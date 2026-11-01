@@ -84,8 +84,12 @@ export const FORUM_KEY = 'forum-data-v1';
  *  质疑杠精/好奇宝宝/玩梗者）+ 话题/情绪判定 + 万能句式黑名单 + 3~100 字」
  *  重写；万能句式校验（universalPhraseIn + postAllowsCatchall）：
  *  非未完结八卦/求助帖出现即废稿，豁免帖每批最多 1 条；
+ *  v23 = 帖子生成 Prompt 按用户规范重写（超级网民/八种网友风格/内部思考
+ *  机制）：LLM 输出 {thought, topic, content} 三字段 JSON——thought 内部思考
+ *  不上屏，topic 话题标签由服务端规范化成 #xx# 追加进正文（版块归类/评论
+ *  锚定依赖内嵌标签），字数 30~1000 → 10~1000（短帖精悍有梗）；
  *  GEN_VERSION 升级触发重新播种，清掉存量万能句式评论。 */
-export const GEN_VERSION = 22;
+export const GEN_VERSION = 23;
 /** 首次播种的 NPC 帖子目标条数（feed 一屏半左右） */
 export const SEED_POST_TARGET = 14;
 /** 补新帖：feed 最新帖子超过该毫秒数视为「凉了」，打开时补 2~4 条 */
