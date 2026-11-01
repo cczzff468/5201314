@@ -9,7 +9,7 @@
  * 「···」更多按钮 → 底部弹层菜单（推荐/不感兴趣/举报，主框架渲染）。
  */
 
-import { Fragment, memo } from 'react';
+import { memo } from 'react';
 import {
   castVote as castVoteCore,
   countShort,
@@ -140,10 +140,11 @@ export function PostMedia({ media }: { media: string[] }) {
   );
 }
 
-/** v27 图文并茂正文：text 含 [图片] 占位符且有配图 → 按「文字段-图-文字段」
- *  分段交替上屏（AI 配图帖的图＝纯白底居中文字图，1:1 原样不裁切）；
- *  无占位符（用户手发帖/译文）→ 原样正文 + PostMedia 网格（图在正文后，X 官方观感）。
- *  thread 详情页与 feed 帖子卡共用；clamp 仅时间线截断用（分段时只裁第一段）。 */
+/** v32 图文并茂正文（用户要求）：图卡一律放正文最后——含 [图片] 占位符的
+ *  AI 配图帖剥掉占位符、正文完整连续渲染，图卡（纯白底居中文字图，1:1 原样
+ *  不裁切）追加在正文末尾；无占位符（用户手发帖/译文）→ 原样正文 + 图网格
+ *  （图本来就在正文后）。文字图卡显示宽度收窄到 75%（用户要求「图片小一点」，
+ *  白底文字图不再占满整行）。thread 详情页与 feed 帖子卡共用；clamp 仅时间线截断。 */
 export function PostBodyMedia({
   text,
   media,
@@ -162,28 +163,28 @@ export function PostBodyMedia({
       </>
     );
   }
-  const segs = text.split('[图片]');
+  // v32：剥掉占位符，正文完整连续渲染（不再「文字段-图-文字段」交替）；
+  // 图卡统一追加在正文最后（i 对应第几张图，单帖配图只用 imgs[0]）
+  const body = text
+    .split('[图片]')
+    .join('')
+    .replace(/[ \t]{2,}/g, ' ')
+    .trim();
   return (
     <>
-      {segs.map((seg, i) => (
-        <Fragment key={i}>
-          {seg.trim() && <PostText text={seg} clamp={clamp && i === 0} />}
-          {i < segs.length - 1 && (
-            <div
-              className="my-2.5 overflow-hidden rounded-2xl border bg-white"
-              style={{ borderColor: 'rgba(137,151,166,0.35)' }}
-            >
-              <img
-                src={imgs[Math.min(i, imgs.length - 1)]}
-                alt="帖子配图（文字图）"
-                className="aspect-square w-full select-none"
-                draggable={false}
-                loading="lazy"
-              />
-            </div>
-          )}
-        </Fragment>
-      ))}
+      <PostText text={body} clamp={clamp} />
+      <div
+        className="mt-2.5 w-3/4 overflow-hidden rounded-2xl border bg-white"
+        style={{ borderColor: 'rgba(137,151,166,0.35)' }}
+      >
+        <img
+          src={imgs[0]}
+          alt="帖子配图（文字图）"
+          className="aspect-square w-full select-none"
+          draggable={false}
+          loading="lazy"
+        />
+      </div>
     </>
   );
 }

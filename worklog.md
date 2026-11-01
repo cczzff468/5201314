@@ -1922,3 +1922,19 @@ Stage Summary:
 - GEN_VERSION 28→31 三连 bump（每次改池子/表内容都必须 bump，同号不触发重播种）
 - E2E 解锁守卫突破：上滑解锁是 X 论坛图标点击的前置条件
 - 关键文件：api/forum/generate/route.ts（POST_LEN_PLANS/pickLenPlan/lenBucketOk/postLen+Prompt 重写）、core.ts（17 组池子四档化+POOL_TEXTIMG+poolTextImage+GEN_VERSION=31）、engine.ts（三挂点+FEED_TEXTIMG_MAX=8）
+
+## 2026-11-01 · X论坛 v32「图卡排版 + 渲染参数」（用户要求：图放最后、字大图小）
+
+Task: 用户两条反馈——①「文字图片应该放在文字最后」：v27 PostBodyMedia 是「文字段-图-文字段」分段交替（占位符在正文中间时图卡插在正文中间）；②「图片里面的文字大一点，图片小一点」：旧渲染 1080 画布 28px 字号，文字/画布比仅 2.6%，缩到手机屏（390 宽）后文字实际显示 ~9px，几乎看不清。
+
+- [排版 feed.tsx] PostBodyMedia 重写：含 [图片] 占位符的帖剥掉占位符、正文完整连续渲染（whitespace-pre-wrap 单块），图卡追加在正文末尾；不再「文字段-图-文字段」交替（Fragment 从 import 移除）；图卡容器 w-full→w-3/4（296px/390px=76%，白底文字图不再占满整行）；无占位符帖（用户手发/译文）不变（图网格本就在正文后）；thread-view.tsx 共用组件自动生效
+- [渲染 textimg.ts] renderTextImage 调参：画布 1080→720（输出体积减 44%）、字号 28→40、行距 53→74、单行宽 960→640——文字/画布比 2.6%→5.6%（视觉翻 2.2 倍），发布弹层「文字图片」与 AI 配图帖同款同步生效
+- [GEN_VERSION 31→32] bump 重播种：存量帖 media 里是旧参数 dataURL（1080 画布），需整体换新渲染
+- [E2E·Agent Browser] 全新会话：解锁→X论坛；v32 播种 gen=32、27 帖 3 图；DOM 实测三重验证——图卡宽 296px=76%（w-3/4）；图卡 previousElementSibling 全为正文文本块 whitespace-pre-wrap（「昨晚酒局散得晚，他送…」「红毯后台我负责…」「朋友新房交付…」，图在正文最后实锤）；PNG IHDR 解析 720×720（新画布参数生效）；零 console error
+- [网络] GitHub 直连仍中断（TLS/HTTP2 错误）；v31 提交 f55a1fb 的推送后台重试任务 30 次未成功——本次提交后合并重试窗口
+
+Stage Summary:
+- PostBodyMedia：图卡一律正文末尾 + w-3/4；正文连续渲染剥占位符
+- renderTextImage：720/40px/74 行距/640 行宽（文字视觉 ×2.2）
+- GEN_VERSION=32 重播种；E2E 三重 DOM 验证（宽度 76%/前置兄弟=正文/PNG 720×720）
+- 关键文件：feed.tsx（PostBodyMedia 重写+删 Fragment import）、textimg.ts（调参）、core.ts（GEN_VERSION=32）
