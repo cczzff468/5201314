@@ -1249,6 +1249,87 @@ async function buildFeedBatch(
  *  - 时间戳排在现有最老主帖之前（信息流向下无限延伸，旧帖永不消失）；
  *  - 防刷屏：与现有 feed 尾部作者隔开 + 批内绝不连排；时间间隔自然衰减（40分钟~几小时，偶尔隔天）。
  *  返回本次新增条数。 */
+// ---------------- 生成帖子按需配图（v8：文字 + 图片搭配） ----------------
+
+/** 配图概率：每条新生成的帖子约 1/3 概率带图（真实感：不是每条都配图） */
+const FEED_IMAGE_RATE = 0.34;
+/** 单批最多配图条数（AI 文生图有成本，控制并发与生成时长） */
+const FEED_IMAGE_MAX = 3;
+
+/** 主题 → 生图场景描述：只有「适合配图」的内容才配（宠物/美食/汽车/风景等）；
+ *  吃瓜/吐槽/打工碎碎念这类主观内容配图反而假，保持纯文字。
+ *  描述句由 API 侧统一拼「手机随拍照片风格」后缀，生成网友随手拍观感的照片。
+ *  帖子带 #话题# 标签时优先按标签匹配。 */
+const IMG_TOPIC_MAP: { re: RegExp; kw: string }[] = [
+  { re: /猫|狗|宠物|铲屎|主子|撸猫|遛狗|哈基米|橘猫|布偶|柯基|柴犬|金毛|边牧|猫粮|狗粮|拆家/i, kw: '一只可爱的宠物猫狗趴在家里窗台边晒太阳' },
+  { re: /吃|喝|外卖|探店|美食|火锅|奶茶|咖啡|餐厅|好吃|难吃|宵夜|零食|甜品|做菜|厨房|烘焙|烧烤/i, kw: '餐桌上刚端上来的一盘热气腾腾的美食特写' },
+  { re: /车|油|驾|4S|提车|试驾|轮胎|油耗|引擎|声浪|SUV|轿跑|自驾|堵车/i, kw: '一辆干净的家用汽车停在城市街边，傍晚光线' },
+  { re: /旅行|旅游|出发|风景|海边|山顶|露营|徒步|citywalk|打卡|出片|古镇|西藏|云南|新疆/i, kw: '旅途中随手拍的风景，远处山峦和蓝天白云' },
+  { re: /天空|晚霞|日落|夕阳|月亮|星空|下雨|下雪|彩虹|蓝天|云朵/i, kw: '手机拍的天空晚霞，橘粉色云彩铺满天空' },
+  { re: /花|植物|绿植|养花|园艺|樱花|玫瑰|郁金香/i, kw: '手机微距拍的一朵盛开的花，背景虚化' },
+  { re: /健身|跑步|瑜伽|羽毛球|篮球|足球|运动|减脂|健身房/i, kw: '健身房里跑步机和器械一角，手机随拍视角' },
+  { re: /剧|追剧|电影|综艺|影院|上映|预告|豆瓣/i, kw: '电影院放映厅银幕亮着，观众席座椅暗光环境' },
+  { re: /演唱会|livehouse|音乐节|现场|演出/i, kw: '演唱会现场舞台灯光，远处观众举着手机' },
+];
+
+/** 从帖子正文提取配图场景描述；不适合配图的内容返回 null */
+function extractImageKeyword(text: string): string | null {
+  const tag = /#([^#\s]{2,8})#/.exec(text)?.[1];
+  if (tag && IMG_TOPIC_MAP.some(({ re }) => re.test(tag))) {
+    const hit = IMG_TOPIC_MAP.find(({ re }) => re.test(tag))!;
+    return hit.kw;
+  }
+  for (const { re, kw } of IMG_TOPIC_MAP) if (re.test(text)) return kw;
+  return null;
+}
+
+/** 生成一张配图（z-ai 文生图；失败/超时返回 null，绝不阻塞生成流程） */
+async function generatePostImage(kw: string): Promise<string | null> {
+  try {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 90_000);
+    const res = await fetch('/api/forum/img', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query: kw }),
+      signal: ctrl.signal,
+    });
+    clearTimeout(timer);
+    if (!res.ok) return null;
+    const j = (await res.json()) as { src?: unknown };
+    return typeof j.src === 'string' && j.src.startsWith('data:image/') ? j.src : null;
+  } catch {
+    return null;
+  }
+}
+
+/** 给一批新生成的帖子按需配图：适合配图的内容 ~1/3 概率生成 1 张「手机随拍」
+ *  风格的真实感照片（AI 文生图，与帖子主题匹配）。
+ *  异步补图模式：帖子先以纯文字上屏（不阻塞生成流程），图片生成完成后
+ *  二次落库广播，时间线里图片自动弹出来（生图慢也不影响体验）。
+ *  返回是否有帖子配上了图（调用方据此决定是否二次落库）。 */
+async function attachFeedImages(targets: ForumPost[]): Promise<boolean> {
+  const candidates = targets
+    .filter((p) => !p.media?.length && extractImageKeyword(p.content))
+    .filter(() => Math.random() < FEED_IMAGE_RATE)
+    .slice(0, FEED_IMAGE_MAX);
+  if (!candidates.length) return false;
+  let changed = false;
+  await Promise.all(
+    candidates.map(async (p) => {
+      const kw = extractImageKeyword(p.content);
+      if (!kw) return;
+      const src = await generatePostImage(kw);
+      if (src) {
+        p.media = [src];
+        changed = true;
+      }
+    }),
+  );
+  return changed;
+}
+
+/** 主页滑到底、上拉松开 → 生成一批更早的帖子（追加在信息流下方，旧帖永不消失）。 */
 export async function generateMoreFeedPosts(): Promise<number> {
   if (feedGenerating) return 0;
   feedGenerating = true;
@@ -1282,6 +1363,7 @@ export async function generateMoreFeedPosts(): Promise<number> {
     // 同一作者的帖子若同批出现两次，天然被隔到不同深度（时间差拉开）
     const next = { ...forumData() };
     let at = frontier - (8 + Math.random() * 30) * 60_000;
+    const created: ForumPost[] = [];
     results.forEach(({ key, text }, i) => {
       const tag = /#([^#\s]+)#/.exec(text)?.[1];
       const cid = key.startsWith('npc:')
@@ -1289,9 +1371,15 @@ export async function generateMoreFeedPosts(): Promise<number> {
         : tag
           ? NPC_COMMUNITY_MAP[tag] ?? null
           : null;
-      next.posts.push(basePost(key, text, cid, at));
+      const p = basePost(key, text, cid, at);
+      next.posts.push(p);
+      created.push(p);
       recordDynNpcRecent(key, text); // 人设连通性
       at -= naturalGapMs(6 + i); // 底部生成：间隔从几十分钟起拉大
+    });
+    // v8：异步补图（不阻塞）：帖子先以纯文字落库上屏，图片生成完后再二次落库弹出来
+    void attachFeedImages(created).then((changed) => {
+      if (changed) saveForum({ ...forumData() });
     });
     next.lastGenAt = Date.now();
     saveForum(next);
@@ -1332,6 +1420,7 @@ export async function generateNewFeedPosts(): Promise<number> {
     for (const p of next.posts) newestExisting = Math.max(newestExisting, p.createdAt);
     const floorAt = newestExisting + 90_000;
     let at = Date.now() - (30 + Math.random() * 60) * 1000;
+    const created: ForumPost[] = [];
     results.forEach(({ key, text }, i) => {
       const tag = /#([^#\s]+)#/.exec(text)?.[1];
       const cid = key.startsWith('npc:')
@@ -1339,9 +1428,15 @@ export async function generateNewFeedPosts(): Promise<number> {
         : tag
           ? NPC_COMMUNITY_MAP[tag] ?? null
           : null;
-      next.posts.push(basePost(key, text, cid, at));
+      const p = basePost(key, text, cid, at);
+      next.posts.push(p);
+      created.push(p);
       recordDynNpcRecent(key, text); // 人设连通性
       at = Math.max(at - naturalGapMs(i), floorAt);
+    });
+    // v8：异步补图（不阻塞）：帖子先以纯文字落库上屏，图片生成完后再二次落库弹出来
+    void attachFeedImages(created).then((changed) => {
+      if (changed) saveForum({ ...forumData() });
     });
     next.lastGenAt = Date.now();
     saveForum(next);

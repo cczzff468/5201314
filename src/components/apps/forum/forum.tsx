@@ -482,11 +482,17 @@ export default function ForumApp() {
                     )}
                   </div>
                 </div>
-                {/* 手势下拉时内容整体下移让位（loading 期间保持 46px 空隙给指示器） */}
+                {/* 手势下拉时内容整体下移让位（loading 期间保持 46px 空隙给指示器）。
+                    v8 修复：原先用 transform: translateY 下移内容——transform 会把已吸顶的
+                    tab 栏一起往下推（吸顶渲染位置 = 54px + transform 位移），生成期间用户
+                    一旦滚动，tab 栏就错位 46px：帖子头露出在 tab 上方、正文被 tab 挡住、
+                    顶栏区出现空洞（用户反馈「上滑生成后再下滑顶部缺一块」）。
+                    改用 paddingTop：只推移内容自然流位置，吸顶元素的 stuck 偏移仍相对
+                    滚动视口（54px）计算，任何滚动位置下 tab 栏都稳定吸顶。 */}
                 <div
                   style={{
-                    transform: `translateY(${topLoading ? 46 : pullDownPx}px)`,
-                    transition: pulling ? 'none' : 'transform .25s ease',
+                    paddingTop: topLoading ? 46 : pullDownPx,
+                    transition: pulling ? 'none' : 'padding-top .25s ease',
                   }}
                 >
                 {/* 顶栏(X:头像 | 𝕏 | 订阅):随内容滚走(用户要求:顶部的头像、X符号、订阅跟随滑动) */}

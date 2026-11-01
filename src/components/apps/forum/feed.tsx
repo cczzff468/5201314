@@ -12,7 +12,6 @@
 import { memo } from 'react';
 import {
   castVote as castVoteCore,
-  communityName,
   countShort,
   forumData,
   likesOf,
@@ -23,7 +22,7 @@ import {
   type ForumPost,
   COMMUNITY_DEFS,
 } from '@/lib/forum/core';
-import { CommunityTag, VerifiedBadge, XAvatar, XIcons, useXTheme } from './shared';
+import { VerifiedBadge, XAvatar, XIcons, useXTheme } from './shared';
 import { useForum } from './ctx';
 
 /** 正文渲染：#话题# 染品牌蓝（X hashtag 观感）。
@@ -245,7 +244,6 @@ export const PostCard = memo(function PostCard({ post, onOpen }: { post: ForumPo
   const a = resolveAuthor(post.authorKey);
   const liked = post.likes.includes('user');
   const repostedByMe = post.reposted === true;
-  const communityLabel = post.community && post.community !== 'hot' ? communityName(post.community) : '';
   const time = relTime(post.createdAt);
   const replyCount = repliesOf(forumData(), post.id).length;
   const likeCount = likesOf(post);
@@ -302,17 +300,8 @@ export const PostCard = memo(function PostCard({ post, onOpen }: { post: ForumPo
               回复 <span style={{ color: t.blue }}>@{replyToName}</span>
             </p>
           )}
-          {/* 社区来源（X Communities 帖子显示来自哪个社区） */}
-          {communityLabel && (
-            <div className="mb-[4px] mt-[2px]">
-              <CommunityTag
-                name={communityLabel}
-                onClick={() => {
-                  if (post.community) f.openCommunity(post.community);
-                }}
-              />
-            </div>
-          )}
+          {/* v8：按用户要求移除帖子名下方的社区来源标签（#影视片单# 等），
+              时间线更贴近 X 官方（帖子只显示名字行 + 正文） */}
           <PostText text={post.content} clamp={post.content.length > 240} />
           {media.length > 0 && <PostMedia media={media} />}
           {post.poll && <PollBlock post={post} />}

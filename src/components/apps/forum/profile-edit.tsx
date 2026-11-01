@@ -229,7 +229,7 @@ export function EditProfileSheet({ onClose }: { onClose: () => void }) {
               {previewAvatar ? (
                 <img src={previewAvatar} alt="头像预览" className="h-full w-full object-cover" />
               ) : (
-                <img src="/forum-default-avatar.jpg" alt="默认头像" className="h-full w-full object-cover" />
+                <img src="/default-profile.png" alt="默认头像" className="h-full w-full object-cover" />
               )}
             </div>
             <div className="flex min-w-0 flex-1 flex-col items-start gap-2">
