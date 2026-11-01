@@ -7,13 +7,14 @@
  *   浅色 白底/#0f1419 正文/#536471 次要/#eff3f4 分隔线；深色 纯黑底/#e7e9ea 正文/
  *   #71767b 次要/#2f3336 分隔线（X 深色即纯黑，与手机深色主题天然契合）。
  * - 图标 lucide 线条（strokeWidth 1.9），选中态实心填充（X 底栏行为：选中黑、未选灰）。
- * - 头像：dataURL 直出；NPC 彩底首字圆；缺省用用户指定的默认头像图
- *   （public/default-profile.png，用户上传的灰蓝人形剪影风）。
+ * - 头像：dataURL 直出；头像库图片（avatar-library）随机分配；加载失败/偶然无头像的网友
+ *   用 flat 纯色系池轮换兑底（用户上传：默认灰人形/灰圆/纯黑/纯白/灰渐变）；
+ *   机主未设头像用固定默认剪影（public/default-profile.png）。
  * - 认证徽章：蓝圆白勾（X 2023 版认证样式）。
  */
 
 import { useSystemDark, selectResolvedTheme, useSettings } from '@/lib/ios/store';
-import { resolveAuthor, type AuthorKey } from '@/lib/forum/core';
+import { resolveAuthor, flatAvatarFor, type AuthorKey } from '@/lib/forum/core';
 import { useState, type ReactNode } from 'react';
 import {
   ArrowLeft,
@@ -156,7 +157,7 @@ export function VerifiedBadge({ size = 15 }: { size?: number }) {
 
 // ---------------- 头像 ----------------
 
-/** X 风格头像：图片直出 / NPC 彩底首字 / 灰底剪影（无头像时）。
+/** X 风格头像：图片直出 / flat 纯色系轮换兑底 / 官方蓝底「助」字 / 灰底剪影（机主）。
  *  可点击时渲染 <button>；纯展示时渲染 <span>（避免嵌入父级 button 造成非法嵌套）。 */
 export function XAvatar({
   authorKey,
@@ -168,8 +169,10 @@ export function XAvatar({
   onClick?: () => void;
 }) {
   const a = resolveAuthor(authorKey);
-  // 头像图加载失败（CDN 不可达等）→ 回退 NPC 彩底首字，避免裂图
+  // 头像图加载失败（CDN 不可达等）→ flat 纯色系池轮换兑底（用户上传的 5 张：
+  // 默认灰人形/灰圆/纯黑/纯白/灰渐变），不再回退彩底首字；flat 也挂了才用灰人形
   const [imgBroken, setImgBroken] = useState(false);
+  const [flatBroken, setFlatBroken] = useState(false);
   let inner: ReactNode;
   if (a.avatar && !imgBroken) {
     // dataURL / 头像库 CDN URL 直出（IndexedDB 与朋友圈/聊天头像同口径，不经 next/image 优化端点）
@@ -183,6 +186,7 @@ export function XAvatar({
       />
     );
   } else if (a.npcAvatar) {
+    // 仅官方账号保留品牌徽章式头像（蓝底「助」字）
     inner = (
       <span
         style={{ background: a.npcAvatar.bg, fontSize: size * 0.42, fontWeight: 700 }}
@@ -191,8 +195,29 @@ export function XAvatar({
         {a.npcAvatar.ch}
       </span>
     );
+  } else if (authorKey === 'user') {
+    // 机主未设头像：固定默认剪影（自己的头像不参与轮换）
+    inner = (
+      <img
+        src="/default-profile.png"
+        alt={a.name}
+        draggable={false}
+        className="h-full w-full select-none object-cover"
+      />
+    );
+  } else if (!flatBroken) {
+    // NPC 头像缺失/加载失败：默认+纯色系头像轮换（按 key 稳定分配，
+    // 不同人拿到不同的——像真实平台里不设头像的那批用户）
+    inner = (
+      <img
+        src={flatAvatarFor(authorKey)}
+        alt={a.name}
+        draggable={false}
+        onError={() => setFlatBroken(true)}
+        className="h-full w-full select-none object-cover"
+      />
+    );
   } else {
-    // 默认头像：用户上传的灰蓝人形剪影（无自定义/全局头像时使用）
     inner = (
       <img
         src="/default-profile.png"

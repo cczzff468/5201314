@@ -29,8 +29,12 @@ export const FORUM_KEY = 'forum-data-v1';
  *  旧数据整体重播种，离谱热度一并清除；
  *  v7 = 信息流生成管线改为严格 JSON（用户反馈：网名漏进正文、正文与评论
  *  粘连成一大段、不同帖子装同样的乱码文本）——旧版「每条一行」松散格式
- *  的历史脏帖一并清除重播种；生成帖配图改为文字图片（canvas 直出） */
-export const GEN_VERSION = 7;
+ *  的历史脏帖一并清除重播种；生成帖配图改为文字图片（canvas 直出）
+ *  v8 = 头像全面图片化（用户反馈：评论区不要彩底首字头像——偶然没头像/加载
+ *  失败的网友改用 flat 纯色系池轮换：默认灰人形/灰圆/纯黑/纯白/灰渐变）+
+ *  网名池扩容 + 回访率下调（网名不要老用那几个）+ 楼中楼文案去重修复
+ *  （同一帖两人发一模一样的话）；旧评论一并重播种清掉重复文案 */
+export const GEN_VERSION = 8;
 /** 首次播种的 NPC 帖子目标条数（feed 一屏半左右） */
 export const SEED_POST_TARGET = 14;
 /** 补新帖：feed 最新帖子超过该毫秒数视为「凉了」，打开时补 2~4 条 */
@@ -49,8 +53,8 @@ export interface ForumAuthor {
   key: AuthorKey;
   name: string;
   handle: string; // 不带 @
-  avatar: string | null; // dataURL（user/char）；NPC 为 null（用彩底首字）
-  /** NPC 彩底头像（bg 色值 + 显示字） */
+  avatar: string | null; // dataURL（user/char）；NPC = 头像库图片（加载失败/未分配时 XAvatar 用纯色系 flat 池兑底）
+  /** 彩底首字头像（仅官方账号「助」字徽章还在用；网友已全部改用图片头像） */
   npcAvatar?: { bg: string; ch: string };
   /** 认证蓝 V（大 V NPC / 官方账号） */
   verified?: boolean;
@@ -649,6 +653,22 @@ export const REAL_NAME_POOL: string[] = [
   'Asdfgh', 'Zzzz_', 'Momo', 'momo酱', 'dddd', 'xswl本wsl', 'yyds本人',
   'nsdd', 'u1s1', 'dbq我错了', 'awsl', 'szd', 'kdl', 'bhs', '不瘦十斤不改名', 'qwe123',
   'hhh别骂了', 'pyq不见不散', 'bili干杯', 'auoh', 'Lynn不在线', 'Cici今天很困',
+  // v8 扩容（用户反馈：网名老用那几个——LLM 限流期兜底池更大，评论区面孔更丰富）
+  '黄油曲奇不加糖', '乌龙去冰三分甜', '深夜泡面学家', '冰箱里有半个西瓜', '饺子就蒜',
+  '烤红薯要流蜜的', '关东煮最后一块', '薯片碎渣收藏家', '奶茶加珍珠不加糖', '汤圆黑芝麻馅',
+  '周末爬山选手', '公园暴走团', '夜跑半途而废', '瑜伽垫晾衣服', '跳绳三天放弃',
+  '健身卡吃灰中', '操场散步观察员', '羽毛球捡球手', '游泳换气失败', '拉伸两分钟结束',
+  '存款为零的快乐', '记账三天放弃', '工资到账三分钟', '购物车清空大师', '优惠券过期达人',
+  '双十一吃土', '快递站常客', '退货流程熟练工', '直播间蹲优惠', '九块九包邮学家',
+  '月亮邮递员', '晚风便利店', '凌晨的自习室', '雨天窗户边', '云的收藏夹',
+  '路灯收集者', '末班车乘客', '清晨六点の海', '午后三点的猫', '风把窗帘吹起来',
+  '被窝考古学家', '枕头翻面主义者', '午睡超时冠军', '闹钟按掉五次', '床以外都是远方',
+  'WiFi满格才会出门', '手机电量焦虑症', '充电器随身带', '消息免打扰常开', '已读不回艺术家',
+  '表情包库存充足', '斗图从不输', '标点符号省略者', '打字全靠语音', '错字连篇不改',
+  '地铁座位侦察兵', '公交车站牌背下来了', '堵车时听广播', '共享单车月卡用户', '步行二十五分钟',
+  '书签永远在第十二页', '买书如山倒', '电子书吃灰中', '播客二倍速', '歌单循环到腻',
+  '猫片云吸户', '狗子握手失败', '鹦鹉学舌中', '鱼缸藻类培育师', '乌龟叫壮壮',
+  '绿萝养死三盆', '多肉浇水过多', '仙人掌苟活着', '阳台种葱失败', '窗台薄荷还活着',
 ];
 
 /** 真实感简介池（随机分配给动态网友） */
@@ -1232,8 +1252,19 @@ export function randomHandle(key: string): string {
  *  用本地静态文件而非 jsdelivr CDN：沙箱/部分网络环境下 CDN 会 301 到被墙的 raw.githubusercontent，
  *  本地直出零外部依赖、秒开；GitHub 仓库仍是规范图库源（批量更新时同步拷回 public）。 */
 const AVATAR_LIBRARY_BASE = '/avatar-library';
-/** 每类张数（与仓库保持同步；real 类 051-100 未就绪时 onError 回退彩底首字） */
-const AVATAR_LIBRARY_PER_CLS = 100;
+/** 每类张数（与仓库保持同步）。flat = 用户上传的「默认+纯色系」头像（灰人形/灰圆/纯黑/纯白/灰渐变）
+ *  ——分配给偶然没头像的网友 + 图片加载失败时的兑底，轮换使用不重样。 */
+const AVATAR_LIBRARY_COUNTS: Record<string, number> = {
+  anime: 100,
+  catdog: 100,
+  abstract: 100,
+  male: 100,
+  female: 100,
+  real: 100,
+  flat: 5,
+};
+/** flat 池张数 */
+export const FLAT_AVATAR_COUNT = 5;
 
 /** FNV-1a 播种 + LCG 伪随机（与 randomHandle 同款；纯函数保证同一 NPC 每次渲染拿到同一头像） */
 function avatarRng(key: string): () => number {
@@ -1250,17 +1281,27 @@ function avatarRng(key: string): () => number {
 const FEMALE_HINTS = ['她', '女', '姐', '妹', '闺蜜', '化妆', '口红', '美甲', '裙子', '穿搭', '美妆', '追星', '追剧', '甜妹', '女孩', '妈咪', '宝宝', '减肥', '奶茶', '粉', '老婆口中的', '小仙女'];
 const MALE_HINTS = ['他', '男', '哥', '弟', '兄弟', '哥们', '哥们儿', '健身', '篮球', '足球', '游戏', '键盘', '数码', '装机', '显卡', '打球', '抽烟', '喝酒', '搬砖', '程序员', '打工', '糙汉', '大兄弟', '男孩', '老哥'];
 
+/** flat 池头像（用户上传：X 默认灰人形/灰底灰圆/纯黑/纯白/灰渐变）。
+ *  按 key 确定性轮换——加载失败/未分配头像的作者稳定拿到其中一张，
+ *  不同人拿到不同的，不再千篇一律同一张默认图（用户要求：轮换使用，不要老用那一个）。 */
+export function flatAvatarFor(key: string): string {
+  const next = avatarRng(`${key}::flat`);
+  const idx = 1 + Math.floor(next() * FLAT_AVATAR_COUNT); // 1..5
+  return `${AVATAR_LIBRARY_BASE}/flat/flat_${String(idx).padStart(3, '0')}.jpg`;
+}
+
 /** 给 NPC 分配头像库图片（随机但稳定：同一 key 永远同一张）。
- *  分布参考真实论坛生态：真人系 50%（按人设性别分男女池）、动漫 22%、猫狗 14%、抽象 10%、4% 保留彩底首字（更自然）。 */
-export function assignNpcAvatar(key: string, name: string, persona?: string): string | null {
+ *  分布参考真实论坛生态：真人系 48%（按人设性别分男女池）、动漫 22%、猫狗 14%、抽象 10%、
+ *  6% 纯色系 flat（默认头像/纯色头像——像真实平台里不设头像的那批人，用户指定）。 */
+export function assignNpcAvatar(key: string, name: string, persona?: string): string {
   const next = avatarRng(key);
   const roll = next();
-  let cls: string | null;
-  if (roll < 0.04) cls = null; // 4% 无头像（彩底首字兜底）
-  else if (roll < 0.26) cls = 'anime';
-  else if (roll < 0.40) cls = 'catdog';
-  else if (roll < 0.50) cls = 'abstract';
-  else cls = 'real-photo'; // 50% 真人系，下面再分性别
+  let cls: string;
+  if (roll < 0.06) cls = 'flat'; // 偶然有些人用默认头像和纯色头像（不再彩底首字）
+  else if (roll < 0.28) cls = 'anime';
+  else if (roll < 0.42) cls = 'catdog';
+  else if (roll < 0.52) cls = 'abstract';
+  else cls = 'real-photo'; // 真人系，下面再分性别
 
   if (cls === 'real-photo') {
     const text = `${name} ${persona ?? ''}`;
@@ -1274,8 +1315,7 @@ export function assignNpcAvatar(key: string, name: string, persona?: string): st
     // 少部分真人系用混合 real 池（更丰富）
     if (next() < 0.18) cls = 'real';
   }
-  if (!cls) return null;
-  const idx = 1 + Math.floor(next() * AVATAR_LIBRARY_PER_CLS); // 1..100
+  const idx = 1 + Math.floor(next() * (AVATAR_LIBRARY_COUNTS[cls] ?? 100)); // 1..N（按类容量）
   const file = `${cls}_${String(idx).padStart(3, '0')}.jpg`;
   return `${AVATAR_LIBRARY_BASE}/${cls}/${file}`;
 }
@@ -1317,9 +1357,8 @@ export function resolveAuthor(key: AuthorKey): ForumAuthor {
         name,
         // 随机字母+数字账号（用户要求；不再用固定英文 handle）
         handle: randomHandle(key),
-        // 头像库随机分配（同一 NPC 永远同一张；加载失败回退彩底首字）
+        // 头像库随机分配（同一 NPC 永远同一张；加载失败 XAvatar 兜底 flat 纯色系池）
         avatar: assignNpcAvatar(key, name, persona),
-        npcAvatar: { bg: def.bg, ch: name.slice(0, 1) },
         verified: def.verified,
         bio: def.bio,
         baseFollowers: def.followers,
@@ -1336,9 +1375,8 @@ export function resolveAuthor(key: AuthorKey): ForumAuthor {
         key,
         name: def.name,
         handle: randomHandle(key),
-        // 头像库随机分配（同一网友永远同一张；加载失败回退彩底首字）
+        // 头像库随机分配（同一网友永远同一张；加载失败 XAvatar 兜底 flat 纯色系池）
         avatar: assignNpcAvatar(key, def.name, def.persona),
-        npcAvatar: { bg: def.bg, ch: def.name.slice(0, 1) },
         verified: def.verified,
         bio: def.bio,
         baseFollowers: def.followers,

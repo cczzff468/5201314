@@ -441,7 +441,8 @@ function seedCommentsFor(post: ForumPost, out: ForumPost[]): void {
   // 楼中楼：随机挑 1~2 条评论各接一条子回复（其他网友/楼主接话）
   const subN = Math.min(newComments.length, 1 + Math.floor(Math.random() * 2));
   const subs = newComments.slice().sort(() => Math.random() - 0.5).slice(0, subN);
-  const usedSub = new Set<string>();
+  // v8 修复：去重集继承顶层评论已用文案——同一帖里两个人发一模一样的话太假
+  const usedSub = new Set(usedCt);
   for (const c of subs) {
     const byAuthor = post.authorKey !== 'user' && Math.random() < 0.35 ? post.authorKey : pickCommenters(1, postAuthor.lang, post.content, post.authorKey, ...keys)[0];
     const subLang = resolveAuthor(byAuthor).lang ?? 'zh-Hans';
@@ -1441,8 +1442,9 @@ function pickCommenters(count: number, postLang?: string, postContent?: string, 
     } else if (r < 0.1) {
       // 内置 NPC 缩减到 ~4%（v4：评论区也以动态网友为主，网名靠 LLM）
       k = `npc:${npcs[out.length % npcs.length].id}`;
-    } else if (r < 0.4 && dynKeys.length) {
-      // 已有动态网友回访（同一人出现在不同帖子评论区，真实论坛常态）
+    } else if (r < 0.32 && dynKeys.length) {
+      // 已有动态网友回访（同一人出现在不同帖子评论区，真实论坛常态）。
+      // v8：回访率 0.4→0.32（用户反馈：网名老用那几个——新面孔占比更高，评论区更丰富）
       k = `dyn:${dynKeys[Math.floor(Math.random() * dynKeys.length)]}`;
     } else {
       // 新面孔：60% 概率人设原型贴合帖子主题，40% 纯随机乱入（大杂烩）
@@ -1608,8 +1610,12 @@ async function genCommentBatch(postId: string): Promise<number> {
         } catch {
           subTexts = [];
         }
-        // 兜底子回复共享去重集（同一帖的楼中楼不重复用同一条兜底文案）
-        const usedSub = new Set<string>();
+        // 兜底子回复共享去重集（同一帖的楼中楼不重复用同一条兜底文案；
+        // v8 修复：继承本批顶层评论 + 该帖已有评论的已用文案，杜绝两人发同一条）
+        const usedSub = new Set<string>([
+          ...texts.map((t) => t.slice(0, 16)),
+          ...threadReplies.map((p) => p.content.slice(0, 16)),
+        ]);
         subTargets.forEach((c, i) => {
           let text = subTexts[i];
           if (!text) {
