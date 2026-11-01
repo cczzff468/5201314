@@ -496,8 +496,18 @@ export function topicAnchorOf(content: string): string {
     // v15.1：长标签（>7 字）截到首个停用字为止——「应援色之争的学术级吵架现场」
     // →「应援色」；整条标签塞进兜底模板会让 15 条评论全是同一个 13 字开头，太机械
     if (tag.length > 7) {
-      const cut = tag.split('').findIndex((ch) => STOP_CHARS.has(ch));
-      const frag = cut >= 2 ? tag.slice(0, cut) : tag.slice(0, 4);
+      // v20.1：首个停用字若在 index 0/1（「赛道日基金两千一戒奶茶一个月」的「道」
+      // 来自「知道」），截出来是「赛道日基」这种残词——跳过太靠前的停用字，
+      // 找 index ≥2 的首个停用字再截；整条都没有 → 取前 7 字
+      const chars = tag.split('');
+      let cut = -1;
+      for (let i = 2; i < chars.length; i++) {
+        if (STOP_CHARS.has(chars[i])) {
+          cut = i;
+          break;
+        }
+      }
+      const frag = cut >= 2 ? tag.slice(0, cut) : tag.slice(0, Math.min(7, tag.length));
       if (frag.length >= 2) return frag;
     }
     return tag;
@@ -521,4 +531,23 @@ export function topicAnchorOf(content: string): string {
     }
   }
   return '这事儿';
+}
+
+/** v20：追问式兜底评论的「话题锚点候选池」。
+ *  旧版每条兜底评论都只取 topicAnchorOf 的单一锚点（如「深夜」）——
+ *  LLM 限流期一个帖子的十几条兜底评论全是同一个词开头（「深夜这事蹲一个后续」
+ *  「深夜？？真的假的」「蹲深夜的下文」……），一眼假（用户反馈「评论有问题」）。
+ *  现在：锚点候选 = 兜底锚点（话题标签/领域 subject）+ 核心话题词（强关键词），
+ *  调用方按下标轮换取用——「深夜」「熬夜」「凌晨」交替出现，模板感大幅下降。 */
+export function anchorCandidatesOf(content: string): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  const push = (w?: string) => {
+    if (!w || w.length < 2 || seen.has(w)) return;
+    seen.add(w);
+    out.push(w);
+  };
+  push(topicAnchorOf(content));
+  for (const w of extractTopicWords(content)) push(w);
+  return out.length ? out.slice(0, 5) : ['这事儿'];
 }

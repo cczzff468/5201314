@@ -53,7 +53,7 @@ import {
 } from './core';
 import { describeImagesAuto } from '@/lib/vision-client';
 import { renderTextImage } from './textimg';
-import { commentAnchored, topicAnchorOf } from './topic';
+import { anchorCandidatesOf, commentAnchored } from './topic';
 
 // ---------------- pending 队列（跨刷新持久） ----------------
 
@@ -442,11 +442,12 @@ function seedCommentsFor(post: ForumPost, out: ForumPost[]): void {
   const postLang = detectPostLang(post.content, postAuthor.lang);
   const want = 2 + Math.floor(Math.random() * 2); // 2~3 条锚定占位
   const usedCt = new Set<string>();
+  const usedTpl = new Set<string>(); // v20.2：同帖句式去重
   const texts: string[] = [];
   // 中文帖才有追问式占位（外语模板没有——宁缺毋滥，外语评论只走 LLM）
   if (postLang === 'zh-Hans') {
     for (let i = 0; i < want; i++) {
-      const base = followupComment(post.content, usedCt);
+      const base = followupComment(post.content, usedCt, i, usedTpl);
       if (!base) break; // 模板用尽：宁可少一条也不重复
       texts.push(base);
     }
@@ -816,14 +817,22 @@ const FOLLOWUP_COMMENT_TEMPLATES: string[] = [
 const FOLLOWUP_SUFFIXES: string[] = ['，蹲蹲蹲', '，坐等下文', '，在线蹲', '，瓜子已备好', '，小板凳已就位', '，别让楼主跑了'];
 
 /** 渲染一条追问式兜底评论（{t} = 原帖话题锚点；本帖内去重；
- *  模板+变体全部用尽 → 返回空串，调用方跳过这条） */
-function followupComment(postContent: string, used: Set<string>): string {
-  const t = topicAnchorOf(postContent);
+ *  模板+变体全部用尽 → 返回空串，调用方跳过这条）。
+ *  v20：锚点轮换——anchorIdx 依次取候选池（兜底锚点 + 核心话题词）里的
+ *  不同词，同一帖的多条兜底评论不再全是同一个词开头
+ *  （「深夜这事蹲一个后续」×15 的复读机即用户反馈的「评论有问题」）。
+ *  v20.2：usedTpl = 同帖已用过的模板句式（不同锚点撞同一句式也假——
+ *  「赛道日基？信息量有点大」和「外卖？信息量有点大」并排出现一眼模板）。 */
+function followupComment(postContent: string, used: Set<string>, anchorIdx = 0, usedTpl?: Set<string>): string {
+  const anchors = anchorCandidatesOf(postContent);
+  const t = anchors[anchorIdx % anchors.length];
   for (let i = 0; i < 40; i++) {
     const tpl = FOLLOWUP_COMMENT_TEMPLATES[Math.floor(Math.random() * FOLLOWUP_COMMENT_TEMPLATES.length)];
+    if (usedTpl?.has(tpl)) continue; // 同帖不重用同一句式（锚点不同也不行）
     const cand = tpl.replaceAll('{t}', t);
     if (!used.has(cand.slice(0, 16))) {
       used.add(cand.slice(0, 16));
+      usedTpl?.add(tpl);
       return cand;
     }
   }
@@ -1446,8 +1455,9 @@ async function genCommentBatch(postId: string): Promise<number> {
     const newDynCommenters = commenterKeys.filter((k) => k.startsWith('dyn:') && !dynBefore.has(k.slice(4)));
     const avoid = threadReplies.slice(-10).map((p) => p.content.slice(0, 40));
 
-    // ---- 顶层评论（LLM 批量，池子兜底） ----
+    // ---- 顶层评论（LLM 批量；v20 兜底新规则） ----
     let texts: string[] = [];
+    let llmDead = false; // v20：LLM 整体失败（限流/断网）→ 不铺模板
     try {
       const r = (await callApi({
         kind: 'comments',
@@ -1475,17 +1485,22 @@ async function genCommentBatch(postId: string): Promise<number> {
         : [];
     } catch {
       texts = [];
+      llmDead = true;
     }
-    if (texts.length < want) {
-      // v15：流氓语料库已整池删除——LLM 失败/限流时的唯一应急兜底 =
-      // 「追问式」锚定模板（{t} = 本帖自己的话题词，结构上不可能串台）。
-      // 中文帖才兜底（外语帖宁缺毋滥）；模板用尽 → 宁可少一条也绝不重复刷屏。
+    if (!llmDead && texts.length < want) {
+      // v20：LLM 出了一部分但不足额 → 最多补 2 条追问式锚定模板（锚点轮换）。
+      // 旧版把 7~15 条全部填满模板，同一个词开头的复读机即用户反馈的
+      // 「评论有问题」；LLM 彻底失败（llmDead，限流/断网）时一条都不铺——
+      // 评论区维持现状，等配额恢复后再点「更多评论」才是真评论。
       const usedCt = new Set<string>([
         ...texts.map((t) => t.slice(0, 16)),
         ...threadReplies.map((p) => p.content.slice(0, 16)),
       ]);
-      while (texts.length < want) {
-        const cand = postLang === 'zh-Hans' ? followupComment(post.content, usedCt) : '';
+      const fillCap = texts.length + 2; // 模板兜底配额：每批最多 +2 条
+      let anchorTurn = 0;
+      const usedTpl = new Set<string>(); // v20.2：同帖句式去重（避免同批撞句式）
+      while (texts.length < Math.min(want, fillCap)) {
+        const cand = postLang === 'zh-Hans' ? followupComment(post.content, usedCt, anchorTurn++, usedTpl) : '';
         if (!cand) break;
         usedCt.add(cand.slice(0, 16));
         texts.push(cand);
@@ -1560,22 +1575,13 @@ async function genCommentBatch(postId: string): Promise<number> {
         } catch {
           subTexts = [];
         }
-        // 兜底子回复共享去重集（同一帖的楼中楼不重复用同一条兜底文案；
-        // v8 修复：继承本批顶层评论 + 该帖已有评论的已用文案，杜绝两人发同一条）
-        const usedSub = new Set<string>([
-          ...texts.map((t) => t.slice(0, 16)),
-          ...threadReplies.map((p) => p.content.slice(0, 16)),
-        ]);
+        // v20：楼中楼一律由 LLM 实时生成（模板兜底已删——见 forEach 内注释）
         subTargets.forEach((c, i) => {
-          let text = subTexts[i];
-          if (!text) {
-            // v15：池子已删——LLM 失败的楼中楼兜底 = 追问式锚定模板（中文帖），
-            // 模板用尽 → 跳过这条楼中楼（宁可少一条也绝不重复/串台）
-            const cand = postLang === 'zh-Hans' ? followupComment(post.content, usedSub) : '';
-            if (!cand) return; // forEach 回调内跳过本条楼中楼
-            usedSub.add(cand.slice(0, 16));
-            text = cand;
-          }
+          const text = subTexts[i];
+          // v20：楼中楼一律不用模板兜底——LLM 没写出来就跳过。
+          // 旧版「回复 @xx：{t}这事我关注了，等一个下文」式机械楼中楼
+          // 比没有楼中楼更假（用户反馈「评论有问题」的组成部分）。
+          if (!text) return;
           const subAt = Math.min(Date.now() - Math.floor(Math.random() * 60_000), c.createdAt + (2 + Math.random() * 30) * 60_000);
           const sub = basePost(
             subKeys[i],
