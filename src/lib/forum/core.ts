@@ -122,8 +122,12 @@ export const FORUM_KEY = 'forum-data-v1';
  *  图卡追加在末尾（w-3/4 收窄显示）；②renderTextImage 调参——画布
  *  1080→720、字号 28→40、行距 53→74、单行宽 960→640，文字/画布比
  *  2.6%→5.6%（「文字大一点，图片小一点」）；发布弹层同款生效。
- *  bump 触发重播种：存量帖 media 里是旧参数 dataURL，需换新渲染。 */
-export const GEN_VERSION = 32;
+ *  bump 触发重播种：存量帖 media 里是旧参数 dataURL，需换新渲染。
+ * v33 = 文字图片字号回调（用户要求「文字图片里面的文字小一点」）：
+ *  renderTextImage 字号 40→32、行距 74→60、单行宽 640→600，
+ *  文字/画布比 5.6%→4.4%（介于 v31 的 2.6% 与 v32 的 5.6% 之间）。
+ *  bump 触发重播种：存量帖 media 里是 40px 旧参数 dataURL，需换新渲染。 */
+export const GEN_VERSION = 33;
 /** 首次播种的 NPC 帖子目标条数（feed 一屏半左右） */
 export const SEED_POST_TARGET = 14;
 /** 补新帖：feed 最新帖子超过该毫秒数视为「凉了」，打开时补 2~4 条 */

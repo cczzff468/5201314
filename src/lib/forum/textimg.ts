@@ -12,6 +12,11 @@
  * 单行宽 960→640：文字/画布比从 2.6% 提到 5.6%（视觉翻 2.2 倍），
  * 同屏显示下文字明显变大；发布弹层与 AI 配图帖同步生效。
  *
+ * v33 按用户要求回调：「文字图片里面的文字小一点」——40px 偏大，
+ * 字号 40→32（介于 28 与 40 之间），行距 74→60、单行宽 640→600
+ * 等比收拢，文字/画布比 5.6%→4.4%：字变小、留白回来一点；
+ * 发布弹层与 AI 配图帖同步生效（GEN_VERSION bump 重播种换新图）。
+ *
  * 纯前端 canvas 直出 dataURL（PNG）：
  * - 发布弹层「文字图片」：用户输入一句话 → 生成白底居中文字图；
  * - AI 生成帖子按需配图（engine）：LLM 给出 image_description
@@ -20,8 +25,8 @@
 
 export const TEXTIMG_MAX_LEN = 60;
 
-/** 文字图片渲染：720×720 纯白底，#999997 正文 40px 居中（行距 74px），
- *  多行自动换行（每行宽 ≤640px），整块垂直居中；无任何时间戳/水印。 */
+/** 文字图片渲染：720×720 纯白底，#999997 正文 32px 居中（行距 60px），
+ *  多行自动换行（每行宽 ≤600px），整块垂直居中；无任何时间戳/水印。 */
 export function renderTextImage(text: string): string {
   const W = 720;
   const H = 720;
@@ -32,14 +37,14 @@ export function renderTextImage(text: string): string {
   if (!ctx) throw new Error('canvas 不可用');
   ctx.fillStyle = '#ffffff';
   ctx.fillRect(0, 0, W, H);
-  const fs = 40;
-  const lh = 74;
+  const fs = 32;
+  const lh = 60;
   ctx.font = `400 ${fs}px system-ui, -apple-system, 'PingFang SC', 'Segoe UI', 'Noto Sans SC', sans-serif`;
   ctx.fillStyle = '#999997';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  // 自动换行（每行宽 ≤ 640px）
-  const maxW = 640;
+  // 自动换行（每行宽 ≤ 600px）
+  const maxW = 600;
   const lines: string[] = [];
   let cur = '';
   for (const ch of text.trim()) {
