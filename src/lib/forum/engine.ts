@@ -158,22 +158,33 @@ async function describePostMedia(media: string[] | undefined): Promise<string> {
 
 // ---------------- 帖子构造 ----------------
 
-/** 评论/楼中楼互动量（用户要求：评论的点赞/浏览必须合理——主帖 180 赞、
- *  单条评论却几万赞太假，像推特一样评论赞远小于主帖赞）：
- *  按父帖热度比例缩放——42% 几乎没人赞（父帖的 0.2%~3%）、33% 少量（2%~10%）、
- *  20% 小热门（8%~30%）、5% 热评（20%~60%）；浏览 ≈ 父帖浏览的 2%~25%；转推 0~2。 */
+/** 评论/楼中楼互动量（v9 用户【评论区数据逻辑】强校验）：
+ *  1. 浏览量必须远小于帖子浏览量——父帖浏览的 0.5%~8%，硬上限几万~几十万
+ *     （3w~45w 随机），绝不能出现几百万；
+ *  2. 点赞从浏览量推导（浏览的 0.5%~12%——真实平台评论赞永远远小于评论浏览，
+ *     绝不会出现「赞比浏览还多」），且硬上限楼主点赞数的 60%（绝不超楼主）；
+ *  3. 转发数通常为个位数（0~9，占 85%）或十几个（10~19，占 13%）；
+ *     只有约 2% 极具争议的引战评论可以到几百（100~599）。 */
 function rollCommentEngagement(parentLikes: number, parentViews: number): { likeBoost: number; views: number; reposts: number } {
-  const r = Math.random();
-  let ratio: number;
-  if (r < 0.42) ratio = 0.002 + Math.random() * 0.028;
-  else if (r < 0.75) ratio = 0.02 + Math.random() * 0.08;
-  else if (r < 0.95) ratio = 0.08 + Math.random() * 0.22;
-  else ratio = 0.2 + Math.random() * 0.4;
-  return {
-    likeBoost: Math.floor(parentLikes * ratio),
-    views: Math.max(3, Math.floor(parentViews * (0.02 + Math.random() * 0.23))),
-    reposts: Math.random() < 0.08 ? 1 + Math.floor(Math.random() * 2) : 0,
-  };
+  // 浏览：父帖的 0.5%~8%，硬上限 3w~45w（几万~几十万档，绝无几百万）
+  const cap = 30_000 + Math.floor(Math.random() * 420_000);
+  const views = Math.max(3, Math.min(Math.floor(parentViews * (0.005 + Math.random() * 0.075)), cap));
+  // 点赞：浏览量的 0.5%~12%（远小于浏览），且硬上限楼主点赞的 60%
+  const likeBoost = Math.min(
+    Math.floor(views * (0.005 + Math.random() * 0.115)),
+    Math.floor(parentLikes * 0.6),
+  );
+  // 转发：个位数为主 / 十几个次之 / ~2% 引战热评几百
+  const fr = Math.random();
+  const reposts =
+    fr < 0.55
+      ? Math.floor(Math.random() * 6) // 0~5
+      : fr < 0.85
+        ? 5 + Math.floor(Math.random() * 5) // 5~9
+        : fr < 0.98
+          ? 10 + Math.floor(Math.random() * 10) // 10~19
+          : 100 + Math.floor(Math.random() * 500); // 引战争议评论 100~599
+  return { likeBoost, views, reposts };
 }
 
 function basePost(
@@ -202,6 +213,17 @@ function basePost(
       ? rollCommentEngagement(parentEng?.likes ?? 40, parentEng?.views ?? 600)
       : rollEngagement()
     : { likeBoost: 0, views: Math.floor(Math.random() * 45), reposts: 0 };
+  // v9 硬钳制：评论的总点赞（NPC点赞 + 合成热度）绝对不超过楼主帖子的点赞数
+  if (replyTo !== undefined && parentEng) {
+    const cap = Math.max(0, parentEng.likes - likes.length);
+    if (likes.length + eng.likeBoost > parentEng.likes) eng.likeBoost = Math.min(eng.likeBoost, cap);
+  }
+  // v11 自洽：评论浏览量绝不低于总点赞数（点赞的人必然看过——极小浏览的
+  // 评论配上 NPC 有机赞数组会出现「4赞3浏览」，浏览抬到点赞数封底）
+  if (replyTo !== undefined) {
+    const totalLikes = likes.length + eng.likeBoost;
+    if (eng.views < totalLikes) eng.views = totalLikes;
+  }
   return {
     id: uid('p'),
     authorKey,
@@ -405,16 +427,25 @@ function resetAiContent(d: ForumData): void {
 
 /** 给种子帖同步连带一批评论（用户要求：第一次生成帖子就连带着生成评论——
  *  打开帖子就是热闹评论区，而不是「评论正在赶来」）。
- *  池子主题匹配（评论对得上帖子内容）+ 少量楼中楼；时间在（发帖, 现在）内升序。 */
+ *  池子主题匹配（评论对得上帖子内容）+ 少量楼中楼；时间在（发帖, 现在）内升序。
+ *  v9：评论语言跟随帖子（中文帖全中文，外语网友最多带 1-3 个母语字符点缀）。 */
 function seedCommentsFor(post: ForumPost, out: ForumPost[]): void {
   const postAuthor = resolveAuthor(post.authorKey);
+  const postLang = detectPostLang(post.content, postAuthor.lang);
   const count = 7 + Math.floor(Math.random() * 9); // 7~15 条（用户要求：评论一批 7~15）
-  const keys = pickCommenters(count, postAuthor.lang, post.content, post.authorKey);
+  const keys = pickCommenters(count, postLang, post.content, post.authorKey);
   const usedCt = new Set<string>();
   const texts: string[] = [];
   for (let i = 0; i < count; i++) {
-    const lang = resolveAuthor(keys[i]).lang ?? 'zh-Hans';
-    texts.push(pickTopicComment(post.content, lang, usedCt, post.community) ?? pickGenericComment('zh-Hans', usedCt) ?? '哈哈哈哈');
+    const commenterLang = resolveAuthor(keys[i]).lang ?? 'zh-Hans';
+    // v9：中文帖 → 人人中文（外语网友偶尔加母语口癖点缀）；外语帖 → 跟帖子语言
+    const lang = commentLangFor(postLang, commenterLang);
+    const base =
+      pickTopicComment(post.content, lang, usedCt, post.community) ??
+      pickGenericComment(lang, usedCt, post.content) ??
+      pickGenericComment('zh-Hans', usedCt, post.content) ??
+      '哈哈哈哈';
+    texts.push(lang === 'zh-Hans' && postLang === 'zh-Hans' ? maybeForeignFlavor(base, commenterLang) : base);
   }
   // 时间：在（发帖后, 现在）窗口内自然铺开；帖子很新时评论挤在最近几十秒（爆款即视感），
   // 老帖则从发帖后一直散到现在——绝不再出现全部同一毫秒的假时间戳
@@ -444,9 +475,15 @@ function seedCommentsFor(post: ForumPost, out: ForumPost[]): void {
   // v8 修复：去重集继承顶层评论已用文案——同一帖里两个人发一模一样的话太假
   const usedSub = new Set(usedCt);
   for (const c of subs) {
-    const byAuthor = post.authorKey !== 'user' && Math.random() < 0.35 ? post.authorKey : pickCommenters(1, postAuthor.lang, post.content, post.authorKey, ...keys)[0];
-    const subLang = resolveAuthor(byAuthor).lang ?? 'zh-Hans';
-    const text = pickTopicComment(`${c.content} ${post.content}`, subLang, usedSub, post.community) ?? pickGenericComment('zh-Hans', usedSub) ?? '哈哈哈哈哈';
+    const byAuthor = post.authorKey !== 'user' && Math.random() < 0.35 ? post.authorKey : pickCommenters(1, postLang, post.content, post.authorKey, ...keys)[0];
+    const subCommenterLang = resolveAuthor(byAuthor).lang ?? 'zh-Hans';
+    const subLang = commentLangFor(postLang, subCommenterLang);
+    const rawSub =
+      pickTopicComment(`${c.content} ${post.content}`, subLang, usedSub, post.community) ??
+      pickGenericComment(subLang, usedSub, `${c.content} ${post.content}`) ??
+      pickGenericComment('zh-Hans', usedSub, `${c.content} ${post.content}`) ??
+      '哈哈哈哈哈';
+    const text = subLang === 'zh-Hans' && postLang === 'zh-Hans' ? maybeForeignFlavor(rawSub, subCommenterLang) : rawSub;
     const subAt = Math.min(Date.now() - 30_000, c.createdAt + (3 + Math.random() * 40) * 60_000);
     const sub = basePost(
       byAuthor,
@@ -522,6 +559,13 @@ export async function ensureSeed(): Promise<void> {
     // 首刷连带评论（用户要求：第一次生成帖子就连带着生成评论）
     const allNew: ForumPost[] = [...seedPosts];
     for (const sp of seedPosts) seedCommentsFor(sp, allNew);
+    // v9：版本升级重播种时用户帖的旧评论已被清掉——给用户自己的帖子也补一批
+    // 干净评论（新强校验逻辑：贴题+语言跟随+数据合理），帖子不至于零回复
+    const userPosts = d.posts.filter((p) => p.authorKey === 'user').slice(-6);
+    for (const up of userPosts) {
+      if (allNew.some((p) => p.replyTo === up.id)) continue;
+      seedCommentsFor(up, allNew);
+    }
     const next: ForumData = {
       ...d,
       posts: [...d.posts, ...allNew],
@@ -739,11 +783,37 @@ const GENERIC_COMMENTS: { text: string; lang: string }[] = [
   { text: '직접 본 사람도 있다니 부럽다', lang: 'ko' },
 ];
 
-/** 按评论者语言从通用池抽取未用短评（语言池尽 → 落中文池：外国网友用翻译器发中文也很真实） */
-function pickGenericComment(lang: string, usedCt: Set<string>): string | null {
+/** 按评论者语言从通用池抽取未用短评。
+ *  v9 语言铁律：只出该语言的池子，池尽落中文池（外语池尽 → 中文评论，
+ *  绝不从全语言混合池抽——旧逻辑 20% 概率把整句日/韩/英语漏进中文帖）。
+ *  v9 领域守卫：带强领域词的通用短评（车/剧/瓜/追星…）只出现在对得上的帖子下，
+ *  杜绝「追星女孩路过」出现在车帖、「这剧我也在追」出现在吃瓜帖的轻度串台。 */
+const GENERIC_DOMAIN_GUARDS: { has: RegExp; need: RegExp }[] = [
+  { has: /剧|二刷|倍速|烂尾|编剧|男主|女主|影院|片单/, need: /剧|影|追|看|综艺|烂尾|编剧|男主|女主|影院|倍速/ },
+  { has: /车|试驾|油耗|司机|手动挡|提车|4S|赛道|加塞/, need: /车|驾|油|堵|胎|提车|赛道|加塞|本|变道/ },
+  { has: /瓜|热搜|反转|塌|爆料|辟谣|同框|拍到/, need: /瓜|热搜|塌|反转|爆料|辟谣|拍到|明星|顶流|恋情|同框|吃瓜/ },
+  { has: /追星|粉丝|爱豆|应援|本命|演唱会/, need: /星|粉|爱豆|偶像|塌|瓜|演唱会|应援|本命|追星/ },
+  { has: /猫|狗|宠物|铲屎|主子/, need: /猫|狗|宠物|铲屎|主子|毛孩子/ },
+  { has: /外卖|火锅|奶茶|宵夜|下饭|探店|美食|看饿|馋/, need: /吃|喝|饿|馋|外卖|火锅|奶茶|宵夜|美食|店|饭|菜|厨/ },
+  { has: /班|老板|工资|加班|通勤|辞职|摸鱼|打工|同事|周报/, need: /班|老板|工资|加班|通勤|辞职|摸鱼|打工|同事|工作|月薪|上班/ },
+];
+
+/** 通用短评与帖子内容领域是否匹配（候选带领域词而帖子完全不沾边 → false） */
+function genericFitsPost(cand: string, postContent: string): boolean {
+  for (const g of GENERIC_DOMAIN_GUARDS) {
+    if (g.has.test(cand) && !g.need.test(postContent)) return false;
+  }
+  return true;
+}
+
+function pickGenericComment(lang: string, usedCt: Set<string>, postContent = ''): string | null {
+  // 领域守卫后的候选池（守卫只在给了帖子内容时生效）
+  const langPool = GENERIC_COMMENTS.filter((c) => c.lang === lang && (!postContent || genericFitsPost(c.text, postContent)));
+  const zhPool = GENERIC_COMMENTS.filter((c) => c.lang === 'zh-Hans' && (!postContent || genericFitsPost(c.text, postContent)));
+  // v9：严格语言池——本语言池（守卫后）→ 中文池（守卫后）→ 无守卫全池（保底不空）
+  const usePool = langPool.length ? langPool : zhPool.length ? zhPool : GENERIC_COMMENTS.filter((c) => c.lang === lang).concat(GENERIC_COMMENTS.filter((c) => c.lang === 'zh-Hans'));
+  if (!usePool.length) return null;
   for (let i = 0; i < 60; i++) {
-    const pool = GENERIC_COMMENTS.filter((c) => c.lang === lang);
-    const usePool = pool.length && Math.random() < 0.8 ? pool : GENERIC_COMMENTS;
     const cand = usePool[Math.floor(Math.random() * usePool.length)].text;
     const k = cand.slice(0, 16);
     if (!usedCt.has(k)) {
@@ -819,7 +889,7 @@ const TOPIC_COMMENT_POOLS: { re: RegExp; subject: string; comments: string[] }[]
     ],
   },
   {
-    re: /明星|偶像|爱豆|本命|追星|演唱会|应援|粉丝|站姐|代拍|周边|签售|安可|主唱|哥哥|姐姐|排队|见到本人|现场|本人比屏幕/i,
+    re: /明星|偶像|爱豆|本命|追星|演唱会|应援|粉丝|站姐|代拍|周边|签售|安可|主唱|见到本人|本人比屏幕/i,
     subject: '追星',
     comments: [
       '天哪这也太好磕了，{t}我先磕为敬',
@@ -837,7 +907,7 @@ const TOPIC_COMMENT_POOLS: { re: RegExp; subject: string; comments: string[] }[]
     ],
   },
   {
-    re: /班|老板|工资|加班|通勤|辞职|摸鱼|周报|开会|同事|甲方|乙方|上班|打工|绩效|KPI|裁员|领导|地铁/i,
+    re: /班|老板|工资|加班|通勤|辞职|摸鱼|周报|开会|同事|甲方|乙方|上班|打工|绩效|KPI|裁员|领导/i,
     subject: '打工',
     comments: [
       '{t}世另我，今天也是不想上班的一天',
@@ -952,6 +1022,82 @@ function stripReplyPrefixClient(raw: string): string {
   return t;
 }
 
+/** 评论正文清洗（v9 乱码修复，与服务端 sanitizeCommentText 同口径）：
+ *  零宽/控制字符/替换符、拼接符连串、markdown 记号、emoji 全部清除。 */
+function sanitizeCommentClient(raw: string): string {
+  let t = raw;
+  t = t.replace(/[\u200B-\u200D\uFEFF\u2028\u2029]/g, '').replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '').replace(/\uFFFD/g, '');
+  t = t.replace(/[~～|｜·•※]{2,}/g, ' ');
+  t = t.replace(/```+/g, '').replace(/[*_`#>]{1,3}(?=\s|$)/g, '');
+  t = t.replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE00}-\u{FE0F}\u{1F1E6}-\u{1F1FF}\u{2B00}-\u{2BFF}]/gu, '');
+  return t.replace(/[ \t]{2,}/g, ' ').trim();
+}
+
+/** 判断帖子内容是否以中文为主体（v9 语言铁律：评论语言跟随帖子）。
+ *  内容脚本占比判断 + 作者语言兜底（内容太短/无脚本字符时信作者）。 */
+export function detectPostLang(content: string, authorLang?: string): string {
+  let zh = 0;
+  let foreign = 0;
+  for (const ch of content) {
+    const c = ch.codePointAt(0) ?? 0;
+    if (c >= 0x4e00 && c <= 0x9fff) zh += 1;
+    else if (
+      (c >= 0x41 && c <= 0x5a) || (c >= 0x61 && c <= 0x7a) ||
+      (c >= 0x3040 && c <= 0x30ff) || c === 0x30fc ||
+      (c >= 0xac00 && c <= 0xd7a3) || (c >= 0x3130 && c <= 0x318f)
+    ) foreign += 1;
+  }
+  if (zh + foreign < 4) return authorLang ?? 'zh-Hans';
+  return zh >= foreign ? 'zh-Hans' : (authorLang ?? 'zh-Hans');
+}
+
+/** 评论者语言 → 实际评论文案语言（v9：中文帖人人用中文，外语网友可带 1-3 个母语字符点缀；
+ *  外语帖用帖子语言或中文）。 */
+function commentLangFor(postLang: string, commenterLang: string): string {
+  if (postLang === 'zh-Hans') return 'zh-Hans';
+  return commenterLang === postLang ? postLang : 'zh-Hans';
+}
+
+/** 外语网友在中文帖评论时的母语口癖点缀（v9 允许 1-3 个外文字符夹杂）。
+ *  三成概率给中文文案补一个小尾巴，像懂中文的外国网友随手打的。 */
+const FOREIGN_FLAVORS = ['www', 'ㅋㅋ', 'hhh', 'lol', '草', 'hh'];
+function maybeForeignFlavor(text: string, commenterLang: string): string {
+  if (commenterLang === 'zh-Hans') return text;
+  if (Math.random() >= 0.3) return text;
+  const f = FOREIGN_FLAVORS[Math.floor(Math.random() * FOREIGN_FLAVORS.length)];
+  return /[。！？!?~～\s]$/.test(text) ? `${text}${f}` : `${text} ${f}`;
+}
+
+/** 客户端整句外语判定（与服务端 violatesCommentLang 同口径的兜底）：
+ *  中文帖的评论若被外语主导（整句英/日/韩/繁）→ true，调用方丢弃换池子。 */
+function foreignDominantClient(text: string): boolean {
+  let zh = 0;
+  let latin = 0;
+  let kana = 0;
+  let hangul = 0;
+  let trad = 0;
+  let simp = 0;
+  const TRAD_SET = '們個這時過還發對說聽後來車馬門問長無書龍鳥語體點關應讓證邊沒壞愛國會間東兩單買賣辦動務名條當處帶幫廣歸開從優傷兒內準決覺觀視親計訊訪話該詳誤說課調誰謝負財貢風飛飯飲館駐騙體魚島嶼歡樂進遠違連遲適選遜鄰醫針錢鐵銀錯鍵鎮閃閉閑閱隊階際隨隱難電霧頁頂項順頗領頻題顏願香講種樣認談論請讀讚絲喪髮為麼裡幾別嗎寫實續識編劇簡體雙嚇';
+  const SIMP_SET = '们这说过发对听后来车马门问长无书龙鸟语体点关应让证边没坏爱国会间东两单买卖办动务名条当处带帮广归开从优伤儿内准决觉观视亲计讯访话该详误课调谁谢负财贡风飞饭饮馆驻骗体鱼岛屿欢乐进远违连迟适选逊邻医针钱铁银错键镇闪闭闲阅队阶际随隐难电雾页顶项顺颇领频题颜愿香讲种样认谈论请读赞丝丧发为么里几别吗写实续识编剧简体双吓';
+  for (const ch of text) {
+    const c = ch.codePointAt(0) ?? 0;
+    if (c >= 0x4e00 && c <= 0x9fff) {
+      zh += 1;
+      if (TRAD_SET.includes(ch)) trad += 1;
+      else if (SIMP_SET.includes(ch)) simp += 1;
+    } else if ((c >= 0x41 && c <= 0x5a) || (c >= 0x61 && c <= 0x7a)) latin += 1;
+    else if ((c >= 0x3040 && c <= 0x30ff) || c === 0x30fc) kana += 1;
+    else if ((c >= 0xac00 && c <= 0xd7a3) || (c >= 0x3130 && c <= 0x318f)) hangul += c >= 0xac00 ? 1 : 0.5;
+  }
+  if (kana >= 4) return true;
+  if (hangul >= 4) return true;
+  if (latin >= 10 && latin > zh * 0.8) return true;
+  if (zh === 0 && latin + kana + hangul + trad >= 5) return true;
+  if (trad >= 5) return true;
+  if (trad >= 3 && simp <= 1) return true; // 整句繁体（繁体独有字≥3且简体独有字几乎没有）
+  return false;
+}
+
 /** 求推荐/求助帖检测（v7 用户反馈：楼主求「不烧脑不虐心」的剧，NPC 却回「中间注水、
  *  结局烂尾」——池子兜底也要看帖作答，求什么答什么） */
 const REQUEST_POST_RE = /求推荐|求推|推荐一下|推荐几|有没有.{0,8}(推荐|好看|好听的)|剧荒|书荒|歌荒|安利|求个|求助|跪求|在线等|姐妹们.{0,6}推|家人们.{0,6}推|求下饭|求剧|求歌|求攻略|怎么选|哪个好|求避雷/i;
@@ -993,34 +1139,78 @@ function pickRequestComment(postContent: string, used: Set<string>): string | nu
 }
 
 /** 兜底评论：按帖子内容命中的主题池抽取（对得上帖子内容，不是万金油），
- *  主题池尽/未命中 → 通用池。外语评论者走外语通用池。
+ *  主题池尽/未命中 → 通用池（带领域守卫：领域词对不上帖子的通用短评不出场）。
+ *  外语评论者走外语通用池。
  *  v7：求推荐/求助帖 → 优先求推荐池（求什么答什么，绝不答非所问）。 */
 function pickTopicComment(postContent: string, lang: string, used: Set<string>, community?: string | null): string | null {
   if (lang !== 'zh-Hans') {
-    const cand = pickGenericComment(lang, used);
+    const cand = pickGenericComment(lang, used, postContent);
     if (cand) return cand;
   }
   // 求推荐/求助帖优先：正面回答（推荐/同求/避雷），再考虑主题池
   const req = pickRequestComment(postContent, used);
   if (req) return req;
-  // 版块优先：帖子所在版块的领域池先抽（追星帖出追星评论，车帖出车友评论）
-  const pools: { re: RegExp; subject: string; comments: string[] }[] = [];
+  // v10 加权选池（串台修复）：池子得分 = 正则命中的分支词数，权重 = 得分²。
+  // 版块池（版块定领域）基础权重 1；关键词强匹配池（明星帖命中追星池的
+  // 明星/见到本人等多个词）权重 4~9 倍起——弱误触池（单个泛词如「累」撞上
+  // 深夜池）几乎不出场，评论与帖子主题强关联。
+  const weighted: { pool: { re: RegExp; subject: string; comments: string[] }; w: number }[] = [];
+  const seenPool = new Set<{ re: RegExp; subject: string; comments: string[] }>();
   const commIdx = community ? COMMUNITY_POOLS[community] ?? [] : [];
-  for (const i of commIdx) pools.push(TOPIC_COMMENT_POOLS[i]);
-  // 再补关键词命中的池（版块没匹配到时兜底；已加入的不重复）
-  const hit = TOPIC_COMMENT_POOLS.filter((p) => p.re.test(postContent) && !pools.includes(p));
-  pools.push(...hit);
-  if (!pools.length) return pickGenericComment('zh-Hans', used);
+  for (const i of commIdx) {
+    const p = TOPIC_COMMENT_POOLS[i];
+    if (p && !seenPool.has(p)) {
+      seenPool.add(p);
+      weighted.push({ pool: p, w: 1 });
+    }
+  }
+  for (const p of TOPIC_COMMENT_POOLS) {
+    if (seenPool.has(p)) continue;
+    const score = poolMatchScore(p.re, postContent);
+    if (score > 0) {
+      seenPool.add(p);
+      weighted.push({ pool: p, w: score * score });
+    }
+  }
+  if (!weighted.length) return pickGenericComment('zh-Hans', used, postContent);
+  const totalW = weighted.reduce((s, x) => s + x.w, 0);
   for (let i = 0; i < 60; i++) {
-    const pool = pools[Math.floor(Math.random() * pools.length)];
-    const raw = pool.comments[Math.floor(Math.random() * pool.comments.length)];
-    const cand = raw.replaceAll('{t}', topicSubjectOf(postContent, pool.subject));
+    let r = Math.random() * totalW;
+    let picked = weighted[0].pool;
+    for (const x of weighted) {
+      r -= x.w;
+      if (r <= 0) {
+        picked = x.pool;
+        break;
+      }
+    }
+    const raw = picked.comments[Math.floor(Math.random() * picked.comments.length)];
+    const cand = raw.replaceAll('{t}', topicSubjectOf(postContent, picked.subject));
     if (!used.has(cand.slice(0, 16))) {
       used.add(cand.slice(0, 16));
       return cand;
     }
   }
-  return pickGenericComment('zh-Hans', used);
+  return pickGenericComment('zh-Hans', used, postContent);
+}
+
+/** 主题池与帖子内容的匹配强度：正则按 | 拆分支逐个测，命中分支数即得分
+ *  （明星帖命中追星池的「明星+见到本人」= 2 分；只撞上「地铁」一个泛词 = 1 分） */
+function poolMatchScore(re: RegExp, content: string): number {
+  try {
+    const branches = re.source.split('|').filter(Boolean);
+    let n = 0;
+    for (const b of branches) {
+      try {
+        if (new RegExp(b, 'i').test(content)) n += 1;
+      } catch {
+        /* 非法分支忽略 */
+      }
+    }
+    return n;
+  } catch {
+    return re.test(content) ? 1 : 0;
+  }
 }
 
 /** 组合式帖子兜底（NPC 池耗尽 + LLM 失败时：话题×开头×正文×结尾 组合出近乎无限的帖子，
@@ -1500,8 +1690,8 @@ async function genCommentBatch(postId: string): Promise<number> {
     );
     // 识图模型：帖子带图先「看图」，AI 评论才有画面感
     const mediaDesc = await describePostMedia(post.media);
-    // 主帖语言（外语帖评论区外语网友更多）
-    const postLang = resolveAuthor(post.authorKey).lang ?? 'zh-Hans';
+    // 主帖语言（v9：内容判定 + 作者语言兜底——中文帖的评论全部中文，外语帖才外语）
+    const postLang = detectPostLang(post.content, resolveAuthor(post.authorKey).lang);
     // 评论者：新面孔 + 老网友回访；同帖去重（含已有评论者 + 楼主，绝不复读）
     const existingKeys = threadReplies.map((p) => p.authorKey);
     const dynBefore = new Set(Object.keys(forumData().dynNpcs ?? {}));
@@ -1515,25 +1705,29 @@ async function genCommentBatch(postId: string): Promise<number> {
     try {
       const r = (await callApi({
         kind: 'comments',
-        post: { authorName: postAuthor.name, content: post.content, mediaDesc },
+        post: { authorName: postAuthor.name, content: post.content, mediaDesc, lang: postLang },
         count: want,
         personas: commenterKeys.map((k) => {
           const a = resolveAuthor(k);
-          const recent = k.startsWith('dyn:') ? forumData().dynNpcs?.[k.slice(4)]?.recent : undefined;
-          return { name: a.name, persona: a.persona || '普通论坛网友', lang: a.lang ?? 'zh-Hans', recent };
+          return { name: a.name, persona: a.persona || '普通论坛网友', lang: a.lang ?? 'zh-Hans' };
         }),
         avoid,
         userName: resolveAuthor('user').name,
       })) as { items?: string[] };
       texts = Array.isArray(r.items)
-        ? r.items.map((x) => (typeof x === 'string' ? stripReplyPrefixClient(x) : x)).filter((x) => typeof x === 'string' && x.trim().length >= 2)
+        ? r.items
+            .map((x) => (typeof x === 'string' ? sanitizeCommentClient(stripReplyPrefixClient(x)) : x))
+            .filter((x) => typeof x === 'string' && x.trim().length >= 2)
+            // v9 客户端兜底校验：中文帖拒绝整句外语（服务端已过滤，双保险）
+            .filter((x) => postLang !== 'zh-Hans' || !foreignDominantClient(x))
         : [];
     } catch {
       texts = [];
     }
     if (texts.length < want) {
       // 池子兜底：按帖子内容命中的主题评论池（评论对得上帖子内容，不是万金油）
-      // + 外语评论者走外语通用池；去重仅限本帖，保证任何帖子都能补满
+      // v9：语言跟随帖子——中文帖人人中文（外语网友带 1-3 字符口癖）；外语帖用帖子语言
+      // 去重仅限本帖，保证任何帖子都能补满
       const usedCt = new Set<string>([
         ...texts.map((t) => t.slice(0, 16)),
         ...threadReplies.map((p) => p.content.slice(0, 16)),
@@ -1542,7 +1736,14 @@ async function genCommentBatch(postId: string): Promise<number> {
       while (texts.length < want && ni < 400) {
         const idx = texts.length;
         const commenterLang = resolveAuthor(commenterKeys[idx] ?? 'user').lang ?? 'zh-Hans';
-        const cand = pickTopicComment(post.content, commenterLang, usedCt, post.community) ?? pickGenericComment('zh-Hans', usedCt);
+        const lang = commentLangFor(postLang, commenterLang);
+        let cand =
+          pickTopicComment(post.content, lang, usedCt, post.community) ??
+          pickGenericComment(lang, usedCt, post.content) ??
+          pickGenericComment('zh-Hans', usedCt, post.content);
+        if (cand && lang === 'zh-Hans' && postLang === 'zh-Hans') {
+          cand = maybeForeignFlavor(cand, commenterLang);
+        }
         if (cand) {
           usedCt.add(cand.slice(0, 16));
           texts.push(cand);
@@ -1596,7 +1797,7 @@ async function genCommentBatch(postId: string): Promise<number> {
         try {
           const r = (await callApi({
             kind: 'subreplies',
-            post: { authorName: postAuthor.name, content: post.content, mediaDesc },
+            post: { authorName: postAuthor.name, content: post.content, mediaDesc, lang: postLang },
             threads: subTargets.map((c) => ({ authorName: resolveAuthor(c.authorKey).name, content: c.content })),
             personas: subKeys.map((k) => {
               const a = resolveAuthor(k);
@@ -1605,7 +1806,11 @@ async function genCommentBatch(postId: string): Promise<number> {
             userName: resolveAuthor('user').name,
           })) as { items?: string[] };
           subTexts = Array.isArray(r.items)
-            ? r.items.map((x) => (typeof x === 'string' ? stripReplyPrefixClient(x) : x)).filter((x) => typeof x === 'string' && x.trim().length >= 2)
+            ? r.items
+                .map((x) => (typeof x === 'string' ? sanitizeCommentClient(stripReplyPrefixClient(x)) : x))
+                .filter((x) => typeof x === 'string' && x.trim().length >= 2)
+                // v9 客户端兑底：中文帖拒绝整句外语楼中楼（双保险）
+                .filter((x) => postLang !== 'zh-Hans' || !foreignDominantClient(x))
             : [];
         } catch {
           subTexts = [];
@@ -1619,9 +1824,18 @@ async function genCommentBatch(postId: string): Promise<number> {
         subTargets.forEach((c, i) => {
           let text = subTexts[i];
           if (!text) {
-            // 池子兜底：优先主题匹配（接得上评论/主帖），外语网友外语接话
-            const subLang = resolveAuthor(subKeys[i]).lang ?? 'zh-Hans';
-            text = pickTopicComment(`${c.content} ${post.content}`, subLang, usedSub) ?? pickGenericComment(subLang, usedSub) ?? pickGenericComment('zh-Hans', usedSub) ?? '哈哈哈哈';
+            // 池子兜底：优先主题匹配（接得上评论/主帖）；v9 语言跟随帖子
+            const subCommenterLang = resolveAuthor(subKeys[i]).lang ?? 'zh-Hans';
+            const subLang = commentLangFor(postLang, subCommenterLang);
+            let cand =
+              pickTopicComment(`${c.content} ${post.content}`, subLang, usedSub) ??
+              pickGenericComment(subLang, usedSub, `${c.content} ${post.content}`) ??
+              pickGenericComment('zh-Hans', usedSub, `${c.content} ${post.content}`) ??
+              '哈哈哈哈';
+            if (cand !== '哈哈哈哈' && subLang === 'zh-Hans' && postLang === 'zh-Hans') {
+              cand = maybeForeignFlavor(cand, subCommenterLang);
+            }
+            text = cand;
           }
           const subAt = Math.min(Date.now() - Math.floor(Math.random() * 60_000), c.createdAt + (2 + Math.random() * 30) * 60_000);
           const sub = basePost(
@@ -1838,6 +2052,9 @@ async function execJob(job: PendingJob): Promise<void> {
       // 识图模型：帖子带图时先「看图」再回复
       const mainForMedia = d.posts.find((p) => p.id === (job.kind === 'aiReplyBack' ? (job.meta.mainPostId ?? job.meta.rootId ?? target.id) : target.id));
       const mediaDesc = await describePostMedia(mainForMedia?.media ?? target.media);
+      // v9：主帖语言（中文帖的 AI 回复也必须中文为主体）
+      const mainPostAuthorLang = mainForMedia ? resolveAuthor(mainForMedia.authorKey).lang : undefined;
+      const postLang = detectPostLang(postContent || target.content, mainPostAuthorLang ?? resolveAuthor(target.authorKey).lang);
 
       let text = '';
       try {
@@ -1846,24 +2063,30 @@ async function execJob(job: PendingJob): Promise<void> {
           author: { name: author.name, persona: author.persona || '', lang: author.lang ?? 'zh-Hans' },
           parent: { authorName: replyName, content: parentContent },
           postContent,
+          postLang,
           mediaDesc,
           history,
           userName,
         })) as { text?: string };
-        text = typeof r.text === 'string' ? stripReplyPrefixClient(r.text) : '';
+        text = typeof r.text === 'string' ? sanitizeCommentClient(stripReplyPrefixClient(r.text)) : '';
+        // v9 客户端兜底：中文帖拒绝整句外语回复
+        if (text && postLang === 'zh-Hans' && foreignDominantClient(text)) text = '';
       } catch {
         text = '';
       }
       if (!text) {
         const npc = NPC_DEFS.find((n) => `npc:${n.id}` === authorKey);
-        const lang = author.lang ?? 'zh-Hans';
         // v7：兜底也要看帖作答——求推荐帖 → 推荐/同求/避雷池；主题帖 → 主题池；
-        // 池子尽/外语 → 原通用兜底（不再一律万金油「蹲一个后续」）
+        // v9：语言跟随帖子（中文帖人人中文，外语网友带口癖点缀）
+        const commenterLang = author.lang ?? 'zh-Hans';
+        const lang = commentLangFor(postLang, commenterLang);
         const used = new Set<string>();
-        const smart =
-          lang === 'zh-Hans'
-            ? pickTopicComment(`${parentContent} ${postContent}`, 'zh-Hans', used, target.community)
-            : pickGenericComment(lang, used);
+        let smart =
+          pickTopicComment(`${parentContent} ${postContent}`, lang, used, target.community) ??
+          pickGenericComment(lang, used, `${parentContent} ${postContent}`);
+        if (smart && lang === 'zh-Hans' && postLang === 'zh-Hans') {
+          smart = maybeForeignFlavor(smart, commenterLang);
+        }
         if (smart) {
           text = smart;
         } else {

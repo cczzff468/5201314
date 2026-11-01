@@ -85,6 +85,69 @@ function stripReplyPrefix(raw: string): string {
   return t;
 }
 
+// ---------------- 评论强校验（v9：严禁串台/整句外语/乱码） ----------------
+
+/** 繁体独有常用字（简体文本里不该成片出现） */
+const TRAD_ONLY_CHARS =
+  '們個這時過還發對說聽後來車馬門問長無書龍鳥語體點關應讓證邊沒壞愛國會間東兩單買賣辦動務名條當處帶幫廣歸開從優傷兒內準決覺觀視親計訊訪話該詳誤課調誰謝負財貢風飛飯飲館駐騙體魚島嶺歡樂進遠違連遲適選遜鄰醫針錢鐵銀錯鍵鎮閃閉閑閱隊階際隨隱難電霧頁頂項順頗領頻題顏願香講種樣認談論請諸諾讀讚絲喪髮為麼裡幾別嗎寫實續識編劇簡體雙嚇';
+/** 对应的简体独有字（真简体评论必然带这些；整句繁体 = 繁体字成片且简体字几乎为零） */
+const SIMP_ONLY_CHARS =
+  '们这说过发对听后来车马门问长无书龙鸟语体点关应让证边没坏爱国会间东两单买卖办动务名条当处带帮广归开从优伤儿内准决觉观视亲计讯访话该详误课调谁谢负财贡风飞饭饮馆驻骗体鱼岛屿欢乐进远违连迟适选逊邻医针钱铁银错键镇闪闭闲阅队阶际随隐难电雾页顶项顺颇领频题颜愿香讲种样认谈论请读赞丝丧发为么里几别吗写实续识编剧简体双吓';
+
+/** 脚本字符统计：汉字总数/拉丁字母/假名/谚文/繁体独有字/简体独有字 */
+function scriptStats(text: string): { zh: number; latin: number; kana: number; hangul: number; trad: number; simp: number } {
+  let zh = 0;
+  let latin = 0;
+  let kana = 0;
+  let hangul = 0;
+  let trad = 0;
+  let simp = 0;
+  for (const ch of text) {
+    const c = ch.codePointAt(0) ?? 0;
+    if (c >= 0x4e00 && c <= 0x9fff) {
+      zh += 1;
+      if (TRAD_ONLY_CHARS.includes(ch)) trad += 1;
+      else if (SIMP_ONLY_CHARS.includes(ch)) simp += 1;
+    } else if ((c >= 0x41 && c <= 0x5a) || (c >= 0x61 && c <= 0x7a)) latin += 1;
+    else if ((c >= 0x3040 && c <= 0x30ff) || c === 0x30fc) kana += 1; // 平/片假名+长音符
+    else if ((c >= 0xac00 && c <= 0xd7a3) || (c >= 0x3130 && c <= 0x318f)) {
+      // 谚文音节按 1 计、兼容字母（ㄹㅇㅋㅋ）按 0.5 计（口癖级点缀放行）
+      hangul += c >= 0xac00 ? 1 : 0.5;
+    }
+  }
+  return { zh, latin, kana, hangul, trad, simp };
+}
+
+/** 中文帖评论语言校验：整句外语（英/日/韩/繁）→ 违规。
+ *  允许「1-3 个外文字符夹杂」（www / ㅋㅋ / 草 / 太real了 这类真实点缀）。 */
+function violatesCommentLang(text: string, postLang: string): boolean {
+  if (postLang === 'zh-Hans') {
+    const s = scriptStats(text);
+    if (s.kana >= 4) return true; // 整句日语
+    if (s.hangul >= 4) return true; // 整句韩语
+    if (s.latin >= 10 && s.latin > s.zh * 0.8) return true; // 整句英语
+    if (s.zh === 0 && s.latin + s.kana + s.hangul + s.trad >= 5) return true; // 完全无中文
+    if (s.trad >= 5) return true; // 繁体字成片
+    if (s.trad >= 3 && s.simp <= 1) return true; // 整句繁体（繁体独有字≥3且简体独有字几乎没有）
+  }
+  return false;
+}
+
+/** 评论正文清洗（v9 乱码修复）：零宽/控制字符/替换符、拼接符连串、
+ *  markdown 记号、emoji 一律清除；连续空白折叠。 */
+function sanitizeCommentText(raw: string): string {
+  let t = raw;
+  // 零宽字符、控制字符（保留 \n）、Unicode 替换符（乱码直接产物）
+  t = t.replace(/[\u200B-\u200D\uFEFF\u2028\u2029]/g, '').replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '').replace(/\uFFFD/g, '');
+  // 拼接分隔符连串（≥2 个）→ 空格
+  t = t.replace(/[~～|｜·•※]{2,}/g, ' ');
+  // markdown 记号
+  t = t.replace(/```+/g, '').replace(/[*_`#>]{1,3}(?=\s|$)/g, '');
+  // emoji（App 全线禁 emoji；评论区出现即清洗）
+  t = t.replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE00}-\u{FE0F}\u{1F1E6}-\u{1F1FF}\u{2B00}-\u{2BFF}]/gu, '');
+  return t.replace(/[ \t]{2,}/g, ' ').trim();
+}
+
 /** 北京时间行（与 moments/generate 同口径） */
 function bjTimeLine(): string {
   const d = new Date(Date.now() + 8 * 3600_000);
@@ -387,7 +450,10 @@ export async function POST(req: Request) {
     }
 
     if (kind === 'comments' || kind === 'subreplies') {
-      const post = body.post as { authorName?: string; content?: string; mediaDesc?: string } | undefined;
+      const post = body.post as { authorName?: string; content?: string; mediaDesc?: string; lang?: string } | undefined;
+      // 帖子语言（v9：评论语言必须跟随帖子语言——中文帖全中文，外语帖才允许外语评论）
+      const postLangRaw = typeof post?.lang === 'string' ? post.lang : '';
+      const postLang = LANG_LABELS[postLangRaw] ? postLangRaw : 'zh-Hans';
       const personas = Array.isArray(body.personas)
         ? (body.personas as Record<string, unknown>[])
             .slice(0, 30)
@@ -395,9 +461,6 @@ export async function POST(req: Request) {
               name: typeof p.name === 'string' ? p.name.slice(0, 24) : '网友',
               persona: typeof p.persona === 'string' ? p.persona.slice(0, 200) : '普通论坛网友',
               lang: typeof p.lang === 'string' ? p.lang : 'zh-Hans',
-              recent: Array.isArray(p.recent)
-                ? (p.recent as unknown[]).filter((x): x is string => typeof x === 'string').slice(0, 3)
-                : [],
             }))
         : [];
       if (!post || !personas.length) return NextResponse.json({ error: '参数为空' }, { status: 400 });
@@ -407,53 +470,65 @@ export async function POST(req: Request) {
         const expect = personas.length;
         const spec = personas
           .map((p, i) => {
-            const mem = p.recent.length
-              ? `；TA最近在别的帖子里说过：${p.recent.map((r) => `「${r.slice(0, 30)}」`).join('、')}——如果对得上这个帖子的事，可以顺嘴接一句（你看，我早就说过了吧）`
-              : '';
-            return `${i + 1}. ${p.name}（人设：${p.persona}；评论语言：${langLabel(p.lang)}${mem}）`;
+            // v9：语言铁律——评论语言跟随帖子，不跟随评论者母语；
+            // 外语网友也用帖子语言评论，最多带 1-3 个母语字符口癖
+            const langNote =
+              postLang === 'zh-Hans'
+                ? p.lang !== 'zh-Hans'
+                  ? `；母语${langLabel(p.lang)}，但评论必须用简体中文，最多带1-3个母语字符的口癖`
+                  : ''
+                : `；评论语言跟随帖子用${langLabel(postLang)}或简体中文`;
+            return `${i + 1}. ${p.name}（人设：${p.persona}${langNote}）`;
           })
           .join('\n');
         const messages: LLMMessage[] = [
           {
             role: 'system',
             content:
-              '你在为一个国际化中文论坛（X/Twitter 风格广场）的帖子批量生成网友评论。' +
-              '【最重要】每条评论必须回应帖子里讲的具体那件事——帖子说某顶流被拍到深夜同框，评论就聊这个同框；帖子说车油耗高想卖车，评论就聊这车。禁止答非所问的万金油。' +
+              '你在为一个中文论坛（X/Twitter 风格广场）的帖子批量生成网友评论。' +
+              '【最高优先级·严禁串台】每条评论必须 100% 围绕楼主帖子讲的那件具体的事：' +
+              '\n- 动笔前先在心里归纳「楼主这条帖子讲的是什么」（如：熬夜看剧、某顶流塌房、油耗高想卖车、猫吐了、剧荒求推荐）；' +
+              '\n- 评论只能聊这件事本身和它的直接相关面——楼主熬夜看剧，评论只能围绕追剧/失眠/剧情/演员/大结局；楼主聊车油耗，评论只能围绕这车/油耗/养车成本；' +
+              '\n- 绝对禁止出现与帖子无关的任何话题：楼主聊看剧，绝不能出现试驾、吃饭、买衣服、游戏装备；楼主聊吃瓜，绝不能出现健身、考研、宠物；' +
+              '\n- 禁止不指向帖子具体内容的万金油空评（「说得好」「支持」「有道理」这类等于没说）。' +
+              '\n【语言铁律】评论语言严格跟随帖子语言：' +
+              `\n- 这是${langLabel(postLang)}帖子${postLang === 'zh-Hans' ? '：所有评论必须以简体中文为主体，最多偶尔夹杂 1-3 个外文字符（www、ㅋㅋ、草、hhh 这种口癖级点缀），绝对禁止整句英语/日语/韩语/繁体中文的评论' : '：评论用该语言写，要像母语网友的网络口吻；也可以用简体中文'}；` +
+              '\n- 每位网友的母语只影响口癖和语气，不改变评论语言。' +
               '\n【看帖作答铁律】先读懂原帖在问什么/求什么，再开口：' +
-              '\n- 求推荐帖（求剧/求歌/求店/求攻略）：必须正面回答——要么真心推荐（说出具体名字+一句真实理由，如「去看XXX吧，三集一个案子不虐不烧脑」）、要么同求（「同求！也想要这种的」）、要么避雷（「别看XXX，开头甜后面刀」）。绝对禁止答非所问——人家求不烧脑不虐心的甜剧，你不能回「中间注水、结局烂尾」这种没头没尾的评价，更不能推荐相反的东西；' +
+              '\n- 求推荐帖（求剧/求歌/求店/求攻略）：必须正面回答——要么真心推荐（说出具体名字+一句真实理由）、要么同求、要么避雷（带名字）。绝对禁止答非所问；' +
               '\n- 求助/提问帖：必须给出具体建议或直接回答问题；' +
               '\n- 分享/吐槽帖：共鸣、补充细节、抬杠都可以，但必须围绕帖子那件事。' +
-              '\n【格式铁律】这是直接评论帖子的一级评论，不是回复某个人：绝对禁止以「@任何人」开头，绝对禁止带「回复」「回复 @某某：」字样（回复对象由系统自动标注，你写了就是画蛇添足）。' +
-              '\n评论区六种人（按人设自然落位，有好有坏、有捧有踩，必须各占一定比例）：' +
-              '\n- 共鸣党（顺着楼主发泄情绪）：「太懂了，我今天也是」「真的，谁懂啊！」「家人们谁懂，我也是」' +
-              '\n- 无脑杠精（为抬杠而抬杠）：「只有我一个人觉得这很无聊吗？」「自己没钱买在这酸什么？」「就这也好意思发出来？」' +
-              '\n- 课代表（整理信息/指出漏洞）：「课代表来了：博主说的是xx，别搞混了。」「省流：就是那么回事」' +
-              '\n- 理中客（看似客观实则让人烦）：「大家理智吃瓜，等官方通报吧。」「不知道全貌不予评价」' +
-              '\n- 乐子人（纯发疯凑热闹）：「打起来打起来！」「前排售卖瓜子花生矿泉水」「搬好小板凳了」' +
-              '\n- 地域/身份暴击（结合IP属地或身份说话）：「沪爷就是有钱啊」「这在我们广东叫白切鸡」「北方人直接看傻」' +
+              '\n【格式铁律】这是直接评论帖子的一级评论，不是回复某个人：绝对禁止以「@任何人」开头，绝对禁止带「回复」「回复 @某某：」字样（回复对象由系统自动标注）。' +
+              '\n评论区六种人（按人设自然落位，有好有坏、有捧有踩）：' +
+              '\n- 共鸣党（顺着楼主聊帖子里的事）：「我也熬夜追这部，黑眼圈都出来了」「谁懂，这剧后劲太大了」' +
+              '\n- 无脑杠精（围绕帖子抬杠）：「就这也值得熬夜？」「楼主自己作息问题别怪剧」' +
+              '\n- 课代表（整理帖子里的事）：「省流：楼主说的是xx，别搞混了」' +
+              '\n- 理中客（看似客观）：「等后续吧，别急着下结论」' +
+              '\n- 乐子人（围着帖子的事起哄）：「前排围观楼主的黑眼圈」' +
+              '\n- 同好（晒同类经历）：「我上周也通宵刷完，根本停不下来」' +
               '\n【禁用词库——出现即废稿】：' +
               '\n-「总的来说」「不可否认」「确实如此」「在这个事件中」「我们应该」绝对禁止；' +
               '\n-「首先、其次、最后」的结构化长篇大论绝对禁止——网友只发一两句话，最多不超过三句；' +
-              '\n-「支持」「说得对」「有道理」「深有体会」「说得真好」「感谢分享」「学到了」这类客套话绝对禁止——真实评论区没人这么说话。' +
-              '\n【网感文字（大量使用）】：' +
-              '\n- 梗与缩写：绝绝子（反讽用）、乐、笑死、一整个无语住、破防了、你小子、xswl、u1s1、真下头、蚌埠住了；' +
-              '\n- 允许极端情绪词（符合社区规范、不真辱骂）：卧槽、妈呀、离谱、恶心、救命；' +
-              '\n- 可以没头没尾、可以不用标点或全用感叹号/问号、可以有错别字。' +
-              '\n【对比参考——帖子：「这车油耗真受不了，想卖了。」' +
-              '\n- 好（真人味）：「这啥车啊避个雷。」「买的时候不看油耗吗？笑死。」「50包邮解君愁。」' +
-              '\n- 差（AI味，禁止）：「确实，汽车的油耗对日常开销有很大影响，建议您在购车时多了解相关信息。」】' +
-              '\n【人设一致性】每条严格符合该网友的人设口吻：给 TA 定了暴躁老哥，TA 的每条评论都得带点火气；定了乐子人，条条都在整活；定了饭圈女孩，满口磕到了/塌房/姐姐好美。' +
-              '\n硬性要求：每条评论一两句话为主、长短错落；每条严格用该网友指定的「评论语言」写，地道得像母语者（日语像 それな/草、韩语像 ㄹㅇㅋㅋ、繁体像港台、英语是真网络英语）；多数简体中文，其他语言自然穿插；带「最近说过」记忆且与帖子相关时顺嘴接上（表现出连贯记忆）；每条一行，行数与网友数一致，第 N 行对应第 N 位。禁止 emoji 和任何格式标记。',
+              '\n-「支持」「说得对」「有道理」「深有体会」「说得真好」「感谢分享」「学到了」这类客套话绝对禁止。' +
+              '\n【网感文字（大量使用）】：乐、笑死、xswl、u1s1、真下头、蚌埠住了、破防了、你小子、一整个无语住；' +
+              '可以没头没尾、可以不用标点或全用感叹号/问号、可以有错别字。' +
+              '\n【对比参考——帖子：「熬夜刷完这部剧，结局意难平，现在毫无睡意。」' +
+              '\n- 好（贴题+真人味）：「哪集啊，我看到18集不敢往下」「凌晨四点的我也是，明早八点班」「男主最后那句台词我循环了十遍」「别看了我烂尾警告……不剧透了」' +
+              '\n- 差（串台，绝对禁止）：「今天去试驾了新出的SUV」「刚点了份外卖真香」「这件衣服买贵了吗家人们」】' +
+              '\n【人设一致性】每条严格符合该网友的人设口吻（暴躁老哥带火气、乐子人在整活、饭圈女孩满口磕到了）。' +
+              '\n硬性要求：每条评论一两句话为主、长短错落；每条一行，行数与网友数一致，第 N 行对应第 N 位。禁止 emoji 和任何格式标记。',
           },
           {
             role: 'user',
-            content: `论坛里有这么一条帖子——\n${base}\n\n请以这 ${expect} 位网友的口吻各写一条一级评论（都是直接评论帖子本身，不是回复别人；输出 ${expect} 行）：\n${spec}${avoidLine}\n${bjTimeLine()}`,
+            content: `论坛里有这么一条${langLabel(postLang)}帖子（评论必须100%围绕它讲的事，语言跟随帖子）——\n${base}\n\n请以这 ${expect} 位网友的口吻各写一条一级评论（都是直接评论帖子本身，不是回复别人；输出 ${expect} 行）：\n${spec}${avoidLine}\n${bjTimeLine()}`,
           },
         ];
         const raw = (await completeWithFallback(config, messages)).text;
         const list = (await batchWithRetry(config, messages, raw, expect, 1000))
-          .map(stripReplyPrefix)
-          .filter((s) => s.length >= 2);
+          .map((s) => sanitizeCommentText(stripReplyPrefix(s)))
+          .filter((s) => s.length >= 2)
+          // v9 强校验：中文帖出现整句外语 = 串台级错误 → 作废（客户端中文池兜底）
+          .filter((s) => !violatesCommentLang(s, postLang));
         return NextResponse.json({ items: list });
       }
 
@@ -470,22 +545,33 @@ export async function POST(req: Request) {
       if (!threads.length) return NextResponse.json({ error: 'threads 为空' }, { status: 400 });
       const expect = threads.length;
       const spec = threads
-        .map((h, i) => `${i + 1}. 评论（${h.authorName} 说：「${h.content}」）→ 由 ${personas[i % personas.length].name} 回复（人设：${personas[i % personas.length].persona}；语言：${langLabel(personas[i % personas.length].lang)}）`)
+        .map((h, i) => {
+          const p = personas[i % personas.length];
+          const langNote =
+            postLang === 'zh-Hans'
+              ? p.lang !== 'zh-Hans'
+                ? `；母语${langLabel(p.lang)}，但回复必须用简体中文，最多带1-3个母语字符的口癖`
+                : ''
+              : `；回复语言跟随帖子用${langLabel(postLang)}或简体中文`;
+          return `${i + 1}. 评论（${h.authorName} 说：「${h.content}」）→ 由 ${p.name} 回复（人设：${p.persona}${langNote}）`;
+        })
         .join('\n');
       const messages: LLMMessage[] = [
         {
           role: 'system',
           content:
-            '你在为一个国际化中文论坛（X/Twitter 风格广场）的帖子评论区生成楼中楼回复（回复评论区里某条评论）。' +
-            '【格式铁律】直接写回复正文本身：绝对禁止以「@任何人」开头，绝对禁止带「回复」「回复 @某某：」字样——系统会根据真实回复关系自动在前面标注「回复 @被回复者：」，你自己写@会和系统标注重复甚至错位到别人头上。' +
-            '【楼中楼铁律】每条回复必须针对对应那条评论里说的话——他说得对就附和补充，说得不对比回去，他问了就回答他；禁止无视对方自说自话，禁止绕开对方硬聊主帖。' +
+            '你在为一个中文论坛（X/Twitter 风格广场）的帖子评论区生成楼中楼回复（回复评论区里某条评论）。' +
+            '【最高优先级·严禁串台】每条回复必须 100% 围绕「被回复的那条评论」和「主帖讲的那件事」：' +
+            '\n- 他说得对就附和补充，说得不对比回去，他问了就回答他；禁止无视对方自说自话，禁止绕开对方硬聊别的；' +
+            '\n- 绝对禁止引入主帖之外的新话题（楼主聊剧，回复里不能冒出试驾/吃饭/买衣服）。' +
+            `\n【语言铁律】${postLang === 'zh-Hans' ? '这是中文帖：所有楼中楼必须以简体中文为主体，最多偶尔夹杂 1-3 个外文字符（www、ㅋㅋ、草），绝对禁止整句英语/日语/韩语/繁体' : '评论语言跟随帖子语言，也可用简体中文'}。` +
+            '\n【格式铁律】直接写回复正文本身：绝对禁止以「@任何人」开头，绝对禁止带「回复」「回复 @某某：」字样（系统会自动标注回复对象）。' +
             '\n【看帖作答】对方在求推荐/求助时，直接给出具体答案（名字+理由/具体做法），不能答非所问。' +
             '\n【禁用词库】「总的来说」「不可否认」「确实如此」「在这个事件中」「我们应该」「首先其次最后」「支持」「说得对」「有道理」绝对禁止；' +
             '一两句话为主，禁止长篇大论。' +
             '\n【网感】笑死、乐、破防了、你小子、一整个无语住、绝绝子（反讽）、卧槽、妈呀、离谱；可以没头没尾、可以不用标点、可以有错别字。' +
             '\n【人设一致性】严格符合该网友的人设口吻（暴躁老哥条条带火气，乐子人条条在整活）。' +
-            '每条回复严格用指定网友的「语言」写，地道得像母语者。' +
-            '几个字的短接到几十字的展开都行，长短错落。禁止 emoji 和任何格式标记。每条一行，行数与评论数一致，第 N 行对应第 N 条评论的回复。',
+            '每条一行，行数与评论数一致，第 N 行对应第 N 条评论的回复。禁止 emoji 和任何格式标记。',
         },
         {
           role: 'user',
@@ -494,8 +580,10 @@ export async function POST(req: Request) {
       ];
       const raw = (await completeWithFallback(config, messages)).text;
       const list = (await batchWithRetry(config, messages, raw, expect, 600))
-        .map(stripReplyPrefix)
-        .filter((s) => s.length >= 2);
+        .map((s) => sanitizeCommentText(stripReplyPrefix(s)))
+        .filter((s) => s.length >= 2)
+        // v9 强校验：中文帖整句外语楼中楼作废（客户端中文池兜底）
+        .filter((s) => !violatesCommentLang(s, postLang));
       return NextResponse.json({ items: list });
     }
 
@@ -509,6 +597,9 @@ export async function POST(req: Request) {
         const parentLine = p?.content ? `${p.authorName ?? '有人'}对你说：「${String(p.content).slice(0, 300)}」` : '一条帖子';
         // 多轮上下文：所在主帖 + 评论串最近几轮对话（用户在评论区与 AI 无限来回）
         const postContent = typeof body.postContent === 'string' ? body.postContent.slice(0, 400) : '';
+        // v9：主帖语言——中文帖的回复也必须以中文为主体（外语网友最多带 1-3 个母语字符口癖）
+        const postLangRaw = typeof body.postLang === 'string' ? body.postLang : '';
+        const postLang = LANG_LABELS[postLangRaw] ? postLangRaw : 'zh-Hans';
         const history = Array.isArray(body.history)
           ? (body.history as Record<string, unknown>[])
               .slice(-8)
@@ -522,13 +613,20 @@ export async function POST(req: Request) {
         ]
           .filter(Boolean)
           .join('\n');
+        const langLine =
+          postLang === 'zh-Hans'
+            ? myLang !== 'zh-Hans'
+              ? `你母语是${langLabel(myLang)}，但这条帖子是中文的：回复必须以简体中文为主体，最多带 1-3 个母语字符的口癖（www、ㅋㅋ 这类），绝对不要整句外语。`
+              : '用简体中文回复。'
+            : `这条帖子是${langLabel(postLang)}的：回复可以用${langLabel(postLang)}或简体中文，像母语网友的口吻。`;
         const raw = (await completeWithFallback(config, [
           {
             role: 'system',
             content:
-              `你是国际化中文论坛（X/Twitter 风格广场）的网友「${name}」。人设：${persona}。` +
-              `你平时发帖惯用${langLabel(myLang)}，这次回复也用${langLabel(myLang)}写，要地道得像母语者。` +
-              '回复必须贴合对方说的内容、帖子语境和你们之前的对话，可以带一点自己的态度，可以接梗、反问、分享经历、反驳。' +
+              `你是中文论坛（X/Twitter 风格广场）的网友「${name}」。人设：${persona}。` +
+              `${langLine}` +
+              '【严禁串台】回复必须 100% 贴合对方说的内容、帖子语境和你们之前的对话——对方聊剧就聊剧，对方问什么就答什么；绝对禁止把与帖子无关的新话题（试驾/吃饭/买衣服之类）带进回复。' +
+              '可以带一点自己的态度，可以接梗、反问、分享同类经历、反驳。' +
               '【看帖作答】对方问了什么就答什么：求推荐就给出具体推荐（说出名字和理由），求助就给具体建议，绝不能答非所问。' +
               '【格式铁律】直接写回复正文：绝对禁止以「@任何人」开头，绝对禁止带「回复 @某某：」字样（系统会自动标注回复对象）。' +
               '【禁用】「总的来说」「不可否认」「确实如此」「在这个事件中」「我们应该」「首先其次最后」这类 AI 套话；「支持」「说得对」「有道理」这类客套话也禁止；一两句话为主。' +
@@ -537,7 +635,12 @@ export async function POST(req: Request) {
           },
           { role: 'user', content: `${ctx ? ctx + '\n\n' : ''}${parentLine}\n请以「${name}」的口吻回复（直接写正文，不要带@或「回复」前缀）。${bjTimeLine()}` },
         ])).text;
-        return NextResponse.json({ text: cleanText(stripReplyPrefix(raw), 1000) });
+        const text = sanitizeCommentText(stripReplyPrefix(raw));
+        // v9 强校验：中文帖整句外语回复 → 返回空（客户端中文池兜底）
+        if (text.length >= 2 && !violatesCommentLang(text, postLang)) {
+          return NextResponse.json({ text: cleanText(text, 1000) });
+        }
+        return NextResponse.json({ text: '' });
       }
       const history = Array.isArray(body.history)
         ? (body.history as Record<string, unknown>[])
