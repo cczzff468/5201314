@@ -53,6 +53,7 @@ import {
 } from './core';
 import { describeImagesAuto } from '@/lib/vision-client';
 import { renderTextImage } from './textimg';
+import { commentAnchored, dominantDomainId, domainScores, topicAnchorOf } from './topic';
 
 // ---------------- pending 队列（跨刷新持久） ----------------
 
@@ -443,12 +444,16 @@ function seedCommentsFor(post: ForumPost, out: ForumPost[]): void {
     const commenterLang = resolveAuthor(keys[i]).lang ?? 'zh-Hans';
     // v9：中文帖 → 人人中文（外语网友偶尔加母语口癖点缀）；外语帖 → 跟帖子语言
     const lang = commentLangFor(postLang, commenterLang);
-    const base =
-      pickTopicComment(post.content, lang, usedCt, post.community) ??
-      pickGenericComment(lang, usedCt, post.content) ??
-      pickGenericComment('zh-Hans', usedCt, post.content) ??
-      '哈哈哈哈';
-    texts.push(lang === 'zh-Hans' && postLang === 'zh-Hans' ? maybeForeignFlavor(base, commenterLang) : base);
+    // v14.2：口癖只加在池子评论上（加在兜底上会破坏去重键→重复刷屏）；
+    // 兜底模板/变体全部用尽 → 跳过这条（宁可少一条也不重复）
+    const pooled = pickTopicComment(post.content, lang, usedCt) ?? pickGenericComment(lang, usedCt, post.content);
+    let base: string | null = pooled;
+    if (base && lang === 'zh-Hans' && postLang === 'zh-Hans') {
+      base = maybeForeignFlavor(base, commenterLang);
+      usedCt.add(base.slice(0, 16));
+    }
+    if (!base) base = followupComment(post.content, usedCt);
+    if (base) texts.push(base);
   }
   // 时间：在（发帖后, 现在）窗口内自然铺开；帖子很新时评论挤在最近几十秒（爆款即视感），
   // 老帖则从发帖后一直散到现在——绝不再出现全部同一毫秒的假时间戳
@@ -481,12 +486,15 @@ function seedCommentsFor(post: ForumPost, out: ForumPost[]): void {
     const byAuthor = post.authorKey !== 'user' && Math.random() < 0.35 ? post.authorKey : pickCommenters(1, postLang, post.content, post.authorKey, ...keys)[0];
     const subCommenterLang = resolveAuthor(byAuthor).lang ?? 'zh-Hans';
     const subLang = commentLangFor(postLang, subCommenterLang);
-    const rawSub =
-      pickTopicComment(`${c.content} ${post.content}`, subLang, usedSub, post.community) ??
-      pickGenericComment(subLang, usedSub, `${c.content} ${post.content}`) ??
-      pickGenericComment('zh-Hans', usedSub, `${c.content} ${post.content}`) ??
-      '哈哈哈哈哈';
-    const text = subLang === 'zh-Hans' && postLang === 'zh-Hans' ? maybeForeignFlavor(rawSub, subCommenterLang) : rawSub;
+    // v14.2：口癖只加在池子评论上（加在兜底上会破坏去重键）；兜底用尽 → 跳过这条楼中楼
+    const pooled = pickTopicComment(`${c.content} ${post.content}`, subLang, usedSub) ?? pickGenericComment(subLang, usedSub, `${c.content} ${post.content}`);
+    let text: string | null = pooled;
+    if (text && subLang === 'zh-Hans' && postLang === 'zh-Hans') {
+      text = maybeForeignFlavor(text, subCommenterLang);
+      usedSub.add(text.slice(0, 16));
+    }
+    if (!text) text = followupComment(post.content, usedSub);
+    if (!text) continue;
     const subAt = Math.min(Date.now() - 30_000, c.createdAt + (3 + Math.random() * 40) * 60_000);
     const sub = basePost(
       byAuthor,
@@ -688,145 +696,100 @@ async function llmPolish(): Promise<void> {
 
 let feedGenerating = false;
 
-/** 通用评论池（LLM 失败时的兜底扩充：与 NPC 池合计保证任何帖子都能补满 10~30 条不重样评论；
- *  去重只在本帖内——不同帖子评论区出现相似短评很正常）。
- *  用户要求评论也可多语言（英语/韩语/日语/繁体）：外语短评由外语网友发出，
- *  兜底时按评论者语言匹配对应语言的池子。 */
+/** v14 通用池彻底重做：中文万能附和（「太真实了」「同感同感」「说得太对」）
+ *  全部删除——中文评论一律走主题池（强锚定）→ 追问式兜底（带话题词），
+ *  绝不再出现水军式空评。这里只留外语池（外语帖子评论区用，外语网友
+ *  母语口吻；纯附和型外语废话同样已清掉）。 */
 const GENERIC_COMMENTS: { text: string; lang: string }[] = [
-  { text: '哈哈哈哈太真实了', lang: 'zh-Hans' },
-  { text: '这条必须顶上去，说得太对了', lang: 'zh-Hans' },
-  { text: '同感同感，深有体会', lang: 'zh-Hans' },
-  { text: '前排围观，楼主说得好', lang: 'zh-Hans' },
-  { text: '看完沉默了，想想还真是这样', lang: 'zh-Hans' },
-  { text: '每天刷论坛就为了等这种帖子', lang: 'zh-Hans' },
-  { text: '理性讨论，这条我站楼主', lang: 'zh-Hans' },
-  { text: '泪目了，突然想家了', lang: 'zh-Hans' },
-  { text: '有点东西，已经收藏了', lang: 'zh-Hans' },
-  { text: '这波总结到位，一个字都没多说', lang: 'zh-Hans' },
-  { text: '蹲一个后续，别断更啊', lang: 'zh-Hans' },
-  { text: '评论区比帖子还精彩，哈哈', lang: 'zh-Hans' },
-  { text: '楼主是懂生活的', lang: 'zh-Hans' },
-  { text: '说实话，看饿了', lang: 'zh-Hans' },
-  { text: '半夜看到这条，直接破防', lang: 'zh-Hans' },
-  { text: '人间清醒，就是这么回事', lang: 'zh-Hans' },
-  { text: '这就是生活啊，平平常常的才是真', lang: 'zh-Hans' },
-  { text: '太治愈了，谢谢分享', lang: 'zh-Hans' },
-  { text: '有用，马克一下回头细看', lang: 'zh-Hans' },
-  { text: '好家伙，直接说进心坎里了', lang: 'zh-Hans' },
-  { text: '有点意思，已关注', lang: 'zh-Hans' },
-  { text: '笑死，段子手果然在民间', lang: 'zh-Hans' },
-  { text: '支持支持，让更多人看到', lang: 'zh-Hans' },
-  { text: '路过留个爪，明天再来看', lang: 'zh-Hans' },
-  { text: '这就是普通人的浪漫吧', lang: 'zh-Hans' },
-  { text: '确实，没毛病', lang: 'zh-Hans' },
-  { text: '看得出来很用心，赞一个', lang: 'zh-Hans' },
-  { text: '学到了学到了，受教', lang: 'zh-Hans' },
-  { text: '突然被这句话安慰到了', lang: 'zh-Hans' },
-  { text: '已转给我朋友看，她说太像了', lang: 'zh-Hans' },
-  { text: '一整个共鸣住了', lang: 'zh-Hans' },
-  { text: '楼主文笔可以啊，多写点', lang: 'zh-Hans' },
-  { text: '认真看完，值得细品', lang: 'zh-Hans' },
-  { text: '这么好的帖子不能沉', lang: 'zh-Hans' },
-  { text: '是本人了，别念了别念了', lang: 'zh-Hans' },
-  { text: '哈哈哈评论区都是人才', lang: 'zh-Hans' },
-  { text: '说出了我不敢说的', lang: 'zh-Hans' },
-  { text: '这个观点我保留，但尊重', lang: 'zh-Hans' },
-  { text: '细想还真是这个理', lang: 'zh-Hans' },
-  { text: '先赞后看，习惯了', lang: 'zh-Hans' },
-  { text: '前排吃瓜，瓜子已备好', lang: 'zh-Hans' },
-  { text: '这瓜太大了，先马后看', lang: 'zh-Hans' },
-  { text: '车主路过，确实是这样', lang: 'zh-Hans' },
-  { text: '这剧我也在追，上头了', lang: 'zh-Hans' },
-  { text: '反转了反转了，快看最新', lang: 'zh-Hans' },
-  { text: '让子弹再飞一会儿', lang: 'zh-Hans' },
-  { text: '课代表什么时候来总结', lang: 'zh-Hans' },
-  { text: '追星女孩路过，理智看待', lang: 'zh-Hans' },
-  { text: '这瓜保熟吗', lang: 'zh-Hans' },
-  { text: '老司机看不下去了，说两句', lang: 'zh-Hans' },
-  { text: '省流：就是那么回事', lang: 'zh-Hans' },
-  { text: '已经开始二刷了，别拦我', lang: 'zh-Hans' },
-  { text: '这车我也试驾过，感觉还行', lang: 'zh-Hans' },
-  { text: '热搜挂一整天了，看疲劳了', lang: 'zh-Hans' },
-  { text: '天哪这也太好磕了', lang: 'zh-Hans' },
-  { text: '姐妹你是我的互联网嘴替', lang: 'zh-Hans' },
   // 繁体中文（港台网友）
-  { text: '笑死，超真實', lang: 'zh-Hant' },
-  { text: '太懂了吧，完全講中我', lang: 'zh-Hant' },
-  { text: '蹲後續，别斷更', lang: 'zh-Hant' },
+  { text: '蹲後續，別斷更', lang: 'zh-Hant' },
   { text: '這瓜也太大了，先吃為敬', lang: 'zh-Hant' },
-  { text: '台北路過，推一個', lang: 'zh-Hant' },
-  { text: '真的假的啦，長知識了', lang: 'zh-Hant' },
   { text: '編劇出來面對！', lang: 'zh-Hant' },
   { text: '這部我也在看，超上頭', lang: 'zh-Hant' },
+  { text: '台北路過，推一個', lang: 'zh-Hant' },
+  { text: '真的假的啦，長知識了', lang: 'zh-Hant' },
+  { text: '這結局我不能接受，重寫', lang: 'zh-Hant' },
+  { text: '先別站隊，讓子彈飛一會兒', lang: 'zh-Hant' },
   // 英语
-  { text: 'omg so true', lang: 'en' },
-  { text: 'this is so real lol', lang: 'en' },
-  { text: 'why is this so accurate', lang: 'en' },
   { text: 'nah this is wild', lang: 'en' },
-  { text: 'first time commenting but wow', lang: 'en' },
-  { text: 'the way I screamed reading this', lang: 'en' },
   { text: 'wait is this actually happening??', lang: 'en' },
-  { text: 'he is SO handsome in person, trust me', lang: 'en' },
+  { text: 'he is SO much more handsome in person, trust me', lang: 'en' },
   { text: 'the drama never ends here lol', lang: 'en' },
   { text: 'saving this thread for later', lang: 'en' },
+  { text: 'drop the location, need to see this myself', lang: 'en' },
+  { text: 'ok but WHO was it, do not leave us hanging', lang: 'en' },
   // 日语
-  { text: 'わかる', lang: 'ja' },
-  { text: 'それな', lang: 'ja' },
-  { text: '草', lang: 'ja' },
-  { text: '尊い', lang: 'ja' },
-  { text: 'あるあるすぎる', lang: 'ja' },
   { text: 'え、まじで？', lang: 'ja' },
   { text: 'この続きが気になる', lang: 'ja' },
   { text: '実際に会った人いるんだ、羨ましい', lang: 'ja' },
   { text: '情報ありがとう、保存しました', lang: 'ja' },
+  { text: 'そこ一番好きな場面なんだが', lang: 'ja' },
   // 韩语
-  { text: 'ㄹㅇㅋㅋ', lang: 'ko' },
   { text: '실화냐', lang: 'ko' },
-  { text: '인정', lang: 'ko' },
   { text: '정보 감사합니다', lang: 'ko' },
-  { text: '이거 진짜 웃기네', lang: 'ko' },
   { text: '후속 기다립니다', lang: 'ko' },
-  { text: '완전 공감', lang: 'ko' },
   { text: '직접 본 사람도 있다니 부럽다', lang: 'ko' },
 ];
 
-/** 按评论者语言从通用池抽取未用短评。
- *  v9 语言铁律：只出该语言的池子，池尽落中文池（外语池尽 → 中文评论，
- *  绝不从全语言混合池抽——旧逻辑 20% 概率把整句日/韩/英语漏进中文帖）。
- *  v9 领域守卫：带强领域词的通用短评（车/剧/瓜/追星…）只出现在对得上的帖子下，
- *  杜绝「追星女孩路过」出现在车帖、「这剧我也在追」出现在吃瓜帖的轻度串台。 */
-const GENERIC_DOMAIN_GUARDS: { has: RegExp; need: RegExp }[] = [
-  { has: /剧|二刷|倍速|烂尾|编剧|男主|女主|影院|片单/, need: /剧|影|追|看|综艺|烂尾|编剧|男主|女主|影院|倍速/ },
-  { has: /车|试驾|油耗|司机|手动挡|提车|4S|赛道|加塞/, need: /车|驾|油|堵|胎|提车|赛道|加塞|本|变道/ },
-  { has: /瓜|热搜|反转|塌|爆料|辟谣|同框|拍到/, need: /瓜|热搜|塌|反转|爆料|辟谣|拍到|明星|顶流|恋情|同框|吃瓜/ },
-  { has: /追星|粉丝|爱豆|应援|本命|演唱会/, need: /星|粉|爱豆|偶像|塌|瓜|演唱会|应援|本命|追星/ },
-  { has: /猫|狗|宠物|铲屎|主子/, need: /猫|狗|宠物|铲屎|主子|毛孩子/ },
-  { has: /外卖|火锅|奶茶|宵夜|下饭|探店|美食|看饿|馋/, need: /吃|喝|饿|馋|外卖|火锅|奶茶|宵夜|美食|店|饭|菜|厨/ },
-  { has: /班|老板|工资|加班|通勤|辞职|摸鱼|打工|同事|周报/, need: /班|老板|工资|加班|通勤|辞职|摸鱼|打工|同事|工作|月薪|上班/ },
+/** 追问式兜底（终极兜底，v14）：围绕帖子的事件要后续/要细节/要图，
+ *  话题词由 topicAnchorOf 从原帖提取填充 → 天然锚定核心话题，
+ *  是「追问」不是「附和」——楼主聊什么就追着什么问，绝不串台。
+ *  模板耗尽时用变体后缀，全部用尽返回空串（调用方跳过，绝不重复刷屏）。 */
+const FOLLOWUP_COMMENT_TEMPLATES: string[] = [
+  '{t}这事蹲一个后续，别断更啊',
+  '{t}？？真的假的，细说',
+  '就{t}这事，我能聊十块钱的',
+  '{t}后面怎么样了，楼主别睡',
+  '无图无真相，{t}求个截图',
+  '{t}……先收藏，回头来考古',
+  '不是，{t}就这？后续呢',
+  '{t}这事我关注了，等一个下文',
+  '{t}什么时候的事？我怎么现在才刷到',
+  '楼主把{t}的完整时间线捋一捋，我拿小板凳等着',
+  '{t}有后续记得@我，我先关注了',
+  '蹲{t}的下文，今晚不睡等更新',
+  '{t}这事我得转发给我姐妹一起蹲',
+  '楼主更新{t}的时候麻烦开个追更',
 ];
 
-/** 通用短评与帖子内容领域是否匹配（候选带领域词而帖子完全不沾边 → false） */
-function genericFitsPost(cand: string, postContent: string): boolean {
-  for (const g of GENERIC_DOMAIN_GUARDS) {
-    if (g.has.test(cand) && !g.need.test(postContent)) return false;
-  }
-  return true;
-}
+/** 模板耗尽后的变体后缀（保证同帖绝不出现一模一样的兜底评论） */
+const FOLLOWUP_SUFFIXES: string[] = ['，蹲蹲蹲', '，坐等下文', '，在线蹲', '，瓜子已备好', '，小板凳已就位', '，别让楼主跑了'];
 
-function pickGenericComment(lang: string, usedCt: Set<string>, postContent = ''): string | null {
-  // 领域守卫后的候选池（守卫只在给了帖子内容时生效）
-  const langPool = GENERIC_COMMENTS.filter((c) => c.lang === lang && (!postContent || genericFitsPost(c.text, postContent)));
-  const zhPool = GENERIC_COMMENTS.filter((c) => c.lang === 'zh-Hans' && (!postContent || genericFitsPost(c.text, postContent)));
-  // v9：严格语言池——本语言池（守卫后）→ 中文池（守卫后）→ 无守卫全池（保底不空）
-  const usePool = langPool.length ? langPool : zhPool.length ? zhPool : GENERIC_COMMENTS.filter((c) => c.lang === lang).concat(GENERIC_COMMENTS.filter((c) => c.lang === 'zh-Hans'));
-  if (!usePool.length) return null;
-  for (let i = 0; i < 60; i++) {
-    const cand = usePool[Math.floor(Math.random() * usePool.length)].text;
-    const k = cand.slice(0, 16);
-    if (!usedCt.has(k)) {
-      usedCt.add(k);
+/** 渲染一条追问式兜底评论（{t} = 原帖话题锚点；本帖内去重；
+ *  模板+变体全部用尽 → 返回空串，调用方跳过这条） */
+function followupComment(postContent: string, used: Set<string>): string {
+  const t = topicAnchorOf(postContent);
+  for (let i = 0; i < 40; i++) {
+    const tpl = FOLLOWUP_COMMENT_TEMPLATES[Math.floor(Math.random() * FOLLOWUP_COMMENT_TEMPLATES.length)];
+    const cand = tpl.replaceAll('{t}', t);
+    if (!used.has(cand.slice(0, 16))) {
+      used.add(cand.slice(0, 16));
       return cand;
     }
+  }
+  for (const suf of FOLLOWUP_SUFFIXES) {
+    const cand = `${t}这事蹲一个后续${suf}`;
+    if (!used.has(cand.slice(0, 16))) {
+      used.add(cand.slice(0, 16));
+      return cand;
+    }
+  }
+  return ''; // 全部用尽：宁可少一条，也绝不重复刷屏
+}
+
+/** 按评论者语言从外语池抽取（v14：中文万能池已整池删除——中文评论一律
+ *  走主题池（强锚定）→ 追问式兜底；外语评论只服务外语帖子，
+ *  候选同样要过 commentAnchored 废话黑名单）。 */
+function pickGenericComment(lang: string, usedCt: Set<string>, postContent = ''): string | null {
+  if (lang === 'zh-Hans') return null; // 中文池已删除：中文走主题池 + 追问兜底
+  const pool = GENERIC_COMMENTS.filter((c) => c.lang === lang);
+  if (!pool.length) return null;
+  for (let i = 0; i < 40; i++) {
+    const cand = pool[Math.floor(Math.random() * pool.length)]?.text;
+    if (!cand || usedCt.has(cand.slice(0, 16))) continue;
+    if (postContent && !commentAnchored(cand, postContent)) continue;
+    usedCt.add(cand.slice(0, 16));
+    return cand;
   }
   return null;
 }
@@ -835,178 +798,301 @@ function pickGenericComment(lang: string, usedCt: Set<string>, postContent = '')
  *  LLM 按主题方向生成；兜底组合池同主题，保证无 LLM 也是对味内容 */
 export const FEED_TOPICS = ['明星八卦', '吃瓜现场', '影视综艺', '汽车圈', '娱乐热点', '今日吐槽'];
 
-// ---------------- 主题匹配评论池（评论必须对得上帖子内容） ----------------
+// ---------------- 主题匹配评论池（v14 领域计分制重写） ----------------
 
-/** 主题评论池：按帖子关键词命中主题，评论直接围绕该主题接话
- *  （用户要求：评论和发表的内容对不上是不行的；含杠精/课代表/跟风/吐槽党多角色）。
- *  {t} = 帖子命中的话题词（如「这瓜」「这车」「这剧」），渲染时替换。 */
-const TOPIC_COMMENT_POOLS: { re: RegExp; subject: string; comments: string[] }[] = [
+/** 主题评论池：与 topic.ts 的 15 个话题领域一一对应。
+ *  出场资格 = 帖子在该领域的得分（强词×2＋弱词×1）≥ 3（v14 串台修复：
+ *  旧版按版块硬塞评论池——吐槽版块的追剧帖被强插「老板画饼」类打工评论、
+ *  单个泛词（累/班/屏幕）误触打工池/数码池，全部废除，只认帖子内容本身；
+ *  单个强词的顺带提及【追剧帖里一句「工资不多」】也不放行）；
+ *  权重 = 得分²。所有候选渲染后还要过 commentAnchored 锚定校验
+ *  （呼应核心话题词 + AI 废话黑名单），不达标一律重抽。
+ *  {t} = 帖子话题锚点（话题标签 → 领域话题词），渲染时替换。 */
+interface TopicPool {
+  /** topic.ts 领域 id（词表/计分/呼应词共享） */
+  domain: string;
+  /** 领域兜底话题词（帖子无话题标签时 {t} 用它） */
+  subject: string;
+  comments: string[];
+}
+
+const TOPIC_COMMENT_POOLS: TopicPool[] = [
   {
-    re: /瓜|塌|恋情|官宣|热搜|爆料|同框|拍到|声明|辟谣|反转|吃瓜|出轨|分手|结婚|离婚|绯闻/i,
-    subject: '这瓜',
-    comments: [
-      '救命这瓜也太大了吧？？？我吃到现在都没吃明白，有没有课代表总结一下',
-      '课代表来了：起因是{t}被扒，中间反转了两次，现在双方都装死，蹲后续',
-      '只有我觉得{t}很无聊吗，每次都是这套流程，看腻了',
-      '让子弹再飞一会儿，上次那个瓜最后不也是乌龙',
-      '我朋友就在现场，她说根本不是传的那样，等我详细问问',
-      '哈哈哈哈哈哈笑死，楼主你太惨了，蹲蹲蹲',
-      '{t}我早就有预感了，懂的都懂，不敢多说',
-      '蹲一个后续，别断更啊，我瓜子都买好了',
-      '家人们谁懂啊，半夜刷到{t}直接睡不着了',
-      '就这也能上热搜？现在的热搜是越来越水了',
-      '先别站队，上次提前站队的都被打脸了，让子弹飞',
-      '这瓜保熟吗，不保熟我可就走了',
-    ],
-  },
-  {
-    re: /剧|追剧|大结局|烂尾|编剧|男主|女主|剧情|综艺|电影|影院|红毯|上映|预告|豆瓣|倍速|剧荒/i,
+    domain: 'drama',
     subject: '这剧',
     comments: [
       '{t}我也在追！！第八集直接封神，编剧是懂怎么拿捏我的',
       '预警：后面开始注水了，回忆杀能占半集，我提前弃了',
       '编剧出来挨打！！{t}这结局我意难平到现在',
-      '只有我觉得{t}很难看吗，全程倍速都嫌慢',
       '课代表总结：{t}前三集平，第四集起飞，中间注水两集，结局烂尾',
       '为了{t}开了三个会员，平台是懂绑架的',
-      '哈哈哈哈哈楼主说的太对了，我也是这么想的',
       '别看解说版！{t}必须亲自看，两分钟解说会毁掉两小时',
       '安利给所有还没看的人，撑过前三集你会回来谢我的',
-      '这导演的运镜真的绝，{t}那段长镜头我倒回去看了五遍',
-      '女主演技被女主粉丝吹过头了吧，尴尬到脚趾抠地',
-      '求下饭剧！不烧脑不虐心一集一个故事的那种',
+      '导演的运镜真的绝，{t}那段长镜头我倒回去看了五遍',
+      '女主演技被粉丝吹过头了吧，尴尬到脚趾抠地',
+      '男主第14集那个眼神，我直接暂停回味了半分钟',
+      '求别烂尾求别烂尾，{t}现在每更新一集我都当最后一集看',
+      '熬到凌晨三点刷完更新，第二天顶着黑眼圈去公司，值',
+      '{t}我二倍速看的，注水部分直接拖进度条，不影响主线',
+      '弹幕全是「啊啊啊」，我的观后感：吵，但是对',
+      '{t}更到几集了？我怎么记得上次更新还是上周',
+      '会员到期前一小时速刷大结局的就是我，顺便取消了自动续费',
+      '这编剧的套路我熟：前紧后松，中期注水，结局匆忙',
+      '男主的睫毛！！特写那一帧我暂停截图当壁纸了',
     ],
   },
   {
-    re: /车|油|堵|驾|4S|提车|试驾|轮胎|油耗|加塞|变道|停车场|科目|刹车|引擎|声浪/i,
+    domain: 'gossip',
+    subject: '这瓜',
+    comments: [
+      '救命这瓜也太大了吧？？？我吃到现在都没吃明白，有没有课代表总结一下',
+      '课代表来了：起因是{t}被扒，中间反转了两次，现在双方都装死，蹲后续',
+      '让子弹再飞一会儿，上次那个瓜最后不也是乌龙',
+      '我朋友就在现场，她说根本不是传的那样，等我详细问问',
+      '{t}我早就有预感了，懂的都懂，不敢多说',
+      '就这也能上热搜？现在的热搜是越来越水了',
+      '先别站队，上次提前站队的都被打脸了，让子弹飞',
+      '蹲一个后续，我瓜子都买好了',
+      '家人们谁懂啊，半夜刷到{t}直接睡不着了',
+      '代拍拍的糊图也能锤？我先存疑，等高清再站队',
+      '声明文案都是同一个公关写的吧，句式我都能背了',
+      '我宣布，这是我今年吃过最绕的一个瓜，没有之一',
+      '前排出售瓜子花生矿泉水，蹲一个后续',
+      '瓜田里上蹿下跳一天，我的意见是：都别急，等实锤',
+    ],
+  },
+  {
+    domain: 'star',
+    subject: '追星',
+    comments: [
+      '天哪这也太好磕了，{t}我先磕为敬',
+      '姐妹你是我的互联网嘴替！！一句没多一句没少',
+      '理智追星，不代拍不私生，{t}看看就好别上头',
+      '我也在现场！！{t}那段我现在想起来还是想哭',
+      '代拍真的该管管了，{t}都被拍成什么样了',
+      '啊啊啊啊啊同担！！终于刷到组织了',
+      '白嫖它不香吗，{t}氪金要量力而行啊家人们',
+      '蹲一个演唱会门票转让，蹲蹲蹲',
+      '他站到光里的同时你也要把自己的日子过亮呀，理智追星',
+      '小卡吧唧一圈下来五百块，我钱包已经在哭了',
+      '直拍我循环了二十遍，这个走位是练了多久啊',
+      '抢票抢了六次，次次陪跑，黄牛加价三倍真有脸',
+      '周边秒没，官方店铺是拿服务器开玩笑吧',
+      '物料里他笑的那一帧我存了，当头像已经半年',
+    ],
+  },
+  {
+    domain: 'work',
+    subject: '打工',
+    comments: [
+      '{t}世另我，今天也是不想上班的一天',
+      '老板画的饼真香，我血压也真高',
+      '课代表：{t}的本质是能拖就拖，建议保留证据，骑驴找马',
+      '带薪如厕大师就是我，摸鱼才是打工人的本体',
+      '已老实，{t}之后我连辞职口号都不敢喊了',
+      '辞职口号月更选手路过，咱们俩组个队吧',
+      '跑吧，{t}这种环境待久了人会废掉的',
+      '工位摸鱼冠军在此，楼主悄悄的，别让老板刷到',
+      '笑死，班味洗不掉的，周末泡澡都没用',
+      '试用期第23天，我已经在数离职倒计时了',
+      '{t}同款经历+1，周报写了个寂寞',
+      '同款周报受害者，我现在把周报存成模板每周改三个词',
+      '面试时说的和入职后干的完全是两回事',
+      '开会两小时，结论零条，散会前说下次再议',
+    ],
+  },
+  {
+    domain: 'car',
     subject: '这车',
     comments: [
       '别买{t}，买了就后悔，修车排队排到怀疑人生',
       '车主路过，{t}确实是这样，油耗高得离谱',
-      '只有我一个人觉得{t}还行吗，你们是不是要求太高了',
       '课代表：{t}优点是动力，缺点是价格和油耗，自己权衡',
       '键盘车神又开始了，{t}你们真开过吗就搁这评',
-      '哈哈哈哈哈哈笑死，新手司机真实写照，我也是三把才进去的',
       '早高峰被加塞三次+1，血压和油门一起踩到底',
       '攒钱提车中，看完{t}更焦虑了，钱包和快乐总得选一个',
       '这油耗正常吧，市区通勤谁开都这样，别吓唬楼主',
       '老司机说得对，刹得住比跑得快重要',
       '{t}我试驾过，推背感是真的，价格也是真的硬',
       '刚拿本别买手动挡，相信我，堵车的时候你会哭的',
+      '保养别去4S当冤种，找靠谱的修理厂能省一半',
+      '新手司机路过，看到楼主这操作我先怕了',
+      '自动启停这功能谁发明的，等红灯一顿一顿的',
+      '保险别乱买，我第一年多花了小两千冤枉钱',
+      '油价又涨了，加油的时候我的心在滴血',
     ],
   },
   {
-    re: /明星|偶像|爱豆|本命|追星|演唱会|应援|粉丝|站姐|代拍|周边|签售|安可|主唱|见到本人|本人比屏幕/i,
-    subject: '追星',
+    domain: 'digital',
+    subject: '这机子',
     comments: [
-      '天哪这也太好磕了，{t}我先磕为敬',
-      '姐妹你是我的互联网嘴替！！说得太对了',
-      '理智追星，不代拍不私生，{t}看看就好别上头',
-      '只有我觉得{t}有点过了吗，追星还是要先过好自己的生活',
-      '我也在现场！！{t}那段我现在想起来还是想哭',
-      '代拍真的该管管了，{t}都被拍成什么样了',
-      '啊啊啊啊啊同担！！终于刷到组织了',
-      '追星女孩路过，{t}这个说法我认可',
-      '白嫖它不香吗，{t}氪金要量力而行啊家人们',
-      '笑死，追星追到倾家荡产，说的是我本人',
-      '蹲一个演唱会门票转让，蹲蹲蹲',
-      '他站到光里的同时你也要把自己的日子过亮呀',
+      '等等党永不为奴，{t}再战三年',
+      '跑分不代表体验，{t}实测才是真的',
+      '{t}买新不买旧，一步到位，别问，问就是过来人',
+      '装机预算超了+1，{t}一看价格我沉默了',
+      '显卡终于到了，恭喜脱贫',
+      '{t}散热怎么样，我看评测说烫手',
+      '课代表：{t}首发别冲，等两个月降价+固件稳定',
+      '首发冲了，一个月亏三百，我是大冤种',
+      '碎屏险值得买，我上个月刚用上，血赚',
+      '系统更新别急着升，等一个月看看反馈',
+      '存储永远不够用，当初选最小容量是我的错',
+      '同款设备用了两年，除了电池其他都还行',
     ],
   },
   {
-    re: /班|老板|工资|加班|通勤|辞职|摸鱼|周报|开会|同事|甲方|乙方|上班|打工|绩效|KPI|裁员|领导/i,
-    subject: '打工',
+    domain: 'game',
+    subject: '这游戏',
     comments: [
-      '{t}世另我，今天也是不想上班的一天',
-      '老板画的饼真香，我血压也真高',
-      '只有我觉得{t}还能忍吗，至少还有工资拿',
-      '课代表：{t}的本质是资本压榨，建议保留证据，骑驴找马',
-      '哈哈哈哈哈哈带薪如厕大师就是我，摸鱼才是打工人的本体',
-      '已老实，{t}之后我连辞职口号都不敢喊了',
-      '工资三分钟热度+1，每月还款日都在怀疑人生',
-      '辞职口号月更选手路过，咱们俩组个队吧',
-      '{t}真的会谢，谁懂啊，周一综合征又犯了',
-      '跑吧，{t}这种环境待久了人会废掉的',
-      '工位摸鱼冠军在此，楼主悄悄的，别让老板刷到',
-      '笑死，班味洗不掉的，周末泡澡都没用',
+      '{t}这赛季匹配机制有毒吧，连跪五把给我排俩挂机',
+      '组我组我，{t}我也在肝，今晚通宵',
+      '策划出来挨打，{t}这波削弱没人同意',
+      '零氪党路过，{t}白嫖玩得也挺开心',
+      '外挂再不管管{t}就凉了，昨晚把把神仙',
+      '菜就多练，{t}这操作我上我也行——行不了，我更菜',
+      '{t}新赛季上分攻略出了吗，蹲一个',
+      '这匹配机制我服了，赢一把安排三把猪队友',
+      '版本答案又变了，我刚练熟的上个版本英雄',
+      '今晚八点车队缺一个，评论区摇人',
     ],
   },
   {
-    re: /猫|狗|宠物|铲屎|主子|疫苗|猫粮|狗粮|拆家|撸猫|遛狗/i,
-    subject: '宠物',
-    comments: [
-      '{t}快发照片！不看照片等于没说',
-      '哈哈哈哈哈哈拆家现场我也经历过，沙发已经阵亡了',
-      '铲屎官含泪点赞，{t}懂的都懂',
-      '只有养过的人才知道{t}有多真实，主子的脸色就是天气',
-      '猫毛过敏但养猫+1，戒不掉的根本戒不掉',
-      '{t}建议直接发视频，让我们云吸一下',
-      '我家那位也是，{t}的时候一脸无辜，气死又好笑',
-      '疫苗本收藏家路过，宠物医院VIP就是我',
-      '笑死，{t}这条我要转给我妈看，让她知道养宠物的快乐',
-    ],
-  },
-  {
-    re: /吃|喝|外卖|探店|美食|火锅|奶茶|咖啡|餐厅|好吃|难吃|宵夜|零食|甜品/i,
-    subject: '探店',
+    domain: 'food',
+    subject: '这家店',
     comments: [
       '看饿了，{t}求地址，已经准备好出发了',
       '{t}避雷+1，我也踩过这个坑，难吃到怀疑人生',
-      '只有我觉得{t}一般般吗，可能是我口味问题',
-      '哈哈哈哈哈哈深夜放毒是吧，举报了（咽口水）',
+      '深夜放毒是吧，举报了（咽口水）',
       '课代表总结：{t}值得冲的是招牌，别的别点',
       '奶茶三分甜选手路过，{t}这个搭配我认可',
       '救命，半夜刷到{t}是对减肥人士的谋杀',
       '碳水快乐星人狂喜，{t}看着就香',
-      '外卖红包猎人来了，{t}有没有优惠券链接',
+      '{t}排队要多久？我怕站到腿软',
+      '这家我吃过！招牌确实可以，别的真的别点',
+      '深夜刷到吃的，我的胃在抗议',
+      '外卖红包群了解一下，一个月省出好几顿早饭',
     ],
   },
   {
-    re: /手机|芯片|跑分|新机|发布会|显卡|装机|屏幕|数码|耳机|键盘|游戏|排位|上分|开黑|外挂/i,
-    subject: '数码',
+    domain: 'pet',
+    subject: '毛孩子',
     comments: [
-      '等等党永不为奴，{t}再战三年',
-      '只有我觉得{t}参数没意义吗，体验才是王道',
-      '跑分不代表体验，{t}实测才是真的',
-      '{t}买新不买旧，一步到位，别问，问就是过来人',
-      '装机预算超了+1，{t}一看价格我沉默了',
-      '哈哈哈哈哈哈显卡终于到了，恭喜脱贫',
-      '{t}散热怎么样，我看评测说烫手',
-      '课代表：{t}首发别冲，等两个月降价+固件稳定',
-      '凌晨排位的兄弟还在吗，{t}组一队',
+      '{t}快发照片！不看照片等于没说',
+      '拆家现场我也经历过，沙发已经阵亡了',
+      '铲屎官含泪点赞，懂的都懂',
+      '猫毛过敏但养猫+1，戒不掉的根本戒不掉',
+      '{t}建议直接发视频，让我们云吸一下',
+      '我家那位主子也是，犯错的时候一脸无辜，气死又好笑',
+      '疫苗本收藏家路过，宠物医院VIP就是我',
+      '{t}吐了多久了？一天超过两次赶紧去医院，别拖',
+      '养猫第三年，猫毛已经织进我的每一件衣服',
+      '别问我家里为什么到处是猫抓板，问就是沙发保命',
+      '我家那位凌晨四点准时跑酷，我的黑眼圈它功不可没',
+      '驱虫药别忘了定时喂，别问我怎么知道的',
     ],
   },
   {
-    re: /失眠|熬夜|凌晨|睡不着|emo|崩溃|焦虑|压力|累|孤独|深夜/i,
+    domain: 'night',
     subject: '深夜',
     comments: [
-      '凌晨三点刷到{t}，突然就不那么孤独了',
-      '抱抱楼主，{t}这个阶段都会过去的',
-      '只有我睡不着的时候刷到{t}更emo了吗',
-      '月亮不睡我不睡+1，{t}咱们组个失眠互助群吧',
-      '{t}写的就是我吧，别念了别念了',
-      '褪黑素依赖中，{t}看得我更清醒了',
-      '深夜的情绪别当真，{t}睡一觉明天再看会不一样',
-      '数羊数到一万选手路过，{t}同病相怜',
+      '凌晨三点刷到这个，突然就不那么孤独了',
+      '抱抱，这个阶段都会过去的',
+      '月亮不睡我不睡+1，咱们组个失眠互助群吧',
+      '褪黑素依赖中，看得我更清醒了',
+      '深夜的情绪别当真，睡一觉明天再看会不一样',
+      '睡不着数羊数到一万的选手路过，同病相怜',
+      '别刷手机了，越刷越精神，说的是你也是我',
+      '失眠第4天，眼下的青黑已经可以出门不画卧蚕了',
+      '闭眼两小时，大脑开了场演唱会',
+      '数了三百只羊，羊都睡了我还醒着',
+      '凌晨四点的天花板我已经看了快一个月',
+      '白天的困是真的，晚上的清醒也是真的，离谱',
+    ],
+  },
+  {
+    domain: 'love',
+    subject: '这段感情',
+    comments: [
+      '暧昧期最折磨，他一句话我能反刍一晚上',
+      '冲！不说出口的喜欢都是遗憾',
+      '异地恋第400天，见面那刻觉得一切都值',
+      '清醒一点，对你忽冷忽热的对象就算了吧',
+      '心动是真的，心疼自己也是真的',
+      '{t}到什么阶段了？评论区帮你分析分析',
+      '暧昧期别急着表白，再观察观察，急着摊牌的容易输',
+      '暗恋十年还是异地，你俩这是双向奔赴还是单机模式',
+      '前任这关，谁过谁知道',
+      '心动过的人，再遇见还是会乱',
+      '喜欢过的人的余光，确实比正文长',
+      '暧昧最狠的就是这种欲言又止',
+    ],
+  },
+  {
+    domain: 'fitness',
+    subject: '训练',
+    comments: [
+      '{t}第38天打卡，体重没变但裤腰松了两格',
+      '三分练七分吃，鸡胸肉吃到怀疑人生',
+      '拉伸别偷懒，我上周就是没拉伸，现在走路像机器人',
+      '私教课真贵，一节课够我办两年视频会员',
+      '体脂秤的数字别太当真，围度和镜子不会骗人',
+      '{t}练后那顿饭才是我坚持的全部理由',
+      '新手别上大重量，动作变形练了等于白练还伤腰',
+      '别问体重，问就是肌肉密度大',
+      '练完第二天下楼梯的姿势，懂的都懂',
+      '蛋白粉喝出中药味，我的味蕾已经投降',
+    ],
+  },
+  {
+    domain: 'study',
+    subject: '学习',
+    comments: [
+      '图书馆占座大军申请出战，七点不到门口排队',
+      '错题本比刷新题有用，血泪教训',
+      '{t}第200天，政治还没背完，我先疯为敬',
+      '同考研，昨晚三点睡的，互相伤害',
+      '上岸的过来人说一句：真题刷三遍不过分',
+      '背了忘忘了背，我的海马体已经在抗议了',
+      '{t}进度到哪了？我这个月才过完一轮，慌',
+      '占座失败，转战走廊，膝盖当桌子',
+      '背书背到怀疑自己的记忆是漏斗',
+      '图书馆的闭馆音乐是我每天的下班铃',
+    ],
+  },
+  {
+    domain: 'travel',
+    subject: '这趟',
+    comments: [
+      '特种兵行程看着就累，我更推荐躺平游',
+      '人从众警告，假期出门先做好排队三小时准备',
+      '民宿照片仅供参考系列，实际开窗是停车场',
+      '出片攻略收了，下次照抄',
+      '古镇都长一个样，卖的东西全国统一',
+      '{t}预算多少？我也在规划这条线',
+      '错峰旅行才是王道，工作日请两天假人少一半',
+      '这个季节去人少，性价比拉满',
+      '高铁晚点两小时，我的行程全乱套',
+      '酒店早餐七点结束，我七点半醒的，完美错过',
+    ],
+  },
+  {
+    domain: 'weather',
+    subject: '今天',
+    comments: [
+      '今天出门被风吹成表情包，发型已阵亡',
+      '降温提醒：秋裤该请出来了，别硬扛',
+      '这种天气就该窝在家里，谁劝我出门我跟谁急',
+      '桂花开了？难怪这两天一路走一路闻',
+      '回南天墙都在流泪，晾了一周的衣服长蘑菇了',
+      '{t}这种天气，适合窝被窝里刷剧，谁都别拦我',
+      '天气预报说晴，出门就下雨，我再也不信它了',
+      '这种风，出门五分钟发型全毁',
+      '降温别硬扛，秋裤是人类之光',
+      '一到换季就感冒，我的嗓子已经预警',
+      '今天的风是免费的吹风机，还是强力档',
     ],
   },
 ];
-
-/** 版块 → 匹配的主题评论池（评论与帖子内容对得上：版块定领域，关键词做微调）。
- *  索引：0=瓜 1=剧 2=车 3=追星 4=打工 5=宠物 6=吃 7=数码 8=深夜 */
-const COMMUNITY_POOLS: Record<string, number[]> = {
-  gossip: [0, 3],
-  movie: [1],
-  car: [2],
-  rant: [4],
-  digital: [7],
-  food: [6],
-  work: [4],
-  fit: [7],
-  travel: [6, 8],
-  night: [8],
-  game: [7],
-};
 
 /** 从帖子内容提取主题词（给 {t} 槽位用：优先 #话题#，否则用主体词） */
 function topicSubjectOf(text: string, fallback: string): string {
@@ -1145,11 +1231,15 @@ function pickRequestComment(postContent: string, used: Set<string>): string | nu
   return null;
 }
 
-/** 兜底评论：按帖子内容命中的主题池抽取（对得上帖子内容，不是万金油），
- *  主题池尽/未命中 → 通用池（带领域守卫：领域词对不上帖子的通用短评不出场）。
- *  外语评论者走外语通用池。
- *  v7：求推荐/求助帖 → 优先求推荐池（求什么答什么，绝不答非所问）。 */
-function pickTopicComment(postContent: string, lang: string, used: Set<string>, community?: string | null): string | null {
+/** 兜底评论（v14 领域计分制重写）：只认帖子内容本身——
+ *  1) 外语评论者 → 外语池；
+ *  2) 求推荐/求助帖 → 求推荐池（求什么答什么，绝不答非所问）；
+ *  3) 领域得分（强词×2＋弱词×1）≥2 的主题池按 得分² 加权抽取，
+ *     无一命中时放宽到最高分池（弱相关也比对不上强）；
+ *  4) 每条候选渲染 {t} 后必须过 commentAnchored 锚定校验
+ *     （呼应核心话题词 + AI 废话黑名单），不达标重抽；
+ *  5) 池子耗尽 → 返回 null，调用方落「追问式兜底」（带话题锚点）。 */
+function pickTopicComment(postContent: string, lang: string, used: Set<string>): string | null {
   if (lang !== 'zh-Hans') {
     const cand = pickGenericComment(lang, used, postContent);
     if (cand) return cand;
@@ -1157,31 +1247,25 @@ function pickTopicComment(postContent: string, lang: string, used: Set<string>, 
   // 求推荐/求助帖优先：正面回答（推荐/同求/避雷），再考虑主题池
   const req = pickRequestComment(postContent, used);
   if (req) return req;
-  // v10 加权选池（串台修复）：池子得分 = 正则命中的分支词数，权重 = 得分²。
-  // 版块池（版块定领域）基础权重 1；关键词强匹配池（明星帖命中追星池的
-  // 明星/见到本人等多个词）权重 4~9 倍起——弱误触池（单个泛词如「累」撞上
-  // 深夜池）几乎不出场，评论与帖子主题强关联。
-  const weighted: { pool: { re: RegExp; subject: string; comments: string[] }; w: number }[] = [];
-  const seenPool = new Set<{ re: RegExp; subject: string; comments: string[] }>();
-  const commIdx = community ? COMMUNITY_POOLS[community] ?? [] : [];
-  for (const i of commIdx) {
-    const p = TOPIC_COMMENT_POOLS[i];
-    if (p && !seenPool.has(p)) {
-      seenPool.add(p);
-      weighted.push({ pool: p, w: 1 });
+  // 领域计分（v14.1 门槛 3 分）：单个强词的顺带提及（追剧帖里一句「工资不多」）
+  // 不再让打工池入场——得分 ≥3 的池子才有出场资格，权重 = 得分²
+  const scores = new Map(domainScores(postContent).map((x) => [x.id, x.score]));
+  let weighted: { pool: TopicPool; w: number }[] = TOPIC_COMMENT_POOLS.filter((p) => (scores.get(p.domain) ?? 0) >= 3).map((p) => ({
+    pool: p,
+    w: (scores.get(p.domain) ?? 3) ** 2,
+  }));
+  // 无一命中：放宽到「最早出现」主领域池（v14.2：并列得分时不再把所有并列池
+  // 拉进评论区——恋爱帖顺带提一句「低头看手机」时只出恋爱池，不出数码池）
+  if (!weighted.length) {
+    const dom = dominantDomainId(postContent);
+    if (dom) {
+      const pool = TOPIC_COMMENT_POOLS.find((p) => p.domain === dom);
+      if (pool) weighted = [{ pool, w: 1 }];
     }
   }
-  for (const p of TOPIC_COMMENT_POOLS) {
-    if (seenPool.has(p)) continue;
-    const score = poolMatchScore(p.re, postContent);
-    if (score > 0) {
-      seenPool.add(p);
-      weighted.push({ pool: p, w: score * score });
-    }
-  }
-  if (!weighted.length) return pickGenericComment('zh-Hans', used, postContent);
+  if (!weighted.length) return null; // 调用方落追问式兜底
   const totalW = weighted.reduce((s, x) => s + x.w, 0);
-  for (let i = 0; i < 60; i++) {
+  for (let i = 0; i < 80; i++) {
     let r = Math.random() * totalW;
     let picked = weighted[0].pool;
     for (const x of weighted) {
@@ -1193,63 +1277,84 @@ function pickTopicComment(postContent: string, lang: string, used: Set<string>, 
     }
     const raw = picked.comments[Math.floor(Math.random() * picked.comments.length)];
     const cand = raw.replaceAll('{t}', topicSubjectOf(postContent, picked.subject));
-    if (!used.has(cand.slice(0, 16))) {
-      used.add(cand.slice(0, 16));
-      return cand;
-    }
+    if (used.has(cand.slice(0, 16))) continue;
+    // v14 锚定校验：必须呼应核心话题词 + 不在废话黑名单，不达标重抽
+    if (!commentAnchored(cand, postContent)) continue;
+    used.add(cand.slice(0, 16));
+    return cand;
   }
-  return pickGenericComment('zh-Hans', used, postContent);
+  return null;
 }
 
-/** 主题池与帖子内容的匹配强度：正则按 | 拆分支逐个测，命中分支数即得分
- *  （明星帖命中追星池的「明星+见到本人」= 2 分；只撞上「地铁」一个泛词 = 1 分） */
-function poolMatchScore(re: RegExp, content: string): number {
-  try {
-    const branches = re.source.split('|').filter(Boolean);
-    let n = 0;
-    for (const b of branches) {
-      try {
-        if (new RegExp(b, 'i').test(content)) n += 1;
-      } catch {
-        /* 非法分支忽略 */
-      }
-    }
-    return n;
-  } catch {
-    return re.test(content) ? 1 : 0;
-  }
-}
+/** 组合式帖子兜底（v14 全面重写）：旧版「话题×开头×正文×结尾」拼出来的是
+ *  新闻摘要腔——被用户点名「太人机」。新版按八大真实网友风格写整段模板：
+ *  八卦爆料/暴躁吐槽/追星发疯/明星营业/搞抽象/暧昧擦边/阴暗爬行/日常分享，
+ *  每条自带场景/动作/情绪/数据，槽位（{place}{code}{food}{n}）替换保证不重样，
+ *  LLM 失败时兜底帖也像真人发的（篇幅与 NPC 池、八大风格 Prompt 同水位）。 */
+const COMBO_SLOTS: Record<string, string[]> = {
+  place: ['国贸B1的寿司店', '公司楼下的便利店', '小区门口的快递驿站', '大学城小吃街', '机场T2的咖啡店', '商场顶楼的火锅店', '老家属院的楼道', '高铁站候车厅', '凌晨两点的马路牙子', '健身房更衣室'],
+  code: ['W姓顶流', 'Z老师', 'L姓小生', 'H姓影后', '那个选秀出道的', '某男团门面', '仙侠剧男主', '唱跳那个X'],
+  food: ['38块的猪脚饭', '半糖去冰的奶茶', '两个烤红薯', '加辣的螺蛳粉', '便利店的关东煮', '双拼麻辣烫', '九块九的沙拉'],
+  n: ['三', '五', '七', '十', '两', '半'],
+};
 
-/** 组合式帖子兜底（NPC 池耗尽 + LLM 失败时：话题×开头×正文×结尾 组合出近乎无限的帖子，
- *  保证「下滑无限生成」在任何情况下都有新内容；主题与 FEED_TOPICS 同向） */
-const GEN_TOPICS = ['明星塌房', '恋情官宣', '热搜第一', '大结局烂尾', '新剧上头', '电影彩蛋', '提车第一天', '油价', '早高峰堵车', '司机加塞', '综艺名场面', '红毯造型', '剧组路透', '新车发布', '试驾感受', '二手车避坑', '追星开销', '剧荒求推', '瓜反转', '代拍乱象'];
-const GEN_MOODS = [
-  '刚刷到{t}，先蹲一个后续：',
-  '关于{t}，说点个人看法：',
-  '{t}这事儿，懂的都懂。',
-  '不是，{t}都能上热搜？',
-  '{t}，建议全体围观：',
-  '一觉醒来又被{t}刷屏了。',
-  '有人聊{t}吗，在线等。',
-  '今日份{t}，瓜保熟：',
+const COMBO_POST_STYLES: string[][] = [
+  // 一、八卦爆料（细节拉满，有「偷感」）
+  [
+    '家人们谁懂啊，我在{place}排队，斜前方卡座一个戴口罩鸭舌帽的男的，侧脸越看越不对劲——{code}！就是最近那部剧里演反派的那个！本人比屏幕上还瘦，手腕上那串珠子跟上周活动戴的是同一串。他跟对面女生全程没说话，我不敢多看，假装回消息偷瞄了二十分钟，手心的汗把手机壳都捂热了。没敢拍，门口蹲着俩代拍，一举手机就露馅 #在{place}撞见{code}#',
+    '表妹在{place}打工，刚给我发了六十秒语音，全是尖叫。说{code}今天来了，全程帽子口罩，但那个身高和走路姿势错不了，点单的时候声音压得特别低，说了句谢谢就赶紧走。表妹说后厨都在传，经理进场前还专门开了个短会。细节我还在问，蹲到的先别外传 #{code}现身{place}#',
+    '刚才在{place}等位，隔壁桌两个人聊天声音越来越小，我耳朵已经竖成天线了。听到几个关键词：「档期」「不方便」「别拍到我」。抬头一看，其中一个人的工作证我刷到过——{code}的妆造师！另一个人递了个牛皮纸袋，她放进包里的动作特别快。这是什么新瓜？我瓜子已经就位 #{code}深夜密会现场#',
+    '停车场蹲到个大的。我取车的时候，旁边商务车车门开着，一个裹得严严实实的人在上车，那个下巴的形状我一眼认出来——{code}！重点是，从车上下来的另一个人把他的外套披走了，俩人一句话没说，车窗升上去之前还互相看了一眼。我在原地愣了半分钟，行车记录仪都没来得及开 #停车场目击{code}#',
+  ],
+  // 二、暴躁吐槽（极度情绪化，针对具体槽点）
+  [
+    '中午点了个{food}，打开盒子我人傻了：{n}块肉，最薄那块对着灯看是半透明的，米饭比肉多四倍，汤就一层油。卧槽我备注写得清清楚楚的加辣呢？？骑手都走了我找谁去。客服机器人复读「亲亲这边建议您下次备注哦」——备注了！！我备注了！！！建议这家店直接改名米饭配米饭，肉纯属装饰 #外卖避雷实录#',
+    '停车场排队二十分钟，保安大哥挨个车窗问「找谁」，到我这直接抬杆了，连问都不问。我说大哥你不问问？他说：看你这样就是来找车位的。合着我这张脸就是月卡通行证呗？？最气的是绕了{n}层发现全是满的，最后停到隔壁商场又走了十五分钟回来。一个月停车费三百多，买的是个寂寞 #我的脸就是停车场通行证#',
+    '客服电话打了一小时四十分，转人工按了九次「0」，每次都说「当前排队人数较多」。好不容易接通，对面第一句：「请问您的问题是什么呢？」我从头说了一遍，她说：这个问题需要帮您转接专门部门。又挂了！！从头再来！！你们的热线是莫比乌斯环吗 #转人工转人工转人工#',
+    '楼下装修第八天了。电钻早上八点准时开工，比我闹钟还准。戴耳塞、戴耳机、开冰箱听嗡嗡声，都盖不住。上去沟通，师傅特别客气：快了快了，还有二十来天。二十来天？？中介当时说的是「隔壁轻微施工一周」！！押金我不退了行吗，我就想知道「轻微」的标准是谁定的 #装修第八天精神状态良好#',
+    '新买的手机壳七天就黄了，客服说是我使用不当。我使用不当？？我把它供在桌上它自己黄的！评论区教我用牙膏擦、用酒精泡，全试了，黄得更均匀了。九块九的东西我生什么气，我生气的是它黄之前还挺好看 #手机壳黄了是我的错吗#',
+  ],
+  // 三、追星发疯（饭圈黑话，感叹号管够）
+  [
+    '啊啊啊啊新物料出了！！！白毛衣！！袖子挽到小臂！！副歌抬头对镜头笑了一下，就一下！！！我原地去世！！！下颌线什么神仙角度，慢放看了十四遍，我妈以为我在哭，我是真的在哭！！耳返松了全程左手按着唱完，一句没跑，这什么敬业爱豆！！15分钟百万播放不是没道理的，我先去循环500遍 #新物料杀我#',
+    '刚从现场回来，手还在抖。安可的时候他走到我们这区，隔着一排人看了这边一眼——就一眼！我旁边的姐妹直接蹲下去了，我脑子一片空白，回来的路上一直在笑，司机师傅一直在看我。嗓子喊哑了，明天再说，今晚谁也别想让我睡 #安可一眼值回票价#',
+    '他今天机场图出了，灰色卫衣，帽子压得很低，但是包上挂的娃娃是我们送的那个！！他挂上了！！他真的挂上了！！去年生日应援送的，我以为到了工作室就进仓库了，呜呜呜他带着它飞了三个城市了，这个娃娃过得比我好 #他挂上我们送的娃娃了#',
+    '新歌第一句出来我就跪了，那个气声！！那个咬字！！耳机开最大声，鸡皮疙瘩从后颈起到脚后跟。有人质疑唱功的，麻烦听一下副歌那段升key，一遍过，现场稳得像CD。我已经把歌词背下来了，虽然整首就四十多个词 #新歌气声绝了#',
+  ],
+  // 四、明星日常（假装本尊，非常营业）
+  [
+    '今天难得六点收工，路过楼下买了杯热美式，店员小哥问我是不是上次那个「加三份浓缩」的狠人，行吧，我在陌生人心里的形象是这样。你们最近都在追什么剧？评论区安利我，收工回去下饭。对了，我那部剧这周更到关键剧情，别倍速看，会后悔。还有，说我耍大牌那条是假的，那天我在补妆，导演可以作证，他骂我笑场骂了二十分钟。配图收工自拍，风大，头发乱了，凑合看',
+    '凌晨三点还没睡，不是失眠，是背台词背的。明早六点开工，现在睡等于没睡，干脆不睡。翻了翻评论区，看到有学生党说考完试来看我，好好考试！！考完随便看。问我最近为什么瘦了的，剧组盒饭是真难吃，我含泪瘦了六斤，这波算工伤。碎碎念完了，去冲个澡，早上见 #收工碎碎念#',
+    '被公司逼着营业的一天。问：今天的自拍为什么是背影？答：因为正脸在赶工的剧里，先留个悬念。问：什么时候播出？答：快了，比我化妆快。问：最近有什么开心的事？答：刚发现楼下的猫会握手了，比我会营业。行了，老板说字数够了，评论区见 #被逼营业现场#',
+  ],
+  // 五、搞抽象/无厘头（毫无逻辑，纯发疯）
+  [
+    '刚才电梯里放了个屁，11楼到1楼停了{n}次，每个人都进来看了我一眼，我悟了，这就是社会性死亡倒计时。说个事，我家猫最近看我的眼神像HR看简历，随时准备把我优化掉。早上它把杯子推下桌是慢动作的，边推边看我，像我删好友前最后看一眼对方头像 #本猫疑似有编制#',
+    '一个冷知识：人在等外卖的时候，时间会变慢。我刚才盯着骑手轨迹看了八分钟，他在地图上转了个圈，我以为他在跳舞，其实他在掉头。外卖到了，我的腿麻了，站起来的时候膝盖响了一声，像开瓶盖。二十八岁，身体已经进入售后阶段 #身体进入售后阶段#',
+    '我怀疑我家的WiFi有情绪。我想看视频它就转圈，我一放下手机它就满格，跟故意的似的。刚才我跟它对峙了十分钟——把手机放桌上假装走开，偷偷回头看，信号满格；一把抓起来，它又转圈了。行，你赢了你赢了好不好，今晚我陪你耗着 #我家WiFi成精了#',
+    '早上称体重，秤显示「Err」。我重新站上去，它还是「Err」。我妈路过说：它不是坏了，它是不想伤害你。好家伙，现在连秤都学会高情商发言了。中午我吃了两碗饭压压惊，晚上再称，它学会直接黑屏了 #体重秤的高情商时刻#',
+  ],
+  // 六、暧昧擦边（高端海王风，话不说透）
+  [
+    '昨晚酒局散得晚，他送我到楼下，说外套先披着明天还。今天来拿外套，他顺手端走我桌上那杯咖啡喝了一口，说：苦的，跟你一样。我说那你怎么不撒手。他笑了一下没接话，走的时候在门口站了两秒……就两秒。外套我洗过了，掉的那颗扣子也缝回去了。算了不说了，说多了显得我没出息……',
+    '他说「顺路」送我回家，导航明明显示他家在反方向。车上放的歌单全是我上次随口说过好听的那些，一首不差。红灯的时候他手搭在挡把上，离我的手就两厘米，我盯着那个红灯看了整整九十秒。到了楼下他说「那，上去吧」，就这三个字，我在电梯里回放了半小时……',
+    '健身房的教练今天纠正我动作，手虚扶在我手肘下面，没碰到，就那么一点距离。他说「沉肩」，声音比平时低了半度。我肩膀没沉下去，心跳先沉不下去了。下课他递水给我，瓶盖是拧开过的……我知道那可能是随手，但我今天多练了二十分钟，练到他下班。嗯，就当是练腿。',
+  ],
+  // 七、阴暗爬行（引战/三观炸裂，理直气壮）
+  [
+    '想跟大家商量个事。我室友保研了，但她家境不好，那个奖学金对她很重要。我差0.3分没评上，难受了很久。我在想要不要跟辅导员提一嘴她上次翘团建的事（就一次），名额顺延下来就是我的了。我不是坏心，规则就是规则，翘了就是翘了，跟我举不举报没关系呀。而且我更需要这个名额，我谈恋爱了花销大，她一个单身的人要那么多钱干嘛呢。你们说，我这不算小人吧？',
+    '男朋友一个月挣两万，却只给我花三千，我要分手有问题吗？我闺蜜说她男朋友每个月工资全交，我妈说我虚荣。可是我都陪他聊天到半夜了，我的时间不要钱吗？他打游戏的时候我在旁边看着，这不算付出？昨天他点了杯三十块的奶茶还备注「少糖，她最近减肥」，无语，我减肥是为谁啊，还不是为了带出去给他长面子 #我的付出值得更多#',
+    '我有个习惯，跟每个前任分手前都会把他们送的东西折现要回来。闺蜜说这样不好，可我觉得这叫止损。上一任的手表我卖了四千二，回血率百分之六十，已经很高了。这次谈的这个，第一次约会就送了本二手的书，二手的！我都开始盘算分手时怎么开口了。他要是问我为什么，我就说：书我看完了，留着也是浪费，你说对吗 #谈恋爱要懂得止损#',
+  ],
+  // 八、日常分享（天气/气味/感官/情绪打底）
+  [
+    '下班出来闻到今年第一茬桂花，甜得发闷。绕路买了糖炒栗子，老板娘多给了两颗，说看我脸色像加班的。地铁上剥了一颗，烫手，但是那种很扎实的甜。到家楼下看见一对老夫妻分一个烤红薯，老头把皮剥好了才递过去。突然想给我妈打电话，拨到一半挂了，改成发「吃了吗」，她秒回「吃了，你呢」。配图：上周在江边拍的晚霞 #秋天的第一口甜#',
+    '今天下雨，没带伞，在便利店门口站了十分钟等雨小。旁边大爷把伞往我这边偏了偏，说「姑娘，顺路，走吧」。我蹭了他的伞走了两百米，一路上聊了他孙子的期末考试。到小区门口他要给我伞，我说不用，跑两步的事。跑的时候雨打在脸上，凉的，但我一直在笑。回家路上买了两把伞，放一把在包里，以后也能帮别人挡一挡 #雨天蹭伞两百米#',
+    '周末大扫除，从床底下扫出来一只失踪半年的袜子，和它一起出来的还有三块钱、一张电影票根和半包受潮的薯片。袜子找到了另一半，钱进了存钱罐，票根让我想起那部看到一半睡着的电影，薯片……薯片我尝了一口，还是脆的，缘分。下午的阳光斜进来，灰尘在光里飘，我坐在地板上发了半小时呆 #床底考古现场#',
+    '今天降温，把厚被子翻出来了。晒了一下午太阳的被子，晚上钻进去有一股说不出的味道，我妈管这叫「太阳味」。开了加湿器，泡了脚，水凉了三次才舍得擦。这种晚上就适合早点关灯，裹着被子听窗外呼呼的风，心想：幸好明天是周日。配图是我的被子角，猫已经踩好奶了 #太阳味的被子#',
+    '早高峰的地铁上，前面一个女生的手机壳背后贴了张便利贴：「再坚持三天就放假」。我盯着看了两站地，心情莫名好了起来。到站的时候人挤人，她护着咖啡挤下车，一滴没洒，厉害。我买了这么多年咖啡，洒过三杯在键盘上。今天上班路上没那么烦了，谢谢那张便利条 #地铁上的能量便利贴#',
+  ],
 ];
-const GEN_BODIES = [
-  '前排吃瓜，目前信息还很乱，先别急着站队',
-  '瓜越吃越大，反转比剧还精彩，我已经搬好小板凳了',
-  '追了三季，这个走向我直接傻眼，编剧你出来',
-  '红毯造型一出，评论区已经吵了八百楼',
-  '试驾了一圈，动力是真好，价格也是真硬',
-  '早高峰被加塞三次，血压和油门一起踩到底了',
-  '路透看着还行，正片出来之前保持冷静',
-  '官宣文案我都能背了，就等一个后续',
-  '粉丝说是状态问题，路人说是审美问题，我说都有问题',
-  '第二集开始封神，安利给所有还没看的人',
-  '剧组宣发真会玩，预告剪得比正片好看',
-  '朋友提了新车，我把副驾坐出包浆了',
-  '黄牛加价三倍，官方声明管用吗，蹲一个结果',
-  '这瓜保熟吗，先让子弹飞一会儿',
-];
-const GEN_TAILS = ['评论区蹲一个真相。', '有懂哥出来讲讲吗？', '理性讨论，别吵架。', '先吃瓜，后负责。', '就问还有谁。', '懂的都懂。', '让我看看谁的DNA动了。', ''];
 
 /** 外语整帖兑底（LLM 失败时外语网友的帖子：每个语言一组真实感短帖，
  *  与中文组合池互补——多语言不只依赖 LLM） */
@@ -1303,6 +1408,7 @@ const GEN_FOREIGN: { lang: string; texts: string[] }[] = [
 ];
 
 /** 从组合池里抽一条不重复的帖子文案（used = 已用内容前缀指纹；80 次抽不到就放弃）。
+ *  v14：整段八大风格模板 + 槽位一致替换（同一条里 {place}/{code} 取值相同）；
  *  lang 指定语言：外语走整帖兑底池（外语池尽 → 落中文组合池）。 */
 function comboPostText(used: Set<string>, lang = 'zh-Hans'): string | null {
   if (lang !== 'zh-Hans') {
@@ -1317,12 +1423,16 @@ function comboPostText(used: Set<string>, lang = 'zh-Hans'): string | null {
     }
     // 外语池尽：落中文组合池（外语网友用翻译器发中文帖，也真实）
   }
+  const flat = COMBO_POST_STYLES.flat();
   for (let i = 0; i < 80; i++) {
-    const t = GEN_TOPICS[Math.floor(Math.random() * GEN_TOPICS.length)];
-    const m = GEN_MOODS[Math.floor(Math.random() * GEN_MOODS.length)].replace('{t}', t);
-    const b = GEN_BODIES[Math.floor(Math.random() * GEN_BODIES.length)];
-    const tail = GEN_TAILS[Math.floor(Math.random() * GEN_TAILS.length)];
-    const s = `${m}${b}。${tail}`.slice(0, POST_MAX);
+    const tpl = flat[Math.floor(Math.random() * flat.length)];
+    // 槽位一致替换：同一个槽位名在一条模板里取同一个值
+    const vals: Record<string, string> = {};
+    for (const k of Object.keys(COMBO_SLOTS)) {
+      const arr = COMBO_SLOTS[k];
+      vals[k] = arr[Math.floor(Math.random() * arr.length)];
+    }
+    const s = tpl.replace(/\{(\w+)\}/g, (_m, k: string) => vals[k] ?? '').slice(0, POST_MAX);
     const k = s.slice(0, 20);
     if (!used.has(k)) {
       used.add(k);
@@ -1722,11 +1832,17 @@ async function genCommentBatch(postId: string): Promise<number> {
         userName: resolveAuthor('user').name,
       })) as { items?: string[] };
       texts = Array.isArray(r.items)
-        ? r.items
-            .map((x) => (typeof x === 'string' ? sanitizeCommentClient(stripReplyPrefixClient(x)) : x))
-            .filter((x) => typeof x === 'string' && x.trim().length >= 2)
-            // v9 客户端兜底校验：中文帖拒绝整句外语（服务端已过滤，双保险）
-            .filter((x) => postLang !== 'zh-Hans' || !foreignDominantClient(x))
+        ? (r.items as unknown[])
+            .map((x) => {
+              if (typeof x !== 'string') return '';
+              const s = sanitizeCommentClient(stripReplyPrefixClient(x));
+              if (s.trim().length < 2) return '';
+              if (postLang === 'zh-Hans' && foreignDominantClient(s)) return '';
+              // v14 锚定校验：串台/AI 废话直接丢弃（与服务端双保险），池子补位
+              if (!commentAnchored(s, post.content)) return '';
+              return s;
+            })
+            .filter(Boolean)
         : [];
     } catch {
       texts = [];
@@ -1744,13 +1860,14 @@ async function genCommentBatch(postId: string): Promise<number> {
         const idx = texts.length;
         const commenterLang = resolveAuthor(commenterKeys[idx] ?? 'user').lang ?? 'zh-Hans';
         const lang = commentLangFor(postLang, commenterLang);
-        let cand =
-          pickTopicComment(post.content, lang, usedCt, post.community) ??
-          pickGenericComment(lang, usedCt, post.content) ??
-          pickGenericComment('zh-Hans', usedCt, post.content);
+        // v14.2：口癖只加在池子评论上；兜底用尽 → 本条跳过（绝不重复刷屏）
+        const pooled = pickTopicComment(post.content, lang, usedCt) ?? pickGenericComment(lang, usedCt, post.content);
+        let cand: string | null = pooled;
         if (cand && lang === 'zh-Hans' && postLang === 'zh-Hans') {
           cand = maybeForeignFlavor(cand, commenterLang);
+          usedCt.add(cand.slice(0, 16));
         }
+        if (!cand) cand = followupComment(post.content, usedCt);
         if (cand) {
           usedCt.add(cand.slice(0, 16));
           texts.push(cand);
@@ -1813,11 +1930,16 @@ async function genCommentBatch(postId: string): Promise<number> {
             userName: resolveAuthor('user').name,
           })) as { items?: string[] };
           subTexts = Array.isArray(r.items)
-            ? r.items
-                .map((x) => (typeof x === 'string' ? sanitizeCommentClient(stripReplyPrefixClient(x)) : x))
-                .filter((x) => typeof x === 'string' && x.trim().length >= 2)
-                // v9 客户端兑底：中文帖拒绝整句外语楼中楼（双保险）
-                .filter((x) => postLang !== 'zh-Hans' || !foreignDominantClient(x))
+            ? (r.items as unknown[]).map((x, i) => {
+                // 位置对齐：无效项置空串（由池子兜底补位），不向后错位
+                if (typeof x !== 'string') return '';
+                const s = sanitizeCommentClient(stripReplyPrefixClient(x));
+                if (s.trim().length < 2) return '';
+                if (postLang === 'zh-Hans' && foreignDominantClient(s)) return '';
+                // v14 锚定校验：楼中楼必须呼应「被回复评论 + 主帖」
+                if (!commentAnchored(s, `${subTargets[i]?.content ?? ''} ${post.content}`)) return '';
+                return s;
+              })
             : [];
         } catch {
           subTexts = [];
@@ -1834,14 +1956,15 @@ async function genCommentBatch(postId: string): Promise<number> {
             // 池子兜底：优先主题匹配（接得上评论/主帖）；v9 语言跟随帖子
             const subCommenterLang = resolveAuthor(subKeys[i]).lang ?? 'zh-Hans';
             const subLang = commentLangFor(postLang, subCommenterLang);
-            let cand =
-              pickTopicComment(`${c.content} ${post.content}`, subLang, usedSub) ??
-              pickGenericComment(subLang, usedSub, `${c.content} ${post.content}`) ??
-              pickGenericComment('zh-Hans', usedSub, `${c.content} ${post.content}`) ??
-              '哈哈哈哈';
-            if (cand !== '哈哈哈哈' && subLang === 'zh-Hans' && postLang === 'zh-Hans') {
+            // v14.2：口癖只加在池子评论上；兜底用尽 → 跳过这条楼中楼
+            const pooled = pickTopicComment(`${c.content} ${post.content}`, subLang, usedSub) ?? pickGenericComment(subLang, usedSub, `${c.content} ${post.content}`);
+            let cand: string | null = pooled;
+            if (cand && subLang === 'zh-Hans' && postLang === 'zh-Hans') {
               cand = maybeForeignFlavor(cand, subCommenterLang);
+              usedSub.add(cand.slice(0, 16));
             }
+            if (!cand) cand = followupComment(post.content, usedSub);
+            if (!cand) return; // forEach 回调内跳过本条楼中楼
             text = cand;
           }
           const subAt = Math.min(Date.now() - Math.floor(Math.random() * 60_000), c.createdAt + (2 + Math.random() * 30) * 60_000);
@@ -2082,28 +2205,19 @@ async function execJob(job: PendingJob): Promise<void> {
         text = '';
       }
       if (!text) {
-        const npc = NPC_DEFS.find((n) => `npc:${n.id}` === authorKey);
-        // v7：兜底也要看帖作答——求推荐帖 → 推荐/同求/避雷池；主题帖 → 主题池；
-        // v9：语言跟随帖子（中文帖人人中文，外语网友带口癖点缀）
+        // v14 兜底重写：旧版「有道理，学到了」「这条我认可」是用户点名的 AI 废话，
+        // 全部废除——兜底也必须锚定：主题池（看帖作答）→ 追问式（带话题锚点）
         const commenterLang = author.lang ?? 'zh-Hans';
         const lang = commentLangFor(postLang, commenterLang);
         const used = new Set<string>();
-        let smart =
-          pickTopicComment(`${parentContent} ${postContent}`, lang, used, target.community) ??
-          pickGenericComment(lang, used, `${parentContent} ${postContent}`);
+        const ctxContent = `${parentContent} ${postContent}`;
+        const pooled = pickTopicComment(ctxContent, lang, used) ?? pickGenericComment(lang, used, ctxContent);
+        let smart: string | null = pooled;
         if (smart && lang === 'zh-Hans' && postLang === 'zh-Hans') {
           smart = maybeForeignFlavor(smart, commenterLang);
         }
-        if (smart) {
-          text = smart;
-        } else {
-          const pool = npc
-            ? npc.replies
-            : lang !== 'zh-Hans'
-              ? ['哈哈哈哈']
-              : ['有意思，蹲一个后续。', '这条我认可。', '顶上去让更多人看到。', '哈哈你这么一说我竟无法反驳。', '有道理，学到了。'];
-          text = pool[Math.floor(Math.random() * pool.length)];
-        }
+        if (!smart) smart = followupComment(ctxContent, used);
+        text = smart || '蹲一个后续，别断更啊';
       }
       const next = { ...forumData() };
       // AI 回复的热度按被回复父帖缩放（评论赞 << 主帖赞；用户的新帖 0 赞 → 回复也几乎 0 赞）
