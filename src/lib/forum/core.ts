@@ -108,6 +108,20 @@ export const POST_MAX = 1000;
 /** 回复字数上限（同上，宽松上限） */
 export const REPLY_MAX = 1000;
 
+/** v27 图文并茂帖：正文中 AI 配图占位符（LLM 按 has_image 在最自然位置插入，
+ *  渲染端按它分段交替上屏「文字段-文字图-文字段」）。 */
+export const IMG_PLACEHOLDER = '[图片]';
+
+/** 剥掉正文里的 [图片] 占位符（评论生成上下文/锚定校验/翻译前使用——
+ *  占位符字样混进锚定词表会把正常评论误杀成「与帖子无关」）。 */
+export function stripImgPh(text: string): string {
+  return text
+    .split(IMG_PLACEHOLDER)
+    .join('')
+    .replace(/[ \t]{2,}/g, ' ')
+    .trim();
+}
+
 // ---------------- 数据模型 ----------------
 
 export type AuthorKey = string; // 'user' | 'char:<contactId>' | 'npc:<id>' | 'official'

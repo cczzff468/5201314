@@ -32,6 +32,7 @@ import { kvGet, kvSet } from '@/lib/ios/idb-kv';
 import {
   COMMUNITY_DEFS,
   GEN_VERSION,
+  IMG_PLACEHOLDER,
   NPC_DEFS,
   PERSONA_ARCHETYPES,
   POST_MAX,
@@ -43,6 +44,7 @@ import {
   renameDynNpc,
   rollEngagement,
   seedBuiltinNpcFallbackNames,
+  stripImgPh,
   unnamedDynKeys,
   unnamedNpcIds,
   type AuthorKey,
@@ -604,15 +606,20 @@ async function llmPolish(): Promise<void> {
       const tag = /#([^#\s]+)#/.exec(t)?.[1];
       const cid = spec.isChar ? (tag ? NPC_COMMUNITY_MAP[tag] ?? null : null) : communityOfPoolText(spec.id, t);
       const post = basePost(authorKey, t, cid, now - (i + 1) * 420_000);
-      // v9 文字图片：LLM 给了合适短句就 canvas 直出一张（每批最多 3 张，失败静默纯文字）
+      // v27 文字图片：has_image 帖的 image_description canvas 直出一张
+      // （纯白底居中文字图；图被丢弃时剥掉 [图片] 占位符防字面上屏）
       const ti = typeof o?.textImage === 'string' ? o.textImage.trim() : '';
-      if (ti.length >= 2 && ti.length <= 40 && ti !== t && imgN < 3) {
+      const imgOk = ti.length >= 4 && ti.length <= 120 && imgN < FEED_TEXTIMG_MAX;
+      if (imgOk) {
         try {
           post.media = [renderTextImage(ti)];
           imgN += 1;
         } catch {
-          /* canvas 不可用等：保持纯文字 */
+          /* canvas 不可用等：剥占位符保持纯文字 */
         }
+      }
+      if (!post.media?.length && post.content.includes(IMG_PLACEHOLDER)) {
+        post.content = stripPlaceholder(post.content);
       }
       next.posts.push(post);
     });
@@ -682,9 +689,11 @@ async function llmPolishSeedComments(seedPostIds: string[]): Promise<void> {
           if (!catchallOk || catchallUsed) continue;
           catchallUsed = true;
         }
-        // v25 领域私货：≥2 个该帖领域之外的关键词 → 串台丢弃（与服务端双保险）
-        if (offTopicIn(s, t.content)) continue;
-        if (!commentAnchored(s, t.content)) continue; // 串台/AI 废话 → 丢弃
+        // v25 领域私货：≥2 个该帖领域之外的关键词 → 串台丢弃（与服务端双保险）；
+        // v27 锚定前剥 [图片] 占位符（防词表污染误杀正常评论）
+        const anchorText = stripImgPh(t.content);
+        if (offTopicIn(s, anchorText)) continue;
+        if (!commentAnchored(s, anchorText)) continue; // 串台/AI 废话 → 丢弃
         seenCt.add(s.slice(0, 16));
         valid.push(s);
       }
@@ -1138,7 +1147,7 @@ async function buildFeedBatch(
       results.push({
         key: spec.key,
         text: content,
-        textImage: ti.length >= 2 && ti.length <= 40 && ti !== content ? ti : undefined,
+        textImage: ti.length >= 4 && ti.length <= 120 ? ti : undefined,
       });
     });
   } catch {
@@ -1192,26 +1201,41 @@ async function buildFeedBatch(
  *  - 时间戳排在现有最老主帖之前（信息流向下无限延伸，旧帖永不消失）；
  *  - 防刷屏：与现有 feed 尾部作者隔开 + 批内绝不连排；时间间隔自然衰减（40分钟~几小时，偶尔隔天）。
  *  返回本次新增条数。 */
-// ---------------- 生成帖子按需配「文字图片」（v9） ----------------
+// ---------------- 生成帖子按需配「文字图片」（v9；v27 图文并茂重写） ----------------
 
-/** 单批最多文字图片数（太多会刷屏，像人人都发金句图） */
-const FEED_TEXTIMG_MAX = 3;
+/** 单批最多文字图片数（太多会刷屏，像人人都发金句图；v27 配图帖比例
+ *  提升——明垦日常/日常分享/实锤爆料必配，故 3→5） */
+const FEED_TEXTIMG_MAX = 5;
 
-/** 给一条新生成的帖子按需配「文字图片」（v9：用户要求的配图方式——
- *  用文字描述图片，即把 LLM 给出的短句 canvas 渲染成白底居中灰字的
- *  文字图，与发布弹层「文字图片」同款观感）：
- *  纯前端直出，零 API 成本、同步完成不阻塞；渲染失败静默保持纯文字。
- *  count 为本批已配图计数（跨帖子共享，封顶 FEED_TEXTIMG_MAX）。 */
+/** 剥掉正文里的 [图片] 占位符并清理多余空白（配图被丢弃时防字面上屏）。 */
+function stripPlaceholder(content: string): string {
+  return content
+    .split(IMG_PLACEHOLDER)
+    .join('')
+    .replace(/[ \t]{2,}/g, ' ')
+    .trim();
+}
+
+/** 给一条新生成的帖子按需配「文字图片」（v27：用户要求的配图方式——
+ *  LLM 按 has_image 输出 image_description（以【视角】开头，30~100 字），
+ *  客户端把它 canvas 渲染成纯白底居中灰字的文字图（与发布弹层「文字图片」
+ *  同款观感），content 里对应位置保留 [图片] 占位符，渲染端分段交替上屏；
+ *  图被丢弃（描述无效/封顶/canvas 失败）时必须剥掉占位符。
+ *  纯前端直出，零 API 成本；count 为本批已配图计数（封顶 FEED_TEXTIMG_MAX）。 */
 function attachTextImage(post: ForumPost, textImage: string | undefined, count: { n: number }): void {
   const ti = textImage?.trim();
-  if (!ti || ti.length < 2 || ti.length > 40 || post.media?.length) return;
-  if (count.n >= FEED_TEXTIMG_MAX) return;
+  const usable = !!ti && ti.length >= 4 && ti.length <= 120 && !post.media?.length && count.n < FEED_TEXTIMG_MAX;
   try {
-    post.media = [renderTextImage(ti)];
-    count.n += 1;
+    if (usable && ti) {
+      post.media = [renderTextImage(ti)];
+      count.n += 1;
+      return; // 配图成功：占位符保留（渲染端分段上屏）
+    }
   } catch {
-    /* canvas 不可用等：保持纯文字 */
+    /* canvas 不可用等：按配图失败处理 */
   }
+  // 配图失败/无效/封顶：剥掉占位符（防字面 [图片] 上屏）
+  if (post.content.includes(IMG_PLACEHOLDER)) post.content = stripPlaceholder(post.content);
 }
 
 /** 主页滑到底、上拉松开 → 生成一批更早的帖子（追加在信息流下方，旧帖永不消失）。 */
@@ -1471,9 +1495,11 @@ async function callSubReplyLayer(
               // v25 称呼/名称串线：拿回复者网名拼称呼/自称网名 → 丢弃
               if (personaBleedIn(s, resolveAuthor(plan.target.authorKey).name, [resolveAuthor(plan.key).name])) return '';
               // v25 领域私货：≥2 个「被回复内容 + 主帖」领域之外的关键词 → 丢弃
-              if (offTopicIn(s, `${plan.target.content} ${ctx.post.content}`)) return '';
+              // v27 锚定前剥 [图片] 占位符（防词表污染误杀）
+              const anchorCtx = stripImgPh(`${plan.target.content} ${ctx.post.content}`);
+              if (offTopicIn(s, anchorCtx)) return '';
               // 锚定校验：必须呼应「被回复的那条 + 主帖」
-              if (!commentAnchored(s, `${plan.target.content} ${ctx.post.content}`)) return '';
+              if (!commentAnchored(s, anchorCtx)) return '';
               return s;
             })
           : [];
@@ -1741,9 +1767,11 @@ async function genCommentBatch(postId: string, report?: (n: number) => void): Pr
               // v25 称呼/名称串线：屿哥（拿评论者网名拼称呼）/自称网名 → 丢弃
               if (personaBleedIn(s, postAuthor.name, commenterNames)) return '';
               // v25 领域私货：≥2 个主帖领域之外的关键词（剧+特调混进保研帖）→ 丢弃
-              if (offTopicIn(s, post.content)) return '';
+              // v27 锚定前剥 [图片] 占位符（防词表污染误杀）
+              const anchorPost = stripImgPh(post.content);
+              if (offTopicIn(s, anchorPost)) return '';
               // v14 锚定校验：串台/AI 废话直接丢弃（与服务端双保险）
-              if (!commentAnchored(s, post.content)) return '';
+              if (!commentAnchored(s, anchorPost)) return '';
               return s;
             })
             .filter(Boolean)
@@ -2087,7 +2115,8 @@ async function execJob(job: PendingJob): Promise<void> {
         // v24 客户端兜底：楼层对话回复 20-80 字（留容差 12~95）——过短/过长直接不发生
         if (text && (text.length < 12 || text.length > 95)) text = '';
         // v26 锚定双保险：必须接得上「用户这条回复 + 用户回复的那条 + 主帖」（与服务端同口径）
-        if (text && !commentAnchored(text, `${parentContent} ${repliedTo?.content ?? ''} ${postContent}`)) text = '';
+        // v27 锚定前剥 [图片] 占位符（防词表污染误杀）
+        if (text && !commentAnchored(text, stripImgPh(`${parentContent} ${repliedTo?.content ?? ''} ${postContent}`))) text = '';
       } catch {
         text = '';
       }

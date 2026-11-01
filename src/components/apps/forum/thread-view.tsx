@@ -32,6 +32,7 @@ import {
   relTime,
   resolveAuthor,
   saveForum,
+  stripImgPh,
   subscribeForum,
   uid,
   REPLY_MAX,
@@ -43,7 +44,7 @@ import { detectMessageLang, requestTranslation } from '@/lib/chat-translate';
 import { useSettings } from '@/lib/ios/store';
 import { XAvatar, XIcons, VerifiedBadge } from './shared';
 import { useForum } from './ctx';
-import { PostMedia, PollBlock, LocationLine } from './feed';
+import { PostBodyMedia, PollBlock, LocationLine } from './feed';
 
 /** 论坛翻译请求 + 超时保护 + 限流自动重试。
  *  服务端单轮预算 ~2 分钟（高优会话锁：重试期间后台生成暂停、配额恢复）；
@@ -610,14 +611,15 @@ export function ThreadView({ postId }: { postId: string }) {
     inputRef.current?.focus();
   };
 
-  /** AI 翻译正文：中文 → 英语，外语 → 中文（带缓存与内置模型兜底；25s 超时保护） */
+  /** AI 翻译正文：中文 → 英语，外语 → 中文（带缓存与内置模型兜底；25s 超时保护）；
+   *  v27：翻译前剥 [图片] 占位符（译文纯文字，配图仍由 PostBodyMedia 渲染不丢） */
   const runTranslate = () => {
     // 已有译文：切换展示/收起
     if (tr.text) {
       setTr((s) => ({ ...s, shown: !s.shown }));
       return;
     }
-    const text = post.content.trim();
+    const text = stripImgPh(post.content);
     if (!text || tr.loading) return;
     setTr({ loading: true, text: null, shown: false });
     translateForum(text)
@@ -708,10 +710,9 @@ export function ThreadView({ postId }: { postId: string }) {
               </div>
             </div>
           </div>
-          {/* 正文：翻译激活时原位替换为译文（X 官方行为），未翻译/收起时显示原文 */}
-          <p className="mt-2.5 whitespace-pre-wrap break-words text-[17px] leading-[1.42]" style={{ color: t.text }}>
-            {tr.shown && tr.text ? tr.text : post.content}
-          </p>
+          {/* 正文：翻译激活时原位替换为译文（X 官方行为），未翻译/收起时显示原文；
+              v27 图文并茂：含 [图片] 占位符时按「正文段-文字图-正文段」分段交替渲染 */}
+          <PostBodyMedia text={tr.shown && tr.text ? tr.text : post.content} media={post.media} />
           {/* 翻译标注行（译文已原位替换正文） */}
           {tr.text && tr.shown && (
             <p className="mt-1.5 flex items-center gap-1.5 text-[13px]" style={{ color: t.secondary }}>
@@ -719,8 +720,7 @@ export function ThreadView({ postId }: { postId: string }) {
               由 AI 翻译
             </p>
           )}
-          {/* 主帖附图 / 投票 / 位置（与帖子卡同规格） */}
-          {(post.media ?? []).length > 0 && <PostMedia media={post.media!} />}
+          {/* 主帖投票 / 位置（附图已由 PostBodyMedia 分段/网格渲染） */}
           {post.poll && <PollBlock post={post} />}
           {post.location && <div className="mt-1"><LocationLine name={post.location} /></div>}
           {/* 版块来源引用卡已按用户要求删除（不再显示「来自版块 · 点击进入逛逛」） */}

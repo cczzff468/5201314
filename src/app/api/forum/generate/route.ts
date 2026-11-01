@@ -25,10 +25,22 @@ import { NextResponse } from 'next/server';
  *    第 N 项对应第 N 位作者，无效项 content 为空串由客户端池子兜底）；
  *   { items: string[] }（comments/subreplies/names 批量）；{ text: string }（reply/dm）
  *
+ * v27（用户 Prompt 规范：图文并茂）posts 分支新增配图能力：
+ * - 输出五字段 {thought, topic, content, has_image, image_description}：
+ *   明星日常/日常分享/八卦爆料（有实锤）必配图，其余风格视内容而定；
+ * - has_image=true 时 content 在最自然位置插恰好一个 [图片] 占位符，
+ *   image_description 以【视角】开头（自拍/偷拍/第一人称/远景/特写），
+ *   30~100 字，正文提到的物品必须在描述里出现；
+ * - 图片以「纯白留白+文字居中」的文字图渲染（textimg.ts canvas 直出），
+ *   textImage 字段复活＝image_description（≤110 字硬校验）；
+ * - 三元校验：占位符+has_image+有效描述缺一即剥占位符防字面上屏；
+ * - 评论三分支（comments/subreplies/multiComments）拼 Prompt 前统一
+ *   剥掉 [图片] 占位符（防锚定词表污染与「图呢」式迷幻评论）。
+ *
  * v23（用户 Prompt 规范：超级网民/八种网友风格/内部思考机制）posts 分支重写：
  * - 输出 {thought, topic, content} 三字段 JSON：thought 内部思考不上屏直接丢弃；
  *   topic 话题标签规范化成 #xx# 追加到正文尾（客户端版块归类/评论锚定依赖内嵌标签）；
- *   textImage 退役（恒空串，字段保留兼容客户端）；
+ *   textImage v23 退役、v27 携 image_description 复活（图文并茂）；
  * - 字数 30~1000 → 10~1000（短帖 10~100 字精悍有梗，长帖 300~1000 剧情跌宕起伏）；
  * - 八种风格公式与示例提示对齐用户最新规范（擦边＝身体接触停留在脖颈/锁骨/指尖等）。
  *
@@ -60,6 +72,7 @@ import { NextResponse } from 'next/server';
 import { completeWithFallback, extractUpstreamConfig, parseLooseJSON, type LLMMessage, type UpstreamConfig } from '@/lib/server-llm';
 import { extractThinkBlocks } from '@/lib/think-filter';
 import { commentAnchored, extractTopicWords, isBannedFiller, isFlamePost, offTopicIn, personaBleedIn, postAllowsCatchall, universalPhraseIn } from '@/lib/forum/topic';
+import { IMG_PLACEHOLDER, stripImgPh } from '@/lib/forum/core';
 
 /** 语言代码 → 中文名（与客户端 FORUM_LANG_LABELS 同口径） */
 const LANG_LABELS: Record<string, string> = {
@@ -244,7 +257,8 @@ function extractThoughtComments(raw: string): string[] {
  *  帖子末尾的话题标签/细节往往是锚定评论的关键）。 */
 function anchorHeadOf(post: { authorName?: string; content?: string; mediaDesc?: string }): string {
   const owner = typeof post.authorName === 'string' && post.authorName.trim() ? post.authorName.trim().slice(0, 24) : '楼主';
-  const content = typeof post.content === 'string' ? post.content.slice(0, 1000) : '';
+  // v27：剥掉 [图片] 占位符（防「图呢/看不到图」式迷幻评论与锚定词表污染）
+  const content = typeof post.content === 'string' ? stripImgPh(post.content).slice(0, 1000) : '';
   const tags = (content.match(/#[^#\s]{1,14}#/g) ?? []).join(' ');
   const desc = typeof post.mediaDesc === 'string' && post.mediaDesc.trim() ? `（帖子配图内容：${post.mediaDesc.slice(0, 160)}）` : '';
   return (
@@ -257,9 +271,11 @@ function anchorHeadOf(post: { authorName?: string; content?: string; mediaDesc?:
 // ---------------- posts 分支：严格 JSON 解析 + 校验清洗（v7 结构性灾难修复） ----------------
 
 interface PostGenItem {
-  /** 帖子正文（清洗后；无效/作废为空串——客户端按空位用文案池兜底） */
+  /** 帖子正文（清洗后；无效/作废为空串——客户端按空位用文案池兜底）。
+   *  v27：配图帖正文含恰好一个 [图片] 占位符（渲染端分段上屏） */
   content: string;
-  /** v23 起恒为空串：用户规范输出只有 thought/topic/content 三字段，文字图特性退役（字段保留兼容客户端） */
+  /** v27 复活：has_image 帖的图片描述（≤110字，以【视角】开头）——客户端
+   *  canvas 渲染成纯白底居中文字图（与发布弹层「文字图片」同款观感） */
   textImage: string;
 }
 
@@ -393,8 +409,9 @@ function pickPostStyle(): (typeof POST_STYLES)[number] {
 
 /** 从模型回复中提取严格 JSON 帖子数组（容忍 ``` 围栏与前后杂文本；非数组/解析失败返回 []）。
  *  v23：模型按用户规范输出 {thought, topic, content} 三字段——thought 是内部
- *  思考不上屏直接丢弃；topic 是话题标签（alignPostItems 里规范化后追加进正文）。 */
-function extractPostItems(raw: string): { content: string; topic: string }[] {
+ *  思考不上屏直接丢弃；topic 是话题标签（alignPostItems 里规范化后追加进正文）。
+ *  v27：新增 has_image/image_description 两字段（图文并茂配图）。 */
+function extractPostItems(raw: string): { content: string; topic: string; hasImage: boolean; imageDesc: string }[] {
   const text = extractThinkBlocks(raw ?? '').text;
   const arr = parseLooseJSON<unknown[]>(text);
   if (!Array.isArray(arr)) return [];
@@ -404,9 +421,11 @@ function extractPostItems(raw: string): { content: string; topic: string }[] {
       return {
         content: typeof rec.content === 'string' ? rec.content : '',
         topic: typeof rec.topic === 'string' ? rec.topic.trim().slice(0, 30) : '',
+        hasImage: rec.has_image === true,
+        imageDesc: typeof rec.image_description === 'string' ? rec.image_description.trim().slice(0, 110) : '',
       };
     }
-    return { content: '', topic: '' };
+    return { content: '', topic: '', hasImage: false, imageDesc: '' };
   });
 }
 
@@ -422,9 +441,11 @@ function normalizeTopicTag(raw: string, content: string): string {
 
 /** 解析结果 → 与作者一一对齐的清洗后数组（第 i 项对应第 i 位作者；
  *  无效项置空串；批内规范化去重——前缀剥离后同稿必撞。
- *  v23：LLM 的 topic 字段规范化成 #xx# 追加到正文尾（同款标签已在正文则不重复） */
+ *  v23：LLM 的 topic 字段规范化成 #xx# 追加到正文尾（同款标签已在正文则不重复）；
+ *  v27：配图三元校验（占位符+has_image+有效描述）——齐备才保留图与占位符，
+ *  否则剥掉正文中所有 [图片] 字样（防字面占位符上屏） */
 function alignPostItems(
-  parsed: { content: string; topic: string }[],
+  parsed: { content: string; topic: string; hasImage: boolean; imageDesc: string }[],
   expect: number,
   allNames: string[],
   seenFp: Set<string>,
@@ -438,16 +459,33 @@ function alignPostItems(
       out.push({ content: '', textImage: '' });
       continue;
     }
+    // v27 配图三元校验：占位符 + has_image + 有效描述（4~110 字）三者齐备才配图
+    const desc = (parsed[i]?.imageDesc ?? '').trim();
+    const hasPh = content.includes(IMG_PLACEHOLDER);
+    const imgOk = !!(parsed[i]?.hasImage && hasPh && desc.length >= 4 && desc.length <= 110);
+    let body = content;
+    if (hasPh) {
+      // 恰好保留一个占位符（多余的剥掉）；无图时全剥（防字面 [图片] 上屏）
+      const parts = content.split(IMG_PLACEHOLDER);
+      body = (imgOk ? parts[0] + IMG_PLACEHOLDER + parts.slice(1).join('') : parts.join(''))
+        .replace(/[ \t]{2,}/g, ' ')
+        .trim();
+    }
+    // 剥占位符后跌破 10 字铁律 = 废稿（走客户端池子兜底）
+    if (body.replace(/\s+/g, '').length < 10) {
+      out.push({ content: '', textImage: '' });
+      continue;
+    }
     // 批内规范化去重（去空白后前 30 字指纹；同稿不同前缀也会在这里撞上）
-    const fp = content.replace(/\s+/g, '').slice(0, 30);
+    const fp = body.replace(/\s+/g, '').slice(0, 30);
     if (seenFp.has(fp)) {
       out.push({ content: '', textImage: '' });
       continue;
     }
     seenFp.add(fp);
     // v23：topic 话题标签规范化成 #xx# 追加到正文尾（客户端版块归类/评论锚定依赖内嵌标签）
-    const tag = normalizeTopicTag(parsed[i]?.topic ?? '', content);
-    out.push({ content: tag ? `${content} ${tag}` : content, textImage: '' });
+    const tag = normalizeTopicTag(parsed[i]?.topic ?? '', body);
+    out.push({ content: tag ? `${body} ${tag}` : body, textImage: imgOk ? desc : '' });
   }
   return out;
 }
@@ -506,10 +544,11 @@ export async function POST(req: Request) {
             '# 输出格式铁律（最高优先级）\n' +
             '只输出一个严格合法的 JSON 数组，此外禁止任何文字、解释或代码围栏：\n' +
             `- 数组恰好包含 ${expect} 个对象，第 N 个对象对应第 N 位网友，顺序不能乱；\n` +
-            '- 每个对象只有三个字段：{"thought":"内部思考","topic":"话题标签","content":"帖子正文"}；\n' +
-            '- thought（内部思考过程，不上屏）：按「本次选择的风格是__，场景设定在__，我要塑造的人设是__，核心情绪是__，包含的细节数据有__」逐项填满，每个空都填具体内容；\n' +
+            '- 每个对象只有五个字段：{"thought":"内部思考","topic":"话题标签","content":"帖子正文","has_image":true或false,"image_description":"图片描述"}；\n' +
+            '- thought（内部思考过程，不上屏）：按「本次选择的风格是__，场景设定在__，我要塑造的人设是__，核心情绪是__，包含的细节数据有__，是否需要配图（配图则写清视角）」逐项填满，每个空都填具体内容；\n' +
             '- topic（话题标签）：1~14 字、#开头，贴着这条帖子讲的具体事情起（如 #娱乐圈爆料、#打工人日常、#追星日记），跟随该帖发帖语言，禁止与该帖正文里已有的标签重复；\n' +
-            '- content（帖子正文）：这位网友发的帖子正文本身；字符串内换行用 \\n 转义，禁止出现未转义的引号。\n' +
+            '- content（帖子正文）：这位网友发的帖子正文本身；字符串内换行用 \\n 转义，禁止出现未转义的引号；\n' +
+            '- has_image（是否配图）与 image_description（图片描述）：遵守下方配图规则。\n' +
             '# 核心原则\n' +
             '1. 拒绝新闻稿！拒绝摘要！必须是第一人称（或偷窥第三人称）视角的鲜活表达，像当事人或目击者喘着气随手打出来的，绝不能写成新闻摘要；\n' +
             '2. 细节与情绪至上：帖子必须是一件有血有肉、刚发生完或正在发生的具体的事——四要素缺一即废稿：\n' +
@@ -521,6 +560,13 @@ export async function POST(req: Request) {
             '4. 内部思考机制：动笔前必须先在 thought 里想清楚：你是谁？你在哪？发生了什么？你的情绪是什么？\n' +
             '5. 单主题铁律：一条帖子只讲一件事——讲咖啡就只讲咖啡，讲剧宣就只讲剧宣，讲澄清就只讲澄清。严禁把多个不相关内容（日常梗＋剧宣＋澄清谣言＋求推荐＋代言）塞进同一条——那是营销号的宣发清单，不是人发的帖子；结尾自然带一句自拍描述或提问可以，绝不再塞第二件事；\n' +
             '6. 身份统一：发帖人从头到尾是同一个人——打工人帖里不许突然冒出片场/导演/演戏，普通网友帖不许写着写着变成明星视角；身份在 thought 里定死，正文全程不变。\n' +
+            '# 配图规则（图文并茂，v27）\n' +
+            '帖子可以配图——图片会渲染成「文字图」：纯白底、极简灰字居中排布的图卡（网友常发的那种文字图）。是否配图、怎么描述遵守：\n' +
+            '1. 是否需要配图：「明星日常」必带自拍描述→必配图；「日常分享」提到合影/自拍/生活场景→必须配图；「八卦爆料」自称拍到实锤→必须配图；「暴躁吐槽」「追星发疯」「搞抽象」「擦边」「阴暗爬行」视内容而定（吐槽离谱账单/发疯晒图可配，纯文字发疯可不配）；一批里图文穿插，不要条条带图，也不要全无图；\n' +
+            '2. 视角设定：image_description 必须以视角开头：【自拍视角】【偷拍视角】【第一人称视角】【远景】【特写】任选其一；\n' +
+            '3. 绝不脱离正文：正文里提到的关键物品（咖啡、剧本、戒指、猪脚饭、演唱会灯牌……）图片描述里必须出现；\n' +
+            '4. image_description 写法：has_image=true 时必填——以【视角】开头，写清主体/光线/细节，30~100 字，像这张图真实拍到的画面；has_image=false 时必须是空串 ""；\n' +
+            `5. [图片] 占位符：has_image=true 时，content 里必须在最自然的位置（叙事停顿处/提到配图物品处）插入恰好一个「${IMG_PLACEHOLDER}」占位符，前后文字自然衔接；has_image=false 时 content 里绝对禁止出现「${IMG_PLACEHOLDER}」字样。\n` +
             '# content 纯净性铁律（违反即废稿）\n' +
             'content 是帖子正文这一件事本身，里面绝对禁止：\n' +
             '- 出现任何人的网名/名字/名字+冒号前缀（包括这位网友自己的名字——「某某：」式开头是严重错误，发帖人名字由系统自动展示在头像旁，不需要你写）；\n' +
@@ -563,7 +609,7 @@ export async function POST(req: Request) {
         },
         {
           role: 'user',
-          content: `请为下面 ${expect} 位论坛网友各写一条帖子（每条严格按分配的「发帖风格」公式写，10~1000 字，场景/动作/情绪/数据四要素齐备；先在 thought 里完成内部思考，再起 topic 话题标签，最后写 content 正文）：输出恰好 ${expect} 个对象的 JSON 数组（第 N 个对象对应第 N 位网友，顺序一致）：\n${spec}${avoidLine}\n${bjTimeLine()}`,
+          content: `请为下面 ${expect} 位论坛网友各写一条帖子（每条严格按分配的「发帖风格」公式写，10~1000 字，场景/动作/情绪/数据四要素齐备；先在 thought 里完成内部思考，再起 topic 话题标签，然后写 content 正文，最后按配图规则定 has_image 与 image_description——需要配图的帖在正文最自然的位置插一个 [图片] 占位符）：输出恰好 ${expect} 个对象的 JSON 数组（第 N 个对象对应第 N 位网友，顺序一致）：\n${spec}${avoidLine}\n${bjTimeLine()}`,
         },
       ];
       const raw = (await completeWithFallback(config, messages)).text;
@@ -579,7 +625,7 @@ export async function POST(req: Request) {
               { role: 'assistant', content: raw.slice(0, 1500) },
               {
                 role: 'user',
-                content: `你上一次的输出不是合法的 JSON 数组（或大量对象无效）。重新输出：恰好 ${expect} 个对象、只含 thought/topic/content 三个字段的 JSON 数组，除 JSON 本身外禁止任何文字，不要代码围栏。再次提醒：content 里不能出现任何人的网名或名字，不能把别人的评论混进正文；每条严格 10~1000 字，严格按分配的发帖风格公式写，必须同时具备场景/动作/情绪/数据四要素，topic 贴着内容起。`,
+                content: `你上一次的输出不是合法的 JSON 数组（或大量对象无效）。重新输出：恰好 ${expect} 个对象、只含 thought/topic/content/has_image/image_description 五个字段的 JSON 数组，除 JSON 本身外禁止任何文字，不要代码围栏。再次提醒：content 里不能出现任何人的网名或名字，不能把别人的评论混进正文；每条严格 10~1000 字，严格按分配的发帖风格公式写，必须同时具备场景/动作/情绪/数据四要素，topic 贴着内容起；has_image=true 的帖子 content 里必须插恰好一个 [图片] 占位符且 image_description 以【视角】开头 30~100 字，has_image=false 的帖 content 里绝不出现 [图片] 字样且 image_description 为空串。`,
               },
             ])
           ).text;
@@ -642,7 +688,8 @@ export async function POST(req: Request) {
             .map((p) => ({
               id: typeof p.id === 'string' ? p.id.slice(0, 32) : '',
               authorName: typeof p.authorName === 'string' ? p.authorName.slice(0, 24) : '有人',
-              content: typeof p.content === 'string' ? p.content.slice(0, 1000) : '',
+              // v27：剥 [图片] 占位符（锚定词表/引战检测/话题词提取统一用干净正文）
+              content: typeof p.content === 'string' ? stripImgPh(p.content).slice(0, 1000) : '',
               lang: typeof p.lang === 'string' && LANG_LABELS[p.lang] ? p.lang : 'zh-Hans',
             }))
             .filter((p) => p.id && p.content)
@@ -756,7 +803,7 @@ export async function POST(req: Request) {
         : [];
       if (!post || !personas.length) return NextResponse.json({ error: '参数为空' }, { status: 400 });
       // v14 核心话题词（用户要求：生成评论前必须先提取；每条评论必须包含或呼应）
-      const postContentRaw = typeof post.content === 'string' ? post.content : '';
+      const postContentRaw = typeof post.content === 'string' ? stripImgPh(post.content) : '';
       const topicWords = extractTopicWords(postContentRaw);
       const topicLine = topicWords.length
         ? `\n【本帖核心话题词（每条评论至少呼应其一，帖里没提的领域一个字不许出现）】${topicWords.join('、')}`

@@ -9,7 +9,7 @@
  * 「···」更多按钮 → 底部弹层菜单（推荐/不感兴趣/举报，主框架渲染）。
  */
 
-import { memo } from 'react';
+import { Fragment, memo } from 'react';
 import {
   castVote as castVoteCore,
   countShort,
@@ -137,6 +137,54 @@ export function PostMedia({ media }: { media: string[] }) {
         />
       ))}
     </div>
+  );
+}
+
+/** v27 图文并茂正文：text 含 [图片] 占位符且有配图 → 按「文字段-图-文字段」
+ *  分段交替上屏（AI 配图帖的图＝纯白底居中文字图，1:1 原样不裁切）；
+ *  无占位符（用户手发帖/译文）→ 原样正文 + PostMedia 网格（图在正文后，X 官方观感）。
+ *  thread 详情页与 feed 帖子卡共用；clamp 仅时间线截断用（分段时只裁第一段）。 */
+export function PostBodyMedia({
+  text,
+  media,
+  clamp = false,
+}: {
+  text: string;
+  media?: string[];
+  clamp?: boolean;
+}) {
+  const imgs = media ?? [];
+  if (!text.includes('[图片]') || !imgs.length) {
+    return (
+      <>
+        <PostText text={text} clamp={clamp} />
+        {imgs.length > 0 && <PostMedia media={imgs} />}
+      </>
+    );
+  }
+  const segs = text.split('[图片]');
+  return (
+    <>
+      {segs.map((seg, i) => (
+        <Fragment key={i}>
+          {seg.trim() && <PostText text={seg} clamp={clamp && i === 0} />}
+          {i < segs.length - 1 && (
+            <div
+              className="my-2.5 overflow-hidden rounded-2xl border bg-white"
+              style={{ borderColor: 'rgba(137,151,166,0.35)' }}
+            >
+              <img
+                src={imgs[Math.min(i, imgs.length - 1)]}
+                alt="帖子配图（文字图）"
+                className="aspect-square w-full select-none"
+                draggable={false}
+                loading="lazy"
+              />
+            </div>
+          )}
+        </Fragment>
+      ))}
+    </>
   );
 }
 
@@ -302,8 +350,8 @@ export const PostCard = memo(function PostCard({ post, onOpen }: { post: ForumPo
           )}
           {/* v8：按用户要求移除帖子名下方的社区来源标签（#影视片单# 等），
               时间线更贴近 X 官方（帖子只显示名字行 + 正文） */}
-          <PostText text={post.content} clamp={post.content.length > 240} />
-          {media.length > 0 && <PostMedia media={media} />}
+          {/* v27 图文并茂：含 [图片] 占位符时正文-文字图-正文分段交替渲染 */}
+          <PostBodyMedia text={post.content} media={media} clamp={post.content.length > 240} />
           {post.poll && <PollBlock post={post} />}
           {post.location && <LocationLine name={post.location} />}
           {/* 定时标记（列表一般不会出现未到时间的帖子；详情打开时可见） */}
