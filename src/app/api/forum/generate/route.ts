@@ -5,9 +5,11 @@ import { NextResponse } from 'next/server';
  *
  * POST {
  *   config?: UpstreamConfig,             // 设置 App 的用户 API；缺省 SDK 兜底
- *   kind: 'posts' | 'reply' | 'dm' | 'comments' | 'subreplies' | 'names',
+ *   kind: 'posts' | 'reply' | 'dm' | 'comments' | 'subreplies' | 'names' | 'multiComments',
  *   items?: { name, persona?, community?, topic?, lang? }[],  // posts：批量生成多位作者的帖子（一次最多 24 条；lang = 惯用语言）
  *   count?: number,                     // names：生成几个网名（1~30）；comments：生成几条评论（10~30）
+ *   posts?: { id, authorName, content, lang }[],       // multiComments：一批帖子各生成几条一级评论（播种期专用，一次 LLM 调用）
+ *   perPost?: number,                   // multiComments：每帖几条评论（3~8）
  *   author?: { name, persona?, lang? },  // reply/dm：说话人（lang = 惯用语言）
  *   parent?: { authorName, content },   // reply：被回复的帖子/评论
  *   postContent?: string,               // reply：所在主帖内容（多轮对话上下文）
@@ -206,12 +208,17 @@ async function batchWithRetry(config: UpstreamConfig | null, messages: LLMMessag
   return list;
 }
 
-/** 帖子/评论正文行（含配图描述时拼接） */
-function postLine(post: { authorName?: string; content?: string; mediaDesc?: string } | undefined): string {
-  const who = post?.authorName ?? '有人';
-  const text = typeof post?.content === 'string' ? post.content.slice(0, 400) : '';
-  const desc = typeof post?.mediaDesc === 'string' && post.mediaDesc.trim() ? `（帖子配图内容：${post.mediaDesc.slice(0, 160)}）` : '';
-  return `${who}发的帖子：「${text}」${desc}`;
+/** v15（用户强制要求的 Prompt 开头）：把「你现在是一个网友，你正在看这篇帖子…」
+ *  放在用户消息最开头，楼主的【帖子正文】和【话题标签】原封不动嵌入
+ *  （不再截断 400 字——帖子末尾的话题标签/细节往往是锚定评论的关键）。 */
+function anchorHeadOf(post: { authorName?: string; content?: string; mediaDesc?: string }): string {
+  const content = typeof post.content === 'string' ? post.content.slice(0, 1000) : '';
+  const tags = (content.match(/#[^#\s]{1,14}#/g) ?? []).join(' ');
+  const desc = typeof post.mediaDesc === 'string' && post.mediaDesc.trim() ? `（帖子配图内容：${post.mediaDesc.slice(0, 160)}）` : '';
+  return (
+    `你现在是一个网友，你正在看这篇帖子：【${content}】${tags ? `（帖子话题标签：${tags}）` : ''}${desc}。` +
+    `请针对这篇帖子的具体内容发表评论。如果评论内容与帖子无关，生成将直接失败。`
+  );
 }
 
 // ---------------- posts 分支：严格 JSON 解析 + 校验清洗（v7 结构性灾难修复） ----------------
@@ -564,6 +571,89 @@ export async function POST(req: Request) {
       return NextResponse.json({ items: list });
     }
 
+    if (kind === 'multiComments') {
+      // v15 新增：一批帖子各生成几条一级评论（播种期用——旧版首刷评论从写死的
+      // 主题池随机抽，是「应援色帖下考研/图书馆/代拍评论」串台的根源；现在
+      // 改为一次 LLM 调用按每条帖子的具体内容实时生成）。
+      // POST { posts: [{ id, authorName, content, lang }], perPost } → { items: [{ postId, comments[] }] }
+      const posts = Array.isArray(body.posts)
+        ? (body.posts as Record<string, unknown>[])
+            .slice(0, 16)
+            .map((p) => ({
+              id: typeof p.id === 'string' ? p.id.slice(0, 32) : '',
+              authorName: typeof p.authorName === 'string' ? p.authorName.slice(0, 24) : '有人',
+              content: typeof p.content === 'string' ? p.content.slice(0, 1000) : '',
+              lang: typeof p.lang === 'string' && LANG_LABELS[p.lang] ? p.lang : 'zh-Hans',
+            }))
+            .filter((p) => p.id && p.content)
+        : [];
+      const perPost = Math.min(Math.max(Math.floor(Number(body.perPost) || 5), 3), 8);
+      if (!posts.length) return NextResponse.json({ error: 'posts 为空' }, { status: 400 });
+      const spec = posts
+        .map((p, i) => {
+          const tags = (p.content.match(/#[^#\s]{1,14}#/g) ?? []).join(' ');
+          const tw = extractTopicWords(p.content);
+          return (
+            `${i + 1}. postId=${p.id}｜${p.authorName}发的帖子：【${p.content}】` +
+            `${tags ? `（话题标签：${tags}）` : ''}${tw.length ? `｜核心话题词：${tw.join('、')}` : ''}`
+          );
+        })
+        .join('\n\n');
+      const messages: LLMMessage[] = [
+        {
+          role: 'system',
+          content:
+            // v15（用户强制要求）：Prompt 开头强制锚定
+            '你现在是一个网友，你正在逐条看帖子并给每一条写评论；任何一条评论与对应帖子的内容无关 = 生成直接失败。' +
+            '你在为一个中文论坛（X/Twitter 风格广场）的多条帖子批量生成网友评论。' +
+            '【最高优先级·逐帖锚定（严禁串台）】用户消息里给出了每条帖子的完整正文、话题标签和核心话题词：' +
+            '\n- 每条评论只能围绕「自己对应的那条帖子」讲的那件具体的事展开，必须包含或呼应该帖的核心话题词；' +
+            '\n- 每条帖子自成一体，绝不被其他帖子带偏：A 帖聊应援色吵架，A 的评论里就不能出现考研/图书馆/代拍/装机/打工；B 帖聊熬夜追剧，B 的评论就只能聊追剧/剧情/演员/失眠；' +
+            '\n- 帖子没提到的领域一个字都不许出现；禁止万金油空评（「说得好」「支持」「有道理」）。' +
+            '\n【语言铁律】评论语言跟随对应帖子语言：中文帖必须以简体中文为主体，最多偶尔夹杂 1-3 个外文字符（www、ㅋㅋ、草），绝对禁止整句外语。' +
+            '\n【看帖作答】原帖在求推荐/求助时，评论必须正面回答（具体名字+理由 / 同求 / 避雷），不能答非所问。' +
+            '\n【格式铁律】一级评论：绝对禁止以「@任何人」开头，绝对禁止带「回复」字样；禁止 emoji 和任何格式标记。' +
+            '\n评论区六种人（每条帖子的评论里自然混搭，有好有坏、有捧有踩）：共鸣党（顺着楼主聊）/ 无脑杠精（围绕帖子抬杠）/ 课代表（整理）/ 理中客（等后续）/ 乐子人（起哄）/ 同好（晒同类经历）。' +
+            '\n【AI 废话黑名单（出现即废稿）】「楼主说的太对了，我也是这么想的」「太对了哈哈哈」「只有我一个人觉得」「笑死，真的是这样」「总的来说」「不可否认」「确实如此」「我们应该」「首先其次最后」「支持」「说得对」「有道理」及纯笑声空评；评论必须有具体观点或信息。' +
+            '\n【网感】乐、笑死、xswl、u1s1、真下头、蚌埠住了、破防了；可以没头没尾、可以全用感叹号/问号、可以有错别字。' +
+            `【输出格式（最高优先级）】只输出一个严格合法的 JSON 数组，此外禁止任何文字、解释或代码围栏：\n[{"postId":"输入的 postId 原样照抄","comments":["评论1","评论2"]}]` +
+            `\n- 数组恰好 ${posts.length} 个对象，顺序与输入列表一致，postId 必须与输入完全相同；` +
+            `\n- 每个对象的 comments 恰好 ${perPost} 条，每条一两句话、长短错落、口吻各不相同。`,
+        },
+        {
+          role: 'user',
+          content: `你现在是一个网友，你正在逐条看这些帖子并分别评论。请针对每篇帖子的具体内容发表评论——评论内容与帖子无关，生成将直接失败。\n\n帖子列表：\n${spec}\n\n请按系统指令输出 JSON 数组（每个 postId 各 ${perPost} 条评论）。${bjTimeLine()}`,
+        },
+      ];
+      const raw = (await completeWithFallback(config, messages)).text;
+      const parsed = parseLooseJSON<unknown[]>(extractThinkBlocks(raw ?? '').text);
+      const byId = new Map(posts.map((p) => [p.id, p]));
+      const out = posts.map((p) => ({ postId: p.id, comments: [] as string[] }));
+      if (Array.isArray(parsed)) {
+        for (const o of parsed) {
+          if (!o || typeof o !== 'object' || Array.isArray(o)) continue;
+          const rec = o as Record<string, unknown>;
+          const pid = typeof rec.postId === 'string' ? rec.postId : '';
+          const post = byId.get(pid);
+          const target = out.find((x) => x.postId === pid);
+          if (!post || !target) continue;
+          const arr = Array.isArray(rec.comments) ? rec.comments : [];
+          const seen = new Set(target.comments.map((c) => c.slice(0, 16)));
+          for (const c of arr) {
+            if (typeof c !== 'string') continue;
+            const s = sanitizeCommentText(stripReplyPrefix(c));
+            if (s.length < 2 || seen.has(s.slice(0, 16))) continue;
+            if (violatesCommentLang(s, post.lang)) continue;
+            if (!commentAnchored(s, post.content)) continue;
+            seen.add(s.slice(0, 16));
+            target.comments.push(s);
+            if (target.comments.length >= perPost) break;
+          }
+        }
+      }
+      return NextResponse.json({ items: out });
+    }
+
     if (kind === 'comments' || kind === 'subreplies') {
       const post = body.post as { authorName?: string; content?: string; mediaDesc?: string; lang?: string } | undefined;
       // 帖子语言（v9：评论语言必须跟随帖子语言——中文帖全中文，外语帖才允许外语评论）
@@ -579,7 +669,6 @@ export async function POST(req: Request) {
             }))
         : [];
       if (!post || !personas.length) return NextResponse.json({ error: '参数为空' }, { status: 400 });
-      const base = postLine(post);
       // v14 核心话题词（用户要求：生成评论前必须先提取；每条评论必须包含或呼应）
       const postContentRaw = typeof post.content === 'string' ? post.content : '';
       const topicWords = extractTopicWords(postContentRaw);
@@ -606,12 +695,15 @@ export async function POST(req: Request) {
           {
             role: 'system',
             content:
+              // v15（用户强制要求）：Prompt 开头强制锚定
+              '你现在是一个网友，你正在看一篇帖子，只针对这篇帖子的具体内容发表评论；评论内容与帖子无关 = 生成直接失败。' +
               '你在为一个中文论坛（X/Twitter 风格广场）的帖子批量生成网友评论。' +
-              '【最高优先级·核心话题词锚定（严禁串台）】用户消息里给出了本帖的「核心话题词」：' +
-              '\n- 动笔前先读懂楼主这条帖子讲的是哪一件具体的事（如：熬夜追剧、某顶流塌房、油耗高想卖车、猫吐了、剧荒求推荐）；' +
-              '\n- 每条评论必须至少包含或直接呼应一个核心话题词——楼主熬夜追剧，评论只能围绕追剧/剧情/演员/失眠熬不动；' +
-              '\n- 帖子没提到的领域一个字都不许出现：楼主聊看剧，评论里出现装机、打工、试驾、健身、考研任何一个词 = 串台废稿；' +
+              '【最高优先级·核心话题词锚定（严禁串台）】用户消息开头原封不动给出了楼主的帖子正文和话题标签，末尾给出了本帖的「核心话题词」：' +
+              '\n- 动笔前先读懂楼主这条帖子讲的是哪一件具体的事（如：应援色吵架、熬夜追剧、某顶流塌房、油耗高想卖车、猫吐了、剧荒求推荐）——每条评论只能围绕这件事本身展开；' +
+              '\n- 每条评论必须至少包含或直接呼应一个核心话题词——楼主聊应援色吵架，评论只能聊应援色/这两家粉丝/吵架这件事；楼主熬夜追剧，评论只能聊追剧/剧情/演员/失眠熬不动；' +
+              '\n- 帖子没提到的领域一个字都不许出现：楼主聊应援色，评论里出现考研/图书馆/代拍/装机/打工/试驾任何一个词 = 串台废稿；楼主聊看剧，评论里出现装机、打工、试驾、健身、考研任何一个词 = 串台废稿；' +
               '\n- 禁止不指向帖子具体内容的万金油空评（「说得好」「支持」「有道理」这类等于没说）。' +
+              '\n【人设边界（v15）】人设只决定说话的口吻和语气，绝对不许把人设自己领域的话题带进评论——考研人看应援色帖也只能聊应援色，打工人看八卦帖也只能聊八卦；评论者人设的话题（考研/装机/打工等）帖子没提就一个字不许出现。' +
               '\n【语言铁律】评论语言严格跟随帖子语言：' +
               `\n- 这是${langLabel(postLang)}帖子${postLang === 'zh-Hans' ? '：所有评论必须以简体中文为主体，最多偶尔夹杂 1-3 个外文字符（www、ㅋㅋ、草、hhh 这种口癖级点缀），绝对禁止整句英语/日语/韩语/繁体中文的评论' : '：评论用该语言写，要像母语网友的网络口吻；也可以用简体中文'}；` +
               '\n- 每位网友的母语只影响口癖和语气，不改变评论语言。' +
@@ -639,12 +731,13 @@ export async function POST(req: Request) {
               '\n【对比参考——帖子：「熬夜刷完这部剧，结局意难平，现在毫无睡意。」' +
               '\n- 好（呼应话题词+真人味）：「哪集啊，我看到18集不敢往下」「凌晨四点的我也是，明早八点班」「男主最后那句台词我循环了十遍」「别看了我烂尾警告……不剧透了」' +
               '\n- 差（串台/AI 废话，绝对禁止）：「今天去试驾了新出的SUV」「装机预算多少合适」「刚点了份外卖真香」「哈哈哈哈，楼主说的太对了，我也是这么想的」「只有我一个人觉得这部剧好看吗」】' +
-              '\n【人设一致性】每条严格符合该网友的人设口吻（暴躁老哥带火气、乐子人在整活、饭圈女孩满口磕到了）。' +
+              '\n【人设一致性】每条严格符合该网友的人设口吻（暴躁老哥带火气、乐子人在整活、饭圈女孩满口磕到了）——但人设只管口吻不管话题，话题永远跟着帖子走。' +
               '\n硬性要求：每条评论一两句话为主、长短错落；每条一行，行数与网友数一致，第 N 行对应第 N 位。禁止 emoji 和任何格式标记。',
           },
           {
             role: 'user',
-            content: `论坛里有这么一条${langLabel(postLang)}帖子（评论必须100%围绕它讲的事，每条至少呼应一个核心话题词，语言跟随帖子）——\n${base}${topicLine}\n\n请以这 ${expect} 位网友的口吻各写一条一级评论（都是直接评论帖子本身，不是回复别人；输出 ${expect} 行）：\n${spec}${avoidLine}\n${bjTimeLine()}`,
+            // v15（用户强制要求）：用户消息开头 = 锚定句 + 原封不动的帖子正文与话题标签
+            content: `${anchorHeadOf(post)}\n\n${topicLine}\n\n请以这 ${expect} 位网友的口吻各写一条一级评论（都是直接评论上面这篇帖子本身，不是回复别人；每条必须呼应核心话题词；输出 ${expect} 行）：\n${spec}${avoidLine}\n${bjTimeLine()}`,
           },
         ];
         const raw = (await completeWithFallback(config, messages)).text;
@@ -686,22 +779,26 @@ export async function POST(req: Request) {
         {
           role: 'system',
           content:
+            // v15（用户强制要求）：Prompt 开头强制锚定
+            '你现在是一个网友，你正在一篇帖子的评论区里回复别人的评论；回复内容与帖子或被回复的评论无关 = 生成直接失败。' +
             '你在为一个中文论坛（X/Twitter 风格广场）的帖子评论区生成楼中楼回复（回复评论区里某条评论）。' +
-            '【最高优先级·核心话题词锚定（严禁串台）】用户消息里给出了主帖的「核心话题词」：' +
+            '【最高优先级·核心话题词锚定（严禁串台）】用户消息开头原封不动给出了主帖正文、话题标签和「核心话题词」：' +
             '\n- 每条回复必须 100% 围绕「被回复的那条评论」和「主帖讲的那件事」：他说得对就附和补充，说得不对比回去，他问了就回答他；禁止无视对方自说自话；' +
-            '\n- 帖子没提到的领域一个字都不许出现：楼主聊剧，回复里不能冒出装机/打工/试驾。' +
+            '\n- 帖子没提到的领域一个字都不许出现：楼主聊应援色，回复里不能冒出考研/图书馆/代拍；楼主聊剧，回复里不能冒出装机/打工/试驾。' +
+            '\n【人设边界（v15）】人设只决定口吻，绝不许把人设自己领域的话题（考研/装机/打工等帖子没提的东西）带进回复。' +
             `\n【语言铁律】${postLang === 'zh-Hans' ? '这是中文帖：所有楼中楼必须以简体中文为主体，最多偶尔夹杂 1-3 个外文字符（www、ㅋㅋ、草），绝对禁止整句英语/日语/韩语/繁体' : '评论语言跟随帖子语言，也可用简体中文'}。` +
             '\n【格式铁律】直接写回复正文本身：绝对禁止以「@任何人」开头，绝对禁止带「回复」「回复 @某某：」字样（系统会自动标注回复对象）。' +
             '\n【看帖作答】对方在求推荐/求助时，直接给出具体答案（名字+理由/具体做法），不能答非所问。' +
             '\n【AI 废话黑名单（出现即废稿）】「楼主说的太对了，我也是这么想的」「太对了哈哈哈」「只有我一个人觉得」「笑死，真的是这样」「总的来说」「不可否认」「确实如此」「在这个事件中」「我们应该」「首先其次最后」「支持」「说得对」「有道理」绝对禁止；' +
             '回复必须有具体观点或信息。一两句话为主，禁止长篇大论。' +
             '\n【网感】笑死、乐、破防了、你小子、一整个无语住、绝绝子（反讽）、卧槽、妈呀、离谱；可以没头没尾、可以不用标点、可以有错别字。' +
-            '\n【人设一致性】严格符合该网友的人设口吻（暴躁老哥条条带火气，乐子人条条在整活）。' +
+            '\n【人设一致性】严格符合该网友的人设口吻（暴躁老哥条条带火气，乐子人条条在整活）——但人设只管口吻不管话题。' +
             '每条一行，行数与评论数一致，第 N 行对应第 N 条评论的回复。禁止 emoji 和任何格式标记。',
         },
         {
           role: 'user',
-          content: `论坛帖子：${base}${topicLine}\n\n评论区里有下面 ${expect} 条评论，请逐条写出对应的楼中楼回复（每条直接写正文，针对那条评论说的话回应并呼应主帖话题词，不要带任何@或「回复」前缀；输出 ${expect} 行）：\n${spec}\n${bjTimeLine()}`,
+          // v15（用户强制要求）：用户消息开头 = 锚定句 + 原封不动的主帖正文与话题标签
+          content: `${anchorHeadOf(post)}\n\n${topicLine}\n\n评论区里有下面 ${expect} 条评论，请逐条写出对应的楼中楼回复（每条直接写正文，针对那条评论说的话回应并呼应主帖话题词，不要带任何@或「回复」前缀；输出 ${expect} 行）：\n${spec}\n${bjTimeLine()}`,
         },
       ];
       const raw = (await completeWithFallback(config, messages)).text;
@@ -728,7 +825,8 @@ export async function POST(req: Request) {
         const p = body.parent as { authorName?: string; content?: string } | undefined;
         const parentLine = p?.content ? `${p.authorName ?? '有人'}对你说：「${String(p.content).slice(0, 300)}」` : '一条帖子';
         // 多轮上下文：所在主帖 + 评论串最近几轮对话（用户在评论区与 AI 无限来回）
-        const postContent = typeof body.postContent === 'string' ? body.postContent.slice(0, 400) : '';
+        // v15：主帖正文原封不动（不再截断 400 字）
+        const postContent = typeof body.postContent === 'string' ? body.postContent.slice(0, 1000) : '';
         // v9：主帖语言——中文帖的回复也必须以中文为主体（外语网友最多带 1-3 个母语字符口癖）
         const postLangRaw = typeof body.postLang === 'string' ? body.postLang : '';
         const postLang = LANG_LABELS[postLangRaw] ? postLangRaw : 'zh-Hans';
