@@ -890,9 +890,11 @@ export async function POST(req: Request) {
       }
 
       // subreplies：给 threads 里的每条评论各写一条回复（来自 personas 对应网友）
+      // v26：单调用线程上限 12→30（楼中楼需求「评论下面 1-5 人」+ 深层嵌套——
+      // 每条一级评论 1~5 条直接回复、部分回复再被回复，一批常 20~40 线程）
       const threads = Array.isArray(body.threads)
         ? (body.threads as Record<string, unknown>[])
-            .slice(0, 12)
+            .slice(0, 30)
             .map((h) => ({
               authorName: typeof h.authorName === 'string' ? h.authorName.slice(0, 24) : '网友',
               content: typeof h.content === 'string' ? h.content.slice(0, 160) : '',
@@ -991,16 +993,34 @@ export async function POST(req: Request) {
         const lastLine = p?.content
           ? `【上一句对话】\n${p.authorName ?? '有人'}：${String(p.content).slice(0, 300)}`
           : '【上一句对话】\n（无——这是对主帖本身的第一条回复）';
+        // v26：用户回复的那条评论（"我回复的什么"——围观网友接话前必须看清）。
+        // 仅当被回复对象不是主帖本身时给出（直接回复主帖时它＝主帖，不再重复）。
+        const rt = body.repliedTo as { authorName?: unknown; content?: unknown } | undefined;
+        const rtText = typeof rt?.content === 'string' ? rt.content.slice(0, 300) : '';
+        const rtName = typeof rt?.authorName === 'string' ? rt.authorName.slice(0, 24) : '网友';
+        const repliedLine = rtText
+          ? `【用户回复的那条评论（${rtName} 发的；用户刚才这条回复，回的就是它）】\n${rtText}`
+          : '';
         // 多轮上下文：所在主帖 + 评论串最近几轮对话（用户在评论区与 AI 无限来回）
         // v15：主帖正文原封不动（不再截断 400 字）
         const postContent = typeof body.postContent === 'string' ? body.postContent.slice(0, 1000) : '';
         // v9：主帖语言——中文帖的回复也必须以中文为主体（外语网友最多带 1-3 个母语字符口癖）
         const postLangRaw = typeof body.postLang === 'string' ? body.postLang : '';
         const postLang = LANG_LABELS[postLangRaw] ? postLangRaw : 'zh-Hans';
+        // v26：逐条带真实说话人名——1-5 位围观网友接话时看的是整层楼的对话，
+        // 不能把「别人」的发言一律当成当前回复者自己说的（旧格式只有 user/peer 两态）
         const history = Array.isArray(body.history)
           ? (body.history as Record<string, unknown>[])
               .slice(-8)
-              .map((h) => `${h.from === 'user' ? userName : name}：${typeof h.text === 'string' ? h.text.slice(0, 150) : ''}`)
+              .map((h) => {
+                const speaker =
+                  typeof h.speaker === 'string' && h.speaker.trim()
+                    ? h.speaker.slice(0, 24)
+                    : h.from === 'user'
+                      ? userName
+                      : name;
+                return `${speaker}：${typeof h.text === 'string' ? h.text.slice(0, 150) : ''}`;
+              })
               .join('\n')
           : '';
         const mediaDesc =
@@ -1009,7 +1029,8 @@ export async function POST(req: Request) {
             : '';
         const ctx = [
           postContent ? `【主帖内容】\n${postContent}${mediaDesc}` : '',
-          history ? `【最近对话（你们已经说过的话）】\n${history}` : '',
+          repliedLine,
+          history ? `【这层楼最近的对话（按时间顺序，发言者各有其名）】\n${history}` : '',
           lastLine,
         ]
           .filter(Boolean)
@@ -1031,7 +1052,8 @@ export async function POST(req: Request) {
               '\n1. 拒绝幻觉：绝对不能生硬地加入主帖和对话里完全没有提到的名词、剧名、人名、梗（比如突然聊起某部剧或某个导演）——除非主帖或上一句对话明确提到了它们；' +
               '\n2. 紧扣上下文：回复必须 100% 针对【上一句对话】说的话，同时贴着【主帖内容】讲的那件事；绝对禁止把与帖子无关的新话题（试驾/吃饭/买衣服之类）带进回复；' +
               '\n3. 字数控制：20-80 字以内，必须口语化，像真人随手打的一句话——可以不用标点或全用感叹号、可以有错别字和缩写（xswl、u1s1、笑死、破防了）；' +
-              '\n4. 输出格式：直接输出回复的正文，不要带任何解释。' +
+              '\n4. 输出格式：直接输出回复的正文，不要带任何解释；' +
+              '\n5. 接住对话链：若给出了【用户回复的那条评论】，先看清用户回复的是谁、在接什么话头——你的回复要接用户这条话本身（回应/反驳/追问/接梗都行），禁止无视 TA 自说自话；【这层楼最近的对话】里每条发言都有各自的名字，那是别人说的，不要把别人的话当成自己说的；' +
               '\n# 废稿红线（出现即作废）' +
               '\n- 万能句式：「蹲后续」「这瓜保熟吗」「等一个下文」「让子弹飞一会儿」「前排吃瓜」这类放在任何帖子下都「成立」的模板句（主帖真是未完结爆料八卦时最多 1 条）；' +
               '\n- AI 废话：「楼主说的太对了，我也是这么想的」「太对了哈哈哈」「只有我一个人觉得」「总的来说」「不可否认」「确实如此」「首先其次最后」，以及「支持」「说得对」「有道理」「深有体会」这类客套空评；' +
@@ -1046,14 +1068,15 @@ export async function POST(req: Request) {
         // v9 强校验：中文帖整句外语回复 → 返回空
         // v14 锚定校验：串台/AI 废话 → 返回空
         // v22 万能句式：非未完结八卦帖 → 返回空（客户端不再兜底，宁缺毋滥）
-        const catchallHit = universalPhraseIn(text) && !postAllowsCatchall(`${p?.content ?? ''} ${postContent}`);
+        const catchallHit = universalPhraseIn(text) && !postAllowsCatchall(`${p?.content ?? ''} ${rtText} ${postContent}`);
         if (
           text.length >= 12 &&
           text.length <= 95 &&
           !catchallHit &&
           !violatesCommentLang(text, postLang) &&
           !isBannedFiller(text) &&
-          commentAnchored(text, `${p?.content ?? ''} ${postContent}`)
+          // v26：锚定语料 = 用户这条回复 + 用户回复的那条评论 + 主帖（围观者必须接得上话）
+          commentAnchored(text, `${p?.content ?? ''} ${rtText} ${postContent}`)
         ) {
           return NextResponse.json({ text: cleanText(text, 95) });
         }

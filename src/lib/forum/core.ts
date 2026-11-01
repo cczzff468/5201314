@@ -95,8 +95,10 @@ export const FORUM_KEY = 'forum-data-v1';
  *  剧宣/澄清/雨戏/表妹/盒饭/ootd 各自成帖，绝不混装）；
  *  v25 = v24 播种竞态修复：HMR 窗口期（GEN_VERSION 先落盘、池子后落盘）
  *  用「新版本号+旧池子」播出的脏数据，靠再 bump 一版强制重播种清掉；
+ *  v26 = 楼中楼多层化：每条评论 1-5 位不同网友回复、部分回复再被回复成
+ *  3/4 层（旧数据评论全是平铺一级，看不到「回复他人下面还有回复」）；
  *  GEN_VERSION 升级触发重新播种，清掉存量清单式帖子。 */
-export const GEN_VERSION = 25;
+export const GEN_VERSION = 26;
 /** 首次播种的 NPC 帖子目标条数（feed 一屏半左右） */
 export const SEED_POST_TARGET = 14;
 /** 补新帖：feed 最新帖子超过该毫秒数视为「凉了」，打开时补 2~4 条 */

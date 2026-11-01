@@ -11,12 +11,15 @@
  *    点「显示更多评论」时才生成。
  * 2. queueUserPostInteractions：用户发帖后延迟点赞（1~3 位 NPC + 好友），
  *    0~2 条 AI 回复（持久 pending 队列，重启不丢）。
- * 3. queueAiReplyToUserReply：用户回复了 AI 的帖/评论 → 该作者延迟再回一条
- *    （带完整上下文：主帖 + 被回复评论 + 用户评论 + 最近对话链，可无限多轮）。
+ * 3. queueAiReplyToUserReply：用户回复了 AI 的帖/评论 → 1-5 位网友延迟回复
+ *    （被回复者大概率在场 + 围观者；完整上下文：主帖 + 用户回复的那条评论 +
+ *    用户评论 + 整楼对话链，可无限多轮，时间彼此错开陆续到达）。
  * 4. queueDmReply：用户私信发消息 → 对方延迟回复（LLM，失败通用兜底句）。
  * 5. generateMoreFeedPosts / generateNewFeedPosts：主页上拉/下拉松开 → 无限生成一批帖子
  *    （7~15 条，时间戳向前排，旧帖永不消失）；LLM 批量失败时 NPC 文案池兜底。
- * 6. generateMoreComments：「显示更多评论」按钮 → 再生成 7~15 条（含楼中楼子回复）。
+ * 6. generateMoreComments：「显示更多评论」→ 7~15 条一级评论 + 楼中楼森林
+ *    （v26：每条评论 1-5 位不同网友直接回复，部分回复再被回复成 3/4 层；
+ *    前台只等前两层，深层回复像真实 thread 一样陆续冒出来）。
  * 7. 热度合理性：评论/楼中楼/AI 回复的点赞浏览按父帖比例缩放（评论赞 << 主帖赞，像推特）。
  *
  * 模型连接（设置 App）：
@@ -655,6 +658,8 @@ async function llmPolishSeedComments(seedPostIds: string[]): Promise<void> {
     const newDyn: AuthorKey[] = [];
     const dynBefore = new Set(Object.keys(forumData().dynNpcs ?? {}));
     let added = 0;
+    // v26：全部新评论（跨帖汇总——种子楼中楼的选材池）
+    const createdAll: ForumPost[] = [];
     for (const t of targets) {
       const block = items.find((x) => typeof x?.postId === 'string' && x.postId === t.id);
       const raw = Array.isArray(block?.comments) ? block.comments : [];
@@ -712,6 +717,7 @@ async function llmPolishSeedComments(seedPostIds: string[]): Promise<void> {
         recordDynNpcRecent(keys[i] ?? t.authorKey, `评论过：${txt.slice(0, 60)}`);
       });
       added += created.length;
+      createdAll.push(...created);
       // 楼主是用户 → 前 2 条评论发通知（X：别人回复了你的帖子）
       if (t.authorKey === 'user' && created.length) {
         next.notifications = [
@@ -731,8 +737,62 @@ async function llmPolishSeedComments(seedPostIds: string[]): Promise<void> {
     // LLM 起名：本批新建的评论者换 AI 网名（失败保留占位名）
     if (newDyn.length) await renameDynNpcsViaLlm([...new Set(newDyn)]);
     saveForum(next);
+    // v26：种子评论的楼中楼（后台静默长树；预算受限——「显示更多评论」给全量 1-5 人）
+    if (createdAll.length) void growSeedSubReplies(createdAll);
   } catch {
     /* 静默：评论区维持现状（宁缺毋滥），下次点「更多评论」再补 */
+  }
+}
+
+/** v26：种子评论的楼中楼（llmPolishSeedComments 落盘后异步调用）。
+ *  挑 3~5 个拿到新评论的种子帖，各给小预算楼中楼（每帖 2 条评论 × 1~3 人
+ *  直接回复，L3 ≤2、L4 ≤1）——首屏打开帖子就能看到「评论下面有人回复、回复
+ *  下面还有人回复」；点「显示更多评论」时 genCommentBatch 给新评论全量 1-5 人。
+ *  开机后台静默长树（失败静默——评论区维持现状，宁缺毋滥）。 */
+async function growSeedSubReplies(created: ForumPost[]): Promise<void> {
+  try {
+    if (!created.length) return;
+    // 按主帖分组（created 都是 replyTo = 主帖 id 的一级评论）
+    const byPost = new Map<string, ForumPost[]>();
+    for (const c of created) {
+      const pid = c.replyTo ?? '';
+      if (!pid) continue;
+      const list = byPost.get(pid) ?? [];
+      list.push(c);
+      byPost.set(pid, list);
+    }
+    // 挑 3~5 帖（每帖至少 1 条新评论；跨帖分散——更多帖子能刷到楼中楼）
+    const picked = [...byPost.entries()].sort(() => Math.random() - 0.5).slice(0, 3 + Math.floor(Math.random() * 3));
+    const newDynAll: AuthorKey[] = [];
+    for (const [pid, comments] of picked) {
+      const post = forumData().posts.find((p) => p.id === pid);
+      if (!post || !comments.length) continue;
+      const postAuthor = resolveAuthor(post.authorKey);
+      const postLang = detectPostLang(post.content, postAuthor.lang);
+      const mediaDesc = await describePostMedia(post.media);
+      // 每帖挑 2 条评论（随机）；L2 选人避开本帖已有作者
+      const targets = comments.slice().sort(() => Math.random() - 0.5).slice(0, 2);
+      const existing = [
+        post.authorKey,
+        ...forumData().posts.filter((p) => p.replyTo === pid).map((p) => p.authorKey),
+        ...targets.map((t) => t.authorKey),
+      ];
+      const made = await growSubReplyForest({
+        post,
+        postAuthorName: postAuthor.name,
+        postLang,
+        mediaDesc,
+        targets,
+        existingKeys: existing,
+        catchall: { ok: postAllowsCatchall(post.content), used: false },
+        budget: { maxDirect: 3, l3Max: 2, l4Max: 1 },
+        renameMode: 'defer',
+      });
+      newDynAll.push(...made.newDyn);
+    }
+    if (newDynAll.length) await renameDynNpcsViaLlm([...new Set(newDynAll)]);
+  } catch {
+    /* 静默：开机楼中楼失败不影响评论区（点「更多评论」随时补） */
   }
 }
 
@@ -1340,17 +1400,291 @@ function archetypeIdsForContent(content: string): string[] {
   return out;
 }
 
+// ---------------- v26 楼中楼：多层回复树（评论下 1-5 人 · 回复下还有回复） ----------------
+
+/** L2 直接回复条数：1~5（用户需求「评论下面回复评论可以有 1-5 个人」；
+ *  2~3 条为主流，1 条和 5 条都真实存在。max 供种子期预算压缩（1~3）用。 */
+function rollSubCount(max = 5): number {
+  const r = Math.random();
+  if (r < 0.2) return Math.min(1, max);
+  if (r < 0.45) return Math.min(2, max);
+  if (r < 0.7) return Math.min(3, max);
+  if (r < 0.87) return Math.min(4, max);
+  return Math.min(5, max);
+}
+
+/** 一批楼中楼的调用计划（按位对齐）：target = 被回复的帖子；root = 所属一级评论
+ *  （replyTo 分组锚点——挂在这条评论的楼中楼里显示）；key = 回复者。 */
+interface SubPlan {
+  target: ForumPost;
+  root: ForumPost;
+  key: AuthorKey;
+}
+
+/** 调 subreplies API 生成一层楼中楼（≤30 线程/调用，分片并行）→ 客户端双保险
+ *  校验 → basePost 建帖（replyTo = root 锚点、replyToPost = target 精确挂树）。
+ *  时间戳晚于被回复帖 1~40 分钟（不晚于现在）；没写出来的位置直接跳过
+ *  （v20 起无模板兜底——宁缺毋滥）。 */
+async function callSubReplyLayer(
+  ctx: {
+    post: ForumPost;
+    postAuthorName: string;
+    postLang: string;
+    mediaDesc: string;
+    catchall: { ok: boolean; used: boolean };
+  },
+  plans: SubPlan[],
+): Promise<ForumPost[]> {
+  const out: ForumPost[] = [];
+  if (!plans.length) return [];
+  const CHUNK = 30; // 与服务端 subreplies 线程上限同步（v26：12→30）
+  const chunks: SubPlan[][] = [];
+  for (let i = 0; i < plans.length; i += CHUNK) chunks.push(plans.slice(i, i + CHUNK));
+  const groups = await Promise.all(
+    chunks.map(async (ch): Promise<ForumPost[]> => {
+      let texts: string[] = [];
+      try {
+        const r = (await callApi({
+          kind: 'subreplies',
+          post: { authorName: ctx.postAuthorName, content: ctx.post.content, mediaDesc: ctx.mediaDesc, lang: ctx.postLang },
+          threads: ch.map((p) => ({ authorName: resolveAuthor(p.target.authorKey).name, content: p.target.content })),
+          personas: ch.map((p) => {
+            const a = resolveAuthor(p.key);
+            return { name: a.name, persona: a.persona || '普通论坛网友', lang: a.lang ?? 'zh-Hans' };
+          }),
+          userName: resolveAuthor('user').name,
+        })) as { items?: string[] };
+        texts = Array.isArray(r.items)
+          ? (r.items as unknown[]).map((x, i) => {
+              // 位置对齐：无效项置空串，不向后错位
+              if (typeof x !== 'string') return '';
+              const s = sanitizeCommentClient(stripReplyPrefixClient(x));
+              // 用户规范：回复 3~100 字（留 10 字容差）
+              if (s.trim().length < 3 || s.length > 110) return '';
+              if (ctx.postLang === 'zh-Hans' && foreignDominantClient(s)) return '';
+              // 万能句式：非豁免帖全废；豁免帖与整批共享 1 条额度
+              if (universalPhraseIn(s)) {
+                if (!ctx.catchall.ok || ctx.catchall.used) return '';
+                ctx.catchall.used = true;
+              }
+              const plan = ch[i];
+              // v25 称呼/名称串线：拿回复者网名拼称呼/自称网名 → 丢弃
+              if (personaBleedIn(s, resolveAuthor(plan.target.authorKey).name, [resolveAuthor(plan.key).name])) return '';
+              // v25 领域私货：≥2 个「被回复内容 + 主帖」领域之外的关键词 → 丢弃
+              if (offTopicIn(s, `${plan.target.content} ${ctx.post.content}`)) return '';
+              // 锚定校验：必须呼应「被回复的那条 + 主帖」
+              if (!commentAnchored(s, `${plan.target.content} ${ctx.post.content}`)) return '';
+              return s;
+            })
+          : [];
+      } catch {
+        texts = [];
+      }
+      const made: ForumPost[] = [];
+      ch.forEach((plan, i) => {
+        const text = texts[i];
+        if (!text) return;
+        // 时间：晚于被回复帖 1~40 分钟（下限 +60s 优先，上限不晚于现在）
+        const subAt = Math.max(
+          plan.target.createdAt + 60_000,
+          Math.min(Date.now() - 2_000, plan.target.createdAt + (2 + Math.random() * 38) * 60_000),
+        );
+        const sub = basePost(
+          plan.key,
+          text.slice(0, REPLY_MAX),
+          ctx.post.community,
+          subAt,
+          plan.root.id,
+          resolveAuthor(plan.target.authorKey).name,
+          true,
+          { likes: likesOf(plan.target), views: plan.target.views },
+        );
+        sub.replyToPost = plan.target.id;
+        made.push(sub);
+      });
+      return made;
+    }),
+  );
+  for (const g of groups) out.push(...g);
+  return out;
+}
+
+/** 给一批一级评论挂「直接回复 1-5 条 + 部分回复再被回复」的楼中楼森林。
+ *  层级结构（用户需求：评论下面回复评论 1-5 个人；回复他人下面还要有回复）：
+ *  · L2 直接回复评论：每条 1~5 位不同网友（25% 楼主本人下场，其余新面孔/回访）；
+ *  · L3 回复某条 L2：约 30% 被回复——45% 由该一级评论的作者出面回应
+ *    （别人回复了你的评论，你回一句），12% 楼主，其余围观网友；
+ *  · L4 回复某条 L3：约 18% 被回复（同规则：被回复对象出面回应为主）。
+ *  逐层落盘（UI 实时长树）；L2 落盘后回调 onAfterDirect——「显示更多评论」
+ *  按钮据此提前结束等待，L3/L4 像真实回复一样陆续冒出来。
+ *  renameMode：'phase'（L2 落盘前先换 AI 网名——名字首屏即终态）/
+ *  'defer'（调用方最后统一换名——种子期多帖并发时省调用）。 */
+async function growSubReplyForest(opts: {
+  post: ForumPost;
+  postAuthorName: string;
+  postLang: string;
+  mediaDesc: string;
+  /** 参与楼中楼的一级评论 */
+  targets: ForumPost[];
+  /** 本帖已有作者（L2 选人避开；L3/L4 的「被回复者回应」是刻意复用不受此限） */
+  existingKeys: AuthorKey[];
+  /** 万能句式豁免状态（整批共享 1 条额度） */
+  catchall: { ok: boolean; used: boolean };
+  /** L2 落盘后回调（前台提前返回用） */
+  onAfterDirect?: (direct: ForumPost[]) => void;
+  /** 种子期预算压缩（maxDirect：每条评论直接回复 1~max 条；l3/l4 层数上限） */
+  budget?: { maxDirect?: number; l3Max?: number; l4Max?: number };
+  renameMode?: 'phase' | 'defer';
+}): Promise<{ posts: ForumPost[]; newDyn: AuthorKey[] }> {
+  const { post, targets } = opts;
+  const created: ForumPost[] = [];
+  const newDyn: AuthorKey[] = [];
+  if (!targets.length) {
+    opts.onAfterDirect?.([]);
+    return { posts: created, newDyn };
+  }
+  const dynBefore = new Set(Object.keys(forumData().dynNpcs ?? {}));
+  const track = (k: AuthorKey | undefined) => {
+    if (!k) return;
+    if (k.startsWith('dyn:') && !dynBefore.has(k.slice(4))) newDyn.push(k);
+  };
+  const ctx = {
+    post,
+    postAuthorName: opts.postAuthorName,
+    postLang: opts.postLang,
+    mediaDesc: opts.mediaDesc,
+    catchall: opts.catchall,
+  };
+  const opKey = post.authorKey; // 楼主（user 时不下场——AI 不代用户说话）
+  const ownerCanSpeak = opKey !== 'user';
+  const avoid = new Set<AuthorKey>(opts.existingKeys.filter(Boolean));
+  const saveLayer = (made: ForumPost[]) => {
+    if (!made.length) return;
+    const next = { ...forumData() };
+    next.posts.push(...made);
+    saveForum(next);
+  };
+  const noteRecent = (made: ForumPost[]) => {
+    made.forEach((s) => recordDynNpcRecent(s.authorKey, `评论过：${s.content.slice(0, 60)}`));
+  };
+
+  // ---- L2：每条一级评论 1~5 位不同网友直接回复 ----
+  const maxDirect = opts.budget?.maxDirect ?? 5;
+  const l2Plans: SubPlan[] = [];
+  for (const c of targets) {
+    const n = rollSubCount(maxDirect);
+    const usedHere = new Set<AuthorKey>([c.authorKey]); // 同一条评论下绝不重复同一个人
+    for (let j = 0; j < n; j++) {
+      let key: AuthorKey | undefined;
+      if (ownerCanSpeak && Math.random() < 0.25) key = opKey; // 楼主下场回评（X 常态）
+      else key = pickCommenters(1, opts.postLang, post.content, ...avoid, ...usedHere)[0];
+      if (!key) key = ownerCanSpeak ? opKey : pickCommenters(1, opts.postLang, post.content)[0];
+      if (!key) continue; // 实在凑不到人：这条少一个（1-5 本来就有弹性）
+      usedHere.add(key);
+      track(key);
+      l2Plans.push({ target: c, root: c, key });
+    }
+  }
+  let l2: ForumPost[] = [];
+  try {
+    l2 = await callSubReplyLayer(ctx, l2Plans);
+  } catch {
+    l2 = [];
+  }
+  created.push(...l2);
+  // L2 新网友先换 AI 网名再上屏（L3 的上下文里也是终名）
+  if (opts.renameMode !== 'defer' && newDyn.length) await renameDynNpcsViaLlm([...new Set(newDyn)]);
+  saveLayer(l2);
+  noteRecent(l2);
+  opts.onAfterDirect?.(l2);
+
+  // ---- L3：约 30% 的 L2 被回复（用户需求「回复他人下面还要有回复」） ----
+  // 人选：45% 被回复那条所在评论的作者出面（别人回复了你的评论，你回一句）；
+  // 12% 楼主；其余围观网友（50% 本楼已有参与者，50% 新面孔）
+  const pickDeepKey = (target: ForumPost, root: ForumPost): AuthorKey => {
+    const parent = [...created, ...forumData().posts].find((x) => x.id === target.replyToPost);
+    if (parent && parent.authorKey !== 'user' && Math.random() < 0.45) return parent.authorKey;
+    if (ownerCanSpeak && Math.random() < 0.12) return opKey;
+    const pool = [root.authorKey, ...created.filter((x) => x.replyTo === root.id).map((x) => x.authorKey)].filter(
+      (k) => k !== 'user',
+    );
+    if (pool.length && Math.random() < 0.5) return pool[Math.floor(Math.random() * pool.length)];
+    return pickCommenters(1, opts.postLang, post.content, ...avoid)[0] ?? (ownerCanSpeak ? opKey : 'npc:wang');
+  };
+  const l3Max = opts.budget?.l3Max ?? Infinity;
+  let l3Sel = l2
+    .slice()
+    .sort(() => Math.random() - 0.5)
+    .filter(() => Math.random() < 0.3);
+  if (l3Sel.length < Math.min(2, l2.length)) {
+    // 保底：这批至少 2 条 L2 被回复（「回复下面还有回复」必须看得见）
+    const rest = l2.filter((x) => !l3Sel.includes(x)).sort(() => Math.random() - 0.5);
+    while (l3Sel.length < Math.min(2, l2.length) && rest.length) l3Sel.push(rest.pop() as ForumPost);
+  }
+  l3Sel = l3Sel.slice(0, l3Max);
+  const l3Plans: SubPlan[] = l3Sel
+    .map((r2) => {
+      const root = targets.find((c) => c.id === r2.replyToPost);
+      if (!root) return null;
+      const key = pickDeepKey(r2, root);
+      track(key);
+      return { target: r2, root, key };
+    })
+    .filter((x): x is SubPlan => !!x);
+  let l3: ForumPost[] = [];
+  try {
+    l3 = await callSubReplyLayer(ctx, l3Plans);
+  } catch {
+    l3 = [];
+  }
+  created.push(...l3);
+  saveLayer(l3);
+  noteRecent(l3);
+
+  // ---- L4：约 18% 的 L3 再被回复（同规则：被回复对象出面回应为主） ----
+  const l4Max = opts.budget?.l4Max ?? Infinity;
+  let l4Sel = l3
+    .slice()
+    .sort(() => Math.random() - 0.5)
+    .filter(() => Math.random() < 0.18);
+  if (!l4Sel.length && l3.length) l4Sel = [l3[Math.floor(Math.random() * l3.length)]];
+  l4Sel = l4Sel.slice(0, l4Max);
+  const l4Plans: SubPlan[] = l4Sel
+    .map((r3) => {
+      const r2 = l2.find((x) => x.id === r3.replyToPost);
+      const root = r2 ? targets.find((c) => c.id === r2.replyToPost) : undefined;
+      if (!root) return null;
+      const key = pickDeepKey(r3, root);
+      track(key);
+      return { target: r3, root, key };
+    })
+    .filter((x): x is SubPlan => !!x);
+  let l4: ForumPost[] = [];
+  try {
+    l4 = await callSubReplyLayer(ctx, l4Plans);
+  } catch {
+    l4 = [];
+  }
+  created.push(...l4);
+  saveLayer(l4);
+  noteRecent(l4);
+  return { posts: created, newDyn };
+}
+
 /** 生成一批评论并落库（v22：100% LLM 实时生成，无模板兜底）。
  *  仅由「显示更多评论」按钮触发（用户要求：生成完后不再自动生成，
  *  只有用户自己上滑/下滑、点更多评论时才生成）；一次 7~15 条。
  *  LLM 失败/限流时宁缺毋滥（返回 0，评论区维持现状）；万能句式
  *  （蹲后续/保熟/等下文）只有未完结八卦/求助帖豁免且每批最多 1 条。
  *  返回新增评论数（含子回复）。 */
-async function genCommentBatch(postId: string): Promise<number> {
+async function genCommentBatch(postId: string, report?: (n: number) => void): Promise<number> {
   if (threadGen.has(postId)) return 0;
   const d0 = forumData();
   const post = d0.posts.find((p) => p.id === postId);
-  if (!post) return 0;
+  if (!post) {
+    report?.(0);
+    return 0;
+  }
   const want = 7 + Math.floor(Math.random() * 9); // 7~15 条（用户要求）
   threadGen.add(postId);
   try {
@@ -1418,7 +1752,11 @@ async function genCommentBatch(postId: string): Promise<number> {
       // v22：LLM 失败（限流/断网）→ 宁缺毋滥，不铺任何模板
       texts = [];
     }
-    if (!texts.length) return 0;
+    if (!texts.length) {
+      // v26：report 必须在每条退出路径上给到（否则前台 Promise 悬挂）
+      report?.(0);
+      return 0;
+    }
 
     // LLM 起名：本批新建的评论者换 AI 生成的网名（在落盘前完成——
     // 评论作者名与楼中楼「回复 @xx」一并用新名；失败保留占位名）
@@ -1447,86 +1785,9 @@ async function genCommentBatch(postId: string): Promise<number> {
       recordDynNpcRecent(authorKey, `评论过：${t.slice(0, 60)}`);
     });
 
-    // ---- 楼中楼：约 1/3 的新评论各来 1 条子回复（其他网友/楼主接话） ----
-    try {
-      const subTargets = newComments
-        .slice()
-        .sort(() => Math.random() - 0.5)
-        .slice(0, Math.max(1, Math.floor(newComments.length / 3)));
-      if (subTargets.length) {
-        // 子回复作者：其他网友（动态+内置混合，偶尔楼主本人回评，很 X）；同帖去重
-        const dynBeforeSubs = new Set(Object.keys(forumData().dynNpcs ?? {}));
-        const subKeys = subTargets.map((c) => {
-          if (post.authorKey !== 'user' && Math.random() < 0.3) return post.authorKey;
-          return pickCommenters(1, postLang, post.content, post.authorKey, ...existingKeys, ...commenterKeys)[0];
-        });
-        let subTexts: string[] = [];
-        try {
-          const r = (await callApi({
-            kind: 'subreplies',
-            post: { authorName: postAuthor.name, content: post.content, mediaDesc, lang: postLang },
-            threads: subTargets.map((c) => ({ authorName: resolveAuthor(c.authorKey).name, content: c.content })),
-            personas: subKeys.map((k) => {
-              const a = resolveAuthor(k);
-              return { name: a.name, persona: a.persona || '普通论坛网友', lang: a.lang ?? 'zh-Hans' };
-            }),
-            userName: resolveAuthor('user').name,
-          })) as { items?: string[] };
-          subTexts = Array.isArray(r.items)
-            ? (r.items as unknown[]).map((x, i) => {
-                // 位置对齐：无效项置空串，不向后错位
-                if (typeof x !== 'string') return '';
-                const s = sanitizeCommentClient(stripReplyPrefixClient(x));
-                // 用户规范：评论 3~100 字（留 10 字容差）
-                if (s.trim().length < 3 || s.length > 110) return '';
-                if (postLang === 'zh-Hans' && foreignDominantClient(s)) return '';
-                // v22 万能句式：楼中楼同禁（豁免帖最多 1 条，与顶层共享额度）
-                if (universalPhraseIn(s)) {
-                  if (!catchallOk || catchallUsed) return '';
-                  catchallUsed = true;
-                }
-                // v25 称呼/名称串线：拿回复者网名拼称呼/自称网名 → 丢弃
-                const replied = subTargets[i];
-                const ctxSub = `${replied?.content ?? ''} ${post.content}`;
-                if (personaBleedIn(s, resolveAuthor(replied?.authorKey ?? post.authorKey).name, [resolveAuthor(subKeys[i]).name])) return '';
-                // v25 领域私货：≥2 个「被回复评论+主帖」领域之外的关键词 → 丢弃
-                if (offTopicIn(s, ctxSub)) return '';
-                // v14 锚定校验：楼中楼必须呼应「被回复评论 + 主帖」
-                if (!commentAnchored(s, ctxSub)) return '';
-                return s;
-              })
-            : [];
-        } catch {
-          subTexts = [];
-        }
-        // v20：楼中楼一律由 LLM 实时生成（模板兜底已删——见 forEach 内注释）
-        subTargets.forEach((c, i) => {
-          const text = subTexts[i];
-          // v20：楼中楼一律不用模板兜底——LLM 没写出来就跳过。
-          // 旧版「回复 @xx：{t}这事我关注了，等一个下文」式机械楼中楼
-          // 比没有楼中楼更假（用户反馈「评论有问题」的组成部分）。
-          if (!text) return;
-          const subAt = Math.min(Date.now() - Math.floor(Math.random() * 60_000), c.createdAt + (2 + Math.random() * 30) * 60_000);
-          const sub = basePost(
-            subKeys[i],
-            text.slice(0, REPLY_MAX),
-            post.community,
-            Math.max(subAt, c.createdAt + 60_000),
-            c.id,
-            resolveAuthor(c.authorKey).name,
-            true,
-            { likes: likesOf(c), views: c.views },
-          );
-          sub.replyToPost = c.id;
-          next.posts.push(sub);
-        });
-        // LLM 起名：楼中楼阶段新建的动态网友也换 AI 网名（落盘前完成；失败保留占位名）
-        const subNewDyn = subKeys.filter((k) => k.startsWith('dyn:') && !dynBeforeSubs.has(k.slice(4)));
-        if (subNewDyn.length) await renameDynNpcsViaLlm(subNewDyn);
-      }
-    } catch {
-      /* 子回复失败不影响主评论 */
-    }
+    // ---- v26 楼中楼森林：每条新评论 1-5 位不同网友直接回复；部分回复再被回复 ----
+    // （3/4 层嵌套，回复他人下面还有回复）。逐层落盘实时上屏；L2 完成后通过
+    // report 提前返回——L3/L4 由森林内部继续（像真实回复一样陆续冒出来）。
 
     // 楼主是用户 → 前 3 条评论发通知（X：别人回复了你的帖子）
     if (post.authorKey === 'user') {
@@ -1542,20 +1803,44 @@ async function genCommentBatch(postId: string): Promise<number> {
         ...next.notifications,
       ];
     }
+    // v26：一级评论先上屏（楼中楼还在路上——真实 thread 里回复本来就有先后）
     saveForum(next);
-    const subs = next.posts.filter((p) => newComments.some((c) => c.id === p.replyTo)).length;
-    return newComments.length + subs;
+
+    const forest = await growSubReplyForest({
+      post,
+      postAuthorName: postAuthor.name,
+      postLang,
+      mediaDesc,
+      targets: newComments,
+      existingKeys: [post.authorKey, ...existingKeys, ...commenterKeys],
+      catchall: { ok: catchallOk, used: catchallUsed },
+      onAfterDirect: (direct) => report?.(newComments.length + direct.length),
+    });
+    return newComments.length + forest.posts.length;
   } catch {
+    report?.(0);
     return 0;
   } finally {
+    // 森林全部长完才解锁（前台已提前返回；长树期间再点按钮会提示稍后再试）
     threadGen.delete(postId);
   }
 }
 
-/** 「更多评论」按钮：再生成 7~15 条（含楼中楼；用户要求：仅按钮触发，打开帖子不自动补）。
- *  返回新增数。 */
+/** 「更多评论」按钮：再生成 7~15 条一级评论 + 楼中楼森林（v26：每条评论
+ *  1-5 位不同网友回复、部分回复再被回复）。前台只等一级评论 + 直接回复（L2）
+ *  ——L3/L4 像真实回复一样陆续冒出来（分层数据逐层落盘，UI 实时长树）。
+ *  用户要求：仅按钮触发，打开帖子不自动补。返回前台可见新增数。 */
 export async function generateMoreComments(postId: string): Promise<number> {
-  return genCommentBatch(postId);
+  if (threadGen.has(postId)) return 0;
+  return new Promise<number>((resolve) => {
+    let settled = false;
+    const settle = (n: number) => {
+      if (settled) return;
+      settled = true;
+      resolve(n);
+    };
+    void genCommentBatch(postId, (n) => settle(n)).catch(() => settle(0));
+  });
 }
 
 // ---------------- 用户发帖 → NPC/char 互动 ----------------
@@ -1617,29 +1902,72 @@ export function queueUserPostInteractions(post: ForumPost): void {
   runPending();
 }
 
-/** 用户回复某帖/某条评论（thread 页）后调用：若被回复对象作者是 AI，排一条再回复。
- *  targetPostId = 实际被回复的那条（主帖或某条评论/子回复）→ 其作者来接话；
+/** 用户回复某帖/某条评论（thread 页）后调用：排 1-5 位网友回复用户。
+ *  v26（用户需求：我回复一个人以后，网友知道我回复的什么，网友可以回复我
+ *  1-5 个人）：
+ *  · 被回复者 85% 在场（你回复了 TA，TA 大概率回你），排第一个；
+ *  · 围观网友补足人数——本楼已有参与者（正在跟这层楼的人）+ 新面孔，
+ *    到达时间彼此错开（真实 thread 里「有人回复你，别人也凑热闹」）；
+ *  · 每位网友接话前都拿到完整上下文：主帖 + 用户回复的那条评论
+ *    （「我回复的什么」）+ 用户这条回复 + 整楼最近的对话链（execJob 组装）。
+ *  targetPostId = 实际被回复的那条（主帖或某条评论/子回复）；
  *  rootId = 分组锚点（顶层评论 id 或主帖 id）→ AI 的回复挂在这一层显示；
  *  mainPostId = 主帖 id（LLM 上下文用）。
- *  每次用户回复都排一条 → 我再回复他、他还能再回复我（无限多轮）。 */
+ *  无限多轮：用户再回复任何一条 → 再排一批。 */
 export function queueAiReplyToUserReply(targetPostId: string, userReplyId: string, rootId?: string, mainPostId?: string): void {
   const d = forumData();
   const target = d.posts.find((p) => p.id === targetPostId);
   if (!target || target.authorKey === 'user') return;
   if (!d.posts.find((p) => p.id === userReplyId)) return;
-  addPending({
-    id: uid('j'),
-    due: Date.now() + 5000 + Math.random() * 8000,
-    kind: 'aiReplyBack',
-    postKey: targetPostId,
-    meta: {
-      authorKey: target.authorKey,
-      parentContent: target.content,
-      rootId: rootId ?? targetPostId,
-      mainPostId: mainPostId ?? (rootId && rootId !== targetPostId ? rootId : targetPostId),
-      userReplyId,
-    },
+  const groupId = rootId ?? targetPostId;
+  const mainId = mainPostId ?? (rootId && rootId !== targetPostId ? rootId : targetPostId);
+  // v26 总人数 1-5：被回复者 85% 在场；围观网友 = 本楼已有参与者 + 新面孔
+  const total = 1 + Math.floor(Math.random() * 5); // 1~5
+  const picked: AuthorKey[] = [];
+  const pickedSet = new Set<AuthorKey>();
+  const addPick = (k: AuthorKey | undefined) => {
+    if (!k || k === 'user' || pickedSet.has(k)) return;
+    picked.push(k);
+    pickedSet.add(k);
+  };
+  if (Math.random() < 0.85) addPick(target.authorKey); // 你回复了 TA，TA 大概率回你
+  // 本楼已有参与者（分组锚点下的其他 AI 作者——正在看这层楼的人）
+  const threadKeys = d.posts
+    .filter((p) => p.replyTo === groupId && p.id !== userReplyId && p.id !== targetPostId)
+    .map((p) => p.authorKey)
+    .filter((k) => k !== 'user');
+  let guard = 0;
+  while (picked.length < total && guard++ < total * 6) {
+    const pool = threadKeys.filter((k) => !pickedSet.has(k));
+    if (pool.length && Math.random() < 0.5) {
+      addPick(pool[Math.floor(Math.random() * pool.length)]);
+      continue;
+    }
+    addPick(pickCommenters(1, undefined, undefined, ...picked)[0]);
+  }
+  if (!picked.length) addPick(target.authorKey); // 兜底：至少被回复者回一句
+  if (!picked.length) return;
+  picked.forEach((k, idx) => {
+    // 被回复者先回（5~15s）；围观网友陆续（每位再错开 6~20s；封顶 80s
+    // ——pending 执行器只挂 90s 内的任务，晚了要等下次触发点才补挂）
+    const due = Date.now() + 5000 + Math.random() * 10000 + idx * (6000 + Math.random() * 14000);
+    addPending({
+      id: uid('j'),
+      due: Math.min(due, Date.now() + 80_000),
+      kind: 'aiReplyBack',
+      postKey: targetPostId,
+      meta: {
+        authorKey: k,
+        parentContent: target.content,
+        rootId: groupId,
+        mainPostId: mainId,
+        userReplyId,
+      },
+    });
   });
+  // 新围观网友换 AI 网名（回复发出前后均可——显示名动态解析，落盘即刷新）
+  const freshDyn = picked.filter((k) => k.startsWith('dyn:'));
+  if (freshDyn.length) void renameDynNpcsViaLlm(freshDyn);
   runPending();
 }
 
@@ -1688,13 +2016,19 @@ async function execJob(job: PendingJob): Promise<void> {
 
       // ---- 组装 LLM 上下文（感觉帖子内容 + 用户评论内容 + 最近对话链） ----
       let postContent = '';
-      let history: { from: 'user' | 'peer'; text: string }[] = [];
+      let history: { from: 'user' | 'peer'; speaker?: string; text: string }[] = [];
       let groupId = target.id; // AI 回复挂载的分组锚点
       let replyName = resolveAuthor(target.authorKey).name;
       let parentContent = target.content; // 被回复的内容（默认=目标帖本身）
+      // v26「我回复的什么」：用户回复的那条评论（围观网友接话的完整上下文；
+      // 被回复对象不是主帖本身时才有——直接回复主帖时它＝主帖，不再重复）
+      let repliedTo: { authorName: string; content: string } | undefined;
+      // v26：回复的热度跟随它的父帖（AI 回的是用户的回复→按用户回复缩放，
+      // 多半接近 0 赞——新接的话本来就没人赞；旧版错拿被回复评论的热度）
+      let parentEng = { likes: likesOf(target), views: target.views };
 
       if (job.kind === 'aiReplyBack') {
-        // 用户在评论区回复了 AI：AI 回应用户的评论
+        // 用户在评论区回复了 AI/网友：这位作者（被回复者或围观者）回应用户的回复
         const mainId = job.meta.mainPostId ?? job.meta.rootId ?? target.id;
         const mainPost = d.posts.find((p) => p.id === mainId);
         postContent = mainPost?.content ?? '';
@@ -1703,13 +2037,22 @@ async function execJob(job: PendingJob): Promise<void> {
         const userReply = job.meta.userReplyId ? d.posts.find((p) => p.id === job.meta.userReplyId) : null;
         parentContent = userReply?.content ?? target.content;
         replyName = userName;
-        // 最近对话链：分组锚点下「该 AI ↔ 用户」的最近几轮（多轮来回的上下文；
-        // 排除用户刚发的这条——它已作为 parent 单独传，避免重复）
+        if (userReply) parentEng = { likes: likesOf(userReply), views: userReply.views };
+        if (target.id !== mainId) {
+          repliedTo = { authorName: resolveAuthor(target.authorKey).name, content: target.content };
+        }
+        // v26 整楼对话链：分组锚点下最近的发言（任何作者——1-5 位围观者看的是
+        // 整层楼，不再只看「自己 ↔ 用户」；排除用户刚发的这条（已作为 parent 单传）
+        // 和被回复的那条（已作为 repliedTo 单传），逐条带真实说话人名
         history = d.posts
-          .filter((p) => p.replyTo === groupId && (p.authorKey === authorKey || p.authorKey === 'user') && p.id !== job.meta.userReplyId)
+          .filter((p) => p.replyTo === groupId && p.id !== job.meta.userReplyId && p.id !== target.id)
           .sort((a, b) => a.createdAt - b.createdAt)
           .slice(-6)
-          .map((p) => ({ from: p.authorKey === 'user' ? ('user' as const) : ('peer' as const), text: p.content }));
+          .map((p) => ({
+            from: p.authorKey === 'user' ? ('user' as const) : ('peer' as const),
+            speaker: resolveAuthor(p.authorKey).name,
+            text: p.content,
+          }));
       } else {
         // NPC 回复用户的新帖
         postContent = target.content;
@@ -1735,6 +2078,7 @@ async function execJob(job: PendingJob): Promise<void> {
           postLang,
           mediaDesc,
           history,
+          repliedTo, // v26：用户回复的那条评论（"我回复的什么"）
           userName,
         })) as { text?: string };
         text = typeof r.text === 'string' ? sanitizeCommentClient(stripReplyPrefixClient(r.text)) : '';
@@ -1742,6 +2086,8 @@ async function execJob(job: PendingJob): Promise<void> {
         if (text && postLang === 'zh-Hans' && foreignDominantClient(text)) text = '';
         // v24 客户端兜底：楼层对话回复 20-80 字（留容差 12~95）——过短/过长直接不发生
         if (text && (text.length < 12 || text.length > 95)) text = '';
+        // v26 锚定双保险：必须接得上「用户这条回复 + 用户回复的那条 + 主帖」（与服务端同口径）
+        if (text && !commentAnchored(text, `${parentContent} ${repliedTo?.content ?? ''} ${postContent}`)) text = '';
       } catch {
         text = '';
       }
@@ -1752,7 +2098,8 @@ async function execJob(job: PendingJob): Promise<void> {
         return;
       }
       const next = { ...forumData() };
-      // AI 回复的热度按被回复父帖缩放（评论赞 << 主帖赞；用户的新帖 0 赞 → 回复也几乎 0 赞）
+      // AI 回复的热度按被回复父帖缩放（v26：aiReplyBack 的父帖 = 用户的回复，
+      // 多半接近 0 赞——新接的话本来就没人赞；评论赞 << 主帖赞）
       const replyPost = basePost(
         authorKey,
         text.slice(0, REPLY_MAX),
@@ -1761,7 +2108,7 @@ async function execJob(job: PendingJob): Promise<void> {
         groupId,
         replyName,
         true,
-        { likes: likesOf(target), views: target.views },
+        parentEng,
       );
       // 精确被回复对象 = 用户的回复（多轮接话定位）
       if (job.kind === 'aiReplyBack' && job.meta.userReplyId) replyPost.replyToPost = job.meta.userReplyId;
