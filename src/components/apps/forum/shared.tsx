@@ -14,7 +14,7 @@
 
 import { useSystemDark, selectResolvedTheme, useSettings } from '@/lib/ios/store';
 import { resolveAuthor, type AuthorKey } from '@/lib/forum/core';
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import {
   ArrowLeft,
   BarChart3,
@@ -168,14 +168,17 @@ export function XAvatar({
   onClick?: () => void;
 }) {
   const a = resolveAuthor(authorKey);
+  // 头像图加载失败（CDN 不可达等）→ 回退 NPC 彩底首字，避免裂图
+  const [imgBroken, setImgBroken] = useState(false);
   let inner: ReactNode;
-  if (a.avatar) {
-    // dataURL 直出（IndexedDB），与朋友圈/聊天头像同口径（不经 next/image 优化端点）
+  if (a.avatar && !imgBroken) {
+    // dataURL / 头像库 CDN URL 直出（IndexedDB 与朋友圈/聊天头像同口径，不经 next/image 优化端点）
     inner = (
       <img
         src={a.avatar}
         alt={a.name}
         draggable={false}
+        onError={() => setImgBroken(true)}
         className="h-full w-full select-none object-cover"
       />
     );

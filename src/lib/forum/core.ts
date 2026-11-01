@@ -1226,6 +1226,60 @@ export function randomHandle(key: string): string {
   return s + num.slice(0, D);
 }
 
+// ---------------- NPC 头像库接入（avatar-library 随机分配） ----------------
+
+/** 头像库基址：项目内置静态资源（public/avatar-library，与 GitHub 仓库 cczzff468/avatar-library 同步）。
+ *  用本地静态文件而非 jsdelivr CDN：沙箱/部分网络环境下 CDN 会 301 到被墙的 raw.githubusercontent，
+ *  本地直出零外部依赖、秒开；GitHub 仓库仍是规范图库源（批量更新时同步拷回 public）。 */
+const AVATAR_LIBRARY_BASE = '/avatar-library';
+/** 每类张数（与仓库保持同步；real 类 051-100 未就绪时 onError 回退彩底首字） */
+const AVATAR_LIBRARY_PER_CLS = 100;
+
+/** FNV-1a 播种 + LCG 伪随机（与 randomHandle 同款；纯函数保证同一 NPC 每次渲染拿到同一头像） */
+function avatarRng(key: string): () => number {
+  let h = 2166136261;
+  for (let i = 0; i < key.length; i++) h = (h ^ key.charCodeAt(i)) * 16777619;
+  h = h >>> 0;
+  return () => {
+    h = (Math.imul(h, 1103515245) + 12345) >>> 0;
+    return h / 4294967296;
+  };
+}
+
+/** 男女倾向关键词（从网名 + 人设里推断，用于真人头像分性别配图） */
+const FEMALE_HINTS = ['她', '女', '姐', '妹', '闺蜜', '化妆', '口红', '美甲', '裙子', '穿搭', '美妆', '追星', '追剧', '甜妹', '女孩', '妈咪', '宝宝', '减肥', '奶茶', '粉', '老婆口中的', '小仙女'];
+const MALE_HINTS = ['他', '男', '哥', '弟', '兄弟', '哥们', '哥们儿', '健身', '篮球', '足球', '游戏', '键盘', '数码', '装机', '显卡', '打球', '抽烟', '喝酒', '搬砖', '程序员', '打工', '糙汉', '大兄弟', '男孩', '老哥'];
+
+/** 给 NPC 分配头像库图片（随机但稳定：同一 key 永远同一张）。
+ *  分布参考真实论坛生态：真人系 50%（按人设性别分男女池）、动漫 22%、猫狗 14%、抽象 10%、4% 保留彩底首字（更自然）。 */
+export function assignNpcAvatar(key: string, name: string, persona?: string): string | null {
+  const next = avatarRng(key);
+  const roll = next();
+  let cls: string | null;
+  if (roll < 0.04) cls = null; // 4% 无头像（彩底首字兜底）
+  else if (roll < 0.26) cls = 'anime';
+  else if (roll < 0.40) cls = 'catdog';
+  else if (roll < 0.50) cls = 'abstract';
+  else cls = 'real-photo'; // 50% 真人系，下面再分性别
+
+  if (cls === 'real-photo') {
+    const text = `${name} ${persona ?? ''}`;
+    const fem = FEMALE_HINTS.some((w) => text.includes(w));
+    const mal = MALE_HINTS.some((w) => text.includes(w));
+    // 都命中/都没命中 → 伪随机分性别；只有一类命中 → 用命中的
+    if (fem && !mal) cls = 'female';
+    else if (mal && !fem) cls = 'male';
+    else if (next() < 0.5) cls = 'female';
+    else cls = 'male';
+    // 少部分真人系用混合 real 池（更丰富）
+    if (next() < 0.18) cls = 'real';
+  }
+  if (!cls) return null;
+  const idx = 1 + Math.floor(next() * AVATAR_LIBRARY_PER_CLS); // 1..100
+  const file = `${cls}_${String(idx).padStart(3, '0')}.jpg`;
+  return `${AVATAR_LIBRARY_BASE}/${cls}/${file}`;
+}
+
 /** 按 key 解析作者（含 user/official/NPC/char）；未知 key 给占位。
  *  user：论坛内自定义资料（name/handle/avatar/bio）优先，未自定义跟随全局机主资料。 */
 export function resolveAuthor(key: AuthorKey): ForumAuthor {
@@ -1253,21 +1307,23 @@ export function resolveAuthor(key: AuthorKey): ForumAuthor {
       // persona 里的旧名同步替换，LLM 生成口吻跟着新身份走
       const ov = forumData().npcNames?.[def.id];
       const name = ov ?? def.name;
+      const persona = ov
+        ? def.persona.includes(def.name)
+          ? def.persona.replaceAll(def.name, ov)
+          : `${def.persona}你的网名叫「${ov}」，说话保持这个人的口吻和用语习惯。`
+        : def.persona;
       return {
         key,
         name,
         // 随机字母+数字账号（用户要求；不再用固定英文 handle）
         handle: randomHandle(key),
-        avatar: null,
+        // 头像库随机分配（同一 NPC 永远同一张；加载失败回退彩底首字）
+        avatar: assignNpcAvatar(key, name, persona),
         npcAvatar: { bg: def.bg, ch: name.slice(0, 1) },
         verified: def.verified,
         bio: def.bio,
         baseFollowers: def.followers,
-        persona: ov
-          ? def.persona.includes(def.name)
-            ? def.persona.replaceAll(def.name, ov)
-            : `${def.persona}你的网名叫「${ov}」，说话保持这个人的口吻和用语习惯。`
-          : def.persona,
+        persona,
         ip: NPC_IPS[key.slice(4)],
       };
     }
@@ -1280,7 +1336,8 @@ export function resolveAuthor(key: AuthorKey): ForumAuthor {
         key,
         name: def.name,
         handle: randomHandle(key),
-        avatar: null,
+        // 头像库随机分配（同一网友永远同一张；加载失败回退彩底首字）
+        avatar: assignNpcAvatar(key, def.name, def.persona),
         npcAvatar: { bg: def.bg, ch: def.name.slice(0, 1) },
         verified: def.verified,
         bio: def.bio,
