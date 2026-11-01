@@ -19,7 +19,20 @@ import { NextResponse } from 'next/server';
  *   userName?: string,                  // 机主名（称呼/被回复者）
  *   avoid?: string[],                   // 防重复：最近已出现过的内容
  * }
- * → { items: string[] }（posts/comments/subreplies 批量）；{ text: string }（reply/dm）
+ * → { items: { content, textImage }[] }（posts：严格 JSON 解析后的帖子对象数组，
+ *    第 N 项对应第 N 位作者，无效项 content 为空串由客户端池子兜底）；
+ *   { items: string[] }（comments/subreplies/names 批量）；{ text: string }（reply/dm）
+ *
+ * v7（用户反馈「信息流结构性灾难」）posts 分支全面重构：
+ * - System Prompt 严格命令模型只输出严格合法的 JSON 数组；
+ * - 服务端 parseLooseJSON 解析（容忍围栏/前后杂文本），解析失败/大量无效
+ *   → 严格重试一次，再失败返回全空（客户端 NPC 文案池兜底，绝不把乱稿上屏）；
+ * - 字段严格隔离：content 只存帖子正文；textImage 只存文字图片短句（可选）；
+ *   发帖人网名由前端根据 authorKey 独立渲染在头部，评论由另一套接口独立生成，
+ *   绝不混进正文；
+ * - 清洗：剥「回复 @xx：」/网名前缀、去零宽/控制字符、行首行尾拼接符 ~ |，
+ *   ASCII ~ 连串折行；多人对话拼接稿（含其他作者网名+冒号，或 2 处以上
+ *   「名字：」发言标记）整条作废；批内规范化去重（同名前缀剥离后同稿必撞）。
  *
  * 输出清洗：extractThinkBlocks 剥 [思考] 块；去引号/围栏/舞台指示；长度截断；
  * 时间感知注入与 moments/generate 同口径（北京时间 + 时段语境）。
@@ -27,7 +40,7 @@ import { NextResponse } from 'next/server';
  * 内容偏「编事情」的明星八卦吃瓜叙事（谁和谁怎么样、今天碰见xxx了好帅）、字数不限。
  */
 
-import { completeWithFallback, extractUpstreamConfig, type LLMMessage, type UpstreamConfig } from '@/lib/server-llm';
+import { completeWithFallback, extractUpstreamConfig, parseLooseJSON, type LLMMessage, type UpstreamConfig } from '@/lib/server-llm';
 import { extractThinkBlocks } from '@/lib/think-filter';
 
 /** 语言代码 → 中文名（与客户端 FORUM_LANG_LABELS 同口径） */
@@ -129,6 +142,113 @@ function postLine(post: { authorName?: string; content?: string; mediaDesc?: str
   return `${who}发的帖子：「${text}」${desc}`;
 }
 
+// ---------------- posts 分支：严格 JSON 解析 + 校验清洗（v7 结构性灾难修复） ----------------
+
+interface PostGenItem {
+  /** 帖子正文（清洗后；无效/作废为空串——客户端按空位用文案池兜底） */
+  content: string;
+  /** 文字图片短句（可选，≤40 字；客户端 canvas 渲染成白底居中文字图） */
+  textImage: string;
+}
+
+/** 正则转义（网名里可能有特殊字符） */
+function escapeRe(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/** 「名字：」式发言标记（行首/空白/拼接符后的 词+全半角冒号；冒号后不要求空格——
+ *  中文「我：」「你：」后直接接正文是常态；名字段须含至少一个非数字字符——
+ *  排除 08:26 时间、1:2 比例这类误报）：≥2 处 = 多人对话拼接稿 */
+const SPEAKER_RE =
+  /(?:^|\n|\s|[~～|｜])[@＠]?(?=[^\s:：，。！!？?~～|｜]{1,24}[:：])(?=[^\s:：，。！!？?~～|｜]*[^\s:：，。！!？?~～|｜\d])[^\s:：，。！!？?~～|｜]{1,24}[:：]/g;
+
+/** 帖子正文清洗 + 灾难稿检测。
+ *  返回 null = 整条作废（多人拼接/混入他人评论），客户端会用文案池补位。
+ *  ownName = 该帖作者网名；allNames = 本批全部作者网名（含自己）。 */
+function sanitizePostContent(raw: string, ownName: string, allNames: string[]): string | null {
+  let t = cleanText(raw, 2000); // 剥思考块/围栏/引号/编号前缀/舞台指示
+  t = stripReplyPrefix(t); // 剥「回复 @xx：」式前缀
+  // 清除零宽字符与控制字符（保留 \n）——「奇怪的拼接符导致解析失败」的元凶之一
+  t = t.replace(/[\u200B-\u200D\uFEFF\u2028\u2029]/g, '').replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
+  // ASCII ~ 连串 = 大模型把多人发言糊一条时爱用的分隔符：折成换行再逐行清洗行首行尾拼接符
+  t = t.replace(/~+/g, '\n');
+  t = t
+    .split('\n')
+    .map((l) => l.replace(/^[~～|｜·•\s]+/, '').replace(/\s*[~～|｜]+$/, '').trim())
+    .filter(Boolean)
+    .join('\n');
+  // 剥开头网名前缀：「草莓大福今天吃了吗：正文」——发帖人名字由系统独立展示在头部，
+  // 出现在正文开头的任何本批网名都是模型写串了，剥掉名字与后面的冒号
+  for (const n of allNames) {
+    if (n && t.startsWith(n)) {
+      const rest = t.slice(n.length).replace(/^[\s:：~～\-—]+/, '').trim();
+      if (rest.length >= 4) t = rest;
+      break;
+    }
+  }
+  // 「@名 正文」形态（顶帖一般不会以 @ 开头，模型写串的句柄前缀）
+  if (/^[@＠][^\s:：]{1,24}\s+/.test(t)) {
+    const rest = t.replace(/^[@＠][^\s:：]{1,24}\s+/, '');
+    if (rest.length >= 4) t = rest;
+  }
+  // 灾难稿检测①：正文里混入其他作者的网名 + 冒号（把别人的评论拼进来了）→ 整条作废
+  for (const n of allNames) {
+    if (!n || n === ownName) continue;
+    if (new RegExp(`(?:^|[\\n\\s~～|｜@＠])${escapeRe(n)}\\s*[:：]`).test(t)) return null;
+  }
+  // 灾难稿检测②：2 处以上「名字：」式发言标记 = 多人轮流发言的聊天记录稿 → 整条作废
+  if ((t.match(SPEAKER_RE) ?? []).length >= 2) return null;
+  if (t.replace(/\s+/g, '').length < 4) return null;
+  return t;
+}
+
+/** 从模型回复中提取严格 JSON 帖子数组（容忍 ``` 围栏与前后杂文本；非数组/解析失败返回 []） */
+function extractPostItems(raw: string): { content: string; textImage: string }[] {
+  const text = extractThinkBlocks(raw ?? '').text;
+  const arr = parseLooseJSON<unknown[]>(text);
+  if (!Array.isArray(arr)) return [];
+  return arr.map((o) => {
+    if (o && typeof o === 'object' && !Array.isArray(o)) {
+      const rec = o as Record<string, unknown>;
+      return {
+        content: typeof rec.content === 'string' ? rec.content : '',
+        textImage: typeof rec.textImage === 'string' ? rec.textImage.trim().slice(0, 40) : '',
+      };
+    }
+    return { content: '', textImage: '' };
+  });
+}
+
+/** 解析结果 → 与作者一一对齐的清洗后数组（第 i 项对应第 i 位作者；
+ *  无效项置空串、textImage 随之作废；批内规范化去重——前缀剥离后同稿必撞） */
+function alignPostItems(
+  parsed: { content: string; textImage: string }[],
+  expect: number,
+  allNames: string[],
+  seenFp: Set<string>,
+): PostGenItem[] {
+  const out: PostGenItem[] = [];
+  for (let i = 0; i < expect; i++) {
+    const ownName = allNames[i] ?? '';
+    const raw = parsed[i]?.content ?? '';
+    const content = raw ? sanitizePostContent(raw, ownName, allNames) : null;
+    if (!content) {
+      out.push({ content: '', textImage: '' });
+      continue;
+    }
+    // 批内规范化去重（去空白后前 30 字指纹；同稿不同前缀也会在这里撞上）
+    const fp = content.replace(/\s+/g, '').slice(0, 30);
+    if (seenFp.has(fp)) {
+      out.push({ content: '', textImage: '' });
+      continue;
+    }
+    seenFp.add(fp);
+    const ti = parsed[i]?.textImage ?? '';
+    out.push({ content, textImage: ti.length >= 2 && ti !== content ? ti : '' });
+  }
+  return out;
+}
+
 export async function POST(req: Request) {
   try {
     const body = (await req.json().catch(() => ({}))) as Record<string, unknown>;
@@ -160,6 +280,7 @@ export async function POST(req: Request) {
         : [];
       if (!items.length) return NextResponse.json({ error: 'items 为空' }, { status: 400 });
       const expect = items.length;
+      const allNames = items.map((it) => it.name);
       const spec = items
         .map((it, i) => {
           const mem = it.recent.length
@@ -173,7 +294,17 @@ export async function POST(req: Request) {
           role: 'system',
           content:
             '你在为一个国际化中文论坛（风格类似 X/Twitter 的公开广场）批量生成不同网友的帖子。' +
-            '【最重要】每条帖子必须像真实网民随手发的，不是写作文。硬性要求：' +
+            `【输出格式铁律（最高优先级）】只输出一个严格合法的 JSON 数组，此外禁止输出任何文字、解释或代码围栏：` +
+            `\n- 数组恰好包含 ${expect} 个对象，第 N 个对象对应第 N 位网友，顺序不能乱；` +
+            '\n- 每个对象只有两个字段：{"content":"帖子正文","textImage":"文字图片短句"}；' +
+            '\n- content = 这位网友发的帖子正文本身；字符串内换行用 \\n 转义，禁止出现未转义的引号；' +
+            '\n- textImage = 可选的文字图片短句（≤40 字）：把一句话做成白底居中的文字图发出来的那种（金句/台词/心情独白/毒舌吐槽），只有内容确实适合配文字图的帖子才给（整批最多三成），其余一律给空字符串 ""。' +
+            '\n【content 纯净性铁律（违反即废稿）】content 是帖子正文这一件事本身，里面绝对禁止：' +
+            '\n- 出现任何人的网名/名字/名字+冒号前缀（包括这位网友自己的名字——「某某：」式开头是严重错误，发帖人名字由系统自动展示在头像旁，不需要你写）；' +
+            '\n- 把别人的评论、回复、对话、@提及、「回复」字样混进正文——评论区由系统另行生成，你只写 TA 自己一个人发的一件事；' +
+            '\n- 多人轮流发言的拼接文本（A：xxx B：xxx 这种聊天记录式内容）；' +
+            '\n- ~ ～ | 等拼接分隔符和任何格式标记。' +
+            '\n【内容风格】【最重要】每条帖子必须像真实网民随手发的，不是写作文。硬性要求：' +
             '\n- 口吻：碎碎念、带情绪、想哪说明，可以没头没尾；可以不用标点或全用感叹号/问号；可以有错别字和拼音缩写（u1s1、xswl、真下头）；短句为主，别写长难句。' +
             '\n- 严禁新闻稿腔/官方腔/作文腔：「今天看了个新闻感觉非常震惊」「我们要保持理智」「不得不说」「总的来说」「首先其次最后」这类全部禁止。' +
             '\n- 内容要会「编事情」——像讲一件真事：谁和谁被拍到深夜同框、今天在商场碰见某男星本人真人比屏幕帅、同事追星追到吃土、邻居提了新车全楼道都听说了、剧组路透、演唱会门口的黄牛、红毯造型翻车……有细节、有画面、有起因经过，像当事人或目击者随手发出来的。' +
@@ -183,16 +314,36 @@ export async function POST(req: Request) {
             '\n- 语言：每条严格用该网友指定的「发帖语言」写，要地道得像母语者随手发的（英语帖是真英语网络口吻、日语帖像日本网友、韩语帖像韩国网友、繁体帖像港台网友）；简体中文为主，其他语言自然穿插。' +
             '\n- 字数不限：一句话的短吐槽、两三句话的现场播报、几百字的长帖叙事都可以，长短错落才真实。' +
             '\n- 涉及明星一律用模糊称呼（某顶流、某男团成员、某剧组、xxx），禁止使用真实明星姓名；影视剧可用泛称或虚构名。' +
-            '\n- 每条必须严格符合该网友的人设口吻；同一人设带「最近发过」记忆时，内容要有连贯性（接着上次的事说）。' +
-            '\n- 每条一行，行数与作者数一致。禁止 emoji、禁止任何格式标记。同一人设出现多次时，每条聊不同的事。',
+            '\n- 每条必须严格符合该网友的人设口吻；同一人设带「最近发过」记忆时，内容要有连贯性（接着上次的事说）。同一人设出现多次时，每条聊不同的事。禁止 emoji。',
         },
         {
           role: 'user',
-          content: `请为下面 ${expect} 位论坛网友各写一条帖子（每人一条，输出 ${expect} 行，第 N 行对应第 N 位）：\n${spec}${avoidLine}\n${bjTimeLine()}`,
+          content: `请为下面 ${expect} 位论坛网友各写一条帖子：输出恰好 ${expect} 个对象的 JSON 数组（第 N 个对象对应第 N 位网友，顺序一致）：\n${spec}${avoidLine}\n${bjTimeLine()}`,
         },
       ];
       const raw = (await completeWithFallback(config, messages)).text;
-      const list = await batchWithRetry(config, messages, raw, expect, 2000);
+      const seenFp = new Set<string>();
+      let list = alignPostItems(extractPostItems(raw), expect, allNames, seenFp);
+      // 有效条数不足一半：多半是模型没按 JSON 输出或大量废稿 → 严格重试一次
+      const validN = (l: PostGenItem[]) => l.filter((x) => x.content).length;
+      if (validN(list) < Math.ceil(expect / 2)) {
+        try {
+          const raw2 = (
+            await completeWithFallback(config, [
+              ...messages,
+              { role: 'assistant', content: raw.slice(0, 1500) },
+              {
+                role: 'user',
+                content: `你上一次的输出不是合法的 JSON 数组（或大量对象无效）。重新输出：恰好 ${expect} 个对象、只含 content 和 textImage 两个字段的 JSON 数组，除 JSON 本身外禁止任何文字，不要代码围栏。再次提醒：content 里不能出现任何人的网名或名字，不能把别人的评论混进正文。`,
+              },
+            ])
+          ).text;
+          const retry = alignPostItems(extractPostItems(raw2), expect, allNames, new Set());
+          if (validN(retry) > validN(list)) list = retry;
+        } catch {
+          /* 重试失败：按现有结果返回，客户端文案池兜底 */
+        }
+      }
       return NextResponse.json({ items: list });
     }
 

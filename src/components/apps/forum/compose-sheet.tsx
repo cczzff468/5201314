@@ -6,15 +6,17 @@
  * 布局：
  * - 顶行：返回箭头 | 「发布」胶囊（空文浅蓝 #a9d4f5、可发亮蓝；草稿按钮已按需求移除）；
  * - 正文区：40px 头像 + 「有什么新鲜事？」20px 大输入；
- * - 媒体预览：2 列网格 + 右上删除角标（相册/GIF，最多 4 张）；
+ * - 媒体预览：2 列网格 + 右上删除角标（相册/文字图片，最多 4 张）；
  * - 投票编辑卡：选项 2~4 条，可增删（工具栏投票开关）；
  * - 隐私行/版块胶囊已按用户要求移除（「所有人都可以回复」与「今日热议」不再展示）；
- * - 工具行（细分隔线上方）：相册（手机上传/文字搜图二选一）/ 投票 / 表情 / 定时 / 位置 / 旗子(话题)
+ * - 工具行（细分隔线上方）：相册（手机上传/文字图片二选一）/ 投票 / 表情 / 定时 / 位置 / 旗子(话题)
  *   未激活灰色线条（用户指定），激活蓝底白图标 + 字数圆环；
  * - 底行：左下灰色圆角「全屏」方块（写作模式）+ 定时/位置状态芯片（图标化美化）。
  *
  * 数据出参 ComposePayload：media / poll / location / visibleAt（定时帖）。
  * 话题面板：支持自定义话题输入 + 热门话题列表。
+ * v9：GIF·动图搜索已按用户要求移除；文字图片移除「iMessage HH:mm」时间戳
+ * （渲染逻辑迁至 lib/forum/textimg.ts，与 AI 生成帖配图同源）。
  */
 
 import { useRef, useState } from 'react';
@@ -31,6 +33,7 @@ import {
   X,
 } from 'lucide-react';
 import { trendingTopics, forumData, POST_MAX } from '@/lib/forum/core';
+import { renderTextImage, TEXTIMG_MAX_LEN } from '@/lib/forum/textimg';
 import { XAvatar, XIcons, useXTheme } from './shared';
 import { useForum } from './ctx';
 
@@ -72,51 +75,8 @@ function schedulePresets(): { label: string; at: number }[] {
   ];
 }
 
-/** 文字图片渲染（用户参考图 1:1）：1080×1080 纯白底，中灰 #999997，
- * 「iMessage HH:mm」时间戳行 + 正文同字号居中排布，大量留白；
- * 布局取自参考图实测：时间戳中心 y≈502、正文首行中心 y≈562（中心距 60px），
- * 多行正文自动换行（行距 53px），整块垂直居中。 */
-export function renderTextImage(text: string, when = new Date()): string {
-  const W = 1080;
-  const H = 1080;
-  const canvas = document.createElement('canvas');
-  canvas.width = W;
-  canvas.height = H;
-  const ctx = canvas.getContext('2d');
-  if (!ctx) throw new Error('canvas 不可用');
-  ctx.fillStyle = '#ffffff';
-  ctx.fillRect(0, 0, W, H);
-  const fs = 28;
-  const lh = 53;
-  ctx.font = `400 ${fs}px system-ui, -apple-system, 'PingFang SC', 'Segoe UI', 'Noto Sans SC', sans-serif`;
-  ctx.fillStyle = '#999997';
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  // 自动换行（每行宽 ≤ 960px）
-  const maxW = 960;
-  const lines: string[] = [];
-  let cur = '';
-  for (const ch of text.trim()) {
-    if (ctx.measureText(cur + ch).width > maxW && cur) {
-      lines.push(cur);
-      cur = ch;
-    } else {
-      cur += ch;
-    }
-  }
-  if (cur) lines.push(cur);
-  const n = Math.max(1, lines.length);
-  // 垂直居中布局（参考图实测：n=1 时时间戳中心 502 / 正文中心 562）
-  const blockH = 99 + (n - 1) * lh;
-  const blockTop = 536.5 - blockH / 2;
-  const stampCy = blockTop + 12.5;
-  const firstCy = stampCy + 60;
-  const hh = String(when.getHours()).padStart(2, '0');
-  const mm = String(when.getMinutes()).padStart(2, '0');
-  ctx.fillText(`iMessage ${hh}:${mm}`, W / 2, stampCy);
-  lines.forEach((ln, i) => ctx.fillText(ln, W / 2, firstCy + i * lh));
-  return canvas.toDataURL('image/png');
-}
+/** 文字图片渲染已迁至 lib/forum/textimg.ts（与 AI 生成帖配图同源；
+ *  v9 按用户要求移除「iMessage HH:mm」时间戳行，成品只有正文本身） */
 
 const fmtSchedule = (at: number) =>
   new Date(at).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
@@ -207,10 +167,7 @@ export function ComposeSheet({
   const [location, setLocation] = useState<string | null>(null);
   const [visibleAt, setVisibleAt] = useState<number | null>(null);
   const [full, setFull] = useState(false);
-  const [sheet, setSheet] = useState<null | 'gallery' | 'emoji' | 'schedule' | 'geo' | 'gif' | 'topic' | 'textimg'>(null);
-  const [gifQuery, setGifQuery] = useState('');
-  const [gifResults, setGifResults] = useState<{ url: string; source?: string }[]>([]);
-  const [gifLoading, setGifLoading] = useState(false);
+  const [sheet, setSheet] = useState<null | 'gallery' | 'emoji' | 'schedule' | 'geo' | 'topic' | 'textimg'>(null);
   const [geoInput, setGeoInput] = useState('');
   const [customSchedule, setCustomSchedule] = useState('');
   /** 自定义话题输入（话题面板顶部） */
@@ -269,29 +226,6 @@ export function ComposeSheet({
         f.toast('图片已添加');
       }
     });
-  };
-
-  /** GIF 搜索（服务端 /api/forum/gif → z-ai images.search） */
-  const searchGif = (q: string) => {
-    const query = q.trim();
-    if (!query) return;
-    setGifLoading(true);
-    setGifResults([]);
-    fetch('/api/forum/gif', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ query }),
-    })
-      .then((r) => r.json())
-      .then((data: { success?: boolean; results?: { url: string; source?: string }[] }) => {
-        if (data.success && data.results?.length) {
-          setGifResults(data.results.slice(0, 12));
-        } else {
-          f.toast('没搜到相关动图，换个词试试');
-        }
-      })
-      .catch(() => f.toast('GIF 搜索失败，稍后再试'))
-      .finally(() => setGifLoading(false));
   };
 
   /** 插入表情 */
@@ -559,8 +493,9 @@ export function ComposeSheet({
         )}
       </div>
 
-      {/* emoji / 定时 / 位置 / GIF / 话题 底部弹层（互斥，一次一个）;
-          版块选择弹层已随隐私行一并移除（用户要求删除「今日热议」） */}
+      {/* emoji / 定时 / 位置 / 话题 底部弹层（互斥，一次一个）;
+          版块选择弹层已随隐私行一并移除（用户要求删除「今日热议」）；
+          GIF·动图搜索已按用户要求删除（v9） */}
       {sheet && (
         <div className="absolute inset-0 z-10" role="dialog" aria-label="工具面板">
           <button
@@ -574,12 +509,12 @@ export function ComposeSheet({
             className="forum-hide-scrollbar absolute inset-x-0 bottom-0 max-h-[66%] animate-[forum-sheet_.24s_ease-out] overflow-y-auto overflow-x-hidden rounded-t-2xl pb-[24px]"
             style={{ background: t.bg, color: t.text }}
           >
-            {/* --- 相册选择（手机上传 / 文字搜图） --- */}
+            {/* --- 相册选择（手机上传 / 文字图片） --- */}
             {sheet === 'gallery' && (
               <div className="px-4 pt-3">
                 <p className="pb-1 text-[15px] font-bold">添加图片</p>
                 <p className="pb-3 text-[12px]" style={{ color: t.secondary }}>
-                  选择从手机相册上传，或输入文字搜索网络动图，最多 {MAX_MEDIA} 张
+                  从手机相册上传照片，或用文字生成文字图片，最多 {MAX_MEDIA} 张
                 </p>
                 <button
                   type="button"
@@ -627,39 +562,15 @@ export function ComposeSheet({
                     </span>
                   </span>
                 </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setGifResults([]);
-                    setGifQuery('');
-                    setSheet('gif');
-                  }}
-                  className="mt-2 flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left transition-colors active:opacity-60"
-                  style={{ background: t.hover }}
-                >
-                  <span
-                    className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full"
-                    style={{ background: 'rgba(0,186,124,0.12)', color: t.green }}
-                    aria-hidden="true"
-                  >
-                    <span className="text-[12px] font-extrabold">GIF</span>
-                  </span>
-                  <span className="min-w-0 flex-1">
-                    <span className="block text-[15px] font-bold">文字搜图（动图）</span>
-                    <span className="block text-[12px]" style={{ color: t.secondary }}>
-                      输入关键词，搜索网络图片/动图
-                    </span>
-                  </span>
-                </button>
               </div>
             )}
 
-            {/* --- 文字图片（用户参考图 1:1）：白底居中，iMessage 时间戳 + 正文 --- */}
+            {/* --- 文字图片：白底居中灰字（v9 已移除 iMessage 时间戳行） --- */}
             {sheet === 'textimg' && (
               <div className="px-4 pt-3">
                 <p className="pb-1 text-[15px] font-bold">文字图片</p>
                 <p className="pb-3 text-[12px]" style={{ color: t.secondary }}>
-                  用文字描述图片：生成纯白留白图，iMessage 时间戳 + 你的文字同字号居中（与参考图同款）
+                  用文字描述生成图片：纯白留白，你的文字居中排布
                 </p>
                 {/* 实时预览（与成品同布局；比例缩小的白底居中灰字卡） */}
                 <div
@@ -667,19 +578,13 @@ export function ComposeSheet({
                   style={{ borderColor: t.border, background: '#ffffff' }}
                   aria-hidden="true"
                 >
-                  <div className="px-6 text-center" style={{ color: '#999997' }}>
-                    <p style={{ fontSize: 13, lineHeight: 1 }}>
-                      iMessage {String(new Date().getHours()).padStart(2, '0')}:
-                      {String(new Date().getMinutes()).padStart(2, '0')}
-                    </p>
-                    <p className="mt-[6px] break-all" style={{ fontSize: 13, lineHeight: 1.9 }}>
-                      {textImgInput.trim() || '输入文字，生成你的文字图片'}
-                    </p>
-                  </div>
+                  <p className="px-6 break-all text-center" style={{ color: '#999997', fontSize: 13, lineHeight: 1.9 }}>
+                    {textImgInput.trim() || '输入文字，生成你的文字图片'}
+                  </p>
                 </div>
                 <textarea
                   value={textImgInput}
-                  onChange={(e) => setTextImgInput(e.target.value.slice(0, 60))}
+                  onChange={(e) => setTextImgInput(e.target.value.slice(0, TEXTIMG_MAX_LEN))}
                   rows={3}
                   placeholder="用一句文字描述图片，如 伦敦雨季很长，长到能忘记很多人和事。"
                   className="w-full resize-none rounded-xl px-3 py-[10px] text-[15px] outline-none"
@@ -688,7 +593,7 @@ export function ComposeSheet({
                 />
                 <div className="mt-3 flex items-center justify-between pb-1">
                   <span className="text-[12px]" style={{ color: t.secondary }}>
-                    {textImgInput.length}/60 字，超出自动换行居中
+                    {textImgInput.length}/{TEXTIMG_MAX_LEN} 字，超出自动换行居中
                   </span>
                   <button
                     type="button"
@@ -863,85 +768,6 @@ export function ComposeSheet({
                   >
                     移除当前位置
                   </button>
-                )}
-              </div>
-            )}
-
-            {/* --- GIF 搜索 --- */}
-            {sheet === 'gif' && (
-              <div className="px-4 pt-3">
-                <p className="pb-1 text-[15px] font-bold">GIF·动图搜索</p>
-                <form
-                  className="mt-1 flex items-center gap-2 rounded-full px-3 py-2"
-                  style={{ background: t.dark ? '#202327' : '#eff3f4' }}
-                  onSubmit={(e) => {
-                    e.preventDefault();
-                    searchGif(gifQuery);
-                  }}
-                >
-                  <input
-                    value={gifQuery}
-                    onChange={(e) => setGifQuery(e.target.value.slice(0, 30))}
-                    placeholder="搜动图，如 开心 猫 打工人"
-                    className="min-w-0 flex-1 bg-transparent text-[15px] outline-none"
-                    style={{ color: t.text, caretColor: t.blue }}
-                    aria-label="GIF 搜索关键词"
-                  />
-                  <button
-                    type="submit"
-                    disabled={!gifQuery.trim() || gifLoading}
-                    className="rounded-full px-4 py-1.5 text-[13px] font-bold text-white disabled:opacity-40"
-                    style={{ background: t.blue }}
-                  >
-                    {gifLoading ? '搜索中…' : '搜索'}
-                  </button>
-                </form>
-                {gifLoading && (
-                  <p className="py-6 text-center text-[13px]" style={{ color: t.secondary }}>
-                    正在全网搜动图…
-                  </p>
-                )}
-                {!gifLoading && gifResults.length === 0 && (
-                  <div className="pb-2 pt-3">
-                    <p className="pb-2 text-[13px] font-bold" style={{ color: t.secondary }}>
-                      热门搜索
-                    </p>
-                    <div className="flex flex-wrap gap-2">
-                      {['开心', '猫猫', '打工人', '干饭', '点赞', '摸鱼', '晚安', '庆祝'].map((k) => (
-                        <button
-                          key={k}
-                          type="button"
-                          onClick={() => {
-                            setGifQuery(k);
-                            searchGif(k);
-                          }}
-                          className="rounded-full px-3 py-1.5 text-[13px] font-medium active:opacity-60"
-                          style={{ background: t.dark ? '#202327' : '#eff3f4', color: t.text }}
-                        >
-                          {k}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )}
-                {gifResults.length > 0 && (
-                  <div className="grid grid-cols-3 gap-2 pt-3">
-                    {gifResults.map((g, i) => (
-                      <button
-                        key={i}
-                        type="button"
-                        onClick={() => {
-                          addMedia([g.url]);
-                          setSheet(null);
-                          f.toast('动图已添加（发布后可看到）');
-                        }}
-                        className="relative aspect-square overflow-hidden rounded-xl active:opacity-70"
-                        aria-label={`添加第 ${i + 1} 张动图`}
-                      >
-                        <img src={g.url} alt="搜索结果动图" className="h-full w-full object-cover" loading="lazy" />
-                      </button>
-                    ))}
-                  </div>
                 )}
               </div>
             )}

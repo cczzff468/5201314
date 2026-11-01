@@ -52,6 +52,7 @@ import {
   uid,
 } from './core';
 import { describeImagesAuto } from '@/lib/vision-client';
+import { renderTextImage } from './textimg';
 
 // ---------------- pending 队列（跨刷新持久） ----------------
 
@@ -594,18 +595,34 @@ async function llmPolish(): Promise<void> {
       items: items.map(({ name, persona, community }, i) => ({ name, persona, community, topic: topics[i % topics.length] })),
       avoid,
       userName: resolveAuthor('user').name,
-    })) as { items?: string[] };
-    const texts = Array.isArray(r.items) ? r.items.filter((x) => typeof x === 'string' && x.trim().length > 5) : [];
-    if (!texts.length) return;
+    })) as { items?: { content?: unknown; textImage?: unknown }[] };
+    // v7 契约：服务端严格 JSON 解析后的对象数组（第 i 项对应第 i 位作者；
+    // 无效项 content 为空串——这里直接跳过，不错位到别人头上）
+    const objs = Array.isArray(r.items) ? r.items : [];
     const now = Date.now();
     const next: ForumData = { ...forumData() };
-    texts.forEach((t, i) => {
-      const spec = items[i] ?? items[items.length - 1];
+    let imgN = 0;
+    objs.forEach((o, i) => {
+      const spec = items[i];
+      if (!spec) return;
+      const t = typeof o?.content === 'string' ? o.content.trim() : '';
+      if (t.length < 6) return;
       const authorKey: AuthorKey = spec.isChar ? `char:${spec.id}` : `npc:${spec.id}`;
       // LLM 帖不带 #话题 时，按默认版块归位
       const tag = /#([^#\s]+)#/.exec(t)?.[1];
       const cid = spec.isChar ? (tag ? NPC_COMMUNITY_MAP[tag] ?? null : null) : communityOfPoolText(spec.id, t);
-      next.posts.push(basePost(authorKey, t, cid, now - (i + 1) * 420_000));
+      const post = basePost(authorKey, t, cid, now - (i + 1) * 420_000);
+      // v9 文字图片：LLM 给了合适短句就 canvas 直出一张（每批最多 3 张，失败静默纯文字）
+      const ti = typeof o?.textImage === 'string' ? o.textImage.trim() : '';
+      if (ti.length >= 2 && ti.length <= 40 && ti !== t && imgN < 3) {
+        try {
+          post.media = [renderTextImage(ti)];
+          imgN += 1;
+        } catch {
+          /* canvas 不可用等：保持纯文字 */
+        }
+      }
+      next.posts.push(post);
     });
     saveForum(next);
   } catch {
@@ -1184,19 +1201,31 @@ async function buildFeedBatch(
   }
 
   // LLM 批量生成（一次 7~20 条；失败静默走池子；recent = 老网友最近发过的内容，LLM 据此接话疸）
-  const results: { key: AuthorKey; text: string }[] = [];
+  // v7 契约：服务端严格 JSON 解析后的对象数组（第 i 项对应第 i 位作者，无效项
+  // content 为空串——这里直接跳过，文案池在尾部补齐，作者不错位）
+  const results: { key: AuthorKey; text: string; textImage?: string }[] = [];
   try {
     const r = (await callApi({
       kind: 'posts',
       items: specs.map(({ name, persona, community, topic, lang, recent }) => ({ name, persona, community: community ?? '今日热议', topic, lang, recent })),
       avoid,
       userName: resolveAuthor('user').name,
-    })) as { items?: string[] };
-    const texts = Array.isArray(r.items) ? r.items.filter((x) => typeof x === 'string' && x.trim().length > 3) : [];
-    texts.forEach((t, i) => {
-      if (used.has(t.slice(0, 20))) return;
-      used.add(t.slice(0, 20));
-      results.push({ key: specs[i]?.key ?? `npc:${NPC_DEFS[0].id}`, text: t });
+    })) as { items?: { content?: unknown; textImage?: unknown }[] };
+    const objs = Array.isArray(r.items) ? r.items : [];
+    objs.forEach((o, i) => {
+      const spec = specs[i];
+      if (!spec) return;
+      const content = typeof o?.content === 'string' ? o.content.trim() : '';
+      if (content.length < 4) return; // 无效条目 → 池子兜底补齐
+      const k = content.slice(0, 20);
+      if (used.has(k)) return;
+      used.add(k);
+      const ti = typeof o?.textImage === 'string' ? o.textImage.trim() : '';
+      results.push({
+        key: spec.key,
+        text: content,
+        textImage: ti.length >= 2 && ti.length <= 40 && ti !== content ? ti : undefined,
+      });
     });
   } catch {
     /* 走池子兜底 */
@@ -1249,84 +1278,26 @@ async function buildFeedBatch(
  *  - 时间戳排在现有最老主帖之前（信息流向下无限延伸，旧帖永不消失）；
  *  - 防刷屏：与现有 feed 尾部作者隔开 + 批内绝不连排；时间间隔自然衰减（40分钟~几小时，偶尔隔天）。
  *  返回本次新增条数。 */
-// ---------------- 生成帖子按需配图（v8：文字 + 图片搭配） ----------------
+// ---------------- 生成帖子按需配「文字图片」（v9） ----------------
 
-/** 配图概率：每条新生成的帖子约 1/3 概率带图（真实感：不是每条都配图） */
-const FEED_IMAGE_RATE = 0.34;
-/** 单批最多配图条数（AI 文生图有成本，控制并发与生成时长） */
-const FEED_IMAGE_MAX = 3;
+/** 单批最多文字图片数（太多会刷屏，像人人都发金句图） */
+const FEED_TEXTIMG_MAX = 3;
 
-/** 主题 → 生图场景描述：只有「适合配图」的内容才配（宠物/美食/汽车/风景等）；
- *  吃瓜/吐槽/打工碎碎念这类主观内容配图反而假，保持纯文字。
- *  描述句由 API 侧统一拼「手机随拍照片风格」后缀，生成网友随手拍观感的照片。
- *  帖子带 #话题# 标签时优先按标签匹配。 */
-const IMG_TOPIC_MAP: { re: RegExp; kw: string }[] = [
-  { re: /猫|狗|宠物|铲屎|主子|撸猫|遛狗|哈基米|橘猫|布偶|柯基|柴犬|金毛|边牧|猫粮|狗粮|拆家/i, kw: '一只可爱的宠物猫狗趴在家里窗台边晒太阳' },
-  { re: /吃|喝|外卖|探店|美食|火锅|奶茶|咖啡|餐厅|好吃|难吃|宵夜|零食|甜品|做菜|厨房|烘焙|烧烤/i, kw: '餐桌上刚端上来的一盘热气腾腾的美食特写' },
-  { re: /车|油|驾|4S|提车|试驾|轮胎|油耗|引擎|声浪|SUV|轿跑|自驾|堵车/i, kw: '一辆干净的家用汽车停在城市街边，傍晚光线' },
-  { re: /旅行|旅游|出发|风景|海边|山顶|露营|徒步|citywalk|打卡|出片|古镇|西藏|云南|新疆/i, kw: '旅途中随手拍的风景，远处山峦和蓝天白云' },
-  { re: /天空|晚霞|日落|夕阳|月亮|星空|下雨|下雪|彩虹|蓝天|云朵/i, kw: '手机拍的天空晚霞，橘粉色云彩铺满天空' },
-  { re: /花|植物|绿植|养花|园艺|樱花|玫瑰|郁金香/i, kw: '手机微距拍的一朵盛开的花，背景虚化' },
-  { re: /健身|跑步|瑜伽|羽毛球|篮球|足球|运动|减脂|健身房/i, kw: '健身房里跑步机和器械一角，手机随拍视角' },
-  { re: /剧|追剧|电影|综艺|影院|上映|预告|豆瓣/i, kw: '电影院放映厅银幕亮着，观众席座椅暗光环境' },
-  { re: /演唱会|livehouse|音乐节|现场|演出/i, kw: '演唱会现场舞台灯光，远处观众举着手机' },
-];
-
-/** 从帖子正文提取配图场景描述；不适合配图的内容返回 null */
-function extractImageKeyword(text: string): string | null {
-  const tag = /#([^#\s]{2,8})#/.exec(text)?.[1];
-  if (tag && IMG_TOPIC_MAP.some(({ re }) => re.test(tag))) {
-    const hit = IMG_TOPIC_MAP.find(({ re }) => re.test(tag))!;
-    return hit.kw;
-  }
-  for (const { re, kw } of IMG_TOPIC_MAP) if (re.test(text)) return kw;
-  return null;
-}
-
-/** 生成一张配图（z-ai 文生图；失败/超时返回 null，绝不阻塞生成流程） */
-async function generatePostImage(kw: string): Promise<string | null> {
+/** 给一条新生成的帖子按需配「文字图片」（v9：用户要求的配图方式——
+ *  用文字描述图片，即把 LLM 给出的短句 canvas 渲染成白底居中灰字的
+ *  文字图，与发布弹层「文字图片」同款观感）：
+ *  纯前端直出，零 API 成本、同步完成不阻塞；渲染失败静默保持纯文字。
+ *  count 为本批已配图计数（跨帖子共享，封顶 FEED_TEXTIMG_MAX）。 */
+function attachTextImage(post: ForumPost, textImage: string | undefined, count: { n: number }): void {
+  const ti = textImage?.trim();
+  if (!ti || ti.length < 2 || ti.length > 40 || post.media?.length) return;
+  if (count.n >= FEED_TEXTIMG_MAX) return;
   try {
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 90_000);
-    const res = await fetch('/api/forum/img', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ query: kw }),
-      signal: ctrl.signal,
-    });
-    clearTimeout(timer);
-    if (!res.ok) return null;
-    const j = (await res.json()) as { src?: unknown };
-    return typeof j.src === 'string' && j.src.startsWith('data:image/') ? j.src : null;
+    post.media = [renderTextImage(ti)];
+    count.n += 1;
   } catch {
-    return null;
+    /* canvas 不可用等：保持纯文字 */
   }
-}
-
-/** 给一批新生成的帖子按需配图：适合配图的内容 ~1/3 概率生成 1 张「手机随拍」
- *  风格的真实感照片（AI 文生图，与帖子主题匹配）。
- *  异步补图模式：帖子先以纯文字上屏（不阻塞生成流程），图片生成完成后
- *  二次落库广播，时间线里图片自动弹出来（生图慢也不影响体验）。
- *  返回是否有帖子配上了图（调用方据此决定是否二次落库）。 */
-async function attachFeedImages(targets: ForumPost[]): Promise<boolean> {
-  const candidates = targets
-    .filter((p) => !p.media?.length && extractImageKeyword(p.content))
-    .filter(() => Math.random() < FEED_IMAGE_RATE)
-    .slice(0, FEED_IMAGE_MAX);
-  if (!candidates.length) return false;
-  let changed = false;
-  await Promise.all(
-    candidates.map(async (p) => {
-      const kw = extractImageKeyword(p.content);
-      if (!kw) return;
-      const src = await generatePostImage(kw);
-      if (src) {
-        p.media = [src];
-        changed = true;
-      }
-    }),
-  );
-  return changed;
 }
 
 /** 主页滑到底、上拉松开 → 生成一批更早的帖子（追加在信息流下方，旧帖永不消失）。 */
@@ -1363,8 +1334,8 @@ export async function generateMoreFeedPosts(): Promise<number> {
     // 同一作者的帖子若同批出现两次，天然被隔到不同深度（时间差拉开）
     const next = { ...forumData() };
     let at = frontier - (8 + Math.random() * 30) * 60_000;
-    const created: ForumPost[] = [];
-    results.forEach(({ key, text }, i) => {
+    const imgCount = { n: 0 }; // 本批文字图片计数（封顶 FEED_TEXTIMG_MAX）
+    results.forEach(({ key, text, textImage }, i) => {
       const tag = /#([^#\s]+)#/.exec(text)?.[1];
       const cid = key.startsWith('npc:')
         ? communityOfPoolText(key.slice(4), text)
@@ -1372,14 +1343,10 @@ export async function generateMoreFeedPosts(): Promise<number> {
           ? NPC_COMMUNITY_MAP[tag] ?? null
           : null;
       const p = basePost(key, text, cid, at);
+      attachTextImage(p, textImage, imgCount); // v9：按需配文字图片（canvas 同步直出）
       next.posts.push(p);
-      created.push(p);
       recordDynNpcRecent(key, text); // 人设连通性
       at -= naturalGapMs(6 + i); // 底部生成：间隔从几十分钟起拉大
-    });
-    // v8：异步补图（不阻塞）：帖子先以纯文字落库上屏，图片生成完后再二次落库弹出来
-    void attachFeedImages(created).then((changed) => {
-      if (changed) saveForum({ ...forumData() });
     });
     next.lastGenAt = Date.now();
     saveForum(next);
@@ -1420,8 +1387,8 @@ export async function generateNewFeedPosts(): Promise<number> {
     for (const p of next.posts) newestExisting = Math.max(newestExisting, p.createdAt);
     const floorAt = newestExisting + 90_000;
     let at = Date.now() - (30 + Math.random() * 60) * 1000;
-    const created: ForumPost[] = [];
-    results.forEach(({ key, text }, i) => {
+    const imgCount = { n: 0 }; // 本批文字图片计数（封顶 FEED_TEXTIMG_MAX）
+    results.forEach(({ key, text, textImage }, i) => {
       const tag = /#([^#\s]+)#/.exec(text)?.[1];
       const cid = key.startsWith('npc:')
         ? communityOfPoolText(key.slice(4), text)
@@ -1429,14 +1396,10 @@ export async function generateNewFeedPosts(): Promise<number> {
           ? NPC_COMMUNITY_MAP[tag] ?? null
           : null;
       const p = basePost(key, text, cid, at);
+      attachTextImage(p, textImage, imgCount); // v9：按需配文字图片（canvas 同步直出）
       next.posts.push(p);
-      created.push(p);
       recordDynNpcRecent(key, text); // 人设连通性
       at = Math.max(at - naturalGapMs(i), floorAt);
-    });
-    // v8：异步补图（不阻塞）：帖子先以纯文字落库上屏，图片生成完后再二次落库弹出来
-    void attachFeedImages(created).then((changed) => {
-      if (changed) saveForum({ ...forumData() });
     });
     next.lastGenAt = Date.now();
     saveForum(next);
