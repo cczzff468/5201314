@@ -1903,3 +1903,22 @@ Stage Summary:
 - 顺带修复 v27 潜伏客户端边界 bug（stripImgPh 从 'use client' 的 core.ts 被服务端调用 → 评论三分支静默崩掉）；拆 lib/forum/imgph.ts 共享模块
 - GEN_VERSION 28 重播种完成（浏览器 IndexedDB 实测），存量错乱评论清除
 - 关键文件：topic.ts（isTenderPost/loudMemeIn）、api/forum/generate/route.ts（三分支 Prompt+校验+header v28）、engine.ts（三处双保险）、core.ts（GEN_VERSION=28+再导出）、imgph.ts（新增）
+
+## 2026-11-01 · X论坛 v31「字数池四档 + 图文并茂」重写（用户实锤：帖子字数都一样、没带图）
+
+Task: 用户两大抱怨——①「生成的帖子为什么看着字数都一样」：旧 Prompt 是「随意 10~1000 字、长短错落」的模糊描述，LLM 全部收敛到 200~400 中间档（实测 21 帖全落 143~217）；②「还有没有带文字图片」：v27 配图规则触发面太窄，且池子帖（429 期间信息流主力）完全没有配图路径。用户给出完整新规范：四档字数池（极短 10~30/短 50~100/中 150~300/长 400~800）+ Image Rules（触发词命中必配、无图仅三种例外）。
+
+- [LLM 路径 route.ts v29] POST_LEN_PLANS 四档+pickLenPlan（服务端等权抽档+档内点值注入 spec——LLM 自己"随机"会全体收敛中档，正是字数趋同根源）；核心原则3重写字数池铁律（禁注水/禁落缝 31~49、101~149、301~399/档位优先于风格偏好）；极短篇豁免四要素；thought 模板补「目标字数是多少」；配图规则块整体换用户版 Image Rules（触发条件：看图/实拍/自拍/合照/打卡/偷拍/偶遇/安利/求推/OOTD → has_image 必须 true；无图仅纯文字吐槽/引战/无画面感搞抽象；image_description 以视角开头极度细节 30~100 字）；校验层 lenBucketOk 四档并集（含容差，缝隙/超880=废稿）；retry Prompt 同步
+- [池子路径 core.ts v30/v31] 17 组 NPC pool 各追加 3 条四档文案（1 极短+1 短+1 长，51 条新文案）+ POOL_TEXTIMG 配图描述表 20 条（6 条新文案带 [图片] 占位符 + 14 条存量文案——attachTextImage 对无占位符文案走「正文+图网格」渲染，无需改文案）+ poolTextImage() 查询函数；key 自动对齐脚本（最长公共前缀，15 个手抄偏差 key 全部修正，20/20 命中）
+- [engine.ts 挂点] ensureSeed（seedImgCount+basePost 后 attachTextImage）/buildFeedBatch NPC 池路径/combo 兜底路径三处全部接 poolTextImage；FEED_TEXTIMG_MAX 5→8（新配图规则下配图率大涨）
+- [GEN_VERSION 28→31] 三次 bump：29（route v29 触发重播种）→30（池子四档化，浏览器已按 29 播过旧池——v25 同款教训再现：改池子内容必须配新版本号）→31（POOL_TEXTIMG 第二批 14 条在播种后追加，同样必须 bump）
+- [E2E·Agent Browser] 关键突破：桌面 X 论坛图标点击前必须上滑解锁（App 开关有状态守卫，DOM click 在锁屏态被拦）——三次排查（HMR/swipe 翻页/overlay）后定位；v31 播种实测：24 帖 dist=a:2/b:3/c:14/GAP:5（改造前 21 帖全 c 档 143~217），withImg=2 且 phNoImg=0（改造前 0 图），2 张 data:image/png 白底图卡上屏，页面零 error，无字面 [图片] 泄漏
+- [E2E 数据盲区] 本会话抽样长篇 0 条（1/9 概率的 24 次抽取，(8/9)^24≈6%，纯运气）；GAP 5 条为存量池文案天然落缝（31~399 区间），不影响「字数差距大」观感，遗留：下会话把 GAP 文案改写进档内
+- [已知·环境] 上游 LLM 账号级 429 持续（本会话全程；VLM 同账号也被限流）——route v29 的 LLM 路径（四档抽签+新 Image Rules）无法端到端实跑，池子路径（四档池+配图表）已当场验证生效；LLM 窗口打开后新帖自动走新规则，需复验
+
+Stage Summary:
+- 双路径齐修：LLM 路径（route.ts v29 四档抽签+用户版 Image Rules+四档并集校验）+ 池子路径（core.ts 51 条四档文案+20 条配图描述表）
+- 三落盘点全接 attachTextImage：ensureSeed/buildFeedBatch/combo；FEED_TEXTIMG_MAX 5→8
+- GEN_VERSION 28→31 三连 bump（每次改池子/表内容都必须 bump，同号不触发重播种）
+- E2E 解锁守卫突破：上滑解锁是 X 论坛图标点击的前置条件
+- 关键文件：api/forum/generate/route.ts（POST_LEN_PLANS/pickLenPlan/lenBucketOk/postLen+Prompt 重写）、core.ts（17 组池子四档化+POOL_TEXTIMG+poolTextImage+GEN_VERSION=31）、engine.ts（三挂点+FEED_TEXTIMG_MAX=8）

@@ -34,6 +34,7 @@ import {
   GEN_VERSION,
   IMG_PLACEHOLDER,
   NPC_DEFS,
+  poolTextImage,
   PERSONA_ARCHETYPES,
   POST_MAX,
   REPLY_MAX,
@@ -500,8 +501,12 @@ export async function ensureSeed(): Promise<void> {
     // 自然时间线：最新一条「刚刚」（15~60 秒前），往下间隔逐渐拉大（15分钟→1小时→昨天）
     const seedPosts: ForumPost[] = [];
     let at = now - (15 + Math.random() * 45) * 1000;
+    // v29 池子帖配图挂点：POOL_TEXTIMG 描述 → attachTextImage 渲染白底居中文字图
+    const seedImgCount = { n: 0 };
     ordered.forEach((sp, i) => {
-      seedPosts.push(basePost(sp.key, sp.text, sp.community, at));
+      const p = basePost(sp.key, sp.text, sp.community, at);
+      attachTextImage(p, poolTextImage(sp.text), seedImgCount);
+      seedPosts.push(p);
       // 人设连通性：记录动态网友最近发的内容（下个帖子里接上话疸）
       recordDynNpcRecent(sp.key, sp.text);
       at -= naturalGapMs(i);
@@ -1166,7 +1171,7 @@ async function buildFeedBatch(
         const cand = npc.pool.find((x) => !used.has(x.slice(0, 20)));
         if (!cand) continue;
         used.add(cand.slice(0, 20));
-        results.push({ key: `npc:${npc.id}`, text: cand });
+        results.push({ key: `npc:${npc.id}`, text: cand, textImage: poolTextImage(cand) }); // v29 池子帖配图
         addedThisRound += 1;
       }
       if (!addedThisRound) break; // 池子彻底耗尽
@@ -1189,7 +1194,7 @@ async function buildFeedBatch(
         dynIds.length && rr % 3 !== 2
           ? `dyn:${dynIds[rr % dynIds.length]}`
           : `npc:${npcRing[rr % npcRing.length].id}`;
-      results.push({ key: author, text: t });
+      results.push({ key: author, text: t, textImage: poolTextImage(t) }); // v29 combo 帖子配图（新四档池条目）
       rr += 1;
     }
   }
@@ -1205,9 +1210,9 @@ async function buildFeedBatch(
  *  返回本次新增条数。 */
 // ---------------- 生成帖子按需配「文字图片」（v9；v27 图文并茂重写） ----------------
 
-/** 单批最多文字图片数（太多会刷屏，像人人都发金句图；v27 配图帖比例
- *  提升——明垦日常/日常分享/实锤爆料必配，故 3→5） */
-const FEED_TEXTIMG_MAX = 5;
+/** 单批最多文字图片数（太多会刷屏；v27 配图帖比例提升 3→5；
+ *  v29 用户新配图规则（触发词命中必配、无图仅三种例外）下配图率大涨，5→8） */
+const FEED_TEXTIMG_MAX = 8;
 
 /** 剥掉正文里的 [图片] 占位符并清理多余空白（配图被丢弃时防字面上屏）。 */
 function stripPlaceholder(content: string): string {
