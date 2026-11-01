@@ -9,7 +9,7 @@
  * 「···」更多按钮 → 底部弹层菜单（推荐/不感兴趣/举报，主框架渲染）。
  */
 
-import { memo } from 'react';
+import { memo, type ReactNode } from 'react';
 import {
   castVote as castVoteCore,
   countShort,
@@ -113,30 +113,63 @@ function ActionBtn({
 
 // ---------------- 媒体 / 投票 / 位置（PostCard 与 thread 主帖共用） ----------------
 
-/** 帖子附图网格（X 官方观感）：1 张 16:9 大图；2 张两列方图；3-4 张 2x2 宫格 */
+/** v34 文字图识别：renderTextImage 直出的 PNG dataURL。相册上传图
+ *  （fileToPostMedia）非 GIF 一律转 JPEG、GIF 原样保留，永不产生 PNG——
+ *  故 media 里的 `data:image/png` 必为文字图片（用户手发或 AI 配图）。 */
+const isTextImg = (m: string) => m.startsWith('data:image/png');
+
+/** v34 文字图卡（统一尺寸）：w-3/4 方图原样不裁切、白底圆角描边。
+ *  AI 配图帖与用户手发文字图片共用，保证所有文字图「一样大」。 */
+function TextImgCard({ src, alt }: { src: string; alt: string }) {
+  return (
+    <div
+      className="mt-2.5 w-3/4 overflow-hidden rounded-2xl border bg-white"
+      style={{ borderColor: 'rgba(137,151,166,0.35)' }}
+    >
+      <img src={src} alt={alt} className="aspect-square w-full select-none" draggable={false} loading="lazy" />
+    </div>
+  );
+}
+
+/** 帖子附图网格（X 官方观感）：1 张 16:9 大图；2 张两列方图；3-4 张 2x2 宫格。
+ *  v34：文字图片（PNG）不再混进相册网格被 16:9 / object-cover 裁切放大——
+ *  先拆分：相册图（JPEG/GIF）走原网格，文字图每张单独 w-3/4 方卡
+ *  （与 AI 配图帖同尺寸），所有文字图大小完全一致。 */
 export function PostMedia({ media }: { media: string[] }) {
   if (!media.length) return null;
-  if (media.length === 1) {
-    return (
+  const textImgs = media.filter(isTextImg);
+  const photos = media.filter((m) => !isTextImg(m));
+  let photoGrid: ReactNode = null;
+  if (photos.length === 1) {
+    photoGrid = (
       <div className="mt-2.5 overflow-hidden rounded-2xl border" style={{ borderColor: 'rgba(137,151,166,0.35)' }}>
-        <img src={media[0]} alt="帖子图片" className="aspect-[16/9] w-full select-none object-cover" draggable={false} loading="lazy" />
+        <img src={photos[0]} alt="帖子图片" className="aspect-[16/9] w-full select-none object-cover" draggable={false} loading="lazy" />
+      </div>
+    );
+  } else if (photos.length > 1) {
+    const cells = photos.length === 3 ? [photos[0], photos[1], photos[2]] : photos.slice(0, 4);
+    photoGrid = (
+      <div className="mt-2.5 grid grid-cols-2 gap-[3px] overflow-hidden rounded-2xl border" style={{ borderColor: 'rgba(137,151,166,0.35)' }}>
+        {cells.map((m, i) => (
+          <img
+            key={i}
+            src={m}
+            alt={`帖子图片 ${i + 1}`}
+            className={`aspect-square w-full select-none object-cover ${photos.length === 3 && i === 2 ? 'col-span-2' : ''}`}
+            draggable={false}
+            loading="lazy"
+          />
+        ))}
       </div>
     );
   }
-  const cells = media.length === 3 ? [media[0], media[1], media[2]] : media.slice(0, 4);
   return (
-    <div className="mt-2.5 grid grid-cols-2 gap-[3px] overflow-hidden rounded-2xl border" style={{ borderColor: 'rgba(137,151,166,0.35)' }}>
-      {cells.map((m, i) => (
-        <img
-          key={i}
-          src={m}
-          alt={`帖子图片 ${i + 1}`}
-          className={`aspect-square w-full select-none object-cover ${media.length === 3 && i === 2 ? 'col-span-2' : ''}`}
-          draggable={false}
-          loading="lazy"
-        />
+    <>
+      {photoGrid}
+      {textImgs.map((m, i) => (
+        <TextImgCard key={`ti-${i}`} src={m} alt={`文字图片 ${i + 1}`} />
       ))}
-    </div>
+    </>
   );
 }
 
@@ -144,7 +177,11 @@ export function PostMedia({ media }: { media: string[] }) {
  *  AI 配图帖剥掉占位符、正文完整连续渲染，图卡（纯白底居中文字图，1:1 原样
  *  不裁切）追加在正文末尾；无占位符（用户手发帖/译文）→ 原样正文 + 图网格
  *  （图本来就在正文后）。文字图卡显示宽度收窄到 75%（用户要求「图片小一点」，
- *  白底文字图不再占满整行）。thread 详情页与 feed 帖子卡共用；clamp 仅时间线截断。 */
+ *  白底文字图不再占满整行）。thread 详情页与 feed 帖子卡共用；clamp 仅时间线截断。
+ *  v34（用户要求「我的文字图片大小也变成一样大」）：用户手发的文字图片
+ *  （发布弹层「文字图片」直出的 PNG）与 AI 配图帖的图卡完全同尺寸——
+ *  PostMedia 拆出文字图单独用 TextImgCard（w-3/4 方图不裁切）渲染，
+ *  相册图照旧 16:9/宫格；全部文字图（无论谁发）大小一致。 */
 export function PostBodyMedia({
   text,
   media,
@@ -164,7 +201,8 @@ export function PostBodyMedia({
     );
   }
   // v32：剥掉占位符，正文完整连续渲染（不再「文字段-图-文字段」交替）；
-  // 图卡统一追加在正文最后（i 对应第几张图，单帖配图只用 imgs[0]）
+  // 图卡统一追加在正文最后（i 对应第几张图，单帖配图只用 imgs[0]）。
+  // v34：图卡改用 TextImgCard（与用户手发文字图共用组件，尺寸完全一致）
   const body = text
     .split('[图片]')
     .join('')
@@ -173,18 +211,7 @@ export function PostBodyMedia({
   return (
     <>
       <PostText text={body} clamp={clamp} />
-      <div
-        className="mt-2.5 w-3/4 overflow-hidden rounded-2xl border bg-white"
-        style={{ borderColor: 'rgba(137,151,166,0.35)' }}
-      >
-        <img
-          src={imgs[0]}
-          alt="帖子配图（文字图）"
-          className="aspect-square w-full select-none"
-          draggable={false}
-          loading="lazy"
-        />
-      </div>
+      <TextImgCard src={imgs[0]} alt="帖子配图（文字图）" />
     </>
   );
 }
