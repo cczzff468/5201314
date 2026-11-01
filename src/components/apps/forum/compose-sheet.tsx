@@ -572,13 +572,14 @@ export function ComposeSheet({
                 <p className="pb-3 text-[12px]" style={{ color: t.secondary }}>
                   用文字描述生成图片：纯白留白，你的文字居中排布
                 </p>
-                {/* 实时预览（与成品同布局；比例缩小的白底居中灰字卡） */}
+                {/* 实时预览（与成品同布局；比例缩小的白底居中灰字卡。
+                    v35：字号 13→22 匹配新渲染比例 46/720≈6.4%，行距同步 1.83） */}
                 <div
                   className="mb-3 flex aspect-square items-center justify-center rounded-xl border"
                   style={{ borderColor: t.border, background: '#ffffff' }}
                   aria-hidden="true"
                 >
-                  <p className="px-6 break-all text-center" style={{ color: '#999997', fontSize: 13, lineHeight: 1.9 }}>
+                  <p className="px-6 break-all text-center" style={{ color: '#999997', fontSize: 22, lineHeight: 1.83 }}>
                     {textImgInput.trim() || '输入文字，生成你的文字图片'}
                   </p>
                 </div>

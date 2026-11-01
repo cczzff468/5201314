@@ -126,8 +126,19 @@ export const FORUM_KEY = 'forum-data-v1';
  * v33 = 文字图片字号回调（用户要求「文字图片里面的文字小一点」）：
  *  renderTextImage 字号 40→32、行距 74→60、单行宽 640→600，
  *  文字/画布比 5.6%→4.4%（介于 v31 的 2.6% 与 v32 的 5.6% 之间）。
- *  bump 触发重播种：存量帖 media 里是 40px 旧参数 dataURL，需换新渲染。 */
-export const GEN_VERSION = 33;
+ *  bump 触发重播种：存量帖 media 里是 40px 旧参数 dataURL，需换新渲染。
+ * v34 = 图卡尺寸统一（用户要求「我的文字图片大小也变成一样大」）：
+ *  feed.tsx PostMedia 拆分文字图/相册图（PNG=文字图），用户手发文字图
+ *  不再被 16:9/object-cover 裁切放大，统一 TextImgCard（w-3/4 方图），
+ *  与 AI 配图卡完全同尺寸。纯显示层变化，未 bump。
+ * v35 = 文字图字号重做（用户反馈「文字图片里面的文字为什么那么小」）：
+ *  32px 在 222px 卡片上有效字号仅 ~10px（比帖子配文 13px 还小），且 v34
+ *  统一尺寸后用户手发图从整行宽收窄到 75% 再降一档。renderTextImage
+ *  改自适应：基准 46px（比 6.4%）、短句单行升 56px、长文（≤120 字）
+ *  按块高 ≤640px 逐级降字号（下限 34px）防溢出，行距=字号×1.83。
+ *  bump 触发重播种：存量 AI 帖 media 里是 32px 旧参数 dataURL，需换新
+ *  渲染（用户自己的帖子保留；旧文字图是生成时快照，重发才会更新）。 */
+export const GEN_VERSION = 35;
 /** 首次播种的 NPC 帖子目标条数（feed 一屏半左右） */
 export const SEED_POST_TARGET = 14;
 /** 补新帖：feed 最新帖子超过该毫秒数视为「凉了」，打开时补 2~4 条 */
