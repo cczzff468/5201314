@@ -1855,3 +1855,32 @@ Stage Summary:
 - 翻译失败四层修复：SDK 串行队列（消除自伤 429）+ 重试预算 73s + 跳过默认配置无效 401 + 客户端冷却 8s/超时 90s
 - 网名全面 LLM 化：kind='names' 路由 + 占位→换名→回填三段式（池子名仅作同步保底），动态网友占比提升至主导
 - 关键文件：core.ts（countShort/renameDynNpc/named/unnamedDynKeys/GEN_VERSION=4）、engine.ts（renameDynNpcsViaLlm+回填+比例）、route.ts（kind='names'）、server-llm.ts（runInSdkQueue+跳默认401）、translate/route.ts（队列+7次重试）、chat-translate.ts（FAILED_TTL=8s）、thread-view.tsx（删书签/超时90s）
+
+## 2026-11-01 · X论坛「KPI清单帖 + 评论自嗨臆测」修复（用户截图诊断）
+
+Task: 用户以截图实锤两类病灶——①江屿主帖像「带货/宣发KPI清单」（一条帖子硬塞咖啡梗+求剧安利+剧宣+澄清谣言+自拍，身份在打工人/明星间漂移）；②评论区（卡皮巴拉本人）无视主帖自嗨：「家人们！」饭圈大粉口吻放错场合、脑补「导演心疼你」楼主没说的内容。用户给出修复方向：帖子单主题化（严禁多主题混装、选其一讲透）+ 评论先提取主帖三个核心要点只针对一个展开 + 禁止臆测 + 语气适配帖子性质 + 帖子像营销号时评论要真实吐槽。
+
+- [根因定位] 病灶四处，全部处理：
+  1) core.ts NPC 'star'（江屿）池子帖——截图那条 KPI 帖就是硬编码 pool[0]；
+  2) engine.ts COMBO_POST_STYLES 四、明星日常[0]——同款 KPI 清单兜底模板；
+  3) route.ts POST_STYLES mingxing spec + posts 分支系统提示「四、明星日常」公式与示例——示例本身就是 KPI 清单文（教坏模型）；江屿 persona 描述也是一张清单。
+- [帖子单主题化]
+  - core.ts 江屿 pool 重写 6→8 条全单主题：咖啡趣事（只咖啡+自拍收尾）/《雾里看花》第九集剧宣（只剧宣）/迟到谣言澄清（只澄清）/杀青感言（保留）/雨戏（删冷萃咖啡 Q&A 混装）/表妹澄清（删第八集剧宣+打戏段落）/盒饭打戏（保留，同一天一件事）/ootd（删观影活动官宣）；persona 同步重写为「一条只讲一件事」铁律版
+  - engine.ts COMBO 明星日常[0] 替换为单主题咖啡版；新增[3] 单主题剧宣模板
+  - route.ts POST_STYLES mingxing spec 重写；posts 系统提示新增核心原则 5「单主题铁律」（严禁日常梗+剧宣+澄清+求推荐+代言塞同一条，结尾最多一句自拍描述/提问）与 6「身份统一」（打工人帖不冒片场、身份在 thought 定死）；「四、明星日常」公式+示例整体替换为单主题版
+- [评论三新规] route.ts comments/multiComments/subreplies 三分支同步注入：
+  - 工作流增「提取三个核心要点」（如：咖啡、求剧推荐、澄清）——每条评论只针对其中一个点展开，不许贪多混着回（comments 从 4 步扩为 5 步）
+  - 「拒绝臆测（幻觉红线）」：只能基于帖子白纸黑字——楼主说被导演骂二十分钟≠「导演心疼你」；楼主没说的内心/内幕/后续一个字不许编
+  - 「语气适配」：口吻配帖子不配人设自嗨——生活帖用生活化口吻，「家人们/宝子」只在楼主是明星本人且帖子是粉丝向营业时成立；控评式发言（「必须澄清」「不许说他」）一律禁止
+  - 「营销号检测」：帖子像宣发清单时评论要像真实网友直接指出（「这条发出来，水军和老板都沉默了」「怎么一股通稿味」）
+- [GEN_VERSION 23→25] v24 单主题池子；v25 修 HMR 竞态——两编辑落盘窗口期残留页用「新版本号+旧池子」播出脏数据（genVersion=24+旧帖文本），再 bump 一版强制重播种清掉
+- [楼中楼头像对齐复核]（上会话 v24 已改，本次注入实测）：竖屏 390×844（横屏 1280×900 下手机壳旋转 90°，getBoundingClientRect 全是旋转坐标系——测量必须竖屏）注入三层楼中楼测试数据，实测顶层评论头像 44px@x=16，两层子回复头像 28px 同列 x=70、spread=0（完全对齐、不阶梯），「回复 @」前缀齐全；测后从 localStorage 备份还原原始数据
+- [E2E·Agent Browser] 解锁→开论坛→信息流：江屿帖为单主题盒饭帖，全文无「评论区安利我/明晚更新第九集」KPI 短语（noKpi=true）；IndexedDB 复核 genVersion=25、旧 KPI 帖清零；console 零错误；tsc/eslint forum 相关 0 错（存量 expressStyle 类型错误为 chat-call 旧账）
+- [已知·环境] 上游 LLM 账号级持续 429（本会话 curl 复测全程未恢复；dev.log 累计 2157 次 429）——comments/multiComments/posts 分支的新 Prompt 无法端到端实跑（失败点恰在上游 fetch，早前 200 in 2.3s 证明管道畅通）；已建一次性 cron（job 2918061，24h 后）自动复验评论/帖子生成质量；窗口打开前评论维持「宁缺毋滥」，池子帖不依赖 LLM 已生效
+
+Stage Summary:
+- 江屿「KPI清单帖」四源头全清理（池子/兜底/风格公式/示例），核心原则新增单主题铁律+身份统一
+- 评论三分支新增：三核心要点提取（只打一个点）、拒绝臆测红线、语气适配、营销号真实吐槽
+- GEN_VERSION 25；HMR 竞态脏数据靠双 bump 清除
+- 楼中楼头像对齐实测通过（竖屏测量，spread=0）
+- 关键文件：core.ts（江屿 pool/persona/GEN_VERSION=25）、engine.ts（COMBO 明星日常）、api/forum/generate/route.ts（posts 原则 5/6 + 三分支新规则）
