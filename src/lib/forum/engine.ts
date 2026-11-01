@@ -256,6 +256,9 @@ function defaultCommunityFor(npcId: string): string | null {
     ju: 'movie',
     che: 'car',
     bao: 'gossip',
+    star: 'gossip', // v13 明星本尊：营业帖归娱乐八卦
+    wave: 'night', // v13 海王：暧昧实录归深夜树洞
+    greentea: 'hot', // v13 绿茶：引战帖归今日热议（最大曝光，评论区吵起来才真实）
   };
   const v = map[npcId];
   return v === undefined ? null : v;
@@ -507,6 +510,8 @@ const NPC_DOMAIN_ARCH: Record<string, string[]> = {
   iron: ['xinshou', 'laosiji'], boat: ['zhuiju', 'yemao'], abacus: ['zhuiju'],
   kai: ['laosiji'], candy: ['fanquan'], liang: ['dagong', 'ningmeng'], sunny: ['chigua'],
   gua: ['chigua', 'kebiao'], ju: ['zhuiju'], che: ['laosiji', 'xinshou'], bao: ['kebiao', 'chigua'],
+  // v13 新增：海王/绿茶池可改派给动态网友（匿名发帖也成立）；star 是 pinned 不走这里
+  wave: ['yemao', 'gaoxiao'], greentea: ['ningmeng', 'baoma'],
 };
 
 /** 首次打开：池子同步落盘（立即有内容 + 连带评论），LLM 精修异步追加。幂等。
@@ -536,10 +541,12 @@ export async function ensureSeed(): Promise<void> {
         const idx = Math.floor(Math.random() * pool.length);
         const text = pool.splice(idx, 1)[0];
         // 85% 概率换成动态真实感网友发（人设原型与文案领域对上，口吻才真实）；
-        // 内置 NPC 只占 15%（v4：网名与内容都靠 LLM，内置池子仅作保底）
+        // 内置 NPC 只占 15%（v4：网名与内容都靠 LLM，内置池子仅作保底）；
+        // v13：pinned 本尊账号（明星本尊）的池子帖不改派——
+        // 打工人小号发明星营业帖会穿帮（海王/绿茶帖可匿名改派，更真实）
         const domainArch = NPC_DOMAIN_ARCH[npc.id] ?? [];
         const author: AuthorKey =
-          Math.random() < 0.85
+          !npc.pinned && Math.random() < 0.85
             ? createDynNpc({ archetypeId: domainArch.length ? domainArch[Math.floor(Math.random() * domainArch.length)] : undefined })
             : `npc:${npc.id}`;
         specs.push({ key: author, text, community: communityOfPoolText(npc.id, text), npcId: npc.id });
@@ -1336,7 +1343,7 @@ async function buildFeedBatch(
   n: number,
   used: Set<string>,
   avoid: string[],
-): Promise<{ key: AuthorKey; text: string; recent?: string[] }[]> {
+): Promise<{ key: AuthorKey; text: string; textImage?: string; recent?: string[] }[]> {
   const chars = forumContactsSnap().filter((c) => c.kind === 'char' && (c.persona || c.background));
   const shuffledNpcs = NPC_DEFS.slice().sort(() => Math.random() - 0.5);
   const topics = FEED_TOPICS.slice().sort(() => Math.random() - 0.5);

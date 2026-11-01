@@ -37,7 +37,7 @@ import { renderTextImage, TEXTIMG_MAX_LEN } from '@/lib/forum/textimg';
 import { XAvatar, XIcons, useXTheme } from './shared';
 import { useForum } from './ctx';
 
-/** 发布字数上限（用户要求「生成的字数不限」：与数据层 POST_MAX 同步 = 2000） */
+/** 发布字数上限（v13 用户要求：帖子 30~1000 字；与数据层 POST_MAX 同步 = 1000） */
 const LIMIT = POST_MAX;
 const SW = 1.9;
 const MAX_MEDIA = 4;
