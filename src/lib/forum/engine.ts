@@ -53,7 +53,7 @@ import {
 } from './core';
 import { describeImagesAuto } from '@/lib/vision-client';
 import { renderTextImage } from './textimg';
-import { anchorCandidatesOf, commentAnchored } from './topic';
+import { commentAnchored, postAllowsCatchall, universalPhraseIn } from './topic';
 
 // ---------------- pending 队列（跨刷新持久） ----------------
 
@@ -429,53 +429,12 @@ function resetAiContent(d: ForumData): void {
   d.seeded = false;
 }
 
-/** 给种子帖同步连带少量占位评论（v15 重写）。
- *  旧版：7~15 条全部从写死的主题评论池随机抽——「应援色帖下考研/图书馆/
- *  代拍评论」串台的直接根源，用户已明令「评论必须完全由大模型根据当前
- *  帖子实时生成，不能从固定池里随机抽」。
- *  新版：同步阶段只落 2~3 条「追问式」锚定占位（{t} = 本帖自己的话题词，
- *  结构上不可能串台，保证首屏评论区不空）；落盘后 ensureSeed 立刻调
- *  llmPolishSeedComments → /api/forum/generate kind=multiComments，
- *  一次 LLM 调用按每条帖子的具体内容实时生成 4~6 条真实评论补足。 */
-function seedCommentsFor(post: ForumPost, out: ForumPost[]): void {
-  const postAuthor = resolveAuthor(post.authorKey);
-  const postLang = detectPostLang(post.content, postAuthor.lang);
-  const want = 2 + Math.floor(Math.random() * 2); // 2~3 条锚定占位
-  const usedCt = new Set<string>();
-  const usedTpl = new Set<string>(); // v20.2：同帖句式去重
-  const texts: string[] = [];
-  // 中文帖才有追问式占位（外语模板没有——宁缺毋滥，外语评论只走 LLM）
-  if (postLang === 'zh-Hans') {
-    for (let i = 0; i < want; i++) {
-      const base = followupComment(post.content, usedCt, i, usedTpl);
-      if (!base) break; // 模板用尽：宁可少一条也不重复
-      texts.push(base);
-    }
-  }
-  if (!texts.length) return;
-  const keys = pickCommenters(texts.length, postLang, post.content, post.authorKey);
-  // 时间：在（发帖后, 现在）窗口内自然铺开
-  const hi = Date.now() - 5_000;
-  let lo = Math.max(post.createdAt + 5_000, hi - Math.max(texts.length * 2_500, 90_000));
-  const span = Math.max(hi - lo, texts.length * 1_200);
-  const postEng = { likes: likesOf(post), views: post.views };
-  texts.forEach((t, i) => {
-    const at = Math.floor(lo + (span * (i + 0.15 + Math.random() * 0.7)) / texts.length);
-    const c = basePost(
-      keys[i] ?? post.authorKey,
-      t.slice(0, REPLY_MAX),
-      post.community,
-      Math.min(Math.max(at, post.createdAt + 5_000), hi),
-      post.id,
-      postAuthor.name,
-      true,
-      postEng,
-    );
-    out.push(c);
-  });
-  // 楼中楼不再同步生成（旧版从池子抽子回复也是串台源）——
-  // 真实楼中楼由「显示更多评论」的 subreplies 分支按评论内容实时生成
-}
+/** v22：seedCommentsFor（同步铺「追问式」占位评论）已删——用户明令禁止
+ *  「蹲后续/这瓜保熟吗/等一个下文」这类万能句式，而追问式模板池全部由这类
+ *  句子组成；评论 100% 由大模型根据当前帖子正文实时生成
+ *  （ensureSeed 落盘后立刻调 llmPolishSeedComments → kind=multiComments，
+ *  服务端把每条帖子的正文+话题标签原封不动传给模型；失败静默，宁缺毋滥——
+ *  评论区短暂为空也不铺万能句式模板）。 */
 
 /** 内置 NPC → 领域相近的人设原型（池子文案交给动态网友发时，人设与内容领域对上：
  *  车帖由车友发、吃瓜帖由吃瓜群众发——口吻才真实） */
@@ -537,16 +496,12 @@ export async function ensureSeed(): Promise<void> {
       recordDynNpcRecent(sp.key, sp.text);
       at -= naturalGapMs(i);
     });
-    // 首刷连带评论（用户要求：第一次生成帖子就连带着生成评论）
+    // v22：同步占位评论已删（万能句式池清洗）——所有评论（含用户帖）
+    // 全部由紧随其后的 llmPolishSeedComments 按每条帖子正文 LLM 实时生成
     const allNew: ForumPost[] = [...seedPosts];
-    for (const sp of seedPosts) seedCommentsFor(sp, allNew);
     // v9：版本升级重播种时用户帖的旧评论已被清掉——给用户自己的帖子也补一批
     // 干净评论（新强校验逻辑：贴题+语言跟随+数据合理），帖子不至于零回复
     const userPosts = d.posts.filter((p) => p.authorKey === 'user').slice(-6);
-    for (const up of userPosts) {
-      if (allNew.some((p) => p.replyTo === up.id)) continue;
-      seedCommentsFor(up, allNew);
-    }
     const next: ForumData = {
       ...d,
       posts: [...d.posts, ...allNew],
@@ -663,7 +618,8 @@ async function llmPolish(): Promise<void> {
  *  一次 kind=multiComments 调用（服务端把每条帖子的正文+话题标签原封不动
  *  传给模型，Prompt 开头强制锚定）→ 每帖 4~6 条完全由大模型按帖子具体内容
  *  实时生成的一级评论；客户端再做一遍锚定/语言双保险校验。
- *  失败静默——同步「追问式」占位评论已保证首屏评论区不空。 */
+ *  失败静默——评论区短暂为空也不铺万能句式模板（宁缺毋滥）；
+ *  用户点开帖子可随时点「显示更多评论」触发 genCommentBatch 实时补齐。 */
 async function llmPolishSeedComments(seedPostIds: string[]): Promise<void> {
   try {
     const d = forumData();
@@ -703,11 +659,19 @@ async function llmPolishSeedComments(seedPostIds: string[]): Promise<void> {
       const existing = next.posts.filter((p) => p.replyTo === t.id);
       const seenCt = new Set(existing.map((p) => p.content.slice(0, 16)));
       const valid: string[] = [];
+      const catchallOk = postAllowsCatchall(t.content); // 万能句式豁免（未完结八卦/求助帖）
+      let catchallUsed = false;
       for (const c of raw) {
         if (typeof c !== 'string') continue;
         const s = sanitizeCommentClient(stripReplyPrefixClient(c));
-        if (s.trim().length < 2 || seenCt.has(s.slice(0, 16))) continue;
+        // 用户规范：评论 3~100 字（留 10 字容差）
+        if (s.trim().length < 3 || s.length > 110 || seenCt.has(s.slice(0, 16))) continue;
         if (postLang === 'zh-Hans' && foreignDominantClient(s)) continue;
+        // v22 万能句式：非豁免帖一律丢弃；豁免帖最多 1 条
+        if (universalPhraseIn(s)) {
+          if (!catchallOk || catchallUsed) continue;
+          catchallUsed = true;
+        }
         if (!commentAnchored(s, t.content)) continue; // 串台/AI 废话 → 丢弃
         seenCt.add(s.slice(0, 16));
         valid.push(s);
@@ -761,7 +725,7 @@ async function llmPolishSeedComments(seedPostIds: string[]): Promise<void> {
     if (newDyn.length) await renameDynNpcsViaLlm([...new Set(newDyn)]);
     saveForum(next);
   } catch {
-    /* 静默：同步占位评论已保底（评论区不空），下次点「更多评论」再补 */
+    /* 静默：评论区维持现状（宁缺毋滥），下次点「更多评论」再补 */
   }
 }
 
@@ -771,80 +735,15 @@ async function llmPolishSeedComments(seedPostIds: string[]): Promise<void> {
 
 let feedGenerating = false;
 
-/** v15 流氓语料库清洗（用户点名「应援色帖下大量考研/图书馆/代拍评论」）：
- *  旧版 v14 的三套写死评论池全部整池删除——
- *  - TOPIC_COMMENT_POOLS（15 领域主题池）：领域计分有漏洞，应援色帖里
- *    「专业得像论文开题」+「学会了」恰好凑 3 分让学习池入场（权重与追星池
- *    同为 9），考研/图书馆闭馆评论就是这样漏进评论区的；追星池自带的
- *    「代拍」文案在没提代拍的帖子里出现也是串台；
- *  - GENERIC_COMMENTS（外语池）、REQUEST_COMMENT_POOL（求推荐池）：同样是
- *    与帖子内容无关的固定语料。
- *  现在：评论一律由大模型根据当前帖子正文实时生成（/api/forum/generate
- *  的 comments / multiComments / subreplies 分支，Prompt 开头强制锚定）；
- *  LLM 失败/限流时的唯一应急兜底 = 下面的「追问式」模板——{t} 槽位由
- *  topicAnchorOf 从原帖提取，天然锚定本帖话题词，结构上不可能串台。 */
-
-/** 追问式兜底（唯一应急兜底，v15）：围绕帖子的事件要后续/要细节/要图，
- *  话题词由 topicAnchorOf 从原帖提取填充 → 天然锚定核心话题，
- *  是「追问」不是「附和」——楼主聊什么就追着什么问，绝不串台。
- *  模板耗尽时用变体后缀，全部用尽返回空串（调用方跳过，绝不重复刷屏）。 */
-const FOLLOWUP_COMMENT_TEMPLATES: string[] = [
-  '{t}这事蹲一个后续，别断更啊',
-  '{t}？？真的假的，细说',
-  '就{t}这事，我能聊十块钱的',
-  '{t}后面怎么样了，楼主别睡',
-  '无图无真相，{t}求个截图',
-  '{t}……先收藏，回头来考古',
-  '不是，{t}就这？后续呢',
-  '{t}这事我关注了，等一个下文',
-  '{t}什么时候的事？我怎么现在才刷到',
-  '楼主把{t}的完整时间线捋一捋，我拿小板凳等着',
-  '{t}有后续记得@我，我先关注了',
-  '蹲{t}的下文，今晚不睡等更新',
-  '{t}这事我得转发给我姐妹一起蹲',
-  '楼主更新{t}的时候麻烦开个追更',
-  '笑死，{t}还能这么发展？展开说说',
-  '{t}这瓜保熟吗，我先存疑',
-  '路过，{t}这事先让子弹飞一会儿',
-  '{t}？信息量有点大，容我捋一捋',
-  '好家伙，{t}比我追的剧还精彩',
-  '{t}楼主快更，别管那些催你睡觉的',
-  '前排，{t}这事我全程围观了，就等楼主这帖',
-  '{t}细说中间那段，我错过了什么',
-];
-
-/** 模板耗尽后的变体后缀（保证同帖绝不出现一模一样的兜底评论） */
-const FOLLOWUP_SUFFIXES: string[] = ['，蹲蹲蹲', '，坐等下文', '，在线蹲', '，瓜子已备好', '，小板凳已就位', '，别让楼主跑了'];
-
-/** 渲染一条追问式兜底评论（{t} = 原帖话题锚点；本帖内去重；
- *  模板+变体全部用尽 → 返回空串，调用方跳过这条）。
- *  v20：锚点轮换——anchorIdx 依次取候选池（兜底锚点 + 核心话题词）里的
- *  不同词，同一帖的多条兜底评论不再全是同一个词开头
- *  （「深夜这事蹲一个后续」×15 的复读机即用户反馈的「评论有问题」）。
- *  v20.2：usedTpl = 同帖已用过的模板句式（不同锚点撞同一句式也假——
- *  「赛道日基？信息量有点大」和「外卖？信息量有点大」并排出现一眼模板）。 */
-function followupComment(postContent: string, used: Set<string>, anchorIdx = 0, usedTpl?: Set<string>): string {
-  const anchors = anchorCandidatesOf(postContent);
-  const t = anchors[anchorIdx % anchors.length];
-  for (let i = 0; i < 40; i++) {
-    const tpl = FOLLOWUP_COMMENT_TEMPLATES[Math.floor(Math.random() * FOLLOWUP_COMMENT_TEMPLATES.length)];
-    if (usedTpl?.has(tpl)) continue; // 同帖不重用同一句式（锚点不同也不行）
-    const cand = tpl.replaceAll('{t}', t);
-    if (!used.has(cand.slice(0, 16))) {
-      used.add(cand.slice(0, 16));
-      usedTpl?.add(tpl);
-      return cand;
-    }
-  }
-  for (const suf of FOLLOWUP_SUFFIXES) {
-    const cand = `${t}这事蹲一个后续${suf}`;
-    if (!used.has(cand.slice(0, 16))) {
-      used.add(cand.slice(0, 16));
-      return cand;
-    }
-  }
-  return ''; // 全部用尽：宁可少一条，也绝不重复刷屏
-}
+/** v22 万能句式池彻底清除（用户规范：「绝对禁止万能句式——蹲后续/
+ *  这瓜保熟吗/等一个下文，除非帖子真的是在爆料未完结的八卦」）：
+ *  - v15 的 FOLLOWUP_COMMENT_TEMPLATES（22 条追问式模板）与变体后缀全部由
+ *    这类万能句式组成——原设计是 LLM 失败/不足额时的应急兜底，但它正是
+ *    评论区「满屏蹲后续」的直接来源，用户已明令禁止，整池删除；
+ *  - 现在评论一律由大模型根据当前帖子正文实时生成（/api/forum/generate
+ *    的 comments / multiComments / subreplies 分支，Prompt 按「先分析后
+ *    生成 + 五种网友人设 + 万能句式黑名单」重写）；LLM 失败/限流时
+ *    宁缺毋滥——评论区维持现状等配额恢复，绝不铺模板。 */
 
 /** 生成主题池（用户指定内容方向：八卦/明星/吐槽/车/影视/娱乐/吃瓜）——
  *  LLM 按主题方向生成；兜底组合池同主题，保证无 LLM 也是对味内容 */
@@ -1424,9 +1323,11 @@ function archetypeIdsForContent(content: string): string[] {
   return out;
 }
 
-/** 生成一批评论并落库（LLM 批量 + 池子兜底 + 楼中楼子回复）。
+/** 生成一批评论并落库（v22：100% LLM 实时生成，无模板兜底）。
  *  仅由「显示更多评论」按钮触发（用户要求：生成完后不再自动生成，
  *  只有用户自己上滑/下滑、点更多评论时才生成）；一次 7~15 条。
+ *  LLM 失败/限流时宁缺毋滥（返回 0，评论区维持现状）；万能句式
+ *  （蹲后续/保熟/等下文）只有未完结八卦/求助帖豁免且每批最多 1 条。
  *  返回新增评论数（含子回复）。 */
 async function genCommentBatch(postId: string): Promise<number> {
   if (threadGen.has(postId)) return 0;
@@ -1455,9 +1356,10 @@ async function genCommentBatch(postId: string): Promise<number> {
     const newDynCommenters = commenterKeys.filter((k) => k.startsWith('dyn:') && !dynBefore.has(k.slice(4)));
     const avoid = threadReplies.slice(-10).map((p) => p.content.slice(0, 40));
 
-    // ---- 顶层评论（LLM 批量；v20 兜底新规则） ----
+    // ---- 顶层评论（v22：100% LLM 实时生成，无模板兜底） ----
     let texts: string[] = [];
-    let llmDead = false; // v20：LLM 整体失败（限流/断网）→ 不铺模板
+    const catchallOk = postAllowsCatchall(post.content); // 万能句式豁免（未完结八卦/求助帖）
+    let catchallUsed = false; // 豁免帖每批也最多 1 条万能句式
     try {
       const r = (await callApi({
         kind: 'comments',
@@ -1475,36 +1377,23 @@ async function genCommentBatch(postId: string): Promise<number> {
             .map((x) => {
               if (typeof x !== 'string') return '';
               const s = sanitizeCommentClient(stripReplyPrefixClient(x));
-              if (s.trim().length < 2) return '';
+              // 用户规范：评论 3~100 字（留 10 字容差；过短/过长都是废稿）
+              if (s.trim().length < 3 || s.length > 110) return '';
               if (postLang === 'zh-Hans' && foreignDominantClient(s)) return '';
-              // v14 锚定校验：串台/AI 废话直接丢弃（与服务端双保险），池子补位
+              // v22 万能句式：非豁免帖一律丢弃；豁免帖最多 1 条
+              if (universalPhraseIn(s)) {
+                if (!catchallOk || catchallUsed) return '';
+                catchallUsed = true;
+              }
+              // v14 锚定校验：串台/AI 废话直接丢弃（与服务端双保险）
               if (!commentAnchored(s, post.content)) return '';
               return s;
             })
             .filter(Boolean)
         : [];
     } catch {
+      // v22：LLM 失败（限流/断网）→ 宁缺毋滥，不铺任何模板
       texts = [];
-      llmDead = true;
-    }
-    if (!llmDead && texts.length < want) {
-      // v20：LLM 出了一部分但不足额 → 最多补 2 条追问式锚定模板（锚点轮换）。
-      // 旧版把 7~15 条全部填满模板，同一个词开头的复读机即用户反馈的
-      // 「评论有问题」；LLM 彻底失败（llmDead，限流/断网）时一条都不铺——
-      // 评论区维持现状，等配额恢复后再点「更多评论」才是真评论。
-      const usedCt = new Set<string>([
-        ...texts.map((t) => t.slice(0, 16)),
-        ...threadReplies.map((p) => p.content.slice(0, 16)),
-      ]);
-      const fillCap = texts.length + 2; // 模板兜底配额：每批最多 +2 条
-      let anchorTurn = 0;
-      const usedTpl = new Set<string>(); // v20.2：同帖句式去重（避免同批撞句式）
-      while (texts.length < Math.min(want, fillCap)) {
-        const cand = postLang === 'zh-Hans' ? followupComment(post.content, usedCt, anchorTurn++, usedTpl) : '';
-        if (!cand) break;
-        usedCt.add(cand.slice(0, 16));
-        texts.push(cand);
-      }
     }
     if (!texts.length) return 0;
 
@@ -1562,11 +1451,17 @@ async function genCommentBatch(postId: string): Promise<number> {
           })) as { items?: string[] };
           subTexts = Array.isArray(r.items)
             ? (r.items as unknown[]).map((x, i) => {
-                // 位置对齐：无效项置空串（由池子兜底补位），不向后错位
+                // 位置对齐：无效项置空串，不向后错位
                 if (typeof x !== 'string') return '';
                 const s = sanitizeCommentClient(stripReplyPrefixClient(x));
-                if (s.trim().length < 2) return '';
+                // 用户规范：评论 3~100 字（留 10 字容差）
+                if (s.trim().length < 3 || s.length > 110) return '';
                 if (postLang === 'zh-Hans' && foreignDominantClient(s)) return '';
+                // v22 万能句式：楼中楼同禁（豁免帖最多 1 条，与顶层共享额度）
+                if (universalPhraseIn(s)) {
+                  if (!catchallOk || catchallUsed) return '';
+                  catchallUsed = true;
+                }
                 // v14 锚定校验：楼中楼必须呼应「被回复评论 + 主帖」
                 if (!commentAnchored(s, `${subTargets[i]?.content ?? ''} ${post.content}`)) return '';
                 return s;
@@ -1820,13 +1715,10 @@ async function execJob(job: PendingJob): Promise<void> {
         text = '';
       }
       if (!text) {
-        // v15 兜底重写：主题池/外语池已整池删除（流氓语料库清洗）——
-        // LLM 失败时只用「追问式」锚定模板（{t} = 被回复内容/主帖的话题词），
-        // 绝不出现与帖子无关的固定语料
-        const used = new Set<string>();
-        const ctxContent = `${parentContent} ${postContent}`;
-        const smart = postLang === 'zh-Hans' ? followupComment(ctxContent, used) : '';
-        text = smart || '蹲一个后续，别断更啊';
+        // v22：万能句式兜底已删（用户明令禁止「蹲一个后续，别断更啊」这类
+        // 万能句式）；LLM 失败时宁缺毋滥——这条回复直接不发生（静默跳过），
+        // 也不发虚假通知
+        return;
       }
       const next = { ...forumData() };
       // AI 回复的热度按被回复父帖缩放（评论赞 << 主帖赞；用户的新帖 0 赞 → 回复也几乎 0 赞）

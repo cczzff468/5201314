@@ -74,8 +74,18 @@ export const FORUM_KEY = 'forum-data-v1';
  *  模板兜底；GEN_VERSION 升级触发重新播种，清掉存量模板刷屏评论；
  *  v20.1/20.2 = 锚点质量补丁：topicAnchorOf 跳过 index 0/1 的停用字
  *  （「赛道日基金…」的「道」来自「知道」，在 index 1 截断产生「赛道日基」
- *  残词）；followupComment 增加同帖句式去重（不同锚点撞同一句式也假）。 */
-export const GEN_VERSION = 21;
+ *  残词）；followupComment 增加同帖句式去重（不同锚点撞同一句式也假）；
+ *  v22 = 万能句式池彻底清除 + 评论 Prompt 规范化（用户规范：「绝对禁止
+ *  万能句式——蹲后续/这瓜保熟吗/等一个下文，除非帖子真的是在爆料未完结
+ *  的八卦」）：FOLLOWUP 追问式模板池整池删除（22 条模板全是万能句式），
+ *  同步占位评论（seedCommentsFor）删除，评论 100% 由大模型按当前帖子正文
+ *  实时生成，LLM 失败宁缺毋滥；服务端 comments/multiComments/subreplies
+ *  Prompt 按「先分析后生成（thought）+ 五种网友人设（共情者/经验分享者/
+ *  质疑杠精/好奇宝宝/玩梗者）+ 话题/情绪判定 + 万能句式黑名单 + 3~100 字」
+ *  重写；万能句式校验（universalPhraseIn + postAllowsCatchall）：
+ *  非未完结八卦/求助帖出现即废稿，豁免帖每批最多 1 条；
+ *  GEN_VERSION 升级触发重新播种，清掉存量万能句式评论。 */
+export const GEN_VERSION = 22;
 /** 首次播种的 NPC 帖子目标条数（feed 一屏半左右） */
 export const SEED_POST_TARGET = 14;
 /** 补新帖：feed 最新帖子超过该毫秒数视为「凉了」，打开时补 2~4 条 */

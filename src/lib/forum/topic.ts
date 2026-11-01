@@ -387,6 +387,38 @@ const POST_REQUEST_RE = /求推荐|求推|推荐一下|有没有.{0,8}(推荐|�
 /** 求助帖的回答标记（评论侧：推荐/同求/避雷天然算呼应——求什么答什么） */
 const REPLY_REQUEST_RE = /同求|蹲一个|蹲蹲|马克|收藏|避雷|安利|听我的|去搜|推荐「|先看「|别看「|冲「/;
 
+// ---------------- 万能句式黑名单（v22，用户明令禁止） ----------------
+
+/** 万能句式（用户点名 + 同族变体）：「蹲后续」「这瓜保熟吗」「等一个下文」
+ *  这类放在任何帖子下面都「成立」的句子 = 模板评论，一律废稿。
+ *  仅两类帖子豁免（见 postAllowsCatchall）：
+ *  1. 求助/求推荐帖（「蹲一个」是真实网友的回答方式，求什么蹲什么）；
+ *  2. 真正未完结的爆料八卦帖（帖子明示事情没讲完，追问后续是真实反应）。 */
+const UNIVERSAL_PHRASES: string[] = [
+  '蹲一个后续', '蹲后续', '蹲下文', '蹲一个下文', '蹲蹲后续',
+  '这瓜保熟', '瓜保熟', '保熟吗', '保熟了',
+  '等一个下文', '等下文', '等一个后续', '等后续',
+  '让子弹飞', '先让子弹飞',
+  '前排吃瓜', '前排围观', '瓜子已备好', '瓜子已经备好', '小板凳已就位', '小板凳已经就位', '拿好小板凳', '搬好小板凳', '拿小板凳',
+  '关注了等更新', '收藏了回头考古', '收藏先，回头考古', '收藏了等更新',
+];
+
+/** 评论是否命中万能句式（命中后是否废稿由 postAllowsCatchall 决定） */
+export function universalPhraseIn(text: string): boolean {
+  const t = text.replace(/\s+/g, '');
+  return UNIVERSAL_PHRASES.some((p) => t.includes(p));
+}
+
+/** 帖子是否豁免万能句式：求助/求推荐帖（蹲一个=真实回答）或
+ *  未完结的爆料八卦帖（吃瓜域命中 + 帖子明示事情没讲完） */
+export function postAllowsCatchall(postContent: string): boolean {
+  if (POST_REQUEST_RE.test(postContent)) return true;
+  const scores = domainScores(postContent);
+  const gossipish = scores.some((x) => x.score >= 3 && (x.id === 'gossip' || x.id === 'star'));
+  const unfinished = /爆料|未完|还没完|后续呢|断更|吃到一半|锤了一半|事情没完|没讲完|刚开头|下回分解|还没结果/.test(postContent);
+  return gossipish && unfinished;
+}
+
 /** 评论锚定校验（串台判定核心，v14；v15 通用呼应词降权）：
  *  0. AI 废话（黑名单/纯附和空评）→ 违规；
  *  1. 求助帖的回答（推荐/同求/避雷）→ 放行（求什么答什么）；
@@ -533,21 +565,6 @@ export function topicAnchorOf(content: string): string {
   return '这事儿';
 }
 
-/** v20：追问式兜底评论的「话题锚点候选池」。
- *  旧版每条兜底评论都只取 topicAnchorOf 的单一锚点（如「深夜」）——
- *  LLM 限流期一个帖子的十几条兜底评论全是同一个词开头（「深夜这事蹲一个后续」
- *  「深夜？？真的假的」「蹲深夜的下文」……），一眼假（用户反馈「评论有问题」）。
- *  现在：锚点候选 = 兜底锚点（话题标签/领域 subject）+ 核心话题词（强关键词），
- *  调用方按下标轮换取用——「深夜」「熬夜」「凌晨」交替出现，模板感大幅下降。 */
-export function anchorCandidatesOf(content: string): string[] {
-  const out: string[] = [];
-  const seen = new Set<string>();
-  const push = (w?: string) => {
-    if (!w || w.length < 2 || seen.has(w)) return;
-    seen.add(w);
-    out.push(w);
-  };
-  push(topicAnchorOf(content));
-  for (const w of extractTopicWords(content)) push(w);
-  return out.length ? out.slice(0, 5) : ['这事儿'];
-}
+// v22：anchorCandidatesOf（追问式兜底评论的话题锚点候选池）已删——
+// FOLLOWUP 万能句式模板池整池删除（用户明令「绝对禁止蹲后续/这瓜保熟吗/
+// 等一个下文这类万能句式」），评论 100% 由大模型按当前帖子实时生成。
