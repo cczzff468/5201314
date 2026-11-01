@@ -9,9 +9,10 @@
  * 互动栏（回复/转推/点赞/浏览/分享，爱心归位第三，带数字）+ 分隔线下接评论流；
  * 打开帖子不自动生成评论（用户要求：仅「显示更多评论」按钮触发，7~15 条）；
  * 评论流按参考图：头像 + 名字(bold) + @账号 · 时间(灰) + 右侧「···」，
- * v7 楼中楼树状重构：按真实 parentId（replyToPost）递归嵌套——楼中楼缩进显示、
- * 头像随深度缩小；嵌套回复正文强制带「回复 @被回复者：」前缀（动态取父帖作者
- * 当前昵称，NPC 被 LLM 改名也不会@错人）；一级评论正文绝不带任何@前缀字样；
+ * v24 楼中楼头像对齐：所有层级子回复头像统一 28px、排同一垂直列（与上面的评论
+ * 头像对齐，不再楼梯式逐层缩进/缩小）；嵌套回复正文强制带「回复 @被回复者：」
+ * 前缀（动态取父帖作者当前昵称，NPC 被 LLM 改名也不会@错人）；
+ * 一级评论正文绝不带任何@前缀字样；
  * 操作行为空心线性图标（回复/转推/爱心/浏览/分享，图标+数字）；
  * 头像右缘细竖线贯穿到子回复；
  * 底部回复输入条（头像 + input + 蓝色发送圆钮），
@@ -333,24 +334,24 @@ function CommentNameRow({
   );
 }
 
-/** 子回复树节点（v7 楼中楼结构修复：真正按 parentId 递归嵌套）。
+/** 子回复树节点（v24 头像对齐重排：拆掉楼梯）。
  *  · 数据：parentId = replyToPost（旧数据回退 replyTo）；直接回复主帖 → 挂在主帖下（一级）；
- *  · 渲染：每层缩进（左侧留白）+ 头像随深度缩小；正文前强制「回复 @被回复者：」前缀
- *    （动态取父帖作者当前昵称，NPC 改名也不会错）；
- *  · 交互：点任意层回复 → 定向回复那一条（新回复挂到 TA 名下，多层无限往下接）。 */
+ *  · 渲染（用户要求：回复头像和上面的评论头像对齐，不要跟楼梯一样）：
+ *    所有层级的楼中楼头像同一尺寸（28px）、排成同一垂直列——子回复容器与本层平级
+ *    （不再嵌在本层内容列里逐层缩进、头像不再随深度缩小）；层级关系由
+ *    「回复 @被回复者：」前缀 + 头像右缘竖线表达（X 官方嵌套对话流的做法）；
+ *  · 交互：点任意层回复 → 定向回复那一条；stopPropagation 阻断冒泡到上层
+ *    （旧版冒泡会把点击目标错位成最外层——点到谁就回复谁）。 */
 function SubReplyItem({
   s,
   rootId,
   parentName,
-  depth,
   onReply,
 }: {
   s: ForumPost;
   rootId: string;
   /** 被回复者显示名（父帖作者当前昵称，动态解析） */
   parentName: string;
-  /** 嵌套深度：1 = 顶层评论的直接回复 */
-  depth: number;
   onReply: (rootId: string, postId: string, name: string) => void;
 }) {
   const f = useForum();
@@ -358,7 +359,7 @@ function SubReplyItem({
   const sa = resolveAuthor(s.authorKey);
   const d = forumData();
   const sSubs = childRepliesOf(d, s.id);
-  const avSize = depth <= 1 ? 36 : depth === 2 ? 30 : 26;
+  const avSize = 28; // v24：所有楼中楼头像统一 28px（不再随深度缩小）
   const tr = useCommentTr(s.content);
   return (
     <div
@@ -367,15 +368,25 @@ function SubReplyItem({
       aria-label={`回复 ${sa.name} 的评论`}
       onClick={(e) => {
         if ((e.target as HTMLElement).closest('button')) return;
+        e.stopPropagation(); // v24：阻断冒泡——点到谁就定向回复谁，不被上层覆盖
         onReply(rootId, s.id, sa.name); // 点任意层 → 定向回复那一条（挂 TA 名下，AI 接话也定位到 TA）
       }}
       onKeyDown={(e) => {
-        if (e.key === 'Enter' || e.key === ' ') onReply(rootId, s.id, sa.name);
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.stopPropagation();
+          onReply(rootId, s.id, sa.name);
+        }
       }}
       className="cursor-pointer rounded-lg py-2 transition-colors active:opacity-60"
     >
       <div className="flex gap-2">
-        <XAvatar authorKey={s.authorKey} size={avSize} onClick={() => f.openProfile(s.authorKey)} />
+        {/* 头像列：v24 头像对齐（与上层评论同一列）+ 右缘细竖线贯穿到自己的子回复 */}
+        <div className="flex shrink-0 flex-col items-center">
+          <XAvatar authorKey={s.authorKey} size={avSize} onClick={() => f.openProfile(s.authorKey)} />
+          {sSubs.length > 0 && (
+            <span className="mt-1 w-[2px] flex-1" style={{ background: t.border }} aria-hidden="true" />
+          )}
+        </div>
         <div className="min-w-0 flex-1">
           {/* 名行：名字(bold) + @账号 · 时间(灰) + 最右「···」 */}
           <CommentNameRow
@@ -404,34 +415,25 @@ function SubReplyItem({
             onReplyClick={() => onReply(rootId, s.id, sa.name)}
             translate={{ loading: tr.st.loading, active: tr.st.shown, onClick: tr.toggle }}
           />
-          {/* 更深层楼中楼：递归嵌套 + 左侧留白缩进（用户要求：楼中楼必须缩进显示） */}
-          {sSubs.length > 0 && (
-            <div
-              className="mt-1 flex flex-col"
-              style={{ marginLeft: Math.min(depth, 3) * 14 }}
-            >
-              {sSubs.map((c) => (
-                <SubReplyItem
-                  key={c.id}
-                  s={c}
-                  rootId={rootId}
-                  parentName={sa.name}
-                  depth={depth + 1}
-                  onReply={onReply}
-                />
-              ))}
-            </div>
-          )}
         </div>
       </div>
+      {/* v24 头像对齐：子回复容器与本层平级（不嵌在本层内容列里）——所有楼中楼
+          头像排成同一垂直列、与上面的评论头像对齐，不再楼梯式缩进 */}
+      {sSubs.length > 0 && (
+        <div className="mt-1 flex flex-col">
+          {sSubs.map((c) => (
+            <SubReplyItem key={c.id} s={c} rootId={rootId} parentName={sa.name} onReply={onReply} />
+          ))}
+        </div>
+      )}
     </div>
   );
 }
 
 /** 顶层评论（参考图规格）：头像 44px + 头像右缘竖线贯穿到子回复 +
  *  名行（名字bold + @账号·时间灰 + 右侧···）+ 正文 + 图标操作行（最右翻译）；
- *  v7 楼中楼树：子回复按真实 parentId 递归嵌套（带「回复 @xx：」前缀 + 缩进），
- *  多层楼中楼不再扁平堆在第一层；点评论/子回复 → 定向回复（支持无限多轮）。 */
+ *  v24 楼中楼头像对齐：子回复统一 28px 排同一垂直列（带「回复 @xx：」前缀），
+ *  不再逐层缩进/缩小；点评论/子回复 → 定向回复（stopPropagation，支持无限多轮）。 */
 function CommentRow({
   comment,
   onReply,
@@ -487,7 +489,7 @@ function CommentRow({
             onReplyClick={() => onReply(comment.id, comment.id, a.name)}
             translate={{ loading: tr.st.loading, active: tr.st.shown, onClick: tr.toggle }}
           />
-          {/* 楼中楼（v7 树状）：按真实 parentId 递归嵌套 + 「回复 @被回复者：」前缀 + 缩进 */}
+          {/* 楼中楼（v24 头像对齐）：所有子回复头像同一列对齐 + 「回复 @被回复者：」前缀 */}
           {subReplies.length > 0 && (
             <div className="mt-2 flex flex-col">
               {subReplies.map((s) => (
@@ -496,7 +498,6 @@ function CommentRow({
                   s={s}
                   rootId={comment.id}
                   parentName={a.name}
-                  depth={1}
                   onReply={onReply}
                 />
               ))}

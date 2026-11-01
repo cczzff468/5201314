@@ -1711,6 +1711,8 @@ async function execJob(job: PendingJob): Promise<void> {
         text = typeof r.text === 'string' ? sanitizeCommentClient(stripReplyPrefixClient(r.text)) : '';
         // v9 客户端兜底：中文帖拒绝整句外语回复
         if (text && postLang === 'zh-Hans' && foreignDominantClient(text)) text = '';
+        // v24 客户端兜底：楼层对话回复 20-80 字（留容差 12~95）——过短/过长直接不发生
+        if (text && (text.length < 12 || text.length > 95)) text = '';
       } catch {
         text = '';
       }

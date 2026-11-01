@@ -933,7 +933,11 @@ export async function POST(req: Request) {
       const myLang = typeof authorRaw?.lang === 'string' && LANG_LABELS[authorRaw.lang] ? authorRaw.lang : 'zh-Hans';
       if (kind === 'reply') {
         const p = body.parent as { authorName?: string; content?: string } | undefined;
-        const parentLine = p?.content ? `${p.authorName ?? '有人'}对你说：「${String(p.content).slice(0, 300)}」` : '一条帖子';
+        // v24（用户本次 Prompt 规格）：楼层对话回复 = 根据【主帖内容】+【上一句对话】
+        // 生成符合人类社交逻辑的回复（拒绝幻觉 / 紧扣上下文 / 20-80字口语化 / 直接输出正文）
+        const lastLine = p?.content
+          ? `【上一句对话】\n${p.authorName ?? '有人'}：${String(p.content).slice(0, 300)}`
+          : '【上一句对话】\n（无——这是对主帖本身的第一条回复）';
         // 多轮上下文：所在主帖 + 评论串最近几轮对话（用户在评论区与 AI 无限来回）
         // v15：主帖正文原封不动（不再截断 400 字）
         const postContent = typeof body.postContent === 'string' ? body.postContent.slice(0, 1000) : '';
@@ -946,13 +950,17 @@ export async function POST(req: Request) {
               .map((h) => `${h.from === 'user' ? userName : name}：${typeof h.text === 'string' ? h.text.slice(0, 150) : ''}`)
               .join('\n')
           : '';
-        const mediaDesc = typeof body.mediaDesc === 'string' && body.mediaDesc.trim() ? `（主帖配图内容：${body.mediaDesc.slice(0, 160)}）` : '';
+        const mediaDesc =
+          typeof body.mediaDesc === 'string' && body.mediaDesc.trim()
+            ? `\n（主帖配图内容：${body.mediaDesc.slice(0, 160)}）`
+            : '';
         const ctx = [
-          postContent ? `你们正在评论这条帖子：${postContent}${mediaDesc}` : '',
-          history ? `最近的对话：\n${history}` : '',
+          postContent ? `【主帖内容】\n${postContent}${mediaDesc}` : '',
+          history ? `【最近对话（你们已经说过的话）】\n${history}` : '',
+          lastLine,
         ]
           .filter(Boolean)
-          .join('\n');
+          .join('\n\n');
         const langLine =
           postLang === 'zh-Hans'
             ? myLang !== 'zh-Hans'
@@ -963,33 +971,38 @@ export async function POST(req: Request) {
           {
             role: 'system',
             content:
-              `你是中文论坛（X/Twitter 风格广场）的网友「${name}」。人设：${persona}。` +
-              `${langLine}` +
-              '【严禁串台】回复必须 100% 贴合对方说的内容、帖子语境和你们之前的对话——对方聊剧就聊剧，对方问什么就答什么；绝对禁止把与帖子无关的新话题（试驾/吃饭/买衣服之类）带进回复。' +
-              '【万能句式禁令（用户明令）】「蹲后续」「这瓜保熟吗」「等一个下文」「让子弹飞一会儿」「前排吃瓜」这类放在任何帖子下都「成立」的模板句绝对禁止——除非主帖真的是未完结爆料八卦。' +
-              '【AI 废话黑名单（出现即废稿）】「楼主说的太对了，我也是这么想的」「太对了哈哈哈」「只有我一个人觉得」「笑死，真的是这样」及「支持」「说得对」「有道理」这类客套空评绝对禁止——回复必须有具体观点或信息，哪怕是追问、抬杠、骂人都行。' +
-              '可以带一点自己的态度，可以接梗、反问、分享同类经历、反驳。' +
-              '【看帖作答】对方问了什么就答什么：求推荐就给出具体推荐（说出名字和理由），求助就给具体建议，绝不能答非所问。' +
-              '【格式铁律】直接写回复正文：绝对禁止以「@任何人」开头，绝对禁止带「回复 @某某：」字样（系统会自动标注回复对象）。' +
-              '【禁用】「总的来说」「不可否认」「确实如此」「在这个事件中」「我们应该」「首先其次最后」这类 AI 套话；「支持」「说得对」「有道理」这类客套话也禁止；一两句话为主。' +
-              '口吻像真人聊天：口语化、带情绪、可以不用标点或全用感叹号、可以有错别字和缩写（xswl、u1s1、笑死、破防了）。' +
-              '字数不限：一两句短回到上百字的长回复都可以。禁止 emoji，禁止任何格式标记，只输出回复正文。',
+              // v24（用户本次 Prompt 规格）：楼层对话回复按 Role/Task/Rules 结构重写
+              `# Role（角色）\n你是一个真实的网友「${name}」，正在一条帖子的评论区参与楼层对话。口吻人设：${persona}。${langLine}` +
+              '\n# Task（任务）\n根据【主帖内容】和【上一句对话】，生成一条符合人类社交逻辑的回复：对方问什么就答什么，对方抛观点就接观点，对方玩梗就接梗，对方情绪上头就先接住情绪再说事。' +
+              '\n# Rules（核心规则）' +
+              '\n1. 拒绝幻觉：绝对不能生硬地加入主帖和对话里完全没有提到的名词、剧名、人名、梗（比如突然聊起某部剧或某个导演）——除非主帖或上一句对话明确提到了它们；' +
+              '\n2. 紧扣上下文：回复必须 100% 针对【上一句对话】说的话，同时贴着【主帖内容】讲的那件事；绝对禁止把与帖子无关的新话题（试驾/吃饭/买衣服之类）带进回复；' +
+              '\n3. 字数控制：20-80 字以内，必须口语化，像真人随手打的一句话——可以不用标点或全用感叹号、可以有错别字和缩写（xswl、u1s1、笑死、破防了）；' +
+              '\n4. 输出格式：直接输出回复的正文，不要带任何解释。' +
+              '\n# 废稿红线（出现即作废）' +
+              '\n- 万能句式：「蹲后续」「这瓜保熟吗」「等一个下文」「让子弹飞一会儿」「前排吃瓜」这类放在任何帖子下都「成立」的模板句（主帖真是未完结爆料八卦时最多 1 条）；' +
+              '\n- AI 废话：「楼主说的太对了，我也是这么想的」「太对了哈哈哈」「只有我一个人觉得」「总的来说」「不可否认」「确实如此」「首先其次最后」，以及「支持」「说得对」「有道理」「深有体会」这类客套空评；' +
+              '\n- 禁止以「@任何人」开头、禁止带「回复」「回复 @某某：」字样（系统自动标注回复对象）；禁止 emoji 和任何格式标记。',
           },
-          { role: 'user', content: `${ctx ? ctx + '\n\n' : ''}${parentLine}\n请以「${name}」的口吻回复（直接写正文，不要带@或「回复」前缀）。${bjTimeLine()}` },
+          {
+            role: 'user',
+            content: `${ctx}\n\n请以「${name}」的口吻回复这条楼层对话（直接输出回复正文，20-80 字口语化，不要带任何解释）。${bjTimeLine()}` },
         ])).text;
         const text = sanitizeCommentText(stripReplyPrefix(raw));
+        // v24 字数铁律（用户规范 20-80 字，留容差）：过短/过长 → 返回空
         // v9 强校验：中文帖整句外语回复 → 返回空
         // v14 锚定校验：串台/AI 废话 → 返回空
         // v22 万能句式：非未完结八卦帖 → 返回空（客户端不再兜底，宁缺毋滥）
         const catchallHit = universalPhraseIn(text) && !postAllowsCatchall(`${p?.content ?? ''} ${postContent}`);
         if (
-          text.length >= 3 &&
+          text.length >= 12 &&
+          text.length <= 95 &&
           !catchallHit &&
           !violatesCommentLang(text, postLang) &&
           !isBannedFiller(text) &&
           commentAnchored(text, `${p?.content ?? ''} ${postContent}`)
         ) {
-          return NextResponse.json({ text: cleanText(text, 1000) });
+          return NextResponse.json({ text: cleanText(text, 95) });
         }
         return NextResponse.json({ text: '' });
       }
