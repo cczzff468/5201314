@@ -1884,3 +1884,22 @@ Stage Summary:
 - GEN_VERSION 25；HMR 竞态脏数据靠双 bump 清除
 - 楼中楼头像对齐实测通过（竖屏测量，spread=0）
 - 关键文件：core.ts（江屿 pool/persona/GEN_VERSION=25）、engine.ts（COMBO 明星日常）、api/forum/generate/route.ts（posts 原则 5/6 + 三分支新规则）
+
+## 2026-11-01 · X论坛 v28「走心帖语境适配」（用户实锤：语境错乱评论）+ v27 潜伏边界 bug 修复
+
+Task: 用户以实例诊断评论语境错乱——楼主帖「於我而言 你比星璀璨」（繁体+文艺+自拍配图，深情表白），AI 评论却是「救命……甜得我当场去世哈哈哈！家人们谁懂啊……笑死我了，楼主你俩锁死别出来放毒了 xswl」。三层病灶：①语境错乱（楼主走心、评论发癫）；②「锁死」「放毒」在普通网友语境里是阴阳怪气（锁死=这俩别祸害别人、放毒=别出来恶心大家），跟夸人「甜」完全两个极端；③语料模板过载（AI 抓「自拍+情话」标签就调「单身狗看秀恩爱」刻板模板，把 xswl/家人们谁懂啊/锁死一股脑全塞）。用户给出修复规范：评论生成 Prompt 加语境判断规则（情绪识别+绝对禁令），正确反应应为感动/吃狗粮/祝福/酸。
+
+- [新检测函数 topic.ts] isTenderPost（走心帖判定：浪漫意象词 璀璨/星河/晚风/月色/余生/白月光…＋表白句式 你比星/喜欢你/爱你/情书/余生请多指教…，简繁双体；mediaDesc（配图基调）一并并入；单字「星/月/你」绝不单独判定，「你比」只认后接星月光璀璨——你比他考得好是攀比不是深情）＋ loudMemeIn（聒噪烂梗：锁死/放毒/笑死/笑不活了/家人们谁懂啊/xswl/当场去世/甜得我去世；只对走心帖生效——别处「笑死」是正常网感，美食帖「深夜放毒」也根本不会命中 isTenderPost，双条件天然不误伤）
+- [Prompt 三分支注入 route.ts] comments/multiComments/subreplies 全部加上「走心帖处理逻辑」：①情绪识别（简短/文艺/繁体/深情文案+自拍 → 楼主感性浪漫私密情境）②绝对禁令（锁死/放毒/笑死/家人们谁懂啊/xswl/当场去世，注明这些词是阴阳怪气不是夸奖）③正确姿势（被戳中/吃狗粮/克制地酸（酸了/柠檬了）/祝福 99/文艺接梗，语气沉下来同频）④视角降级（玩梗者/暴躁老哥/阴阳怪气自动失效）；comments/subreplies 动态 tenderLine（同 flameLine 机制，命中才注入）；multiComments 帖单逐帖标注；三处「鼓励网感」行（乐/笑死/xswl…）全部追加「走心帖下一律禁用」豁免说明
+- [校验链双保险] 服务端三分支（multiComments 循环/comments filter 链/subreplies 按位映射）＋客户端 engine.ts 三处（与服务端同口径）全部加「isTenderPost(post) && loudMemeIn(comment) → 作废」
+- [正则单测（/tmp 临时脚本，不进项目）] 10/10 全过：用户病例帖（含 mediaDesc 自拍描述）检出走心；晚霞/月色/余生/喜欢上她/繁体深情 5 例全检出；美食放毒/吐槽/攀比/星巴克/月亮不睡梗 5 例全不误判；loudMemeIn 对病例评论 BAN、对「酸了/哈哈哈哈/这句话好浪漫」PASS
+- [v27 潜伏 bug 修复（本次暴露）] stripImgPh/IMG_PLACEHOLDER 原从 core.ts（'use client'）导入进服务端路由——调用 stripImgPh() 抛「Attempted to call from the server」客户端边界错误：评论三分支在 LLM 预处理阶段就整段崩掉，被 engine try/catch 静默吃成「还没有回复」（叠加 429 噪音极难察觉；字符串常量 IMG_PLACEHOLDER 靠常量折叠「侥幸」能用所以 posts 分支一直正常）。拆出共享模块 lib/forum/imgph.ts（无指令，双端共用），core.ts 改再导出保持客户端 import 兼容，route.ts 改从 imgph 导入。修复后 curl 直连 comments 分支：边界错误消失、请求打穿到上游 fetch（返回账号级 429）——与 v25 时代「失败点恰在上游 fetch」的行为一致
+- [GEN_VERSION 26→28] v27（图文并茂帖）当时只影响新生成内容故未 bump（历史注释补记）；v28 bump 触发重播种清存量错乱评论（用户看到的那条就在清除范围内）。浏览器实测 IndexedDB forum-data-v1.value：genVersion=28、seeded=true、26 帖全新播种（PPT纺织工/蛋黄酥刺客/本日の気分…全新 LLM 帖子，单主题质量在线）
+- [E2E·Agent Browser] 390×844 竖屏：解锁→翻两页找 X论坛→开论坛→信息流 26 article 渲染→帖详情→「显示更多评论」触发全链路（dev.log：请求打穿到上游、429 限流）；IndexedDB 复核重播种完成；console/errors 双零；eslint 改动五文件零输出；tsc 仅存 4 条 expressStyle 旧账（chat-call，非本次范围）
+- [已知·环境] 上游 LLM 账号级持续 429（本会话 4 次 curl 重试 13:06~13:10 全 429；dev.log 曾有 200 in 39s/27.1s 均为 429 包 200 状态码的假成功）——LLM 输出层（评论实际语气）无法当场实跑，已建一次性 cron job 2918160（11-03 10:00，晚于既存 job 2918061 的 11-02 17:14）自动复验：走心帖评论不得出现禁用烂梗、语气须同频；正则层/服务端路径/重播种/前端渲染均已当场验证
+
+Stage Summary:
+- 走心帖语境适配四层落地：topic.ts 检测（isTenderPost×loudMemeIn）→ Prompt 三分支注入（情绪识别+禁令+正确姿势+视角降级+tenderLine 动态注入）→ 服务端校验 → 客户端双保险
+- 顺带修复 v27 潜伏客户端边界 bug（stripImgPh 从 'use client' 的 core.ts 被服务端调用 → 评论三分支静默崩掉）；拆 lib/forum/imgph.ts 共享模块
+- GEN_VERSION 28 重播种完成（浏览器 IndexedDB 实测），存量错乱评论清除
+- 关键文件：topic.ts（isTenderPost/loudMemeIn）、api/forum/generate/route.ts（三分支 Prompt+校验+header v28）、engine.ts（三处双保险）、core.ts（GEN_VERSION=28+再导出）、imgph.ts（新增）

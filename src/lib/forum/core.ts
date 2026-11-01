@@ -97,8 +97,16 @@ export const FORUM_KEY = 'forum-data-v1';
  *  用「新版本号+旧池子」播出的脏数据，靠再 bump 一版强制重播种清掉；
  *  v26 = 楼中楼多层化：每条评论 1-5 位不同网友回复、部分回复再被回复成
  *  3/4 层（旧数据评论全是平铺一级，看不到「回复他人下面还有回复」）；
- *  GEN_VERSION 升级触发重新播种，清掉存量清单式帖子。 */
-export const GEN_VERSION = 26;
+ *  v27 = 图文并茂帖（正文 [图片] 占位符 + LLM image_description → canvas
+ *  纯白底居中文字图，textimg.ts）：只影响新生成内容，无需重播种，故未 bump；
+ *  v28 = 走心帖语境适配（用户反馈「语境错乱」）：文艺/深情/表白类主帖
+ *  （「於我而言 你比星璀璨」式繁体表白+自拍）下，AI 曾输出「楼主你俩
+ *  锁死别出来放毒了 xswl」——楼主走心，评论发癫。新增 isTenderPost/
+ *  loudMemeIn（topic.ts，浪漫意象词/表白句式×聒噪烂梗检测），评论三分支
+ *  （comments/multiComments/subreplies）Prompt 注入「走心帖处理逻辑」
+ *  （情绪识别+绝对禁令+正确姿势+视角降级），服务端+客户端双保险作废
+ *  聒噪评论；GEN_VERSION bump 触发重播种，清掉存量语境错乱评论。 */
+export const GEN_VERSION = 28;
 /** 首次播种的 NPC 帖子目标条数（feed 一屏半左右） */
 export const SEED_POST_TARGET = 14;
 /** 补新帖：feed 最新帖子超过该毫秒数视为「凉了」，打开时补 2~4 条 */
@@ -108,19 +116,10 @@ export const POST_MAX = 1000;
 /** 回复字数上限（同上，宽松上限） */
 export const REPLY_MAX = 1000;
 
-/** v27 图文并茂帖：正文中 AI 配图占位符（LLM 按 has_image 在最自然位置插入，
- *  渲染端按它分段交替上屏「文字段-文字图-文字段」）。 */
-export const IMG_PLACEHOLDER = '[图片]';
-
-/** 剥掉正文里的 [图片] 占位符（评论生成上下文/锚定校验/翻译前使用——
- *  占位符字样混进锚定词表会把正常评论误杀成「与帖子无关」）。 */
-export function stripImgPh(text: string): string {
-  return text
-    .split(IMG_PLACEHOLDER)
-    .join('')
-    .replace(/[ \t]{2,}/g, ' ')
-    .trim();
-}
+/** v27 图文并茂帖的 [图片] 占位符工具——v28 拆到 ./imgph.ts（无 'use client'，
+ *  服务端路由也要用：v27 放在这里导致 api 路由调用 stripImgPh() 抛客户端
+ *  边界错误，评论三分支整段静默崩掉）。此处再导出保持客户端既有 import 不变。 */
+export { IMG_PLACEHOLDER, stripImgPh } from './imgph';
 
 // ---------------- 数据模型 ----------------
 

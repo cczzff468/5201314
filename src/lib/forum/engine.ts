@@ -58,7 +58,7 @@ import {
 } from './core';
 import { describeImagesAuto } from '@/lib/vision-client';
 import { renderTextImage } from './textimg';
-import { commentAnchored, offTopicIn, personaBleedIn, postAllowsCatchall, universalPhraseIn } from './topic';
+import { commentAnchored, isTenderPost, loudMemeIn, offTopicIn, personaBleedIn, postAllowsCatchall, universalPhraseIn } from './topic';
 
 // ---------------- pending 队列（跨刷新持久） ----------------
 
@@ -689,6 +689,8 @@ async function llmPolishSeedComments(seedPostIds: string[]): Promise<void> {
           if (!catchallOk || catchallUsed) continue;
           catchallUsed = true;
         }
+        // v28 走心帖：聒噪烂梗（锁死/放毒/笑死/xswl…）→ 语境错乱丢弃（与服务端双保险）
+        if (isTenderPost(t.content) && loudMemeIn(s)) continue;
         // v25 领域私货：≥2 个该帖领域之外的关键词 → 串台丢弃（与服务端双保险）；
         // v27 锚定前剥 [图片] 占位符（防词表污染误杀正常评论）
         const anchorText = stripImgPh(t.content);
@@ -1491,6 +1493,8 @@ async function callSubReplyLayer(
                 if (!ctx.catchall.ok || ctx.catchall.used) return '';
                 ctx.catchall.used = true;
               }
+              // v28 走心帖：聒噪烂梗（锁死/放毒/笑死/xswl…）→ 语境错乱丢弃
+              if (isTenderPost(ctx.post.content, ctx.mediaDesc) && loudMemeIn(s)) return '';
               const plan = ch[i];
               // v25 称呼/名称串线：拿回复者网名拼称呼/自称网名 → 丢弃
               if (personaBleedIn(s, resolveAuthor(plan.target.authorKey).name, [resolveAuthor(plan.key).name])) return '';
@@ -1764,6 +1768,8 @@ async function genCommentBatch(postId: string, report?: (n: number) => void): Pr
                 if (!catchallOk || catchallUsed) return '';
                 catchallUsed = true;
               }
+              // v28 走心帖：聒噪烂梗（锁死/放毒/笑死/xswl…）→ 语境错乱丢弃（与服务端双保险）
+              if (isTenderPost(post.content, mediaDesc) && loudMemeIn(s)) return '';
               // v25 称呼/名称串线：屿哥（拿评论者网名拼称呼）/自称网名 → 丢弃
               if (personaBleedIn(s, postAuthor.name, commenterNames)) return '';
               // v25 领域私货：≥2 个主帖领域之外的关键词（剧+特调混进保研帖）→ 丢弃
