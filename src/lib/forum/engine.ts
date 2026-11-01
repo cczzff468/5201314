@@ -53,7 +53,7 @@ import {
 } from './core';
 import { describeImagesAuto } from '@/lib/vision-client';
 import { renderTextImage } from './textimg';
-import { commentAnchored, postAllowsCatchall, universalPhraseIn } from './topic';
+import { commentAnchored, offTopicIn, personaBleedIn, postAllowsCatchall, universalPhraseIn } from './topic';
 
 // ---------------- pending 队列（跨刷新持久） ----------------
 
@@ -298,6 +298,11 @@ function communityOfPoolText(npcId: string, text: string): string | null {
 
 /** 全部人设原型 id（信息流大杂烩轮换环：每隔几条就是完全不同领域和语气的人） */
 const ARCHETYPE_IDS = PERSONA_ARCHETYPES.map((a) => a.id);
+
+/** v25：只发帖不评论的内置 NPC（人设道具型——江屿/海王/绿茶：
+ *  人设里自带具体道具【代言品牌/剧名/粉丝称呼】，去评论别人时
+ *  极易把道具泄漏进评论造成角色串线；且明星本尊出现在素人帖评论区本身违和） */
+const POSTER_ONLY_NPCS = new Set(['star', 'wave', 'greentea']);
 
 /** 重排一批帖子：同一信息流内绝不连续出现同一作者（用户要求：严格防刷屏）。
  *  prev = 批次之前紧邻的那条作者（如现有 feed 最老一条），一并隔开。 */
@@ -672,6 +677,8 @@ async function llmPolishSeedComments(seedPostIds: string[]): Promise<void> {
           if (!catchallOk || catchallUsed) continue;
           catchallUsed = true;
         }
+        // v25 领域私货：≥2 个该帖领域之外的关键词 → 串台丢弃（与服务端双保险）
+        if (offTopicIn(s, t.content)) continue;
         if (!commentAnchored(s, t.content)) continue; // 串台/AI 废话 → 丢弃
         seenCt.add(s.slice(0, 16));
         valid.push(s);
@@ -1272,7 +1279,13 @@ const threadGen = new Set<string>();
 function pickCommenters(count: number, postLang?: string, postContent?: string, ...avoidKeys: AuthorKey[]): AuthorKey[] {
   const d = forumData();
   const chars = forumContactsSnap().filter((c) => c.kind === 'char' && (c.persona || c.background));
-  const npcs = NPC_DEFS.slice().sort(() => Math.random() - 0.5);
+  // v25：人设道具型 NPC（明星本尊江屿/海王/绿茶）退出评论区候选——
+  // 这些人设自带大量具体道具（咖啡品牌代言/剧名/粉丝称呼「屿哥」），
+  // 去评论素人帖子时极易把道具泄漏进评论（角色串线重灾区）。
+  // 发帖保留（人设在自家帖子里成立），评论一律由普通网友承担。
+  const npcs = NPC_DEFS.slice()
+    .filter((n) => !POSTER_ONLY_NPCS.has(n.id))
+    .sort(() => Math.random() - 0.5);
   const dynKeys = Object.keys(d.dynNpcs ?? {});
   const bias = postLang && postLang !== 'zh-Hans' ? postLang : undefined;
   // 帖子主题 → 更可能来评论的人设原型（评论区同温层，但保留乱入的乐子人）
@@ -1307,6 +1320,8 @@ function pickCommenters(count: number, postLang?: string, postContent?: string, 
 /** 帖子内容 → 相关人设原型 id 列表（评论者与帖子同领域，评论才对得上内容） */
 function archetypeIdsForContent(content: string): string[] {
   const map: { re: RegExp; ids: string[] }[] = [
+    // v25：引战/三观争议帖放最前——杠精/暴躁口吻优先（这类帖子评论区骂声一片）
+    { re: /保研|名额|奖学金|室友矛盾|我不是坏心|小三|彩礼|该不该分|要不要分|重男轻女|偏心|举报她|举报他/i, ids: ['gangjing', 'daxuesheng', 'dagong', 'kaoyan'] },
     { re: /车|油|堵|驾|4S|提车|试驾|胎|加塞|变道/i, ids: ['laosiji', 'xinshou', 'beipiao', 'dagong'] },
     { re: /剧|追|烂尾|编剧|男主|女主|电影|影院|综艺|红毯|上映|剧荒|倍速/i, ids: ['zhuiju', 'yemao', 'daxuesheng', 'gaoxiao'] },
     { re: /瓜|塌|恋情|官宣|热搜|爆料|同框|拍到|辟谣|反转|吃瓜/i, ids: ['chigua', 'fanquan', 'kebiao', 'gangjing'] },
@@ -1362,6 +1377,8 @@ async function genCommentBatch(postId: string): Promise<number> {
     let texts: string[] = [];
     const catchallOk = postAllowsCatchall(post.content); // 万能句式豁免（未完结八卦/求助帖）
     let catchallUsed = false; // 豁免帖每批也最多 1 条万能句式
+    // v25：称呼串线检测名单（本批评论者网名；服务端已拦，这里双保险）
+    const commenterNames = commenterKeys.map((k) => resolveAuthor(k).name);
     try {
       const r = (await callApi({
         kind: 'comments',
@@ -1387,6 +1404,10 @@ async function genCommentBatch(postId: string): Promise<number> {
                 if (!catchallOk || catchallUsed) return '';
                 catchallUsed = true;
               }
+              // v25 称呼/名称串线：屿哥（拿评论者网名拼称呼）/自称网名 → 丢弃
+              if (personaBleedIn(s, postAuthor.name, commenterNames)) return '';
+              // v25 领域私货：≥2 个主帖领域之外的关键词（剧+特调混进保研帖）→ 丢弃
+              if (offTopicIn(s, post.content)) return '';
               // v14 锚定校验：串台/AI 废话直接丢弃（与服务端双保险）
               if (!commentAnchored(s, post.content)) return '';
               return s;
@@ -1464,8 +1485,14 @@ async function genCommentBatch(postId: string): Promise<number> {
                   if (!catchallOk || catchallUsed) return '';
                   catchallUsed = true;
                 }
+                // v25 称呼/名称串线：拿回复者网名拼称呼/自称网名 → 丢弃
+                const replied = subTargets[i];
+                const ctxSub = `${replied?.content ?? ''} ${post.content}`;
+                if (personaBleedIn(s, resolveAuthor(replied?.authorKey ?? post.authorKey).name, [resolveAuthor(subKeys[i]).name])) return '';
+                // v25 领域私货：≥2 个「被回复评论+主帖」领域之外的关键词 → 丢弃
+                if (offTopicIn(s, ctxSub)) return '';
                 // v14 锚定校验：楼中楼必须呼应「被回复评论 + 主帖」
-                if (!commentAnchored(s, `${subTargets[i]?.content ?? ''} ${post.content}`)) return '';
+                if (!commentAnchored(s, ctxSub)) return '';
                 return s;
               })
             : [];

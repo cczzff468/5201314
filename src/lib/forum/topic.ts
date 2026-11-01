@@ -18,6 +18,17 @@
  *    领域的强词都当成「核心话题词」喂给模型；
  * 4. 通用呼应词降权：「姐妹/家人们/哭/尖叫」这类跨领域情绪词单独出现不算
  *    强呼应——只靠通用词「呼应」+携带外部领域强关键词（考研/装机）→ 判串台。
+ *
+ * v25（用户反馈「江屿评论芋头保研帖：屿哥你最近有在剧里看到…三杯特调心疼到发抖」
+ *  ——评论者人设道具泄漏 + 称呼错乱）三层拦截落地：
+ * 1. personaBleedIn：称呼/名称泄漏检测——评论里出现评论者自己的网名，或
+ *    「评论者网名尾字＋哥/姐等称谓」拼出的称呼（屿＋哥＝屿哥）且主帖没有
+ *    这个称呼 → 作废（把评论者自己的名字安到楼主头上，主语错乱）；
+ * 2. offTopicIn：领域私货检测——评论携带 ≥2 个「上下文（主帖＋被回复评论）
+ *    领域之外」的领域关键词（跨 2 个域，或同域 ≥2 词）→ 串线作废
+ *    （保研帖里的「剧里」＋「三杯特调」在这里拦下）；
+ * 3. isFlamePost：引战/三观争议帖检测（举报抢名额/我不是坏心/小三/彩礼…）
+ *    → 评论生成时注入「骂声一片」风向指令（真实互联网不会顺着这种楼主说话）。
  */
 
 /** 话题领域定义：strong = 强关键词（单个命中记 2 分，判领域用）；
@@ -106,9 +117,11 @@ export const TOPIC_DOMAINS: TopicDomain[] = [
     id: 'food',
     label: '吃喝',
     subject: '这家店',
-    strong: ['外卖', '火锅', '奶茶', '宵夜', '下饭', '探店', '美食', '好吃', '难吃', '零食', '甜品', '咖啡', '烧烤', '点单', '餐厅', '等位', '菜单', '轻食', '炸鸡', '螺蛳粉', '蛋糕', '面包', '烘焙', '做饭', '下厨', '菜谱', '米其林', '大排档', '夜市摊'],
+    strong: ['外卖', '火锅', '奶茶', '宵夜', '下饭', '探店', '美食', '好吃', '难吃', '零食', '甜品', '咖啡', '咖啡因', '特调', '浓缩', '美式', '拿铁', '生椰', '瑞幸', '库迪', '挂耳', '手冲', '拉花', '烧烤', '点单', '餐厅', '等位', '菜单', '轻食', '炸鸡', '螺蛳粉', '蛋糕', '面包', '烘焙', '做饭', '下厨', '菜谱', '米其林', '大排档', '夜市摊'],
     weak: ['吃', '喝', '饿', '馋', '店', '饭', '菜', '厨'],
-    echo: ['吃', '喝', '饿', '馋', '店', '饭', '菜', '厨', '外卖', '火锅', '奶茶', '宵夜', '美食', '好吃', '难吃', '零食', '甜品', '咖啡', '烧烤', '餐厅', '排队', '等位', '菜单', '炸鸡', '螺蛳粉', '蛋糕', '面包', '做饭', '下厨', '菜谱', '锅', '煮', '炒', '蒸', '烤', '加辣', '香菜', '葱', '蒜', '辣', '酸', '甜', '咸', '烫', '热量', '卡路里', '胖', '减肥', '瘦', '斤', '饱', '馋了', '口水', '咽', '垫肚子', '深夜食堂'],
+    // v25：咖啡细词补表（特调/浓缩/美式…）——主帖聊咖啡时这些是亲缘词放行；
+    // 保研帖等不沾咖啡的帖子里出现「三杯特调」则被 offTopicIn 判为外来领域私货
+    echo: ['吃', '喝', '饿', '馋', '店', '饭', '菜', '厨', '外卖', '火锅', '奶茶', '宵夜', '美食', '好吃', '难吃', '零食', '甜品', '咖啡', '咖啡因', '特调', '浓缩', '美式', '拿铁', '生椰', '瑞幸', '库迪', '挂耳', '手冲', '拉花', '豆子', '咖啡店', '烧烤', '餐厅', '排队', '等位', '菜单', '炸鸡', '螺蛳粉', '蛋糕', '面包', '做饭', '下厨', '菜谱', '锅', '煮', '炒', '蒸', '烤', '加辣', '香菜', '葱', '蒜', '辣', '酸', '甜', '咸', '烫', '热量', '卡路里', '胖', '减肥', '瘦', '斤', '饱', '馋了', '口水', '咽', '垫肚子', '深夜食堂'],
   },
   {
     id: 'pet',
@@ -568,3 +581,93 @@ export function topicAnchorOf(content: string): string {
 // v22：anchorCandidatesOf（追问式兜底评论的话题锚点候选池）已删——
 // FOLLOWUP 万能句式模板池整池删除（用户明令「绝对禁止蹲后续/这瓜保熟吗/
 // 等一个下文这类万能句式」），评论 100% 由大模型按当前帖子实时生成。
+
+// ---------------- v25 防角色串线（Persona Bleed） ----------------
+
+/** 通用称呼豁免：这些「字+称谓」组合是大众称呼，不是拿网友网名拼的，
+ *  不能因为某位评论者网名里恰好有这个字就误杀 */
+const GENERIC_TITLES = new Set([
+  '大哥', '小哥', '老哥', '表哥', '哥俩', '哥们', '空姐', '大姐', '老姐',
+  '姐妹', '学姐', '学长', '宝子', '老铁', '老妹', '兄弟', '哥们儿',
+]);
+
+/** 称呼/名称泄漏检测（v25 用户反馈「屿哥」称呼错乱的直接拦截）。
+ *  postAuthorName = 楼主网名；commenterNames = 本批评论者网名。
+ *  命中以下任一 → true（作废）：
+ *  1. 评论里出现某位评论者自己的完整网名（真人评论不会自称网名——名字由
+ *     系统展示在头像旁；「江屿你最近…」= 把自己当被回复对象，主语错乱）；
+ *  2. 评论里出现「评论者网名尾字/尾二字＋哥/姐/妹/宝/爷/叔/酱/大大」拼出的
+ *     称呼（屿＋哥＝屿哥），且主帖里没有这个称呼——楼主真在聊这位网友时除外。 */
+export function personaBleedIn(comment: string, postAuthorName: string, commenterNames: string[]): boolean {
+  const t = (comment ?? '').replace(/\s+/g, '');
+  if (!t) return false;
+  const owner = (postAuthorName ?? '').replace(/\s+/g, '');
+  const titles = ['哥', '姐', '妹', '宝', '爷', '叔', '酱', '大大'];
+  for (const raw of commenterNames ?? []) {
+    const n = (raw ?? '').replace(/\s+/g, '');
+    if (n.length < 2 || n === owner || owner.includes(n) || n.includes(owner)) continue;
+    // ① 自称网名（评论里出现自己的完整网名）
+    if (t.includes(n)) return true;
+    // ② 网名片段拼称呼：屿哥 / 江屿哥 / Nana姐 …
+    //    （楼主名里也含该字时无法区分「屿哥」叫的是谁 → 放行不误杀）
+    const tails = [...new Set([n.slice(-2), n.slice(-1)])].filter(Boolean);
+    for (const tail of tails) {
+      if (tail.length === 1 && owner.includes(tail)) continue;
+      for (const ti of titles) {
+        const combo = `${tail}${ti}`;
+        if (GENERIC_TITLES.has(combo)) continue;
+        if (t.includes(combo) && !owner.includes(combo)) return true;
+      }
+    }
+  }
+  return false;
+}
+
+/** 领域私货检测（v25 用户反馈「保研帖评论里冒出剧里+三杯特调」）。
+ *  context = 主帖正文（楼中楼时 = 被回复评论 + 主帖）。
+ *  评论携带 ≥2 个「context 领域（含亲缘）之外」的领域关键词
+ *  （跨 2 个外来域，或单一外来域 ≥2 词）→ true（串线作废）。
+ *  单字弱词只在 context 完全不含该字时才计（「剧」在保研帖没出现，
+ *  「在剧里看到」的「剧」即外来；追剧帖里「剧」是本域不计）。
+ *  context 一个领域都没命中 → 从宽放行（无从判定）。 */
+export function offTopicIn(comment: string, context: string): boolean {
+  const t = comment ?? '';
+  const ctx = context ?? '';
+  if (!t.trim() || !ctx.trim()) return false;
+  // context 命中的全部领域（含低分顺带提及）+ 亲缘域
+  const ctxDomains = new Set<string>();
+  for (const s of domainScores(ctx)) ctxDomains.add(s.id);
+  if (!ctxDomains.size) return false;
+  for (const id of [...ctxDomains]) {
+    for (const k of DOMAIN_KIN[id] ?? []) ctxDomains.add(k);
+  }
+  // 评论命中的外来领域（strong 计 1；≥2 字 weak 计 1；单字 weak 仅当 ctx 不含该字）
+  let foreignDomains = 0;
+  let foreignHits = 0;
+  for (const d of TOPIC_DOMAINS) {
+    if (ctxDomains.has(d.id)) continue;
+    let n = 0;
+    for (const k of d.strong) if (k && t.includes(k)) n += 1;
+    for (const k of d.weak) {
+      if (!k) continue;
+      if (k.length >= 2 && t.includes(k)) n += 1;
+      else if (k.length === 1 && t.includes(k) && !ctx.includes(k)) n += 1;
+    }
+    if (n > 0) {
+      foreignDomains += 1;
+      foreignHits += n;
+    }
+  }
+  return foreignDomains >= 2 || (foreignDomains === 1 && foreignHits >= 2);
+}
+
+/** 引战/三观争议帖检测（v25：这类帖子真实评论区一定骂声一片，
+ *  评论生成需注入「至少一半直接批评楼主」的风向指令）。
+ *  特征：理直气壮的自私诉求（举报抢名额）＋绿茶话术（我不是坏心/我只是觉得）
+ *  ＋三观炸裂话题（小三/彩礼防备/偏心/该不该分）。 */
+const FLAME_POST_RE =
+  /我不是坏心|我不是那个意思|我只是觉得|跟我(?:可)?没关系|你们(?:说|评评理).{0,10}(?:算|对|错|吗)|我(?:错|过分|小气|坏)了吗|我是不是.{0,6}(?:小气|过分|太坏)|举报(?:她|他|了)|名额顺延|翘了?(?:团建|课|班)|当?小三|彩礼.{0,10}(?:防|留|退|给)|防着我|道德绑架|重男轻女|偏心(?:我|弟弟|妹妹|哥|姐)|该不该分(?:手|)?|要不要分(?:手|)?|(?:劝|要)我分(?:手|)?/;
+
+export function isFlamePost(content: string): boolean {
+  return FLAME_POST_RE.test(content ?? '');
+}
