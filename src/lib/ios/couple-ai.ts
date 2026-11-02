@@ -153,6 +153,10 @@ interface CoupleSnap {
   replyTa?: { active: boolean; picks: Record<string, { pick: number; say: string; at: number }>; mePicks: Record<string, { pick: number; text: string }>; startedAt: number; endedAt: number | null } | null;
   /** AI 主动留言去重（每天最多一条）：最近一次主动留言的日期 key */
   aiCommentDay?: string;
+  /** 许愿树留言卡（第六十轮：爱情小树改许愿树——树上挂卡片，卡片下可双向留言）；最新在前 */
+  treeCards?: { id: string; from: 'me' | 'ta'; text: string; at: number; comments: { id: string; from: 'me' | 'ta'; text: string; at: number }[] }[];
+  /** AI 挂卡去重（每天最多一张）：最近一次挂卡的日期 key */
+  treeCardDay?: string;
   /** 恋爱水平考试（第十五轮）：TA 知道卷子、成绩和彼此的作答 */
   examPaper?: { title: string; questions: { q: string; opts: string[] }[]; source?: string } | null;
   examTaPaper?: { title: string; questions: { q: string; opts: string[] }[]; at: number; answered?: boolean } | null;
@@ -172,6 +176,7 @@ function sceneOfKey(key: string, snap: CoupleSnap | null): string {
   if (key.startsWith('mood:')) return '心情日记留言区';
   if (key.startsWith('quiz:')) return '甜蜜小问答的讨论区';
   if (key.startsWith('letter:')) return '情书留言区';
+  if (key.startsWith('treecard:')) return '许愿树卡片的留言区';
   if (key === 'trail') return '情侣轨迹的聊天区';
   if (key === 'impress') return '情侣印象留言区';
   if (key.startsWith('reply:')) {
@@ -302,6 +307,21 @@ export function coupleChatBlock(contactId: string, channel: CoupleChannel, userN
     const myN = snap.treeStreak?.n ?? 0;
     const taN = snap.taTreeStreak?.n ?? 0;
     lines.push(`- 恋爱小树：成长值 ${snap.tree}/100，${me}连续浇水 ${myN} 天，${ta}连续浇水 ${taN} 天。`);
+  }
+
+  // 许愿树留言卡（第六十轮：树上挂的卡片 + 卡片下的留言，双方互相都知道）
+  const treeCards = snap.treeCards ?? [];
+  if (treeCards.length > 0) {
+    const meN = treeCards.filter((c) => c.from === 'me').length;
+    const taN = treeCards.filter((c) => c.from === 'ta').length;
+    lines.push(`- 许愿树：你们的小树长成了许愿树，树上挂着 ${treeCards.length} 张留言卡（${me}挂的 ${meN} 张、${ta}挂的 ${taN} 张），卡片下面还能互相留言。`);
+    for (const c of treeCards.slice(0, 3)) {
+      const who = c.from === 'ta' ? ta : me;
+      const lastC = (c.comments ?? [])[(c.comments ?? []).length - 1];
+      lines.push(
+        `- 许愿树卡片：${who}挂的卡片正面写着「${cut(c.text, 40)}」${lastC ? `，卡片下面${lastC.from === 'ta' ? ta : me}留言说「${cut(lastC.text, 30)}」` : ''}。`,
+      );
+    }
   }
 
   // 甜蜜小问答（最近 2 组，含双方回答——AI 知道我答了什么）
@@ -1187,6 +1207,22 @@ export function coupleMemoryDiff(prev: CoupleSnap, next: CoupleSnap, contactId: 
   if ((next.tree ?? 0) > (prev.tree ?? 0) && (next.treeStreak?.last ?? '') === (next.treeStreak?.last ?? '')) {
     if ((next.tree ?? 0) - (prev.tree ?? 0) > 0) lines.push(`${me}给两个人的恋爱小树浇水了（成长值到 ${next.tree}）`);
   }
+  // 许愿树留言卡（第六十轮：我新挂的卡 + 我给卡片留的言——TA 都要知道）
+  {
+    const prevCards = prev.treeCards ?? [];
+    const nextCards = next.treeCards ?? [];
+    const myNewCard = nextCards.find((c) => c.from === 'me' && !prevCards.some((p) => p.id === c.id));
+    if (myNewCard) lines.push(`${me}在许愿树上挂了一张留言卡片：「${cut(myNewCard.text, 44)}」`);
+    const prevCmtIds = new Set(prevCards.flatMap((p) => (p.comments ?? []).map((m) => m.id)));
+    for (const c of nextCards) {
+      const mine = (c.comments ?? []).find((m) => m.from === 'me' && !prevCmtIds.has(m.id));
+      if (mine) {
+        const owner = c.from === 'ta' ? ta : me;
+        lines.push(`${me}在许愿树上${owner === me ? `自己挂的那张卡片（「${cut(c.text, 24)}」）` : `${ta}挂的卡片（「${cut(c.text, 24)}」）`}下面留言：${cut(mine.text, 44)}`);
+        break; // 一次 diff 只记一条（连续多条留言时下轮 diff 会补）
+      }
+    }
+  }
   // 心情日记（我写的）
   const newMood = (next.moods ?? []).find((m) => m.from !== 'ta' && !(prev.moods ?? []).some((p) => p.id === m.id));
   if (newMood) lines.push(`${me}在恋人空间写了心情日记：${cut(newMood.text || newMood.emoji, 40)}`);
@@ -1413,6 +1449,138 @@ function aiTickWater(snap: CoupleSnap, me: string, ta: string): void {
   const pid = currentPartnerId;
   if (pid) coupleRemember(pid, currentChannel, `${ta}给两个人的恋爱小树浇水了（成长值到 ${Math.min(100, (snap.tree ?? 0) + 2)}，连续 ${n} 天）`);
   logAi(`${ta}给恋爱小树浇了水 🌱`);
+}
+
+// ---------------- 第六十轮：许愿树留言卡（爱情小树改许愿树） ----------------
+
+/**
+ * AI 在许愿树上挂一张留言卡（每天最多一张；自主决策链 'treecard' 行为）。
+ * 素材 = 人设 + 记忆碎片召回 + 最近微信/QQ 聊天 + 树上已有的卡（防写重）；
+ * 卡片内容 = TA 真心想对对方说的一句手写话（8~36 字）。
+ */
+async function aiTickTreeCard(snap: CoupleSnap, me: string, ta: string, p: TaPersona): Promise<void> {
+  const today = todayKey();
+  if ((snap.treeCardDay ?? '') === today) return;
+  const pid = currentPartnerId;
+  const ch = currentChannel;
+  if (!pid) return;
+  const existing = (snap.treeCards ?? []).slice(0, 6).map((c) => `「${cut(c.text, 30)}」`).join('、');
+  let memBlock = '';
+  try {
+    memBlock = memChatRecallBlock(pid, ch, `${ta}想在许愿树上挂一张写给${me}的留言卡 最近你们聊过什么、有什么想对${me}说的`, { mode: 'private' });
+  } catch {
+    /* 召回失败不影响 */
+  }
+  const chatCtx = recentChatBlock(pid, ch, me, ta);
+  const sys = [
+    llmSystem(p, me, snap),
+    `场景：你们的爱情小树长成了许愿树，树上可以挂一张张手写留言卡，${ta}现在想亲手挂一张上去——正面写一句真心想对${me}说的话。`,
+    memBlock ? `【你们的记忆碎片】\n${cut(memBlock, 500)}` : '',
+    chatCtx ? `【你们最近在微信/QQ里聊过的话题】\n${cut(chatCtx, 300)}` : '',
+    existing ? `树上已经挂过这些卡片（内容不许重复、不许相近）：${existing}` : '',
+  ]
+    .filter(Boolean)
+    .join('\n');
+  let text = '';
+  try {
+    const raw = await llmUserFirst(
+      sys,
+      `输出 JSON：{"text":"卡片上写的这句话"}。要求：8~36 字，${ta}的口吻手写感（可以是一个小小心愿、一句想说的情话、对${me}的承诺或此刻的想念），贴人设/记忆/最近聊过的事，具体不空洞；禁止使用任何 emoji/表情符号。只输出 JSON。`,
+    );
+    const j = extractJson<{ text?: string }>(raw);
+    text = stripEmoji(cut(j?.text ?? '', 40));
+  } catch {
+    /* 生成失败本次不挂 */
+  }
+  if (!text || text.length < 4) return;
+  const card = {
+    id: `ta-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+    from: 'ta' as const,
+    text,
+    at: Date.now(),
+    comments: [] as { id: string; from: 'me' | 'ta'; text: string; at: number }[],
+  };
+  writeSnap((s) => ({
+    ...s,
+    treeCards: [card, ...((s.treeCards as CoupleSnap['treeCards']) ?? [])].slice(0, 30),
+    treeCardDay: today,
+  }));
+  coupleRemember(pid, ch, `${ta}在许愿树上亲手挂了一张留言卡片：「${cut(text, 44)}」`);
+  logAi(`${ta}在许愿树上挂了一张新卡片`);
+  void notifyCouple(ch, pid, `我在许愿树上挂了一张卡片，写了句想给你的话，去看看嘛`);
+}
+
+/** 许愿树卡片留言的 AI 回复定时器（按卡片去重合并） */
+const treeCardTimers = new Map<string, number>();
+
+/**
+ * 我挂了卡片 / 在卡片下留言后：调度 TA（AI）在卡片下回一句（人设+记忆+聊天上下文）。
+ * - 我挂的新卡（还没人留言）→ TA 来当第一个回应的人；
+ * - 我在任意卡片下留了言（最新一条是我）→ TA 回复我；
+ * - 最新一条已经是 TA 说的 / TA 自己的卡还没人说话 → 不出声。
+ * 同一张卡片连发会重置计时（合并到最后一条再回，30~120s）。
+ */
+export function scheduleTreeCardReply(cardId: string, delayMin = 30000, delayMax = 120000): void {
+  const target = aiTarget();
+  if (!target || !cardId) return;
+  const old = treeCardTimers.get(cardId);
+  if (old) window.clearTimeout(old);
+  const t = window.setTimeout(() => {
+    treeCardTimers.delete(cardId);
+    void (async () => {
+      try {
+        const snap = readSnap();
+        if (!snap) return;
+        const card = (snap.treeCards ?? []).find((c) => c.id === cardId);
+        if (!card) return;
+        const last = (card.comments ?? [])[(card.comments ?? []).length - 1];
+        if (card.from === 'ta' && !last) return; // TA 自己的卡还没人说话，不用回
+        if (last && last.from === 'ta') return; // 最新一条已经是 TA 说的
+        const me = (snap.meName || '').trim() || '我';
+        const ta = (snap.taName || '').trim() || 'TA';
+        const p = await taPersonaOf(target.contactId);
+        if (!p) return;
+        currentPartnerId = target.contactId;
+        currentChannel = target.channel;
+        const owner = card.from === 'ta' ? ta : me;
+        const convo = (card.comments ?? []).slice(-6).map((m) => `${m.from === 'ta' ? ta : me}：${cut(m.text, 60)}`).join('\n');
+        let memBlock = '';
+        try {
+          memBlock = memChatRecallBlock(target.contactId, target.channel, `${me}在许愿树的卡片（「${cut(card.text, 30)}」）下面留言 ${ta}想回一句`, { mode: 'private' });
+        } catch {
+          /* 召回失败不影响 */
+        }
+        const chatCtx = recentChatBlock(target.contactId, target.channel, me, ta);
+        let text = '';
+        try {
+          text = await llmUserFirst(
+            `${llmSystem(p, me, snap)}\n场景：你们恋人空间的爱情小树长成了许愿树，树上挂着一张张手写留言卡，卡片下面可以互相留言。这张卡片是${owner === me ? `${me}挂的，正面写着「${cut(card.text, 80)}」` : `${ta}自己挂的，正面写着「${cut(card.text, 80)}」（${ta}当然记得自己写了什么）`}，留言就写在这张卡片下面。${memBlock ? `\n【相关记忆】\n${cut(memBlock, 300)}` : ''}${chatCtx ? `\n【你们最近在微信/QQ里聊过的话题】\n${cut(chatCtx, 360)}` : ''}`,
+            `${convo ? `卡片下最近的留言：\n${convo}\n` : '卡片下还没有人留言，你是第一个回应这张卡的人。\n'}\n请以「${ta}」的口吻在卡片下面留一条言（30 字内，口语）：${
+              card.from === 'me'
+                ? `认真接住${me}写在卡片上的那句话——它对你们意味着什么、你此刻真实的感受或想回应的心里话`
+                : `回应${me}刚刚在你卡片下的留言`
+            }；贴着你的人设、你们的真实记忆和最近聊过的话题说具体的话；绝对禁止敷衍应付（「好啦好啦」「随便」「都行」这类话一个字都不许出现）。禁止使用任何 emoji/表情符号。只输出留言内容。`,
+          );
+        } catch {
+          /* 生成失败保持安静 */
+        }
+        text = stripEmoji(text);
+        if (!text || text.length < 2) return;
+        text = cut(text, 90);
+        const c = { id: `ai-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, from: 'ta' as const, text, at: Date.now() };
+        writeSnap((s) => ({
+          ...s,
+          treeCards: ((s.treeCards as CoupleSnap['treeCards']) ?? []).map((x) => (x.id === cardId ? { ...x, comments: [...(x.comments ?? []), c] } : x)),
+        }));
+        coupleRemember(target.contactId, target.channel, `${ta}在许愿树的卡片（「${cut(card.text, 30)}」）下面回复${me}：${cut(text, 40)}`);
+        logAi(`${ta}在许愿树的卡片下留了言`);
+        void notifyCouple(target.channel, target.contactId, `许愿树有张卡片，我在下面给你回了句话，去看看`);
+      } catch {
+        /* AI 回复失败静默 */
+      }
+    })();
+  }, delayMin + Math.random() * (delayMax - delayMin));
+  treeCardTimers.set(cardId, t);
 }
 
 // 第二十四轮：AI 心情日记的模板兜底已删除（生成失败就不写）
@@ -2382,6 +2550,13 @@ const AUTONOMY_BEHAVIORS: AutonomyBehavior[] = [
     run: (s, me, ta, p) => aiTickLetter(s, me, ta, p),
   },
   {
+    // 第六十轮：许愿树——TA 亲手在树上挂一张写给对方的留言卡
+    key: 'treecard',
+    label: '在许愿树上挂一张亲手写的留言卡（今天挂过了就先不挂）',
+    guard: (s) => (s.treeCardDay ?? '') !== todayKey() && (s.treeCards ?? []).length < 30,
+    run: (s, me, ta, p) => aiTickTreeCard(s, me, ta, p),
+  },
+  {
     key: 'album',
     label: '往相册里放一张自己拍的照片（昨天今天都放过就先不放）',
     guard: (s) => {
@@ -2402,10 +2577,29 @@ function timePeriodNow(): { period: string; hm: string } {
 }
 
 /**
- * 自主决策：让 LLM 以 TA 的身份从「此刻还能做的行为」里挑一件真正想做的（可输出 none）。
- * 返回选中的行为；null = 什么都不做/生成失败（绝不硬凑）。
+ * 自主决策：让 LLM 以 TA 的身份从「此刻还能做的行为」里挑一件真正想做的（可输出 none），
+ * 并且自己决定什么时候做——now 立刻做 / in+N 分钟后做（延时执行，不跟着用户打开 App 走）。
+ * 返回选中的行为与延后分钟数；null = 什么都不做/生成失败（绝不硬凑）。
  */
-async function autonomyDecide(contactId: string, me: string, ta: string): Promise<AutonomyBehavior | null> {
+interface AutonomyDecision {
+  act: AutonomyBehavior;
+  /** AI 自选的延后分钟数（0 = 现在就做） */
+  delayMin: number;
+  why: string;
+}
+
+/** 解析 LLM 的 when 字段：now / in+N / N分钟 / 直接数字 → 延后分钟数（0~180 钳制） */
+function parseWhenValue(w: unknown): number {
+  const s = String(w ?? '').trim().toLowerCase();
+  if (!s || s === 'now' || s === '现在' || s === '立刻' || s === '马上') return 0;
+  const m = s.match(/(\d+)/);
+  if (!m) return 0;
+  const n = Number(m[1]);
+  if (!Number.isFinite(n) || n <= 0) return 0;
+  return Math.min(180, Math.round(n));
+}
+
+async function autonomyDecide(contactId: string, me: string, ta: string): Promise<AutonomyDecision | null> {
   const snap = readSnap();
   if (!snap) return null;
   const avail = AUTONOMY_BEHAVIORS.filter((b) => {
@@ -2437,46 +2631,58 @@ async function autonomyDecide(contactId: string, me: string, ta: string): Promis
     memBlock ? `【你们的记忆碎片】\n${cut(memBlock, 500)}` : '',
     chatBlock ? `【你们最近在微信/QQ里聊过的话题】\n${cut(chatBlock, 260)}` : '',
     `你作为一个真实的恋人，此刻（${period} ${hm}）可以自发地做一件小事。下面是此刻还能做的行为：\n${opts}\n`,
-    `要求：结合现在的时段、你的人设和你们的真实状态，选出你此刻最想做的一件；如果此刻其实什么都不想做（刚做过类似的/时机不对/没心情），就输出 "none"——绝不硬凑、绝不因为能做就做。`,
+    `要求：结合现在的时段、你的人设和你们的真实状态，选出你此刻最想做的一件；什么时候做也由你自己定——现在就想做就输出 "now"，想等一等（比如${me}不在线的时候/晚上安静的时候/过一会儿心血来潮）就输出 "in+分钟数"（1~180）；如果此刻其实什么都不想做（刚做过类似的/时机不对/没心情），就输出 "none"——绝不硬凑、绝不因为能做就做。`,
   ].filter(Boolean).join('\n');
   try {
-    const raw = await llmUserFirst(sys, `输出 JSON：{"do":"行为key或none","why":"一句话理由（≤16字）"}。只输出 JSON。`);
-    const j = extractJson<{ do?: string; why?: string }>(raw);
+    const raw = await llmUserFirst(sys, `输出 JSON：{"do":"行为key或none","when":"now 或 in+N（N=1~180分钟）","why":"一句话理由（≤16字）"}。只输出 JSON。`);
+    const j = extractJson<{ do?: string; when?: string; why?: string }>(raw);
     const key = stripEmoji(String(j?.do ?? '')).trim();
     if (!key || key === 'none') return null;
     const act = avail.find((b) => b.key === key);
     if (!act) return null;
-    logAi(`${ta}自己决定：${act.label.split('（')[0]}${j?.why ? `（${cut(String(j.why), 18)}）` : ''}`);
-    return act;
+    return { act, delayMin: parseWhenValue(j?.when), why: cut(String(j?.why ?? ''), 18) };
   } catch {
     return null;
   }
 }
 
-/** 自主决策链：延时 ms 后唤醒一次 → 决策并执行（成功才扣额度）→ 按剩余额度链式安排下一次 */
+/**
+ * 自主决策链：延时 ms 后唤醒一次 → LLM 决策（做什么 + 什么时候做）→ 按时机执行
+ * （now 立刻执行 / in+N 分钟后延时执行，到点复查 guard，成功才扣额度）→ 链式安排下一次。
+ * 用户反馈「我一打开他就立马做」→ 决策与执行都和「打开 App」脱钩：
+ * 首次唤醒 3~12 分钟、链式间隔 8~22 分钟，做什么/什么时候做全由 LLM 自己定。
+ */
 function autonomyLoop(contactId: string, me: string, ta: string, delayMs: number): void {
   window.setTimeout(() => {
     void (async () => {
       try {
         if (autonomyQuota() > 0) {
-          const act = await autonomyDecide(contactId, me, ta);
-          if (act) {
-            const s = readSnap();
-            const p = await taPersonaOf(contactId);
-            let ok = false;
-            if (s && p) {
+          const decided = await autonomyDecide(contactId, me, ta);
+          if (decided) {
+            const { act, delayMin, why } = decided;
+            /** 到点执行（guard 双保险在行为内部）；成功才扣额度 */
+            const exec = async () => {
+              const s = readSnap();
+              const p = await taPersonaOf(contactId);
+              if (!s || !p) return;
               try {
                 await act.run(s, me, ta, p);
-                ok = true;
+                autonomySpend();
               } catch {
                 /* 单次行为失败不扣额度、不影响链路 */
               }
+            };
+            if (delayMin <= 0) {
+              await exec();
+            } else {
+              // AI 自己选的时间：挂到墙钟上到点再做（页面刷新丢了就丢了——下次决策会重新安排，不重复不硬凑）
+              logAi(`${ta}想好了，${delayMin} 分钟后${act.label.split('（')[0]}${why ? `（${why}）` : ''}`);
+              window.setTimeout(() => void exec(), delayMin * 60000);
             }
-            if (ok) autonomySpend();
           }
         }
-        // 链式下一次唤醒（150~330s）；额度用完自然停
-        if (autonomyQuota() > 0) autonomyLoop(contactId, me, ta, 150000 + Math.random() * 180000);
+        // 链式下一次唤醒（8~22 分钟）；额度用完自然停
+        if (autonomyQuota() > 0) autonomyLoop(contactId, me, ta, 8 * 60000 + Math.random() * 14 * 60000);
       } catch {
         /* 链路异常终止，下次打开恋人空间再续 */
       }
@@ -2484,12 +2690,18 @@ function autonomyLoop(contactId: string, me: string, ta: string, delayMs: number
   }, delayMs);
 }
 
+/** 想你/浇树定时器句柄（同会话只挂一份，防 60s 常驻 kick 反复补挂） */
+let missTimer: number | undefined;
+let waterTimer: number | undefined;
+/** 想你/浇树今天已挂过定时器（本会话内）：防常驻 kick 重复补挂（跨天/刷新自动重置） */
+let dailyCasualArmedFor = '';
+
 /**
  * AI 主动行为总入口：打开恋人空间（建立关系后）时调用。第九轮重写——
- * - 想你/浇树：无 LLM 的小事，独立随机延时（与用户操作无关，绝不跟着用户操作走）；
- * - 其余行为：进入自主决策链（随机唤醒 → LLM 自己决定做不做/做什么 → 执行 → 链式续），
+ * - 想你/浇树：无 LLM 的小事，独立随机延时（分钟级，与用户操作无关，绝不跟着用户操作走）；
+ * - 其余行为：进入自主决策链（随机唤醒 → LLM 自己决定做不做/做什么/什么时候做 → 执行 → 链式续），
  *   每天最多 5 件；开机即起链（PhoneShell 常驻挂 CoupleResidentWatcher，第十四轮起
- *   不再依赖打开恋人空间——刷新/重开手机都会自动续链），首次唤醒 25~90s。
+ *   不再依赖打开恋人空间——刷新/重开手机都会自动续链），首次唤醒 3~12 分钟。
  */
 export function runCoupleAiTick(channel: CoupleChannel, contactId: string): void {
   const snap = readSnap();
@@ -2505,16 +2717,27 @@ export function runCoupleAiTick(channel: CoupleChannel, contactId: string): void
   const me = (snap.meName || '').trim() || '机主';
   const ta = (snap.taName || '').trim() || 'TA';
 
-  // 无 LLM 依赖的日常小事：AI 自己决定什么时候做——随机延时（40~200s / 90~300s），
-  // 与用户是否点过「每天想你」/「浇水」完全无关（用户明确要求）。
-  const missDelayS = (first ? 40 : 25) + Math.random() * (first ? 160 : 120);
-  const waterDelayS = (first ? 90 : 55) + Math.random() * (first ? 210 : 150);
-  window.setTimeout(() => aiTickMissYou(readSnap() ?? snap, me, ta), missDelayS * 1000);
-  window.setTimeout(() => aiTickWater(readSnap() ?? snap, me, ta), waterDelayS * 1000);
+  // 无 LLM 依赖的日常小事：随机延时分钟级（想你 4~28 分钟 / 浇树 8~40 分钟）——
+  // 与用户是否点过「每天想你」/「浇水」、是否刚打开 App 完全无关（用户明确要求
+  // 「让 AI 自己决定什么时候做，不是一打开就立马做」）；本会话只挂一份定时器，
+  // 行为内部当日去重双保险（60s 常驻 kick 不会堆叠出一串定时器）。
+  if (dailyCasualArmedFor !== schedKey) {
+    dailyCasualArmedFor = schedKey;
+    if (missTimer) window.clearTimeout(missTimer);
+    if (waterTimer) window.clearTimeout(waterTimer);
+    missTimer = window.setTimeout(() => {
+      missTimer = undefined;
+      aiTickMissYou(readSnap() ?? snap, me, ta);
+    }, (4 + Math.random() * 24) * 60000);
+    waterTimer = window.setTimeout(() => {
+      waterTimer = undefined;
+      aiTickWater(readSnap() ?? snap, me, ta);
+    }, (8 + Math.random() * 32) * 60000);
+  }
 
-  // 自主决策链：每日首次打开时起链；额度用完（或用过的日子）不起
+  // 自主决策链：每日首次起链（首次唤醒 3~12 分钟）；额度用完（或用过的日子）不起
   if (first && autonomyQuota() > 0) {
-    autonomyLoop(contactId, me, ta, 25000 + Math.random() * 65000);
+    autonomyLoop(contactId, me, ta, 3 * 60000 + Math.random() * 9 * 60000);
   }
 }
 

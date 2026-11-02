@@ -25,15 +25,19 @@ import {
   CalendarClock,
   Flag,
   Image as ImageIcon,
+  Loader2,
   MapPin,
   Maximize2,
   Minimize2,
   Smile,
+  Sparkles,
   Type,
   X,
 } from 'lucide-react';
 import { activeAuthorKey, trendingTopics, forumData, POST_MAX } from '@/lib/forum/core';
 import { renderTextImage, TEXTIMG_MAX_LEN } from '@/lib/forum/textimg';
+import { generateFreePhoto, imgGenConfigReady } from '@/lib/imggen';
+import { useSettings, useUI } from '@/lib/ios/store';
 import { XAvatar, XIcons, useXTheme } from './shared';
 import { useForum } from './ctx';
 
@@ -174,6 +178,12 @@ export function ComposeSheet({
   const [customTopic, setCustomTopic] = useState('');
   /** 文字图片输入（相册弹层第三入口） */
   const [textImgInput, setTextImgInput] = useState('');
+  /** 文字图片弹层模式：'text' = 经典白底文字图；'ai' = AI 生图（自定义提示词→真图） */
+  const [imgMode, setImgMode] = useState<'text' | 'ai'>('text');
+  /** AI 生图：自定义提示词 */
+  const [aiImgPrompt, setAiImgPrompt] = useState('');
+  /** AI 生图进行中 */
+  const [aiImgBusy, setAiImgBusy] = useState(false);
 
   const textRef = useRef<HTMLTextAreaElement | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
@@ -231,6 +241,36 @@ export function ComposeSheet({
   /** 插入表情 */
   const insertEmoji = (e: string) => {
     setText((s) => (s.length + e.length > LIMIT ? s : s + e));
+  };
+
+  /** AI 生图：自定义提示词 → 真图（走全局生图模型配置；未配置给入口引导） */
+  const genAiImage = async () => {
+    const prompt = aiImgPrompt.trim();
+    if (!prompt || aiImgBusy) return;
+    const cfg = useSettings.getState().imgGenConfig;
+    if (!imgGenConfigReady(cfg)) {
+      f.toast('先配置生图模型（设置 › 图像生成）');
+      return;
+    }
+    setAiImgBusy(true);
+    try {
+      const src = await generateFreePhoto(cfg, prompt);
+      addMedia([src]);
+      setSheet(null);
+      setAiImgPrompt('');
+      f.toast('图片已生成，发布后可见');
+    } catch (e) {
+      f.toast(e instanceof Error ? e.message : '生成失败，稍后再试');
+    } finally {
+      setAiImgBusy(false);
+    }
+  };
+
+  /** 跳去系统设置 › 图像生成（配置生图模型） */
+  const gotoImgGenSettings = () => {
+    const ui = useUI.getState();
+    ui.setPendingSettingsPage('imggen');
+    ui.switchToApp('settings');
   };
 
   /** 话题（旗子）：文末追加 #话题# */
@@ -514,7 +554,7 @@ export function ComposeSheet({
               <div className="px-4 pt-3">
                 <p className="pb-1 text-[15px] font-bold">添加图片</p>
                 <p className="pb-3 text-[12px]" style={{ color: t.secondary }}>
-                  从手机相册上传照片，或用文字生成文字图片，最多 {MAX_MEDIA} 张
+                  从手机相册上传照片，或用文字图片 / AI 生图，最多 {MAX_MEDIA} 张
                 </p>
                 <button
                   type="button"
@@ -556,66 +596,177 @@ export function ComposeSheet({
                     <Type width={20} height={20} strokeWidth={SW} />
                   </span>
                   <span className="min-w-0 flex-1">
-                    <span className="block text-[15px] font-bold">文字图片</span>
+                    <span className="block text-[15px] font-bold">文字图片 / AI 生图</span>
                     <span className="block text-[12px]" style={{ color: t.secondary }}>
-                      用文字描述生成图片：白底留白，文字居中
+                      白底居中文字图，或用生图模型按自定义提示词生成真图
                     </span>
                   </span>
                 </button>
               </div>
             )}
 
-            {/* --- 文字图片：白底居中灰字（v9 已移除 iMessage 时间戳行） --- */}
+            {/* --- 文字图片 / AI 生图（模式切换：白底文字图 or 生图模型真图） --- */}
             {sheet === 'textimg' && (
               <div className="px-4 pt-3">
-                <p className="pb-1 text-[15px] font-bold">文字图片</p>
-                <p className="pb-3 text-[12px]" style={{ color: t.secondary }}>
-                  用文字描述生成图片：纯白留白，你的文字居中排布
-                </p>
-                {/* 实时预览（与成品同布局；比例缩小的白底居中灰字卡。
-                    v35：字号 13→22 匹配新渲染比例 46/720≈6.4%，行距同步 1.83） */}
-                <div
-                  className="mb-3 flex aspect-square items-center justify-center rounded-xl border"
-                  style={{ borderColor: t.border, background: '#ffffff' }}
-                  aria-hidden="true"
-                >
-                  <p className="px-6 break-all text-center" style={{ color: '#999997', fontSize: 22, lineHeight: 1.83 }}>
-                    {textImgInput.trim() || '输入文字，生成你的文字图片'}
-                  </p>
-                </div>
-                <textarea
-                  value={textImgInput}
-                  onChange={(e) => setTextImgInput(e.target.value.slice(0, TEXTIMG_MAX_LEN))}
-                  rows={3}
-                  placeholder="用一句文字描述图片，如 伦敦雨季很长，长到能忘记很多人和事。"
-                  className="w-full resize-none rounded-xl px-3 py-[10px] text-[15px] outline-none"
-                  style={{ background: t.dark ? '#202327' : '#eff3f4', color: t.text, caretColor: t.blue }}
-                  aria-label="文字图片内容"
-                />
-                <div className="mt-3 flex items-center justify-between pb-1">
-                  <span className="text-[12px]" style={{ color: t.secondary }}>
-                    {textImgInput.length}/{TEXTIMG_MAX_LEN} 字，超出自动换行居中
-                  </span>
-                  <button
-                    type="button"
-                    disabled={!textImgInput.trim()}
-                    onClick={() => {
-                      try {
-                        const url = renderTextImage(textImgInput);
-                        addMedia([url]);
-                        setSheet(null);
-                        setTextImgInput('');
-                        f.toast('文字图片已生成，发布后可见');
-                      } catch {
-                        f.toast('生成失败，稍后再试');
-                      }
-                    }}
-                    className="rounded-full px-5 py-2 text-[14px] font-bold text-white transition-opacity active:opacity-70 disabled:opacity-40"
-                    style={{ background: t.blue }}
+                <div className="flex items-center justify-between gap-3 pb-3">
+                  <div className="min-w-0">
+                    <p className="text-[15px] font-bold">{imgMode === 'text' ? '文字图片' : 'AI 生图'}</p>
+                    <p className="text-[12px]" style={{ color: t.secondary }}>
+                      {imgMode === 'text' ? '用文字描述生成图片：纯白留白，文字居中排布' : '自定义提示词，用生图模型生成真实图片'}
+                    </p>
+                  </div>
+                  {/* 模式切换胶囊 */}
+                  <div
+                    className="flex shrink-0 rounded-full p-[3px]"
+                    style={{ background: t.dark ? '#202327' : '#eff3f4' }}
+                    role="tablist"
+                    aria-label="图片生成方式"
                   >
-                    生成并添加
-                  </button>
+                    {([
+                      { key: 'text', label: '文字图片', icon: <Type width={13} height={13} strokeWidth={2.2} /> },
+                      { key: 'ai', label: 'AI 生图', icon: <Sparkles width={13} height={13} strokeWidth={2.2} /> },
+                    ] as const).map((m) => (
+                      <button
+                        key={m.key}
+                        type="button"
+                        role="tab"
+                        aria-selected={imgMode === m.key}
+                        onClick={() => setImgMode(m.key)}
+                        className="flex items-center gap-1 rounded-full px-3 py-[6px] text-[12.5px] font-bold transition-all"
+                        style={
+                          imgMode === m.key
+                            ? { background: t.blue, color: '#fff' }
+                            : { color: t.secondary }
+                        }
+                      >
+                        {m.icon}
+                        {m.label}
+                      </button>
+                    ))}
+                  </div>
                 </div>
+
+                {imgMode === 'text' ? (
+                  <>
+                    {/* 实时预览（与成品同布局；比例缩小的白底居中灰字卡。
+                        v35：字号 13→22 匹配新渲染比例 46/720≈6.4%，行距同步 1.83） */}
+                    <div
+                      className="mb-3 flex aspect-square items-center justify-center rounded-xl border"
+                      style={{ borderColor: t.border, background: '#ffffff' }}
+                      aria-hidden="true"
+                    >
+                      <p className="px-6 break-all text-center" style={{ color: '#999997', fontSize: 22, lineHeight: 1.83 }}>
+                        {textImgInput.trim() || '输入文字，生成你的文字图片'}
+                      </p>
+                    </div>
+                    <textarea
+                      value={textImgInput}
+                      onChange={(e) => setTextImgInput(e.target.value.slice(0, TEXTIMG_MAX_LEN))}
+                      rows={3}
+                      placeholder="用一句文字描述图片，如 伦敦雨季很长，长到能忘记很多人和事。"
+                      className="w-full resize-none rounded-xl px-3 py-[10px] text-[15px] outline-none"
+                      style={{ background: t.dark ? '#202327' : '#eff3f4', color: t.text, caretColor: t.blue }}
+                      aria-label="文字图片内容"
+                    />
+                    <div className="mt-3 flex items-center justify-between pb-1">
+                      <span className="text-[12px]" style={{ color: t.secondary }}>
+                        {textImgInput.length}/{TEXTIMG_MAX_LEN} 字，超出自动换行居中
+                      </span>
+                      <button
+                        type="button"
+                        disabled={!textImgInput.trim()}
+                        onClick={() => {
+                          try {
+                            const url = renderTextImage(textImgInput);
+                            addMedia([url]);
+                            setSheet(null);
+                            setTextImgInput('');
+                            f.toast('文字图片已生成，发布后可见');
+                          } catch {
+                            f.toast('生成失败，稍后再试');
+                          }
+                        }}
+                        className="rounded-full px-5 py-2 text-[14px] font-bold text-white transition-opacity active:opacity-70 disabled:opacity-40"
+                        style={{ background: t.blue }}
+                      >
+                        生成并添加
+                      </button>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    {/* 生图模型状态 */}
+                    {(() => {
+                      const cfg = useSettings.getState().imgGenConfig;
+                      const ready = imgGenConfigReady(cfg);
+                      return (
+                        <div
+                          className="mb-3 flex items-center gap-2.5 rounded-xl px-3 py-[10px]"
+                          style={{ background: t.dark ? '#202327' : '#eff3f4' }}
+                        >
+                          <span
+                            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full"
+                            style={{
+                              background: ready ? 'rgba(52,199,89,0.14)' : 'rgba(255,159,10,0.14)',
+                              color: ready ? '#34c759' : '#ff9f0a',
+                            }}
+                            aria-hidden="true"
+                          >
+                            <Sparkles width={16} height={16} strokeWidth={2.1} />
+                          </span>
+                          <div className="min-w-0 flex-1">
+                            <p className="text-[13px] font-bold leading-tight">
+                              {ready ? cfg.model : '生图模型未配置'}
+                            </p>
+                            <p className="text-[11.5px] leading-tight" style={{ color: t.secondary }}>
+                              {ready ? '已就绪 · 提示词会自动拼接全局补充词' : '在系统设置 › 图像生成里填好模型即可用'}
+                            </p>
+                          </div>
+                          {!ready && (
+                            <button
+                              type="button"
+                              onClick={gotoImgGenSettings}
+                              className="shrink-0 rounded-full px-3 py-[6px] text-[12px] font-bold text-white"
+                              style={{ background: t.blue }}
+                            >
+                              去设置
+                            </button>
+                          )}
+                        </div>
+                      );
+                    })()}
+                    <textarea
+                      value={aiImgPrompt}
+                      onChange={(e) => setAiImgPrompt(e.target.value.slice(0, 400))}
+                      rows={4}
+                      placeholder="自定义提示词，描述想要的画面，如 黄昏的咖啡厅窗边，暖光落在木桌上，一杯拿铁冒着热气，窗外雨刚停"
+                      className="w-full resize-none rounded-xl px-3 py-[10px] text-[15px] outline-none"
+                      style={{ background: t.dark ? '#202327' : '#eff3f4', color: t.text, caretColor: t.blue }}
+                      aria-label="AI 生图提示词"
+                    />
+                    <div className="mt-3 flex items-center justify-between pb-1">
+                      <span className="text-[12px]" style={{ color: t.secondary }}>
+                        {aiImgPrompt.length}/400 字 · 生成约需十几秒
+                      </span>
+                      <button
+                        type="button"
+                        disabled={!aiImgPrompt.trim() || aiImgBusy}
+                        onClick={() => void genAiImage()}
+                        className="flex items-center gap-1.5 rounded-full px-5 py-2 text-[14px] font-bold text-white transition-opacity active:opacity-70 disabled:opacity-40"
+                        style={{ background: t.blue }}
+                      >
+                        {aiImgBusy ? (
+                          <>
+                            <Loader2 width={15} height={15} strokeWidth={2.2} className="animate-spin" aria-hidden="true" />
+                            生成中…
+                          </>
+                        ) : (
+                          '生成并添加'
+                        )}
+                      </button>
+                    </div>
+                  </>
+                )}
               </div>
             )}
 

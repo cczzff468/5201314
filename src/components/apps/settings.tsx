@@ -6199,7 +6199,19 @@ function FontPage({ onBack }: { onBack: () => void }) {
 // ---------------- 根组件 ----------------
 
 export default function SettingsApp() {
-  const [page, setPage] = useState<Page>('root');
+  // 跨 App 跳转（X 论坛「生图模型」入口等）：别的 App switchToApp('settings') 前写入
+  // pendingSettingsPage，这里挂载时读取直接进对应设置页（如 imggen 图像生成）。
+  // 消费清空放到挂载后的 effect 里——渲染期间写 store 会触发「渲染中更新其它组件」告警。
+  const [page, setPage] = useState<Page>(() => {
+    const pending = useUI.getState().pendingSettingsPage;
+    if (pending && ['root', 'account', 'profile', 'theme', 'notification', 'storage', 'wallpaper', 'font', 'api', 'vision', 'imggen', 'voice', 'about', 'lock'].includes(pending)) {
+      return pending as Page;
+    }
+    return 'root';
+  });
+  useEffect(() => {
+    if (useUI.getState().pendingSettingsPage) useUI.getState().setPendingSettingsPage(null);
+  }, []);
 
   return (
     <IOSScreen className="relative">

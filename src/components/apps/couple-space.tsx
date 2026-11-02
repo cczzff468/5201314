@@ -110,7 +110,7 @@ import {
 } from '@/lib/ios/couple-invite';
 // 第十六轮：AI 情绪系统（TA 头像下的心情小胶囊）
 import { aiMoodOf, MOOD_DISPLAY } from '@/lib/ios/ai-mood';
-import { aiAnswerWithMe, aiCommentOnPhoto, aiCommentOnPhotoLazy, aiDecideCouplePhoto, aiReplyPickForLevel, aiReplyVerdict, aiStatusPick, aiTickTrail, aiTrailFeed, aiZodiacReading, coupleMemoryDiff, coupleRemember, genReplyLevels, pokeTaDiary, rememberStatusExam, runCoupleAiTick, scheduleAiReply, syncLocFromContacts, trailSortMs, isGenPhoto, isTextPhoto, photoSrc, type CouplePhotoEntry, type CoupleTextPhoto, type CoupleTrailRec, type DynReplyLevel } from '@/lib/ios/couple-ai';
+import { aiAnswerWithMe, aiCommentOnPhoto, aiCommentOnPhotoLazy, aiDecideCouplePhoto, aiReplyPickForLevel, aiReplyVerdict, aiStatusPick, aiTickTrail, aiTrailFeed, aiZodiacReading, coupleMemoryDiff, coupleRemember, genReplyLevels, pokeTaDiary, rememberStatusExam, runCoupleAiTick, scheduleAiReply, scheduleTreeCardReply, syncLocFromContacts, trailSortMs, isGenPhoto, isTextPhoto, photoSrc, type CouplePhotoEntry, type CoupleTextPhoto, type CoupleTrailRec, type DynReplyLevel } from '@/lib/ios/couple-ai';
 import { HUNDRED_LIST } from '@/lib/ios/couple-hundred';
 import { consumePendingPactOpen, COUPLE_PACT_NAV_EVENT, patchPactCardsWhere, peekPendingPactOpen, scheduleAiPactDecision, sendPactCard } from '@/lib/ios/couple-pact-share';
 import { consumePendingExamOpen, COUPLE_EXAM_NAV_EVENT, peekPendingExamOpen, scheduleAiExamAnswer, sendExamCard } from '@/lib/ios/couple-exam-share';
@@ -152,6 +152,23 @@ interface CouplePlace {
   name: string; // 展示名（如「北京市」）
   lat: number;
   lng: number;
+}
+
+/** 许愿树卡片下的留言（第六十轮：卡片正文 + 卡片下双向留言区） */
+export interface TreeCardComment {
+  id: string;
+  from: 'me' | 'ta';
+  text: string;
+  at: number;
+}
+
+/** 许愿树留言卡（第六十轮：爱情小树改许愿树——树上挂卡片，点开看正文+留言） */
+export interface TreeCard {
+  id: string;
+  from: 'me' | 'ta';
+  text: string;
+  at: number;
+  comments: TreeCardComment[];
 }
 
 /** 已保存的恋爱协议书（签署生效后自动存档；可多份，可点击回看；第十二轮支持分享/待对方签署） */
@@ -237,6 +254,8 @@ export interface CoupleState {
   replies: { id: string; prompt: string; reply: string; at: number }[]; // 回复挑战（旧版自由回复存档）
   replyBest: number | null; // 回复挑战历史最佳（到达关数，12=通关；第七轮玩法）
   treeStreak: { last: string | null; n: number }; // 爱情树：我连续浇树（last=最近浇水日）
+  treeCards: TreeCard[]; // 许愿树留言卡（第六十轮：最新在前，最多 30 张）
+  treeCardDay?: string; // TA（AI）挂卡去重（每天最多一张）
   taMissYou: number; // TA（AI）想你累计（第九轮：AI 每天想你）
   taMissYouByDay: Record<string, number>; // TA 每日想你
   taTreeStreak: { last: string | null; n: number }; // TA 连续浇树
@@ -343,6 +362,8 @@ function defaultState(): CoupleState {
     replies: [],
     replyBest: null,
     treeStreak: { last: null, n: 0 },
+    treeCards: [],
+    treeCardDay: undefined,
     taMissYou: 0,
     taMissYouByDay: {},
     taTreeStreak: { last: null, n: 0 },
@@ -1719,7 +1740,7 @@ function HomePage(props: {
       {/* 底部固定四功能卡（不随内容滚动，始终贴在 Tab 栏上方；第二十五轮：浅灰白圆角矩形风） */}
       <div className="relative z-10 grid shrink-0 grid-cols-4 gap-2 px-3 pb-3 pt-2">
         {([
-          { key: 'tree', label: '爱情小树\n成长记', icon: <Sprout className="h-6 w-6 text-[#3c3c42] dark:text-zinc-200" strokeWidth={1.9} /> },
+          { key: 'tree', label: '许愿树\n成长记', icon: <Sprout className="h-6 w-6 text-[#3c3c42] dark:text-zinc-200" strokeWidth={1.9} /> },
           { key: 'track', label: '情侣轨迹', icon: <Compass className="h-6 w-6 text-[#3c3c42] dark:text-zinc-200" strokeWidth={1.9} /> },
           { key: 'quiz', label: '甜蜜\n小问答', icon: <MessageCircleHeart className="h-6 w-6 text-[#3c3c42] dark:text-zinc-200" strokeWidth={1.9} /> },
           { key: 'letters', label: '情书', icon: <BookHeart className="h-6 w-6 text-[#3c3c42] dark:text-zinc-200" strokeWidth={1.9} /> },
@@ -2355,7 +2376,7 @@ function SubRouter(props: {
 
   switch (sub) {
     case 'tree':
-      return <TreePage state={state} waterTree={waterTree} close={close} showToast={showToast} />;
+      return <TreePage state={state} patch={patch} waterTree={waterTree} close={close} showToast={showToast} />;
     case 'track':
       return <TrackPage state={state} patch={patch} days={days} close={close} showToast={showToast} />;
     case 'quiz':
@@ -2770,8 +2791,171 @@ function LoveTree({ stage }: { stage: number }) {
   );
 }
 
-/** 爱情小树成长记（参考图：全屏游戏场景）——顶部悬挂木牌（等级星+进度+连续浇树）+ 草地小树（SVG 成长）+ 化肥浇水气泡 */
-function TreePage({ state, waterTree, close, showToast }: { state: CoupleState; waterTree: () => void; close: () => void; showToast: (m: string) => void }) {
+/** 许愿树挂卡锚点（树冠上的挂点，百分比定位；可见卡数随成长 stage 增加——越长越能挂） */
+const TREE_CARD_SLOTS: { x: number; y: number; r: number }[] = [
+  { x: 27, y: 36, r: -7 },
+  { x: 70, y: 32, r: 6 },
+  { x: 48, y: 19, r: -4 },
+  { x: 14, y: 55, r: 8 },
+  { x: 85, y: 52, r: -6 },
+  { x: 40, y: 64, r: 5 },
+  { x: 63, y: 74, r: -8 },
+];
+
+/** 许愿树上挂的留言卡小卡（树冠锚点 + 挂绳 + 彩纸；点击进详情看正文+留言） */
+function TreeCardChip({ card, x, y, r, onClick }: { card: TreeCard; x: number; y: number; r: number; onClick: () => void }) {
+  const mine = card.from === 'me';
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={`查看${mine ? '我' : 'TA'}挂的留言卡片`}
+      className="absolute z-10 transition-transform duration-150 active:scale-90"
+      style={{ left: `${x}%`, top: `${y}%`, transform: `translate(-50%, -50%) rotate(${r}deg)` }}
+    >
+      {/* 挂绳 */}
+      <span aria-hidden="true" className="absolute bottom-full left-1/2 mb-[2px] h-[16px] w-[2px] -translate-x-1/2 rounded bg-[#8a5a2e]/70" />
+      {/* 卡纸（我=粉 / TA=米黄） */}
+      <span
+        className="relative flex w-[76px] flex-col gap-[2px] rounded-[6px] border px-[6px] py-[5px] text-left shadow-[0_3px_8px_rgba(80,60,40,0.30)]"
+        style={
+          mine
+            ? { background: 'linear-gradient(180deg,#fff1f5,#ffdce7)', borderColor: '#f2b3c5', color: '#8c4257' }
+            : { background: 'linear-gradient(180deg,#fff9e2,#ffefb9)', borderColor: '#e2c05c', color: '#7c5a17' }
+        }
+      >
+        <span className="line-clamp-2 break-all text-[9.5px] font-semibold leading-[1.35]">{card.text}</span>
+        <span className="flex items-center justify-between">
+          <span className="text-[8px] font-bold leading-none">{mine ? '我挂的' : 'TA挂的'}</span>
+          {(card.comments?.length ?? 0) > 0 && (
+            <span className="flex items-center gap-[1px] text-[8px] font-bold leading-none opacity-85">
+              <MessageSquare className="h-[7px] w-[7px]" strokeWidth={2.6} aria-hidden="true" />
+              {card.comments.length}
+            </span>
+          )}
+        </span>
+      </span>
+    </button>
+  );
+}
+
+/** 许愿树卡片详情弹层：卡片正文 + 卡片下双向留言区（我留言 → TA 接话；TA 留言 → 我接话） */
+function TreeCardDetail({
+  card,
+  meName,
+  taName,
+  onClose,
+  onSend,
+}: {
+  card: TreeCard;
+  meName: string;
+  taName: string;
+  onClose: () => void;
+  onSend: (text: string) => void;
+}) {
+  const [input, setInput] = useState('');
+  const mine = card.from === 'me';
+  const owner = mine ? meName || '我' : taName || 'TA';
+  const send = () => {
+    const t = input.trim();
+    if (!t) return;
+    onSend(t);
+    setInput('');
+  };
+  return (
+    <div className="absolute inset-0 z-40 flex items-center justify-center px-6" role="dialog" aria-label="留言卡片详情">
+      <button type="button" aria-label="关闭" onClick={onClose} className="absolute inset-0 bg-black/45 backdrop-blur-[2px]" />
+      <div className="relative flex max-h-[80%] w-full max-w-[320px] flex-col overflow-hidden rounded-2xl bg-white shadow-[0_18px_50px_rgba(0,0,0,0.35)] dark:bg-zinc-900">
+        {/* 卡片正文（彩纸） */}
+        <div className="shrink-0 px-4 pb-3 pt-4">
+          <div
+            className="rounded-2xl border-2 px-4 py-5"
+            style={
+              mine
+                ? { background: 'linear-gradient(180deg,#fff1f5,#ffdbe6)', borderColor: '#f2b3c5', color: '#8c4257' }
+                : { background: 'linear-gradient(180deg,#fff9e2,#ffefb9)', borderColor: '#e2c05c', color: '#7c5a17' }
+            }
+          >
+            <p className="break-all text-[15px] font-semibold leading-[1.7]">{card.text}</p>
+            <p className="mt-3 text-right text-[11px] font-bold opacity-75">
+              {owner} 挂的 · {fmtDate(card.at)}
+            </p>
+          </div>
+        </div>
+        {/* 留言区（卡片正文下面的双向留言） */}
+        <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-2">
+          <p className="sticky top-0 z-[1] bg-white pb-1.5 pt-0.5 text-[11px] font-bold text-zinc-400 dark:bg-zinc-900 dark:text-zinc-500">
+            卡片下的留言 · {(card.comments ?? []).length}
+          </p>
+          {(card.comments ?? []).length === 0 && (
+            <p className="py-5 text-center text-[12.5px] leading-relaxed text-zinc-400 dark:text-zinc-500">
+              还没有留言——{mine ? 'TA 会看到你挂的这张卡片，也可能会来下面留言' : '给 TA 挂的这张卡片回一句话吧'}
+            </p>
+          )}
+          {(card.comments ?? []).map((m) => {
+            const mMine = m.from === 'me';
+            const who = mMine ? meName || '我' : taName || 'TA';
+            return (
+              <div key={m.id} className="flex items-start gap-2 py-[6px]">
+                <span
+                  className={`mt-[2px] flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[12px] font-bold ${
+                    mMine ? 'bg-[#ffdce7] text-[#8c4257]' : 'bg-[#ffefb9] text-[#7c5a17]'
+                  }`}
+                  aria-hidden="true"
+                >
+                  {who.slice(0, 1)}
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p className="text-[10.5px] font-semibold leading-tight text-zinc-400 dark:text-zinc-500">
+                    {who} · {fmtDate(m.at).slice(5)}
+                  </p>
+                  <p className="mt-[1px] break-all text-[13.5px] leading-relaxed text-zinc-800 dark:text-zinc-100">{m.text}</p>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+        {/* 输入行 */}
+        <div className="flex shrink-0 items-center gap-2 border-t border-zinc-200 px-3 py-2.5 dark:border-zinc-700">
+          <input
+            value={input}
+            onChange={(e) => setInput(e.target.value.slice(0, 90))}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') send();
+            }}
+            placeholder="在卡片下留一句话…"
+            className="min-w-0 flex-1 rounded-full bg-zinc-100 px-3.5 py-2 text-[13.5px] outline-none dark:bg-zinc-800 dark:text-zinc-100"
+            aria-label="卡片留言输入"
+          />
+          <button
+            type="button"
+            onClick={send}
+            disabled={!input.trim()}
+            aria-label="发送留言"
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[linear-gradient(135deg,#ff7a9c,#f2536a)] text-white shadow-[0_3px_10px_rgba(242,83,106,0.30)] transition-transform active:scale-95 disabled:opacity-40"
+          >
+            <ArrowUp className="h-[18px] w-[18px]" strokeWidth={2.4} />
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** 爱情小树成长记 · 许愿树版（第六十轮重做）——顶部悬挂木牌（等级星+进度+连续浇树）+ 许愿大树（树上挂留言卡：TA 会按人设/记忆/上下文自己挂卡与留言）+ 浇水/挂卡/全部卡片底栏 */
+function TreePage({
+  state,
+  patch,
+  waterTree,
+  close,
+  showToast,
+}: {
+  state: CoupleState;
+  patch: (p: Partial<CoupleState> | ((prev: CoupleState) => Partial<CoupleState>)) => void;
+  waterTree: () => void;
+  close: () => void;
+  showToast: (m: string) => void;
+}) {
   const tree = state.tree;
   const level = Math.max(1, Math.min(5, Math.ceil(tree / 20) || 1));
   const inLevel = tree >= 100 ? 20 : tree - (level - 1) * 20;
@@ -2797,6 +2981,39 @@ function TreePage({ state, waterTree, close, showToast }: { state: CoupleState; 
   }, [state.taTreeStreak]);
   const taWateredToday = state.taTreeStreak?.last === today;
   const [pop, setPop] = useState(0);
+
+  // ---- 许愿树：卡片与弹层状态 ----
+  const cards = state.treeCards ?? [];
+  const visibleN = Math.min(2 + stage, TREE_CARD_SLOTS.length); // 成长值越高树上能挂越多（2→6 张）
+  const [composing, setComposing] = useState(false);
+  const [draft, setDraft] = useState('');
+  const [openId, setOpenId] = useState<string | null>(null);
+  const [listOpen, setListOpen] = useState(false);
+  const openCard = cards.find((c) => c.id === openId) ?? null;
+
+  /** 挂一张我的许愿卡（写进记忆让 TA 知道；TA 会来卡片下留言回应） */
+  const hangCard = () => {
+    const text = draft.trim().slice(0, 60);
+    if (!text) return;
+    const id = `me-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    patch((prev) => ({
+      treeCards: [{ id, from: 'me' as const, text, at: Date.now(), comments: [] }, ...(prev.treeCards ?? [])].slice(0, 30),
+    }));
+    setComposing(false);
+    setDraft('');
+    setPop((p) => p + 1);
+    showToast('卡片挂上许愿树啦，TA 会看到 ♡');
+    scheduleTreeCardReply(id);
+  };
+
+  /** 在卡片下留言（TA 会按人设/记忆/上下文接话回复） */
+  const commentCard = (cardId: string, text: string) => {
+    const c = { id: `me-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, from: 'me' as const, text: text.slice(0, 90), at: Date.now() };
+    patch((prev) => ({
+      treeCards: (prev.treeCards ?? []).map((x) => (x.id === cardId ? { ...x, comments: [...x.comments, c] } : x)),
+    }));
+    scheduleTreeCardReply(cardId);
+  };
 
   return (
     <div className="relative flex h-full flex-col overflow-hidden bg-[linear-gradient(180deg,#bfe9fb_0%,#d8f4fd_38%,#eefaf7_62%,#dff0d0_100%)] dark:bg-[linear-gradient(180deg,#0e1a22_0%,#101d24_38%,#0f1c18_62%,#0f1a12_100%)]">
@@ -2902,82 +3119,193 @@ function TreePage({ state, waterTree, close, showToast }: { state: CoupleState; 
         </div>
       )}
 
-      {/* ===== 中部场景 ===== */}
+      {/* ===== 中部：许愿树 + 挂卡 ===== */}
       <div className="relative z-10 flex-1">
-        {/* 左侧滑动箭头（装饰） */}
+        {/* 许愿树（SVG 成长树 + 树冠挂卡 + 泥土堆） */}
+        <div className="absolute bottom-[104px] left-1/2 -translate-x-1/2">
+          <div className="relative h-[290px] w-[330px]">
+            {/* 树本体 */}
+            <span key={pop} className="absolute bottom-0 left-1/2 -translate-x-1/2 block h-[252px] w-[210px] [animation:couple-pop-heart_.5s_ease-out]">
+              <LoveTree stage={stage} />
+            </span>
+            {/* 泥土堆 */}
+            <span aria-hidden="true" className="absolute bottom-[-6px] left-1/2 h-6 w-[92px] -translate-x-1/2 rounded-[50%] bg-[linear-gradient(180deg,#9a6b3d,#7c5227)] shadow-[0_4px_10px_rgba(80,50,20,0.35)]" />
+            {/* 挂卡（最新 visibleN 张；点开看正文+留言；小树时卡片挂低、繁茂大树挂高） */}
+            {cards.slice(0, visibleN).map((c, i) => {
+              const slot = TREE_CARD_SLOTS[i % TREE_CARD_SLOTS.length];
+              const sag = (4 - stage) * 5; // 成长值低 → 卡片挂得低（贴着树苗）；满级挂进树冠
+              return <TreeCardChip key={c.id} card={c} x={slot.x} y={slot.y + sag} r={slot.r} onClick={() => setOpenId(c.id)} />;
+            })}
+            {/* 空树提示 */}
+            {cards.length === 0 && (
+              <div className="absolute left-1/2 top-[6%] z-10 -translate-x-1/2 whitespace-nowrap rounded-full bg-white/90 dark:bg-zinc-800/92 px-3.5 py-1.5 text-[11.5px] font-semibold text-[#8c4257] shadow-[0_3px_10px_rgba(140,66,87,0.18)] backdrop-blur-sm [animation:couple-float-y_2.6s_ease-in-out_infinite]">
+                树上还空着——挂一张卡片，许个愿吧 ♡
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* ===== 底部操作栏：浇水 / 挂许愿卡 / 全部卡片 ===== */}
+      <div className="relative z-20 flex shrink-0 items-center justify-center gap-5 px-6 pb-[34px] pt-2">
+        {/* 水滴浇水按钮 */}
         <button
           type="button"
-          onClick={() => showToast('左右滑动可以看看小树的成长变化')}
-          aria-label="切换视角"
-          className="absolute left-0 top-[46%] flex h-14 w-8 items-center justify-center rounded-r-2xl bg-black/15 text-white backdrop-blur-[1px] transition-opacity active:opacity-60"
+          onClick={() => {
+            waterTree();
+            setPop((p) => p + 1);
+          }}
+          disabled={tree >= 100}
+          aria-label="给许愿树浇水"
+          className="flex h-[62px] w-[62px] shrink-0 items-center justify-center rounded-full bg-white/95 dark:bg-zinc-800/95 shadow-[0_5px_16px_rgba(90,130,60,0.3)] transition-transform active:scale-[0.94] disabled:opacity-60 [animation:couple-float-y_2.6s_ease-in-out_infinite]"
         >
-          <svg viewBox="0 0 24 24" className="h-6 w-6" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round">
-            <path d="M9 5l7 7-7 7" />
+          <svg viewBox="0 0 24 24" className="h-9 w-9" aria-hidden="true">
+            <path d="M12 2.6 C12 2.6 5.2 10.4 5.2 15 A6.8 6.8 0 0 0 18.8 15 C18.8 10.4 12 2.6 12 2.6 Z" fill="url(#dropg)" stroke="#4f9bd2" strokeWidth="1.2" />
+            <defs>
+              <linearGradient id="dropg" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0" stopColor="#b5e3fa" />
+                <stop offset="1" stopColor="#6cb7e8" />
+              </linearGradient>
+            </defs>
+            <path d="M8.8 15.2 A3.2 3.2 0 0 0 10.8 18" stroke="#ffffff" strokeWidth="1.6" fill="none" strokeLinecap="round" />
+            <circle cx="9.4" cy="12.4" r="0.9" fill="#ffffff" opacity="0.9" />
           </svg>
         </button>
-
-        {/* 小树 + 泥土堆（SVG 成长树） */}
-        <div className="absolute bottom-[26px] left-1/2 -translate-x-1/2 text-center">
-          <span key={pop} className="mx-auto block h-[218px] w-[200px] [animation:couple-pop-heart_.5s_ease-out]">
-            <LoveTree stage={stage} />
-          </span>
-          {/* 泥土堆 */}
-          <span aria-hidden="true" className="mx-auto -mt-6 block h-6 w-[92px] rounded-[50%] bg-[linear-gradient(180deg,#9a6b3d,#7c5227)] shadow-[0_4px_10px_rgba(80,50,20,0.35)]" />
-          <span aria-hidden="true" className="mx-auto -mt-5 block h-3.5 w-[70px] rounded-[50%] bg-[#b07f4a]" />
-        </div>
-
-        {/* 水滴浇水按钮（点击浇水） */}
+        {/* 挂许愿卡（主按钮） */}
         <button
           type="button"
-          onClick={() => {
-            waterTree();
-            setPop((p) => p + 1);
-          }}
-          disabled={tree >= 100}
-          aria-label="用小水滴给小树浇水"
-          className="absolute bottom-[146px] left-[31%] flex flex-col items-center transition-transform active:scale-[0.94] disabled:opacity-60"
+          onClick={() => setComposing(true)}
+          aria-label="挂一张许愿卡"
+          className="flex h-[52px] shrink-0 items-center gap-1.5 rounded-full border-[3px] border-[#8a5a2e] bg-[linear-gradient(180deg,#ffd94d,#ffb62e)] px-6 text-[15px] font-extrabold text-[#5f3d18] shadow-[0_6px_16px_rgba(220,150,30,0.5)] transition-transform active:scale-95"
         >
-          <span className="relative flex h-[62px] w-[62px] items-center justify-center rounded-full bg-white/95 dark:bg-zinc-800/95 shadow-[0_5px_16px_rgba(90,130,60,0.3)] [animation:couple-float-y_2.6s_ease-in-out_infinite]">
-            <svg viewBox="0 0 24 24" className="h-9 w-9" aria-hidden="true">
-              <path d="M12 2.6 C12 2.6 5.2 10.4 5.2 15 A6.8 6.8 0 0 0 18.8 15 C18.8 10.4 12 2.6 12 2.6 Z" fill="url(#dropg)" stroke="#4f9bd2" strokeWidth="1.2" />
-              <defs>
-                <linearGradient id="dropg" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0" stopColor="#b5e3fa" />
-                  <stop offset="1" stopColor="#6cb7e8" />
-                </linearGradient>
-              </defs>
-              <path d="M8.8 15.2 A3.2 3.2 0 0 0 10.8 18" stroke="#ffffff" strokeWidth="1.6" fill="none" strokeLinecap="round" />
-              <circle cx="9.4" cy="12.4" r="0.9" fill="#ffffff" opacity="0.9" />
-            </svg>
-            {/* 气泡尾巴 */}
-            <span aria-hidden="true" className="absolute -bottom-2 left-3.5 h-4 w-4 rotate-45 rounded-[3px] bg-white/95 dark:bg-zinc-800/95" />
-          </span>
+          <Plus className="h-5 w-5" strokeWidth={3} aria-hidden="true" />
+          挂许愿卡
         </button>
-
-        {/* 化肥浇水气泡 */}
+        {/* 全部卡片 */}
         <button
           type="button"
-          onClick={() => {
-            waterTree();
-            setPop((p) => p + 1);
-          }}
-          disabled={tree >= 100}
-          aria-label="给小树浇水"
-          className="absolute bottom-[142px] left-[56%] flex flex-col items-center transition-transform active:scale-[0.94] disabled:opacity-60"
+          onClick={() => setListOpen(true)}
+          aria-label="查看全部留言卡"
+          className="relative flex h-[62px] w-[62px] shrink-0 flex-col items-center justify-center rounded-2xl border-[3px] border-[#8a5a2e] bg-[linear-gradient(180deg,#c99a55,#b07f3e)] text-white shadow-[0_5px_14px_rgba(120,80,30,0.4)] transition-transform active:scale-95"
         >
-          <span className="relative flex h-[74px] w-[74px] items-center justify-center rounded-full bg-white/95 dark:bg-zinc-800/95 shadow-[0_5px_16px_rgba(90,130,60,0.3)]">
-            {/* 化肥罐 */}
-            <span className="flex h-11 w-12 items-center justify-center rounded-[10px_10px_14px_14px] bg-[linear-gradient(180deg,#c99456,#a26b32)] text-[11px] font-extrabold text-[#5f3d18] shadow-inner ring-2 ring-[#8a5a2e]/40">
-              <span className="relative -mt-1 block">
-                化肥
-                <span aria-hidden="true" className="absolute -top-2.5 left-1/2 h-1.5 w-6 -translate-x-1/2 rounded-t-sm bg-[#7c5227]" />
-              </span>
-            </span>
-            {/* 气泡尾巴 */}
-            <span aria-hidden="true" className="absolute -bottom-2 left-4 h-4 w-4 rotate-45 rounded-[3px] bg-white/95 dark:bg-zinc-800/95" />
-          </span>
+          <MessageSquare className="h-6 w-6" strokeWidth={2.2} aria-hidden="true" />
+          <span className="mt-[3px] text-[9px] font-bold leading-none">{cards.length} 张卡</span>
         </button>
       </div>
+
+      {/* ===== 挂卡弹层 ===== */}
+      {composing && (
+        <div className="absolute inset-0 z-40 flex items-center justify-center px-6" role="dialog" aria-label="挂一张许愿卡">
+          <button type="button" aria-label="取消" onClick={() => setComposing(false)} className="absolute inset-0 bg-black/45 backdrop-blur-[2px]" />
+          <div className="relative w-full max-w-[320px] rounded-2xl bg-white p-4 shadow-[0_18px_50px_rgba(0,0,0,0.35)] dark:bg-zinc-900">
+            <p className="text-[15px] font-bold text-zinc-900 dark:text-zinc-50">挂一张许愿卡</p>
+            <p className="mt-0.5 text-[12px] leading-relaxed text-zinc-500 dark:text-zinc-400">
+              写一句想对{state.taName || 'TA'}说的话，挂在你们的许愿树上——TA 会看到这张卡片，也会知道你写了什么。
+            </p>
+            <div className="mt-3 rounded-2xl border-2 border-[#f2b3c5] bg-[linear-gradient(180deg,#fff1f5,#ffdbe6)] px-4 py-4">
+              <textarea
+                value={draft}
+                onChange={(e) => setDraft(e.target.value.slice(0, 60))}
+                rows={3}
+                placeholder="如：希望明年的今天，我们还一起站在这棵树下。"
+                className="w-full resize-none bg-transparent text-[15px] font-semibold leading-[1.7] text-[#8c4257] outline-none placeholder:font-normal placeholder:text-[#d49aab]"
+                aria-label="许愿卡内容"
+              />
+              <p className="mt-1 text-right text-[11px] font-bold text-[#c76e8b]">{draft.length}/60</p>
+            </div>
+            <div className="mt-3 flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setComposing(false)}
+                className="rounded-full px-4 py-2 text-[13.5px] font-bold text-zinc-500 active:opacity-60 dark:text-zinc-400"
+              >
+                先不挂了
+              </button>
+              <button
+                type="button"
+                onClick={hangCard}
+                disabled={!draft.trim()}
+                className="rounded-full bg-[linear-gradient(135deg,#ff7a9c,#f2536a)] px-5 py-2 text-[13.5px] font-bold text-white shadow-[0_4px_12px_rgba(242,83,106,0.35)] transition-transform active:scale-95 disabled:opacity-40"
+              >
+                挂上许愿树 ♡
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ===== 卡片详情弹层（正文 + 卡片下留言） ===== */}
+      {openCard && (
+        <TreeCardDetail
+          card={openCard}
+          meName={state.meName}
+          taName={state.taName}
+          onClose={() => setOpenId(null)}
+          onSend={(t) => commentCard(openCard.id, t)}
+        />
+      )}
+
+      {/* ===== 全部卡片列表弹层 ===== */}
+      {listOpen && (
+        <div className="absolute inset-0 z-40" role="dialog" aria-label="全部留言卡">
+          <button type="button" aria-label="关闭" onClick={() => setListOpen(false)} className="absolute inset-0 bg-black/45 backdrop-blur-[2px]" />
+          <div className="absolute inset-x-0 bottom-0 max-h-[68%] overflow-y-auto rounded-t-2xl bg-white px-4 pb-[26px] pt-3 shadow-[0_-8px_30px_rgba(0,0,0,0.3)] dark:bg-zinc-900">
+            <div className="mb-2 flex items-center justify-between">
+              <p className="text-[15px] font-bold text-zinc-900 dark:text-zinc-50">全部留言卡 · {cards.length} 张</p>
+              <button
+                type="button"
+                onClick={() => setListOpen(false)}
+                aria-label="收起列表"
+                className="flex h-8 w-8 items-center justify-center rounded-full bg-zinc-100 text-zinc-500 active:opacity-60 dark:bg-zinc-800 dark:text-zinc-400"
+              >
+                <ChevronDown className="h-5 w-5" strokeWidth={2.4} />
+              </button>
+            </div>
+            {cards.length === 0 && <p className="py-8 text-center text-[12.5px] text-zinc-400 dark:text-zinc-500">树上还没有卡片</p>}
+            <div className="flex flex-col gap-2 pb-2">
+              {cards.map((c) => {
+                const mine = c.from === 'me';
+                const who = mine ? state.meName || '我' : state.taName || 'TA';
+                return (
+                  <button
+                    key={c.id}
+                    type="button"
+                    onClick={() => {
+                      setListOpen(false);
+                      setOpenId(c.id);
+                    }}
+                    className="flex w-full items-center gap-3 rounded-xl border-2 px-3.5 py-2.5 text-left transition-transform active:scale-[0.98]"
+                    style={
+                      mine
+                        ? { borderColor: '#f6cbda', background: 'linear-gradient(180deg,#fff5f8,#ffe9f0)' }
+                        : { borderColor: '#ecd58a', background: 'linear-gradient(180deg,#fffce8,#fff5c9)' }
+                    }
+                    aria-label={`查看${who}挂的卡片`}
+                  >
+                    <span
+                      className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[12px] font-bold ${
+                        mine ? 'bg-[#ffdce7] text-[#8c4257]' : 'bg-[#ffefb9] text-[#7c5a17]'
+                      }`}
+                      aria-hidden="true"
+                    >
+                      {who.slice(0, 1)}
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-[13.5px] font-semibold" style={{ color: mine ? '#8c4257' : '#7c5a17' }}>
+                        {c.text}
+                      </span>
+                      <span className="mt-[1px] block text-[10.5px] font-semibold opacity-70" style={{ color: mine ? '#8c4257' : '#7c5a17' }}>
+                        {who} 挂的 · {fmtDate(c.at)} · {(c.comments ?? []).length} 条留言
+                      </span>
+                    </span>
+                    <ChevronRight className="h-4 w-4 shrink-0 opacity-40" strokeWidth={2.4} aria-hidden="true" />
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

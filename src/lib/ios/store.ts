@@ -1591,6 +1591,9 @@ interface UIState {
   /** 跨 App 跳转：微信搜索页网络结果 → 打开浏览器 App 后直接导航到该网页，消费后置回 null */
   pendingBrowserUrl: string | null;
   setPendingBrowserUrl: (url: string | null) => void;
+  /** 跨 App 跳转：X 论坛「生图模型」入口等 → 打开设置 App 后直接进入指定设置页（如 imggen 图像生成），消费后置回 null */
+  pendingSettingsPage: string | null;
+  setPendingSettingsPage: (v: string | null) => void;
 }
 
 export const useUI = create<UIState>((set, get) => ({
@@ -1620,6 +1623,10 @@ export const useUI = create<UIState>((set, get) => ({
   pendingBrowserUrl: null,
   setPendingBrowserUrl: (v) => {
     set({ pendingBrowserUrl: v });
+  },
+  pendingSettingsPage: null,
+  setPendingSettingsPage: (v) => {
+    set({ pendingSettingsPage: v });
   },
   openApp: (id) => {
     if (get().locked) return; // 锁屏时禁止打开 App（锁屏直达相机走 lockCameraOpen）

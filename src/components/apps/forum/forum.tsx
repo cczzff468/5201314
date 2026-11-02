@@ -59,7 +59,8 @@ import {
 import { FORUM_PROMPT_DEFS } from '@/lib/forum/prompt-defs';
 // 【分享给 AI】帖子 → 微信/QQ 聊天卡片 + 深链返回论坛（forum-share.ts）
 import { FORUM_OPEN_POST_EVENT, takePendingForumPost } from '@/lib/ios/forum-share';
-import { useUI } from '@/lib/ios/store';
+import { useUI, useSettings } from '@/lib/ios/store';
+import { imgGenConfigReady } from '@/lib/imggen';
 // 【多世界观】世界观切换 / NPC 矩阵 / AI 规则面板 + store 订阅（首页标签实时读）
 import { subscribeWorldview, worldviewSnapshot, countCustomRules } from '@/lib/forum/worldview-store';
 import { GenRangeRow } from './prompt-sheet';
@@ -1044,6 +1045,33 @@ export default function ForumApp() {
                         bounds={COMMENT_COUNT_BOUNDS}
                         onBump={(which, d) => bumpGenRange('comments', which, d)}
                       />
+                      {/* 发帖配图·生图模型：发帖时「文字图片 / AI 生图」里用真图模型（全局配置，跳系统设置编辑） */}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const ui = useUI.getState();
+                          ui.setPendingSettingsPage('imggen');
+                          ui.switchToApp('settings');
+                        }}
+                        className="flex w-full items-center justify-between gap-2 rounded-xl px-3 py-[10px] text-left transition-colors active:opacity-70"
+                        style={{ background: t.hover }}
+                        aria-label="配置生图模型"
+                      >
+                        <div className="flex min-w-0 flex-col gap-[1px]">
+                          <span className="text-[15px] font-medium">生图模型</span>
+                          <span className="truncate text-[12px] leading-snug" style={{ color: t.secondary }}>
+                            {(() => {
+                              const cfg = useSettings.getState().imgGenConfig;
+                              return imgGenConfigReady(cfg)
+                                ? `${cfg.model} · 发帖可用 AI 生图（自定义提示词）`
+                                : '未配置 · 去系统设置填好即可用 AI 生图';
+                            })()}
+                          </span>
+                        </div>
+                        <span aria-hidden="true" className="shrink-0 text-[15px]" style={{ color: t.secondary }}>
+                          ›
+                        </span>
+                      </button>
                     </div>
                   </div>
                   {/* v36【多世界观】世界观与规则：切换世界观 / 管理 NPC 矩阵 / 修改 AI 规则 */}
