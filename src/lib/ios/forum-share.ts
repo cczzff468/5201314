@@ -105,10 +105,12 @@ export function forumShareHistoryLine(pid: string): string {
  * 从文本里解析 X 论坛帖子链接（分享面板「复制链接」生成的格式）：
  * `https://x.com/{handle}/status/{postId}`；容忍缺协议/www 前缀、尾斜杠与查询参数，
  * 也认 `x.com/i/web/status/{id}` 分享短链格式。命中返回帖子 id，否则 null。
+ * v39 审查修复：handle 段放宽到任意非斜杠/非空白字符（ sanitizeHandle 允许中文等
+ * 自定义账号名——旧正则 [A-Za-z0-9_] 会让中文 handle 复制的链接粘贴后解析失败）。
  */
 export function parseForumPostLink(text: string): string | null {
   if (!text) return null;
-  const m = text.match(/(?:https?:\/\/)?(?:www\.)?x\.com\/(?:i\/web\/|[A-Za-z0-9_]{1,30}\/)status\/([A-Za-z0-9_-]{4,64})/);
+  const m = text.match(/(?:https?:\/\/)?(?:www\.)?x\.com\/(?:i\/web\/|[^\/?\s#]{1,40}\/)status\/([A-Za-z0-9_-]{4,64})/);
   return m ? m[1] : null;
 }
 
@@ -138,7 +140,7 @@ export function buildForumShareCardMsg(post: ForumPost, role: 'me' | 'peer' = 'm
  * 普通联系人（非 AI 角色）同样落一条——记忆库按联系人隔离，读侧只有 AI 角色会用。
  */
 export async function noteForumLinkSharedToChat(opts: {
-  idp: 'wx' | 'qq';
+  idp: 'wx' | 'qq' | 'sms';
   contactId: string;
   post: ForumPost;
   meName?: string;

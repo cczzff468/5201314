@@ -93,6 +93,10 @@ import {
 } from '@/lib/ios/block-state';
 import { getTimeAware, setTimeAware, buildTimeAwareBlock } from '@/lib/time-aware';
 import { useEnterSend, setEnterSend, guardEnterToSend } from '@/lib/enter-send';
+// v39【复制链接→发给AI】信息 App 接入：粘贴 X 论坛帖子链接发送 → 自动跟帖子分享卡
+// （AI 回合把卡片序列化成「帖子正文＋热门评论」上下文）+ 异步写记忆；点卡深链回论坛
+import { forumShareHistoryLine, noteForumLinkSharedToChat, resolveForumLinkPost } from '@/lib/ios/forum-share';
+import { ForumShareBubble } from './forum/share-card';
 import { kvDel, kvGet, kvSet, kvSetDebounced } from '@/lib/ios/idb-kv';
 import { getMemSettings, memAfterAiTurn, memChatRecallBlock, memConvoFromRaw, memPurgeMessageSources, memRecallBlock, memSummarizeCallNow, profileRecallBlock, setMemScopeForApp } from '@/lib/memory';
 // 第十六轮：AI 动态状态（情绪+作息）注入
@@ -156,8 +160,12 @@ interface ChatMsg {
   role: 'user' | 'assistant';
   content: string;
   time: number;
-  /** 消息类型（缺省 = text；旧数据无此字段天然兼容；textcard = 文字图片卡片） */
-  kind?: 'text' | 'voice' | 'image' | 'textcard';
+  /** 消息类型（缺省 = text；旧数据无此字段天然兼容；textcard = 文字图片卡片；
+   *  forumshare = X 论坛帖子分享卡——粘贴帖子链接发送时自动跟在链接文字后） */
+  kind?: 'text' | 'voice' | 'image' | 'textcard' | 'forumshare';
+  /** X 论坛帖子分享卡数据（kind==='forumshare' 时有效；渲染时实时读论坛 store，
+   *  点卡片深链跳论坛打开帖子，删帖自动失效；AI 历史读 forumShareHistoryLine 序列化） */
+  forumshare?: { pid: string };
   /** 语音消息数据（kind==='voice' 时有效；音频 dataURL 持久化在聊天记录里） */
   voice?: VoiceMsgData;
   /** 图片消息数据（kind==='image' 时有效；自动生图投递，src 为压缩 dataURL；
@@ -1724,15 +1732,16 @@ function ChatView({
   /** AI 回合：把整轮流式请求交给全局 store（userMsg 为 null = 分句发送批次触发/语音转写完成触发，消息早已入列）。
    *  流式接收、超时、错误处理、落盘全部在 chat-stream-store 内完成：退出聊天页不中断，重进从 store 读实时内容。
    *  baseMsgs：显式传入最新消息数组（语音转写完成后调用时避免闭包旧状态漏掉刚落库的语音消息） */
-  const startAiTurn = (userMsg: ChatMsg | null, sysEvent?: string, baseMsgs?: ChatMsg[]) => {
+  const startAiTurn = (userMsg: ChatMsg | null, sysEvent?: string, baseMsgs?: ChatMsg[], extraUserMsgs?: ChatMsg[]) => {
     // F1：回合开始清空照片标签 carry（上一回合流中断/换号中止的残留不串入本回合）
     photoCarryRef.current = '';
     // fix3-D #8：用户消息先入列再判拉黑守卫（对齐微信 wechat.tsx send「先 setMsgs 再 runAiTurn」同口径）——
     // 拉黑期（byUser）用户消息照常进记录上屏、AI 不回（回合静默取消）。此前守卫在前会把文字消息一并吞掉
     // （send 与 sttPreview 两条文字路都把落库委托给本函数；语音路 commitVoiceMsg 已先入列不受累，
     // 此处入列的 userMsg 只来自这两条文字路，无双入列）。入列后经 msgs 持久化 effect 自动落盘。
-    // 红色 ! 徽标重试（retryReply）也会带已入列的消息进来：按 id 判重，不重复入列（对齐微信/QQ 同款守卫）
-    if (userMsg) setMsgs((prev) => (prev.some((m) => m.id === userMsg.id) ? prev : [...prev, userMsg]));
+    // 红色 ! 徽标重试（retryReply）也会带已入列的消息进来：按 id 判重，不重复入列（对齐微信/QQ 同款守卫）。
+    // v39 extraUserMsgs（论坛分享卡等跟随消息）：与 userMsg 同批入列（拉黑期照常上屏）、进 base 上下文
+    if (userMsg) setMsgs((prev) => (prev.some((m) => m.id === userMsg.id) ? prev : [...prev, userMsg, ...(extraUserMsgs ?? [])]));
     // 深度思考：重置本轮上下文（重试/新回合互不串台；firstMsgId 由 buildReplyMsgs 首次产出时记录）
     turnThinkRef.current = { firstMsgId: null, text: '' };
     // 40-a 拉黑拦截（第一层）：用户拉黑角色（byUser）后，本 App 内 AI 不能发任何消息——回合静默取消。
@@ -1765,7 +1774,7 @@ function ChatView({
     // 队列尾巴按序拼进 base（时序上属于上一轮，排在最新用户消息之前）；同一消息要么已落盘/进 state、
     // 要么还在队列里（deliveredIndex 逐条同步推进），不会重复。
     const pendingTail = peekPendingMsgs<ChatMsg>(sessionKey);
-    const base = [...(baseMsgs ?? msgs), ...pendingTail, ...(userMsg ? [userMsg] : [])];
+    const base = [...(baseMsgs ?? msgs), ...pendingTail, ...(userMsg ? [userMsg, ...(extraUserMsgs ?? [])] : [])];
     // 识图输入（加号发图/文字随图）：从末尾向前收集连续「我」（user）消息里的图片（最多 3 张），
     // 遇到对方/AI 消息即停。识图模型配置存在时，chat-stream-store 先把图片转描述再交给聊天模型，
     // 并经 onVision 把描述写回对应图片消息（img.desc 持久化，之后的聊天历史 AI 都能读到图片内容）
@@ -1789,7 +1798,7 @@ function ChatView({
         (m) =>
           !m.error &&
           !m.recalled &&
-          (m.content || m.kind === 'voice' || (m.kind === 'image' && m.img) || (m.kind === 'textcard' && m.card))
+          (m.content || m.kind === 'voice' || (m.kind === 'image' && m.img) || (m.kind === 'textcard' && m.card) || (m.kind === 'forumshare' && m.forumshare))
       )
       .sort((a, b) => a.time - b.time)
       .slice(-20)
@@ -1808,7 +1817,10 @@ function ChatView({
                 : '[图片]'
               : m.kind === 'textcard' && m.card
                 ? `[文字图片]（卡片上写着：${m.card.text}）`
-                : m.content
+                : m.kind === 'forumshare' && m.forumshare
+                  ? // v39：帖子分享卡序列化成「帖子正文＋热门评论」可读文本（AI 能看懂卡片内容）
+                    forumShareHistoryLine(m.forumshare.pid)
+                  : m.content
         }`,
       }));
 
@@ -2495,6 +2507,15 @@ function ChatView({
     }
 
     const userMsg: ChatMsg = { id: uid(), role: 'user', content: text, time: Date.now(), quote: quote ?? undefined };
+    // v39【复制链接→发给AI】粘贴 X 论坛帖子链接发送：链接文字照发，后面自动跟一张帖子分享卡
+    // （联系人/小助手会话都支持）；AI 回合把卡片序列化成「帖子正文＋热门评论」上下文
+    // （forumShareHistoryLine），联系人是 AI 角色时异步写一条「TA把帖子链接发给了我」记忆；
+    // 点卡可深链回论坛打开帖子（删帖后卡片自动失效）
+    const linkPost = text ? resolveForumLinkPost(text) : null;
+    if (linkPost && wbContactId) void noteForumLinkSharedToChat({ idp: 'sms', contactId: wbContactId, post: linkPost });
+    const linkCard: ChatMsg | null = linkPost
+      ? { id: uid(), role: 'user', content: `[X论坛帖子] 分享帖子：${linkPost.content.slice(0, 40)}`, time: Date.now() + 1, kind: 'forumshare', forumshare: { pid: linkPost.id } }
+      : null;
     // #8 对方正在回复（流式接收或连发投递未清空，投递可拖到流结束后数秒）：消息照常上屏并排队补跑，
     // 「流收尾且投递完毕」后自动触发回复——不再静默丢弃（对齐微信：消息发出去了，AI 稍后回复；
     // 投递中也排队，否则旧回复尾部进不了新回合上下文、旧 AI 气泡还会倒挂在用户新消息下面）。
@@ -2503,7 +2524,7 @@ function ChatView({
       setInput('');
       clearChatDraft('sms', storageKey); // Task 40 草稿箱：消息已入列即清草稿（重进不回显）
       setQuote(null);
-      setMsgs((prev) => [...prev, userMsg]);
+      setMsgs((prev) => [...prev, userMsg, ...(linkCard ? [linkCard] : [])]);
       markDeliverBoundary(sessionKey, userMsg.id);
       enqueueQueuedTurn({ kind: 'kick' });
       return;
@@ -2513,7 +2534,7 @@ function ChatView({
     setQuote(null);
     // 分句发送开启：只入列不触发回复，等输入框为空再点一次「发送」统一触发（真人把几句话拆开发完）
     if (sentenceSend) {
-      setMsgs((prev) => [...prev, userMsg]);
+      setMsgs((prev) => [...prev, userMsg, ...(linkCard ? [linkCard] : [])]);
       setPendingDispatch(true);
       markPendingBatch(sessionKey, true);
       return;
@@ -2539,11 +2560,11 @@ function ChatView({
         const sys = buildReminderSysMsg('sms', label) as unknown as ChatMsg;
         saveMsgs(storageKey, appendWithBoundary(sessionKey, loadMsgs(storageKey) ?? [], sys));
         setMsgs((prev) => (prev.some((m) => m.id === sys.id) ? prev : [...prev, sys]));
-        startAiTurn(userMsg, reminderSysHint(label));
+        startAiTurn(userMsg, reminderSysHint(label), undefined, linkCard ? [linkCard] : undefined);
         return;
       }
     }
-    startAiTurn(userMsg);
+    startAiTurn(userMsg, undefined, undefined, linkCard ? [linkCard] : undefined);
   };
 
   /** 分句发送批次触发：把已发出的整批消息交给 AI 统一回复（输入框为空时点「发送」）；
@@ -2893,7 +2914,8 @@ function ChatView({
    *  对方 → 联系人名/手机号。profileName 未设置时回退「我」保持旧行为 */
   const quoteNameOf = (m: ChatMsg): string => (m.role === 'user' ? profileName || '我' : peer.name || peer.title);
 
-  /** 消息的可复制/引用文本快照（语音 = [语音] + 转写、图片 = [图片] + 描述、文字图片卡片 = 卡片文字，与微信同语义） */
+  /** 消息的可复制/引用文本快照（语音 = [语音] + 转写、图片 = [图片] + 描述、文字图片卡片 = 卡片文字，与微信同语义）
+   *  v39：论坛帖子卡 = [X论坛帖子] + 预览文案 */
   const quoteContentOf = (m: ChatMsg): string =>
     m.kind === 'voice'
       ? m.voice?.transcript
@@ -2907,7 +2929,9 @@ function ChatView({
           ? m.card?.text
             ? `[文字图片] ${m.card.text}`
             : '[文字图片]'
-          : m.content;
+          : m.kind === 'forumshare'
+            ? '[X论坛帖子]'
+            : m.content;
 
   /** 按发送方组装长按菜单项（语音首项转文字；图片无编辑（内容不可改）有保存/重新生成；复制 删除 编辑 引用 多选 撤回；语音可编辑转写文本、无引用） */
   const buildMsgMenuItems = (m: ChatMsg): BubbleMenuItem[] => {
@@ -2915,13 +2939,15 @@ function ChatView({
     const isVoice = m.kind === 'voice';
     const isImage = m.kind === 'image';
     const isCard = m.kind === 'textcard';
+    // v39：论坛帖子卡同样不可编辑（内容随论坛实时变，编辑无意义）
+    const isForumCard = m.kind === 'forumshare';
     const items: BubbleMenuItem[] = [];
     if (isVoice) items.push({ key: 'stt', label: m.voice?.stt === 'done' && m.voice.transcript ? '取消转文字' : '转文字', icon: B.stt });
     items.push({ key: 'copy', label: '复制', icon: B.copy });
     // 图片消息：保存到设备（dataURL 直接下载）
     if (isImage && m.img?.src) items.push({ key: 'saveimg', label: '保存', icon: B.save });
     items.push({ key: 'del', label: '删除', icon: B.del, danger: true });
-    if (!isImage && !isCard) items.push({ key: 'edit', label: '编辑', icon: B.edit });
+    if (!isImage && !isCard && !isForumCard) items.push({ key: 'edit', label: '编辑', icon: B.edit });
     if (!isVoice) {
       items.push({ key: 'quote', label: '引用', icon: B.quote });
     }
@@ -3486,6 +3512,50 @@ function ChatView({
                           if (!selectMode) setCardActionId(m.id);
                         }}
                       />
+                    </div>
+                    {/* iMessage：已送达挂在最后一条己方消息下沿（与文本/语音/图片气泡同规则） */}
+                    {mine && i === lastUserIdx && (
+                      <p className="mt-1 self-stretch pl-1 text-left text-[11px] leading-none text-muted-foreground">已送达</p>
+                    )}
+                  </div>
+                  {!mine && blockedIconOf(m)}
+                  {selectMode && mine && (
+                    <span
+                      aria-hidden="true"
+                      data-testid={`sms-select-${m.id}`}
+                      className={`ml-2 grid h-[20px] w-[20px] shrink-0 self-center place-items-center rounded-full border ${
+                        selectedIds.includes(m.id) ? 'border-[#007AFF] bg-[#007AFF] text-white' : 'border-black/25 dark:border-white/35'
+                      }`}
+                    >
+                      {selectedIds.includes(m.id) && <CircleCheck className="h-[14px] w-[14px]" strokeWidth={2.2} />}
+                    </span>
+                  )}
+                </motion.div>
+              ) : m.kind === 'forumshare' && m.forumshare ? (
+                /* v39 X论坛帖子分享卡（粘贴帖子链接发送自动跟卡；双向——右侧我发出的/左侧 AI 转发来的）：
+                   卡片实时读论坛 store（正文/点赞/评论数跟帖走，删帖自动失效）；点卡深链跳论坛打开帖子；
+                   长按菜单/多选/拉黑图标与文本消息一致 */
+                <motion.div
+                  initial={{ opacity: 0, y: 10, scale: 0.97 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  transition={{ type: 'spring', stiffness: 500, damping: 36 }}
+                  className={`flex ${mine ? 'justify-end' : 'justify-start'} ${grouped ? 'mt-[3px]' : 'mt-2.5'}`}
+                >
+                  {selectMode && !mine && (
+                    <span
+                      aria-hidden="true"
+                      data-testid={`sms-select-${m.id}`}
+                      className={`mr-2 grid h-[20px] w-[20px] shrink-0 self-center place-items-center rounded-full border ${
+                        selectedIds.includes(m.id) ? 'border-[#007AFF] bg-[#007AFF] text-white' : 'border-black/25 dark:border-white/35'
+                      }`}
+                    >
+                      {selectedIds.includes(m.id) && <CircleCheck className="h-[14px] w-[14px]" strokeWidth={2.2} />}
+                    </span>
+                  )}
+                  {mine && (m.replyFail ? failBadgeOf(m) : blockedIconOf(m))}
+                  <div className={`flex max-w-[76%] flex-col ${mine ? 'items-end' : 'items-start'}`}>
+                    <div {...bubblePress}>
+                      <ForumShareBubble pid={m.forumshare.pid} side={mine ? 'right' : 'left'} />
                     </div>
                     {/* iMessage：已送达挂在最后一条己方消息下沿（与文本/语音/图片气泡同规则） */}
                     {mine && i === lastUserIdx && (
@@ -4663,6 +4733,7 @@ function scanContactSessions(contacts: ContactRecord[]): ContactSessionPreview[]
     // 错误占位消息（旧版失败落库文案）不作会话预览，回退到最后一条实质消息
     const last = [...msgs].reverse().find((m) => m.error !== true) ?? msgs[msgs.length - 1];
     // 语音消息预览统一显示 [语音]、图片消息显示 [图片]、文字图片卡片显示 [文字图片]（与微信会话列表同口径；语音 content 为空串，不透出转写原文）
+    // v39：论坛帖子卡显示 [X论坛帖子]（卡片正文含摘要，列表只露类型）
     const lastText =
       last?.kind === 'voice'
         ? '[语音]'
@@ -4670,7 +4741,9 @@ function scanContactSessions(contacts: ContactRecord[]): ContactSessionPreview[]
           ? '[图片]'
           : last?.kind === 'textcard'
             ? '[文字图片]'
-            : (last?.content ?? '');
+            : last?.kind === 'forumshare'
+              ? '[X论坛帖子]'
+              : (last?.content ?? '');
     out.push({
       contact: c,
       preview: last?.recalled
