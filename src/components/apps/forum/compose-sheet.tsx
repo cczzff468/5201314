@@ -49,6 +49,9 @@ const MAX_MEDIA = 4;
 /** 发布扩展内容（forum.tsx publish 回调的第三参） */
 export interface ComposePayload {
   media?: string[];
+  /** 文字图片源文本（与 media 按下标对齐；文字图项存原文，其余为 ''）——
+  *  发布后点击卡片生成真图时预填提示词 */
+  mediaText?: string[];
   poll?: { options: string[] };
   location?: string;
   visibleAt?: number;
@@ -178,6 +181,9 @@ export function ComposeSheet({
   const [customTopic, setCustomTopic] = useState('');
   /** 文字图片输入（相册弹层第三入口） */
   const [textImgInput, setTextImgInput] = useState('');
+  /** 文字图片源文本（与 media 按下标对齐；文字图项存原文、其余 ''，
+  *  发布时随 ComposePayload 带出 → 点击卡片生图预填提示词） */
+  const [mediaText, setMediaText] = useState<string[]>([]);
   /** 文字图片弹层模式：'text' = 经典白底文字图；'ai' = AI 生图（自定义提示词→真图） */
   const [imgMode, setImgMode] = useState<'text' | 'ai'>('text');
   /** AI 生图：自定义提示词 */
@@ -207,12 +213,16 @@ export function ComposeSheet({
     </button>
   );
 
-  /** 追加媒体（超上限给 toast） */
-  const addMedia = (items: string[]) => {
+  /** 追加媒体（超上限给 toast）；srcs 与 items 按下标对齐（文字图项源文本，其余 ''） */
+  const addMedia = (items: string[], srcs?: string[]) => {
     setMedia((cur) => {
       const next = [...cur, ...items].slice(0, MAX_MEDIA);
       if (cur.length + items.length > MAX_MEDIA) f.toast(`最多 ${MAX_MEDIA} 张图片`);
       return next;
+    });
+    setMediaText((cur) => {
+      const add = items.map((_, i) => (srcs && i < srcs.length ? srcs[i] : '')).slice(0, MAX_MEDIA);
+      return [...cur, ...add].slice(0, MAX_MEDIA);
     });
   };
 
@@ -292,6 +302,7 @@ export function ComposeSheet({
     }
     onPublish(text.trim(), null, {
       media: media.length ? media : undefined,
+      mediaText: media.length && mediaText.some((s) => s.trim()) ? mediaText.slice(0, media.length) : undefined,
       poll: pollOptions && validPoll ? { options: pollOptions.filter((o) => o.trim()) } : undefined,
       location: location ?? undefined,
       visibleAt: visibleAt && visibleAt > Date.now() ? visibleAt : undefined,
@@ -369,7 +380,10 @@ export function ComposeSheet({
                 <button
                   type="button"
                   aria-label={`移除附图 ${i + 1}`}
-                  onClick={() => setMedia((cur) => cur.filter((_, j) => j !== i))}
+                  onClick={() => {
+                    setMedia((cur) => cur.filter((_, j) => j !== i));
+                    setMediaText((cur) => (cur.length === media.length ? cur.filter((_, j) => j !== i) : cur));
+                  }}
                   className="absolute right-1.5 top-1.5 flex h-6 w-6 items-center justify-center rounded-full bg-black/60 text-white active:opacity-70"
                 >
                   <X width={13} height={13} strokeWidth={3} aria-hidden="true" />
@@ -678,10 +692,10 @@ export function ComposeSheet({
                         onClick={() => {
                           try {
                             const url = renderTextImage(textImgInput);
-                            addMedia([url]);
+                            addMedia([url], [textImgInput]);
                             setSheet(null);
                             setTextImgInput('');
-                            f.toast('文字图片已生成，发布后可见');
+                            f.toast('文字图片已生成，发布后可见；发布后点击卡片还能升级成真图');
                           } catch {
                             f.toast('生成失败，稍后再试');
                           }

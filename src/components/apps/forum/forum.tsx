@@ -30,6 +30,7 @@ import {
   isPostVisible,
   isAnonActive,
   isPostMemoryOn,
+  mutateForum,
   myFollowingCount,
   refreshForumAuthors,
   resolveAuthor,
@@ -60,7 +61,9 @@ import { FORUM_PROMPT_DEFS } from '@/lib/forum/prompt-defs';
 // 【分享给 AI】帖子 → 微信/QQ 聊天卡片 + 深链返回论坛（forum-share.ts）
 import { FORUM_OPEN_POST_EVENT, takePendingForumPost } from '@/lib/ios/forum-share';
 import { useUI, useSettings } from '@/lib/ios/store';
-import { imgGenConfigReady } from '@/lib/imggen';
+import { compressImageSrc, generateFreePhoto, imgGenConfigReady } from '@/lib/imggen';
+// 【点击生图】文字图卡片 → 生成弹层（与聊天/朋友圈三端共用组件：提示词预填可改）
+import { TextCardActionSheet } from '@/components/apps/text-card-bubble';
 // 【多世界观】世界观切换 / NPC 矩阵 / AI 规则面板 + store 订阅（首页标签实时读）
 import { subscribeWorldview, worldviewSnapshot, countCustomRules } from '@/lib/forum/worldview-store';
 import { GenRangeRow } from './prompt-sheet';
@@ -169,6 +172,10 @@ export default function ForumApp() {
   /** 【分享给 AI】帖子分享弹层：当前分享的帖子（null = 关闭）；
    *  帖子卡/帖子页的分享图标 → 选微信/QQ → 选联系人 → 帖子卡进聊天 + AI 回应 */
   const [shareSheetPost, setShareSheetPost] = useState<ForumPost | null>(null);
+  /** 【点击生图】文字图卡片生成弹层：postId + media 下标 + 预填提示词（null = 关闭） */
+  const [textImgGen, setTextImgGen] = useState<{ postId: string; index: number; text: string } | null>(null);
+  /** 【点击生图】生成中（弹层转圈、不可关闭） */
+  const [textImgBusy, setTextImgBusy] = useState(false);
   /** 定时发布到期重绘 tick（30s；到点的帖子自动出现在列表顶部） */
   const [tick, setTick] = useState(0);
 
@@ -427,6 +434,11 @@ export default function ForumApp() {
         replyTo: null,
         replyToName: null,
         media: extras?.media?.length ? extras.media.slice(0, 4) : undefined,
+        // 【点击生图】文字图源文本随帖落库（与 media 对齐；点击卡片生图预填提示词）
+        mediaText:
+          extras?.media?.length && extras.mediaText?.length
+            ? extras.mediaText.slice(0, Math.min(4, extras.media.length))
+            : undefined,
         poll: extras?.poll?.options.length
           ? {
               options: extras.poll.options.slice(0, 4).map((o) => o.slice(0, 25)),
@@ -467,6 +479,74 @@ export default function ForumApp() {
     [gotoTab, toast],
   );
 
+  /** 【点击生图】点帖子里的文字图卡片 → 打开生成弹层。
+   *  提示词预填源文本（mediaText；旧数据无此字段回退用帖子正文剥掉占位符取前 200 字）；
+   *  生图模型未配置时也先打开弹层（弹层内点生成会提示去设置，与发帖弹层口径一致）。 */
+  const openTextImgGen = useCallback(
+    (post: ForumPost, mediaIndex: number) => {
+      const src = post.mediaText?.[mediaIndex]?.trim();
+      const fallback = post.content
+        .split('[图片]')
+        .join('')
+        .replace(/[ \t]{2,}/g, ' ')
+        .trim()
+        .slice(0, 200);
+      const text = src && src.length >= 2 ? src : fallback;
+      setTextImgGen({ postId: post.id, index: mediaIndex, text });
+    },
+    [],
+  );
+
+  /** 【点击生图】生成提交：按（可改的）提示词生图 → 成功后原位替换该帖
+   *  media[下标]（文字图 PNG → 真图），mediaText 对应位清空（不再是文字图）。
+   *  mutateForum 原子读改写，防与后台 AI 任务互吞写入。
+   *  模型优先级：用户自己配的生图模型（设置 › 图像生成）→ 未配置时走
+   *  /api/ai-product-img 内置 SDK 免费生图（与淘宝/美团同款兑底，开箱即用）。 */
+  const runTextImgGen = useCallback(
+    async (desc: string) => {
+      const target = textImgGen;
+      if (!target || textImgBusy) return;
+      const prompt = desc.trim();
+      if (!prompt) return;
+      setTextImgBusy(true);
+      try {
+        const cfg = useSettings.getState().imgGenConfig;
+        let src: string;
+        if (imgGenConfigReady(cfg)) {
+          src = await generateFreePhoto(cfg, prompt);
+        } else {
+          // 兑底：内置 SDK 生图（1024 方图 → 压缩 JPEG 入库，与用户模型管线同规格）
+          const res = await fetch('/api/ai-product-img', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ prompt }),
+          });
+          const data = (await res.json().catch(() => null)) as { src?: string; error?: string } | null;
+          if (!res.ok || !data?.src) throw new Error(data?.error || '生成失败，稍后再试');
+          src = await compressImageSrc(data.src, 1024, 0.9);
+        }
+        mutateForum((d) => {
+          const p = d.posts.find((x) => x.id === target.postId);
+          if (!p?.media?.length || target.index >= p.media.length) return;
+          const media = [...p.media];
+          media[target.index] = src;
+          const mediaText = [...(p.mediaText ?? p.media.map(() => ''))];
+          while (mediaText.length < media.length) mediaText.push('');
+          mediaText[target.index] = '';
+          p.media = media;
+          p.mediaText = mediaText;
+        });
+        setTextImgGen(null);
+        toast('图片已生成，卡片已升级为真图');
+      } catch (e) {
+        toast(e instanceof Error ? e.message : '生成失败，稍后再试');
+      } finally {
+        setTextImgBusy(false);
+      }
+    },
+    [textImgGen, textImgBusy, toast],
+  );
+
   /** 添加/移除主页分类标签（+ 号：勾选版块 → 作为附加 tab 显示在主页顶部） */
   const toggleTag = useCallback(
     (id: string) => {
@@ -497,10 +577,11 @@ export default function ForumApp() {
       repostToggle,
       gotoTab,
       openPostMenu: (p: ForumPost) => setMenuPost(p),
+      openTextImgGen,
       castVote: (postId: string, optionIndex: number) => castVoteCore(postId, optionIndex),
       sharePost: (p: ForumPost) => setShareSheetPost(p),
     }),
-    [t, push, pop, replace, openThread, openProfile, openCommunity, openDm, toast, likeToggle, repostToggle, gotoTab],
+    [t, push, pop, replace, openThread, openProfile, openCommunity, openDm, toast, likeToggle, repostToggle, gotoTab, openTextImgGen],
   );
 
   const d = forumData();
@@ -1205,6 +1286,19 @@ export default function ForumApp() {
         {/* 【分享给 AI】帖子分享弹层（分享图标 → 选微信/QQ → 选联系人 → 帖子卡进聊天） */}
         {shareSheetPost && (
           <ForumShareSheet post={shareSheetPost} toast={toast} onClose={() => setShareSheetPost(null)} />
+        )}
+
+        {/* 【点击生图】文字图卡片生成弹层：提示词预填源文本可改 → 真图原位替换卡片
+            （用户发的帖与 AI 发的帖同样可点；生图模型走 设置 › 图像生成） */}
+        {textImgGen && (
+          <TextCardActionSheet
+            text={textImgGen.text}
+            busy={textImgBusy}
+            accent={t.blue}
+            onGenerate={(desc) => void runTextImgGen(desc)}
+            onToast={toast}
+            onClose={() => setTextImgGen(null)}
+          />
         )}
 
         {/* v36【多世界观】三个管理面板（抽屉入口打开；覆盖抽屉层）。

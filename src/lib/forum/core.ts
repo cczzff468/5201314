@@ -210,6 +210,10 @@ export interface ForumPost {
   replyToPost?: string;
   /** 帖子附图（dataURL 或 http URL，最多 4 张；发布界面相册/GIF 上传） */
   media?: string[];
+  /** 文字图片源文本（与 media 按下标对齐；文字图片项存渲染前的原文——
+   *  点击卡片生成真图时预填提示词（可改）；非文字图项为 ''；
+   *  旧数据无此字段时回退用帖子正文预填） */
+  mediaText?: string[];
   /** 投票（发布界面发起） */
   poll?: PostPoll;
   /** 位置名（发布界面添加，帖子卡展示 📍） */

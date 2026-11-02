@@ -38,6 +38,9 @@ export interface ForumUi {
   gotoTab: (i: number) => void;
   /** 帖子右上「···」→ 底部更多菜单（推荐/不感兴趣/举报） */
   openPostMenu: (post: ForumPost) => void;
+  /** 【点击生图】点击帖子里的文字图片卡片 → 打开生成弹层
+  *  （提示词预填源文本可改；成功后原位替换成真图） */
+  openTextImgGen: (post: ForumPost, mediaIndex: number) => void;
   /** 投票：点选某选项 */
   castVote: (postId: string, optionIndex: number) => void;
   /** 分享图标 → 帖子分享弹层（选微信/QQ → 选联系人 → 帖子卡进聊天 + AI 回应） */

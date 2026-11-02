@@ -783,6 +783,8 @@ async function llmPolish(): Promise<void> {
       if (imgOk) {
         try {
           post.media = [renderTextImage(ti)];
+          // 【点击生图】：记录源文本，点击卡片生成真图时预填提示词
+          post.mediaText = [ti];
           imgN += 1;
         } catch {
           /* canvas 不可用等：剥占位符保持纯文字 */
@@ -1515,6 +1517,9 @@ function attachTextImage(post: ForumPost, textImage: string | undefined, count: 
   try {
     if (usable && ti) {
       post.media = [renderTextImage(ti)];
+      // 【点击生图】：记录文字图源文本（mediaText[0]），点击卡片生成
+      // 真图时预填提示词；生成后该位清空（不再是文字图）
+      post.mediaText = [ti];
       count.n += 1;
       return; // 配图成功：占位符保留（渲染端分段上屏）
     }

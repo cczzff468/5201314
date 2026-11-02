@@ -719,8 +719,13 @@ export function ThreadView({ postId }: { postId: string }) {
             </div>
           </div>
           {/* 正文：翻译激活时原位替换为译文（X 官方行为），未翻译/收起时显示原文；
-              v27 图文并茂：含 [图片] 占位符时按「正文段-文字图-正文段」分段交替渲染 */}
-          <PostBodyMedia text={tr.shown && tr.text ? tr.text : post.content} media={post.media} />
+              v27 图文并茂：含 [图片] 占位符时按「正文段-文字图-正文段」分段交替渲染；
+              【点击生图】：文字图卡片可点 → 生成弹层（真图原位替换卡片） */}
+          <PostBodyMedia
+            text={tr.shown && tr.text ? tr.text : post.content}
+            media={post.media}
+            onTextImg={(post.media ?? []).some((m) => m.startsWith('data:image/png')) ? (i) => f.openTextImgGen(post, i) : undefined}
+          />
           {/* 翻译标注行（译文已原位替换正文） */}
           {tr.text && tr.shown && (
             <p className="mt-1.5 flex items-center gap-1.5 text-[13px]" style={{ color: t.secondary }}>

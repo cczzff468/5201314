@@ -10,6 +10,7 @@
  */
 
 import { memo, type ReactNode } from 'react';
+import { Sparkles } from 'lucide-react';
 import {
   castVote as castVoteCore,
   countShort,
@@ -120,14 +121,44 @@ function ActionBtn({
 const isTextImg = (m: string) => m.startsWith('data:image/png');
 
 /** v34 文字图卡（统一尺寸）：w-3/4 方图原样不裁切、白底圆角描边。
- *  AI 配图帖与用户手发文字图片共用，保证所有文字图「一样大」。 */
-function TextImgCard({ src, alt }: { src: string; alt: string }) {
+ *  AI 配图帖与用户手发文字图片共用，保证所有文字图「一样大」。
+ *  【点击生图】：onTextImg 存在时卡片可点（右下角浮一枚生成角标提示），
+ *  点击弹生成弹层（提示词预填源文本可改）→ 生成的真图原位替换卡片。 */
+function TextImgCard({ src, alt, onClick }: { src: string; alt: string; onClick?: () => void }) {
+  const inner = (
+    <>
+      <img src={src} alt={alt} className="aspect-square w-full select-none" draggable={false} loading="lazy" />
+      {onClick && (
+        <span
+          aria-hidden="true"
+          className="absolute bottom-1.5 right-1.5 flex items-center gap-[3px] rounded-full bg-black/55 px-2 py-[3px] text-[10px] font-bold text-white backdrop-blur-[2px]"
+        >
+          <Sparkles className="h-[10px] w-[10px]" strokeWidth={2.4} />
+          生成图片
+        </span>
+      )}
+    </>
+  );
   return (
     <div
-      className="mt-2.5 w-3/4 overflow-hidden rounded-2xl border bg-white"
+      className={`relative mt-2.5 w-3/4 overflow-hidden rounded-2xl border bg-white ${onClick ? 'transition-transform active:scale-[0.985]' : ''}`}
       style={{ borderColor: 'rgba(137,151,166,0.35)' }}
     >
-      <img src={src} alt={alt} className="aspect-square w-full select-none" draggable={false} loading="lazy" />
+      {onClick ? (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation(); // 点卡片生图，不触发开帖
+            onClick();
+          }}
+          aria-label="点击用文字生成真实图片"
+          className="block w-full"
+        >
+          {inner}
+        </button>
+      ) : (
+        inner
+      )}
     </div>
   );
 }
@@ -135,8 +166,9 @@ function TextImgCard({ src, alt }: { src: string; alt: string }) {
 /** 帖子附图网格（X 官方观感）：1 张 16:9 大图；2 张两列方图；3-4 张 2x2 宫格。
  *  v34：文字图片（PNG）不再混进相册网格被 16:9 / object-cover 裁切放大——
  *  先拆分：相册图（JPEG/GIF）走原网格，文字图每张单独 w-3/4 方卡
- *  （与 AI 配图帖同尺寸），所有文字图大小完全一致。 */
-export function PostMedia({ media }: { media: string[] }) {
+ *  （与 AI 配图帖同尺寸），所有文字图大小完全一致。
+ *  【点击生图】：onTextImg = 点文字图回调（参数 = 该图在 media 里的下标）。 */
+export function PostMedia({ media, onTextImg }: { media: string[]; onTextImg?: (index: number) => void }) {
   if (!media.length) return null;
   const textImgs = media.filter(isTextImg);
   const photos = media.filter((m) => !isTextImg(m));
@@ -167,9 +199,11 @@ export function PostMedia({ media }: { media: string[] }) {
   return (
     <>
       {photoGrid}
-      {textImgs.map((m, i) => (
-        <TextImgCard key={`ti-${i}`} src={m} alt={`文字图片 ${i + 1}`} />
-      ))}
+      {media.map((m, i) =>
+        isTextImg(m) ? (
+          <TextImgCard key={`ti-${i}`} src={m} alt="文字图片" onClick={onTextImg ? () => onTextImg(i) : undefined} />
+        ) : null,
+      )}
     </>
   );
 }
@@ -187,23 +221,28 @@ export function PostBodyMedia({
   text,
   media,
   clamp = false,
+  onTextImg,
 }: {
   text: string;
   media?: string[];
   clamp?: boolean;
+  /** 【点击生图】点文字图回调（参数 = 该图在 media 里的下标）；不传 = 不可点 */
+  onTextImg?: (index: number) => void;
 }) {
   const imgs = media ?? [];
   if (!text.includes('[图片]') || !imgs.length) {
     return (
       <>
         <PostText text={text} clamp={clamp} />
-        {imgs.length > 0 && <PostMedia media={imgs} />}
+        {imgs.length > 0 && <PostMedia media={imgs} onTextImg={onTextImg} />}
       </>
     );
   }
   // v32：剥掉占位符，正文完整连续渲染（不再「文字段-图-文字段」交替）；
   // 图卡统一追加在正文最后（i 对应第几张图，单帖配图只用 imgs[0]）。
   // v34：图卡改用 TextImgCard（与用户手发文字图共用组件，尺寸完全一致）
+  // 【点击生图】：占位符分支只对仍是文字图（PNG）的 imgs[0] 生效——
+  //  已点击升级成真图的（JPEG）走普通图网格，不臆渲染成白底卡。
   const body = text
     .split('[图片]')
     .join('')
@@ -212,7 +251,11 @@ export function PostBodyMedia({
   return (
     <>
       <PostText text={body} clamp={clamp} />
-      <TextImgCard src={imgs[0]} alt="帖子配图（文字图）" />
+      {isTextImg(imgs[0]) ? (
+        <TextImgCard src={imgs[0]} alt="帖子配图（文字图）" onClick={onTextImg ? () => onTextImg(0) : undefined} />
+      ) : (
+        <PostMedia media={imgs} onTextImg={onTextImg} />
+      )}
     </>
   );
 }
@@ -380,8 +423,14 @@ export const PostCard = memo(function PostCard({ post, onOpen }: { post: ForumPo
           )}
           {/* v8：按用户要求移除帖子名下方的社区来源标签（#影视片单# 等），
               时间线更贴近 X 官方（帖子只显示名字行 + 正文） */}
-          {/* v27 图文并茂：含 [图片] 占位符时正文-文字图-正文分段交替渲染 */}
-          <PostBodyMedia text={post.content} media={media} clamp={post.content.length > 240} />
+          {/* v27 图文并茂：含 [图片] 占位符时正文-文字图-正文分段交替渲染；
+              【点击生图】：文字图卡片可点 → 生成弹层（真图原位替换） */}
+          <PostBodyMedia
+            text={post.content}
+            media={media}
+            clamp={post.content.length > 240}
+            onTextImg={media.some((m) => m.startsWith('data:image/png')) ? (i) => f.openTextImgGen(post, i) : undefined}
+          />
           {post.poll && <PollBlock post={post} />}
           {post.location && <LocationLine name={post.location} />}
           {/* 定时标记（列表一般不会出现未到时间的帖子；详情打开时可见） */}
