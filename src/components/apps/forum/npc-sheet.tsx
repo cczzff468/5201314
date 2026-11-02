@@ -534,6 +534,8 @@ const RULE_SECTIONS: { key: 'postRules' | 'commentRules' | 'filterRules'; label:
 export function RulesSheet({ onClose, toast }: SheetProps) {
   const t = useXTheme();
   const snap = useSyncExternalStore(subscribeWorldview, worldviewSnapshot);
+  /** 已自定义提示词条数（面板打开时读一次；提示词卡片自己保存，不实时刷） */
+  const [promptOv, setPromptOv] = useState(() => countPromptOverrides());
   const [drafts, setDrafts] = useState({
     postRules: snap.rules.postRules,
     commentRules: snap.rules.commentRules,
@@ -578,14 +580,17 @@ export function RulesSheet({ onClose, toast }: SheetProps) {
   const justSaved = savedFlash && Date.now() - savedFlash < 2400;
 
   return (
-    <div className="absolute inset-0 z-[70]" role="dialog" aria-modal="true" aria-label="AI 规则编辑">
+    <div className="absolute inset-0 z-[70]" role="dialog" aria-modal="true" aria-label="AI 规则与提示词编辑">
       <div className="flex h-full flex-col animate-[forum-sheet_.26s_ease-out]" style={{ background: t.bg, color: t.text }}>
         {/* 顶行 */}
         <div className="flex shrink-0 items-center justify-between gap-2 px-3 pt-[54px]" style={{ height: 100 }}>
           <button
             type="button"
             aria-label="关闭并返回"
-            onClick={onClose}
+            onClick={() => {
+              setPromptOv(countPromptOverrides());
+              onClose();
+            }}
             className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full active:bg-black/10 dark:active:bg-white/10"
             style={{ color: t.text }}
           >
@@ -594,7 +599,7 @@ export function RulesSheet({ onClose, toast }: SheetProps) {
           <div className="flex min-w-0 flex-col items-center">
             <span className="text-[17px] font-bold">AI 规则</span>
             <span className="text-[11px]" style={{ color: t.secondary }}>
-              {customized} 条自定义 · 拼在所有提示词最前端
+              3 条底层规则 + {FORUM_PROMPT_DEFS.length} 条提示词{promptOv + customized > 0 ? ` · ${promptOv + customized} 条已自定义` : ''}
             </span>
           </div>
           <button
@@ -602,25 +607,34 @@ export function RulesSheet({ onClose, toast }: SheetProps) {
             onClick={() => {
               setDrafts({ postRules: '', commentRules: '', filterRules: '' });
               resetAiRules();
-              toast('AI 规则已清空');
+              toast('三条底层规则已清空');
             }}
             className="flex h-[32px] shrink-0 items-center gap-1 rounded-full px-3 text-[13px] font-medium active:opacity-70"
             style={{ border: `1px solid ${t.border}`, color: t.secondary }}
-            aria-label="清空全部规则"
+            aria-label="清空全部底层规则"
           >
             <RotateCcw size={13} strokeWidth={2.2} />
-            清空
+            清空规则
           </button>
         </div>
 
         {/* 说明条 */}
         <div className="shrink-0 px-4 pb-2 text-[11.5px] leading-relaxed" style={{ color: t.secondary }}>
-          最高级玩法：这里的规则会拼接在所有生成提示词的 <span style={{ color: t.text, fontWeight: 600 }}>System Prompt 最前端</span>（最高优先级）——
-          发帖、评论、回复、私信全部遵守，修改后下一次生成立即生效。
+          底层规则拼接在所有生成提示词的 <span style={{ color: t.text, fontWeight: 600 }}>System Prompt 最前端</span>（最高优先级）；下面还能直接查看、修改全部
+          {FORUM_PROMPT_DEFS.length} 条生成提示词——发帖、评论、回复、私信的完整模板，修改后下一次生成立即生效。
         </div>
 
-        {/* 三块规则 */}
+        {/* 上半：三条底层规则 + 下半：全部生成提示词（同一滚动区） */}
         <div className="forum-gen-scroll min-h-0 flex-1 overflow-y-auto px-3 pb-[28px]">
+          {/* 段头：底层规则 */}
+          <div className="mb-2 mt-1 flex items-center justify-between px-1">
+            <div className="min-w-0 leading-tight">
+              <span className="text-[13px] font-bold">底层规则</span>
+              <span className="ml-[6px] text-[11px]" style={{ color: t.secondary }}>
+                {customized} 条自定义 · 拼在提示词最前端
+              </span>
+            </div>
+          </div>
           {RULE_SECTIONS.map((s) => (
             <div key={s.key} className="mb-2 rounded-2xl p-3" style={{ border: `1px solid ${drafts[s.key].trim() ? t.blue : t.border}`, background: drafts[s.key].trim() ? t.hover : 'transparent' }}>
               <div className="mb-[6px] flex items-center gap-[6px]">
@@ -673,6 +687,11 @@ export function RulesSheet({ onClose, toast }: SheetProps) {
           <p className="px-2 pb-2 pt-1 text-center text-[11px] leading-relaxed" style={{ color: t.secondary }}>
             留空的规则不注入（零开销）；空格/换行会被保留
           </p>
+
+          {/* 下半：全部生成提示词（v38 合入：完整展示可改可恢复默认） */}
+          <div className="mb-2 mt-3 border-t pt-3" style={{ borderColor: t.border }}>
+            <PromptCardsList toast={toast} />
+          </div>
         </div>
       </div>
     </div>

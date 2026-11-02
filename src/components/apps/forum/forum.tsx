@@ -50,7 +50,7 @@ import {
 import { FORUM_PROMPT_DEFS } from '@/lib/forum/prompt-defs';
 // 【多世界观】世界观切换 / NPC 矩阵 / AI 规则面板 + store 订阅（首页标签实时读）
 import { subscribeWorldview, worldviewSnapshot, countCustomRules } from '@/lib/forum/worldview-store';
-import { GenRangeRow, PromptSheet } from './prompt-sheet';
+import { GenRangeRow } from './prompt-sheet';
 import { WorldviewSheet } from './worldview-sheet';
 import { NpcMatrixSheet, RulesSheet } from './npc-sheet';
 import { XAvatar, XIcons, XLogo, WorldviewIcon, useXTheme } from './shared';
@@ -96,19 +96,16 @@ export default function ForumApp() {
   const [views, setViews] = useState<ViewSpec[]>([]);
   const [drawer, setDrawer] = useState(false);
   const [compose, setCompose] = useState(false);
-  /** v34 生成设置：每次生成帖子/评论条数范围（抽屉步进行）+ 提示词面板开关 */
+  /** v34 生成设置：每次生成帖子/评论条数范围（抽屉步进行） */
   const [genUi, setGenUi] = useState(() => {
     const s = getForumGenSettings();
     return { pMin: s.postCountMin, pMax: s.postCountMax, cMin: s.commentCountMin, cMax: s.commentCountMax };
   });
-  const [promptSheet, setPromptSheet] = useState(false);
-  /** 已自定义提示词条数（入口摘要；提示词面板关闭时刷新） */
-  const [ovCount, setOvCount] = useState(() => countPromptOverrides());
-  /** 【多世界观】三个管理面板开关 + 规则自定义条数角标 */
+  /** 【多世界观】三个管理面板开关 + AI 规则面板自定义总数角标（底层规则 + 提示词） */
   const [worldSheet, setWorldSheet] = useState(false);
   const [npcSheet, setNpcSheet] = useState(false);
   const [rulesSheet, setRulesSheet] = useState(false);
-  const [rulesCount, setRulesCount] = useState(() => countCustomRules());
+  const [rulesCount, setRulesCount] = useState(() => countCustomRules() + countPromptOverrides());
   /** 生成设置镜像 ref：步进处理器里同步更新——同一事件循环里连点也逐级累加 */
   const genUiRef = useRef(genUi);
   useEffect(() => {
@@ -881,7 +878,7 @@ export default function ForumApp() {
                     </button>
                   </div>
 
-                  {/* v34 生成设置：每次生成帖子/评论条数范围（X~Y 条）+ 提示词管理入口 */}
+                  {/* v34 生成设置：每次生成帖子/评论条数范围（X~Y 条） */}
                   <div className="mb-2 border-t pt-2" style={{ borderColor: t.border }}>
                     <div className="px-3 pb-[6px] text-[12px] font-bold tracking-wide" style={{ color: t.secondary }}>
                       生成设置
@@ -903,25 +900,6 @@ export default function ForumApp() {
                         bounds={COMMENT_COUNT_BOUNDS}
                         onBump={(which, d) => bumpGenRange('comments', which, d)}
                       />
-                      {/* 提示词管理：全部生成提示词查看/编辑，改完立即生效 */}
-                      <button
-                        type="button"
-                        onClick={() => setPromptSheet(true)}
-                        className="flex w-full items-center justify-between gap-2 rounded-xl px-3 py-[10px] text-left transition-colors active:opacity-70"
-                        style={{ background: t.hover }}
-                        aria-label="打开提示词管理面板"
-                      >
-                        <div className="flex min-w-0 flex-col gap-[1px]">
-                          <span className="text-[15px] font-medium">提示词</span>
-                          <span className="text-[12px] leading-snug" style={{ color: t.secondary }}>
-                            全部 {FORUM_PROMPT_DEFS.length} 条生成提示词
-                            {ovCount > 0 ? ` · ${ovCount} 条已自定义` : ' · 可查看与修改'}
-                          </span>
-                        </div>
-                        <span aria-hidden="true" className="shrink-0 text-[15px]" style={{ color: t.secondary }}>
-                          ›
-                        </span>
-                      </button>
                     </div>
                   </div>
                   {/* v36【多世界观】世界观与规则：切换世界观 / 管理 NPC 矩阵 / 修改 AI 规则 */}
@@ -983,7 +961,8 @@ export default function ForumApp() {
                         <div className="flex min-w-0 flex-col gap-[1px]">
                           <span className="text-[15px] font-medium">修改 AI 规则</span>
                           <span className="truncate text-[12px] leading-snug" style={{ color: t.secondary }}>
-                            发帖 / 评论 / 审核过滤{rulesCount > 0 ? ` · ${rulesCount} 条已自定义` : ' · 拼在提示词最前端'}
+                            3 条底层规则 + {FORUM_PROMPT_DEFS.length} 条提示词
+                            {rulesCount > 0 ? ` · ${rulesCount} 条已自定义` : ' · 全部可查看与修改'}
                           </span>
                         </div>
                         <span aria-hidden="true" className="shrink-0 text-[15px]" style={{ color: t.secondary }}>
@@ -1051,28 +1030,15 @@ export default function ForumApp() {
         {/* 发布弹层 */}
         {compose && <ComposeSheet onClose={() => setCompose(false)} onPublish={publish} />}
 
-        {/* v34 提示词管理面板（抽屉「提示词」入口打开；覆盖抽屉层） */}
-        {promptSheet && (
-          <PromptSheet
-            toast={toast}
-            onClose={() => {
-              setPromptSheet(false);
-              setOvCount(countPromptOverrides());
-              // 范围值同步刷新（面板不动范围，保险起见仍读一次）
-              const s = getForumGenSettings();
-              setGenUi({ pMin: s.postCountMin, pMax: s.postCountMax, cMin: s.commentCountMin, cMax: s.commentCountMax });
-            }}
-          />
-        )}
-
-        {/* v36【多世界观】三个管理面板（抽屉入口打开；覆盖抽屉层） */}
+        {/* v36【多世界观】三个管理面板（抽屉入口打开；覆盖抽屉层）。
+            v38：提示词面板并入「修改 AI 规则」（RulesSheet），关闭时刷总数角标 */}
         {worldSheet && <WorldviewSheet toast={toast} onClose={() => setWorldSheet(false)} />}
         {npcSheet && (
           <NpcMatrixSheet
             toast={toast}
             onClose={() => {
               setNpcSheet(false);
-              setRulesCount(countCustomRules());
+              setRulesCount(countCustomRules() + countPromptOverrides());
             }}
           />
         )}
@@ -1081,7 +1047,7 @@ export default function ForumApp() {
             toast={toast}
             onClose={() => {
               setRulesSheet(false);
-              setRulesCount(countCustomRules());
+              setRulesCount(countCustomRules() + countPromptOverrides());
             }}
           />
         )}
