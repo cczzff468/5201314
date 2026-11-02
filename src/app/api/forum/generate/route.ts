@@ -219,8 +219,33 @@ function violatesCommentLang(text: string, postLang: string): boolean {
   return false;
 }
 
+/** 常用聊天 emoji 白名单（v41 B6：真实网友会用少量 emoji；全套剥除后评论区
+ *  永远打不出表情）。与客户端 engine.filterEmoji 同口径：表情脸 + 常用手势
+ *  爱心火苗保留 ≤2 个，其余奇异符号照旧全剥。 */
+const EMOJI_KEEP_RE = /[\u{1F600}-\u{1F64F}\u{1F44D}\u{1F44C}\u{1F44F}\u{1F64C}\u{1F91D}\u{1F4AA}\u{2764}\u{2728}\u{1F525}\u{1F4AF}\u{1F389}\u{1F38A}]/u;
+
+/** emoji 过滤（v41 B6）：白名单常用 emoji 保留 ≤2 个，其余全剥。 */
+function filterEmoji(raw: string): string {
+  const cps = Array.from(raw);
+  const keepIdx: number[] = [];
+  cps.forEach((ch, i) => {
+    if (EMOJI_KEEP_RE.test(ch)) keepIdx.push(i);
+  });
+  const keepSet = new Set(keepIdx.slice(0, 2)); // 只保前 2 个白名单 emoji
+  let out = '';
+  for (let i = 0; i < cps.length; i++) {
+    const ch = cps[i];
+    const c = ch.codePointAt(0) ?? 0;
+    const isEmoji =
+      (c >= 0x1f000 && c <= 0x1faff) || (c >= 0x2600 && c <= 0x27bf) || (c >= 0xfe00 && c <= 0xfe0f) ||
+      (c >= 0x1f1e6 && c <= 0x1f1ff) || (c >= 0x2b00 && c <= 0x2bff);
+    if (!isEmoji || keepSet.has(i)) out += ch; // 非白名单 emoji 或超额：丢弃
+  }
+  return out;
+}
+
 /** 评论正文清洗（v9 乱码修复）：零宽/控制字符/替换符、拼接符连串、
- *  markdown 记号、emoji 一律清除；连续空白折叠。 */
+ *  markdown 记号全清除；v41（B6）emoji 改白名单过滤（常用表情保留 ≤2 个）。 */
 function sanitizeCommentText(raw: string): string {
   let t = raw;
   // 零宽字符、控制字符（保留 \n）、Unicode 替换符（乱码直接产物）
@@ -229,8 +254,8 @@ function sanitizeCommentText(raw: string): string {
   t = t.replace(/[~～|｜·•※]{2,}/g, ' ');
   // markdown 记号
   t = t.replace(/```+/g, '').replace(/[*_`#>]{1,3}(?=\s|$)/g, '');
-  // emoji（App 全线禁 emoji；评论区出现即清洗）
-  t = t.replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE00}-\u{FE0F}\u{1F1E6}-\u{1F1FF}\u{2B00}-\u{2BFF}]/gu, '');
+  // v41（B6）：emoji 白名单过滤（≤2 个常用表情，其余清除）
+  t = filterEmoji(t);
   return t.replace(/[ \t]{2,}/g, ' ').trim();
 }
 
@@ -735,6 +760,30 @@ export async function POST(req: Request) {
       const list = splitItems(raw, count, 24)
         .map((n) => n.replace(/^@/, '').trim())
         .filter((n) => n.length >= 2 && n.length <= 16);
+      // v41（C4）：不足额补试一次（模型数错行/被截断时不再直接短斤缺两）
+      if (list.length < count) {
+        try {
+          const raw2 = (
+            await completeWithFallback(config, [
+              ...messages,
+              { role: 'assistant', content: raw.slice(0, 1200) },
+              { role: 'user', content: `还差 ${count - list.length} 个网名，继续按同样格式补齐（只输出缺的，每行一个，不要重复已输出的）` },
+            ])
+          ).text;
+          const seen = new Set(list);
+          for (const n of splitItems(raw2, count - list.length, 24)
+            .map((x) => x.replace(/^@/, '').trim())
+            .filter((x) => x.length >= 2 && x.length <= 16)) {
+            if (list.length >= count) break;
+            if (!seen.has(n)) {
+              seen.add(n);
+              list.push(n);
+            }
+          }
+        } catch {
+          /* 补试失败：按现有结果返回（客户端用池子名兑底） */
+        }
+      }
       return NextResponse.json({ items: list });
     }
 
@@ -1019,7 +1068,9 @@ export async function POST(req: Request) {
       // v26：单调用线程上限 12→30（楼中楼需求「评论下面 1-5 人」+ 深层嵌套——
       // 每条一级评论 1~5 条直接回复、部分回复再被回复，一批常 20~40 线程）
       // v35：threads 增加可选 prev（同楼层已存在的回复——生成时明确避开，杜绝盖楼复读）
-      const threads = Array.isArray(body.threads)
+      // v41（C3）：过滤空内容 threads 时 personas 同步跟齐——客户端按全量列表
+      // 一一对应传人设，服务端单边 filter 会让人设错位（A 的回复安到 B 头上）
+      const threadsRaw = Array.isArray(body.threads)
         ? (body.threads as Record<string, unknown>[])
             .slice(0, 30)
             .map((h) => ({
@@ -1029,13 +1080,18 @@ export async function POST(req: Request) {
                 ? (h.prev as unknown[]).filter((x): x is string => typeof x === 'string').slice(0, 4).map((x) => x.slice(0, 80))
                 : [],
             }))
-            .filter((h) => h.content)
         : [];
+      const keepIdx = threadsRaw.map((h, i) => (h.content ? i : -1)).filter((i): i is number => i >= 0);
+      const threads = keepIdx.map((i) => threadsRaw[i]);
       if (!threads.length) return NextResponse.json({ error: 'threads 为空' }, { status: 400 });
+      // v41（C3）：客户端与 threads 等长传人设时按原始下标取（过滤后不错位）；
+      // 长度不匹配时退回旧版取模兑底
+      const personasAligned = personas.length === threadsRaw.length;
+      const personaOf = (i: number) => (personasAligned ? personas[keepIdx[i]] : personas[i % personas.length]);
       const expect = threads.length;
       const spec = threads
         .map((h, i) => {
-          const p = personas[i % personas.length];
+          const p = personaOf(i);
           const langNote =
             postLang === 'zh-Hans'
               ? p.lang !== 'zh-Hans'
@@ -1081,7 +1137,8 @@ export async function POST(req: Request) {
           role: 'user',
           // v15（用户强制要求）：用户消息开头 = 锚定句 + 原封不动的主帖正文与话题标签
           // v35：防复读铁律进用户消息（系统模板可能被用户覆盖，此处双保险）
-          content: `${anchorHeadOf(post)}\n\n${topicLine}${tenderLine}${scoopLine}\n\n评论区里有下面 ${expect} 条评论，请逐条写出对应的楼中楼回复（每条直接写正文，针对那条评论说的话回应并呼应主帖话题词，不要带任何@或「回复」前缀；输出 ${expect} 行）。防复读铁律：绝对不许重复被回复那条评论的核心词汇——对方说「代拍太可怕」你就绝不能再写「代拍可怕」，要么换完全不同的措辞谈同一件事，要么直接反驳/爆料/抖机灵换角度；多条回复针对同一条评论时（或楼层里已有人说过类似的话时），各自角度必须完全不同；回复正文里绝不许出现「thought」「废稿」等任何指令/规则字眼或 JSON 结构。\n${spec}\n${bjTimeLine()}`,
+          // v41（C2）：avoid 防重复表注入楼中楼——本帖最近说过的评论不再重复
+          content: `${anchorHeadOf(post)}\n\n${topicLine}${tenderLine}${scoopLine}${avoidLine}\n\n评论区里有下面 ${expect} 条评论，请逐条写出对应的楼中楼回复（每条直接写正文，针对那条评论说的话回应并呼应主帖话题词，不要带任何@或「回复」前缀；输出 ${expect} 行）。防复读铁律：绝对不许重复被回复那条评论的核心词汇——对方说「代拍太可怕」你就绝不能再写「代拍可怕」，要么换完全不同的措辞谈同一件事，要么直接反驳/爆料/抖机灵换角度；多条回复针对同一条评论时（或楼层里已有人说过类似的话时），各自角度必须完全不同；回复正文里绝不许出现「thought」「废稿」等任何指令/规则字眼或 JSON 结构。\n${spec}\n${bjTimeLine()}`,
         },
       ];
       const raw = (await completeWithFallback(config, messages)).text;
@@ -1163,7 +1220,13 @@ export async function POST(req: Request) {
         if (t) kept.push(t);
         byTarget.set(key, kept);
       });
-      return NextResponse.json({ items: list });
+      // v41（C3）：结果按原始 threads 下标回填——客户端按全量列表对位消费
+      //（服务端过滤过空内容线程，直接返回会把回复错位安到别的评论名下）
+      const outFull = threadsRaw.map(() => '');
+      keepIdx.forEach((orig, i) => {
+        outFull[orig] = list[i] ?? '';
+      });
+      return NextResponse.json({ items: outFull });
     }
 
     // ================= v33【AI 真人社交】角色驱动生成（charPost/charEngage/charReply） =================
@@ -1264,6 +1327,9 @@ export async function POST(req: Request) {
         const p = (body.post ?? {}) as Record<string, unknown>;
         const postContent = typeof p.content === 'string' ? p.content.slice(0, 600) : '';
         const mediaDesc = typeof p.mediaDesc === 'string' && p.mediaDesc.trim() ? `\n（帖子配图：${p.mediaDesc.slice(0, 160)}）` : '';
+        // v41（B8）：语言校验跟随帖子（客户端传 lang；中文帖才拒整句外语，
+        // 外语帖不再被写死的 zh-Hans 误杀全部评论）
+        const engageLang = typeof p.lang === 'string' && LANG_LABELS[p.lang] ? p.lang : 'zh-Hans';
         if (!postContent) return NextResponse.json({ error: 'post 为空' }, { status: 400 });
         const raw = (await completeWithFallback(config, [
           {
@@ -1298,7 +1364,8 @@ export async function POST(req: Request) {
         if (comment && structuredLeakIn(comment)) comment = '';
         // 锚定：评论必须接得上帖子内容（与服务端评论管线同口径）
         if (comment && !commentAnchored(comment, stripImgPh(postContent))) comment = '';
-        if (comment && violatesCommentLang(comment, 'zh-Hans')) comment = '';
+        // v41（B8）：语言跟随帖子（不再写死简体中文）
+        if (comment && violatesCommentLang(comment, engageLang)) comment = '';
         return NextResponse.json({ like, comment });
       }
 
@@ -1307,6 +1374,8 @@ export async function POST(req: Request) {
       const postAuthor = typeof body.postAuthor === 'string' ? body.postAuthor.slice(0, 24) : chName;
       const userComment = typeof body.userComment === 'string' ? body.userComment.slice(0, 300) : '';
       const thanks = body.thanks === true;
+      // v41（B8）：语言校验跟随主帖（客户端传 postLang；不再写死简体中文）
+      const replyLang = typeof body.postLang === 'string' && LANG_LABELS[body.postLang] ? body.postLang : 'zh-Hans';
       const mediaDesc =
         typeof body.mediaDesc === 'string' && body.mediaDesc.trim()
           ? `\n（帖子配图：${body.mediaDesc.slice(0, 160)}）`
@@ -1345,7 +1414,7 @@ export async function POST(req: Request) {
       if (
         text.length >= (thanks ? 8 : 10) &&
         text.length <= (thanks ? 80 : 130) &&
-        !violatesCommentLang(text, 'zh-Hans') &&
+        !violatesCommentLang(text, replyLang) &&
         !isBannedFiller(text) &&
         // v35：神回复同样禁止把指令原文/JSON 结构当话说（宁缺毋滥）
         !structuredLeakIn(text)
@@ -1356,7 +1425,7 @@ export async function POST(req: Request) {
     }
 
     if (kind === 'reply' || kind === 'dm') {
-      const authorRaw = body.author as { name?: unknown; persona?: unknown; lang?: unknown; matrix?: unknown } | undefined;
+      const authorRaw = body.author as { name?: unknown; persona?: unknown; lang?: unknown; matrix?: unknown; char?: unknown; relation?: unknown; mood?: unknown; memory?: unknown } | undefined;
       const name = typeof authorRaw?.name === 'string' ? authorRaw.name.slice(0, 24) : '网友';
       // 【多世界观】矩阵 NPC 的合并人设（身份+性格+口头禅）更长，放宽截断
       const persona =
@@ -1428,7 +1497,8 @@ export async function POST(req: Request) {
           {
             role: 'user',
             // v35：防复读指令进用户消息（系统模板可能被用户覆盖，此处双保险）
-            content: `${ctx}\n\n请以「${name}」的口吻回复这条楼层对话（直接输出回复正文，20-80 字口语化，不要带任何解释）。防复读：绝不许原样重复上一句对话的核心词汇——对方说「代拍太可怕」你就不能再写「代拍可怕」，要么换措辞要么换角度（反驳/爆料/抖机灵）；回复正文只能是纯文本，绝不许出现任何指令原文或 JSON 结构。${bjTimeLine()}` },
+            // v41（C2）：avoid 防重复表注入楼层回复——本楼最近说过的不再重复
+            content: `${ctx}${avoidLine}\n\n请以「${name}」的口吻回复这条楼层对话（直接输出回复正文，20-80 字口语化，不要带任何解释）。防复读：绝不许原样重复上一句对话的核心词汇——对方说「代拍太可怕」你就不能再写「代拍可怕」，要么换措辞要么换角度（反驳/爆料/抖机灵）；回复正文只能是纯文本，绝不许出现任何指令原文或 JSON 结构。${bjTimeLine()}` },
         ])).text;
         const text = sanitizeCommentText(stripReplyPrefix(raw));
         // v24 字数铁律（用户规范 20-80 字，留容差）：过短/过长 → 返回空
@@ -1459,17 +1529,40 @@ export async function POST(req: Request) {
             .map((h) => `${h.from === 'user' ? userName : name}：${typeof h.text === 'string' ? h.text.slice(0, 120) : ''}`)
             .join('\n')
         : '';
+      // v41（C1）：私信对齐 charReply 规格——对方是 AI 角色时带完整身份块
+      //（人设卡+关系+情绪+对用户的记忆）；普通网友保持轻量身份行
+      const isChar = authorRaw?.char === true;
+      const dmRelation = typeof authorRaw?.relation === 'string' ? authorRaw.relation.slice(0, 80) : '';
+      const dmMood = typeof authorRaw?.mood === 'string' ? authorRaw.mood.slice(0, 400) : '';
+      const dmMemory = typeof authorRaw?.memory === 'string' ? authorRaw.memory.slice(0, 2000) : '';
+      const identityBlock = [
+        isChar ? `# 你是谁（第一人称，严格保持，绝不跳出）\n你是「${name}」，${userName}的${dmRelation || '好友'}——你是一个有自己生活、脾气和说话习惯的真实的人，在 X 论坛有一个账号，你们在论坛私信里聊天。` : `你是中文论坛（X/Twitter 风格广场）的用户「${name}」，正在论坛私信里和${userName}聊天。`,
+        persona ? `【你的资料卡】\n${persona}` : '',
+        dmMood ? `【你此刻的心情】\n${dmMood}` : '',
+        dmMemory ? `【你对${userName}的记忆（你们真实经历过的事——聊天时自然运用，不要逐条复述）】\n${dmMemory}` : '',
+      ]
+        .filter(Boolean)
+        .join('\n\n') + '\n\n';
+      const chLine = isChar ? `你（${name}）` : `你`;
+      const memoryLine = isChar ? `你对TA的记忆` : `你们聊过的天`;
       const raw = (await completeWithFallback(config, [
         {
           role: 'system',
           content:
-            front + sysPrompt(promptOv, 'dm', { name, persona, userName }),
+            front + sysPrompt(promptOv, 'dm', { identityBlock, chLine, name, persona, memoryLine, userName }),
         },
-        { role: 'user', content: `最近的对话：\n${history || '（刚开始聊）'}\n\n请以「${name}」的口吻接下一条私信。${bjTimeLine()}` },
+        // v41（C2）：avoid 防重复表注入私信——对方最近说过的不再重复
+        { role: 'user', content: `最近的对话：\n${history || '（刚开始聊）'}${avoidLine}\n\n请以「${name}」的口吻接下一条私信。${bjTimeLine()}` },
       ])).text;
-      // v35：私信同样拦截泄露（指令原文/JSON 当话说）
+      // v35：私信同样拦截泄露（指令原文/JSON 当话说）；v41（C1）：长度校验对齐口径
       const dmText = cleanText(raw, 300);
-      return NextResponse.json({ text: structuredLeakIn(dmText) ? '' : dmText });
+      const dmOk =
+        dmText.length >= 2 &&
+        dmText.length <= 300 &&
+        !structuredLeakIn(dmText) &&
+        // v41（C1）：万能敷衍单条（「哈哈哈」「嗯嗯」）不再放行——与提示词红线同口径
+        !/^(:?哈{2,}|嗯{2,}|哦{2,}|是的呢|在呢)[。!！~～\s]*$/.test(dmText);
+      return NextResponse.json({ text: dmOk ? dmText : '' });
     }
 
     return NextResponse.json({ error: '未知 kind' }, { status: 400 });

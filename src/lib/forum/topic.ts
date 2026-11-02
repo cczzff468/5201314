@@ -629,15 +629,22 @@ export function personaBleedIn(comment: string, postAuthorName: string, commente
  *  （跨 2 个外来域，或单一外来域 ≥2 词）→ true（串线作废）。
  *  单字弱词只在 context 完全不含该字时才计（「剧」在保研帖没出现，
  *  「在剧里看到」的「剧」即外来；追剧帖里「剧」是本域不计）。
- *  context 一个领域都没命中 → 从宽放行（无从判定）。 */
+ *  context 一个领域都没命中 → 从宽放行（无从判定）。
+ *  v41（A3 修复）：弱领域帖（最高领域分 ≤2——「今天好累啊，奶茶都没心情喝」
+ *  这类闲聊帖只弱命中一个领域）不再执行本拦截：网友安慰「上班累了吧，你们
+ *  老板真行」提打工词是自然接话，旧版整条作废导致随手帖经常零评论、角色互动
+ *  空转。强领域帖（保研/装机/追星，分数 ≥3）照拦——那里串台仍是硬伤。 */
 export function offTopicIn(comment: string, context: string): boolean {
   const t = comment ?? '';
   const ctx = context ?? '';
   if (!t.trim() || !ctx.trim()) return false;
   // context 命中的全部领域（含低分顺带提及）+ 亲缘域
+  const ctxScores = domainScores(ctx);
   const ctxDomains = new Set<string>();
-  for (const s of domainScores(ctx)) ctxDomains.add(s.id);
+  for (const s of ctxScores) ctxDomains.add(s.id);
   if (!ctxDomains.size) return false;
+  // v41（A3）：弱领域帖从宽放行——最高领域分 ≤2 说明帖子没有明确话题阵地
+  if (ctxScores.length && ctxScores[0].score <= 2) return false;
   for (const id of [...ctxDomains]) {
     for (const k of DOMAIN_KIN[id] ?? []) ctxDomains.add(k);
   }

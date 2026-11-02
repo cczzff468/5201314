@@ -1540,6 +1540,16 @@ export function memHasForumFragment(contactId: string, postId: string, commentId
   }
 }
 
+/** 联系人的记忆碎片总数（论坛互动轮换的「好感/熟悉度」权重代理——
+ *  碎片多 = 互动多 = 与机主更熟，刷到 TA 帖子更可能停下来回应） */
+export function memCountFragments(contactId: string): number {
+  try {
+    return readFragments(contactId).length;
+  } catch {
+    return 0;
+  }
+}
+
 /**
  * 按追溯字段清理「动态来源」记忆碎片（删除动态/评论时级联调用，六.3）：
  * - 删动态传 { postId }：该动态相关的全部来源记忆（TA 发的动态/点赞/评论/回复/用户动态被看到）一并清掉，

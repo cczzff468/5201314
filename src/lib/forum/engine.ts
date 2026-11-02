@@ -39,6 +39,8 @@
  */
 
 import { kvGet, kvSet } from '@/lib/ios/idb-kv';
+// v41（B3）：致谢持久标记直连记忆库（like-thanks 去重）；D3 跨 App 主动消息
+import { memAddForumFragment, memHasForumFragment } from '@/lib/memory';
 import {
   COMMUNITY_DEFS,
   GEN_VERSION,
@@ -63,6 +65,7 @@ import {
   type ForumPost,
   forumContactsSnap,
   forumData,
+  mutateForum,
   refreshForumAuthors,
   resolveAuthor,
   saveForum,
@@ -78,8 +81,10 @@ import {
   charPersonaCard,
   charRecentPosts,
   charRelationLine,
+  dailyEventsFor,
   forumCharBriefs,
-  pickDailyEvents,
+  noteCharEngaged,
+  pickCharsWeighted,
   userPostsDigest,
   writeCharEngageMemory,
   writeCharOwnPostMemory,
@@ -94,6 +99,8 @@ import {
   worldviewApiPayload,
 } from './worldview-store';
 import { matrixNpcPersona, type MatrixNpc } from './worldview';
+// v41（D3）：角色刷到你的帖子 → 低概率跨 App 主动来微信/QQ 私聊
+import { maybeCrossAppPing } from './crossapp';
 
 // ---------------- pending 队列（跨刷新持久） ----------------
 
@@ -101,12 +108,14 @@ interface PendingJob {
   id: string;
   /** 到期时间戳 */
   due: number;
-  kind: 'replyToUserPost' | 'aiReplyBack' | 'dmReply' | 'charPost' | 'charEngage' | 'charReply';
+  kind: 'replyToUserPost' | 'aiReplyBack' | 'dmReply' | 'charPost' | 'charEngage' | 'charReply' | 'netLike';
   /** 相关帖子 id（reply 类）/ dm 对方 key（dmReply）/ charPost=charKey */
   postKey: string;
   meta: {
     authorKey?: AuthorKey;
     parentContent?: string;
+    /** netLike：是否发「赞了你的帖子」通知（仅用户自己的帖子才通知——v41 A4） */
+    notify?: boolean;
     /** aiReplyBack 增强：分组锚点（顶层评论/主帖 id） */
     rootId?: string;
     /** aiReplyBack 增强：主帖 id（上下文用） */
@@ -995,14 +1004,52 @@ function stripReplyPrefixClient(raw: string): string {
   return t;
 }
 
+/** 常用聊天 emoji 白名单（B6 v41：真实网友会用少量 emoji；全套剥除后角色永远
+ *  打不出表情，冷冰冰）。白名单 = 表情脸（U+1F600–1F64F）+ 常用手势爱心火苗
+ *  （👍👏🙏💪❤️✨🔥💯🎉）；数量限 ≤2 个，超出的从尾部删；其余奇异符号
+ *  （旗帜/技术符号/组合装饰）照旧全剥。 */
+const EMOJI_KEEP = /[\u{1F600}-\u{1F64F}\u{1F44D}\u{1F44C}\u{1F44F}\u{1F64C}\u{1F91D}\u{1F4AA}\u{2764}\u{2728}\u{1F525}\u{1F4AF}\u{1F389}\u{1F38A}]/u;
+
+/** emoji 过滤（B6 v41）：白名单常用 emoji 保留 ≤2 个，其余全剥。 */
+function filterEmoji(raw: string): string {
+  // 逐码点扫描（代理对安全）；只保前 2 个白名单 emoji，其余全剥
+  const cps = Array.from(raw);
+  const keepIdx: number[] = [];
+  cps.forEach((ch, i) => {
+    if (EMOJI_KEEP.test(ch)) keepIdx.push(i);
+  });
+  const keepSet = new Set(keepIdx.slice(0, 2));
+  let out = '';
+  for (let i = 0; i < cps.length; i++) {
+    const ch = cps[i];
+    const c = ch.codePointAt(0) ?? 0;
+    const isEmoji =
+      (c >= 0x1f000 && c <= 0x1faff) || (c >= 0x2600 && c <= 0x27bf) || (c >= 0xfe00 && c <= 0xfe0f) ||
+      (c >= 0x1f1e6 && c <= 0x1f1ff) || (c >= 0x2b00 && c <= 0x2bff);
+    if (!isEmoji || keepSet.has(i)) out += ch; // 非白名单 emoji 或超额：丢弃
+  }
+  return out;
+}
+
 /** 评论正文清洗（v9 乱码修复，与服务端 sanitizeCommentText 同口径）：
- *  零宽/控制字符/替换符、拼接符连串、markdown 记号、emoji 全部清除。 */
+ *  零宽/控制字符/替换符、拼接符连串、markdown 记号全清除；
+ *  v41（B6）：emoji 改白名单过滤（常用表情脸/手势保留 ≤2 个，其余照剥）。 */
 function sanitizeCommentClient(raw: string): string {
   let t = raw;
   t = t.replace(/[\u200B-\u200D\uFEFF\u2028\u2029]/g, '').replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '').replace(/\uFFFD/g, '');
   t = t.replace(/[~～|｜·•※]{2,}/g, ' ');
   t = t.replace(/```+/g, '').replace(/[*_`#>]{1,3}(?=\s|$)/g, '');
-  t = t.replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE00}-\u{FE0F}\u{1F1E6}-\u{1F1FF}\u{2B00}-\u{2BFF}]/gu, '');
+  t = filterEmoji(t);
+  return t.replace(/[ \t]{2,}/g, ' ').trim();
+}
+
+/** v41（C1）：私信文本轻量清洗（不剥 emoji——私聊表情更自然；只清控制字符/
+ *  markdown 记号/拼接符，折叠空白）。 */
+function sanitizeDmClient(raw: string): string {
+  let t = raw;
+  t = t.replace(/[\u200B-\u200D\uFEFF\u2028\u2029]/g, '').replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '').replace(/\uFFFD/g, '');
+  t = t.replace(/[~～|｜·•※]{2,}/g, ' ');
+  t = t.replace(/```+/g, '').replace(/[*_`#>]{1,3}(?=\s|$)/g, '');
   return t.replace(/[ \t]{2,}/g, ' ').trim();
 }
 
@@ -1687,6 +1734,12 @@ async function callSubReplyLayer(
         const topLevelTexts = dNow.posts
           .filter((s) => s.replyTo === ctx.post.id && s.content)
           .map((s) => s.content);
+        // v41（C2）：avoid 防重复注入楼中楼——本帖最近已说过的评论不再重复
+        const avoid = dNow.posts
+          .filter((s) => (s.replyTo === ctx.post.id || s.replyToPost) && s.content)
+          .sort((a, b) => b.createdAt - a.createdAt)
+          .slice(0, 12)
+          .map((s) => s.content.slice(0, 40));
         const r = (await callApi({
           kind: 'subreplies',
           post: { authorName: ctx.postAuthorName, content: ctx.post.content, mediaDesc: ctx.mediaDesc, lang: ctx.postLang },
@@ -1705,6 +1758,7 @@ async function callSubReplyLayer(
               ...(p.key.startsWith('mnpc:') ? { matrix: true } : {}),
             };
           }),
+          avoid,
           userName: resolveAuthor('user').name,
         })) as { items?: string[] };
         texts = Array.isArray(r.items)
@@ -2172,21 +2226,47 @@ function aiActivityOn(): boolean {
 }
 
 /** 抽屉「AI 活跃度」开关：开 → 重置各角色排程（几分钟内开始发帖）；
- *  关 → 不再排新主动帖（存量任务执行时也会被跳过；神回复不受影响）。 */
+ *  关 → 不再排新主动帖（存量任务执行时顺延不丢——v41 B5；神回复不受影响）。
+ *  v41（A6）：重开时错峰——firstPost 随机 + 按序错开，不再全部挤在同一分钟段；
+ *  lastPostAt 保留（不重置历史节奏，也不多等一个完整周期）。 */
 export function setForumAiActivity(on: boolean): void {
-  const d = { ...forumData() };
-  d.aiActivity = on;
+  mutateForum((d) => {
+    d.aiActivity = on;
+    if (on) {
+      const soc: NonNullable<ForumData['charSocial']> = { ...(d.charSocial ?? {}) };
+      forumCharBriefs().forEach((b, i) => {
+        soc[b.contactId] = {
+          lastPostAt: soc[b.contactId]?.lastPostAt ?? 0,
+          nextPostAt: Date.now() + CHAR_DELAY.firstPost() + i * (120_000 + Math.random() * 300_000),
+        };
+      });
+      d.charSocial = soc;
+    }
+  });
   if (on) {
-    const soc: NonNullable<ForumData['charSocial']> = {};
-    for (const b of forumCharBriefs(6)) soc[b.contactId] = { nextPostAt: Date.now() + CHAR_DELAY.firstPost() };
-    d.charSocial = soc;
+    // v41（B5）：挂起（顺延中）的 charPost 任务拉回近期执行——开关重开即恢复节奏，
+    // 而不是等到顺延的 due（可能远在 12 小时后）
+    const pend = loadPending();
+    let j = 0;
+    for (const job of Object.values(pend)) {
+      if (job.kind === 'charPost' && job.due > Date.now()) {
+        pend[job.id] = { ...job, due: Date.now() + CHAR_DELAY.firstPost() + j * 90_000 };
+        j++;
+      }
+    }
+    if (j) savePending(pend);
   }
-  saveForum(d);
+  runPending();
 }
 
 /** ForumScheduler 心跳（App 不打开也照常调度）：
  *  1. runPending 重挂到期任务（远期任务进入 90s 窗口时自动上 timer）；
- *  2. 活跃度开 → 每个角色按节奏排「主动发帖」任务（人设+记忆+情绪+今日事件）。 */
+ *  2. 活跃度开 → 窗口到期的角色按节奏排「主动发帖」任务（人设+记忆+情绪+今日事件）。
+ *  v41（A1+A2）：
+ *  - 全员参与轮换——窗口到期的角色进加权抽签，每拍最多排 2 个发帖任务
+ *    （旧的「发帖数前 6 」截断会让圈外角色永远轮不到）；
+ *  - 发帖间隔记账修复：窗口到期 → 短键的酝酿延迟后发帖，间隔一次性算清
+ *    （旧版 due = now + interval 再 + interval 记账，0.5~4.5h 实际跑成 1~9h）。 */
 export async function tickForumSocial(): Promise<void> {
   try {
     const d = forumData();
@@ -2194,36 +2274,65 @@ export async function tickForumSocial(): Promise<void> {
     if (!forumContactsSnap().length) await refreshForumAuthors(); // 角色快照兜底
     runPending();
     if (!aiActivityOn()) return;
-    const briefs = forumCharBriefs(6);
+    const briefs = forumCharBriefs(); // v41（A1）：全部角色（不再截断前 6）
     if (!briefs.length) return;
     const pend = loadPending();
     const hasJob = (key: string) => Object.values(pend).some((j) => j.kind === 'charPost' && j.meta.charKey === key);
     const now = Date.now();
-    const soc: NonNullable<ForumData['charSocial']> = { ...(d.charSocial ?? {}) };
+    // 窗口到期的候选（含从未排过的；已排队的不重复排）
+    const due = briefs.filter((b) => {
+      const st = d.charSocial?.[b.contactId];
+      return !(st?.nextPostAt && st.nextPostAt > now) && !hasJob(b.key);
+    });
+    if (!due.length) return;
+    // v41（A1+B1）：加权抽签每拍最多排 2 位（熟悉度+活跃度+噪声+冷却轮换）——
+    // 高频小圈子 → 低频全员轮换，人人都有发帖窗口
+    const winners = pickCharsWeighted(2, due);
+    if (!winners.length) return;
+    const soc: NonNullable<ForumData['charSocial']> = { ...(forumData().charSocial ?? {}) };
     let changed = false;
-    briefs.forEach((b, i) => {
-      const st = soc[b.contactId];
-      if (st?.nextPostAt && st.nextPostAt > now) return; // 还没到下一次发帖窗口
-      if (hasJob(b.key)) return; // 已有排队中的发帖任务
+    winners.forEach((b, i) => {
+      const st = d.charSocial?.[b.contactId];
       const first = !st?.lastPostAt && !b.postCount;
-      const due = now + (first ? CHAR_DELAY.firstPost() + i * (120_000 + Math.random() * 180_000) : CHAR_DELAY.postInterval());
-      addPending({ id: uid('j'), due, kind: 'charPost', postKey: b.key, meta: { charKey: b.key } });
-      soc[b.contactId] = { lastPostAt: st?.lastPostAt ?? 0, nextPostAt: due + CHAR_DELAY.postInterval() };
+      // v41（A2）：窗口到期后的酝酿延迟（3 秒~12 分钟——「今天想起来要发帖」），
+      // 发帖间隔在记账时一次算清：nextPostAt = 发帖时刻 + 新间隔
+      const delay = first
+        ? CHAR_DELAY.firstPost() + i * (120_000 + Math.random() * 180_000)
+        : 3_000 + Math.random() * 12 * 60_000;
+      const at = now + delay;
+      addPending({ id: uid('j'), due: at, kind: 'charPost', postKey: b.key, meta: { charKey: b.key } });
+      soc[b.contactId] = {
+        lastPostAt: st?.lastPostAt ?? 0,
+        nextPostAt: at + CHAR_DELAY.postInterval(),
+      };
       changed = true;
     });
-    if (changed) saveForum({ ...forumData(), charSocial: soc });
+    if (changed) {
+      // v41（A5）：合并式落盘——以最新快照为底，只覆盖本轮改动的角色条目
+      //（旧版整表覆盖会吞掉执行期间 charPost 任务写入的 lastPostAt）
+      mutateForum((latest) => {
+        const merged = { ...(latest.charSocial ?? {}) };
+        for (const [cid, st] of Object.entries(soc)) {
+          merged[cid] = { ...(merged[cid] ?? {}), ...st };
+        }
+        latest.charSocial = merged;
+      });
+    }
   } catch {
     /* 心跳失败静默 */
   }
 }
 
 /** 用户发帖后：每位论坛角色独立排队「看到帖子 → 决定点赞/评论」（延迟分钟级、彼此错开）。
- *  决策由 LLM 在任务执行时做（要不要赞、要不要评论、评论写什么——针对帖子具体内容）。 */
+ *  决策由 LLM 在任务执行时做（要不要赞、要不要评论、评论写什么——针对帖子具体内容）。
+ *  v41（A1+B1）：不再固定「发帖数前 4」——加权随机抽 2~4 位轮换
+ *  （熟悉度+活跃度+噪声），单角色 8h 冷却不重复；首位仍最错峰。 */
 export function queueCharEngagements(post: ForumPost): void {
   try {
     if (!aiActivityOn()) return;
-    const briefs = forumCharBriefs(4);
+    const briefs = pickCharsWeighted(2 + Math.floor(Math.random() * 3)); // 2~4 位轮换
     briefs.forEach((b, i) => {
+      noteCharEngaged(b.contactId);
       addPending({
         id: uid('j'),
         due: Date.now() + CHAR_DELAY.engage(i),
@@ -2239,45 +2348,50 @@ export function queueCharEngagements(post: ForumPost): void {
 }
 
 /** 角色帖子发布后：安排虚拟网友点赞 + 0~2 条评论（真实网友规则；秒级~分钟级到达）。
- *  评论走既有 replyToUserPost 管线（完整上下文 + 校验链 + 宁缺毋滥）。 */
+ *  评论走既有 replyToUserPost 管线（完整上下文 + 校验链 + 宁缺毋滥）。
+ *  v41：B2——点赞改持久 pending 任务（关页面不再丢，重开补发）；
+ *  B4——道具型 NPC（站姐/浪姐/绿茶）滤出点赞名单，评论者不与首位点赞者重复；
+ *  A4——角色帖的网友点赞/评论不再给机主发「赞了你的帖子/回复了你」通知
+ *  （帖子不是你发的，误归因）。 */
 function queueNetizenReactionsToCharPost(post: ForumPost): void {
   const next0 = forumData();
   const likers: AuthorKey[] = [];
   const npcCount = 1 + Math.floor(Math.random() * 2);
+  // v41（B4）：道具型 NPC 滤出（人设自带代言品牌/剧名/粉丝称呼，去点赞别人帖易串线）
   NPC_DEFS.slice()
+    .filter((n) => !POSTER_ONLY_NPCS.has(n.id))
     .sort(() => Math.random() - 0.5)
     .slice(0, npcCount)
     .forEach((l) => likers.push(`npc:${l.id}`));
   while (likers.length < 2 + Math.floor(Math.random() * 3)) likers.push(createDynNpc());
   void renameDynNpcsViaLlm(likers.filter((k) => k.startsWith('dyn:')));
-  // 点赞分批陆续到达（不是同一瞬间齐刷刷）
+  // v41（B2）：点赞改持久任务分批陆续到达（不是同一瞬间齐刷刷；关页面不丢）
   likers.forEach((k, i) => {
-    window.setTimeout(() => {
-      try {
-        const next = { ...forumData() };
-        const p = next.posts.find((x) => x.id === post.id);
-        if (!p) return;
-        p.likes = [...new Set([...p.likes, k])];
-        if (i === 0) {
-          next.notifications = [
-            { id: uid('n'), type: 'like' as const, fromKey: k, postId: post.id, createdAt: Date.now(), read: false },
-            ...next.notifications,
-          ];
-        }
-        saveForum(next);
-      } catch {
-        /* 静默 */
-      }
-    }, CHAR_DELAY.netLike(i));
+    addPending({
+      id: uid('j'),
+      due: Date.now() + CHAR_DELAY.netLike(i),
+      kind: 'netLike',
+      postKey: post.id,
+      meta: { authorKey: k, notify: false }, // A4：角色帖不通知机主
+    });
   });
   const replyCount = Math.random() < 0.8 ? 1 + (Math.random() < 0.4 ? 1 : 0) : 0;
+  // v41（B4）：评论者不与首位点赞者重复（同一人发两条）；从点赞名单里
+  // 挑没用过的，还不够就新建动态网友
+  const usedCommenters = new Set<AuthorKey>();
   for (let i = 0; i < replyCount; i++) {
+    let commenter = likers[npcCount + i];
+    if (!commenter || usedCommenters.has(commenter)) {
+      commenter =
+        likers.find((k) => !usedCommenters.has(k) && k !== likers[0]) ?? createDynNpc();
+    }
+    usedCommenters.add(commenter);
     addPending({
       id: uid('j'),
       due: Date.now() + CHAR_DELAY.netComment(i),
       kind: 'replyToUserPost',
       postKey: post.id,
-      meta: { authorKey: likers[npcCount + i] ?? likers[0], parentContent: post.content },
+      meta: { authorKey: commenter, parentContent: post.content },
     });
   }
   saveForum({ ...next0 });
@@ -2285,10 +2399,15 @@ function queueNetizenReactionsToCharPost(post: ForumPost): void {
 }
 
 /** 用户给角色的帖子点赞后（forum.tsx likeToggle 调用）：低概率角色来评论区回一句
- *  （「看到你给我点赞啦」式轻互动，可能返回空 = 选择不打扰）。 */
+ *  （「看到你给我点赞啦」式轻互动，可能返回空 = 选择不打扰）。
+ *  v41（B3）：持久致谢标记——同帖只致谢一次（快速赞↔取消↔再赞不叠加双份）；
+ *  排队去重仍在（在队任务不重复排）。 */
 export function queueCharThanksForLike(post: ForumPost): void {
   try {
     if (!aiActivityOn() || !post.authorKey.startsWith('char:')) return;
+    const contactId = post.authorKey.slice(5);
+    // v41（B3）：已致谢过的帖子不再排致谢任务（持久标记在记忆库里）
+    if (memHasForumFragment(contactId, post.id, 'like-thanks')) return;
     if (Math.random() > 0.3) return; // 30% 概率：真人也不会每次都回
     // 去重：同帖已有致谢任务排队时不重复排（点赞↔取消↔再点赞不叠加）
     const pend = loadPending();
@@ -2312,7 +2431,9 @@ export function queueCharThanksForLike(post: ForumPost): void {
 /** 用户发布帖子后调用：延迟点赞 + 0~2 条 AI 回复（持久 pending）。
  *  互动者也以动态真实感网友为主（点赞/回帖名单不重复）。
  *  v33【真人节奏】：点赞 15~90 秒陆续到达、评论 45 秒~5 分钟错开——不秒回；
- *  char 好友的点赞/评论改由 queueCharEngagements 独立管线（分钟级延迟 + LLM 决策）。 */
+ *  char 好友的点赞/评论改由 queueCharEngagements 独立管线（分钟级延迟 + LLM 决策）。
+ *  v41（B2）：点赞改持久 pending 任务（关页面不丢，重开补发）；
+ *  v41（B4）：道具型 NPC 滤出点赞名单；评论者不与首位点赞者重复。 */
 export function queueUserPostInteractions(post: ForumPost): void {
   const next0 = forumData();
   // 点赞名单：动态网友 + 矩阵阵容/内置 NPC 混合（3~5 位，不再全是老面孔）。
@@ -2325,7 +2446,9 @@ export function queueUserPostInteractions(post: ForumPost): void {
   let npcCount = likers.length;
   if (!cast.length) {
     npcCount = 1 + Math.floor(Math.random() * 2);
+    // v41（B4）：道具型 NPC 滤出（串线重灾区）
     NPC_DEFS.slice()
+      .filter((n) => !POSTER_ONLY_NPCS.has(n.id))
       .sort(() => Math.random() - 0.5)
       .slice(0, npcCount)
       .forEach((l) => likers.push(`npc:${l.id}`));
@@ -2333,36 +2456,26 @@ export function queueUserPostInteractions(post: ForumPost): void {
   while (likers.length < 3 + Math.floor(Math.random() * 3)) likers.push(createDynNpc());
   // LLM 起名：新建的点赞网友换 AI 生成的网名（通知/主页里都是 AI 起的名；失败保留占位名）
   void renameDynNpcsViaLlm(likers.filter((k) => k.startsWith('dyn:')));
-  // 点赞陆续到达（15~90s，真人刷到帖子的反应速度；首位带通知）
+  // v41（B2）：点赞改持久任务陆续到达（15~90s，真人刷到帖子的反应速度；首位带通知）
   likers.forEach((k, i) => {
-    window.setTimeout(() => {
-      try {
-        const next = { ...forumData() };
-        const p = next.posts.find((x) => x.id === post.id);
-        if (!p) return;
-        p.likes = [...new Set([...p.likes, k])];
-        if (i === 0) {
-          // 点赞也发通知（X：有人赞了你的帖子）
-          next.notifications = [
-            {
-              id: uid('n'),
-              type: 'like' as const,
-              fromKey: k,
-              postId: post.id,
-              createdAt: Date.now(),
-              read: false,
-            },
-            ...next.notifications,
-          ];
-        }
-        saveForum(next);
-      } catch {
-        /* 静默 */
-      }
-    }, 15_000 + Math.random() * 75_000 + i * 9000);
+    addPending({
+      id: uid('j'),
+      due: Date.now() + 15_000 + Math.random() * 75_000 + i * 9000,
+      kind: 'netLike',
+      postKey: post.id,
+      meta: { authorKey: k, notify: i === 0 },
+    });
   });
   const replyCount = Math.random() < 0.75 ? 1 + (Math.random() < 0.35 ? 1 : 0) : 0;
+  // v41（B4）：评论者兜底不再直接回退 likers[0]（同一人发两条）——
+  // 名单里没用过的优先，否则新建动态网友
+  const usedCommenters = new Set<AuthorKey>();
   for (let i = 0; i < replyCount; i++) {
+    let fallback = likers[npcCount + i];
+    if (!fallback || usedCommenters.has(fallback)) {
+      fallback = likers.find((k) => !usedCommenters.has(k)) ?? createDynNpc();
+    }
+    usedCommenters.add(fallback);
     addPending({
       id: uid('j'),
       due: Date.now() + 45_000 + Math.random() * 270_000 + i * (60_000 + Math.random() * 150_000),
@@ -2374,7 +2487,7 @@ export function queueUserPostInteractions(post: ForumPost): void {
         authorKey:
           cast.length && Math.random() < 0.6
             ? cast[Math.floor(Math.random() * cast.length)].key
-            : likers[npcCount + i] ?? likers[0],
+            : fallback,
         parentContent: post.content,
       },
     });
@@ -2514,9 +2627,36 @@ async function execJob(job: PendingJob): Promise<void> {
   try {
     // ================= 【AI 真人社交】角色任务 =================
 
+    // v41（B5）：活跃度开关关着时主动类任务不丢——顺延 12h 重排队
+    //（开关重开时 setForumAiActivity 会把挂起任务拉回近期）；
+    // 神回复/网友回复/点赞不受开关限制，照常执行
+    if ((job.kind === 'charPost' || job.kind === 'charEngage') && !aiActivityOn()) {
+      addPending({ ...job, due: Date.now() + 12 * 3600_000 });
+      return;
+    }
+
+    // v41（B2）：网友点赞（持久任务版——关页面不丢，执行时原子改写）
+    if (job.kind === 'netLike') {
+      const k = job.meta.authorKey;
+      if (!k) return;
+      mutateForum((next) => {
+        const p = next.posts.find((x) => x.id === job.postKey);
+        if (!p) return;
+        p.likes = [...new Set([...p.likes, k])];
+        // v41（A4）：只有用户自己的帖子才发「赞了你的帖子」通知
+        //（角色帖的网友点赞不再误归因给机主）
+        if (job.meta.notify && p.authorKey === 'user') {
+          next.notifications = [
+            { id: uid('n'), type: 'like' as const, fromKey: k, postId: p.id, createdAt: Date.now(), read: false },
+            ...next.notifications,
+          ];
+        }
+      });
+      return;
+    }
+
     if (job.kind === 'charPost') {
       // 角色主动发帖：人设+情绪+对用户的记忆+今日事件素材+用户最近帖子 → 一条完全「TA 本人」的帖子
-      if (!aiActivityOn()) return;
       const charKey = (job.meta.charKey ?? job.postKey) as AuthorKey;
       const brief = forumCharBriefs().find((b) => b.key === charKey);
       if (!brief) return;
@@ -2535,7 +2675,9 @@ async function execJob(job: PendingJob): Promise<void> {
             recent: charRecentPosts(charKey, 2).map((p) => p.content.slice(0, 60)),
           },
           userPosts: userPostsDigest(),
-          events: pickDailyEvents(2),
+          // v41（B7）：当日事件日内一致性——同一角色同一天固定拿同一组素材
+          //（不再「上午加班到九点、下午去了健身房」自相矛盾）
+          events: dailyEventsFor(charKey, 2),
           userName,
         })) as { content?: string; textImage?: string };
         content = typeof r.content === 'string' ? r.content.trim() : '';
@@ -2566,7 +2708,6 @@ async function execJob(job: PendingJob): Promise<void> {
 
     if (job.kind === 'charEngage') {
       // 角色刷到了用户的帖子：LLM 决定要不要点赞/评论（评论必须针对帖子具体内容）
-      if (!aiActivityOn()) return;
       const d0 = forumData();
       const post = d0.posts.find((x) => x.id === job.postKey);
       if (!post || post.authorKey !== 'user') return;
@@ -2575,6 +2716,8 @@ async function execJob(job: PendingJob): Promise<void> {
       if (!brief) return;
       const userName = resolveAuthor('user').name;
       const mediaDesc = await describePostMedia(post.media);
+      // v41（B8）：语言跟随帖子（中文帖才拒整句外语；外语帖不再误杀）
+      const postLang = detectPostLang(post.content);
       let like = false;
       let comment = '';
       try {
@@ -2587,7 +2730,8 @@ async function execJob(job: PendingJob): Promise<void> {
             mood: charMoodBlock(brief.contactId),
             memory: charMemoryDigest(brief.contactId),
           },
-          post: { content: post.content.slice(0, 600), mediaDesc },
+          // v41（B8）：postLang 随请求上送（服务端语言校验跟随帖子，不再写死中文）
+          post: { content: post.content.slice(0, 600), mediaDesc, lang: postLang },
           userName,
         })) as { like?: boolean; comment?: string };
         like = r.like === true;
@@ -2632,6 +2776,9 @@ async function execJob(job: PendingJob): Promise<void> {
       saveForum(next);
       // 记忆写入：「我给TA的帖子点了赞/我在TA的帖子下评论了……」
       writeCharEngageMemory(brief.contactId, { post, liked: like, comment: comment || undefined });
+      // v41（D3）：角色在评论区互动过后，低概率跨 App 主动来私聊——
+      //「刚在论坛看到你发的帖子」的自然开话；只在互动成功（赞/评）时触发
+      if (like || comment) void maybeCrossAppPing(brief, post, comment);
       return;
     }
 
@@ -2662,6 +2809,8 @@ async function execJob(job: PendingJob): Promise<void> {
           text: p.content,
         }));
       const mediaDesc = await describePostMedia(mainPost.media);
+      // v41（B8）：语言跟随主帖（服务端校验用；中文帖才拒整句外语）
+      const postLang = detectPostLang(mainPost.content, resolveAuthor(mainPost.authorKey).lang);
       let text = '';
       try {
         const r = (await callApi({
@@ -2679,6 +2828,7 @@ async function execJob(job: PendingJob): Promise<void> {
           history,
           mediaDesc,
           thanks,
+          postLang,
           userName,
         })) as { text?: string };
         text = typeof r.text === 'string' ? sanitizeCommentClient(stripReplyPrefixClient(r.text)) : '';
@@ -2715,6 +2865,18 @@ async function execJob(job: PendingJob): Promise<void> {
       // 记忆写入：「TA评论了我的帖子，我回复TA：……」
       if (!thanks && userReply) {
         writeCharReplyMemory(brief.contactId, { userComment: userReply.content, reply: text, postId: mainPost.id });
+      }
+      // v41（B3）：致谢持久标记——写过这条的同帖不再二次致谢（快速赞↔取消↔再赞不叠加）
+      if (thanks) {
+        try {
+          memAddForumFragment(
+            brief.contactId,
+            `${userName}给${resolveAuthor(mainPost.authorKey).name === brief.contact.nickname || brief.contact.name ? '我' : '我'}发的帖子点过赞，我在评论区谢过TA了`,
+            { postId: mainPost.id, kind: 'like', commentId: 'like-thanks' },
+          );
+        } catch {
+          /* 静默 */
+        }
       }
       return;
     }
@@ -2785,6 +2947,12 @@ async function execJob(job: PendingJob): Promise<void> {
 
       let text = '';
       try {
+        // v41（C2）：avoid 防重复注入——本楼最近说过的内容不再重复
+        const avoid = d.posts
+          .filter((p) => p.replyTo === groupId)
+          .sort((a, b) => a.createdAt - b.createdAt)
+          .slice(-8)
+          .map((p) => p.content.slice(0, 40));
         const r = (await callApi({
           kind: 'reply',
           author: {
@@ -2800,6 +2968,7 @@ async function execJob(job: PendingJob): Promise<void> {
           mediaDesc,
           history,
           repliedTo, // v26：用户回复的那条评论（"我回复的什么"）
+          avoid,
           userName,
         })) as { text?: string };
         text = typeof r.text === 'string' ? sanitizeCommentClient(stripReplyPrefixClient(r.text)) : '';
@@ -2839,17 +3008,24 @@ async function execJob(job: PendingJob): Promise<void> {
       // 精确被回复对象 = 用户的回复（多轮接话定位）
       if (job.kind === 'aiReplyBack' && job.meta.userReplyId) replyPost.replyToPost = job.meta.userReplyId;
       next.posts.push(replyPost);
-      next.notifications = [
-        {
-          id: uid('n'),
-          type: 'reply',
-          fromKey: authorKey,
-          postId: replyPost.id,
-          createdAt: replyPost.createdAt,
-          read: false,
-        },
-        ...next.notifications,
-      ];
+      // v41（A4）：通知只发「用户在对话链里」的场景——
+      // · aiReplyBack：用户在评论区发了回复，别人回 TA → 通知 ✓
+      // · replyToUserPost 且主帖是用户发的 → 通知 ✓
+      // · replyToUserPost 但主帖是角色帖（网友评论角色的帖子）→ 不通知（帖子不是你发的）
+      const notifyUser = job.kind === 'aiReplyBack' || target.authorKey === 'user';
+      if (notifyUser) {
+        next.notifications = [
+          {
+            id: uid('n'),
+            type: 'reply',
+            fromKey: authorKey,
+            postId: replyPost.id,
+            createdAt: replyPost.createdAt,
+            read: false,
+          },
+          ...next.notifications,
+        ];
+      }
       saveForum(next);
       return;
     }
@@ -2860,24 +3036,49 @@ async function execJob(job: PendingJob): Promise<void> {
       if (!dm) return;
       const peer = resolveAuthor(peerKey);
       const history = dm.messages.slice(-8).map((m) => ({ from: m.from === 'user' ? ('user' as const) : ('peer' as const), text: m.text }));
+      // v41（C1）：对方是 AI 角色时带完整身份块（人设卡+关系+情绪+对用户的记忆），
+      // 对齐 charReply 规格；普通网友保持轻量（网名+persona）
+      const brief = peerKey.startsWith('char:') ? forumCharBriefs().find((b) => b.key === peerKey) : null;
       let text = '';
       try {
+        // v41（C2）：私信也注入 avoid——对方最近说过的内容不再重复
+        const avoid = dm.messages
+          .filter((m) => m.from === peerKey)
+          .slice(-6)
+          .map((m) => m.text.slice(0, 40));
         const r = (await callApi({
           kind: 'dm',
-          author: { name: peer.name, persona: peer.persona || '' },
+          author: {
+            name: peer.name,
+            persona: peer.persona || '',
+            ...(brief
+              ? {
+                  relation: charRelationLine(brief.contact),
+                  mood: charMoodBlock(brief.contactId),
+                  memory: charMemoryDigest(brief.contactId),
+                  char: true,
+                }
+              : {}),
+          },
           history,
+          avoid,
           userName: resolveAuthor('user').name,
         })) as { text?: string };
-        text = typeof r.text === 'string' ? stripReplyPrefixClient(r.text) : '';
+        text = typeof r.text === 'string' ? sanitizeDmClient(stripReplyPrefixClient(r.text)) : '';
+        // v41（C1）：泄露拦截 + 长度校验（对齐全站「宁缺毋滥」口径）
+        if (text && (jsonLeakIn(text) || promptLeakIn(text))) text = '';
+        if (text && (text.length < 2 || text.length > 300)) text = '';
       } catch {
         text = '';
       }
-      if (!text) text = ['刚看到私信，在呢在呢', '哈哈你说得对', '嗯嗯，我也是这么想的', '等我想想再回你'][Math.floor(Math.random() * 4)];
-      const next = { ...forumData() };
-      const target = next.dms.find((x) => x.peerKey === peerKey);
-      if (!target) return;
-      target.messages.push({ id: uid('m'), from: peerKey, text: text.slice(0, 160), at: Date.now() });
-      saveForum(next);
+      // v41（C1）：删掉 4 句固定复读话术兜底——LLM 失败时私信不落垃圾句
+      //（与全站「宁缺毋滥」口径一致；用户再发一条会重新触发回复）
+      if (!text) return;
+      mutateForum((next) => {
+        const target = next.dms.find((x) => x.peerKey === peerKey);
+        if (!target) return;
+        target.messages.push({ id: uid('m'), from: peerKey, text: text.slice(0, 160), at: Date.now() });
+      });
       return;
     }
   } catch {

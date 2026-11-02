@@ -18,7 +18,7 @@
  */
 
 import { forumContactsSnap, forumData, isPostVisible, relTime, resolveAuthor, type ForumPost } from './core';
-import { memAddForumFragment, memHasForumFragment, memChatRecallBlock } from '@/lib/memory';
+import { memAddForumFragment, memCountFragments, memHasForumFragment, memChatRecallBlock } from '@/lib/memory';
 import { buildMoodBlock } from '@/lib/ios/ai-mood';
 import type { ContactRecord } from '@/lib/contacts';
 
@@ -37,9 +37,10 @@ export interface ForumCharBrief {
   postCount: number;
 }
 
-/** 论坛里的 AI 角色名单（联系人 kind='char'）：
- *  按「论坛发帖数降序 + 联系人列表顺序」排序——活跃者优先参与互动/主动发帖。
- *  cap 限制参与人数（0 = 全部）：太多角色同时互动会刷屏。 */
+/** 论坛里的 AI 角色名单（联系人 kind='char'）：全部返回，不再按发帖数截断。
+ *  v41（A1 修复）：旧版「按发帖数降序取前 N」会固化小圈子——头部角色永远第一个反应、
+ *  圈外角色永远轮不到；现在 cap 仅作展示排序参考，互动/发帖参与改由
+ *  pickCharsWeighted 加权随机 + 单角色冷却轮换（B1），人人有机会、熟的更常来。 */
 export function forumCharBriefs(cap = 0): ForumCharBrief[] {
   const d = forumData();
   const chars = forumContactsSnap().filter((c) => c.kind === 'char');
@@ -55,6 +56,65 @@ export function forumCharBriefs(cap = 0): ForumCharBrief[] {
   }));
   list.sort((a, b) => b.postCount - a.postCount);
   return cap > 0 ? list.slice(0, cap) : list;
+}
+
+// ---------------- v41（A1+B1）互动轮换：好感/记忆加权随机 + 单角色冷却 ----------------
+
+/** 单角色互动冷却（毫秒）：同一角色 8 小时内不重复参与「看到用户帖决定互动」，
+ *  避免固定某人永远第一个反应。 */
+const ENGAGE_COOL_MS = 8 * 3600_000;
+
+/** 内存态互动冷却表（contactId → 最近一次参与 charEngage 的时刻；
+ *  不落盘——冷却是「会话内轮换节奏」，App 重启清零反而像真人重新上线） */
+const engageLastAt = new Map<string, number>();
+
+/** 记录某角色刚参与了一次互动（排任务时调） */
+export function noteCharEngaged(contactId: string): void {
+  engageLastAt.set(contactId, Date.now());
+}
+
+/** 加权随机抽 k 位角色（不放回抽样；权重 = 熟悉度 + 活跃度 + 随机扰动）：
+ *  - 熟悉度：记忆碎片数（memCountFragments，0~25 封顶线性）——与机主互动多的角色更可能回应；
+ *  - 活跃度：论坛发帖数开方——爱发帖的人更常刷论坛（但不霸榜：开方压平数量级差距）；
+ *  - 随机扰动：×(1~2.4) 均匀噪声——保证低权重角色也有稳定出场概率；
+ *  - 冷却：8h 内刚参与过的权重归零（本轮不选），全部冷却时解禁最久的一位；
+ *  - from：限定候选子集（如「发帖窗口已到期」的角色），缺省 = 全部角色。
+ *  返回按抽中顺序排列（调用方按序错开延迟）。 */
+export function pickCharsWeighted(k: number, from?: ForumCharBrief[]): ForumCharBrief[] {
+  const all = from ?? forumCharBriefs(); // 全部角色参与抽签（A1：不再只有前 N 名）
+  if (!all.length || k <= 0) return [];
+  const now = Date.now();
+  const pool = all
+    .map((b) => {
+      const cooled = now - (engageLastAt.get(b.contactId) ?? 0) >= ENGAGE_COOL_MS;
+      const familiar = Math.min(memCountFragments(b.contactId), 25);
+      const active = Math.sqrt(b.postCount);
+      const noise = 1 + Math.random() * 1.4;
+      return { b, w: cooled ? (1 + familiar * 0.16 + active * 0.3) * noise : 0 };
+    })
+    .filter((x) => x.w > 0);
+  // 全员冷却中：解禁最久没互动的那位（保底不空转）
+  if (!pool.length) {
+    const stale = all.slice().sort((a, b) => (engageLastAt.get(a.contactId) ?? 0) - (engageLastAt.get(b.contactId) ?? 0))[0];
+    return stale ? [stale] : [];
+  }
+  const picked: ForumCharBrief[] = [];
+  let rest = pool.slice();
+  while (picked.length < k && rest.length) {
+    const total = rest.reduce((s, x) => s + x.w, 0);
+    let r = Math.random() * total;
+    let idx = rest.length - 1;
+    for (let i = 0; i < rest.length; i++) {
+      r -= rest[i].w;
+      if (r <= 0) {
+        idx = i;
+        break;
+      }
+    }
+    picked.push(rest[idx].b);
+    rest.splice(idx, 1);
+  }
+  return picked;
 }
 
 /** 角色发帖/互动用的紧凑人设卡（论坛语境：第一人称要点，≤600 字） */
@@ -172,6 +232,33 @@ export function pickDailyEvents(n = 2): string[] {
   return out;
 }
 
+// ---------------- B7（v41）：今日事件日内一致性 ----------------
+
+/** 角色 × 日 的当日事件缓存（内存 Map；App 生命周期内同角色同一天拿到同一组事件，
+ *  不会再「上午加班到九点、下午去了健身房」自相矛盾；跨天自动换新的一组） */
+const dayEventsCache = new Map<string, string[]>();
+
+function dayKeyOf(now = Date.now()): string {
+  const d = new Date(now);
+  return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
+}
+
+/** 某角色今天的生活事件（当天内固定；同一天反复发帖引用同一遭遇，人设自洽） */
+export function dailyEventsFor(charKey: string, n = 2): string[] {
+  const day = dayKeyOf();
+  const cacheKey = `${day}|${charKey}`;
+  let evts = dayEventsCache.get(cacheKey);
+  if (!evts) {
+    // 跨天清理旧键（Map 不无限增长）
+    for (const k of dayEventsCache.keys()) {
+      if (!k.startsWith(`${day}|`)) dayEventsCache.delete(k);
+    }
+    evts = pickDailyEvents(2); // 每人每天固定 2 条备用素材
+    dayEventsCache.set(cacheKey, evts);
+  }
+  return evts.slice(0, n);
+}
+
 // ---------------- 记忆写入（用户要求：极其重要） ----------------
 
 /** 机主显示名（记忆句式用；与论坛 resolveAuthor('user') 同源） */
@@ -186,7 +273,9 @@ export function writeUserPostMemory(post: ForumPost, briefs?: ForumCharBrief[]):
     const name = ownerName();
     const media = post.media?.length ? `（配了${post.media.length}张图）` : '';
     const content = post.content.replace(/\s+/g, ' ').slice(0, 80);
-    for (const ch of briefs ?? forumCharBriefs(6)) {
+    // v41（A1）：写记忆不再只写「发帖数前 6」——按加权随机抽 4 位轮换（熟的更可能记住，
+    // 但人人都可能看到），抽中即写（记忆面广了，互动轮换时熟悉度权重才有真实梯度）
+    for (const ch of briefs ?? pickCharsWeighted(4)) {
       if (memHasForumFragment(ch.contactId, post.id, 'post')) continue;
       memAddForumFragment(ch.contactId, `${name}今天在X论坛发帖说：「${content}」${media}`, {
         postId: post.id,

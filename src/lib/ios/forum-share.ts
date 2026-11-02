@@ -36,6 +36,7 @@ import {
   type ForumPost,
 } from '@/lib/forum/core';
 import { IMG_PLACEHOLDER } from '@/lib/forum/imgph';
+import { extractTopicWords } from '@/lib/forum/topic';
 
 // ---------------- 常量 / 事件 ----------------
 
@@ -258,7 +259,9 @@ interface AiReplyOpts {
   contactId: string;
 }
 
-/** 延时让 AI「看到分享」再回应（5~13s，真人在聊天的反应速度） */
+/** 延时让 AI「看到分享」再回应（5~13s，真人在聊天的反应速度）；
+ *  v41（D1）：三次全失败不再静默——2 分钟后自动补试一次（限一次，
+ *  避开「分享出去石沉大海」的空转体感） */
 export function scheduleForumShareAiReply(opts: AiReplyOpts): void {
   const key = `${opts.idp}:${opts.contactId}:${opts.postId}`;
   if (replyInFlight.has(key)) return;
@@ -266,10 +269,26 @@ export function scheduleForumShareAiReply(opts: AiReplyOpts): void {
   const delay = 5200 + Math.floor(Math.random() * 7800);
   window.setTimeout(() => {
     void runShareReply(opts)
+      .then((delivered) => {
+        // v41（D1）：未投递且未补试过 → 2 分钟后自动补试一次（分享不该石沉大海）
+        if (!delivered && !retryDone.has(key)) {
+          retryDone.add(key);
+          window.setTimeout(() => {
+            void runShareReply(opts)
+              .catch(() => undefined)
+              .finally(() => retryDone.delete(key));
+          }, 120_000);
+          return;
+        }
+        retryDone.delete(key);
+      })
       .catch(() => undefined)
       .finally(() => replyInFlight.delete(key));
   }, delay);
 }
+
+/** v41（D1）：已补试过一轮的分享回应（同一条分享最多补试一次） */
+const retryDone = new Set<string>();
 
 function extractJsonObject(raw: string): Record<string, unknown> | null {
   const t = (raw ?? '').trim();
@@ -319,29 +338,53 @@ async function callForumLlm(system: string, userContent: string): Promise<string
   return raw;
 }
 
-/** AI 可反向分享的候选帖：近期的他人主帖（排除被分享帖与用户自己的帖），取 3 条 */
+/** AI 可反向分享的候选帖（v41 D2：按机主兴趣挑，不再「近 12 帖随机抽 3」）：
+ *  兴趣画像 = 机主最近的主帖话题词（extractTopicWords）——候选帖与这些词
+ *  命中越多排序越靠前；无任何命中时退回近期随机（冷启动兼容）。 */
 function candidatePostsFor(excludeId: string, limit = 3): ForumPost[] {
   const d = forumData();
   const now = Date.now();
-  return d.posts
+  // 机主兴趣词：最近 5 条主帖的话题词去重汇总（聊什么 = 对什么感兴趣）
+  const myInterest = new Set<string>();
+  for (const p of d.posts
+    .filter((x) => x.authorKey === 'user' && x.replyTo === null && isPostVisible(x, now))
+    .sort((a, b) => b.createdAt - a.createdAt)
+    .slice(0, 5)) {
+    for (const w of extractTopicWords(p.content)) myInterest.add(w);
+  }
+  const pool = d.posts
     .filter((p) => p.id !== excludeId && p.replyTo === null && p.authorKey !== 'user' && isPostVisible(p, now))
     .sort((a, b) => b.createdAt - a.createdAt)
-    .slice(0, 12)
-    .sort(() => Math.random() - 0.5)
-    .slice(0, limit);
+    .slice(0, 24);
+  if (!pool.length) return [];
+  if (!myInterest.size) {
+    // 冷启动：无兴趣画像 → 近期随机（旧口径）
+    return pool.slice(0, 12).sort(() => Math.random() - 0.5).slice(0, limit);
+  }
+  // 兴趣命中打分（命中的话题词数 × 2 + 随机扰动 0~1）；同分随机打散
+  return pool
+    .map((p) => {
+      const text = postSnippet(p, 300);
+      let hits = 0;
+      for (const w of myInterest) if (w.length >= 2 && text.includes(w)) hits += 1;
+      return { p, score: hits * 2 + Math.random() };
+    })
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limit)
+    .map((x) => x.p);
 }
 
-async function runShareReply(opts: AiReplyOpts): Promise<void> {
+async function runShareReply(opts: AiReplyOpts): Promise<boolean> {
   const { postId, idp, contactId } = opts;
   const post = forumData().posts.find((p) => p.id === postId);
-  if (!post) return; // 帖子已被删除 → 不回应
+  if (!post) return false; // 帖子已被删除 → 不回应
   let contact: ContactRecord | null = null;
   try {
     contact = await getContact(contactId);
   } catch {
     contact = null;
   }
-  if (!contact || contact.kind !== 'char') return;
+  if (!contact || contact.kind !== 'char') return false;
 
   const app = idp;
   const sessionKey = `${app}:${contact.id}`;
@@ -403,7 +446,7 @@ async function runShareReply(opts: AiReplyOpts): Promise<void> {
     // v40：多行回复合并成一条（旧版只取首行，第二句凭空蒸发）；120 字上限防长篇大论
     .join(' ')
     .slice(0, 120);
-  if (!reply) return;
+  if (!reply) return false;
 
   // 反向分享：shareBack 命中候选帖 → AI 也发一张帖子卡（AI 分享给我，卡片同款）
   const shareBackPost = candidates.find((c) => c.id === (parsed?.shareBack ?? '').trim()) ?? null;
@@ -441,6 +484,7 @@ async function runShareReply(opts: AiReplyOpts): Promise<void> {
   }
 
   await deliverPeerMsgs(app, contact, outMsgs);
+  return true;
 }
 
 /** AI 回应消息投递（落库 + 灵动岛通知 + 未读角标；与主动消息/tb 决策同管线） */

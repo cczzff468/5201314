@@ -1474,12 +1474,27 @@ export function forumData(): ForumData {
   return cache;
 }
 
-/** 写穿（内存 + 异步落盘）+ 广播 */
+/** 写穿（内存 + 异步落盘）+ 广播。
+ *  v41（A5）：通知数组封顶 200 条——历史通知不参与任何逻辑（通知页也只展示
+ *  最近 50 条），无限增长只会让全量快照越写越大、后台任务互拷越来越慢。 */
 export function saveForum(next: ForumData): void {
+  if (Array.isArray(next.notifications) && next.notifications.length > 200) {
+    next.notifications = next.notifications.slice(0, 200);
+  }
   cache = next;
   rev += 1;
   void kvSet(FORUM_KEY, next);
   if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent(CHANGED_EVENT));
+}
+
+/** 原子读改写（v41 A5）：读最新快照 → fn 就地修改 → 落盘。
+ *  替代「先 {...forumData()} 快照、中间隔了 await、回来再 saveForum」的散写——
+ *  多个后台任务并行时旧快照会互吞对方的写入（通知/点赞/charSocial 覆盖丢失）。
+ *  fn 必须同步（无 await），否则原子性失效。 */
+export function mutateForum(fn: (d: ForumData) => void): void {
+  const next = { ...forumData() };
+  fn(next);
+  saveForum(next);
 }
 
 export function subscribeForum(cb: () => void): () => void {
