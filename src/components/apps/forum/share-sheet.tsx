@@ -172,7 +172,7 @@ export function ForumShareSheet({
               <span className="min-w-0 flex-1">
                 <span className="block text-[15px] font-medium">复制链接</span>
                 <span className="block text-[12px]" style={{ color: t.secondary }}>
-                  复制帖子链接到剪贴板
+                  复制后粘贴发给 AI 好友，TA 能看懂帖子与评论
                 </span>
               </span>
             </button>

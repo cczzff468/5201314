@@ -12,7 +12,7 @@ import { NextResponse } from 'next/server';
  *   post?: { content, mediaDesc? },                    // charEngage：被看的用户帖子
  *   postContent?/postAuthor?/userComment?/history?/thanks?,  // charReply：神回复/点赞致谢上下文
  *   items?: { name, persona?, community?, topic?, lang? }[],  // posts：批量生成多位作者的帖子（一次最多 24 条；lang = 惯用语言）
- *   count?: number,                     // names：生成几个网名（1~30）；comments：生成几条评论（10~30）
+ *   count?: number,                     // names：生成几个网名（1~30）
  *   posts?: { id, authorName, content, lang }[],       // multiComments：一批帖子各生成几条一级评论（播种期专用，一次 LLM 调用）
  *   perPost?: number,                   // multiComments：每帖几条评论（3~8）
  *   author?: { name, persona?, lang? },  // reply/dm：说话人（lang = 惯用语言）
@@ -659,7 +659,7 @@ export async function POST(req: Request) {
       const spec = items
         .map((it, i) => {
           const mem = it.recent.length
-            ? `；TA最近发过：${it.recent.map((r) => `「${r.slice(0, 40)}」`).join('、')}——这次可以接上之前的话疸（比如上次抱怨没买、这次晒到手；上次说瓜没意思、这次说看吧我早说了）`
+            ? `；TA最近发过：${it.recent.map((r) => `「${r.slice(0, 40)}」`).join('、')}——这次可以接上之前的话茬（比如上次抱怨没买、这次晒到手；上次说瓜没意思、这次说看吧我早说了）`
             : '';
           // v10：风格分配（客户端指定优先，缺省加权随机）；同一批内尽量不重样
           // v29：字数档独立等权抽签+档内点值——服务端随机保证字数分布差距极大
@@ -787,10 +787,12 @@ export async function POST(req: Request) {
         },
       ];
       const raw = (await completeWithFallback(config, messages)).text;
-      const parsed = parseLooseJSON<unknown[]>(extractThinkBlocks(raw ?? '').text);
       const byId = new Map(posts.map((p) => [p.id, p]));
-      const out = posts.map((p) => ({ postId: p.id, comments: [] as string[] }));
-      if (Array.isArray(parsed)) {
+      // v40：解析+校验链抽成函数（重试复用）——非法 JSON / postId 对不上时按空评论返回
+      const collect = (src: string): { postId: string; comments: string[] }[] => {
+        const parsed = parseLooseJSON<unknown[]>(extractThinkBlocks(src ?? '').text);
+        const out = posts.map((p) => ({ postId: p.id, comments: [] as string[] }));
+        if (Array.isArray(parsed)) {
         for (const o of parsed) {
           if (!o || typeof o !== 'object' || Array.isArray(o)) continue;
           const rec = o as Record<string, unknown>;
@@ -833,6 +835,29 @@ export async function POST(req: Request) {
             target.comments.push(s);
             if (target.comments.length >= perPost) break;
           }
+        }
+        }
+        return out;
+      };
+      let out = collect(raw);
+      // v40：整批有效评论不足半数（JSON 解析失败/大量废稿）→ 严格重试一次（与 posts/comments 同口径）
+      const totalOf = (o: { comments: string[] }[]) => o.reduce((n, x) => n + x.comments.length, 0);
+      if (totalOf(out) < Math.ceil((posts.length * perPost) / 2)) {
+        try {
+          const raw2 = (
+            await completeWithFallback(config, [
+              ...messages,
+              { role: 'assistant', content: raw.slice(0, 1500) },
+              {
+                role: 'user',
+                content: `你上一次的输出不是合法的 JSON 数组（或大量评论无效被过滤）。重新输出：恰好 ${posts.length} 个对象、每个只含 postId 和 comments（每帖 ${perPost} 条 3~100 字评论）的 JSON 数组，postId 必须与输入列表完全相同，除 JSON 本身外禁止任何文字，不要代码围栏。`,
+              },
+            ])
+          ).text;
+          const retry = collect(raw2);
+          if (totalOf(retry) > totalOf(out)) out = retry;
+        } catch {
+          /* 重试失败：按现有结果返回（客户端宁缺毋滥） */
         }
       }
       return NextResponse.json({ items: out });
@@ -986,7 +1011,8 @@ export async function POST(req: Request) {
             /* 重试失败：按现有结果返回，客户端不铺模板（宁缺毋滥） */
           }
         }
-        return NextResponse.json({ items: list });
+        // v40：personas 与评论一一对应（第 N 条对应第 N 位网友）：超发/逐行兑底解析的多余条目截掉
+        return NextResponse.json({ items: list.slice(0, expect) });
       }
 
       // subreplies：给 threads 里的每条评论各写一条回复（来自 personas 对应网友）
@@ -1171,7 +1197,7 @@ export async function POST(req: Request) {
           ? (body.events as unknown[]).filter((x): x is string => typeof x === 'string').slice(0, 4)
           : [];
         const { plan: lp, target } = pickLenPlan();
-        const raw = (await completeWithFallback(config, [
+        const messages: LLMMessage[] = [
           {
             role: 'system',
             content:
@@ -1191,13 +1217,15 @@ export async function POST(req: Request) {
             content:
               [
                 userPosts ? `【${userName}最近在论坛发的帖子（你刷到了，可以视心情回应/吐槽/关心，也可以无视）】\n${userPosts}` : '',
-                events.length ? `【你今天的生活素材（选0~2个融入，也可完全不用）】\n${events.map((e) => `- ${e}`).join('\n')}` : '',
+                // v40：事件条目截断（与其余素材同口径，防超长输入打爆提示词）
+                events.length ? `【你今天的生活素材（选0~2个融入，也可完全不用）】\n${events.map((e) => `- ${e.slice(0, 200)}`).join('\n')}` : '',
                 `请以「${chName}」的口吻发这条帖子（直接输出严格JSON）。${bjTimeLine()}`,
               ]
                 .filter(Boolean)
                 .join('\n\n'),
           },
-        ])).text;
+        ];
+        const raw = (await completeWithFallback(config, messages)).text;
         // 解析+校验复用 posts 管线（sanitize/四档字数/配图三元校验/话题规范化）
         const parsed = extractPostItems(raw);
         const aligned = alignPostItems(parsed, 1, [chName], new Set());
@@ -1205,15 +1233,25 @@ export async function POST(req: Request) {
         if (item && item.content) {
           return NextResponse.json({ content: item.content, textImage: item.textImage });
         }
-        // 严格重试一次（强调JSON格式与字数档）
-        const raw2 = (await completeWithFallback(config, [
-          {
-            role: 'system',
-            content: `上一次输出无效。你只能输出一个严格合法的JSON对象（{"thought","content","has_image","image_description"}），content字数必须落在${lp.min}~${lp.max}字。其他一切文本都会作废。`,
-          },
-          { role: 'user', content: `${raw.slice(0, 400)}\n\n重新以「${chName}」的口吻输出这条帖子（严格JSON）。${bjTimeLine()}` },
-        ])).text;
-        const aligned2 = alignPostItems(extractPostItems(raw2), 1, [chName], new Set());
+        // 严格重试一次（强调JSON格式与字数档）；v40：保留原 system（人设+情绪+记忆+提示词
+        // 覆盖都在里面——重试不能丢掉角色口吻），只追加纠偏指令；并包 try/catch 防重试
+        // 异常把可降级的空结果升级成 500
+        let raw2 = '';
+        try {
+          raw2 = (
+            await completeWithFallback(config, [
+              ...messages,
+              { role: 'assistant', content: raw.slice(0, 400) },
+              {
+                role: 'user',
+                content: `你上一次的输出无效（不是合法 JSON 或字数档不符）。重新以「${chName}」的口吻输出这条帖子：一个严格合法的 JSON 对象（{"thought","content","has_image","image_description"}），content 字数必须落在${lp.min}~${lp.max} 字，除 JSON 本身外禁止任何文字，不要代码围栏。`,
+              },
+            ])
+          ).text;
+        } catch {
+          /* 重试失败：返回空（客户端宁缺毋滥） */
+        }
+        const aligned2 = raw2 ? alignPostItems(extractPostItems(raw2), 1, [chName], new Set()) : [];
         const item2 = aligned2[0];
         return NextResponse.json({
           content: item2?.content ?? '',
@@ -1235,9 +1273,25 @@ export async function POST(req: Request) {
           },
           { role: 'user', content: `【${userName}的帖子】\n${postContent}${mediaDesc}\n\n请决定你的反应（严格JSON）。${bjTimeLine()}` },
         ])).text;
-        const parsed = parseLooseJSON<Record<string, unknown>>(extractThinkBlocks(raw).text) ?? {};
+        // v40：数组包裹/畸形 JSON 兑底——[{...}] 取首个对象；整体解析失败时按
+        // "comment"/"like" 字段正则恢复（一次点赞/评论决策不因格式问题白给）
+        const parsedAny = parseLooseJSON<unknown>(extractThinkBlocks(raw).text);
+        let parsed: Record<string, unknown> = {};
+        if (Array.isArray(parsedAny)) {
+          parsed = (parsedAny.find((x) => x && typeof x === 'object' && !Array.isArray(x)) as Record<string, unknown> | undefined) ?? {};
+        } else if (parsedAny && typeof parsedAny === 'object') {
+          parsed = parsedAny as Record<string, unknown>;
+        }
+        if (!('comment' in parsed) && !('like' in parsed)) {
+          const text = extractThinkBlocks(raw).text;
+          const cm = text.match(/"comment"\s*:\s*"((?:[^"\\]|\\.)*)"/);
+          if (cm) parsed = { ...parsed, comment: unescapeJsonStr(cm[1]) };
+          if (/"like"\s*:\s*true/.test(text)) parsed = { ...parsed, like: true };
+        }
         const like = parsed.like === true;
-        let comment = typeof parsed.comment === 'string' ? sanitizeCommentText(stripReplyPrefix(parsed.comment)) : '';
+        // v40：先 cleanText（剥引号包裹/舞台指示）再做长度与内容校验——旧序校验后
+        // 再截断可能跌破下限，把合格评论误杀
+        let comment = typeof parsed.comment === 'string' ? cleanText(sanitizeCommentText(stripReplyPrefix(parsed.comment)), 150) : '';
         if (comment && (comment.length < 15 || comment.length > 150)) comment = '';
         if (comment && (isBannedFiller(comment) || universalPhraseIn(comment))) comment = '';
         // v35：JSON 残留 / 指令泄露 → 作废（角色评论同样不能把 thought 字段吐出来）
@@ -1245,7 +1299,7 @@ export async function POST(req: Request) {
         // 锚定：评论必须接得上帖子内容（与服务端评论管线同口径）
         if (comment && !commentAnchored(comment, stripImgPh(postContent))) comment = '';
         if (comment && violatesCommentLang(comment, 'zh-Hans')) comment = '';
-        return NextResponse.json({ like, comment: comment ? cleanText(comment, 150) : '' });
+        return NextResponse.json({ like, comment });
       }
 
       // ---- charReply：神回复（用户评论了角色的帖/评论） / thanks（用户点赞后的轻回应） ----
@@ -1286,7 +1340,8 @@ export async function POST(req: Request) {
               .join('\n\n'),
         },
       ])).text;
-      const text = sanitizeCommentText(stripReplyPrefix(raw));
+      // v40：先 cleanText 再校验长度（cleanText 剥离包裹后可能跌破下限——校验必须对着最终文本）
+      const text = cleanText(sanitizeCommentText(stripReplyPrefix(raw)), 130);
       if (
         text.length >= (thanks ? 8 : 10) &&
         text.length <= (thanks ? 80 : 130) &&
@@ -1295,7 +1350,7 @@ export async function POST(req: Request) {
         // v35：神回复同样禁止把指令原文/JSON 结构当话说（宁缺毋滥）
         !structuredLeakIn(text)
       ) {
-        return NextResponse.json({ text: cleanText(text, 130) });
+        return NextResponse.json({ text });
       }
       return NextResponse.json({ text: '' });
     }

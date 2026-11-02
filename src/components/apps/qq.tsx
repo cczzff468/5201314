@@ -160,7 +160,7 @@ import { MT_SHARE_CARD_EVENT } from '@/lib/ios/mt-order-share';
 import { MtShareBubble } from './mt-share-card';
 import { TbPayBubble, TbProxyDetailPage, TbShareBubble, TbExpressPicker } from './tb-share-cards';
 import { tbCreateOrderShare, tbGetProxy, tbProxyHistoryLine, tbProxyMeHistoryLine, tbReshareProxy, tbShareHistoryLine, stripTbEchoText, TB_PROXY_CARD_EVENT, TB_SHARE_CARD_EVENT } from '@/lib/ios/tb-share-proxy';
-import { FORUM_SHARE_CARD_EVENT, forumShareHistoryLine } from '@/lib/ios/forum-share';
+import { FORUM_SHARE_CARD_EVENT, buildForumShareCardMsg, forumShareHistoryLine, noteForumLinkSharedToChat, resolveForumLinkPost } from '@/lib/ios/forum-share';
 import { ForumShareBubble } from './forum/share-card';
 import CoupleRelBubble from '@/components/apps/couple-rel-bubble';
 import CouplePactBubble from '@/components/apps/couple-pact-bubble';
@@ -6050,13 +6050,17 @@ function ChatPage({
     if (staged.length > 0) {
       const textMsg: QQMsg = { id: uid(), role: 'me', content: text, time: Date.now(), quote: quote ?? undefined, unread: true };
       const created: QQMsg[] = staged.map((p) => ({ id: uid(), role: 'me', content: p.src, time: Date.now(), kind: 'image', unread: true }));
+      // v40【复制链接→发给AI】同微信：粘贴 X 论坛帖子链接发送 → 文字后跟一张帖子分享卡 + 写记忆
+      const linkPost = peer.id !== me.id ? resolveForumLinkPost(text) : null;
+      const linkCard = linkPost ? buildForumShareCardMsg(linkPost) : null;
+      if (linkPost) void noteForumLinkSharedToChat({ idp: 'qq', contactId: peer.id, post: linkPost });
       pendingImgsRef.current = [];
       setPendingImgs([]);
       setInput('');
       clearChatDraft('qq', peer.id); // Task 40 草稿箱：发送成功清空草稿
       setQuote(null);
       // 显示设置 › 已读回执：append 时把 TA 的未读全部转已读；我的新消息已带 unread: true
-      for (const msg of [textMsg, ...created]) setMsgs((prev) => [...qqMarkPeerRead(prev), msg]);
+      for (const msg of [textMsg, ...(linkCard ? [linkCard] : []), ...created]) setMsgs((prev) => [...qqMarkPeerRead(prev), msg]);
       // 给自己发消息：只记录，不触发 AI 回复，也不计密友值
       if (peer.id === me.id) return;
       // 对方正在回复（流式接收或连发投递未清空）：文字+图片整批走排队补跑口径（与单发文字/图片一致）。
@@ -6073,7 +6077,7 @@ function ChatPage({
         markPendingBatch(sessionKey, true);
         return;
       }
-      runAiTurnRef.current?.(textMsg, created);
+      runAiTurnRef.current?.(textMsg, linkCard ? [linkCard, ...created] : created);
       return;
     }
     // 文字转语音发送：合成语音气泡（transcript 带原文，AI 直接读得到内容）；失败只 toast 不发文字
@@ -6082,6 +6086,12 @@ function ChatPage({
       return;
     }
     const userMsg: QQMsg = { id: uid(), role: 'me', content: text, time: Date.now(), quote: quote ?? undefined, unread: true };
+    // v40【复制链接→发给AI】同微信：粘贴 X 论坛帖子链接发送 → 文字后跟一张帖子分享卡
+    //（AI 回合读卡即知帖子正文与热门评论，并异步写一条「TA把帖子链接发给了我」记忆）
+    const linkPost = peer.id !== me.id ? resolveForumLinkPost(text) : null;
+    const linkCard = linkPost ? buildForumShareCardMsg(linkPost) : null;
+    if (linkPost) void noteForumLinkSharedToChat({ idp: 'qq', contactId: peer.id, post: linkPost });
+    const outbound = [userMsg, ...(linkCard ? [linkCard] : [])];
     // 对方正在回复（流式接收或连发投递未清空，投递可拖到流结束后数秒）：消息照常入列并排队，
     // 「流收尾且投递完毕」后自动补跑回复——不再静默丢弃（旧版直接 return：消息滞留输入框，
     // 看起来像「发了消息没人理」，AI 下一轮自然接不上话）。投递中也排队：否则旧回复尾部
@@ -6091,7 +6101,7 @@ function ChatPage({
       setInput('');
       clearChatDraft('qq', peer.id); // Task 40 草稿箱：消息已入列即清草稿（重进不回显）
       setQuote(null);
-      setMsgs((prev) => [...qqMarkPeerRead(prev), userMsg]);
+      setMsgs((prev) => [...qqMarkPeerRead(prev), ...outbound]);
       markDeliverBoundary(sessionKey, userMsg.id);
       qqQueueAdd(peer.id);
       // 37-a：按钮流式中不再禁用，排队补跑统一给 toast 反馈（消息已上屏但回复要等上一轮走完）
@@ -6103,12 +6113,12 @@ function ChatPage({
     setQuote(null);
     // 给自己发消息：只记录，不触发 AI 回复，也不计密友值
     if (peer.id === me.id) {
-      setMsgs((prev) => [...qqMarkPeerRead(prev), userMsg]);
+      setMsgs((prev) => [...qqMarkPeerRead(prev), ...outbound]);
       return;
     }
     // 分句发送开启：只入列不触发回复，等输入框为空再点一次「发送」统一触发（真人把几句话拆开发完）
     if (sentenceSend) {
-      setMsgs((prev) => [...qqMarkPeerRead(prev), userMsg]);
+      setMsgs((prev) => [...qqMarkPeerRead(prev), ...outbound]);
       setPendingDispatch(true);
       markPendingBatch(sessionKey, true);
       return;
@@ -6120,11 +6130,11 @@ function ChatPage({
       setBlk(setUserBlock('qq', peer.id, true));
       onToast(`已将「${peer.name}」加入黑名单`);
       const blkSys = { id: uid(), role: 'peer', content: '', time: Date.now(), kind: 'sys', sys: { text: `你已拉黑「${peer.name}」` } } as unknown as QQMsg;
-      setMsgs((prev) => (prev.some((m) => m.id === userMsg.id) ? [...prev, blkSys] : [...prev, userMsg, blkSys]));
-      runAiTurn(userMsg);
+      setMsgs((prev) => (prev.some((m) => m.id === userMsg.id) ? [...prev, blkSys] : [...prev, ...outbound, blkSys]));
+      runAiTurn(userMsg, linkCard ? [linkCard] : undefined);
       return;
     }
-    setMsgs((prev) => [...qqMarkPeerRead(prev), userMsg]);
+    setMsgs((prev) => [...qqMarkPeerRead(prev), ...outbound]);
     // Task 49 定时提醒：用户消息像「定时发消息」指令时先解析（LLM 两级兜底；正则闸未命中零开销）；
     // 落任务后：聊天里落灰色系统行（确定性反馈）+ 本轮 sysEvent 带确认提示（AI 自然确认）
     if (reminderHintHit(userMsg.content)) {
@@ -6133,11 +6143,11 @@ function ChatPage({
         const sys = buildReminderSysMsg('qq', label) as unknown as QQMsg;
         saveMsgs(peer.id, appendWithBoundary(sessionKey, loadMsgs(peer.id), sys));
         setMsgs((prev) => (prev.some((m) => m.id === sys.id) ? prev : [...prev, sys]));
-        runAiTurn(userMsg, undefined, reminderSysHint(label));
+        runAiTurn(userMsg, linkCard ? [linkCard] : undefined, reminderSysHint(label));
         return;
       }
     }
-    runAiTurn(userMsg);
+    runAiTurn(userMsg, linkCard ? [linkCard] : undefined);
   }, [flushPendingImages, input, me.id, peer.id, runAiTurn, sessionKey, sentenceSend, quote, ttsSend]);
 
   /** 分句发送批次触发：把已发出的整批消息交给 AI 统一回复（输入框为空时点「发送」）；

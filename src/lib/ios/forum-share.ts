@@ -91,12 +91,77 @@ export function forumShareHistoryLine(pid: string): string {
   const p = d.posts.find((x) => x.id === pid);
   if (!p) return '[X论坛帖子分享卡片]（原帖已删除）';
   const a = resolveAuthor(p.authorKey);
-  const comments = topCommentsOf(p, 2);
+  const comments = topCommentsOf(p, 3);
   const cLine = comments.length
-    ? `，热门评论：${comments.map((c) => `「${postSnippet(c, 30)}」（${resolveAuthor(c.authorKey).name}）`).join('、')}`
+    ? `，热门评论：${comments.map((c) => `「${postSnippet(c, 40)}」（${resolveAuthor(c.authorKey).name}）`).join('、')}`
     : '';
   const media = p.media?.length ? `（配了${p.media.length}张图）` : '';
-  return `[X论坛帖子 ID:${p.id}]（${a.name}发的：「${postSnippet(p, 90)}」${media}${cLine}）`;
+  return `[X论坛帖子 ID:${p.id}]（${a.name}发的：「${postSnippet(p, 120)}」${media}${cLine}）`;
+}
+
+// ---------------- 帖子链接识别（v40：复制链接 → 粘贴到聊天发送） ----------------
+
+/**
+ * 从文本里解析 X 论坛帖子链接（分享面板「复制链接」生成的格式）：
+ * `https://x.com/{handle}/status/{postId}`；容忍缺协议/www 前缀、尾斜杠与查询参数，
+ * 也认 `x.com/i/web/status/{id}` 分享短链格式。命中返回帖子 id，否则 null。
+ */
+export function parseForumPostLink(text: string): string | null {
+  if (!text) return null;
+  const m = text.match(/(?:https?:\/\/)?(?:www\.)?x\.com\/(?:i\/web\/|[A-Za-z0-9_]{1,30}\/)status\/([A-Za-z0-9_-]{4,64})/);
+  return m ? m[1] : null;
+}
+
+/** 链接指向的帖子（存在且当前可见才返回；删帖/隐藏后解析失败走普通文字） */
+export function resolveForumLinkPost(text: string): ForumPost | null {
+  const pid = parseForumPostLink(text);
+  if (!pid) return null;
+  const post = forumData().posts.find((p) => p.id === pid);
+  return post && isPostVisible(post, Date.now()) ? post : null;
+}
+
+/** 帖子分享卡消息工厂（send 管线复用：粘贴链接发送 → 文字后跟一张帖子卡） */
+export function buildForumShareCardMsg(post: ForumPost, role: 'me' | 'peer' = 'me'): ForumShareCardMsg {
+  return {
+    id: genId('fwsh'),
+    role,
+    content: `[X论坛帖子] 分享${resolveAuthor(post.authorKey).name}的帖子：${postSnippet(post, 40)}`,
+    time: Date.now(),
+    kind: 'forumshare',
+    forumshare: { pid: post.id },
+  };
+}
+
+/**
+ * 粘贴链接分享的记忆写入（与 shareForumPostToChat 同款句式，fire-and-forget）：
+ * 让 AI「知道」机主把这条帖子链接发给了自己（帖子正文 + 热门评论摘录入库）。
+ * 普通联系人（非 AI 角色）同样落一条——记忆库按联系人隔离，读侧只有 AI 角色会用。
+ */
+export async function noteForumLinkSharedToChat(opts: {
+  idp: 'wx' | 'qq';
+  contactId: string;
+  post: ForumPost;
+  meName?: string;
+}): Promise<void> {
+  const { idp, contactId, post } = opts;
+  try {
+    const contact = await getContact(contactId).catch(() => null);
+    if (!contact || contact.kind === 'user') return;
+    const owner = await ownerProfileFor(idp as AccountApp).catch(() => null);
+    const meName = opts.meName || owner?.realName || '机主';
+    const comments = topCommentsOf(post, 2);
+    const commentCount = forumData().posts.filter((p) => p.replyTo === post.id).length;
+    const cText = comments.length
+      ? `，热门评论：${comments.map((c) => `「${postSnippet(c, 30)}」（${resolveAuthor(c.authorKey).name}）`).join('、')}`
+      : '';
+    memAddForumFragment(
+      contactId,
+      `${meName}把X论坛${resolveAuthor(post.authorKey).name}发的帖子链接发给了我（共${commentCount}条评论）：「${postSnippet(post, 80)}」${cText}`,
+      { postId: post.id, kind: 'share', commentId: 'link' },
+    );
+  } catch {
+    /* 记忆失败不影响发送 */
+  }
 }
 
 // ---------------- 卡片写入 ----------------
@@ -332,7 +397,10 @@ async function runShareReply(opts: AiReplyOpts): Promise<void> {
     .replace(/^[「"'『]+|[」"'』]+$/g, '')
     .split('\n')
     .map((s) => s.trim())
-    .filter(Boolean)[0] ?? '';
+    .filter(Boolean)
+    // v40：多行回复合并成一条（旧版只取首行，第二句凭空蒸发）；120 字上限防长篇大论
+    .join(' ')
+    .slice(0, 120);
   if (!reply) return;
 
   // 反向分享：shareBack 命中候选帖 → AI 也发一张帖子卡（AI 分享给我，卡片同款）

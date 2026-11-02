@@ -100,7 +100,7 @@ import { MtShareBubble } from './mt-share-card';
 import { TbPayBubble, TbProxyDetailPage, TbShareBubble } from './tb-share-cards';
 import { WxGiftCardBubble, WxGiftPicker, WxGiftReceiveSheet, type WxGiftData } from './wx-gift';
 import { TB_PROXY_CARD_EVENT, TB_SHARE_CARD_EVENT, tbGetProxy, tbProxyHistoryLine, tbProxyMeHistoryLine, tbReshareProxy, tbCreateOrderShare, stripTbEchoText } from '@/lib/ios/tb-share-proxy';
-import { FORUM_SHARE_CARD_EVENT, forumShareHistoryLine } from '@/lib/ios/forum-share';
+import { FORUM_SHARE_CARD_EVENT, buildForumShareCardMsg, forumShareHistoryLine, noteForumLinkSharedToChat, resolveForumLinkPost } from '@/lib/ios/forum-share';
 import { ForumShareBubble } from './forum/share-card';
 import { tbShareHistoryLine } from '@/lib/ios/tb-share-proxy';
 import { TbDraftBubble } from './tb-draft-card';
@@ -7738,7 +7738,13 @@ function ChatPage({
       ? { id: uid(), role: 'me', content: text, time: Date.now(), quote: quote ?? undefined, unread: true }
       : null;
     const created: WxMsg[] = pendingImgs.map((p) => ({ id: uid(), role: 'me', content: '', time: Date.now(), kind: 'image' as const, img: { src: p.src }, unread: true }));
-    const batch = [...(userMsg ? [userMsg] : []), ...created];
+    // v40【复制链接→发给AI】粘贴 X 论坛帖子链接发送：链接文字照发，后面自动跟一张帖子分享卡——
+    // AI 回合把卡片序列化成「帖子正文＋热门评论」的上下文（forumShareHistoryLine），并异步写一条
+    // 「TA把帖子链接发给了我」记忆；点卡片可深链回论坛打开帖子（删帖后卡片自动失效）
+    const linkPost = text && peer.id !== me.id ? resolveForumLinkPost(text) : null;
+    const linkCard = linkPost ? buildForumShareCardMsg(linkPost) : null;
+    if (linkPost) void noteForumLinkSharedToChat({ idp: 'wx', contactId: peer.id, post: linkPost });
+    const batch = [...(userMsg ? [userMsg] : []), ...(linkCard ? [linkCard] : []), ...created];
     // 显示设置 › 已读回执：markPeerRead（模块级）—— append 时把 TA 的未读全部转已读；
     // 我的新消息已带 unread: true（TA 回复落地时转已读）
     // 拉黑方向修正：用户说「我要拉黑你」类明确宣言 → 系统直接执行「用户拉黑对方」
@@ -7792,11 +7798,11 @@ function ChatPage({
         const sys = buildReminderSysMsg('wx', label) as unknown as WxMsg;
         saveMsgs(peer.id, appendWithBoundary(sessionKey, loadMsgs(peer.id), sys));
         setMsgs((prev) => (prev.some((m) => m.id === sys.id) ? prev : [...prev, sys]));
-        runAiTurnRef.current?.(userMsg, created, reminderSysHint(label));
+        runAiTurnRef.current?.(userMsg, linkCard ? [linkCard, ...created] : created, reminderSysHint(label));
         return;
       }
     }
-    runAiTurnRef.current?.(userMsg, created);
+    runAiTurnRef.current?.(userMsg, linkCard ? [linkCard, ...created] : created);
   }, [input, me, peer, sessionKey, sentenceSend, quote, ttsSend, pendingImgs, onToast]);
 
   /** 分句发送批次触发：把已发出的整批消息交给 AI 统一回复（输入框为空时点「发送」）；
