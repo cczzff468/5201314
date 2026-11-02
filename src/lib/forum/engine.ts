@@ -85,6 +85,15 @@ import {
   writeCharOwnPostMemory,
   writeCharReplyMemory,
 } from './social';
+// 【多世界观】矩阵阵容 / 世界观话题 / AI 规则载荷（worldview-store 客户端层）
+import {
+  activeMatrixNpcs,
+  activeWorldview,
+  rebuildMatrixIndex,
+  setActiveWorldviewId,
+  worldviewApiPayload,
+} from './worldview-store';
+import { matrixNpcPersona, type MatrixNpc } from './worldview';
 
 // ---------------- pending 队列（跨刷新持久） ----------------
 
@@ -155,10 +164,20 @@ async function callApi(payload: Record<string, unknown>): Promise<unknown> {
   // v34 提示词面板：抽屉里编辑的提示词覆盖随请求上送（空对象 = 全默认零开销；
   // 保存即生效——每次调用都重读设置，后台调度器触发的生成同样用新提示词）
   const prompts = promptOverridesPayload();
+  // 【多世界观】激活世界观背景/标签 + 用户 AI 规则（发帖/评论/审核）随请求上送——
+  // 服务端把自定义规则拼在 System Prompt 最前端、世界观背景紧随其后；保存即生效
+  //（每次调用都重读 store，后台调度器触发的生成同样用新世界观与新规则）
+  const wv = worldviewApiPayload();
   const res = await fetch('/api/forum/generate', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ ...payload, ...(Object.keys(prompts).length ? { prompts } : {}), config: useSettings.getState().apiConfig }),
+    body: JSON.stringify({
+      ...payload,
+      ...(Object.keys(prompts).length ? { prompts } : {}),
+      worldview: wv.worldview,
+      aiRules: wv.rules,
+      config: useSettings.getState().apiConfig,
+    }),
   });
   if (!res.ok) {
     // 带上服务端错误详情：含 429 字样 → 识别为限流，进入冷却（不再轰炸）
@@ -196,6 +215,42 @@ async function describePostMedia(media: string[] | undefined): Promise<string> {
 }
 
 // ---------------- 帖子构造 ----------------
+
+// ---------------- 【多世界观】矩阵 NPC 阵容（worldview-store 驱动） ----------------
+
+/** 当前世界观的矩阵 NPC 阵容（authorKey = `mnpc:<id>`；空数组 = 无矩阵，走经典内置 NPC 池） */
+function matrixCast(): { key: AuthorKey; npc: MatrixNpc }[] {
+  return activeMatrixNpcs().map((npc) => ({ key: `mnpc:${npc.id}` as AuthorKey, npc }));
+}
+
+/** 按 postFreq 加权随机挑矩阵 NPC（avoidKeys 去重；无候选返回 undefined） */
+function pickMatrixNpc(
+  cast: { key: AuthorKey; npc: MatrixNpc }[],
+  ...avoidKeys: AuthorKey[]
+): { key: AuthorKey; npc: MatrixNpc } | undefined {
+  const seen = new Set<AuthorKey>(avoidKeys.filter(Boolean));
+  const avail = cast.filter((c) => !seen.has(c.key));
+  if (!avail.length) return undefined;
+  const total = avail.reduce((s, c) => s + Math.max(1, c.npc.postFreq), 0);
+  let r = Math.random() * total;
+  for (const c of avail) {
+    r -= Math.max(1, c.npc.postFreq);
+    if (r < 0) return c;
+  }
+  return avail[avail.length - 1];
+}
+
+/** 矩阵 NPC 的生成字段（name/persona 走 resolveAuthor 的作者索引；索引缺失时兜底直拼） */
+function matrixSpecFields(npc: MatrixNpc): { name: string; persona: string } {
+  const a = resolveAuthor(`mnpc:${npc.id}` as AuthorKey);
+  return { name: a.name, persona: a.persona || matrixNpcPersona(npc) };
+}
+
+/** 当前世界观的话题方向（版块标签；空 = 经典 FEED_TOPICS） */
+function worldviewTopics(): string[] {
+  const tags = activeWorldview()?.tags.filter((x) => x.trim()) ?? [];
+  return tags.length ? tags : FEED_TOPICS;
+}
 
 /** 评论/楼中楼互动量（v9 用户【评论区数据逻辑】强校验）：
  *  1. 浏览量必须远小于帖子浏览量——父帖浏览的 0.5%~8%，硬上限几万~几十万
@@ -510,6 +565,21 @@ export async function ensureSeed(): Promise<void> {
     // 「电影院常驻嘉宾」「是小柔本人呀」这类内置描述型网名；LLM 回填后再换 AI 名）
     seedBuiltinNpcFallbackNames();
     const specs: { key: AuthorKey; text: string; community: string | null; npcId: string }[] = [];
+    // 【多世界观】优先用世界观风格池播种：矩阵阵容领衔（每人保底一帖）+
+    // 动态网友填充——绝不落入内置八卦池串味；自定义世界观（无风格池）回落经典 NPC 池
+    const wvSeed = activeWorldview()?.seedPool ?? [];
+    if (wvSeed.length) {
+      const cast = matrixCast();
+      const castKeys = cast.map((c) => c.key).sort(() => Math.random() - 0.5);
+      const dynKeys: AuthorKey[] = [];
+      for (let i = 0; i < Math.max(3, Math.ceil(wvSeed.length * 0.8)); i++) dynKeys.push(createDynNpc());
+      const filler = [...castKeys, ...dynKeys].sort(() => Math.random() - 0.5);
+      wvSeed.forEach((text, i) => {
+        const key: AuthorKey =
+          i < castKeys.length ? castKeys[i] : filler[(i - castKeys.length) % filler.length] ?? castKeys[0] ?? dynKeys[0] ?? 'official';
+        specs.push({ key, text, community: null, npcId: '' });
+      });
+    } else {
     for (const npc of NPC_DEFS) {
       const n = 1 + Math.floor(Math.random() * 2);
       const pool = [...npc.pool];
@@ -527,6 +597,7 @@ export async function ensureSeed(): Promise<void> {
             : `npc:${npc.id}`;
         specs.push({ key: author, text, community: communityOfPoolText(npc.id, text), npcId: npc.id });
       }
+    }
     }
     // 防刷屏重排（同一信息流绝不连续同一作者）
     const ordered = shuffleNoAdjacent(specs);
@@ -601,7 +672,12 @@ export async function ensureSeed(): Promise<void> {
 async function llmPolish(): Promise<void> {
   try {
     const d = forumData();
-    const npcPicks = NPC_DEFS.slice().sort(() => Math.random() - 0.5).slice(0, 3);
+    // 【多世界观】精修帖优先由矩阵阵容发（persona 含【身份】【性格】【口头禅】，
+    // 服务端强制代入）；无矩阵回落内置 NPC
+    const cast = matrixCast();
+    const npcPicks: { id: string; matrix: boolean; npc?: MatrixNpc }[] = cast.length
+      ? cast.slice().sort(() => Math.random() - 0.5).slice(0, 3).map((c) => ({ id: c.npc.id, matrix: true, npc: c.npc }))
+      : NPC_DEFS.slice().sort(() => Math.random() - 0.5).slice(0, 3).map((n) => ({ id: n.id, matrix: false }));
     // char 好友：各生成一条人设帖（最多 2 位，避免首批请求过重）
     const charPicks = forumContactsSnap()
       .filter((c) => c.kind === 'char' && (c.persona || c.background))
@@ -612,15 +688,19 @@ async function llmPolish(): Promise<void> {
       });
     const items = [
       ...npcPicks.map((n) => {
+        if (n.matrix && n.npc) {
+          const f = matrixSpecFields(n.npc);
+          return { name: f.name, persona: f.persona, community: '今日热议', isChar: false, id: n.id, matrix: true };
+        }
         // v5：名字/人设都走 resolveAuthor（内置 NPC 已换成 LLM 名，口吻跟新身份走）
         const a = resolveAuthor(`npc:${n.id}` as AuthorKey);
-        return { name: a.name, persona: a.persona ?? n.persona, community: defaultCommunityFor(n.id) ?? '今日热议', isChar: false, id: n.id };
+        return { name: a.name, persona: a.persona ?? '', community: defaultCommunityFor(n.id) ?? '今日热议', isChar: false, id: n.id, matrix: false };
       }),
-      ...charPicks.map((c) => ({ name: c.name, persona: c.persona, community: '今日热议', isChar: true, id: c.id })),
+      ...charPicks.map((c) => ({ name: c.name, persona: c.persona, community: '今日热议', isChar: true, id: c.id, matrix: false })),
     ].slice(0, 5);
     if (!items.length) return;
     const avoid = d.posts.slice(-8).map((p) => p.content.slice(0, 60));
-    const topics = FEED_TOPICS.slice().sort(() => Math.random() - 0.5);
+    const topics = worldviewTopics().slice().sort(() => Math.random() - 0.5);
     const r = (await callApi({
       kind: 'posts',
       items: items.map(({ name, persona, community }, i) => ({ name, persona, community, topic: topics[i % topics.length] })),
@@ -638,10 +718,10 @@ async function llmPolish(): Promise<void> {
       if (!spec) return;
       const t = typeof o?.content === 'string' ? o.content.trim() : '';
       if (t.length < 6) return;
-      const authorKey: AuthorKey = spec.isChar ? `char:${spec.id}` : `npc:${spec.id}`;
+      const authorKey: AuthorKey = spec.isChar ? `char:${spec.id}` : spec.matrix ? `mnpc:${spec.id}` : `npc:${spec.id}`;
       // LLM 帖不带 #话题 时，按默认版块归位
       const tag = /#([^#\s]+)#/.exec(t)?.[1];
-      const cid = spec.isChar ? (tag ? NPC_COMMUNITY_MAP[tag] ?? null : null) : communityOfPoolText(spec.id, t);
+      const cid = spec.isChar || spec.matrix ? (tag ? NPC_COMMUNITY_MAP[tag] ?? null : null) : communityOfPoolText(spec.id, t);
       const post = basePost(authorKey, t, cid, now - (i + 1) * 420_000);
       // v27 文字图片：has_image 帖的 image_description canvas 直出一张
       // （纯白底居中文字图；图被丢弃时剥掉 [图片] 占位符防字面上屏）
@@ -1124,7 +1204,14 @@ async function buildFeedBatch(
 ): Promise<{ key: AuthorKey; text: string; textImage?: string; recent?: string[] }[]> {
   const chars = forumContactsSnap().filter((c) => c.kind === 'char' && (c.persona || c.background));
   const shuffledNpcs = NPC_DEFS.slice().sort(() => Math.random() - 0.5);
-  const topics = FEED_TOPICS.slice().sort(() => Math.random() - 0.5);
+  // 【多世界观】话题方向优先用世界观版块标签；矩阵阵容进入作者池（按 postFreq
+  // 加权 ~35% 出场率——瓜主/营销号/站姐/杠精是这个世界观的原住民）
+  const topics = worldviewTopics().slice().sort(() => Math.random() - 0.5);
+  const cast = matrixCast();
+  const pChar = chars.length ? 0.08 : 0;
+  const pMatrix = cast.length ? 0.35 : 0;
+  const pNpc = cast.length ? 0 : 0.08;
+  const pOldDyn = 0.24;
   // 原型轮换环（打工人→饭圈女孩→数码极客→宝妈→搞笑女……保证大杂烩）
   const archRing = ARCHETYPE_IDS.slice().sort(() => Math.random() - 0.5);
   const specs: { key: AuthorKey; name: string; persona: string; community: string | null; topic: string; lang: string; recent?: string[] }[] = [];
@@ -1135,7 +1222,7 @@ async function buildFeedBatch(
   for (let i = 0; i < n; i++) {
     const topic = topics[i % topics.length];
     const r = Math.random();
-    if (chars.length && r < 0.08) {
+    if (r < pChar) {
       const ch = chars[Math.floor(Math.random() * chars.length)];
       specs.push({
         key: `char:${ch.id}`,
@@ -1145,13 +1232,26 @@ async function buildFeedBatch(
         topic,
         lang: 'zh-Hans',
       });
-    } else if (r < 0.16) {
+    } else if (r < pChar + pMatrix) {
+      // 【多世界观】矩阵 NPC：persona 含【身份】【性格】【口头禅】强制代入
+      const m = pickMatrixNpc(cast);
+      if (m) {
+        const f = matrixSpecFields(m.npc);
+        specs.push({ key: m.key, name: f.name, persona: f.persona, community: null, topic, lang: 'zh-Hans' });
+        continue;
+      }
+      // 加权抽取意外失败：落新网友兑底
+      const key = createDynNpc({ archetypeId: archRing[archCursor++ % archRing.length] });
+      newDyn.push(key);
+      const a = resolveAuthor(key);
+      specs.push({ key, name: a.name, persona: a.persona ?? '', community: null, topic, lang: a.lang ?? 'zh-Hans' });
+    } else if (r < pChar + pMatrix + pNpc) {
       // 内置主题 NPC（v4 缩减到 ~8%，只作保底大 V；轮换环保证一环内不重复；
       // v5 名字/persona 走 resolveAuthor——内置 NPC 也挂着 LLM 名）
       const nd = shuffledNpcs[npcCursor++ % shuffledNpcs.length];
       const a = resolveAuthor(`npc:${nd.id}` as AuthorKey);
       specs.push({ key: `npc:${nd.id}`, name: a.name, persona: a.persona ?? nd.persona, community: defaultCommunityFor(nd.id), topic, lang: 'zh-Hans' });
-    } else if (r < 0.4) {
+    } else if (r < pChar + pMatrix + pNpc + pOldDyn) {
       // 老网友回访（带 recent 记忆：上一个帖子里聊过的事，这次能接上话疸）
       const d = forumData();
       const dynIds = Object.keys(d.dynNpcs ?? {});
@@ -1206,9 +1306,27 @@ async function buildFeedBatch(
   } catch {
     /* 走池子兜底 */
   }
+  // 【多世界观】风格一致的兑底池：矩阵阵容 + 动态网友轮流出帖（绝不串味到内置八卦池）
+  const wvSeedPool = activeWorldview()?.seedPool ?? [];
+  if (results.length < n && wvSeedPool.length) {
+    const d = forumData();
+    const dynIds = Object.keys(d.dynNpcs ?? {})
+      .sort(() => Math.random() - 0.5)
+      .map((id) => `dyn:${id}` as AuthorKey);
+    const ring: AuthorKey[] = [...cast.map((c) => c.key), ...dynIds];
+    while (ring.length < 3) ring.push(createDynNpc());
+    let ri = 0;
+    for (const text of wvSeedPool) {
+      if (results.length >= n) break;
+      if (used.has(text.slice(0, 20))) continue;
+      used.add(text.slice(0, 20));
+      results.push({ key: ring[ri++ % ring.length], text, textImage: poolTextImage(text) });
+    }
+  }
   // NPC 文案池补齐（LLM 失败/条数不足）：轮换环——每个 NPC 一轮只出一条，
-  // 同一批内绝不连续出现同一作者（修复「秋名山下打车连发多条」刷屏 Bug 的关键）
-  if (results.length < n) {
+  // 同一批内绝不连续出现同一作者（修复「秋名山下打车连发多条」刷屏 Bug 的关键）。
+  // 【多世界观】有风格池时跳过（内置八卦池会串味），直接走下方组合式兑底
+  if (results.length < n && !wvSeedPool.length) {
     let rounds = 0;
     while (results.length < n && rounds < 60) {
       let addedThisRound = 0;
@@ -1429,10 +1547,21 @@ function pickCommenters(count: number, postLang?: string, postContent?: string, 
   const archBias = postContent ? archetypeIdsForContent(postContent) : [];
   const seen = new Set<AuthorKey>(avoidKeys.filter(Boolean));
   const out: AuthorKey[] = [];
+  // 【多世界观】矩阵阵容的评论区存在感（按 postFreq 加权 ~18%——
+  // 核心 NPC 必须频繁出没评论区，且身份/性格/口头禅强制代入）
+  const cast = matrixCast();
   let guard = 0;
   while (out.length < count && guard++ < count * 12) {
     const r = Math.random();
     let k: AuthorKey;
+    if (cast.length && r < 0.18) {
+      const m = pickMatrixNpc(cast, ...seen);
+      if (m) {
+        seen.add(m.key);
+        out.push(m.key);
+        continue;
+      }
+    }
     if (chars.length && r < 0.06) {
       k = `char:${chars[Math.floor(Math.random() * chars.length)].id}`;
     } else if (r < 0.1) {
@@ -1546,7 +1675,13 @@ async function callSubReplyLayer(
           })),
           personas: ch.map((p) => {
             const a = resolveAuthor(p.key);
-            return { name: a.name, persona: a.persona || '普通论坛网友', lang: a.lang ?? 'zh-Hans' };
+            // 【多世界观】矩阵 NPC 身份强制代入标记（服务端渲染强度不同）
+            return {
+              name: a.name,
+              persona: a.persona || '普通论坛网友',
+              lang: a.lang ?? 'zh-Hans',
+              ...(p.key.startsWith('mnpc:') ? { matrix: true } : {}),
+            };
           }),
           userName: resolveAuthor('user').name,
         })) as { items?: string[] };
@@ -1836,7 +1971,14 @@ async function genCommentBatch(postId: string, report?: (n: number) => void): Pr
         count: want,
         personas: commenterKeys.map((k) => {
           const a = resolveAuthor(k);
-          return { name: a.name, persona: a.persona || '普通论坛网友', lang: a.lang ?? 'zh-Hans' };
+          // 【多世界观】矩阵 NPC：persona 含【身份】【性格】【口头禅】——
+          // 服务端按「必须完全代入」渲染（不再是普通网友的「只学语气」降级）
+          return {
+            name: a.name,
+            persona: a.persona || '普通论坛网友',
+            lang: a.lang ?? 'zh-Hans',
+            ...(k.startsWith('mnpc:') ? { matrix: true } : {}),
+          };
         }),
         avoid,
         userName: resolveAuthor('user').name,
@@ -2151,13 +2293,21 @@ export function queueCharThanksForLike(post: ForumPost): void {
  *  char 好友的点赞/评论改由 queueCharEngagements 独立管线（分钟级延迟 + LLM 决策）。 */
 export function queueUserPostInteractions(post: ForumPost): void {
   const next0 = forumData();
-  // 点赞名单：动态网友 + 内置 NPC 混合（3~5 位，不再全是老面孔）
+  // 点赞名单：动态网友 + 矩阵阵容/内置 NPC 混合（3~5 位，不再全是老面孔）。
+  // 【多世界观】矩阵 NPC 优先光顾用户帖（核心阵容是这个世界的原住民）
   const likers: AuthorKey[] = [];
-  const npcCount = 1 + Math.floor(Math.random() * 2);
-  NPC_DEFS.slice()
-    .sort(() => Math.random() - 0.5)
-    .slice(0, npcCount)
-    .forEach((l) => likers.push(`npc:${l.id}`));
+  const cast = matrixCast();
+  if (cast.length) {
+    cast.slice().sort(() => Math.random() - 0.5).slice(0, 2).forEach((c) => likers.push(c.key));
+  }
+  let npcCount = likers.length;
+  if (!cast.length) {
+    npcCount = 1 + Math.floor(Math.random() * 2);
+    NPC_DEFS.slice()
+      .sort(() => Math.random() - 0.5)
+      .slice(0, npcCount)
+      .forEach((l) => likers.push(`npc:${l.id}`));
+  }
   while (likers.length < 3 + Math.floor(Math.random() * 3)) likers.push(createDynNpc());
   // LLM 起名：新建的点赞网友换 AI 生成的网名（通知/主页里都是 AI 起的名；失败保留占位名）
   void renameDynNpcsViaLlm(likers.filter((k) => k.startsWith('dyn:')));
@@ -2196,8 +2346,15 @@ export function queueUserPostInteractions(post: ForumPost): void {
       due: Date.now() + 45_000 + Math.random() * 270_000 + i * (60_000 + Math.random() * 150_000),
       kind: 'replyToUserPost',
       postKey: post.id,
-      // 回帖者优先动态网友（新面孔来搭讪）
-      meta: { authorKey: likers[npcCount + i] ?? likers[0], parentContent: post.content },
+      // 回帖者：【多世界观】矩阵 NPC 高概率出场（身份鲜明的神回复）；
+      // 否则动态网友新面孔来搭讪
+      meta: {
+        authorKey:
+          cast.length && Math.random() < 0.6
+            ? cast[Math.floor(Math.random() * cast.length)].key
+            : likers[npcCount + i] ?? likers[0],
+        parentContent: post.content,
+      },
     });
   }
   // 立即落盘新建的动态网友（点赞名单先持久化，不等延时任务）
@@ -2608,7 +2765,13 @@ async function execJob(job: PendingJob): Promise<void> {
       try {
         const r = (await callApi({
           kind: 'reply',
-          author: { name: author.name, persona: author.persona || '', lang: author.lang ?? 'zh-Hans' },
+          author: {
+            name: author.name,
+            persona: author.persona || '',
+            lang: author.lang ?? 'zh-Hans',
+            // 【多世界观】矩阵 NPC 身份强制代入标记
+            ...(authorKey.startsWith('mnpc:') ? { matrix: true } : {}),
+          },
           parent: { authorName: replyName, content: parentContent },
           postContent,
           postLang,
@@ -2831,6 +2994,8 @@ export async function bootForum(): Promise<void> {
   if (booting) return;
   booting = true;
   try {
+    // 【多世界观】确保矩阵作者索引就绪（首次打开/切换后 resolveAuthor('mnpc:') 有数据）
+    rebuildMatrixIndex();
     // 仅首次播种（打开 App 不再自动补帖——用户要求：生成完后不自动生成，
     // 只在用户下拉/上拉松开、点「更多评论」时才生成）
     await ensureSeed();
@@ -2849,5 +3014,26 @@ export async function bootForum(): Promise<void> {
     /* 引擎失败不拦 UI */
   } finally {
     booting = false;
+  }
+}
+
+/** 【多世界观】切换世界观（瞬间风格切换）——抽屉「切换世界观」面板调用：
+ *  1. worldview-store 激活新世界观（首页标签/面板即时刷新）；
+ *  2. 重建矩阵作者索引（mnpc 作者解析立即用新阵容的名字/头像/人设）；
+ *  3. 复位论坛内容（旧世界观的帖子/评论/通知/动态网友清空，用户自己的帖子保留）；
+ *  4. bootForum 重新播种——新世界观第一屏立刻到位：矩阵阵容领衔发帖、
+ *     话题方向/语气/人设/兑底池全部来自新世界观，随后 LLM 精修帖 +
+ *     multiComments 评论也按新设定生成（callApi 每次都带新世界观背景与规则）。 */
+export async function switchWorldview(id: string): Promise<boolean> {
+  try {
+    if (!setActiveWorldviewId(id)) return false;
+    rebuildMatrixIndex();
+    const d = forumData();
+    resetAiContent(d);
+    saveForum({ ...d });
+    await bootForum();
+    return true;
+  } catch {
+    return false;
   }
 }

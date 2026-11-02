@@ -12,6 +12,7 @@
 import { kvGet, kvSet } from '@/lib/ios/idb-kv';
 import { listContacts, ownerRealName } from '@/lib/ios/contacts-store';
 import type { ContactRecord } from '@/lib/contacts';
+import { MNPC_INDEX_KEY, type MatrixAuthorRec } from './worldview-store';
 
 // ---------------- 常量 ----------------
 
@@ -1689,6 +1690,24 @@ export function resolveAuthor(key: AuthorKey): ForumAuthor {
       };
     }
   }
+  if (key.startsWith('mnpc:')) {
+    // 【多世界观】矩阵 NPC（世界观核心阵容；worldview-store 维护的作者索引里直读。
+    // 头像未配置时按 key 稳定分配头像库图片，与内置 NPC 同规则）
+    const rec = kvGet<Record<string, MatrixAuthorRec>>(MNPC_INDEX_KEY)?.[key.slice(5)];
+    if (rec) {
+      return {
+        key,
+        name: rec.name,
+        handle: randomHandle(key),
+        avatar: rec.avatar || assignNpcAvatar(key, rec.name, rec.persona),
+        verified: rec.verified,
+        bio: rec.bio || '论坛用户',
+        baseFollowers: rec.followers,
+        persona: rec.persona,
+        ip: rec.ip,
+      };
+    }
+  }
   if (key.startsWith('dyn:')) {
     // 动态虚拟网友（真实感网名池生成；resolveAuthor 直读数据层，无需缓存）
     const def = forumData().dynNpcs?.[key.slice(4)];
@@ -1730,7 +1749,7 @@ export function resolveAuthor(key: AuthorKey): ForumAuthor {
  *  机主/联系人/动态网友一律真实 0（不再造 320+联系人×180 这种公式假数）；
  *  仅保留内置认证大 V 的粉丝基数（蓝 V 人设的一部分）。 */
 export function followersOf(key: AuthorKey): number {
-  if (key.startsWith('npc:')) {
+  if (key.startsWith('npc:') || key.startsWith('mnpc:')) {
     const a = resolveAuthor(key);
     if (typeof a.baseFollowers === 'number') return a.baseFollowers;
   }

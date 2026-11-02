@@ -114,6 +114,9 @@ import { commentAnchored, extractTopicWords, isBannedFiller, isFlamePost, isTend
 import { IMG_PLACEHOLDER, stripImgPh } from '@/lib/forum/imgph';
 // v34 提示词面板：抽屉可查看/编辑全部生成提示词，覆盖随请求带到服务端，修改后立即生效
 import { FORUM_PROMPT_DEFAULTS, fillPromptTemplate, readPromptOverrides, type PromptKey } from '@/lib/forum/prompt-defs';
+// 【多世界观】世界观背景/标签 + 用户自定义 AI 规则（拼接在 System Prompt 最前端，
+// 最高优先级）+ 矩阵 NPC 身份渲染——engine.callApi 每次都附带，保存即生效
+import { aiRulesFront, readAiRules, readWorldviewPayload, worldviewBlock } from '@/lib/forum/worldview';
 
 /** 用户覆盖优先的 system prompt 组装（抽屉提示词面板编辑后立即生效）：
  *  未覆盖/空串 → 用默认模板（prompt-defs.ts 内与旧版逐字一致）；
@@ -617,6 +620,12 @@ export async function POST(req: Request) {
     const kind = typeof body.kind === 'string' ? body.kind : '';
     // v34 提示词面板：客户端随请求送来的提示词覆盖（未知 key 忽略；空串视为未覆盖）
     const promptOv = readPromptOverrides(body.prompts);
+    // 【多世界观】世界观背景 + 用户自定义 AI 规则：规则块拼在 System Prompt 最前端
+    //（最高优先级，凌驾于模板之上），世界观背景紧随其后——所有内容生成分支
+    //（names 起名除外）共用；两块都为空时零开销（经典模式完全不变）
+    const wvP = readWorldviewPayload(body.worldview);
+    const aiRules = readAiRules(body.aiRules);
+    const front = kind === 'names' ? '' : aiRulesFront(aiRules, kind) + worldviewBlock(wvP);
     const userName = typeof body.userName === 'string' ? body.userName.slice(0, 20) : '你';
     const avoid = Array.isArray(body.avoid)
       ? body.avoid.filter((x): x is string => typeof x === 'string').slice(0, 12)
@@ -631,11 +640,13 @@ export async function POST(req: Request) {
             .slice(0, 24)
             .map((it) => ({
               name: typeof it.name === 'string' ? it.name.slice(0, 24) : '网友',
-              persona: typeof it.persona === 'string' ? it.persona.slice(0, 300) : '',
+              // 【多世界观】矩阵 NPC 的合并人设（身份+性格+口头禅）更长，放宽截断
+              persona: typeof it.persona === 'string' ? it.persona.slice(0, it.matrix === true ? 360 : 300) : '',
               community: typeof it.community === 'string' ? it.community.slice(0, 16) : '今日热议',
               topic: typeof it.topic === 'string' ? it.topic.slice(0, 16) : '',
               lang: typeof it.lang === 'string' ? it.lang : 'zh-Hans',
               style: typeof it.style === 'string' ? it.style.slice(0, 24) : '',
+              matrix: it.matrix === true,
               recent: Array.isArray(it.recent)
                 ? (it.recent as unknown[]).filter((x): x is string => typeof x === 'string').slice(0, 3)
                 : [],
@@ -654,7 +665,12 @@ export async function POST(req: Request) {
           // v29：字数档独立等权抽签+档内点值——服务端随机保证字数分布差距极大
           const st = findPostStyle(it.style) ?? pickPostStyle();
           const { plan: lp, target } = pickLenPlan();
-          return `${i + 1}. ${it.name}（人设：${it.persona || '普通论坛网友'}；本次发帖风格：【${st.label}】公式＝${st.spec}；本次目标字数：【${lp.label}】${lp.min}~${lp.max} 字（目标约 ${target} 字，${lp.hint}）；主题方向：${it.topic || '娱乐热点'}；发帖语言：${langLabel(it.lang)}；发在「${it.community}」版块${mem}）`;
+          // 【多世界观】矩阵 NPC：身份人设必须完全代入（瓜主/营销号/站姐/杠精的鲜明
+          // 身份是刻意设计）；普通网友仍走普通人设渲染
+          const personaHead = it.matrix
+            ? `身份人设·必须完全代入这个身份、性格与口头禅发帖：${it.persona}`
+            : `人设：${it.persona || '普通论坛网友'}`;
+          return `${i + 1}. ${it.name}（${personaHead}；本次发帖风格：【${st.label}】公式＝${st.spec}；本次目标字数：【${lp.label}】${lp.min}~${lp.max} 字（目标约 ${target} 字，${lp.hint}）；主题方向：${it.topic || '娱乐热点'}；发帖语言：${langLabel(it.lang)}；发在「${it.community}」版块${mem}）`;
         })
         .join('\n');
       const messages: LLMMessage[] = [
@@ -662,7 +678,8 @@ export async function POST(req: Request) {
           role: 'system',
           content:
             // v34 提示词面板：默认模板已搬到 lib/forum/prompt-defs.ts（抽屉可查看/编辑，立即生效）
-            sysPrompt(promptOv, 'posts', { expect }),
+            // 【多世界观】front = 用户规则（最前端）+ 世界观背景，拼接在模板前
+            front + sysPrompt(promptOv, 'posts', { expect }),
         },
         {
           role: 'user',
@@ -762,7 +779,7 @@ export async function POST(req: Request) {
         {
           role: 'system',
           content:
-            sysPrompt(promptOv, 'multiComments', { postCount: posts.length, perPost }),
+            front + sysPrompt(promptOv, 'multiComments', { postCount: posts.length, perPost }),
         },
         {
           role: 'user',
@@ -831,8 +848,10 @@ export async function POST(req: Request) {
             .slice(0, 30)
             .map((p) => ({
               name: typeof p.name === 'string' ? p.name.slice(0, 24) : '网友',
-              persona: typeof p.persona === 'string' ? p.persona.slice(0, 200) : '普通论坛网友',
+              // 【多世界观】矩阵 NPC 身份人设（身份+性格+口头禅）更长，放宽截断
+              persona: typeof p.persona === 'string' ? p.persona.slice(0, p.matrix === true ? 340 : 200) : '普通论坛网友',
               lang: typeof p.lang === 'string' ? p.lang : 'zh-Hans',
+              matrix: p.matrix === true,
             }))
         : [];
       if (!post || !personas.length) return NextResponse.json({ error: '参数为空' }, { status: 400 });
@@ -871,14 +890,18 @@ export async function POST(req: Request) {
                   ? `；母语${langLabel(p.lang)}，但评论必须用简体中文，最多带1-3个母语字符的口癖`
                   : ''
                 : `；评论语言跟随帖子用${langLabel(postLang)}或简体中文`;
-            return `${i + 1}. ${p.name}（口吻参考·只学语气和打字习惯，其中出现的一切具体事物（职业、作品、品牌、道具、经历、称呼）除非主帖本身提到，否则一个字都不许出现在评论里：${p.persona}${langNote}）`;
+            // 【多世界观】矩阵 NPC：身份人设必须完全代入（鲜明身份是刻意设计，
+            // 不降级为「只学语气」）；普通网友仍走防串台降级渲染
+            return p.matrix
+              ? `${i + 1}. ${p.name}（身份人设·必须完全代入这个身份、性格与口头禅说话：${p.persona}${langNote}）`
+              : `${i + 1}. ${p.name}（口吻参考·只学语气和打字习惯，其中出现的一切具体事物（职业、作品、品牌、道具、经历、称呼）除非主帖本身提到，否则一个字都不许出现在评论里：${p.persona}${langNote}）`;
           })
           .join('\n');
         const messages: LLMMessage[] = [
           {
             role: 'system',
             content:
-              sysPrompt(promptOv, 'comments', {
+              front + sysPrompt(promptOv, 'comments', {
                 expect,
                 langRule:
                   `# 语言铁律\n这是${langLabel(postLang)}帖子` +
@@ -998,8 +1021,11 @@ export async function POST(req: Request) {
             ? `｜这层楼已有人说：「${h.prev.join('」「')}」——你绝不许重复他们的观点和措辞，换一个完全不同的角度`
             : '';
           // v25：人设降级为「口吻参考」——其中具体事物（职业/作品/道具/经历）
-          // 除非主帖和被回复评论提到，否则一个字不许进回复（防 Persona Bleed）
-          return `${i + 1}. 评论（楼主是「${typeof post.authorName === 'string' ? post.authorName : '楼主'}」；${h.authorName} 说：「${h.content}」${prevLine}）→ 由 ${p.name} 回复（口吻参考·只学语气，其中具体事物严禁入评：${p.persona}${langNote}）`;
+          // 除非主帖和被回复评论提到，否则一个字不许进回复（防 Persona Bleed）；
+          // 【多世界观】矩阵 NPC 不降级：身份人设必须完全代入
+          return p.matrix
+            ? `${i + 1}. 评论（楼主是「${typeof post.authorName === 'string' ? post.authorName : '楼主'}」；${h.authorName} 说：「${h.content}」${prevLine}）→ 由 ${p.name} 回复（身份人设·必须完全代入这个身份、性格与口头禅说话：${p.persona}${langNote}）`
+            : `${i + 1}. 评论（楼主是「${typeof post.authorName === 'string' ? post.authorName : '楼主'}」；${h.authorName} 说：「${h.content}」${prevLine}）→ 由 ${p.name} 回复（口吻参考·只学语气，其中具体事物严禁入评：${p.persona}${langNote}）`;
         })
         .join('\n');
       // v28：走心帖（文艺/深情/表白）→ 楼中楼语气同频指令（楼主走心时楼中楼也发癫 = 杠精现场）
@@ -1016,7 +1042,7 @@ export async function POST(req: Request) {
         {
           role: 'system',
           content:
-            sysPrompt(promptOv, 'subreplies', {
+            front + sysPrompt(promptOv, 'subreplies', {
               langRule:
                 '\n【语言铁律】' +
                 (postLang === 'zh-Hans'
@@ -1149,7 +1175,7 @@ export async function POST(req: Request) {
           {
             role: 'system',
             content:
-              sysPrompt(promptOv, 'charPost', {
+              front + sysPrompt(promptOv, 'charPost', {
                 identity,
                 chName,
                 userName,
@@ -1205,7 +1231,7 @@ export async function POST(req: Request) {
           {
             role: 'system',
             content:
-              sysPrompt(promptOv, 'charEngage', { identity, userName, chRelation }),
+              front + sysPrompt(promptOv, 'charEngage', { identity, userName, chRelation }),
           },
           { role: 'user', content: `【${userName}的帖子】\n${postContent}${mediaDesc}\n\n请决定你的反应（严格JSON）。${bjTimeLine()}` },
         ])).text;
@@ -1245,7 +1271,7 @@ export async function POST(req: Request) {
         {
           role: 'system',
           content:
-            sysPrompt(promptOv, thanks ? 'charThanks' : 'charReply', { identity, userName }),
+            front + sysPrompt(promptOv, thanks ? 'charThanks' : 'charReply', { identity, userName }),
         },
         {
           role: 'user',
@@ -1275,9 +1301,13 @@ export async function POST(req: Request) {
     }
 
     if (kind === 'reply' || kind === 'dm') {
-      const authorRaw = body.author as { name?: unknown; persona?: unknown; lang?: unknown } | undefined;
+      const authorRaw = body.author as { name?: unknown; persona?: unknown; lang?: unknown; matrix?: unknown } | undefined;
       const name = typeof authorRaw?.name === 'string' ? authorRaw.name.slice(0, 24) : '网友';
-      const persona = typeof authorRaw?.persona === 'string' ? authorRaw.persona.slice(0, 300) : '普通论坛网友';
+      // 【多世界观】矩阵 NPC 的合并人设（身份+性格+口头禅）更长，放宽截断
+      const persona =
+        typeof authorRaw?.persona === 'string'
+          ? authorRaw.persona.slice(0, authorRaw.matrix === true ? 360 : 300)
+          : '普通论坛网友';
       const myLang = typeof authorRaw?.lang === 'string' && LANG_LABELS[authorRaw.lang] ? authorRaw.lang : 'zh-Hans';
       if (kind === 'reply') {
         const p = body.parent as { authorName?: string; content?: string } | undefined;
@@ -1338,7 +1368,7 @@ export async function POST(req: Request) {
           {
             role: 'system',
             content:
-              sysPrompt(promptOv, 'reply', { name, persona, langRule: langLine }),
+              front + sysPrompt(promptOv, 'reply', { name, persona, langRule: langLine }),
           },
           {
             role: 'user',
@@ -1378,7 +1408,7 @@ export async function POST(req: Request) {
         {
           role: 'system',
           content:
-            sysPrompt(promptOv, 'dm', { name, persona, userName }),
+            front + sysPrompt(promptOv, 'dm', { name, persona, userName }),
         },
         { role: 'user', content: `最近的对话：\n${history || '（刚开始聊）'}\n\n请以「${name}」的口吻接下一条私信。${bjTimeLine()}` },
       ])).text;

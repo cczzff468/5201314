@@ -48,7 +48,11 @@ import {
   setPostCountRange,
 } from '@/lib/forum/gen-settings';
 import { FORUM_PROMPT_DEFS } from '@/lib/forum/prompt-defs';
+// 【多世界观】世界观切换 / NPC 矩阵 / AI 规则面板 + store 订阅（首页标签实时读）
+import { subscribeWorldview, worldviewSnapshot, countCustomRules } from '@/lib/forum/worldview-store';
 import { GenRangeRow, PromptSheet } from './prompt-sheet';
+import { WorldviewSheet } from './worldview-sheet';
+import { NpcMatrixSheet, RulesSheet } from './npc-sheet';
 import { XAvatar, XIcons, XLogo, useXTheme } from './shared';
 import { FeedList, FeedSkeleton, CommunityIcon } from './feed';
 import { ComposeSheet, type ComposePayload } from './compose-sheet';
@@ -100,6 +104,11 @@ export default function ForumApp() {
   const [promptSheet, setPromptSheet] = useState(false);
   /** 已自定义提示词条数（入口摘要；提示词面板关闭时刷新） */
   const [ovCount, setOvCount] = useState(() => countPromptOverrides());
+  /** 【多世界观】三个管理面板开关 + 规则自定义条数角标 */
+  const [worldSheet, setWorldSheet] = useState(false);
+  const [npcSheet, setNpcSheet] = useState(false);
+  const [rulesSheet, setRulesSheet] = useState(false);
+  const [rulesCount, setRulesCount] = useState(() => countCustomRules());
   /** 生成设置镜像 ref：步进处理器里同步更新——同一事件循环里连点也逐级累加 */
   const genUiRef = useRef(genUi);
   useEffect(() => {
@@ -450,19 +459,25 @@ export default function ForumApp() {
   const seeded = d.seeded && d.posts.length > 0;
   // pinnedTags 过滤掉 'hot'（今日热议 = 广场，与「为你推荐」重复，不作为分类标签）
   const pinnedTags = (d.pinnedTags ?? []).filter((id) => id !== 'hot' && COMMUNITY_DEFS.some((c) => c.id === id));
+  // 【多世界观】激活世界观的首页版块标签（实时读 store——切换/编辑立即生效）
+  const wvSnap = useSyncExternalStore(subscribeWorldview, worldviewSnapshot);
+  const activeWv = wvSnap.worldviews.find((w) => w.id === wvSnap.activeId) ?? null;
+  const worldTags = (activeWv?.tags ?? []).map((x) => x.trim()).filter(Boolean).slice(0, 8);
 
-  /** 主页 tab 集：为你推荐 | 关注 | 已添加的分类标签（按添加顺序） */
+  /** 主页 tab 集：为你推荐 | 关注 | 世界观版块标签 | 已添加的分类标签（按添加顺序） */
   const homeTabs: { key: string; label: string }[] = useMemo(
     () => [
       { key: 'foryou', label: '为你推荐' },
       { key: 'following', label: '关注' },
+      ...worldTags.map((tag) => ({ key: `wt:${tag}`, label: tag })),
       ...pinnedTags.map((id) => ({ key: id, label: communityName(id) })),
     ],
-    [pinnedTags],
+    [pinnedTags, worldTags],
   );
 
-  // Feed 数据：为你推荐 = 全部主帖；关注 = 已关注作者的主帖；标签 tab = 对应版块主帖。
-  // 过滤：被隐藏（不感兴趣/举报）与未到时间的定时帖不进列表。tick 变化触发重算（定时到期现身）。
+  // Feed 数据：为你推荐 = 全部主帖；关注 = 已关注作者的主帖；世界观标签 tab = 内容命中该标签；
+  // 分类标签 tab = 对应版块主帖。过滤：被隐藏（不感兴趣/举报）与未到时间的定时帖不进列表。
+  // tick 变化触发重算（定时到期现身）。wvSnap 变化触发重算（切换世界观标签实时变）。
   const feedPosts = useMemo(() => {
     const now = Date.now();
     const all = [...d.posts]
@@ -472,11 +487,17 @@ export default function ForumApp() {
       const followingSet = new Set(d.following);
       return all.filter((p) => followingSet.has(p.authorKey));
     }
+    if (homeTab.startsWith('wt:')) {
+      const tag = homeTab.slice(3);
+      // 世界观已切换、旧标签失效 → 回落「为你推荐」
+      if (!worldTags.includes(tag)) return all;
+      return all.filter((p) => p.content.includes(`#${tag}`) || p.content.includes(tag));
+    }
     if (homeTab !== 'foryou') {
       return all.filter((p) => (p.community ?? 'hot') === homeTab);
     }
     return all;
-  }, [d, homeTab, tick]);
+  }, [d, homeTab, tick, wvSnap]);
 
   const unread = d.notifications.filter((n) => !n.read).length;
   const topView = views.length ? views[views.length - 1] : null;
@@ -904,6 +925,66 @@ export default function ForumApp() {
                       </button>
                     </div>
                   </div>
+                  {/* v36【多世界观】世界观与规则：切换世界观 / 管理 NPC 矩阵 / 修改 AI 规则 */}
+                  <div className="mb-2 border-t pt-2" style={{ borderColor: t.border }}>
+                    <div className="px-3 pb-[6px] text-[12px] font-bold tracking-wide" style={{ color: t.secondary }}>
+                      世界观与规则
+                    </div>
+                    <div className="flex flex-col gap-[6px]">
+                      <button
+                        type="button"
+                        onClick={() => setWorldSheet(true)}
+                        className="flex w-full items-center justify-between gap-2 rounded-xl px-3 py-[10px] text-left transition-colors active:opacity-70"
+                        style={{ background: t.hover }}
+                        aria-label="打开世界观面板"
+                      >
+                        <div className="flex min-w-0 flex-col gap-[1px]">
+                          <span className="text-[15px] font-medium">切换世界观</span>
+                          <span className="truncate text-[12px] leading-snug" style={{ color: t.secondary }}>
+                            {activeWv ? `${activeWv.emoji} ${activeWv.name} · ${wvSnap.worldviews.length} 个可选` : '选择论坛的世界设定'}
+                          </span>
+                        </div>
+                        <span aria-hidden="true" className="shrink-0 text-[15px]" style={{ color: t.secondary }}>
+                          ›
+                        </span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setNpcSheet(true)}
+                        className="flex w-full items-center justify-between gap-2 rounded-xl px-3 py-[10px] text-left transition-colors active:opacity-70"
+                        style={{ background: t.hover }}
+                        aria-label="打开 NPC 矩阵管理面板"
+                      >
+                        <div className="flex min-w-0 flex-col gap-[1px]">
+                          <span className="text-[15px] font-medium">管理 NPC 矩阵</span>
+                          <span className="truncate text-[12px] leading-snug" style={{ color: t.secondary }}>
+                            {activeWv ? `${activeWv.matrix.length} 位核心 NPC · 瓜主/营销号/站姐/杠精` : '身份、性格、口头禅、发帖频率'}
+                          </span>
+                        </div>
+                        <span aria-hidden="true" className="shrink-0 text-[15px]" style={{ color: t.secondary }}>
+                          ›
+                        </span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setRulesSheet(true)}
+                        className="flex w-full items-center justify-between gap-2 rounded-xl px-3 py-[10px] text-left transition-colors active:opacity-70"
+                        style={{ background: t.hover }}
+                        aria-label="打开 AI 规则编辑面板"
+                      >
+                        <div className="flex min-w-0 flex-col gap-[1px]">
+                          <span className="text-[15px] font-medium">修改 AI 规则</span>
+                          <span className="truncate text-[12px] leading-snug" style={{ color: t.secondary }}>
+                            发帖 / 评论 / 审核过滤{rulesCount > 0 ? ` · ${rulesCount} 条已自定义` : ' · 拼在提示词最前端'}
+                          </span>
+                        </div>
+                        <span aria-hidden="true" className="shrink-0 text-[15px]" style={{ color: t.secondary }}>
+                          ›
+                        </span>
+                      </button>
+                    </div>
+                  </div>
+
                   {[
                     {
                       label: '个人资料',
@@ -972,6 +1053,27 @@ export default function ForumApp() {
               // 范围值同步刷新（面板不动范围，保险起见仍读一次）
               const s = getForumGenSettings();
               setGenUi({ pMin: s.postCountMin, pMax: s.postCountMax, cMin: s.commentCountMin, cMax: s.commentCountMax });
+            }}
+          />
+        )}
+
+        {/* v36【多世界观】三个管理面板（抽屉入口打开；覆盖抽屉层） */}
+        {worldSheet && <WorldviewSheet toast={toast} onClose={() => setWorldSheet(false)} />}
+        {npcSheet && (
+          <NpcMatrixSheet
+            toast={toast}
+            onClose={() => {
+              setNpcSheet(false);
+              setRulesCount(countCustomRules());
+            }}
+          />
+        )}
+        {rulesSheet && (
+          <RulesSheet
+            toast={toast}
+            onClose={() => {
+              setRulesSheet(false);
+              setRulesCount(countCustomRules());
             }}
           />
         )}
