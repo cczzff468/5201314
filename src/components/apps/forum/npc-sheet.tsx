@@ -10,10 +10,11 @@
  * - 保存立即生效：upsertMatrixNpc 重建作者索引（mnpc 解析用新名字/头像），
  *   下一次发帖/评论即按新【身份+性格+口头禅】生成（engine 每次都读 store）。
  *
- * RulesSheet（抽屉「修改 AI 规则」入口）：
- * - 论坛底层 AI 规则编辑框：发帖规则 / 评论规则 / 审核与过滤三块；
- * - 700ms 防抖自动保存 + 「保存并生效」按钮；规则拼接在所有生成提示词的
- *   System Prompt 最前端（最高优先级），下一次生成立即生效。
+ * RulesSheet（抽屉「修改 AI 规则」入口，v38 合开全部提示词）：
+ * - 上半：论坛底层 AI 规则编辑框三块——发帖规则 / 评论规则 / 审核与过滤；
+ * - 下半：全部 11 条生成提示词（PromptCardsList）——完整展示、可改可恢复默认；
+ * - 规则拼接在所有生成提示词的 System Prompt 最前端（最高优先级）；
+ * - 提示词修改 700ms 防抖自动保存，均保存即生效，下一次生成立即用新词。
  */
 
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
@@ -29,6 +30,9 @@ import {
   type MatrixNpcDraft,
 } from '@/lib/forum/worldview-store';
 import { AI_RULES_MAX_LEN, NPC_ROLES, roleDefOf, type MatrixNpc, type NpcRoleId } from '@/lib/forum/worldview';
+import { FORUM_PROMPT_DEFS } from '@/lib/forum/prompt-defs';
+import { countPromptOverrides } from '@/lib/forum/gen-settings';
+import { PromptCardsList } from './prompt-sheet';
 import { VerifiedBadge, WorldviewIcon, XIcons, useXTheme } from './shared';
 
 // ---------------- 头像候选（头像库精选 + 自动） ----------------

@@ -1,17 +1,18 @@
 'use client';
 
 /**
- * X论坛 · 生成设置 UI（v34 抽屉「生成设置」配套）。
+ * X论坛 · 提示词模板组件（v38「AI 规则」面板配套）。
  *
  * - GenRangeRow：抽屉里「每次生成帖子 / 每次生成评论 X~Y 条」的范围步进行
  *   （− 数字 + 一组，两组夹「至」；越界自动钳制、min/max 互相推挤）；
- * - PromptSheet：全屏提示词面板——把全部 11 条生成提示词（帖子/评论/楼中楼/
- *   私信/角色三件套/网名…）完整展示出来，可查看、修改、恢复默认：
+ * - PromptCardsList：全部 11 条生成提示词（帖子/评论/楼中楼/私信/角色三件套/
+ *   网名…）的完整展示 + 编辑卡片列表——嵌在「AI 规则」面板（npc-sheet.RulesSheet）
+ *   里使用，可查看、修改、恢复默认：
  *   · 修改后 700ms 防抖自动保存（也可点「保存并生效」立即保存）；
  *   · 保存即生效——engine.callApi 每次生成请求都把覆盖送给服务端，
  *     后台调度器（角色发帖/互动）同样用新提示词；
- *   · 模板里的 {{占位符}} 由系统按调用现场填充（面板展示可用占位符表）；
- *   · 关闭面板时自动落盘未保存的草稿，编辑不丢。
+ *   · 模板里的 {{占位符}} 由系统按调用现场填充（卡片展示可用占位符表）；
+ *   · 卸载时自动落盘未保存的草稿，编辑不丢。
  */
 
 import { useEffect, useRef, useState } from 'react';
@@ -23,7 +24,7 @@ import {
   type PromptKey,
 } from '@/lib/forum/prompt-defs';
 import { activePromptOf, resetAllPrompts, resetPrompt, setPromptOverride } from '@/lib/forum/gen-settings';
-import { XIcons, useXTheme } from './shared';
+import { useXTheme } from './shared';
 
 // ---------------- 范围步进行（抽屉用） ----------------
 
@@ -113,19 +114,14 @@ export function GenRangeRow({
   );
 }
 
-// ---------------- 提示词面板（全屏 sheet） ----------------
-
-interface PromptSheetProps {
-  onClose: () => void;
-  toast: (text: string) => void;
-}
+// ---------------- 提示词卡片列表（嵌入「AI 规则」面板） ----------------
 
 const AUTOSAVE_MS = 700;
 
-export function PromptSheet({ onClose, toast }: PromptSheetProps) {
+export function PromptCardsList({ toast }: { toast: (text: string) => void }) {
   const t = useXTheme();
-  /** 当前展开的提示词（默认展开第一条「帖子生成」——用户最关心的入口） */
-  const [expanded, setExpanded] = useState<PromptKey | null>('posts');
+  /** 当前展开的提示词（默认全收起——上方还有三块规则，列表先给全局） */
+  const [expanded, setExpanded] = useState<PromptKey | null>(null);
   /** 编辑草稿（key → 文本；初始 = 当前生效模板：覆盖优先、默认兜底） */
   const [drafts, setDrafts] = useState<Record<string, string>>(() => {
     const o: Record<string, string> = {};
@@ -225,190 +221,172 @@ export function PromptSheet({ onClose, toast }: PromptSheetProps) {
   ).length;
 
   return (
-    <div className="absolute inset-0 z-[70]" role="dialog" aria-modal="true" aria-label="提示词管理">
-      <div className="flex h-full flex-col animate-[forum-sheet_.26s_ease-out]" style={{ background: t.bg, color: t.text }}>
-        {/* 顶行：返回 | 标题 | 全部恢复默认 */}
-        <div className="flex shrink-0 items-center justify-between gap-2 px-3 pt-[54px]" style={{ height: 100 }}>
-          <button
-            type="button"
-            aria-label="关闭并返回"
-            onClick={onClose}
-            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full active:bg-black/10 dark:active:bg-white/10"
-            style={{ color: t.text }}
-          >
-            {XIcons.back(22)}
-          </button>
-          <div className="flex min-w-0 flex-col items-center">
-            <span className="text-[17px] font-bold">提示词</span>
-            <span className="text-[11px]" style={{ color: t.secondary }}>
-              全部 {FORUM_PROMPT_DEFS.length} 条 · {overriddenCount} 条已自定义
-            </span>
-          </div>
-          <button
-            type="button"
-            onClick={resetEverything}
-            className="flex h-[32px] shrink-0 items-center gap-1 rounded-full px-3 text-[13px] font-medium active:opacity-70"
-            style={{
-              border: `1px solid ${confirmReset ? '#e0245e' : t.border}`,
-              color: confirmReset ? '#e0245e' : t.text,
-            }}
-            aria-label="全部恢复默认"
-          >
-            <RotateCcw size={14} strokeWidth={2.2} />
-            {confirmReset ? '确认恢复？' : '全部默认'}
-          </button>
-        </div>
-
-        {/* 说明条 */}
-        <div className="shrink-0 px-4 pb-2 text-[11.5px] leading-relaxed" style={{ color: t.secondary }}>
-          修改后自动保存，下一次生成（含后台角色发帖）立即使用新提示词。模板里的
-          <span className="font-semibold" style={{ color: t.text }}>
-            {'{{占位符}}'}
+    <div>
+      {/* 段头：标题 + 统计 + 全部恢复默认 */}
+      <div className="mb-2 mt-1 flex items-center justify-between gap-2 px-1">
+        <div className="min-w-0 leading-tight">
+          <span className="text-[13px] font-bold">生成提示词</span>
+          <span className="ml-[6px] text-[11px]" style={{ color: t.secondary }}>
+            全部 {FORUM_PROMPT_DEFS.length} 条 · {overriddenCount} 条已自定义
           </span>
-          会被系统替换成真实值，没写的占位符会原样发给 AI。
         </div>
+        <button
+          type="button"
+          onClick={resetEverything}
+          className="flex h-[28px] shrink-0 items-center gap-1 rounded-full px-[10px] text-[12px] font-medium active:opacity-70"
+          style={{
+            border: `1px solid ${confirmReset ? '#e0245e' : t.border}`,
+            color: confirmReset ? '#e0245e' : t.secondary,
+          }}
+          aria-label="全部提示词恢复默认"
+        >
+          <RotateCcw size={12} strokeWidth={2.2} />
+          {confirmReset ? '确认恢复？' : '全部默认'}
+        </button>
+      </div>
 
-        {/* 提示词列表（长列表滚动 + 自定义滚动条） */}
-        <div className="forum-gen-scroll min-h-0 flex-1 overflow-y-auto px-3 pb-[28px]">
-          {FORUM_PROMPT_DEFS.map((def) => {
-            const open = expanded === def.key;
-            const draft = drafts[def.key] ?? '';
-            const isApplied = applied[def.key] === FORUM_PROMPT_DEFAULTS[def.key];
-            const dirty = draft !== (applied[def.key] ?? '');
-            const justSaved = !!savedFlash[def.key];
-            return (
-              <div
-                key={def.key}
-                className="mb-2 overflow-hidden rounded-2xl"
-                style={{ border: `1px solid ${t.border}`, background: open ? t.hover : 'transparent' }}
-              >
-                {/* 卡头（点击展开/收起） */}
-                <button
-                  type="button"
-                  aria-expanded={open}
-                  aria-label={`展开提示词：${def.label}`}
-                  onClick={() => setExpanded(open ? null : def.key)}
-                  className="flex w-full items-center gap-2 px-3 py-[10px] text-left transition-colors active:opacity-70"
-                >
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-[6px]">
-                      <span className="truncate text-[15px] font-semibold">{def.label}</span>
-                      {isApplied ? (
-                        <span
-                          className="shrink-0 rounded-full px-[6px] py-[1px] text-[10px] font-medium"
-                          style={{ background: t.border, color: t.secondary }}
-                        >
-                          默认
-                        </span>
-                      ) : (
-                        <span
-                          className="shrink-0 rounded-full px-[6px] py-[1px] text-[10px] font-semibold"
-                          style={{ background: 'rgba(29,155,240,0.14)', color: t.blue }}
-                        >
-                          已自定义
-                        </span>
-                      )}
-                      {dirty && (
-                        <span
-                          className="shrink-0 rounded-full px-[6px] py-[1px] text-[10px] font-semibold"
-                          style={{ background: 'rgba(224,36,94,0.12)', color: '#e0245e' }}
-                        >
-                          未保存
-                        </span>
-                      )}
-                    </div>
-                    <span className="mt-[1px] block truncate text-[11.5px]" style={{ color: t.secondary }}>
-                      {def.desc}
+      {/* 提示词卡片列表 */}
+      {FORUM_PROMPT_DEFS.map((def) => {
+        const open = expanded === def.key;
+        const draft = drafts[def.key] ?? '';
+        const isApplied = applied[def.key] === FORUM_PROMPT_DEFAULTS[def.key];
+        const dirty = draft !== (applied[def.key] ?? '');
+        const justSaved = !!savedFlash[def.key];
+        return (
+          <div
+            key={def.key}
+            className="mb-2 overflow-hidden rounded-2xl"
+            style={{ border: `1px solid ${t.border}`, background: open ? t.hover : 'transparent' }}
+          >
+            {/* 卡头（点击展开/收起） */}
+            <button
+              type="button"
+              aria-expanded={open}
+              aria-label={`展开提示词：${def.label}`}
+              onClick={() => setExpanded(open ? null : def.key)}
+              className="flex w-full items-center gap-2 px-3 py-[10px] text-left transition-colors active:opacity-70"
+            >
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-[6px]">
+                  <span className="truncate text-[15px] font-semibold">{def.label}</span>
+                  {isApplied ? (
+                    <span
+                      className="shrink-0 rounded-full px-[6px] py-[1px] text-[10px] font-medium"
+                      style={{ background: t.border, color: t.secondary }}
+                    >
+                      默认
                     </span>
-                  </div>
-                  <span
-                    aria-hidden="true"
-                    className="shrink-0 text-[13px] transition-transform"
-                    style={{ color: t.secondary, transform: open ? 'rotate(90deg)' : 'none' }}
-                  >
-                    ›
-                  </span>
-                </button>
+                  ) : (
+                    <span
+                      className="shrink-0 rounded-full px-[6px] py-[1px] text-[10px] font-semibold"
+                      style={{ background: 'rgba(29,155,240,0.14)', color: t.blue }}
+                    >
+                      已自定义
+                    </span>
+                  )}
+                  {dirty && (
+                    <span
+                      className="shrink-0 rounded-full px-[6px] py-[1px] text-[10px] font-semibold"
+                      style={{ background: 'rgba(224,36,94,0.12)', color: '#e0245e' }}
+                    >
+                      未保存
+                    </span>
+                  )}
+                </div>
+                <span className="mt-[1px] block truncate text-[11.5px]" style={{ color: t.secondary }}>
+                  {def.desc}
+                </span>
+              </div>
+              <span
+                aria-hidden="true"
+                className="shrink-0 text-[13px] transition-transform"
+                style={{ color: t.secondary, transform: open ? 'rotate(90deg)' : 'none' }}
+              >
+                ›
+              </span>
+            </button>
 
-                {/* 卡体（展开才渲染，长文本编辑区） */}
-                {open && (
-                  <div className="px-3 pb-3">
-                    {/* 可用占位符 */}
-                    {def.tokens.length > 0 && (
-                      <div className="mb-2 flex flex-wrap gap-[5px]">
-                        {def.tokens.map((tk) => (
-                          <span
-                            key={tk.token}
-                            title={tk.desc}
-                            className="rounded-md px-[6px] py-[2px] text-[10.5px] font-medium"
-                            style={{ background: t.border, color: t.secondary }}
-                          >
-                            {'{{' + tk.token + '}}'} · {tk.desc}
-                          </span>
-                        ))}
-                      </div>
-                    )}
-                    <textarea
-                      value={draft}
-                      onChange={(e) => edit(def.key, e.target.value)}
-                      onBlur={() => saveNow(def.key)}
-                      spellCheck={false}
-                      aria-label={`${def.label}模板文本`}
-                      className="forum-gen-scroll w-full resize-none rounded-xl px-[10px] py-[8px] text-[12px] leading-[1.65] outline-none"
-                      style={{
-                        background: t.bg,
-                        color: t.text,
-                        border: `1px solid ${t.border}`,
-                        height: 232,
-                        caretColor: t.blue,
-                        fontFamily:
-                          'ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace',
-                      }}
-                    />
-                    {/* 底部操作行：字数 + 恢复默认 + 保存并生效 */}
-                    <div className="mt-[6px] flex items-center gap-2">
-                      <span className="text-[10.5px] tabular-nums" style={{ color: t.secondary }}>
-                        {draft.length} 字
-                        {draft.length >= PROMPT_OVERRIDE_MAX_LEN ? '（已达上限）' : ''}
+            {/* 卡体（展开才渲染，长文本编辑区） */}
+            {open && (
+              <div className="px-3 pb-3">
+                {/* 可用占位符 */}
+                {def.tokens.length > 0 && (
+                  <div className="mb-2 flex flex-wrap gap-[5px]">
+                    {def.tokens.map((tk) => (
+                      <span
+                        key={tk.token}
+                        title={tk.desc}
+                        className="rounded-md px-[6px] py-[2px] text-[10.5px] font-medium"
+                        style={{ background: t.border, color: t.secondary }}
+                      >
+                        {'{{' + tk.token + '}}'} · {tk.desc}
                       </span>
-                      {justSaved && (
-                        <span
-                          className="flex items-center gap-[3px] text-[10.5px] font-medium"
-                          style={{ color: '#00ba7c' }}
-                        >
-                          <Check size={11} strokeWidth={3} />
-                          已保存 · 下次生成即生效
-                        </span>
-                      )}
-                      <span className="flex-1" />
-                      <button
-                        type="button"
-                        onClick={() => resetOne(def.key)}
-                        className="flex h-[28px] items-center gap-1 rounded-full px-3 text-[12px] font-medium active:opacity-70"
-                        style={{ border: `1px solid ${t.border}`, color: t.secondary }}
-                        aria-label={`恢复默认：${def.label}`}
-                      >
-                        <RotateCcw size={12} strokeWidth={2.4} />
-                        恢复默认
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => saveNow(def.key)}
-                        disabled={!dirty}
-                        className="flex h-[28px] items-center rounded-full px-4 text-[12px] font-bold text-white transition-opacity active:opacity-70 disabled:opacity-40"
-                        style={{ background: t.blue }}
-                        aria-label={`保存并生效：${def.label}`}
-                      >
-                        保存并生效
-                      </button>
-                    </div>
+                    ))}
                   </div>
                 )}
+                <textarea
+                  value={draft}
+                  onChange={(e) => edit(def.key, e.target.value)}
+                  onBlur={() => saveNow(def.key)}
+                  spellCheck={false}
+                  aria-label={`${def.label}模板文本`}
+                  className="forum-gen-scroll w-full resize-none rounded-xl px-[10px] py-[8px] text-[12px] leading-[1.65] outline-none"
+                  style={{
+                    background: t.bg,
+                    color: t.text,
+                    border: `1px solid ${t.border}`,
+                    height: 232,
+                    caretColor: t.blue,
+                    fontFamily:
+                      'ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace',
+                  }}
+                />
+                {/* 底部操作行：字数 + 恢复默认 + 保存并生效 */}
+                <div className="mt-[6px] flex items-center gap-2">
+                  <span className="text-[10.5px] tabular-nums" style={{ color: t.secondary }}>
+                    {draft.length} 字
+                    {draft.length >= PROMPT_OVERRIDE_MAX_LEN ? '（已达上限）' : ''}
+                  </span>
+                  {justSaved && (
+                    <span
+                      className="flex items-center gap-[3px] text-[10.5px] font-medium"
+                      style={{ color: '#00ba7c' }}
+                    >
+                      <Check size={11} strokeWidth={3} />
+                      已保存 · 下次生成即生效
+                    </span>
+                  )}
+                  <span className="flex-1" />
+                  <button
+                    type="button"
+                    onClick={() => resetOne(def.key)}
+                    className="flex h-[28px] items-center gap-1 rounded-full px-3 text-[12px] font-medium active:opacity-70"
+                    style={{ border: `1px solid ${t.border}`, color: t.secondary }}
+                    aria-label={`恢复默认：${def.label}`}
+                  >
+                    <RotateCcw size={12} strokeWidth={2.4} />
+                    恢复默认
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => saveNow(def.key)}
+                    disabled={!dirty}
+                    className="flex h-[28px] items-center rounded-full px-4 text-[12px] font-bold text-white transition-opacity active:opacity-70 disabled:opacity-40"
+                    style={{ background: t.blue }}
+                    aria-label={`保存并生效：${def.label}`}
+                  >
+                    保存并生效
+                  </button>
+                </div>
               </div>
-            );
-          })}
-        </div>
-      </div>
+            )}
+          </div>
+        );
+      })}
+      <p className="px-2 pb-2 pt-1 text-center text-[11px] leading-relaxed" style={{ color: t.secondary }}>
+        模板里的 <span className="font-semibold" style={{ color: t.text }}>{'{{占位符}}'}</span>{' '}
+        由系统替换成真实值；修改自动保存，下一次生成立即生效
+      </p>
     </div>
   );
 }

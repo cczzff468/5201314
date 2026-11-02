@@ -251,25 +251,17 @@ export function XAvatar({
   );
 }
 
-// ---------------- 世界观图标（渐变徽章 + 矢量 glyph） ----------------
+// ---------------- 世界观图标（纯色平涂徽章 + 矢量 glyph） ----------------
 
-/** hex → rgba（彩色柔光阴影用） */
-function hexA(hex: string, a: number): string {
-  const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim());
-  if (!m) return hex;
-  const n = parseInt(m[1], 16);
-  return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${a})`;
-}
-
-/** 内置 5 套世界观的签名渐变（高饱和双 Stop，全部避开蓝/靛）：
- *  韩娱嫂站＝嫂子粉→应援紫；内娱八卦＝瓜橙→塌房深红；校园暗恋墙＝樱花粉→心动玫红；
- *  硬核追星现场＝舞台紫→灯牌粉；抽象乐子人＝乐子金→发疯橙。 */
-const WV_BUILTIN_GRADIENTS: Record<string, [string, string]> = {
-  'builtin:hyul': ['#ff6fb5', '#8b5cf6'],
-  'builtin:neiyu': ['#ff8a5c', '#e0245e'],
-  'builtin:campus': ['#fda4af', '#f43f5e'],
-  'builtin:concert': ['#c084fc', '#e879f9'],
-  'builtin:abstract': ['#fbbf24', '#f97316'],
+/** 内置 5 套世界观的签名色（平涂单色，中等饱和，全部避开蓝/靛）：
+ *  韩娱嫂站＝嫂子粉；内娱八卦＝瓜橙；校园暗恋墙＝樱花玫红；
+ *  硬核追星现场＝舞台紫；抽象乐子人＝乐子金。 */
+const WV_BUILTIN_COLORS: Record<string, string> = {
+  'builtin:hyul': '#f06292',
+  'builtin:neiyu': '#f4773b',
+  'builtin:campus': '#ef6a7f',
+  'builtin:concert': '#b45bd4',
+  'builtin:abstract': '#e8a13c',
 };
 
 /** 内置世界观的签名 glyph（白色描线矢量图标——不用 emoji）：
@@ -283,21 +275,21 @@ const WV_BUILTIN_ICONS: Record<string, LucideIcon> = {
   'builtin:abstract': Laugh,
 };
 
-/** 自建世界观渐变池（按名字哈希稳定取一组——改名配色跟着换，名字回看即知） */
-const WV_CUSTOM_PALETTE: [string, string][] = [
-  ['#f472b6', '#a855f7'],
-  ['#fb923c', '#ef4444'],
-  ['#fda4af', '#ec4899'],
-  ['#a3e635', '#14b8a6'],
-  ['#fcd34d', '#f97316'],
-  ['#f87171', '#dc2626'],
-  ['#e879f9', '#9333ea'],
-  ['#4ade80', '#0d9488'],
+/** 自建世界观平涂色池（按名字哈希稳定取一个——改名配色跟着换，名字回看即知） */
+const WV_CUSTOM_PALETTE: string[] = [
+  '#e05a9a',
+  '#e8683c',
+  '#e46a80',
+  '#a55ad0',
+  '#d9a238',
+  '#3fa38a',
+  '#d95850',
+  '#c05fd0',
 ];
 
-/** 世界观徽章渐变（内置签名配色；自建按名字哈希稳定落池） */
-export function worldviewGradient(id: string, name?: string): [string, string] {
-  const sig = WV_BUILTIN_GRADIENTS[id];
+/** 世界观徽章平涂色（内置签名配色；自建按名字哈希稳定落池） */
+export function worldviewColor(id: string, name?: string): string {
+  const sig = WV_BUILTIN_COLORS[id];
   if (sig) return sig;
   const seed = (name ?? '').trim() || id;
   let h = 0;
@@ -305,47 +297,23 @@ export function worldviewGradient(id: string, name?: string): [string, string] {
   return WV_CUSTOM_PALETTE[h % WV_CUSTOM_PALETTE.length];
 }
 
-/** 世界观图标：渐变方圆徽章（app 图标式 31% 圆角）+ 顶部玻璃高光 +
- *  内描边高光 + 彩色柔光投影 + 白色矢量 glyph（内置＝签名描线图标，
- *  自建＝名字首字白粗体）——不用 emoji（用户要求 v37）。 */
+/** 世界观图标：纯色平涂方圆徽章（app 图标式 31% 圆角）+ 白色矢量 glyph
+ *  （内置＝签名描线图标，自建＝名字首字白粗体）——平涂无渐变/无高光/
+ *  无内描边/无彩色投影（用户要求 v38），不用 emoji。 */
 export function WorldviewIcon({ id, name, size = 44 }: { id: string; name: string; size?: number }) {
-  const [from, to] = worldviewGradient(id, name);
+  const bg = worldviewColor(id, name);
   const r = Math.round(size * 0.31);
   const Icon = WV_BUILTIN_ICONS[id];
   return (
     <span
       aria-hidden="true"
-      className="relative flex shrink-0 select-none items-center justify-center"
-      style={{
-        width: size,
-        height: size,
-        borderRadius: r,
-        background: `linear-gradient(140deg, ${from}, ${to})`,
-        boxShadow: `0 5px 14px -4px ${hexA(to, 0.55)}, inset 0 1px 0 rgba(255,255,255,0.45), inset 0 0 0 1px rgba(255,255,255,0.28)`,
-      }}
+      className="flex shrink-0 select-none items-center justify-center"
+      style={{ width: size, height: size, borderRadius: r, background: bg }}
     >
-      {/* 顶部玻璃高光（左上斜向光斑） */}
-      <span
-        className="pointer-events-none absolute inset-0"
-        style={{ borderRadius: r, background: 'radial-gradient(120% 70% at 30% 8%, rgba(255,255,255,0.5), rgba(255,255,255,0) 60%)' }}
-      />
       {Icon ? (
-        <Icon
-          size={Math.round(size * 0.52)}
-          strokeWidth={Math.max(1.8, size * 0.055)}
-          color="#ffffff"
-          style={{ filter: 'drop-shadow(0 1px 2px rgba(0,0,0,0.28))' }}
-        />
+        <Icon size={Math.round(size * 0.52)} strokeWidth={Math.max(1.8, size * 0.055)} color="#ffffff" />
       ) : (
-        <span
-          style={{
-            fontSize: Math.round(size * 0.44),
-            fontWeight: 700,
-            color: '#fff',
-            lineHeight: 1,
-            filter: 'drop-shadow(0 1px 2px rgba(0,0,0,0.28))',
-          }}
-        >
+        <span style={{ fontSize: Math.round(size * 0.44), fontWeight: 700, color: '#fff', lineHeight: 1 }}>
           {name.trim().slice(0, 1) || '世'}
         </span>
       )}
