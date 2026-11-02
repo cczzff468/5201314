@@ -11,9 +11,9 @@
 
 // ---------------- 基础类型 ----------------
 
-export type MemApp = 'wx' | 'qq' | 'sms' | 'phone' | 'cabin';
+export type MemApp = 'wx' | 'qq' | 'sms' | 'phone' | 'cabin' | 'forum';
 
-export const MEM_APP_LABEL: Record<MemApp, string> = { wx: '微信', qq: 'QQ', sms: '信息', phone: '电话', cabin: '拾光小屋' };
+export const MEM_APP_LABEL: Record<MemApp, string> = { wx: '微信', qq: 'QQ', sms: '信息', phone: '电话', cabin: '拾光小屋', forum: 'X论坛' };
 
 /** 记忆权重：高（身份/关系/承诺/禁忌）/ 普通 / 低（临时安排、近期状态，最先淡化） */
 export type MemWeight = 'high' | 'normal' | 'low';
@@ -61,7 +61,7 @@ export interface MemFragment {
   sourceMsgId?: string;
   /** 来源渠道：缺省 = 私聊对话提取；'moments' = 朋友圈/QQ空间动态（与私聊区分，注入时带渠道标注）；
    *  'group' = 群聊对话提取（互开关决定是否参与私聊召回；群聊召回仅限当前群） */
-  source?: 'chat' | 'moments' | 'group';
+  source?: 'chat' | 'moments' | 'group' | 'forum';
   /** source==='moments'：关联的动态 id（动态与记忆双向打通的追溯键） */
   sourcePostId?: string;
   /** source==='moments'：互动类型（发动态/点赞/评论） */

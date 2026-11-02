@@ -40,6 +40,7 @@ import {
   type ForumPost,
 } from '@/lib/forum/core';
 import { generateMoreComments, queueAiReplyToUserReply } from '@/lib/forum/engine';
+import { writeUserCommentMemory } from '@/lib/forum/social';
 import { detectMessageLang, requestTranslation } from '@/lib/chat-translate';
 import { useSettings } from '@/lib/ios/store';
 import { XAvatar, XIcons, VerifiedBadge } from './shared';
@@ -602,6 +603,17 @@ export function ThreadView({ postId }: { postId: string }) {
     setDraft('');
     const targetPost = nd.posts.find((p) => p.id === exactId);
     if (targetPost && targetPost.authorKey !== 'user') queueAiReplyToUserReply(exactId, reply.id, groupId, post.id);
+    // v33【AI 真人社交·记忆写入】：用户评论/回复了角色的内容 → 写入该角色的记忆
+    //（直接回复角色主帖 = 「TA在我帖子下评论」；回复角色的评论 = 「TA回复了我的评论」）
+    if (targetPost?.authorKey.startsWith('char:')) {
+      writeUserCommentMemory(targetPost.authorKey.slice(5), {
+        post: targetPost.id === post.id ? targetPost : post,
+        comment: reply,
+        onOwnComment: targetPost.id !== post.id,
+      });
+    } else if (post.authorKey.startsWith('char:')) {
+      writeUserCommentMemory(post.authorKey.slice(5), { post, comment: reply, onOwnComment: false });
+    }
     setReplyTarget(null);
   };
 

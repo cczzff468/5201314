@@ -1938,3 +1938,25 @@ Stage Summary:
 - renderTextImage：720/40px/74 行距/640 行宽（文字视觉 ×2.2）
 - GEN_VERSION=32 重播种；E2E 三重 DOM 验证（宽度 76%/前置兄弟=正文/PNG 720×720）
 - 关键文件：feed.tsx（PostBodyMedia 重写+删 Fragment import）、textimg.ts（调参）、core.ts（GEN_VERSION=32）
+
+## 2026-11-02 · X论坛 v33「AI 真人社交系统」全闭环（主动发帖/双向互动/记忆/异步时间差）
+
+Task: 用户五项规格把论坛升级为「AI 真人社交系统」：①AI 角色基于人设+情绪+记忆+事件主动发帖（禁模板腔），发帖后网友按真实规则互动；②AI 能看到用户帖子（正文/图/标签入上下文）；③双向互动（AI 决定点赞/评论、用户评论必得「神回复」）；④记忆写入（用户发帖/AI评论/用户回复/AI二次回复全部入库，私聊能主动提起）；⑤不秒回（分钟~小时级延迟）+ 抽屉「AI 活跃度」开关。
+
+Work Log:
+- [新模块 social.ts] 角色侧大脑：charPersonaCard（人设卡）/charMoodBlock（ai-mood 情绪）/charMemoryDigest（memChatRecallBlock 召回截取）/userPostsDigest（用户帖感知）/pickDailyEvents（30 条今日事件池）/writeXMemory 六个记忆写入函数（用户发帖/评论/点赞 + 角色发帖/互动/神回复，归属句式+sourcePostId 去重）/buildForumChatBlock（私聊感知块：双方帖子+评论区互动，沿 replyTo 链爬主帖判断归属）
+- [记忆层] memory-core.ts：MemApp/MemFragment.source 扩 'forum'；MEM_APP_LABEL 加「X论坛」；accounts.ts AccountApp 扩 forum（DEFAULT_APPS 固定 main——论坛=机主公开空间，小号不可见）；memory.ts 新增 memAddForumFragment/memHasForumFragment（仿 moments 管线：appendFragments 去重合并+大号作用域）；召回标签 f.source==='forum' → 「X论坛」，头部文案补 X论坛
+- [engine.ts] PendingJob 扩 charPost/charEngage/charReply 三 kind（meta.charKey/thanks/userReplyId）；CHAR_DELAY 延迟族（首帖 1.5~7min、常规 0.5~4.5h、engagement 1~15min 错开、神回复 0.75~5min、致谢 2~10min、网友反应 12s~6min）；tickForumSocial（ForumScheduler 心跳：runPending 重挂 + 按节奏排角色发帖）；setForumAiActivity（开关切换重置排程）；queueCharEngagements（用户发帖→每位角色独立排队决策）；queueNetizenReactionsToCharPost（角色帖→网友点赞陆续+0~2 评论）；queueCharThanksForLike（用户点赞→30% 致谢，查重防叠）；queueUserPostInteractions 重写（v33 真人节奏：点赞 15~90s 陆续、评论 45s~5min；charLiker 秒赞废除——改走 charEngage）；queueAiReplyToUserReply 升级（被回复对象是 char → 保证 charReply 神回复 + char 从通用网友池剔除防双回复）；execJob 三新分支（charPost：人设+情绪+记忆+事件+用户帖→LLM→四档校验→落库零热度起步→网友反应→写记忆；charEngage：LLM 决策 {like,comment}→锚定校验→点赞+通知+评论+记忆；charReply：神回复带整楼对话链+记忆→replyToPost 精确回应用户那条；thanks 模式可空=不打扰）；replyToUserPost 分支 replyName 修正（网友评 char 帖时取真实作者名）
+- [route.ts] 新增三 kind：charPost（身份块=人设+情绪+记忆+最近帖；取材三向=对TA的记忆含蓄念叨/今日事件按性格消化/自己的生活；公开场合分寸铁律；复用 alignPostItems 四档字数+配图三元校验，extractPostItems 兼容单对象输出【关键bug修复：原只解析数组】+严格重试一次）；charEngage（决策规则：不是每条都理/真心才赞/评论必须引细节接梗禁空评；15~120字+锚定+黑名单校验）；charReply（神回复标准：接得住话+带记忆+人设口吻+公开分寸；thanks 分支轻回应可空）
+- [forum.tsx] 抽屉新增「AI 活跃度」iOS 开关（role=switch/aria-checked/绿色 #34c759；ForumData.aiActivity 持久化）；publish 接线（writeUserPostMemory + queueCharEngagements）；likeToggle 接线（char 帖点赞→writeUserLikeMemory + queueCharThanksForLike）
+- [thread-view.tsx] sendReply 记忆写入（回复 char 主帖/评论→writeUserCommentMemory，onOwnComment 区分句式）
+- [三端私聊] wechat.tsx/qq.tsx/chat.tsx：systemFull 注入 buildForumChatBlock(peer.id)（紧随 momentsBlock；空串零成本）
+- [ForumScheduler.tsx + PhoneShell] 仿 MomentsScheduler：null 渲染 + 15s 心跳 + alive/busy 防重入；App 不打开也照常调度（tick 首查 seeded 不强制播种）
+- [E2E·Agent Browser 全链路] 注入机主林一+char 苏晴（傲娇插画师女友）→ 解锁开论坛：抽屉开关渲染✓/关闭持久化 aiActivity=false✓/重开重置排程✓；调度器心跳排 charPost 任务（IndexedDB 实测 due 倒计时）；到期执行→苏晴发帖「今早的地铁挤到怀疑人生…沙丁鱼罐头…」（事件素材「通勤地铁」被人设消化，呀/哼口吻）+lastPostAt 更新+网友点赞陆续+评论排队；用户发感冒帖→苏晴记忆「林一今天在X论坛发帖说：…」+charEngage 排队；用户评论苏晴帖→charReply 保证排队+记忆「林一在我今天的X论坛帖子下评论：…」→神回复到达「被你猜中啦，三分糖奶茶确实买了，不过你感冒嗓子还来冲浪，笨蛋，快去吃药休息嘛！」（接住用户评论+引用感冒帖记忆+人设口吻）→记忆「…我回复TA：…」；charEngage 到期→点赞+评论「笨蛋林一，嗓子疼还敢想冰的…」（LLM 决策+锚定+记忆）→记忆「我在林一的X论坛帖子下评论：…」；网友评论用户帖「热柠檬水选得好www，冰奶茶下去嗓子直接报废」（锚定）；信息 App 私聊 fetch 拦截实测 system prompt 含【X论坛近况】块（双方帖子+评论区来回+提及频率规则），苏晴回复主动提起论坛（「你评论说我买了三分糖奶茶，被你猜中啦～不过你感冒嗓子还来冲浪」）；curl 直测三 kind 全过；零浏览器错误；tsc 除 4 条 chat-call 存量基线外零错；eslint 改动文件零新增
+- [排障] charPost 首测空稿→根因 extractPostItems 只解析 JSON 数组而 prompt 让模型输出单对象→兼容 object/array 后 curl 实测出稿（人设口吻+用户帖感知全达标）；锁屏解锁用 PointerEvent 序列（touch 事件无效）
+
+Stage Summary:
+- AI 真人社交五项规格全部落地：主动发帖（人设+情绪+记忆+事件素材四源驱动）、用户帖感知（userPostsDigest 入全部角色 prompt）、双向互动（charEngage LLM 决策 + 神回复保证）、记忆写入（6 类事件→source='forum' 碎片，私聊双通道提起：forumBlock 感知块 + 记忆召回）、异步时间差（CHAR_DELAY 分钟~小时级 + 抽屉 AI 活跃度开关门控主动行为）
+- 新文件：social.ts（角色大脑）、ForumScheduler.tsx（全局心跳）；核心改动：engine.ts（三 kind+调度+执行）、route.ts（三生成分支）、memory-core/memory/accounts（forum 记忆通道）、forum/thread-view/wechat/qq/chat（接线）
+- 关键修复：extractPostItems 兼容单对象（charPost 全链路因此打通）
+- GEN_VERSION 不变（35）：纯功能叠加不动内容池，存量帖子/评论/关注全保留

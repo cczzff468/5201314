@@ -37,7 +37,8 @@ import {
   type ForumPost,
   POST_MAX,
 } from '@/lib/forum/core';
-import { bootForum, generateMoreFeedPosts, generateNewFeedPosts, queueUserPostInteractions } from '@/lib/forum/engine';
+import { bootForum, generateMoreFeedPosts, generateNewFeedPosts, queueUserPostInteractions, queueCharEngagements, queueCharThanksForLike, setForumAiActivity } from '@/lib/forum/engine';
+import { writeUserLikeMemory, writeUserPostMemory } from '@/lib/forum/social';
 import { XAvatar, XIcons, XLogo, useXTheme } from './shared';
 import { FeedList, FeedSkeleton, CommunityIcon } from './feed';
 import { ComposeSheet, type ComposePayload } from './compose-sheet';
@@ -70,6 +71,8 @@ const KEYFRAMES = `
 
 export default function ForumApp() {
   const t = useXTheme();
+  /** v33【AI 真人社交】活跃度开关状态（从 ForumData 派生；saveForum 后自动刷新） */
+  const aiActivity = forumData().aiActivity !== false;
   const [authorsReady, setAuthorsReady] = useState(false);
   const [tab, setTabRaw] = useState<Tab>('home');
   const [views, setViews] = useState<ViewSpec[]>([]);
@@ -286,7 +289,14 @@ export default function ForumApp() {
     const p = d.posts.find((x) => x.id === postId);
     if (!p) return;
     if (p.likes.includes('user')) p.likes = p.likes.filter((k) => k !== 'user');
-    else p.likes = [...p.likes, 'user'];
+    else {
+      p.likes = [...p.likes, 'user'];
+      // v33【AI 真人社交】：用户给角色的帖子点赞 → 通知角色（写记忆）+ 低概率 TA 来评论区回一句
+      if (p.authorKey.startsWith('char:')) {
+        writeUserLikeMemory(p.authorKey.slice(5), p);
+        queueCharThanksForLike(p);
+      }
+    }
     saveForum({ ...d });
   }, []);
 
@@ -339,7 +349,13 @@ export default function ForumApp() {
       };
       d.posts.push(post);
       saveForum({ ...d });
-      if (!scheduled) queueUserPostInteractions(post);
+      if (!scheduled) {
+        queueUserPostInteractions(post);
+        // v33【AI 真人社交】：用户发帖 → 写入全部角色的记忆（「TA今天在论坛发帖说…」）
+        // + 每位角色延迟几分钟独立决定要不要点赞/评论（LLM 决策，不秒回）
+        writeUserPostMemory(post);
+        queueCharEngagements(post);
+      }
       setHomeTab('foryou');
       gotoTab(0);
       toast(
@@ -765,6 +781,40 @@ export default function ForumApp() {
                 </button>
                 {/* 菜单 */}
                 <div className="mt-4 border-t pt-3" style={{ borderColor: t.border }}>
+                  {/* v33【AI 真人社交】活跃度开关：门控角色主动发帖/逛帖/互动（神回复不受限） */}
+                  <div className="mb-1 flex w-full items-center justify-between gap-3 rounded-xl px-3 py-[10px]">
+                    <div className="flex min-w-0 flex-col gap-[1px] text-left">
+                      <span className="text-[15px] font-medium">AI 活跃度</span>
+                      <span className="text-[12px] leading-snug" style={{ color: t.secondary }}>
+                        角色像真人一样发帖、点赞、评论（有分钟级延迟）；关闭后不再主动，但仍会回复你
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={aiActivity}
+                      aria-label="切换 AI 活跃度"
+                      onClick={() => {
+                        const next = !aiActivity;
+                        setForumAiActivity(next);
+                        toast(
+                          next
+                            ? 'AI 活跃度已开启：角色将像真人一样逛论坛'
+                            : 'AI 活跃度已关闭：角色不再主动发帖与互动',
+                        );
+                      }}
+                      className="relative h-[31px] w-[51px] shrink-0 rounded-full transition-colors"
+                      style={{
+                        background: aiActivity ? '#34c759' : 'rgba(120,120,128,0.32)',
+                        boxShadow: 'inset 0 0 0 0.5px rgba(0,0,0,0.06)',
+                      }}
+                    >
+                      <span
+                        className="absolute top-[2px] h-[27px] w-[27px] rounded-full bg-white shadow-md transition-all duration-200"
+                        style={{ left: aiActivity ? 22 : 2 }}
+                      />
+                    </button>
+                  </div>
                   {[
                     {
                       label: '个人资料',

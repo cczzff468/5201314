@@ -306,6 +306,12 @@ export interface ForumData {
   nameBank?: string[];
   /** 生成引擎版本（升级内容风格时 bump：旧 AI 帖子清除重播种，用户自己的帖子保留） */
   genVersion?: number;
+  /** 【AI 真人社交】AI 角色活跃度开关（抽屉里切换；缺省 = 开）——
+   *  开：角色主动发帖/逛帖/给用户点赞评论；关：不再主动，但回复用户评论（神回复）不受限 */
+  aiActivity?: boolean;
+  /** 【AI 真人社交】每个角色的发帖节奏（key = 联系人 id）：
+   *  lastPostAt = 上次发帖时刻；nextPostAt = 下一次可以排主动帖的最早时刻（调度器心跳据此排程） */
+  charSocial?: Record<string, { lastPostAt?: number; nextPostAt?: number }>;
   seeded: boolean;
   lastGenAt: number;
   joinedAt: number;

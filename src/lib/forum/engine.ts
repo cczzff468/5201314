@@ -21,6 +21,16 @@
  *    （v26：每条评论 1-5 位不同网友直接回复，部分回复再被回复成 3/4 层；
  *    前台只等前两层，深层回复像真实 thread 一样陆续冒出来）。
  * 7. 热度合理性：评论/楼中楼/AI 回复的点赞浏览按父帖比例缩放（评论赞 << 主帖赞，像推特）。
+ * 8. 【AI 真人社交】角色侧闭环（social.ts 提供人设/情绪/记忆/事件素材）：
+ *    - tickForumSocial（ForumScheduler 心跳驱动）：按节奏给每个 char 排「主动发帖」任务；
+ *    - charPost：基于【人设+当前情绪+对用户的记忆+今日事件素材+用户最近发的帖】发帖，
+ *      发帖后安排网友点赞/评论（真实网友规则）+ 写入自己的记忆；
+ *    - queueCharEngagements（用户发帖后）：每位角色延迟几分钟独立决定要不要点赞/评论
+ *      （LLM 决策，评论必须针对帖子具体内容）；
+ *    - queueAiReplyToUserReply 升级：被回复对象是 char 时，保证 TA 本人延迟几分钟「神回复」
+ *      （带人设+记忆+完整对话链）；
+ *    - queueCharThanksForLike：用户给角色点赞 → 角色偶尔来评论区回一句；
+ *    - 所有延迟模拟真人（分钟~小时级，不秒回）；活跃度开关（ForumData.aiActivity）门控主动行为。
  *
  * 模型连接（设置 App）：
  * - API 模型（apiConfig）：所有 LLM 生成（帖子/评论/回复/私信）；
@@ -53,6 +63,7 @@ import {
   type ForumPost,
   forumContactsSnap,
   forumData,
+  refreshForumAuthors,
   resolveAuthor,
   saveForum,
   uid,
@@ -60,6 +71,19 @@ import {
 import { describeImagesAuto } from '@/lib/vision-client';
 import { renderTextImage } from './textimg';
 import { commentAnchored, isTenderPost, loudMemeIn, offTopicIn, personaBleedIn, postAllowsCatchall, universalPhraseIn } from './topic';
+import {
+  charMemoryDigest,
+  charMoodBlock,
+  charPersonaCard,
+  charRecentPosts,
+  charRelationLine,
+  forumCharBriefs,
+  pickDailyEvents,
+  userPostsDigest,
+  writeCharEngageMemory,
+  writeCharOwnPostMemory,
+  writeCharReplyMemory,
+} from './social';
 
 // ---------------- pending 队列（跨刷新持久） ----------------
 
@@ -67,8 +91,8 @@ interface PendingJob {
   id: string;
   /** 到期时间戳 */
   due: number;
-  kind: 'replyToUserPost' | 'aiReplyBack' | 'dmReply';
-  /** 相关帖子 id（reply 类）/ dm 对方 key（dmReply） */
+  kind: 'replyToUserPost' | 'aiReplyBack' | 'dmReply' | 'charPost' | 'charEngage' | 'charReply';
+  /** 相关帖子 id（reply 类）/ dm 对方 key（dmReply）/ charPost=charKey */
   postKey: string;
   meta: {
     authorKey?: AuthorKey;
@@ -77,8 +101,12 @@ interface PendingJob {
     rootId?: string;
     /** aiReplyBack 增强：主帖 id（上下文用） */
     mainPostId?: string;
-    /** aiReplyBack 增强：用户刚发的回复 id（AI 据此接话） */
+    /** aiReplyBack/charReply 增强：用户刚发的回复 id（AI 据此接话） */
     userReplyId?: string;
+    /** 【AI 真人社交】charPost/charEngage/charReply：目标角色 char:<contactId> */
+    charKey?: AuthorKey;
+    /** charReply：点赞致谢模式（用户点赞后角色来评论区回一句，可返回空=不打扰） */
+    thanks?: boolean;
   };
 }
 
@@ -1882,10 +1910,174 @@ export async function generateMoreComments(postId: string): Promise<number> {
   });
 }
 
+// ---------------- 【AI 真人社交】角色社交（人设+记忆+情绪驱动） ----------------
+
+/** 角色社交延迟（用户要求：不要秒回——模拟真人，延迟几分钟甚至几小时）。
+ *  全部落在分钟~小时量级；动态网友（背景音）保持秒级~分钟级。 */
+const CHAR_DELAY = {
+  /** 首次激活后的第一帖（角色「入驻」论坛，几分钟内能刷到） */
+  firstPost: () => 90_000 + Math.random() * 330_000, // 1.5~7 分钟
+  /** 常规主动发帖间隔 */
+  postInterval: () => (30 + Math.random() * 240) * 60_000, // 0.5~4.5 小时
+  /** 角色刷到用户帖子后的反应延迟（i = 第几位角色，彼此错开） */
+  engage: (i: number) => 60_000 + Math.random() * 840_000 + i * (120_000 + Math.random() * 300_000), // 1~15 分钟+错开
+  /** 神回复延迟（你评论了 TA，TA 过几分钟才回你） */
+  godReply: () => 45_000 + Math.random() * 225_000, // 0.75~5 分钟
+  /** 被点赞后来评论区回一句（低概率触发时的延迟） */
+  thanks: () => 120_000 + Math.random() * 480_000, // 2~10 分钟
+  /** 角色帖子收到的网友点赞（i = 第几个网友） */
+  netLike: (i: number) => 12_000 + Math.random() * 168_000 + i * 25_000, // 12 秒~3 分钟
+  /** 角色帖子收到的网友评论（i = 第几条） */
+  netComment: (i: number) => 45_000 + Math.random() * 315_000 + i * (90_000 + Math.random() * 180_000), // 45 秒~6 分钟
+};
+
+/** 活跃度开关是否打开（缺省开） */
+function aiActivityOn(): boolean {
+  return forumData().aiActivity !== false;
+}
+
+/** 抽屉「AI 活跃度」开关：开 → 重置各角色排程（几分钟内开始发帖）；
+ *  关 → 不再排新主动帖（存量任务执行时也会被跳过；神回复不受影响）。 */
+export function setForumAiActivity(on: boolean): void {
+  const d = { ...forumData() };
+  d.aiActivity = on;
+  if (on) {
+    const soc: NonNullable<ForumData['charSocial']> = {};
+    for (const b of forumCharBriefs(6)) soc[b.contactId] = { nextPostAt: Date.now() + CHAR_DELAY.firstPost() };
+    d.charSocial = soc;
+  }
+  saveForum(d);
+}
+
+/** ForumScheduler 心跳（App 不打开也照常调度）：
+ *  1. runPending 重挂到期任务（远期任务进入 90s 窗口时自动上 timer）；
+ *  2. 活跃度开 → 每个角色按节奏排「主动发帖」任务（人设+记忆+情绪+今日事件）。 */
+export async function tickForumSocial(): Promise<void> {
+  try {
+    const d = forumData();
+    if (!d.seeded) return; // 论坛从未打开过：不强制播种（首次打开 App 时 ensureSeed）
+    if (!forumContactsSnap().length) await refreshForumAuthors(); // 角色快照兜底
+    runPending();
+    if (!aiActivityOn()) return;
+    const briefs = forumCharBriefs(6);
+    if (!briefs.length) return;
+    const pend = loadPending();
+    const hasJob = (key: string) => Object.values(pend).some((j) => j.kind === 'charPost' && j.meta.charKey === key);
+    const now = Date.now();
+    const soc: NonNullable<ForumData['charSocial']> = { ...(d.charSocial ?? {}) };
+    let changed = false;
+    briefs.forEach((b, i) => {
+      const st = soc[b.contactId];
+      if (st?.nextPostAt && st.nextPostAt > now) return; // 还没到下一次发帖窗口
+      if (hasJob(b.key)) return; // 已有排队中的发帖任务
+      const first = !st?.lastPostAt && !b.postCount;
+      const due = now + (first ? CHAR_DELAY.firstPost() + i * (120_000 + Math.random() * 180_000) : CHAR_DELAY.postInterval());
+      addPending({ id: uid('j'), due, kind: 'charPost', postKey: b.key, meta: { charKey: b.key } });
+      soc[b.contactId] = { lastPostAt: st?.lastPostAt ?? 0, nextPostAt: due + CHAR_DELAY.postInterval() };
+      changed = true;
+    });
+    if (changed) saveForum({ ...forumData(), charSocial: soc });
+  } catch {
+    /* 心跳失败静默 */
+  }
+}
+
+/** 用户发帖后：每位论坛角色独立排队「看到帖子 → 决定点赞/评论」（延迟分钟级、彼此错开）。
+ *  决策由 LLM 在任务执行时做（要不要赞、要不要评论、评论写什么——针对帖子具体内容）。 */
+export function queueCharEngagements(post: ForumPost): void {
+  try {
+    if (!aiActivityOn()) return;
+    const briefs = forumCharBriefs(4);
+    briefs.forEach((b, i) => {
+      addPending({
+        id: uid('j'),
+        due: Date.now() + CHAR_DELAY.engage(i),
+        kind: 'charEngage',
+        postKey: post.id,
+        meta: { charKey: b.key, parentContent: post.content.slice(0, 200) },
+      });
+    });
+    if (briefs.length) runPending();
+  } catch {
+    /* 静默 */
+  }
+}
+
+/** 角色帖子发布后：安排虚拟网友点赞 + 0~2 条评论（真实网友规则；秒级~分钟级到达）。
+ *  评论走既有 replyToUserPost 管线（完整上下文 + 校验链 + 宁缺毋滥）。 */
+function queueNetizenReactionsToCharPost(post: ForumPost): void {
+  const next0 = forumData();
+  const likers: AuthorKey[] = [];
+  const npcCount = 1 + Math.floor(Math.random() * 2);
+  NPC_DEFS.slice()
+    .sort(() => Math.random() - 0.5)
+    .slice(0, npcCount)
+    .forEach((l) => likers.push(`npc:${l.id}`));
+  while (likers.length < 2 + Math.floor(Math.random() * 3)) likers.push(createDynNpc());
+  void renameDynNpcsViaLlm(likers.filter((k) => k.startsWith('dyn:')));
+  // 点赞分批陆续到达（不是同一瞬间齐刷刷）
+  likers.forEach((k, i) => {
+    window.setTimeout(() => {
+      try {
+        const next = { ...forumData() };
+        const p = next.posts.find((x) => x.id === post.id);
+        if (!p) return;
+        p.likes = [...new Set([...p.likes, k])];
+        if (i === 0) {
+          next.notifications = [
+            { id: uid('n'), type: 'like' as const, fromKey: k, postId: post.id, createdAt: Date.now(), read: false },
+            ...next.notifications,
+          ];
+        }
+        saveForum(next);
+      } catch {
+        /* 静默 */
+      }
+    }, CHAR_DELAY.netLike(i));
+  });
+  const replyCount = Math.random() < 0.8 ? 1 + (Math.random() < 0.4 ? 1 : 0) : 0;
+  for (let i = 0; i < replyCount; i++) {
+    addPending({
+      id: uid('j'),
+      due: Date.now() + CHAR_DELAY.netComment(i),
+      kind: 'replyToUserPost',
+      postKey: post.id,
+      meta: { authorKey: likers[npcCount + i] ?? likers[0], parentContent: post.content },
+    });
+  }
+  saveForum({ ...next0 });
+  runPending();
+}
+
+/** 用户给角色的帖子点赞后（forum.tsx likeToggle 调用）：低概率角色来评论区回一句
+ *  （「看到你给我点赞啦」式轻互动，可能返回空 = 选择不打扰）。 */
+export function queueCharThanksForLike(post: ForumPost): void {
+  try {
+    if (!aiActivityOn() || !post.authorKey.startsWith('char:')) return;
+    if (Math.random() > 0.3) return; // 30% 概率：真人也不会每次都回
+    // 去重：同帖已有致谢任务排队时不重复排（点赞↔取消↔再点赞不叠加）
+    const pend = loadPending();
+    const dup = Object.values(pend).some((j) => j.kind === 'charReply' && j.meta.thanks && j.postKey === post.id);
+    if (dup) return;
+    addPending({
+      id: uid('j'),
+      due: Date.now() + CHAR_DELAY.thanks(),
+      kind: 'charReply',
+      postKey: post.id,
+      meta: { charKey: post.authorKey, thanks: true, rootId: post.id, mainPostId: post.id },
+    });
+    runPending();
+  } catch {
+    /* 静默 */
+  }
+}
+
 // ---------------- 用户发帖 → NPC/char 互动 ----------------
 
 /** 用户发布帖子后调用：延迟点赞 + 0~2 条 AI 回复（持久 pending）。
- *  互动者也以动态真实感网友为主（点赞/回帖名单不重复）。 */
+ *  互动者也以动态真实感网友为主（点赞/回帖名单不重复）。
+ *  v33【真人节奏】：点赞 15~90 秒陆续到达、评论 45 秒~5 分钟错开——不秒回；
+ *  char 好友的点赞/评论改由 queueCharEngagements 独立管线（分钟级延迟 + LLM 决策）。 */
 export function queueUserPostInteractions(post: ForumPost): void {
   const next0 = forumData();
   // 点赞名单：动态网友 + 内置 NPC 混合（3~5 位，不再全是老面孔）
@@ -1898,38 +2090,39 @@ export function queueUserPostInteractions(post: ForumPost): void {
   while (likers.length < 3 + Math.floor(Math.random() * 3)) likers.push(createDynNpc());
   // LLM 起名：新建的点赞网友换 AI 生成的网名（通知/主页里都是 AI 起的名；失败保留占位名）
   void renameDynNpcsViaLlm(likers.filter((k) => k.startsWith('dyn:')));
-  // char 好友优先来点赞
-  const charLiker = next0.posts
-    .filter((p) => p.authorKey.startsWith('char:'))
-    .map((p) => p.authorKey)[0];
-  window.setTimeout(() => {
-    try {
-      const next = { ...forumData() };
-      const p = next.posts.find((x) => x.id === post.id);
-      if (!p) return;
-      p.likes = [...new Set([...p.likes, ...likers, ...(charLiker ? [charLiker] : [])])];
-      // 点赞也发通知（X：有人赞了你的帖子）
-      next.notifications = [
-        {
-          id: uid('n'),
-          type: 'like' as const,
-          fromKey: likers[0] ?? (charLiker ?? 'npc:wang'),
-          postId: post.id,
-          createdAt: Date.now(),
-          read: false,
-        },
-        ...next.notifications,
-      ];
-      saveForum(next);
-    } catch {
-      /* 静默 */
-    }
-  }, 3000 + Math.random() * 6000);
+  // 点赞陆续到达（15~90s，真人刷到帖子的反应速度；首位带通知）
+  likers.forEach((k, i) => {
+    window.setTimeout(() => {
+      try {
+        const next = { ...forumData() };
+        const p = next.posts.find((x) => x.id === post.id);
+        if (!p) return;
+        p.likes = [...new Set([...p.likes, k])];
+        if (i === 0) {
+          // 点赞也发通知（X：有人赞了你的帖子）
+          next.notifications = [
+            {
+              id: uid('n'),
+              type: 'like' as const,
+              fromKey: k,
+              postId: post.id,
+              createdAt: Date.now(),
+              read: false,
+            },
+            ...next.notifications,
+          ];
+        }
+        saveForum(next);
+      } catch {
+        /* 静默 */
+      }
+    }, 15_000 + Math.random() * 75_000 + i * 9000);
+  });
   const replyCount = Math.random() < 0.75 ? 1 + (Math.random() < 0.35 ? 1 : 0) : 0;
   for (let i = 0; i < replyCount; i++) {
     addPending({
       id: uid('j'),
-      due: Date.now() + 8000 + Math.random() * 12000 + i * (5000 + Math.random() * 8000),
+      due: Date.now() + 45_000 + Math.random() * 270_000 + i * (60_000 + Math.random() * 150_000),
       kind: 'replyToUserPost',
       postKey: post.id,
       // 回帖者优先动态网友（新面孔来搭讪）
@@ -1937,7 +2130,7 @@ export function queueUserPostInteractions(post: ForumPost): void {
     });
   }
   // 立即落盘新建的动态网友（点赞名单先持久化，不等延时任务）
-  saveForum({ ...forumData() });
+  saveForum({ ...next0 });
   runPending();
 }
 
@@ -1960,16 +2153,37 @@ export function queueAiReplyToUserReply(targetPostId: string, userReplyId: strin
   if (!d.posts.find((p) => p.id === userReplyId)) return;
   const groupId = rootId ?? targetPostId;
   const mainId = mainPostId ?? (rootId && rootId !== targetPostId ? rootId : targetPostId);
+  // v33【AI 真人社交·神回复保证】：被回复对象是 char（AI 角色）时，TA 本人必须延迟几分钟
+  // 回复用户（带人设+对用户的记忆+完整对话链——queueUserPostInteractions 式秒赞已废除）。
+  // 神回复不受活跃度开关限制（那是 TA 的「社交礼仪」，不是主动行为）。
+  const charTarget = target.authorKey.startsWith('char:') ? target.authorKey : null;
+  if (charTarget) {
+    const pend = loadPending();
+    const dup = Object.values(pend).some(
+      (j) => j.kind === 'charReply' && !j.meta.thanks && j.meta.userReplyId === userReplyId,
+    );
+    if (!dup) {
+      addPending({
+        id: uid('j'),
+        due: Date.now() + CHAR_DELAY.godReply(),
+        kind: 'charReply',
+        postKey: targetPostId,
+        meta: { charKey: charTarget, rootId: groupId, mainPostId: mainId, userReplyId },
+      });
+    }
+  }
   // v26 总人数 1-5：被回复者 85% 在场；围观网友 = 本楼已有参与者 + 新面孔
   const total = 1 + Math.floor(Math.random() * 5); // 1~5
   const picked: AuthorKey[] = [];
   const pickedSet = new Set<AuthorKey>();
   const addPick = (k: AuthorKey | undefined) => {
     if (!k || k === 'user' || pickedSet.has(k)) return;
+    // char 已有专属神回复管线，不再进通用网友池（防同一角色双回复）
+    if (charTarget && k.startsWith('char:')) return;
     picked.push(k);
     pickedSet.add(k);
   };
-  if (Math.random() < 0.85) addPick(target.authorKey); // 你回复了 TA，TA 大概率回你
+  if (Math.random() < 0.85 && !charTarget) addPick(target.authorKey); // 你回复了 TA，TA 大概率回你
   // 本楼已有参与者（分组锚点下的其他 AI 作者——正在看这层楼的人）
   const threadKeys = d.posts
     .filter((p) => p.replyTo === groupId && p.id !== userReplyId && p.id !== targetPostId)
@@ -1984,7 +2198,10 @@ export function queueAiReplyToUserReply(targetPostId: string, userReplyId: strin
     }
     addPick(pickCommenters(1, undefined, undefined, ...picked)[0]);
   }
-  if (!picked.length) addPick(target.authorKey); // 兜底：至少被回复者回一句
+  if (!picked.length) {
+    // 兜底：至少被回复者回一句（char 已有专属神回复管线，无需网友兜底）
+    if (!charTarget) addPick(target.authorKey);
+  }
   if (!picked.length) return;
   picked.forEach((k, idx) => {
     // 被回复者先回（5~15s）；围观网友陆续（每位再错开 6~20s；封顶 80s
@@ -2045,6 +2262,211 @@ export function runPending(): void {
 
 async function execJob(job: PendingJob): Promise<void> {
   try {
+    // ================= 【AI 真人社交】角色任务 =================
+
+    if (job.kind === 'charPost') {
+      // 角色主动发帖：人设+情绪+对用户的记忆+今日事件素材+用户最近帖子 → 一条完全「TA 本人」的帖子
+      if (!aiActivityOn()) return;
+      const charKey = (job.meta.charKey ?? job.postKey) as AuthorKey;
+      const brief = forumCharBriefs().find((b) => b.key === charKey);
+      if (!brief) return;
+      const userName = resolveAuthor('user').name;
+      let content = '';
+      let textImage = '';
+      try {
+        const r = (await callApi({
+          kind: 'charPost',
+          char: {
+            name: brief.contact.nickname || brief.contact.name,
+            persona: charPersonaCard(brief.contact),
+            relation: charRelationLine(brief.contact),
+            mood: charMoodBlock(brief.contactId),
+            memory: charMemoryDigest(brief.contactId),
+            recent: charRecentPosts(charKey, 2).map((p) => p.content.slice(0, 60)),
+          },
+          userPosts: userPostsDigest(),
+          events: pickDailyEvents(2),
+          userName,
+        })) as { content?: string; textImage?: string };
+        content = typeof r.content === 'string' ? r.content.trim() : '';
+        textImage = typeof r.textImage === 'string' ? r.textImage.trim().slice(0, 110) : '';
+        // 客户端兜底：长度下限（服务端已按四档严校验）；占位符缺失时不配图
+        if (content && (content.length < 10 || content.length > POST_MAX)) content = '';
+        if (content && !content.includes(IMG_PLACEHOLDER)) textImage = '';
+      } catch {
+        content = '';
+      }
+      if (!content) return; // 宁缺毋滥：人设帖 LLM 失败不落模板垃圾帖
+      const next = { ...forumData() };
+      // organic=false：新帖从零热度起步（网友反应会陆续带来真实点赞），不预支百万热度
+      const post = basePost(charKey, content.slice(0, POST_MAX), null, Date.now(), undefined, undefined, false);
+      const imgCount = { n: 0 };
+      attachTextImage(post, textImage, imgCount);
+      next.posts.push(post);
+      const soc = { ...(next.charSocial ?? {}) };
+      soc[brief.contactId] = { ...(soc[brief.contactId] ?? {}), lastPostAt: post.createdAt };
+      next.charSocial = soc;
+      saveForum(next);
+      // 发帖后：网友按真实网友规则来互动（点赞陆续 + 0~2 条评论）
+      queueNetizenReactionsToCharPost(post);
+      // 记忆写入：「我今天在X论坛发了帖子……」（下次私聊能自然提起）
+      writeCharOwnPostMemory(brief.contactId, post);
+      return;
+    }
+
+    if (job.kind === 'charEngage') {
+      // 角色刷到了用户的帖子：LLM 决定要不要点赞/评论（评论必须针对帖子具体内容）
+      if (!aiActivityOn()) return;
+      const d0 = forumData();
+      const post = d0.posts.find((x) => x.id === job.postKey);
+      if (!post || post.authorKey !== 'user') return;
+      const charKey = job.meta.charKey ?? '';
+      const brief = forumCharBriefs().find((b) => b.key === charKey);
+      if (!brief) return;
+      const userName = resolveAuthor('user').name;
+      const mediaDesc = await describePostMedia(post.media);
+      let like = false;
+      let comment = '';
+      try {
+        const r = (await callApi({
+          kind: 'charEngage',
+          char: {
+            name: brief.contact.nickname || brief.contact.name,
+            persona: charPersonaCard(brief.contact),
+            relation: charRelationLine(brief.contact),
+            mood: charMoodBlock(brief.contactId),
+            memory: charMemoryDigest(brief.contactId),
+          },
+          post: { content: post.content.slice(0, 600), mediaDesc },
+          userName,
+        })) as { like?: boolean; comment?: string };
+        like = r.like === true;
+        comment = typeof r.comment === 'string' ? sanitizeCommentClient(stripReplyPrefixClient(r.comment)) : '';
+        // 双保险：15~150 字 + 必须锚定帖子具体内容（禁「沙发/支持」式空评）
+        if (comment && (comment.length < 15 || comment.length > 150)) comment = '';
+        if (comment && !commentAnchored(comment, stripImgPh(post.content))) comment = '';
+      } catch {
+        like = false;
+        comment = '';
+      }
+      if (!like && !comment) return; // AI 决定不互动（真人也不是每条都理）
+      const next = { ...forumData() };
+      const target = next.posts.find((x) => x.id === post.id);
+      if (!target) return;
+      if (like && !target.likes.includes(charKey)) {
+        target.likes = [...target.likes, charKey];
+        next.notifications = [
+          { id: uid('n'), type: 'like' as const, fromKey: charKey, postId: post.id, createdAt: Date.now(), read: false },
+          ...next.notifications,
+        ];
+      }
+      if (comment) {
+        const reply = basePost(
+          charKey,
+          comment.slice(0, REPLY_MAX),
+          target.community,
+          Date.now(),
+          target.id,
+          userName,
+          true,
+          { likes: likesOf(target), views: target.views },
+        );
+        next.posts.push(reply);
+        next.notifications = [
+          { id: uid('n'), type: 'reply' as const, fromKey: charKey, postId: reply.id, createdAt: Date.now(), read: false },
+          ...next.notifications,
+        ];
+      }
+      saveForum(next);
+      // 记忆写入：「我给TA的帖子点了赞/我在TA的帖子下评论了……」
+      writeCharEngageMemory(brief.contactId, { post, liked: like, comment: comment || undefined });
+      return;
+    }
+
+    if (job.kind === 'charReply') {
+      // 神回复：用户评论了角色的帖子/评论 → 角色本人带人设+记忆+对话链回复；
+      // thanks 模式：用户只是点了赞 → 角色低概率来评论区回一句（可返回空=不打扰）
+      const d0 = forumData();
+      const charKey = job.meta.charKey ?? '';
+      const brief = forumCharBriefs().find((b) => b.key === charKey);
+      if (!brief) return;
+      const thanks = job.meta.thanks === true;
+      if (thanks && !aiActivityOn()) return;
+      const mainId = job.meta.mainPostId ?? job.meta.rootId ?? job.postKey;
+      const mainPost = d0.posts.find((p) => p.id === mainId);
+      if (!mainPost) return;
+      if (thanks && !mainPost.likes.includes('user')) return; // 用户已取消点赞→不打扰
+      const groupId = job.meta.rootId ?? mainId;
+      const userReply = job.meta.userReplyId ? d0.posts.find((p) => p.id === job.meta.userReplyId) : null;
+      const userName = resolveAuthor('user').name;
+      // 整楼对话链（最近 6 条带说话人名——神回复要接得住前面的梗）
+      const history = d0.posts
+        .filter((p) => p.replyTo === groupId && p.id !== job.meta.userReplyId)
+        .sort((a, b) => a.createdAt - b.createdAt)
+        .slice(-6)
+        .map((p) => ({
+          from: p.authorKey === 'user' ? ('user' as const) : ('peer' as const),
+          speaker: resolveAuthor(p.authorKey).name,
+          text: p.content,
+        }));
+      const mediaDesc = await describePostMedia(mainPost.media);
+      let text = '';
+      try {
+        const r = (await callApi({
+          kind: 'charReply',
+          char: {
+            name: brief.contact.nickname || brief.contact.name,
+            persona: charPersonaCard(brief.contact),
+            relation: charRelationLine(brief.contact),
+            mood: charMoodBlock(brief.contactId),
+            memory: charMemoryDigest(brief.contactId),
+          },
+          postContent: mainPost.content.slice(0, 1000),
+          postAuthor: resolveAuthor(mainPost.authorKey).name,
+          userComment: thanks ? '' : (userReply?.content ?? ''),
+          history,
+          mediaDesc,
+          thanks,
+          userName,
+        })) as { text?: string };
+        text = typeof r.text === 'string' ? sanitizeCommentClient(stripReplyPrefixClient(r.text)) : '';
+        if (text && (text.length < 8 || text.length > 120)) text = '';
+        // 神回复锚定双保险：必须接得上「用户的评论 + 主帖」
+        if (text && !thanks && !commentAnchored(text, stripImgPh(`${userReply?.content ?? ''} ${mainPost.content}`))) text = '';
+      } catch {
+        text = '';
+      }
+      if (!text) return; // 致谢空=选择不打扰；神回复空=宁缺毋滥（不发假通知）
+      const next = { ...forumData() };
+      const parentEng = userReply
+        ? { likes: likesOf(userReply), views: userReply.views }
+        : { likes: likesOf(mainPost), views: mainPost.views };
+      const reply = basePost(
+        charKey,
+        text.slice(0, REPLY_MAX),
+        mainPost.community,
+        Date.now(),
+        groupId,
+        userReply ? userName : resolveAuthor(mainPost.authorKey).name,
+        true,
+        parentEng,
+      );
+      if (userReply) reply.replyToPost = userReply.id; // 精确回应用户那条评论
+      next.posts.push(reply);
+      next.notifications = [
+        { id: uid('n'), type: 'reply' as const, fromKey: charKey, postId: reply.id, createdAt: Date.now(), read: false },
+        ...next.notifications,
+      ];
+      saveForum(next);
+      // 记忆写入：「TA评论了我的帖子，我回复TA：……」
+      if (!thanks && userReply) {
+        writeCharReplyMemory(brief.contactId, { userComment: userReply.content, reply: text, postId: mainPost.id });
+      }
+      return;
+    }
+
+    // ================= 既有任务（网友回复/私信） =================
+
     if (job.kind === 'replyToUserPost' || job.kind === 'aiReplyBack') {
       const d = forumData();
       const target = d.posts.find((x) => x.id === job.postKey);
@@ -2093,11 +2515,11 @@ async function execJob(job: PendingJob): Promise<void> {
             text: p.content,
           }));
       } else {
-        // NPC 回复用户的新帖
+        // NPC 回复用户的新帖（v33：也承接网友对 char 帖子的评论——被回复对象名取帖子真实作者）
         postContent = target.content;
         parentContent = target.content;
         groupId = target.id;
-        replyName = userName;
+        replyName = target.authorKey === 'user' ? userName : resolveAuthor(target.authorKey).name;
       }
 
       // 识图模型：帖子带图时先「看图」再回复

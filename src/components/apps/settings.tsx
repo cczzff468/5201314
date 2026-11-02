@@ -4493,7 +4493,7 @@ const ACCOUNT_AVATAR_TONE: Record<'alt' | 'anon', string> = {
 };
 
 /** accountUsedBy 的 App 中文名映射（「使用中：微信·QQ」副行用） */
-const ACCOUNT_APP_NAMES: Record<AccountApp, string> = { wx: '微信', qq: 'QQ', sms: '信息', phone: '电话', cabin: '拾光小屋' };
+const ACCOUNT_APP_NAMES: Record<AccountApp, string> = { wx: '微信', qq: 'QQ', sms: '信息', phone: '电话', cabin: '拾光小屋', forum: 'X论坛' };
 
 /**
  * 账号管理页（多账号系统 Task 40-C，v2 per-app 账号适配；Task 40-R 流程修正）：

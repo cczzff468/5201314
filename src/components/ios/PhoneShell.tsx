@@ -36,6 +36,9 @@ const ReminderWatcher = dynamic(() => import('./ReminderWatcher'), { ssr: false 
 // 朋友圈/QQ动态全局调度（AI 互动结算 + 自动发布）：同样懒加载，挂载即后台运行
 const MomentsScheduler = dynamic(() => import('./MomentsScheduler'), { ssr: false });
 
+// v33【AI 真人社交】X论坛全局调度（角色主动发帖/互动/神回复的延迟任务结算）：同样懒加载，挂载即后台运行
+const ForumScheduler = dynamic(() => import('./ForumScheduler'), { ssr: false });
+
 // 退群挽留全局调度（退群后 1 分钟内 AI 主动私信 + 私聊里拉回群）：同样懒加载，挂载即后台运行
 const QuitFlowScheduler = dynamic(() => import('./QuitFlowScheduler'), { ssr: false });
 
@@ -492,6 +495,7 @@ export default function PhoneShell() {
 
         {/* 朋友圈/QQ动态全局调度：AI 好友的点赞/评论/回复延迟队列结算 + 三种触发自动发动态（App 不打开也生效） */}
         <MomentsScheduler />
+        <ForumScheduler />
 
         {/* 退群挽留全局调度：退群后 1 分钟内群成员按人设主动私信 + 私聊里拉回群（App 不打开也生效） */}
         <QuitFlowScheduler />

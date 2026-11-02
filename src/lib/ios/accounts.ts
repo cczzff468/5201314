@@ -22,8 +22,9 @@
 
 export type AccountKind = 'main' | 'alt' | 'anon';
 
-/** 账号跟随的四个 App（账号按 App 独立切换） */
-export type AccountApp = 'wx' | 'qq' | 'sms' | 'phone' | 'cabin';
+/** 账号跟随的 App（账号按 App 独立切换；'forum' = X论坛，固定大号作用域不参与切换——
+ *  论坛是机主的公开社交空间，记忆写入/召回始终落大号（小号视角下论坛记忆不可见，与朋友圈同语义） */
+export type AccountApp = 'wx' | 'qq' | 'sms' | 'phone' | 'cabin' | 'forum';
 
 export interface PhoneAccount {
   /** 稳定 id：大号恒为 'main'，其余为创建时生成的 a{ts}{rand} */
@@ -153,7 +154,7 @@ export function updateAccount(
 // ---------------- per-app 当前账号 ----------------
 
 type ActiveApps = Record<AccountApp, string>;
-const DEFAULT_APPS: ActiveApps = { wx: MAIN_ACCOUNT_ID, qq: MAIN_ACCOUNT_ID, sms: MAIN_ACCOUNT_ID, phone: MAIN_ACCOUNT_ID, cabin: MAIN_ACCOUNT_ID };
+const DEFAULT_APPS: ActiveApps = { wx: MAIN_ACCOUNT_ID, qq: MAIN_ACCOUNT_ID, sms: MAIN_ACCOUNT_ID, phone: MAIN_ACCOUNT_ID, cabin: MAIN_ACCOUNT_ID, forum: MAIN_ACCOUNT_ID };
 
 let activeAppsCache: ActiveApps | null = null;
 
@@ -322,6 +323,7 @@ const LOGIN_HIST_KEY: Record<AccountApp, string> = {
   sms: 'sms-login-hist',
   phone: 'phone-login-hist',
   cabin: 'cabin-login-hist',
+  forum: 'forum-login-hist',
 };
 
 export function markAccountLoginHistory(app: AccountApp, id: string): void {
@@ -369,6 +371,7 @@ const FORCE_LOGIN_KEY: Record<AccountApp, string> = {
   sms: 'sms-force-login',
   phone: 'phone-force-login',
   cabin: 'cabin-force-login',
+  forum: 'forum-force-login',
 };
 
 export function requestForceLoginWall(app: AccountApp): void {
@@ -530,7 +533,7 @@ export async function migrateLegacyAccounts(): Promise<void> {
     const apps = readActiveApps();
     const untouched = (Object.keys(apps) as AccountApp[]).every((a) => apps[a] === MAIN_ACCOUNT_ID);
     if (untouched) {
-      writeActiveApps({ wx: legacyActive, qq: legacyActive, sms: legacyActive, phone: legacyActive, cabin: MAIN_ACCOUNT_ID });
+      writeActiveApps({ wx: legacyActive, qq: legacyActive, sms: legacyActive, phone: legacyActive, cabin: MAIN_ACCOUNT_ID, forum: MAIN_ACCOUNT_ID });
     }
   }
   // ② 旧账号库数据迁移

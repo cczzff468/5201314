@@ -234,6 +234,8 @@ import {
   upgradeMomentTextCard,
   type MomentNotice,
   type MomentRepostRef, markMomentAutoAttempt } from '@/lib/moments';
+// v33【AI 真人社交】：X论坛近况感知块（TA 发的帖/我发的帖/评论互动 → 私聊能自然提起）
+import { buildForumChatBlock } from '@/lib/forum/social';
 import { AskPostSheet, BilingualTranslation, CommentDeleteDialog, EditPostDialog, MomentAutoCfgSheet, MomentInteractionsPage, MomentsEmojiPanel, PostMoreMenu, insertEmojiAtCursor, momentFriendsOf } from './moments-shared';
 import { MomentsSettingsPage } from './moments-settings';
 import { ThemeStylePage } from './bubble-style-settings';
@@ -5342,6 +5344,8 @@ function ChatPage({
     // AI 能像真人一样自然提起；用户广播动态首次被看到时懒写入该角色记忆（动态 → 记忆双向打通）
     // userName=展示名（动态存储检索口径）；userRealName=真名（标签/归属说明用真名称呼用户）
     const momentsBlock = buildMomentsChatBlock({ contactId: peer.id, app: 'qq', userName: me.name, userRealName: me.realName || me.name, peer });
+    // v33【AI 真人社交】：X论坛近况感知（TA 发的帖/我发的帖/评论互动）——AI 私聊时能自然提起论坛的事
+    const forumBlock = buildForumChatBlock(peer.id);
     // 恋人空间×AI（第九轮）：对方是恋人绑定的联系人时，注入你们在恋人空间里的一切
     const coupleBlock = coupleChatBlock(peer.id, 'qq', meAddrName);
     // 美团×AI 联动（外卖/代付）：实时订单动态 + 本聊天的待处理代付请求/待付订单 +
@@ -5452,6 +5456,8 @@ function ChatPage({
       // + 主动放歌引导 + 播控指令说明）（发消息瞬间现场构建，非缓存）
       togetherLiveBlock(peer.id, meAddrName),
       momentsBlock,
+      // v33【AI 真人社交】：论坛近况（紧随 QQ动态感知块；空串时零成本）
+      forumBlock,
       coupleBlock,
       locBlock,
       // 第二十九轮「头像感知」：AI 知道自己头像长什么样、用户头像长什么样/什么时候换的；

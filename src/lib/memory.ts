@@ -1306,7 +1306,7 @@ function memRecallBlockInner(contactId: string, app: MemApp, contextText: string
   const headScope = isGroupMode
     ? '群聊模式：下面只给本群可见的共同经历'
     : share
-      ? '下面是你在微信、QQ、信息、电话里和TA亲身经历过的事，带App标注的条目来自对应那一端'
+      ? '下面是你在微信、QQ、信息、电话、X论坛里和TA亲身经历过的事，带App标注的条目来自对应那一端'
       : '仅本App的经历（跨应用互通已关闭）：你在其他App和TA聊过的内容这里看不到';
   // 归属标注说明（朋友圈/QQ动态来源记忆自带「（AI角色本人）/（用户本人）」标注）：
   // 只要注入内容里出现这类标注，就附一行解释——AI 必须能区分「是我自己发的动态」还是「用户发的」，
@@ -1360,7 +1360,9 @@ function memRecallBlockInner(contactId: string, app: MemApp, contextText: string
           : 'QQ动态'
         : f.source === 'group'
           ? `群聊·${(f.sourceGroupId && groupLabelOf(f.sourceGroupId)) || '群聊'}`
-          : MEM_APP_LABEL[f.app];
+          : f.source === 'forum'
+            ? 'X论坛'
+            : MEM_APP_LABEL[f.app];
     const t = `${f.eventTime != null ? memTimeLabel(f.eventTime, now) : memTimeLabel(f.sourceTime, now)}·${srcLabel}`;
     return `${i + 1}. （${t}）${f.content}`;
   });
@@ -1487,6 +1489,52 @@ export function memAddEventFragment(
 export function memHasMomentFragment(contactId: string, postId: string): boolean {
   try {
     return readFragments(contactId).some((f) => f.sourcePostId === postId);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * 【X论坛真人社交】直写一条论坛来源记忆碎片：
+ * - 用户发帖/评论、AI 角色发帖/点赞/评论/神回复后调用，内容已按归属句式写好
+ *  （谁在论坛做了什么，用双方真名）；
+ * - source='forum' + sourcePostId/sourceKind/sourceCommentId 溯源（与朋友圈同款：
+ *   去重、级联清理、召回时带「X论坛」渠道标注都能复用既有链路）；
+ * - 作用域固定大号（setMemScopeForApp('forum') → forum 永远 main）：论坛是机主公开
+ *   社交空间，小号聊天时这些记忆不可见（与朋友圈语义一致）；
+ * - 走 appendFragments 同款去重/合并/矛盾管线：同一事实重复写入只会加强，不会重复占位。
+ * 返回是否写入（新增或加强）成功。
+ */
+export function memAddForumFragment(
+  contactId: string,
+  content: string,
+  src: { postId?: string; kind?: 'post' | 'like' | 'comment'; commentId?: string },
+  sourceTime?: number
+): boolean {
+  try {
+    const text = content.trim();
+    if (!contactId || !text) return false;
+    setMemScopeForApp('forum'); // 论坛固定大号作用域
+    const res = appendFragments(
+      contactId,
+      'forum',
+      [{ text, weight: autoWeight(text) }],
+      sourceTime ?? Date.now(),
+      undefined,
+      { source: 'forum', sourcePostId: src.postId, sourceKind: src.kind, sourceCommentId: src.commentId }
+    );
+    return res.added.length > 0 || res.merged > 0 || res.superseded > 0;
+  } catch {
+    return false;
+  }
+}
+
+/** 该联系人是否已有某条论坛来源的记忆（同帖同互动去重用；sourcePostId 全局唯一不与朋友圈冲突） */
+export function memHasForumFragment(contactId: string, postId: string, commentId?: string): boolean {
+  try {
+    return readFragments(contactId).some(
+      (f) => f.source === 'forum' && f.sourcePostId === postId && (commentId == null || f.sourceCommentId === commentId)
+    );
   } catch {
     return false;
   }

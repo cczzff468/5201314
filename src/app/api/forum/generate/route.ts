@@ -5,7 +5,12 @@ import { NextResponse } from 'next/server';
  *
  * POST {
  *   config?: UpstreamConfig,             // 设置 App 的用户 API；缺省 SDK 兜底
- *   kind: 'posts' | 'reply' | 'dm' | 'comments' | 'subreplies' | 'names' | 'multiComments',
+ *   kind: 'posts' | 'reply' | 'dm' | 'comments' | 'subreplies' | 'names' | 'multiComments'
+ *        | 'charPost' | 'charEngage' | 'charReply',   // v33【AI 真人社交】角色驱动三件套
+ *   char?: { name, persona?, relation?, mood?, memory?, recent? },  // 角色卡（三 kind 共用：人设+情绪+记忆）
+ *   userPosts?: string, events?: string[],             // charPost：用户最近帖子摘要 + 今日事件素材
+ *   post?: { content, mediaDesc? },                    // charEngage：被看的用户帖子
+ *   postContent?/postAuthor?/userComment?/history?/thanks?,  // charReply：神回复/点赞致谢上下文
  *   items?: { name, persona?, community?, topic?, lang? }[],  // posts：批量生成多位作者的帖子（一次最多 24 条；lang = 惯用语言）
  *   count?: number,                     // names：生成几个网名（1~30）；comments：生成几条评论（10~30）
  *   posts?: { id, authorName, content, lang }[],       // multiComments：一批帖子各生成几条一级评论（播种期专用，一次 LLM 调用）
@@ -487,8 +492,8 @@ function lenBucketOk(n: number): boolean {
  *  v27：新增 has_image/image_description 两字段（图文并茂配图）。 */
 function extractPostItems(raw: string): { content: string; topic: string; hasImage: boolean; imageDesc: string }[] {
   const text = extractThinkBlocks(raw ?? '').text;
-  const arr = parseLooseJSON<unknown[]>(text);
-  if (!Array.isArray(arr)) return [];
+  const parsed = parseLooseJSON<unknown>(text);
+  const arr = Array.isArray(parsed) ? parsed : parsed && typeof parsed === 'object' ? [parsed] : [];
   return arr.map((o) => {
     if (o && typeof o === 'object' && !Array.isArray(o)) {
       const rec = o as Record<string, unknown>;
@@ -1138,6 +1143,184 @@ export async function POST(req: Request) {
         return t;
       });
       return NextResponse.json({ items: list });
+    }
+
+    // ================= v33【AI 真人社交】角色驱动生成（charPost/charEngage/charReply） =================
+
+    if (kind === 'charPost' || kind === 'charEngage' || kind === 'charReply') {
+      const c = (body.char ?? {}) as Record<string, unknown>;
+      const chName = typeof c.name === 'string' ? c.name.slice(0, 24) : '好友';
+      const chPersona = typeof c.persona === 'string' ? c.persona.slice(0, 900) : '';
+      const chRelation = typeof c.relation === 'string' ? c.relation.slice(0, 80) : '好友';
+      const chMood = typeof c.mood === 'string' ? c.mood.slice(0, 400) : '';
+      const chMemory = typeof c.memory === 'string' ? c.memory.slice(0, 2000) : '';
+      const chRecent = Array.isArray(c.recent)
+        ? (c.recent as unknown[]).filter((x): x is string => typeof x === 'string').slice(0, 3)
+        : [];
+      // 身份块（三 kind 共用）：人设 + 情绪 + 对用户的记忆 + 「你是真人不是回帖机器」
+      const identity = [
+        '# 你是谁（第一人称，严格保持，绝不跳出）',
+        `你是「${chName}」，${userName}的${chRelation}——你不是AI助手、不是万能回帖机器人：你是一个有自己生活、脾气和说话习惯的真实的人，在 X 论坛有一个自己的账号，像真人刷社交软件一样发帖、点赞、回评论。`,
+        chPersona ? `【你的资料卡】\n${chPersona}` : '',
+        chMood ? `【你此刻的心情】\n${chMood}` : '',
+        chMemory ? `【你对${userName}的记忆（你们真实经历过的事——聊天时自然运用，不要逐条复述）】\n${chMemory}` : '',
+        chRecent.length ? `【你最近发过的帖子（别重复话题，可以接话茬）】\n${chRecent.map((r) => `- ${r.slice(0, 60)}`).join('\n')}` : '',
+      ]
+        .filter(Boolean)
+        .join('\n\n');
+
+      // ---- charPost：角色主动发一条帖子 ----
+      if (kind === 'charPost') {
+        const userPosts = typeof body.userPosts === 'string' ? body.userPosts.slice(0, 800) : '';
+        const events = Array.isArray(body.events)
+          ? (body.events as unknown[]).filter((x): x is string => typeof x === 'string').slice(0, 4)
+          : [];
+        const { plan: lp, target } = pickLenPlan();
+        const raw = (await completeWithFallback(config, [
+          {
+            role: 'system',
+            content:
+              identity +
+              '\n\n# Task\n以「' + chName + '」本人的身份在 X 论坛发一条帖子。取材方向（自由组合，全凭你此刻的心情）：' +
+              '\n1. 你的记忆里有和' + userName + '相关的事——可以含蓄地发帖念叨（TA感冒了你可以发「家里那位病了还不肯吃药」，但论坛是公开场合，绝不复述私密聊天细节、不直接@TA）；' +
+              '\n2. 今日生活素材（下面给）——按你的性格消化它（同一件事，温柔的人觉得治愈，暴躁的人嫌它烦）；' +
+              '\n3. 纯粹你自己的生活/心情/工作。' +
+              '\n\n# 铁律' +
+              '\n1. 口吻完全是你自己的：口头禅、语气、标点习惯从性格和说话风格里长出来；严禁AI万能腔（「总之」「在这个……的时代」「今天想和大家分享」），严禁堆砌网络烂梗；' +
+              '\n2. 公开场合分寸：你们的关系可以隐隐透出来（关心/吃醋/提到「某人」），但不写暴露式表白原文；' +
+              `\n3. 字数铁律：本次目标【${lp.label}】${lp.min}~${lp.max}字（目标约${target}字，${lp.hint}）——必须命中档位，宁短勿注水；` +
+              '\n4. 像随手发的一条，不是作文：碎碎念/没头没尾/只讲一件小事都行；' +
+              '\n5. 禁emoji、禁markdown；话题最多1个（可以没有）。' +
+              '\n\n# 输出（严格JSON，无任何其他文本）' +
+              '\n{"thought":"内部思考（不上屏）：此刻心情+想发什么","content":"帖子正文","has_image":false,"image_description":""}' +
+              '\n配图规则：正文出现 实拍/自拍/拍到/合照/打卡/看到了xx 时 has_image=true，并在 content 最自然位置插恰好一个 [图片] 占位符，image_description 以视角开头写30~100字；其余情况 has_image=false。',
+          },
+          {
+            role: 'user',
+            content:
+              [
+                userPosts ? `【${userName}最近在论坛发的帖子（你刷到了，可以视心情回应/吐槽/关心，也可以无视）】\n${userPosts}` : '',
+                events.length ? `【你今天的生活素材（选0~2个融入，也可完全不用）】\n${events.map((e) => `- ${e}`).join('\n')}` : '',
+                `请以「${chName}」的口吻发这条帖子（直接输出严格JSON）。${bjTimeLine()}`,
+              ]
+                .filter(Boolean)
+                .join('\n\n'),
+          },
+        ])).text;
+        // 解析+校验复用 posts 管线（sanitize/四档字数/配图三元校验/话题规范化）
+        const parsed = extractPostItems(raw);
+        const aligned = alignPostItems(parsed, 1, [chName], new Set());
+        const item = aligned[0];
+        if (item && item.content) {
+          return NextResponse.json({ content: item.content, textImage: item.textImage });
+        }
+        // 严格重试一次（强调JSON格式与字数档）
+        const raw2 = (await completeWithFallback(config, [
+          {
+            role: 'system',
+            content: `上一次输出无效。你只能输出一个严格合法的JSON对象（{"thought","content","has_image","image_description"}），content字数必须落在${lp.min}~${lp.max}字。其他一切文本都会作废。`,
+          },
+          { role: 'user', content: `${raw.slice(0, 400)}\n\n重新以「${chName}」的口吻输出这条帖子（严格JSON）。${bjTimeLine()}` },
+        ])).text;
+        const aligned2 = alignPostItems(extractPostItems(raw2), 1, [chName], new Set());
+        const item2 = aligned2[0];
+        return NextResponse.json({
+          content: item2?.content ?? '',
+          textImage: item2?.textImage ?? '',
+        });
+      }
+
+      // ---- charEngage：角色刷到用户帖子 → 决定点赞/评论 ----
+      if (kind === 'charEngage') {
+        const p = (body.post ?? {}) as Record<string, unknown>;
+        const postContent = typeof p.content === 'string' ? p.content.slice(0, 600) : '';
+        const mediaDesc = typeof p.mediaDesc === 'string' && p.mediaDesc.trim() ? `\n（帖子配图：${p.mediaDesc.slice(0, 160)}）` : '';
+        if (!postContent) return NextResponse.json({ error: 'post 为空' }, { status: 400 });
+        const raw = (await completeWithFallback(config, [
+          {
+            role: 'system',
+            content:
+              identity +
+              `\n\n# Task\n你刷到了${userName}（你的${chRelation}）在 X 论坛发的帖子。像真人一样决定你的反应。` +
+              '\n\n# 决策规则' +
+              '\n1. 不是每条都要互动——关系再好也有懒得理的时候：没感觉就 like=false、comment=""（完全无视）；' +
+              '\n2. 真心觉得有意思/想怼/想关心才点赞（like=true），别机械每条都赞；' +
+              '\n3. 评论必须针对帖子的具体内容——引用TA说的细节、接梗、吐槽、关心、调侃都行；严禁「沙发」「支持」「哈哈哈」「太对了」式空评（出现即作废）；' +
+              '\n4. 语气完全是你的说话风格；你们熟（记忆里有底）称呼可以随意，但评论区是公开的，别撒狗粮过头；' +
+              '\n5. 评论15~120字，像随手打的一句话。' +
+              '\n\n# 输出（严格JSON，无任何其他文本）' +
+              '\n{"thought":"内心怎么想的","like":true或false,"comment":"评论内容（决定不评论就输出空串）"}',
+          },
+          { role: 'user', content: `【${userName}的帖子】\n${postContent}${mediaDesc}\n\n请决定你的反应（严格JSON）。${bjTimeLine()}` },
+        ])).text;
+        const parsed = parseLooseJSON<Record<string, unknown>>(extractThinkBlocks(raw).text) ?? {};
+        const like = parsed.like === true;
+        let comment = typeof parsed.comment === 'string' ? sanitizeCommentText(stripReplyPrefix(parsed.comment)) : '';
+        if (comment && (comment.length < 15 || comment.length > 150)) comment = '';
+        if (comment && (isBannedFiller(comment) || universalPhraseIn(comment))) comment = '';
+        // 锚定：评论必须接得上帖子内容（与服务端评论管线同口径）
+        if (comment && !commentAnchored(comment, stripImgPh(postContent))) comment = '';
+        if (comment && violatesCommentLang(comment, 'zh-Hans')) comment = '';
+        return NextResponse.json({ like, comment: comment ? cleanText(comment, 150) : '' });
+      }
+
+      // ---- charReply：神回复（用户评论了角色的帖/评论） / thanks（用户点赞后的轻回应） ----
+      const postContent = typeof body.postContent === 'string' ? body.postContent.slice(0, 1000) : '';
+      const postAuthor = typeof body.postAuthor === 'string' ? body.postAuthor.slice(0, 24) : chName;
+      const userComment = typeof body.userComment === 'string' ? body.userComment.slice(0, 300) : '';
+      const thanks = body.thanks === true;
+      const mediaDesc =
+        typeof body.mediaDesc === 'string' && body.mediaDesc.trim()
+          ? `\n（帖子配图：${body.mediaDesc.slice(0, 160)}）`
+          : '';
+      const history = Array.isArray(body.history)
+        ? (body.history as Record<string, unknown>[])
+            .slice(-8)
+            .map((h) => {
+              const speaker =
+                typeof h.speaker === 'string' && h.speaker.trim() ? h.speaker.slice(0, 24) : h.from === 'user' ? userName : chName;
+              return `${speaker}：${typeof h.text === 'string' ? h.text.slice(0, 150) : ''}`;
+            })
+            .join('\n')
+        : '';
+      const raw = (await completeWithFallback(config, [
+        {
+          role: 'system',
+          content:
+            identity +
+            (thanks
+              ? `\n\n# Task\n${userName}没有评论，只是给你的帖子点了个赞。你可以选择在帖子评论区回一句轻松自然的话（比如自然地提一嘴TA、半开玩笑式感谢、自言自语接梗——10~60字，别煽情别刻意），也可以选择什么都不回（直接输出空串）。真人不是每次被点赞都会说话。`
+              : `\n\n# Task（神回复）\n${userName}在X论坛评论了你（你的帖子/你的评论），你刷到了。以你的口吻回复TA——「神回复」标准：` +
+                '\n1. 接得住TA说的话：TA问什么答什么、TA抛梗接梗、TA关心你你要回应——不是敷衍的「嗯嗯」；' +
+                '\n2. 带着你对TA的记忆：TA之前跟你说过的事能用上就自然用上（TA上次说感冒了，这次评论你可以说「你感冒好点没还来冲浪」）；' +
+                '\n3. 语气完全是你的说话风格——对TA的称呼、口癖、撒娇/毒舌/温柔按人设来；' +
+                '\n4. 20~100字，口语化，像随手回的一句话；' +
+                '\n5. 评论区是公开的，别人也看得到：可以自然带点「我们很熟」的气场，但不复述私密聊天细节。') +
+            (thanks ? '\n\n# 输出\n直接输出评论正文（决定不回就只输出空串），不要带任何解释。' : '\n\n# 输出\n直接输出回复正文，不要带任何解释。'),
+        },
+        {
+          role: 'user',
+          content:
+            [
+              postContent ? `【你的帖子（${postAuthor} 发的）】\n${postContent}${mediaDesc}` : '',
+              userComment ? `【${userName}的评论（你回的就是这条）】\n${userComment}` : '',
+              history ? `【这层楼之前的对话（各有其名，别把别人的话当成自己说的）】\n${history}` : '',
+              `请以「${chName}」的口吻回复。${bjTimeLine()}`,
+            ]
+              .filter(Boolean)
+              .join('\n\n'),
+        },
+      ])).text;
+      const text = sanitizeCommentText(stripReplyPrefix(raw));
+      if (
+        text.length >= (thanks ? 8 : 10) &&
+        text.length <= (thanks ? 80 : 130) &&
+        !violatesCommentLang(text, 'zh-Hans') &&
+        !isBannedFiller(text)
+      ) {
+        return NextResponse.json({ text: cleanText(text, 130) });
+      }
+      return NextResponse.json({ text: '' });
     }
 
     if (kind === 'reply' || kind === 'dm') {

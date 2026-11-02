@@ -98,6 +98,8 @@ import { getMemSettings, memAfterAiTurn, memChatRecallBlock, memConvoFromRaw, me
 // 第十六轮：AI 动态状态（情绪+作息）注入
 import { buildDynamicStateBlocks } from '@/lib/ios/ai-mood';
 import { buildMomentsChatBlock } from '@/lib/moments';
+// v33【AI 真人社交】：X论坛近况感知块（TA 发的帖/我发的帖/评论互动 → 私聊能自然提起）
+import { buildForumChatBlock } from '@/lib/forum/social';
 import { ChatReplyCountPage, ChatTranslatePage, ChatVoiceFreqPage, ChatVoicePage, SmsChatSettingsPage, WorldBookPickerPage } from './chat-settings';
 import { ProactiveMsgPage } from './proactive-msg-page';
 import { proactiveCfgSummary, parseReminderInstruction, reminderHintHit, reminderSysHint, buildReminderSysMsg, setActiveProactiveChat } from '@/lib/ios/proactive-msg';
@@ -1847,6 +1849,8 @@ function ChatView({
           peer: { id: memContactId, name: peer.name ?? peer.title, nickname: null },
         })
       : '';
+    // v33【AI 真人社交】：X论坛近况感知（TA 发的帖/我发的帖/评论互动）——AI 私聊时能自然提起论坛的事
+    const forumBlock = memContactId ? buildForumChatBlock(memContactId) : '';
     // 时间感知（本会话独立开关，发送时现场读取；关闭时不注入任何时间信息，恢复普通聊天）：
     // 上次聊天间隔 = 该会话上一条消息时间戳（不含本轮刚发的消息）与当前时间的差值；
     // AI 助手会话（无人设）也注入时间块，让「现在几点」这类问题能答准
@@ -1880,6 +1884,8 @@ function ChatView({
       crossCtxRef.current.crossAppBlock,
       crossCtxRef.current.groupBlock,
       momentsBlock,
+      // v33【AI 真人社交】：论坛近况（紧随动态感知块；空串时零成本）
+      forumBlock,
       // 双向拉黑感知：当前会话的拉黑关系注入 system（无拉黑状态时为空串；40-a 重构后拉黑会拦截本 App 内的消息发送）
       wbContactId ? buildBlockPromptBlock('sms', wbContactId, profileName) : '',
       // 语音占位防编造：最近消息里有听不到内容的语音时注入，AI 不假装听过、不编造内容；
