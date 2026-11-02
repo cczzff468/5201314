@@ -330,6 +330,10 @@ export interface ForumData {
   /** 【AI 真人社交】AI 角色活跃度开关（抽屉里切换；缺省 = 开）——
    *  开：角色主动发帖/逛帖/给用户点赞评论；关：不再主动，但回复用户评论（神回复）不受限 */
   aiActivity?: boolean;
+  /** 【帖子记忆】深度/金鱼记忆开关（抽屉里切换；缺省 = 开 = 现有深度记忆行为）。
+ *  开：发帖/NPC评论/角色发帖写入记忆库，AI 私聊能自然提起；关：论坛互动零落库，
+ *  AI 只聊眼前事（不提起过往帖与评论）——随 forum-data-v1 持久化，重启保留。 */
+  postMemory?: boolean;
   /** 【AI 真人社交】每个角色的发帖节奏（key = 联系人 id）：
    *  lastPostAt = 上次发帖时刻；nextPostAt = 下一次可以排主动帖的最早时刻（调度器心跳据此排程） */
   charSocial?: Record<string, { lastPostAt?: number; nextPostAt?: number }>;
@@ -1928,6 +1932,22 @@ export function switchForumAccount(to: 'main' | 'anon'): 'main' | 'anon' {
 /** 当前是否处于匿名小号模式（发帖/评论/点赞/私信都以「匿名者」身份发生） */
 export function isAnonActive(): boolean {
   return forumData().activeAccount === 'anon';
+}
+
+// ---------------- 帖子记忆开关（深度/金鱼） ----------------
+
+/** 帖子记忆是否开启（缺省开：与既有深度记忆行为一致；关 = 金鱼模式——
+ *  论坛互动不写入长期记忆，AI 也不提起过往帖与评论）。开关随 forum-data-v1 落盘，
+ *  重启 App 后保留。 */
+export function isPostMemoryOn(): boolean {
+  return forumData().postMemory !== false;
+}
+
+/** 切换帖子记忆开关（抽屉「帖子记忆」行调用；广播 CHANGED_EVENT 驱动 UI 刷新） */
+export function setPostMemory(on: boolean): void {
+  mutateForum((next) => {
+    next.postMemory = on;
+  });
 }
 
 // ---------------- 工具 ----------------

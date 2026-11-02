@@ -17,10 +17,11 @@
  * 调度与执行（pending 队列、LLM 调用）在 engine.ts。
  */
 
-import { forumContactsSnap, forumData, isPostVisible, isUserAuthor, relTime, resolveAuthor, ANON_KEY, type ForumPost } from './core';
+import { ANON_KEY, forumContactsSnap, forumData, isPostMemoryOn, isPostVisible, isUserAuthor, relTime, resolveAuthor, type ForumPost } from './core';
 import { memAddForumFragment, memCountFragments, memHasForumFragment, memChatRecallBlock } from '@/lib/memory';
 import { buildMoodBlock } from '@/lib/ios/ai-mood';
 import { isForumAnonDisclosed } from '@/lib/ios/forum-anon';
+import { buildForumPostMemoryBlock } from './post-memory';
 import type { ContactRecord } from '@/lib/contacts';
 
 // ---------------- 角色解析 ----------------
@@ -138,10 +139,14 @@ export function charRelationLine(contact: ContactRecord): string {
 
 /** 角色的记忆摘要（给论坛生成用）：召回块截短——包含长期/核心/近期碎片与时间标注，
  *  让角色的帖子/评论/神回复能自然带出「TA 前两天说感冒了」这类记忆。
- *  互通关闭的角色只能看到论坛自身的记忆（share=false 时 recall 仅同 App）。 */
+ *  互通关闭的角色只能看到论坛自身的记忆（share=false 时 recall 仅同 App）。
+ *  v42【帖子记忆·金鱼】：开关关时排除 source='forum' 的碎片——角色在论坛生成里
+ *  也提不起过往论坛互动（只针对当前帖子的上下文回复，当前帖正文走即时 prompt 不受影响）。 */
 export function charMemoryDigest(contactId: string): string {
   try {
-    const block = memChatRecallBlock(contactId, 'forum', 'X论坛 发帖 互动 点赞 评论 神回复');
+    const block = memChatRecallBlock(contactId, 'forum', 'X论坛 发帖 互动 点赞 评论 神回复', {
+      excludeFragmentSources: isPostMemoryOn() ? undefined : ['forum'],
+    });
     if (!block) return '';
     return block.slice(0, 1800);
   } catch {
@@ -268,9 +273,11 @@ function ownerName(): string {
 }
 
 /** 用户发帖 → 写入全部论坛角色的记忆（去重：同帖不重复入库）。
- *  句式：「{owner}今天在X论坛发帖说：……」——下次私聊/论坛互动角色都能想起。 */
+ *  句式：「{owner}今天在X论坛发帖说：……」——下次私聊/论坛互动角色都能想起。
+ *  v42【帖子记忆·金鱼】：开关关时零写入（论坛互动不进长期记忆）。 */
 export function writeUserPostMemory(post: ForumPost, briefs?: ForumCharBrief[]): void {
   try {
+    if (!isPostMemoryOn()) return; // 金鱼模式：不写入
     const name = ownerName();
     const media = post.media?.length ? `（配了${post.media.length}张图）` : '';
     const content = post.content.replace(/\s+/g, ' ').slice(0, 80);
@@ -288,9 +295,11 @@ export function writeUserPostMemory(post: ForumPost, briefs?: ForumCharBrief[]):
   }
 }
 
-/** 用户在角色的帖子下评论 / 回复了角色的评论 → 写入该角色记忆 */
+/** 用户在角色的帖子下评论 / 回复了角色的评论 → 写入该角色记忆。
+ *  v42【帖子记忆·金鱼】：开关关时零写入。 */
 export function writeUserCommentMemory(contactId: string, opts: { post: ForumPost; comment: ForumPost; onOwnComment: boolean }): void {
   try {
+    if (!isPostMemoryOn()) return;
     const name = ownerName();
     const comment = opts.comment.content.replace(/\s+/g, ' ').slice(0, 60);
     if (memHasForumFragment(contactId, opts.post.id, opts.comment.id)) return;
@@ -307,9 +316,11 @@ export function writeUserCommentMemory(contactId: string, opts: { post: ForumPos
   }
 }
 
-/** 用户给角色的帖子点赞 → 写入该角色记忆（AI「被通知」的感知载体） */
+/** 用户给角色的帖子点赞 → 写入该角色记忆（AI「被通知」的感知载体）。
+ *  v42【帖子记忆·金鱼】：开关关时零写入。 */
 export function writeUserLikeMemory(contactId: string, post: ForumPost): void {
   try {
+    if (!isPostMemoryOn()) return;
     const name = ownerName();
     if (memHasForumFragment(contactId, post.id, 'like')) return;
     const content = post.content.replace(/\s+/g, ' ').slice(0, 40);
@@ -322,9 +333,11 @@ export function writeUserLikeMemory(contactId: string, post: ForumPost): void {
   }
 }
 
-/** 角色主动发帖成功 → 写自己的记忆（「我今天在论坛发了……」——下次私聊能自然提起） */
+/** 角色主动发帖成功 → 写自己的记忆（「我今天在论坛发了……」——下次私聊能自然提起）。
+ *  v42【帖子记忆·金鱼】：开关关时零写入（角色发帖同样不进长期记忆）。 */
 export function writeCharOwnPostMemory(contactId: string, post: ForumPost): void {
   try {
+    if (!isPostMemoryOn()) return;
     if (memHasForumFragment(contactId, post.id, 'own-post')) return;
     const content = post.content.replace(/\s+/g, ' ').slice(0, 80);
     memAddForumFragment(contactId, `我今天在X论坛发了帖子：「${content}」`, { postId: post.id, kind: 'post', commentId: 'own-post' }, post.createdAt);
@@ -333,9 +346,11 @@ export function writeCharOwnPostMemory(contactId: string, post: ForumPost): void
   }
 }
 
-/** 角色给用户帖子点赞/评论 → 写自己的记忆 */
+/** 角色给用户帖子点赞/评论 → 写自己的记忆。
+ *  v42【帖子记忆·金鱼】：开关关时零写入。 */
 export function writeCharEngageMemory(contactId: string, opts: { post: ForumPost; liked: boolean; comment?: string }): void {
   try {
+    if (!isPostMemoryOn()) return;
     const name = ownerName();
     const content = opts.post.content.replace(/\s+/g, ' ').slice(0, 50);
     if (opts.liked) {
@@ -357,9 +372,11 @@ export function writeCharEngageMemory(contactId: string, opts: { post: ForumPost
   }
 }
 
-/** 角色神回复成功 → 写自己的记忆（TA评论了我、我回了什么——私聊可提起） */
+/** 角色神回复成功 → 写自己的记忆（TA评论了我、我回了什么——私聊可提起）。
+ *  v42【帖子记忆·金鱼】：开关关时零写入。 */
 export function writeCharReplyMemory(contactId: string, opts: { userComment: string; reply: string; postId: string }): void {
   try {
+    if (!isPostMemoryOn()) return;
     const name = ownerName();
     memAddForumFragment(
       contactId,
@@ -376,9 +393,15 @@ export function writeCharReplyMemory(contactId: string, opts: { userComment: str
 /** 论坛近况感知块：角色的论坛动态 + 机主的帖子 + 彼此互动，注入私聊 system。
  *  仿 buildMomentsChatBlock 语义——让 AI 私聊时「记得自己在玩论坛」，
  *  能自然提起（TA 发的帖/自己发的帖收到的评论），但明确规定不要频繁硬聊。
+ *  v42【帖子记忆】：
+ *  · 金鱼模式（开关关）→ 空串（论坛互动零提起——过往帖/评论一律不提）；
+ *  · 深度模式 → 追加「帖子记忆块」：TA 发过的帖子 + NPC 评论内容（跨应用感知素材：
+ *    「我看到你昨天发的帖子了，那个谁谁谁的评论太逗了」）；匿名小号仓仅说破后并入。
  *  无任何相关动态时返回空串（join 后零成本）。 */
 export function buildForumChatBlock(contactId: string): string {
   try {
+    // 金鱼记忆：绝对不提起用户过往发过的帖子和他们在帖子下留过的评论
+    if (!isPostMemoryOn()) return '';
     const d = forumData();
     if (!d.seeded || !d.posts.length) return '';
     const myKey = charKeyOf(contactId);
@@ -446,14 +469,22 @@ export function buildForumChatBlock(contactId: string): string {
       const to = c.authorKey === myKey ? (isUserAuthor(root?.authorKey ?? '') ? `${name}的帖子` : `${name}的评论`) : '你的帖子';
       lines.push(`${who} ${relTime(c.createdAt, now)}评论了${to}：「${body}」`);
     }
-    if (!lines.length) return '';
-    // 去重保序，最多 6 行
+    if (!lines.length) {
+      // 近况行为空但帖子记忆库有货（角色自己没发帖/没互动）→ 仍注入帖子记忆块
+      const memBlock = buildForumPostMemoryBlock(contactId, isForumAnonDisclosed(contactId));
+      return memBlock || '';
+    }
+    // 去重保序，最多 6 行 + 帖子记忆块（TA发过的帖子与NPC评论——跨应用感知）
     const uniq = [...new Set(lines)].slice(0, 6);
+    const memBlock = buildForumPostMemoryBlock(contactId, isForumAnonDisclosed(contactId));
     return [
       '【X论坛近况（你和TA都在玩X论坛；下面是你们最近的论坛动态，仅作背景了解）】',
       ...uniq.map((l) => `- ${l}`),
       '聊天时偶尔想起可以自然提起（比如TA发帖说的事、你发帖收到的评论、你们在评论区的来回），但绝大多数时候不要主动提论坛，更不要逐条复述这些动态。',
-    ].join('\n');
+      memBlock,
+    ]
+      .filter(Boolean)
+      .join('\n');
   } catch {
     return '';
   }

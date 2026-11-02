@@ -271,6 +271,7 @@ import {
   markMomentAutoAttempt } from '@/lib/moments';
 // v33【AI 真人社交】：X论坛近况感知块（TA 发的帖/我发的帖/评论互动 → 私聊能自然提起）
 import { buildForumChatBlock } from '@/lib/forum/social';
+import { isPostMemoryOn } from '@/lib/forum/core';
 import { AskPostSheet, BilingualTranslation, CommentDeleteDialog, EditPostDialog, MomentAutoCfgSheet, MomentInteractionsPage, MomentsEmojiPanel, insertEmojiAtCursor, momentFriendsOf } from './moments-shared';
 import { MomentsSettingsPage } from './moments-settings';
 import { ThemeStylePage } from './bubble-style-settings';
@@ -7162,6 +7163,8 @@ function ChatPage({
       disclosureText: [userMsg?.content ?? '', ...base.slice(-8).filter((m) => m.role === 'me').map(scanTextOf)].filter(Boolean).join(' '),
       altMainName: cachedOwnerName(),
       altMainRelation: peer.relation?.trim() || '',
+      // v42【帖子记忆·金鱼】：开关关时 forum 来源碎片零召回——过往帖子/评论绝不提起
+      excludeFragmentSources: isPostMemoryOn() ? undefined : ['forum'],
     });
     // 朋友圈动态感知（四）：把「最近的动态 + 相关互动」注入 system（互通开关关闭时只看朋友圈平台的动态），
     // AI 能像真人一样自然提起；用户广播动态首次被看到时懒写入该角色记忆（动态 → 记忆双向打通）

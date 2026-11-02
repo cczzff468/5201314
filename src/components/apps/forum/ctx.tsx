@@ -24,6 +24,9 @@ export interface ForumUi {
   t: XTheme;
   push: (v: ViewSpec) => void;
   pop: () => void;
+  /** 替换栈顶视图（不叠加返回层级）——账号切换用：大号主页 ↔ 匿名主页
+   *  互切后点一次返回直接回主界面，不再退两层。 */
+  replace: (v: ViewSpec) => void;
   openThread: (postId: string) => void;
   openProfile: (key: AuthorKey) => void;
   openCommunity: (id: string) => void;

@@ -30,6 +30,7 @@ import { useSettings, useUI } from './store';
 import { getActiveAccountIdFor, type AccountApp } from './accounts';
 import {
   forumData,
+  isPostMemoryOn,
   isPostVisible,
   isUserAuthor,
   likesOf,
@@ -167,6 +168,7 @@ export async function noteForumLinkSharedToChat(opts: {
 }): Promise<void> {
   const { idp, contactId, post } = opts;
   try {
+    if (!isPostMemoryOn()) return; // v42 金鱼模式：论坛互动不写入长期记忆（当轮上下文仍带帖子原文，AI 能回应）
     const contact = await getContact(contactId).catch(() => null);
     if (!contact || contact.kind === 'user') return;
     const owner = await ownerProfileFor(idp as AccountApp).catch(() => null);
@@ -257,23 +259,27 @@ export async function shareForumPostToChat(opts: ForumShareOpts): Promise<ForumS
   });
 
   // 记忆：让 AI「知道」这条帖子与评论（用户要求：写入记忆）。
+  // v42 金鱼模式（帖子记忆开关关）：分享属于论坛互动——不写入长期记忆
+  //（当轮回应的上下文里仍有帖子原文，AI 照常回应；只是过后不再记得）。
   // 匿名小号帖：陌生网友框架（认知隔离——AI 初始认知是「一个陌生人发的帖子」）；
   // 已对该联系人说破（揭秘）→ 「TA的小号」框架（态度可以转变）。
   try {
     const cText = comments.length
       ? `，热门评论：${comments.map((c) => `「${postSnippet(c, 30)}」（${resolveAuthor(c.authorKey).name}）`).join('、')}`
       : '';
-    const shareNote =
-      post.authorKey === ANON_KEY
-        ? isForumAnonDisclosed(contactId)
-          ? `${meName}把TA自己小号「${author.name}」发的X论坛帖子分享给了我`
-          : `${meName}把X论坛一个陌生网友「${author.name}」发的帖子分享给了我（我不认识这个网友）`
-        : `${meName}把X论坛${author.name}发的帖子分享给了我`;
-    memAddForumFragment(
-      contactId,
-      `${shareNote}（共${commentCount}条评论）：「${postSnippet(post, 80)}」${cText}`,
-      { postId: post.id, kind: 'share', commentId: 'shared' },
-    );
+    if (isPostMemoryOn()) {
+      const shareNote =
+        post.authorKey === ANON_KEY
+          ? isForumAnonDisclosed(contactId)
+            ? `${meName}把TA自己小号「${author.name}」发的X论坛帖子分享给了我`
+            : `${meName}把X论坛一个陌生网友「${author.name}」发的帖子分享给了我（我不认识这个网友）`
+          : `${meName}把X论坛${author.name}发的帖子分享给了我`;
+      memAddForumFragment(
+        contactId,
+        `${shareNote}（共${commentCount}条评论）：「${postSnippet(post, 80)}」${cText}`,
+        { postId: post.id, kind: 'share', commentId: 'shared' },
+      );
+    }
   } catch {
     /* 记忆失败不影响分享 */
   }
@@ -513,25 +519,28 @@ async function runShareReply(opts: AiReplyOpts): Promise<boolean> {
   }
   outMsgs.push({ id: genId('fwsr'), role: 'peer', content: reply, time: now + 1 });
 
-  // 记忆：AI 回应过这条分享（+ 反向分享）。匿名小号帖按认知框架落句
+  // 记忆：AI 回应过这条分享（+ 反向分享）。匿名小号帖按认知框架落句。
+  // v42 金鱼模式：不写入长期记忆（过后不记得回应过）
   try {
-    const replyNote =
-      isAnonPost
-        ? anonDisclosed
-          ? `${meName}把TA自己小号「${author.name}」发的X论坛帖子分享给我看（「${postSnippet(post, 60)}」），我回应TA：「${reply.slice(0, 60)}」`
-          : `${meName}把一个陌生网友「${author.name}」的X论坛帖子分享给我看（「${postSnippet(post, 60)}」），我回应TA：「${reply.slice(0, 60)}」`
-        : `${meName}把X论坛${author.name}的帖子分享给我看（「${postSnippet(post, 60)}」），我回应TA：「${reply.slice(0, 60)}」`;
-    memAddForumFragment(
-      contactId,
-      replyNote,
-      { postId: post.id, kind: 'share', commentId: 'share-reply' },
-    );
-    if (shareBackPost) {
+    if (isPostMemoryOn()) {
+      const replyNote =
+        isAnonPost
+          ? anonDisclosed
+            ? `${meName}把TA自己小号「${author.name}」发的X论坛帖子分享给我看（「${postSnippet(post, 60)}」），我回应TA：「${reply.slice(0, 60)}」`
+            : `${meName}把一个陌生网友「${author.name}」的X论坛帖子分享给我看（「${postSnippet(post, 60)}」），我回应TA：「${reply.slice(0, 60)}」`
+          : `${meName}把X论坛${author.name}的帖子分享给我看（「${postSnippet(post, 60)}」），我回应TA：「${reply.slice(0, 60)}」`;
       memAddForumFragment(
         contactId,
-        `我把X论坛${resolveAuthor(shareBackPost.authorKey).name}的帖子（「${postSnippet(shareBackPost, 50)}」）分享给了${meName}`,
-        { postId: shareBackPost.id, kind: 'share', commentId: 'shared-back' },
+        replyNote,
+        { postId: post.id, kind: 'share', commentId: 'share-reply' },
       );
+      if (shareBackPost) {
+        memAddForumFragment(
+          contactId,
+          `我把X论坛${resolveAuthor(shareBackPost.authorKey).name}的帖子（「${postSnippet(shareBackPost, 50)}」）分享给了${meName}`,
+          { postId: shareBackPost.id, kind: 'share', commentId: 'shared-back' },
+        );
+      }
     }
   } catch {
     /* 静默 */

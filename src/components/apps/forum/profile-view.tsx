@@ -225,7 +225,8 @@ export function ProfileView({ authorKey }: { authorKey: AuthorKey }) {
               {isMe ? (
                 <>
                   {/* 【匿名账号】大号主页 → 切换到匿名小号；小号主页 → 切回大号。
-                      切到小号后发帖/评论/点赞/私信都以「匿名者」身份发生（数据完全隔离） */}
+                      切到小号后发帖/评论/点赞/私信都以「匿名者」身份发生（数据完全隔离）。
+                      v42：用 replace 替换栈顶——切换后点一次返回直接回主界面（旧版 push 会退两层） */}
                   <button
                     type="button"
                     aria-label={isAnonProfile ? '切回主账号' : '切换匿名账号'}
@@ -235,10 +236,10 @@ export function ProfileView({ authorKey }: { authorKey: AuthorKey }) {
                       if (switched === 'anon') {
                         const anon = resolveAuthor(ANON_KEY);
                         f.toast(`已切换到匿名账号 @${anon.handle}，发帖/评论/点赞都以匿名者身份发生`);
-                        f.openProfile(ANON_KEY);
+                        f.replace({ kind: 'profile', key: ANON_KEY });
                       } else {
                         f.toast('已切回主账号（大号）');
-                        f.openProfile('user');
+                        f.replace({ kind: 'profile', key: 'user' });
                       }
                     }}
                     className="flex h-[34px] items-center gap-1.5 rounded-full border px-3.5 text-[13px] font-bold transition-opacity active:opacity-60"

@@ -29,10 +29,12 @@ import {
   followersOf,
   isPostVisible,
   isAnonActive,
+  isPostMemoryOn,
   myFollowingCount,
   refreshForumAuthors,
   resolveAuthor,
   saveForum,
+  setPostMemory,
   subscribeForum,
   switchForumAccount,
   castVote as castVoteCore,
@@ -43,6 +45,7 @@ import {
 } from '@/lib/forum/core';
 import { bootForum, generateMoreFeedPosts, generateNewFeedPosts, queueUserPostInteractions, queueCharEngagements, queueCharThanksForLike, setForumAiActivity } from '@/lib/forum/engine';
 import { writeUserLikeMemory, writeUserPostMemory } from '@/lib/forum/social';
+import { notePostPublished } from '@/lib/forum/post-memory';
 import {
   COMMENT_COUNT_BOUNDS,
   POST_COUNT_BOUNDS,
@@ -99,6 +102,8 @@ export default function ForumApp() {
   const t = useXTheme();
   /** v33【AI 真人社交】活跃度开关状态（从 ForumData 派生；saveForum 后自动刷新） */
   const aiActivity = forumData().aiActivity !== false;
+  // v42【帖子记忆】：深度（true，缺省）/金鱼（false）记忆开关（抽屉里切换；随 forum-data-v1 持久化）
+  const postMemory = isPostMemoryOn();
   const [authorsReady, setAuthorsReady] = useState(false);
   const [tab, setTabRaw] = useState<Tab>('home');
   const [views, setViews] = useState<ViewSpec[]>([]);
@@ -337,6 +342,8 @@ export default function ForumApp() {
 
   const push = useCallback((v: ViewSpec) => setViews((s) => [...s, v]), []);
   const pop = useCallback(() => setViews((s) => s.slice(0, -1)), []);
+  /** 替换栈顶（账号切换用）：大号主页 ↔ 匿名主页互切不叠加返回层级 */
+  const replace = useCallback((v: ViewSpec) => setViews((s) => [...s.slice(0, -1), v]), []);
   const openThread = useCallback((postId: string) => push({ kind: 'thread', postId }), [push]);
   const openProfile = useCallback((key: string) => push({ kind: 'profile', key }), [push]);
   const openCommunity = useCallback((id: string) => push({ kind: 'community', id }), [push]);
@@ -429,6 +436,9 @@ export default function ForumApp() {
       };
       d.posts.push(post);
       saveForum({ ...d });
+      // v42【帖子记忆】（深度模式）：帖子正文/配图/话题标签入帖子记忆库
+      // （金鱼模式下模块内部直接跳过；anon/main 物理隔离入库）
+      notePostPublished(post);
       if (!scheduled) {
         queueUserPostInteractions(post);
         if (me === 'user') {
@@ -470,6 +480,7 @@ export default function ForumApp() {
       t,
       push,
       pop,
+      replace,
       openThread,
       openProfile,
       openCommunity,
@@ -482,7 +493,7 @@ export default function ForumApp() {
       castVote: (postId: string, optionIndex: number) => castVoteCore(postId, optionIndex),
       sharePost: (p: ForumPost) => setShareSheetPost(p),
     }),
-    [t, push, pop, openThread, openProfile, openCommunity, openDm, toast, likeToggle, repostToggle, gotoTab],
+    [t, push, pop, replace, openThread, openProfile, openCommunity, openDm, toast, likeToggle, repostToggle, gotoTab],
   );
 
   const d = forumData();
@@ -962,6 +973,43 @@ export default function ForumApp() {
                       <span
                         className="absolute top-[2px] h-[27px] w-[27px] rounded-full bg-white shadow-md transition-all duration-200"
                         style={{ left: aiActivity ? 22 : 2 }}
+                      />
+                    </button>
+                  </div>
+
+                  {/* v42【帖子记忆】深度/金鱼记忆开关：门控论坛互动写入长期记忆 + AI 跨应用提起 */}
+                  <div className="mb-1 flex w-full items-center justify-between gap-3 rounded-xl px-3 py-[10px]">
+                    <div className="flex min-w-0 flex-col gap-[1px] text-left">
+                      <span className="text-[15px] font-medium">帖子记忆</span>
+                      <span className="text-[12px] leading-snug" style={{ color: t.secondary }}>
+                        {postMemory
+                          ? '深度记忆：AI 记得你发过的帖子与网友的评论，私聊时会自然提起'
+                          : '金鱼记忆：论坛互动不写入长期记忆，AI 只聊眼前的事'}
+                      </span>
+                    </div>
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={postMemory}
+                      aria-label="切换帖子记忆"
+                      onClick={() => {
+                        const next = !postMemory;
+                        setPostMemory(next);
+                        toast(
+                          next
+                            ? '帖子记忆已开启：深度记忆——发过的帖子和网友评论都会被记住'
+                            : '帖子记忆已关闭：金鱼模式——过往帖子和评论一律不再提起',
+                        );
+                      }}
+                      className="relative h-[31px] w-[51px] shrink-0 rounded-full transition-colors"
+                      style={{
+                        background: postMemory ? '#34c759' : 'rgba(120,120,128,0.32)',
+                        boxShadow: 'inset 0 0 0 0.5px rgba(0,0,0,0.06)',
+                      }}
+                    >
+                      <span
+                        className="absolute top-[2px] h-[27px] w-[27px] rounded-full bg-white shadow-md transition-all duration-200"
+                        style={{ left: postMemory ? 22 : 2 }}
                       />
                     </button>
                   </div>

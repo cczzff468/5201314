@@ -104,6 +104,7 @@ import { buildDynamicStateBlocks } from '@/lib/ios/ai-mood';
 import { buildMomentsChatBlock } from '@/lib/moments';
 // v33【AI 真人社交】：X论坛近况感知块（TA 发的帖/我发的帖/评论互动 → 私聊能自然提起）
 import { buildForumChatBlock } from '@/lib/forum/social';
+import { isPostMemoryOn } from '@/lib/forum/core';
 import { ChatReplyCountPage, ChatTranslatePage, ChatVoiceFreqPage, ChatVoicePage, SmsChatSettingsPage, WorldBookPickerPage } from './chat-settings';
 import { ProactiveMsgPage } from './proactive-msg-page';
 import { proactiveCfgSummary, parseReminderInstruction, reminderHintHit, reminderSysHint, buildReminderSysMsg, setActiveProactiveChat } from '@/lib/ios/proactive-msg';
@@ -1845,6 +1846,8 @@ function ChatView({
             disclosureText: [userMsg?.content ?? '', ...base.slice(-6).filter((m) => m.role === 'user').map((m) => (m.kind === 'voice' ? m.voice?.transcript || '' : m.kind === 'textcard' ? m.card?.text || '' : m.content))].filter(Boolean).join(' '),
             altMainName: cachedOwnerName(),
             altMainRelation: activeContactRelation,
+            // v42【帖子记忆·金鱼】：开关关时 forum 来源碎片零召回——过往帖子/评论绝不提起
+            excludeFragmentSources: isPostMemoryOn() ? undefined : ['forum'],
           }
         )
       : '';

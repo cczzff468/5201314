@@ -52,6 +52,7 @@ import {
   POST_MAX,
   REPLY_MAX,
   createDynNpc,
+  isPostMemoryOn,
   isUserAuthor,
   likesOf,
   recordDynNpcRecent,
@@ -77,6 +78,8 @@ import { describeImagesAuto } from '@/lib/vision-client';
 import { renderTextImage } from './textimg';
 import { commentAnchored, isTenderPost, loudMemeIn, offTopicIn, personaBleedIn, postAllowsCatchall, universalPhraseIn, isParrotReply, isScoopPost, jsonLeakIn, promptLeakIn, sweetShipIn } from './topic';
 import { promptOverridesPayload, rollCommentCount, rollPostCount } from './gen-settings';
+// v42【帖子记忆】：帖子入库 + NPC 评论入库（深度记忆开关守卫在模块内部）
+import { noteNpcCommentOnMyPost, notePostPublished } from './post-memory';
 import {
   charMemoryDigest,
   charMoodBlock,
@@ -895,6 +898,8 @@ async function llmPolishSeedComments(seedPostIds: string[]): Promise<void> {
       createdAll.push(...created);
       // 楼主是用户（大号/小号） → 前 2 条评论发通知（X：别人回复了你的帖子）
       if (isUserAuthor(t.authorKey) && created.length) {
+        // v42【帖子记忆】：播种期生成的网友评论也入「某NPC在我的帖子里说了什么」
+        created.forEach((c) => noteNpcCommentOnMyPost(t.id, c));
         next.notifications = [
           ...created.slice(0, 2).map((c) => ({
             id: uid('n'),
@@ -2774,6 +2779,8 @@ async function execJob(job: PendingJob): Promise<void> {
           { likes: likesOf(target), views: target.views },
         );
         next.posts.push(reply);
+        // v42【帖子记忆】：角色评论了用户的帖 → 「某NPC在我的哪个帖子里说了什么」入库
+        noteNpcCommentOnMyPost(target.id, reply);
         next.notifications = [
           { id: uid('n'), type: 'reply' as const, fromKey: charKey, postId: reply.id, createdAt: Date.now(), read: false },
           ...next.notifications,
@@ -2865,6 +2872,8 @@ async function execJob(job: PendingJob): Promise<void> {
       );
       if (userReply) reply.replyToPost = userReply.id; // 精确回应用户那条评论
       next.posts.push(reply);
+      // v42【帖子记忆】：神回复落用户帖的评论区 → 也算「某NPC在我的帖子里说了话」入库
+      noteNpcCommentOnMyPost(mainId, reply);
       next.notifications = [
         { id: uid('n'), type: 'reply' as const, fromKey: charKey, postId: reply.id, createdAt: Date.now(), read: false },
         ...next.notifications,
@@ -2876,12 +2885,16 @@ async function execJob(job: PendingJob): Promise<void> {
       }
       // v41（B3）：致谢持久标记——写过这条的同帖不再二次致谢（快速赞↔取消↔再赞不叠加）
       if (thanks) {
+        // v42【帖子记忆·金鱼】：致谢去重标记也是论坛来源记忆——开关关时不落库
+        //（代价：快速赞↔取消↔再赞可能重复致谢，可接受；金鱼模式本就不该记住赞过谁）
         try {
-          memAddForumFragment(
-            brief.contactId,
-            `${userName}给${resolveAuthor(mainPost.authorKey).name === brief.contact.nickname || brief.contact.name ? '我' : '我'}发的帖子点过赞，我在评论区谢过TA了`,
-            { postId: mainPost.id, kind: 'like', commentId: 'like-thanks' },
-          );
+          if (isPostMemoryOn()) {
+            memAddForumFragment(
+              brief.contactId,
+              `${userName}给${resolveAuthor(mainPost.authorKey).name === brief.contact.nickname || brief.contact.name ? '我' : '我'}发的帖子点过赞，我在评论区谢过TA了`,
+              { postId: mainPost.id, kind: 'like', commentId: 'like-thanks' },
+            );
+          }
         } catch {
           /* 静默 */
         }
@@ -3021,6 +3034,12 @@ async function execJob(job: PendingJob): Promise<void> {
       // 精确被回复对象 = 用户的回复（多轮接话定位）
       if (job.kind === 'aiReplyBack' && job.meta.userReplyId) replyPost.replyToPost = job.meta.userReplyId;
       next.posts.push(replyPost);
+      // v42【帖子记忆】：网友/围观者评论了用户的帖（或楼中楼接话）→
+      // 「某NPC在我的哪个帖子里说了什么」入库（自己账号的评论不记，模块内部守卫）
+      noteNpcCommentOnMyPost(
+        job.kind === 'aiReplyBack' ? (job.meta.mainPostId ?? job.meta.rootId ?? target.id) : target.id,
+        replyPost,
+      );
       // v41（A4）：通知只发「用户在对话链里」的场景——
       // · aiReplyBack：用户（大号/小号）在评论区发了回复，别人回 TA → 通知 ✓
       // · replyToUserPost 且主帖是用户账号发的（大号/小号） → 通知 ✓

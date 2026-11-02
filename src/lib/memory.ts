@@ -765,6 +765,10 @@ export interface MemRecallOpts {
    * 缺省/空 = 包装段不带关系行（零破坏）。
    */
   altMainRelation?: string;
+  /** 【X论坛帖子记忆·金鱼模式】排除指定 source 的碎片不参与召回（如 ['forum']）——
+   *  关闭帖子记忆时论坛互动碎片零提起（写侧也停了，此处挡历史存量）。
+   *  仅作用于近期碎片层（source 精确到条）；长期/核心总结层不受影响（本就不含论坛明细）。 */
+  excludeFragmentSources?: string[];
 }
 
 export function memRecallBlock(contactId: string, app: MemApp, contextText: string, opts?: MemRecallOpts): string {
@@ -1273,6 +1277,8 @@ function memRecallBlockInner(contactId: string, app: MemApp, contextText: string
     .filter((f) => !bondExcludeIds.has(f.id)) // 本轮已被人设【最近发生的事】选用的碎片不再重复注入（B8 跨块去重）
     .filter((f) => !bondExcludeIds.has(f.id))
     .filter((f) => (isGroupMode ? fragVisibleInGroup(f) : fragVisiblePrivate(f)))
+    // v42【帖子记忆·金鱼】：排除指定 source 的碎片（关闭帖子记忆 → forum 互动零召回）
+    .filter((f) => !(opts?.excludeFragmentSources ?? []).includes(f.source ?? ''))
     .map((f) => ({ f, ...fragRecallScore(f, forget, contextText, now) }))
     .filter((x) => x.st !== 'faded')
     .sort((a, b) => b.s - a.s)

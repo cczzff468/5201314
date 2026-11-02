@@ -27,7 +27,7 @@ import { pushChatNotification } from '@/lib/ios/island-notify';
 import { wxUnreads, qqUnreads } from '@/lib/unread-store';
 import { useSettings } from '@/lib/ios/store';
 import { getActiveAccountIdFor, type AccountApp } from '@/lib/ios/accounts';
-import { likesOf, isPostVisible, type ForumPost } from '@/lib/forum/core';
+import { isPostMemoryOn, likesOf, isPostVisible, type ForumPost } from '@/lib/forum/core';
 import { stripImgPh } from '@/lib/forum/imgph';
 import type { ForumCharBrief } from './social';
 
@@ -181,13 +181,16 @@ export async function maybeCrossAppPing(brief: ForumCharBrief, post: ForumPost, 
       { initialDelay: 4000 + Math.random() * 9000 },
     );
 
-    // 记忆：我在论坛看到TA的帖子后主动去找TA聊了（去重标记也在这里落）
+    // 记忆：我在论坛看到TA的帖子后主动去找TA聊了（去重标记也在这里落）。
+    // v42【帖子记忆·金鱼】：开关关时不落库（去重退化为 6h 冷却 + 会话内存，可接受）
     try {
-      memAddForumFragment(
-        contact.id,
-        `我在X论坛看到${meName}发的帖子（「${bodyText.slice(0, 50)}」）后，主动去${app === 'wx' ? '微信' : 'QQ'}找TA聊了这个事`,
-        { postId: post.id, kind: 'share', commentId: PING_MEM_KIND },
-      );
+      if (isPostMemoryOn()) {
+        memAddForumFragment(
+          contact.id,
+          `我在X论坛看到${meName}发的帖子（「${bodyText.slice(0, 50)}」）后，主动去${app === 'wx' ? '微信' : 'QQ'}找TA聊了这个事`,
+          { postId: post.id, kind: 'share', commentId: PING_MEM_KIND },
+        );
+      }
     } catch {
       /* 静默 */
     }
