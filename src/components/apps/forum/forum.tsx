@@ -941,7 +941,7 @@ export default function ForumApp() {
                           <span className="text-[15px] font-medium">切换世界观</span>
                           {activeWv ? (
                             <span className="flex min-w-0 items-center gap-[5px] text-[12px] leading-snug" style={{ color: t.secondary }}>
-                              <WorldviewIcon id={activeWv.id} emoji={activeWv.emoji} size={16} />
+                              <WorldviewIcon id={activeWv.id} name={activeWv.name} size={16} />
                               <span className="truncate">
                                 {activeWv.name} · {wvSnap.worldviews.length} 个可选
                               </span>

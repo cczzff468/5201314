@@ -13,7 +13,8 @@
  *    抽象乐子人）+ 用户自建（名称/背景设定/话题方向）；切换后整个论坛
  *    （帖子/评论/话题）瞬间切换为该风格（engine.switchWorldview 重置重播种）；
  *    v37：话题方向只作为生成素材洗牌后逐帖注入（自然混在内容里），
- *    不再在首页当 tab 标签展示；
+ *    不再在首页当 tab 标签展示；面板图标不用 emoji——渐变徽章内置
+ *    白色矢量 glyph（shared.WorldviewIcon，内置签名图标/自建名字首字）；
  * 2. NPC 账号矩阵：每个世界观预置核心 NPC（瓜主/营销号/粉丝站姐/路人杠精/
  *    自定义身份），用户可增删改：名字、头像、身份、性格与语气、发帖频率、
  *    专属口头禅——生成时强制读取该 NPC 的【性格】和【身份】；
@@ -125,8 +126,6 @@ export interface WorldviewDef {
   name: string;
   /** 面板里的一句话简介 */
   desc: string;
-  /** 面板图标 */
-  emoji: string;
   /** 背景设定（注入 LLM 的世界观描述——整个论坛的内容生态由它决定） */
   background: string;
   /** 话题方向（v37：不再作为首页 tab 标签展示——engine 洗牌后逐帖注入
@@ -227,7 +226,6 @@ export const BUILTIN_WORLDVIEWS: WorldviewDef[] = [
   {
     id: 'builtin:hyul',
     name: '韩娱嫂站',
-    emoji: '💜',
     desc: '爱豆恋爱瓜 · 站姐脱粉回踩 · 韩网热帖翻译',
     builtin: true,
     background:
@@ -314,7 +312,6 @@ export const BUILTIN_WORLDVIEWS: WorldviewDef[] = [
   {
     id: 'builtin:neiyu',
     name: '内娱八卦',
-    emoji: '🍉',
     desc: '明星番位 · 狗仔爆料 · 红毯比美 · 营销号引战',
     builtin: true,
     background:
@@ -400,7 +397,6 @@ export const BUILTIN_WORLDVIEWS: WorldviewDef[] = [
   {
     id: 'builtin:campus',
     name: '校园暗恋墙',
-    emoji: '💌',
     desc: '青春痛痒 · 匿名表白 · 吐槽老师 · 寻找crush',
     builtin: true,
     background:
@@ -486,7 +482,6 @@ export const BUILTIN_WORLDVIEWS: WorldviewDef[] = [
   {
     id: 'builtin:concert',
     name: '硬核追星现场',
-    emoji: '🎤',
     desc: '演唱会repo · 抢票吐槽 · 安利绝美神图',
     builtin: true,
     background:
@@ -560,7 +555,6 @@ export const BUILTIN_WORLDVIEWS: WorldviewDef[] = [
   {
     id: 'builtin:abstract',
     name: '抽象乐子人',
-    emoji: '🤡',
     desc: '发疯文学 · 无厘头烂梗 · 纯搞笑',
     builtin: true,
     background:

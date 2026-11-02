@@ -166,7 +166,7 @@ export function NpcMatrixSheet({ onClose, toast }: SheetProps) {
             <span className="text-[17px] font-bold">NPC 矩阵</span>
             {wv ? (
               <span className="flex max-w-[190px] items-center gap-[5px] text-[11px]" style={{ color: t.secondary }}>
-                <WorldviewIcon id={wv.id} emoji={wv.emoji} size={15} />
+                <WorldviewIcon id={wv.id} name={wv.name} size={15} />
                 <span className="truncate">
                   {wv.name} · {matrix.length} 位核心 NPC
                 </span>

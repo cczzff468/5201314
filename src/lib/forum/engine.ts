@@ -567,8 +567,11 @@ export async function ensureSeed(): Promise<void> {
     seedBuiltinNpcFallbackNames();
     const specs: { key: AuthorKey; text: string; community: string | null; npcId: string }[] = [];
     // 【多世界观】优先用世界观风格池播种：矩阵阵容领衔（每人保底一帖）+
-    // 动态网友填充——绝不落入内置八卦池串味；自定义世界观（无风格池）回落经典 NPC 池
-    const wvSeed = activeWorldview()?.seedPool ?? [];
+    // 动态网友填充——绝不落入内置八卦池串味；自建世界观（无风格池）走
+    // buildFeedBatch LLM 批量（世界观背景+矩阵人设+话题方向全注入），
+    // LLM 失败/限流才回落经典 NPC 池（保论坛非空）
+    const wvActive = activeWorldview();
+    const wvSeed = wvActive?.seedPool ?? [];
     if (wvSeed.length) {
       const cast = matrixCast();
       const castKeys = cast.map((c) => c.key).sort(() => Math.random() - 0.5);
@@ -580,6 +583,24 @@ export async function ensureSeed(): Promise<void> {
           i < castKeys.length ? castKeys[i] : filler[(i - castKeys.length) % filler.length] ?? castKeys[0] ?? dynKeys[0] ?? 'official';
         specs.push({ key, text, community: null, npcId: '' });
       });
+    } else if (wvActive) {
+      // 【多世界观 v37】自建世界观：种子帖与上拉生成同一条 LLM 路径——
+      // 风格贴合用户写的背景设定，绝不串味到内置八卦池
+      let llmRaw: { key: AuthorKey; text: string }[] = [];
+      try {
+        llmRaw = await buildFeedBatch(10, new Set(), []);
+      } catch {
+        /* 冷却/限流 → 下方经典池兜底 */
+      }
+      if (llmRaw.length) {
+        llmRaw.forEach(({ key, text }) => specs.push({ key, text, community: null, npcId: '' }));
+      } else {
+        for (const npc of NPC_DEFS) {
+          const pool = [...npc.pool];
+          const text = pool[Math.floor(Math.random() * pool.length)];
+          if (text) specs.push({ key: `npc:${npc.id}`, text, community: communityOfPoolText(npc.id, text), npcId: npc.id });
+        }
+      }
     } else {
     for (const npc of NPC_DEFS) {
       const n = 1 + Math.floor(Math.random() * 2);

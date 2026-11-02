@@ -80,10 +80,6 @@ function sanitizeState(raw: unknown): WorldviewState {
   for (const b of BUILTIN_WORLDVIEWS) {
     if (!merged.some((w) => w.id === b.id)) merged.push({ ...b, tags: [...b.tags], seedPool: [...b.seedPool], matrix: b.matrix.map((n) => ({ ...n })) });
   }
-  // v37 图标美化迁移：旧副本里韩娱嫂站的旗标 emoji（多数平台渲染成 "KR" 两个字母）换成紫心
-  for (const w of merged) {
-    if (w.builtin && w.emoji === '🇰🇷') w.emoji = '💜';
-  }
   const known = new Set(merged.map((w) => w.id));
   let activeId = typeof rec.activeId === 'string' && known.has(rec.activeId) ? rec.activeId : DEFAULT_WORLDVIEW_ID;
   const rules = rec.rules && typeof rec.rules === 'object' && !Array.isArray(rec.rules)
@@ -189,7 +185,6 @@ export function setActiveWorldviewId(id: string): boolean {
 export interface WorldviewDraft {
   name: string;
   desc?: string;
-  emoji?: string;
   background: string;
   tags: string[];
   matrix?: MatrixNpc[];
@@ -206,7 +201,6 @@ export function addWorldview(draft: WorldviewDraft): string | null {
     id,
     name,
     desc: (draft.desc?.trim() || '自定义世界观').slice(0, 60),
-    emoji: draft.emoji?.trim().slice(0, 4) || '✨',
     background,
     tags: draft.tags.map((t) => t.trim().slice(0, 16)).filter(Boolean).slice(0, 8),
     matrix: (draft.matrix ?? []).map((n) => ({ ...n })),
@@ -216,8 +210,8 @@ export function addWorldview(draft: WorldviewDraft): string | null {
   return id;
 }
 
-/** 编辑世界观基础字段（名称/背景/标签/简介/图标；内置的也可以改，矩阵另走矩阵接口） */
-export function updateWorldview(id: string, patch: Partial<Pick<WorldviewDef, 'name' | 'desc' | 'emoji' | 'background' | 'tags'>>): boolean {
+/** 编辑世界观基础字段（名称/背景/话题方向/简介；内置的也可以改，矩阵另走矩阵接口） */
+export function updateWorldview(id: string, patch: Partial<Pick<WorldviewDef, 'name' | 'desc' | 'background' | 'tags'>>): boolean {
   const s = getWorldviewState();
   const idx = s.worldviews.findIndex((w) => w.id === id);
   if (idx < 0) return false;
@@ -226,7 +220,6 @@ export function updateWorldview(id: string, patch: Partial<Pick<WorldviewDef, 'n
     ...cur,
     name: patch.name !== undefined ? patch.name.trim().slice(0, 24) || cur.name : cur.name,
     desc: patch.desc !== undefined ? patch.desc.trim().slice(0, 60) || cur.desc : cur.desc,
-    emoji: patch.emoji !== undefined ? patch.emoji.trim().slice(0, 4) || cur.emoji : cur.emoji,
     background: patch.background !== undefined ? patch.background.trim().slice(0, 1200) || cur.background : cur.background,
     tags: patch.tags !== undefined ? patch.tags.map((t) => t.trim().slice(0, 16)).filter(Boolean).slice(0, 8) : cur.tags,
   };
