@@ -48,11 +48,15 @@ import {
   setPostCountRange,
 } from '@/lib/forum/gen-settings';
 import { FORUM_PROMPT_DEFS } from '@/lib/forum/prompt-defs';
+// 【分享给 AI】帖子 → 微信/QQ 聊天卡片 + 深链返回论坛（forum-share.ts）
+import { FORUM_OPEN_POST_EVENT, takePendingForumPost } from '@/lib/ios/forum-share';
+import { useUI } from '@/lib/ios/store';
 // 【多世界观】世界观切换 / NPC 矩阵 / AI 规则面板 + store 订阅（首页标签实时读）
 import { subscribeWorldview, worldviewSnapshot, countCustomRules } from '@/lib/forum/worldview-store';
 import { GenRangeRow } from './prompt-sheet';
 import { WorldviewSheet } from './worldview-sheet';
 import { NpcMatrixSheet, RulesSheet } from './npc-sheet';
+import { ForumShareSheet } from './share-sheet';
 import { XAvatar, XIcons, XLogo, WorldviewIcon, useXTheme } from './shared';
 import { FeedList, FeedSkeleton, CommunityIcon } from './feed';
 import { ComposeSheet, type ComposePayload } from './compose-sheet';
@@ -150,6 +154,9 @@ export default function ForumApp() {
   });
   /** 帖子「···」底部菜单：当前操作的帖子（null = 关闭） */
   const [menuPost, setMenuPost] = useState<ForumPost | null>(null);
+  /** 【分享给 AI】帖子分享弹层：当前分享的帖子（null = 关闭）；
+   *  帖子卡/帖子页的分享图标 → 选微信/QQ → 选联系人 → 帖子卡进聊天 + AI 回应 */
+  const [shareSheetPost, setShareSheetPost] = useState<ForumPost | null>(null);
   /** 定时发布到期重绘 tick（30s；到点的帖子自动出现在列表顶部） */
   const [tick, setTick] = useState(0);
 
@@ -335,6 +342,18 @@ export default function ForumApp() {
     setTabRaw(TABS[Math.max(0, Math.min(4, i))]);
   }, []);
 
+  // 【深链】聊天里的帖子卡点击 → switchToApp('forum') + pending 帖子 → 打开对应帖子页。
+  //  挂载时消费一次（App 从后台唤起/冷启动）；在场时由 FORUM_OPEN_POST_EVENT 驱动。
+  useEffect(() => {
+    const open = () => {
+      const pid = takePendingForumPost();
+      if (pid) openThread(pid);
+    };
+    open();
+    window.addEventListener(FORUM_OPEN_POST_EVENT, open);
+    return () => window.removeEventListener(FORUM_OPEN_POST_EVENT, open);
+  }, [openThread]);
+
   const likeToggle = useCallback((postId: string) => {
     const d = forumData();
     const p = d.posts.find((x) => x.id === postId);
@@ -448,6 +467,7 @@ export default function ForumApp() {
       gotoTab,
       openPostMenu: (p: ForumPost) => setMenuPost(p),
       castVote: (postId: string, optionIndex: number) => castVoteCore(postId, optionIndex),
+      sharePost: (p: ForumPost) => setShareSheetPost(p),
     }),
     [t, push, pop, openThread, openProfile, openCommunity, openDm, toast, likeToggle, repostToggle, gotoTab],
   );
@@ -573,12 +593,19 @@ export default function ForumApp() {
                     transition: pulling ? 'none' : 'padding-top .25s ease',
                   }}
                 >
-                {/* 顶栏(X:头像 | 𝕏 | 订阅):随内容滚走(用户要求:顶部的头像、X符号、订阅跟随滑动) */}
-                <div className="flex items-center justify-between px-4 pt-[54px]" style={{ height: 100, background: t.bg }}>
+                {/* 顶栏(X:头像 | 𝕏 | 订阅):随内容滚走(用户要求:顶部的头像、X符号、订阅跟随滑动)。
+                    v39：X 符号绝对居中（左右元素宽度不同时也严格居中）+ 可点击返回上一界面（关闭论坛 App） */}
+                <div className="relative flex items-center justify-between px-4 pt-[54px]" style={{ height: 100, background: t.bg }}>
                   <XAvatar authorKey="user" size={36} onClick={() => setDrawer(true)} />
-                  <span aria-hidden="true" style={{ color: t.text }}>
+                  <button
+                    type="button"
+                    aria-label="返回"
+                    title="返回"
+                    onClick={() => useUI.getState().closeApp()}
+                    className="absolute left-1/2 top-[54px] flex h-[46px] w-[46px] -translate-x-1/2 items-center justify-center rounded-full transition-colors active:bg-black/5 dark:active:bg-white/5"
+                  >
                     <XLogo size={26} />
-                  </span>
+                  </button>
                   <button
                     type="button"
                     aria-label="订阅"
@@ -1029,6 +1056,11 @@ export default function ForumApp() {
 
         {/* 发布弹层 */}
         {compose && <ComposeSheet onClose={() => setCompose(false)} onPublish={publish} />}
+
+        {/* 【分享给 AI】帖子分享弹层（分享图标 → 选微信/QQ → 选联系人 → 帖子卡进聊天） */}
+        {shareSheetPost && (
+          <ForumShareSheet post={shareSheetPost} toast={toast} onClose={() => setShareSheetPost(null)} />
+        )}
 
         {/* v36【多世界观】三个管理面板（抽屉入口打开；覆盖抽屉层）。
             v38：提示词面板并入「修改 AI 规则」（RulesSheet），关闭时刷总数角标 */}

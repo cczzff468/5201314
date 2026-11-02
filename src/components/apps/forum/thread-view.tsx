@@ -203,7 +203,6 @@ function CommentActions({
   const reposted = post.reposted === true;
   const iconSize = compact ? 15 : 16;
   const size = compact ? 'sm' : 'md';
-  const a = resolveAuthor(post.authorKey);
   return (
     <div
       className={`mt-1.5 flex items-center ${compact ? 'gap-[2px]' : 'justify-between'}`}
@@ -256,14 +255,7 @@ function CommentActions({
         color={t.secondary}
         hoverColor={t.blue}
         hoverBg="rgba(29,155,240,0.12)"
-        onClick={() => {
-          try {
-            void navigator.clipboard?.writeText(`https://x.com/${a.handle}/status/${post.id}`);
-          } catch {
-            /* 剪贴板不可用无妨 */
-          }
-          f.toast('链接已复制');
-        }}
+        onClick={() => f.sharePost(post)}
       />
       {/* 翻译按钮：操作行最右面（用户要求）；已有译文时高亮，点击展开/收起 */}
       {translate && (
@@ -800,14 +792,7 @@ export function ThreadView({ postId }: { postId: string }) {
               color={t.secondary}
               hoverColor={t.blue}
               hoverBg="rgba(29,155,240,0.12)"
-              onClick={() => {
-                try {
-                  void navigator.clipboard?.writeText(`https://x.com/${a.handle}/status/${post.id}`);
-                } catch {
-                  /* 剪贴板不可用无妨 */
-                }
-                f.toast('链接已复制');
-              }}
+              onClick={() => f.sharePost(post)}
             />
           </div>
         </div>

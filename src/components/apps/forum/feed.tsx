@@ -433,14 +433,7 @@ export const PostCard = memo(function PostCard({ post, onOpen }: { post: ForumPo
               color={t.secondary}
               hoverColor={t.blue}
               hoverBg={HOVER_BG.blue}
-              onClick={() => {
-                try {
-                  void navigator.clipboard?.writeText(`https://x.com/${a.handle}/status/${post.id}`);
-                } catch {
-                  /* 剪贴板不可用无妨 */
-                }
-                f.toast('链接已复制');
-              }}
+              onClick={() => f.sharePost(post)}
             />
           </div>
         </div>

@@ -37,6 +37,8 @@ export interface ForumUi {
   openPostMenu: (post: ForumPost) => void;
   /** 投票：点选某选项 */
   castVote: (postId: string, optionIndex: number) => void;
+  /** 分享图标 → 帖子分享弹层（选微信/QQ → 选联系人 → 帖子卡进聊天 + AI 回应） */
+  sharePost: (post: ForumPost) => void;
 }
 
 export const ForumCtx = createContext<ForumUi | null>(null);

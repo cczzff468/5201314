@@ -1508,7 +1508,7 @@ export function memHasMomentFragment(contactId: string, postId: string): boolean
 export function memAddForumFragment(
   contactId: string,
   content: string,
-  src: { postId?: string; kind?: 'post' | 'like' | 'comment'; commentId?: string },
+  src: { postId?: string; kind?: 'post' | 'like' | 'comment' | 'share'; commentId?: string },
   sourceTime?: number
 ): boolean {
   try {

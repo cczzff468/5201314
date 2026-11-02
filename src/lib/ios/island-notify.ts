@@ -596,6 +596,9 @@ export function notifyPreviewText(m: NotifyMsgInfo): string | null {
       return '[群聊邀请]';
     case 'relcard':
       return '[亲密关系]';
+    case 'forumshare':
+      // X论坛帖子分享卡：预览显示卡片标题（content 已带帖子摘要），无 content 兜底卡片名
+      return m.content?.trim() || '[X论坛帖子]';
     default:
       return m.content?.trim() || null;
   }

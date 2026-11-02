@@ -64,8 +64,8 @@ export interface MemFragment {
   source?: 'chat' | 'moments' | 'group' | 'forum';
   /** source==='moments'：关联的动态 id（动态与记忆双向打通的追溯键） */
   sourcePostId?: string;
-  /** source==='moments'：互动类型（发动态/点赞/评论） */
-  sourceKind?: 'post' | 'like' | 'comment';
+  /** source==='moments'/'forum'：互动类型（发动态/点赞/评论/帖子分享） */
+  sourceKind?: 'post' | 'like' | 'comment' | 'share';
   /** source==='moments'：关联的评论 id（可追溯到具体哪条互动） */
   sourceCommentId?: string;
   /** source==='group'：来源群聊 ID（互通开关与群间隔离的判断键） */

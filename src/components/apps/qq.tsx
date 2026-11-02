@@ -160,6 +160,8 @@ import { MT_SHARE_CARD_EVENT } from '@/lib/ios/mt-order-share';
 import { MtShareBubble } from './mt-share-card';
 import { TbPayBubble, TbProxyDetailPage, TbShareBubble, TbExpressPicker } from './tb-share-cards';
 import { tbCreateOrderShare, tbGetProxy, tbProxyHistoryLine, tbProxyMeHistoryLine, tbReshareProxy, tbShareHistoryLine, stripTbEchoText, TB_PROXY_CARD_EVENT, TB_SHARE_CARD_EVENT } from '@/lib/ios/tb-share-proxy';
+import { FORUM_SHARE_CARD_EVENT, forumShareHistoryLine } from '@/lib/ios/forum-share';
+import { ForumShareBubble } from './forum/share-card';
 import CoupleRelBubble from '@/components/apps/couple-rel-bubble';
 import CouplePactBubble from '@/components/apps/couple-pact-bubble';
 import CoupleExamBubble from '@/components/apps/couple-exam-bubble';
@@ -465,7 +467,7 @@ interface QQMsg {
   unread?: boolean;
   /** 消息种类：缺省 = 文本；image = 图片（content 为 dataURL）；location = 位置（loc 有值）；红包/转账消息 content 为空串（转账接收卡片也是 transfer）；family = 亲属卡（fam 有值）；notice = 红包领取通知；forward = 转发卡片；groupcard = 群聊邀请卡片；relcard = 亲密关系卡片（恋人空间邀请卡/成功卡）；
    *  voice = 语音消息（voice 有值，content 保持空串）；sys = 拉黑等系统提示（居中灰字胶囊，不进 AI 上下文）；blockreq = 角色发起的「申请解除拉黑」卡片；textcard = 文字图片卡片（card 有值，无生图依赖）；mtpay = 美团找人代付卡片（请求/完成）；mtshare = 美团订单分享动态卡片；tbpay = 淘宝代付卡片（请求/完成）；tbshare = 淘宝订单分享动态卡片 */
-  kind?: 'text' | 'image' | 'voice' | 'redpacket' | 'transfer' | 'location' | 'notice' | 'sticker' | 'family' | 'forward' | 'groupcard' | 'sys' | 'blockreq' | 'call' | 'textcard' | 'song' | 'mtpay' | 'mtshare' | 'mtdraft' | 'tbpay' | 'tbshare' | 'tbdraft' | 'relcard' | 'pactcard' | 'examcard' | 'lettercard';
+  kind?: 'text' | 'image' | 'voice' | 'redpacket' | 'transfer' | 'location' | 'notice' | 'sticker' | 'family' | 'forward' | 'groupcard' | 'sys' | 'blockreq' | 'call' | 'textcard' | 'song' | 'mtpay' | 'mtshare' | 'mtdraft' | 'tbpay' | 'tbshare' | 'tbdraft' | 'relcard' | 'pactcard' | 'examcard' | 'lettercard' | 'forumshare';
   /** 恋爱协议卡片（kind='pactcard'；第十二轮：协议分享/签署卡，由 couple-pact-share 落库，点击进恋人空间签署界面） */
   pactcard?: CouplePactCardData;
   /** 恋爱考试卡片（kind='examcard'；第十五轮：我喊TA答题/TA出卷喊我答，由 couple-exam-share 落库，点击进恋人空间试卷页） */
@@ -536,6 +538,8 @@ interface QQMsg {
   tbpay?: { pid: string; role: 'req' | 'done' };
   /** 淘宝订单分享动态卡片（kind='tbshare'）：sid = 分享快照（tb-share:<sid>），状态时间线实时跟订单走 */
   tbshare?: { sid: string };
+  /** X论坛帖子分享卡片（kind='forumshare'）：pid = 帖子 id，卡片实时读论坛 store（正文/互动数跟帖走） */
+  forumshare?: { pid: string };
   /** 美团 AI 代点外卖草稿卡（kind='mtdraft'）：did = 草稿（mt-draft:<did>）；QQ 端仅历史序列化，卡片渲染在微信端 */
   mtdraft?: { did: string };
   /** 淘宝 AI 代买草稿卡（kind='tbdraft'）：did = 草稿（tb-draft:<did>），确认后 AI 付款下单 */
@@ -636,6 +640,7 @@ function msgPreview(m: QQMsg | undefined): string {
   if (m.kind === 'pactcard') return '[恋爱协议]';
   if (m.kind === 'examcard') return '[恋爱考试]';
   if (m.kind === 'lettercard') return '[情书]';
+  if (m.kind === 'forumshare') return '[X论坛帖子]';
   return m.content;
 }
 
@@ -4035,6 +4040,22 @@ function ChatPage({
     };
   }, [peer.id]);
 
+  /** X论坛帖子分享卡落库监听：论坛分享/AI 回应直写 kv 后广播 FORUM_SHARE_CARD_EVENT，
+   *  聊天页在场时实时合并落库消息（新卡片立即上屏），不用重开聊天 */
+  useEffect(() => {
+    const onForumCard = (e: Event) => {
+      const d = (e as CustomEvent<{ cid?: string; app?: string }>).detail;
+      if (!d || d.cid !== peer.id || d.app !== 'qq') return;
+      setMsgs((prev) => {
+        const saved = loadMsgs(peer.id);
+        const ids = new Set(prev.map((m) => m.id));
+        return sortMsgsByTime([...prev, ...saved.filter((m) => !ids.has(m.id))]);
+      });
+    };
+    window.addEventListener(FORUM_SHARE_CARD_EVENT, onForumCard);
+    return () => window.removeEventListener(FORUM_SHARE_CARD_EVENT, onForumCard);
+  }, [peer.id]);
+
   /** 恋人空间亲密关系卡片落库监听：邀请卡/成功卡/sys 行由 couple-invite 直写 kv 后广播
    *  COUPLE_CARD_EVENT，聊天页在场时实时合并落库消息（新卡片上屏 + 邀请卡状态刷新），不用重开聊天 */
   useEffect(() => {
@@ -5267,7 +5288,9 @@ function ChatPage({
                                 : tbProxyHistoryLine(m.tbpay.pid, m.tbpay.role, m.role === 'me' ? me.realName || me.name : peer.name)
                             : m.kind === 'tbshare' && m.tbshare
                               ? tbShareHistoryLine(m.tbshare.sid)
-                              : m.kind === 'tbdraft' && m.tbdraft
+                              : m.kind === 'forumshare' && m.forumshare
+                                ? forumShareHistoryLine(m.forumshare.pid)
+                                : m.kind === 'tbdraft' && m.tbdraft
                                 ? tbDraftHistoryLine(m.tbdraft.did)
                                 : m.kind === 'relcard' && m.relcard
                                   ? `[亲密关系卡片：${m.relcard.stage === 'invite' ? `${m.relcard.fromName}邀请${m.relcard.toName}建立情侣关系` : `${m.relcard.fromName}已同意，双方成功建立情侣关系`}，${m.relcard.status === 'pending' ? '待处理' : m.relcard.status === 'accepted' ? '已接受' : '已拒绝'}]`
@@ -7497,6 +7520,11 @@ function ChatPage({
                   /* 淘宝订单分享动态卡片（交易成功/已发货详情分享、快递面板发出；时间线实时跟订单走） */
                   <div {...bubblePress}>
                     <TbShareBubble sid={m.tbshare.sid} side={m.role === 'me' ? 'right' : 'left'} />
+                  </div>
+                ) : m.kind === 'forumshare' && m.forumshare ? (
+                  /* X论坛帖子分享卡片（用户分享给 AI / AI 反向分享给机主；点击卡片进论坛帖子页） */
+                  <div {...bubblePress}>
+                    <ForumShareBubble pid={m.forumshare.pid} side={m.role === 'me' ? 'right' : 'left'} />
                   </div>
                 ) : m.kind === 'tbdraft' && m.tbdraft ? (
                   /* 淘宝 AI 代买草稿卡（AI [帮你买] 生成；机主确认后 AI 立即付款下单） */
