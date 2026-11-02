@@ -39,6 +39,16 @@ import {
 } from '@/lib/forum/core';
 import { bootForum, generateMoreFeedPosts, generateNewFeedPosts, queueUserPostInteractions, queueCharEngagements, queueCharThanksForLike, setForumAiActivity } from '@/lib/forum/engine';
 import { writeUserLikeMemory, writeUserPostMemory } from '@/lib/forum/social';
+import {
+  COMMENT_COUNT_BOUNDS,
+  POST_COUNT_BOUNDS,
+  countPromptOverrides,
+  getForumGenSettings,
+  setCommentCountRange,
+  setPostCountRange,
+} from '@/lib/forum/gen-settings';
+import { FORUM_PROMPT_DEFS } from '@/lib/forum/prompt-defs';
+import { GenRangeRow, PromptSheet } from './prompt-sheet';
 import { XAvatar, XIcons, XLogo, useXTheme } from './shared';
 import { FeedList, FeedSkeleton, CommunityIcon } from './feed';
 import { ComposeSheet, type ComposePayload } from './compose-sheet';
@@ -67,6 +77,10 @@ const KEYFRAMES = `
 @keyframes forum-sheet { from { transform: translateY(100%) } to { transform: translateY(0) } }
 .forum-hide-scrollbar { scrollbar-width: none; -ms-overflow-style: none; }
 .forum-hide-scrollbar::-webkit-scrollbar { display: none; }
+.forum-gen-scroll { scrollbar-width: thin; scrollbar-color: rgba(120,120,128,0.4) transparent; }
+.forum-gen-scroll::-webkit-scrollbar { width: 4px; height: 4px; }
+.forum-gen-scroll::-webkit-scrollbar-thumb { background: rgba(120,120,128,0.4); border-radius: 4px; }
+.forum-gen-scroll::-webkit-scrollbar-track { background: transparent; }
 `;
 
 export default function ForumApp() {
@@ -78,6 +92,37 @@ export default function ForumApp() {
   const [views, setViews] = useState<ViewSpec[]>([]);
   const [drawer, setDrawer] = useState(false);
   const [compose, setCompose] = useState(false);
+  /** v34 生成设置：每次生成帖子/评论条数范围（抽屉步进行）+ 提示词面板开关 */
+  const [genUi, setGenUi] = useState(() => {
+    const s = getForumGenSettings();
+    return { pMin: s.postCountMin, pMax: s.postCountMax, cMin: s.commentCountMin, cMax: s.commentCountMax };
+  });
+  const [promptSheet, setPromptSheet] = useState(false);
+  /** 已自定义提示词条数（入口摘要；提示词面板关闭时刷新） */
+  const [ovCount, setOvCount] = useState(() => countPromptOverrides());
+  /** 生成设置镜像 ref：步进处理器里同步更新——同一事件循环里连点也逐级累加 */
+  const genUiRef = useRef(genUi);
+  useEffect(() => {
+    genUiRef.current = genUi;
+  }, [genUi]);
+  /** 范围步进：钳制 + min/max 推挤 + 立即落库（下一次生成就用新范围） */
+  const bumpGenRange = useCallback((kind: 'posts' | 'comments', which: 'min' | 'max', d: number) => {
+    const g = genUiRef.current;
+    const bounds = kind === 'posts' ? POST_COUNT_BOUNDS : COMMENT_COUNT_BOUNDS;
+    let min = kind === 'posts' ? g.pMin : g.cMin;
+    let max = kind === 'posts' ? g.pMax : g.cMax;
+    if (which === 'min') {
+      min = Math.min(Math.max(min + d, bounds.min), bounds.max);
+      if (min > max) max = min;
+    } else {
+      max = Math.min(Math.max(max + d, bounds.min), bounds.max);
+      if (max < min) min = max;
+    }
+    const s = kind === 'posts' ? setPostCountRange(min, max) : setCommentCountRange(min, max);
+    const next = { pMin: s.postCountMin, pMax: s.postCountMax, cMin: s.commentCountMin, cMax: s.commentCountMax };
+    genUiRef.current = next;
+    setGenUi(next);
+  }, []);
   const [tagPicker, setTagPicker] = useState(false);
   const [homeTab, setHomeTab] = useState<string>('foryou');
   const [toastMsg, setToastMsg] = useState<{ id: number; text: string } | null>(null);
@@ -815,6 +860,50 @@ export default function ForumApp() {
                       />
                     </button>
                   </div>
+
+                  {/* v34 生成设置：每次生成帖子/评论条数范围（X~Y 条）+ 提示词管理入口 */}
+                  <div className="mb-2 border-t pt-2" style={{ borderColor: t.border }}>
+                    <div className="px-3 pb-[6px] text-[12px] font-bold tracking-wide" style={{ color: t.secondary }}>
+                      生成设置
+                    </div>
+                    <div className="flex flex-col gap-[6px]">
+                      <GenRangeRow
+                        label="每次生成帖子"
+                        hint="主页下拉/上拉刷新一次生成的帖子条数"
+                        min={genUi.pMin}
+                        max={genUi.pMax}
+                        bounds={POST_COUNT_BOUNDS}
+                        onBump={(which, d) => bumpGenRange('posts', which, d)}
+                      />
+                      <GenRangeRow
+                        label="每次生成评论"
+                        hint="点「显示更多评论」一次补的评论条数"
+                        min={genUi.cMin}
+                        max={genUi.cMax}
+                        bounds={COMMENT_COUNT_BOUNDS}
+                        onBump={(which, d) => bumpGenRange('comments', which, d)}
+                      />
+                      {/* 提示词管理：全部生成提示词查看/编辑，改完立即生效 */}
+                      <button
+                        type="button"
+                        onClick={() => setPromptSheet(true)}
+                        className="flex w-full items-center justify-between gap-2 rounded-xl px-3 py-[10px] text-left transition-colors active:opacity-70"
+                        style={{ background: t.hover }}
+                        aria-label="打开提示词管理面板"
+                      >
+                        <div className="flex min-w-0 flex-col gap-[1px]">
+                          <span className="text-[15px] font-medium">提示词</span>
+                          <span className="text-[12px] leading-snug" style={{ color: t.secondary }}>
+                            全部 {FORUM_PROMPT_DEFS.length} 条生成提示词
+                            {ovCount > 0 ? ` · ${ovCount} 条已自定义` : ' · 可查看与修改'}
+                          </span>
+                        </div>
+                        <span aria-hidden="true" className="shrink-0 text-[15px]" style={{ color: t.secondary }}>
+                          ›
+                        </span>
+                      </button>
+                    </div>
+                  </div>
                   {[
                     {
                       label: '个人资料',
@@ -872,6 +961,20 @@ export default function ForumApp() {
 
         {/* 发布弹层 */}
         {compose && <ComposeSheet onClose={() => setCompose(false)} onPublish={publish} />}
+
+        {/* v34 提示词管理面板（抽屉「提示词」入口打开；覆盖抽屉层） */}
+        {promptSheet && (
+          <PromptSheet
+            toast={toast}
+            onClose={() => {
+              setPromptSheet(false);
+              setOvCount(countPromptOverrides());
+              // 范围值同步刷新（面板不动范围，保险起见仍读一次）
+              const s = getForumGenSettings();
+              setGenUi({ pMin: s.postCountMin, pMax: s.postCountMax, cMin: s.commentCountMin, cMax: s.commentCountMax });
+            }}
+          />
+        )}
 
         {/* 帖子「···」底部菜单（X iOS 风格：摘要 + 推荐/不感兴趣/举报） */}
         {menuPost && (

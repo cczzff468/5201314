@@ -71,6 +71,7 @@ import {
 import { describeImagesAuto } from '@/lib/vision-client';
 import { renderTextImage } from './textimg';
 import { commentAnchored, isTenderPost, loudMemeIn, offTopicIn, personaBleedIn, postAllowsCatchall, universalPhraseIn } from './topic';
+import { promptOverridesPayload, rollCommentCount, rollPostCount } from './gen-settings';
 import {
   charMemoryDigest,
   charMoodBlock,
@@ -151,10 +152,13 @@ let llmCooldownUntil = 0;
 async function callApi(payload: Record<string, unknown>): Promise<unknown> {
   if (Date.now() < llmCooldownUntil) throw new Error('AI 配额冷却中（刚被限流，走池子兜底）');
   const { useSettings } = await import('@/lib/ios/store');
+  // v34 提示词面板：抽屉里编辑的提示词覆盖随请求上送（空对象 = 全默认零开销；
+  // 保存即生效——每次调用都重读设置，后台调度器触发的生成同样用新提示词）
+  const prompts = promptOverridesPayload();
   const res = await fetch('/api/forum/generate', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ ...payload, config: useSettings.getState().apiConfig }),
+    body: JSON.stringify({ ...payload, ...(Object.keys(prompts).length ? { prompts } : {}), config: useSettings.getState().apiConfig }),
   });
   if (!res.ok) {
     // 带上服务端错误详情：含 429 字样 → 识别为限流，进入冷却（不再轰炸）
@@ -1280,7 +1284,7 @@ export async function generateMoreFeedPosts(): Promise<number> {
   try {
     const d = forumData();
     if (!d.seeded) return 0;
-    const n = 7 + Math.floor(Math.random() * 9); // 7~15 条（用户要求）
+    const n = rollPostCount(); // v34：抽屉「每次生成帖子」范围（默认 7~15 条）
     // 时间边界：全部主帖里最老的时间，新帖排在它之前（feed 下方）；
     // 同时拿到它的作者——新批次与它隔开（防刷屏跨批次也生效）
     let frontier = Date.now();
@@ -1341,7 +1345,7 @@ export async function generateNewFeedPosts(): Promise<number> {
   if (!d0.seeded) return 0;
   feedGenerating = true;
   try {
-    const n = 7 + Math.floor(Math.random() * 9); // 7~15 条（用户要求）
+    const n = rollPostCount(); // v34：抽屉「每次生成帖子」范围（默认 7~15 条）
     const used = new Set(d0.posts.map((p) => p.content.slice(0, 20)));
     const avoid = [...d0.posts]
       .sort((a, b) => b.createdAt - a.createdAt)
@@ -1748,7 +1752,7 @@ async function genCommentBatch(postId: string, report?: (n: number) => void): Pr
     report?.(0);
     return 0;
   }
-  const want = 7 + Math.floor(Math.random() * 9); // 7~15 条（用户要求）
+  const want = rollCommentCount(); // v34：抽屉「每次生成评论」范围（默认 7~15 条）
   threadGen.add(postId);
   try {
     const d = forumData();
