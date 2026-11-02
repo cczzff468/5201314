@@ -1,16 +1,17 @@
 'use client';
 
 /**
- * X论坛 · 世界观面板（v36【多世界观预设与自定义规则系统】配套）。
+ * X论坛 · 世界观面板（v36【多世界观预设与自定义规则系统】配套；v37 图标美化）。
  *
  * 抽屉「切换世界观」入口打开的全屏面板：
  * - 内置 5 套世界观（韩娱嫂站/内娱八卦/校园暗恋墙/硬核追星现场/抽象乐子人）
- *   + 用户自建世界观，卡片式列表（emoji + 名称 + 简介 + 版块标签 + NPC 数）；
+ *   + 用户自建世界观，卡片式列表（签名渐变徽章 + 名称 + 简介 + 话题方向 + NPC 数）；
  * - 一键切换（两段确认——切换会重置论坛 AI 内容并按新世界观重新开张）：
  *   engine.switchWorldview → 激活 + 重建矩阵索引 + 清空旧内容 + 重新播种，
- *   帖子/评论/标签瞬间切换为新风格（用户自己的帖子保留）；
- * - 新建自定义世界观：名称 + emoji + 背景设定 + 首页版块标签（逗号/空格分隔）；
- * - 编辑世界观的名称/背景/标签（内置与自建都可改——改完立即生效）；
+ *   帖子/评论/话题瞬间切换为新风格（用户自己的帖子保留）；
+ * - 新建自定义世界观：名称 + emoji + 背景设定 + 话题方向（逗号/空格分隔；
+ *   v37 起话题方向只作为生成素材自然混进帖子，不再在首页当 tab 标签展示）；
+ * - 编辑世界观的名称/背景/话题方向（内置与自建都可改——改完立即生效）；
  * - 删除自建世界观（激活中的不可删，先切换走再删）。
  */
 
@@ -19,7 +20,7 @@ import { Check, Loader2, PencilLine, Plus, X, Trash2 } from 'lucide-react';
 import { subscribeWorldview, worldviewSnapshot, addWorldview, deleteWorldview, updateWorldview } from '@/lib/forum/worldview-store';
 import { switchWorldview } from '@/lib/forum/engine';
 import type { WorldviewDef } from '@/lib/forum/worldview';
-import { XIcons, useXTheme } from './shared';
+import { XIcons, WorldviewIcon, worldviewGradient, useXTheme } from './shared';
 
 interface WorldviewSheetProps {
   onClose: () => void;
@@ -109,7 +110,7 @@ export function WorldviewSheet({ onClose, toast }: WorldviewSheetProps) {
     }
     updateWorldview(wv.id, { name, emoji: edEmoji, background: bg, tags: parseTags(edTags) });
     setEditingId('');
-    toast(wv.id === activeId ? '已保存，版块标签立即生效' : '已保存');
+    toast(wv.id === activeId ? '已保存，话题方向立即混入生成' : '已保存');
   };
 
   const saveCreate = (andSwitch: boolean) => {
@@ -191,7 +192,7 @@ export function WorldviewSheet({ onClose, toast }: WorldviewSheetProps) {
         {/* 说明条 */}
         <div className="shrink-0 px-4 pb-2 text-[11.5px] leading-relaxed" style={{ color: t.secondary }}>
           切换世界观会清空当前 AI 帖子与评论（你自己的帖子保留），并按新世界观的设定、
-          NPC 阵容、版块标签重新开张——所有后续生成立即用新风格。
+          NPC 阵容、话题方向重新开张——话题会自然混进帖子内容，不在首页单独设标签。
         </div>
 
         {/* 世界观列表 */}
@@ -202,17 +203,28 @@ export function WorldviewSheet({ onClose, toast }: WorldviewSheetProps) {
               <div className="mb-2 flex items-center gap-2">
                 <span className="text-[15px] font-bold">新建世界观</span>
                 <span className="text-[11px]" style={{ color: t.secondary }}>
-                  名称 + 背景设定 + 版块标签
+                  名称 + 背景设定 + 话题方向
                 </span>
               </div>
               <div className="flex gap-2">
-                <input
-                  value={nvEmoji}
-                  onChange={(e) => setNvEmoji(e.target.value.slice(0, 4))}
-                  aria-label="世界观图标"
-                  className="h-[38px] w-[46px] shrink-0 rounded-xl px-2 text-center text-[18px] outline-none"
-                  style={{ background: t.bg, border: `1px solid ${t.border}`, color: t.text, caretColor: t.blue }}
-                />
+                {/* emoji 输入：直接渲染成渐变徽章（所见即所得——存什么颜色就展示什么颜色） */}
+                {(() => {
+                  const [gf, gt] = worldviewGradient(`custom:${nvName.trim() || 'new'}`);
+                  return (
+                    <input
+                      value={nvEmoji}
+                      onChange={(e) => setNvEmoji(e.target.value.slice(0, 4))}
+                      aria-label="世界观图标"
+                      className="h-[38px] w-[46px] shrink-0 rounded-[12px] px-2 text-center text-[18px] outline-none"
+                      style={{
+                        background: `linear-gradient(140deg, ${gf}, ${gt})`,
+                        color: '#fff',
+                        caretColor: '#fff',
+                        boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.45), inset 0 0 0 1px rgba(255,255,255,0.28)',
+                      }}
+                    />
+                  );
+                })()}
                 <input
                   value={nvName}
                   onChange={(e) => setNvName(e.target.value.slice(0, 24))}
@@ -234,8 +246,8 @@ export function WorldviewSheet({ onClose, toast }: WorldviewSheetProps) {
               <input
                 value={nvTags}
                 onChange={(e) => setNvTags(e.target.value.slice(0, 120))}
-                placeholder="首页版块标签（逗号/空格分隔，如：仙门八卦，渡劫实录，炉翻车现场）"
-                aria-label="版块标签"
+                placeholder="话题方向（逗号/空格分隔，如：仙门八卦，渡劫实录，炉翻车现场）——会自然混进生成的帖子"
+                aria-label="话题方向"
                 className="mt-2 h-[38px] w-full rounded-xl px-[10px] text-[13px] outline-none"
                 style={{ background: t.bg, border: `1px solid ${t.border}`, color: t.text, caretColor: t.blue }}
               />
@@ -285,20 +297,14 @@ export function WorldviewSheet({ onClose, toast }: WorldviewSheetProps) {
                   background: active || editing ? t.hover : 'transparent',
                 }}
               >
-                {/* 卡头：emoji + 名称/简介 + 状态角标 */}
+                {/* 卡头：渐变徽章 + 名称/简介 + 状态角标 */}
                 <button
                   type="button"
                   aria-label={`世界观：${wv.name}`}
                   onClick={() => (active ? startEdit(wv) : doSwitch(wv))}
                   className="flex w-full items-center gap-3 px-3 py-[10px] text-left transition-colors active:opacity-70"
                 >
-                  <span
-                    aria-hidden="true"
-                    className="flex h-[44px] w-[44px] shrink-0 items-center justify-center rounded-full text-[22px]"
-                    style={{ background: t.border }}
-                  >
-                    {wv.emoji}
-                  </span>
+                  <WorldviewIcon id={wv.id} emoji={wv.emoji} size={46} />
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-[6px]">
                       <span className="truncate text-[15px] font-semibold">{wv.name}</span>
@@ -318,7 +324,7 @@ export function WorldviewSheet({ onClose, toast }: WorldviewSheetProps) {
                     </span>
                     <span className="mt-[3px] block truncate text-[11px]" style={{ color: t.secondary }}>
                       {wv.matrix.length} 位核心 NPC
-                      {wv.tags.length ? ` · ${wv.tags.map((x) => `#${x}`).join(' ')}` : ''}
+                      {wv.tags.length ? ` · 话题：${wv.tags.join('、')}` : ''}
                     </span>
                   </div>
                   {active ? (
@@ -338,13 +344,24 @@ export function WorldviewSheet({ onClose, toast }: WorldviewSheetProps) {
                 {editing && (
                   <div className="border-t px-3 pb-3 pt-[10px]" style={{ borderColor: t.border }}>
                     <div className="flex gap-2">
-                      <input
-                        value={edEmoji}
-                        onChange={(e) => setEdEmoji(e.target.value.slice(0, 4))}
-                        aria-label="世界观图标"
-                        className="h-[36px] w-[44px] shrink-0 rounded-xl px-2 text-center text-[17px] outline-none"
-                        style={{ background: t.bg, border: `1px solid ${t.border}`, color: t.text, caretColor: t.blue }}
-                      />
+                      {/* emoji 输入：渲染成该世界观的签名渐变徽章（所见即所得） */}
+                      {(() => {
+                        const [gf, gt] = worldviewGradient(wv.id);
+                        return (
+                          <input
+                            value={edEmoji}
+                            onChange={(e) => setEdEmoji(e.target.value.slice(0, 4))}
+                            aria-label="世界观图标"
+                            className="h-[36px] w-[44px] shrink-0 rounded-[12px] px-2 text-center text-[17px] outline-none"
+                            style={{
+                              background: `linear-gradient(140deg, ${gf}, ${gt})`,
+                              color: '#fff',
+                              caretColor: '#fff',
+                              boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.45), inset 0 0 0 1px rgba(255,255,255,0.28)',
+                            }}
+                          />
+                        );
+                      })()}
                       <input
                         value={edName}
                         onChange={(e) => setEdName(e.target.value.slice(0, 24))}
@@ -365,8 +382,8 @@ export function WorldviewSheet({ onClose, toast }: WorldviewSheetProps) {
                     <input
                       value={edTags}
                       onChange={(e) => setEdTags(e.target.value.slice(0, 120))}
-                      aria-label="版块标签"
-                      placeholder="首页版块标签（逗号/空格分隔）"
+                      aria-label="话题方向"
+                      placeholder="话题方向（逗号/空格分隔）——会自然混进生成的帖子"
                       className="mt-2 h-[36px] w-full rounded-xl px-[10px] text-[13px] outline-none"
                       style={{ background: t.bg, border: `1px solid ${t.border}`, color: t.text, caretColor: t.blue }}
                     />

@@ -10,8 +10,10 @@
  *
  * 三大块（对应用户需求）：
  * 1. 世界观预设：5 套内置（韩娱嫂站/内娱八卦/校园暗恋墙/硬核追星现场/
- *    抽象乐子人）+ 用户自建（名称/背景设定/版块标签）；切换后整个论坛
- *    （帖子/评论/标签）瞬间切换为该风格（engine.switchWorldview 重置重播种）；
+ *    抽象乐子人）+ 用户自建（名称/背景设定/话题方向）；切换后整个论坛
+ *    （帖子/评论/话题）瞬间切换为该风格（engine.switchWorldview 重置重播种）；
+ *    v37：话题方向只作为生成素材洗牌后逐帖注入（自然混在内容里），
+ *    不再在首页当 tab 标签展示；
  * 2. NPC 账号矩阵：每个世界观预置核心 NPC（瓜主/营销号/粉丝站姐/路人杠精/
  *    自定义身份），用户可增删改：名字、头像、身份、性格与语气、发帖频率、
  *    专属口头禅——生成时强制读取该 NPC 的【性格】和【身份】；
@@ -127,7 +129,8 @@ export interface WorldviewDef {
   emoji: string;
   /** 背景设定（注入 LLM 的世界观描述——整个论坛的内容生态由它决定） */
   background: string;
-  /** 首页默认展示的版块标签 */
+  /** 话题方向（v37：不再作为首页 tab 标签展示——engine 洗牌后逐帖注入
+   *  生成提示词，自然混在帖子内容里） */
   tags: string[];
   /** 该世界观的核心 NPC 阵容 */
   matrix: MatrixNpc[];
@@ -184,10 +187,14 @@ export function readAiRules(raw: unknown): ForumAiRules {
   return { postRules: s('postRules'), commentRules: s('commentRules'), filterRules: s('filterRules') };
 }
 
-/** 世界观注入块（所有内容生成分支共用；紧跟在用户规则块之后） */
+/** 世界观注入块（所有内容生成分支共用；紧跟在用户规则块之后）。
+ *  v37：话题方向措辞强调「自然混在内容里」——不罗列标签、不每帖点名，
+ *  像真实论坛热点一样穿插在不同帖子里。 */
 export function worldviewBlock(wv: WorldviewPayload | null): string {
   if (!wv) return '';
-  const tagLine = wv.tags.length ? `\n这个论坛的热门话题标签：${wv.tags.map((t) => `#${t}`).join('、')}——帖子和评论都围绕这些方向。` : '';
+  const tagLine = wv.tags.length
+    ? `\n这个论坛当前的热门话题方向：${wv.tags.map((t) => `#${t}`).join('、')}——生成时从中自由取材，自然混合在不同帖子里（像真实论坛热点自然穿插），不要把方向名当标签罗列，也不要每篇都点名同一个方向。`
+    : '';
   return (
     `# 世界观设定（本论坛的背景，一切内容必须活在这个设定里）\n` +
     `这个论坛叫「${wv.name}」。${wv.background.trim()}${tagLine}\n` +
@@ -220,7 +227,7 @@ export const BUILTIN_WORLDVIEWS: WorldviewDef[] = [
   {
     id: 'builtin:hyul',
     name: '韩娱嫂站',
-    emoji: '🇰🇷',
+    emoji: '💜',
     desc: '爱豆恋爱瓜 · 站姐脱粉回踩 · 韩网热帖翻译',
     builtin: true,
     background:

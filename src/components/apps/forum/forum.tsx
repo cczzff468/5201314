@@ -53,7 +53,7 @@ import { subscribeWorldview, worldviewSnapshot, countCustomRules } from '@/lib/f
 import { GenRangeRow, PromptSheet } from './prompt-sheet';
 import { WorldviewSheet } from './worldview-sheet';
 import { NpcMatrixSheet, RulesSheet } from './npc-sheet';
-import { XAvatar, XIcons, XLogo, useXTheme } from './shared';
+import { XAvatar, XIcons, XLogo, WorldviewIcon, useXTheme } from './shared';
 import { FeedList, FeedSkeleton, CommunityIcon } from './feed';
 import { ComposeSheet, type ComposePayload } from './compose-sheet';
 import { ThreadView } from './thread-view';
@@ -459,45 +459,44 @@ export default function ForumApp() {
   const seeded = d.seeded && d.posts.length > 0;
   // pinnedTags 过滤掉 'hot'（今日热议 = 广场，与「为你推荐」重复，不作为分类标签）
   const pinnedTags = (d.pinnedTags ?? []).filter((id) => id !== 'hot' && COMMUNITY_DEFS.some((c) => c.id === id));
-  // 【多世界观】激活世界观的首页版块标签（实时读 store——切换/编辑立即生效）
+  // 【多世界观 v37】激活世界观（抽屉入口展示用；实时读 store——切换/编辑立即生效）。
+  //  世界观话题方向不再作为首页 tab 标签展示（用户要求「狗仔爆料/红毯比美/营销号引战…
+  //  混合起来，不要弄成标签」）——话题方向由 engine.worldviewTopics() 洗牌后逐帖注入
+  //  生成提示词，自然混在帖子内容里；首页 tab 只留 为你推荐/关注/已添加的分类标签。
   const wvSnap = useSyncExternalStore(subscribeWorldview, worldviewSnapshot);
   const activeWv = wvSnap.worldviews.find((w) => w.id === wvSnap.activeId) ?? null;
-  const worldTags = (activeWv?.tags ?? []).map((x) => x.trim()).filter(Boolean).slice(0, 8);
 
-  /** 主页 tab 集：为你推荐 | 关注 | 世界观版块标签 | 已添加的分类标签（按添加顺序） */
+  /** 主页 tab 集：为你推荐 | 关注 | 已添加的分类标签（按添加顺序） */
   const homeTabs: { key: string; label: string }[] = useMemo(
     () => [
       { key: 'foryou', label: '为你推荐' },
       { key: 'following', label: '关注' },
-      ...worldTags.map((tag) => ({ key: `wt:${tag}`, label: tag })),
       ...pinnedTags.map((id) => ({ key: id, label: communityName(id) })),
     ],
-    [pinnedTags, worldTags],
+    [pinnedTags],
   );
 
-  // Feed 数据：为你推荐 = 全部主帖；关注 = 已关注作者的主帖；世界观标签 tab = 内容命中该标签；
+  // v37：残留的旧世界观标签选中态（wt:xxx）渲染期直接派生回落「为你推荐」
+  //（不用 effect——setState-in-effect 会级联重渲，派生值才是 React 推荐写法）
+  const effHomeTab = homeTab.startsWith('wt:') ? 'foryou' : homeTab;
+
+  // Feed 数据：为你推荐 = 全部主帖（世界观话题自然混在其中）；关注 = 已关注作者的主帖；
   // 分类标签 tab = 对应版块主帖。过滤：被隐藏（不感兴趣/举报）与未到时间的定时帖不进列表。
-  // tick 变化触发重算（定时到期现身）。wvSnap 变化触发重算（切换世界观标签实时变）。
+  // tick 变化触发重算（定时到期现身）。
   const feedPosts = useMemo(() => {
     const now = Date.now();
     const all = [...d.posts]
       .sort((a, b) => b.createdAt - a.createdAt)
       .filter((p) => p.replyTo === null && isPostVisible(p, now));
-    if (homeTab === 'following') {
+    if (effHomeTab === 'following') {
       const followingSet = new Set(d.following);
       return all.filter((p) => followingSet.has(p.authorKey));
     }
-    if (homeTab.startsWith('wt:')) {
-      const tag = homeTab.slice(3);
-      // 世界观已切换、旧标签失效 → 回落「为你推荐」
-      if (!worldTags.includes(tag)) return all;
-      return all.filter((p) => p.content.includes(`#${tag}`) || p.content.includes(tag));
-    }
-    if (homeTab !== 'foryou') {
-      return all.filter((p) => (p.community ?? 'hot') === homeTab);
+    if (effHomeTab !== 'foryou') {
+      return all.filter((p) => (p.community ?? 'hot') === effHomeTab);
     }
     return all;
-  }, [d, homeTab, tick, wvSnap]);
+  }, [d, effHomeTab, tick]);
 
   const unread = d.notifications.filter((n) => !n.read).length;
   const topView = views.length ? views[views.length - 1] : null;
@@ -607,7 +606,7 @@ export default function ForumApp() {
                 >
                   <div className="forum-hide-scrollbar flex min-w-0 flex-1 flex-wrap items-center">
                     {homeTabs.map(({ key: k, label }) => {
-                      const active = homeTab === k;
+                      const active = effHomeTab === k;
                       return (
                         <button
                           key={k}
@@ -940,9 +939,18 @@ export default function ForumApp() {
                       >
                         <div className="flex min-w-0 flex-col gap-[1px]">
                           <span className="text-[15px] font-medium">切换世界观</span>
-                          <span className="truncate text-[12px] leading-snug" style={{ color: t.secondary }}>
-                            {activeWv ? `${activeWv.emoji} ${activeWv.name} · ${wvSnap.worldviews.length} 个可选` : '选择论坛的世界设定'}
-                          </span>
+                          {activeWv ? (
+                            <span className="flex min-w-0 items-center gap-[5px] text-[12px] leading-snug" style={{ color: t.secondary }}>
+                              <WorldviewIcon id={activeWv.id} emoji={activeWv.emoji} size={16} />
+                              <span className="truncate">
+                                {activeWv.name} · {wvSnap.worldviews.length} 个可选
+                              </span>
+                            </span>
+                          ) : (
+                            <span className="truncate text-[12px] leading-snug" style={{ color: t.secondary }}>
+                              选择论坛的世界设定
+                            </span>
+                          )}
                         </div>
                         <span aria-hidden="true" className="shrink-0 text-[15px]" style={{ color: t.secondary }}>
                           ›

@@ -246,7 +246,8 @@ function matrixSpecFields(npc: MatrixNpc): { name: string; persona: string } {
   return { name: a.name, persona: a.persona || matrixNpcPersona(npc) };
 }
 
-/** 当前世界观的话题方向（版块标签；空 = 经典 FEED_TOPICS） */
+/** 当前世界观的话题方向（v37：洗牌后逐帖注入生成——自然混在内容里，
+ *  不再作首页 tab 标签展示；空 = 经典 FEED_TOPICS） */
 function worldviewTopics(): string[] {
   const tags = activeWorldview()?.tags.filter((x) => x.trim()) ?? [];
   return tags.length ? tags : FEED_TOPICS;
@@ -1204,7 +1205,7 @@ async function buildFeedBatch(
 ): Promise<{ key: AuthorKey; text: string; textImage?: string; recent?: string[] }[]> {
   const chars = forumContactsSnap().filter((c) => c.kind === 'char' && (c.persona || c.background));
   const shuffledNpcs = NPC_DEFS.slice().sort(() => Math.random() - 0.5);
-  // 【多世界观】话题方向优先用世界观版块标签；矩阵阵容进入作者池（按 postFreq
+  // 【多世界观 v37】话题方向优先用世界观话题（洗牌后逐帖注入，自然混在信息流里）；矩阵阵容进入作者池（按 postFreq
   // 加权 ~35% 出场率——瓜主/营销号/站姐/杠精是这个世界观的原住民）
   const topics = worldviewTopics().slice().sort(() => Math.random() - 0.5);
   const cast = matrixCast();

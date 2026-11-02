@@ -246,6 +246,75 @@ export function XAvatar({
   );
 }
 
+// ---------------- 世界观图标（渐变徽章） ----------------
+
+/** hex → rgba（彩色柔光阴影用） */
+function hexA(hex: string, a: number): string {
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim());
+  if (!m) return hex;
+  const n = parseInt(m[1], 16);
+  return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${a})`;
+}
+
+/** 内置 5 套世界观的签名渐变（高饱和双 Stop，全部避开蓝/靛）：
+ *  韩娱嫂站＝嫂子粉→应援紫；内娱八卦＝瓜红→塌房深红；校园暗恋墙＝樱花粉→心动玫红；
+ *  硬核追星现场＝舞台紫→灯牌粉；抽象乐子人＝乐子金→发疯橙。 */
+const WV_BUILTIN_GRADIENTS: Record<string, [string, string]> = {
+  'builtin:hyul': ['#ff6fb5', '#8b5cf6'],
+  'builtin:neiyu': ['#ff8a5c', '#e0245e'],
+  'builtin:campus': ['#fda4af', '#f43f5e'],
+  'builtin:concert': ['#c084fc', '#e879f9'],
+  'builtin:abstract': ['#fbbf24', '#f97316'],
+};
+
+/** 自建世界观渐变池（按 id 稳定取一组，新建时名字一改配色跟着换） */
+const WV_CUSTOM_PALETTE: [string, string][] = [
+  ['#f472b6', '#a855f7'],
+  ['#fb923c', '#ef4444'],
+  ['#fda4af', '#ec4899'],
+  ['#a3e635', '#14b8a6'],
+  ['#fcd34d', '#f97316'],
+  ['#f87171', '#dc2626'],
+  ['#e879f9', '#9333ea'],
+  ['#4ade80', '#0d9488'],
+];
+
+/** 世界观徽章渐变（内置签名配色；自建按 id 哈希稳定落池） */
+export function worldviewGradient(id: string): [string, string] {
+  const sig = WV_BUILTIN_GRADIENTS[id];
+  if (sig) return sig;
+  let h = 0;
+  for (const ch of id) h = (h * 131 + ch.codePointAt(0)!) >>> 0;
+  return WV_CUSTOM_PALETTE[h % WV_CUSTOM_PALETTE.length];
+}
+
+/** 世界观图标：渐变方圆徽章（app 图标式 31% 圆角）+ 顶部玻璃高光 +
+ *  内描边高光 + 彩色柔光投影。世界观面板卡片 / 抽屉入口 / NPC 面板共用。 */
+export function WorldviewIcon({ id, emoji, size = 44 }: { id: string; emoji: string; size?: number }) {
+  const [from, to] = worldviewGradient(id);
+  const r = Math.round(size * 0.31);
+  return (
+    <span
+      aria-hidden="true"
+      className="relative flex shrink-0 select-none items-center justify-center"
+      style={{
+        width: size,
+        height: size,
+        borderRadius: r,
+        background: `linear-gradient(140deg, ${from}, ${to})`,
+        boxShadow: `0 5px 14px -4px ${hexA(to, 0.55)}, inset 0 1px 0 rgba(255,255,255,0.45), inset 0 0 0 1px rgba(255,255,255,0.28)`,
+      }}
+    >
+      {/* 顶部玻璃高光（左上斜向光斑） */}
+      <span
+        className="pointer-events-none absolute inset-0"
+        style={{ borderRadius: r, background: 'radial-gradient(120% 70% at 30% 8%, rgba(255,255,255,0.5), rgba(255,255,255,0) 60%)' }}
+      />
+      <span style={{ fontSize: Math.round(size * 0.5), filter: 'drop-shadow(0 1px 2px rgba(0,0,0,0.28))' }}>{emoji}</span>
+    </span>
+  );
+}
+
 // ---------------- 通用小组件 ----------------
 
 /** X 按钮（实心蓝 / 描边 / 黑），供 关注/发布/加入 等复用 */

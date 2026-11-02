@@ -80,6 +80,10 @@ function sanitizeState(raw: unknown): WorldviewState {
   for (const b of BUILTIN_WORLDVIEWS) {
     if (!merged.some((w) => w.id === b.id)) merged.push({ ...b, tags: [...b.tags], seedPool: [...b.seedPool], matrix: b.matrix.map((n) => ({ ...n })) });
   }
+  // v37 图标美化迁移：旧副本里韩娱嫂站的旗标 emoji（多数平台渲染成 "KR" 两个字母）换成紫心
+  for (const w of merged) {
+    if (w.builtin && w.emoji === '🇰🇷') w.emoji = '💜';
+  }
   const known = new Set(merged.map((w) => w.id));
   let activeId = typeof rec.activeId === 'string' && known.has(rec.activeId) ? rec.activeId : DEFAULT_WORLDVIEW_ID;
   const rules = rec.rules && typeof rec.rules === 'object' && !Array.isArray(rec.rules)
@@ -146,7 +150,7 @@ export function activeWorldview(): WorldviewDef | null {
   return s.worldviews.find((w) => w.id === s.activeId) ?? null;
 }
 
-/** 当前世界观的首页版块标签（空 = 无世界观标签，走经典 pinnedTags） */
+/** 当前世界观的话题方向（v37：只作生成素材混进内容，不再作首页 tab 标签；空 = 无） */
 export function worldviewTags(): string[] {
   const wv = activeWorldview();
   return wv && wv.tags.length ? wv.tags.filter((t) => t.trim()).slice(0, 8) : [];

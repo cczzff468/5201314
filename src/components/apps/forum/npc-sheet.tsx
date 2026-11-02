@@ -29,7 +29,7 @@ import {
   type MatrixNpcDraft,
 } from '@/lib/forum/worldview-store';
 import { AI_RULES_MAX_LEN, NPC_ROLES, roleDefOf, type MatrixNpc, type NpcRoleId } from '@/lib/forum/worldview';
-import { VerifiedBadge, XIcons, useXTheme } from './shared';
+import { VerifiedBadge, WorldviewIcon, XIcons, useXTheme } from './shared';
 
 // ---------------- 头像候选（头像库精选 + 自动） ----------------
 
@@ -164,9 +164,18 @@ export function NpcMatrixSheet({ onClose, toast }: SheetProps) {
           </button>
           <div className="flex min-w-0 flex-col items-center">
             <span className="text-[17px] font-bold">NPC 矩阵</span>
-            <span className="max-w-[180px] truncate text-[11px]" style={{ color: t.secondary }}>
-              {wv ? `${wv.emoji} ${wv.name} · ${matrix.length} 位核心 NPC` : '未激活世界观'}
-            </span>
+            {wv ? (
+              <span className="flex max-w-[190px] items-center gap-[5px] text-[11px]" style={{ color: t.secondary }}>
+                <WorldviewIcon id={wv.id} emoji={wv.emoji} size={15} />
+                <span className="truncate">
+                  {wv.name} · {matrix.length} 位核心 NPC
+                </span>
+              </span>
+            ) : (
+              <span className="max-w-[180px] truncate text-[11px]" style={{ color: t.secondary }}>
+                未激活世界观
+              </span>
+            )}
           </div>
           {wv?.builtin ? (
             <button
