@@ -133,6 +133,9 @@ async function sdkComplete(messages: LLMMessage[]): Promise<string> {
         zai!.chat.completions.create({
           messages: messages.map((m) => ({ role: m.role, content: m.content })),
           thinking: { type: 'disabled' },
+          // v35（用户反馈「太发散、太发癫」）：温度降到 0.65——评论/楼中楼
+          // 紧贴帖子内容说话，不再瞎编指令/复读上屏（已实测 SDK 接受该参数）
+          temperature: 0.65,
         }),
       );
       const text = completion.choices[0]?.message?.content ?? '';

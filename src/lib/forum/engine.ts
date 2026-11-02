@@ -70,7 +70,7 @@ import {
 } from './core';
 import { describeImagesAuto } from '@/lib/vision-client';
 import { renderTextImage } from './textimg';
-import { commentAnchored, isTenderPost, loudMemeIn, offTopicIn, personaBleedIn, postAllowsCatchall, universalPhraseIn } from './topic';
+import { commentAnchored, isTenderPost, loudMemeIn, offTopicIn, personaBleedIn, postAllowsCatchall, universalPhraseIn, isParrotReply, isScoopPost, jsonLeakIn, promptLeakIn, sweetShipIn } from './topic';
 import { promptOverridesPayload, rollCommentCount, rollPostCount } from './gen-settings';
 import {
   charMemoryDigest,
@@ -715,12 +715,17 @@ async function llmPolishSeedComments(seedPostIds: string[]): Promise<void> {
       const valid: string[] = [];
       const catchallOk = postAllowsCatchall(t.content); // 万能句式豁免（未完结八卦/求助帖）
       let catchallUsed = false;
+      // v35：爆料帖磕糖甜评限 1 条 + 泄露双保险（与服务端同口径）
+      const scoopPost = isScoopPost(t.content) && !isTenderPost(t.content);
+      let sweetUsed = false;
       for (const c of raw) {
         if (typeof c !== 'string') continue;
         const s = sanitizeCommentClient(stripReplyPrefixClient(c));
         // 用户规范：评论 3~100 字（留 10 字容差）
         if (s.trim().length < 3 || s.length > 110 || seenCt.has(s.slice(0, 16))) continue;
         if (postLang === 'zh-Hans' && foreignDominantClient(s)) continue;
+        // v35 第一道闸：JSON 残留（{"thought":…}）/ 指令泄露（【本帖核心话题词…】）→ 丢弃
+        if (jsonLeakIn(s) || promptLeakIn(s)) continue;
         // v22 万能句式：非豁免帖一律丢弃；豁免帖最多 1 条
         if (universalPhraseIn(s)) {
           if (!catchallOk || catchallUsed) continue;
@@ -728,12 +733,21 @@ async function llmPolishSeedComments(seedPostIds: string[]): Promise<void> {
         }
         // v28 走心帖：聒噪烂梗（锁死/放毒/笑死/xswl…）→ 语境错乱丢弃（与服务端双保险）
         if (isTenderPost(t.content) && loudMemeIn(s)) continue;
+        // v35 爆料帖：磕糖甜评超 1 条 → 丢弃
+        if (scoopPost && sweetShipIn(s)) {
+          if (sweetUsed) continue;
+          sweetUsed = true;
+        }
         // v25 领域私货：≥2 个该帖领域之外的关键词 → 串台丢弃（与服务端双保险）；
         // v27 锚定前剥 [图片] 占位符（防词表污染误杀正常评论）
         const anchorText = stripImgPh(t.content);
         if (offTopicIn(s, anchorText)) continue;
         if (!commentAnchored(s, anchorText)) continue; // 串台/AI 废话 → 丢弃
+        // v35 跨批次去重：与本帖已有评论整句级重合（换皮复读）→ 丢弃
+        if (existing.some((tp) => isParrotReply(s, tp.content))) continue;
         seenCt.add(s.slice(0, 16));
+        // v35：批内一级评论互相复读（同措辞换网名）→ 只保留首条（与服务端同口径双保险）
+        if (valid.some((v) => isParrotReply(s, v))) continue;
         valid.push(s);
       }
       if (!valid.length) continue;
@@ -1503,14 +1517,33 @@ async function callSubReplyLayer(
   const CHUNK = 30; // 与服务端 subreplies 线程上限同步（v26：12→30）
   const chunks: SubPlan[][] = [];
   for (let i = 0; i < plans.length; i += CHUNK) chunks.push(plans.slice(i, i + CHUNK));
+  // v35：爆料帖磕糖甜评限 1 条（整批共享）
+  const scoop = isScoopPost(ctx.post.content, ctx.mediaDesc) && !isTenderPost(ctx.post.content, ctx.mediaDesc);
+  let sweetUsed = false;
   const groups = await Promise.all(
     chunks.map(async (ch): Promise<ForumPost[]> => {
       let texts: string[] = [];
       try {
+        // v35：带上每层楼已有的回复（生成时明确避开——盖楼复读的解药）
+        const dNow = forumData();
+        const prevOf = (targetId: string): string[] =>
+          dNow.posts
+            .filter((s) => s.replyToPost === targetId && s.content)
+            .sort((a, b) => a.createdAt - b.createdAt)
+            .slice(-4)
+            .map((s) => s.content);
+        // v35：本帖全部一级评论（楼中楼整句照搬别楼评论 = 换皮复读 → 拦截）
+        const topLevelTexts = dNow.posts
+          .filter((s) => s.replyTo === ctx.post.id && s.content)
+          .map((s) => s.content);
         const r = (await callApi({
           kind: 'subreplies',
           post: { authorName: ctx.postAuthorName, content: ctx.post.content, mediaDesc: ctx.mediaDesc, lang: ctx.postLang },
-          threads: ch.map((p) => ({ authorName: resolveAuthor(p.target.authorKey).name, content: p.target.content })),
+          threads: ch.map((p) => ({
+            authorName: resolveAuthor(p.target.authorKey).name,
+            content: p.target.content,
+            prev: prevOf(p.target.id),
+          })),
           personas: ch.map((p) => {
             const a = resolveAuthor(p.key);
             return { name: a.name, persona: a.persona || '普通论坛网友', lang: a.lang ?? 'zh-Hans' };
@@ -1525,6 +1558,15 @@ async function callSubReplyLayer(
               // 用户规范：回复 3~100 字（留 10 字容差）
               if (s.trim().length < 3 || s.length > 110) return '';
               if (ctx.postLang === 'zh-Hans' && foreignDominantClient(s)) return '';
+              // v35 第一道闸：JSON 残留（{"thought":…}）/ 指令泄露（【本帖核心话题词…】）→ 丢弃
+              if (jsonLeakIn(s) || promptLeakIn(s)) return '';
+              const plan = ch[i];
+              // v35 复读机检测：与被回复评论词面高度重合（盖楼复读）→ 丢弃
+              if (isParrotReply(s, plan.target.content)) return '';
+              // v35 同楼层去重：与楼层里已有的回复复读撞车 → 丢弃
+              if (prevOf(plan.target.id).some((pv) => isParrotReply(s, pv))) return '';
+              // v35 跨楼照搬：整句照搬本帖别的一级评论（换皮复读）→ 丢弃
+              if (topLevelTexts.some((c) => c !== plan.target.content && isParrotReply(s, c))) return '';
               // 万能句式：非豁免帖全废；豁免帖与整批共享 1 条额度
               if (universalPhraseIn(s)) {
                 if (!ctx.catchall.ok || ctx.catchall.used) return '';
@@ -1532,7 +1574,11 @@ async function callSubReplyLayer(
               }
               // v28 走心帖：聒噪烂梗（锁死/放毒/笑死/xswl…）→ 语境错乱丢弃
               if (isTenderPost(ctx.post.content, ctx.mediaDesc) && loudMemeIn(s)) return '';
-              const plan = ch[i];
+              // v35 爆料帖：磕糖甜评超 1 条 → 丢弃
+              if (scoop && sweetShipIn(s)) {
+                if (sweetUsed) return '';
+                sweetUsed = true;
+              }
               // v25 称呼/名称串线：拿回复者网名拼称呼/自称网名 → 丢弃
               if (personaBleedIn(s, resolveAuthor(plan.target.authorKey).name, [resolveAuthor(plan.key).name])) return '';
               // v25 领域私货：≥2 个「被回复内容 + 主帖」领域之外的关键词 → 丢弃
@@ -1778,6 +1824,9 @@ async function genCommentBatch(postId: string, report?: (n: number) => void): Pr
     let texts: string[] = [];
     const catchallOk = postAllowsCatchall(post.content); // 万能句式豁免（未完结八卦/求助帖）
     let catchallUsed = false; // 豁免帖每批也最多 1 条万能句式
+    // v35：爆料帖磕糖甜评限 1 条（与服务端同口径）
+    const scoop = isScoopPost(post.content, mediaDesc) && !isTenderPost(post.content, mediaDesc);
+    let sweetUsed = false;
     // v25：称呼串线检测名单（本批评论者网名；服务端已拦，这里双保险）
     const commenterNames = commenterKeys.map((k) => resolveAuthor(k).name);
     try {
@@ -1800,6 +1849,8 @@ async function genCommentBatch(postId: string, report?: (n: number) => void): Pr
               // 用户规范：评论 3~100 字（留 10 字容差；过短/过长都是废稿）
               if (s.trim().length < 3 || s.length > 110) return '';
               if (postLang === 'zh-Hans' && foreignDominantClient(s)) return '';
+              // v35 第一道闸：JSON 残留（{"thought":…}）/ 指令泄露（【本帖核心话题词…】）→ 丢弃
+              if (jsonLeakIn(s) || promptLeakIn(s)) return '';
               // v22 万能句式：非豁免帖一律丢弃；豁免帖最多 1 条
               if (universalPhraseIn(s)) {
                 if (!catchallOk || catchallUsed) return '';
@@ -1807,6 +1858,13 @@ async function genCommentBatch(postId: string, report?: (n: number) => void): Pr
               }
               // v28 走心帖：聒噪烂梗（锁死/放毒/笑死/xswl…）→ 语境错乱丢弃（与服务端双保险）
               if (isTenderPost(post.content, mediaDesc) && loudMemeIn(s)) return '';
+              // v35 爆料帖：磕糖甜评（好甜/好稳/锁死）超 1 条 → 丢弃
+              if (scoop && sweetShipIn(s)) {
+                if (sweetUsed) return '';
+                sweetUsed = true;
+              }
+              // v35 跨批次去重：与本帖已有评论整句级重合（换皮复读）→ 丢弃
+              if (threadReplies.some((tp) => isParrotReply(s, tp.content))) return '';
               // v25 称呼/名称串线：屿哥（拿评论者网名拼称呼）/自称网名 → 丢弃
               if (personaBleedIn(s, postAuthor.name, commenterNames)) return '';
               // v25 领域私货：≥2 个主帖领域之外的关键词（剧+特调混进保研帖）→ 丢弃
@@ -1822,6 +1880,15 @@ async function genCommentBatch(postId: string, report?: (n: number) => void): Pr
     } catch {
       // v22：LLM 失败（限流/断网）→ 宁缺毋滥，不铺任何模板
       texts = [];
+    }
+    // v35：批内一级评论互相复读（同措辞换网名）→ 只保留首条（与服务端同口径双保险）
+    if (texts.length > 1) {
+      const keptC: string[] = [];
+      texts = texts.filter((s) => {
+        if (keptC.some((k) => isParrotReply(s, k))) return false;
+        keptC.push(s);
+        return true;
+      });
     }
     if (!texts.length) {
       // v26：report 必须在每条退出路径上给到（否则前台 Promise 悬挂）
@@ -2348,6 +2415,8 @@ async function execJob(job: PendingJob): Promise<void> {
         comment = typeof r.comment === 'string' ? sanitizeCommentClient(stripReplyPrefixClient(r.comment)) : '';
         // 双保险：15~150 字 + 必须锚定帖子具体内容（禁「沙发/支持」式空评）
         if (comment && (comment.length < 15 || comment.length > 150)) comment = '';
+        // v35：JSON 残留 / 指令泄露 → 作废（角色评论不能把 thought 字段吐出来）
+        if (comment && (jsonLeakIn(comment) || promptLeakIn(comment))) comment = '';
         if (comment && !commentAnchored(comment, stripImgPh(post.content))) comment = '';
       } catch {
         like = false;
@@ -2435,6 +2504,8 @@ async function execJob(job: PendingJob): Promise<void> {
         })) as { text?: string };
         text = typeof r.text === 'string' ? sanitizeCommentClient(stripReplyPrefixClient(r.text)) : '';
         if (text && (text.length < 8 || text.length > 120)) text = '';
+        // v35：神回复同样拦截泄露（指令原文/JSON 当话说）
+        if (text && (jsonLeakIn(text) || promptLeakIn(text))) text = '';
         // 神回复锚定双保险：必须接得上「用户的评论 + 主帖」
         if (text && !thanks && !commentAnchored(text, stripImgPh(`${userReply?.content ?? ''} ${mainPost.content}`))) text = '';
       } catch {
@@ -2551,6 +2622,10 @@ async function execJob(job: PendingJob): Promise<void> {
         if (text && postLang === 'zh-Hans' && foreignDominantClient(text)) text = '';
         // v24 客户端兜底：楼层对话回复 20-80 字（留容差 12~95）——过短/过长直接不发生
         if (text && (text.length < 12 || text.length > 95)) text = '';
+        // v35：JSON 残留 / 指令泄露 → 作废（双保险，与服务端同口径）
+        if (text && (jsonLeakIn(text) || promptLeakIn(text))) text = '';
+        // v35 复读机检测：AI 不许原样复读用户/被回复者的话（盖楼复读）
+        if (text && isParrotReply(text, parentContent)) text = '';
         // v26 锚定双保险：必须接得上「用户这条回复 + 用户回复的那条 + 主帖」（与服务端同口径）
         // v27 锚定前剥 [图片] 占位符（防词表污染误杀）
         if (text && !commentAnchored(text, stripImgPh(`${parentContent} ${repliedTo?.content ?? ''} ${postContent}`))) text = '';
@@ -2678,6 +2753,80 @@ function migrateV7ReplyData(): void {
   }
 }
 
+/** v35 存量脏数据清洗（幂等，boot 时执行）：
+ *  ① 泄露清理：用户实锤截图里「半糖去冰」「凌晨四点」等评论存的就是
+ *  {"thought":"...","comment":"..."} 原始 JSON 串、「巷口的…」存的是
+ *  【本帖核心话题词…】指令原文——本次升级前已落库的这些出戏评论，
+ *  现在按新检测器全部清掉（含其下楼中楼整链——父评论没了子回复悬空）；
+ *  ② 复读清理：同帖内整句级换皮重复的旧评论（如截图里「代拍太可怕了」×4）
+ *  只留时间最早的一条；用户手写内容（authorKey=user）一律不动。 */
+function migrateV35PurgeLeaked(): void {
+  try {
+    const d = forumData();
+    const bad = new Set<string>();
+    for (const p of d.posts) {
+      if (p.authorKey === 'user') continue;
+      if (jsonLeakIn(p.content) || promptLeakIn(p.content)) bad.add(p.id);
+    }
+    if (bad.size) {
+      // 迭代闭包：被删评论的楼中楼（replyToPost 指向它）一并删除，防悬空
+      let grew = true;
+      while (grew) {
+        grew = false;
+        for (const p of d.posts) {
+          if (bad.has(p.id)) continue;
+          const parentId = p.replyToPost ?? p.replyTo ?? '';
+          if (parentId && bad.has(parentId)) {
+            bad.add(p.id);
+            grew = true;
+          }
+        }
+      }
+    }
+    const posts = d.posts.filter((p) => !bad.has(p.id));
+    // 第二阶段：同帖内的旧复读评论（换皮重复）——按主帖整树分组（一级评论+
+    // 全部楼中楼同页可见）、时间排序，AI 评论与前面保留的评论整句级重合 → 删除
+    //（用户内容不动）；父链断裂时退化按自身锚点分组
+    const purged = new Set(bad);
+    const byId = new Map(posts.map((p) => [p.id, p]));
+    const mainOf = (p: ForumPost): string => {
+      let cur = p;
+      for (let guard = 0; guard < 6; guard++) {
+        const parent = byId.get(cur.replyToPost ?? cur.replyTo ?? '');
+        if (!parent) return cur.replyTo ?? cur.id;
+        if (parent.replyTo === null) return parent.id;
+        cur = parent;
+      }
+      return cur.replyTo ?? cur.id;
+    };
+    const byMain = new Map<string, ForumPost[]>();
+    for (const p of posts) {
+      if (p.authorKey === 'user' || !p.replyTo) continue;
+      const key = mainOf(p);
+      const group = byMain.get(key) ?? [];
+      group.push(p);
+      byMain.set(key, group);
+    }
+    for (const group of byMain.values()) {
+      const keptTexts: string[] = [];
+      for (const p of group.slice().sort((a, b) => a.createdAt - b.createdAt)) {
+        if (keptTexts.some((k) => isParrotReply(p.content, k))) {
+          purged.add(p.id);
+          continue;
+        }
+        keptTexts.push(p.content);
+      }
+    }
+    if (!purged.size) return;
+    const finalPosts = d.posts.filter((p) => !purged.has(p.id));
+    // 系统通知 postId 为 null 必须保留；指向被删帖的通知一并清掉
+    const finalNotis = d.notifications.filter((n) => n.postId === null || finalPosts.some((p) => p.id === n.postId));
+    saveForum({ ...d, posts: finalPosts, notifications: finalNotis });
+  } catch {
+    /* 迁移失败静默 */
+  }
+}
+
 export async function bootForum(): Promise<void> {
   if (booting) return;
   booting = true;
@@ -2688,6 +2837,8 @@ export async function bootForum(): Promise<void> {
     syncCommunities();
     // v7：存量评论数据修复（@前缀清洗 + 回复对象名回填）
     migrateV7ReplyData();
+    // v35：存量出戏评论清洗（JSON 残留/指令泄露 + 其楼中楼整链）
+    migrateV35PurgeLeaked();
     // v5 兜底迁移：限流期播种/中间版本数据没挂上内置 NPC 覆盖名的，现在补上
     //（幂等：已有覆盖名/LLM 名的跳过；保证任何情况下都不露出内置描述型网名）
     if (seedBuiltinNpcFallbackNames()) saveForum({ ...forumData() });

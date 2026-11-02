@@ -723,3 +723,133 @@ const LOUD_MEME_RE =
 export function loudMemeIn(comment: string): boolean {
   return LOUD_MEME_RE.test(comment ?? '');
 }
+
+/** ============ v35 四大出戏问题修复（用户实锤反馈） ============
+ *  病例（用户截图实锤）：
+ *  ①「半糖去冰」「凌晨四点」「Lynn不在线」的评论直接显示
+ *    {"thought":"主帖讲述…","comment":"楼主观察得好细致啊…"} 原始 JSON——
+ *    服务端 JSON 解析失败走行拆兜底，整串 JSON 被当纯文本评论存库上屏；
+ *  ②「巷口的…」的评论正文 = 【本帖核心话题词（每条评论至少呼应其一，
+ *    帖里没提的领域一个字不许出现）】恋情、代拍、美式——写给模型的指令
+ *    原文被模型当评论输出（严重幻觉）；
+ *  ③ @凌晨四点的海 楼中楼四人接力复读「代拍太可怕了」——生成楼中楼时
+ *    没有防复读约束，模型只能顺着上一句的词语无限复读；
+ *  ④ 偷感爆料贴（偶遇 B 姓小生疑似恋情、楼主不敢拍照怕代拍）下评论
+ *    清一色「好甜啊」「B哥好稳」——爆料语境网友第一反应是求锤/猜身份/
+ *    蹲后续/粉丝心态，不是磕糖。
+ *  修复：本组检测器 + 服务端 generate 路由全分支过滤 + 客户端双保险。 */
+
+// ---------------- ① JSON 残留检测 ----------------
+
+/** 评论正文含 JSON 结构残迹 → true（作废）。
+ *  特征：对象起手 {"/数组起手 ["、`"字段名":` 键值对记号（thought/comment/
+ *  like/content/topic/has_image 等本管线专用字段名）、对象间分隔 } , {、
+ *  字符串转义 \n 居多、整串只剩 JSON 标点。
+ *  真实评论绝不会写出 "thought": 或 {"（中文网友不用半角引号包键名）。 */
+const JSON_LEAK_RE =
+  /"\s*(?:thought|comment|like|content|topic|has_image|image_description|postId|reply|text)\s*"\s*:|\{\s*"|\[\s*\{|(?:\}|")\s*,\s*(?:\{|\[)|"\s*\}\s*"?|\\n|\\u[0-9a-fA-F]{4}/;
+const JSON_ONLY_PUNCT_RE = /^[\s'"{}\[\],:]*$/;
+
+export function jsonLeakIn(text: string): boolean {
+  const t = text ?? '';
+  if (!t.trim()) return false;
+  if (JSON_ONLY_PUNCT_RE.test(t)) return true;
+  return JSON_LEAK_RE.test(t);
+}
+
+// ---------------- ② 系统指令泄露检测 ----------------
+
+/** 指令泄露·强特征（单发命中即作废）：本管线 system/user 消息里的原文片段 */
+const PROMPT_LEAK_STRONG_RE =
+  /【本帖核心话题词|每条评论至少呼应|帖里没提的领域|一个字不许出现|【本帖判定|只输出一个严格合法|输出格式铁律|严格合法的\s*JSON|JSON\s*数组|口吻参考·只学语气|杜绝历史污染|称呼规范】|绝对红线|视角降级|内部思考机制|thought（|（thought|「thought」|\{\{\w+\}\}|# Role|# Task|系统指令|System Prompt/i;
+
+/** 指令泄露·弱特征（两个以上同时出现才作废，防误杀正常评论） */
+const PROMPT_LEAK_WEAK_RES: RegExp[] = [
+  /废稿/, /内部思考/, /输出格式/, /楼主情绪[：:]/, /视角[：:]\s*[/【[]/, /核心话题词/, /评论视角/, /铁律/, /占位符/, /mermaid|```/,
+];
+
+export function promptLeakIn(text: string): boolean {
+  const t = text ?? '';
+  if (!t.trim()) return false;
+  if (PROMPT_LEAK_STRONG_RE.test(t)) return true;
+  let weak = 0;
+  for (const re of PROMPT_LEAK_WEAK_RES) if (re.test(t)) weak += 1;
+  return weak >= 2;
+}
+
+/** 结构化泄露总闸（JSON 残留 ∨ 指令泄露）：全部评论管线第一道过滤 */
+export function structuredLeakIn(text: string): boolean {
+  return jsonLeakIn(text) || promptLeakIn(text);
+}
+
+// ---------------- ③ 复读机检测 ----------------
+
+/** 字符 bigram 集合（中文 2 字滑窗——词序无关的词面重合度量） */
+function bigrams(text: string): Set<string> {
+  const t = (text ?? '').replace(/\s+/g, '');
+  const out = new Set<string>();
+  for (let i = 0; i < t.length - 1; i++) out.add(t.slice(i, i + 2));
+  return out;
+}
+
+/** 最长公共连续子串长度（「楼主能忍住不拍」式整句复读的度量） */
+function longestCommonRun(a: string, b: string): number {
+  const A = (a ?? '').replace(/\s+/g, '');
+  const B = (b ?? '').replace(/\s+/g, '');
+  if (!A.length || !B.length) return 0;
+  let best = 0;
+  let prev = new Array<number>(B.length + 1).fill(0);
+  for (let i = 1; i <= A.length; i++) {
+    const cur = new Array<number>(B.length + 1).fill(0);
+    for (let j = 1; j <= B.length; j++) {
+      if (A[i - 1] === B[j - 1]) {
+        cur[j] = prev[j - 1] + 1;
+        if (cur[j] > best) best = cur[j];
+      }
+    }
+    prev = cur;
+  }
+  return best;
+}
+
+/** 复读相似度（0~1）：bigram 重合率（以较短一方的 bigram 数为分母）。 */
+export function parrotScore(reply: string, prev: string): number {
+  const r = bigrams(reply);
+  const p = bigrams(prev);
+  if (!r.size || !p.size) return 0;
+  let hit = 0;
+  for (const g of r) if (p.has(g)) hit += 1;
+  return hit / Math.min(r.size, p.size);
+}
+
+/** 复读判定：与上一句连续重合 ≥6 字（整句照抄级），或 bigram 重合 ≥0.5
+ *  （「代拍太可怕了」→「代拍真的太可怕了」重合率 0.8+，正常接话 <0.3）。 */
+export function isParrotReply(reply: string, prev: string): boolean {
+  const r = (reply ?? '').trim();
+  const p = (prev ?? '').trim();
+  if (r.length < 3 || p.length < 3) return false;
+  if (longestCommonRun(r, p) >= 6) return true;
+  return parrotScore(r, p) >= 0.5;
+}
+
+// ---------------- ④ 爆料帖检测 + 磕糖甜评检测 ----------------
+
+/** 吃瓜爆料帖·特征词（偶遇/偷拍/代拍/疑似恋情/神秘女/B姓顶流…）。
+ *  与走心帖（isTenderPost）互斥方向：爆料帖情绪基调是「偷感+求锤」，
+ *  不是「浪漫深情」——命中走心帖的爆料文案（罕见）由调用方先判走心。 */
+const SCOOP_POST_RE =
+  /偶遇|目击|偷拍|被拍|拍到|代拍|蹲一个|蹲后续|爆料|疑似.{0,8}(?:恋情|在一起|交往|领证)|神秘(?:女|男)(?:生|人)?|[BWXZLHMC]姓(?:顶流|小生|影后|女星|男星|艺人)|某(?:男|女)(?:星|生|艺人)|顶流|小生|塌房|恋情|绯闻|同框|吃瓜|瓜保熟|热圈|次次蹲/;
+
+export function isScoopPost(content: string, mediaDesc?: string): boolean {
+  const text = `${content ?? ''}\n${mediaDesc ?? ''}`;
+  if (!text.trim()) return false;
+  return SCOOP_POST_RE.test(text);
+}
+
+/** 磕糖甜评检测（爆料帖下情绪错位的「好甜/B哥稳」式评论；每帖限 1 条）。 */
+const SWEET_SHIP_RE =
+  /好甜|真甜|太甜|确实甜|超甜|齁甜|甜到|甜得|甜了|甜度|这么甜|磕到|磕死|嗑到|嗑死|我磕|好稳|真稳|[哥姐]稳|稳得|好讲究|真讲究|好配|太配|锁死|鎖死|这糖|糖我|甜妹|天作之合|双向奔赴|官宣吧|在一起吧|祝99|99呀/;
+
+export function sweetShipIn(text: string): boolean {
+  return SWEET_SHIP_RE.test(text ?? '');
+}

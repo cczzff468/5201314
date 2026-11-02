@@ -108,7 +108,7 @@ import { NextResponse } from 'next/server';
 
 import { completeWithFallback, extractUpstreamConfig, parseLooseJSON, type LLMMessage, type UpstreamConfig } from '@/lib/server-llm';
 import { extractThinkBlocks } from '@/lib/think-filter';
-import { commentAnchored, extractTopicWords, isBannedFiller, isFlamePost, isTenderPost, loudMemeIn, offTopicIn, personaBleedIn, postAllowsCatchall, universalPhraseIn } from '@/lib/forum/topic';
+import { commentAnchored, extractTopicWords, isBannedFiller, isFlamePost, isTenderPost, loudMemeIn, offTopicIn, personaBleedIn, postAllowsCatchall, universalPhraseIn, structuredLeakIn, isParrotReply, isScoopPost, sweetShipIn } from '@/lib/forum/topic';
 // v28：[图片] 占位符工具改从共享模块导入（无 'use client'——v27 从 core.ts
 // 导入导致服务端调 stripImgPh() 抛客户端边界错误，评论三分支静默崩掉）
 import { IMG_PLACEHOLDER, stripImgPh } from '@/lib/forum/imgph';
@@ -283,7 +283,20 @@ async function batchWithRetry(config: UpstreamConfig | null, messages: LLMMessag
 /** v22：解析评论批量输出（[{thought, comment}] JSON 数组——用户规范
  *  「先分析后生成」：thought = 内部思考（话题/情绪/角度），不上屏；
  *  comment = 最终评论。模型退化成纯字符串数组时兼容；彻底不是 JSON 时
- *  行解析兑底（splitItems 语义）。 */
+ *  行解析兑底（splitItems 语义）。
+ *  v35（用户实锤「JSON 直接渲染到前端」）：JSON.parse 失败（引号未转义/
+ *  杂文本）时不再直接把原始 JSON 行当评论——先用正则逐个抠出
+ *  "comment":"..." 字段值（unescape 后）再兑底，保证上屏的永远是纯文本。 */
+function unescapeJsonStr(raw: string): string {
+  try {
+    return JSON.parse(`"${raw.replace(/"/g, '\\"')}"`) as string;
+  } catch {
+    return raw.replace(/\\n/g, '\n').replace(/\\"/g, '"').replace(/\\\\/g, '\\').replace(/\\u([0-9a-fA-F]{4})/g, (_, h) => String.fromCharCode(parseInt(h, 16)));
+  }
+}
+
+const COMMENT_FIELD_RE = /"comment"\s*:\s*"((?:[^"\\]|\\.)*)"/g;
+
 function extractThoughtComments(raw: string): string[] {
   const parsed = parseLooseJSON<unknown[]>(extractThinkBlocks(raw ?? '').text);
   if (Array.isArray(parsed)) {
@@ -299,7 +312,16 @@ function extractThoughtComments(raw: string): string[] {
     }
     if (out.length) return out;
   }
-  return splitItems(raw, 30, 1000);
+  // v35：JSON.parse 失败（或结构不含 comment）→ 正则抠 "comment":"..." 字段值；
+  // 抠出来的才是纯评论（{"thought":"...","comment":"..."} 整串绝不兑底上屏）
+  const text = extractThinkBlocks(raw ?? '').text;
+  const reHits: string[] = [];
+  for (const m of text.matchAll(COMMENT_FIELD_RE)) {
+    const v = unescapeJsonStr(m[1]).trim();
+    if (v) reHits.push(v);
+  }
+  if (reHits.length) return reHits;
+  return splitItems(raw, 30, 1000).filter((s) => !structuredLeakIn(s));
 }
 
 /** v25（用户强制要求 + 「屿哥」称呼错乱修复）：把「你现在是一个网友…」
@@ -381,6 +403,8 @@ function sanitizePostContent(raw: string, ownName: string, allNames: string[]): 
   if ((t.match(SPEAKER_RE) ?? []).length >= 2) return null;
   // v23 字数铁律（用户规范 10~1000 字）：去空白后不足 10 字 = 废稿（短帖 10~100 字精悍有梗）
   if (t.replace(/\s+/g, '').length < 10) return null;
+  // v35：JSON 残留 / 指令泄露（正文把 {"thought":…} 或【本帖核心话题词…】当内容）→ 整条作废
+  if (structuredLeakIn(t)) return null;
   return t;
 }
 
@@ -587,6 +611,9 @@ export async function POST(req: Request) {
   try {
     const body = (await req.json().catch(() => ({}))) as Record<string, unknown>;
     const config = extractUpstreamConfig(body.config);
+    // v35（用户反馈「太发散、太发癫」）：上游温度钳制 ≤ 0.7——配置了高温 API
+    // 的用户也按「贴着帖子说话」的档位出稿（SDK 兜底路径已在 server-llm 固定 0.65）
+    if (config && config.temperature > 0.7) config.temperature = 0.7;
     const kind = typeof body.kind === 'string' ? body.kind : '';
     // v34 提示词面板：客户端随请求送来的提示词覆盖（未知 key 忽略；空串视为未覆盖）
     const promptOv = readPromptOverrides(body.prompts);
@@ -721,9 +748,13 @@ export async function POST(req: Request) {
           const flame = isFlamePost(p.content) ? '｜【引战/三观争议帖：至少一半评论直接批评楼主，绝不顺着 TA 说话】' : '';
           // v28：走心帖（文艺/深情/表白）逐帖标注——语气沉下来同频，严禁聒噪烂梗
           const tender = isTenderPost(p.content) ? '｜【走心帖：楼主在走心，语气沉下来同频，严禁锁死/放毒/笑死/xswl 式聒噪烂梗】' : '';
+          // v35：吃瓜爆料帖逐帖标注——求锤/猜身份/蹲后续为主，磕糖甜评最多 1 条
+          const scoop = isScoopPost(p.content) && !isTenderPost(p.content)
+            ? '｜【吃瓜爆料帖：至少一半评论是求图求锤/猜当事人身份/震惊蹲后续/粉丝心态（要塌了/快跑）；磕糖甜评（好甜/好稳/锁死/好配）最多 1 条】'
+            : '';
           return (
             `${i + 1}. postId=${p.id}｜楼主${p.authorName}发的帖子：【${p.content}】` +
-            `${tags ? `（话题标签：${tags}）` : ''}${tw.length ? `｜核心话题词：${tw.join('、')}` : ''}${flame}${tender}`
+            `${tags ? `（话题标签：${tags}）` : ''}${tw.length ? `｜核心话题词：${tw.join('、')}` : ''}${flame}${tender}${scoop}`
           );
         })
         .join('\n\n');
@@ -755,12 +786,17 @@ export async function POST(req: Request) {
           // v22：万能句式豁免（未完结八卦/求助帖）且每帖限 1 条
           const catchallOk = postAllowsCatchall(post.content);
           let catchallUsed = false;
+          // v35：吃瓜爆料帖磕糖甜评限 1 条
+          const scoopPost = isScoopPost(post.content) && !isTenderPost(post.content);
+          let sweetUsed = false;
           for (const c of arr) {
             if (typeof c !== 'string') continue;
             const s = sanitizeCommentText(stripReplyPrefix(c));
             // 用户规范：评论 3~100 字（留 10 字容差）
             if (s.length < 3 || s.length > 110 || seen.has(s.slice(0, 16))) continue;
             if (violatesCommentLang(s, post.lang)) continue;
+            // v35 第一道闸：JSON 残留 / 系统指令泄露 → 作废
+            if (structuredLeakIn(s)) continue;
             // v22 万能句式：非豁免帖全废；豁免帖限 1 条
             if (universalPhraseIn(s)) {
               if (!catchallOk || catchallUsed) continue;
@@ -768,6 +804,11 @@ export async function POST(req: Request) {
             }
             // v28 走心帖：聒噪烂梗（锁死/放毒/笑死/xswl…）→ 语境错乱评论作废
             if (isTenderPost(post.content) && loudMemeIn(s)) continue;
+            // v35 爆料帖：磕糖甜评超 1 条 → 作废
+            if (scoopPost && sweetShipIn(s)) {
+              if (sweetUsed) continue;
+              sweetUsed = true;
+            }
             // v25 领域私货：评论携带 ≥2 个该帖领域之外的关键词 → 串台作废
             if (offTopicIn(s, post.content)) continue;
             if (!commentAnchored(s, post.content)) continue;
@@ -814,6 +855,12 @@ export async function POST(req: Request) {
         const tenderLine = tender
           ? '\n\n【本帖判定：走心帖（文艺/深情/表白）】楼主处于感性、浪漫或私密的情境中——TA 在走心。本批评论的语气必须沉下来跟帖子同频：被戳中（「这句话我记得很久」）、吃狗粮（酸一下但祝福）、认真祝福（99/祝好）、或文艺地接一句，都可以；「锁死」「放毒」「笑死」「家人们谁懂啊」「xswl」「当场去世」这类过于聒噪、阴阳怪气的烂梗一个字都不许出现（「锁死」「放毒」在普通网友语境里是阴阳怪气，跟夸人「甜」完全两个极端；楼主走心你发癫 = 语境错乱，直接废稿）；玩梗者/暴躁/阴阳怪气视角本批自动失效。'
           : '';
+        // v35：吃瓜爆料帖（偶遇明星/偷拍/疑似恋情）→ 求锤风向指令——爆料语境下
+        // 网友第一反应是好奇和要证据，不是磕糖（「好甜/B哥稳」= 情绪错位）
+        const scoop = isScoopPost(postContentRaw, typeof post.mediaDesc === 'string' ? post.mediaDesc : undefined) && !tender;
+        const scoopLine = scoop
+          ? '\n\n【本帖判定：吃瓜爆料帖（偶遇/偷拍/疑似恋情）】楼主在爆料，评论区第一反应是好奇和要证据：至少一半评论是——求图求锤（没图说个锤子/求原图/拍照的时候在干嘛）、猜当事人身份（B哥到底是谁/查了下时间线）、震惊蹲后续、粉丝心态（要塌了/粉丝还有3秒到达战场/跑路了）；磕糖甜评（好甜/好稳/锁死/好配）最多 1 条——楼主都怕被代拍发现了，粉丝的第一反应是慌，不是嗑糖。'
+          : '';
         const spec = personas
           .map((p, i) => {
             // v9：语言铁律——评论语言跟随帖子，不跟随评论者母语；
@@ -845,14 +892,60 @@ export async function POST(req: Request) {
             role: 'user',
             // v25：开头 = 锚定句（带楼主网名）+ 原封不动的帖子正文与话题标签；
             // 引战帖注入「骂声一片」风向指令；输出 [{thought, comment}] JSON 数组
-            content: `${anchorHeadOf(post)}\n${topicLine}${flameLine}${tenderLine}\n\n请以这 ${expect} 位网友的口吻各写一条一级评论（都是直接评论上面这篇帖子本身，不是回复别人；先在 thought 里完成核心矛盾/情绪/视角分析，再写 comment；输出恰好 ${expect} 个对象的 JSON 数组，第 N 个对象对应第 N 位网友）：\n${spec}${avoidLine}\n${bjTimeLine()}`,
+            content: `${anchorHeadOf(post)}\n${topicLine}${flameLine}${tenderLine}${scoopLine}\n\n请以这 ${expect} 位网友的口吻各写一条一级评论（都是直接评论上面这篇帖子本身，不是回复别人；先在 thought 里完成核心矛盾/情绪/视角分析，再写 comment；输出恰好 ${expect} 个对象的 JSON 数组，第 N 个对象对应第 N 位网友；comment 只能是评论本身的纯文本——绝不许把指令原文、话题词表、JSON 结构或「废稿」这类规则字眼写进 comment）：\n${spec}${avoidLine}\n${bjTimeLine()}`,
           },
         ];
+        // v35 校验链（清洗 → 长度 → 语言 → 泄露 → 万能句式 → 称呼串线 → 走心聒噪
+        // → 爆料磕糖限额 → 领域私货 → 锚定）捕成函数：过滤后有效数不足半数时
+        // 带着明确错误原因严格重试一次（旧版在过滤前判重试，泄露稿全部白给）
+        const catchallOk = postAllowsCatchall(postContentRaw);
+        const postOwnerName = typeof post.authorName === 'string' ? post.authorName : '';
+        const commenterNames = personas.map((p) => p.name);
+        const runChain = (src: string[]): string[] => {
+          let catchallUsed = false;
+          let sweetUsed = false; // v35：爆料帖磕糖甜评限 1 条
+          const kept: string[] = []; // v35：批内复读去重（保留首条）
+          return src
+            .map((s) => sanitizeCommentText(stripReplyPrefix(s)))
+            .filter((s) => s.length >= 3 && s.length <= 110)
+            // v9 强校验：中文帖出现整句外语 = 串台级错误 → 作废
+            .filter((s) => !violatesCommentLang(s, postLang))
+            // v35 第一道闸：JSON 残留 / 系统指令泄露（{"thought":…}/【本帖核心话题词…】）→ 作废
+            .filter((s) => !structuredLeakIn(s))
+            .filter((s) => {
+              if (!universalPhraseIn(s)) return true;
+              if (!catchallOk || catchallUsed) return false;
+              catchallUsed = true;
+              return true;
+            })
+            // v25 称呼/名称串线：屿哥（拿评论者网名拼称呼）/自称网名 → 作废
+            .filter((s) => !personaBleedIn(s, postOwnerName, commenterNames))
+            // v28 走心帖：聒噪烂梗（锁死/放毒/笑死/xswl…）→ 语境错乱作废
+            .filter((s) => !(tender && loudMemeIn(s)))
+            // v35 爆料帖：磕糖甜评（好甜/好稳/锁死）超出 1 条 → 作废
+            .filter((s) => {
+              if (!scoop || !sweetShipIn(s)) return true;
+              if (sweetUsed) return false;
+              sweetUsed = true;
+              return true;
+            })
+            // v25 领域私货：评论携带 ≥2 个主帖领域之外的关键词（剧+特调混进保研帖）→ 作废
+            .filter((s) => !offTopicIn(s, postContentRaw))
+            // v14 锚定强校验：不呼应核心话题词 / 串台 / AI 废话 → 作废
+            .filter((s) => commentAnchored(s, postContentRaw))
+            // v35 批内复读去重：多条一级评论互相复读（同措辞换网名）→ 只保留首条
+            .filter((s) => {
+              if (kept.some((k) => isParrotReply(s, k))) return false;
+              kept.push(s);
+              return true;
+            });
+        };
         const raw = (await completeWithFallback(config, messages)).text;
         // v22：[{thought, comment}] JSON 数组解析（thought 是「先分析后生成」的
-        // 内部思考，不上屏，只取 comment）；有效条数不足半数 → 严格重试一次
-        let cands = extractThoughtComments(raw);
-        if (cands.length < Math.ceil(expect / 2)) {
+        // 内部思考，不上屏，只取 comment）
+        let list = runChain(extractThoughtComments(raw));
+        // v35：过滤后有效数不足半数（JSON 解析失败/大量泄露或废稿）→ 严格重试一次
+        if (list.length < Math.ceil(expect / 2)) {
           try {
             const raw2 = (
               await completeWithFallback(config, [
@@ -860,54 +953,32 @@ export async function POST(req: Request) {
                 { role: 'assistant', content: raw.slice(0, 1500) },
                 {
                   role: 'user',
-                  content: `你上一次的输出不是合法的 JSON 数组（或大量对象无效）。重新输出：恰好 ${expect} 个对象、只含 thought 和 comment 两个字段的 JSON 数组，除 JSON 本身外禁止任何文字，不要代码围栏。再次提醒：comment 3~100 字、必须针对帖子的具体内容、绝不出现万能句式（蹲后续/这瓜保熟吗/等一个下文/让子弹飞）。`,
+                  content: `你上一次的输出大量无效（不是合法 JSON 数组，或 comment 里混进了指令原文/JSON结构/万能句式）。重新输出：恰好 ${expect} 个对象、只含 thought 和 comment 两个字段的 JSON 数组，除 JSON 本身外禁止任何文字，不要代码围栏。再次提醒：comment 只能是评论本身的纯文本（3~100 字），绝不许出现 "thought"、"comment"、【本帖核心话题词】这类字段名/指令原文/规则字眼；必须针对帖子的具体内容，绝不出现万能句式（蹲后续/这瓜保熟吗/等一个下文/让子弹飞）。`,
                 },
               ])
             ).text;
-            const retry = extractThoughtComments(raw2);
-            if (retry.length > cands.length) cands = retry;
+            const retry = runChain(extractThoughtComments(raw2));
+            if (retry.length > list.length) list = retry;
           } catch {
             /* 重试失败：按现有结果返回，客户端不铺模板（宁缺毋滥） */
           }
         }
-        // v25 校验链：清洗 → 长度（3~110，用户规范 3~100 字留容差）→ 语言 →
-        // 万能句式（非豁免帖全废；豁免帖限 1 条）→ 称呼/名称串线（屿哥/自称网名）
-        // → 领域私货（保研帖冒出剧+特调）→ 锚定/串台/AI 废话
-        const catchallOk = postAllowsCatchall(postContentRaw);
-        let catchallUsed = false;
-        const postOwnerName = typeof post.authorName === 'string' ? post.authorName : '';
-        const commenterNames = personas.map((p) => p.name);
-        const list = cands
-          .map((s) => sanitizeCommentText(stripReplyPrefix(s)))
-          .filter((s) => s.length >= 3 && s.length <= 110)
-          // v9 强校验：中文帖出现整句外语 = 串台级错误 → 作废
-          .filter((s) => !violatesCommentLang(s, postLang))
-          .filter((s) => {
-            if (!universalPhraseIn(s)) return true;
-            if (!catchallOk || catchallUsed) return false;
-            catchallUsed = true;
-            return true;
-          })
-          // v25 称呼/名称串线：屿哥（拿评论者网名拼称呼）/自称网名 → 作废
-          .filter((s) => !personaBleedIn(s, postOwnerName, commenterNames))
-          // v28 走心帖：聒噪烂梗（锁死/放毒/笑死/xswl…）→ 语境错乱作废
-          .filter((s) => !(tender && loudMemeIn(s)))
-          // v25 领域私货：评论携带 ≥2 个主帖领域之外的关键词（剧+特调混进保研帖）→ 作废
-          .filter((s) => !offTopicIn(s, postContentRaw))
-          // v14 锚定强校验：不呼应核心话题词 / 串台 / AI 废话 → 作废
-          .filter((s) => commentAnchored(s, postContentRaw));
         return NextResponse.json({ items: list });
       }
 
       // subreplies：给 threads 里的每条评论各写一条回复（来自 personas 对应网友）
       // v26：单调用线程上限 12→30（楼中楼需求「评论下面 1-5 人」+ 深层嵌套——
       // 每条一级评论 1~5 条直接回复、部分回复再被回复，一批常 20~40 线程）
+      // v35：threads 增加可选 prev（同楼层已存在的回复——生成时明确避开，杜绝盖楼复读）
       const threads = Array.isArray(body.threads)
         ? (body.threads as Record<string, unknown>[])
             .slice(0, 30)
             .map((h) => ({
               authorName: typeof h.authorName === 'string' ? h.authorName.slice(0, 24) : '网友',
               content: typeof h.content === 'string' ? h.content.slice(0, 160) : '',
+              prev: Array.isArray(h.prev)
+                ? (h.prev as unknown[]).filter((x): x is string => typeof x === 'string').slice(0, 4).map((x) => x.slice(0, 80))
+                : [],
             }))
             .filter((h) => h.content)
         : [];
@@ -922,15 +993,24 @@ export async function POST(req: Request) {
                 ? `；母语${langLabel(p.lang)}，但回复必须用简体中文，最多带1-3个母语字符的口癖`
                 : ''
               : `；回复语言跟随帖子用${langLabel(postLang)}或简体中文`;
+          // v35：同楼层已有的回复（观点/措辞都必须避开——盖楼复读的解药）
+          const prevLine = h.prev.length
+            ? `｜这层楼已有人说：「${h.prev.join('」「')}」——你绝不许重复他们的观点和措辞，换一个完全不同的角度`
+            : '';
           // v25：人设降级为「口吻参考」——其中具体事物（职业/作品/道具/经历）
           // 除非主帖和被回复评论提到，否则一个字不许进回复（防 Persona Bleed）
-          return `${i + 1}. 评论（楼主是「${typeof post.authorName === 'string' ? post.authorName : '楼主'}」；${h.authorName} 说：「${h.content}」）→ 由 ${p.name} 回复（口吻参考·只学语气，其中具体事物严禁入评：${p.persona}${langNote}）`;
+          return `${i + 1}. 评论（楼主是「${typeof post.authorName === 'string' ? post.authorName : '楼主'}」；${h.authorName} 说：「${h.content}」${prevLine}）→ 由 ${p.name} 回复（口吻参考·只学语气，其中具体事物严禁入评：${p.persona}${langNote}）`;
         })
         .join('\n');
       // v28：走心帖（文艺/深情/表白）→ 楼中楼语气同频指令（楼主走心时楼中楼也发癫 = 杠精现场）
       const tender = isTenderPost(postContentRaw, typeof post.mediaDesc === 'string' ? post.mediaDesc : undefined);
       const tenderLine = tender
         ? '\n\n【本帖判定：走心帖（文艺/深情/表白）】楼主在走心（感性/浪漫/私密情境）：楼中楼也要沉下来跟主帖同频——附和感动、酸（克制版）、祝福、文艺接梗都行；「锁死」「放毒」「笑死」「家人们谁懂啊」「xswl」「当场去世」这类聒噪/阴阳怪气烂梗一个字不许出现（楼主走心你发癫 = 语境错乱，废稿）。'
+        : '';
+      // v35：吃瓜爆料帖 → 楼中楼也是求锤/猜身份心态，磕糖甜评最多 1 条
+      const scoop = isScoopPost(postContentRaw, typeof post.mediaDesc === 'string' ? post.mediaDesc : undefined) && !tender;
+      const scoopLine = scoop
+        ? '\n\n【本帖判定：吃瓜爆料帖（偶遇/偷拍/疑似恋情）】楼中楼跟一级评论同风向：求图求锤、猜当事人身份、震惊蹲后续、粉丝心态（要塌了/快跑）；「好甜」「好稳」「锁死」式磕糖甜评整批最多 1 条。'
         : '';
       const messages: LLMMessage[] = [
         {
@@ -948,15 +1028,40 @@ export async function POST(req: Request) {
         {
           role: 'user',
           // v15（用户强制要求）：用户消息开头 = 锚定句 + 原封不动的主帖正文与话题标签
-          content: `${anchorHeadOf(post)}\n\n${topicLine}${tenderLine}\n\n评论区里有下面 ${expect} 条评论，请逐条写出对应的楼中楼回复（每条直接写正文，针对那条评论说的话回应并呼应主帖话题词，不要带任何@或「回复」前缀；输出 ${expect} 行）：\n${spec}\n${bjTimeLine()}`,
+          // v35：防复读铁律进用户消息（系统模板可能被用户覆盖，此处双保险）
+          content: `${anchorHeadOf(post)}\n\n${topicLine}${tenderLine}${scoopLine}\n\n评论区里有下面 ${expect} 条评论，请逐条写出对应的楼中楼回复（每条直接写正文，针对那条评论说的话回应并呼应主帖话题词，不要带任何@或「回复」前缀；输出 ${expect} 行）。防复读铁律：绝对不许重复被回复那条评论的核心词汇——对方说「代拍太可怕」你就绝不能再写「代拍可怕」，要么换完全不同的措辞谈同一件事，要么直接反驳/爆料/抖机灵换角度；多条回复针对同一条评论时（或楼层里已有人说过类似的话时），各自角度必须完全不同；回复正文里绝不许出现「thought」「废稿」等任何指令/规则字眼或 JSON 结构。\n${spec}\n${bjTimeLine()}`,
         },
       ];
       const raw = (await completeWithFallback(config, messages)).text;
-      // v14：位置对齐校验（无效项置空串由客户端按位跳过，不向后错位）
-      const rawList = await batchWithRetry(config, messages, raw, expect, 600);
+      // v35：模型偶尔无视「输出 N 行」契约改吐 JSON 数组——先按 JSON 解析
+      //（对象取 reply/comment/text/content 字段或纯字符串），行拆兜底且过滤泄露
+      const parseThreadLines = (text: string): string[] => {
+        const parsed = parseLooseJSON<unknown[]>(extractThinkBlocks(text ?? '').text);
+        if (Array.isArray(parsed)) {
+          const out = parsed.map((o) => {
+            if (typeof o === 'string') return o;
+            if (o && typeof o === 'object' && !Array.isArray(o)) {
+              const rec = o as Record<string, unknown>;
+              for (const k of ['reply', 'comment', 'text', 'content']) {
+                if (typeof rec[k] === 'string' && rec[k].trim()) return rec[k];
+              }
+            }
+            return '';
+          });
+          if (out.filter(Boolean).length >= Math.ceil(expect / 2)) return out.slice(0, expect);
+        }
+        return [];
+      };
+      let rawList = parseThreadLines(raw);
+      if (!rawList.length) {
+        // v14：位置对齐校验（无效项置空串由客户端按位跳过，不向后错位）
+        rawList = await batchWithRetry(config, messages, raw, expect, 600);
+      }
       // v22：万能句式豁免（未完结八卦/求助帖）且整批限 1 条
       const catchallOk = postAllowsCatchall(postContentRaw);
       let catchallUsed = false;
+      // v35：爆料帖磕糖甜评限 1 条
+      let sweetUsed = false;
       // v25：称呼串线检测名单（本批回复者网名）+ 楼主网名
       const replierNames = personas.map((p) => p.name);
       const postOwnerName = typeof post.authorName === 'string' ? post.authorName : '';
@@ -967,6 +1072,8 @@ export async function POST(req: Request) {
         // 用户规范：回复 3~100 字（留容差）
         if (t.length < 3 || t.length > 110) return '';
         if (violatesCommentLang(t, postLang)) return '';
+        // v35 第一道闸：JSON 残留 / 系统指令泄露 → 作废
+        if (structuredLeakIn(t)) return '';
         // v22 万能句式：非豁免帖全废；豁免帖限 1 条
         if (universalPhraseIn(t)) {
           if (!catchallOk || catchallUsed) return '';
@@ -974,13 +1081,35 @@ export async function POST(req: Request) {
         }
         // v28 走心帖：聒噪烂梗（锁死/放毒/笑死/xswl…）→ 语境错乱作废
         if (tender && loudMemeIn(t)) return '';
+        // v35 爆料帖：磕糖甜评超 1 条 → 作废
+        if (scoop && sweetShipIn(t)) {
+          if (sweetUsed) return '';
+          sweetUsed = true;
+        }
         // v25 称呼/名称串线：拿回复者网名拼称呼（屿哥）/自称网名 → 作废
         if (personaBleedIn(t, postOwnerName, replierNames)) return '';
+        // v35 复读机检测：与被回复评论词面高度重合（「代拍太可怕了」式盖楼）→ 作废
+        if (isParrotReply(t, h.content)) return '';
+        // v35 同楼层去重：与楼层里已有的回复复读撞车 → 作废
+        if (h.prev.some((pv) => isParrotReply(t, pv))) return '';
         // v25 领域私货：回复携带 ≥2 个「被回复评论+主帖」领域之外的关键词 → 作废
         if (offTopicIn(t, ctx)) return '';
         // 楼中楼必须呼应「被回复评论 + 主帖」
         if (!commentAnchored(t, ctx)) return '';
         return t;
+      });
+      // v35 批内同目标去重：同一评论的多条回复互相复读（不同楼但同样话）→ 保留首条
+      const byTarget = new Map<string, string[]>();
+      threads.forEach((h, i) => {
+        const key = h.content.slice(0, 40);
+        const kept = byTarget.get(key) ?? [];
+        const t = list[i];
+        if (t && kept.some((k) => isParrotReply(t, k))) {
+          list[i] = '';
+          return;
+        }
+        if (t) kept.push(t);
+        byTarget.set(key, kept);
       });
       return NextResponse.json({ items: list });
     }
@@ -1085,6 +1214,8 @@ export async function POST(req: Request) {
         let comment = typeof parsed.comment === 'string' ? sanitizeCommentText(stripReplyPrefix(parsed.comment)) : '';
         if (comment && (comment.length < 15 || comment.length > 150)) comment = '';
         if (comment && (isBannedFiller(comment) || universalPhraseIn(comment))) comment = '';
+        // v35：JSON 残留 / 指令泄露 → 作废（角色评论同样不能把 thought 字段吐出来）
+        if (comment && structuredLeakIn(comment)) comment = '';
         // 锚定：评论必须接得上帖子内容（与服务端评论管线同口径）
         if (comment && !commentAnchored(comment, stripImgPh(postContent))) comment = '';
         if (comment && violatesCommentLang(comment, 'zh-Hans')) comment = '';
@@ -1134,7 +1265,9 @@ export async function POST(req: Request) {
         text.length >= (thanks ? 8 : 10) &&
         text.length <= (thanks ? 80 : 130) &&
         !violatesCommentLang(text, 'zh-Hans') &&
-        !isBannedFiller(text)
+        !isBannedFiller(text) &&
+        // v35：神回复同样禁止把指令原文/JSON 结构当话说（宁缺毋滥）
+        !structuredLeakIn(text)
       ) {
         return NextResponse.json({ text: cleanText(text, 130) });
       }
@@ -1209,7 +1342,8 @@ export async function POST(req: Request) {
           },
           {
             role: 'user',
-            content: `${ctx}\n\n请以「${name}」的口吻回复这条楼层对话（直接输出回复正文，20-80 字口语化，不要带任何解释）。${bjTimeLine()}` },
+            // v35：防复读指令进用户消息（系统模板可能被用户覆盖，此处双保险）
+            content: `${ctx}\n\n请以「${name}」的口吻回复这条楼层对话（直接输出回复正文，20-80 字口语化，不要带任何解释）。防复读：绝不许原样重复上一句对话的核心词汇——对方说「代拍太可怕」你就不能再写「代拍可怕」，要么换措辞要么换角度（反驳/爆料/抖机灵）；回复正文只能是纯文本，绝不许出现任何指令原文或 JSON 结构。${bjTimeLine()}` },
         ])).text;
         const text = sanitizeCommentText(stripReplyPrefix(raw));
         // v24 字数铁律（用户规范 20-80 字，留容差）：过短/过长 → 返回空
@@ -1223,6 +1357,10 @@ export async function POST(req: Request) {
           !catchallHit &&
           !violatesCommentLang(text, postLang) &&
           !isBannedFiller(text) &&
+          // v35：JSON 残留 / 指令泄露 → 返回空
+          !structuredLeakIn(text) &&
+          // v35：复读机检测——与被回复内容词面高度重合（盖楼复读）→ 返回空
+          !isParrotReply(text, p?.content ?? '') &&
           // v26：锚定语料 = 用户这条回复 + 用户回复的那条评论 + 主帖（围观者必须接得上话）
           commentAnchored(text, `${p?.content ?? ''} ${rtText} ${postContent}`)
         ) {
@@ -1244,7 +1382,9 @@ export async function POST(req: Request) {
         },
         { role: 'user', content: `最近的对话：\n${history || '（刚开始聊）'}\n\n请以「${name}」的口吻接下一条私信。${bjTimeLine()}` },
       ])).text;
-      return NextResponse.json({ text: cleanText(raw, 300) });
+      // v35：私信同样拦截泄露（指令原文/JSON 当话说）
+      const dmText = cleanText(raw, 300);
+      return NextResponse.json({ text: structuredLeakIn(dmText) ? '' : dmText });
     }
 
     return NextResponse.json({ error: '未知 kind' }, { status: 400 });
