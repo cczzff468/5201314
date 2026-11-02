@@ -76,13 +76,16 @@ import {
 } from './core';
 import { describeImagesAuto } from '@/lib/vision-client';
 import { renderTextImage } from './textimg';
-import { commentAnchored, isTenderPost, loudMemeIn, offTopicIn, personaBleedIn, postAllowsCatchall, universalPhraseIn, isParrotReply, isScoopPost, jsonLeakIn, promptLeakIn, sweetShipIn } from './topic';
+import { commentAnchored, extractTopicWords, isTenderPost, loudMemeIn, offTopicIn, personaBleedIn, postAllowsCatchall, universalPhraseIn, isParrotReply, isScoopPost, jsonLeakIn, promptLeakIn, sweetShipIn } from './topic';
 import { promptOverridesPayload, rollCommentCount, rollPostCount } from './gen-settings';
 // v42【帖子记忆】：帖子入库 + NPC 评论入库（深度记忆开关守卫在模块内部）
-import { noteNpcCommentOnMyPost, notePostPublished, accountOfPost } from './post-memory';
+// v43（A3/C1）：buildForumPostMemoryBlock 给论坛私信注入；listPostMemories 给蹭热点取话题
+import { noteNpcCommentOnMyPost, notePostPublished, accountOfPost, buildForumPostMemoryBlock, listPostMemories } from './post-memory';
 // v43【NPC 记忆系统】：NPC 记住自己在用户帖下说过什么（人设/态度连贯）+
 // 楼主帖子历史块（NPC 评论时读用户过往帖）+ 马甲暴露检测（金鱼守卫在模块内部）
+// v43（A3）：npcDmMemoryBlock 给论坛私信（网友侧记忆块）
 import {
+  npcDmMemoryBlock,
   npcMyHistoryBlock,
   npcMyHistoryLine,
   noteNpcMyComment,
@@ -116,6 +119,8 @@ import {
 import { matrixNpcPersona, type MatrixNpc } from './worldview';
 // v41（D3）：角色刷到你的帖子 → 低概率跨 App 主动来微信/QQ 私聊
 import { maybeCrossAppPing } from './crossapp';
+// v43（A3）：论坛私信记忆块（char 侧）的匿名说破状态
+import { isForumAnonDisclosed } from '@/lib/ios/forum-anon';
 
 // ---------------- pending 队列（跨刷新持久） ----------------
 
@@ -137,6 +142,8 @@ interface PendingJob {
     mainPostId?: string;
     /** aiReplyBack/charReply 增强：用户刚发的回复 id（AI 据此接话） */
     userReplyId?: string;
+    /** v43（C3）限流重排计数：任务因 429 没干成时重排的次数（上限 2） */
+    retries?: number;
     /** 【AI 真人社交】charPost/charEngage/charReply：目标角色 char:<contactId> */
     charKey?: AuthorKey;
     /** charReply：点赞致谢模式（用户点赞后角色来评论区回一句，可返回空=不打扰） */
@@ -1295,6 +1302,26 @@ async function buildFeedBatch(
   // 【多世界观 v37】话题方向优先用世界观话题（洗牌后逐帖注入，自然混在信息流里）；矩阵阵容进入作者池（按 postFreq
   // 加权 ~35% 出场率——瓜主/营销号/站姐/杠精是这个世界观的原住民）
   const topics = worldviewTopics().slice().sort(() => Math.random() - 0.5);
+  // v43（C1）【蹭热点】：帖子记忆开着时，1~2 个帖位的话题方向对齐用户近 2 天发的
+  // 帖（真实广场的跟风发帖——「刷到你那帖，我也想说两句」）；金鱼模式零注入
+  // （NPC 不感知用户任何历史）；只对齐「话题方向」，不复述用户帖内容。
+  const hotTopics: string[] = [];
+  try {
+    if (isPostMemoryOn()) {
+      for (const r of listPostMemories('main', 3)) {
+        if (Date.now() - r.createdAt > 48 * 3600_000) continue;
+        const dir = r.tags[0]?.replace(/#/g, '') || extractTopicWords(r.content).slice(0, 2).join('');
+        if (dir && !hotTopics.includes(dir)) hotTopics.push(dir.slice(0, 16));
+      }
+    }
+  } catch {
+    /* 蹭热点是彩蛋能力，失败静默 */
+  }
+  const hotIdx = new Set<number>();
+  if (hotTopics.length) {
+    const hotN = Math.min(hotTopics.length, Math.random() < 0.4 ? 2 : 1);
+    while (hotIdx.size < hotN) hotIdx.add(Math.floor(Math.random() * n));
+  }
   const cast = matrixCast();
   const pChar = chars.length ? 0.08 : 0;
   const pMatrix = cast.length ? 0.35 : 0;
@@ -1308,7 +1335,8 @@ async function buildFeedBatch(
   let npcCursor = 0;
   let archCursor = 0;
   for (let i = 0; i < n; i++) {
-    const topic = topics[i % topics.length];
+    // v43（C1）：蹭热点帖位（位置随机散布，不都挤在信息流头部）
+    const topic = hotIdx.has(i) ? hotTopics[Math.floor(Math.random() * hotTopics.length)] : topics[i % topics.length];
     const r = Math.random();
     if (r < pChar) {
       const ch = chars[Math.floor(Math.random() * chars.length)];
@@ -1770,11 +1798,15 @@ async function callSubReplyLayer(
           personas: ch.map((p) => {
             const a = resolveAuthor(p.key);
             // 【多世界观】矩阵 NPC 身份强制代入标记（服务端渲染强度不同）
+            // v43（A2）【NPC 记忆】：楼中楼回复者也带自己的留言史（「怎么又是你」
+            // 不只发生在一级评论；金鱼/无史/非用户帖 → 零注入）
+            const npcMem = npcMyHistoryLine(p.key, ctx.post);
             return {
               name: a.name,
               persona: a.persona || '普通论坛网友',
               lang: a.lang ?? 'zh-Hans',
               ...(p.key.startsWith('mnpc:') ? { matrix: true } : {}),
+              ...(npcMem ? { npcHistory: npcMem } : {}),
             };
           }),
           avoid,
@@ -1816,7 +1848,10 @@ async function callSubReplyLayer(
               const anchorCtx = stripImgPh(`${plan.target.content} ${ctx.post.content}`);
               if (offTopicIn(s, anchorCtx)) return '';
               // 锚定校验：必须呼应「被回复的那条 + 主帖」
-              if (!commentAnchored(s, anchorCtx)) return '';
+              // v43（A2）【NPC 记忆】：锚定语料并入这位回复者的留言史（认脸/提旧事
+              // 的楼中楼不因「不呼应当前帖」被误杀；领域私货检测仍只看当前帖）
+              const memRaw = npcMyHistoryLine(plan.key, ctx.post);
+              if (!commentAnchored(s, memRaw ? `${anchorCtx} ${memRaw}` : anchorCtx)) return '';
               return s;
             })
           : [];
@@ -2523,6 +2558,13 @@ export function queueUserPostInteractions(post: ForumPost): void {
     });
   });
   const replyCount = Math.random() < 0.75 ? 1 + (Math.random() < 0.35 ? 1 : 0) : 0;
+  // v43（A1）【NPC 记忆·回访优先】：用户账号帖（大号/小号）→ 在TA帖下留过言的
+  // NPC 高概率再来（真实论坛常客就是那几个——发帖后的自动评论也接得上「我记得你」
+  // 的连贯性，不再只靠手动点「显示更多评论」；金鱼模式名单为空，自动落回原逻辑）
+  const posterAccount0 = accountOfPost(post);
+  const veterans0 = (posterAccount0 ? npcsWithHistoryOn(posterAccount0) : []).filter(
+    (k) => !isUserAuthor(k) && k !== post.authorKey,
+  );
   // v41（B4）：评论者兜底不再直接回退 likers[0]（同一人发两条）——
   // 名单里没用过的优先，否则新建动态网友
   const usedCommenters = new Set<AuthorKey>();
@@ -2531,19 +2573,26 @@ export function queueUserPostInteractions(post: ForumPost): void {
     if (!fallback || usedCommenters.has(fallback)) {
       fallback = likers.find((k) => !usedCommenters.has(k)) ?? createDynNpc();
     }
-    usedCommenters.add(fallback);
+    // 选人优先级：回访老面孔（60%）> 矩阵 NPC（60%）> 动态网友新面孔
+    const veteranPool = veterans0.filter((v) => !usedCommenters.has(v));
+    let authorKey: AuthorKey;
+    if (veteranPool.length && Math.random() < 0.6) {
+      authorKey = veteranPool[Math.floor(Math.random() * veteranPool.length)];
+    } else if (cast.length && Math.random() < 0.6) {
+      authorKey = cast[Math.floor(Math.random() * cast.length)].key;
+    } else {
+      authorKey = fallback;
+    }
+    usedCommenters.add(authorKey);
     addPending({
       id: uid('j'),
       due: Date.now() + 45_000 + Math.random() * 270_000 + i * (60_000 + Math.random() * 150_000),
       kind: 'replyToUserPost',
       postKey: post.id,
-      // 回帖者：【多世界观】矩阵 NPC 高概率出场（身份鲜明的神回复）；
-      // 否则动态网友新面孔来搭讪
+      // 回帖者：v43（A1）回访老面孔优先（态度延续「怎么又是你」）；矩阵 NPC
+      // 身份鲜明；否则动态网友新面孔来搭讪
       meta: {
-        authorKey:
-          cast.length && Math.random() < 0.6
-            ? cast[Math.floor(Math.random() * cast.length)].key
-            : fallback,
+        authorKey,
         parentContent: post.content,
       },
     });
@@ -2678,7 +2727,23 @@ export function runPending(): void {
     if (wait > 90_000) continue; // 远期任务等下次触发点再挂
     scheduled.add(job.id);
     window.setTimeout(() => {
-      void execJob(job).finally(() => dropPending(job.id));
+      void execJob(job).finally(() => {
+        dropPending(job.id);
+        // v43（C3）【限流重排】：任务收尾时限流冷却仍生效 = 本次执行窗口内确实撞过
+        // 429（服务端 SDK 重试链已耗尽）——任务大概率没干成。不再直接丢弃：
+        // 冷却结束后重排一次（上限 2 次防循环）。「偶尔有评论没来」的修复。
+        // 非限流失败照旧丢弃（宁缺毋滥口径不变）。
+        if (Date.now() < llmCooldownUntil && (job.meta.retries ?? 0) < 2) {
+          const re: PendingJob = {
+            ...job,
+            id: uid('j'),
+            due: llmCooldownUntil + 30_000 + Math.random() * 60_000,
+            meta: { ...job.meta, retries: (job.meta.retries ?? 0) + 1 },
+          };
+          addPending(re);
+          window.setTimeout(runPending, Math.max(0, re.due - Date.now() + 100));
+        }
+      });
     }, wait);
   }
 }
@@ -2689,9 +2754,11 @@ async function execJob(job: PendingJob): Promise<void> {
 
     // v41（B5）：活跃度开关关着时主动类任务不丢——顺延 12h 重排队
     //（开关重开时 setForumAiActivity 会把挂起任务拉回近期）；
-    // 神回复/网友回复/点赞不受开关限制，照常执行
+    // 神回复/网友回复/点赞不受开关限制，照常执行。
+    // v43（C3）：换新 id 重排（旧版同 id 顺延会被 runPending 的 finally
+    // dropPending(job.id) 误删——顺延任务凭空消失的潜伏 bug）
     if ((job.kind === 'charPost' || job.kind === 'charEngage') && !aiActivityOn()) {
-      addPending({ ...job, due: Date.now() + 12 * 3600_000 });
+      addPending({ ...job, id: uid('j'), due: Date.now() + 12 * 3600_000 });
       return;
     }
 
@@ -2791,7 +2858,18 @@ async function execJob(job: PendingJob): Promise<void> {
             memory: charMemoryDigest(brief.contactId),
           },
           // v41（B8）：postLang 随请求上送（服务端语言校验跟随帖子，不再写死中文）
-          post: { content: post.content.slice(0, 600), mediaDesc, lang: postLang },
+          // v43（A4）【已有评论感知】：带上帖子下已有的一级评论——角色评论不与
+          // 先到的 NPC 撞观点撞措辞（像真人刷帖先翻翻楼再说话）
+          post: {
+            content: post.content.slice(0, 600),
+            mediaDesc,
+            lang: postLang,
+            topComments: d0.posts
+              .filter((x) => x.replyTo === post.id)
+              .sort((a, b) => a.createdAt - b.createdAt)
+              .slice(-5)
+              .map((x) => `${resolveAuthor(x.authorKey).name}：${x.content.slice(0, 60)}`),
+          },
           userName,
         })) as { like?: boolean; comment?: string };
         like = r.like === true;
@@ -3153,6 +3231,17 @@ async function execJob(job: PendingJob): Promise<void> {
       // 小号会话 → 一律陌生网友模式（stranger）：剥离关系/情绪/记忆（记忆里全是
       // 与机主本人的事，注入即穿帮）
       const brief = !fromAnon && peerKey.startsWith('char:') ? forumCharBriefs().find((b) => b.key === peerKey) : null;
+      // v43（A3）【私信记忆】：论坛私信也带帖子记忆——对方能自然聊起「你那帖」与
+      // 评论区（微信/QQ/信息早有跨应用感知块，论坛自己的私信此前反而失忆）：
+      // · char 角色 → 帖子记忆块（TA发过的帖+网友评论；小号仓仅说破后并入）；
+      // · 普通网友/NPC → TA 自己的留言史 + 楼主最近发的帖；
+      // · 小号会话（stranger）→ 零注入（认知隔离铁律，注入即穿帮）。
+      let dmForumMem = '';
+      if (!fromAnon) {
+        dmForumMem = brief
+          ? buildForumPostMemoryBlock(brief.contactId, isForumAnonDisclosed(brief.contactId))
+          : npcDmMemoryBlock(peerKey);
+      }
       let text = '';
       try {
         // v41（C2）：私信也注入 avoid——对方最近说过的内容不再重复
@@ -3165,6 +3254,8 @@ async function execJob(job: PendingJob): Promise<void> {
           author: {
             name: peer.name,
             persona: peer.persona || '',
+            // v43（A3）：帖子记忆块随请求上送（服务端注入用户消息；空串零注入）
+            ...(dmForumMem ? { forumMemory: dmForumMem } : {}),
             ...(fromAnon
               ? { stranger: true }
               : brief

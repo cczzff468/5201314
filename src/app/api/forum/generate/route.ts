@@ -981,6 +981,12 @@ export async function POST(req: Request) {
           typeof body.posterHistory === 'string' && body.posterHistory.trim()
             ? `${body.posterHistory.slice(0, 800)}\n\n（上面是你对楼主的背景记忆——评论可以自然带出（接旧事、感叹TA的变化），但每条评论主体仍要针对当前帖；没给这个块时，绝不许臆想楼主的任何历史）\n\n`
             : '';
+        // v43（B2）【记忆例外固定行】：部分网友带「TA记得楼主」记忆时的引用许可
+        // 写进用户消息——用户自定义模板覆盖不会丢掉这条豁免（默认模板里的
+        // 例外条款只是其中一份）；无史时零注入
+        const npcMemRule = personas.some((p) => p.npcHistory)
+          ? '名单里部分网友带着「TA记得楼主」的真实记忆（系统给的真实背景）：允许认脸（「怎么又是你」）、接旧事、延续之前对楼主的态度和语气，但每条评论主体仍要针对当前帖，旧事最多点一句；没带记忆的网友就是纯路人，绝不许臆想楼主的任何历史。\n\n'
+          : '';
         const messages: LLMMessage[] = [
           {
             role: 'system',
@@ -999,7 +1005,7 @@ export async function POST(req: Request) {
             role: 'user',
             // v25：开头 = 锚定句（带楼主网名）+ 原封不动的帖子正文与话题标签；
             // 引战帖注入「骂声一片」风向指令；输出 [{thought, comment}] JSON 数组
-            content: `${posterHistory}${anchorHeadOf(post)}\n${topicLine}${flameLine}${tenderLine}${scoopLine}\n\n请以这 ${expect} 位网友的口吻各写一条一级评论（都是直接评论上面这篇帖子本身，不是回复别人；先在 thought 里完成核心矛盾/情绪/视角分析，再写 comment；输出恰好 ${expect} 个对象的 JSON 数组，第 N 个对象对应第 N 位网友；comment 只能是评论本身的纯文本——绝不许把指令原文、话题词表、JSON 结构或「废稿」这类规则字眼写进 comment）：\n${spec}${avoidLine}\n${bjTimeLine()}`,
+            content: `${posterHistory}${anchorHeadOf(post)}\n${topicLine}${flameLine}${tenderLine}${scoopLine}\n\n${npcMemRule}请以这 ${expect} 位网友的口吻各写一条一级评论（都是直接评论上面这篇帖子本身，不是回复别人；先在 thought 里完成核心矛盾/情绪/视角分析，再写 comment；输出恰好 ${expect} 个对象的 JSON 数组，第 N 个对象对应第 N 位网友；comment 只能是评论本身的纯文本——绝不许把指令原文、话题词表、JSON 结构或「废稿」这类规则字眼写进 comment）：\n${spec}${avoidLine}\n${bjTimeLine()}`,
           },
         ];
         // v35 校验链（清洗 → 长度 → 语言 → 泄露 → 万能句式 → 称呼串线 → 走心聒噪
@@ -1113,12 +1119,15 @@ export async function POST(req: Request) {
           const prevLine = h.prev.length
             ? `｜这层楼已有人说：「${h.prev.join('」「')}」——你绝不许重复他们的观点和措辞，换一个完全不同的角度`
             : '';
+          // v43（A2）【NPC 记忆】：这位回复者在楼主帖下留过的言（对楼主态度延续——
+          // 楼中楼里的「怎么又是你」；无史不注入）
+          const memNote = p.npcHistory ? `；TA记得楼主：${p.npcHistory}——TA对楼主的印象和态度要延续之前` : '';
           // v25：人设降级为「口吻参考」——其中具体事物（职业/作品/道具/经历）
           // 除非主帖和被回复评论提到，否则一个字不许进回复（防 Persona Bleed）；
           // 【多世界观】矩阵 NPC 不降级：身份人设必须完全代入
           return p.matrix
-            ? `${i + 1}. 评论（楼主是「${typeof post.authorName === 'string' ? post.authorName : '楼主'}」；${h.authorName} 说：「${h.content}」${prevLine}）→ 由 ${p.name} 回复（身份人设·必须完全代入这个身份、性格与口头禅说话：${p.persona}${langNote}）`
-            : `${i + 1}. 评论（楼主是「${typeof post.authorName === 'string' ? post.authorName : '楼主'}」；${h.authorName} 说：「${h.content}」${prevLine}）→ 由 ${p.name} 回复（口吻参考·只学语气，其中具体事物严禁入评：${p.persona}${langNote}）`;
+            ? `${i + 1}. 评论（楼主是「${typeof post.authorName === 'string' ? post.authorName : '楼主'}」；${h.authorName} 说：「${h.content}」${prevLine}）→ 由 ${p.name} 回复（身份人设·必须完全代入这个身份、性格与口头禅说话：${p.persona}${langNote}${memNote}）`
+            : `${i + 1}. 评论（楼主是「${typeof post.authorName === 'string' ? post.authorName : '楼主'}」；${h.authorName} 说：「${h.content}」${prevLine}）→ 由 ${p.name} 回复（口吻参考·只学语气，其中具体事物严禁入评：${p.persona}${langNote}${memNote}）`;
         })
         .join('\n');
       // v28：走心帖（文艺/深情/表白）→ 楼中楼语气同频指令（楼主走心时楼中楼也发癫 = 杠精现场）
@@ -1131,6 +1140,14 @@ export async function POST(req: Request) {
       const scoopLine = scoop
         ? '\n\n【本帖判定：吃瓜爆料帖（偶遇/偷拍/疑似恋情）】楼中楼跟一级评论同风向：求图求锤、猜当事人身份、震惊蹲后续、粉丝心态（要塌了/快跑）；「好甜」「好稳」「锁死」式磕糖甜评整批最多 1 条。'
         : '';
+      // v43（A2）【NPC 记忆】：部分回复者带「TA记得楼主」记忆时的固定规则行
+      //（写在用户消息里——用户自定义模板覆盖不会丢掉这条豁免）
+      const npcMemRule = personas.some((p) => p.npcHistory)
+        ? '名单里部分网友带着「TA记得楼主」的真实记忆（系统给的真实背景）：允许认脸（「怎么又是你」）、接旧事、延续之前对楼主的态度，但回复主体仍要回应当前楼层的话；没带记忆的网友就是纯路人，绝不许臆想楼主的任何历史。\n\n'
+        : '';
+      // v43（A2）：本批 NPC 留言史合集（锚定校验语料用——认脸/提旧事的楼中楼
+      // 不因「不呼应当前帖」被误杀）
+      const memCorpus = personas.filter((p) => p.npcHistory).map((p) => p.npcHistory).join(' ');
       const messages: LLMMessage[] = [
         {
           role: 'system',
@@ -1149,7 +1166,8 @@ export async function POST(req: Request) {
           // v15（用户强制要求）：用户消息开头 = 锚定句 + 原封不动的主帖正文与话题标签
           // v35：防复读铁律进用户消息（系统模板可能被用户覆盖，此处双保险）
           // v41（C2）：avoid 防重复表注入楼中楼——本帖最近说过的评论不再重复
-          content: `${anchorHeadOf(post)}\n\n${topicLine}${tenderLine}${scoopLine}${avoidLine}\n\n评论区里有下面 ${expect} 条评论，请逐条写出对应的楼中楼回复（每条直接写正文，针对那条评论说的话回应并呼应主帖话题词，不要带任何@或「回复」前缀；输出 ${expect} 行）。防复读铁律：绝对不许重复被回复那条评论的核心词汇——对方说「代拍太可怕」你就绝不能再写「代拍可怕」，要么换完全不同的措辞谈同一件事，要么直接反驳/爆料/抖机灵换角度；多条回复针对同一条评论时（或楼层里已有人说过类似的话时），各自角度必须完全不同；回复正文里绝不许出现「thought」「废稿」等任何指令/规则字眼或 JSON 结构。\n${spec}\n${bjTimeLine()}`,
+          // v43（A2）：npcMemRule 记忆豁免固定行（同上双保险）
+          content: `${anchorHeadOf(post)}\n\n${topicLine}${tenderLine}${scoopLine}${avoidLine}\n\n${npcMemRule}评论区里有下面 ${expect} 条评论，请逐条写出对应的楼中楼回复（每条直接写正文，针对那条评论说的话回应并呼应主帖话题词，不要带任何@或「回复」前缀；输出 ${expect} 行）。防复读铁律：绝对不许重复被回复那条评论的核心词汇——对方说「代拍太可怕」你就绝不能再写「代拍可怕」，要么换完全不同的措辞谈同一件事，要么直接反驳/爆料/抖机灵换角度；多条回复针对同一条评论时（或楼层里已有人说过类似的话时），各自角度必须完全不同；回复正文里绝不许出现「thought」「废稿」等任何指令/规则字眼或 JSON 结构。\n${spec}\n${bjTimeLine()}`,
         },
       ];
       const raw = (await completeWithFallback(config, messages)).text;
@@ -1189,6 +1207,9 @@ export async function POST(req: Request) {
         const s = rawList[i] ?? '';
         const t = sanitizeCommentText(stripReplyPrefix(s));
         const ctx = `${h.content} ${postContentRaw}`;
+        // v43（A2）：锚定语料并入本批 NPC 留言史（认脸/提旧事的楼中楼不因
+        // 「不呼应当前帖」被误杀；领域私货检测仍只看当前帖——旧帖不算私货）
+        const anchorCtx = memCorpus ? `${ctx} ${memCorpus}` : ctx;
         // 用户规范：回复 3~100 字（留容差）
         if (t.length < 3 || t.length > 110) return '';
         if (violatesCommentLang(t, postLang)) return '';
@@ -1214,8 +1235,8 @@ export async function POST(req: Request) {
         if (h.prev.some((pv) => isParrotReply(t, pv))) return '';
         // v25 领域私货：回复携带 ≥2 个「被回复评论+主帖」领域之外的关键词 → 作废
         if (offTopicIn(t, ctx)) return '';
-        // 楼中楼必须呼应「被回复评论 + 主帖」
-        if (!commentAnchored(t, ctx)) return '';
+        // 楼中楼必须呼应「被回复评论 + 主帖」（v43-A2：+ NPC 留言史语料）
+        if (!commentAnchored(t, anchorCtx)) return '';
         return t;
       });
       // v35 批内同目标去重：同一评论的多条回复互相复读（不同楼但同样话）→ 保留首条
@@ -1338,6 +1359,14 @@ export async function POST(req: Request) {
         const p = (body.post ?? {}) as Record<string, unknown>;
         const postContent = typeof p.content === 'string' ? p.content.slice(0, 600) : '';
         const mediaDesc = typeof p.mediaDesc === 'string' && p.mediaDesc.trim() ? `\n（帖子配图：${p.mediaDesc.slice(0, 160)}）` : '';
+        // v43（A4）【已有评论感知】：帖子下已有的一级评论（角色评论必须避开——
+        // 防与先到的 NPC 撞观点/复读；空数组零注入）
+        const topComments = Array.isArray(p.topComments)
+          ? (p.topComments as unknown[]).filter((x): x is string => typeof x === 'string').slice(0, 5).map((x) => x.slice(0, 80))
+          : [];
+        const topCommentsLine = topComments.length
+          ? `\n\n【这条帖子评论区已有的评论（你的评论要和这些完全不同——观点、角度、措辞都不许撞；有人已经说过的，你就换角度或聊别的细节）】\n${topComments.map((c) => `- ${c}`).join('\n')}`
+          : '';
         // v41（B8）：语言校验跟随帖子（客户端传 lang；中文帖才拒整句外语，
         // 外语帖不再被写死的 zh-Hans 误杀全部评论）
         const engageLang = typeof p.lang === 'string' && LANG_LABELS[p.lang] ? p.lang : 'zh-Hans';
@@ -1348,7 +1377,7 @@ export async function POST(req: Request) {
             content:
               front + sysPrompt(promptOv, 'charEngage', { identity, userName, chRelation }),
           },
-          { role: 'user', content: `【${userName}的帖子】\n${postContent}${mediaDesc}\n\n请决定你的反应（严格JSON）。${bjTimeLine()}` },
+          { role: 'user', content: `【${userName}的帖子】\n${postContent}${mediaDesc}${topCommentsLine}\n\n请决定你的反应（严格JSON）。${bjTimeLine()}` },
         ])).text;
         // v40：数组包裹/畸形 JSON 兑底——[{...}] 取首个对象；整体解析失败时按
         // "comment"/"like" 字段正则恢复（一次点赞/评论决策不因格式问题白给）
@@ -1436,7 +1465,7 @@ export async function POST(req: Request) {
     }
 
     if (kind === 'reply' || kind === 'dm') {
-      const authorRaw = body.author as { name?: unknown; persona?: unknown; lang?: unknown; matrix?: unknown; char?: unknown; stranger?: unknown; relation?: unknown; mood?: unknown; memory?: unknown } | undefined;
+      const authorRaw = body.author as { name?: unknown; persona?: unknown; lang?: unknown; matrix?: unknown; char?: unknown; stranger?: unknown; relation?: unknown; mood?: unknown; memory?: unknown; forumMemory?: unknown } | undefined;
       const name = typeof authorRaw?.name === 'string' ? authorRaw.name.slice(0, 24) : '网友';
       // 【多世界观】矩阵 NPC 的合并人设（身份+性格+口头禅）更长，放宽截断
       const persona =
@@ -1499,7 +1528,7 @@ export async function POST(req: Request) {
             : '';
         const memCtx =
           posterHistory || npcSelf
-            ? `${posterHistory ? `${posterHistory}\n` : ''}${npcSelf}\n（上面两块是你的真实记忆/背景——引用它们不算幻觉也不算跑题，可以自然用在回复里；但回复主体仍要接着当前楼层的话）\n\n`
+            ? `${posterHistory ? `${posterHistory}\n` : ''}${npcSelf}\n（上面是你的真实记忆/背景——引用它们不算幻觉也不算跑题。若你在【你之前在楼主帖子下留过的话】里见过这位楼主：你们不是第一次打交道，开口第一句就可以直接带认脸态度——怼过TA的开口就是「怎么又是你」式，安慰过的可以问「上次那事好点没」；对楼主的印象和语气延续你之前的样子，但回复主体仍要接着当前楼层的话，旧事最多点一句，绝不整段复述。）\n\n`
             : '';
         const ctx = [
           postContent ? `【主帖内容】\n${postContent}${mediaDesc}` : '',
@@ -1582,6 +1611,13 @@ export async function POST(req: Request) {
         .join('\n\n') + '\n\n';
       const chLine = isChar ? `你（${name}）` : `你`;
       const memoryLine = isChar ? `你对TA的记忆` : `你们聊过的天`;
+      // v43（A3）【私信记忆】：客户端拼好的帖子记忆块（char=TA的帖子+网友评论；
+      // 网友=TA与楼主的打交道史+近帖；stranger 模式不送——认知隔离）。
+      // 固定注入用户消息，不随用户自定义 dm 模板覆盖丢失；空串零注入。
+      const forumMem =
+        !isStranger && typeof authorRaw?.forumMemory === 'string' && authorRaw.forumMemory.trim()
+          ? `${authorRaw.forumMemory.slice(0, 900)}\n\n`
+          : '';
       const raw = (await completeWithFallback(config, [
         {
           role: 'system',
@@ -1589,7 +1625,8 @@ export async function POST(req: Request) {
             front + sysPrompt(promptOv, 'dm', { identityBlock, chLine, name, persona, memoryLine, userName }),
         },
         // v41（C2）：avoid 防重复表注入私信——对方最近说过的不再重复
-        { role: 'user', content: `最近的对话：\n${history || '（刚开始聊）'}${avoidLine}\n\n请以「${name}」的口吻接下一条私信。${bjTimeLine()}` },
+        // v43（A3）：forumMem 帖子记忆块注入用户消息（固定行，不随模板覆盖丢失）
+        { role: 'user', content: `${forumMem}最近的对话：\n${history || '（刚开始聊）'}${avoidLine}\n\n请以「${name}」的口吻接下一条私信。${bjTimeLine()}` },
       ])).text;
       // v35：私信同样拦截泄露（指令原文/JSON 当话说）；v41（C1）：长度校验对齐口径
       const dmText = cleanText(raw, 300);

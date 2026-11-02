@@ -272,27 +272,15 @@ function ownerName(): string {
   return resolveAuthor('user').name || '机主';
 }
 
-/** 用户发帖 → 写入全部论坛角色的记忆（去重：同帖不重复入库）。
- *  句式：「{owner}今天在X论坛发帖说：……」——下次私聊/论坛互动角色都能想起。
- *  v42【帖子记忆·金鱼】：开关关时零写入（论坛互动不进长期记忆）。 */
-export function writeUserPostMemory(post: ForumPost, briefs?: ForumCharBrief[]): void {
-  try {
-    if (!isPostMemoryOn()) return; // 金鱼模式：不写入
-    const name = ownerName();
-    const media = post.media?.length ? `（配了${post.media.length}张图）` : '';
-    const content = post.content.replace(/\s+/g, ' ').slice(0, 80);
-    // v41（A1）：写记忆不再只写「发帖数前 6」——按加权随机抽 4 位轮换（熟的更可能记住，
-    // 但人人都可能看到），抽中即写（记忆面广了，互动轮换时熟悉度权重才有真实梯度）
-    for (const ch of briefs ?? pickCharsWeighted(4)) {
-      if (memHasForumFragment(ch.contactId, post.id, 'post')) continue;
-      memAddForumFragment(ch.contactId, `${name}今天在X论坛发帖说：「${content}」${media}`, {
-        postId: post.id,
-        kind: 'post',
-      }, post.createdAt);
-    }
-  } catch {
-    /* 静默 */
-  }
+/** 用户发帖 → 写入全部论坛角色的记忆（v43-B4 全面退役，保留签名避免调用方改动）。
+ *  「{owner}今天在X论坛发帖说：……」记忆碎片通道与 v42 帖子记忆块全渠道重复
+ *  （微信/QQ/信息走 buildForumChatBlock、论坛私信任 v43-A3 也注入块）——
+ *  同一帖在 system prompt 里出现两遍，AI 一句话提两次「你那帖子」的元凶。
+ *  深度模式由帖子记忆块独家覆盖；金鱼模式（开关关）本就零写入。
+ *  其余 write*Memory（评论/点赞/角色自发帖/神回复）是块不覆盖的独有事件，照写。 */
+export function writeUserPostMemory(_post: ForumPost, _briefs?: ForumCharBrief[]): void {
+  void _post;
+  void _briefs;
 }
 
 /** 用户在角色的帖子下评论 / 回复了角色的评论 → 写入该角色记忆。

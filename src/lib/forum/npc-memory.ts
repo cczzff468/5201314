@@ -127,6 +127,22 @@ export function exposeAnonIdentityIn(content: string): boolean {
 
 // ---------------- 写入（受「帖子记忆」开关守卫） ----------------
 
+// ---------------- v43（C2）时间感知分级 ----------------
+
+/** 记忆新旧分级提示：24h 内 = 强认脸（「今天又来了？」）；一周内 = 常规；
+ *  一周以上 = 弱提（印象模糊，顶多眼熟，别硬提细节）。所有记忆注入统一走此分级——
+ *  真人记忆会褪色，NPC 的认脸强度也应随时间衰减（而不是永远「怎么又是你」）。 */
+function memoryGrade(at: number): string {
+  try {
+    const age = Date.now() - at;
+    if (age < 24 * 3600_000) return '（最近就打过交道——印象还热乎，开口可以直接认脸，比如「今天又来了？」）';
+    if (age < 7 * 24 * 3600_000) return '';
+    return '（这是好一阵子前的事了——印象已经模糊，顶多觉得眼熟，别硬提当时的细节）';
+  } catch {
+    return '';
+  }
+}
+
 /**
  * NPC（虚拟网友/AI 角色）在用户帖子下留了言 → 写入该 NPC 的留言记忆。
  * · 金鱼模式（开关关）零写入；
@@ -187,9 +203,12 @@ export function npcMyHistoryLine(npcKey: string, post: ForumPost): string {
     if (!account) return '';
     const recs = npcHistory(npcKey, account, 2);
     if (!recs.length) return '';
-    return recs
+    const base = recs
       .map((r) => `${relTime(r.at, Date.now())}在楼主的帖子「${r.postSnippet.slice(0, 24)}」下说过「${r.myComment.slice(0, 50)}」`)
       .join('；');
+    // v43（C2）：时间分级提示附在行尾（最近=强认脸 / 好久=弱提）
+    const grade = memoryGrade(recs[recs.length - 1].at);
+    return grade ? `${base}${grade}` : base;
   } catch {
     return '';
   }
@@ -216,12 +235,13 @@ export function npcMyHistoryBlock(npcKey: string, post: ForumPost): string {
     const altLine = isNpcAnonKnown()
       ? '（你认得TA：TA的大号和小号你都见过——两个号在论坛发言都是同一个人，你对TA的整体印象延续）'
       : '';
+    // v43（C2）：时间分级（最近=强认脸 / 好久=弱提）
+    const grade = memoryGrade(recs[recs.length - 1].at);
     return [
       `【你之前在楼主帖子下留过的话（你记得这个楼主——延续你当时的态度和语气：怼过TA的继续怼，安慰过TA的接着关心；也可以「怎么又是你」式认脸。别整段复述，自然带出来）】${altLine}`,
+      ...(grade ? [grade] : []),
       ...lines,
-    ]
-      .filter(Boolean)
-      .join('\n');
+    ].join('\n');
   } catch {
     return '';
   }
@@ -285,6 +305,66 @@ function collectPosterHistory(post: ForumPost, account: 'main' | 'anon', limit: 
       .slice(0, limit);
   }
   return recs;
+}
+
+// ---------------- v43（A3）论坛私信记忆 ----------------
+
+/** 论坛私信用：这位 NPC 对「楼主」（机主）的整体记忆块——TA 自己的留言史 +
+ *  楼主最近发的帖（含最近一条 NPC 评论）。微信/QQ/信息早有跨应用感知块，
+ *  论坛自己的私信此前反而失忆（刚被怼完转头私聊像没事人）。仅大号会话调用——
+ *  小号会话（stranger 模式）零注入，认知隔离铁律。 */
+export function npcDmMemoryBlock(npcKey: string): string {
+  try {
+    if (!isPostMemoryOn()) return '';
+    if (isUserAuthor(npcKey)) return '';
+    const self = npcHistory(npcKey, 'main', 3);
+    let posts = listPostMemories('main', 2);
+    if (isNpcAnonKnown()) {
+      // NPC 认得马甲：两个号的帖都是同一个人发的
+      const other = listPostMemories('anon', 2);
+      const seen = new Set(posts.map((r) => r.postId));
+      posts = [...posts, ...other.filter((r) => !seen.has(r.postId))]
+        .sort((a, b) => b.createdAt - a.createdAt)
+        .slice(0, 2);
+    }
+    if (!self.length && !posts.length) return '';
+    const now = Date.now();
+    const parts: string[] = [];
+    if (self.length) {
+      parts.push(
+        '【你跟TA打过交道（你记得这个楼主——延续你当时的态度和语气：怼过的接着怼，聊得来的自然熟稳；别整段复述，聊到相关话题自然带出）】',
+        ...self.map(
+          (r) => `- ${relTime(r.at, now)}TA发「${r.postSnippet.slice(0, 24)}」时你评论过：「${r.myComment.slice(0, 50)}」`,
+        ),
+      );
+    }
+    if (posts.length) {
+      parts.push(
+        '【TA最近发的帖子（你刷到过——聊到相关话题可以提，比如评论区谁说了什么；别一口气全提）】',
+        ...posts.map((r) => {
+          const c = r.npcComments[r.npcComments.length - 1];
+          const cLine = c ? `（当时网友「${c.author}」留言：「${c.text.slice(0, 36)}」）` : '';
+          return `- ${relTime(r.createdAt, now)}TA发过：「${r.content.slice(0, 60)}」${cLine}`;
+        }),
+      );
+    }
+    return parts.join('\n');
+  } catch {
+    return '';
+  }
+}
+
+// ---------------- v43（C4）老熟人检测（通知文案记忆梗） ----------------
+
+/** 这位 NPC 是不是「老熟人」（在用户帖下留过 ≥2 次言）——通知页「又来了」变体用。
+ *  跨大号/小号合计（用户自己知道两个号都是自己，文案不暴露身份）。金鱼模式一律不算。 */
+export function isNpcVeteran(npcKey: string): boolean {
+  try {
+    if (!isPostMemoryOn() || isUserAuthor(npcKey)) return false;
+    return readList(npcKey, 'main').length + readList(npcKey, 'anon').length >= 2;
+  } catch {
+    return false;
+  }
 }
 
 // ---------------- 回访名单 ----------------

@@ -26,6 +26,8 @@ import {
 import { XAvatar, XIcons, useXTheme } from './shared';
 import { useForum } from './ctx';
 import { PostCard, EmptyState, CommunityIcon } from './feed';
+// v43（C4）：老熟人检测——通知文案「又来了」记忆梗
+import { isNpcVeteran } from '@/lib/forum/npc-memory';
 
 /** 通用页面头（X 二级 tab 头：标题 + 可选右侧按钮） */
 function PageHead({ title, right }: { title: string; right?: React.ReactNode }) {
@@ -413,6 +415,12 @@ export function NotificationsView() {
           const a = resolveAuthor(n.fromKey);
           const post = n.postId ? d.posts.find((p) => p.id === n.postId) : undefined;
           const target: ForumPost | undefined = post;
+          // v43（C4）【记忆梗】：在TA帖下留过多次言的「老熟人」回访时，通知文案
+          // 偶尔换成认脸版（「xxx 又来了」）——按通知 id 哈希稳定选择，重渲染不闪烁
+          const veteranReply =
+            n.type === 'reply' &&
+            isNpcVeteran(n.fromKey) &&
+            [...n.id].reduce((s, c) => s + c.charCodeAt(0), 0) % 10 < 4;
           const iconColor =
             n.type === 'like' ? t.pink : n.type === 'reply' ? t.blue : n.type === 'repost' ? t.green : t.blue;
           const icon =
@@ -450,7 +458,7 @@ export function NotificationsView() {
               </span>
               <span className="min-w-0 flex-1">
                 <span className="block text-[15px] leading-snug" style={{ color: t.text }}>
-                  {n.type === 'system' ? n.text : n.type === 'like' ? `${a.name} 赞了你的帖子` : n.type === 'reply' ? `${a.name} 回复了你` : `${a.name} 转推了你的帖子`}
+                  {n.type === 'system' ? n.text : n.type === 'like' ? `${a.name} 赞了你的帖子` : n.type === 'reply' ? (veteranReply ? `${a.name} 又来了：回复了你` : `${a.name} 回复了你`) : `${a.name} 转推了你的帖子`}
                 </span>
                 {target && (
                   <span className="mt-[2px] block truncate text-[14px]" style={{ color: t.secondary }}>
