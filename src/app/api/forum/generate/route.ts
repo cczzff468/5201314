@@ -1425,7 +1425,7 @@ export async function POST(req: Request) {
     }
 
     if (kind === 'reply' || kind === 'dm') {
-      const authorRaw = body.author as { name?: unknown; persona?: unknown; lang?: unknown; matrix?: unknown; char?: unknown; relation?: unknown; mood?: unknown; memory?: unknown } | undefined;
+      const authorRaw = body.author as { name?: unknown; persona?: unknown; lang?: unknown; matrix?: unknown; char?: unknown; stranger?: unknown; relation?: unknown; mood?: unknown; memory?: unknown } | undefined;
       const name = typeof authorRaw?.name === 'string' ? authorRaw.name.slice(0, 24) : '网友';
       // 【多世界观】矩阵 NPC 的合并人设（身份+性格+口头禅）更长，放宽截断
       const persona =
@@ -1530,14 +1530,22 @@ export async function POST(req: Request) {
             .join('\n')
         : '';
       // v41（C1）：私信对齐 charReply 规格——对方是 AI 角色时带完整身份块
-      //（人设卡+关系+情绪+对用户的记忆）；普通网友保持轻量身份行
+      //（人设卡+关系+情绪+对用户的记忆）；普通网友保持轻量身份行。
+      // 匿名小号会话（stranger）：对面是「你不认识的陌生网友」——不带关系/情绪/
+      // 记忆（那些全是与机主本人的事，注入即穿帮），人格照旧但按陌生人聊天
       const isChar = authorRaw?.char === true;
+      const isStranger = authorRaw?.stranger === true;
       const dmRelation = typeof authorRaw?.relation === 'string' ? authorRaw.relation.slice(0, 80) : '';
       const dmMood = typeof authorRaw?.mood === 'string' ? authorRaw.mood.slice(0, 400) : '';
       const dmMemory = typeof authorRaw?.memory === 'string' ? authorRaw.memory.slice(0, 2000) : '';
       const identityBlock = [
-        isChar ? `# 你是谁（第一人称，严格保持，绝不跳出）\n你是「${name}」，${userName}的${dmRelation || '好友'}——你是一个有自己生活、脾气和说话习惯的真实的人，在 X 论坛有一个账号，你们在论坛私信里聊天。` : `你是中文论坛（X/Twitter 风格广场）的用户「${name}」，正在论坛私信里和${userName}聊天。`,
-        persona ? `【你的资料卡】\n${persona}` : '',
+        isStranger
+          ? `你是中文论坛（X/Twitter 风格广场）的用户「${name}」${persona ? '（下面有你的资料卡）' : ''}。一个你完全不认识的陌生网友「${userName}」正在论坛私信里找你聊天——你们素不相识，既不是好友也没有任何共同经历，就当一个陌生网友突然私信你那样聊天（好奇/警惕/随缘都行）。`
+          : isChar
+            ? `# 你是谁（第一人称，严格保持，绝不跳出）\n你是「${name}」，${userName}的${dmRelation || '好友'}——你是一个有自己生活、脾气和说话习惯的真实的人，在 X 论坛有一个账号，你们在论坛私信里聊天。`
+            : `你是中文论坛（X/Twitter 风格广场）的用户「${name}」，正在论坛私信里和${userName}聊天。`,
+        persona && !isStranger ? `【你的资料卡】\n${persona}` : '',
+        persona && isStranger ? `【你的说话风格（保持自己的口吻，但不认识对面这个人）】\n${persona}` : '',
         dmMood ? `【你此刻的心情】\n${dmMood}` : '',
         dmMemory ? `【你对${userName}的记忆（你们真实经历过的事——聊天时自然运用，不要逐条复述）】\n${dmMemory}` : '',
       ]

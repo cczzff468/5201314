@@ -16,17 +16,20 @@
  */
 
 import { useState, useSyncExternalStore } from 'react';
-import { ChevronDown, X } from 'lucide-react';
+import { ChevronDown, VenetianMask, X } from 'lucide-react';
 import {
+  ANON_KEY,
   followersOf,
   forumData,
   forumSnapshot,
   isPostVisible,
+  isUserAuthor,
   myFollowingCount,
   postsOf,
   resolveAuthor,
   saveForum,
   subscribeForum,
+  switchForumAccount,
   type AuthorKey,
   type ForumPost,
 } from '@/lib/forum/core';
@@ -49,7 +52,9 @@ export function ProfileView({ authorKey }: { authorKey: AuthorKey }) {
   useSyncExternalStore(subscribeForum, forumSnapshot, forumSnapshot);
   const d = forumData();
   const a = resolveAuthor(authorKey);
-  const isMe = authorKey === 'user';
+  // 大号与匿名小号都是「我自己」的主页（编辑资料/切换按钮/回复 tab 语义同源）
+  const isMe = isUserAuthor(authorKey);
+  const isAnonProfile = authorKey === ANON_KEY;
   const followed = d.following.includes(authorKey);
   const [pTab, setPTab] = useState<PTab>('posts');
   const [editing, setEditing] = useState(false);
@@ -63,25 +68,28 @@ export function ProfileView({ authorKey }: { authorKey: AuthorKey }) {
   const replyPosts = all.filter((p) => p.replyTo !== null);
   // 「回复」tab（自己的主页）：别人回复我的（回复我任何帖/评论的），非我评论别人的
   // v7：按真实 parentId（replyToPost，缺省回退 replyTo）判定——别人在我的楼中楼
-  // 下的任何一层回复（哪怕锚点挂在别人的评论分组上）都能正确算作「回复了我」
-  const myPostIdSet = new Set(d.posts.filter((p) => p.authorKey === 'user').map((p) => p.id));
+  // 下的任何一层回复（哪怕锚点挂在别人的评论分组上）都能正确算作「回复了我」。
+  // 匿名小号主页：只算小号自己的帖/评论（与大号数据完全隔离）。
+  const myPostIdSet = new Set(d.posts.filter((p) => p.authorKey === authorKey).map((p) => p.id));
   const repliesToMe = d.posts
     .filter(
-      (p) => p.authorKey !== 'user' && p.replyTo !== null && myPostIdSet.has(p.replyToPost ?? p.replyTo) && isPostVisible(p),
+      (p) => !isUserAuthor(p.authorKey) && p.replyTo !== null && myPostIdSet.has(p.replyToPost ?? p.replyTo) && isPostVisible(p),
     )
     .sort((x, y) => y.createdAt - x.createdAt);
   // 「转推」tab（自己的主页）：我转推过的帖子
   const myReposts = d.posts.filter((p) => p.reposted === true && isPostVisible(p)).sort((x, y) => y.createdAt - x.createdAt);
   // 「媒体」tab：带附图的帖子 → 3 列方图网格（X 官方媒体墙）
   const mediaPosts = all.filter((p) => (p.media ?? []).length > 0);
-  const joined = new Date(d.joinedAt);
+  // 加入时间：大号 = 论坛注册时刻；匿名小号 = 小号创建时刻
+  const joined = new Date(isAnonProfile ? (d.anon?.createdAt ?? d.joinedAt) : d.joinedAt);
   const joinedLabel = `${joined.getFullYear()}年${joined.getMonth() + 1}月加入`;
-  const myBanner = isMe ? d.profile?.banner : undefined;
+  const myBanner = isMe ? (isAnonProfile ? d.anon?.profile?.banner : d.profile?.banner) : undefined;
   /** 真人主页（自己/联系人）无自定义背景时的默认横幅（精致渐变艺术图）；NPC 用品牌色渐变 */
   const useDefaultBanner = !myBanner && (isMe || authorKey.startsWith('char:'));
   const bannerBg = a.npcAvatar?.bg ?? (authorKey.startsWith('char:') ? '#5b7d9e' : '#657786');
   // v7 用户要求：正在关注/关注者默认 0——自己 = 真实关注数，其他人 = 0（不造假数）；
-  // 关注者同样默认 0（followersOf：仅内置认证大 V 保留粉丝基数）
+  // 关注者同样默认 0（followersOf：仅内置认证大 V 保留粉丝基数）。
+  // 匿名小号与大号共用关注列表（X 同设备双号语义，关注是设备行为）。
   const followingCount = isMe ? myFollowingCount(d) : 0;
 
   /** 页内搜索关键词过滤（当前 tab 的列表） */
@@ -215,15 +223,44 @@ export function ProfileView({ authorKey }: { authorKey: AuthorKey }) {
             <XAvatar authorKey={authorKey} size={80} />
             <div className="flex items-center gap-2">
               {isMe ? (
-                <button
-                  type="button"
-                  aria-label="编辑资料"
-                  onClick={() => setEditing(true)}
-                  className="flex h-[34px] items-center rounded-full border px-4 text-[14px] font-bold transition-opacity active:opacity-60"
-                  style={{ borderColor: t.dark ? '#536471' : '#cfd9de', color: t.text }}
-                >
-                  编辑资料
-                </button>
+                <>
+                  {/* 【匿名账号】大号主页 → 切换到匿名小号；小号主页 → 切回大号。
+                      切到小号后发帖/评论/点赞/私信都以「匿名者」身份发生（数据完全隔离） */}
+                  <button
+                    type="button"
+                    aria-label={isAnonProfile ? '切回主账号' : '切换匿名账号'}
+                    onClick={() => {
+                      const to = isAnonProfile ? 'main' : 'anon';
+                      const switched = switchForumAccount(to);
+                      if (switched === 'anon') {
+                        const anon = resolveAuthor(ANON_KEY);
+                        f.toast(`已切换到匿名账号 @${anon.handle}，发帖/评论/点赞都以匿名者身份发生`);
+                        f.openProfile(ANON_KEY);
+                      } else {
+                        f.toast('已切回主账号（大号）');
+                        f.openProfile('user');
+                      }
+                    }}
+                    className="flex h-[34px] items-center gap-1.5 rounded-full border px-3.5 text-[13px] font-bold transition-opacity active:opacity-60"
+                    style={{
+                      borderColor: isAnonProfile ? (t.dark ? '#536471' : '#cfd9de') : t.border,
+                      color: isAnonProfile ? t.text : t.blue,
+                      background: isAnonProfile ? 'transparent' : 'rgba(29,155,240,0.08)',
+                    }}
+                  >
+                    <VenetianMask width={15} height={15} strokeWidth={2.1} aria-hidden="true" />
+                    {isAnonProfile ? '切回大号' : '切换匿名账号'}
+                  </button>
+                  <button
+                    type="button"
+                    aria-label="编辑资料"
+                    onClick={() => setEditing(true)}
+                    className="flex h-[34px] items-center rounded-full border px-4 text-[14px] font-bold transition-opacity active:opacity-60"
+                    style={{ borderColor: t.dark ? '#536471' : '#cfd9de', color: t.text }}
+                  >
+                    编辑资料
+                  </button>
+                </>
               ) : (
                 <>
                   <button
@@ -269,6 +306,15 @@ export function ProfileView({ authorKey }: { authorKey: AuthorKey }) {
             <div className="flex items-center gap-1">
               <h1 className="text-[20px] font-extrabold leading-tight">{a.name}</h1>
               {a.verified && <VerifiedBadge size={16} />}
+              {/* 匿名小号标识（仅自己可见的身份提示：当前正在用小号冲浪） */}
+              {isMe && isAnonProfile && (
+                <span
+                  className="ml-1 flex items-center gap-1 rounded-full px-2 py-[2px] text-[11px] font-bold"
+                  style={{ background: 'rgba(29,155,240,0.12)', color: t.blue }}
+                >
+                  <VenetianMask width={11} height={11} strokeWidth={2.4} aria-hidden="true" /> 匿名账号
+                </span>
+              )}
             </div>
             <p className="text-[14px]" style={{ color: t.secondary }}>
               @{a.handle}
@@ -399,8 +445,8 @@ export function ProfileView({ authorKey }: { authorKey: AuthorKey }) {
         </div>
       </div>
 
-      {/* 编辑资料弹层 */}
-      {editing && <EditProfileSheet onClose={() => setEditing(false)} />}
+      {/* 编辑资料弹层（大号/匿名小号各自隔离的资料编辑） */}
+      {editing && <EditProfileSheet account={isAnonProfile ? 'anon' : 'main'} onClose={() => setEditing(false)} />}
     </div>
   );
 }

@@ -52,6 +52,9 @@ import {
 } from '@/lib/ios/accounts';
 // 大号侧「小号是我」披露检测（用户规则一/二：账号关联记忆）与主号侧事件记忆碎片
 import { memAddEventFragment, memDetectMainAltDisclosure, memLinkAltAccounts } from '@/lib/memory';
+// X论坛匿名小号「揭秘时刻」：私聊里说破「那是我小号」→ 关联记忆 + 持久披露标记
+import { detectForumAnonDisclosure, markForumAnonDisclosed } from '@/lib/ios/forum-anon';
+import { resolveAuthor, ANON_KEY } from '@/lib/forum/core';
 import { localDB } from '@/lib/ios/db';
 import { buildAltAccountsSection } from '@/lib/ios/persona';
 import { cachedOwnerName } from '@/lib/ios/contacts-store';
@@ -704,6 +707,28 @@ async function runStream(rt: StreamRuntime, opts: BeginChatStreamOptions): Promi
           `${ownerLabel}亲口告知：「${altLabels}」是${ownerLabel}的小号——小号和大号都是${ownerLabel}本人（同一个人）`,
           { sourceTag: 'acc-link' },
         );
+      }
+      // 【X论坛匿名小号·揭秘时刻】聊天 App 小号系统没认领的「小号/那个帖子是我发的」表述
+      // → 归论坛匿名账号（A 级帖子指向明确时优先级更高，不受聊天小号命中影响）：
+      // 落持久披露标记 + 写关联记忆碎片——之后 AI 分享/聊到小号帖子的初始认知变成「TA本人」，
+      // 态度可以转变（吃醋/调侃钓鱼）；默认（未说破）两号记忆完全隔离。
+      try {
+        const anonHit = detectForumAnonDisclosure(lastUserText, hitAltIds.length > 0);
+        if (anonHit) {
+          const fresh = markForumAnonDisclosed(linkCid, anonHit);
+          const ownerLabel2 = cachedOwnerName() || useSettings.getState().profile.name?.trim() || '机主';
+          const anonName = resolveAuthor(ANON_KEY).name;
+          if (fresh) {
+            memAddEventFragment(
+              linkCid,
+              accApp,
+              `${ownerLabel2}亲口向我承认：X论坛网友「${anonName}」其实是${ownerLabel2}本人的小号（匿名账号）——之前我一直以为是个陌生网友`,
+              { sourceTag: 'forum-anon-link' },
+            );
+          }
+        }
+      } catch {
+        // 论坛小号检测失败不影响本轮聊天
       }
     }
   } catch {

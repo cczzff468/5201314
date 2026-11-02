@@ -14,11 +14,13 @@
  */
 
 import { useRef, useState } from 'react';
-import { Camera, ImagePlus, RotateCcw, Trash2 } from 'lucide-react';
+import { Camera, ImagePlus, RotateCcw, Trash2, VenetianMask } from 'lucide-react';
 import { fileToAvatarDataUrl } from '@/lib/ios/avatar-upload';
 import {
+  ANON_KEY,
   forumData,
   ownerGlobalProfile,
+  resolveAuthor,
   saveForumProfile,
   DEFAULT_USER_HANDLE,
 } from '@/lib/forum/core';
@@ -97,12 +99,19 @@ function Field({
   );
 }
 
-export function EditProfileSheet({ onClose }: { onClose: () => void }) {
+/** 编辑资料弹层：大号（account='main'，缺省）与匿名小号（account='anon'）各自隔离的资料。
+ *  大号：槽位隔离语义（未编辑字段跟随全局机主资料）；
+ *  小号：独立身份——未编辑字段用小号自己的随机默认（网名/handle/头像），
+ *  与大号/全局零关联（AI 认知隔离的根基：资料里不出现任何机主痕迹）。 */
+export function EditProfileSheet({ account = 'main', onClose }: { account?: 'main' | 'anon'; onClose: () => void }) {
   const f = useForum();
   const t = f.t;
   const d = forumData();
+  const isAnon = account === 'anon';
   const gp = ownerGlobalProfile();
-  const fp = d.profile ?? {};
+  const anonAuthor = resolveAuthor(ANON_KEY);
+  // 小号预览/占位：小号当前身份（默认或自定义）；大号预览：自定义 → 全局
+  const fp = isAnon ? (d.anon?.profile ?? {}) : (d.profile ?? {});
 
   const [name, setName] = useState(fp.name ?? '');
   const [handle, setHandle] = useState(fp.handle ?? '');
@@ -112,11 +121,13 @@ export function EditProfileSheet({ onClose }: { onClose: () => void }) {
   const avatarRef = useRef<HTMLInputElement | null>(null);
   const bannerRef = useRef<HTMLInputElement | null>(null);
 
-  /** 头像预览：自定义 → 全局 → 默认头像图 */
-  const previewAvatar = avatar ?? gp.avatar;
+  /** 头像预览：小号 = 自定义 → 小号默认（头像库随机图）；大号 = 自定义 → 全局 → 默认头像图 */
+  const previewAvatar = isAnon ? (avatar ?? anonAuthor.avatar) : (avatar ?? gp.avatar);
   const hasCustom = Boolean(fp.name || fp.handle || fp.bio || fp.avatar || fp.banner);
-  /** 账号默认值：@qvq12345678（用户指定，未自定义时始终用它） */
-  const handleFallback = DEFAULT_USER_HANDLE;
+  /** 账号默认值：大号 @qvq12345678（用户指定）；小号 = 创建时随机生成的 handle */
+  const handleFallback = isAnon ? anonAuthor.handle : DEFAULT_USER_HANDLE;
+  /** 名字占位：小号默认随机网名；大号跟随全局机主名 */
+  const namePlaceholder = isAnon ? `默认（${anonAuthor.name}）` : `跟随全局（${gp.name}）`;
 
   const onAvatarFile = (file: File | undefined) => {
     if (!file) return;
@@ -144,33 +155,39 @@ export function EditProfileSheet({ onClose }: { onClose: () => void }) {
   };
 
   const save = () => {
-    saveForumProfile({
-      name: name.trim() || undefined,
-      handle: handle.trim() || undefined,
-      bio: bio.trim() || undefined,
-      avatar,
-      banner,
-    });
-    f.toast('资料已保存');
+    saveForumProfile(
+      {
+        name: name.trim() || undefined,
+        handle: handle.trim() || undefined,
+        bio: bio.trim() || undefined,
+        avatar,
+        banner,
+      },
+      account,
+    );
+    f.toast(isAnon ? '匿名账号资料已保存' : '资料已保存');
     onClose();
   };
 
   const resetAll = () => {
-    saveForumProfile({
-      name: undefined,
-      handle: undefined,
-      bio: undefined,
-      avatar: undefined,
-      banner: undefined,
-    });
-    f.toast('已清除全部自定义，恢复跟随全局');
+    saveForumProfile(
+      {
+        name: undefined,
+        handle: undefined,
+        bio: undefined,
+        avatar: undefined,
+        banner: undefined,
+      },
+      account,
+    );
+    f.toast(isAnon ? '已恢复匿名账号的默认身份' : '已清除全部自定义，恢复跟随全局');
     onClose();
   };
 
   return (
     <div className="absolute inset-0 z-50" role="dialog" aria-modal="true" aria-label="编辑资料">
       <div className="flex h-full flex-col animate-[forum-sheet_.26s_ease-out]" style={{ background: t.bg, color: t.text }}>
-        {/* 顶行：取消 | 编辑资料 | 保存（X Edit profile 三段式） */}
+        {/* 顶行：取消 | 编辑资料（匿名小号）/ 编辑资料 | 保存（X Edit profile 三段式） */}
         <div className="flex shrink-0 items-center justify-between px-4 pt-[54px]" style={{ height: 100 }}>
           <button
             type="button"
@@ -180,7 +197,10 @@ export function EditProfileSheet({ onClose }: { onClose: () => void }) {
           >
             取消
           </button>
-          <span className="text-[17px] font-bold">编辑资料</span>
+          <span className="flex items-center gap-1.5 text-[17px] font-bold">
+            {isAnon && <VenetianMask width={17} height={17} strokeWidth={2.1} aria-hidden="true" />}
+            {isAnon ? '编辑匿名账号' : '编辑资料'}
+          </span>
           <button
             type="button"
             onClick={save}
@@ -254,14 +274,14 @@ export function EditProfileSheet({ onClose }: { onClose: () => void }) {
             </div>
           </div>
 
-          {/* 名字 / 简介（未填跟随全局；「正在关注/关注者」已按用户要求移除，跟随真实数据） */}
+          {/* 名字 / 简介（小号未填恢复自己的随机默认；大号未填跟随全局） */}
           <Field
             label="名字"
             value={name}
             onChange={setName}
-            placeholder={`跟随全局（${gp.name}）`}
+            placeholder={namePlaceholder}
             maxLength={24}
-            ariaLabel="自定义名字"
+            ariaLabel={isAnon ? '匿名账号名字' : '自定义名字'}
           />
           <Field
             label="账号"
@@ -269,22 +289,26 @@ export function EditProfileSheet({ onClose }: { onClose: () => void }) {
             onChange={onHandleChange}
             placeholder={`默认 @${handleFallback}，可自定义`}
             maxLength={20}
-            ariaLabel="自定义账号"
+            ariaLabel={isAnon ? '匿名账号账号' : '自定义账号'}
           />
           <p className="px-4 pt-1.5 text-[12px]" style={{ color: t.secondary }}>
-            账号是你在X论坛的唯一标识，默认 @{handleFallback}，仅限字母、数字、下划线或中文，不能包含 @ 或空格。
+            {isAnon
+              ? `匿名账号的账号是它在论坛的唯一标识，默认 @${handleFallback}，仅限字母、数字、下划线或中文——和大号完全独立，互不可见关联。`
+              : `账号是你在X论坛的唯一标识，默认 @${handleFallback}，仅限字母、数字、下划线或中文，不能包含 @ 或空格。`}
           </p>
           <Field
             label="简介"
             value={bio}
             onChange={setBio}
-            placeholder="X论坛用户"
+            placeholder={isAnon ? '匿名账号的简介' : 'X论坛用户'}
             maxLength={60}
-            ariaLabel="自定义简介"
+            ariaLabel={isAnon ? '匿名账号简介' : '自定义简介'}
           />
 
           <p className="px-4 pt-4 text-[12px] leading-relaxed" style={{ color: t.secondary }}>
-            留空或移除的项目会跟随全局资料（设置 › 个人信息）；在这里保存过的项目，X论坛会一直使用这里的值。
+            {isAnon
+              ? '匿名账号（小号）与大号（主账号）的发帖、评论、点赞完全隔离；AI 看到的一直是一个陌生网友，除非你在私聊里亲口说破。'
+              : '留空或移除的项目会跟随全局资料（设置 › 个人信息）；在这里保存过的项目，X论坛会一直使用这里的值。'}
           </p>
 
           {hasCustom && (
@@ -294,7 +318,8 @@ export function EditProfileSheet({ onClose }: { onClose: () => void }) {
               className="mx-4 mt-4 flex h-[38px] w-[calc(100%-32px)] items-center justify-center gap-2 rounded-full border text-[14px] font-bold transition-opacity active:opacity-60"
               style={{ borderColor: t.dark ? '#536471' : '#cfd9de', color: t.text }}
             >
-              <RotateCcw width={14} height={14} strokeWidth={2.2} aria-hidden="true" /> 全部恢复跟随全局
+              <RotateCcw width={14} height={14} strokeWidth={2.2} aria-hidden="true" />{' '}
+              {isAnon ? '全部恢复默认身份' : '全部恢复跟随全局'}
             </button>
           )}
         </div>

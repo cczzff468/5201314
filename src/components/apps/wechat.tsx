@@ -7076,7 +7076,7 @@ function ChatPage({
                             : m.kind === 'tbshare' && m.tbshare
                               ? tbShareHistoryLine(m.tbshare.sid)
                               : m.kind === 'forumshare' && m.forumshare
-                                ? forumShareHistoryLine(m.forumshare.pid)
+                                ? forumShareHistoryLine(m.forumshare.pid, peer.id)
                                 : m.kind === 'tbdraft' && m.tbdraft
                                 ? tbDraftHistoryLine(m.tbdraft.did)
                                 : m.kind === 'relcard' && m.relcard

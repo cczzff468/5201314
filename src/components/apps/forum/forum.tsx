@@ -17,20 +17,24 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
-import { ArrowDown, ArrowUp, Check, Flag, Sparkles, EyeOff } from 'lucide-react';
+import { ArrowDown, ArrowUp, Check, Flag, Sparkles, EyeOff, VenetianMask } from 'lucide-react';
 import {
+  ANON_KEY,
   COMMUNITY_DEFS,
+  activeAuthorKey,
   communityName,
   countShort,
   forumData,
   forumSnapshot,
   followersOf,
   isPostVisible,
+  isAnonActive,
   myFollowingCount,
   refreshForumAuthors,
   resolveAuthor,
   saveForum,
   subscribeForum,
+  switchForumAccount,
   castVote as castVoteCore,
   hidePost,
   uid,
@@ -358,11 +362,14 @@ export default function ForumApp() {
     const d = forumData();
     const p = d.posts.find((x) => x.id === postId);
     if (!p) return;
-    if (p.likes.includes('user')) p.likes = p.likes.filter((k) => k !== 'user');
+    // 点赞归属当前活跃账号（大号/小号隔离：切号后同一帖的红心状态各自独立）
+    const me = activeAuthorKey();
+    if (p.likes.includes(me)) p.likes = p.likes.filter((k) => k !== me);
     else {
-      p.likes = [...p.likes, 'user'];
-      // v33【AI 真人社交】：用户给角色的帖子点赞 → 通知角色（写记忆）+ 低概率 TA 来评论区回一句
-      if (p.authorKey.startsWith('char:')) {
+      p.likes = [...p.likes, me];
+      // v33【AI 真人社交】：用户（大号）给角色的帖子点赞 → 通知角色（写记忆）+ 低概率
+      // TA 来评论区回一句。匿名小号点赞 → 陌生人点赞，不写记忆不致谢（认知隔离）
+      if (p.authorKey.startsWith('char:') && me === 'user') {
         writeUserLikeMemory(p.authorKey.slice(5), p);
         queueCharThanksForLike(p);
       }
@@ -390,14 +397,17 @@ export default function ForumApp() {
   );
 
   /** 发帖（compose 发布回调）：落库 + 触发 AI 互动 + 切回主页顶部。
-   *  extras：媒体/投票/位置/定时；定时帖 createdAt=visibleAt（到点才出现在列表）。 */
+   *  extras：媒体/投票/位置/定时；定时帖 createdAt=visibleAt（到点才出现在列表）。
+   *  匿名小号模式：帖子归属 'anon'——AI 看到的就是一个普通陌生网友发的帖
+   *  （只排网友反应，不通知角色/不写角色记忆，两号记忆完全隔离）。 */
   const publish = useCallback(
     (text: string, community: string | null, extras?: ComposePayload) => {
       const d = forumData();
+      const me = activeAuthorKey();
       const scheduled = typeof extras?.visibleAt === 'number' && extras.visibleAt > Date.now();
       const post: ForumPost = {
         id: uid('p'),
-        authorKey: 'user',
+        authorKey: me,
         content: text.slice(0, POST_MAX),
         community: community === 'hot' ? null : community,
         createdAt: scheduled ? extras!.visibleAt! : Date.now(),
@@ -421,10 +431,13 @@ export default function ForumApp() {
       saveForum({ ...d });
       if (!scheduled) {
         queueUserPostInteractions(post);
-        // v33【AI 真人社交】：用户发帖 → 写入全部角色的记忆（「TA今天在论坛发帖说…」）
-        // + 每位角色延迟几分钟独立决定要不要点赞/评论（LLM 决策，不秒回）
-        writeUserPostMemory(post);
-        queueCharEngagements(post);
+        if (me === 'user') {
+          // v33【AI 真人社交】（仅大号）：用户发帖 → 写入全部角色的记忆（「TA今天在论坛发帖说…」）
+          // + 每位角色延迟几分钟独立决定要不要点赞/评论（LLM 决策，不秒回）。
+          // 小号帖：角色不会把它当「TA的帖」看（认知隔离），只有普通网友来互动。
+          writeUserPostMemory(post);
+          queueCharEngagements(post);
+        }
       }
       setHomeTab('foryou');
       gotoTab(0);
@@ -474,6 +487,9 @@ export default function ForumApp() {
 
   const d = forumData();
   const seeded = d.seeded && d.posts.length > 0;
+  // 当前活跃账号（大号/匿名小号）：顶栏头像、抽屉资料、发布/点赞/评论的归属都跟随它
+  const meKey = activeAuthorKey();
+  const anonMode = isAnonActive();
   // pinnedTags 过滤掉 'hot'（今日热议 = 广场，与「为你推荐」重复，不作为分类标签）
   const pinnedTags = (d.pinnedTags ?? []).filter((id) => id !== 'hot' && COMMUNITY_DEFS.some((c) => c.id === id));
   // 【多世界观 v37】激活世界观（抽屉入口展示用；实时读 store——切换/编辑立即生效）。
@@ -596,7 +612,19 @@ export default function ForumApp() {
                 {/* 顶栏(X:头像 | 𝕏 | 订阅):随内容滚走(用户要求:顶部的头像、X符号、订阅跟随滑动)。
                     v39：X 符号绝对居中（左右元素宽度不同时也严格居中）+ 可点击返回上一界面（关闭论坛 App） */}
                 <div className="relative flex items-center justify-between px-4 pt-[54px]" style={{ height: 100, background: t.bg }}>
-                  <XAvatar authorKey="user" size={36} onClick={() => setDrawer(true)} />
+                  <div className="relative">
+                    <XAvatar authorKey={meKey} size={36} onClick={() => setDrawer(true)} />
+                    {/* 匿名小号模式角标（顶栏头像右下小面具：一眼看出当前在用小号） */}
+                    {meKey === ANON_KEY && (
+                      <span
+                        className="absolute -bottom-1 -right-1 flex h-[16px] w-[16px] items-center justify-center rounded-full border"
+                        style={{ background: t.bg, borderColor: t.dark ? '#536471' : '#cfd9de', color: t.blue }}
+                        aria-label="当前使用匿名账号"
+                      >
+                        <VenetianMask width={10} height={10} strokeWidth={2.6} aria-hidden="true" />
+                      </span>
+                    )}
+                  </div>
                   <button
                     type="button"
                     aria-label="返回"
@@ -846,28 +874,61 @@ export default function ForumApp() {
                     <XLogo size={22} />
                   </span>
                 </div>
-                {/* 个人摘要（点头像进主页） */}
-                <button
-                  type="button"
-                  onClick={() => {
-                    setDrawer(false);
-                    openProfile('user');
-                  }}
-                  className="mt-2 flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left transition-colors active:opacity-70"
-                  style={{ background: t.hover }}
-                >
-                  <XAvatar authorKey="user" size={44} />
-                  <div className="min-w-0 flex-1">
-                    <span className="block truncate text-[16px] font-bold">{resolveAuthor('user').name}</span>
-                    <span className="block truncate text-[13px]" style={{ color: t.secondary }}>
-                      @{resolveAuthor('user').handle}
-                    </span>
-                    <span className="mt-[2px] block text-[13px]" style={{ color: t.secondary }}>
-                      <span style={{ color: t.text, fontWeight: 700 }}>{myFollowingCount(d)}</span> 关注 ·{' '}
-                      <span style={{ color: t.text, fontWeight: 700 }}>{followersOf('user')}</span> 粉丝
-                    </span>
-                  </div>
-                </button>
+                {/* 个人摘要（点头像进主页；匿名小号模式展示小号身份 + 一键切回大号） */}
+                <div className="mt-2 flex w-full items-center gap-3 rounded-2xl px-3 py-3" style={{ background: t.hover }}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDrawer(false);
+                      openProfile(meKey);
+                    }}
+                    className="flex min-w-0 flex-1 items-center gap-3 rounded-xl text-left transition-opacity active:opacity-70"
+                  >
+                    <XAvatar authorKey={meKey} size={44} />
+                    <div className="min-w-0 flex-1">
+                      <span className="flex items-center gap-1.5 truncate text-[16px] font-bold">
+                        <span className="truncate">{resolveAuthor(meKey).name}</span>
+                        {anonMode && (
+                          <span
+                            className="flex shrink-0 items-center gap-1 rounded-full px-1.5 py-[1px] text-[10px] font-bold"
+                            style={{ background: 'rgba(29,155,240,0.12)', color: t.blue }}
+                          >
+                            <VenetianMask width={10} height={10} strokeWidth={2.4} aria-hidden="true" /> 匿名
+                          </span>
+                        )}
+                      </span>
+                      <span className="block truncate text-[13px]" style={{ color: t.secondary }}>
+                        @{resolveAuthor(meKey).handle}
+                      </span>
+                      <span className="mt-[2px] block text-[13px]" style={{ color: t.secondary }}>
+                        <span style={{ color: t.text, fontWeight: 700 }}>{myFollowingCount(d)}</span> 关注 ·{' '}
+                        <span style={{ color: t.text, fontWeight: 700 }}>{followersOf(meKey)}</span> 粉丝
+                      </span>
+                    </div>
+                  </button>
+                  {/* 快捷切换：大号 ↔ 匿名小号（与「我的资料」页同款入口；
+                      小号帖/评论/点赞/私信都以匿名者身份发生） */}
+                  <button
+                    type="button"
+                    aria-label={anonMode ? '切回大号' : '切换到匿名账号'}
+                    onClick={() => {
+                      const to = anonMode ? 'main' : 'anon';
+                      const switched = switchForumAccount(to);
+                      setDrawer(false);
+                      if (switched === 'anon') {
+                        toast(`已切换到匿名账号 @${resolveAuthor(ANON_KEY).handle}，现在你是「匿名者」`);
+                        openProfile(ANON_KEY);
+                      } else {
+                        toast('已切回主账号（大号）');
+                        openProfile('user');
+                      }
+                    }}
+                    className="flex h-[36px] w-[36px] shrink-0 items-center justify-center rounded-full border transition-opacity active:opacity-60"
+                    style={{ borderColor: t.dark ? '#536471' : '#cfd9de', color: t.blue }}
+                  >
+                    <VenetianMask width={17} height={17} strokeWidth={2.1} aria-hidden="true" />
+                  </button>
+                </div>
                 {/* 菜单 */}
                 <div className="mt-4 border-t pt-3" style={{ borderColor: t.border }}>
                   {/* v33【AI 真人社交】活跃度开关：门控角色主动发帖/逛帖/互动（神回复不受限） */}
@@ -1002,10 +1063,10 @@ export default function ForumApp() {
                   {[
                     {
                       label: '个人资料',
-                      hint: '主页与帖子',
+                      hint: anonMode ? '匿名账号主页与帖子' : '主页与帖子',
                       onClick: () => {
                         setDrawer(false);
-                        openProfile('user');
+                        openProfile(meKey);
                       },
                     },
                     {

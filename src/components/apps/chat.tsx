@@ -1819,7 +1819,7 @@ function ChatView({
                 ? `[文字图片]（卡片上写着：${m.card.text}）`
                 : m.kind === 'forumshare' && m.forumshare
                   ? // v39：帖子分享卡序列化成「帖子正文＋热门评论」可读文本（AI 能看懂卡片内容）
-                    forumShareHistoryLine(m.forumshare.pid)
+                    forumShareHistoryLine(m.forumshare.pid, wbContactId ?? undefined)
                   : m.content
         }`,
       }));

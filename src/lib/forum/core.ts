@@ -156,7 +156,12 @@ export { IMG_PLACEHOLDER, stripImgPh } from './imgph';
 
 // ---------------- 数据模型 ----------------
 
-export type AuthorKey = string; // 'user' | 'char:<contactId>' | 'npc:<id>' | 'official'
+export type AuthorKey = string; // 'user' | 'anon' | 'char:<contactId>' | 'npc:<id>' | 'official'
+
+/** 匿名账号（小号）作者 key：发帖/评论/点赞/私信归属与主账号（'user'）完全隔离。
+ *  AI 认知隔离：resolveAuthor('anon') 只返回匿名身份（网名/handle/头像），
+ *  NPC/角色看到的就是一个普通陌生网友，绝不关联机主本人。 */
+export const ANON_KEY = 'anon';
 
 export interface ForumAuthor {
   key: AuthorKey;
@@ -305,6 +310,21 @@ export interface ForumData {
   npcLlmNamed?: Record<string, boolean>;
   /** LLM 网名库（预生成的备用名，与帖子领域无关；createDynNpc 优先从这里取） */
   nameBank?: string[];
+  /** 【匿名账号】小号档案（首次切换时创建；资料可像大号一样编辑，与大号完全隔离） */
+  anon?: {
+    profile: ForumProfile;
+    /** 小号创建时刻（主页「加入于」展示） */
+    createdAt: number;
+    /** 默认网名（创建时随机抽的；profile.name 未自定义时用它——像随机注册的陌生网友） */
+    defaultName: string;
+    /** 默认 handle（创建时随机生成；未自定义时用它） */
+    defaultHandle: string;
+    /** 默认头像（头像库随机分配的稳定图；未自定义时用它） */
+    defaultAvatar: string;
+  };
+  /** 当前活跃账号：'main'（缺省）| 'anon'——发帖/评论/点赞/私信的归属作者。
+ *  只影响「我现在用哪个号说话」，两个号的既有数据始终并存且互相隔离。 */
+  activeAccount?: 'main' | 'anon';
   /** 生成引擎版本（升级内容风格时 bump：旧 AI 帖子清除重播种，用户自己的帖子保留） */
   genVersion?: number;
   /** 【AI 真人社交】AI 角色活跃度开关（抽屉里切换；缺省 = 开）——
@@ -1658,8 +1678,10 @@ export function assignNpcAvatar(key: string, name: string, persona?: string): st
   return `${AVATAR_LIBRARY_BASE}/${cls}/${file}`;
 }
 
-/** 按 key 解析作者（含 user/official/NPC/char）；未知 key 给占位。
- *  user：论坛内自定义资料（name/handle/avatar/bio）优先，未自定义跟随全局机主资料。 */
+/** 按 key 解析作者（含 user/anon/official/NPC/char）；未知 key 给占位。
+ *  user：论坛内自定义资料（name/handle/avatar/bio）优先，未自定义跟随全局机主资料。
+ *  anon：匿名小号——只返回匿名身份（默认随机网名/handle/头像，可编辑），
+ *  绝不携带任何机主真实资料（AI 认知隔离的根基）。 */
 export function resolveAuthor(key: AuthorKey): ForumAuthor {
   if (key === 'user') {
     const fp = forumData().profile;
@@ -1672,6 +1694,21 @@ export function resolveAuthor(key: AuthorKey): ForumAuthor {
       handle,
       avatar: fp?.avatar ?? ownerAvatar,
       bio: fp?.bio?.trim() || 'X论坛用户',
+    };
+  }
+  if (key === ANON_KEY) {
+    const d = forumData();
+    const a = d.anon;
+    // 小号未创建（旧数据/异常）：给一个中性的匿名身份，不暴露机主资料
+    if (!a) return { key, name: '论坛用户', handle: randomHandle('anon-unknown'), avatar: flatAvatarFor('anon-unknown') };
+    const name = a.profile.name?.trim() || a.defaultName;
+    const handle = sanitizeHandle(a.profile.handle ?? '') || a.defaultHandle;
+    return {
+      key,
+      name,
+      handle,
+      avatar: a.profile.avatar ?? a.defaultAvatar,
+      bio: a.profile.bio?.trim() || 'X论坛用户',
     };
   }
   if (key === 'official') {
@@ -1811,20 +1848,86 @@ export function descendantCountOf(d: ForumData, postId: string, depth = 0): numb
   return kids.reduce((n, k) => n + 1 + descendantCountOf(d, k.id, depth + 1), 0);
 }
 
-/** 保存论坛内自定义资料（局部合并；某字段传 undefined 即清除该字段、恢复跟随全局）。
+/** 保存论坛内自定义资料（局部合并；某字段传 undefined 即清除该字段）。
+ *  account='anon'（缺省 'main'）：写入匿名小号档案——与大号资料完全隔离，
+ *  清除字段恢复的是小号自己的默认身份（随机网名/handle/头像），不跟随全局机主资料。
  *  兼容清理：旧版本存过的「正在关注/关注者」自定义数一并移除（已改为跟随真实数据）。 */
-export function saveForumProfile(patch: Partial<ForumProfile>): void {
+export function saveForumProfile(patch: Partial<ForumProfile>, account: 'main' | 'anon' = 'main'): void {
   const d = forumData();
-  const merged: Record<string, unknown> = { ...(d.profile ?? {}), ...patch };
+  const merged: Record<string, unknown> =
+    account === 'anon'
+      ? { ...(d.anon?.profile ?? {}), ...patch }
+      : { ...(d.profile ?? {}), ...patch };
   delete merged.followingCount;
   delete merged.followersCount;
-  d.profile = merged as ForumProfile;
-  saveForum({ ...d });
+  if (account === 'anon') {
+    if (!d.anon) ensureAnonAccount();
+    const latest = forumData();
+    if (latest.anon) latest.anon = { ...latest.anon, profile: merged as ForumProfile };
+    saveForum({ ...latest });
+  } else {
+    d.profile = merged as ForumProfile;
+    saveForum({ ...d });
+  }
 }
 
 /** 全局机主资料快照（编辑资料页 placeholder/预览用：展示「未自定义时」的取值） */
 export function ownerGlobalProfile(): { name: string; avatar: string | null } {
   return { name: ownerName || '我', avatar: ownerAvatar };
+}
+
+// ---------------- 匿名账号（小号） ----------------
+
+/** 匿名小号默认网名池：像真人随手取的普通网名（绝不带「匿名/小号」字样——
+ *  NPC 看到它就是一个普通陌生网友）；创建时随机抽一个，之后可编辑 */
+const ANON_NAME_POOL: string[] = [
+  '今天也想退休', '奶茶三分糖', '一只特立独行的猫', '下班冲第一', '月亮不打烊',
+  '废话小能手', '来杯冰美式', '深夜食堂常客', '在线摸鱼选手', '千层不要香菜',
+  '深夜吹晚风', '千纸鹤不飞了', '隔壁发什么疯', '网名还没想好', '干饭第一名',
+  '有点困但是睡不着', '平平无奇冲浪选手', '评论区潜水员', '偶尔上线', '人间观察员',
+];
+
+/** 该 key 是否是「机主本人」的账号（大号或匿名小号）——发帖归属/通知归因/主页判定用 */
+export function isUserAuthor(key: AuthorKey): boolean {
+  return key === 'user' || key === ANON_KEY;
+}
+
+/** 当前活跃账号的作者 key（'user' | 'anon'）：发帖/评论/点赞/私信的归属 */
+export function activeAuthorKey(): 'user' | 'anon' {
+  return forumData().activeAccount === 'anon' ? ANON_KEY : 'user';
+}
+
+/** 创建匿名小号档案（幂等：已存在直接返回 false）。默认身份全部随机——
+ *  网名从池子抽、handle 由创建时刻种子生成、头像从头像库随机分配，
+ *  像一个真实注册的陌生网友，与机主真实资料零关联（AI 认知隔离的根基）。 */
+export function ensureAnonAccount(): boolean {
+  const d = forumData();
+  if (d.anon) return false;
+  const createdAt = Date.now();
+  const defaultName = ANON_NAME_POOL[Math.floor(Math.random() * ANON_NAME_POOL.length)];
+  const defaultHandle = randomHandle(`anon-${createdAt}`);
+  const defaultAvatar = assignNpcAvatar(`anon:${createdAt}`, defaultName);
+  mutateForum((next) => {
+    next.anon = { profile: {}, createdAt, defaultName, defaultHandle, defaultAvatar };
+  });
+  return true;
+}
+
+/** 切换活跃账号（'main' | 'anon'）。切到小号时不存在则先创建。
+ *  返回切换后的账号（切到已在的账号 = 无变化）。 */
+export function switchForumAccount(to: 'main' | 'anon'): 'main' | 'anon' {
+  if (to === 'anon') ensureAnonAccount();
+  const cur: 'main' | 'anon' = forumData().activeAccount === 'anon' ? 'anon' : 'main';
+  if (cur === to) return cur;
+  mutateForum((next) => {
+    next.activeAccount = to;
+  });
+  return to;
+}
+
+/** 当前是否处于匿名小号模式（发帖/评论/点赞/私信都以「匿名者」身份发生） */
+export function isAnonActive(): boolean {
+  return forumData().activeAccount === 'anon';
 }
 
 // ---------------- 工具 ----------------

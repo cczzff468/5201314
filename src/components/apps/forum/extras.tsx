@@ -15,6 +15,7 @@ import {
   forumData,
   forumSnapshot,
   isPostVisible,
+  activeAuthorKey,
   relTime,
   resolveAuthor,
   saveForum,
@@ -107,7 +108,7 @@ export function SearchView() {
         }}
       >
         <div className="flex items-center gap-3 px-4 pt-[54px]" style={{ height: 100 }}>
-          <XAvatar authorKey="user" size={32} onClick={() => f.openProfile('user')} />
+          <XAvatar authorKey={activeAuthorKey()} size={32} onClick={() => f.openProfile(activeAuthorKey())} />
           <label
             className="flex h-[40px] min-w-0 flex-1 items-center gap-2 rounded-full px-3"
             style={{ background: t.dark ? '#202327' : '#eff3f4' }}

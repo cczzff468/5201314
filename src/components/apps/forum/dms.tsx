@@ -12,6 +12,8 @@ import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'reac
 import {
   forumData,
   forumSnapshot,
+  activeAuthorKey,
+  isUserAuthor,
   relTime,
   resolveAuthor,
   saveForum,
@@ -121,7 +123,7 @@ export function DmThread({ peerKey }: { peerKey: AuthorKey }) {
       slot = { peerKey, messages: [] };
       nd.dms.push(slot);
     }
-    slot.messages.push({ id: uid('m'), from: 'user', text: text.slice(0, 200), at: Date.now() });
+    slot.messages.push({ id: uid('m'), from: activeAuthorKey(), text: text.slice(0, 200), at: Date.now() });
     saveForum({ ...nd });
     setDraft('');
     queueDmReply(peerKey);
@@ -169,7 +171,7 @@ export function DmThread({ peerKey }: { peerKey: AuthorKey }) {
           </p>
         )}
         {messages.map((m) => {
-          const mine = m.from === 'user';
+          const mine = isUserAuthor(m.from); // 大号/小号发的都在我方（气泡样式同侧，身份按账号隔离）
           return (
             <div key={m.id} className={`mb-3 flex ${mine ? 'justify-end' : 'justify-start'}`}>
               <span

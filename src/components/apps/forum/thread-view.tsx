@@ -23,11 +23,13 @@
 import { useRef, useState, useSyncExternalStore } from 'react';
 import { Languages } from 'lucide-react';
 import {
+  activeAuthorKey,
   childRepliesOf,
   countShort,
   descendantCountOf,
   forumData,
   forumSnapshot,
+  isUserAuthor,
   likesOf,
   relTime,
   resolveAuthor,
@@ -199,7 +201,7 @@ function CommentActions({
 }) {
   const f = useForum();
   const t = f.t;
-  const liked = post.likes.includes('user');
+  const liked = post.likes.includes(activeAuthorKey());
   const reposted = post.reposted === true;
   const iconSize = compact ? 15 : 16;
   const size = compact ? 'sm' : 'md';
@@ -559,7 +561,7 @@ export function ThreadView({ postId }: { postId: string }) {
   }
 
   const a = resolveAuthor(post.authorKey);
-  const liked = post.likes.includes('user');
+  const liked = post.likes.includes(activeAuthorKey());
   const followed = d.following.includes(post.authorKey);
   const dt = new Date(post.createdAt);
   const dateStr = `${dt.getFullYear()}年${dt.getMonth() + 1}月${dt.getDate()}日`;
@@ -575,9 +577,11 @@ export function ThreadView({ postId }: { postId: string }) {
     const groupId = replyTarget?.commentId ?? post.id;
     const exactId = replyTarget?.postId ?? post.id;
     const targetName = replyTarget?.name ?? a.name;
+    // 回复归属当前活跃账号：匿名小号模式下，AI 看到的评论者就是小号网名（陌生网友）
+    const me = activeAuthorKey();
     const reply: ForumPost = {
       id: uid('p'),
-      authorKey: 'user',
+      authorKey: me,
       content: text.slice(0, REPLY_MAX),
       community: post.community,
       createdAt: Date.now(),
@@ -594,16 +598,16 @@ export function ThreadView({ postId }: { postId: string }) {
     saveForum({ ...nd });
     setDraft('');
     const targetPost = nd.posts.find((p) => p.id === exactId);
-    if (targetPost && targetPost.authorKey !== 'user') queueAiReplyToUserReply(exactId, reply.id, groupId, post.id);
-    // v33【AI 真人社交·记忆写入】：用户评论/回复了角色的内容 → 写入该角色的记忆
-    //（直接回复角色主帖 = 「TA在我帖子下评论」；回复角色的评论 = 「TA回复了我的评论」）
-    if (targetPost?.authorKey.startsWith('char:')) {
+    // 网友/角色内容被回复 → 排围观回复（匿名小号的评论对 AI 也是陌生网友发言）；
+    // 记忆写入/神回复仅大号（匿名评论不写角色记忆——认知隔离）
+    if (targetPost && !isUserAuthor(targetPost.authorKey)) queueAiReplyToUserReply(exactId, reply.id, groupId, post.id);
+    if (me === 'user' && targetPost?.authorKey.startsWith('char:')) {
       writeUserCommentMemory(targetPost.authorKey.slice(5), {
         post: targetPost.id === post.id ? targetPost : post,
         comment: reply,
         onOwnComment: targetPost.id !== post.id,
       });
-    } else if (post.authorKey.startsWith('char:')) {
+    } else if (me === 'user' && post.authorKey.startsWith('char:')) {
       writeUserCommentMemory(post.authorKey.slice(5), { post, comment: reply, onOwnComment: false });
     }
     setReplyTarget(null);
@@ -680,7 +684,7 @@ export function ThreadView({ postId }: { postId: string }) {
                   @{a.handle}
                 </span>
                 <div className="ml-auto flex shrink-0 items-center gap-2">
-                  {post.authorKey !== 'user' && (
+                  {!isUserAuthor(post.authorKey) && (
                     <button
                       type="button"
                       aria-label={followed ? '取消关注' : '关注'}
@@ -875,7 +879,7 @@ export function ThreadView({ postId }: { postId: string }) {
           </div>
         )}
         <div className="flex items-center gap-2 px-3 py-2">
-          <XAvatar authorKey="user" size={34} />
+          <XAvatar authorKey={activeAuthorKey()} size={34} />
           <div className="flex min-w-0 flex-1 items-center gap-2 rounded-full px-4 h-[40px]" style={{ background: t.dark ? '#202327' : '#eff3f4' }}>
             <input
               ref={inputRef}

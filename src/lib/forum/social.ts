@@ -17,9 +17,10 @@
  * 调度与执行（pending 队列、LLM 调用）在 engine.ts。
  */
 
-import { forumContactsSnap, forumData, isPostVisible, relTime, resolveAuthor, type ForumPost } from './core';
+import { forumContactsSnap, forumData, isPostVisible, isUserAuthor, relTime, resolveAuthor, ANON_KEY, type ForumPost } from './core';
 import { memAddForumFragment, memCountFragments, memHasForumFragment, memChatRecallBlock } from '@/lib/memory';
 import { buildMoodBlock } from '@/lib/ios/ai-mood';
+import { isForumAnonDisclosed } from '@/lib/ios/forum-anon';
 import type { ContactRecord } from '@/lib/contacts';
 
 // ---------------- 角色解析 ----------------
@@ -390,10 +391,23 @@ export function buildForumChatBlock(contactId: string): string {
       const body = p.content.replace(/\s+/g, ' ').slice(0, 60);
       lines.push(`你 ${relTime(p.createdAt, now)}在X论坛发了帖：「${body}」`);
     }
-    // TA（机主）最近的帖子
+    // TA（机主）最近的帖子：大号常驻；匿名小号帖仅在「TA已对该角色说破」后合并
+    //（认知隔离：未说破时 AI 不能知道小号帖也是 TA 发的）
     for (const p of recentUserPosts(2)) {
       const body = p.content.replace(/\s+/g, ' ').slice(0, 60);
       lines.push(`${name} ${relTime(p.createdAt, now)}在X论坛发帖说：「${body}」`);
+    }
+    if (isForumAnonDisclosed(contactId)) {
+      const anonName = resolveAuthor(ANON_KEY).name;
+      const now2 = Date.now();
+      const anonPosts = forumData()
+        .posts.filter((p) => p.authorKey === ANON_KEY && p.replyTo === null && isPostVisible(p, now2))
+        .sort((a, b) => b.createdAt - a.createdAt)
+        .slice(0, 2);
+      for (const p of anonPosts) {
+        const body = p.content.replace(/\s+/g, ' ').slice(0, 60);
+        lines.push(`${name} ${relTime(p.createdAt, now2)}用TA的小号「${anonName}」在X论坛发帖说：「${body}」`);
+      }
     }
     // 彼此互动（最近 4 条）：双方在「对方或自己的帖子」评论区里的发言
     // （用户评论角色的帖 / 角色神回复 / 角色评论用户的帖；锚点=主帖 id 或其顶层评论 id，
@@ -408,13 +422,18 @@ export function buildForumChatBlock(contactId: string): string {
       }
       return cur;
     };
+    const anonKnown = isForumAnonDisclosed(contactId);
     const anchorOk = (p: ForumPost): boolean => {
       if (!p.replyTo) return false;
       const root = mainOf(p.replyTo);
-      if (!root || (root.authorKey !== myKey && root.authorKey !== 'user')) return false;
+      if (!root || (root.authorKey !== myKey && !isUserAuthor(root.authorKey))) return false;
+      // 匿名小号的发言/帖子仅在该角色已知情（说破）时才算「彼此互动」——
+      // 未说破时混进来 = AI 在论坛看到同样文案的小号评论，反向认出机主（穿帮）
+      if (p.authorKey === ANON_KEY && !anonKnown) return false;
+      if (root.authorKey === ANON_KEY && !anonKnown) return false;
       // 双方任一发言都算互动（用户在自己帖下自说自话除外）
-      if (p.authorKey === 'user' && root.authorKey === 'user') return false;
-      return p.authorKey === myKey || p.authorKey === 'user';
+      if (isUserAuthor(p.authorKey) && isUserAuthor(root.authorKey)) return false;
+      return p.authorKey === myKey || isUserAuthor(p.authorKey);
     };
     const inter = d.posts
       .filter(anchorOk)
@@ -424,7 +443,7 @@ export function buildForumChatBlock(contactId: string): string {
       const body = c.content.replace(/\s+/g, ' ').slice(0, 50);
       const root = mainOf(c.replyTo ?? '');
       const who = c.authorKey === myKey ? '你' : name;
-      const to = c.authorKey === myKey ? (root?.authorKey === 'user' ? `${name}的帖子` : `${name}的评论`) : '你的帖子';
+      const to = c.authorKey === myKey ? (isUserAuthor(root?.authorKey ?? '') ? `${name}的帖子` : `${name}的评论`) : '你的帖子';
       lines.push(`${who} ${relTime(c.createdAt, now)}评论了${to}：「${body}」`);
     }
     if (!lines.length) return '';

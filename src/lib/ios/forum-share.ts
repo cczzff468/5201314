@@ -31,10 +31,13 @@ import { getActiveAccountIdFor, type AccountApp } from './accounts';
 import {
   forumData,
   isPostVisible,
+  isUserAuthor,
   likesOf,
   resolveAuthor,
+  ANON_KEY,
   type ForumPost,
 } from '@/lib/forum/core';
+import { isForumAnonDisclosed } from './forum-anon';
 import { IMG_PLACEHOLDER } from '@/lib/forum/imgph';
 import { extractTopicWords } from '@/lib/forum/topic';
 
@@ -86,18 +89,34 @@ export function postSnippet(post: ForumPost, max = 60): string {
     .slice(0, max);
 }
 
-/** AI 上下文/通知预览行：帖子卡在历史里的可读文本（AI 聊天回合可回看） */
-export function forumShareHistoryLine(pid: string): string {
+/** 帖子作者在「该联系人认知里」的归因描述（匿名小号认知隔离/揭秘用）：
+ *  · 匿名帖 + 未揭秘 → 陌生网友框架（AI 初始认知：这是个不认识的人发的）；
+ *  · 匿名帖 + 已说破 → 「TA 的小号」框架（态度可以转变：调侃钓鱼/吃醋）；
+ *  · 其他作者（NPC/大号/角色）→ 原名照述。 */
+function authorCognitionOf(post: ForumPost, viewerContactId?: string): string {
+  const a = resolveAuthor(post.authorKey);
+  if (post.authorKey === ANON_KEY && viewerContactId) {
+    return isForumAnonDisclosed(viewerContactId)
+      ? `${a.name}（TA本人的小号，TA已向你承认过）`
+      : `${a.name}（你不认识的陌生网友）`;
+  }
+  return a.name;
+}
+
+/** AI 上下文/通知预览行：帖子卡在历史里的可读文本（AI 聊天回合可回看）。
+ *  viewerContactId（可选）：看这条历史的联系人——匿名小号帖按 TA 的认知序列化
+ *  （未说破 = 陌生网友；说破后 = TA 的小号）。 */
+export function forumShareHistoryLine(pid: string, viewerContactId?: string): string {
   const d = forumData();
   const p = d.posts.find((x) => x.id === pid);
   if (!p) return '[X论坛帖子分享卡片]（原帖已删除）';
-  const a = resolveAuthor(p.authorKey);
+  const authorDesc = authorCognitionOf(p, viewerContactId);
   const comments = topCommentsOf(p, 3);
   const cLine = comments.length
     ? `，热门评论：${comments.map((c) => `「${postSnippet(c, 40)}」（${resolveAuthor(c.authorKey).name}）`).join('、')}`
     : '';
   const media = p.media?.length ? `（配了${p.media.length}张图）` : '';
-  return `[X论坛帖子 ID:${p.id}]（${a.name}发的：「${postSnippet(p, 120)}」${media}${cLine}）`;
+  return `[X论坛帖子 ID:${p.id}]（${authorDesc}发的：「${postSnippet(p, 120)}」${media}${cLine}）`;
 }
 
 // ---------------- 帖子链接识别（v40：复制链接 → 粘贴到聊天发送） ----------------
@@ -157,9 +176,18 @@ export async function noteForumLinkSharedToChat(opts: {
     const cText = comments.length
       ? `，热门评论：${comments.map((c) => `「${postSnippet(c, 30)}」（${resolveAuthor(c.authorKey).name}）`).join('、')}`
       : '';
+    // 匿名小号帖：认知隔离——AI 记的是「TA把一个陌生网友的帖子发给了我」；
+    // 已对 TA 说破（揭秘）→ 记忆直接关联「TA的小号」。
+    const anonName = resolveAuthor(ANON_KEY).name;
+    const anonNote =
+      post.authorKey === ANON_KEY
+        ? isForumAnonDisclosed(contactId)
+          ? `${meName}把TA自己小号「${anonName}」发的X论坛帖子链接发给了我`
+          : `${meName}把X论坛一个陌生网友「${anonName}」发的帖子链接发给了我（我不认识这个网友）`
+        : `${meName}把X论坛${resolveAuthor(post.authorKey).name}发的帖子链接发给了我`;
     memAddForumFragment(
       contactId,
-      `${meName}把X论坛${resolveAuthor(post.authorKey).name}发的帖子链接发给了我（共${commentCount}条评论）：「${postSnippet(post, 80)}」${cText}`,
+      `${anonNote}（共${commentCount}条评论）：「${postSnippet(post, 80)}」${cText}`,
       { postId: post.id, kind: 'share', commentId: 'link' },
     );
   } catch {
@@ -228,14 +256,22 @@ export async function shareForumPostToChat(opts: ForumShareOpts): Promise<ForumS
     forumshare: { pid: post.id },
   });
 
-  // 记忆：让 AI「知道」这条帖子与评论（用户要求：写入记忆）
+  // 记忆：让 AI「知道」这条帖子与评论（用户要求：写入记忆）。
+  // 匿名小号帖：陌生网友框架（认知隔离——AI 初始认知是「一个陌生人发的帖子」）；
+  // 已对该联系人说破（揭秘）→ 「TA的小号」框架（态度可以转变）。
   try {
     const cText = comments.length
       ? `，热门评论：${comments.map((c) => `「${postSnippet(c, 30)}」（${resolveAuthor(c.authorKey).name}）`).join('、')}`
       : '';
+    const shareNote =
+      post.authorKey === ANON_KEY
+        ? isForumAnonDisclosed(contactId)
+          ? `${meName}把TA自己小号「${author.name}」发的X论坛帖子分享给了我`
+          : `${meName}把X论坛一个陌生网友「${author.name}」发的帖子分享给了我（我不认识这个网友）`
+        : `${meName}把X论坛${author.name}发的帖子分享给了我`;
     memAddForumFragment(
       contactId,
-      `${meName}把X论坛${author.name}发的帖子分享给了我（共${commentCount}条评论）：「${postSnippet(post, 80)}」${cText}`,
+      `${shareNote}（共${commentCount}条评论）：「${postSnippet(post, 80)}」${cText}`,
       { postId: post.id, kind: 'share', commentId: 'shared' },
     );
   } catch {
@@ -344,16 +380,17 @@ async function callForumLlm(system: string, userContent: string): Promise<string
 function candidatePostsFor(excludeId: string, limit = 3): ForumPost[] {
   const d = forumData();
   const now = Date.now();
-  // 机主兴趣词：最近 5 条主帖的话题词去重汇总（聊什么 = 对什么感兴趣）
+  // 机主兴趣词：最近 5 条主帖（大号或匿名小号——都是 TA 本人聊什么 = 对什么感兴趣）
+  // 的话题词去重汇总
   const myInterest = new Set<string>();
   for (const p of d.posts
-    .filter((x) => x.authorKey === 'user' && x.replyTo === null && isPostVisible(x, now))
+    .filter((x) => isUserAuthor(x.authorKey) && x.replyTo === null && isPostVisible(x, now))
     .sort((a, b) => b.createdAt - a.createdAt)
     .slice(0, 5)) {
     for (const w of extractTopicWords(p.content)) myInterest.add(w);
   }
   const pool = d.posts
-    .filter((p) => p.id !== excludeId && p.replyTo === null && p.authorKey !== 'user' && isPostVisible(p, now))
+    .filter((p) => p.id !== excludeId && p.replyTo === null && !isUserAuthor(p.authorKey) && isPostVisible(p, now))
     .sort((a, b) => b.createdAt - a.createdAt)
     .slice(0, 24);
   if (!pool.length) return [];
@@ -404,13 +441,24 @@ async function runShareReply(opts: AiReplyOpts): Promise<boolean> {
   const timeBlock = getTimeAware(sessionKey) ? buildTimeAwareBlock({ regionHint: contact.region || null }) : '';
   const system = [persona, memoryBlock, moodBlock, timeBlock].filter(Boolean).join('\n\n');
 
+  // 匿名小号认知（用户规则三）：未说破 → 帖子作者对 AI 是陌生网友（可吐槽吃瓜，
+  // 但绝不能认出是 TA 本人）；已说破（揭秘时刻）→ TA 的小号，态度可以转变。
+  const isAnonPost = post.authorKey === ANON_KEY;
+  const anonDisclosed = isAnonPost && isForumAnonDisclosed(contactId);
+  const authorLine = authorCognitionOf(post, contactId);
+
   const comments = topCommentsOf(post, 5);
   const commentCount = forumData().posts.filter((p) => p.replyTo === post.id).length;
   const bodyText = post.content.split(IMG_PLACEHOLDER).map((s) => s.trim()).filter(Boolean).join(' ').replace(/\s+/g, ' ');
   const candidates = candidatePostsFor(postId, 3);
 
   const user = [
-    `【${meName}刚在${app === 'wx' ? '微信' : 'QQ'}里分享给你的X论坛帖子】\n作者：${author.name}${author.verified ? '（认证大V）' : ''}\n正文：${bodyText.slice(0, 800)}${post.media?.length ? `\n（帖子配了${post.media.length}张图）` : ''}\n互动：${likesOf(post)} 赞 · ${post.reposts} 转发 · ${post.views} 浏览 · ${commentCount} 条评论${comments.length ? `\n热门评论：\n${comments.map((c) => `- ${resolveAuthor(c.authorKey).name}：「${postSnippet(c, 60)}」（${likesOf(c)} 赞）`).join('\n')}` : ''}`,
+    `【${meName}刚在${app === 'wx' ? '微信' : 'QQ'}里分享给你的X论坛帖子】\n作者：${authorLine}${author.verified ? '（认证大V）' : ''}\n正文：${bodyText.slice(0, 800)}${post.media?.length ? `\n（帖子配了${post.media.length}张图）` : ''}\n互动：${likesOf(post)} 赞 · ${post.reposts} 转发 · ${post.views} 浏览 · ${commentCount} 条评论${comments.length ? `\n热门评论：\n${comments.map((c) => `- ${resolveAuthor(c.authorKey).name}：「${postSnippet(c, 60)}」（${likesOf(c)} 赞）`).join('\n')}` : ''}`,
+    isAnonPost && !anonDisclosed
+      ? '【作者身份】发这个帖子的人你不认识——就是一个陌生网友。你可以吐槽、吃瓜、评头论足，但绝对不要把这个人和TA（机主）本人或你们认识的任何人联系起来（不许出现「楼主不会是你吧」「这风格好熟悉」之类的话）。'
+      : anonDisclosed
+        ? '【作者身份】这个帖子其实是TA本人的小号（匿名账号）发的——TA已经向你承认过。你的态度可以转变：调侃TA钓鱼、吃醋、揭穿式吐槽都行，但别上升到真人吵架。'
+        : '',
     '【任务】TA 专门把这条帖子发给你看，说明想跟你聊它。结合你的人设、说话风格、你们的关系、上面的记忆和帖子内容/评论，像平时聊天一样回应：1~2 句，可以吐槽、共情、玩梗、追问，别复述帖子原文。',
     candidates.length
       ? `如果你觉得论坛上另一条帖子 TA 大概也感兴趣，可以从候选里挑一条分享回去（不想分享就不挑）：\n${candidates.map((c) => `- ID ${c.id}：「${postSnippet(c, 50)}」（${resolveAuthor(c.authorKey).name}）`).join('\n')}`
@@ -465,11 +513,17 @@ async function runShareReply(opts: AiReplyOpts): Promise<boolean> {
   }
   outMsgs.push({ id: genId('fwsr'), role: 'peer', content: reply, time: now + 1 });
 
-  // 记忆：AI 回应过这条分享（+ 反向分享）
+  // 记忆：AI 回应过这条分享（+ 反向分享）。匿名小号帖按认知框架落句
   try {
+    const replyNote =
+      isAnonPost
+        ? anonDisclosed
+          ? `${meName}把TA自己小号「${author.name}」发的X论坛帖子分享给我看（「${postSnippet(post, 60)}」），我回应TA：「${reply.slice(0, 60)}」`
+          : `${meName}把一个陌生网友「${author.name}」的X论坛帖子分享给我看（「${postSnippet(post, 60)}」），我回应TA：「${reply.slice(0, 60)}」`
+        : `${meName}把X论坛${author.name}的帖子分享给我看（「${postSnippet(post, 60)}」），我回应TA：「${reply.slice(0, 60)}」`;
     memAddForumFragment(
       contactId,
-      `${meName}把X论坛${author.name}的帖子分享给我看（「${postSnippet(post, 60)}」），我回应TA：「${reply.slice(0, 60)}」`,
+      replyNote,
       { postId: post.id, kind: 'share', commentId: 'share-reply' },
     );
     if (shareBackPost) {

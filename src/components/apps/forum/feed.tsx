@@ -15,6 +15,7 @@ import {
   countShort,
   forumData,
   likesOf,
+  activeAuthorKey,
   relTime,
   repliesOf,
   resolveAuthor,
@@ -318,7 +319,8 @@ export const PostCard = memo(function PostCard({ post, onOpen }: { post: ForumPo
   const f = useForum();
   const t = f.t;
   const a = resolveAuthor(post.authorKey);
-  const liked = post.likes.includes('user');
+  // 红心状态跟当前活跃账号（大号/小号点赞互相隔离）
+  const liked = post.likes.includes(activeAuthorKey());
   const repostedByMe = post.reposted === true;
   const time = relTime(post.createdAt);
   const replyCount = repliesOf(forumData(), post.id).length;

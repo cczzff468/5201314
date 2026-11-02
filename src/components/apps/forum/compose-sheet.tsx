@@ -32,7 +32,7 @@ import {
   Type,
   X,
 } from 'lucide-react';
-import { trendingTopics, forumData, POST_MAX } from '@/lib/forum/core';
+import { activeAuthorKey, trendingTopics, forumData, POST_MAX } from '@/lib/forum/core';
 import { renderTextImage, TEXTIMG_MAX_LEN } from '@/lib/forum/textimg';
 import { XAvatar, XIcons, useXTheme } from './shared';
 import { useForum } from './ctx';
@@ -303,9 +303,9 @@ export function ComposeSheet({
           )}
         </div>
 
-        {/* 正文区：头像 + 大号输入（全屏模式加大书写区） */}
+        {/* 正文区：头像（当前活跃账号：大号/匿名小号）+ 正文输入（全屏模式加大书写区） */}
         <div className={`flex gap-3 px-4 pt-3 ${full ? 'min-h-0 flex-1' : ''}`}>
-          <XAvatar authorKey="user" size={40} />
+          <XAvatar authorKey={activeAuthorKey()} size={40} />
           <div className="flex min-h-0 flex-1 flex-col">
             <textarea
               ref={textRef}

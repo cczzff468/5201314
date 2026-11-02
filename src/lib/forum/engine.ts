@@ -42,6 +42,7 @@ import { kvGet, kvSet } from '@/lib/ios/idb-kv';
 // v41（B3）：致谢持久标记直连记忆库（like-thanks 去重）；D3 跨 App 主动消息
 import { memAddForumFragment, memHasForumFragment } from '@/lib/memory';
 import {
+  ANON_KEY,
   COMMUNITY_DEFS,
   GEN_VERSION,
   IMG_PLACEHOLDER,
@@ -51,6 +52,7 @@ import {
   POST_MAX,
   REPLY_MAX,
   createDynNpc,
+  isUserAuthor,
   likesOf,
   recordDynNpcRecent,
   renameBuiltinNpc,
@@ -520,7 +522,7 @@ let seeding = false;
  *  v4 = 网名 LLM 生成 + 动态网友占比提升；
  *  v5 = 网名与帖子领域解绑（删原型网名池 + 名字库）+ 内置 NPC 也 LLM 起名。 */
 function resetAiContent(d: ForumData): void {
-  const keepPosts = d.posts.filter((p) => p.authorKey === 'user');
+  const keepPosts = d.posts.filter((p) => isUserAuthor(p.authorKey));
   const keepIds = new Set(keepPosts.map((p) => p.id));
   d.posts = keepPosts;
   d.dynNpcs = {};
@@ -648,9 +650,9 @@ export async function ensureSeed(): Promise<void> {
     // v22：同步占位评论已删（万能句式池清洗）——所有评论（含用户帖）
     // 全部由紧随其后的 llmPolishSeedComments 按每条帖子正文 LLM 实时生成
     const allNew: ForumPost[] = [...seedPosts];
-    // v9：版本升级重播种时用户帖的旧评论已被清掉——给用户自己的帖子也补一批
-    // 干净评论（新强校验逻辑：贴题+语言跟随+数据合理），帖子不至于零回复
-    const userPosts = d.posts.filter((p) => p.authorKey === 'user').slice(-6);
+    // v9：版本升级重播种时用户帖的旧评论已被清掉——给自己的帖子（大号或匿名小号）
+    // 也补一批干净评论（新强校验逻辑：贴题+语言跟随+数据合理），帖子不至于零回复
+    const userPosts = d.posts.filter((p) => isUserAuthor(p.authorKey)).slice(-6);
     const next: ForumData = {
       ...d,
       posts: [...d.posts, ...allNew],
@@ -891,8 +893,8 @@ async function llmPolishSeedComments(seedPostIds: string[]): Promise<void> {
       });
       added += created.length;
       createdAll.push(...created);
-      // 楼主是用户 → 前 2 条评论发通知（X：别人回复了你的帖子）
-      if (t.authorKey === 'user' && created.length) {
+      // 楼主是用户（大号/小号） → 前 2 条评论发通知（X：别人回复了你的帖子）
+      if (isUserAuthor(t.authorKey) && created.length) {
         next.notifications = [
           ...created.slice(0, 2).map((c) => ({
             id: uid('n'),
@@ -1879,8 +1881,8 @@ async function growSubReplyForest(opts: {
     mediaDesc: opts.mediaDesc,
     catchall: opts.catchall,
   };
-  const opKey = post.authorKey; // 楼主（user 时不下场——AI 不代用户说话）
-  const ownerCanSpeak = opKey !== 'user';
+  const opKey = post.authorKey; // 楼主（user/anon 时不下场——AI 绝不代机主的任何账号说话）
+  const ownerCanSpeak = !isUserAuthor(opKey);
   const avoid = new Set<AuthorKey>(opts.existingKeys.filter(Boolean));
   const saveLayer = (made: ForumPost[]) => {
     if (!made.length) return;
@@ -1927,10 +1929,10 @@ async function growSubReplyForest(opts: {
   // 12% 楼主；其余围观网友（50% 本楼已有参与者，50% 新面孔）
   const pickDeepKey = (target: ForumPost, root: ForumPost): AuthorKey => {
     const parent = [...created, ...forumData().posts].find((x) => x.id === target.replyToPost);
-    if (parent && parent.authorKey !== 'user' && Math.random() < 0.45) return parent.authorKey;
+    if (parent && !isUserAuthor(parent.authorKey) && Math.random() < 0.45) return parent.authorKey;
     if (ownerCanSpeak && Math.random() < 0.12) return opKey;
     const pool = [root.authorKey, ...created.filter((x) => x.replyTo === root.id).map((x) => x.authorKey)].filter(
-      (k) => k !== 'user',
+      (k) => !isUserAuthor(k),
     );
     if (pool.length && Math.random() < 0.5) return pool[Math.floor(Math.random() * pool.length)];
     return pickCommenters(1, opts.postLang, post.content, ...avoid)[0] ?? (ownerCanSpeak ? opKey : 'npc:wang');
@@ -2145,8 +2147,8 @@ async function genCommentBatch(postId: string, report?: (n: number) => void): Pr
     // （3/4 层嵌套，回复他人下面还有回复）。逐层落盘实时上屏；L2 完成后通过
     // report 提前返回——L3/L4 由森林内部继续（像真实回复一样陆续冒出来）。
 
-    // 楼主是用户 → 前 3 条评论发通知（X：别人回复了你的帖子）
-    if (post.authorKey === 'user') {
+    // 楼主是用户（大号/小号） → 前 3 条评论发通知（X：别人回复了你的帖子）
+    if (isUserAuthor(post.authorKey)) {
       next.notifications = [
         ...newComments.slice(0, 3).map((c) => ({
           id: uid('n'),
@@ -2512,15 +2514,19 @@ export function queueUserPostInteractions(post: ForumPost): void {
 export function queueAiReplyToUserReply(targetPostId: string, userReplyId: string, rootId?: string, mainPostId?: string): void {
   const d = forumData();
   const target = d.posts.find((p) => p.id === targetPostId);
-  if (!target || target.authorKey === 'user') return;
-  if (!d.posts.find((p) => p.id === userReplyId)) return;
+  if (!target || isUserAuthor(target.authorKey)) return;
+  const userReplyPost = d.posts.find((p) => p.id === userReplyId);
+  if (!userReplyPost) return;
+  // 匿名认知隔离：机主用小号评论 → 角色不排「神回复」（那是对「熟人的 TA」的专属反应，
+  // 对陌生网友的评论 AI 角色不会特意回）；围观网友照常接话（看到的就是陌生网友发言）。
+  const replyFromAnon = userReplyPost.authorKey === ANON_KEY;
   const groupId = rootId ?? targetPostId;
   const mainId = mainPostId ?? (rootId && rootId !== targetPostId ? rootId : targetPostId);
   // v33【AI 真人社交·神回复保证】：被回复对象是 char（AI 角色）时，TA 本人必须延迟几分钟
   // 回复用户（带人设+对用户的记忆+完整对话链——queueUserPostInteractions 式秒赞已废除）。
   // 神回复不受活跃度开关限制（那是 TA 的「社交礼仪」，不是主动行为）。
   const charTarget = target.authorKey.startsWith('char:') ? target.authorKey : null;
-  if (charTarget) {
+  if (charTarget && !replyFromAnon) {
     const pend = loadPending();
     const dup = Object.values(pend).some(
       (j) => j.kind === 'charReply' && !j.meta.thanks && j.meta.userReplyId === userReplyId,
@@ -2540,7 +2546,7 @@ export function queueAiReplyToUserReply(targetPostId: string, userReplyId: strin
   const picked: AuthorKey[] = [];
   const pickedSet = new Set<AuthorKey>();
   const addPick = (k: AuthorKey | undefined) => {
-    if (!k || k === 'user' || pickedSet.has(k)) return;
+    if (!k || isUserAuthor(k) || pickedSet.has(k)) return;
     // char 已有专属神回复管线，不再进通用网友池（防同一角色双回复）
     if (charTarget && k.startsWith('char:')) return;
     picked.push(k);
@@ -2643,9 +2649,9 @@ async function execJob(job: PendingJob): Promise<void> {
         const p = next.posts.find((x) => x.id === job.postKey);
         if (!p) return;
         p.likes = [...new Set([...p.likes, k])];
-        // v41（A4）：只有用户自己的帖子才发「赞了你的帖子」通知
+        // v41（A4）：只有用户自己的帖子（大号/小号）才发「赞了你的帖子」通知
         //（角色帖的网友点赞不再误归因给机主）
-        if (job.meta.notify && p.authorKey === 'user') {
+        if (job.meta.notify && isUserAuthor(p.authorKey)) {
           next.notifications = [
             { id: uid('n'), type: 'like' as const, fromKey: k, postId: p.id, createdAt: Date.now(), read: false },
             ...next.notifications,
@@ -2798,13 +2804,15 @@ async function execJob(job: PendingJob): Promise<void> {
       const groupId = job.meta.rootId ?? mainId;
       const userReply = job.meta.userReplyId ? d0.posts.find((p) => p.id === job.meta.userReplyId) : null;
       const userName = resolveAuthor('user').name;
-      // 整楼对话链（最近 6 条带说话人名——神回复要接得住前面的梗）
+      // 整楼对话链（最近 6 条带说话人名——神回复要接得住前面的梗）。
+      // isUserAuthor：机主大号/匿名小号的评论都在「user 侧」，但 speaker 用各自账号
+      // 的昵称（匿名评论对 AI 就是一个陌生网友在说话）
       const history = d0.posts
         .filter((p) => p.replyTo === groupId && p.id !== job.meta.userReplyId)
         .sort((a, b) => a.createdAt - b.createdAt)
         .slice(-6)
         .map((p) => ({
-          from: p.authorKey === 'user' ? ('user' as const) : ('peer' as const),
+          from: isUserAuthor(p.authorKey) ? ('user' as const) : ('peer' as const),
           speaker: resolveAuthor(p.authorKey).name,
           text: p.content,
         }));
@@ -2892,11 +2900,13 @@ async function execJob(job: PendingJob): Promise<void> {
       const userName = resolveAuthor('user').name;
 
       // ---- 组装 LLM 上下文（感觉帖子内容 + 用户评论内容 + 最近对话链） ----
+      // 匿名认知隔离：被回复对象是大号 → 机主名；匿名小号 → 小号网名（AI 眼里就是个
+      // 普通陌生网友，与机主零关联）；其他作者 → TA 自己的名。
       let postContent = '';
       let history: { from: 'user' | 'peer'; speaker?: string; text: string }[] = [];
       let groupId = target.id; // AI 回复挂载的分组锚点
       let replyName = resolveAuthor(target.authorKey).name;
-      let parentContent = target.content; // 被回复的内容（默认=目标帖本身）
+      let parentContent = target.content; // 被回复的内容（默认 = 目标帖本身）
       // v26「我回复的什么」：用户回复的那条评论（围观网友接话的完整上下文；
       // 被回复对象不是主帖本身时才有——直接回复主帖时它＝主帖，不再重复）
       let repliedTo: { authorName: string; content: string } | undefined;
@@ -2905,37 +2915,40 @@ async function execJob(job: PendingJob): Promise<void> {
       let parentEng = { likes: likesOf(target), views: target.views };
 
       if (job.kind === 'aiReplyBack') {
-        // 用户在评论区回复了 AI/网友：这位作者（被回复者或围观者）回应用户的回复
+        // 用户（大号/小号）在评论区回复了 AI/网友：这位作者（被回复者或围观者）回应用户的回复
         const mainId = job.meta.mainPostId ?? job.meta.rootId ?? target.id;
         const mainPost = d.posts.find((p) => p.id === mainId);
         postContent = mainPost?.content ?? '';
         groupId = job.meta.rootId ?? target.id;
-        // 被回复对象 = 用户刚发的回复（AI 回应「我评论的内容」）
+        // 被回复对象 = 用户刚发的回复（AI 回应「我评论的内容」）——
+        // 匿名小号评论 → AI 看到的说话人就是小号网名（陌生网友）
         const userReply = job.meta.userReplyId ? d.posts.find((p) => p.id === job.meta.userReplyId) : null;
         parentContent = userReply?.content ?? target.content;
-        replyName = userName;
+        replyName = resolveAuthor(userReply?.authorKey ?? target.authorKey).name;
         if (userReply) parentEng = { likes: likesOf(userReply), views: userReply.views };
         if (target.id !== mainId) {
           repliedTo = { authorName: resolveAuthor(target.authorKey).name, content: target.content };
         }
         // v26 整楼对话链：分组锚点下最近的发言（任何作者——1-5 位围观者看的是
         // 整层楼，不再只看「自己 ↔ 用户」；排除用户刚发的这条（已作为 parent 单传）
-        // 和被回复的那条（已作为 repliedTo 单传），逐条带真实说话人名
+        // 和被回复的那条（已作为 repliedTo 单传），逐条带真实说话人名（匿名评论
+        // 也用小号网名——对 AI 是陌生网友的发言）
         history = d.posts
           .filter((p) => p.replyTo === groupId && p.id !== job.meta.userReplyId && p.id !== target.id)
           .sort((a, b) => a.createdAt - b.createdAt)
           .slice(-6)
           .map((p) => ({
-            from: p.authorKey === 'user' ? ('user' as const) : ('peer' as const),
+            from: isUserAuthor(p.authorKey) ? ('user' as const) : ('peer' as const),
             speaker: resolveAuthor(p.authorKey).name,
             text: p.content,
           }));
       } else {
-        // NPC 回复用户的新帖（v33：也承接网友对 char 帖子的评论——被回复对象名取帖子真实作者）
+        // NPC 回复用户的新帖（v33：也承接网友对 char 帖子的评论——被回复对象名取帖子真实作者）。
+        // 匿名小号帖：AI 看到的楼主 = 小号网名（陌生网友，与机主零关联）
         postContent = target.content;
         parentContent = target.content;
         groupId = target.id;
-        replyName = target.authorKey === 'user' ? userName : resolveAuthor(target.authorKey).name;
+        replyName = resolveAuthor(target.authorKey).name;
       }
 
       // 识图模型：帖子带图时先「看图」再回复
@@ -3009,10 +3022,10 @@ async function execJob(job: PendingJob): Promise<void> {
       if (job.kind === 'aiReplyBack' && job.meta.userReplyId) replyPost.replyToPost = job.meta.userReplyId;
       next.posts.push(replyPost);
       // v41（A4）：通知只发「用户在对话链里」的场景——
-      // · aiReplyBack：用户在评论区发了回复，别人回 TA → 通知 ✓
-      // · replyToUserPost 且主帖是用户发的 → 通知 ✓
+      // · aiReplyBack：用户（大号/小号）在评论区发了回复，别人回 TA → 通知 ✓
+      // · replyToUserPost 且主帖是用户账号发的（大号/小号） → 通知 ✓
       // · replyToUserPost 但主帖是角色帖（网友评论角色的帖子）→ 不通知（帖子不是你发的）
-      const notifyUser = job.kind === 'aiReplyBack' || target.authorKey === 'user';
+      const notifyUser = job.kind === 'aiReplyBack' || isUserAuthor(target.authorKey);
       if (notifyUser) {
         next.notifications = [
           {
@@ -3035,10 +3048,17 @@ async function execJob(job: PendingJob): Promise<void> {
       const dm = d.dms.find((x) => x.peerKey === peerKey);
       if (!dm) return;
       const peer = resolveAuthor(peerKey);
-      const history = dm.messages.slice(-8).map((m) => ({ from: m.from === 'user' ? ('user' as const) : ('peer' as const), text: m.text }));
+      // 匿名认知隔离：最后一封我方私信若是小号发的（from='anon'），对方（AI 角色/网友）
+      // 看到的私信对象就是小号网名——素不相识的陌生网友，不带任何关系/记忆块
+      const lastMine = [...dm.messages].reverse().find((m) => isUserAuthor(m.from));
+      const fromAnon = lastMine?.from === ANON_KEY;
+      const speakerName = resolveAuthor(lastMine?.from ?? 'user').name;
+      const history = dm.messages.slice(-8).map((m) => ({ from: isUserAuthor(m.from) ? ('user' as const) : ('peer' as const), text: m.text }));
       // v41（C1）：对方是 AI 角色时带完整身份块（人设卡+关系+情绪+对用户的记忆），
-      // 对齐 charReply 规格；普通网友保持轻量（网名+persona）
-      const brief = peerKey.startsWith('char:') ? forumCharBriefs().find((b) => b.key === peerKey) : null;
+      // 对齐 charReply 规格；普通网友保持轻量（网名+persona）。
+      // 小号会话 → 一律陌生网友模式（stranger）：剥离关系/情绪/记忆（记忆里全是
+      // 与机主本人的事，注入即穿帮）
+      const brief = !fromAnon && peerKey.startsWith('char:') ? forumCharBriefs().find((b) => b.key === peerKey) : null;
       let text = '';
       try {
         // v41（C2）：私信也注入 avoid——对方最近说过的内容不再重复
@@ -3051,18 +3071,20 @@ async function execJob(job: PendingJob): Promise<void> {
           author: {
             name: peer.name,
             persona: peer.persona || '',
-            ...(brief
-              ? {
-                  relation: charRelationLine(brief.contact),
-                  mood: charMoodBlock(brief.contactId),
-                  memory: charMemoryDigest(brief.contactId),
-                  char: true,
-                }
-              : {}),
+            ...(fromAnon
+              ? { stranger: true }
+              : brief
+                ? {
+                    relation: charRelationLine(brief.contact),
+                    mood: charMoodBlock(brief.contactId),
+                    memory: charMemoryDigest(brief.contactId),
+                    char: true,
+                  }
+                : {}),
           },
           history,
           avoid,
-          userName: resolveAuthor('user').name,
+          userName: speakerName,
         })) as { text?: string };
         text = typeof r.text === 'string' ? sanitizeDmClient(stripReplyPrefixClient(r.text)) : '';
         // v41（C1）：泄露拦截 + 长度校验（对齐全站「宁缺毋滥」口径）
@@ -3116,7 +3138,7 @@ function migrateV7ReplyData(): void {
     let changed = false;
     const byId = new Map(d.posts.map((p) => [p.id, p]));
     for (const p of d.posts) {
-      if (p.authorKey === 'user') continue;
+      if (isUserAuthor(p.authorKey)) continue;
       // ① 剥正文前缀
       const cleaned = stripReplyPrefixClient(p.content);
       if (cleaned !== p.content && cleaned.length >= 1) {
@@ -3151,7 +3173,7 @@ function migrateV35PurgeLeaked(): void {
     const d = forumData();
     const bad = new Set<string>();
     for (const p of d.posts) {
-      if (p.authorKey === 'user') continue;
+      if (isUserAuthor(p.authorKey)) continue;
       if (jsonLeakIn(p.content) || promptLeakIn(p.content)) bad.add(p.id);
     }
     if (bad.size) {
@@ -3187,7 +3209,7 @@ function migrateV35PurgeLeaked(): void {
     };
     const byMain = new Map<string, ForumPost[]>();
     for (const p of posts) {
-      if (p.authorKey === 'user' || !p.replyTo) continue;
+      if (isUserAuthor(p.authorKey) || !p.replyTo) continue;
       const key = mainOf(p);
       const group = byMain.get(key) ?? [];
       group.push(p);
