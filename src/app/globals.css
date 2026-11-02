@@ -564,18 +564,28 @@
     transform: scale(1.15);
   }
 }
-/* 许愿树：浇水水珠落下 */
-@keyframes wish-drop {
+/* 许愿树：挂签时金色光尘从树冠升起飘散（--dx/--dy 为飘移向量） */
+@keyframes wish-burst {
   0% {
-    transform: translateY(0);
+    transform: translate(0, 0) scale(0.5);
     opacity: 0;
   }
-  15% {
+  18% {
     opacity: 1;
   }
   100% {
-    transform: translateY(150px);
+    transform: translate(var(--dx, 0px), var(--dy, -80px)) scale(1);
     opacity: 0;
+  }
+}
+/* 许愿树：地面薄雾缓慢漂移 */
+@keyframes wish-mist {
+  0%,
+  100% {
+    transform: translateX(-4%);
+  }
+  50% {
+    transform: translateX(4%);
   }
 }
 /* 三生石：流星划过 */
@@ -718,7 +728,8 @@
   [animation\:couple-fall],
   [animation\:wish-sway],
   [animation\:wish-firefly],
-  [animation\:wish-drop] {
+  [animation\:wish-burst],
+  [animation\:wish-mist] {
     animation: none;
   }
 }

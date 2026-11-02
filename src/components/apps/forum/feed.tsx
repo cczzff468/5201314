@@ -10,7 +10,6 @@
  */
 
 import { memo, type ReactNode } from 'react';
-import { Sparkles } from 'lucide-react';
 import {
   castVote as castVoteCore,
   countShort,
@@ -122,23 +121,10 @@ const isTextImg = (m: string) => m.startsWith('data:image/png');
 
 /** v34 文字图卡（统一尺寸）：w-3/4 方图原样不裁切、白底圆角描边。
  *  AI 配图帖与用户手发文字图片共用，保证所有文字图「一样大」。
- *  【点击生图】：onTextImg 存在时卡片可点（右下角浮一枚生成角标提示），
- *  点击弹生成弹层（提示词预填源文本可改）→ 生成的真图原位替换卡片。 */
+ *  【点击生图】：onTextImg 存在时卡片可点（无角标，点卡片即弹生成弹层，
+ *  提示词预填源文本可改）→ 生成的真图原位替换卡片。 */
 function TextImgCard({ src, alt, onClick }: { src: string; alt: string; onClick?: () => void }) {
-  const inner = (
-    <>
-      <img src={src} alt={alt} className="aspect-square w-full select-none" draggable={false} loading="lazy" />
-      {onClick && (
-        <span
-          aria-hidden="true"
-          className="absolute bottom-1.5 right-1.5 flex items-center gap-[3px] rounded-full bg-black/55 px-2 py-[3px] text-[10px] font-bold text-white backdrop-blur-[2px]"
-        >
-          <Sparkles className="h-[10px] w-[10px]" strokeWidth={2.4} />
-          生成图片
-        </span>
-      )}
-    </>
-  );
+  const inner = <img src={src} alt={alt} className="aspect-square w-full select-none" draggable={false} loading="lazy" />;
   return (
     <div
       className={`relative mt-2.5 w-3/4 overflow-hidden rounded-2xl border bg-white ${onClick ? 'transition-transform active:scale-[0.985]' : ''}`}
