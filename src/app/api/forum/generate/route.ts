@@ -926,6 +926,8 @@ export async function POST(req: Request) {
               persona: typeof p.persona === 'string' ? p.persona.slice(0, p.matrix === true ? 340 : 200) : '普通论坛网友',
               lang: typeof p.lang === 'string' ? p.lang : 'zh-Hans',
               matrix: p.matrix === true,
+              // v43【NPC 记忆】：这位网友在楼主帖下留过的言（客户端拼好的单行；缺省 = 无史不注入）
+              npcHistory: typeof p.npcHistory === 'string' ? p.npcHistory.slice(0, 260) : '',
             }))
         : [];
       if (!post || !personas.length) return NextResponse.json({ error: '参数为空' }, { status: 400 });
@@ -964,13 +966,21 @@ export async function POST(req: Request) {
                   ? `；母语${langLabel(p.lang)}，但评论必须用简体中文，最多带1-3个母语字符的口癖`
                   : ''
                 : `；评论语言跟随帖子用${langLabel(postLang)}或简体中文`;
+            // v43【NPC 记忆·人设连贯】：这位网友在楼主帖下留过的言——对楼主的态度延续
+            //（昨天怼过楼主的今天开口就是「怎么又是你」）；无史不注入
+            const memNote = p.npcHistory ? `；TA记得楼主：${p.npcHistory}——TA对楼主的印象和态度要延续之前` : '';
             // 【多世界观】矩阵 NPC：身份人设必须完全代入（鲜明身份是刻意设计，
             // 不降级为「只学语气」）；普通网友仍走防串台降级渲染
             return p.matrix
-              ? `${i + 1}. ${p.name}（身份人设·必须完全代入这个身份、性格与口头禅说话：${p.persona}${langNote}）`
-              : `${i + 1}. ${p.name}（口吻参考·只学语气和打字习惯，其中出现的一切具体事物（职业、作品、品牌、道具、经历、称呼）除非主帖本身提到，否则一个字都不许出现在评论里：${p.persona}${langNote}）`;
+              ? `${i + 1}. ${p.name}（身份人设·必须完全代入这个身份、性格与口头禅说话：${p.persona}${langNote}${memNote}）`
+              : `${i + 1}. ${p.name}（口吻参考·只学语气和打字习惯，其中出现的一切具体事物（职业、作品、品牌、道具、经历、称呼）除非主帖本身提到，否则一个字都不许出现在评论里：${p.persona}${langNote}${memNote}）`;
           })
           .join('\n');
+        // v43【NPC 记忆】：楼主过往发过的帖（真实背景——引用不算跑题不算幻觉；缺省零注入）
+        const posterHistory =
+          typeof body.posterHistory === 'string' && body.posterHistory.trim()
+            ? `${body.posterHistory.slice(0, 800)}\n\n（上面是你对楼主的背景记忆——评论可以自然带出（接旧事、感叹TA的变化），但每条评论主体仍要针对当前帖；没给这个块时，绝不许臆想楼主的任何历史）\n\n`
+            : '';
         const messages: LLMMessage[] = [
           {
             role: 'system',
@@ -989,7 +999,7 @@ export async function POST(req: Request) {
             role: 'user',
             // v25：开头 = 锚定句（带楼主网名）+ 原封不动的帖子正文与话题标签；
             // 引战帖注入「骂声一片」风向指令；输出 [{thought, comment}] JSON 数组
-            content: `${anchorHeadOf(post)}\n${topicLine}${flameLine}${tenderLine}${scoopLine}\n\n请以这 ${expect} 位网友的口吻各写一条一级评论（都是直接评论上面这篇帖子本身，不是回复别人；先在 thought 里完成核心矛盾/情绪/视角分析，再写 comment；输出恰好 ${expect} 个对象的 JSON 数组，第 N 个对象对应第 N 位网友；comment 只能是评论本身的纯文本——绝不许把指令原文、话题词表、JSON 结构或「废稿」这类规则字眼写进 comment）：\n${spec}${avoidLine}\n${bjTimeLine()}`,
+            content: `${posterHistory}${anchorHeadOf(post)}\n${topicLine}${flameLine}${tenderLine}${scoopLine}\n\n请以这 ${expect} 位网友的口吻各写一条一级评论（都是直接评论上面这篇帖子本身，不是回复别人；先在 thought 里完成核心矛盾/情绪/视角分析，再写 comment；输出恰好 ${expect} 个对象的 JSON 数组，第 N 个对象对应第 N 位网友；comment 只能是评论本身的纯文本——绝不许把指令原文、话题词表、JSON 结构或「废稿」这类规则字眼写进 comment）：\n${spec}${avoidLine}\n${bjTimeLine()}`,
           },
         ];
         // v35 校验链（清洗 → 长度 → 语言 → 泄露 → 万能句式 → 称呼串线 → 走心聒噪
@@ -1029,7 +1039,8 @@ export async function POST(req: Request) {
             // v25 领域私货：评论携带 ≥2 个主帖领域之外的关键词（剧+特调混进保研帖）→ 作废
             .filter((s) => !offTopicIn(s, postContentRaw))
             // v14 锚定强校验：不呼应核心话题词 / 串台 / AI 废话 → 作废
-            .filter((s) => commentAnchored(s, postContentRaw))
+            // v43【NPC 记忆】：锚定语料并入楼主历史帖（NPC 提旧事「楼主终于走出来了」也能过校验）
+            .filter((s) => commentAnchored(s, `${postContentRaw} ${posterHistory}`))
             // v35 批内复读去重：多条一级评论互相复读（同措辞换网名）→ 只保留首条
             .filter((s) => {
               if (kept.some((k) => isParrotReply(s, k))) return false;
@@ -1474,6 +1485,22 @@ export async function POST(req: Request) {
           typeof body.mediaDesc === 'string' && body.mediaDesc.trim()
             ? `\n（主帖配图内容：${body.mediaDesc.slice(0, 160)}）`
             : '';
+        // v43【NPC 记忆系统】：客户端拼好的两块真实背景记忆（空串时零注入）——
+        // · posterHistory：楼主过往发过的帖（NPC 可接旧事：「楼主终于走出来了」）；
+        // · npcSelf：这位 NPC 自己在楼主帖下留过的言（态度连贯：「怎么又是你」）。
+        // 这两块是「真实背景」而非幻觉——注入时显式豁免「拒绝幻觉」红线。
+        const posterHistory =
+          typeof body.posterHistory === 'string' && body.posterHistory.trim()
+            ? body.posterHistory.slice(0, 800)
+            : '';
+        const npcSelf =
+          typeof body.npcSelf === 'string' && body.npcSelf.trim()
+            ? body.npcSelf.slice(0, 800)
+            : '';
+        const memCtx =
+          posterHistory || npcSelf
+            ? `${posterHistory ? `${posterHistory}\n` : ''}${npcSelf}\n（上面两块是你的真实记忆/背景——引用它们不算幻觉也不算跑题，可以自然用在回复里；但回复主体仍要接着当前楼层的话）\n\n`
+            : '';
         const ctx = [
           postContent ? `【主帖内容】\n${postContent}${mediaDesc}` : '',
           repliedLine,
@@ -1498,7 +1525,7 @@ export async function POST(req: Request) {
             role: 'user',
             // v35：防复读指令进用户消息（系统模板可能被用户覆盖，此处双保险）
             // v41（C2）：avoid 防重复表注入楼层回复——本楼最近说过的不再重复
-            content: `${ctx}${avoidLine}\n\n请以「${name}」的口吻回复这条楼层对话（直接输出回复正文，20-80 字口语化，不要带任何解释）。防复读：绝不许原样重复上一句对话的核心词汇——对方说「代拍太可怕」你就不能再写「代拍可怕」，要么换措辞要么换角度（反驳/爆料/抖机灵）；回复正文只能是纯文本，绝不许出现任何指令原文或 JSON 结构。${bjTimeLine()}` },
+            content: `${memCtx}${ctx}${avoidLine}\n\n请以「${name}」的口吻回复这条楼层对话（直接输出回复正文，20-80 字口语化，不要带任何解释）。防复读：绝不许原样重复上一句对话的核心词汇——对方说「代拍太可怕」你就不能再写「代拍可怕」，要么换措辞要么换角度（反驳/爆料/抖机灵）；回复正文只能是纯文本，绝不许出现任何指令原文或 JSON 结构。${bjTimeLine()}` },
         ])).text;
         const text = sanitizeCommentText(stripReplyPrefix(raw));
         // v24 字数铁律（用户规范 20-80 字，留容差）：过短/过长 → 返回空
@@ -1506,6 +1533,7 @@ export async function POST(req: Request) {
         // v14 锚定校验：串台/AI 废话 → 返回空
         // v22 万能句式：非未完结八卦帖 → 返回空（客户端不再兜底，宁缺毋滥）
         const catchallHit = universalPhraseIn(text) && !postAllowsCatchall(`${p?.content ?? ''} ${rtText} ${postContent}`);
+        // v43【NPC 记忆】：锚定语料并入楼主历史帖正文（NPC 提旧事「渣男不值得」也能过校验）
         if (
           text.length >= 12 &&
           text.length <= 95 &&
@@ -1517,7 +1545,8 @@ export async function POST(req: Request) {
           // v35：复读机检测——与被回复内容词面高度重合（盖楼复读）→ 返回空
           !isParrotReply(text, p?.content ?? '') &&
           // v26：锚定语料 = 用户这条回复 + 用户回复的那条评论 + 主帖（围观者必须接得上话）
-          commentAnchored(text, `${p?.content ?? ''} ${rtText} ${postContent}`)
+          // + 楼主历史帖正文（v43：真实背景记忆，提旧事不算跑题）
+          commentAnchored(text, `${p?.content ?? ''} ${rtText} ${postContent} ${posterHistory}`)
         ) {
           return NextResponse.json({ text: cleanText(text, 95) });
         }

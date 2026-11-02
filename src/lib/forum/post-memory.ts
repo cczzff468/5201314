@@ -79,7 +79,7 @@ function writeList(accountId: 'main' | 'anon', list: ForumPostMemory[]): void {
 }
 
 /** 帖子归属账号：user → main 仓；anon → anon 仓；其他作者（NPC/角色）不属于机主记忆 */
-function accountOfPost(post: ForumPost): 'main' | 'anon' | null {
+export function accountOfPost(post: ForumPost): 'main' | 'anon' | null {
   if (post.authorKey === ANON_KEY) return 'anon';
   if (post.authorKey === 'user') return 'main';
   return null;
@@ -184,8 +184,13 @@ export function buildForumPostMemoryBlock(contactId: string, disclosed: boolean)
     const lines = recs.slice(0, 3).map((r) => {
       const media = r.mediaCount ? `（配了${r.mediaCount}张图）` : '';
       const tags = r.tags.length ? `（话题：${r.tags.join(' ')}）` : '';
-      const c = r.npcComments[r.npcComments.length - 1];
-      const cLine = c ? `，网友「${c.author}」评论说：「${c.text.slice(0, 40)}」` : '';
+      // v43【NPC 记忆联动】：每帖带最近 2 条不同 NPC 的评论（私聊吐槽素材更足——
+      //「哪个网友在哪个帖里说了什么」一眼可辨）
+      const cLines = r.npcComments
+        .slice(-2)
+        .map((c) => `网友「${c.author}」评论说：「${c.text.slice(0, 40)}」`)
+        .join('，');
+      const cLine = cLines ? `，${cLines}` : '';
       return `- TA ${relTime(r.createdAt, now)}发的帖子：「${r.content.slice(0, 60)}」${media}${tags}${cLine}`;
     });
     return [

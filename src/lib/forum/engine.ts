@@ -79,7 +79,17 @@ import { renderTextImage } from './textimg';
 import { commentAnchored, isTenderPost, loudMemeIn, offTopicIn, personaBleedIn, postAllowsCatchall, universalPhraseIn, isParrotReply, isScoopPost, jsonLeakIn, promptLeakIn, sweetShipIn } from './topic';
 import { promptOverridesPayload, rollCommentCount, rollPostCount } from './gen-settings';
 // v42【帖子记忆】：帖子入库 + NPC 评论入库（深度记忆开关守卫在模块内部）
-import { noteNpcCommentOnMyPost, notePostPublished } from './post-memory';
+import { noteNpcCommentOnMyPost, notePostPublished, accountOfPost } from './post-memory';
+// v43【NPC 记忆系统】：NPC 记住自己在用户帖下说过什么（人设/态度连贯）+
+// 楼主帖子历史块（NPC 评论时读用户过往帖）+ 马甲暴露检测（金鱼守卫在模块内部）
+import {
+  npcMyHistoryBlock,
+  npcMyHistoryLine,
+  noteNpcMyComment,
+  npcsWithHistoryOn,
+  posterHistoryBlock,
+  posterHistoryRaw,
+} from './npc-memory';
 import {
   charMemoryDigest,
   charMoodBlock,
@@ -900,6 +910,8 @@ async function llmPolishSeedComments(seedPostIds: string[]): Promise<void> {
       if (isUserAuthor(t.authorKey) && created.length) {
         // v42【帖子记忆】：播种期生成的网友评论也入「某NPC在我的帖子里说了什么」
         created.forEach((c) => noteNpcCommentOnMyPost(t.id, c));
+        // v43【NPC 记忆系统】：播种期网友也记「我在TA帖下说过这句」
+        created.forEach((c) => noteNpcMyComment(c.authorKey, t, c.content));
         next.notifications = [
           ...created.slice(0, 2).map((c) => ({
             id: uid('n'),
@@ -1894,6 +1906,12 @@ async function growSubReplyForest(opts: {
     const next = { ...forumData() };
     next.posts.push(...made);
     saveForum(next);
+    // v42 补挂 + v43【NPC 记忆系统】：楼中楼里网友说的话也算「在楼主的帖子里说过话」
+    // （楼主是用户账号帖时模块内部才落库；金鱼模式零写入）
+    made.forEach((s) => {
+      noteNpcCommentOnMyPost(post.id, s);
+      noteNpcMyComment(s.authorKey, post, s.content);
+    });
   };
   const noteRecent = (made: ForumPost[]) => {
     made.forEach((s) => recordDynNpcRecent(s.authorKey, `评论过：${s.content.slice(0, 60)}`));
@@ -2034,6 +2052,24 @@ async function genCommentBatch(postId: string, report?: (n: number) => void): Pr
     const existingKeys = threadReplies.map((p) => p.authorKey);
     const dynBefore = new Set(Object.keys(forumData().dynNpcs ?? {}));
     const commenterKeys = pickCommenters(want, postLang, post.content, post.authorKey, ...existingKeys);
+    // v43【NPC 记忆·回访优先】：楼主是用户账号帖（大号/小号）时，「在TA帖下留过言的 NPC」
+    // 优先回访（真实论坛里常客就是那几个——NPC 再次出现才接得上「我记得你」的连贯性）。
+    // 只替换本批新建的动态网友席位（矩阵/内置/已有回访者不动），最多 40%。金鱼模式名单为空、零替换。
+    const posterAccount = accountOfPost(post);
+    if (posterAccount) {
+      const veterans = npcsWithHistoryOn(posterAccount).filter(
+        (k) => !existingKeys.includes(k) && k !== post.authorKey && !commenterKeys.includes(k) && !isUserAuthor(k),
+      );
+      const n = Math.min(veterans.length, Math.max(1, Math.floor(commenterKeys.length * 0.4)));
+      const shuffled = veterans.slice().sort(() => Math.random() - 0.5);
+      let vi = 0;
+      for (let i = commenterKeys.length - 1; i >= 0 && vi < n; i--) {
+        if (commenterKeys[i].startsWith('dyn:')) {
+          const v = shuffled[vi++];
+          if (v) commenterKeys[i] = v;
+        }
+      }
+    }
     // 本批新建的评论者（LLM 起名目标；池子名只是占位）
     const newDynCommenters = commenterKeys.filter((k) => k.startsWith('dyn:') && !dynBefore.has(k.slice(4)));
     const avoid = threadReplies.slice(-10).map((p) => p.content.slice(0, 40));
@@ -2056,14 +2092,19 @@ async function genCommentBatch(postId: string, report?: (n: number) => void): Pr
           const a = resolveAuthor(k);
           // 【多世界观】矩阵 NPC：persona 含【身份】【性格】【口头禅】——
           // 服务端按「必须完全代入」渲染（不再是普通网友的「只学语气」降级）
+          // v43【NPC 记忆】：这位网友在楼主帖下留过的言（单行；金鱼/无史/非用户帖 → 缺省零注入）
+          const npcMem = npcMyHistoryLine(k, post);
           return {
             name: a.name,
             persona: a.persona || '普通论坛网友',
             lang: a.lang ?? 'zh-Hans',
             ...(k.startsWith('mnpc:') ? { matrix: true } : {}),
+            ...(npcMem ? { npcHistory: npcMem } : {}),
           };
         }),
         avoid,
+        // v43【NPC 记忆】：楼主过往发过的帖（整批背景——「楼主终于走出来了」的素材；金鱼 → 空串）
+        posterHistory: posterHistoryBlock(post),
         userName: resolveAuthor('user').name,
       })) as { items?: string[] };
       texts = Array.isArray(r.items)
@@ -2097,7 +2138,10 @@ async function genCommentBatch(postId: string, report?: (n: number) => void): Pr
               const anchorPost = stripImgPh(post.content);
               if (offTopicIn(s, anchorPost)) return '';
               // v14 锚定校验：串台/AI 废话直接丢弃（与服务端双保险）
-              if (!commentAnchored(s, anchorPost)) return '';
+              // v43【NPC 记忆】：锚定语料并入楼主历史帖正文（NPC 提旧事也能过校验；
+              // 串台检测仍只看当前帖——旧帖不算私货）
+              const anchorAll = posterHistoryRaw(post) ? `${anchorPost} ${posterHistoryRaw(post)}` : anchorPost;
+              if (!commentAnchored(s, anchorAll)) return '';
               return s;
             })
             .filter(Boolean)
@@ -2144,8 +2188,13 @@ async function genCommentBatch(postId: string, report?: (n: number) => void): Pr
       const c = basePost(authorKey, t.slice(0, REPLY_MAX), post.community, at, postId, postAuthor.name, true, postEng);
       newComments.push(c);
       next.posts.push(c);
-      // 人设连通性：记录动态网友最近评论过的内容（下次发帖/评论能接上话疸）
+      // 人设连通性：记录动态网友最近评论过的内容（下次发帖/评论能接上话）
       recordDynNpcRecent(authorKey, `评论过：${t.slice(0, 60)}`);
+      // v42 补挂：用户帖点「显示更多评论」生成的网友评论也入「某NPC在我的帖子里说了什么」
+      // （非用户帖在两模块内部均无副作用）
+      noteNpcCommentOnMyPost(post.id, c);
+      // v43【NPC 记忆系统】：这些网友记住「我在楼主的这篇帖下说了这句话」
+      noteNpcMyComment(authorKey, post, t);
     });
 
     // ---- v26 楼中楼森林：每条新评论 1-5 位不同网友直接回复；部分回复再被回复 ----
@@ -2781,6 +2830,8 @@ async function execJob(job: PendingJob): Promise<void> {
         next.posts.push(reply);
         // v42【帖子记忆】：角色评论了用户的帖 → 「某NPC在我的哪个帖子里说了什么」入库
         noteNpcCommentOnMyPost(target.id, reply);
+        // v43【NPC 记忆系统】：角色也记「我在TA帖下说过这句」（下次逛到TA新帖态度可延续）
+        noteNpcMyComment(charKey, post, comment);
         next.notifications = [
           { id: uid('n'), type: 'reply' as const, fromKey: charKey, postId: reply.id, createdAt: Date.now(), read: false },
           ...next.notifications,
@@ -2874,6 +2925,8 @@ async function execJob(job: PendingJob): Promise<void> {
       next.posts.push(reply);
       // v42【帖子记忆】：神回复落用户帖的评论区 → 也算「某NPC在我的帖子里说了话」入库
       noteNpcCommentOnMyPost(mainId, reply);
+      // v43【NPC 记忆系统】：神回复也是「我在TA帖下说过的话」（角色侧连贯性）
+      noteNpcMyComment(charKey, mainPost, text);
       next.notifications = [
         { id: uid('n'), type: 'reply' as const, fromKey: charKey, postId: reply.id, createdAt: Date.now(), read: false },
         ...next.notifications,
@@ -2967,6 +3020,14 @@ async function execJob(job: PendingJob): Promise<void> {
       // 识图模型：帖子带图时先「看图」再回复
       const mainForMedia = d.posts.find((p) => p.id === (job.kind === 'aiReplyBack' ? (job.meta.mainPostId ?? job.meta.rootId ?? target.id) : target.id));
       const mediaDesc = await describePostMedia(mainForMedia?.media ?? target.media);
+      // v43【NPC 记忆系统】：主帖是用户账号帖（大号/小号）时——
+      // · posterHist：楼主过往发过的帖（NPC 能接旧事：「楼主终于走出来了」）；
+      // · npcSelfHist：这位 NPC 自己在TA帖子下留过的言（态度连贯：「怎么又是你」）；
+      // 金鱼模式（帖子记忆关）两者皆空——NPC 只针对当前帖；
+      // 匿名小号帖走 anon 仓（NPC 眼里是另一个陌生楼主，绝不带大号历史，防穿帮）。
+      const mainPostForMem = mainForMedia ?? target;
+      const posterHist = posterHistoryBlock(mainPostForMem);
+      const npcSelfHist = posterHist || isUserAuthor(mainPostForMem.authorKey) ? npcMyHistoryBlock(authorKey, mainPostForMem) : '';
       // v9：主帖语言（中文帖的 AI 回复也必须中文为主体）
       const mainPostAuthorLang = mainForMedia ? resolveAuthor(mainForMedia.authorKey).lang : undefined;
       const postLang = detectPostLang(postContent || target.content, mainPostAuthorLang ?? resolveAuthor(target.authorKey).lang);
@@ -2995,6 +3056,9 @@ async function execJob(job: PendingJob): Promise<void> {
           history,
           repliedTo, // v26：用户回复的那条评论（"我回复的什么"）
           avoid,
+          // v43【NPC 记忆系统】：楼主历史帖 + 这位 NPC 自己的留言史（空串时服务端零注入）
+          posterHistory: posterHist,
+          npcSelf: npcSelfHist,
           userName,
         })) as { text?: string };
         text = typeof r.text === 'string' ? sanitizeCommentClient(stripReplyPrefixClient(r.text)) : '';
@@ -3008,7 +3072,15 @@ async function execJob(job: PendingJob): Promise<void> {
         if (text && isParrotReply(text, parentContent)) text = '';
         // v26 锚定双保险：必须接得上「用户这条回复 + 用户回复的那条 + 主帖」（与服务端同口径）
         // v27 锚定前剥 [图片] 占位符（防词表污染误杀）
-        if (text && !commentAnchored(text, stripImgPh(`${parentContent} ${repliedTo?.content ?? ''} ${postContent}`))) text = '';
+        // v43【NPC 记忆】：锚定语料并入楼主历史帖（NPC 提旧事「渣男不值得」也能过校验）
+        if (
+          text &&
+          !commentAnchored(
+            text,
+            stripImgPh(`${parentContent} ${repliedTo?.content ?? ''} ${postContent} ${posterHistoryRaw(mainPostForMem)}`),
+          )
+        )
+          text = '';
       } catch {
         text = '';
       }
@@ -3040,6 +3112,9 @@ async function execJob(job: PendingJob): Promise<void> {
         job.kind === 'aiReplyBack' ? (job.meta.mainPostId ?? job.meta.rootId ?? target.id) : target.id,
         replyPost,
       );
+      // v43【NPC 记忆系统】：这位 NPC 记住「我在楼主的这篇帖下说了这句话」——
+      // 下次再遇到TA的新帖，态度可延续（怎么又是你）
+      noteNpcMyComment(authorKey, mainPostForMem, text);
       // v41（A4）：通知只发「用户在对话链里」的场景——
       // · aiReplyBack：用户（大号/小号）在评论区发了回复，别人回 TA → 通知 ✓
       // · replyToUserPost 且主帖是用户账号发的（大号/小号） → 通知 ✓

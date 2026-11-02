@@ -46,6 +46,8 @@ import {
 import { bootForum, generateMoreFeedPosts, generateNewFeedPosts, queueUserPostInteractions, queueCharEngagements, queueCharThanksForLike, setForumAiActivity } from '@/lib/forum/engine';
 import { writeUserLikeMemory, writeUserPostMemory } from '@/lib/forum/social';
 import { notePostPublished } from '@/lib/forum/post-memory';
+// v43【NPC 记忆系统】：马甲暴露检测（用户在大号帖里自己点名小号 → NPC 侧从此认得马甲）
+import { exposeAnonIdentityIn, markNpcAnonKnown } from '@/lib/forum/npc-memory';
 import {
   COMMENT_COUNT_BOUNDS,
   POST_COUNT_BOUNDS,
@@ -439,6 +441,10 @@ export default function ForumApp() {
       // v42【帖子记忆】（深度模式）：帖子正文/配图/话题标签入帖子记忆库
       // （金鱼模式下模块内部直接跳过；anon/main 物理隔离入库）
       notePostPublished(post);
+      // v43【NPC 记忆·马甲暴露】：用户在大号帖正文里自己暴露了小号特征
+      // （@了小号 handle，或「我的小号是xxx」）→ NPC 侧从此认得这个马甲；
+      // 未暴露时 NPC 对两个号完全是两个陌生人的认知（绝不穿帮）
+      if (me === 'user' && exposeAnonIdentityIn(post.content)) markNpcAnonKnown();
       if (!scheduled) {
         queueUserPostInteractions(post);
         if (me === 'user') {
@@ -928,10 +934,12 @@ export default function ForumApp() {
                       setDrawer(false);
                       if (switched === 'anon') {
                         toast(`已切换到匿名账号 @${resolveAuthor(ANON_KEY).handle}，现在你是「匿名者」`);
-                        openProfile(ANON_KEY);
+                        // v43 导航修复：重置为单层栈（旧版 openProfile 会再压一层——
+                        // 若当前已在某个 profile 页，返回时会先退回旧账号页再退主界面，两步才到家）
+                        setViews([{ kind: 'profile', key: ANON_KEY }]);
                       } else {
                         toast('已切回主账号（大号）');
-                        openProfile('user');
+                        setViews([{ kind: 'profile', key: 'user' }]);
                       }
                     }}
                     className="flex h-[36px] w-[36px] shrink-0 items-center justify-center rounded-full border transition-opacity active:opacity-60"
