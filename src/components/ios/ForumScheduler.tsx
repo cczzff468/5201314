@@ -12,6 +12,8 @@
 
 import { useEffect } from 'react';
 import { tickForumSocial } from '@/lib/forum/engine';
+// 【时间流增长】帖子数据动态增长引擎（用户规格一）：心跳驱动 + 内部 20 分钟节流
+import { tickForumGrowth } from '@/lib/forum/growth';
 
 const TICK_MS = 15_000;
 
@@ -25,6 +27,7 @@ export default function ForumScheduler() {
       busy = true;
       try {
         await tickForumSocial();
+        tickForumGrowth();
       } catch {
         // 论坛是增强能力，任何异常静默（引擎内部已有静默保护）
       } finally {

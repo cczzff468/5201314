@@ -199,6 +199,10 @@ export interface ForumPost {
   /** 合成点赞基数（AI 帖子按热度分层生成：十几/几十/几百/几千/几万/几十万/几百万；
    *  展示数 = likes.length + likeBoost，用户点赞仍写 likes 数组） */
   likeBoost?: number;
+  /** 【时间流增长】用户帖的热度档案：pot = 发帖时抽定的热度潜质（0.25~2.2，
+   *  决定这条帖在时间流里浏览/点赞/转推的自然增速）；首次增长 tick 时懒初始化。
+   *  仅用户帖（大号/小号）使用；AI 帖生成时已带满额数据，不参与时间流。 */
+  growth?: { pot: number };
   /** 我是否转推过（X 转推可撤销；true 时绿高亮） */
   reposted?: boolean;
   /** 回复链：回复某帖时同时是一条帖（X 语义：回复即发帖） */
@@ -345,6 +349,9 @@ export interface ForumData {
    *  角色刷到帖子觉得值得长期看/聊天里被请求后按人设自主决定关注，
    *  主页「关注者」数字与列表页真实展示（可查谁关注了我） */
   charFollowers?: AuthorKey[];
+  /** 【时间流增长】机主大号的合成关注者增量：帖子热度带来的自然涨粉
+   *  （随增长引擎缓慢累积；展示 = charFollowers.length + 本值，见 followersOf） */
+  userFollowerBoost?: number;
   /** 【楼主回复】AI 楼主已「看过并决策过」的帖子评论（key = 帖子 id → 评论 id 列表）：
  *  回过的/无视过的都算已处理——同一批评论不重复触发决策（防 LLM 反复空转）；
  *  只保留最近 40 帖（noteOwnerReplySeen 内剪枝，防无限增长）。 */
@@ -1821,7 +1828,7 @@ export function followersOf(key: AuthorKey): number {
     const a = resolveAuthor(key);
     if (typeof a.baseFollowers === 'number') return a.baseFollowers;
   }
-  if (key === 'user') return (forumData().charFollowers ?? []).length;
+  if (key === 'user') return (forumData().charFollowers ?? []).length + (forumData().userFollowerBoost ?? 0);
   if (key.startsWith('char:')) return forumData().following.includes(key) ? 1 : 0;
   return 0;
 }

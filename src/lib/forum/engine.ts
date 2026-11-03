@@ -125,6 +125,16 @@ import { matrixNpcPersona, type MatrixNpc } from './worldview';
 import { maybeCrossAppPing } from './crossapp';
 // v43（A3）：论坛私信记忆块（char 侧）的匿名说破状态
 import { isForumAnonDisclosed } from '@/lib/ios/forum-anon';
+// 【NPC 私信独立记忆库】（用户规格三/四）：20条触发总结、永久存储、
+// main/anon 分仓、说破后单向关联；char 角色不写入（防串台，规格五）
+import {
+  afterDmMessage,
+  commitDmSummary,
+  dmLongMemoryBlock,
+  formatDmWindow,
+  isDmPeerDisclosed,
+  isNpcDmPeer,
+} from './dm-memory';
 
 // ---------------- pending 队列（跨刷新持久） ----------------
 
@@ -132,7 +142,7 @@ interface PendingJob {
   id: string;
   /** 到期时间戳 */
   due: number;
-  kind: 'replyToUserPost' | 'aiReplyBack' | 'dmReply' | 'charPost' | 'charEngage' | 'charReply' | 'netLike' | 'followAsk' | 'ownerReply';
+  kind: 'replyToUserPost' | 'aiReplyBack' | 'dmReply' | 'charPost' | 'charEngage' | 'charReply' | 'netLike' | 'followAsk' | 'ownerReply' | 'npcProactiveDm' | 'dmSummary';
   /** 相关帖子 id（reply 类）/ dm 对方 key（dmReply）/ charPost=charKey */
   postKey: string;
   meta: {
@@ -157,6 +167,14 @@ interface PendingJob {
     /** v46【楼主回复】ownerReply：ownPost=回自己帖下的评论（楼主视角）；
      *  userPost=回用户帖下的评论（护短/围观视角） */
     mode?: 'ownPost' | 'userPost';
+    /** npcProactiveDm：目标账号仓（帖子是谁发的——决定 NPC 对TA的认知身份） */
+    account?: 'main' | 'anon';
+    /** npcProactiveDm：触发帖子 id + 正文（LLM 结合人设生成开场私信） */
+    postId?: string;
+    proactivePost?: string;
+    /** dmSummary：总结窗口起点（at<=coveredAt 的已沉淀过）与窗口消息数 */
+    coveredAt?: number;
+    windowCount?: number;
   };
 }
 
@@ -174,7 +192,7 @@ function savePending(p: Record<string, PendingJob>): void {
   void kvSet(PENDING_KEY, p);
 }
 
-function addPending(job: PendingJob): void {
+export function addPending(job: PendingJob): void {
   const p = loadPending();
   p[job.id] = job;
   savePending(p);
@@ -2715,6 +2733,9 @@ export function queueUserPostInteractions(post: ForumPost): void {
       },
     });
   }
+  // 【NPC 主动私信】（用户规格二）：社交型 NPC/网友/角色根据帖子内容+人设
+  // 主动来私（maybeQueueProactiveDm 内部自带概率/冷却/匿名认知隔离）
+  maybeQueueProactiveDm(post);
   // 立即落盘新建的动态网友（点赞名单先持久化，不等延时任务）
   saveForum({ ...next0 });
   runPending();
@@ -2830,6 +2851,176 @@ export function queueDmReply(peerKey: AuthorKey): void {
     meta: { authorKey: peerKey },
   });
   runPending();
+}
+
+// ---------------- NPC 独立记忆库：总结任务（用户规格三） ----------------
+
+/** 满 20 条窗口 → 排一次 LLM 总结（去重：同对端同账号同时刻只排一个） */
+function queueDmSummaryJob(peerKey: AuthorKey, account: 'main' | 'anon', coveredAt: number, windowCount: number): void {
+  try {
+    const p = loadPending();
+    const dup = Object.values(p).some((j) => j.kind === 'dmSummary' && j.postKey === peerKey && j.meta.account === account);
+    if (dup) return;
+    addPending({
+      id: uid('js'),
+      due: Date.now() + 8000 + Math.random() * 20_000,
+      kind: 'dmSummary',
+      postKey: peerKey,
+      meta: { account, coveredAt, windowCount },
+    });
+    runPending();
+  } catch {
+    /* 静默 */
+  }
+}
+
+/** dms.tsx 发送用户消息后调用：把这条消息计入对端独立记忆库；
+ *  满足 20 条窗口时自动排总结任务。char/official 直接跳过（规格五防串台）。 */
+export function noteDmExchangeAndMaybeSummarize(peerKey: AuthorKey, from: AuthorKey): void {
+  try {
+    if (!isNpcDmPeer(peerKey)) return;
+    const account: 'main' | 'anon' = from === ANON_KEY ? 'anon' : 'main';
+    const due = afterDmMessage(peerKey, account, 1);
+    if (due) queueDmSummaryJob(due.peerKey, due.account, due.coveredAt, due.pending);
+  } catch {
+    /* 静默 */
+  }
+}
+
+// ---------------- NPC 主动私信（用户规格二：帖子+人设触发） ----------------
+
+/** 社交型人设识别（爆料人/吃瓜/八卦同好/线人——这些人看到帖子会想私聊） */
+const SOCIAL_PERSONA_RE = /吃瓜|爆料|八卦|瓜主|线人|打听|蹲后续|围观|好奇|吃熟瓜/;
+/** 主动私信冷却 kv：Record<peerKey, at>——同一 NPC 6h 内不重复主动私信（防轰炸） */
+const PROACTIVE_DM_KEY = 'forum-dm-proactive-v1';
+
+function proactiveLastMap(): Record<string, number> {
+  try {
+    const raw = kvGet<Record<string, number>>(PROACTIVE_DM_KEY);
+    return raw && typeof raw === 'object' ? raw : {};
+  } catch {
+    return {};
+  }
+}
+
+/** 该对端多长时间没主动私信过（0 = 从没来过） */
+function proactiveLastAt(peerKey: string): number {
+  return proactiveLastMap()[peerKey] ?? 0;
+}
+
+/** 任务成功落地后落冷却标记（job 失败/取消不占用冷却） */
+function markProactiveDmCooldown(peerKey: string): void {
+  try {
+    const map = proactiveLastMap();
+    map[peerKey] = Date.now();
+    kvSet(PROACTIVE_DM_KEY, map);
+  } catch {
+    /* 静默 */
+  }
+}
+
+/**
+ * 用户发帖后：部分社交型 NPC/网友/角色会根据【帖子内容 + 自身人设】主动私信。
+ * - 触发率约四成；每次 1~2 位；同对端 6h 冷却；
+ * - 生成必须结合 NPC 人设 + 发帖正文（服务端 proactive 上下文）；
+ * - 匿名帖：NPC 把发帖人当陌生网友（stranger）；AI 角色不对匿名帖发起
+ *  （认知隔离——角色不认识这个匿名陌生人）；
+ * - 延迟 45s~6min（真人「刷到帖子想了想才来私」）。
+ */
+function maybeQueueProactiveDm(post: ForumPost): void {
+  try {
+    if (!isUserAuthor(post.authorKey)) return;
+    if (Math.random() > 0.38) return; // 约四成帖子会有人来私
+    const account: 'main' | 'anon' = post.authorKey === ANON_KEY ? 'anon' : 'main';
+    const candidates: AuthorKey[] = [];
+    // ① 内置 NPC（社交型人设：瓜主/搬运工这类）
+    for (const n of NPC_DEFS) {
+      if (SOCIAL_PERSONA_RE.test(n.persona)) candidates.push(`npc:${n.id}` as AuthorKey);
+    }
+    // ② 矩阵阵容（当前世界观的原住民大V）
+    for (const c of matrixCast()) {
+      if (SOCIAL_PERSONA_RE.test(matrixNpcPersona(c.npc) ?? '')) candidates.push(c.key);
+    }
+    // ③ 动态网友池里的八卦同好
+    const d = forumData();
+    for (const [id, npc] of Object.entries(d.dynNpcs ?? {})) {
+      if (npc && SOCIAL_PERSONA_RE.test(npc.persona ?? '')) candidates.push(`dyn:${id}` as AuthorKey);
+    }
+    // ④ AI 角色（仅大号帖——匿名帖角色不认识发帖人，不主动私信）
+    if (account === 'main') {
+      for (const b of forumCharBriefs()) {
+        const p = `${b.contact.persona ?? ''}${(b.contact as { bio?: string }).bio ?? ''}`;
+        if (SOCIAL_PERSONA_RE.test(p) || /男友|女友|恋人|对象|暗恋|暧昧|亲密|关心你/.test(p)) {
+          candidates.push(b.key as AuthorKey);
+        }
+      }
+    }
+    if (!candidates.length) return;
+    const picked = new Set<AuthorKey>();
+    const want = Math.random() < 0.18 ? 2 : 1;
+    for (let i = 0; i < want * 10 && picked.size < want; i++) {
+      const k = candidates[Math.floor(Math.random() * candidates.length)];
+      if (!k || picked.has(k) || k === 'official') continue;
+      if (proactiveLastAt(k) > Date.now() - 6 * 3600_000) continue; // 冷却中
+      picked.add(k);
+    }
+    if (!picked.size) return;
+    let idx = 0;
+    for (const k of picked) {
+      addPending({
+        id: uid('j'),
+        due: Date.now() + 45_000 + Math.random() * 300_000 + idx * 60_000,
+        kind: 'npcProactiveDm',
+        postKey: k,
+        meta: { postId: post.id, proactivePost: post.content.slice(0, 240), account },
+      });
+      idx++;
+    }
+    runPending();
+  } catch {
+    /* 静默 */
+  }
+}
+
+// ---------------- 私信公共辅助（multi 模式：用户规格五/六） ----------------
+
+/** multi 模式结果清洗：服务端 items[]（或旧版单条 text）→ 逐条 sanitize +
+ *  泄露拦截 + 长度/敷衍校验（对齐全站「宁缺毋滥」；单次最多 10 条）。 */
+function sanitizeDmBubbles(raw: unknown): string[] {
+  const robj = raw as { items?: unknown; text?: unknown };
+  const list: unknown[] = Array.isArray(robj?.items)
+    ? robj.items
+    : typeof robj?.text === 'string'
+      ? [robj.text]
+      : [];
+  return list
+    .map((x) => sanitizeDmClient(stripReplyPrefixClient(String(x ?? ''))))
+    .filter((t) => {
+      if (!t) return false;
+      if (jsonLeakIn(t) || promptLeakIn(t)) return false;
+      if (t.length < 2 || t.length > 160) return false;
+      // 万能敷衍单条（「哈哈哈」「嗯嗯」）不放行
+      if (/^(:?哈{2,}|嗯{2,}|哦{2,}|是的呢|在呢)[。!！~～\s]*$/.test(t)) return false;
+      return true;
+    })
+    .slice(0, 10);
+}
+
+/** 多条私信错峰落库：首条 2.5s 后到、之后每条再隔 2.2~7s（打字节奏）——
+ *  前端 DmThread 按 at<=now 逐条揭示，呈现「流式输出 + 连发气泡」。 */
+function landDmBubbles(peerKey: AuthorKey, from: AuthorKey, items: string[]): void {
+  mutateForum((next) => {
+    let target = next.dms.find((x) => x.peerKey === peerKey);
+    if (!target) {
+      target = { peerKey, messages: [] };
+      next.dms.push(target);
+    }
+    let at = Date.now() + 2500;
+    for (const t of items) {
+      at += 2200 + Math.random() * 4800;
+      target.messages.push({ id: uid('m'), from, text: t.slice(0, 160), at });
+    }
+  });
 }
 
 // ---------------- pending 执行器 ----------------
@@ -3523,49 +3714,62 @@ async function execJob(job: PendingJob): Promise<void> {
       if (!dm) return;
       const peer = resolveAuthor(peerKey);
       // 匿名认知隔离：最后一封我方私信若是小号发的（from='anon'），对方（AI 角色/网友）
-      // 看到的私信对象就是小号网名——素不相识的陌生网友，不带任何关系/记忆块
+      // 看到的私信对象就是小号网名——素不相识的陌生网友，不带任何关系/记忆块。
+      // 【说破关联】（用户规格四）：该对端已被亲口告知身份（私信里说过）→ 不再当陌生人。
       const lastMine = [...dm.messages].reverse().find((m) => isUserAuthor(m.from));
       const fromAnon = lastMine?.from === ANON_KEY;
+      const disclosed = fromAnon ? isDmPeerDisclosed(peerKey) : true;
+      const stranger = fromAnon && !disclosed;
+      const account: 'main' | 'anon' = fromAnon ? 'anon' : 'main';
       const speakerName = resolveAuthor(lastMine?.from ?? 'user').name;
       const history = dm.messages.slice(-8).map((m) => ({ from: isUserAuthor(m.from) ? ('user' as const) : ('peer' as const), text: m.text }));
       // v41（C1）：对方是 AI 角色时带完整身份块（人设卡+关系+情绪+对用户的记忆），
       // 对齐 charReply 规格；普通网友保持轻量（网名+persona）。
-      // 小号会话 → 一律陌生网友模式（stranger）：剥离关系/情绪/记忆（记忆里全是
-      // 与机主本人的事，注入即穿帮）
-      const brief = !fromAnon && peerKey.startsWith('char:') ? forumCharBriefs().find((b) => b.key === peerKey) : null;
+      const brief = !stranger && peerKey.startsWith('char:') ? forumCharBriefs().find((b) => b.key === peerKey) : null;
       // v44【AI 关注者】：TA 这条私信是在让你关注 TA（论坛私信语境里「关注我」即可）→
       //  ① 私信回复自然接这句话（followAsk 提示随请求上送服务端）；
-      //  ② 稍后自主决策（queueForumFollowAsk 延迟 45s~2min）；小号发的（匿名认知隔离）不触发
-      const followAsked = !fromAnon && !!brief && wantsForumFollow(lastMine?.text ?? '', { inForum: true });
+      //  ② 稍后自主决策（queueForumFollowAsk 延迟 45s~2min）
+      const followAsked = !stranger && !!brief && wantsForumFollow(lastMine?.text ?? '', { inForum: true });
       if (followAsked) queueForumFollowAsk(peerKey, 'dm');
       // v43（A3）【私信记忆】：论坛私信也带帖子记忆——对方能自然聊起「你那帖」与
       // 评论区（微信/QQ/信息早有跨应用感知块，论坛自己的私信此前反而失忆）：
-      // · char 角色 → 帖子记忆块（TA发过的帖+网友评论；小号仓仅说破后并入）；
+      // · char 角色 → 帖子记忆块（TA发过的帖+网友评论；说破后并匿名仓）；
       // · 普通网友/NPC → TA 自己的留言史 + 楼主最近发的帖；
-      // · 小号会话（stranger）→ 零注入（认知隔离铁律，注入即穿帮）。
+      // · 陌生模式（stranger）→ 零注入（认知隔离铁律，注入即穿帮）。
       let dmForumMem = '';
-      if (!fromAnon) {
+      if (!stranger) {
         dmForumMem = brief
           ? buildForumPostMemoryBlock(brief.contactId, isForumAnonDisclosed(brief.contactId))
           : npcDmMemoryBlock(peerKey);
       }
-      let text = '';
+      // 【NPC 独立记忆库】（用户规格三）：该 NPC 的长期私信记忆（每满 20 条总结沉淀）。
+      // 仅 NPC 网友；char 角色走 charMemoryDigest 管线，绝不写入 NPC 库（规格五防串台）。
+      let dmLongMem = '';
+      if (!stranger && isNpcDmPeer(peerKey)) {
+        dmLongMem = dmLongMemoryBlock(peerKey, account, fromAnon && disclosed);
+      }
+      // 【多条连发】（用户规格五/六）：1~10 条气泡，服务端 multi 模式生成
+      let items: string[] = [];
       try {
         // v41（C2）：私信也注入 avoid——对方最近说过的内容不再重复
         const avoid = dm.messages
           .filter((m) => m.from === peerKey)
           .slice(-6)
           .map((m) => m.text.slice(0, 40));
-        const r = (await callApi({
+        const r = await callApi({
           kind: 'dm',
           author: {
             name: peer.name,
             persona: peer.persona || '',
             // v43（A3）：帖子记忆块随请求上送（服务端注入用户消息；空串零注入）
             ...(dmForumMem ? { forumMemory: dmForumMem } : {}),
+            // 【NPC 独立记忆库】长期记忆块随请求上送
+            ...(dmLongMem ? { dmLongMem } : {}),
             // v44【AI 关注者】：TA 让你关注 TA 的提示（服务端注入引导行）
             ...(followAsked ? { followAsk: true } : {}),
-            ...(fromAnon
+            // 【多条连发】：multi 模式（服务端返回 items[]）
+            multi: true,
+            ...(stranger
               ? { stranger: true }
               : brief
                 ? {
@@ -3579,22 +3783,142 @@ async function execJob(job: PendingJob): Promise<void> {
           history,
           avoid,
           userName: speakerName,
-        })) as { text?: string };
-        text = typeof r.text === 'string' ? sanitizeDmClient(stripReplyPrefixClient(r.text)) : '';
-        // v41（C1）：泄露拦截 + 长度校验（对齐全站「宁缺毋滥」口径）
-        if (text && (jsonLeakIn(text) || promptLeakIn(text))) text = '';
-        if (text && (text.length < 2 || text.length > 300)) text = '';
+        });
+        items = sanitizeDmBubbles(r);
+      } catch {
+        items = [];
+      }
+      // 「宁缺毋滥」：LLM 失败/全军覆没时私信不落垃圾句
+      // （与全站口径一致；用户再发一条会重新触发回复）
+      if (!items.length) return;
+      // 多条错峰落库（前端按 at<=now 逐条揭示 → 流式输出观感）
+      landDmBubbles(peerKey, peerKey, items);
+      // 【NPC 独立记忆库】把这批消息计入该 NPC 的账号仓（满 20 自动排总结）
+      if (isNpcDmPeer(peerKey)) {
+        const due = afterDmMessage(peerKey, account, items.length);
+        if (due) queueDmSummaryJob(due.peerKey, due.account, due.coveredAt, due.pending);
+      }
+      return;
+    }
+    if (job.kind === 'npcProactiveDm') {
+      // 【NPC 主动私信】（用户规格二）：社交型 NPC/网友/角色刷到用户帖子 → 主动来私。
+      // 生成 = NPC 人设 + 帖子正文（服务端 proactive 上下文）；1~4 条开场气泡。
+      const peerKey = job.postKey as AuthorKey;
+      if (peerKey === 'official' || isUserAuthor(peerKey)) return;
+      const account: 'main' | 'anon' = job.meta.account === 'anon' ? 'anon' : 'main';
+      const d = forumData();
+      const post = d.posts.find((p) => p.id === job.meta.postId);
+      if (!post) return; // 帖子已被删除：不追着私信
+      const dm = d.dms.find((x) => x.peerKey === peerKey);
+      // 同一会话 10 分钟内已有TA的新消息 → 别连环轰炸
+      if (dm) {
+        const lastPeer = [...dm.messages].reverse().find((m) => m.from === peerKey);
+        if (lastPeer && Date.now() - lastPeer.at < 10 * 60_000) return;
+      }
+      const peer = resolveAuthor(peerKey);
+      const isCharPeer = peerKey.startsWith('char:');
+      // 匿名帖：发帖人对 TA 是陌生网友（角色不接匿名帖——排队时已滤，双保险）
+      const stranger = account === 'anon' && !isDmPeerDisclosed(peerKey);
+      if (isCharPeer && account === 'anon') return;
+      const posterName = resolveAuthor(account === 'anon' ? ANON_KEY : 'user').name;
+      const brief = isCharPeer ? forumCharBriefs().find((b) => b.key === peerKey) : null;
+      let items: string[] = [];
+      try {
+        const r = await callApi({
+          kind: 'dm',
+          author: {
+            name: peer.name,
+            persona: peer.persona || '',
+            multi: true,
+            proactive: (job.meta.proactivePost ?? post.content).slice(0, 240),
+            ...(stranger
+              ? { stranger: true }
+              : brief
+                ? {
+                    relation: charRelationLine(brief.contact),
+                    mood: charMoodBlock(brief.contactId),
+                    memory: charMemoryDigest(brief.contactId),
+                    char: true,
+                  }
+                : {}),
+          },
+          history: [],
+          avoid: [],
+          userName: posterName,
+        });
+        items = sanitizeDmBubbles(r);
+      } catch {
+        items = [];
+      }
+      if (!items.length) return;
+      mutateForum((next) => {
+        let target = next.dms.find((x) => x.peerKey === peerKey);
+        if (!target) {
+          target = { peerKey, messages: [] };
+          next.dms.push(target);
+        }
+        let at = Date.now() + 2500;
+        for (const t of items) {
+          at += 2200 + Math.random() * 4800;
+          target.messages.push({ id: uid('m'), from: peerKey, text: t.slice(0, 160), at });
+        }
+        // 系统通知：有人给你发来了私信（正文不剧透，去私信页看）
+        next.notifications = [
+          {
+            id: uid('n'),
+            type: 'system' as const,
+            fromKey: peerKey,
+            postId: null,
+            text: `「${peer.name}」给你发来了私信，快去私信页看看`,
+            createdAt: Date.now(),
+            read: false,
+          },
+          ...next.notifications,
+        ];
+      });
+      markProactiveDmCooldown(peerKey);
+      // 计入独立记忆库（同 dmReply 口径）
+      if (isNpcDmPeer(peerKey)) {
+        const due = afterDmMessage(peerKey, account, items.length);
+        if (due) queueDmSummaryJob(due.peerKey, due.account, due.coveredAt, due.pending);
+      }
+      return;
+    }
+    if (job.kind === 'dmSummary') {
+      // 【NPC 独立记忆库·总结】（用户规格三）：私信累计满 20 条 → LLM 提取关键信息
+      // → 永久存入该 NPC 的独立记忆库（该账号仓）。LLM 失败时机械兜底（记忆不丢档）。
+      const peerKey = job.postKey as AuthorKey;
+      const account: 'main' | 'anon' = job.meta.account === 'anon' ? 'anon' : 'main';
+      if (!isNpcDmPeer(peerKey)) return;
+      const win = formatDmWindow(peerKey, account, job.meta.coveredAt ?? 0, 40);
+      if (!win || !win.texts.length) return;
+      const peer = resolveAuthor(peerKey);
+      const speakerName = resolveAuthor(account === 'anon' ? ANON_KEY : 'user').name;
+      let text = '';
+      let src: 'llm' | 'fallback' = 'fallback';
+      try {
+        const r = await callApi({
+          kind: 'dmSummary',
+          author: { name: peer.name, persona: peer.persona || '' },
+          userName: speakerName,
+          messages: win.texts.map((m) => ({ from: m.from, text: m.text })),
+        });
+        const t = typeof (r as { text?: unknown })?.text === 'string' ? sanitizeDmClient((r as { text: string }).text) : '';
+        if (t.length >= 6 && t.length <= 200 && !jsonLeakIn(t) && !promptLeakIn(t)) {
+          text = t;
+          src = 'llm';
+        }
       } catch {
         text = '';
       }
-      // v41（C1）：删掉 4 句固定复读话术兜底——LLM 失败时私信不落垃圾句
-      //（与全站「宁缺毋滥」口径一致；用户再发一条会重新触发回复）
-      if (!text) return;
-      mutateForum((next) => {
-        const target = next.dms.find((x) => x.peerKey === peerKey);
-        if (!target) return;
-        target.messages.push({ id: uid('m'), from: peerKey, text: text.slice(0, 160), at: Date.now() });
-      });
+      // 机械兜底：宁可粗糙也不能没有（这批消息此后不再进任何窗口）
+      if (!text) {
+        const userMsgs = win.texts.filter((m) => m.from === 'user');
+        const first = (userMsgs[0]?.text ?? win.texts[0]?.text ?? '').slice(0, 30);
+        const last = (win.texts[win.texts.length - 1]?.text ?? '').slice(0, 30);
+        text = `聊了${win.texts.length}条：TA说过「${first}」，最后聊到「${last}」`.slice(0, 200);
+      }
+      commitDmSummary(peerKey, account, text, win.newCoveredAt, win.consumed, src);
       return;
     }
   } catch {

@@ -1960,3 +1960,23 @@ Stage Summary:
 - 新文件：social.ts（角色大脑）、ForumScheduler.tsx（全局心跳）；核心改动：engine.ts（三 kind+调度+执行）、route.ts（三生成分支）、memory-core/memory/accounts（forum 记忆通道）、forum/thread-view/wechat/qq/chat（接线）
 - 关键修复：extractPostItems 兼容单对象（charPost 全链路因此打通）
 - GEN_VERSION 不变（35）：纯功能叠加不动内容池，存量帖子/评论/关注全保留
+
+## 2026-11-03 · X论坛 v47「动态数据 + NPC 私信 + 独立记忆系统」（六模块底层改造）
+
+Task: 用户六项规格：①帖子数据动态增长（时间流+长尾）；②NPC 主动私信（帖子+人设触发）；③NPC 独立记忆库（20条总结永久沉淀）；④匿名/大号账号隔离+说破关联；⑤AI 角色私信 1~10 条连发（不写入 NPC 库）；⑥私信界面流式输出+多条气泡。
+
+Work Log:
+- [新模块 growth.ts] 帖子数据时间流增长引擎：45min/滚离线补算（cap 40滚≈30h）+20min 在线滚；每帖热度潜质 pot 懒抽（15%爆款1.6~2.2/35%温和0.8~1.3/50%冷清0.25~0.6）写回 post.growth 永久跟随；真实点赞热度乘数（likes 封顶+50%）；长尾衰减 ageFactor（<0.5h×1→<24h×0.12→<72h×0.02→≥72h 停止）；增长面=views(+3~30)/likeBoost(+1~8)/reposts(偶发)/userFollowerBoost(大号自然涨粉)/评论区偶发补一条新网友回复（COMMENT_CHANCE=0.12，复用 replyToUserPost 管线）；首启基线修正（last=0→now，防 1970 滚点）；帖子只从发布时刻起增长（rt<createdAt 跳过）；触发点=ForumScheduler 心跳+论坛 App 打开（LIVE_MS 节流幂等）
+- [新模块 dm-memory.ts] NPC 私信独立记忆库：每 NPC（npc:/mnpc:/dyn:）一仓 `forum-dm-mem:<key>`，main/anon 物理分仓（counts/lastSummaryAt/summaries 三层）；满 20 条触发 LLM 总结→永久沉淀（summaries 只增不删，防御封顶 40/账号）；LLM 失败机械兜底（src:'fallback'，记忆不丢档）；说破检测 per-NPC 粒度 `forum-dm-disclose-v1`（detectForumAnonDisclosure 复用，char 走 isForumAnonDisclosed 全局联系人粒度）；dmLongMemoryBlock 长期记忆块（说破后读取侧单向合并+「你认得TA」明示）；formatDmWindow 按当前会话账号归仓截窗；isNpcDmPeer 守卫——char 角色绝不写入（规格五防串台）
+- [engine.ts] PendingJob 扩 npcProactiveDm/dmSummary 两 kind；queueUserPostInteractions 末尾挂 maybeQueueProactiveDm（38%触发率/1~2位/6h冷却/匿名帖角色不参与/社交人设正则筛候选池=npc+mnpc+dyn+char）；dmReply 全面改造：multi:true 连发 1~10 条（landDmBubbles 错峰落库 2.5s起步+2.2~7s/条）、说破后 stranger 翻转（isDmPeerDisclosed→合并视角+认人明示）、dmLongMem 长期记忆注入（仅 NPC）、批后 afterDmMessage 计数满 20 自动排总结；npcProactiveDm 执行（帖子+人设生成 1~4 条开场、系统通知「给你发来了私信」、成功才记冷却）；dmSummary 执行（LLM 总结→commitDmSummary 永久入库+窗口边界推进+计数递减）；export noteDmExchangeAndMaybeSummarize/addPending；sanitizeDmBubbles 多条逐条清洗（泄露/敷衍/2~160字）
+- [route.ts] dm kind 三扩展：multi（||分隔 1~10 条逐条校验返回 items[]）、proactive（开场白由帖子内容触发+stranger 变体）、dmLongMem（长期记忆块注入用户消息固定行）；新增 dmSummary kind（120 字第一人称记忆压缩）
+- [dms.tsx] DmsView/DmThread 流式输出：useArrivedTicker 会话时钟（800/400ms），只渲染 at<=now 的气泡（未来=对方打字中不剧透）；列表行「正在输入…」蓝字+线程底部三点打字动画（animate-bounce 错峰）；气泡到点逐条揭示+自动滚底；send() 接线：匿名号发送→detectForumAnonDisclosure 说破检测→markDmPeerDisclosed per-NPC 落标 + noteDmExchangeAndMaybeSummarize 计数入独立记忆库
+- [core.ts] ForumPost.growth（pot 热度档案）+ ForumData.userFollowerBoost（合成涨粉）；followersOf('user')=charFollowers+boost；ForumScheduler 心跳挂 tickForumGrowth；forum.tsx 打开即 tickForumGrowth(true) 补算
+- [E2E·Agent Browser 全链路验证] ①增长：发帖初始全 0（UI 实测）→补算 40 滚后 IDB 对比 views 0→45/likeBoost +10/pot=1.25 持久化/信息流 UI 显示「点赞14 浏览45」（4 真实+10 合成）；80h 帖二测零增长（长尾停止）✓；②记忆库：真实发送→bank kv 自动创建 counts{main:1,anon:0} 分仓计数✓；预置 19+1 触发→dmSummary job→429 限流下机械兜底 src:'fallback' 永久沉淀✓（summaries 入库+lastSummaryAt 推进+counts 递减）；意外验证：论坛数据重置后记忆库 kv 独立存活（隔离设计生效）；③说破：匿名号发「那个帖子是我发的」→forum-dm-disclose-v1 per-NPC 落标（evidence 记录原话）✓；④流式 UI：注入未来时间戳气泡→列表「正在输入…」+打字点动画→1→2→3 条逐条揭示→打字点消失（截图三阶段）✓；⑤多气泡 stagger 落库即 landDmBubbles 行为复现✓
+- [验证缺口] 平台 LLM 全程 429 限流（会话期间未恢复）——主动私信内容/1~10 条连发内容/LLM 总结质量为管线接线+代码验证，配额恢复后自然生效（dmReply/npcProactiveDm/dmSummary 任务均带 429 冷却重试≤2）；tsc 全绿（仅 couple-space 存量基线 33 条）
+- [排障] 增长首启 1970 滚点（last=0 基线修正）；rt<createdAt 倒灌（新帖只从发布起增长）；Set.forEach 第二参非索引（TS2362，for-of 重写）；IDB 预置对运行页不可见（memStore 优先——需预置→重载→再操作）；E2E 期间误触「重置论坛数据」——论坛重播种，验证数据已在重置前采集完毕，顺带实证记忆库/匿名号独立于论坛数据存续
+
+Stage Summary:
+- 六模块全部落地：动态增长（时间流+长尾+热度潜质+涨粉）、NPC 主动私信（人设+帖子触发）、独立记忆库（20条总结永久沉淀+分仓隔离+说破关联）、1~10 条连发（multi 管线）、流式 UI（打字中+逐条揭示）
+- 新文件：growth.ts、dm-memory.ts；核心改动：engine.ts（两 kind+dmReply 重构）、route.ts（multi/proactive/dmLongMem/dmSummary）、dms.tsx（流式 UI）、core.ts（growth/userFollowerBoost）
+- 数据不变式：NPC 记忆库独立于论坛数据（重置不丢）；char 永不写 NPC 库；匿名/大号物理分仓；说破仅 per-NPC 单向关联

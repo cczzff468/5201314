@@ -191,6 +191,14 @@ export default function ForumApp() {
       if (!alive) return;
       setAuthorsReady(true);
       await bootForum();
+      // 【时间流增长】（用户规格一）：打开论坛 = 一次「刷新页面」触发点——
+      // 离线期间错过的增长虚拟滚补算回来（内部节流，重复调用安全）
+      try {
+        const { tickForumGrowth } = await import('@/lib/forum/growth');
+        tickForumGrowth(true);
+      } catch {
+        /* 静默 */
+      }
     })();
     return () => {
       alive = false;

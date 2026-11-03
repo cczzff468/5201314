@@ -1616,7 +1616,7 @@ export async function POST(req: Request) {
     }
 
     if (kind === 'reply' || kind === 'dm') {
-      const authorRaw = body.author as { name?: unknown; persona?: unknown; lang?: unknown; matrix?: unknown; char?: unknown; stranger?: unknown; relation?: unknown; mood?: unknown; memory?: unknown; forumMemory?: unknown; followAsk?: unknown } | undefined;
+      const authorRaw = body.author as { name?: unknown; persona?: unknown; lang?: unknown; matrix?: unknown; char?: unknown; stranger?: unknown; relation?: unknown; mood?: unknown; memory?: unknown; forumMemory?: unknown; followAsk?: unknown; multi?: unknown; proactive?: unknown; dmLongMem?: unknown } | undefined;
       const name = typeof authorRaw?.name === 'string' ? authorRaw.name.slice(0, 24) : '网友';
       // 【多世界观】矩阵 NPC 的合并人设（身份+性格+口头禅）更长，放宽截断
       const persona =
@@ -1783,6 +1783,25 @@ export async function POST(req: Request) {
         !isStranger && isChar && authorRaw?.followAsk === true
           ? `TA 这条私信是在让你关注 TA 的 X 论坛主页——你按自己的意思自然接这句话（答应/婉拒/打岔都行，像真人一样）；要不要真的关注由你自己决定，稍后会按你的整体人设处理，聊天里不用提任何机制。\n\n`
           : '';
+      // 【多条连发】（multi）：1~10 条气泡；【主动私信】（proactive）：开场白由帖子内容触发；
+      // 【NPC 独立记忆库】（dmLongMem）：该 NPC 的长期私信记忆块（每满 20 条总结沉淀）
+      const wantMulti = authorRaw?.multi === true;
+      const proPost = typeof authorRaw?.proactive === 'string' ? authorRaw.proactive.slice(0, 240) : '';
+      const isPro = proPost.trim().length >= 2;
+      const maxBubbles = isPro ? 4 : 10;
+      const dmLongMemLine =
+        !isStranger && typeof authorRaw?.dmLongMem === 'string' && authorRaw.dmLongMem.trim()
+          ? `${authorRaw.dmLongMem.slice(0, 700)}\n\n`
+          : '';
+      const proactiveLine = isPro
+        ? `你刚刚在论坛刷到${userName}发的这条帖子，看完很想找TA私聊两句：\n「${proPost}」\n${isStranger ? '（你和TA素不相识——只是个你觉得有意思的陌生网友的帖子，可以由帖子聊起但别装熟人）' : ''}\n\n`
+        : '';
+      const multiLine = wantMulti
+        ? `\n\n这次可以像真人一样连发 1~${maxBubbles} 条短消息（每条 2~60 字，一条说一件事；条与条之间用 || 分隔，分隔符外不要有任何解释）。别把一整段话塞进一条里，也别每条都带称呼。`
+        : '';
+      const askLine = isPro
+        ? `请以「${name}」的口吻发出你的私信开场白（结合你的身份和人设，自然地由这条帖子聊起——想问什么/爆什么/关心什么随你，但必须和帖子内容有关）。${bjTimeLine()}`
+        : `请以「${name}」的口吻接下一条私信。${bjTimeLine()}`;
       const raw = (await completeWithFallback(config, [
         {
           role: 'system',
@@ -1790,9 +1809,25 @@ export async function POST(req: Request) {
             front + sysPrompt(promptOv, 'dm', { identityBlock, chLine, name, persona, memoryLine, userName }),
         },
         // v41（C2）：avoid 防重复表注入私信——对方最近说过的不再重复
-        // v43（A3）：forumMem 帖子记忆块注入用户消息（固定行，不随模板覆盖丢失）
-        { role: 'user', content: `${followAskHint}${forumMem}最近的对话：\n${history || '（刚开始聊）'}${avoidLine}\n\n请以「${name}」的口吻接下一条私信。${bjTimeLine()}` },
+        // v43（A3）：forumMem 帖子记忆块 + dmLongMem 长期记忆块注入用户消息（固定行，不随模板覆盖丢失）
+        { role: 'user', content: `${followAskHint}${proactiveLine}${forumMem}${dmLongMemLine}最近的对话：\n${history || '（刚开始聊）'}${avoidLine}${multiLine}\n\n${askLine}` },
       ])).text;
+      // multi 模式：拆 || → items[]（每条独立清洗校验）；逐条拦截泄露/敷衍/超长
+      if (wantMulti) {
+        const parts = String(raw ?? '')
+          .split('||')
+          .map((s) => cleanText(s, 140))
+          .filter(Boolean)
+          .slice(0, maxBubbles);
+        const items = parts.filter(
+          (p) =>
+            p.length >= 2 &&
+            p.length <= 140 &&
+            !structuredLeakIn(p) &&
+            !/^(:?哈{2,}|嗯{2,}|哦{2,}|是的呢|在呢)[。!！~～\s]*$/.test(p),
+        );
+        return NextResponse.json({ items });
+      }
       // v35：私信同样拦截泄露（指令原文/JSON 当话说）；v41（C1）：长度校验对齐口径
       const dmText = cleanText(raw, 300);
       const dmOk =
@@ -1802,6 +1837,30 @@ export async function POST(req: Request) {
         // v41（C1）：万能敷衍单条（「哈哈哈」「嗯嗯」）不再放行——与提示词红线同口径
         !/^(:?哈{2,}|嗯{2,}|哦{2,}|是的呢|在呢)[。!！~～\s]*$/.test(dmText);
       return NextResponse.json({ text: dmOk ? dmText : '' });
+    }
+
+    // 【NPC 独立记忆库·总结】（用户规格三）：私信累计满 20 条 → LLM 提取关键信息 →
+    // 永久存入该 NPC 的独立记忆库。只做内容压缩，不做角色扮演。
+    if (kind === 'dmSummary') {
+      const authorRaw = body.author as { name?: unknown; persona?: unknown } | undefined;
+      const name = typeof authorRaw?.name === 'string' ? authorRaw.name.slice(0, 24) : '网友';
+      const persona = typeof authorRaw?.persona === 'string' ? authorRaw.persona.slice(0, 300) : '';
+      const msgs = Array.isArray(body.messages)
+        ? (body.messages as Record<string, unknown>[])
+            .slice(-40)
+            .map((m) => `${m.from === 'peer' ? name : userName}：${typeof m.text === 'string' ? m.text.slice(0, 100) : ''}`)
+            .join('\n')
+        : '';
+      if (!msgs) return NextResponse.json({ text: '' });
+      const raw = (await completeWithFallback(config, [
+        {
+          role: 'system',
+          content: `你是论坛用户「${name}」${persona ? `（${persona}）` : ''}。下面是你和${userName}在论坛私信里的聊天记录节选。请把这段对话压缩成你的长期记忆：第一人称（「我」=你，「TA」=${userName}），提取关键信息（聊了什么事、TA透露过什么、你们的情绪/约定/态度），120 字以内，直接输出记忆内容，不要任何前后缀和引号，不要评论这件事该不该记。`,
+        },
+        { role: 'user', content: `聊天记录：\n${msgs}\n\n请输出记忆（120 字以内，直接输出）` },
+      ])).text;
+      const t = cleanText(raw, 180);
+      return NextResponse.json({ text: t.length >= 6 && !structuredLeakIn(t) ? t : '' });
     }
 
     return NextResponse.json({ error: '未知 kind' }, { status: 400 });

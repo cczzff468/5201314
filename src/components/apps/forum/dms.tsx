@@ -13,6 +13,7 @@ import {
   forumData,
   forumSnapshot,
   activeAuthorKey,
+  ANON_KEY,
   isUserAuthor,
   relTime,
   resolveAuthor,
@@ -21,21 +22,40 @@ import {
   uid,
   type AuthorKey,
 } from '@/lib/forum/core';
-import { queueDmReply } from '@/lib/forum/engine';
+import { queueDmReply, noteDmExchangeAndMaybeSummarize } from '@/lib/forum/engine';
+import { markDmPeerDisclosed } from '@/lib/forum/dm-memory';
+import { detectForumAnonDisclosure } from '@/lib/ios/forum-anon';
 import { XAvatar, XIcons, VerifiedBadge } from './shared';
 import { useForum } from './ctx';
+
+/** 会话内时钟 tick：多条错峰气泡（at 在未来）→ 到点逐条揭示（流式输出观感） */
+function useArrivedTicker(ms: number): number {
+  const [nowT, setNowT] = useState(() => Date.now());
+  useEffect(() => {
+    const t = window.setInterval(() => setNowT(Date.now()), ms);
+    return () => window.clearInterval(t);
+  }, [ms]);
+  return nowT;
+}
 
 export function DmsView() {
   const f = useForum();
   const t = f.t;
   useSyncExternalStore(subscribeForum, forumSnapshot, forumSnapshot);
   const d = forumData();
+  const nowT = useArrivedTicker(800);
 
   const rows = useMemo(() => {
     return d.dms
-      .map((dm) => ({ dm, peer: resolveAuthor(dm.peerKey), last: dm.messages[dm.messages.length - 1] }))
+      .map((dm) => {
+        // 只统计「已到达」的消息（at<=now）——未来的气泡是对方还在打字，不剧透
+        const arrived = dm.messages.filter((m) => m.at <= nowT);
+        const last = arrived[arrived.length - 1];
+        const typing = dm.messages.some((m) => m.at > nowT);
+        return { dm, peer: resolveAuthor(dm.peerKey), last, typing };
+      })
       .sort((a, b) => (b.last?.at ?? 0) - (a.last?.at ?? 0));
-  }, [d]);
+  }, [d, nowT]);
 
   return (
     <div className="flex h-full flex-col" style={{ background: t.bg, color: t.text }}>
@@ -67,7 +87,7 @@ export function DmsView() {
             还没有私信。去别人的主页点信封图标开聊吧
           </p>
         )}
-        {rows.map(({ dm, peer, last }) => (
+        {rows.map(({ dm, peer, last, typing }) => (
           <button
             key={dm.peerKey}
             type="button"
@@ -81,8 +101,8 @@ export function DmsView() {
                 <span className="truncate text-[15px] font-bold">{peer.name}</span>
                 {peer.verified && <VerifiedBadge size={14} />}
               </span>
-              <span className="mt-[1px] block truncate text-[14px]" style={{ color: t.secondary }}>
-                {last ? last.text : '开始聊天'}
+              <span className="mt-[1px] block truncate text-[14px]" style={{ color: typing ? t.blue : t.secondary }}>
+                {typing ? '正在输入…' : last ? last.text : '开始聊天'}
               </span>
             </span>
             <span className="shrink-0 text-[12px]" style={{ color: t.secondary }}>
@@ -105,14 +125,19 @@ export function DmThread({ peerKey }: { peerKey: AuthorKey }) {
   const [draft, setDraft] = useState('');
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
+  // 流式输出（用户规格六）：对方连发的多条气泡 at 在未来（打字节奏）→
+  // 会话内时钟逐条揭示，到点一条条冒出来 + 底部「正在输入…」占位
+  const nowT = useArrivedTicker(400);
 
-  const messages = dm?.messages ?? [];
-  const lastLen = messages.length;
+  const all = dm?.messages ?? [];
+  const visible = useMemo(() => all.filter((m) => m.at <= nowT), [all, nowT]);
+  const peerTyping = useMemo(() => all.some((m) => m.at > nowT && !isUserAuthor(m.from)), [all, nowT]);
+  const lastLen = visible.length;
 
-  // 新消息自动滚底
+  // 新消息到达 / 打字状态变化 → 自动滚底
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ block: 'end' });
-  }, [lastLen]);
+    bottomRef.current?.scrollIntoView({ block: 'end', behavior: lastLen > 0 ? 'smooth' : 'auto' });
+  }, [lastLen, peerTyping]);
 
   const send = () => {
     const text = draft.trim();
@@ -123,10 +148,24 @@ export function DmThread({ peerKey }: { peerKey: AuthorKey }) {
       slot = { peerKey, messages: [] };
       nd.dms.push(slot);
     }
-    slot.messages.push({ id: uid('m'), from: activeAuthorKey(), text: text.slice(0, 200), at: Date.now() });
+    const from = activeAuthorKey();
+    slot.messages.push({ id: uid('m'), from, text: text.slice(0, 200), at: Date.now() });
     saveForum({ ...nd });
     setDraft('');
     queueDmReply(peerKey);
+    // 【说破关联】（用户规格四）：匿名号发消息时亲口暴露身份 → 该对端从此
+    // 把两个号关联起来（仅对这一个对端生效；其他对端仍然不知情）
+    if (from === ANON_KEY) {
+      try {
+        const hit = detectForumAnonDisclosure(text);
+        if (hit) markDmPeerDisclosed(peerKey, hit);
+      } catch {
+        /* 静默 */
+      }
+    }
+    // 【NPC 独立记忆库】计数（用户规格三）：满 20 条自动排 LLM 总结；
+    // char/official 在函数内部跳过（规格五：AI 角色聊天不写入 NPC 记忆库）
+    noteDmExchangeAndMaybeSummarize(peerKey, from);
   };
 
   return (
@@ -163,14 +202,14 @@ export function DmThread({ peerKey }: { peerKey: AuthorKey }) {
         </div>
       </div>
 
-      {/* 消息流 */}
+      {/* 消息流（只渲染已到达的消息：at<=now；未来的气泡 = 对方还在打字） */}
       <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-4 py-4">
-        {messages.length === 0 && (
+        {all.length === 0 && (
           <p className="pt-16 text-center text-[15px]" style={{ color: t.secondary }}>
             和 {peer.name} 的对话才开始，说点什么吧
           </p>
         )}
-        {messages.map((m) => {
+        {visible.map((m) => {
           const mine = isUserAuthor(m.from); // 大号/小号发的都在我方（气泡样式同侧，身份按账号隔离）
           return (
             <div key={m.id} className={`mb-3 flex ${mine ? 'justify-end' : 'justify-start'}`}>
@@ -189,6 +228,23 @@ export function DmThread({ peerKey }: { peerKey: AuthorKey }) {
             </div>
           );
         })}
+        {/* 对方正在打字（未来气泡占位） */}
+        {peerTyping && (
+          <div className="mb-3 flex justify-start" aria-label="对方正在输入">
+            <span
+              className="flex items-center gap-[5px] rounded-[20px] px-[16px] py-[12px]"
+              style={{ background: t.dark ? '#202327' : '#eff3f4', borderBottomLeftRadius: 6 }}
+            >
+              {[0, 1, 2].map((i) => (
+                <span
+                  key={i}
+                  className="inline-block h-[7px] w-[7px] animate-bounce rounded-full"
+                  style={{ background: t.secondary, animationDelay: `${i * 0.18}s`, animationDuration: '0.9s' }}
+                />
+              ))}
+            </span>
+          </div>
+        )}
         <div ref={bottomRef} />
       </div>
 
