@@ -566,6 +566,29 @@
     opacity: 0;
   }
 }
+/* 许愿树（简约晴天版）：太阳柔光环缓慢呼吸（叠加在静态 box-shadow 之上） */
+@keyframes couple-sun-breathe {
+  from {
+    box-shadow: 0 0 0 10px rgba(245, 198, 95, 0.18), 0 0 0 22px rgba(245, 198, 95, 0.08);
+  }
+  to {
+    box-shadow: 0 0 0 15px rgba(245, 198, 95, 0.26), 0 0 0 34px rgba(245, 198, 95, 0.12);
+  }
+}
+/* 许愿树（简约晴天版）：阳光绒絮慢慢升起飘散（首尾透明，循环无跳变） */
+@keyframes couple-seed-drift {
+  0% {
+    transform: translate(0, 12px);
+    opacity: 0;
+  }
+  22% {
+    opacity: 0.9;
+  }
+  100% {
+    transform: translate(16px, -44px);
+    opacity: 0;
+  }
+}
 /* 许愿树（简约晴天版）：空树时「挂许愿签」主按钮呼吸柔光（陶红 + 暖阳色） */
 @keyframes wish-invite-pulse {
   0%,
@@ -716,7 +739,9 @@
   [animation\:couple-fall],
   [animation\:wish-sway],
   [animation\:wish-burst],
-  [animation\:wish-invite-pulse] {
+  [animation\:wish-invite-pulse],
+  [animation\:couple-sun-breathe],
+  [animation\:couple-seed-drift] {
     animation: none;
   }
 }

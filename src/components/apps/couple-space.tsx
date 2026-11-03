@@ -2713,16 +2713,16 @@ const WISH_SLOTS: { x: number; y: number; r: number }[] = [
   { x: 59, y: 50, r: 5 },
 ];
 
-/** 许愿签调色盘（简约版：8 种低饱和扁平色；text = 签面文字色；swatch = 色盘圆点色） */
+/** 许愿签调色盘（简约版：8 种低饱和色；bg = 同色微渐层，扁平但有体积；swatch = 色盘圆点色） */
 const WISH_COLORS: { name: string; bg: string; border: string; text: string; swatch: string }[] = [
-  { name: '陶红', bg: '#dd7f6c', border: '#c96a58', text: '#fff6f1', swatch: '#dd7f6c' },
-  { name: '橘橙', bg: '#e79a62', border: '#d3834c', text: '#fff7ef', swatch: '#e79a62' },
-  { name: '杏黄', bg: '#ecc26e', border: '#d9ac52', text: '#6a531a', swatch: '#ecc26e' },
-  { name: '豆绿', bg: '#a4c29a', border: '#8cab82', text: '#31462a', swatch: '#a4c29a' },
-  { name: '雾蓝', bg: '#85b3cf', border: '#6f9dba', text: '#f2f9fd', swatch: '#85b3cf' },
-  { name: '藤紫', bg: '#b4a5d3', border: '#9f8dc0', text: '#fbf8ff', swatch: '#b4a5d3' },
-  { name: '樱粉', bg: '#e7abc0', border: '#d395ac', text: '#fff3f7', swatch: '#e7abc0' },
-  { name: '米白', bg: '#f2ead7', border: '#e0d5b8', text: '#6b5b39', swatch: '#f2ead7' },
+  { name: '陶红', bg: 'linear-gradient(180deg,#e29080,#dd7f6c)', border: '#c96a58', text: '#fff6f1', swatch: '#dd7f6c' },
+  { name: '橘橙', bg: 'linear-gradient(180deg,#eda375,#e79a62)', border: '#d3834c', text: '#fff7ef', swatch: '#e79a62' },
+  { name: '杏黄', bg: 'linear-gradient(180deg,#efca7f,#ecc26e)', border: '#d9ac52', text: '#6a531a', swatch: '#ecc26e' },
+  { name: '豆绿', bg: 'linear-gradient(180deg,#adc9a4,#a4c29a)', border: '#8cab82', text: '#31462a', swatch: '#a4c29a' },
+  { name: '雾蓝', bg: 'linear-gradient(180deg,#92bcd8,#85b3cf)', border: '#6f9dba', text: '#f2f9fd', swatch: '#85b3cf' },
+  { name: '藤紫', bg: 'linear-gradient(180deg,#bcafda,#b4a5d3)', border: '#9f8dc0', text: '#fbf8ff', swatch: '#b4a5d3' },
+  { name: '樱粉', bg: 'linear-gradient(180deg,#ecb4c7,#e7abc0)', border: '#d395ac', text: '#fff3f7', swatch: '#e7abc0' },
+  { name: '米白', bg: 'linear-gradient(180deg,#f5efe0,#f2ead7)', border: '#e0d5b8', text: '#6b5b39', swatch: '#f2ead7' },
 ];
 
 /** 卡片的显示色（旧卡无 color：我挂的=陶红 / TA 挂的=米白，兼容历史数据） */
@@ -2740,63 +2740,92 @@ const WISH_BURST: { x: number; y: number; dx: string; dy: string; d: number }[] 
   { x: 68, y: 24, dx: '24px', dy: '-90px', d: 0.22 },
 ];
 
-/** 许愿树本体（简约版：优雅的树干 + 舒展树杈，无叶子无装饰；stage 越高枝杈越多） */
+/** 许愿树本体（简约治愈版：远景淡丘拉纵深 + 锥度枝干末梢上扬，无叶子；stage 越高枝杈越多） */
 function WishTreeSVG({ stage }: { stage: number }) {
   return (
     <svg viewBox="0 0 390 560" className="h-full w-full" aria-hidden="true">
-      {/* 草地（两层柔和的扁平绿丘） */}
-      <ellipse cx="195" cy="556" rx="185" ry="26" fill="#d5dcc8" />
-      <ellipse cx="195" cy="551" rx="126" ry="17" fill="#e0e5d3" />
-      {/* 树影（投在草地上的一枚淡影） */}
-      <ellipse cx="195" cy="548" rx="92" ry="10" fill="#bcc7ad" opacity="0.5" />
+      <defs>
+        <linearGradient id="wtTrunkG" x1="0" y1="1" x2="0" y2="0">
+          <stop offset="0%" stopColor="#675642" />
+          <stop offset="100%" stopColor="#7d6b57" />
+        </linearGradient>
+      </defs>
 
-      {/* ===== 树干 + 树杈（简约线稿风；签就挂在这些枝上；stage≥2/≥3 长出更多细枝） ===== */}
+      {/* 远景淡丘（两枚浅色远坡，拉开纵深） */}
+      <ellipse cx="78" cy="562" rx="150" ry="32" fill="#e4e8d5" />
+      <ellipse cx="315" cy="564" rx="150" ry="34" fill="#dee3cd" />
+      {/* 草地（主丘两层） */}
+      <ellipse cx="195" cy="562" rx="192" ry="27" fill="#d2d9c1" />
+      <ellipse cx="195" cy="555" rx="128" ry="16" fill="#e2e7d3" />
+      {/* 树影（投在草地上的一枚淡影） */}
+      <ellipse cx="195" cy="551" rx="88" ry="9" fill="#b8c3a6" opacity="0.45" />
+
+      {/* ===== 树干 + 树杈（锥度自然、末梢上扬；签就挂在这些枝上；stage≥2/≥3 长出更多细枝） ===== */}
       <g fill="none" strokeLinecap="round">
-        {/* 主干（自下而上，柔和收细） */}
-        <path d="M195 558 C194 516 196 474 194 434 C193 398 194 366 195 340 C195 316 194 296 192 274" stroke="#7c6a57" strokeWidth={16} />
-        {/* 左下枝 */}
-        <path d="M194 424 C168 414 138 402 110 382 C94 370 76 354 60 332" stroke="#7c6a57" strokeWidth={9} />
-        <path d="M100 372 C92 358 88 346 86 334" stroke="#6d5c4a" strokeWidth={4} />
-        {/* 右下枝 */}
-        <path d="M196 428 C222 416 252 402 280 380 C296 366 312 348 324 324" stroke="#7c6a57" strokeWidth={9} />
-        <path d="M282 376 C288 360 290 348 290 336" stroke="#6d5c4a" strokeWidth={4} />
-        {/* 左上枝 */}
-        <path d="M193 306 C178 268 154 226 120 192 C106 178 88 162 68 146" stroke="#7c6a57" strokeWidth={8} />
-        <path d="M142 240 C134 224 128 212 126 198" stroke="#6d5c4a" strokeWidth={4} />
-        {/* 右上枝 */}
-        <path d="M195 302 C212 264 236 222 270 190 C284 176 302 162 320 148" stroke="#7c6a57" strokeWidth={8} />
-        <path d="M250 244 C258 230 262 218 264 204" stroke="#6d5c4a" strokeWidth={4} />
-        {/* 中央枝（直伸树顶） */}
-        <path d="M192 274 C188 230 184 184 180 140 C178 118 176 98 172 80" stroke="#7c6a57" strokeWidth={8} />
-        <path d="M181 166 C172 156 164 148 154 140" stroke="#6d5c4a" strokeWidth={3.5} />
-        <path d="M180 122 C190 114 196 106 202 96" stroke="#6d5c4a" strokeWidth={3.5} />
+        {/* 主干（自下而上，柔和收细，带暖墨渐层） */}
+        <path d="M195 558 C194 514 197 468 194 428 C192 390 194 354 193 324 C192 300 192 282 190 262" stroke="url(#wtTrunkG)" strokeWidth={15} />
+        {/* 左下枝（末梢上扬） */}
+        <path d="M193 424 C170 414 141 403 113 386 C95 375 78 359 64 342" stroke="#7c6a57" strokeWidth={9} />
+        <path d="M64 342 C60 332 58 324 58 315" stroke="#6d5c4a" strokeWidth={3.5} />
+        <path d="M106 378 C99 364 95 352 93 340" stroke="#6d5c4a" strokeWidth={4} />
+        {/* 右下枝（末梢上扬） */}
+        <path d="M197 428 C224 415 254 402 281 383 C297 371 313 355 326 338" stroke="#7c6a57" strokeWidth={9} />
+        <path d="M326 338 C330 328 332 320 332 311" stroke="#6d5c4a" strokeWidth={3.5} />
+        <path d="M292 375 C298 361 302 349 304 337" stroke="#6d5c4a" strokeWidth={4} />
+        {/* 左上枝（末梢上扬） */}
+        <path d="M191 304 C175 268 151 228 118 194 C104 180 86 164 66 148" stroke="#7c6a57" strokeWidth={8} />
+        <path d="M66 148 C62 138 60 130 60 121" stroke="#6d5c4a" strokeWidth={3} />
+        <path d="M139 236 C131 220 125 208 123 194" stroke="#6d5c4a" strokeWidth={4} />
+        {/* 右上枝（末梢上扬） */}
+        <path d="M193 300 C212 262 237 222 270 190 C284 176 301 162 320 148" stroke="#7c6a57" strokeWidth={8} />
+        <path d="M320 148 C324 138 326 130 326 121" stroke="#6d5c4a" strokeWidth={3} />
+        <path d="M249 240 C257 226 261 214 263 200" stroke="#6d5c4a" strokeWidth={4} />
+        {/* 中央枝（直伸树顶，顶梢上扬） */}
+        <path d="M190 262 C186 220 182 176 178 132 C176 110 174 90 170 74" stroke="#7c6a57" strokeWidth={7.5} />
+        <path d="M179 158 C170 148 162 140 152 132" stroke="#6d5c4a" strokeWidth={3.5} />
+        <path d="M178 114 C188 106 194 98 200 88" stroke="#6d5c4a" strokeWidth={3.5} />
+        <path d="M170 74 C167 64 165 56 165 48" stroke="#6d5c4a" strokeWidth={3} />
         {/* 成长值长出的额外细枝（stage≥2 / ≥3） */}
         {stage >= 2 && (
           <g stroke="#6d5c4a" strokeWidth={3}>
-            <path d="M60 332 C54 318 50 306 48 294" />
-            <path d="M120 192 C114 180 110 170 108 158" />
-            <path d="M324 324 C330 310 334 298 336 286" />
-            <path d="M320 148 C326 138 330 128 332 118" />
-            <path d="M172 80 C168 68 166 58 164 50" />
+            <path d="M58 315 C54 305 51 297 49 289" />
+            <path d="M93 340 C88 330 85 322 83 314" />
+            <path d="M123 194 C117 184 113 176 111 168" />
+            <path d="M332 311 C336 301 339 293 341 285" />
+            <path d="M304 337 C310 327 314 319 316 311" />
+            <path d="M165 48 C162 40 160 34 159 28" />
           </g>
         )}
         {stage >= 3 && (
           <g stroke="#6d5c4a" strokeWidth={2.5}>
-            <path d="M86 334 C80 324 76 316 72 310" />
-            <path d="M126 198 C120 188 116 180 114 172" />
-            <path d="M290 336 C296 326 300 318 304 312" />
-            <path d="M264 204 C270 194 274 186 276 178" />
-            <path d="M154 140 C146 132 140 126 134 122" />
+            <path d="M60 121 C56 113 54 107 52 101" />
+            <path d="M111 168 C106 160 103 154 101 148" />
+            <path d="M200 88 C206 80 210 74 214 68" />
+            <path d="M263 200 C269 192 273 186 275 180" />
+            <path d="M152 132 C145 124 140 118 135 113" />
           </g>
         )}
       </g>
 
-      {/* 草叶（树脚三两笔小草，点到即止） */}
-      <g stroke="#a8b494" strokeWidth={2} fill="none" strokeLinecap="round" opacity={0.7}>
-        <path d="M160 553 C159 548 159 543 158 538" />
-        <path d="M232 553 C233 548 233 543 234 538" />
-        <path d="M118 549 C117 545 117 541 116 537" />
+      {/* 草叶（树脚几簇小草，点到即止） */}
+      <g stroke="#a3b18c" strokeWidth={2} fill="none" strokeLinecap="round" opacity={0.8}>
+        <path d="M156 552 C155 547 155 542 154 537" />
+        <path d="M236 552 C237 547 237 542 238 537" />
+        <path d="M112 548 C111 544 111 540 110 536" />
+        <path d="M288 547 C289 543 289 539 290 535" />
       </g>
+
+      {/* 小花（三枚极简小点花，点亮草地） */}
+      {[
+        { x: 138, y: 545, c: '#ffffff' },
+        { x: 254, y: 543, c: '#f6dcae' },
+        { x: 196, y: 551, c: '#ffffff' },
+      ].map((f, i) => (
+        <g key={`flower-${i}`}>
+          <circle cx={f.x} cy={f.y} r="3" fill={f.c} opacity="0.95" />
+          <circle cx={f.x} cy={f.y} r="1.2" fill="#ecc26e" />
+        </g>
+      ))}
     </svg>
   );
 }
@@ -2825,11 +2854,12 @@ function WishStrip({
       className="absolute z-10 transition-transform duration-150 active:scale-90"
       style={{ left: `${x}%`, top: `${y}%`, transform: `translate(-50%, 0) rotate(${r}deg)`, transformOrigin: 'top center' }}
     >
-      {/* 挂绳（一缕细绳） */}
+      {/* 挂绳（细绳 + 顶上一颗小木珠） */}
       <span aria-hidden="true" className="absolute bottom-full left-1/2 block h-[13px] w-[1.5px] -translate-x-1/2 rounded bg-[#9a8a72]" />
-      {/* 签身（扁平色纸签，轻轻摇曳） */}
+      <span aria-hidden="true" className="absolute bottom-full left-1/2 mb-[9px] block h-[5px] w-[5px] -translate-x-1/2 rounded-full bg-[#8a7355] shadow-[0_1px_2px_rgba(70,58,42,0.3)]" />
+      {/* 签身（绘马小木牌造型：顶部圆角更大；同色微渐层 + 顶缘一线高光，轻轻摇曳） */}
       <span
-        className="block w-[54px] rounded-[6px] px-[5px] pb-[5px] pt-[6px] text-left shadow-[0_2px_8px_rgba(70,58,42,0.16)] [animation:wish-sway_4.8s_ease-in-out_infinite] [transform-origin:top_center]"
+        className="block w-[54px] rounded-t-[9px] rounded-b-[5px] px-[5px] pb-[5px] pt-[6px] text-left shadow-[0_2px_8px_rgba(70,58,42,0.16),inset_0_1px_0_rgba(255,255,255,0.28)] [animation:wish-sway_4.8s_ease-in-out_infinite] [transform-origin:top_center]"
         style={{ background: col.bg, color: col.text }}
       >
         {/* 签头小孔 */}
@@ -2846,8 +2876,8 @@ function WishStrip({
   );
 }
 
-/** 装饰空签（调色盘里的扁平柔色、不可点；有卡时补几笔让树不显空） */
-function DecorStrip({ x, y, r, tone, delay }: { x: number; y: number; r: number; tone: { bg: string }; delay: number }) {
+/** 装饰空签（调色盘里的柔色、不可点；绘马小牌造型 + 小木珠；有卡时补几笔让树不显空） */
+function DecorStrip({ x, y, r, tone, delay }: { x: number; y: number; r: number; tone: { bg: string; border: string }; delay: number }) {
   const h = 56 + ((x * 7 + y * 13) % 26); // 56-82 随机高度
   return (
     <div
@@ -2856,9 +2886,10 @@ function DecorStrip({ x, y, r, tone, delay }: { x: number; y: number; r: number;
       style={{ left: `${x}%`, top: `${y}%`, transform: `translate(-50%, 0) rotate(${r}deg)`, transformOrigin: 'top center' }}
     >
       <span aria-hidden="true" className="absolute bottom-full left-1/2 block h-[11px] w-[1.5px] -translate-x-1/2 rounded bg-[#9a8a72]/70" />
+      <span aria-hidden="true" className="absolute bottom-full left-1/2 mb-[8px] block h-[4px] w-[4px] -translate-x-1/2 rounded-full bg-[#8a7355]/80" />
       <span
-        className="block w-[36px] rounded-[5px] shadow-[0_2px_6px_rgba(70,58,42,0.12)] [animation:wish-sway_5.6s_ease-in-out_infinite] [transform-origin:top_center]"
-        style={{ height: h, background: tone.bg, animationDelay: `${delay}s` }}
+        className="block w-[36px] rounded-t-[7px] rounded-b-[4px] shadow-[0_2px_6px_rgba(70,58,42,0.12),inset_0_1px_0_rgba(255,255,255,0.25)] [animation:wish-sway_5.6s_ease-in-out_infinite] [transform-origin:top_center]"
+        style={{ height: h, background: tone.bg, border: `1px solid ${tone.border}`, animationDelay: `${delay}s` }}
       >
         <span className="mx-auto mt-[5px] block h-[2.5px] w-[2.5px] rounded-full bg-black/15" />
       </span>
@@ -3028,19 +3059,30 @@ function TreePage({
   return (
     <div
       className="relative flex h-full flex-col overflow-hidden"
-      style={{ background: 'linear-gradient(180deg,#dce8e4 0%,#ececdf 45%,#f6f1e4 100%)' }}
+      style={{ background: 'linear-gradient(180deg,#cfe0da 0%,#e7ecdb 42%,#f6efdd 78%,#faf0da 100%)' }}
     >
-      {/* ===== 场景层：简约晴天（一轮扁平暖阳 + 两朵简云） ===== */}
-      {/* 太阳（扁平圆 + 双层柔光环，静置不转） */}
+      {/* ===== 场景层：简约晴天（暖阳呼吸 + 柔云 + 远鸟 + 飘絮 + 暗角） ===== */}
+      {/* 太阳一侧的广阔柔光（大气感） */}
+      <span aria-hidden="true" className="absolute inset-0 bg-[radial-gradient(ellipse_at_82%_6%,rgba(247,207,113,0.22),rgba(247,207,113,0)_55%)]" />
+      {/* 太阳（扁平圆 + 呼吸柔光环） */}
       <span
         aria-hidden="true"
-        className="absolute right-[12%] top-[8%] block h-16 w-16 rounded-full"
+        className="absolute right-[12%] top-[8%] block h-16 w-16 rounded-full [animation:couple-sun-breathe_6.5s_ease-in-out_infinite_alternate]"
         style={{ background: '#f5c65f', boxShadow: '0 0 0 12px rgba(245,198,95,0.20), 0 0 0 26px rgba(245,198,95,0.09)' }}
       />
-      {/* 云（两朵极简白云，缓缓漂移） */}
+      {/* 远处飞鸟（三两笔淡墨，静中有远意） */}
+      <svg aria-hidden="true" viewBox="0 0 96 28" className="absolute left-[7%] top-[21%] w-[76px] opacity-[0.55]">
+        <g stroke="#8a7761" strokeWidth="2" fill="none" strokeLinecap="round">
+          <path d="M4 16 Q10 8 16 14 Q23 7 29 13" />
+          <path d="M46 8 Q51 3 56 8 Q61 3 66 7" />
+          <path d="M74 19 Q78 14 82 18 Q86 13 91 16" />
+        </g>
+      </svg>
+      {/* 云（三朵，远淡近实，缓缓漂移） */}
       {[
-        { left: '5%', top: '15%', w: 118, h: 26, dur: '26s' },
-        { left: '56%', top: '9%', w: 86, h: 22, dur: '21s' },
+        { left: '4%', top: '14%', w: 118, h: 26, dur: '26s', o: 0.9 },
+        { left: '55%', top: '9%', w: 86, h: 22, dur: '21s', o: 0.75 },
+        { left: '30%', top: '26%', w: 58, h: 15, dur: '31s', o: 0.55 },
       ].map((cl, i) => (
         <span
           key={`cloud-${i}`}
@@ -3048,12 +3090,29 @@ function TreePage({
           className="absolute block"
           style={{ left: cl.left, top: cl.top, width: cl.w, height: cl.h }}
         >
-          <span className="block h-full w-full opacity-80 [animation:couple-cloud-drift_ease-in-out_infinite_alternate]" style={{ animationDuration: cl.dur }}>
+          <span className="block h-full w-full [animation:couple-cloud-drift_ease-in-out_infinite_alternate]" style={{ animationDuration: cl.dur, opacity: cl.o }}>
             <span className="absolute bottom-0 left-0 h-[58%] w-full rounded-full bg-white" />
             <span className="absolute bottom-[34%] left-[20%] h-[80%] w-[42%] rounded-full bg-white" />
           </span>
         </span>
       ))}
+      {/* 飘絮（几粒被阳光点亮的绒絮，慢慢升起） */}
+      {[
+        { left: '14%', top: '42%', dur: '10s', delay: '0s' },
+        { left: '26%', top: '58%', dur: '13s', delay: '2.5s' },
+        { left: '70%', top: '40%', dur: '11s', delay: '1.2s' },
+        { left: '84%', top: '56%', dur: '14s', delay: '4s' },
+        { left: '48%', top: '62%', dur: '12s', delay: '6s' },
+      ].map((sd, i) => (
+        <span
+          key={`seed-${i}`}
+          aria-hidden="true"
+          className="absolute block h-[5px] w-[5px] rounded-full bg-white [animation:couple-seed-drift_ease-in-out_infinite]"
+          style={{ left: sd.left, top: sd.top, animationDuration: sd.dur, animationDelay: sd.delay, boxShadow: '0 0 5px 1px rgba(255,244,214,0.8)' }}
+        />
+      ))}
+      {/* 极淡暗角（让画面聚焦中央的树） */}
+      <span aria-hidden="true" className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_center,transparent_55%,rgba(96,84,60,0.06))]" />
 
       {/* ===== 顶部：返回键 + 小标题 ===== */}
       <div className="relative z-20 shrink-0">
