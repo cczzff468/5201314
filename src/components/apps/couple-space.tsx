@@ -273,6 +273,7 @@ export interface CoupleState {
   treeCardDay?: string; // TA（AI）挂卡去重（每天最多一张）
   boardNotes: BoardNote[]; // 恋爱留言板便签（最新在前，最多 60 张；unlockAt 非空 = 时间胶囊）
   boardNoteDay?: string; // TA（AI）钉便签去重（每天最多一张）
+  boardBg?: number; // 留言板背景：0/缺省=默认米色板，1-5=用户上传的背景图（第六十轮）
   taMissYou: number; // TA（AI）想你累计（第九轮：AI 每天想你）
   taMissYouByDay: Record<string, number>; // TA 每日想你
   taTreeStreak: { last: string | null; n: number }; // TA 连续浇树
@@ -2782,6 +2783,28 @@ const WALL_STYLE: CSSProperties = {
   backgroundColor: '#f1e7d0',
 };
 
+/** 留言墙背景图清单（用户上传的 5 张 + 默认米色；veil = 按各图亮度定制的暖白纱罩浓度，保证便签/文字可读） */
+const BOARD_BGS: { label: string; veil: number }[] = [
+  { label: '米色', veil: 0 }, // 0：默认纯米色板（无图）
+  { label: '素灰', veil: 0.2 }, // bg-1：亮灰调（亮度 197）
+  { label: '黛灰', veil: 0.26 }, // bg-2：中灰调（亮度 172）
+  { label: '雾蓝', veil: 0.34 }, // bg-3：淡蓝调（亮度 153）
+  { label: '云白', veil: 0.04 }, // bg-4：极亮白（亮度 251）
+  { label: '暖褐', veil: 0.38 }, // bg-5：暖棕调（亮度 142）
+];
+
+/** 留言墙实际样式（0=纯米色板；1-5=背景图 cover + 暖白纱罩统一可读性） */
+function wallStyleOf(bg: number | undefined): CSSProperties {
+  const i = Math.max(0, Math.min(BOARD_BGS.length - 1, bg ?? 0));
+  if (i === 0) return WALL_STYLE;
+  const veil = BOARD_BGS[i].veil;
+  return {
+    backgroundImage: `linear-gradient(rgba(250,247,240,${veil}),rgba(250,247,240,${veil})),url(/board-bg/bg-${i}.jpg)`,
+    backgroundSize: 'cover',
+    backgroundPosition: 'center',
+  };
+}
+
 /** 黄铜图钉（钉在便签顶上；带针尖与高光） */
 function NotePin() {
   return (
@@ -3013,6 +3036,8 @@ function BoardPage({
   const [customUnlock, setCustomUnlock] = useState(''); // 'YYYY-MM-DDTHH:mm'
   const [openId, setOpenId] = useState<string | null>(null);
   const [flashId, setFlashId] = useState<string | null>(null); // 刚钉上墙的便签（落钉动画）
+  const [bgPicker, setBgPicker] = useState(false); // 背景选择弹层
+  const bgIdx = Math.max(0, Math.min(BOARD_BGS.length - 1, state.boardBg ?? 0)); // 当前背景（0=默认米色）
   const openNote = notes.find((n) => n.id === openId) ?? null;
   const openLocked = !!(openNote?.unlockAt && openNote.unlockAt > now);
   const previewCol = NOTE_COLORS[draftColor % NOTE_COLORS.length]; // 书写区实时预览色
@@ -3077,11 +3102,20 @@ function BoardPage({
         <p className="absolute left-1/2 top-[54px] flex h-10 -translate-x-1/2 items-center pl-[0.35em] text-[13px] font-semibold tracking-[0.35em] text-[#6f6552]/70">
           留言板
         </p>
+        {/* 背景切换（右上角；与返回键对称） */}
+        <button
+          type="button"
+          onClick={() => setBgPicker(true)}
+          aria-label="选择背景"
+          className="absolute right-3 top-[54px] z-30 flex h-10 w-10 items-center justify-center rounded-full border border-[#d9d3c2] bg-white/80 text-[#6f6552] backdrop-blur-md transition-transform active:scale-95"
+        >
+          <ImageIcon className="h-[19px] w-[19px]" strokeWidth={2.1} aria-hidden="true" />
+        </button>
       </div>
 
       {/* ===== 留言墙（简约米麻面板 + 便签瀑布流） ===== */}
       <div className="relative z-10 min-h-0 flex-1 px-3">
-        <div className="relative flex h-full min-h-0 flex-col overflow-y-auto rounded-[20px]" style={WALL_STYLE}>
+        <div className="relative flex h-full min-h-0 flex-col overflow-y-auto rounded-[20px]" style={wallStyleOf(state.boardBg)}>
           {/* 板头统计 */}
           <p className="shrink-0 px-4 pb-1 pt-3 text-center text-[11px] font-bold tracking-[0.18em] text-[#8a6d3e]/80">
             已钉下 {notes.length} 张便签{capsules.length > 0 ? ` · ${capsules.length} 颗时间胶囊` : ''}
@@ -3104,6 +3138,50 @@ function BoardPage({
           )}
         </div>
       </div>
+
+      {/* ===== 背景选择弹层（默认米色 + 5 张上传图；选了即换并持久化） ===== */}
+      {bgPicker && (
+        <div className="absolute inset-0 z-40 flex items-center justify-center px-6" role="dialog" aria-label="选择背景">
+          <button type="button" aria-label="关闭" onClick={() => setBgPicker(false)} className="absolute inset-0 bg-[#5c5244]/25 backdrop-blur-[2px]" />
+          <div className="relative w-full max-w-[320px] rounded-2xl border border-[#e7e0cd] bg-[#fdfbf4] p-4 shadow-[0_16px_44px_rgba(80,66,44,0.25)]">
+            <p className="text-[15px] font-bold text-[#5f5646]">选择背景</p>
+            <p className="mt-0.5 text-[12px] text-[#a39a83]">挑一张喜欢的图，钉在图上</p>
+            <div className="mt-3 grid grid-cols-3 gap-2.5">
+              {BOARD_BGS.map((b, i) => (
+                <button
+                  key={b.label}
+                  type="button"
+                  onClick={() => {
+                    patch({ boardBg: i });
+                    setBgPicker(false);
+                    showToast(i === 0 ? '换回米色板啦' : '背景换好啦 ♡');
+                  }}
+                  aria-label={b.label}
+                  aria-pressed={bgIdx === i}
+                  className="relative overflow-hidden rounded-xl transition-transform active:scale-95"
+                >
+                  {/* 缩略图：0=米色块，1-5=背景图 + 同款纱罩 */}
+                  <span
+                    className="block aspect-[3/4] w-full"
+                    style={
+                      i === 0
+                        ? { backgroundColor: '#f1e7d0' }
+                        : { backgroundImage: `linear-gradient(rgba(250,247,240,${b.veil}),rgba(250,247,240,${b.veil})),url(/board-bg/bg-${i}.jpg)`, backgroundSize: 'cover', backgroundPosition: 'center' }
+                    }
+                  />
+                  <span className={`absolute inset-0 rounded-xl ${bgIdx === i ? 'shadow-[inset_0_0_0_2px_#c96a58]' : 'shadow-[inset_0_0_0_1px_rgba(146,116,80,0.18)]'}`} aria-hidden="true" />
+                  {bgIdx === i && (
+                    <span className="absolute right-1.5 top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-[#c96a58] text-white shadow">
+                      <Check className="h-3 w-3" strokeWidth={3.2} aria-hidden="true" />
+                    </span>
+                  )}
+                  <span className="block pb-1 pt-1.5 text-center text-[11px] font-bold text-[#6f6552]">{b.label}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ===== 底部操作栏：时间胶囊（圆钮） + 钉便签（主按钮；空墙时呼吸柔光） ===== */}
       <div className="relative z-20 flex shrink-0 items-center justify-center gap-4 px-6 pb-[34px] pt-2">
