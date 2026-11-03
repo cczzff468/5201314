@@ -2689,9 +2689,11 @@ function AnniversaryPage(props: { state: CoupleState; patch: (p: Partial<CoupleS
  * 奶油纸 #f3ecd6、金黄点缀 #c9a35c）。
  * - 我的卡片 = 红签（点击看正文+卡片下留言）；TA 的卡片 = 米白纸签；
  * - 树冠同时挂着若干暗色装饰签（不可点），让树像照片里一样「挂满」；
+ *   ——树上还没挂过签时完全空树（装饰签与落地红签都不出现）；
  * - 成长值 0-100（stage 0-4）：树越长越繁茂，能挂的签越来越多；
  * - 纯净版：顶部木牌/进度条/双方连浇/断签提醒/浇水钮/张签计数/空树提示
- *   均已移除；场景补星空、月亮、地面薄雾，挂签时树冠升金色光尘；
+ *   均已移除；场景补流星/月光环/月光光柱/树顶星辉/树冠萤火虫/树脚发光蘑菇，
+ *   空树时主按钮呼吸柔光邀请挂上第一张签；
  * - 数据契约不变：tree / treeStreak / taTreeStreak / treeCards / treeCardDay，
  *   AI 自主浇树/挂签（couple-ai.ts autonomy）与卡片留言回复全部保留。
  */
@@ -2735,8 +2737,8 @@ const WISH_BURST: { x: number; y: number; dx: string; dy: string; d: number }[] 
   { x: 68, y: 24, dx: '24px', dy: '-90px', d: 0.22 },
 ];
 
-/** 许愿树本体（暗夜森林大树 SVG；stage 0-4 → 树冠 0.62x→1x 渐大） */
-function WishTreeSVG({ stage }: { stage: number }) {
+/** 许愿树本体（暗夜森林大树 SVG；stage 0-4 → 树冠 0.62x→1x 渐大；hasCards=false 时地面不留落签） */
+function WishTreeSVG({ stage, hasCards }: { stage: number; hasCards?: boolean }) {
   const s = Math.max(0, Math.min(4, stage));
   const c = 0.62 + s * 0.095;
   const blob = (cx: number, cy: number, rx: number, ry: number, fill: string, op?: number) => (
@@ -2781,6 +2783,10 @@ function WishTreeSVG({ stage }: { stage: number }) {
       {blob(278, 92, 50, 36, '#2c4721')}
       {blob(164, 44, 26, 16, '#446336', 0.9)}
       {blob(238, 40, 22, 14, '#446336', 0.85)}
+      {/* 树冠受光面（右上月光侧的浅绿高光，增强立体感） */}
+      {blob(258, 58, 62, 38, '#3b5730', 0.55)}
+      {blob(302, 104, 44, 28, '#33502c', 0.5)}
+      {blob(196, 42, 42, 24, '#3f5e34', 0.45)}
 
       {/* 主干（带板根） */}
       <path d="M172 560 C176 500 179 440 183 380 C185 330 187 298 189 254 L201 254 C203 298 205 330 207 380 C211 440 214 500 218 560 Z" fill="url(#wtTrunk)" />
@@ -2813,8 +2819,13 @@ function WishTreeSVG({ stage }: { stage: number }) {
         <path d="M150 556 C149 548 151 542 150 537" />
         <path d="M244 556 C245 548 243 542 244 537" />
       </g>
-      {/* 地上落着的一张小红签（照片细节感） */}
-      <rect x="262" y="540" width="18" height="34" rx="3" transform="rotate(14 271 557)" fill="#7a2f2a" stroke="#511a14" strokeWidth="1.5" />
+      {/* 地上落着的一张小红签（照片细节感；树上还没挂过签时不出现） */}
+      {hasCards && (
+        <g>
+          <rect x="262" y="540" width="18" height="34" rx="3" transform="rotate(14 271 557)" fill="#7a2f2a" stroke="#511a14" strokeWidth="1.5" />
+          <rect x="265" y="546" width="12" height="2" rx="1" transform="rotate(14 271 557)" fill="#5d1f1a" opacity="0.8" />
+        </g>
+      )}
     </svg>
   );
 }
@@ -3046,8 +3057,9 @@ function TreePage({
     scheduleTreeCardReply(cardId);
   };
 
-  /** 装饰签布局（从挂点池里取「没被真卡占用」的位置；数量随成长变多） */
+  /** 装饰签布局（树上还没挂过签时完全空树；有签后用暗色装饰签补位营造「挂满」的照片感） */
   const decorSlots = useMemo(() => {
+    if (cards.length === 0) return [];
     const used = new Set(cards.slice(0, visibleN).map((_, i) => WISH_SLOTS[i % WISH_SLOTS.length].x * 100 + WISH_SLOTS[i % WISH_SLOTS.length].y));
     const free = WISH_SLOTS.filter((s) => !used.has(s.x * 100 + s.y));
     const want = Math.min(free.length, 6 + stage - Math.min(cards.length, visibleN));
@@ -3059,9 +3071,11 @@ function TreePage({
       className="relative flex h-full flex-col overflow-hidden"
       style={{ background: 'radial-gradient(130% 95% at 50% 16%, #47563a 0%, #37452d 36%, #27321d 64%, #1a2213 100%)' }}
     >
-      {/* ===== 场景层：暗夜森林（星空 + 月亮 + 萤火虫 + 地面薄雾） ===== */}
+      {/* ===== 场景层：暗夜森林（星空 + 流星 + 月亮 + 光柱 + 萤火虫 + 地面薄雾） ===== */}
       {/* 顶部天光（树冠缝隙透光） */}
       <span aria-hidden="true" className="absolute -top-20 left-1/2 h-64 w-[130%] -translate-x-1/2 rounded-[50%] bg-[radial-gradient(ellipse,rgba(222,238,192,0.14),rgba(222,238,192,0)_65%)]" />
+      {/* 顶部夜色压暗（让星空与流星更突出） */}
+      <span aria-hidden="true" className="absolute inset-x-0 top-0 h-36 bg-[linear-gradient(180deg,rgba(8,12,6,0.38),transparent)]" />
       {/* 满天星（微小光点缓缓明灭） */}
       {[
         ['8%', '9%'], ['18%', '15%'], ['30%', '6%'], ['42%', '12%'], ['55%', '5%'],
@@ -3075,7 +3089,15 @@ function TreePage({
           style={{ left: l, top: t, width: 2 + (i % 3), height: 2 + (i % 3), animationDelay: `${(i * 0.55).toFixed(2)}s`, boxShadow: '0 0 4px 1px rgba(238,244,220,0.28)' }}
         />
       ))}
-      {/* 月亮（右上柔光） */}
+      {/* 月亮（右上柔光 + 双层微光环） */}
+      <span
+        aria-hidden="true"
+        className="absolute right-[9%] top-[7%] -m-[16px] block h-[76px] w-[76px] rounded-full border border-[#f0e2b6]/10"
+      />
+      <span
+        aria-hidden="true"
+        className="absolute right-[9%] top-[7%] -m-[6px] block h-14 w-14 rounded-full border border-[#f0e2b6]/15 [animation:couple-glow-pulse_5.5s_ease-in-out_infinite]"
+      />
       <span
         aria-hidden="true"
         className="absolute right-[9%] top-[7%] block h-11 w-11 rounded-full"
@@ -3083,6 +3105,27 @@ function TreePage({
           background: 'radial-gradient(circle at 38% 34%, #fdf6dd 0%, #f0e2b6 55%, #d9c48e 100%)',
           boxShadow: '0 0 34px 10px rgba(240,226,182,0.16), 0 0 90px 30px rgba(240,226,182,0.08)',
         }}
+      />
+      {/* 流星（两颗错峰划过夜空） */}
+      {[
+        { left: '14%', top: '9%', delay: '2.6s', dur: '9s' },
+        { left: '56%', top: '5%', delay: '8.4s', dur: '12s' },
+      ].map((m, i) => (
+        <span
+          key={`shoot-${i}`}
+          aria-hidden="true"
+          className="absolute h-[2px] w-[54px] rounded-full bg-[linear-gradient(90deg,rgba(238,244,220,0),rgba(238,244,220,0.9))] [animation:couple-shoot_ease-in_infinite]"
+          style={{ left: m.left, top: m.top, animationDelay: m.delay, animationDuration: m.dur, boxShadow: '0 0 6px 1px rgba(238,244,220,0.3)' }}
+        />
+      ))}
+      {/* 月光光柱（两道斜落的柔光束缓缓明灭） */}
+      <span
+        aria-hidden="true"
+        className="absolute -top-10 left-[7%] h-[46%] w-[76px] rotate-[16deg] rounded-full bg-[linear-gradient(180deg,rgba(222,238,192,0.09),rgba(222,238,192,0)_75%)] blur-[7px] [animation:wish-ray_9s_ease-in-out_infinite]"
+      />
+      <span
+        aria-hidden="true"
+        className="absolute -top-12 right-[9%] h-[42%] w-[56px] -rotate-[14deg] rounded-full bg-[linear-gradient(180deg,rgba(222,238,192,0.07),rgba(222,238,192,0)_70%)] blur-[6px] [animation:wish-ray_11s_ease-in-out_infinite_reverse]"
       />
       {/* 萤火虫（金色小点缓慢明灭） */}
       {[
@@ -3125,9 +3168,37 @@ function TreePage({
       <div className="relative z-10 flex-1">
         <div className="absolute bottom-[104px] left-1/2 -translate-x-1/2">
           <div className="relative h-[430px] w-[340px]" style={{ transform: `scale(${(0.88 + stage * 0.03).toFixed(3)})`, transformOrigin: 'bottom center' }}>
-            {/* 树本体（挂签时轻轻一颤） */}
+            {/* 树顶星辉（树的心灵微光，四角星缓缓呼吸） */}
+            <span
+              aria-hidden="true"
+              className="pointer-events-none absolute left-1/2 top-[2%] z-[6] block h-[15px] w-[15px] -translate-x-1/2 [animation:couple-glow-pulse_4.5s_ease-in-out_infinite]"
+              style={{ background: '#ffe9a8', clipPath: 'polygon(50% 0, 62% 38%, 100% 50%, 62% 62%, 50% 100%, 38% 62%, 0 50%, 38% 38%)', boxShadow: '0 0 14px 4px rgba(255,222,150,0.4)' }}
+            />
+            {/* 树冠环绕萤火虫（月光小精灵缓缓游移明灭） */}
+            {[
+              ['10%', '20%'], ['86%', '16%'], ['22%', '10%'], ['70%', '7%'], ['42%', '3%'], ['90%', '34%'], ['6%', '38%'],
+            ].map(([l, t], i) => (
+              <span
+                key={`crown-ff-${i}`}
+                aria-hidden="true"
+                className="pointer-events-none absolute z-[6] h-[5px] w-[5px] rounded-full bg-[#ffd98a] blur-[1px] [animation:wish-orbit_8s_ease-in-out_infinite]"
+                style={{ left: l, top: t, animationDelay: `${(i * 1.3).toFixed(1)}s`, animationDuration: `${7 + (i % 3) * 2}s`, boxShadow: '0 0 9px 2px rgba(255,217,138,0.4)' }}
+              />
+            ))}
+            {/* 树脚发光的小蘑菇/苔藓微光（童话感点缀） */}
+            {[
+              ['17%', '92%', '#9fe8c8'], ['26%', '95%', '#ffcf9a'], ['75%', '93%', '#9fe8c8'], ['83%', '90%', '#ffcf9a'], ['48%', '96%', '#b9f0d8'],
+            ].map(([l, t, c], i) => (
+              <span
+                key={`glow-${i}`}
+                aria-hidden="true"
+                className="pointer-events-none absolute z-[6] h-[5px] w-[5px] rounded-full [animation:couple-glow-pulse_5s_ease-in-out_infinite]"
+                style={{ left: l, top: t, background: c, animationDelay: `${(i * 0.9).toFixed(1)}s`, boxShadow: `0 0 10px 3px ${c}55` }}
+              />
+            ))}
+            {/* 树本体（挂签时轻轻一颤；树上还没签时地面不留落签） */}
             <span key={pop} className="absolute inset-0 block [animation:couple-pop-heart_.5s_ease-out]">
-              <WishTreeSVG stage={stage} />
+              <WishTreeSVG stage={stage} hasCards={cards.length > 0} />
             </span>
             {/* 挂签时的金色光尘（从树冠升起飘散） */}
             {pop > 0 && (
@@ -3155,7 +3226,7 @@ function TreePage({
         </div>
       </div>
 
-      {/* ===== 底部操作栏：全部签（玻璃图标钮） + 挂许愿签（主按钮；浇水钮与张签计数已按需求移除） ===== */}
+      {/* ===== 底部操作栏：全部签（玻璃图标钮） + 挂许愿签（主按钮；空树时呼吸柔光邀请挂上第一张） ===== */}
       <div className="relative z-20 flex shrink-0 items-center justify-center gap-4 px-6 pb-[34px] pt-2">
         {/* 全部签 */}
         <button
@@ -3166,12 +3237,12 @@ function TreePage({
         >
           <MessageSquare className="h-[23px] w-[23px]" strokeWidth={2.2} aria-hidden="true" />
         </button>
-        {/* 挂许愿签（主按钮：红签配色 + 金描边 + 柔光） */}
+        {/* 挂许愿签（主按钮：红签配色 + 金描边 + 柔光；空树时呼吸脉动） */}
         <button
           type="button"
           onClick={() => setComposing(true)}
           aria-label="挂一张许愿签"
-          className="flex h-[54px] shrink-0 items-center gap-1.5 rounded-full border border-[#c9a35c]/55 bg-[linear-gradient(180deg,#b23832,#8d2723)] px-8 text-[15.5px] font-extrabold tracking-wide text-[#f7e9c8] shadow-[0_8px_24px_rgba(141,39,35,0.5),0_0_18px_rgba(201,163,92,0.18)] transition-transform active:scale-95"
+          className={`flex h-[54px] shrink-0 items-center gap-1.5 rounded-full border border-[#c9a35c]/55 bg-[linear-gradient(180deg,#b23832,#8d2723)] px-8 text-[15.5px] font-extrabold tracking-wide text-[#f7e9c8] shadow-[0_8px_24px_rgba(141,39,35,0.5),0_0_18px_rgba(201,163,92,0.18)] transition-transform active:scale-95 ${cards.length === 0 ? '[animation:wish-invite-pulse_2.8s_ease-in-out_infinite]' : ''}`}
         >
           <Plus className="h-5 w-5" strokeWidth={3} aria-hidden="true" />
           挂许愿签

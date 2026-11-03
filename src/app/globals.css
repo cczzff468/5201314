@@ -588,6 +588,46 @@
     transform: translateX(4%);
   }
 }
+/* 许愿树：月光光柱缓缓明灭 */
+@keyframes wish-ray {
+  0%,
+  100% {
+    opacity: 0.4;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+/* 许愿树：树冠萤火虫缓缓游移 */
+@keyframes wish-orbit {
+  0%,
+  100% {
+    transform: translate(0, 0);
+    opacity: 0.35;
+  }
+  25% {
+    transform: translate(9px, -12px);
+    opacity: 0.95;
+  }
+  50% {
+    transform: translate(-4px, -18px);
+    opacity: 0.55;
+  }
+  75% {
+    transform: translate(-10px, -7px);
+    opacity: 0.9;
+  }
+}
+/* 许愿树：空树时「挂许愿签」主按钮呼吸柔光（邀请挂上第一张签） */
+@keyframes wish-invite-pulse {
+  0%,
+  100% {
+    box-shadow: 0 8px 24px rgba(141, 39, 35, 0.5), 0 0 18px rgba(201, 163, 92, 0.18);
+  }
+  50% {
+    box-shadow: 0 10px 32px rgba(141, 39, 35, 0.62), 0 0 36px rgba(201, 163, 92, 0.42);
+  }
+}
 /* 三生石：流星划过 */
 @keyframes couple-shoot {
   0% {
@@ -729,7 +769,10 @@
   [animation\:wish-sway],
   [animation\:wish-firefly],
   [animation\:wish-burst],
-  [animation\:wish-mist] {
+  [animation\:wish-mist],
+  [animation\:wish-ray],
+  [animation\:wish-orbit],
+  [animation\:wish-invite-pulse] {
     animation: none;
   }
 }
