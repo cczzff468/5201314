@@ -153,8 +153,8 @@ interface CoupleSnap {
   replyTa?: { active: boolean; picks: Record<string, { pick: number; say: string; at: number }>; mePicks: Record<string, { pick: number; text: string }>; startedAt: number; endedAt: number | null } | null;
   /** AI 主动留言去重（每天最多一条）：最近一次主动留言的日期 key */
   aiCommentDay?: string;
-  /** 许愿树留言卡（第六十轮：爱情小树改许愿树——树上挂卡片，卡片下可双向留言）；最新在前 */
-  treeCards?: { id: string; from: 'me' | 'ta'; text: string; at: number; comments: { id: string; from: 'me' | 'ta'; text: string; at: number }[] }[];
+  /** 许愿树留言卡（晴天版：挂签自选颜色 color = 调色盘索引）；最新在前 */
+  treeCards?: { id: string; from: 'me' | 'ta'; text: string; at: number; color?: number; comments: { id: string; from: 'me' | 'ta'; text: string; at: number }[] }[];
   /** AI 挂卡去重（每天最多一张）：最近一次挂卡的日期 key */
   treeCardDay?: string;
   /** 恋爱水平考试（第十五轮）：TA 知道卷子、成绩和彼此的作答 */
@@ -1498,6 +1498,7 @@ async function aiTickTreeCard(snap: CoupleSnap, me: string, ta: string, p: TaPer
     from: 'ta' as const,
     text,
     at: Date.now(),
+    color: Math.floor(Math.random() * 8), // TA 也从调色盘里挑一张心仪颜色的签
     comments: [] as { id: string; from: 'me' | 'ta'; text: string; at: number }[],
   };
   writeSnap((s) => ({

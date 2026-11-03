@@ -542,7 +542,7 @@
     transform: translateX(6%);
   }
 }
-/* 许愿树：挂签轻摇（绕签顶摆动） */
+/* 许愿树（晴天版）：挂签轻摇（绕签顶摆动） */
 @keyframes wish-sway {
   0%,
   100% {
@@ -552,19 +552,13 @@
     transform: rotate(1.8deg);
   }
 }
-/* 许愿树：萤火虫明灭 */
-@keyframes wish-firefly {
-  0%,
-  100% {
-    opacity: 0.15;
-    transform: scale(0.8);
-  }
-  50% {
-    opacity: 0.95;
-    transform: scale(1.15);
+/* 许愿树（晴天版）：太阳光芒轮缓慢旋转 */
+@keyframes couple-sun-spin {
+  to {
+    transform: rotate(360deg);
   }
 }
-/* 许愿树：挂签时金色光尘从树冠升起飘散（--dx/--dy 为飘移向量） */
+/* 许愿树（晴天版）：挂签时金色光尘从枝头升起飘散（--dx/--dy 为飘移向量） */
 @keyframes wish-burst {
   0% {
     transform: translate(0, 0) scale(0.5);
@@ -578,54 +572,14 @@
     opacity: 0;
   }
 }
-/* 许愿树：地面薄雾缓慢漂移 */
-@keyframes wish-mist {
-  0%,
-  100% {
-    transform: translateX(-4%);
-  }
-  50% {
-    transform: translateX(4%);
-  }
-}
-/* 许愿树：月光光柱缓缓明灭 */
-@keyframes wish-ray {
-  0%,
-  100% {
-    opacity: 0.4;
-  }
-  50% {
-    opacity: 1;
-  }
-}
-/* 许愿树：树冠萤火虫缓缓游移 */
-@keyframes wish-orbit {
-  0%,
-  100% {
-    transform: translate(0, 0);
-    opacity: 0.35;
-  }
-  25% {
-    transform: translate(9px, -12px);
-    opacity: 0.95;
-  }
-  50% {
-    transform: translate(-4px, -18px);
-    opacity: 0.55;
-  }
-  75% {
-    transform: translate(-10px, -7px);
-    opacity: 0.9;
-  }
-}
-/* 许愿树：空树时「挂许愿签」主按钮呼吸柔光（邀请挂上第一张签） */
+/* 许愿树（晴天版）：空树时「挂许愿签」主按钮呼吸柔光（暖阳色调） */
 @keyframes wish-invite-pulse {
   0%,
   100% {
-    box-shadow: 0 8px 24px rgba(141, 39, 35, 0.5), 0 0 18px rgba(201, 163, 92, 0.18);
+    box-shadow: 0 8px 22px rgba(201, 58, 46, 0.38), 0 0 16px rgba(255, 200, 90, 0.35);
   }
   50% {
-    box-shadow: 0 10px 32px rgba(141, 39, 35, 0.62), 0 0 36px rgba(201, 163, 92, 0.42);
+    box-shadow: 0 10px 30px rgba(201, 58, 46, 0.55), 0 0 34px rgba(255, 200, 90, 0.65);
   }
 }
 /* 三生石：流星划过 */
@@ -767,12 +721,9 @@
   [animation\:couple-shoot],
   [animation\:couple-fall],
   [animation\:wish-sway],
-  [animation\:wish-firefly],
   [animation\:wish-burst],
-  [animation\:wish-mist],
-  [animation\:wish-ray],
-  [animation\:wish-orbit],
-  [animation\:wish-invite-pulse] {
+  [animation\:wish-invite-pulse],
+  [animation\:couple-sun-spin] {
     animation: none;
   }
 }
