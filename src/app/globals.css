@@ -552,12 +552,6 @@
     transform: rotate(1.8deg);
   }
 }
-/* 许愿树（晴天版）：太阳光芒轮缓慢旋转 */
-@keyframes couple-sun-spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
 /* 许愿树（晴天版）：挂签时金色光尘从枝头升起飘散（--dx/--dy 为飘移向量） */
 @keyframes wish-burst {
   0% {
@@ -572,14 +566,14 @@
     opacity: 0;
   }
 }
-/* 许愿树（晴天版）：空树时「挂许愿签」主按钮呼吸柔光（暖阳色调） */
+/* 许愿树（简约晴天版）：空树时「挂许愿签」主按钮呼吸柔光（陶红 + 暖阳色） */
 @keyframes wish-invite-pulse {
   0%,
   100% {
-    box-shadow: 0 8px 22px rgba(201, 58, 46, 0.38), 0 0 16px rgba(255, 200, 90, 0.35);
+    box-shadow: 0 8px 22px rgba(221, 127, 108, 0.35), 0 0 14px rgba(245, 198, 95, 0.3);
   }
   50% {
-    box-shadow: 0 10px 30px rgba(201, 58, 46, 0.55), 0 0 34px rgba(255, 200, 90, 0.65);
+    box-shadow: 0 10px 28px rgba(221, 127, 108, 0.5), 0 0 30px rgba(245, 198, 95, 0.55);
   }
 }
 /* 三生石：流星划过 */
@@ -722,8 +716,7 @@
   [animation\:couple-fall],
   [animation\:wish-sway],
   [animation\:wish-burst],
-  [animation\:wish-invite-pulse],
-  [animation\:couple-sun-spin] {
+  [animation\:wish-invite-pulse] {
     animation: none;
   }
 }

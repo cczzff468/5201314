@@ -2684,15 +2684,15 @@ function AnniversaryPage(props: { state: CoupleState; patch: (p: Partial<CoupleS
 }
 
 /**
- * ================= 爱情小树成长记 · 许愿树（晴天版重建） =================
- * 按需求整体重建：晴天白天场景（暖阳 + 旋转光芒 + 漂移白云 + 草地），
- * 大树只有树干和树杈（不要叶子），许愿签直接挂在枝杈上；
- * - 挂签时可自选颜色（调色盘 8 色：红/橙/黄/绿/蓝/紫/粉/奶油白）；
+ * ================= 爱情小树成长记 · 许愿树（简约晴天版） =================
+ * 整体重建为极简插画风：大留白的浅色天空 + 一轮扁平暖阳 + 两朵简云，
+ * 大树只保留优雅的树干与舒展树杈（无叶子、无多余装饰）；
+ * - 挂签时可自选颜色（调色盘 8 种低饱和扁平色）；
  * - 树上的签不显示「我挂的/TA挂的」归属，只看得到颜色和内容；
- * - 树上还没挂过签时完全空树（装饰签与落地小签都不出现）；
+ * - 树上还没挂过签时完全空树；
  * - 数据契约不变：tree / treeStreak / taTreeStreak / treeCards / treeCardDay，
- *   treeCards 新增可选 color（调色盘索引，旧数据缺省兼容），
- *   AI 自主挂签（couple-ai.ts autonomy）与卡片留言回复全部保留。
+ *   treeCards 可选 color（调色盘索引，旧数据缺省兼容），
+ *   AI 自动挂签（couple-ai.ts autonomy）与卡片留言回复全部保留。
  */
 
 /** 许愿签挂点（相对树容器的百分比；r = 基础旋转角；签从挂点垂下来） */
@@ -2713,22 +2713,22 @@ const WISH_SLOTS: { x: number; y: number; r: number }[] = [
   { x: 59, y: 50, r: 5 },
 ];
 
-/** 许愿签调色盘（挂签时自选颜色；text = 签面文字色，保证对比度；swatch = 色盘圆点色） */
+/** 许愿签调色盘（简约版：8 种低饱和扁平色；text = 签面文字色；swatch = 色盘圆点色） */
 const WISH_COLORS: { name: string; bg: string; border: string; text: string; swatch: string }[] = [
-  { name: '石榴红', bg: 'linear-gradient(180deg,#e05a4a,#c93a2e)', border: '#a52a20', text: '#fff3e4', swatch: '#d64a3c' },
-  { name: '蜜橘橙', bg: 'linear-gradient(180deg,#f2905a,#e8702a)', border: '#c2551a', text: '#fff6ec', swatch: '#ec7f42' },
-  { name: '向日葵黄', bg: 'linear-gradient(180deg,#f6ca54,#e8a93a)', border: '#c28a1e', text: '#6b4710', swatch: '#efb947' },
-  { name: '青苹果绿', bg: 'linear-gradient(180deg,#a3d173,#7fb84e)', border: '#5e8f36', text: '#2e4a12', swatch: '#91c460' },
-  { name: '晴空蓝', bg: 'linear-gradient(180deg,#79bde8,#4f9cd4)', border: '#2f7ab5', text: '#f2faff', swatch: '#62abde' },
-  { name: '薰衣草紫', bg: 'linear-gradient(180deg,#b9a0e2,#9a7ecf)', border: '#7a5fb0', text: '#f8f4ff', swatch: '#a98fd8' },
-  { name: '樱花粉', bg: 'linear-gradient(180deg,#f4a6ba,#e87e9c)', border: '#c25c7c', text: '#fff2f6', swatch: '#ee92a9' },
-  { name: '奶油白', bg: 'linear-gradient(180deg,#faf3dc,#f0e4bd)', border: '#c9b276', text: '#5c4d26', swatch: '#f4ebcd' },
+  { name: '陶红', bg: '#dd7f6c', border: '#c96a58', text: '#fff6f1', swatch: '#dd7f6c' },
+  { name: '橘橙', bg: '#e79a62', border: '#d3834c', text: '#fff7ef', swatch: '#e79a62' },
+  { name: '杏黄', bg: '#ecc26e', border: '#d9ac52', text: '#6a531a', swatch: '#ecc26e' },
+  { name: '豆绿', bg: '#a4c29a', border: '#8cab82', text: '#31462a', swatch: '#a4c29a' },
+  { name: '雾蓝', bg: '#85b3cf', border: '#6f9dba', text: '#f2f9fd', swatch: '#85b3cf' },
+  { name: '藤紫', bg: '#b4a5d3', border: '#9f8dc0', text: '#fbf8ff', swatch: '#b4a5d3' },
+  { name: '樱粉', bg: '#e7abc0', border: '#d395ac', text: '#fff3f7', swatch: '#e7abc0' },
+  { name: '米白', bg: '#f2ead7', border: '#e0d5b8', text: '#6b5b39', swatch: '#f2ead7' },
 ];
 
-/** 卡片的显示色（旧卡无 color：我挂的=石榴红 / TA 挂的=奶油白，兼容历史数据） */
+/** 卡片的显示色（旧卡无 color：我挂的=陶红 / TA 挂的=米白，兼容历史数据） */
 const cardColorOf = (card: TreeCard) => WISH_COLORS[(card.color ?? (card.from === 'me' ? 0 : 7)) % WISH_COLORS.length];
 
-/** 挂签时的金色光尘（起点 = 树冠内的百分比坐标；dx/dy = 飘移向量；d = 延迟秒） */
+/** 挂签时的暖金光尘（起点 = 树冠内的百分比坐标；dx/dy = 飘移向量；d = 延迟秒） */
 const WISH_BURST: { x: number; y: number; dx: string; dy: string; d: number }[] = [
   { x: 30, y: 26, dx: '-34px', dy: '-84px', d: 0 },
   { x: 42, y: 20, dx: '-12px', dy: '-102px', d: 0.12 },
@@ -2740,142 +2740,68 @@ const WISH_BURST: { x: number; y: number; dx: string; dy: string; d: number }[] 
   { x: 68, y: 24, dx: '24px', dy: '-90px', d: 0.22 },
 ];
 
-/** 许愿树本体（晴天版：只有树干和树杈，不要叶子；枝头小鸟 + 草地小花；hasCards=false 时地面不留落签） */
-function WishTreeSVG({ stage, hasCards }: { stage: number; hasCards?: boolean }) {
+/** 许愿树本体（简约版：优雅的树干 + 舒展树杈，无叶子无装饰；stage 越高枝杈越多） */
+function WishTreeSVG({ stage }: { stage: number }) {
   return (
     <svg viewBox="0 0 390 560" className="h-full w-full" aria-hidden="true">
-      <defs>
-        <linearGradient id="wtTrunk" x1="0" y1="0" x2="1" y2="0">
-          <stop offset="0%" stopColor="#a87a52" />
-          <stop offset="45%" stopColor="#8a6240" />
-          <stop offset="100%" stopColor="#6a4527" />
-        </linearGradient>
-      </defs>
+      {/* 草地（两层柔和的扁平绿丘） */}
+      <ellipse cx="195" cy="556" rx="185" ry="26" fill="#d5dcc8" />
+      <ellipse cx="195" cy="551" rx="126" ry="17" fill="#e0e5d3" />
+      {/* 树影（投在草地上的一枚淡影） */}
+      <ellipse cx="195" cy="548" rx="92" ry="10" fill="#bcc7ad" opacity="0.5" />
 
-      {/* 草地小丘（ sunny 绿丘 + 内侧亮草） */}
-      <ellipse cx="195" cy="554" rx="170" ry="27" fill="#b2d687" />
-      <ellipse cx="195" cy="549" rx="122" ry="18" fill="#c3e39a" />
-      {/* 树影（投在草地上的柔影） */}
-      <ellipse cx="195" cy="551" rx="128" ry="16" fill="#7fae5c" opacity="0.4" />
-
-      {/* ===== 树干 + 树杈骨架（五主枝 + 细枝；签就挂在这些枝上；stage≥2/≥3 长出更多细枝） ===== */}
+      {/* ===== 树干 + 树杈（简约线稿风；签就挂在这些枝上；stage≥2/≥3 长出更多细枝） ===== */}
       <g fill="none" strokeLinecap="round">
-        {/* 主干（带锥度，向上分叉） */}
-        <path d="M195 556 C194 500 195 450 194 400 C193 355 194 335 195 312" stroke="url(#wtTrunk)" strokeWidth={21} />
-        {/* 左下枝（拖到远左，低枝位） */}
-        <path d="M192 352 C165 336 130 324 95 311 C68 302 38 290 16 262" stroke="#8a6240" strokeWidth={11} />
-        <path d="M96 310 C88 296 86 286 85 278" stroke="#7a5233" strokeWidth={5} />
-        <path d="M112 304 C106 286 102 274 101 262" stroke="#7a5233" strokeWidth={5} />
-        {/* 左上枝（扫向左上高处） */}
-        <path d="M193 322 C172 282 152 242 122 212 C102 194 78 178 50 162" stroke="#8a6240" strokeWidth={11} />
-        <path d="M150 240 C142 222 136 206 128 190 C124 180 121 168 120 156 C119 146 118 134 118 118" stroke="#7a5233" strokeWidth={5} />
-        <path d="M154 238 C150 220 148 204 147 186" stroke="#7a5233" strokeWidth={5} />
-        {/* 中央枝（直冲树顶） */}
-        <path d="M195 312 C192 260 188 210 186 162 C185 138 184 116 183 88" stroke="#8a6240" strokeWidth={10} />
-        <path d="M192 185 C200 176 206 170 212 164" stroke="#7a5233" strokeWidth={5} />
-        <path d="M190 150 C180 140 172 132 164 124" stroke="#7a5233" strokeWidth={4} />
-        {/* 右上枝（扫向右上高处） */}
-        <path d="M197 318 C216 280 226 240 233 200 C237 174 240 140 241 106" stroke="#8a6240" strokeWidth={10} />
-        <path d="M226 222 C240 212 250 204 258 194" stroke="#7a5233" strokeWidth={5} />
-        {/* 右中枝（拖到右侧中部） */}
-        <path d="M198 330 C232 318 268 296 294 266 C300 258 304 240 306 206 C307 186 308 166 309 148" stroke="#8a6240" strokeWidth={9} />
-        <path d="M286 256 C280 236 275 222 272 210" stroke="#7a5233" strokeWidth={5} />
-        {/* 右下枝（拖到远右） */}
-        <path d="M196 346 C235 342 280 332 315 312 C338 298 351 258 360 194" stroke="#8a6240" strokeWidth={9} />
-        <path d="M330 270 C332 262 333 257 333 252" stroke="#7a5233" strokeWidth={4} />
-        {/* 主干低处小杈（两侧小枝） */}
-        <path d="M196 282 C202 276 207 271 211 264" stroke="#7a5233" strokeWidth={5} />
-        <path d="M194 300 C188 294 184 290 179 286" stroke="#7a5233" strokeWidth={4} />
+        {/* 主干（自下而上，柔和收细） */}
+        <path d="M195 558 C194 516 196 474 194 434 C193 398 194 366 195 340 C195 316 194 296 192 274" stroke="#7c6a57" strokeWidth={16} />
+        {/* 左下枝 */}
+        <path d="M194 424 C168 414 138 402 110 382 C94 370 76 354 60 332" stroke="#7c6a57" strokeWidth={9} />
+        <path d="M100 372 C92 358 88 346 86 334" stroke="#6d5c4a" strokeWidth={4} />
+        {/* 右下枝 */}
+        <path d="M196 428 C222 416 252 402 280 380 C296 366 312 348 324 324" stroke="#7c6a57" strokeWidth={9} />
+        <path d="M282 376 C288 360 290 348 290 336" stroke="#6d5c4a" strokeWidth={4} />
+        {/* 左上枝 */}
+        <path d="M193 306 C178 268 154 226 120 192 C106 178 88 162 68 146" stroke="#7c6a57" strokeWidth={8} />
+        <path d="M142 240 C134 224 128 212 126 198" stroke="#6d5c4a" strokeWidth={4} />
+        {/* 右上枝 */}
+        <path d="M195 302 C212 264 236 222 270 190 C284 176 302 162 320 148" stroke="#7c6a57" strokeWidth={8} />
+        <path d="M250 244 C258 230 262 218 264 204" stroke="#6d5c4a" strokeWidth={4} />
+        {/* 中央枝（直伸树顶） */}
+        <path d="M192 274 C188 230 184 184 180 140 C178 118 176 98 172 80" stroke="#7c6a57" strokeWidth={8} />
+        <path d="M181 166 C172 156 164 148 154 140" stroke="#6d5c4a" strokeWidth={3.5} />
+        <path d="M180 122 C190 114 196 106 202 96" stroke="#6d5c4a" strokeWidth={3.5} />
         {/* 成长值长出的额外细枝（stage≥2 / ≥3） */}
         {stage >= 2 && (
-          <g stroke="#6a4527" strokeWidth={3.5}>
-            <path d="M85 278 C80 264 76 254 70 244" />
-            <path d="M120 156 C116 142 112 130 106 118" />
-            <path d="M241 106 C246 94 250 82 252 70" />
-            <path d="M309 148 C316 138 322 128 330 120" />
-            <path d="M50 162 C44 152 40 142 38 132" />
+          <g stroke="#6d5c4a" strokeWidth={3}>
+            <path d="M60 332 C54 318 50 306 48 294" />
+            <path d="M120 192 C114 180 110 170 108 158" />
+            <path d="M324 324 C330 310 334 298 336 286" />
+            <path d="M320 148 C326 138 330 128 332 118" />
+            <path d="M172 80 C168 68 166 58 164 50" />
           </g>
         )}
         {stage >= 3 && (
-          <g stroke="#6a4527" strokeWidth={3}>
-            <path d="M101 262 C96 252 92 244 86 238" />
-            <path d="M147 186 C142 176 138 168 132 162" />
-            <path d="M212 164 C218 156 224 150 232 146" />
-            <path d="M258 194 C264 188 270 184 278 182" />
-            <path d="M360 194 C366 188 370 180 372 170" />
+          <g stroke="#6d5c4a" strokeWidth={2.5}>
+            <path d="M86 334 C80 324 76 316 72 310" />
+            <path d="M126 198 C120 188 116 180 114 172" />
+            <path d="M290 336 C296 326 300 318 304 312" />
+            <path d="M264 204 C270 194 274 186 276 178" />
+            <path d="M154 140 C146 132 140 126 134 122" />
           </g>
         )}
       </g>
 
-      {/* 树皮纹（主干上的纹理） */}
-      <g stroke="#5d3d22" strokeWidth="2" fill="none" opacity="0.5" strokeLinecap="round">
-        <path d="M188 430 C187 390 186 350 185 312" />
-        <path d="M201 440 C202 396 203 352 204 314" />
-        <path d="M194 480 C193 450 192 420 192 392" />
-        <path d="M191 350 C190 336 190 326 190 318" />
+      {/* 草叶（树脚三两笔小草，点到即止） */}
+      <g stroke="#a8b494" strokeWidth={2} fill="none" strokeLinecap="round" opacity={0.7}>
+        <path d="M160 553 C159 548 159 543 158 538" />
+        <path d="M232 553 C233 548 233 543 234 538" />
+        <path d="M118 549 C117 545 117 541 116 537" />
       </g>
-
-      {/* 板根（主干基部向两侧展开） */}
-      <path d="M185 556 C160 552 140 548 122 544 C120 550 121 554 124 556 Z" fill="#7a5233" />
-      <path d="M205 556 C230 552 250 548 268 544 C270 550 269 554 266 556 Z" fill="#7a5233" />
-
-      {/* 草叶（草地上的几簇草） */}
-      <g stroke="#6f9e4a" strokeWidth="2.5" fill="none" strokeLinecap="round">
-        <path d="M74 552 C72 542 74 534 72 528" />
-        <path d="M86 554 C85 544 88 538 86 532" />
-        <path d="M300 552 C302 542 300 534 302 528" />
-        <path d="M310 554 C311 544 308 538 310 532" />
-        <path d="M146 556 C145 548 147 542 146 537" />
-        <path d="M246 556 C247 548 245 542 246 537" />
-        <path d="M50 549 C49 541 51 535 50 530" />
-        <path d="M336 549 C337 541 335 535 336 530" />
-      </g>
-
-      {/* 小花（草地上的白/粉小雏菊） */}
-      {[
-        { x: 62, y: 540, c: '#ffffff' },
-        { x: 100, y: 548, c: '#ffd1e0' },
-        { x: 290, y: 544, c: '#ffffff' },
-        { x: 330, y: 538, c: '#ffd1e0' },
-        { x: 170, y: 552, c: '#ffffff' },
-        { x: 226, y: 551, c: '#ffd1e0' },
-      ].map((f, i) => (
-        <g key={`flower-${i}`}>
-          <circle cx={f.x} cy={f.y} r="3.2" fill={f.c} />
-          <circle cx={f.x} cy={f.y} r="1.3" fill="#ffcf5c" />
-        </g>
-      ))}
-
-      {/* 枝头小鸟（两只晒太阳的小家伙） */}
-      <g transform="translate(136,228)">
-        <path d="M-9 -3 L-17 -8 L-14 1 Z" fill="#c2551a" />
-        <ellipse cx="0" cy="0" rx="8" ry="6" fill="#e8702a" />
-        <circle cx="7" cy="-5" r="4" fill="#e8702a" />
-        <path d="M11 -5 L16 -4 L11 -2 Z" fill="#ffcf5c" />
-        <circle cx="8" cy="-6" r="0.9" fill="#3a2410" />
-        <path d="M-2 6 L-2 9 M2 6 L2 9" stroke="#8a4a1a" strokeWidth="1.2" />
-      </g>
-      <g transform="translate(284,250) scale(0.85)">
-        <path d="M-9 -3 L-17 -8 L-14 1 Z" fill="#b04a68" />
-        <ellipse cx="0" cy="0" rx="8" ry="6" fill="#e87e9c" />
-        <circle cx="7" cy="-5" r="4" fill="#e87e9c" />
-        <path d="M11 -5 L16 -4 L11 -2 Z" fill="#ffd1e0" />
-        <circle cx="8" cy="-6" r="0.9" fill="#3a2410" />
-        <path d="M-2 6 L-2 9 M2 6 L2 9" stroke="#8a4a1a" strokeWidth="1.2" />
-      </g>
-
-      {/* 地上落着的一张小签（细节感；树上还没挂过签时不出现） */}
-      {hasCards && (
-        <g>
-          <rect x="262" y="538" width="18" height="34" rx="3" transform="rotate(14 271 555)" fill="#e05a4a" stroke="#a52a20" strokeWidth="1.5" />
-          <rect x="265" y="544" width="12" height="2" rx="1" transform="rotate(14 271 555)" fill="#a52a20" opacity="0.6" />
-        </g>
-      )}
     </svg>
   );
 }
 
-/** 树上垂挂的许愿签（颜色 = 挂签时自选；不显示谁挂的，只看颜色和内容；点击看正文+留言） */
+/** 树上垂挂的许愿签（简约纸签：扁平色 + 细挂绳；不显示谁挂的；点击看正文+留言） */
 function WishStrip({
   card,
   x,
@@ -2899,19 +2825,18 @@ function WishStrip({
       className="absolute z-10 transition-transform duration-150 active:scale-90"
       style={{ left: `${x}%`, top: `${y}%`, transform: `translate(-50%, 0) rotate(${r}deg)`, transformOrigin: 'top center' }}
     >
-      {/* 挂绳（签顶到枝头的小绳 + 绳结） */}
-      <span aria-hidden="true" className="absolute bottom-full left-1/2 block h-[14px] w-[2px] -translate-x-1/2 rounded bg-[#7a5a34]" />
-      <span aria-hidden="true" className="absolute bottom-full left-1/2 mb-[11px] block h-[4px] w-[8px] -translate-x-1/2 rounded-[2px] bg-[#5d4322]" />
-      {/* 签身（轻微摇曳；颜色 = 自选色） */}
+      {/* 挂绳（一缕细绳） */}
+      <span aria-hidden="true" className="absolute bottom-full left-1/2 block h-[13px] w-[1.5px] -translate-x-1/2 rounded bg-[#9a8a72]" />
+      {/* 签身（扁平色纸签，轻轻摇曳） */}
       <span
-        className="block w-[64px] rounded-[6px] border-2 px-[5px] py-[6px] text-left shadow-[0_4px_12px_rgba(90,60,30,0.35)] [animation:wish-sway_4.6s_ease-in-out_infinite] [transform-origin:top_center]"
-        style={{ background: col.bg, borderColor: col.border, color: col.text }}
+        className="block w-[54px] rounded-[6px] px-[5px] pb-[5px] pt-[6px] text-left shadow-[0_2px_8px_rgba(70,58,42,0.16)] [animation:wish-sway_4.8s_ease-in-out_infinite] [transform-origin:top_center]"
+        style={{ background: col.bg, color: col.text }}
       >
         {/* 签头小孔 */}
-        <span aria-hidden="true" className="mx-auto mb-[4px] block h-[3px] w-[3px] rounded-full bg-black/25" />
-        <span className="line-clamp-3 break-all text-[9px] font-semibold leading-[1.4]">{card.text}</span>
+        <span aria-hidden="true" className="mx-auto mb-[4px] block h-[2.5px] w-[2.5px] rounded-full bg-black/20" />
+        <span className="line-clamp-3 break-all text-[9px] font-semibold leading-[1.45]">{card.text}</span>
         {n > 0 && (
-          <span className="mt-[3px] flex items-center justify-center gap-[2px] text-[8px] font-bold leading-none opacity-80">
+          <span className="mt-[2px] flex items-center justify-center gap-[2px] text-[8px] font-bold leading-none opacity-75">
             <MessageSquare className="h-[7px] w-[7px]" strokeWidth={2.6} aria-hidden="true" />
             {n}
           </span>
@@ -2921,27 +2846,27 @@ function WishStrip({
   );
 }
 
-/** 装饰空签（调色盘里的柔色、不可点；没卡的挂点也挂满签，晴天里像彩笺飘扬） */
-function DecorStrip({ x, y, r, tone, delay }: { x: number; y: number; r: number; tone: { bg: string; border: string }; delay: number }) {
-  const h = 84 + ((x * 7 + y * 13) % 34); // 84-118 随机高度
+/** 装饰空签（调色盘里的扁平柔色、不可点；有卡时补几笔让树不显空） */
+function DecorStrip({ x, y, r, tone, delay }: { x: number; y: number; r: number; tone: { bg: string }; delay: number }) {
+  const h = 56 + ((x * 7 + y * 13) % 26); // 56-82 随机高度
   return (
     <div
       aria-hidden="true"
-      className="pointer-events-none absolute z-[5] opacity-80"
+      className="pointer-events-none absolute z-[5] opacity-[0.55]"
       style={{ left: `${x}%`, top: `${y}%`, transform: `translate(-50%, 0) rotate(${r}deg)`, transformOrigin: 'top center' }}
     >
-      <span aria-hidden="true" className="absolute bottom-full left-1/2 block h-[12px] w-[2px] -translate-x-1/2 rounded bg-[#7a5a34]/70" />
+      <span aria-hidden="true" className="absolute bottom-full left-1/2 block h-[11px] w-[1.5px] -translate-x-1/2 rounded bg-[#9a8a72]/70" />
       <span
-        className="block w-[46px] rounded-[5px] border-2 shadow-[0_3px_10px_rgba(90,60,30,0.3)] [animation:wish-sway_5.4s_ease-in-out_infinite] [transform-origin:top_center]"
-        style={{ height: h, background: tone.bg, borderColor: tone.border, animationDelay: `${delay}s` }}
+        className="block w-[36px] rounded-[5px] shadow-[0_2px_6px_rgba(70,58,42,0.12)] [animation:wish-sway_5.6s_ease-in-out_infinite] [transform-origin:top_center]"
+        style={{ height: h, background: tone.bg, animationDelay: `${delay}s` }}
       >
-        <span className="mx-auto mt-[5px] block h-[3px] w-[3px] rounded-full bg-black/25" />
+        <span className="mx-auto mt-[5px] block h-[2.5px] w-[2.5px] rounded-full bg-black/15" />
       </span>
     </div>
   );
 }
 
-/** 许愿签详情弹层（晴天亮色：签正文大卡（自选色） + 卡片下双向留言区 + 输入行） */
+/** 许愿签详情弹层（简约亮色：签正文大卡（自选色） + 卡片下双向留言区 + 输入行） */
 function TreeCardDetail({
   card,
   meName,
@@ -2967,13 +2892,13 @@ function TreeCardDetail({
   };
   return (
     <div className="absolute inset-0 z-40 flex items-center justify-center px-6" role="dialog" aria-label="许愿签详情">
-      <button type="button" aria-label="关闭" onClick={onClose} className="absolute inset-0 bg-[#2e4a1e]/30 backdrop-blur-[2px]" />
-      <div className="relative flex max-h-[80%] w-full max-w-[320px] flex-col overflow-hidden rounded-2xl border border-[#d9c48a] bg-[#fffdf2] shadow-[0_18px_50px_rgba(90,60,20,0.35)]">
+      <button type="button" aria-label="关闭" onClick={onClose} className="absolute inset-0 bg-[#5c5244]/25 backdrop-blur-[2px]" />
+      <div className="relative flex max-h-[80%] w-full max-w-[320px] flex-col overflow-hidden rounded-2xl border border-[#e7e0cd] bg-[#fdfbf4] shadow-[0_16px_44px_rgba(80,66,44,0.22)]">
         {/* 签正文（自选色大卡） */}
         <div className="shrink-0 px-4 pb-3 pt-4">
           <div
-            className="rounded-2xl border-2 px-4 py-5 shadow-[0_6px_18px_rgba(90,60,20,0.22)]"
-            style={{ background: col.bg, borderColor: col.border, color: col.text }}
+            className="rounded-xl px-4 py-5 shadow-[0_4px_14px_rgba(70,58,42,0.15)]"
+            style={{ background: col.bg, border: `1.5px solid ${col.border}`, color: col.text }}
           >
             <p className="break-all text-[15px] font-semibold leading-[1.7]">{card.text}</p>
             <p className="mt-3 text-right text-[11px] font-bold opacity-75">
@@ -2983,11 +2908,11 @@ function TreeCardDetail({
         </div>
         {/* 留言区（卡片下的双向留言） */}
         <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-2">
-          <p className="sticky top-0 z-[1] bg-[#fffdf2] pb-1.5 pt-0.5 text-[11px] font-bold text-[#8a6d2e]">
+          <p className="sticky top-0 z-[1] bg-[#fdfbf4] pb-1.5 pt-0.5 text-[11px] font-bold text-[#a39a83]">
             签下的留言 · {(card.comments ?? []).length}
           </p>
           {(card.comments ?? []).length === 0 && (
-            <p className="py-5 text-center text-[12.5px] leading-relaxed text-[#a09468]">
+            <p className="py-5 text-center text-[12.5px] leading-relaxed text-[#b3aa92]">
               还没有留言——{mine ? 'TA 会看到你挂的这张签，也可能会来下面留言' : '给 TA 挂的这张签回一句话吧'}
             </p>
           )}
@@ -2998,27 +2923,23 @@ function TreeCardDetail({
               <div key={m.id} className="flex items-start gap-2 py-[6px]">
                 <span
                   className="mt-[2px] flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[12px] font-bold"
-                  style={
-                    mMine
-                      ? { background: '#c93a2e', color: '#fff3e4' }
-                      : { background: '#e8d9a8', color: '#5c4d26' }
-                  }
+                  style={mMine ? { background: '#8b8069', color: '#fffdf6' } : { background: '#e3dcc7', color: '#6b6350' }}
                   aria-hidden="true"
                 >
                   {who.slice(0, 1)}
                 </span>
                 <div className="min-w-0 flex-1">
-                  <p className="text-[10.5px] font-semibold leading-tight text-[#8a7a4e]">
+                  <p className="text-[10.5px] font-semibold leading-tight text-[#a39a83]">
                     {who} · {fmtDate(m.at).slice(5)}
                   </p>
-                  <p className="mt-[1px] break-all text-[13.5px] leading-relaxed text-[#3d3524]">{m.text}</p>
+                  <p className="mt-[1px] break-all text-[13.5px] leading-relaxed text-[#4a4436]">{m.text}</p>
                 </div>
               </div>
             );
           })}
         </div>
         {/* 输入行 */}
-        <div className="flex shrink-0 items-center gap-2 border-t border-[#e3d5a8] px-3 py-2.5">
+        <div className="flex shrink-0 items-center gap-2 border-t border-[#eee8d6] px-3 py-2.5">
           <input
             value={input}
             onChange={(e) => setInput(e.target.value.slice(0, 90))}
@@ -3026,7 +2947,7 @@ function TreeCardDetail({
               if (e.key === 'Enter') send();
             }}
             placeholder="在签下留一句话…"
-            className="min-w-0 flex-1 rounded-full bg-[#f4ecd4] px-3.5 py-2 text-[13.5px] text-[#3d3524] outline-none placeholder:text-[#a89a70]"
+            className="min-w-0 flex-1 rounded-full bg-[#f3efe1] px-3.5 py-2 text-[13.5px] text-[#4a4436] outline-none placeholder:text-[#b3aa92]"
             aria-label="签下留言输入"
           />
           <button
@@ -3034,7 +2955,7 @@ function TreeCardDetail({
             onClick={send}
             disabled={!input.trim()}
             aria-label="发送留言"
-            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[linear-gradient(135deg,#e05a4a,#c93a2e)] text-white shadow-[0_3px_10px_rgba(201,58,46,0.35)] transition-transform active:scale-95 disabled:opacity-40"
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#dd7f6c] text-white shadow-[0_3px_10px_rgba(221,127,108,0.35)] transition-transform active:scale-95 disabled:opacity-40"
           >
             <ArrowUp className="h-[18px] w-[18px]" strokeWidth={2.4} />
           </button>
@@ -3044,7 +2965,7 @@ function TreeCardDetail({
   );
 }
 
-/** 爱情小树成长记 · 许愿树页（晴天版：暖阳白云 + 纯树干树杈；挂签自选颜色，全链路保留） */
+/** 爱情小树成长记 · 许愿树页（简约晴天版：浅色天空 + 扁平暖阳 + 极简秃树；挂签自选颜色） */
 function TreePage({
   state,
   patch,
@@ -3065,7 +2986,7 @@ function TreePage({
   const visibleN = Math.min(3 + stage, 8); // 成长值越高树上能挂越多（3→7 张）
   const [composing, setComposing] = useState(false);
   const [draft, setDraft] = useState('');
-  const [draftColor, setDraftColor] = useState(0); // 调色盘选中色（默认石榴红）
+  const [draftColor, setDraftColor] = useState(0); // 调色盘选中色（默认陶红）
   const [openId, setOpenId] = useState<string | null>(null);
   const [listOpen, setListOpen] = useState(false);
   const openCard = cards.find((c) => c.id === openId) ?? null;
@@ -3095,7 +3016,7 @@ function TreePage({
     scheduleTreeCardReply(cardId);
   };
 
-  /** 装饰签布局（树上还没挂过签时完全空树；有签后用调色盘柔色补位营造彩笺飘扬） */
+  /** 装饰签布局（树上还没挂过签时完全空树；有签后用调色盘柔色补几笔） */
   const decorSlots = useMemo(() => {
     if (cards.length === 0) return [];
     const used = new Set(cards.slice(0, visibleN).map((_, i) => WISH_SLOTS[i % WISH_SLOTS.length].x * 100 + WISH_SLOTS[i % WISH_SLOTS.length].y));
@@ -3107,32 +3028,19 @@ function TreePage({
   return (
     <div
       className="relative flex h-full flex-col overflow-hidden"
-      style={{ background: 'linear-gradient(180deg,#7ec8ec 0%,#a5daf2 34%,#d3edf8 58%,#e9f4da 80%,#d9eec6 100%)' }}
+      style={{ background: 'linear-gradient(180deg,#dce8e4 0%,#ececdf 45%,#f6f1e4 100%)' }}
     >
-      {/* ===== 场景层：晴天（暖阳旋转光芒 + 漂移白云 + 草地暖光） ===== */}
-      {/* 太阳（右上暖阳核心 + 缓旋光芒轮） */}
+      {/* ===== 场景层：简约晴天（一轮扁平暖阳 + 两朵简云） ===== */}
+      {/* 太阳（扁平圆 + 双层柔光环，静置不转） */}
       <span
         aria-hidden="true"
-        className="absolute right-[10%] top-[7%] -m-[38px] block h-[132px] w-[132px] rounded-full [animation:couple-sun-spin_80s_linear_infinite]"
-        style={{
-          background: 'repeating-conic-gradient(from 0deg, rgba(255,214,90,0.5) 0deg 6deg, rgba(255,214,90,0) 6deg 45deg)',
-          WebkitMaskImage: 'radial-gradient(circle, transparent 52%, #000 56%, #000 78%, transparent 82%)',
-          maskImage: 'radial-gradient(circle, transparent 52%, #000 56%, #000 78%, transparent 82%)',
-        }}
+        className="absolute right-[12%] top-[8%] block h-16 w-16 rounded-full"
+        style={{ background: '#f5c65f', boxShadow: '0 0 0 12px rgba(245,198,95,0.20), 0 0 0 26px rgba(245,198,95,0.09)' }}
       />
-      <span
-        aria-hidden="true"
-        className="absolute right-[10%] top-[7%] block h-14 w-14 rounded-full"
-        style={{
-          background: 'radial-gradient(circle at 40% 36%, #fff8d9 0%, #ffe485 45%, #ffc94d 100%)',
-          boxShadow: '0 0 36px 12px rgba(255,220,110,0.5), 0 0 90px 30px rgba(255,210,90,0.28)',
-        }}
-      />
-      {/* 白云（三朵，缓缓来回漂移） */}
+      {/* 云（两朵极简白云，缓缓漂移） */}
       {[
-        { left: '7%', top: '12%', w: 116, h: 42, dur: '22s' },
-        { left: '44%', top: '7%', w: 84, h: 30, dur: '17s' },
-        { left: '68%', top: '20%', w: 100, h: 36, dur: '26s' },
+        { left: '5%', top: '15%', w: 118, h: 26, dur: '26s' },
+        { left: '56%', top: '9%', w: 86, h: 22, dur: '21s' },
       ].map((cl, i) => (
         <span
           key={`cloud-${i}`}
@@ -3140,46 +3048,44 @@ function TreePage({
           className="absolute block"
           style={{ left: cl.left, top: cl.top, width: cl.w, height: cl.h }}
         >
-          <span className="block h-full w-full opacity-90 [animation:couple-cloud-drift_ease-in-out_infinite_alternate]" style={{ animationDuration: cl.dur }}>
-            <span className="absolute bottom-0 left-0 h-[45%] w-full rounded-full bg-white/95" />
-            <span className="absolute bottom-[18%] left-[16%] h-[72%] w-[46%] rounded-full bg-white/95" />
-            <span className="absolute bottom-[26%] left-[46%] h-[58%] w-[36%] rounded-full bg-white/95" />
+          <span className="block h-full w-full opacity-80 [animation:couple-cloud-drift_ease-in-out_infinite_alternate]" style={{ animationDuration: cl.dur }}>
+            <span className="absolute bottom-0 left-0 h-[58%] w-full rounded-full bg-white" />
+            <span className="absolute bottom-[34%] left-[20%] h-[80%] w-[42%] rounded-full bg-white" />
           </span>
         </span>
       ))}
-      {/* 顶部暖光（天空过曝的柔软天光） */}
-      <span aria-hidden="true" className="absolute -top-20 left-1/2 h-64 w-[130%] -translate-x-1/2 rounded-[50%] bg-[radial-gradient(ellipse,rgba(255,248,210,0.45),rgba(255,248,210,0)_65%)]" />
-      {/* 底部草地暖光（衔接树丘与页脚） */}
-      <span aria-hidden="true" className="absolute inset-x-0 bottom-0 h-[130px] bg-[linear-gradient(180deg,rgba(190,225,140,0),rgba(173,214,118,0.5))" />
 
-      {/* ===== 顶部：仅返回键（亮色玻璃） ===== */}
+      {/* ===== 顶部：返回键 + 小标题 ===== */}
       <div className="relative z-20 shrink-0">
         <button
           type="button"
           onClick={close}
           aria-label="返回"
-          className="absolute left-3 top-[54px] z-30 flex h-10 w-10 items-center justify-center rounded-full border border-[#c9b276]/50 bg-white/65 text-[#6b5430] backdrop-blur-md transition-transform active:scale-95"
+          className="absolute left-3 top-[54px] z-30 flex h-10 w-10 items-center justify-center rounded-full border border-[#d9d3c2] bg-white/80 text-[#6f6552] backdrop-blur-md transition-transform active:scale-95"
         >
-          <ArrowLeft className="h-6 w-6" strokeWidth={2.6} />
+          <ArrowLeft className="h-[22px] w-[22px]" strokeWidth={2.4} />
         </button>
+        <p className="absolute left-1/2 top-[54px] flex h-10 -translate-x-1/2 items-center pl-[0.35em] text-[13px] font-semibold tracking-[0.35em] text-[#6f6552]/70">
+          许愿树
+        </p>
       </div>
 
-      {/* ===== 中部：许愿大树 + 垂挂签（晴天纯树干树杈） ===== */}
+      {/* ===== 中部：许愿大树 + 垂挂签 ===== */}
       <div className="relative z-10 flex-1">
         <div className="absolute bottom-[104px] left-1/2 -translate-x-1/2">
           <div className="relative h-[430px] w-[340px]" style={{ transform: `scale(${(0.88 + stage * 0.03).toFixed(3)})`, transformOrigin: 'bottom center' }}>
-            {/* 树本体（挂签时轻轻一颤；树上还没签时地面不留落签） */}
+            {/* 树本体（挂签时轻轻一颤） */}
             <span key={pop} className="absolute inset-0 block [animation:couple-pop-heart_.5s_ease-out]">
-              <WishTreeSVG stage={stage} hasCards={cards.length > 0} />
+              <WishTreeSVG stage={stage} />
             </span>
-            {/* 挂签时的金色光尘（阳光下从枝头升起飘散） */}
+            {/* 挂签时的暖金光尘（从枝头升起飘散） */}
             {pop > 0 && (
               <span key={`burst-${pop}`} className="pointer-events-none absolute inset-0" aria-hidden="true">
                 {WISH_BURST.map((p, i) => (
                   <span
                     key={i}
-                    className="absolute h-[4px] w-[4px] rounded-full bg-[#ffd98a] blur-[0.5px] [animation:wish-burst_1.3s_ease-out_forwards]"
-                    style={{ left: `${p.x}%`, top: `${p.y}%`, animationDelay: `${p.d}s`, boxShadow: '0 0 6px 1px rgba(255,217,138,0.5)', '--dx': p.dx, '--dy': p.dy } as CSSProperties}
+                    className="absolute h-[4px] w-[4px] rounded-full bg-[#f2cf8a] blur-[0.5px] [animation:wish-burst_1.3s_ease-out_forwards]"
+                    style={{ left: `${p.x}%`, top: `${p.y}%`, animationDelay: `${p.d}s`, boxShadow: '0 0 6px 1px rgba(242,207,138,0.45)', '--dx': p.dx, '--dy': p.dy } as CSSProperties}
                   />
                 ))}
               </span>
@@ -3189,7 +3095,7 @@ function TreePage({
               const slot = WISH_SLOTS[i % WISH_SLOTS.length];
               return <WishStrip key={c.id} card={c} x={slot.x} y={slot.y} r={slot.r} onClick={() => setOpenId(c.id)} />;
             })}
-            {/* 装饰空签（调色盘柔色，晴天里像彩笺飘扬） */}
+            {/* 装饰空签（调色盘柔色补位） */}
             {decorSlots.map((s, i) => (
               <DecorStrip key={`d-${i}`} x={s.x} y={s.y} r={s.r} tone={s.tone} delay={s.delay} />
             ))}
@@ -3197,40 +3103,43 @@ function TreePage({
         </div>
       </div>
 
-      {/* ===== 底部操作栏：全部签（白玻璃图标钮） + 挂许愿签（主按钮；空树时呼吸柔光邀请挂上第一张） ===== */}
+      {/* ===== 底部操作栏：全部签（白玻璃圆钮） + 挂许愿签（陶红主按钮；空树时呼吸柔光） ===== */}
       <div className="relative z-20 flex shrink-0 items-center justify-center gap-4 px-6 pb-[34px] pt-2">
         {/* 全部签 */}
         <button
           type="button"
           onClick={() => setListOpen(true)}
           aria-label="查看全部许愿签"
-          className="flex h-[52px] w-[52px] shrink-0 items-center justify-center rounded-full border border-[#c9b276]/60 bg-white/70 text-[#8a6d2e] backdrop-blur-md transition-transform active:scale-95"
+          className="flex h-[52px] w-[52px] shrink-0 items-center justify-center rounded-full border border-[#ddd6c3] bg-white/75 text-[#8b8069] backdrop-blur-md transition-transform active:scale-95"
         >
-          <MessageSquare className="h-[23px] w-[23px]" strokeWidth={2.2} aria-hidden="true" />
+          <MessageSquare className="h-[22px] w-[22px]" strokeWidth={2.1} aria-hidden="true" />
         </button>
-        {/* 挂许愿签（主按钮：石榴红 + 金描边 + 晴天柔光；空树时呼吸脉动） */}
+        {/* 挂许愿签（主按钮：扁平陶红；空树时呼吸脉动） */}
         <button
           type="button"
           onClick={() => setComposing(true)}
           aria-label="挂一张许愿签"
-          className={`flex h-[54px] shrink-0 items-center gap-1.5 rounded-full border border-[#b98a3a]/60 bg-[linear-gradient(180deg,#e05a4a,#c93a2e)] px-8 text-[15.5px] font-extrabold tracking-wide text-white shadow-[0_8px_24px_rgba(201,58,46,0.4)] transition-transform active:scale-95 ${cards.length === 0 ? '[animation:wish-invite-pulse_2.8s_ease-in-out_infinite]' : ''}`}
+          className={`flex h-[54px] shrink-0 items-center gap-1.5 rounded-full bg-[#dd7f6c] px-8 text-[15.5px] font-bold tracking-wide text-white shadow-[0_8px_22px_rgba(221,127,108,0.35)] transition-transform active:scale-95 ${cards.length === 0 ? '[animation:wish-invite-pulse_2.8s_ease-in-out_infinite]' : ''}`}
         >
-          <Plus className="h-5 w-5" strokeWidth={3} aria-hidden="true" />
+          <Plus className="h-5 w-5" strokeWidth={2.8} aria-hidden="true" />
           挂许愿签
         </button>
       </div>
 
-      {/* ===== 挂签弹层（亮色面板 + 自选颜色签纸 + 调色盘） ===== */}
+      {/* ===== 挂签弹层（简约面板 + 自选颜色签纸 + 调色盘） ===== */}
       {composing && (
         <div className="absolute inset-0 z-40 flex items-center justify-center px-6" role="dialog" aria-label="挂一张许愿签">
-          <button type="button" aria-label="取消" onClick={() => setComposing(false)} className="absolute inset-0 bg-[#2e4a1e]/30 backdrop-blur-[2px]" />
-          <div className="relative w-full max-w-[320px] rounded-2xl border border-[#d9c48a] bg-[#fffdf2] p-4 shadow-[0_18px_50px_rgba(90,60,20,0.35)]">
-            <p className="text-[15px] font-bold text-[#8a6d2e]">挂一张许愿签</p>
-            <p className="mt-0.5 text-[12px] leading-relaxed text-[#a09468]">
+          <button type="button" aria-label="取消" onClick={() => setComposing(false)} className="absolute inset-0 bg-[#5c5244]/25 backdrop-blur-[2px]" />
+          <div className="relative w-full max-w-[320px] rounded-2xl border border-[#e7e0cd] bg-[#fdfbf4] p-4 shadow-[0_16px_44px_rgba(80,66,44,0.25)]">
+            <p className="text-[15px] font-bold text-[#5f5646]">挂一张许愿签</p>
+            <p className="mt-0.5 text-[12px] leading-relaxed text-[#a39a83]">
               选一个喜欢的颜色，把心愿写上，挂上你们的许愿树——TA 会看到这张签。
             </p>
             {/* 签纸书写区（颜色随调色盘实时变化） */}
-            <div className="mt-3 rounded-2xl border-2 px-4 py-4 shadow-[0_5px_16px_rgba(90,60,20,0.22)]" style={{ background: previewCol.bg, borderColor: previewCol.border, color: previewCol.text }}>
+            <div
+              className="mt-3 rounded-xl px-4 py-4 shadow-[0_4px_14px_rgba(70,58,42,0.15)]"
+              style={{ background: previewCol.bg, border: `1.5px solid ${previewCol.border}`, color: previewCol.text }}
+            >
               <textarea
                 value={draft}
                 onChange={(e) => setDraft(e.target.value.slice(0, 60))}
@@ -3243,7 +3152,7 @@ function TreePage({
             </div>
             {/* 调色盘（8 色自选） */}
             <div className="mt-3">
-              <p className="text-[11.5px] font-bold text-[#8a6d2e]">选颜色</p>
+              <p className="text-[11.5px] font-bold text-[#a39a83]">选颜色</p>
               <div className="mt-1.5 flex items-center gap-2">
                 {WISH_COLORS.map((c, i) => (
                   <button
@@ -3252,8 +3161,8 @@ function TreePage({
                     onClick={() => setDraftColor(i)}
                     aria-label={c.name}
                     aria-pressed={draftColor === i}
-                    className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full border-2 transition-transform active:scale-90 ${
-                      draftColor === i ? 'scale-110 border-[#8a6d2e] shadow-[0_2px_8px_rgba(90,60,20,0.3)]' : 'border-transparent'
+                    className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-transform active:scale-90 ${
+                      draftColor === i ? 'scale-110 shadow-[0_0_0_2px_#fdfbf4,0_0_0_3.5px_#9a8f78]' : 'shadow-[0_1px_4px_rgba(70,58,42,0.18)]'
                     }`}
                     style={{ background: c.swatch }}
                   >
@@ -3266,7 +3175,7 @@ function TreePage({
               <button
                 type="button"
                 onClick={() => setComposing(false)}
-                className="rounded-full px-4 py-2 text-[13.5px] font-bold text-[#a09468] active:opacity-60"
+                className="rounded-full px-4 py-2 text-[13.5px] font-bold text-[#a39a83] active:opacity-60"
               >
                 先不挂了
               </button>
@@ -3274,7 +3183,7 @@ function TreePage({
                 type="button"
                 onClick={hangCard}
                 disabled={!draft.trim()}
-                className="rounded-full border border-[#b98a3a]/60 bg-[linear-gradient(135deg,#e05a4a,#c93a2e)] px-5 py-2 text-[13.5px] font-bold text-white shadow-[0_4px_12px_rgba(201,58,46,0.35)] transition-transform active:scale-95 disabled:opacity-40"
+                className="rounded-full bg-[#dd7f6c] px-5 py-2 text-[13.5px] font-bold text-white shadow-[0_4px_12px_rgba(221,127,108,0.35)] transition-transform active:scale-95 disabled:opacity-40"
               >
                 挂上许愿树 ♡
               </button>
@@ -3294,23 +3203,23 @@ function TreePage({
         />
       )}
 
-      {/* ===== 全部签列表弹层（亮色底部抽屉） ===== */}
+      {/* ===== 全部签列表弹层（简约底部抽屉） ===== */}
       {listOpen && (
         <div className="absolute inset-0 z-40" role="dialog" aria-label="全部许愿签">
-          <button type="button" aria-label="关闭" onClick={() => setListOpen(false)} className="absolute inset-0 bg-[#2e4a1e]/30 backdrop-blur-[2px]" />
-          <div className="absolute inset-x-0 bottom-0 max-h-[68%] overflow-y-auto rounded-t-2xl border-t border-[#d9c48a] bg-[#fffdf2] px-4 pb-[26px] pt-3 shadow-[0_-8px_30px_rgba(90,60,20,0.35)]">
+          <button type="button" aria-label="关闭" onClick={() => setListOpen(false)} className="absolute inset-0 bg-[#5c5244]/25 backdrop-blur-[2px]" />
+          <div className="absolute inset-x-0 bottom-0 max-h-[68%] overflow-y-auto rounded-t-2xl border-t border-[#e7e0cd] bg-[#fdfbf4] px-4 pb-[26px] pt-3 shadow-[0_-8px_30px_rgba(80,66,44,0.25)]">
             <div className="mb-2 flex items-center justify-between">
-              <p className="text-[15px] font-bold text-[#8a6d2e]">全部许愿签 · {cards.length} 张</p>
+              <p className="text-[15px] font-bold text-[#5f5646]">全部许愿签 · {cards.length} 张</p>
               <button
                 type="button"
                 onClick={() => setListOpen(false)}
                 aria-label="收起列表"
-                className="flex h-8 w-8 items-center justify-center rounded-full bg-[#f0e8cc] text-[#8a6d2e] active:opacity-60"
+                className="flex h-8 w-8 items-center justify-center rounded-full bg-[#f0ebdd] text-[#8b8069] active:opacity-60"
               >
-                <ChevronDown className="h-5 w-5" strokeWidth={2.4} />
+                <ChevronDown className="h-5 w-5" strokeWidth={2.2} />
               </button>
             </div>
-            {cards.length === 0 && <p className="py-8 text-center text-[12.5px] text-[#a09468]">树上还没有许愿签</p>}
+            {cards.length === 0 && <p className="py-8 text-center text-[12.5px] text-[#b3aa92]">树上还没有许愿签</p>}
             <div className="flex flex-col gap-2 pb-2">
               {cards.map((c) => {
                 const who = c.from === 'me' ? state.meName || '我' : state.taName || 'TA';
@@ -3323,19 +3232,19 @@ function TreePage({
                       setListOpen(false);
                       setOpenId(c.id);
                     }}
-                    className="flex w-full items-center gap-3 rounded-xl border border-[#e3d5a8] bg-white/70 px-3.5 py-2.5 text-left transition-transform active:scale-[0.98]"
+                    className="flex w-full items-center gap-3 rounded-xl border border-[#ece6d4] bg-white/60 px-3.5 py-2.5 text-left transition-transform active:scale-[0.98]"
                     aria-label={`查看${who}挂的许愿签`}
                   >
-                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#f4ecd4]" aria-hidden="true">
-                      <span className="block h-[22px] w-[10px] rounded-[3px] border-2" style={{ background: col.bg, borderColor: col.border }} />
+                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#f3efe1]" aria-hidden="true">
+                      <span className="block h-[22px] w-[9px] rounded-[3px]" style={{ background: col.bg }} />
                     </span>
                     <span className="min-w-0 flex-1">
-                      <span className="block truncate text-[13.5px] font-semibold text-[#3d3524]">{c.text}</span>
-                      <span className="mt-[1px] block text-[10.5px] font-semibold opacity-80 text-[#a09468]">
+                      <span className="block truncate text-[13.5px] font-semibold text-[#4a4436]">{c.text}</span>
+                      <span className="mt-[1px] block text-[10.5px] font-semibold opacity-80 text-[#a39a83]">
                         {who} 挂的 · {fmtDate(c.at)} · {(c.comments ?? []).length} 条留言
                       </span>
                     </span>
-                    <ChevronRight className="h-4 w-4 shrink-0 text-[#a09468] opacity-60" strokeWidth={2.4} aria-hidden="true" />
+                    <ChevronRight className="h-4 w-4 shrink-0 text-[#b3aa92]" strokeWidth={2.2} aria-hidden="true" />
                   </button>
                 );
               })}
