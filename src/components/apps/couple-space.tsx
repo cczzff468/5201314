@@ -51,6 +51,7 @@ import {
   Heart,
   Headphones,
   HelpCircle,
+  Hourglass,
   IdCard,
   Image as ImageIcon,
   ImagePlus,
@@ -59,6 +60,8 @@ import {
   Landmark,
   Lightbulb,
   Loader2,
+  Lock,
+  LockOpen,
   Mail,
   MapPin,
   MapPinned,
@@ -75,6 +78,7 @@ import {
   Orbit,
   Phone,
   PhoneCall,
+  Pin,
   PersonStanding,
   Plane,
   Plus,
@@ -86,7 +90,6 @@ import {
   Smartphone,
   Smile,
   Sparkles,
-  Sprout,
   Star,
   Trash2,
   Users,
@@ -110,7 +113,7 @@ import {
 } from '@/lib/ios/couple-invite';
 // 第十六轮：AI 情绪系统（TA 头像下的心情小胶囊）
 import { aiMoodOf, MOOD_DISPLAY } from '@/lib/ios/ai-mood';
-import { aiAnswerWithMe, aiCommentOnPhoto, aiCommentOnPhotoLazy, aiDecideCouplePhoto, aiReplyPickForLevel, aiReplyVerdict, aiStatusPick, aiTickTrail, aiTrailFeed, aiZodiacReading, coupleMemoryDiff, coupleRemember, genReplyLevels, pokeTaDiary, rememberStatusExam, runCoupleAiTick, scheduleAiReply, scheduleTreeCardReply, syncLocFromContacts, trailSortMs, isGenPhoto, isTextPhoto, photoSrc, type CouplePhotoEntry, type CoupleTextPhoto, type CoupleTrailRec, type DynReplyLevel } from '@/lib/ios/couple-ai';
+import { aiAnswerWithMe, aiCommentOnPhoto, aiCommentOnPhotoLazy, aiDecideCouplePhoto, aiReplyPickForLevel, aiReplyVerdict, aiStatusPick, aiTickTrail, aiTrailFeed, aiZodiacReading, coupleMemoryDiff, coupleRemember, genReplyLevels, pokeTaDiary, rememberStatusExam, runCoupleAiTick, scheduleAiReply, scheduleBoardNoteReply, syncLocFromContacts, trailSortMs, isGenPhoto, isTextPhoto, photoSrc, type CouplePhotoEntry, type CoupleTextPhoto, type CoupleTrailRec, type DynReplyLevel } from '@/lib/ios/couple-ai';
 import { HUNDRED_LIST } from '@/lib/ios/couple-hundred';
 import { consumePendingPactOpen, COUPLE_PACT_NAV_EVENT, patchPactCardsWhere, peekPendingPactOpen, scheduleAiPactDecision, sendPactCard } from '@/lib/ios/couple-pact-share';
 import { consumePendingExamOpen, COUPLE_EXAM_NAV_EVENT, peekPendingExamOpen, scheduleAiExamAnswer, sendExamCard } from '@/lib/ios/couple-exam-share';
@@ -170,6 +173,17 @@ export interface TreeCard {
   at: number;
   comments: TreeCardComment[];
   color?: number; // 调色盘索引（0-7）；缺省时按挂签人兼容（我=红 / TA=奶油白）
+}
+
+/** 恋爱留言板便签（软木墙上钉的手写便签；color = NOTE_COLORS 调色盘索引；unlockAt 非空 = 时间胶囊） */
+export interface BoardNote {
+  id: string;
+  from: 'me' | 'ta';
+  text: string;
+  at: number;
+  color?: number; // 调色盘索引（0-7）；缺省时按钉便签人兼容（我=陶红 / TA=米白）
+  unlockAt?: number; // 时间胶囊解锁时间戳；缺省 = 普通便签；封存中内容对双方都不可见
+  comments: TreeCardComment[]; // 便签下的双向留言
 }
 
 /** 已保存的恋爱协议书（签署生效后自动存档；可多份，可点击回看；第十二轮支持分享/待对方签署） */
@@ -255,8 +269,10 @@ export interface CoupleState {
   replies: { id: string; prompt: string; reply: string; at: number }[]; // 回复挑战（旧版自由回复存档）
   replyBest: number | null; // 回复挑战历史最佳（到达关数，12=通关；第七轮玩法）
   treeStreak: { last: string | null; n: number }; // 爱情树：我连续浇树（last=最近浇水日）
-  treeCards: TreeCard[]; // 许愿树留言卡（第六十轮：最新在前，最多 30 张）
+  treeCards: TreeCard[]; // 许愿树留言卡（最新在前，最多 30 张；已下线，仅作迁移源保留）
   treeCardDay?: string; // TA（AI）挂卡去重（每天最多一张）
+  boardNotes: BoardNote[]; // 恋爱留言板便签（最新在前，最多 60 张；unlockAt 非空 = 时间胶囊）
+  boardNoteDay?: string; // TA（AI）钉便签去重（每天最多一张）
   taMissYou: number; // TA（AI）想你累计（第九轮：AI 每天想你）
   taMissYouByDay: Record<string, number>; // TA 每日想你
   taTreeStreak: { last: string | null; n: number }; // TA 连续浇树
@@ -365,6 +381,8 @@ function defaultState(): CoupleState {
     treeStreak: { last: null, n: 0 },
     treeCards: [],
     treeCardDay: undefined,
+    boardNotes: [],
+    boardNoteDay: undefined,
     taMissYou: 0,
     taMissYouByDay: {},
     taTreeStreak: { last: null, n: 0 },
@@ -430,6 +448,17 @@ function loadCoupleState(): CoupleState {
       const swap = (arr: string[]) => arr.map((t) => (t === '男友力max' ? '女友力max' : t));
       if (Array.isArray(merged.impressionsMe)) merged.impressionsMe = swap(merged.impressionsMe);
       if (Array.isArray(merged.aiImpressions)) merged.aiImpressions = swap(merged.aiImpressions);
+    }
+    // 修复三：许愿树下线 → 留言板一次性迁移（旧 treeCards 转成第一批便签；颜色/留言原样保留）
+    if ((merged.boardNotes ?? []).length === 0 && (merged.treeCards ?? []).length > 0) {
+      merged.boardNotes = merged.treeCards.map((c) => ({
+        id: c.id,
+        from: c.from,
+        text: c.text,
+        at: c.at,
+        color: c.color,
+        comments: c.comments ?? [],
+      }));
     }
     return merged;
   } catch {
@@ -997,7 +1026,7 @@ function CoupleAvatar({ src, name, size, ring = true }: { src: string | null; na
 type TabKey = 'home' | 'discover' | 'album' | 'us';
 
 type SubPage =
-  | 'tree' | 'track' | 'quiz' | 'letters'
+  | 'board' | 'track' | 'quiz' | 'letters'
   | 'house' | 'mood' | 'tarot' | 'hundred' | 'pact' | 'exam' | 'zodiac'
   | 'chronicle' | 'stone' | 'reply' | 'hotel' | 'status' | 'impress'
   | 'profile' | 'missyou' | 'chapel' | 'support' | 'settings'
@@ -1369,7 +1398,7 @@ export default function CoupleSpaceApp() {
           <div className="grid grid-cols-3 gap-3">
             {[
               { label: '情侣相册', icon: <Camera className="h-8 w-8" strokeWidth={1.8} /> },
-              { label: '爱情树', icon: <Sprout className="h-8 w-8" strokeWidth={1.8} /> },
+              { label: '留言板', icon: <Pin className="h-8 w-8" strokeWidth={1.8} /> },
               { label: '纪念日', icon: <BadgeCheck className="h-8 w-8" strokeWidth={1.8} /> },
             ].map((it) => (
               <div key={it.label} className="flex h-[110px] flex-col items-center justify-center gap-2.5 rounded-2xl bg-white/80 dark:bg-zinc-800/85 backdrop-blur-xl shadow-[0_6px_18px_rgba(0,0,0,0.05)]">
@@ -1724,7 +1753,7 @@ function HomePage(props: {
       {/* 底部固定四功能卡（不随内容滚动，始终贴在 Tab 栏上方；第二十五轮：浅灰白圆角矩形风） */}
       <div className="relative z-10 grid shrink-0 grid-cols-4 gap-2 px-3 pb-3 pt-2">
         {([
-          { key: 'tree', label: '许愿树\n成长记', icon: <Sprout className="h-6 w-6 text-[#3c3c42] dark:text-zinc-200" strokeWidth={1.9} /> },
+          { key: 'board', label: '恋爱\n留言板', icon: <Pin className="h-6 w-6 text-[#3c3c42] dark:text-zinc-200" strokeWidth={1.9} /> },
           { key: 'track', label: '情侣轨迹', icon: <Compass className="h-6 w-6 text-[#3c3c42] dark:text-zinc-200" strokeWidth={1.9} /> },
           { key: 'quiz', label: '甜蜜\n小问答', icon: <MessageCircleHeart className="h-6 w-6 text-[#3c3c42] dark:text-zinc-200" strokeWidth={1.9} /> },
           { key: 'letters', label: '情书', icon: <BookHeart className="h-6 w-6 text-[#3c3c42] dark:text-zinc-200" strokeWidth={1.9} /> },
@@ -2358,8 +2387,8 @@ function SubRouter(props: {
   const { sub, state, patch, days, tapMissYou, close, showToast, openSub, onReset } = props;
 
   switch (sub) {
-    case 'tree':
-      return <TreePage state={state} patch={patch} close={close} showToast={showToast} />;
+    case 'board':
+      return <BoardPage state={state} patch={patch} close={close} showToast={showToast} />;
     case 'track':
       return <TrackPage state={state} patch={patch} days={days} close={close} showToast={showToast} />;
     case 'quiz':
@@ -2684,237 +2713,157 @@ function AnniversaryPage(props: { state: CoupleState; patch: (p: Partial<CoupleS
 }
 
 /**
- * ================= 爱情小树成长记 · 许愿树（简约晴天版） =================
- * 整体重建为极简插画风：大留白的浅色天空 + 一轮扁平暖阳 + 两朵简云，
- * 大树只保留优雅的树干与舒展树杈（无叶子、无多余装饰）；
- * - 挂签时可自选颜色（调色盘 8 种低饱和扁平色）；
- * - 树上的签不显示「我挂的/TA挂的」归属，只看得到颜色和内容；
- * - 树上还没挂过签时完全空树；
- * - 数据契约不变：tree / treeStreak / taTreeStreak / treeCards / treeCardDay，
- *   treeCards 可选 color（调色盘索引，旧数据缺省兼容），
- *   AI 自动挂签（couple-ai.ts autonomy）与卡片留言回复全部保留。
+ * ================= 恋爱留言板（软木墙 + 手写便签 + 时间胶囊彩蛋） =================
+ * 按需求以「留言板为主 + 时间胶囊彩蛋」重建（替代许愿树）：
+ * - 一面软木留言墙：两人随手钉便签（8 色调色盘自选颜色），点开可回一句，成小对话串；
+ * - 时间胶囊：写下即封存（到点前连自己也看不到），锁着倒计时钉在墙上，到点自动开启；
+ * - 数据契约：boardNotes（最新在前，最多 60 张）+ boardNoteDay（TA 钉便签去重）；
+ *   旧许愿树 treeCards 由 loadCoupleState 一次性迁移为第一批便签；
+ * - AI（TA）自主钉便签（couple-ai.ts 'boardnote' 行为）与便签下留言回复全链路保留。
  */
 
-/** 许愿签挂点（相对树容器的百分比；r = 基础旋转角；签从挂点垂下来） */
-const WISH_SLOTS: { x: number; y: number; r: number }[] = [
-  { x: 18, y: 30, r: -6 },
-  { x: 33, y: 22, r: 4 },
-  { x: 47, y: 18, r: -3 },
-  { x: 61, y: 22, r: 5 },
-  { x: 75, y: 28, r: -5 },
-  { x: 88, y: 36, r: 6 },
-  { x: 10, y: 48, r: 5 },
-  { x: 25, y: 42, r: -4 },
-  { x: 39, y: 34, r: 3 },
-  { x: 53, y: 32, r: -5 },
-  { x: 67, y: 40, r: 4 },
-  { x: 81, y: 48, r: -6 },
-  { x: 33, y: 52, r: -3 },
-  { x: 59, y: 50, r: 5 },
+/** 便签调色盘（8 种低饱和暖色；bg = 同色微渐层，扁平但有体积） */
+const NOTE_COLORS: { name: string; bg: string; text: string; swatch: string }[] = [
+  { name: '陶红', bg: 'linear-gradient(180deg,#e29080,#dd7f6c)', text: '#fff6f1', swatch: '#dd7f6c' },
+  { name: '橘橙', bg: 'linear-gradient(180deg,#eda375,#e79a62)', text: '#fff7ef', swatch: '#e79a62' },
+  { name: '杏黄', bg: 'linear-gradient(180deg,#efca7f,#ecc26e)', text: '#6a531a', swatch: '#ecc26e' },
+  { name: '豆绿', bg: 'linear-gradient(180deg,#adc9a4,#a4c29a)', text: '#31462a', swatch: '#a4c29a' },
+  { name: '雾蓝', bg: 'linear-gradient(180deg,#92bcd8,#85b3cf)', text: '#f2f9fd', swatch: '#85b3cf' },
+  { name: '藤紫', bg: 'linear-gradient(180deg,#bcafda,#b4a5d3)', text: '#fbf8ff', swatch: '#b4a5d3' },
+  { name: '樱粉', bg: 'linear-gradient(180deg,#ecb4c7,#e7abc0)', text: '#fff3f7', swatch: '#e7abc0' },
+  { name: '米白', bg: 'linear-gradient(180deg,#f5efe0,#f2ead7)', text: '#6b5b39', swatch: '#f2ead7' },
 ];
 
-/** 许愿签调色盘（简约版：8 种低饱和色；bg = 同色微渐层，扁平但有体积；swatch = 色盘圆点色） */
-const WISH_COLORS: { name: string; bg: string; border: string; text: string; swatch: string }[] = [
-  { name: '陶红', bg: 'linear-gradient(180deg,#e29080,#dd7f6c)', border: '#c96a58', text: '#fff6f1', swatch: '#dd7f6c' },
-  { name: '橘橙', bg: 'linear-gradient(180deg,#eda375,#e79a62)', border: '#d3834c', text: '#fff7ef', swatch: '#e79a62' },
-  { name: '杏黄', bg: 'linear-gradient(180deg,#efca7f,#ecc26e)', border: '#d9ac52', text: '#6a531a', swatch: '#ecc26e' },
-  { name: '豆绿', bg: 'linear-gradient(180deg,#adc9a4,#a4c29a)', border: '#8cab82', text: '#31462a', swatch: '#a4c29a' },
-  { name: '雾蓝', bg: 'linear-gradient(180deg,#92bcd8,#85b3cf)', border: '#6f9dba', text: '#f2f9fd', swatch: '#85b3cf' },
-  { name: '藤紫', bg: 'linear-gradient(180deg,#bcafda,#b4a5d3)', border: '#9f8dc0', text: '#fbf8ff', swatch: '#b4a5d3' },
-  { name: '樱粉', bg: 'linear-gradient(180deg,#ecb4c7,#e7abc0)', border: '#d395ac', text: '#fff3f7', swatch: '#e7abc0' },
-  { name: '米白', bg: 'linear-gradient(180deg,#f5efe0,#f2ead7)', border: '#e0d5b8', text: '#6b5b39', swatch: '#f2ead7' },
+/** 便签显示色（旧数据无 color：我=陶红 / TA=米白，兼容历史数据） */
+const noteColorOf = (n: BoardNote) => NOTE_COLORS[(n.color ?? (n.from === 'me' ? 0 : 7)) % NOTE_COLORS.length];
+
+/** 时间胶囊解锁时间预设（chips；ms = 解锁时间戳） */
+const CAPSULE_PRESETS: { label: string; hint: string; ms: () => number }[] = [
+  {
+    label: '明早 8 点',
+    hint: '睡一觉醒来开启',
+    ms: () => {
+      const d = new Date();
+      d.setHours(8, 0, 0, 0);
+      if (d.getTime() <= Date.now()) d.setDate(d.getDate() + 1);
+      return d.getTime();
+    },
+  },
+  { label: '3 天后', hint: '小小的一颗期待', ms: () => Date.now() + 3 * 86400000 },
+  { label: '7 天后', hint: '一周后的惊喜', ms: () => Date.now() + 7 * 86400000 },
+  { label: '30 天后', hint: '一个月后的礼物', ms: () => Date.now() + 30 * 86400000 },
+  { label: '1 年后', hint: '跨过四季再相见', ms: () => Date.now() + 365 * 86400000 },
 ];
 
-/** 卡片的显示色（旧卡无 color：我挂的=陶红 / TA 挂的=米白，兼容历史数据） */
-const cardColorOf = (card: TreeCard) => WISH_COLORS[(card.color ?? (card.from === 'me' ? 0 : 7)) % WISH_COLORS.length];
+/** 封存倒计时文本（天/时/分） */
+function fmtCountdown(ms: number): string {
+  if (ms <= 0) return '可以开启了';
+  const m = Math.floor(ms / 60000);
+  const days = Math.floor(m / 1440);
+  const hours = Math.floor((m % 1440) / 60);
+  const mins = m % 60;
+  if (days > 0) return `还有 ${days} 天 ${hours} 小时`;
+  if (hours > 0) return `还有 ${hours} 小时 ${mins} 分`;
+  return `还有 ${mins} 分`;
+}
 
-/** 挂签时的暖金光尘（起点 = 树冠内的百分比坐标；dx/dy = 飘移向量；d = 延迟秒） */
-const WISH_BURST: { x: number; y: number; dx: string; dy: string; d: number }[] = [
-  { x: 30, y: 26, dx: '-34px', dy: '-84px', d: 0 },
-  { x: 42, y: 20, dx: '-12px', dy: '-102px', d: 0.12 },
-  { x: 52, y: 24, dx: '10px', dy: '-96px', d: 0.06 },
-  { x: 63, y: 30, dx: '32px', dy: '-78px', d: 0.18 },
-  { x: 36, y: 34, dx: '-44px', dy: '-58px', d: 0.24 },
-  { x: 57, y: 38, dx: '46px', dy: '-52px', d: 0.1 },
-  { x: 47, y: 30, dx: '-6px', dy: '-118px', d: 0.3 },
-  { x: 68, y: 24, dx: '24px', dy: '-90px', d: 0.22 },
-];
+/** 软木墙底纹（暖木框 + 软木颗粒 + 内阴影） */
+const CORK_STYLE: CSSProperties = {
+  backgroundColor: '#d9bd93',
+  backgroundImage:
+    'radial-gradient(rgba(139,105,66,0.10) 1px, transparent 1.6px), radial-gradient(rgba(255,246,224,0.18) 1px, transparent 1.6px), repeating-linear-gradient(92deg, rgba(139,105,66,0.05) 0 2px, transparent 2px 7px)',
+  backgroundSize: '7px 7px, 11px 11px, auto',
+  boxShadow: 'inset 0 2px 10px rgba(120,86,50,0.30), inset 0 -2px 8px rgba(120,86,50,0.18)',
+};
 
-/** 许愿树本体（简约治愈版：远景淡丘拉纵深 + 锥度枝干末梢上扬，无叶子；stage 越高枝杈越多） */
-function WishTreeSVG({ stage }: { stage: number }) {
+/** 黄铜图钉（钉在便签顶上；带针尖与高光） */
+function NotePin() {
   return (
-    <svg viewBox="0 0 390 560" className="h-full w-full" aria-hidden="true">
-      <defs>
-        <linearGradient id="wtTrunkG" x1="0" y1="1" x2="0" y2="0">
-          <stop offset="0%" stopColor="#675642" />
-          <stop offset="100%" stopColor="#7d6b57" />
-        </linearGradient>
-      </defs>
-
-      {/* 远景淡丘（两枚浅色远坡，拉开纵深） */}
-      <ellipse cx="78" cy="562" rx="150" ry="32" fill="#e4e8d5" />
-      <ellipse cx="315" cy="564" rx="150" ry="34" fill="#dee3cd" />
-      {/* 草地（主丘两层） */}
-      <ellipse cx="195" cy="562" rx="192" ry="27" fill="#d2d9c1" />
-      <ellipse cx="195" cy="555" rx="128" ry="16" fill="#e2e7d3" />
-      {/* 树影（投在草地上的一枚淡影） */}
-      <ellipse cx="195" cy="551" rx="88" ry="9" fill="#b8c3a6" opacity="0.45" />
-
-      {/* ===== 树干 + 树杈（锥度自然、末梢上扬；签就挂在这些枝上；stage≥2/≥3 长出更多细枝） ===== */}
-      <g fill="none" strokeLinecap="round">
-        {/* 主干（自下而上，柔和收细，带暖墨渐层） */}
-        <path d="M195 558 C194 514 197 468 194 428 C192 390 194 354 193 324 C192 300 192 282 190 262" stroke="url(#wtTrunkG)" strokeWidth={15} />
-        {/* 左下枝（末梢上扬） */}
-        <path d="M193 424 C170 414 141 403 113 386 C95 375 78 359 64 342" stroke="#7c6a57" strokeWidth={9} />
-        <path d="M64 342 C60 332 58 324 58 315" stroke="#6d5c4a" strokeWidth={3.5} />
-        <path d="M106 378 C99 364 95 352 93 340" stroke="#6d5c4a" strokeWidth={4} />
-        {/* 右下枝（末梢上扬） */}
-        <path d="M197 428 C224 415 254 402 281 383 C297 371 313 355 326 338" stroke="#7c6a57" strokeWidth={9} />
-        <path d="M326 338 C330 328 332 320 332 311" stroke="#6d5c4a" strokeWidth={3.5} />
-        <path d="M292 375 C298 361 302 349 304 337" stroke="#6d5c4a" strokeWidth={4} />
-        {/* 左上枝（末梢上扬） */}
-        <path d="M191 304 C175 268 151 228 118 194 C104 180 86 164 66 148" stroke="#7c6a57" strokeWidth={8} />
-        <path d="M66 148 C62 138 60 130 60 121" stroke="#6d5c4a" strokeWidth={3} />
-        <path d="M139 236 C131 220 125 208 123 194" stroke="#6d5c4a" strokeWidth={4} />
-        {/* 右上枝（末梢上扬） */}
-        <path d="M193 300 C212 262 237 222 270 190 C284 176 301 162 320 148" stroke="#7c6a57" strokeWidth={8} />
-        <path d="M320 148 C324 138 326 130 326 121" stroke="#6d5c4a" strokeWidth={3} />
-        <path d="M249 240 C257 226 261 214 263 200" stroke="#6d5c4a" strokeWidth={4} />
-        {/* 中央枝（直伸树顶，顶梢上扬） */}
-        <path d="M190 262 C186 220 182 176 178 132 C176 110 174 90 170 74" stroke="#7c6a57" strokeWidth={7.5} />
-        <path d="M179 158 C170 148 162 140 152 132" stroke="#6d5c4a" strokeWidth={3.5} />
-        <path d="M178 114 C188 106 194 98 200 88" stroke="#6d5c4a" strokeWidth={3.5} />
-        <path d="M170 74 C167 64 165 56 165 48" stroke="#6d5c4a" strokeWidth={3} />
-        {/* 成长值长出的额外细枝（stage≥2 / ≥3） */}
-        {stage >= 2 && (
-          <g stroke="#6d5c4a" strokeWidth={3}>
-            <path d="M58 315 C54 305 51 297 49 289" />
-            <path d="M93 340 C88 330 85 322 83 314" />
-            <path d="M123 194 C117 184 113 176 111 168" />
-            <path d="M332 311 C336 301 339 293 341 285" />
-            <path d="M304 337 C310 327 314 319 316 311" />
-            <path d="M165 48 C162 40 160 34 159 28" />
-          </g>
-        )}
-        {stage >= 3 && (
-          <g stroke="#6d5c4a" strokeWidth={2.5}>
-            <path d="M60 121 C56 113 54 107 52 101" />
-            <path d="M111 168 C106 160 103 154 101 148" />
-            <path d="M200 88 C206 80 210 74 214 68" />
-            <path d="M263 200 C269 192 273 186 275 180" />
-            <path d="M152 132 C145 124 140 118 135 113" />
-          </g>
-        )}
-      </g>
-
-      {/* 草叶（树脚几簇小草，点到即止） */}
-      <g stroke="#a3b18c" strokeWidth={2} fill="none" strokeLinecap="round" opacity={0.8}>
-        <path d="M156 552 C155 547 155 542 154 537" />
-        <path d="M236 552 C237 547 237 542 238 537" />
-        <path d="M112 548 C111 544 111 540 110 536" />
-        <path d="M288 547 C289 543 289 539 290 535" />
-      </g>
-
-      {/* 小花（三枚极简小点花，点亮草地） */}
-      {[
-        { x: 138, y: 545, c: '#ffffff' },
-        { x: 254, y: 543, c: '#f6dcae' },
-        { x: 196, y: 551, c: '#ffffff' },
-      ].map((f, i) => (
-        <g key={`flower-${i}`}>
-          <circle cx={f.x} cy={f.y} r="3" fill={f.c} opacity="0.95" />
-          <circle cx={f.x} cy={f.y} r="1.2" fill="#ecc26e" />
-        </g>
-      ))}
-    </svg>
+    <span
+      aria-hidden="true"
+      className="absolute -top-[7px] left-1/2 block h-[13px] w-[13px] -translate-x-1/2 rounded-full shadow-[0_2px_4px_rgba(60,40,20,0.45)]"
+      style={{ background: 'radial-gradient(circle at 35% 30%, #f6dfae, #c9924e 68%, #a87838)' }}
+    >
+      <span className="absolute left-1/2 top-full block h-[5px] w-[1.5px] -translate-x-1/2 bg-[#7a5a34]" />
+    </span>
   );
 }
 
-/** 树上垂挂的许愿签（简约纸签：扁平色 + 细挂绳；不显示谁挂的；点击看正文+留言） */
-function WishStrip({
-  card,
-  x,
-  y,
-  r,
-  onClick,
-}: {
-  card: TreeCard;
-  x: number;
-  y: number;
-  r: number;
-  onClick: () => void;
-}) {
-  const col = cardColorOf(card);
-  const n = card.comments?.length ?? 0;
+/** 墙上的一张便签（颜色自选、黄铜图钉、轻微角度；胶囊锁着时内容封存只显倒计时；点开看正文+留言） */
+function BoardNoteCard({ note, now, flash, onClick }: { note: BoardNote; now: number; flash: boolean; onClick: () => void }) {
+  const col = noteColorOf(note);
+  const isCapsule = !!note.unlockAt;
+  const locked = isCapsule && (note.unlockAt ?? 0) > now;
+  const n = note.comments?.length ?? 0;
+  // 由 id 决定的轻微角度（-4°~4°，稳定不闪；--rot 供落钉动画保持同一角度）
+  const rot = ((note.id.charCodeAt(note.id.length - 1) * 7 + note.id.length * 3) % 9) - 4;
   return (
     <button
       type="button"
       onClick={onClick}
-      aria-label="查看这张许愿签"
-      className="absolute z-10 transition-transform duration-150 active:scale-90"
-      style={{ left: `${x}%`, top: `${y}%`, transform: `translate(-50%, 0) rotate(${r}deg)`, transformOrigin: 'top center' }}
+      aria-label={locked ? '一颗还没开启的时间胶囊' : '查看这张便签'}
+      className={`relative mb-2.5 block w-full break-inside-avoid rounded-[8px] px-3 pb-2.5 pt-[17px] text-left shadow-[0_3px_10px_rgba(96,66,33,0.28)] transition-transform duration-150 active:scale-[0.96] ${flash ? '[animation:board-pin-in_.45s_ease-out]' : ''}`}
+      style={
+        locked
+          ? { background: 'linear-gradient(180deg,#e9dfc6,#e2d5b4)', color: '#8a6d3e', border: '1.5px dashed #bfa878', transform: `rotate(${rot}deg)`, '--rot': `${rot}deg` }
+          : { background: col.bg, color: col.text, transform: `rotate(${rot}deg)`, '--rot': `${rot}deg` }
+      }
     >
-      {/* 挂绳（细绳 + 顶上一颗小木珠） */}
-      <span aria-hidden="true" className="absolute bottom-full left-1/2 block h-[13px] w-[1.5px] -translate-x-1/2 rounded bg-[#9a8a72]" />
-      <span aria-hidden="true" className="absolute bottom-full left-1/2 mb-[9px] block h-[5px] w-[5px] -translate-x-1/2 rounded-full bg-[#8a7355] shadow-[0_1px_2px_rgba(70,58,42,0.3)]" />
-      {/* 签身（绘马小木牌造型：顶部圆角更大；同色微渐层 + 顶缘一线高光，轻轻摇曳） */}
-      <span
-        className="block w-[54px] rounded-t-[9px] rounded-b-[5px] px-[5px] pb-[5px] pt-[6px] text-left shadow-[0_2px_8px_rgba(70,58,42,0.16),inset_0_1px_0_rgba(255,255,255,0.28)] [animation:wish-sway_4.8s_ease-in-out_infinite] [transform-origin:top_center]"
-        style={{ background: col.bg, color: col.text }}
-      >
-        {/* 签头小孔 */}
-        <span aria-hidden="true" className="mx-auto mb-[4px] block h-[2.5px] w-[2.5px] rounded-full bg-black/20" />
-        <span className="line-clamp-3 break-all text-[9px] font-semibold leading-[1.45]">{card.text}</span>
-        {n > 0 && (
-          <span className="mt-[2px] flex items-center justify-center gap-[2px] text-[8px] font-bold leading-none opacity-75">
-            <MessageSquare className="h-[7px] w-[7px]" strokeWidth={2.6} aria-hidden="true" />
-            {n}
+      <NotePin />
+      {locked ? (
+        <>
+          <span className="flex items-center gap-1 text-[10.5px] font-bold tracking-wide opacity-90">
+            <Lock className="h-3.5 w-3.5" strokeWidth={2.4} aria-hidden="true" />
+            时间胶囊 · 封存中
           </span>
-        )}
-      </span>
+          {/* 打码的字句（封存中谁也看不到） */}
+          <span className="mt-1.5 block" aria-hidden="true">
+            <span className="block h-[5px] w-[86%] rounded-full bg-black/15" />
+            <span className="mt-[5px] block h-[5px] w-[64%] rounded-full bg-black/10" />
+            <span className="mt-[5px] block h-[5px] w-[38%] rounded-full bg-black/10" />
+          </span>
+          <p className="mt-2 text-[10.5px] font-bold opacity-80">{fmtCountdown((note.unlockAt ?? 0) - now)}开启</p>
+        </>
+      ) : (
+        <>
+          {isCapsule && (
+            <span className="mb-1 inline-flex items-center gap-1 rounded-full bg-black/10 px-2 py-[2px] text-[9.5px] font-bold tracking-wide">
+              <LockOpen className="h-3 w-3" strokeWidth={2.6} aria-hidden="true" />
+              胶囊已开启
+            </span>
+          )}
+          <p className="line-clamp-6 break-all text-[12.5px] font-semibold leading-[1.55]">{note.text}</p>
+          <p className="mt-1.5 flex items-center gap-2 text-[10px] font-bold opacity-70">
+            <span>{fmtDate(note.at).slice(5)}</span>
+            {n > 0 && (
+              <span className="flex items-center gap-[3px]">
+                <MessageSquare className="h-[10px] w-[10px]" strokeWidth={2.6} aria-hidden="true" />
+                {n}
+              </span>
+            )}
+          </p>
+        </>
+      )}
     </button>
   );
 }
 
-/** 装饰空签（调色盘里的柔色、不可点；绘马小牌造型 + 小木珠；有卡时补几笔让树不显空） */
-function DecorStrip({ x, y, r, tone, delay }: { x: number; y: number; r: number; tone: { bg: string; border: string }; delay: number }) {
-  const h = 56 + ((x * 7 + y * 13) % 26); // 56-82 随机高度
-  return (
-    <div
-      aria-hidden="true"
-      className="pointer-events-none absolute z-[5] opacity-[0.55]"
-      style={{ left: `${x}%`, top: `${y}%`, transform: `translate(-50%, 0) rotate(${r}deg)`, transformOrigin: 'top center' }}
-    >
-      <span aria-hidden="true" className="absolute bottom-full left-1/2 block h-[11px] w-[1.5px] -translate-x-1/2 rounded bg-[#9a8a72]/70" />
-      <span aria-hidden="true" className="absolute bottom-full left-1/2 mb-[8px] block h-[4px] w-[4px] -translate-x-1/2 rounded-full bg-[#8a7355]/80" />
-      <span
-        className="block w-[36px] rounded-t-[7px] rounded-b-[4px] shadow-[0_2px_6px_rgba(70,58,42,0.12),inset_0_1px_0_rgba(255,255,255,0.25)] [animation:wish-sway_5.6s_ease-in-out_infinite] [transform-origin:top_center]"
-        style={{ height: h, background: tone.bg, border: `1px solid ${tone.border}`, animationDelay: `${delay}s` }}
-      >
-        <span className="mx-auto mt-[5px] block h-[2.5px] w-[2.5px] rounded-full bg-black/15" />
-      </span>
-    </div>
-  );
-}
-
-/** 许愿签详情弹层（简约亮色：签正文大卡（自选色） + 卡片下双向留言区 + 输入行） */
-function TreeCardDetail({
-  card,
+/** 便签详情弹层（正文大卡（自选色 + 图钉） + 便签下双向留言区 + 输入行；不显示谁钉的） */
+function NoteDetail({
+  note,
   meName,
   taName,
   onClose,
   onSend,
 }: {
-  card: TreeCard;
+  note: BoardNote;
   meName: string;
   taName: string;
   onClose: () => void;
   onSend: (text: string) => void;
 }) {
   const [input, setInput] = useState('');
-  const mine = card.from === 'me';
-  const owner = mine ? meName || '我' : taName || 'TA';
-  const col = cardColorOf(card);
+  const col = noteColorOf(note);
   const send = () => {
     const t = input.trim();
     if (!t) return;
@@ -2922,32 +2871,35 @@ function TreeCardDetail({
     setInput('');
   };
   return (
-    <div className="absolute inset-0 z-40 flex items-center justify-center px-6" role="dialog" aria-label="许愿签详情">
+    <div className="absolute inset-0 z-40 flex items-center justify-center px-6" role="dialog" aria-label="便签详情">
       <button type="button" aria-label="关闭" onClick={onClose} className="absolute inset-0 bg-[#5c5244]/25 backdrop-blur-[2px]" />
       <div className="relative flex max-h-[80%] w-full max-w-[320px] flex-col overflow-hidden rounded-2xl border border-[#e7e0cd] bg-[#fdfbf4] shadow-[0_16px_44px_rgba(80,66,44,0.22)]">
-        {/* 签正文（自选色大卡） */}
-        <div className="shrink-0 px-4 pb-3 pt-4">
+        {/* 便签正文（自选色大卡 + 图钉） */}
+        <div className="shrink-0 px-4 pb-3 pt-5">
           <div
-            className="rounded-xl px-4 py-5 shadow-[0_4px_14px_rgba(70,58,42,0.15)]"
-            style={{ background: col.bg, border: `1.5px solid ${col.border}`, color: col.text }}
+            className="relative rounded-xl px-4 py-5 pt-6 shadow-[0_4px_14px_rgba(70,58,42,0.15)]"
+            style={{ background: col.bg, color: col.text }}
           >
-            <p className="break-all text-[15px] font-semibold leading-[1.7]">{card.text}</p>
-            <p className="mt-3 text-right text-[11px] font-bold opacity-75">
-              {owner} 挂的 · {fmtDate(card.at)}
-            </p>
+            <NotePin />
+            {note.unlockAt && (
+              <p className="mb-1.5 inline-flex items-center gap-1 rounded-full bg-black/10 px-2 py-[2px] text-[9.5px] font-bold tracking-wide">
+                <LockOpen className="h-3 w-3" strokeWidth={2.6} aria-hidden="true" />
+                胶囊 · {fmtMDHM(note.unlockAt)} 已开启
+              </p>
+            )}
+            <p className="break-all text-[15px] font-semibold leading-[1.7]">{note.text}</p>
+            <p className="mt-3 text-right text-[11px] font-bold opacity-75">{fmtMDHM(note.at)}</p>
           </div>
         </div>
-        {/* 留言区（卡片下的双向留言） */}
+        {/* 留言区（便签下的双向留言） */}
         <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-2">
           <p className="sticky top-0 z-[1] bg-[#fdfbf4] pb-1.5 pt-0.5 text-[11px] font-bold text-[#a39a83]">
-            签下的留言 · {(card.comments ?? []).length}
+            便签下的留言 · {(note.comments ?? []).length}
           </p>
-          {(card.comments ?? []).length === 0 && (
-            <p className="py-5 text-center text-[12.5px] leading-relaxed text-[#b3aa92]">
-              还没有留言——{mine ? 'TA 会看到你挂的这张签，也可能会来下面留言' : '给 TA 挂的这张签回一句话吧'}
-            </p>
+          {(note.comments ?? []).length === 0 && (
+            <p className="py-5 text-center text-[12.5px] leading-relaxed text-[#b3aa92]">还没有留言——给这张便签回一句话吧</p>
           )}
-          {(card.comments ?? []).map((m) => {
+          {(note.comments ?? []).map((m) => {
             const mMine = m.from === 'me';
             const who = mMine ? meName || '我' : taName || 'TA';
             return (
@@ -2961,7 +2913,7 @@ function TreeCardDetail({
                 </span>
                 <div className="min-w-0 flex-1">
                   <p className="text-[10.5px] font-semibold leading-tight text-[#a39a83]">
-                    {who} · {fmtDate(m.at).slice(5)}
+                    {who} · {fmtMDHM(m.at)}
                   </p>
                   <p className="mt-[1px] break-all text-[13.5px] leading-relaxed text-[#4a4436]">{m.text}</p>
                 </div>
@@ -2977,9 +2929,9 @@ function TreeCardDetail({
             onKeyDown={(e) => {
               if (e.key === 'Enter') send();
             }}
-            placeholder="在签下留一句话…"
+            placeholder="在便签下留一句话…"
             className="min-w-0 flex-1 rounded-full bg-[#f3efe1] px-3.5 py-2 text-[13.5px] text-[#4a4436] outline-none placeholder:text-[#b3aa92]"
-            aria-label="签下留言输入"
+            aria-label="便签下留言输入"
           />
           <button
             type="button"
@@ -2996,8 +2948,35 @@ function TreeCardDetail({
   );
 }
 
-/** 爱情小树成长记 · 许愿树页（简约晴天版：浅色天空 + 扁平暖阳 + 极简秃树；挂签自选颜色） */
-function TreePage({
+/** 胶囊封存中弹层（大锁 + 倒计时 + 开启时间；内容谁也看不到） */
+function CapsulePending({ note, now, onClose }: { note: BoardNote; now: number; onClose: () => void }) {
+  return (
+    <div className="absolute inset-0 z-40 flex items-center justify-center px-6" role="dialog" aria-label="时间胶囊">
+      <button type="button" aria-label="关闭" onClick={onClose} className="absolute inset-0 bg-[#5c5244]/30 backdrop-blur-[2px]" />
+      <div className="relative w-full max-w-[320px] rounded-2xl border border-[#e2d6bb] bg-[#fdfaf0] p-5 text-center shadow-[0_16px_44px_rgba(80,66,44,0.25)]">
+        <span className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-[#efe5c9] text-[#a98a5f] shadow-[inset_0_2px_6px_rgba(120,90,50,0.18)]">
+          <Lock className="h-7 w-7" strokeWidth={2.2} aria-hidden="true" />
+        </span>
+        <p className="mt-3 text-[15px] font-bold text-[#5f5646]">这颗时间胶囊还封存着</p>
+        <p className="mt-1.5 text-[23px] font-extrabold tracking-wide text-[#c96a58]">{fmtCountdown((note.unlockAt ?? 0) - now)}</p>
+        <p className="mt-1 text-[12px] font-semibold text-[#a39a83]">{fmtMDHM(note.unlockAt ?? 0)} · 到点自动开启</p>
+        <p className="mt-3 rounded-xl bg-[#f4eeda] px-3 py-2.5 text-[11.5px] leading-relaxed text-[#a39a83]">
+          写下它的那一刻就被封存了——到点之前谁都看不到，急不来也改不了。
+        </p>
+        <button
+          type="button"
+          onClick={onClose}
+          className="mt-3 w-full rounded-full bg-[#e2d5b4] py-2.5 text-[13.5px] font-bold text-[#6b5b39] active:opacity-70"
+        >
+          我知道了
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/** 恋爱留言板页（软木墙 + 手写便签 + 时间胶囊彩蛋；替代许愿树） */
+function BoardPage({
   state,
   patch,
   close,
@@ -3008,112 +2987,75 @@ function TreePage({
   close: () => void;
   showToast: (m: string) => void;
 }) {
-  const tree = state.tree;
-  const stage = Math.min(4, Math.floor(tree / 20));
-  const [pop, setPop] = useState(0);
+  const notes = state.boardNotes ?? [];
+  const capsules = notes.filter((n) => n.unlockAt);
 
-  // ---- 许愿签：卡片与弹层状态 ----
-  const cards = state.treeCards ?? [];
-  const visibleN = Math.min(3 + stage, 8); // 成长值越高树上能挂越多（3→7 张）
+  // 倒计时每 30s 刷新（胶囊到点自动变为已开启）
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const t = window.setInterval(() => setNow(Date.now()), 30000);
+    return () => window.clearInterval(t);
+  }, []);
+
+  // ---- 弹层与草稿状态 ----
   const [composing, setComposing] = useState(false);
   const [draft, setDraft] = useState('');
   const [draftColor, setDraftColor] = useState(0); // 调色盘选中色（默认陶红）
+  const [capsuleOn, setCapsuleOn] = useState(false); // 时间胶囊开关
+  const [unlockChoice, setUnlockChoice] = useState(0); // 0-4 预设 / 5 自定义
+  const [customUnlock, setCustomUnlock] = useState(''); // 'YYYY-MM-DDTHH:mm'
   const [openId, setOpenId] = useState<string | null>(null);
-  const [listOpen, setListOpen] = useState(false);
-  const openCard = cards.find((c) => c.id === openId) ?? null;
-  const previewCol = WISH_COLORS[draftColor % WISH_COLORS.length]; // 签纸实时预览色
+  const [flashId, setFlashId] = useState<string | null>(null); // 刚钉上墙的便签（落钉动画）
+  const openNote = notes.find((n) => n.id === openId) ?? null;
+  const openLocked = !!(openNote?.unlockAt && openNote.unlockAt > now);
+  const previewCol = NOTE_COLORS[draftColor % NOTE_COLORS.length]; // 书写区实时预览色
 
-  /** 挂一张我的许愿签（自选颜色；写进记忆让 TA 知道；TA 会来签下留言回应） */
-  const hangCard = () => {
-    const text = draft.trim().slice(0, 60);
-    if (!text) return;
-    const id = `me-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-    patch((prev) => ({
-      treeCards: [{ id, from: 'me' as const, text, at: Date.now(), comments: [], color: draftColor }, ...(prev.treeCards ?? [])].slice(0, 30),
-    }));
+  // 计划解锁时间（胶囊模式）：预设毫秒或自定义 datetime-local
+  const customMs = customUnlock ? new Date(customUnlock).getTime() : 0;
+  const plannedUnlock = !capsuleOn ? 0 : unlockChoice === 5 ? customMs : CAPSULE_PRESETS[unlockChoice].ms();
+  const unlockOk = !capsuleOn || plannedUnlock > Date.now() + 60000; // 至少 1 分钟后
+
+  const openCompose = (capsule: boolean) => {
+    setCapsuleOn(capsule);
+    setComposing(true);
+  };
+  const closeCompose = () => {
     setComposing(false);
     setDraft('');
-    setPop((p) => p + 1);
-    showToast('许愿签挂上树啦，TA 会看到 ♡');
-    scheduleTreeCardReply(id);
+    setCapsuleOn(false);
+    setUnlockChoice(0);
+    setCustomUnlock('');
   };
 
-  /** 在签下留言（TA 会按人设/记忆/上下文接话回复） */
-  const commentCard = (cardId: string, text: string) => {
+  /** 钉一张便签（普通 or 时间胶囊；胶囊封存不上报内容，普通便签 TA 会来留言回应） */
+  const pinNote = () => {
+    const text = draft.trim().slice(0, 60);
+    if (!text || !unlockOk) return;
+    let unlockAt: number | undefined;
+    if (capsuleOn && plannedUnlock) unlockAt = plannedUnlock;
+    const id = `me-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    patch((prev) => ({
+      boardNotes: [{ id, from: 'me' as const, text, at: Date.now(), comments: [], color: draftColor, ...(unlockAt ? { unlockAt } : {}) }, ...(prev.boardNotes ?? [])].slice(0, 60),
+    }));
+    closeCompose();
+    setFlashId(id);
+    window.setTimeout(() => setFlashId(null), 900);
+    showToast(unlockAt ? '时间胶囊封存好啦，到点自动开启' : '便签钉上墙啦，TA 会看到 ♡');
+    if (!unlockAt) scheduleBoardNoteReply(id);
+  };
+
+  /** 在便签下留言（TA 会按人设/记忆/上下文接话回复；封存中的胶囊不出声） */
+  const commentNote = (noteId: string, text: string) => {
     const c = { id: `me-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, from: 'me' as const, text: text.slice(0, 90), at: Date.now() };
     patch((prev) => ({
-      treeCards: (prev.treeCards ?? []).map((x) => (x.id === cardId ? { ...x, comments: [...x.comments, c] } : x)),
+      boardNotes: (prev.boardNotes ?? []).map((x) => (x.id === noteId ? { ...x, comments: [...(x.comments ?? []), c] } : x)),
     }));
-    scheduleTreeCardReply(cardId);
+    const note = notes.find((n) => n.id === noteId);
+    if (!(note?.unlockAt && note.unlockAt > Date.now())) scheduleBoardNoteReply(noteId);
   };
 
-  /** 装饰签布局（树上还没挂过签时完全空树；有签后用调色盘柔色补几笔） */
-  const decorSlots = useMemo(() => {
-    if (cards.length === 0) return [];
-    const used = new Set(cards.slice(0, visibleN).map((_, i) => WISH_SLOTS[i % WISH_SLOTS.length].x * 100 + WISH_SLOTS[i % WISH_SLOTS.length].y));
-    const free = WISH_SLOTS.filter((s) => !used.has(s.x * 100 + s.y));
-    const want = Math.min(free.length, 6 + stage - Math.min(cards.length, visibleN));
-    return free.slice(0, Math.max(0, want)).map((s, i) => ({ ...s, tone: WISH_COLORS[(i * 3 + 2) % WISH_COLORS.length], delay: (i * 0.7) % 3 }));
-  }, [cards, visibleN, stage]);
-
   return (
-    <div
-      className="relative flex h-full flex-col overflow-hidden"
-      style={{ background: 'linear-gradient(180deg,#cfe0da 0%,#e7ecdb 42%,#f6efdd 78%,#faf0da 100%)' }}
-    >
-      {/* ===== 场景层：简约晴天（暖阳呼吸 + 柔云 + 远鸟 + 飘絮 + 暗角） ===== */}
-      {/* 太阳一侧的广阔柔光（大气感） */}
-      <span aria-hidden="true" className="absolute inset-0 bg-[radial-gradient(ellipse_at_82%_6%,rgba(247,207,113,0.22),rgba(247,207,113,0)_55%)]" />
-      {/* 太阳（扁平圆 + 呼吸柔光环） */}
-      <span
-        aria-hidden="true"
-        className="absolute right-[12%] top-[8%] block h-16 w-16 rounded-full [animation:couple-sun-breathe_6.5s_ease-in-out_infinite_alternate]"
-        style={{ background: '#f5c65f', boxShadow: '0 0 0 12px rgba(245,198,95,0.20), 0 0 0 26px rgba(245,198,95,0.09)' }}
-      />
-      {/* 远处飞鸟（三两笔淡墨，静中有远意） */}
-      <svg aria-hidden="true" viewBox="0 0 96 28" className="absolute left-[7%] top-[21%] w-[76px] opacity-[0.55]">
-        <g stroke="#8a7761" strokeWidth="2" fill="none" strokeLinecap="round">
-          <path d="M4 16 Q10 8 16 14 Q23 7 29 13" />
-          <path d="M46 8 Q51 3 56 8 Q61 3 66 7" />
-          <path d="M74 19 Q78 14 82 18 Q86 13 91 16" />
-        </g>
-      </svg>
-      {/* 云（三朵，远淡近实，缓缓漂移） */}
-      {[
-        { left: '4%', top: '14%', w: 118, h: 26, dur: '26s', o: 0.9 },
-        { left: '55%', top: '9%', w: 86, h: 22, dur: '21s', o: 0.75 },
-        { left: '30%', top: '26%', w: 58, h: 15, dur: '31s', o: 0.55 },
-      ].map((cl, i) => (
-        <span
-          key={`cloud-${i}`}
-          aria-hidden="true"
-          className="absolute block"
-          style={{ left: cl.left, top: cl.top, width: cl.w, height: cl.h }}
-        >
-          <span className="block h-full w-full [animation:couple-cloud-drift_ease-in-out_infinite_alternate]" style={{ animationDuration: cl.dur, opacity: cl.o }}>
-            <span className="absolute bottom-0 left-0 h-[58%] w-full rounded-full bg-white" />
-            <span className="absolute bottom-[34%] left-[20%] h-[80%] w-[42%] rounded-full bg-white" />
-          </span>
-        </span>
-      ))}
-      {/* 飘絮（几粒被阳光点亮的绒絮，慢慢升起） */}
-      {[
-        { left: '14%', top: '42%', dur: '10s', delay: '0s' },
-        { left: '26%', top: '58%', dur: '13s', delay: '2.5s' },
-        { left: '70%', top: '40%', dur: '11s', delay: '1.2s' },
-        { left: '84%', top: '56%', dur: '14s', delay: '4s' },
-        { left: '48%', top: '62%', dur: '12s', delay: '6s' },
-      ].map((sd, i) => (
-        <span
-          key={`seed-${i}`}
-          aria-hidden="true"
-          className="absolute block h-[5px] w-[5px] rounded-full bg-white [animation:couple-seed-drift_ease-in-out_infinite]"
-          style={{ left: sd.left, top: sd.top, animationDuration: sd.dur, animationDelay: sd.delay, boxShadow: '0 0 5px 1px rgba(255,244,214,0.8)' }}
-        />
-      ))}
-      {/* 极淡暗角（让画面聚焦中央的树） */}
-      <span aria-hidden="true" className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_center,transparent_55%,rgba(96,84,60,0.06))]" />
-
+    <div className="relative flex h-full flex-col overflow-hidden" style={{ background: 'linear-gradient(180deg,#efe6d2 0%,#f6efdd 100%)' }}>
       {/* ===== 顶部：返回键 + 小标题 ===== */}
       <div className="relative z-20 shrink-0">
         <button
@@ -3125,95 +3067,104 @@ function TreePage({
           <ArrowLeft className="h-[22px] w-[22px]" strokeWidth={2.4} />
         </button>
         <p className="absolute left-1/2 top-[54px] flex h-10 -translate-x-1/2 items-center pl-[0.35em] text-[13px] font-semibold tracking-[0.35em] text-[#6f6552]/70">
-          许愿树
+          留言板
         </p>
       </div>
 
-      {/* ===== 中部：许愿大树 + 垂挂签 ===== */}
-      <div className="relative z-10 flex-1">
-        <div className="absolute bottom-[104px] left-1/2 -translate-x-1/2">
-          <div className="relative h-[430px] w-[340px]" style={{ transform: `scale(${(0.88 + stage * 0.03).toFixed(3)})`, transformOrigin: 'bottom center' }}>
-            {/* 树本体（挂签时轻轻一颤） */}
-            <span key={pop} className="absolute inset-0 block [animation:couple-pop-heart_.5s_ease-out]">
-              <WishTreeSVG stage={stage} />
-            </span>
-            {/* 挂签时的暖金光尘（从枝头升起飘散） */}
-            {pop > 0 && (
-              <span key={`burst-${pop}`} className="pointer-events-none absolute inset-0" aria-hidden="true">
-                {WISH_BURST.map((p, i) => (
-                  <span
-                    key={i}
-                    className="absolute h-[4px] w-[4px] rounded-full bg-[#f2cf8a] blur-[0.5px] [animation:wish-burst_1.3s_ease-out_forwards]"
-                    style={{ left: `${p.x}%`, top: `${p.y}%`, animationDelay: `${p.d}s`, boxShadow: '0 0 6px 1px rgba(242,207,138,0.45)', '--dx': p.dx, '--dy': p.dy } as CSSProperties}
-                  />
-                ))}
-              </span>
+      {/* ===== 软木板（暖木框 + 软木颗粒墙 + 便签瀑布流） ===== */}
+      <div className="relative z-10 min-h-0 flex-1 px-3">
+        <div
+          className="flex h-full flex-col rounded-[18px] p-[7px] shadow-[0_10px_30px_rgba(96,66,33,0.30)]"
+          style={{ background: 'linear-gradient(135deg,#c59a66,#a87c50 38%,#b58a58 68%,#96703f)' }}
+        >
+          <div className="relative flex min-h-0 flex-1 flex-col overflow-y-auto rounded-[12px]" style={CORK_STYLE}>
+            {/* 板头统计 */}
+            <p className="shrink-0 px-4 pb-1 pt-3 text-center text-[11px] font-bold tracking-[0.18em] text-[#8a6d3e]/80">
+              已钉下 {notes.length} 张便签{capsules.length > 0 ? ` · ${capsules.length} 颗时间胶囊` : ''}
+            </p>
+            {/* 便签瀑布流（两列；新钉的便签带落钉动画） */}
+            <div className="columns-2 gap-2.5 px-2.5 pb-4 pt-1.5">
+              {notes.map((n) => (
+                <BoardNoteCard key={n.id} note={n} now={now} flash={flashId === n.id} onClick={() => setOpenId(n.id)} />
+              ))}
+            </div>
+            {/* 空墙提示 */}
+            {notes.length === 0 && (
+              <div className="flex flex-1 flex-col items-center justify-center gap-2.5 px-10 pb-10 text-center">
+                <span className="flex h-12 w-12 items-center justify-center rounded-full bg-[#e6d9b8] text-[#b09a6d] shadow-[inset_0_2px_5px_rgba(120,90,50,0.15)]">
+                  <Pin className="h-6 w-6" strokeWidth={2} aria-hidden="true" />
+                </span>
+                <p className="text-[13.5px] font-bold text-[#8a6d3e]">墙上还空着</p>
+                <p className="text-[11.5px] leading-relaxed text-[#a98d5f]">钉下第一张手写便签，或者塞一颗慢一点的时间胶囊</p>
+              </div>
             )}
-            {/* 挂签（最新 visibleN 张，颜色自选；点开看正文+留言） */}
-            {cards.slice(0, visibleN).map((c, i) => {
-              const slot = WISH_SLOTS[i % WISH_SLOTS.length];
-              return <WishStrip key={c.id} card={c} x={slot.x} y={slot.y} r={slot.r} onClick={() => setOpenId(c.id)} />;
-            })}
-            {/* 装饰空签（调色盘柔色补位） */}
-            {decorSlots.map((s, i) => (
-              <DecorStrip key={`d-${i}`} x={s.x} y={s.y} r={s.r} tone={s.tone} delay={s.delay} />
-            ))}
           </div>
         </div>
       </div>
 
-      {/* ===== 底部操作栏：全部签（白玻璃圆钮） + 挂许愿签（陶红主按钮；空树时呼吸柔光） ===== */}
+      {/* ===== 底部操作栏：时间胶囊（圆钮） + 钉便签（主按钮；空墙时呼吸柔光） ===== */}
       <div className="relative z-20 flex shrink-0 items-center justify-center gap-4 px-6 pb-[34px] pt-2">
-        {/* 全部签 */}
+        {/* 塞一颗时间胶囊（圆钮：沙漏） */}
         <button
           type="button"
-          onClick={() => setListOpen(true)}
-          aria-label="查看全部许愿签"
-          className="flex h-[52px] w-[52px] shrink-0 items-center justify-center rounded-full border border-[#ddd6c3] bg-white/75 text-[#8b8069] backdrop-blur-md transition-transform active:scale-95"
+          onClick={() => openCompose(true)}
+          aria-label="塞一颗时间胶囊"
+          className="flex h-[52px] w-[52px] shrink-0 items-center justify-center rounded-full border border-[#ddd6c3] bg-white/75 text-[#a3752f] backdrop-blur-md transition-transform active:scale-95"
         >
-          <MessageSquare className="h-[22px] w-[22px]" strokeWidth={2.1} aria-hidden="true" />
+          <Hourglass className="h-[22px] w-[22px]" strokeWidth={2.1} aria-hidden="true" />
         </button>
-        {/* 挂许愿签（主按钮：扁平陶红；空树时呼吸脉动） */}
+        {/* 钉一张便签（主按钮：扁平陶红；空墙时呼吸脉动） */}
         <button
           type="button"
-          onClick={() => setComposing(true)}
-          aria-label="挂一张许愿签"
-          className={`flex h-[54px] shrink-0 items-center gap-1.5 rounded-full bg-[#dd7f6c] px-8 text-[15.5px] font-bold tracking-wide text-white shadow-[0_8px_22px_rgba(221,127,108,0.35)] transition-transform active:scale-95 ${cards.length === 0 ? '[animation:wish-invite-pulse_2.8s_ease-in-out_infinite]' : ''}`}
+          onClick={() => openCompose(false)}
+          aria-label="钉一张便签"
+          className={`flex h-[54px] shrink-0 items-center gap-1.5 rounded-full bg-[#dd7f6c] px-8 text-[15.5px] font-bold tracking-wide text-white shadow-[0_8px_22px_rgba(221,127,108,0.35)] transition-transform active:scale-95 ${notes.length === 0 ? '[animation:wish-invite-pulse_2.8s_ease-in-out_infinite]' : ''}`}
         >
-          <Plus className="h-5 w-5" strokeWidth={2.8} aria-hidden="true" />
-          挂许愿签
+          <Pin className="h-5 w-5" strokeWidth={2.6} aria-hidden="true" />
+          钉一张便签
         </button>
       </div>
 
-      {/* ===== 挂签弹层（简约面板 + 自选颜色签纸 + 调色盘） ===== */}
+      {/* ===== 钉便签/塞胶囊弹层（书写 + 调色盘 + 胶囊开关 + 解锁时间） ===== */}
       {composing && (
-        <div className="absolute inset-0 z-40 flex items-center justify-center px-6" role="dialog" aria-label="挂一张许愿签">
-          <button type="button" aria-label="取消" onClick={() => setComposing(false)} className="absolute inset-0 bg-[#5c5244]/25 backdrop-blur-[2px]" />
-          <div className="relative w-full max-w-[320px] rounded-2xl border border-[#e7e0cd] bg-[#fdfbf4] p-4 shadow-[0_16px_44px_rgba(80,66,44,0.25)]">
-            <p className="text-[15px] font-bold text-[#5f5646]">挂一张许愿签</p>
+        <div className="absolute inset-0 z-40 flex items-center justify-center px-6" role="dialog" aria-label={capsuleOn ? '塞一颗时间胶囊' : '钉一张便签'}>
+          <button type="button" aria-label="取消" onClick={closeCompose} className="absolute inset-0 bg-[#5c5244]/25 backdrop-blur-[2px]" />
+          <div className="relative max-h-[86%] w-full max-w-[320px] overflow-y-auto rounded-2xl border border-[#e7e0cd] bg-[#fdfbf4] p-4 shadow-[0_16px_44px_rgba(80,66,44,0.25)]">
+            <p className="text-[15px] font-bold text-[#5f5646]">{capsuleOn ? '塞一颗时间胶囊' : '钉一张便签'}</p>
             <p className="mt-0.5 text-[12px] leading-relaxed text-[#a39a83]">
-              选一个喜欢的颜色，把心愿写上，挂上你们的许愿树——TA 会看到这张签。
+              {capsuleOn ? '写下的那一刻就被封存——到点之前，连你自己也看不到。' : '随手写一句想说的，钉在你们的留言墙上——TA 会看到。'}
             </p>
-            {/* 签纸书写区（颜色随调色盘实时变化） */}
+            {/* 书写区（颜色随调色盘实时变化；胶囊模式为牛皮纸色） */}
             <div
-              className="mt-3 rounded-xl px-4 py-4 shadow-[0_4px_14px_rgba(70,58,42,0.15)]"
-              style={{ background: previewCol.bg, border: `1.5px solid ${previewCol.border}`, color: previewCol.text }}
+              className="relative mt-3 rounded-xl px-4 py-4 pt-5 shadow-[0_4px_14px_rgba(70,58,42,0.15)]"
+              style={
+                capsuleOn
+                  ? { background: 'linear-gradient(180deg,#e9dfc6,#e2d5b4)', color: '#6b5b39', border: '1.5px dashed #bfa878' }
+                  : { background: previewCol.bg, color: previewCol.text }
+              }
             >
+              <NotePin />
+              {capsuleOn && (
+                <span className="mb-1.5 inline-flex items-center gap-1 text-[10.5px] font-bold tracking-wide opacity-80">
+                  <Lock className="h-3.5 w-3.5" strokeWidth={2.4} aria-hidden="true" />
+                  封存后锁着倒计时贴在墙上
+                </span>
+              )}
               <textarea
                 value={draft}
                 onChange={(e) => setDraft(e.target.value.slice(0, 60))}
                 rows={3}
-                placeholder="如：希望明年的今天，我们还一起站在这棵树下。"
+                placeholder={capsuleOn ? '写给未来的你们的一句话…' : '如：今天的晚霞很好看，想你。'}
                 className="w-full resize-none bg-transparent text-[15px] font-semibold leading-[1.7] outline-none placeholder:font-normal placeholder:opacity-60"
-                aria-label="许愿签内容"
+                aria-label="便签内容"
               />
               <p className="mt-1 text-right text-[11px] font-bold opacity-70">{draft.length}/60</p>
             </div>
-            {/* 调色盘（8 色自选） */}
+            {/* 调色盘（8 色自选；胶囊模式下为开启后的颜色） */}
             <div className="mt-3">
-              <p className="text-[11.5px] font-bold text-[#a39a83]">选颜色</p>
+              <p className="text-[11.5px] font-bold text-[#a39a83]">{capsuleOn ? '开启后的便签颜色' : '选颜色'}</p>
               <div className="mt-1.5 flex items-center gap-2">
-                {WISH_COLORS.map((c, i) => (
+                {NOTE_COLORS.map((c, i) => (
                   <button
                     key={c.name}
                     type="button"
@@ -3230,87 +3181,109 @@ function TreePage({
                 ))}
               </div>
             </div>
+            {/* 时间胶囊开关 */}
+            <button
+              type="button"
+              onClick={() => setCapsuleOn((v) => !v)}
+              aria-pressed={capsuleOn}
+              aria-label="设为时间胶囊"
+              className="mt-3 flex w-full items-center gap-2.5 rounded-xl border border-[#ece6d4] bg-white/60 px-3.5 py-2.5 text-left active:opacity-70"
+            >
+              <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${capsuleOn ? 'bg-[#e2d5b4] text-[#8a6d3e]' : 'bg-[#f0ebdd] text-[#b3aa92]'}`}>
+                <Hourglass className="h-4 w-4" strokeWidth={2.2} aria-hidden="true" />
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block text-[13px] font-bold text-[#5f5646]">设为时间胶囊</span>
+                <span className="mt-[1px] block text-[10.5px] leading-tight text-[#a39a83]">到点自动开启，期间谁都看不到</span>
+              </span>
+              <span className={`relative h-6 w-10 shrink-0 rounded-full transition-colors ${capsuleOn ? 'bg-[#c96a58]' : 'bg-[#d8d2c0]'}`}>
+                <span className={`absolute top-[3px] h-[18px] w-[18px] rounded-full bg-white shadow transition-all ${capsuleOn ? 'left-[21px]' : 'left-[3px]'}`} />
+              </span>
+            </button>
+            {/* 解锁时间选择（胶囊模式） */}
+            {capsuleOn && (
+              <div className="mt-2.5">
+                <p className="text-[11.5px] font-bold text-[#a39a83]">什么时候开启</p>
+                <div className="mt-1.5 grid grid-cols-3 gap-2">
+                  {CAPSULE_PRESETS.map((p, i) => (
+                    <button
+                      key={p.label}
+                      type="button"
+                      onClick={() => setUnlockChoice(i)}
+                      aria-pressed={unlockChoice === i}
+                      className={`rounded-xl border px-2 py-2 text-center transition-transform active:scale-95 ${
+                        unlockChoice === i ? 'border-[#c96a58] bg-[#fbf3ef] text-[#c96a58]' : 'border-[#ece6d4] bg-white/60 text-[#6f6552]'
+                      }`}
+                    >
+                      <span className="block text-[12.5px] font-bold">{p.label}</span>
+                      <span className="mt-[1px] block text-[9.5px] leading-tight opacity-75">{p.hint}</span>
+                    </button>
+                  ))}
+                  <button
+                    type="button"
+                    onClick={() => setUnlockChoice(5)}
+                    aria-pressed={unlockChoice === 5}
+                    className={`rounded-xl border px-2 py-2 text-center transition-transform active:scale-95 ${
+                      unlockChoice === 5 ? 'border-[#c96a58] bg-[#fbf3ef] text-[#c96a58]' : 'border-[#ece6d4] bg-white/60 text-[#6f6552]'
+                    }`}
+                  >
+                    <span className="block text-[12.5px] font-bold">自定义</span>
+                    <span className="mt-[1px] block text-[9.5px] leading-tight opacity-75">有意义的日子</span>
+                  </button>
+                </div>
+                {unlockChoice === 5 && (
+                  <input
+                    type="datetime-local"
+                    value={customUnlock}
+                    min={new Date(Date.now() + 3600000).toISOString().slice(0, 16)}
+                    onChange={(e) => setCustomUnlock(e.target.value)}
+                    className="mt-2 w-full rounded-xl border border-[#ece6d4] bg-white/70 px-3 py-2 text-[13px] text-[#4a4436] outline-none"
+                    aria-label="自定义开启时间"
+                  />
+                )}
+                {capsuleOn && !unlockOk && <p className="mt-1.5 text-[11px] font-semibold text-[#c96a58]">开启时间至少要在 1 分钟之后</p>}
+                {capsuleOn && unlockOk && plannedUnlock > 0 && (
+                  <p className="mt-1.5 text-[11px] font-semibold text-[#8a6d3e]">
+                    将于 {fmtMDHM(plannedUnlock)} 开启 · {fmtCountdown(plannedUnlock - Date.now())}
+                  </p>
+                )}
+              </div>
+            )}
+            {/* 操作按钮 */}
             <div className="mt-3 flex items-center justify-end gap-2">
               <button
                 type="button"
-                onClick={() => setComposing(false)}
+                onClick={closeCompose}
                 className="rounded-full px-4 py-2 text-[13.5px] font-bold text-[#a39a83] active:opacity-60"
               >
-                先不挂了
+                先不钉了
               </button>
               <button
                 type="button"
-                onClick={hangCard}
-                disabled={!draft.trim()}
+                onClick={pinNote}
+                disabled={!draft.trim() || !unlockOk}
                 className="rounded-full bg-[#dd7f6c] px-5 py-2 text-[13.5px] font-bold text-white shadow-[0_4px_12px_rgba(221,127,108,0.35)] transition-transform active:scale-95 disabled:opacity-40"
               >
-                挂上许愿树 ♡
+                {capsuleOn ? '封存起来 ♡' : '钉上留言墙 ♡'}
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* ===== 签详情弹层（正文 + 签下留言） ===== */}
-      {openCard && (
-        <TreeCardDetail
-          card={openCard}
-          meName={state.meName}
-          taName={state.taName}
-          onClose={() => setOpenId(null)}
-          onSend={(t) => commentCard(openCard.id, t)}
-        />
-      )}
-
-      {/* ===== 全部签列表弹层（简约底部抽屉） ===== */}
-      {listOpen && (
-        <div className="absolute inset-0 z-40" role="dialog" aria-label="全部许愿签">
-          <button type="button" aria-label="关闭" onClick={() => setListOpen(false)} className="absolute inset-0 bg-[#5c5244]/25 backdrop-blur-[2px]" />
-          <div className="absolute inset-x-0 bottom-0 max-h-[68%] overflow-y-auto rounded-t-2xl border-t border-[#e7e0cd] bg-[#fdfbf4] px-4 pb-[26px] pt-3 shadow-[0_-8px_30px_rgba(80,66,44,0.25)]">
-            <div className="mb-2 flex items-center justify-between">
-              <p className="text-[15px] font-bold text-[#5f5646]">全部许愿签 · {cards.length} 张</p>
-              <button
-                type="button"
-                onClick={() => setListOpen(false)}
-                aria-label="收起列表"
-                className="flex h-8 w-8 items-center justify-center rounded-full bg-[#f0ebdd] text-[#8b8069] active:opacity-60"
-              >
-                <ChevronDown className="h-5 w-5" strokeWidth={2.2} />
-              </button>
-            </div>
-            {cards.length === 0 && <p className="py-8 text-center text-[12.5px] text-[#b3aa92]">树上还没有许愿签</p>}
-            <div className="flex flex-col gap-2 pb-2">
-              {cards.map((c) => {
-                const who = c.from === 'me' ? state.meName || '我' : state.taName || 'TA';
-                const col = cardColorOf(c);
-                return (
-                  <button
-                    key={c.id}
-                    type="button"
-                    onClick={() => {
-                      setListOpen(false);
-                      setOpenId(c.id);
-                    }}
-                    className="flex w-full items-center gap-3 rounded-xl border border-[#ece6d4] bg-white/60 px-3.5 py-2.5 text-left transition-transform active:scale-[0.98]"
-                    aria-label={`查看${who}挂的许愿签`}
-                  >
-                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#f3efe1]" aria-hidden="true">
-                      <span className="block h-[22px] w-[9px] rounded-[3px]" style={{ background: col.bg }} />
-                    </span>
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate text-[13.5px] font-semibold text-[#4a4436]">{c.text}</span>
-                      <span className="mt-[1px] block text-[10.5px] font-semibold opacity-80 text-[#a39a83]">
-                        {who} 挂的 · {fmtDate(c.at)} · {(c.comments ?? []).length} 条留言
-                      </span>
-                    </span>
-                    <ChevronRight className="h-4 w-4 shrink-0 text-[#b3aa92]" strokeWidth={2.2} aria-hidden="true" />
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        </div>
-      )}
+      {/* ===== 详情/胶囊弹层 ===== */}
+      {openNote &&
+        (openLocked ? (
+          <CapsulePending note={openNote} now={now} onClose={() => setOpenId(null)} />
+        ) : (
+          <NoteDetail
+            note={openNote}
+            meName={state.meName}
+            taName={state.taName}
+            onClose={() => setOpenId(null)}
+            onSend={(t) => commentNote(openNote.id, t)}
+          />
+        ))}
     </div>
   );
 }

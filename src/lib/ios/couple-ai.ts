@@ -157,6 +157,10 @@ interface CoupleSnap {
   treeCards?: { id: string; from: 'me' | 'ta'; text: string; at: number; color?: number; comments: { id: string; from: 'me' | 'ta'; text: string; at: number }[] }[];
   /** AI 挂卡去重（每天最多一张）：最近一次挂卡的日期 key */
   treeCardDay?: string;
+  /** 恋爱留言板（软木墙手写便签；unlockAt=时间胶囊解锁时间，封存中内容对双方都不可见）；最新在前 */
+  boardNotes?: { id: string; from: 'me' | 'ta'; text: string; at: number; color?: number; unlockAt?: number; comments: { id: string; from: 'me' | 'ta'; text: string; at: number }[] }[];
+  /** AI 钉便签去重（每天最多一张）：最近一次钉便签的日期 key */
+  boardNoteDay?: string;
   /** 恋爱水平考试（第十五轮）：TA 知道卷子、成绩和彼此的作答 */
   examPaper?: { title: string; questions: { q: string; opts: string[] }[]; source?: string } | null;
   examTaPaper?: { title: string; questions: { q: string; opts: string[] }[]; at: number; answered?: boolean } | null;
@@ -176,7 +180,7 @@ function sceneOfKey(key: string, snap: CoupleSnap | null): string {
   if (key.startsWith('mood:')) return '心情日记留言区';
   if (key.startsWith('quiz:')) return '甜蜜小问答的讨论区';
   if (key.startsWith('letter:')) return '情书留言区';
-  if (key.startsWith('treecard:')) return '许愿树卡片的留言区';
+  if (key.startsWith('boardnote:')) return '留言板便签的留言区';
   if (key === 'trail') return '情侣轨迹的聊天区';
   if (key === 'impress') return '情侣印象留言区';
   if (key.startsWith('reply:')) {
@@ -302,24 +306,21 @@ export function coupleChatBlock(contactId: string, channel: CoupleChannel, userN
     lines.push(`- 每天想你：${me}累计想${ta} ${snap.missYou ?? 0} 次（今天 ${myToday} 次），${ta}累计想${me} ${snap.taMissYou ?? 0} 次（今天 ${taToday} 次）。`);
   }
 
-  // 爱情小树
-  if ((snap.tree ?? 0) > 0) {
-    const myN = snap.treeStreak?.n ?? 0;
-    const taN = snap.taTreeStreak?.n ?? 0;
-    lines.push(`- 恋爱小树：成长值 ${snap.tree}/100，${me}连续浇水 ${myN} 天，${ta}连续浇水 ${taN} 天。`);
-  }
-
-  // 许愿树留言卡（第六十轮：树上挂的卡片 + 卡片下的留言，双方互相都知道）
-  const treeCards = snap.treeCards ?? [];
-  if (treeCards.length > 0) {
-    const meN = treeCards.filter((c) => c.from === 'me').length;
-    const taN = treeCards.filter((c) => c.from === 'ta').length;
-    lines.push(`- 许愿树：你们的小树长成了许愿树，树上挂着 ${treeCards.length} 张留言卡（${me}挂的 ${meN} 张、${ta}挂的 ${taN} 张），卡片下面还能互相留言。`);
-    for (const c of treeCards.slice(0, 3)) {
-      const who = c.from === 'ta' ? ta : me;
-      const lastC = (c.comments ?? [])[(c.comments ?? []).length - 1];
+  // 恋爱留言板（软木墙上的便签 + 时间胶囊；胶囊解锁前内容对双方都封存）
+  const boardNotes = snap.boardNotes ?? [];
+  if (boardNotes.length > 0) {
+    const meN = boardNotes.filter((n) => n.from === 'me').length;
+    const taN = boardNotes.filter((n) => n.from === 'ta').length;
+    const caps = boardNotes.filter((n) => n.unlockAt);
+    const capsLocked = caps.filter((n) => (n.unlockAt ?? 0) > Date.now()).length;
+    lines.push(
+      `- 恋爱留言板：你们的软木墙上钉着 ${boardNotes.length} 张便签（${me}钉的 ${meN} 张、${ta}钉的 ${taN} 张），其中 ${caps.length} 颗是时间胶囊${capsLocked > 0 ? `（${capsLocked} 颗还没到开启时间，里面的字句封存中——连${ta}自己也看不到）` : ''}。便签下面可以互相留言。`,
+    );
+    for (const n of boardNotes.filter((x) => !x.unlockAt || x.unlockAt <= Date.now()).slice(0, 3)) {
+      const who = n.from === 'ta' ? ta : me;
+      const lastC = (n.comments ?? [])[(n.comments ?? []).length - 1];
       lines.push(
-        `- 许愿树卡片：${who}挂的卡片正面写着「${cut(c.text, 40)}」${lastC ? `，卡片下面${lastC.from === 'ta' ? ta : me}留言说「${cut(lastC.text, 30)}」` : ''}。`,
+        `- 留言板便签：${who}钉的便签写着「${cut(n.text, 40)}」${lastC ? `，下面${lastC.from === 'ta' ? ta : me}留言说「${cut(lastC.text, 30)}」` : ''}。`,
       );
     }
   }
@@ -1203,22 +1204,25 @@ export function coupleMemoryDiff(prev: CoupleSnap, next: CoupleSnap, contactId: 
     const n = next.missYouByDay?.[today] ?? 1;
     lines.push(`${me}在恋人空间想${ta}了（今天第 ${n} 次，累计 ${next.missYou} 次）`);
   }
-  // 浇水
-  if ((next.tree ?? 0) > (prev.tree ?? 0) && (next.treeStreak?.last ?? '') === (next.treeStreak?.last ?? '')) {
-    if ((next.tree ?? 0) - (prev.tree ?? 0) > 0) lines.push(`${me}给两个人的恋爱小树浇水了（成长值到 ${next.tree}）`);
-  }
-  // 许愿树留言卡（第六十轮：我新挂的卡 + 我给卡片留的言——TA 都要知道）
+  // 恋爱留言板（我新钉的便签/封存的胶囊 + 我在便签下留的言——TA 都要知道；胶囊内容封存，不写进记忆）
   {
-    const prevCards = prev.treeCards ?? [];
-    const nextCards = next.treeCards ?? [];
-    const myNewCard = nextCards.find((c) => c.from === 'me' && !prevCards.some((p) => p.id === c.id));
-    if (myNewCard) lines.push(`${me}在许愿树上挂了一张留言卡片：「${cut(myNewCard.text, 44)}」`);
-    const prevCmtIds = new Set(prevCards.flatMap((p) => (p.comments ?? []).map((m) => m.id)));
-    for (const c of nextCards) {
-      const mine = (c.comments ?? []).find((m) => m.from === 'me' && !prevCmtIds.has(m.id));
+    const prevNotes = prev.boardNotes ?? [];
+    const nextNotes = next.boardNotes ?? [];
+    const myNew = nextNotes.find((n) => n.from === 'me' && !prevNotes.some((p) => p.id === n.id));
+    if (myNew) {
+      if (myNew.unlockAt) {
+        const days = Math.max(1, Math.ceil((myNew.unlockAt - Date.now()) / 86400000));
+        lines.push(`${me}在留言板上封存了一颗时间胶囊（约 ${days} 天后开启，内容暂时谁也看不到）`);
+      } else {
+        lines.push(`${me}在留言板上钉了一张便签：「${cut(myNew.text, 44)}」`);
+      }
+    }
+    const prevCmtIds = new Set(prevNotes.flatMap((p) => (p.comments ?? []).map((m) => m.id)));
+    for (const n of nextNotes) {
+      const mine = (n.comments ?? []).find((m) => m.from === 'me' && !prevCmtIds.has(m.id));
       if (mine) {
-        const owner = c.from === 'ta' ? ta : me;
-        lines.push(`${me}在许愿树上${owner === me ? `自己挂的那张卡片（「${cut(c.text, 24)}」）` : `${ta}挂的卡片（「${cut(c.text, 24)}」）`}下面留言：${cut(mine.text, 44)}`);
+        const owner = n.from === 'ta' ? ta : me;
+        lines.push(`${me}在留言板上${owner === me ? `自己钉的那张便签（「${cut(n.text, 24)}」）` : `${ta}钉的便签（「${cut(n.text, 24)}」）`}下面留言：${cut(mine.text, 44)}`);
         break; // 一次 diff 只记一条（连续多条留言时下轮 diff 会补）
       }
     }
@@ -1433,51 +1437,33 @@ function aiTickMissYou(snap: CoupleSnap, me: string, ta: string): void {
   logAi(`${ta}今天也想${me}了 ♡`);
 }
 
-/** AI 浇树（每天一次） */
-function aiTickWater(snap: CoupleSnap, me: string, ta: string): void {
-  const today = todayKey();
-  if ((snap.tree ?? 0) >= 100) return; // 树已满级
-  if (snap.taTreeStreak?.last === today) return;
-  const y = todayKey(new Date(Date.now() - 86400000));
-  const prev = snap.taTreeStreak ?? { last: null, n: 0 };
-  const n = prev.last === today ? prev.n : prev.last === y ? prev.n + 1 : 1;
-  writeSnap((s) => ({
-    ...s,
-    tree: Math.min(100, ((s.tree as number) ?? 0) + 2),
-    taTreeStreak: { last: today, n },
-  }));
-  const pid = currentPartnerId;
-  if (pid) coupleRemember(pid, currentChannel, `${ta}给两个人的恋爱小树浇水了（成长值到 ${Math.min(100, (snap.tree ?? 0) + 2)}，连续 ${n} 天）`);
-  logAi(`${ta}给恋爱小树浇了水 🌱`);
-}
-
-// ---------------- 第六十轮：许愿树留言卡（爱情小树改许愿树） ----------------
+// ---------------- 恋爱留言板（软木墙手写便签；替代许愿树） ----------------
 
 /**
- * AI 在许愿树上挂一张留言卡（每天最多一张；自主决策链 'treecard' 行为）。
- * 素材 = 人设 + 记忆碎片召回 + 最近微信/QQ 聊天 + 树上已有的卡（防写重）；
- * 卡片内容 = TA 真心想对对方说的一句手写话（8~36 字）。
+ * AI 在恋爱留言板上钉一张手写便签（每天最多一张；自主决策链 'boardnote' 行为）。
+ * 素材 = 人设 + 记忆碎片召回 + 最近微信/QQ 聊天 + 墙上已有的便签（防写重）；
+ * 便签内容 = TA 真心想对对方说的一句手写话（8~36 字）。
  */
-async function aiTickTreeCard(snap: CoupleSnap, me: string, ta: string, p: TaPersona): Promise<void> {
+async function aiTickBoardNote(snap: CoupleSnap, me: string, ta: string, p: TaPersona): Promise<void> {
   const today = todayKey();
-  if ((snap.treeCardDay ?? '') === today) return;
+  if ((snap.boardNoteDay ?? '') === today) return;
   const pid = currentPartnerId;
   const ch = currentChannel;
   if (!pid) return;
-  const existing = (snap.treeCards ?? []).slice(0, 6).map((c) => `「${cut(c.text, 30)}」`).join('、');
+  const existing = (snap.boardNotes ?? []).slice(0, 6).map((n) => `「${cut(n.text, 30)}」`).join('、');
   let memBlock = '';
   try {
-    memBlock = memChatRecallBlock(pid, ch, `${ta}想在许愿树上挂一张写给${me}的留言卡 最近你们聊过什么、有什么想对${me}说的`, { mode: 'private' });
+    memBlock = memChatRecallBlock(pid, ch, `${ta}想在恋爱留言板上钉一张写给${me}的便签 最近你们聊过什么、有什么想对${me}说的`, { mode: 'private' });
   } catch {
     /* 召回失败不影响 */
   }
   const chatCtx = recentChatBlock(pid, ch, me, ta);
   const sys = [
     llmSystem(p, me, snap),
-    `场景：你们的爱情小树长成了许愿树，树上可以挂一张张手写留言卡，${ta}现在想亲手挂一张上去——正面写一句真心想对${me}说的话。`,
+    `场景：你们有一面恋爱留言板（软木墙），两人可以随手把手写便签钉上去，${ta}现在想亲手钉一张上去——上面写一句真心想对${me}说的话（日常的关心、想念、小事吐槽或此刻的心情都行）。`,
     memBlock ? `【你们的记忆碎片】\n${cut(memBlock, 500)}` : '',
     chatCtx ? `【你们最近在微信/QQ里聊过的话题】\n${cut(chatCtx, 300)}` : '',
-    existing ? `树上已经挂过这些卡片（内容不许重复、不许相近）：${existing}` : '',
+    existing ? `墙上已经钉过这些便签（内容不许重复、不许相近）：${existing}` : '',
   ]
     .filter(Boolean)
     .join('\n');
@@ -1485,57 +1471,59 @@ async function aiTickTreeCard(snap: CoupleSnap, me: string, ta: string, p: TaPer
   try {
     const raw = await llmUserFirst(
       sys,
-      `输出 JSON：{"text":"卡片上写的这句话"}。要求：8~36 字，${ta}的口吻手写感（可以是一个小小心愿、一句想说的情话、对${me}的承诺或此刻的想念），贴人设/记忆/最近聊过的事，具体不空洞；禁止使用任何 emoji/表情符号。只输出 JSON。`,
+      `输出 JSON：{"text":"便签上写的这句话"}。要求：8~36 字，${ta}的口吻手写感（可以是日常关心、一句想念、对${me}的小承诺或此刻想说的话），贴人设/记忆/最近聊过的事，具体不空洞；禁止使用任何 emoji/表情符号。只输出 JSON。`,
     );
     const j = extractJson<{ text?: string }>(raw);
     text = stripEmoji(cut(j?.text ?? '', 40));
   } catch {
-    /* 生成失败本次不挂 */
+    /* 生成失败本次不钉 */
   }
   if (!text || text.length < 4) return;
-  const card = {
+  const note = {
     id: `ta-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
     from: 'ta' as const,
     text,
     at: Date.now(),
-    color: Math.floor(Math.random() * 8), // TA 也从调色盘里挑一张心仪颜色的签
+    color: Math.floor(Math.random() * 8), // TA 也从调色盘里挑一张心仪颜色的便签纸
     comments: [] as { id: string; from: 'me' | 'ta'; text: string; at: number }[],
   };
   writeSnap((s) => ({
     ...s,
-    treeCards: [card, ...((s.treeCards as CoupleSnap['treeCards']) ?? [])].slice(0, 30),
-    treeCardDay: today,
+    boardNotes: [note, ...((s.boardNotes as CoupleSnap['boardNotes']) ?? [])].slice(0, 60),
+    boardNoteDay: today,
   }));
-  coupleRemember(pid, ch, `${ta}在许愿树上亲手挂了一张留言卡片：「${cut(text, 44)}」`);
-  logAi(`${ta}在许愿树上挂了一张新卡片`);
-  void notifyCouple(ch, pid, `我在许愿树上挂了一张卡片，写了句想给你的话，去看看嘛`);
+  coupleRemember(pid, ch, `${ta}在恋爱留言板上亲手钉了一张便签：「${cut(text, 44)}」`);
+  logAi(`${ta}在留言板上钉了一张新便签`);
+  void notifyCouple(ch, pid, `我在留言板上钉了张便签，写了句想给你的话，去看看嘛`);
 }
 
-/** 许愿树卡片留言的 AI 回复定时器（按卡片去重合并） */
-const treeCardTimers = new Map<string, number>();
+/** 留言板便签留言的 AI 回复定时器（按便签去重合并） */
+const boardNoteTimers = new Map<string, number>();
 
 /**
- * 我挂了卡片 / 在卡片下留言后：调度 TA（AI）在卡片下回一句（人设+记忆+聊天上下文）。
- * - 我挂的新卡（还没人留言）→ TA 来当第一个回应的人；
- * - 我在任意卡片下留了言（最新一条是我）→ TA 回复我；
- * - 最新一条已经是 TA 说的 / TA 自己的卡还没人说话 → 不出声。
- * 同一张卡片连发会重置计时（合并到最后一条再回，30~120s）。
+ * 我钉了便签 / 在便签下留言后：调度 TA（AI）在便签下回一句（人设+记忆+聊天上下文）。
+ * - 我钉的新便签（还没人留言）→ TA 来当第一个回应的人；
+ * - 我在任意便签下留了言（最新一条是我）→ TA 回复我；
+ * - 最新一条已经是 TA 说的 / TA 自己的便签还没人说话 → 不出声；
+ * - 封存中的时间胶囊谁都看不到，TA 也不出声。
+ * 同一张便签连发会重置计时（合并到最后一条再回，30~120s）。
  */
-export function scheduleTreeCardReply(cardId: string, delayMin = 30000, delayMax = 120000): void {
+export function scheduleBoardNoteReply(noteId: string, delayMin = 30000, delayMax = 120000): void {
   const target = aiTarget();
-  if (!target || !cardId) return;
-  const old = treeCardTimers.get(cardId);
+  if (!target || !noteId) return;
+  const old = boardNoteTimers.get(noteId);
   if (old) window.clearTimeout(old);
   const t = window.setTimeout(() => {
-    treeCardTimers.delete(cardId);
+    boardNoteTimers.delete(noteId);
     void (async () => {
       try {
         const snap = readSnap();
         if (!snap) return;
-        const card = (snap.treeCards ?? []).find((c) => c.id === cardId);
-        if (!card) return;
-        const last = (card.comments ?? [])[(card.comments ?? []).length - 1];
-        if (card.from === 'ta' && !last) return; // TA 自己的卡还没人说话，不用回
+        const note = (snap.boardNotes ?? []).find((n) => n.id === noteId);
+        if (!note) return;
+        if (note.unlockAt && note.unlockAt > Date.now()) return; // 胶囊封存中，谁都看不到
+        const last = (note.comments ?? [])[(note.comments ?? []).length - 1];
+        if (note.from === 'ta' && !last) return; // TA 自己的便签还没人说话，不用回
         if (last && last.from === 'ta') return; // 最新一条已经是 TA 说的
         const me = (snap.meName || '').trim() || '我';
         const ta = (snap.taName || '').trim() || 'TA';
@@ -1543,11 +1531,11 @@ export function scheduleTreeCardReply(cardId: string, delayMin = 30000, delayMax
         if (!p) return;
         currentPartnerId = target.contactId;
         currentChannel = target.channel;
-        const owner = card.from === 'ta' ? ta : me;
-        const convo = (card.comments ?? []).slice(-6).map((m) => `${m.from === 'ta' ? ta : me}：${cut(m.text, 60)}`).join('\n');
+        const owner = note.from === 'ta' ? ta : me;
+        const convo = (note.comments ?? []).slice(-6).map((m) => `${m.from === 'ta' ? ta : me}：${cut(m.text, 60)}`).join('\n');
         let memBlock = '';
         try {
-          memBlock = memChatRecallBlock(target.contactId, target.channel, `${me}在许愿树的卡片（「${cut(card.text, 30)}」）下面留言 ${ta}想回一句`, { mode: 'private' });
+          memBlock = memChatRecallBlock(target.contactId, target.channel, `${me}在恋爱留言板的便签（「${cut(note.text, 30)}」）下面留言 ${ta}想回一句`, { mode: 'private' });
         } catch {
           /* 召回失败不影响 */
         }
@@ -1555,11 +1543,11 @@ export function scheduleTreeCardReply(cardId: string, delayMin = 30000, delayMax
         let text = '';
         try {
           text = await llmUserFirst(
-            `${llmSystem(p, me, snap)}\n场景：你们恋人空间的爱情小树长成了许愿树，树上挂着一张张手写留言卡，卡片下面可以互相留言。这张卡片是${owner === me ? `${me}挂的，正面写着「${cut(card.text, 80)}」` : `${ta}自己挂的，正面写着「${cut(card.text, 80)}」（${ta}当然记得自己写了什么）`}，留言就写在这张卡片下面。${memBlock ? `\n【相关记忆】\n${cut(memBlock, 300)}` : ''}${chatCtx ? `\n【你们最近在微信/QQ里聊过的话题】\n${cut(chatCtx, 360)}` : ''}`,
-            `${convo ? `卡片下最近的留言：\n${convo}\n` : '卡片下还没有人留言，你是第一个回应这张卡的人。\n'}\n请以「${ta}」的口吻在卡片下面留一条言（30 字内，口语）：${
-              card.from === 'me'
-                ? `认真接住${me}写在卡片上的那句话——它对你们意味着什么、你此刻真实的感受或想回应的心里话`
-                : `回应${me}刚刚在你卡片下的留言`
+            `${llmSystem(p, me, snap)}\n场景：你们有一面恋爱留言板（软木墙），上面钉着一张张手写便签，便签下面可以互相留言。这张便签是${owner === me ? `${me}钉的，上面写着「${cut(note.text, 80)}」` : `${ta}自己钉的，上面写着「${cut(note.text, 80)}」（${ta}当然记得自己写了什么）`}，留言就写在这张便签下面。${memBlock ? `\n【相关记忆】\n${cut(memBlock, 300)}` : ''}${chatCtx ? `\n【你们最近在微信/QQ里聊过的话题】\n${cut(chatCtx, 360)}` : ''}`,
+            `${convo ? `便签下最近的留言：\n${convo}\n` : '便签下还没有人留言，你是第一个回应这张便签的人。\n'}\n请以「${ta}」的口吻在便签下面留一条言（30 字内，口语）：${
+              note.from === 'me'
+                ? `认真接住${me}写在便签上的那句话——它对你们意味着什么、你此刻真实的感受或想回应的心里话`
+                : `回应${me}刚刚在你便签下的留言`
             }；贴着你的人设、你们的真实记忆和最近聊过的话题说具体的话；绝对禁止敷衍应付（「好啦好啦」「随便」「都行」这类话一个字都不许出现）。禁止使用任何 emoji/表情符号。只输出留言内容。`,
           );
         } catch {
@@ -1571,17 +1559,17 @@ export function scheduleTreeCardReply(cardId: string, delayMin = 30000, delayMax
         const c = { id: `ai-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, from: 'ta' as const, text, at: Date.now() };
         writeSnap((s) => ({
           ...s,
-          treeCards: ((s.treeCards as CoupleSnap['treeCards']) ?? []).map((x) => (x.id === cardId ? { ...x, comments: [...(x.comments ?? []), c] } : x)),
+          boardNotes: ((s.boardNotes as CoupleSnap['boardNotes']) ?? []).map((x) => (x.id === noteId ? { ...x, comments: [...(x.comments ?? []), c] } : x)),
         }));
-        coupleRemember(target.contactId, target.channel, `${ta}在许愿树的卡片（「${cut(card.text, 30)}」）下面回复${me}：${cut(text, 40)}`);
-        logAi(`${ta}在许愿树的卡片下留了言`);
-        void notifyCouple(target.channel, target.contactId, `许愿树有张卡片，我在下面给你回了句话，去看看`);
+        coupleRemember(target.contactId, target.channel, `${ta}在留言板的便签（「${cut(note.text, 30)}」）下面回复${me}：${cut(text, 40)}`);
+        logAi(`${ta}在留言板的便签下留了言`);
+        void notifyCouple(target.channel, target.contactId, `留言板有张便签，我在下面给你回了句话，去看看`);
       } catch {
         /* AI 回复失败静默 */
       }
     })();
   }, delayMin + Math.random() * (delayMax - delayMin));
-  treeCardTimers.set(cardId, t);
+  boardNoteTimers.set(noteId, t);
 }
 
 // 第二十四轮：AI 心情日记的模板兜底已删除（生成失败就不写）
@@ -2551,11 +2539,11 @@ const AUTONOMY_BEHAVIORS: AutonomyBehavior[] = [
     run: (s, me, ta, p) => aiTickLetter(s, me, ta, p),
   },
   {
-    // 第六十轮：许愿树——TA 亲手在树上挂一张写给对方的留言卡
-    key: 'treecard',
-    label: '在许愿树上挂一张亲手写的留言卡（今天挂过了就先不挂）',
-    guard: (s) => (s.treeCardDay ?? '') !== todayKey() && (s.treeCards ?? []).length < 30,
-    run: (s, me, ta, p) => aiTickTreeCard(s, me, ta, p),
+    // 恋爱留言板——TA 亲手在软木墙上钉一张写给对方的便签
+    key: 'boardnote',
+    label: '在留言板上钉一张手写的便签（今天钉过了就先不钉）',
+    guard: (s) => (s.boardNoteDay ?? '') !== todayKey() && (s.boardNotes ?? []).length < 60,
+    run: (s, me, ta, p) => aiTickBoardNote(s, me, ta, p),
   },
   {
     key: 'album',
@@ -2691,10 +2679,9 @@ function autonomyLoop(contactId: string, me: string, ta: string, delayMs: number
   }, delayMs);
 }
 
-/** 想你/浇树定时器句柄（同会话只挂一份，防 60s 常驻 kick 反复补挂） */
+/** 想你定时器句柄（同会话只挂一份，防 60s 常驻 kick 反复补挂；原「浇树」随许愿树下线） */
 let missTimer: number | undefined;
-let waterTimer: number | undefined;
-/** 想你/浇树今天已挂过定时器（本会话内）：防常驻 kick 重复补挂（跨天/刷新自动重置） */
+/** 想你今天已挂过定时器（本会话内）：防常驻 kick 重复补挂（跨天/刷新自动重置） */
 let dailyCasualArmedFor = '';
 
 /**
@@ -2718,22 +2705,17 @@ export function runCoupleAiTick(channel: CoupleChannel, contactId: string): void
   const me = (snap.meName || '').trim() || '机主';
   const ta = (snap.taName || '').trim() || 'TA';
 
-  // 无 LLM 依赖的日常小事：随机延时分钟级（想你 4~28 分钟 / 浇树 8~40 分钟）——
-  // 与用户是否点过「每天想你」/「浇水」、是否刚打开 App 完全无关（用户明确要求
+  // 无 LLM 依赖的日常小事：随机延时分钟级（想你 4~28 分钟）——
+  // 与用户是否点过「每天想你」、是否刚打开 App 完全无关（用户明确要求
   // 「让 AI 自己决定什么时候做，不是一打开就立马做」）；本会话只挂一份定时器，
   // 行为内部当日去重双保险（60s 常驻 kick 不会堆叠出一串定时器）。
   if (dailyCasualArmedFor !== schedKey) {
     dailyCasualArmedFor = schedKey;
     if (missTimer) window.clearTimeout(missTimer);
-    if (waterTimer) window.clearTimeout(waterTimer);
     missTimer = window.setTimeout(() => {
       missTimer = undefined;
       aiTickMissYou(readSnap() ?? snap, me, ta);
     }, (4 + Math.random() * 24) * 60000);
-    waterTimer = window.setTimeout(() => {
-      waterTimer = undefined;
-      aiTickWater(readSnap() ?? snap, me, ta);
-    }, (8 + Math.random() * 32) * 60000);
   }
 
   // 自主决策链：每日首次起链（首次唤醒 3~12 分钟）；额度用完（或用过的日子）不起
