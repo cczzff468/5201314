@@ -349,8 +349,13 @@ export interface ForumData {
    *  角色刷到帖子觉得值得长期看/聊天里被请求后按人设自主决定关注，
    *  主页「关注者」数字与列表页真实展示（可查谁关注了我） */
   charFollowers?: AuthorKey[];
-  /** 【时间流增长】机主大号的合成关注者增量：帖子热度带来的自然涨粉
-   *  （随增长引擎缓慢累积；展示 = charFollowers.length + 本值，见 followersOf） */
+  /** 【时间流涨粉·可见关注者】涨粉数字（userFollowerBoost）中「长出真实身份」的动态网友
+   *  （dyn: 列表）：帖子热度涨来的粉里约半数会获得账号身份，进入本名单——
+   *  个人主页「关注者」列表页真实展示（可回关），其余保持纯数字（路人粉语义） */
+  dynFollowers?: AuthorKey[];
+  /** 【时间流增长】机主大号的合成关注者增量（总量）：帖子热度带来的自然涨粉
+   *  （随增长引擎累积；展示 = charFollowers.length + 本值，见 followersOf；
+   *  其中可见身份的那部分在 dynFollowers，列表页展示用） */
   userFollowerBoost?: number;
   /** 【楼主回复】AI 楼主已「看过并决策过」的帖子评论（key = 帖子 id → 评论 id 列表）：
  *  回过的/无视过的都算已处理——同一批评论不重复触发决策（防 LLM 反复空转）；
@@ -1841,6 +1846,12 @@ export function myFollowingCount(d: ForumData): number {
 /** 【AI 关注者】当前关注了机主大号的 AI 角色名单（去重保序快照） */
 export function charFollowersOf(): AuthorKey[] {
   return [...new Set(forumData().charFollowers ?? [])];
+}
+
+/** 【时间流涨粉】帖子热度带来的可见关注者名单（dyn: 动态网友；去重保序快照）。
+ *  与 charFollowers 合并在「关注者」列表页展示；计数已含在 userFollowerBoost 总量里 */
+export function dynFollowersOf(): AuthorKey[] {
+  return [...new Set(forumData().dynFollowers ?? [])];
 }
 
 /** 【AI 关注者】某 AI 角色是否已关注机主大号 */

@@ -1980,3 +1980,20 @@ Stage Summary:
 - 六模块全部落地：动态增长（时间流+长尾+热度潜质+涨粉）、NPC 主动私信（人设+帖子触发）、独立记忆库（20条总结永久沉淀+分仓隔离+说破关联）、1~10 条连发（multi 管线）、流式 UI（打字中+逐条揭示）
 - 新文件：growth.ts、dm-memory.ts；核心改动：engine.ts（两 kind+dmReply 重构）、route.ts（multi/proactive/dmLongMem/dmSummary）、dms.tsx（流式 UI）、core.ts（growth/userFollowerBoost）
 - 数据不变式：NPC 记忆库独立于论坛数据（重置不丢）；char 永不写 NPC 库；匿名/大号物理分仓；说破仅 per-NPC 单向关联
+
+## 2026-11-03 · X论坛 v48「涨粉可见化 + 全局防轰炸静默」
+
+Task: 用户追加规格：①发帖后关注者也要增长（v47 只涨纯数字且概率过低不可感知）；②六小时冷却防轰炸——事件删除（v47 只有单 NPC 粒度，跨 NPC 轮番来仍会轰炸）。
+
+Work Log:
+- [growth.ts] 涨粉提速：每滚概率 0.12→0.30×f×pot（平均帖 24h 约涨 1~3 个、爆款 5+，发帖后肉眼可见）；涨粉「长出身份」：本轮 followBoost 中 45% 逐个创建真实动态网友（createDynNpc）→ 去重后进 dynFollowers（封顶 60）+「XX 关注了你」follow 通知（单轮封顶 3 条防刷屏）；未选中部分保持纯数字（X「关注者 23/列表只展示部分」路人粉语义）；createDynNpc 直改活对象，落盘由紧随的 mutateForum 携带
+- [core.ts] ForumData 新增 dynFollowers 字段 + dynFollowersOf() 去重快照；followersOf('user') 公式不变（charFollowers+boost 总量——dynFollowers 是其可见子集，不重复计数）
+- [engine.ts] 全局防轰炸静默（kv `forum-dm-proactive-global-v1`，6h）：三层守卫——①maybeQueueProactiveDm 入口拦截（静默期触发事件直接删除：不排队、不顺延，与单 NPC 冷却、38% 概率门叠加）；②npcProactiveDm 执行侧拦截（已挂 timer 的兜底，guard 位于 callApi 之前→零 LLM 成本零落地）；③落地成功后 markProactiveGlobal + purgeQueuedProactiveDms（loadPending 清空全部排队中的主动私信任务——「删除」而非顺延）；静默仅成功落地占用（LLM 失败不占用，配额恢复后自然生效）
+- [follow-list.tsx] 「关注者」名单 = charFollowers（AI 角色）+ dynFollowers（涨粉网友）去重合并；涨粉网友行真实展示可回关
+- [E2E·Agent Browser] ①涨粉全链路：发帖（初始 views 0）→IDB 注入 pot=5 + lastr=46min 前→重载→心跳滚一轮→boost 0→1 / dynFollowers 生成 / views+115 likeBoost+38 / follow 通知落库；UI 三面验证：主页统计「0 正在关注 · 1 关注者」→「关注者」列表显示 dyn 网友行（「那咋了」+回关按钮）→页脚「1 人关注了你」→通知页「那咋了 关注了你」✓；②冷却入队拦截：静默期（2min 前时间戳）发帖→pending 9 任务零 npcProactiveDm（netLike/replyToUserPost 照常排队）✓；③对照实验：清冷却（7h 前）发帖→npcProactiveDm 恢复排队（npc:sunny，meta 带帖子正文，due 223s）✓；④执行侧拦截：任务 due 改 8s+恢复静默→重载→任务消失、无 sunny 私信落地、无系统通知、时间戳未被占用✓；全程控制台零错误零水合警告
+- [验证缺口] 平台 LLM 配额仍 429（SDK 重试 42s 后 500）——主动私信内容落地/连发文案/总结质量为接线验证，配额恢复自然生效（三层守卫与 LLM 无关，已全量 E2E）
+
+Stage Summary:
+- 关注者增长三面齐备：数字（计数涨）+ 身份（列表可见可回关）+ 感知（关注通知）
+- 防轰炸静默 6h 三层守卫：入队拦截（事件删除）/ 执行拦截（timer 兜底零成本）/ 落地清场（删除已排队任务）
+- 数据不变式：dynFollowers ⊆ userFollowerBoost（列表行数 ≤ 计数）；匿名小号不产生关注者资产（沿 v47 设计）；静默仅成功占用

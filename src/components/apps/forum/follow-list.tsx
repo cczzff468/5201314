@@ -6,7 +6,8 @@
  * 个人主页统计行「N 正在关注 / N 关注者」点击进入：
  * - 正在关注（仅自己的主页）：我关注的人（联系人/网友/大V），每行可「取消关注」；
  * - 关注者（自己的主页）：关注了我的 AI 角色名单（charFollowers——角色刷到帖子
- *   或被请求后按人设自主决定关注）；每行可回关/取消回关；
+ *   或被请求后按人设自主决定关注）+ 帖子热度涨来的可见网友（dynFollowers，v48）；
+ *   每行可回关/取消回关；
  * - 他人主页的关注者：谁关注 TA（我若关注了 TA，列表里就有我）；
  *   内置大V 的粉丝基数是平台数据，列表仅展示与我有交互的账号（空态说明）。
  * - 顶栏两 tab 互切（X 官方样式：进「关注者」也能一键切看「正在关注」）。
@@ -15,6 +16,7 @@
 import { useState, useSyncExternalStore } from 'react';
 import {
   charFollowersOf,
+  dynFollowersOf,
   followersOf,
   forumData,
   forumSnapshot,
@@ -41,12 +43,13 @@ export function FollowListView({ authorKey, tab }: { authorKey: AuthorKey; tab: 
 
   /** 「正在关注」名单：仅自己的主页有真实数据（他人不展示其关注列表） */
   const followingKeys = isMe && cur === 'following' ? [...new Set(d.following)] : isMe ? [] : [];
-  /** 「关注者」名单：自己 = charFollowers（AI 角色按人设自主关注）；
+  /** 「关注者」名单：自己 = charFollowers（AI 角色按人设自主关注）+
+   *   dynFollowers（帖子热度涨来的可见网友，v48）；
    *  联系人 = 若我关注了 TA 列表里就有我；内置大V = 平台粉丝基数（列表只放真实可交互账号） */
   const followerKeys: AuthorKey[] =
     cur === 'followers'
       ? authorKey === 'user'
-        ? charFollowersOf()
+        ? [...new Set([...charFollowersOf(), ...dynFollowersOf()])]
         : authorKey.startsWith('char:')
           ? d.following.includes(authorKey)
             ? ['user']

@@ -2919,9 +2919,52 @@ function markProactiveDmCooldown(peerKey: string): void {
   }
 }
 
+/** 全局防轰炸静默（v48 用户规格追加）：任何一次主动私信成功落地后，整个私信池
+ *  静默 6h——新触发事件直接删除（不排队、不顺延），已排队未执行的任务一并删除。
+ *  与单 NPC 6h 冷却叠加：单 NPC 不重复来 + 全池不被轮番轰炸。 */
+const PROACTIVE_GLOBAL_KEY = 'forum-dm-proactive-global-v1';
+const PROACTIVE_SILENCE_MS = 6 * 3600_000;
+
+/** 全池是否处于静默期（6h 内有过一次成功落地） */
+function proactiveGlobalCooling(): boolean {
+  try {
+    return Date.now() - (kvGet<number>(PROACTIVE_GLOBAL_KEY) ?? 0) < PROACTIVE_SILENCE_MS;
+  } catch {
+    return false;
+  }
+}
+
+/** 一次落地成功 → 全池静默 6h（仅成功占用；LLM 失败不占用） */
+function markProactiveGlobal(): void {
+  try {
+    kvSet(PROACTIVE_GLOBAL_KEY, Date.now());
+  } catch {
+    /* 静默 */
+  }
+}
+
+/** 删除全部排队中的主动私信任务（静默期开启时清场——删除而非顺延；
+ *  已挂 timer 的任务由执行侧 proactiveGlobalCooling 守卫兜底拦截） */
+function purgeQueuedProactiveDms(): void {
+  try {
+    const p = loadPending();
+    let removed = false;
+    for (const [id, j] of Object.entries(p)) {
+      if (j && j.kind === 'npcProactiveDm' && p[id]) {
+        delete p[id];
+        removed = true;
+      }
+    }
+    if (removed) savePending(p);
+  } catch {
+    /* 静默 */
+  }
+}
+
 /**
  * 用户发帖后：部分社交型 NPC/网友/角色会根据【帖子内容 + 自身人设】主动私信。
- * - 触发率约四成；每次 1~2 位；同对端 6h 冷却；
+ * - 触发率约四成；每次 1~2 位；同对端 6h 冷却 + 全池 6h 静默（任一落地后，
+ *   其他 NPC 的事件一律删除——防轮番轰炸，v48）；
  * - 生成必须结合 NPC 人设 + 发帖正文（服务端 proactive 上下文）；
  * - 匿名帖：NPC 把发帖人当陌生网友（stranger）；AI 角色不对匿名帖发起
  *  （认知隔离——角色不认识这个匿名陌生人）；
@@ -2930,6 +2973,7 @@ function markProactiveDmCooldown(peerKey: string): void {
 function maybeQueueProactiveDm(post: ForumPost): void {
   try {
     if (!isUserAuthor(post.authorKey)) return;
+    if (proactiveGlobalCooling()) return; // 全池静默中：本事件直接删除（不排队不顺延）
     if (Math.random() > 0.38) return; // 约四成帖子会有人来私
     const account: 'main' | 'anon' = post.authorKey === ANON_KEY ? 'anon' : 'main';
     const candidates: AuthorKey[] = [];
@@ -3809,6 +3853,8 @@ async function execJob(job: PendingJob): Promise<void> {
       const d = forumData();
       const post = d.posts.find((p) => p.id === job.meta.postId);
       if (!post) return; // 帖子已被删除：不追着私信
+      // 全局防轰炸：静默期内本任务直接删除（排队时已滤，这里是已挂 timer 的兜底）
+      if (proactiveGlobalCooling()) return;
       const dm = d.dms.find((x) => x.peerKey === peerKey);
       // 同一会话 10 分钟内已有TA的新消息 → 别连环轰炸
       if (dm) {
@@ -3877,6 +3923,9 @@ async function execJob(job: PendingJob): Promise<void> {
         ];
       });
       markProactiveDmCooldown(peerKey);
+      // 全池进入 6h 静默（v48 防轰炸）：后来的触发事件删除，已排队未执行的也删除
+      markProactiveGlobal();
+      purgeQueuedProactiveDms();
       // 计入独立记忆库（同 dmReply 口径）
       if (isNpcDmPeer(peerKey)) {
         const due = afterDmMessage(peerKey, account, items.length);

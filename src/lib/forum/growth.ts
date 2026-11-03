@@ -13,7 +13,9 @@
  * - 【长尾效应】增速随帖龄衰减：<0.5h×1.0 → <2h×0.7 → <6h×0.45 → <12h×0.25
  *   → <24h×0.12 → <48h×0.05 → <72h×0.02 → ≥72h 停止；
  * - 【增长面】views（+3~30/滚）、likeBoost（+1~8/滚）、reposts（偶发）、
- *   大号 userFollowerBoost（帖子热度带来的自然涨粉）、评论区偶发一条新网友回复
+ *   大号 userFollowerBoost（帖子热度带来的自然涨粉，v48 提速至每滚约 0.3×f×pot；
+ *   涨的粉里约半数「长出身份」成为 dyn 动态网友进 dynFollowers——「关注者」列表
+ *   可见可回关 + 「关注了你」通知，其余保持纯数字）；评论区偶发一条新网友回复
  *   （走既有 replyToUserPost 管线，LLM 真写内容）；
  * - 【范围】仅用户帖（大号+匿名小号都是「用户发的」）；AI 帖生成时已带满额
  *   数据，不参与时间流。未到时间的定时帖不参与（还没「发出来」）。
@@ -30,6 +32,7 @@ import {
   likesOf,
   mutateForum,
   uid,
+  type AuthorKey,
   type ForumPost,
 } from './core';
 import { addPending, runPending } from './engine';
@@ -148,8 +151,9 @@ function applyGrowth(rolls: number[], now: number): void {
         // 转推：偶发
         const rpInc = Math.floor(Math.random() * 2.2 * f * pot * hm);
         if (rpInc >= 1) p.reposts += rpInc;
-        // 自然涨粉（仅大号帖；匿名小号不产生关注者资产）
-        if (p.authorKey !== ANON_KEY && Math.random() < 0.12 * f * pot) followBoost++;
+        // 自然涨粉（仅大号帖；匿名小号不产生关注者资产）。
+        // v48 提速：0.12 → 0.30——平均帖 24h 约涨 1~3 个、爆款帖 5+，发帖后肉眼可见
+        if (p.authorKey !== ANON_KEY && Math.random() < 0.3 * f * pot) followBoost++;
       }
       // 评论区增长候选登记（<48h 且未达上限；是否触发在 mutateForum 外统一抽签）
       if (
@@ -161,6 +165,37 @@ function applyGrowth(rolls: number[], now: number): void {
     }
     if (followBoost > 0) next.userFollowerBoost = (next.userFollowerBoost ?? 0) + followBoost;
   });
+
+  // 【涨粉长出身份】（v48）：本次涨的粉里约 45% 获得真实动态网友身份 → 进 dynFollowers
+  // （个人主页「关注者」列表页可见、可回关）+「XX 关注了你」通知；其余保持纯数字
+  // （路人粉——X 的「关注者 23 / 列表只展示部分」语义）。
+  // createDynNpc 直改活对象（dynNpcs/usedNames），落盘由紧随的 mutateForum 携带。
+  if (followBoost > 0) {
+    const seen = new Set(forumData().dynFollowers ?? []);
+    const fresh: AuthorKey[] = [];
+    for (let i = 0; i < followBoost; i++) {
+      if (Math.random() < 0.45) fresh.push(createDynNpc());
+    }
+    // 去重（池满时 createDynNpc 会返回已有网友）
+    const uniq = [...new Set(fresh)].filter((k) => !seen.has(k));
+    if (uniq.length) {
+      mutateForum((next) => {
+        next.dynFollowers = [...(next.dynFollowers ?? []), ...uniq].slice(-60);
+        // 「关注了你」通知（单轮封顶 3 条——涨粉高峰也不刷通知页）
+        next.notifications = [
+          ...uniq.slice(0, 3).map((k) => ({
+            id: uid('n'),
+            type: 'follow' as const,
+            fromKey: k,
+            postId: null,
+            createdAt: Date.now(),
+            read: false,
+          })),
+          ...next.notifications,
+        ];
+      });
+    }
+  }
 
   // 评论区偶发补一条新网友回复（长尾里的「过几天还有人翻到」）：
   // 本轮整体以 COMMENT_CHANCE 概率触发一次；createDynNpc 会落盘，放 mutateForum 外
