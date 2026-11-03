@@ -175,7 +175,7 @@ export interface TreeCard {
   color?: number; // 调色盘索引（0-7）；缺省时按挂签人兼容（我=红 / TA=奶油白）
 }
 
-/** 恋爱留言板便签（留言墙上钉的手写便签；card = BOARD_CARDS 图案卡纸 1-5，缺省 = 素白色卡；color = 素白卡时的调色盘索引；unlockAt 非空 = 时间胶囊） */
+/** 恋爱留言板便签（留言墙上钉的手写便签；card = BOARD_CARDS 图案卡纸 1-8，缺省 = 素白色卡；color = 素白卡时的调色盘索引；unlockAt 非空 = 时间胶囊） */
 export interface BoardNote {
   id: string;
   from: 'me' | 'ta';
@@ -274,7 +274,7 @@ export interface CoupleState {
   treeCardDay?: string; // TA（AI）挂卡去重（每天最多一张）
   boardNotes: BoardNote[]; // 恋爱留言板便签（最新在前，最多 60 张；unlockAt 非空 = 时间胶囊）
   boardNoteDay?: string; // TA（AI）钉便签去重（每天最多一张）
-  boardBg?: number; // 留言板背景：0/缺省=默认米色板，1-5=用户上传的背景图（第六十轮）
+  boardBg?: number; // 留言板背景：0-5=用户上传的 6 张背景图（缺省 0）
   taMissYou: number; // TA（AI）想你累计（第九轮：AI 每天想你）
   taMissYouByDay: Record<string, number>; // TA 每日想你
   taTreeStreak: { last: string | null; n: number }; // TA 连续浇树
@@ -2779,14 +2779,9 @@ function fmtCountdown(ms: number): string {
   return `还有 ${mins} 分`;
 }
 
-/** 留言墙底板（简约：纯暖米色平板，无纹理无特效） */
-const WALL_STYLE: CSSProperties = {
-  backgroundColor: '#f1e7d0',
-};
-
-/** 留言墙背景图清单（用户上传的 5 张 + 默认米色；veil = 按各图亮度定制的暖白纱罩浓度，保证便签/文字可读） */
+/** 留言墙背景图清单（用户上传的 6 张图全部铺满；veil = 按各图中部亮度定制的暖白纱罩浓度，保证便签/文字可读） */
 const BOARD_BGS: { label: string; veil: number }[] = [
-  { label: '米色', veil: 0 }, // 0：默认纯米色板（无图）
+  { label: '雾青', veil: 0.22 }, // bg-0：用户上传的第一张图（中部亮 182、左下亮右上传暗）
   { label: '素灰', veil: 0.2 }, // bg-1：亮灰调（亮度 197）
   { label: '黛灰', veil: 0.26 }, // bg-2：中灰调（亮度 172）
   { label: '雾蓝', veil: 0.34 }, // bg-3：淡蓝调（亮度 153）
@@ -2794,10 +2789,9 @@ const BOARD_BGS: { label: string; veil: number }[] = [
   { label: '暖褐', veil: 0.38 }, // bg-5：暖棕调（亮度 142）
 ];
 
-/** 留言墙实际样式（0=纯米色板；1-5=背景图 cover + 暖白纱罩统一可读性） */
+/** 留言墙实际样式（背景图 cover 铺满整个界面 + 暖白纱罩统一可读性） */
 function wallStyleOf(bg: number | undefined): CSSProperties {
   const i = Math.max(0, Math.min(BOARD_BGS.length - 1, bg ?? 0));
-  if (i === 0) return WALL_STYLE;
   const veil = BOARD_BGS[i].veil;
   return {
     backgroundImage: `linear-gradient(rgba(250,247,240,${veil}),rgba(250,247,240,${veil})),url(/board-bg/bg-${i}.jpg)`,
@@ -2806,13 +2800,16 @@ function wallStyleOf(bg: number | undefined): CSSProperties {
   };
 }
 
-/** 便签图案卡纸清单（用户上传的 5 张卡面，白边已裁净；文字色按各卡中心亮度统一深灰） */
-const BOARD_CARDS: { label: string; text: string }[] = [
-  { label: '样式一', text: '#3a3a3a' },
-  { label: '样式二', text: '#3a3a3a' },
-  { label: '样式三', text: '#3a3a3a' },
-  { label: '样式四', text: '#3a3a3a' },
-  { label: '样式五', text: '#3a3a3a' },
+/** 便签图案卡纸清单（用户上传的 8 张卡面，白边已裁净；ar=卡面原始宽高比（多大就是多大），span=横幅卡跨栏铺满，padTop=顶部插画避让区占卡面高度的比例） */
+const BOARD_CARDS: { label: string; text: string; ar: number; span?: boolean; padTop?: number }[] = [
+  { label: '样式一', text: '#3a3a3a', ar: 1079 / 1024 },
+  { label: '样式二', text: '#3a3a3a', ar: 1058 / 1352 },
+  { label: '样式三', text: '#3a3a3a', ar: 1056 / 1438 },
+  { label: '样式四', text: '#3a3a3a', ar: 783 / 647 },
+  { label: '样式五', text: '#38342c', ar: 776 / 463, span: true },
+  { label: '样式六', text: '#3a3a3a', ar: 899 / 590, span: true },
+  { label: '样式七', text: '#3a3a3a', ar: 1079 / 1439, padTop: 0.23 },
+  { label: '样式八', text: '#332e26', ar: 648 / 487 },
 ];
 
 /** 便签的卡面样式（图案卡 = 图 cover 铺满无白边；素白卡 = 调色盘纯色） */
@@ -2845,24 +2842,69 @@ function NotePin() {
   );
 }
 
-/** 墙上的一张便签（颜色自选、黄铜图钉、轻微角度；胶囊锁着时内容封存只显倒计时；点开看正文+留言） */
-function BoardNoteCard({ note, now, flash, onClick }: { note: BoardNote; now: number; flash: boolean; onClick: () => void }) {
+/** 留言板小头像（跟随恋人空间全局头像；没设置时用默认头像兜底） */
+function BoardAvatar({ src, name, size }: { src: string | null; name: string; size: number }) {
+  return (
+    <span className="block shrink-0 overflow-hidden rounded-full bg-[#ececef]" style={{ width: size, height: size }} aria-hidden="true">
+      {src ? <img src={src} alt={name} className="h-full w-full object-cover" draggable={false} /> : <DefaultAvatar size={size} />}
+    </span>
+  );
+}
+
+/** 墙上的一张便签（卡面最前面是头像+名字，正文下面直接显示留言；图案卡多大就是多大（横幅卡跨栏铺满）；胶囊锁着时内容封存只显倒计时） */
+function BoardNoteCard({
+  note,
+  now,
+  flash,
+  onClick,
+  meName,
+  taName,
+  meAvatar,
+  taAvatar,
+  colW,
+  fullW,
+}: {
+  note: BoardNote;
+  now: number;
+  flash: boolean;
+  onClick: () => void;
+  meName: string;
+  taName: string;
+  meAvatar: string | null;
+  taAvatar: string | null;
+  colW: number;
+  fullW: number;
+}) {
   const isCapsule = !!note.unlockAt;
   const locked = isCapsule && (note.unlockAt ?? 0) > now;
-  const n = note.comments?.length ?? 0;
+  const comments = note.comments ?? [];
+  // 图案卡：多大就是多大（按卡面原始宽高比给最小高度，字多时自然长高）；横幅卡跨栏铺满
+  const skin = !locked && (note.card ?? 0) > 0 ? BOARD_CARDS[((note.card ?? 0) - 1) % BOARD_CARDS.length] : null;
+  const shownN = skin ? (skin.span ? 2 : skin.ar >= 1 ? 1 : 2) : 2; // 紧凑卡上只露最近一条，其余点开看
+  const shown = comments.slice(-shownN);
+  const clamp = skin ? (skin.span ? 'line-clamp-4' : skin.ar >= 1 ? 'line-clamp-3' : 'line-clamp-5') : 'line-clamp-6';
   // 由 id 决定的轻微角度（-4°~4°，稳定不闪；--rot 供落钉动画保持同一角度）
   const rot = ((note.id.charCodeAt(note.id.length - 1) * 7 + note.id.length * 3) % 9) - 4;
+  const face: CSSProperties = locked
+    ? { background: 'linear-gradient(180deg,#ececec,#e3e3e3)', color: '#52525b', border: '1.5px dashed #a8a8a8' }
+    : noteFaceStyle(note);
+  if (skin) {
+    const w = skin.span ? fullW : colW;
+    if (w > 0) {
+      face.minHeight = Math.round(w / skin.ar); // 原始比例的最小高度（字多时自然长高）
+      // 顶部插画避让区：按卡面自然高度的比例折算成像素（多栏里 % 基准不可控，直接算像素）
+      if (skin.padTop) face.paddingTop = Math.round((w / skin.ar) * skin.padTop);
+    }
+  }
+  const mine = note.from === 'me';
+  const who = mine ? meName || '我' : taName || 'TA';
   return (
     <button
       type="button"
       onClick={onClick}
       aria-label={locked ? '一颗还没开启的时间胶囊' : '查看这张便签'}
-      className={`relative mb-2.5 block w-full break-inside-avoid rounded-[10px] px-3.5 pb-2.5 pt-[17px] text-left shadow-[0_3px_10px_rgba(0,0,0,0.22)] transition-transform duration-150 active:scale-[0.96] ${flash ? '[animation:board-pin-in_.45s_ease-out]' : ''}`}
-      style={
-        locked
-          ? { background: 'linear-gradient(180deg,#ececec,#e3e3e3)', color: '#52525b', border: '1.5px dashed #a8a8a8', transform: `rotate(${rot}deg)`, '--rot': `${rot}deg` }
-          : { ...noteFaceStyle(note), transform: `rotate(${rot}deg)`, '--rot': `${rot}deg` }
-      }
+      className={`relative mb-2.5 flex w-full flex-col justify-start break-inside-avoid rounded-[10px] px-3.5 pb-2.5 pt-[17px] text-left shadow-[0_3px_10px_rgba(0,0,0,0.22)] transition-transform duration-150 active:scale-[0.96] ${flash ? '[animation:board-pin-in_.45s_ease-out]' : ''}`}
+      style={{ ...face, transform: `rotate(${rot}deg)`, '--rot': `${rot}deg`, ...(skin?.span ? { columnSpan: 'all' as const } : {}) }}
     >
       <NotePin />
       {locked ? (
@@ -2887,13 +2929,35 @@ function BoardNoteCard({ note, now, flash, onClick }: { note: BoardNote; now: nu
               胶囊已开启
             </span>
           )}
-          <p className="line-clamp-6 break-all text-[12.5px] font-semibold leading-[1.6]">{note.text}</p>
+          {/* 卡面最前面：头像 + 名字（跟随恋人空间全局头像） */}
+          <span className="flex items-center gap-1.5">
+            <BoardAvatar src={mine ? meAvatar : taAvatar} name={who} size={20} />
+            <span className="min-w-0 truncate text-[11px] font-bold opacity-80">{who}</span>
+          </span>
+          {/* 正文 */}
+          <p className={`mt-1.5 break-all text-[12.5px] font-semibold leading-[1.55] ${clamp}`}>{note.text}</p>
+          {/* 留言直接显示在便签正文下面（最近几条；头像跟随全局） */}
+          {shown.length > 0 && (
+            <span className="mt-1.5 block space-y-[3px] border-t border-black/10 pt-1.5">
+              {shown.map((m) => {
+                const mMine = m.from === 'me';
+                const mWho = mMine ? meName || '我' : taName || 'TA';
+                return (
+                  <span key={m.id} className="flex items-center gap-1">
+                    <BoardAvatar src={mMine ? meAvatar : taAvatar} name={mWho} size={14} />
+                    <span className="min-w-0 flex-1 truncate text-[10.5px] font-semibold leading-[1.35] opacity-85">{m.text}</span>
+                  </span>
+                );
+              })}
+            </span>
+          )}
+          {/* 日期 + 留言数 */}
           <p className="mt-2 flex items-center gap-1.5 text-[10px] font-bold">
             <span className="opacity-60">{fmtDate(note.at).slice(5)}</span>
-            {n > 0 && (
+            {comments.length > 0 && (
               <span className="flex items-center gap-[3px] rounded-full bg-black/10 px-1.5 py-[1px] text-[9.5px]">
                 <MessageSquare className="h-[9px] w-[9px]" strokeWidth={2.8} aria-hidden="true" />
-                {n}
+                {comments.length}
               </span>
             )}
           </p>
@@ -2903,17 +2967,21 @@ function BoardNoteCard({ note, now, flash, onClick }: { note: BoardNote; now: nu
   );
 }
 
-/** 便签详情弹层（正文大卡（自选色 + 图钉） + 便签下双向留言区 + 输入行；不显示谁钉的） */
+/** 便签详情弹层（卡面头像名字 + 正文大卡 + 便签下双向留言区（头像跟随全局） + 输入行；不限字数） */
 function NoteDetail({
   note,
   meName,
   taName,
+  meAvatar,
+  taAvatar,
   onClose,
   onSend,
 }: {
   note: BoardNote;
   meName: string;
   taName: string;
+  meAvatar: string | null;
+  taAvatar: string | null;
   onClose: () => void;
   onSend: (text: string) => void;
 }) {
@@ -2941,7 +3009,12 @@ function NoteDetail({
                 胶囊 · {fmtMDHM(note.unlockAt)} 已开启
               </p>
             )}
-            <p className="break-all text-[15px] font-semibold leading-[1.7]">{note.text}</p>
+            {/* 谁钉的：头像 + 名字（跟随恋人空间全局头像） */}
+            <span className="flex items-center gap-1.5">
+              <BoardAvatar src={note.from === 'me' ? meAvatar : taAvatar} name={note.from === 'me' ? meName || '我' : taName || 'TA'} size={22} />
+              <span className="text-[12px] font-bold opacity-80">{note.from === 'me' ? meName || '我' : taName || 'TA'}</span>
+            </span>
+            <p className="mt-1.5 break-all text-[15px] font-semibold leading-[1.7]">{note.text}</p>
             <p className="mt-3 text-right text-[11px] font-bold opacity-75">{fmtMDHM(note.at)}</p>
           </div>
         </div>
@@ -2958,13 +3031,7 @@ function NoteDetail({
             const who = mMine ? meName || '我' : taName || 'TA';
             return (
               <div key={m.id} className="flex items-start gap-2 py-[6px]">
-                <span
-                  className="mt-[2px] flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[12px] font-bold"
-                  style={mMine ? { background: '#1a1a1a', color: '#fff' } : { background: '#ececec', color: '#52525b' }}
-                  aria-hidden="true"
-                >
-                  {who.slice(0, 1)}
-                </span>
+                <BoardAvatar src={mMine ? meAvatar : taAvatar} name={who} size={28} />
                 <div className="min-w-0 flex-1">
                   <p className="text-[10.5px] font-semibold leading-tight text-[#a3a3a3]">
                     {who} · {fmtMDHM(m.at)}
@@ -2979,11 +3046,11 @@ function NoteDetail({
         <div className="flex shrink-0 items-center gap-2 border-t border-neutral-200 px-3 py-2.5">
           <input
             value={input}
-            onChange={(e) => setInput(e.target.value.slice(0, 90))}
+            onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === 'Enter') send();
             }}
-            placeholder="在便签下留一句话…"
+            placeholder="在便签下留一句话…（不限字数）"
             className="min-w-0 flex-1 rounded-full bg-neutral-100 px-3.5 py-2 text-[13.5px] text-[#262626] outline-none placeholder:text-[#b3b3b3]"
             aria-label="便签下留言输入"
           />
@@ -3050,18 +3117,36 @@ function BoardPage({
     return () => window.clearInterval(t);
   }, []);
 
+  // 测量瀑布流实际宽度（图案卡‘多大就是多大’需要：按卡面原始宽高比算最小高度，横幅卡跨栏铺满）
+  const wallRef = useRef<HTMLDivElement | null>(null);
+  const [colW, setColW] = useState(0); // 单栏卡宽
+  const [fullW, setFullW] = useState(0); // 跨栏卡宽
+  useEffect(() => {
+    const el = wallRef.current;
+    if (!el) return;
+    const measure = () => {
+      const w = el.clientWidth;
+      setFullW(w);
+      setColW((w - 10) / 2); // columns-2 + gap-2.5(10px)
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
   // ---- 弹层与草稿状态 ----
   const [composing, setComposing] = useState(false);
   const [draft, setDraft] = useState('');
   const [draftColor, setDraftColor] = useState(0); // 素白卡的调色盘选中色
-  const [draftCard, setDraftCard] = useState(0); // 卡纸样式（0=素白，1-5=图案卡）
+  const [draftCard, setDraftCard] = useState(0); // 卡纸样式（0=素白，1-8=图案卡）
   const [capsuleOn, setCapsuleOn] = useState(false); // 时间胶囊开关
   const [unlockChoice, setUnlockChoice] = useState(0); // 0-4 预设 / 5 自定义
   const [customUnlock, setCustomUnlock] = useState(''); // 'YYYY-MM-DDTHH:mm'
   const [openId, setOpenId] = useState<string | null>(null);
   const [flashId, setFlashId] = useState<string | null>(null); // 刚钉上墙的便签（落钉动画）
   const [bgPicker, setBgPicker] = useState(false); // 背景选择弹层
-  const bgIdx = Math.max(0, Math.min(BOARD_BGS.length - 1, state.boardBg ?? 0)); // 当前背景（0=默认米色）
+  const bgIdx = Math.max(0, Math.min(BOARD_BGS.length - 1, state.boardBg ?? 0)); // 当前背景（0=雾青，用户上传的第一张图）
   const openNote = notes.find((n) => n.id === openId) ?? null;
   const openLocked = !!(openNote?.unlockAt && openNote.unlockAt > now);
   const previewCol = NOTE_COLORS[draftColor % NOTE_COLORS.length]; // 书写区实时预览色
@@ -3085,9 +3170,9 @@ function BoardPage({
     setCustomUnlock('');
   };
 
-  /** 钉一张便签（普通 or 时间胶囊；胶囊封存不上报内容，普通便签 TA 会来留言回应） */
+  /** 钉一张便签（普通 or 时间胶囊；不限字数；胶囊封存不上报内容，普通便签 TA 会来留言回应） */
   const pinNote = () => {
-    const text = draft.trim().slice(0, 60);
+    const text = draft.trim();
     if (!text || !unlockOk) return;
     let unlockAt: number | undefined;
     if (capsuleOn && plannedUnlock) unlockAt = plannedUnlock;
@@ -3102,9 +3187,9 @@ function BoardPage({
     if (!unlockAt) scheduleBoardNoteReply(id);
   };
 
-  /** 在便签下留言（TA 会按人设/记忆/上下文接话回复；封存中的胶囊不出声） */
+  /** 在便签下留言（不限字数；TA 会按人设/记忆/上下文接话回复；封存中的胶囊不出声） */
   const commentNote = (noteId: string, text: string) => {
-    const c = { id: `me-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, from: 'me' as const, text: text.slice(0, 90), at: Date.now() };
+    const c = { id: `me-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, from: 'me' as const, text, at: Date.now() };
     patch((prev) => ({
       boardNotes: (prev.boardNotes ?? []).map((x) => (x.id === noteId ? { ...x, comments: [...(x.comments ?? []), c] } : x)),
     }));
@@ -3113,7 +3198,7 @@ function BoardPage({
   };
 
   return (
-    // 背景图/米色直接铺满整个界面（顶部按钮与底部操作栏都浮在背景上）
+    // 背景图直接铺满整个界面（顶部按钮与底部操作栏都浮在背景上）
     <div className="relative flex h-full flex-col overflow-hidden" style={wallStyleOf(state.boardBg)}>
       {/* ===== 顶部：返回键（黑） + 小标题 + 背景切换（黑·三个点） ===== */}
       <div className="relative z-20 shrink-0">
@@ -3127,7 +3212,7 @@ function BoardPage({
         </button>
         <p
           className="absolute left-1/2 top-[54px] flex h-10 -translate-x-1/2 items-center pl-[0.35em] text-[13px] font-semibold tracking-[0.35em] text-[#3c3c42]/75"
-          style={bgIdx > 0 ? { textShadow: '0 1px 4px rgba(255,255,255,0.65)' } : undefined}
+          style={{ textShadow: '0 1px 4px rgba(255,255,255,0.65)' }}
         >
           留言板
         </p>
@@ -3142,11 +3227,23 @@ function BoardPage({
         </button>
       </div>
 
-      {/* ===== 便签瀑布流（直接铺在整面背景上；两列；新钉的便签带落钉动画） ===== */}
+      {/* ===== 便签瀑布流（直接铺在整面背景上；两列，横幅图案卡跨栏铺满；新钉的便签带落钉动画） ===== */}
       <div className="relative z-10 flex min-h-0 flex-1 flex-col overflow-y-auto">
-        <div className="columns-2 gap-2.5 px-3.5 pb-4 pt-[106px]">
+        <div ref={wallRef} className="columns-2 gap-2.5 px-3.5 pb-4 pt-[106px]">
           {notes.map((n) => (
-            <BoardNoteCard key={n.id} note={n} now={now} flash={flashId === n.id} onClick={() => setOpenId(n.id)} />
+            <BoardNoteCard
+              key={n.id}
+              note={n}
+              now={now}
+              flash={flashId === n.id}
+              onClick={() => setOpenId(n.id)}
+              meName={state.meName}
+              taName={state.taName}
+              meAvatar={state.meAvatar}
+              taAvatar={state.taAvatar}
+              colW={colW}
+              fullW={fullW}
+            />
           ))}
         </div>
         {/* 空墙提示 */}
@@ -3161,7 +3258,7 @@ function BoardPage({
         )}
       </div>
 
-      {/* ===== 背景选择弹层（默认米色 + 5 张上传图；选了即换并持久化） ===== */}
+      {/* ===== 背景选择弹层（用户上传的 6 张图；选了即换并持久化） ===== */}
       {bgPicker && (
         <div className="absolute inset-0 z-40 flex items-center justify-center px-6" role="dialog" aria-label="选择背景">
           <button type="button" aria-label="关闭" onClick={() => setBgPicker(false)} className="absolute inset-0 bg-black/25 backdrop-blur-[2px]" />
@@ -3176,20 +3273,16 @@ function BoardPage({
                   onClick={() => {
                     patch({ boardBg: i });
                     setBgPicker(false);
-                    showToast(i === 0 ? '换回米色板啦' : '背景换好啦 ♡');
+                    showToast('背景换好啦 ♡');
                   }}
                   aria-label={b.label}
                   aria-pressed={bgIdx === i}
                   className="relative overflow-hidden rounded-xl transition-transform active:scale-95"
                 >
-                  {/* 缩略图：0=米色块，1-5=背景图 + 同款纱罩 */}
+                  {/* 缩略图：背景图 + 同款纱罩 */}
                   <span
                     className="block aspect-[3/4] w-full"
-                    style={
-                      i === 0
-                        ? { backgroundColor: '#f1e7d0' }
-                        : { backgroundImage: `linear-gradient(rgba(250,247,240,${b.veil}),rgba(250,247,240,${b.veil})),url(/board-bg/bg-${i}.jpg)`, backgroundSize: 'cover', backgroundPosition: 'center' }
-                    }
+                    style={{ backgroundImage: `linear-gradient(rgba(250,247,240,${b.veil}),rgba(250,247,240,${b.veil})),url(/board-bg/bg-${i}.jpg)`, backgroundSize: 'cover', backgroundPosition: 'center' }}
                   />
                   <span className={`absolute inset-0 rounded-xl ${bgIdx === i ? 'shadow-[inset_0_0_0_2px_#000]' : 'shadow-[inset_0_0_0_1px_rgba(0,0,0,0.12)]'}`} aria-hidden="true" />
                   {bgIdx === i && (
@@ -3257,21 +3350,20 @@ function BoardPage({
               )}
               <textarea
                 value={draft}
-                onChange={(e) => setDraft(e.target.value.slice(0, 60))}
+                onChange={(e) => setDraft(e.target.value)}
                 rows={3}
-                placeholder={capsuleOn ? '写给未来的你们的一句话…' : '如：今天的晚霞很好看，想你。'}
+                placeholder={capsuleOn ? '写给未来的你们的一句话…' : '如：今天的晚霞很好看，想你。（不限字数）'}
                 className="w-full resize-none bg-transparent text-[15px] font-semibold leading-[1.7] outline-none placeholder:font-normal placeholder:opacity-60"
                 aria-label="便签内容"
               />
-              <p className="mt-1 text-right text-[11px] font-bold opacity-70">{draft.length}/60</p>
             </div>
-            {/* 卡纸选择（素白 + 5 张图案卡；图案卡自带配色） */}
+            {/* 卡纸选择（素白 + 8 张图案卡；图案卡自带配色） */}
             <div className="mt-3">
               <p className="text-[11.5px] font-bold text-[#a3a3a3]">
                 {capsuleOn ? '开启后的便签卡纸' : '选卡纸'}
                 <span className="ml-1 text-[#52525b]">· {draftCard > 0 ? BOARD_CARDS[draftCard - 1].label : '素白'}</span>
               </p>
-              <div className="mt-2 grid grid-cols-6 gap-1.5">
+              <div className="mt-2 grid grid-cols-5 gap-1.5">
                 <button
                   type="button"
                   onClick={() => setDraftCard(0)}
@@ -3435,6 +3527,8 @@ function BoardPage({
             note={openNote}
             meName={state.meName}
             taName={state.taName}
+            meAvatar={state.meAvatar}
+            taAvatar={state.taAvatar}
             onClose={() => setOpenId(null)}
             onSend={(t) => commentNote(openNote.id, t)}
           />

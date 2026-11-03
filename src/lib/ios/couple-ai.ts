@@ -158,7 +158,7 @@ interface CoupleSnap {
   /** AI 挂卡去重（每天最多一张）：最近一次挂卡的日期 key */
   treeCardDay?: string;
   /** 恋爱留言板（软木墙手写便签；unlockAt=时间胶囊解锁时间，封存中内容对双方都不可见）；最新在前 */
-  boardNotes?: { id: string; from: 'me' | 'ta'; text: string; at: number; color?: number; unlockAt?: number; comments: { id: string; from: 'me' | 'ta'; text: string; at: number }[] }[];
+  boardNotes?: { id: string; from: 'me' | 'ta'; text: string; at: number; color?: number; card?: number; unlockAt?: number; comments: { id: string; from: 'me' | 'ta'; text: string; at: number }[] }[];
   /** AI 钉便签去重（每天最多一张）：最近一次钉便签的日期 key */
   boardNoteDay?: string;
   /** 恋爱水平考试（第十五轮）：TA 知道卷子、成绩和彼此的作答 */
@@ -1485,7 +1485,7 @@ async function aiTickBoardNote(snap: CoupleSnap, me: string, ta: string, p: TaPe
     text,
     at: Date.now(),
     color: Math.floor(Math.random() * 16), // 素白卡时 TA 也从 16 色调色盘里挑
-    ...(Math.random() < 0.45 ? { card: 1 + Math.floor(Math.random() * 5) } : {}), // 近半概率直接挑一张图案卡纸
+    ...(Math.random() < 0.45 ? { card: 1 + Math.floor(Math.random() * 8) } : {}), // 近半概率直接挑一张图案卡纸（8 张）
     comments: [] as { id: string; from: 'me' | 'ta'; text: string; at: number }[],
   };
   writeSnap((s) => ({
