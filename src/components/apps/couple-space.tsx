@@ -175,7 +175,7 @@ export interface TreeCard {
   color?: number; // 调色盘索引（0-7）；缺省时按挂签人兼容（我=红 / TA=奶油白）
 }
 
-/** 恋爱留言板便签（软木墙上钉的手写便签；color = NOTE_COLORS 调色盘索引；unlockAt 非空 = 时间胶囊） */
+/** 恋爱留言板便签（留言墙上钉的手写便签；color = NOTE_COLORS 调色盘索引；unlockAt 非空 = 时间胶囊） */
 export interface BoardNote {
   id: string;
   from: 'me' | 'ta';
@@ -2713,9 +2713,9 @@ function AnniversaryPage(props: { state: CoupleState; patch: (p: Partial<CoupleS
 }
 
 /**
- * ================= 恋爱留言板（软木墙 + 手写便签 + 时间胶囊彩蛋） =================
+ * ================= 恋爱留言板（简约留言墙 + 手写便签 + 时间胶囊彩蛋） =================
  * 按需求以「留言板为主 + 时间胶囊彩蛋」重建（替代许愿树）：
- * - 一面软木留言墙：两人随手钉便签（16 色调色盘自选颜色），点开可回一句，成小对话串；
+ * - 一面简约留言墙：两人随手钉便签（16 色调色盘自选颜色），点开可回一句，成小对话串；
  * - 时间胶囊：写下即封存（到点前连自己也看不到），锁着倒计时钉在墙上，到点自动开启；
  * - 数据契约：boardNotes（最新在前，最多 60 张）+ boardNoteDay（TA 钉便签去重）；
  *   旧许愿树 treeCards 由 loadCoupleState 一次性迁移为第一批便签；
@@ -2777,13 +2777,13 @@ function fmtCountdown(ms: number): string {
   return `还有 ${mins} 分`;
 }
 
-/** 软木墙底纹（暖木框 + 软木颗粒 + 内阴影） */
-const CORK_STYLE: CSSProperties = {
-  backgroundColor: '#d9bd93',
-  backgroundImage:
-    'radial-gradient(rgba(139,105,66,0.10) 1px, transparent 1.6px), radial-gradient(rgba(255,246,224,0.18) 1px, transparent 1.6px), repeating-linear-gradient(92deg, rgba(139,105,66,0.05) 0 2px, transparent 2px 7px)',
-  backgroundSize: '7px 7px, 11px 11px, auto',
-  boxShadow: 'inset 0 2px 10px rgba(120,86,50,0.30), inset 0 -2px 8px rgba(120,86,50,0.18)',
+/** 留言墙底板（简约米麻面板：细颗粒底纹 + 顶缘一线光 + 细边框 + 柔和外投影） */
+const WALL_STYLE: CSSProperties = {
+  backgroundColor: '#f1e7d0',
+  backgroundImage: 'radial-gradient(rgba(146,116,80,0.05) 1px, transparent 1.5px)',
+  backgroundSize: '10px 10px',
+  border: '1px solid rgba(146,116,80,0.16)',
+  boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.55), 0 12px 30px rgba(96,66,33,0.16)',
 };
 
 /** 黄铜图钉（钉在便签顶上；带针尖与高光） */
@@ -2800,11 +2800,7 @@ function NotePin() {
   );
 }
 
-/** 纸面质感叠层（顶缘高光 + 底部微沉 + 右下折角；pointer-events-none 不挡点击，墙上便签与详情大卡共用） */
-const NOTE_PAPER_SHEEN =
-  'linear-gradient(180deg,rgba(255,255,255,0.25),rgba(255,255,255,0) 34%),linear-gradient(0deg,rgba(0,0,0,0.06),rgba(0,0,0,0) 22%),linear-gradient(315deg,rgba(0,0,0,0.11),rgba(0,0,0,0) 44%)';
-
-/** 墙上的一张便签（颜色自选、黄铜图钉、轻微角度、纸面质感；胶囊锁着时内容封存只显倒计时；点开看正文+留言） */
+/** 墙上的一张便签（颜色自选、黄铜图钉、轻微角度；胶囊锁着时内容封存只显倒计时；点开看正文+留言） */
 function BoardNoteCard({ note, now, flash, onClick }: { note: BoardNote; now: number; flash: boolean; onClick: () => void }) {
   const col = noteColorOf(note);
   const isCapsule = !!note.unlockAt;
@@ -2817,7 +2813,7 @@ function BoardNoteCard({ note, now, flash, onClick }: { note: BoardNote; now: nu
       type="button"
       onClick={onClick}
       aria-label={locked ? '一颗还没开启的时间胶囊' : '查看这张便签'}
-      className={`relative mb-2.5 block w-full break-inside-avoid rounded-[10px] px-3.5 pb-2.5 pt-[17px] text-left shadow-[0_4px_12px_rgba(96,66,33,0.22),0_1px_3px_rgba(96,66,33,0.16)] transition-transform duration-150 active:scale-[0.96] ${flash ? '[animation:board-pin-in_.45s_ease-out]' : ''}`}
+      className={`relative mb-2.5 block w-full break-inside-avoid rounded-[10px] px-3.5 pb-2.5 pt-[17px] text-left shadow-[0_3px_10px_rgba(96,66,33,0.22)] transition-transform duration-150 active:scale-[0.96] ${flash ? '[animation:board-pin-in_.45s_ease-out]' : ''}`}
       style={
         locked
           ? { background: 'linear-gradient(180deg,#ecdfc0,#e4d3a9)', color: '#8a6d3e', border: '1.5px dashed #c4a874', transform: `rotate(${rot}deg)`, '--rot': `${rot}deg` }
@@ -2825,8 +2821,6 @@ function BoardNoteCard({ note, now, flash, onClick }: { note: BoardNote; now: nu
       }
     >
       <NotePin />
-      {/* 纸面质感：顶缘高光 + 底部微沉 + 右下折角 */}
-      <span aria-hidden="true" className="pointer-events-none absolute inset-0 rounded-[10px]" style={{ background: NOTE_PAPER_SHEEN }} />
       {locked ? (
         <>
           <span className="flex items-center gap-1 text-[10.5px] font-bold tracking-wide opacity-90">
@@ -2894,12 +2888,10 @@ function NoteDetail({
         {/* 便签正文（自选色大卡 + 图钉） */}
         <div className="shrink-0 px-4 pb-3 pt-5">
           <div
-            className="relative rounded-xl px-4 py-5 pt-6 shadow-[0_5px_16px_rgba(70,58,42,0.18)]"
+            className="relative rounded-xl px-4 py-5 pt-6 shadow-[0_4px_14px_rgba(70,58,42,0.16)]"
             style={{ background: col.bg, color: col.text }}
           >
             <NotePin />
-            {/* 纸面质感：与墙上便签一致的高光/折角 */}
-            <span aria-hidden="true" className="pointer-events-none absolute inset-0 rounded-xl" style={{ background: NOTE_PAPER_SHEEN }} />
             {note.unlockAt && (
               <p className="mb-1.5 inline-flex items-center gap-1 rounded-full bg-white/30 px-2 py-[2px] text-[9.5px] font-bold tracking-wide backdrop-blur-[1px]">
                 <LockOpen className="h-3 w-3" strokeWidth={2.6} aria-hidden="true" />
@@ -2994,7 +2986,7 @@ function CapsulePending({ note, now, onClose }: { note: BoardNote; now: number; 
   );
 }
 
-/** 恋爱留言板页（软木墙 + 手写便签 + 时间胶囊彩蛋；替代许愿树） */
+/** 恋爱留言板页（简约留言墙 + 手写便签 + 时间胶囊彩蛋；替代许愿树） */
 function BoardPage({
   state,
   patch,
@@ -3091,34 +3083,29 @@ function BoardPage({
         </p>
       </div>
 
-      {/* ===== 软木板（暖木框 + 软木颗粒墙 + 便签瀑布流） ===== */}
+      {/* ===== 留言墙（简约米麻面板 + 便签瀑布流） ===== */}
       <div className="relative z-10 min-h-0 flex-1 px-3">
-        <div
-          className="flex h-full flex-col rounded-[18px] p-[7px] shadow-[0_10px_30px_rgba(96,66,33,0.30)]"
-          style={{ background: 'linear-gradient(135deg,#c59a66,#a87c50 38%,#b58a58 68%,#96703f)' }}
-        >
-          <div className="relative flex min-h-0 flex-1 flex-col overflow-y-auto rounded-[12px]" style={CORK_STYLE}>
-            {/* 板头统计 */}
-            <p className="shrink-0 px-4 pb-1 pt-3 text-center text-[11px] font-bold tracking-[0.18em] text-[#8a6d3e]/80">
-              已钉下 {notes.length} 张便签{capsules.length > 0 ? ` · ${capsules.length} 颗时间胶囊` : ''}
-            </p>
-            {/* 便签瀑布流（两列；新钉的便签带落钉动画） */}
-            <div className="columns-2 gap-2.5 px-2.5 pb-4 pt-1.5">
-              {notes.map((n) => (
-                <BoardNoteCard key={n.id} note={n} now={now} flash={flashId === n.id} onClick={() => setOpenId(n.id)} />
-              ))}
-            </div>
-            {/* 空墙提示 */}
-            {notes.length === 0 && (
-              <div className="flex flex-1 flex-col items-center justify-center gap-2.5 px-10 pb-10 text-center">
-                <span className="flex h-12 w-12 items-center justify-center rounded-full bg-[#e6d9b8] text-[#b09a6d] shadow-[inset_0_2px_5px_rgba(120,90,50,0.15)]">
-                  <Pin className="h-6 w-6" strokeWidth={2} aria-hidden="true" />
-                </span>
-                <p className="text-[13.5px] font-bold text-[#8a6d3e]">墙上还空着</p>
-                <p className="text-[11.5px] leading-relaxed text-[#a98d5f]">钉下第一张手写便签，或者塞一颗慢一点的时间胶囊</p>
-              </div>
-            )}
+        <div className="relative flex h-full min-h-0 flex-col overflow-y-auto rounded-[20px]" style={WALL_STYLE}>
+          {/* 板头统计 */}
+          <p className="shrink-0 px-4 pb-1 pt-3 text-center text-[11px] font-bold tracking-[0.18em] text-[#8a6d3e]/80">
+            已钉下 {notes.length} 张便签{capsules.length > 0 ? ` · ${capsules.length} 颗时间胶囊` : ''}
+          </p>
+          {/* 便签瀑布流（两列；新钉的便签带落钉动画） */}
+          <div className="columns-2 gap-2.5 px-2.5 pb-4 pt-1.5">
+            {notes.map((n) => (
+              <BoardNoteCard key={n.id} note={n} now={now} flash={flashId === n.id} onClick={() => setOpenId(n.id)} />
+            ))}
           </div>
+          {/* 空墙提示 */}
+          {notes.length === 0 && (
+            <div className="flex flex-1 flex-col items-center justify-center gap-2.5 px-10 pb-10 text-center">
+              <span className="flex h-12 w-12 items-center justify-center rounded-full bg-[#e6d9b8] text-[#b09a6d] shadow-[inset_0_2px_5px_rgba(120,90,50,0.15)]">
+                <Pin className="h-6 w-6" strokeWidth={2} aria-hidden="true" />
+              </span>
+              <p className="text-[13.5px] font-bold text-[#8a6d3e]">墙上还空着</p>
+              <p className="text-[11.5px] leading-relaxed text-[#a98d5f]">钉下第一张手写便签，或者塞一颗慢一点的时间胶囊</p>
+            </div>
+          )}
         </div>
       </div>
 
