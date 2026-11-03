@@ -2732,7 +2732,7 @@ const NOTE_COLORS: { name: string; bg: string; text: string; swatch: string }[] 
   { name: '雾蓝', bg: 'linear-gradient(180deg,#92bcd8,#85b3cf)', text: '#f2f9fd', swatch: '#85b3cf' },
   { name: '藤紫', bg: 'linear-gradient(180deg,#bcafda,#b4a5d3)', text: '#fbf8ff', swatch: '#b4a5d3' },
   { name: '樱粉', bg: 'linear-gradient(180deg,#ecb4c7,#e7abc0)', text: '#fff3f7', swatch: '#e7abc0' },
-  { name: '米白', bg: 'linear-gradient(180deg,#f5efe0,#f2ead7)', text: '#6b5b39', swatch: '#f2ead7' },
+  { name: '云白', bg: 'linear-gradient(180deg,#faf8f2,#f5f1e8)', text: '#5b5344', swatch: '#f5f1e8' },
   // ── 新增 8 种（补全色环：石榴红/蜜桃/柠黄/竹青/湖青/晴空/葡萄/暖灰） ──
   { name: '石榴', bg: 'linear-gradient(180deg,#d5756e,#cc6a62)', text: '#fff4f2', swatch: '#cc6a62' },
   { name: '蜜桃', bg: 'linear-gradient(180deg,#f2c8ab,#eebf9e)', text: '#6e4a30', swatch: '#eebf9e' },
@@ -2744,8 +2744,8 @@ const NOTE_COLORS: { name: string; bg: string; text: string; swatch: string }[] 
   { name: '暖灰', bg: 'linear-gradient(180deg,#cec9bd,#c5c0b3)', text: '#4c453a', swatch: '#c5c0b3' },
 ];
 
-/** 便签显示色（旧数据无 color：我=陶红 / TA=米白，兼容历史数据） */
-const noteColorOf = (n: BoardNote) => NOTE_COLORS[(n.color ?? (n.from === 'me' ? 0 : 7)) % NOTE_COLORS.length];
+/** 便签显示色（旧数据无 color：默认云白，兼容历史数据） */
+const noteColorOf = (n: BoardNote) => NOTE_COLORS[(n.color ?? 7) % NOTE_COLORS.length];
 
 /** 时间胶囊解锁时间预设（chips；ms = 解锁时间戳） */
 const CAPSULE_PRESETS: { label: string; hint: string; ms: () => number }[] = [
@@ -2777,13 +2777,9 @@ function fmtCountdown(ms: number): string {
   return `还有 ${mins} 分`;
 }
 
-/** 留言墙底板（简约米麻面板：细颗粒底纹 + 顶缘一线光 + 细边框 + 柔和外投影） */
+/** 留言墙底板（简约：纯暖米色平板，无纹理无特效） */
 const WALL_STYLE: CSSProperties = {
   backgroundColor: '#f1e7d0',
-  backgroundImage: 'radial-gradient(rgba(146,116,80,0.05) 1px, transparent 1.5px)',
-  backgroundSize: '10px 10px',
-  border: '1px solid rgba(146,116,80,0.16)',
-  boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.55), 0 12px 30px rgba(96,66,33,0.16)',
 };
 
 /** 黄铜图钉（钉在便签顶上；带针尖与高光） */
@@ -3028,7 +3024,7 @@ function BoardPage({
 
   const openCompose = (capsule: boolean) => {
     setCapsuleOn(capsule);
-    setDraftColor(Math.floor(Math.random() * NOTE_COLORS.length)); // 每次随机起手色——16 色便签纸换着用
+    setDraftColor(7); // 默认云白便签纸；想要颜色再从调色盘挑
     setComposing(true);
   };
   const closeCompose = () => {
@@ -3067,7 +3063,7 @@ function BoardPage({
   };
 
   return (
-    <div className="relative flex h-full flex-col overflow-hidden" style={{ background: 'linear-gradient(180deg,#efe6d2 0%,#f6efdd 100%)' }}>
+    <div className="relative flex h-full flex-col overflow-hidden" style={{ background: 'linear-gradient(180deg,#faf6ed 0%,#f2ebdc 100%)' }}>
       {/* ===== 顶部：返回键 + 小标题 ===== */}
       <div className="relative z-20 shrink-0">
         <button
