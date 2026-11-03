@@ -175,13 +175,14 @@ export interface TreeCard {
   color?: number; // 调色盘索引（0-7）；缺省时按挂签人兼容（我=红 / TA=奶油白）
 }
 
-/** 恋爱留言板便签（留言墙上钉的手写便签；color = NOTE_COLORS 调色盘索引；unlockAt 非空 = 时间胶囊） */
+/** 恋爱留言板便签（留言墙上钉的手写便签；card = BOARD_CARDS 图案卡纸 1-5，缺省 = 素白色卡；color = 素白卡时的调色盘索引；unlockAt 非空 = 时间胶囊） */
 export interface BoardNote {
   id: string;
   from: 'me' | 'ta';
   text: string;
   at: number;
-  color?: number; // 调色盘索引（0-7）；缺省时按钉便签人兼容（我=陶红 / TA=米白）
+  card?: number; // 图案卡纸样式（1-5 = 用户上传的卡面；缺省 = 素白卡走调色盘配色）
+  color?: number; // 素白卡的调色盘索引；缺省 = 云白
   unlockAt?: number; // 时间胶囊解锁时间戳；缺省 = 普通便签；封存中内容对双方都不可见
   comments: TreeCardComment[]; // 便签下的双向留言
 }
@@ -2805,6 +2806,31 @@ function wallStyleOf(bg: number | undefined): CSSProperties {
   };
 }
 
+/** 便签图案卡纸清单（用户上传的 5 张卡面，白边已裁净；文字色按各卡中心亮度统一深灰） */
+const BOARD_CARDS: { label: string; text: string }[] = [
+  { label: '样式一', text: '#3a3a3a' },
+  { label: '样式二', text: '#3a3a3a' },
+  { label: '样式三', text: '#3a3a3a' },
+  { label: '样式四', text: '#3a3a3a' },
+  { label: '样式五', text: '#3a3a3a' },
+];
+
+/** 便签的卡面样式（图案卡 = 图 cover 铺满无白边；素白卡 = 调色盘纯色） */
+function noteFaceStyle(note: BoardNote): CSSProperties {
+  const card = note.card ?? 0;
+  if (card > 0) {
+    const skin = BOARD_CARDS[(card - 1) % BOARD_CARDS.length];
+    return {
+      backgroundImage: `url(/board-cards/card-${(card - 1) % BOARD_CARDS.length + 1}.jpg)`,
+      backgroundSize: 'cover',
+      backgroundPosition: 'center',
+      color: skin.text,
+    };
+  }
+  const col = noteColorOf(note);
+  return { background: col.bg, color: col.text };
+}
+
 /** 黄铜图钉（钉在便签顶上；带针尖与高光） */
 function NotePin() {
   return (
@@ -2821,7 +2847,6 @@ function NotePin() {
 
 /** 墙上的一张便签（颜色自选、黄铜图钉、轻微角度；胶囊锁着时内容封存只显倒计时；点开看正文+留言） */
 function BoardNoteCard({ note, now, flash, onClick }: { note: BoardNote; now: number; flash: boolean; onClick: () => void }) {
-  const col = noteColorOf(note);
   const isCapsule = !!note.unlockAt;
   const locked = isCapsule && (note.unlockAt ?? 0) > now;
   const n = note.comments?.length ?? 0;
@@ -2832,11 +2857,11 @@ function BoardNoteCard({ note, now, flash, onClick }: { note: BoardNote; now: nu
       type="button"
       onClick={onClick}
       aria-label={locked ? '一颗还没开启的时间胶囊' : '查看这张便签'}
-      className={`relative mb-2.5 block w-full break-inside-avoid rounded-[10px] px-3.5 pb-2.5 pt-[17px] text-left shadow-[0_3px_10px_rgba(96,66,33,0.22)] transition-transform duration-150 active:scale-[0.96] ${flash ? '[animation:board-pin-in_.45s_ease-out]' : ''}`}
+      className={`relative mb-2.5 block w-full break-inside-avoid rounded-[10px] px-3.5 pb-2.5 pt-[17px] text-left shadow-[0_3px_10px_rgba(0,0,0,0.22)] transition-transform duration-150 active:scale-[0.96] ${flash ? '[animation:board-pin-in_.45s_ease-out]' : ''}`}
       style={
         locked
-          ? { background: 'linear-gradient(180deg,#ecdfc0,#e4d3a9)', color: '#8a6d3e', border: '1.5px dashed #c4a874', transform: `rotate(${rot}deg)`, '--rot': `${rot}deg` }
-          : { background: col.bg, color: col.text, transform: `rotate(${rot}deg)`, '--rot': `${rot}deg` }
+          ? { background: 'linear-gradient(180deg,#ececec,#e3e3e3)', color: '#52525b', border: '1.5px dashed #a8a8a8', transform: `rotate(${rot}deg)`, '--rot': `${rot}deg` }
+          : { ...noteFaceStyle(note), transform: `rotate(${rot}deg)`, '--rot': `${rot}deg` }
       }
     >
       <NotePin />
@@ -2893,7 +2918,6 @@ function NoteDetail({
   onSend: (text: string) => void;
 }) {
   const [input, setInput] = useState('');
-  const col = noteColorOf(note);
   const send = () => {
     const t = input.trim();
     if (!t) return;
@@ -2902,13 +2926,13 @@ function NoteDetail({
   };
   return (
     <div className="absolute inset-0 z-40 flex items-center justify-center px-6" role="dialog" aria-label="便签详情">
-      <button type="button" aria-label="关闭" onClick={onClose} className="absolute inset-0 bg-[#5c5244]/25 backdrop-blur-[2px]" />
-      <div className="relative flex max-h-[80%] w-full max-w-[320px] flex-col overflow-hidden rounded-2xl border border-[#e7e0cd] bg-[#fdfbf4] shadow-[0_16px_44px_rgba(80,66,44,0.22)]">
-        {/* 便签正文（自选色大卡 + 图钉） */}
+      <button type="button" aria-label="关闭" onClick={onClose} className="absolute inset-0 bg-black/25 backdrop-blur-[2px]" />
+      <div className="relative flex max-h-[80%] w-full max-w-[320px] flex-col overflow-hidden rounded-2xl border border-neutral-200 bg-white shadow-[0_16px_44px_rgba(0,0,0,0.18)]">
+        {/* 便签正文（图案卡纸/自选色大卡 + 图钉） */}
         <div className="shrink-0 px-4 pb-3 pt-5">
           <div
-            className="relative rounded-xl px-4 py-5 pt-6 shadow-[0_4px_14px_rgba(70,58,42,0.16)]"
-            style={{ background: col.bg, color: col.text }}
+            className="relative rounded-xl px-4 py-5 pt-6 shadow-[0_4px_14px_rgba(0,0,0,0.15)]"
+            style={noteFaceStyle(note)}
           >
             <NotePin />
             {note.unlockAt && (
@@ -2923,11 +2947,11 @@ function NoteDetail({
         </div>
         {/* 留言区（便签下的双向留言） */}
         <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-2">
-          <p className="sticky top-0 z-[1] bg-[#fdfbf4] pb-1.5 pt-0.5 text-[11px] font-bold text-[#a39a83]">
+          <p className="sticky top-0 z-[1] bg-white pb-1.5 pt-0.5 text-[11px] font-bold text-[#a3a3a3]">
             便签下的留言 · {(note.comments ?? []).length}
           </p>
           {(note.comments ?? []).length === 0 && (
-            <p className="py-5 text-center text-[12.5px] leading-relaxed text-[#b3aa92]">还没有留言——给这张便签回一句话吧</p>
+            <p className="py-5 text-center text-[12.5px] leading-relaxed text-[#b3b3b3]">还没有留言——给这张便签回一句话吧</p>
           )}
           {(note.comments ?? []).map((m) => {
             const mMine = m.from === 'me';
@@ -2936,23 +2960,23 @@ function NoteDetail({
               <div key={m.id} className="flex items-start gap-2 py-[6px]">
                 <span
                   className="mt-[2px] flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[12px] font-bold"
-                  style={mMine ? { background: '#8b8069', color: '#fffdf6' } : { background: '#e3dcc7', color: '#6b6350' }}
+                  style={mMine ? { background: '#1a1a1a', color: '#fff' } : { background: '#ececec', color: '#52525b' }}
                   aria-hidden="true"
                 >
                   {who.slice(0, 1)}
                 </span>
                 <div className="min-w-0 flex-1">
-                  <p className="text-[10.5px] font-semibold leading-tight text-[#a39a83]">
+                  <p className="text-[10.5px] font-semibold leading-tight text-[#a3a3a3]">
                     {who} · {fmtMDHM(m.at)}
                   </p>
-                  <p className="mt-[1px] break-all text-[13.5px] leading-relaxed text-[#4a4436]">{m.text}</p>
+                  <p className="mt-[1px] break-all text-[13.5px] leading-relaxed text-[#262626]">{m.text}</p>
                 </div>
               </div>
             );
           })}
         </div>
         {/* 输入行 */}
-        <div className="flex shrink-0 items-center gap-2 border-t border-[#eee8d6] px-3 py-2.5">
+        <div className="flex shrink-0 items-center gap-2 border-t border-neutral-200 px-3 py-2.5">
           <input
             value={input}
             onChange={(e) => setInput(e.target.value.slice(0, 90))}
@@ -2960,7 +2984,7 @@ function NoteDetail({
               if (e.key === 'Enter') send();
             }}
             placeholder="在便签下留一句话…"
-            className="min-w-0 flex-1 rounded-full bg-[#f3efe1] px-3.5 py-2 text-[13.5px] text-[#4a4436] outline-none placeholder:text-[#b3aa92]"
+            className="min-w-0 flex-1 rounded-full bg-neutral-100 px-3.5 py-2 text-[13.5px] text-[#262626] outline-none placeholder:text-[#b3b3b3]"
             aria-label="便签下留言输入"
           />
           <button
@@ -2968,7 +2992,7 @@ function NoteDetail({
             onClick={send}
             disabled={!input.trim()}
             aria-label="发送留言"
-            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#dd7f6c] text-white shadow-[0_3px_10px_rgba(221,127,108,0.35)] transition-transform active:scale-95 disabled:opacity-40"
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-black text-white shadow-[0_3px_10px_rgba(0,0,0,0.25)] transition-transform active:scale-95 disabled:opacity-40"
           >
             <ArrowUp className="h-[18px] w-[18px]" strokeWidth={2.4} />
           </button>
@@ -2982,21 +3006,21 @@ function NoteDetail({
 function CapsulePending({ note, now, onClose }: { note: BoardNote; now: number; onClose: () => void }) {
   return (
     <div className="absolute inset-0 z-40 flex items-center justify-center px-6" role="dialog" aria-label="时间胶囊">
-      <button type="button" aria-label="关闭" onClick={onClose} className="absolute inset-0 bg-[#5c5244]/30 backdrop-blur-[2px]" />
-      <div className="relative w-full max-w-[320px] rounded-2xl border border-[#e2d6bb] bg-[#fdfaf0] p-5 text-center shadow-[0_16px_44px_rgba(80,66,44,0.25)]">
-        <span className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-[#efe5c9] text-[#a98a5f] shadow-[inset_0_2px_6px_rgba(120,90,50,0.18)]">
+      <button type="button" aria-label="关闭" onClick={onClose} className="absolute inset-0 bg-black/30 backdrop-blur-[2px]" />
+      <div className="relative w-full max-w-[320px] rounded-2xl border border-neutral-200 bg-white p-5 text-center shadow-[0_16px_44px_rgba(0,0,0,0.2)]">
+        <span className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-neutral-100 text-neutral-500">
           <Hourglass className="h-7 w-7" strokeWidth={2.2} aria-hidden="true" />
         </span>
-        <p className="mt-3 text-[15px] font-bold text-[#5f5646]">这颗时间胶囊还封存着</p>
-        <p className="mt-1.5 text-[23px] font-extrabold tracking-wide text-[#c96a58]">{fmtCountdown((note.unlockAt ?? 0) - now)}</p>
-        <p className="mt-1 text-[12px] font-semibold text-[#a39a83]">{fmtMDHM(note.unlockAt ?? 0)} · 到点自动开启</p>
-        <p className="mt-3 rounded-xl bg-[#f4eeda] px-3 py-2.5 text-[11.5px] leading-relaxed text-[#a39a83]">
+        <p className="mt-3 text-[15px] font-bold text-[#1a1a1a]">这颗时间胶囊还封存着</p>
+        <p className="mt-1.5 text-[23px] font-extrabold tracking-wide text-black">{fmtCountdown((note.unlockAt ?? 0) - now)}</p>
+        <p className="mt-1 text-[12px] font-semibold text-[#a3a3a3]">{fmtMDHM(note.unlockAt ?? 0)} · 到点自动开启</p>
+        <p className="mt-3 rounded-xl bg-neutral-100 px-3 py-2.5 text-[11.5px] leading-relaxed text-[#a3a3a3]">
           写下它的那一刻就被封存了——到点之前谁都看不到，急不来也改不了。
         </p>
         <button
           type="button"
           onClick={onClose}
-          className="mt-3 w-full rounded-full bg-[#e2d5b4] py-2.5 text-[13.5px] font-bold text-[#6b5b39] active:opacity-70"
+          className="mt-3 w-full rounded-full bg-black py-2.5 text-[13.5px] font-bold text-white active:opacity-70"
         >
           我知道了
         </button>
@@ -3018,7 +3042,6 @@ function BoardPage({
   showToast: (m: string) => void;
 }) {
   const notes = state.boardNotes ?? [];
-  const capsules = notes.filter((n) => n.unlockAt);
 
   // 倒计时每 30s 刷新（胶囊到点自动变为已开启）
   const [now, setNow] = useState(Date.now());
@@ -3030,7 +3053,8 @@ function BoardPage({
   // ---- 弹层与草稿状态 ----
   const [composing, setComposing] = useState(false);
   const [draft, setDraft] = useState('');
-  const [draftColor, setDraftColor] = useState(0); // 调色盘选中色（默认陶红）
+  const [draftColor, setDraftColor] = useState(0); // 素白卡的调色盘选中色
+  const [draftCard, setDraftCard] = useState(0); // 卡纸样式（0=素白，1-5=图案卡）
   const [capsuleOn, setCapsuleOn] = useState(false); // 时间胶囊开关
   const [unlockChoice, setUnlockChoice] = useState(0); // 0-4 预设 / 5 自定义
   const [customUnlock, setCustomUnlock] = useState(''); // 'YYYY-MM-DDTHH:mm'
@@ -3049,7 +3073,8 @@ function BoardPage({
 
   const openCompose = (capsule: boolean) => {
     setCapsuleOn(capsule);
-    setDraftColor(7); // 默认云白便签纸；想要颜色再从调色盘挑
+    setDraftCard(0); // 默认素白卡；想用图案再从卡纸里挑
+    setDraftColor(7); // 素白卡默认云白
     setComposing(true);
   };
   const closeCompose = () => {
@@ -3068,7 +3093,7 @@ function BoardPage({
     if (capsuleOn && plannedUnlock) unlockAt = plannedUnlock;
     const id = `me-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
     patch((prev) => ({
-      boardNotes: [{ id, from: 'me' as const, text, at: Date.now(), comments: [], color: draftColor, ...(unlockAt ? { unlockAt } : {}) }, ...(prev.boardNotes ?? [])].slice(0, 60),
+      boardNotes: [{ id, from: 'me' as const, text, at: Date.now(), comments: [], ...(draftCard > 0 ? { card: draftCard } : { color: draftColor }), ...(unlockAt ? { unlockAt } : {}) }, ...(prev.boardNotes ?? [])].slice(0, 60),
     }));
     closeCompose();
     setFlashId(id);
@@ -3088,64 +3113,61 @@ function BoardPage({
   };
 
   return (
-    <div className="relative flex h-full flex-col overflow-hidden" style={{ background: 'linear-gradient(180deg,#faf6ed 0%,#f2ebdc 100%)' }}>
-      {/* ===== 顶部：返回键 + 小标题 ===== */}
+    // 背景图/米色直接铺满整个界面（顶部按钮与底部操作栏都浮在背景上）
+    <div className="relative flex h-full flex-col overflow-hidden" style={wallStyleOf(state.boardBg)}>
+      {/* ===== 顶部：返回键（黑） + 小标题 + 背景切换（黑·三个点） ===== */}
       <div className="relative z-20 shrink-0">
         <button
           type="button"
           onClick={close}
           aria-label="返回"
-          className="absolute left-3 top-[54px] z-30 flex h-10 w-10 items-center justify-center rounded-full border border-[#d9d3c2] bg-white/80 text-[#6f6552] backdrop-blur-md transition-transform active:scale-95"
+          className="absolute left-3 top-[54px] z-30 flex h-10 w-10 items-center justify-center rounded-full bg-black text-white shadow-[0_4px_14px_rgba(0,0,0,0.35)] transition-transform active:scale-95"
         >
           <ArrowLeft className="h-[22px] w-[22px]" strokeWidth={2.4} />
         </button>
-        <p className="absolute left-1/2 top-[54px] flex h-10 -translate-x-1/2 items-center pl-[0.35em] text-[13px] font-semibold tracking-[0.35em] text-[#6f6552]/70">
+        <p
+          className="absolute left-1/2 top-[54px] flex h-10 -translate-x-1/2 items-center pl-[0.35em] text-[13px] font-semibold tracking-[0.35em] text-[#3c3c42]/75"
+          style={bgIdx > 0 ? { textShadow: '0 1px 4px rgba(255,255,255,0.65)' } : undefined}
+        >
           留言板
         </p>
-        {/* 背景切换（右上角；与返回键对称） */}
+        {/* 背景切换（右上角·黑底三个点；与返回键对称） */}
         <button
           type="button"
           onClick={() => setBgPicker(true)}
           aria-label="选择背景"
-          className="absolute right-3 top-[54px] z-30 flex h-10 w-10 items-center justify-center rounded-full border border-[#d9d3c2] bg-white/80 text-[#6f6552] backdrop-blur-md transition-transform active:scale-95"
+          className="absolute right-3 top-[54px] z-30 flex h-10 w-10 items-center justify-center rounded-full bg-black text-white shadow-[0_4px_14px_rgba(0,0,0,0.35)] transition-transform active:scale-95"
         >
-          <ImageIcon className="h-[19px] w-[19px]" strokeWidth={2.1} aria-hidden="true" />
+          <MoreVertical className="h-[20px] w-[20px]" strokeWidth={2.4} aria-hidden="true" />
         </button>
       </div>
 
-      {/* ===== 留言墙（简约米麻面板 + 便签瀑布流） ===== */}
-      <div className="relative z-10 min-h-0 flex-1 px-3">
-        <div className="relative flex h-full min-h-0 flex-col overflow-y-auto rounded-[20px]" style={wallStyleOf(state.boardBg)}>
-          {/* 板头统计 */}
-          <p className="shrink-0 px-4 pb-1 pt-3 text-center text-[11px] font-bold tracking-[0.18em] text-[#8a6d3e]/80">
-            已钉下 {notes.length} 张便签{capsules.length > 0 ? ` · ${capsules.length} 颗时间胶囊` : ''}
-          </p>
-          {/* 便签瀑布流（两列；新钉的便签带落钉动画） */}
-          <div className="columns-2 gap-2.5 px-2.5 pb-4 pt-1.5">
-            {notes.map((n) => (
-              <BoardNoteCard key={n.id} note={n} now={now} flash={flashId === n.id} onClick={() => setOpenId(n.id)} />
-            ))}
-          </div>
-          {/* 空墙提示 */}
-          {notes.length === 0 && (
-            <div className="flex flex-1 flex-col items-center justify-center gap-2.5 px-10 pb-10 text-center">
-              <span className="flex h-12 w-12 items-center justify-center rounded-full bg-[#e6d9b8] text-[#b09a6d] shadow-[inset_0_2px_5px_rgba(120,90,50,0.15)]">
-                <Pin className="h-6 w-6" strokeWidth={2} aria-hidden="true" />
-              </span>
-              <p className="text-[13.5px] font-bold text-[#8a6d3e]">墙上还空着</p>
-              <p className="text-[11.5px] leading-relaxed text-[#a98d5f]">钉下第一张手写便签，或者塞一颗慢一点的时间胶囊</p>
-            </div>
-          )}
+      {/* ===== 便签瀑布流（直接铺在整面背景上；两列；新钉的便签带落钉动画） ===== */}
+      <div className="relative z-10 flex min-h-0 flex-1 flex-col overflow-y-auto">
+        <div className="columns-2 gap-2.5 px-3.5 pb-4 pt-[106px]">
+          {notes.map((n) => (
+            <BoardNoteCard key={n.id} note={n} now={now} flash={flashId === n.id} onClick={() => setOpenId(n.id)} />
+          ))}
         </div>
+        {/* 空墙提示 */}
+        {notes.length === 0 && (
+          <div className="flex flex-1 flex-col items-center justify-center gap-2.5 px-10 pb-16 text-center">
+            <span className="flex h-12 w-12 items-center justify-center rounded-full bg-white/70 text-neutral-500 backdrop-blur-sm">
+              <Pin className="h-6 w-6" strokeWidth={2} aria-hidden="true" />
+            </span>
+            <p className="text-[13.5px] font-bold text-[#3c3c42]">墙上还空着</p>
+            <p className="text-[11.5px] leading-relaxed text-[#3c3c42]/55">钉下第一张手写便签，或者塞一颗慢一点的时间胶囊</p>
+          </div>
+        )}
       </div>
 
       {/* ===== 背景选择弹层（默认米色 + 5 张上传图；选了即换并持久化） ===== */}
       {bgPicker && (
         <div className="absolute inset-0 z-40 flex items-center justify-center px-6" role="dialog" aria-label="选择背景">
-          <button type="button" aria-label="关闭" onClick={() => setBgPicker(false)} className="absolute inset-0 bg-[#5c5244]/25 backdrop-blur-[2px]" />
-          <div className="relative w-full max-w-[320px] rounded-2xl border border-[#e7e0cd] bg-[#fdfbf4] p-4 shadow-[0_16px_44px_rgba(80,66,44,0.25)]">
-            <p className="text-[15px] font-bold text-[#5f5646]">选择背景</p>
-            <p className="mt-0.5 text-[12px] text-[#a39a83]">挑一张喜欢的图，钉在图上</p>
+          <button type="button" aria-label="关闭" onClick={() => setBgPicker(false)} className="absolute inset-0 bg-black/25 backdrop-blur-[2px]" />
+          <div className="relative w-full max-w-[320px] rounded-2xl border border-neutral-200 bg-white p-4 shadow-[0_16px_44px_rgba(0,0,0,0.2)]">
+            <p className="text-[15px] font-bold text-[#1a1a1a]">选择背景</p>
+            <p className="mt-0.5 text-[12px] text-[#a3a3a3]">挑一张喜欢的图，钉在图上</p>
             <div className="mt-3 grid grid-cols-3 gap-2.5">
               {BOARD_BGS.map((b, i) => (
                 <button
@@ -3169,13 +3191,13 @@ function BoardPage({
                         : { backgroundImage: `linear-gradient(rgba(250,247,240,${b.veil}),rgba(250,247,240,${b.veil})),url(/board-bg/bg-${i}.jpg)`, backgroundSize: 'cover', backgroundPosition: 'center' }
                     }
                   />
-                  <span className={`absolute inset-0 rounded-xl ${bgIdx === i ? 'shadow-[inset_0_0_0_2px_#c96a58]' : 'shadow-[inset_0_0_0_1px_rgba(146,116,80,0.18)]'}`} aria-hidden="true" />
+                  <span className={`absolute inset-0 rounded-xl ${bgIdx === i ? 'shadow-[inset_0_0_0_2px_#000]' : 'shadow-[inset_0_0_0_1px_rgba(0,0,0,0.12)]'}`} aria-hidden="true" />
                   {bgIdx === i && (
-                    <span className="absolute right-1.5 top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-[#c96a58] text-white shadow">
+                    <span className="absolute right-1.5 top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-black text-white shadow">
                       <Check className="h-3 w-3" strokeWidth={3.2} aria-hidden="true" />
                     </span>
                   )}
-                  <span className="block pb-1 pt-1.5 text-center text-[11px] font-bold text-[#6f6552]">{b.label}</span>
+                  <span className="block pb-1 pt-1.5 text-center text-[11px] font-bold text-[#3c3c42]">{b.label}</span>
                 </button>
               ))}
             </div>
@@ -3183,45 +3205,47 @@ function BoardPage({
         </div>
       )}
 
-      {/* ===== 底部操作栏：时间胶囊（圆钮） + 钉便签（主按钮；空墙时呼吸柔光） ===== */}
+      {/* ===== 底部操作栏：时间胶囊（白圆钮） + 钉便签（黑主按钮；空墙时呼吸柔光） ===== */}
       <div className="relative z-20 flex shrink-0 items-center justify-center gap-4 px-6 pb-[34px] pt-2">
-        {/* 塞一颗时间胶囊（圆钮：沙漏） */}
+        {/* 塞一颗时间胶囊（白圆钮 + 黑沙漏） */}
         <button
           type="button"
           onClick={() => openCompose(true)}
           aria-label="塞一颗时间胶囊"
-          className="flex h-[52px] w-[52px] shrink-0 items-center justify-center rounded-full border border-[#ddd6c3] bg-white/75 text-[#a3752f] backdrop-blur-md transition-transform active:scale-95"
+          className="flex h-[52px] w-[52px] shrink-0 items-center justify-center rounded-full border border-black/10 bg-white/90 text-black shadow-[0_4px_14px_rgba(0,0,0,0.18)] backdrop-blur-md transition-transform active:scale-95"
         >
           <Hourglass className="h-[22px] w-[22px]" strokeWidth={2.1} aria-hidden="true" />
         </button>
-        {/* 钉一张便签（主按钮：扁平陶红；空墙时呼吸脉动） */}
+        {/* 钉一张便签（黑主按钮；空墙时呼吸脉动） */}
         <button
           type="button"
           onClick={() => openCompose(false)}
           aria-label="钉一张便签"
-          className={`flex h-[54px] shrink-0 items-center gap-1.5 rounded-full bg-[#dd7f6c] px-8 text-[15.5px] font-bold tracking-wide text-white shadow-[0_8px_22px_rgba(221,127,108,0.35)] transition-transform active:scale-95 ${notes.length === 0 ? '[animation:wish-invite-pulse_2.8s_ease-in-out_infinite]' : ''}`}
+          className={`flex h-[54px] shrink-0 items-center gap-1.5 rounded-full bg-black px-8 text-[15.5px] font-bold tracking-wide text-white shadow-[0_8px_22px_rgba(0,0,0,0.3)] transition-transform active:scale-95 ${notes.length === 0 ? '[animation:wish-invite-pulse_2.8s_ease-in-out_infinite]' : ''}`}
         >
           <Pin className="h-5 w-5" strokeWidth={2.6} aria-hidden="true" />
           钉一张便签
         </button>
       </div>
 
-      {/* ===== 钉便签/塞胶囊弹层（书写 + 调色盘 + 胶囊开关 + 解锁时间） ===== */}
+      {/* ===== 钉便签/塞胶囊弹层（书写 + 卡纸选择 + 调色盘 + 胶囊开关 + 解锁时间） ===== */}
       {composing && (
         <div className="absolute inset-0 z-40 flex items-center justify-center px-6" role="dialog" aria-label={capsuleOn ? '塞一颗时间胶囊' : '钉一张便签'}>
-          <button type="button" aria-label="取消" onClick={closeCompose} className="absolute inset-0 bg-[#5c5244]/25 backdrop-blur-[2px]" />
-          <div className="relative max-h-[86%] w-full max-w-[320px] overflow-y-auto rounded-2xl border border-[#e7e0cd] bg-[#fdfbf4] p-4 shadow-[0_16px_44px_rgba(80,66,44,0.25)]">
-            <p className="text-[15px] font-bold text-[#5f5646]">{capsuleOn ? '塞一颗时间胶囊' : '钉一张便签'}</p>
-            <p className="mt-0.5 text-[12px] leading-relaxed text-[#a39a83]">
+          <button type="button" aria-label="取消" onClick={closeCompose} className="absolute inset-0 bg-black/25 backdrop-blur-[2px]" />
+          <div className="relative max-h-[86%] w-full max-w-[320px] overflow-y-auto rounded-2xl border border-neutral-200 bg-white p-4 shadow-[0_16px_44px_rgba(0,0,0,0.2)]">
+            <p className="text-[15px] font-bold text-[#1a1a1a]">{capsuleOn ? '塞一颗时间胶囊' : '钉一张便签'}</p>
+            <p className="mt-0.5 text-[12px] leading-relaxed text-[#a3a3a3]">
               {capsuleOn ? '写下的那一刻就被封存——到点之前，连你自己也看不到。' : '随手写一句想说的，钉在你们的留言墙上——TA 会看到。'}
             </p>
-            {/* 书写区（颜色随调色盘实时变化；胶囊模式为牛皮纸色） */}
+            {/* 书写区（随卡纸/颜色实时变化；胶囊模式为浅灰封存卡） */}
             <div
-              className="relative mt-3 rounded-xl px-4 py-4 pt-5 shadow-[0_4px_14px_rgba(70,58,42,0.15)]"
+              className="relative mt-3 rounded-xl px-4 py-4 pt-5 shadow-[0_4px_14px_rgba(0,0,0,0.12)]"
               style={
                 capsuleOn
-                  ? { background: 'linear-gradient(180deg,#e9dfc6,#e2d5b4)', color: '#6b5b39', border: '1.5px dashed #bfa878' }
-                  : { background: previewCol.bg, color: previewCol.text }
+                  ? { background: 'linear-gradient(180deg,#ececec,#e6e6e6)', color: '#52525b', border: '1.5px dashed #a8a8a8' }
+                  : draftCard > 0
+                    ? { backgroundImage: `url(/board-cards/card-${draftCard}.jpg)`, backgroundSize: 'cover', backgroundPosition: 'center', color: BOARD_CARDS[draftCard - 1].text }
+                    : { background: previewCol.bg, color: previewCol.text }
               }
             >
               <NotePin />
@@ -3241,53 +3265,100 @@ function BoardPage({
               />
               <p className="mt-1 text-right text-[11px] font-bold opacity-70">{draft.length}/60</p>
             </div>
-            {/* 调色盘（16 色自选·两行八列；胶囊模式下为开启后的颜色） */}
+            {/* 卡纸选择（素白 + 5 张图案卡；图案卡自带配色） */}
             <div className="mt-3">
-              <p className="text-[11.5px] font-bold text-[#a39a83]">
-                {capsuleOn ? '开启后的便签颜色' : '选颜色'}
-                <span className="ml-1 text-[#8a6d3e]">· {NOTE_COLORS[draftColor % NOTE_COLORS.length].name}</span>
+              <p className="text-[11.5px] font-bold text-[#a3a3a3]">
+                {capsuleOn ? '开启后的便签卡纸' : '选卡纸'}
+                <span className="ml-1 text-[#52525b]">· {draftCard > 0 ? BOARD_CARDS[draftCard - 1].label : '素白'}</span>
               </p>
-              <div className="mt-2 grid grid-cols-8 gap-1.5">
-                {NOTE_COLORS.map((c, i) => (
+              <div className="mt-2 grid grid-cols-6 gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setDraftCard(0)}
+                  aria-label="素白"
+                  aria-pressed={draftCard === 0}
+                  className="relative overflow-hidden rounded-lg transition-transform active:scale-90"
+                >
+                  <span className="block aspect-[3/4] w-full rounded-lg bg-[#faf8f2] shadow-[inset_0_0_0_1px_rgba(0,0,0,0.1)]" />
+                  {draftCard === 0 && <span className="absolute inset-0 rounded-lg shadow-[inset_0_0_0_2px_#000]" aria-hidden="true" />}
+                  {draftCard === 0 && (
+                    <span className="absolute right-1 top-1 flex h-4 w-4 items-center justify-center rounded-full bg-black text-white">
+                      <Check className="h-2.5 w-2.5" strokeWidth={3.5} aria-hidden="true" />
+                    </span>
+                  )}
+                </button>
+                {BOARD_CARDS.map((c, i) => (
                   <button
-                    key={c.name}
+                    key={c.label}
                     type="button"
-                    onClick={() => setDraftColor(i)}
-                    aria-label={c.name}
-                    aria-pressed={draftColor === i}
-                    className={`flex aspect-square w-full items-center justify-center rounded-full transition-transform active:scale-90 ${
-                      draftColor === i ? 'scale-110 shadow-[0_0_0_2px_#fdfbf4,0_0_0_3.5px_#9a8f78]' : 'shadow-[0_1px_4px_rgba(70,58,42,0.18)]'
-                    }`}
-                    style={{ background: c.swatch }}
+                    onClick={() => setDraftCard(i + 1)}
+                    aria-label={c.label}
+                    aria-pressed={draftCard === i + 1}
+                    className="relative overflow-hidden rounded-lg transition-transform active:scale-90"
                   >
-                    {draftColor === i && <Check className="h-3.5 w-3.5" strokeWidth={3.2} style={{ color: c.text }} aria-hidden="true" />}
+                    <span
+                      className="block aspect-[3/4] w-full rounded-lg"
+                      style={{ backgroundImage: `url(/board-cards/card-${i + 1}.jpg)`, backgroundSize: 'cover', backgroundPosition: 'center' }}
+                    />
+                    <span className={`absolute inset-0 rounded-lg ${draftCard === i + 1 ? 'shadow-[inset_0_0_0_2px_#000]' : 'shadow-[inset_0_0_0_1px_rgba(0,0,0,0.08)]'}`} aria-hidden="true" />
+                    {draftCard === i + 1 && (
+                      <span className="absolute right-1 top-1 flex h-4 w-4 items-center justify-center rounded-full bg-black text-white">
+                        <Check className="h-2.5 w-2.5" strokeWidth={3.5} aria-hidden="true" />
+                      </span>
+                    )}
                   </button>
                 ))}
               </div>
             </div>
+            {/* 调色盘（素白卡时才可选颜色；16 色两行八列） */}
+            {draftCard === 0 && (
+              <div className="mt-3">
+                <p className="text-[11.5px] font-bold text-[#a3a3a3]">
+                  {capsuleOn ? '开启后的便签颜色' : '选颜色'}
+                  <span className="ml-1 text-[#52525b]">· {NOTE_COLORS[draftColor % NOTE_COLORS.length].name}</span>
+                </p>
+                <div className="mt-2 grid grid-cols-8 gap-1.5">
+                  {NOTE_COLORS.map((c, i) => (
+                    <button
+                      key={c.name}
+                      type="button"
+                      onClick={() => setDraftColor(i)}
+                      aria-label={c.name}
+                      aria-pressed={draftColor === i}
+                      className={`flex aspect-square w-full items-center justify-center rounded-full transition-transform active:scale-90 ${
+                        draftColor === i ? 'scale-110 shadow-[0_0_0_2px_#fff,0_0_0_3.5px_#1a1a1a]' : 'shadow-[0_1px_4px_rgba(0,0,0,0.15)]'
+                      }`}
+                      style={{ background: c.swatch }}
+                    >
+                      {draftColor === i && <Check className="h-3.5 w-3.5" strokeWidth={3.2} style={{ color: c.text }} aria-hidden="true" />}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
             {/* 时间胶囊开关 */}
             <button
               type="button"
               onClick={() => setCapsuleOn((v) => !v)}
               aria-pressed={capsuleOn}
               aria-label="设为时间胶囊"
-              className="mt-3 flex w-full items-center gap-2.5 rounded-xl border border-[#ece6d4] bg-white/60 px-3.5 py-2.5 text-left active:opacity-70"
+              className="mt-3 flex w-full items-center gap-2.5 rounded-xl border border-neutral-200 bg-neutral-50 px-3.5 py-2.5 text-left active:opacity-70"
             >
-              <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${capsuleOn ? 'bg-[#e2d5b4] text-[#8a6d3e]' : 'bg-[#f0ebdd] text-[#b3aa92]'}`}>
+              <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${capsuleOn ? 'bg-black text-white' : 'bg-neutral-200 text-neutral-500'}`}>
                 <Hourglass className="h-4 w-4" strokeWidth={2.2} aria-hidden="true" />
               </span>
               <span className="min-w-0 flex-1">
-                <span className="block text-[13px] font-bold text-[#5f5646]">设为时间胶囊</span>
-                <span className="mt-[1px] block text-[10.5px] leading-tight text-[#a39a83]">到点自动开启，期间谁都看不到</span>
+                <span className="block text-[13px] font-bold text-[#1a1a1a]">设为时间胶囊</span>
+                <span className="mt-[1px] block text-[10.5px] leading-tight text-[#a3a3a3]">到点自动开启，期间谁都看不到</span>
               </span>
-              <span className={`relative h-6 w-10 shrink-0 rounded-full transition-colors ${capsuleOn ? 'bg-[#c96a58]' : 'bg-[#d8d2c0]'}`}>
+              <span className={`relative h-6 w-10 shrink-0 rounded-full transition-colors ${capsuleOn ? 'bg-black' : 'bg-neutral-300'}`}>
                 <span className={`absolute top-[3px] h-[18px] w-[18px] rounded-full bg-white shadow transition-all ${capsuleOn ? 'left-[21px]' : 'left-[3px]'}`} />
               </span>
             </button>
             {/* 解锁时间选择（胶囊模式） */}
             {capsuleOn && (
               <div className="mt-2.5">
-                <p className="text-[11.5px] font-bold text-[#a39a83]">什么时候开启</p>
+                <p className="text-[11.5px] font-bold text-[#a3a3a3]">什么时候开启</p>
                 <div className="mt-1.5 grid grid-cols-3 gap-2">
                   {CAPSULE_PRESETS.map((p, i) => (
                     <button
@@ -3296,7 +3367,7 @@ function BoardPage({
                       onClick={() => setUnlockChoice(i)}
                       aria-pressed={unlockChoice === i}
                       className={`rounded-xl border px-2 py-2 text-center transition-transform active:scale-95 ${
-                        unlockChoice === i ? 'border-[#c96a58] bg-[#fbf3ef] text-[#c96a58]' : 'border-[#ece6d4] bg-white/60 text-[#6f6552]'
+                        unlockChoice === i ? 'border-black bg-neutral-100 text-black' : 'border-neutral-200 bg-neutral-50 text-[#52525b]'
                       }`}
                     >
                       <span className="block text-[12.5px] font-bold">{p.label}</span>
@@ -3308,7 +3379,7 @@ function BoardPage({
                     onClick={() => setUnlockChoice(5)}
                     aria-pressed={unlockChoice === 5}
                     className={`rounded-xl border px-2 py-2 text-center transition-transform active:scale-95 ${
-                      unlockChoice === 5 ? 'border-[#c96a58] bg-[#fbf3ef] text-[#c96a58]' : 'border-[#ece6d4] bg-white/60 text-[#6f6552]'
+                      unlockChoice === 5 ? 'border-black bg-neutral-100 text-black' : 'border-neutral-200 bg-neutral-50 text-[#52525b]'
                     }`}
                   >
                     <span className="block text-[12.5px] font-bold">自定义</span>
@@ -3321,13 +3392,13 @@ function BoardPage({
                     value={customUnlock}
                     min={new Date(Date.now() + 3600000).toISOString().slice(0, 16)}
                     onChange={(e) => setCustomUnlock(e.target.value)}
-                    className="mt-2 w-full rounded-xl border border-[#ece6d4] bg-white/70 px-3 py-2 text-[13px] text-[#4a4436] outline-none"
+                    className="mt-2 w-full rounded-xl border border-neutral-200 bg-white px-3 py-2 text-[13px] text-[#262626] outline-none"
                     aria-label="自定义开启时间"
                   />
                 )}
-                {capsuleOn && !unlockOk && <p className="mt-1.5 text-[11px] font-semibold text-[#c96a58]">开启时间至少要在 1 分钟之后</p>}
+                {capsuleOn && !unlockOk && <p className="mt-1.5 text-[11px] font-semibold text-black">开启时间至少要在 1 分钟之后</p>}
                 {capsuleOn && unlockOk && plannedUnlock > 0 && (
-                  <p className="mt-1.5 text-[11px] font-semibold text-[#8a6d3e]">
+                  <p className="mt-1.5 text-[11px] font-semibold text-[#52525b]">
                     将于 {fmtMDHM(plannedUnlock)} 开启 · {fmtCountdown(plannedUnlock - Date.now())}
                   </p>
                 )}
@@ -3338,7 +3409,7 @@ function BoardPage({
               <button
                 type="button"
                 onClick={closeCompose}
-                className="rounded-full px-4 py-2 text-[13.5px] font-bold text-[#a39a83] active:opacity-60"
+                className="rounded-full px-4 py-2 text-[13.5px] font-bold text-[#a3a3a3] active:opacity-60"
               >
                 先不钉了
               </button>
@@ -3346,7 +3417,7 @@ function BoardPage({
                 type="button"
                 onClick={pinNote}
                 disabled={!draft.trim() || !unlockOk}
-                className="rounded-full bg-[#dd7f6c] px-5 py-2 text-[13.5px] font-bold text-white shadow-[0_4px_12px_rgba(221,127,108,0.35)] transition-transform active:scale-95 disabled:opacity-40"
+                className="rounded-full bg-black px-5 py-2 text-[13.5px] font-bold text-white shadow-[0_4px_12px_rgba(0,0,0,0.25)] transition-transform active:scale-95 disabled:opacity-40"
               >
                 {capsuleOn ? '封存起来 ♡' : '钉上留言墙 ♡'}
               </button>
