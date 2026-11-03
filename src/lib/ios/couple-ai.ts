@@ -1484,7 +1484,7 @@ async function aiTickBoardNote(snap: CoupleSnap, me: string, ta: string, p: TaPe
     from: 'ta' as const,
     text,
     at: Date.now(),
-    color: Math.floor(Math.random() * 8), // TA 也从调色盘里挑一张心仪颜色的便签纸
+    color: Math.floor(Math.random() * 16), // TA 从 16 色便签纸里挑一张心仪的颜色
     comments: [] as { id: string; from: 'me' | 'ta'; text: string; at: number }[],
   };
   writeSnap((s) => ({

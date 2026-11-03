@@ -2715,15 +2715,16 @@ function AnniversaryPage(props: { state: CoupleState; patch: (p: Partial<CoupleS
 /**
  * ================= 恋爱留言板（软木墙 + 手写便签 + 时间胶囊彩蛋） =================
  * 按需求以「留言板为主 + 时间胶囊彩蛋」重建（替代许愿树）：
- * - 一面软木留言墙：两人随手钉便签（8 色调色盘自选颜色），点开可回一句，成小对话串；
+ * - 一面软木留言墙：两人随手钉便签（16 色调色盘自选颜色），点开可回一句，成小对话串；
  * - 时间胶囊：写下即封存（到点前连自己也看不到），锁着倒计时钉在墙上，到点自动开启；
  * - 数据契约：boardNotes（最新在前，最多 60 张）+ boardNoteDay（TA 钉便签去重）；
  *   旧许愿树 treeCards 由 loadCoupleState 一次性迁移为第一批便签；
  * - AI（TA）自主钉便签（couple-ai.ts 'boardnote' 行为）与便签下留言回复全链路保留。
  */
 
-/** 便签调色盘（8 种低饱和暖色；bg = 同色微渐层，扁平但有体积） */
+/** 便签调色盘（16 色补全色环；前 8 色索引与旧版一致，历史便签颜色不变；bg = 同色微渐层，扁平但有体积） */
 const NOTE_COLORS: { name: string; bg: string; text: string; swatch: string }[] = [
+  // ── 原有暖色 8 种（索引 0-7 原位保留，旧数据颜色不漂移） ──
   { name: '陶红', bg: 'linear-gradient(180deg,#e29080,#dd7f6c)', text: '#fff6f1', swatch: '#dd7f6c' },
   { name: '橘橙', bg: 'linear-gradient(180deg,#eda375,#e79a62)', text: '#fff7ef', swatch: '#e79a62' },
   { name: '杏黄', bg: 'linear-gradient(180deg,#efca7f,#ecc26e)', text: '#6a531a', swatch: '#ecc26e' },
@@ -2732,6 +2733,15 @@ const NOTE_COLORS: { name: string; bg: string; text: string; swatch: string }[] 
   { name: '藤紫', bg: 'linear-gradient(180deg,#bcafda,#b4a5d3)', text: '#fbf8ff', swatch: '#b4a5d3' },
   { name: '樱粉', bg: 'linear-gradient(180deg,#ecb4c7,#e7abc0)', text: '#fff3f7', swatch: '#e7abc0' },
   { name: '米白', bg: 'linear-gradient(180deg,#f5efe0,#f2ead7)', text: '#6b5b39', swatch: '#f2ead7' },
+  // ── 新增 8 种（补全色环：石榴红/蜜桃/柠黄/竹青/湖青/晴空/葡萄/暖灰） ──
+  { name: '石榴', bg: 'linear-gradient(180deg,#d5756e,#cc6a62)', text: '#fff4f2', swatch: '#cc6a62' },
+  { name: '蜜桃', bg: 'linear-gradient(180deg,#f2c8ab,#eebf9e)', text: '#6e4a30', swatch: '#eebf9e' },
+  { name: '柠黄', bg: 'linear-gradient(180deg,#efd98f,#e9d178)', text: '#63531c', swatch: '#e9d178' },
+  { name: '竹青', bg: 'linear-gradient(180deg,#9dc0a6,#92b699)', text: '#2d4229', swatch: '#92b699' },
+  { name: '湖青', bg: 'linear-gradient(180deg,#89bfbb,#7fb4b0)', text: '#f0faf9', swatch: '#7fb4b0' },
+  { name: '晴空', bg: 'linear-gradient(180deg,#82aade,#779fd6)', text: '#f3f9ff', swatch: '#779fd6' },
+  { name: '葡萄', bg: 'linear-gradient(180deg,#a294c9,#998bc1)', text: '#faf8ff', swatch: '#998bc1' },
+  { name: '暖灰', bg: 'linear-gradient(180deg,#cec9bd,#c5c0b3)', text: '#4c453a', swatch: '#c5c0b3' },
 ];
 
 /** 便签显示色（旧数据无 color：我=陶红 / TA=米白，兼容历史数据） */
@@ -2784,12 +2794,17 @@ function NotePin() {
       className="absolute -top-[7px] left-1/2 block h-[13px] w-[13px] -translate-x-1/2 rounded-full shadow-[0_2px_4px_rgba(60,40,20,0.45)]"
       style={{ background: 'radial-gradient(circle at 35% 30%, #f6dfae, #c9924e 68%, #a87838)' }}
     >
+      <span className="absolute left-[3px] top-[2.5px] h-[3.5px] w-[3.5px] rounded-full bg-white/75" />
       <span className="absolute left-1/2 top-full block h-[5px] w-[1.5px] -translate-x-1/2 bg-[#7a5a34]" />
     </span>
   );
 }
 
-/** 墙上的一张便签（颜色自选、黄铜图钉、轻微角度；胶囊锁着时内容封存只显倒计时；点开看正文+留言） */
+/** 纸面质感叠层（顶缘高光 + 底部微沉 + 右下折角；pointer-events-none 不挡点击，墙上便签与详情大卡共用） */
+const NOTE_PAPER_SHEEN =
+  'linear-gradient(180deg,rgba(255,255,255,0.25),rgba(255,255,255,0) 34%),linear-gradient(0deg,rgba(0,0,0,0.06),rgba(0,0,0,0) 22%),linear-gradient(315deg,rgba(0,0,0,0.11),rgba(0,0,0,0) 44%)';
+
+/** 墙上的一张便签（颜色自选、黄铜图钉、轻微角度、纸面质感；胶囊锁着时内容封存只显倒计时；点开看正文+留言） */
 function BoardNoteCard({ note, now, flash, onClick }: { note: BoardNote; now: number; flash: boolean; onClick: () => void }) {
   const col = noteColorOf(note);
   const isCapsule = !!note.unlockAt;
@@ -2802,18 +2817,20 @@ function BoardNoteCard({ note, now, flash, onClick }: { note: BoardNote; now: nu
       type="button"
       onClick={onClick}
       aria-label={locked ? '一颗还没开启的时间胶囊' : '查看这张便签'}
-      className={`relative mb-2.5 block w-full break-inside-avoid rounded-[8px] px-3 pb-2.5 pt-[17px] text-left shadow-[0_3px_10px_rgba(96,66,33,0.28)] transition-transform duration-150 active:scale-[0.96] ${flash ? '[animation:board-pin-in_.45s_ease-out]' : ''}`}
+      className={`relative mb-2.5 block w-full break-inside-avoid rounded-[10px] px-3.5 pb-2.5 pt-[17px] text-left shadow-[0_4px_12px_rgba(96,66,33,0.22),0_1px_3px_rgba(96,66,33,0.16)] transition-transform duration-150 active:scale-[0.96] ${flash ? '[animation:board-pin-in_.45s_ease-out]' : ''}`}
       style={
         locked
-          ? { background: 'linear-gradient(180deg,#e9dfc6,#e2d5b4)', color: '#8a6d3e', border: '1.5px dashed #bfa878', transform: `rotate(${rot}deg)`, '--rot': `${rot}deg` }
+          ? { background: 'linear-gradient(180deg,#ecdfc0,#e4d3a9)', color: '#8a6d3e', border: '1.5px dashed #c4a874', transform: `rotate(${rot}deg)`, '--rot': `${rot}deg` }
           : { background: col.bg, color: col.text, transform: `rotate(${rot}deg)`, '--rot': `${rot}deg` }
       }
     >
       <NotePin />
+      {/* 纸面质感：顶缘高光 + 底部微沉 + 右下折角 */}
+      <span aria-hidden="true" className="pointer-events-none absolute inset-0 rounded-[10px]" style={{ background: NOTE_PAPER_SHEEN }} />
       {locked ? (
         <>
           <span className="flex items-center gap-1 text-[10.5px] font-bold tracking-wide opacity-90">
-            <Lock className="h-3.5 w-3.5" strokeWidth={2.4} aria-hidden="true" />
+            <Hourglass className="h-3.5 w-3.5" strokeWidth={2.4} aria-hidden="true" />
             时间胶囊 · 封存中
           </span>
           {/* 打码的字句（封存中谁也看不到） */}
@@ -2827,17 +2844,17 @@ function BoardNoteCard({ note, now, flash, onClick }: { note: BoardNote; now: nu
       ) : (
         <>
           {isCapsule && (
-            <span className="mb-1 inline-flex items-center gap-1 rounded-full bg-black/10 px-2 py-[2px] text-[9.5px] font-bold tracking-wide">
+            <span className="mb-1.5 inline-flex items-center gap-1 rounded-full bg-white/30 px-2 py-[2px] text-[9.5px] font-bold tracking-wide backdrop-blur-[1px]">
               <LockOpen className="h-3 w-3" strokeWidth={2.6} aria-hidden="true" />
               胶囊已开启
             </span>
           )}
-          <p className="line-clamp-6 break-all text-[12.5px] font-semibold leading-[1.55]">{note.text}</p>
-          <p className="mt-1.5 flex items-center gap-2 text-[10px] font-bold opacity-70">
-            <span>{fmtDate(note.at).slice(5)}</span>
+          <p className="line-clamp-6 break-all text-[12.5px] font-semibold leading-[1.6]">{note.text}</p>
+          <p className="mt-2 flex items-center gap-1.5 text-[10px] font-bold">
+            <span className="opacity-60">{fmtDate(note.at).slice(5)}</span>
             {n > 0 && (
-              <span className="flex items-center gap-[3px]">
-                <MessageSquare className="h-[10px] w-[10px]" strokeWidth={2.6} aria-hidden="true" />
+              <span className="flex items-center gap-[3px] rounded-full bg-black/10 px-1.5 py-[1px] text-[9.5px]">
+                <MessageSquare className="h-[9px] w-[9px]" strokeWidth={2.8} aria-hidden="true" />
                 {n}
               </span>
             )}
@@ -2877,12 +2894,14 @@ function NoteDetail({
         {/* 便签正文（自选色大卡 + 图钉） */}
         <div className="shrink-0 px-4 pb-3 pt-5">
           <div
-            className="relative rounded-xl px-4 py-5 pt-6 shadow-[0_4px_14px_rgba(70,58,42,0.15)]"
+            className="relative rounded-xl px-4 py-5 pt-6 shadow-[0_5px_16px_rgba(70,58,42,0.18)]"
             style={{ background: col.bg, color: col.text }}
           >
             <NotePin />
+            {/* 纸面质感：与墙上便签一致的高光/折角 */}
+            <span aria-hidden="true" className="pointer-events-none absolute inset-0 rounded-xl" style={{ background: NOTE_PAPER_SHEEN }} />
             {note.unlockAt && (
-              <p className="mb-1.5 inline-flex items-center gap-1 rounded-full bg-black/10 px-2 py-[2px] text-[9.5px] font-bold tracking-wide">
+              <p className="mb-1.5 inline-flex items-center gap-1 rounded-full bg-white/30 px-2 py-[2px] text-[9.5px] font-bold tracking-wide backdrop-blur-[1px]">
                 <LockOpen className="h-3 w-3" strokeWidth={2.6} aria-hidden="true" />
                 胶囊 · {fmtMDHM(note.unlockAt)} 已开启
               </p>
@@ -2955,7 +2974,7 @@ function CapsulePending({ note, now, onClose }: { note: BoardNote; now: number; 
       <button type="button" aria-label="关闭" onClick={onClose} className="absolute inset-0 bg-[#5c5244]/30 backdrop-blur-[2px]" />
       <div className="relative w-full max-w-[320px] rounded-2xl border border-[#e2d6bb] bg-[#fdfaf0] p-5 text-center shadow-[0_16px_44px_rgba(80,66,44,0.25)]">
         <span className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-[#efe5c9] text-[#a98a5f] shadow-[inset_0_2px_6px_rgba(120,90,50,0.18)]">
-          <Lock className="h-7 w-7" strokeWidth={2.2} aria-hidden="true" />
+          <Hourglass className="h-7 w-7" strokeWidth={2.2} aria-hidden="true" />
         </span>
         <p className="mt-3 text-[15px] font-bold text-[#5f5646]">这颗时间胶囊还封存着</p>
         <p className="mt-1.5 text-[23px] font-extrabold tracking-wide text-[#c96a58]">{fmtCountdown((note.unlockAt ?? 0) - now)}</p>
@@ -3017,6 +3036,7 @@ function BoardPage({
 
   const openCompose = (capsule: boolean) => {
     setCapsuleOn(capsule);
+    setDraftColor(Math.floor(Math.random() * NOTE_COLORS.length)); // 每次随机起手色——16 色便签纸换着用
     setComposing(true);
   };
   const closeCompose = () => {
@@ -3160,10 +3180,13 @@ function BoardPage({
               />
               <p className="mt-1 text-right text-[11px] font-bold opacity-70">{draft.length}/60</p>
             </div>
-            {/* 调色盘（8 色自选；胶囊模式下为开启后的颜色） */}
+            {/* 调色盘（16 色自选·两行八列；胶囊模式下为开启后的颜色） */}
             <div className="mt-3">
-              <p className="text-[11.5px] font-bold text-[#a39a83]">{capsuleOn ? '开启后的便签颜色' : '选颜色'}</p>
-              <div className="mt-1.5 flex items-center gap-2">
+              <p className="text-[11.5px] font-bold text-[#a39a83]">
+                {capsuleOn ? '开启后的便签颜色' : '选颜色'}
+                <span className="ml-1 text-[#8a6d3e]">· {NOTE_COLORS[draftColor % NOTE_COLORS.length].name}</span>
+              </p>
+              <div className="mt-2 grid grid-cols-8 gap-1.5">
                 {NOTE_COLORS.map((c, i) => (
                   <button
                     key={c.name}
@@ -3171,12 +3194,12 @@ function BoardPage({
                     onClick={() => setDraftColor(i)}
                     aria-label={c.name}
                     aria-pressed={draftColor === i}
-                    className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-transform active:scale-90 ${
+                    className={`flex aspect-square w-full items-center justify-center rounded-full transition-transform active:scale-90 ${
                       draftColor === i ? 'scale-110 shadow-[0_0_0_2px_#fdfbf4,0_0_0_3.5px_#9a8f78]' : 'shadow-[0_1px_4px_rgba(70,58,42,0.18)]'
                     }`}
                     style={{ background: c.swatch }}
                   >
-                    {draftColor === i && <Check className="h-4 w-4" strokeWidth={3.2} style={{ color: c.text }} aria-hidden="true" />}
+                    {draftColor === i && <Check className="h-3.5 w-3.5" strokeWidth={3.2} style={{ color: c.text }} aria-hidden="true" />}
                   </button>
                 ))}
               </div>
