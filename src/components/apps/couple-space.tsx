@@ -274,7 +274,8 @@ export interface CoupleState {
   treeCardDay?: string; // TA（AI）挂卡去重（每天最多一张）
   boardNotes: BoardNote[]; // 恋爱留言板便签（最新在前，最多 60 张；unlockAt 非空 = 时间胶囊）
   boardNoteDay?: string; // TA（AI）钉便签去重（每天最多一张）
-  boardBg?: number; // 留言板背景：0-5=用户上传的 6 张背景图（缺省 0）
+  boardBg?: number; // 留言板背景：0-5=内置 6 张背景图，100+=手机上传的自定义背景（boardBgCustom 下标 + 100）
+  boardBgCustom?: { src: string; veil: number }[]; // 手机上传的自定义背景（canvas 压缩后的 dataURL + 按亮度定的纱罩；最多 4 张）
   taMissYou: number; // TA（AI）想你累计（第九轮：AI 每天想你）
   taMissYouByDay: Record<string, number>; // TA 每日想你
   taTreeStreak: { last: string | null; n: number }; // TA 连续浇树
@@ -2789,9 +2790,20 @@ const BOARD_BGS: { label: string; veil: number }[] = [
   { label: '暖褐', veil: 0.38 }, // bg-5：暖棕调（亮度 142）
 ];
 
-/** 留言墙实际样式（背景图 cover 铺满整个界面 + 暖白纱罩统一可读性） */
-function wallStyleOf(bg: number | undefined): CSSProperties {
-  const i = Math.max(0, Math.min(BOARD_BGS.length - 1, bg ?? 0));
+/** 留言墙实际样式（背景图 cover 铺满整个界面 + 暖白纱罩统一可读性；100+=手机上传的自定义背景） */
+function wallStyleOf(bg: number | undefined, customs?: { src: string; veil: number }[]): CSSProperties {
+  const v = bg ?? 0;
+  if (v >= 100) {
+    const c = customs?.[v - 100];
+    if (c) {
+      return {
+        backgroundImage: `linear-gradient(rgba(250,247,240,${c.veil}),rgba(250,247,240,${c.veil})),url("${c.src}")`,
+        backgroundSize: 'cover',
+        backgroundPosition: 'center',
+      };
+    }
+  }
+  const i = Math.max(0, Math.min(BOARD_BGS.length - 1, v));
   const veil = BOARD_BGS[i].veil;
   return {
     backgroundImage: `linear-gradient(rgba(250,247,240,${veil}),rgba(250,247,240,${veil})),url(/board-bg/bg-${i}.jpg)`,
@@ -2800,16 +2812,17 @@ function wallStyleOf(bg: number | undefined): CSSProperties {
   };
 }
 
-/** 便签图案卡纸清单（用户上传的 8 张卡面，白边已裁净；ar=卡面原始宽高比（多大就是多大），span=横幅卡跨栏铺满，padTop=顶部插画避让区占卡面高度的比例） */
-const BOARD_CARDS: { label: string; text: string; ar: number; span?: boolean; padTop?: number }[] = [
-  { label: '样式一', text: '#3a3a3a', ar: 1079 / 1024 },
-  { label: '样式二', text: '#3a3a3a', ar: 1058 / 1352 },
-  { label: '样式三', text: '#3a3a3a', ar: 1056 / 1438 },
-  { label: '样式四', text: '#3a3a3a', ar: 783 / 647 },
-  { label: '样式五', text: '#38342c', ar: 776 / 463, span: true },
-  { label: '样式六', text: '#3a3a3a', ar: 899 / 590, span: true },
-  { label: '样式七', text: '#3a3a3a', ar: 1079 / 1439, padTop: 0.23 },
-  { label: '样式八', text: '#332e26', ar: 648 / 487 },
+/** 便签图案卡纸清单（file=卡面文件名；ar=卡面原始宽高比（多大就是多大），span=横幅卡跨栏铺满，padTop=顶部插画避让区比例，small=缩小显示宽度）；用户上传卡 + 三张手绘可爱卡（小熊/兔兔/猫猫，SVG 全出血无边） */
+const BOARD_CARDS: { label: string; file: string; text: string; ar: number; span?: boolean; padTop?: number; small?: boolean }[] = [
+  { label: '样式一', file: 'card-1.jpg', text: '#3a3a3a', ar: 1079 / 1024 },
+  { label: '样式二', file: 'card-2.jpg', text: '#3a3a3a', ar: 1058 / 1352 },
+  { label: '样式三', file: 'card-3.jpg', text: '#3a3a3a', ar: 1056 / 1438 },
+  { label: '样式四', file: 'card-4.jpg', text: '#3a3a3a', ar: 783 / 647, small: true }, // 小一点：宽度 82% 居中
+  { label: '样式五', file: 'card-6.jpg', text: '#3a3a3a', ar: 899 / 590, span: true },
+  { label: '样式六', file: 'card-7.jpg', text: '#3a3a3a', ar: 1079 / 1439, padTop: 0.23 },
+  { label: '奶油小熊', file: 'card-9.jpg', text: '#4a3a30', ar: 810 / 1080 },
+  { label: '薄荷兔兔', file: 'card-10.jpg', text: '#37453c', ar: 810 / 1080 },
+  { label: '薰衣草猫猫', file: 'card-11.jpg', text: '#443c5e', ar: 1080 / 675, span: true },
 ];
 
 /** 便签的卡面样式（图案卡 = 图 cover 铺满无白边；素白卡 = 调色盘纯色） */
@@ -2818,7 +2831,7 @@ function noteFaceStyle(note: BoardNote): CSSProperties {
   if (card > 0) {
     const skin = BOARD_CARDS[(card - 1) % BOARD_CARDS.length];
     return {
-      backgroundImage: `url(/board-cards/card-${(card - 1) % BOARD_CARDS.length + 1}.jpg)`,
+      backgroundImage: `url(/board-cards/${skin.file})`,
       backgroundSize: 'cover',
       backgroundPosition: 'center',
       color: skin.text,
@@ -2851,7 +2864,7 @@ function BoardAvatar({ src, name, size }: { src: string | null; name: string; si
   );
 }
 
-/** 墙上的一张便签（卡面最前面是头像+名字，正文下面直接显示留言；图案卡多大就是多大（横幅卡跨栏铺满）；胶囊锁着时内容封存只显倒计时） */
+/** 墙上的一张便签（卡面最前面是头像+名字 + 正文 + 日期；留言只在详情里看；图案卡多大就是多大（横幅卡跨栏铺满、样式四缩小居中）；胶囊锁着时内容封存只显倒计时） */
 function BoardNoteCard({
   note,
   now,
@@ -2877,11 +2890,8 @@ function BoardNoteCard({
 }) {
   const isCapsule = !!note.unlockAt;
   const locked = isCapsule && (note.unlockAt ?? 0) > now;
-  const comments = note.comments ?? [];
-  // 图案卡：多大就是多大（按卡面原始宽高比给最小高度，字多时自然长高）；横幅卡跨栏铺满
+  // 图案卡：多大就是多大（按卡面原始宽高比给最小高度，字多时自然长高）；横幅卡跨栏铺满；small 卡宽度 82% 居中
   const skin = !locked && (note.card ?? 0) > 0 ? BOARD_CARDS[((note.card ?? 0) - 1) % BOARD_CARDS.length] : null;
-  const shownN = skin ? (skin.span ? 2 : skin.ar >= 1 ? 1 : 2) : 2; // 紧凑卡上只露最近一条，其余点开看
-  const shown = comments.slice(-shownN);
   const clamp = skin ? (skin.span ? 'line-clamp-4' : skin.ar >= 1 ? 'line-clamp-3' : 'line-clamp-5') : 'line-clamp-6';
   // 由 id 决定的轻微角度（-4°~4°，稳定不闪；--rot 供落钉动画保持同一角度）
   const rot = ((note.id.charCodeAt(note.id.length - 1) * 7 + note.id.length * 3) % 9) - 4;
@@ -2889,11 +2899,16 @@ function BoardNoteCard({
     ? { background: 'linear-gradient(180deg,#ececec,#e3e3e3)', color: '#52525b', border: '1.5px dashed #a8a8a8' }
     : noteFaceStyle(note);
   if (skin) {
-    const w = skin.span ? fullW : colW;
+    const w = skin.span ? fullW : skin.small ? colW * 0.82 : colW;
     if (w > 0) {
       face.minHeight = Math.round(w / skin.ar); // 原始比例的最小高度（字多时自然长高）
       // 顶部插画避让区：按卡面自然高度的比例折算成像素（多栏里 % 基准不可控，直接算像素）
       if (skin.padTop) face.paddingTop = Math.round((w / skin.ar) * skin.padTop);
+      // 缩小卡：宽度 82% 在栏内居中
+      if (skin.small) {
+        face.width = '82%';
+        face.marginInline = 'auto';
+      }
     }
   }
   const mine = note.from === 'me';
@@ -2936,30 +2951,9 @@ function BoardNoteCard({
           </span>
           {/* 正文 */}
           <p className={`mt-1.5 break-all text-[12.5px] font-semibold leading-[1.55] ${clamp}`}>{note.text}</p>
-          {/* 留言直接显示在便签正文下面（最近几条；头像跟随全局） */}
-          {shown.length > 0 && (
-            <span className="mt-1.5 block space-y-[3px] border-t border-black/10 pt-1.5">
-              {shown.map((m) => {
-                const mMine = m.from === 'me';
-                const mWho = mMine ? meName || '我' : taName || 'TA';
-                return (
-                  <span key={m.id} className="flex items-center gap-1">
-                    <BoardAvatar src={mMine ? meAvatar : taAvatar} name={mWho} size={14} />
-                    <span className="min-w-0 flex-1 truncate text-[10.5px] font-semibold leading-[1.35] opacity-85">{m.text}</span>
-                  </span>
-                );
-              })}
-            </span>
-          )}
-          {/* 日期 + 留言数 */}
+          {/* 日期（留言点开详情看） */}
           <p className="mt-2 flex items-center gap-1.5 text-[10px] font-bold">
             <span className="opacity-60">{fmtDate(note.at).slice(5)}</span>
-            {comments.length > 0 && (
-              <span className="flex items-center gap-[3px] rounded-full bg-black/10 px-1.5 py-[1px] text-[9.5px]">
-                <MessageSquare className="h-[9px] w-[9px]" strokeWidth={2.8} aria-hidden="true" />
-                {comments.length}
-              </span>
-            )}
           </p>
         </>
       )}
@@ -3139,14 +3133,15 @@ function BoardPage({
   const [composing, setComposing] = useState(false);
   const [draft, setDraft] = useState('');
   const [draftColor, setDraftColor] = useState(0); // 素白卡的调色盘选中色
-  const [draftCard, setDraftCard] = useState(0); // 卡纸样式（0=素白，1-8=图案卡）
+  const [draftCard, setDraftCard] = useState(0); // 卡纸样式（0=素白，1-9=图案卡）
   const [capsuleOn, setCapsuleOn] = useState(false); // 时间胶囊开关
   const [unlockChoice, setUnlockChoice] = useState(0); // 0-4 预设 / 5 自定义
   const [customUnlock, setCustomUnlock] = useState(''); // 'YYYY-MM-DDTHH:mm'
   const [openId, setOpenId] = useState<string | null>(null);
   const [flashId, setFlashId] = useState<string | null>(null); // 刚钉上墙的便签（落钉动画）
   const [bgPicker, setBgPicker] = useState(false); // 背景选择弹层
-  const bgIdx = Math.max(0, Math.min(BOARD_BGS.length - 1, state.boardBg ?? 0)); // 当前背景（0=雾青，用户上传的第一张图）
+  const curBg = state.boardBg ?? 0; // 当前背景索引（0-5=内置，100+=手机上传的自定义）
+  const customs = state.boardBgCustom ?? [];
   const openNote = notes.find((n) => n.id === openId) ?? null;
   const openLocked = !!(openNote?.unlockAt && openNote.unlockAt > now);
   const previewCol = NOTE_COLORS[draftColor % NOTE_COLORS.length]; // 书写区实时预览色
@@ -3197,18 +3192,64 @@ function BoardPage({
     if (!(note?.unlockAt && note.unlockAt > Date.now())) scheduleBoardNoteReply(noteId);
   };
 
+  /** 手机上传背景：读文件 → canvas 压到 1080 宽 JPEG → 按中部亮度定纱罩 → 存进自定义背景（最多 4 张）并选中 */
+  const uploadBg = (file: File) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      const scale = Math.min(1, 1080 / (img.naturalWidth || 1));
+      const w = Math.max(1, Math.round((img.naturalWidth || 1) * scale));
+      const h = Math.max(1, Math.round((img.naturalHeight || 1) * scale));
+      const cv = document.createElement('canvas');
+      cv.width = w;
+      cv.height = h;
+      const ctx = cv.getContext('2d');
+      if (!ctx) {
+        showToast('这张图读不出来，换一张试试');
+        return;
+      }
+      ctx.drawImage(img, 0, 0, w, h);
+      // 中部采样平均亮度（便签覆盖区）→ 纱罩浓度，保证便签/文字可读
+      let sum = 0;
+      let cnt = 0;
+      try {
+        const d = ctx.getImageData(0, Math.floor(h * 0.3), w, Math.max(1, Math.floor(h * 0.45))).data;
+        for (let i = 0; i < d.length; i += 244) {
+          sum += d[i] * 0.299 + d[i + 1] * 0.587 + d[i + 2] * 0.114;
+          cnt++;
+        }
+      } catch {
+        /* 采样失败用中亮纱罩 */
+      }
+      const b = cnt ? sum / cnt : 200;
+      const veil = b >= 230 ? 0.05 : b >= 195 ? 0.16 : b >= 160 ? 0.26 : 0.36;
+      const src = cv.toDataURL('image/jpeg', 0.82);
+      patch((prev) => {
+        const arr = [...(prev.boardBgCustom ?? []), { src, veil }].slice(-4);
+        return { boardBgCustom: arr, boardBg: 100 + arr.length - 1 };
+      });
+      showToast('背景传好啦 ♡');
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      showToast('这张图读不出来，换一张试试');
+    };
+    img.src = url;
+  };
+
   return (
-    // 背景图直接铺满整个界面（顶部按钮与底部操作栏都浮在背景上）
-    <div className="relative flex h-full flex-col overflow-hidden" style={wallStyleOf(state.boardBg)}>
-      {/* ===== 顶部：返回键（黑） + 小标题 + 背景切换（黑·三个点） ===== */}
+    // 背景图直接铺满整个界面（顶部图标与右下角悬浮加号都浮在背景上）
+    <div className="relative flex h-full flex-col overflow-hidden" style={wallStyleOf(state.boardBg, state.boardBgCustom)}>
+      {/* ===== 顶部：返回键（裸图标） + 小标题 + 背景切换（裸图标·三个点；白色柔光保证任何背景上可见） ===== */}
       <div className="relative z-20 shrink-0">
         <button
           type="button"
           onClick={close}
           aria-label="返回"
-          className="absolute left-3 top-[54px] z-30 flex h-10 w-10 items-center justify-center rounded-full bg-black text-white shadow-[0_4px_14px_rgba(0,0,0,0.35)] transition-transform active:scale-95"
+          className="absolute left-3 top-[54px] z-30 flex h-10 w-10 items-center justify-center text-[#1a1a1a] transition-transform active:scale-90"
         >
-          <ArrowLeft className="h-[22px] w-[22px]" strokeWidth={2.4} />
+          <ArrowLeft className="h-[23px] w-[23px] drop-shadow-[0_0_5px_rgba(255,255,255,0.95)]" strokeWidth={2.4} />
         </button>
         <p
           className="absolute left-1/2 top-[54px] flex h-10 -translate-x-1/2 items-center pl-[0.35em] text-[13px] font-semibold tracking-[0.35em] text-[#3c3c42]/75"
@@ -3216,20 +3257,20 @@ function BoardPage({
         >
           留言板
         </p>
-        {/* 背景切换（右上角·黑底三个点；与返回键对称） */}
+        {/* 背景切换（右上角·三个点；与返回键对称） */}
         <button
           type="button"
           onClick={() => setBgPicker(true)}
           aria-label="选择背景"
-          className="absolute right-3 top-[54px] z-30 flex h-10 w-10 items-center justify-center rounded-full bg-black text-white shadow-[0_4px_14px_rgba(0,0,0,0.35)] transition-transform active:scale-95"
+          className="absolute right-3 top-[54px] z-30 flex h-10 w-10 items-center justify-center text-[#1a1a1a] transition-transform active:scale-90"
         >
-          <MoreVertical className="h-[20px] w-[20px]" strokeWidth={2.4} aria-hidden="true" />
+          <MoreVertical className="h-[21px] w-[21px] drop-shadow-[0_0_5px_rgba(255,255,255,0.95)]" strokeWidth={2.4} aria-hidden="true" />
         </button>
       </div>
 
-      {/* ===== 便签瀑布流（直接铺在整面背景上；两列，横幅图案卡跨栏铺满；新钉的便签带落钉动画） ===== */}
+      {/* ===== 便签瀑布流（直接铺在整面背景上；两列，横幅图案卡跨栏铺满；底部留出悬浮加号的高度） ===== */}
       <div className="relative z-10 flex min-h-0 flex-1 flex-col overflow-y-auto">
-        <div ref={wallRef} className="columns-2 gap-2.5 px-3.5 pb-4 pt-[106px]">
+        <div ref={wallRef} className="columns-2 gap-2.5 px-3.5 pb-[120px] pt-[106px]">
           {notes.map((n) => (
             <BoardNoteCard
               key={n.id}
@@ -3258,13 +3299,13 @@ function BoardPage({
         )}
       </div>
 
-      {/* ===== 背景选择弹层（用户上传的 6 张图；选了即换并持久化） ===== */}
+      {/* ===== 背景选择弹层（内置 6 张 + 手机上传的自定义背景（最多 4 张）+ 上传入口） ===== */}
       {bgPicker && (
         <div className="absolute inset-0 z-40 flex items-center justify-center px-6" role="dialog" aria-label="选择背景">
           <button type="button" aria-label="关闭" onClick={() => setBgPicker(false)} className="absolute inset-0 bg-black/25 backdrop-blur-[2px]" />
-          <div className="relative w-full max-w-[320px] rounded-2xl border border-neutral-200 bg-white p-4 shadow-[0_16px_44px_rgba(0,0,0,0.2)]">
+          <div className="relative max-h-[82%] w-full max-w-[320px] overflow-y-auto rounded-2xl border border-neutral-200 bg-white p-4 shadow-[0_16px_44px_rgba(0,0,0,0.2)]">
             <p className="text-[15px] font-bold text-[#1a1a1a]">选择背景</p>
-            <p className="mt-0.5 text-[12px] text-[#a3a3a3]">挑一张喜欢的图，钉在图上</p>
+            <p className="mt-0.5 text-[12px] text-[#a3a3a3]">挑一张喜欢的图，或从手机上传</p>
             <div className="mt-3 grid grid-cols-3 gap-2.5">
               {BOARD_BGS.map((b, i) => (
                 <button
@@ -3276,7 +3317,7 @@ function BoardPage({
                     showToast('背景换好啦 ♡');
                   }}
                   aria-label={b.label}
-                  aria-pressed={bgIdx === i}
+                  aria-pressed={curBg === i}
                   className="relative overflow-hidden rounded-xl transition-transform active:scale-95"
                 >
                   {/* 缩略图：背景图 + 同款纱罩 */}
@@ -3284,8 +3325,8 @@ function BoardPage({
                     className="block aspect-[3/4] w-full"
                     style={{ backgroundImage: `linear-gradient(rgba(250,247,240,${b.veil}),rgba(250,247,240,${b.veil})),url(/board-bg/bg-${i}.jpg)`, backgroundSize: 'cover', backgroundPosition: 'center' }}
                   />
-                  <span className={`absolute inset-0 rounded-xl ${bgIdx === i ? 'shadow-[inset_0_0_0_2px_#000]' : 'shadow-[inset_0_0_0_1px_rgba(0,0,0,0.12)]'}`} aria-hidden="true" />
-                  {bgIdx === i && (
+                  <span className={`absolute inset-0 rounded-xl ${curBg === i ? 'shadow-[inset_0_0_0_2px_#000]' : 'shadow-[inset_0_0_0_1px_rgba(0,0,0,0.12)]'}`} aria-hidden="true" />
+                  {curBg === i && (
                     <span className="absolute right-1.5 top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-black text-white shadow">
                       <Check className="h-3 w-3" strokeWidth={3.2} aria-hidden="true" />
                     </span>
@@ -3293,33 +3334,65 @@ function BoardPage({
                   <span className="block pb-1 pt-1.5 text-center text-[11px] font-bold text-[#3c3c42]">{b.label}</span>
                 </button>
               ))}
+              {/* 手机上传的自定义背景 */}
+              {customs.map((c, i) => (
+                <button
+                  key={'custom-' + i}
+                  type="button"
+                  onClick={() => {
+                    patch({ boardBg: 100 + i });
+                    setBgPicker(false);
+                    showToast('背景换好啦 ♡');
+                  }}
+                  aria-label={'上传背景' + (i + 1)}
+                  aria-pressed={curBg === 100 + i}
+                  className="relative overflow-hidden rounded-xl transition-transform active:scale-95"
+                >
+                  <span
+                    className="block aspect-[3/4] w-full"
+                    style={{ backgroundImage: `linear-gradient(rgba(250,247,240,${c.veil}),rgba(250,247,240,${c.veil})),url("${c.src}")`, backgroundSize: 'cover', backgroundPosition: 'center' }}
+                  />
+                  <span className={`absolute inset-0 rounded-xl ${curBg === 100 + i ? 'shadow-[inset_0_0_0_2px_#000]' : 'shadow-[inset_0_0_0_1px_rgba(0,0,0,0.12)]'}`} aria-hidden="true" />
+                  {curBg === 100 + i && (
+                    <span className="absolute right-1.5 top-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-black text-white shadow">
+                      <Check className="h-3 w-3" strokeWidth={3.2} aria-hidden="true" />
+                    </span>
+                  )}
+                  <span className="block pb-1 pt-1.5 text-center text-[11px] font-bold text-[#3c3c42]">上传{['一', '二', '三', '四'][i] ?? i + 1}</span>
+                </button>
+              ))}
+              {/* 从手机上传（最多存 4 张） */}
+              <label className="relative block cursor-pointer overflow-hidden rounded-xl border border-dashed border-neutral-300 transition-transform active:scale-95" aria-label="从手机上传背景">
+                <span className="flex aspect-[3/4] w-full flex-col items-center justify-center gap-1.5 bg-neutral-50 text-neutral-400">
+                  <Plus className="h-7 w-7" strokeWidth={2.2} aria-hidden="true" />
+                  <span className="text-[11px] font-bold">手机上传</span>
+                </span>
+                <input
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  aria-label="上传背景图"
+                  onChange={(e) => {
+                    const f = e.currentTarget.files?.[0];
+                    if (f) uploadBg(f);
+                    e.currentTarget.value = '';
+                  }}
+                />
+              </label>
             </div>
           </div>
         </div>
       )}
 
-      {/* ===== 底部操作栏：时间胶囊（白圆钮） + 钉便签（黑主按钮；空墙时呼吸柔光） ===== */}
-      <div className="relative z-20 flex shrink-0 items-center justify-center gap-4 px-6 pb-[34px] pt-2">
-        {/* 塞一颗时间胶囊（白圆钮 + 黑沙漏） */}
-        <button
-          type="button"
-          onClick={() => openCompose(true)}
-          aria-label="塞一颗时间胶囊"
-          className="flex h-[52px] w-[52px] shrink-0 items-center justify-center rounded-full border border-black/10 bg-white/90 text-black shadow-[0_4px_14px_rgba(0,0,0,0.18)] backdrop-blur-md transition-transform active:scale-95"
-        >
-          <Hourglass className="h-[22px] w-[22px]" strokeWidth={2.1} aria-hidden="true" />
-        </button>
-        {/* 钉一张便签（黑主按钮；空墙时呼吸脉动） */}
-        <button
-          type="button"
-          onClick={() => openCompose(false)}
-          aria-label="钉一张便签"
-          className={`flex h-[54px] shrink-0 items-center gap-1.5 rounded-full bg-black px-8 text-[15.5px] font-bold tracking-wide text-white shadow-[0_8px_22px_rgba(0,0,0,0.3)] transition-transform active:scale-95 ${notes.length === 0 ? '[animation:wish-invite-pulse_2.8s_ease-in-out_infinite]' : ''}`}
-        >
-          <Pin className="h-5 w-5" strokeWidth={2.6} aria-hidden="true" />
-          钉一张便签
-        </button>
-      </div>
+      {/* ===== 右下角悬浮加号（钉一张便签；空墙时呼吸柔光；时间胶囊在弹层里设） ===== */}
+      <button
+        type="button"
+        onClick={() => openCompose(false)}
+        aria-label="钉一张便签"
+        className={`absolute bottom-[44px] right-4 z-30 flex h-[56px] w-[56px] items-center justify-center rounded-full bg-black text-white shadow-[0_8px_22px_rgba(0,0,0,0.35)] transition-transform active:scale-90 ${notes.length === 0 ? '[animation:wish-invite-pulse_2.8s_ease-in-out_infinite]' : ''}`}
+      >
+        <Plus className="h-[26px] w-[26px]" strokeWidth={2.4} aria-hidden="true" />
+      </button>
 
       {/* ===== 钉便签/塞胶囊弹层（书写 + 卡纸选择 + 调色盘 + 胶囊开关 + 解锁时间） ===== */}
       {composing && (
@@ -3337,7 +3410,7 @@ function BoardPage({
                 capsuleOn
                   ? { background: 'linear-gradient(180deg,#ececec,#e6e6e6)', color: '#52525b', border: '1.5px dashed #a8a8a8' }
                   : draftCard > 0
-                    ? { backgroundImage: `url(/board-cards/card-${draftCard}.jpg)`, backgroundSize: 'cover', backgroundPosition: 'center', color: BOARD_CARDS[draftCard - 1].text }
+                    ? { backgroundImage: `url(/board-cards/${BOARD_CARDS[draftCard - 1].file})`, backgroundSize: 'cover', backgroundPosition: 'center', color: BOARD_CARDS[draftCard - 1].text }
                     : { background: previewCol.bg, color: previewCol.text }
               }
             >
@@ -3390,7 +3463,7 @@ function BoardPage({
                   >
                     <span
                       className="block aspect-[3/4] w-full rounded-lg"
-                      style={{ backgroundImage: `url(/board-cards/card-${i + 1}.jpg)`, backgroundSize: 'cover', backgroundPosition: 'center' }}
+                      style={{ backgroundImage: `url(/board-cards/${c.file})`, backgroundSize: 'cover', backgroundPosition: 'center' }}
                     />
                     <span className={`absolute inset-0 rounded-lg ${draftCard === i + 1 ? 'shadow-[inset_0_0_0_2px_#000]' : 'shadow-[inset_0_0_0_1px_rgba(0,0,0,0.08)]'}`} aria-hidden="true" />
                     {draftCard === i + 1 && (

@@ -1485,7 +1485,7 @@ async function aiTickBoardNote(snap: CoupleSnap, me: string, ta: string, p: TaPe
     text,
     at: Date.now(),
     color: Math.floor(Math.random() * 16), // 素白卡时 TA 也从 16 色调色盘里挑
-    ...(Math.random() < 0.45 ? { card: 1 + Math.floor(Math.random() * 8) } : {}), // 近半概率直接挑一张图案卡纸（8 张）
+    ...(Math.random() < 0.45 ? { card: 1 + Math.floor(Math.random() * 9) } : {}), // 近半概率直接挑一张图案卡纸（9 张：上传 6 + 可爱 3）
     comments: [] as { id: string; from: 'me' | 'ta'; text: string; at: number }[],
   };
   writeSnap((s) => ({
