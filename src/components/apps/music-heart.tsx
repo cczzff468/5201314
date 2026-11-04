@@ -36,7 +36,7 @@ import {
 } from '@/lib/ios/music-api';
 import { useMusic } from '@/lib/ios/music-store';
 import { CoverImg, EmptyBlock, fmtClock } from './music-shared';
-import { VipBadge } from './music-vip-badge';
+import { VipSongBadge } from './music-vip-badge'; // v59：歌单 VIP 角标统一「我的」页同款黑胶唱片胶囊
 
 /** 推荐结果项：歌 + 推荐理由（跟种子走） */
 interface HeartSong {
@@ -484,7 +484,7 @@ export function MusicHeart() {
                     {songArtistText(it.song)} · {it.reason}
                   </p>
                 </div>
-                {it.song.fee === 1 && <VipBadge />}
+                {it.song.fee === 1 && <VipSongBadge />}
                 <span className="w-6 shrink-0 text-center text-[13px] tabular-nums text-white/25">
                   {i + 1}
                 </span>

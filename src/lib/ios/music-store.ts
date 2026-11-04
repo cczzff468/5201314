@@ -862,6 +862,8 @@ export interface GuestProfile {
   follows: number;
   /** 粉丝数（游客本地可编辑） */
   fans: number;
+  /** 等级（v59：游客「我的」页统计行 Lv.X 展示，编辑资料可自定义；替代旧「歌单」计数） */
+  level: number;
   /** VIP 徽章类型（游客可自定义） */
   vipType: 'vip' | 'svip';
   /** VIP 等级（展示为中文数字，如 VIP·柒） */
@@ -920,6 +922,8 @@ export function getGuestProfile(): GuestProfile {
     signature: v?.signature ?? '这个人很懒，什么都没留下',
     follows: typeof v?.follows === 'number' ? v.follows : 0,
     fans: typeof v?.fans === 'number' ? v.fans : 0,
+    // v59：等级默认 8（可编辑 0~99；老存档无此字段时用默认值）
+    level: typeof v?.level === 'number' && v.level >= 0 ? Math.min(99, Math.floor(v.level)) : 8,
     vipType: v?.vipType === 'svip' ? 'svip' : 'vip',
     vipLevel: typeof v?.vipLevel === 'number' && v.vipLevel >= 1 ? Math.min(99, Math.floor(v.vipLevel)) : 7,
     // Task 21：默认隐藏（用户要求游客「我的」页不显示 VIP 图标）；老存档里没有该字段时同样隐藏

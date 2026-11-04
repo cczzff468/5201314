@@ -34,9 +34,10 @@ import {
   userPlaylists,
   playlistAddTracks,
   playlistCreate,
+  NcmError,
   type NcmSong,
 } from '@/lib/ios/music-api';
-import { VipBadge } from './music-vip-badge';
+import { VipSongBadge } from './music-vip-badge'; // v59：歌单 VIP 角标统一「我的」页同款黑胶唱片胶囊
 
 // ---------------- 格式化 ----------------
 
@@ -176,7 +177,7 @@ export function SongRow({
             {showAlbum && songAlbumText(song) ? ` · ${songAlbumText(song)}` : ''}
           </div>
         </div>
-        {song.fee === 1 && <VipBadge />}
+        {song.fee === 1 && <VipSongBadge />}
         {onMore ? (
           <span
             role="button"
@@ -279,8 +280,14 @@ export function AddToSongSheet({ song, onClose }: { song: NcmSong; onClose: () =
       }
       showToast(`已加入「${name}」`);
       setTimeout(onClose, 700);
-    } catch {
-      showToast('加入失败');
+    } catch (e) {
+      // v58：网易云重复添加（code 512）→ 友好提示；其余真实错误消息优先于笼统的「加入失败」
+      if (e instanceof NcmError && e.code === 512) {
+        showToast('这首歌已经在歌单里啦');
+        setTimeout(onClose, 700);
+        return;
+      }
+      showToast(e instanceof Error && e.message ? `加入失败：${e.message}` : '加入失败');
     }
   };
 

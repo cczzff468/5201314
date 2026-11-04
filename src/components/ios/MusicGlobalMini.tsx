@@ -148,8 +148,51 @@ function useStopPointerBubble(
   }, deps);
 }
 
+// ---------------- 触屏合成点击吸收垫（v59 修复「点迷你播放器连带打开底下 App」） ----------------
+
+/**
+ * 根因（触屏专属，鼠标不受影响）：迷你播放器的点按动作在 pointerup 里同步执行——
+ * 唱片点按切回条形（唱片当场卸载、条形在别处挂载）、拖到边缘松手停靠（唱片弹走）、
+ * 点条身开播放页（层隐身）——而真实触摸的浏览器要等 touchend 之后才合成
+ * mousedown/mouseup/click，合成事件按**当时的坐标**重新命中检测：迷你播放器已不在
+ * 原地 → 合成点击落到底下的 App 图标/按钮上，「点播放器连带把底下 App 打开」。
+ * （条身开播放页有 350ms 隐身层接住；唱片切样式/停靠松手没有——本垫补齐。）
+ *
+ * 修复：点按/停靠松手瞬间在指针落点「布防」：window 捕获阶段的 mousedown/mouseup/click
+ * 只要在布防坐标 ±32px 内且 450ms 未过期，一律 preventDefault + stopPropagation
+ * （合成点击到不了底下的图标）；吞完 click 自动作废；远离布防坐标的正常点击不受影响。
+ */
+const ABSORB_RADIUS = 32;
+const ABSORB_MS = 450;
+let tapAbsorb: { x: number; y: number; until: number } | null = null;
+
+function swallowArmed(e: MouseEvent): void {
+  if (!tapAbsorb) return;
+  if (performance.now() > tapAbsorb.until) {
+    tapAbsorb = null;
+    return;
+  }
+  if (Math.hypot(e.clientX - tapAbsorb.x, e.clientY - tapAbsorb.y) > ABSORB_RADIUS) return;
+  e.preventDefault();
+  e.stopPropagation();
+  if (e.type === 'click') tapAbsorb = null; // 完整吞掉一次合成点击序列即收工
+}
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('mousedown', swallowArmed, true);
+  window.addEventListener('mouseup', swallowArmed, true);
+  window.addEventListener('click', swallowArmed, true);
+}
+
+/** 在指针落点布防合成点击吸收垫（点按/松手动作触发前调用） */
+function armTapAbsorb(x: number, y: number): void {
+  tapAbsorb = { x, y, until: performance.now() + ABSORB_MS };
+}
+
 /** 点按判定（拖拽与点按共存的确定性方案）：pointerdown 记录起点，pointerup 位移 <6px 视为点按。
- *  不用 framer 的 onTap：拖拽结束的 pointerup 与 drag 完成标记存在竞态，拖拽后可能误触发点按 */
+ *  不用 framer 的 onTap：拖拽结束的 pointerup 与 drag 完成标记存在竞态，拖拽后可能误触发点按。
+ *  v59：点按动作会当场改写/卸载迷你播放器 DOM，先在指针落点布防合成点击吸收垫
+ *  （详见上方「触屏合成点击吸收垫」注释） */
 function useTapGuard(action: () => void) {
   const down = useRef<{ x: number; y: number } | null>(null);
   const onPointerDown = (e: React.PointerEvent) => {
@@ -159,7 +202,10 @@ function useTapGuard(action: () => void) {
     if (!down.current) return;
     const d = Math.hypot(e.clientX - down.current.x, e.clientY - down.current.y);
     down.current = null;
-    if (d < 6) action();
+    if (d < 6) {
+      armTapAbsorb(e.clientX, e.clientY);
+      action();
+    }
   };
   return { onPointerDown, onPointerUp };
 }
@@ -329,6 +375,8 @@ function GlobalMiniRecord({ layerRef }: { layerRef: React.RefObject<HTMLDivEleme
         : freeX;
 
   const onDragEnd = (_e: unknown, info: PanInfo): void => {
+    // v59：松手可能触发停靠弹走（唱片滑入边缘）→ 在松手点布防合成点击吸收垫防穿透
+    armTapAbsorb(info.point.x, info.point.y);
     const rect = recRef.current?.getBoundingClientRect();
     const lRect = layerRef.current?.getBoundingClientRect();
     if (rect && lRect) {

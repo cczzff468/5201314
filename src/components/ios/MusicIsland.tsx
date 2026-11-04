@@ -76,7 +76,7 @@ function useIncomingCallPresenting(): boolean {
 function isHiddenNow(): boolean {
   const m = useMusic.getState();
   if (!m.current || !m.playing) return true; // 第十八轮反馈：不放音乐（无歌/暂停）时弹窗消失
-  if (!useSettings.getState().statusBarVisible) return true;
+  // v58：状态栏关闭不再隐藏音乐岛（APP 灵动岛独立于状态栏开关，用户要求）
   if (useUI.getState().screenOff) return true;
   // 灵动岛堆叠：淘宝/美团配送岛出现时音乐岛不再隐身（改为左侧封面小圆圈组合形态）
   const n = useIslandNotify.getState();
@@ -138,7 +138,6 @@ export default function MusicIsland() {
   const liked = useMusic((s) => (s.current ? s.likedIds.has(s.current.id) : false));
   const lyricLines = useMusic((s) => s.lyricLines);
   const lyricFor = useMusic((s) => s.lyricFor);
-  const statusBarVisible = useSettings((s) => s.statusBarVisible);
   const screenOff = useUI((s) => s.screenOff);
   const chatNotifyShowing = useIslandNotify((s) => s.current !== null || s.exiting);
   const callPresenting = useIncomingCallPresenting();
@@ -195,9 +194,10 @@ export default function MusicIsland() {
 
   // 不放音乐（暂停超过 5 秒宽限 / 无歌）时弹窗整体消失（第十八轮反馈 + 第二十轮宽限）
   // 拾光小屋家具（音箱/黑胶）播放中（ambient）也不弹岛 —— 用户在音乐 App 内点歌/打开 App 自动恢复（v5.9）
+  // v58：状态栏关闭不再隐藏音乐岛（APP 灵动岛独立于状态栏开关，用户要求）
   const ambient = useMusic((s) => s.ambient);
   const hidden =
-    !statusBarVisible || screenOff || chatNotifyShowing || callPresenting || !current || (!playing && !pauseGrace) || ambient;
+    screenOff || chatNotifyShowing || callPresenting || !current || (!playing && !pauseGrace) || ambient;
 
   // 弹窗可见性 → music-store.islandVisible（StatusBar 据此隐藏/恢复「移动数据」图标）。
   // 订阅外部派生值（含 pauseGrace 内部态）在回调里 setState，渲染期不碰 store
@@ -250,8 +250,8 @@ export default function MusicIsland() {
       if (useIslandStack.getState().order.includes('music')) return;
       // 灵动岛堆叠：配送岛（淘宝/美团）展示中不自动抢屏，保持组合形态（左圆圈 + 右配送小窗）
       if (useMtIsland.getState().visible || useTbIsland.getState().visible) return;
-      // 整层隐身期间（消息通知/来电/熄屏/关闭状态栏）不抢展开，恢复后从小弹窗开始
-      if (!useSettings.getState().statusBarVisible || useUI.getState().screenOff) return;
+      // 整层隐身期间（消息通知/来电/熄屏）不抢展开，恢复后从小弹窗开始（v58：状态栏关闭不再拦截）
+      if (useUI.getState().screenOff) return;
       if (useIslandNotify.getState().current || useIslandNotify.getState().exiting) return;
       if (useIncomingCall.getState().call) return;
       expandedAutoRef.current = true;

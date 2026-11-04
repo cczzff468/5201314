@@ -542,7 +542,7 @@ function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
             </button>
           </div>
           <MainRow icon={Wifi} tone={TONE_BLUE} label="无线局域网" value="我爱你" chevron />
-          <MainRow icon={Bluetooth} tone={TONE_BLUE} label="蓝牙" value="打开" chevron />
+          <MainRow icon={Bluetooth} tone={TONE_BLUE} label="蓝牙" value="love" chevron />
         </div>
 
         {/* 锁屏与密码（按用户要求不显示开启状态提示） */}
@@ -574,7 +574,8 @@ function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
             value={fontRowValue}
             onClick={() => onOpen('font')}
           />
-          {/* 状态栏开关（Task 36；Task 37 换绿色大开关）：关闭后顶部时间/信号/电量状态栏与灵动岛都隐藏。
+          {/* 状态栏开关（Task 36；Task 37 换绿色大开关；v58 行为更新）：关闭后隐藏顶部时间/信号/电量状态栏
+              与黑色胶囊基础灵动岛；APP 灵动岛（音乐岛、美团/淘宝配送岛、灵动岛通知卡、来电胶囊）照常显示。
               与飞行模式同款 iOS 原生 51×31 大开关，开启态 #34C759 绿 */}
           <div className="flex min-h-[52px] items-center gap-3 px-4 py-2">
             <RowIcon icon={PanelTop} tone={TONE_GRAY} />

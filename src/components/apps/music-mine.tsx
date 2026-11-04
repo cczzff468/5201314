@@ -67,83 +67,12 @@ import {
 import { kvGet, kvSet } from '@/lib/ios/idb-kv';
 import { useSettings } from '@/lib/ios/store';
 import { CoverImg, LoadingBlock, PlaylistCreateDialog, fmtPlayCount } from './music-shared';
+// v59：VIP 徽章抽到 music-vip-badge.tsx 共享（评论区/歌单/弹窗全 App 统一「我的」页同款黑胶唱片胶囊）
+import { VipBadge } from './music-vip-badge';
 
 type SheetKind = 'recent' | 'record' | 'liked' | 'local' | 'dress' | 'profile' | null;
 type MainTab = 'music' | 'podcast' | 'notes';
 type SubTab = 'recent' | 'created';
-
-/** 中文数字（VIP 等级展示，跟网易云一样用大写/繁体数字：壹贰叁肆伍陆柒捌玖拾） */
-const CN_DIGITS = ['零', '壹', '贰', '叁', '肆', '伍', '陆', '柒', '捌', '玖'];
-const CN_TEN = '拾';
-
-export function cnNum(n: number): string {
-  const x = Math.max(1, Math.min(99, Math.floor(n)));
-  if (x < 10) return CN_DIGITS[x];
-  const t = Math.floor(x / 10);
-  const o = x % 10;
-  return (t > 1 ? CN_DIGITS[t] : '') + CN_TEN + (o ? CN_DIGITS[o] : '');
-}
-
-/**
- * VIP 徽章（第十四轮：双盘重抠 + 按各自参考截图实测微调）。
- * 唱片：用户截图原像素抠底 —— public/music-vip-disc-{vip,svip}.png：
- * - VIP 284px 大黑胶（新截图重抠+内缩 0.75px 防边缘污染；**盘面整体压暗 ×0.78**——用户反馈深色
- *   资料页上原灰盘面像一圈白晕，压暗后黑胶感回归、无白晕）；
- * - SVIP 92px 金胶（用户新横条参考图重抠：金渐变盘面+黑外环+深金标签+中心孔）。
- * 布局（按各自参考实测等比换算，胶囊高 13.5px）：
- * - VIP 参考（Ø285/胶囊222→0.78）：盘 17.3px；SVIP 参考（Ø93.5/胶囊74→0.79）：盘 17px；
- * - 胶囊左端**凹弧**（圆心=唱片圆心、半径 10px，与盘缘留 VIP 1.35 / SVIP 1.5px 间隙）；
- * - 文字 9px：VIP 米白 #EDE6DD / SVIP 金 #F4E8D0（横条实测 244,232,208）；
- *   胶囊底 VIP #302B28 / SVIP #3D3533（横条实测 61,53,51）。
- * - 第十七轮修复「VIP 显示不全」：凹弧遮罩透明区在胶囊中线上延伸到左缘+17.2px，旧内边距
- *   pl 4.8/5.4 落在透明区内 →「VI」被遮罩吃掉只剩「P·叁」。按横条参考逐像素实测：
- *   文字起点距胶囊左缘 19.7px（凹弧凸点+2.2px）、距右缘 4.0px → pl 19.7 / pr 4.2，
- *   修复后胶囊总宽 ≈54px 与参考 54.2px 一致。
- * level<1 只显示 VIP。
- */
-export function VipBadge({ type, level }: { type: 'vip' | 'svip'; level: number }) {
-  const svip = type === 'svip';
-  const DISC = svip ? 17 : 17.3; // 唱片直径（各自参考实测比例）
-  const ARC = 10; // 胶囊左端凹弧半径，圆心=唱片圆心
-  // 胶囊盒左缘 = 唱片半径 - √(ARC²-(H/2)²)=±7.38 → 盒左缘落在唱片盒内 1.12/1.27px
-  const pillInset = DISC / 2 - 7.38;
-  const pillMl = pillInset - DISC;
-  // mask：唱片圆心在胶囊盒左缘右侧 7.38px；圆内透明（挖出凹弧）、圆外不透明
-  const maskCss = `radial-gradient(circle ${ARC}px at ${(DISC / 2 + pillMl) * -1}px 50%, transparent ${ARC - 0.15}px, #000 ${ARC}px)`;
-  return (
-    <span className="relative flex shrink-0 items-center" data-testid="music-mine-vip">
-      {/* 用户截图原像素唱片（圆形抠底无白边），上下微溢出胶囊 */}
-      <img
-        src={svip ? '/music-vip-disc-svip.png' : '/music-vip-disc-vip.png'}
-        alt=""
-        width={DISC}
-        height={DISC}
-        draggable={false}
-        className="shrink-0 select-none"
-        style={{ width: DISC, height: DISC }}
-      />
-      {/* 深色胶囊：左端凹弧（radial-gradient mask 挖空唱片+间隙区域），右端全圆角。
-          pl 19.7px：文字必须从凹弧透明区（左缘+17.2px）之后开始，否则「VI」会被遮罩吃掉（参考实测 19.68px） */}
-      <span
-        className={`flex h-[13.5px] shrink-0 items-center pl-[19.7px] pr-[4.2px]`}
-        style={{
-          marginLeft: pillMl,
-          borderRadius: '0 999px 999px 0',
-          background: svip ? '#3D3533' : '#302B28',
-          WebkitMaskImage: maskCss,
-          maskImage: maskCss,
-        }}
-      >
-        <span
-          className={`text-[9px] font-bold leading-none ${svip ? 'text-[#F4E8D0]' : 'text-[#EDE6DD]'}`}
-        >
-          {svip ? 'SVIP' : 'VIP'}
-          {level >= 1 && <span className="font-bold">·{cnNum(level)}</span>}
-        </span>
-      </span>
-    </span>
-  );
-}
 
 /** 头部主题（装扮） */
 const MINE_THEMES = [
@@ -462,13 +391,14 @@ export function MusicMine({ onSettings }: { onSettings: () => void }) {
           </button>
         </div>
 
-        {/* 昵称 + VIP 徽章（SVIP 昵称变金色——网易云同款：黑胶SVIP 用户名金色展示） */}
+        {/* 昵称 + VIP 徽章（SVIP 昵称变金色——网易云同款：黑胶SVIP 用户名金色展示。
+            v58：金色换成柔和香槟金渐变（旧版偏橙黄且顶部近白、发灰发奇怪） */}
         <div className="mt-2 flex items-center justify-center gap-2 px-6">
           <h2
             className={`max-w-[62%] truncate bg-clip-text text-[21px] font-bold ${
               // 登录账号是黑胶SVIP，或游客资料选择了 SVIP → 金色昵称
               (loginUid ? loginVip?.isVip && loginVip.type === 'svip' : guest.vipType === 'svip')
-                ? 'text-transparent [background-image:linear-gradient(180deg,#FFE9B0_0%,#F5CE72_45%,#D9A648_100%)]'
+                ? 'text-transparent [background-image:linear-gradient(180deg,#F6E3B4_0%,#E8C583_48%,#CDA25F_100%)]'
                 : 'text-white'
             }`}
             data-testid="music-mine-nickname"
@@ -478,14 +408,14 @@ export function MusicMine({ onSettings }: { onSettings: () => void }) {
           {loginUid ? (
             loginVip ? (
               loginVip.isVip ? (
-                <VipBadge type={loginVip.type} level={loginVip.level} />
+                <VipBadge type={loginVip.type} level={loginVip.level} testId="music-mine-vip" />
               ) : (
-                <VipBadge type="vip" level={0} />
+                <VipBadge type="vip" level={0} testId="music-mine-vip" />
               )
             ) : null
           ) : (
             // Task 21：游客 VIP 徽章默认隐藏（编辑资料里「主页显示：显示/隐藏」可重新打开）
-            !guest.vipHidden && <VipBadge type={guest.vipType} level={guest.vipLevel} />
+            !guest.vipHidden && <VipBadge type={guest.vipType} level={guest.vipLevel} testId="music-mine-vip" />
           )}
         </div>
 
@@ -518,8 +448,15 @@ export function MusicMine({ onSettings }: { onSettings: () => void }) {
                 </span>
                 <span className="text-[12px] text-white/60">粉丝</span>
               </button>
-              <StatV v={`${guestLists.length}`} l="歌单" />
-              <StatV v={`${likedIds.size}`} l="红心" />
+              {/* v59：旧「歌单 X」计数改等级 Lv.X（编辑资料可自定义），与登录态统计行同版式；
+                  点按进编辑资料（同关注/粉丝可点） */}
+              <button type="button" onClick={() => setSheet('profile')} data-testid="music-mine-level-btn" className="flex items-baseline active:opacity-70">
+                <span className="text-[15px] font-bold" data-testid="music-mine-level">
+                  Lv.{guest.level}
+                </span>
+              </button>
+              {/* v59：旧「红心 X」计数改累计听歌时长（本地真实累计，不可编辑），与登录态同版式 */}
+              <StatV v={fmtListenDur(listenSec)} l="" />
             </>
           )}
         </div>
@@ -1069,6 +1006,8 @@ function ProfileEditSheet({ onClose }: { onClose: () => void }) {
   const [avatar, setAvatar] = useState(cur.avatar);
   const [follows, setFollows] = useState(String(cur.follows));
   const [fans, setFans] = useState(String(cur.fans));
+  // v59：等级（游客「我的」页统计行 Lv.X，可自定义）
+  const [level, setLevel] = useState(String(cur.level));
   // Task 21：VIP 徽章可整体隐藏（默认隐藏，见 getGuestProfile）
   const [vipHidden, setVipHidden] = useState(cur.vipHidden);
   const [vipType, setVipType] = useState<'vip' | 'svip'>(cur.vipType);
@@ -1095,6 +1034,7 @@ function ProfileEditSheet({ onClose }: { onClose: () => void }) {
       signature: signature.trim().slice(0, 40),
       follows: Math.max(0, Math.min(999999, Number(follows.replace(/\D/g, '')) || 0)),
       fans: Math.max(0, Math.min(999999, Number(fans.replace(/\D/g, '')) || 0)),
+      level: Math.max(0, Math.min(99, Number(level.replace(/\D/g, '')) || 0)),
       vipHidden,
       vipType,
       vipLevel: Math.max(1, Math.min(99, Number(vipLevel.replace(/\D/g, '')) || 7)),
@@ -1176,7 +1116,7 @@ function ProfileEditSheet({ onClose }: { onClose: () => void }) {
           className="mb-4 h-10 w-full rounded-lg border border-black/10 bg-white/70 px-3 text-[14px] text-zinc-900 outline-none backdrop-blur-xl dark:border-white/10 dark:bg-zinc-800/70 dark:text-zinc-100"
         />
 
-        {/* 关注 / 粉丝 */}
+        {/* 关注 / 粉丝 / 等级（v59：等级三列一排，Lv.X 展示在统计行） */}
         <div className="mb-4 flex gap-3">
           <div className="flex-1">
             <label className="mb-1 block text-[12px] text-zinc-500">关注数</label>
@@ -1195,6 +1135,17 @@ function ProfileEditSheet({ onClose }: { onClose: () => void }) {
               onChange={(e) => setFans(e.target.value.replace(/\D/g, '').slice(0, 6))}
               inputMode="numeric"
               data-testid="music-stats-fans"
+              className="h-10 w-full rounded-lg border border-black/10 bg-white/70 px-3 text-[14px] text-zinc-900 outline-none backdrop-blur-xl dark:border-white/10 dark:bg-zinc-800/70 dark:text-zinc-100"
+            />
+          </div>
+          <div className="flex-1">
+            <label className="mb-1 block text-[12px] text-zinc-500">等级</label>
+            <input
+              value={level}
+              onChange={(e) => setLevel(e.target.value.replace(/\D/g, '').slice(0, 2))}
+              inputMode="numeric"
+              placeholder="0-99"
+              data-testid="music-stats-level"
               className="h-10 w-full rounded-lg border border-black/10 bg-white/70 px-3 text-[14px] text-zinc-900 outline-none backdrop-blur-xl dark:border-white/10 dark:bg-zinc-800/70 dark:text-zinc-100"
             />
           </div>

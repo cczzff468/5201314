@@ -15,9 +15,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ChevronDown,
+  ChevronLeft,
   Check,
   Loader2,
-  Music2,
   QrCode,
   RefreshCw,
   Smartphone,
@@ -36,7 +36,7 @@ import {
   type QrState,
 } from '@/lib/ios/music-api';
 import { useMusic, enterGuestMode } from '@/lib/ios/music-store';
-import { useSettings, useSystemDark } from '@/lib/ios/store';
+import { useSettings, useUI, useSystemDark } from '@/lib/ios/store';
 import { useStatusBarToneEffect, type StatusBarTone } from '@/lib/ios/status-bar-tone';
 import { bootMusicAi } from '@/lib/ios/music-ai';
 import { MusicTabBar, MiniBar } from './music-shared';
@@ -150,11 +150,25 @@ function LoginView() {
 
   return (
     <div className="relative flex h-full flex-col overflow-y-auto bg-gradient-to-b from-[#FDF5F5] to-[#F8F8F8] px-6 pb-10 pt-[70px] dark:from-zinc-900 dark:to-black">
-      {/* 标题 */}
+      {/* v58：返回键（退出音乐 App 回主屏；与各 App 顶栏返回同口径） */}
+      <button
+        type="button"
+        aria-label="返回"
+        data-testid="music-login-back"
+        onClick={() => useUI.getState().closeApp()}
+        className="absolute left-2 top-[58px] z-20 flex h-9 w-9 items-center justify-center rounded-full bg-black/[0.03] backdrop-blur-xl transition-all active:scale-90 dark:bg-white/10"
+      >
+        <ChevronLeft className="h-5 w-5 text-zinc-700 dark:text-zinc-200" strokeWidth={2.4} />
+      </button>
+
+      {/* 标题（v58：顶部图标换 APP 真实图标，与主屏一致） */}
       <div className="mb-7 flex flex-col items-center gap-2.5">
-        <div className="flex h-16 w-16 items-center justify-center rounded-[18px] bg-[#C20C0C] shadow-sm">
-          <Music2 className="h-9 w-9 text-white" fill="currentColor" />
-        </div>
+        <img
+          src="/icons/music.png"
+          alt="网易云音乐"
+          draggable={false}
+          className="h-16 w-16 rounded-[18px] shadow-sm ring-1 ring-black/[0.06] select-none"
+        />
         <h1 className="text-[21px] font-bold text-zinc-900 dark:text-zinc-100">网易云音乐</h1>
         <p className="text-[12px] text-zinc-400">登录你的账号，同步歌单与收藏</p>
       </div>

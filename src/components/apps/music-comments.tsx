@@ -37,6 +37,8 @@ import {
 } from '@/lib/ios/music-api';
 import { useMusic } from '@/lib/ios/music-store';
 import { CoverImg, EmptyBlock, LoadingBlock, fmtPlayCount } from './music-shared';
+// v59：评论区 VIP/SVIP 徽章改用「我的」页同款黑胶唱片胶囊（用户要求全 App 统一）
+import { VipBadge } from './music-vip-badge';
 
 type SortKey = 'rec' | 'hot' | 'new';
 const SORT_ORDER: SortKey[] = ['rec', 'hot', 'new'];
@@ -45,9 +47,6 @@ const SORT_TYPE: Record<SortKey, CommentSortType> = { rec: 1, hot: 2, new: 3 };
 
 /** 底部话题胶囊（展示用，与网易云热榜话题同风格） */
 const TOPICS = ['耳机常驻歌曲', '一听前奏就红心', '科学听歌大法', '单曲循环一整天'];
-
-/** VIP 等级数字大写（徽章「VIP·柒」；>10 直接数字） */
-const CN_NUM = ['', '', '壹', '贰', '叁', '肆', '伍', '陆', '柒', '捌', '玖', '拾'];
 
 interface FloorState {
   open: boolean;
@@ -520,7 +519,7 @@ function CommentRow({
               >
                 {c.user?.nickname}
               </p>
-              <VipBadge user={c.user} />
+              <UserVipBadge user={c.user} />
             </div>
             <p className="mt-0.5 text-[11px] text-zinc-400">
               {commentDate(c)}
@@ -593,7 +592,7 @@ function FloorReply({ r, onLike }: { r: NcmComment; onLike: () => void }) {
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-1.5">
               <p className="min-w-0 truncate text-[13px] text-zinc-500 dark:text-zinc-400">{r.user?.nickname}</p>
-              <VipBadge user={r.user} />
+              <UserVipBadge user={r.user} />
             </div>
             <p className="mt-0.5 text-[10px] text-zinc-400">
               {commentDate(r)}
@@ -622,24 +621,12 @@ function FloorReply({ r, onLike }: { r: NcmComment; onLike: () => void }) {
   );
 }
 
-/** VIP 徽章（黑底胶囊：VIP 白字+红点 / SVIP 金字，等级大写数字，仿截图） */
-function VipBadge({ user }: { user: NcmComment['user'] }) {
+/** 评论用户 VIP/SVIP 徽章（v59：黑胶唱片胶囊同「我的」页；vipType≥11 = SVIP，等级取 redVipLevel） */
+function UserVipBadge({ user }: { user: NcmComment['user'] }) {
   const vip = user?.vipType ?? 0;
   if (vip <= 0) return null;
   const lv = user.vipRights?.redVipLevel ?? 0;
-  const lvText = lv >= 1 && lv <= 10 ? CN_NUM[lv] : lv > 10 ? `${lv}` : '';
-  const svip = vip >= 11;
-  return (
-    <span
-      className={`inline-flex shrink-0 items-center gap-[3px] rounded-[3px] bg-zinc-900 px-[4px] py-[1px] text-[9px] font-semibold leading-[13px] dark:bg-zinc-800 ${
-        svip ? 'text-amber-300' : 'text-white'
-      }`}
-    >
-      {!svip && <span className="h-[7px] w-[7px] rounded-full bg-[#EC4141]" aria-hidden />}
-      {svip ? 'SVIP' : 'VIP'}
-      {lvText ? `·${lvText}` : ''}
-    </span>
-  );
+  return <VipBadge type={vip >= 11 ? 'svip' : 'vip'} level={lv} />;
 }
 
 /** 评论日期：同一年显示「MM-DD」、跨年「YYYY-MM-DD」（timeStr 优先） */

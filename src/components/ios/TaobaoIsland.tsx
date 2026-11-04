@@ -34,7 +34,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { motion, type Transition } from 'framer-motion';
-import { useSettings, useUI } from '@/lib/ios/store';
+import { useUI } from '@/lib/ios/store';
 import { useIslandNotify, navigateToChatSession } from '@/lib/ios/island-notify';
 import { useGlobalCall } from '@/lib/ios/global-call';
 import { useIncomingCall } from '@/lib/ios/incoming-call';
@@ -192,7 +192,6 @@ function progressOf(o: TbOrder, now: number, uid: string): number {
 }
 
 export default function TaobaoIsland() {
-  const statusBarVisible = useSettings((s) => s.statusBarVisible);
   const screenOff = useUI((s) => s.screenOff);
   const chatNotifyShowing = useIslandNotify((s) => s.current !== null || s.exiting);
   const callPresenting = useIncomingCallPresenting();
@@ -319,7 +318,8 @@ export default function TaobaoIsland() {
   const mtWins = mtLatest > 0 && (active === null || mtLatest >= tbLatest);
 
   const hidden =
-    !statusBarVisible || screenOff || chatNotifyShowing || callPresenting || !active ||
+    // v58：状态栏关闭不再隐藏淘宝岛（APP 灵动岛独立于状态栏开关，用户要求）
+    screenOff || chatNotifyShowing || callPresenting || !active ||
     (mtWins && !expanded) ||
     musicExpandedAlone;
 

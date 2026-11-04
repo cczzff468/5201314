@@ -212,6 +212,19 @@ async function ncmRequest<T = Record<string, unknown>>(
   } catch {
     throw new NcmError('接口返回格式异常');
   }
+  // v58 修复：api-enhanced 的部分模块（playlist/tracks 等）把网易原响应包在 {status, body, cookie}
+  // 包装层里——顶层没有 code，旧代码会把成功当「接口错误(-1)」抛出（用户实测加入歌单必失败）。
+  // 归一化：顶层缺 code 且 body 是带数字 code 的对象 → 解包 body 作为真实载荷（含错误分支：
+  // body.code=512 重复添加等照常走下面的抛错逻辑）
+  if (
+    (j.code === undefined || j.code === null) &&
+    typeof j.status === 'number' &&
+    j.body &&
+    typeof j.body === 'object' &&
+    typeof (j.body as Record<string, unknown>).code === 'number'
+  ) {
+    j = j.body as Record<string, unknown>;
+  }
   const code = (j.code as number) ?? -1;
   // 3012 = 登录已过期（网易云）
   if (code !== 200 && code !== 801 && code !== 802 && code !== 803) {
@@ -375,8 +388,15 @@ export async function playlistSubscribe(id: number, t: 1 | 2): Promise<void> {
 }
 
 export async function playlistCreate(name: string, privacy: 0 | 10 = 0): Promise<number> {
-  const j = await authRequest<{ id: number }>('playlist/create', { name, privacy });
-  return j.id;
+  // v58 修复：/playlist/create 的响应是 {code:200, playlist:{id,...}}——新建歌单 id 在
+  // playlist.id（旧代码读 j.id 恒 undefined，添加到歌单弹窗的「新建并加入」因此整条链路断掉）；
+  // 兼容旧形状 j.id（自部署其它实现可能直接返回）
+  const j = await authRequest<{ id?: number; playlist?: { id?: number } }>('playlist/create', { name, privacy });
+  const id = j.playlist?.id ?? j.id;
+  if (typeof id !== 'number' || !Number.isFinite(id)) {
+    throw new NcmError('创建歌单失败：接口未返回歌单 id');
+  }
+  return id;
 }
 
 export async function playlistDelete(id: number): Promise<void> {

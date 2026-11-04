@@ -92,6 +92,8 @@ import type { ContactRecord } from '@/lib/contacts';
 import { MINI_MODE_LABELS, useMiniPlayer } from '@/components/ios/MusicGlobalMini';
 import { AddToSongSheet, CoverImg, fmtClock } from './music-shared';
 import { TogetherChat, TogetherChatInput } from './music-together';
+// v59：音质行 VIP 小胶囊换「我的」页同款黑胶唱片胶囊（用户要求全 App 统一）
+import { VipBadge } from './music-vip-badge';
 
 // ---------------- 底部控制键自绘图标（第三十五轮，按用户参考截图美化） ----------------
 
@@ -2306,7 +2308,7 @@ function MoreSheet({
             >
               <span className="inline-flex items-center gap-1.5">
                 音质：{QUALITY_LABELS[quality]}
-                <VipChip />
+                <VipBadge type="vip" level={0} />
               </span>
             </MoreRow>
             <MoreRow
@@ -2848,18 +2850,6 @@ function MoreRow({
       <span className="shrink-0 text-zinc-500 dark:text-zinc-400">{icon}</span>
       <span className="min-w-0 flex-1 truncate text-[14px] text-zinc-800 dark:text-zinc-200">{children}</span>
     </button>
-  );
-}
-
-/** 迷你 VIP 胶囊（音质行内，仿网易云黑胶小标） */
-function VipChip() {
-  return (
-    <span className="inline-flex shrink-0 items-center rounded-full bg-zinc-900 py-[2.5px] pl-[4px] pr-[6px] dark:bg-zinc-700">
-      <span className="relative mr-[3px] flex h-[11px] w-[11px] items-center justify-center rounded-full bg-[#101010] ring-[1px] ring-white/40">
-        <span className="h-[4.5px] w-[4.5px] rounded-full bg-[#EC4141]" />
-      </span>
-      <span className="text-[9px] font-semibold leading-none text-white">VIP</span>
-    </span>
   );
 }
 
