@@ -1,0 +1,28 @@
+{
+  "choices": [
+    {
+      "finish_reason": "stop",
+      "index": 0,
+      "message": {
+        "content": "根据您提供的《拾光小屋》截图，针对您的问题回答如下：\n\n1. **位置与动作**：**没有**。画面中的棕色双马尾女孩（TA）此时正背对着镜头站在房间中央的地板上（看起来像是在梳妆台或镜子附近），**并没有坐在钢琴前**，手也**不在琴键上**。\n2. **特效**：**没有**。当前画面中**没有任何飘浮的音符特效或彩色音符图标**。\n3. **姿势**：由于她目前处于站立/行走的待机状态（而非弹奏状态），所以不存在“弹奏姿势”是否自然的问题。她目前的站姿是游戏内标准的俯视视角下的默认站立姿态。\n\n**总结**：在这张截图中，她只是在房间里站着，并没有在弹钢琴。",
+        "role": "assistant"
+      }
+    }
+  ],
+  "created": 1793366259,
+  "id": "20261030211735d9598f049b094b03",
+  "model": "glm-5v-turbo",
+  "object": "chat.completion",
+  "request_id": "20261030211735d9598f049b094b03",
+  "usage": {
+    "completion_tokens": 171,
+    "completion_tokens_details": {
+      "reasoning_tokens": 0
+    },
+    "prompt_tokens": 451,
+    "prompt_tokens_details": {
+      "cached_tokens": 0
+    },
+    "total_tokens": 622
+  }
+}

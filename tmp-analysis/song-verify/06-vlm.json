@@ -1,0 +1,28 @@
+{
+  "choices": [
+    {
+      "finish_reason": "stop",
+      "index": 0,
+      "message": {
+        "content": "1) 卡通小人（棕色双马尾女孩）现在在**房间中央**，**站立**着（背对镜头）。\n2) 画面里**看不到**钢琴或吉他。\n3) **有**白色文字气泡或提示浮层（例如“换台”按钮、底部的输入框“跟小雨说点什么...”等）。",
+        "role": "assistant"
+      }
+    }
+  ],
+  "created": 1793365418,
+  "id": "202610302103364ddb47c00f2f4d34",
+  "model": "glm-5v-turbo",
+  "object": "chat.completion",
+  "request_id": "202610302103364ddb47c00f2f4d34",
+  "usage": {
+    "completion_tokens": 74,
+    "completion_tokens_details": {
+      "reasoning_tokens": 0
+    },
+    "prompt_tokens": 461,
+    "prompt_tokens_details": {
+      "cached_tokens": 0
+    },
+    "total_tokens": 535
+  }
+}

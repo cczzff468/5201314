@@ -1,0 +1,28 @@
+{
+  "choices": [
+    {
+      "finish_reason": "stop",
+      "index": 0,
+      "message": {
+        "content": "根据您提供的截图，针对棕色双马尾女孩（TA）的三个问题回答如下：\n\n1. **是否坐在黑色立式钢琴前的琴凳上、面朝钢琴？**\n   **否**。画面中的女孩目前正站在房间中央的地板上，背对镜头。她身旁虽然有一架黑色的立式钢琴，但她并没有坐在琴凳上，也没有面朝钢琴。\n\n2. **画面里有没有飘浮的彩色音符特效？**\n   **没有**。画面中没有任何飘浮的彩色音符特效。\n\n3. **钢琴附近有没有发光/高亮效果？**\n   **没有**。钢琴附近没有任何发光或高亮的特效表现。",
+        "role": "assistant"
+      }
+    }
+  ],
+  "created": 1793366286,
+  "id": "20261030211804d69863f3fdc446f6",
+  "model": "glm-5v-turbo",
+  "object": "chat.completion",
+  "request_id": "20261030211804d69863f3fdc446f6",
+  "usage": {
+    "completion_tokens": 138,
+    "completion_tokens_details": {
+      "reasoning_tokens": 0
+    },
+    "prompt_tokens": 450,
+    "prompt_tokens_details": {
+      "cached_tokens": 2
+    },
+    "total_tokens": 588
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "choices": [
+    {
+      "finish_reason": "stop",
+      "index": 0,
+      "message": {
+        "content": "根据您提供的手机主题设置页截图，页面底部可见的文字标签和区块如下：\n\n**1. 提示说明文字：**\n> “点按图标从手机相册选择图片，自动裁剪为正方形；点左上角 × 可单独恢复该图标默认。图标保存在本机，不会上传服务器。”\n\n**2. 区块标题：**\n*   **小组件**\n\n**3. 功能入口/卡片名称：**\n*   **小组件界面**\n    *   *副标题/描述文字：* “全部小组件 1:1 预览 · 点名上角 + 添加到主屏幕”\n\n---\n\n**关于您特别询问的入口：**\n在当前截图中，**没有**看到以下相关入口：\n*   ❌ **『自定义CSS』**\n*   ❌ **『液态玻璃设置』**\n*   ❌ **『个性装扮』**\n\n（注：截图显示的是“主题”页面的图标自定义区域及底部的“小组件”入口，未显示更高级的代码或特效设置选项。）",
+        "role": "assistant"
+      }
+    }
+  ],
+  "created": 1793360618,
+  "id": "20261030194334d813dba34a8a418c",
+  "model": "glm-5v-turbo",
+  "object": "chat.completion",
+  "request_id": "20261030194334d813dba34a8a418c",
+  "usage": {
+    "completion_tokens": 225,
+    "completion_tokens_details": {
+      "reasoning_tokens": 0
+    },
+    "prompt_tokens": 432,
+    "prompt_tokens_details": {
+      "cached_tokens": 0
+    },
+    "total_tokens": 657
+  }
+}

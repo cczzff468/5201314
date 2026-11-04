@@ -1,0 +1,28 @@
+{
+  "choices": [
+    {
+      "finish_reason": "stop",
+      "index": 0,
+      "message": {
+        "content": "便签卡片顶部中央的固定物是一个**银色金属回形针（paperclip）**，而不是圆形图钉。\n\n细节描述：\n- **形状**：典型的回形针造型，由金属丝弯折成的双层椭圆形环圈结构，上端从卡片顶边上方伸出，下端扣夹在粉色便签的顶部边缘上。\n- **颜色与质感**：银灰色金属色，带有明显的高光和阴影渐变，呈现出金属光泽和立体感。\n- **位置**：位于卡片顶部居中偏右的位置，垂直方向夹住便签，营造出便签被“别”在留言板上的视觉效果。",
+        "role": "assistant"
+      }
+    }
+  ],
+  "created": 1793756948,
+  "id": "2026110409490137bcd6f4617f4c85",
+  "model": "glm-5.3-flash",
+  "object": "chat.completion",
+  "request_id": "2026110409490137bcd6f4617f4c85",
+  "usage": {
+    "completion_tokens": 139,
+    "completion_tokens_details": {
+      "reasoning_tokens": 0
+    },
+    "prompt_tokens": 189,
+    "prompt_tokens_details": {
+      "cached_tokens": 0
+    },
+    "total_tokens": 328
+  }
+}

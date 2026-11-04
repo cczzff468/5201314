@@ -1,0 +1,28 @@
+{
+  "choices": [
+    {
+      "finish_reason": "stop",
+      "index": 0,
+      "message": {
+        "content": "根据您提供的手机截图，针对您的三个问题分析如下：\n\n1.  **TA小人（粉色双马尾女孩）的位置与状态**：\n    *   **位置**：她正位于画面的中下方，站在一个白色的柜子或冰箱旁边，脚下似乎有一个粉色的圆形地毯/垫子。\n    *   **在做什么**：她目前处于**站立/待机状态**（背对镜头）。\n    *   **是否在弹奏**：**没有**。画面中的钢琴和吉他都在房间的远处（背景区域），而小人离它们很远，并没有在乐器前进行弹奏动作。\n\n2.  **Toast提示或音符图标**：\n    *   **没有**。画面中没有任何 Toast 提示框弹出，也没有任何音符图标在飘出。\n\n3.  **曲名字幕**：\n    *   **没有**。画面中没有显示任何正在播放的歌曲名称或曲名字幕。\n\n**总结**：截图中的场景是一个静态的3D小屋环境，TA小人只是单纯地站在房间中央偏下的位置，周围没有音乐播放相关的UI特效或文字信息。",
+        "role": "assistant"
+      }
+    }
+  ],
+  "created": 1793362372,
+  "id": "202610302012493db3f5eb00ea423e",
+  "model": "glm-5v-turbo",
+  "object": "chat.completion",
+  "request_id": "202610302012493db3f5eb00ea423e",
+  "usage": {
+    "completion_tokens": 236,
+    "completion_tokens_details": {
+      "reasoning_tokens": 0
+    },
+    "prompt_tokens": 448,
+    "prompt_tokens_details": {
+      "cached_tokens": 2
+    },
+    "total_tokens": 684
+  }
+}

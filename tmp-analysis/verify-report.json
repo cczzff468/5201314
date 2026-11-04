@@ -1,0 +1,101 @@
+{
+  "total": 14,
+  "passed": 14,
+  "failed": [],
+  "results": [
+    {
+      "step": "0",
+      "name": "开机进入锁屏(无白屏)",
+      "ok": true,
+      "evidence": "锁屏出现「向上轻扫以解锁」"
+    },
+    {
+      "step": "1",
+      "name": "种子 IndexedDB couple-space:state(accepted)",
+      "ok": true,
+      "evidence": "写回校验 accepted=True"
+    },
+    {
+      "step": "2",
+      "name": "上滑解锁进入主屏幕",
+      "ok": true,
+      "evidence": "锁屏退场,主屏出现"
+    },
+    {
+      "step": "3",
+      "name": "主屏翻页找到「恋人空间」图标",
+      "ok": true,
+      "evidence": "第 2 次左滑后图标进入视口"
+    },
+    {
+      "step": "4",
+      "name": "打开恋人空间 → 首页(非邀请页)",
+      "ok": true,
+      "evidence": "标题「恋人空间」出现=True; 邀请页残留=False"
+    },
+    {
+      "step": "5",
+      "name": "点击「恋爱留言板」卡片进入留言板",
+      "ok": true,
+      "evidence": "留言板标题出现; 空墙提示=True; 便签数=0"
+    },
+    {
+      "step": "5b",
+      "name": "留言板背景图渲染",
+      "ok": true,
+      "evidence": "容器背景 style={'bg': 'linear-gradient(rgba(250, 247, 240, 0.22), rgba(250, 247, 240, 0.22)), url(\"/board-bg/bg-0.jpg\")', 'w': 390, 'h': 844}"
+    },
+    {
+      "step": "6",
+      "name": "+ 按钮书写区创建 3 张便签",
+      "ok": true,
+      "evidence": "DOM 顺序(最新在前)=['测试便签三', '测试便签二', '测试便签一']"
+    },
+    {
+      "step": "A",
+      "name": "右键便签弹出 iOS 底部动作面板(预览+置顶/多选/删除+取消)",
+      "ok": true,
+      "evidence": "按钮=['置顶', '多选', '删除', '取消']; 预览=['测试便签二']"
+    },
+    {
+      "step": "B",
+      "name": "置顶 → 便签移到最前 + 「置顶」图钉徽章",
+      "ok": true,
+      "evidence": "顺序=['测试便签二', '测试便签三', '测试便签一']; 置顶徽章卡片=['测试便签二']; toast含置顶=True"
+    },
+    {
+      "step": "C",
+      "name": "置顶便签菜单显示「取消置顶」→ 点击后回到时间排序",
+      "ok": true,
+      "evidence": "菜单按钮=['取消置顶', '多选', '删除', '取消']; 恢复后顺序=['测试便签三', '测试便签二', '测试便签一']; 无置顶徽章=True"
+    },
+    {
+      "step": "D",
+      "name": "多选模式:顶部工具栏 + 底部操作栏 + 勾选徽章 + 长按项已选",
+      "ok": true,
+      "evidence": "顶部栏=['取消', '', '已选 1 张', '', '全选']; 底部栏=['置顶', '删除']; 徽章全显=True; 已选=['测试便签三']; FAB隐藏=True"
+    },
+    {
+      "step": "E",
+      "name": "多选第 2 张 → 已选 2 张 → 批量删除 → 退出多选",
+      "ok": true,
+      "evidence": "勾选后顶部栏=['取消', '', '已选 2 张', '', '全选']; 删除后剩余=['测试便签二']; 工具栏消失=True; +按钮回归=True"
+    },
+    {
+      "step": "F",
+      "name": "删除 → 二次确认弹层 → 确认后便签移除(空墙提示回归);「再想想」可撤销",
+      "ok": true,
+      "evidence": "确认弹层文本=['删除后便签和下面的留言都没有了', '确定取下这张便签吗？', '', '删除再想想']; 再想想后菜单仍在=True(按钮=['置顶', '多选', '删除', '取消']); 再想想后便签仍在=True; 最终便签数=0; 空墙提示=True"
+    }
+  ],
+  "console_errors": [],
+  "console_warnings": [],
+  "page_errors": [],
+  "failed_requests": [],
+  "board_bg_requests": [
+    {
+      "url": "http://localhost:3000/board-bg/bg-0.jpg",
+      "status": 200
+    }
+  ]
+}

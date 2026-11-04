@@ -1,0 +1,28 @@
+{
+  "choices": [
+    {
+      "finish_reason": "stop",
+      "index": 0,
+      "message": {
+        "content": "这张截图显示的是**锁屏界面**（或称为“锁定屏幕”）。\n\n**判断依据：**\n1.  **大字体时间显示**：屏幕中央以巨大的白色字体显示当前时间（00:18）和日期（10月31日 周六），这是典型的 iOS 锁屏风格。\n2.  **底部 Dock 栏与搜索栏**：屏幕底部有“搜索”栏以及固定的快捷应用图标（信息、通讯录、电话、设置），这也是 iOS 锁屏界面的特征。\n3.  **布局特征**：虽然显示了应用图标，但这是 iOS 16 及以后版本引入的**锁屏小组件（Widgets）**功能，允许用户在未解锁的情况下查看信息和快速启动应用。\n\n**可见的 App 图标/组件名称如下：**\n\n*   **主屏幕区域（Widget 区域）：**\n    *   天气（左侧大卡片及右侧小图标）\n    *   主页\n    *   浏览器（Safari）\n    *   备忘录\n    *   相机\n    *   照片\n    *   文件\n    *   计算器\n\n*   **底部快捷栏（Dock）：**\n    *   信息（带有红色角标“1”，提示有未读消息）\n    *   通讯录（或 FaceTime 通话）\n    *   电话\n    *   设置",
+        "role": "assistant"
+      }
+    }
+  ],
+  "created": 1793405947,
+  "id": "20261031081901b2bd613b78d14c2e",
+  "model": "glm-5v-turbo",
+  "object": "chat.completion",
+  "request_id": "20261031081901b2bd613b78d14c2e",
+  "usage": {
+    "completion_tokens": 296,
+    "completion_tokens_details": {
+      "reasoning_tokens": 0
+    },
+    "prompt_tokens": 414,
+    "prompt_tokens_details": {
+      "cached_tokens": 0
+    },
+    "total_tokens": 710
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "choices": [
+    {
+      "finish_reason": "stop",
+      "index": 0,
+      "message": {
+        "content": "是的，画面里能看到白色立式钢琴（靠在右侧墙壁上，能看到琴键）。\n\n**位置百分比：**\n*   **水平 (X)：** 约在 **80% - 95%** 的位置（画面最右侧）。\n*   **垂直 (Y)：** 约在 **25% - 35%** 的位置（画面中上部，电视/黑胶唱机的左侧）。\n\n**小人离它的距离：**\n小人（位于画面中下部）离钢琴的距离**较远**。从视觉比例来看，两者之间大概隔了**3到4个地砖/地板格**的距离（或者说是整个房间宽度的约1/3）。",
+        "role": "assistant"
+      }
+    }
+  ],
+  "created": 1793362782,
+  "id": "20261030201938b9b67ade3e9a4bab",
+  "model": "glm-5v-turbo",
+  "object": "chat.completion",
+  "request_id": "20261030201938b9b67ade3e9a4bab",
+  "usage": {
+    "completion_tokens": 147,
+    "completion_tokens_details": {
+      "reasoning_tokens": 0
+    },
+    "prompt_tokens": 427,
+    "prompt_tokens_details": {
+      "cached_tokens": 0
+    },
+    "total_tokens": 574
+  }
+}

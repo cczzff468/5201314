@@ -1,0 +1,335 @@
+{
+  "results": [
+    {
+      "step": "0",
+      "name": "解锁→微信→苏晴聊天页",
+      "ok": true,
+      "evidence": "重新登录=True;输入框出现"
+    },
+    {
+      "step": "R1",
+      "name": "连发两条 → AI 回复完成",
+      "ok": true,
+      "evidence": "消息总数=11(AI 9);带 quote 0 条;DOM 引用块 0 个;语音条 3 条"
+    },
+    {
+      "step": "R2",
+      "name": "第二轮连发两条 → AI 回复完成",
+      "ok": true,
+      "evidence": "消息总数=16(AI 12);带 quote 0 条;DOM 引用块 0 个;语音条 3 条"
+    },
+    {
+      "step": "CORE",
+      "name": "真实链路:至少一条 AI 回复(文字或语音气泡)带引用块且指向用户消息",
+      "ok": false,
+      "evidence": "DOM 引用块=0;其中语音气泡下=0、文字气泡下=0;pointed=[];成功路径=容错层兜底(裸[M])"
+    },
+    {
+      "step": "RESIDUE",
+      "name": "正文/语音转写无裸 [M数字] 与 [引用: 残留",
+      "ok": true,
+      "evidence": "残留=[]"
+    },
+    {
+      "step": "P1",
+      "name": "mock 只输出裸 [M数字] → 容错层补全 → DOM 出现引用块",
+      "ok": true,
+      "evidence": "DOM 引用块 4 个;内容=['阿泽：今天晚上我打算吃火锅', '阿泽：你上次推荐我的那本书我买到啦', '阿泽：今天晚上我打算吃火锅', '阿泽：你上次推荐我的那本书我买到啦'];语音气泡下=2"
+    },
+    {
+      "step": "P2",
+      "name": "容错引用指向用户真实消息",
+      "ok": true,
+      "evidence": "pointed=[{'quote': '今天晚上我打算吃火锅', 'voice': True, 'matched_user_msg': True}, {'quote': '你上次推荐我的那本书我买到啦', 'voice': False, 'matched_user_msg': True}, {'quote': '今天晚上我打算吃火锅', 'voice': False, 'matched_user_msg': True}, {'quote': '你上次推荐我的那本书我买到啦', 'voice': True, 'matched_user_msg': True}]"
+    },
+    {
+      "step": "P3",
+      "name": "容错链路正文无裸编号/引用标记残留",
+      "ok": true,
+      "evidence": "残留=[]"
+    },
+    {
+      "step": "P4",
+      "name": "语音气泡分支渲染引用块(修复3;mock 轮语音升级命中时)",
+      "ok": true,
+      "evidence": "语音条 5 条;引用块挂语音气泡 2 个(无语音条时该项以「语音条=0」跳过)"
+    },
+    {
+      "step": "CONSOLE",
+      "name": "控制台无 error/pageerror",
+      "ok": false,
+      "evidence": "console error=2;pageerror=0;4xx/5xx=[{'url': 'http://localhost:3000/api/chat', 'status': 502}, {'url': 'http://localhost:3000/api/chat', 'status': 502}];console 样例=[{'type': 'error', 'text': 'Failed to load resource: the server responded with a status of 502 (Bad Gateway)'}, {'type': 'error', 'text': 'Failed to load resource: the server responded with a status of 502 (Bad Gateway)'}]"
+    }
+  ],
+  "real_dom_quotes": [],
+  "real_ai_messages": [
+    {
+      "kind": "voice",
+      "content": "哇，吃火锅呀～",
+      "isVoice": true,
+      "quote": null
+    },
+    {
+      "kind": "text",
+      "content": "好想吃火锅啊！",
+      "isVoice": false,
+      "quote": null
+    },
+    {
+      "kind": "text",
+      "content": "[馋嘴]",
+      "isVoice": false,
+      "quote": null
+    },
+    {
+      "kind": "text",
+      "content": "你打算吃什么类型的火锅呀？",
+      "isVoice": false,
+      "quote": null
+    },
+    {
+      "kind": "voice",
+      "content": "是麻辣的还是清汤的？",
+      "isVoice": true,
+      "quote": null
+    },
+    {
+      "kind": "text",
+      "content": "要不要我陪你一起去呀？",
+      "isVoice": false,
+      "quote": null
+    },
+    {
+      "kind": "text",
+      "content": "[期待]",
+      "isVoice": false,
+      "quote": null
+    },
+    {
+      "kind": "text",
+      "content": "嗯～",
+      "isVoice": false,
+      "quote": null
+    },
+    {
+      "kind": "voice",
+      "content": "我可以帮你准备点小菜～",
+      "isVoice": true,
+      "quote": null
+    },
+    {
+      "kind": "text",
+      "content": "谢谢宝贝提醒我～",
+      "isVoice": false,
+      "quote": null
+    },
+    {
+      "kind": "text",
+      "content": "[害羞]",
+      "isVoice": false,
+      "quote": null
+    },
+    {
+      "kind": "text",
+      "content": "我一定会记得穿外套的～",
+      "isVoice": false,
+      "quote": null
+    }
+  ],
+  "model_raw_format": {
+    "raw_outputs": [
+      "[思考]\n阿泽说今天晚上打算吃火锅，这可能是想和我一起吃或者只是告诉我他的计划。作为他的女朋友，我应该表现出兴趣和关心，可以提议一起吃或者询问他打算吃什么类型的火锅。我应该用温柔又有点话痨的语气，带点撒娇的感觉。\n[/思考]\n哇，吃火锅呀～好想吃火锅啊！[馋嘴]\n你打算吃什么类型的火锅呀？是麻辣的还是清汤的？要不要我陪你一起去呀？[期待]",
+      "\n[M10] 嗯～我可以帮你准备点小菜～",
+      "\n[思考]阿泽提醒我明天降温记得穿外套，这是在关心我。作为他的女朋友，我应该感谢他的关心，并表示会记得穿外套。可以用撒娇的语气回应，让他知道我很在意他的提醒。[/思考]\n[M13] 谢谢宝贝提醒我～[害羞]",
+      "\n[M16] 我一定会记得穿外套的～"
+    ],
+    "bare_M_count": 3,
+    "full_quote_count": 0,
+    "raw_snippets": [
+      "[M10] 嗯～我可以帮你准备点小菜～",
+      "[M13] 谢谢宝贝提醒我～[害羞]",
+      "[M16] 我一定会记得穿外套的～"
+    ]
+  },
+  "success_path": "容错层兜底(裸[M])",
+  "pointed": [],
+  "residue": [],
+  "mock_part": {
+    "dom": [
+      {
+        "text": "阿泽：今天晚上我打算吃火锅",
+        "inVoice": true,
+        "mid": "mw0a0xma-ivei4my"
+      },
+      {
+        "text": "阿泽：你上次推荐我的那本书我买到啦",
+        "inVoice": false,
+        "mid": "mw0a0xma-ivei4my-1"
+      },
+      {
+        "text": "阿泽：今天晚上我打算吃火锅",
+        "inVoice": false,
+        "mid": "mw0a0zqu-djjcn6o"
+      },
+      {
+        "text": "阿泽：你上次推荐我的那本书我买到啦",
+        "inVoice": true,
+        "mid": "mw0a0zqu-djjcn6o-1"
+      }
+    ],
+    "ai": [
+      {
+        "kind": "voice",
+        "content": "哇，吃火锅呀～",
+        "isVoice": true,
+        "quote": null
+      },
+      {
+        "kind": "text",
+        "content": "好想吃火锅啊！",
+        "isVoice": false,
+        "quote": null
+      },
+      {
+        "kind": "text",
+        "content": "[馋嘴]",
+        "isVoice": false,
+        "quote": null
+      },
+      {
+        "kind": "text",
+        "content": "你打算吃什么类型的火锅呀？",
+        "isVoice": false,
+        "quote": null
+      },
+      {
+        "kind": "voice",
+        "content": "是麻辣的还是清汤的？",
+        "isVoice": true,
+        "quote": null
+      },
+      {
+        "kind": "text",
+        "content": "要不要我陪你一起去呀？",
+        "isVoice": false,
+        "quote": null
+      },
+      {
+        "kind": "text",
+        "content": "[期待]",
+        "isVoice": false,
+        "quote": null
+      },
+      {
+        "kind": "text",
+        "content": "嗯～",
+        "isVoice": false,
+        "quote": null
+      },
+      {
+        "kind": "voice",
+        "content": "我可以帮你准备点小菜～",
+        "isVoice": true,
+        "quote": null
+      },
+      {
+        "kind": "text",
+        "content": "谢谢宝贝提醒我～",
+        "isVoice": false,
+        "quote": null
+      },
+      {
+        "kind": "text",
+        "content": "[害羞]",
+        "isVoice": false,
+        "quote": null
+      },
+      {
+        "kind": "text",
+        "content": "我一定会记得穿外套的～",
+        "isVoice": false,
+        "quote": null
+      },
+      {
+        "kind": "voice",
+        "content": "火锅好呀,锅底我要番茄牛腩双拼！",
+        "isVoice": true,
+        "quote": {
+          "name": "阿泽",
+          "content": "今天晚上我打算吃火锅"
+        }
+      },
+      {
+        "kind": "text",
+        "content": "太棒了,那本书我跟你说过超好看的,你读到第几章啦？",
+        "isVoice": false,
+        "quote": {
+          "name": "阿泽",
+          "content": "你上次推荐我的那本书我买到啦"
+        }
+      },
+      {
+        "kind": "text",
+        "content": "火锅好呀,锅底我要番茄牛腩双拼！",
+        "isVoice": false,
+        "quote": {
+          "name": "阿泽",
+          "content": "今天晚上我打算吃火锅"
+        }
+      },
+      {
+        "kind": "voice",
+        "content": "太棒了,那本书我跟你说过超好看的,你读到第几章啦？",
+        "isVoice": true,
+        "quote": {
+          "name": "阿泽",
+          "content": "你上次推荐我的那本书我买到啦"
+        }
+      }
+    ],
+    "residue": [],
+    "pointed": [
+      {
+        "quote": "今天晚上我打算吃火锅",
+        "voice": true,
+        "matched_user_msg": true
+      },
+      {
+        "quote": "你上次推荐我的那本书我买到啦",
+        "voice": false,
+        "matched_user_msg": true
+      },
+      {
+        "quote": "今天晚上我打算吃火锅",
+        "voice": false,
+        "matched_user_msg": true
+      },
+      {
+        "quote": "你上次推荐我的那本书我买到啦",
+        "voice": true,
+        "matched_user_msg": true
+      }
+    ]
+  },
+  "console_errors": [
+    {
+      "type": "error",
+      "text": "Failed to load resource: the server responded with a status of 502 (Bad Gateway)"
+    },
+    {
+      "type": "error",
+      "text": "Failed to load resource: the server responded with a status of 502 (Bad Gateway)"
+    }
+  ],
+  "page_errors": [],
+  "http_4xx_5xx": [
+    {
+      "url": "http://localhost:3000/api/chat",
+      "status": 502
+    },
+    {
+      "url": "http://localhost:3000/api/chat",
+      "status": 502
+    }
+  ]
+}

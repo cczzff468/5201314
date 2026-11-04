@@ -1,0 +1,28 @@
+{
+  "choices": [
+    {
+      "finish_reason": "stop",
+      "index": 0,
+      "message": {
+        "content": "钢琴主体的位置：左边缘 x9、右边缘 x10（或画面右边缘）、上边缘 y3、下边缘 y4（或 y3 到 y4 之间）。",
+        "role": "assistant"
+      }
+    }
+  ],
+  "created": 1793362820,
+  "id": "20261030202017ce2d21f572c544c9",
+  "model": "glm-5v-turbo",
+  "object": "chat.completion",
+  "request_id": "20261030202017ce2d21f572c544c9",
+  "usage": {
+    "completion_tokens": 39,
+    "completion_tokens_details": {
+      "reasoning_tokens": 0
+    },
+    "prompt_tokens": 495,
+    "prompt_tokens_details": {
+      "cached_tokens": 2
+    },
+    "total_tokens": 534
+  }
+}

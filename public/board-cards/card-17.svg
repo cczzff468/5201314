@@ -1,0 +1,71 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="760" viewBox="0 0 760 760">
+  <!-- 恋爱留言板 · 便签纸卡：暖白横格便签 + 顶部和纸胶带 + 手绘小涂鸦（v44 新卡面） -->
+  <defs>
+    <!-- 纸张纤维噪点（低透明度叠加在纸底上，出细腻纸纹） -->
+    <filter id="grain" x="0" y="0" width="100%" height="100%">
+      <feTurbulence type="fractalNoise" baseFrequency="0.85" numOctaves="2" stitchTiles="stitch" result="n"/>
+      <feColorMatrix in="n" type="matrix" values="0 0 0 0 0.46  0 0 0 0 0.40  0 0 0 0 0.28  0 0 0 0.055 0"/>
+    </filter>
+    <!-- 胶带的半透明柔和投影 -->
+    <filter id="tapeShadow" x="-20%" y="-40%" width="140%" height="200%">
+      <feDropShadow dx="0" dy="2.5" stdDeviation="3" flood-color="#7a5a34" flood-opacity="0.28"/>
+    </filter>
+    <!-- 纸张四缘的厚度暗边（内描边渐晕） -->
+    <radialGradient id="paperEdge" cx="50%" cy="46%" r="75%">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0"/>
+      <stop offset="82%" stop-color="#ffffff" stop-opacity="0"/>
+      <stop offset="100%" stop-color="#8a6f4d" stop-opacity="0.16"/>
+    </radialGradient>
+    <!-- 和纸胶带的暖色半透明体（略带纵向米色条纹质感） -->
+    <linearGradient id="tapeBody" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#f6ead0" stop-opacity="0.92"/>
+      <stop offset="18%" stop-color="#efdfba" stop-opacity="0.78"/>
+      <stop offset="55%" stop-color="#f1e2c2" stop-opacity="0.82"/>
+      <stop offset="100%" stop-color="#e8d5ac" stop-opacity="0.88"/>
+    </linearGradient>
+  </defs>
+
+  <!-- 纸底 -->
+  <rect width="760" height="760" fill="#fbf7ee"/>
+  <!-- 纸纹噪点 -->
+  <rect width="760" height="760" filter="url(#grain)" opacity="0.55"/>
+  <!-- 横格线（从胶带下方开始，写字用的淡米灰线） -->
+  <g stroke="#e6ddc8" stroke-width="2.2" stroke-linecap="round" opacity="0.85">
+    <line x1="52" y1="172" x2="708" y2="172"/>
+    <line x1="52" y1="230" x2="708" y2="230"/>
+    <line x1="52" y1="288" x2="708" y2="288"/>
+    <line x1="52" y1="346" x2="708" y2="346"/>
+    <line x1="52" y1="404" x2="708" y2="404"/>
+    <line x1="52" y1="462" x2="708" y2="462"/>
+    <line x1="52" y1="520" x2="708" y2="520"/>
+    <line x1="52" y1="578" x2="708" y2="578"/>
+    <line x1="52" y1="636" x2="708" y2="636"/>
+    <line x1="52" y1="694" x2="708" y2="694"/>
+  </g>
+  <!-- 左侧装订孔红边线（经典便签细节） -->
+  <line x1="46" y1="150" x2="46" y2="720" stroke="#e8b8a8" stroke-width="3" stroke-linecap="round" opacity="0.65"/>
+
+  <!-- 顶部和纸胶带（微旋转 -2.5°；两端锯齿撕口） -->
+  <g transform="rotate(-2.5 380 62)" filter="url(#tapeShadow)">
+    <path d="M282 32 L306 24 L454 24 L478 32 L478 94 L454 102 L306 102 L282 94 Z" fill="url(#tapeBody)"/>
+    <!-- 撕口锯齿（左右两端的细密三角） -->
+    <path d="M282 32 l-10 6.5 10 6.5 -10 6.5 10 6.5 -10 6.5 10 6.5 -10 6.5 10 6.5 -10 6.5 10 5" fill="#efdfba" opacity="0.6"/>
+    <path d="M478 32 l10 6.5 -10 6.5 10 6.5 -10 6.5 10 6.5 -10 6.5 10 6.5 -10 6.5 10 6.5 -10 5" fill="#efdfba" opacity="0.6"/>
+    <!-- 胶带高光（上缘细亮线 + 沿长边的微条纹） -->
+    <path d="M300 30 L460 30" stroke="#fffdf6" stroke-width="3" stroke-linecap="round" opacity="0.7"/>
+    <path d="M316 44 L444 44" stroke="#fdf6e6" stroke-width="1.6" stroke-linecap="round" opacity="0.5"/>
+    <path d="M316 84 L444 84" stroke="#d9c497" stroke-width="1.6" stroke-linecap="round" opacity="0.45"/>
+  </g>
+
+  <!-- 右下手绘小涂鸦：一颗陶红小爱心 -->
+  <path d="M668 648 c-7-15-28-17-34-3 -5 11 4 22 34 41 30-19 39-30 34-41 -6-14-27-12-34 3z"
+        fill="none" stroke="#d98a76" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round" opacity="0.85"/>
+  <!-- 左下小星星 -->
+  <path d="M96 700 l7-16 7 16 17 2 -12 12 3 17 -15-8 -15 8 3-17 -12-12 z"
+        fill="none" stroke="#dcb96a" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round" opacity="0.8"/>
+
+  <!-- 纸张四缘厚度渐晕 -->
+  <rect width="760" height="760" fill="url(#paperEdge)"/>
+  <!-- 极细描边收口 -->
+  <rect x="1" y="1" width="758" height="758" fill="none" stroke="#c9bda1" stroke-width="2" opacity="0.6"/>
+</svg>

@@ -1,0 +1,28 @@
+{
+  "choices": [
+    {
+      "finish_reason": "stop",
+      "index": 0,
+      "message": {
+        "content": "在这张图里**有**木吉他（立在角落的，有琴身和琴颈）。\n琴身中心的绝对像素坐标是(100, 290)（x轴对应网格的90-110区间中点，y轴对应280-300区间中点，允许±10px左右的误差）。",
+        "role": "assistant"
+      }
+    }
+  ],
+  "created": 1793363360,
+  "id": "20261030202918684c2f6b1ad54e5e",
+  "model": "glm-5v-turbo",
+  "object": "chat.completion",
+  "request_id": "20261030202918684c2f6b1ad54e5e",
+  "usage": {
+    "completion_tokens": 66,
+    "completion_tokens_details": {
+      "reasoning_tokens": 0
+    },
+    "prompt_tokens": 390,
+    "prompt_tokens_details": {
+      "cached_tokens": 0
+    },
+    "total_tokens": 456
+  }
+}

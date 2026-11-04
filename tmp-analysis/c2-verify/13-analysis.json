@@ -1,0 +1,28 @@
+{
+  "choices": [
+    {
+      "finish_reason": "stop",
+      "index": 0,
+      "message": {
+        "content": "根据您提供的手机截图，**画面中有弹出家具动作按钮**。\n\n具体位置和文字如下：\n\n1.  **位置**：位于屏幕的**顶部区域（右上角）**。\n2.  **按钮文字**：按钮条上显示的文字是 **「装修小家」**。\n\n此外，该按钮条的左侧还有“爱心”图标和“猫咪”头像，右侧有一个“更多”（三个点）的选项。",
+        "role": "assistant"
+      }
+    }
+  ],
+  "created": 1793362834,
+  "id": "20261030202032f18ddab7fa1741c7",
+  "model": "glm-5v-turbo",
+  "object": "chat.completion",
+  "request_id": "20261030202032f18ddab7fa1741c7",
+  "usage": {
+    "completion_tokens": 91,
+    "completion_tokens_details": {
+      "reasoning_tokens": 0
+    },
+    "prompt_tokens": 424,
+    "prompt_tokens_details": {
+      "cached_tokens": 0
+    },
+    "total_tokens": 515
+  }
+}

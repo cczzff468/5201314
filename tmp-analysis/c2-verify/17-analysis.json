@@ -1,0 +1,28 @@
+{
+  "choices": [
+    {
+      "finish_reason": "stop",
+      "index": 0,
+      "message": {
+        "content": "根据您提供的截图，**画面底部或中部没有出现**类似「弹琴」或「坐下弹奏」的家具动作确认胶囊按钮。\n\n关于小人的状态：\n1.  **小人目前没有在走向钢琴**：画面中的小人（穿粉色衣服）正站在房间中央的地板上，处于静止状态。\n2.  **钢琴的位置**：画面左侧有一架黑色的立式钢琴，但旁边站着的是另一个穿黑白条纹衣服的小人（或者那是吉他的位置），主角并没有朝那个方向移动。\n\n**总结：**\n*   **动作按钮：** 无。\n*   **走向钢琴：** 否。",
+        "role": "assistant"
+      }
+    }
+  ],
+  "created": 1793362990,
+  "id": "20261030202308b2fb13d21bc14186",
+  "model": "glm-5v-turbo",
+  "object": "chat.completion",
+  "request_id": "20261030202308b2fb13d21bc14186",
+  "usage": {
+    "completion_tokens": 132,
+    "completion_tokens_details": {
+      "reasoning_tokens": 0
+    },
+    "prompt_tokens": 431,
+    "prompt_tokens_details": {
+      "cached_tokens": 2
+    },
+    "total_tokens": 563
+  }
+}

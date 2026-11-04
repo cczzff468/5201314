@@ -1,0 +1,28 @@
+{
+  "choices": [
+    {
+      "finish_reason": "stop",
+      "index": 0,
+      "message": {
+        "content": "根据截图分析：\n\n1.  **棕色双马尾女孩（TA）在哪里？**\n    她在画面的**中间偏下位置**，背对着镜头，站在一个写着“换台”的粉色按钮上方。\n\n2.  **她在弹吉他吗？**\n    **没有**。她目前是站立姿势，双手自然垂在身体两侧，并没有抱着吉他或做出弹奏的姿势。\n\n3.  **附近有没有吉他（木色吉他立在角落）？**\n    **没有**。在她身后的角落里，立着的是一个**粉色的圆形物体**（看起来像是一个呼啦圈或者镜子），而不是木色吉他。\n\n4.  **有没有飘浮音符？**\n    **没有**。画面中没有任何飘浮的音符特效。",
+        "role": "assistant"
+      }
+    }
+  ],
+  "created": 1793366544,
+  "id": "20261030212222c6aa188a82d24f13",
+  "model": "glm-5v-turbo",
+  "object": "chat.completion",
+  "request_id": "20261030212222c6aa188a82d24f13",
+  "usage": {
+    "completion_tokens": 162,
+    "completion_tokens_details": {
+      "reasoning_tokens": 0
+    },
+    "prompt_tokens": 439,
+    "prompt_tokens_details": {
+      "cached_tokens": 2
+    },
+    "total_tokens": 601
+  }
+}

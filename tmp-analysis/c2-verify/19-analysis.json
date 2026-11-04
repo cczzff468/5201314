@@ -1,0 +1,28 @@
+{
+  "choices": [
+    {
+      "finish_reason": "stop",
+      "index": 0,
+      "message": {
+        "content": "根据您提供的手机截图，针对您的问题回答如下：\n\n1.  **两个小人的位置与姿势：**\n    *   **穿粉色衣服的小人（主角）：** 位于画面**中央偏下的地板上**，呈**跪坐/盘腿坐**的姿势，背对着镜头。\n    *   **穿黑色衣服的小人：** 位于画面**左侧边缘**，只能看到部分身体（头部和肩膀），似乎也是坐着或站着的姿势。\n\n2.  **是否有人坐在乐器前：**\n    *   **没有。**\n    *   虽然画面左侧靠墙的位置立着一把**吉他**，但两个小人都没有坐在它面前或正在弹奏它。\n\n3.  **画面底部是否有乐器弹奏UI：**\n    *   **没有。**\n    *   画面底部的UI是**语音/文字聊天界面**（包含输入框“跟小雨说点什么...”、发送按钮、虚拟摇杆以及麦克风/音效等圆形功能按钮），并没有出现钢琴键或吉他弦等乐器演奏的交互界面。",
+        "role": "assistant"
+      }
+    }
+  ],
+  "created": 1793363159,
+  "id": "20261030202555da1c43819b254f4f",
+  "model": "glm-5v-turbo",
+  "object": "chat.completion",
+  "request_id": "20261030202555da1c43819b254f4f",
+  "usage": {
+    "completion_tokens": 226,
+    "completion_tokens_details": {
+      "reasoning_tokens": 0
+    },
+    "prompt_tokens": 428,
+    "prompt_tokens_details": {
+      "cached_tokens": 0
+    },
+    "total_tokens": 654
+  }
+}

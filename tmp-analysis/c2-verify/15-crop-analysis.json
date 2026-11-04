@@ -1,0 +1,28 @@
+{
+  "choices": [
+    {
+      "finish_reason": "stop",
+      "index": 0,
+      "message": {
+        "content": "这张图显示的是**白色立式钢琴**（或电子琴/键盘乐器）。\n\n关于细节：\n- **琴键**：由于图像分辨率和角度原因，琴键区域看起来是模糊的浅色块，**无法清晰分辨出黑白琴键的细节**。\n- **琴腿**：钢琴的支撑结构（琴腿）在图中**看不清楚**，底部与地面融合在一起，没有明显的腿部轮廓。\n\n**像素位置计算**：\n此放大图对应原图的区域是 `x: 0-160, y: 250-520`，并且放大了2倍。\n- 该物体（白色钢琴）主要位于放大图的**左下角/左侧**区域。\n- 换算回原图（390x844）的坐标，该物体大约位于：\n  - **X轴**：约 **0 ~ 100** 像素（靠左边缘）\n  - **Y轴**：约 **350 ~ 520** 像素（中下部）\n\n简单来说，这就是原图左下角那架白色的立式钢琴（旁边还靠着一把吉他）。",
+        "role": "assistant"
+      }
+    }
+  ],
+  "created": 1793362951,
+  "id": "2026103020222793fb44f557bc40e9",
+  "model": "glm-5v-turbo",
+  "object": "chat.completion",
+  "request_id": "2026103020222793fb44f557bc40e9",
+  "usage": {
+    "completion_tokens": 234,
+    "completion_tokens_details": {
+      "reasoning_tokens": 0
+    },
+    "prompt_tokens": 175,
+    "prompt_tokens_details": {
+      "cached_tokens": 0
+    },
+    "total_tokens": 409
+  }
+}

@@ -1,0 +1,31 @@
+# 网易云 API（api-enhanced v4.41.1）一键部署 —— 离开沙箱后在任何有 Docker 的机器上运行
+#
+# 用法：
+#   cd deploy/ncm-api && docker compose up -d        # 构建并启动（首次构建约 1-2 分钟）
+#   docker compose logs -f                            # 看日志
+#   bash check.sh                                     # 健康检查（宿主机）
+#
+# 与本手机模拟器 App（5200 仓库）对接：
+#   - 默认零配置：本 compose 把容器 3000 映射到宿主机 3010，
+#     App 的 /api/music/ncm 代理默认指向 localhost:3010，同机即通；
+#   - API 部署在其它机器/端口：给 App 设环境变量 NCM_API_UPSTREAM=http://主机:端口。
+
+services:
+  ncm-api:
+    # 从你自己的 fork 构建（推荐：代码自主可控，改完 push 后 docker compose build --pull 即升级）
+    build: https://github.com/cczzff468/api-enhanced.git
+    # 不想构建可直接用上游官方镜像（更快）——注释上一行、解开下一行即可：
+    # image: moefurina/ncm-api:latest
+    container_name: ncm-api
+    ports:
+      - "3010:3000" # 宿主机 3010 → 容器 3000（fork 的 Dockerfile 固定 EXPOSE 3000 / node app.js）
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=production
+    healthcheck:
+      # 探活用本地静态资源（不消耗网易接口配额、不触发风控）
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:3000/static/neteaselogo.png"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s

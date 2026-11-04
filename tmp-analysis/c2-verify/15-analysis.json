@@ -1,0 +1,28 @@
+{
+  "choices": [
+    {
+      "finish_reason": "stop",
+      "index": 0,
+      "message": {
+        "content": "根据网格刻度分析，白色立式钢琴（主体部分）在画面中的位置如下：\n\n**网格范围：**\n*   **左边缘：** 位于 **x1** 刻度线（10%宽）\n*   **右边缘：** 位于 **x2** 刻度线（20%宽）\n*   **上边缘：** 位于 **y4** 刻度线（40%高）\n*   **下边缘：** 位于 **y5** 刻度线（50%高）\n\n**可见性说明：**\n钢琴主体完全可见，位于画面左侧偏下的区域（坐标范围 x1-x2, y4-y5）。钢琴的琴键部分朝向右侧，琴背紧贴左侧边缘。",
+        "role": "assistant"
+      }
+    }
+  ],
+  "created": 1793362903,
+  "id": "202610302021418cf9f69acf6f45e7",
+  "model": "glm-5v-turbo",
+  "object": "chat.completion",
+  "request_id": "202610302021418cf9f69acf6f45e7",
+  "usage": {
+    "completion_tokens": 156,
+    "completion_tokens_details": {
+      "reasoning_tokens": 0
+    },
+    "prompt_tokens": 465,
+    "prompt_tokens_details": {
+      "cached_tokens": 2
+    },
+    "total_tokens": 621
+  }
+}

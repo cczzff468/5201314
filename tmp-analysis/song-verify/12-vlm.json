@@ -1,0 +1,28 @@
+{
+  "choices": [
+    {
+      "finish_reason": "stop",
+      "index": 0,
+      "message": {
+        "content": "根据您提供的《拾光小屋》截图，以下是详细情况：\n\n1.  **位置与姿态**：棕色双马尾女孩（TA）目前正**站着**（或处于待机站立状态），位于画面的**中下部区域**。从俯视视角看，她正面对着前方的家具。\n2.  **附近家具（特别注意钢琴）**：\n    *   她的正前方紧挨着一个**白色的梳妆台/桌子**。\n    *   在她右侧（画面右侧）靠墙的位置，有一架**黑色的立式钢琴**。这是您特别关注的物体。\n    *   她的左侧和后方是浅色的地板区域。\n3.  **音符效果**：画面中**没有**正在发光或浮动的音符效果。\n\n**总结：** 她正站在房间中央偏下的位置，面前是白色桌子，右手边就是那架黑色钢琴，目前处于静止站立状态，周围没有特殊的音乐特效。",
+        "role": "assistant"
+      }
+    }
+  ],
+  "created": 1793366042,
+  "id": "2026103021135900089ae9f4dc4b64",
+  "model": "glm-5v-turbo",
+  "object": "chat.completion",
+  "request_id": "2026103021135900089ae9f4dc4b64",
+  "usage": {
+    "completion_tokens": 206,
+    "completion_tokens_details": {
+      "reasoning_tokens": 0
+    },
+    "prompt_tokens": 435,
+    "prompt_tokens_details": {
+      "cached_tokens": 0
+    },
+    "total_tokens": 641
+  }
+}

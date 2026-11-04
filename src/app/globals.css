@@ -1,0 +1,1582 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+/* 淘宝/美团深色模式覆盖层（第六十七轮，scripts/gen-shop-dark-css.mjs 自动生成）：
+   仅在 .shop-dark 作用域（AppWindow 深色时挂给淘宝/美团）内生效 */
+@import "./shop-dark.css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+:root {
+  --radius: 0.625rem;
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.145 0 0);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.145 0 0);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.145 0 0);
+  --primary: oklch(0.205 0 0);
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.97 0 0);
+  --secondary-foreground: oklch(0.205 0 0);
+  --muted: oklch(0.97 0 0);
+  --muted-foreground: oklch(0.556 0 0);
+  --accent: oklch(0.97 0 0);
+  --accent-foreground: oklch(0.205 0 0);
+  --destructive: oklch(0.577 0.245 27.325);
+  --border: oklch(0.922 0 0);
+  --input: oklch(0.922 0 0);
+  --ring: oklch(0.708 0 0);
+  --chart-1: oklch(0.646 0.222 41.116);
+  --chart-2: oklch(0.6 0.118 184.704);
+  --chart-3: oklch(0.398 0.07 227.392);
+  --chart-4: oklch(0.828 0.189 84.429);
+  --chart-5: oklch(0.769 0.188 70.08);
+  --sidebar: oklch(0.985 0 0);
+  --sidebar-foreground: oklch(0.145 0 0);
+  --sidebar-primary: oklch(0.205 0 0);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.97 0 0);
+  --sidebar-accent-foreground: oklch(0.205 0 0);
+  --sidebar-border: oklch(0.922 0 0);
+  --sidebar-ring: oklch(0.708 0 0);
+}
+
+.dark {
+  --background: oklch(0.145 0 0);
+  --foreground: oklch(0.985 0 0);
+  --card: oklch(0.205 0 0);
+  --card-foreground: oklch(0.985 0 0);
+  --popover: oklch(0.205 0 0);
+  --popover-foreground: oklch(0.985 0 0);
+  --primary: oklch(0.922 0 0);
+  --primary-foreground: oklch(0.205 0 0);
+  --secondary: oklch(0.269 0 0);
+  --secondary-foreground: oklch(0.985 0 0);
+  --muted: oklch(0.269 0 0);
+  --muted-foreground: oklch(0.708 0 0);
+  --accent: oklch(0.269 0 0);
+  --accent-foreground: oklch(0.985 0 0);
+  --destructive: oklch(0.704 0.191 22.216);
+  --border: oklch(1 0 0 / 10%);
+  --input: oklch(1 0 0 / 15%);
+  --ring: oklch(0.556 0 0);
+  --chart-1: oklch(0.488 0.243 264.376);
+  --chart-2: oklch(0.696 0.17 162.48);
+  --chart-3: oklch(0.769 0.188 70.08);
+  --chart-4: oklch(0.627 0.265 303.9);
+  --chart-5: oklch(0.645 0.246 16.439);
+  --sidebar: oklch(0.205 0 0);
+  --sidebar-foreground: oklch(0.985 0 0);
+  --sidebar-primary: oklch(0.488 0.243 264.376);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.269 0 0);
+  --sidebar-accent-foreground: oklch(0.985 0 0);
+  --sidebar-border: oklch(1 0 0 / 10%);
+  --sidebar-ring: oklch(0.556 0 0);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  html,
+  body {
+    height: 100%;
+    overscroll-behavior: none;
+  }
+  body {
+    @apply bg-background text-foreground;
+    /* 全局字体（Task 33-d）：--app-font-family 由设置「字体」页写入 documentElement，未设置时回退默认系统字体栈 */
+    font-family: var(--app-font-family, -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'PingFang SC', 'Hiragino Sans GB',
+      'Microsoft YaHei', 'Helvetica Neue', Arial, sans-serif);
+    /* 全局字重（Task 34-a）：未显式设 font-medium/semibold 的文本生效；显式类的字重保持不变 */
+    font-weight: var(--app-font-weight, 400);
+    -webkit-font-smoothing: antialiased;
+  }
+}
+
+/* 全局字体大小（Task 36 修订）：只缩放文字、不缩放界面框架。
+   旧方案（34-a）把 transform scale 打在手机屏容器上，「小」档连按钮/图标/布局一起缩小，
+   与「字体大小」语义不符，已废弃；新方案由设置页把倍率写入 :root 的 --app-font-scale
+   （lib/ios/fonts.ts applyAppFontScale），下方按项目内实际用到的 text-[Npx] / leading-[Npx]
+   任意值类逐档重写为 calc(原值 × 倍率)——行高跟随缩放避免大档位文字重叠，容器尺寸全部不变。
+   这些规则置于 @layer utilities 之外：未分层声明在 CSS 级联中恒胜过 Tailwind 的分层工具类，
+   无需 !important；LightningCSS 对 calc 乘法 + var 静态可验证，构建期不会丢弃。
+   新增字号/行高写法时在此同步补一条。 */
+.text-\[6\.5px\] { font-size: calc(6.5px * var(--app-font-scale, 1)); }
+.text-\[7px\] { font-size: calc(7px * var(--app-font-scale, 1)); }
+.text-\[9px\] { font-size: calc(9px * var(--app-font-scale, 1)); }
+.text-\[9\.5px\] { font-size: calc(9.5px * var(--app-font-scale, 1)); }
+.text-\[10px\] { font-size: calc(10px * var(--app-font-scale, 1)); }
+.text-\[10\.5px\] { font-size: calc(10.5px * var(--app-font-scale, 1)); }
+.text-\[11px\] { font-size: calc(11px * var(--app-font-scale, 1)); }
+.text-\[11\.5px\] { font-size: calc(11.5px * var(--app-font-scale, 1)); }
+.text-\[12px\] { font-size: calc(12px * var(--app-font-scale, 1)); }
+.text-\[12\.5px\] { font-size: calc(12.5px * var(--app-font-scale, 1)); }
+.text-\[13px\] { font-size: calc(13px * var(--app-font-scale, 1)); }
+.text-\[13\.5px\] { font-size: calc(13.5px * var(--app-font-scale, 1)); }
+.text-\[14px\] { font-size: calc(14px * var(--app-font-scale, 1)); }
+.text-\[14\.5px\] { font-size: calc(14.5px * var(--app-font-scale, 1)); }
+.text-\[15px\] { font-size: calc(15px * var(--app-font-scale, 1)); }
+.text-\[15\.5px\] { font-size: calc(15.5px * var(--app-font-scale, 1)); }
+.text-\[16px\] { font-size: calc(16px * var(--app-font-scale, 1)); }
+.text-\[16\.5px\] { font-size: calc(16.5px * var(--app-font-scale, 1)); }
+.text-\[17px\] { font-size: calc(17px * var(--app-font-scale, 1)); }
+.text-\[18px\] { font-size: calc(18px * var(--app-font-scale, 1)); }
+.text-\[19px\] { font-size: calc(19px * var(--app-font-scale, 1)); }
+.text-\[20px\] { font-size: calc(20px * var(--app-font-scale, 1)); }
+.text-\[21px\] { font-size: calc(21px * var(--app-font-scale, 1)); }
+.text-\[22px\] { font-size: calc(22px * var(--app-font-scale, 1)); }
+.text-\[23px\] { font-size: calc(23px * var(--app-font-scale, 1)); }
+.text-\[24px\] { font-size: calc(24px * var(--app-font-scale, 1)); }
+.text-\[25px\] { font-size: calc(25px * var(--app-font-scale, 1)); }
+.text-\[26px\] { font-size: calc(26px * var(--app-font-scale, 1)); }
+.text-\[28px\] { font-size: calc(28px * var(--app-font-scale, 1)); }
+.text-\[29px\] { font-size: calc(29px * var(--app-font-scale, 1)); }
+.text-\[30px\] { font-size: calc(30px * var(--app-font-scale, 1)); }
+.text-\[32px\] { font-size: calc(32px * var(--app-font-scale, 1)); }
+.text-\[34px\] { font-size: calc(34px * var(--app-font-scale, 1)); }
+.text-\[36px\] { font-size: calc(36px * var(--app-font-scale, 1)); }
+.text-\[38px\] { font-size: calc(38px * var(--app-font-scale, 1)); }
+.text-\[40px\] { font-size: calc(40px * var(--app-font-scale, 1)); }
+.text-\[42px\] { font-size: calc(42px * var(--app-font-scale, 1)); }
+.text-\[44px\] { font-size: calc(44px * var(--app-font-scale, 1)); }
+.text-\[46px\] { font-size: calc(46px * var(--app-font-scale, 1)); }
+.text-\[48px\] { font-size: calc(48px * var(--app-font-scale, 1)); }
+.text-\[52px\] { font-size: calc(52px * var(--app-font-scale, 1)); }
+.text-\[54px\] { font-size: calc(54px * var(--app-font-scale, 1)); }
+.text-\[64px\] { font-size: calc(64px * var(--app-font-scale, 1)); }
+.text-\[72px\] { font-size: calc(72px * var(--app-font-scale, 1)); }
+.text-\[88px\] { font-size: calc(88px * var(--app-font-scale, 1)); }
+.text-\[96px\] { font-size: calc(96px * var(--app-font-scale, 1)); }
+.text-\[112px\] { font-size: calc(112px * var(--app-font-scale, 1)); }
+.leading-\[9px\] { line-height: calc(9px * var(--app-font-scale, 1)); }
+.leading-\[10px\] { line-height: calc(10px * var(--app-font-scale, 1)); }
+.leading-\[12px\] { line-height: calc(12px * var(--app-font-scale, 1)); }
+.leading-\[13px\] { line-height: calc(13px * var(--app-font-scale, 1)); }
+.leading-\[14px\] { line-height: calc(14px * var(--app-font-scale, 1)); }
+.leading-\[16px\] { line-height: calc(16px * var(--app-font-scale, 1)); }
+.leading-\[17px\] { line-height: calc(17px * var(--app-font-scale, 1)); }
+.leading-\[18px\] { line-height: calc(18px * var(--app-font-scale, 1)); }
+.leading-\[19px\] { line-height: calc(19px * var(--app-font-scale, 1)); }
+.leading-\[20px\] { line-height: calc(20px * var(--app-font-scale, 1)); }
+.leading-\[22px\] { line-height: calc(22px * var(--app-font-scale, 1)); }
+.leading-\[36px\] { line-height: calc(36px * var(--app-font-scale, 1)); }
+.leading-\[40px\] { line-height: calc(40px * var(--app-font-scale, 1)); }
+.leading-\[46px\] { line-height: calc(46px * var(--app-font-scale, 1)); }
+/* placeholder 字号变体（世界书搜索框；placeholder: 前缀类选择器不同，需单独覆盖） */
+.placeholder\:text-\[16px\]::placeholder { font-size: calc(16px * var(--app-font-scale, 1)); }
+
+/* 隐藏滚动条（iOS 风格） */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* 细滚动条（深色内容区） */
+.thin-scrollbar::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+.thin-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(128, 128, 128, 0.45);
+  border-radius: 4px;
+}
+.thin-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* 全局滚动条「滚动时才显示」（Task 40）：
+   手机内所有 App 滚动区默认滚动条完全透明（视觉隐藏），滚动时浮现 4px 细条，停止 ~0.9s 后隐去。
+   显隐由 PhoneShell 的全局捕获 scroll 监听控制：滚动容器被标记 data-scrolling="true"，
+   停止滚动后回 "false"。.no-scrollbar 与 [scrollbar-width:none] 等显式隐藏规则优先级更高，不受影响。 */
+*::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  background: transparent;
+  border-radius: 9999px;
+}
+[data-scrolling='true']::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.3);
+}
+[data-scrolling='true']::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.45);
+}
+* {
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+}
+[data-scrolling='true'] {
+  scrollbar-color: rgba(0, 0, 0, 0.3) transparent;
+}
+
+/* 主屏幕编辑模式：App 图标 / 小组件抖动 */
+@keyframes home-jiggle {
+  0%,
+  100% {
+    transform: rotate(-1.3deg) translateX(-0.6px);
+  }
+  50% {
+    transform: rotate(1.3deg) translateX(0.6px);
+  }
+}
+.home-jiggle {
+  animation: home-jiggle 0.32s ease-in-out infinite;
+}
+
+/* 文件夹展开面板：背景淡入 + 内容从中心弹出（iOS 风格） */
+@keyframes folder-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.folder-fade {
+  animation: folder-fade 0.22s ease-out both;
+}
+@keyframes folder-pop {
+  from {
+    opacity: 0;
+    transform: scale(0.88);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+.folder-pop {
+  animation: folder-pop 0.26s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+/* 压住入夹：目标图标自身的轻微缩放脉动（iOS 同款） */
+@keyframes merge-target-breathe {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.07);
+  }
+}
+.merge-target-pulse {
+  animation: merge-target-breathe 1.05s ease-in-out infinite;
+  pointer-events: none;
+}
+
+/* 压住入夹：目标外围一圈呼吸的圆角方边框（贴图标轮廓，与缩放脉动同频呼吸） */
+@keyframes merge-target-ring {
+  0%,
+  100% {
+    opacity: 0.45;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+.merge-target-ring {
+  position: absolute;
+  inset: -4px;
+  z-index: 5;
+  border-radius: 19px;
+  border: 2.5px solid rgba(255, 255, 255, 0.98);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.18);
+  animation: merge-target-ring 1.05s ease-in-out infinite;
+  pointer-events: none;
+}
+
+/* 合并预览期间被拖 App 轻微收拢（iOS 同款：手指上的图标缩一点，目标图标呼吸脉动） */
+@keyframes merge-copy-shrink {
+  from {
+    transform: scale(1.08);
+  }
+  to {
+    transform: scale(0.92);
+  }
+}
+.merge-copy-shrink {
+  animation: merge-copy-shrink 0.22s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+/* 网易云音乐小组件：黑胶唱片缓慢旋转（播放中） */
+@keyframes netease-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* 音乐小组件声波条律动（播放中每根条错峰缩放跳动，暂停时静止） */
+@keyframes music-wave {
+  0%,
+  100% {
+    transform: scaleY(1);
+  }
+  50% {
+    transform: scaleY(0.4);
+  }
+}
+
+/* 通话弹幕字幕：逐条弹跳入场（头像/名字下方实时字幕流，跳动特效——落下→弹起→回弹稳定） */
+@keyframes call-caption-in {
+  0% {
+    opacity: 0;
+    transform: translateY(14px) scale(0.85);
+  }
+  55% {
+    opacity: 1;
+    transform: translateY(-5px) scale(1.06);
+  }
+  78% {
+    transform: translateY(2px) scale(0.985);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+.animate-call-caption {
+  animation: call-caption-in 0.42s cubic-bezier(0.26, 0.68, 0.44, 0.94) both;
+}
+
+/* 一起听音乐界面底部快聊输入条滑入 */
+@keyframes quick-in-up {
+  from {
+    opacity: 0;
+    transform: translateY(100%);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* 全局迷你播放器悬浮唱片旋转（第十六轮反馈）：播放中旋转、暂停时 animationPlayState 暂停 */
+@keyframes mini-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* iOS 风格绿色滑杆（通知声音设置）：粗轨道 + #34C759 已选段 + 白色大圆钮带投影 */
+.ios-slider[data-slot='slider'] [data-slot='slider-track'] {
+  height: 6px;
+}
+.ios-slider[data-slot='slider'] [data-slot='slider-range'] {
+  background: #34c759;
+}
+.ios-slider[data-slot='slider'] [data-slot='slider-thumb'] {
+  height: 26px;
+  width: 26px;
+  border: none;
+  background: #fff;
+  box-shadow:
+    0 3px 8px rgba(0, 0, 0, 0.22),
+    0 1px 1px rgba(0, 0, 0, 0.1);
+}
+.dark .ios-slider[data-slot='slider'] [data-slot='slider-thumb'] {
+  background: #fff;
+}
+
+/* 美团订单详情：配送小地图骑手沿商家→家的弧线按真实配送时间单向前进（关键帧已废弃：
+   位置改由 DeliveryMap 内联 style 按订单时间进度沿贝塞尔曲线 M 75 139 Q 241 92 443 177
+   （viewBox 500×208，preserveAspectRatio=none）实时插值，1s linear 过渡让逐秒刷新平滑） */
+.mt-rider {
+  transition:
+    left 1s linear,
+    top 1s linear;
+}
+
+/* 骑手形象立体颠簸（配合百分比轨迹巡航；投影由内联 drop-shadow 提供，无白边白环） */
+@keyframes mt-rider-bob {
+  0%,
+  100% {
+    transform: translateY(0) rotate(-2.5deg);
+  }
+  50% {
+    transform: translateY(-5px) rotate(2.5deg);
+  }
+}
+.mt-rider-img {
+  animation: mt-rider-bob 1.6s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .mt-rider-img {
+    animation: none;
+  }
+}
+
+/* ---------------- 情侣空间 App（couple-space）动效 ---------------- */
+/* 子页滑入（App 内全屏覆盖层） */
+@keyframes couple-sub-in {
+  from {
+    transform: translateX(36px);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+/* 「每天想你」点击回弹 */
+@keyframes couple-pop-heart {
+  0% {
+    transform: scale(1);
+  }
+  40% {
+    transform: scale(1.12);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+/* 情侣轨迹地图虚线流动 */
+@keyframes couple-dash-flow {
+  to {
+    stroke-dashoffset: -64;
+  }
+}
+/* 「每天想你」点击涟漪扩散 */
+@keyframes couple-ripple-out {
+  from {
+    transform: scale(0.9);
+    opacity: 0.55;
+  }
+  to {
+    transform: scale(1.5);
+    opacity: 0;
+  }
+}
+/* 三生石：星星闪烁 */
+@keyframes couple-twinkle {
+  0%,
+  100% {
+    opacity: 0.2;
+    transform: scale(0.75);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.15);
+  }
+}
+/* 三生石：水晶光晕呼吸 */
+@keyframes couple-glow-pulse {
+  0%,
+  100% {
+    opacity: 0.5;
+  }
+  50% {
+    opacity: 0.95;
+  }
+}
+/* 名牌/装饰缓慢漂浮 */
+@keyframes couple-float-y {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-6px);
+  }
+}
+/* 留言板：新便签钉上墙的落钉动画（--rot = 便签自身角度，落钉后回到同一角度不跳变） */
+@keyframes board-pin-in {
+  0% {
+    transform: rotate(var(--rot, 0deg)) translateY(-14px) scale(0.7);
+    opacity: 0;
+  }
+  55% {
+    transform: rotate(var(--rot, 0deg)) translateY(2px) scale(1.05);
+    opacity: 1;
+  }
+  100% {
+    transform: rotate(var(--rot, 0deg)) translateY(0) scale(1);
+    opacity: 1;
+  }
+}
+/* 三生石：流星划过 */
+@keyframes couple-shoot {
+  0% {
+    transform: translate(0, 0) rotate(24deg);
+    opacity: 0;
+  }
+  4% {
+    opacity: 0.95;
+  }
+  16% {
+    transform: translate(150px, 66px) rotate(24deg);
+    opacity: 0;
+  }
+  100% {
+    transform: translate(150px, 66px) rotate(24deg);
+    opacity: 0;
+  }
+}
+/* 三生石：星尘飘落 */
+@keyframes couple-fall {
+  0% {
+    transform: translateY(-10px);
+    opacity: 0;
+  }
+  12% {
+    opacity: 0.85;
+  }
+  82% {
+    opacity: 0.5;
+  }
+  100% {
+    transform: translateY(320px);
+    opacity: 0;
+  }
+}
+/* 未来情书：信纸 textarea 占位符颜色 */
+.letter-pad::placeholder {
+  opacity: 0.42;
+  font-weight: 300;
+}
+/* —— 第四十六轮 爱情塔罗（浅色毛玻璃风）—— */
+/* 洗牌：单张牌飞出再归位（外层定位，内层做位移旋转；--sx/--sy/--sr 每张随机） */
+@keyframes tarot-shuffle-card {
+  0% {
+    transform: translate(0, 0) rotate(0deg);
+  }
+  32% {
+    transform: translate(var(--sx), var(--sy)) rotate(var(--sr));
+  }
+  68% {
+    transform: translate(calc(var(--sx) * -0.55), calc(var(--sy) * -0.55)) rotate(calc(var(--sr) * -0.7));
+  }
+  100% {
+    transform: translate(0, 0) rotate(0deg);
+  }
+}
+/* 牌堆呼吸光晕（浅色） */
+@keyframes tarot-pile-glow {
+  0%,
+  100% {
+    opacity: 0.3;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.65;
+    transform: scale(1.1);
+  }
+}
+/* 当前待填牌位的虚线框呼吸 */
+@keyframes tarot-slot-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(17, 24, 39, 0.12);
+  }
+  50% {
+    box-shadow: 0 0 0 5px rgba(17, 24, 39, 0);
+  }
+}
+/* 牌落入牌位/卡面浮现 */
+@keyframes tarot-reveal-in {
+  from {
+    opacity: 0;
+    transform: translateY(14px) scale(0.94);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+/* 解读文字渐入上移 */
+@keyframes tarot-text-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+/* AI 解读加载：环旋转 */
+@keyframes tarot-halo-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+/* 长按洗牌提示呼吸 */
+@keyframes tarot-star-pulse {
+  0%,
+  100% {
+    opacity: 0.4;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  [animation\:tarot-shuffle-card],
+  [animation\:tarot-pile-glow],
+  [animation\:tarot-slot-pulse],
+  [animation\:tarot-reveal-in],
+  [animation\:tarot-text-in],
+  [animation\:tarot-halo-spin],
+  [animation\:tarot-star-pulse] {
+    animation: none;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  [animation\:couple-sub-in],
+  [animation\:couple-pop-heart],
+  [animation\:couple-ripple-out],
+  [animation\:couple-dash-flow],
+  [animation\:couple-twinkle],
+  [animation\:couple-glow-pulse],
+  [animation\:couple-float-y],
+  [animation\:couple-shoot],
+  [animation\:couple-fall],
+  [animation\:board-pin-in] {
+    animation: none;
+  }
+}
+/* 第二十八轮情书：信封收信字样——容器宽度过小时（编辑器工具栏小按钮等）自动隐藏，防止挤爆 */
+@container (max-width: 72px) {
+  .letter-env-face {
+    display: none;
+  }
+}
+
+/* ---------------- 情侣小家动画 ---------------- */
+@keyframes char-bob {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-3px); }
+}
+@keyframes tv-flicker {
+  0%, 100% { opacity: 0.85; }
+  40% { opacity: 1; }
+  60% { opacity: 0.72; }
+  80% { opacity: 0.95; }
+}
+
+/* ===================== 情侣小家 2.5D ===================== */
+@keyframes char-bob {
+  0%, 100% { transform: translateY(0) rotate(0deg); }
+  50% { transform: translateY(-5px) rotate(-1.2deg); }
+}
+@keyframes ch-furn-bob {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-6px); }
+}
+@keyframes ch-tv-play {
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+@keyframes ch-float-up {
+  0% { transform: translate(-50%, 0) scale(0.7); opacity: 0; }
+  15% { transform: translate(-50%, -12px) scale(1.1); opacity: 1; }
+  100% { transform: translate(-50%, -64px) scale(1); opacity: 0; }
+}
+@keyframes ch-twinkle-star {
+  0%, 100% { opacity: 0.35; }
+  50% { opacity: 0.95; }
+}
+@keyframes ch-coin-pop {
+  0% { transform: scale(1); }
+  40% { transform: scale(1.25); }
+  100% { transform: scale(1); }
+}
+@keyframes ch-cloud-drift {
+  0% { transform: translateX(-8%); }
+  100% { transform: translateX(8%); }
+}
+
+/* ───────── 微信语音气泡（voice-bubble.tsx）：伪元素小尾巴 + 播放中声波波纹闪烁（第 20 轮：声波改为用户指定现成 SVG 18×18） ───────── */
+/* 尾巴菱形只挂在 .wx-voice-tail-left/right 两个类上（第二十轮修复）：
+   此前基础规则写在 .wx-voice-bubble::before 上、tail 类只补 left/right 定位——
+   毛玻璃/液态装扮隐藏尾巴（hideTail 去掉 tail 类）后 ::before 仍然生成，
+   只是没有 left/right → 落在静态位置（气泡内部左上），变成一块悬浮的白色菱形。
+   现在菱形的全部属性都在 tail 类上：无 tail 类 = 无 ::before，彻底消失。 */
+.wx-voice-tail-left::before,
+.wx-voice-tail-right::before {
+  content: '';
+  position: absolute;
+  top: 13px; /* 10px 正方形 rotate(45deg) 后菱形中心落在 top 18px＝42px 气泡垂直居中偏上（用户指定） */
+  width: 10px;
+  height: 10px;
+  background-color: inherit; /* 尾巴颜色与气泡背景完全一致（浅/深色模式自动跟随） */
+  transform: rotate(45deg);
+}
+.wx-voice-tail-left::before {
+  left: -4px; /* 接收方：尾巴紧贴气泡最左侧 */
+}
+.wx-voice-tail-right::before {
+  right: -4px; /* 发送方：尾巴紧贴气泡最右侧 */
+}
+/* 静态声波弧线/锥体着色（第 22 轮：两道弧线改**纯黑**——去掉灰度衰减，不透明度 1；
+   锥体保持真机微差：白气泡 .85、绿气泡 1。wx-arc-2=内弧 / wx-arc-3=外弧，锥体在最左） */
+.wx-voice-tail-left .wx-cone { opacity: 0.85; }
+.wx-voice-tail-left .wx-arc-2,
+.wx-voice-tail-left .wx-arc-3 { opacity: 1; }
+.wx-voice-tail-right .wx-cone { opacity: 1; }
+.wx-voice-tail-right .wx-arc-2,
+.wx-voice-tail-right .wx-arc-3 { opacity: 1; }
+/* 播放中：两道弧线**从前往后一个一个出现**（第 22 轮，用户指定）——
+   内弧先亮、外弧半拍后亮，各自循环形成逐个浮现的波纹；停止恢复静态纯黑 */
+@keyframes wx-voice-arc-seq {
+  0% { opacity: 0; }
+  32% { opacity: 1; }
+  100% { opacity: 1; }
+}
+.wx-voice-playing .wx-arc-2 { animation: wx-voice-arc-seq 1.1s linear infinite; }
+.wx-voice-playing .wx-arc-3 { animation: wx-voice-arc-seq 1.1s linear 0.55s infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .wx-voice-playing .wx-arc-2,
+  .wx-voice-playing .wx-arc-3 { animation: none; }
+}
+
+/* ---------------------------------------------------------------------------
+ * 液态玻璃（第十九轮终版）：清透玻璃（用户指定：删 brightness 提亮、删白描边、更透明）。
+ * 胶囊外形 + 极淡白膜（α 0.10 以下，背景几乎完全直接透出）+ blur 提饱和。
+ * 无描边、无伪元素（无高光、无闪光）。文字色随深浅色模式自适应。
+ * 与毛玻璃的区别：毛玻璃 = 奶白半透磨砂（0.62 白，背景漫射成柔和轮廓）；
+ * 液态 = 0.10 以下极淡白膜，背景清晰可见——一个是磨砂乳白玻璃，一个是水膜。
+ * 第四十八轮（用户指定「去雾，更清透，和玻璃一样」）：白膜再减半（0.10/0.02/0.06 →
+ * 0.055/0.012/0.035）+ 投影减淡减短（去玻璃上的雾感，背景像直接透过玻璃看到）；
+ * blur 微升 8→10px——透明度让给背景，玻璃质感由模糊层承担，清澈而有玻璃厚度。
+ * ------------------------------------------------------------------------- */
+.bub-liquid {
+  color: #1a1a1a;
+  /* 第十九轮：删白描边（用户指定）+ 更透明（白膜 α 0.16→0.10）；第四十八轮：再减半去雾 */
+  background: linear-gradient(
+    165deg,
+    rgba(255, 255, 255, 0.055) 0%,
+    rgba(255, 255, 255, 0.012) 48%,
+    rgba(255, 255, 255, 0.035) 100%
+  );
+  -webkit-backdrop-filter: blur(10px) saturate(185%);
+  backdrop-filter: blur(10px) saturate(185%);
+  box-shadow: 0 4px 12px rgba(31, 35, 41, 0.05);
+}
+.dark .bub-liquid {
+  color: #ffffff;
+  background: linear-gradient(
+    165deg,
+    rgba(255, 255, 255, 0.04) 0%,
+    rgba(255, 255, 255, 0.008) 48%,
+    rgba(255, 255, 255, 0.025) 100%
+  );
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.16);
+}
+
+/* ---------------------------------------------------------------------------
+ * 毛玻璃（第十九轮重做）：真实磨砂玻璃三要素——
+ * ① 奶白半透底（0.62 白，彩色背景被漫射成柔和轮廓透出）；
+ * ② 磨砂颗粒纹理（feTurbulence 分形噪点 5.5% 灰尘感——素色背景下也能看出
+ *    「磨砂面」的 satin 质地，与纯白实心胶囊拉开差距）；
+ * ③ 柔和悬浮投影（0 5px 16px 中性灰——投影是玻璃板的浮起深度，不是高光；
+ *    此前删高光时连投影一起删了导致素底上像一片死白，本轮重做恢复）。
+ * 无描边、无光泽高光、无渐变（用户历轮指定）。深浅色模式同一奶白面板
+ * （0.62 白叠深底 ≈ #A7 + 黑字，对比度 ≥6.9 仍可读）。
+ * ------------------------------------------------------------------------- */
+.bub-frosted {
+  color: #111111;
+  background-color: rgba(255, 255, 255, 0.62);
+  /* 磨砂颗粒：无缝平铺的分形噪点（灰度、5.5% 不透明度） */
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)' opacity='0.055'/%3E%3C/svg%3E");
+  background-size: 140px 140px;
+  -webkit-backdrop-filter: blur(22px) saturate(140%);
+  backdrop-filter: blur(22px) saturate(140%);
+  box-shadow: 0 5px 16px rgba(31, 35, 41, 0.10);
+}
+
+/* ---------------------------------------------------------------------------
+ * 液态玻璃主题（第四十二轮）——App 级界面主题（微信 / QQ）
+ * ---------------------------------------------------------------------------
+ * 参考图（用户上传 5 张 iOS Liquid Glass 微信截图）提炼的视觉语言：
+ *  - 页面底：极浅灰（#F2F2F7 系）纯色/微渐变，深色近黑蓝；
+ *  - 内容卡：半透玻璃卡（白 62% + blur-xl + 发丝白描边 + 柔和浮投影），
+ *    列表分组独立成卡、四周留白漂浮；
+ *  - 底部 TabBar：悬浮胶囊（左右留边 + 大圆角 26px + 高透玻璃 + 环境投影）；
+ *  - 聊天页顶栏/输入栏：玻璃胶囊条（背景与聊天背景透出）；
+ *  - 强调色沿用各 App 品牌色（微信绿 #07C160 / QQ 蓝 #1E6FFF）。
+ * 主题只接管页面铭件；聊天气泡仍由气泡装扮系统（kind）管，
+ *  聊天背景层完全不受主题影响（用户指定）。
+ * ------------------------------------------------------------------------- */
+
+/* 主题页面底：浅色极浅灰微渐变（上浅下深一档，玻璃卡在下方更深底上更明显） */
+.lg-root {
+  background: linear-gradient(180deg, #F4F4F8 0%, #ECECF1 100%);
+}
+.dark .lg-root {
+  background: linear-gradient(180deg, #101014 0%, #0C0C10 100%);
+}
+
+/* 玻璃内容卡（列表分组卡/功能入口卡）：白 62% + 强 blur + 发丝描边 + 浮投影 */
+.lg-card {
+  background: rgba(255, 255, 255, 0.62);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  backdrop-filter: blur(20px) saturate(180%);
+  border-radius: 16px;
+  box-shadow:
+    inset 0 0 0 0.5px rgba(255, 255, 255, 0.75),
+    0 8px 28px rgba(31, 38, 135, 0.07);
+}
+.dark .lg-card {
+  background: rgba(28, 28, 34, 0.62);
+  box-shadow:
+    inset 0 0 0 0.5px rgba(255, 255, 255, 0.12),
+    0 8px 28px rgba(0, 0, 0, 0.38);
+}
+
+/* 悬浮胶囊 TabBar：左右留边 + 26px 圆角 + 高透玻璃 + 环境投影 */
+.lg-tabbar {
+  background: rgba(255, 255, 255, 0.72);
+  -webkit-backdrop-filter: blur(24px) saturate(200%);
+  backdrop-filter: blur(24px) saturate(200%);
+  border-radius: 26px;
+  box-shadow:
+    inset 0 0 0 0.5px rgba(255, 255, 255, 0.85),
+    inset 0 1px 1px rgba(255, 255, 255, 0.9),
+    0 10px 36px rgba(31, 38, 135, 0.12);
+}
+.dark .lg-tabbar {
+  background: rgba(30, 30, 36, 0.72);
+  box-shadow:
+    inset 0 0 0 0.5px rgba(255, 255, 255, 0.14),
+    0 10px 36px rgba(0, 0, 0, 0.45);
+}
+
+/* 聊天页玻璃胶囊条（顶栏/输入栏共用语言） */
+.lg-bar {
+  background: rgba(255, 255, 255, 0.62);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  backdrop-filter: blur(20px) saturate(180%);
+  box-shadow:
+    inset 0 0 0 0.5px rgba(255, 255, 255, 0.75),
+    0 6px 24px rgba(31, 38, 135, 0.08);
+}
+.dark .lg-bar {
+  background: rgba(28, 28, 34, 0.60);
+  box-shadow:
+    inset 0 0  0 0.5px rgba(255, 255, 255, 0.12),
+    0 6px 24px rgba(0, 0, 0, 0.35);
+}
+
+/* 玻璃内嵌输入胶囊（聊天输入框本体：白 55% 透 + blur） */
+.lg-input {
+  background: rgba(255, 255, 255, 0.55);
+  -webkit-backdrop-filter: blur(14px) saturate(160%);
+  backdrop-filter: blur(14px) saturate(160%);
+  box-shadow: inset 0 0 0 0.5px rgba(255, 255, 255, 0.7);
+}
+.dark .lg-input {
+  background: rgba(255, 255, 255, 0.08);
+  box-shadow: inset 0 0 0 0.5px rgba(255, 255, 255, 0.10);
+}
+
+/* 玻璃搜索胶囊（列表页搜索框） */
+.lg-search {
+  background: rgba(255, 255, 255, 0.5);
+  -webkit-backdrop-filter: blur(14px) saturate(160%);
+  backdrop-filter: blur(14px) saturate(160%);
+  box-shadow: inset 0 0 0 0.5px rgba(255, 255, 255, 0.65);
+}
+.dark .lg-search {
+  background: rgba(255, 255, 255, 0.07);
+  box-shadow: inset 0 0 0 0.5px rgba(255, 255, 255, 0.09);
+}
+
+/* ---------------------------------------------------------------------------
+ * 液态玻璃主题（第四十三轮）——参考图精确复刻补件
+ * ---------------------------------------------------------------------------
+ *  - 圆形玻璃浮钮（lg-chip）：返回/更多/加号/语音/表情等独立圆钮——
+ *    白 70% + blur20 + 发丝白描边 + 顶部高光 + 柔和冷灰投影；
+ *  - 标题胶囊（lg-title）：圆角矩形玻璃容器（聊天页名字/居中标题）；
+ *  - 弹出面板（lg-sheet）：长按菜单/加号菜单等浮层——强模糊（blur40+）、
+ *    乳白 78%、超大圆角 24px、顶缘 1.5px 高光带、大面积柔影；
+ *  - 分段控件（lg-seg）：分类标签栏白色玻璃胶囊容器（选中 = 绿字 + 绿色下划线，行内实现）；
+ *  - 行卡片（lg-row）：会话列表每行独立玻璃卡（去分割线，四周留白漂浮）。
+ * ------------------------------------------------------------------------- */
+
+/* 圆形玻璃浮钮（正圆；px-圆角由调用方 rounded-full 提供） */
+.lg-chip {
+  background: rgba(255, 255, 255, 0.7);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  backdrop-filter: blur(20px) saturate(180%);
+  box-shadow:
+    inset 0 0 0 0.5px rgba(255, 255, 255, 0.85),
+    inset 0 1px 1px rgba(255, 255, 255, 0.9),
+    0 3px 12px rgba(31, 38, 135, 0.1);
+}
+.dark .lg-chip {
+  background: rgba(32, 32, 38, 0.72);
+  box-shadow:
+    inset 0 0 0 0.5px rgba(255, 255, 255, 0.14),
+    inset 0 1px 1px rgba(255, 255, 255, 0.08),
+    0 3px 12px rgba(0, 0, 0, 0.4);
+}
+
+/* 标题胶囊（圆角矩形玻璃容器，rounded-[18px] 由调用方提供） */
+.lg-title {
+  background: rgba(255, 255, 255, 0.66);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  backdrop-filter: blur(20px) saturate(180%);
+  box-shadow:
+    inset 0 0 0 0.5px rgba(255, 255, 255, 0.8),
+    inset 0 1px 1px rgba(255, 255, 255, 0.85),
+    0 3px 14px rgba(31, 38, 135, 0.09);
+}
+.dark .lg-title {
+  background: rgba(32, 32, 38, 0.68);
+  box-shadow:
+    inset 0 0 0 0.5px rgba(255, 255, 255, 0.13),
+    0 3px 14px rgba(0, 0, 0, 0.42);
+}
+
+/* 弹出面板（菜单浮层）：强模糊乳白 + 超大圆角 + 顶缘高光带 + 大面积柔影 */
+.lg-sheet {
+  background: rgba(255, 255, 255, 0.78);
+  -webkit-backdrop-filter: blur(40px) saturate(190%);
+  backdrop-filter: blur(40px) saturate(190%);
+  box-shadow:
+    inset 0 1.5px 0 rgba(255, 255, 255, 0.95),
+    inset 0 0 0 0.5px rgba(255, 255, 255, 0.7),
+    0 8px 32px rgba(0, 0, 0, 0.12),
+    0 2px 8px rgba(31, 38, 135, 0.06);
+}
+.dark .lg-sheet {
+  background: rgba(30, 30, 36, 0.86);
+  box-shadow:
+    inset 0 1.5px 0 rgba(255, 255, 255, 0.16),
+    inset 0 0 0 0.5px rgba(255, 255, 255, 0.12),
+    0 8px 32px rgba(0, 0, 0, 0.45);
+}
+
+/* 弹出面板菜单行（按下态：融入玻璃的浅绿荧光高亮） */
+.lg-menu-row {
+  transition: background-color 0.12s ease;
+}
+.lg-menu-row:active {
+  background-color: rgba(0, 200, 100, 0.15);
+}
+.dark .lg-menu-row:active {
+  background-color: rgba(46, 230, 125, 0.2);
+}
+
+/* 分段控件容器（分类标签栏胶囊）：第四十六轮用户指定——恢复原来的白色玻璃面板 */
+.lg-seg {
+  background: rgba(255, 255, 255, 0.5);
+  -webkit-backdrop-filter: blur(18px) saturate(170%);
+  backdrop-filter: blur(18px) saturate(170%);
+  box-shadow:
+    inset 0 0 0 0.5px rgba(255, 255, 255, 0.7),
+    0 2px 10px rgba(31, 38, 135, 0.06);
+}
+.dark .lg-seg {
+  background: rgba(255, 255, 255, 0.06);
+  box-shadow: inset 0 0 0 0.5px rgba(255, 255, 255, 0.08);
+}
+
+/* 选中态不再用胶囊背景（lg-seg-on 已删）——选中 = 绿色文字 + 底部绿色横线（行内 span 实现，参考图同款） */
+
+/* 会话列表行卡片（每行独立漂浮玻璃卡） */
+.lg-row {
+  background: rgba(255, 255, 255, 0.65);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  backdrop-filter: blur(20px) saturate(180%);
+  border-radius: 16px;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.9),
+    inset 0 0 0 0.5px rgba(255, 255, 255, 0.75),
+    0 4px 18px rgba(31, 38, 135, 0.06);
+}
+.dark .lg-row {
+  background: rgba(28, 28, 34, 0.62);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.1),
+    inset 0 0 0 0.5px rgba(255, 255, 255, 0.1),
+    0 4px 18px rgba(0, 0, 0, 0.34);
+}
+
+/* ---------------------------------------------------------------------------
+ * 液态玻璃主题（第四十四轮）——用户反馈精确修正
+ * ---------------------------------------------------------------------------
+ *  - 白色分组面板（lg-panel）：列表页背景改真实微信灰底后，会话/联系人/发现/我
+ *    各分组用「真实微信同款白色面板」（近实心白 + 大圆角 + 发丝描边），
+ *    置顶/非置顶各共用一张；铭件（TabBar/搜索胶囊/分段控件/顶栏圆钮）保持液态。
+ * ------------------------------------------------------------------------- */
+
+/* 白色分组面板（真实微信同款白底 + 圆角 + 细描边；96% 不透明保留一丝材质） */
+.lg-panel {
+  background: rgba(255, 255, 255, 0.96);
+  border-radius: 16px;
+  box-shadow:
+    inset 0 0 0 0.5px rgba(0, 0, 0, 0.045),
+    0 1px 3px rgba(0, 0, 0, 0.04);
+}
+.dark .lg-panel {
+  background: rgba(28, 28, 32, 0.96);
+  box-shadow:
+    inset 0 0 0 0.5px rgba(255, 255, 255, 0.07),
+    0 1px 3px rgba(0, 0, 0, 0.32);
+}
+
+/* ---------------------------------------------------------------------------
+ * 液态玻璃主题（第四十七轮）——聊天页顶部渐变模糊带（lg-top-blur）
+ * ---------------------------------------------------------------------------
+ *  用户指定「聊天界面顶部会逐渐模糊」：消息滚到透明顶栏下方时得到渐进磨砂——
+ *  顶缘全模糊、往下线性减淡至透明（mask 渐变实现渐进；blur 强度恒定、由
+ *  mask 透明度完成「逐渐」），叠一层随深度淡出的极淡白膜保证状态栏可读。
+ *  调用方约定：pointer-events-none + absolute inset-x-0 top-0 + z-[15]
+ *  （消息流 z-10 之上、顶栏铭件 z-20 之下）；高度 = 消息区顶部让位值。
+ * ------------------------------------------------------------------------- */
+.lg-top-blur {
+  /* 第四十八轮（用户指定「再模糊一点点」）：blur 14→18px——顶部磨砂更重一档 */
+  -webkit-backdrop-filter: blur(18px) saturate(175%);
+  backdrop-filter: blur(18px) saturate(175%);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.34) 0%, rgba(255, 255, 255, 0.10) 46%, rgba(255, 255, 255, 0) 100%);
+  -webkit-mask-image: linear-gradient(to bottom, #000 0%, rgba(0, 0, 0, 0.62) 46%, rgba(0, 0, 0, 0) 100%);
+  mask-image: linear-gradient(to bottom, #000 0%, rgba(0, 0, 0, 0.62) 46%, rgba(0, 0, 0, 0) 100%);
+}
+.dark .lg-top-blur {
+  background: linear-gradient(180deg, rgba(16, 16, 20, 0.38) 0%, rgba(16, 16, 20, 0.12) 46%, rgba(16, 16, 20, 0) 100%);
+}
+
+/* ---------------------------------------------------------------------------
+ * 古早主题（第五十四轮）——2012-2014 年代拟物复古（微信 / QQ）
+ * ---------------------------------------------------------------------------
+ *  参考用户上传的三张老 App 截图逐像素提取：
+ *   - 主界面：淡青灰纸感底（截图2 #EDEEF1）+ 白色分组卡 + 银灰拟物 TabBar；
+ *   - 聊天页：深灰安卓顶栏（截图1 #2A2A2A）+ 灰底（#D2D2D2）+ 描边小圆角气泡；
+ *   - 铭件语言 = iOS 6 银灰拟物（上高光渐变 + 1px 硬边 + 硬投影），无模糊无大圆角。
+ *  主题只接管页面铭件；气泡由装扮系统 kind='retro'（.bub-retro）接管，
+ *  聊天背景层不受主题影响（与液态主题同口径）。
+ * ------------------------------------------------------------------------- */
+
+/* 主题页面底：淡青灰纸感微渐变（上浅下深一档，参考截图2 整体 #EDEEF1 系） */
+.rt-root {
+  background: linear-gradient(180deg, #EDEEF2 0%, #E7EAEF 55%, #E2E6EC 100%);
+}
+.dark .rt-root {
+  background: linear-gradient(180deg, #26262B 0%, #212126 55%, #1D1D22 100%);
+}
+
+/* 银灰拟物导航栏（iOS 6 风）：上高光 + 52% 处硬分界 + 底部深线 */
+.rt-bar {
+  background: linear-gradient(180deg, #FCFCFE 0%, #EFF0F3 46%, #DCDDE2 54%, #C9CBD1 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.95),
+    0 1px 4px rgba(24, 28, 44, 0.16);
+}
+.dark .rt-bar {
+  background: linear-gradient(180deg, #54545E 0%, #474751 46%, #3C3C46 54%, #33333D 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.14),
+    0 1px 4px rgba(0, 0, 0, 0.35);
+}
+
+/* 深灰聊天顶栏（截图1 安卓 4.x 风：#2A2A2A 深黑灰 + 微渐变） */
+.rt-dark {
+  background: linear-gradient(180deg, #3E3E42 0%, #2E2E32 55%, #25252A 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    0 2px 5px rgba(0, 0, 0, 0.30);
+}
+.dark .rt-dark {
+  background: linear-gradient(180deg, #232327 0%, #1B1B1F 55%, #16161A 100%);
+}
+
+/* 复古聊天页底色（第五十五轮：图1实测 #EBEBEB / 图2实测 #E1E2E5，取中间值；
+   仅主题接管默认底色，自定义聊天背景不受影响） */
+.rt-chat-bg {
+  background: #E8E9EC;
+}
+.dark .rt-chat-bg {
+  background: #1C1C1F;
+}
+
+/* 白色分组卡（iOS 6 分组表格：白底 + 1px 硬边 + 8px 圆角） */
+.rt-panel {
+  background: #FFFFFF;
+  border-radius: 8px;
+  box-shadow:
+    inset 0 0 0 1px #C3C5CC,
+    inset 0 1px 0 #FFFFFF,
+    0 1px 2px rgba(24, 28, 44, 0.07);
+}
+.dark .rt-panel {
+  background: #35353D;
+  box-shadow:
+    inset 0 0 0 1px #4D4D57,
+    inset 0 1px 0 rgba(255, 255, 255, 0.05),
+    0 1px 2px rgba(0, 0, 0, 0.30);
+}
+
+/* 列表行分割线颜色（rt-panel 内部行线：略深于现代版的硬灰线） */
+.rt-panel .rt-div,
+.rt-div {
+  background: #D9DBE1;
+}
+.dark .rt-div {
+  background: #45454F;
+}
+
+/* 银灰拟物 TabBar（截图2 灰底 + iOS 6 高光渐变 + 顶部深线） */
+.rt-tabbar {
+  background: linear-gradient(180deg, #F0F1F4 0%, #E0E2E7 46%, #CBCED5 52%, #B8BCC5 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.9),
+    0 -1px 0 #9DA1AB,
+    0 -3px 8px rgba(24, 28, 44, 0.10);
+}
+.dark .rt-tabbar {
+  background: linear-gradient(180deg, #4A4A54 0%, #3D3D47 46%, #33333D 52%, #2B2B35 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.12),
+    0 -1px 0 #17171C,
+    0 -3px 8px rgba(0, 0, 0, 0.35);
+}
+
+/* 复古 Tab 选中蓝（iOS 6 时代 App 通用选中色，微信/QQ 古早统一） */
+.rt-tab-on {
+  color: #3D6DB5;
+}
+.dark .rt-tab-on {
+  color: #8FB4E8;
+}
+
+/* 拟物输入条（聊天页底部银灰渐变） */
+.rt-inputbar {
+  background: linear-gradient(180deg, #EEF0F3 0%, #DEE0E5 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.85),
+    0 -1px 0 #A9ABB3;
+}
+.dark .rt-inputbar {
+  background: linear-gradient(180deg, #38383F 0%, #2E2E35 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.07),
+    0 -1px 0 #1A1A1F;
+}
+
+/* 复古输入框本体（白底内凹：上内阴影 + 4px 小圆角，安卓老版输入框） */
+.rt-input {
+  background: #FFFFFF;
+  border-radius: 4px;
+  box-shadow:
+    inset 0 1px 2px rgba(24, 28, 44, 0.15),
+    inset 0 0 0 1px #C0C2C9,
+    0 1px 0 rgba(255, 255, 255, 0.75);
+}
+.dark .rt-input {
+  background: #26262D;
+  box-shadow:
+    inset 0 1px 2px rgba(0, 0, 0, 0.4),
+    inset 0 0 0 1px #464650,
+    0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+/* 复古搜索框（列表页搜索：白底内凹 + 6px 圆角） */
+.rt-search {
+  background: #FFFFFF;
+  border-radius: 6px;
+  box-shadow:
+    inset 0 1px 2px rgba(24, 28, 44, 0.13),
+    inset 0 0 0 1px #C0C2C9;
+}
+.dark .rt-search {
+  background: #26262D;
+  box-shadow:
+    inset 0 1px 2px rgba(0, 0, 0, 0.4),
+    inset 0 0 0 1px #464650;
+}
+
+/* 拟物小按钮（+ 钮/圆钮：银灰渐变凸起 + 硬边） */
+.rt-btn {
+  background: linear-gradient(180deg, #FDFDFE 0%, #E9EAEE 55%, #DCDDE2 100%);
+  border-radius: 5px;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.95),
+    inset 0 0 0 1px #AFB1B9,
+    0 1px 2px rgba(24, 28, 44, 0.14);
+}
+.dark .rt-btn {
+  background: linear-gradient(180deg, #52525C 0%, #43434D 55%, #38383F 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.12),
+    inset 0 0 0 1px #26262E,
+    0 1px 2px rgba(0, 0, 0, 0.3);
+}
+
+/* 复古小圆钮（线下模式顶部按钮等圆形图标钮的独立椭圆包裹：银灰拟物 + 8px 圆角，第六十五轮） */
+.rt-chip {
+  background: linear-gradient(180deg, #FDFDFE 0%, #E9EAEE 55%, #DCDDE2 100%);
+  border-radius: 10px;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.95),
+    inset 0 0 0 1px #AFB1B9,
+    0 1px 2px rgba(24, 28, 44, 0.14);
+}
+.dark .rt-chip {
+  background: linear-gradient(180deg, #52525C 0%, #43434D 55%, #38383F 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.12),
+    inset 0 0 0 1px #26262E,
+    0 1px 2px rgba(0, 0, 0, 0.3);
+}
+
+/* 复古发送键（微信古早 = 深草绿实心小方角；QQ 古早 = 复古蓝） */
+.rt-send,
+.rt-send-qq {
+  border-radius: 4px;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.35),
+    0 1px 2px rgba(24, 28, 44, 0.2);
+}
+.rt-send {
+  background: linear-gradient(180deg, #97CC58 0%, #7FBA45 55%, #71A83B 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.35),
+    inset 0 0 0 1px #679337,
+    0 1px 2px rgba(24, 28, 44, 0.2);
+}
+.rt-send-qq {
+  background: linear-gradient(180deg, #7EA3D8 0%, #5C8AC6 55%, #4E7CB8 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.35),
+    inset 0 0 0 1px #4470AA,
+    0 1px 2px rgba(24, 28, 44, 0.2);
+}
+
+/* 复古图标底座（iOS 6 拟物圆角方块：上高光 + 硬边 + 做旧滤镜） */
+.rt-ic {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 7px;
+  flex-shrink: 0;
+  background: linear-gradient(180deg, #FDFDFE 0%, #EDEEF2 50%, #DDDFE5 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.95),
+    inset 0 0 0 1px rgba(150, 153, 163, 0.55),
+    0 1px 2px rgba(24, 28, 44, 0.16);
+}
+.rt-ic > svg {
+  /* 第五十六轮：底座内换白色 glyph 图标（不再套现代彩色线稿）——去掉做旧滤镜保白度 */
+  filter: none;
+}
+.dark .rt-ic {
+  background: linear-gradient(180deg, #50505A 0%, #414149 50%, #35353D 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.12),
+    inset 0 0 0 1px rgba(0, 0, 0, 0.45),
+    0 1px 2px rgba(0, 0, 0, 0.3);
+}
+.dark .rt-ic > svg {
+  filter: none;
+}
+
+/* 复古全宽白列表（第五十六轮：联系人页——旧微信通讯录是整幅白底列表，无分组卡片） */
+.rt-plain {
+  background: #ffffff;
+}
+.dark .rt-plain {
+  background: #2a2a31;
+}
+
+/* 复古时间胶囊（聊天页时间行：白底硬边小圆角，老 App 的时间戳） */
+.rt-time {
+  background: rgba(255, 255, 255, 0.85);
+  border-radius: 4px;
+  box-shadow: inset 0 0 0 1px rgba(24, 28, 44, 0.14);
+  color: #6B6E78;
+}
+.dark .rt-time {
+  background: rgba(40, 40, 47, 0.85);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+  color: #A9ACB8;
+}
+
+/* ---------------------------------------------------------------------------
+ * 古早气泡（kind='retro'，第五十六轮参考图逐像素精修二round）：
+ *  微信（图2）：我方亮绿 #9EE75A 近黑字 4px 方角 + 顶部圆润 nub 尾巴；对方纯白无描边；
+ *  QQ（图1）：两侧顶部尖角 beak 尾巴；我方灰渐变/对方浅蓝渐变（CSS 类携带，深色用
+ *  background 简写 !important 盖掉渐变图）。
+ * ------------------------------------------------------------------------- */
+.bub-retro {
+  border: 1px solid transparent;
+  /* 老安卓气泡的软投影（图1 绿泡边缘 4-5px 柔和过渡即此物质）；微信白泡无描边只留极淡投影 */
+  box-shadow: 0 1px 2.5px rgba(24, 28, 44, 0.16);
+}
+.dark .bub-retro {
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+}
+/* 微信：我方亮绿 / 对方纯白（深色色板 !important 盖内联） */
+.dark .bub-retro-mine {
+  background-color: #5E9E3C !important;
+  border-color: #4C8230 !important;
+  color: #EFF5E2 !important;
+}
+.dark .bub-retro-theirs {
+  background-color: #3A3A42 !important;
+  border-color: #50505A !important;
+  color: #E8E8EC !important;
+}
+/* QQ 浅色：垂直渐变（图1 实测：灰泡顶 #D0D0D0→底 #B9B9B9；蓝泡顶 #C2D8EC→底 #A9C9E5）。
+   双类选择器特异性高于宿主的 bg-white，且 inline 不再携带 backgroundColor。
+   第六十轮美化：QQ 泡去 1px 描边（参考图实测边缘干净无描边线，只剩 1-2px 极淡投影）——
+   beak 尾巴与泡身衔接处不再受描边断色影响，整体更柔和 */
+.bub-retro-qq {
+  border-width: 0;
+}
+.bub-retro-qq.bub-retro-mine {
+  background: linear-gradient(180deg, #D0D0D0 0%, #C4C4C4 55%, #B9B9B9 100%);
+}
+.bub-retro-qq.bub-retro-theirs {
+  background: linear-gradient(180deg, #C2D8EC 0%, #B4CDE7 55%, #A9C9E5 100%);
+}
+/* QQ 深色：background 简写（盖掉渐变图与 inline），我方灰泡 / 对方复古蓝 */
+.dark .bub-retro-qq.bub-retro-mine {
+  background: #4E4E57 !important;
+  border-color: #3A3A42 !important;
+  color: #EDEDF0 !important;
+}
+.dark .bub-retro-qq.bub-retro-theirs {
+  background: #46648C !important;
+  border-color: #365171 !important;
+  color: #E6EDF6 !important;
+}
+/* 古早微信小尾巴（第五十八轮：用户指定回归默认气泡同款方形小三角）：
+   颜色跟随古早色板深浅自适应（与 .bub-retro-mine/-theirs 同色对）——
+   深色模式下 .dark 色板 !important 会盖掉 inline 气泡底色，尾巴若走 inline
+   tailColor 会与气泡脱色，故尾巴颜色也走 CSS 类成对切换 */
+.rt-tail-mine {
+  background-color: #9EE75A;
+}
+.dark .rt-tail-mine {
+  background-color: #5E9E3C;
+}
+.rt-tail-theirs {
+  background-color: #FFFFFF;
+}
+.dark .rt-tail-theirs {
+  background-color: #3A3A42;
+}
+/* 古早语音气泡尾巴（第五十九轮，用户指定「和默认气泡小尾巴一样大」）：
+   .bub-retro 的 1px 描边让伪元素的定位基准（padding box）内缩 1px——
+   尾巴外移/上移 1px 补偿，露出量与默认语音气泡尾巴（10px、top 13、±-4px）完全一致 */
+.bub-retro.wx-voice-tail-left::before {
+  left: -5px;
+  top: 12px;
+}
+.bub-retro.wx-voice-tail-right::before {
+  right: -5px;
+  top: 12px;
+}
+/* 古早 QQ 底部弯钩尾巴（第六十三轮，用户指定「小尾巴放下面，跟七彩差不多」）：
+   与七彩 im 尾巴同款信息式剪影（14×18 贴底悬挂）——渐变对齐泡身底部 18px 色带
+   （42px 单行泡折算 y24-42：我方 #C3C3C3→#B9B9B9 / 对方 #B3CDE7→#A9C9E5），
+   与泡身过渡视觉无缝；深色成对切换——.dark 用平色 background 接管（与泡身同色对） */
+.rt-beak-mine {
+  background: linear-gradient(180deg, #C3C3C3 0%, #B9B9B9 100%);
+}
+.rt-beak-theirs {
+  background: linear-gradient(180deg, #B3CDE7 0%, #A9C9E5 100%);
+}
+.dark .rt-beak-mine {
+  background: #4E4E57;
+}
+.dark .rt-beak-theirs {
+  background: #46648C;
+}
+/* 古早实心图标色板（retro-icons.tsx RtPlus* 系列：加号面板 + 输入框上方快捷条共用）：
+   浅色 = 深灰实心 + 白色镂空细节（参考图实测 #6E7474）；深色成对切换为
+   浅灰实心 + 深色细节，保证 14px 快捷条小图标在深色输入栏上也清晰 */
+:root {
+  --rt-ic-body: #6E7474;
+  --rt-ic-detail: #FFFFFF;
+}
+.dark {
+  --rt-ic-body: #C6CAD1;
+  --rt-ic-detail: #26262E;
+}
+
+/* ---------------------------------------------------------------------------
+ * 古早主题全局接管（第五十五轮：用户指定「所有界面都变化、全部面板全部按钮都变化」）
+ * ---------------------------------------------------------------------------
+ *  作用域 = App 根容器 data-rt-theme="true"（微信/QQ 根 wrapper，覆盖主界面/聊天页/
+ *  全部子页/弹层）。子页无需逐个改 JSX，在这里按 Tailwind 类名批量接管：
+ *   - 页面底（含状态栏后方顶区）→ 复古纸感渐变；
+ *   - 白色分组卡 → 复古硬边白卡（iOS 6 分组表格语言）；
+ *   - 绿/蓝主按钮 → 拟物渐变凸起；
+ *   - 深色下拉菜单 → 白底硬边拟物 popover。
+ *  !important 盖过 dark: 变体（复古有自己的夜间色板）。
+ * ------------------------------------------------------------------------- */
+
+/* ① 页面底：各子页根的灰底 → 复古纸感渐变（状态栏后方同此变化） */
+[data-rt-theme='true'] .bg-\[\#EDEDED\],
+[data-rt-theme='true'] .bg-\[\#F5F6F7\],
+[data-rt-theme='true'] .bg-\[\#F6F7F9\],
+[data-rt-theme='true'] .bg-\[\#F7F7F7\],
+[data-rt-theme='true'] .bg-\[\#FAFAFC\],
+[data-rt-theme='true'] .bg-\[\#F2F2F2\] {
+  background: linear-gradient(180deg, #EDEEF2 0%, #E7EAEF 55%, #E2E6EC 100%) !important;
+}
+.dark [data-rt-theme='true'] .bg-\[\#EDEDED\],
+.dark [data-rt-theme='true'] .bg-\[\#F5F6F7\],
+.dark [data-rt-theme='true'] .bg-\[\#F6F7F9\],
+.dark [data-rt-theme='true'] .bg-\[\#F7F7F7\],
+.dark [data-rt-theme='true'] .bg-\[\#FAFAFC\],
+.dark [data-rt-theme='true'] .bg-\[\#F2F2F2\] {
+  background: linear-gradient(180deg, #26262B 0%, #212126 55%, #1D1D22 100%) !important;
+}
+
+/* ② 白色分组卡 → 复古硬边白卡（1px 硬描边 + 轻投影；圆角沿用元素自带） */
+[data-rt-theme='true'] .bg-white {
+  background: #ffffff !important;
+  box-shadow:
+    inset 0 0 0 1px #c3c5cc,
+    0 1px 2px rgba(24, 28, 44, 0.07);
+}
+.dark [data-rt-theme='true'] .bg-white {
+  background: #35353d !important;
+  box-shadow:
+    inset 0 0 0 1px #4d4d57,
+    0 1px 2px rgba(0, 0, 0, 0.3);
+}
+
+/* ③ 绿色主按钮（微信系确认/发送/保存）→ 复古绿拟物渐变 */
+[data-rt-theme='true'] .bg-\[\#07C160\] {
+  background: linear-gradient(180deg, #a4e468 0%, #8ac94c 52%, #79b540 100%) !important;
+}
+.dark [data-rt-theme='true'] .bg-\[\#07C160\] {
+  background: linear-gradient(180deg, #5fa848 0%, #529a3c 52%, #468a32 100%) !important;
+}
+
+/* ④ QQ 蓝主按钮 → 复古蓝拟物渐变 */
+[data-rt-theme='true'] .bg-\[\#0099FF\],
+[data-rt-theme='true'] .bg-\[\#1E6FFF\] {
+  background: linear-gradient(180deg, #8fb4e4 0%, #6e9bd4 52%, #5a87c4 100%) !important;
+}
+.dark [data-rt-theme='true'] .bg-\[\#0099FF\],
+.dark [data-rt-theme='true'] .bg-\[\#1E6FFF\] {
+  background: linear-gradient(180deg, #4a6da0 0%, #3e5f90 52%, #345281 100%) !important;
+}
+
+/* ⑤ 深色下拉菜单 → 白底硬边拟物 popover（含子项按下态） */
+[data-rt-theme='true'] .bg-\[\#4C4C4C\],
+[data-rt-theme='true'] .bg-\[\#383838\] {
+  background: #ffffff !important;
+  color: #2e2e33;
+  box-shadow:
+    inset 0 0 0 1px #9a9ca6,
+    0 3px 10px rgba(24, 28, 44, 0.22);
+}
+.dark [data-rt-theme='true'] .bg-\[\#4C4C4C\],
+.dark [data-rt-theme='true'] .bg-\[\#383838\] {
+  background: #3a3a44 !important;
+  color: #e8e8ec;
+  box-shadow:
+    inset 0 0 0 1px #50505a,
+    0 3px 10px rgba(0, 0, 0, 0.4);
+}
+/* 白底菜单上的子项按下态（原生 active:bg-white/10 在白底不可见 → 浅灰） */
+[data-rt-theme='true'] .bg-\[\#4C4C4C\] .active\:bg-white\/10:active {
+  background-color: rgba(0, 0, 0, 0.07) !important;
+}
+
+/* ---------------------------------------------------------------------------
+ * 液态玻璃主题全局接管（第五十五轮：用户指定液态也覆盖所有界面）
+ * ---------------------------------------------------------------------------
+ *  作用域 = App 根容器 data-liquid-theme="true"。子页批量接管：
+ *   - 页面底 → 液态根渐变（含状态栏后方顶区）；
+ *   - 白色分组卡 → 玻璃卡（半透白 + blur + 发丝描边，与 lg-panel 同语言）。
+ *  品牌色按钮（绿/蓝）保持液态既有口径不变（现代语言）。
+ * ------------------------------------------------------------------------- */
+
+/* ① 页面底 → 液态根渐变 */
+[data-liquid-theme='true'] .bg-\[\#EDEDED\],
+[data-liquid-theme='true'] .bg-\[\#F5F6F7\],
+[data-liquid-theme='true'] .bg-\[\#F6F7F9\],
+[data-liquid-theme='true'] .bg-\[\#F7F7F7\],
+[data-liquid-theme='true'] .bg-\[\#FAFAFC\],
+[data-liquid-theme='true'] .bg-\[\#F2F2F2\] {
+  background: linear-gradient(180deg, #f4f4f8 0%, #ececf1 100%) !important;
+}
+.dark [data-liquid-theme='true'] .bg-\[\#EDEDED\],
+.dark [data-liquid-theme='true'] .bg-\[\#F5F6F7\],
+.dark [data-liquid-theme='true'] .bg-\[\#F6F7F9\],
+.dark [data-liquid-theme='true'] .bg-\[\#F7F7F7\],
+.dark [data-liquid-theme='true'] .bg-\[\#FAFAFC\],
+.dark [data-liquid-theme='true'] .bg-\[\#F2F2F2\] {
+  background: linear-gradient(180deg, #101014 0%, #0c0c10 100%) !important;
+}
+
+/* ② 白色分组卡 → 玻璃卡（与 lg-panel 同材质） */
+[data-liquid-theme='true'] .bg-white {
+  background: rgba(255, 255, 255, 0.62) !important;
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  backdrop-filter: blur(20px) saturate(180%);
+  box-shadow:
+    inset 0 0 0 0.5px rgba(255, 255, 255, 0.75),
+    0 8px 28px rgba(31, 38, 135, 0.07);
+}
+.dark [data-liquid-theme='true'] .bg-white {
+  background: rgba(28, 28, 34, 0.62) !important;
+  box-shadow:
+    inset 0 0 0 0.5px rgba(255, 255, 255, 0.12),
+    0 8px 28px rgba(0, 0, 0, 0.38);
+}

@@ -1,0 +1,74 @@
+[
+  {
+    "step": "M0",
+    "name": "种子（联系人 + 论坛数据 + 2 个 ownerReply 任务）",
+    "ok": true,
+    "evidence": "IndexedDB 写入"
+  },
+  {
+    "step": "M0b",
+    "name": "重载 + 上滑解锁（调度器随壳启动）",
+    "ok": true,
+    "evidence": ""
+  },
+  {
+    "step": "M1",
+    "name": "ownPost：楼主回复落地（挂被选评论名下）",
+    "ok": true,
+    "evidence": "选中=C2恶评 内容='评论区酸人谁不会，有本事你自己画一幅橘色系小屋试试？' replyToPost=v46-c2"
+  },
+  {
+    "step": "M2",
+    "name": "评论标记「已看过并决策过」（两帖）",
+    "ok": true,
+    "evidence": "P1 seen=['v46-c1', 'v46-c2']; P2 seen=['v46-c3']"
+  },
+  {
+    "step": "M3",
+    "name": "userPost：护短回复落地（挂恶评名下）",
+    "ok": true,
+    "evidence": "内容='摆拍？TA为了这提拉米苏打了半小时蛋白，跟你嘴里的现成货不一样' replyToPost=v46-c3"
+  },
+  {
+    "step": "M4",
+    "name": "userPost：护短产生「回复」通知",
+    "ok": true,
+    "evidence": "notifications=1 条"
+  },
+  {
+    "step": "M5",
+    "name": "记忆联动：楼主回复+护短都写入记忆碎片",
+    "ok": true,
+    "evidence": "ownPost记忆=True 护短记忆=True; 碎片键=['mem-frag:c-fanfan']"
+  },
+  {
+    "step": "M6",
+    "name": "请求载荷：人设/关系/主帖/评论清单注入正确",
+    "ok": true,
+    "evidence": "ownPost: persona含凡凡=True, relation='恋人', 评论数=2, mood=False, memory=False"
+  },
+  {
+    "step": "D0",
+    "name": "打开 X 论坛（信息流可见种子帖）",
+    "ok": true,
+    "evidence": "翻页 2 次后进入"
+  },
+  {
+    "step": "D1",
+    "name": "char 帖：楼主回复带「楼主」徽章",
+    "ok": true,
+    "evidence": "徽章数=1（凡凡作为楼主，其回复应带徽章）"
+  },
+  {
+    "step": "D2",
+    "name": "用户帖：护短回复不带「楼主」徽章",
+    "ok": true,
+    "evidence": "徽章数=0（凡凡不是 P2 楼主，不应有徽章）"
+  },
+  {
+    "step": "E1",
+    "name": "无 console/page 错误",
+    "ok": true,
+    "evidence": "console=[] pageerror=[]"
+  }
+]

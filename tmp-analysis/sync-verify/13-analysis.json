@@ -1,0 +1,28 @@
+{
+  "choices": [
+    {
+      "finish_reason": "stop",
+      "index": 0,
+      "message": {
+        "content": "根据您提供的手机截图，以下是详细分析：\n\n**1) 用户发的消息是什么？**\n用户发送的消息是：**“你好，今天天气怎么样？”**\n\n**2) AI 助手回复了什么内容（如果有）？**\n**没有文字回复。**\n截图显示该消息状态为“已送达”，但下方只有一条语音消息（或正在录制的语音），AI 助手尚未给出文字形式的回复。\n\n**3) 消息是否有语音形式？**\n**有。**\n在用户发送的文字消息下方，有一条**蓝色的语音消息**，时长为 **19秒**（显示为“19”）。这可能是用户随后发送的语音，也可能是 AI 正在以语音形式进行回复（从位置和颜色看，更像是用户紧接着发送的语音消息）。\n\n---\n**补充说明：**\n*   截图顶部有一个“开启系统通知”的弹窗。\n*   界面显示这是与名为 **Cove** 的 AI 小助手的对话，其自我介绍功能包括聊天解闷、头脑风暴、算数查资料等。",
+        "role": "assistant"
+      }
+    }
+  ],
+  "created": 1793360950,
+  "id": "202610301948483d9579a4178742bd",
+  "model": "glm-5v-turbo",
+  "object": "chat.completion",
+  "request_id": "202610301948483d9579a4178742bd",
+  "usage": {
+    "completion_tokens": 225,
+    "completion_tokens_details": {
+      "reasoning_tokens": 0
+    },
+    "prompt_tokens": 427,
+    "prompt_tokens_details": {
+      "cached_tokens": 0
+    },
+    "total_tokens": 652
+  }
+}

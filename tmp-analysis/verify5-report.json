@@ -1,0 +1,165 @@
+{
+  "results": [
+    {
+      "step": "0",
+      "name": "解锁→微信→苏晴聊天页(会话已清空)",
+      "ok": true,
+      "evidence": "重新登录=True;旧消息已删除;语音升级保持默认开启"
+    },
+    {
+      "step": "R1",
+      "name": "连发两条 → AI 回复完成",
+      "ok": true,
+      "evidence": "消息总数=8(AI 6);带 quote 1 条;DOM 引用块 1 个;语音条 2 条"
+    },
+    {
+      "step": "CORE",
+      "name": "至少一条 AI 回复(文字或语音气泡)带引用块且指向用户真实消息",
+      "ok": true,
+      "evidence": "DOM 引用块=1(语音气泡下 0 / 文字气泡下 1);pointed=[{'quote': '周末要不要一起去看展', 'voice': False, 'matched_user_msg': True, 'matched': '周末要不要一起去看展'}];成功路径=C 越界兜底(编号 N>历史最大,兜底引用最近用户消息)"
+    },
+    {
+      "step": "RESIDUE",
+      "name": "正文/语音转写无裸 [M数字] 与 [引用: 残留",
+      "ok": true,
+      "evidence": "残留=[]"
+    },
+    {
+      "step": "CONSOLE",
+      "name": "控制台无 error/pageerror",
+      "ok": true,
+      "evidence": "console error=0;pageerror=0;4xx/5xx=[];console 样例=[]"
+    }
+  ],
+  "core_pass": true,
+  "dom_quotes": [
+    {
+      "text": "阿泽：周末要不要一起去看展",
+      "inVoice": false,
+      "mid": "mw0af6gm-gb8jugf"
+    }
+  ],
+  "pointed": [
+    {
+      "quote": "周末要不要一起去看展",
+      "voice": false,
+      "matched_user_msg": true,
+      "matched": "周末要不要一起去看展"
+    }
+  ],
+  "ai_messages": [
+    {
+      "kind": "voice",
+      "isVoice": true,
+      "content": "哇！",
+      "quote": null
+    },
+    {
+      "kind": "text",
+      "isVoice": false,
+      "content": "阿泽好厉害呀～",
+      "quote": null
+    },
+    {
+      "kind": "text",
+      "isVoice": false,
+      "content": "红烧排骨超成功是什么概念？",
+      "quote": null
+    },
+    {
+      "kind": "voice",
+      "isVoice": true,
+      "content": "是不是味道超棒？",
+      "quote": null
+    },
+    {
+      "kind": "text",
+      "isVoice": false,
+      "content": "我都要流口水啦[偷笑] 什么时候让我也尝尝你的手艺呀？",
+      "quote": null
+    },
+    {
+      "kind": "text",
+      "isVoice": false,
+      "content": "周末看展这个提议不错哦～",
+      "quote": {
+        "name": "阿泽",
+        "content": "周末要不要一起去看展"
+      }
+    }
+  ],
+  "my_messages": [
+    "今晚我做了红烧排骨,超成功",
+    "周末要不要一起去看展"
+  ],
+  "model_output_analysis": [
+    {
+      "history_max_M": 1,
+      "history_label_count": 1,
+      "model_bare_M": [],
+      "model_full_quote": [],
+      "bare_out_of_bounds": [],
+      "full_valid": [],
+      "path": null,
+      "resp_snippet": ""
+    },
+    {
+      "history_max_M": 7,
+      "history_label_count": 6,
+      "model_bare_M": [
+        "8"
+      ],
+      "model_full_quote": [],
+      "bare_out_of_bounds": [
+        "8"
+      ],
+      "full_valid": [],
+      "path": "C 越界兜底(编号 N>历史最大,兜底引用最近用户消息)",
+      "resp_snippet": "[M8] 周末看展这个提议不错哦～"
+    }
+  ],
+  "chat_pairs_raw": [
+    {
+      "history": [
+        [
+          "M1",
+          " 今晚我做了红烧排骨,超成功"
+        ]
+      ],
+      "resp": "[思考]\n阿泽说他今晚做了红烧排骨而且超成功，这看起来是他很自豪的事情。作为他的女朋友，我应该表现出对他的支持和赞赏。我可以夸奖他的厨艺，同时表达想品尝的愿望，这样既能肯定他的努力，又能增进我们之间的亲密感。语气要温柔带点撒娇，符合我的人设。\n[/思考]\n哇！阿泽好厉害呀～红烧排骨超成功是什么概念？是不是味道超棒？我都要流口水啦[偷笑] 什么时候让我也尝尝你的手艺呀？"
+    },
+    {
+      "history": [
+        [
+          "M1",
+          " 今晚我做了红烧排骨,超成功"
+        ],
+        [
+          "M2",
+          " 周末要不要一起去看展"
+        ],
+        [
+          "M4",
+          " 阿泽好厉害呀～"
+        ],
+        [
+          "M5",
+          " 红烧排骨超成功是什么概念？"
+        ],
+        [
+          "M6",
+          " 是不是味道超棒？"
+        ],
+        [
+          "M7",
+          " 我都要流口水啦[偷笑] 什么时候让我也尝尝你的手艺呀？"
+        ]
+      ],
+      "resp": "\n[M8] 周末看展这个提议不错哦～"
+    }
+  ],
+  "residue": [],
+  "console_errors": [],
+  "page_errors": [],
+  "http_4xx_5xx": []
+}

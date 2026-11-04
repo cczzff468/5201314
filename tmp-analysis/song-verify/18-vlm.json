@@ -1,0 +1,28 @@
+{
+  "choices": [
+    {
+      "finish_reason": "stop",
+      "index": 0,
+      "message": {
+        "content": "根据您提供的《拾光小屋》截图，回答如下：\n\n1.  **她在做什么？**\n    她正**背对着镜头站立/坐着**（从视角看是俯视她的后脑勺）。\n\n2.  **她是不是抱着木吉他、手在琴弦上？**\n    **不是。** 从截图中可以清晰地看到，她的双手自然地垂在身体两侧（或放在腿上），**并没有抱着吉他**，也没有做出弹奏的姿势。\n\n3.  **附近有没有飘浮的音符符号？**\n    **没有。** 她的周围没有出现任何飘浮的音符符号。\n\n**总结：** 在这张截图中，这位棕色双马尾女孩只是静静地待在那里，并没有进行弹吉他或演奏音乐的动作。",
+        "role": "assistant"
+      }
+    }
+  ],
+  "created": 1793366621,
+  "id": "202610302123382508d71a6d2e407e",
+  "model": "glm-5v-turbo",
+  "object": "chat.completion",
+  "request_id": "202610302123382508d71a6d2e407e",
+  "usage": {
+    "completion_tokens": 165,
+    "completion_tokens_details": {
+      "reasoning_tokens": 0
+    },
+    "prompt_tokens": 435,
+    "prompt_tokens_details": {
+      "cached_tokens": 0
+    },
+    "total_tokens": 600
+  }
+}

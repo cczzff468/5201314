@@ -1,0 +1,28 @@
+{
+  "choices": [
+    {
+      "finish_reason": "stop",
+      "index": 0,
+      "message": {
+        "content": "这张截图显示的是**主屏桌面（Home Screen）**，而不是锁屏界面。判断依据是：屏幕上显示了完整的应用图标网格、底部Dock栏以及搜索框，这些都是解锁后主屏的典型特征。\n\n### 主屏上能看到的应用图标包括：\n\n**第一行：**\n- **天气小组件**（显示北京13°C、晴）\n- **天气**应用\n- **主题**应用\n\n**第二行：**\n- **浏览器**（Safari/Chrome类）\n- **备忘录**\n\n**第三行：**\n- **相机**\n- **照片**\n- **文件**\n- **计算器**\n\n**底部Dock栏（固定栏）：**\n- **信息/短信**（带红色角标\"1\"，表示有1条未读消息）\n- **通讯录/联系人**\n- **电话**\n- **设置**\n\n此外，屏幕下方还有**搜索框**（显示\"搜索\"字样）。\n\n### 渲染状态：\n**是的，图像正常渲染**。所有图标、文字、时间日期（11:43，10月30日 周五）、状态栏信号和电量（100%）都清晰可见，没有出现模糊、错位或加载失败的情况。这是一个标准的iOS风格主屏界面（看起来像是iPhone的深色模式/暗色主题）。",
+        "role": "assistant"
+      }
+    }
+  ],
+  "created": 1793360593,
+  "id": "2026103019430735b30acf7a874d07",
+  "model": "glm-5v-turbo",
+  "object": "chat.completion",
+  "request_id": "2026103019430735b30acf7a874d07",
+  "usage": {
+    "completion_tokens": 273,
+    "completion_tokens_details": {
+      "reasoning_tokens": 0
+    },
+    "prompt_tokens": 416,
+    "prompt_tokens_details": {
+      "cached_tokens": 0
+    },
+    "total_tokens": 689
+  }
+}

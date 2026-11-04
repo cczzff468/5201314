@@ -1,0 +1,28 @@
+{
+  "choices": [
+    {
+      "finish_reason": "stop",
+      "index": 0,
+      "message": {
+        "content": "我看到的 App 图标标签如下：\n\n- 音乐\n- 微信\n- App Store\n- QQ\n- 记忆库\n- 世界书\n- 美团\n- **情侣空间**\n- 拾光小屋\n- X论坛\n\n是的，确实有一个叫「**情侣空间**」的 App（粉色底、两个白色心形图案的图标）。",
+        "role": "assistant"
+      }
+    }
+  ],
+  "created": 1793757164,
+  "id": "202611040952407b9e2bbdb5a647e4",
+  "model": "glm-5.3-flash",
+  "object": "chat.completion",
+  "request_id": "202611040952407b9e2bbdb5a647e4",
+  "usage": {
+    "completion_tokens": 82,
+    "completion_tokens_details": {
+      "reasoning_tokens": 0
+    },
+    "prompt_tokens": 1768,
+    "prompt_tokens_details": {
+      "cached_tokens": 0
+    },
+    "total_tokens": 1850
+  }
+}

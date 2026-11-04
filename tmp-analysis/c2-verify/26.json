@@ -1,0 +1,28 @@
+{
+  "choices": [
+    {
+      "finish_reason": "stop",
+      "index": 0,
+      "message": {
+        "content": "白色立式钢琴在画面里。\n钢琴琴身（含琴键部分）的像素范围是[[314,364,468,442]]，中心点坐标是[[391,403]]。",
+        "role": "assistant"
+      }
+    }
+  ],
+  "created": 1793363649,
+  "id": "202610302034083a8287cfefaf4900",
+  "model": "glm-5v-turbo",
+  "object": "chat.completion",
+  "request_id": "202610302034083a8287cfefaf4900",
+  "usage": {
+    "completion_tokens": 48,
+    "completion_tokens_details": {
+      "reasoning_tokens": 0
+    },
+    "prompt_tokens": 445,
+    "prompt_tokens_details": {
+      "cached_tokens": 0
+    },
+    "total_tokens": 493
+  }
+}
