@@ -1,13 +1,16 @@
 'use client';
 
 /**
- * 主动发消息设置页（Task 49 / Task 50 毛玻璃 / Task 51 规则完善 / Task 52 总开关+简约纯色）——聊天设置二级页（微信/QQ/信息三端共用）：
+ * 主动发消息设置页（Task 49 / Task 50 毛玻璃 / Task 51 规则完善 / Task 52 总开关+简约纯色 /
+ * Task 53 焦虑关怀设置重设计——删「此刻焦虑值」读数、阈值改滑块、宽限时间可自定义）——聊天设置二级页（微信/QQ/信息三端共用）：
  * ⓪ 总开关：设备级一键暂停所有角色的主动发消息（与三端「我」设置页的全局开关同一存储，联动状态头与分区置灰）
  * ① 定时触发：开关 + 双模式（按间隔 30秒~24小时+自定义 ｜ 每天定时=钟表时刻滚轮），到点 AI 按人设/近况发消息
  * ② 事件触发：事件清单（名称 + 准时触发/仅情境 + 星期几 + 启用开关 + 立即发一条），增删改 + 同名查重
  * ③ 自主触发：开关（AI 自己决定发不发/何时发/发什么）+ 决策频率档位
  * ④ 定时提醒任务：自然语言解析产生的任务清单（到点 AI 自动发消息；迟到也补发并标注「来晚了」）
- * ⑤ 最近主动消息：每角色最近 20 条主动发送记录回看
+ * ⑤ 焦虑关怀（Task 53）：开关 + 触发阈值滑块（30~100%、步进 5、默认 70，accent 配色）+ 宽限时间（预设 chips +
+ *    自定义弹窗 15 秒~24 小时）；不再展示「此刻焦虑值」实时读数（状态卡里仍可见）
+ * ⑥ 最近主动消息：每角色最近 20 条主动发送记录回看
  *
  * 视觉（Task 52：无光斑、无渐变、更简约）——玻璃卡片、纯色图标瓷砖、胶囊 chips/按钮、状态呼吸灯、
  * 时/分滚轮选择器（iOS picker 风）、弹窗毛玻璃卡 + rAF 进出场动画（与 IOSActionSheet 同一套曲线）。
@@ -15,7 +18,7 @@
  * 自包含数据读写（@/lib/ios/proactive-msg 的 cfg/reminders/hist API），宿主只需传 variant/contactId/contactName。
  */
 
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { BellOff, BellRing, CalendarClock, Check, ChevronLeft, HeartPulse, History, Plus, Send, Sparkles, Timer, Trash2, Zap } from 'lucide-react';
 import { ChatToggle } from './chat-settings';
 import { useChatSkin } from '@/lib/ios/chat-skin';
@@ -40,7 +43,8 @@ import {
   type ProactiveReminder,
   type ProactiveHistEntry,
 } from '@/lib/ios/proactive-msg';
-import { anxietyOf, anxietyLabel, anxietyUnansweredLabel, ANXIETY_DEFAULT_THRESHOLD, type AnxietyState } from '@/lib/ios/anxiety';
+import { ANXIETY_DEFAULT_THRESHOLD } from '@/lib/ios/anxiety';
+import { Slider } from '@/components/ui/slider';
 import { genId } from '@/lib/ios/db';
 
 /** 定时间隔档位（毫秒）；自定义走输入面板 */
@@ -60,10 +64,7 @@ const TIMER_PRESETS: number[] = [
 /** 自主决策频率档位（分钟） */
 const AUTO_FREQ_PRESETS: number[] = [3, 5, 10, 15, 30];
 
-/** v51 焦虑关怀：触发阈值档位（%；默认 70——用户需求「允许自定义触发阈值（默认 70%）」） */
-const ANXIETY_THRESHOLD_PRESETS: number[] = [50, 60, 70, 80, 90];
-
-/** v51 焦虑关怀：多久没回复开始涨焦虑的档位（毫秒；默认 1 分钟——用户需求「用户1分钟没有回复消息（可自定义时间）」） */
+/** v52 焦虑关怀：多久没回复开始涨焦虑的档位（毫秒；默认 1 分钟——用户需求「用户1分钟没有回复消息（可自定义时间）」） */
 const ANXIETY_GRACE_PRESETS: { ms: number; label: string }[] = [
   { ms: 30_000, label: '30秒' },
   { ms: 60_000, label: '1分钟' },
@@ -326,24 +327,13 @@ export function ProactiveMsgPage({
   };
   const [blockedDir, setBlockedDir] = useState<'byUser' | 'byChar' | null>(readBlockHint);
 
-  // v51 焦虑关怀：当前焦虑值实时读数（读即结算；展示层与引擎同一存储同一口径）
-  const readAnx = (): AnxietyState => {
-    try {
-      return anxietyOf(contactId);
-    } catch {
-      return { level: 0, lastUserAt: 0, lastUserApp: '', lastFireAt: 0, mult: 1, graceMs: 60_000 };
-    }
-  };
-  const [anx, setAnx] = useState<AnxietyState>(readAnx);
-
-  /** 提醒/历史清单/总开关/焦虑读数轻轮询（NL 解析可能在本页打开时于聊天里创建任务；4s 刷新足够） */
+  /** 提醒/历史清单/总开关轻轮询（NL 解析可能在本页打开时于聊天里创建任务；4s 刷新足够） */
   useEffect(() => {
     const t = window.setInterval(() => {
       setReminders(remindersFor(app, contactId));
       setHist(proactiveHistory(app, contactId));
       setMasterOff(isProactiveMasterOff());
       setBlockedDir(readBlockHint());
-      setAnx(readAnx());
     }, 4_000);
     return () => window.clearInterval(t);
   }, [app, contactId]);
@@ -365,6 +355,11 @@ export function ProactiveMsgPage({
   const [customVal, setCustomVal] = useState('5');
   const [customUnit, setCustomUnit] = useState<'s' | 'm' | 'h'>('m');
   const isPreset = cfg ? TIMER_PRESETS.includes(cfg.timerMs) : true;
+
+  // v52 焦虑关怀：宽限时间自定义面板（多久没回复开始涨焦虑；写多少存多少，存储层收敛 15 秒~24 小时）
+  const [graceCustomOpen, setGraceCustomOpen] = useState(false);
+  const [graceCustomVal, setGraceCustomVal] = useState('1');
+  const [graceCustomUnit, setGraceCustomUnit] = useState<'s' | 'm' | 'h'>('m');
 
   // 每天定时时刻拨盘
   const [dialOpen, setDialOpen] = useState(false);
@@ -397,6 +392,15 @@ export function ProactiveMsgPage({
     const ms = Math.max(3_000, Math.round(customUnit === 's' ? n * 1000 : customUnit === 'm' ? n * 60_000 : n * 3600_000));
     update({ timerMs: Math.min(ms, 7 * 24 * 3600_000), timerMode: 'interval' });
     setCustomOpen(false);
+  };
+
+  /** v52：自定义宽限时间保存（焦虑涨起算的未回复时长；存储层收敛 15 秒~24 小时，面板提示同口径） */
+  const applyCustomGrace = (): void => {
+    const n = Number(graceCustomVal);
+    if (!Number.isFinite(n) || n <= 0) return;
+    const ms = Math.round(graceCustomUnit === 's' ? n * 1000 : graceCustomUnit === 'm' ? n * 60_000 : n * 3600_000);
+    update({ anxietyGraceMs: Math.max(15_000, Math.min(ms, 24 * 3600_000)) });
+    setGraceCustomOpen(false);
   };
 
   const saveEvent = (): void => {
@@ -819,7 +823,8 @@ export function ProactiveMsgPage({
           </p>
         </div>
 
-        {/* ⑤ 焦虑关怀（v51 情绪焦虑值系统）：焦虑值 ≥ 阈值且用户超时未回复 → 带着焦虑主动发消息 */}
+        {/* ⑤ 焦虑关怀（v51 焦虑值系统 / v52 设置重设计）：焦虑值 ≥ 阈值且用户超时未回复 → 带着焦虑主动发消息。
+            v52 按用户要求：删「此刻焦虑值」实时读数；触发阈值改滑块（30~100%）；宽限时间预设 + 自定义。 */}
         <div className={`${glassCard} mt-3 overflow-hidden`}>
           <div className={rowCls}>
             <span className="flex items-center gap-2.5">
@@ -833,66 +838,69 @@ export function ProactiveMsgPage({
             </span>
             <ChatToggle on={cfg.anxietyOn !== false} onChange={(v) => update({ anxietyOn: v })} accent={accent} testId={`${testPrefix}-proactive-anxiety`} label="焦虑关怀" />
           </div>
-          <div className="border-t px-4 py-3.5" style={{ borderColor: 'inherit' }}>
-            {/* 实时焦虑值读数（本地焦虑引擎读即结算；与状态卡/引擎同一存储同一口径） */}
-            <div className={miniCard} data-testid={`${testPrefix}-proactive-anxiety-live`}>
-              <div className="flex items-baseline justify-between">
-                <span className="text-[12.5px] text-black/45 dark:text-white/45">此刻焦虑值</span>
-                <span className="text-[12.5px]">
-                  <span className="font-semibold tabular-nums" style={{ color: anx.level >= (cfg.anxietyThreshold ?? ANXIETY_DEFAULT_THRESHOLD) ? '#FF9500' : undefined }}>
-                    {Math.round(anx.level)}
-                  </span>
-                  <span className="text-black/40 dark:text-white/40">/100 · {anxietyLabel(anx.level)}</span>
+          {cfg.anxietyOn !== false && (
+            <div className="border-t px-4 py-3.5" style={{ borderColor: 'inherit' }} data-testid={`${testPrefix}-proactive-anxiety-config`}>
+              {/* 触发阈值滑块（v52：原 5 档 chips 换滑块；30~100%、步进 5、默认 70——与存储层收敛同口径） */}
+              <div className="flex items-baseline justify-between gap-2">
+                <span className="text-[12.5px] text-black/45 dark:text-white/45">触发阈值（焦虑值达到多少开始主动发消息）</span>
+                <span className="shrink-0 text-[15px] font-semibold tabular-nums leading-none" style={{ color: accent }}>
+                  {cfg.anxietyThreshold ?? ANXIETY_DEFAULT_THRESHOLD}%
                 </span>
               </div>
-              <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-black/[0.06] dark:bg-white/[0.08]">
-                <div
-                  className="h-full rounded-full transition-[width] duration-700"
-                  style={{ width: `${Math.round(anx.level)}%`, background: 'linear-gradient(90deg,#FFD60A,#FF9500)' }}
-                />
+              <Slider
+                min={30}
+                max={100}
+                step={5}
+                value={[cfg.anxietyThreshold ?? ANXIETY_DEFAULT_THRESHOLD]}
+                onValueChange={(v) => update({ anxietyThreshold: v[0] ?? ANXIETY_DEFAULT_THRESHOLD })}
+                aria-label="焦虑触发阈值"
+                data-testid={`${testPrefix}-proactive-anxiety-threshold`}
+                className="mt-2.5"
+                style={{ '--color-primary': accent, '--color-ring': accent } as CSSProperties}
+              />
+              {/* 宽限时间（v52：预设 + 自定义面板，时间可自定义） */}
+              <p className="mb-2 mt-4 text-[12px] text-black/40 dark:text-white/40">多久没回复开始涨焦虑</p>
+              <div className="flex flex-wrap gap-2">
+                {ANXIETY_GRACE_PRESETS.map((g) => (
+                  <button
+                    key={g.ms}
+                    type="button"
+                    data-testid={`${testPrefix}-proactive-anxiety-grace-${g.ms}`}
+                    onClick={() => update({ anxietyGraceMs: g.ms })}
+                    className={`${chipCls} ${(cfg.anxietyGraceMs ?? 60_000) === g.ms ? '' : chipIdle}`}
+                    style={(cfg.anxietyGraceMs ?? 60_000) === g.ms ? { background: accent, color: '#fff' } : undefined}
+                  >
+                    {g.label}
+                  </button>
+                ))}
+                <button
+                  type="button"
+                  data-testid={`${testPrefix}-proactive-anxiety-grace-custom`}
+                  onClick={() => {
+                    const ms = cfg.anxietyGraceMs ?? 60_000;
+                    if (ms >= 3600_000 && ms % 3600_000 === 0) {
+                      setGraceCustomVal(String(ms / 3600_000));
+                      setGraceCustomUnit('h');
+                    } else if (ms >= 60_000 && ms % 60_000 === 0) {
+                      setGraceCustomVal(String(ms / 60_000));
+                      setGraceCustomUnit('m');
+                    } else {
+                      setGraceCustomVal(String(Math.max(15, Math.round(ms / 1000))));
+                      setGraceCustomUnit('s');
+                    }
+                    setGraceCustomOpen(true);
+                  }}
+                  className={`${chipCls} ${!ANXIETY_GRACE_PRESETS.some((g) => g.ms === (cfg.anxietyGraceMs ?? 60_000)) ? '' : chipIdle}`}
+                  style={!ANXIETY_GRACE_PRESETS.some((g) => g.ms === (cfg.anxietyGraceMs ?? 60_000)) ? { background: accent, color: '#fff' } : undefined}
+                >
+                  自定义
+                </button>
               </div>
-              <p className="mt-2 text-[11.5px] leading-relaxed text-black/40 dark:text-white/40" data-testid={`${testPrefix}-proactive-anxiety-status`}>
-                {anx.lastUserAt > 0 ? `你 ${anxietyUnansweredLabel(anx)}——TA 都看在眼里` : '你们还没聊过天，焦虑无从谈起'}
+              <p className="mt-2.5 text-[12px] leading-relaxed text-black/35 dark:text-white/35">
+                焦虑值随你未回复的时间上涨（超过 {intervalLabel(cfg.anxietyGraceMs ?? 60_000)} 起算；冷淡回复、吵架、提到别人也会涨，按 TA 的人设快慢不同）；达到 {cfg.anxietyThreshold ?? ANXIETY_DEFAULT_THRESHOLD}% 后 TA 会带着当下的焦虑主动发消息——约每 1 分钟忍不住发一「轮」，每轮像真人那样连发好几条短消息——你回复 TA，就会安心下来。
               </p>
             </div>
-            {cfg.anxietyOn !== false && (
-              <>
-                <p className="mb-2 mt-3 text-[12px] text-black/40 dark:text-white/40">触发阈值（焦虑值达到多少开始主动发消息）</p>
-                <div className="flex flex-wrap gap-2">
-                  {ANXIETY_THRESHOLD_PRESETS.map((p) => (
-                    <button
-                      key={p}
-                      type="button"
-                      data-testid={`${testPrefix}-proactive-anxiety-threshold-${p}`}
-                      onClick={() => update({ anxietyThreshold: p })}
-                      className={`${chipCls} ${(cfg.anxietyThreshold ?? ANXIETY_DEFAULT_THRESHOLD) === p ? '' : chipIdle}`}
-                      style={(cfg.anxietyThreshold ?? ANXIETY_DEFAULT_THRESHOLD) === p ? { background: accent, color: '#fff' } : undefined}
-                    >
-                      {p}%
-                    </button>
-                  ))}
-                </div>
-                <p className="mb-2 mt-3.5 text-[12px] text-black/40 dark:text-white/40">多久没回复开始涨焦虑</p>
-                <div className="flex flex-wrap gap-2">
-                  {ANXIETY_GRACE_PRESETS.map((g) => (
-                    <button
-                      key={g.ms}
-                      type="button"
-                      data-testid={`${testPrefix}-proactive-anxiety-grace-${g.ms}`}
-                      onClick={() => update({ anxietyGraceMs: g.ms })}
-                      className={`${chipCls} ${(cfg.anxietyGraceMs ?? 60_000) === g.ms ? '' : chipIdle}`}
-                      style={(cfg.anxietyGraceMs ?? 60_000) === g.ms ? { background: accent, color: '#fff' } : undefined}
-                    >
-                      {g.label}
-                    </button>
-                  ))}
-                </div>
-                <p className="mt-2.5 text-[12px] leading-relaxed text-black/35 dark:text-white/35">
-                  焦虑值随你未回复的时间上涨（超过 {intervalLabel(cfg.anxietyGraceMs ?? 60_000)} 起算；冷淡回复、吵架、提到别人也会涨，按 TA 的人设快慢不同）；达到 {cfg.anxietyThreshold ?? ANXIETY_DEFAULT_THRESHOLD}% 后 TA 会带着当下的焦虑主动发消息——约每 1 分钟忍不住发一「轮」，每轮像真人那样连发好几条短消息——你回复 TA，就会安心下来。
-                </p>
-              </>
-            )}
-          </div>
+          )}
         </div>
 
         {/* ⑥ 最近主动消息（Task 51 C2） */}
@@ -987,6 +995,65 @@ export function ProactiveMsgPage({
               className="h-10 flex-1 rounded-full text-[14.5px] font-medium text-white transition-all active:scale-95"
               style={{ background: accent }}
               onClick={applyCustomInterval}
+            >
+              保存
+            </button>
+          </div>
+        </div>
+      </GlassModal>
+
+      {/* v52 焦虑关怀：宽限时间自定义面板（毛玻璃胶囊弹窗；多久没回复开始涨焦虑） */}
+      <GlassModal open={graceCustomOpen} onClose={() => setGraceCustomOpen(false)} label="自定义宽限时间">
+        <div data-testid={`${testPrefix}-proactive-grace-custom-panel`}>
+          <p className={`text-center ${titleCls}`}>自定义宽限时间</p>
+          <p className="mt-1 text-center text-[12px] text-black/40 dark:text-white/40">你超过这么久没回复，TA 就开始涨焦虑（15 秒 ~ 24 小时）</p>
+          <div className="mt-4 flex items-center gap-2.5">
+            <input
+              type="number"
+              min="15"
+              step="any"
+              value={graceCustomVal}
+              onChange={(e) => setGraceCustomVal(e.target.value)}
+              data-testid={`${testPrefix}-proactive-grace-custom-input`}
+              className={fieldCls}
+              placeholder="如 45"
+              aria-label="宽限时间数值"
+            />
+            <div className={`flex shrink-0 overflow-hidden rounded-full p-0.5 ${chipIdle}`}>
+              {(
+                [
+                  ['s', '秒'],
+                  ['m', '分'],
+                  ['h', '时'],
+                ] as const
+              ).map(([u, label]) => (
+                <button
+                  key={u}
+                  type="button"
+                  onClick={() => setGraceCustomUnit(u)}
+                  aria-pressed={graceCustomUnit === u}
+                  className={`rounded-full px-3 py-1.5 text-[13px] transition-all ${graceCustomUnit === u ? 'shadow-sm' : 'opacity-60'}`}
+                  style={graceCustomUnit === u ? { background: accent, color: '#fff' } : undefined}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="mt-5 flex gap-2.5">
+            <button
+              type="button"
+              className={`h-10 flex-1 rounded-full text-[14.5px] transition-all active:scale-95 ${chipIdle} text-black/55 dark:text-white/60`}
+              onClick={() => setGraceCustomOpen(false)}
+            >
+              取消
+            </button>
+            <button
+              type="button"
+              data-testid={`${testPrefix}-proactive-grace-custom-save`}
+              className="h-10 flex-1 rounded-full text-[14.5px] font-medium text-white transition-all active:scale-95"
+              style={{ background: accent }}
+              onClick={applyCustomGrace}
             >
               保存
             </button>
