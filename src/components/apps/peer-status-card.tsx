@@ -203,14 +203,15 @@ export default function PeerStatusCard({
     }
   }, [app, bondHint, contact]);
 
-  // 打开即生成；「换一换」/「重试」改变 nonce 再生成；关闭时中断在途请求
+  // 打开即生成；「换一换」/「重试」改变 nonce 再生成；关闭时中断在途请求。
+  // setTimeout(0) 让出生命周期同步段（generate 内部首行亦有 await 让步）：关闭竞态时取消未启动的生成
   useEffect(() => {
     if (open && contact) {
-      void generate();
-    } else {
-      seqRef.current += 1;
-      abortRef.current?.abort();
+      const t = window.setTimeout(() => void generate(), 0);
+      return () => window.clearTimeout(t);
     }
+    seqRef.current += 1;
+    abortRef.current?.abort();
   }, [open, contact, generate, nonce]);
 
   /** 用户主动把这张状态卡存进记忆（一条事件碎片；重复保存会被记忆库去重合并） */

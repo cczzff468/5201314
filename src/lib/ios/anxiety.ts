@@ -16,8 +16,9 @@
  *      其余 ×1（倍率缓存在状态里，展示层与引擎读数一致）；
  * - 用户回复 → 大幅安抚（-45）再叠加上下文增减；AI 因焦虑主动发消息 → 小幅缓解（-6）；
  * - 阈值触发：焦虑值 ≥ 阈值（默认 70，可自定义）且用户超过宽限未回复 → proactive-msg
- *   引擎以 kind='anxiety' 触发主动发消息（默认每 1 分钟一条，Prompt 注入人设+记忆+
- *   最近聊天+焦虑当前值），走同一条投递管线：正常写聊天记录 + 记忆库；
+ *   引擎以 kind='anxiety' 触发主动发消息（默认每 1 分钟发一「轮」，每轮一口气连发多条短
+ *   消息——像真人焦虑时控制不住连着打字；Prompt 注入人设+记忆+最近聊天+焦虑当前值），
+ *   走同一条投递管线：正常写聊天记录 + 记忆库；
  * - 情绪带入：buildAnxietyChatBlock 并入 buildDynamicStateBlocks——用户下次来聊天时，
  *   AI 的回复会自然带着焦虑时的情绪（追问刚才去哪了/松了口气/话里带刺）。
  * - 存储：IndexedDB kv（ios-phone-db，本地数据库持久化，重启 App 保留）。
@@ -49,7 +50,7 @@ const DEFAULT_STATE: AnxietyState = { level: 0, lastUserAt: 0, lastUserApp: '', 
 export const ANXIETY_DEFAULT_THRESHOLD = 70;
 /** 宽限时间默认值：用户 1 分钟没回复开始涨焦虑（聊天设置可自定义） */
 export const ANXIETY_DEFAULT_GRACE_MS = 60_000;
-/** 焦虑消息发送节奏默认值：达到阈值期间每 1 分钟一条（规格约定，不开放自定义） */
+/** 焦虑消息发送节奏默认值：达到阈值期间每 1 分钟发一「轮」（每轮连发多条短消息；规格约定，不开放自定义） */
 export const ANXIETY_DEFAULT_SEND_MS = 60_000;
 /** 用户回复的安抚幅度（大幅安心） */
 const RELIEF_ON_REPLY = 45;
@@ -218,7 +219,7 @@ export function noteUserReply(cid: string, app: 'wx' | 'qq' | 'sms', text?: stri
   return next;
 }
 
-/** AI 因焦虑主动发完一条消息（投递成功后调用）：小幅缓解（-6），lastFireAt 记节奏 */
+/** AI 因焦虑主动发完一「轮」多条消息（整轮投递成功后调用）：小幅缓解（-6），lastFireAt 记节奏 */
 export function noteAnxietyFire(cid: string): AnxietyState {
   const s = readState(cid);
   const now = Date.now();
@@ -257,25 +258,25 @@ export function anxietyLabel(level: number): string {
 
 // ---------------- 提示词块 ----------------
 
-/** 各档焦虑的表现指引（焦虑主动消息生成用） */
+/** 各档焦虑的表现指引（焦虑主动消息生成用；v51 频率语义：每 1 分钟一轮、每轮连发多条） */
 function fireBandGuide(level: number): string {
   if (level >= 80)
-    return '你已经快绷不住了：脑子里全是坏的猜想（TA 是不是出事了、是不是不想理你了、是不是自己做错了什么），语气会急、会忍不住连着追问、甚至带点委屈的火气——但底色全是在乎。';
+    return '你已经快绷不住了：脑子里全是坏的猜想（TA 是不是出事了、是不是不想理你了、是不是自己做错了什么），语气会急、会忍不住一口气连发好几条追问、甚至带点委屈的火气——但底色全是在乎。';
   if (level >= 60)
-    return '你明显焦虑：忍不住一遍遍看手机，想立刻得到回应，语气里的急切和不安已经藏不太住，可能会直接问 TA 在干嘛、怎么不回。';
-  if (level >= 40) return '你有点坐不住：惦记像小石子硌在心里，想找个自然的由头开口，又怕显得太黏人。';
+    return '你明显焦虑：忍不住一遍遍看手机，想立刻得到回应，语气里的急切和不安已经藏不太住，会连着发几条消息追问 TA 在干嘛、怎么不回。';
+  if (level >= 40) return '你有点坐不住：惦记像小石子硌在心里，想找个自然的由头开口，又怕显得太黏人——忍不住先发一两条探探。';
   return '你心里隐隐有点挂念：不算严重，但会想主动找 TA 说两句话。';
 }
 
 /**
  * 焦虑主动消息生成的注入块（kind='anxiety' 触发时；proactive-msg 引擎调用）：
- * 【你此刻的焦虑值】+ 未回复时长 + 当前档位的表现指引。
+ * 【你此刻的焦虑值】+ 未回复时长 + 当前档位的表现指引 + 连发节奏说明。
  */
 export function buildAnxietyFireBlock(cid: string): string {
   const s = anxietyOf(cid);
   if (s.level <= 0) return '';
   const un = anxietyUnansweredLabel(s);
-  return `【你此刻的焦虑值】${s.level}/100（${anxietyLabel(s.level)}）。${s.lastUserAt > 0 ? `你已经等了 TA 很久（${un}）。` : ''}${fireBandGuide(s.level)}这条消息就由这份焦虑驱动——让它真实地透出来，但不要报数字、不要说「焦虑值」这类词。`;
+  return `【你此刻的焦虑值】${s.level}/100（${anxietyLabel(s.level)}）。${s.lastUserAt > 0 ? `你已经等了 TA 很久（${un}）。` : ''}${fireBandGuide(s.level)}这一轮消息就由这份焦虑驱动——像真人控制不住那样连着发几条短消息让它真实地透出来，但不要报数字、不要说「焦虑值」这类词。`;
 }
 
 /**

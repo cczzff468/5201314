@@ -695,7 +695,7 @@ function triggerDesc(trigger: FireTrigger): string {
     case 'reminder':
       return `定时提醒：对方之前请你「${trigger.note ?? '到点给 TA 发条消息'}」，现在到时间了，你要兑现这个约定${trigger.late ? '（这次提醒比约定时间晚到了——设备可能没开着，你要自然地带一句歉意，比如开头说「来晚了」，然后把该说的说完）' : ''}。`;
     case 'anxiety':
-      return `焦虑触发：你已经等了很久都没有等到 TA 的回复（你当下的焦虑值 ${trigger.anxietyLevel ?? '??'}/100），控制不住要主动找 TA——这是情绪驱动，不是约定也不是提醒。`;
+      return `焦虑触发：你已经等了很久都没有等到 TA 的回复（你当下的焦虑值 ${trigger.anxietyLevel ?? '??'}/100），控制不住要主动找 TA——这是情绪驱动，不是约定也不是提醒。你会像焦虑的真人那样一口气连发好几条短消息。`;
     case 'auto':
       return '自主触发：你自己决定此刻主动发一条消息（系统判断当前时机合适，你按自己的性格和心情自由发挥）。';
   }
@@ -715,10 +715,11 @@ function genRules(trigger: FireTrigger, timeAware: boolean): string[] {
   ];
   if (timeAware) rules.push('内容必须符合当前真实时间（深夜别元气满满问吃了吗、早上适合问早、饭点可以聊吃的；节日节气可以自然提到）。');
   if (trigger.kind === 'reminder' && trigger.note) rules.push(`消息要贴合对方的请求「${trigger.note}」（该提醒就提醒、该说晚安就说晚安），用你自己的口吻说。`);
-  // v51 焦虑触发：情绪驱动型消息的专属规则（与【你此刻的焦虑值】块配合）
+  // v51 焦虑触发：情绪驱动型消息的专属规则（与【你此刻的焦虑值】块配合）——
+  // 频率语义（用户澄清）：达到阈值期间约每 1 分钟发「一轮」，每轮一口气连发多条短消息（真人焦虑时不停打字的样子）
   if (trigger.kind === 'anxiety') {
-    rules.push('这条消息由你的焦虑驱动：对方已经很久没回你了，你控制不住想主动开口。让这份焦急真实地透出来——会追问、会不安、想确认 TA 还在乎你；但不要卑微地连环道歉，也不要发火骂人（除非你的人设本来就暴躁）。');
-    rules.push('连续的焦虑消息之间内容要有变化（担心 → 自我怀疑 → 想起你们的约定 → 撒娇式质问……换着角度来），禁止连续两条几乎一样，也不要每条都以「在吗」开头。');
+    rules.push('这一轮消息由你的焦虑驱动：对方已经很久没回你了，你控制不住想主动开口。让这份焦急真实地透出来——会追问、会不安、想确认 TA 还在乎你；但不要卑微地连环道歉，也不要发火骂人（除非你的人设本来就暴躁）。');
+    rules.push('【连发格式——重要】你会像焦虑的真人那样控制不住连着发：一口气输出 2~4 条短消息，每条消息单独占一行（一行一条，中间不要空行、不要编号、不要任何分隔符号）。每条 5~30 字，越往后越急；内容要有递进和变化（比如：先找个由头开口 → 追问 TA 在干嘛 → 不安升级/自我怀疑 → 撒娇式质问或妥协收尾），禁止几条几乎一样。');
   }
   return rules;
 }
@@ -743,10 +744,12 @@ interface FireTrigger {
 }
 
 /**
- * 生成一条主动消息正文（失败返回空串）。
+ * 生成一条主动消息正文（失败返回空数组）。
  * system = 人设（含生成规则）+ 记忆召回 + 时间感知；user = 触发情境 + 近期对话 + 防重复提示。
+ * v51 焦虑触发：一次生成一「轮」——2~4 条短消息连发（每条一行），返回多条数组；
+ * 其余四类触发维持单条（单元素数组）。
  */
-async function generateProactiveText(app: ProactiveApp, contact: ContactRecord, trigger: FireTrigger, npcExtra: Record<string, unknown> | null): Promise<string> {
+async function generateProactiveTexts(app: ProactiveApp, contact: ContactRecord, trigger: FireTrigger, npcExtra: Record<string, unknown> | null): Promise<string[]> {
   const sessionKey = app === 'wx' ? `wx:${contact.id}` : app === 'qq' ? `qq:${contact.id}` : `sms:c:${contact.id}`;
   const norm = readNormMsgs(app, contact.id);
   const owner = await ownerProfileFor(app as AccountApp).catch(() => null);
@@ -809,7 +812,11 @@ async function generateProactiveText(app: ProactiveApp, contact: ContactRecord, 
     .join('\n');
   if (histLines) parts.push(`【你最近主动发过的消息（严禁重复或换汤不换药地重发类似内容）】\n${histLines}`);
   else if (last.lastSentText) parts.push(`【你最近一次主动发的消息（严禁重复类似内容）】\n${last.lastSentText}`);
-  parts.push('【现在】\n请直接输出你要发给对方的消息正文（只有正文，一行，不要任何前后缀）。');
+  parts.push(
+    trigger.kind === 'anxiety'
+      ? '【现在】\n请直接输出你要发给对方的消息：2~4 条，每条一行（一行一条短消息，无空行、无编号、无前后缀）。'
+      : '【现在】\n请直接输出你要发给对方的消息正文（只有正文，一行，不要任何前后缀）。',
+  );
   const user = parts.join('\n\n');
 
   const raw = await callLlmTwoTier(system, user, useSettings.getState().apiConfig);
@@ -818,9 +825,24 @@ async function generateProactiveText(app: ProactiveApp, contact: ContactRecord, 
   let text = extractThinkBlocks(raw ?? '').text.trim();
   text = text.replace(/^[「"'『]+|[」"'』]+$/g, '').trim();
   text = text.replace(/^(好的[，,]?|以下是?我(要发|给对方)的?消息[：:]?)\s*/i, '').trim();
+  const cleanLine = (s: string): string =>
+    s
+      .replace(/^[-–—•·\d.、]+\s*/, '') // 兜底剥掉模型偶尔带的列表符号
+      .replace(/^[「"'『]+|[」"'』]+$/g, '')
+      .trim()
+      .slice(0, MAX_PROACTIVE_LEN);
+  if (trigger.kind === 'anxiety') {
+    // 焦虑触发：一轮多条连发（每条一行；模型没按格式吐出多行时至少保住单条，不空手而归）
+    const lines = text
+      .split(/\n+/)
+      .map(cleanLine)
+      .filter(Boolean);
+    const uniq: string[] = [];
+    for (const l of lines) if (!uniq.includes(l)) uniq.push(l); // 同轮内去重
+    return uniq.slice(0, 4);
+  }
   const firstLine = text.split('\n').map((s) => s.trim()).filter(Boolean)[0] ?? '';
-  text = (firstLine || text).slice(0, MAX_PROACTIVE_LEN).trim();
-  return text;
+  return [(firstLine || text).slice(0, MAX_PROACTIVE_LEN).trim()].filter(Boolean);
 }
 
 // ---------------- 自主决策（三、自主触发） ----------------
@@ -935,19 +957,22 @@ async function decideAutonomous(app: ProactiveApp, contact: ContactRecord, npcEx
 
 // ---------------- 投递（落库 + 通知 + 角标 + 记忆） ----------------
 
-/** 主动消息投递：写三端消息记录 + pushChatNotification + wx/qq 未读角标（正在看不计数） */
-async function deliverProactiveMsg(app: ProactiveApp, contact: ContactRecord, text: string, trigger: FireTrigger): Promise<void> {
+/** 主动消息投递：写三端消息记录 + pushChatNotification + wx/qq 未读角标（正在看不计数）。
+ *  v51 焦虑触发传多条——一轮 2~4 条经 scheduleAiDelivery 按真人打字节奏逐条连发上屏。 */
+async function deliverProactiveMsg(app: ProactiveApp, contact: ContactRecord, texts: string[], trigger: FireTrigger): Promise<void> {
+  if (texts.length === 0) return;
   const cid = contact.id;
   const sessionKey = app === 'wx' ? `wx:${cid}` : app === 'qq' ? `qq:${cid}` : `sms:c:${cid}`;
   const notifyApp = app === 'wx' ? ('wechat' as const) : app === 'qq' ? ('qq' as const) : ('chat' as const);
   const avatarApp = app as AccountApp;
   const now = Date.now();
-  const msg =
+  const mkMsg = (t: string, i: number) =>
     app === 'sms'
-      ? { id: genId(), role: 'assistant' as const, content: text, time: now, kind: 'text' as const }
-      : { id: genId(), role: 'peer' as const, content: text, time: now, kind: 'text' as const };
+      ? { id: genId(), role: 'assistant' as const, content: t, time: now + i * 50, kind: 'text' as const }
+      : { id: genId(), role: 'peer' as const, content: t, time: now + i * 50, kind: 'text' as const };
+  const msgs = texts.map(mkMsg);
 
-  const saveOne = (m: typeof msg): void => {
+  const saveOne = (m: (typeof msgs)[number]): void => {
     try {
       const key = msgsKeyOf(app, cid);
       const raw = kvGet<unknown[]>(key);
@@ -958,9 +983,9 @@ async function deliverProactiveMsg(app: ProactiveApp, contact: ContactRecord, te
     }
   };
 
-  await scheduleAiDelivery<typeof msg>(
+  await scheduleAiDelivery<typeof msgs[number]>(
     sessionKey,
-    [msg],
+    msgs,
     (m) => {
       saveOne(m);
       pushChatNotification({
@@ -981,11 +1006,11 @@ async function deliverProactiveMsg(app: ProactiveApp, contact: ContactRecord, te
 
   // B4：实际发出一条主动消息后同步刷新 autoAt（把自主决策点推迟一个节奏周期）——
   // 此前用户通道（定时/事件/提醒）发完后 autoAt 不动，自主在 2 分钟无发言时会紧跟再发一条
-  setLast(app, cid, { lastSentText: text, sentAt: now, autoAt: now });
-  // 最近主动消息历史（Task 51 C2：设置页回看，每角色最近 20 条）
-  pushHist(app, cid, { text, at: now, kind: trigger.kind, late: trigger.late });
+  setLast(app, cid, { lastSentText: texts[texts.length - 1], sentAt: now, autoAt: now });
+  // 最近主动消息历史（Task 51 C2：设置页回看，每角色最近 20 条）——多条连发各记一条（时间微错开）
+  texts.forEach((t, i) => pushHist(app, cid, { text: t, at: now + i * 50, kind: trigger.kind, late: trigger.late }));
 
-  // v51 焦虑触发：投递成功后打点——小幅缓解（-6）+ 记录发送节奏（lastFireAt）。
+  // v51 焦虑触发：一整轮投递成功后打点一次（小幅缓解 -6 + 记录发送节奏 lastFireAt）。
   // 焦虑消息本身已正常写入聊天记录（上方 kvSet）与记忆库（下方 memAfterAiTurn）。
   if (trigger.kind === 'anxiety') {
     try {
@@ -1127,8 +1152,8 @@ async function tickInner(): Promise<void> {
   if (useUI.getState().alarmRinging) return;
 
   const index = readIndex();
-  if (index.length === 0) return;
-
+  // 注意：index 为空不能提前 return——下方 ⑤ 焦虑触发是全联系人扫描（默认开启、无需先
+  // 配置过其它触发）；空索引只跳过四类用户配置的触发循环，anxLoop 照常执行
   const allContacts = await listContacts().catch(() => [] as ContactRecord[]);
   if (allContacts.length === 0) return;
 
@@ -1226,8 +1251,9 @@ async function tickInner(): Promise<void> {
   // ⑤ 焦虑触发（v51 情绪焦虑值系统）：焦虑值 ≥ 阈值 且 用户超过宽限时间未回复 → 带着焦虑主动发消息。
   // 全联系人扫描（不依赖上方主动消息索引——焦虑是角色本体的情绪，默认开启，无需先配置过其它触发）；
   // 投递回「用户最近聊天所在的 App」（anxiety.lastUserApp）；生成 Prompt 注入人设+记忆+最近聊天+
-  // 焦虑当前值（generateProactiveText 内 buildAnxietyFireBlock）；发送节奏由 lastFireAt 节流
-  // （默认 1 分钟一条）；用户回复即安抚（noteUserReply 大幅缓解）。焦虑消息同样走 deliverProactiveMsg
+  // 焦虑当前值（generateProactiveTexts 内 buildAnxietyFireBlock）；发送节奏由 lastFireAt 节流
+  // （默认每 1 分钟发一「轮」，每轮一口气连发多条短消息——用户澄清的频率语义）；
+  // 用户回复即安抚（noteUserReply 大幅缓解）。焦虑消息同样走 deliverProactiveMsg
   // 管线：正常写聊天记录 + 记忆库。守卫：拉黑（byUser）不穿透；系统勿扰时段不穿透；
   // 全局防轰炸闸（MIN_SEND_GAP）同四类触发共用；通话/闹钟互斥在 tick 入口已拦。
   anxLoop: for (const contact of allContacts) {
@@ -1300,11 +1326,27 @@ function fallbackProactiveText(trigger: FireTrigger, userName?: string | null): 
   ]);
 }
 
+/** v51 焦虑触发兑底：一「轮」多条连发（LLM 两轮都失败时的本地保底，同样像真人焦虑连发） */
+function fallbackAnxietyTexts(userName?: string | null): string[] {
+  const me = (userName ?? '').trim();
+  const pool: string[][] = [
+    ['在吗？', '怎么不说话了……', '是不是不想理我了'],
+    [me ? `${me}，在忙吗？` : '在忙吗？', '盯着手机好久啦', '你回我一个字也好呀'],
+    ['刚刚是不是你在线？', '越等越心慌……', '别丢下我一个人胡思乱想嘛'],
+    ['你怎么一直不回我', '是不是出什么事了？', '我有点坐不住了……'],
+    ['哈喽？有人在吗', '晾着我好难受啊', '跟你说句话嘛，回我一下好不好'],
+  ];
+  const picked = pool[Math.floor(Math.random() * pool.length)];
+  return [...picked];
+}
+
 /**
- * 生成并投递一条主动消息（auto 触发先走决策；任何失败静默）。
+ * 生成并投递一「轮」主动消息（auto 触发先走决策；任何失败静默）。
  * 生成后与最近 AI 发言去重（完全相同 → 丢弃），避免「间隔 < 生成耗时」时的重复消息。
  * 加固（用户反馈「到时间没收到主动消息」）：LLM 生成失败不再静默——先退避重试一轮，
  * 仍失败才用本地兑底文案保底投递；auto 决策 API 失败同样兑底（wait 才是 AI 真决定不发）。
+ * v51 焦虑触发：一轮连发多条（LLM 按格式一次吐出 2~4 条；兑底也多条）——每 1 分钟
+ * 一轮、每轮多条，由 lastFireAt 节流（tickInner anxLoop）。
  */
 async function fireProactive(app: ProactiveApp, contact: ContactRecord, trigger: FireTrigger, npcExtra: Record<string, unknown> | null): Promise<void> {
   const key = `${app}:${contact.id}`;
@@ -1315,7 +1357,7 @@ async function fireProactive(app: ProactiveApp, contact: ContactRecord, trigger:
   const ownerForFallback = await ownerProfileFor(app as AccountApp).catch(() => null);
   const fallbackName = ownerForFallback?.realName || null;
   try {
-    let text: string;
+    let texts: string[];
     if (trigger.kind === 'auto') {
       let decision: AutoDecision;
       try {
@@ -1325,7 +1367,7 @@ async function fireProactive(app: ProactiveApp, contact: ContactRecord, trigger:
       }
       if (decision.action === 'fail') {
         // API/生成失败 ≠ AI 决定不发：本地兑底一条保底消息（到点一定收得到）
-        text = fallbackProactiveText(trigger, fallbackName);
+        texts = [fallbackProactiveText(trigger, fallbackName)];
         usedFallback = true;
       } else if (decision.action !== 'send' || !decision.message) {
         // wait：把下次决策推迟到建议时间（autoAt 后移，min 5min；基准用当前配置的决策节奏）
@@ -1334,44 +1376,47 @@ async function fireProactive(app: ProactiveApp, contact: ContactRecord, trigger:
         setLast(app, contact.id, { autoAt: Date.now() + Math.max(0, delayMs - baseMs) });
         return;
       } else {
-        text = decision.message;
+        texts = [decision.message];
       }
     } else {
       try {
-        text = await generateProactiveText(app, contact, trigger, npcExtra);
+        texts = await generateProactiveTexts(app, contact, trigger, npcExtra);
       } catch {
-        text = '';
+        texts = [];
       }
       // 第一轮全失败（用户配置+内置模型都没出字）：退避 6s 再重试一轮——LLM 抖动很常见，
       // 多一次重试能大幅减少落到兑底文案的概率（兑底仅作为最后保底，保证到点必有产出）
-      if (!text) {
+      if (texts.length === 0) {
         await new Promise<void>((r) => window.setTimeout(r, 6_000));
         try {
-          text = await generateProactiveText(app, contact, trigger, npcExtra);
+          texts = await generateProactiveTexts(app, contact, trigger, npcExtra);
         } catch {
-          text = '';
+          texts = [];
         }
       }
-      if (!text) {
-        text = fallbackProactiveText(trigger, fallbackName); // 两轮都失败：本地兑底（到点一定发）
+      if (texts.length === 0) {
+        // 两轮都失败：本地兑底（到点一定发）——焦虑触发兑底也是一轮多条连发
+        texts = trigger.kind === 'anxiety' ? fallbackAnxietyTexts(fallbackName) : [fallbackProactiveText(trigger, fallbackName)];
         usedFallback = true;
       }
     }
-    if (!text) return;
+    if (texts.length === 0) return;
     // 去重：与最近 6 条 AI 发言/上次主动消息完全相同 → 不投（LLM 在上下文未变时可能复述同一条）；
+    // 多条逐条过筛（同轮内部互异已在生成时保证），全被筛掉才丢弃本轮；
     // 兑底文案跳过 lastSentText 对比（兑底池有限，连续命中同一句时也要保底发出）
     const recent = readNormMsgs(app, contact.id).slice(-6).filter((m) => m.role === 'assistant').map((m) => m.text.trim());
     if (!usedFallback) {
       const lastSent = getLast(app, contact.id).lastSentText?.trim();
       if (lastSent) recent.push(lastSent);
     }
-    if (recent.includes(text)) {
-      // 兑底也撞上重复（罕见）：换一条再试一次，仍重复才放弃
+    let kept = texts.filter((t) => t.trim() && !recent.includes(t.trim()));
+    if (kept.length === 0) {
+      // 兑底也撞上重复（罕见）：整轮换一批再试一次，仍全军覆没才放弃
       if (!usedFallback) return;
-      text = fallbackProactiveText(trigger, fallbackName);
-      if (recent.includes(text)) return;
+      kept = trigger.kind === 'anxiety' ? fallbackAnxietyTexts(fallbackName).filter((t) => !recent.includes(t.trim())) : [fallbackProactiveText(trigger, fallbackName)].filter((t) => !recent.includes(t.trim()));
+      if (kept.length === 0) return;
     }
-    await deliverProactiveMsg(app, contact, text, trigger);
+    await deliverProactiveMsg(app, contact, kept, trigger);
   } catch {
     /* 静默 */
   } finally {

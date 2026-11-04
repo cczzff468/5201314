@@ -888,7 +888,7 @@ export function ProactiveMsgPage({
                   ))}
                 </div>
                 <p className="mt-2.5 text-[12px] leading-relaxed text-black/35 dark:text-white/35">
-                  焦虑值随你未回复的时间上涨（超过 {intervalLabel(cfg.anxietyGraceMs ?? 60_000)} 起算；冷淡回复、吵架、提到别人也会涨，按 TA 的人设快慢不同）；达到 {cfg.anxietyThreshold ?? ANXIETY_DEFAULT_THRESHOLD}% 后 TA 会带着当下的焦虑主动发消息，约每 1 分钟一条——你回复 TA，就会安心下来。
+                  焦虑值随你未回复的时间上涨（超过 {intervalLabel(cfg.anxietyGraceMs ?? 60_000)} 起算；冷淡回复、吵架、提到别人也会涨，按 TA 的人设快慢不同）；达到 {cfg.anxietyThreshold ?? ANXIETY_DEFAULT_THRESHOLD}% 后 TA 会带着当下的焦虑主动发消息——约每 1 分钟忍不住发一「轮」，每轮像真人那样连发好几条短消息——你回复 TA，就会安心下来。
                 </p>
               </>
             )}
