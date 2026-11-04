@@ -113,8 +113,7 @@ import {
   type CoupleChannel,
   type CoupleInviteMeta,
 } from '@/lib/ios/couple-invite';
-// 第十六轮：AI 情绪系统（TA 头像下的心情小胶囊）
-import { aiMoodOf, MOOD_DISPLAY } from '@/lib/ios/ai-mood';
+// 第十六轮：AI 情绪系统——v61 头像下的心情小胶囊已不再展示（仅删显示，情绪引擎/提示词注入等功能全保留）
 import { aiAnswerWithMe, aiCommentOnPhoto, aiCommentOnPhotoLazy, aiDecideCouplePhoto, aiReplyPickForLevel, aiReplyVerdict, aiStatusPick, aiTickTrail, aiTrailFeed, aiZodiacReading, coupleMemoryDiff, coupleRemember, genReplyLevels, pokeTaDiary, rememberStatusExam, runCoupleAiTick, scheduleAiReply, scheduleBoardNoteReply, syncLocFromContacts, trailSortMs, isGenPhoto, isTextPhoto, photoSrc, type CouplePhotoEntry, type CoupleTextPhoto, type CoupleTrailRec, type DynReplyLevel } from '@/lib/ios/couple-ai';
 import { HUNDRED_LIST } from '@/lib/ios/couple-hundred';
 import { consumePendingPactOpen, COUPLE_PACT_NAV_EVENT, patchPactCardsWhere, peekPendingPactOpen, scheduleAiPactDecision, sendPactCard } from '@/lib/ios/couple-pact-share';
@@ -1645,31 +1644,14 @@ function HomePage(props: {
   /** 今天是否已打卡（第四十三轮：每天点击一次后大圆消失，次日恢复显示） */
   const missedToday = (state.missYouByDay?.[todayKey()] ?? 0) > 0;
 
-  /** 头像 + 下方想念天数徽标（点击「每天想你」后出现） */
-  // 第十六轮：TA 头像下显示 AI 当前心情小胶囊（情绪非平静时才显示，与想念徽章同款白胶囊）
-  const taMood = (() => {
-    try {
-      const pid = readInviteMeta().partnerContactId;
-      if (!pid) return null;
-      const m = aiMoodOf(pid);
-      return m.tag === 'normal' ? null : MOOD_DISPLAY[m.tag];
-    } catch {
-      return null;
-    }
-  })();
+  /** 头像 + 下方想念天数徽标（点击「每天想你」后出现）
+   *  v61：TA 头像下的 AI 心情小胶囊已删（用户要求只删显示不删功能——情绪引擎照常运转并注入提示词，
+   *  只是首页不再展示；「我的」侧从未有过心情胶囊，无需处理） */
   const avatarCol = (side: 'me' | 'ta') => {
     const isMe = side === 'me';
     return (
       <div className="flex w-[78px] flex-col items-center">
         <CoupleAvatar src={isMe ? state.meAvatar : state.taAvatar} name={isMe ? state.meName : state.taName} size={52} />
-        {!isMe && taMood && (
-          <span
-            data-testid="couple-ta-mood"
-            className="mt-1 rounded-full bg-white/90 dark:bg-zinc-800/92 px-2 py-[3px] text-[10px] font-medium leading-none text-[#5a5a62] dark:text-zinc-300 shadow-[0_2px_8px_rgba(0,0,0,0.08)] backdrop-blur-sm"
-          >
-            {taMood.emoji} {taMood.label}
-          </span>
-        )}
         {missDays != null && (
           <button
             type="button"
