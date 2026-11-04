@@ -25,7 +25,7 @@ import { FORUM_PROMPT_DEFAULTS, type PromptKey } from '@/lib/forum/prompt-defs';
 
 // ---------------- 类型 ----------------
 
-/** 条目归属 App（筛选标签；global = 所有聊天链路共享的核心人设段） */
+/** 条目归属 App（global = 所有聊天链路共享的核心人设段；worldbook/记忆/行为 = 跨 App 系统模块） */
 export type PromptAppId =
   | 'global'
   | 'wechat'
@@ -36,6 +36,7 @@ export type PromptAppId =
   | 'couple'
   | 'offline'
   | 'moments'
+  | 'worldbook'
   | 'memory'
   | 'behavior';
 
@@ -105,8 +106,9 @@ export const PROMPT_APPS: { id: PromptAppId; label: string; short: string }[] = 
   { id: 'forum', label: 'X 论坛', short: '论坛' },
   { id: 'couple', label: '情侣空间', short: '情侣' },
   { id: 'offline', label: '线下模式', short: '线下' },
-  { id: 'moments', label: '朋友圈/QQ空间', short: '动态' },
-  { id: 'memory', label: '记忆·世界书', short: '记忆' },
+  { id: 'moments', label: '朋友圈', short: '动态' },
+  { id: 'worldbook', label: '世界书', short: '世界书' },
+  { id: 'memory', label: '记忆', short: '记忆' },
   { id: 'behavior', label: '行为逻辑', short: '行为' },
 ];
 
@@ -684,6 +686,66 @@ const BUILTIN_APP_RULES: PromptEntry[] = [
     content: AI_VOICE_RULE_TEXT,
     builtin: true,
     source: 'components/apps/chat.tsx SMS_AI_VOICE_DELIVERY_RULE',
+  },
+  {
+    id: 'sms-action-desc',
+    appId: 'chat',
+    role: 'system',
+    depth: 44,
+    order: 0,
+    title: '信息·动作描写格式（开）',
+    desc: '动作描写开关开启：*...* 星号包裹动作/神态/情景描写',
+    category: 'immersion',
+    content:
+      '【动作描写格式】你可以在回复里用一对星号包裹动作、神态与情景描写（只包裹描写本身，例如 *笑了笑*、*她端起茶杯抿了一口*、*窗外雨声渐起*），' +
+      '描写会以灰色小字独立显示在聊天中间，正文照常写在星号外面。动作描写尽量单独占一行，写在它相邻正文的前面或后面，不要把描写和正文挤在同一句里；' +
+      '星号只用来包裹动作描写，不要用在普通文字的强调或标题上；' +
+      '每条回复里的动作描写要简短自然（一两处即可），不要整条回复全是描写，也不要每条消息都加描写。',
+    builtin: true,
+    source: 'lib/action-desc.ts ACTION_DESC_RULE（chat.tsx 发送流）',
+  },
+  {
+    id: 'sms-action-desc-off',
+    appId: 'chat',
+    role: 'system',
+    depth: 44,
+    order: 1,
+    title: '信息·动作描写禁用（关）',
+    desc: '动作描写开关关闭：禁止任何星号/括号动作描写',
+    category: 'immersion',
+    content:
+      '【动作描写禁用（对方已关闭动作描写）】禁止输出任何动作、神态、情景描写：不要写「*...*」这类被星号包裹的内容，也不要用括号单独补充动作或场景；' +
+      '回复一律只写你嘴里说出来的话，像真人打字一样。',
+    builtin: true,
+    source: 'lib/action-desc.ts ACTION_DESC_OFF_RULE（chat.tsx 发送流）',
+  },
+  {
+    id: 'sms-voice-call',
+    appId: 'chat',
+    role: 'system',
+    depth: 46,
+    order: 0,
+    title: '信息·语音通话能力',
+    desc: '联系人会话：AI 想马上说话时可加 [语音通话] 标记打一次电话',
+    category: 'immersion',
+    content:
+      '【语音通话能力】如果你此刻非常想和对方马上说话（想TA了、有急事、聊到特别开心等自然原因），可以在回复的最开头单独加上标记 [语音通话] 打一次电话给对方，对方手机会弹出你的来电邀请；平时聊天不要加这个标记，最多偶尔一次，连续使用会很烦人。',
+    builtin: true,
+    source: 'components/apps/chat.tsx 发送流 baseSys',
+  },
+  {
+    id: 'sms-quote-ban',
+    appId: 'chat',
+    role: 'system',
+    depth: 47,
+    order: 0,
+    title: '信息·引用存档前缀禁止模仿',
+    desc: '联系人会话：禁止照抄「（引用 名字：「内容」）」存档前缀',
+    category: 'immersion',
+    content:
+      '【引用存档前缀·禁止模仿】聊天记录里部分消息的开头带着「（引用 名字：「内容」）」这样的括号前缀——那是系统存档历史消息时自动加的引用标注，不是聊天内容，更不是你的输出格式。你自己回复时绝对不要写出这种括号前缀（信息端没有引用功能，写出来只会变成脏文本堆在气泡开头），直接说正文就好。',
+    builtin: true,
+    source: 'components/apps/chat.tsx 发送流 baseSys（v54）',
   },
 
   // ---------------- 电话 / 语音视频通话 ----------------
@@ -1357,7 +1419,7 @@ const BUILTIN_MEMORY: PromptEntry[] = [
   },
   {
     id: 'worldbook-rules',
-    appId: 'memory',
+    appId: 'worldbook',
     role: 'system',
     depth: 86,
     order: 0,
@@ -1658,8 +1720,8 @@ export const PROMPT_GROUPS: PromptGroup[] = [
     id: 'wx-rules',
     appId: 'wechat',
     kind: 'merged',
-    title: '微信·聊天规则',
-    desc: '表情包回应/内置小表情/特殊消息标记（红包转账等）/动作描写/语音条告知合为一大段；关闭 = 微信不再注入任何沉浸规则',
+    title: '微信',
+    desc: '微信聊天规则整块（表情包/小表情/特殊消息/动作描写/语音条告知）',
     members: ['wx-sticker-recv', 'wx-emoji-code', 'wx-rich-rules', 'wx-sticker-off', 'wx-action-desc', 'wx-action-desc-off', 'wx-ai-voice'],
     templateMembers: ['wx-sticker-recv', 'wx-emoji-code', 'wx-rich-rules', 'wx-action-desc', 'wx-ai-voice'],
     templateOverrides: { 'wx-rich-rules': '{{richRules}}' },
@@ -1668,8 +1730,8 @@ export const PROMPT_GROUPS: PromptGroup[] = [
     id: 'qq-rules',
     appId: 'qq',
     kind: 'merged',
-    title: 'QQ·聊天规则',
-    desc: '表情包回应/内置小表情/特殊消息标记（红包转账等）/动作描写/语音条告知合为一大段；关闭 = QQ 不再注入任何沉浸规则',
+    title: 'QQ',
+    desc: 'QQ 聊天规则整块（表情包/小表情/特殊消息/动作描写/语音条告知）',
     members: ['qq-sticker-recv', 'qq-emoji-code', 'qq-rich-rules', 'qq-sticker-off', 'qq-action-desc', 'qq-action-desc-off', 'qq-ai-voice'],
     templateMembers: ['qq-sticker-recv', 'qq-emoji-code', 'qq-rich-rules', 'qq-action-desc', 'qq-ai-voice'],
     templateOverrides: { 'qq-rich-rules': '{{richRules}}' },
@@ -1678,16 +1740,17 @@ export const PROMPT_GROUPS: PromptGroup[] = [
     id: 'sms-rules',
     appId: 'chat',
     kind: 'merged',
-    title: '信息·聊天规则',
-    desc: '短信语境的语音条送达告知',
-    members: ['sms-ai-voice'],
+    title: '信息',
+    desc: '信息（短信）聊天规则整块（语音条告知/动作描写/语音通话能力/引用前缀禁模仿）',
+    members: ['sms-ai-voice', 'sms-action-desc', 'sms-action-desc-off', 'sms-voice-call', 'sms-quote-ban'],
+    templateMembers: ['sms-ai-voice', 'sms-action-desc', 'sms-voice-call', 'sms-quote-ban'],
   },
   {
     id: 'call-rules',
     appId: 'phone',
     kind: 'merged',
-    title: '通话规则',
-    desc: '句数口语化/纯口语输出/寒暄挂断/操作桥接/主动开口等合为一大段；关闭 = 通话不再注入任何通话规则',
+    title: '电话',
+    desc: '通话规则整块（句数口语化/纯口语输出/寒暄挂断/操作桥接/主动开口）',
     members: [
       'call-length',
       'call-no-emoji',
@@ -1705,32 +1768,32 @@ export const PROMPT_GROUPS: PromptGroup[] = [
     id: 'forum',
     appId: 'forum',
     kind: 'list',
-    title: '论坛·生成提示词',
-    desc: '13 个生成场景各一条（发帖/评论/楼中楼/私信/互动决策/命名…），逐条开关与编辑',
+    title: '论坛',
+    desc: '13 个生成场景各一条（发帖/评论/楼中楼/私信/互动决策/命名…）',
     members: (Object.keys(FORUM_PROMPT_DEFAULTS) as PromptKey[]).map((k) => `forum-${k}`),
   },
   {
     id: 'couple',
     appId: 'couple',
     kind: 'list',
-    title: '情侣空间规则',
-    desc: '共享小天地注入/AI 心情日记/留言板便签决策，逐条开关与编辑',
+    title: '情侣空间',
+    desc: '共享小天地注入/AI 心情日记/留言板便签决策',
     members: ['couple-chat-block', 'couple-mood-diary', 'couple-pin-note'],
   },
   {
     id: 'offline',
     appId: 'offline',
     kind: 'list',
-    title: '线下模式规则',
-    desc: '世界观分析助手/总纲指令，逐条开关与编辑',
+    title: '线下',
+    desc: '世界观分析助手/总纲指令',
     members: ['offline-world-analysis', 'offline-directive'],
   },
   {
     id: 'moments',
     appId: 'moments',
     kind: 'list',
-    title: '动态（朋友圈/空间）规则',
-    desc: '发帖人身份硬性要求/发文规则/双语规则，逐条开关与编辑',
+    title: '朋友圈',
+    desc: '发帖人身份硬性要求/发文规则/双语规则',
     members: ['moments-identity', 'moments-post-rule', 'moments-bilingual'],
   },
   {
@@ -1742,11 +1805,19 @@ export const PROMPT_GROUPS: PromptGroup[] = [
     members: ['reply-count', 'reply-count-group', 'deep-think', 'proactive-gen-rules', 'proactive-auto-rules', 'anxiety-fire-block', 'anxiety-chat-block', 'time-aware-block'],
   },
   {
+    id: 'worldbook',
+    appId: 'worldbook',
+    kind: 'merged',
+    title: '世界书',
+    desc: '世界书使用规则整块（信息优先级/冲突处理/陌生阶段门控）',
+    members: ['worldbook-rules'],
+  },
+  {
     id: 'memory',
     appId: 'memory',
     kind: 'list',
-    title: '记忆系统',
-    desc: '记忆提取/总结/用户画像/召回/世界书使用规则，逐条开关与编辑',
+    title: '记忆',
+    desc: '记忆提取/总结/用户画像/召回，逐条开关与编辑',
     members: [
       'mem-extract-main',
       'mem-extract-perspective',
@@ -1756,7 +1827,6 @@ export const PROMPT_GROUPS: PromptGroup[] = [
       'mem-profile',
       'mem-recall-profile',
       'mem-recall-stranger',
-      'worldbook-rules',
     ],
   },
 ];

@@ -583,6 +583,14 @@ let activeContactRelation = '';
 const SMS_AI_VOICE_DELIVERY_RULE =
   '（你的文字消息有时会以语音条的形式送达对方——这是正常的送达方式，不用在意；但不要在正文里说「我给你发条语音」这类话，也不要主动承诺发语音，用文字自然聊就好。）';
 
+/** v66 起进预设注册表（sms-voice-call）：语音通话能力标记规则（仅联系人会话注入） */
+const SMS_VOICE_CALL_RULE =
+  '【语音通话能力】如果你此刻非常想和对方马上说话（想TA了、有急事、聊到特别开心等自然原因），可以在回复的最开头单独加上标记 [语音通话] 打一次电话给对方，对方手机会弹出你的来电邀请；平时聊天不要加这个标记，最多偶尔一次，连续使用会很烦人。';
+
+/** v54 防照抄引用前缀；v66 起进预设注册表（sms-quote-ban；仅联系人会话注入） */
+const SMS_QUOTE_BAN_RULE =
+  '【引用存档前缀·禁止模仿】聊天记录里部分消息的开头带着「（引用 名字：「内容」）」这样的括号前缀——那是系统存档历史消息时自动加的引用标注，不是聊天内容，更不是你的输出格式。你自己回复时绝对不要写出这种括号前缀（信息端没有引用功能，写出来只会变成脏文本堆在气泡开头），直接说正文就好。';
+
 function buildPersonaPrompt(c: ContactRecord, ownerName: string | null, multiApp: boolean, npcExtra?: NpcPromptExtra | null, userReal?: string | null): string {
   const mode = useSettings.getState().addressMode;
   const addrName = userReal ? addressNameOf({ name: userReal, realName: userReal }, mode) : null;
@@ -1921,21 +1929,20 @@ function ChatView({
         msgs.map((m) => ({ ...m, role: m.role === 'user' ? ('me' as const) : ('peer' as const) })),
       ),
       // 语音通话能力（仅联系人会话）：AI 想马上说话时可在回复开头加 [语音通话] 给机主打一次电话
-      wbContactId
-        ? '【语音通话能力】如果你此刻非常想和对方马上说话（想TA了、有急事、聊到特别开心等自然原因），可以在回复的最开头单独加上标记 [语音通话] 打一次电话给对方，对方手机会弹出你的来电邀请；平时聊天不要加这个标记，最多偶尔一次，连续使用会很烦人。'
-        : '',
+      // v66：接入全局预设管理器（sms-voice-call 可开关/可编辑；sms-rules 组关/组编辑时整块让位）
+      ...(wbContactId ? [promptRule('sms-voice-call', SMS_VOICE_CALL_RULE) ?? ''] : []),
       timeBlock,
       // v54【引用存档前缀·禁止模仿】信息端 AI 无引用能力（无 [引用:M编号] 标记机制），
       // 但上下文里带引用的消息以「（引用 名字：「内容」）」前缀序列化——模型偶发照抄进自己的回复
       // （用户实测：连发多条每条开头都挂着「（引用 凡凡：「mua」）」）。提示词层显式禁止 +
       // 落盘/渲染两层剥除兜底（见 buildReplyMsgs 的 cleanBubbleText 与下方 text 变量）。
-      ...(wbContactId
-        ? [
-            '【引用存档前缀·禁止模仿】聊天记录里部分消息的开头带着「（引用 名字：「内容」）」这样的括号前缀——那是系统存档历史消息时自动加的引用标注，不是聊天内容，更不是你的输出格式。你自己回复时绝对不要写出这种括号前缀（信息端没有引用功能，写出来只会变成脏文本堆在气泡开头），直接说正文就好。',
-          ]
-        : []),
+      // v66：接入全局预设管理器（sms-quote-ban 可开关/可编辑；sms-rules 组关/组编辑时整块让位）
+      ...(wbContactId ? [promptRule('sms-quote-ban', SMS_QUOTE_BAN_RULE) ?? ''] : []),
       // 动作描写：开启下发 *...* 格式约定（灰色小字居中显示），关闭下发显式禁令（渲染层另有硬剥离兜底）
-      actionDescOn ? ACTION_DESC_RULE : ACTION_DESC_OFF_RULE,
+      // v66：接入全局预设管理器（sms-action-desc/-off 可开关/可编辑；sms-rules 组关/组编辑时整块让位）
+      actionDescOn
+        ? (promptRule('sms-action-desc', ACTION_DESC_RULE) ?? '')
+        : (promptRule('sms-action-desc-off', ACTION_DESC_OFF_RULE) ?? ''),
       // 46-g 视觉自主决策规则（仅联系人会话；信息端无图无朋友圈，albumSummary 通常为空 → 只注入换头像规则；
       // 相册非空时额外注入【选图操作】+【相册清单】，让 AI 可用 [选图设头像:alb-xxx] 从相册挑图换头像）
       // #111 信息端仅支持 pick-album-avatar：通用 buildVisionRules 列了 3 个 pick-album-* 动作，但 chat.tsx

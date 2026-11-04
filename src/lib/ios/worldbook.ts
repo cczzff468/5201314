@@ -27,7 +27,7 @@
  */
 
 import { hasEmoji } from '@/lib/emoji';
-import { promptTextOf } from '@/lib/prompt-entries';
+import { promptGroupText } from '@/lib/prompt-entries';
 import { kvDel, kvGet, kvSet } from './idb-kv';
 
 // ---------------- 类型 ----------------
@@ -545,7 +545,8 @@ export function wbRulesBlock(blocks: WbBlocks): string {
     '3. 世界书与角色人设冲突时，世界观与背景类内容以世界书为准，但人设【禁止事项】（安全与格式红线）始终优先于世界书；',
     '4. 如果当前对话里你们还处于互不相识/刚换新身份的陌生阶段，涉及你们共同经历的世界书设定先不要生效，等关系对上再自然使用，以免穿帮。',
   ].join('\n');
-  return promptTextOf('worldbook-rules', undefined, block) ?? '';
+  // v66：世界书独立成 merged 组（与记忆分开）——组关/组编辑时整块接管，默认零破坏
+  return promptGroupText('worldbook', {}, () => block) ?? '';
 }
 
 // ---------------- 触发匹配与注入 ----------------

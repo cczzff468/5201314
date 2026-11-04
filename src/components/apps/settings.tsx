@@ -132,7 +132,6 @@ import { LocalToast, useLocalToast } from './page-toast';
 import {
   PROMPT_APPS,
   PROMPT_GROUPS,
-  promptAppLabel,
   resolvePromptEntries,
   type PromptAppId,
   type PromptEntry,
@@ -6233,21 +6232,6 @@ function FontPage({ onBack }: { onBack: () => void }) {
 
 // ---------------- 默认预设（内置）· 全局预设管理器（v63） ----------------
 
-/** App 徽章配色（筛选 chips 与卡片标签共用） */
-const PROMPT_APP_TONE: Record<PromptAppId, string> = {
-  global: '#8E8E93',
-  wechat: '#34C759',
-  qq: '#32ADE6',
-  chat: '#34C759',
-  phone: '#FF9500',
-  forum: '#AF52FF',
-  couple: '#FF2D55',
-  offline: '#FF9500',
-  moments: '#34C759',
-  memory: '#007AFF',
-  behavior: '#FF3B30',
-};
-
 /** 论坛条目内容展示（论坛设置面板同源：覆盖优先、默认兜底） */
 function entryContentOf(e: PromptEntry, disabled: Set<string>): string {
   if (e.appId === 'forum') {
@@ -6324,13 +6308,19 @@ function PromptEntriesPage({ onBack }: { onBack: () => void }) {
     showToast(on ? `${g?.title ?? '自定义条目'}已启用，下次发送即生效` : `${g?.title ?? '自定义条目'}已关闭，整块不再注入`);
   };
 
-  /** 组深度 = 首成员当前生效深度；加减时全成员统一拉到同一深度（保持注入顺序稳定） */
+  /** 组深度 = 首成员当前生效深度；加减时全成员统一拉到同一深度（保持注入顺序稳定）。
+   *  v66 修正：深度目标一律取组成员（merged 组此前误用组 id——组 id 不是条目，
+   *  entryMap 永远查不到，深度加减成了不刷新的摆设；启停仍走 groupTargetIds 的组 id/成员） */
+  const groupDepthIds = (gid: string): string[] => {
+    const g = PROMPT_GROUPS.find((x) => x.id === gid);
+    return g ? g.members : customEntries.map((c) => c.id);
+  };
   const groupDepth = (gid: string): number => {
-    const ids = groupTargetIds(gid);
+    const ids = groupDepthIds(gid);
     return entryMap.get(ids[0])?.depth ?? 50;
   };
   const changeGroupDepth = (gid: string, delta: number) => {
-    const ids = groupTargetIds(gid);
+    const ids = groupDepthIds(gid);
     if (ids.length === 0) return;
     const next = Math.max(0, Math.min(999, groupDepth(gid) + delta));
     for (const id of ids) setPromptEntryDepth(id, next);
@@ -6445,8 +6435,6 @@ function PromptEntriesPage({ onBack }: { onBack: () => void }) {
   };
 
   const selCount = selected.size;
-  const editedCount = Object.keys(state.edits).length;
-  const offCount = state.disabled.length;
 
   // 渲染一个 list 组的成员行（内置组与自定义组共用）
   const renderMember = (e: PromptEntry, groupKey: string) => {
@@ -6469,16 +6457,7 @@ function PromptEntriesPage({ onBack }: { onBack: () => void }) {
             aria-expanded={open}
           >
             <ChevronDown className={`h-3.5 w-3.5 shrink-0 text-muted-foreground/70 transition-transform ${open ? 'rotate-180' : ''}`} />
-            <span className="min-w-0 flex-1">
-              <span className="block truncate text-[13px] font-medium">{e.title}</span>
-              {e.desc && <span className="mt-0.5 block truncate text-[10.5px] text-muted-foreground">{e.desc}</span>}
-            </span>
-            <span
-              className="shrink-0 rounded-[5px] px-1.5 py-0.5 text-[9.5px] font-medium text-white"
-              style={{ backgroundColor: PROMPT_APP_TONE[e.appId] ?? '#8E8E93' }}
-            >
-              {promptAppLabel(e.appId)}
-            </span>
+            <span className="min-w-0 flex-1 truncate text-[13px] font-medium">{e.title}</span>
           </button>
           <Switch
             checked={!off}
@@ -6553,10 +6532,6 @@ function PromptEntriesPage({ onBack }: { onBack: () => void }) {
                 </button>
               )}
             </div>
-            <p className="mt-1.5 text-[10px] leading-relaxed text-muted-foreground">
-              {e.appId === 'forum' ? '与 X 论坛抽屉的「提示词」面板同源（编辑写回论坛设置）。' : e.source ? `来源：${e.source}` : ''}
-              修改或关闭后，下一次请求立即生效。
-            </p>
           </div>
         )}
       </div>
@@ -6564,15 +6539,14 @@ function PromptEntriesPage({ onBack }: { onBack: () => void }) {
   };
 
   // 渲染一张模块卡（merged：大文本框；list：成员行列表）
-  const renderGroup = (g: PromptGroup, key: string, memberIds: string[], appTone: string, extraHint: string) => {
+  // v66：去掉全部标签徽章/副标题/提示行/变量 chips——卡内只剩标题、开关、深度与编辑区
+  const renderGroup = (g: PromptGroup, key: string, memberIds: string[]) => {
     const open = expandedGroup === key;
     const on = groupOn(key);
     const gOff = g.kind === 'merged' && disabled.has(g.id);
-    const gEdited = g.kind === 'merged' && typeof state.edits[g.id] === 'string' && !!state.edits[g.id]?.trim();
     const draft = drafts[key];
     const editing = draft !== undefined;
     const groupContent = state.edits[key] || g.content || '';
-    const onCount = memberIds.filter((id) => !disabled.has(id)).length;
     return (
       <div
         key={key}
@@ -6604,30 +6578,13 @@ function PromptEntriesPage({ onBack }: { onBack: () => void }) {
             data-testid={`prompt-group-head-${key}`}
           >
             <ChevronDown className={`h-4 w-4 shrink-0 text-muted-foreground/70 transition-transform ${open ? 'rotate-180' : ''}`} />
-            <span className="min-w-0 flex-1">
-              <span className="flex items-center gap-1.5">
-                <span className="truncate text-[14.5px] font-semibold">{g.title}</span>
-                <span className="shrink-0 rounded-[6px] px-1.5 py-0.5 text-[9.5px] font-medium text-white" style={{ backgroundColor: appTone }}>
-                  {g.kind === 'merged' ? '整块编辑' : `${memberIds.length} 条`}
-                </span>
-                {gEdited && <span className="shrink-0 rounded-[6px] bg-[#AF52FF]/15 px-1.5 py-0.5 text-[9.5px] font-medium text-[#AF52FF]">已自定义</span>}
-              </span>
-              <span className="mt-0.5 block truncate text-[11px] text-muted-foreground">{g.desc}</span>
-            </span>
+            <span className="min-w-0 flex-1 truncate text-[14.5px] font-semibold">{g.title}</span>
           </button>
           <Switch checked={on} onCheckedChange={(v) => toggleGroup(key, v)} aria-label={`启用 ${g.title}`} data-testid={`prompt-group-switch-${key}`} />
         </div>
 
-        {/* 标签行：App / 组深度 */}
-        <div className="flex flex-wrap items-center gap-1.5 px-3 pb-2.5 pl-9">
-          <span className="rounded-[6px] bg-black/[0.06] px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground dark:bg-white/10">
-            {promptAppLabel(g.appId)}
-          </span>
-          {g.kind === 'list' && (
-            <span className="rounded-[6px] bg-black/[0.06] px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground dark:bg-white/10">
-              {onCount}/{memberIds.length} 开启
-            </span>
-          )}
+        {/* 深度行：v66 删掉了 App/条数标签，仅保留组深度调节 */}
+        <div className="flex items-center px-3 pb-2.5 pl-9">
           <span className="ml-auto flex items-center gap-1 text-[10px] text-muted-foreground">
             <span>深度</span>
             <button
@@ -6663,15 +6620,6 @@ function PromptEntriesPage({ onBack }: { onBack: () => void }) {
                   className="min-h-[260px] font-mono text-[11px] leading-relaxed"
                   data-testid={`prompt-text-${key}`}
                 />
-                {g.tokens && g.tokens.length > 0 && (
-                  <div className="mt-2 flex flex-wrap gap-1">
-                    {g.tokens.map((t) => (
-                      <span key={t.token} className="rounded-[6px] bg-[#AF52FF]/10 px-1.5 py-0.5 text-[10px] text-[#AF52FF]" title={t.desc}>
-                        {`{{${t.token}}}`}
-                      </span>
-                    ))}
-                  </div>
-                )}
                 <div className="mt-2 flex items-center gap-2">
                   <button
                     type="button"
@@ -6691,15 +6639,9 @@ function PromptEntriesPage({ onBack }: { onBack: () => void }) {
                     恢复默认
                   </button>
                 </div>
-                <p className="mt-1.5 text-[10px] leading-relaxed text-muted-foreground">
-                  {extraHint}保存后这一整块按你编辑的文本注入；关闭上方开关 = 整块不再注入。变量按请求现场填充，无数据的段落自动省略。
-                </p>
               </>
             ) : (
               <>
-                <p className="mb-2 text-[10px] leading-relaxed text-muted-foreground">
-                  {extraHint}每条对应一个独立场景，逐条开关/编辑/调整深度；组开关批量启停全部成员。
-                </p>
                 <div className="flex flex-col gap-1.5">
                   {memberIds.map((id) => {
                     const e = entryMap.get(id);
@@ -6712,14 +6654,6 @@ function PromptEntriesPage({ onBack }: { onBack: () => void }) {
         )}
       </div>
     );
-  };
-
-  const MERGED_HINT: Record<string, string> = {
-    'persona-core': '人设大模板：开场/名字/身份/资料/性格/风格/背景/关系/禁止事项合为一段。陌生身份、多端互通两块按场景自动切换（不在此模板内）。',
-    'wx-rules': '微信沉浸规则大模板（{{richRules}} 为当前表情包/特殊消息动态规则）。表情包禁用令、动作描写禁用两条按各开关场景自动选用。',
-    'qq-rules': 'QQ 沉浸规则大模板（{{richRules}} 为当前表情包/特殊消息动态规则）。表情包禁用令、动作描写禁用两条按各开关场景自动选用。',
-    'sms-rules': '信息（短信）规则。',
-    'call-rules': '通话规则大模板（{{media}}/{{mediaVerb}}/{{attempt}} 按通话现场填充）。接通问候两分支按拨号方向自动选用。',
   };
 
   return (
@@ -6750,10 +6684,6 @@ function PromptEntriesPage({ onBack }: { onBack: () => void }) {
             <Check className="h-3.5 w-3.5" />
             {selectMode ? '取消多选' : '多选'}
           </button>
-          <span className="ml-auto text-[11px] text-muted-foreground" data-testid="prompt-groups-count">
-            共 {PROMPT_GROUPS.length} 组{editedCount > 0 ? ` · 已自定义 ${editedCount}` : ''}
-            {offCount > 0 ? ` · 已关 ${offCount}` : ''}
-          </span>
         </div>
 
         {/* 多选批量操作条 */}
@@ -6824,7 +6754,7 @@ function PromptEntriesPage({ onBack }: { onBack: () => void }) {
               <Textarea
                 value={addForm.content}
                 onChange={(e) => setAddForm({ ...addForm, content: e.target.value })}
-                placeholder="提示词正文（支持 {{user}}、{{name}}、{{channel}} 等占位符，与内置条目同语法）"
+                placeholder="提示词正文"
                 className="min-h-24 text-[12px]"
                 data-testid="prompt-add-content"
               />
@@ -6847,14 +6777,12 @@ function PromptEntriesPage({ onBack }: { onBack: () => void }) {
 
         {/* 模块卡列表 */}
         <div className="flex flex-col gap-2.5" data-testid="prompt-entries-list">
-          {PROMPT_GROUPS.map((g) => renderGroup(g, g.id, g.members, PROMPT_APP_TONE[g.appId], MERGED_HINT[g.id] ?? ''))}
+          {PROMPT_GROUPS.map((g) => renderGroup(g, g.id, g.members))}
           {customEntries.length > 0 &&
             renderGroup(
-              { id: 'custom', appId: 'global', kind: 'list', title: '自定义条目', desc: '你新增的预设（可删除；按所选 App/Role/深度注入）', members: customEntries.map((c) => c.id) },
+              { id: 'custom', appId: 'global', kind: 'list', title: '自定义条目', desc: '', members: customEntries.map((c) => c.id) },
               'custom',
               customEntries.map((c) => c.id),
-              '#8E8E93',
-              '',
             )}
         </div>
 
@@ -6875,9 +6803,6 @@ function PromptEntriesPage({ onBack }: { onBack: () => void }) {
               全部恢复默认（清空所有开关/编辑/自定义）
             </button>
           </GroupCard>
-          <p className="px-1 pt-2 text-[11px] leading-relaxed text-muted-foreground">
-            预设状态保存在本机浏览器（IndexedDB），并自动同步到服务端内存（电话/记忆/朋友圈等服务端组装提示词的链路同样生效）。
-          </p>
         </div>
       </div>
       <LocalToast msg={toastMsg} />
