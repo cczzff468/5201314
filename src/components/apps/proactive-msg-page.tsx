@@ -856,7 +856,10 @@ export function ProactiveMsgPage({
                 aria-label="焦虑触发阈值"
                 data-testid={`${testPrefix}-proactive-anxiety-threshold`}
                 className="mt-2.5"
-                style={{ '--color-primary': accent, '--color-ring': accent } as CSSProperties}
+                // v53 滑块交互配色（用户要求变绿）：shadcn Slider 的轨道/圆钮用 bg-primary/border-primary；
+                // 本项目 globals.css 是 @theme inline（工具类直接引用底层 --primary/--ring），所以要在
+                // 内联样式里覆盖这两个底层变量（之前覆盖 --color-primary 无效——轨道仍近黑色）
+                style={{ '--primary': accent, '--ring': accent } as CSSProperties}
               />
               {/* 宽限时间（v52：预设 + 自定义面板，时间可自定义） */}
               <p className="mb-2 mt-4 text-[12px] text-black/40 dark:text-white/40">多久没回复开始涨焦虑</p>

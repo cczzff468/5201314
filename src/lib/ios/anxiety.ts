@@ -276,7 +276,7 @@ export function buildAnxietyFireBlock(cid: string): string {
   const s = anxietyOf(cid);
   if (s.level <= 0) return '';
   const un = anxietyUnansweredLabel(s);
-  return `【你此刻的焦虑值】${s.level}/100（${anxietyLabel(s.level)}）。${s.lastUserAt > 0 ? `你已经等了 TA 很久（${un}）。` : ''}${fireBandGuide(s.level)}这一轮消息就由这份焦虑驱动——像真人控制不住那样连着发几条短消息让它真实地透出来，但不要报数字、不要说「焦虑值」这类词。`;
+  return `【你此刻的焦虑值】${s.level}/100（${anxietyLabel(s.level)}）。${s.lastUserAt > 0 ? `你已经等了 TA 很久（${un}）。` : ''}${fireBandGuide(s.level)}这一轮消息就由这份焦虑驱动——像真人控制不住那样连着发几条消息（每条可短可长——短到几个字，长到一大段心里话一口气说完都可以，单条长度没有任何数字限制）让它真实地透出来，但不要报数字、不要说「焦虑值」这类词。`;
 }
 
 /**
