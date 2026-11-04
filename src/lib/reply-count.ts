@@ -10,8 +10,9 @@ import { scopedConvKey } from './ios/accounts';
  *   sms:<storageKey>，天然按角色/App 隔离），localStorage 单键 JSON map 持久化；
  *   切换角色时各 App 在发送现场读取该角色自己的值，互不影响；
  * - buildReplyCountPrompt：追加在角色人设 system 消息之后，约定「min~N 条」的连发区间语义
- *   （能自然拆开就往多了拆，每条哪怕很短；内容不多可以少发，不用硬凑——不凑条数、自然优先；
- *   条与条之间要有递进，不重复、不空消息）——说什么内容完全交给角色人设自由发挥；
+ *   （v55 按用户反馈「话少不要拆开说」重写：话多就往多了拆、目标接近 N 条；话少时合并成
+ *   一条完整消息，绝不为了凑条数把短话拆成几个字的碎片；条与条之间要有递进，不重复不空消息）
+ *   ——说什么内容完全交给角色人设自由发挥；
  * - replyMinTarget：最低条数目标（v54：floor(N×0.8)——设置 5 条 → 4~5 条、10 条 → 8~10 条；
  *   旧版 0.7 偏松，模型实际常只发 1~3 条，按用户反馈「让 AI 多发几条」收紧下限），
  *   至少 2 条）——提示词用「min~max」区间引导；
@@ -24,13 +25,16 @@ import { scopedConvKey } from './ios/accounts';
  *   不与正文挤同一气泡，也不会被语音升级吞掉），与五端 action-desc 渲染同口径；
  * - splitReplySegments：把完整回复按边界切成多条消息文本（单条模式 multi=false 只按标记
  *   切分；多条模式按「标记 + 换行 + 句末标点 + 动作描写」稳定切分，不设硬上限——内容多
- *   就多切几条、内容少就少发，绝不把多句话挤回同一个气泡）；切不出任何非空段时返回 ['']
- *   （调用方沿用各自的空回复兜底文案）；
+ *   就多切几条、内容少就少发，绝不把多句话挤回同一个气泡）；v55 全员碎片合并：切出来的段
+ *   全是 ≤4 字的碎句时并成一条完整消息（「话少不要拆开说」，含标记/动作/结构字符的段不参与）；
+ *   切不出任何非空段时返回 ['']（调用方沿用各自的空回复兜底文案）；
  * - createReplySegmentScanner：流式分段器（聊天流总线使用，「边接收边逐条显示」的核心）——
  *   增量接收原文，每凑齐一条【完整】消息（边界出现、标记闭合）立刻回调 onSegment，由各 App
  *   解析成真实消息排队投递上屏；不设条数上限（回复几条由 AI 生成端决定，切分端每句必切、
  *   绝不把溢出内容堆进最后一条）；连续重复的段直接丢弃；末尾停在未闭合标记里的片段
  *   （祝福语「！」切碎标记）不提前放出，等标记闭合后再扫。
+ *   v55 碎片扣住合并：凑齐的 ≤4 字碎句先扣住不投，下一段也碎则并成一条，到不碎的段/收尾时
+ *   再放行（下游 splitReplySegments 的全员碎片合并同口径接收，流式与整段两路行为一致）。
  *   全程不阻塞读取上游，退出页面后继续接收的逻辑不受影响。
  */
 
@@ -125,7 +129,8 @@ export function saveReplyCount(sessionKey: string, n: number): void {
  * 最低条数目标（v54：floor(N×0.8)，夹在 [2, N]）：设置 5 条 → 至少 4 条、10 条 → 至少 8 条。
  * N=1 是单条模式没有「多条」概念；其余 N 作为 min~N 连发区间提示的下限。
  * 旧版 0.7 配「内容不多就少发」措辞 → 模型常只发 1~3 条（用户反馈），双管齐下收紧：
- * 下限抬高 + 措辞改为「目标接近 N 条、话少也拆开说」。
+ * 下限抬高 + 措辞改为「目标接近 N 条」。v55 按用户最新反馈删掉「话少也拆开说」
+ * （碎片化刷屏招人烦）：区间只在话多时约束目标条数，话少时明确允许合并成一条、宁少勿碎。
  */
 export function replyMinTarget(n: number): number {
   const cap = Math.max(1, Math.floor(n) || 1);
@@ -149,15 +154,15 @@ export function buildReplyCountPrompt(n: number, opts?: { groupMode?: boolean })
     const cap = Math.max(1, Math.min(Math.floor(n) || 1, 5));
     return [
       `【连发短消息·群聊节奏】这是群聊，把你这次想说的话拆成一条一条的短消息，一句一条、连续发出来。`,
-      `本次发 1~${cap} 条：${cap} 条是硬上限；其他群成员也要说话，按群聊节奏来，一两句能说清就发一两条，绝不要一个人连发刷屏。`,
+      `本次发 1~${cap} 条：${cap} 条是硬上限；其他群成员也要说话，按群聊节奏来，一两句能说清就发一两条，绝不要一个人连发刷屏；话特别少时合并成一条完整消息也行，不要发几个字的碎片。`,
       `多条消息之间要有递进：回应 → 补充 → 追问或顺着话题补充，不要原地重复、不要车轱辘话；不允许发空消息凑数。`,
       `每条消息只写一句简短、口语化的话，单独占一行；消息内部不要换行，不要加序号、项目符号或任何分隔标记（方括号系统标记是操作指令，按对应功能块的说明输出，不受这条限制）。`,
     ].join('\n');
   }
   const range = min >= n ? `${n} 条` : `${min}~${n} 条`;
   return [
-    `【连发短消息】本次回复按你的人设，模仿真人在手机上聊天：把想说的话拆成一条一条的短消息，一句一条、连续发出来。`,
-    `本次发 ${range}：像真人那样想到一句就发一句——把话尽量往多了拆，目标是发到接近 ${n} 条；每条哪怕很短（几个字、一个语气词都可以）也远好过把几句话挤成一条长消息。话确实很少时也想办法拆开说（先回应、再补充、再追问或撒个娇），不要动不动就只发一两条。`,
+    `【连发短消息】本次回复模仿真人在手机上聊天：想说的话多时，像真人那样拆成一条一条的短消息，一句一条、连续发出来（本次发 ${range}，话多时目标接近 ${n} 条）。`,
+    `话少时不要硬拆：内容本身就少（一两句就能说完）时，直接合成一条完整消息发出去就好，宁可少发几条，也不要为了凑条数把短话拆成几个字的碎片（「嗯」「好」「在」这种不要各自单独成一条）。`,
     `多条消息之间要有递进：像真人连发那样把话题往前推（回应 → 补充 → 追问或顺着话题补充），不要原地重复、不要车轱辘话。`,
     `每条消息只写一句简短、口语化的话，单独占一行；消息内部不要换行，不要加序号、项目符号或任何分隔标记（方括号系统标记是操作指令，按对应功能块的说明输出，不受这条限制）。`,
     `不允许重复：不要把同一句话或同一个意思换个说法再发一遍；不允许发完全空的消息凑数。`,
@@ -191,6 +196,29 @@ function trimSegs(parts: string[]): string[] {
 /** 连续重复段去重（不重复：模型卡顿/重试时偶尔原样复读上一句，重复气泡没有信息量） */
 function dedupConsecutive(segs: string[]): string[] {
   return segs.filter((s, i) => i === 0 || s !== segs[i - 1]);
+}
+
+// ---------------- v55「话少不要拆开说」：碎片段合并 ----------------
+
+/** 碎片段判定上限（可见字符数，Array.from 计数兼容 emoji）：≤4 字的短句算碎片 */
+const TINY_MAX_CHARS = 4;
+/** 含标记/动作/引号等结构字符的段不参与合并（防把 [红包]、*动作* 与正文黏连破坏解析） */
+const TINY_EXCLUDE_RE = /[\[\]{}()（）【】*「」『』“”"'`]/;
+
+function isTinySegment(s: string): boolean {
+  return s.length > 0 && !TINY_EXCLUDE_RE.test(s) && Array.from(s).length <= TINY_MAX_CHARS;
+}
+
+/** 两个碎片段合并：前段已带句末标点直接拼（「好。」+「嗯。」→「好。嗯。」），否则补一个逗号（「嗯」+「好」→「嗯，好」） */
+function joinTinySegments(a: string, b: string): string {
+  return /[。！？!?～〜]$/.test(a) ? a + b : `${a}，${b}`;
+}
+
+/** 全员碎片 → 合并成一条完整消息：整条回复切出来全是 ≤4 字碎句时并成一个气泡（话少不拆）；
+ *  任一段不是碎片（有长句/动作/标记）则原样返回，不影响正常连发节奏 */
+function mergeTinySegments(segs: string[]): string[] {
+  if (segs.length < 2 || !segs.every(isTinySegment)) return segs;
+  return [segs.reduce((acc, s) => joinTinySegments(acc, s))];
 }
 
 /** 动作与正文贴合处残留的句中停顿逗号（“*想了想*，好吧”的「，」）：从段首/段尾剥掉，省略号保留 */
@@ -235,7 +263,8 @@ export function splitReplySegments(content: string, multi = false): string[] {
     const segs = trimSegs(content.split(MARKER_RE));
     return segs.length > 0 ? segs : [''];
   }
-  const segs = dedupConsecutive(splitMultiSegments(content));
+  // v55：切分后全员碎片合并（「嗯」「好」「在」这种碎句不再各自成条，并成一条完整消息）
+  const segs = mergeTinySegments(dedupConsecutive(splitMultiSegments(content)));
   return segs.length > 0 ? segs : [''];
 }
 
@@ -249,6 +278,8 @@ export function splitReplySegments(content: string, multi = false): string[] {
  * - 空段跳过、连续重复段丢弃（不硬凑、不重复、不空消息）；
  * - 片段末尾停在未闭合标记里（祝福语「生日快乐！」的「！」切碎标记）不提前放出，
  *   游标先越过标记内边界等标记闭合后再重扫；
+ * - v55 碎片扣住：≤4 字碎句先扣住不投，与后续碎句并成一条；碰到不碎的段或流结束时
+ *   才放行（防「嗯」「好」这种碎句逐条刷屏——话少不拆，与 splitReplySegments 同口径）；
  * - finish()：返回剩余未放出的最后一段（通常是收尾一句没带句末标点的裸行；标记换成
  *   换行、去掉末尾半截「&&」后 trim；无剩余或与上一条重复时返回空串，调用方跳过投递）。
  *   各 App 拿到段后还会过一遍 splitReplySegments(..., true) 稳定再切（动作描写独立成条、
@@ -274,6 +305,10 @@ export function createReplySegmentScanner(onSegment: (segment: string) => void):
   let segStart = 0; // 当前未放出片段的起点
   let scanFrom = 0; // 边界搜索游标（≥ segStart；标记未闭合时先越过标记内边界等待闭合）
   let lastEmitted = ''; // 上一条放出的内容（连续重复去重）
+  // v55「话少不要拆开说」：凑齐的 ≤4 字碎句先扣住不投——下一段也碎就并成一条继续扣，
+  // 碰到不碎的段/流结束时才放行。下游各 App 拿到段后还会过一遍 splitReplySegments(..., true)
+  // 稳定再切（把「好。嗯。」切回两句、再被全员碎片合并并回一条），流式与整段两路口径一致。
+  let held = ''; // 扣住待合并的碎片段（空串 = 没有扣住的）
 
   return {
     push(delta) {
@@ -294,22 +329,28 @@ export function createReplySegmentScanner(onSegment: (segment: string) => void):
         // 首尾空白 + 不可见占位字符一并剥掉：只含空白/零宽字符的段按空段处理（不投不占条数），
         // 放出的段内容也不再携带不可见字符（下游各 App 不会再落出空白气泡）
         const trimmed = trimBlank(candidate);
-        if (trimmed.length === 0) {
-          // 空段（连续换行/标记/不可见字符）：跳过不投
-          segStart = end;
-          scanFrom = end;
-          continue;
+        segStart = end;
+        scanFrom = end;
+        if (trimmed.length === 0) continue; // 空段（连续换行/标记/不可见字符）：跳过不投
+        if (trimmed === lastEmitted) continue; // 与上一条放出的重复：丢弃（不重复）
+        if (held) {
+          if (trimmed === held) continue; // 与扣住的碎片重复：丢弃（不重复）
+          if (isTinySegment(trimmed)) {
+            // 下一段也是碎片：并进扣住的段继续等（「嗯」+「好。」→「嗯，好。」）
+            held = joinTinySegments(held, trimmed);
+            continue;
+          }
+          // 碰到不碎的段：放行扣住的合并段，再正常处理本段
+          onSegment(held);
+          lastEmitted = held;
+          held = '';
         }
-        if (trimmed === lastEmitted) {
-          // 连续重复：丢弃不投（不重复）
-          segStart = end;
-          scanFrom = end;
+        if (isTinySegment(trimmed)) {
+          held = trimmed; // 碎片段先扣住：等下一段决定合并还是放行
           continue;
         }
         onSegment(trimmed);
         lastEmitted = trimmed;
-        segStart = end;
-        scanFrom = end;
       }
     },
     finish() {
@@ -317,6 +358,16 @@ export function createReplySegmentScanner(onSegment: (segment: string) => void):
       // 半截「&&」与首尾不可见字符不进气泡；各 App 侧会再按稳定边界细切，这里整段交出
       let tail = trimBlank(full.slice(segStart).replace(MARKER_RE, '\n'));
       tail = trimBlank(tail.replace(HALF_MARKER_RE, ''));
+      if (held) {
+        // 有扣住的碎片：与收尾合并——都碎并成一条完整短消息；收尾不碎用换行隔开整段交出
+        //（下游 splitReplySegments 稳定再切按行分开，全员碎片时又会并回，口径一致）
+        const h = held;
+        held = '';
+        if (!tail) return h;
+        if (tail === h || tail === lastEmitted) return h;
+        if (isTinySegment(tail)) return joinTinySegments(h, tail);
+        return `${h}\n${tail}`;
+      }
       if (!tail || tail === lastEmitted) return '';
       return tail;
     },
