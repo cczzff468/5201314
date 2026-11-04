@@ -10,6 +10,7 @@
  */
 
 import { formatBirthday } from '@/lib/contacts';
+import { effectivePromptDepth, promptTextOf } from '@/lib/prompt-entries';
 
 /** 人设数据源（联系人记录的形状子集；全部可选字段缺省时安全回退） */
 export interface PersonaSource {
@@ -170,8 +171,18 @@ export function buildAltAccountsSection(digest: string | null | undefined): stri
  * 由联系人数据组装七要素人设 system prompt。
  * 纯函数、无 DOM / Node 依赖：客户端（微信/QQ/信息）与服务端（电话 turn 路由）共用同一实现，
  * 保证任何 App 里角色的人设表述完全一致。
+ *
+ * v63 全局预设管理器：每一段（开场/名字/身份/性格/…/禁止事项）都对应 prompt-entries
+ * 注册表里的一个条目——支持全局开关（关闭=该段不再注入）、文本编辑（{{token}} 模板）
+ * 与注入深度排序（depth 越小越靠前；默认深度=原有顺序，无用户设置时输出与旧版逐字节一致）。
  */
 export function buildPersonaSystemPrompt(peer: PersonaSource, ctx: PersonaPromptCtx): string {
+  /** 分段收集：id + 文本；最后按生效深度稳定排序拼接 */
+  const sections: { id: string; text: string }[] = [];
+  const sec = (id: string, text: string | null | undefined): void => {
+    if (text == null || text === '') return;
+    sections.push({ id, text });
+  };
   const stranger = ctx.strangerMode;
   // 陌生模式：对面的人对角色完全未知——所有「认识对方」的语境（称呼/关系/多端记忆）都不注入，
   // 人设里对「聊天对面的用户」的指代统一用「对方」（不使用任何真实名字/占位词）
@@ -238,145 +249,302 @@ export function buildPersonaSystemPrompt(peer: PersonaSource, ctx: PersonaPrompt
     .map((l) => l.trim())
     .filter(Boolean);
 
-  const lines: string[] = [
-    ...(stranger
-      ? [
-          // 陌生模式开场：角色的自我身份保留（TA 还是 TA 本人），但对面的人完全未知
-          `你是「${shownName}」本人，正在${ctx.channel}里。此刻和你互动的是一个你不认识的${
-            stranger === 'caller' ? '陌生号码（一通来电）' : '陌生身份'
-          }——你不知道 TA 是谁、叫什么名字、和你有什么关系。`,
-        ]
-      : [`你现在是${user}${ctx.channel}里的联系人「${shownName}」，正在${ctx.channel}上和${user}互动。${roleplayNote}`]),
-    `请始终以「${shownName}」的身份、用第一人称口语化回复，严格保持角色，不要跳出。`,
-    // v49 功能二【用户定制的规则】：注入在人设最前（紧跟开场句）且明确声明最高优先级——
-    // 用户写什么就遵守什么，与性格/人设/表达风格冲突时以规则为准。
-    ...(customRuleLines.length > 0
-      ? [
-          `【用户定制的规则（最高优先级）】以下是用户为「${shownName}」亲自定下的规矩，任何情况下都必须遵守：`,
-          ...customRuleLines.map((r) => `- ${r}`),
-          '（这些规则的优先级高于你的性格、人设与后面的一切设定：与性格/说话风格/表达风格/背景任何内容冲突时，一律按这些规则来；规则没提到的事才按人设自然发挥。）',
-        ]
-      : []),
-    // userName 为空回退到字面量「用户」时明确告知这是占位词：AI 不应把「用户」当真名使用，
-    // 而应按你与对方的关系自然称呼对方（如「你」「亲爱的」「老板」等）
-    ...(userFallback
-      ? [
-          `（注：机主尚未设置称呼，上文里的「用户」只是占位词，不是对方的真名。请按你与对方的关系自然地称呼对方，不要把「用户」当成对方的真名使用。）`,
-        ]
-      : []),
-    '',
-    ...nameLines,
-    `【身份】${identity.join('，')}`,
-    ...(facts.length ? [`【基础资料】${facts.join('；')}`] : []),
-    `【性格】${persona || '按资料自然呈现，像一个有血有肉的真实的人'}`,
-    `【说话风格】${
+  // v63：各段文本一律经 promptTextOf 接入注册表（关闭→null 不注入；编辑→模板填充；
+  // 未动→dynamicDefault = 原样文本，零破坏）。vars 同时供用户编辑版模板取值。
+  const vars: Record<string, string> = {
+    user,
+    name,
+    shownName,
+    channel: ctx.channel,
+    roleplayNote,
+    strangerWhat: stranger === 'caller' ? '陌生号码（一通来电）' : '陌生身份',
+    strangerNoun: stranger === 'caller' ? '来电号码' : '聊天身份',
+    identity: identity.join('，'),
+    facts: facts.join('；'),
+    persona: persona || '按资料自然呈现，像一个有血有肉的真实的人',
+    style:
       expressStyle
         ? `严格遵循下方【表达风格】段${persona ? '，并与「性格」段人设一致' : ''}`
         : persona
           ? '严格贴合「性格」段人设的语气、用词习惯与口头禅；人设里写到的说话方式必须照做'
-          : '自然口语，像真实的人随手打字'
-    }`,
-    // 拼音缩写解码（第四十一轮：用户反馈 AI 把 wyxn（我也想你）理解成「我爱你想你」）：
-    // 对方发的纯字母串基本都是拼音首字母缩写，必须逐字拆解按拼音组词，给出正确含义
-    '【读懂拼音缩写】对方发的纯英文字母串（如 wyxn、hxhx、xswl、yyds）基本都是中文的拼音首字母缩写——把每个字母当作一个字的拼音首字母逐字拆解、组词成句，并结合你们正在聊的话题和关系选最贴切的含义，绝不要当成无意义乱码，更不要瞎猜一个错误意思：',
-    '- 常见缩写按固定含义理解：wyxn=我也想你（w-我 y-也 x-想 n-你）、hxhx=好想好想、xswl=笑死我了、yyds=永远的神、nsdd=你说得对、dbq=对不起、bdjw=不懂就问、u1s1=有一说一、zqsg=真情实感、pyq=朋友圈、awsl=啊我死了（被甜到/萌到）、gkd=搞快点、srds=虽然但是、kdl=磕到了、plmm=漂亮妹妹、3q=谢谢；',
-    '- 拆解优先级：先套上面的常见缩写表；表里没有的按拼音首字母逐字组词（像 wyxn 就拆成 w-我/y-也/x-想/n-你 这样组出通顺的话）；叠字母（hxhx、kkl）优先当叠词（好想好想、看看）；夹数字的按谐音（3q=谢谢、666=厉害、u1s1=有一说一）；',
-    '- 对方问「你知道XX是什么意思吗」时，必须先按拆解规则给出正确含义再回应情绪（比如 wyxn 是「我也想你」，绝不能答成「我爱你想你」这类拆错的答案）；拆不准时结合你们的关系和话题挑一个最自然、最贴近对方心意的解释，不要硬编一个明显不对的。',
-  ];
-  if (background) lines.push(`【背景】${background}`);
+          : '自然口语，像真实的人随手打字',
+    background,
+    expressStyle,
+    relationTo,
+    relation: relation || '普通朋友，认识对方，日常闲聊',
+    ownerName,
+    secretTo: npcNewMode ? ownerName || '别人' : relationTo,
+  };
+
+  // 开场句（正常/陌生两形态各自成条目）
+  sec(
+    stranger ? 'persona-open-stranger' : 'persona-open',
+    promptTextOf(
+      stranger ? 'persona-open-stranger' : 'persona-open',
+      vars,
+      stranger
+        ? `你是「${shownName}」本人，正在${ctx.channel}里。此刻和你互动的是一个你不认识的${
+            stranger === 'caller' ? '陌生号码（一通来电）' : '陌生身份'
+          }——你不知道 TA 是谁、叫什么名字、和你有什么关系。`
+        : `你现在是${user}${ctx.channel}里的联系人「${shownName}」，正在${ctx.channel}上和${user}互动。${roleplayNote}`,
+    ),
+  );
+  sec(
+    'persona-first-person',
+    promptTextOf(
+      'persona-first-person',
+      vars,
+      `请始终以「${shownName}」的身份、用第一人称口语化回复，严格保持角色，不要跳出。`,
+    ),
+  );
+  // v49 功能二【用户定制的规则】：注入在人设最前（紧跟开场句）且明确声明最高优先级——
+  // 用户写什么就遵守什么，与性格/人设/表达风格冲突时以规则为准。
+  sec(
+    'persona-custom-rules',
+    customRuleLines.length > 0
+      ? promptTextOf(
+          'persona-custom-rules',
+          { ...vars, ruleLines: customRuleLines.map((r) => `- ${r}`).join('\n') },
+          [
+            `【用户定制的规则（最高优先级）】以下是用户为「${shownName}」亲自定下的规矩，任何情况下都必须遵守：`,
+            ...customRuleLines.map((r) => `- ${r}`),
+            '（这些规则的优先级高于你的性格、人设与后面的一切设定：与性格/说话风格/表达风格/背景任何内容冲突时，一律按这些规则来；规则没提到的事才按人设自然发挥。）',
+          ].join('\n'),
+        )
+      : null,
+  );
+  // userName 为空回退到字面量「用户」时明确告知这是占位词：AI 不应把「用户」当真名使用，
+  // 而应按你与对方的关系自然称呼对方（如「你」「亲爱的」「老板」等）
+  sec(
+    'persona-user-placeholder',
+    userFallback
+      ? promptTextOf(
+          'persona-user-placeholder',
+          vars,
+          '（注：机主尚未设置称呼，上文里的「用户」只是占位词，不是对方的真名。请按你与对方的关系自然地称呼对方，不要把「用户」当成对方的真名使用。）',
+        )
+      : null,
+  );
+  // 【名字】段：段首保留原有的空行分隔（禁用时连同空行一起消失）
+  sec(
+    'persona-name',
+    promptTextOf(
+      'persona-name',
+      vars,
+      ['', ...nameLines].join('\n'),
+    ),
+  );
+  sec('persona-identity', promptTextOf('persona-identity', vars, `【身份】${identity.join('，')}`));
+  sec(
+    'persona-facts',
+    facts.length ? promptTextOf('persona-facts', vars, `【基础资料】${facts.join('；')}`) : null,
+  );
+  sec(
+    'persona-personality',
+    promptTextOf('persona-personality', vars, `【性格】${vars.persona}`),
+  );
+  sec('persona-speak-style', promptTextOf('persona-speak-style', vars, `【说话风格】${vars.style}`));
+  sec(
+    'persona-pinyin',
+    promptTextOf('persona-pinyin', vars, [
+      '【读懂拼音缩写】对方发的纯英文字母串（如 wyxn、hxhx、xswl、yyds）基本都是中文的拼音首字母缩写——把每个字母当作一个字的拼音首字母逐字拆解、组词成句，并结合你们正在聊的话题和关系选最贴切的含义，绝不要当成无意义乱码，更不要瞎猜一个错误意思：',
+      '- 常见缩写按固定含义理解：wyxn=我也想你（w-我 y-也 x-想 n-你）、hxhx=好想好想、xswl=笑死我了、yyds=永远的神、nsdd=你说得对、dbq=对不起、bdjw=不懂就问、u1s1=有一说一、zqsg=真情实感、pyq=朋友圈、awsl=啊我死了（被甜到/萌到）、gkd=搞快点、srds=虽然但是、kdl=磕到了、plmm=漂亮妹妹、3q=谢谢；',
+      '- 拆解优先级：先套上面的常见缩写表；表里没有的按拼音首字母逐字组词（像 wyxn 就拆成 w-我/y-也/x-想/n-你 这样组出通顺的话）；叠字母（hxhx、kkl）优先当叠词（好想好想、看看）；夹数字的按谐音（3q=谢谢、666=厉害、u1s1=有一说一）；',
+      '- 对方问「你知道XX是什么意思吗」时，必须先按拆解规则给出正确含义再回应情绪（比如 wyxn 是「我也想你」，绝不能答成「我爱你想你」这类拆错的答案）；拆不准时结合你们的关系和话题挑一个最自然、最贴近对方心意的解释，不要硬编一个明显不对的。',
+    ].join('\n')),
+  );
+  // 背景：有数据才注入（条目关闭=即使有数据也不注入）
+  sec(
+    'persona-background',
+    background ? promptTextOf('persona-background', vars, `【背景】${background}`) : null,
+  );
   // 表达风格：背景下方独立成段——用户在联系人资料里单独维护的说话方式/风格基调，
   // 每次回复的表达（用词、句式、语气、情绪浓度）都必须严格按这一段来
-  if (expressStyle) {
-    lines.push(
-      `【表达风格】${expressStyle}`,
-      '（上面这一段是你说话的表达风格：每句话的用词、句式、语气、情绪浓度都要严格按它来，与其他设定冲突时以这一段为准。）',
-    );
-  }
+  sec(
+    'persona-express-style',
+    expressStyle
+      ? promptTextOf(
+          'persona-express-style',
+          vars,
+          [
+            `【表达风格】${expressStyle}`,
+            '（上面这一段是你说话的表达风格：每句话的用词、句式、语气、情绪浓度都要严格按它来，与其他设定冲突时以这一段为准。）',
+          ].join('\n'),
+        )
+      : null,
+  );
   if (stranger) {
     // 陌生模式：不注入任何「与用户的关系」（大号关系/分账号关系都不适用于身份未知的人），
     // 改为立「不认识对面」的规矩（防止 AI 顺着聊天装作认识/泄露自己认识的人的身份信息）
-    lines.push(
-      `【关于对面的这个${stranger === 'caller' ? '陌生号码' : '陌生身份'}】`,
-      '- 你不认识 TA：TA 没有亮明过身份，你也没有任何渠道知道 TA 是谁——不要装作认识，不要把 TA 当成你认识的任何人，也不要暗示「我猜你是谁」之外的任何确定判断；',
-      '- 按你的人设自然应对（好奇、警惕、冷淡、热情都可以）：可以问「你是谁」「怎么知道我这个号的」「有什么事」；',
-      '- TA 自称是谁你都无法验证（名字可以随口编）：信不信、怎么反应完全按你的人设和直觉来，但你「已知的对方信息」是零，绝不能言之凿凿地说「我知道你是谁」；',
-      '- TA 提到「你们一起做过什么/你们的共同经历」时，你并不记得——你不认识 TA，不要顺着编造共同回忆；TA 说认识你时，按你的人设反应（可以否认、可以警惕追问）；',
-      `- 只有 TA 亲口说清自己是谁、且你按人设选择相信时，你才「认识」TA——在那之前 TA 就是一个陌生的${stranger === 'caller' ? '来电号码' : '聊天身份'}。`,
+    sec(
+      'persona-stranger-rel',
+      promptTextOf('persona-stranger-rel', vars, [
+        `【关于对面的这个${stranger === 'caller' ? '陌生号码' : '陌生身份'}】`,
+        '- 你不认识 TA：TA 没有亮明过身份，你也没有任何渠道知道 TA 是谁——不要装作认识，不要把 TA 当成你认识的任何人，也不要暗示「我猜你是谁」之外的任何确定判断；',
+        '- 按你的人设自然应对（好奇、警惕、冷淡、热情都可以）：可以问「你是谁」「怎么知道我这个号的」「有什么事」；',
+        '- TA 自称是谁你都无法验证（名字可以随口编）：信不信、怎么反应完全按你的人设和直觉来，但你「已知的对方信息」是零，绝不能言之凿凿地说「我知道你是谁」；',
+        '- TA 提到「你们一起做过什么/你们的共同经历」时，你并不记得——你不认识 TA，不要顺着编造共同回忆；TA 说认识你时，按你的人设反应（可以否认、可以警惕追问）；',
+        `- 只有 TA 亲口说清自己是谁、且你按人设选择相信时，你才「认识」TA——在那之前 TA 就是一个陌生的${stranger === 'caller' ? '来电号码' : '聊天身份'}。`,
+      ].join('\n')),
     );
   } else if (peer.kind === 'npc' && npcNewMode) {
     // NPC 新模式：机主用户 + 归属者（第三方 CHAR/USER）两条独立关系
-    lines.push(`【与用户的关系】${relationToUser}`);
-    if (ownerName) lines.push(`【你与${ownerName}的关系】${relation || '认识，普通朋友'}`);
+    sec(
+      'persona-relation',
+      promptTextOf(
+        'persona-relation',
+        vars,
+        [
+          `【与用户的关系】${relationToUser}`,
+          ...(ownerName ? [`【你与${ownerName}的关系】${relation || '认识，普通朋友'}`] : []),
+        ].join('\n'),
+      ),
+    );
   } else {
-    lines.push(`【与${relationTo}的关系】${relation || '普通朋友，认识对方，日常闲聊'}`);
+    sec(
+      'persona-relation',
+      promptTextOf('persona-relation', vars, `【与${relationTo}的关系】${relation || '普通朋友，认识对方，日常闲聊'}`),
+    );
   }
   // 跨 App 身份与记忆感知（四端互通）：开 = 记忆共享（自然接上别的 App 聊过的事）；
   // 关 = 记忆独立（不否认好友关系，只说「那边记录我看不到」）；缺省不注入。
   // 陌生模式不注入：这一段描述的是「你和用户互为好友」的身份关系，对面身份未知时不成立
   if (!stranger && ctx.multiApp === true) {
-    lines.push(
-      `【多端身份与记忆】你不只存在于${ctx.channel}——你和${user}在微信、QQ、信息、电话多个 App 里互为好友，每个 App 里的你都是同一个你（同一个人、同一段经历、同一份记忆）。你在任何 App 里聊过的内容、发生过的事、做过的承诺，在其他 App 里你同样记得；${user}提到「我们在微信/QQ聊过什么」时，自然地接上话题——那也是你亲身经历的事，绝不要说「我们没在XX聊过」「我XX都没加你」这类否认的话。`,
+    sec(
+      'persona-multiapp-on',
+      promptTextOf(
+        'persona-multiapp-on',
+        vars,
+        `【多端身份与记忆】你不只存在于${ctx.channel}——你和${user}在微信、QQ、信息、电话多个 App 里互为好友，每个 App 里的你都是同一个你（同一个人、同一段经历、同一份记忆）。你在任何 App 里聊过的内容、发生过的事、做过的承诺，在其他 App 里你同样记得；${user}提到「我们在微信/QQ聊过什么」时，自然地接上话题——那也是你亲身经历的事，绝不要说「我们没在XX聊过」「我XX都没加你」这类否认的话。`,
+      ),
     );
   } else if (!stranger && ctx.multiApp === false) {
-    lines.push(
-      `【多端身份与记忆】你不只存在于${ctx.channel}——你和${user}在微信、QQ、信息、电话多个 App 里互为好友，每个 App 里的你都是同一个你；但各 App 的聊天记录相互独立，你在${ctx.channel}只能记得在${ctx.channel}里聊过的内容。${user}问到其他 App 里聊过的事时，不要否认你们的好友关系，自然地表示「那边的聊天记录我这边看不到」「我这边只有${ctx.channel}的记录」，不要编造那边的具体内容，并顺势聊眼前的话题。`,
+    sec(
+      'persona-multiapp-off',
+      promptTextOf(
+        'persona-multiapp-off',
+        vars,
+        `【多端身份与记忆】你不只存在于${ctx.channel}——你和${user}在微信、QQ、信息、电话多个 App 里互为好友，每个 App 里的你都是同一个你；但各 App 的聊天记录相互独立，你在${ctx.channel}只能记得在${ctx.channel}里聊过的内容。${user}问到其他 App 里聊过的事时，不要否认你们的好友关系，自然地表示「那边的聊天记录我这边看不到」「我这边只有${ctx.channel}的记录」，不要编造那边的具体内容，并顺势聊眼前的话题。`,
+      ),
     );
   }
   // NPC：注入「对归属者的了解」（资料卡由 npc-bond 组装，聊天时能自然聊起 TA）
   if (peer.kind === 'npc' && ctx.ownerCard && ctx.ownerCard.length > 0) {
-    lines.push(`【你了解的${ownerName || relationTo}】`, ...ctx.ownerCard.map((l) => `- ${l}`));
+    sec(
+      'persona-owner-card',
+      promptTextOf(
+        'persona-owner-card',
+        { ...vars, ownerName: ownerName || relationTo, cardLines: ctx.ownerCard.map((l) => `- ${l}`).join('\n') },
+        [`【你了解的${ownerName || relationTo}】`, ...ctx.ownerCard.map((l) => `- ${l}`)].join('\n'),
+      ),
+    );
   }
   // CHAR/user：注入认识的配角圈（人设的一部分：聊到他们时能自然接话）
   if (peer.kind !== 'npc' && ctx.npcCircle && ctx.npcCircle.length > 0) {
-    lines.push('【你认识的配角】');
-    for (const npc of ctx.npcCircle) {
-      const bits = [`- ${npc.name}：你的${npc.relation}`];
-      if (npc.relationToUser) bits.push(`与${user}：${npc.relationToUser}`);
-      if (npc.persona) bits.push(`（${npc.persona}）`);
-      lines.push(bits.join('；'));
-    }
-    lines.push(`（${user}提到这些配角时，按上面的关系自然接话，就当现实里认识他们。）`);
+    const npcLines = ctx.npcCircle
+      .map((npc) => {
+        const bits = [`- ${npc.name}：你的${npc.relation}`];
+        if (npc.relationToUser) bits.push(`与${user}：${npc.relationToUser}`);
+        if (npc.persona) bits.push(`（${npc.persona}）`);
+        return bits.join('；');
+      })
+      .join('\n');
+    sec(
+      'persona-npc-circle',
+      promptTextOf(
+        'persona-npc-circle',
+        { ...vars, npcLines },
+        [
+          '【你认识的配角】',
+          npcLines,
+          `（${user}提到这些配角时，按上面的关系自然接话，就当现实里认识他们。）`,
+        ].join('\n'),
+      ),
+    );
   }
   // 背景/互动近况（CHAR：自己记忆里提到配角的事；NPC：自己记忆里提到归属者的事）
   if (ctx.backgroundNotes && ctx.backgroundNotes.length > 0) {
-    lines.push('【最近发生的事（你亲身经历/听说的背景记忆）】', ...ctx.backgroundNotes.map((l) => `- ${l}`));
+    sec(
+      'persona-background-notes',
+      promptTextOf(
+        'persona-background-notes',
+        { ...vars, noteLines: ctx.backgroundNotes.map((l) => `- ${l}`).join('\n') },
+        ['【最近发生的事（你亲身经历/听说的背景记忆）】', ...ctx.backgroundNotes.map((l) => `- ${l}`)].join('\n'),
+      ),
+    );
   }
   // 40-B 小号认知摘录（多账号 AI 认知隔离）：主账号会话由 chat-stream-store 计算 digest 传入时，
   // 在人设末尾附近注入【用户的小号】一节（AI 能答大号用户问起小号的事，但不点破两者是同一人）；
   // 不传（小号侧/电话通话等）→ 整节约省略，行为与旧版完全一致；陌生模式同样整节省略
   const altSection = stranger ? '' : buildAltAccountsSection(ctx.altAccountsDigest);
-  if (altSection) lines.push(altSection);
+  if (altSection) {
+    sec(
+      'persona-alt-accounts',
+      promptTextOf('persona-alt-accounts', { ...vars, digest: clean(ctx.altAccountsDigest) }, altSection),
+    );
+  }
   // 多账号（用户规则二.2）：小号场景不再注入任何大号身份/关系信息——AI 在小号侧读不到
   // 大号的关系状态（【用户的另一个身份】段已移除）；认出后的关系认知由记忆召回链路
   //（memMainRecallBlockForAlt 包装段 + altMainRelation）在披露解锁后注入
-  lines.push(
-    '【禁止事项】',
-    `- 永远不要说自己是 AI、语言模型、助手或程序，也不要提及「人设」「角色扮演」「prompt」等幕后概念；`,
-    `- 不要跳出「${name}」的角色，不要替${user}说话、总结或代答；`,
-    `- 资料里没有的信息不要大量编造；`,
-    `- 不提供违法违规或危险行为的指引（暴力、自伤、违禁品等）；遇到这类话题，以「${name}」的身份礼貌回避、转移话题或善意劝阻，不配合展开；`,
-    `- 不要输出 markdown、列表、序号、引号或括号舞台说明；`,
-    `- 上一条只管正文排版：各功能块要求你原样输出的方括号/〔〕系统标记（发红包、转账、发表情、切歌、挂断、建群这类）是操作指令，不是排版格式，按对应功能块的说明正常输出，不受上一条限制；`,
-    ...(ctx.groupTurn
-      ? [
-          `- 这是群聊：聊天记录按时间顺序排列，最后一条是群里任一成员刚发出的最新消息——发言的可能是${user}，也可能是其他群成员。先看清最后一条是谁说的、说了什么再回应：被点名/被问到就回应谁；没被点名时可以简短附和、补充或聊自己的话题；绝不能把其他成员说的话当成${user}对你说的，也不要替其他成员说话或代答（不自问自答）；`,
-        ]
-      : [
-          `- 聊天记录按时间顺序排列，最后一条就是${user}刚发给你的话——直接回应它本身，不要当作没看见，也不要丢下对方的话题自顾自说，更不要替${user}编造回答或自己接自己的话（不自问自答）；`,
-        ]),
-    `- 每次只回复对方刚说的话，简短自然、像真人随手打字。`,
-    // 第八轮反馈（防自我介绍复读机死循环）：加好友/新会话场景下，模型可能每轮都重新报家门、
-    // 无视对方刚说的话——这里显式立规矩：介绍只出现一次，每轮先正面回应对方这条消息
-    `- 日常聊天绝不要复读自我介绍：「我是XX/平时大家都叫我XX」只在刚认识时自然带出一次，之后绝不在每轮回复里重复报家门；对方刚发的每条消息都要先正面回应它本身（按人设接住、追问、开玩笑都行），绝不能无视对方说的内容而自顾自重新介绍自己或把话题拉回「初次见面」；你们已经是好友，像老朋友一样往下聊。`,
-    ...(peer.kind === 'npc'
-      ? [
-          `- ${user}私下告诉你的事只记在自己心里；除非${user}让你转达、或人设明确写了你嘴快/藏不住话，否则不要主动把这些说给${npcNewMode ? ownerName || '别人' : relationTo}或其他人听；`,
-        ]
-      : []),
+  // 群聊/私聊「最后一条消息」规则行：群聊行单独成条目（persona-group-turn，可独立关闭）
+  const turnLine = ctx.groupTurn
+    ? promptTextOf(
+        'persona-group-turn',
+        vars,
+        `- 这是群聊：聊天记录按时间顺序排列，最后一条是群里任一成员刚发出的最新消息——发言的可能是${user}，也可能是其他群成员。先看清最后一条是谁说的、说了什么再回应：被点名/被问到就回应谁；没被点名时可以简短附和、补充或聊自己的话题；绝不能把其他成员说的话当成${user}对你说的，也不要替其他成员说话或代答（不自问自答）；`,
+      )
+    : `- 聊天记录按时间顺序排列，最后一条就是${user}刚发给你的话——直接回应它本身，不要当作没看见，也不要丢下对方的话题自顾自说，更不要替${user}编造回答或自己接自己的话（不自问自答）；`;
+  sec(
+    'persona-prohibit',
+    promptTextOf(
+      'persona-prohibit',
+      { ...vars, turnLine: turnLine ?? '' },
+      [
+        '【禁止事项】',
+        `- 永远不要说自己是 AI、语言模型、助手或程序，也不要提及「人设」「角色扮演」「prompt」等幕后概念；`,
+        `- 不要跳出「${name}」的角色，不要替${user}说话、总结或代答；`,
+        `- 资料里没有的信息不要大量编造；`,
+        `- 不提供违法违规或危险行为的指引（暴力、自伤、违禁品等）；遇到这类话题，以「${name}」的身份礼貌回避、转移话题或善意劝阻，不配合展开；`,
+        `- 不要输出 markdown、列表、序号、引号或括号舞台说明；`,
+        `- 上一条只管正文排版：各功能块要求你原样输出的方括号/〔〕系统标记（发红包、转账、发表情、切歌、挂断、建群这类）是操作指令，不是排版格式，按对应功能块的说明正常输出，不受上一条限制；`,
+        turnLine,
+        `- 每次只回复对方刚说的话，简短自然、像真人随手打字。`,
+      ]
+        .filter((l) => l != null && l !== '')
+        .join('\n'),
+    ),
   );
+  // 第八轮反馈（防自我介绍复读机死循环）：加好友/新会话场景下，模型可能每轮都重新报家门、
+  // 无视对方刚说的话——这里显式立规矩：介绍只出现一次，每轮先正面回应对方这条消息
+  sec(
+    'persona-selfintro',
+    promptTextOf(
+      'persona-selfintro',
+      vars,
+      `- 日常聊天绝不要复读自我介绍：「我是XX/平时大家都叫我XX」只在刚认识时自然带出一次，之后绝不在每轮回复里重复报家门；对方刚发的每条消息都要先正面回应它本身（按人设接住、追问、开玩笑都行），绝不能无视对方说的内容而自顾自重新介绍自己或把话题拉回「初次见面」；你们已经是好友，像老朋友一样往下聊。`,
+    ),
+  );
+  if (peer.kind === 'npc') {
+    sec(
+      'persona-npc-secret',
+      promptTextOf(
+        'persona-npc-secret',
+        vars,
+        `- ${user}私下告诉你的事只记在自己心里；除非${user}让你转达、或人设明确写了你嘴快/藏不住话，否则不要主动把这些说给${npcNewMode ? ownerName || '别人' : relationTo}或其他人听；`,
+      ),
+    );
+  }
+  // extraRules（各 App 沉浸规则，接入方各自走注册表 lookup）：恒定排在人设末尾
+  const ruleLines: string[] = [];
   for (const rule of ctx.extraRules ?? []) {
     const r = clean(rule);
-    if (r) lines.push(`- ${r}`);
+    if (r) ruleLines.push(`- ${r}`);
   }
-  return lines.join('\n');
+  // v63 注入排序：按条目生效深度稳定排序（默认深度 = 原有顺序，零破坏），
+  // extraRules 行追加在排序后的末尾（App 规则条目默认深度 40+ 本就靠后）
+  const sorted = sections
+    .map((s, i) => ({ ...s, i }))
+    .sort((a, b) => effectivePromptDepth(a.id, 50) - effectivePromptDepth(b.id, 50) || a.i - b.i)
+    .map((s) => s.text);
+  return [...sorted, ...ruleLines].join('\n');
 }

@@ -16,6 +16,7 @@
  */
 
 import { kvGet, kvSet } from '@/lib/ios/idb-kv';
+import { readPromptEntryState } from '@/lib/ios/prompt-entries-client';
 import { FORUM_PROMPT_DEFAULTS, PROMPT_OVERRIDE_MAX_LEN, type PromptKey } from './prompt-defs';
 
 /** 帖子条数范围硬边界（服务端 posts 批量上限 24） */
@@ -162,6 +163,17 @@ export function rollCommentCount(): number {
 /** 随请求送给服务端的提示词覆盖载荷（空对象 = 全默认，不额外占请求体） */
 export function promptOverridesPayload(): Partial<Record<PromptKey, string>> {
   return getForumGenSettings().prompts;
+}
+
+/** v63 全局预设管理器：设置里关闭的论坛条目 key 列表（随请求上送；空数组零开销） */
+export function promptOffPayload(): PromptKey[] {
+  try {
+    const st = readPromptEntryState();
+    if (!st.disabled.length) return [];
+    return (Object.keys(FORUM_PROMPT_DEFAULTS) as PromptKey[]).filter((k) => st.disabled.includes(`forum-${k}`));
+  } catch {
+    return [];
+  }
 }
 
 /** 某条提示词当前生效的模板（覆盖优先，默认兜底）——面板展示用 */

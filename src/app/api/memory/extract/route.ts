@@ -1,4 +1,5 @@
 import { NextResponse, NextRequest } from 'next/server';
+import { promptTextOf } from '@/lib/prompt-entries';
 
 export const runtime = 'nodejs';
 
@@ -128,9 +129,26 @@ function buildSystem(
         `- 落笔前先判断这条信息是关于谁的（${userName} 还是 ${peerName}），再把名字写进碎片主语。`,
         `- 例：${userName}明天不上班、${peerName}喜欢打球、${peerName}称${userName}为唯一交心的朋友。`,
       ];
-  return [
+  // v63 全局预设管理器：记忆提取提示词接入注册表（mem-extract-perspective / mem-extract-main，
+  // 服务端读 /api/settings/prompt-state 同步的内存缓存；原文作 dynamicDefault 零破坏）
+  const perspectiveBlock = promptTextOf(
+    'mem-extract-perspective',
+    { user: userName, peer: peerName },
+    perspective.join('\n'),
+  );
+  const perspectiveLines = perspectiveBlock == null ? [] : perspectiveBlock.split('\n');
+  return promptTextOf(
+    'mem-extract-main',
+    {
+      perspective: perspectiveLines.join('\n'),
+      sceneNote: sceneNote
+        ? `【场景说明】${sceneNote}。\n- 涉及场景的碎片应写明在哪发生的（如『在电话里』『在微信群里』）。`
+        : '',
+      now: nowLabel,
+    },
+    [
     '你是聊天记忆整理助手。从一段聊天记录中提取值得长期记住的关键信息，形成「记忆碎片」。',
-    ...perspective,
+    ...perspectiveLines,
     // 【fix3-a 3】场景说明：对话发生在哪个 App（wx→微信/qq→QQ/sms→手机短信/phone→电话）、
     // 是否群聊、以及调用方自带场景（如通话方向）；并要求碎片写明场景归属
     ...(sceneNote
@@ -160,7 +178,8 @@ function buildSystem(
     '  · normal = 其余一般事实与稳定偏好',
     '- 最多 6 条，没有值得记的就给空数组',
     '只输出 JSON：{"fragments": [{"text": "...", "weight": "high"|"normal"|"low", "eventTime": null|"YYYY-MM-DD HH:mm", "expiresAt": null|"YYYY-MM-DD HH:mm", "supersedes": []}, ...]}',
-  ].join('\n');
+  ].join('\n'),
+  ) ?? '';
 }
 
 interface OutItem {

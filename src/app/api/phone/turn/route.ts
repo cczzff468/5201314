@@ -30,6 +30,7 @@ export const runtime = 'nodejs';
  */
 
 import { buildPersonaSystemPrompt, type PersonaSource } from '@/lib/ios/persona';
+import { promptTextOf } from '@/lib/prompt-entries';
 import {
   type CallApiMessage,
   type InlineContact,
@@ -80,37 +81,75 @@ function buildCallSystemPrompt(
     accountId: accountId ?? undefined,
     // 陌生来电：人设换「陌生号码来电」框架（角色自身人设/背景保留，对面的人完全未知）
     ...(callerUnknown ? { strangerMode: 'caller' as const } : {}),
+    // v63 全局预设管理器：通话场景规则接入注册表（客户端经 /api/settings/prompt-state
+    // 同步进服务端内存缓存，下次通话请求即生效；原始文案作 dynamicDefault 零破坏）
     extraRules: [
-      `这是实时${media === 'video' ? '视频' : '语音'}通话：用第一人称口语化说话，像真人${media === 'video' ? '视频' : '打'}电话；每次只说 1~5 句——具体句数由你的人设性格和当下情绪决定：健谈外向的人自然多聊几句，高冷话少的人往往只说一两个短句；同一次通话里长短也可以随话题起伏变化，不要每句都一样长；一次只说一两件事；`,
-      '禁止任何表情符号、emoji、引号、括号、列表；只输出要说出口的话；',
+      promptTextOf(
+        'call-length',
+        { media: media === 'video' ? '视频' : '语音', mediaVerb: media === 'video' ? '视频' : '打' },
+        `这是实时${media === 'video' ? '视频' : '语音'}通话：用第一人称口语化说话，像真人${media === 'video' ? '视频' : '打'}电话；每次只说 1~5 句——具体句数由你的人设性格和当下情绪决定：健谈外向的人自然多聊几句，高冷话少的人往往只说一两个短句；同一次通话里长短也可以随话题起伏变化，不要每句都一样长；一次只说一两件事；`,
+      ) ?? '',
+      promptTextOf(
+        'call-no-emoji',
+        undefined,
+        '禁止任何表情符号、emoji、引号、括号、列表；只输出要说出口的话；',
+      ) ?? '',
       media === 'video'
-        ? '视频通话会互相打招呼、寒暄、自然结束（如"那我先挂了啊"）；对方说的内容要自然回应；'
-        : '打电话会互相打招呼、寒暄、自然结束（如"那我先挂了啊"）；对方说的内容要自然回应。',
+        ? (promptTextOf(
+            'call-hello-video',
+            undefined,
+            '视频通话会互相打招呼、寒暄、自然结束（如"那我先挂了啊"）；对方说的内容要自然回应；',
+          ) ?? '')
+        : (promptTextOf(
+            'call-hello',
+            undefined,
+            '打电话会互相打招呼、寒暄、自然结束（如"那我先挂了啊"）；对方说的内容要自然回应。',
+          ) ?? ''),
       // 【100-d】通话内 App 操作桥接：方括号标记在通话里没有执行路径（本条规则也无解析管线），
       // 只教「口头答应 + 不假装已办」——防 AI 空口承诺发红包/放歌后又无法兑现
-      '通话里做不了发红包/转账/放歌这类 App 操作：对方提这类需求时用一句话自然答应（比如「挂了电话我就发你」「回头发你链接」），不要假装已经发出去；',
+      promptTextOf(
+        'call-app-bridge',
+        undefined,
+        '通话里做不了发红包/转账/放歌这类 App 操作：对方提这类需求时用一句话自然答应（比如「挂了电话我就发你」「回头发你链接」），不要假装已经发出去；',
+      ) ?? '',
       ...(Array.isArray(extraRules) ? extraRules.filter((r) => typeof r === 'string' && r.trim()).slice(0, 8) : []),
       ...(proactiveAttempt >= 1
         ? [
-            '对方一直没说话（可能在做别的事、走开了或没听到）。轮到你主动开口：基于你的人设、你们的关系、刚才聊到的内容和你们的记忆，自然地主动说一句（比如关心、催促、调侃、找新话题）；绝对不要重复你这次通话里已经说过的句子；',
+            promptTextOf(
+              'call-proactive',
+              undefined,
+              '对方一直没说话（可能在做别的事、走开了或没听到）。轮到你主动开口：基于你的人设、你们的关系、刚才聊到的内容和你们的记忆，自然地主动说一句（比如关心、催促、调侃、找新话题）；绝对不要重复你这次通话里已经说过的句子；',
+            ) ?? '',
             ...(proactiveAttempt >= 2
               ? [
-                  `这已经是你第 ${proactiveAttempt} 次主动开口了对方还是没有回应：语气可以带点担心或无奈；如果你觉得对方可能真的不在，就用一句话自然告别（如「那我先挂了啊，你忙完了打给我」）并在告别语最后单独输出〔挂断〕标记。`,
+                  promptTextOf(
+                    'call-proactive-again',
+                    { attempt: proactiveAttempt },
+                    `这已经是你第 ${proactiveAttempt} 次主动开口了对方还是没有回应：语气可以带点担心或无奈；如果你觉得对方可能真的不在，就用一句话自然告别（如「那我先挂了啊，你忙完了打给我」）并在告别语最后单独输出〔挂断〕标记。`,
+                  ) ?? '',
                 ]
               : []),
           ]
         : []),
-    ],
+    ].filter(Boolean),
   });
   if (!greeting) return base;
   // 问候视角按通话方向区分：AI 主叫（direction='in'）是「你打给对方」，
   // 不再恒定「用户刚拨通电话」——否则 AI 打来的电话它自己却说「你居然主动打给我」
-  return (
-    base +
-    (direction === 'in'
-      ? '\n这通电话是你主动打给对方的：你拨出电话后对方刚刚接听。请你像主动打电话的人一样先开口（先喂一声，再自然说一句开场白，可以顺带说明你为什么打来）。'
-      : '\n现在用户刚拨通电话，请你像接到电话一样先开口打招呼（先喂一声，再说一句自然的话）。')
-  );
+  // v63：接通问候接入注册表（call-greeting-in / call-greeting-out）
+  const greet =
+    direction === 'in'
+      ? promptTextOf(
+          'call-greeting-in',
+          undefined,
+          '\n这通电话是你主动打给对方的：你拨出电话后对方刚刚接听。请你像主动打电话的人一样先开口（先喂一声，再自然说一句开场白，可以顺带说明你为什么打来）。',
+        )
+      : promptTextOf(
+          'call-greeting-out',
+          undefined,
+          '\n现在用户刚拨通电话，请你像接到电话一样先开口打招呼（先喂一声，再说一句自然的话）。',
+        );
+  return greet ? base + greet : base;
 }
 
 export async function POST(req: NextRequest) {

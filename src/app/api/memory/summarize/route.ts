@@ -1,4 +1,5 @@
 import { NextResponse, NextRequest } from 'next/server';
+import { promptTextOf } from '@/lib/prompt-entries';
 
 export const runtime = 'nodejs';
 
@@ -50,19 +51,38 @@ const SUMMARY_ATTRIB_RULES = [
 ];
 
 function buildSystem(level: 'core' | 'long', userName: string, peerName: string, participants: string[] = []): string {
+  // v63 全局预设管理器：记忆总结提示词接入注册表（mem-summarize-long / mem-summarize-core /
+  // mem-summarize-attrib，服务端读 /api/settings/prompt-state 内存缓存；原文作 dynamicDefault 零破坏）
+  const attribBlock = promptTextOf('mem-summarize-attrib', undefined, SUMMARY_ATTRIB_RULES.join('\n'));
+  const attribLines = attribBlock == null ? [] : attribBlock.split('\n');
   if (level === 'long') {
-    return [
-      '你是记忆总结助手。把多条「核心记忆」浓缩成一条「长期记忆」（最稳定的人物画像）。',
-      ...perspectiveRules(userName, peerName, participants),
-      '要求：',
-      '- 一段话，120 字以内，只保留长期稳定的事实、偏好、承诺与关系本质，省略已经过时的临时细节',
-      '- 信息冲突时以更晚的核心记忆为准；禁止推测和编造',
-      '- 语言自然、第三人称叙述，不要罗列条目',
-      ...SUMMARY_ATTRIB_RULES,
-      '只输出 JSON：{"summary": "..."}',
-    ].join('\n');
+    return (
+      promptTextOf(
+        'mem-summarize-long',
+        {
+          perspective: perspectiveRules(userName, peerName, participants).join('\n'),
+          attrib: attribLines.join('\n'),
+        },
+        [
+          '你是记忆总结助手。把多条「核心记忆」浓缩成一条「长期记忆」（最稳定的人物画像）。',
+          ...perspectiveRules(userName, peerName, participants),
+          '要求：',
+          '- 一段话，120 字以内，只保留长期稳定的事实、偏好、承诺与关系本质，省略已经过时的临时细节',
+          '- 信息冲突时以更晚的核心记忆为准；禁止推测和编造',
+          '- 语言自然、第三人称叙述，不要罗列条目',
+          ...attribLines,
+          '只输出 JSON：{"summary": "..."}',
+        ].join('\n'),
+      ) ?? ''
+    );
   }
-  return [
+  return promptTextOf(
+    'mem-summarize-core',
+    {
+      perspective: perspectiveRules(userName, peerName, participants).join('\n'),
+      attrib: attribLines.join('\n'),
+    },
+    [
     // 【fix3-a 1】core 分支此前丢了 participants（long 分支已传）：群来源碎片被强制按二人视角
     // 浓缩，其他成员的事被改成用户/角色的事（归属坍塌）；有 participants 时开头文案同步改为群聊口径
     participants.length
@@ -73,9 +93,10 @@ function buildSystem(level: 'core' | 'long', userName: string, peerName: string,
     '- 一段话，80 字以内，覆盖最重要的长期事实、偏好、承诺与关系进展',
     '- 信息冲突时以更晚的碎片为准；禁止推测和编造',
     '- 语言自然、第三人称叙述，不要罗列条目',
-    ...SUMMARY_ATTRIB_RULES,
+    ...attribLines,
     '只输出 JSON：{"summary": "..."}',
-  ].join('\n');
+  ].join('\n'),
+  ) ?? '';
 }
 
 export async function POST(req: NextRequest) {

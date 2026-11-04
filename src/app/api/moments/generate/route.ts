@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { promptTextOf } from '@/lib/prompt-entries';
 
 export const runtime = 'nodejs';
 
@@ -207,6 +208,19 @@ export async function POST(req: Request) {
     .join('，');
   const nickname = s(peerRaw.nickname, 30);
 
+  // v63 全局预设管理器：动态「硬性要求」块接入注册表（moments-identity；关闭=不注入；原文零破坏）
+  const hardBlock = promptTextOf(
+    'moments-identity',
+    { name },
+    [
+    '【硬性要求】',
+    `- 你就是「${name}」本人，绝不能说自己是 AI、语言模型、助手或程序，也不能提到系统、提示词、设定、生成等幕后概念；`,
+    '- 内容、语气、用词、口头禅都必须严格贴合你的人设（不同的人要有明显不同的风格）；',
+    '- 你是活人不是客服：说话可以懒散、可以带情绪、可以调侃甚至不客气，绝不能输出万能祝福、夸奖模板或官方客套；',
+    '- 只输出正文本身：不要 markdown、不要标题、不要引号包裹、不要解释、不要一串话题标签、不要@任何人；',
+    '- 像真人随手发的，不要写成作文或公告。',
+    ].join('\n'),
+  );
   const sys: string[] = [
     `你是「${name}」${nickname && nickname !== name ? `（${label}昵称显示为「${nickname}」）` : ''}，是${userName}的好友${relation ? `（你们的关系：${relation}）` : ''}。`,
     facts ? `【资料】${facts}` : '',
@@ -219,12 +233,7 @@ export async function POST(req: Request) {
           ...customRules.split(/\n+/).map((l) => l.trim()).filter(Boolean).map((l) => `- ${l}`),
         ]
       : []),
-    '【硬性要求】',
-    `- 你就是「${name}」本人，绝不能说自己是 AI、语言模型、助手或程序，也不能提到系统、提示词、设定、生成等幕后概念；`,
-    '- 内容、语气、用词、口头禅都必须严格贴合你的人设（不同的人要有明显不同的风格）；',
-    '- 你是活人不是客服：说话可以懒散、可以带情绪、可以调侃甚至不客气，绝不能输出万能祝福、夸奖模板或官方客套；',
-    '- 只输出正文本身：不要 markdown、不要标题、不要引号包裹、不要解释、不要一串话题标签、不要@任何人；',
-    '- 像真人随手发的，不要写成作文或公告。',
+    ...(hardBlock ? hardBlock.split('\n') : []),
   ].filter(Boolean);
 
   // ---- 素材段 ----
@@ -263,7 +272,9 @@ export async function POST(req: Request) {
 - **非中文语言译文输出格式**：非中文语言，正文必须使用"原文|对应的简体中文译文"的格式输出，必须有|分割符号。
 - **朋友圈正文双语补充**：如果朋友圈正文、评论正文或回复正文使用非中文，必须在同一段正文里写成"完整外文原文|完整简体中文译文"。
 - **照片双语规则**：照片标签（[照片:使用参考图:描述] / [照片:不使用参考图:描述] / [图片:描述]）的标签结构保持原样不动，且标签内的描述只用中文书写，不做双语、不要中英混写（描述会直接用作生图提示词，混入外文既降低出图质量，也会把标签顶超长导致识别失败）。`;
-  const bilingualPrompt = s(body.bilingualPrompt, 1200) || DEFAULT_BILINGUAL_PROMPT;
+  // v63：moments-bilingual（关闭=不注入双语规则；原文零破坏）
+  const bilingualPrompt =
+    s(body.bilingualPrompt, 1200) || (promptTextOf('moments-bilingual', undefined, DEFAULT_BILINGUAL_PROMPT) ?? '');
 
   const user: string[] = [
     // 时间感知（G）：post/comment/reply/repost 四个分支通用，放在 user prompt 开头附近，
@@ -271,12 +282,22 @@ export async function POST(req: Request) {
     bjTimeLine(),
   ];
   if (kind === 'post') {
-    user.push(`请以「${name}」的口吻，现在发一条${label}动态。`);
-    user.push('- 第一人称、口语化，20~120 字；禁止使用任何 emoji 或表情符号（如 😀😂🎉✨🔥👍❤☀ 之类一律不用）；正文是纯文字（仅当下方开放配图协议时，允许在末尾带一个配图标签）；');
-    user.push('- 内容是你自己的近况、心情、见闻或想法，要贴合你的身份、职业和生活；');
-    user.push('- 这是你自己在发动态，不是去评论别人的动态、也不是回复谁的消息；');
-    if (chat.length > 0) user.push('- 可以自然融入你们最近的相处与共同话题（下方素材），但绝不能逐字复述聊天记录，也不要写「你说过…」这种引用句式；');
-    user.push(`- 这是发在动态广场的公开内容，不是发给某人的私聊，不要直接对${userName}说心里话式的称呼。`);
+    // v63 全局预设管理器：发文规则接入注册表（moments-post-rule；原文零破坏）
+    const postRuleBlock =
+      promptTextOf(
+        'moments-post-rule',
+        { name, label, user: userName },
+        [
+    `请以「${name}」的口吻，现在发一条${label}动态。`,
+    '- 第一人称、口语化，20~120 字；禁止使用任何 emoji 或表情符号（如 😀😂🎉✨🔥👍❤☀ 之类一律不用）；正文是纯文字（仅当下方开放配图协议时，允许在末尾带一个配图标签）；',
+    '- 内容是你自己的近况、心情、见闻或想法，要贴合你的身份、职业和生活；',
+    '- 这是你自己在发动态，不是去评论别人的动态、也不是回复谁的消息；',
+    ...(chat.length > 0 ? ['- 可以自然融入你们最近的相处与共同话题（下方素材），但绝不能逐字复述聊天记录，也不要写「你说过…」这种引用句式；'] : []),
+    `- 这是发在动态广场的公开内容，不是发给某人的私聊，不要直接对${userName}说心里话式的称呼。`,
+        ].join('\n'),
+      ) ?? '';
+    if (postRuleBlock) user.push(...postRuleBlock.split('\n'));
+
     // 配图协议（按次随机，需求「AI 发朋友圈不要每条都带文字图片」）：本次请求先掷点决定是否开放配图——
     // 约 6 成动态完全不教配图协议并明令禁止输出图片标签（模型看不到协议就不会配图，比口头节制可靠得多），
     // 其余动态开放协议、由模型按内容决定配不配（协议内含节制约束）。前端引擎只在剥出标签时才走生图。

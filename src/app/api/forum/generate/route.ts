@@ -113,7 +113,7 @@ import { commentAnchored, extractTopicWords, isBannedFiller, isFlamePost, isTend
 // 导入导致服务端调 stripImgPh() 抛客户端边界错误，评论三分支静默崩掉）
 import { IMG_PLACEHOLDER, stripImgPh } from '@/lib/forum/imgph';
 // v34 提示词面板：抽屉可查看/编辑全部生成提示词，覆盖随请求带到服务端，修改后立即生效
-import { FORUM_PROMPT_DEFAULTS, fillPromptTemplate, readPromptOverrides, type PromptKey } from '@/lib/forum/prompt-defs';
+import { FORUM_PROMPT_DEFAULTS, fillPromptTemplate, readPromptOff, readPromptOverrides, type PromptKey } from '@/lib/forum/prompt-defs';
 // 【多世界观】世界观背景/标签 + 用户自定义 AI 规则（拼接在 System Prompt 最前端，
 // 最高优先级）+ 矩阵 NPC 身份渲染——engine.callApi 每次都附带，保存即生效
 import { aiRulesFront, readAiRules, readWorldviewPayload, worldviewBlock } from '@/lib/forum/worldview';
@@ -122,10 +122,12 @@ import { aiRulesFront, readAiRules, readWorldviewPayload, worldviewBlock } from 
  *  未覆盖/空串 → 用默认模板（prompt-defs.ts 内与旧版逐字一致）；
  *  模板里的 {{token}} 占位符按调用现场真实值填充，用户没写的占位符保持字面。 */
 function sysPrompt(
-  ov: Partial<Record<PromptKey, string>>,
+  ov: Partial<Record<PromptKey, string>> & { __off?: Set<PromptKey> },
   key: PromptKey,
   vals: Record<string, string | number>,
 ): string {
+  // v63 全局预设管理器：条目在设置里被关闭 → 该条提示词不再注入（front 前置块不受影响）
+  if (ov.__off?.has(key)) return '';
   return fillPromptTemplate(ov[key] ?? FORUM_PROMPT_DEFAULTS[key], vals);
 }
 
@@ -644,7 +646,10 @@ export async function POST(req: Request) {
     if (config && config.temperature > 0.7) config.temperature = 0.7;
     const kind = typeof body.kind === 'string' ? body.kind : '';
     // v34 提示词面板：客户端随请求送来的提示词覆盖（未知 key 忽略；空串视为未覆盖）
-    const promptOv = readPromptOverrides(body.prompts);
+    const promptOv = Object.assign(readPromptOverrides(body.prompts), {
+      // v63：全局预设管理器关闭的论坛条目（engine 每次随请求上送）
+      __off: readPromptOff(body.promptOff),
+    });
     // 【多世界观】世界观背景 + 用户自定义 AI 规则：规则块拼在 System Prompt 最前端
     //（最高优先级，凌驾于模板之上），世界观背景紧随其后——所有内容生成分支
     //（names 起名除外）共用；两块都为空时零开销（经典模式完全不变）

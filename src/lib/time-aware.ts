@@ -17,6 +17,7 @@
  */
 
 import { solarToLunar } from './ios/lunar';
+import { promptTextOf } from '@/lib/prompt-entries';
 import { scopedConvKey } from './ios/accounts';
 
 const STORE_KEY = 'chat-time-aware';
@@ -303,9 +304,15 @@ export function buildTimeAwareBlock(opts: TimeAwareOptions = {}): string {
   // 性能（token 精简）：月份天数表/日期运算规则段删除——月份天数是模型常识，
   // 当前日期已注入后 LLM 可自行推算，原先每轮固定多带 ~300 字符
 
-  return [
+  // v63 全局预设管理器：时间感知块接入注册表（time-aware-block，可开关/可编辑；原文零破坏）
+  const nowLine = `当前时间：${t.year}年${t.month}月${t.day}日 星期${t.week} ${hh}:${mm}:${ss}（北京时间，UTC+8）。${todayLine}${gap}。当前季节是${getSeason(t.month)}。`;
+  return (
+    promptTextOf(
+      'time-aware-block',
+      { nowLine, region: regionLine, festivalTable: festivalTableTextOfYear(t.year) },
+      [
     '【时间感知】（内部参考：以下时间信息只用于你内部辅助判断，绝对禁止把时间戳卡片作为消息输出，不要机械复述时间，也不要在每条回复里硬提时间）',
-    `当前时间：${t.year}年${t.month}月${t.day}日 星期${t.week} ${hh}:${mm}:${ss}（北京时间，UTC+8）。${todayLine}${gap}。当前季节是${getSeason(t.month)}。`,
+    nowLine,
     '（若你的人设住在国外，按TA所在时区理解日期与作息：问候、节日、饭点按当地时间。）',
     '【事件时长感知规则】',
     '角色在提及正在进行某项活动时，必须意识到该活动需要消耗真实时间。对照上下文里「距离上次聊天」显示的跨度，按常识判断该事件是否已完成：隔了一夜、过了饭点、隔了工作日这类跨度，很多事已经自然完成并可以往下聊；只隔了片刻则可能仍在进行中。跨度只需按常识大致把握（一夜/一顿饭/一个工作日的量级），不要凭空精确计算过去了多少分钟；角色在说出任何事件耗时之前，必须先自行验证该时长是否符合现实常识。',
@@ -318,5 +325,7 @@ export function buildTimeAwareBlock(opts: TimeAwareOptions = {}): string {
     `【节日对照表（${t.year}年，公历）】`,
     festivalTableTextOfYear(t.year),
     '请结合以上时间信息自然回复，让回复与真实的时间流逝、事件时长相符。',
-  ].join('\n');
+  ].join('\n'),
+    ) ?? ''
+  );
 }

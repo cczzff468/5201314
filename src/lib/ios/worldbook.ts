@@ -27,6 +27,7 @@
  */
 
 import { hasEmoji } from '@/lib/emoji';
+import { promptTextOf } from '@/lib/prompt-entries';
 import { kvDel, kvGet, kvSet } from './idb-kv';
 
 // ---------------- 类型 ----------------
@@ -520,7 +521,8 @@ export function hasWbContent(blocks: WbBlocks): boolean {
  */
 export function wbRulesBlock(blocks: WbBlocks): string {
   if (!hasWbContent(blocks)) return '';
-  return [
+  // v63 全局预设管理器：世界书规则块接入注册表（worldbook-rules；原文零破坏）
+  const block = [
     '【世界设定使用规则】',
     '对话中【世界设定开始】与【世界设定结束】标记之间的内容是本次对话的世界设定，使用时必须遵守以下规则：',
     '1. 以上是世界设定，请根据这些设定理解当前世界观、角色背景和关系；',
@@ -543,6 +545,7 @@ export function wbRulesBlock(blocks: WbBlocks): string {
     '3. 世界书与角色人设冲突时，世界观与背景类内容以世界书为准，但人设【禁止事项】（安全与格式红线）始终优先于世界书；',
     '4. 如果当前对话里你们还处于互不相识/刚换新身份的陌生阶段，涉及你们共同经历的世界书设定先不要生效，等关系对上再自然使用，以免穿帮。',
   ].join('\n');
+  return promptTextOf('worldbook-rules', undefined, block) ?? '';
 }
 
 // ---------------- 触发匹配与注入 ----------------

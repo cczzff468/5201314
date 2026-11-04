@@ -52,6 +52,7 @@ import {
   type ChatPayloadMessage,
 } from '@/lib/chat-stream-store';
 import { buildPersonaSystemPrompt } from '@/lib/ios/persona';
+import { promptRule } from '@/lib/prompt-entries';
 import { addressNameOf } from '@/lib/contacts';
 import { buildNpcPromptExtra, type NpcPromptExtra } from '@/lib/ios/npc-bond';
 import { getReplyCount, saveReplyCount, buildReplyCountPrompt, splitReplySegments } from '@/lib/reply-count';
@@ -605,7 +606,11 @@ function buildPersonaPrompt(c: ContactRecord, ownerName: string | null, multiApp
     // 跨 App 身份感知：互通开关（打开会话时现场读取）；陌生身份模式由人设内部忽略用户称呼/关系/多端段
     multiApp,
     // C6：语音频率非 off 时告知「文字可能以语音条送达」（与微信/QQ 三端同口径）
-    extraRules: getAiVoiceFreq(`sms:${c.id}`) !== 'off' || getAiVoiceFreq(`wx:${c.id}`) !== 'off' ? [SMS_AI_VOICE_DELIVERY_RULE] : [],
+    // v63：接入全局预设管理器（sms-ai-voice 可开关/可编辑）
+    extraRules:
+      getAiVoiceFreq(`sms:${c.id}`) !== 'off' || getAiVoiceFreq(`wx:${c.id}`) !== 'off'
+        ? [promptRule('sms-ai-voice', SMS_AI_VOICE_DELIVERY_RULE) ?? '']
+        : [],
     ...(strangerText ? { strangerMode: 'text' as const } : {}),
     ...npcExtra,
   });
@@ -1950,8 +1955,8 @@ function ChatView({
     // 拼在 system 真正的最末尾（条数指令之后）：最新指令最受模型关注，短回复场景也不跳过思考块
     const sysContent = baseSys
       ? replyCount > 1
-        ? `${baseSys}\n\n${buildReplyCountPrompt(replyCount)}\n\n${DEEP_THINK_RULE}`
-        : `${baseSys}\n\n${DEEP_THINK_RULE}`
+        ? `${baseSys}\n\n${buildReplyCountPrompt(replyCount)}\n\n${promptRule('deep-think', DEEP_THINK_RULE) ?? ''}`
+        : `${baseSys}\n\n${promptRule('deep-think', DEEP_THINK_RULE) ?? ''}`
       : null;
     const payload: ChatPayloadMessage[] = applyWbUserBlocks(
       sysContent ? [{ role: 'system' as const, content: sysContent }, ...history] : history,

@@ -118,6 +118,7 @@ import {
   type ChatPayloadMessage,
 } from '@/lib/chat-stream-store';
 import { buildPersonaSystemPrompt } from '@/lib/ios/persona';
+import { promptRule, promptTextOf } from '@/lib/prompt-entries';
 import { buildNpcPromptExtra, type NpcPromptExtra } from '@/lib/ios/npc-bond';
 import {
   WxIcMoments,
@@ -1574,6 +1575,13 @@ function buildPersonaPrompt(peer: ContactRecord, me: WxUser, ownerName: string |
   const mode = useSettings.getState().addressMode;
   // 多账号（用户规则二.2）：小号/匿名号侧不再注入任何大号身份/关系信息（【用户的另一个身份】段已移除）
   const accId = activeAccountIdOf('wx');
+  // v63 全局预设管理器：微信沉浸规则全部接入注册表（可开关/可编辑，下次发送即生效）。
+  // 静态规则传原文本作 dynamicDefault（零破坏）；红包/转账/表情包清单等动态规则整块包成一条
+  const richBlock = (() => {
+    const rich = buildRichRules(stickersOn ? stickers : []);
+    if (rich.length === 0) return '';
+    return promptTextOf('wx-rich-rules', {}, rich.join('\n')) ?? '';
+  })();
   return buildPersonaSystemPrompt(peer, {
     channel: '微信',
     userName: addressNameOf(me, mode),
@@ -1584,15 +1592,20 @@ function buildPersonaPrompt(peer: ContactRecord, me: WxUser, ownerName: string |
     ...npcExtra,
     extraRules: [
       // fix3-c #3：规则限定主语——只解释「对方（用户）消息里」出现的标记；AI 自己发的表情另有 [表情包:ID]/[你发送了表情：XX] 序列化，不与规则冲突
-      '出现在对方（用户）消息里的「[发送了表情：XX]」表示对方发来一张含义为「XX」的表情包，你要理解并自然回应表情的含义（可以调侃或接住情绪），不要字面复述括号内容。',
+      promptRule(
+        'wx-sticker-recv',
+        '出现在对方（用户）消息里的「[发送了表情：XX]」表示对方发来一张含义为「XX」的表情包，你要理解并自然回应表情的含义（可以调侃或接住情绪），不要字面复述括号内容。',
+      ) ?? '',
       // 内置小表情 [微笑] 代码约定（开关开启才注入；用户点面板内置表情即以此格式入历史，AI 也可同格式回复）
-      ...(stickersOn ? [EMOJI_CODE_RULE] : []),
-      ...buildRichRules(stickersOn ? stickers : []),
-      ...(stickersOn ? [] : [STICKER_OFF_RULE]),
-      ...(actionDescOn ? [ACTION_DESC_RULE] : [ACTION_DESC_OFF_RULE]),
+      ...(stickersOn ? [promptRule('wx-emoji-code', EMOJI_CODE_RULE) ?? ''] : []),
+      ...richBlock.split('\n'),
+      ...(stickersOn ? [] : [promptRule('wx-sticker-off', STICKER_OFF_RULE) ?? '']),
+      ...(actionDescOn
+        ? [promptRule('wx-action-desc', ACTION_DESC_RULE) ?? '']
+        : [promptRule('wx-action-desc-off', ACTION_DESC_OFF_RULE) ?? '']),
       // 100-e 文字升级语音条告知（开关开启才注入，off 零注入）
-      ...(aiVoiceOn ? [AI_VOICE_DELIVERY_RULE] : []),
-    ],
+      ...(aiVoiceOn ? [promptRule('wx-ai-voice', AI_VOICE_DELIVERY_RULE) ?? ''] : []),
+    ].filter(Boolean),
   });
 }
 
@@ -7348,7 +7361,7 @@ function ChatPage({
       .join('\n\n');
     const payloadMsgs: ChatPayloadMessage[] = applyWbUserBlocks(
       [
-        { role: 'system' as const, content: replyCount > 1 ? `${systemFull}\n\n${buildReplyCountPrompt(replyCount)}\n\n${DEEP_THINK_RULE}` : `${systemFull}\n\n${DEEP_THINK_RULE}` },
+        { role: 'system' as const, content: replyCount > 1 ? `${systemFull}\n\n${buildReplyCountPrompt(replyCount)}\n\n${promptRule('deep-think', DEEP_THINK_RULE) ?? ''}` : `${systemFull}\n\n${promptRule('deep-think', DEEP_THINK_RULE) ?? ''}` },
         ...history,
       ],
       wbBlocks,

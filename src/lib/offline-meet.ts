@@ -29,6 +29,7 @@
  */
 
 import { kvDel, kvGet, kvSet } from '@/lib/ios/idb-kv';
+import { promptTextOf } from '@/lib/prompt-entries';
 import { memTimeLabel } from '@/lib/memory-core';
 
 // ---------------- 类型 ----------------
@@ -702,7 +703,12 @@ export function buildOfflineDirective(opts: {
     s.person === 'auto'
       ? `按现场设置：叙述${userName}用「${s.userPerson}」，${charName}相关叙述用「${charPersonEff}」`
       : `强制${'「' + charPersonEff + '」'}（基础设置指定）；叙述${userName}用「${s.userPerson}」`;
-  return [
+  // v63 全局预设管理器：线下总纲接入注册表（offline-directive；关闭=不注入总纲；原文零破坏）
+  return (
+    promptTextOf(
+      'offline-directive',
+      { charName, userName, channel, target },
+      [
     '【线下叙事模式总纲（最高优先级，覆盖线上聊天规则）】',
     `现在从${channel}线上聊天切换到「线下见面」叙事模式：你和${userName}已经在现实中见面。你写的内容不是聊天消息，而是线下场景的实时叙事（环境 + ${charName}的动作神态 + 对白）。线上聊天的「简短回复」「像随手打字」等规则在本模式下全部不适用，以本节为准。`,
     `- 叙事直接面向${userName}展开；对白贴合人设语气，穿插在叙述中；动作与心理直接写进叙述；`,
@@ -719,7 +725,9 @@ export function buildOfflineDirective(opts: {
     `- 节奏：${paceLine}`,
     `- 人称：${personLine}`,
     `- 长度：每次回复正文约 ${target} 字，写足再自然收束`,
-  ].join('\n');
+  ].join('\n'),
+    ) ?? ''
+  );
 }
 
 /** 保存见面时生成记忆摘要（写入 memAddEventFragment） */

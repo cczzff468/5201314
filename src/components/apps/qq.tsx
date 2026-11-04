@@ -203,6 +203,7 @@ import {
   type ChatPayloadMessage,
 } from '@/lib/chat-stream-store';
 import { buildPersonaSystemPrompt } from '@/lib/ios/persona';
+import { promptRule, promptTextOf } from '@/lib/prompt-entries';
 import { buildNpcPromptExtra, type NpcPromptExtra } from '@/lib/ios/npc-bond';
 import OfflineMeetingPage from '@/components/apps/offline-meeting';
 import type { OfflineOnlineMsg } from '@/lib/offline-meet';
@@ -1669,6 +1670,12 @@ function buildPersonaPrompt(peer: ContactRecord, me: QQUser, ownerName: string |
   const mode = useSettings.getState().addressMode;
   // 多账号（用户规则二.2）：小号/匿名号侧不再注入任何大号身份/关系信息（【用户的另一个身份】段已移除）
   const accId = activeAccountIdOf('qq');
+  // v63 全局预设管理器：QQ 沉浸规则接入注册表（可开关/可编辑；亲属卡教学仍按 familyCard=false 区分）
+  const richBlock = (() => {
+    const rich = buildRichRules(stickersOn ? stickers : [], { familyCard: false });
+    if (rich.length === 0) return '';
+    return promptTextOf('qq-rich-rules', {}, rich.join('\n')) ?? '';
+  })();
   return buildPersonaSystemPrompt(peer, {
     channel: 'QQ',
     userName: addressNameOf(me, mode),
@@ -1681,16 +1688,21 @@ function buildPersonaPrompt(peer: ContactRecord, me: QQUser, ownerName: string |
       // 【fix3-d-2】点明该标记只出现在「对方（用户）」消息里：与历史序列化中 AI 自己表情的
       // 「[表情包:ID]」/「[你发送了表情：XX]」写法区分开，防止 AI 把兜底标记当成自己的输出格式
       // 100-e 与微信端文案逐字一致（此前两端手工复制引号风格漂移『』vs「」）
-      '出现在对方（用户）消息里的「[发送了表情：XX]」表示对方发来一张含义为「XX」的表情包，你要理解并自然回应表情的含义（可以调侃或接住情绪），不要字面复述括号内容。',
+      promptRule(
+        'qq-sticker-recv',
+        '出现在对方（用户）消息里的「[发送了表情：XX]」表示对方发来一张含义为「XX」的表情包，你要理解并自然回应表情的含义（可以调侃或接住情绪），不要字面复述括号内容。',
+      ) ?? '',
       // 内置小表情 [微笑] 代码约定（开关开启才注入；用户点面板内置表情即以此格式入历史，AI 也可同格式回复）
-      ...(stickersOn ? [EMOJI_CODE_RULE] : []),
+      ...(stickersOn ? [promptRule('qq-emoji-code', EMOJI_CODE_RULE) ?? ''] : []),
       // 100-e QQ 没有亲属卡功能：亲属卡教学不下发（opts.familyCard=false，与微信区分）
-      ...buildRichRules(stickersOn ? stickers : [], { familyCard: false }),
-      ...(stickersOn ? [] : [STICKER_OFF_RULE]),
-      ...(actionDescOn ? [ACTION_DESC_RULE] : [ACTION_DESC_OFF_RULE]),
+      ...richBlock.split('\n'),
+      ...(stickersOn ? [] : [promptRule('qq-sticker-off', STICKER_OFF_RULE) ?? '']),
+      ...(actionDescOn
+        ? [promptRule('qq-action-desc', ACTION_DESC_RULE) ?? '']
+        : [promptRule('qq-action-desc-off', ACTION_DESC_OFF_RULE) ?? '']),
       // 100-e 文字升级语音条告知（开关开启才注入，off 零注入）
-      ...(aiVoiceOn ? [AI_VOICE_DELIVERY_RULE] : []),
-    ],
+      ...(aiVoiceOn ? [promptRule('qq-ai-voice', AI_VOICE_DELIVERY_RULE) ?? ''] : []),
+    ].filter(Boolean),
   });
 }
 
@@ -5540,7 +5552,7 @@ function ChatPage({
       .join('\n\n');
     const payloadMsgs: ChatPayloadMessage[] = applyWbUserBlocks(
       [
-        { role: 'system' as const, content: replyCount > 1 ? `${systemFull}\n\n${buildReplyCountPrompt(replyCount)}\n\n${DEEP_THINK_RULE}` : `${systemFull}\n\n${DEEP_THINK_RULE}` },
+        { role: 'system' as const, content: replyCount > 1 ? `${systemFull}\n\n${buildReplyCountPrompt(replyCount)}\n\n${promptRule('deep-think', DEEP_THINK_RULE) ?? ''}` : `${systemFull}\n\n${promptRule('deep-think', DEEP_THINK_RULE) ?? ''}` },
         ...history,
       ],
       wbBlocks,

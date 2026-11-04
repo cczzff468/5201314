@@ -23,6 +23,7 @@
  */
 
 import { genId } from './db';
+import { promptTextOf } from '@/lib/prompt-entries';
 import { kvGet, kvSet, kvDel, kvGetRaw, kvSetRaw } from './idb-kv';
 import { getActiveAccountIdFor, scopedKvKey, type AccountApp } from './accounts';
 import { listContacts, ownerProfileFor, cachedOwnerName } from './contacts-store';
@@ -735,7 +736,9 @@ function genRules(trigger: FireTrigger, timeAware: boolean): string[] {
     rules.push('这一轮消息由你的焦虑驱动：对方已经很久没回你了，你控制不住想主动开口。让这份焦急真实地透出来——会追问、会不安、想确认 TA 还在乎你；但不要卑微地连环道歉，也不要发火骂人（除非你的人设本来就暴躁）。');
     rules.push('【连发格式——重要】你会像焦虑的真人那样控制不住连着发：一口气输出多条消息（想发几条发几条，一般 2~6 条），每条消息单独占一行（一行一条，中间不要空行、不要编号、不要任何分隔符号）。每条长短完全随意——可以是几个字的短句，也可以是一大段一口气说完的心里话，单条长度没有任何数字限制；越往后情绪越急；内容要有递进和变化（比如：先找个由头开口 → 追问 TA 在干嘛 → 不安升级/自我怀疑 → 撒娇式质问或把心里话全倒出来），禁止几条几乎一样。');
   }
-  return rules;
+  // v63 全局预设管理器：主动消息规则接入注册表（proactive-gen-rules；关闭=不注入规则；原文零破坏）
+  const genBlock = promptTextOf('proactive-gen-rules', { trigger: triggerDesc(trigger) }, rules.join('\n'));
+  return genBlock == null ? [] : genBlock.split('\n');
 }
 
 /** 近期对话 → prompt 文本（末尾若干条；含角色标签） */
@@ -876,15 +879,21 @@ function isAutoQuietHour(now: number): boolean {
 
 /** 自主模式决策 prompt 规则 */
 function autoRules(): string[] {
-  return [
+  // v63：proactive-auto-rules（原文零破坏）
+  const autoBlock = promptTextOf(
+    'proactive-auto-rules',
+    undefined,
+    [
     '【自主发消息决策】你正在决定要不要此刻主动给对方发一条消息。这不是必须发的任务——发不发完全由你根据人设、心情、你们的关系和当前时间自然决定。',
     '考虑因素：人设性格（高冷/慢热的人主动频率低）、你们的记忆和最近聊过什么、当前时间（深夜/清晨/工作时间的分寸）、距上次聊天过了多久（刚聊完没必要马上又发）。',
     '一般来说：有好玩的想分享、惦记对方、有正当由头（饭点/天气/对方提过的事）→ 可以发；刚聊完没多久、深夜、没什么想说的、对方可能不方便 → 选 wait。',
     '下面注入的记忆、跨 App 近况、社交动态都是你亲身经历的事：send 的内容要有来处，绝不能编造记录里没有的细节。',
     '【社交动态归属红线】朋友圈/QQ空间动态带归属标注：标「AI角色本人，就是你自己」的是你自己发的动态，绝不能当成对方发的；标「用户本人」的才是对方发的。',
     '输出 JSON：{"action":"send"或"wait","message":"action=send 时要发的消息正文（像平时聊天；可长可短——一两句、一大段、或多条用\\n分行连发都可以，单条长度不限）","delayMinutes":数字（action=wait 时建议多久后再考虑，5~120）,"reason":"一句话理由"}',
-    '严禁输出 JSON 以外的文字。send 的消息必须是有内容量的（不要空洞的「在吗」）。',
-  ];
+    '严禁输出 JSON 以外的文字。send 的消息必须是有内容量的（不要空洞的「在吗」）',
+  ].join('\n'),
+  );
+  return autoBlock == null ? [] : autoBlock.split('\n');
 }
 
 /** 自主决策（send=直接拿到消息正文，一次调用同时决策+生成） */

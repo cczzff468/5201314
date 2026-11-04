@@ -13,6 +13,7 @@ import { ensureAccountOwnerContacts, migrateFromServer } from '@/lib/ios/contact
 import { startOwnerProfileSync } from '@/lib/ios/owner-profile-sync';
 import { ensureAppFontApplied } from '@/lib/ios/fonts';
 import { ensureKvReady } from '@/lib/ios/idb-kv';
+import { ensurePromptEntriesClientReady } from '@/lib/ios/prompt-entries-client';
 import { migrateLegacyAccounts } from '@/lib/ios/accounts';
 import { shellScale } from '@/lib/ios/shell-scale';
 import StatusBar from './StatusBar';
@@ -301,6 +302,9 @@ export default function PhoneShell() {
       // 必须在 ensureKvReady 注水之前——迁移产生的后缀键要进同一份内存
       await migrateLegacyAccounts();
       await ensureKvReady();
+      // v63 全局预设管理器：注册提示词状态同步读取源（kvGet 内存缓存）并同步服务端内存镜像
+      //（phone/memory/moments/forum 等服务端组装提示词的路由此后读到用户设置）
+      ensurePromptEntriesClientReady();
       // 多账号（Task 40）：为缺档案联系人的小号/匿名号自动建 user 档案（altOf 关联）——
       // 只读写 contacts store 与 kv，与 load()（只读 settings store）无依赖，并行省黑屏时间
       await Promise.all([ensureAccountOwnerContacts(), load()]);

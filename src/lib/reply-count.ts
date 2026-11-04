@@ -1,6 +1,7 @@
 'use client';
 
 import { splitActionDescParts } from './action-desc';
+import { promptTextOf } from '@/lib/prompt-entries';
 import { scopedConvKey } from './ios/accounts';
 
 /**
@@ -148,25 +149,27 @@ export function replyMinTarget(n: number): number {
  */
 export function buildReplyCountPrompt(n: number, opts?: { groupMode?: boolean }): string {
   const min = replyMinTarget(n);
+  // v63 全局预设管理器：条数指令块接入注册表（reply-count / reply-count-group 可开关、可编辑）；
+  // 被关闭时返回空串（调用方拼进 system 的多余空行对模型无影响）
   if (opts?.groupMode) {
     // 群聊模式：单成员发言要给其他成员留空间——上限收敛到 min(N,5)，不再注入「尽量往多了发/
     // 绝不能只发 1 条」，改成「按群聊节奏，1~N 条即可，别一个人刷屏」（与群规则「兼顾群聊节奏」一致）
     const cap = Math.max(1, Math.min(Math.floor(n) || 1, 5));
-    return [
+    return promptTextOf('reply-count-group', { cap }, [
       `【连发短消息·群聊节奏】这是群聊，把你这次想说的话拆成一条一条的短消息，一句一条、连续发出来。`,
       `本次发 1~${cap} 条：${cap} 条是硬上限；其他群成员也要说话，按群聊节奏来，一两句能说清就发一两条，绝不要一个人连发刷屏；话特别少时合并成一条完整消息也行，不要发几个字的碎片。`,
       `多条消息之间要有递进：回应 → 补充 → 追问或顺着话题补充，不要原地重复、不要车轱辘话；不允许发空消息凑数。`,
       `每条消息只写一句简短、口语化的话，单独占一行；消息内部不要换行，不要加序号、项目符号或任何分隔标记（方括号系统标记是操作指令，按对应功能块的说明输出，不受这条限制）。`,
-    ].join('\n');
+    ].join('\n')) ?? '';
   }
   const range = min >= n ? `${n} 条` : `${min}~${n} 条`;
-  return [
+  return promptTextOf('reply-count', { range, n }, [
     `【连发短消息】本次回复模仿真人在手机上聊天：想说的话多时，像真人那样拆成一条一条的短消息，一句一条、连续发出来（本次发 ${range}，话多时目标接近 ${n} 条）。`,
     `话少时不要硬拆：内容本身就少（一两句就能说完）时，直接合成一条完整消息发出去就好，宁可少发几条，也不要为了凑条数把短话拆成几个字的碎片（「嗯」「好」「在」这种不要各自单独成一条）。`,
     `多条消息之间要有递进：像真人连发那样把话题往前推（回应 → 补充 → 追问或顺着话题补充），不要原地重复、不要车轱辘话。`,
     `每条消息只写一句简短、口语化的话，单独占一行；消息内部不要换行，不要加序号、项目符号或任何分隔标记（方括号系统标记是操作指令，按对应功能块的说明输出，不受这条限制）。`,
     `不允许重复：不要把同一句话或同一个意思换个说法再发一遍；不允许发完全空的消息凑数。`,
-  ].join('\n');
+  ].join('\n')) ?? '';
 }
 
 /**

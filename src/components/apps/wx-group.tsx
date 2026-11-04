@@ -31,6 +31,7 @@
  */
 
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { promptRule } from '@/lib/prompt-entries';
 import {
   ArrowLeftRight,
   AtSign,
@@ -3280,7 +3281,7 @@ export function WxGroupChatPage({
           .join('\n\n');
         // 回复条数 replyCount 已在群聊规则处提前读取（条数约束与连发指令共用同一份设置）
         const payload: ChatPayloadMessage[] = [
-          { role: 'system', content: replyCount > 1 ? `${systemFull}\n\n${buildReplyCountPrompt(replyCount, { groupMode: true })}\n\n${DEEP_THINK_RULE}` : `${systemFull}\n\n${DEEP_THINK_RULE}` },
+          { role: 'system', content: replyCount > 1 ? `${systemFull}\n\n${buildReplyCountPrompt(replyCount, { groupMode: true })}\n\n${promptRule('deep-think', DEEP_THINK_RULE) ?? ''}` : `${systemFull}\n\n${promptRule('deep-think', DEEP_THINK_RULE) ?? ''}` },
           ...history,
         ];
         const messages = applyWbUserBlocks(payload, wbBlocks);

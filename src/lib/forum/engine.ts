@@ -78,7 +78,7 @@ import {
 import { describeImagesAuto } from '@/lib/vision-client';
 import { renderTextImage } from './textimg';
 import { commentAnchored, extractTopicWords, isTenderPost, loudMemeIn, offTopicIn, personaBleedIn, postAllowsCatchall, universalPhraseIn, isParrotReply, isScoopPost, jsonLeakIn, promptLeakIn, sweetShipIn, isBenignPost, imaginaryEnemyIn, tabloidScriptIn } from './topic';
-import { promptOverridesPayload, rollCommentCount, rollPostCount } from './gen-settings';
+import { promptOffPayload, promptOverridesPayload, rollCommentCount, rollPostCount } from './gen-settings';
 // v42【帖子记忆】：帖子入库 + NPC 评论入库（深度记忆开关守卫在模块内部）
 // v43（A3/C1）：buildForumPostMemoryBlock 给论坛私信注入；listPostMemories 给蹭热点取话题
 import { noteNpcCommentOnMyPost, notePostPublished, accountOfPost, buildForumPostMemoryBlock, listPostMemories } from './post-memory';
@@ -222,6 +222,8 @@ async function callApi(payload: Record<string, unknown>): Promise<unknown> {
   // v34 提示词面板：抽屉里编辑的提示词覆盖随请求上送（空对象 = 全默认零开销；
   // 保存即生效——每次调用都重读设置，后台调度器触发的生成同样用新提示词）
   const prompts = promptOverridesPayload();
+  // v63 全局预设管理器：设置里关闭的论坛提示词条目（空数组零开销）
+  const promptOff = promptOffPayload();
   // 【多世界观】激活世界观背景/标签 + 用户 AI 规则（发帖/评论/审核）随请求上送——
   // 服务端把自定义规则拼在 System Prompt 最前端、世界观背景紧随其后；保存即生效
   //（每次调用都重读 store，后台调度器触发的生成同样用新世界观与新规则）
@@ -232,6 +234,7 @@ async function callApi(payload: Record<string, unknown>): Promise<unknown> {
     body: JSON.stringify({
       ...payload,
       ...(Object.keys(prompts).length ? { prompts } : {}),
+      ...(promptOff.length ? { promptOff } : {}),
       worldview: wv.worldview,
       aiRules: wv.rules,
       config: useSettings.getState().apiConfig,

@@ -20,6 +20,7 @@
  */
 
 import { kvGet, kvSet } from './idb-kv';
+import { promptTextOf } from '@/lib/prompt-entries';
 import { memAddEventFragment, memChatRecallBlock, memConvoFromRaw, memRecallBlock } from '@/lib/memory';
 // 第十六轮：AI 动态状态（情绪+作息）注入 + 作息提醒（早安/晚安/饭点，不占自主额度）
 import { buildDynamicStateBlocks } from './ai-mood';
@@ -465,11 +466,18 @@ export function coupleChatBlock(contactId: string, channel: CoupleChannel, userN
   }
 
   if (lines.length === 0) return '';
-  return [
-    '【情侣空间·你们的共享小天地】下面是你们二人在情侣空间 App 里真实记录的内容（都是你们亲身经历的事，不是资料）：',
-    ...lines,
-    `- 这些是你们的共同记忆：聊天中自然记得、可以自然提起；${userName || me}问起其中任何一项都要能如实回答；但不要一次全部罗列出来。`,
-  ].join('\n');
+  // v63 全局预设管理器：情侣空间注入段接入注册表（couple-chat-block；原文零破坏）
+  return (
+    promptTextOf(
+      'couple-chat-block',
+      { user: userName || me, lines: lines.join('\n') },
+      [
+        '【情侣空间·你们的共享小天地】下面是你们二人在情侣空间 App 里真实记录的内容（都是你们亲身经历的事，不是资料）：',
+        ...lines,
+        `- 这些是你们的共同记忆：聊天中自然记得、可以自然提起；${userName || me}问起其中任何一项都要能如实回答；但不要一次全部罗列出来。`,
+      ].join('\n'),
+    ) ?? ''
+  );
 }
 
 // ---------------- 链路二点五（第十轮）：AI 双向互动行为 ----------------
@@ -1469,7 +1477,10 @@ async function aiTickBoardNote(snap: CoupleSnap, me: string, ta: string, p: TaPe
     ...BOARD_CARDS.map((c) => `${c.label}（${c.desc ?? '图案卡纸'}）`),
     ...customs.map((_, i) => `自定义卡${i + 1}（${me}亲手上传的卡纸，贴这张最有心意）`),
   ].join('、');
-  const sys = [
+  const sys = promptTextOf(
+    'couple-pin-note',
+    { period, hm, ta, me },
+    [
     llmSystem(p, me, snap),
     `场景：你们有一面留言板（软木墙），两人可以随手把手写便签钉上去。现在是${period}（${hm}），${ta}被问到：此刻想不想亲手钉一张便签上去（上面写一句真心想对${me}说的话）？想就钉，不想就先不钉——完全由你按此刻的心情/时段/你们最近的状态决定，绝不硬凑。`,
     `可选卡纸：${cardMenu}`,
@@ -1477,8 +1488,10 @@ async function aiTickBoardNote(snap: CoupleSnap, me: string, ta: string, p: TaPe
     chatCtx ? `【你们最近在微信/QQ里聊过的话题】\n${cut(chatCtx, 300)}` : '',
     existing ? `墙上已经钉过这些便签（内容不许重复、不许相近）：${existing}` : '',
   ]
-    .filter(Boolean)
-    .join('\n');
+      .filter(Boolean)
+      .join('\n'),
+  ) ?? '';
+  if (!sys) return false; // v63：couple-pin-note 条目关闭 → 本次不问便签
   try {
     const raw = await llmUserFirst(
       sys,
@@ -1666,7 +1679,10 @@ async function aiTickMood(snap: CoupleSnap, me: string, ta: string, p: TaPersona
   }
   // 素材二：最近的微信/QQ 聊天上下文（非情侣空间内容）
   const chatBlock = recentChatBlock(pid, ch, me, ta);
-  const sys = [
+  const sys = promptTextOf(
+    'couple-mood-diary',
+    { ta, me },
+    [
     `你是「${ta}」，是${me}的恋人，正在写自己的心情日记。`,
     p.relation ? `你们的关系：${p.relation}。` : '',
     p.persona ? `你的性格/说话风格：${cut(p.persona, 120)}` : '',
@@ -1676,8 +1692,10 @@ async function aiTickMood(snap: CoupleSnap, me: string, ta: string, p: TaPersona
     chatBlock ? `【你们最近的聊天记录】\n${chatBlock}` : '',
     '要求：像真人写日记，根据你今天的生活、你们最近聊天的话题和你的心情来写；素材只能来自你的人设、你们的记忆碎片和最近的聊天记录；不要提情侣空间 App 里的任何功能或内容（想你打卡/标签/协议/问答/相册/小树/轨迹等都不许出现）；口语、简短、真诚；禁止 emoji/表情符号；禁止 markdown。',
   ]
-    .filter(Boolean)
-    .join('\n');
+      .filter(Boolean)
+      .join('\n'),
+  ) ?? '';
+  if (!sys) return false; // v63：couple-mood-diary 条目关闭 → 跳过今天的心情日记
   let moodLabel = '';
   let text = '';
   try {

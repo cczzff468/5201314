@@ -55,6 +55,17 @@ export function fillPromptTemplate(tpl: string, vals: Record<string, string | nu
 }
 
 /** 从请求体读取合法的提示词覆盖（未知 key 忽略；空串视为未覆盖走默认） */
+/** v63 全局预设管理器：请求携带的「已关闭」提示词 key 列表 → Set（sysPrompt 命中即返回空串） */
+export function readPromptOff(raw: unknown): Set<PromptKey> {
+  const out = new Set<PromptKey>();
+  if (!Array.isArray(raw)) return out;
+  const known = new Set<string>(FORUM_PROMPT_DEFS.map((d) => d.key));
+  for (const k of raw) {
+    if (typeof k === 'string' && known.has(k)) out.add(k as PromptKey);
+  }
+  return out;
+}
+
 export function readPromptOverrides(raw: unknown): Partial<Record<PromptKey, string>> {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
   const rec = raw as Record<string, unknown>;

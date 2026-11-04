@@ -22,6 +22,7 @@
  */
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { promptTextOf } from '@/lib/prompt-entries';
 import {
   Archive,
   ArrowUp,
@@ -1365,6 +1366,13 @@ export default function OfflineMeetingPage({ app, channel, contactId, userName, 
       saveWbBgCache(contactId, localFallback);
       return localFallback;
     }
+    // v63 全局预设管理器：offline-world-analysis（关闭=跳过 LLM 分析，直接用本地推断）
+    const waSys = promptTextOf(
+      'offline-world-analysis',
+      undefined,
+      '你是世界观分析助手。把给定的世界书设定与角色资料浓缩成一段 200 字以内的客观世界背景描述：世界观类型、时代、地点、关键规则/组织/关系背景。只输出这段描述本身，不要标题、不要列表、不要评论。',
+    );
+    if (waSys) {
     try {
       const cfg = useSettings.getState().apiConfig;
       const res = await fetch('/api/offline', {
@@ -1376,8 +1384,7 @@ export default function OfflineMeetingPage({ app, channel, contactId, userName, 
           messages: [
             {
               role: 'system',
-              content:
-                '你是世界观分析助手。把给定的世界书设定与角色资料浓缩成一段 200 字以内的客观世界背景描述：世界观类型、时代、地点、关键规则/组织/关系背景。只输出这段描述本身，不要标题、不要列表、不要评论。',
+              content: waSys,
             },
             {
               role: 'user',
@@ -1395,6 +1402,7 @@ export default function OfflineMeetingPage({ app, channel, contactId, userName, 
     } catch {
       // 兜底走本地推断
     }
+    } // v63：waSys 为空（条目关闭）时不发 LLM 请求
     return localFallback;
   }, [contactId, contact, shownName, userNameEff]);
 

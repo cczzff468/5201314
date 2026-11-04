@@ -1,4 +1,5 @@
 import { NextResponse, NextRequest } from 'next/server';
+import { promptTextOf } from '@/lib/prompt-entries';
 
 export const runtime = 'nodejs';
 
@@ -62,7 +63,12 @@ const CATEGORY_LABEL: Record<Category, string> = {
 };
 
 function buildSystem(userName: string, peerName: string, nowLabel: string, existingText: string): string {
-  return [
+  // v63 全局预设管理器：画像提取提示词接入注册表（mem-profile；服务端读内存缓存；零破坏）
+  return (
+    promptTextOf(
+      'mem-profile',
+      { user: userName, peer: peerName, existing: existingText },
+      [
     '你是用户画像整理助手。从一段聊天记录中提炼【稳定画像事实】，形成结构化的「画像图谱」条目。',
     '【视角规则（最高优先级，违反即无效）】',
     `- 这段对话发生在两个人之间：「${userName}」（用户本人）和「${peerName}」（AI角色）。`,
@@ -87,7 +93,9 @@ function buildSystem(userName: string, peerName: string, nowLabel: string, exist
     ...(existingText
       ? [`【已有画像（同 topic 的新说法=更新这条，沿用旧 topic；矛盾变化如旧「不吃辣」新「能吃微辣」同样沿用旧 topic 覆盖）】${existingText}`]
       : []),
-  ].join('\n');
+  ].join('\n'),
+    ) ?? ''
+  );
 }
 
 export async function POST(req: NextRequest) {

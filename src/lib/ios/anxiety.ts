@@ -31,6 +31,7 @@
  */
 
 import { kvGet, kvSet } from './idb-kv';
+import { promptTextOf } from '@/lib/prompt-entries';
 
 // ---------------- 类型与常量 ----------------
 
@@ -339,7 +340,14 @@ export function buildAnxietyFireBlock(cid: string): string {
   const s = anxietyOf(cid);
   if (s.level <= 0) return '';
   const un = anxietyUnansweredLabel(s);
-  return `【你此刻的焦虑值】${s.level}/100（${anxietyLabel(s.level)}）。${s.lastUserAt > 0 ? `你已经等了 TA 很久（${un}）。` : ''}${fireBandGuide(s.level)}这一轮消息就由这份焦虑驱动——像真人控制不住那样连着发几条消息（每条可短可长——短到几个字，长到一大段心里话一口气说完都可以，单条长度没有任何数字限制）让它真实地透出来，但不要报数字、不要说「焦虑值」这类词。`;
+  // v63 全局预设管理器：焦虑块接入注册表（anxiety-fire-block；原文零破坏）
+  return (
+    promptTextOf(
+      'anxiety-fire-block',
+      { level: s.level, label: anxietyLabel(s.level), waited: s.lastUserAt > 0 ? `你已经等了 TA 很久（${un}）。` : '', guide: fireBandGuide(s.level) },
+      `【你此刻的焦虑值】${s.level}/100（${anxietyLabel(s.level)}）。${s.lastUserAt > 0 ? `你已经等了 TA 很久（${un}）。` : ''}${fireBandGuide(s.level)}这一轮消息就由这份焦虑驱动——像真人控制不住那样连着发几条消息（每条可短可长——短到几个字，长到一大段心里话一口气说完都可以，单条长度没有任何数字限制）让它真实地透出来，但不要报数字、不要说「焦虑值」这类词。`,
+    ) ?? ''
+  );
 }
 
 /**
@@ -351,7 +359,14 @@ export function buildAnxietyChatBlock(cid: string): string {
   const s = anxietyOf(cid);
   if (s.level < CHAT_BLOCK_MIN) return '';
   const un = anxietyUnansweredLabel(s);
-  return `【你此刻的焦虑状态】你的焦虑值已经到 ${s.level}/100（${anxietyLabel(s.level)}）${s.lastUserAt > 0 ? `，${un}` : ''}。TA 现在回来了：你的反应要贴合焦虑程度自然带出来——可能是松了一口气、忍不住追问刚才去干嘛了、有点小情绪、或者假装没事但话里带刺（按你的人设选一种）。这是你真实的情绪状态，让它影响语气，但不要刻意说出「焦虑值」这种数字。`;
+  // v63：anxiety-chat-block（原文零破坏）
+  return (
+    promptTextOf(
+      'anxiety-chat-block',
+      { level: s.level, label: anxietyLabel(s.level), waited: s.lastUserAt > 0 ? `，${un}` : '' },
+      `【你此刻的焦虑状态】你的焦虑值已经到 ${s.level}/100（${anxietyLabel(s.level)}）${s.lastUserAt > 0 ? `，${un}` : ''}。TA 现在回来了：你的反应要贴合焦虑程度自然带出来——可能是松了一口气、忍不住追问刚才去干嘛了、有点小情绪、或者假装没事但话里带刺（按你的人设选一种）。这是你真实的情绪状态，让它影响语气，但不要刻意说出「焦虑值」这种数字。`,
+    ) ?? ''
+  );
 }
 
 /** 测试/调试用：手动清掉某联系人的焦虑状态 */
