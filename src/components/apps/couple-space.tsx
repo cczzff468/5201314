@@ -3662,13 +3662,13 @@ function BoardPage({
         </div>
       )}
 
-      {/* ===== 右下角悬浮加号（钉一张便签；浅灰色融入墙面；空墙时呼吸柔光；时间胶囊在弹层里设；多选模式下隐藏） ===== */}
+      {/* ===== 右下角悬浮加号（钉一张便签；浅灰色融入墙面；时间胶囊在弹层里设；多选模式下隐藏） ===== */}
       {!multi && (
         <button
           type="button"
           onClick={() => openCompose(false)}
           aria-label="钉一张便签"
-          className={`absolute bottom-[44px] right-4 z-30 flex h-[56px] w-[56px] items-center justify-center rounded-full bg-[#ececec] text-[#8a8a8a] shadow-[0_6px_18px_rgba(0,0,0,0.22)] ring-1 ring-black/10 transition-transform active:scale-90 ${notes.length === 0 ? '[animation:wish-invite-pulse_2.8s_ease-in-out_infinite]' : ''}`}
+          className="absolute bottom-[44px] right-4 z-30 flex h-[56px] w-[56px] items-center justify-center rounded-full bg-[#ececec] text-[#8a8a8a] shadow-[0_6px_18px_rgba(0,0,0,0.22)] ring-1 ring-black/10 transition-transform active:scale-90"
         >
           <Plus className="h-[26px] w-[26px]" strokeWidth={2.4} aria-hidden="true" />
         </button>

@@ -237,40 +237,10 @@ function ForumGlyph() {
   );
 }
 
-/** X论坛真实图标（X 官方 App 图标 1:1）：黑色圆角方块 + 白色 𝕏，
- *  自绘 SVG 直出（不经 next/image，SVG 无需图优化配置）；外壳与 RealIconTile
- *  同规格（rounded-[15px] 裁切 + 阴影 + 细描边），卡片场景同图 */
-function ForumRealIcon() {
-  return (
-    <IconTile>
-      <span
-        aria-hidden="true"
-        className="relative block h-full w-full overflow-hidden rounded-[15px] shadow-[0_2px_8px_rgba(0,0,0,0.16)] ring-1 ring-black/[0.06]"
-      >
-        <svg viewBox="0 0 120 120" className="h-full w-full" aria-hidden="true">
-          <rect x="0" y="0" width="120" height="120" rx="27" fill="#000000" />
-          <g transform="translate(34.8 34.8) scale(2.1)">
-            <path
-              fill="#ffffff"
-              d="M18.901 1.153h3.68l-8.04 9.19L24 22.846h-7.406l-5.8-7.584-6.638 7.584H.474l8.6-9.83L0 1.154h7.594l5.243 6.932ZM17.61 20.644h2.039L6.486 3.24H4.298Z"
-            />
-          </g>
-        </svg>
-      </span>
-    </IconTile>
-  );
-}
-
-/** 无法用 PNG 图片、但自带品牌实体图标的 App：real 样式直接渲染自绘图。
- *  （X论坛的官方 App 图标就是黑方块白 𝕏，PNG 转存有损且要配 dangerouslyAllowSVG，
- *  自绘 SVG 同规格直出更稳） */
-const REAL_CUSTOM: Partial<Record<AppId, ReactNode>> = {
-  forum: <ForumRealIcon />,
-};
+/** X论坛真实图标改用用户提供的官方 PNG（public/icons/forum.png） */
 
 /** App 定义表：glyph 为裸线条图（不含磨砂底座）；image 为真实图标图片（public 下
- *  路径，满槽实体图标），两者可并存，icon 生成时优先用 image；无 image 但有
- *  REAL_CUSTOM 的 App（X论坛）在 real 样式下用自绘品牌实体图 */
+ *  路径，满槽实体图标），两者可并存，icon 生成时优先用 image */
 interface AppDef {
   id: AppId;
   name: string;
@@ -481,7 +451,8 @@ const APP_DEFS: AppDef[] = [
   {
     id: 'forum',
     name: 'X论坛',
-    // 真实图标：REAL_CUSTOM 自绘（X 官方 App 图标：黑方块白 𝕏）；
+    // 真实图标：用户提供的 X（前身为 Twitter）官方 App 图标（1024×1024 透明底 PNG）
+    image: '/icons/forum.png',
     // 线条图（毛玻璃/液态样式时展示）：X wordmark 实心
     glyph: <ForumGlyph />,
     component: ForumApp,
@@ -501,11 +472,11 @@ export function appImage(id: AppId): string | null {
 }
 
 /** 壁纸上的图标（主屏网格 / Dock / Spotlight / 多任务）：真实 iOS 图标满槽铺满；
- *  有 REAL_CUSTOM 的 App（X论坛）用自绘品牌实体图；其余磨砂玻璃底座随壁纸明暗自适应 */
+ *  其余磨砂玻璃底座随壁纸明暗自适应 */
 export const APPS: AppMeta[] = APP_DEFS.map(({ glyph, image, id, ...rest }) => ({
   ...rest,
   id,
-  icon: image ? <RealIconTile src={image} /> : REAL_CUSTOM[id] ?? <LineIcon>{glyph}</LineIcon>,
+  icon: image ? <RealIconTile src={image} /> : <LineIcon>{glyph}</LineIcon>,
 }));
 
 /** 各 App 裸线条图（appId → glyph），供卡片底色场景（AppIconTile）重组使用 */
@@ -517,7 +488,6 @@ const GLYPHS = Object.fromEntries(APP_DEFS.map((d) => [d.id, d.glyph])) as Recor
 export function AppIconTile({ id }: { id: AppId }) {
   const image = IMAGES[id];
   if (image) return <RealIconTile src={image} variant="card" />;
-  if (REAL_CUSTOM[id]) return REAL_CUSTOM[id];
   return <LineIcon variant="card">{GLYPHS[id]}</LineIcon>;
 }
 
@@ -533,7 +503,6 @@ export function AppIconById({ id, variant = 'auto' }: { id: AppId; variant?: 'au
   if (style === 'glass') return <LineIcon variant={variant}>{GLYPHS[id]}</LineIcon>;
   const image = IMAGES[id];
   if (image) return <RealIconTile src={image} />;
-  if (REAL_CUSTOM[id]) return REAL_CUSTOM[id];
   return <LineIcon variant={variant}>{GLYPHS[id]}</LineIcon>;
 }
 
@@ -544,7 +513,6 @@ export function AppStylePreview({ id, style }: { id: AppId; style: IconStyle }) 
   if (style === 'glass') return <LineIcon variant="card">{GLYPHS[id]}</LineIcon>;
   const image = IMAGES[id];
   if (image) return <RealIconTile src={image} variant="card" />;
-  if (REAL_CUSTOM[id]) return REAL_CUSTOM[id];
   return <LineIcon variant="card">{GLYPHS[id]}</LineIcon>;
 }
 
@@ -573,16 +541,6 @@ export function AppMiniIcon({ id, custom }: { id: AppId; custom?: string | null 
   if (style === 'real' && image) {
     // 真实图标不再适配深色模式（第六十七轮）：始终直铺原图，与主屏 RealIconTile 同源
     return <img src={image} alt="" draggable={false} className="block h-full w-full select-none object-cover" />;
-  }
-  // X论坛迷你图（real 样式）：迷你黑方块白 𝕏（自绘品牌实体图的 14px 版）
-  if (style === 'real' && REAL_CUSTOM[id] && id === 'forum') {
-    return (
-      <span aria-hidden="true" className="flex h-full w-full items-center justify-center rounded-[3.5px] bg-black ring-1 ring-black/[0.08]">
-        <svg viewBox="0 0 24 24" className="h-[68%] w-[68%]" fill="#fff">
-          <path d="M18.901 1.153h3.68l-8.04 9.19L24 22.846h-7.406l-5.8-7.584-6.638 7.584H.474l8.6-9.83L0 1.154h7.594l5.243 6.932ZM17.61 20.644h2.039L6.486 3.24H4.298Z" />
-        </svg>
-      </span>
-    );
   }
   // 迷你玻璃缩略图同样画在壁纸上：明暗跟壁纸走（第六十七轮，同 LineIcon/LiquidIcon 口径）
   const lightGlass = lightWallpaper;
