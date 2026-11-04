@@ -11,6 +11,7 @@
 
 import { kvGet, kvSet } from './idb-kv';
 import { BUILTIN_STICKER_GROUP_ID, builtinGroupName, builtinStickersOf } from './builtin-stickers';
+import { BUILTIN_PACKS, BUILTIN_PACK_GROUP_IDS, BUILTIN_PACK_STICKERS } from './sticker-packs';
 
 export interface Sticker {
   id: string;
@@ -41,6 +42,16 @@ export const DEFAULT_STICKER_GROUP_NAME = '我的表情';
 const LS_KEY = (app: 'wx' | 'qq') => `${app}-stickers`;
 const GROUPS_KEY = (app: 'wx' | 'qq') => `${app}-sticker-groups`;
 
+/** 判断某分组 ID 是否内置分组（官方表情分组或 v62 内置表情包分组）：面板里隐藏「管理/添加」，分组不可删不可改名 */
+export function isBuiltinGroupId(groupId: string): boolean {
+  return groupId === BUILTIN_STICKER_GROUP_ID || BUILTIN_PACK_GROUP_IDS.has(groupId);
+}
+
+/** 判断某张表情是否「官方小表情」（微信表情/QQ表情分组里的小图）：面板点选插入 [微笑] 文字代码而非直接发送；内置包大贴纸不是 */
+export function isOfficialEmojiSticker(s: Sticker): boolean {
+  return !!s.builtin && s.groupId === BUILTIN_STICKER_GROUP_ID;
+}
+
 export function loadStickers(app: 'wx' | 'qq'): Sticker[] {
   let user: Sticker[] = [];
   try {
@@ -61,8 +72,10 @@ export function loadStickers(app: 'wx' | 'qq'): Sticker[] {
     user = [];
   }
   // 内置表情自动合并（在用户表情之后）；防旧数据意外持久化了内置项 → 去重
+  // v62：内置表情包四套（太阳小狗/小狗豹/小凑狗/古早企鹅）一并合入（官方小表情在前、大贴纸包在后）
   const builtin = builtinStickersOf(app).filter((b) => !user.some((u) => u.id === b.id));
-  return [...user, ...builtin];
+  const packs = BUILTIN_PACK_STICKERS.filter((b) => !user.some((u) => u.id === b.id));
+  return [...user, ...builtin, ...packs];
 }
 
 export function saveStickers(app: 'wx' | 'qq', list: Sticker[]): void {
@@ -78,15 +91,16 @@ export function newStickerId(): string {
   return `stk-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
-/** 读取表情分组列表（默认分组第一，内置分组第二——动态插入虚拟分组；损坏/缺失数据时返回默认+内置） */
+/** 读取表情分组列表（默认分组第一，内置分组第二，v62 内置表情包分组紧随其后——动态插入虚拟分组；损坏/缺失数据时返回默认+内置） */
 export function loadStickerGroups(app: 'wx' | 'qq'): StickerGroup[] {
   const def: StickerGroup = { id: DEFAULT_STICKER_GROUP_ID, name: DEFAULT_STICKER_GROUP_NAME, createdAt: 0 };
   const builtin: StickerGroup = { id: BUILTIN_STICKER_GROUP_ID, name: builtinGroupName(app), builtin: true, createdAt: 0 };
+  const packGroups: StickerGroup[] = BUILTIN_PACKS.map((p) => ({ id: p.id, name: p.name, builtin: true, createdAt: 0 }));
   try {
     const parsed: unknown = kvGet<Partial<StickerGroup>[]>(GROUPS_KEY(app));
-    if (!Array.isArray(parsed)) return [def, builtin];
-    const seen = new Set<string>([DEFAULT_STICKER_GROUP_ID, BUILTIN_STICKER_GROUP_ID]);
-    const out: StickerGroup[] = [def, builtin];
+    if (!Array.isArray(parsed)) return [def, builtin, ...packGroups];
+    const seen = new Set<string>([DEFAULT_STICKER_GROUP_ID, BUILTIN_STICKER_GROUP_ID, ...BUILTIN_PACK_GROUP_IDS]);
+    const out: StickerGroup[] = [def, builtin, ...packGroups];
     for (const g of parsed) {
       if (!g || typeof g.id !== 'string' || !g.id || seen.has(g.id)) continue;
       const name = typeof g.name === 'string' ? g.name.trim().slice(0, 16) : '';
@@ -96,7 +110,7 @@ export function loadStickerGroups(app: 'wx' | 'qq'): StickerGroup[] {
     }
     return out;
   } catch {
-    return [def, builtin];
+    return [def, builtin, ...packGroups];
   }
 }
 
@@ -104,7 +118,7 @@ export function loadStickerGroups(app: 'wx' | 'qq'): StickerGroup[] {
 export function saveStickerGroups(app: 'wx' | 'qq', groups: StickerGroup[]): void {
   try {
     const def: StickerGroup = { id: DEFAULT_STICKER_GROUP_ID, name: DEFAULT_STICKER_GROUP_NAME, createdAt: 0 };
-    const seen = new Set<string>([DEFAULT_STICKER_GROUP_ID, BUILTIN_STICKER_GROUP_ID]);
+    const seen = new Set<string>([DEFAULT_STICKER_GROUP_ID, BUILTIN_STICKER_GROUP_ID, ...BUILTIN_PACK_GROUP_IDS]);
     const rest: StickerGroup[] = [];
     for (const g of groups) {
       if (!g || g.builtin || g.id === DEFAULT_STICKER_GROUP_ID || seen.has(g.id)) continue;

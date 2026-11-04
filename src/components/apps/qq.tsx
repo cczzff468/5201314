@@ -331,7 +331,9 @@ import {
   DEFAULT_STICKER_GROUP_ID,
   extractMeaningFromUrl,
   fileNameMeaning,
+  isBuiltinGroupId,
   isImageUrl,
+  isOfficialEmojiSticker,
   loadStickerGroups,
   loadStickers,
   newStickerId,
@@ -339,6 +341,7 @@ import {
   saveStickers,
   stickerGroupOf,
 } from '@/lib/ios/stickers';
+import { BUILTIN_STICKER_GROUP_ID } from '@/lib/ios/builtin-stickers';
 import type { Sticker, StickerGroup } from '@/lib/ios/stickers';
 import {
   buildRichRules,
@@ -2738,7 +2741,7 @@ export function QqStickerPanel({
               <Search className="h-[18px] w-[18px]" strokeWidth={2} />
             </button>
           )}
-          {mode === 'grid' && activeGroupId !== 'builtin' && list.some((s) => !s.builtin) && (
+          {mode === 'grid' && !isBuiltinGroupId(activeGroupId) && list.some((s) => !s.builtin) && (
             <button
               type="button"
               data-testid="qq-sticker-panel-manage"
@@ -2769,7 +2772,8 @@ export function QqStickerPanel({
                       return;
                     }
                     if (editMode) return;
-                    if (st.builtin) onPickBuiltin?.(st);
+                    // v62：官方小表情插入 [代码] 混排；内置包大贴纸与用户表情一样点选直接发送
+                    if (isOfficialEmojiSticker(st)) onPickBuiltin?.(st);
                     else onPick(st);
                   }}
                   onPointerDown={onStickerPointerDown(st)}
@@ -2778,7 +2782,7 @@ export function QqStickerPanel({
                   onPointerCancel={clearStickerPress}
                   onPointerLeave={clearStickerPress}
                   className={
-                    st.builtin
+                    isOfficialEmojiSticker(st)
                       ? `flex h-10 w-full items-center justify-center overflow-hidden rounded-[8px] p-[3px] active:bg-black/[0.06]`
                       : `aspect-square w-full overflow-hidden rounded-[10px] active:bg-black/[0.06] p-1.5`
                   }
@@ -2786,6 +2790,7 @@ export function QqStickerPanel({
                 >
                   <img src={st.url} alt={st.meaning || '表情'} className="h-full w-full object-contain" loading="lazy" />
                 </button>
+                {/* v62：用户表情=可点改意思的按钮；内置包贴纸=纯文本标签（常量不可改）；官方小表情不显 */}
                 {!st.builtin && (
                   <button
                     type="button"
@@ -2795,6 +2800,9 @@ export function QqStickerPanel({
                   >
                     {st.meaning || '＋意思'}
                   </button>
+                )}
+                {st.builtin && st.groupId !== BUILTIN_STICKER_GROUP_ID && (
+                  <p className="mt-0.5 h-4 w-full truncate text-center text-[10px] leading-4 text-black/40 dark:text-white/40">{st.meaning}</p>
                 )}
                 {editMode && !st.builtin && (
                   <button
@@ -2809,9 +2817,9 @@ export function QqStickerPanel({
                 )}
               </div>
             ))}
-            {/* 内置分组不可添加（静态常量）；空占位保持网格末尾对齐 */}
-            {activeGroupId === 'builtin' ? (
-              <span aria-hidden="true" className="h-10 w-full" />
+            {/* 内置分组（官方小表情 + v62 内置表情包）不可添加（静态常量）；空占位与各自网格尺寸对齐 */}
+            {isBuiltinGroupId(activeGroupId) ? (
+              <span aria-hidden="true" className={activeGroupId === 'builtin' ? 'h-10 w-full' : 'aspect-square w-full'} />
             ) : (
               <button
                 type="button"

@@ -347,7 +347,9 @@ import {
   DEFAULT_STICKER_GROUP_ID,
   extractMeaningFromUrl,
   fileNameMeaning,
+  isBuiltinGroupId,
   isImageUrl,
+  isOfficialEmojiSticker,
   loadStickerGroups,
   loadStickers,
   newStickerId,
@@ -355,6 +357,7 @@ import {
   saveStickers,
   stickerGroupOf,
 } from '@/lib/ios/stickers';
+import { BUILTIN_STICKER_GROUP_ID } from '@/lib/ios/builtin-stickers';
 import type { Sticker, StickerGroup } from '@/lib/ios/stickers';
 import { useUnreadMap, wxUnreads as wxUnreadStore } from '@/lib/unread-store';
 import { consumeBgPending, onBgPageVisible, peekBgBadgeCounts, pullBgPending, registerBgSession, unregisterBgSession, type BgPendingItem } from '@/lib/ios/bg-turn';
@@ -3059,7 +3062,7 @@ export function WxStickerPanel({
               <Search className="h-[18px] w-[18px]" strokeWidth={2} />
             </button>
           )}
-          {mode === 'grid' && activeGroupId !== 'builtin' && list.some((s) => !s.builtin) && (
+          {mode === 'grid' && !isBuiltinGroupId(activeGroupId) && list.some((s) => !s.builtin) && (
             <button
               type="button"
               data-testid="wx-sticker-panel-manage"
@@ -3091,7 +3094,8 @@ export function WxStickerPanel({
                       return;
                     }
                     if (editMode) return;
-                    if (s.builtin) onPickBuiltin?.(s);
+                    // v62：官方小表情插入 [代码] 混排；内置包大贴纸与用户表情一样点选直接发送
+                    if (isOfficialEmojiSticker(s)) onPickBuiltin?.(s);
                     else onPick(s);
                   }}
                   onPointerDown={onStickerPointerDown(s)}
@@ -3100,7 +3104,7 @@ export function WxStickerPanel({
                   onPointerCancel={clearStickerPress}
                   onPointerLeave={clearStickerPress}
                   className={
-                    s.builtin
+                    s.builtin && s.groupId === BUILTIN_STICKER_GROUP_ID
                       ? `flex h-10 w-full items-center justify-center overflow-hidden rounded-[8px] p-[3px] active:bg-black/[0.05]`
                       : `aspect-square w-full overflow-hidden rounded-[10px] active:bg-black/[0.05] p-1.5`
                   }
@@ -3108,6 +3112,7 @@ export function WxStickerPanel({
                 >
                   <img src={s.url} alt={s.meaning || '表情'} className="h-full w-full object-contain" loading="lazy" />
                 </button>
+                {/* v62：用户表情=可点改意思的按钮；内置包贴纸=纯文本标签（常量不可改）；官方小表情不显 */}
                 {!s.builtin && (
                   <button
                     type="button"
@@ -3117,6 +3122,9 @@ export function WxStickerPanel({
                   >
                     {s.meaning || '＋意思'}
                   </button>
+                )}
+                {s.builtin && s.groupId !== BUILTIN_STICKER_GROUP_ID && (
+                  <p className="mt-0.5 h-4 w-full truncate text-center text-[10px] leading-4 text-black/40 dark:text-white/40">{s.meaning}</p>
                 )}
                 {editMode && !s.builtin && (
                   <button
@@ -3131,9 +3139,9 @@ export function WxStickerPanel({
                 )}
               </div>
             ))}
-            {/* 内置分组不可添加（静态常量）；空占位保持网格末尾对齐 */}
-            {activeGroupId === 'builtin' ? (
-              <span aria-hidden="true" className="h-10 w-full" />
+            {/* 内置分组（官方小表情 + v62 内置表情包）不可添加（静态常量）；空占位与各自网格尺寸对齐 */}
+            {isBuiltinGroupId(activeGroupId) ? (
+              <span aria-hidden="true" className={activeGroupId === 'builtin' ? 'h-10 w-full' : 'aspect-square w-full'} />
             ) : (
               <button
                 type="button"
