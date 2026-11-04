@@ -5053,8 +5053,19 @@ interface WxTurnCtx {
   wantVideoCallSeen: boolean;
   /** 一起听遥控（第三十七轮）：本轮回复里剥出并执行过播控指令（纯指令回复不再落「暂无回复」兑底） */
   musicActed: boolean;
-  // v55：Task 30 AI 引用下线——pendingQuote/quoteMap 字段删除（用户反馈「AI 一直引用我说的话」）
+  /** Task 30 AI 引用（v56 恢复）：[引用:M编号] 标记剥出后暂存的编号——挂到紧随其后的第一条正文消息上；
+ *  标记与正文跨流式分段时靠它跨段接力（buildReplyMsgs 各次调用共享同一 ctx） */
+  pendingQuote?: string;
+  /** Task 30 AI 引用（v56 恢复）：本轮上下文窗口内的消息编号 → 源消息映射（runAiTurn 构建注入）；
+ *  后台接力投递（deliverBgItems）自建 ctx 无映射 → [引用:…] 标记静默丢弃，正文照常 */
+  quoteMap?: Map<string, WxMsg>;
+  /** v56 引用冷却：本轮是否已成功挂载过引用块（一轮连发最多一条带引用，挂过即丢弃后续引用标记） */
+  turnQuoted?: boolean;
 }
+
+/** v56 引用冷却窗口：距上次成功挂载引用不足该时长的轮次一律丢弃引用标记——用户要「学会引用」
+ *  而非「一直引用」，措辞约束之外由代码层兜底，永远不会回到 v53 那种每轮必挂的状态 */
+const AI_QUOTE_COOL_MS = 5 * 60_000;
 
 function ChatPage({
   me,
@@ -6164,6 +6175,9 @@ function ChatPage({
   const carryTextRef = useRef('');
   // 一起听遥控（第三十七轮）：流式分段尾部未闭合的半截播控指令（如「[快进:」），下一段拼回（照片标签 carry 同款机制）
   const musicHoldRef = useRef('');
+  // Task 30 AI 引用（v56 恢复）：上次成功挂载引用块的时刻（跨回合冷却闸，与 AI_QUOTE_COOL_MS 配合——
+  // 一轮最多一条 + 5 分钟内不重复，代码层保证「偶尔引用」而非「一直引用」）
+  const quoteLastAtRef = useRef(0);
 
   /**
    * 消费照片任务：配置完整时每条先生「正在拍照…」系统行，异步生成成功后落照片消息 + 存相册（origin 'ai'）+
@@ -6436,9 +6450,15 @@ function ChatPage({
           }
           continue;
         }
-        // v55：AI 引用回复下线（用户反馈「AI 一直引用我说的话」）——[引用:…] 标记（模型偶发
-        // 残写/跨链路模仿）静默吞掉，不再挂引用块；用户自己长按引用发送的功能不受影响
-        if (part.action.kind === 'quote') continue;
+        // Task 30 AI 引用（[引用:M编号]，v56 恢复）：编号暂存 ctx，挂到紧随其后的第一条正文消息上
+        //（见下方文字分支；标记与正文跨流式分段/切分边界时靠 ctx 跨段接力）。
+        // v56 冷却闸：本轮已挂过引用、或距上次挂载不足 AI_QUOTE_COOL_MS → 静默丢弃（正文照常）
+        if (part.action.kind === 'quote') {
+          if (!ctx.turnQuoted && Date.now() - quoteLastAtRef.current >= AI_QUOTE_COOL_MS) {
+            ctx.pendingQuote = part.action.targetId.trim();
+          }
+          continue;
+        }
         // Task 30 AI 拍一拍（[拍一拍:文案]/[拍一拍]）：系统提示行「「角色」拍了拍你+文案」——
         // 文案由 AI 按人设/记忆/上下文自己决定；拍一拍不是消息，前后正文照常投递
         if (part.action.kind === 'pat') {
@@ -6729,10 +6749,31 @@ function ChatPage({
             const refBodies = refSegs.filter((s) => s.kind === 'text').map((s) => (s.text || '').trim()).filter(Boolean);
             const refIds = refSegs.filter((s) => s.kind === 'imgref' && s.id).map((s) => s.id!) ;
             const body = refBodies.join(' ').replace(/\s{2,}/g, ' ').trim();
-            // v55：Task 30 AI 引用块挂载逻辑删除（引用回复全面下线——教学提示/门牌号注入/
-            // 越界兜底同轮移除，见 chat-rich.ts）；[引用:…] 动作标记在上游分支已静默吞掉
+            // Task 30 AI 引用（v56 恢复）：此前剥出过 [引用:M编号] → 挂到这第一条正文消息上（引用块随气泡展示）；
+            // 编号查不到时分两档：①跨回合编号漂移/后台接力无映射（旧容忍）→ 静默丢弃；
+            // ②编号越界（模型把 [M(N)] 当成「给自己新消息编号」在写，N=最后一条+1）→ 引用意图是真的
+            //（它正在回应对方刚发来的话），回退引用本轮触发回复的那条用户消息，不让引用凭空消失。
+            // 冷却闸在标记剥出处已拦（本处能走到 = 冷却已过）；挂载成功后 turnQuoted 置位 + 记录时刻
+            let attachQuote: WxMsg['quote'] | null = null;
+            if (ctx.pendingQuote) {
+              let qSrc = ctx.quoteMap?.get(ctx.pendingQuote) ?? null;
+              if (!qSrc) {
+                const n = parseInt(ctx.pendingQuote.replace(/\D/g, ''), 10);
+                if (Number.isFinite(n) && n > 0 && (!ctx.quoteMap || n > ctx.quoteMap.size)) {
+                  // 越界自编号：兜底引用最近一条用户消息（本轮触发源，正是模型想回应的对象）。
+                  // 从 quoteMap（与 AI 所见历史同源，含刚发出的这条）倒序找，不受落盘时序影响
+                  qSrc = [...(ctx.quoteMap?.values() ?? [])].reverse().find((x) => x.role === 'me' && !x.recalled) ?? null;
+                }
+              }
+              if (qSrc && !qSrc.recalled) {
+                attachQuote = { name: qSrc.role === 'me' ? me.name : peer.name, content: quoteContentOf(qSrc), id: qSrc.id, time: qSrc.time };
+                ctx.turnQuoted = true;
+                quoteLastAtRef.current = Date.now();
+              }
+              ctx.pendingQuote = undefined;
+            }
             if (body) {
-              out.push({ id, role: 'peer', content: body, time: t });
+              out.push({ id, role: 'peer', content: body, time: t, ...(attachQuote ? { quote: attachQuote } : {}) });
             }
             for (const refId of refIds) {
               const refMsg = cur.find((m) => m.id === refId && m.kind === 'image' && !m.recalled) ?? null;
@@ -6833,6 +6874,18 @@ function ChatPage({
   const deliverBgItems = (items: BgPendingItem[]) => {
     if (items.length === 0) return;
     const ctx: WxTurnCtx = { aiId: uid(), msgIdx: 0, batchStarted: false, wantCallSeen: false, wantVideoCallSeen: false, musicActed: false };
+    // Task 30（v56 恢复）：接力回复同样带消息编号映射——落盘记录按绝对位置重算（与生成侧同口径），
+    // 生成时 AI 看到的 [引用:M编号] 在投递侧能对上同一条消息（中途删消息才可能漂移，罕见可容忍）
+    {
+      let n = 0;
+      const map = new Map<string, WxMsg>();
+      for (const m of loadMsgs(peer.id)) {
+        if (m.recalled || m.error || m.kind === 'notice' || m.kind === 'blockreq') continue;
+        n += 1;
+        map.set(`M${n}`, m);
+      }
+      ctx.quoteMap = map;
+    }
     let queuedAny = false;
     // 接力 generate 存的是完整回复原文：按该会话自己的回复条数决定解析模式（与页面内
     // finalize 同语义）——单条(N=1)整条解析，多条(N>1)走稳定细切，不把整段挤成一个气泡
@@ -6958,8 +7011,20 @@ function ChatPage({
         if (!m.recalled && m.role === 'me' && m.kind === 'image' && m.img) userImgSeq.set(m.id, ++seq);
       }
     }
-    // v55：Task 30 引用编号停注——历史行首不再带 [M数字] 门牌号（AI 引用回复全面下线：
-    // 门牌号只诱导模型照抄成脏文本/伪引用；编号映射 quoteMap/quoteIdOf 一并移除）
+    // Task 30 AI 引用编号（v56 恢复）：会话内每条消息的绝对位置编号（M1..Mn；撤回/错误/通知行/申请卡不占号）——
+    // 历史行前缀 [M数字] 与 [引用:编号] 反查共用同一映射；绝对位置跨回合稳定（对话增长不漂移，
+    // 后台接力投递按落盘记录重算也能对上同一编号）
+    const quoteMap = new Map<string, WxMsg>();
+    const quoteIdOf = new Map<string, string>();
+    {
+      let n = 0;
+      for (const m of base) {
+        if (m.recalled || m.error || m.kind === 'notice' || m.kind === 'blockreq') continue;
+        n += 1;
+        quoteMap.set(`M${n}`, m);
+        quoteIdOf.set(m.id, `M${n}`);
+      }
+    }
     const history = base
       .filter(
         (m) =>
@@ -6989,12 +7054,13 @@ function ChatPage({
         }`;
         return {
         role: m.role === 'me' ? ('user' as const) : ('assistant' as const),
-        // v55：行首不再带 [M数字] 消息编号（AI 引用回复下线）；我的表情以 [发送了表情：意思] 进入历史（AI 理解含义）；
+        // 行首 [M数字] = 消息编号（v56 恢复：AI 用 [引用:编号] 引用它，教学见 chat-rich.ts）；我的表情以 [发送了表情：意思] 进入历史（AI 理解含义）；
         // AI 自己发的表情回写成 [表情包:ID] 示范正确输出格式（意思靠 system 清单反查），避免它模仿我的记录格式导致发表情变文字
         // 深度思考：AI 自己的历史回复带思考过程时还原 [思考]…[/思考] 前缀——模型看到自己一直按此格式输出
         //（in-context 自我一致），新回复的思考块遵循度大幅提升；标签展示前已被流层剥离，不进任何气泡
         content:
           (m.role === 'peer' && m.thinking ? `[思考]${m.thinking}[/思考]\n` : '') +
+          (quoteIdOf.has(m.id) ? `[${quoteIdOf.get(m.id)}] ` : '') +
           pre +
           (m.kind === 'forward' && m.fwd?.merged
             ? `[聊天记录：${(m.fwd.records ?? []).slice(-8).map((r) => `${r.name}：${r.text}`).join(' ／ ')}]`
@@ -7085,8 +7151,9 @@ function ChatPage({
         };
       });
 
-    // 本轮投递上下文（投递管线与接力拉取共用，见组件层 deliverAiMsg/enqueueBatch/buildReplyMsgs）
-    const ctx: WxTurnCtx = { aiId: uid(), msgIdx: 0, batchStarted: false, wantCallSeen: false, wantVideoCallSeen: false, musicActed: false };
+    // 本轮投递上下文（投递管线与接力拉取共用，见组件层 deliverAiMsg/enqueueBatch/buildReplyMsgs）。
+    // v56 恢复：带上 quoteMap（本轮历史窗口的编号映射——[引用:M编号] 反查挂引用块用）
+    const ctx: WxTurnCtx = { aiId: uid(), msgIdx: 0, batchStarted: false, wantCallSeen: false, wantVideoCallSeen: false, musicActed: false, quoteMap };
     carryTextRef.current = ''; // F1 回合开始清 carry：跨段残留只可能属于上一回合，不复用
     musicHoldRef.current = ''; // 一起听遥控：同款回合开始清留存（半截播控指令不串回合）
     // 用户消息立即入列（保存 effect 随即落盘）；AI 回复在全局 store 流式接收，

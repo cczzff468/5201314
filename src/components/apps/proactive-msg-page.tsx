@@ -19,7 +19,7 @@
  */
 
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
-import { BellOff, BellRing, CalendarClock, Check, ChevronLeft, HeartPulse, History, Plus, Send, Sparkles, Timer, Trash2, Zap } from 'lucide-react';
+import { BellOff, BellRing, CalendarClock, Check, ChevronLeft, HeartPulse, Plus, Send, Sparkles, Timer, Trash2, Zap } from 'lucide-react';
 import { ChatToggle } from './chat-settings';
 import { useChatSkin } from '@/lib/ios/chat-skin';
 import { loadBlock } from '@/lib/ios/block-state';
@@ -32,8 +32,6 @@ import {
   removeReminder,
   reminderLabel,
   dayLabel,
-  histTimeLabel,
-  proactiveHistory,
   manuallyFireEvent,
   isProactiveMasterOff,
   setProactiveMasterOff,
@@ -41,9 +39,8 @@ import {
   type ProactiveEvent,
   type ProactiveMsgConfig,
   type ProactiveReminder,
-  type ProactiveHistEntry,
 } from '@/lib/ios/proactive-msg';
-import { ANXIETY_DEFAULT_THRESHOLD } from '@/lib/ios/anxiety';
+import { ANXIETY_DEFAULT_THRESHOLD, ANXIETY_DEFAULT_MIN_WAIT_MS, ANXIETY_DEFAULT_MAX_WAIT_MS } from '@/lib/ios/anxiety';
 import { Slider } from '@/components/ui/slider';
 import { genId } from '@/lib/ios/db';
 
@@ -69,6 +66,23 @@ const ANXIETY_GRACE_PRESETS: { ms: number; label: string }[] = [
   { ms: 30_000, label: '30秒' },
   { ms: 60_000, label: '1分钟' },
   { ms: 120_000, label: '2分钟' },
+  { ms: 300_000, label: '5分钟' },
+  { ms: 600_000, label: '10分钟' },
+  { ms: 1_800_000, label: '30分钟' },
+];
+
+/** v56 追发设置：最短等待档位（焦虑拉满 100% 时两轮追发之间的等待；默认 15 秒） */
+const ANXIETY_MIN_WAIT_PRESETS: { ms: number; label: string }[] = [
+  { ms: 5_000, label: '5秒' },
+  { ms: 15_000, label: '15秒' },
+  { ms: 30_000, label: '30秒' },
+  { ms: 60_000, label: '1分钟' },
+];
+
+/** v56 追发设置：最长等待档位（焦虑刚过阈值时两轮追发之间的等待；默认 3 分钟） */
+const ANXIETY_MAX_WAIT_PRESETS: { ms: number; label: string }[] = [
+  { ms: 60_000, label: '1分钟' },
+  { ms: 180_000, label: '3分钟' },
   { ms: 300_000, label: '5分钟' },
   { ms: 600_000, label: '10分钟' },
   { ms: 1_800_000, label: '30分钟' },
@@ -298,13 +312,6 @@ export function ProactiveMsgPage({
       return [];
     }
   });
-  const [hist, setHist] = useState<ProactiveHistEntry[]>(() => {
-    try {
-      return proactiveHistory(app, contactId);
-    } catch {
-      return [];
-    }
-  });
   // 设备级总开关（Task 52）：与三端「我」设置页的全局开关同一存储，轮询保持同步
   const [masterOff, setMasterOff] = useState<boolean>(() => {
     try {
@@ -327,11 +334,11 @@ export function ProactiveMsgPage({
   };
   const [blockedDir, setBlockedDir] = useState<'byUser' | 'byChar' | null>(readBlockHint);
 
-  /** 提醒/历史清单/总开关轻轮询（NL 解析可能在本页打开时于聊天里创建任务；4s 刷新足够） */
+  /** 提醒清单/总开关轻轮询（NL 解析可能在本页打开时于聊天里创建任务；4s 刷新足够）。
+ *  v57：「最近主动消息」区块已删（历史仍由引擎落库供生成去重用），不再轮询 hist */
   useEffect(() => {
     const t = window.setInterval(() => {
       setReminders(remindersFor(app, contactId));
-      setHist(proactiveHistory(app, contactId));
       setMasterOff(isProactiveMasterOff());
       setBlockedDir(readBlockHint());
     }, 4_000);
@@ -360,6 +367,15 @@ export function ProactiveMsgPage({
   const [graceCustomOpen, setGraceCustomOpen] = useState(false);
   const [graceCustomVal, setGraceCustomVal] = useState('1');
   const [graceCustomUnit, setGraceCustomUnit] = useState<'s' | 'm' | 'h'>('m');
+
+  // v56 追发设置：最短/最长等待自定义面板（两轮追发之间等待的插值两端；改动即写穿 IndexedDB，
+  // 引擎每个 tick 重读——App 启动/进入聊天/改设置立即生效）
+  const [minWaitCustomOpen, setMinWaitCustomOpen] = useState(false);
+  const [minWaitCustomVal, setMinWaitCustomVal] = useState('15');
+  const [minWaitCustomUnit, setMinWaitCustomUnit] = useState<'s' | 'm' | 'h'>('s');
+  const [maxWaitCustomOpen, setMaxWaitCustomOpen] = useState(false);
+  const [maxWaitCustomVal, setMaxWaitCustomVal] = useState('3');
+  const [maxWaitCustomUnit, setMaxWaitCustomUnit] = useState<'s' | 'm' | 'h'>('m');
 
   // 每天定时时刻拨盘
   const [dialOpen, setDialOpen] = useState(false);
@@ -403,6 +419,28 @@ export function ProactiveMsgPage({
     setGraceCustomOpen(false);
   };
 
+  /** v56：自定义最短等待保存（焦虑拉满时两轮追发间隔；3 秒~24 小时，比最长还长时自动抬齐最长） */
+  const applyCustomMinWait = (): void => {
+    const n = Number(minWaitCustomVal);
+    if (!Number.isFinite(n) || n <= 0) return;
+    const ms = Math.round(minWaitCustomUnit === 's' ? n * 1000 : minWaitCustomUnit === 'm' ? n * 60_000 : n * 3600_000);
+    const clamped = Math.max(3_000, Math.min(ms, 24 * 3600_000));
+    const curMax = cfg?.anxietyMaxWaitMs ?? ANXIETY_DEFAULT_MAX_WAIT_MS;
+    update({ anxietyMinWaitMs: clamped, anxietyMaxWaitMs: Math.max(curMax, clamped) });
+    setMinWaitCustomOpen(false);
+  };
+
+  /** v56：自定义最长等待保存（刚过阈值时两轮追发间隔；15 秒~24 小时，比最短还短时自动对齐到最短） */
+  const applyCustomMaxWait = (): void => {
+    const n = Number(maxWaitCustomVal);
+    if (!Number.isFinite(n) || n <= 0) return;
+    const ms = Math.round(maxWaitCustomUnit === 's' ? n * 1000 : maxWaitCustomUnit === 'm' ? n * 60_000 : n * 3600_000);
+    const clamped = Math.max(15_000, Math.min(ms, 24 * 3600_000));
+    const curMin = cfg?.anxietyMinWaitMs ?? ANXIETY_DEFAULT_MIN_WAIT_MS;
+    update({ anxietyMaxWaitMs: Math.max(clamped, curMin) });
+    setMaxWaitCustomOpen(false);
+  };
+
   const saveEvent = (): void => {
     if (!cfg || !evtDraft) return;
     const name = evtDraft.name.trim();
@@ -417,9 +455,6 @@ export function ProactiveMsgPage({
     setCfg(next);
     setEvtDraft(null);
   };
-
-  const kindLabel = (k: ProactiveHistEntry['kind']): string =>
-    k === 'timer' ? '定时' : k === 'event' ? '事件' : k === 'reminder' ? '提醒' : k === 'anxiety' ? '焦虑' : '自主';
 
   if (!cfg) {
     return (
@@ -517,8 +552,8 @@ export function ProactiveMsgPage({
             <BellOff className="h-4 w-4 shrink-0 text-[#FF9500]" strokeWidth={2.2} />
             <span className="text-[12.5px] leading-relaxed text-[#9A6700] dark:text-[#FFC776]">
               {blockedDir === 'byUser'
-                ? `你已拉黑「${contactName}」：拉黑期间 TA 的所有主动消息（定时/事件/自主/提醒）都会暂停，解除拉黑后自动恢复。`
-                : `「${contactName}」已拉黑你：拉黑期间 TA 不会主动发消息，解除拉黑后自动恢复。`}
+                ? `你已拉黑「${contactName}」：TA 的主动消息已暂停，解除后自动恢复。`
+                : `「${contactName}」已拉黑你：期间不会主动发消息，解除后自动恢复。`}
             </span>
           </div>
         )}
@@ -594,7 +629,7 @@ export function ProactiveMsgPage({
                     </button>
                   </div>
                   <p className="mt-2.5 text-[12px] leading-relaxed text-black/35 dark:text-white/35">
-                    当前：每隔{intervalLabel(cfg.timerMs)}，到点 {contactName} 会按人设和近况主动给你发消息
+                    每隔{intervalLabel(cfg.timerMs)}发一条，错过几分钟内仍会补发
                   </p>
                 </>
               ) : (
@@ -617,7 +652,7 @@ export function ProactiveMsgPage({
                     </span>
                   </button>
                   <p className="mt-2 text-[12px] leading-relaxed text-black/35 dark:text-white/35">
-                    对齐钟表时间（错过几分钟内仍会补发）；{cfg.timerDailyTime ? `每天 ${cfg.timerDailyTime} ${contactName} 会主动给你发消息` : `选好时刻后，${contactName} 每天都会准时报到`}
+                    错过几分钟内仍会补发
                   </p>
                 </>
               )}
@@ -683,7 +718,7 @@ export function ProactiveMsgPage({
                         className="grid h-8 w-8 shrink-0 place-items-center rounded-full transition-all active:scale-90"
                         style={{ background: `${accent}15`, color: accent }}
                         onClick={() => {
-                          void manuallyFireEvent(app, contactId, e.id).then(() => setHist(proactiveHistory(app, contactId)));
+                          void manuallyFireEvent(app, contactId, e.id);
                         }}
                       >
                         <Send className="h-[13.5px] w-[13.5px]" strokeWidth={2.2} />
@@ -720,7 +755,7 @@ export function ProactiveMsgPage({
           )}
           {cfg.events.length === 0 && (
             <p className="px-4 pb-3.5 pt-0.5 text-[12px] leading-relaxed text-black/40 dark:text-white/40">
-              如「下班路上」「午休结束」——到条件时间，{contactName} 会结合事件主动发消息
+              如「下班路上」「午休结束」，到点 {contactName} 会结合事件找你
             </p>
           )}
         </div>
@@ -742,9 +777,9 @@ export function ProactiveMsgPage({
           {cfg.autoOn && (
             <div className="border-t px-4 py-3.5" style={{ borderColor: 'inherit' }}>
               <p className="text-[12px] leading-[1.7] text-black/40 dark:text-white/40">
-                不限定时间和事件：{contactName} 会根据 TA 的性格、你们的记忆、最近聊了什么和当前时间，自己决定要不要主动发消息、什么时候发、发什么（深夜不会打扰）。
+                {contactName} 自己决定要不要找你、什么时候找（深夜不打扰）
               </p>
-              <p className="mb-2 mt-3 text-[12px] text-black/40 dark:text-white/40">考虑频率（多久琢磨一次要不要找你）</p>
+              <p className="mb-2 mt-3 text-[12px] text-black/40 dark:text-white/40">考虑频率</p>
               <div className="flex flex-wrap gap-2">
                 {AUTO_FREQ_PRESETS.map((m) => (
                   <button
@@ -759,9 +794,6 @@ export function ProactiveMsgPage({
                   </button>
                 ))}
               </div>
-              <p className="mt-2.5 text-[12px] leading-relaxed text-black/35 dark:text-white/35">
-                当前：约每 {cfg.autoFreqMin ?? 5} 分钟考虑一次（正在聊天时不打扰）
-              </p>
             </div>
           )}
         </div>
@@ -819,12 +851,13 @@ export function ProactiveMsgPage({
             </div>
           )}
           <p className="px-4 pb-3.5 pt-0.5 text-[12px] leading-relaxed text-black/40 dark:text-white/40">
-            在聊天里对 {contactName} 说「10分钟后提醒我喝水」「每天晚上10点给我发消息」「每隔1小时发个消息」，会自动创建任务（错过了也会补发）
+            聊天里说「10分钟后提醒我喝水」「每天晚10点给我发消息」即可创建
           </p>
         </div>
 
-        {/* ⑤ 焦虑关怀（v51 焦虑值系统 / v52 设置重设计）：焦虑值 ≥ 阈值且用户超时未回复 → 带着焦虑主动发消息。
-            v52 按用户要求：删「此刻焦虑值」实时读数；触发阈值改滑块（30~100%）；宽限时间预设 + 自定义。 */}
+        {/* ⑤ 焦虑追发（v51 焦虑值系统 / v52 设置重设计 / v56 追发引擎）：焦虑值 ≥ 阈值且用户超时未回复
+            → 按动态插值挂起追发倒计时，到点带着焦虑主动追发。四个参数全部实时落库（IndexedDB）并
+            被引擎每个 tick 重读：阈值滑块（30~100%）+ 宽限时间 + 最短/最长等待（插值两端）。 */}
         <div className={`${glassCard} mt-3 overflow-hidden`}>
           <div className={rowCls}>
             <span className="flex items-center gap-2.5">
@@ -832,17 +865,17 @@ export function ProactiveMsgPage({
                 <HeartPulse className="h-[15px] w-[15px]" strokeWidth={2.4} />
               </IconTile>
               <span>
-                <span className="block text-[15.5px] leading-tight">焦虑关怀</span>
-                <span className="mt-0.5 block text-[11.5px] leading-tight text-black/40 dark:text-white/40">等不到你回复，TA 会越来越焦虑</span>
+                <span className="block text-[15.5px] leading-tight">焦虑追发</span>
+                <span className="mt-0.5 block text-[11.5px] leading-tight text-black/40 dark:text-white/40">等不到你回复，TA 会越来越焦虑地追发消息</span>
               </span>
             </span>
-            <ChatToggle on={cfg.anxietyOn !== false} onChange={(v) => update({ anxietyOn: v })} accent={accent} testId={`${testPrefix}-proactive-anxiety`} label="焦虑关怀" />
+            <ChatToggle on={cfg.anxietyOn !== false} onChange={(v) => update({ anxietyOn: v })} accent={accent} testId={`${testPrefix}-proactive-anxiety`} label="焦虑追发" />
           </div>
           {cfg.anxietyOn !== false && (
             <div className="border-t px-4 py-3.5" style={{ borderColor: 'inherit' }} data-testid={`${testPrefix}-proactive-anxiety-config`}>
               {/* 触发阈值滑块（v52：原 5 档 chips 换滑块；30~100%、步进 5、默认 70——与存储层收敛同口径） */}
               <div className="flex items-baseline justify-between gap-2">
-                <span className="text-[12.5px] text-black/45 dark:text-white/45">触发阈值（焦虑值达到多少开始主动发消息）</span>
+                <span className="text-[12.5px] text-black/45 dark:text-white/45">触发阈值</span>
                 <span className="shrink-0 text-[15px] font-semibold tabular-nums leading-none" style={{ color: accent }}>
                   {cfg.anxietyThreshold ?? ANXIETY_DEFAULT_THRESHOLD}%
                 </span>
@@ -856,10 +889,11 @@ export function ProactiveMsgPage({
                 aria-label="焦虑触发阈值"
                 data-testid={`${testPrefix}-proactive-anxiety-threshold`}
                 className="mt-2.5"
-                // v53 滑块交互配色（用户要求变绿）：shadcn Slider 的轨道/圆钮用 bg-primary/border-primary；
+                // v53/v56 滑块交互配色（用户要求变绿）：固定 iOS 绿 #34C759（三端一致，不随 App 主题色走
+                // ——QQ 主题蓝会违背「变绿」诉求）；shadcn Slider 的轨道/圆钮用 bg-primary/border-primary，
                 // 本项目 globals.css 是 @theme inline（工具类直接引用底层 --primary/--ring），所以要在
                 // 内联样式里覆盖这两个底层变量（之前覆盖 --color-primary 无效——轨道仍近黑色）
-                style={{ '--primary': accent, '--ring': accent } as CSSProperties}
+                style={{ '--primary': '#34C759', '--ring': '#34C759' } as CSSProperties}
               />
               {/* 宽限时间（v52：预设 + 自定义面板，时间可自定义） */}
               <p className="mb-2 mt-4 text-[12px] text-black/40 dark:text-white/40">多久没回复开始涨焦虑</p>
@@ -899,50 +933,91 @@ export function ProactiveMsgPage({
                   自定义
                 </button>
               </div>
+              {/* 追发最短等待（v56 插值下限：焦虑拉满 100% 时两轮追发之间的等待） */}
+              <p className="mb-2 mt-4 text-[12px] text-black/40 dark:text-white/40">最短等待（焦虑拉满时）</p>
+              <div className="flex flex-wrap gap-2">
+                {ANXIETY_MIN_WAIT_PRESETS.map((w) => (
+                  <button
+                    key={w.ms}
+                    type="button"
+                    data-testid={`${testPrefix}-proactive-anxiety-minwait-${w.ms}`}
+                    onClick={() => update({ anxietyMinWaitMs: w.ms, anxietyMaxWaitMs: Math.max(cfg.anxietyMaxWaitMs ?? ANXIETY_DEFAULT_MAX_WAIT_MS, w.ms) })}
+                    className={`${chipCls} ${(cfg.anxietyMinWaitMs ?? ANXIETY_DEFAULT_MIN_WAIT_MS) === w.ms ? '' : chipIdle}`}
+                    style={(cfg.anxietyMinWaitMs ?? ANXIETY_DEFAULT_MIN_WAIT_MS) === w.ms ? { background: accent, color: '#fff' } : undefined}
+                  >
+                    {w.label}
+                  </button>
+                ))}
+                <button
+                  type="button"
+                  data-testid={`${testPrefix}-proactive-anxiety-minwait-custom`}
+                  onClick={() => {
+                    const ms = cfg.anxietyMinWaitMs ?? ANXIETY_DEFAULT_MIN_WAIT_MS;
+                    if (ms >= 3600_000 && ms % 3600_000 === 0) {
+                      setMinWaitCustomVal(String(ms / 3600_000));
+                      setMinWaitCustomUnit('h');
+                    } else if (ms >= 60_000 && ms % 60_000 === 0) {
+                      setMinWaitCustomVal(String(ms / 60_000));
+                      setMinWaitCustomUnit('m');
+                    } else {
+                      setMinWaitCustomVal(String(Math.max(3, Math.round(ms / 1000))));
+                      setMinWaitCustomUnit('s');
+                    }
+                    setMinWaitCustomOpen(true);
+                  }}
+                  className={`${chipCls} ${!ANXIETY_MIN_WAIT_PRESETS.some((w) => w.ms === (cfg.anxietyMinWaitMs ?? ANXIETY_DEFAULT_MIN_WAIT_MS)) ? '' : chipIdle}`}
+                  style={!ANXIETY_MIN_WAIT_PRESETS.some((w) => w.ms === (cfg.anxietyMinWaitMs ?? ANXIETY_DEFAULT_MIN_WAIT_MS)) ? { background: accent, color: '#fff' } : undefined}
+                >
+                  自定义
+                </button>
+              </div>
+              {/* 追发最长等待（v56 插值上限：焦虑刚过阈值时两轮追发之间的等待） */}
+              <p className="mb-2 mt-4 text-[12px] text-black/40 dark:text-white/40">最长等待（刚过阈值时）</p>
+              <div className="flex flex-wrap gap-2">
+                {ANXIETY_MAX_WAIT_PRESETS.map((w) => (
+                  <button
+                    key={w.ms}
+                    type="button"
+                    data-testid={`${testPrefix}-proactive-anxiety-maxwait-${w.ms}`}
+                    onClick={() => update({ anxietyMaxWaitMs: Math.max(w.ms, cfg.anxietyMinWaitMs ?? ANXIETY_DEFAULT_MIN_WAIT_MS) })}
+                    className={`${chipCls} ${(cfg.anxietyMaxWaitMs ?? ANXIETY_DEFAULT_MAX_WAIT_MS) === w.ms ? '' : chipIdle}`}
+                    style={(cfg.anxietyMaxWaitMs ?? ANXIETY_DEFAULT_MAX_WAIT_MS) === w.ms ? { background: accent, color: '#fff' } : undefined}
+                  >
+                    {w.label}
+                  </button>
+                ))}
+                <button
+                  type="button"
+                  data-testid={`${testPrefix}-proactive-anxiety-maxwait-custom`}
+                  onClick={() => {
+                    const ms = cfg.anxietyMaxWaitMs ?? ANXIETY_DEFAULT_MAX_WAIT_MS;
+                    if (ms >= 3600_000 && ms % 3600_000 === 0) {
+                      setMaxWaitCustomVal(String(ms / 3600_000));
+                      setMaxWaitCustomUnit('h');
+                    } else if (ms >= 60_000 && ms % 60_000 === 0) {
+                      setMaxWaitCustomVal(String(ms / 60_000));
+                      setMaxWaitCustomUnit('m');
+                    } else {
+                      setMaxWaitCustomVal(String(Math.max(15, Math.round(ms / 1000))));
+                      setMaxWaitCustomUnit('s');
+                    }
+                    setMaxWaitCustomOpen(true);
+                  }}
+                  className={`${chipCls} ${!ANXIETY_MAX_WAIT_PRESETS.some((w) => w.ms === (cfg.anxietyMaxWaitMs ?? ANXIETY_DEFAULT_MAX_WAIT_MS)) ? '' : chipIdle}`}
+                  style={!ANXIETY_MAX_WAIT_PRESETS.some((w) => w.ms === (cfg.anxietyMaxWaitMs ?? ANXIETY_DEFAULT_MAX_WAIT_MS)) ? { background: accent, color: '#fff' } : undefined}
+                >
+                  自定义
+                </button>
+              </div>
+              {/* v57 简约化：插值说明 + 长说明合并为一行 */}
               <p className="mt-2.5 text-[12px] leading-relaxed text-black/35 dark:text-white/35">
-                焦虑值随你未回复的时间上涨（超过 {intervalLabel(cfg.anxietyGraceMs ?? 60_000)} 起算；冷淡回复、吵架、提到别人也会涨，按 TA 的人设快慢不同）；达到 {cfg.anxietyThreshold ?? ANXIETY_DEFAULT_THRESHOLD}% 后 TA 会带着当下的焦虑主动发消息——约每 1 分钟忍不住发一「轮」，每轮像真人那样连发好几条短消息——你回复 TA，就会安心下来。
+                焦虑随未回复上涨；达到阈值后按最长等待 → 最短等待动态追发，越焦虑追越紧。你一回复立刻打断，不会一哄就清零。
               </p>
             </div>
           )}
         </div>
 
-        {/* ⑥ 最近主动消息（Task 51 C2） */}
-        {hist.length > 0 && (
-          <div className={`${glassCard} mt-3 overflow-hidden`}>
-            <div className={rowCls}>
-              <span className="flex items-center gap-2.5">
-                <IconTile color="#8E8E93">
-                  <History className="h-[15px] w-[15px]" strokeWidth={2.4} />
-                </IconTile>
-                <span>
-                  <span className="block text-[15.5px] leading-tight">最近主动消息</span>
-                  <span className="mt-0.5 block text-[11.5px] leading-tight text-black/40 dark:text-white/40">TA 最近主动发过什么</span>
-                </span>
-              </span>
-              <span className={`shrink-0 rounded-full px-2.5 py-1 text-[11.5px] ${chipIdle}`}>{hist.length} 条</span>
-            </div>
-            <div className="flex flex-col gap-2 px-3 pb-3">
-              {hist.map((h, i) => (
-                <div key={`${h.at}-${i}`} className={miniCard}>
-                  <p className="text-[14px] leading-snug">{h.text}</p>
-                  <p className="mt-1.5 flex items-center gap-1.5 text-[11.5px] text-black/40 dark:text-white/40">
-                    <span className="rounded-full px-1.5 py-0.5 text-[10px]" style={{ background: `${accent}15`, color: accent }}>
-                      {kindLabel(h.kind)}
-                    </span>
-                    {h.late && <span className="rounded-full bg-amber-500/15 px-1.5 py-0.5 text-[10px] text-amber-600 dark:text-amber-400">来晚了</span>}
-                    <span className="truncate">{histTimeLabel(h.at)}</span>
-                  </p>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        <div className={`${glassCard} mt-3 rounded-[16px] px-4 py-3`}>
-          <p className="text-[11.5px] leading-[1.7] text-black/40 dark:text-white/40">
-            主动发的消息基于角色人设、记忆、最近聊天和当前时间生成，会像正常聊天一样进入聊天记录并写入记忆；每个角色的设置相互独立，可随时关闭。
-          </p>
-        </div>
+        {/* v57：⑥「最近主动消息」区块删除（用户要求）；历史仍由引擎落库供生成去重，仅不再展示 */}
         </div>
       </div>
 
@@ -1057,6 +1132,124 @@ export function ProactiveMsgPage({
               className="h-10 flex-1 rounded-full text-[14.5px] font-medium text-white transition-all active:scale-95"
               style={{ background: accent }}
               onClick={applyCustomGrace}
+            >
+              保存
+            </button>
+          </div>
+        </div>
+      </GlassModal>
+
+      {/* v56 追发设置：最短等待自定义面板（毛玻璃胶囊弹窗；焦虑拉满时两轮追发间隔） */}
+      <GlassModal open={minWaitCustomOpen} onClose={() => setMinWaitCustomOpen(false)} label="自定义最短等待">
+        <div data-testid={`${testPrefix}-proactive-minwait-custom-panel`}>
+          <p className={`text-center ${titleCls}`}>自定义最短等待</p>
+          <p className="mt-1 text-center text-[12px] text-black/40 dark:text-white/40">焦虑拉满（100%）时，两轮追发之间等这么久（3 秒 ~ 24 小时）</p>
+          <div className="mt-4 flex items-center gap-2.5">
+            <input
+              type="number"
+              min="3"
+              step="any"
+              value={minWaitCustomVal}
+              onChange={(e) => setMinWaitCustomVal(e.target.value)}
+              data-testid={`${testPrefix}-proactive-minwait-custom-input`}
+              className={fieldCls}
+              placeholder="如 15"
+              aria-label="最短等待数值"
+            />
+            <div className={`flex shrink-0 overflow-hidden rounded-full p-0.5 ${chipIdle}`}>
+              {(
+                [
+                  ['s', '秒'],
+                  ['m', '分'],
+                  ['h', '时'],
+                ] as const
+              ).map(([u, label]) => (
+                <button
+                  key={u}
+                  type="button"
+                  onClick={() => setMinWaitCustomUnit(u)}
+                  aria-pressed={minWaitCustomUnit === u}
+                  className={`rounded-full px-3 py-1.5 text-[13px] transition-all ${minWaitCustomUnit === u ? 'shadow-sm' : 'opacity-60'}`}
+                  style={minWaitCustomUnit === u ? { background: accent, color: '#fff' } : undefined}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="mt-5 flex gap-2.5">
+            <button
+              type="button"
+              className={`h-10 flex-1 rounded-full text-[14.5px] transition-all active:scale-95 ${chipIdle} text-black/55 dark:text-white/60`}
+              onClick={() => setMinWaitCustomOpen(false)}
+            >
+              取消
+            </button>
+            <button
+              type="button"
+              data-testid={`${testPrefix}-proactive-minwait-custom-save`}
+              className="h-10 flex-1 rounded-full text-[14.5px] font-medium text-white transition-all active:scale-95"
+              style={{ background: accent }}
+              onClick={applyCustomMinWait}
+            >
+              保存
+            </button>
+          </div>
+        </div>
+      </GlassModal>
+
+      {/* v56 追发设置：最长等待自定义面板（毛玻璃胶囊弹窗；焦虑刚过阈值时两轮追发间隔） */}
+      <GlassModal open={maxWaitCustomOpen} onClose={() => setMaxWaitCustomOpen(false)} label="自定义最长等待">
+        <div data-testid={`${testPrefix}-proactive-maxwait-custom-panel`}>
+          <p className={`text-center ${titleCls}`}>自定义最长等待</p>
+          <p className="mt-1 text-center text-[12px] text-black/40 dark:text-white/40">焦虑刚过阈值时，两轮追发之间等这么久（15 秒 ~ 24 小时；比最短还短会自动对齐）</p>
+          <div className="mt-4 flex items-center gap-2.5">
+            <input
+              type="number"
+              min="15"
+              step="any"
+              value={maxWaitCustomVal}
+              onChange={(e) => setMaxWaitCustomVal(e.target.value)}
+              data-testid={`${testPrefix}-proactive-maxwait-custom-input`}
+              className={fieldCls}
+              placeholder="如 3"
+              aria-label="最长等待数值"
+            />
+            <div className={`flex shrink-0 overflow-hidden rounded-full p-0.5 ${chipIdle}`}>
+              {(
+                [
+                  ['s', '秒'],
+                  ['m', '分'],
+                  ['h', '时'],
+                ] as const
+              ).map(([u, label]) => (
+                <button
+                  key={u}
+                  type="button"
+                  onClick={() => setMaxWaitCustomUnit(u)}
+                  aria-pressed={maxWaitCustomUnit === u}
+                  className={`rounded-full px-3 py-1.5 text-[13px] transition-all ${maxWaitCustomUnit === u ? 'shadow-sm' : 'opacity-60'}`}
+                  style={maxWaitCustomUnit === u ? { background: accent, color: '#fff' } : undefined}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="mt-5 flex gap-2.5">
+            <button
+              type="button"
+              className={`h-10 flex-1 rounded-full text-[14.5px] transition-all active:scale-95 ${chipIdle} text-black/55 dark:text-white/60`}
+              onClick={() => setMaxWaitCustomOpen(false)}
+            >
+              取消
+            </button>
+            <button
+              type="button"
+              data-testid={`${testPrefix}-proactive-maxwait-custom-save`}
+              className="h-10 flex-1 rounded-full text-[14.5px] font-medium text-white transition-all active:scale-95"
+              style={{ background: accent }}
+              onClick={applyCustomMaxWait}
             >
               保存
             </button>

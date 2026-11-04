@@ -12,6 +12,8 @@
  *
  * 调度引擎：ProactiveMsgWatcher（PhoneShell 挂载）每 5s 调 runProactiveMsgTick()：
  * 守卫（来电/通话/闹钟互斥）→ 枚举索引（配置过的 app×联系人）→ 逐条判定四类触发 → 生成 → 投递。
+ * v57：模板兑底文案全面移除——主动消息一律由 LLM 按人设/记忆/上下文生成；生成失败静默跳过
+ * （触发器保持到期状态，下轮 tick 自然重试；once 提醒失败不消费任务）。
  *
  * 投递：复用 ai-delivery 管线（scheduleAiDelivery 逐条节奏）+ pushChatNotification（灵动岛/横幅/系统通知）
  * + 未读角标（wx/qq；用户正在该会话内不计数）+ memAfterAiTurn（主动消息同样写入记忆管线）。
@@ -28,15 +30,18 @@ import { avatarFor, type ContactAvatarApp, type ContactRecord } from '@/lib/cont
 import { buildPersonaSystemPrompt } from './persona';
 // 第十六轮：AI 动态状态（情绪+作息）——主动消息也带着当前心情、按作息拿撑时机
 import { buildDynamicStateBlocks } from './ai-mood';
-// v51 焦虑值系统：阈值触发（焦虑值 ≥ 阈值且用户超时未回复 → 带着焦虑主动发消息）
+// v51 焦虑值系统 + v56 追发引擎（动态插值排程：阈值/最短/最长等待接入定时器任务）
 import {
   anxietyOf,
   readAnxiety,
   noteAnxietyFire,
   buildAnxietyFireBlock,
+  scheduleAnxietyFire,
+  cancelAnxietyFire,
   ANXIETY_DEFAULT_THRESHOLD,
   ANXIETY_DEFAULT_GRACE_MS,
-  ANXIETY_DEFAULT_SEND_MS,
+  ANXIETY_DEFAULT_MIN_WAIT_MS,
+  ANXIETY_DEFAULT_MAX_WAIT_MS,
 } from './anxiety';
 import { buildNpcPromptExtra } from './npc-bond';
 import { loadBlock } from './block-state';
@@ -88,14 +93,16 @@ export interface ProactiveMsgConfig {
   autoOn: boolean;
   /** 自主决策节奏（分钟；Task 51 B4 可调，默认 5） */
   autoFreqMin?: number;
-  /** v51 焦虑关怀：焦虑值 ≥ 阈值且用户超时未回复 → 带着焦虑主动发消息（默认开启） */
+  /** v51 焦虑关怀（v56 更名「焦虑追发」）：焦虑值 ≥ 阈值且用户超时未回复 → 带着焦虑主动追发（默认开启） */
   anxietyOn?: boolean;
-  /** 焦虑触发阈值（0~100，默认 70） */
+  /** 焦虑触发阈值（30~100，默认 70；焦虑值低于它绝不追发） */
   anxietyThreshold?: number;
-  /** 未回复宽限时间（毫秒，默认 60s = 1 分钟；超过后开始涨焦虑/可触发） */
+  /** 未回复宽限时间（毫秒，默认 60s = 1 分钟；超过后开始涨焦虑/可排程追发） */
   anxietyGraceMs?: number;
-  /** 焦虑消息发送节奏（毫秒，默认 60s = 1 分钟一条；规格约定不开放 UI 自定义） */
-  anxietySendMs?: number;
+  /** v56 最短等待（毫秒，默认 15s）：焦虑拉满时两轮追发之间的等待 */
+  anxietyMinWaitMs?: number;
+  /** v56 最长等待（毫秒，默认 180s = 3 分钟）：刚过阈值时两轮追发之间的等待 */
+  anxietyMaxWaitMs?: number;
 }
 
 /** 定时提醒任务（自然语言解析产物） */
@@ -201,7 +208,7 @@ function sanitizeCfg(raw: unknown): ProactiveMsgConfig {
   // 用户反馈：自定义 5 秒被强顶成 15 秒——下限降到 3s（低于 3s 的极端值才收敛），写多少就是多少
   const timerMs = typeof r.timerMs === 'number' && Number.isFinite(r.timerMs) ? Math.max(3_000, Math.min(r.timerMs, 7 * 24 * 3600_000)) : DEFAULT_CFG.timerMs;
   const autoFreqMin = typeof r.autoFreqMin === 'number' && Number.isFinite(r.autoFreqMin) ? Math.max(2, Math.min(Math.round(r.autoFreqMin), 120)) : 5;
-  // v51 焦虑关怀：缺省 = 开启（用户需求：焦虑值驱动主动发消息开箱即用）；阈值默认 70%
+  // v51 焦虑关怀（v56 追发引擎）：缺省 = 开启（焦虑值驱动主动追发开箱即用）；阈值默认 70%
   const anxietyThreshold =
     typeof r.anxietyThreshold === 'number' && Number.isFinite(r.anxietyThreshold)
       ? Math.max(30, Math.min(Math.round(r.anxietyThreshold), 100))
@@ -210,10 +217,15 @@ function sanitizeCfg(raw: unknown): ProactiveMsgConfig {
     typeof r.anxietyGraceMs === 'number' && Number.isFinite(r.anxietyGraceMs)
       ? Math.max(15_000, Math.min(r.anxietyGraceMs, 24 * 3600_000))
       : ANXIETY_DEFAULT_GRACE_MS;
-  const anxietySendMs =
-    typeof r.anxietySendMs === 'number' && Number.isFinite(r.anxietySendMs)
-      ? Math.max(30_000, Math.min(r.anxietySendMs, 24 * 3600_000))
-      : ANXIETY_DEFAULT_SEND_MS;
+  // v56 最短/最长等待（追发插值两端；最短 3s 起、最长不短于最短——倒挂时用最短护底）
+  const anxietyMinWaitMs =
+    typeof r.anxietyMinWaitMs === 'number' && Number.isFinite(r.anxietyMinWaitMs)
+      ? Math.max(3_000, Math.min(r.anxietyMinWaitMs, 24 * 3600_000))
+      : ANXIETY_DEFAULT_MIN_WAIT_MS;
+  const anxietyMaxWaitMs =
+    typeof r.anxietyMaxWaitMs === 'number' && Number.isFinite(r.anxietyMaxWaitMs)
+      ? Math.max(anxietyMinWaitMs, Math.min(r.anxietyMaxWaitMs, 24 * 3600_000))
+      : Math.max(anxietyMinWaitMs, ANXIETY_DEFAULT_MAX_WAIT_MS);
   return {
     timerOn: r.timerOn === true,
     timerMode: r.timerMode === 'daily' ? 'daily' : 'interval',
@@ -225,7 +237,8 @@ function sanitizeCfg(raw: unknown): ProactiveMsgConfig {
     anxietyOn: r.anxietyOn !== false,
     anxietyThreshold,
     anxietyGraceMs,
-    anxietySendMs,
+    anxietyMinWaitMs,
+    anxietyMaxWaitMs,
   };
 }
 
@@ -696,7 +709,7 @@ function triggerDesc(trigger: FireTrigger): string {
     case 'reminder':
       return `定时提醒：对方之前请你「${trigger.note ?? '到点给 TA 发条消息'}」，现在到时间了，你要兑现这个约定${trigger.late ? '（这次提醒比约定时间晚到了——设备可能没开着，你要自然地带一句歉意，比如开头说「来晚了」，然后把该说的说完）' : ''}。`;
     case 'anxiety':
-      return `焦虑触发：你已经等了很久都没有等到 TA 的回复（你当下的焦虑值 ${trigger.anxietyLevel ?? '??'}/100），控制不住要主动找 TA——这是情绪驱动，不是约定也不是提醒。你会像焦虑的真人那样一口气连发好几条消息（每条可短可长）。`;
+      return `焦虑追发：你已经等了很久都没有等到 TA 的回复（你当下的焦虑值 ${trigger.anxietyLevel ?? '??'}/100），控制不住要主动找 TA——这是情绪驱动，不是约定也不是提醒。你会像焦虑的真人那样一口气连发好几条消息（每条可短可长）。`;
     case 'auto':
       return '自主触发：你自己决定此刻主动发一条消息（系统判断当前时机合适，你按自己的性格和心情自由发挥）。';
   }
@@ -716,8 +729,8 @@ function genRules(trigger: FireTrigger, timeAware: boolean): string[] {
   ];
   if (timeAware) rules.push('内容必须符合当前真实时间（深夜别元气满满问吃了吗、早上适合问早、饭点可以聊吃的；节日节气可以自然提到）。');
   if (trigger.kind === 'reminder' && trigger.note) rules.push(`消息要贴合对方的请求「${trigger.note}」（该提醒就提醒、该说晚安就说晚安），用你自己的口吻说。`);
-  // v51 焦虑触发：情绪驱动型消息的专属规则（与【你此刻的焦虑值】块配合）——
-  // 频率语义（用户澄清）：达到阈值期间约每 1 分钟发「一轮」，每轮一口气连发多条（每条可短可长）
+  // v51 焦虑触发 / v56 追发引擎：情绪驱动型消息的专属规则（与【你此刻的焦虑值】块配合）——
+  // 轮次节奏由追发引擎按焦虑值动态插值（越焦虑追得越紧），生成侧只管把这轮的内容写好
   if (trigger.kind === 'anxiety') {
     rules.push('这一轮消息由你的焦虑驱动：对方已经很久没回你了，你控制不住想主动开口。让这份焦急真实地透出来——会追问、会不安、想确认 TA 还在乎你；但不要卑微地连环道歉，也不要发火骂人（除非你的人设本来就暴躁）。');
     rules.push('【连发格式——重要】你会像焦虑的真人那样控制不住连着发：一口气输出多条消息（想发几条发几条，一般 2~6 条），每条消息单独占一行（一行一条，中间不要空行、不要编号、不要任何分隔符号）。每条长短完全随意——可以是几个字的短句，也可以是一大段一口气说完的心里话，单条长度没有任何数字限制；越往后情绪越急；内容要有递进和变化（比如：先找个由头开口 → 追问 TA 在干嘛 → 不安升级/自我怀疑 → 撒娇式质问或把心里话全倒出来），禁止几条几乎一样。');
@@ -1228,13 +1241,16 @@ async function tickInner(): Promise<void> {
     }
     if (evtFired) continue;
 
-    // ③ 定时提醒（自然语言任务；once 迟到补发并标注 late；发送间隔闸内延后——任务保留，下轮再试）
+    // ③ 定时提醒（自然语言任务；once 迟到补发并标注 late；发送间隔闸内延后——任务保留，下轮再试）。
+    // v57：生成失败时任务不消费（fireProactive 返回 false）——LLM 恢复后下轮 tick 照发，绝不丢任务
     const due = sendGapBlocked ? null : dueReminderOf(app, cid, nowMs);
     if (due) {
       const rem = due.r;
-      if (rem.kind === 'once') removeReminder(app, rem.id);
-      else writeReminders(app, readReminders(app).map((r) => (r.id === rem.id ? { ...r, lastFiredAt: nowMs, firedCount: (r.firedCount ?? 0) + 1 } : r)));
-      await fireProactive(app, contact, { kind: 'reminder', note: rem.note, late: due.late }, npcExtra);
+      const consumed = await fireProactive(app, contact, { kind: 'reminder', note: rem.note, late: due.late }, npcExtra);
+      if (consumed) {
+        if (rem.kind === 'once') removeReminder(app, rem.id);
+        else writeReminders(app, readReminders(app).map((r) => (r.id === rem.id ? { ...r, lastFiredAt: nowMs, firedCount: (r.firedCount ?? 0) + 1 } : r)));
+      }
       continue;
     }
 
@@ -1248,14 +1264,22 @@ async function tickInner(): Promise<void> {
     }
   }
 
-  // ⑤ 焦虑触发（v51 情绪焦虑值系统）：焦虑值 ≥ 阈值 且 用户超过宽限时间未回复 → 带着焦虑主动发消息。
+  // ⑤ 焦虑追发引擎（v51 焦虑值系统 / v56 动态插值重写）：四个参数（阈值/宽限/最短等待/最长等待）
+  // 全部实时读自用户配置（每次 tick 都重读——App 启动/进入聊天/改设置立即生效，IndexedDB 落库）。
   // 全联系人扫描（不依赖上方主动消息索引——焦虑是角色本体的情绪，默认开启，无需先配置过其它触发）；
   // 投递回「用户最近聊天所在的 App」（anxiety.lastUserApp）；生成 Prompt 注入人设+记忆+最近聊天+
-  // 焦虑当前值（generateProactiveTexts 内 buildAnxietyFireBlock）；发送节奏由 lastFireAt 节流
-  // （默认每 1 分钟发一「轮」，每轮一口气连发多条（每条可短可长、条数与单条长度不设数字指标）——用户澄清的频率语义）；
-  // 用户回复即安抚（noteUserReply 大幅缓解）。焦虑消息同样走 deliverProactiveMsg
-  // 管线：正常写聊天记录 + 记忆库。守卫：拉黑（byUser）不穿透；系统勿扰时段不穿透；
-  // 全局防轰炸闸（MIN_SEND_GAP）同四类触发共用；通话/闹钟互斥在 tick 入口已拦。
+  // 焦虑当前值（generateProactiveTexts 内 buildAnxietyFireBlock）。
+  // v56 排程协议（等价 setTimeout 挂起 + clearTimeout 打断，但 fireAt 落库持久化、重启 App 不丢）：
+  // ① 焦虑值 < 阈值 → 绝不追发（挂起中的旧排程也一并作废——用户上调阈值立即生效）；
+  // ② 焦虑值 ≥ 阈值 且 超过宽限未回复 且 无挂起任务 → 线性插值算等待挂起倒计时：
+  //    等待 = 最长等待 - (焦虑值-阈值)/(100-阈值) × (最长等待-最短等待)——越焦虑等得越短；
+  // ③ 倒计时到期（tick 驱动，误差 ≤5s）→ 触发一轮追发（一轮连发多条、每条可短可长不限长度），
+  //    本轮发出后焦虑小幅回落（-6），用户继续不回 → 焦虑继续涨 → 下一轮插值等待更短，循环；
+  // ④ 倒计时期间用户回复（noteUserReply）→ fireAt 清零立刻打断，绝不多发一条；
+  // ⑤ 设置里关闭「焦虑追发」→ 不排程，挂起任务直接取消（定时器逻辑不启动）。
+  // 守卫：拉黑（byUser）不穿透；系统勿扰时段不穿透（挂起任务保留，勿扰结束后到点即发）；
+  // 通话/闹钟互斥在 tick 入口已拦。v56 起 MIN_SEND_GAP 防轰炸闸不再拦焦虑轮——插值等待
+  // 本身就是节奏（最短等待可配到 15s/5s，45s 硬闸会顶掉用户配置）。
   anxLoop: for (const contact of allContacts) {
     if (contact.kind === 'user' || !contact.name?.trim()) continue;
     const cid = contact.id;
@@ -1263,20 +1287,40 @@ async function tickInner(): Promise<void> {
     const anxApp = meta.lastUserApp;
     if (meta.lastUserAt <= 0 || (anxApp !== 'wx' && anxApp !== 'qq' && anxApp !== 'sms')) continue;
     const anxAppTyped = anxApp as ProactiveApp;
-    const anx = anxietyOf(cid, { persona: contact.persona || null });
     const anxHeightCfg = getProactiveCfg(anxAppTyped, cid);
-    if (anxHeightCfg.anxietyOn === false) continue;
+    // ⑤ 功能开关：关闭焦虑追发 → 定时器逻辑不启动，挂起中的倒计时一并取消
+    if (anxHeightCfg.anxietyOn === false) {
+      if (meta.fireAt > 0) cancelAnxietyFire(cid);
+      continue;
+    }
     const blkAnx = loadBlock(anxAppTyped, cid);
     if (blkAnx.byUser) continue; // 拉黑期间不穿透（同四类触发口径）
     const threshold = anxHeightCfg.anxietyThreshold ?? ANXIETY_DEFAULT_THRESHOLD;
     const graceMs = anxHeightCfg.anxietyGraceMs ?? ANXIETY_DEFAULT_GRACE_MS;
-    const sendMs = anxHeightCfg.anxietySendMs ?? ANXIETY_DEFAULT_SEND_MS;
-    const unansweredMs = nowMs - anx.lastUserAt;
-    if (anx.level < threshold || unansweredMs < graceMs || nowMs - anx.lastFireAt < sendMs) continue;
-    if (nowMs - (getLast(anxAppTyped, cid).sentAt ?? 0) < MIN_SEND_GAP_MS) continue; // 防轰炸闸
-    if (isDndWindowActive()) continue; // 系统勿扰：焦虑再急也不穿透用户设置的勿扰时段
-    const npcExtraAnx = buildNpcPromptExtra(contact, allContacts) as unknown as Record<string, unknown> | null;
-    await fireProactive(anxAppTyped, contact, { kind: 'anxiety', anxietyLevel: Math.round(anx.level) }, npcExtraAnx);
+    const minWaitMs = anxHeightCfg.anxietyMinWaitMs ?? ANXIETY_DEFAULT_MIN_WAIT_MS;
+    const maxWaitMs = anxHeightCfg.anxietyMaxWaitMs ?? ANXIETY_DEFAULT_MAX_WAIT_MS;
+    // 读即结算（把用户自定义宽限同步进状态缓存——涨焦虑曲线与配置一致）；同时拿到 fireAt
+    const anx = anxietyOf(cid, { persona: contact.persona || null, graceMs });
+    // ① 焦虑值 < 阈值：绝对不触发；挂起的旧排程作废（用户上调阈值后立即生效）
+    if (anx.level < threshold) {
+      if (anx.fireAt > 0) cancelAnxietyFire(cid);
+      continue;
+    }
+    // 宽限未过（TA 才刚回复没多久）：不排程也不触发；残余焦虑保留
+    if (nowMs - anx.lastUserAt < graceMs) continue;
+    if (anx.fireAt > 0) {
+      // ② 挂起中的倒计时：未到点 → 跳过等下一轮 tick
+      if (nowMs < anx.fireAt) continue;
+      if (isDndWindowActive()) continue; // 系统勿扰：焦虑再急也不穿透（挂起任务保留，勿扰结束后到点即发）
+      // ③ 到点：先消费掉这个排程再发（生成失败/全被去重也按「这轮已发过」算，
+      //    下一轮由最新焦虑值重新插值排程——避免 5s tick 快速重试轰炸）
+      cancelAnxietyFire(cid);
+      const npcExtraAnx = buildNpcPromptExtra(contact, allContacts) as unknown as Record<string, unknown> | null;
+      await fireProactive(anxAppTyped, contact, { kind: 'anxiety', anxietyLevel: Math.round(anx.level) }, npcExtraAnx);
+      continue;
+    }
+    // ② 无挂起任务且条件满足 → 动态插值排程：等待 = 最长 - (level-阈值)/(100-阈值) × (最长-最短)
+    scheduleAnxietyFire(cid, anx.level, threshold, minWaitMs, maxWaitMs);
   }
 }
 
@@ -1286,76 +1330,20 @@ async function tickInner(): Promise<void> {
 const generating = new Set<string>();
 
 /**
- * 生成失败本地兑底文案（用户验收点：设置了自动发消息，到点一定能收到一条）——
- * timer/event/reminder 是用户明确约定的「必须发」，LLM 挂了也不能沉默；
- * 文案像真人随手发的（不暴露「系统兜底」痕迹）；带用户真名（短间隔高频下上游限流时
- * 兑底消息占比上升，无称呼的通用句会显得假——统一用真实名字称呼，与主链路口径一致）。
- * userName 传空时保持原句（跨端兼容）。 */
-function fallbackProactiveText(trigger: FireTrigger, userName?: string | null): string {
-  const me = (userName ?? '').trim();
-  const pick = (arr: string[]): string => {
-    const base = arr[Math.floor(Math.random() * arr.length)];
-    return me ? `${me}，${base}` : base;
-  };
-  if (trigger.kind === 'reminder') {
-    const note = (trigger.note ?? '').trim();
-    if (note) return `你之前让我到点提醒你「${note}」——时间到啦！`;
-    return '叮咚——你交代的提醒时间到啦！';
-  }
-  if (trigger.kind === 'event') {
-    const name = (trigger.eventName ?? '').trim();
-    if (name) return `「${name}」的时间到了，特地来跟你说一声~`;
-    return '到点了，来跟你说一声~';
-  }
-  if (trigger.kind === 'anxiety') {
-    // v51：焦虑触发兑底——等不到回复的坐立不安（像真人随手发的，不暴露系统兑底痕迹）
-    return pick([
-      '你怎么一直不回我……是不是出什么事了？',
-      '盯着手机好久了，你就回我一个字也好啊',
-      '越等越心慌……你倒是说句话呀',
-      '我有点坐不住了，你是不是不想理我了……',
-      '跟你说句话嘛，别晾着我好不好',
-    ]);
-  }
-  return pick([
-    '在干嘛呢？突然想起你了',
-    '忙完了没？来跟你聊两句',
-    '咻——冒个泡，今天过得怎么样？',
-    '刚看到个东西第一反应是想发给你，你最近咋样？',
-    '好一阵没说话了，有点想你了',
-  ]);
-}
-
-/** v51 焦虑触发兑底：一「轮」多条连发（LLM 两轮都失败时的本地保底，同样像真人焦虑连发） */
-function fallbackAnxietyTexts(userName?: string | null): string[] {
-  const me = (userName ?? '').trim();
-  const pool: string[][] = [
-    ['在吗？', '怎么不说话了……', '是不是不想理我了'],
-    [me ? `${me}，在忙吗？` : '在忙吗？', '盯着手机好久啦', '你回我一个字也好呀'],
-    ['刚刚是不是你在线？', '越等越心慌……', '别丢下我一个人胡思乱想嘛'],
-    ['你怎么一直不回我', '是不是出什么事了？', '我有点坐不住了……'],
-    ['哈喽？有人在吗', '晾着我好难受啊', '跟你说句话嘛，回我一下好不好'],
-  ];
-  const picked = pool[Math.floor(Math.random() * pool.length)];
-  return [...picked];
-}
-
-/**
- * 生成并投递一「轮」主动消息（auto 触发先走决策；任何失败静默）。
+ * 生成并投递一「轮」主动消息（auto 触发先走决策）。
  * 生成后与最近 AI 发言去重（完全相同 → 丢弃），避免「间隔 < 生成耗时」时的重复消息。
- * 加固（用户反馈「到时间没收到主动消息」）：LLM 生成失败不再静默——先退避重试一轮，
- * 仍失败才用本地兑底文案保底投递；auto 决策 API 失败同样兑底（wait 才是 AI 真决定不发）。
- * v51 焦虑触发：一轮连发多条（LLM 按格式一次吐出多条，条数不限一般 2~6 条；兑底也多条）——每 1 分钟
- * 一轮、每轮多条，由 lastFireAt 节流（tickInner anxLoop）。
+ * v57 模板兑底全面移除（用户要求：主动消息一律由 LLM 按人设/记忆/上下文生成，不发任何
+ * canned 文案——五类触发同口径）：LLM 两轮生成均失败 → 本轮静默跳过，触发器按各自节奏
+ * 下轮重试（once 提醒不消费任务、焦虑 fireAt 已消费则重新插值排程、定时按间隔再到期）。
+ * 返回值 = 本次触发是否已被「处理完」（true = 已投递或主动丢弃；false = 生成失败/锁定中——
+ * 提醒分支据此决定是否消费任务，防失败丢任务/防生成中重复消费）。
+ * v51 焦虑触发 / v56 追发引擎：一轮连发多条（条数不限一般 2~6 条）；轮次间隔由 anxLoop
+ * 动态插值排程（最短/最长等待可配，越焦虑追得越紧）。
  */
-async function fireProactive(app: ProactiveApp, contact: ContactRecord, trigger: FireTrigger, npcExtra: Record<string, unknown> | null): Promise<void> {
+async function fireProactive(app: ProactiveApp, contact: ContactRecord, trigger: FireTrigger, npcExtra: Record<string, unknown> | null): Promise<boolean> {
   const key = `${app}:${contact.id}`;
-  if (generating.has(key)) return;
+  if (generating.has(key)) return false; // 上一轮生成中：本轮不算数（提醒任务不消费，交给那轮）
   generating.add(key);
-  let usedFallback = false;
-  // 兑底文案用的真名（LLM 失败时本地文案也用真实名字称呼用户）；取不到回退 null
-  const ownerForFallback = await ownerProfileFor(app as AccountApp).catch(() => null);
-  const fallbackName = ownerForFallback?.realName || null;
   try {
     let texts: string[];
     if (trigger.kind === 'auto') {
@@ -1365,33 +1353,30 @@ async function fireProactive(app: ProactiveApp, contact: ContactRecord, trigger:
       } catch {
         decision = { action: 'fail' };
       }
-      if (decision.action === 'fail') {
-        // API/生成失败 ≠ AI 决定不发：本地兑底一条保底消息（到点一定收得到）
-        texts = [fallbackProactiveText(trigger, fallbackName)];
-        usedFallback = true;
-      } else if (decision.action !== 'send' || !decision.message) {
-        // wait：把下次决策推迟到建议时间（autoAt 后移，min 5min；基准用当前配置的决策节奏）
-        const delayMs = (decision.delayMinutes ?? AUTO_WAIT_MIN_MINUTES) * 60_000;
-        const baseMs = Math.max(2, getProactiveCfg(app, contact.id).autoFreqMin ?? AUTO_DECIDE_BASE_MS / 60_000) * 60_000;
-        setLast(app, contact.id, { autoAt: Date.now() + Math.max(0, delayMs - baseMs) });
-        return;
-      } else {
-        // v53 自主触发同样多形态：message 里带换行 = 多条连发（一行一条，条数保护上限同口径）；
-        // 整段长文（无换行）= 单个大气泡，长度不设上限；v54 同样剥字面引用前缀
-        texts = decision.message
-          .split(/\n+/)
-          .map((s) => stripLiteralQuotePrefix(s).replace(/^[-–—•·\d.、]+\s*/, '').replace(/^[「"'『]+|[」"'』]+$/g, '').trim())
-          .filter(Boolean)
-          .slice(0, MAX_BURST_COUNT);
+      if (decision.action !== 'send' || !decision.message) {
+        // wait：把下次决策推迟到建议时间（autoAt 后移，min 5min；基准用当前配置的决策节奏）；
+        // fail：决策 API 失败——v57 不发模板，本轮作罢（autoAt 已在 tickInner 盖戳，下个周期自然重试）
+        if (decision.action === 'wait') {
+          const delayMs = (decision.delayMinutes ?? AUTO_WAIT_MIN_MINUTES) * 60_000;
+          const baseMs = Math.max(2, getProactiveCfg(app, contact.id).autoFreqMin ?? AUTO_DECIDE_BASE_MS / 60_000) * 60_000;
+          setLast(app, contact.id, { autoAt: Date.now() + Math.max(0, delayMs - baseMs) });
+        }
+        return false;
       }
+      // v53 自主触发同样多形态：message 里带换行 = 多条连发（一行一条，条数保护上限同口径）；
+      // 整段长文（无换行）= 单个大气泡，长度不设上限；v54 同样剥字面引用前缀
+      texts = decision.message
+        .split(/\n+/)
+        .map((s) => stripLiteralQuotePrefix(s).replace(/^[-–—•·\d.、]+\s*/, '').replace(/^[「"'『]+|[」"'』]+$/g, '').trim())
+        .filter(Boolean)
+        .slice(0, MAX_BURST_COUNT);
     } else {
       try {
         texts = await generateProactiveTexts(app, contact, trigger, npcExtra);
       } catch {
         texts = [];
       }
-      // 第一轮全失败（用户配置+内置模型都没出字）：退避 6s 再重试一轮——LLM 抖动很常见，
-      // 多一次重试能大幅减少落到兑底文案的概率（兑底仅作为最后保底，保证到点必有产出）
+      // 第一轮全失败（用户配置+内置模型都没出字）：退避 6s 再重试一轮——LLM 抖动很常见
       if (texts.length === 0) {
         await new Promise<void>((r) => window.setTimeout(r, 6_000));
         try {
@@ -1400,31 +1385,21 @@ async function fireProactive(app: ProactiveApp, contact: ContactRecord, trigger:
           texts = [];
         }
       }
-      if (texts.length === 0) {
-        // 两轮都失败：本地兑底（到点一定发）——焦虑触发兑底也是一轮多条连发
-        texts = trigger.kind === 'anxiety' ? fallbackAnxietyTexts(fallbackName) : [fallbackProactiveText(trigger, fallbackName)];
-        usedFallback = true;
-      }
+      // v57：两轮都失败 → 本轮不发（绝不发模板兑底）；触发器保持到期状态，下轮 tick 自然重试
+      if (texts.length === 0) return false;
     }
-    if (texts.length === 0) return;
-    // 去重：与最近 6 条 AI 发言/上次主动消息完全相同 → 不投（LLM 在上下文未变时可能复述同一条）；
-    // 多条逐条过筛（同轮内部互异已在生成时保证），全被筛掉才丢弃本轮；
-    // 兑底文案跳过 lastSentText 对比（兑底池有限，连续命中同一句时也要保底发出）
+    if (texts.length === 0) return false;
+    // 去重：与最近 6 条 AI 发言/上次主动消息完全相同 → 不投（LLM 在上下文未变时可能复述同一条）。
+    // 全被筛掉 = 本轮已处理完（同上下文重试大概率同样全筛——按消费处理，防每 tick 空转）
     const recent = readNormMsgs(app, contact.id).slice(-6).filter((m) => m.role === 'assistant').map((m) => m.text.trim());
-    if (!usedFallback) {
-      const lastSent = getLast(app, contact.id).lastSentText?.trim();
-      if (lastSent) recent.push(lastSent);
-    }
-    let kept = texts.filter((t) => t.trim() && !recent.includes(t.trim()));
-    if (kept.length === 0) {
-      // 兑底也撞上重复（罕见）：整轮换一批再试一次，仍全军覆没才放弃
-      if (!usedFallback) return;
-      kept = trigger.kind === 'anxiety' ? fallbackAnxietyTexts(fallbackName).filter((t) => !recent.includes(t.trim())) : [fallbackProactiveText(trigger, fallbackName)].filter((t) => !recent.includes(t.trim()));
-      if (kept.length === 0) return;
-    }
+    const lastSent = getLast(app, contact.id).lastSentText?.trim();
+    if (lastSent) recent.push(lastSent);
+    const kept = texts.filter((t) => t.trim() && !recent.includes(t.trim()));
+    if (kept.length === 0) return true;
     await deliverProactiveMsg(app, contact, kept, trigger);
+    return true;
   } catch {
-    /* 静默 */
+    return false;
   } finally {
     generating.delete(key);
   }

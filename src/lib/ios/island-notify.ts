@@ -15,13 +15,16 @@
  *    - 同一会话短时间内多条消息 → 每条消息各弹一次（不再合并计数，后到替换展示中的前一条）；
  *    - 不同会话 → 排队逐条展示（每条 3 秒），队列上限 4 条，超出丢最旧；
  *    - 自动收起计时在页面不可见（切走标签页）或熄屏时冻结，回来自动续期。
- * 5. 离开网页也通知：页面不可见且浏览器支持 Web Notification 且已授权 → 发系统通知
- *    （tag 每条唯一，每条消息一个独立系统通知，不互相替换）；权限 default 时首次自动申请一次；
- *    权限 granted 后尽力注册 Service Worker + Web Push 订阅（/api/push）——
- *    页面已关闭时由服务端接力生成的回复也能逐条推送系统通知（不支持的环境静默降级）；
- *    拒绝/不支持/申请失败都不影响应用内灵动岛弹窗。
+ * 5. 离开网页也通知（v57 通知系统重进）：系统通知经 SSE 长连接（/api/notify/stream，
+ *    notify-sse 模块加载即挂）广播下发——AI 每落盘一条消息 → POST /api/notify/push →
+ *    服务端广播 → 页面收到 → SW registration.showNotification()（Android Chrome 页面无
+ *    Notification 构造器，SW 是唯一正路；桌面无 SW 时页面构造器兑底）；通知动态携带
+ *    角色头像（复合图标）/角色名字/App 图标，页面可见时同样弹出（旧版仅隐藏时发）。
+ *    权限 default 时首次展示应用内说明卡（点「开启」才弹浏览器授权框）；granted 后尽力
+ *    注册 SW + Web Push 订阅（/api/push）——页面已关闭时由服务端接力生成的回复也能逐条
+ *    推送系统通知（不支持的环境静默降级）；拒绝/不支持/申请失败都不影响应用内灵动岛弹窗。
  *    设置 › 通知「允许通知」开关是系统级通道总闸（isSysNotifyEnabled，localStorage 持久化）：
- *    关闭后 Web Notification / Web Push / 预提示卡全部跳过，应用内灵动岛弹窗不受影响。
+ *    关闭后 Web Notification / Web Push / SSE 展示 / 预提示卡全部跳过，应用内灵动岛弹窗不受影响。
  * 6. 点击跳转：卡片点击 → switchToApp 到目标 App + 经导航总线（ISLAND_NAV_EVENT +
  *    takeNotifyNavigation）让对应聊天页打开该会话（单聊 / 群聊）；锁屏/熄屏/闹钟响铃时点击只收起不跳转。
  */
@@ -30,6 +33,8 @@ import { create } from 'zustand';
 import { useUI } from './store';
 import { setupPushSubscription } from './push-client';
 import { showSystemNotification } from './system-notify';
+// v57 通知系统：SSE 长连接（服务端广播 → SW showNotification）；notify-sse 模块加载即挂连接
+import { pushSysNotifyViaSse, type SseNotifyPayload } from './notify-sse';
 import { wxChatFlags, qqChatFlags } from '@/lib/chat-flags';
 import { playNotifySound } from './notify-sound';
 
@@ -439,16 +444,28 @@ async function buildNotifyIcon(n: IslandNotification): Promise<string> {
 }
 
 async function postWebNotification(n: IslandNotification): Promise<void> {
-  // SW showNotification 优先（Android Chrome 页面里无 Notification 构造器，直接 new 会抛
-  // Illegal constructor——必须走 Service Worker 通道）；桌面无 SW 时自动落到页面构造器兜底；
-  // 两条通道都不可用时返回 null → 静默降级为应用内灵动岛弹窗（已在 pushChatNotification 弹过）
-  await showSystemNotification(n.title, {
-    body: n.subtitle ? `【${n.subtitle}】${n.body}` : n.body,
+  // v57 通知系统重进：复合图标（角色头像圆底 + App 角标）→ 载荷 → 优先经 SSE 长连接广播
+  //（POST /api/notify/push → notify-bus 广播 → 页面 EventSource 收到 → SW showNotification）——
+  // 通知动态携带：角色头像（icon）、角色名字（title）、App 图标（badge）；
+  // 广播通道异常时直发兜底（同一条 showSystemNotification，SW 通道优先的全平台一致行为不变）
+  const body = n.subtitle ? `【${n.subtitle}】${n.body}` : n.body;
+  const payload: SseNotifyPayload = {
+    title: n.title,
+    body,
     tag: n.id, // 每条消息一个独立系统通知（不再按会话替换合并）
     icon: await buildNotifyIcon(n),
     badge: NOTIFY_APP_ICON[n.app],
-    onclick: () => navigateToNotifyTarget(n.target),
-  }).catch(() => null);
+  };
+  const viaSse = await pushSysNotifyViaSse(payload);
+  if (!viaSse) {
+    await showSystemNotification(payload.title, {
+      body: payload.body,
+      tag: payload.tag,
+      icon: payload.icon,
+      badge: payload.badge,
+      onclick: () => navigateToNotifyTarget(n.target),
+    }).catch(() => null);
+  }
 }
 
 function maybeWebNotification(n: IslandNotification): void {
@@ -460,8 +477,10 @@ function maybeWebNotification(n: IslandNotification): void {
     const perm = Notification.permission;
     if (perm === 'granted') {
       ensurePushSubscription();
-      // 页面可见时灵动岛弹窗足够，不重复打扰；只有用户切走/锁屏才发系统通知
-      if (document.visibilityState === 'hidden') void postWebNotification(n);
+      // v57：系统通知常显（旧版仅页面隐藏时才发——预览页恒可见，通知系统形同虚设）。
+      // 改为经 SSE 长连接广播 + SW showNotification，页面可见时同样弹出；
+      // 应用内灵动岛弹窗照常（两套展示互不干扰）
+      void postWebNotification(n);
     } else if (perm === 'default' && !webPermAsked) {
       // 首次使用友好申请：不直接弹浏览器授权框，先展示应用内说明卡，
       // 用户点「开启」才 requestPermission（用户手势内触发，浏览器不会被拦）；

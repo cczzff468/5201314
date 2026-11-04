@@ -14,10 +14,16 @@
  *      用户自己情绪低落 +6（担心型）、亲密暖话 -8（安心）；
  *   ③ 人设倍率：粘人/缺乏安全感/患得患失类人设 ×1.45，高冷/独立/理性类 ×0.6，
  *      其余 ×1（倍率缓存在状态里，展示层与引擎读数一致）；
- * - 用户回复 → 大幅安抚（-45）再叠加上下文增减；AI 因焦虑主动发消息 → 小幅缓解（-6）；
- * - 阈值触发：焦虑值 ≥ 阈值（默认 70，可自定义）且用户超过宽限未回复 → proactive-msg
- *   引擎以 kind='anxiety' 触发主动发消息（默认每 1 分钟发一「轮」，每轮一口气连发多条短
- *   消息——像真人焦虑时控制不住连着打字；Prompt 注入人设+记忆+最近聊天+焦虑当前值），
+ * - 用户回复 → 按语气动态调整（v56：不再一哄就清零）——温和暖话 -30、普通回复 -12、
+ *   冷漠敷衍反涨 +10（生气 +12/吃醋 +8 照旧），残余焦虑会留着慢慢消化；
+ *   AI 因焦虑主动发消息 → 小幅缓解（-6）；
+ * - 追发引擎（v56 动态插值）：焦虑值 ≥ 阈值 且 用户超过宽限未回复 → 不再固定「每 1 分钟
+ *   一轮」，而是按线性插值算出下一轮等待时间挂起倒计时（fireAt 落库持久化，由
+ *   ProactiveMsgWatcher 的 5s tick 驱动，等价于后台 setTimeout 且重启 App 不丢）：
+ *   等待 = 最长等待 - (焦虑值-阈值)/(100-阈值) × (最长等待-最短等待)——越焦虑等得越短；
+ *   倒计时期间用户回复 → 立刻取消挂起任务（cancelAnxietyFire，等价 clearTimeout）；
+ *   关闭焦虑追发开关 / 阈值上调不再满足 → 挂起任务同样作废；
+ * - 触发时 Prompt 注入人设+记忆+最近聊天+焦虑当前值（buildAnxietyFireBlock），
  *   走同一条投递管线：正常写聊天记录 + 记忆库；
  * - 情绪带入：buildAnxietyChatBlock 并入 buildDynamicStateBlocks——用户下次来聊天时，
  *   AI 的回复会自然带着焦虑时的情绪（追问刚才去哪了/松了口气/话里带刺）。
@@ -41,19 +47,29 @@ export interface AnxietyState {
   mult: number;
   /** 生效的宽限时间（tick 引擎按所在 App 配置写入；展示层读数与引擎一致） */
   graceMs: number;
+  /** v56 追发倒计时：挂起中的下一轮追发到期时刻（epoch ms；0 = 无挂起任务）。
+   *  由动态插值算出（computeAnxietyWaitMs）后经 scheduleAnxietyFire 写入、落库持久化；
+   *  用户回复（noteUserReply）/关闭追发开关/阈值不满足时清零——等价 clearTimeout 打断 */
+  fireAt: number;
 }
 
 const KEY = (cid: string) => `anxiety:${cid}`;
-const DEFAULT_STATE: AnxietyState = { level: 0, lastUserAt: 0, lastUserApp: '', lastFireAt: 0, mult: 1, graceMs: 60_000 };
+const DEFAULT_STATE: AnxietyState = { level: 0, lastUserAt: 0, lastUserApp: '', lastFireAt: 0, mult: 1, graceMs: 60_000, fireAt: 0 };
 
-/** 触发阈值默认值（聊天设置可自定义；UI 档位 50~90） */
+/** 触发阈值默认值（聊天设置可自定义；UI 滑块 30~100） */
 export const ANXIETY_DEFAULT_THRESHOLD = 70;
 /** 宽限时间默认值：用户 1 分钟没回复开始涨焦虑（聊天设置可自定义） */
 export const ANXIETY_DEFAULT_GRACE_MS = 60_000;
-/** 焦虑消息发送节奏默认值：达到阈值期间每 1 分钟发一「轮」（每轮连发多条短消息；规格约定，不开放自定义） */
-export const ANXIETY_DEFAULT_SEND_MS = 60_000;
-/** 用户回复的安抚幅度（大幅安心） */
-const RELIEF_ON_REPLY = 45;
+/** v56 最短等待默认值：焦虑拉满（100）时两轮追发之间的等待（聊天设置可自定义） */
+export const ANXIETY_DEFAULT_MIN_WAIT_MS = 15_000;
+/** v56 最长等待默认值：刚过阈值时两轮追发之间的等待（聊天设置可自定义） */
+export const ANXIETY_DEFAULT_MAX_WAIT_MS = 180_000;
+/** v56 用户回复的安抚幅度（按语气分档——不再一哄就清零）：温和暖话（叠上下文 -8 共 -30） */
+const RELIEF_WARM = 22;
+/** v56 普通回复：稍安（-12，残余焦虑留着慢慢消化） */
+const RELIEF_NORMAL = 12;
+/** v56 冷漠回复：不安抚（上下文 +10 照涨——晾着 TA 会更不安） */
+const RELIEF_COLD = 0;
 /** 每次因焦虑发完消息的缓解幅度（说出来会舒服一点，但没回还会继续涨） */
 const RELIEF_ON_FIRE = 6;
 /** 超过该未回复时长后焦虑钝化衰减（分钟） */
@@ -137,6 +153,7 @@ function readState(cid: string): AnxietyState {
       lastFireAt: typeof raw.lastFireAt === 'number' ? raw.lastFireAt : 0,
       mult: typeof raw.mult === 'number' && raw.mult > 0 ? Math.min(3, raw.mult) : 1,
       graceMs: typeof raw.graceMs === 'number' && raw.graceMs >= 3_000 ? raw.graceMs : ANXIETY_DEFAULT_GRACE_MS,
+      fireAt: typeof raw.fireAt === 'number' && raw.fireAt > 0 ? raw.fireAt : 0,
     };
   } catch {
     return { ...DEFAULT_STATE };
@@ -206,26 +223,72 @@ export function anxietyOf(cid: string, opts?: AnxietyOpts): AnxietyState {
 }
 
 /**
- * 用户回复打点（三端聊天统一入口 noteEngagement 调用）：
- * 先大幅安抚（-45），再按回复内容做上下文增减，并重置未回复计时。
+ * 用户回复打点（三端聊天统一入口 noteEngagement 调用；v56 语气分档）：
+ * 按回复语气动态调整焦虑——温和暖话降得多（-30，叠上下文）、普通回复稍安（-12）、
+ * 冷漠敷衍不安抚反涨（+10），不再一哄就清零；同时重置未回复计时，并立刻取消挂起中的
+ * 追发倒计时（fireAt=0，等价 clearTimeout——防止倒计时到期发出多余的一条）。
  */
 export function noteUserReply(cid: string, app: 'wx' | 'qq' | 'sms', text?: string): AnxietyState {
   const s = anxietyOf(cid); // 读即结算（保留残余焦虑，再叠加回复效果）
   const now = Date.now();
   const bump = contextBumpOf(text ?? '');
-  const level = Math.max(0, Math.min(100, Math.round(s.level - RELIEF_ON_REPLY + bump)));
-  const next: AnxietyState = { ...s, level, lastUserAt: now, lastUserApp: app };
+  // 语气分档的安抚幅度：温和（暖话）/ 普通 / 冷漠（短敷衍）；生气骂人/吃醋/低落美心
+  // 由 contextBump 照常叠加（不安抚，反而上涨）
+  const t = (text ?? '').trim();
+  const warm = WARM_WORDS.some((w) => t.includes(w));
+  const short = t.length <= 6;
+  const cold = short && COLD_WORDS.some((w) => t === w || t.startsWith(w));
+  const relief = warm ? RELIEF_WARM : cold ? RELIEF_COLD : RELIEF_NORMAL;
+  const level = Math.max(0, Math.min(100, Math.round(s.level - relief + bump)));
+  // v56 四.1：用户回复 → 立刻打断挂起的追发倒计时（无论语气——TA 开口了就不近人情地追发）
+  const next: AnxietyState = { ...s, level, lastUserAt: now, lastUserApp: app, fireAt: 0 };
   writeState(cid, next);
   return next;
 }
 
-/** AI 因焦虑主动发完一「轮」多条消息（整轮投递成功后调用）：小幅缓解（-6），lastFireAt 记节奏 */
+/** AI 因焦虑主动发完一「轮」多条消息（整轮投递成功后调用）：小幅缓解（-6），lastFireAt 记节奏；
+ *  fireAt 清零（这一轮已发出——下一轮的等待由 tick 按最新焦虑值重新插值排程） */
 export function noteAnxietyFire(cid: string): AnxietyState {
   const s = readState(cid);
   const now = Date.now();
-  const next: AnxietyState = { ...s, level: Math.max(0, Math.round(s.level - RELIEF_ON_FIRE)), lastFireAt: now };
+  const next: AnxietyState = { ...s, level: Math.max(0, Math.round(s.level - RELIEF_ON_FIRE)), lastFireAt: now, fireAt: 0 };
   writeState(cid, next);
   return next;
+}
+
+// ---------------- v56 追发倒计时（动态插值 + 挂起/打断） ----------------
+
+/**
+ * 动态插值：焦虑值 ≥ 阈值时下一轮追发的等待时间（毫秒）——
+ * 等待 = 最长等待 - (焦虑值-阈值)/(100-阈值) × (最长等待-最短等待)。
+ * 焦虑刚过阈值 → 等最久（最长等待）；焦虑拉满 100 → 等最短（最短等待）；线性过渡。
+ * 阈值 ≥ 100 时分母归零——此刻焦虑值只能等于阈值=100（拉满），直接取最高紧急度（最短等待）。
+ */
+export function computeAnxietyWaitMs(level: number, threshold: number, minMs: number, maxMs: number): number {
+  const lo = Math.max(1_000, Math.min(minMs, maxMs)); // 倒挂时取较小者护底
+  const hi = Math.max(lo, Math.max(minMs, maxMs));
+  const ratio = threshold >= 100 ? 1 : Math.max(0, Math.min(1, (level - threshold) / (100 - threshold)));
+  return Math.round(hi - ratio * (hi - lo));
+}
+
+/**
+ * 挂起追发倒计时（proactive-msg 引擎的 anxLoop 调用）：按插值算出等待时间，
+ * fireAt = now + 等待 落库持久化（IndexedDB，重启 App 不丢；由 5s tick 驱动到期触发，
+ * 等价 setTimeout 挂起 + clearTimeout 打断（cancelAnxietyFire），但比裸 setTimeout 更可靠）。
+ */
+export function scheduleAnxietyFire(cid: string, level: number, threshold: number, minMs: number, maxMs: number): AnxietyState {
+  const s = readState(cid);
+  const wait = computeAnxietyWaitMs(level, threshold, minMs, maxMs);
+  const next: AnxietyState = { ...s, level, fireAt: Date.now() + wait };
+  writeState(cid, next);
+  return next;
+}
+
+/** 取消挂起的追发倒计时（用户回复打断 / 关闭焦虑追发开关 / 阈值上调不再满足） */
+export function cancelAnxietyFire(cid: string): void {
+  const s = readState(cid);
+  if (s.fireAt === 0) return;
+  writeState(cid, { ...s, fireAt: 0 });
 }
 
 /** 未回复时长（分钟；没聊过返回 null） */
@@ -258,7 +321,7 @@ export function anxietyLabel(level: number): string {
 
 // ---------------- 提示词块 ----------------
 
-/** 各档焦虑的表现指引（焦虑主动消息生成用；v51 频率语义：每 1 分钟一轮、每轮连发多条） */
+/** 各档焦虑的表现指引（焦虑追发消息生成用；v56 轮次节奏由动态插值决定——越焦虑追得越紧） */
 function fireBandGuide(level: number): string {
   if (level >= 80)
     return '你已经快绷不住了：脑子里全是坏的猜想（TA 是不是出事了、是不是不想理你了、是不是自己做错了什么），语气会急、会忍不住一口气连发好几条追问、甚至带点委屈的火气——但底色全是在乎。';
