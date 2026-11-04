@@ -52,7 +52,7 @@ import {
   type ChatPayloadMessage,
 } from '@/lib/chat-stream-store';
 import { buildPersonaSystemPrompt } from '@/lib/ios/persona';
-import { promptRule } from '@/lib/prompt-entries';
+import { promptGroupParts, promptRule } from '@/lib/prompt-entries';
 import { addressNameOf } from '@/lib/contacts';
 import { buildNpcPromptExtra, type NpcPromptExtra } from '@/lib/ios/npc-bond';
 import { getReplyCount, saveReplyCount, buildReplyCountPrompt, splitReplySegments } from '@/lib/reply-count';
@@ -598,6 +598,13 @@ function buildPersonaPrompt(c: ContactRecord, ownerName: string | null, multiApp
     smsAcc.kind !== 'main' &&
     !(c.relationByAcc?.[accId] ?? '').trim() &&
     ![c.friendWxByAcc?.[accId], c.friendQqByAcc?.[accId], c.friendSmsByAcc?.[accId]].some((m) => typeof m === 'boolean');
+  // v65：信息沉浸规则整块走 sms-rules 合并组（组关闭=短信不再注入；组编辑=编辑版接管；默认=原逻辑零破坏）
+  const smsRuleParts = promptGroupParts('sms-rules', {}, () =>
+    (getAiVoiceFreq(`sms:${c.id}`) !== 'off' || getAiVoiceFreq(`wx:${c.id}`) !== 'off'
+      ? [promptRule('sms-ai-voice', SMS_AI_VOICE_DELIVERY_RULE) ?? '']
+      : []
+    ).filter(Boolean),
+  );
   return buildPersonaSystemPrompt(c, {
     channel: '短信',
     userName: addrName,
@@ -606,11 +613,8 @@ function buildPersonaPrompt(c: ContactRecord, ownerName: string | null, multiApp
     // 跨 App 身份感知：互通开关（打开会话时现场读取）；陌生身份模式由人设内部忽略用户称呼/关系/多端段
     multiApp,
     // C6：语音频率非 off 时告知「文字可能以语音条送达」（与微信/QQ 三端同口径）
-    // v63：接入全局预设管理器（sms-ai-voice 可开关/可编辑）
-    extraRules:
-      getAiVoiceFreq(`sms:${c.id}`) !== 'off' || getAiVoiceFreq(`wx:${c.id}`) !== 'off'
-        ? [promptRule('sms-ai-voice', SMS_AI_VOICE_DELIVERY_RULE) ?? '']
-        : [],
+    // v63：接入全局预设管理器（sms-ai-voice 可开关/可编辑）→ v65 整组接管
+    extraRules: smsRuleParts ?? [],
     ...(strangerText ? { strangerMode: 'text' as const } : {}),
     ...npcExtra,
   });

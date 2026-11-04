@@ -131,13 +131,12 @@ import {
 import { LocalToast, useLocalToast } from './page-toast';
 import {
   PROMPT_APPS,
-  PROMPT_CATEGORIES,
+  PROMPT_GROUPS,
   promptAppLabel,
-  promptCategoryLabel,
-  promptEntryCount,
   resolvePromptEntries,
   type PromptAppId,
   type PromptEntry,
+  type PromptGroup,
   type PromptRole,
 } from '@/lib/prompt-entries';
 import {
@@ -664,7 +663,7 @@ function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
             icon={Layers}
             tone={TONE_PURPLE}
             label="默认预设（内置）"
-            value={`Prompt Entries (${promptEntryCount()})`}
+            value={`预设模块 (${PROMPT_GROUPS.length})`}
             onClick={() => onOpen('prompts')}
             testId="settings-prompts-row"
           />
@@ -6271,16 +6270,14 @@ function PromptEntriesPage({ onBack }: { onBack: () => void }) {
     ensurePromptEntriesClientReady();
   }, []);
 
-  // 筛选：App 多选 chips（空 = 全部）
-  const [appFilter, setAppFilter] = useState<PromptAppId[]>([]);
-  // 分类筛选（空 = 全部）
-  const [catFilter, setCatFilter] = useState<string[]>([]);
-  // 展开的条目
-  const [expanded, setExpanded] = useState<string | null>(null);
-  // 多选模式与已选条目
+  // 展开的组（merged 大卡 / list 组）
+  const [expandedGroup, setExpandedGroup] = useState<string | null>(null);
+  // list 组里展开的成员（成员条目 id）
+  const [expandedMember, setExpandedMember] = useState<string | null>(null);
+  // 多选模式与已选组
   const [selectMode, setSelectMode] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  // 草稿（编辑中的文本；按 id 存）
+  // 草稿（组 id 或成员 id → 编辑中文本）
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   // 新增表单
   const [adding, setAdding] = useState(false);
@@ -6294,29 +6291,77 @@ function PromptEntriesPage({ onBack }: { onBack: () => void }) {
 
   const state = readPromptEntryState();
   const disabled = useMemo(() => new Set(state.disabled), [state.disabled, state.disabled.length]);
-  const allEntries = useMemo(() => resolvePromptEntries(), [disabled, state.rev]);
+  const entryMap = useMemo(() => {
+    const m = new Map<string, PromptEntry>();
+    for (const e of resolvePromptEntries()) m.set(e.id, e);
+    return m;
+  }, [state.rev, state.disabled.length]);
+  const customEntries = useMemo(
+    () => state.custom.filter((c) => !state.deleted.includes(c.id)),
+    [state.custom, state.deleted, state.deleted.length],
+  );
 
-  const visible = useMemo(() => {
-    let list = allEntries;
-    if (appFilter.length > 0) list = list.filter((e) => appFilter.includes(e.appId));
-    if (catFilter.length > 0) list = list.filter((e) => catFilter.includes(e.category));
-    return list;
-  }, [allEntries, appFilter, catFilter]);
+  /** 组 → 开关实际写的目标 id 列表（merged = 组 id 本身；list = 全体成员；自定义 = 自定义条目） */
+  const groupTargetIds = useCallback(
+    (gid: string): string[] => {
+      const g = PROMPT_GROUPS.find((x) => x.id === gid);
+      if (g) return g.kind === 'merged' ? [g.id] : g.members;
+      return customEntries.map((c) => c.id);
+    },
+    [customEntries],
+  );
 
-  const toggleAppFilter = (id: PromptAppId) => {
-    setAppFilter((cur) => (cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]));
+  /** 组开关当前态（merged = 组未被关；list/自定义 = 任一成员开启即算开） */
+  const groupOn = (gid: string): boolean => {
+    const ids = groupTargetIds(gid);
+    return !ids.every((id) => disabled.has(id));
   };
-  const toggleCatFilter = (id: string) => {
-    setCatFilter((cur) => (cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id]));
-  };
 
-  const toggleEntry = (e: PromptEntry, on: boolean) => {
-    setPromptEntryEnabled(e.id, on);
+  const toggleGroup = (gid: string, on: boolean) => {
+    setPromptEntriesEnabled(groupTargetIds(gid), on);
     refresh();
-    showToast(on ? '已启用，下次发送即生效' : '已禁用，该段不再注入');
+    const g = PROMPT_GROUPS.find((x) => x.id === gid);
+    showToast(on ? `${g?.title ?? '自定义条目'}已启用，下次发送即生效` : `${g?.title ?? '自定义条目'}已关闭，整块不再注入`);
   };
 
-  const saveDraft = (e: PromptEntry) => {
+  /** 组深度 = 首成员当前生效深度；加减时全成员统一拉到同一深度（保持注入顺序稳定） */
+  const groupDepth = (gid: string): number => {
+    const ids = groupTargetIds(gid);
+    return entryMap.get(ids[0])?.depth ?? 50;
+  };
+  const changeGroupDepth = (gid: string, delta: number) => {
+    const ids = groupTargetIds(gid);
+    if (ids.length === 0) return;
+    const next = Math.max(0, Math.min(999, groupDepth(gid) + delta));
+    for (const id of ids) setPromptEntryDepth(id, next);
+    refresh();
+  };
+
+  // ---- merged 组：大文本框保存 / 恢复 ----
+  const saveGroupDraft = (g: PromptGroup) => {
+    const text = drafts[g.id] ?? '';
+    setPromptEntryText(g.id, text);
+    setDrafts((d) => {
+      const next = { ...d };
+      delete next[g.id];
+      return next;
+    });
+    refresh();
+    showToast('已保存，下次发送即生效');
+  };
+  const resetGroup = (g: PromptGroup) => {
+    resetPromptEntry(g.id);
+    setDrafts((d) => {
+      const next = { ...d };
+      delete next[g.id];
+      return next;
+    });
+    refresh();
+    showToast('已恢复内置默认');
+  };
+
+  // ---- list 组成员：单条保存 / 恢复（论坛写回论坛设置面板） ----
+  const saveMemberDraft = (e: PromptEntry) => {
     const text = drafts[e.id] ?? '';
     if (e.appId === 'forum') {
       try {
@@ -6335,18 +6380,15 @@ function PromptEntriesPage({ onBack }: { onBack: () => void }) {
     refresh();
     showToast('已保存，下次发送即生效');
   };
-
-  const resetEntry = (e: PromptEntry) => {
+  const resetMember = (e: PromptEntry) => {
     if (e.appId === 'forum') {
       try {
         setPromptOverride(e.id.replace(/^forum-/, '') as PromptKey, '');
       } catch {
         /* 忽略 */
       }
-      resetPromptEntry(e.id);
-    } else {
-      resetPromptEntry(e.id);
     }
+    resetPromptEntry(e.id);
     setDrafts((d) => {
       const next = { ...d };
       delete next[e.id];
@@ -6355,10 +6397,8 @@ function PromptEntriesPage({ onBack }: { onBack: () => void }) {
     refresh();
     showToast('已恢复内置默认');
   };
-
-  const changeDepth = (e: PromptEntry, delta: number) => {
-    const cur = e.depth;
-    setPromptEntryDepth(e.id, cur + delta);
+  const changeMemberDepth = (e: PromptEntry, delta: number) => {
+    setPromptEntryDepth(e.id, e.depth + delta);
     refresh();
   };
 
@@ -6376,112 +6416,318 @@ function PromptEntriesPage({ onBack }: { onBack: () => void }) {
     }
     setAddForm({ appId: addForm.appId, role: addForm.role, depth: addForm.depth, title: '', content: '' });
     setAdding(false);
+    setExpandedGroup('custom');
     refresh();
     showToast('已新增预设条目');
   };
 
   const batchEnable = (on: boolean) => {
-    setPromptEntriesEnabled([...selected], on);
+    for (const gid of selected) setPromptEntriesEnabled(groupTargetIds(gid), on);
     setSelected(new Set());
     setSelectMode(false);
     refresh();
-    showToast(on ? `已批量启用 ${selected.size} 条` : `已批量禁用 ${selected.size} 条`);
+    showToast(on ? `已批量启用 ${selected.size} 组` : `已批量关闭 ${selected.size} 组`);
   };
-
   const batchDelete = () => {
-    for (const id of selected) deletePromptEntry(id);
+    for (const gid of selected) for (const id of groupTargetIds(gid)) deletePromptEntry(id);
     setSelected(new Set());
     setSelectMode(false);
     refresh();
-    showToast(`已删除/关闭 ${selected.size} 条`);
+    showToast(`已删除/关闭 ${selected.size} 组`);
   };
-
-  const toggleSelect = (id: string) => {
+  const toggleSelect = (gid: string) => {
     setSelected((cur) => {
       const next = new Set(cur);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
+      if (next.has(gid)) next.delete(gid);
+      else next.add(gid);
       return next;
     });
   };
 
   const selCount = selected.size;
-  const editedCount = Object.keys(state.edits).length + state.custom.length;
+  const editedCount = Object.keys(state.edits).length;
   const offCount = state.disabled.length;
+
+  // 渲染一个 list 组的成员行（内置组与自定义组共用）
+  const renderMember = (e: PromptEntry, groupKey: string) => {
+    const off = disabled.has(e.id);
+    const open = expandedMember === e.id;
+    const draft = drafts[e.id];
+    const editing = draft !== undefined;
+    const content = entryContentOf(e, disabled);
+    return (
+      <div
+        key={e.id}
+        data-testid={`prompt-entry-${e.id}`}
+        className={`overflow-hidden rounded-[12px] bg-black/[0.035] ring-1 ring-black/[0.04] dark:bg-white/[0.05] dark:ring-white/[0.06] ${off ? 'opacity-55' : ''}`}
+      >
+        <div className="flex items-center gap-2 px-2.5 py-2">
+          <button
+            type="button"
+            onClick={() => setExpandedMember(open ? null : e.id)}
+            className="flex min-w-0 flex-1 items-center gap-1.5 text-left"
+            aria-expanded={open}
+          >
+            <ChevronDown className={`h-3.5 w-3.5 shrink-0 text-muted-foreground/70 transition-transform ${open ? 'rotate-180' : ''}`} />
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-[13px] font-medium">{e.title}</span>
+              {e.desc && <span className="mt-0.5 block truncate text-[10.5px] text-muted-foreground">{e.desc}</span>}
+            </span>
+            <span
+              className="shrink-0 rounded-[5px] px-1.5 py-0.5 text-[9.5px] font-medium text-white"
+              style={{ backgroundColor: PROMPT_APP_TONE[e.appId] ?? '#8E8E93' }}
+            >
+              {promptAppLabel(e.appId)}
+            </span>
+          </button>
+          <Switch
+            checked={!off}
+            onCheckedChange={(v) => {
+              setPromptEntryEnabled(e.id, v);
+              refresh();
+              showToast(v ? '已启用，下次发送即生效' : '已禁用，该条不再注入');
+            }}
+            aria-label={`启用 ${e.title}`}
+          />
+        </div>
+        {open && (
+          <div className="border-t border-black/5 px-2.5 py-2.5 dark:border-white/10">
+            <Textarea
+              value={editing ? draft : content}
+              onChange={(ev) => setDrafts((d) => ({ ...d, [e.id]: ev.target.value }))}
+              className="min-h-36 font-mono text-[11px] leading-relaxed"
+              data-testid={`prompt-text-${e.id}`}
+            />
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => saveMemberDraft(e)}
+                disabled={!editing}
+                className="rounded-[10px] bg-[#007AFF] px-3 py-1.5 text-[11.5px] font-medium text-white transition-all active:scale-95 disabled:opacity-40"
+                data-testid={`prompt-save-${e.id}`}
+              >
+                保存修改
+              </button>
+              <button
+                type="button"
+                onClick={() => resetMember(e)}
+                className="flex items-center gap-1 rounded-[10px] bg-white/70 px-3 py-1.5 text-[11.5px] text-muted-foreground ring-1 ring-black/5 active:scale-95 dark:bg-white/10 dark:ring-white/10"
+              >
+                <RefreshCw className="h-3 w-3" />
+                恢复默认
+              </button>
+              <span className="ml-auto flex items-center gap-1 text-[10px] text-muted-foreground">
+                深度
+                <button
+                  type="button"
+                  aria-label="减小注入深度"
+                  onClick={() => changeMemberDepth(e, -1)}
+                  className="flex h-[18px] w-[18px] items-center justify-center rounded-full bg-black/[0.06] active:scale-90 dark:bg-white/10"
+                >
+                  <Minus className="h-2.5 w-2.5" />
+                </button>
+                <span className="w-5 text-center text-[10.5px] font-semibold tabular-nums" data-testid={`prompt-depth-${e.id}`}>
+                  {e.depth}
+                </span>
+                <button
+                  type="button"
+                  aria-label="增大注入深度"
+                  onClick={() => changeMemberDepth(e, 1)}
+                  className="flex h-[18px] w-[18px] items-center justify-center rounded-full bg-black/[0.06] active:scale-90 dark:bg-white/10"
+                >
+                  <Plus className="h-2.5 w-2.5" />
+                </button>
+              </span>
+              {!e.builtin && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    deletePromptEntry(e.id);
+                    refresh();
+                    showToast('已删除自定义条目');
+                  }}
+                  className="flex items-center gap-1 rounded-[10px] bg-[#FF3B30]/10 px-2.5 py-1.5 text-[11.5px] font-medium text-[#FF3B30] active:scale-95"
+                >
+                  <Trash2 className="h-3 w-3" />
+                  删除
+                </button>
+              )}
+            </div>
+            <p className="mt-1.5 text-[10px] leading-relaxed text-muted-foreground">
+              {e.appId === 'forum' ? '与 X 论坛抽屉的「提示词」面板同源（编辑写回论坛设置）。' : e.source ? `来源：${e.source}` : ''}
+              修改或关闭后，下一次请求立即生效。
+            </p>
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  // 渲染一张模块卡（merged：大文本框；list：成员行列表）
+  const renderGroup = (g: PromptGroup, key: string, memberIds: string[], appTone: string, extraHint: string) => {
+    const open = expandedGroup === key;
+    const on = groupOn(key);
+    const gOff = g.kind === 'merged' && disabled.has(g.id);
+    const gEdited = g.kind === 'merged' && typeof state.edits[g.id] === 'string' && !!state.edits[g.id]?.trim();
+    const draft = drafts[key];
+    const editing = draft !== undefined;
+    const groupContent = state.edits[key] || g.content || '';
+    const onCount = memberIds.filter((id) => !disabled.has(id)).length;
+    return (
+      <div
+        key={key}
+        data-testid={`prompt-group-${key}`}
+        className={`overflow-hidden rounded-[16px] bg-white/60 shadow-[0_2px_10px_rgba(17,24,39,0.04)] ring-1 ring-black/5 backdrop-blur-xl dark:bg-white/[0.06] dark:ring-white/[0.08] ${gOff ? 'opacity-55' : ''}`}
+      >
+        {/* 卡片头：多选框 + 标题 + 组开关 */}
+        <div className="flex items-center gap-2 px-3 py-2.5">
+          {selectMode && (
+            <button
+              type="button"
+              onClick={() => toggleSelect(key)}
+              aria-label={selected.has(key) ? '取消选择' : '选择'}
+              className={`flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-full transition-all active:scale-90 ${
+                selected.has(key) ? 'bg-[#007AFF] text-white' : 'bg-white/70 ring-1 ring-black/15 dark:bg-white/10 dark:ring-white/20'
+              }`}
+            >
+              {selected.has(key) && <Check className="h-3 w-3" strokeWidth={3} />}
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => {
+              setExpandedGroup(open ? null : key);
+              setExpandedMember(null);
+            }}
+            className="flex min-w-0 flex-1 items-center gap-2 text-left"
+            aria-expanded={open}
+            data-testid={`prompt-group-head-${key}`}
+          >
+            <ChevronDown className={`h-4 w-4 shrink-0 text-muted-foreground/70 transition-transform ${open ? 'rotate-180' : ''}`} />
+            <span className="min-w-0 flex-1">
+              <span className="flex items-center gap-1.5">
+                <span className="truncate text-[14.5px] font-semibold">{g.title}</span>
+                <span className="shrink-0 rounded-[6px] px-1.5 py-0.5 text-[9.5px] font-medium text-white" style={{ backgroundColor: appTone }}>
+                  {g.kind === 'merged' ? '整块编辑' : `${memberIds.length} 条`}
+                </span>
+                {gEdited && <span className="shrink-0 rounded-[6px] bg-[#AF52FF]/15 px-1.5 py-0.5 text-[9.5px] font-medium text-[#AF52FF]">已自定义</span>}
+              </span>
+              <span className="mt-0.5 block truncate text-[11px] text-muted-foreground">{g.desc}</span>
+            </span>
+          </button>
+          <Switch checked={on} onCheckedChange={(v) => toggleGroup(key, v)} aria-label={`启用 ${g.title}`} data-testid={`prompt-group-switch-${key}`} />
+        </div>
+
+        {/* 标签行：App / 组深度 */}
+        <div className="flex flex-wrap items-center gap-1.5 px-3 pb-2.5 pl-9">
+          <span className="rounded-[6px] bg-black/[0.06] px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground dark:bg-white/10">
+            {promptAppLabel(g.appId)}
+          </span>
+          {g.kind === 'list' && (
+            <span className="rounded-[6px] bg-black/[0.06] px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground dark:bg-white/10">
+              {onCount}/{memberIds.length} 开启
+            </span>
+          )}
+          <span className="ml-auto flex items-center gap-1 text-[10px] text-muted-foreground">
+            <span>深度</span>
+            <button
+              type="button"
+              aria-label="减小注入深度"
+              onClick={() => changeGroupDepth(key, -1)}
+              className="flex h-[20px] w-[20px] items-center justify-center rounded-full bg-black/[0.06] active:scale-90 dark:bg-white/10"
+            >
+              <Minus className="h-3 w-3" />
+            </button>
+            <span className="w-6 text-center text-[11px] font-semibold tabular-nums" data-testid={`prompt-group-depth-${key}`}>
+              {groupDepth(key)}
+            </span>
+            <button
+              type="button"
+              aria-label="增大注入深度"
+              onClick={() => changeGroupDepth(key, 1)}
+              className="flex h-[20px] w-[20px] items-center justify-center rounded-full bg-black/[0.06] active:scale-90 dark:bg-white/10"
+            >
+              <Plus className="h-3 w-3" />
+            </button>
+          </span>
+        </div>
+
+        {/* 展开区 */}
+        {open && (
+          <div className="border-t border-black/5 px-3 py-3 dark:border-white/10">
+            {g.kind === 'merged' ? (
+              <>
+                <Textarea
+                  value={editing ? draft : groupContent}
+                  onChange={(ev) => setDrafts((d) => ({ ...d, [key]: ev.target.value }))}
+                  className="min-h-[260px] font-mono text-[11px] leading-relaxed"
+                  data-testid={`prompt-text-${key}`}
+                />
+                {g.tokens && g.tokens.length > 0 && (
+                  <div className="mt-2 flex flex-wrap gap-1">
+                    {g.tokens.map((t) => (
+                      <span key={t.token} className="rounded-[6px] bg-[#AF52FF]/10 px-1.5 py-0.5 text-[10px] text-[#AF52FF]" title={t.desc}>
+                        {`{{${t.token}}}`}
+                      </span>
+                    ))}
+                  </div>
+                )}
+                <div className="mt-2 flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => saveGroupDraft(g)}
+                    disabled={!editing}
+                    className="rounded-[12px] bg-[#007AFF] px-3.5 py-1.5 text-[12px] font-medium text-white transition-all active:scale-95 disabled:opacity-40"
+                    data-testid={`prompt-save-${key}`}
+                  >
+                    保存修改
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => resetGroup(g)}
+                    className="flex items-center gap-1 rounded-[12px] bg-white/60 px-3.5 py-1.5 text-[12px] text-muted-foreground ring-1 ring-black/5 active:scale-95 dark:bg-white/10 dark:ring-white/10"
+                  >
+                    <RefreshCw className="h-3.5 w-3.5" />
+                    恢复默认
+                  </button>
+                </div>
+                <p className="mt-1.5 text-[10px] leading-relaxed text-muted-foreground">
+                  {extraHint}保存后这一整块按你编辑的文本注入；关闭上方开关 = 整块不再注入。变量按请求现场填充，无数据的段落自动省略。
+                </p>
+              </>
+            ) : (
+              <>
+                <p className="mb-2 text-[10px] leading-relaxed text-muted-foreground">
+                  {extraHint}每条对应一个独立场景，逐条开关/编辑/调整深度；组开关批量启停全部成员。
+                </p>
+                <div className="flex flex-col gap-1.5">
+                  {memberIds.map((id) => {
+                    const e = entryMap.get(id);
+                    return e ? renderMember(e, key) : null;
+                  })}
+                </div>
+              </>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const MERGED_HINT: Record<string, string> = {
+    'persona-core': '人设大模板：开场/名字/身份/资料/性格/风格/背景/关系/禁止事项合为一段。陌生身份、多端互通两块按场景自动切换（不在此模板内）。',
+    'wx-rules': '微信沉浸规则大模板（{{richRules}} 为当前表情包/特殊消息动态规则）。表情包禁用令、动作描写禁用两条按各开关场景自动选用。',
+    'qq-rules': 'QQ 沉浸规则大模板（{{richRules}} 为当前表情包/特殊消息动态规则）。表情包禁用令、动作描写禁用两条按各开关场景自动选用。',
+    'sms-rules': '信息（短信）规则。',
+    'call-rules': '通话规则大模板（{{media}}/{{mediaVerb}}/{{attempt}} 按通话现场填充）。接通问候两分支按拨号方向自动选用。',
+  };
 
   return (
     <DetailShell gray title="默认预设（内置）" onBack={onBack}>
-      {/* v64：不再自造滚动容器（min-h-0 flex-1 overflow-y-auto overscroll-contain）——
-          DetailShell 外壳的滚动区才是本页唯一 scroller；此前这层在非 flex 父级下高度=内容高、
-          自身永不滚，touch 手势命中的最近 scroller 是它且 overscroll-contain 禁止链式传播，
-          整页触摸滚动被吞（手机上划不动；桌面滚轮走 wheel 冒泡所以看不出来） */}
+      {/* v65：不再自造滚动容器（DetailShell 外壳的滚动区才是本页唯一 scroller） */}
       <div className="pb-6">
-        {/* 标题区：Prompt Entries (N) */}
-        <div className="px-1 pb-3">
-          <h1 className="text-[22px] font-bold tracking-tight" data-testid="prompt-entries-title">
-            Prompt Entries ({allEntries.length})
-          </h1>
-          <p className="mt-1 text-[12px] leading-relaxed text-muted-foreground">
-            App 内全部底层提示词（微信 / QQ / 信息 / 电话 / 论坛 / 情侣空间 / 线下 / 朋友圈 / 记忆 / 行为逻辑）。
-            开关、编辑文本或调整注入深度后，下一次发送消息即生效。
-            {offCount > 0 && <span className="text-[#FF3B30]"> 已禁用 {offCount} 条</span>}
-            {editedCount > 0 && <span className="text-[#AF52FF]"> · 已自定义 {editedCount} 条</span>}
-          </p>
-        </div>
-
-        {/* App 筛选 chips（多选） */}
-        <div className="flex flex-wrap gap-1.5 px-1 pb-2">
-          <button
-            type="button"
-            onClick={() => setAppFilter([])}
-            className={`rounded-full px-2.5 py-1 text-[11px] font-medium transition-all active:scale-95 ${
-              appFilter.length === 0 ? 'bg-foreground text-background' : 'bg-white/60 text-muted-foreground ring-1 ring-black/5 dark:bg-white/10 dark:ring-white/10'
-            }`}
-          >
-            全部
-          </button>
-          {PROMPT_APPS.map((a) => (
-            <button
-              key={a.id}
-              type="button"
-              onClick={() => toggleAppFilter(a.id)}
-              className={`rounded-full px-2.5 py-1 text-[11px] font-medium transition-all active:scale-95 ${
-                appFilter.includes(a.id) ? 'text-white' : 'bg-white/60 text-muted-foreground ring-1 ring-black/5 dark:bg-white/10 dark:ring-white/10'
-              }`}
-              style={appFilter.includes(a.id) ? { backgroundColor: PROMPT_APP_TONE[a.id] } : undefined}
-            >
-              {a.short}
-            </button>
-          ))}
-        </div>
-
-        {/* 分类筛选 chips */}
-        <div className="flex flex-wrap gap-1.5 px-1 pb-3">
-          <button
-            type="button"
-            onClick={() => setCatFilter([])}
-            className={`rounded-full px-2.5 py-1 text-[11px] transition-all active:scale-95 ${
-              catFilter.length === 0 ? 'bg-foreground text-background' : 'bg-white/60 text-muted-foreground ring-1 ring-black/5 dark:bg-white/10 dark:ring-white/10'
-            }`}
-          >
-            全部分类
-          </button>
-          {PROMPT_CATEGORIES.map((c) => (
-            <button
-              key={c.id}
-              type="button"
-              onClick={() => toggleCatFilter(c.id)}
-              className={`rounded-full px-2.5 py-1 text-[11px] transition-all active:scale-95 ${
-                catFilter.includes(c.id) ? 'bg-foreground text-background' : 'bg-white/60 text-muted-foreground ring-1 ring-black/5 dark:bg-white/10 dark:ring-white/10'
-              }`}
-            >
-              {c.label}
-            </button>
-          ))}
-        </div>
-
-        {/* 工具行：新增 / 多选 / 全部恢复 */}
-        <div className="flex items-center gap-2 px-1 pb-3">
+        {/* 工具行：新增 / 多选 */}
+        <div className="flex items-center gap-2 px-1 pb-3 pt-1">
           <button
             type="button"
             onClick={() => setAdding((v) => !v)}
@@ -6504,18 +6750,21 @@ function PromptEntriesPage({ onBack }: { onBack: () => void }) {
             <Check className="h-3.5 w-3.5" />
             {selectMode ? '取消多选' : '多选'}
           </button>
-          <span className="ml-auto text-[11px] text-muted-foreground">{visible.length} 条</span>
+          <span className="ml-auto text-[11px] text-muted-foreground" data-testid="prompt-groups-count">
+            共 {PROMPT_GROUPS.length} 组{editedCount > 0 ? ` · 已自定义 ${editedCount}` : ''}
+            {offCount > 0 ? ` · 已关 ${offCount}` : ''}
+          </span>
         </div>
 
         {/* 多选批量操作条 */}
         {selectMode && selCount > 0 && (
           <div className="sticky top-0 z-10 mb-2 flex items-center gap-2 rounded-[14px] bg-white/80 px-3 py-2 shadow-[0_4px_18px_rgba(17,24,39,0.1)] ring-1 ring-black/5 backdrop-blur-xl dark:bg-white/10 dark:ring-white/10">
-            <span className="text-[12px] font-medium">已选 {selCount} 条</span>
+            <span className="text-[12px] font-medium">已选 {selCount} 组</span>
             <button type="button" onClick={() => batchEnable(true)} className="rounded-full bg-[#34C759] px-3 py-1 text-[11px] font-medium text-white active:scale-95">
               批量启用
             </button>
             <button type="button" onClick={() => batchEnable(false)} className="rounded-full bg-[#FF9500] px-3 py-1 text-[11px] font-medium text-white active:scale-95">
-              批量禁用
+              批量关闭
             </button>
             <button type="button" onClick={batchDelete} className="rounded-full bg-[#FF3B30] px-3 py-1 text-[11px] font-medium text-white active:scale-95">
               删除
@@ -6596,158 +6845,17 @@ function PromptEntriesPage({ onBack }: { onBack: () => void }) {
           </GroupCard>
         )}
 
-        {/* 条目列表 */}
-        <div className="flex flex-col gap-2" data-testid="prompt-entries-list">
-          {visible.map((e) => {
-            const off = disabled.has(e.id);
-            const open = expanded === e.id;
-            const draft = drafts[e.id];
-            const content = entryContentOf(e, disabled);
-            const editing = draft !== undefined;
-            return (
-              <div
-                key={e.id}
-                data-testid={`prompt-entry-${e.id}`}
-                className={`overflow-hidden rounded-[16px] bg-white/60 shadow-[0_2px_10px_rgba(17,24,39,0.04)] ring-1 ring-black/5 backdrop-blur-xl transition-opacity dark:bg-white/[0.06] dark:ring-white/[0.08] ${off ? 'opacity-55' : ''}`}
-              >
-                {/* 卡片头：多选框 + 标题 + 开关 */}
-                <div className="flex items-center gap-2 px-3 py-2.5">
-                  {selectMode && (
-                    <button
-                      type="button"
-                      onClick={() => toggleSelect(e.id)}
-                      aria-label={selected.has(e.id) ? '取消选择' : '选择'}
-                      className={`flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-full transition-all active:scale-90 ${
-                        selected.has(e.id) ? 'bg-[#007AFF] text-white' : 'bg-white/70 ring-1 ring-black/15 dark:bg-white/10 dark:ring-white/20'
-                      }`}
-                    >
-                      {selected.has(e.id) && <Check className="h-3 w-3" strokeWidth={3} />}
-                    </button>
-                  )}
-                  <button
-                    type="button"
-                    onClick={() => setExpanded(open ? null : e.id)}
-                    className="flex min-w-0 flex-1 items-center gap-2 text-left"
-                    aria-expanded={open}
-                  >
-                    <ChevronDown
-                      className={`h-4 w-4 shrink-0 text-muted-foreground/70 transition-transform ${open ? 'rotate-180' : ''}`}
-                    />
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate text-[14px] font-medium">{e.title}</span>
-                      <span className="mt-0.5 block truncate text-[11px] text-muted-foreground">{e.desc}</span>
-                    </span>
-                  </button>
-                  <Switch checked={!off} onCheckedChange={(v) => toggleEntry(e, v)} aria-label={`启用 ${e.title}`} />
-                </div>
-
-                {/* 标签行：App / Role / Depth / 分类 */}
-                <div className="flex flex-wrap items-center gap-1.5 px-3 pb-2.5 pl-9">
-                  <span
-                    className="rounded-[6px] px-1.5 py-0.5 text-[10px] font-medium text-white"
-                    style={{ backgroundColor: PROMPT_APP_TONE[e.appId] }}
-                  >
-                    {promptAppLabel(e.appId)}
-                  </span>
-                  <span className="rounded-[6px] bg-black/[0.06] px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground dark:bg-white/10">
-                    {e.role === 'system' ? 'System' : e.role === 'user' ? 'User' : 'Assistant'}
-                  </span>
-                  <span className="rounded-[6px] bg-black/[0.06] px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground dark:bg-white/10">
-                    {promptCategoryLabel(e.category)}
-                  </span>
-                  <span className="ml-auto flex items-center gap-1 text-[10px] text-muted-foreground">
-                    <span>深度</span>
-                    <button
-                      type="button"
-                      aria-label="减小注入深度"
-                      onClick={() => changeDepth(e, -1)}
-                      className="flex h-[20px] w-[20px] items-center justify-center rounded-full bg-black/[0.06] active:scale-90 dark:bg-white/10"
-                    >
-                      <Minus className="h-3 w-3" />
-                    </button>
-                    <span className="w-6 text-center text-[11px] font-semibold tabular-nums" data-testid={`prompt-depth-${e.id}`}>
-                      {e.depth}
-                    </span>
-                    <button
-                      type="button"
-                      aria-label="增大注入深度"
-                      onClick={() => changeDepth(e, 1)}
-                      className="flex h-[20px] w-[20px] items-center justify-center rounded-full bg-black/[0.06] active:scale-90 dark:bg-white/10"
-                    >
-                      <Plus className="h-3 w-3" />
-                    </button>
-                  </span>
-                </div>
-
-                {/* 展开区：Prompt 文本编辑 */}
-                {open && (
-                  <div className="border-t border-black/5 px-3 py-3 dark:border-white/10">
-                    <Textarea
-                      value={editing ? draft : content}
-                      onChange={(ev) => setDrafts((d) => ({ ...d, [e.id]: ev.target.value }))}
-                      className="min-h-40 font-mono text-[11px] leading-relaxed"
-                      data-testid={`prompt-text-${e.id}`}
-                    />
-                    {e.tokens && e.tokens.length > 0 && (
-                      <div className="mt-2 flex flex-wrap gap-1">
-                        {e.tokens.map((t) => (
-                          <span key={t.token} className="rounded-[6px] bg-[#AF52FF]/10 px-1.5 py-0.5 text-[10px] text-[#AF52FF]" title={t.desc}>
-                            {`{{${t.token}}}`}
-                          </span>
-                        ))}
-                      </div>
-                    )}
-                    <div className="mt-2 flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => saveDraft(e)}
-                        disabled={!editing}
-                        className="rounded-[12px] bg-[#007AFF] px-3.5 py-1.5 text-[12px] font-medium text-white transition-all active:scale-95 disabled:opacity-40"
-                        data-testid={`prompt-save-${e.id}`}
-                      >
-                        保存修改
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => resetEntry(e)}
-                        className="flex items-center gap-1 rounded-[12px] bg-white/60 px-3.5 py-1.5 text-[12px] text-muted-foreground ring-1 ring-black/5 active:scale-95 dark:bg-white/10 dark:ring-white/10"
-                      >
-                        <RefreshCw className="h-3.5 w-3.5" />
-                        恢复默认
-                      </button>
-                      {!e.builtin && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            deletePromptEntry(e.id);
-                            refresh();
-                            showToast('已删除自定义条目');
-                          }}
-                          className="ml-auto flex items-center gap-1 rounded-[12px] bg-[#FF3B30]/10 px-3 py-1.5 text-[12px] font-medium text-[#FF3B30] active:scale-95"
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                          删除
-                        </button>
-                      )}
-                    </div>
-                    <p className="mt-1.5 text-[10px] leading-relaxed text-muted-foreground">
-                      {e.appId === 'forum'
-                        ? '与 X 论坛抽屉的「提示词」面板同源（编辑写回论坛设置）。'
-                        : e.source
-                          ? `来源：${e.source}`
-                          : ''}
-                      修改或关闭后，下一次发送消息立即生效。
-                    </p>
-                  </div>
-                )}
-              </div>
-            );
-          })}
-          {visible.length === 0 && (
-            <div className="rounded-[16px] bg-white/50 px-4 py-8 text-center text-[13px] text-muted-foreground ring-1 ring-black/5 dark:bg-white/[0.06] dark:ring-white/10">
-              没有匹配的条目——换一组筛选试试
-            </div>
-          )}
+        {/* 模块卡列表 */}
+        <div className="flex flex-col gap-2.5" data-testid="prompt-entries-list">
+          {PROMPT_GROUPS.map((g) => renderGroup(g, g.id, g.members, PROMPT_APP_TONE[g.appId], MERGED_HINT[g.id] ?? ''))}
+          {customEntries.length > 0 &&
+            renderGroup(
+              { id: 'custom', appId: 'global', kind: 'list', title: '自定义条目', desc: '你新增的预设（可删除；按所选 App/Role/深度注入）', members: customEntries.map((c) => c.id) },
+              'custom',
+              customEntries.map((c) => c.id),
+              '#8E8E93',
+              '',
+            )}
         </div>
 
         {/* 危险区：全部恢复默认 */}

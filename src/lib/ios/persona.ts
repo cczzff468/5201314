@@ -10,7 +10,7 @@
  */
 
 import { formatBirthday } from '@/lib/contacts';
-import { effectivePromptDepth, promptTextOf } from '@/lib/prompt-entries';
+import { effectivePromptDepth, promptGroupText, promptTextOf } from '@/lib/prompt-entries';
 
 /** 人设数据源（联系人记录的形状子集；全部可选字段缺省时安全回退） */
 export interface PersonaSource {
@@ -177,12 +177,6 @@ export function buildAltAccountsSection(digest: string | null | undefined): stri
  * 与注入深度排序（depth 越小越靠前；默认深度=原有顺序，无用户设置时输出与旧版逐字节一致）。
  */
 export function buildPersonaSystemPrompt(peer: PersonaSource, ctx: PersonaPromptCtx): string {
-  /** 分段收集：id + 文本；最后按生效深度稳定排序拼接 */
-  const sections: { id: string; text: string }[] = [];
-  const sec = (id: string, text: string | null | undefined): void => {
-    if (text == null || text === '') return;
-    sections.push({ id, text });
-  };
   const stranger = ctx.strangerMode;
   // 陌生模式：对面的人对角色完全未知——所有「认识对方」的语境（称呼/关系/多端记忆）都不注入，
   // 人设里对「聊天对面的用户」的指代统一用「对方」（不使用任何真实名字/占位词）
@@ -276,7 +270,69 @@ export function buildPersonaSystemPrompt(peer: PersonaSource, ctx: PersonaPrompt
     secretTo: npcNewMode ? ownerName || '别人' : relationTo,
   };
 
-  // 开场句（正常/陌生两形态各自成条目）
+  // v65 核心角色设定（persona-core 合并组）：组级动态段落变量（编辑版大模板填充用；
+  // 无数据的段落填空串 → promptGroupText 内部 collapsePromptSegments 整段省略，不注入空壳）
+  const customRulesSection =
+    customRuleLines.length > 0
+      ? [
+          `【用户定制的规则（最高优先级）】以下是用户为「${shownName}」亲自定下的规矩，任何情况下都必须遵守：`,
+          ...customRuleLines.map((r) => `- ${r}`),
+          '（这些规则的优先级高于你的性格、人设与后面的一切设定：与性格/说话风格/表达风格/背景任何内容冲突时，一律按这些规则来；规则没提到的事才按人设自然发挥。）',
+        ].join('\n')
+      : '';
+  const userPlaceholderNote = userFallback
+    ? '（注：机主尚未设置称呼，上文里的「用户」只是占位词，不是对方的真名。请按你与对方的关系自然地称呼对方，不要把「用户」当成对方的真名使用。）'
+    : '';
+  const ownerCardSection =
+    peer.kind === 'npc' && ctx.ownerCard && ctx.ownerCard.length > 0
+      ? [`【你了解的${ownerName || relationTo}】`, ...ctx.ownerCard.map((l) => `- ${l}`)].join('\n')
+      : '';
+  const npcCircleSection =
+    peer.kind !== 'npc' && ctx.npcCircle && ctx.npcCircle.length > 0
+      ? [
+          '【你认识的配角】',
+          ctx.npcCircle
+            .map((npc) => {
+              const bits = [`- ${npc.name}：你的${npc.relation}`];
+              if (npc.relationToUser) bits.push(`与${user}：${npc.relationToUser}`);
+              if (npc.persona) bits.push(`（${npc.persona}）`);
+              return bits.join('；');
+            })
+            .join('\n'),
+          `（${user}提到这些配角时，按上面的关系自然接话，就当现实里认识他们。）`,
+        ].join('\n')
+      : '';
+  const recentNotesSection =
+    ctx.backgroundNotes && ctx.backgroundNotes.length > 0
+      ? ['【最近发生的事（你亲身经历/听说的背景记忆）】', ...ctx.backgroundNotes.map((l) => `- ${l}`)].join('\n')
+      : '';
+  const altAccountsSection = stranger ? '' : buildAltAccountsSection(ctx.altAccountsDigest);
+  // 群聊/私聊「最后一条消息」规则行：群聊行单独成条目（persona-group-turn，可独立关闭）；
+  // v65 合并组编辑版用原行文本（成员级微调在编辑版下由用户文本接管）
+  const groupTurnLine = `- 这是群聊：聊天记录按时间顺序排列，最后一条是群里任一成员刚发出的最新消息——发言的可能是${user}，也可能是其他群成员。先看清最后一条是谁说的、说了什么再回应：被点名/被问到就回应谁；没被点名时可以简短附和、补充或聊自己的话题；绝不能把其他成员说的话当成${user}对你说的，也不要替其他成员说话或代答（不自问自答）；`;
+  const privateTurnLine = `- 聊天记录按时间顺序排列，最后一条就是${user}刚发给你的话——直接回应它本身，不要当作没看见，也不要丢下对方的话题自顾自说，更不要替${user}编造回答或自己接自己的话（不自问自答）；`;
+  const groupVars: Record<string, string> = {
+    ...vars,
+    customRulesSection,
+    userPlaceholderNote,
+    ownerCardSection,
+    npcCircleSection,
+    recentNotesSection,
+    altAccountsSection,
+    turnLine: ctx.groupTurn ? groupTurnLine : privateTurnLine,
+  };
+
+  // v65：人设块统一走 persona-core 合并组门控——
+  // 组关闭 = 整个人设不再注入（只剩 App 规则行）；组编辑 = 编辑版大模板整块接管；
+  // 默认 = 原逐段组装（零破坏，成员级开关/编辑/深度全部照旧）
+  const personaBlock = promptGroupText('persona-core', groupVars, () => {
+    const sections: { id: string; text: string }[] = [];
+    const sec = (id: string, text: string | null | undefined): void => {
+      if (text == null || text === '') return;
+      sections.push({ id, text });
+    };
+
+    // 开场句（正常/陌生两形态各自成条目）
   sec(
     stranger ? 'persona-open-stranger' : 'persona-open',
     promptTextOf(
@@ -487,18 +543,14 @@ export function buildPersonaSystemPrompt(peer: PersonaSource, ctx: PersonaPrompt
   // 大号的关系状态（【用户的另一个身份】段已移除）；认出后的关系认知由记忆召回链路
   //（memMainRecallBlockForAlt 包装段 + altMainRelation）在披露解锁后注入
   // 群聊/私聊「最后一条消息」规则行：群聊行单独成条目（persona-group-turn，可独立关闭）
-  const turnLine = ctx.groupTurn
-    ? promptTextOf(
-        'persona-group-turn',
-        vars,
-        `- 这是群聊：聊天记录按时间顺序排列，最后一条是群里任一成员刚发出的最新消息——发言的可能是${user}，也可能是其他群成员。先看清最后一条是谁说的、说了什么再回应：被点名/被问到就回应谁；没被点名时可以简短附和、补充或聊自己的话题；绝不能把其他成员说的话当成${user}对你说的，也不要替其他成员说话或代答（不自问自答）；`,
-      )
-    : `- 聊天记录按时间顺序排列，最后一条就是${user}刚发给你的话——直接回应它本身，不要当作没看见，也不要丢下对方的话题自顾自说，更不要替${user}编造回答或自己接自己的话（不自问自答）；`;
-  sec(
-    'persona-prohibit',
-    promptTextOf(
+    const turnLine = ctx.groupTurn
+      ? promptTextOf('persona-group-turn', vars, groupTurnLine)
+      : privateTurnLine;
+    sec(
       'persona-prohibit',
-      { ...vars, turnLine: turnLine ?? '' },
+      promptTextOf(
+        'persona-prohibit',
+        { ...vars, turnLine: turnLine ?? '' },
       [
         '【禁止事项】',
         `- 永远不要说自己是 AI、语言模型、助手或程序，也不要提及「人设」「角色扮演」「prompt」等幕后概念；`,
@@ -516,35 +568,38 @@ export function buildPersonaSystemPrompt(peer: PersonaSource, ctx: PersonaPrompt
   );
   // 第八轮反馈（防自我介绍复读机死循环）：加好友/新会话场景下，模型可能每轮都重新报家门、
   // 无视对方刚说的话——这里显式立规矩：介绍只出现一次，每轮先正面回应对方这条消息
-  sec(
-    'persona-selfintro',
-    promptTextOf(
-      'persona-selfintro',
-      vars,
-      `- 日常聊天绝不要复读自我介绍：「我是XX/平时大家都叫我XX」只在刚认识时自然带出一次，之后绝不在每轮回复里重复报家门；对方刚发的每条消息都要先正面回应它本身（按人设接住、追问、开玩笑都行），绝不能无视对方说的内容而自顾自重新介绍自己或把话题拉回「初次见面」；你们已经是好友，像老朋友一样往下聊。`,
-    ),
-  );
-  if (peer.kind === 'npc') {
     sec(
-      'persona-npc-secret',
+      'persona-selfintro',
       promptTextOf(
-        'persona-npc-secret',
+        'persona-selfintro',
         vars,
-        `- ${user}私下告诉你的事只记在自己心里；除非${user}让你转达、或人设明确写了你嘴快/藏不住话，否则不要主动把这些说给${npcNewMode ? ownerName || '别人' : relationTo}或其他人听；`,
+        `- 日常聊天绝不要复读自我介绍：「我是XX/平时大家都叫我XX」只在刚认识时自然带出一次，之后绝不在每轮回复里重复报家门；对方刚发的每条消息都要先正面回应它本身（按人设接住、追问、开玩笑都行），绝不能无视对方说的内容而自顾自重新介绍自己或把话题拉回「初次见面」；你们已经是好友，像老朋友一样往下聊。`,
       ),
     );
-  }
-  // extraRules（各 App 沉浸规则，接入方各自走注册表 lookup）：恒定排在人设末尾
+    if (peer.kind === 'npc') {
+      sec(
+        'persona-npc-secret',
+        promptTextOf(
+          'persona-npc-secret',
+          vars,
+          `- ${user}私下告诉你的事只记在自己心里；除非${user}让你转达、或人设明确写了你嘴快/藏不住话，否则不要主动把这些说给${npcNewMode ? ownerName || '别人' : relationTo}或其他人听；`,
+        ),
+      );
+    }
+    // v63 注入排序：按条目生效深度稳定排序（默认深度 = 原有顺序，零破坏）
+    const sorted = sections
+      .map((s, i) => ({ ...s, i }))
+      .sort((a, b) => effectivePromptDepth(a.id, 50) - effectivePromptDepth(b.id, 50) || a.i - b.i)
+      .map((s) => s.text);
+    return sorted.join('\n');
+  });
+
+  // extraRules（各 App 沉浸规则，接入方各自走注册表 lookup）：人设块之后独立成行——
+  // persona-core 关闭/编辑时 App 规则不受影响（wx-rules/qq-rules 等组各自管辖）
   const ruleLines: string[] = [];
   for (const rule of ctx.extraRules ?? []) {
     const r = clean(rule);
     if (r) ruleLines.push(`- ${r}`);
   }
-  // v63 注入排序：按条目生效深度稳定排序（默认深度 = 原有顺序，零破坏），
-  // extraRules 行追加在排序后的末尾（App 规则条目默认深度 40+ 本就靠后）
-  const sorted = sections
-    .map((s, i) => ({ ...s, i }))
-    .sort((a, b) => effectivePromptDepth(a.id, 50) - effectivePromptDepth(b.id, 50) || a.i - b.i)
-    .map((s) => s.text);
-  return [...sorted, ...ruleLines].join('\n');
+  return [...(personaBlock ? [personaBlock] : []), ...ruleLines].join('\n');
 }

@@ -30,7 +30,7 @@ export const runtime = 'nodejs';
  */
 
 import { buildPersonaSystemPrompt, type PersonaSource } from '@/lib/ios/persona';
-import { promptTextOf } from '@/lib/prompt-entries';
+import { promptGroupParts, promptTextOf } from '@/lib/prompt-entries';
 import {
   type CallApiMessage,
   type InlineContact,
@@ -73,17 +73,16 @@ function buildCallSystemPrompt(
    *  人设换陌生来电框架（【与X的关系】/机主称呼/多端记忆全部不下发） */
   callerUnknown?: boolean
 ): string {
-  const base = buildPersonaSystemPrompt(peer, {
-    channel: media === 'video' ? '视频通话' : '语音通话',
-    userName: callerUnknown ? null : (user?.name ?? null),
-    ...npcExtra,
-    multiApp: callerUnknown ? undefined : multiApp,
-    accountId: accountId ?? undefined,
-    // 陌生来电：人设换「陌生号码来电」框架（角色自身人设/背景保留，对面的人完全未知）
-    ...(callerUnknown ? { strangerMode: 'caller' as const } : {}),
-    // v63 全局预设管理器：通话场景规则接入注册表（客户端经 /api/settings/prompt-state
-    // 同步进服务端内存缓存，下次通话请求即生效；原始文案作 dynamicDefault 零破坏）
-    extraRules: [
+  // v65：通话规则整块走 call-rules 合并组——组关闭=通话不再注入任何规则（含接通问候）；
+  // 组编辑=编辑版大模板接管（{{media}}/{{attempt}} 等变量填充）；默认=原逐条组装（零破坏）。
+  // 调用方传入的 extraRules（运行时附加行）不受组门控影响，恒定追加在末尾
+  const callerExtra = (Array.isArray(extraRules)
+    ? extraRules.filter((r) => typeof r === 'string' && r.trim()).slice(0, 8)
+    : []);
+  const callRuleParts = promptGroupParts(
+    'call-rules',
+    { media: media === 'video' ? '视频' : '语音', mediaVerb: media === 'video' ? '视频' : '打', attempt: proactiveAttempt },
+    () => [
       promptTextOf(
         'call-length',
         { media: media === 'video' ? '视频' : '语音', mediaVerb: media === 'video' ? '视频' : '打' },
@@ -112,7 +111,6 @@ function buildCallSystemPrompt(
         undefined,
         '通话里做不了发红包/转账/放歌这类 App 操作：对方提这类需求时用一句话自然答应（比如「挂了电话我就发你」「回头发你链接」），不要假装已经发出去；',
       ) ?? '',
-      ...(Array.isArray(extraRules) ? extraRules.filter((r) => typeof r === 'string' && r.trim()).slice(0, 8) : []),
       ...(proactiveAttempt >= 1
         ? [
             promptTextOf(
@@ -132,6 +130,19 @@ function buildCallSystemPrompt(
           ]
         : []),
     ].filter(Boolean),
+  );
+  const base = buildPersonaSystemPrompt(peer, {
+    channel: media === 'video' ? '视频通话' : '语音通话',
+    userName: callerUnknown ? null : (user?.name ?? null),
+    ...npcExtra,
+    multiApp: callerUnknown ? undefined : multiApp,
+    accountId: accountId ?? undefined,
+    // 陌生来电：人设换「陌生号码来电」框架（角色自身人设/背景保留，对面的人完全未知）
+    ...(callerUnknown ? { strangerMode: 'caller' as const } : {}),
+    // v63 全局预设管理器：通话场景规则接入注册表（客户端经 /api/settings/prompt-state
+    // 同步进服务端内存缓存，下次通话请求即生效；原始文案作 dynamicDefault 零破坏）
+    // v65：整组接管 + 调用方附加行不受门控影响
+    extraRules: [...(callRuleParts ?? []), ...callerExtra],
   });
   if (!greeting) return base;
   // 问候视角按通话方向区分：AI 主叫（direction='in'）是「你打给对方」，

@@ -203,7 +203,7 @@ import {
   type ChatPayloadMessage,
 } from '@/lib/chat-stream-store';
 import { buildPersonaSystemPrompt } from '@/lib/ios/persona';
-import { promptRule, promptTextOf } from '@/lib/prompt-entries';
+import { promptGroupParts, promptRule, promptTextOf } from '@/lib/prompt-entries';
 import { buildNpcPromptExtra, type NpcPromptExtra } from '@/lib/ios/npc-bond';
 import OfflineMeetingPage from '@/components/apps/offline-meeting';
 import type { OfflineOnlineMsg } from '@/lib/offline-meet';
@@ -1676,15 +1676,9 @@ function buildPersonaPrompt(peer: ContactRecord, me: QQUser, ownerName: string |
     if (rich.length === 0) return '';
     return promptTextOf('qq-rich-rules', {}, rich.join('\n')) ?? '';
   })();
-  return buildPersonaSystemPrompt(peer, {
-    channel: 'QQ',
-    userName: addressNameOf(me, mode),
-    ownerName,
-    accountId: accId,
-    // 跨 App 身份感知：互通开关（每联系人设置，发送时现场读取）
-    multiApp: getMemSettings(peer.id).share,
-    ...npcExtra,
-    extraRules: [
+  // v65：QQ 沉浸规则整块走 qq-rules 合并组（与微信同构）——组关闭=QQ 不再注入任何沉浸规则；
+  // 组编辑=编辑版大模板整块接管（{{richRules}} 填入当前表情包动态规则）；默认=原逐条组装（零破坏）
+  const qqRuleParts = promptGroupParts('qq-rules', { richRules: richBlock }, () => [
       // 【fix3-d-2】点明该标记只出现在「对方（用户）」消息里：与历史序列化中 AI 自己表情的
       // 「[表情包:ID]」/「[你发送了表情：XX]」写法区分开，防止 AI 把兜底标记当成自己的输出格式
       // 100-e 与微信端文案逐字一致（此前两端手工复制引号风格漂移『』vs「」）
@@ -1702,7 +1696,16 @@ function buildPersonaPrompt(peer: ContactRecord, me: QQUser, ownerName: string |
         : [promptRule('qq-action-desc-off', ACTION_DESC_OFF_RULE) ?? '']),
       // 100-e 文字升级语音条告知（开关开启才注入，off 零注入）
       ...(aiVoiceOn ? [promptRule('qq-ai-voice', AI_VOICE_DELIVERY_RULE) ?? ''] : []),
-    ].filter(Boolean),
+    ].filter(Boolean));
+  return buildPersonaSystemPrompt(peer, {
+    channel: 'QQ',
+    userName: addressNameOf(me, mode),
+    ownerName,
+    accountId: accId,
+    // 跨 App 身份感知：互通开关（每联系人设置，发送时现场读取）
+    multiApp: getMemSettings(peer.id).share,
+    ...npcExtra,
+    extraRules: qqRuleParts ?? [],
   });
 }
 

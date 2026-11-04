@@ -1459,7 +1459,7 @@ export function sanitizePromptEntryState(raw: unknown): PromptEntryState | null 
         )
         .map((x) => ({
           ...x,
-          role: x.role === 'user' || x.role === 'assistant' ? x.role : 'system',
+          role: (x.role === 'user' || x.role === 'assistant' ? x.role : 'system') as PromptRole,
           depth: Number.isFinite(x.depth) ? Math.max(0, Math.min(999, Math.floor(x.depth as number))) : 50,
           order: Number.isFinite(x.order) ? Math.floor(x.order as number) : 0,
           category: x.category ?? 'immersion',
@@ -1530,6 +1530,319 @@ export function effectivePromptDepth(id: string, fallback = 50): number {
   return BUILTIN_MAP.get(id)?.depth ?? fallback;
 }
 
+// ---------------- v65 模块分组（整合碎条目） ----------------
+
+/**
+ * 功能模块组：把碎条目按「同一请求同一注入块」整合成模块卡。
+ * - merged（合并组）：成员段在请求里连续拼接（人设块/微信规则块/通话规则块…）——
+ *   一张大卡 + 一个大文本框（{{token}} 模板整合全部变量）；组开关 = 整块启停
+ *   （persona-core 关闭 = 整个角色人设不再注入）；组编辑 = 编辑版整块接管。
+ * - list（归堆组）：成员是不同场景各自的提示词（论坛 13 个生成场景/记忆提取/召回…）——
+ *   一张卡内紧凑成员行逐条控制，组开关 = 批量启停成员。
+ */
+export interface PromptGroup {
+  id: string;
+  appId: PromptAppId;
+  title: string;
+  desc: string;
+  kind: 'merged' | 'list';
+  /** 成员条目 id（组开关/编辑的管辖范围） */
+  members: string[];
+  /** merged：参与合并模板的成员（缺省 = members；互斥场景成员不进模板但仍受组管辖） */
+  templateMembers?: string[];
+  /** merged：模板里替换成员正文的片段（动态组装段 → {{token}} 占位） */
+  templateOverrides?: Record<string, string>;
+  /** merged：合并模板（构建时计算） */
+  content?: string;
+  /** merged：模板可用占位符（构建时计算） */
+  tokens?: { token: string; desc: string }[];
+}
+
+const PERSONA_CORE_TEMPLATE = [
+  'persona-open',
+  'persona-first-person',
+  'persona-custom-rules',
+  'persona-user-placeholder',
+  'persona-name',
+  'persona-identity',
+  'persona-facts',
+  'persona-personality',
+  'persona-speak-style',
+  'persona-pinyin',
+  'persona-background',
+  'persona-express-style',
+  'persona-relation',
+  'persona-owner-card',
+  'persona-npc-circle',
+  'persona-background-notes',
+  'persona-alt-accounts',
+  'persona-prohibit',
+  'persona-selfintro',
+  'persona-npc-secret',
+];
+
+const PERSONA_ALL = [
+  'persona-open',
+  'persona-open-stranger',
+  'persona-first-person',
+  'persona-custom-rules',
+  'persona-user-placeholder',
+  'persona-name',
+  'persona-identity',
+  'persona-facts',
+  'persona-personality',
+  'persona-speak-style',
+  'persona-pinyin',
+  'persona-background',
+  'persona-express-style',
+  'persona-stranger-rel',
+  'persona-relation',
+  'persona-multiapp-on',
+  'persona-multiapp-off',
+  'persona-owner-card',
+  'persona-npc-circle',
+  'persona-background-notes',
+  'persona-alt-accounts',
+  'persona-prohibit',
+  'persona-group-turn',
+  'persona-selfintro',
+  'persona-npc-secret',
+];
+
+/** 合并模板构建：成员 content 按序拼接（动态段用 overrides 换成 {{token}}）+ tokens 并集 */
+function buildMergedTemplate(
+  ids: string[],
+  overrides?: Record<string, string>,
+): { content: string; tokens: { token: string; desc: string }[] } {
+  const parts: string[] = [];
+  const tokenMap = new Map<string, { token: string; desc: string }>();
+  for (const id of ids) {
+    const entry = BUILTIN_MAP.get(id);
+    const text = overrides?.[id] ?? entry?.content ?? '';
+    if (text) parts.push(text);
+    for (const t of entry?.tokens ?? []) tokenMap.set(t.token, t);
+  }
+  for (const [k, v] of Object.entries(overrides ?? {})) {
+    const token = v.replace(/[{}\s]/g, '');
+    if (v.includes('{{') && token) {
+      tokenMap.set(token, {
+        token,
+        desc: `动态段（请求时现场组装并填充）：${BUILTIN_MAP.get(k)?.title ?? k}`,
+      });
+    }
+  }
+  return { content: parts.join('\n\n'), tokens: [...tokenMap.values()] };
+}
+
+export const PROMPT_GROUPS: PromptGroup[] = [
+  {
+    id: 'persona-core',
+    appId: 'global',
+    kind: 'merged',
+    title: '核心角色设定',
+    desc: '人设一整块：开场句/名字/身份/基础资料/性格/说话风格/背景/关系/配角圈/禁止事项等全部合为一大段，变量（{{name}}、{{persona}}…）直接可改；关闭 = 整个角色不再有人设',
+    members: PERSONA_ALL,
+    templateMembers: PERSONA_CORE_TEMPLATE,
+    // 条件注入段（有数据才注入）换成段落级 token：编辑版填充时无数据 → 整段消失，不注入空壳；
+    // persona-group-turn 不进模板（其内容经 {{turnLine}} 流入【禁止事项】段，避免重复）
+    templateOverrides: {
+      'persona-custom-rules': '{{customRulesSection}}',
+      'persona-user-placeholder': '{{userPlaceholderNote}}',
+      'persona-owner-card': '{{ownerCardSection}}',
+      'persona-npc-circle': '{{npcCircleSection}}',
+      'persona-background-notes': '{{recentNotesSection}}',
+      'persona-alt-accounts': '{{altAccountsSection}}',
+    },
+  },
+  {
+    id: 'wx-rules',
+    appId: 'wechat',
+    kind: 'merged',
+    title: '微信·聊天规则',
+    desc: '表情包回应/内置小表情/特殊消息标记（红包转账等）/动作描写/语音条告知合为一大段；关闭 = 微信不再注入任何沉浸规则',
+    members: ['wx-sticker-recv', 'wx-emoji-code', 'wx-rich-rules', 'wx-sticker-off', 'wx-action-desc', 'wx-action-desc-off', 'wx-ai-voice'],
+    templateMembers: ['wx-sticker-recv', 'wx-emoji-code', 'wx-rich-rules', 'wx-action-desc', 'wx-ai-voice'],
+    templateOverrides: { 'wx-rich-rules': '{{richRules}}' },
+  },
+  {
+    id: 'qq-rules',
+    appId: 'qq',
+    kind: 'merged',
+    title: 'QQ·聊天规则',
+    desc: '表情包回应/内置小表情/特殊消息标记（红包转账等）/动作描写/语音条告知合为一大段；关闭 = QQ 不再注入任何沉浸规则',
+    members: ['qq-sticker-recv', 'qq-emoji-code', 'qq-rich-rules', 'qq-sticker-off', 'qq-action-desc', 'qq-action-desc-off', 'qq-ai-voice'],
+    templateMembers: ['qq-sticker-recv', 'qq-emoji-code', 'qq-rich-rules', 'qq-action-desc', 'qq-ai-voice'],
+    templateOverrides: { 'qq-rich-rules': '{{richRules}}' },
+  },
+  {
+    id: 'sms-rules',
+    appId: 'chat',
+    kind: 'merged',
+    title: '信息·聊天规则',
+    desc: '短信语境的语音条送达告知',
+    members: ['sms-ai-voice'],
+  },
+  {
+    id: 'call-rules',
+    appId: 'phone',
+    kind: 'merged',
+    title: '通话规则',
+    desc: '句数口语化/纯口语输出/寒暄挂断/操作桥接/主动开口等合为一大段；关闭 = 通话不再注入任何通话规则',
+    members: [
+      'call-length',
+      'call-no-emoji',
+      'call-hello',
+      'call-hello-video',
+      'call-app-bridge',
+      'call-proactive',
+      'call-proactive-again',
+      'call-greeting-out',
+      'call-greeting-in',
+    ],
+    templateMembers: ['call-length', 'call-no-emoji', 'call-hello', 'call-hello-video', 'call-app-bridge', 'call-proactive', 'call-proactive-again'],
+  },
+  {
+    id: 'forum',
+    appId: 'forum',
+    kind: 'list',
+    title: '论坛·生成提示词',
+    desc: '13 个生成场景各一条（发帖/评论/楼中楼/私信/互动决策/命名…），逐条开关与编辑',
+    members: (Object.keys(FORUM_PROMPT_DEFAULTS) as PromptKey[]).map((k) => `forum-${k}`),
+  },
+  {
+    id: 'couple',
+    appId: 'couple',
+    kind: 'list',
+    title: '情侣空间规则',
+    desc: '共享小天地注入/AI 心情日记/留言板便签决策，逐条开关与编辑',
+    members: ['couple-chat-block', 'couple-mood-diary', 'couple-pin-note'],
+  },
+  {
+    id: 'offline',
+    appId: 'offline',
+    kind: 'list',
+    title: '线下模式规则',
+    desc: '世界观分析助手/总纲指令，逐条开关与编辑',
+    members: ['offline-world-analysis', 'offline-directive'],
+  },
+  {
+    id: 'moments',
+    appId: 'moments',
+    kind: 'list',
+    title: '动态（朋友圈/空间）规则',
+    desc: '发帖人身份硬性要求/发文规则/双语规则，逐条开关与编辑',
+    members: ['moments-identity', 'moments-post-rule', 'moments-bilingual'],
+  },
+  {
+    id: 'behavior',
+    appId: 'behavior',
+    kind: 'list',
+    title: '行为逻辑',
+    desc: '回复条数限制/深度思考/主动消息决策/焦虑追发/时间感知，逐条开关与编辑',
+    members: ['reply-count', 'reply-count-group', 'deep-think', 'proactive-gen-rules', 'proactive-auto-rules', 'anxiety-fire-block', 'anxiety-chat-block', 'time-aware-block'],
+  },
+  {
+    id: 'memory',
+    appId: 'memory',
+    kind: 'list',
+    title: '记忆系统',
+    desc: '记忆提取/总结/用户画像/召回/世界书使用规则，逐条开关与编辑',
+    members: [
+      'mem-extract-main',
+      'mem-extract-perspective',
+      'mem-summarize-core',
+      'mem-summarize-long',
+      'mem-summarize-attrib',
+      'mem-profile',
+      'mem-recall-profile',
+      'mem-recall-stranger',
+      'worldbook-rules',
+    ],
+  },
+];
+
+// 构建合并模板（content + tokens）
+for (const g of PROMPT_GROUPS) {
+  if (g.kind !== 'merged') continue;
+  const built = buildMergedTemplate(g.templateMembers ?? g.members, g.templateOverrides);
+  g.content = built.content;
+  g.tokens = built.tokens;
+}
+
+/** merged 组成员 → 组映射（成员抑制查找用） */
+const MEMBER_TO_GROUP = new Map<string, PromptGroup>(
+  PROMPT_GROUPS.filter((g) => g.kind === 'merged').flatMap((g) => g.members.map((m) => [m, g] as const)),
+);
+
+/** 组成员是否被组级状态抑制（组关闭或组编辑 → 成员不再单独注入，整块让位给组文本） */
+export function isPromptGroupMemberSuppressed(id: string): boolean {
+  const g = MEMBER_TO_GROUP.get(id);
+  if (!g) return false;
+  const st = getPromptEntryState();
+  if (!st) return false;
+  if (st.disabled.includes(g.id)) return true;
+  const edit = st.edits[g.id];
+  return typeof edit === 'string' && edit.trim().length > 0;
+}
+
+/** 编辑版填充后的清理：孤儿段头（占位符填空后只剩【XX】头的行）连同其后单行括注一并省略，
+ *  连续空行收拢——保证动态段无数据时编辑版不注入空壳 */
+function collapsePromptSegments(text: string): string {
+  const out: string[] = [];
+  let skippingNote = false;
+  for (const rawLine of text.split('\n')) {
+    const line = rawLine.trimEnd();
+    if (/^\s*【[^】]*】\s*$/.test(line)) {
+      skippingNote = true;
+      continue;
+    }
+    if (skippingNote && /^\s*（[^）]*）\s*$/.test(line)) continue;
+    skippingNote = false;
+    out.push(line);
+  }
+  return out.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+}
+
+/**
+ * 组级文本查找（merged 组注入点统一入口）：
+ * - 组关闭 → null（调用方整块跳过）；
+ * - 组编辑 → 编辑版模板填充 {{vars}} + 空段清理（整块接管）；
+ * - 默认 → dynamicDefault（调用方现场组装，零破坏）。
+ */
+export function promptGroupText(
+  groupId: string,
+  vars: Record<string, string | number>,
+  dynamicDefault: string | (() => string),
+): string | null {
+  const st = getPromptEntryState();
+  if (st?.disabled?.includes(groupId)) return null;
+  const edit = st?.edits?.[groupId];
+  if (typeof edit === 'string' && edit.trim()) return collapsePromptSegments(fillPromptTemplate(edit, vars));
+  return typeof dynamicDefault === 'function' ? dynamicDefault() : dynamicDefault;
+}
+
+/** promptGroupText 的数组版（extraRules 类注入点）：默认路径原样返回成员行，编辑版按行拆分 */
+export function promptGroupParts(
+  groupId: string,
+  vars: Record<string, string | number>,
+  defaultParts: () => string[],
+): string[] | null {
+  const st = getPromptEntryState();
+  if (st?.disabled?.includes(groupId)) return null;
+  const edit = st?.edits?.[groupId];
+  if (typeof edit === 'string' && edit.trim()) {
+    return collapsePromptSegments(fillPromptTemplate(edit, vars))
+      .split('\n')
+      .filter((l) => l.trim().length > 0);
+  }
+  return defaultParts();
+}
+
+/** 组条目 id → 组（UI 与批量操作用） */
+export function promptGroupOf(id: string): PromptGroup | undefined {
+  return PROMPT_GROUPS.find((g) => g.id === id);
+}
+
 // ---------------- 核心查找（各链路接入点） ----------------
 
 /**
@@ -1544,6 +1857,8 @@ export function promptTextOf(
   vars?: Record<string, string | number>,
   dynamicDefault?: string,
 ): string | null {
+  // v65：合并组成员受组级状态管辖——组关闭/组编辑时成员不再单独注入（整块让位给组文本）
+  if (isPromptGroupMemberSuppressed(id)) return null;
   const st = getPromptEntryState();
   if (st?.disabled?.includes(id)) return null;
   const edit = st?.edits?.[id];

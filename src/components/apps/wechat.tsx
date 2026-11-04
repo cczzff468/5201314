@@ -118,7 +118,7 @@ import {
   type ChatPayloadMessage,
 } from '@/lib/chat-stream-store';
 import { buildPersonaSystemPrompt } from '@/lib/ios/persona';
-import { promptRule, promptTextOf } from '@/lib/prompt-entries';
+import { promptGroupParts, promptRule, promptTextOf } from '@/lib/prompt-entries';
 import { buildNpcPromptExtra, type NpcPromptExtra } from '@/lib/ios/npc-bond';
 import {
   WxIcMoments,
@@ -1582,15 +1582,10 @@ function buildPersonaPrompt(peer: ContactRecord, me: WxUser, ownerName: string |
     if (rich.length === 0) return '';
     return promptTextOf('wx-rich-rules', {}, rich.join('\n')) ?? '';
   })();
-  return buildPersonaSystemPrompt(peer, {
-    channel: '微信',
-    userName: addressNameOf(me, mode),
-    ownerName,
-    accountId: accId,
-    // 跨 App 身份感知：互通开关（每联系人设置，发送时现场读取）
-    multiApp: getMemSettings(peer.id).share,
-    ...npcExtra,
-    extraRules: [
+  // v65：微信沉浸规则整块走 wx-rules 合并组——组关闭=微信不再注入任何沉浸规则；
+  // 组编辑=编辑版大模板整块接管（{{richRules}} 填入当前表情包动态规则）；
+  // 默认=原逐条组装（零破坏，成员级开关/编辑照旧）
+  const wxRuleParts = promptGroupParts('wx-rules', { richRules: richBlock }, () => [
       // fix3-c #3：规则限定主语——只解释「对方（用户）消息里」出现的标记；AI 自己发的表情另有 [表情包:ID]/[你发送了表情：XX] 序列化，不与规则冲突
       promptRule(
         'wx-sticker-recv',
@@ -1605,7 +1600,16 @@ function buildPersonaPrompt(peer: ContactRecord, me: WxUser, ownerName: string |
         : [promptRule('wx-action-desc-off', ACTION_DESC_OFF_RULE) ?? '']),
       // 100-e 文字升级语音条告知（开关开启才注入，off 零注入）
       ...(aiVoiceOn ? [promptRule('wx-ai-voice', AI_VOICE_DELIVERY_RULE) ?? ''] : []),
-    ].filter(Boolean),
+    ].filter(Boolean));
+  return buildPersonaSystemPrompt(peer, {
+    channel: '微信',
+    userName: addressNameOf(me, mode),
+    ownerName,
+    accountId: accId,
+    // 跨 App 身份感知：互通开关（每联系人设置，发送时现场读取）
+    multiApp: getMemSettings(peer.id).share,
+    ...npcExtra,
+    extraRules: wxRuleParts ?? [],
   });
 }
 
