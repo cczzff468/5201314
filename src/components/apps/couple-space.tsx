@@ -3115,52 +3115,55 @@ function NoteDetail({
     <div className="absolute inset-0 z-40 flex items-center justify-center px-6" role="dialog" aria-label="便签详情">
       <button type="button" aria-label="关闭" onClick={onClose} className="absolute inset-0 bg-black/25 backdrop-blur-[2px]" />
       <div className="relative flex max-h-[80%] w-full max-w-[320px] flex-col overflow-hidden rounded-2xl border border-neutral-200 bg-white shadow-[0_16px_44px_rgba(0,0,0,0.18)]">
-        {/* 便签正文（图案卡纸/自选色大卡 + 金属别针） */}
-        <div className="shrink-0 px-4 pb-3 pt-5">
-          <div
-            className="relative rounded-xl px-4 py-5 pt-6 shadow-[0_4px_14px_rgba(0,0,0,0.15)]"
-            style={noteFaceStyle(note, cardCustoms)}
-          >
-            {/* v44：自带胶带装饰的卡面（便签纸）不再叠金属别针 */}
-            {!noteHasOwnDecor(note, cardCustoms) && <NoteClip />}
-            {note.unlockAt && (
-              <p className="mb-1.5 inline-flex items-center gap-1 rounded-full bg-white/30 px-2 py-[2px] text-[9.5px] font-bold tracking-wide backdrop-blur-[1px]">
-                <LockOpen className="h-3 w-3" strokeWidth={2.6} aria-hidden="true" />
-                胶囊 · {fmtMDHM(note.unlockAt)} 已开启
-              </p>
-            )}
-            {/* 谁钉的：头像 + 名字（跟随情侣空间全局头像） */}
-            <span className="flex items-center gap-1.5">
-              <BoardAvatar src={note.from === 'me' ? meAvatar : taAvatar} name={note.from === 'me' ? meName || '我' : taName || 'TA'} size={22} />
-              <span className="text-[12px] font-bold opacity-80">{note.from === 'me' ? meName || '我' : taName || 'TA'}</span>
-            </span>
-            <p className="mt-1.5 break-all text-[15px] font-semibold leading-[1.7]">{note.text}</p>
-            <p className="mt-3 text-right text-[11px] font-bold opacity-75">{fmtMDHM(note.at)}</p>
+        {/* v59 修复「长便签划不动」：正文 + 留言区放进同一个滚动区——此前正文块 shrink-0 不可滚，长文自己就撑满 80% 上限，留言区被压成 0、输入行被裁出屏外，整卡哪里都划不动；现在输入行固定底部，往上整体可滑 */}
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+          {/* 便签正文（图案卡纸/自选色大卡 + 金属别针） */}
+          <div className="px-4 pb-3 pt-5">
+            <div
+              className="relative rounded-xl px-4 py-5 pt-6 shadow-[0_4px_14px_rgba(0,0,0,0.15)]"
+              style={noteFaceStyle(note, cardCustoms)}
+            >
+              {/* v44：自带胶带装饰的卡面（便签纸）不再叠金属别针 */}
+              {!noteHasOwnDecor(note, cardCustoms) && <NoteClip />}
+              {note.unlockAt && (
+                <p className="mb-1.5 inline-flex items-center gap-1 rounded-full bg-white/30 px-2 py-[2px] text-[9.5px] font-bold tracking-wide backdrop-blur-[1px]">
+                  <LockOpen className="h-3 w-3" strokeWidth={2.6} aria-hidden="true" />
+                  胶囊 · {fmtMDHM(note.unlockAt)} 已开启
+                </p>
+              )}
+              {/* 谁钉的：头像 + 名字（跟随情侣空间全局头像） */}
+              <span className="flex items-center gap-1.5">
+                <BoardAvatar src={note.from === 'me' ? meAvatar : taAvatar} name={note.from === 'me' ? meName || '我' : taName || 'TA'} size={22} />
+                <span className="text-[12px] font-bold opacity-80">{note.from === 'me' ? meName || '我' : taName || 'TA'}</span>
+              </span>
+              <p className="mt-1.5 break-all text-[15px] font-semibold leading-[1.7]">{note.text}</p>
+              <p className="mt-3 text-right text-[11px] font-bold opacity-75">{fmtMDHM(note.at)}</p>
+            </div>
           </div>
-        </div>
-        {/* 留言区（便签下的双向留言） */}
-        <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-2">
-          <p className="sticky top-0 z-[1] bg-white pb-1.5 pt-0.5 text-[11px] font-bold text-[#a3a3a3]">
-            便签下的留言 · {(note.comments ?? []).length}
-          </p>
-          {(note.comments ?? []).length === 0 && (
-            <p className="py-5 text-center text-[12.5px] leading-relaxed text-[#b3b3b3]">还没有留言——给这张便签回一句话吧</p>
-          )}
-          {(note.comments ?? []).map((m) => {
-            const mMine = m.from === 'me';
-            const who = mMine ? meName || '我' : taName || 'TA';
-            return (
-              <div key={m.id} className="flex items-start gap-2 py-[6px]">
-                <BoardAvatar src={mMine ? meAvatar : taAvatar} name={who} size={28} />
-                <div className="min-w-0 flex-1">
-                  <p className="text-[10.5px] font-semibold leading-tight text-[#a3a3a3]">
-                    {who} · {fmtMDHM(m.at)}
-                  </p>
-                  <p className="mt-[1px] break-all text-[13.5px] leading-relaxed text-[#262626]">{m.text}</p>
+          {/* 留言区（便签下的双向留言；与正文同滚动区，置顶小标题滑到顶时吸顶） */}
+          <div className="px-4 pb-2">
+            <p className="sticky top-0 z-[1] bg-white pb-1.5 pt-0.5 text-[11px] font-bold text-[#a3a3a3]">
+              便签下的留言 · {(note.comments ?? []).length}
+            </p>
+            {(note.comments ?? []).length === 0 && (
+              <p className="py-5 text-center text-[12.5px] leading-relaxed text-[#b3b3b3]">还没有留言——给这张便签回一句话吧</p>
+            )}
+            {(note.comments ?? []).map((m) => {
+              const mMine = m.from === 'me';
+              const who = mMine ? meName || '我' : taName || 'TA';
+              return (
+                <div key={m.id} className="flex items-start gap-2 py-[6px]">
+                  <BoardAvatar src={mMine ? meAvatar : taAvatar} name={who} size={28} />
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[10.5px] font-semibold leading-tight text-[#a3a3a3]">
+                      {who} · {fmtMDHM(m.at)}
+                    </p>
+                    <p className="mt-[1px] break-all text-[13.5px] leading-relaxed text-[#262626]">{m.text}</p>
+                  </div>
                 </div>
-              </div>
-            );
-          })}
+              );
+            })}
+          </div>
         </div>
         {/* 输入行 */}
         <div className="flex shrink-0 items-center gap-2 border-t border-neutral-200 px-3 py-2.5">
