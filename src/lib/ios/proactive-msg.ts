@@ -46,6 +46,7 @@ import { buildMomentsChatBlock } from '../moments';
 import { buildCrossAppBlock } from './cross-app-context';
 import { buildTimeAwareBlock, getTimeAware } from '@/lib/time-aware';
 import { extractThinkBlocks } from '@/lib/think-filter';
+import { stripLiteralQuotePrefix } from '@/lib/chat-rich';
 import { scheduleAiDelivery } from './ai-delivery';
 import { pushChatNotification } from './island-notify';
 import { wxUnreads, qqUnreads } from '@/lib/unread-store';
@@ -828,7 +829,7 @@ async function generateProactiveTexts(app: ProactiveApp, contact: ContactRecord,
   text = text.replace(/^[「"'『]+|[」"'』]+$/g, '').trim();
   text = text.replace(/^(好的[，,]?|以下是?我(要发|给对方)的?消息[：:]?)\s*/i, '').trim();
   const cleanLine = (s: string): string =>
-    s
+    stripLiteralQuotePrefix(s) // v54：剥掉模型裸抄的「（引用 …）」存档前缀（防模仿兜底；与三端聊天同口径）
       .replace(/^[-–—•·\d.、]+\s*/, '') // 兜底剥掉模型偶尔带的列表符号
       .replace(/^[「"'『]+|[」"'』]+$/g, '')
       .trim();
@@ -1376,10 +1377,10 @@ async function fireProactive(app: ProactiveApp, contact: ContactRecord, trigger:
         return;
       } else {
         // v53 自主触发同样多形态：message 里带换行 = 多条连发（一行一条，条数保护上限同口径）；
-        // 整段长文（无换行）= 单个大气泡，长度不设上限
+        // 整段长文（无换行）= 单个大气泡，长度不设上限；v54 同样剥字面引用前缀
         texts = decision.message
           .split(/\n+/)
-          .map((s) => s.replace(/^[-–—•·\d.、]+\s*/, '').replace(/^[「"'『]+|[」"'』]+$/g, '').trim())
+          .map((s) => stripLiteralQuotePrefix(s).replace(/^[-–—•·\d.、]+\s*/, '').replace(/^[「"'『]+|[」"'』]+$/g, '').trim())
           .filter(Boolean)
           .slice(0, MAX_BURST_COUNT);
       }

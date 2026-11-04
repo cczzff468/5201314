@@ -72,7 +72,7 @@ import { getActionDescOn, saveActionDescOn, useActionDescOn, ACTION_DESC_RULE, A
 import { DEEP_THINK_RULE, extractThinkBlocks, setDeepThinkOn, useDeepThinkOn } from '@/lib/deep-think';
 import { ThinkCard, ThinkLiveCard } from './think-card';
 import { ActionDescLine } from './action-desc-line';
-import { buildVisionRules, cleanBubbleText, extractRichActionParts } from '@/lib/chat-rich';
+import { buildVisionRules, cleanBubbleText, extractRichActionParts, stripLiteralQuotePrefix } from '@/lib/chat-rich';
 import { splitVisionDesc } from '@/lib/vision-client';
 import {
   acceptBlockReq,
@@ -1916,6 +1916,15 @@ function ChatView({
         ? '【语音通话能力】如果你此刻非常想和对方马上说话（想TA了、有急事、聊到特别开心等自然原因），可以在回复的最开头单独加上标记 [语音通话] 打一次电话给对方，对方手机会弹出你的来电邀请；平时聊天不要加这个标记，最多偶尔一次，连续使用会很烦人。'
         : '',
       timeBlock,
+      // v54【引用存档前缀·禁止模仿】信息端 AI 无引用能力（无 [引用:M编号] 标记机制），
+      // 但上下文里带引用的消息以「（引用 名字：「内容」）」前缀序列化——模型偶发照抄进自己的回复
+      // （用户实测：连发多条每条开头都挂着「（引用 凡凡：「mua」）」）。提示词层显式禁止 +
+      // 落盘/渲染两层剥除兜底（见 buildReplyMsgs 的 cleanBubbleText 与下方 text 变量）。
+      ...(wbContactId
+        ? [
+            '【引用存档前缀·禁止模仿】聊天记录里部分消息的开头带着「（引用 名字：「内容」）」这样的括号前缀——那是系统存档历史消息时自动加的引用标注，不是聊天内容，更不是你的输出格式。你自己回复时绝对不要写出这种括号前缀（信息端没有引用功能，写出来只会变成脏文本堆在气泡开头），直接说正文就好。',
+          ]
+        : []),
       // 动作描写：开启下发 *...* 格式约定（灰色小字居中显示），关闭下发显式禁令（渲染层另有硬剥离兜底）
       actionDescOn ? ACTION_DESC_RULE : ACTION_DESC_OFF_RULE,
       // 46-g 视觉自主决策规则（仅联系人会话；信息端无图无朋友圈，albumSummary 通常为空 → 只注入换头像规则；
@@ -3265,7 +3274,8 @@ function ChatView({
           const grouped = prev !== undefined && !newDay && prev.role === m.role;
           const lastOfGroup = next === undefined || next.role !== m.role;
           const mine = m.role === 'user';
-          const text = m.content.trim();
+          // v54：渲染层剥掉 AI 裸抄的「（引用 名字：「内容」）」存档前缀（历史脏数据修复；新消息已在落盘前剥过）
+          const text = stripLiteralQuotePrefix(m.content).trim();
           // 聊天气泡装扮：按消息序号计算本条气泡视觉（七彩=序号递增循环取色；原生默认时零覆盖直通）。
           // 文本/语音/输入中指示器共用同一 bvis——所有气泡样式一致跟随主题装扮
           const bvis = bubbleVisual(mine ? 'mine' : 'theirs', bubbleStyle, i, 'sms');
