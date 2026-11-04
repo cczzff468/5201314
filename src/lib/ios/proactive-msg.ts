@@ -28,6 +28,16 @@ import { avatarFor, type ContactAvatarApp, type ContactRecord } from '@/lib/cont
 import { buildPersonaSystemPrompt } from './persona';
 // 第十六轮：AI 动态状态（情绪+作息）——主动消息也带着当前心情、按作息拿撑时机
 import { buildDynamicStateBlocks } from './ai-mood';
+// v51 焦虑值系统：阈值触发（焦虑值 ≥ 阈值且用户超时未回复 → 带着焦虑主动发消息）
+import {
+  anxietyOf,
+  readAnxiety,
+  noteAnxietyFire,
+  buildAnxietyFireBlock,
+  ANXIETY_DEFAULT_THRESHOLD,
+  ANXIETY_DEFAULT_GRACE_MS,
+  ANXIETY_DEFAULT_SEND_MS,
+} from './anxiety';
 import { buildNpcPromptExtra } from './npc-bond';
 import { loadBlock } from './block-state';
 import { isDndWindowActive } from './notify-sound';
@@ -61,7 +71,7 @@ export interface ProactiveEvent {
   enabled: boolean;
 }
 
-/** 单个角色的主动发消息配置（三模式独立开关） */
+/** 单个角色的主动发消息配置（三模式独立开关 + v51 焦虑关怀） */
 export interface ProactiveMsgConfig {
   /** 定时触发 */
   timerOn: boolean;
@@ -77,6 +87,14 @@ export interface ProactiveMsgConfig {
   autoOn: boolean;
   /** 自主决策节奏（分钟；Task 51 B4 可调，默认 5） */
   autoFreqMin?: number;
+  /** v51 焦虑关怀：焦虑值 ≥ 阈值且用户超时未回复 → 带着焦虑主动发消息（默认开启） */
+  anxietyOn?: boolean;
+  /** 焦虑触发阈值（0~100，默认 70） */
+  anxietyThreshold?: number;
+  /** 未回复宽限时间（毫秒，默认 60s = 1 分钟；超过后开始涨焦虑/可触发） */
+  anxietyGraceMs?: number;
+  /** 焦虑消息发送节奏（毫秒，默认 60s = 1 分钟一条；规格约定不开放 UI 自定义） */
+  anxietySendMs?: number;
 }
 
 /** 定时提醒任务（自然语言解析产物） */
@@ -182,6 +200,19 @@ function sanitizeCfg(raw: unknown): ProactiveMsgConfig {
   // 用户反馈：自定义 5 秒被强顶成 15 秒——下限降到 3s（低于 3s 的极端值才收敛），写多少就是多少
   const timerMs = typeof r.timerMs === 'number' && Number.isFinite(r.timerMs) ? Math.max(3_000, Math.min(r.timerMs, 7 * 24 * 3600_000)) : DEFAULT_CFG.timerMs;
   const autoFreqMin = typeof r.autoFreqMin === 'number' && Number.isFinite(r.autoFreqMin) ? Math.max(2, Math.min(Math.round(r.autoFreqMin), 120)) : 5;
+  // v51 焦虑关怀：缺省 = 开启（用户需求：焦虑值驱动主动发消息开箱即用）；阈值默认 70%
+  const anxietyThreshold =
+    typeof r.anxietyThreshold === 'number' && Number.isFinite(r.anxietyThreshold)
+      ? Math.max(30, Math.min(Math.round(r.anxietyThreshold), 100))
+      : ANXIETY_DEFAULT_THRESHOLD;
+  const anxietyGraceMs =
+    typeof r.anxietyGraceMs === 'number' && Number.isFinite(r.anxietyGraceMs)
+      ? Math.max(15_000, Math.min(r.anxietyGraceMs, 24 * 3600_000))
+      : ANXIETY_DEFAULT_GRACE_MS;
+  const anxietySendMs =
+    typeof r.anxietySendMs === 'number' && Number.isFinite(r.anxietySendMs)
+      ? Math.max(30_000, Math.min(r.anxietySendMs, 24 * 3600_000))
+      : ANXIETY_DEFAULT_SEND_MS;
   return {
     timerOn: r.timerOn === true,
     timerMode: r.timerMode === 'daily' ? 'daily' : 'interval',
@@ -190,6 +221,10 @@ function sanitizeCfg(raw: unknown): ProactiveMsgConfig {
     events,
     autoOn: r.autoOn === true,
     autoFreqMin,
+    anxietyOn: r.anxietyOn !== false,
+    anxietyThreshold,
+    anxietyGraceMs,
+    anxietySendMs,
   };
 }
 
@@ -204,12 +239,12 @@ export function setProactiveCfg(app: ProactiveApp, cid: string, cfg: ProactiveMs
   upsertIndex(app, cid);
 }
 
-/** 配置是否有任何生效中的触发 */
+/** 配置是否有任何生效中的触发（v51：焦虑关怀默认开启也算生效——呼吸灯亮） */
 export function cfgHasActiveTrigger(cfg: ProactiveMsgConfig): boolean {
-  return cfg.timerOn || cfg.autoOn || cfg.events.some((e) => e.enabled);
+  return cfg.timerOn || cfg.autoOn || cfg.anxietyOn !== false || cfg.events.some((e) => e.enabled);
 }
 
-/** 设置页入口行摘要（如「定时 5 分钟」「事件 2 · 自主」；全关 = 「未开启」） */
+/** 设置页入口行摘要（如「定时 5 分钟 · 焦虑 70」；全关 = 「未开启」） */
 export function proactiveCfgSummary(app: ProactiveApp, cid: string): string {
   let cfg: ProactiveMsgConfig;
   try {
@@ -222,6 +257,8 @@ export function proactiveCfgSummary(app: ProactiveApp, cid: string): string {
   const evtOn = cfg.events.filter((e) => e.enabled).length;
   if (evtOn > 0) parts.push(`事件 ${evtOn}`);
   if (cfg.autoOn) parts.push('自主');
+  // v51 焦虑关怀摘要（开启才显示；默认开 → 入口行可见「焦虑 70」）
+  if (cfg.anxietyOn !== false) parts.push(`焦虑 ${cfg.anxietyThreshold ?? ANXIETY_DEFAULT_THRESHOLD}`);
   return parts.length > 0 ? parts.join(' · ') : '未开启';
 }
 
@@ -455,7 +492,7 @@ export async function parseReminderInstruction(app: ProactiveApp, cid: string, t
 export interface ProactiveHistEntry {
   text: string;
   at: number;
-  kind: 'timer' | 'event' | 'auto' | 'reminder';
+  kind: 'timer' | 'event' | 'auto' | 'reminder' | 'anxiety';
   /** 迟到补发的提醒（Task 51 A2） */
   late?: boolean;
 }
@@ -657,6 +694,8 @@ function triggerDesc(trigger: FireTrigger): string {
       return `事件触发：现在正是「${trigger.eventName ?? ''}」的时候，你因为这个事件想给对方发条消息。`;
     case 'reminder':
       return `定时提醒：对方之前请你「${trigger.note ?? '到点给 TA 发条消息'}」，现在到时间了，你要兑现这个约定${trigger.late ? '（这次提醒比约定时间晚到了——设备可能没开着，你要自然地带一句歉意，比如开头说「来晚了」，然后把该说的说完）' : ''}。`;
+    case 'anxiety':
+      return `焦虑触发：你已经等了很久都没有等到 TA 的回复（你当下的焦虑值 ${trigger.anxietyLevel ?? '??'}/100），控制不住要主动找 TA——这是情绪驱动，不是约定也不是提醒。`;
     case 'auto':
       return '自主触发：你自己决定此刻主动发一条消息（系统判断当前时机合适，你按自己的性格和心情自由发挥）。';
   }
@@ -676,6 +715,11 @@ function genRules(trigger: FireTrigger, timeAware: boolean): string[] {
   ];
   if (timeAware) rules.push('内容必须符合当前真实时间（深夜别元气满满问吃了吗、早上适合问早、饭点可以聊吃的；节日节气可以自然提到）。');
   if (trigger.kind === 'reminder' && trigger.note) rules.push(`消息要贴合对方的请求「${trigger.note}」（该提醒就提醒、该说晚安就说晚安），用你自己的口吻说。`);
+  // v51 焦虑触发：情绪驱动型消息的专属规则（与【你此刻的焦虑值】块配合）
+  if (trigger.kind === 'anxiety') {
+    rules.push('这条消息由你的焦虑驱动：对方已经很久没回你了，你控制不住想主动开口。让这份焦急真实地透出来——会追问、会不安、想确认 TA 还在乎你；但不要卑微地连环道歉，也不要发火骂人（除非你的人设本来就暴躁）。');
+    rules.push('连续的焦虑消息之间内容要有变化（担心 → 自我怀疑 → 想起你们的约定 → 撒娇式质问……换着角度来），禁止连续两条几乎一样，也不要每条都以「在吗」开头。');
+  }
   return rules;
 }
 
@@ -689,11 +733,13 @@ function convoLines(norm: NormMsg[], count: number, peerName: string, userName: 
 }
 
 interface FireTrigger {
-  kind: 'timer' | 'event' | 'auto' | 'reminder';
+  kind: 'timer' | 'event' | 'auto' | 'reminder' | 'anxiety';
   eventName?: string;
   note?: string;
   /** 提醒迟到补发（Task 51 A2）：生成时带歉意 */
   late?: boolean;
+  /** v51 焦虑触发：当下的焦虑值（0~100，进触发情境描述） */
+  anxietyLevel?: number;
 }
 
 /**
@@ -749,7 +795,7 @@ async function generateProactiveText(app: ProactiveApp, contact: ContactRecord, 
   // 跨 App 近况（与三端聊天同口径）：其他 App 最近聊过什么/用户在听什么——主动消息能接上别处的话题
   const crossAppBlock = await buildCrossAppBlock(contact.id, app, userName);
 
-  const system = [persona, memoryBlock, crossAppBlock, momentsBlock, timeBlock, buildDynamicStateBlocks(contact.id)].filter(Boolean).join('\n\n');
+  const system = [persona, memoryBlock, crossAppBlock, momentsBlock, timeBlock, buildDynamicStateBlocks(contact.id), trigger.kind === 'anxiety' ? buildAnxietyFireBlock(contact.id) : ''].filter(Boolean).join('\n\n');
 
   // user prompt：情境 + 最近对话 + 防重复
   const recent = convoLines(norm, 12, contact.name, userName);
@@ -938,6 +984,16 @@ async function deliverProactiveMsg(app: ProactiveApp, contact: ContactRecord, te
   setLast(app, cid, { lastSentText: text, sentAt: now, autoAt: now });
   // 最近主动消息历史（Task 51 C2：设置页回看，每角色最近 20 条）
   pushHist(app, cid, { text, at: now, kind: trigger.kind, late: trigger.late });
+
+  // v51 焦虑触发：投递成功后打点——小幅缓解（-6）+ 记录发送节奏（lastFireAt）。
+  // 焦虑消息本身已正常写入聊天记录（上方 kvSet）与记忆库（下方 memAfterAiTurn）。
+  if (trigger.kind === 'anxiety') {
+    try {
+      noteAnxietyFire(cid);
+    } catch {
+      /* 打点失败不影响投递 */
+    }
+  }
 
   // 写记忆：主动消息同样进记忆管线（七.2）——与三端聊天 memAfterAiTurn 同口径
   try {
@@ -1166,6 +1222,36 @@ async function tickInner(): Promise<void> {
       }
     }
   }
+
+  // ⑤ 焦虑触发（v51 情绪焦虑值系统）：焦虑值 ≥ 阈值 且 用户超过宽限时间未回复 → 带着焦虑主动发消息。
+  // 全联系人扫描（不依赖上方主动消息索引——焦虑是角色本体的情绪，默认开启，无需先配置过其它触发）；
+  // 投递回「用户最近聊天所在的 App」（anxiety.lastUserApp）；生成 Prompt 注入人设+记忆+最近聊天+
+  // 焦虑当前值（generateProactiveText 内 buildAnxietyFireBlock）；发送节奏由 lastFireAt 节流
+  // （默认 1 分钟一条）；用户回复即安抚（noteUserReply 大幅缓解）。焦虑消息同样走 deliverProactiveMsg
+  // 管线：正常写聊天记录 + 记忆库。守卫：拉黑（byUser）不穿透；系统勿扰时段不穿透；
+  // 全局防轰炸闸（MIN_SEND_GAP）同四类触发共用；通话/闹钟互斥在 tick 入口已拦。
+  anxLoop: for (const contact of allContacts) {
+    if (contact.kind === 'user' || !contact.name?.trim()) continue;
+    const cid = contact.id;
+    const meta = readAnxiety(cid);
+    const anxApp = meta.lastUserApp;
+    if (meta.lastUserAt <= 0 || (anxApp !== 'wx' && anxApp !== 'qq' && anxApp !== 'sms')) continue;
+    const anxAppTyped = anxApp as ProactiveApp;
+    const anx = anxietyOf(cid, { persona: contact.persona || null });
+    const anxHeightCfg = getProactiveCfg(anxAppTyped, cid);
+    if (anxHeightCfg.anxietyOn === false) continue;
+    const blkAnx = loadBlock(anxAppTyped, cid);
+    if (blkAnx.byUser) continue; // 拉黑期间不穿透（同四类触发口径）
+    const threshold = anxHeightCfg.anxietyThreshold ?? ANXIETY_DEFAULT_THRESHOLD;
+    const graceMs = anxHeightCfg.anxietyGraceMs ?? ANXIETY_DEFAULT_GRACE_MS;
+    const sendMs = anxHeightCfg.anxietySendMs ?? ANXIETY_DEFAULT_SEND_MS;
+    const unansweredMs = nowMs - anx.lastUserAt;
+    if (anx.level < threshold || unansweredMs < graceMs || nowMs - anx.lastFireAt < sendMs) continue;
+    if (nowMs - (getLast(anxAppTyped, cid).sentAt ?? 0) < MIN_SEND_GAP_MS) continue; // 防轰炸闸
+    if (isDndWindowActive()) continue; // 系统勿扰：焦虑再急也不穿透用户设置的勿扰时段
+    const npcExtraAnx = buildNpcPromptExtra(contact, allContacts) as unknown as Record<string, unknown> | null;
+    await fireProactive(anxAppTyped, contact, { kind: 'anxiety', anxietyLevel: Math.round(anx.level) }, npcExtraAnx);
+  }
 }
 
 // ---------------- 统一触发入口（生成锁 + 去重 + 投递） ----------------
@@ -1194,6 +1280,16 @@ function fallbackProactiveText(trigger: FireTrigger, userName?: string | null): 
     const name = (trigger.eventName ?? '').trim();
     if (name) return `「${name}」的时间到了，特地来跟你说一声~`;
     return '到点了，来跟你说一声~';
+  }
+  if (trigger.kind === 'anxiety') {
+    // v51：焦虑触发兑底——等不到回复的坐立不安（像真人随手发的，不暴露系统兑底痕迹）
+    return pick([
+      '你怎么一直不回我……是不是出什么事了？',
+      '盯着手机好久了，你就回我一个字也好啊',
+      '越等越心慌……你倒是说句话呀',
+      '我有点坐不住了，你是不是不想理我了……',
+      '跟你说句话嘛，别晾着我好不好',
+    ]);
   }
   return pick([
     '在干嘛呢？突然想起你了',

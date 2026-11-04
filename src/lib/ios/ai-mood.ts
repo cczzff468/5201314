@@ -199,14 +199,17 @@ export function buildMoodBlock(cid: string): string {
 
 import { buildRoutineBlock } from './routine';
 import { buildUserMoodBlock } from './user-mood';
+import { buildAnxietyChatBlock } from './anxiety';
 
 /**
- * AI 动态状态块 = 情绪块 + 作息块（第十六轮）+ 用户情绪感知块（v49 功能四）。
+ * AI 动态状态块 = 情绪块 + 作息块（第十六轮）+ 用户情绪感知块（v49 功能四）+ 焦虑情绪带入块（v51）。
  * 供三端聊天 systemFull / 主动消息 / 情侣空间行为等**客户端**组装点注入；
  * persona.ts 本身是客户端+服务端共用纯函数，不能带 localStorage 依赖，故由调用方注入。
  * v49：buildUserMoodBlock（【对方此刻的状态】：低落→安抚 / 兴奋→共庆 / 生气→哄）
  * 并入组合块——三端聊天/主动消息/情侣空间行为全部自动带上，无需各处单独接。
+ * v51：buildAnxietyChatBlock（【你此刻的焦虑状态】：用户久久未回复导致的焦虑，回来
+ * 聊天时自然带入情绪）并入——四.3「下次用户主动聊天时，AI 可能会带入焦虑时的情绪」。
  */
 export function buildDynamicStateBlocks(cid: string): string {
-  return [buildMoodBlock(cid), buildUserMoodBlock(cid), buildRoutineBlock()].filter(Boolean).join('\n');
+  return [buildMoodBlock(cid), buildUserMoodBlock(cid), buildAnxietyChatBlock(cid), buildRoutineBlock()].filter(Boolean).join('\n');
 }

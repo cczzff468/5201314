@@ -16,7 +16,7 @@
  */
 
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { BellOff, BellRing, CalendarClock, Check, ChevronLeft, History, Plus, Send, Sparkles, Timer, Trash2, Zap } from 'lucide-react';
+import { BellOff, BellRing, CalendarClock, Check, ChevronLeft, HeartPulse, History, Plus, Send, Sparkles, Timer, Trash2, Zap } from 'lucide-react';
 import { ChatToggle } from './chat-settings';
 import { useChatSkin } from '@/lib/ios/chat-skin';
 import { loadBlock } from '@/lib/ios/block-state';
@@ -40,6 +40,7 @@ import {
   type ProactiveReminder,
   type ProactiveHistEntry,
 } from '@/lib/ios/proactive-msg';
+import { anxietyOf, anxietyLabel, anxietyUnansweredLabel, ANXIETY_DEFAULT_THRESHOLD, type AnxietyState } from '@/lib/ios/anxiety';
 import { genId } from '@/lib/ios/db';
 
 /** 定时间隔档位（毫秒）；自定义走输入面板 */
@@ -58,6 +59,19 @@ const TIMER_PRESETS: number[] = [
 
 /** 自主决策频率档位（分钟） */
 const AUTO_FREQ_PRESETS: number[] = [3, 5, 10, 15, 30];
+
+/** v51 焦虑关怀：触发阈值档位（%；默认 70——用户需求「允许自定义触发阈值（默认 70%）」） */
+const ANXIETY_THRESHOLD_PRESETS: number[] = [50, 60, 70, 80, 90];
+
+/** v51 焦虑关怀：多久没回复开始涨焦虑的档位（毫秒；默认 1 分钟——用户需求「用户1分钟没有回复消息（可自定义时间）」） */
+const ANXIETY_GRACE_PRESETS: { ms: number; label: string }[] = [
+  { ms: 30_000, label: '30秒' },
+  { ms: 60_000, label: '1分钟' },
+  { ms: 120_000, label: '2分钟' },
+  { ms: 300_000, label: '5分钟' },
+  { ms: 600_000, label: '10分钟' },
+  { ms: 1_800_000, label: '30分钟' },
+];
 
 const WEEK_CHIPS: { d: number; label: string }[] = [
   { d: 1, label: '一' },
@@ -312,13 +326,24 @@ export function ProactiveMsgPage({
   };
   const [blockedDir, setBlockedDir] = useState<'byUser' | 'byChar' | null>(readBlockHint);
 
-  /** 提醒/历史清单/总开关轻轮询（NL 解析可能在本页打开时于聊天里创建任务；4s 刷新足够） */
+  // v51 焦虑关怀：当前焦虑值实时读数（读即结算；展示层与引擎同一存储同一口径）
+  const readAnx = (): AnxietyState => {
+    try {
+      return anxietyOf(contactId);
+    } catch {
+      return { level: 0, lastUserAt: 0, lastUserApp: '', lastFireAt: 0, mult: 1, graceMs: 60_000 };
+    }
+  };
+  const [anx, setAnx] = useState<AnxietyState>(readAnx);
+
+  /** 提醒/历史清单/总开关/焦虑读数轻轮询（NL 解析可能在本页打开时于聊天里创建任务；4s 刷新足够） */
   useEffect(() => {
     const t = window.setInterval(() => {
       setReminders(remindersFor(app, contactId));
       setHist(proactiveHistory(app, contactId));
       setMasterOff(isProactiveMasterOff());
       setBlockedDir(readBlockHint());
+      setAnx(readAnx());
     }, 4_000);
     return () => window.clearInterval(t);
   }, [app, contactId]);
@@ -389,7 +414,8 @@ export function ProactiveMsgPage({
     setEvtDraft(null);
   };
 
-  const kindLabel = (k: ProactiveHistEntry['kind']): string => (k === 'timer' ? '定时' : k === 'event' ? '事件' : k === 'reminder' ? '提醒' : '自主');
+  const kindLabel = (k: ProactiveHistEntry['kind']): string =>
+    k === 'timer' ? '定时' : k === 'event' ? '事件' : k === 'reminder' ? '提醒' : k === 'anxiety' ? '焦虑' : '自主';
 
   if (!cfg) {
     return (
@@ -793,7 +819,83 @@ export function ProactiveMsgPage({
           </p>
         </div>
 
-        {/* ⑤ 最近主动消息（Task 51 C2） */}
+        {/* ⑤ 焦虑关怀（v51 情绪焦虑值系统）：焦虑值 ≥ 阈值且用户超时未回复 → 带着焦虑主动发消息 */}
+        <div className={`${glassCard} mt-3 overflow-hidden`}>
+          <div className={rowCls}>
+            <span className="flex items-center gap-2.5">
+              <IconTile color="#FF9500">
+                <HeartPulse className="h-[15px] w-[15px]" strokeWidth={2.4} />
+              </IconTile>
+              <span>
+                <span className="block text-[15.5px] leading-tight">焦虑关怀</span>
+                <span className="mt-0.5 block text-[11.5px] leading-tight text-black/40 dark:text-white/40">等不到你回复，TA 会越来越焦虑</span>
+              </span>
+            </span>
+            <ChatToggle on={cfg.anxietyOn !== false} onChange={(v) => update({ anxietyOn: v })} accent={accent} testId={`${testPrefix}-proactive-anxiety`} label="焦虑关怀" />
+          </div>
+          <div className="border-t px-4 py-3.5" style={{ borderColor: 'inherit' }}>
+            {/* 实时焦虑值读数（本地焦虑引擎读即结算；与状态卡/引擎同一存储同一口径） */}
+            <div className={miniCard} data-testid={`${testPrefix}-proactive-anxiety-live`}>
+              <div className="flex items-baseline justify-between">
+                <span className="text-[12.5px] text-black/45 dark:text-white/45">此刻焦虑值</span>
+                <span className="text-[12.5px]">
+                  <span className="font-semibold tabular-nums" style={{ color: anx.level >= (cfg.anxietyThreshold ?? ANXIETY_DEFAULT_THRESHOLD) ? '#FF9500' : undefined }}>
+                    {Math.round(anx.level)}
+                  </span>
+                  <span className="text-black/40 dark:text-white/40">/100 · {anxietyLabel(anx.level)}</span>
+                </span>
+              </div>
+              <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-black/[0.06] dark:bg-white/[0.08]">
+                <div
+                  className="h-full rounded-full transition-[width] duration-700"
+                  style={{ width: `${Math.round(anx.level)}%`, background: 'linear-gradient(90deg,#FFD60A,#FF9500)' }}
+                />
+              </div>
+              <p className="mt-2 text-[11.5px] leading-relaxed text-black/40 dark:text-white/40" data-testid={`${testPrefix}-proactive-anxiety-status`}>
+                {anx.lastUserAt > 0 ? `你 ${anxietyUnansweredLabel(anx)}——TA 都看在眼里` : '你们还没聊过天，焦虑无从谈起'}
+              </p>
+            </div>
+            {cfg.anxietyOn !== false && (
+              <>
+                <p className="mb-2 mt-3 text-[12px] text-black/40 dark:text-white/40">触发阈值（焦虑值达到多少开始主动发消息）</p>
+                <div className="flex flex-wrap gap-2">
+                  {ANXIETY_THRESHOLD_PRESETS.map((p) => (
+                    <button
+                      key={p}
+                      type="button"
+                      data-testid={`${testPrefix}-proactive-anxiety-threshold-${p}`}
+                      onClick={() => update({ anxietyThreshold: p })}
+                      className={`${chipCls} ${(cfg.anxietyThreshold ?? ANXIETY_DEFAULT_THRESHOLD) === p ? '' : chipIdle}`}
+                      style={(cfg.anxietyThreshold ?? ANXIETY_DEFAULT_THRESHOLD) === p ? { background: accent, color: '#fff' } : undefined}
+                    >
+                      {p}%
+                    </button>
+                  ))}
+                </div>
+                <p className="mb-2 mt-3.5 text-[12px] text-black/40 dark:text-white/40">多久没回复开始涨焦虑</p>
+                <div className="flex flex-wrap gap-2">
+                  {ANXIETY_GRACE_PRESETS.map((g) => (
+                    <button
+                      key={g.ms}
+                      type="button"
+                      data-testid={`${testPrefix}-proactive-anxiety-grace-${g.ms}`}
+                      onClick={() => update({ anxietyGraceMs: g.ms })}
+                      className={`${chipCls} ${(cfg.anxietyGraceMs ?? 60_000) === g.ms ? '' : chipIdle}`}
+                      style={(cfg.anxietyGraceMs ?? 60_000) === g.ms ? { background: accent, color: '#fff' } : undefined}
+                    >
+                      {g.label}
+                    </button>
+                  ))}
+                </div>
+                <p className="mt-2.5 text-[12px] leading-relaxed text-black/35 dark:text-white/35">
+                  焦虑值随你未回复的时间上涨（超过 {intervalLabel(cfg.anxietyGraceMs ?? 60_000)} 起算；冷淡回复、吵架、提到别人也会涨，按 TA 的人设快慢不同）；达到 {cfg.anxietyThreshold ?? ANXIETY_DEFAULT_THRESHOLD}% 后 TA 会带着当下的焦虑主动发消息，约每 1 分钟一条——你回复 TA，就会安心下来。
+                </p>
+              </>
+            )}
+          </div>
+        </div>
+
+        {/* ⑥ 最近主动消息（Task 51 C2） */}
         {hist.length > 0 && (
           <div className={`${glassCard} mt-3 overflow-hidden`}>
             <div className={rowCls}>

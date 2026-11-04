@@ -188,6 +188,15 @@ export async function POST(req: NextRequest) {
   const userName = typeof body.userName === 'string' ? body.userName.trim().slice(0, 30) : '';
   const userRealName = typeof body.userRealName === 'string' ? body.userRealName.trim().slice(0, 30) : '';
 
+  // v51 焦虑值（本地焦虑引擎计算值透传）：注入【你此刻的焦虑值】让心情/心声自然贴合
+  const anx = body.anxiety as { level?: unknown; unansweredMinutes?: unknown } | undefined;
+  const anxLevel =
+    anx && typeof anx.level === 'number' && Number.isFinite(anx.level) ? Math.max(0, Math.min(100, Math.round(anx.level))) : null;
+  const anxUnanswered =
+    anx && typeof anx.unansweredMinutes === 'number' && Number.isFinite(anx.unansweredMinutes) ? Math.max(0, Math.round(anx.unansweredMinutes)) : null;
+  const anxLabelOf = (l: number): string =>
+    l >= 80 ? '快绷不住了' : l >= 60 ? '焦虑上头' : l >= 40 ? '坐立难安' : l >= 20 ? '隐隐挂念' : '安然自在';
+
   const system = buildStatusSystemPrompt(
     peer,
     userName || userRealName ? { name: userName || userRealName } : undefined,
@@ -207,6 +216,11 @@ export async function POST(req: NextRequest) {
   const chatLines = recentChats.map((c) => `${c.role === 'user' ? '机主' : '你'}：${c.text}`);
   const contextLines = [
     `【场景】机主（${userName || '用户'}）此刻在${APP_CHANNEL[app]}里点开了你的头像，正在查看你的状态卡。`,
+    ...(anxLevel != null
+      ? [
+          `【你此刻的焦虑值】${anxLevel}/100（${anxLabelOf(anxLevel)}）${anxUnanswered != null && anxUnanswered > 0 ? `——你已经约 ${anxUnanswered} 分钟没有收到 TA 的回复` : ''}。生成这张状态卡时，让心情（mood/moodText）和心声（innerVoice）自然反映这份焦虑（焦虑值低时心情照常，不必强行体现）。`,
+        ]
+      : []),
     ...(chatLines.length > 0
       ? ['【最近聊天】', '（机主=用户本人，「你」=角色本人，别把机主说的话当成自己说的）', ...chatLines]
       : []),

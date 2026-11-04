@@ -32,6 +32,7 @@ import { getActiveAccountIdFor } from '@/lib/ios/accounts';
 import { listContacts, ownerProfileFor } from '@/lib/ios/contacts-store';
 import { buildNpcPromptExtra } from '@/lib/ios/npc-bond';
 import { getMemSettings, memAddEventFragment, memRecentConvo, memRecallBlock } from '@/lib/memory';
+import { anxietyOf, anxietyLabel, anxietyUnansweredLabel, type AnxietyState } from '@/lib/ios/anxiety';
 import { DefaultAvatar } from '@/components/apps/default-avatar';
 
 /** 状态卡数据（与 /api/character-status 返回形状一致） */
@@ -101,6 +102,8 @@ export default function PeerStatusCard({
 }) {
   const [phase, setPhase] = useState<'loading' | 'ok' | 'error'>('loading');
   const [data, setData] = useState<StatusCard | null>(null);
+  /** v51 焦虑值（本地焦虑引擎实时计算，随卡片打开/换一换刷新；与好感度同框展示） */
+  const [anx, setAnx] = useState<AnxietyState | null>(null);
   const [openedAt, setOpenedAt] = useState<Date | null>(null);
   const [saved, setSaved] = useState(false);
   /** 「换一换」/「重试」计数：变化即重新生成 */
@@ -122,6 +125,9 @@ export default function PeerStatusCard({
     setPhase('loading');
     setSaved(false);
     setOpenedAt(new Date());
+    // v51 焦虑值：本地引擎读即结算（人设倍率同引擎口径）；随请求下发给后端 → 心情/心声自然反映焦虑
+    const anxState = anxietyOf(contact.id, { persona: contact.persona || null });
+    setAnx(anxState);
     try {
       const st = useSettings.getState();
       // 机主身份 + 配角圈（NPC 场景）：与聊天人设同口径（v2 多账号：按所在 App 当前账号取「我」）
@@ -173,6 +179,11 @@ export default function PeerStatusCard({
           userName: userName || null,
           userRealName: realName || null,
           multiApp: getMemSettings(contact.id).share,
+          // v51 焦虑值（本地引擎计算值透传：后端注入【你此刻的焦虑值】让心情/心声贴合）
+          anxiety: {
+            level: Math.round(anxState.level),
+            unansweredMinutes: anxState.lastUserAt > 0 ? Math.round((Date.now() - anxState.lastUserAt) / 60_000) : null,
+          },
           // 多账号关系感知：小号下生成状态卡读分账号关系（与机主身份同账号口径）
           accountId: getActiveAccountIdFor(app),
           bondHint: bondHint ?? null,
@@ -209,6 +220,7 @@ export default function PeerStatusCard({
     const bits = [
       `心情${data.moodText}（${data.mood}）`,
       `对机主的好感约 ${data.affection}/100（${data.affectionLabel}）`,
+      ...(anx ? [`此刻焦虑值约 ${Math.round(anx.level)}/100（${anxietyLabel(anx.level)}）`] : []),
       `内心独白：「${data.innerVoice}」`,
       `当时正在${data.action}`,
       data.outfit ? `穿着${data.outfit}` : '',
@@ -257,7 +269,7 @@ export default function PeerStatusCard({
             role="dialog"
             aria-label={`${peerName}的状态卡`}
           >
-            {/* 头部：头像 + 名字 + 来源 App + 关闭 */}
+            {/* 头部：头像 + 名字 + 关闭（v51：按用户要求删除「微信/QQ/信息」渠道前缀，只留「此刻状态」） */}
             <div className="flex items-center gap-3 px-4 pt-4">
               {contact.avatar ? (
                 <img src={contact.avatar} alt={peerName} className={`h-12 w-12 shrink-0 object-cover ${avatarShape}`} />
@@ -275,7 +287,7 @@ export default function PeerStatusCard({
                       <span className="relative inline-flex h-[7px] w-[7px] rounded-full bg-[#07C160]" />
                     </span>
                   )}
-                  <span>{APP_LABEL[app]} · 此刻状态</span>
+                  <span>此刻状态</span>
                 </div>
               </div>
               <button
@@ -340,6 +352,27 @@ export default function PeerStatusCard({
                       />
                     </div>
                   </div>
+                  {/* 焦虑值（v51）：本地焦虑引擎实时计算——用户久久未回复，TA 越来越坐立不安；达到阈值会主动发消息 */}
+                  {anx && (
+                    <div className="mt-3" data-testid="peer-status-anxiety">
+                      <div className="flex items-baseline justify-between">
+                        <span className="text-[11px] font-medium text-muted-foreground">焦虑值</span>
+                        <span className="text-[12px]">
+                          <span className="font-semibold tabular-nums">{Math.round(anx.level)}</span>
+                          <span className="text-muted-foreground"> · {anxietyLabel(anx.level)}</span>
+                        </span>
+                      </div>
+                      <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-muted">
+                        <motion.div
+                          className="h-full rounded-full bg-[#FF9500]"
+                          initial={{ width: 0 }}
+                          animate={{ width: `${Math.round(anx.level)}%` }}
+                          transition={{ duration: 0.5, ease: 'easeOut' }}
+                        />
+                      </div>
+                      <p className="mt-1 text-[10.5px] leading-none text-muted-foreground/80">{anxietyUnansweredLabel(anx)} · 超过阈值会忍不住主动找你</p>
+                    </div>
+                  )}
                   {/* 心声（液态 = 内嵌玻璃胶囊） */}
                   <div
                     className={liquid ? 'lg-input mt-4 rounded-[16px] p-3' : 'mt-4 rounded-xl bg-muted/50 p-3'}
