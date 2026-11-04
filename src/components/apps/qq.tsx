@@ -466,14 +466,14 @@ interface QQMsg {
   time: number;
   /** 已读未读回执（显示设置）：发送/投递时 true，对方回话时转 false；undefined = 旧数据，视为已读 */
   unread?: boolean;
-  /** 消息种类：缺省 = 文本；image = 图片（content 为 dataURL）；location = 位置（loc 有值）；红包/转账消息 content 为空串（转账接收卡片也是 transfer）；family = 亲属卡（fam 有值）；notice = 红包领取通知；forward = 转发卡片；groupcard = 群聊邀请卡片；relcard = 亲密关系卡片（恋人空间邀请卡/成功卡）；
+  /** 消息种类：缺省 = 文本；image = 图片（content 为 dataURL）；location = 位置（loc 有值）；红包/转账消息 content 为空串（转账接收卡片也是 transfer）；family = 亲属卡（fam 有值）；notice = 红包领取通知；forward = 转发卡片；groupcard = 群聊邀请卡片；relcard = 亲密关系卡片（情侣空间邀请卡/成功卡）；
    *  voice = 语音消息（voice 有值，content 保持空串）；sys = 拉黑等系统提示（居中灰字胶囊，不进 AI 上下文）；blockreq = 角色发起的「申请解除拉黑」卡片；textcard = 文字图片卡片（card 有值，无生图依赖）；mtpay = 美团找人代付卡片（请求/完成）；mtshare = 美团订单分享动态卡片；tbpay = 淘宝代付卡片（请求/完成）；tbshare = 淘宝订单分享动态卡片 */
   kind?: 'text' | 'image' | 'voice' | 'redpacket' | 'transfer' | 'location' | 'notice' | 'sticker' | 'family' | 'forward' | 'groupcard' | 'sys' | 'blockreq' | 'call' | 'textcard' | 'song' | 'mtpay' | 'mtshare' | 'mtdraft' | 'tbpay' | 'tbshare' | 'tbdraft' | 'relcard' | 'pactcard' | 'examcard' | 'lettercard' | 'forumshare';
-  /** 恋爱协议卡片（kind='pactcard'；第十二轮：协议分享/签署卡，由 couple-pact-share 落库，点击进恋人空间签署界面） */
+  /** 恋爱协议卡片（kind='pactcard'；第十二轮：协议分享/签署卡，由 couple-pact-share 落库，点击进情侣空间签署界面） */
   pactcard?: CouplePactCardData;
-  /** 恋爱考试卡片（kind='examcard'；第十五轮：我喊TA答题/TA出卷喊我答，由 couple-exam-share 落库，点击进恋人空间试卷页） */
+  /** 恋爱考试卡片（kind='examcard'；第十五轮：我喊TA答题/TA出卷喊我答，由 couple-exam-share 落库，点击进情侣空间试卷页） */
   examcard?: CoupleExamCardData;
-  /** 情书信封卡片（kind='lettercard'；第十八轮：我分享情书给TA/TA寄信给我，由 couple-letter-share 落库，点击进恋人空间信件页） */
+  /** 情书信封卡片（kind='lettercard'；第十八轮：我分享情书给TA/TA寄信给我，由 couple-letter-share 落库，点击进情侣空间信件页） */
   lettercard?: CoupleLetterCardData;
   /** 歌曲卡片（kind='song'，Task 68 音乐 × AI）：结构同微信端 */
   song?: { name: string; artist: string; cover?: string; songId?: number; note?: string; autoPlay?: boolean; inviteDone?: boolean; agree?: boolean };
@@ -523,7 +523,7 @@ interface QQMsg {
   fwd?: { from: string; merged?: boolean; title?: string; records?: { name: string; role: 'me' | 'peer'; text: string; quote?: string; time: number; avatar?: string | null; kind?: 'text' | 'sticker' | 'image'; imgSrc?: string; stkMeaning?: string }[] };
   /** 群聊邀请卡片（kind='groupcard'；AI 主动建群/拉人时发出，用户可接受/拒绝） */
   gcard?: GroupCardData;
-  /** 亲密关系卡片（kind='relcard'；恋人空间邀请卡/成功卡，AI 邀我或我邀 AI 时由 couple-invite 落库，可接受/拒绝） */
+  /** 亲密关系卡片（kind='relcard'；情侣空间邀请卡/成功卡，AI 邀我或我邀 AI 时由 couple-invite 落库，可接受/拒绝） */
   relcard?: CoupleRelCardData;
   /** 好友添加过程标记（同 WxMsg.fr）：apply = 用户验证消息（胶囊标注「以上为验证消息」）/ greet = AI 验证消息（胶囊标注「以上是打招呼的内容」）/ added = 加好友成功提示（kind='sys' 携带文案，落入普通 sys 胶囊分支与其他系统提示同款包裹） */
   fr?: 'apply' | 'greet' | 'added';
@@ -3826,7 +3826,7 @@ function ChatPage({
     [peer.id, onOpenGroup, onToast],
   );
 
-  /** 亲密关系卡片：接受/拒绝（恋人空间邀请卡；状态变更/成功卡/sys 行均由 couple-invite 落库，
+  /** 亲密关系卡片：接受/拒绝（情侣空间邀请卡；状态变更/成功卡/sys 行均由 couple-invite 落库，
    *  本地经 COUPLE_CARD_EVENT 合并刷新；content 为空、不进多选/长按菜单） */
   const decideCoupleCard = useCallback(
     (m: QQMsg, accept: boolean) => {
@@ -4057,7 +4057,7 @@ function ChatPage({
     return () => window.removeEventListener(FORUM_SHARE_CARD_EVENT, onForumCard);
   }, [peer.id]);
 
-  /** 恋人空间亲密关系卡片落库监听：邀请卡/成功卡/sys 行由 couple-invite 直写 kv 后广播
+  /** 情侣空间亲密关系卡片落库监听：邀请卡/成功卡/sys 行由 couple-invite 直写 kv 后广播
    *  COUPLE_CARD_EVENT，聊天页在场时实时合并落库消息（新卡片上屏 + 邀请卡状态刷新），不用重开聊天 */
   useEffect(() => {
     const onCoupleCard = (e: Event) => {
@@ -5166,7 +5166,7 @@ function ChatPage({
       // #35 时序兑底：历史数据/合并竞态可能把上一轮未投递完的回复排在用户新消息之后（旧气泡倒挂），
       // 按创建时间稳定排序还原对话时序（正常数据 time 单调，排序为空操作），保证上下文顺序正确
       .sort((a, b) => a.time - b.time);
-    // 恋人空间×情书（第五十八轮）：我在聊天里让 TA 写情书/写信 → TA 稍后真的提笔写一封寄到本会话
+    // 情侣空间×情书（第五十八轮）：我在聊天里让 TA 写情书/写信 → TA 稍后真的提笔写一封寄到本会话
     //（只对恋人绑定的联系人生效；TA 先在聊天里自然应声，几秒后信封卡片寄到；90 秒冷却防重复）
     {
       const lastMine = [...base].reverse().find((m) => m.role === 'me' && typeof m.content === 'string' && m.content.trim());
@@ -5382,7 +5382,7 @@ function ChatPage({
     // v33【AI 真人社交】：X论坛近况感知（TA 发的帖/我发的帖/评论互动）——AI 私聊时能自然提起论坛的事
     // v44【AI 关注者】：带上 TA 刚发的这句——「你去x论坛关注我」会被感知并稍后自主决策
     const forumBlock = buildForumChatBlock(peer.id, userMsg?.content);
-    // 恋人空间×AI（第九轮）：对方是恋人绑定的联系人时，注入你们在恋人空间里的一切
+    // 情侣空间×AI（第九轮）：对方是恋人绑定的联系人时，注入你们在情侣空间里的一切
     const coupleBlock = coupleChatBlock(peer.id, 'qq', meAddrName);
     // 美团×AI 联动（外卖/代付）：实时订单动态 + 本聊天的待处理代付请求/待付订单 +
     // 食物话题命中时的商家目录与点外卖动作教学（全同步 kv 读，状态实时）——
@@ -7228,7 +7228,7 @@ function ChatPage({
             >
               {streaming || delivering ? '正在输入中…' : peer.name}
             </span>
-            {/* 恋人空间标识（第九/十轮）：开通恋人空间后名字后的徽章+钥匙（用户素材图），解除后即时消失 */}
+            {/* 情侣空间标识（第九/十轮）：开通情侣空间后名字后的徽章+钥匙（用户素材图），解除后即时消失 */}
             <CoupleMark contactId={peer.id} size={20} testId="qq-chat-couple-mark" />
             {flags.muted === true && (
               <BellOff
@@ -7645,7 +7645,7 @@ function ChatPage({
                     />
                   </div>
                 ) : m.kind === 'relcard' && m.relcard ? (
-                  /* 亲密关系卡片（恋人空间邀请卡/成功卡）：对方邀请 pending 出接受/拒绝；卡片本体不可点 */
+                  /* 亲密关系卡片（情侣空间邀请卡/成功卡）：对方邀请 pending 出接受/拒绝；卡片本体不可点 */
                   <div {...bubblePress}>
                     <CoupleRelBubble
                       data={m.relcard}
@@ -7656,17 +7656,17 @@ function ChatPage({
                     />
                   </div>
                 ) : m.kind === 'pactcard' && m.pactcard ? (
-                  /* 恋爱协议卡片（第十二轮）：点卡片本体进恋人空间签署界面（导航在气泡组件内） */
+                  /* 恋爱协议卡片（第十二轮）：点卡片本体进情侣空间签署界面（导航在气泡组件内） */
                   <div {...bubblePress}>
                     <CouplePactBubble data={m.pactcard} mine={m.role === 'me'} testidPrefix="qq" />
                   </div>
                 ) : m.kind === 'examcard' && m.examcard ? (
-                  /* 恋爱考试卡片（第十五轮）：点卡片进恋人空间试卷页（导航在气泡组件内） */
+                  /* 恋爱考试卡片（第十五轮）：点卡片进情侣空间试卷页（导航在气泡组件内） */
                   <div {...bubblePress}>
                     <CoupleExamBubble data={m.examcard} mine={m.role === 'me'} testidPrefix="qq" />
                   </div>
                 ) : m.kind === 'lettercard' && m.lettercard ? (
-                  /* 情书信封卡片（第十八轮）：点卡片直达恋人空间信件页（导航在气泡组件内） */
+                  /* 情书信封卡片（第十八轮）：点卡片直达情侣空间信件页（导航在气泡组件内） */
                   <div {...bubblePress}>
                     <CoupleLetterBubble data={m.lettercard} mine={m.role === 'me'} testidPrefix="qq" />
                   </div>
@@ -10560,7 +10560,7 @@ function coupleLvOf(points: number): { lv: number; pct: number; need: number } {
   return { lv, pct, need };
 }
 
-/** 恋人空间纪念日 → 已绑定天数（含当天，最小 1） */
+/** 情侣空间纪念日 → 已绑定天数（含当天，最小 1） */
 function coupleBoundDays(anniv: string | null): number {
   if (!anniv) return 1;
   const t = new Date(`${anniv}T00:00:00`);
@@ -10571,7 +10571,7 @@ function coupleBoundDays(anniv: string | null): number {
   return diff >= 1 ? diff : 1;
 }
 
-/** 读恋人空间全局状态里与该好友的绑定情况（bound=已绑定 days=已绑定天数 pending=邀请待接受） */
+/** 读情侣空间全局状态里与该好友的绑定情况（bound=已绑定 days=已绑定天数 pending=邀请待接受） */
 function readCoupleBondInfo(peerId: string): { bound: boolean; days: number; pending: boolean } {
   try {
     const s = kvGet<Record<string, unknown>>('couple-space:state') ?? {};
@@ -10602,7 +10602,7 @@ function FriendBondPage({
   const days = bondDays(stat);
   // 我们的DNA弹窗（summary=聊天小结 / common=共同属性 / timeline=友谊时间线，对照 QQ 真机）
   const [dnaModal, setDnaModal] = useState<null | 'summary' | 'common' | 'timeline'>(null);
-  // 用户第九轮：恋人空间绑定状态（邀请卡同意后本页上半部分变情侣关系卡；AI 在别处接受时实时刷新）
+  // 用户第九轮：情侣空间绑定状态（邀请卡同意后本页上半部分变情侣关系卡；AI 在别处接受时实时刷新）
   const [bondTick, setBondTick] = useState(0);
   const [bindBusy, setBindBusy] = useState(false);
   useEffect(() => {
@@ -10612,7 +10612,7 @@ function FriendBondPage({
   }, []);
   const couple = useMemo(() => readCoupleBondInfo(peer.id), [peer.id, bondTick]);
   const coupleLv = coupleLvOf(stat.points);
-  /** 点「去绑定专属关系」→ 给 TA 发恋人空间邀请卡（couple-invite 管线：AI 延时接受 → 回成功卡 → 建立关系） */
+  /** 点「去绑定专属关系」→ 给 TA 发情侣空间邀请卡（couple-invite 管线：AI 延时接受 → 回成功卡 → 建立关系） */
   const onBindRelation = async () => {
     if (bindBusy) return;
     setBindBusy(true);
@@ -10630,7 +10630,7 @@ function FriendBondPage({
       setBindBusy(false);
     }
   };
-  /** 「情侣空间 >」入口 → 切到恋人空间 App（与考试卡/情书卡同款导航） */
+  /** 「情侣空间 >」入口 → 切到情侣空间 App（与考试卡/情书卡同款导航） */
   const openCoupleSpace = () => {
     const ui = useUI.getState();
     if (ui.locked) return;
@@ -10829,7 +10829,7 @@ function FriendBondPage({
             </div>
           </div>
 
-          {/* 底部：去绑定专属关系（蓝色文字链接；用户第九轮：真发恋人空间邀请卡，AI 同意后本卡升级为情侣关系卡） */}
+          {/* 底部：去绑定专属关系（蓝色文字链接；用户第九轮：真发情侣空间邀请卡，AI 同意后本卡升级为情侣关系卡） */}
           <div className="relative flex justify-center">
             {couple.pending ? (
               <div
@@ -12181,7 +12181,7 @@ function MessagesPage({
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-1.5">
                   <div className="truncate text-[16px] font-medium leading-snug">{row.name}</div>
-                  {/* 恋人空间标识（第十轮）：会话列表名字后也显示徽章+钥匙，与聊天页同源同显隐 */}
+                  {/* 情侣空间标识（第十轮）：会话列表名字后也显示徽章+钥匙，与聊天页同源同显隐 */}
                   <CoupleMark contactId={row.contact?.id ?? null} size={20} testId={`qq-list-couple-mark-${row.key}`} />
                   {flagsMap[row.key]?.muted === true && (
                     <BellOff className="h-3.5 w-3.5 shrink-0 text-black/30 dark:text-white/30" strokeWidth={2} aria-label="消息免打扰" />

@@ -5,7 +5,7 @@
  *
  * 用户规格：
  * - 我可以喊 TA 来答题：把当前试卷以卡片发进会话，TA（AI）延时认真作答并自评分；
- * - TA 也会自己出卷喊我来答：TA 的卡片点进来直达恋人空间的试卷答题页；
+ * - TA 也会自己出卷喊我来答：TA 的卡片点进来直达情侣空间的试卷答题页；
  * 复用 couple-pact-share 的成熟管线（落库 + 广播 + 通知 + 导航事件）。
  */
 
@@ -164,13 +164,13 @@ export async function sendExamCard(opts: { channel: CoupleChannel; contactId: st
   void notifyCard(channel, contactId, preview);
 }
 
-// ---------------- 导航（卡片点击 → 恋人空间考试页） ----------------
+// ---------------- 导航（卡片点击 → 情侣空间考试页） ----------------
 
 /** 聊天考试卡片点击后的导航事件名（CoupleSpaceApp 监听 → openSub('exam')） */
 export const COUPLE_EXAM_NAV_EVENT = 'couple-exam-nav';
 
 /**
- * 聊天里的考试卡片被点击：记下待打开目标 + 切进恋人空间 + 广播导航事件。
+ * 聊天里的考试卡片被点击：记下待打开目标 + 切进情侣空间 + 广播导航事件。
  * （ExamPage 挂载后 consumePendingExamOpen 直达对应答题/成绩/答卷界面；已答完的卡点进去是结果页）
  */
 export function navToExam(from: 'me' | 'ta', title?: string): void {
@@ -234,7 +234,7 @@ export function scheduleAiExamAnswer(opts: { channel: CoupleChannel; contactId: 
         if (!r) return;
         // 第二十四轮：交卷的话由 AI 按人设+记忆+上下文现说（失败就不发文字，只发通知）*/
         const say = await aiExamSubmitSay(opts.title, opts.questions.length);
-        // 写进恋人空间状态（TA 的答卷；无自评分/评语，等我批改）
+        // 写进情侣空间状态（TA 的答卷；无自评分/评语，等我批改）
         let taN = 'TA';
         let meN = '我';
         try {

@@ -6,13 +6,13 @@
  * 用户规格（第七批）：
  * - 未来情书改为「情书」，写完可以分享给 AI（AI 知道信里的内容）；
  * - AI 会根据人设记忆+上下文在信下面写留言，也可以给我回信；
- * - AI 也会主动给我写信，分享过来是一张信封卡片，点击卡片直接进入信件页面（不进恋人空间主页）；
+ * - AI 也会主动给我写信，分享过来是一张信封卡片，点击卡片直接进入信件页面（不进情侣空间主页）；
  * - 分享时可以选择 QQ/微信，然后再选择联系人（通用分享选择器，调用方负责）。
  *
  * 实现模式（复用 couple-pact-share / couple-exam-share 的成熟管线）：
  * - 卡片注入：直写 `${app}-chat-msgs:${cid}`（kvGetScoped/kvSetScoped）+ 恢复隐藏会话 +
  *   广播 COUPLE_CARD_EVENT（聊天页实时合并上屏）+ 灵动岛通知 + 未读角标；
- * - 点击卡片 → 写 pendingLetterOpen + 切进恋人空间 App → LettersPage 消费后直达信件详情页；
+ * - 点击卡片 → 写 pendingLetterOpen + 切进情侣空间 App → LettersPage 消费后直达信件详情页；
  * - 我分享给 AI → AI 延时读信：在信下留言 + 写一封回信（回信也发信封卡片）——scheduleAiLetterFeedback。
  */
 
@@ -35,7 +35,7 @@ function cut(s: string | undefined | null, max: number): string {
 
 /** 情书信封卡片数据（挂在消息 lettercard 字段；微信/QQ 聊天共用） */
 export interface CoupleLetterCardData {
-  letterId: string; // 恋人空间里的信 id（我的信在 letters / TA 的信在 aiLetters）
+  letterId: string; // 情侣空间里的信 id（我的信在 letters / TA 的信在 aiLetters）
   envelope: string; // 信封样式 key（点击卡片进详情按此渲染）
   envText?: string; // 信封收信字样（第二十九轮可自定义；缺省 = 默认「致 最爱的你」）
   snippet: string; // 信开头摘要（卡片展示前几行）
@@ -211,8 +211,8 @@ export async function sendLetterCard(opts: {
 export const COUPLE_LETTER_NAV_EVENT = 'couple-letter-nav';
 
 /**
- * 聊天里的信封卡片被点击：记下待打开目标 + 切进恋人空间 + 广播导航事件。
- * （LettersPage 挂载后 consumePendingLetterOpen 直达对应信件详情页，不进恋人空间主页）
+ * 聊天里的信封卡片被点击：记下待打开目标 + 切进情侣空间 + 广播导航事件。
+ * （LettersPage 挂载后 consumePendingLetterOpen 直达对应信件详情页，不进情侣空间主页）
  */
 export function navToLetter(p: { letterId: string; from: 'me' | 'ta'; envelope?: string; snippet?: string; replyToId?: string; channel?: CoupleChannel; contactId?: string }): void {
   setPendingLetterOpen(p);

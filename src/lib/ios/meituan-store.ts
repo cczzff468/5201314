@@ -1953,12 +1953,12 @@ export function mtExistingOrderKeys(uid: string): string[] {
   return mtLoadOrders(uid).map(mtGenOrderKey);
 }
 
-// ---------------- 外部直达页（第十九轮：恋人空间「情侣酒店」→ 美团「酒店旅行」频道） ----------------
+// ---------------- 外部直达页（第十九轮：情侣空间「情侣酒店」→ 美团「酒店旅行」频道） ----------------
 
 /** 待打开的页面（模块级；MeituanApp 挂载时消费） */
 let mtPendingPage: 'travel' | null = null;
 
-/** 外部写入待打开页（恋人空间点击「情侣酒店」时调用） */
+/** 外部写入待打开页（情侣空间点击「情侣酒店」时调用） */
 export function setMtPendingPage(p: 'travel'): void {
   mtPendingPage = p;
 }

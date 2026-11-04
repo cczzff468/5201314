@@ -3082,7 +3082,7 @@ function ProxySheet({
         transition={{ type: 'spring', damping: 30, stiffness: 320 }}
         onClick={(e) => e.stopPropagation()}
       >
-        {/* 拖拽条 + 左对齐标题/副标题（与恋人空间邀请弹层同款结构） */}
+        {/* 拖拽条 + 左对齐标题/副标题（与情侣空间邀请弹层同款结构） */}
         <div className="mx-auto h-1 w-10 rounded-full bg-[#e0e0e5]" />
         <div className="mt-3 text-[17px] font-bold text-[#26262b]">{step === 'contact' && plat ? `选择${platName}好友` : '找人代付'}</div>
         <p className="mt-1 text-[12.5px] leading-relaxed text-[#9a9aa2]">
@@ -3266,7 +3266,7 @@ function ShareSheet({
         transition={{ type: 'spring', damping: 30, stiffness: 320 }}
         onClick={(e) => e.stopPropagation()}
       >
-        {/* 拖拽条 + 左对齐标题/副标题（与恋人空间邀请弹层同款结构） */}
+        {/* 拖拽条 + 左对齐标题/副标题（与情侣空间邀请弹层同款结构） */}
         <div className="mx-auto h-1 w-10 rounded-full bg-[#e0e0e5]" />
         <div className="mt-3 text-[17px] font-bold text-[#26262b]">{step === 'contact' && plat ? `分享到${platName}` : step === 'plat' ? '分享订单' : ''}</div>
         <p className="mt-1 text-[12.5px] leading-relaxed text-[#9a9aa2]">
@@ -12474,7 +12474,7 @@ export default function MeituanApp() {
           setPage('orderDetail');
         }
       }
-      // 恋人空间「情侣酒店」外部直达（第十九轮需求48）：已登录 → 直接进「酒店旅行」频道；未登录留在主页先登录
+      // 情侣空间「情侣酒店」外部直达（第十九轮需求48）：已登录 → 直接进「酒店旅行」频道；未登录留在主页先登录
       if (takeMtPendingPage() === 'travel' && v) {
         setPage('travel');
       }

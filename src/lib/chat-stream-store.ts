@@ -60,6 +60,7 @@ import { buildAltAccountsSection } from '@/lib/ios/persona';
 import { cachedOwnerName } from '@/lib/ios/contacts-store';
 // 第十六轮：AI 情绪系统（用户消息打点→情绪变化）+ 作息记忆（活跃时间直方图）
 import { noteUserMsgMood } from '@/lib/ios/ai-mood';
+import { noteUserEmotion } from '@/lib/ios/user-mood';
 import { noteActive } from '@/lib/ios/routine';
 
 /** 会话键 → 账号所属 App（v2 per-app 账号）：wx:* → 微信、qq:* → QQ、其余（sms 开头与 assistant 等历史键）→ 信息 */
@@ -210,7 +211,9 @@ function blockSessionOf(sessionKey: string): { app: BlockApp; contactId: string 
 /**
  * 第十六轮：用户发言打点（每轮聊天一次）——
  * - 作息记忆：noteActive()（全局活跃直方图，群聊/助手也计——机主在用手机）；
- * - AI 情绪：仅 1:1 会话（blockSessionOf 解析出联系人）→ noteUserMsgMood(cid, 本轮最后一条用户消息文本)。
+ * - AI 情绪：仅 1:1 会话（blockSessionOf 解析出联系人）→ noteUserMsgMood(cid, 本轮最后一条用户消息文本)；
+ * - v49 功能四：用户情绪感知 → noteUserEmotion(cid, 同一条文本)——检测用户低落/兴奋/生气，
+ *   注入【对方此刻的状态】块让 AI 自动切换安抚/共庆/哄模式（与 AI 自己的情绪互补）。
  */
 function noteEngagement(sessionKey: string, messages: ChatPayloadMessage[]): void {
   try {
@@ -221,6 +224,7 @@ function noteEngagement(sessionKey: string, messages: ChatPayloadMessage[]): voi
       const msg = messages[i];
       if (msg?.role === 'user' && typeof msg.content === 'string' && msg.content.trim()) {
         noteUserMsgMood(bs.contactId, msg.content);
+        noteUserEmotion(bs.contactId, msg.content);
         return;
       }
     }

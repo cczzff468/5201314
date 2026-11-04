@@ -4,12 +4,12 @@
  * 情书信封卡片气泡（第十八轮）——微信/QQ 聊天共用。
  *
  * 用户规格（第七批）：AI 写给我的信（AI 也可以主动写信/回信）以信封卡片发到聊天里，
- * 点击卡片直接进入信件页面（LettersPage 消费 pendingLetterOpen，不进恋人空间主页）。
+ * 点击卡片直接进入信件页面（LettersPage 消费 pendingLetterOpen，不进情侣空间主页）。
  * 样式仿亲密关系卡（couple-rel-bubble / couple-pact-bubble）的白底卡：
  * 左侧卡通信封缩略图 + 右侧「XX的情书」+ 信开头摘要 + 底部「情书」小字标签 / 「拆信」按钮。
  *
  * 本文件同时导出信封样式库 LETTER_ENVELOPES 与信封图形组件 EnvelopeArt，
- * 供恋人空间情书页（选样式/主视图/详情/寄出预览）复用同一套视觉。
+ * 供情侣空间情书页（选样式/主视图/详情/寄出预览）复用同一套视觉。
  *
  * 第十九轮（用户要求：信封封面再美化一下，不要 emoji 表情）：
  * - 底纹（爪印/星星/爱心/云朵/圆点）、火漆贴纸、底部一排小动物全部改为 SVG 手绘；
@@ -300,7 +300,7 @@ function EnvelopePattern({ style }: { style: LetterEnvelopeStyle }) {
 }
 
 /**
- * 卡通信封图形（恋人空间情书页与聊天卡片共用；第十九轮重绘：零 emoji 全 SVG；第二十轮美化 + 头像火漆）：
+ * 卡通信封图形（情侣空间情书页与聊天卡片共用；第十九轮重绘：零 emoji 全 SVG；第二十轮美化 + 头像火漆）：
  * 信封身 + 底纹 + 内衼信纸探头 + V 形封口盖（渐变高光）+ 顶部蕾丝花边 + 圆形火漆印
  * （传 avatar 时火漆位改盖发件人头像印章）+ 右上角恋人邮局邮戳 + 底部一排 SVG 小动物 + 内描边。
  * 第二十九轮：收信字样可自定义（faceText 传入信封上的第一行字；空/缺省 = 默认「致 最爱的你」，
@@ -393,7 +393,7 @@ export function EnvelopeArt({ envKey, className = '', pets = true, avatar, faceT
 // ---------------- 聊天气泡 ----------------
 
 export default function CoupleLetterBubble({ data, mine, testidPrefix = 'wx' }: { data: CoupleLetterCardData; mine: boolean; testidPrefix?: string }) {
-  /** 点击卡片 → 进恋人空间信件页面（任何状态都直达信件详情；不进恋人空间主页） */
+  /** 点击卡片 → 进情侣空间信件页面（任何状态都直达信件详情；不进情侣空间主页） */
   const openLetter = () => {
     const ui = useUI.getState();
     if (ui.locked) return;

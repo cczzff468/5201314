@@ -257,6 +257,8 @@ export interface InlineContact {
   background: string | null;
   /** 表达风格（说话方式/风格基调；注入人设【表达风格】段，与 PersonaSource 同名同义） */
   expressStyle: string | null;
+  /** 自定义 AI 规则（v49：一行一条；注入人设【用户定制的规则】段，优先级高于人设，与 PersonaSource 同名同义） */
+  customRules: string | null;
   relation: string | null;
   /** 仅 NPC：对机主（USER）的关系 */
   relationToUser: string | null;
@@ -293,6 +295,7 @@ export function parseInlineContact(raw: unknown): InlineContact | null {
     persona: typeof c.persona === 'string' ? c.persona : null,
     background: typeof c.background === 'string' ? c.background : null,
     expressStyle: typeof c.expressStyle === 'string' ? c.expressStyle : null,
+    customRules: typeof c.customRules === 'string' ? c.customRules : null,
     relation: typeof c.relation === 'string' ? c.relation : null,
     relationToUser: typeof c.relationToUser === 'string' ? c.relationToUser : null,
     relationByAcc: parseRelationByAcc(c.relationByAcc),

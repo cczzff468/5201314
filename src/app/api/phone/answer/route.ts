@@ -137,6 +137,7 @@ export async function POST(req: NextRequest) {
     persona: inline.persona,
     background: inline.background,
     expressStyle: inline.expressStyle,
+    customRules: inline.customRules,
     relation: inline.relation,
     relationByAcc: inline.relationByAcc ?? null,
     relationToUser: inline.relationToUser,

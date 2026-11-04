@@ -462,8 +462,8 @@ const APP_DEFS: AppDef[] = [
   },
   {
     id: 'couple',
-    name: '恋人空间',
-    // 真实图标：白灰双心定制版（用户指定白/浅灰配色，不用粉红）；原「情侣空间」已更名恋人空间（原情侣空间）
+    name: '情侣空间',
+    // 真实图标：白灰双心定制版（用户指定白/浅灰配色，不用粉红）；v49 按用户要求定名「情侣空间」
     image: '/icons/couple.png',
     // 备用线条图（毛玻璃/液态样式时展示）：双心轮廓
     glyph: <HeartIcon className={GLYPH_CLASS} strokeWidth={GLYPH_STROKE} />,

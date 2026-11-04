@@ -1,5 +1,5 @@
 /**
- * 恋爱留言板·便签卡纸共享数据（couple-space.tsx 墙面渲染 与 couple-ai.ts TA 选卡 共用的唯一清单）：
+ * 留言板·便签卡纸共享数据（couple-space.tsx 墙面渲染 与 couple-ai.ts TA 选卡 共用的唯一清单）：
  *
  * - BOARD_CARDS：内置图案卡纸（file 对应 public/board-cards/；ar = 原始宽高比「多大就是多大」，
  *   span = 横幅卡跨栏铺满，padTop = 顶部插画避让区比例，small = 缩小到 82% 居中，desc = 给 AI 选卡用的卡面描述）；
@@ -17,7 +17,7 @@
  *  v45：用户新发 5 张便签卡参考图全部加入（手绘涂鸦/水彩蝴蝶/蕾丝乐谱/枝头双兔/朦胧少女），
  *  padTop 由像素分析定制（涂鸦卡顶上有小动物插画 → 文字避让 32%）。
  *  scale：卡面显示缩放（0~1；缺省 = small ? 0.82 : 1）——样式五用户要求再小一点（0.62）；
- *  noPin：卡面自带胶带等固定装饰 → 不再叠黄铜图钉（便签纸卡）。 */
+ *  noPin：卡面自带胶带等固定装饰 → 不再叠金属别针（便签纸卡）。 */
 export const BOARD_CARDS: {
   label: string;
   file: string;
@@ -82,7 +82,7 @@ export interface BoardCardSkin {
   small?: boolean;
   /** v44：卡面显示缩放（0~1；缺省 = small ? 0.82 : 1） */
   scale?: number;
-  /** v44：卡面自带胶带等固定装饰 → 不再叠黄铜图钉 */
+  /** v44：卡面自带胶带等固定装饰 → 不再叠金属别针 */
   noPin?: boolean;
   /** CSS background-image 值（内置 = 文件 url；自定义 = dataURL） */
   bgImage: string;

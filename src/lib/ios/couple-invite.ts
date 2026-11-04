@@ -1,10 +1,10 @@
 'use client';
 
 /**
- * 恋人空间邀请（亲密关系卡片流）——情侣空间第六轮改造核心模块。
+ * 情侣空间邀请（亲密关系卡片流）——情侣空间第六轮改造核心模块。
  *
  * 用户规格：
- * - 恋人空间（原情侣空间）邀请页按钮：有人邀请我 → 「接受邀请」；没人邀请我 → 「立即邀请我的另一半」（可邀请 AI）。
+ * - 情侣空间（原情侣空间）邀请页按钮：有人邀请我 → 「接受邀请」；没人邀请我 → 「立即邀请我的另一半」（可邀请 AI）。
  * - 卡片流仿 QQ 亲密关系卡片（对称双向）：
  *   · AI 邀请我 → AI 在微信/QQ 会话发「邀请卡」→ 我接受 → 我回「成功卡」；
  *   · 我邀请 AI → 我在会话发「邀请卡」→ AI 延时接受 → AI 回「成功卡」。
@@ -130,7 +130,7 @@ export const emptyInviteMeta = (): CoupleInviteMeta => ({
 
 /** 事件：卡片落库（聊天页在场时实时合并上屏） */
 export const COUPLE_CARD_EVENT = 'couple-card-inserted';
-/** 事件：全局邀请状态变化（恋人空间邀请页刷新按钮状态） */
+/** 事件：全局邀请状态变化（情侣空间邀请页刷新按钮状态） */
 export const COUPLE_STATE_EVENT = 'couple-state-changed';
 
 const STATE_KEY = 'couple-space:state'; // 无 wx-/qq- 前缀 → 全局作用域（不随账号切换）
@@ -177,7 +177,7 @@ export function writeInviteMeta(meta: CoupleInviteMeta): void {
   dispatchStateEvent();
 }
 
-/** 广播全局状态变化（恋人空间邀请页监听刷新） */
+/** 广播全局状态变化（情侣空间邀请页监听刷新） */
 export function dispatchStateEvent(): void {
   try {
     window.dispatchEvent(new CustomEvent(COUPLE_STATE_EVENT));
@@ -345,7 +345,7 @@ async function aiAcceptInvite(channel: CoupleChannel, contactId: string, inviteM
     kind: 'relcard',
     relcard: { stage: 'accept', status: 'accepted', fromName: aiName, toName: inviterName, app: channel, contactId } satisfies CoupleRelCardData,
   });
-  pushMsg(channel, contactId, sysRow('你们已成为情侣并获得情侣标识，去恋人空间看看吧'));
+  pushMsg(channel, contactId, sysRow('你们已成为情侣并获得情侣标识，去情侣空间看看吧'));
   await establishRelation(channel, contactId);
   try {
     const c = await getContact(contactId);
@@ -360,7 +360,7 @@ async function aiAcceptInvite(channel: CoupleChannel, contactId: string, inviteM
 export type CoupleInviteResult = { ok: true } | { ok: false; error: string };
 
 /**
- * 我邀请 AI（恋人空间「立即邀请我的另一半」）：选渠道 → 选联系人 → 邀请卡进会话（role=me）
+ * 我邀请 AI（情侣空间「立即邀请我的另一半」）：选渠道 → 选联系人 → 邀请卡进会话（role=me）
  * → AI 延时接受 → AI 回成功卡 → 建立关系。
  * 校验：已有关系 / 已有 pending / 该联系人已邀请过（每联系人限一次）均拒绝。
  */
@@ -397,7 +397,7 @@ export async function sendMyInvite(channel: CoupleChannel, contactId: string): P
 }
 
 /**
- * AI 邀请我（恋人空间「让 TA 来邀请你」）：先占全局 pendingInvite（邀请页马上变「接受邀请」），
+ * AI 邀请我（情侣空间「让 TA 来邀请你」）：先占全局 pendingInvite（邀请页马上变「接受邀请」），
  * AI 延时数秒发邀请卡（role=peer，带接受/拒绝按钮）+ 灵动岛通知。
  */
 export async function aiInvitesMe(channel: CoupleChannel, contactId: string): Promise<CoupleInviteResult> {
@@ -438,7 +438,7 @@ export async function aiInvitesMe(channel: CoupleChannel, contactId: string): Pr
 }
 
 /**
- * 我接受 AI 的邀请（聊天卡片「接受邀请」按钮 或 恋人空间「接受邀请」大按钮共用）：
+ * 我接受 AI 的邀请（聊天卡片「接受邀请」按钮 或 情侣空间「接受邀请」大按钮共用）：
  * AI 的邀请卡转 accepted → 我回成功卡（role=me）→ sys 提示行 → 建立关系。
  */
 export async function acceptIncomingInvite(contactId: string): Promise<CoupleInviteResult> {
@@ -463,7 +463,7 @@ export async function acceptIncomingInvite(contactId: string): Promise<CoupleInv
     kind: 'relcard',
     relcard: { stage: 'accept', status: 'accepted', fromName: myName, toName: taName, app: inv.app, contactId } satisfies CoupleRelCardData,
   });
-  pushMsg(inv.app, contactId, sysRow('你们已成为情侣并获得情侣标识，去恋人空间看看吧'));
+  pushMsg(inv.app, contactId, sysRow('你们已成为情侣并获得情侣标识，去情侣空间看看吧'));
   await establishRelation(inv.app, contactId);
   return { ok: true };
 }
@@ -505,9 +505,9 @@ function hasPartner(): boolean {
 }
 
 /**
- * 恋人标识（第九轮）：与该联系人的恋人空间关系是否处于「已建立」状态。
+ * 恋人标识（第九轮）：与该联系人的情侣空间关系是否处于「已建立」状态。
  * QQ 聊天页标题/会话列表名字后的恋人图标（徽章+钥匙）显隐共用这一个判定——
- * 解除恋人空间（resetAll）后 readInviteMeta 的 partnerContactId 清空 → 图标即时消失。
+ * 解除情侣空间（resetAll）后 readInviteMeta 的 partnerContactId 清空 → 图标即时消失。
  */
 export function isCoupleActiveWith(contactId: string): boolean {
   if (!contactId) return false;
@@ -521,7 +521,7 @@ export function isCoupleActiveWith(contactId: string): boolean {
 }
 
 /**
- * 恋人标识显隐 hook（第九轮）：useSyncExternalStore 订阅 COUPLE_STATE_EVENT——开通恋人空间
+ * 恋人标识显隐 hook（第九轮）：useSyncExternalStore 订阅 COUPLE_STATE_EVENT——开通情侣空间
  * 图标即时出现、解除后即时消失（跨组件同步，无需刷新页面；快照为原始布尔值，天然稳定）。
  */
 export function useCoupleBadgeOn(contactId: string | null | undefined): boolean {

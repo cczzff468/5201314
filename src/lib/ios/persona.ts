@@ -32,6 +32,10 @@ export interface PersonaSource {
   /** 表达风格（说话的表达方式/风格基调，如「傲娇毒舌」「温柔轻声细语」）→ 独立【表达风格】段
    *  （背景下方）；与 persona 里混写的性格描述互补，用户单独维护。可选：历史数据无此键 */
   expressStyle?: string | null;
+  /** 自定义 AI 规则（v49 功能二：用户给这个角色定的私人规矩，一行一条）→ 独立【用户定制的规则】段，
+   *  注入在开头（人设各段之前）且优先级高于人设/性格/表达风格——与任何设定冲突时以规则为准。
+   *  可选：历史数据无此键 */
+  customRules?: string | null;
   /** 与用户（或 NPC 归属者）的关系 */
   relation?: string | null;
   /** 与角色的关系·按账号隔离（多账号关系感知）：键 = 账号 id；配合 ctx.accountId 取分账号关系，
@@ -227,6 +231,13 @@ export function buildPersonaSystemPrompt(peer: PersonaSource, ctx: PersonaPrompt
   if (clean(peer.height)) facts.push(`身高 ${clean(peer.height)}`);
   if (clean(peer.weight)) facts.push(`体重 ${clean(peer.weight)}`);
 
+  // v49 功能二【用户定制的规则】：用户给这个角色定的私人规矩（一行一条；空行丢弃）。
+  // 注入在人设最前（紧跟开场句）且明确声明最高优先级——用户写什么就遵守什么。
+  const customRuleLines = clean(peer.customRules)
+    .split(/\n+/)
+    .map((l) => l.trim())
+    .filter(Boolean);
+
   const lines: string[] = [
     ...(stranger
       ? [
@@ -237,6 +248,15 @@ export function buildPersonaSystemPrompt(peer: PersonaSource, ctx: PersonaPrompt
         ]
       : [`你现在是${user}${ctx.channel}里的联系人「${shownName}」，正在${ctx.channel}上和${user}互动。${roleplayNote}`]),
     `请始终以「${shownName}」的身份、用第一人称口语化回复，严格保持角色，不要跳出。`,
+    // v49 功能二【用户定制的规则】：注入在人设最前（紧跟开场句）且明确声明最高优先级——
+    // 用户写什么就遵守什么，与性格/人设/表达风格冲突时以规则为准。
+    ...(customRuleLines.length > 0
+      ? [
+          `【用户定制的规则（最高优先级）】以下是用户为「${shownName}」亲自定下的规矩，任何情况下都必须遵守：`,
+          ...customRuleLines.map((r) => `- ${r}`),
+          '（这些规则的优先级高于你的性格、人设与后面的一切设定：与性格/说话风格/表达风格/背景任何内容冲突时，一律按这些规则来；规则没提到的事才按人设自然发挥。）',
+        ]
+      : []),
     // userName 为空回退到字面量「用户」时明确告知这是占位词：AI 不应把「用户」当真名使用，
     // 而应按你与对方的关系自然称呼对方（如「你」「亲爱的」「老板」等）
     ...(userFallback

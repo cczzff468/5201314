@@ -5,7 +5,7 @@
  *
  * 第二十七轮：邀请卡片和淘宝/美团代付卡片样式一模一样（只换内容）——
  * 结构对齐 TbPayBubble/MtPayBubble：白卡 p-2.5 rounded-[14px] + 指向头像侧的小箭头
- * + 头部（logo 22px + 恋人空间 + ShieldCheck 真爱保障）+ 主标题 + 内容面板 + 胶囊按钮。
+ * + 头部（logo 22px + 情侣空间 + ShieldCheck 真爱保障）+ 主标题 + 内容面板 + 胶囊按钮。
  *
  * 第三十轮（用户参考图，只改内容）：主标题改为「我写的恋爱协议，等你来签名」；
  * 内容面板由「粉横幅+白面板」改为参考图里的**协议书正文**：居中协议名 + 分隔线 +
@@ -18,7 +18,7 @@
  * ③排版再美化：协议名两侧加短渐变线装饰、分隔线改渐变淡出、条款编号改粉色、
  * 前言与条款行距收紧，整体像一张更精致的小协议书。
  *
- * 点击卡片本体 → 记 pending + 切进恋人空间 App（PactPage 消费后跳对应界面）。
+ * 点击卡片本体 → 记 pending + 切进情侣空间 App（PactPage 消费后跳对应界面）。
  */
 
 import type { CouplePactCardData } from '@/lib/ios/couple-pact-share';
@@ -38,8 +38,8 @@ export interface CouplePactBubbleProps {
 const MAX_CLAUSES = 5;
 
 export default function CouplePactBubble({ data, mine, testidPrefix = 'wx' }: CouplePactBubbleProps) {
-  // 第十七轮·动态状态（自愈）：恋人空间里已有同题的「已签署」存档 → 卡片一律按已签署显示，
-  // 修复「签完后卡片还显示去签署/点进去还是未签署」——卡片状态永远跟随恋人空间的存档真相
+  // 第十七轮·动态状态（自愈）：情侣空间里已有同题的「已签署」存档 → 卡片一律按已签署显示，
+  // 修复「签完后卡片还显示去签署/点进去还是未签署」——卡片状态永远跟随情侣空间的存档真相
   const live = (() => {
     try {
       const snap = kvGet<{ pacts?: { id?: string; title?: string; status?: string }[] }>('couple-space:state');
@@ -60,7 +60,7 @@ export default function CouplePactBubble({ data, mine, testidPrefix = 'wx' }: Co
   const signed = live.signed;
   const canSign = data.from === 'ta' && data.status === 'pending' && !signed && !declined;
 
-  /** 点击卡片 → 进恋人空间（携带卡片正文/TA 是否已先签名/是否已签署/卡片消息定位，任何状态都直达对应签署/回看界面） */
+  /** 点击卡片 → 进情侣空间（携带卡片正文/TA 是否已先签名/是否已签署/卡片消息定位，任何状态都直达对应签署/回看界面） */
   const openPact = () => {
     const ui = useUI.getState();
     if (ui.locked) return;
@@ -110,10 +110,10 @@ export default function CouplePactBubble({ data, mine, testidPrefix = 'wx' }: Co
       {/* 箭头指向头像侧：我发出（右）/ TA 发来（左），与代付卡一致 */}
       <span aria-hidden="true" className={`absolute top-[13px] h-[11px] w-[11px] rotate-45 rounded-[2px] bg-white dark:bg-zinc-800/95 ${mine ? '-right-[4px]' : '-left-[4px]'}`} />
 
-      {/* 头部：恋人空间 logo + 真爱保障（外壳保持与代付卡家族一致） */}
+      {/* 头部：情侣空间 logo + 真爱保障（外壳保持与代付卡家族一致） */}
       <span className="relative flex items-center gap-1.5">
         <img src="/icons/couple.png" alt="" aria-hidden="true" className="h-[20px] w-[20px] rounded-full object-cover" draggable={false} />
-        <span className="text-[12.5px] font-semibold text-black/85 dark:text-zinc-200">恋人空间</span>
+        <span className="text-[12.5px] font-semibold text-black/85 dark:text-zinc-200">情侣空间</span>
         <span className="ml-auto flex items-center gap-[3px] text-[10.5px] font-medium text-[#f2536a]">
           <ShieldCheck className="h-[12px] w-[12px]" strokeWidth={2.2} />
           真爱保障

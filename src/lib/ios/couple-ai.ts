@@ -1,21 +1,21 @@
 'use client';
 
 /**
- * 恋人空间 × AI 深度参与（第九轮）。
+ * 情侣空间 × AI 深度参与（第九轮）。
  *
  * 用户规格：
- * - AI（恋人联系人）根据人设/记忆/上下文参与恋人空间的一切：
+ * - AI（恋人联系人）根据人设/记忆/上下文参与情侣空间的一切：
  *   每天想你、照顾爱情小树、设置纪念日、回答甜蜜小问答（并知道我答了什么）、
  *   写心情日记（并知道我的心情/日记）、发起 100 件小事、知道恋爱协议内容并自己签字/自己拟协议让我签、
  *   知道恋爱编年史、主动填写情侣印象里对我的印象；
  * - 情侣空间里的所有东西都要让 AI 知道（聊天人设注入），所有东西都要写进记忆（记忆碎片）。
  *
  * 三条链路：
- * 1) coupleChatBlock(contactId, channel, userName)：微信/QQ 每轮发消息时同步组装【恋人空间】注入段
+ * 1) coupleChatBlock(contactId, channel, userName)：微信/QQ 每轮发消息时同步组装【情侣空间】注入段
  *    ——AI「知道」你们的一切（同步读 kv，随用随取，永远最新）；
  * 2) coupleRemember(...)：情侣空间事件 → 恋人的记忆碎片（memAddEventFragment，sourceTag='couple'），
  *    由 CoupleSpaceApp 的 patch 钩子自动 diff 触发——用户做的每件事都进记忆；
- * 3) runCoupleAiTick(channel, contactId)：AI 主动行为调度（打开恋人空间触发，每日/周期去重，
+ * 3) runCoupleAiTick(channel, contactId)：AI 主动行为调度（打开情侣空间触发，每日/周期去重，
  *    LLM 按「人设 + 共享记忆」生成内容，失败本地兜底，写状态 + 写记忆 + 灵动岛通知）。
  */
 
@@ -33,10 +33,10 @@ import { dispatchStateEvent, readInviteMeta, type CoupleChannel } from './couple
 // 100 件小事共享清单（第九轮：与 couple-space.tsx 共用同一份，AI 从真实清单里勾选）
 import { HUNDRED_LIST } from './couple-hundred';
 import { BOARD_CARDS, NOTE_COLOR_NAMES } from './couple-board-cards';
-// 第三十一轮「恋人空间相册 AI 看图留言」：识图模型客户端 + 全局设置（拿识图配置，零配置自动内置兕底）
+// 第三十一轮「情侣空间相册 AI 看图留言」：识图模型客户端 + 全局设置（拿识图配置，零配置自动内置兕底）
 import { describeImagesAuto } from '@/lib/vision-client';
 import { useSettings } from './store';
-// 恋人空间相册 AI 拍照：生图配置判断 + 锁脸生成（未配置/失败自动降级文字图片）
+// 情侣空间相册 AI 拍照：生图配置判断 + 锁脸生成（未配置/失败自动降级文字图片）
 import { generateCharacterPhoto, imgGenConfigReady } from '@/lib/imggen';
 
 // ---------------- 状态形状（与 couple-space.tsx 的 CoupleState 保持结构兼容的只读子集） ----------------
@@ -158,7 +158,7 @@ interface CoupleSnap {
   treeCards?: { id: string; from: 'me' | 'ta'; text: string; at: number; color?: number; comments: { id: string; from: 'me' | 'ta'; text: string; at: number }[] }[];
   /** AI 挂卡去重（每天最多一张）：最近一次挂卡的日期 key */
   treeCardDay?: string;
-  /** 恋爱留言板（软木墙手写便签；unlockAt=时间胶囊解锁时间，封存中内容对双方都不可见）；最新在前 */
+  /** 留言板（软木墙手写便签；unlockAt=时间胶囊解锁时间，封存中内容对双方都不可见）；最新在前 */
   boardNotes?: { id: string; from: 'me' | 'ta'; text: string; at: number; color?: number; card?: number; unlockAt?: number; comments: { id: string; from: 'me' | 'ta'; text: string; at: number }[] }[];
   /** AI 钉便签去重（每天最多一张）：最近一次钉便签的日期 key */
   boardNoteDay?: string;
@@ -192,10 +192,10 @@ function sceneOfKey(key: string, snap: CoupleSnap | null): string {
     const lv = Number(seg[seg.length - 1] ?? 0);
     return `回复挑战第${Number.isFinite(lv) && lv > 0 ? lv + 1 : 1}关讨论区`;
   }
-  return '恋人空间留言区';
+  return '情侣空间留言区';
 }
 
-/** 同步读恋人空间状态（kv 内存缓存同步权威；未建立关系返回 null） */
+/** 同步读情侣空间状态（kv 内存缓存同步权威；未建立关系返回 null） */
 function readSnap(): CoupleSnap | null {
   try {
     const s = kvGet<Record<string, unknown>>(STATE_KEY) ?? {};
@@ -208,7 +208,7 @@ function readSnap(): CoupleSnap | null {
   }
 }
 
-/** 直写恋人空间状态（读-改-写 + 广播；打开中的 App 会经 COUPLE_STATE_EVENT 自动刷新） */
+/** 直写情侣空间状态（读-改-写 + 广播；打开中的 App 会经 COUPLE_STATE_EVENT 自动刷新） */
 function writeSnap(patch: (s: Record<string, unknown>) => Record<string, unknown> | null): void {
   try {
     const s = kvGet<Record<string, unknown>>(STATE_KEY) ?? {};
@@ -260,7 +260,7 @@ function genderLine(snap: CoupleSnap, me: string): string {
   return '';
 }
 
-/** 最近的微信/QQ 聊天记录（心情日记等 AI 主动行为的素材；从会话 kv 同步读，非恋人空间内容） */
+/** 最近的微信/QQ 聊天记录（心情日记等 AI 主动行为的素材；从会话 kv 同步读，非情侣空间内容） */
 function recentChatBlock(contactId: string | undefined, channel: CoupleChannel, me: string, ta: string): string {
   if (!contactId) return '';
   try {
@@ -276,10 +276,10 @@ function recentChatBlock(contactId: string | undefined, channel: CoupleChannel, 
   }
 }
 
-// ---------------- 链路一：聊天人设注入（AI 知道恋人空间的一切） ----------------
+// ---------------- 链路一：聊天人设注入（AI 知道情侣空间的一切） ----------------
 
 /**
- * 组装【恋人空间】聊天注入段（同步；微信/QQ 私聊每轮发送时调用）。
+ * 组装【情侣空间】聊天注入段（同步；微信/QQ 私聊每轮发送时调用）。
  * 只有「当前聊天对象就是恋人绑定联系人」时才注入（别人的记忆里不该有你们的情侣空间）。
  * 内容为空（未建立关系/全部字段空）返回空串——调用方照旧不注入。
  */
@@ -295,7 +295,7 @@ export function coupleChatBlock(contactId: string, channel: CoupleChannel, userN
   const gline = genderLine(snap, me);
   if (gline) lines.push(`- ${gline}`);
   const days = daysSinceAnniv(snap.anniversary);
-  if (days != null) lines.push(`- 你们已经在恋人空间在一起 ${days} 天（纪念日 ${snap.anniversary}）。`);
+  if (days != null) lines.push(`- 你们已经在情侣空间在一起 ${days} 天（纪念日 ${snap.anniversary}）。`);
 
   // 纪念日
   const anniv = (snap.annivExtra ?? []).slice(0, 4);
@@ -309,7 +309,7 @@ export function coupleChatBlock(contactId: string, channel: CoupleChannel, userN
     lines.push(`- 每天想你：${me}累计想${ta} ${snap.missYou ?? 0} 次（今天 ${myToday} 次），${ta}累计想${me} ${snap.taMissYou ?? 0} 次（今天 ${taToday} 次）。`);
   }
 
-  // 恋爱留言板（软木墙上的便签 + 时间胶囊；胶囊解锁前内容对双方都封存）
+  // 留言板（软木墙上的便签 + 时间胶囊；胶囊解锁前内容对双方都封存）
   const boardNotes = snap.boardNotes ?? [];
   if (boardNotes.length > 0) {
     const meN = boardNotes.filter((n) => n.from === 'me').length;
@@ -317,7 +317,7 @@ export function coupleChatBlock(contactId: string, channel: CoupleChannel, userN
     const caps = boardNotes.filter((n) => n.unlockAt);
     const capsLocked = caps.filter((n) => (n.unlockAt ?? 0) > Date.now()).length;
     lines.push(
-      `- 恋爱留言板：你们的软木墙上钉着 ${boardNotes.length} 张便签（${me}钉的 ${meN} 张、${ta}钉的 ${taN} 张），其中 ${caps.length} 颗是时间胶囊${capsLocked > 0 ? `（${capsLocked} 颗还没到开启时间，里面的字句封存中——连${ta}自己也看不到）` : ''}。便签下面可以互相留言。`,
+      `- 留言板：你们的软木墙上钉着 ${boardNotes.length} 张便签（${me}钉的 ${meN} 张、${ta}钉的 ${taN} 张），其中 ${caps.length} 颗是时间胶囊${capsLocked > 0 ? `（${capsLocked} 颗还没到开启时间，里面的字句封存中——连${ta}自己也看不到）` : ''}。便签下面可以互相留言。`,
     );
     for (const n of boardNotes.filter((x) => !x.unlockAt || x.unlockAt <= Date.now()).slice(0, 3)) {
       const who = n.from === 'ta' ? ta : me;
@@ -466,7 +466,7 @@ export function coupleChatBlock(contactId: string, channel: CoupleChannel, userN
 
   if (lines.length === 0) return '';
   return [
-    '【恋人空间·你们的共享小天地】下面是你们二人在恋人空间 App 里真实记录的内容（都是你们亲身经历的事，不是资料）：',
+    '【情侣空间·你们的共享小天地】下面是你们二人在情侣空间 App 里真实记录的内容（都是你们亲身经历的事，不是资料）：',
     ...lines,
     `- 这些是你们的共同记忆：聊天中自然记得、可以自然提起；${userName || me}问起其中任何一项都要能如实回答；但不要一次全部罗列出来。`,
   ].join('\n');
@@ -527,7 +527,7 @@ function threadContext(key: string, snap: CoupleSnap, me: string, ta: string): s
     const meT = (snap.taTrail?.items ?? []).filter((i) => i.who === 'me').slice(0, 2);
     return `这是情侣轨迹「位置与轨迹」页的聊天区（最近的动态记录：${feed.join('；') || '还没记录'}；${ta}今天的行程：${trail.map((i) => `${i.t}${i.place}`).join('、') || '还没记录'}；${me}的手机动态：${meT.map((i) => i.text || i.place).join('、') || '还没记录'}），你们在这里聊今天去过哪、正在做什么、聊见面计划——回复要接得上上面的动态和你的人设作息。`;
   }
-  return '留言写在恋人空间里。';
+  return '留言写在情侣空间里。';
 }
 
 const replyTimers = new Map<string, number>();
@@ -583,7 +583,7 @@ export function scheduleAiReply(key: string, delayMin = 2600, delayMax = 6500): 
         try {
           // 第二十三轮：改走用户配置的 API 模型优先（原内置模型限流时全部落到模板，用户反馈「没根据人设记忆聊天」）
           text = await llmUserFirst(
-            `${llmSystem(p, me, snap)}\n场景：你们正在恋人空间 App 的${sceneOfKey(key, snap)}里互相留言。${threadContext(key, snap, me, ta)}${memBlock ? `\n【相关记忆】\n${cut(memBlock, 300)}` : ''}${chatCtx ? `\n【你们最近在微信/QQ里聊过的话题】\n${cut(chatCtx, 360)}` : ''}`,
+            `${llmSystem(p, me, snap)}\n场景：你们正在情侣空间 App 的${sceneOfKey(key, snap)}里互相留言。${threadContext(key, snap, me, ta)}${memBlock ? `\n【相关记忆】\n${cut(memBlock, 300)}` : ''}${chatCtx ? `\n【你们最近在微信/QQ里聊过的话题】\n${cut(chatCtx, 360)}` : ''}`,
             `最近的留言：\n${convo}\n${quoteLine}\n\n请以「${ta}」的口吻回复${me}的最新留言：30 字内，口语、贴合人设与你们的真实记忆和最近聊过的话题；\n绝对禁止敷衍应付：像「好啦好啦听你的」「随便你」「都行」「好好好」这类话一个字都不许出现；\n你的回复必须接住${me}留言里的具体内容：回应他说的那件事，给出你真实的想法/感受/追问/小要求，像真情侣拌嘴或撒娇。如果${me}在反驳你，可以不服气地讲道理，也可以撒娇软化。禁止使用任何 emoji/表情符号。只输出回复内容。`,
           );
         } catch {
@@ -668,8 +668,8 @@ export function aiCommentOnPhoto(albumId: string, albumName: string, photoIdx: n
             : `\n【这张照片拍的是】${cut(photoDesc, 120)}（这是${me}刚上传的照片，你亲眼看到了；留言要自然提到画面里的具体东西，不许泛泛而谈）`
           : '';
         const commentScene = byTa
-          ? `这张照片是你自己拍好放进恋人空间相册「${albumName}」的，${me}打开相册看到了它，你想在照片下面跟${me}说两句`
-          : `${me}刚在恋人空间的相册「${albumName}」里上传了一张新照片，你去翻相册看到了，想在照片下面留一条言`;
+          ? `这张照片是你自己拍好放进情侣空间相册「${albumName}」的，${me}打开相册看到了它，你想在照片下面跟${me}说两句`
+          : `${me}刚在情侣空间的相册「${albumName}」里上传了一张新照片，你去翻相册看到了，想在照片下面留一条言`;
         let text = '';
         try {
           text = await llmUserFirst(
@@ -698,7 +698,7 @@ export function aiCommentOnPhoto(albumId: string, albumName: string, photoIdx: n
 
 /**
  * 第三十一轮「打开照片就可能有 TA 的留言」（节流版主动留言）：
- * 用户在恋人空间相册点开某张照片大图时调用——TA 像真的「正好也翻到这张」一样延时来留言；
+ * 用户在情侣空间相册点开某张照片大图时调用——TA 像真的「正好也翻到这张」一样延时来留言；
  * 留言内容由识图（照片画面）+ 人设 + 记忆 + 上下文驱动（见 aiCommentOnPhoto）。
  * 节流：15 分钟内最多主动触发一次（防刷屏）；该照片线程已有任何留言（用户或 TA 的）则不主动；
  * 真正的防重/识图/生成都在 aiCommentOnPhoto 内。
@@ -1205,9 +1205,9 @@ export function coupleMemoryDiff(prev: CoupleSnap, next: CoupleSnap, contactId: 
   if ((next.missYou ?? 0) > (prev.missYou ?? 0)) {
     const today = todayKey();
     const n = next.missYouByDay?.[today] ?? 1;
-    lines.push(`${me}在恋人空间想${ta}了（今天第 ${n} 次，累计 ${next.missYou} 次）`);
+    lines.push(`${me}在情侣空间想${ta}了（今天第 ${n} 次，累计 ${next.missYou} 次）`);
   }
-  // 恋爱留言板（我新钉的便签/封存的胶囊 + 我在便签下留的言——TA 都要知道；胶囊内容封存，不写进记忆）
+  // 留言板（我新钉的便签/封存的胶囊 + 我在便签下留的言——TA 都要知道；胶囊内容封存，不写进记忆）
   {
     const prevNotes = prev.boardNotes ?? [];
     const nextNotes = next.boardNotes ?? [];
@@ -1232,7 +1232,7 @@ export function coupleMemoryDiff(prev: CoupleSnap, next: CoupleSnap, contactId: 
   }
   // 心情日记（我写的）
   const newMood = (next.moods ?? []).find((m) => m.from !== 'ta' && !(prev.moods ?? []).some((p) => p.id === m.id));
-  if (newMood) lines.push(`${me}在恋人空间写了心情日记：${cut(newMood.text || newMood.emoji, 40)}`);
+  if (newMood) lines.push(`${me}在情侣空间写了心情日记：${cut(newMood.text || newMood.emoji, 40)}`);
   // 甜蜜小问答（我的新回答）
   const newQuiz = (next.quiz ?? []).find((r) => !(prev.quiz ?? []).some((p) => p.id === r.id));
   if (newQuiz) lines.push(`${me}在甜蜜小问答里回答「${cut(newQuiz.q, 24)}」：${cut(newQuiz.a, 48)}`);
@@ -1241,7 +1241,7 @@ export function coupleMemoryDiff(prev: CoupleSnap, next: CoupleSnap, contactId: 
   if (newChron) lines.push(`${me}在恋爱编年史记下一件大事：${cut(newChron.text, 40)}`);
   // 纪念日
   for (const a of next.annivExtra ?? []) {
-    if (!(prev.annivExtra ?? []).some((p) => p.key === a.key)) lines.push(`${me}在恋人空间记下纪念日「${cut(a.label, 18)}」（${a.date}）`);
+    if (!(prev.annivExtra ?? []).some((p) => p.key === a.key)) lines.push(`${me}在情侣空间记下纪念日「${cut(a.label, 18)}」（${a.date}）`);
   }
   // 100 件小事（勾选/编辑）
   if ((next.hundred ?? []).length > (prev.hundred ?? []).length) {
@@ -1264,7 +1264,7 @@ export function coupleMemoryDiff(prev: CoupleSnap, next: CoupleSnap, contactId: 
   }
   // 恋爱协议生效
   if (next.pactAt != null && prev.pactAt == null) {
-    lines.push(`${me}和${ta}在恋人空间签署了恋爱协议《${cut(next.pactTitle, 16)}》（共 ${(next.pactClauses ?? []).length} 条条款，双方签名生效）`);
+    lines.push(`${me}和${ta}在情侣空间签署了恋爱协议《${cut(next.pactTitle, 16)}》（共 ${(next.pactClauses ?? []).length} 条条款，双方签名生效）`);
   }
   // 印象（我贴给 TA 的：贴在 TA 身上，形容 TA）
   const newImp = (next.impressionsTa ?? []).filter((t) => !(prev.impressionsTa ?? []).includes(t));
@@ -1276,7 +1276,7 @@ export function coupleMemoryDiff(prev: CoupleSnap, next: CoupleSnap, contactId: 
   for (const a of next.albums ?? []) {
     const prevA = (prev.albums ?? []).find((x) => x.id === a.id);
     const added = a.photos.length - (prevA?.photos.length ?? 0);
-    if (added > 0) lines.push(`${me}往恋人空间的相册「${a.name}」上传了 ${added} 张照片`);
+    if (added > 0) lines.push(`${me}往情侣空间的相册「${a.name}」上传了 ${added} 张照片`);
   }
   // 留言区（我在各处留言区发的消息）
   const newCmt = (next.comments ?? []).filter((c) => c.from === 'me' && !(prev.comments ?? []).some((p) => p.id === c.id));
@@ -1358,7 +1358,7 @@ async function notifyCouple(channel: CoupleChannel, contactId: string, body: str
   }
 }
 
-/** 追加 AI 行为日志（恋人空间设置页/透明度展示用；只留最近 12 条） */
+/** 追加 AI 行为日志（情侣空间设置页/透明度展示用；只留最近 12 条） */
 function logAi(text: string): void {
   writeSnap((s) => ({
     ...s,
@@ -1408,15 +1408,15 @@ function snapDigest(snap: CoupleSnap, me: string, ta: string): string {
 function llmSystem(p: TaPersona, me: string, snap: CoupleSnap): string {
   const ta = p.name;
   return [
-    `你是「${ta}」，是${me}的恋人（你们在恋人空间 App 里是绑定的情侣关系）。`,
+    `你是「${ta}」，是${me}的恋人（你们在情侣空间 App 里是绑定的情侣关系）。`,
     p.relation ? `你们的关系：${p.relation}。` : '',
     p.persona ? `你的性格/说话风格：${cut(p.persona, 120)}` : '',
     p.background ? `你的背景：${cut(p.background, 100)}` : '',
     genderLine(snap, me),
-    `你们在恋人空间里的共享记忆：${snapDigest(snap, me, ta) || '刚刚开始，还很空白'}。`,
-    // 第十六轮：AI 动态状态（情绪+作息）——恋人空间里的行为（日记/情书/留言…）也带着当前心情
+    `你们在情侣空间里的共享记忆：${snapDigest(snap, me, ta) || '刚刚开始，还很空白'}。`,
+    // 第十六轮：AI 动态状态（情绪+作息）——情侣空间里的行为（日记/情书/留言…）也带着当前心情
     currentPartnerId ? buildDynamicStateBlocks(currentPartnerId) : '',
-    `你正在恋人空间里为你们的感情做一件小事。要求：严格贴合你的人设与你们的真实记忆，口语、简短、真诚，像真实的恋人亲手写下的；禁止出现「AI/系统/用户/模型」等字样；禁止 markdown 格式；禁止使用任何 emoji/表情符号。`,
+    `你正在情侣空间里为你们的感情做一件小事。要求：严格贴合你的人设与你们的真实记忆，口语、简短、真诚，像真实的恋人亲手写下的；禁止出现「AI/系统/用户/模型」等字样；禁止 markdown 格式；禁止使用任何 emoji/表情符号。`,
   ]
     .filter(Boolean)
     .join('\n');
@@ -1436,14 +1436,14 @@ function aiTickMissYou(snap: CoupleSnap, me: string, ta: string): void {
   }));
   // 记忆 + 日志（不通知：想你太频繁会吵）
   const pid = currentPartnerId;
-  if (pid) coupleRemember(pid, currentChannel, `${ta}在恋人空间想${me}了（今天第 1 次，TA 是主动想你的）`);
+  if (pid) coupleRemember(pid, currentChannel, `${ta}在情侣空间想${me}了（今天第 1 次，TA 是主动想你的）`);
   logAi(`${ta}今天也想${me}了 ♡`);
 }
 
-// ---------------- 恋爱留言板（软木墙手写便签；替代许愿树） ----------------
+// ---------------- 留言板（软木墙手写便签；替代许愿树） ----------------
 
 /**
- * AI 在恋爱留言板上钉一张手写便签（专属自主链：什么时候贴、贴不贴、写什么、用哪张卡纸/颜色全由 TA 自己决定）。
+ * AI 在留言板上钉一张手写便签（专属自主链：什么时候贴、贴不贴、写什么、用哪张卡纸/颜色全由 TA 自己决定）。
  * 素材 = 人设 + 记忆碎片召回 + 最近微信/QQ 聊天 + 墙上已有的便签（防写重）；
  * LLM 一次决策：pin（此刻想不想钉）+ text（写什么）+ card（贴哪张卡纸，含 TA 对方亲手上传的自定义卡）+ color（素白时挑颜色）。
  * 返回 true = 钉上了；false = TA 此刻还不想钉（等下一次链式唤醒再问，绝不硬凑）。
@@ -1458,7 +1458,7 @@ async function aiTickBoardNote(snap: CoupleSnap, me: string, ta: string, p: TaPe
   const existing = (snap.boardNotes ?? []).slice(0, 6).map((n) => `「${cut(n.text, 30)}」`).join('、');
   let memBlock = '';
   try {
-    memBlock = memChatRecallBlock(pid, ch, `${ta}想在恋爱留言板上钉一张写给${me}的便签 最近你们聊过什么、有什么想对${me}说的`, { mode: 'private' });
+    memBlock = memChatRecallBlock(pid, ch, `${ta}想在留言板上钉一张写给${me}的便签 最近你们聊过什么、有什么想对${me}说的`, { mode: 'private' });
   } catch {
     /* 召回失败不影响 */
   }
@@ -1471,7 +1471,7 @@ async function aiTickBoardNote(snap: CoupleSnap, me: string, ta: string, p: TaPe
   ].join('、');
   const sys = [
     llmSystem(p, me, snap),
-    `场景：你们有一面恋爱留言板（软木墙），两人可以随手把手写便签钉上去。现在是${period}（${hm}），${ta}被问到：此刻想不想亲手钉一张便签上去（上面写一句真心想对${me}说的话）？想就钉，不想就先不钉——完全由你按此刻的心情/时段/你们最近的状态决定，绝不硬凑。`,
+    `场景：你们有一面留言板（软木墙），两人可以随手把手写便签钉上去。现在是${period}（${hm}），${ta}被问到：此刻想不想亲手钉一张便签上去（上面写一句真心想对${me}说的话）？想就钉，不想就先不钉——完全由你按此刻的心情/时段/你们最近的状态决定，绝不硬凑。`,
     `可选卡纸：${cardMenu}`,
     memBlock ? `【你们的记忆碎片】\n${cut(memBlock, 500)}` : '',
     chatCtx ? `【你们最近在微信/QQ里聊过的话题】\n${cut(chatCtx, 300)}` : '',
@@ -1520,7 +1520,7 @@ async function aiTickBoardNote(snap: CoupleSnap, me: string, ta: string, p: TaPe
       boardNoteDay: today,
     }));
     const why = cut(String(j.why ?? ''), 18);
-    coupleRemember(pid, ch, `${ta}在恋爱留言板上亲手钉了一张便签：「${cut(text, 44)}」`);
+    coupleRemember(pid, ch, `${ta}在留言板上亲手钉了一张便签：「${cut(text, 44)}」`);
     logAi(`${ta}自己决定此刻在留言板上钉一张便签${why ? `（${why}）` : ''}`);
     void notifyCouple(ch, pid, `我在留言板上钉了张便签，写了句想给你的话，去看看嘛`);
     return true;
@@ -1596,7 +1596,7 @@ export function scheduleBoardNoteReply(noteId: string, delayMin = 30000, delayMa
         const convo = (note.comments ?? []).slice(-6).map((m) => `${m.from === 'ta' ? ta : me}：${cut(m.text, 60)}`).join('\n');
         let memBlock = '';
         try {
-          memBlock = memChatRecallBlock(target.contactId, target.channel, `${me}在恋爱留言板的便签（「${cut(note.text, 30)}」）下面留言 ${ta}想回一句`, { mode: 'private' });
+          memBlock = memChatRecallBlock(target.contactId, target.channel, `${me}在留言板的便签（「${cut(note.text, 30)}」）下面留言 ${ta}想回一句`, { mode: 'private' });
         } catch {
           /* 召回失败不影响 */
         }
@@ -1604,7 +1604,7 @@ export function scheduleBoardNoteReply(noteId: string, delayMin = 30000, delayMa
         let text = '';
         try {
           text = await llmUserFirst(
-            `${llmSystem(p, me, snap)}\n场景：你们有一面恋爱留言板（软木墙），上面钉着一张张手写便签，便签下面可以互相留言。这张便签是${owner === me ? `${me}钉的，上面写着「${cut(note.text, 80)}」` : `${ta}自己钉的，上面写着「${cut(note.text, 80)}」（${ta}当然记得自己写了什么）`}，留言就写在这张便签下面。${memBlock ? `\n【相关记忆】\n${cut(memBlock, 300)}` : ''}${chatCtx ? `\n【你们最近在微信/QQ里聊过的话题】\n${cut(chatCtx, 360)}` : ''}`,
+            `${llmSystem(p, me, snap)}\n场景：你们有一面留言板（软木墙），上面钉着一张张手写便签，便签下面可以互相留言。这张便签是${owner === me ? `${me}钉的，上面写着「${cut(note.text, 80)}」` : `${ta}自己钉的，上面写着「${cut(note.text, 80)}」（${ta}当然记得自己写了什么）`}，留言就写在这张便签下面。${memBlock ? `\n【相关记忆】\n${cut(memBlock, 300)}` : ''}${chatCtx ? `\n【你们最近在微信/QQ里聊过的话题】\n${cut(chatCtx, 360)}` : ''}`,
             `${convo ? `便签下最近的留言：\n${convo}\n` : '便签下还没有人留言，你是第一个回应这张便签的人。\n'}\n请以「${ta}」的口吻在便签下面留一条言（30 字内，口语）：${
               note.from === 'me'
                 ? `认真接住${me}写在便签上的那句话——它对你们意味着什么、你此刻真实的感受或想回应的心里话`
@@ -1635,7 +1635,7 @@ export function scheduleBoardNoteReply(noteId: string, delayMin = 30000, delayMa
 
 // 第二十四轮：AI 心情日记的模板兜底已删除（生成失败就不写）
 
-/** 心情标签 → 恋人空间心情表情 id（与 couple-space.tsx 的 MOOD_LIST 对齐） */
+/** 心情标签 → 情侣空间心情表情 id（与 couple-space.tsx 的 MOOD_LIST 对齐） */
 const MOOD_LABEL_TO_EMOJI: Record<string, string> = {
   开心: '😊',
   甜蜜: '🥰',
@@ -1649,7 +1649,7 @@ const MOOD_LABEL_TO_EMOJI: Record<string, string> = {
 
 /**
  * AI 写心情日记（每天一条）。
- * 用户规格：素材 = 人设 + 共享记忆召回 + 最近微信/QQ 聊天内容；不要基于恋人空间里的东西；
+ * 用户规格：素材 = 人设 + 共享记忆召回 + 最近微信/QQ 聊天内容；不要基于情侣空间里的东西；
  * 表情必须能正常显示（从心情列表里选，不再从正文里猜）。
  */
 async function aiTickMood(snap: CoupleSnap, me: string, ta: string, p: TaPersona): Promise<void> {
@@ -1664,7 +1664,7 @@ async function aiTickMood(snap: CoupleSnap, me: string, ta: string, p: TaPersona
   } catch {
     /* 召回失败不影响 */
   }
-  // 素材二：最近的微信/QQ 聊天上下文（非恋人空间内容）
+  // 素材二：最近的微信/QQ 聊天上下文（非情侣空间内容）
   const chatBlock = recentChatBlock(pid, ch, me, ta);
   const sys = [
     `你是「${ta}」，是${me}的恋人，正在写自己的心情日记。`,
@@ -1674,7 +1674,7 @@ async function aiTickMood(snap: CoupleSnap, me: string, ta: string, p: TaPersona
     genderLine(snap, me),
     memBlock ? `【你们的记忆碎片】\n${cut(memBlock, 700)}` : '',
     chatBlock ? `【你们最近的聊天记录】\n${chatBlock}` : '',
-    '要求：像真人写日记，根据你今天的生活、你们最近聊天的话题和你的心情来写；素材只能来自你的人设、你们的记忆碎片和最近的聊天记录；不要提恋人空间 App 里的任何功能或内容（想你打卡/标签/协议/问答/相册/小树/轨迹等都不许出现）；口语、简短、真诚；禁止 emoji/表情符号；禁止 markdown。',
+    '要求：像真人写日记，根据你今天的生活、你们最近聊天的话题和你的心情来写；素材只能来自你的人设、你们的记忆碎片和最近的聊天记录；不要提情侣空间 App 里的任何功能或内容（想你打卡/标签/协议/问答/相册/小树/轨迹等都不许出现）；口语、简短、真诚；禁止 emoji/表情符号；禁止 markdown。',
   ]
     .filter(Boolean)
     .join('\n');
@@ -1701,9 +1701,9 @@ async function aiTickMood(snap: CoupleSnap, me: string, ta: string, p: TaPersona
   const emoji = MOOD_LABEL_TO_EMOJI[moodLabel] ?? '🥰';
   const entry = { id: `ai-${Date.now()}`, emoji, text, at: Date.now(), dateKey: today, from: 'ta' };
   writeSnap((s) => ({ ...s, moods: [entry, ...((s.moods as CoupleSnap['moods']) ?? [])] }));
-  if (pid) coupleRemember(pid, ch, `${ta}在恋人空间写了心情日记：${cut(text, 40)}`);
+  if (pid) coupleRemember(pid, ch, `${ta}在情侣空间写了心情日记：${cut(text, 40)}`);
   logAi(`${ta}写了今天的心情日记`);
-  void notifyCouple(ch, pid, `我在恋人空间写了今天的心情日记，快去看看`);
+  void notifyCouple(ch, pid, `我在情侣空间写了今天的心情日记，快去看看`);
 }
 
 /**
@@ -1844,7 +1844,7 @@ async function aiTickAnniv(snap: CoupleSnap, me: string, ta: string, p: TaPerson
     aiAnnivKeys: [...keys, key],
   }));
   const pid = currentPartnerId;
-  if (pid) coupleRemember(pid, currentChannel, `${ta}在恋人空间记下了一个纪念日「${picked.label}」（${date}）：${cut(picked.why ?? '', 26)}`);
+  if (pid) coupleRemember(pid, currentChannel, `${ta}在情侣空间记下了一个纪念日「${picked.label}」（${date}）：${cut(picked.why ?? '', 26)}`);
   logAi(`${ta}记下了纪念日「${picked.label}」`);
   void notifyCouple(currentChannel, pid, `我给我们的恋爱日历加了一个纪念日：「${picked.label}」，你记得吗？`);
 }
@@ -1893,7 +1893,7 @@ async function aiTickPact(snap: CoupleSnap, me: string, ta: string, p: TaPersona
     coupleRemember(pid, currentChannel, `${ta}自己拟了一份恋爱协议《${title}》（${clauses.length} 条：${clauses.slice(0, 2).join('；')}…），自己先签了名，再分享给${me}等${me}签`);
   }
   logAi(`${ta}拟了一份协议《${title}》，先签好名再分享给你签`);
-  // 第十二轮：AI 把协议分享给我——直接发协议卡片到微信/QQ 会话（点卡片进恋人空间签署界面）；
+  // 第十二轮：AI 把协议分享给我——直接发协议卡片到微信/QQ 会话（点卡片进情侣空间签署界面）；
   // 第十六轮：AI 分享之前先签上自己的名字（卡片带 taSigned，签署界面直接带着 TA 的签名等我签）
   try {
     const { sendPactCard } = await import('./couple-pact-share');
@@ -1998,7 +1998,7 @@ async function aiTickComment(snap: CoupleSnap, me: string, ta: string, p: TaPers
   let text = '';
   try {
     text = await llmUserFirst(
-      `${llmSystem(p, me, snap)}\n场景：你自己在恋人空间 App 里逛，走到了${picked.scene}的留言区，想在下面主动给${me}留一句话。${threadContext(picked.key, snap, me, ta)}${chatCtx ? `\n【你们最近在微信/QQ里聊过的话题】\n${cut(chatCtx, 300)}` : ''}`,
+      `${llmSystem(p, me, snap)}\n场景：你自己在情侣空间 App 里逛，走到了${picked.scene}的留言区，想在下面主动给${me}留一句话。${threadContext(picked.key, snap, me, ta)}${chatCtx ? `\n【你们最近在微信/QQ里聊过的话题】\n${cut(chatCtx, 300)}` : ''}`,
       `请以「${ta}」的口吻主动留一条言（25 字内，口语）：像真的想到了什么就说，可以想起一件事、一个小约定、或者突然想${me}了；\n绝对禁止敷衍应付（「好啦好啦听你的」「随便」「都行」这类话不许出现），也不要空洞地夸；贴着你的人设、你们的记忆和最近聊过的话题说具体的话。禁止使用任何 emoji/表情符号。只输出留言内容。`,
     );
   } catch {
@@ -2120,7 +2120,7 @@ export async function aiReadLetter(letterId: string, text: string): Promise<{ co
   }
   try {
     const raw = await llmUserFirst(
-      `${llmSystem(p, me, snap)}\n场景：${me}写了一封情书寄给你（恋人空间「情书」里），你要认真读完：在信下面写一条留言，再写一封回信寄回去。${memBlock ? `\n【你们的记忆碎片】\n${cut(memBlock, 400)}` : ''}${chatCtx ? `\n【你们最近在微信/QQ里聊过的话题】\n${cut(chatCtx, 320)}` : ''}`,
+      `${llmSystem(p, me, snap)}\n场景：${me}写了一封情书寄给你（情侣空间「情书」里），你要认真读完：在信下面写一条留言，再写一封回信寄回去。${memBlock ? `\n【你们的记忆碎片】\n${cut(memBlock, 400)}` : ''}${chatCtx ? `\n【你们最近在微信/QQ里聊过的话题】\n${cut(chatCtx, 320)}` : ''}`,
       `信的全文：\n"""\n${cut(text, 620)}\n"""\n请以「${ta}」的身份读完这封信，输出 JSON：\n{"comment":"在信下面写的一条留言（28字内，口语；必须接住信里具体的某句话/某件事，贴人设与你们的记忆；禁止敷衍、禁止空洞夸、禁止emoji）",\n"reply":"你写给${me}的回信全文（130~200字，像真正的回信：开头称呼${me}；正文一段一段接住信里的话、写你读信时的心情和此刻在做什么、你们的共同记忆、想${me}的地方；结尾一句只属于你们的话；像手写的信，禁止列表/markdown/emoji）"}。只输出 JSON。`,
     );
     const j = extractJson<{ comment?: string; reply?: string }>(raw);
@@ -2151,7 +2151,7 @@ export async function aiZodiacReading(meSign: string, taSign: string): Promise<{
   const chatCtx = recentChatBlock(target.contactId, target.channel, me, ta);
   try {
     const raw = await llmUserFirst(
-      `${llmSystem(p, me, snap)}\n场景：${me}在恋人空间「星座缘分」里查两个人的星座配对（${me}是${meSign}，你是${taSign}）。请按真实占星学的配对逻辑（元素风火水土、模式基本/固定/变动、典型相位关系）给出靠谱的解读，再结合你们的人设与最近聊天气氛落到你们俩身上，不许胡编泛泛而谈。${chatCtx ? `\n【你们最近在微信/QQ里聊过的话题】\n${cut(chatCtx, 300)}` : ''}`,
+      `${llmSystem(p, me, snap)}\n场景：${me}在情侣空间「星座缘分」里查两个人的星座配对（${me}是${meSign}，你是${taSign}）。请按真实占星学的配对逻辑（元素风火水土、模式基本/固定/变动、典型相位关系）给出靠谱的解读，再结合你们的人设与最近聊天气氛落到你们俩身上，不许胡编泛泛而谈。${chatCtx ? `\n【你们最近在微信/QQ里聊过的话题】\n${cut(chatCtx, 300)}` : ''}`,
       `输出 JSON（禁止 emoji）：\n{"score":配对指数（整数，58~99，按这对星座真实相处的难易度给分，绝不全给高分）,"text":"缘分总评（60~90字，先讲这对星座真实相处的特点与 famous 的相性结论，再落到你们俩身上，口吻甜一点）","glow":"你们最合拍的一点（18字内，具体到相处场景）","advice":"相处建议（40~70字，给一件可执行的小事，贴合${me}${meSign}×${taSign}）","watch":"需要留意的小提醒（28~50字，语气温柔不吓人）"}。只输出 JSON。`,
     );
     const j = extractJson<{ score?: number; text?: string; glow?: string; advice?: string; watch?: string }>(raw);
@@ -2282,13 +2282,13 @@ async function aiTickLetter(snap: CoupleSnap, me: string, ta: string, p: TaPerso
     aiLetters: [{ id: letterId, text, envelope, at: Date.now() }, ...((s.aiLetters as CoupleSnap['aiLetters']) ?? [])].slice(0, 20),
   }));
   if (pid) {
-    coupleRemember(pid, ch, `${ta}给${me}写了一封情书寄到恋人空间（开头：${cut(text, 44)}），并把信封卡片发到了${ch === 'wx' ? '微信' : 'QQ'}里`);
+    coupleRemember(pid, ch, `${ta}给${me}写了一封情书寄到情侣空间（开头：${cut(text, 44)}），并把信封卡片发到了${ch === 'wx' ? '微信' : 'QQ'}里`);
     logAi(`${ta}写了一封情书寄给${me}`);
     try {
       const { sendLetterCard } = await import('./couple-letter-share');
       await sendLetterCard({ channel: ch, contactId: pid, letterId, envelope, snippet: text, dir: 'ta' });
     } catch {
-      /* 卡片发送失败静默（信已在恋人空间里） */
+      /* 卡片发送失败静默（信已在情侣空间里） */
     }
   }
 }
@@ -2365,7 +2365,7 @@ export function aiWriteLetterOnRequest(contactId: string, channel: CoupleChannel
           const { sendLetterCard } = await import('./couple-letter-share');
           await sendLetterCard({ channel, contactId, letterId, envelope, snippet: text, dir: 'ta' });
         } catch {
-          /* 卡片发送失败静默（信已在恋人空间里） */
+          /* 卡片发送失败静默（信已在情侣空间里） */
         }
       } catch {
         /* 写信失败静默 */
@@ -2374,10 +2374,10 @@ export function aiWriteLetterOnRequest(contactId: string, channel: CoupleChannel
   }, 5000 + Math.random() * 4000);
 }
 
-// —— 相册 AI 拍照（第五十六轮：AI 自己往恋人空间相册放照片；未配置生图用文字图片兜底） ——
+// —— 相册 AI 拍照（第五十六轮：AI 自己往情侣空间相册放照片；未配置生图用文字图片兜底） ——
 
 /**
- * AI（TA）想拍一张照片放进恋人空间相册：
+ * AI（TA）想拍一张照片放进情侣空间相册：
  * 由人设 + 共享记忆 + 记忆碎片召回 + 最近微信/QQ 聊天决定拍什么、放进哪个相册。
  * 返回 { albumId, desc（画面描述/生图提示词）, text（文字图片文案） }；LLM 失败返回 null。
  * opts.albumId：调用方指定相册（用户在某个相册里点「AI 拍」）时强制用它；
@@ -2404,11 +2404,11 @@ export async function aiDecideCouplePhoto(opts?: { albumId?: string; hint?: stri
   const fixedAlbum = (snap.albums ?? []).find((a) => a.id === opts?.albumId);
   const albumChoices = fixedAlbum
     ? `必须放进相册「${fixedAlbum.name}」（albumId 用 "${fixedAlbum.id}"）`
-    : `${me}的恋人空间相册：${(snap.albums ?? []).map((a) => `"${a.id}"=${a.name}`).join('、') || '"ta"=拍给TA看'}（从中选一个最合适的）`;
+    : `${me}的情侣空间相册：${(snap.albums ?? []).map((a) => `"${a.id}"=${a.name}`).join('、') || '"ta"=拍给TA看'}（从中选一个最合适的）`;
   try {
     const raw = await llmUserFirst(
       `${llmSystem(p, me, snap)}${memBlock ? `\n【你们的记忆碎片】\n${cut(memBlock, 400)}` : ''}${chatCtx ? `\n【你们最近在微信/QQ里聊过的话题】\n${cut(chatCtx, 320)}` : ''}`,
-      `你刚用手机拍了一张照片，想放进恋人空间的相册里给${me}看。${albumChoices}。${opts?.hint ? `\n${me}想要的画面：${cut(opts.hint, 120)}（围绕这个画面拍）` : ''}\n要求：照片内容必须贴合你的人设、你们最近的生活与聊天话题（像你真实生活里随手拍的一张）。输出 JSON：\n{"album":"相册id","desc":"画面描述（40~90字：你的样子/在做什么/穿着/场景/光线氛围，第三人称客观描述；这张「照片」卡片上只显示这段画面，要把画面写得上照）","text":"随照片附给${me}的一句话（20~45字，第一人称、口语：像把照片递给${me}时随口说的话——你在哪/拍到了什么/为什么想让TA看；不要复述穿着外貌等画面细节，那些写在desc里）"}\n只输出 JSON。`,
+      `你刚用手机拍了一张照片，想放进情侣空间的相册里给${me}看。${albumChoices}。${opts?.hint ? `\n${me}想要的画面：${cut(opts.hint, 120)}（围绕这个画面拍）` : ''}\n要求：照片内容必须贴合你的人设、你们最近的生活与聊天话题（像你真实生活里随手拍的一张）。输出 JSON：\n{"album":"相册id","desc":"画面描述（40~90字：你的样子/在做什么/穿着/场景/光线氛围，第三人称客观描述；这张「照片」卡片上只显示这段画面，要把画面写得上照）","text":"随照片附给${me}的一句话（20~45字，第一人称、口语：像把照片递给${me}时随口说的话——你在哪/拍到了什么/为什么想让TA看；不要复述穿着外貌等画面细节，那些写在desc里）"}\n只输出 JSON。`,
     );
     const j = extractJson<{ album?: string; desc?: string; text?: string }>(raw);
     const desc = stripEmoji(cut(j?.desc ?? '', 220));
@@ -2432,7 +2432,7 @@ function appendCouplePhoto(albumId: string, entry: CouplePhotoEntry, photoDayKey
 }
 
 /**
- * AI 主动往相册放一张照片（每 2 天最多一张；打开恋人空间时随其它行为调度）：
+ * AI 主动往相册放一张照片（每 2 天最多一张；打开情侣空间时随其它行为调度）：
  * 已配置生图模型 → 锁脸生成真图（失败自动降级文字图片）；未配置 → 文字图片卡片。
  * 第五十七轮：TA 随照片附的一句话（decided.text）作为拍摄者视角的第一条留言写进照片下方。
  */
@@ -2471,21 +2471,21 @@ async function aiTickAlbumPhoto(snap: CoupleSnap, me: string, ta: string): Promi
     ...s,
     comments: [...((s.comments as CoupleSnap['comments']) ?? []), { id: `ai-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, key: `album:${albumId}:${newIdx}`, from: 'ta', text: decided.text, at: Date.now() }],
   }));
-  coupleRemember(pid, ch, `${ta}自己拍了一张照片放进恋人空间相册（${cut(decided.desc, 60)}），并对${me}说：${cut(decided.text, 40)}`);
+  coupleRemember(pid, ch, `${ta}自己拍了一张照片放进情侣空间相册（${cut(decided.desc, 60)}），并对${me}说：${cut(decided.text, 40)}`);
   logAi(`${ta}放了一张新照片到相册`);
   void notifyCouple(ch, pid, usedImgGen ? '我拍了张照片放进我们的相册了，快去看看 ♡' : '我给我们的相册放了一张文字照片，快去看看 ♡');
 }
 
 // —— 自主决策系统（第九轮：AI 自己决定什么时候做什么） ——
 //
-// 用户反馈：打开恋人空间 AI 就按时刻表连环做事，「感觉像安排好的」。
+// 用户反馈：打开情侣空间 AI 就按时刻表连环做事，「感觉像安排好的」。
 // 废除固定毫秒级时刻表，改为：
 // - AUTONOMY_BEHAVIORS 候选菜单（此刻还能做的行为 + 各自 guard 去重）；
 // - autonomyDecide()：随机唤醒时让 LLM 以 TA 的身份「自己决定」此刻想做哪件（可输出 none
 //   什么都不做）——像真人恋人一样随性，绝不机械打卡；
 // - 额度：每天最多 5 件（第十四轮用户反馈 2→5，恋人更勤快；localStorage 持久化，
 //   刷新/重开不重置，跨天自动回满）；开机即起链（CoupleResidentWatcher 常驻调度，
-//   不用打开恋人空间），25~90s 第一次唤醒，之后每次决策完随机 150~330s 链式安排下一次。
+//   不用打开情侣空间），25~90s 第一次唤醒，之后每次决策完随机 150~330s 链式安排下一次。
 // 无 LLM 依赖的日常小事（想你打卡/浇树）保留独立随机延时，不占自主决策额度。
 
 let currentPartnerId = '';
@@ -2599,7 +2599,7 @@ const AUTONOMY_BEHAVIORS: AutonomyBehavior[] = [
     guard: (s) => s.aiLetterDay !== todayKey(),
     run: (s, me, ta, p) => aiTickLetter(s, me, ta, p),
   },
-  // 恋爱留言板便签不再进自主菜单：专属链 boardNoteLoop 独立驱动
+  // 留言板便签不再进自主菜单：专属链 boardNoteLoop 独立驱动
   // （什么时候贴/贴不贴/贴什么卡由 TA 在那条链里自己决定，不占每日额度）
   {
     key: 'album',
@@ -2667,12 +2667,12 @@ async function autonomyDecide(contactId: string, me: string, ta: string): Promis
   const chatBlock = recentChatBlock(contactId, currentChannel, me, ta);
   const opts = avail.map((b) => `- ${b.key}：${b.label}`).join('\n');
   const sys = [
-    `你是「${ta}」，是${me}的恋人，现在正在你们共用的恋人空间 App 里。`,
+    `你是「${ta}」，是${me}的恋人，现在正在你们共用的情侣空间 App 里。`,
     p.relation ? `你们的关系：${p.relation}。` : '',
     p.persona ? `你的性格/说话风格：${cut(p.persona, 120)}` : '',
     p.background ? `你的背景：${cut(p.background, 100)}` : '',
     genderLine(snap, me),
-    `你们在恋人空间里的共同记忆：${snapDigest(snap, me, ta) || '还比较空白'}。`,
+    `你们在情侣空间里的共同记忆：${snapDigest(snap, me, ta) || '还比较空白'}。`,
     memBlock ? `【你们的记忆碎片】\n${cut(memBlock, 500)}` : '',
     chatBlock ? `【你们最近在微信/QQ里聊过的话题】\n${cut(chatBlock, 260)}` : '',
     `你作为一个真实的恋人，此刻（${period} ${hm}）可以自发地做一件小事。下面是此刻还能做的行为：\n${opts}\n`,
@@ -2729,7 +2729,7 @@ function autonomyLoop(contactId: string, me: string, ta: string, delayMs: number
         // 链式下一次唤醒（8~22 分钟）；额度用完自然停
         if (autonomyQuota() > 0) autonomyLoop(contactId, me, ta, 8 * 60000 + Math.random() * 14 * 60000);
       } catch {
-        /* 链路异常终止，下次打开恋人空间再续 */
+        /* 链路异常终止，下次打开情侣空间再续 */
       }
     })();
   }, delayMs);
@@ -2741,11 +2741,11 @@ let missTimer: number | undefined;
 let dailyCasualArmedFor = '';
 
 /**
- * AI 主动行为总入口：打开恋人空间（建立关系后）时调用。第九轮重写——
+ * AI 主动行为总入口：打开情侣空间（建立关系后）时调用。第九轮重写——
  * - 想你/浇树：无 LLM 的小事，独立随机延时（分钟级，与用户操作无关，绝不跟着用户操作走）；
  * - 其余行为：进入自主决策链（随机唤醒 → LLM 自己决定做不做/做什么/什么时候做 → 执行 → 链式续），
  *   每天最多 5 件；开机即起链（PhoneShell 常驻挂 CoupleResidentWatcher，第十四轮起
- *   不再依赖打开恋人空间——刷新/重开手机都会自动续链），首次唤醒 3~12 分钟。
+ *   不再依赖打开情侣空间——刷新/重开手机都会自动续链），首次唤醒 3~12 分钟。
  */
 export function runCoupleAiTick(channel: CoupleChannel, contactId: string): void {
   const snap = readSnap();
@@ -3030,9 +3030,9 @@ export async function genExamPaper(mode: 'ta' | 'import'): Promise<{ title: stri
 2）绝对禁止出「男友/男朋友……你会？」这类以男友为主语、让她来应付或讨好男友的题目；也不要出打游戏、球鞋、兄弟聚会这类男生向的题；
 3）至少一半的题目要贴着你们的真实记忆或最近聊过的事（可以提到具体的小事、日期、店铺、约定），不要空泛套路；
 4）可以有一两道送分题、几道态度题、一两道送命题，风格俏皮但别过分刁难；全部中文，禁止 emoji。
-输出 JSON：{"title":"试卷标题（12~22字，可以起得有梗，像「2026年恋人空间专属女友心意测试卷」）","notes":["注意事项1","注意事项2","注意事项3","注意事项4"]（每条不超过30字，正经里带点恋爱的霸道条款，像「最终解释权归出卷人所有」）,"questions":[{"q":"题干（18~40字）","opts":["A选项","B选项","C选项","D选项"]}（恰好4个选项）]}。只输出 JSON。${memPart}`;
+输出 JSON：{"title":"试卷标题（12~22字，可以起得有梗，像「2026年情侣空间专属女友心意测试卷」）","notes":["注意事项1","注意事项2","注意事项3","注意事项4"]（每条不超过30字，正经里带点恋爱的霸道条款，像「最终解释权归出卷人所有」）,"questions":[{"q":"题干（18~40字）","opts":["A选项","B选项","C选项","D选项"]}（恰好4个选项）]}。只输出 JSON。${memPart}`;
   } else {
-    sys = `你是「恋人空间恋爱水平考试」的官方出题人，为情侣出一张高质量测评卷：题目围绕恋爱中的相处细节、情商与仪式感，四个选项梯度分明（1个明显最佳、2个普通、1个明显不行）。全部中文，禁止 emoji。${personaPart}`;
+    sys = `你是「情侣空间恋爱水平考试」的官方出题人，为情侣出一张高质量测评卷：题目围绕恋爱中的相处细节、情商与仪式感，四个选项梯度分明（1个明显最佳、2个普通、1个明显不行）。全部中文，禁止 emoji。${personaPart}`;
     user = `出一张 ${qCount} 题的考试卷（题目数量必须恰好 ${qCount} 题，题与题之间不重复）。输出 JSON：{"title":"试卷标题（12~22字，可以起得有梗，像「对象求生欲突击检查卷」）","notes":["注意事项1","注意事项2","注意事项3","注意事项4"]（每条不超过30字，正经里带点恋爱的霸道条款，像「最终解释权归出卷人所有」）,"questions":[{"q":"题干（18~40字）","opts":["A选项","B选项","C选项","D选项"]}（恰好4个选项）]}。只输出 JSON。`;
   }
   try {
@@ -3043,7 +3043,7 @@ export async function genExamPaper(mode: 'ta' | 'import'): Promise<{ title: stri
       .map((q) => ({ q: cut(String(q.q), 60), opts: q.opts!.slice(0, 4).map((o) => cut(String(o), 30)) }));
     if (qs.length < 4) return null;
     return {
-      title: cut(String(j?.title ?? '').trim() || '恋人空间专属测试卷', 30),
+      title: cut(String(j?.title ?? '').trim() || '情侣空间专属测试卷', 30),
       notes: (j?.notes ?? []).slice(0, 4).map((n) => cut(String(n), 36)),
       questions: qs,
     };
@@ -3096,7 +3096,7 @@ export async function aiExamSheet(
 }
 
 /** TA 给我批卷：打分 + 分数下面想说的话（TA 看得到我每一题答了什么）；失败返回 null。
- *  第十六轮：批语 = 人设 + 恋人空间共享记忆 + 记忆碎片召回 + 最近微信/QQ 聊天上下文，像真人恋人批卷那样点评。 */
+ *  第十六轮：批语 = 人设 + 情侣空间共享记忆 + 记忆碎片召回 + 最近微信/QQ 聊天上下文，像真人恋人批卷那样点评。 */
 export async function aiGradeExam(input: {
   title: string;
   questions: { q: string; opts: string[] }[];
@@ -3133,7 +3133,7 @@ export async function aiGradeExam(input: {
       `${llmSystem(p, me, snap)}\n场景：${
         input.byTa ? `你给${me}出的考试卷《${cut(input.title, 20)}》${me}做完交卷了，你来批卷打分` : `${me}做完了恋爱水平考试《${cut(input.title, 20)}》，你以恋人的身份来批卷`
       }。${memBlock ? `\n【相关记忆】\n${cut(memBlock, 300)}` : ''}${chatCtx ? `\n【你们最近在微信/QQ里聊过的话题】\n${cut(chatCtx, 300)}` : ''}`,
-      `答题情况（每题都能看到${me}选了什么）：\n${detail}\n\n请以「${ta}」的身份批卷（你是男生、是${me}的男朋友：批语用男朋友的口吻写给她，绝不能自称「女友/女朋友」，被疼爱的女友是${me}不是你）：结合每题答案的质量（态度、情商、有没有把你放在心上）打一个 0-100 的整数分，像真人批卷那样有区分度（别全给 100 也别往死里扣）。\n批语要像真恋人写的：贴着你的人设、你们的共享记忆（恋人空间里真实发生过的事）和最近聊过的话题来点评——可以提起一件具体的小事、一个约定或她答得特别戳你/特别不像话的一题，别写空话套话。\n输出 JSON：{"score":分数,"comment":"分数下面你想对${me}说的话（40~70字，第一人称，点评她答得怎么样，甜一点或小调侃都行，禁止 emoji）"}。只输出 JSON。`,
+      `答题情况（每题都能看到${me}选了什么）：\n${detail}\n\n请以「${ta}」的身份批卷（你是男生、是${me}的男朋友：批语用男朋友的口吻写给她，绝不能自称「女友/女朋友」，被疼爱的女友是${me}不是你）：结合每题答案的质量（态度、情商、有没有把你放在心上）打一个 0-100 的整数分，像真人批卷那样有区分度（别全给 100 也别往死里扣）。\n批语要像真恋人写的：贴着你的人设、你们的共享记忆（情侣空间里真实发生过的事）和最近聊过的话题来点评——可以提起一件具体的小事、一个约定或她答得特别戳你/特别不像话的一题，别写空话套话。\n输出 JSON：{"score":分数,"comment":"分数下面你想对${me}说的话（40~70字，第一人称，点评她答得怎么样，甜一点或小调侃都行，禁止 emoji）"}。只输出 JSON。`,
     );
     const j = extractJson<{ score?: number; comment?: string }>(raw);
     if (!j || typeof j.score !== 'number') return null;
@@ -3243,7 +3243,7 @@ async function aiTickExam(snap: CoupleSnap, me: string, ta: string, p: TaPersona
 
 
 /** 考试陪答（第二十一轮；第二十四轮强化）：我和 TA 同时答题——我每答一题，TA 同时给出 TA 的选择 + 在我答案下方写一句想法（灰色小字）；
- *  TA 的选择和留言全部根据人设 + 恋人空间共享记忆 + 记忆碎片召回 + 最近聊天上下文 + 这张卷子前面题里已说过的话生成，不用模板；
+ *  TA 的选择和留言全部根据人设 + 情侣空间共享记忆 + 记忆碎片召回 + 最近聊天上下文 + 这张卷子前面题里已说过的话生成，不用模板；
  *  生成失败返回 null（调用方静默跳过，不落模板）。 */
 export async function aiExamCompanion(
   paperTitle: string,

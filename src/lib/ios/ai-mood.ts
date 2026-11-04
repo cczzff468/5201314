@@ -88,7 +88,7 @@ function setMoodState(cid: string, s: AiMoodState): void {
   }
 }
 
-/** 读当前情绪（展示用：恋人空间/聊天页小图标） */
+/** 读当前情绪（展示用：情侣空间/聊天页小图标） */
 export function aiMoodOf(cid: string): AiMoodState {
   const s = getMoodState(cid);
   decayIfDue(cid, s);
@@ -198,12 +198,15 @@ export function buildMoodBlock(cid: string): string {
 // ---------------- 组合块（客户端注入点统一入口） ----------------
 
 import { buildRoutineBlock } from './routine';
+import { buildUserMoodBlock } from './user-mood';
 
 /**
- * AI 动态状态块 = 情绪块 + 作息块（第十六轮）。
- * 供三端聊天 systemFull / 主动消息 / 恋人空间行为等**客户端**组装点注入；
+ * AI 动态状态块 = 情绪块 + 作息块（第十六轮）+ 用户情绪感知块（v49 功能四）。
+ * 供三端聊天 systemFull / 主动消息 / 情侣空间行为等**客户端**组装点注入；
  * persona.ts 本身是客户端+服务端共用纯函数，不能带 localStorage 依赖，故由调用方注入。
+ * v49：buildUserMoodBlock（【对方此刻的状态】：低落→安抚 / 兴奋→共庆 / 生气→哄）
+ * 并入组合块——三端聊天/主动消息/情侣空间行为全部自动带上，无需各处单独接。
  */
 export function buildDynamicStateBlocks(cid: string): string {
-  return [buildMoodBlock(cid), buildRoutineBlock()].filter(Boolean).join('\n');
+  return [buildMoodBlock(cid), buildUserMoodBlock(cid), buildRoutineBlock()].filter(Boolean).join('\n');
 }

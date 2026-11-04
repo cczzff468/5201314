@@ -1,15 +1,15 @@
 'use client';
 
 /**
- * 情侣空间 App（恋人空间，原情侣空间）——白/浅灰定制配色版。
+ * 情侣空间 App（情侣空间，原情侣空间）——白/浅灰定制配色版。
  *
  * 用户规格：按提供的 5 张参考截图 1:1 复刻结构（邀请页 / 首页 / 发现 / 相册 / 我们），
  * 全站配色不用粉色/红色，改用白色 + 浅灰（主强调色为炭灰渐变，深灰白字保证对比）。
  *
  * 页面结构（对应参考图）：
- * - 邀请页（图1）：全屏渐变底 + 装饰圆与浮点 + 恋人头像/昵称 + 「邀请你开通恋人空间」
- *   + 左上角返回键 + 「接受邀请」大按钮 + 底部「在恋人空间你们可以体验这些」三体验卡（情侣相册/爱情树/纪念日）
- * - 首页（图2）：恋人空间大标题 + 双头像虚线连接 + 中间纪念日气泡（点击设置→已相恋 N 天）
+ * - 邀请页（图1）：全屏渐变底 + 装饰圆与浮点 + 恋人头像/昵称 + 「邀请你开通情侣空间」
+ *   + 左上角返回键 + 「接受邀请」大按钮 + 底部「在情侣空间你们可以体验这些」三体验卡（情侣相册/爱情树/纪念日）
+ * - 首页（图2）：情侣空间大标题 + 双头像虚线连接 + 中间纪念日气泡（点击设置→已相恋 N 天）
  *   + 背景合影图上叠「每天想你」大圆（可点击打卡，两侧引号装饰）+ 右侧悬浮心形/换背景按钮
  *   + 底部四功能卡（爱情小树成长记/情侣轨迹/甜蜜小问答/未来情书）
  * - 发现（图3）：一起玩吧两张大卡（情侣轨迹/情侣小家）+「情感升温小技巧」3×4 宫格 12 项
@@ -177,7 +177,7 @@ export interface TreeCard {
   color?: number; // 调色盘索引（0-7）；缺省时按挂签人兼容（我=红 / TA=奶油白）
 }
 
-/** 恋爱留言板便签（留言墙上钉的手写便签；card = BOARD_CARDS 图案卡纸 1-7，缺省 = 素白色卡；color = 素白卡时的调色盘索引；unlockAt 非空 = 时间胶囊；pinned = 置顶（长按菜单可置顶/取消，置顶的排在墙最前面） */
+/** 留言板便签（留言墙上钉的手写便签；card = BOARD_CARDS 图案卡纸 1-7，缺省 = 素白色卡；color = 素白卡时的调色盘索引；unlockAt 非空 = 时间胶囊；pinned = 置顶（长按菜单可置顶/取消，置顶的排在墙最前面） */
 export interface BoardNote {
   id: string;
   from: 'me' | 'ta';
@@ -275,7 +275,7 @@ export interface CoupleState {
   treeStreak: { last: string | null; n: number }; // 爱情树：我连续浇树（last=最近浇水日）
   treeCards: TreeCard[]; // 许愿树留言卡（最新在前，最多 30 张；已下线，仅作迁移源保留）
   treeCardDay?: string; // TA（AI）挂卡去重（每天最多一张）
-  boardNotes: BoardNote[]; // 恋爱留言板便签（最新在前，最多 60 张；unlockAt 非空 = 时间胶囊）
+  boardNotes: BoardNote[]; // 留言板便签（最新在前，最多 60 张；unlockAt 非空 = 时间胶囊）
   boardNoteDay?: string; // TA（AI）钉便签去重（每天最多一张）
   boardBg?: number; // 留言板背景：0-5=内置 6 张背景图，100+=手机上传的自定义背景（boardBgCustom 下标 + 100）
   boardBgCustom?: { src: string; veil: number }[]; // 手机上传的自定义背景（canvas 压缩后的 dataURL + 按亮度定的纱罩；最多 4 张）
@@ -538,7 +538,7 @@ interface ExamTpl {
 const EXAM_TPLS: ExamTpl[] = [
   {
     id: 'tpl-bf',
-    title: '2026年恋人空间普通高等男友统一测试卷',
+    title: '2026年情侣空间普通高等男友统一测试卷',
     usage: '18.0W人使用',
     notes: [
       '本试卷为专属男友测评卷，满分100分，考试全程禁止敷衍、作弊、讲道理。',
@@ -559,7 +559,7 @@ const EXAM_TPLS: ExamTpl[] = [
   },
   {
     id: 'tpl-gf',
-    title: '2026年恋人空间普通高等女友统一测试卷',
+    title: '2026年情侣空间普通高等女友统一测试卷',
     usage: '11.2W人使用',
     notes: [
       '本试卷为专属女友测评卷，满分100分，考试全程禁止敷衍、作弊、翻旧账。',
@@ -1094,8 +1094,8 @@ export default function CoupleSpaceApp() {
     return () => window.removeEventListener(COUPLE_STATE_EVENT, sync);
   }, []);
 
-  /** 聊天里的协议卡片点击进来（第十二轮）：切到恋人空间时直接打开协议页（PactPage 挂载后消费具体目标）。
-   *  组件可能晚于事件挂载（聊天→恋人空间切换）→ 挂载时也检查一次 pending */
+  /** 聊天里的协议卡片点击进来（第十二轮）：切到情侣空间时直接打开协议页（PactPage 挂载后消费具体目标）。
+   *  组件可能晚于事件挂载（聊天→情侣空间切换）→ 挂载时也检查一次 pending */
   useEffect(() => {
     const nav = () => {
       if (peekPendingPactOpen()) setSub('pact');
@@ -1108,7 +1108,7 @@ export default function CoupleSpaceApp() {
     return () => window.removeEventListener(COUPLE_PACT_NAV_EVENT, nav);
   }, []);
 
-  /** 聊天里的考试卡片点击进来（第十五轮）：切到恋人空间时直接打开考试页（ExamPage 挂载后消费具体目标） */
+  /** 聊天里的考试卡片点击进来（第十五轮）：切到情侣空间时直接打开考试页（ExamPage 挂载后消费具体目标） */
   useEffect(() => {
     const nav = () => {
       if (peekPendingExamOpen()) setSub('exam');
@@ -1121,7 +1121,7 @@ export default function CoupleSpaceApp() {
     return () => window.removeEventListener(COUPLE_EXAM_NAV_EVENT, nav);
   }, []);
 
-  /** 聊天里的情书信封卡片点击进来（第十八轮）：切到恋人空间时直接打开信件页（LettersPage 挂载后消费具体目标，不进主页） */
+  /** 聊天里的情书信封卡片点击进来（第十八轮）：切到情侣空间时直接打开信件页（LettersPage 挂载后消费具体目标，不进主页） */
   useEffect(() => {
     const nav = () => {
       if (peekPendingLetterOpen()) setSub('letters');
@@ -1369,16 +1369,16 @@ export default function CoupleSpaceApp() {
           >
             <ArrowLeft className="h-5 w-5" strokeWidth={2.2} />
           </button>
-          {/* 恋人头像 + 名字（recv 时为邀请人）；无头像时兜底为恋人空间粉双心图 */}
+          {/* 恋人头像 + 名字（recv 时为邀请人）；无头像时兜底为情侣空间粉双心图 */}
           <div className="h-[118px] w-[118px] overflow-hidden rounded-full bg-[#ececef] dark:bg-zinc-900/80 ring-[6px] ring-white/80 shadow-[0_10px_30px_rgba(0,0,0,0.10)]">
             {invAvatar ? (
               <img src={invAvatar} alt={invName || '恋人'} className="h-full w-full object-cover" draggable={false} />
             ) : (
-              <img src="/icons/couple.png" alt="恋人空间" className="h-full w-full object-cover" draggable={false} />
+              <img src="/icons/couple.png" alt="情侣空间" className="h-full w-full object-cover" draggable={false} />
             )}
           </div>
           <div className="mt-8 text-[30px] font-bold leading-none">{invName || '恋人'}</div>
-          <div className="mt-7 text-[30px] font-bold leading-tight text-[#3c3c42] dark:text-zinc-200">邀请你开通恋人空间</div>
+          <div className="mt-7 text-[30px] font-bold leading-tight text-[#3c3c42] dark:text-zinc-200">邀请你开通情侣空间</div>
 
           {/* 按钮区：有人邀请我 → 接受邀请；我已发出 → 等待对方；没人邀请 → 立即邀请我的另一半 */}
           {recvInvite ? (
@@ -1429,7 +1429,7 @@ export default function CoupleSpaceApp() {
         </div>
 
         <div className="relative px-6 pb-12">
-          <div className="mb-4 text-center text-[16px] text-[#9a9aa2] dark:text-zinc-400">在恋人空间你们可以体验这些</div>
+          <div className="mb-4 text-center text-[16px] text-[#9a9aa2] dark:text-zinc-400">在情侣空间你们可以体验这些</div>
           <div className="grid grid-cols-3 gap-3">
             {[
               { label: '情侣相册', icon: <Camera className="h-8 w-8" strokeWidth={1.8} /> },
@@ -1696,7 +1696,7 @@ function HomePage(props: {
             aria-label="返回主界面"
             className="text-left text-[24px] font-bold leading-tight tracking-tight transition-opacity active:opacity-40"
           >
-            恋人空间
+            情侣空间
           </button>
         </div>
 
@@ -1788,7 +1788,7 @@ function HomePage(props: {
       {/* 底部固定四功能卡（不随内容滚动，始终贴在 Tab 栏上方；第二十五轮：浅灰白圆角矩形风） */}
       <div className="relative z-10 grid shrink-0 grid-cols-4 gap-2 px-3 pb-3 pt-2">
         {([
-          { key: 'board', label: '恋爱\n留言板', icon: <Pin className="h-6 w-6 text-[#3c3c42] dark:text-zinc-200" strokeWidth={1.9} /> },
+          { key: 'board', label: '留言板', icon: <Pin className="h-6 w-6 text-[#3c3c42] dark:text-zinc-200" strokeWidth={1.9} /> },
           { key: 'track', label: '情侣轨迹', icon: <Compass className="h-6 w-6 text-[#3c3c42] dark:text-zinc-200" strokeWidth={1.9} /> },
           { key: 'quiz', label: '甜蜜\n小问答', icon: <MessageCircleHeart className="h-6 w-6 text-[#3c3c42] dark:text-zinc-200" strokeWidth={1.9} /> },
           { key: 'letters', label: '情书', icon: <BookHeart className="h-6 w-6 text-[#3c3c42] dark:text-zinc-200" strokeWidth={1.9} /> },
@@ -2748,7 +2748,7 @@ function AnniversaryPage(props: { state: CoupleState; patch: (p: Partial<CoupleS
 }
 
 /**
- * ================= 恋爱留言板（简约留言墙 + 手写便签 + 时间胶囊彩蛋） =================
+ * ================= 留言板（简约留言墙 + 手写便签 + 时间胶囊彩蛋） =================
  * 按需求以「留言板为主 + 时间胶囊彩蛋」重建（替代许愿树）：
  * - 一面简约留言墙：两人随手钉便签（16 色调色盘自选颜色），点开可回一句，成小对话串；
  * - 时间胶囊：写下即封存（到点前连自己也看不到），锁着倒计时钉在墙上，到点自动开启；
@@ -2845,27 +2845,62 @@ function noteFaceStyle(note: BoardNote, customs?: BoardCardCustom[]): CSSPropert
   return { background: col.bg, color: col.text };
 }
 
-/** v44：这张便签的卡面是否自带固定装饰（胶带）→ 不再叠黄铜图钉（便签纸卡） */
+/** v44：这张便签的卡面是否自带固定装饰（胶带）→ 不再叠金属别针（便签纸卡） */
 function noteHasOwnDecor(note: BoardNote, customs?: BoardCardCustom[]): boolean {
   const card = note.card ?? 0;
   return card > 0 && boardCardSkinOf(card, customs)?.noPin === true;
 }
 
-/** 黄铜图钉（钉在便签顶上；带针尖与高光） */
-function NotePin() {
+/** 金属别针/回形针（夹在便签顶上；银色金属渐变 + 高光 + 投影，立体质感） */
+function NoteClip() {
   return (
     <span
       aria-hidden="true"
-      className="absolute -top-[7px] left-1/2 block h-[13px] w-[13px] -translate-x-1/2 rounded-full shadow-[0_2px_4px_rgba(60,40,20,0.45)]"
-      style={{ background: 'radial-gradient(circle at 35% 30%, #f6dfae, #c9924e 68%, #a87838)' }}
+      className="pointer-events-none absolute -top-[9px] left-1/2 block h-[30px] w-[20px] -translate-x-1/2"
     >
-      <span className="absolute left-[3px] top-[2.5px] h-[3.5px] w-[3.5px] rounded-full bg-white/75" />
-      <span className="absolute left-1/2 top-full block h-[5px] w-[1.5px] -translate-x-1/2 bg-[#7a5a34]" />
+      <svg viewBox="0 0 20 32" className="h-full w-full" aria-hidden="true">
+        <defs>
+          <linearGradient id="note-clip-grad" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0" stopColor="#fafaf8" />
+            <stop offset="0.42" stopColor="#b8bdc5" />
+            <stop offset="0.68" stopColor="#eceef2" />
+            <stop offset="1" stopColor="#8d939d" />
+          </linearGradient>
+        </defs>
+        {/* 投影：针身在纸上落下的淡淡影子（右下偏移，垂直拉伸） */}
+        <g transform="translate(1.4 1.6)" opacity="0.28">
+          <path
+            d="M5 5.5 V24 a5 5 0 0 0 10 0 V4.5 a2.9 2.9 0 0 0 -5.8 0 V17.5 a1.15 1.15 0 0 0 2.3 0 V6.5"
+            fill="none"
+            stroke="#4a3a28"
+            strokeWidth="2.1"
+            strokeLinecap="round"
+          />
+        </g>
+        {/* 针身：左外丝→底弧→右丝→顶弧→中丝→内底小弧→回丝，两端都在顶部（真实回形针结构） */}
+        <path
+          d="M5 5.5 V24 a5 5 0 0 0 10 0 V4.5 a2.9 2.9 0 0 0 -5.8 0 V17.5 a1.15 1.15 0 0 0 2.3 0 V6.5"
+          fill="none"
+          stroke="url(#note-clip-grad)"
+          strokeWidth="2"
+          strokeLinecap="round"
+        />
+        {/* 顶部高光：沿顶弧的一小段亮线，让金属有反光层次 */}
+        <path
+          d="M13.4 5.1 a2.2 2.2 0 0 0 -3.4 -0.2"
+          fill="none"
+          stroke="rgba(255,255,255,0.85)"
+          strokeWidth="0.7"
+          strokeLinecap="round"
+        />
+        {/* 左丝内侧高光 */}
+        <path d="M5.9 8.5 V21" fill="none" stroke="rgba(255,255,255,0.5)" strokeWidth="0.55" strokeLinecap="round" />
+      </svg>
     </span>
   );
 }
 
-/** 留言板小头像（跟随恋人空间全局头像；没设置时用默认头像兜底） */
+/** 留言板小头像（跟随情侣空间全局头像；没设置时用默认头像兜底） */
 function BoardAvatar({ src, name, size }: { src: string | null; name: string; size: number }) {
   return (
     <span className="block shrink-0 overflow-hidden rounded-full bg-[#ececef]" style={{ width: size, height: size }} aria-hidden="true">
@@ -2987,8 +3022,8 @@ function BoardNoteCard({
       className={`relative mb-2.5 flex w-full select-none flex-col justify-start break-inside-avoid rounded-[10px] px-3.5 pb-2.5 pt-[17px] text-left shadow-[0_3px_10px_rgba(0,0,0,0.22)] transition-transform duration-150 active:scale-[0.96] ${flash ? '[animation:board-pin-in_.45s_ease-out]' : ''} ${selecting && selected ? 'ring-[3px] ring-black/70 brightness-[0.96]' : ''}`}
       style={{ ...face, transform: `rotate(${rot}deg)`, '--rot': `${rot}deg`, ...(skin?.span ? { columnSpan: 'all' as const } : {}) }}
     >
-      {/* v44：自带胶带装饰的卡面（便签纸）不再叠黄铜图钉 */}
-      {!skin?.noPin && <NotePin />}
+      {/* v44：自带胶带装饰的卡面（便签纸）不再叠金属别针 */}
+      {!skin?.noPin && <NoteClip />}
       {/* 多选模式：右上角圆勾徽章（选中=黑底白勾；未选=白透圆圈） */}
       {selecting && (
         <span
@@ -3020,14 +3055,14 @@ function BoardNoteCard({
               胶囊已开启
             </span>
           )}
-          {/* 卡面最前面：头像 + 名字（跟随恋人空间全局头像） */}
+          {/* 卡面最前面：头像 + 名字（跟随情侣空间全局头像） */}
           <span className="flex items-center gap-1.5">
             <BoardAvatar src={mine ? meAvatar : taAvatar} name={who} size={20} />
             <span className="min-w-0 truncate text-[11px] font-bold opacity-80">{who}</span>
           </span>
           {/* 正文 */}
           <p className={`mt-1.5 break-all text-[12.5px] font-semibold leading-[1.55] ${clamp}`}>{note.text}</p>
-          {/* 日期（左；置顶的带小图钉徽章） + 右下角留言数徽章（有几条留言；封存中的胶囊不显） */}
+          {/* 日期（左；置顶的带小别针徽章） + 右下角留言数徽章（有几条留言；封存中的胶囊不显） */}
           <p className="mt-2 flex items-center gap-1.5 text-[10px] font-bold">
             {note.pinned && (
               <span className="inline-flex items-center gap-[3px] rounded-full bg-black/12 px-1.5 py-[1px] text-[9px] font-bold tracking-tight">
@@ -3080,21 +3115,21 @@ function NoteDetail({
     <div className="absolute inset-0 z-40 flex items-center justify-center px-6" role="dialog" aria-label="便签详情">
       <button type="button" aria-label="关闭" onClick={onClose} className="absolute inset-0 bg-black/25 backdrop-blur-[2px]" />
       <div className="relative flex max-h-[80%] w-full max-w-[320px] flex-col overflow-hidden rounded-2xl border border-neutral-200 bg-white shadow-[0_16px_44px_rgba(0,0,0,0.18)]">
-        {/* 便签正文（图案卡纸/自选色大卡 + 图钉） */}
+        {/* 便签正文（图案卡纸/自选色大卡 + 金属别针） */}
         <div className="shrink-0 px-4 pb-3 pt-5">
           <div
             className="relative rounded-xl px-4 py-5 pt-6 shadow-[0_4px_14px_rgba(0,0,0,0.15)]"
             style={noteFaceStyle(note, cardCustoms)}
           >
-            {/* v44：自带胶带装饰的卡面（便签纸）不再叠黄铜图钉 */}
-            {!noteHasOwnDecor(note, cardCustoms) && <NotePin />}
+            {/* v44：自带胶带装饰的卡面（便签纸）不再叠金属别针 */}
+            {!noteHasOwnDecor(note, cardCustoms) && <NoteClip />}
             {note.unlockAt && (
               <p className="mb-1.5 inline-flex items-center gap-1 rounded-full bg-white/30 px-2 py-[2px] text-[9.5px] font-bold tracking-wide backdrop-blur-[1px]">
                 <LockOpen className="h-3 w-3" strokeWidth={2.6} aria-hidden="true" />
                 胶囊 · {fmtMDHM(note.unlockAt)} 已开启
               </p>
             )}
-            {/* 谁钉的：头像 + 名字（跟随恋人空间全局头像） */}
+            {/* 谁钉的：头像 + 名字（跟随情侣空间全局头像） */}
             <span className="flex items-center gap-1.5">
               <BoardAvatar src={note.from === 'me' ? meAvatar : taAvatar} name={note.from === 'me' ? meName || '我' : taName || 'TA'} size={22} />
               <span className="text-[12px] font-bold opacity-80">{note.from === 'me' ? meName || '我' : taName || 'TA'}</span>
@@ -3181,7 +3216,7 @@ function CapsulePending({ note, now, onClose }: { note: BoardNote; now: number; 
   );
 }
 
-/** 恋爱留言板页（简约留言墙 + 手写便签 + 时间胶囊彩蛋；替代许愿树） */
+/** 留言板页（简约留言墙 + 手写便签 + 时间胶囊彩蛋；替代许愿树） */
 function BoardPage({
   state,
   patch,
@@ -3781,8 +3816,8 @@ function BoardPage({
                       : { background: previewCol.bg, color: previewCol.text }
               }
             >
-              {/* v44：便签纸卡自带胶带 → 预览不叠图钉；内置卡 padTop 避让顶部装饰 */}
-              {!(draftCard >= 1 && draftCard <= BOARD_CARDS.length && BOARD_CARDS[draftCard - 1].noPin) && <NotePin />}
+              {/* v44：便签纸卡自带胶带 → 预览不叠金属别针；内置卡 padTop 避让顶部装饰 */}
+              {!(draftCard >= 1 && draftCard <= BOARD_CARDS.length && BOARD_CARDS[draftCard - 1].noPin) && <NoteClip />}
               {capsuleOn && (
                 <span className="mb-1.5 inline-flex items-center gap-1 text-[10.5px] font-bold tracking-wide opacity-80">
                   <Lock className="h-3.5 w-3.5" strokeWidth={2.4} aria-hidden="true" />
@@ -8033,7 +8068,7 @@ function HundredPage({ state, patch, close, showToast }: { state: CoupleState; p
   );
 }
 
-/** 恋爱协议红章（参考图3：恋人空间公证 LOVE SPACE 圆形印章） */
+/** 恋爱协议红章（参考图3：情侣空间公证 LOVE SPACE 圆形印章） */
 function PactStamp() {
   return (
     <svg viewBox="0 0 120 120" className="h-[98px] w-[98px] -rotate-[14deg] opacity-90" aria-hidden="true">
@@ -8043,9 +8078,9 @@ function PactStamp() {
       <circle cx="60" cy="60" r="54" fill="rgba(229,70,76,0.05)" stroke="#e5464c" strokeWidth="3.5" />
       <circle cx="60" cy="60" r="29" fill="none" stroke="#e5464c" strokeWidth="1.8" />
       <text fill="#e5464c" fontSize="12.5" fontWeight="700" letterSpacing="2.2">
-        <textPath href="#pact-stamp-circ" startOffset="1%">LOVE SPACE · 恋人空间公证</textPath>
+        <textPath href="#pact-stamp-circ" startOffset="1%">LOVE SPACE · 情侣空间公证</textPath>
       </text>
-      <text x="60" y="54" textAnchor="middle" fontSize="14" fontWeight="800" fill="#e5464c">恋人空间</text>
+      <text x="60" y="54" textAnchor="middle" fontSize="14" fontWeight="800" fill="#e5464c">情侣空间</text>
       <text x="60" y="72" textAnchor="middle" fontSize="12" fontWeight="800" fill="#e5464c" letterSpacing="6">公证</text>
       <path d="M60 77 c -3.2 -4.2 -9.5 -3 -9.5 2 c 0 4 5.2 6.8 9.5 9.8 c 4.3 -3 9.5 -5.8 9.5 -9.8 c 0 -5 -6.3 -6.2 -9.5 -2 Z" fill="#e5464c" />
     </svg>
@@ -8139,7 +8174,7 @@ function PactPage({ state, patch, showToast, close }: { state: CoupleState; patc
 
   /** 聊天里的协议卡片点击进来（第十五轮加固）：TA 分享的 → 优先用 aiPact，没有就直接拿卡片正文填草稿，永远直达签署界面；
    *  第十六轮：TA 分享前已先签名（aiPact.signTa / 卡片 taSigned）→ 签署界面直接带着 TA 的签名等我签；
-   *  第十七轮·动态状态：卡片已是「已签署」（卡片标记 or 恋人空间存档里有同题已签协议）→ 点卡片直达已签署页面，不再进签署界面 */
+   *  第十七轮·动态状态：卡片已是「已签署」（卡片标记 or 情侣空间存档里有同题已签协议）→ 点卡片直达已签署页面，不再进签署界面 */
   useEffect(() => {
     const p = consumePendingPactOpen();
     if (!p) return;
@@ -8361,7 +8396,7 @@ function PactPage({ state, patch, showToast, close }: { state: CoupleState; patc
         { status: 'signed', pactId: rec.id },
       );
       if (hit === 0) {
-        // 一张都没命中也广播一次：聊天页重载消息后，卡片气泡会按恋人空间存档自愈显示「已签署」
+        // 一张都没命中也广播一次：聊天页重载消息后，卡片气泡会按情侣空间存档自愈显示「已签署」
         try {
           window.dispatchEvent(new CustomEvent(COUPLE_CARD_EVENT, { detail: { cid, app: ch } }));
         } catch {
@@ -8901,7 +8936,7 @@ function PactPage({ state, patch, showToast, close }: { state: CoupleState; patc
               协议书已生成并生效，好好爱 ♡
             </div>
           ) : (
-            <p className="mb-2 mt-5 text-center text-[12.5px] leading-relaxed text-[#b6b6bd] dark:text-zinc-500">双方都签名后，协议书自动生成并盖上恋人空间公证章</p>
+            <p className="mb-2 mt-5 text-center text-[12.5px] leading-relaxed text-[#b6b6bd] dark:text-zinc-500">双方都签名后，协议书自动生成并盖上情侣空间公证章</p>
           )}
         </SubShell>
       )}
@@ -10514,7 +10549,7 @@ function ChroniclePage({ state, patch, showToast, close }: { state: CoupleState;
           </button>
           <span className="mx-4 text-[#e5d3d8] dark:text-rose-200/55">|</span>
           <button type="button" onClick={close} className="text-[#26262b] dark:text-zinc-100 underline underline-offset-4 active:opacity-60">
-            回到恋人空间
+            回到情侣空间
           </button>
         </div>
       </SubShell>
@@ -11610,7 +11645,7 @@ function StatusPage({ state, patch, showToast, close }: { state: CoupleState; pa
             <span aria-hidden="true" className="pointer-events-none absolute bottom-3 right-10 h-9 w-9 rounded-full bg-white/20" />
             <div className="relative flex items-center gap-1.5">
               <PixelHeart size={16} />
-              <span className="text-[12.5px] font-bold text-white/95">恋人空间</span>
+              <span className="text-[12.5px] font-bold text-white/95">情侣空间</span>
             </div>
             <div className="relative mt-2 select-none text-[30px] font-extrabold leading-[1.18] text-white drop-shadow-[0_3px_8px_rgba(200,60,90,0.35)]">
               恋爱
@@ -11917,7 +11952,7 @@ function StatusPage({ state, patch, showToast, close }: { state: CoupleState; pa
           </button>
         </div>
         <button type="button" onClick={close} className="mx-auto mt-4 block text-[13px] text-[#8e8e96] dark:text-zinc-400 underline underline-offset-4 active:opacity-60">
-          回到恋人空间
+          回到情侣空间
         </button>
         <div className="mt-3 pb-2 text-center text-[11px] text-[#c9aeb6]">已答 {answeredCount}/{STATUS_EXAM.length} 题 · 报告由 {useSettings.getState().apiConfig?.baseUrl ? '你配置的 API 模型' : '内置模型'}生成</div>
       </div>
@@ -12375,7 +12410,7 @@ function ProfilePage({ state, patch, showToast, close, onReset }: { state: Coupl
             {dialog === 'reset' && (
               <>
                 <div className="text-[15px] font-semibold text-[#2c2c30] dark:text-zinc-100">确定解除恋人关系吗？</div>
-                <p className="mt-2 text-[13px] leading-relaxed text-[#9a9aa2] dark:text-zinc-400">将清空恋人空间的全部数据（相册、日记、情书、成长值……），此操作不可恢复。</p>
+                <p className="mt-2 text-[13px] leading-relaxed text-[#9a9aa2] dark:text-zinc-400">将清空情侣空间的全部数据（相册、日记、情书、成长值……），此操作不可恢复。</p>
                 <div className="mt-4 flex gap-2.5">
                   <button type="button" onClick={() => setDialog(null)} className="h-10 flex-1 rounded-xl bg-[#f0f0f3] dark:bg-zinc-900/80 text-[13.5px] font-medium text-[#5a5a62] dark:text-zinc-300">
                     再想想
@@ -12724,7 +12759,7 @@ function ChapelPage({ state, patch, showToast, close }: { state: CoupleState; pa
 /** 联系客服：本地假客服 */
 function SupportPage({ close }: { close: () => void }) {
   const [msgs, setMsgs] = useState<{ id: string; me: boolean; text: string }[]>([
-    { id: uid(), me: false, text: '您好，这里是恋人空间客服小甜 ♡ 请问有什么可以帮您？' },
+    { id: uid(), me: false, text: '您好，这里是情侣空间客服小甜 ♡ 请问有什么可以帮您？' },
   ]);
   const [text, setText] = useState('');
   const send = () => {
@@ -12854,7 +12889,7 @@ function SettingsPage({ state, patch, showToast, close, onReset }: { state: Coup
       {/* 第三十二轮：「TA 最近在你们的小天地里做的事」区块已按用户要求从设置页删除（AI 行为日志仍在后台记录） */}
 
       <div className="mt-6 text-center text-[12.5px] leading-relaxed text-[#b6b6bd] dark:text-zinc-500">
-        恋人空间 v1.0
+        情侣空间 v1.0
         <br />
         愿有岁月可回首，且以深情共白头
       </div>
@@ -12880,7 +12915,7 @@ function SettingsPage({ state, patch, showToast, close, onReset }: { state: Coup
         <div className="absolute inset-0 z-40 flex items-center justify-center bg-black/35 px-10" onClick={() => setConfirmReset(false)}>
           <div className="w-full rounded-2xl bg-white/85 dark:bg-zinc-800/90 backdrop-blur-2xl backdrop-saturate-150 p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
             <div className="text-[17px] font-semibold text-[#2c2c30] dark:text-zinc-100">确定解除恋人关系吗？</div>
-            <p className="mt-2 text-[14px] leading-relaxed text-[#9a9aa2] dark:text-zinc-400">将清空恋人空间的全部数据（相册、日记、情书、成长值……），此操作不可恢复。</p>
+            <p className="mt-2 text-[14px] leading-relaxed text-[#9a9aa2] dark:text-zinc-400">将清空情侣空间的全部数据（相册、日记、情书、成长值……），此操作不可恢复。</p>
             <div className="mt-4 flex gap-3">
               <button type="button" onClick={() => setConfirmReset(false)} className="h-11 flex-1 rounded-xl bg-[#f0f0f3] dark:bg-zinc-900/80 text-[15px] font-medium text-[#5a5a62] dark:text-zinc-300">
                 再想想

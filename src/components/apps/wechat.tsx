@@ -501,7 +501,7 @@ interface WxMsg {
   time: number;
   /** 已读未读回执（显示设置）：发送/投递时 true，对方回话时转 false；undefined = 旧数据，视为已读 */
   unread?: boolean;
-  /** 消息类型：默认 text；红包/转账/亲属卡为卡片消息；image 图片；location 位置卡片；sticker 表情包；notice = 红包领取通知；forward = 转发卡片；groupcard = 群聊邀请卡片；relcard = 亲密关系卡片（恋人空间邀请卡/成功卡）；
+  /** 消息类型：默认 text；红包/转账/亲属卡为卡片消息；image 图片；location 位置卡片；sticker 表情包；notice = 红包领取通知；forward = 转发卡片；groupcard = 群聊邀请卡片；relcard = 亲密关系卡片（情侣空间邀请卡/成功卡）；
    *  sys = 拉黑等系统提示（居中灰字胶囊，不进 AI 上下文）；blockreq = 角色发起的「申请解除拉黑」卡片；voice = 语音消息（voice 字段存音频/波形/时长/转写）；call = 语音通话卡片（call 字段存状态/时长/方向）；textcard = 文字图片卡片；mtpay = 美团找人代付卡片（请求/完成）；mtshare = 美团订单分享动态卡片；tbpay = 淘宝代付卡片（请求/完成）；tbshare = 淘宝订单分享动态卡片 */
   kind?: 'text' | 'redpacket' | 'transfer' | 'notice' | 'family' | 'image' | 'location' | 'sticker' | 'forward' | 'groupcard' | 'sys' | 'blockreq' | 'voice' | 'call' | 'textcard' | 'song' | 'mtpay' | 'mtshare' | 'mtdraft' | 'tbpay' | 'tbshare' | 'tbdraft' | 'relcard' | 'pactcard' | 'examcard' | 'lettercard' | 'giftcard' | 'forumshare';
   rp?: WxRpData;
@@ -550,13 +550,13 @@ interface WxMsg {
   fwd?: { from: string; merged?: boolean; title?: string; records?: { name: string; role: 'me' | 'peer'; text: string; quote?: string; time: number; avatar?: string | null; kind?: 'text' | 'sticker' | 'image'; imgSrc?: string; stkMeaning?: string }[] };
   /** 群聊邀请卡片（kind='groupcard'；AI 主动建群/拉人时发出，用户可接受/拒绝） */
   gcard?: GroupCardData;
-  /** 亲密关系卡片（kind='relcard'；恋人空间邀请卡/成功卡，AI 邀我或我邀 AI 时由 couple-invite 落库，可接受/拒绝） */
+  /** 亲密关系卡片（kind='relcard'；情侣空间邀请卡/成功卡，AI 邀我或我邀 AI 时由 couple-invite 落库，可接受/拒绝） */
   relcard?: CoupleRelCardData;
-  /** 恋爱协议卡片（kind='pactcard'；第十二轮：协议分享/签署卡，由 couple-pact-share 落库，点击进恋人空间签署界面） */
+  /** 恋爱协议卡片（kind='pactcard'；第十二轮：协议分享/签署卡，由 couple-pact-share 落库，点击进情侣空间签署界面） */
   pactcard?: CouplePactCardData;
-  /** 恋爱考试卡片（kind='examcard'；第十五轮：我喊TA答题/TA出卷喊我答，由 couple-exam-share 落库，点击进恋人空间试卷页） */
+  /** 恋爱考试卡片（kind='examcard'；第十五轮：我喊TA答题/TA出卷喊我答，由 couple-exam-share 落库，点击进情侣空间试卷页） */
   examcard?: CoupleExamCardData;
-  /** 情书信封卡片（kind='lettercard'；第十八轮：我分享情书给TA/TA寄信给我，由 couple-letter-share 落库，点击进恋人空间信件页） */
+  /** 情书信封卡片（kind='lettercard'；第十八轮：我分享情书给TA/TA寄信给我，由 couple-letter-share 落库，点击进情侣空间信件页） */
   lettercard?: CoupleLetterCardData;
   /** 语音消息（kind='voice'）：音频 dataURL 持久化在聊天记录里，重启后仍可播放 */
   voice?: VoiceMsgData;
@@ -5508,7 +5508,7 @@ function ChatPage({
     [peer.id, onOpenGroup, onToast],
   );
 
-  /** 亲密关系卡片：接受/拒绝（恋人空间邀请卡；状态变更/成功卡/sys 行均由 couple-invite 落库，
+  /** 亲密关系卡片：接受/拒绝（情侣空间邀请卡；状态变更/成功卡/sys 行均由 couple-invite 落库，
    *  本地经 COUPLE_CARD_EVENT 合并刷新；content 为空、不进多选/长按菜单） */
   const decideCoupleCard = useCallback(
     (m: WxMsg, accept: boolean) => {
@@ -5738,7 +5738,7 @@ function ChatPage({
     return () => window.removeEventListener(FORUM_SHARE_CARD_EVENT, onForumCard);
   }, [peer.id]);
 
-  /** 恋人空间亲密关系卡片落库监听：邀请卡/成功卡/sys 行由 couple-invite 直写 kv 后广播
+  /** 情侣空间亲密关系卡片落库监听：邀请卡/成功卡/sys 行由 couple-invite 直写 kv 后广播
    *  COUPLE_CARD_EVENT，聊天页在场时实时合并落库消息（新卡片上屏 + 邀请卡状态刷新），不用重开聊天 */
   useEffect(() => {
     const onCoupleCard = (e: Event) => {
@@ -6958,7 +6958,7 @@ function ChatPage({
       // #35 时序兜底：历史数据/合并竞态可能把上一轮未投递完的回复排在用户新消息之后（旧气泡倒挂），
       // 按创建时间稳定排序还原对话时序（正常数据 time 单调，排序为空操作），保证上下文顺序正确
       .sort((a, b) => a.time - b.time);
-    // 恋人空间×情书（第五十八轮）：我在聊天里让 TA 写情书/写信 → TA 稍后真的提笔写一封寄到本会话
+    // 情侣空间×情书（第五十八轮）：我在聊天里让 TA 写情书/写信 → TA 稍后真的提笔写一封寄到本会话
     //（只对恋人绑定的联系人生效；TA 先在聊天里自然应声，几秒后信封卡片寄到；90 秒冷却防重复）
     {
       const lastMine = [...base].reverse().find((m) => m.role === 'me' && typeof m.content === 'string' && m.content.trim());
@@ -7212,7 +7212,7 @@ function ChatPage({
     // v33【AI 真人社交】：X论坛近况感知（TA 发的帖/我发的帖/评论互动）——AI 私聊时能自然提起论坛的事
     // v44【AI 关注者】：带上 TA 刚发的这句——「你去x论坛关注我」会被感知并稍后自主决策
     const forumBlock = buildForumChatBlock(peer.id, userMsg?.content);
-    // 恋人空间×AI（第九轮）：对方是恋人绑定的联系人时，注入你们在恋人空间里的一切（纪念日/想你/小树/问答/心情/100件小事/协议/编年史/印象/轨迹）
+    // 情侣空间×AI（第九轮）：对方是恋人绑定的联系人时，注入你们在情侣空间里的一切（纪念日/想你/小树/问答/心情/100件小事/协议/编年史/印象/轨迹）
     const coupleBlock = coupleChatBlock(peer.id, 'wx', meAddrName);
     // 美团×AI 联动（外卖/代付）：实时订单动态 + 本聊天的待处理代付请求/待付订单 +
     // 食物话题命中时的商家目录与点外卖动作教学（全同步 kv 读，状态实时）
@@ -9655,7 +9655,7 @@ function ChatPage({
                   />
                 </div>
               ) : m.kind === 'relcard' && m.relcard ? (
-                /* 亲密关系卡片（恋人空间邀请卡/成功卡）：对方邀请 pending 出接受/拒绝；卡片本体不可点 */
+                /* 亲密关系卡片（情侣空间邀请卡/成功卡）：对方邀请 pending 出接受/拒绝；卡片本体不可点 */
                 <div {...bubblePress}>
                   <CoupleRelBubble
                     data={m.relcard}
@@ -9666,17 +9666,17 @@ function ChatPage({
                   />
                 </div>
               ) : m.kind === 'pactcard' && m.pactcard ? (
-                /* 恋爱协议卡片（第十二轮）：点卡片本体进恋人空间签署界面（导航在气泡组件内） */
+                /* 恋爱协议卡片（第十二轮）：点卡片本体进情侣空间签署界面（导航在气泡组件内） */
                 <div {...bubblePress}>
                   <CouplePactBubble data={m.pactcard} mine={m.role === 'me'} testidPrefix="wx" />
                 </div>
               ) : m.kind === 'examcard' && m.examcard ? (
-                /* 恋爱考试卡片（第十五轮）：点卡片进恋人空间试卷页（导航在气泡组件内） */
+                /* 恋爱考试卡片（第十五轮）：点卡片进情侣空间试卷页（导航在气泡组件内） */
                 <div {...bubblePress}>
                   <CoupleExamBubble data={m.examcard} mine={m.role === 'me'} testidPrefix="wx" />
                 </div>
               ) : m.kind === 'lettercard' && m.lettercard ? (
-                /* 情书信封卡片（第十八轮）：点卡片直达恋人空间信件页（导航在气泡组件内） */
+                /* 情书信封卡片（第十八轮）：点卡片直达情侣空间信件页（导航在气泡组件内） */
                 <div {...bubblePress}>
                   <CoupleLetterBubble data={m.lettercard} mine={m.role === 'me'} testidPrefix="wx" />
                 </div>

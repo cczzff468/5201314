@@ -1,10 +1,10 @@
 'use client';
 
 /**
- * 亲密关系卡片气泡（恋人空间邀请卡 / 成功卡）——微信/QQ 聊天共用。
+ * 亲密关系卡片气泡（情侣空间邀请卡 / 成功卡）——微信/QQ 聊天共用。
  *
  * 仿 QQ「亲密关系」卡片（用户参考截图1）：
- * - 白底圆角卡：标题黑粗 + 灰色副文案 + 右侧恋人空间图标 + 底部「亲密关系」小字标签
+ * - 白底圆角卡：标题黑粗 + 灰色副文案 + 右侧情侣空间图标 + 底部「亲密关系」小字标签
  * - 邀请卡 pending 且对方发来 → 底部「拒绝 / 接受邀请」双按钮（仿群聊邀请卡交互）
  * - 我发的邀请卡 pending → 「等待对方接受」状态行；终态显示「已同意 / 已拒绝」
  * - 成功卡 → 标题「我们已经成功建立情侣关系」+「我已经同意了你的邀请，现在我们是情侣啦」
@@ -29,7 +29,7 @@ export default function CoupleRelBubble({ data, mine, onAccept, onDecline, testi
   const isInvite = data.stage === 'invite';
   const declined = data.status === 'declined';
 
-  /** 点击卡片本体进入恋人空间 APP（第七轮用户要求）：在其它 App 内直接切换，主屏则打开 */
+  /** 点击卡片本体进入情侣空间 APP（第七轮用户要求）：在其它 App 内直接切换，主屏则打开 */
   const openCoupleApp = () => {
     const ui = useUI.getState();
     if (ui.locked) return;
@@ -67,7 +67,7 @@ export default function CoupleRelBubble({ data, mine, onAccept, onDecline, testi
       data-testid={`${testidPrefix}-rel-card`}
       className={`w-[248px] select-none overflow-hidden rounded-[10px] bg-white shadow-sm dark:bg-[#1E1E1E] ${declined ? 'opacity-60' : ''}`}
     >
-      {/* 卡片本体：标题 + 副文案 + 图标（点击进入恋人空间 APP；操作按钮仍在下方，不冲突） */}
+      {/* 卡片本体：标题 + 副文案 + 图标（点击进入情侣空间 APP；操作按钮仍在下方，不冲突） */}
       <button
         type="button"
         data-testid={`${testidPrefix}-rel-card-body`}
@@ -81,9 +81,9 @@ export default function CoupleRelBubble({ data, mine, onAccept, onDecline, testi
           <span className="block text-[15.5px] font-semibold leading-[1.35] text-black dark:text-white">{title}</span>
           <span className="mt-1 block text-[13px] leading-[1.45] text-black/45 dark:text-white/45">{desc}</span>
         </span>
-        {/* 恋人空间图标（粉色双心官方原图，圆角方块；原生 img 直出不经优化端点） */}
+        {/* 情侣空间图标（粉色双心官方原图，圆角方块；原生 img 直出不经优化端点） */}
         <span aria-hidden="true" className="h-11 w-11 shrink-0 overflow-hidden rounded-[9px] shadow-[0_2px_6px_rgba(0,0,0,0.10)]">
-          <img src="/icons/couple.png" alt="恋人空间" className="h-full w-full object-cover" draggable={false} />
+          <img src="/icons/couple.png" alt="情侣空间" className="h-full w-full object-cover" draggable={false} />
         </span>
       </button>
 

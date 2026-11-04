@@ -5,13 +5,13 @@
  *
  * 用户规格：
  * - 协议可以分享给 AI（我拟的协议发到微信/QQ 会话，AI 决定签不签）；
- * - AI 也可以分享协议给我（AI 拟协议时自动发卡片，点卡片进恋人空间签署界面）；
+ * - AI 也可以分享协议给我（AI 拟协议时自动发卡片，点卡片进情侣空间签署界面）；
  * - 分享协议在聊天界面是一张卡片，点击卡片进入签署协议界面。
  *
  * 实现模式（复用 couple-invite 的成熟管线）：
  * - 卡片注入：直写 `${app}-chat-msgs:${cid}`（按目标 App 账号作用域 kvGetScoped/kvSetScoped）
  *   + 恢复被隐藏会话 + 广播 COUPLE_CARD_EVENT（聊天页在场时实时合并上屏）+ 灵动岛通知 + 未读角标；
- * - 点击卡片 → 写 pendingPactOpen + 切进恋人空间 App → PactPage 消费后跳对应界面；
+ * - 点击卡片 → 写 pendingPactOpen + 切进情侣空间 App → PactPage 消费后跳对应界面；
  * - 我分享给 AI → AI 延时决定签/不签（couple-ai.aiDecidePact），结果写回协议记录 + 记忆 + 通知。
  */
 
@@ -43,7 +43,7 @@ export interface CouplePactCardData {
   toName: string;
   app: CoupleChannel; // 卡片所在渠道
   contactId: string; // 卡片所在会话的联系人 id
-  pactId?: string; // 关联恋人空间里的协议记录 id（pacts 里）或 'ai'（TA 拟的草稿）
+  pactId?: string; // 关联情侣空间里的协议记录 id（pacts 里）或 'ai'（TA 拟的草稿）
   reason?: string; // declined 时的理由（TA 说的）
   declinedBy?: 'me' | 'ta'; // 第二十三轮：谁拒绝的（我拒 TA 的协议 / TA 拒我的协议，卡片文案不同）
   taSigned?: boolean; // 第十六轮：TA 分享前已先签上自己的名字（等对方签）
@@ -53,7 +53,7 @@ export interface CouplePactCardData {
 
 /** 点击卡片后的待打开协议（PactPage 消费）；第十五轮起携带卡片正文——TA 分享的 pending 卡无论 aiPact 是否存在都能直达签署界面；
  *  第十六轮起携带 taSigned（TA 已先签名）与卡片消息定位（签署完成后回写卡片「已签署」）；
- *  第十七轮起携带 signed（卡片/恋人空间存档已是已签署 → 点卡片直达已签署页面） */
+ *  第十七轮起携带 signed（卡片/情侣空间存档已是已签署 → 点卡片直达已签署页面） */
 interface PendingPactOpen {
   pactId?: string; // pacts 记录 id
   from: 'me' | 'ta'; // 卡片来源
@@ -333,7 +333,7 @@ export function peekPendingPactOpen(): PendingPactOpen | null {
 export const COUPLE_PACT_NAV_EVENT = 'couple-pact-nav';
 
 /**
- * 聊天里的协议卡片被点击：记下待打开目标（含卡片正文/TA 是否已先签名/卡片消息定位）+ 切进恋人空间 + 广播导航事件。
+ * 聊天里的协议卡片被点击：记下待打开目标（含卡片正文/TA 是否已先签名/卡片消息定位）+ 切进情侣空间 + 广播导航事件。
  * （气泡组件调用；CoupleSpaceApp 收到事件后 openSub('pact')，PactPage 挂载后 consumePendingPactOpen 直达签署界面）
  */
 export function navToPact(p: { pactId?: string; from: 'me' | 'ta'; title?: string; preamble?: string; clauses?: string[]; taSigned?: boolean; signed?: boolean; msgId?: string; channel?: CoupleChannel; contactId?: string }): void {

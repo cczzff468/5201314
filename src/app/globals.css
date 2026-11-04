@@ -533,7 +533,7 @@
     transform: translateY(-6px);
   }
 }
-/* 恋爱留言板：新便签钉上墙的落钉动画（--rot = 便签自身角度，落钉后回到同一角度不跳变） */
+/* 留言板：新便签钉上墙的落钉动画（--rot = 便签自身角度，落钉后回到同一角度不跳变） */
 @keyframes board-pin-in {
   0% {
     transform: rotate(var(--rot, 0deg)) translateY(-14px) scale(0.7);
@@ -548,7 +548,7 @@
     opacity: 1;
   }
 }
-/* 恋爱留言板：空墙时「钉一张便签」主按钮呼吸柔光（陶红 + 暖色） */
+/* 留言板：空墙时「钉一张便签」主按钮呼吸柔光（陶红 + 暖色） */
 @keyframes wish-invite-pulse {
   0%,
   100% {

@@ -28,6 +28,10 @@ export interface ContactRecord {
   /** 表达风格（说话的表达方式/风格基调，如「傲娇毒舌」「温柔轻声细语」；与 persona 里的性格描述互补，
    *  注入人设时独立成段【表达风格】；可选字段：历史数据无此键，读取处用 ?. 兼容） */
   expressStyle?: string | null;
+  /** 自定义 AI 规则（v49 功能二：用户给这个角色定的私人规矩，一行一条，如「永远叫我宝贝」「别提工作」；
+   *  注入人设时独立成段【用户定制的规则】且优先级高于人设/性格/表达风格——用户写什么就遵守什么；
+   *  可选字段：历史数据无此键，读取处用 ?. 兼容） */
+  customRules?: string | null;
   occupation: string | null;
   company: string | null;
   region: string | null;
@@ -102,6 +106,8 @@ export interface ContactPayload {
   background?: string | null;
   /** 表达风格（说话方式/风格基调；注入 AI 决策人设【表达风格】段） */
   expressStyle?: string | null;
+  /** 自定义 AI 规则（一行一条；注入人设【用户定制的规则】段，优先级高于人设） */
+  customRules?: string | null;
   occupation?: string | null;
   company?: string | null;
   region?: string | null;

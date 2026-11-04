@@ -278,6 +278,7 @@ interface ParsedContact {
   persona: string;
   background: string;
   expressStyle: string;
+  customRules: string;
 }
 
 /** 单行字段标签 → 字段名（长标签在前，避免「微信号」截胡「微信密码」） */
@@ -325,6 +326,7 @@ function emptyParsed(): ParsedContact {
     persona: '',
     background: '',
     expressStyle: '',
+    customRules: '',
   };
 }
 
@@ -334,7 +336,8 @@ function parseContactBlock(blockLines: string[]): ParsedContact | null {
   const personaLines: string[] = [];
   const backgroundLines: string[] = [];
   const expressStyleLines: string[] = [];
-  let block: 'persona' | 'background' | 'expressStyle' | null = null;
+  const customRuleLines: string[] = [];
+  let block: 'persona' | 'background' | 'expressStyle' | 'customRules' | null = null;
 
   for (const raw of blockLines) {
     const trimmed = raw.trim();
@@ -343,9 +346,10 @@ function parseContactBlock(blockLines: string[]): ParsedContact | null {
       if (block === 'persona') personaLines.push('');
       else if (block === 'background') backgroundLines.push('');
       else if (block === 'expressStyle') expressStyleLines.push('');
+      else if (block === 'customRules') customRuleLines.push('');
       continue;
     }
-    // 多行块标签：整行恰为「人设：」/「背景：」/「表达风格：」（半/全角冒号均可）
+    // 多行块标签：整行恰为「人设：」/「背景：」/「表达风格：」/「自定义规则：」（半/全角冒号均可）
     if (/^人设[:：]$/.test(trimmed)) {
       block = 'persona';
       continue;
@@ -356,6 +360,10 @@ function parseContactBlock(blockLines: string[]): ParsedContact | null {
     }
     if (/^表达风格[:：]$/.test(trimmed)) {
       block = 'expressStyle';
+      continue;
+    }
+    if (/^自定义规则[:：]$/.test(trimmed)) {
+      block = 'customRules';
       continue;
     }
     // 单行字段
@@ -379,11 +387,13 @@ function parseContactBlock(blockLines: string[]): ParsedContact | null {
     if (block === 'persona') personaLines.push(raw.replace(/\s+$/, ''));
     else if (block === 'background') backgroundLines.push(raw.replace(/\s+$/, ''));
     else if (block === 'expressStyle') expressStyleLines.push(raw.replace(/\s+$/, ''));
+    else if (block === 'customRules') customRuleLines.push(raw.replace(/\s+$/, ''));
   }
 
   c.persona = personaLines.join('\n').trim();
   c.background = backgroundLines.join('\n').trim();
   c.expressStyle = expressStyleLines.join('\n').trim();
+  c.customRules = customRuleLines.join('\n').trim();
   return c.name.trim() ? c : null;
 }
 
@@ -791,6 +801,7 @@ function ListView({
           persona: p.persona,
           background: p.background,
           expressStyle: p.expressStyle,
+          customRules: p.customRules,
           avatar: null,
         }).catch(() => null);
         if (!created) {
@@ -1030,6 +1041,8 @@ interface ContactFormState {
   background: string;
   /** 表达风格（说话方式/风格基调；AI 全部决策注入【表达风格】段） */
   expressStyle: string;
+  /** 自定义 AI 规则（v49：一行一条；注入【用户定制的规则】段，优先级高于人设） */
+  customRules: string;
   phone: string;
   wechatId: string;
   wechatPassword: string;
@@ -1054,6 +1067,7 @@ const EMPTY_FORM: ContactFormState = {
   persona: '',
   background: '',
   expressStyle: '',
+  customRules: '',
   phone: '',
   wechatId: '',
   wechatPassword: '',
@@ -1079,6 +1093,7 @@ function formFromRecord(c: ContactRecord): ContactFormState {
     persona: pick(c.persona),
     background: pick(c.background),
     expressStyle: pick(c.expressStyle ?? null),
+    customRules: pick(c.customRules ?? null),
     phone: pick(c.phone),
     wechatId: pick(c.wechatId),
     wechatPassword: pick(c.wechatPassword),
@@ -1550,6 +1565,21 @@ function ContactFormView({
               className={`${boxAreaCls} min-h-[76px]`}
             />
           </BoxField>
+          {/* v49 功能二【自定义 AI 规则】：用户给这个角色定的私人规矩，一行一条；
+              注入人设【用户定制的规则】段且优先级高于人设——用户写什么 AI 就遵守什么 */}
+          <BoxField label="自定义 AI 规则">
+            <textarea
+              value={form.customRules}
+              onChange={(e) => set('customRules')(e.target.value)}
+              placeholder={'一行一条，AI 会严格遵守（优先级高于人设），如：\n永远叫我宝贝\n别提工作\n不许发语音'}
+              aria-label="自定义 AI 规则"
+              rows={4}
+              className={`${boxAreaCls} min-h-[96px]`}
+            />
+            <p className="mt-1.5 px-1 text-[11.5px] leading-[17px] text-muted-foreground/75">
+              你写什么 TA 就遵守什么；与性格/人设冲突时按这里的规则来。留空 = 不启用。
+            </p>
+          </BoxField>
         </div>
 
         {/* 账号信息：ID 可自动生成，密码自己填写并牢记 */}
@@ -1657,9 +1687,11 @@ function DetailView({
     const persona = pick(contact.persona);
     const background = pick(contact.background);
     const expressStyle = pick(contact.expressStyle);
+    const customRules = pick(contact.customRules);
     if (persona) lines.push('人设：', persona);
     if (background) lines.push('背景：', background);
     if (expressStyle) lines.push('表达风格：', expressStyle);
+    if (customRules) lines.push('自定义规则：', customRules);
     const blob = new Blob([lines.join('\n') + '\n'], { type: 'text/plain;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -1803,7 +1835,7 @@ function DetailView({
             )}
         </CardGroup>
 
-        {(contact.persona || contact.background || contact.expressStyle) && (
+        {(contact.persona || contact.background || contact.expressStyle || contact.customRules) && (
           <>
             <div className="pb-3 pt-3" />
             <CardGroup
@@ -1813,6 +1845,7 @@ function DetailView({
               {contact.persona && <DetailRow label="人设" value={contact.persona} block />}
               {contact.background && <DetailRow label="背景" value={contact.background} block />}
               {contact.expressStyle && <DetailRow label="表达风格" value={contact.expressStyle} block />}
+              {contact.customRules && <DetailRow label="自定义规则" value={contact.customRules} block />}
             </CardGroup>
           </>
         )}

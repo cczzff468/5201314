@@ -476,6 +476,7 @@ async function recordMissedPhoneCall(
         persona: contact.persona || null,
         background: contact.background || null,
         expressStyle: contact.expressStyle || null,
+        customRules: contact.customRules ?? null,
         nickname: contact.nickname || null,
         // 真实姓名用 realName 字段（name 在展示层可能已被昵称/备注替换，注入人设必须是真名）
         realName: contact.realName ?? null,
@@ -548,6 +549,7 @@ function contactPayloadOf(
     persona: c.persona || null,
     background: c.background || null,
     expressStyle: c.expressStyle || null,
+    customRules: c.customRules ?? null,
     nickname: c.nickname || null,
     realName: c.realName ?? null,
     // NPC 字段（ownerLabel/npcCircle/ownerCard/backgroundNotes）：NPC 角色的归属者/配角圈上下文

@@ -68,7 +68,7 @@ const TAGLINES: Record<AppId, string> = {
   worldbook: '关键词触发的 AI 设定库',
   meituan: '外卖团购，吃喝玩乐',
   taobao: '淘好货，要淘宝',
-  couple: '恋人空间，两个人的小天地',
+  couple: '情侣空间，两个人的小天地',
   cottage: '拾光小屋，把日常装进小家',
   forum: 'X论坛，大家都在聊什么',
 };

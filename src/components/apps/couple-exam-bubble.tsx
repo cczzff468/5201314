@@ -5,7 +5,7 @@
  *
  * 第二十七轮：邀请卡片和淘宝/美团代付卡片样式一模一样（只换内容）——
  * 结构对齐 TbPayBubble/MtPayBubble：白卡 p-2.5 rounded-[14px] + 指向头像侧的小箭头
- * + 头部（logo 22px + 恋人空间 + ShieldCheck 真爱保障）+ 主标题 + 内容面板 + 胶囊按钮。
+ * + 头部（logo 22px + 情侣空间 + ShieldCheck 真爱保障）+ 主标题 + 内容面板 + 胶囊按钮。
  *
  * 第三十轮（用户参考图，只改内容）：主标题改为「恋爱水平考试已开始，请考生作答」；
  * 内容面板由「粉横幅+白面板」改为参考图里的**试卷预览**：米黄卷纸底 + 卷头（爱心徽章 +
@@ -30,7 +30,7 @@ export interface CoupleExamBubbleProps {
 }
 
 export default function CoupleExamBubble({ data, mine, testidPrefix = 'wx' }: CoupleExamBubbleProps) {
-  // 动态状态（自愈）：以恋人空间当前状态为准——TA 出的卷我答完 = done；我邀请的卷 TA 交卷 = done
+  // 动态状态（自愈）：以情侣空间当前状态为准——TA 出的卷我答完 = done；我邀请的卷 TA 交卷 = done
   const done = (() => {
     if (data.status === 'done') return true;
     try {
@@ -46,7 +46,7 @@ export default function CoupleExamBubble({ data, mine, testidPrefix = 'wx' }: Co
     }
   })();
 
-  /** 点击卡片 → 进恋人空间考试页（答完直达结果/答卷页，没答直达答题页；ExamPage 按当前状态自动分流） */
+  /** 点击卡片 → 进情侣空间考试页（答完直达结果/答卷页，没答直达答题页；ExamPage 按当前状态自动分流） */
   const openExam = () => {
     const ui = useUI.getState();
     if (ui.locked) return;
@@ -77,10 +77,10 @@ export default function CoupleExamBubble({ data, mine, testidPrefix = 'wx' }: Co
       {/* 箭头指向头像侧：我发出（右）/ TA 发来（左），与代付卡一致 */}
       <span aria-hidden="true" className={`absolute top-[13px] h-[11px] w-[11px] rotate-45 rounded-[2px] bg-white dark:bg-zinc-800/95 ${mine ? '-right-[4px]' : '-left-[4px]'}`} />
 
-      {/* 头部：恋人空间 logo + 真爱保障（外壳保持与代付卡家族一致） */}
+      {/* 头部：情侣空间 logo + 真爱保障（外壳保持与代付卡家族一致） */}
       <span className="relative flex items-center gap-1.5">
         <img src="/icons/couple.png" alt="" aria-hidden="true" className="h-[22px] w-[22px] rounded-full object-cover" draggable={false} />
-        <span className="text-[13px] font-semibold text-black/85 dark:text-zinc-200">恋人空间</span>
+        <span className="text-[13px] font-semibold text-black/85 dark:text-zinc-200">情侣空间</span>
         <span className="ml-auto flex items-center gap-[3px] text-[11px] font-medium text-[#f2536a]">
           <ShieldCheck className="h-[13px] w-[13px]" strokeWidth={2.2} />
           真爱保障

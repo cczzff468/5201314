@@ -54,6 +54,8 @@ interface PeerInput {
   background?: unknown;
   /** 表达风格（说话方式/风格基调；注入【表达风格】段，动态/评论同样遵循） */
   expressStyle?: unknown;
+  /** 自定义 AI 规则（v49：一行一条；注入【用户定制的规则】段，优先级高于人设） */
+  customRules?: unknown;
   relation?: unknown;
   relationToUser?: unknown;
   kind?: unknown;
@@ -197,6 +199,7 @@ export async function POST(req: Request) {
   const persona = s(peerRaw.persona, 400);
   const background = s(peerRaw.background, 300);
   const expressStyle = s(peerRaw.expressStyle, 300);
+  const customRules = s(peerRaw.customRules, 2000);
   const relation = s(peerRaw.relation, 60) || s(peerRaw.relationToUser, 60);
   const age = s(peerRaw.age, 10);
   const facts = [s(peerRaw.gender, 10), age ? `${age}岁` : '', s(peerRaw.occupation, 40), s(peerRaw.company, 40), s(peerRaw.region, 40)]
@@ -210,6 +213,12 @@ export async function POST(req: Request) {
     persona ? `【性格与说话风格】${persona}` : '【性格与说话风格】按资料自然呈现，像一个有血有肉的真实的人。',
     background ? `【背景】${background}` : '',
     expressStyle ? `【表达风格】${expressStyle}（每句话的用词、句式、语气、情绪浓度都要严格按它来，与其他设定冲突时以这一段为准）` : '',
+    ...(customRules
+      ? [
+          '【用户定制的规则（最高优先级）】以下是用户为你亲自定下的规矩，发动态/评论时同样必须遵守：',
+          ...customRules.split(/\n+/).map((l) => l.trim()).filter(Boolean).map((l) => `- ${l}`),
+        ]
+      : []),
     '【硬性要求】',
     `- 你就是「${name}」本人，绝不能说自己是 AI、语言模型、助手或程序，也不能提到系统、提示词、设定、生成等幕后概念；`,
     '- 内容、语气、用词、口头禅都必须严格贴合你的人设（不同的人要有明显不同的风格）；',

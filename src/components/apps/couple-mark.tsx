@@ -3,10 +3,10 @@
 import { useCoupleBadgeOn } from '@/lib/ios/couple-invite';
 
 /**
- * 恋人空间标识（第九/十轮）：联系人名字后面的「徽章 + 钥匙」图标。
+ * 情侣空间标识（第九/十轮）：联系人名字后面的「徽章 + 钥匙」图标。
  * - 素材为用户提供的原图抠底（public/qq-couple-badge.png / qq-couple-key.png，96px 无白边），
  *   徽章在前、钥匙在后依次挨着（用户指定顺序）；
- * - 显隐 = 与该联系人的恋人空间关系处于「已建立」（useCoupleBadgeOn 订阅 COUPLE_STATE_EVENT：
+ * - 显隐 = 与该联系人的情侣空间关系处于「已建立」（useCoupleBadgeOn 订阅 COUPLE_STATE_EVENT：
  *   开通即时出现、解除即时消失，跨页面同步）；
  * - QQ 聊天页标题栏 / QQ 消息列表会话行共用本组件（第十轮：消息列表也要显示）。
  */
@@ -30,7 +30,7 @@ export function CoupleMark({
       className={`inline-flex shrink-0 items-center align-[-3px] ${className}`}
       {...(testId ? { 'data-testid': testId } : {})}
       role="img"
-      aria-label="恋人空间标识"
+      aria-label="情侣空间标识"
     >
       {/* 徽章在前（用户图2），钥匙在后（用户图3），相邻 1px 间隙 */}
       <img

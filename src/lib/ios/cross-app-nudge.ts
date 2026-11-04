@@ -4,7 +4,7 @@
  * 跨 App 事件联动（第十六轮）—— 别的 App 里发生的事，AI 主动到微信/QQ 聊天里聊起：
  *
  * - 美团外卖送达 / 淘宝快递签收 → 恋人 AI 按情境主动发一条消息（「外卖到啦，趁热吃」这类）；
- * - 接收者 = 恋人空间绑定的 partner（partnerContactId + partnerApp）——情侣手机的核心场景；
+ * - 接收者 = 情侣空间绑定的 partner（partnerContactId + partnerApp）——情侣手机的核心场景；
  *   未绑定恋人关系时不发（不打扰普通好友）；
  * - 投递走 fireProactiveNudge（幂等键=事件类型+订单号，24h 不重发；每日上限 3 条防风暴）；
  * - 依赖方向：本模块被 MeituanOrderWatcher / taobao 确认收货链路调用；

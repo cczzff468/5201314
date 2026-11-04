@@ -3680,7 +3680,7 @@ function TbContactPickSheet({
         className="max-h-[82%] overflow-y-auto rounded-t-3xl bg-white/80 backdrop-blur-2xl backdrop-saturate-150 px-5 pb-[max(16px,env(safe-area-inset-bottom))] pt-4 shadow-2xl [animation:quick-in-up_.24s_cubic-bezier(0.32,0.72,0,1)_both]"
         onClick={(e) => e.stopPropagation()}
       >
-        {/* 拖拽条 + 左对齐标题/副标题（与恋人空间邀请弹层同款结构） */}
+        {/* 拖拽条 + 左对齐标题/副标题（与情侣空间邀请弹层同款结构） */}
         <div className="mx-auto h-1 w-10 rounded-full bg-[#e0e0e5]" />
         <div className="mt-3 text-[17px] font-bold text-[#26262b]">{step === 'contact' && plat ? `选择${platName}好友` : title}</div>
         <p className="mt-1 text-[12.5px] leading-relaxed text-[#9a9aa2]">{step === 'plat' ? platHint : contactHint(platName)}</p>

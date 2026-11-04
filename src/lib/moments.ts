@@ -1823,6 +1823,7 @@ function personaOf(peer: ContactRecord): Record<string, string | null> {
     persona: peer.persona ?? null,
     background: peer.background ?? null,
     expressStyle: peer.expressStyle ?? null,
+    customRules: peer.customRules ?? null,
     relation: peer.relation ?? null,
     relationToUser: peer.relationToUser ?? null,
     kind: peer.kind ?? null,

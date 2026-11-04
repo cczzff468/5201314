@@ -1,7 +1,7 @@
 'use client';
 
 /**
- * 恋人空间「爱情塔罗」· 浅色毛玻璃风 + 真实牌面图（第四十九轮）。
+ * 情侣空间「爱情塔罗」· 浅色毛玻璃风 + 真实牌面图（第四十九轮）。
  *
  * 流程：选主题（预设 + 自定义问题）→ 洗牌（牌堆散乱铺开；点击牌堆=重新打乱 / 长按持续洗牌；
  * 「切牌」按钮=先整叠整齐再上下左右四叠分开合拢，可无限切牌；「下一步」进入）→ 选牌阵（13 种经典牌阵）→
@@ -1692,7 +1692,7 @@ export default function CoupleTarotPage({ state, patch, showToast, close }: {
           coupleTarotRemember(
             meta.partnerContactId ? cid : '',
             channel,
-            `（塔罗事件）${meName}在恋人空间用塔罗牌以「${spread?.name ?? ''}」牌阵占卜「${theme?.label ?? ''}」${theme?.custom && customQ.trim() ? `（问题：${cutText(customQ.trim(), 24)}）` : ''}，抽到 ${cardStr}。${cutText(final.overall, 90)}`,
+            `（塔罗事件）${meName}在情侣空间用塔罗牌以「${spread?.name ?? ''}」牌阵占卜「${theme?.label ?? ''}」${theme?.custom && customQ.trim() ? `（问题：${cutText(customQ.trim(), 24)}）` : ''}，抽到 ${cardStr}。${cutText(final.overall, 90)}`,
           );
           showToast('占卜完成，已写入你们的记忆');
         })();

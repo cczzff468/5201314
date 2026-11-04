@@ -49,7 +49,7 @@ const ProactiveCallWatcher = dynamic(() => import('./ProactiveCallWatcher'), { s
 const ProactiveMsgWatcher = dynamic(() => import('./ProactiveMsgWatcher'), { ssr: false });
 const MeituanOrderWatcher = dynamic(() => import('./MeituanOrderWatcher'), { ssr: false });
 
-// 恋人空间 AI 常驻调度（第十四轮：自主决策链开机即起，刷新自动续链，不用先打开恋人空间）
+// 情侣空间 AI 常驻调度（第十四轮：自主决策链开机即起，刷新自动续链，不用先打开情侣空间）
 const CoupleResidentWatcher = dynamic(() => import('./CoupleResidentWatcher'), { ssr: false });
 
 // Task 68 音乐 App × AI 深度互动：AI 邀请一起听全局卡（任何 App/主屏幕都能弹出）+ 全局调度器
@@ -506,7 +506,7 @@ export default function PhoneShell() {
         {/* AI 主动发消息全局调度：定时/事件/自主/自然语言提醒四类触发，到点 AI 主动给用户发消息（App 不打开也生效） */}
         <ProactiveMsgWatcher />
 
-        {/* 恋人空间 AI 常驻调度：自主决策链开机即起、刷新自动续链（不用先打开恋人空间，App 不打开也生效） */}
+        {/* 情侣空间 AI 常驻调度：自主决策链开机即起、刷新自动续链（不用先打开情侣空间，App 不打开也生效） */}
         <CoupleResidentWatcher />
 
         {/* 美团订单全局调度：订单状态机按时间戳推进（商家接单/骑手取餐/已送达），变化弹灵动岛通知（App 不打开也生效） */}

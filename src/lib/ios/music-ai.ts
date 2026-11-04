@@ -1467,7 +1467,7 @@ export function useTogetherLive(): TogetherSession | null {
       .then((c) => {
         if (!on) return;
         // 渠道头像（第五十五轮，用户要求：QQ 邀请的关系→TA 用 QQ 头像，微信邀请的→微信头像）：
-        // 一起听对象就是绑定恋人时，头像取关系渠道的分 App 头像槽位（与恋人空间同源），
+        // 一起听对象就是绑定恋人时，头像取关系渠道的分 App 头像槽位（与情侣空间同源），
         // 未绑定关系/渠道不匹配时保持联系人全局头像
         const meta = readInviteMeta();
         const chAv =
