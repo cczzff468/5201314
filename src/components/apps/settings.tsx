@@ -6411,7 +6411,11 @@ function PromptEntriesPage({ onBack }: { onBack: () => void }) {
 
   return (
     <DetailShell gray title="默认预设（内置）" onBack={onBack}>
-      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 pb-10 pt-3">
+      {/* v64：不再自造滚动容器（min-h-0 flex-1 overflow-y-auto overscroll-contain）——
+          DetailShell 外壳的滚动区才是本页唯一 scroller；此前这层在非 flex 父级下高度=内容高、
+          自身永不滚，touch 手势命中的最近 scroller 是它且 overscroll-contain 禁止链式传播，
+          整页触摸滚动被吞（手机上划不动；桌面滚轮走 wheel 冒泡所以看不出来） */}
+      <div className="pb-6">
         {/* 标题区：Prompt Entries (N) */}
         <div className="px-1 pb-3">
           <h1 className="text-[22px] font-bold tracking-tight" data-testid="prompt-entries-title">
