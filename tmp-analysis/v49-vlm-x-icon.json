@@ -1,0 +1,28 @@
+{
+  "choices": [
+    {
+      "finish_reason": "stop",
+      "index": 0,
+      "message": {
+        "content": "我看到这张图片上主要是一大片纯白色（或非常浅的灰白色）区域，图片中并没有显示出清晰的 App 图标、符号或文字标签。\n\n可能的原因是：\n- 图片加载不完整或被裁剪了\n- 图片本身几乎是空白的\n- 图标内容太小或对比度太低，我无法识别\n\n如果您能提供一张更清晰、包含完整图标的图片，我很乐意帮您描述它的背景颜色、形状、中间的符号以及下方的文字标签。",
+        "role": "assistant"
+      }
+    }
+  ],
+  "created": 1793757090,
+  "id": "2026110409512380035f44a6c24c52",
+  "model": "glm-5.3-flash",
+  "object": "chat.completion",
+  "request_id": "2026110409512380035f44a6c24c52",
+  "usage": {
+    "completion_tokens": 105,
+    "completion_tokens_details": {
+      "reasoning_tokens": 0
+    },
+    "prompt_tokens": 86,
+    "prompt_tokens_details": {
+      "cached_tokens": 0
+    },
+    "total_tokens": 191
+  }
+}

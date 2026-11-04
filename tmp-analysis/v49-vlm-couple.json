@@ -1,0 +1,28 @@
+{
+  "choices": [
+    {
+      "finish_reason": "stop",
+      "index": 0,
+      "message": {
+        "content": "根据截图内容：\n\n1) **页面顶部标题**：「情侣空间」\n\n2) **恋人名字和天数**：\n   - 左边头像下的名字显示为「...」（未设置/隐藏）\n   - 右边名字是「**凡凡酱**」\n   - 中间显示「**已相恋 1 天**」\n\n3) **底部功能卡**（四个卡片）：\n   - 留言板\n   - 情侣轨迹\n   - 甜蜜小问答\n   - 情书\n\n另外最下方的导航栏标签为：首页、发现、相册、我们。",
+        "role": "assistant"
+      }
+    }
+  ],
+  "created": 1793757175,
+  "id": "20261104095249a9b9fe8ff9764a96",
+  "model": "glm-5.3-flash",
+  "object": "chat.completion",
+  "request_id": "20261104095249a9b9fe8ff9764a96",
+  "usage": {
+    "completion_tokens": 133,
+    "completion_tokens_details": {
+      "reasoning_tokens": 0
+    },
+    "prompt_tokens": 1769,
+    "prompt_tokens_details": {
+      "cached_tokens": 0
+    },
+    "total_tokens": 1902
+  }
+}

@@ -1,0 +1,29 @@
+{
+  "choices": [
+    {
+      "finish_reason": "stop",
+      "index": 0,
+      "message": {
+        "content": "这张放大图中其实**看不到任何 App 图标或文字标签**。\n\n画面内容只是：\n- **左上方**：一块近似白色（略带极浅的灰蓝色调）的矩形色块\n- **其余部分**：纯黑色背景\n\n图中没有出现图标形状（如圆角方形、圆形）、中间的符号，也没有任何文字标签。看起来像是截图时图标区域没有被正确包含进去，或者放大倍率过高只截取到了图标旁边的空白部分。\n\n建议您重新截取包含完整图标的区域再放大查看。",
+        "reasoning_content": "The image shows only a white rectangle top-left, rest black—no icon visible.",
+        "role": "assistant"
+      }
+    }
+  ],
+  "created": 1793757117,
+  "id": "202611040951519536d93fdbfb4b91",
+  "model": "glm-5.3-flash",
+  "object": "chat.completion",
+  "request_id": "202611040951519536d93fdbfb4b91",
+  "usage": {
+    "completion_tokens": 133,
+    "completion_tokens_details": {
+      "reasoning_tokens": 17
+    },
+    "prompt_tokens": 263,
+    "prompt_tokens_details": {
+      "cached_tokens": 0
+    },
+    "total_tokens": 396
+  }
+}
