@@ -199,6 +199,15 @@ export default function PhoneShell() {
     return () => window.clearTimeout(t);
   }, []);
 
+  // v70 开机提速：全局调度器/监听器延迟挂载——它们各自 dynamic import 的重模块
+  // （forum / memory / couple-ai / moments 等，合计数百 KB）不再挤进首屏关键路径，
+  // 首帧渲染与主屏滑动更顺；各调度器内部本就有 10s 级首跳延迟，+8s 挂载不影响功能
+  const [watchersReady, setWatchersReady] = useState(false);
+  useEffect(() => {
+    const t = window.setTimeout(() => setWatchersReady(true), 8000);
+    return () => window.clearTimeout(t);
+  }, []);
+
   // 底部边缘上滑手势（全局）：从屏幕最底下往上滑 → 打开多任务切换器，主屏幕与所有 App 内均生效（含时钟）。
   // 用 window 捕获阶段原生 Pointer 监听而非组件 onTouch 事件：
   // ① 鼠标/触摸/触控笔统一支持（旧实现仅 touch 事件，桌面鼠标永远无法触发，时钟等界面看起来“不能多任务”）；
@@ -491,36 +500,42 @@ export default function PhoneShell() {
         {/* 通知权限友好申请卡（首次使用时展示，应用内说明 → 用户手势内才弹浏览器授权框） */}
         <NotifyPermissionCard />
 
-        {/* 全局闹钟监听（锁屏时也会响铃，铃声弹层 z-90 高于锁屏） */}
-        <AlarmWatcher />
+        {/* v70：以下全局调度器/监听器延迟 8s 挂载（watchersReady 门控）——
+            重模块移出首屏关键路径，开机更快；功能不受影响 */}
+        {watchersReady && (
+          <>
+            {/* 全局闹钟监听（锁屏时也会响铃，铃声弹层 z-90 高于锁屏） */}
+            <AlarmWatcher />
 
-        {/* 全局提醒事项/日历到期监听：到点弹横幅 + 系统通知 + 短提示音（App 不打开也生效） */}
-        <ReminderWatcher />
+            {/* 全局提醒事项/日历到期监听：到点弹横幅 + 系统通知 + 短提示音（App 不打开也生效） */}
+            <ReminderWatcher />
 
-        {/* 朋友圈/QQ动态全局调度：AI 好友的点赞/评论/回复延迟队列结算 + 三种触发自动发动态（App 不打开也生效） */}
-        <MomentsScheduler />
-        <ForumScheduler />
+            {/* 朋友圈/QQ动态全局调度：AI 好友的点赞/评论/回复延迟队列结算 + 三种触发自动发动态（App 不打开也生效） */}
+            <MomentsScheduler />
+            <ForumScheduler />
 
-        {/* 退群挽留全局调度：退群后 1 分钟内群成员按人设主动私信 + 私聊里拉回群（App 不打开也生效） */}
-        <QuitFlowScheduler />
+            {/* 退群挽留全局调度：退群后 1 分钟内群成员按人设主动私信 + 私聊里拉回群（App 不打开也生效） */}
+            <QuitFlowScheduler />
 
-        {/* AI 主动来电全局调度：根据人设/聊天内容/时间自主决策并真正拨打（接听/拒接/超时走全局来电层） */}
-        <ProactiveCallWatcher />
+            {/* AI 主动来电全局调度：根据人设/聊天内容/时间自主决策并真正拨打（接听/拒接/超时走全局来电层） */}
+            <ProactiveCallWatcher />
 
-        {/* AI 主动发消息全局调度：定时/事件/自主/自然语言提醒四类触发，到点 AI 主动给用户发消息（App 不打开也生效） */}
-        <ProactiveMsgWatcher />
+            {/* AI 主动发消息全局调度：定时/事件/自主/自然语言提醒四类触发，到点 AI 主动给用户发消息（App 不打开也生效） */}
+            <ProactiveMsgWatcher />
 
-        {/* 情侣空间 AI 常驻调度：自主决策链开机即起、刷新自动续链（不用先打开情侣空间，App 不打开也生效） */}
-        <CoupleResidentWatcher />
+            {/* 情侣空间 AI 常驻调度：自主决策链开机即起、刷新自动续链（不用先打开情侣空间，App 不打开也生效） */}
+            <CoupleResidentWatcher />
 
-        {/* 美团订单全局调度：订单状态机按时间戳推进（商家接单/骑手取餐/已送达），变化弹灵动岛通知（App 不打开也生效） */}
-        <MeituanOrderWatcher />
+            {/* 美团订单全局调度：订单状态机按时间戳推进（商家接单/骑手取餐/已送达），变化弹灵动岛通知（App 不打开也生效） */}
+            <MeituanOrderWatcher />
 
-        {/* AI 邀请一起听全局卡（仿网易云邀请弹窗：双头像+耳机线+歌名，✕/✓ 接受拒绝；
-            触发源 = 聊天里 AI 的 [邀请一起听] 标记 + 全局调度器按人设/听歌数据主动邀约；
-            接受后直接进音乐 App 一起听模式） */}
-        <TogetherInviteLayer />
-        <TogetherInviteWatcher />
+            {/* AI 邀请一起听全局卡（仿网易云邀请弹窗：双头像+耳机线+歌名，✕/✓ 接受拒绝；
+                触发源 = 聊天里 AI 的 [邀请一起听] 标记 + 全局调度器按人设/听歌数据主动邀约；
+                接受后直接进音乐 App 一起听模式） */}
+            <TogetherInviteLayer />
+            <TogetherInviteWatcher />
+          </>
+        )}
 
         {/* 电源键（桌面端机身右侧：熄屏 ↔ 亮屏锁定） */}
         <button

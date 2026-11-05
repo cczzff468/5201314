@@ -51,10 +51,10 @@ import {
   type AccountApp,
 } from '@/lib/ios/accounts';
 // 大号侧「小号是我」披露检测（用户规则一/二：账号关联记忆）与主号侧事件记忆碎片
-import { memAddEventFragment, memDetectMainAltDisclosure, memLinkAltAccounts } from '@/lib/memory';
+// v70 开机提速：记忆库改为用时动态 import（本模块被 PhoneShell 开机链路引用，
+// 静态 import 会把 3300+ 行的 lib/memory 拖进首屏关键路径；下列用法均在异步流式回调里，懒加载无感知）
 // X论坛匿名小号「揭秘时刻」：私聊里说破「那是我小号」→ 关联记忆 + 持久披露标记
-import { detectForumAnonDisclosure, markForumAnonDisclosed } from '@/lib/ios/forum-anon';
-import { resolveAuthor, ANON_KEY } from '@/lib/forum/core';
+// v70 开机提速：论坛模块同为用时动态 import（forum/core 2100+ 行，不该进开机关键路径）
 import { localDB } from '@/lib/ios/db';
 import { buildAltAccountsSection } from '@/lib/ios/persona';
 import { cachedOwnerName } from '@/lib/ios/contacts-store';
@@ -701,6 +701,7 @@ async function runStream(rt: StreamRuntime, opts: BeginChatStreamOptions): Promi
     const linkCid = streamContactIdOf(opts.sessionKey);
     if (accBefore === MAIN_ACCOUNT_ID && linkCid) {
       const lastUserText = [...messages].reverse().find((m) => m.role === 'user')?.content ?? '';
+      const { memAddEventFragment, memDetectMainAltDisclosure, memLinkAltAccounts } = await import('@/lib/memory');
       const hitAltIds = memDetectMainAltDisclosure(lastUserText);
       if (hitAltIds.length > 0) {
         memLinkAltAccounts(linkCid, hitAltIds, lastUserText);
@@ -721,6 +722,8 @@ async function runStream(rt: StreamRuntime, opts: BeginChatStreamOptions): Promi
       // 落持久披露标记 + 写关联记忆碎片——之后 AI 分享/聊到小号帖子的初始认知变成「TA本人」，
       // 态度可以转变（吃醋/调侃钓鱼）；默认（未说破）两号记忆完全隔离。
       try {
+        const [{ detectForumAnonDisclosure, markForumAnonDisclosed }, { resolveAuthor, ANON_KEY }] =
+          await Promise.all([import('@/lib/ios/forum-anon'), import('@/lib/forum/core')]);
         const anonHit = detectForumAnonDisclosure(lastUserText, hitAltIds.length > 0);
         if (anonHit) {
           const fresh = markForumAnonDisclosed(linkCid, anonHit);

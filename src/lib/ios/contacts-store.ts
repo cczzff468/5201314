@@ -21,7 +21,9 @@ import {
 } from './accounts';
 import { kvDel, kvDelRaw, kvGet, kvSet } from './idb-kv';
 import { clearContactBinding } from './worldbook';
-import { memPurgeContact } from '@/lib/memory';
+// v70 开机提速：memPurgeContact 改为删除联系人时才动态 import——
+// 避免把 3300+ 行的记忆库模块（及其依赖）拖进 PhoneShell 开机关键路径
+// const { memPurgeContact } = await import('@/lib/memory')
 import { wxChatFlags, qqChatFlags } from '@/lib/chat-flags';
 import { phoneBadge, qqUnreads, wxUnreads } from '@/lib/unread-store';
 import { wsHeaders } from './workspace';
@@ -932,6 +934,7 @@ function purgeChatTracesFor(id: string, survivingContactIds: readonly string[], 
 
 /** 删除联系人（归属对象被删时其名下 NPC 一并级联删除，同旧服务端 DELETE）；删除了返回 true */
 export async function deleteContact(id: string): Promise<boolean> {
+  const { memPurgeContact } = await import('@/lib/memory');
   const existing = await getContact(id);
   if (!existing) return false;
   const cascadedNpcIds: string[] = [];

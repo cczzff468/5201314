@@ -45,7 +45,8 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ContactRecord } from '@/lib/contacts';
-import { memAfterAiTurn, memConvoFromRaw, memSummarizeCallNow } from '@/lib/memory';
+// v70 开机提速：记忆库改为用时动态 import——chat-call 被开机即挂的来电层引用，
+// 静态 import 会把 3300+ 行的 lib/memory 拖进首屏关键路径（函数均后台异步调用，懒加载无感知）
 import { ownerRealNameFor, ownerProfileFor } from './contacts-store';
 import { getAccountById, getActiveAccountIdFor } from './accounts';
 import { useSettings } from './store';
@@ -529,13 +530,11 @@ export function useChatCall(opts: UseChatCallOptions): ChatCallApi {
 
   // ---------- 通话记忆接线（微信/QQ 与电话 App 同款）：轮次计数 + 自动提取 + 挂断总结 ----------
 
-  /** 通话转写 → 记忆对话轮次（chatLog 含语音轮次 + 文字轮次，统一转 me/peer） */
-  const chatLogToConvo = useCallback(() => {
-    return memConvoFromRaw(
-      chatLogRef.current.map((m) => ({ role: m.role, text: m.content })),
-      '',
-    );
-  }, []);
+  /** 原始转写（chatLog 含语音轮次 + 文字轮次，统一转 me/peer；记忆函数接收前先转轮次） */
+  const rawChatLog = useCallback(
+    () => chatLogRef.current.map((m) => ({ role: m.role, text: m.content })),
+    [],
+  );
 
   /** 一轮 AI 回复后的记忆管线（runTurn/sendText 成功分支调用；后台异步，失败静默）：
    *  轮次计数（无持久消息数组，固定计 2 条）→ 达提取间隔自动从通话转写提取记忆碎片；
@@ -552,29 +551,28 @@ export function useChatCall(opts: UseChatCallOptions): ChatCallApi {
       : ownerRealNameFor(cur.app).catch(() => '')
     )
       .catch(() => '')
-      .then((owner) =>
+      .then(async (owner) => {
+        const { memAfterAiTurn, memConvoFromRaw } = await import('@/lib/memory');
         memAfterAiTurn(
           cid,
           cur.app,
           useSettings.getState().apiConfig,
-          () => chatLogToConvo(),
+          () => memConvoFromRaw(rawChatLog(), ''),
           () => null, // 无持久消息数组：每轮固定计 2 条（1 用户 + 1 AI）
           // fix3-11 机主名回退链：机主卡片真名 → 设置 profile 名（owner 为空时不再让 names.user 空、
           // 提取 prompt 回退成「用户/对方」代称；与 phone.tsx 挂断总结 owner || profileName 同口径）
           { user: owner || useSettings.getState().profile.name || '', peer: cur.contact?.name || '' },
           // fix3-11 场景标记：通话里说的话在提取 prompt 中标注「语音/视频通话」场景（App 归属由 app 字段自带）
           { scene: media === 'video' ? '视频通话' : '语音通话' },
-        ),
-      );
-  }, [chatLogToConvo, media]);
+        );
+      });
+  }, [rawChatLog, media]);
 
   /** 挂断时自动总结整通电话：提取关键信息沉淀为记忆（通话结束自动触发一次；失败静默不阻塞收尾） */
   const summarizeCall = useCallback(() => {
     const cur = optsRef.current;
     const cid = cur.contact?.id;
     if (!cid || cur.contact?.kind === 'user') return;
-    const turns = chatLogToConvo();
-    if (turns.length < 2) return; // 通话太短没有可沉淀的内容
     // 陌生来电（多账号）：记忆总结用「陌生号码」指代来电人（按当前账号作用域隔离）
     const stranger = phoneCallerUnknown(cur.app, direction, cur.contact);
     void (stranger
@@ -582,7 +580,10 @@ export function useChatCall(opts: UseChatCallOptions): ChatCallApi {
       : ownerRealNameFor(cur.app).catch(() => '')
     )
       .catch(() => '')
-      .then((owner) =>
+      .then(async (owner) => {
+        const { memSummarizeCallNow, memConvoFromRaw } = await import('@/lib/memory');
+        const turns = memConvoFromRaw(rawChatLog(), '');
+        if (turns.length < 2) return; // 通话太短没有可沉淀的内容
         memSummarizeCallNow(
           cid,
           cur.app,
@@ -593,9 +594,9 @@ export function useChatCall(opts: UseChatCallOptions): ChatCallApi {
           // fix3-11 通话方向（机主手机视角，契约尾参）：本引擎 direction 'in'=AI 拨入/'out'=机主拨出，
           // 直接透传——总结 prompt 才能写清「谁打给谁的一通电话」
           { direction, media },
-        ),
-      );
-  }, [chatLogToConvo, direction, media]);
+        );
+      });
+  }, [rawChatLog, direction, media]);
 
   /** 挂断后 AI 续聊（三端共用逻辑，挂断即触发）+ 记忆总结（一次提取「通话内容+续聊文字」）：
    *  ① 接通后挂断（AI 主动挂断 / 用户挂断）→ 基于人设+通话内容+记忆+最近聊天生成文字，立刻发

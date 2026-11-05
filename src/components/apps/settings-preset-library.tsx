@@ -1,28 +1,28 @@
 'use client';
 
 /**
- * 默认预设 · 按 App 整合的统一页面主体（v69 · 删除重建）。
+ * 默认预设 · 按 App 整合的统一页面主体（v70 · 简约重制）。
  *
- * 「默认预设」与「全量提示词库」彻底合并为一个界面：
- * 页面主体 = 18 个 App 折叠面板（全局·核心人设置顶），
- * 点开任一 App，面板内是该 App 的**全部**提示词与规则，分两段——
+ * 页面主体 = 18 个 App 折叠面板（全局·核心人设置顶），点开任一 App，
+ * 面板内是该 App 的全部提示词与规则，分两段——
  *
  * - 预设模块（renderAppModules 回调注入，宿主 settings.tsx 渲染）：
  *   prompt-entries.ts 注册表的组卡（整块编辑 / 组开关 / 注入深度 / 多选批量）
  *   + 该 App 的自定义条目卡；
  * - 提示词库（本组件懒加载 public/prompt-library/{id}.json）：
- *   分类折叠 → 条目胶囊（逐条开关 / 编辑 / 恢复默认，原文一字不差）。
+ *   分类折叠 → 条目行（逐条开关 / 编辑 / 恢复默认，原文一字不差）。
  *
  * 两段共用同一套状态存储（kv: prompt-entries:state，prompt-entries-client
  * 写穿 + 服务端同步）：模块组开关/编辑走组 id，库条目走 `lib:<key>` 前缀。
- * 接线状态徽章数据：public/prompt-library/wired.json（scripts/build-prompt-wired.ts
- * 扫描源码 `lib:<key>` 字面量生成）。已接线 = 修改/开关即时生效；
- * 存档 = 编辑与开关先保存，该条目暂未接入运行时链路（后续接线后自动生效）。
+ * 接线状态：public/prompt-library/wired.json（scripts/build-prompt-wired.ts
+ * 扫描源码生成）。已接线 = 修改/开关即时生效；存档 = 先保存待接入。
  *
- * v69 视觉：延续 v68 毛玻璃胶囊设计语言——
- * L1 玻璃面板（App 折叠卡）→ L2 玻璃子面板（预设模块组卡/分类）→ L3 条目胶囊
- * （收起 = 纯胶囊 rounded-full，展开 = 圆角玻璃卡，radius 过渡动画）；
- * 徽章/按钮/搜索框/深度调节全部胶囊化（rounded-full）。
+ * v70 简约 + 提速（用户反馈「再简约一点 / 加载慢」）：
+ * - 视觉降噪：去掉说明大卡/统计徽章/编号 chip/描述行——头部只剩一行灰字统计，
+ *   App 行 = 图标 + 名称 + 右侧灰字条数；条目行 = 标题 + 状态小圆点
+ *   （绿=已接线 / 灰=存档 / 橙=已编辑）+ 开关；
+ * - 渲染提速：去掉全部列表项 backdrop-blur / saturate / transition-all
+ *   （数百层叠毛玻璃是展开与滚动的卡顿根源），改为实底白卡 + 仅箭头旋转过渡。
  */
 
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
@@ -88,25 +88,29 @@ interface LibIndex {
   apps: { id: string; name: string; desc: string; count: number }[];
 }
 
-// ---------------- 毛玻璃胶囊设计令牌（与「默认预设」页共用同一套配方） ----------------
+// ---------------- 简约设计令牌（实底白卡，无 blur） ----------------
 
-/** L1 玻璃面板：iOS 霜玻璃（App 折叠卡 / 说明卡），带顶部高光描边 */
-const GLASS_PANEL =
-  'overflow-hidden rounded-[22px] bg-white/55 shadow-[0_8px_28px_rgba(17,24,39,0.06)] ring-1 ring-white/70 backdrop-blur-2xl backdrop-saturate-150 dark:bg-white/[0.06] dark:ring-white/[0.09]';
+/** L1 面板：iOS 设置风实底白卡 */
+const PANEL =
+  'overflow-hidden rounded-[16px] bg-white ring-1 ring-black/[0.05] dark:bg-[#1C1C1E] dark:ring-white/[0.08]';
 
-/** L2 玻璃子面板：分类折叠（稍透，让 L3 胶囊浮起） */
-const GLASS_SUB =
-  'overflow-hidden rounded-[16px] bg-white/40 ring-1 ring-white/45 backdrop-blur-xl dark:bg-white/[0.045] dark:ring-white/[0.07]';
+/** L2 分类块：浅灰底内嵌块 */
+const SUB =
+  'overflow-hidden rounded-[12px] bg-black/[0.035] dark:bg-white/[0.06]';
 
-/** L3 条目胶囊：收起 = 纯胶囊，展开 = 圆角玻璃卡（radius 平滑过渡） */
-const glassEntry = (open: boolean, off: boolean) =>
-  `overflow-hidden bg-white/60 ring-1 ring-white/60 backdrop-blur-lg backdrop-saturate-150 transition-all duration-300 ease-out dark:bg-white/[0.07] dark:ring-white/[0.08] ${
-    open ? 'rounded-[20px]' : 'rounded-full'
-  } ${off ? 'opacity-60 saturate-[0.6]' : ''}`;
+/** L3 条目行：收起 = 白胶囊，展开 = 圆角白卡（仅 radius 过渡，无 blur） */
+const entryShell = (open: boolean, off: boolean) =>
+  `overflow-hidden bg-white ring-1 ring-black/[0.05] dark:bg-[#2A2A2C] dark:ring-white/[0.08] ${
+    open ? 'rounded-[14px]' : 'rounded-full'
+  } ${off ? 'opacity-55' : ''}`;
 
-/** 玻璃胶囊文本输入（编辑框） */
-const GLASS_TEXTAREA =
-  'rounded-[16px] border-0 bg-white/65 ring-1 ring-black/[0.06] focus-visible:ring-2 focus-visible:ring-[#007AFF]/40 dark:bg-white/[0.08] dark:ring-white/10';
+/** 编辑框 */
+const TEXTAREA =
+  'rounded-[12px] border-0 bg-black/[0.03] ring-1 ring-black/[0.05] focus-visible:ring-2 focus-visible:ring-[#007AFF]/40 dark:bg-white/[0.06] dark:ring-white/10';
+
+/** 次级按钮（无阴影无 blur） */
+const BTN_GHOST =
+  'flex items-center gap-1 rounded-full bg-black/[0.05] px-3 py-[6px] text-[11.5px] font-medium text-foreground/70 transition-colors active:bg-black/[0.08] disabled:opacity-40 dark:bg-white/10 dark:text-muted-foreground';
 
 /** App 分组 → 图标 / 主色（参照系统各 App 品牌色） */
 const APP_META: Record<string, { icon: LucideIcon; tone: string }> = {
@@ -149,66 +153,20 @@ async function loadApp(id: string): Promise<LibApp> {
   return data;
 }
 
-// ---------------- 胶囊小组件 ----------------
+// ---------------- 小组件 ----------------
 
-/** 通用玻璃胶囊徽章（统计数 / 标签） */
-function Pill({
-  tone = 'gray',
-  className = '',
-  children,
-}: {
-  tone?: 'gray' | 'green' | 'orange' | 'blue';
-  className?: string;
-  children: React.ReactNode;
-}) {
-  const tones = {
-    gray: 'bg-black/[0.05] text-muted-foreground dark:bg-white/10 dark:text-zinc-300',
-    green: 'bg-[#34C759]/[0.14] text-[#248A3D] dark:text-[#30D158]',
-    orange: 'bg-[#FF9500]/[0.15] text-[#C77700] dark:text-[#FF9500]',
-    blue: 'bg-[#007AFF]/[0.12] text-[#0A6CFF] dark:text-[#409CFF]',
-  };
-  return (
-    <span
-      className={`inline-flex shrink-0 items-center gap-1 rounded-full px-2.5 py-[3px] text-[11px] font-medium backdrop-blur-md ${tones[tone]} ${className}`}
-    >
-      {children}
-    </span>
-  );
+/** 状态小圆点（替代徽章胶囊）：绿=已接线 / 灰=存档 / 橙=已编辑 */
+function StatusDot({ tone, title }: { tone: 'green' | 'orange' | 'gray'; title: string }) {
+  const tones = { green: '#34C759', orange: '#FF9500', gray: '#B0B0B5' };
+  return <span title={title} aria-hidden className="h-[7px] w-[7px] shrink-0 rounded-full" style={{ backgroundColor: tones[tone] }} />;
 }
 
-/** 状态胶囊（已接线 / 存档 / 已编辑）：带呼吸小圆点 */
-function StatusPill({ tone, label, title }: { tone: 'green' | 'orange' | 'gray'; label: string; title?: string }) {
-  const tones = {
-    green: 'bg-[#34C759]/[0.14] text-[#248A3D] dark:text-[#30D158]',
-    orange: 'bg-[#FF9500]/[0.15] text-[#C77700] dark:text-[#FF9500]',
-    gray: 'bg-black/[0.06] text-muted-foreground dark:bg-white/10 dark:text-zinc-300',
-  };
-  return (
-    <span
-      title={title}
-      className={`inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-[2px] text-[10px] font-medium backdrop-blur-md ${tones[tone]}`}
-    >
-      <span className="h-[5px] w-[5px] rounded-full bg-current" />
-      {label}
-    </span>
-  );
+/** 面板内分节小标签（预设模块 / 提示词库） */
+function SectionLabel({ children }: { children: React.ReactNode }) {
+  return <div className="px-1 pb-0.5 pt-1 text-[10.5px] font-semibold tracking-wide text-muted-foreground/80">{children}</div>;
 }
 
-/** 次级玻璃胶囊按钮 */
-const BTN_GHOST =
-  'flex items-center gap-1 rounded-full bg-white/60 px-3.5 py-[7px] text-[11.5px] font-medium text-foreground/70 ring-1 ring-black/[0.06] backdrop-blur-md transition-all active:scale-95 disabled:opacity-40 dark:bg-white/10 dark:text-muted-foreground dark:ring-white/10';
-
-/** 面板内分节小标签（预设模块 / 提示词库）：App 品牌色圆点 + 弱化大写风 */
-function SectionLabel({ tone, children }: { tone: string; children: React.ReactNode }) {
-  return (
-    <div className="flex items-center gap-1.5 px-1.5 pt-0.5">
-      <span className="h-[5px] w-[5px] shrink-0 rounded-full" style={{ backgroundColor: tone }} />
-      <span className="text-[10.5px] font-semibold tracking-wide text-muted-foreground">{children}</span>
-    </div>
-  );
-}
-
-// ---------------- 条目胶囊（开关 / 原文浏览 / 编辑 / 恢复默认） ----------------
+// ---------------- 条目行（开关 / 原文浏览 / 编辑 / 恢复默认） ----------------
 
 function LibEntryCard({
   entry,
@@ -234,29 +192,26 @@ function LibEntryCard({
   const dirty = editedText !== undefined || off;
 
   return (
-    <div data-testid={`lib-entry-${entry.key}`} className={glassEntry(open, off)}>
-      {/* 胶囊头：编号 + 标题 + 状态徽章 + 开关 + 右侧箭头（箭头一律靠右，与面板/分类一致） */}
-      <div className="flex items-center gap-2 px-3 py-[7px]">
+    <div data-testid={`lib-entry-${entry.key}`} className={entryShell(open, off)}>
+      {/* 行头：标题 + 状态圆点 + 开关 + 右侧箭头 */}
+      <div className="flex items-center gap-2 px-3 py-[6px]">
         <button
           type="button"
           onClick={() => setOpen((v) => !v)}
           className="flex min-w-0 flex-1 items-center gap-1.5 text-left"
           aria-expanded={open}
         >
-          {entry.n && (
-            <span className="shrink-0 rounded-full bg-black/[0.06] px-1.5 py-[1px] font-mono text-[10px] leading-[15px] text-muted-foreground dark:bg-white/10 dark:text-zinc-300">
-              {entry.n}
-            </span>
-          )}
-          <span className="min-w-0 flex-1 truncate text-[13px] font-medium">{entry.title}</span>
+          <span className="min-w-0 flex-1 truncate text-[13px]">{entry.title}</span>
         </button>
-        <span className="flex shrink-0 items-center gap-1">
-          {editedText !== undefined && <StatusPill tone="orange" label="已编辑" />}
-          <StatusPill
-            tone={wired ? 'green' : 'gray'}
-            label={wired ? '已接线' : '存档'}
-            title={wired ? '已接入运行时：修改与开关即时生效' : '存档条目：编辑与开关先保存，暂未接入运行时链路'}
-          />
+        <span className="flex shrink-0 items-center gap-2">
+          {editedText !== undefined ? (
+            <StatusDot tone="orange" title="已编辑" />
+          ) : (
+            <StatusDot
+              tone={wired ? 'green' : 'gray'}
+              title={wired ? '已接线：修改与开关即时生效' : '存档：编辑与开关先保存，暂未接入运行时'}
+            />
+          )}
           <Switch
             checked={!off}
             onCheckedChange={(v) => onToggle(entry.key, v)}
@@ -264,33 +219,33 @@ function LibEntryCard({
             data-testid={`lib-switch-${entry.key}`}
           />
           <ChevronDown
-            className={`h-3.5 w-3.5 shrink-0 text-muted-foreground/70 transition-transform duration-300 ${open ? 'rotate-180' : ''}`}
+            className={`h-3.5 w-3.5 shrink-0 text-muted-foreground/60 transition-transform duration-200 ${open ? 'rotate-180' : ''}`}
           />
         </span>
       </div>
 
-      {/* 展开区：触发场景 / 来源 / 原文 / 编辑框 */}
+      {/* 展开区：触发场景 / 原文 / 编辑框 */}
       {open && (
-        <div className="border-t border-black/[0.05] px-3 py-3 dark:border-white/10">
+        <div className="border-t border-black/[0.05] px-3 py-2.5 dark:border-white/[0.08]">
           {entry.trigger && (
-            <p className="mb-1.5 rounded-[14px] bg-black/[0.04] px-3 py-1.5 text-[11px] leading-relaxed text-muted-foreground dark:bg-white/[0.07]">
+            <p className="mb-1.5 rounded-[10px] bg-black/[0.035] px-2.5 py-1.5 text-[11px] leading-relaxed text-muted-foreground dark:bg-white/[0.06]">
               <span className="font-medium">触发场景：</span>
               {entry.trigger}
             </p>
           )}
           {entry.file && (
-            <p className="mb-1.5 font-mono text-[10px] leading-relaxed break-all text-muted-foreground">{entry.file.replace(/`/g, '')}</p>
+            <p className="mb-1.5 font-mono text-[10px] leading-relaxed break-all text-muted-foreground/70">{entry.file.replace(/`/g, '')}</p>
           )}
-          <p className="mb-1 text-[10px] font-medium text-muted-foreground">
+          <p className="mb-1 text-[10px] text-muted-foreground">
             原文（一字不差{editedText !== undefined ? '；下方编辑框为当前生效版' : ''}）：
           </p>
-          <pre className="thin-scrollbar max-h-56 overflow-y-auto overscroll-contain rounded-[14px] bg-black/[0.045] px-3 py-2 font-mono text-[10.5px] leading-[1.65] break-words whitespace-pre-wrap text-foreground/85 ring-1 ring-black/[0.03] dark:bg-black/25 dark:ring-white/[0.05]">
+          <pre className="thin-scrollbar max-h-56 overflow-y-auto overscroll-contain rounded-[10px] bg-black/[0.035] px-2.5 py-2 font-mono text-[10.5px] leading-[1.65] break-words whitespace-pre-wrap text-foreground/85 dark:bg-black/30">
             {entry.text}
           </pre>
           <Textarea
             value={editing ? (draft as string) : template}
             onChange={(ev) => setDraft(ev.target.value)}
-            className={`mt-2 min-h-36 font-mono text-[11px] leading-relaxed ${GLASS_TEXTAREA}`}
+            className={`mt-2 min-h-36 font-mono text-[11px] leading-relaxed ${TEXTAREA}`}
             data-testid={`lib-text-${entry.key}`}
           />
           <p className="mt-1 text-[10px] leading-relaxed text-muted-foreground/80">
@@ -304,7 +259,7 @@ function LibEntryCard({
                 setDraft(null);
               }}
               disabled={!editing}
-              className="rounded-full bg-[#007AFF] px-4 py-[7px] text-[11.5px] font-medium text-white shadow-[0_4px_14px_rgba(0,122,255,0.35)] transition-all active:scale-95 disabled:opacity-40"
+              className="rounded-full bg-[#007AFF] px-4 py-[6px] text-[11.5px] font-medium text-white transition-colors active:bg-[#0066D6] disabled:opacity-40"
               data-testid={`lib-save-${entry.key}`}
             >
               保存修改
@@ -343,9 +298,9 @@ export function PresetAppPanels({
   requestOpenApp,
 }: {
   onToast: (m: string) => void;
-  /** 预设模块总数（说明卡统计胶囊；含自定义组） */
+  /** 预设模块总数（头部统计；含自定义组） */
   moduleCount?: number;
-  /** 某个 App 的预设模块数（面板头胶囊；0 = 无模块段） */
+  /** 某个 App 的预设模块数（0 = 无模块段） */
   appModuleCount?: (appId: string) => number;
   /** 渲染某 App 的预设模块组卡（含自定义条目卡）；返回 null = 该 App 无模块 */
   renderAppModules?: (appId: string) => ReactNode;
@@ -415,7 +370,7 @@ export function PresetAppPanels({
   );
 
   // 新增自定义条目后：自动展开对应 App 面板（nonce 变化触发；已展开则跳过）。
-  //  setTimeout 0 推迟到下一个宏任务——避免 effect 内同步 setState 触发级联渲染告警
+  // setTimeout 0 推迟到下一个宏任务——避免 effect 内同步 setState 触发级联渲染告警
   useEffect(() => {
     const req = requestOpenApp;
     if (!req) return;
@@ -536,47 +491,36 @@ export function PresetAppPanels({
     return g ? [g, ...rest] : rest;
   }, [index]);
 
-  /** App 品牌色圆点（分类子面板标题前） */
-  const toneOf = (id: string) => (APP_META[id] ?? APP_META.global).tone;
+  /** 某面板条目总数（模块数 + 库条数，头部右侧灰字） */
+  const totalCountOf = (meta: { id: string; count: number }) => {
+    const m = appModuleCount?.(meta.id) ?? 0;
+    return m > 0 ? `${meta.count + m} 项` : `${meta.count} 条`;
+  };
 
   return (
     <div data-testid="preset-library-section">
-      {/* 页面说明卡：玻璃卡 + 合并统计胶囊 */}
-      <div className={GLASS_PANEL}>
-        <div className="flex flex-col gap-2.5 px-4 py-4">
-          <div className="flex flex-wrap items-center gap-2.5">
-            <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-[#AF52FF] to-[#FF2D55] text-white shadow-[0_4px_12px_rgba(175,82,255,0.4)]">
-              <Sparkles className="h-3.5 w-3.5" strokeWidth={2.4} />
-            </span>
-            <p className="shrink-0 whitespace-nowrap text-[14.5px] font-semibold">全部预设 · 按 App 整理</p>
-            <span className="ml-auto flex flex-wrap items-center justify-end gap-1.5">
-              {typeof moduleCount === 'number' && moduleCount > 0 && <Pill>模块 {moduleCount} 组</Pill>}
-              {index && <Pill>{index.apps.length} 个 App</Pill>}
-              {index && <Pill>{index.total} 条</Pill>}
-              {wiredSet.size > 0 && <Pill tone="green">已接线 {wiredSet.size}</Pill>}
-            </span>
-          </div>
-          <p className="text-[11.5px] leading-[1.6] text-muted-foreground">
-            默认预设与全量提示词库已整合为一个界面：点开 App 面板，里面就是该 App 的全部提示词与规则——「预设模块」支持整块编辑、组开关与注入深度调节（修改即时生效）；「提示词库」是系统内发给大模型的全部原文（动作类：买东西、发红包/转账/亲属卡、送礼物、引用、转发、撤回、拍一拍…；生成类：商品、帖子、商家、订单、图片…），逐条开关与编辑。标注「已接线」的条目修改后即时生效，「存档」条目的修改先保存、待接入运行时。
-          </p>
-        </div>
-      </div>
+      {/* 头部统计：一行灰字（v70 简约：去掉说明大卡） */}
+      <p className="px-1 pb-2.5 pt-1 text-[11.5px] text-muted-foreground">
+        按 App 整理{index ? ` · ${index.apps.length} 个 App · ${index.total} 条提示词` : ''}
+        {typeof moduleCount === 'number' && moduleCount > 0 ? ` · 模块 ${moduleCount} 组` : ''}
+        {wiredSet.size > 0 ? ` · 已接线 ${wiredSet.size} 条（修改即时生效）` : ''}
+      </p>
 
-      {/* 搜索胶囊 */}
-      <div className="relative mt-3.5 mb-1.5">
-        <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground/70" />
+      {/* 搜索框（扁平） */}
+      <div className="relative mb-2.5">
+        <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground/60" />
         <Input
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="搜索全部提示词（标题 / 正文 / 文件 / 场景）"
-          className="h-11 rounded-full border-0 bg-white/60 pl-10 pr-4 text-[13px] shadow-[0_6px_20px_rgba(17,24,39,0.07)] ring-1 ring-white/70 backdrop-blur-xl focus-visible:ring-2 focus-visible:ring-[#007AFF]/50 dark:bg-white/[0.08] dark:ring-white/10"
+          placeholder="搜索全部提示词"
+          className="h-10 rounded-full border-0 bg-white pl-9 pr-4 text-[13px] ring-1 ring-black/[0.06] focus-visible:ring-2 focus-visible:ring-[#007AFF]/40 dark:bg-[#1C1C1E] dark:ring-white/[0.1]"
           inputMode="search"
         />
       </div>
 
       {/* 搜索模式：跨 App 扁平分组结果 */}
       {searchingAll && (
-        <div className="mt-2 flex flex-col gap-2.5" data-testid="preset-library-search">
+        <div className="flex flex-col gap-2.5" data-testid="preset-library-search">
           {searchResults && searchResults.length === 0 && (
             <p className="px-1 py-2 text-[12px] text-muted-foreground">没有匹配「{query.trim()}」的提示词</p>
           )}
@@ -585,15 +529,14 @@ export function PresetAppPanels({
               <div className="flex items-center gap-2 px-1.5">
                 <AppIcon id={app.id} />
                 <span className="text-[13px] font-semibold">{app.name}</span>
-                <Pill>{categories.reduce((s, c) => s + c.entries.length, 0)} 条命中</Pill>
+                <span className="text-[11px] text-muted-foreground">{categories.reduce((s, c) => s + c.entries.length, 0)} 条命中</span>
               </div>
               {categories.map((c, ci) => (
-                <div key={`${app.id}-${ci}`} className={GLASS_SUB}>
-                  <div className="flex min-h-[40px] items-center gap-2 px-3.5 py-2">
-                    <span className="h-[6px] w-[6px] shrink-0 rounded-full" style={{ backgroundColor: toneOf(app.id) }} />
-                    <span className="min-w-0 flex-1 truncate text-[13px] font-semibold">{c.name}</span>
+                <div key={`${app.id}-${ci}`} className={SUB}>
+                  <div className="flex min-h-[38px] items-center gap-2 px-3 py-1.5">
+                    <span className="min-w-0 flex-1 truncate text-[12.5px] font-medium">{c.name}</span>
                   </div>
-                  <div className="flex flex-col gap-1.5 px-3 pb-3">
+                  <div className="flex flex-col gap-1.5 px-2.5 pb-2.5">
                     {c.entries.map(renderEntry)}
                   </div>
                 </div>
@@ -605,74 +548,65 @@ export function PresetAppPanels({
 
       {/* 浏览模式：App 折叠面板（预设模块 + 提示词库 同居一屏） */}
       {!searchingAll && (
-        <div className="mt-2 flex flex-col gap-2.5" data-testid="preset-library-apps">
+        <div className="flex flex-col gap-2" data-testid="preset-library-apps">
           {orderedApps.map((meta) => {
             const open = openApps.has(meta.id);
             const data = appData[meta.id];
             const loading = loadingApp === meta.id;
-            const tone = toneOf(meta.id);
             const modules = renderAppModules?.(meta.id) ?? null;
-            const mCount = appModuleCount?.(meta.id) ?? 0;
             return (
-              <div key={meta.id} className={GLASS_PANEL}>
+              <div key={meta.id} className={PANEL}>
                 <button
                   type="button"
                   onClick={() => void toggleApp(meta.id)}
-                  className="flex min-h-[56px] w-full items-center gap-3 px-4 py-3 text-left transition-colors active:bg-black/[0.03] dark:active:bg-white/[0.05]"
+                  className="flex min-h-[48px] w-full items-center gap-3 px-3.5 py-2 text-left transition-colors active:bg-black/[0.03] dark:active:bg-white/[0.05]"
                   aria-expanded={open}
                   data-testid={`preset-lib-app-${meta.id}`}
                 >
                   <AppIcon id={meta.id} />
-                  <span className="min-w-0 flex-1">
-                    <span className="flex flex-wrap items-center gap-2">
-                      <span className="truncate text-[15px] font-semibold">{meta.name}</span>
-                      {mCount > 0 && <Pill tone="blue">模块 {mCount}</Pill>}
-                      <Pill>{meta.count} 条</Pill>
-                    </span>
-                    <span className="mt-0.5 block truncate text-[11.5px] text-muted-foreground">{meta.desc}</span>
-                  </span>
+                  <span className="min-w-0 flex-1 truncate text-[15px] font-medium">{meta.name}</span>
+                  <span className="shrink-0 text-[11.5px] text-muted-foreground">{totalCountOf(meta)}</span>
                   <ChevronDown
-                    className={`h-[18px] w-[18px] shrink-0 text-muted-foreground/70 transition-transform duration-300 ${open ? 'rotate-180' : ''}`}
+                    className={`h-[18px] w-[18px] shrink-0 text-muted-foreground/60 transition-transform duration-200 ${open ? 'rotate-180' : ''}`}
                   />
                 </button>
 
                 {open && (
-                  <div className="flex flex-col gap-2 border-t border-black/[0.04] bg-black/[0.03] px-3.5 py-3.5 dark:border-white/[0.06] dark:bg-black/[0.15]">
+                  <div className="flex flex-col gap-1.5 border-t border-black/[0.05] px-2.5 py-2.5 dark:border-white/[0.08]">
                     {/* 段一：预设模块（组卡由宿主注入——整块编辑 / 组开关 / 深度 / 多选） */}
                     {modules != null && (
                       <>
-                        <SectionLabel tone={tone}>预设模块</SectionLabel>
-                        <div className="flex flex-col gap-2">{modules}</div>
+                        <SectionLabel>预设模块</SectionLabel>
+                        <div className="flex flex-col gap-1.5">{modules}</div>
                       </>
                     )}
 
-                    {/* 段二：提示词库原文（分类折叠 → 条目胶囊） */}
+                    {/* 段二：提示词库原文（分类折叠 → 条目行） */}
                     {loading && <p className="px-1 py-2 text-[12px] text-muted-foreground">正在加载…</p>}
                     {!loading && !data && <p className="px-1 py-2 text-[12px] text-red-500">加载失败，请收起后重新展开重试</p>}
                     {data?.categories.length ? (
                       <>
-                        {modules != null && <SectionLabel tone={tone}>提示词库</SectionLabel>}
+                        {modules != null && <SectionLabel>提示词库</SectionLabel>}
                         {data.categories.map((cat, ci) => {
                           const catKey = `${meta.id}::${ci}`;
                           const catOpen = openCats.has(catKey);
                           return (
-                            <div key={catKey} className={GLASS_SUB}>
+                            <div key={catKey} className={SUB}>
                               <button
                                 type="button"
                                 onClick={() => toggleCat(catKey)}
-                                className="flex min-h-[44px] w-full items-center gap-2 px-3.5 py-2 text-left transition-colors active:bg-black/[0.03] dark:active:bg-white/[0.05]"
+                                className="flex min-h-[40px] w-full items-center gap-2 px-3 py-1.5 text-left transition-colors active:bg-black/[0.03] dark:active:bg-white/[0.05]"
                                 aria-expanded={catOpen}
                                 data-testid={`preset-lib-cat-${meta.id}-${ci}`}
                               >
-                                <span className="h-[6px] w-[6px] shrink-0 rounded-full" style={{ backgroundColor: tone }} />
-                                <span className="min-w-0 flex-1 truncate text-[13px] font-semibold">{cat.name}</span>
-                                <Pill>{cat.entries.length}</Pill>
+                                <span className="min-w-0 flex-1 truncate text-[12.5px] font-medium">{cat.name}</span>
+                                <span className="shrink-0 text-[11px] text-muted-foreground">{cat.entries.length} 条</span>
                                 <ChevronDown
                                   className={`h-4 w-4 shrink-0 text-muted-foreground/60 transition-transform duration-200 ${catOpen ? 'rotate-180' : ''}`}
                                 />
                               </button>
                               {catOpen && (
-                                <div className="flex flex-col gap-1.5 border-t border-black/[0.04] px-3 py-2.5 dark:border-white/[0.06]">
+                                <div className="flex flex-col gap-1.5 px-2.5 pb-2.5 pt-0.5">
                                   {cat.entries.map(renderEntry)}
                                 </div>
                               )}
@@ -689,26 +623,26 @@ export function PresetAppPanels({
         </div>
       )}
 
-      {/* 收录口径说明 */}
-      <p className="mt-4 px-2 text-[10.5px] leading-relaxed text-muted-foreground/80">
-        收录口径：只收真正发给大模型的文本（system / user 消息、规则块、决策与生成提示词、LLM 可见的上下文序列化格式），纯 UI 文案不收录。同一提示词代码块被多个 App 面板收录时（如微信/QQ 共用的聊天规则、淘宝/美团联动的买东西规则），在任一面板关闭即不再注入，编辑以归属 App 面板优先。数据由 scripts/build-prompt-library.ts 构建原文、scripts/build-prompt-wired.ts 扫描源码生成接线清单。
+      {/* 口径说明：一行（v70 简约） */}
+      <p className="mt-3.5 px-2 text-[10.5px] leading-relaxed text-muted-foreground/70">
+        已接线条目修改即时生效；存档条目先保存待接入。同一提示词被多个面板共用时，任一面板关闭即不再注入。
       </p>
     </div>
   );
 }
 
-// ---------------- App 图标（胶囊面板内配套） ----------------
+// ---------------- App 图标 ----------------
 
 function AppIcon({ id }: { id: string }) {
   const meta = APP_META[id] ?? APP_META.global;
   const Icon = meta.icon;
   return (
     <span
-      className="flex h-[30px] w-[30px] shrink-0 items-center justify-center rounded-[9px] shadow-[0_3px_10px_rgba(17,24,39,0.16)] ring-1 ring-white/25"
+      className="flex h-[28px] w-[28px] shrink-0 items-center justify-center rounded-[8px]"
       style={{ backgroundColor: meta.tone }}
       aria-hidden
     >
-      <Icon className="h-4 w-4 text-white" strokeWidth={2.4} />
+      <Icon className="h-4 w-4 text-white" strokeWidth={2.2} />
     </span>
   );
 }
