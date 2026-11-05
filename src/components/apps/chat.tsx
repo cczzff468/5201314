@@ -93,6 +93,13 @@ import {
   type BlockEntry,
 } from '@/lib/ios/block-state';
 import { getTimeAware, setTimeAware, buildTimeAwareBlock } from '@/lib/time-aware';
+import {
+  buildPerceptionBlock,
+  prewarmPerception,
+  perceptionSummary,
+  markTypingStart,
+  markAiReplyEnd,
+} from '@/lib/perception';
 import { useEnterSend, setEnterSend, guardEnterToSend } from '@/lib/enter-send';
 // v39【复制链接→发给AI】信息 App 接入：粘贴 X 论坛帖子链接发送 → 自动跟帖子分享卡
 // （AI 回合把卡片序列化成「帖子正文＋热门评论」上下文）+ 异步写记忆；点卡深链回论坛
@@ -108,6 +115,7 @@ import { buildForumChatBlock } from '@/lib/forum/social';
 import { isPostMemoryOn } from '@/lib/forum/core';
 import { ChatReplyCountPage, ChatTranslatePage, ChatVoiceFreqPage, ChatVoicePage, SmsChatSettingsPage, WorldBookPickerPage } from './chat-settings';
 import { ProactiveMsgPage } from './proactive-msg-page';
+import { PerceptionSettingsPage } from './perception-settings';
 import { proactiveCfgSummary, parseReminderInstruction, reminderHintHit, reminderSysHint, buildReminderSysMsg, setActiveProactiveChat } from '@/lib/ios/proactive-msg';
 import {
   WB_EMPTY_BLOCKS,
@@ -1277,6 +1285,12 @@ function ChatView({
   const [wbOpen, setWbOpen] = useState(false);
   /** 主动发消息设置页（聊天设置二级页：定时/事件/自主/提醒四类触发，仅联系人会话） */
   const [proactiveOpen, setProactiveOpen] = useState(false);
+  /** 感知设置二级页开关（打字/电量/天气/日历/ActivityWatch 真机感知/看屏；按会话独立） */
+  const [perceptionOpen, setPerceptionOpen] = useState(false);
+  // 感知预热：进入聊天即拉一次感知数据（天气/ActivityWatch/屏幕描述缓存），首轮对话就有数据
+  useEffect(() => {
+    void prewarmPerception(sessionKey);
+  }, [sessionKey]);
   // 主动发消息角标守卫登记：用户正看着该会话时主动消息不涨角标（联系人会话才有角色，助手会话不参与）
   useEffect(() => {
     setActiveProactiveChat('sms', wbContactId);
@@ -1891,6 +1905,12 @@ function ChatView({
     const timeBlock = getTimeAware(sessionKey)
       ? buildTimeAwareBlock({ lastMsgTime: msgs.length > 0 ? msgs[msgs.length - 1].time : null })
       : '';
+    // 感知设置（第七十四轮）：打字耗时/电量/天气/日历 + ActivityWatch 真机感知 + VLM 看屏 ——
+    // 预热缓存+现场读取范式（本轮同步读缓存，同时 fire-and-forget 刷新供下一轮）
+    const perceptionBlock = buildPerceptionBlock(sessionKey, {
+      lastMsgTime: msgs.length > 0 ? msgs[msgs.length - 1].time : null,
+    });
+    void prewarmPerception(sessionKey);
     // 世界书：仅联系人会话参与（AI 助手会话无联系人角色）；命中触发词条目按插入位置注入
     //（每本书独立包裹成【世界设定开始】/【世界设定结束】块；有内容时 system 末尾附带使用规则）
     const wbBlocks = wbContactId
@@ -1932,6 +1952,7 @@ function ChatView({
       // v66：接入全局预设管理器（sms-voice-call 可开关/可编辑；sms-rules 组关/组编辑时整块让位）
       ...(wbContactId ? [promptRule('sms-voice-call', SMS_VOICE_CALL_RULE) ?? ''] : []),
       timeBlock,
+      perceptionBlock,
       // v54【引用存档前缀·禁止模仿】信息端 AI 无引用能力（无 [引用:M编号] 标记机制），
       // 但上下文里带引用的消息以「（引用 名字：「内容」）」前缀序列化——模型偶发照抄进自己的回复
       // （用户实测：连发多条每条开头都挂着「（引用 凡凡：「mua」）」）。提示词层显式禁止 +
@@ -2041,6 +2062,8 @@ function ChatView({
       // 边接收边逐条显示：分段器每凑齐一条完整消息立刻排队投递（多条模式）
       onSegment: deliverSegment,
       finalize: ({ content, error, tail, thinking }) => {
+        // 感知设置：AI 回复落地时刻 = 用户下一轮「思考+打字」计时的基线（打字感知开关用）
+        markAiReplyEnd(sessionKey);
         // 深度思考：合并流层收集的思考过程（buildReplyMsgs 兜底剥离的已累积在 ref 里，流层的在此并入）
         if (thinking && thinking.trim()) {
           const prevTk = turnThinkRef.current.text;
@@ -3907,6 +3930,8 @@ function ChatView({
                 value={input}
                 onChange={(e) => {
                   setInput(e.target.value);
+                  // 感知设置（打字思考感知）：首次键入记起点，发送时算「纯打字」时长
+                  markTypingStart(sessionKey);
                   // Task 40 草稿箱：随输入持久化草稿（防抖合幵落库）；超长截断保存并 5 秒节流提示一次
                   if (saveChatDraft('sms', storageKey, e.target.value) && draftWarnRef.current <= Date.now() - 5000) {
                     draftWarnRef.current = Date.now();
@@ -4144,6 +4169,8 @@ function ChatView({
           voiceSummary={describeVoiceId(contactVoiceId, myVoicesForSummary)}
           onOpenVoice={wbContactId ? () => setVoiceOpen(true) : undefined}
           onOpenProactive={wbContactId ? () => setProactiveOpen(true) : undefined}
+          onOpenPerception={wbContactId ? () => setPerceptionOpen(true) : undefined}
+          perceptionSummary={perceptionSummary(sessionKey)}
           proactiveSummary={wbContactId ? proactiveCfgSummary('sms', wbContactId) : undefined}
           blockedByUser={blk.byUser === true}
           onToggleBlock={wbContactId ? toggleBlockFromSettings : undefined}
@@ -4165,6 +4192,11 @@ function ChatView({
       {/* 主动发消息设置页（聊天设置二级页，仅联系人会话）：定时/事件/自主/提醒四类触发 */}
       {proactiveOpen && wbContactId && (
         <ProactiveMsgPage variant="sms" contactId={wbContactId} contactName={peerLabel} onBack={() => setProactiveOpen(false)} />
+      )}
+
+      {/* 感知设置页（聊天设置二级页，仅联系人会话）：打字/电量/天气/日历/ActivityWatch 真机感知/看屏 */}
+      {perceptionOpen && wbContactId && (
+        <PerceptionSettingsPage variant="sms" sessionKey={sessionKey} peerName={peerLabel} onBack={() => setPerceptionOpen(false)} />
       )}
 
       {/* 回复条数选择页（聊天设置二级页）：信息端每会话独立，选择后立即持久化生效 */}

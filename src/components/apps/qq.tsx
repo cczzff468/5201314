@@ -263,6 +263,13 @@ import { InlineEmojiText } from './inline-emoji';
 import { ChatRichInput, type ChatRichInputHandle } from './chat-rich-input';
 import { stripEmojiText } from '@/lib/emoji';
 import { getTimeAware, setTimeAware, buildTimeAwareBlock } from '@/lib/time-aware';
+import {
+  buildPerceptionBlock,
+  prewarmPerception,
+  perceptionSummary,
+  markTypingStart,
+  markAiReplyEnd,
+} from '@/lib/perception';
 import { useEnterSend, setEnterSend, guardEnterToSend } from '@/lib/enter-send';
 // 多账号 v2（Task 40-2b）：kv 裸键自动按 qq 当前账号作用域；purge 限账号用 kvKeysByPrefix+kvDelRaw
 import { kvGet, kvGetRaw, kvSet, kvSetDebounced, kvDel, kvDelRaw, kvKeysByPrefix } from '@/lib/ios/idb-kv';
@@ -420,6 +427,7 @@ import {
   type ChatSettingsBg,
 } from './chat-settings';
 import { ProactiveMsgPage } from './proactive-msg-page';
+import { PerceptionSettingsPage } from './perception-settings';
 import { proactiveCfgSummary, parseReminderInstruction, reminderHintHit, reminderSysHint, buildReminderSysMsg, setActiveProactiveChat } from '@/lib/ios/proactive-msg';
 import { decideAiVoiceMessage, getAiVoiceFreq, saveAiVoiceFreq, synthesizeAiVoice, undoLastAiVoiceDecision } from '@/lib/ios/ai-voice';
 import { describeVoiceId, useMyVoices } from '@/lib/ios/my-voices';
@@ -3543,6 +3551,12 @@ function ChatPage({
   const [wbOpen, setWbOpen] = useState(false);
   /** 主动发消息设置页（聊天设置二级页：定时/事件/自主/提醒四类触发） */
   const [proactiveOpen, setProactiveOpen] = useState(false);
+  /** 感知设置二级页开关（打字/电量/天气/日历/ActivityWatch 真机感知/看屏；按会话独立） */
+  const [perceptionOpen, setPerceptionOpen] = useState(false);
+  // 感知预热：进入聊天即拉一次感知数据（天气/ActivityWatch/屏幕描述缓存），首轮对话就有数据
+  useEffect(() => {
+    void prewarmPerception(sessionKey);
+  }, [sessionKey]);
   /** 当前联系人挂载的世界书 id（切换联系人/挂载变化时重读） */
   const [wbBound, setWbBound] = useState<string[]>(() => getBoundBookIds(peer.id));
   useEffect(() => {
@@ -5447,6 +5461,12 @@ function ChatPage({
           regionHint: peer.region || null,
         })
       : '';
+    // 感知设置（第七十四轮）：打字耗时/电量/天气/日历 + ActivityWatch 真机感知 + VLM 看屏 ——
+    // 预热缓存+现场读取范式（本轮同步读缓存，同时 fire-and-forget 刷新供下一轮）
+    const perceptionBlock = buildPerceptionBlock(sessionKey, {
+      lastMsgTime: priorMsgs.length > 0 ? priorMsgs[priorMsgs.length - 1].time : null,
+    });
+    void prewarmPerception(sessionKey);
     // 世界书：扫描「最新用户消息 + 最近 8 条上下文」，命中触发词的条目按插入位置分组注入
     //（每本书独立包裹成【世界设定开始】/【世界设定结束】块；系统/角色定义前后进 system，
     // 用户消息前后包裹最后一条 user 消息；未命中不发送；有内容时 system 末尾附带使用规则；
@@ -5555,6 +5575,7 @@ function ChatPage({
       '【语音通话能力】如果你此刻非常想和对方马上说话（想TA了、有急事、聊到特别开心等自然原因），可以在回复的最开头单独加上标记 [语音通话] 发起一次语音通话邀请，对方手机会弹出你的来电邀请；平时聊天不要加这个标记，最多偶尔一次，连续使用会很烦人。',
       '【视频通话能力】如果你此刻很想看看对方（想TA了、有值得分享的时刻、对方说想见你/想看看你等自然原因），可以在回复的最开头单独加上标记 [视频通话] 发起一次视频通话邀请，对方手机会弹出你的视频来电邀请；平时聊天不要加这个标记，最多偶尔一次，连续使用会很烦人。注意：标记必须是单独四个字 [视频通话]，严禁模仿聊天记录里「[视频通话：时长/内容摘要]」这类卡片描述文字的格式（那是系统卡片不是标记），不要输出带冒号的 [视频通话：……]。',
       timeBlock,
+      perceptionBlock,
       ...(visionRules.length > 0 ? [visionRules.join('\n\n')] : []),
       // 生图（锁脸）：照片标签规则（自动生图开启时；AI 输出 [照片:描述] 系统自动生图并以图片消息投递）
       ...(photoRule ? [photoRule] : []),
@@ -5688,6 +5709,8 @@ function ChatPage({
       // 边接收边逐条显示：分段器每凑齐一条完整消息立刻解析投递（多条模式）
       onSegment: deliverSegment,
       finalize: ({ content, error, tail, thinking }) => {
+        // 感知设置：AI 回复落地时刻 = 用户下一轮「思考+打字」计时的基线（打字感知开关用）
+        markAiReplyEnd(sessionKey);
         // 深度思考：合并流层收集的思考过程（buildReplyMsgs 兜底剥离的已累积在 ref 里，流层的在此并入）
         if (thinking && thinking.trim()) {
           const prevTk = turnThinkRef.current.text;
@@ -8156,6 +8179,8 @@ function ChatPage({
               value={input}
               onChange={(v) => {
                 setInput(v);
+                // 感知设置（打字思考感知）：首次键入记起点，发送时算「纯打字」时长
+                markTypingStart(sessionKey);
                 // Task 40 草稿箱：随输入持久化草稿（防抖合幵落库）；超长截断保存并 5 秒节流提示一次
                 if (saveChatDraft('qq', peer.id, v) && draftWarnRef.current <= Date.now() - 5000) {
                   draftWarnRef.current = Date.now();
@@ -8729,6 +8754,8 @@ function ChatPage({
           voiceSummary={describeVoiceId(peer.voiceId, myVoicesForSummary)}
           onOpenVoice={() => setVoiceOpen(true)}
           onOpenProactive={peer.id === me.id ? undefined : () => setProactiveOpen(true)}
+          onOpenPerception={peer.id === me.id ? undefined : () => setPerceptionOpen(true)}
+          perceptionSummary={perceptionSummary(sessionKey)}
           proactiveSummary={proactiveCfgSummary('qq', peer.id)}
           pinned={flags.pinned === true}
           muted={flags.muted === true}
@@ -8790,6 +8817,9 @@ function ChatPage({
 
       {/* 主动发消息设置页（聊天设置二级页）：定时/事件/自主/提醒四类触发（每角色独立） */}
       {proactiveOpen ? <ProactiveMsgPage variant="qq" contactId={peer.id} contactName={peer.name} onBack={() => setProactiveOpen(false)} /> : null}
+
+      {/* 感知设置页（聊天设置二级页）：打字/电量/天气/日历/ActivityWatch 真机感知/看屏（按会话独立） */}
+      {perceptionOpen ? <PerceptionSettingsPage variant="qq" sessionKey={sessionKey} peerName={peer.name} onBack={() => setPerceptionOpen(false)} /> : null}
 
       {/* 世界书挂载页（聊天设置二级页）：为联系人勾选挂载的书籍（按联系人隔离持久化） */}
       {wbOpen ? (

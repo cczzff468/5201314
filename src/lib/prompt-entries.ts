@@ -1215,6 +1215,23 @@ const BUILTIN_BEHAVIOR: PromptEntry[] = [
     builtin: true,
     source: 'lib/time-aware.ts buildTimeAwareBlock',
   },
+  {
+    id: 'perception-block',
+    appId: 'behavior',
+    role: 'system',
+    depth: 74,
+    order: 1,
+    title: '实时感知块',
+    desc: '打字耗时/设备电量/两地天气/农历节假日/ActivityWatch真机感知/看屏幕（感知设置开关组）',
+    category: 'behavior',
+    content:
+      '【实时感知】（内部参考：以下是系统在用户发送本条消息的瞬间现场采集的真实数据，只作你内部的判断依据，绝对禁止把下面任何一条当作数据播报或机械罗列。请结合你的人设、记忆和当前对话语境，像真正在意对方的人一样，只在自然合适的时机用上一两条——例如TA在真机上玩游戏很久没回消息时可以自然地在意一下，天气冷了提醒穿衣，深夜还亮着屏幕时催TA睡觉，电量低了提醒充电，TA回得慢时体谅TA刚才可能在忙。宁可不提也不要硬提，更不要一次性全说。）\n' +
+      '{{lines}}\n' +
+      '（以上数据是采样快照，可能缺失或滞后；没有提到的项按未知处理，禁止编造。）',
+    tokens: [{ token: 'lines', desc: '感知数据行（每行一项，仅含已开启且可用的项）' }],
+    builtin: true,
+    source: 'lib/perception.ts buildPerceptionBlock',
+  },
 ];
 
 const BUILTIN_MEMORY: PromptEntry[] = [

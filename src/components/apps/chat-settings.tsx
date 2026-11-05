@@ -26,7 +26,7 @@
  *   （形象锁定/锁脸页已迁移到「设置 › 图像生成」页尾的 FaceLockSection，数据层 @/lib/imggen 不变）
  */
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
-import { ArrowLeftRight, AudioLines, BookMarked, Check, ChevronLeft, ChevronRight, Image as ImageIcon, Loader2, Palette, Search, Zap } from 'lucide-react';
+import { ArrowLeftRight, AudioLines, BookMarked, Check, ChevronLeft, ChevronRight, Image as ImageIcon, Loader2, Palette, Radar, Search, Zap } from 'lucide-react';
 import { deepThinkCaption } from '@/lib/deep-think';
 import type { ChatBgMode } from '@/lib/chat-flags';
 import type { ContactRecord } from '@/lib/contacts';
@@ -190,6 +190,10 @@ export function ChatSettingsPage({
   onOpenProactive,
   /** 主动发消息入口行摘要（宿主用 proactiveCfgSummary 计算） */
   proactiveSummary,
+  /** 打开「感知设置」页（打字/电量/天气/日历/真机感知/看屏）；不传 = 隐藏该入口行 */
+  onOpenPerception,
+  /** 感知设置入口行摘要（宿主用 perceptionSummary 计算） */
+  perceptionSummary,
   onDeleteContact,
 }: {
   variant: ChatSettingsVariant;
@@ -270,6 +274,10 @@ export function ChatSettingsPage({
   onOpenProactive?: () => void;
   /** 主动发消息入口行摘要（宿主用 proactiveCfgSummary 计算；空 = 未开启） */
   proactiveSummary?: string;
+  /** 打开「感知设置」页（打字耗时/电量/天气/日历/ActivityWatch 真机感知/看屏）；不传 = 隐藏该入口行 */
+  onOpenPerception?: () => void;
+  /** 感知设置入口行摘要（宿主用 perceptionSummary(sessionKey) 计算；空 = 未开启） */
+  perceptionSummary?: string;
   /** 删除联系人（删除好友关系：列表移除/聊天关闭；记录/记忆/朋友圈/通话保留但不可见，加回恢复）。不传 = 隐藏入口 */
   onDeleteContact?: () => void;
 }) {
@@ -523,6 +531,24 @@ export function ChatSettingsPage({
             />
           </div>
         </div>
+
+        {/* 感知设置：打字耗时/电量/天气/日历/ActivityWatch真机感知/看屏（独立二级页，按会话独立开关，发送时现场读取） */}
+        {onOpenPerception && (
+          <div className={`${cardCls} mt-3 overflow-hidden`}>
+            <button type="button" data-testid={`${testPrefix}-settings-perception`} onClick={onOpenPerception} className={rowCls}>
+              <span className="flex items-center gap-2.5">
+                <Radar className="h-[18px] w-[18px] text-black/60 dark:text-white/60" strokeWidth={1.9} aria-hidden="true" />
+                感知设置
+              </span>
+              <span className="flex shrink-0 items-center gap-2">
+                <span data-testid={`${testPrefix}-perception-summary`} className="max-w-[150px] truncate text-[14px] text-black/40 dark:text-white/40">
+                  {perceptionSummary || '未开启'}
+                </span>
+                <ChevronRight className="h-[18px] w-[18px] text-black/25 dark:text-white/25" strokeWidth={2} />
+              </span>
+            </button>
+          </div>
+        )}
 
         {/* 主动发消息：定时/事件/自主/自然语言提醒四类触发（独立二级页，每角色独立设置） */}
         {onOpenProactive && (
@@ -1539,6 +1565,10 @@ export function SmsChatSettingsPage({
   onOpenProactive,
   /** 主动发消息入口行摘要（宿主用 proactiveCfgSummary 计算） */
   proactiveSummary,
+  /** 打开「感知设置」页（打字/电量/天气/日历/真机感知/看屏）；不传 = 隐藏该入口行 */
+  onOpenPerception,
+  /** 感知设置入口行摘要（宿主用 perceptionSummary 计算） */
+  perceptionSummary,
   /** 打开主题界面（毛玻璃胶囊：主题/气泡两个选择）；不传 = 隐藏该入口行 */
   onOpenTheme,
 }: {
@@ -1602,6 +1632,10 @@ export function SmsChatSettingsPage({
   onOpenProactive?: () => void;
   /** 主动发消息入口行摘要（宿主用 proactiveCfgSummary 计算；空 = 未开启） */
   proactiveSummary?: string;
+  /** 打开「感知设置」页（打字耗时/电量/天气/日历/ActivityWatch 真机感知/看屏）；不传 = 隐藏该入口行 */
+  onOpenPerception?: () => void;
+  /** 感知设置入口行摘要（宿主用 perceptionSummary(sessionKey) 计算；空 = 未开启） */
+  perceptionSummary?: string;
 }) {
   const t = translateTokens('sms');
   const skinSms = useChatSkin();
@@ -1781,6 +1815,24 @@ export function SmsChatSettingsPage({
             />
           </div>
         </div>
+
+        {/* 感知设置：打字耗时/电量/天气/日历/ActivityWatch真机感知/看屏（独立二级页，按会话独立开关，发送时现场读取） */}
+        {onOpenPerception && (
+          <div className={`${t.cardCls} mt-3`}>
+            <button type="button" data-testid="sms-settings-perception" onClick={onOpenPerception} className={t.rowCls}>
+              <span className="flex items-center gap-2.5">
+                <Radar className="h-[18px] w-[18px] text-black/60 dark:text-white/60" strokeWidth={1.9} aria-hidden="true" />
+                感知设置
+              </span>
+              <span className="flex shrink-0 items-center gap-2">
+                <span data-testid="sms-perception-summary" className="max-w-[150px] truncate text-[14px] text-black/40 dark:text-white/40">
+                  {perceptionSummary || '未开启'}
+                </span>
+                <ChevronRight className="h-[18px] w-[18px] text-black/25 dark:text-white/25" strokeWidth={2} />
+              </span>
+            </button>
+          </div>
+        )}
 
         {/* 主动发消息：每角色独立设置入口（独立二级页，每角色独立设置）；
             第三十四轮：「AI 主动消息」全局总开关删除 */}

@@ -9,7 +9,7 @@ interface BatteryLike {
   removeEventListener: (type: string, listener: () => void) => void;
 }
 
-interface BatteryInfo {
+export interface BatteryInfo {
   level: number;
   charging: boolean;
 }
@@ -96,4 +96,13 @@ function getServerSnapshot(): BatteryInfo | null {
  */
 export function useBattery(): BatteryInfo | null {
   return useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
+}
+
+/** 非组件环境读取当前设备电量（感知设置发送时现场读取：接入 Battery API + 同步返回缓存值；
+ *  无数据（不支持的浏览器/首帧未到）返回 null，调用方按缺失省略 */
+export function getBatterySnapshot(): BatteryInfo | null {
+  if (typeof window === 'undefined') return null;
+  readCacheOnce();
+  startBatteryApi(); // 顺带激活 API（尚未启动时；监听器后续会自动刷新模块级状态）
+  return batteryState;
 }
