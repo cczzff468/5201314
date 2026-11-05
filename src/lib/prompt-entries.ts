@@ -554,28 +554,12 @@ const BUILTIN_PERSONA: PromptEntry[] = [
   },
 ];
 
-const STICKER_RECV_RULE =
-  '出现在对方（用户）消息里的「[发送了表情：XX]」表示对方发来一张含义为「XX」的表情包，你要理解并自然回应表情的含义（可以调侃或接住情绪），不要字面复述括号内容。';
-
 const AI_VOICE_RULE_TEXT =
   '（你的文字消息有时会以语音条的形式送达对方——这是正常的送达方式，不用在意；但不要在正文里说「我给你发条语音」这类话，也不要主动承诺发语音，用文字自然聊就好。）';
 
 function chatRuleEntries(app: 'wechat' | 'qq', label: string): PromptEntry[] {
   const p = app === 'wechat' ? 'wx' : 'qq';
   return [
-    {
-      id: `${p}-sticker-recv`,
-      appId: app,
-      role: 'system',
-      depth: 40,
-      order: 0,
-      title: `${label}·对方表情包回应`,
-      desc: '「[发送了表情：XX]」= 对方发来的表情包，理解含义自然回应',
-      category: 'immersion',
-      content: STICKER_RECV_RULE,
-      builtin: true,
-      source: `components/apps/${app === 'wechat' ? 'wechat' : 'qq'}.tsx extraRules`,
-    },
     {
       id: `${p}-emoji-code`,
       appId: app,
@@ -1722,8 +1706,8 @@ export const PROMPT_GROUPS: PromptGroup[] = [
     kind: 'merged',
     title: '微信',
     desc: '微信聊天规则整块（表情包/小表情/特殊消息/动作描写/语音条告知）',
-    members: ['wx-sticker-recv', 'wx-emoji-code', 'wx-rich-rules', 'wx-sticker-off', 'wx-action-desc', 'wx-action-desc-off', 'wx-ai-voice'],
-    templateMembers: ['wx-sticker-recv', 'wx-emoji-code', 'wx-rich-rules', 'wx-action-desc', 'wx-ai-voice'],
+    members: ['wx-emoji-code', 'wx-rich-rules', 'wx-sticker-off', 'wx-action-desc', 'wx-action-desc-off', 'wx-ai-voice'],
+    templateMembers: ['wx-emoji-code', 'wx-rich-rules', 'wx-action-desc', 'wx-ai-voice'],
     templateOverrides: { 'wx-rich-rules': '{{richRules}}' },
   },
   {
@@ -1732,8 +1716,8 @@ export const PROMPT_GROUPS: PromptGroup[] = [
     kind: 'merged',
     title: 'QQ',
     desc: 'QQ 聊天规则整块（表情包/小表情/特殊消息/动作描写/语音条告知）',
-    members: ['qq-sticker-recv', 'qq-emoji-code', 'qq-rich-rules', 'qq-sticker-off', 'qq-action-desc', 'qq-action-desc-off', 'qq-ai-voice'],
-    templateMembers: ['qq-sticker-recv', 'qq-emoji-code', 'qq-rich-rules', 'qq-action-desc', 'qq-ai-voice'],
+    members: ['qq-emoji-code', 'qq-rich-rules', 'qq-sticker-off', 'qq-action-desc', 'qq-action-desc-off', 'qq-ai-voice'],
+    templateMembers: ['qq-emoji-code', 'qq-rich-rules', 'qq-action-desc', 'qq-ai-voice'],
     templateOverrides: { 'qq-rich-rules': '{{richRules}}' },
   },
   {

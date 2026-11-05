@@ -10,7 +10,8 @@
  *   prompt-entries.ts 注册表的组卡（整块编辑 / 组开关 / 注入深度 / 多选批量）
  *   + 该 App 的自定义条目卡；
  * - 提示词库（本组件懒加载 public/prompt-library/{id}.json）：
- *   分类折叠 → 条目行（逐条开关 / 编辑 / 恢复默认，原文一字不差）。
+ *   分类折叠 → 条目行（逐条开关 / 编辑 / 恢复默认；v71 隐藏触发场景与原文展示，
+ *   只留编辑框——编辑框预填的就是当前生效文本）。
  *
  * 两段共用同一套状态存储（kv: prompt-entries:state，prompt-entries-client
  * 写穿 + 服务端同步）：模块组开关/编辑走组 id，库条目走 `lib:<key>` 前缀。
@@ -161,12 +162,12 @@ function StatusDot({ tone, title }: { tone: 'green' | 'orange' | 'gray'; title: 
   return <span title={title} aria-hidden className="h-[7px] w-[7px] shrink-0 rounded-full" style={{ backgroundColor: tones[tone] }} />;
 }
 
-/** 面板内分节小标签（预设模块 / 提示词库） */
+/** 面板内分节小标签（预设模块） */
 function SectionLabel({ children }: { children: React.ReactNode }) {
   return <div className="px-1 pb-0.5 pt-1 text-[10.5px] font-semibold tracking-wide text-muted-foreground/80">{children}</div>;
 }
 
-// ---------------- 条目行（开关 / 原文浏览 / 编辑 / 恢复默认） ----------------
+// ---------------- 条目行（开关 / 编辑 / 恢复默认） ----------------
 
 function LibEntryCard({
   entry,
@@ -224,24 +225,12 @@ function LibEntryCard({
         </span>
       </div>
 
-      {/* 展开区：触发场景 / 原文 / 编辑框 */}
+      {/* 展开区：文件出处 / 编辑框（v71 简约：不再展示触发场景与原文，编辑框预填当前生效文本） */}
       {open && (
         <div className="border-t border-black/[0.05] px-3 py-2.5 dark:border-white/[0.08]">
-          {entry.trigger && (
-            <p className="mb-1.5 rounded-[10px] bg-black/[0.035] px-2.5 py-1.5 text-[11px] leading-relaxed text-muted-foreground dark:bg-white/[0.06]">
-              <span className="font-medium">触发场景：</span>
-              {entry.trigger}
-            </p>
-          )}
           {entry.file && (
             <p className="mb-1.5 font-mono text-[10px] leading-relaxed break-all text-muted-foreground/70">{entry.file.replace(/`/g, '')}</p>
           )}
-          <p className="mb-1 text-[10px] text-muted-foreground">
-            原文（一字不差{editedText !== undefined ? '；下方编辑框为当前生效版' : ''}）：
-          </p>
-          <pre className="thin-scrollbar max-h-56 overflow-y-auto overscroll-contain rounded-[10px] bg-black/[0.035] px-2.5 py-2 font-mono text-[10.5px] leading-[1.65] break-words whitespace-pre-wrap text-foreground/85 dark:bg-black/30">
-            {entry.text}
-          </pre>
           <Textarea
             value={editing ? (draft as string) : template}
             onChange={(ev) => setDraft(ev.target.value)}
@@ -249,7 +238,7 @@ function LibEntryCard({
             data-testid={`lib-text-${entry.key}`}
           />
           <p className="mt-1 text-[10px] leading-relaxed text-muted-foreground/80">
-            编辑版支持 {'{{token}}'} 占位符（原文 ${'{token}'} 自动转换；留空保存 = 恢复默认文本）
+            编辑版支持 {'{{token}}'} 占位符（留空保存 = 恢复默认文本）
           </p>
           <div className="mt-2 flex flex-wrap items-center gap-2">
             <button
@@ -546,7 +535,7 @@ export function PresetAppPanels({
         </div>
       )}
 
-      {/* 浏览模式：App 折叠面板（预设模块 + 提示词库 同居一屏） */}
+      {/* 浏览模式：App 折叠面板（预设模块 + 提示词库 同居一屏，v71 起两段不再分节标注） */}
       {!searchingAll && (
         <div className="flex flex-col gap-2" data-testid="preset-library-apps">
           {orderedApps.map((meta) => {
@@ -581,12 +570,11 @@ export function PresetAppPanels({
                       </>
                     )}
 
-                    {/* 段二：提示词库原文（分类折叠 → 条目行） */}
+                    {/* 段二：提示词库条目（分类折叠 → 条目行；v71 去掉分节标签） */}
                     {loading && <p className="px-1 py-2 text-[12px] text-muted-foreground">正在加载…</p>}
                     {!loading && !data && <p className="px-1 py-2 text-[12px] text-red-500">加载失败，请收起后重新展开重试</p>}
                     {data?.categories.length ? (
                       <>
-                        {modules != null && <SectionLabel>提示词库</SectionLabel>}
                         {data.categories.map((cat, ci) => {
                           const catKey = `${meta.id}::${ci}`;
                           const catOpen = openCats.has(catKey);

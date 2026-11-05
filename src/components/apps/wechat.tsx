@@ -1586,11 +1586,7 @@ function buildPersonaPrompt(peer: ContactRecord, me: WxUser, ownerName: string |
   // 组编辑=编辑版大模板整块接管（{{richRules}} 填入当前表情包动态规则）；
   // 默认=原逐条组装（零破坏，成员级开关/编辑照旧）
   const wxRuleParts = promptGroupParts('wx-rules', { richRules: richBlock }, () => [
-      // fix3-c #3：规则限定主语——只解释「对方（用户）消息里」出现的标记；AI 自己发的表情另有 [表情包:ID]/[你发送了表情：XX] 序列化，不与规则冲突
-      promptRule(
-        'wx-sticker-recv',
-        '出现在对方（用户）消息里的「[发送了表情：XX]」表示对方发来一张含义为「XX」的表情包，你要理解并自然回应表情的含义（可以调侃或接住情绪），不要字面复述括号内容。',
-      ) ?? '',
+      // v71：wx-sticker-recv（对方表情包回应规则）按用户要求整条移除，不再注入
       // 内置小表情 [微笑] 代码约定（开关开启才注入；用户点面板内置表情即以此格式入历史，AI 也可同格式回复）
       ...(stickersOn ? [promptRule('wx-emoji-code', EMOJI_CODE_RULE) ?? ''] : []),
       ...richBlock.split('\n'),

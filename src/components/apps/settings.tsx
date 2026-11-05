@@ -673,7 +673,7 @@ function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
             icon={Layers}
             tone={TONE_PURPLE}
             label="默认预设（内置）"
-            value="按 App 整理 · 503 条 · 模块 12 组"
+            value="按 App 整理 · 501 条 · 模块 12 组"
             onClick={() => onOpen('prompts')}
             testId="settings-prompts-row"
           />

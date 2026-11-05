@@ -1679,13 +1679,7 @@ function buildPersonaPrompt(peer: ContactRecord, me: QQUser, ownerName: string |
   // v65：QQ 沉浸规则整块走 qq-rules 合并组（与微信同构）——组关闭=QQ 不再注入任何沉浸规则；
   // 组编辑=编辑版大模板整块接管（{{richRules}} 填入当前表情包动态规则）；默认=原逐条组装（零破坏）
   const qqRuleParts = promptGroupParts('qq-rules', { richRules: richBlock }, () => [
-      // 【fix3-d-2】点明该标记只出现在「对方（用户）」消息里：与历史序列化中 AI 自己表情的
-      // 「[表情包:ID]」/「[你发送了表情：XX]」写法区分开，防止 AI 把兜底标记当成自己的输出格式
-      // 100-e 与微信端文案逐字一致（此前两端手工复制引号风格漂移『』vs「」）
-      promptRule(
-        'qq-sticker-recv',
-        '出现在对方（用户）消息里的「[发送了表情：XX]」表示对方发来一张含义为「XX」的表情包，你要理解并自然回应表情的含义（可以调侃或接住情绪），不要字面复述括号内容。',
-      ) ?? '',
+      // v71：qq-sticker-recv（对方表情包回应规则）按用户要求整条移除，不再注入
       // 内置小表情 [微笑] 代码约定（开关开启才注入；用户点面板内置表情即以此格式入历史，AI 也可同格式回复）
       ...(stickersOn ? [promptRule('qq-emoji-code', EMOJI_CODE_RULE) ?? ''] : []),
       // 100-e QQ 没有亲属卡功能：亲属卡教学不下发（opts.familyCard=false，与微信区分）
