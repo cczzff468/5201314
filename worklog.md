@@ -1997,3 +1997,27 @@ Stage Summary:
 - 关注者增长三面齐备：数字（计数涨）+ 身份（列表可见可回关）+ 感知（关注通知）
 - 防轰炸静默 6h 三层守卫：入队拦截（事件删除）/ 执行拦截（timer 兜底零成本）/ 落地清场（删除已排队任务）
 - 数据不变式：dynFollowers ⊆ userFollowerBoost（列表行数 ≤ 计数）；匿名小号不产生关注者资产（沿 v47 设计）；静默仅成功占用
+
+---
+
+## 2026-11-05 · 部署 5201314 仓库到沙箱环境 + 修复 instrumentation 守护链
+
+Task ID: 25
+Agent: 主控 Agent（Z.ai Code）
+Task: 从 https://github.com/cczzff468/5201314.git 拉取代码部署到 /home/z/my-project，配置 git 主分支推送链路（git branch -M 主 / git push -u origin 主）
+
+Work Log:
+- [拉取] 沙箱直连 github.com 超时（TLS 非正常终止），改走 gh-proxy.com 镜像浅克隆 main 分支（4422 文件）成功
+- [同步] rsync 全量同步 src/ public/ prisma/ scripts/ mini-services/ tools/ deploy/ prompts/ tests/ examples/ upload/ download/ tmp-analysis/ agent-ctx/ 及根配置到 /home/z/my-project；保留环境专属 .env/Caddyfile/db/skills/.zscripts 运行时文件；替换 .git 保留仓库完整历史
+- [依赖] bun install 401 包（含 three/@react-three/fiber/leaflet/web-push 等）；prisma generate + db push（复用 db/custom.db）
+- [git] remote origin 配置 PAT token；分支重命名 main → 主；修复提交后 git push -u origin 主 成功（远端新建 主 分支）
+- [排障·关键] dev server 启动后 netease-api（3010）始终未被自动拉起——逐层定位：instrumentation.ts 编译产物正常（Turbopack 将 NEXT_RUNTIME === 'nodejs' 编译为 compile-time truthy）、.next/dev/server/instrumentation.js 存在且被 Next 正常 require、register() 被 Next 调用并正常返回；最终发现根因：src/instrumentation.ts 的 register() 仅 `await import('./instrumentation-node')` 加载模块而**从未调用其导出的 register()**，守护逻辑（spawn ncm-keeper.sh）从不执行
+- [修复] instrumentation.ts：`const mod = await import('./instrumentation-node'); await mod.register();`
+- [验证] 重启后 dev.log 出现 `[instrumentation] ncm-keeper spawned pid=4756`；netease-api 自动监听 3010，/search?keywords=晴天 返回正常；next-keeper 反向守护链（3010 保活 3000）恢复设计意图
+- [E2E] Agent Browser（390×844）：锁屏渲染✓（时间/日期/天气组件/上滑提示）→ 上滑解锁✓ → 主屏图标网格✓ → 信息 App✓ → AI 小助手对话✓（消息已送达、AI 回复+9″ TTS 语音、通知权限卡片正常）→ 全程 API 200 无控制台错误；eslint 变更文件 0 问题
+- [注] node_modules/next 的临时调试代码已全部还原；.zscripts/dev.pid 为环境运行时差异不入库
+
+Stage Summary:
+- 5201314 仓库完整部署并运行于 /home/z/my-project：AI Phone 仿 iOS 智能助手（105+ App）
+- git 推送链路就绪：本地分支 主 ↔ origin/主（PAT 已配置，直连 push 实测可用；如再遇超时可换 gh-proxy.com/https://github.com/... 前缀）
+- 修复存量 bug：instrumentation 动态导入不调 register() 导致 ncm-keeper/网易云 API 本机实例从不自动启动（已提交 2bf8e06 并推送）
