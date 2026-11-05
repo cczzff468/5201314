@@ -10,6 +10,9 @@
  */
 export async function register() {
   if (process.env.NEXT_RUNTIME === 'nodejs') {
-    await import('./instrumentation-node');
+    // 动态导入后必须显式调用子模块的 register()——
+    // 仅 import 只会加载模块定义而不会执行其中的守护逻辑（拉起 ncm-keeper）。
+    const instrumentationNode = await import('./instrumentation-node');
+    await instrumentationNode.register();
   }
 }
