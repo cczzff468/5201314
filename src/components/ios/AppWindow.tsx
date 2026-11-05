@@ -35,8 +35,15 @@ export default function AppWindow() {
     <div
       role="dialog"
       aria-label={meta.name}
-      className={`absolute inset-0 z-40 overflow-hidden bg-background will-change-[transform,opacity] transition-all duration-[380ms] ease-[cubic-bezier(0.32,0.72,0,1)] ${
-        phase === 'open' ? 'scale-100 rounded-none opacity-100' : 'scale-[0.18] rounded-[48px] opacity-0'
+      // 性能（v71 界面加载提速）：
+      // ① transition-all → 只过渡 transform/opacity/border-radius（打开缩放动画用到的三样）——
+      //    transition-all 会把容器全部 CSS 属性纳入过渡判定（含 shop-dark 主题类的背景色等），
+      //    样式失效与插值开销白白放大；
+      // ② will-change 只在动画进行中（opening/closing）挂，open 后立即摘掉——
+      //    常驻 will-change 会把整个 App 子树（数千 DOM 节点）钉在独立合成层，
+      //    显存常驻 + App 内任何更新的重绘都要走大合成层，是「打开后界面反而卡」的元凶之一。
+      className={`absolute inset-0 z-40 overflow-hidden bg-background transition-[transform,opacity,border-radius] duration-[380ms] ease-[cubic-bezier(0.32,0.72,0,1)] ${
+        phase === 'open' ? 'scale-100 rounded-none opacity-100' : 'scale-[0.18] rounded-[48px] opacity-0 will-change-[transform,opacity]'
       } ${shopDark ? 'shop-dark' : ''}`}
     >
       <App />

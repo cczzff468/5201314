@@ -585,16 +585,54 @@ export const GRID_APPS: AppMeta[] = APPS.filter((a) => !DOCK_IDS.includes(a.id))
 export const DOCK_APPS: AppMeta[] = DOCK_IDS.map((id) => APP_MAP[id]);
 
 /**
- * 主屏空闲预热重 App（解决「刷新网页后首次打开音乐 App 要等一会」）：
- * 音乐 App 是 dynamic 懒加载（上方 MusicApp），刷新后首次点开要现场编译/下载大 chunk
- * （music.tsx + home/player/search/mine/playlist/settings/comments 数千行）再挂载 boot，
- * 冷启动明显卡顿。主屏挂载 ~2.5s 后（首帧稳定、用户尚未操作）后台预热：
- * ① 预载音乐 App chunk（与 dynamic 同一模块引用，重复调用幂等，打开时直接命中缓存）；
- * ② 提前执行音乐 boot（幂等：音频引擎惰性建 + 登录态校验 + 快照/历史恢复）；
- * ③ 提前恢复一起听会话与 AI 钩子（bootMusicAi 幂等）。
+ * 主屏空闲预热重 App（解决「点击进入任何界面都要等一会」）：
+ * 所有 App 组件都是 dynamic 懒加载，chunk 只在首次点开时才拉取——dev 下未压缩
+ * chunk 高达 2~3MB（QQ/微信/美团/情侣空间），每次代码改动后 hash 变化还要重新
+ * 下载+解析+执行，用户点开要干等 1~3 秒。主屏挂载稳定后按「从重到轻」串行预热：
+ * ① 预载各 App chunk（与 dynamic 同一模块引用，重复调用幂等，点开直接命中模块缓存）；
+ * ② 重 App 依次错峰 import（每个之间让出一拍主线程，不与首帧/主屏滑动抢资源）；
+ * ③ 音乐 App 额外提前 boot（音频引擎/登录态/快照恢复）与一起听恢复（bootMusicAi 幂等）。
+ * 用户在主屏停留的几秒内，后台已把全部重 App 备好，之后点开任何 App 秒进。
  */
 export function preloadHeavyApps(): void {
-  void import('./music');
+  // 按实测 chunk 体积从重到轻排序（越重的越优先预热，用户感知收益越大）
+  const heavyImports: Array<() => Promise<unknown>> = [
+    () => import('./meituan'),
+    () => import('./qq'),
+    () => import('./couple-space'),
+    () => import('./wechat'),
+    () => import('./taobao'),
+    () => import('./settings'),
+    () => import('./wx-group'),
+    () => import('./qq-group'),
+    () => import('./chat'),
+    () => import('./phone'),
+    () => import('./cottage'),
+    () => import('./forum/forum'),
+    () => import('./memory-bank'),
+    () => import('./worldbook'),
+    () => import('./contacts'),
+    () => import('./music'),
+  ];
+  // 空闲串行调度：只在浏览器空闲帧里预载下一个（每次让出主线程，不与首帧/
+  // 主屏滑动/用户点击抢资源）；页面隐藏时 idle 回调暂停，回前台自动续上。
+  // 失败静默——点开 App 时 dynamic 会正常重试。Safari 无 requestIdleCallback 时退化为 1s 定时
+  const schedule = (fn: () => void) => {
+    if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
+      window.requestIdleCallback(fn, { timeout: 4000 });
+    } else {
+      window.setTimeout(fn, 1000);
+    }
+  };
+  const next = (i: number): void => {
+    if (i >= heavyImports.length) return;
+    schedule(() => {
+      heavyImports[i]()
+        .catch(() => undefined)
+        .finally(() => next(i + 1));
+    });
+  };
+  next(0);
   void import('@/lib/ios/music-store')
     .then((m) => {
       try {

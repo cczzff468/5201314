@@ -3305,6 +3305,12 @@ function QqBlockReqCard({
  *  用户要「学会引用」而非「一直引用」，措辞约束之外由代码层兑底，挂载即刷新（同轮第二条也会被拦） */
 const AI_QUOTE_COOL_MS = 5 * 60_000;
 
+/** v71 分窗渲染（与微信同款）：初始只渲染最近 WINDOW_FIRST 条，上滑到顶按 WINDOW_STEP 向前扩——
+ *  长会话几千条一次性 map 渲染是「点进聊天界面卡顿」的主因；时间分隔/组尾角/七彩序号
+ *  都按消息原始索引计算，分窗渲染带原索引 → 行为与全量渲染完全一致 */
+const WINDOW_FIRST = 120;
+const WINDOW_STEP = 160;
+
 function ChatPage({
   me,
   peer,
@@ -3444,6 +3450,19 @@ function ChatPage({
   const stream = useChatStream(sessionKey);
   const streaming = stream?.status === 'streaming';
   const scrollRef = useRef<HTMLDivElement>(null);
+  // ---- v71 分窗渲染（界面提速）：初始只渲染最近 WINDOW_FIRST 条，上滑到顶自动向前扩 ----
+  const [visibleCount, setVisibleCount] = useState(WINDOW_FIRST);
+  const winStart = Math.max(0, msgs.length - visibleCount);
+  /** 向前扩窗时记录「加载前内容底缘到视口顶的距离」，渲染提交后把 scrollTop 顶回，
+   *  视口停留在原消息上（iOS 原生上翻加载同款体验） */
+  const topAnchorRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (topAnchorRef.current != null && scrollRef.current) {
+      const el = scrollRef.current;
+      el.scrollTop = Math.max(0, el.scrollHeight - topAnchorRef.current);
+      topAnchorRef.current = null;
+    }
+  });
   // 加号面板（弹出时把输入行+工具栏整体顶起，输入框跟随面板上浮）
   const [plusOpen, setPlusOpen] = useState(false);
   /** 一起听选歌弹层（加号面板「一起听」入口；选歌后我方发邀请卡进聊天，AI 接受后双方发同意卡） */
@@ -7089,17 +7108,25 @@ function ChatPage({
     [msgs]
   );
 
-  /** 搜索结果定位：关闭搜索页与设置页 → 滚动到消息并短暂高亮 */
-  const jumpToMessage = useCallback((id: string) => {
-    setSearchOpen(false);
-    setSettingsOpen(false);
-    setHighlightId(id);
-    requestAnimationFrame(() => {
-      const el = scrollRef.current?.querySelector(`[data-mid="${CSS.escape(id)}"]`);
-      el?.scrollIntoView({ block: 'center', behavior: 'smooth' });
-    });
-    window.setTimeout(() => setHighlightId((cur) => (cur === id ? null : cur)), 2000);
-  }, []);
+  /** 搜索结果定位：关闭搜索页与设置页 → 滚动到消息并短暂高亮。
+   *  v71 分窗渲染兑底：目标消息若在未渲染的更早窗口里，先扩窗覆盖它再定位（双 rAF 等扩窗渲染提交） */
+  const jumpToMessage = useCallback(
+    (id: string) => {
+      setSearchOpen(false);
+      setSettingsOpen(false);
+      setHighlightId(id);
+      const idx = msgs.findIndex((m) => m.id === id);
+      if (idx >= 0 && idx < winStart) setVisibleCount(Math.max(visibleCount, msgs.length - idx + 10));
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          const el = scrollRef.current?.querySelector(`[data-mid="${CSS.escape(id)}"]`);
+          el?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        });
+      });
+      window.setTimeout(() => setHighlightId((cur) => (cur === id ? null : cur)), 2000);
+    },
+    [msgs, winStart, visibleCount],
+  );
 
   return (
     <div
@@ -7300,11 +7327,21 @@ function ChatPage({
           qq-chat-list：消息区锚点（聊天设置 › 自定义CSS 示例主题可改内边距/字体） */}
       <div
         ref={scrollRef}
+        onScroll={(e) => {
+          if (winStart <= 0) return;
+          const el = e.currentTarget;
+          if (el.scrollTop <= 140) {
+            topAnchorRef.current = el.scrollHeight - el.scrollTop;
+            setVisibleCount((v) => v + WINDOW_STEP);
+          }
+        }}
         className={`qq-chat-list no-scrollbar relative z-10 flex-1 overflow-y-auto px-3.5 select-none ${liquid ? 'pt-[112px] pb-3' : 'py-3'}`}
         data-testid="qq-chat-list"
         style={{ touchAction: 'pan-y' }}
       >
-        {msgs.map((m, i) => {
+        {msgs.slice(winStart).map((m, wi) => {
+          // 原始全量索引（时间分隔 msgs[i-1] / 组尾角 msgs[i+1] / 七彩序号等按全量索引计算，分窗行为一致）
+          const i = winStart + wi;
           // 错误占位消息（旧版失败落库文案）：新版失败改由触发消息上的红色 ! 徽标表达，不再渲染占位文字行
           if (m.error) return null;
           // 显示设置 › 时间开启后每条消息单独显示时间，此间隔条退场（冗余）
