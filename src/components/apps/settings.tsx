@@ -38,6 +38,7 @@ import {
   PanelTop,
   ScanEye,
   ScanFace,
+  SlidersHorizontal,
   Smartphone,
   Star,
   Sun,
@@ -443,6 +444,11 @@ function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
   // 灵动岛常驻开关（用户需求）：关闭后隐藏顶部黑色胶囊基础灵动岛，只显示 APP 灵动岛
   const islandPersistent = useSettings((s) => s.islandPersistent);
   const setIslandPersistent = useSettings((s) => s.setIslandPersistent);
+  // 全局悬浮工具（v72）：提示词查看器 / 快捷操作——开启后手机右下角出现可拖拽悬浮球
+  const assistViewer = useSettings((s) => s.assistViewer);
+  const setAssistViewer = useSettings((s) => s.setAssistViewer);
+  const assistQuickOps = useSettings((s) => s.assistQuickOps);
+  const setAssistQuickOps = useSettings((s) => s.setAssistQuickOps);
 
   const [airplane, setAirplane] = useState(false);
 
@@ -653,6 +659,61 @@ function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
               <span
                 className={`pointer-events-none absolute left-[2px] top-[2px] block h-[27px] w-[27px] rounded-full bg-white shadow-[0_2px_5px_rgba(0,0,0,0.25)] transition-transform duration-200 ${
                   islandPersistent ? 'translate-x-[20px]' : 'translate-x-0'
+                }`}
+              />
+            </button>
+          </div>
+        </div>
+
+        {/* 悬浮工具（v72）：两个开关控制手机右下角的可拖拽悬浮球——
+            提示词查看器（下一轮完整 Prompt 只读预览）与快捷操作（API/世界书一键切换）。
+            两个开关全关时不显示悬浮球；与状态栏/灵动岛同款 iOS 原生 51×31 大开关 */}
+        <div className="mb-2 mt-6 px-8 text-[13px] text-muted-foreground">悬浮工具</div>
+        <div className="mx-4 divide-y divide-black/[0.05] overflow-hidden rounded-[22px] bg-white/55 shadow-[0_8px_28px_rgba(17,24,39,0.06)] ring-1 ring-white/70 backdrop-blur-2xl dark:divide-white/[0.06] dark:bg-white/[0.06] dark:ring-white/[0.09]">
+          <div className="flex min-h-[52px] items-center gap-3 px-4 py-2">
+            <RowIcon icon={Eye} tone={TONE_CYAN} />
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-[16px]">提示词查看器</span>
+              <span className="mt-0.5 block truncate text-[11.5px] text-muted-foreground">悬浮球菜单里预览下一轮完整 Prompt</span>
+            </span>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={assistViewer}
+              aria-label="提示词查看器"
+              data-testid="settings-assist-viewer-switch"
+              onClick={() => setAssistViewer(!assistViewer)}
+              className={`relative h-[31px] w-[51px] shrink-0 rounded-full transition-colors duration-200 ${
+                assistViewer ? 'bg-[#34C759]' : 'bg-black/15 dark:bg-white/25'
+              }`}
+            >
+              <span
+                className={`pointer-events-none absolute left-[2px] top-[2px] block h-[27px] w-[27px] rounded-full bg-white shadow-[0_2px_5px_rgba(0,0,0,0.25)] transition-transform duration-200 ${
+                  assistViewer ? 'translate-x-[20px]' : 'translate-x-0'
+                }`}
+              />
+            </button>
+          </div>
+          <div className="flex min-h-[52px] items-center gap-3 px-4 py-2">
+            <RowIcon icon={SlidersHorizontal} tone={TONE_GREEN} />
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-[16px]">快捷操作</span>
+              <span className="mt-0.5 block truncate text-[11.5px] text-muted-foreground">悬浮球菜单里快速切换 API 与世界书</span>
+            </span>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={assistQuickOps}
+              aria-label="快捷操作"
+              data-testid="settings-assist-quickops-switch"
+              onClick={() => setAssistQuickOps(!assistQuickOps)}
+              className={`relative h-[31px] w-[51px] shrink-0 rounded-full transition-colors duration-200 ${
+                assistQuickOps ? 'bg-[#34C759]' : 'bg-black/15 dark:bg-white/25'
+              }`}
+            >
+              <span
+                className={`pointer-events-none absolute left-[2px] top-[2px] block h-[27px] w-[27px] rounded-full bg-white shadow-[0_2px_5px_rgba(0,0,0,0.25)] transition-transform duration-200 ${
+                  assistQuickOps ? 'translate-x-[20px]' : 'translate-x-0'
                 }`}
               />
             </button>

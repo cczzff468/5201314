@@ -641,6 +641,18 @@ export function isProactiveChatActive(app: ProactiveApp, cid: string): boolean {
   return activeChats.has(`${app}:${cid}`);
 }
 
+/** 跨模块查询：当前正被用户查看的会话清单（悬浮工具「快捷操作」定位当前聊天用）。
+ *  返回 [{app, cid}]（每 App 至多一条——setActiveProactiveChat 同 App 互斥）；列表为空 = 没有打开中的聊天 */
+export function getActiveProactiveChats(): { app: ProactiveApp; cid: string }[] {
+  const out: { app: ProactiveApp; cid: string }[] = [];
+  for (const key of activeChats.keys()) {
+    const i = key.indexOf(':');
+    if (i <= 0) continue;
+    out.push({ app: key.slice(0, i) as ProactiveApp, cid: key.slice(i + 1) });
+  }
+  return out;
+}
+
 // ---------------- LLM 调用（两级兜底：用户配置 → 内置模型；与 friend-state 同款） ----------------
 
 async function callLlmTwoTier(system: string, userContent: string, apiConfig: ApiConfig): Promise<string> {

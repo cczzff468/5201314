@@ -387,6 +387,12 @@ interface SettingsState {
    *  只显示 APP 灵动岛（音乐岛大/小窗、美团/淘宝配送岛、灵动岛通知卡、来电胶囊等）。
    *  与状态栏开关独立：关灵动岛不影响状态栏文字/图标 */
   islandPersistent: boolean;
+  /** 全局悬浮工具·提示词查看器开关（悬浮球菜单里的「提示词查看器」入口）：
+   *  开启后悬浮球可打开提示词预览弹窗（无副作用，只读拼装，不消耗 Token） */
+  assistViewer: boolean;
+  /** 全局悬浮工具·快捷操作开关（悬浮球菜单里的「快捷操作」入口）：
+   *  开启后悬浮球可快速切换 API 预设与世界书绑定 */
+  assistQuickOps: boolean;
   /** 全局字重（400=标准；300/400/500/600，未显式设 font-weight 的文本生效） */
   appFontWeight: number;
   /** 聊天气泡装扮（第十八轮重构：微信/QQ 两 App 完全隔离，各持 { kind, mineColor, theirsColor }；
@@ -440,6 +446,8 @@ interface SettingsState {
   setStatusBarVisible: (v: boolean) => void;
   /** 灵动岛常驻开关；立即持久化，PhoneShell 实时响应（APP 灵动岛不受影响） */
   setIslandPersistent: (v: boolean) => void;
+  setAssistViewer: (v: boolean) => void;
+  setAssistQuickOps: (v: boolean) => void;
   setWallpaperPreset: (id: string) => void;
   setCustomWallpaper: (blob: Blob | null) => void;
   /** 设置锁屏壁纸预设（独立于主屏幕壁纸） */
@@ -497,6 +505,8 @@ export const useSettings = create<SettingsState>((set, get) => ({
   appFontWeight: 400,
   statusBarVisible: true,
   islandPersistent: true,
+  assistViewer: false,
+  assistQuickOps: false,
   iconStyle: 'real',
   goodsImgStyle: 'cartoon',
   bubbleStyle: { wx: { ...DEFAULT_BUBBLE_STYLE.wx }, qq: { ...DEFAULT_BUBBLE_STYLE.qq }, sms: { ...DEFAULT_BUBBLE_STYLE.sms } },
@@ -509,7 +519,7 @@ export const useSettings = create<SettingsState>((set, get) => ({
   load: async () => {
     if (get().loaded) return;
     try {
-      const [themeRec, wallpaperRec, lockWallpaperRec, apiRec, presetsRec, visionRec, visionPresetsRec, lockRec, profileRec, iconsRec, ttsRec, sttRec, imgGenRec, imgGenPresetsRec, fontRec, fontScaleRec, fontWeightRec, statusBarRec, iconStyleRec, goodsImgStyleRec, themeResetRec, islandPersistentRec, bubbleStyleRec, bubbleSchemesRec, liquidSkinRec, chatDecorRec, customCssRec] = await Promise.all([
+      const [themeRec, wallpaperRec, lockWallpaperRec, apiRec, presetsRec, visionRec, visionPresetsRec, lockRec, profileRec, iconsRec, ttsRec, sttRec, imgGenRec, imgGenPresetsRec, fontRec, fontScaleRec, fontWeightRec, statusBarRec, iconStyleRec, goodsImgStyleRec, themeResetRec, islandPersistentRec, assistViewerRec, assistQuickOpsRec, bubbleStyleRec, bubbleSchemesRec, liquidSkinRec, chatDecorRec, customCssRec] = await Promise.all([
         localDB.get('settings', 'theme'),
         localDB.get('settings', 'wallpaper'),
         localDB.get('settings', 'lockWallpaper'),
@@ -532,6 +542,8 @@ export const useSettings = create<SettingsState>((set, get) => ({
         localDB.get('settings', 'goodsImgStyle'),
         localDB.get('settings', 'themeDefaultLight'),
         localDB.get('settings', 'islandPersistent'),
+        localDB.get('settings', 'assistViewer'),
+        localDB.get('settings', 'assistQuickOps'),
         localDB.get('settings', 'bubbleStyle'),
         localDB.get('settings', 'bubbleSchemes'),
         localDB.get('settings', 'liquidSkin'),
@@ -845,6 +857,8 @@ export const useSettings = create<SettingsState>((set, get) => ({
         statusBarVisible: typeof statusBarRec?.value === 'boolean' ? statusBarRec.value : true,
         // 灵动岛常驻：无记录 = 常驻（默认开）；仅接受布尔值
         islandPersistent: typeof islandPersistentRec?.value === 'boolean' ? islandPersistentRec.value : true,
+        assistViewer: assistViewerRec?.value === true,
+        assistQuickOps: assistQuickOpsRec?.value === true,
         iconStyle,
         goodsImgStyle,
         // 聊天气泡装扮 + 收藏夹：无记录/脏数据回默认（normalize 内部校验 kind/color/结构）
@@ -982,6 +996,16 @@ export const useSettings = create<SettingsState>((set, get) => ({
   setIslandPersistent: (v) => {
     set({ islandPersistent: v });
     void localDB.put('settings', { key: 'islandPersistent', value: v });
+  },
+
+  setAssistViewer: (v) => {
+    set({ assistViewer: v });
+    void localDB.put('settings', { key: 'assistViewer', value: v });
+  },
+
+  setAssistQuickOps: (v) => {
+    set({ assistQuickOps: v });
+    void localDB.put('settings', { key: 'assistQuickOps', value: v });
   },
 
   setWallpaperPreset: (id) => {
