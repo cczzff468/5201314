@@ -65,6 +65,10 @@ const MusicGlobalMini = dynamic(() => import('./MusicGlobalMini'), { ssr: false 
  *  （两开关全关时组件自身渲染 null，零开销） */
 const AssistiveTools = dynamic(() => import('./AssistiveTools'), { ssr: false });
 
+/** v73 AI 聊天悬浮小窗：聊天页「小窗模式」开启后常驻悬浮（z-58，高于悬浮球/迷你播放器、
+ *  低于多任务切换器）——切底部 App 不卸载，与全屏聊天实时互通；组件未开启时渲染 null 零开销 */
+const ChatFloatWindow = dynamic(() => import('./ChatFloatWindow'), { ssr: false });
+
 // 音乐灵动岛（第十六轮反馈）：音乐在播时占据灵动岛锚位的常驻音乐弹窗，所有界面都显示
 // （小弹窗常驻 / 大弹窗 5 秒 / 点小弹窗展开 / 点大弹窗跳听歌 / 点别处收回；消息通知展示期间隐身）
 const MusicIsland = dynamic(() => import('./MusicIsland'), { ssr: false });
@@ -438,6 +442,11 @@ export default function PhoneShell() {
 
         {/* 全局悬浮工具（z-56：悬浮球 + 提示词查看器/快捷操作弹窗；设置 › 悬浮工具 控制） */}
         <AssistiveTools />
+
+        {/* v73 AI 聊天悬浮小窗（z-58）：聊天页顶栏「小窗模式」打开——切 App 不卸载、
+            拖拽吸附左右边缘、拖到底部松手销毁、最小化成胶囊；内容复用 ChatPage（float 变体），
+            消息与会话状态同全屏实时互通（会话消息共享源） */}
+        <ChatFloatWindow />
 
         {/* 全局来电层：AI 来电弹窗（电话横幅/微信大窗 5s→胶囊，z-94，灵动岛原位弹出/收回、弹出期间盖住灵动岛）+
             iOS 全屏来电界面（z-84，仅电话来电自动显示、左上可退出，界面可见时不叠加弹窗；

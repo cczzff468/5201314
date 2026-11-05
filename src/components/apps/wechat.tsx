@@ -37,6 +37,7 @@ import {
   Newspaper,
   Pencil,
   Phone,
+  PictureInPicture2,
   Pin,
   PinOff,
   Package,
@@ -361,6 +362,8 @@ import {
 import { BUILTIN_STICKER_GROUP_ID } from '@/lib/ios/builtin-stickers';
 import type { Sticker, StickerGroup } from '@/lib/ios/stickers';
 import { useUnreadMap, wxUnreads as wxUnreadStore } from '@/lib/unread-store';
+// v73 AI 聊天悬浮小窗：顶栏「小窗模式」按钮入口（打开全局小窗并退出全屏聊天）
+import { openChatFloat } from '@/lib/ios/chat-float-store';
 import { consumeBgPending, onBgPageVisible, peekBgBadgeCounts, pullBgPending, registerBgSession, unregisterBgSession, type BgPendingItem } from '@/lib/ios/bg-turn';
 import { useChatFlags, NO_FLAGS, wxChatFlags as wxChatFlagsStore } from '@/lib/chat-flags';
 import {
@@ -417,7 +420,7 @@ import { buildLocationBlock, locationAiText, locDataOf, locFromRich, type ChatLo
 
 // ---------------- 类型 / 常量 / 工具 ----------------
 
-interface WxUser {
+export interface WxUser {
   id: string;
   /** 微信内显示名（备注/昵称优先；非真实姓名） */
   name: string;
@@ -666,6 +669,9 @@ function uid(): string {
 
 /** 当前正在查看的微信聊天（ChatPage 挂载时写入/卸载时清除）：AI 回复落盘时不在该会话 → 未读角标 +1 */
 let wxActiveChatId: string | null = null;
+/** v73 同会话并发打开的 ChatPage 实例数（全屏 + 聊天小窗可双开）：最后一个实例卸载才清 active 标记，
+ *  避免小窗先卸载时把仍在前台的全屏聊天「已读状态」误清（主动消息角标守卫误判） */
+const wxActiveInstances = new Map<string, number>();
 /** 排队补跑回合：对方正在回复时用户又发了消息 / 在回复中处理了「解除拉黑申请、退还红包转账亲属卡」
  *  等需要 AI 后续回应的事项 —— 本轮流结束后由聊天页自动补跑一轮回复。
  *  #28 localStorage 持久化（key: wx-queued-turns）：模块加载时恢复，增删即同步写回——刷新后排队中的
@@ -917,6 +923,55 @@ function saveMsgs(contactId: string, msgs: WxMsg[]): void {
     // 忽略
   }
 }
+
+// ---------------- v73 聊天小窗：会话消息共享源（同一会话全屏 + 小窗双开实时互通） ----------------
+
+/**
+ * 每会话的权威消息列表（模块级，React 外）：ChatPage 的 msgs 状态升级为共享源镜像——
+ * 全屏聊天页与 PhoneShell 层的聊天小窗（同会话）双开时，任一侧发送/接收/撤回都即时同步到另一侧。
+ * 无实例存活时保留缓存（纯内存），下次挂载 init() 与磁盘记录按 id 合并去重，双向兜底：
+ *  · 外部直写磁盘的写入（主动消息/接力投递）不会被旧缓存掩盖；
+ *  · 上一实例 400ms 防抖窗口内未落盘的尾巴不会因重挂载丢失。
+ */
+const wxSessionMsgsMap = new Map<string, WxMsg[]>();
+const wxSessionSubs = new Map<string, Set<(m: WxMsg[]) => void>>();
+
+/** 磁盘 ∥ 内存共享源按 id 合并（overlay 同 id 覆盖、独有追加），结果按时间稳定排序 */
+function mergeMsgLists(base: WxMsg[], overlay: WxMsg[]): WxMsg[] {
+  if (overlay.length === 0) return base;
+  const byId = new Map(base.map((m) => [m.id, m]));
+  for (const m of overlay) byId.set(m.id, m);
+  return sortMsgsByTime(Array.from(byId.values()));
+}
+
+const wxSessionMsgs = {
+  init(cid: string): WxMsg[] {
+    const merged = mergeMsgLists(loadMsgs(cid), wxSessionMsgsMap.get(cid) ?? []);
+    wxSessionMsgsMap.set(cid, merged);
+    return merged;
+  },
+  get(cid: string): WxMsg[] | null {
+    return wxSessionMsgsMap.get(cid) ?? null;
+  },
+  commit(cid: string, next: WxMsg[] | ((prev: WxMsg[]) => WxMsg[])) {
+    const value = typeof next === 'function' ? next(wxSessionMsgsMap.get(cid) ?? []) : next;
+    wxSessionMsgsMap.set(cid, value);
+    const subs = wxSessionSubs.get(cid);
+    if (subs) for (const fn of subs) fn(value);
+  },
+  subscribe(cid: string, fn: (m: WxMsg[]) => void): () => void {
+    let set = wxSessionSubs.get(cid);
+    if (!set) {
+      set = new Set();
+      wxSessionSubs.set(cid, set);
+    }
+    set.add(fn);
+    return () => {
+      set.delete(fn);
+      if (set.size === 0) wxSessionSubs.delete(cid);
+    };
+  },
+};
 
 // ---------------- 转发感知：目标会话的 AI 事件队列 ----------------
 
@@ -5095,7 +5150,7 @@ const AI_QUOTE_COOL_MS = 5 * 60_000;
 const WINDOW_FIRST = 120;
 const WINDOW_STEP = 160;
 
-function ChatPage({
+export function ChatPage({
   me,
   peer,
   contacts,
@@ -5111,6 +5166,7 @@ function ChatPage({
   pendingCall,
   onConsumePendingCall,
   onSwitchChat,
+  float,
 }: {
   me: WxUser;
   peer: ContactRecord;
@@ -5142,6 +5198,9 @@ function ChatPage({
   onConsumePendingCall?: () => void;
   /** Task 37 角色分支：分支创建成功 → 宿主切换进分支聊天页（setChatPeer + toast） */
   onSwitchChat?: (c: ContactRecord) => void;
+  /** v73 聊天小窗变体：渲染在悬浮小窗内（窄容器）——隐藏自带顶栏（外框标题条代替）、
+   *  多选模式仍渲染紧凑工具栏；发送/投递/流式管线与全屏完全同一套 */
+  float?: boolean;
 }) {
   // 聊天页自带 toast（App 根 toast 在聊天分支提前 return 不渲染——收藏成功等提示靠它显示）
   const [chatToast, onToast] = useLocalToast();
@@ -5179,7 +5238,17 @@ function ChatPage({
   // 且前缀比全局多一级属性 → 特异性压制全局 CSS；不会泄漏到聊天页以外/其他联系人）
   const wxCssKey = chatContactKey('wx', peer.id);
   const chatCustomCss = useSettings((s) => s.customCss.chats[wxCssKey]);
-  const [msgs, setMsgs] = useState<WxMsg[]>(() => loadMsgs(peer.id));
+  // v73 聊天小窗：msgs 升级为「会话共享源镜像」——同会话双开（全屏 + 小窗）时实时互通。
+  // 初始化 = 磁盘 ∥ 共享源合并（见 wxSessionMsgs.init）；setMsgs 保持旧签名（值/函数式），
+  // 函数式改读共享源计算（任一侧的写入都立即对两侧生效），订阅把 commit 广播回本实例 state
+  const [msgs, setMsgsState] = useState<WxMsg[]>(() => wxSessionMsgs.init(peer.id));
+  const setMsgs = useCallback(
+    (next: WxMsg[] | ((prev: WxMsg[]) => WxMsg[])) => {
+      wxSessionMsgs.commit(peer.id, next);
+    },
+    [peer.id],
+  );
+  useEffect(() => wxSessionMsgs.subscribe(peer.id, setMsgsState), [peer.id]);
   // 40-b 跨 App 环境感知：会话打开即预热（其他三个 App 最近原始消息 + 共同群近况），
   // 每轮 AI 回合开头再异步刷新一次；回合内同步读最近一次构建结果（systemFull 拼装是同步的）——
   // 首轮流通常发生在打开会话数秒后，预热必已就绪；空结果时对应块不注入，不阻断发送
@@ -5489,12 +5558,24 @@ function ChatPage({
   }, [sessionKey]);
   /** 登记当前正在查看的聊天：AI 回复落盘时按此决定是否计未读角标（退出聊天页后 AI 回复 → 角标 +1） */
   useEffect(() => {
-    wxActiveChatId = peer.id;
-    // 主动发消息角标守卫同步登记：用户正看着该会话时主动消息不涨角标（消息实时可见）
-    setActiveProactiveChat('wx', peer.id);
+    // v73 引用计数：同会话可能双开（全屏 + 小窗）——最后一个实例卸载才清 active 标记
+    const cid = peer.id;
+    const n = (wxActiveInstances.get(cid) ?? 0) + 1;
+    wxActiveInstances.set(cid, n);
+    if (n === 1) {
+      wxActiveChatId = cid;
+      // 主动发消息角标守卫同步登记：用户正看着该会话时主动消息不涨角标（消息实时可见）
+      setActiveProactiveChat('wx', cid);
+    }
     return () => {
-      if (wxActiveChatId === peer.id) wxActiveChatId = null;
-      setActiveProactiveChat('wx', null);
+      const left = (wxActiveInstances.get(cid) ?? 1) - 1;
+      if (left <= 0) {
+        wxActiveInstances.delete(cid);
+        if (wxActiveChatId === cid) wxActiveChatId = null;
+        setActiveProactiveChat('wx', null);
+      } else {
+        wxActiveInstances.set(cid, left);
+      }
     };
   }, [peer.id]);
   /** 搜索定位命中的消息 id（短暂高亮） */
@@ -9050,13 +9131,18 @@ function ChatPage({
       )}
       {/* 第四十七轮（用户指定「顶部会逐渐模糊」）：液态主题顶部渐变磨砂带——
           消息滚入顶栏下方被渐进模糊（顶缘全模糊 → 96px 处透明；不拦截交互，顶栏铭件浮于其上） */}
-      {liquid && <div aria-hidden="true" data-testid="wx-chat-top-blur" className="lg-top-blur pointer-events-none absolute inset-x-0 top-0 z-[15] h-[96px]" />}
+      {liquid && !float && <div aria-hidden="true" data-testid="wx-chat-top-blur" className="lg-top-blur pointer-events-none absolute inset-x-0 top-0 z-[15] h-[96px]" />}
       {/* 顶栏：与消息区/底部输入栏同色（微信灰，非白）；多选模式下变为「取消 + 已选计数」操作栏
           第三十四轮：pt-54→pt-48（顶部再往上移一点，仍避开 54px 状态栏内容区不重叠）
-          第三十六轮：pt-48→pt-42（再上移 6px，灵动岛/状态栏下方留白更紧凑；群聊会话页同步） */}
+          第三十六轮：pt-48→pt-42（再上移 6px，灵动岛/状态栏下方留白更紧凑；群聊会话页同步）
+          v73 小窗变体：常规顶栏隐藏（小窗外框标题条代替：拖拽把手 + 关闭/最小化/最大化），
+          仅多选模式渲染紧凑工具栏（pt-0——小窗内没有状态栏让位） */}
+      {float && !selectMode ? null : (
       <div
         className={
-          'wx-topbar ' +
+          float
+            ? 'wx-topbar relative z-10 shrink-0 bg-[#EDEDED] pt-0 dark:bg-[#111111]'
+            : 'wx-topbar ' +
           (liquid
             ? /* 液态（第四十五轮，用户指定）：删背景遮罩模糊带——顶栏完全透明悬浮，
                 名字改椭圆形玻璃胶囊包裹（参考图「永恩」同款） */
@@ -9221,6 +9307,27 @@ function ChatPage({
               </span>
             )}
           </div>
+          {/* v73 小窗模式：当前聊天缩小为全局悬浮小窗（切 App 不断、与全屏实时互通）——
+              点击即开小窗并退出全屏聊天（返回会话列表）；小窗顶栏不再显示本按钮 */}
+          {!float && (
+            <button
+              type="button"
+              aria-label="小窗模式"
+              title="小窗模式"
+              data-testid="wx-chat-float-btn"
+              onClick={() => {
+                openChatFloat(peer.id);
+                onBack();
+              }}
+              className={
+                liquid
+                  ? 'lg-chip flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-full active:opacity-60'
+                  : 'px-2 active:opacity-50'
+              }
+            >
+              <PictureInPicture2 className={liquid ? 'h-[18px] w-[18px]' : 'h-[22px] w-[22px]'} strokeWidth={2} />
+            </button>
+          )}
           <button
             type="button"
             aria-label="聊天信息"
@@ -9237,6 +9344,7 @@ function ChatPage({
         </div>
         )}
       </div>
+      )}
 
       {/* 消息列表：浅灰背景（同微信），自定义聊天背景时透出背景层。
           wx-chat-list：消息区锚点（聊天设置 › 自定义CSS 示例主题可改内边距/字体）。
