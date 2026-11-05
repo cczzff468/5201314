@@ -1210,6 +1210,11 @@ function FolderPanel({
 export default function HomeScreen() {
   const openApp = useUI((s) => s.openApp);
   const activeApp = useUI((s) => s.activeApp);
+  // v72.4：closing 阶段主屏就开始淡入（App 缩小时身后露出的是完整主屏+图标，
+  // 与 iOS 一致）；之前 activeApp 还在 → 主屏 opacity-0，App 缩完只剩壁纸，
+  // 即刻图标才突然淡入——叠加 scale 跳变就是「退出闪烁」的观感
+  const phase = useUI((s) => s.phase);
+  const homeVisible = !activeApp || phase === 'closing';
   // 主屏壁纸整体亮度：浅色壁纸（如白图）时图标标签/页点自动改深色，保证可读
   const wallpaperLight = useHomeWallpaperLight();
   // 深色模式（第六十七轮：文件夹 tile 适配深色——深色烟熏玻璃，与图标深色分支同源）
@@ -3276,7 +3281,7 @@ export default function HomeScreen() {
       ref={rootRef}
       className={`absolute inset-0 z-10 flex select-none flex-col pb-[38px] transition-[padding-top,opacity] duration-300 [touch-action:pan-y] ${
         edit ? 'pt-[112px]' : 'pt-[64px]'
-      } ${activeApp ? 'pointer-events-none opacity-0' : 'opacity-100'}`}
+      } ${homeVisible ? 'opacity-100' : 'pointer-events-none opacity-0'}`}
       onPointerDown={rootPointerDown}
       onPointerMove={rootPointerMove}
       onPointerUp={rootPointerUp}

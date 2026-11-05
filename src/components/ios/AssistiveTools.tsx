@@ -246,7 +246,7 @@ function PromptViewerSheet({ onClose }: { onClose: () => void }) {
             onChange={(e) => setContactId(e.target.value)}
             disabled={!contacts || contacts.length === 0}
             aria-label="选择角色"
-            className={`h-10 w-full appearance-none rounded-full border-0 pl-4 pr-9 text-[13px] font-medium text-foreground focus-visible:ring-2 focus-visible:ring-[#5AC8FA]/60 ${GLASS_GROUP}`}
+            className={`h-10 w-full appearance-none rounded-full border-0 pl-4 pr-9 text-[13px] font-medium text-foreground focus-visible:ring-2 focus-visible:ring-foreground/35 ${GLASS_GROUP}`}
             data-testid="assist-viewer-contact"
           >
             {contacts == null && <option value="">加载角色…</option>}
@@ -260,10 +260,11 @@ function PromptViewerSheet({ onClose }: { onClose: () => void }) {
           </select>
           <ChevronDown className="pointer-events-none absolute right-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground/70" />
         </div>
-        <span className={`rounded-full px-3 py-[6px] text-[11px] font-semibold ring-1 backdrop-blur-xl ${flags.anxietyOn ? 'bg-[#34C759]/15 text-[#248A3D] ring-[#34C759]/35 dark:text-[#30D158]' : `${GLASS_PILL_BTN} text-muted-foreground`}`}>
+        {/* v72.4 黑白化：状态胶囊 ON = 黑底白字（深色模式反白），不再用绿/珊瑚色底 */}
+        <span className={`rounded-full px-3 py-[6px] text-[11px] font-semibold ring-1 backdrop-blur-xl ${flags.anxietyOn ? 'bg-neutral-900 text-white ring-black/20 dark:bg-white dark:text-neutral-900 dark:ring-white/25' : `${GLASS_PILL_BTN} text-muted-foreground`}`}>
           追发 {flags.anxietyOn ? 'ON' : 'OFF'}
         </span>
-        <span className={`rounded-full px-3 py-[6px] text-[11px] font-semibold ring-1 backdrop-blur-xl ${flags.offlineOn ? 'bg-[#FF9500]/15 text-[#C93400] ring-[#FF9500]/35' : `${GLASS_PILL_BTN} text-muted-foreground`}`}>
+        <span className={`rounded-full px-3 py-[6px] text-[11px] font-semibold ring-1 backdrop-blur-xl ${flags.offlineOn ? 'bg-neutral-900 text-white ring-black/20 dark:bg-white dark:text-neutral-900 dark:ring-white/25' : `${GLASS_PILL_BTN} text-muted-foreground`}`}>
           线下 {flags.offlineOn ? 'ON' : 'OFF'}
         </span>
       </div>
@@ -311,7 +312,7 @@ function PromptViewerSheet({ onClose }: { onClose: () => void }) {
                 重新拼装
               </button>
               <button type="button" onClick={copySystem} className={`flex items-center gap-1 rounded-full px-2.5 py-1 font-medium text-foreground/75 ${GLASS_PILL_BTN}`}>
-                {copied ? <Check className="h-3 w-3 text-[#34C759]" /> : <Copy className="h-3 w-3" />}
+                {copied ? <Check className="h-3 w-3 text-foreground" /> : <Copy className="h-3 w-3" />}
                 {copied ? '已复制' : '复制 System'}
               </button>
             </span>
@@ -329,7 +330,7 @@ function PromptViewerSheet({ onClose }: { onClose: () => void }) {
 
           {/* System Prompt（深色玻璃终端风代码块） */}
           <p className="mt-3.5 mb-1.5 flex items-center gap-1.5 text-[11px] font-bold tracking-widest text-muted-foreground">
-            <span className="inline-block h-[7px] w-[7px] rounded-full bg-[#5AC8FA]" aria-hidden />
+            <span className="inline-block h-[7px] w-[7px] rounded-full bg-neutral-500 dark:bg-white/60" aria-hidden />
             SYSTEM PROMPT
           </p>
           <pre className={`thin-scrollbar max-h-72 overflow-y-auto overscroll-contain rounded-[18px] px-3.5 py-3 font-mono text-[10.5px] leading-[1.65] break-words whitespace-pre-wrap ${GLASS_CODE}`} data-testid="assist-viewer-system">
@@ -338,13 +339,13 @@ function PromptViewerSheet({ onClose }: { onClose: () => void }) {
 
           {/* Context 消息 */}
           <p className="mt-3.5 mb-1.5 flex items-center gap-1.5 text-[11px] font-bold tracking-widest text-muted-foreground">
-            <span className="inline-block h-[7px] w-[7px] rounded-full bg-[#34C759]" aria-hidden />
+            <span className="inline-block h-[7px] w-[7px] rounded-full bg-neutral-500 dark:bg-white/60" aria-hidden />
             CONTEXT（最近对话）
           </p>
           <div className="flex flex-col gap-2">
             {result.messages.slice(1).map((m, i) => (
               <div key={i}>
-                <p className={`mb-1 ml-1 text-[10px] font-bold ${m.role === 'user' ? 'text-[#5AC8FA]' : 'text-[#34C759]'}`}>
+                <p className={`mb-1 ml-1 text-[10px] font-bold ${m.role === 'user' ? 'text-foreground/85' : 'text-foreground/55'}`}>
                   {m.role === 'user' ? 'user（机主）' : 'assistant（TA）'}
                 </p>
                 <pre className={`thin-scrollbar max-h-40 overflow-y-auto overscroll-contain rounded-[16px] px-3.5 py-2.5 font-mono text-[10.5px] leading-[1.6] break-words whitespace-pre-wrap ${GLASS_CODE}`}>
@@ -364,7 +365,7 @@ function PromptViewerSheet({ onClose }: { onClose: () => void }) {
 
 // ---------------- 弹窗二：快捷操作 ----------------
 
-/** 列表行（API / 世界书共用）：毛玻璃胶囊行，当前选中 = 浅绿胶囊底 + 绿色对勾（参考图同款） */
+/** 列表行（API / 世界书共用）：毛玻璃胶囊行，v72.4 黑白化——当前选中 = 中性深色对勾（无彩色） */
 function QuickRow({ label, value, active, onClick, testId }: { label: string; value?: string; active: boolean; onClick: () => void; testId?: string }) {
   return (
     <button
@@ -373,17 +374,17 @@ function QuickRow({ label, value, active, onClick, testId }: { label: string; va
       data-testid={testId}
       className={`flex min-h-[46px] w-full items-center gap-2.5 rounded-full px-3.5 py-2 text-left transition-all ${
         active
-          ? 'bg-[#34C759]/[0.14] ring-1 ring-[#34C759]/40'
+          ? 'bg-black/[0.07] ring-1 ring-black/[0.10] dark:bg-white/[0.10] dark:ring-white/[0.14]'
           : 'active:bg-black/[0.05] dark:active:bg-white/[0.07]'
       }`}
     >
-      <span className={`min-w-0 flex-1 ${active ? 'text-[#248A3D] dark:text-[#30D158]' : 'text-foreground'}`}>
+      <span className="min-w-0 flex-1 text-foreground">
         <span className="block truncate text-[14px] font-semibold leading-tight">{label}</span>
         {value ? <span className="mt-0.5 block truncate text-[11px] leading-tight text-muted-foreground">{value}</span> : null}
       </span>
       {active ? (
-        <span className="flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-full bg-[#34C759] shadow-[0_2px_8px_rgba(52,199,89,0.45)]">
-          <Check className="h-[13px] w-[13px] text-white" strokeWidth={3} />
+        <span className="flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-full bg-neutral-900 shadow-[0_2px_8px_rgba(0,0,0,0.35)] dark:bg-white dark:shadow-[0_2px_8px_rgba(255,255,255,0.25)]">
+          <Check className="h-[13px] w-[13px] text-white dark:text-neutral-900" strokeWidth={3} />
         </span>
       ) : (
         <span className="w-[22px]" />
@@ -534,7 +535,7 @@ function QuickOpsSheet({ onClose }: { onClose: () => void }) {
             <span className="truncate text-[11px] text-muted-foreground">
               当前聊天：{activeChat.app === 'wx' ? '微信' : activeChat.app === 'qq' ? 'QQ' : '信息'} · {activeChat.name}
             </span>
-            <button type="button" onClick={clearBindings} className="shrink-0 rounded-full bg-[#34C759]/12 px-2.5 py-[3px] text-[11px] font-semibold text-[#248A3D] ring-1 ring-[#34C759]/30 dark:text-[#30D158]">
+            <button type="button" onClick={clearBindings} className="shrink-0 rounded-full bg-black/[0.06] px-2.5 py-[3px] text-[11px] font-semibold text-foreground/75 ring-1 ring-black/[0.08] dark:bg-white/10 dark:text-white/80 dark:ring-white/[0.12]">
               清空
             </button>
           </span>
@@ -566,7 +567,7 @@ function QuickOpsSheet({ onClose }: { onClose: () => void }) {
           : '先在微信/QQ/信息里打开一个聊天，这里就能一键把世界书挂上去。'}
       </p>
       {hint ? (
-        <p className={`mt-2.5 rounded-full px-4 py-2.5 text-center text-[12px] font-medium text-[#248A3D] ring-1 ring-[#34C759]/30 backdrop-blur-xl dark:text-[#30D158]`} style={{ background: 'rgba(52,199,89,0.1)' }} data-testid="assist-quickops-hint">
+        <p className={`mt-2.5 rounded-full px-4 py-2.5 text-center text-[12px] font-medium text-foreground/85 ring-1 ring-black/[0.08] backdrop-blur-xl dark:text-white/85 dark:ring-white/[0.12]`} style={{ background: 'rgba(127,127,127,0.1)' }} data-testid="assist-quickops-hint">
           {hint}
         </p>
       ) : null}
