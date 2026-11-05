@@ -39,9 +39,9 @@ const ChatPageMemo = memo(ChatPage);
 const ZOOM = 0.9;
 /** 标题条高度（px，内容区像素尺寸计算配套） */
 const HEADER_H = 34;
-/** 小窗尺寸（相对手机屏幕层）：宽约 75%（v73.1 用户反馈「左右太窄」由 42% 加宽），高度适中 */
-const WIN_W_RATIO = 0.75;
-const WIN_H_RATIO = 0.6;
+/** 小窗尺寸（相对手机屏幕层）：v73.2 宽 88%（用户要求「再宽一点」），高 48%（「上下变小一点」——扁宽形态） */
+const WIN_W_RATIO = 0.88;
+const WIN_H_RATIO = 0.48;
 /** 吸附/边界留白 */
 const EDGE = 6;
 const TOP_MIN = 54;
