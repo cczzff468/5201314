@@ -224,7 +224,7 @@ function LibEntryCard({
 
   return (
     <div data-testid={`lib-entry-${entry.key}`} className={glassEntry(open, off)}>
-      {/* 胶囊头：编号 + 标题 + 状态徽章 + 开关 */}
+      {/* 胶囊头：编号 + 标题 + 状态徽章 + 开关 + 右侧箭头（v68.1 统一：箭头一律靠右，与 App/分类面板一致） */}
       <div className="flex items-center gap-2 px-3 py-[7px]">
         <button
           type="button"
@@ -232,9 +232,6 @@ function LibEntryCard({
           className="flex min-w-0 flex-1 items-center gap-1.5 text-left"
           aria-expanded={open}
         >
-          <ChevronDown
-            className={`h-3.5 w-3.5 shrink-0 text-muted-foreground/70 transition-transform duration-300 ${open ? 'rotate-180' : ''}`}
-          />
           {entry.n && (
             <span className="shrink-0 rounded-full bg-black/[0.06] px-1.5 py-[1px] font-mono text-[10px] leading-[15px] text-muted-foreground dark:bg-white/10 dark:text-zinc-300">
               {entry.n}
@@ -254,6 +251,9 @@ function LibEntryCard({
             onCheckedChange={(v) => onToggle(entry.key, v)}
             aria-label={`启用 ${entry.title}`}
             data-testid={`lib-switch-${entry.key}`}
+          />
+          <ChevronDown
+            className={`h-3.5 w-3.5 shrink-0 text-muted-foreground/70 transition-transform duration-300 ${open ? 'rotate-180' : ''}`}
           />
         </span>
       </div>
@@ -499,12 +499,13 @@ export function PresetLibrarySection({ onToast }: { onToast: (m: string) => void
       {/* 区块头：玻璃说明卡 + 统计胶囊 */}
       <div className={GLASS_PANEL}>
         <div className="flex flex-col gap-2.5 px-4 py-4">
-          <div className="flex items-center gap-2.5">
+          {/* v68.1：flex-wrap + 标题不收缩不折行——窄屏下统计胶囊整组换行到第二行，不再挤压标题/溢出右缘 */}
+          <div className="flex flex-wrap items-center gap-2.5">
             <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-[#AF52FF] to-[#FF2D55] text-white shadow-[0_4px_12px_rgba(175,82,255,0.4)]">
               <Sparkles className="h-3.5 w-3.5" strokeWidth={2.4} />
             </span>
-            <p className="text-[14.5px] font-semibold">全量提示词库</p>
-            <span className="ml-auto flex items-center gap-1.5">
+            <p className="shrink-0 whitespace-nowrap text-[14.5px] font-semibold">全量提示词库</p>
+            <span className="ml-auto flex flex-wrap items-center justify-end gap-1.5">
               {index && <Pill>{index.apps.length} 个 App</Pill>}
               {index && <Pill>{index.total} 条</Pill>}
               {wiredSet.size > 0 && <Pill tone="green">已接线 {wiredSet.size}</Pill>}

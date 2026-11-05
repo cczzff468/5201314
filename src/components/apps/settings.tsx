@@ -6469,7 +6469,6 @@ function PromptEntriesPage({ onBack }: { onBack: () => void }) {
             className="flex min-w-0 flex-1 items-center gap-1.5 text-left"
             aria-expanded={open}
           >
-            <ChevronDown className={`h-3.5 w-3.5 shrink-0 text-muted-foreground/70 transition-transform ${open ? 'rotate-180' : ''}`} />
             <span className="min-w-0 flex-1 truncate text-[13px] font-medium">{e.title}</span>
           </button>
           <Switch
@@ -6481,6 +6480,8 @@ function PromptEntriesPage({ onBack }: { onBack: () => void }) {
             }}
             aria-label={`启用 ${e.title}`}
           />
+          {/* v68.1 统一：箭头移到右侧 */}
+          <ChevronDown className={`h-3.5 w-3.5 shrink-0 text-muted-foreground/70 transition-transform ${open ? 'rotate-180' : ''}`} />
         </div>
         {open && (
           <div className="border-t border-black/[0.05] px-3 py-3 dark:border-white/10">
@@ -6584,6 +6585,7 @@ function PromptEntriesPage({ onBack }: { onBack: () => void }) {
               {selected.has(key) && <Check className="h-3 w-3" strokeWidth={3} />}
             </button>
           )}
+          {/* v68.1 统一：箭头移到右侧（开关之后），与全量库 App/分类/条目面板的右侧箭头一致 */}
           <button
             type="button"
             onClick={() => {
@@ -6594,10 +6596,10 @@ function PromptEntriesPage({ onBack }: { onBack: () => void }) {
             aria-expanded={open}
             data-testid={`prompt-group-head-${key}`}
           >
-            <ChevronDown className={`h-4 w-4 shrink-0 text-muted-foreground/70 transition-transform ${open ? 'rotate-180' : ''}`} />
             <span className="min-w-0 flex-1 truncate text-[14.5px] font-semibold">{g.title}</span>
           </button>
           <Switch checked={on} onCheckedChange={(v) => toggleGroup(key, v)} aria-label={`启用 ${g.title}`} data-testid={`prompt-group-switch-${key}`} />
+          <ChevronDown className={`h-4 w-4 shrink-0 text-muted-foreground/70 transition-transform ${open ? 'rotate-180' : ''}`} />
         </div>
 
         {/* 深度行：v66 删掉了 App/条数标签，仅保留组深度调节；v68 胶囊化 */}
