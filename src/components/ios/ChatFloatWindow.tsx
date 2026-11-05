@@ -35,13 +35,13 @@ import { useChatStream } from '@/lib/chat-stream-store';
 /** ChatPage 的 memo 包装（模块级单例）：配合下方 chatEl 的 props 冻结，拖动重渲染不穿透聊天子树 */
 const ChatPageMemo = memo(ChatPage);
 
-/** 小窗内容缩放（zoom：真实重排缩放——小窗容器窄，缩放后文字/气泡按比例排布不裁切；v73.1 加宽后升到 0.9 提升可读性） */
-const ZOOM = 0.9;
+/** 小窗内容缩放（zoom：真实重排缩放——小窗容器窄，缩放后文字/气泡按比例排布不裁切；v73.3 整体变小降至 0.82） */
+const ZOOM = 0.82;
 /** 标题条高度（px，内容区像素尺寸计算配套） */
 const HEADER_H = 34;
-/** 小窗尺寸（相对手机屏幕层）：v73.2 宽 88%（用户要求「再宽一点」），高 48%（「上下变小一点」——扁宽形态） */
-const WIN_W_RATIO = 0.88;
-const WIN_H_RATIO = 0.48;
+/** 小窗尺寸（相对手机屏幕层）：v73.3 用户要求「整体变小」——宽 88%→70%，高 48%→40%（紧凑形） */
+const WIN_W_RATIO = 0.7;
+const WIN_H_RATIO = 0.4;
 /** 吸附/边界留白 */
 const EDGE = 6;
 const TOP_MIN = 54;
