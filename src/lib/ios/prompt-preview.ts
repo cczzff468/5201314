@@ -49,7 +49,7 @@ import { togetherLiveBlock } from '@/lib/ios/music-remote';
 import { listAlbumsForChat } from '@/lib/ios/album-store';
 import { effectiveInterop } from '@/lib/ios/groups';
 import { kvGet } from '@/lib/ios/idb-kv';
-import { getProactiveCfg } from '@/lib/ios/proactive-msg';
+import { getProactiveCfg, getActiveProactiveChats } from '@/lib/ios/proactive-msg';
 import { loadMeet } from '@/lib/offline-meet';
 
 // ---------------- 类型 ----------------
@@ -640,4 +640,31 @@ export async function buildChatPreview(channel: PreviewChannel, contactId: strin
 export async function listPreviewContacts(): Promise<ContactRecord[]> {
   const all = await listContacts();
   return all.filter((c) => c.kind === 'char' || c.kind === 'npc');
+}
+
+/**
+ * 渠道自动推导（v72.3 查看器移除 微信/QQ/信息 标签后）：
+ * 1) 该角色正打开在某个聊天里 → 用那个 App（正在聊哪就预览哪）；
+ * 2) 否则取三端里「最近一条消息」时间最新的 App；
+ * 3) 三端都没记录 → 兜底微信。
+ * 全程同步内存读（kvGet 内存缓存 + activeChats Map），渲染期调用无副作用。
+ */
+export function resolvePreviewChannel(contactId: string): PreviewChannel {
+  const active = getActiveProactiveChats().find((a) => a.cid === contactId);
+  if (active) return active.app;
+  let best: PreviewChannel = 'wx';
+  let bestTime = -1;
+  for (const ch of ['wx', 'qq', 'sms'] as const) {
+    const msgs = kvMsgs(ch === 'sms' ? `ios-chat-msgs:c:${contactId}` : `${ch}-chat-msgs:${contactId}`);
+    let last = -1;
+    for (const m of msgs) {
+      const t = asNum(m.time);
+      if (t > last) last = t;
+    }
+    if (last > bestTime) {
+      best = ch;
+      bestTime = last;
+    }
+  }
+  return best;
 }

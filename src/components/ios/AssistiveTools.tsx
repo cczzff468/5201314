@@ -1,19 +1,17 @@
 'use client';
 
 /**
- * 全局悬浮工具（v72.2）：设置 › 悬浮工具 开关开启后，手机右下角出现可拖拽悬浮球
- * （iOS 辅助触控同款交互：渐变玻璃球 + 同心圆环图标），点按弹出毛玻璃胶囊菜单：
+ * 全局悬浮工具（v72.3）：设置 › 悬浮工具 开关开启后，手机右下角出现可拖拽悬浮球
+ * （iOS 辅助触控同款交互：黑白色磨砂玻璃球 + 同心圆环图标），点按弹出毛玻璃胶囊菜单：
  *
- * - 提示词查看器：选 App（微信/QQ/信息）+ 角色 → 打开即自动本地拼装
- *   （@/lib/ios/prompt-preview，与真实发送同一套库函数）下一轮完整 System Prompt +
- *   Context（人设/记忆/世界书/聊天记录），代码块展示。纯只读——不请求网络、
- *   不消耗 Token、不打断进行中的对话；v72.2 起「预览 Prompt」按钮移除，
- *   打开弹窗 / 切换 App / 切换角色即自动重拼，仅保留小刷新按钮；
+ * - 提示词查看器：选角色 → 打开即自动本地拼装（@/lib/ios/prompt-preview，
+ *   与真实发送同一套库函数）下一轮完整 System Prompt + Context（人设/记忆/世界书/聊天记录），
+ *   代码块展示。纯只读——不请求网络、不消耗 Token、不打断进行中的对话；
+ *   v72.2 起「预览 Prompt」按钮移除，打开弹窗 / 切换角色即自动重拼，仅保留小刷新按钮；
+ *   v72.3 起微信/QQ/信息 App 标签移除——渠道自动推导（resolvePreviewChannel：
+ *   正在聊天的 App 优先，其次最近有消息的 App，兜底微信），打开时默认选中当前聊天角色；
  * - 快捷操作：API 预设一键切换（全局 apiConfig 立即生效）+ 世界书一键挂载到当前聊天
  *   （getActiveProactiveChats 探测正打开的会话；下次发送即生效）。
- *
- * v72.2 修复：弹窗外壳此前漏了 pointer-events-auto（外层 layer 是 pointer-events-none，
- * 导致弹窗内所有按钮/滚动完全点击穿透「没反应」）——现已补上。
  *
  * 层级 z-[56]：高于 App 窗口（z-40）与迷你播放器（z-55），低于多任务切换器（z-60）/
  * 锁屏（z-65）——锁定/熄屏/多任务时隐藏。data-suppress-edge-gesture：防止拖球触发
@@ -24,7 +22,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { BookOpen, Check, ChevronDown, Code2, Copy, Eye, Loader2, RefreshCw, SlidersHorizontal, X } from 'lucide-react';
 import { useSettings, useUI } from '@/lib/ios/store';
-import { buildChatPreview, listPreviewContacts, CHANNEL_LABELS, type PreviewChannel, type PreviewResult } from '@/lib/ios/prompt-preview';
+import { buildChatPreview, listPreviewContacts, resolvePreviewChannel, type PreviewResult } from '@/lib/ios/prompt-preview';
 import { getActiveProactiveChats } from '@/lib/ios/proactive-msg';
 import { loadBooks, saveBooks, getBoundBookIds, setBoundBookIds, type WorldBook } from '@/lib/ios/worldbook';
 import { listContacts } from '@/lib/ios/contacts-store';
@@ -43,10 +41,21 @@ const BUILTIN_API_PRESETS: { name: string; baseUrl: string; model: string }[] = 
   { name: '智谱 GLM', baseUrl: 'https://open.bigmodel.cn/api/paas/v4/chat/completions', model: 'glm-4-flash' },
 ];
 
-const CHANNELS: PreviewChannel[] = ['wx', 'qq', 'sms'];
-
 /** 悬浮球位置持久化（相对右下锚点的 x/y 偏移；localStorage） */
 const BALL_POS_KEY = 'assist-ball-pos';
+
+/** 球尺寸与右下偏移（与 className 同步：h/w-52 + right-14 / bottom-104） */
+const BALL_SIZE = 52;
+const BALL_RIGHT = 14;
+const BALL_BOTTOM = 104;
+
+/** 把悬浮球偏移钳回层内（球完全保持在手机框内，与 dragConstraints 同一约束盒） */
+function clampBallPos(x: number, y: number, layerW: number, layerH: number): { x: number; y: number } {
+  return {
+    x: Math.min(Math.max(x, -(layerW - BALL_RIGHT - BALL_SIZE)), BALL_RIGHT),
+    y: Math.min(Math.max(y, -(layerH - BALL_BOTTOM - BALL_SIZE)), BALL_BOTTOM),
+  };
+}
 
 /** 当前 apiConfig 是否就是某份预设配置（baseUrl+model+key 三者一致才算「当前选中」） */
 function sameConfig(a: ApiConfig, b: Partial<ApiConfig>): boolean {
@@ -105,9 +114,9 @@ function SheetShell({
       >
         {/* iOS 抓手条 */}
         <span aria-hidden className="mx-auto mt-2 block h-[5px] w-9 shrink-0 rounded-full bg-black/[0.12] dark:bg-white/20" />
-        {/* 标题栏 */}
+        {/* 标题栏（黑白风图标圆片：浅色模式黑底白图标，深色模式白底黑图标） */}
         <div className="flex items-center gap-2.5 px-4 pb-2.5 pt-2">
-          <span className="flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-[#5AC8FA] to-[#34C759] text-white shadow-[0_4px_12px_rgba(52,199,89,0.35)] ring-2 ring-white/50" aria-hidden>
+          <span className="flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-neutral-800 to-black text-white shadow-[0_4px_12px_rgba(0,0,0,0.32)] ring-2 ring-white/55 dark:from-white dark:to-neutral-300 dark:text-neutral-900 dark:ring-white/20" aria-hidden>
             {icon}
           </span>
           <span className="min-w-0 flex-1">
@@ -132,7 +141,6 @@ function SheetShell({
 // ---------------- 弹窗一：提示词查看器 ----------------
 
 function PromptViewerSheet({ onClose }: { onClose: () => void }) {
-  const [channel, setChannel] = useState<PreviewChannel>('wx');
   const [contacts, setContacts] = useState<ContactRecord[] | null>(null);
   const [contactId, setContactId] = useState('');
   const [reloadKey, setReloadKey] = useState(0);
@@ -160,13 +168,22 @@ function PromptViewerSheet({ onClose }: { onClose: () => void }) {
     }
   })();
 
+  // v72.3：App 标签移除——渠道渲染期自动推导（正在聊天的 App 优先，
+  // 其次最近有消息的 App，兜底微信；同步内存读，无副作用），统计行里以小胶囊展示结果
+  const channel = contactId ? resolvePreviewChannel(contactId) : 'wx';
+
   useEffect(() => {
     let alive = true;
     void listPreviewContacts()
       .then((list) => {
         if (!alive) return;
         setContacts(list);
-        if (list.length > 0) setContactId((cur) => (cur && list.some((c) => c.id === cur) ? cur : list[0].id));
+        if (list.length > 0) {
+          // 默认选中当前正打开的聊天角色（没打开聊天则第一个）
+          const act = getActiveProactiveChats();
+          const preferred = act.length > 0 && list.some((c) => c.id === act[act.length - 1].cid) ? act[act.length - 1].cid : '';
+          setContactId((cur) => (cur && list.some((c) => c.id === cur) ? cur : preferred || list[0].id));
+        }
       })
       .catch(() => alive && setContacts([]));
     return () => {
@@ -174,7 +191,7 @@ function PromptViewerSheet({ onClose }: { onClose: () => void }) {
     };
   }, []);
 
-  // v72.2：打开弹窗 / 切 App / 切角色即自动拼装（原「预览 Prompt」大按钮已删除）。
+  // v72.2：打开弹窗 / 切角色即自动拼装（原「预览 Prompt」大按钮已删除）。
   // 快速连续切换时旧拼装结果丢弃（key 不匹配 / alive 已置 false），只保留最后一次。
   const curKey = `${channel}|${contactId}|${reloadKey}`;
   useEffect(() => {
@@ -221,29 +238,8 @@ function PromptViewerSheet({ onClose }: { onClose: () => void }) {
       onClose={onClose}
       testId="assist-viewer-sheet"
     >
-      {/* App 标签（毛玻璃胶囊，横向排列） */}
-      <div className="flex flex-wrap gap-1.5" role="tablist" aria-label="选择 App">
-        {CHANNELS.map((c) => (
-          <button
-            key={c}
-            type="button"
-            role="tab"
-            aria-selected={channel === c}
-            onClick={() => setChannel(c)}
-            className={`rounded-full px-4 py-[7px] text-[12.5px] font-semibold transition-all ${
-              channel === c
-                ? 'bg-gradient-to-r from-[#5AC8FA] to-[#34C759] text-white shadow-[0_3px_10px_rgba(52,199,89,0.35)] ring-1 ring-white/40'
-                : `${GLASS_PILL_BTN} text-foreground/70`
-            }`}
-            data-testid={`assist-viewer-tab-${c}`}
-          >
-            {CHANNEL_LABELS[c]}
-          </button>
-        ))}
-      </div>
-
-      {/* 角色选择 + 追发/线下状态胶囊 */}
-      <div className="mt-3 flex flex-wrap items-center gap-2">
+      {/* 角色选择 + 追发/线下状态胶囊（v72.3：App 标签已移除，渠道自动跟随当前聊天/最近消息） */}
+      <div className="mt-1 flex flex-wrap items-center gap-2">
         <div className="relative min-w-[128px] flex-1">
           <select
             value={contactId}
@@ -275,7 +271,7 @@ function PromptViewerSheet({ onClose }: { onClose: () => void }) {
       {/* 拼装中 */}
       {loading && !result ? (
         <div className="mt-10 mb-6 flex flex-col items-center gap-2.5 text-muted-foreground">
-          <Loader2 className="h-6 w-6 animate-spin text-[#5AC8FA]" />
+          <Loader2 className="h-6 w-6 animate-spin text-neutral-500 dark:text-white/75" />
           <p className="text-[13px] font-medium">正在本地拼装 Prompt…</p>
           <p className="text-[11px]">角色人设 · 记忆 · 世界书 · 聊天记录</p>
         </div>
@@ -294,8 +290,11 @@ function PromptViewerSheet({ onClose }: { onClose: () => void }) {
       ) : null}
       {result ? (
         <div className="mt-3.5">
-          {/* 统计行 + 刷新/复制小胶囊按钮 */}
+          {/* 统计行（含自动识别的 App 渠道胶囊）+ 刷新/复制小胶囊按钮 */}
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 px-0.5 text-[11px] text-muted-foreground">
+            <span className={`rounded-full px-2.5 py-[3px] text-[10.5px] font-semibold text-foreground/75 ${GLASS_GROUP}`} data-testid="assist-viewer-channel">
+              {result.channelLabel}
+            </span>
             <span className="font-semibold text-foreground/85">{result.contactName}</span>
             <span>{result.messages.length} 条消息</span>
             <span>约 {Math.round(result.systemFull.length / 2)} tokens（估）</span>
@@ -355,7 +354,7 @@ function PromptViewerSheet({ onClose }: { onClose: () => void }) {
             ))}
           </div>
           <p className="mt-3 rounded-[16px] px-3.5 py-2.5 text-[10.5px] leading-relaxed text-muted-foreground/80 dark:text-white/55" style={{ background: 'rgba(127,127,127,0.07)' }}>
-            与真实发送同一套拼装函数（人设 → 记忆 → 世界书 → 动态块 → 历史）；预览没有「本轮新消息」，记忆/世界书按最近历史扫描。待处理红包/转账动作规则按本轮卡片状态注入，预览中省略。
+            与真实发送同一套拼装函数（人设 → 记忆 → 世界书 → 动态块 → 历史）；App 自动跟随当前聊天（没打开聊天时取最近有消息的 App）。预览没有「本轮新消息」，记忆/世界书按最近历史扫描。待处理红包/转账动作规则按本轮卡片状态注入，预览中省略。
           </p>
         </div>
       ) : null}
@@ -480,7 +479,7 @@ function QuickOpsSheet({ onClose }: { onClose: () => void }) {
     >
       {/* ---- API 区块 ---- */}
       <div className="flex items-center gap-2 px-1 pb-1.5 pt-0.5">
-        <span className="flex h-6 w-6 items-center justify-center rounded-full bg-gradient-to-br from-[#5AC8FA] to-[#007AFF] text-white shadow-[0_2px_8px_rgba(0,122,255,0.35)]" aria-hidden>
+        <span className="flex h-6 w-6 items-center justify-center rounded-full bg-gradient-to-br from-neutral-800 to-black text-white shadow-[0_2px_8px_rgba(0,0,0,0.30)] dark:from-white dark:to-neutral-300 dark:text-neutral-900" aria-hidden>
           <Code2 className="h-3.5 w-3.5" strokeWidth={2.4} />
         </span>
         <span className="text-[13.5px] font-bold text-foreground">API</span>
@@ -526,7 +525,7 @@ function QuickOpsSheet({ onClose }: { onClose: () => void }) {
 
       {/* ---- 世界书区块 ---- */}
       <div className="mt-4 flex items-center gap-2 px-1 pb-1.5">
-        <span className="flex h-6 w-6 items-center justify-center rounded-full bg-gradient-to-br from-[#34C759] to-[#30B0C7] text-white shadow-[0_2px_8px_rgba(52,199,89,0.35)]" aria-hidden>
+        <span className="flex h-6 w-6 items-center justify-center rounded-full bg-gradient-to-br from-neutral-700 to-neutral-900 text-white shadow-[0_2px_8px_rgba(0,0,0,0.30)] dark:from-white dark:to-neutral-300 dark:text-neutral-900" aria-hidden>
           <BookOpen className="h-3.5 w-3.5" strokeWidth={2.4} />
         </span>
         <span className="text-[13.5px] font-bold text-foreground">世界书</span>
@@ -618,6 +617,24 @@ export default function AssistiveTools() {
   });
   const dragMovedRef = useRef(false);
 
+  // v72.3 一次性自愈：老版本（v72.2 及之前）存过越界偏移会让球停在手机框外
+  // （被框体裁剪到不可见/点不到）——挂载后按层尺寸拉回框内并回写存储。
+  // 拖拽落点已在上锁钳位，这里对正常 pos 是无操作，不会循环
+  useEffect(() => {
+    if (!pos) return;
+    const lr = layerRef.current?.getBoundingClientRect();
+    if (!lr || lr.width === 0 || lr.height === 0) return;
+    const p = clampBallPos(pos.x, pos.y, lr.width, lr.height);
+    if (p.x !== pos.x || p.y !== pos.y) {
+      setPos(p);
+      try {
+        window.localStorage.setItem(BALL_POS_KEY, JSON.stringify(p));
+      } catch {
+        /* 存储不可用仅本次会话生效 */
+      }
+    }
+  }, [pos]);
+
   const enabled = viewerOn || quickOpsOn;
   const visible = enabled && !locked && !screenOff && !switcherOpen;
 
@@ -675,7 +692,8 @@ export default function AssistiveTools() {
         />
       ) : null}
 
-      {/* 悬浮球：蓝绿渐变玻璃球 + 白色高光 + iOS 辅助触控同款同心圆环图标 + 彩色光晕 */}
+      {/* 悬浮球（v72.3 黑白色风格）：浅色模式 = 磨砂白玻璃球 + 炭黑同心圆环，
+          深色模式 = 磨砂黑玻璃球 + 纯白圆环——iOS 辅助触控同款单色质感，中性阴影 */}
       <motion.button
         type="button"
         aria-label="悬浮工具"
@@ -698,7 +716,13 @@ export default function AssistiveTools() {
           }
         }}
         onDragEnd={(_e, info) => {
-          const p = { x: info.offset.x, y: info.offset.y };
+          // v72.3 修复：不能用 info.offset 直接当位置（只是本次手势的位移，会丢掉
+          // 拖前的历史偏移，松手后球会瞬移）——累加到上次保存的位置，再钳回层内
+          // （与 dragConstraints 同一约束盒，弹性越界也一并修正），松手原地定格无跳变
+          const lr = layerRef.current?.getBoundingClientRect();
+          const base = pos ?? { x: 0, y: 0 };
+          const raw = { x: base.x + info.offset.x, y: base.y + info.offset.y };
+          const p = lr && lr.width > 0 ? clampBallPos(raw.x, raw.y, lr.width, lr.height) : raw;
           setPos(p);
           try {
             window.localStorage.setItem(BALL_POS_KEY, JSON.stringify(p));
@@ -708,15 +732,15 @@ export default function AssistiveTools() {
         }}
         animate={pos ? { x: pos.x, y: pos.y } : undefined}
         transition={{ duration: 0.16 }}
-        className="pointer-events-auto absolute bottom-[104px] right-[14px] flex h-[52px] w-[52px] touch-none select-none items-center justify-center rounded-full bg-gradient-to-br from-[#5AC8FA] via-[#4CD97B] to-[#2FB558] shadow-[0_8px_26px_rgba(56,190,120,0.5)] ring-[3px] ring-white/60"
+        className="pointer-events-auto absolute bottom-[104px] right-[14px] flex h-[52px] w-[52px] touch-none select-none items-center justify-center rounded-full bg-gradient-to-b from-white/95 to-white/70 shadow-[inset_0_1px_1.5px_rgba(255,255,255,0.95),0_10px_26px_rgba(0,0,0,0.30)] ring-1 ring-black/[0.10] backdrop-blur-xl dark:from-[#2C2C2E]/92 dark:to-[#161618]/88 dark:shadow-[inset_0_1px_1.5px_rgba(255,255,255,0.18),0_10px_26px_rgba(0,0,0,0.55)] dark:ring-white/[0.18]"
         data-testid="assist-ball"
         ref={ballRef}
       >
         {/* 玻璃高光（上半月牙） */}
-        <span aria-hidden className="pointer-events-none absolute inset-[3px] rounded-full bg-gradient-to-b from-white/45 via-white/5 to-transparent" />
-        {/* 同心圆环 + 中心亮点（辅助触控同款） */}
-        <span aria-hidden className="relative flex h-[26px] w-[26px] items-center justify-center rounded-full border-[2.5px] border-white/95">
-          <span className="h-[9px] w-[9px] rounded-full bg-white shadow-[0_0_8px_rgba(255,255,255,0.95)]" />
+        <span aria-hidden className="pointer-events-none absolute inset-[3px] rounded-full bg-gradient-to-b from-white/75 via-white/10 to-transparent dark:from-white/[0.16] dark:via-white/[0.02]" />
+        {/* 同心圆环 + 中心亮点（黑白色：白球黑环 / 黑球白环） */}
+        <span aria-hidden className="relative flex h-[26px] w-[26px] items-center justify-center rounded-full border-[2.5px] border-neutral-800 dark:border-white/95">
+          <span className="h-[9px] w-[9px] rounded-full bg-neutral-900 shadow-[0_0_8px_rgba(0,0,0,0.35)] dark:bg-white dark:shadow-[0_0_8px_rgba(255,255,255,0.6)]" />
         </span>
       </motion.button>
 
@@ -739,7 +763,7 @@ export default function AssistiveTools() {
                 className="flex w-full items-center gap-2.5 rounded-full px-2 py-2 text-left transition-colors active:bg-black/[0.06] dark:active:bg-white/[0.08]"
                 data-testid="assist-menu-viewer"
               >
-                <span className="flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-[#5AC8FA] to-[#007AFF] text-white shadow-[0_3px_10px_rgba(0,122,255,0.35)] ring-2 ring-white/45" aria-hidden>
+                <span className="flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-neutral-800 to-black text-white shadow-[0_3px_10px_rgba(0,0,0,0.32)] ring-2 ring-white/60 dark:from-white dark:to-neutral-300 dark:text-neutral-900 dark:ring-white/25" aria-hidden>
                   <Eye className="h-[17px] w-[17px]" strokeWidth={2.3} />
                 </span>
                 <span className="min-w-0 flex-1">
@@ -755,7 +779,7 @@ export default function AssistiveTools() {
                 className="flex w-full items-center gap-2.5 rounded-full px-2 py-2 text-left transition-colors active:bg-black/[0.06] dark:active:bg-white/[0.08]"
                 data-testid="assist-menu-quickops"
               >
-                <span className="flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-[#34C759] to-[#30B0C7] text-white shadow-[0_3px_10px_rgba(52,199,89,0.35)] ring-2 ring-white/45" aria-hidden>
+                <span className="flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-neutral-700 to-neutral-900 text-white shadow-[0_3px_10px_rgba(0,0,0,0.32)] ring-2 ring-white/60 dark:from-white dark:to-neutral-300 dark:text-neutral-900 dark:ring-white/25" aria-hidden>
                   <SlidersHorizontal className="h-[17px] w-[17px]" strokeWidth={2.3} />
                 </span>
                 <span className="min-w-0 flex-1">
