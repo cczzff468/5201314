@@ -1,15 +1,19 @@
 'use client';
 
 /**
- * 全局悬浮工具（v72）：设置 › 悬浮工具 开关开启后，手机右下角出现可拖拽悬浮球
- * （iOS 辅助触控同款交互），点按弹出工具菜单：
+ * 全局悬浮工具（v72.2）：设置 › 悬浮工具 开关开启后，手机右下角出现可拖拽悬浮球
+ * （iOS 辅助触控同款交互：渐变玻璃球 + 同心圆环图标），点按弹出毛玻璃胶囊菜单：
  *
- * - 提示词查看器：选 App（微信/QQ/信息）+ 角色 → 「预览 Prompt」→ 本地拼装
+ * - 提示词查看器：选 App（微信/QQ/信息）+ 角色 → 打开即自动本地拼装
  *   （@/lib/ios/prompt-preview，与真实发送同一套库函数）下一轮完整 System Prompt +
  *   Context（人设/记忆/世界书/聊天记录），代码块展示。纯只读——不请求网络、
- *   不消耗 Token、不打断进行中的对话；
+ *   不消耗 Token、不打断进行中的对话；v72.2 起「预览 Prompt」按钮移除，
+ *   打开弹窗 / 切换 App / 切换角色即自动重拼，仅保留小刷新按钮；
  * - 快捷操作：API 预设一键切换（全局 apiConfig 立即生效）+ 世界书一键挂载到当前聊天
  *   （getActiveProactiveChats 探测正打开的会话；下次发送即生效）。
+ *
+ * v72.2 修复：弹窗外壳此前漏了 pointer-events-auto（外层 layer 是 pointer-events-none，
+ * 导致弹窗内所有按钮/滚动完全点击穿透「没反应」）——现已补上。
  *
  * 层级 z-[56]：高于 App 窗口（z-40）与迷你播放器（z-55），低于多任务切换器（z-60）/
  * 锁屏（z-65）——锁定/熄屏/多任务时隐藏。data-suppress-edge-gesture：防止拖球触发
@@ -49,6 +53,21 @@ function sameConfig(a: ApiConfig, b: Partial<ApiConfig>): boolean {
   return a.baseUrl.trim() === (b.baseUrl ?? '').trim() && a.model.trim() === (b.model ?? '').trim() && a.apiKey === (b.apiKey ?? '');
 }
 
+// ---------------- 毛玻璃样式片段 ----------------
+
+/** 弹窗主体：白色磨砂玻璃大圆角面板（浅色 72% 白 + 2xl 背景 blur + 白色描边） */
+const GLASS_SHEET =
+  'bg-white/72 backdrop-blur-2xl ring-1 ring-white/65 shadow-[0_-12px_56px_rgba(0,0,0,0.24)] dark:bg-[#1C1C1E]/82 dark:ring-white/10';
+/** 弹窗内小容器（列表/代码块外框）：更透的白 + 细白描边 */
+const GLASS_GROUP =
+  'bg-white/50 backdrop-blur-xl ring-1 ring-white/60 dark:bg-white/[0.06] dark:ring-white/[0.09]';
+/** 胶囊小按钮（复制/刷新等）：磨砂白胶囊 */
+const GLASS_PILL_BTN =
+  'bg-white/55 ring-1 ring-white/60 backdrop-blur-xl active:bg-white/80 dark:bg-white/10 dark:ring-white/10 dark:active:bg-white/20';
+/** 代码块：深色玻璃终端风（磨砂深底 + 微白描边 + 浅色等宽字） */
+const GLASS_CODE =
+  'bg-[#10151C]/92 backdrop-blur-xl ring-1 ring-white/10 text-white/88';
+
 // ---------------- 底部弹窗外壳 ----------------
 
 function SheetShell({
@@ -68,24 +87,27 @@ function SheetShell({
 }) {
   return (
     <motion.div
-      className="absolute inset-0 z-[90] flex flex-col justify-end"
+      // 关键：外层 layer 是 pointer-events-none，这里必须显式恢复，否则整个弹窗点击穿透
+      className="pointer-events-auto absolute inset-0 z-[90] flex flex-col justify-end"
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
       transition={{ duration: 0.18 }}
       data-testid={testId}
     >
-      <button type="button" aria-label="关闭" className="absolute inset-0 cursor-default bg-black/35" onClick={onClose} />
+      <button type="button" aria-label="关闭" className="absolute inset-0 cursor-default bg-black/30 backdrop-blur-[3px]" onClick={onClose} />
       <motion.div
         initial={{ y: 60, opacity: 0.6 }}
         animate={{ y: 0, opacity: 1 }}
         exit={{ y: 80, opacity: 0 }}
         transition={{ type: 'spring', stiffness: 420, damping: 38 }}
-        className="relative mx-1 mb-1 flex max-h-[76%] flex-col overflow-hidden rounded-[22px] bg-white shadow-[0_-8px_40px_rgba(0,0,0,0.18)] dark:bg-[#1C1C1E]"
+        className={`relative mx-2 mb-2 flex max-h-[76%] flex-col overflow-hidden rounded-[30px] ${GLASS_SHEET}`}
       >
+        {/* iOS 抓手条 */}
+        <span aria-hidden className="mx-auto mt-2 block h-[5px] w-9 shrink-0 rounded-full bg-black/[0.12] dark:bg-white/20" />
         {/* 标题栏 */}
-        <div className="flex items-center gap-2.5 px-4 pb-2.5 pt-3">
-          <span className="flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-[10px] bg-gradient-to-br from-[#5AC8FA] to-[#34C759] text-white shadow-sm" aria-hidden>
+        <div className="flex items-center gap-2.5 px-4 pb-2.5 pt-2">
+          <span className="flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-[#5AC8FA] to-[#34C759] text-white shadow-[0_4px_12px_rgba(52,199,89,0.35)] ring-2 ring-white/50" aria-hidden>
             {icon}
           </span>
           <span className="min-w-0 flex-1">
@@ -96,7 +118,7 @@ function SheetShell({
             type="button"
             onClick={onClose}
             aria-label="关闭"
-            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-black/[0.06] text-foreground/70 transition-colors active:bg-black/[0.12] dark:bg-white/10 dark:text-white/70"
+            className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-foreground/70 transition-colors ${GLASS_PILL_BTN}`}
           >
             <X className="h-4 w-4" />
           </button>
@@ -113,11 +135,19 @@ function PromptViewerSheet({ onClose }: { onClose: () => void }) {
   const [channel, setChannel] = useState<PreviewChannel>('wx');
   const [contacts, setContacts] = useState<ContactRecord[] | null>(null);
   const [contactId, setContactId] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
-  const [result, setResult] = useState<PreviewResult | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
+  // 拼装状态机：key 标记「这份数据属于哪次请求」（App|角色|刷新轮次），
+  // 所有 setState 都在 Promise 回调里——effect 体内不同步 setState，避免级联渲染；
+  // key 不匹配时渲染期直接派生为 loading（旧结果立刻隐藏，无闪现）
+  const [state, setState] = useState<{ key: string; loading: boolean; error: string; result: PreviewResult | null }>({
+    key: '',
+    loading: false,
+    error: '',
+    result: null,
+  });
   const [copied, setCopied] = useState(false);
-  // 追发 / 线下 开关状态（同步 kv 读，随角色/App 变化重算——不用 effect，渲染期直接派生）
+
+  // 追发 / 线下 开关状态（同步 kv 读，随角色/App 变化重算——渲染期直接派生，不用 effect）
   const flags = (() => {
     if (!contactId) return { anxietyOn: false, offlineOn: false };
     try {
@@ -144,27 +174,36 @@ function PromptViewerSheet({ onClose }: { onClose: () => void }) {
     };
   }, []);
 
-  // 角色切换后清空旧预览（新角色的人设/记忆尚未拼装）——渲染期 adjust-state 模式，避免 effect 内 setState
-  const [prevContact, setPrevContact] = useState(contactId);
-  const [prevChannel, setPrevChannel] = useState(channel);
-  if (contactId !== prevContact || channel !== prevChannel) {
-    setPrevContact(contactId);
-    setPrevChannel(channel);
-    setResult(null);
-    setError('');
-  }
+  // v72.2：打开弹窗 / 切 App / 切角色即自动拼装（原「预览 Prompt」大按钮已删除）。
+  // 快速连续切换时旧拼装结果丢弃（key 不匹配 / alive 已置 false），只保留最后一次。
+  const curKey = `${channel}|${contactId}|${reloadKey}`;
+  useEffect(() => {
+    if (!contactId) return;
+    let alive = true;
+    const key = `${channel}|${contactId}|${reloadKey}`;
+    const p = buildChatPreview(channel, contactId);
+    // 置 loading 放微任务（不在 effect 体内同步 setState）
+    void Promise.resolve().then(() => {
+      if (!alive) return;
+      setState((s) => (s.key === key ? s : { key, loading: true, error: '', result: null }));
+    });
+    p.then((r) => {
+      if (alive) setState({ key, loading: false, error: '', result: r });
+    }).catch((e: unknown) => {
+      if (alive) setState({ key, loading: false, error: e instanceof Error ? e.message : '拼装失败', result: null });
+    });
+    return () => {
+      alive = false;
+    };
+  }, [channel, contactId, reloadKey]);
 
-  const runPreview = useCallback(() => {
-    if (!contactId || loading) return;
-    setLoading(true);
-    setError('');
-    // buildChatPreview 含 await（联系人/相册/跨 App 上下文），微任务排队后执行——
-    // 重入保护用 loading 态（无副作用，重复点击也只是重复拼装）
-    void buildChatPreview(channel, contactId)
-      .then((r) => setResult(r))
-      .catch((e: unknown) => setError(e instanceof Error ? e.message : '拼装失败'))
-      .finally(() => setLoading(false));
-  }, [channel, contactId, loading]);
+  // 派生：key 还是旧的（刚切换、拼装还没开始/没回来）= 视为 loading，旧结果立刻隐藏
+  const fresh = state.key === curKey;
+  const loading = contactId ? !fresh || state.loading : false;
+  const error = fresh ? state.error : '';
+  const result = fresh ? state.result : null;
+
+  const refresh = useCallback(() => setReloadKey((k) => k + 1), []);
 
   const copySystem = useCallback(() => {
     if (!result) return;
@@ -182,7 +221,7 @@ function PromptViewerSheet({ onClose }: { onClose: () => void }) {
       onClose={onClose}
       testId="assist-viewer-sheet"
     >
-      {/* App 标签（横向排列） */}
+      {/* App 标签（毛玻璃胶囊，横向排列） */}
       <div className="flex flex-wrap gap-1.5" role="tablist" aria-label="选择 App">
         {CHANNELS.map((c) => (
           <button
@@ -191,10 +230,10 @@ function PromptViewerSheet({ onClose }: { onClose: () => void }) {
             role="tab"
             aria-selected={channel === c}
             onClick={() => setChannel(c)}
-            className={`rounded-full px-3.5 py-[6px] text-[12.5px] font-medium transition-colors ${
+            className={`rounded-full px-4 py-[7px] text-[12.5px] font-semibold transition-all ${
               channel === c
-                ? 'bg-[#007AFF] text-white'
-                : 'bg-black/[0.05] text-foreground/70 active:bg-black/[0.09] dark:bg-white/10 dark:text-white/70'
+                ? 'bg-gradient-to-r from-[#5AC8FA] to-[#34C759] text-white shadow-[0_3px_10px_rgba(52,199,89,0.35)] ring-1 ring-white/40'
+                : `${GLASS_PILL_BTN} text-foreground/70`
             }`}
             data-testid={`assist-viewer-tab-${c}`}
           >
@@ -203,7 +242,7 @@ function PromptViewerSheet({ onClose }: { onClose: () => void }) {
         ))}
       </div>
 
-      {/* 角色选择 + 状态 + 预览按钮 */}
+      {/* 角色选择 + 追发/线下状态胶囊 */}
       <div className="mt-3 flex flex-wrap items-center gap-2">
         <div className="relative min-w-[128px] flex-1">
           <select
@@ -211,7 +250,7 @@ function PromptViewerSheet({ onClose }: { onClose: () => void }) {
             onChange={(e) => setContactId(e.target.value)}
             disabled={!contacts || contacts.length === 0}
             aria-label="选择角色"
-            className="h-9 w-full appearance-none rounded-[10px] border-0 bg-black/[0.045] pl-3 pr-8 text-[13px] font-medium text-foreground ring-1 ring-black/[0.06] focus-visible:ring-2 focus-visible:ring-[#007AFF]/50 dark:bg-white/[0.08] dark:ring-white/10"
+            className={`h-10 w-full appearance-none rounded-full border-0 pl-4 pr-9 text-[13px] font-medium text-foreground focus-visible:ring-2 focus-visible:ring-[#5AC8FA]/60 ${GLASS_GROUP}`}
             data-testid="assist-viewer-contact"
           >
             {contacts == null && <option value="">加载角色…</option>}
@@ -223,80 +262,99 @@ function PromptViewerSheet({ onClose }: { onClose: () => void }) {
               </option>
             ))}
           </select>
-          <ChevronDown className="pointer-events-none absolute right-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground/70" />
+          <ChevronDown className="pointer-events-none absolute right-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground/70" />
         </div>
-        <span className={`rounded-full px-2.5 py-[5px] text-[11px] font-semibold ring-1 ${flags.anxietyOn ? 'bg-[#34C759]/10 text-[#248A3D] ring-[#34C759]/30' : 'bg-black/[0.04] text-muted-foreground ring-black/[0.06] dark:bg-white/[0.07] dark:ring-white/10'}`}>
+        <span className={`rounded-full px-3 py-[6px] text-[11px] font-semibold ring-1 backdrop-blur-xl ${flags.anxietyOn ? 'bg-[#34C759]/15 text-[#248A3D] ring-[#34C759]/35 dark:text-[#30D158]' : `${GLASS_PILL_BTN} text-muted-foreground`}`}>
           追发 {flags.anxietyOn ? 'ON' : 'OFF'}
         </span>
-        <span className={`rounded-full px-2.5 py-[5px] text-[11px] font-semibold ring-1 ${flags.offlineOn ? 'bg-[#FF9500]/10 text-[#C93400] ring-[#FF9500]/30' : 'bg-black/[0.04] text-muted-foreground ring-black/[0.06] dark:bg-white/[0.07] dark:ring-white/10'}`}>
+        <span className={`rounded-full px-3 py-[6px] text-[11px] font-semibold ring-1 backdrop-blur-xl ${flags.offlineOn ? 'bg-[#FF9500]/15 text-[#C93400] ring-[#FF9500]/35' : `${GLASS_PILL_BTN} text-muted-foreground`}`}>
           线下 {flags.offlineOn ? 'ON' : 'OFF'}
         </span>
       </div>
-      <button
-        type="button"
-        onClick={runPreview}
-        disabled={!contactId || loading}
-        className="mt-3 flex h-11 w-full items-center justify-center gap-2 rounded-full bg-[#007AFF] text-[14.5px] font-semibold text-white transition-colors active:bg-[#0066D6] disabled:opacity-40"
-        data-testid="assist-viewer-run"
-      >
-        {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-        {loading ? '正在拼装…' : '预览 Prompt'}
-      </button>
 
-      {/* 结果区 */}
-      {error ? <p className="mt-3 text-[12.5px] text-red-500">拼装失败：{error}</p> : null}
-      {!result && !error && !loading ? (
-        <p className="mt-6 text-center text-[12.5px] leading-relaxed text-muted-foreground">
-          点击「预览 Prompt」查看下一轮会发送的真实提示词
-          <br />
-          （角色人设 · 记忆 · 世界书 · 聊天记录，全部本地拼装）
+      {/* 拼装中 */}
+      {loading && !result ? (
+        <div className="mt-10 mb-6 flex flex-col items-center gap-2.5 text-muted-foreground">
+          <Loader2 className="h-6 w-6 animate-spin text-[#5AC8FA]" />
+          <p className="text-[13px] font-medium">正在本地拼装 Prompt…</p>
+          <p className="text-[11px]">角色人设 · 记忆 · 世界书 · 聊天记录</p>
+        </div>
+      ) : null}
+
+      {/* 无角色 */}
+      {contacts != null && contacts.length === 0 && !loading ? (
+        <p className="mt-8 text-center text-[12.5px] leading-relaxed text-muted-foreground">
+          暂无角色联系人——先在通讯录里创建一个角色
         </p>
       ) : null}
 
+      {/* 结果区（自动拼装完成即展示） */}
+      {error ? (
+        <p className={`mt-3 rounded-full px-4 py-2.5 text-center text-[12.5px] font-medium text-red-500 ring-1 ring-red-400/25 backdrop-blur-xl ${GLASS_GROUP}`}>拼装失败：{error}</p>
+      ) : null}
       {result ? (
         <div className="mt-3.5">
-          {/* 统计行 */}
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-0.5 text-[11px] text-muted-foreground">
-            <span className="font-semibold text-foreground/80">{result.contactName}</span>
+          {/* 统计行 + 刷新/复制小胶囊按钮 */}
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 px-0.5 text-[11px] text-muted-foreground">
+            <span className="font-semibold text-foreground/85">{result.contactName}</span>
             <span>{result.messages.length} 条消息</span>
             <span>约 {Math.round(result.systemFull.length / 2)} tokens（估）</span>
-            <button type="button" onClick={copySystem} className="ml-auto flex items-center gap-1 rounded-full bg-black/[0.05] px-2.5 py-1 font-medium text-foreground/70 active:bg-black/[0.09] dark:bg-white/10 dark:text-white/70">
-              {copied ? <Check className="h-3 w-3 text-[#34C759]" /> : <Copy className="h-3 w-3" />}
-              {copied ? '已复制' : '复制 System'}
-            </button>
+            <span className="ml-auto flex items-center gap-1.5">
+              <button
+                type="button"
+                onClick={refresh}
+                disabled={loading}
+                aria-label="重新拼装"
+                className={`flex items-center gap-1 rounded-full px-2.5 py-1 font-medium text-foreground/75 disabled:opacity-50 ${GLASS_PILL_BTN}`}
+                data-testid="assist-viewer-refresh"
+              >
+                <RefreshCw className={`h-3 w-3 ${loading ? 'animate-spin' : ''}`} />
+                重新拼装
+              </button>
+              <button type="button" onClick={copySystem} className={`flex items-center gap-1 rounded-full px-2.5 py-1 font-medium text-foreground/75 ${GLASS_PILL_BTN}`}>
+                {copied ? <Check className="h-3 w-3 text-[#34C759]" /> : <Copy className="h-3 w-3" />}
+                {copied ? '已复制' : '复制 System'}
+              </button>
+            </span>
           </div>
           {/* 注入块统计（记忆/世界书有没有注入成功一目了然） */}
           {result.sections.length > 0 ? (
             <div className="mt-2 flex flex-wrap gap-1.5">
               {result.sections.map((s) => (
-                <span key={s.key} className="rounded-full bg-black/[0.04] px-2 py-[3px] text-[10.5px] text-foreground/65 dark:bg-white/[0.07] dark:text-white/65">
+                <span key={s.key} className={`rounded-full px-2.5 py-[4px] text-[10.5px] text-foreground/70 dark:text-white/70 ${GLASS_GROUP}`}>
                   {s.label} · {s.chars} 字
                 </span>
               ))}
             </div>
           ) : null}
 
-          {/* System Prompt */}
-          <p className="mt-3 mb-1 text-[11px] font-semibold tracking-wide text-muted-foreground">SYSTEM PROMPT</p>
-          <pre className="thin-scrollbar max-h-72 overflow-y-auto overscroll-contain rounded-[12px] bg-[#F2F2F7] px-3 py-2.5 font-mono text-[10.5px] leading-[1.65] break-words whitespace-pre-wrap text-foreground/90 dark:bg-black/40 dark:text-white/85" data-testid="assist-viewer-system">
+          {/* System Prompt（深色玻璃终端风代码块） */}
+          <p className="mt-3.5 mb-1.5 flex items-center gap-1.5 text-[11px] font-bold tracking-widest text-muted-foreground">
+            <span className="inline-block h-[7px] w-[7px] rounded-full bg-[#5AC8FA]" aria-hidden />
+            SYSTEM PROMPT
+          </p>
+          <pre className={`thin-scrollbar max-h-72 overflow-y-auto overscroll-contain rounded-[18px] px-3.5 py-3 font-mono text-[10.5px] leading-[1.65] break-words whitespace-pre-wrap ${GLASS_CODE}`} data-testid="assist-viewer-system">
             {result.systemFull}
           </pre>
 
           {/* Context 消息 */}
-          <p className="mt-3.5 mb-1 text-[11px] font-semibold tracking-wide text-muted-foreground">CONTEXT（最近对话）</p>
-          <div className="flex flex-col gap-1.5">
+          <p className="mt-3.5 mb-1.5 flex items-center gap-1.5 text-[11px] font-bold tracking-widest text-muted-foreground">
+            <span className="inline-block h-[7px] w-[7px] rounded-full bg-[#34C759]" aria-hidden />
+            CONTEXT（最近对话）
+          </p>
+          <div className="flex flex-col gap-2">
             {result.messages.slice(1).map((m, i) => (
               <div key={i}>
-                <p className={`mb-0.5 text-[10px] font-semibold ${m.role === 'user' ? 'text-[#007AFF]' : 'text-[#34C759]'}`}>
+                <p className={`mb-1 ml-1 text-[10px] font-bold ${m.role === 'user' ? 'text-[#5AC8FA]' : 'text-[#34C759]'}`}>
                   {m.role === 'user' ? 'user（机主）' : 'assistant（TA）'}
                 </p>
-                <pre className="thin-scrollbar max-h-40 overflow-y-auto overscroll-contain rounded-[12px] bg-[#F2F2F7] px-3 py-2 font-mono text-[10.5px] leading-[1.6] break-words whitespace-pre-wrap text-foreground/85 dark:bg-black/40 dark:text-white/80">
+                <pre className={`thin-scrollbar max-h-40 overflow-y-auto overscroll-contain rounded-[16px] px-3.5 py-2.5 font-mono text-[10.5px] leading-[1.6] break-words whitespace-pre-wrap ${GLASS_CODE}`}>
                   {m.content}
                 </pre>
               </div>
             ))}
           </div>
-          <p className="mt-3 text-[10.5px] leading-relaxed text-muted-foreground/70">
+          <p className="mt-3 rounded-[16px] px-3.5 py-2.5 text-[10.5px] leading-relaxed text-muted-foreground/80 dark:text-white/55" style={{ background: 'rgba(127,127,127,0.07)' }}>
             与真实发送同一套拼装函数（人设 → 记忆 → 世界书 → 动态块 → 历史）；预览没有「本轮新消息」，记忆/世界书按最近历史扫描。待处理红包/转账动作规则按本轮卡片状态注入，预览中省略。
           </p>
         </div>
@@ -307,22 +365,30 @@ function PromptViewerSheet({ onClose }: { onClose: () => void }) {
 
 // ---------------- 弹窗二：快捷操作 ----------------
 
-/** 列表行（API / 世界书共用）：当前选中 = 浅绿胶囊底 + 绿色对勾（参考图同款） */
+/** 列表行（API / 世界书共用）：毛玻璃胶囊行，当前选中 = 浅绿胶囊底 + 绿色对勾（参考图同款） */
 function QuickRow({ label, value, active, onClick, testId }: { label: string; value?: string; active: boolean; onClick: () => void; testId?: string }) {
   return (
     <button
       type="button"
       onClick={onClick}
       data-testid={testId}
-      className={`flex min-h-[44px] w-full items-center gap-2 rounded-[12px] px-3 py-2 text-left transition-colors ${
-        active ? 'bg-[#34C759]/[0.12]' : 'active:bg-black/[0.04] dark:active:bg-white/[0.06]'
+      className={`flex min-h-[46px] w-full items-center gap-2.5 rounded-full px-3.5 py-2 text-left transition-all ${
+        active
+          ? 'bg-[#34C759]/[0.14] ring-1 ring-[#34C759]/40'
+          : 'active:bg-black/[0.05] dark:active:bg-white/[0.07]'
       }`}
     >
       <span className={`min-w-0 flex-1 ${active ? 'text-[#248A3D] dark:text-[#30D158]' : 'text-foreground'}`}>
-        <span className="block truncate text-[14px] font-medium leading-tight">{label}</span>
+        <span className="block truncate text-[14px] font-semibold leading-tight">{label}</span>
         {value ? <span className="mt-0.5 block truncate text-[11px] leading-tight text-muted-foreground">{value}</span> : null}
       </span>
-      {active ? <Check className="h-[18px] w-[18px] shrink-0 text-[#248A3D] dark:text-[#30D158]" strokeWidth={2.6} /> : <span className="w-[18px]" />}
+      {active ? (
+        <span className="flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-full bg-[#34C759] shadow-[0_2px_8px_rgba(52,199,89,0.45)]">
+          <Check className="h-[13px] w-[13px] text-white" strokeWidth={3} />
+        </span>
+      ) : (
+        <span className="w-[22px]" />
+      )}
     </button>
   );
 }
@@ -413,12 +479,14 @@ function QuickOpsSheet({ onClose }: { onClose: () => void }) {
       testId="assist-quickops-sheet"
     >
       {/* ---- API 区块 ---- */}
-      <div className="flex items-center gap-2 px-0.5 pb-1.5 pt-0.5">
-        <Code2 className="h-4 w-4 text-foreground/70" />
+      <div className="flex items-center gap-2 px-1 pb-1.5 pt-0.5">
+        <span className="flex h-6 w-6 items-center justify-center rounded-full bg-gradient-to-br from-[#5AC8FA] to-[#007AFF] text-white shadow-[0_2px_8px_rgba(0,122,255,0.35)]" aria-hidden>
+          <Code2 className="h-3.5 w-3.5" strokeWidth={2.4} />
+        </span>
         <span className="text-[13.5px] font-bold text-foreground">API</span>
         <span className="ml-auto truncate text-[11px] text-muted-foreground">{apiConfig.baseUrl ? apiConfig.model || apiConfig.baseUrl : '未设置'}</span>
       </div>
-      <div className="overflow-hidden rounded-[14px] bg-black/[0.025] px-1 py-1 dark:bg-white/[0.05]">
+      <div className={`rounded-[24px] p-1.5 ${GLASS_GROUP}`} >
         {!anyPresetActive ? (
           <Row
             label="当前自定义配置"
@@ -452,20 +520,22 @@ function QuickOpsSheet({ onClose }: { onClose: () => void }) {
           />
         ))}
       </div>
-      <p className="mt-1.5 px-1 text-[10.5px] leading-relaxed text-muted-foreground/70">
+      <p className="mt-1.5 px-2 text-[10.5px] leading-relaxed text-muted-foreground/70">
         点击立即切换全局模型（保留已填的 Key；自定义 Key 在 设置 › 开发者 › API 配置 里填）。切换后下一次发送即生效。
       </p>
 
       {/* ---- 世界书区块 ---- */}
-      <div className="mt-4 flex items-center gap-2 px-0.5 pb-1.5">
-        <BookOpen className="h-4 w-4 text-foreground/70" />
+      <div className="mt-4 flex items-center gap-2 px-1 pb-1.5">
+        <span className="flex h-6 w-6 items-center justify-center rounded-full bg-gradient-to-br from-[#34C759] to-[#30B0C7] text-white shadow-[0_2px_8px_rgba(52,199,89,0.35)]" aria-hidden>
+          <BookOpen className="h-3.5 w-3.5" strokeWidth={2.4} />
+        </span>
         <span className="text-[13.5px] font-bold text-foreground">世界书</span>
         {activeChat ? (
           <span className="ml-auto flex min-w-0 items-center gap-2">
             <span className="truncate text-[11px] text-muted-foreground">
               当前聊天：{activeChat.app === 'wx' ? '微信' : activeChat.app === 'qq' ? 'QQ' : '信息'} · {activeChat.name}
             </span>
-            <button type="button" onClick={clearBindings} className="shrink-0 text-[11.5px] font-medium text-[#248A3D] dark:text-[#30D158]">
+            <button type="button" onClick={clearBindings} className="shrink-0 rounded-full bg-[#34C759]/12 px-2.5 py-[3px] text-[11px] font-semibold text-[#248A3D] ring-1 ring-[#34C759]/30 dark:text-[#30D158]">
               清空
             </button>
           </span>
@@ -473,11 +543,11 @@ function QuickOpsSheet({ onClose }: { onClose: () => void }) {
           <span className="ml-auto text-[11px] text-muted-foreground">未打开聊天</span>
         )}
       </div>
-      <div className="overflow-hidden rounded-[14px] bg-black/[0.025] px-1 py-1 dark:bg-white/[0.05]" data-testid="assist-wb-list">
+      <div className={`rounded-[24px] p-1.5 ${GLASS_GROUP}`} data-testid="assist-wb-list">
         {books == null ? (
-          <p className="px-3 py-3 text-[12.5px] text-muted-foreground">正在读取…</p>
+          <p className="px-4 py-3 text-[12.5px] text-muted-foreground">正在读取…</p>
         ) : books.length === 0 ? (
-          <p className="px-3 py-4 text-center text-[12.5px] text-muted-foreground">暂无世界书</p>
+          <p className="px-4 py-4 text-center text-[12.5px] text-muted-foreground">暂无世界书</p>
         ) : (
           books.map((b) => (
             <Row
@@ -491,13 +561,13 @@ function QuickOpsSheet({ onClose }: { onClose: () => void }) {
           ))
         )}
       </div>
-      <p className="mt-1.5 px-1 text-[10.5px] leading-relaxed text-muted-foreground/70">
+      <p className="mt-1.5 px-2 text-[10.5px] leading-relaxed text-muted-foreground/70">
         {activeChat
           ? '点击世界书挂载到当前聊天（再点移除），下次发送即生效；全局书点击 = 启用/停用。'
           : '先在微信/QQ/信息里打开一个聊天，这里就能一键把世界书挂上去。'}
       </p>
       {hint ? (
-        <p className="mt-2 rounded-[10px] bg-[#34C759]/10 px-3 py-2 text-[12px] font-medium text-[#248A3D] dark:text-[#30D158]" data-testid="assist-quickops-hint">
+        <p className={`mt-2.5 rounded-full px-4 py-2.5 text-center text-[12px] font-medium text-[#248A3D] ring-1 ring-[#34C759]/30 backdrop-blur-xl dark:text-[#30D158]`} style={{ background: 'rgba(52,199,89,0.1)' }} data-testid="assist-quickops-hint">
           {hint}
         </p>
       ) : null}
@@ -509,6 +579,17 @@ function QuickOpsSheet({ onClose }: { onClose: () => void }) {
 
 type ToolKind = 'viewer' | 'quickops';
 
+/** 菜单几何（用于贴球弹出 + 边缘翻转） */
+const MENU_W = 186;
+const MENU_H = 120;
+
+/** 菜单位置：相对 layer 的左偏移 + 上/下锚（二选一；跟随球被拖后的实际位置） */
+interface MenuPos {
+  left: number;
+  bottom?: number;
+  top?: number;
+}
+
 export default function AssistiveTools() {
   const viewerOn = useSettings((s) => s.assistViewer);
   const quickOpsOn = useSettings((s) => s.assistQuickOps);
@@ -517,7 +598,9 @@ export default function AssistiveTools() {
   const switcherOpen = useUI((s) => s.switcherOpen);
 
   const layerRef = useRef<HTMLDivElement | null>(null);
+  const ballRef = useRef<HTMLButtonElement | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [menuPos, setMenuPos] = useState<MenuPos | null>(null);
   const [sheet, setSheet] = useState<ToolKind | null>(null);
   // 拖拽位置（相对右下锚点的偏移；与 MusicGlobalMini 唱片同款模式）——
   // localStorage 恢复放懒初始化（组件 dynamic ssr:false，window 必然可用），无 effect
@@ -546,6 +629,28 @@ export default function AssistiveTools() {
     setSheet(k);
   };
 
+  /** 点按悬浮球：开菜单时按球的当前实际位置（含拖拽 transform）计算弹出点——
+   *  默认菜单在球右上方（右缘对齐球心+34，底部距球顶 10px）；球被拖到顶部时翻到球下方，
+   *  拖到左缘时钳在层内——菜单永远贴球且不出屏 */
+  const toggleMenu = () => {
+    if (menuOpen) {
+      setMenuOpen(false);
+      return;
+    }
+    const layer = layerRef.current;
+    const ball = ballRef.current;
+    if (layer && ball) {
+      const lr = layer.getBoundingClientRect();
+      const br = ball.getBoundingClientRect();
+      const relLeft = br.left - lr.left;
+      const relTop = br.top - lr.top;
+      const left = Math.min(Math.max(relLeft + br.width / 2 + 34 - MENU_W, 10), Math.max(lr.width - MENU_W - 10, 10));
+      const above = relTop > MENU_H + 30;
+      setMenuPos(above ? { left, bottom: lr.height - relTop + 10 } : { left, top: relTop + br.height + 10 });
+    }
+    setMenuOpen(true);
+  };
+
   // 不用延迟卸载模式（MusicGlobalMini 的 350ms 接 click）：点悬浮球/菜单/弹窗都不会让本层卸载
   // （菜单和弹窗都在层内），层只在锁定/熄屏/多任务/全关时隐藏——那些路径都不是本层自身点击触发，
   // 无点击穿透风险；隐藏用 CSS visibility（连同子元素的 pointer-events 一起失效，比 opacity 安全）
@@ -559,7 +664,18 @@ export default function AssistiveTools() {
       data-testid="assist-tools-layer"
       data-suppress-edge-gesture
     >
-      {/* 悬浮球（渐变圆 + 滑杆图标，参考图同款） */}
+      {/* 菜单打开时的透明背板：点菜单外任意处收起菜单（iOS 辅助触控同款消费型关闭） */}
+      {menuOpen ? (
+        <button
+          type="button"
+          aria-label="收起菜单"
+          className="pointer-events-auto absolute inset-0 cursor-default"
+          onClick={() => setMenuOpen(false)}
+          data-testid="assist-menu-backdrop"
+        />
+      ) : null}
+
+      {/* 悬浮球：蓝绿渐变玻璃球 + 白色高光 + iOS 辅助触控同款同心圆环图标 + 彩色光晕 */}
       <motion.button
         type="button"
         aria-label="悬浮工具"
@@ -567,12 +683,13 @@ export default function AssistiveTools() {
         dragConstraints={layerRef}
         dragElastic={0.12}
         dragMomentum={false}
+        whileTap={{ scale: 0.92 }}
         onPointerDown={() => {
           dragMovedRef.current = false;
         }}
         onPointerUp={() => {
           // 没怎么移动的松手 = 点按（拖动交给 framer-motion；位移阈值内视为 tap）
-          if (!dragMovedRef.current) setMenuOpen((v) => !v);
+          if (!dragMovedRef.current) toggleMenu();
         }}
         onDrag={(_e, info) => {
           if (Math.abs(info.offset.x) > 6 || Math.abs(info.offset.y) > 6) {
@@ -591,33 +708,42 @@ export default function AssistiveTools() {
         }}
         animate={pos ? { x: pos.x, y: pos.y } : undefined}
         transition={{ duration: 0.16 }}
-        className="pointer-events-auto absolute bottom-[104px] right-[14px] flex h-[52px] w-[52px] touch-none select-none items-center justify-center rounded-full bg-gradient-to-br from-[#5AC8FA] to-[#34C759] shadow-[0_6px_20px_rgba(0,0,0,0.25)] ring-[3px] ring-white/50 active:scale-95"
+        className="pointer-events-auto absolute bottom-[104px] right-[14px] flex h-[52px] w-[52px] touch-none select-none items-center justify-center rounded-full bg-gradient-to-br from-[#5AC8FA] via-[#4CD97B] to-[#2FB558] shadow-[0_8px_26px_rgba(56,190,120,0.5)] ring-[3px] ring-white/60"
         data-testid="assist-ball"
+        ref={ballRef}
       >
-        <SlidersHorizontal className="h-[22px] w-[22px] text-white" strokeWidth={2.4} />
+        {/* 玻璃高光（上半月牙） */}
+        <span aria-hidden className="pointer-events-none absolute inset-[3px] rounded-full bg-gradient-to-b from-white/45 via-white/5 to-transparent" />
+        {/* 同心圆环 + 中心亮点（辅助触控同款） */}
+        <span aria-hidden className="relative flex h-[26px] w-[26px] items-center justify-center rounded-full border-[2.5px] border-white/95">
+          <span className="h-[9px] w-[9px] rounded-full bg-white shadow-[0_0_8px_rgba(255,255,255,0.95)]" />
+        </span>
       </motion.button>
 
-      {/* 工具菜单（球上方弹出） */}
+      {/* 工具菜单（贴着球当前位置弹出：毛玻璃胶囊 + 渐变图标圆片；menuPos 在开菜单时算好） */}
       <AnimatePresence>
         {menuOpen && (
           <motion.div
-            initial={{ opacity: 0, y: 8, scale: 0.96 }}
+            initial={{ opacity: 0, y: 10, scale: 0.92 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 6, scale: 0.97 }}
-            transition={{ duration: 0.15 }}
-            className="pointer-events-auto absolute bottom-[168px] right-[12px] w-[176px] overflow-hidden rounded-[16px] bg-white/90 py-1 shadow-[0_8px_30px_rgba(0,0,0,0.16)] ring-1 ring-black/[0.06] backdrop-blur-xl dark:bg-[#2C2C2E]/90 dark:ring-white/10"
+            exit={{ opacity: 0, y: 8, scale: 0.95 }}
+            transition={{ type: 'spring', stiffness: 480, damping: 32 }}
+            style={menuPos ? { left: menuPos.left, ...(menuPos.bottom != null ? { bottom: menuPos.bottom } : { top: menuPos.top ?? 10 }) } : { right: 12, bottom: 170 }}
+            className="pointer-events-auto absolute flex w-[186px] flex-col gap-1 rounded-[27px] bg-white/62 p-1.5 shadow-[0_14px_44px_rgba(0,0,0,0.22)] ring-1 ring-white/65 backdrop-blur-2xl dark:bg-[#2C2C2E]/72 dark:ring-white/12"
             data-testid="assist-menu"
           >
             {viewerOn ? (
               <button
                 type="button"
                 onClick={() => openTool('viewer')}
-                className="flex w-full items-center gap-2.5 px-3.5 py-2.5 text-left transition-colors active:bg-black/[0.05] dark:active:bg-white/[0.08]"
+                className="flex w-full items-center gap-2.5 rounded-full px-2 py-2 text-left transition-colors active:bg-black/[0.06] dark:active:bg-white/[0.08]"
                 data-testid="assist-menu-viewer"
               >
-                <Eye className="h-[17px] w-[17px] shrink-0 text-[#007AFF]" />
+                <span className="flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-[#5AC8FA] to-[#007AFF] text-white shadow-[0_3px_10px_rgba(0,122,255,0.35)] ring-2 ring-white/45" aria-hidden>
+                  <Eye className="h-[17px] w-[17px]" strokeWidth={2.3} />
+                </span>
                 <span className="min-w-0 flex-1">
-                  <span className="block text-[13.5px] font-semibold leading-tight text-foreground">提示词查看器</span>
+                  <span className="block text-[13.5px] font-bold leading-tight text-foreground">提示词查看器</span>
                   <span className="block text-[10.5px] leading-tight text-muted-foreground">下一轮完整 Prompt</span>
                 </span>
               </button>
@@ -626,12 +752,14 @@ export default function AssistiveTools() {
               <button
                 type="button"
                 onClick={() => openTool('quickops')}
-                className="flex w-full items-center gap-2.5 px-3.5 py-2.5 text-left transition-colors active:bg-black/[0.05] dark:active:bg-white/[0.08]"
+                className="flex w-full items-center gap-2.5 rounded-full px-2 py-2 text-left transition-colors active:bg-black/[0.06] dark:active:bg-white/[0.08]"
                 data-testid="assist-menu-quickops"
               >
-                <SlidersHorizontal className="h-[17px] w-[17px] shrink-0 text-[#34C759]" />
+                <span className="flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-[#34C759] to-[#30B0C7] text-white shadow-[0_3px_10px_rgba(52,199,89,0.35)] ring-2 ring-white/45" aria-hidden>
+                  <SlidersHorizontal className="h-[17px] w-[17px]" strokeWidth={2.3} />
+                </span>
                 <span className="min-w-0 flex-1">
-                  <span className="block text-[13.5px] font-semibold leading-tight text-foreground">快捷操作</span>
+                  <span className="block text-[13.5px] font-bold leading-tight text-foreground">快捷操作</span>
                   <span className="block text-[10.5px] leading-tight text-muted-foreground">切换 API · 世界书</span>
                 </span>
               </button>
