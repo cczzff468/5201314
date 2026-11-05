@@ -37,6 +37,8 @@ import { showSystemNotification } from './system-notify';
 import { pushSysNotifyViaSse, type SseNotifyPayload } from './notify-sse';
 import { wxChatFlags, qqChatFlags } from '@/lib/chat-flags';
 import { playNotifySound } from './notify-sound';
+// v73.5：通知导航进微信单聊全屏时关闭同会话悬浮小窗/胶囊（防全屏与小窗双开同一聊天）
+import { useChatFloat } from './chat-float-store';
 
 // ---------------- 类型 ----------------
 
@@ -531,6 +533,13 @@ function navigateToNotifyTarget(target: NotifyTarget): void {
   if (ui.locked || ui.screenOff) return;
   pendingNav = { target, at: Date.now() };
   ui.switchToApp(target.app);
+  // v73.5：目标为微信单聊全屏会话时，同一会话的悬浮小窗/胶囊一并关闭——
+  // 「进入聊天」（通知菜单）与小窗同屏双开会话冗余；不同会话的小窗不受影响（浮着正是它的意义）。
+  // 群聊 target 无 contactId 天然跳过；ChatFloatWindow.maximize 也走这里（其自带 close 变为幂等）
+  if (target.app === 'wechat' && target.contactId) {
+    const fl = useChatFloat.getState();
+    if (fl.contactId === target.contactId) fl.close();
+  }
   window.dispatchEvent(new Event(ISLAND_NAV_EVENT));
 }
 
