@@ -129,7 +129,7 @@ import {
   type RingtoneMeta,
 } from '@/lib/ios/notify-sound';
 import { LocalToast, useLocalToast } from './page-toast';
-import { PresetLibrarySection } from './settings-preset-library';
+import { PresetAppPanels } from './settings-preset-library';
 import {
   PROMPT_APPS,
   PROMPT_GROUPS,
@@ -673,7 +673,7 @@ function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
             icon={Layers}
             tone={TONE_PURPLE}
             label="默认预设（内置）"
-            value={`模块 ${PROMPT_GROUPS.length} · 全量库 503 条`}
+            value="按 App 整理 · 503 条 · 模块 12 组"
             onClick={() => onOpen('prompts')}
             testId="settings-prompts-row"
           />
@@ -6255,6 +6255,23 @@ function entryContentOf(e: PromptEntry, disabled: Set<string>): string {
   return e.content;
 }
 
+/** v69：组卡放进 App 面板后，组标题（与 App 同名）改为功能性描述，避免「微信面板里一张微信卡」的重复感 */
+const GROUP_PANEL_TITLE: Record<string, string> = {
+  'persona-core': '核心角色人设（整块）',
+  'wx-rules': '聊天规则（整块）',
+  'qq-rules': '聊天规则（整块）',
+  'sms-rules': '短信规则（整块）',
+  'call-rules': '通话规则（整块）',
+  forum: '生成场景提示词',
+  couple: '小天地与心情注入',
+  offline: '线下剧情指令',
+  moments: '发帖与评论规则',
+  behavior: '行为与节奏控制',
+  worldbook: '世界书使用规则（整块）',
+  memory: '记忆提取与召回',
+};
+const panelTitleOf = (g: PromptGroup) => GROUP_PANEL_TITLE[g.id] ?? g.title;
+
 function PromptEntriesPage({ onBack }: { onBack: () => void }) {
   const [toastMsg, showToast] = useLocalToast();
   const [, setTick] = useState(0);
@@ -6276,6 +6293,8 @@ function PromptEntriesPage({ onBack }: { onBack: () => void }) {
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   // 新增表单
   const [adding, setAdding] = useState(false);
+  // v69：新增自定义条目后自动展开对应 App 面板（nonce 递增触发 PresetAppPanels 内的 effect）
+  const [openAppRequest, setOpenAppRequest] = useState<{ appId: string; nonce: number } | null>(null);
   const [addForm, setAddForm] = useState<{ appId: PromptAppId; role: PromptRole; depth: string; title: string; content: string }>({
     appId: 'wechat',
     role: 'system',
@@ -6296,14 +6315,35 @@ function PromptEntriesPage({ onBack }: { onBack: () => void }) {
     [state.custom, state.deleted, state.deleted.length],
   );
 
-  /** 组 → 开关实际写的目标 id 列表（merged = 组 id 本身；list = 全体成员；自定义 = 自定义条目） */
+  /** v69：自定义条目按 App 归堆——每个 App 一张「自定义条目」组卡（随该 App 面板展示），
+   *  替代旧版「全部自定义挤一张卡」；组 id 形如 custom-wechat，避开内置组 id */
+  const customGroups = useMemo(() => {
+    const byApp = new Map<string, PromptGroup>();
+    for (const c of customEntries) {
+      const g = byApp.get(c.appId) ?? {
+        id: `custom-${c.appId}`,
+        appId: c.appId,
+        kind: 'list' as const,
+        title: '自定义条目',
+        desc: '',
+        members: [] as string[],
+      };
+      g.members.push(c.id);
+      byApp.set(c.appId, g);
+    }
+    return byApp;
+  }, [customEntries]);
+  /** 组查找统一源：内置 PROMPT_GROUPS + 按 App 合成的自定义组（旧逻辑查不到合成组会退化为「全部自定义」） */
+  const allGroups = useMemo(() => [...PROMPT_GROUPS, ...customGroups.values()], [customGroups]);
+
+  /** 组 → 开关实际写的目标 id 列表（merged = 组 id 本身；list = 全体成员；查不到 = 空） */
   const groupTargetIds = useCallback(
     (gid: string): string[] => {
-      const g = PROMPT_GROUPS.find((x) => x.id === gid);
+      const g = allGroups.find((x) => x.id === gid);
       if (g) return g.kind === 'merged' ? [g.id] : g.members;
-      return customEntries.map((c) => c.id);
+      return [];
     },
-    [customEntries],
+    [allGroups],
   );
 
   /** 组开关当前态（merged = 组未被关；list/自定义 = 任一成员开启即算开） */
@@ -6315,16 +6355,17 @@ function PromptEntriesPage({ onBack }: { onBack: () => void }) {
   const toggleGroup = (gid: string, on: boolean) => {
     setPromptEntriesEnabled(groupTargetIds(gid), on);
     refresh();
-    const g = PROMPT_GROUPS.find((x) => x.id === gid);
-    showToast(on ? `${g?.title ?? '自定义条目'}已启用，下次发送即生效` : `${g?.title ?? '自定义条目'}已关闭，整块不再注入`);
+    const g = allGroups.find((x) => x.id === gid);
+    const label = g ? panelTitleOf(g) : '自定义条目';
+    showToast(on ? `${label}已启用，下次发送即生效` : `${label}已关闭，整块不再注入`);
   };
 
   /** 组深度 = 首成员当前生效深度；加减时全成员统一拉到同一深度（保持注入顺序稳定）。
    *  v66 修正：深度目标一律取组成员（merged 组此前误用组 id——组 id 不是条目，
    *  entryMap 永远查不到，深度加减成了不刷新的摆设；启停仍走 groupTargetIds 的组 id/成员） */
   const groupDepthIds = (gid: string): string[] => {
-    const g = PROMPT_GROUPS.find((x) => x.id === gid);
-    return g ? g.members : customEntries.map((c) => c.id);
+    const g = allGroups.find((x) => x.id === gid);
+    return g ? g.members : [];
   };
   const groupDepth = (gid: string): number => {
     const ids = groupDepthIds(gid);
@@ -6417,7 +6458,9 @@ function PromptEntriesPage({ onBack }: { onBack: () => void }) {
     }
     setAddForm({ appId: addForm.appId, role: addForm.role, depth: addForm.depth, title: '', content: '' });
     setAdding(false);
-    setExpandedGroup('custom');
+    // v69：新条目落在对应 App 面板内——自动展开该面板并展开其自定义组，让用户立刻看到
+    setExpandedGroup(`custom-${addForm.appId}`);
+    setOpenAppRequest((cur) => ({ appId: addForm.appId, nonce: (cur?.nonce ?? 0) + 1 }));
     refresh();
     showToast('已新增预设条目');
   };
@@ -6565,7 +6608,7 @@ function PromptEntriesPage({ onBack }: { onBack: () => void }) {
       <div
         key={key}
         data-testid={`prompt-group-${key}`}
-        className={`overflow-hidden rounded-[22px] bg-white/55 shadow-[0_8px_28px_rgba(17,24,39,0.06)] ring-1 ring-white/70 backdrop-blur-2xl backdrop-saturate-150 dark:bg-white/[0.06] dark:ring-white/[0.09] ${
+        className={`overflow-hidden rounded-[16px] bg-white/55 shadow-[0_4px_16px_rgba(17,24,39,0.05)] ring-1 ring-white/60 backdrop-blur-xl backdrop-saturate-150 dark:bg-white/[0.06] dark:ring-white/[0.09] ${
           gOff ? 'opacity-60 saturate-[0.6]' : ''
         }`}
       >
@@ -6596,9 +6639,9 @@ function PromptEntriesPage({ onBack }: { onBack: () => void }) {
             aria-expanded={open}
             data-testid={`prompt-group-head-${key}`}
           >
-            <span className="min-w-0 flex-1 truncate text-[14.5px] font-semibold">{g.title}</span>
+            <span className="min-w-0 flex-1 truncate text-[14px] font-semibold">{panelTitleOf(g)}</span>
           </button>
-          <Switch checked={on} onCheckedChange={(v) => toggleGroup(key, v)} aria-label={`启用 ${g.title}`} data-testid={`prompt-group-switch-${key}`} />
+          <Switch checked={on} onCheckedChange={(v) => toggleGroup(key, v)} aria-label={`启用 ${panelTitleOf(g)}`} data-testid={`prompt-group-switch-${key}`} />
           <ChevronDown className={`h-4 w-4 shrink-0 text-muted-foreground/70 transition-transform ${open ? 'rotate-180' : ''}`} />
         </div>
 
@@ -6798,25 +6841,28 @@ function PromptEntriesPage({ onBack }: { onBack: () => void }) {
           </GroupCard>
         )}
 
-        {/* 模块卡列表（v68：分节标签） */}
-        <div className="flex items-center gap-2 px-2 pb-2">
-          <span className="h-[6px] w-[6px] rounded-full bg-[#007AFF] shadow-[0_0_8px_rgba(0,122,255,0.6)]" />
-          <span className="text-[11px] font-semibold tracking-wide text-muted-foreground">
-            预设模块 · {PROMPT_GROUPS.length + (customEntries.length > 0 ? 1 : 0)} 组
-          </span>
-        </div>
-        <div className="flex flex-col gap-2.5" data-testid="prompt-entries-list">
-          {PROMPT_GROUPS.map((g) => renderGroup(g, g.id, g.members))}
-          {customEntries.length > 0 &&
-            renderGroup(
-              { id: 'custom', appId: 'global', kind: 'list', title: '自定义条目', desc: '', members: customEntries.map((c) => c.id) },
-              'custom',
-              customEntries.map((c) => c.id),
-            )}
-        </div>
-
-        {/* v67：全量提示词库内嵌区——18 个 App 折叠面板 → 分类折叠 → 条目卡（开关/编辑/恢复默认，与本页模块卡同一状态存储） */}
-        <PresetLibrarySection onToast={showToast} />
+        {/* v69：默认预设与全量提示词库彻底合并——页面主体 = 18 个 App 折叠面板（全局·核心人设置顶），
+            每个面板内 = 该 App 的预设模块组卡（含自定义条目）+ 提示词库分类/条目。
+            模块组卡仍由本组件渲染（保留整块编辑/组开关/深度/多选全部逻辑），经 renderAppModules 注入对应面板 */}
+        <PresetAppPanels
+          onToast={showToast}
+          moduleCount={PROMPT_GROUPS.length + customGroups.size}
+          appModuleCount={(appId) =>
+            PROMPT_GROUPS.filter((g) => g.appId === appId).length + (customGroups.has(appId) ? 1 : 0)
+          }
+          renderAppModules={(appId) => {
+            const groups = PROMPT_GROUPS.filter((g) => g.appId === appId);
+            const custom = customGroups.get(appId);
+            if (groups.length === 0 && !custom) return null;
+            return (
+              <>
+                {groups.map((g) => renderGroup(g, g.id, g.members))}
+                {custom && renderGroup(custom, custom.id, custom.members)}
+              </>
+            );
+          }}
+          requestOpenApp={openAppRequest}
+        />
 
         {/* 危险区：全部恢复默认（v68 胶囊化） */}
         <div className="mt-5 px-1">

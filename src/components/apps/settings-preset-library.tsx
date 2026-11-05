@@ -1,30 +1,31 @@
 'use client';
 
 /**
- * 默认预设 · 全量提示词库内嵌区（v68 · 毛玻璃胶囊重构）。
+ * 默认预设 · 按 App 整合的统一页面主体（v69 · 删除重建）。
  *
- * 把系统内发给大模型的**全部**提示词（public/prompt-library/*.json，503 条原文，
- * 含动作类：买东西、发红包/转账/亲属卡、送礼物、引用、转发、撤回、拍一拍…；
- * 生成类：商品、帖子、商家、订单、图片…）以「App 折叠面板 → 分类折叠 → 条目胶囊」
- * 三级结构并入「默认预设（内置）」页，与上方预设模块卡共用同一套状态存储
- * （kv: prompt-entries:state，prompt-entries-client 写穿 + 服务端同步）：
- * - 开关 → disabled（已接线条目：下一次请求起不再注入）；
- * - 编辑 → edits（编辑版支持 {{token}} 占位符，原文 `${token}` 自动转换；已接线
- *   条目即时生效）；
- * - 恢复默认 → 清开关/清编辑。
+ * 「默认预设」与「全量提示词库」彻底合并为一个界面：
+ * 页面主体 = 18 个 App 折叠面板（全局·核心人设置顶），
+ * 点开任一 App，面板内是该 App 的**全部**提示词与规则，分两段——
  *
+ * - 预设模块（renderAppModules 回调注入，宿主 settings.tsx 渲染）：
+ *   prompt-entries.ts 注册表的组卡（整块编辑 / 组开关 / 注入深度 / 多选批量）
+ *   + 该 App 的自定义条目卡；
+ * - 提示词库（本组件懒加载 public/prompt-library/{id}.json）：
+ *   分类折叠 → 条目胶囊（逐条开关 / 编辑 / 恢复默认，原文一字不差）。
+ *
+ * 两段共用同一套状态存储（kv: prompt-entries:state，prompt-entries-client
+ * 写穿 + 服务端同步）：模块组开关/编辑走组 id，库条目走 `lib:<key>` 前缀。
  * 接线状态徽章数据：public/prompt-library/wired.json（scripts/build-prompt-wired.ts
- * 扫描源码中的 `lib:<key>` 字面量生成）。已接线 = 修改/开关即时生效；
+ * 扫描源码 `lib:<key>` 字面量生成）。已接线 = 修改/开关即时生效；
  * 存档 = 编辑与开关先保存，该条目暂未接入运行时链路（后续接线后自动生效）。
  *
- * v68 视觉：全页统一毛玻璃胶囊设计语言——
- * L1 玻璃面板（App 折叠卡）→ L2 玻璃子面板（分类）→ L3 条目胶囊
+ * v69 视觉：延续 v68 毛玻璃胶囊设计语言——
+ * L1 玻璃面板（App 折叠卡）→ L2 玻璃子面板（预设模块组卡/分类）→ L3 条目胶囊
  * （收起 = 纯胶囊 rounded-full，展开 = 圆角玻璃卡，radius 过渡动画）；
- * 徽章/按钮/搜索框/深度调节全部胶囊化（rounded-full），
- * 品牌色按钮带同色光晕阴影，次级按钮为玻璃胶囊。
+ * 徽章/按钮/搜索框/深度调节全部胶囊化（rounded-full）。
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import {
   Bird,
   BookOpen,
@@ -112,13 +113,13 @@ const APP_META: Record<string, { icon: LucideIcon; tone: string }> = {
   wechat: { icon: MessageCircle, tone: '#34C759' },
   qq: { icon: Bird, tone: '#12B7F5' },
   chat: { icon: MessageSquareText, tone: '#34C759' },
+  taobao: { icon: ShoppingBag, tone: '#FF6A00' },
+  meituan: { icon: UtensilsCrossed, tone: '#FFC300' },
   phone: { icon: Phone, tone: '#34C759' },
   moments: { icon: Images, tone: '#FF9500' },
   forum: { icon: MessagesSquare, tone: '#5856D6' },
   couple: { icon: Heart, tone: '#FF375F' },
   offline: { icon: MapPin, tone: '#FF9500' },
-  taobao: { icon: ShoppingBag, tone: '#FF6A00' },
-  meituan: { icon: UtensilsCrossed, tone: '#FFC300' },
   music: { icon: Music, tone: '#FF375F' },
   memory: { icon: Brain, tone: '#AF52FF' },
   worldbook: { icon: BookOpen, tone: '#32ADE6' },
@@ -197,6 +198,16 @@ function StatusPill({ tone, label, title }: { tone: 'green' | 'orange' | 'gray';
 const BTN_GHOST =
   'flex items-center gap-1 rounded-full bg-white/60 px-3.5 py-[7px] text-[11.5px] font-medium text-foreground/70 ring-1 ring-black/[0.06] backdrop-blur-md transition-all active:scale-95 disabled:opacity-40 dark:bg-white/10 dark:text-muted-foreground dark:ring-white/10';
 
+/** 面板内分节小标签（预设模块 / 提示词库）：App 品牌色圆点 + 弱化大写风 */
+function SectionLabel({ tone, children }: { tone: string; children: React.ReactNode }) {
+  return (
+    <div className="flex items-center gap-1.5 px-1.5 pt-0.5">
+      <span className="h-[5px] w-[5px] shrink-0 rounded-full" style={{ backgroundColor: tone }} />
+      <span className="text-[10.5px] font-semibold tracking-wide text-muted-foreground">{children}</span>
+    </div>
+  );
+}
+
 // ---------------- 条目胶囊（开关 / 原文浏览 / 编辑 / 恢复默认） ----------------
 
 function LibEntryCard({
@@ -224,7 +235,7 @@ function LibEntryCard({
 
   return (
     <div data-testid={`lib-entry-${entry.key}`} className={glassEntry(open, off)}>
-      {/* 胶囊头：编号 + 标题 + 状态徽章 + 开关 + 右侧箭头（v68.1 统一：箭头一律靠右，与 App/分类面板一致） */}
+      {/* 胶囊头：编号 + 标题 + 状态徽章 + 开关 + 右侧箭头（箭头一律靠右，与面板/分类一致） */}
       <div className="flex items-center gap-2 px-3 py-[7px]">
         <button
           type="button"
@@ -322,9 +333,25 @@ function LibEntryCard({
   );
 }
 
-// ---------------- 主区块 ----------------
+// ---------------- 页面主体：按 App 整合的统一面板列表 ----------------
 
-export function PresetLibrarySection({ onToast }: { onToast: (m: string) => void }) {
+export function PresetAppPanels({
+  onToast,
+  moduleCount,
+  appModuleCount,
+  renderAppModules,
+  requestOpenApp,
+}: {
+  onToast: (m: string) => void;
+  /** 预设模块总数（说明卡统计胶囊；含自定义组） */
+  moduleCount?: number;
+  /** 某个 App 的预设模块数（面板头胶囊；0 = 无模块段） */
+  appModuleCount?: (appId: string) => number;
+  /** 渲染某 App 的预设模块组卡（含自定义条目卡）；返回 null = 该 App 无模块 */
+  renderAppModules?: (appId: string) => ReactNode;
+  /** 新增自定义条目后自动展开对应 App 面板（nonce 变化触发） */
+  requestOpenApp?: { appId: string; nonce: number } | null;
+}) {
   const [, setTick] = useState(0);
   const refresh = useCallback(() => setTick((t) => t + 1), []);
 
@@ -359,7 +386,7 @@ export function PresetLibrarySection({ onToast }: { onToast: (m: string) => void
     };
   }, []);
 
-  // 当前状态（与上方模块卡同一存储）
+  // 当前状态（与预设模块卡同一存储）
   const state = readPromptEntryState();
   const disabled = useMemo(() => new Set(state.disabled), [state.disabled, state.disabled.length]);
 
@@ -386,6 +413,16 @@ export function PresetLibrarySection({ onToast }: { onToast: (m: string) => void
     },
     [appData],
   );
+
+  // 新增自定义条目后：自动展开对应 App 面板（nonce 变化触发；已展开则跳过）。
+  //  setTimeout 0 推迟到下一个宏任务——避免 effect 内同步 setState 触发级联渲染告警
+  useEffect(() => {
+    const req = requestOpenApp;
+    if (!req) return;
+    if (openApps.has(req.appId)) return;
+    const t = window.setTimeout(() => void toggleApp(req.appId), 0);
+    return () => window.clearTimeout(t);
+  }, [requestOpenApp?.nonce]);
 
   const toggleCat = (catKey: string) => {
     setOpenCats((cur) => {
@@ -420,7 +457,7 @@ export function PresetLibrarySection({ onToast }: { onToast: (m: string) => void
     };
   }, [query, index]);
 
-  // ---- 变更回调（与模块卡共用 prompt-entries-client，写穿 + 服务端同步） ----
+  // ---- 变更回调（与预设模块卡共用 prompt-entries-client，写穿 + 服务端同步） ----
   const onToggle = useCallback(
     (key: string, on: boolean) => {
       setPromptEntryEnabled(`lib:${key}`, on);
@@ -491,28 +528,36 @@ export function PresetLibrarySection({ onToast }: { onToast: (m: string) => void
 
   const searchingAll = query.trim().length > 0;
 
+  /** App 面板顺序：全局·核心人设置顶（人设是所有链路的根基），其余按索引原序 */
+  const orderedApps = useMemo(() => {
+    if (!index) return [];
+    const g = index.apps.find((a) => a.id === 'global');
+    const rest = index.apps.filter((a) => a.id !== 'global');
+    return g ? [g, ...rest] : rest;
+  }, [index]);
+
   /** App 品牌色圆点（分类子面板标题前） */
   const toneOf = (id: string) => (APP_META[id] ?? APP_META.global).tone;
 
   return (
-    <div className="mt-6" data-testid="preset-library-section">
-      {/* 区块头：玻璃说明卡 + 统计胶囊 */}
+    <div data-testid="preset-library-section">
+      {/* 页面说明卡：玻璃卡 + 合并统计胶囊 */}
       <div className={GLASS_PANEL}>
         <div className="flex flex-col gap-2.5 px-4 py-4">
-          {/* v68.1：flex-wrap + 标题不收缩不折行——窄屏下统计胶囊整组换行到第二行，不再挤压标题/溢出右缘 */}
           <div className="flex flex-wrap items-center gap-2.5">
             <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-[#AF52FF] to-[#FF2D55] text-white shadow-[0_4px_12px_rgba(175,82,255,0.4)]">
               <Sparkles className="h-3.5 w-3.5" strokeWidth={2.4} />
             </span>
-            <p className="shrink-0 whitespace-nowrap text-[14.5px] font-semibold">全量提示词库</p>
+            <p className="shrink-0 whitespace-nowrap text-[14.5px] font-semibold">全部预设 · 按 App 整理</p>
             <span className="ml-auto flex flex-wrap items-center justify-end gap-1.5">
+              {typeof moduleCount === 'number' && moduleCount > 0 && <Pill>模块 {moduleCount} 组</Pill>}
               {index && <Pill>{index.apps.length} 个 App</Pill>}
               {index && <Pill>{index.total} 条</Pill>}
               {wiredSet.size > 0 && <Pill tone="green">已接线 {wiredSet.size}</Pill>}
             </span>
           </div>
           <p className="text-[11.5px] leading-[1.6] text-muted-foreground">
-            系统内发给大模型的全部提示词原文（动作类：买东西、发红包/转账/亲属卡、送礼物、引用、转发、撤回、拍一拍…；生成类：商品、帖子、商家、订单、图片…）。与上方预设模块共用同一套开关/编辑状态；标注「已接线」的条目修改后即时生效，「存档」条目的修改先保存、待接入运行时。
+            默认预设与全量提示词库已整合为一个界面：点开 App 面板，里面就是该 App 的全部提示词与规则——「预设模块」支持整块编辑、组开关与注入深度调节（修改即时生效）；「提示词库」是系统内发给大模型的全部原文（动作类：买东西、发红包/转账/亲属卡、送礼物、引用、转发、撤回、拍一拍…；生成类：商品、帖子、商家、订单、图片…），逐条开关与编辑。标注「已接线」的条目修改后即时生效，「存档」条目的修改先保存、待接入运行时。
           </p>
         </div>
       </div>
@@ -558,13 +603,16 @@ export function PresetLibrarySection({ onToast }: { onToast: (m: string) => void
         </div>
       )}
 
-      {/* 浏览模式：App 折叠面板 → 分类折叠 */}
+      {/* 浏览模式：App 折叠面板（预设模块 + 提示词库 同居一屏） */}
       {!searchingAll && (
         <div className="mt-2 flex flex-col gap-2.5" data-testid="preset-library-apps">
-          {index?.apps.map((meta) => {
+          {orderedApps.map((meta) => {
             const open = openApps.has(meta.id);
             const data = appData[meta.id];
             const loading = loadingApp === meta.id;
+            const tone = toneOf(meta.id);
+            const modules = renderAppModules?.(meta.id) ?? null;
+            const mCount = appModuleCount?.(meta.id) ?? 0;
             return (
               <div key={meta.id} className={GLASS_PANEL}>
                 <button
@@ -576,8 +624,9 @@ export function PresetLibrarySection({ onToast }: { onToast: (m: string) => void
                 >
                   <AppIcon id={meta.id} />
                   <span className="min-w-0 flex-1">
-                    <span className="flex items-center gap-2">
+                    <span className="flex flex-wrap items-center gap-2">
                       <span className="truncate text-[15px] font-semibold">{meta.name}</span>
+                      {mCount > 0 && <Pill tone="blue">模块 {mCount}</Pill>}
                       <Pill>{meta.count} 条</Pill>
                     </span>
                     <span className="mt-0.5 block truncate text-[11.5px] text-muted-foreground">{meta.desc}</span>
@@ -589,35 +638,49 @@ export function PresetLibrarySection({ onToast }: { onToast: (m: string) => void
 
                 {open && (
                   <div className="flex flex-col gap-2 border-t border-black/[0.04] bg-black/[0.03] px-3.5 py-3.5 dark:border-white/[0.06] dark:bg-black/[0.15]">
+                    {/* 段一：预设模块（组卡由宿主注入——整块编辑 / 组开关 / 深度 / 多选） */}
+                    {modules != null && (
+                      <>
+                        <SectionLabel tone={tone}>预设模块</SectionLabel>
+                        <div className="flex flex-col gap-2">{modules}</div>
+                      </>
+                    )}
+
+                    {/* 段二：提示词库原文（分类折叠 → 条目胶囊） */}
                     {loading && <p className="px-1 py-2 text-[12px] text-muted-foreground">正在加载…</p>}
                     {!loading && !data && <p className="px-1 py-2 text-[12px] text-red-500">加载失败，请收起后重新展开重试</p>}
-                    {data?.categories.map((cat, ci) => {
-                      const catKey = `${meta.id}::${ci}`;
-                      const catOpen = openCats.has(catKey);
-                      return (
-                        <div key={catKey} className={GLASS_SUB}>
-                          <button
-                            type="button"
-                            onClick={() => toggleCat(catKey)}
-                            className="flex min-h-[44px] w-full items-center gap-2 px-3.5 py-2 text-left transition-colors active:bg-black/[0.03] dark:active:bg-white/[0.05]"
-                            aria-expanded={catOpen}
-                            data-testid={`preset-lib-cat-${meta.id}-${ci}`}
-                          >
-                            <span className="h-[6px] w-[6px] shrink-0 rounded-full" style={{ backgroundColor: toneOf(meta.id) }} />
-                            <span className="min-w-0 flex-1 truncate text-[13px] font-semibold">{cat.name}</span>
-                            <Pill>{cat.entries.length}</Pill>
-                            <ChevronDown
-                              className={`h-4 w-4 shrink-0 text-muted-foreground/60 transition-transform duration-200 ${catOpen ? 'rotate-180' : ''}`}
-                            />
-                          </button>
-                          {catOpen && (
-                            <div className="flex flex-col gap-1.5 border-t border-black/[0.04] px-3 py-2.5 dark:border-white/[0.06]">
-                              {cat.entries.map(renderEntry)}
+                    {data?.categories.length ? (
+                      <>
+                        {modules != null && <SectionLabel tone={tone}>提示词库</SectionLabel>}
+                        {data.categories.map((cat, ci) => {
+                          const catKey = `${meta.id}::${ci}`;
+                          const catOpen = openCats.has(catKey);
+                          return (
+                            <div key={catKey} className={GLASS_SUB}>
+                              <button
+                                type="button"
+                                onClick={() => toggleCat(catKey)}
+                                className="flex min-h-[44px] w-full items-center gap-2 px-3.5 py-2 text-left transition-colors active:bg-black/[0.03] dark:active:bg-white/[0.05]"
+                                aria-expanded={catOpen}
+                                data-testid={`preset-lib-cat-${meta.id}-${ci}`}
+                              >
+                                <span className="h-[6px] w-[6px] shrink-0 rounded-full" style={{ backgroundColor: tone }} />
+                                <span className="min-w-0 flex-1 truncate text-[13px] font-semibold">{cat.name}</span>
+                                <Pill>{cat.entries.length}</Pill>
+                                <ChevronDown
+                                  className={`h-4 w-4 shrink-0 text-muted-foreground/60 transition-transform duration-200 ${catOpen ? 'rotate-180' : ''}`}
+                                />
+                              </button>
+                              {catOpen && (
+                                <div className="flex flex-col gap-1.5 border-t border-black/[0.04] px-3 py-2.5 dark:border-white/[0.06]">
+                                  {cat.entries.map(renderEntry)}
+                                </div>
+                              )}
                             </div>
-                          )}
-                        </div>
-                      );
-                    })}
+                          );
+                        })}
+                      </>
+                    ) : null}
                   </div>
                 )}
               </div>
