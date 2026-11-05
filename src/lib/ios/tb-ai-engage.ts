@@ -31,6 +31,7 @@ import { buildPersonaSystemPrompt } from './persona';
 import { getMemSettings } from '@/lib/memory';
 import { memChatRecallBlock, memAddEventFragment } from '@/lib/memory';
 import { getTimeAware, buildTimeAwareBlock } from '@/lib/time-aware';
+import { libPromptTextMulti } from '@/lib/prompt-entries';
 import { pushChatNotification } from './island-notify';
 import { wxUnreads, qqUnreads } from '@/lib/unread-store';
 import { getActiveAccountIdFor, getActiveAccountFor, type AccountApp } from './accounts';
@@ -293,9 +294,14 @@ function catalogBlock(recentTexts: (string | undefined | null)[]): string {
       parts.push(`【与机主正在聊的相关商品】（机主想要什么就优先从这里选最贴合的）\n${relFresh.map(line).join('\n')}`);
     }
     parts.push(`【其他在售商品】\n${base.map(line).join('\n')}`);
+    // v67 提示词库接线：整块目录经覆写层（wechat-48-1/qq-53 多别名）；禁用 → ''（调用方 if (cat) 整段跳过）
     return (
-      `【淘宝在售商品目录】（推荐/代买只能从这份清单里选，id 必须原样抄写；` +
-      `没有贴合机主所说的商品就直说没有或换个说法，绝不推荐毫不相干的品类凑数）\n${parts.join('\n\n')}`
+      libPromptTextMulti(
+        ['lib:wechat-48-1', 'lib:qq-53'],
+        { parts: parts.join('\n\n') },
+        `【淘宝在售商品目录】（推荐/代买只能从这份清单里选，id 必须原样抄写；` +
+        `没有贴合机主所说的商品就直说没有或换个说法，绝不推荐毫不相干的品类凑数）\n${parts.join('\n\n')}`,
+      ) ?? ''
     );
   } catch {
     return '';
@@ -581,7 +587,9 @@ export function buildTbEngageCtx(
       if (target) {
         const order = tbShareOrderOf(target);
         const takable = !!order && order.status !== 'completed' && order.status !== 'cancelled' && !order.ticket;
-        rules.push(
+        const giftConfirmRule = libPromptTextMulti(
+          ['lib:wechat-48-2', 'lib:qq-54'],
+          { id: target.id, shopName: target.shopName, amount: fmt2(target.amount) },
           `【礼物确认（由你判断）】机主最近的话里提到「给你买的」这类说法，而本聊天里有一张机主分享的淘宝订单（id:${target.id}，淘宝店「${target.shopName}」的${target.items.map((i) => `${i.name}x${i.qty}`).join('、')}，¥${fmt2(target.amount)}）。` +
             `结合你们正在聊的内容和你对这段关系的记忆判断：机主是不是说这张订单是送你的礼物？` +
             (takable
@@ -589,6 +597,7 @@ export function buildTbEngageCtx(
               : `这张订单已不能代取（已签收/取消），不用输出标记，按人设自然聊就好；`) +
             `如果机主说的是买给别人（TA的家人朋友）、送表情包之类虚拟物、或只是随口一提不是礼物 → 不要输出标记，正常聊天。`,
         );
+        if (giftConfirmRule) rules.push(giftConfirmRule);
       }
     } catch {
       /* 礼物候选扫描失败不影响聊天 */
@@ -598,7 +607,11 @@ export function buildTbEngageCtx(
   // —— 动态块：最近订单（AI 知道机主买了什么/哪家店/多少钱/什么时候/快递状态，可自然提起、主动问）
   const recent = orders.filter((o) => o.status !== 'cancelled' && !o.ticket).slice(0, 5);
   const block = recent.length > 0
-    ? `【${owner}的淘宝动态】（实时状态，可以自然提起、主动关心快递进度）\n${recent.map(orderBrief).join('\n')}`
+    ? libPromptTextMulti(
+        ['lib:wechat-48-11', 'lib:qq-60'],
+        { owner, orders: recent.map(orderBrief).join('\n') },
+        `【${owner}的淘宝动态】（实时状态，可以自然提起、主动关心快递进度）\n${recent.map(orderBrief).join('\n')}`,
+      ) ?? ''
     : '';
 
   // —— 聊天内的代付请求（direction 'friend'：机主发给该 AI 的；待付 + 已婉拒可改主意）→ [代付淘宝:请求id]
@@ -630,18 +643,24 @@ export function buildTbEngageCtx(
       ...friendPending.map((p) => `· id=${p.id} 淘宝店「${p.shopName}」 ¥${fmt2(p.amount)}（${p.items.map((i) => `${i.name}x${i.qty}`).join('、')}）${p.note ? ` 备注:${p.note}` : ''} · 请求人:${p.fromName} · 待代付`),
       ...friendDeclined.map((p) => `· id=${p.id} 淘宝店「${p.shopName}」 ¥${fmt2(p.amount)}（${p.items.map((i) => `${i.name}x${i.qty}`).join('、')}） · 请求人:${p.fromName} · 你之前婉拒了（订单还在待付款，机主又开口的话可以改主意）`),
     ];
-    rules.push(
+    const tbProxyRule = libPromptTextMulti(
+      ['lib:wechat-48-3', 'lib:qq-55'],
+      { lines: lines.join('\n') },
       `【待你处理的淘宝代付请求】\n${lines.join('\n')}\n` +
         `机主希望你帮忙支付上面的订单（订单仍是待付款状态才能代付）。是否代付完全由你按人设、你们的关系、记忆和金额自主决定：愿意就先说一句，再单独输出标记 [代付淘宝:请求id]（系统会立即支付并发出回执卡片，id 必须原样抄写；之前婉拒过的也可以改主意帮TA付，系统会把请求卡改成已代付）；不想付或觉得不合适就用正文自然婉拒（可以调侃、可以撒娇说下次），不要输出标记——婉拒后这张请求卡会显示「对方婉拒了」，TA还可以自己支付或再找别人。30 分钟内不付款订单会自动取消。`,
     );
+    if (tbProxyRule) rules.push(tbProxyRule);
   }
 
   // —— AI 自己发出去的代付请求（等机主付）
   const mePending = tbPendingProxiesOfChat(chatContactId).filter((p) => p.direction === 'me');
   if (mePending.length > 0) {
-    rules.push(
+    const meProxyRule = libPromptTextMulti(
+      ['lib:wechat-48-4', 'lib:qq-56'],
+      {},
       `【你发出去的淘宝代付请求（等机主帮你付）】\n${mePending.map((p) => `· 淘宝店「${p.shopName}」 ¥${fmt2(p.amount)}（${p.items.map((i) => `${i.name}x${i.qty}`).join('、')}）· 待机主支付`).join('\n')}\n可以自然提起（按人设撒娇催一催），机主点卡片就能帮你付；不要重复发请求。`,
     );
+    if (meProxyRule) rules.push(meProxyRule);
   }
 
   // —— 待付款订单 → [帮付淘宝:订单id]（一/五：AI 按人设记忆判断是否主动代付）
@@ -657,21 +676,27 @@ export function buildTbEngageCtx(
   const helpable = orders.filter((o) => o.status === 'pendingPay' && !proxyOrderIds.has(o.id));
   if (helpable.length > 0) {
     const lines = helpable.slice(0, 4).map((o) => `· 订单id=${o.id} 淘宝店「${o.shopName}」 ${o.items.map((i) => `${i.title.slice(0, 14)}${i.qty > 1 ? `x${i.qty}` : ''}`).join('、')} ¥${fmt2(o.total)}`);
-    rules.push(
+    const helpPayRule = libPromptTextMulti(
+      ['lib:wechat-48-5', 'lib:qq-57'],
+      { owner, lines: lines.join('\n') },
       `【${owner}的待付款淘宝订单】\n${lines.join('\n')}\n` +
         `如果符合你的人设、你们的关系和上面的记忆（说好要送TA、想宠TA、TA正好缺这个等），可以主动帮TA付掉：输出标记 [帮付淘宝:订单id]（id 必须原样抄写，系统会立即支付并回执）。` +
         `要不要直接付、还是先在正文里提一句看TA反应，都由你按人设/关系/上下文自然拿捉（没有金额限制，也别每次都抢着付）。`,
     );
+    if (helpPayRule) rules.push(helpPayRule);
   }
 
   // —— 在途快递 → [帮取快递:订单id]（机主开口让 AI 取件）
   const express = orders.filter((o) => o.status === 'shipped' && !o.ticket && !o.aiPickup);
   if (express.length > 0) {
     const lines = express.slice(0, 4).map((o) => `· 订单id=${o.id} 淘宝店「${o.shopName}」 ${o.items.map((i) => `${i.title.slice(0, 14)}`).join('、')} · ${tbArrivedAtStation(o) ? '已到驿站待取件' : '还在路上'}`);
-    rules.push(
+    const expressRule = libPromptTextMulti(
+      ['lib:wechat-48-6', 'lib:qq-58'],
+      { owner, lines: lines.join('\n') },
       `【${owner}的淘宝快递】\n${lines.join('\n')}\n` +
         `机主让你帮忙取快递/取件时：输出标记 [帮取快递:订单id]（id 原样抄写）。已到驿站的会立即取好；还在路上的会记下来，到驿站后你自动去取并回消息。取完记得按人设说一句。`,
     );
+    if (expressRule) rules.push(expressRule);
   }
 
   // —— 购物话题 → 商品目录 + [帮你买]（直接买+即时送达+礼物卡，仅微信）+ [自己买]（自己买请机主付）
@@ -687,11 +712,19 @@ export function buildTbEngageCtx(
         app === 'wx'
           ? `【你想送礼物给机主（你出钱直接送）】聊到送礼物/生日节日纪念日/哄TA开心/TA提到喜欢什么时（按人设与关系判断），输出标记 [送礼物:商品id]（id 原样抄目录，选贴合对方心意的）——系统会把礼物以卡片形式送到聊天里，TA 点开就能收下；目录里没有合心意的就直接写宝贝名字并在前面加 *（例如 [送礼物:*永生花礼盒]），系统会现场帮你上架这个宝贝再送出。送之前用正文铺垫一句心意。送过几次都不受限制，机主要就送；别把历史里的 [礼物卡片 ID:…]（你送出…）回执行照抄进回复，那不是标记、没有效果。`
           : '';
+      // v67 提示词库接线：buyRule=lib:wechat-48-7、[自己买]=lib:wechat-48-9+qq-53、giftRule=lib:wechat-48-8
+      //（buyRule/giftRule 仅微信非空——空串不进覆写层，编辑版不会漏进 QQ；禁用 → 该段省略）
+      const buyRuleWired = buyRule ? (libPromptTextMulti(['lib:wechat-48-7'], {}, buyRule) ?? '') : '';
+      const giftRuleWired = giftRule ? libPromptTextMulti(['lib:wechat-48-8'], {}, giftRule) : null;
       rules.push(
         `${cat}\n\n` +
-          buyRule +
-          `【你自己想买（机主出钱）】你自己种草了什么/缺什么的时候（按人设判断，别频繁），输出标记 [自己买:商品id|数量?]——系统会生成待付款订单并请机主帮你代付，记得用正文说一句让TA帮你付。` +
-          (giftRule ? `\n${giftRule}` : ''),
+          buyRuleWired +
+          (libPromptTextMulti(
+            ['lib:wechat-48-9', 'lib:qq-53'],
+            {},
+            `【你自己想买（机主出钱）】你自己种草了什么/缺什么的时候（按人设判断，别频繁），输出标记 [自己买:商品id|数量?]——系统会生成待付款订单并请机主帮你代付，记得用正文说一句让TA帮你付。`,
+          ) ?? '') +
+          (giftRuleWired ? `\n${giftRuleWired}` : ''),
       );
     }
   }
@@ -703,10 +736,13 @@ export function buildTbEngageCtx(
       const ps = c.tiers.map((t) => t.price);
       return `· 演唱会 id=${c.id} 「${c.artist}《${c.tour}》」 ${c.venue} · ${c.dateRange} · ¥${Math.min(...ps)}-${Math.max(...ps)}${c.status === 'soon' ? '（预售未开售）' : ''}`;
     });
-    rules.push(
+    const showsRule = libPromptTextMulti(
+      ['lib:wechat-48-10', 'lib:qq-59'],
+      { shows: [...showLines, ...concertLines].join('\n') },
       `【近期演出（帮机主买票只能从这个清单选，id 必须原样抄写）】\n${[...showLines, ...concertLines].join('\n')}\n` +
         `机主想让你帮买票/订票时，结合你的人设、关系和金额自主决定买不买、买哪场：愿意就输出标记 [帮你买票:演出id]（系统会自动选场次下单、由你付款出票，并把订单分享到聊天）；不想买或觉得不合适就正常聊天婉拒。金额没有上限，但别每次都抢着买。`,
     );
+    if (showsRule) rules.push(showsRule);
   }
 
   return { block, rules };
@@ -1297,20 +1333,29 @@ async function tbPickupLinesViaLlm(
     .join('\n\n');
   const user =
     kind === 'gift'
-      ? [
-          `【刚发生的事】${meName}之前在淘宝送了你一件礼物（「${order.shopName}」的${summary}，¥${fmt2(order.total)}），现在包裹到驿站了，你把它取回来了。`,
-          '【任务】要不要主动给TA发消息，由你结合人设、你们的关系、当前时间（比如大半夜可以不说）和你们相处的记忆自己决定：',
-          '想说的话发 1~2 条，像平时聊天——可以说包裹取到了、聊聊礼物本身、开个玩笑都行；禁止「我超喜欢，谢谢你XX」这类客套道谢句式，也不要复述「到驿站/取件」流程细节；',
-          '觉得没必要主动说/不想打扰 → say 填 false（这单就不说话了，之后TA聊起来再自然回应）。',
-          '输出 JSON：{"say":true或false,"lines":["要说的话（每句一条，最多2条，say=false时给空数组）"]}',
-          '严禁输出 JSON 以外的文字。',
-        ].join('\n\n')
-      : [
-          `【刚发生的事】${meName}的淘宝快递（「${order.shopName}」的${summary}）到驿站了，TA之前请你帮忙取件，你正去取。`,
-          '【任务】生成你要发的两条消息：第一条是出发去取时说的；第二条是取到之后交差的话（按你的人设自然说，比如放哪了/让TA来拿/顺路这些你们之间才会有的说法，禁止套模板，也不要复述流程细节）。',
-          '输出 JSON：{"out":"出发时那条","done":"取到后那条"}（各 1 句，像平时聊天）。',
-          '严禁输出 JSON 以外的文字。',
-        ].join('\n\n');
+      ? libPromptTextMulti(
+          ['lib:taobao-6.3', 'lib:wechat-69', 'lib:qq-60'],
+          { meName, summary, shopName: order.shopName, total: fmt2(order.total) },
+          [
+            `【刚发生的事】${meName}之前在淘宝送了你一件礼物（「${order.shopName}」的${summary}，¥${fmt2(order.total)}），现在包裹到驿站了，你把它取回来了。`,
+            '【任务】要不要主动给TA发消息，由你结合人设、你们的关系、当前时间（比如大半夜可以不说）和你们相处的记忆自己决定：',
+            '想说的话发 1~2 条，像平时聊天——可以说包裹取到了、聊聊礼物本身、开个玩笑都行；禁止「我超喜欢，谢谢你XX」这类客套道谢句式，也不要复述「到驿站/取件」流程细节；',
+            '觉得没必要主动说/不想打扰 → say 填 false（这单就不说话了，之后TA聊起来再自然回应）。',
+            '输出 JSON：{"say":true或false,"lines":["要说的话（每句一条，最多2条，say=false时给空数组）"]}',
+            '严禁输出 JSON 以外的文字。',
+          ].join('\n\n'),
+        )
+      : libPromptTextMulti(
+          ['lib:taobao-6.4', 'lib:wechat-69', 'lib:qq-60'],
+          { meName, summary, shopName: order.shopName },
+          [
+            `【刚发生的事】${meName}的淘宝快递（「${order.shopName}」的${summary}）到驿站了，TA之前请你帮忙取件，你正去取。`,
+            '【任务】生成你要发的两条消息：第一条是出发去取时说的；第二条是取到之后交差的话（按你的人设自然说，比如放哪了/让TA来拿/顺路这些你们之间才会有的说法，禁止套模板，也不要复述流程细节）。',
+            '输出 JSON：{"out":"出发时那条","done":"取到后那条"}（各 1 句，像平时聊天）。',
+            '严禁输出 JSON 以外的文字。',
+          ].join('\n\n'),
+        );
+  if (!user) return []; // v67：条目被禁用 → 不注入该 prompt（gift=不发消息；favor=由调用方走本地兜底文案）
   const raw = await callTbLlm(system, user);
   const clean = (s?: string): string =>
     (s ?? '')
@@ -1415,14 +1460,19 @@ async function runProactivePayEngage(uid: string, orderId: string): Promise<void
   const memoryBlock = memChatRecallBlock(contact.id, app, `淘宝 待付款 代付 购物 ${order.shopName} ${summary}`, {});
   const timeBlock = getTimeAware(sessionKey) ? buildTimeAwareBlock({ regionHint: contact.region || null }) : '';
   const system = [persona, memoryBlock, timeBlock].filter(Boolean).join('\n\n');
-  const user = [
-    `【你看到的一件事】${meName}刚在淘宝「${order.shopName}」下单还没付款：${summary}，共 ¥${fmt2(order.total)}（30 分钟内不付会自动取消）。`,
-    '【任务】结合你的人设、你们的关系、上面的记忆和金额，决定怎么参与（演示语义，不会真花钱）：',
-    '- 直接全付：输出 {"pay":"all"}；不想付：输出 {"pay":false}，用正文自然提一嘴（调侃/关心/催TA去买单都行）。',
-    '关系亲近/人设大方/正好想宠TA → 可以付（全付）；人设节俭/关系一般/刚闹过矛盾 → 不付。怎么选都自然，没有标准答案。',
-    '输出 JSON：{"pay":"all"或false,"reply":"给对方发的一句话（像平时聊天，1~2句；付了说已付+人设话，没付就自然聊）"}',
-    '严禁输出 JSON 以外的文字。',
-  ].join('\n\n');
+  const user = libPromptTextMulti(
+    ['lib:taobao-6.6', 'lib:wechat-68', 'lib:qq-60'],
+    { meName, summary, shopName: order.shopName, total: fmt2(order.total) },
+    [
+      `【你看到的一件事】${meName}刚在淘宝「${order.shopName}」下单还没付款：${summary}，共 ¥${fmt2(order.total)}（30 分钟内不付会自动取消）。`,
+      '【任务】结合你的人设、你们的关系、上面的记忆和金额，决定怎么参与（演示语义，不会真花钱）：',
+      '- 直接全付：输出 {"pay":"all"}；不想付：输出 {"pay":false}，用正文自然提一嘴（调侃/关心/催TA去买单都行）。',
+      '关系亲近/人设大方/正好想宠TA → 可以付（全付）；人设节俭/关系一般/刚闹过矛盾 → 不付。怎么选都自然，没有标准答案。',
+      '输出 JSON：{"pay":"all"或false,"reply":"给对方发的一句话（像平时聊天，1~2句；付了说已付+人设话，没付就自然聊）"}',
+      '严禁输出 JSON 以外的文字。',
+    ].join('\n\n'),
+  );
+  if (!user) return; // v67：条目被禁用 → 不做主动参与（也不走本地兜底帮付，避免「关了提示词却被自动扣单」）
   let parsed: { pay?: boolean | string; reply?: string } | null = null;
   try {
     const raw = await callTbLlm(system, user);
@@ -1587,11 +1637,16 @@ export function tbSchedulePickupResponse(sid: string): void {
         accountId: getActiveAccountIdFor(app as AccountApp),
         multiApp: getMemSettings(contact.id).share,
       });
-      const user = [
-        `【刚收到的事】${meName}在淘宝把「${order.shopName}」的快递订单分享给你，请你帮忙取件（${summary}）。包裹还在路上，到驿站后你会去取。`,
-        '按你的人设自然回应一句（答应下来，1~2 句，像平时聊天）。',
-        '直接输出这句话本身，不要 JSON、不要引号。',
-      ].join('\n\n');
+      const user = libPromptTextMulti(
+        ['lib:taobao-6.5', 'lib:wechat-69', 'lib:qq-60'],
+        { meName, summary, shopName: order.shopName },
+        [
+          `【刚收到的事】${meName}在淘宝把「${order.shopName}」的快递订单分享给你，请你帮忙取件（${summary}）。包裹还在路上，到驿站后你会去取。`,
+          '按你的人设自然回应一句（答应下来，1~2 句，像平时聊天）。',
+          '直接输出这句话本身，不要 JSON、不要引号。',
+        ].join('\n\n'),
+      );
+      if (!user) return; // v67：条目被禁用 → 不注入该 prompt（取件本身仍由 watcher 自动完成，只是不答应一句话）
       let line = '';
       try {
         line = (await callTbLlm(persona, user)).trim().replace(/^[「"'『]+|[」"'』]+$/g, '').split('\n')[0]?.trim() ?? '';
@@ -1637,5 +1692,11 @@ export function tbDraftHistoryLine(did: string): string {
   const status = d.status === 'pending' ? '待机主确认' : d.status === 'confirmed' ? `已下单（订单${(d.orderIds ?? [d.orderId]).filter(Boolean).join('、')}，你已付款）` : '机主已取消';
   const shops = [...new Set(d.items.map((i) => i.shopName))].join('、');
   const goods = d.items.map((i) => `「${i.title}」x${i.qty}`).join('、');
-  return `[淘宝代买 id:${d.id}]（${d.charName}帮机主买的：淘宝店「${shops}」的${goods}，约¥${fmt2(d.total ?? tbDraftEstimate(d))}，状态:${status}）`;
+  return (
+    libPromptTextMulti(
+      ['lib:taobao-4'],
+      { id: d.id, charName: d.charName, shops, goods, total: fmt2(d.total ?? tbDraftEstimate(d)), status },
+      `[淘宝代买 id:${d.id}]（${d.charName}帮机主买的：淘宝店「${shops}」的${goods}，约¥${fmt2(d.total ?? tbDraftEstimate(d))}，状态:${status}）`,
+    ) ?? ''
+  );
 }

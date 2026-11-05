@@ -13,6 +13,7 @@
 import { useRef, useState } from 'react';
 import { ChevronLeft, ImagePlus, Loader2, PackagePlus, Plus, Trash2, Wand2, X } from 'lucide-react';
 import { compressImageSrc, generateFreePhoto } from '@/lib/imggen';
+import { libPromptTextMulti } from '@/lib/prompt-entries';
 import type { ImgGenConfig } from '@/lib/ios/store';
 import type { OrderCustomMeta, OrderCustomOptionGroup } from '@/lib/ios/order-custom';
 import type { TbProduct, TbShop } from '@/lib/ios/taobao-data';
@@ -447,7 +448,7 @@ export function TbOrderCreatePage({
       <OrderImgGenSheet
         open={genOpen}
         title="AI 生成商品图片"
-        initialPrompt={itemName.trim() ? `${itemName.trim()}${type.trim() ? `（${type.trim()}）` : ''} 电商商品白底图` : ''}
+        initialPrompt={itemName.trim() ? libPromptTextMulti(['lib:taobao-8'], { itemName: itemName.trim(), type: type.trim() }, `${itemName.trim()}${type.trim() ? `（${type.trim()}）` : ''} 电商商品白底图`) ?? '' : ''}
         busy={genBusy}
         error={genErr}
         accent="#FF4400"

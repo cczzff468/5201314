@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
+import { libPromptTextMulti } from '@/lib/prompt-entries';
+
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
@@ -460,7 +462,9 @@ const HOME_TAB_RULES: Record<string, string> = {
 
 /** 各表面的任务描述（拼进 user prompt 首行） */
 function surfaceTask(a: GenerateArgs): string {
-  if (a.surface === 'home') return `淘宝首页双列瀑布流推荐商品。当前频道规则：${HOME_TAB_RULES[a.tab] ?? HOME_TAB_RULES.rec}`;
+  // v67 全量预设库：lib:taobao-2.1.2（首页各频道 tab 生成规则；关闭=该段不注入，编辑=替换当前频道规则段）
+  if (a.surface === 'home')
+    return `淘宝首页双列瀑布流推荐商品。当前频道规则：${libPromptTextMulti(['lib:taobao-2.1.2'], { tab: a.tab }, HOME_TAB_RULES[a.tab] ?? HOME_TAB_RULES.rec) ?? ''}`;
   if (a.surface === 'video')
     return '淘宝短视频种草流商品（用于视频流卡片）。title 必须像短视频口播文案——口语化、带情绪、有钩子（例：「吹爆这款平价耳机！学生党闭眼入」「被问爆的春秋外套来了」），不超过 20 字，禁止写成参数罗列式商品名；price 以 9.9~199 为主。';
   if (a.surface === 'subsidy')
@@ -504,30 +508,35 @@ const ITEM_SCHEMA: Record<TbSurface, string> = {
 };
 
 function buildSystem(surface: TbSurface): string {
-  if (surface === 'home') return `${PROMPT_BASE}当前是淘宝首页双列瀑布流。`;
-  if (surface === 'video') return `${PROMPT_BASE}当前是淘宝短视频种草流，标题风格优先级高于参数完整性。`;
-  if (surface === 'subsidy') return `${PROMPT_BASE}当前是淘宝百亿补贴频道，promo 与保障类字段必须完整。`;
-  if (surface === 'seckill') return `${PROMPT_BASE}当前是淘宝秒杀频道，价格必须便宜且折扣要自洽。`;
-  if (surface === 'fliggy') return `${PROMPT_BASE}当前是飞猪酒店民宿频道，酒店名要像真实OTA在售酒店。`;
-  if (surface === 'me') return `${PROMPT_BASE}当前是淘宝「我的」页猜你喜欢瀑布流。`;
-  if (surface === 'standup') return `${PROMPT_BASE}当前是淘票票喜剧脱口秀频道，演出名/厂牌/艺人必须完全虚构。`;
-  if (surface === 'concert') return `${PROMPT_BASE}当前是淘票票演唱会频道，艺人名与巡演名必须完全虚构，严禁真实歌手。`;
-  if (surface === 'merch') return `${PROMPT_BASE}当前是淘票票周边商城，周边必须挂在自创虚构影片下，严禁真实IP。`;
-  if (surface === 'movieUp') return `${PROMPT_BASE}当前是淘票票即将上映频道，片名与演职人员必须完全虚构。`;
-  if (surface === 'coupon') return `${PROMPT_BASE}当前是淘宝领券中心，券名必须像真实大促优惠券且同一批互不重复。`;
-  if (surface === 'search') return `${PROMPT_BASE}当前是淘宝搜索结果页，商品必须与搜索词品类强相关且带品牌/型号/规格。`;
-  return `${PROMPT_BASE}当前是淘票票热映电影频道，片名与演职人员必须完全虚构。`;
+  // v67 全量预设库：lib:taobao-2.1.1（基础 system 段 PROMPT_BASE；关闭=该段不注入，编辑=替换基础段）
+  const base = libPromptTextMulti(['lib:taobao-2.1.1'], undefined, PROMPT_BASE) ?? '';
+  if (surface === 'home') return `${base}当前是淘宝首页双列瀑布流。`;
+  if (surface === 'video') return `${base}当前是淘宝短视频种草流，标题风格优先级高于参数完整性。`;
+  if (surface === 'subsidy') return `${base}当前是淘宝百亿补贴频道，promo 与保障类字段必须完整。`;
+  if (surface === 'seckill') return `${base}当前是淘宝秒杀频道，价格必须便宜且折扣要自洽。`;
+  if (surface === 'fliggy') return `${base}当前是飞猪酒店民宿频道，酒店名要像真实OTA在售酒店。`;
+  if (surface === 'me') return `${base}当前是淘宝「我的」页猜你喜欢瀑布流。`;
+  if (surface === 'standup') return `${base}当前是淘票票喜剧脱口秀频道，演出名/厂牌/艺人必须完全虚构。`;
+  if (surface === 'concert') return `${base}当前是淘票票演唱会频道，艺人名与巡演名必须完全虚构，严禁真实歌手。`;
+  if (surface === 'merch') return `${base}当前是淘票票周边商城，周边必须挂在自创虚构影片下，严禁真实IP。`;
+  if (surface === 'movieUp') return `${base}当前是淘票票即将上映频道，片名与演职人员必须完全虚构。`;
+  if (surface === 'coupon') return `${base}当前是淘宝领券中心，券名必须像真实大促优惠券且同一批互不重复。`;
+  if (surface === 'search') return `${base}当前是淘宝搜索结果页，商品必须与搜索词品类强相关且带品牌/型号/规格。`;
+  return `${base}当前是淘票票热映电影频道，片名与演职人员必须完全虚构。`;
 }
 
 function buildUser(a: GenerateArgs): string {
   return [
-    `生成 ${a.count} 条${surfaceTask(a)}`,
+    // v67 全量预设库：lib:taobao-2.1.3（各表面任务描述段；关闭=该段不注入，编辑=替换任务描述段）
+    `生成 ${a.count} 条${libPromptTextMulti(['lib:taobao-2.1.3'], { tab: a.tab }, surfaceTask(a)) ?? ''}`,
     `【本次口令】${a.nonce}`,
     `【生成条数】${a.count}`,
     `【排除名单（绝不能重复出现）】${a.exclude.slice(0, 60).join('、') || '无'}`,
     '口令要求：标题/店名/片名必须新颖独特、同一批内互不重复，禁止照抄知名品牌或真实影片原名。',
-    `字段规范（示例仅示意格式，输出中禁止出现示例里的名称）：${ITEM_SCHEMA[a.surface]}`,
-    `tag 必须从以下白名单中选最贴切的一个，禁止自造词：${a.tagPool.join('、')}。`,
+    // v67 全量预设库：lib:taobao-2.1.6（各表面输出字段示例段；关闭=该段不注入，编辑=替换字段规范段）
+    `字段规范（示例仅示意格式，输出中禁止出现示例里的名称）：${libPromptTextMulti(['lib:taobao-2.1.6'], { surface: a.surface }, ITEM_SCHEMA[a.surface]) ?? ''}`,
+    // v67 全量预设库：lib:taobao-2.1.7（tag 白名单段；关闭=该段不注入，编辑=替换白名单段）
+    `tag 必须从以下白名单中选最贴切的一个，禁止自造词：${libPromptTextMulti(['lib:taobao-2.1.7'], undefined, a.tagPool.join('、')) ?? ''}。`,
     `全部简体中文（tag 除外），数值要合理逼真；输出尽量精炼，确保 ${a.count} 条全部完整输出。`,
     '请严格输出 JSON 数组，不要输出任何解释文字。',
   ].join('\n');
@@ -763,13 +772,19 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  const system = buildSystem(surface);
+  // v67 全量预设库：lib:taobao-2.1.4（各表面 system 后缀）+ lib:taobao-2.1.1（基础段，供编辑模板 {{PROMPT_BASE}} 填充）
+  const base = libPromptTextMulti(['lib:taobao-2.1.1'], undefined, PROMPT_BASE) ?? '';
+  const system = libPromptTextMulti(['lib:taobao-2.1.4'], { PROMPT_BASE: base }, buildSystem(surface)) ?? '';
   const args: GenerateArgs = { surface, tab, count, exclude, nonce, tagPool: tagPoolFor(surface, tab) };
 
   // 单次生成：用户模型优先（config 缺失/解析为空/上游失败 → 内置模型兜底）
   let rawItems: RawRec[] = [];
   let source: 'user' | 'sdk' = 'sdk';
-  const user = buildUser(args);
+  // v67 全量预设库：lib:taobao-2.1.5（user prompt 模板）；system/user 任一被禁用 → 不发起本次生成（前端走本地兜底）
+  const user = libPromptTextMulti(['lib:taobao-2.1.5'], { count: args.count, nonce: args.nonce }, buildUser(args)) ?? '';
+  if (!system || !user) {
+    return NextResponse.json({ ok: false, error: '生成提示词已停用' }, { status: 200 });
+  }
   try {
     if (userCfg) {
       try {

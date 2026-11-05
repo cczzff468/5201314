@@ -1,6 +1,8 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { completeWithFallback, extractUpstreamConfig, parseLooseJSON, readJsonBody } from '@/lib/server-llm';
 
+import { libPromptTextMulti } from '@/lib/prompt-entries';
+
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
@@ -66,10 +68,14 @@ export async function POST(req: NextRequest) {
 
   const user = `生成 ${count} 条互不重复的淘宝历史订单。排除名单（商品标题命中即跳过）：${exclude.length ? exclude.join('、') : '（无）'}。随机口令：${nonce}。`;
 
+  // v67 全量预设库：lib:taobao-2.2（淘宝历史订单生成提示词 system+user；禁用=不发起本次生成，前端走本地生成器）
+  const system = libPromptTextMulti(['lib:taobao-2.2'], { tags: TAGS.join('|'), count, nonce }, SYSTEM) ?? '';
+  if (!system) return NextResponse.json({ ok: false, error: '生成提示词已停用' }, { status: 200 });
+
   let items: TbOrderRaw[] | null = null;
   try {
     const { text } = await completeWithFallback(config, [
-      { role: 'system', content: SYSTEM },
+      { role: 'system', content: system },
       { role: 'user', content: user },
     ]);
     items = parseLooseJSON<TbOrderRaw[]>(text);

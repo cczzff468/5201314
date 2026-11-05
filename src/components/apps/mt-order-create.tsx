@@ -13,6 +13,7 @@
 import { useRef, useState } from 'react';
 import { ChevronLeft, ImagePlus, Loader2, PackagePlus, Plus, Trash2, Wand2, X } from 'lucide-react';
 import { compressImageSrc, generateFreePhoto } from '@/lib/imggen';
+import { libPromptTextMulti } from '@/lib/prompt-entries';
 import type { ImgGenConfig } from '@/lib/ios/store';
 import type { OrderCustomOptionGroup, OrderCustomMeta } from '@/lib/ios/order-custom';
 import type { MtDish, MtMerchant } from '@/lib/ios/meituan-data';
@@ -448,7 +449,7 @@ export function MtOrderCreatePage({
       <OrderImgGenSheet
         open={genOpen}
         title="AI 生成商品图片"
-        initialPrompt={itemName.trim() ? `${itemName.trim()}${type.trim() ? `（${type.trim()}）` : ''} 商品实拍图，干净背景` : ''}
+        initialPrompt={itemName.trim() ? libPromptTextMulti(['lib:meituan-9'], { itemName: itemName.trim(), type: type.trim() }, `${itemName.trim()}${type.trim() ? `（${type.trim()}）` : ''} 商品实拍图，干净背景`) ?? '' : ''}
         busy={genBusy}
         error={genErr}
         accent="#FF6000"

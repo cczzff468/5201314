@@ -19,6 +19,7 @@
 import { kvDelByPrefix, kvGet, kvSet } from '@/lib/ios/idb-kv';
 import { compressImageSrc, generateFreePhoto } from '@/lib/imggen';
 import type { ImgGenConfig } from '@/lib/ios/store';
+import { libPromptTextMulti } from '@/lib/prompt-entries';
 
 export type TbImgStyle = 'real' | 'ai' | 'default';
 
@@ -156,10 +157,11 @@ const TAG_ZH: Record<string, string> = {
 /** AI 生成最终提示词（商品图 / 门头图两种口径；要求无文字防乱码招牌、无水印） */
 export function tbImgPrompt(tag: string, kind: 'f' | 'c'): string {
   const zh = TAG_ZH[tag] ?? tag.replace(/-/g, ' ');
+  // v67 全量预设库：lib:taobao-8.2（淘宝全站图片样式 AI 生成提示词，按 kind 分支；关闭=不发起生图，保持默认插画）
   if (kind === 'c') {
-    return `${zh}品牌专卖店门头外观，明亮温馨的街边门店实景，玻璃橱窗暖光，实景照片风格，招牌上没有任何文字，画面干净无水印，高质量`;
+    return libPromptTextMulti(['lib:taobao-8.2'], { zh }, `${zh}品牌专卖店门头外观，明亮温馨的街边门店实景，玻璃橱窗暖光，实景照片风格，招牌上没有任何文字，画面干净无水印，高质量`) ?? '';
   }
-  return `${zh}商品商业摄影，电商主图风格，纯色背景，产品居中，光线明亮柔和，细节清晰，画面干净无任何文字无水印，高质量`;
+  return libPromptTextMulti(['lib:taobao-8.2'], { zh }, `${zh}商品商业摄影，电商主图风格，纯色背景，产品居中，光线明亮柔和，细节清晰，画面干净无任何文字无水印，高质量`) ?? '';
 }
 
 // ---------------- 生成队列（并发 2；同 key 去重；burst 挂载时排队逐张出图） ----------------
@@ -207,6 +209,8 @@ function pumpAi(): void {
 
 /** 生成一张：生图 API → dataURL → 压缩到 512px（缩略图够用，控制 kv 体积） */
 async function genAiImg(job: AiJob): Promise<string> {
-  const raw = await generateFreePhoto(job.cfg, tbImgPrompt(job.tag, job.kind));
+  const prompt = tbImgPrompt(job.tag, job.kind);
+  if (!prompt) return ''; // v67：lib:taobao-8.2 被禁用 → 不发起生图，保持默认插画
+  const raw = await generateFreePhoto(job.cfg, prompt);
   return compressImageSrc(raw, 512, 0.82);
 }

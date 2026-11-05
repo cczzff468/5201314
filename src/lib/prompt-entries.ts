@@ -1944,6 +1944,30 @@ export function promptRule(id: string, dynamicDefault?: string): string | null {
   return promptTextOf(id, undefined, dynamicDefault);
 }
 
+/** 全量库条目多别名查找（v67）：同一段提示词代码被多个 App 面板收录
+ *  （如 chat-rich 的规则行同时收录于「微信」「QQ」，tb/mt-ai-engage 的块
+ *  同时收录于「微信」「QQ」「淘宝」「美团」）。语义：
+ *  - 任一别名被禁用 → null（任一面板关掉即不再注入）；
+ *  - 否则取第一个非空编辑（{{token}} 按 vars 填充）；
+ *  - 都无编辑 → dynamicDefault（调用方现场组装的当前文本，零改动时逐字节一致）。 */
+export function libPromptTextMulti(
+  ids: string[],
+  vars?: Record<string, string | number>,
+  dynamicDefault?: string,
+): string | null {
+  const st = getPromptEntryState();
+  if (st) {
+    for (const id of ids) {
+      if (st.disabled?.includes(id)) return null;
+    }
+    for (const id of ids) {
+      const edit = st.edits?.[id];
+      if (typeof edit === 'string' && edit.trim()) return fillPromptTemplate(edit, vars ?? {});
+    }
+  }
+  return dynamicDefault ?? null;
+}
+
 // ---------------- 统一组装（buildPrompt） ----------------
 
 /**

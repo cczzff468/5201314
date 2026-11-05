@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { mtFoodTagOf, mtImg, MT_CATS, type MtDeal, type MtDealPackage, type MtDealMenu, type MtDish, type MtMerchant } from '@/lib/ios/meituan-data';
 
+import { libPromptTextMulti } from '@/lib/prompt-entries';
+
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
@@ -596,7 +598,9 @@ export async function POST(req: NextRequest) {
 
   /** 单次生成：用户模型优先，失败落内置模型；返回解析出的数据项 */
   const generateOnce = async (nonce: string, n: number): Promise<{ items: RawRec[]; source: 'user' | 'sdk' }> => {
-    const user = buildUser({ topic, mode, count: n, exclude, nonce });
+    // v67 全量预设库：lib:meituan-3.1（美团信息流生成提示词 system+user；禁用=不发起本次生成，前端走本地生成器）
+    const user = libPromptTextMulti(['lib:meituan-3.1'], { topic, count: n, nonce }, buildUser({ topic, mode, count: n, exclude, nonce })) ?? '';
+    if (!user) return { items: [], source: 'sdk' };
     try {
       if (userCfg) {
         return { items: parseItems(await upstreamText(userCfg, system, user)), source: 'user' };

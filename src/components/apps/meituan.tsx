@@ -125,6 +125,7 @@ import { MtOrderCreatePage } from './mt-order-create';
 import { MtProductManagePage } from './mt-product-manage';
 import { OrderImgGenSheet, type ImgGenModelOption } from './order-img-gen';
 import { generateFreePhoto } from '@/lib/imggen';
+import { libPromptTextMulti } from '@/lib/prompt-entries';
 import type { ImgGenConfig } from '@/lib/ios/store';
 import MerchantCenterPage from './mt-merchant-center';
 import MerchantEditPage from './mt-merchant-edit';
@@ -2330,7 +2331,7 @@ function MerchantPage({ merchant, onBack, onCheckout, onOpenOrder, onToast }: { 
       <OrderImgGenSheet
         open={avatarGenOpen}
         title="生成店铺头像"
-        initialPrompt={`${merchant.name} 店铺头像，可爱手绘印章风格，简洁背景`}
+        initialPrompt={libPromptTextMulti(['lib:meituan-4'], { name: merchant.name }, `${merchant.name} 店铺头像，可爱手绘印章风格，简洁背景`) ?? ''}
         busy={avatarGenBusy}
         error={avatarGenErr}
         accent="#FF6000"
@@ -2343,7 +2344,7 @@ function MerchantPage({ merchant, onBack, onCheckout, onOpenOrder, onToast }: { 
       <OrderImgGenSheet
         open={!!dishGen}
         title="生成商品图片"
-        initialPrompt={dishGen ? `${dishGen.name}，真实感商品照片，明亮色泽，特写构图` : ''}
+        initialPrompt={dishGen ? libPromptTextMulti(['lib:meituan-5'], { name: dishGen.name }, `${dishGen.name}，真实感商品照片，明亮色泽，特写构图`) ?? '' : ''}
         busy={dishGenBusy}
         error={dishGenErr}
         accent="#FF6000"
@@ -5181,7 +5182,7 @@ function DealDetailPage({ deal, onBack, onBuy, onOpenMerchant, onToast }: { deal
       <OrderImgGenSheet
         open={dealGenOpen}
         title="生成团购图片"
-        initialPrompt={`${deal.title}，真实感商品照片，明亮色泽，特写构图`}
+        initialPrompt={libPromptTextMulti(['lib:meituan-6'], { title: deal.title }, `${deal.title}，真实感商品照片，明亮色泽，特写构图`) ?? ''}
         busy={dealGenBusy}
         error={dealGenErr}
         accent="#FF2D7E"
@@ -5342,7 +5343,7 @@ function MtCustomProductPage({
       <OrderImgGenSheet
         open={genOpen}
         title="生成商品图片"
-        initialPrompt={`${dish.name}，真实感商品照片，明亮色泽，特写构图`}
+        initialPrompt={libPromptTextMulti(['lib:meituan-7'], { name: dish.name }, `${dish.name}，真实感商品照片，明亮色泽，特写构图`) ?? ''}
         busy={genBusy}
         error={genErr}
         accent="#FF6000"

@@ -18,7 +18,6 @@ import {
   ChevronsUpDown,
   Database,
   Download,
-  BookOpen,
   Eye,
   EyeOff,
   Heart,
@@ -130,7 +129,7 @@ import {
   type RingtoneMeta,
 } from '@/lib/ios/notify-sound';
 import { LocalToast, useLocalToast } from './page-toast';
-import PromptLibraryPage from './settings-prompt-library';
+import { PresetLibrarySection } from './settings-preset-library';
 import {
   PROMPT_APPS,
   PROMPT_GROUPS,
@@ -174,7 +173,7 @@ import {
 
 // ---------------- 常量与类型 ----------------
 
-type Page = 'root' | 'account' | 'profile' | 'theme' | 'notification' | 'storage' | 'wallpaper' | 'font' | 'api' | 'vision' | 'imggen' | 'voice' | 'about' | 'lock' | 'prompts' | 'library';
+type Page = 'root' | 'account' | 'profile' | 'theme' | 'notification' | 'storage' | 'wallpaper' | 'font' | 'api' | 'vision' | 'imggen' | 'voice' | 'about' | 'lock' | 'prompts';
 
 const IOS_RED = '#FF453A';
 
@@ -664,17 +663,9 @@ function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
             icon={Layers}
             tone={TONE_PURPLE}
             label="默认预设（内置）"
-            value={`预设模块 (${PROMPT_GROUPS.length})`}
+            value={`模块 ${PROMPT_GROUPS.length} · 全量库 503 条`}
             onClick={() => onOpen('prompts')}
             testId="settings-prompts-row"
-          />
-          <MainRow
-            icon={BookOpen}
-            tone={TONE_CYAN}
-            label="全量提示词库"
-            value="18 个 App · 503 条"
-            onClick={() => onOpen('library')}
-            testId="settings-prompt-library-row"
           />
           <MainRow
             icon={Eye}
@@ -6796,6 +6787,9 @@ function PromptEntriesPage({ onBack }: { onBack: () => void }) {
             )}
         </div>
 
+        {/* v67：全量提示词库内嵌区——18 个 App 折叠面板 → 分类折叠 → 条目卡（开关/编辑/恢复默认，与本页模块卡同一状态存储） */}
+        <PresetLibrarySection onToast={showToast} />
+
         {/* 危险区：全部恢复默认 */}
         <div className="mt-4 px-1">
           <GroupCard>
@@ -6829,7 +6823,7 @@ export default function SettingsApp() {
   // 消费清空放到挂载后的 effect 里——渲染期间写 store 会触发「渲染中更新其它组件」告警。
   const [page, setPage] = useState<Page>(() => {
     const pending = useUI.getState().pendingSettingsPage;
-    if (pending && ['root', 'account', 'profile', 'theme', 'notification', 'storage', 'wallpaper', 'font', 'api', 'vision', 'imggen', 'voice', 'about', 'lock', 'prompts', 'library'].includes(pending)) {
+    if (pending && ['root', 'account', 'profile', 'theme', 'notification', 'storage', 'wallpaper', 'font', 'api', 'vision', 'imggen', 'voice', 'about', 'lock', 'prompts'].includes(pending)) {
       return pending as Page;
     }
     return 'root';
@@ -6854,7 +6848,6 @@ export default function SettingsApp() {
       {page === 'font' && <FontPage onBack={() => setPage('root')} />}
       {page === 'lock' && <LockPage onBack={() => setPage('root')} />}
       {page === 'prompts' && <PromptEntriesPage onBack={() => setPage('root')} />}
-      {page === 'library' && <PromptLibraryPage onBack={() => setPage('root')} />}
       {page === 'about' && <AboutPage onBack={() => setPage('root')} />}
     </IOSScreen>
   );

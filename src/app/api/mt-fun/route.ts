@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { mtImg } from '@/lib/ios/meituan-data';
 
+import { libPromptTextMulti } from '@/lib/prompt-entries';
+
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
@@ -681,9 +683,12 @@ export async function POST(req: NextRequest) {
 
   const system = buildSystem();
   const nonce = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
-  const user = buildUser(kind, topic, count, exclude, nonce);
+  // v67 全量预设库：lib:meituan-3.3/3.4/3.5（休闲玩乐/酒店旅行/电影演出频道生成提示词 system+user，按 kind 取对应条目；禁用=不发起本次生成，前端落种子数据）
+  const funLibId = kind === 'fun' ? 'lib:meituan-3.3' : kind === 'hotel' ? 'lib:meituan-3.4' : 'lib:meituan-3.5';
+  const user = libPromptTextMulti([funLibId], { count, topic, nonce, FUN_TAGS, HOTEL_TAGS }, buildUser(kind, topic, count, exclude, nonce)) ?? '';
 
   const generate = async (): Promise<RawRec[] | null> => {
+    if (!user) return null; // v67：提示词被禁用 → 不发起生成，直接落种子数据
     try {
       if (userCfg) {
         const items = parseItems(await upstreamText(userCfg, system, user));

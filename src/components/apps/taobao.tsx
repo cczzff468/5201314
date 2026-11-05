@@ -64,6 +64,7 @@ import {
   RefreshCw,
 } from 'lucide-react';
 import { TB_COURIERS, tbCourierNameOf, tbCourierSrcOf, tbGetCourierId, tbSetCourierId } from '@/lib/ios/tb-courier';
+import { libPromptTextMulti } from '@/lib/prompt-entries';
 import { useSettings, useUI } from '@/lib/ios/store';
 import { tbCreateOrderShare, tbCreateProxyRequest } from '@/lib/ios/tb-share-proxy';
 import { ISLAND_NAV_EVENT, takeNotifyNavigation } from '@/lib/ios/island-notify';
@@ -2630,7 +2631,7 @@ function ProductPage({
       <OrderImgGenSheet
         open={imgGenOpen}
         title="生成商品图片"
-        initialPrompt={`${p.title}，真实感商品主图，白底商业摄影`}
+        initialPrompt={libPromptTextMulti(['lib:taobao-1'], { title: p.title }, `${p.title}，真实感商品主图，白底商业摄影`) ?? ''}
         busy={imgGenBusy}
         error={imgGenErr}
         accent="#FF5000"
@@ -5226,7 +5227,7 @@ function OrderDetailPage({
         <OrderImgGenSheet
           open
           title="重新生成商品图片"
-          initialPrompt={`${o.items[imgGenIdx].title}${Object.keys(o.items[imgGenIdx].sku).length > 0 ? `（${Object.values(o.items[imgGenIdx].sku).join(' / ')}）` : ''} 电商商品实拍图`}
+          initialPrompt={libPromptTextMulti(['lib:taobao-2'], { title: o.items[imgGenIdx].title }, `${o.items[imgGenIdx].title}${Object.keys(o.items[imgGenIdx].sku).length > 0 ? `（${Object.values(o.items[imgGenIdx].sku).join(' / ')}）` : ''} 电商商品实拍图`) ?? ''}
           busy={imgGenBusy}
           error={imgGenErr}
           accent="#FF4400"
@@ -7013,7 +7014,7 @@ function ShopPage({ shopId, uid, onBack, onOpenProduct, onToast }: { shopId: str
       <OrderImgGenSheet
         open={avGenOpen}
         title="生成店铺头像"
-        initialPrompt={`${shop.name} 店铺头像，简洁卡通图标，方形构图`}
+        initialPrompt={libPromptTextMulti(['lib:taobao-3'], { name: shop.name }, `${shop.name} 店铺头像，简洁卡通图标，方形构图`) ?? ''}
         busy={avGenBusy}
         error={avGenErr}
         accent="#FF5000"

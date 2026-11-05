@@ -22,6 +22,7 @@ import { wxUnreads, qqUnreads } from '@/lib/unread-store';
 import { useSettings } from './store';
 import { getActiveAccountIdFor, type AccountApp } from './accounts';
 import { tbDeclineProxy, tbGetProxy, tbProxyPayOrder, tbProxyChannelName } from './tb-share-proxy';
+import { libPromptTextMulti } from '@/lib/prompt-entries';
 
 const decisionInFlight = new Set<string>();
 
@@ -125,18 +126,23 @@ async function runProxyDecision(pid: string): Promise<void> {
   const timeBlock = getTimeAware(sessionKey) ? buildTimeAwareBlock({ regionHint: contact.region || null }) : '';
   const system = [persona, memoryBlock, timeBlock].filter(Boolean).join('\n\n');
 
-  const user = [
+  // v67 全量预设库：lib:taobao-6.1（淘宝代付 AI 自主决策 user 提示词；禁用=不发起 LLM 决策，直接走本地兜底：帮付 + 兜底话术）
+  const user = libPromptTextMulti(
+    ['lib:taobao-6.1'],
+    { meName, fromName: p.fromName, shopName: p.shopName, summary, amount: fmt2(p.amount) },
+    [
     `【刚收到的淘宝代付请求】\n${meName}（${p.fromName}）在淘宝「${p.shopName}」拍了：${summary}，共 ¥${fmt2(p.amount)}，想请你代付。30 分钟内不付款订单会自动取消。`,
     '【任务】结合你的人设、性格、你们的关系、上面的记忆和金额，决定要不要帮TA付这笔钱（演示语义，不会真花钱）。',
     '一般来说：关系亲近、金额不大、人设大方/爱请客/正好想宠TA → 可以付；人设节俭/关系一般/金额偏大/刚闹过矛盾 → 可以婉拒或调侃。两种选择都自然，没有标准答案。',
     '输出 JSON：{"pay":true或false,"reply":"无论付不付都要给对方的一句话回复（像平时聊天，1~2句；付了可以说已付+一句人设话，婉拒就自然说）"}',
     '严禁输出 JSON 以外的文字。',
-  ].join('\n\n');
+  ].join('\n\n'),
+  ) ?? '';
 
   // LLM 决策（后台链路自动重试：共 3 次尝试、间隔 1.5s）——解析成功且 reply 非空才落定；
   // 3 次全失败走本地兜底（直接帮付 + 兜底话术），保证请求不会永久 pending 无响应
   let parsed: Partial<ProxyDecision> | null = null;
-  for (let attempt = 0; attempt < 3; attempt++) {
+  for (let attempt = 0; user && attempt < 3; attempt++) {
     let raw = '';
     try {
       raw = await callTbLlm(system, user);

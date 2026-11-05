@@ -10,6 +10,7 @@
  */
 import { useSettings } from './store';
 import { splitReplySegments } from '@/lib/reply-count';
+import { libPromptTextMulti } from '@/lib/prompt-entries';
 import { tbSearchPool, productById, type TbProduct, type TbShop } from './taobao-data';
 import { tbLoadOrders, type TbOrder } from './taobao-store';
 
@@ -119,7 +120,14 @@ export function buildSellerSystemPrompt(ctx: TbSellerCtx): string {
       order.createdAt ? `- 下单时间：${new Date(order.createdAt).toLocaleString('zh-CN', { hour12: false })}` : '',
     );
   }
-  return lines.filter((l) => l !== undefined).join('\n');
+  // v67 提示词库接线：整份旺信客服 system 经覆写层（lib:taobao-1.1）；无编辑无禁用 → 原文逐字节一致；禁用 → 空串
+  return (
+    libPromptTextMulti(
+      ['lib:taobao-1.1'],
+      { agent, custName, catalog, shopName: shop.name, shopRating: shop.rating },
+      lines.filter((l) => l !== undefined).join('\n'),
+    ) ?? ''
+  );
 }
 
 /** 历史消息（只取文本，卡片转占位描述） */

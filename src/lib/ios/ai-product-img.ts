@@ -15,6 +15,7 @@ import { compressImageSrc, generateFreePhoto, imgGenConfigReady } from '@/lib/im
 import { useSettings, type ImgGenConfig } from '@/lib/ios/store';
 import { tbProductImgOverride, tbSetProductImg } from '@/lib/ios/taobao-data';
 import { mtMerchantOf, mtProductImgOverride, mtRegisterAiMerchant, mtSetProductImg } from '@/lib/ios/meituan-data';
+import { libPromptTextMulti } from '@/lib/prompt-entries';
 
 /** 真图生成完成广播事件（detail: { kind, id }）；打开中的界面监听后轻量重渲染 */
 export const AI_PRODUCT_IMG_EVENT = 'ai-product-img-ready';
@@ -24,13 +25,14 @@ export type AiProductImgKind = 'tb' | 'mt-dish' | 'mt-cover';
 // ---------------- 提示词（按载体分别定调，写实电商/美食/门头摄影） ----------------
 
 function buildPrompt(kind: AiProductImgKind, name: string): string {
+  // v67 全量预设库：lib:taobao-8.1（AI 自创商品真图自动生成提示词，按 kind 分支；关闭=不发起生图，保持本地卡通图）
   if (kind === 'tb') {
-    return `电商商品白底主图实拍：${name}，单一商品居中构图，纯净浅灰白背景，柔和影棚灯光，质感细节清晰，高清写实商品摄影，无文字无水印无人物`;
+    return libPromptTextMulti(['lib:taobao-8.1'], { name }, `电商商品白底主图实拍：${name}，单一商品居中构图，纯净浅灰白背景，柔和影棚灯光，质感细节清晰，高清写实商品摄影，无文字无水印无人物`) ?? '';
   }
   if (kind === 'mt-dish') {
-    return `外卖美食实拍照片：一份${name}，盛在干净的白瓷盘或餐盒里，色泽诱人热气腾腾，木质餐桌背景，自然光俯拍视角，高清写实美食摄影，无文字无水印`;
+    return libPromptTextMulti(['lib:taobao-8.1'], { name }, `外卖美食实拍照片：一份${name}，盛在干净的白瓷盘或餐盒里，色泽诱人热气腾腾，木质餐桌背景，自然光俯拍视角，高清写实美食摄影，无文字无水印`) ?? '';
   }
-  return `街边温馨小店门头实拍照片：暖色灯箱招牌的小店外观，招牌上文字柔和虚化不可辨认，白天自然光，干净整洁，高清写实街景摄影，无水印`;
+  return libPromptTextMulti(['lib:taobao-8.1'], {}, `街边温馨小店门头实拍照片：暖色灯箱招牌的小店外观，招牌上文字柔和虚化不可辨认，白天自然光，干净整洁，高清写实街景摄影，无水印`) ?? '';
 }
 
 // ---------------- 模型选择：设置›图像生成 当前配置/预设优先，无配置走内置服务端兜底 ----------------
@@ -152,6 +154,7 @@ export function fireAiProductImg(kind: AiProductImgKind, id: string, name: strin
   firedNames.add(dedupKey);
   const job = async (): Promise<void> => {
     const prompt = buildPrompt(kind, cleanName);
+    if (!prompt) return; // v67：lib:taobao-8.1 被禁用 → 不发起生图，静默保持本地卡通图
     const src = await generateOne(pickUserCfg(), prompt);
     if (!src.startsWith('data:image/')) throw new Error('生图返回不是有效图片');
     applyImg(kind, id, src);

@@ -62,6 +62,7 @@ import {
 import { buildPersonaSystemPrompt } from './persona';
 import { memChatRecallBlock, memAddEventFragment } from '@/lib/memory';
 import { buildTimeAwareBlock, getTimeAware } from '@/lib/time-aware';
+import { libPromptTextMulti } from '@/lib/prompt-entries';
 import { pushChatNotification } from './island-notify';
 import { wxUnreads, qqUnreads } from '@/lib/unread-store';
 import { scheduleAiDelivery } from './ai-delivery';
@@ -542,7 +543,14 @@ function buildCatalogBlock(): string {
     const dishText = dishes.length > 0 ? dishes.map((d) => `${d.name}(¥${fmt2(d.price)})`).join('、') : '（暂无在售菜品）';
     return `· ${m.id} 「${m.name}」 评分${m.rating} 月售${m.monthSale} 起送¥${fmt2(m.minOrder)} 配送费¥${fmt2(m.deliveryFee)} 约${m.deliveryMin}分钟 ｜ ${dishText}`;
   });
-  return `【美团外卖精选】（现在是${slot.label}，匹配时段的店排前面；商家ID就是标记里要用的 ID；菜名必须原样抄写；已售罄的菜不会出现在这里，别点）\n${lines.join('\n')}`;
+  // v67 提示词库接线：目录整块经覆写层（wechat-47-1/qq-49 多别名）；禁用 → ''（教学段仍会拼上，仅目录省略）
+  return (
+    libPromptTextMulti(
+      ['lib:wechat-47-1', 'lib:qq-49'],
+      { slotLabel: slot.label, lines: lines.join('\n') },
+      `【美团外卖精选】（现在是${slot.label}，匹配时段的店排前面；商家ID就是标记里要用的 ID；菜名必须原样抄写；已售罄的菜不会出现在这里，别点）\n${lines.join('\n')}`,
+    ) ?? ''
+  );
 }
 
 /** C10：美团未登录 + 聊到吃的时的口径（不输出任何标记，防止落生硬的系统报错） */
@@ -612,9 +620,14 @@ function mtExpiringCouponRule(uid: string, ownerName: string): string | null {
     }
   }
   const lines = toRemind.slice(0, 2).map((c) => `·「${c.name}」减¥${fmt2(c.amount)}${c.min > 0 ? `（满¥${fmt2(c.min)}可用）` : '（无门槛）'}`);
+  // v67 提示词库接线：券提醒文本经覆写层（wechat-47-3/qq-48 多别名）；禁用 → null（调用方不注入）
   return (
-    `【券快过期】${ownerName}有 ${toRemind.length} 张美团券 24 小时内就要过期了：\n${lines.join('\n')}\n` +
-    `找自然的时机提醒TA用掉（比如“你那张券今晚就过期了，要不要点点什么把它用掉？”），提醒过一次就好，别反复念叨；TA没兴趣就正常聊。`
+    libPromptTextMulti(
+      ['lib:wechat-47-3', 'lib:qq-48'],
+      { ownerName, count: toRemind.length, lines: lines.join('\n') },
+      `【券快过期】${ownerName}有 ${toRemind.length} 张美团券 24 小时内就要过期了：\n${lines.join('\n')}\n` +
+      `找自然的时机提醒TA用掉（比如“你那张券今晚就过期了，要不要点点什么把它用掉？”），提醒过一次就好，别反复念叨；TA没兴趣就正常聊。`,
+    ) ?? null
   );
 }
 
@@ -647,7 +660,11 @@ export function buildMtEngageCtx(
     session = null;
   }
   // C10：未登录只在聊到吃的时候提醒，平时不噪音
-  if (!session) return foodHit ? { block: '', rules: [MT_NOT_LOGGED_IN_RULE] } : empty;
+  // v67 提示词库接线：未登录口径经覆写层（wechat-47-2/qq-45 多别名）；禁用 → 不注入（同 empty）
+  if (!session) {
+    const notLoggedIn = foodHit ? libPromptTextMulti(['lib:wechat-47-2', 'lib:qq-45'], {}, MT_NOT_LOGGED_IN_RULE) : null;
+    return notLoggedIn ? { block: '', rules: [notLoggedIn] } : empty;
+  }
   const uid = mtUidOf(session);
   const ownerName = cachedOwnerName() || session.name;
   const orders = mtLoadOrders(uid);
@@ -658,7 +675,12 @@ export function buildMtEngageCtx(
   const blockParts: string[] = [];
   if (recentDone.length > 0) {
     const lines = recentDone.map((o) => `· ${fmtClock(o.createdAt)} 「${o.merchantName}」 ${orderItemSummary(o)} ¥${fmt2(o.total)} · ${MT_STATUS_LABEL[o.status]}${o.payChannelLabel ? `（${o.payChannelLabel}）` : ''}`);
-    blockParts.push(`【${ownerName}的美团外卖动态】（实时状态，可自然提起）\n${lines.join('\n')}`);
+    const mtDynBlock = libPromptTextMulti(
+      ['lib:wechat-47-10', 'lib:qq-44'],
+      { ownerName, lines: lines.join('\n') },
+      `【${ownerName}的美团外卖动态】（实时状态，可自然提起）\n${lines.join('\n')}`,
+    );
+    if (mtDynBlock) blockParts.push(mtDynBlock);
   }
 
   // 规则段
@@ -669,16 +691,22 @@ export function buildMtEngageCtx(
     const mePending = proxies.filter((p) => p.direction === 'me');
     if (friendPending.length > 0) {
       const lines = friendPending.map((p) => `· id=${p.id} 商家「${p.merchantName}」 ¥${fmt2(p.amount)}（${p.items.map((i) => `${i.name}x${i.qty}`).join('、')}）${p.note ? ` 备注:${p.note}` : ''} · 请求人:${p.fromName}`);
-      rules.push(
+      const mtProxyRule = libPromptTextMulti(
+        ['lib:wechat-47-4', 'lib:qq-46'],
+        { lines: lines.join('\n') },
         `【美团代付请求（机主发来请你代付）】\n${lines.join('\n')}\n` +
-          `机主希望你帮忙支付上面的订单。是否代付完全由你按人设、你们的关系、记忆和金额自主决定：愿意就先说一句，再单独输出标记 [代付:请求id]（系统会立即支付并发出回执卡片，id 必须原样抄写）；不想付或觉得不合适就用正文自然婉拒（可以调侃、可以撒娇说下次），不要输出标记——婉拒后这张请求卡会显示「对方婉拒了」，TA还可以自己支付或再找别人。15 分钟内不处理订单会自动取消。`
+          `机主希望你帮忙支付上面的订单。是否代付完全由你按人设、你们的关系、记忆和金额自主决定：愿意就先说一句，再单独输出标记 [代付:请求id]（系统会立即支付并发出回执卡片，id 必须原样抄写）；不想付或觉得不合适就用正文自然婉拒（可以调侃、可以撒娇说下次），不要输出标记——婉拒后这张请求卡会显示「对方婉拒了」，TA还可以自己支付或再找别人。15 分钟内不处理订单会自动取消。`,
       );
+      if (mtProxyRule) rules.push(mtProxyRule);
     }
     if (mePending.length > 0) {
-      rules.push(
+      const mtMeProxyRule = libPromptTextMulti(
+        ['lib:wechat-47-5', 'lib:qq-47'],
+        {},
         `【你发出去的代付请求（等机主帮你付）】\n${mePending.map((p) => `· 商家「${p.merchantName}」 ¥${fmt2(p.amount)} · 待机主支付`).join('\n')}\n` +
-          `可以自然提起（撒娇催一催），机主点卡片就能帮你付；不要重复发请求。`
+          `可以自然提起（撒娇催一催），机主点卡片就能帮你付；不要重复发请求。`,
       );
+      if (mtMeProxyRule) rules.push(mtMeProxyRule);
     }
     // A2/B8：全部 pending 代付请求涉及的订单（任何方向/任何聊天）不进帮付清单——
     // 防 AI 帮付「自己刚请机主代付」的单（语义自相矛盾），也防同一单 [代付:pid] 与 [帮付:订单id] 双口径
@@ -694,11 +722,14 @@ export function buildMtEngageCtx(
     const helpable = pendingPay.filter((o) => !proxyOrderIds.has(o.id));
     if (helpable.length > 0) {
       const lines = helpable.slice(0, 4).map((o) => `· 订单id=${o.id} 商家「${o.merchantName}」 ${orderItemSummary(o)} ¥${fmt2(o.total)}`);
-      rules.push(
+      const helpPayRule = libPromptTextMulti(
+        ['lib:wechat-47-6', 'lib:qq-48'],
+        { ownerName, lines: lines.join('\n') },
         `【${ownerName}的待支付外卖订单】\n${lines.join('\n')}\n` +
           `如果符合你的人设和你们的关系（说好请客、想宠TA等），可以主动帮TA付：输出标记 [帮付:订单id]（系统立即支付并回执）。` +
-          `金额没有上限，付不付/付多少由你按人设/关系/上下文自然拿捉；也别每次都抢着付。`
+          `金额没有上限，付不付/付多少由你按人设/关系/上下文自然拿捉；也别每次都抢着付。`,
       );
+      if (helpPayRule) rules.push(helpPayRule);
     }
     // 第十三轮用户反馈：参与冷却已整体删除，不再注入「参与节流」规则（连点/连请都照办）
     // 券到期提醒（一次性）：与食物话题无关，任何单聊回合都可能自然提一嘴
@@ -707,24 +738,33 @@ export function buildMtEngageCtx(
   }
   if (foodHit) {
     if (group) {
-      rules.push(
+      const groupTeachRule = libPromptTextMulti(
+        ['lib:wechat-47-7', 'lib:qq-49'],
+        { catalog: buildCatalogBlock() },
         `${buildCatalogBlock()}\n\n` +
           `【帮机主点外卖（群里）】聊到吃的、有人说饿/懒得动/想点外卖时，你可以结合当前时段（早餐/午餐/夜宵）和大家的口味推荐上面的商家和菜品；` +
           `有人想要你帮忙点时输出标记 [帮点外卖:商家ID|菜名x数量,菜名x数量|备注?]（菜名优先原样抄目录里的名字，目录里实在没有的也可以直接写——系统会自动帮你上架；备注可省略；目录里没有想点的店，可以把商家ID直接写成店名，系统会自动帮这家店入驻）。` +
-          `系统会生成一张代点卡片，机主确认后才真正下单并自己付款。别频繁发，一次就好；只帮机主点，不要帮其他成员下单。`
+          `系统会生成一张代点卡片，机主确认后才真正下单并自己付款。别频繁发，一次就好；只帮机主点，不要帮其他成员下单。`,
       );
+      if (groupTeachRule) rules.push(groupTeachRule);
     } else {
-      rules.push(
+      const dmTeachRule = libPromptTextMulti(
+        ['lib:wechat-47-8', 'lib:qq-50'],
+        { catalog: buildCatalogBlock() },
         `${buildCatalogBlock()}\n\n` +
           `【帮机主点外卖（机主自己付款）】聊到吃的、机主说饿/懒得动/让你推荐时，你可以先问问口味或结合你记得的偏好、当前时间（早餐/午餐/夜宵）推荐上面的商家和菜品；机主同意后输出标记 [帮点外卖:商家ID|菜名x数量,菜名x数量|备注?]（菜名优先原样抄目录里的名字，目录里实在没有的也可以直接写——系统会自动帮你上架；备注可省略；目录里没有想点的店，可以把商家ID直接写成店名——系统会自动帮这家店入驻）。系统会生成一张代点卡片，机主确认后才真正下单并自己付款，你不用再重复确认。\n` +
           `【请客点外卖（你直接付好）】如果你按人设/你们的关系想直接请TA吃（说好了请客、想宠TA、庆祝纪念等，别频繁），可以输出标记 [请客点外卖:商家ID|菜名x数量,菜名x数量|备注?]——系统会直接下单并由你付款（演示语义，不扣真钱），TA会收到一张已支付的订单卡片（实时显示配送状态），不需要再付款；目录里没有想点的店，商家ID直接写店名就行（系统自动帮这家店入驻）。金额没有上限，请不请/请多少由你按人设/关系/上下文自然拿捉；连着请也照办，没有次数限制。\n` +
-          `【给你自己点外卖】你自己想吃/馋了的时候（按人设判断，别频繁），可以输出标记 [自己点外卖:商家ID|菜名x数量,菜名x数量]——系统会生成待支付订单并请机主帮你代付，记得用正文说一句让TA帮你付。`
+          `【给你自己点外卖】你自己想吃/馋了的时候（按人设判断，别频繁），可以输出标记 [自己点外卖:商家ID|菜名x数量,菜名x数量]——系统会生成待支付订单并请机主帮你代付，记得用正文说一句让TA帮你付。`,
       );
+      if (dmTeachRule) rules.push(dmTeachRule);
       const repeat = mtRepeatPickOf(orders);
       if (repeat) {
-        rules.push(
-          `【复购彩蛋】${ownerName}最近常点「${repeat.merchant.name}」（已经点过 ${repeat.times} 次），最常点「${repeat.dishName}」——如果你一时想不出推荐什么，可以自然提议“要不要再来一次那家？”，TA感兴趣就按上面的 [帮点外卖] 教学输出标记（一次就好，别太刻意）。`
+        const repeatRule = libPromptTextMulti(
+          ['lib:wechat-47-9', 'lib:qq-51'],
+          { ownerName, merchantName: repeat.merchant.name, times: repeat.times, dishName: repeat.dishName },
+          `【复购彩蛋】${ownerName}最近常点「${repeat.merchant.name}」（已经点过 ${repeat.times} 次），最常点「${repeat.dishName}」——如果你一时想不出推荐什么，可以自然提议“要不要再来一次那家？”，TA感兴趣就按上面的 [帮点外卖] 教学输出标记（一次就好，别太刻意）。`,
         );
+        if (repeatRule) rules.push(repeatRule);
       }
     }
   }
@@ -1135,16 +1175,34 @@ export function mtProxyHistoryLine(pid: string, cardRole: 'req' | 'done', sender
   if (!p) return `[美团代付卡片]`;
   if (cardRole === 'req') {
     const stateText = p.status === 'pending' ? '待代付' : p.status === 'paid' ? '已代付' : p.status === 'declined' ? '已婉拒' : `已失效（${p.closeReason ?? '订单未支付'}）`;
-    return `[美团代付请求 id:${p.id}]（${senderName}发的：商家「${p.merchantName}」¥${fmt2(p.amount)}，${p.items.map((i) => `${i.name}x${i.qty}`).join('、')}${p.note ? `，备注:${p.note}` : ''}，状态:${stateText}）`;
+    return (
+      libPromptTextMulti(
+        ['lib:meituan-5-2'],
+        { id: p.id, senderName, merchantName: p.merchantName, amount: fmt2(p.amount), stateText },
+        `[美团代付请求 id:${p.id}]（${senderName}发的：商家「${p.merchantName}」¥${fmt2(p.amount)}，${p.items.map((i) => `${i.name}x${i.qty}`).join('、')}${p.note ? `，备注:${p.note}` : ''}，状态:${stateText}）`,
+      ) ?? ''
+    );
   }
-  return `[美团代付回执 id:${p.id}]（${senderName}：已代付「${p.merchantName}」¥${fmt2(p.amount)}，订单支付完成）`;
+  return (
+    libPromptTextMulti(
+      ['lib:meituan-5-2'],
+      { id: p.id, senderName, merchantName: p.merchantName, amount: fmt2(p.amount) },
+      `[美团代付回执 id:${p.id}]（${senderName}：已代付「${p.merchantName}」¥${fmt2(p.amount)}，订单支付完成）`,
+    ) ?? ''
+  );
 }
 
 export function mtDraftHistoryLine(did: string, senderName: string): string {
   const d = mtGetDraft(did);
   if (!d) return '[美团代点卡片]';
   const status = d.status === 'pending' ? '待机主确认' : d.status === 'confirmed' ? `已下单（订单${d.orderId ?? ''}）` : '机主已取消';
-  return `[美团代点 id:${d.id}]（${senderName}帮机主点的：商家「${d.merchantName}」，${d.items.map((i) => `${i.name}x${i.qty}`).join('、')}，约¥${fmt2(d.total ?? d.estimate)}，状态:${status}）`;
+  return (
+    libPromptTextMulti(
+      ['lib:meituan-6-2'],
+      { id: d.id, senderName, merchantName: d.merchantName, total: fmt2(d.total ?? d.estimate), status },
+      `[美团代点 id:${d.id}]（${senderName}帮机主点的：商家「${d.merchantName}」，${d.items.map((i) => `${i.name}x${i.qty}`).join('、')}，约¥${fmt2(d.total ?? d.estimate)}，状态:${status}）`,
+    ) ?? ''
+  );
 }
 
 /** 订单分享卡 → AI 可读文本（含实时配送状态与付款人，AI 能自然接话）。
@@ -1156,7 +1214,13 @@ export function mtOrderShareHistoryLine(sid: string): string {
   const status = order ? MT_STATUS_LABEL[order.status] : '未知';
   const realFrom = s.contactId ? cachedContactRealName(s.contactId) : '';
   const who = s.paidBy ? `${s.paidBy}请客已付的（机主无需付款）` : `${realFrom || s.fromName}分享的`;
-  return `[美团订单分享]（${who}：「${s.merchantName}」¥${fmt2(s.amount)}，${s.items.map((i) => `${i.name}x${i.qty}`).join('、')}，当前状态:${status}）`;
+  return (
+    libPromptTextMulti(
+      ['lib:meituan-7-2'],
+      { who, merchantName: s.merchantName, amount: fmt2(s.amount), status },
+      `[美团订单分享]（${who}：「${s.merchantName}」¥${fmt2(s.amount)}，${s.items.map((i) => `${i.name}x${i.qty}`).join('、')}，当前状态:${status}）`,
+    ) ?? ''
+  );
 }
 
 /** AI 幻觉回显剥除：模型有时照抄聊天历史里的卡片序列化行（[美团代付/代点/订单分享…]（…））
@@ -1267,13 +1331,18 @@ async function runProxyDecision(pid: string): Promise<void> {
   const timeBlock = getTimeAware(sessionKey) ? buildTimeAwareBlock({ regionHint: contact.region || null }) : '';
   const system = [persona, memoryBlock, timeBlock].filter(Boolean).join('\n\n');
 
-  const user = [
-    `【刚收到的美团代付请求】\n${meName}（${p.fromName}）在美团拍了「${p.merchantName}」的外卖：${summary}，共 ¥${fmt2(p.amount)}，想请你代付。${p.note ? `订单备注：${p.note}。` : ''}15 分钟内不处理订单会自动取消。`,
-    '【任务】结合你的人设、性格、你们的关系、上面的记忆和金额，决定要不要帮TA付这笔钱（演示语义，不会真花钱）。',
-    '一般来说：关系亲近、金额不大、人设大方/爱请客/正好想宠TA → 可以付；人设节俭/关系一般/金额偏大/刚闹过矛盾 → 可以婉拒或调侃。两种选择都自然，没有标准答案。',
-    '输出 JSON：{"pay":true或false,"reply":"无论付不付都要给对方的一句话回复（像平时聊天，1~2句；付了可以说已付+一句人设话，婉拒就自然说）"}',
-    '严禁输出 JSON 以外的文字。',
-  ].join('\n\n');
+  const user = libPromptTextMulti(
+    ['lib:meituan-6.2', 'lib:wechat-47-11', 'lib:qq-52'],
+    { meName, summary, fromName: p.fromName, merchantName: p.merchantName, amount: fmt2(p.amount) },
+    [
+      `【刚收到的美团代付请求】\n${meName}（${p.fromName}）在美团拍了「${p.merchantName}」的外卖：${summary}，共 ¥${fmt2(p.amount)}，想请你代付。${p.note ? `订单备注：${p.note}。` : ''}15 分钟内不处理订单会自动取消。`,
+      '【任务】结合你的人设、性格、你们的关系、上面的记忆和金额，决定要不要帮TA付这笔钱（演示语义，不会真花钱）。',
+      '一般来说：关系亲近、金额不大、人设大方/爱请客/正好想宠TA → 可以付；人设节俭/关系一般/金额偏大/刚闹过矛盾 → 可以婉拒或调侃。两种选择都自然，没有标准答案。',
+      '输出 JSON：{"pay":true或false,"reply":"无论付不付都要给对方的一句话回复（像平时聊天，1~2句；付了可以说已付+一句人设话，婉拒就自然说）"}',
+      '严禁输出 JSON 以外的文字。',
+    ].join('\n\n'),
+  );
+  if (!user) return; // v67：条目被禁用 → 不做该代付决策（请求保持待处理，等聊天内标记/后续口径）
 
   const raw = await callLlm(system, user);
   const parsed = extractJsonObject(raw) as Partial<ProxyDecision> | null;
