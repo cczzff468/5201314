@@ -358,7 +358,7 @@ export default function ChatFloatWindow() {
         >
           <CapsuleAvatar peer={peer} />
           <span className="flex min-w-0 flex-col leading-tight">
-            <span className="max-w-[92px] truncate text-[12.5px] font-semibold text-black/85 dark:text-white/90">
+            <span className="max-w-[110px] truncate text-[12.5px] font-semibold text-black/85 dark:text-white/90">
               {peer?.name ?? '聊天'}
             </span>
             <CapsuleStatus contactId={contactId} />
@@ -479,7 +479,7 @@ function CapsuleAvatar({ peer, size = 26 }: { peer: ContactRecord | null; size?:
   );
 }
 
-/** 胶囊状态行：AI 正在回复 → 动态省略号；否则显示「小窗聊天」 */
+/** 胶囊状态行：AI 正在回复 → 动态省略号；平时不显示（v73.4 应用户要求删除「小窗聊天」静态标签） */
 function CapsuleStatus({ contactId }: { contactId: string }) {
   const stream = useChatStream(`wx:${contactId}`);
   if (stream?.status === 'streaming') {
@@ -498,7 +498,7 @@ function CapsuleStatus({ contactId }: { contactId: string }) {
       </span>
     );
   }
-  return <span className="text-[10px] text-black/40 dark:text-white/45">小窗聊天</span>;
+  return null;
 }
 
 /** 胶囊未读角标：最小化期间 AI 回复累计（ChatPage 已卸载，角标恢复正常计数） */

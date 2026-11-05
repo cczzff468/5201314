@@ -9,6 +9,9 @@
  * - 收起：内容先淡出，卡片缩回胶囊几何，动画完成后由 finishExit 恢复灵动岛 / 展示队列下一条
  *   （收起期间灵动岛保持隐藏，缩回终点与静态灵动岛同位同色，交接无缝）；
  * - 3 秒自动收起（计时在页面不可见/熄屏时冻结）；点击立即收起并跳转对应聊天。
+ *   v73.4：微信单聊通知点击改为弹出选择菜单（进入全屏 / 小窗打开）——灵动岛卡向下长出
+ *   两枚按钮；菜单期间冻结自动收起，点卡片外/再点卡片本体收回；其余目标（QQ/群聊/信息/
+ *   美团/淘宝）小窗不支持，点击仍直接进全屏。
  *
  * 层级 z-[93]：高于锁屏/切换器/闹钟/状态栏，仅低于熄屏黑遮罩（熄屏=屏幕关了，不看）。
  *
@@ -19,8 +22,9 @@
  * 只读引用 incoming-call / global-call 的 store 做互斥判断，不改层级数值、不改通知队列语义。
  */
 
-import { useEffect } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { motion, type Transition } from 'framer-motion';
+import { MessageCircle, PictureInPicture2 } from 'lucide-react';
 import {
   activateCurrentNotification,
   armAutoDismiss,
@@ -30,6 +34,7 @@ import {
   NOTIFY_APP_ICON,
   type NotifyApp,
 } from '@/lib/ios/island-notify';
+import { openChatFloat } from '@/lib/ios/chat-float-store';
 import { useGlobalCall } from '@/lib/ios/global-call';
 import { useIncomingCall } from '@/lib/ios/incoming-call';
 import { selectResolvedTheme, useSettings, useSystemDark, useUI } from '@/lib/ios/store';
@@ -73,27 +78,53 @@ function useIncomingCallPresenting(): boolean {
 function NotifyCard({ held }: { held: boolean }) {
   const current = useIslandNotify((s) => s.current)!;
   const exiting = useIslandNotify((s) => s.exiting);
+  // v73.4 点击选择菜单：微信单聊可开小窗 → 点卡片弹菜单；其余目标直接进全屏（原行为）
+  const canFloat = current.app === 'wechat' && !!current.target.contactId && !current.target.groupId;
+  const [menuOpen, setMenuOpen] = useState(false);
+  const cardRef = useRef<HTMLDivElement>(null);
   // 跟随手机主题（浅色=浅色磨砂卡片深色文字；深色=纯黑卡片白字），auto 跟随系统
   const themeMode = useSettings((s) => s.theme);
   const systemDark = useSystemDark();
   const dark = selectResolvedTheme(themeMode, systemDark) === 'dark';
   // 熄屏/来电暂缓期间冻结自动收起，唤醒（熄屏）/来电层消失（暂缓解除）后续期（与页面不可见冻结同策略）
+  // 菜单展开期间同样冻结：用户正在选择，不能让卡片自己溜走
   const screenOff = useUI((s) => s.screenOff);
   useEffect(() => {
-    if (screenOff || held || exiting) {
+    if (screenOff || held || exiting || menuOpen) {
       clearAutoDismiss();
     } else {
       armAutoDismiss();
     }
     return clearAutoDismiss;
-  }, [screenOff, held, exiting, current]);
+  }, [screenOff, held, exiting, menuOpen, current]);
+
+  // 菜单展开时点卡片外 → 收起菜单（选择层不能变成无法关闭的常驻）
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onDocPointerDown = (e: PointerEvent) => {
+      if (cardRef.current && !cardRef.current.contains(e.target as Node)) setMenuOpen(false);
+    };
+    document.addEventListener('pointerdown', onDocPointerDown, true);
+    return () => document.removeEventListener('pointerdown', onDocPointerDown, true);
+  }, [menuOpen]);
+
+  const onCardClick = () => {
+    if (exiting) return;
+    if (!canFloat) {
+      activateCurrentNotification();
+      return;
+    }
+    setMenuOpen((v) => !v);
+  };
 
   return (
     <motion.div
       key={current.id}
+      ref={cardRef}
       data-testid="island-notification"
       role="button"
       aria-label={`${APP_NAME[current.app]}通知：${current.title} ${current.body}`}
+      aria-expanded={canFloat ? menuOpen : undefined}
       initial={{ ...PILL, backgroundColor: CARD_BG_DARK }}
       animate={{
         ...(exiting ? PILL : EXPANDED),
@@ -103,7 +134,7 @@ function NotifyCard({ held }: { held: boolean }) {
       onAnimationComplete={() => {
         if (exiting) finishExit();
       }}
-      onClick={activateCurrentNotification}
+      onClick={onCardClick}
       className={`pointer-events-auto relative max-w-[calc(100%-16px)] cursor-pointer overflow-hidden shadow-[0_12px_32px_-10px_rgba(0,0,0,0.45)] outline-none backdrop-blur-xl ${
         dark ? 'text-white' : 'text-black'
       }`}
@@ -166,6 +197,47 @@ function NotifyCard({ held }: { held: boolean }) {
           </div>
         </div>
       </motion.div>
+
+      {/* v73.4 点击选择菜单：进入全屏 / 小窗打开（仅微信单聊目标；卡片高度自适应向下长出） */}
+      {menuOpen && !exiting && (
+        <motion.div
+          data-testid="island-notify-menu"
+          initial={{ opacity: 0, y: -4 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.14 }}
+          className="flex gap-2 px-2 pb-2.5"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <button
+            type="button"
+            aria-label="进入聊天"
+            data-testid="island-notify-open-full"
+            onClick={() => activateCurrentNotification()}
+            className={`flex flex-1 items-center justify-center gap-1.5 rounded-[14px] py-[7px] text-[12.5px] font-medium active:opacity-55 ${
+              dark ? 'bg-white/12 text-white' : 'bg-black/8 text-black'
+            }`}
+          >
+            <MessageCircle className="h-[15px] w-[15px]" strokeWidth={2.1} />
+            进入聊天
+          </button>
+          <button
+            type="button"
+            aria-label="小窗打开"
+            data-testid="island-notify-open-float"
+            onClick={() => {
+              const cid = current.target.contactId;
+              if (cid) openChatFloat(cid);
+              useIslandNotify.getState().beginExit();
+            }}
+            className={`flex flex-1 items-center justify-center gap-1.5 rounded-[14px] py-[7px] text-[12.5px] font-medium active:opacity-55 ${
+              dark ? 'bg-white/12 text-white' : 'bg-black/8 text-black'
+            }`}
+          >
+            <PictureInPicture2 className="h-[15px] w-[15px]" strokeWidth={2.1} />
+            小窗打开
+          </button>
+        </motion.div>
+      )}
     </motion.div>
   );
 }
