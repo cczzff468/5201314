@@ -7232,11 +7232,13 @@ function ChatPage({
             {otherUnread > 99 ? '99+' : otherUnread}
           </span>
         )}
-        <div className="ml-1 min-w-0 flex-1">
+        {/* 名字区（本轮用户指定「名字在中间」）：flex-col items-center 让名字行与在线状态整体水平居中
+            （原版 QQ 为左对齐；居中后与微信/信息聊天页同款视觉锚点） */}
+        <div className="ml-1 flex min-w-0 flex-1 flex-col items-center">
           {liquid && liquidSkinQq.headerMode === 'dualName' ? (
             /* 液态·双头像+名字（本轮用户指定）：我的名字也显示——名字在各自头像下面（两列布局）；
                中间可插自定义文字；正在输入时中间显示「正在输入…」 */
-            <div className="flex items-center gap-1.5">
+            <div className="flex max-w-full items-center gap-1.5">
               <span
                 data-testid="qq-chat-liquid-header"
                 className="lg-title flex min-w-0 items-center gap-2 rounded-full py-[4px] pl-[7px] pr-[11px]"
@@ -7270,7 +7272,7 @@ function ChatPage({
             </div>
           ) : liquid && liquidSkinQq.headerMode !== 'text' ? (
             /* 液态玻璃皮肤：头像+名字（名字可关）/ 双头像+中间文字 */
-            <div className="flex items-center gap-1.5">
+            <div className="flex max-w-full items-center gap-1.5">
               <span
                 data-testid="qq-chat-liquid-header"
                 className="lg-title flex min-w-0 items-center gap-1.5 truncate rounded-full py-[4px] pl-[5px] pr-[12px] text-[15px] font-semibold"
@@ -7300,7 +7302,7 @@ function ChatPage({
               )}
             </div>
           ) : (
-          <div className="flex items-center gap-1.5">
+          <div className="flex max-w-full min-w-0 items-center gap-1.5">
             <span
               data-testid="qq-chat-title"
               className={`truncate text-[17px] font-semibold leading-tight ${

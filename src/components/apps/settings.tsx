@@ -313,9 +313,10 @@ function MainRow({
 }
 
 /** 详情页外壳：居中标题导航 + 返回按钮 + 右滑进入动画；
- *  gray=true 时整页浅灰背景（#F2F2F7，iOS 设置子页风）+ 氛围光斑
- *  （v68：给玻璃卡片的 backdrop-blur 提供可折射的彩色光晕，毛玻璃质感才真正显现；
- *  暗色主题保持原背景，光斑同步压暗） */
+ *  gray=true 时整页浅灰背景（#F2F2F7，iOS 设置子页风）。
+ *  历史沿革：v68 曾加过 4 枚彩色氛围光晕（蓝/紫/橙/粉，给玻璃卡的 backdrop-blur 提供折射光），
+ *  本轮起按用户要求全部删除（先删珊瑚色橙/粉两枚，再删蓝/紫两枚）——
+ *  子页背景回归纯浅灰，无任何彩色光斑特效 */
 function DetailShell({
   title,
   onBack,
@@ -329,14 +330,6 @@ function DetailShell({
 }) {
   return (
     <div className={`relative flex h-full w-full flex-col ${gray ? 'bg-[#F2F2F7] dark:bg-transparent' : ''}`}>
-      {gray && (
-        <div aria-hidden className="pointer-events-none absolute inset-0 overflow-hidden">
-          <span className="absolute -top-24 -left-16 h-64 w-64 rounded-full bg-[#007AFF]/[0.16] blur-3xl dark:bg-[#0A84FF]/[0.12]" />
-          <span className="absolute top-1/3 -right-20 h-72 w-72 rounded-full bg-[#AF52FF]/[0.14] blur-3xl dark:bg-[#BF5AF2]/[0.11]" />
-          <span className="absolute -bottom-20 left-1/4 h-64 w-64 rounded-full bg-[#FF9500]/[0.13] blur-3xl dark:bg-[#FF9F0A]/[0.08]" />
-          <span className="absolute top-2/3 left-8 h-56 w-56 rounded-full bg-[#FF375F]/[0.10] blur-3xl dark:bg-[#FF375F]/[0.08]" />
-        </div>
-      )}
       <IOSNavBar
         title={title}
         large={false}
