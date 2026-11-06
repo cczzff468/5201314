@@ -16,6 +16,7 @@
 import { captureFrameDataUrl } from './camera-capture';
 import { describeImagesAuto } from '@/lib/vision-client';
 import { useSettings } from './store';
+import { isNativePerception, nativeGrabScreenFrame } from './native-perception';
 
 const DESC_CACHE_TTL = 90_000;
 const GRAB_TIMEOUT = 4500;
@@ -174,8 +175,14 @@ export async function grabStreamUrlFrame(url: string): Promise<string | null> {
   return await tryOne(`/api/perception/fetch?url=${encodeURIComponent(u)}`);
 }
 
-/** 抓当前屏幕帧：优先串流地址，其次屏幕分享流（都无返回 null） */
+/** 抓当前屏幕帧：APP 壳内原生抓帧优先（MediaProjection，含整个手机屏幕），
+ *  否则串流地址 → 屏幕分享流（都无返回 null） */
 export async function grabScreenFrameDataUrl(streamUrl?: string): Promise<string | null> {
+  // APP 壳内：原生 MediaProjection 抓帧（会话未开启/抓不到时静默回落原链路）
+  if (isNativePerception()) {
+    const native = await nativeGrabScreenFrame();
+    if (native) return native;
+  }
   const u = (streamUrl || '').trim();
   if (u && /^https?:\/\//i.test(u)) {
     const frame = await grabStreamUrlFrame(u);

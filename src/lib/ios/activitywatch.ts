@@ -1,5 +1,7 @@
 'use client';
 
+import { isNativePerception, nativeUsageSnapshot } from './native-perception';
+
 /**
  * ActivityWatch 客户端（感知设置 · 真机感知数据源）：
  *
@@ -203,9 +205,14 @@ function aggregateWeb(events: AwEvent[]): AwSnapshot['web'] | null {
 const awCache = new Map<string, { snap: AwSnapshot | null; ts: number }>();
 const awInflight = new Map<string, Promise<AwSnapshot | null>>();
 
-/** 拉取并聚合 ActivityWatch 数据（45 秒缓存 + 同地址并发去重；不可达返回 null） */
+/** 拉取并聚合 ActivityWatch 数据（45 秒缓存 + 同地址并发去重；不可达返回 null）
+ *
+ * v77.4：APP 壳内优先走原生桥（UsageStats，免装 ActivityWatch/免穿透/免 502）——
+ * 原生无权限/失败时回落远程地址（浏览器/无桥时行为不变）。 */
 export async function fetchAwSnapshot(rawUrl: string, force = false): Promise<AwSnapshot | null> {
-  const base = normalizeAwUrl(rawUrl);
+  const urlBase = normalizeAwUrl(rawUrl);
+  // 原生模式无远程地址也拉（虚拟键）；纯浏览器无地址直接 null（原行为）
+  const base = urlBase ?? (isNativePerception() ? NATIVE_KEY : null);
   if (!base) return null;
   const cached = awCache.get(base);
   if (!force && cached && Date.now() - cached.ts < AW_CACHE_TTL) return cached.snap;
@@ -213,6 +220,19 @@ export async function fetchAwSnapshot(rawUrl: string, force = false): Promise<Aw
   if (running) return running;
 
   const job = (async (): Promise<AwSnapshot | null> => {
+    // APP 壳内：原生 UsageStats 优先（无权限/失败静默回落远程地址）
+    if (isNativePerception()) {
+      const native = await nativeUsageSnapshot();
+      if (native) {
+        awCache.set(base, { snap: native, ts: Date.now() });
+        return native;
+      }
+      if (!urlBase) {
+        // 原生也没拿到（未授权等）：记空缓存防止高频重试
+        awCache.set(base, { snap: null, ts: Date.now() });
+        return null;
+      }
+    }
     const startIso = todayStartIso();
     const endIso = new Date().toISOString();
     const q = (bucket: string, extra: string) =>
@@ -249,9 +269,14 @@ export async function fetchAwSnapshot(rawUrl: string, force = false): Promise<Aw
   return job;
 }
 
-/** 同步读取 45 秒内的缓存快照（构建感知块时用；无缓存/过期返回 null） */
+/** 原生模式下无远程地址时的虚拟缓存键（与真实 URL 隔离） */
+const NATIVE_KEY = '__native__';
+
+/** 同步读取 45 秒内的缓存快照（构建感知块时用；无缓存/过期返回 null）
+ *  原生模式无远程地址时读虚拟键缓存 */
 export function getCachedAw(rawUrl: string): AwSnapshot | null {
-  const base = normalizeAwUrl(rawUrl);
+  const urlBase = normalizeAwUrl(rawUrl);
+  const base = urlBase ?? (isNativePerception() ? NATIVE_KEY : null);
   if (!base) return null;
   const cached = awCache.get(base);
   if (!cached || Date.now() - cached.ts > AW_CACHE_TTL) return null;

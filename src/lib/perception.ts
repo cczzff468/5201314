@@ -29,6 +29,7 @@ import { getCachedScreenDescription, refreshScreenDescription } from './ios/scre
 import { promptTextOf } from '@/lib/prompt-entries';
 import { scopedConvKey } from './ios/accounts';
 import { searchCity, fetchWeather, weatherCodeInfo } from '@/components/apps/weather-core';
+import { isNativePerception } from './ios/native-perception';
 
 // ---------------- 配置存取 ----------------
 
@@ -281,7 +282,8 @@ export async function prewarmPerception(sessionKey: string): Promise<void> {
     if (cfg.userLoc.trim()) jobs.push(weatherLineFor(cfg.userLoc).catch(() => null));
     if (cfg.aiLoc.trim()) jobs.push(weatherLineFor(cfg.aiLoc).catch(() => null));
   }
-  if (anyAwOn(cfg) && normalizeAwUrl(cfg.awUrl)) jobs.push(fetchAwSnapshot(cfg.awUrl).catch(() => null));
+  // APP 壳内无 awUrl 也拉（原生 UsageStats 优先，免装 ActivityWatch）
+  if (anyAwOn(cfg) && (normalizeAwUrl(cfg.awUrl) || isNativePerception())) jobs.push(fetchAwSnapshot(cfg.awUrl).catch(() => null));
   if (cfg.vlmScreen) jobs.push(refreshScreenDescription(cfg.streamUrl).catch(() => null));
   if (jobs.length === 0) return;
   await Promise.allSettled(jobs);

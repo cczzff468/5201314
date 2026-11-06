@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<title>AI Phone</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Helvetica Neue", sans-serif;
+    background: #000;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+  }
+  .card {
+    width: 100%;
+    max-width: 360px;
+    background: linear-gradient(160deg, #1c1c1e 0%, #0d0d0f 100%);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 28px;
+    padding: 36px 28px 28px;
+    text-align: center;
+    box-shadow: 0 24px 60px rgba(0,0,0,0.6);
+  }
+  .logo {
+    width: 84px; height: 84px;
+    margin: 0 auto 18px;
+    border-radius: 22px;
+    background: linear-gradient(145deg, #3a3a3f, #1f1f23);
+    border: 1px solid rgba(255,255,255,0.1);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 40px;
+  }
+  h1 { color: #f5f5f7; font-size: 22px; font-weight: 600; letter-spacing: 0.5px; }
+  .sub { color: rgba(255,255,255,0.45); font-size: 13px; margin-top: 8px; line-height: 1.6; }
+  input {
+    width: 100%;
+    margin-top: 26px;
+    padding: 14px 16px;
+    background: rgba(255,255,255,0.07);
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 14px;
+    color: #fff;
+    font-size: 15px;
+    outline: none;
+    transition: border-color 0.2s;
+    -webkit-appearance: none;
+  }
+  input:focus { border-color: rgba(255,255,255,0.35); }
+  input::placeholder { color: rgba(255,255,255,0.3); }
+  button {
+    width: 100%;
+    margin-top: 18px;
+    padding: 15px;
+    background: #fff;
+    color: #000;
+    border: none;
+    border-radius: 14px;
+    font-size: 16px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: opacity 0.15s, transform 0.1s;
+  }
+  button:active { transform: scale(0.98); opacity: 0.85; }
+  .err { color: #ff6b6b; font-size: 12px; margin-top: 12px; min-height: 16px; line-height: 1.5; }
+  .tips {
+    margin-top: 22px;
+    text-align: left;
+    background: rgba(255,255,255,0.04);
+    border-radius: 14px;
+    padding: 14px;
+  }
+  .tips p { color: rgba(255,255,255,0.4); font-size: 12px; line-height: 1.7; }
+  .tips b { color: rgba(255,255,255,0.7); font-weight: 500; }
+</style>
+</head>
+<body>
+  <div class="card">
+    <div class="logo">📱</div>
+    <h1>AI Phone</h1>
+    <p class="sub">首次使用：填入你的 AI Phone 网站地址<br>之后打开 APP 直接进入</p>
+    <input id="url" type="url" placeholder="https://你的预览地址" autocomplete="off" spellcheck="false">
+    <div class="err" id="err"></div>
+    <button onclick="go()">进 入</button>
+    <div class="tips">
+      <p><b>地址在哪？</b> 在电脑或手机上打开 AI Phone 网页，复制浏览器<b>地址栏</b>的完整网址，粘贴到这里（末尾不用带 / ）。</p>
+    </div>
+  </div>
+<script>
+  // 已保存地址 → 自动进入（静默跳转，200ms 让黑屏过渡不突兀）
+  try {
+    var saved = localStorage.getItem('aiphone_server');
+    if (saved && /^https?:\/\//i.test(saved)) {
+      setTimeout(function () { location.replace(normalize(saved)); }, 200);
+    } else if (saved) {
+      document.getElementById('url').value = saved;
+    }
+  } catch (e) {}
+
+  function normalize(u) {
+    u = (u || '').trim().replace(/\/+$/, '');
+    if (!/^https?:\/\//i.test(u)) u = 'https://' + u;
+    return u;
+  }
+  function go() {
+    var u = normalize(document.getElementById('url').value);
+    var err = document.getElementById('err');
+    if (!u || u.length < 12) { err.textContent = '请输入完整网址，例如 https://xxx.example.com'; return; }
+    err.textContent = '';
+    try { localStorage.setItem('aiphone_server', u); } catch (e) {}
+    location.replace(u + '/');
+  }
+</script>
+</body>
+</html>

@@ -49,6 +49,13 @@ import {
   stopScreenShare,
   testStreamUrl,
 } from '@/lib/ios/screen-share';
+import {
+  isNativePerception,
+  nativeUsagePermission,
+  openNativeUsageSettings,
+  requestNativeScreenCapture,
+  stopNativeScreenCapture,
+} from '@/lib/ios/native-perception';
 
 /** 开关行（图标 + 名称 + 说明 + 开关） */
 function ToggleRow({
@@ -137,6 +144,50 @@ export function PerceptionSettingsPage({
   const [streamTesting, setStreamTesting] = useState(false);
   const [streamResult, setStreamResult] = useState<{ ok: boolean; detail: string } | null>(null);
   const [shareActive, setShareActive] = useState(() => isScreenShareActive());
+  // ---------------- APP 壳原生模式（UsageStats / MediaProjection） ----------------
+  const nativeMode = isNativePerception();
+  const [usageGranted, setUsageGranted] = useState<boolean | null>(null);
+  const [nativeSessionOn, setNativeSessionOn] = useState(false);
+  // 原生模式挂载即查 UsageStats 权限；从系统授权页回来时刷新（页面 onShow 时 Cap 桥不会自动回调，用轻轮询）
+  useEffect(() => {
+    if (!nativeMode) return;
+    let alive = true;
+    const probe = () => {
+      void nativeUsagePermission().then((g) => {
+        if (alive && g !== null) setUsageGranted(g);
+      });
+    };
+    probe();
+    const t = window.setInterval(probe, 3000);
+    return () => {
+      alive = false;
+      window.clearInterval(t);
+    };
+  }, [nativeMode]);
+
+  const openUsageGrant = async () => {
+    const ok = await openNativeUsageSettings();
+    if (ok) showToast('已跳转系统设置：找到 AI Phone 开「有权查看使用情况」');
+  };
+
+  const onNativeCapture = async () => {
+    const r = await requestNativeScreenCapture();
+    if (r === 'ok') {
+      setNativeSessionOn(true);
+      showToast('屏幕感知已开启：发送消息时 TA 能「看到」你的整块手机屏幕');
+    } else if (r === 'canceled') {
+      showToast('已取消授权（每次会话需授权一次）');
+    } else {
+      showToast('当前环境不支持原生屏幕感知');
+    }
+  };
+
+  const offNativeCapture = () => {
+    void stopNativeScreenCapture();
+    setNativeSessionOn(false);
+    showToast('已停止屏幕感知');
+  };
+
   // 屏幕分享状态轻轮询（用户可能从浏览器原生 UI 停止共享，页面状态需跟随）
   useEffect(() => {
     const t = window.setInterval(() => setShareActive(isScreenShareActive()), 2000);
@@ -315,41 +366,68 @@ export function PerceptionSettingsPage({
           ) : null}
         </div>
 
-        {/* 真机感知 · ActivityWatch */}
+        {/* 真机感知：APP 壳内原生 UsageStats（免装免配） → 否则 ActivityWatch */}
         <div className={`${cardCls} mt-3 overflow-hidden`}>
-          <div className="px-4 pb-1 pt-3 text-[12.5px] font-medium text-black/40 dark:text-white/40">真机感知 · ActivityWatch</div>
-          <div className={`border-t ${dividerCls}`} />
-          <div className="space-y-2 px-4 py-3">
-            <p className="text-[12px] leading-relaxed text-black/45 dark:text-white/45">
-              在真实手机安装开源的 ActivityWatch App（F-Droid / Play 商店）并开启服务，
-              TA 就能感知你真机的屏幕使用。地址填手机上 ActivityWatch 的服务地址；
-              由于浏览器安全限制，跨设备访问需让该地址公网可达（内网穿透），本机浏览器访问可填 http://localhost:5600。
-            </p>
-            <div className="flex items-center gap-2">
-              <input
-                value={awUrlDraft}
-                onChange={(e) => setAwUrlDraft(e.target.value)}
-                onBlur={saveAwUrl}
-                placeholder="http://localhost:5600"
-                inputMode="url"
-                data-testid={`${testPrefix}-perception-awurl-input`}
-                className={fieldCls}
-              />
-              <button
-                type="button"
-                onClick={() => void runAwTest()}
-                disabled={awTesting}
-                data-testid={`${testPrefix}-perception-aw-test`}
-                className="shrink-0 rounded-full px-3.5 py-2 text-[13px] font-medium text-white active:opacity-70 disabled:opacity-50"
-                style={{ backgroundColor: accent }}
-              >
-                {awTesting ? <Loader2 className="h-4 w-4 animate-spin" /> : '测试'}
-              </button>
-            </div>
-            {awResult ? (
-              <p className={`text-[12px] leading-snug ${awResult.ok ? 'text-[#07C160]' : 'text-[#E4554F]'}`}>{awResult.detail}</p>
-            ) : null}
+          <div className="px-4 pb-1 pt-3 text-[12.5px] font-medium text-black/40 dark:text-white/40">
+            {nativeMode ? '真机感知 · APP 原生' : '真机感知 · ActivityWatch'}
           </div>
+          <div className={`border-t ${dividerCls}`} />
+          {nativeMode ? (
+            <div className="space-y-2.5 px-4 py-3">
+              <p className="text-[12px] leading-relaxed text-black/45 dark:text-white/45">
+                安装版 APP 直读系统使用统计（无需装 ActivityWatch、无需填地址/穿透）。
+                在下方开关按需开启；「解锁事件 / 媒体播放 / 浏览器 URL」暂需 ActivityWatch，其余原生即用。
+              </p>
+              <div className="flex items-center justify-between gap-2">
+                <span className={`text-[13px] font-medium ${usageGranted === true ? 'text-[#07C160]' : usageGranted === false ? 'text-[#E4554F]' : 'text-black/40 dark:text-white/40'}`}>
+                  {usageGranted === true ? '✓ 使用情况权限已开启' : usageGranted === false ? '✗ 使用情况权限未开启' : '权限检测中…'}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => void openUsageGrant()}
+                  disabled={usageGranted === true}
+                  data-testid={`${testPrefix}-perception-native-usage-grant`}
+                  className="shrink-0 rounded-full px-3.5 py-2 text-[13px] font-medium text-white active:opacity-70 disabled:opacity-50"
+                  style={{ backgroundColor: accent }}
+                >
+                  {usageGranted === true ? '已授权' : '去授权'}
+                </button>
+              </div>
+              <p className="text-[12px] leading-snug text-black/35 dark:text-white/35">系统设置 →「有权查看使用情况」→ 找到 AI Phone 打开，一次授权长期有效。</p>
+            </div>
+          ) : (
+            <div className="space-y-2 px-4 py-3">
+              <p className="text-[12px] leading-relaxed text-black/45 dark:text-white/45">
+                在真实手机安装开源的 ActivityWatch App（F-Droid / Play 商店）并开启服务，
+                TA 就能感知你真机的屏幕使用。地址填手机上 ActivityWatch 的服务地址；
+                由于浏览器安全限制，跨设备访问需让该地址公网可达（内网穿透），本机浏览器访问可填 http://localhost:5600。
+              </p>
+              <div className="flex items-center gap-2">
+                <input
+                  value={awUrlDraft}
+                  onChange={(e) => setAwUrlDraft(e.target.value)}
+                  onBlur={saveAwUrl}
+                  placeholder="http://localhost:5600"
+                  inputMode="url"
+                  data-testid={`${testPrefix}-perception-awurl-input`}
+                  className={fieldCls}
+                />
+                <button
+                  type="button"
+                  onClick={() => void runAwTest()}
+                  disabled={awTesting}
+                  data-testid={`${testPrefix}-perception-aw-test`}
+                  className="shrink-0 rounded-full px-3.5 py-2 text-[13px] font-medium text-white active:opacity-70 disabled:opacity-50"
+                  style={{ backgroundColor: accent }}
+                >
+                  {awTesting ? <Loader2 className="h-4 w-4 animate-spin" /> : '测试'}
+                </button>
+              </div>
+              {awResult ? (
+                <p className={`text-[12px] leading-snug ${awResult.ok ? 'text-[#07C160]' : 'text-[#E4554F]'}`}>{awResult.detail}</p>
+              ) : null}
+            </div>
+          )}
           <div className={`border-t ${dividerCls}`} />
           <ToggleRow
             icon={<Timer size={I.size} strokeWidth={I.strokeWidth} />}
@@ -437,62 +515,96 @@ export function PerceptionSettingsPage({
             <>
               <div className={`border-t ${dividerCls}`} />
               <div className="space-y-2.5 px-4 py-3">
-                <p className="text-[12px] leading-relaxed text-black/45 dark:text-white/45">
-                  两种画面来源（优先串流地址）：手机装串流 App（能输出 MJPEG/单帧画面的均可）填下方地址；
-                  电脑上直接用浏览器「屏幕分享」，零配置。
-                </p>
-                <div className="flex items-center gap-2">
-                  <input
-                    value={streamUrlDraft}
-                    onChange={(e) => setStreamUrlDraft(e.target.value)}
-                    onBlur={saveStreamUrl}
-                    placeholder="串流地址（如 http://192.168.1.5:8080）"
-                    inputMode="url"
-                    data-testid={`${testPrefix}-perception-streamurl-input`}
-                    className={fieldCls}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => void runStreamTest()}
-                    disabled={streamTesting || !streamUrlDraft.trim()}
-                    data-testid={`${testPrefix}-perception-stream-test`}
-                    className="shrink-0 rounded-full px-3.5 py-2 text-[13px] font-medium text-white active:opacity-70 disabled:opacity-50"
-                    style={{ backgroundColor: accent }}
-                  >
-                    {streamTesting ? <Loader2 className="h-4 w-4 animate-spin" /> : '测试'}
-                  </button>
-                </div>
-                {streamResult ? (
-                  <p className={`text-[12px] leading-snug ${streamResult.ok ? 'text-[#07C160]' : 'text-[#E4554F]'}`}>{streamResult.detail}</p>
-                ) : null}
-                {isScreenShareSupported() ? (
-                  <div className="flex items-center gap-2 pt-0.5">
-                    {shareActive ? (
+                {nativeMode ? (
+                  <>
+                    <p className="text-[12px] leading-relaxed text-black/45 dark:text-white/45">
+                      APP 原生屏幕感知：点下方按钮授权一次（本轮会话有效），TA 就能「看到」你整块手机屏幕
+                      （含其他 App），每次发送时抓一帧识图。桌面浏览器用户用下方串流/分享方式。
+                    </p>
+                    {nativeSessionOn ? (
                       <button
                         type="button"
-                        onClick={offShare}
-                        data-testid={`${testPrefix}-perception-share-stop`}
-                        className="flex-1 rounded-full bg-[#E4554F] py-2 text-[13.5px] font-medium text-white active:opacity-70"
+                        onClick={offNativeCapture}
+                        data-testid={`${testPrefix}-perception-native-capture-stop`}
+                        className="w-full rounded-full bg-[#E4554F] py-2 text-[13.5px] font-medium text-white active:opacity-70"
                       >
-                        停止屏幕分享（进行中）
+                        停止屏幕感知（进行中）
                       </button>
                     ) : (
                       <button
                         type="button"
-                        onClick={() => void onShare()}
-                        data-testid={`${testPrefix}-perception-share-start`}
-                        className="flex-1 rounded-full py-2 text-[13.5px] font-medium text-white active:opacity-70"
+                        onClick={() => void onNativeCapture()}
+                        data-testid={`${testPrefix}-perception-native-capture-start`}
+                        className="w-full rounded-full py-2 text-[13.5px] font-medium text-white active:opacity-70"
                         style={{ backgroundColor: accent }}
                       >
                         <span className="inline-flex items-center gap-1.5">
                           <ScanFace size={15} strokeWidth={1.9} />
-                          选择要分享的屏幕 / 窗口
+                          开启屏幕感知（授权一次）
                         </span>
                       </button>
                     )}
-                  </div>
+                  </>
                 ) : (
-                  <p className="text-[12px] text-black/35 dark:text-white/35">当前浏览器不支持屏幕分享（多数手机浏览器如此），请使用串流地址。</p>
+                  <>
+                    <p className="text-[12px] leading-relaxed text-black/45 dark:text-white/45">
+                      两种画面来源（优先串流地址）：手机装串流 App（能输出 MJPEG/单帧画面的均可）填下方地址；
+                      电脑上直接用浏览器「屏幕分享」，零配置。
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <input
+                        value={streamUrlDraft}
+                        onChange={(e) => setStreamUrlDraft(e.target.value)}
+                        onBlur={saveStreamUrl}
+                        placeholder="串流地址（如 http://192.168.1.5:8080）"
+                        inputMode="url"
+                        data-testid={`${testPrefix}-perception-streamurl-input`}
+                        className={fieldCls}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => void runStreamTest()}
+                        disabled={streamTesting || !streamUrlDraft.trim()}
+                        data-testid={`${testPrefix}-perception-stream-test`}
+                        className="shrink-0 rounded-full px-3.5 py-2 text-[13px] font-medium text-white active:opacity-70 disabled:opacity-50"
+                        style={{ backgroundColor: accent }}
+                      >
+                        {streamTesting ? <Loader2 className="h-4 w-4 animate-spin" /> : '测试'}
+                      </button>
+                    </div>
+                    {streamResult ? (
+                      <p className={`text-[12px] leading-snug ${streamResult.ok ? 'text-[#07C160]' : 'text-[#E4554F]'}`}>{streamResult.detail}</p>
+                    ) : null}
+                    {isScreenShareSupported() ? (
+                      <div className="flex items-center gap-2 pt-0.5">
+                        {shareActive ? (
+                          <button
+                            type="button"
+                            onClick={offShare}
+                            data-testid={`${testPrefix}-perception-share-stop`}
+                            className="flex-1 rounded-full bg-[#E4554F] py-2 text-[13.5px] font-medium text-white active:opacity-70"
+                          >
+                            停止屏幕分享（进行中）
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => void onShare()}
+                            data-testid={`${testPrefix}-perception-share-start`}
+                            className="flex-1 rounded-full py-2 text-[13.5px] font-medium text-white active:opacity-70"
+                            style={{ backgroundColor: accent }}
+                          >
+                            <span className="inline-flex items-center gap-1.5">
+                              <ScanFace size={15} strokeWidth={1.9} />
+                              选择要分享的屏幕 / 窗口
+                            </span>
+                          </button>
+                        )}
+                      </div>
+                    ) : (
+                      <p className="text-[12px] text-black/35 dark:text-white/35">当前浏览器不支持屏幕分享（多数手机浏览器如此），请使用串流地址。</p>
+                    )}
+                  </>
                 )}
               </div>
             </>

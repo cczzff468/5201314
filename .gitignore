@@ -64,3 +64,11 @@ db/*.db-journal
 # local clone workspace
 /repo-5201314/
 
+
+# v77.4 APP 壳（本地保留，暂不推送）
+android-shell/android/build/
+android-shell/android/.gradle/
+android-shell/android/app/build/
+android-shell/android/local.properties
+android-shell/node_modules/
+public/AI-Phone.apk
