@@ -126,7 +126,8 @@ export async function POST(request: Request) {
           method: 'POST',
           headers,
           body: payload,
-          signal: AbortSignal.timeout(15000),
+          // 30s：部分中转/冷启动较慢的服务商首响应可超过 15s（过短会误报「地址不可达」）
+          signal: AbortSignal.timeout(30_000),
         });
       } catch {
         // 网络错误 / 超时：换下一个候选路径
