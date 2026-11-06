@@ -747,17 +747,44 @@ function genRules(trigger: FireTrigger, timeAware: boolean): string[] {
   if (trigger.kind === 'anxiety') {
     rules.push('这一轮消息由你的焦虑驱动：对方已经很久没回你了，你控制不住想主动开口。让这份焦急真实地透出来——会追问、会不安、想确认 TA 还在乎你；但不要卑微地连环道歉，也不要发火骂人（除非你的人设本来就暴躁）。');
     rules.push('【连发格式——重要】你会像焦虑的真人那样控制不住连着发：一口气输出多条消息（想发几条发几条，一般 2~6 条），每条消息单独占一行（一行一条，中间不要空行、不要编号、不要任何分隔符号）。每条长短完全随意——可以是几个字的短句，也可以是一大段一口气说完的心里话，单条长度没有任何数字限制；越往后情绪越急；内容要有递进和变化（比如：先找个由头开口 → 追问 TA 在干嘛 → 不安升级/自我怀疑 → 撒娇式质问或把心里话全倒出来），禁止几条几乎一样。');
+    // v76 防自问自答：剧本幻觉硬禁令（用户实测：零回复下 AI 输出「在的在的 我还在呢」
+    // 自接自己上一条问句，又输出「看到你了」假装对方出现——模型把整场戏演完了）
+    rules.push('【对方没有回复——铁的事实】最近聊天里你连发的所有消息，对方一条都没有回。严禁说「你回我了」「看到你的消息」「看到你了」「你终于回我了」这类假装对方回复过/出现过的话；也严禁自问自答——不要先发一句问话（如「你在不在呀」）再自己接一句回答（如「在的在的」「我还在呢」）：你输出的每一行都只能是你自己这一侧说的话，对方不会开口，你也不能替对方说话或假装看到了对方。');
   }
   // v63 全局预设管理器：主动消息规则接入注册表（proactive-gen-rules；关闭=不注入规则；原文零破坏）
   const genBlock = promptTextOf('proactive-gen-rules', { trigger: triggerDesc(trigger) }, rules.join('\n'));
   return genBlock == null ? [] : genBlock.split('\n');
 }
 
-/** 近期对话 → prompt 文本（末尾若干条；含角色标签） */
+/**
+ * 近期对话 → prompt 文本（末尾若干条；含角色标签）。
+ * v76 修复「赛博幻觉·自问自答」（用户实测截图：全程零回复，AI 连发焦虑追发后突然输出
+ * 「在的在的 我还在呢」「刚才是不是忙完啦」「嘿嘿 看到你了心情好多了」）：此前末尾一串
+ * 未回复的 AI 连发渲染成「小财：xxx」的对话格式，模型会把它当成「对话已有来回」，
+ * 在多行生成里把「等待→对方回来→开心」的剧本演完。现在只要末尾存在未回复的连发串
+ * （最后一条用户消息之后还有 AI 消息，或整串都是 AI 发的），就在连发串前插入醒目
+ * 分隔声明——让模型看得清这串全是自己单方面发的、对方一条都没回。
+ */
 function convoLines(norm: NormMsg[], count: number, peerName: string, userName: string): string {
+  const slice = norm.slice(-count);
+  let lastUserIdx = -1;
+  for (let i = 0; i < slice.length; i++) if (slice[i].role === 'user') lastUserIdx = i;
+  const unanswered = slice.length > 0 && lastUserIdx < slice.length - 1;
   const lines: string[] = [];
-  for (const m of norm.slice(-count)) {
-    lines.push(`${m.role === 'user' ? userName : peerName}：${m.text}`);
+  for (let i = 0; i < slice.length; i++) {
+    const m = slice[i];
+    if (m.role === 'user') {
+      lines.push(`${userName}：${m.text}`);
+    } else {
+      if (unanswered && i === lastUserIdx + 1) {
+        lines.push(
+          lastUserIdx >= 0
+            ? `──上面是${userName}的最后一条消息；下面这一串全部是你自己单方面连发的，${userName}至今一条都没有回──`
+            : `──下面这一串全部是你自己单方面连发的消息，${userName}至今一条都没有回──`,
+        );
+      }
+      lines.push(`${peerName}：${m.text}`);
+    }
   }
   return lines.join('\n');
 }
@@ -844,10 +871,18 @@ async function generateProactiveTexts(app: ProactiveApp, contact: ContactRecord,
     .join('\n');
   if (histLines) parts.push(`【你最近主动发过的消息（严禁重复或换汤不换药地重发类似内容）】\n${histLines}`);
   else if (last.lastSentText) parts.push(`【你最近一次主动发的消息（严禁重复类似内容）】\n${last.lastSentText}`);
+  // v76：非焦虑触发也动态锚定事实——末条消息不是用户发的（用户至今未回复）时，
+  // 同样声明「对方没回」防止幻觉（用户实测的幻觉出现在焦虑追发，但其它主动消息
+  // 触发同样存在把「自己连发」当成「对话来回」的风险）
+  const userUnanswered = norm.length === 0 || norm[norm.length - 1].role !== 'user';
   parts.push(
     trigger.kind === 'anxiety'
-      ? '【现在】\n用户至今一条都没有回你（上面最近聊天里你发的消息全部是你单方面发出去的，用户没有回复其中任何一条）。请直接输出你要发给对方的消息：多条（想发几条发几条），每条一行（一行一条，无空行、无编号、无前后缀）；每条长短随意——可以是一小句，也可以是一大段。严禁说「你回我了」「看到你的消息」「你终于回我了」这类话——用户还没给你发任何新消息。'
-      : '【现在】\n请直接输出你要发给对方的消息正文（只有正文，不要任何前后缀）。可以是一两句、一大段，或者拆成多条（每条一行）——按你此刻想说的自然决定。',
+      ? '【现在】\n用户至今一条都没有回你（上面最近聊天里你发的消息全部是你单方面发出去的，用户没有回复其中任何一条）。请直接输出你要发给对方的消息：多条（想发几条发几条），每条一行（一行一条，无空行、无编号、无前后缀）；每条长短随意——可以是一小句，也可以是一大段。严禁说「你回我了」「看到你的消息」「看到你了」「你终于回我了」这类话——用户还没给你发任何新消息；也严禁自问自答（先问「你在不在呀」又自己接「在的在的」这种接自己的话头、假装对方出现或忙完——这些都没有发生）。'
+      : `【现在】\n请直接输出你要发给对方的消息正文（只有正文，不要任何前后缀）。可以是一两句、一大段，或者拆成多条（每条一行）——按你此刻想说的自然决定。${
+          userUnanswered
+            ? '（注意：对方至今没有回复你最近发的消息——上面最近聊天里你单方面连发的那串，对方一条都没回。不要说「你回我了」「看到你的消息」「看到你了」这类话，也不要自问自答或假装对方出现——你输出的每一行都只能是你自己说的话。）'
+            : ''
+        }`,
   );
   const user = parts.join('\n\n');
 
@@ -873,6 +908,48 @@ async function generateProactiveTexts(app: ProactiveApp, contact: ContactRecord,
   for (const l of lines) if (!uniq.includes(l)) uniq.push(l); // 同轮内去重
   if (uniq.length > 0) return uniq.slice(0, MAX_BURST_COUNT);
   return [text].filter(Boolean);
+}
+
+// ---------------- v76 赛博幻觉硬校验（生成后过滤：prompt 是第一道防线，这是第二道） ----------------
+
+/**
+ * 「断言对方回复了/出现了」的剧本幻觉模式（用户实测截图：全程零回复，AI 追发时输出
+ * 「在的在的 我还在呢」「刚才是不是忙完啦」「嘸嘸 看到你了心情好多了」——把
+ * 「等待→对方回来→开心」的戏码自己演完）。逐条匹配，命中即判定该条为幻觉气泡。
+ * 模式设计避免误伤：只匹配「断言对方回复/出现」的表述，不碰 AI 自己的单向倾诉。
+ */
+const REPLY_HALLUCINATION_RES: RegExp[] = [
+  // 断言「对方回复了」
+  /你终于回我/, /你回我了/, /总算回我/, /舍得回我/, /居然回我/, /居然舍得回/,
+  /回我啦/, /回我了[!！呀哟～~]/, /回我了呀/, /你刚[才刚]回的/,
+  /看到你的消息/, /看到你的回复/, /收到你的回复/, /你刚才回的/, /你刚刚回的/,
+  // 断言「对方出现了/回来了」（「看到你了」负向排除「看到你发的」——那是合法的动态归属话题；
+  // 「你回来/上线」带语气词变体，只匹配「你」打头——AI 说「我回来啦」是合法近况）
+  /看到你了(?!发)/, /你上线[了啦呀]/, /你回来[了啦呀哟]/, /欢迎回来/, /你出现[了在啦]/,
+  /是不是忙完/, /你.{0,3}忙完了?[?？吗呢]/, /忙完了[?？]/,
+  // 自问自答标志（未回复期间自接自己发出的问句）
+  /在的在的/, /我还在呢/, /我一直都在/,
+];
+
+/**
+ * 生成内容投递前硬过滤（v76）：会话末条消息不是用户发的（= 用户对 AI 最近的连发
+ * 至今零回复）时，主动消息场景下「你回我了」这类断言必为幻觉——AI 主动发消息
+ * 本来就不是在回复谁。命中模式的气泡直接丢弃，其余照常投递；全部被过滤 → 返回
+ * 空数组（调用方按「本轮已消费」处理，防 5s tick 空转重试轰炸）。
+ * 末条是用户消息时（用户刚说过话、AI 在正常接话）不做校验，避免误伤正常回复。
+ */
+function filterReplyHallucination(app: ProactiveApp, cid: string, texts: string[]): string[] {
+  try {
+    const norm = readNormMsgs(app, cid);
+    if (norm.length > 0 && norm[norm.length - 1].role === 'user') return texts;
+    return texts.filter((t) => {
+      const s = (t || '').trim();
+      if (!s) return false;
+      return !REPLY_HALLUCINATION_RES.some((re) => re.test(s));
+    });
+  } catch {
+    return texts;
+  }
 }
 
 // ---------------- 自主决策（三、自主触发） ----------------
@@ -903,6 +980,7 @@ function autoRules(): string[] {
     '一般来说：有好玩的想分享、惦记对方、有正当由头（饭点/天气/对方提过的事）→ 可以发；刚聊完没多久、深夜、没什么想说的、对方可能不方便 → 选 wait。',
     '下面注入的记忆、跨 App 近况、社交动态都是你亲身经历的事：send 的内容要有来处，绝不能编造记录里没有的细节。',
     '【社交动态归属红线】朋友圈/QQ空间动态带归属标注：标「AI角色本人，就是你自己」的是你自己发的动态，绝不能当成对方发的；标「用户本人」的才是对方发的。',
+    '【事实锚定——重要】先看清「最近聊天」的末尾：若你自己连发的消息后面一直没有对方的回复，说明对方至今没回你——send 的内容里严禁出现「你回我了」「看到你的消息」「看到你了」这类假装对方回复过/出现过的话，也不要自问自答（先问「你在不在」又自己接「在的在的」），你发的每一行都只能是你自己说的话。',
     '输出 JSON：{"action":"send"或"wait","message":"action=send 时要发的消息正文（像平时聊天；可长可短——一两句、一大段、或多条用\\n分行连发都可以，单条长度不限）","delayMinutes":数字（action=wait 时建议多久后再考虑，5~120）,"reason":"一句话理由"}',
     '严禁输出 JSON 以外的文字。send 的消息必须是有内容量的（不要空洞的「在吗」）',
   ].join('\n'),
@@ -1412,6 +1490,11 @@ async function fireProactive(app: ProactiveApp, contact: ContactRecord, trigger:
       if (texts.length === 0) return false;
     }
     if (texts.length === 0) return false;
+    // v76 赛博幻觉硬校验（第二道防线）：用户未回复期间（会话末条不是用户消息），
+    // 「你回我了/看到你了/在的在的」这类断言必为幻觉，投递前逐条硬过滤；
+    // 全部被过滤 → 按已消费处理（防 5s tick 空转重试轰炸——焦虑轮 fireAt 已消费）
+    texts = filterReplyHallucination(app, contact.id, texts);
+    if (texts.length === 0) return true;
     // 去重：与最近 6 条 AI 发言/上次主动消息完全相同 → 不投（LLM 在上下文未变时可能复述同一条）。
     // 全被筛掉 = 本轮已处理完（同上下文重试大概率同样全筛——按消费处理，防每 tick 空转）
     const recent = readNormMsgs(app, contact.id).slice(-6).filter((m) => m.role === 'assistant').map((m) => m.text.trim());
