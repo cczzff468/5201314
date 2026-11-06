@@ -200,12 +200,15 @@ export default function PhoneShell() {
     return () => document.removeEventListener('scroll', onScroll, { capture: true });
   }, []);
 
-  // 主屏空闲预热（刷新后首次打开音乐 App 不再等 chunk 编译/下载数秒）：首帧稳定 ~2.5s 后
-  // 后台预载音乐 App chunk + 提前音乐 boot/一起听恢复（preloadHeavyApps 幂等，失败静默）
+  // 解锁后才预热高频 App：锁屏期间零后台拉取（修「锁屏加载/手势卡」——此前挂载 2.5s
+  // 就全量预热 29 个 App，190+ chunk / 6.6MB JS 把网络与主线程打满，锁屏动画发卡）。
+  // 解锁进主屏、首帧稳定 ~2.5s 后再预热高频 5 个（preloadHeavyApps 幂等，失败静默）；
+  // 重新锁屏会自动取消挂起的预热（locked 翻转时 effect 清理）。
   useEffect(() => {
+    if (locked) return;
     const t = window.setTimeout(() => preloadHeavyApps(), 2500);
     return () => window.clearTimeout(t);
-  }, []);
+  }, [locked]);
 
   // 按下即预载 App chunk（修「点击打开界面显示太慢」的抢跑层）：
   // 图标 pointerdown（触屏比 click 早 ~100-300ms）与桌面 hover（早几百 ms）就

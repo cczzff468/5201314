@@ -669,49 +669,26 @@ export function preloadApp(id: AppId): void {
 }
 
 /**
- * 主屏空闲预热重 App（解决「点击进入任何界面都要等一会」）：
+ * 解锁后预热「高频 App」（解决「点击进入界面要等一会」）：
  * 所有 App 组件都是 dynamic 懒加载，chunk 只在首次点开时才拉取——dev 下未压缩
  * chunk 高达 2~3MB（QQ/微信/美团/情侣空间），每次代码改动后 hash 变化还要重新
- * 下载+解析+执行，用户点开要干等 1~3 秒。主屏挂载稳定后按「从重到轻」串行预热：
- * ① 预载各 App chunk（与 dynamic 同一模块引用，重复调用幂等，点开直接命中模块缓存）；
- * ② 重 App 依次错峰 import（每个之间让出一拍主线程，不与首帧/主屏滑动抢资源）；
- * ③ 音乐 App 额外提前 boot（音频引擎/登录态/快照恢复）与一起听恢复（bootMusicAi 幂等）。
- * 用户在主屏停留的几秒内，后台已把全部重 App 备好，之后点开任何 App 秒进。
+ * 下载+解析+执行，用户点开要干等 1~3 秒。
+ *
+ * v77.3 收敛：此前预热全部 29 个 App（首屏后台拉 190+ chunk / 6.6MB JS），把网络与
+ * 主线程打满——锁屏动画/上滑手势发卡、「锁屏加载慢」的直接元凶。现改为：
+ * ① 只预热高频 5 个（信息/微信/QQ/音乐/美团，覆盖绝大多数点击）；
+ * ② 仅在「解锁进入主屏后」由 PhoneShell 调度（锁屏期间零后台拉取，锁屏百分百流畅）；
+ * ③ 低频 App 不预热——靠图标 pointerdown/hover 抢跑（preloadApp）+ AppSplash
+ *    启动屏兑底，点啥拉啥，不再首屏全量预载。
  */
 export function preloadHeavyApps(): void {
-  // 按实测 chunk 体积从重到轻排序（越重的越优先预热，用户感知收益越大）
+  // 高频 App（从重到轻；只列真正常点开的，其余一律不预热）
   const heavyImports: Array<() => Promise<unknown>> = [
-    () => import('./meituan'),
-    () => import('./qq'),
-    () => import('./couple-space'),
     () => import('./wechat'),
-    () => import('./taobao'),
-    () => import('./settings'),
-    () => import('./wx-group'),
-    () => import('./qq-group'),
+    () => import('./qq'),
+    () => import('./meituan'),
     () => import('./chat'),
-    () => import('./phone'),
-    () => import('./cottage'),
-    () => import('./forum/forum'),
-    () => import('./memory-bank'),
-    () => import('./worldbook'),
-    () => import('./contacts'),
     () => import('./music'),
-    // 轻量 App 排在重 App 之后继续预热（每个只有几十~几百 KB，成本低）：
-    // 全部 App 预热完成后，任何点击都是零等待命中模块缓存
-    () => import('./photos'),
-    () => import('./camera'),
-    () => import('./browser'),
-    () => import('./weather'),
-    () => import('./clock'),
-    () => import('./themes'),
-    () => import('./files'),
-    () => import('./reminders'),
-    () => import('./calculator'),
-    () => import('./notes'),
-    () => import('./calendar'),
-    () => import('./recorder'),
-    () => import('./appstore'),
   ];
   // 空闲串行调度：只在浏览器空闲帧里预载下一个（每次让出主线程，不与首帧/
   // 主屏滑动/用户点击抢资源）；页面隐藏时 idle 回调暂停，回前台自动续上。
