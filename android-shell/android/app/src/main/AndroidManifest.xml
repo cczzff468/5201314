@@ -51,6 +51,16 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/file_paths"></meta-data>
         </provider>
+
+        <!-- Shizuku 绑定提供器（时长数据源「Shizuku 模式」：以 shell 权限读系统 usagestats 账本，
+             免「使用情况」授权；需用户另装 Shizuku APP 并激活，激活失效时自动降级标准模式） -->
+        <provider
+            android:name="rikka.shizuku.ShizukuProvider"
+            android:authorities="${applicationId}.shizuku"
+            android:multiprocess="false"
+            android:enabled="true"
+            android:exported="true"
+            android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />
     </application>
 
     <!-- Permissions -->
@@ -60,6 +70,10 @@
     <uses-permission
         android:name="android.permission.PACKAGE_USAGE_STATS"
         tools:ignore="ProtectedPermissions" />
+    <!-- 分App列表/应用名解析需要（Android 11+ 包可见性；Cap-go queryAllPackages 同源） -->
+    <uses-permission
+        android:name="android.permission.QUERY_ALL_PACKAGES"
+        tools:ignore="QueryAllPackagesPermission" />
     <!-- 屏幕捕获前台服务（Android 9+ / 14+ 要求） -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />

@@ -5,6 +5,7 @@
   "dependencies": {
     "@capacitor/android": "^8.6.0",
     "@capacitor/cli": "^8.6.0",
-    "@capacitor/core": "^8.6.0"
+    "@capacitor/core": "^8.6.0",
+    "@capgo/capacitor-android-usagestatsmanager": "^8.2.14"
   }
 }

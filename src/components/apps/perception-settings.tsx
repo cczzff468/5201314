@@ -60,6 +60,11 @@ import {
   openNativeMediaSettings,
   requestNativeScreenCapture,
   stopNativeScreenCapture,
+  nativeShizukuStatus,
+  nativeRequestShizukuPermission,
+  getUsageEngine,
+  setUsageEngine,
+  type UsageEngine,
 } from '@/lib/ios/native-perception';
 
 /** 开关行（图标 + 名称 + 说明 + 开关） */
@@ -156,6 +161,11 @@ export function PerceptionSettingsPage({
   // 媒体桥能力：null = 探测中；false = 旧版 APK（无音乐感知，引导重装）；true = 新 APK
   const [mediaSupported, setMediaSupported] = useState<boolean | null>(null);
   const [nativeSessionOn, setNativeSessionOn] = useState(false);
+  // ---------------- 时长数据源（v1.2 双引擎：标准 Cap-go / Shizuku） ----------------
+  const [usageEngine, setUsageEngineState] = useState<UsageEngine>(() => getUsageEngine());
+  // undefined = 探测中；null = 旧版 APK 不支持；对象 = Shizuku 实时状态
+  const [shizuku, setShizuku] = useState<{ running: boolean; granted: boolean; version: number } | null | undefined>(undefined);
+  const [shizukuRequesting, setShizukuRequesting] = useState(false);
   // 自检结果（逐步打印；null = 未跑过）
   const [selfTesting, setSelfTesting] = useState(false);
   const [selfTestSteps, setSelfTestSteps] = useState<{ ok: boolean | null; text: string }[] | null>(null);
@@ -184,6 +194,11 @@ export function PerceptionSettingsPage({
         if (!alive || g === null) return;
         setMediaGranted(g);
       });
+      // Shizuku 状态（时长数据源引擎 B；旧壳探测失败回 null = 不支持）
+      void nativeShizukuStatus().then((s) => {
+        if (!alive) return;
+        setShizuku(s && typeof s.running === 'boolean' ? { running: !!s.running, granted: !!s.granted, version: s.version ?? 0 } : null);
+      });
     };
     probe();
     const t = window.setInterval(probe, 3000);
@@ -201,6 +216,40 @@ export function PerceptionSettingsPage({
   const openMediaGrant = async () => {
     const ok = await openNativeMediaSettings();
     if (ok) showToast('已跳转系统设置：找到 AI Phone 开「通知使用权」（读歌名需要）');
+  };
+
+  /** 切换时长数据源（全局设置；立即击穿缓存重新取样） */
+  const pickUsageEngine = (e: UsageEngine) => {
+    if (e === usageEngine) return;
+    setUsageEngine(e);
+    setUsageEngineState(e);
+    void fetchAwSnapshot(getPerception(sessionKey).awUrl, true).catch(() => null);
+    showToast(
+      e === 'shizuku'
+        ? '已切换 Shizuku 模式：未就绪时自动降级标准模式'
+        : '已切换标准模式（Cap-go 事件级精确配对）',
+    );
+  };
+
+  /** 拉起 Shizuku 授权（会打开 Shizuku APP 的授权弹窗） */
+  const requestShizukuGrant = async () => {
+    if (shizukuRequesting) return;
+    setShizukuRequesting(true);
+    try {
+      const r = await nativeRequestShizukuPermission();
+      if (r && r.ok && r.granted) {
+        showToast('Shizuku 已授权：时长统计升级为系统账本直读');
+        void fetchAwSnapshot(getPerception(sessionKey).awUrl, true).catch(() => null);
+      } else if (r && r.reason === 'not-running') {
+        showToast('Shizuku 未运行：先在 Shizuku APP 里激活，再回来授权');
+      } else if (r && r.reason === 'timeout') {
+        showToast('授权超时：在 Shizuku 弹窗里点「允许」后再试');
+      } else {
+        showToast('未完成授权（可在 Shizuku APP 里手动允许）');
+      }
+    } finally {
+      setShizukuRequesting(false);
+    }
   };
 
   const onNativeCapture = async () => {
@@ -262,7 +311,7 @@ export function PerceptionSettingsPage({
           push(false, '媒体权限：「通知使用权」未开启 —— 想让 TA 知道你在听什么歌，点上方「去授权」');
         }
         // ③ 实时数据（force 击穿旧缓存，同时把结果写入缓存供下一次发送直接用）
-        if (granted === true) {
+        if (granted === true || getUsageEngine() === 'shizuku') {
           const snap = await fetchAwSnapshot(getPerception(sessionKey).awUrl, true);
           if (snap) {
             const parts: string[] = [];
@@ -272,6 +321,14 @@ export function PerceptionSettingsPage({
             }
             if (snap.todayTotalMs && snap.todayTotalMs > 0) parts.push(`总时长 ${fmtMs(snap.todayTotalMs)}`);
             if (snap.media && snap.media.title) parts.push(`正在听 ${snap.media.app}《${snap.media.title}》`);
+            if (snap.engine) {
+              const engineName = snap.engine === 'capgo'
+                ? 'Cap-go 标准引擎'
+                : snap.engine === 'shizuku'
+                  ? 'Shizuku 系统账本'
+                  : '原生标准引擎';
+              parts.push(`数据引擎：${engineName}${snap.engineNote ? `（${snap.engineNote}）` : ''}`);
+            }
             push(true, `实时数据：${parts.length > 0 ? parts.join('；') : '今日暂无使用记录（刚开机/统计需几分钟累计）'}`);
           } else {
             push(false, '实时数据：未取到 —— 刚授权后系统统计需要几分钟开始累计，稍后再试');
@@ -498,7 +555,7 @@ export function PerceptionSettingsPage({
             <div className="space-y-2.5 px-4 py-3">
               <p className="text-[12px] leading-relaxed text-black/45 dark:text-white/45">
                 安装版 APP 直读系统使用统计（无需装 ActivityWatch、无需填地址/穿透）；
-                使用时长按前台会话精确计算（息屏不计入）。在下方开关按需开启；
+                使用时长按前台会话精确计算（息屏不计入），时长数据源可在「标准 / Shizuku」双引擎间自选；
                 想让 TA 知道你「在听什么歌」请再开下方通知使用权（解锁/浏览器URL 暂需 ActivityWatch）。
               </p>
               <div className="flex items-center justify-between gap-2">
@@ -518,11 +575,110 @@ export function PerceptionSettingsPage({
               </div>
               <p className="text-[12px] leading-snug text-black/35 dark:text-white/35">系统设置 →「有权查看使用情况」→ 找到 AI Phone 打开，一次授权长期有效。</p>
               <div className={`border-t ${dividerCls} my-0.5`} />
+              {/* v1.2 时长数据源双引擎：标准（Cap-go 事件级配对）/ Shizuku（系统账本直读） */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-[13px] font-medium text-black/70 dark:text-white/70">时长数据源</span>
+                  <span className="text-[11px] text-black/35 dark:text-white/35">全局设置 · 对所有会话生效</span>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => pickUsageEngine('standard')}
+                    data-testid={`${testPrefix}-perception-engine-standard`}
+                    className={`rounded-xl px-3 py-2.5 text-left active:opacity-70 ${
+                      usageEngine === 'standard'
+                        ? 'text-white'
+                        : 'border text-black/60 dark:text-white/60'
+                    }`}
+                    style={
+                      usageEngine === 'standard'
+                        ? { backgroundColor: accent }
+                        : undefined
+                    }
+                  >
+                    <span className="block text-[13px] font-medium">标准模式</span>
+                    <span className={`block text-[11px] leading-snug ${usageEngine === 'standard' ? 'text-white/75' : 'text-black/40 dark:text-white/40'}`}>
+                      零额外配置 · 事件级精确配对
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => pickUsageEngine('shizuku')}
+                    data-testid={`${testPrefix}-perception-engine-shizuku`}
+                    className={`rounded-xl px-3 py-2.5 text-left active:opacity-70 ${
+                      usageEngine === 'shizuku'
+                        ? 'text-white'
+                        : 'border text-black/60 dark:text-white/60'
+                    }`}
+                    style={
+                      usageEngine === 'shizuku'
+                        ? { backgroundColor: accent }
+                        : undefined
+                    }
+                  >
+                    <span className="block text-[13px] font-medium">Shizuku 模式</span>
+                    <span className={`block text-[11px] leading-snug ${usageEngine === 'shizuku' ? 'text-white/75' : 'text-black/40 dark:text-white/40'}`}>
+                      系统账本直读 · 最准
+                    </span>
+                  </button>
+                </div>
+                {usageEngine === 'standard' ? (
+                  <p className="text-[12px] leading-snug text-black/40 dark:text-white/40">
+                    标准模式：Cap-go 插件读系统使用事件，逐条配对计算（息屏不计、桌面不计、跨零点不串天），
+                    且无需「使用情况」以外的任何配置，适合绝大多数情况。
+                  </p>
+                ) : (
+                  <div className="space-y-1.5">
+                    <p className="text-[12px] leading-snug text-black/40 dark:text-white/40">
+                      Shizuku 模式：以 shell 权限直读系统使用统计账本（dumpsys），与系统自身口径最接近，
+                      且不依赖「使用情况」授权。需在手机上另装 Shizuku APP 并激活（每次重启手机后需重新激活）。
+                    </p>
+                    {shizuku === undefined ? (
+                      <p className="text-[12px] text-black/35 dark:text-white/35">Shizuku 状态检测中…</p>
+                    ) : shizuku === null ? (
+                      <p className="text-[12px] leading-snug text-[#E4554F]">
+                        当前 APP 版本不支持双引擎（看不到 Shizuku 状态）：用下方按钮更新到 v1.2 后可用；
+                        更新前会自动用标准模式统计。
+                      </p>
+                    ) : !shizuku.running ? (
+                      <p className="text-[12px] leading-snug text-[#E4554F]">
+                        ✗ Shizuku 未运行（未安装或重启后未激活）—— 现在自动降级标准模式统计；
+                        想启用：装 Shizuku APP → 手机「无线调试」配对激活 → 回这里授权。
+                      </p>
+                    ) : !shizuku.granted ? (
+                      <div className="space-y-1.5">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-[13px] font-medium text-[#E4554F]">Shizuku 已运行 · 待授权</span>
+                          <button
+                            type="button"
+                            onClick={() => void requestShizukuGrant()}
+                            disabled={shizukuRequesting}
+                            data-testid={`${testPrefix}-perception-shizuku-grant`}
+                            className="shrink-0 rounded-full px-3.5 py-2 text-[13px] font-medium text-white active:opacity-70 disabled:opacity-50"
+                            style={{ backgroundColor: accent }}
+                          >
+                            {shizukuRequesting ? <Loader2 className="h-4 w-4 animate-spin" /> : '去授权'}
+                          </button>
+                        </div>
+                        <p className="text-[12px] leading-snug text-black/35 dark:text-white/35">
+                          点「去授权」会打开 Shizuku 的授权弹窗，允许后时长统计即切换为系统账本直读。
+                        </p>
+                      </div>
+                    ) : (
+                      <p className="text-[12px] leading-snug text-[#07C160]">
+                        ✓ Shizuku 已就绪（v{shizuku.version || '?'}）：时长数据以系统账本直读，注意每次重启手机后需在 Shizuku APP 里重新激活（未激活时自动降级标准模式）。
+                      </p>
+                    )}
+                  </div>
+                )}
+              </div>
+              <div className={`border-t ${dividerCls} my-0.5`} />
               {mediaSupported === false ? (
                 <div className="space-y-1.5">
-                  <p className="text-[13px] font-medium text-[#E4554F]">当前 APP 是旧版本（不能读歌名）</p>
+                  <p className="text-[13px] font-medium text-[#E4554F]">当前 APP 是旧版本（不能读歌名/用双引擎）</p>
                   <p className="text-[12px] leading-snug text-black/40 dark:text-white/40">
-                    音乐感知（歌名/歌手）与精确使用时长需要新版 APP。点下方重新下载安装（会覆盖安装，数据都在服务器/本地存储里不会丢）。
+                    音乐感知（歌名/歌手）、精确使用时长与双引擎（Cap-go 标准 / Shizuku）需要新版 APP。点下方重新下载安装（会覆盖安装，数据都在服务器/本地存储里不会丢）。
                   </p>
                   <a
                     href="/AI-Phone.apk"
@@ -530,7 +686,7 @@ export function PerceptionSettingsPage({
                     className="block w-full rounded-full py-2 text-center text-[13.5px] font-medium text-white active:opacity-70"
                     style={{ backgroundColor: accent }}
                   >
-                    下载新版 APP（v1.1）
+                    下载新版 APP（v1.2）
                   </a>
                 </div>
               ) : (

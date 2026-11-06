@@ -57,6 +57,10 @@ export interface AwSnapshot {
   media?: { app: string; title: string; artist: string; state: string } | null;
   /** 正在浏览的网页 */
   web?: { url: string; title?: string } | null;
+  /** 本轮真机数据实际产出引擎（v1.2 双引擎诊断用：capgo/native/shizuku；ActivityWatch 源无此字段） */
+  engine?: string;
+  /** 引擎降级原因（如 shizuku-not-running；仅诊断展示用，不进 prompt） */
+  engineNote?: string;
   fetchedAt: number;
 }
 

@@ -7,35 +7,44 @@
  * WebMessageListener / addJavascriptInterface 全局注入 window.androidBridge，
  * 跨域页面（沙箱预览地址）同样可见 —— 网页侧据此判定原生环境。
  *
- * 关键补丁（修复「当前环境不支持原生屏幕感知」）：Capacitor 8 的注入脚本
- * （native-bridge.js + 插件代理）只覆盖壳自身的源，跨域页面拿不到
+ * 关键补丁：Capacitor 8 的注入脚本只覆盖壳自身的源，跨域页面拿不到
  * window.Capacitor.Plugins —— 因此这里自建一份 Capacitor 消息协议客户端，
- * 直接经 androidBridge.postMessage 调原生插件，回传双通道兼容：
- * ① WebMessageListener（现代 WebView）：androidBridge.onmessage(event.data)
- * ② legacy addJavascriptInterface：evaluateJavascript 调 window.Capacitor.fromNative
+ * 直接经 androidBridge.postMessage 调原生插件（pluginId 可路由到任意已注册
+ * 插件：NativePerception / CapacitorUsageStatsManager）。
  *
- * 能力（对应 NativePerceptionPlugin.java）：
- * - UsageStats 真机感知：getUsageSnapshot（免装 ActivityWatch，替代其 502 链路）；
- * - 屏幕抓帧：requestScreenCapture（MediaProjection 授权，每会话一次）+
- *   grabScreenFrame（抓一帧 dataURL 喂 VLM，替代手机端不可用的 getDisplayMedia）。
+ * v1.2 时长数据源双引擎（用户在感知设置自选，localStorage 全局键）：
+ *  - standard（默认）：Cap-go 插件（CapacitorUsageStatsManager）queryEvents
+ *    事件级 JS 聚合（回看+今日裁剪+桌面排除）；Cap-go 不可用（旧 APK/失败）
+ *    自动回落内置原生 getUsageSnapshot（v1.2 同口径）；
+ *  - shizuku：原生侧经 Shizuku 以 shell 权限 dumpsys usagestats 读系统账本；
+ *    Shizuku 未运行/未授权由原生内部自动降级标准（engineNote 标注）。
  */
 
 import type { AwSnapshot } from './activitywatch';
 
+type UsageSnapshotResult = {
+  ok: boolean;
+  needPermission?: boolean;
+  /** 本轮数据实际由哪个引擎产出（standard/shizuku；旧壳无此字段 → native） */
+  engine?: string;
+  /** 降级原因（如 shizuku-not-running / shizuku-no-permission / shizuku-empty） */
+  engineNote?: string;
+  current?: { app: string; name: string; ongoingMs: number; at?: number; closed?: boolean };
+  todayApps?: { app: string; name: string; ms: number; opens?: number; lastOpenTs?: number }[];
+  todayTotalMs?: number;
+  switchCount?: number;
+  longest?: { app: string; ms: string } | { app: string; ms: number };
+  history?: { hhmm: string; app: string; name: string }[];
+  recentApps?: { app: string; name: string; hhmm: string; opens: number; ms: number }[];
+};
+
+type ShizukuStatusResult = { supported?: boolean; running?: boolean; granted?: boolean; version?: number };
+type ShizukuPermissionResult = { ok?: boolean; granted?: boolean; reason?: string };
+
 type CapPlugin = {
   hasUsagePermission(): Promise<{ granted: boolean }>;
   openUsagePermissionSettings(): Promise<void>;
-  getUsageSnapshot(): Promise<{
-    ok: boolean;
-    needPermission?: boolean;
-    current?: { app: string; name: string; ongoingMs: number; at?: number; closed?: boolean };
-    todayApps?: { app: string; name: string; ms: number; opens?: number; lastOpenTs?: number }[];
-    todayTotalMs?: number;
-    switchCount?: number;
-    longest?: { app: string; ms: number };
-    history?: { hhmm: string; app: string; name: string }[];
-    recentApps?: { app: string; name: string; hhmm: string; opens: number; ms: number }[];
-  }>;
+  getUsageSnapshot(options?: { source?: 'standard' | 'shizuku' }): Promise<UsageSnapshotResult>;
   hasMediaPermission(): Promise<{ granted: boolean }>;
   openMediaPermissionSettings(): Promise<void>;
   getNowPlaying(): Promise<{
@@ -55,6 +64,8 @@ type CapPlugin = {
   requestScreenCapture(): Promise<{ ok: boolean; canceled?: boolean }>;
   grabScreenFrame(): Promise<{ ok: boolean; needSession?: boolean; frame?: string }>;
   stopScreenCapture(): Promise<void>;
+  shizukuStatus(): Promise<ShizukuStatusResult>;
+  requestShizukuPermission(): Promise<ShizukuPermissionResult>;
 };
 
 type CapacitorCore = {
@@ -153,8 +164,13 @@ function ensureBridgeHook(): boolean {
   }
 }
 
-/** 经自建协议调用原生插件方法（与 native-bridge 的 toNative 同构；10s 超时防永久挂起） */
-function bridgeCall<T>(methodName: string, options: Record<string, unknown> = {}, timeoutMs = 10_000): Promise<T> {
+/** 经自建协议调用任意已注册原生插件方法（超时防永久挂起） */
+function bridgeCall<T>(
+  pluginId: string,
+  methodName: string,
+  options: Record<string, unknown> = {},
+  timeoutMs = 10_000,
+): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     if (!ensureBridgeHook()) {
       reject(new Error('androidBridge 不可用'));
@@ -165,7 +181,7 @@ function bridgeCall<T>(methodName: string, options: Record<string, unknown> = {}
     // 数据静默消失比报错更难排查，这里加超时兜底
     const timer = window.setTimeout(() => {
       pendingCalls.delete(callbackId);
-      reject(new Error(`原生调用超时（${methodName}，桥无响应）`));
+      reject(new Error(`原生调用超时（${pluginId}.${methodName}，桥无响应）`));
     }, timeoutMs);
     pendingCalls.set(callbackId, {
       resolve: (v) => {
@@ -179,7 +195,7 @@ function bridgeCall<T>(methodName: string, options: Record<string, unknown> = {}
     });
     try {
       (window as { androidBridge?: AndroidBridgeLike }).androidBridge?.postMessage(
-        JSON.stringify({ callbackId, pluginId: 'NativePerception', methodName, options })
+        JSON.stringify({ callbackId, pluginId, methodName, options })
       );
     } catch (e) {
       window.clearTimeout(timer);
@@ -189,13 +205,17 @@ function bridgeCall<T>(methodName: string, options: Record<string, unknown> = {}
   });
 }
 
-type UsageSnapshotResult = Awaited<ReturnType<CapPlugin['getUsageSnapshot']>>;
+/** 调本 APP 自研感知插件（NativePerception） */
+function nativeCall<T>(methodName: string, options: Record<string, unknown> = {}, timeoutMs = 10_000): Promise<T> {
+  return bridgeCall<T>('NativePerception', methodName, options, timeoutMs);
+}
+
 type NowPlayingResult = Awaited<ReturnType<CapPlugin['getNowPlaying']>>;
 
 // ---------------- 媒体桥新旧壳探测 ----------------
 // 旧 APK（v1.0）没有 hasMediaPermission/getNowPlaying 方法，且 Capacitor 对未知方法
-// 只记日志不回包 —— 直接调用会挂到 10s 超时。这里用短超时探测一次并缓存：
-// 新壳 → 立即响应；旧壳 → 超时后未页面会话内不再尝试（零后续成本）。
+// 只记日志不回包 —— 直接调用会挂到超时。这里用短超时探测一次并缓存：
+// 新壳 → 立即响应；旧壳 → 超时后本页面会话内不再尝试（零后续成本）。
 let mediaBridgeState: boolean | null = null; // null = 未探测
 
 async function mediaBridgeAlive(): Promise<boolean> {
@@ -221,15 +241,17 @@ async function mediaBridgeAlive(): Promise<boolean> {
 /** 自建协议插件代理（方法集与 NativePerceptionPlugin.java 一致） */
 function bridgePlugin(): CapPlugin {
   return {
-    hasUsagePermission: () => bridgeCall<{ granted: boolean }>('hasUsagePermission'),
-    openUsagePermissionSettings: () => bridgeCall<void>('openUsagePermissionSettings'),
-    getUsageSnapshot: () => bridgeCall<UsageSnapshotResult>('getUsageSnapshot'),
-    hasMediaPermission: () => bridgeCall<{ granted: boolean }>('hasMediaPermission'),
-    openMediaPermissionSettings: () => bridgeCall<void>('openMediaPermissionSettings'),
-    getNowPlaying: () => bridgeCall<NowPlayingResult>('getNowPlaying'),
-    requestScreenCapture: () => bridgeCall<{ ok: boolean; canceled?: boolean }>('requestScreenCapture'),
-    grabScreenFrame: () => bridgeCall<{ ok: boolean; needSession?: boolean; frame?: string }>('grabScreenFrame'),
-    stopScreenCapture: () => bridgeCall<void>('stopScreenCapture'),
+    hasUsagePermission: () => nativeCall<{ granted: boolean }>('hasUsagePermission'),
+    openUsagePermissionSettings: () => nativeCall<void>('openUsagePermissionSettings'),
+    getUsageSnapshot: (options) => nativeCall<UsageSnapshotResult>('getUsageSnapshot', options ?? {}),
+    hasMediaPermission: () => nativeCall<{ granted: boolean }>('hasMediaPermission'),
+    openMediaPermissionSettings: () => nativeCall<void>('openMediaPermissionSettings'),
+    getNowPlaying: () => nativeCall<NowPlayingResult>('getNowPlaying'),
+    requestScreenCapture: () => nativeCall<{ ok: boolean; canceled?: boolean }>('requestScreenCapture'),
+    grabScreenFrame: () => nativeCall<{ ok: boolean; needSession?: boolean; frame?: string }>('grabScreenFrame'),
+    stopScreenCapture: () => nativeCall<void>('stopScreenCapture'),
+    shizukuStatus: () => nativeCall<ShizukuStatusResult>('shizukuStatus'),
+    requestShizukuPermission: () => nativeCall<ShizukuPermissionResult>('requestShizukuPermission', {}, 35_000),
   };
 }
 
@@ -250,6 +272,296 @@ async function nativePlugin(): Promise<CapPlugin | null> {
   // 路径 B：跨域页面（注入脚本不覆盖外域）——自建消息协议直连 androidBridge
   if (ensureBridgeHook()) return bridgePlugin();
   return null;
+}
+
+// ---------------- 时长数据源（v1.2 双引擎，全局设置） ----------------
+
+export type UsageEngine = 'standard' | 'shizuku';
+
+const ENGINE_KEY = 'aiphone-usage-engine-v1';
+
+/** 当前选中的时长数据源（默认 standard；全局键，对全部会话生效） */
+export function getUsageEngine(): UsageEngine {
+  try {
+    return window.localStorage.getItem(ENGINE_KEY) === 'shizuku' ? 'shizuku' : 'standard';
+  } catch {
+    return 'standard';
+  }
+}
+
+/** 切换时长数据源（立即生效；下一次取样现场读取） */
+export function setUsageEngine(engine: UsageEngine): void {
+  try {
+    window.localStorage.setItem(ENGINE_KEY, engine);
+  } catch {
+    /* 持久化失败忽略（本会话内存态仍由调用方维护） */
+  }
+}
+
+// ---------------- Cap-go 引擎（标准模式 · 事件级 JS 聚合） ----------------
+
+// v1.2 新壳才装了 @capgo/capacitor-android-usagestatsmanager（插件注册名
+// CapacitorUsageStatsManager）；旧壳不响应 → 短超时探测一次并缓存。
+let capgoState: boolean | null = null;
+
+async function capgoBridgeAlive(): Promise<boolean> {
+  if (capgoState !== null) return capgoState;
+  if (!isNativePerception()) {
+    capgoState = false;
+    return false;
+  }
+  try {
+    const r = await Promise.race([
+      bridgeCall<{ granted: boolean }>('CapacitorUsageStatsManager', 'isUsageStatsPermissionGranted', {}, 2500),
+      new Promise<never>((_, rej) => window.setTimeout(() => rej(new Error('probe-timeout')), 2600)),
+    ]);
+    capgoState = !!r && typeof r.granted === 'boolean';
+  } catch {
+    capgoState = false; // 旧壳无此插件
+  }
+  return capgoState;
+}
+
+/** 应用名标签缓存（queryAllPackages 较重：内存 + localStorage 双层，24h） */
+const APP_LABEL_KEY = 'aiphone-app-labels-v1';
+const APP_LABEL_TTL = 24 * 3600_000;
+let labelMem: { map: Record<string, string>; ts: number } | null = null;
+
+async function capgoAppLabels(): Promise<Record<string, string>> {
+  if (labelMem && Date.now() - labelMem.ts < APP_LABEL_TTL) return labelMem.map;
+  try {
+    const raw = window.localStorage.getItem(APP_LABEL_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw) as { ts?: number; map?: Record<string, string> };
+      if (parsed && typeof parsed.ts === 'number' && Date.now() - parsed.ts < APP_LABEL_TTL && parsed.map) {
+        labelMem = { map: parsed.map, ts: parsed.ts };
+        return parsed.map;
+      }
+    }
+  } catch {
+    /* 缓存损坏忽略，走在线拉取 */
+  }
+  const r = await bridgeCall<{ packages?: { packageName?: string; appName?: string }[] }>(
+    'CapacitorUsageStatsManager',
+    'queryAllPackages',
+    {},
+    20_000,
+  );
+  const map: Record<string, string> = {};
+  for (const p of r?.packages ?? []) {
+    if (p?.packageName && p?.appName && p.appName.trim() && p.appName !== p.packageName) {
+      map[p.packageName] = p.appName.trim();
+    }
+  }
+  labelMem = { map, ts: Date.now() };
+  try {
+    window.localStorage.setItem(APP_LABEL_KEY, JSON.stringify(labelMem));
+  } catch {
+    /* 存储满等异常忽略 */
+  }
+  return map;
+}
+
+/** 常见桌面 Launcher 包名（标准引擎 JS 侧排除；与原生侧 PackageManager 解析互补） */
+const KNOWN_LAUNCHERS = new Set([
+  'com.miui.home',
+  'com.android.launcher',
+  'com.android.launcher2',
+  'com.android.launcher3',
+  'com.huawei.android.launcher',
+  'com.sec.android.app.launcher',
+  'com.google.android.apps.nexuslauncher',
+  'com.coloros.launcher',
+  'com.oppo.launcher',
+  'com.vivo.launcher',
+  'com.hihonor.launcher',
+  'com.lg.launcher2',
+  'com.sonymobile.home',
+  'com.teslacoilsw.launcher',
+]);
+
+function hhmmOf(ts: number): string {
+  const d = new Date(ts);
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+}
+
+/** Cap-go 引擎取样：queryEvents（带回看）→ 与原生 v1.2 同口径的 JS 聚合 */
+async function capgoUsageSnapshot(): Promise<AwSnapshot | null> {
+  const now = Date.now();
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  const startOfDay = d.getTime();
+  const lookback = 2 * 3600_000;
+  const [evRes, labels] = await Promise.all([
+    bridgeCall<{ events?: { packageName?: string; timeStamp?: number; eventType?: number }[] }>(
+      'CapacitorUsageStatsManager',
+      'queryEvents',
+      { beginTime: startOfDay - lookback, endTime: now },
+      12_000,
+    ),
+    capgoAppLabels().catch(() => ({}) as Record<string, string>),
+  ]);
+  const labelOf = (pkg: string): string => {
+    const l = labels[pkg];
+    return l && l.trim() ? l.trim() : (pkg.split('.').pop() ?? pkg);
+  };
+  const isLauncher = (pkg: string): boolean => {
+    if (KNOWN_LAUNCHERS.has(pkg)) return true;
+    const l = labels[pkg]?.toLowerCase();
+    return !!l && (l.includes('launcher') || l.includes('桌面'));
+  };
+
+  type Ev = { ts: number; type: 1 | 2; pkg: string };
+  const evs: Ev[] = (evRes?.events ?? [])
+    .filter((e): e is { packageName: string; timeStamp: number; eventType: number } =>
+      !!e.packageName && typeof e.timeStamp === 'number' && (e.eventType === 1 || e.eventType === 2 || e.eventType === 23))
+    .map((e) => ({ ts: e.timeStamp, type: (e.eventType === 1 ? 1 : 2) as 1 | 2, pkg: e.packageName }))
+    .sort((a, b) => a.ts - b.ts);
+
+  // 与原生 buildSnapshot 同口径：RESUMED→PAUSED 配对 + 今日裁剪 + 桌面排除
+  // + 同 App 内页面切换（3s 内 PAUSED→RESUMED）不重复计打开次数
+  const durationByApp = new Map<string, number>();
+  const opensByApp = new Map<string, number>();
+  const lastOpenByApp = new Map<string, number>();
+  const history: { hhmm: string; app: string }[] = [];
+  let openApp: string | null = null;
+  let openStart = 0;
+  let lastApp: string | null = null;
+  let lastAppStart = 0;
+  let lastClosedPkg: string | null = null;
+  let lastClosedTs = 0;
+  let longestApp: string | null = null;
+  let longestMs = 0;
+  let switchCount = 0;
+
+  const settle = (pkg: string, s: number, e: number): number => {
+    const cs = Math.max(s, startOfDay);
+    const ce = Math.min(e, now);
+    if (ce <= cs) return 0;
+    const dur = ce - cs;
+    durationByApp.set(pkg, (durationByApp.get(pkg) ?? 0) + dur);
+    return dur;
+  };
+
+  for (const ev of evs) {
+    if (ev.ts > now + 60_000) continue; // 时钟跳变产生的未来事件
+    if (ev.type === 1) {
+      if (openApp && ev.ts > openStart) {
+        const dur = settle(openApp, openStart, ev.ts);
+        if (dur > longestMs) { longestMs = dur; longestApp = openApp; }
+        lastClosedPkg = openApp;
+        lastClosedTs = ev.ts;
+      }
+      if (isLauncher(ev.pkg)) {
+        openApp = null; // 桌面停留不计入任何 App
+        continue;
+      }
+      const inToday = ev.ts >= startOfDay;
+      const intraAppSwitch = openApp == null && ev.pkg === lastClosedPkg && ev.ts - lastClosedTs <= 3000;
+      openApp = ev.pkg;
+      openStart = ev.ts;
+      if (inToday) {
+        if (!intraAppSwitch) {
+          opensByApp.set(ev.pkg, (opensByApp.get(ev.pkg) ?? 0) + 1);
+          switchCount++;
+          lastOpenByApp.set(ev.pkg, ev.ts);
+        }
+        lastApp = ev.pkg;
+        lastAppStart = ev.ts;
+        history.push({ hhmm: hhmmOf(ev.ts), app: labelOf(ev.pkg) });
+      }
+    } else {
+      if (openApp && openApp === ev.pkg) {
+        const dur = settle(openApp, openStart, ev.ts);
+        if (dur > longestMs) { longestMs = dur; longestApp = openApp; }
+        lastClosedPkg = openApp;
+        lastClosedTs = ev.ts;
+        openApp = null;
+      }
+    }
+  }
+
+  const sortedApps = [...durationByApp.entries()].sort((a, b) => b[1] - a[1]);
+  const totalMs = sortedApps.reduce((s, [, ms]) => s + ms, 0);
+
+  // 媒体会话一并取（与内置路径同源）
+  const media = await attachMedia();
+
+  return {
+    fetchedAt: now,
+    current: openApp
+      ? { app: labelOf(openApp), ongoingMs: Math.max(0, now - openStart), at: openStart }
+      : lastApp
+        ? { app: labelOf(lastApp), ongoingMs: 0, at: lastAppStart }
+        : undefined,
+    todayApps: sortedApps.slice(0, 30).map(([pkg, ms]) => ({
+      app: labelOf(pkg),
+      ms,
+      opens: opensByApp.get(pkg) ?? 0,
+    })),
+    todayTotalMs: totalMs,
+    switchCount,
+    longest: longestApp ? { app: labelOf(longestApp), ms: longestMs } : undefined,
+    history: history.slice(-24),
+    recentApps: [...lastOpenByApp.entries()]
+      .filter(([, ts]) => now - ts <= 3 * 3600_000)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 10)
+      .map(([pkg, ts]) => ({
+        app: labelOf(pkg),
+        hhmm: hhmmOf(ts),
+        opens: opensByApp.get(pkg) ?? 0,
+        ms: durationByApp.get(pkg) ?? 0,
+      })),
+    unlocks: undefined,
+    media,
+    web: undefined,
+  } satisfies AwSnapshot;
+}
+
+// ---------------- Shizuku 状态/授权 ----------------
+
+// v1.2 新壳才有 shizukuStatus；旧壳不回包 → 短超时探测缓存（同 mediaBridgeAlive 范式）
+let shizukuBridgeState: boolean | null = null;
+
+async function shizukuBridgeAlive(): Promise<boolean> {
+  if (shizukuBridgeState !== null) return shizukuBridgeState;
+  if (!isNativePerception()) {
+    shizukuBridgeState = false;
+    return false;
+  }
+  try {
+    const r = await Promise.race([
+      nativeCall<ShizukuStatusResult>('shizukuStatus', {}, 2500),
+      new Promise<never>((_, rej) => window.setTimeout(() => rej(new Error('probe-timeout')), 2600)),
+    ]);
+    shizukuBridgeState = !!r && typeof r.running === 'boolean';
+  } catch {
+    shizukuBridgeState = false;
+  }
+  return shizukuBridgeState;
+}
+
+/** Shizuku 状态（null = 非原生环境或旧版 APP 不支持双引擎） */
+export async function nativeShizukuStatus(): Promise<ShizukuStatusResult | null> {
+  if (!isNativePerception()) return null;
+  if (!(await shizukuBridgeAlive())) return null;
+  try {
+    return await nativeCall<ShizukuStatusResult>('shizukuStatus');
+  } catch {
+    return null;
+  }
+}
+
+/** 拉起 Shizuku 授权（会打开 Shizuku APP 的授权弹窗；结果回传或 30s 超时） */
+export async function nativeRequestShizukuPermission(): Promise<ShizukuPermissionResult | null> {
+  if (!isNativePerception()) return null;
+  if (!(await shizukuBridgeAlive())) return null;
+  try {
+    return await nativeCall<ShizukuPermissionResult>('requestShizukuPermission', {}, 35_000);
+  } catch {
+    return null;
+  }
 }
 
 // ---------------- UsageStats（真机感知） ----------------
@@ -312,73 +624,105 @@ export async function openNativeMediaSettings(): Promise<boolean> {
   }
 }
 
-/** 原生正在播放的媒体（无权限/暂无播放/非原生/旧壳返回 null） */
-export async function nativeNowPlaying(): Promise<NowPlayingResult['playing'] | null> {
+/** 取正在播放的媒体（静默失败 null；供快照聚合复用） */
+async function attachMedia(): Promise<AwSnapshot['media']> {
+  if (!(await mediaBridgeAlive())) return undefined;
   const p = await nativePlugin();
-  if (!p) return null;
-  if (!(await mediaBridgeAlive())) return null;
+  if (!p) return undefined;
   try {
-    const r = await p.getNowPlaying();
-    if (!r || !r.ok) return null;
-    return r.playing ?? null;
+    const np = await p.getNowPlaying();
+    if (np && np.ok && np.playing && (np.playing.title || np.playing.state === 'playing')) {
+      return {
+        app: np.playing.app || np.playing.pkg,
+        title: np.playing.title || '',
+        artist: np.playing.artist || '',
+        state: np.playing.state === 'playing' ? 'playing' : 'paused',
+      };
+    }
   } catch {
-    return null;
+    /* 媒体不可用不影响其余数据 */
   }
+  return undefined;
 }
 
-/** 原生 UsageStats 快照 → AwSnapshot 形状（下游感知块/设置页零改动兼容）
+/** 原生快照 → AwSnapshot（下游感知块/设置页零改动兼容；engine 字段供设置页展示） */
+function mapNativeSnapshot(r: UsageSnapshotResult): AwSnapshot {
+  const now = Date.now();
+  return {
+    fetchedAt: now,
+    current: r.current
+      ? {
+          app: r.current.name || r.current.app,
+          ongoingMs: r.current.ongoingMs || 0,
+          at: r.current.at && r.current.at > 0 ? r.current.at : now - (r.current.ongoingMs || 0),
+        }
+      : undefined,
+    todayApps: (r.todayApps ?? []).map((x) => ({ app: x.name || x.app, ms: x.ms, opens: x.opens })),
+    todayTotalMs: r.todayTotalMs ?? 0,
+    switchCount: r.switchCount ?? 0,
+    longest: r.longest
+      ? { app: r.longest.app, ms: typeof r.longest.ms === 'string' ? Number(r.longest.ms) || 0 : r.longest.ms }
+      : undefined,
+    history: (r.history ?? []).map((x) => ({ hhmm: x.hhmm, app: x.name || x.app })),
+    recentApps: (r.recentApps ?? []).map((x) => ({
+      app: x.name || x.app,
+      hhmm: x.hhmm,
+      opens: x.opens,
+      ms: x.ms,
+    })),
+    // UsageStats 拿不到解锁/网页事件：省略（AwSnapshot 全字段可选）
+    unlocks: undefined,
+    media: undefined,
+    web: undefined,
+    engine: r.engine === 'shizuku' ? 'shizuku' : r.engine === 'standard' ? 'native' : r.engine,
+    engineNote: r.engineNote,
+  } satisfies AwSnapshot;
+}
+
+/** 原生 UsageStats 快照 → AwSnapshot（v1.2 双引擎路由 + 自动降级）
  *
- * v1.1：同步携带媒体会话（歌名/歌手，需「通知使用权」）与最近打开的 App 列表；
- * 时长已由原生侧按 RESUMED→PAUSED 配对精确计算（息屏不计入）。 */
+ *  - shizuku 模式：原生内部读 dumpsys（未激活/未授权自动降级标准并带 engineNote）；
+ *  - standard 模式：Cap-go 插件（新 APK）事件级 JS 聚合优先，旧壳/失败回落内置原生；
+ *  - 媒体会话（歌名/歌手，需「通知使用权」）所有路径一并附带。 */
 export async function nativeUsageSnapshot(): Promise<AwSnapshot | null> {
   const p = await nativePlugin();
   if (!p) return null;
-  try {
-    const r = await p.getUsageSnapshot();
-    if (!r || !r.ok) return null;
-    const now = Date.now();
-    // 媒体感知一并取（同一快照里下行；旧壳探测失败/无权限/未播放时静默省略）
-    let media: AwSnapshot['media'] | undefined;
-    if (await mediaBridgeAlive()) {
+  const engine = getUsageEngine();
+
+  if (engine === 'shizuku') {
+    try {
+      const r = await p.getUsageSnapshot({ source: 'shizuku' });
+      if (r && r.ok) {
+        const snap = mapNativeSnapshot(r);
+        snap.media = await attachMedia();
+        return snap;
+      }
+      if (r && r.needPermission) {
+        // Shizuku 失效降级 + 「使用情况」也没授权：确实无数据
+        return null;
+      }
+    } catch {
+      /* 桥异常 → 走内置兜底 */
+    }
+  } else {
+    // 标准引擎：Cap-go 优先（v1.2 新壳；事件级聚合口径与原生一致）
+    if (await capgoBridgeAlive()) {
       try {
-        const np = await p.getNowPlaying();
-        if (np && np.ok && np.playing && (np.playing.title || np.playing.state === 'playing')) {
-          media = {
-            app: np.playing.app || np.playing.pkg,
-            title: np.playing.title || '',
-            artist: np.playing.artist || '',
-            state: np.playing.state === 'playing' ? 'playing' : 'paused',
-          };
-        }
+        const snap = await capgoUsageSnapshot();
+        if (snap) return { ...snap, engine: 'capgo' } satisfies AwSnapshot;
       } catch {
-        /* 媒体不可用不影响其余数据 */
+        /* 回落内置原生 */
       }
     }
-    return {
-      fetchedAt: now,
-      current: r.current
-        ? {
-            app: r.current.name || r.current.app,
-            ongoingMs: r.current.ongoingMs || 0,
-            at: r.current.at && r.current.at > 0 ? r.current.at : now - (r.current.ongoingMs || 0),
-          }
-        : undefined,
-      todayApps: (r.todayApps ?? []).map((x) => ({ app: x.name || x.app, ms: x.ms, opens: x.opens })),
-      todayTotalMs: r.todayTotalMs ?? 0,
-      switchCount: r.switchCount ?? 0,
-      longest: r.longest,
-      history: (r.history ?? []).map((x) => ({ hhmm: x.hhmm, app: x.name || x.app })),
-      recentApps: (r.recentApps ?? []).map((x) => ({
-        app: x.name || x.app,
-        hhmm: x.hhmm,
-        opens: x.opens,
-        ms: x.ms,
-      })),
-      // UsageStats 拿不到解锁/网页事件：省略（AwSnapshot 全字段可选）
-      unlocks: undefined,
-      media,
-      web: undefined,
-    } satisfies AwSnapshot;
+  }
+
+  // 内置原生兜底（v1.2 口径；shizuku 模式桥异常时也走这里）
+  try {
+    const r = await p.getUsageSnapshot(engine === 'shizuku' ? { source: 'shizuku' } : {});
+    if (!r || !r.ok) return null;
+    const snap = mapNativeSnapshot(r);
+    snap.media = await attachMedia();
+    return snap;
   } catch {
     return null;
   }

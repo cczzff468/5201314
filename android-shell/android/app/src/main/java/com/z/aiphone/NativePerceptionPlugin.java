@@ -5,9 +5,12 @@ import android.app.AppOpsManager;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
+import android.content.ServiceConnection;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
+import android.content.pm.ResolveInfo;
 import android.os.Build;
+import android.os.IBinder;
 import android.os.Process;
 import android.provider.Settings;
 import android.service.notification.NotificationListenerService;
@@ -19,44 +22,81 @@ import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
 
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Calendar;
 import java.util.Date;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
+
+import rikka.shizuku.Shizuku;
 
 /**
  * 原生感知插件（网页 window.Capacitor.Plugins.NativePerception）：
  *
- * ① UsageStats 真机感知（免装 ActivityWatch 的替代数据源）：
- *    - hasUsagePermission / openUsagePermissionSettings：PACKAGE_USAGE_STATS
- *      特殊权限检测与跳系统设置（一次授权终身有效）；
- *    - getUsageSnapshot：今日前台 App 流水 → 精确前台会话（RESUMED→PAUSED 配对，
- *      息屏/锁屏时间不再计入）→ 当前 App + 已持续 / 分 App 时长 / 打开次数 /
- *      总时长 / 切换次数 / 最长单次 / 近期历史 / 近 3 小时打开过的 App；
+ * ① UsageStats 真机感知（时长数据源双引擎，v1.2）：
+ *    - getUsageSnapshot({source})：
+ *      · source=standard（默认）：UsageStatsManager.queryEvents 事件流配对
+ *        （RESUMED→PAUSED，息屏即停）；v1.2 口径修正：查询窗口带 2h 回看（跨零点
+ *        会话不丢起点）、时长按「今日」裁剪、桌面 Launcher 时间不计入任何 App、
+ *        同 App 内部页面切换（3s 内 PAUSED→RESUMED）不重复计「打开次数」；
+ *      · source=shizuku：经 Shizuku 以 shell 权限执行 dumpsys usagestats -c，
+ *        解析系统事件账本 → 同一套配对聚合（免「使用情况」授权、不受锁屏查询限制）；
+ *        Shizuku 未运行/未授权/超时失败时自动降级 standard 并以 engineNote 标注；
+ *    - 网页端另一引擎 Cap-go（@capgo/capacitor-android-usagestatsmanager，插件
+ *      CapacitorUsageStatsManager）由 JS 侧调用，本插件为其提供能力底座（权限同源）。
  *
  * ② 媒体感知（正在听什么歌）：NotificationListenerService（MediaListenerService）
- *    读取音乐 App 的媒体通知/媒体会话 → 歌名/歌手/专辑/播放状态；
- *    - hasMediaPermission / openMediaPermissionSettings：「通知使用权」检测与跳设置；
- *    - getNowPlaying：当前正在播放的媒体快照；
+ *    - hasMediaPermission / openMediaPermissionSettings / getNowPlaying；
  *
- * ③ 屏幕抓帧（「让 TA 看到我的屏幕」）：
- *    - requestScreenCapture：MediaProjection 授权（系统弹窗，每会话一次）→
- *      ScreenCaptureService 前台服务建流；
- *    - grabScreenFrame：抓一帧 → dataURL（网页端直接喂 VLM 识图）；
- *    - stopScreenCapture：结束会话。
+ * ③ 屏幕抓帧：requestScreenCapture（MediaProjection 授权）→ ScreenCaptureService
+ *    前台服务建流 → grabScreenFrame（dataURL）→ stopScreenCapture。
+ *
+ * ④ Shizuku 状态：shizukuStatus（binder 活性/授权/版本）+ requestShizukuPermission
+ *    （拉起 Shizuku 授权页，结果经监听器回传）。
  */
 @CapacitorPlugin(name = "NativePerception")
 public class NativePerceptionPlugin extends Plugin {
 
     private static final int REQ_SCREEN_CAPTURE = 2;
+    private static final int REQ_SHIZUKU_PERMISSION = 7;
+
+    /** 跨零点会话回看窗口：事件查询从「今日 0 点 - 2h」起，聚合时按今日裁剪 */
+    private static final long SESSION_LOOKBACK_MS = 2 * 3600_000L;
+    /** 同 App 内部 Activity 切换判定阈值：PAUSED→RESUMED 间隔小于此值视为同一次使用 */
+    private static final long INTRA_APP_GAP_MS = 3000L;
+    /** Shizuku dumpsys 看门狗超时 */
+    private static final long SHIZUKU_DUMP_TIMEOUT_MS = 8000L;
+    /** dumpsys 解析保留的事件上限（防异常巨大输出） */
+    private static final int DUMP_EVENT_LIMIT = 60_000;
 
     private PluginCall pendingCaptureCall;
 
-    // ================= UsageStats（真机感知） =================
+    // ================= 事件模型（双引擎共用聚合口径） =================
+
+    /** 前台事件：type 1 = RESUMED（打开），2 = PAUSED/STOPPED（关闭） */
+    private static final class Ev {
+        final long ts;
+        final int type;
+        final String pkg;
+
+        Ev(long ts, int type, String pkg) {
+            this.ts = ts;
+            this.type = type;
+            this.pkg = pkg;
+        }
+    }
+
+    // ================= UsageStats（真机感知 · 双引擎） =================
 
     @PluginMethod
     public void hasUsagePermission(PluginCall call) {
@@ -79,14 +119,55 @@ public class NativePerceptionPlugin extends Plugin {
     }
 
     /**
-     * 今日前台会话聚合（v1.1 数据质量重写）：
+     * 今日前台会话聚合（v1.2 双引擎）：
      *
-     * 旧版只统计 RESUMED 事件、把「上一次打开 → 下一次打开」的整段时间（含息屏/
-     * 锁屏/放下的时间）全记进上一个 App —— 时长严重虚高。新版按
-     * ACTIVITY_RESUMED(1)/ACTIVITY_PAUSED(2) 配对计时：息屏与切走即停止计时。
+     * 事件级配对计时（RESUMED→PAUSED），息屏/锁屏/切走即停止计时；
+     * 桌面 Launcher 只用于结算上一会话，自身时长不计入（数字健康口径）；
+     * 带回看窗口 + 按今日裁剪（跨零点长会话不丢、不串天）。
      */
     @PluginMethod
     public void getUsageSnapshot(PluginCall call) {
+        String source = "standard";
+        try {
+            String s = call.getString("source", "standard");
+            if (s != null) source = s;
+        } catch (Throwable ignored) {
+        }
+
+        if ("shizuku".equals(source)) {
+            // Shizuku 引擎：binder 活着 + 已授权才走 dumpsys，否则自动降级标准
+            String note = null;
+            if (!shizukuBinderAlive()) {
+                note = "shizuku-not-running";
+            } else if (!shizukuPermissionGranted()) {
+                note = "shizuku-no-permission";
+            }
+            if (note != null) {
+                resolveStandardSnapshot(call, note);
+                return;
+            }
+            final long now = System.currentTimeMillis();
+            final long startOfDay = startOfDay(now);
+            final long from = startOfDay - SESSION_LOOKBACK_MS;
+            new Thread(() -> {
+                try {
+                    List<Ev> evs = shizukuDumpEvents(from, now);
+                    if (evs == null || evs.isEmpty()) {
+                        resolveStandardSnapshot(call, "shizuku-empty");
+                        return;
+                    }
+                    JSObject ret = buildSnapshot(evs, startOfDay, now);
+                    ret.put("ok", true);
+                    ret.put("engine", "shizuku");
+                    call.resolve(ret);
+                } catch (Throwable t) {
+                    resolveStandardSnapshot(call, "shizuku-error");
+                }
+            }, "shizuku-usage").start();
+            return;
+        }
+
+        // 标准引擎
         if (!checkUsagePermission()) {
             JSObject ret = new JSObject();
             ret.put("ok", false);
@@ -94,166 +175,496 @@ public class NativePerceptionPlugin extends Plugin {
             call.resolve(ret);
             return;
         }
-        try {
-            android.app.usage.UsageStatsManager usm =
-                    (android.app.usage.UsageStatsManager) getContext().getSystemService(Context.USAGE_STATS_SERVICE);
-            long now = System.currentTimeMillis();
-            Calendar cal = Calendar.getInstance();
-            cal.set(Calendar.HOUR_OF_DAY, 0);
-            cal.set(Calendar.MINUTE, 0);
-            cal.set(Calendar.SECOND, 0);
-            cal.set(Calendar.MILLISECOND, 0);
-            long startOfDay = cal.getTimeInMillis();
+        resolveStandardSnapshot(call, null);
+    }
 
-            android.app.usage.UsageEvents events = usm.queryEvents(startOfDay, now);
-            android.app.usage.UsageEvents.Event ev = new android.app.usage.UsageEvents.Event();
-
-            final int TYPE_RESUMED = android.app.usage.UsageEvents.Event.ACTIVITY_RESUMED;   // = 1
-            final int TYPE_PAUSED = android.app.usage.UsageEvents.Event.ACTIVITY_PAUSED;    // = 2
-
-            // 分 App 聚合
-            final Map<String, Long> durationByApp = new HashMap<>();   // 前台总时长（精确）
-            final Map<String, Integer> opensByApp = new HashMap<>();   // 打开次数（RESUMED 计数）
-            final Map<String, Long> lastOpenByApp = new HashMap<>();   // 最近一次打开时间
-            final List<long[]> history = new ArrayList<>();            // {ts} 与 historyPkgs 平行
-            final List<String> historyPkgs = new ArrayList<>();
-
-            // 当前打开中的会话（尚未收到 PAUSED = 仍在前台）
-            String openApp = null;
-            long openStart = 0;
-            // 最后一个会话（可能已暂停）：用于「最近用过」
-            String lastApp = null;
-            long lastAppStart = 0;
-
-            String longestApp = null;
-            long longestMs = 0;
-            int switchCount = 0;
-
-            while (events.hasNextEvent()) {
-                events.getNextEvent(ev);
-                int type = ev.getEventType();
-                if (type != TYPE_RESUMED && type != TYPE_PAUSED) continue;
-                String pkg = ev.getPackageName();
-                long ts = ev.getTimeStamp();
-                if (pkg == null) continue;
-
-                if (type == TYPE_RESUMED) {
-                    // 新 App 到前台：先结算当前打开中的会话（部分 ROM 不发 PAUSED）
-                    if (openApp != null && ts > openStart) {
-                        long dur = ts - openStart;
-                        durationByApp.merge(openApp, dur, Long::sum);
-                        if (dur > longestMs) { longestMs = dur; longestApp = openApp; }
-                    }
-                    openApp = pkg;
-                    openStart = ts;
-                    lastApp = pkg;
-                    lastAppStart = ts;
-                    opensByApp.merge(pkg, 1, Integer::sum);
-                    lastOpenByApp.put(pkg, ts);
-                    switchCount++;
-                    history.add(new long[]{ts});
-                    historyPkgs.add(pkg);
-                } else { // TYPE_PAUSED
-                    if (openApp != null && openApp.equals(pkg) && ts >= openStart) {
-                        long dur = ts - openStart;
-                        durationByApp.merge(openApp, dur, Long::sum);
-                        if (dur > longestMs) { longestMs = dur; longestApp = openApp; }
-                        openApp = null; // 息屏/切走：停止计时
-                    }
-                    // 非当前会话的 PAUSED（乱序/重复）：忽略
-                }
-            }
-
-            PackageManager pm = getContext().getPackageManager();
-            SimpleDateFormat hhmm = new SimpleDateFormat("HH:mm", Locale.getDefault());
-
-            // 分 App 时长列表（降序；带上打开次数与最近打开时间，最多 30 个）
-            JSArray todayApps = new JSArray();
-            List<Map.Entry<String, Long>> sorted = new ArrayList<>(durationByApp.entrySet());
-            sorted.sort((a, b) -> Long.compare(b.getValue(), a.getValue()));
-            long totalMs = 0;
-            int appCount = 0;
-            for (Map.Entry<String, Long> e : sorted) {
-                totalMs += e.getValue();
-                if (appCount++ >= 30) continue;
-                JSObject o = new JSObject();
-                o.put("app", e.getKey());
-                o.put("name", appLabel(pm, e.getKey()));
-                o.put("ms", e.getValue());
-                o.put("opens", opensByApp.getOrDefault(e.getKey(), 0));
-                Long lastOpen = lastOpenByApp.get(e.getKey());
-                o.put("lastOpenTs", lastOpen == null ? 0 : lastOpen);
-                todayApps.put(o);
-            }
-
-            // 近 3 小时打开过的 App（最近打开在前；「我最近打开了什么App」直接可答）
-            JSArray recentApps = new JSArray();
-            final long RECENT_WINDOW = 3 * 60 * 60 * 1000L;
-            List<String> recentPkgs = new ArrayList<>();
-            for (Map.Entry<String, Long> e : lastOpenByApp.entrySet()) {
-                if (now - e.getValue() <= RECENT_WINDOW) recentPkgs.add(e.getKey());
-            }
-            recentPkgs.sort((a, b) -> Long.compare(lastOpenByApp.get(b), lastOpenByApp.get(a)));
-            int recentCount = 0;
-            for (String pkg : recentPkgs) {
-                if (recentCount++ >= 10) break;
-                JSObject o = new JSObject();
-                o.put("app", pkg);
-                o.put("name", appLabel(pm, pkg));
-                Long ts = lastOpenByApp.get(pkg);
-                o.put("hhmm", hhmm.format(new Date(ts == null ? now : ts)));
-                o.put("opens", opensByApp.getOrDefault(pkg, 0));
-                o.put("ms", durationByApp.getOrDefault(pkg, 0L));
-                recentApps.put(o);
-            }
-
-            // 近期切换时间线（最后 24 条）
-            JSArray hist = new JSArray();
-            int from = Math.max(0, historyPkgs.size() - 24);
-            for (int i = from; i < historyPkgs.size(); i++) {
-                JSObject o = new JSObject();
-                o.put("hhmm", hhmm.format(new Date(history.get(i)[0])));
-                o.put("app", historyPkgs.get(i));
-                o.put("name", appLabel(pm, historyPkgs.get(i)));
-                hist.put(o);
-            }
-
+    /** 标准引擎数据（UsageStatsManager.queryEvents；engineNote 非空表示从 Shizuku 降级而来） */
+    private void resolveStandardSnapshot(PluginCall call, String engineNote) {
+        if (!checkUsagePermission()) {
+            // Shizuku 失效降级 + 「使用情况」也未授权：如实回报需要授权
             JSObject ret = new JSObject();
+            ret.put("ok", false);
+            ret.put("needPermission", true);
+            if (engineNote != null) ret.put("engineNote", engineNote);
+            call.resolve(ret);
+            return;
+        }
+        try {
+            long now = System.currentTimeMillis();
+            long startOfDay = startOfDay(now);
+            List<Ev> evs = queryEventsList(startOfDay - SESSION_LOOKBACK_MS, now);
+            JSObject ret = buildSnapshot(evs, startOfDay, now);
             ret.put("ok", true);
-            if (openApp != null && openStart > 0) {
-                // 正在前台：会话起点精确
-                JSObject cur = new JSObject();
-                cur.put("app", openApp);
-                cur.put("name", appLabel(pm, openApp));
-                cur.put("ongoingMs", Math.max(0, now - openStart));
-                cur.put("at", openStart);
-                ret.put("current", cur);
-            } else if (lastApp != null && lastAppStart > 0) {
-                // 已息屏/切走：报「最近使用」，at = 最后一次打开时间（网页按此老化）
-                JSObject cur = new JSObject();
-                cur.put("app", lastApp);
-                cur.put("name", appLabel(pm, lastApp));
-                cur.put("ongoingMs", 0);
-                cur.put("at", lastAppStart);
-                cur.put("closed", true);
-                ret.put("current", cur);
-            }
-            ret.put("todayApps", todayApps);
-            ret.put("todayTotalMs", totalMs);
-            ret.put("switchCount", switchCount);
-            ret.put("history", hist);
-            ret.put("recentApps", recentApps);
-            if (longestApp != null) {
-                JSObject lg = new JSObject();
-                lg.put("app", appLabel(pm, longestApp));
-                lg.put("ms", longestMs);
-                ret.put("longest", lg);
-            }
+            ret.put("engine", "standard");
+            if (engineNote != null) ret.put("engineNote", engineNote);
             call.resolve(ret);
         } catch (Exception e) {
             call.reject("查询使用情况失败：" + e.getMessage());
         }
     }
+
+    /** 今日 0 点（本地时区） */
+    private long startOfDay(long now) {
+        Calendar cal = Calendar.getInstance();
+        cal.setTimeInMillis(now);
+        cal.set(Calendar.HOUR_OF_DAY, 0);
+        cal.set(Calendar.MINUTE, 0);
+        cal.set(Calendar.SECOND, 0);
+        cal.set(Calendar.MILLISECOND, 0);
+        return cal.getTimeInMillis();
+    }
+
+    /** UsageStatsManager 事件流 → Ev 列表（保留 RESUMED/PAUSED/STOPPED） */
+    private List<Ev> queryEventsList(long from, long to) {
+        List<Ev> out = new ArrayList<>();
+        android.app.usage.UsageStatsManager usm =
+                (android.app.usage.UsageStatsManager) getContext().getSystemService(Context.USAGE_STATS_SERVICE);
+        android.app.usage.UsageEvents events = usm.queryEvents(from, to);
+        android.app.usage.UsageEvents.Event ev = new android.app.usage.UsageEvents.Event();
+        while (events.hasNextEvent()) {
+            events.getNextEvent(ev);
+            int type = ev.getEventType();
+            if (type != android.app.usage.UsageEvents.Event.ACTIVITY_RESUMED   // 1
+                    && type != android.app.usage.UsageEvents.Event.ACTIVITY_PAUSED    // 2
+                    && type != android.app.usage.UsageEvents.Event.ACTIVITY_STOPPED) { // 23
+                continue;
+            }
+            String pkg = ev.getPackageName();
+            if (pkg == null) continue;
+            out.add(new Ev(ev.getTimeStamp(), type == android.app.usage.UsageEvents.Event.ACTIVITY_RESUMED ? 1 : 2, pkg));
+        }
+        return out;
+    }
+
+    /**
+     * 双引擎共用的会话聚合：产出与 v1.1 同构的快照（todayApps/current/recentApps/…），
+     * 口径升级：回看裁剪 / Launcher 排除 / 同 App 内页面切换不重复计数。
+     */
+    private JSObject buildSnapshot(List<Ev> evs, long startOfDay, long now) {
+        final PackageManager pm = getContext().getPackageManager();
+        final String launcherPkg = defaultLauncherPkg();
+
+        final Map<String, Long> durationByApp = new HashMap<>();   // 前台总时长（今日裁剪后）
+        final Map<String, Integer> opensByApp = new HashMap<>();   // 打开次数（App 级）
+        final Map<String, Long> lastOpenByApp = new HashMap<>();   // 最近一次打开时间
+        final List<Long> historyTs = new ArrayList<>();
+        final List<String> historyPkgs = new ArrayList<>();
+
+        String openApp = null;        // 当前打开中的会话
+        long openStart = 0;
+        String lastApp = null;        // 最后一个非桌面 App（「最近用过」）
+        long lastAppStart = 0;
+        String lastClosedPkg = null;  // 上一个被关闭的会话（同 App 内切换判定）
+        long lastClosedTs = 0;
+
+        String longestApp = null;
+        long longestMs = 0;
+        int switchCount = 0;
+
+        for (Ev ev : evs) {
+            long ts = ev.ts;
+            String pkg = ev.pkg;
+            if (ts > now + 60_000L) continue; // 时钟跳变产生的未来事件忽略
+
+            if (ev.type == 1) { // RESUMED
+                // 结算当前打开中的会话（部分 ROM 不发 PAUSED，切走即结束）
+                if (openApp != null && ts > openStart) {
+                    long dur = settle(durationByApp, openApp, openStart, ts, startOfDay, now);
+                    if (dur > longestMs) { longestMs = dur; longestApp = openApp; }
+                    lastClosedPkg = openApp;
+                    lastClosedTs = ts;
+                }
+                if (pkg.equals(launcherPkg)) {
+                    // 桌面停留：只结束上一会话，自身不计入任何 App
+                    openApp = null;
+                    continue;
+                }
+                boolean inToday = ts >= startOfDay;
+                boolean intraAppSwitch = openApp == null
+                        && pkg.equals(lastClosedPkg)
+                        && ts - lastClosedTs <= INTRA_APP_GAP_MS;
+                openApp = pkg;
+                openStart = ts;
+                if (inToday) {
+                    if (!intraAppSwitch) {
+                        opensByApp.merge(pkg, 1, Integer::sum);
+                        switchCount++;
+                        lastOpenByApp.put(pkg, ts);
+                    }
+                    lastApp = pkg;
+                    lastAppStart = ts;
+                    historyTs.add(ts);
+                    historyPkgs.add(pkg);
+                }
+            } else { // PAUSED / STOPPED（关闭）
+                if (openApp != null && openApp.equals(pkg)) {
+                    long dur = settle(durationByApp, openApp, openStart, ts, startOfDay, now);
+                    if (dur > longestMs) { longestMs = dur; longestApp = openApp; }
+                    lastClosedPkg = openApp;
+                    lastClosedTs = ts;
+                    openApp = null; // 息屏/切走：停止计时
+                }
+            }
+        }
+
+        SimpleDateFormat hhmm = new SimpleDateFormat("HH:mm", Locale.getDefault());
+
+        // 分 App 时长列表（降序；带打开次数与最近打开时间，最多 30 个）
+        JSArray todayApps = new JSArray();
+        List<Map.Entry<String, Long>> sorted = new ArrayList<>(durationByApp.entrySet());
+        sorted.sort((a, b) -> Long.compare(b.getValue(), a.getValue()));
+        long totalMs = 0;
+        int appCount = 0;
+        for (Map.Entry<String, Long> e : sorted) {
+            totalMs += e.getValue();
+            if (appCount++ >= 30) continue;
+            JSObject o = new JSObject();
+            o.put("app", e.getKey());
+            o.put("name", appLabel(pm, e.getKey()));
+            o.put("ms", e.getValue());
+            o.put("opens", opensByApp.getOrDefault(e.getKey(), 0));
+            Long lastOpen = lastOpenByApp.get(e.getKey());
+            o.put("lastOpenTs", lastOpen == null ? 0 : lastOpen);
+            todayApps.put(o);
+        }
+
+        // 近 3 小时打开过的 App（最近在前）
+        JSArray recentApps = new JSArray();
+        final long RECENT_WINDOW = 3 * 60 * 60 * 1000L;
+        List<String> recentPkgs = new ArrayList<>();
+        for (Map.Entry<String, Long> e : lastOpenByApp.entrySet()) {
+            if (now - e.getValue() <= RECENT_WINDOW) recentPkgs.add(e.getKey());
+        }
+        recentPkgs.sort((a, b) -> Long.compare(lastOpenByApp.get(b), lastOpenByApp.get(a)));
+        int recentCount = 0;
+        for (String pkg : recentPkgs) {
+            if (recentCount++ >= 10) break;
+            JSObject o = new JSObject();
+            o.put("app", pkg);
+            o.put("name", appLabel(pm, pkg));
+            Long ts = lastOpenByApp.get(pkg);
+            o.put("hhmm", hhmm.format(new Date(ts == null ? now : ts)));
+            o.put("opens", opensByApp.getOrDefault(pkg, 0));
+            o.put("ms", durationByApp.getOrDefault(pkg, 0L));
+            recentApps.put(o);
+        }
+
+        // 近期切换时间线（最后 24 条，仅今日）
+        JSArray hist = new JSArray();
+        int from = Math.max(0, historyPkgs.size() - 24);
+        for (int i = from; i < historyPkgs.size(); i++) {
+            JSObject o = new JSObject();
+            o.put("hhmm", hhmm.format(new Date(historyTs.get(i))));
+            o.put("app", historyPkgs.get(i));
+            o.put("name", appLabel(pm, historyPkgs.get(i)));
+            hist.put(o);
+        }
+
+        JSObject ret = new JSObject();
+        if (openApp != null && openStart > 0) {
+            JSObject cur = new JSObject();
+            cur.put("app", openApp);
+            cur.put("name", appLabel(pm, openApp));
+            cur.put("ongoingMs", Math.max(0, now - openStart));
+            cur.put("at", openStart);
+            ret.put("current", cur);
+        } else if (lastApp != null && lastAppStart > 0) {
+            JSObject cur = new JSObject();
+            cur.put("app", lastApp);
+            cur.put("name", appLabel(pm, lastApp));
+            cur.put("ongoingMs", 0);
+            cur.put("at", lastAppStart);
+            cur.put("closed", true);
+            ret.put("current", cur);
+        }
+        ret.put("todayApps", todayApps);
+        ret.put("todayTotalMs", totalMs);
+        ret.put("switchCount", switchCount);
+        ret.put("history", hist);
+        ret.put("recentApps", recentApps);
+        if (longestApp != null) {
+            JSObject lg = new JSObject();
+            lg.put("app", appLabel(pm, longestApp));
+            lg.put("ms", longestMs);
+            ret.put("longest", lg);
+        }
+        return ret;
+    }
+
+    /** 会话结算：[openStart, closeTs] ∩ [startOfDay, now]，返回计入的时长 */
+    private long settle(Map<String, Long> durationByApp, String pkg, long openStart, long closeTs,
+                        long startOfDay, long now) {
+        long cs = Math.max(openStart, startOfDay);
+        long ce = Math.min(closeTs, now);
+        if (ce <= cs) return 0;
+        long dur = ce - cs;
+        durationByApp.merge(pkg, dur, Long::sum);
+        return dur;
+    }
+
+    /** 默认桌面 Launcher 包名（解析失败返回 null = 不排除） */
+    private String defaultLauncherPkg() {
+        try {
+            Intent home = new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME);
+            ResolveInfo ri = getContext().getPackageManager()
+                    .resolveActivity(home, PackageManager.MATCH_DEFAULT_ONLY);
+            if (ri != null && ri.activityInfo != null) return ri.activityInfo.packageName;
+        } catch (Throwable ignored) {
+        }
+        return null;
+    }
+
+    // ================= Shizuku 引擎（dumpsys usagestats） =================
+
+    /** binder 活性（getVersion 在未运行时抛异常） */
+    private boolean shizukuBinderAlive() {
+        try {
+            Shizuku.getVersion();
+            return true;
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    private boolean shizukuPermissionGranted() {
+        try {
+            return Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED;
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    @PluginMethod
+    public void shizukuStatus(PluginCall call) {
+        JSObject ret = new JSObject();
+        ret.put("supported", true);
+        boolean running = shizukuBinderAlive();
+        ret.put("running", running);
+        int version = 0;
+        int uid = -1;
+        if (running) {
+            try {
+                version = Shizuku.getVersion();
+                uid = Shizuku.getUid();
+            } catch (Throwable ignored) {
+            }
+        }
+        ret.put("version", version);
+        ret.put("uid", uid);
+        ret.put("granted", running && shizukuPermissionGranted());
+        call.resolve(ret);
+    }
+
+    /** 拉起 Shizuku 授权（结果经 OnRequestPermissionResultListener 回传，30s 兜底） */
+    @PluginMethod
+    public void requestShizukuPermission(PluginCall call) {
+        if (!shizukuBinderAlive()) {
+            JSObject ret = new JSObject();
+            ret.put("ok", false);
+            ret.put("reason", "not-running");
+            call.resolve(ret);
+            return;
+        }
+        if (shizukuPermissionGranted()) {
+            JSObject ret = new JSObject();
+            ret.put("ok", true);
+            ret.put("granted", true);
+            call.resolve(ret);
+            return;
+        }
+        if (shizukuPermListener != null) {
+            JSObject ret = new JSObject();
+            ret.put("ok", false);
+            ret.put("reason", "busy");
+            call.resolve(ret);
+            return;
+        }
+        final PluginCall[] holder = new PluginCall[]{call};
+        shizukuPermListener = (requestCode, resultCode) -> {
+            if (requestCode != REQ_SHIZUKU_PERMISSION) return;
+            try {
+                Shizuku.removeRequestPermissionResultListener(shizukuPermListener);
+            } catch (Throwable ignored) {
+            }
+            shizukuPermListener = null;
+            PluginCall c = holder[0];
+            if (c == null) return;
+            holder[0] = null;
+            JSObject ret = new JSObject();
+            boolean granted = resultCode == PackageManager.PERMISSION_GRANTED;
+            ret.put("ok", granted);
+            ret.put("granted", granted);
+            c.resolve(ret);
+        };
+        try {
+            Shizuku.addRequestPermissionResultListener(shizukuPermListener);
+            Shizuku.requestPermission(REQ_SHIZUKU_PERMISSION);
+        } catch (Throwable t) {
+            try {
+                Shizuku.removeRequestPermissionResultListener(shizukuPermListener);
+            } catch (Throwable ignored) {
+            }
+            shizukuPermListener = null;
+            JSObject ret = new JSObject();
+            ret.put("ok", false);
+            ret.put("reason", "error");
+            call.resolve(ret);
+            return;
+        }
+        // 授权对话框挂着不动（用户没点）时 30s 兜底释放，防桥挂起
+        final Shizuku.OnRequestPermissionResultListener listenerRef = shizukuPermListener;
+        new Thread(() -> {
+            try {
+                Thread.sleep(30_000L);
+            } catch (InterruptedException ignored) {
+                return;
+            }
+            if (shizukuPermListener != null && shizukuPermListener == listenerRef) {
+                try {
+                    Shizuku.removeRequestPermissionResultListener(listenerRef);
+                } catch (Throwable ignored) {
+                }
+                shizukuPermListener = null;
+                PluginCall c = holder[0];
+                if (c == null) return;
+                holder[0] = null;
+                JSObject ret = new JSObject();
+                ret.put("ok", false);
+                ret.put("reason", "timeout");
+                c.resolve(ret);
+            }
+        }, "shizuku-perm-timeout").start();
+    }
+
+    private Shizuku.OnRequestPermissionResultListener shizukuPermListener;
+
+    // ---------------- Shizuku UserService（shell 权限命令执行） ----------------
+
+    private Shizuku.UserServiceArgs shellServiceArgs;
+    private ServiceConnection shellServiceConn;
+    private IPerceptionShellService shellSvc;
+
+    /** 取（或绑定）跑在 Shizuku 进程里的 shell 服务（6s 绑定超时；失败抛异常） */
+    private IPerceptionShellService requireShellService(long waitMs) throws Exception {
+        if (shellSvc != null) return shellSvc;
+        if (!shizukuBinderAlive()) throw new IllegalStateException("shizuku-not-running");
+        if (!shizukuPermissionGranted()) throw new IllegalStateException("shizuku-no-permission");
+        if (shellServiceArgs == null) {
+            shellServiceArgs = new Shizuku.UserServiceArgs(
+                            new ComponentName(getContext(), PerceptionShellService.class))
+                    .processNameSuffix("perception_shell")
+                    .daemon(false)
+                    .version(1);
+        }
+        final CountDownLatch latch = new CountDownLatch(1);
+        final AtomicReference<IPerceptionShellService> ref = new AtomicReference<>(null);
+        ServiceConnection conn = new ServiceConnection() {
+            @Override
+            public void onServiceConnected(ComponentName name, IBinder service) {
+                ref.set(IPerceptionShellService.Stub.asInterface(service));
+                latch.countDown();
+            }
+
+            @Override
+            public void onServiceDisconnected(ComponentName name) {
+                shellSvc = null;
+                shellServiceConn = null;
+            }
+        };
+        try {
+            Shizuku.bindUserService(shellServiceArgs, conn);
+        } catch (Throwable t) {
+            throw new IllegalStateException("bind-failed");
+        }
+        shellServiceConn = conn;
+        if (!latch.await(waitMs, TimeUnit.MILLISECONDS)) {
+            try {
+                Shizuku.unbindUserService(shellServiceArgs, conn, true);
+            } catch (Throwable ignored) {
+            }
+            shellServiceConn = null;
+            throw new IllegalStateException("bind-timeout");
+        }
+        shellSvc = ref.get();
+        if (shellSvc == null) throw new IllegalStateException("bind-null");
+        return shellSvc;
+    }
+
+    /**
+     * 经 Shizuku（shell 权限）读 dumpsys usagestats -c 的事件账本：
+     * 服务端已按 mustContain 与时间窗预过滤（控制 Binder 回传体积），
+     * 行形如「time=1705312830000 type=ACTIVITY_RESUMED package=com.x class=… flags=0x0」；
+     * 事件类型兼容字符串（ACTIVITY_RESUMED/MOVE_TO_FOREGROUND）与数字（1/2/23）两种形态；
+     * 多 interval 段可能重复倾倒同一事件 → 按 (ts|type|pkg) 去重；SHUTDOWN(26) 等一律忽略。
+     */
+    private List<Ev> shizukuDumpEvents(long fromTs, long toTs) throws Exception {
+        IPerceptionShellService svc = requireShellService(6000);
+        String out = svc.execFiltered(
+                new String[]{"dumpsys", "usagestats", "-c"},
+                new String[]{"time=", "type="},
+                fromTs,
+                DUMP_EVENT_LIMIT,
+                SHIZUKU_DUMP_TIMEOUT_MS);
+        List<Ev> outList = new ArrayList<>();
+        if (out == null || out.isEmpty()) return outList;
+        Set<String> seen = new HashSet<>();
+        for (String line : out.split("\n")) {
+            Ev ev = parseDumpEventLine(line);
+            if (ev == null) continue;
+            if (ev.ts < fromTs || ev.ts > toTs + 60_000L) continue;
+            String key = ev.ts + "|" + ev.type + "|" + ev.pkg;
+            if (!seen.add(key)) continue;
+            outList.add(ev);
+        }
+        outList.sort((a, b) -> Long.compare(a.ts, b.ts));
+        return outList;
+    }
+
+    /** 解析单行 dumpsys 事件（非事件行/无关类型返回 null） */
+    private Ev parseDumpEventLine(String line) {
+        if (line == null || line.length() < 10) return null;
+        String time = null, type = null, pkg = null;
+        for (String tok : line.trim().split("\\s+")) {
+            int eq = tok.indexOf('=');
+            if (eq <= 0) continue;
+            String k = tok.substring(0, eq);
+            String v = tok.substring(eq + 1);
+            if (k.length() == 4 && k.equals("time")) {
+                time = v;
+            } else if (k.equals("type")) {
+                type = v;
+            } else if (k.equals("package")) {
+                pkg = v;
+            }
+        }
+        if (time == null || type == null || pkg == null || pkg.isEmpty()) return null;
+        int t;
+        switch (type) {
+            case "ACTIVITY_RESUMED":
+            case "MOVE_TO_FOREGROUND":
+            case "1":
+                t = 1;
+                break;
+            case "ACTIVITY_PAUSED":
+            case "MOVE_TO_BACKGROUND":
+            case "2":
+            case "ACTIVITY_STOPPED":
+            case "23":
+                t = 2;
+                break;
+            default:
+                return null; // SHUTDOWN(26)/CONFIGURATION_CHANGE/NOTIFICATION_SEEN 等
+        }
+        long ts;
+        try {
+            ts = Long.parseLong(time);
+        } catch (NumberFormatException e) {
+            return null;
+        }
+        return new Ev(ts, t, pkg);
+    }
+
+    // ================= 权限与工具 =================
 
     private boolean checkUsagePermission() {
         try {
