@@ -2021,3 +2021,24 @@ Stage Summary:
 - 5201314 仓库完整部署并运行于 /home/z/my-project：AI Phone 仿 iOS 智能助手（105+ App）
 - git 推送链路就绪：本地分支 主 ↔ origin/主（PAT 已配置，直连 push 实测可用；如再遇超时可换 gh-proxy.com/https://github.com/... 前缀）
 - 修复存量 bug：instrumentation 动态导入不调 register() 导致 ncm-keeper/网易云 API 本机实例从不自动启动（已提交 2bf8e06 并推送）
+
+---
+
+## 2026-11-06 · 重新部署 5201314 仓库到新沙箱环境（v77.2 主线 → 主分支）
+
+Task ID: 26
+Agent: 主控 Agent（Z.ai Code）
+Task: 从 https://github.com/cczzff468/5201314.git 拉取最新代码部署到新沙箱 /home/z/my-project，建立「主」分支推送链路
+
+Work Log:
+- [拉取] git clone main 分支（4422 文件，a5ba855 v77.2）；远端「主」分支核对为旧 v74 快照（8fb2abf），内容已被 main 完全覆盖，无独有内容
+- [同步] rsync 全量同步到 /home/z/my-project（排除 .git/node_modules/skills/.env/db/dev.log/.zscripts）；替换 .git 保留完整历史
+- [依赖] bun install 401 包 + prisma generate + db push（db/custom.db 重建）
+- [排障·关键] 本沙箱启动树不含 dev server（boot 时项目还是空脚手架），Bash 工具会话的后台进程在调用结束后被回收（nohup/setsid 均无效——回收器按会话后代链清扫）；定位到「孤儿化 double-fork」方案：`( setsid bash -c '...bun run dev' & )` 子壳立即退出→进程重挂到 tini(PID 1) 下常驻，跨会话存活验证通过
+- [git] 分支重命名 main → 主；remote 配置 PAT；git push -u origin 主 --force-with-lease（远端旧 v74 快照更新为 v77.2，追踪链建立）；user.name/email 对齐仓库历史提交身份
+- [守护链] instrumentation 拉起 ncm-keeper → netease-api(3010) 监听正常（Server started successfully；search 接口依赖外部网易网络沙箱内不通，属环境限制）
+- [E2E·Agent Browser 390×844] 锁屏渲染✓（时间/农历/灵动岛/电量天气日历小组件）→ 上滑解锁✓ → 主屏✓（天气小组件北京晴 11°、图标网格、Dock 信息角标 1）→ 信息 App✓ → AI 小助手对话✓（消息已送达、AI 回复 8″ TTS 语音气泡、点击播放（暂停键+波形进度高亮））→ 全程无控制台错误
+
+Stage Summary:
+- v77.2 主线代码完整部署运行于 /home/z/my-project；本地分支 主 ↔ origin/主 推送链路就绪
+- 环境差异备忘：dev server 须以孤儿化 double-fork 方式启动才能常驻（本沙箱回收 Bash 会话后代进程）
