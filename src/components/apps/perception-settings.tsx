@@ -104,19 +104,36 @@ function ToggleRow({
 /** 设置行左侧小图标 */
 const I = { size: 19, strokeWidth: 1.9 } as const;
 
-/** 原生壳内的 APK 下载链接：安卓 WebView 默认不处理 <a download>（无下载监听，
- *  旧版 APK 点 apk 链接毫无反应），改走 intent:// 协议 —— Capacitor Bridge 会把
- *  intent: 前缀的 URL 转成系统 Intent → 唤起外部浏览器（Chrome 等）下载 APK。
- *  intent:// 语法：intent://<host+path>#Intent;scheme=<scheme>;action=VIEW;end */
-function buildApkIntentHref(): string | null {
-  if (typeof window === 'undefined') return null;
+/** 旧版壳内的 APK 下载（用户实测反馈：<a href="intent://..."> 会让 WebView 整屏变黑——
+ *  壳的 allowNavigation:'*' 把 intent: 也放进 WebView 自己加载，渲染失败即黑屏，
+ *  页面 JS 上下文被销毁只能重启 APP）。安全做法是按钮点击双保险：
+ *  ① 隐形 iframe 触发 intent:// —— iframe 加载失败无害于主页面；若壳放行非主帧 intent 则拉起系统浏览器
+ *  ② 直链写入剪贴板兜底 —— 用户去任意浏览器粘贴打开下载 */
+function launchApkDownload(markCopied: (v: boolean) => void): void {
+  if (typeof window === 'undefined') return;
   const proto = window.location.protocol.replace(':', '');
-  if (proto !== 'https' && proto !== 'http') return null;
-  return `intent://${window.location.host}/AI-Phone.apk#Intent;scheme=${proto};action=android.intent.action.VIEW;end`;
+  if (proto === 'https' || proto === 'http') {
+    try {
+      const direct = new URL('/AI-Phone.apk', window.location.href).href;
+      const intentUrl =
+        `intent://${window.location.host}/AI-Phone.apk#Intent;scheme=${proto};` +
+        `action=android.intent.action.VIEW;S.browser_fallback_url=${encodeURIComponent(direct)};end`;
+      const f = document.createElement('iframe');
+      f.setAttribute('aria-hidden', 'true');
+      f.title = 'apk-download-intent';
+      f.style.cssText = 'position:fixed;left:-9999px;top:0;width:1px;height:1px;border:0;opacity:0;';
+      f.src = intentUrl;
+      document.body.appendChild(f);
+      window.setTimeout(() => f.remove(), 4000);
+    } catch {
+      /* iframe 拉不起不阻断兜底 */
+    }
+  }
+  void copyApkLink(markCopied, 10000);
 }
 
-/** 复制 APK 直链（intent:// 被个别壳拦截时的备用路径：粘贴到任意浏览器打开） */
-async function copyApkLink(markCopied: (v: boolean) => void): Promise<void> {
+/** 复制 APK 直链（主下载流程剪贴板兜底 + 「备用：复制链接」按钮共用；keepMs = ✓ 提示保留时长） */
+async function copyApkLink(markCopied: (v: boolean) => void, keepMs = 2500): Promise<void> {
   if (typeof window === 'undefined') return;
   const url = new URL('/AI-Phone.apk', window.location.href).href;
   try {
@@ -137,7 +154,7 @@ async function copyApkLink(markCopied: (v: boolean) => void): Promise<void> {
     }
   }
   markCopied(true);
-  setTimeout(() => markCopied(false), 2500);
+  setTimeout(() => markCopied(false), keepMs);
 }
 
 export function PerceptionSettingsPage({
@@ -719,10 +736,7 @@ export function PerceptionSettingsPage({
                     音乐感知（歌名/歌手）、精确使用时长与双引擎（Cap-go 标准 / Shizuku）需要新版 APP。会覆盖安装，数据都在服务器/本地存储里不会丢。
                   </p>
                   {(() => {
-                    // 安卓 WebView 默认不处理 <a download>（旧版 APK 没有下载监听，点 apk 链接毫无反应）。
-                    // 原生壳内改走 intent:// 协议：Capacitor Bridge 会把 intent: 转成系统 Intent
-                    // → 唤起浏览器（Chrome 等）下载 APK；普通浏览器环境仍用普通直链。
-                    const intentHref = nativeMode ? buildApkIntentHref() : null;
+                    // 普通浏览器环境：直链 <a download> 原生可用。
                     if (!nativeMode) {
                       return (
                         <a
@@ -735,18 +749,24 @@ export function PerceptionSettingsPage({
                         </a>
                       );
                     }
+                    // 旧版壳内：不用 <a href>（直链无下载监听点击无反应；intent: 直链会让
+                    // WebView 整屏变黑）。按钮点击 = 自动复制直链 + 隐形 iframe 尝试拉起浏览器，
+                    // 主页面永不跳走。
                     return (
                       <div className="space-y-2">
-                        <a
-                          href={intentHref ?? '/AI-Phone.apk'}
+                        <button
+                          type="button"
+                          onClick={() => launchApkDownload(setApkLinkCopied)}
+                          data-testid={`${testPrefix}-perception-apk-download`}
                           className="block w-full rounded-full py-2 text-center text-[13.5px] font-medium text-white active:opacity-70"
                           style={{ backgroundColor: accent }}
                         >
                           下载新版 APP（v1.2）
-                        </a>
+                        </button>
                         <p className="text-[12px] leading-snug text-black/40 dark:text-white/40">
-                          点按钮会跳到手机浏览器（Chrome 等）开始下载；下载完从顶部下拉通知栏点开安装。
-                          若浏览器提示「不允许安装未知应用」，按提示允许该浏览器安装即可。
+                          {apkLinkCopied
+                            ? '✓ 下载链接已复制。若手机自动跳出了浏览器：直接等下载完安装；若没跳：打开手机上任意浏览器，点地址栏粘贴打开即可下载。'
+                            : '点按钮自动复制下载链接并尝试拉起手机浏览器（页面不会跳走）；下载完从顶部下拉通知栏点开安装，提示「未知应用」按系统引导允许。'}
                         </p>
                         <button
                           type="button"
