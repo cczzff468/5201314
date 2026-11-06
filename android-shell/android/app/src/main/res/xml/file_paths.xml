@@ -2,4 +2,7 @@
 <paths xmlns:android="http://schemas.android.com/apk/res/android">
     <external-path name="my_images" path="." />
     <cache-path name="my_cache_images" path="." />
+    <!-- APK 升级自下载：公共 Download 目录（MainActivity DownloadListener 完成后经
+         FileProvider content:// URI 调起包安装器，避免 file:// 在 API 24+ 崩溃） -->
+    <external-path name="apk_downloads" path="Download/" />
 </paths>

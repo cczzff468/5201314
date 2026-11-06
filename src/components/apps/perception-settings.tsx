@@ -104,6 +104,42 @@ function ToggleRow({
 /** 设置行左侧小图标 */
 const I = { size: 19, strokeWidth: 1.9 } as const;
 
+/** 原生壳内的 APK 下载链接：安卓 WebView 默认不处理 <a download>（无下载监听，
+ *  旧版 APK 点 apk 链接毫无反应），改走 intent:// 协议 —— Capacitor Bridge 会把
+ *  intent: 前缀的 URL 转成系统 Intent → 唤起外部浏览器（Chrome 等）下载 APK。
+ *  intent:// 语法：intent://<host+path>#Intent;scheme=<scheme>;action=VIEW;end */
+function buildApkIntentHref(): string | null {
+  if (typeof window === 'undefined') return null;
+  const proto = window.location.protocol.replace(':', '');
+  if (proto !== 'https' && proto !== 'http') return null;
+  return `intent://${window.location.host}/AI-Phone.apk#Intent;scheme=${proto};action=android.intent.action.VIEW;end`;
+}
+
+/** 复制 APK 直链（intent:// 被个别壳拦截时的备用路径：粘贴到任意浏览器打开） */
+async function copyApkLink(markCopied: (v: boolean) => void): Promise<void> {
+  if (typeof window === 'undefined') return;
+  const url = new URL('/AI-Phone.apk', window.location.href).href;
+  try {
+    await navigator.clipboard.writeText(url);
+  } catch {
+    // WebView 剪贴板兜底：execCommand 旧接口
+    try {
+      const ta = document.createElement('textarea');
+      ta.value = url;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      ta.remove();
+    } catch {
+      return;
+    }
+  }
+  markCopied(true);
+  setTimeout(() => markCopied(false), 2500);
+}
+
 export function PerceptionSettingsPage({
   variant,
   sessionKey,
@@ -169,6 +205,8 @@ export function PerceptionSettingsPage({
   // 自检结果（逐步打印；null = 未跑过）
   const [selfTesting, setSelfTesting] = useState(false);
   const [selfTestSteps, setSelfTestSteps] = useState<{ ok: boolean | null; text: string }[] | null>(null);
+  // 旧版 APK 内下载引导：复制链接成功提示
+  const [apkLinkCopied, setApkLinkCopied] = useState(false);
   // 授权状态记录（检测「刚授权」时刻：强制刷数据击穿授权前留下的 45s 空缓存）
   const grantSeenRef = useRef<boolean | null>(null);
   // 原生模式挂载即查 UsageStats/媒体权限；从系统授权页回来时刷新（页面 onShow 时 Cap 桥不会自动回调，用轻轮询）
@@ -678,16 +716,49 @@ export function PerceptionSettingsPage({
                 <div className="space-y-1.5">
                   <p className="text-[13px] font-medium text-[#E4554F]">当前 APP 是旧版本（不能读歌名/用双引擎）</p>
                   <p className="text-[12px] leading-snug text-black/40 dark:text-white/40">
-                    音乐感知（歌名/歌手）、精确使用时长与双引擎（Cap-go 标准 / Shizuku）需要新版 APP。点下方重新下载安装（会覆盖安装，数据都在服务器/本地存储里不会丢）。
+                    音乐感知（歌名/歌手）、精确使用时长与双引擎（Cap-go 标准 / Shizuku）需要新版 APP。会覆盖安装，数据都在服务器/本地存储里不会丢。
                   </p>
-                  <a
-                    href="/AI-Phone.apk"
-                    download
-                    className="block w-full rounded-full py-2 text-center text-[13.5px] font-medium text-white active:opacity-70"
-                    style={{ backgroundColor: accent }}
-                  >
-                    下载新版 APP（v1.2）
-                  </a>
+                  {(() => {
+                    // 安卓 WebView 默认不处理 <a download>（旧版 APK 没有下载监听，点 apk 链接毫无反应）。
+                    // 原生壳内改走 intent:// 协议：Capacitor Bridge 会把 intent: 转成系统 Intent
+                    // → 唤起浏览器（Chrome 等）下载 APK；普通浏览器环境仍用普通直链。
+                    const intentHref = nativeMode ? buildApkIntentHref() : null;
+                    if (!nativeMode) {
+                      return (
+                        <a
+                          href="/AI-Phone.apk"
+                          download
+                          className="block w-full rounded-full py-2 text-center text-[13.5px] font-medium text-white active:opacity-70"
+                          style={{ backgroundColor: accent }}
+                        >
+                          下载新版 APP（v1.2）
+                        </a>
+                      );
+                    }
+                    return (
+                      <div className="space-y-2">
+                        <a
+                          href={intentHref ?? '/AI-Phone.apk'}
+                          className="block w-full rounded-full py-2 text-center text-[13.5px] font-medium text-white active:opacity-70"
+                          style={{ backgroundColor: accent }}
+                        >
+                          下载新版 APP（v1.2）
+                        </a>
+                        <p className="text-[12px] leading-snug text-black/40 dark:text-white/40">
+                          点按钮会跳到手机浏览器（Chrome 等）开始下载；下载完从顶部下拉通知栏点开安装。
+                          若浏览器提示「不允许安装未知应用」，按提示允许该浏览器安装即可。
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() => void copyApkLink(setApkLinkCopied)}
+                          data-testid={`${testPrefix}-perception-apk-copy`}
+                          className="block w-full rounded-full border border-black/10 py-2 text-center text-[13px] font-medium text-black/55 active:opacity-70 dark:border-white/15 dark:text-white/55"
+                        >
+                          {apkLinkCopied ? '✓ 已复制，去浏览器粘贴打开' : '备用：复制下载链接'}
+                        </button>
+                      </div>
+                    );
+                  })()}
                 </div>
               ) : (
                 <>
