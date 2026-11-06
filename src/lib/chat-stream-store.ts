@@ -118,6 +118,10 @@ export interface ChatStreamState {
 export interface ChatPayloadMessage {
   role: 'system' | 'user' | 'assistant';
   content: string;
+  /** v75：源消息 ID（真实落库消息携带；系统事件注入的合成 user 消息无 id）。
+ *  noteEngagement 靠它区分「用户真实新回复」与「旧消息重放/系统事件伪装」——
+ *  焦虑引擎的 lastUserAt 绝不能被合成消息或重放历史污染（否则 AI 幻觉「你终于回我了」） */
+  id?: string;
 }
 
 /** 本轮识图输入：用户随消息发送的图片（data URL）+ 随图文字（可为空） */
@@ -210,6 +214,13 @@ function blockSessionOf(sessionKey: string): { app: BlockApp; contactId: string 
 }
 
 /**
+ * 每会话已打点的最后一条真实用户消息 ID（v75）：同一 ID 只打点一次——
+ * 系统事件回合/重新生成等重放历史的路径，末尾 user 消息是旧消息，不得再刷新
+ * 「用户刚回复」状态（防焦虑引擎 lastUserAt 被虚假刷新、追发倒计时被误取消）。
+ */
+const notedUserMsgIds = new Map<string, string>();
+
+/**
  * 第十六轮：用户发言打点（每轮聊天一次）——
  * - 作息记忆：noteActive()（全局活跃直方图，群聊/助手也计——机主在用手机）；
  * - AI 情绪：仅 1:1 会话（blockSessionOf 解析出联系人）→ noteUserMsgMood(cid, 本轮最后一条用户消息文本)；
@@ -217,6 +228,14 @@ function blockSessionOf(sessionKey: string): { app: BlockApp; contactId: string 
  *   注入【对方此刻的状态】块让 AI 自动切换安抚/共庆/哄模式（与 AI 自己的情绪互补）；
  * - v51 焦虑值：noteUserReply(cid, app, 文本)——用户回复即安抚（-45 再叠加上下文增减），
  *   并重置未回复计时（焦虑消息按最近聊天所在 App 投递）。
+ *
+ * v75 修复「赛博幻觉」（严重错误判定：用户没回任何消息，AI 却说「你终于回我了」）：
+ * - 只认**带 id 且从未打点过**的真实落库用户消息：
+ *   ① 系统触发回合（拍一拍/排队补跑/重新生成等）把 sysEvent 以 role:'user' 注入上下文，
+ *      旧实现会把它（或重放的旧历史消息）当成「用户刚回复」→ 焦虑 lastUserAt 被虚假刷新、
+ *      追发倒计时被误取消——现在无 id 的合成消息直接跳过，同 id 的旧消息不重复打点；
+ *   ② AI 自己的消息（role peer/assistant）永远不会被当成用户输入；
+ *   ③ 流式中排队的真实新回复（新 id）照常打点，行为不变。
  */
 function noteEngagement(sessionKey: string, messages: ChatPayloadMessage[]): void {
   try {
@@ -226,6 +245,11 @@ function noteEngagement(sessionKey: string, messages: ChatPayloadMessage[]): voi
     for (let i = messages.length - 1; i >= 0; i--) {
       const msg = messages[i];
       if (msg?.role === 'user' && typeof msg.content === 'string' && msg.content.trim()) {
+        // v75：无 id = 系统事件等合成注入（不是用户真实发送的话）→ 跳过继续向前找真实消息
+        if (typeof msg.id !== 'string' || !msg.id) continue;
+        // v75：同 id 已打点过（旧消息重放：系统触发回合/重新生成等）→ 绝不再次当作「刚回复」
+        if (notedUserMsgIds.get(sessionKey) === msg.id) return;
+        notedUserMsgIds.set(sessionKey, msg.id);
         noteUserMsgMood(bs.contactId, msg.content);
         noteUserEmotion(bs.contactId, msg.content);
         noteUserReply(bs.contactId, bs.app, msg.content);

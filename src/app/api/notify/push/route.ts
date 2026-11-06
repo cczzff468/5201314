@@ -21,6 +21,9 @@ interface PushPayload {
   tag?: unknown;
   icon?: unknown;
   badge?: unknown;
+  /** v75：点击跳转目标（App + 会话 id；透传到客户端，随 notification.data 下发，
+ *  sw.js notificationclick 读到后 postMessage 回页面导航总线跳到对应聊天） */
+  target?: unknown;
 }
 
 export async function POST(req: Request): Promise<Response> {
@@ -35,6 +38,22 @@ export async function POST(req: Request): Promise<Response> {
     // icon 是复合头像 dataURL（1~3KB）不截断；badge 是 App 图标路径
     icon: typeof p.icon === 'string' ? p.icon : undefined,
     badge: typeof p.badge === 'string' ? p.badge : undefined,
+    // v75：target 结构校验后透传（只收 App/会话 id 标量，防任意注入）
+    target:
+      p.target && typeof p.target === 'object'
+        ? {
+            app: typeof (p.target as { app?: unknown }).app === 'string' ? (p.target as { app: string }).app : undefined,
+            contactId:
+              typeof (p.target as { contactId?: unknown }).contactId === 'string'
+                ? (p.target as { contactId: string }).contactId.slice(0, 120)
+                : undefined,
+            groupId:
+              typeof (p.target as { groupId?: unknown }).groupId === 'string'
+                ? (p.target as { groupId: string }).groupId.slice(0, 120)
+                : undefined,
+            pay: (p.target as { pay?: unknown }).pay === true ? true : undefined,
+          }
+        : undefined,
   };
   const delivered = broadcastSseEvent(payload);
   return Response.json({ ok: true, delivered, online: sseClientCount() });

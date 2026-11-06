@@ -335,29 +335,45 @@ function fireBandGuide(level: number): string {
 /**
  * 焦虑主动消息生成的注入块（kind='anxiety' 触发时；proactive-msg 引擎调用）：
  * 【你此刻的焦虑值】+ 未回复时长 + 当前档位的表现指引 + 连发节奏说明。
+ *
+ * v75 修复「赛博幻觉」：明确告知【用户目前仍未回复】——最近聊天里你自己发出的那些消息
+ * 全部是你单方面发出去的，对方一条都没有回。此前缺少这个事实声明，模型会把自己上一轮
+ * 追发的消息当成「对话已有来回」，说出「你终于回我了」「看到你的消息」这类不存在的事。
+ * 硬性禁令拼接在预设文本之外（用户自定义预设也始终生效）。
  */
 export function buildAnxietyFireBlock(cid: string): string {
   const s = anxietyOf(cid);
   if (s.level <= 0) return '';
   const un = anxietyUnansweredLabel(s);
   // v63 全局预设管理器：焦虑块接入注册表（anxiety-fire-block；原文零破坏）
-  return (
+  const base =
     promptTextOf(
       'anxiety-fire-block',
       { level: s.level, label: anxietyLabel(s.level), waited: s.lastUserAt > 0 ? `你已经等了 TA 很久（${un}）。` : '', guide: fireBandGuide(s.level) },
       `【你此刻的焦虑值】${s.level}/100（${anxietyLabel(s.level)}）。${s.lastUserAt > 0 ? `你已经等了 TA 很久（${un}）。` : ''}${fireBandGuide(s.level)}这一轮消息就由这份焦虑驱动——像真人控制不住那样连着发几条消息（每条可短可长——短到几个字，长到一大段心里话一口气说完都可以，单条长度没有任何数字限制）让它真实地透出来，但不要报数字、不要说「焦虑值」这类词。`,
-    ) ?? ''
-  );
+    ) ?? '';
+  if (!base) return '';
+  // v75 硬性事实声明 + 禁令（恒拼接在预设文本之后：即使用户自定义过预设也不会丢失）
+  return `${base}\n【重要事实】用户目前仍未回复你。上面「最近聊天」里你发出的那些消息全部是你单方面发出去的，对方一条都没有回。注意：如果你正在连续发送关切的消息，请不要说「你回我了」「看到你的消息」「你终于回我了」这类话——用户还没有给你发任何新消息。`;
 }
 
 /**
  * 聊天情绪带入块（并入 buildDynamicStateBlocks：三端聊天 / 非焦虑类主动消息 /
  * 情侣空间行为自动带上）：用户回来聊天时，AI 的回复自然带着焦虑时的情绪。
  * 低于 30 返回空串省 token。
+ *
+ * v75 修复「赛博幻觉」：新增 userPresent 入参（默认 true，三端聊天路径不变）——
+ * 主动消息 / 焦虑追发路径必须传 false：用户根本不在场，绝不能注入「TA 现在回来了」
+ * 这种描述（此前主动消息也带这个块，模型看到「回来了」+ 自己上一轮的追发消息，
+ * 就幻觉出「你终于回我了！！！刚才好担心」——用户其实一个字都没回）。
+ * userPresent=false 且用户自上轮追发后仍未回复时返回空串，情绪由心情块自然携带。
  */
-export function buildAnxietyChatBlock(cid: string): string {
+export function buildAnxietyChatBlock(cid: string, opts?: { userPresent?: boolean }): string {
   const s = anxietyOf(cid);
   if (s.level < CHAT_BLOCK_MIN) return '';
+  // 用户不在场（主动消息/焦虑追发）且自上轮追发后没有新回复：绝不声称「TA 回来了」
+  const userPresent = opts?.userPresent !== false;
+  if (!userPresent && s.lastFireAt > s.lastUserAt) return '';
   const un = anxietyUnansweredLabel(s);
   // v63：anxiety-chat-block（原文零破坏）
   return (

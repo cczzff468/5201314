@@ -828,7 +828,9 @@ async function generateProactiveTexts(app: ProactiveApp, contact: ContactRecord,
   // 跨 App 近况（与三端聊天同口径）：其他 App 最近聊过什么/用户在听什么——主动消息能接上别处的话题
   const crossAppBlock = await buildCrossAppBlock(contact.id, app, userName);
 
-  const system = [persona, memoryBlock, crossAppBlock, momentsBlock, timeBlock, buildDynamicStateBlocks(contact.id), trigger.kind === 'anxiety' ? buildAnxietyFireBlock(contact.id) : ''].filter(Boolean).join('\n\n');
+  // v75 修复「赛博幻觉」：主动消息路径 userPresent:false——用户不在场，焦虑情绪带入块
+  // 不再注入「TA 现在回来了」描述（防模型把自己上一轮追发的消息当成用户回复）
+  const system = [persona, memoryBlock, crossAppBlock, momentsBlock, timeBlock, buildDynamicStateBlocks(contact.id, { userPresent: false }), trigger.kind === 'anxiety' ? buildAnxietyFireBlock(contact.id) : ''].filter(Boolean).join('\n\n');
 
   // user prompt：情境 + 最近对话 + 防重复
   const recent = convoLines(norm, 12, contact.name, userName);
@@ -844,7 +846,7 @@ async function generateProactiveTexts(app: ProactiveApp, contact: ContactRecord,
   else if (last.lastSentText) parts.push(`【你最近一次主动发的消息（严禁重复类似内容）】\n${last.lastSentText}`);
   parts.push(
     trigger.kind === 'anxiety'
-      ? '【现在】\n请直接输出你要发给对方的消息：多条（想发几条发几条），每条一行（一行一条，无空行、无编号、无前后缀）；每条长短随意——可以是一小句，也可以是一大段。'
+      ? '【现在】\n用户至今一条都没有回你（上面最近聊天里你发的消息全部是你单方面发出去的，用户没有回复其中任何一条）。请直接输出你要发给对方的消息：多条（想发几条发几条），每条一行（一行一条，无空行、无编号、无前后缀）；每条长短随意——可以是一小句，也可以是一大段。严禁说「你回我了」「看到你的消息」「你终于回我了」这类话——用户还没给你发任何新消息。'
       : '【现在】\n请直接输出你要发给对方的消息正文（只有正文，不要任何前后缀）。可以是一两句、一大段，或者拆成多条（每条一行）——按你此刻想说的自然决定。',
   );
   const user = parts.join('\n\n');

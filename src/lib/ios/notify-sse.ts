@@ -17,7 +17,7 @@
  * 兜底（发送侧）：POST 失败（网络/路由异常）由 island-notify 直接调 showSystemNotification。
  */
 
-import { showSystemNotification } from './system-notify';
+import { showSystemNotification, isPageBackground } from './system-notify';
 
 /** 与 island-notify.SYS_NOTIFY_KEY 同键（避免循环 import，就地重读 localStorage） */
 const SYS_NOTIFY_KEY = 'ios-sys-notify-enabled';
@@ -31,6 +31,9 @@ export interface SseNotifyPayload {
   icon?: string;
   /** App 图标路径（badge） */
   badge?: string;
+  /** v75：点击跳转目标（App + 会话 id；island-notify 透传）——收到后写入 notification.data，
+ *  sw.js notificationclick 读到后 postMessage 回页面导航总线，实现「点击系统通知跳回对应聊天界面」 */
+  target?: { app?: string; contactId?: string; groupId?: string; pay?: boolean };
 }
 
 function sysNotifyEnabled(): boolean {
@@ -74,14 +77,19 @@ export function ensureNotifySse(): void {
         if (!p || typeof p.title !== 'string' || !p.title.trim()) return;
         sseDebug.received += 1;
         sseDebug.last = p;
-        // 接收侧门禁：未授权 / 系统通知总闸关 → 只收不发
+        // 接收侧门禁：未授权 / 系统通知总闸关 / 前台（用户正看着本页）→ 只收不弹。
+        // v75 前台闸门：多标签/回环场景下，可见的那个页面绝不弹系统通知（防刷屏）——
+        // 只有「隐藏的后台标签页」才真正 showNotification（后台化标签的定时器被节流，
+        // SSE 事件仍即时唤醒它弹通知，这正是本通道存在的意义）
         if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
         if (!sysNotifyEnabled()) return;
+        if (!isPageBackground()) return;
         void showSystemNotification(p.title, {
           body: p.body,
           tag: p.tag,
           icon: p.icon,
           badge: p.badge,
+          data: { target: p.target },
         })
           .then((ch) => {
             if (ch) sseDebug.shown += 1;

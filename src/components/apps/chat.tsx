@@ -1837,6 +1837,9 @@ function ChatView({
       .slice(-20)
       .map((m) => ({
         role: m.role,
+        // v75：携带源消息 ID——noteEngagement 区分「用户真实新回复」与「旧消息重放/系统事件合成注入」
+        //（防焦虑 lastUserAt 被污染 → AI 幻觉「你终于回我了」；与微信/QQ 端同口径）
+        id: m.id,
         // 深度思考：AI 自己的历史回复带思考过程时还原 [思考]…[/思考] 前缀——模型看到自己一直按此格式
         // 输出（in-context 自我一致），新回复的思考块遵循度大幅提升；标签展示前已被流层剥离，不进任何气泡
         content: `${m.role === 'assistant' && m.thinking ? `[思考]${m.thinking}[/思考]\n` : ''}${

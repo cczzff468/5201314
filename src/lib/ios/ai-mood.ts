@@ -209,7 +209,9 @@ import { buildAnxietyChatBlock } from './anxiety';
  * 并入组合块——三端聊天/主动消息/情侣空间行为全部自动带上，无需各处单独接。
  * v51：buildAnxietyChatBlock（【你此刻的焦虑状态】：用户久久未回复导致的焦虑，回来
  * 聊天时自然带入情绪）并入——四.3「下次用户主动聊天时，AI 可能会带入焦虑时的情绪」。
+ * v75：userPresent 透传——主动消息/焦虑追发场景传 false，焦虑情绪带入块在用户
+ * 未回复期间不再注入「TA 现在回来了」描述（修复 AI 把自己追发的消息当成用户回复的幻觉）。
  */
-export function buildDynamicStateBlocks(cid: string): string {
-  return [buildMoodBlock(cid), buildUserMoodBlock(cid), buildAnxietyChatBlock(cid), buildRoutineBlock()].filter(Boolean).join('\n');
+export function buildDynamicStateBlocks(cid: string, opts?: { userPresent?: boolean }): string {
+  return [buildMoodBlock(cid), buildUserMoodBlock(cid), buildAnxietyChatBlock(cid, opts), buildRoutineBlock()].filter(Boolean).join('\n');
 }

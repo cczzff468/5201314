@@ -32,7 +32,7 @@
 import { create } from 'zustand';
 import { useUI } from './store';
 import { setupPushSubscription } from './push-client';
-import { showSystemNotification } from './system-notify';
+import { showSystemNotification, isPageBackground } from './system-notify';
 // v57 通知系统：SSE 长连接（服务端广播 → SW showNotification）；notify-sse 模块加载即挂连接
 import { pushSysNotifyViaSse, type SseNotifyPayload } from './notify-sse';
 import { wxChatFlags, qqChatFlags } from '@/lib/chat-flags';
@@ -446,10 +446,12 @@ async function buildNotifyIcon(n: IslandNotification): Promise<string> {
 }
 
 async function postWebNotification(n: IslandNotification): Promise<void> {
-  // v57 通知系统重进：复合图标（角色头像圆底 + App 角标）→ 载荷 → 优先经 SSE 长连接广播
+  // v75 通知系统重进：复合图标（角色头像圆底 + App 角标）→ 载荷 → 优先经 SSE 长连接广播
   //（POST /api/notify/push → notify-bus 广播 → 页面 EventSource 收到 → SW showNotification）——
   // 通知动态携带：角色头像（icon）、角色名字（title）、App 图标（badge）；
   // 广播通道异常时直发兜底（同一条 showSystemNotification，SW 通道优先的全平台一致行为不变）
+  // v75：target（点击跳转目标）随载荷透传——sw.js notificationclick 读到后 postMessage
+  // 回页面导航总线，实现「点击系统通知唤起浏览器并跳回对应聊天界面」
   const body = n.subtitle ? `【${n.subtitle}】${n.body}` : n.body;
   const payload: SseNotifyPayload = {
     title: n.title,
@@ -457,6 +459,7 @@ async function postWebNotification(n: IslandNotification): Promise<void> {
     tag: n.id, // 每条消息一个独立系统通知（不再按会话替换合并）
     icon: await buildNotifyIcon(n),
     badge: NOTIFY_APP_ICON[n.app],
+    target: n.target,
   };
   const viaSse = await pushSysNotifyViaSse(payload);
   if (!viaSse) {
@@ -465,6 +468,7 @@ async function postWebNotification(n: IslandNotification): Promise<void> {
       tag: payload.tag,
       icon: payload.icon,
       badge: payload.badge,
+      data: { target: n.target },
       onclick: () => navigateToNotifyTarget(n.target),
     }).catch(() => null);
   }
@@ -479,9 +483,11 @@ function maybeWebNotification(n: IslandNotification): void {
     const perm = Notification.permission;
     if (perm === 'granted') {
       ensurePushSubscription();
-      // v57：系统通知常显（旧版仅页面隐藏时才发——预览页恒可见，通知系统形同虚设）。
-      // 改为经 SSE 长连接广播 + SW showNotification，页面可见时同样弹出；
-      // 应用内灵动岛弹窗照常（两套展示互不干扰）
+      // v75 修复通知触发方向（原逻辑写反了：前台也狂发系统通知 → 刷屏）：
+      // 前台（用户正看着网页）→ 不弹任何系统通知（应用内灵动岛弹窗已足够）；
+      // 后台（切走标签页/切 App/锁屏/切到别的窗口）→ 才经 SSE/SW 弹真实系统通知。
+      // 判定见 system-notify.isPageBackground（visibilityState + focus/blur 双信号）。
+      if (!isPageBackground()) return;
       void postWebNotification(n);
     } else if (perm === 'default' && !webPermAsked) {
       // 首次使用友好申请：不直接弹浏览器授权框，先展示应用内说明卡，
@@ -528,10 +534,9 @@ export const ISLAND_NAV_EVENT = 'island-notify-nav';
 
 let pendingNav: { target: NotifyTarget; at: number } | null = null;
 
-function navigateToNotifyTarget(target: NotifyTarget): void {
+/** 实际执行通知导航：切 App + 关同会话悬浮小窗 + 广播导航事件（由聊天页消费打开会话） */
+function runNotifyNav(target: NotifyTarget): void {
   const ui = useUI.getState();
-  if (ui.locked || ui.screenOff) return;
-  pendingNav = { target, at: Date.now() };
   ui.switchToApp(target.app);
   // v73.5：目标为微信单聊全屏会话时，同一会话的悬浮小窗/胶囊一并关闭——
   // 「进入聊天」（通知菜单）与小窗同屏双开会话冗余；不同会话的小窗不受影响（浮着正是它的意义）。
@@ -541,6 +546,62 @@ function navigateToNotifyTarget(target: NotifyTarget): void {
     if (fl.contactId === target.contactId) fl.close();
   }
   window.dispatchEvent(new Event(ISLAND_NAV_EVENT));
+}
+
+function navigateToNotifyTarget(target: NotifyTarget): void {
+  const ui = useUI.getState();
+  if (ui.locked || ui.screenOff) return;
+  pendingNav = { target, at: Date.now() };
+  runNotifyNav(target);
+}
+
+/**
+ * v75 系统通知点击导航（sw.js postMessage / 开机 #notify= hash 消费共用）：
+ * 与应用内卡片点击的差异——锁屏/熄屏时**先记下意图**（不丢弃），用户解锁/亮屏后
+ * 由下方订阅补跳（系统通知唤起浏览器时手机常处于锁屏态，直接丢意图会让点击失效）。
+ */
+function navigateFromSystemNotify(target: NotifyTarget): void {
+  if (!target || typeof target.app !== 'string') return;
+  pendingNav = { target, at: Date.now() };
+  const ui = useUI.getState();
+  if (!ui.locked && !ui.screenOff) runNotifyNav(target);
+}
+
+// v75 解锁/亮屏补跳：系统通知点击时手机在锁屏态 → 意图已挂起，解锁/亮屏的瞬间落地导航
+//（60s 内有效，与 takeNotifyNavigation 同口径；订阅挂 useUI 状态变化）
+if (typeof window !== 'undefined') {
+  useUI.subscribe((s, prev) => {
+    const woke = (prev.locked && !s.locked) || (prev.screenOff && !s.screenOff);
+    if (!woke) return;
+    const p = pendingNav;
+    if (p && Date.now() - p.at <= NAV_TTL_MS && p.target.app) runNotifyNav(p.target);
+  });
+
+  // v75 SW 点击消息监听：sw.js notificationclick → client.postMessage({type:'notify-nav',target})
+  // → 走系统通知导航（含锁屏意图挂起）——「点击系统通知唤起浏览器并跳回对应聊天界面」的接收端
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.addEventListener('message', (ev: MessageEvent) => {
+      const d = ev.data as { type?: string; target?: NotifyTarget } | null;
+      if (d && d.type === 'notify-nav' && d.target) navigateFromSystemNotify(d.target);
+    });
+  }
+
+  // v75 开机 hash 消费：sw.js 无已开窗口时 openWindow('/#notify=<encoded>') 新开页面——
+  // 应用启动后消费该 hash 跳到对应聊天（手机启动默认锁屏 → 意图挂起，解锁后补跳）
+  try {
+    const hm = /[#&]notify=([^&]+)/.exec(window.location.hash);
+    if (hm) {
+      const target = JSON.parse(decodeURIComponent(hm[1])) as NotifyTarget;
+      // 清掉 hash 防刷新重复跳转
+      window.history.replaceState(null, '', window.location.pathname + window.location.search);
+      if (target && typeof target.app === 'string') {
+        // 等应用壳挂载（store 就绪）后再落地；锁屏时由上面的订阅在解锁后补跳
+        window.setTimeout(() => navigateFromSystemNotify(target), 900);
+      }
+    }
+  } catch {
+    /* 非法 hash 静默忽略 */
+  }
 }
 
 /** 点击通知卡片：跳转目标会话（锁屏/熄屏/闹钟时只收起不跳转）+ 收起弹窗 */

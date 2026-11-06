@@ -17,6 +17,39 @@
 
 let swRegPromise: Promise<ServiceWorkerRegistration | null> | null = null;
 
+// ---------------- 前台/后台判断（v75 通知触发方向修复） ----------------
+
+/**
+ * 页面是否获得过焦点（曾聚焦标记）：
+ * - 顶层窗口直接打开时加载即有焦点；
+ * - 预览面板等 iframe 场景：用户点进手机后才拿到焦点——在此之前不把「未聚焦」
+ *   当成后台（否则页面一打开就弹系统通知，恰恰相反）；
+ * - 用户点进来之后又切到别的窗口（blur）→ 才判定为「不在网页上」。
+ */
+let everFocused = typeof window !== 'undefined' && typeof document !== 'undefined' && document.hasFocus();
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('focus', () => {
+    everFocused = true;
+  });
+}
+
+/**
+ * 用户是否「不在网页上」（v75）：系统通知（SW showNotification）只允许在后台时弹。
+ * 判定（双信号）：
+ * ① document.visibilityState === 'hidden'——切到别的标签页/最小化/切 App/锁屏（iframe 内同样可靠：
+ *    顶层页隐藏时 iframe 文档也报告 hidden）；
+ * ② 曾聚焦过但当前失焦（everFocused && !document.hasFocus()）——用户切到了同一窗口的
+ *    别的窗口/别的应用，标签页仍「可见」但人已不在（预览面板 iframe 首次点击前不触发：
+ *    everFocused=false 时保持前台判定，防误判）。
+ * 前台（用户正看着网页）→ false → 调用方不弹任何系统通知（应用内灵动岛弹窗已足够）。
+ */
+export function isPageBackground(): boolean {
+  if (typeof document === 'undefined') return false;
+  if (document.visibilityState === 'hidden') return true;
+  return everFocused && !document.hasFocus();
+}
+
 /**
  * 确保 /sw.js 已注册并返回 registration（不 push 也能用 showNotification）。
  * 失败（非安全上下文/不支持/被策略拦截）返回 null，由调用方走页面构造器兜底。
@@ -46,6 +79,9 @@ export interface SystemNotifyOptions {
   icon?: string;
   /** SW 通道角标（Android 状态栏小图标；页面构造器忽略） */
   badge?: string;
+  /** v75：通知携带数据（透传到 notification.data）——sw.js notificationclick 读取
+ *  data.target 后 postMessage 回页面，实现「点击系统通知跳回对应聊天界面」 */
+  data?: unknown;
   onclick?: () => void;
 }
 
@@ -63,6 +99,8 @@ export async function showSystemNotification(title: string, options: SystemNotif
     tag: options.tag ?? `sys-${Date.now()}`,
     icon: options.icon,
     badge: options.badge,
+    // v75：点击跳转目标（sw.js notificationclick → client.postMessage → 页面导航总线）
+    data: options.data,
   };
   // ① SW 通道：Android 全平台唯一可用；桌面同样支持（静默失败 → 兜底）
   try {
