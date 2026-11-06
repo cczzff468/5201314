@@ -352,7 +352,9 @@ export interface PerceptionBlockOptions {
 function awLines(cfg: PerceptionConfig, aw: AwSnapshot): string[] {
   const out: string[] = [];
   if (cfg.currentApp && aw.current) {
-    const { app, ongoingMs } = aw.current;
+    // 已持续时长按 at 时间戳现场计算：缓存哪怕几分钟前的快照也能正确老化（正在玩 → 可能已放下）
+    const ongoingMs = aw.current.at > 0 ? Math.max(0, Date.now() - aw.current.at) : aw.current.ongoingMs;
+    const { app } = aw.current;
     if (ongoingMs < 15 * 60_000) {
       out.push(`用户此刻真机正在用：${app}（已持续 ${fmtDur(ongoingMs)}）`);
     } else {
@@ -446,7 +448,7 @@ export function buildPerceptionBlock(sessionKey: string, opts: PerceptionBlockOp
       'perception-block',
       { lines: linesText },
       [
-        '【实时感知】（内部参考：以下是系统在用户发送本条消息的瞬间现场采集的真实数据，只作你内部的判断依据，绝对禁止把下面任何一条当作数据播报或机械罗列。请结合你的人设、记忆和当前对话语境，像真正在意对方的人一样，只在自然合适的时机用上一两条——例如TA在真机上玩游戏很久没回消息时可以自然地在意一下，天气冷了提醒穿衣，深夜还亮着屏幕时催TA睡觉，电量低了提醒充电，TA回得慢时体谅TA刚才可能在忙。宁可不提也不要硬提，更不要一次性全说。）',
+        '【实时感知】（内部参考：以下是系统在用户发送本条消息的瞬间现场采集的真实数据，只作你内部的判断依据，绝对禁止把下面任何一条当作数据播报或机械罗列。请结合你的人设、记忆和当前对话语境，像真正在意对方的人一样，只在自然合适的时机用上一两条——例如TA在真机上玩游戏很久没回消息时可以自然地在意一下，天气冷了提醒穿衣，深夜还亮着屏幕时催TA睡觉，电量低了提醒充电，TA回得慢时体谅TA刚才可能在忙。宁可不提也不要硬提，更不要一次性全说。唯一例外：用户直接问起某项情况（如「你知道我在玩什么吗」「我屏幕用了多久」）时，若上面有对应数据，必须如实、自然地回答，不许说不知道；没有的数据才按未知处理。）',
         linesText,
         '（以上数据是采样快照，可能缺失或滞后；没有提到的项按未知处理，禁止编造。）',
       ].join('\n'),

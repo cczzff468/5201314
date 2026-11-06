@@ -272,15 +272,18 @@ export async function fetchAwSnapshot(rawUrl: string, force = false): Promise<Aw
 /** 原生模式下无远程地址时的虚拟缓存键（与真实 URL 隔离） */
 const NATIVE_KEY = '__native__';
 
-/** 同步读取 45 秒内的缓存快照（构建感知块时用；无缓存/过期返回 null）
- *  原生模式无远程地址时读虚拟键缓存 */
+/** 同步读取最近一次快照（构建感知块时用；从未取到过返回 null）
+ *
+ * v78 关键修复：不再按 45s TTL 判「过期即丢弃」——人类两轮消息的间隔普遍超过 45 秒
+ * （读回复 + 打字），而感知块在发送瞬间同步构建、prewarm 在其后才刷新缓存，
+ * 按旧逻辑绝大多数回合读到的是「刚过期」的缓存 → 感知块恒为空（TA 永远「不知道」）。
+ * 现改为：永远返回最近一次成功快照（TTL 只用于 fetchAwSnapshot 决定是否重取）；
+ * 「当前 App」行按 at 时间戳现场计算已持续时长，陈旧数据自然老化。 */
 export function getCachedAw(rawUrl: string): AwSnapshot | null {
   const urlBase = normalizeAwUrl(rawUrl);
   const base = urlBase ?? (isNativePerception() ? NATIVE_KEY : null);
   if (!base) return null;
-  const cached = awCache.get(base);
-  if (!cached || Date.now() - cached.ts > AW_CACHE_TTL) return null;
-  return cached.snap;
+  return awCache.get(base)?.snap ?? null;
 }
 
 /** 设置页「测试连接」：返回可达性与路径（直连/代理）细节 */

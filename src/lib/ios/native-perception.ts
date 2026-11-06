@@ -135,20 +135,36 @@ function ensureBridgeHook(): boolean {
   }
 }
 
-/** 经自建协议调用原生插件方法（与 native-bridge 的 toNative 同构） */
-function bridgeCall<T>(methodName: string, options: Record<string, unknown> = {}): Promise<T> {
+/** 经自建协议调用原生插件方法（与 native-bridge 的 toNative 同构；10s 超时防永久挂起） */
+function bridgeCall<T>(methodName: string, options: Record<string, unknown> = {}, timeoutMs = 10_000): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     if (!ensureBridgeHook()) {
       reject(new Error('androidBridge 不可用'));
       return;
     }
     const callbackId = String(++bridgeCallbackId);
-    pendingCalls.set(callbackId, { resolve: resolve as (v: unknown) => void, reject });
+    // 原生侧异常（插件未注册/回传路由失效）时 promise 会永远挂起且无任何报错——
+    // 数据静默消失比报错更难排查，这里加超时兜底
+    const timer = window.setTimeout(() => {
+      pendingCalls.delete(callbackId);
+      reject(new Error(`原生调用超时（${methodName}，桥无响应）`));
+    }, timeoutMs);
+    pendingCalls.set(callbackId, {
+      resolve: (v) => {
+        window.clearTimeout(timer);
+        resolve(v as T);
+      },
+      reject: (e) => {
+        window.clearTimeout(timer);
+        reject(e instanceof Error ? e : new Error(String(e)));
+      },
+    });
     try {
       (window as { androidBridge?: AndroidBridgeLike }).androidBridge?.postMessage(
         JSON.stringify({ callbackId, pluginId: 'NativePerception', methodName, options })
       );
     } catch (e) {
+      window.clearTimeout(timer);
       pendingCalls.delete(callbackId);
       reject(e);
     }

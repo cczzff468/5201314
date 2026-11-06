@@ -14,7 +14,7 @@
  * ActivityWatch 与串流地址都有「测试连接」；屏幕分享需在用户手势中授权（持续流，跨页保持）。
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   BatteryCharging,
   CalendarDays,
@@ -28,6 +28,7 @@ import {
   Globe,
   RotateCcw,
   ScanFace,
+  ScanSearch,
   Smartphone,
   Timer,
   Unlock,
@@ -36,12 +37,13 @@ import { ChatToggle } from './chat-settings';
 import { useChatSkin } from '@/lib/ios/chat-skin';
 import { LocalToast, useLocalToast } from './page-toast';
 import {
+  buildPerceptionBlock,
   getPerception,
   setPerception,
   prewarmPerception,
   type PerceptionConfig,
 } from '@/lib/perception';
-import { testAwConnection } from '@/lib/ios/activitywatch';
+import { fetchAwSnapshot, testAwConnection } from '@/lib/ios/activitywatch';
 import {
   isScreenShareActive,
   isScreenShareSupported,
@@ -148,13 +150,24 @@ export function PerceptionSettingsPage({
   const nativeMode = isNativePerception();
   const [usageGranted, setUsageGranted] = useState<boolean | null>(null);
   const [nativeSessionOn, setNativeSessionOn] = useState(false);
+  // 自检结果（逐步打印；null = 未跑过）
+  const [selfTesting, setSelfTesting] = useState(false);
+  const [selfTestSteps, setSelfTestSteps] = useState<{ ok: boolean | null; text: string }[] | null>(null);
+  // 授权状态记录（检测「刚授权」时刻：强制刷数据击穿授权前留下的 45s 空缓存）
+  const grantSeenRef = useRef<boolean | null>(null);
   // 原生模式挂载即查 UsageStats 权限；从系统授权页回来时刷新（页面 onShow 时 Cap 桥不会自动回调，用轻轮询）
   useEffect(() => {
     if (!nativeMode) return;
     let alive = true;
     const probe = () => {
       void nativeUsagePermission().then((g) => {
-        if (alive && g !== null) setUsageGranted(g);
+        if (!alive || g === null) return;
+        // 授权刚生效：立即强制取一次真机数据（否则空缓存会让 TA 继续盲 45 秒）
+        if (g === true && grantSeenRef.current !== true) {
+          void fetchAwSnapshot(getPerception(sessionKey).awUrl, true).catch(() => null);
+        }
+        grantSeenRef.current = g;
+        setUsageGranted(g);
       });
     };
     probe();
@@ -163,7 +176,7 @@ export function PerceptionSettingsPage({
       alive = false;
       window.clearInterval(t);
     };
-  }, [nativeMode]);
+  }, [nativeMode, sessionKey]);
 
   const openUsageGrant = async () => {
     const ok = await openNativeUsageSettings();
@@ -188,6 +201,80 @@ export function PerceptionSettingsPage({
     showToast('已停止屏幕感知');
   };
 
+  // ---------------- 真机感知自检（排查「TA 不知道」：环境 → 权限 → 数据 → AI 收到的块） ----------------
+
+  /** 毫秒 → 「X分钟 / X小时Y分」 */
+  const fmtMs = (ms: number): string => {
+    const m = Math.max(1, Math.round(ms / 60_000));
+    if (m < 60) return `${m} 分钟`;
+    return `${Math.floor(m / 60)} 小时${m % 60 > 0 ? ` ${m % 60} 分` : ''}`;
+  };
+
+  /** Android WebView UA 特征（; wv)）：区分「装了 APP 但桥未注入」和「纯浏览器」 */
+  const inAndroidWebView = (): boolean =>
+    typeof navigator !== 'undefined' && /Android/i.test(navigator.userAgent) && navigator.userAgent.includes('; wv)');
+
+  const runSelfTest = async () => {
+    setSelfTesting(true);
+    const steps: { ok: boolean | null; text: string }[] = [];
+    const push = (ok: boolean | null, text: string): void => {
+      steps.push({ ok, text });
+      setSelfTestSteps([...steps]);
+    };
+    try {
+      // ① 运行环境
+      if (nativeMode) {
+        push(true, '运行环境：安装版 APP 内，原生桥已连接');
+        // ② 系统权限
+        const granted = await nativeUsagePermission();
+        if (granted === null) {
+          push(false, '系统权限：原生桥无响应（插件异常）');
+        } else if (granted) {
+          push(true, '系统权限：「有权查看使用情况」已开启');
+        } else {
+          push(false, '系统权限：未开启 —— 点上方「去授权」，在系统设置里找到 AI Phone 打开');
+        }
+        // ③ 实时数据（force 击穿旧缓存，同时把结果写入缓存供下一次发送直接用）
+        if (granted === true) {
+          const snap = await fetchAwSnapshot(getPerception(sessionKey).awUrl, true);
+          if (snap) {
+            const parts: string[] = [];
+            if (snap.current) parts.push(`正在用 ${snap.current.app}`);
+            if (snap.todayApps && snap.todayApps.length > 0) {
+              parts.push(`今日Top：${snap.todayApps.slice(0, 3).map((x) => `${x.app} ${fmtMs(x.ms)}`).join('、')}`);
+            }
+            if (snap.todayTotalMs && snap.todayTotalMs > 0) parts.push(`总时长 ${fmtMs(snap.todayTotalMs)}`);
+            push(true, `实时数据：${parts.length > 0 ? parts.join('；') : '今日暂无使用记录（刚开机/统计需几分钟累计）'}`);
+          } else {
+            push(false, '实时数据：未取到 —— 刚授权后系统统计需要几分钟开始累计，稍后再试');
+          }
+        }
+      } else if (inAndroidWebView()) {
+        push(
+          false,
+          '运行环境：你在 APP 里，但原生桥未注入 —— 说明服务器地址不是 https 开头。请在 APP 首页退出后用 https:// 开头的地址重新进入',
+        );
+      } else {
+        push(false, '运行环境：浏览器/网页 —— 原生真机感知只在安装版 APP 里生效，网页里开的真机开关无效');
+      }
+      // ④ AI 实际收到的感知块（两种环境都查；这是 TA 能不能知道的最终判据）
+      const block = buildPerceptionBlock(sessionKey);
+      const dataLines = block
+        .split('\n')
+        .filter((l) => l && !l.startsWith('【') && !l.startsWith('（以上'))
+        .map((l) => l.trim());
+      if (dataLines.length > 0) {
+        push(true, `AI 感知块：已生成（${dataLines.length} 行），发送消息时 TA 能收到：${dataLines.slice(0, 3).join(' ｜ ')}`.slice(0, 220));
+      } else {
+        push(false, 'AI 感知块：为空 —— 本会话没有任何可用感知数据（检查本页开关是否开启、数据源是否可用）');
+      }
+    } catch (e) {
+      push(false, `自检中断：${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setSelfTesting(false);
+    }
+  };
+
   // 屏幕分享状态轻轮询（用户可能从浏览器原生 UI 停止共享，页面状态需跟随）
   useEffect(() => {
     const t = window.setInterval(() => setShareActive(isScreenShareActive()), 2000);
@@ -202,6 +289,13 @@ export function PerceptionSettingsPage({
       return next;
     });
     void prewarmPerception(sessionKey);
+    // 真机/AW 开关刚打开：强制刷一次数据（击穿开关关闭期间可能留下的 45s 空缓存）
+    const awKeys: (keyof PerceptionConfig)[] = [
+      'screenTime', 'currentApp', 'appHistory', 'unlocks', 'media', 'browser', 'stats',
+    ];
+    if (awKeys.some((k) => patch[k] === true)) {
+      void fetchAwSnapshot(getPerception(sessionKey).awUrl, true).catch(() => null);
+    }
   };
 
   const saveLoc = () => {
@@ -428,6 +522,36 @@ export function PerceptionSettingsPage({
               ) : null}
             </div>
           )}
+          {/* 真机感知自检：环境 → 权限 → 实时数据 → AI 收到的感知块，一步步给出结论 */}
+          <div className={`border-t ${dividerCls}`} />
+          <div className="px-4 py-3">
+            <button
+              type="button"
+              onClick={() => void runSelfTest()}
+              disabled={selfTesting}
+              data-testid={`${testPrefix}-perception-selftest`}
+              className="flex w-full items-center justify-center gap-1.5 rounded-full py-2.5 text-[13.5px] font-medium text-white active:opacity-70 disabled:opacity-60"
+              style={{ backgroundColor: accent }}
+            >
+              {selfTesting ? <Loader2 className="h-4 w-4 animate-spin" /> : <ScanSearch size={16} strokeWidth={2} />}
+              {selfTesting ? '自检中…' : '真机感知自检（TA 能看到什么？）'}
+            </button>
+            {selfTestSteps ? (
+              <div className="mt-2.5 max-h-64 space-y-1.5 overflow-y-auto rounded-lg bg-black/[0.03] px-3 py-2.5 dark:bg-white/[0.05]">
+                {selfTestSteps.map((s, i) => (
+                  <p
+                    key={i}
+                    className={`text-[12px] leading-snug ${
+                      s.ok === true ? 'text-[#07C160]' : s.ok === false ? 'text-[#E4554F]' : 'text-black/50 dark:text-white/50'
+                    }`}
+                  >
+                    {s.ok === true ? '✓ ' : s.ok === false ? '✗ ' : '· '}
+                    {s.text}
+                  </p>
+                ))}
+              </div>
+            ) : null}
+          </div>
           <div className={`border-t ${dividerCls}`} />
           <ToggleRow
             icon={<Timer size={I.size} strokeWidth={I.strokeWidth} />}
