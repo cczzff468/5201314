@@ -236,6 +236,26 @@ export async function labScreenSize(): Promise<{ w: number; h: number } | null> 
   return { w: Number(m[1]), h: Number(m[2]) };
 }
 
+/** 已安装应用列表（pm list packages；可按关键词过滤，AI 自主找包名用） */
+export async function labPackageList(filter?: string): Promise<LabResult> {
+  return run(['pm', 'list', 'packages'], {
+    maxLines: 2600,
+    timeoutMs: 10_000,
+    trim: (out) => {
+      const pkgs = out
+        .split('\n')
+        .map((l) => l.trim().replace(/^package:/, ''))
+        .filter(Boolean);
+      if (pkgs.length === 0) return { ok: false, text: '未取到应用列表（pm list 无输出）' };
+      const kw = filter?.trim().toLowerCase();
+      const hit = kw ? pkgs.filter((p) => p.toLowerCase().includes(kw)) : pkgs;
+      if (hit.length === 0) return { ok: true, text: `手机装了 ${pkgs.length} 个应用，没有包名含「${filter}」的（换关键词或查全部）` };
+      const head = `手机共 ${pkgs.length} 个应用${kw ? `，包名含「${filter}」的 ${hit.length} 个` : ''}`;
+      return { ok: true, text: `${head}：\n${hit.slice(0, 40).join('\n')}${hit.length > 40 ? `\n…（共${hit.length}个，加关键词缩小范围）` : ''}` };
+    },
+  });
+}
+
 // ================= B. 让 AI 动手（真实操作手机） =================
 
 /** 点按 (x, y) */

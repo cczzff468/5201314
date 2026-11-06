@@ -93,6 +93,8 @@ import {
   type BlockEntry,
 } from '@/lib/ios/block-state';
 import { getTimeAware, setTimeAware, buildTimeAwareBlock } from '@/lib/time-aware';
+// v1.3 Shizuku 自主权：[手机操作:命令] 标记的执行器 + 按开关动态注入的教学规则（设置 APP → AI 动手）
+import { buildShizukuAutonomyRules, executePhoneOp } from '@/lib/ios/shizuku-autonomy';
 import {
   buildPerceptionBlock,
   prewarmPerception,
@@ -1671,6 +1673,30 @@ function ChatView({
           // 只放行拉黑类（bk/uk 已在上方处理）——视觉等其余标记一律丢弃不执行，
           // 否则拉黑期间 AI 仍能真实改头像/写视觉决策
           if (wbContactId && loadBlock('sms', wbContactId).byUser) continue;
+          // v1.3 Shizuku 自主权（[手机操作:命令:参数]）：AI 真实操控手机（点按/滑动/打开App/强杀/媒体/截屏…）。
+          // 执行异步（1~3s）：占位系统行同步入列（防空回复失败徽标），结果行完成后落盘回传 AI。
+          // 开关 gate 在 executePhoneOp 内（系统设置 → AI 动手，关了直接拒）。
+          if (part.action.kind === 'phone-op') {
+            const argText = part.action.targetId.trim();
+            if (argText) {
+              const cmdName = argText.split(/[:：]/)[0] ?? '';
+              out.push({ id: `${idBase}-sys-${msgIdx}`, role: 'assistant', content: '', time: t, sys: { text: `「${peer.name ?? peer.title}」正在操作手机（${cmdName}）…` } });
+              t += 1;
+              msgIdx += 1;
+              void (async () => {
+                let res: { ok: boolean; text: string };
+                try {
+                  res = await executePhoneOp(argText);
+                } catch {
+                  res = { ok: false, text: '执行器异常（原生桥调用抛错）' };
+                }
+                const sysMsg = { id: uid(), role: 'assistant' as const, content: '', time: Date.now(), sys: { text: `手机操作${res.ok ? '成功' : '失败'}：${res.text}` } } as unknown as ChatMsg;
+                saveMsgs(storageKey, appendWithBoundary(sessionKey, loadMsgs(storageKey) ?? [], sysMsg));
+                setMsgs((prev) => (prev.some((m) => m.id === sysMsg.id) ? prev : [...prev, sysMsg]));
+              })();
+            }
+            continue;
+          }
           // 46-g 视觉自主决策动作（信息端无图片消息也无朋友圈）：
           // - change-avatar / change-moments-bg / save-to-album / pick-album-bg / pick-album-send：信息端静默丢弃
           //   （无图无朋友圈，extractRichActionParts 已解析但无分支处理则跳过到下方 continue）
@@ -1956,6 +1982,8 @@ function ChatView({
       ...(wbContactId ? [promptRule('sms-voice-call', SMS_VOICE_CALL_RULE) ?? ''] : []),
       timeBlock,
       perceptionBlock,
+      // v1.3 Shizuku 自主权：[手机操作:…] 教学规则按当前开关注入（总开关关/非手机APP环境 → 空，零 token）
+      ...buildShizukuAutonomyRules(),
       // v54【引用存档前缀·禁止模仿】信息端 AI 无引用能力（无 [引用:M编号] 标记机制），
       // 但上下文里带引用的消息以「（引用 名字：「内容」）」前缀序列化——模型偶发照抄进自己的回复
       // （用户实测：连发多条每条开头都挂着「（引用 凡凡：「mua」）」）。提示词层显式禁止 +

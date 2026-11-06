@@ -67,6 +67,7 @@ import {
   type UsageEngine,
 } from '@/lib/ios/native-perception';
 import { ShizukuLabSection } from './shizuku-lab';
+import { copyApkLink, launchApkDownload } from '@/lib/ios/apk-download';
 
 /** 开关行（图标 + 名称 + 说明 + 开关） */
 function ToggleRow({
@@ -105,58 +106,7 @@ function ToggleRow({
 /** 设置行左侧小图标 */
 const I = { size: 19, strokeWidth: 1.9 } as const;
 
-/** 旧版壳内的 APK 下载（用户实测反馈：<a href="intent://..."> 会让 WebView 整屏变黑——
- *  壳的 allowNavigation:'*' 把 intent: 也放进 WebView 自己加载，渲染失败即黑屏，
- *  页面 JS 上下文被销毁只能重启 APP）。安全做法是按钮点击双保险：
- *  ① 隐形 iframe 触发 intent:// —— iframe 加载失败无害于主页面；若壳放行非主帧 intent 则拉起系统浏览器
- *  ② 直链写入剪贴板兜底 —— 用户去任意浏览器粘贴打开下载 */
-function launchApkDownload(markCopied: (v: boolean) => void): void {
-  if (typeof window === 'undefined') return;
-  const proto = window.location.protocol.replace(':', '');
-  if (proto === 'https' || proto === 'http') {
-    try {
-      const direct = new URL('/AI-Phone.apk', window.location.href).href;
-      const intentUrl =
-        `intent://${window.location.host}/AI-Phone.apk#Intent;scheme=${proto};` +
-        `action=android.intent.action.VIEW;S.browser_fallback_url=${encodeURIComponent(direct)};end`;
-      const f = document.createElement('iframe');
-      f.setAttribute('aria-hidden', 'true');
-      f.title = 'apk-download-intent';
-      f.style.cssText = 'position:fixed;left:-9999px;top:0;width:1px;height:1px;border:0;opacity:0;';
-      f.src = intentUrl;
-      document.body.appendChild(f);
-      window.setTimeout(() => f.remove(), 4000);
-    } catch {
-      /* iframe 拉不起不阻断兜底 */
-    }
-  }
-  void copyApkLink(markCopied, 10000);
-}
-
-/** 复制 APK 直链（主下载流程剪贴板兜底 + 「备用：复制链接」按钮共用；keepMs = ✓ 提示保留时长） */
-async function copyApkLink(markCopied: (v: boolean) => void, keepMs = 2500): Promise<void> {
-  if (typeof window === 'undefined') return;
-  const url = new URL('/AI-Phone.apk', window.location.href).href;
-  try {
-    await navigator.clipboard.writeText(url);
-  } catch {
-    // WebView 剪贴板兜底：execCommand 旧接口
-    try {
-      const ta = document.createElement('textarea');
-      ta.value = url;
-      ta.style.position = 'fixed';
-      ta.style.opacity = '0';
-      document.body.appendChild(ta);
-      ta.select();
-      document.execCommand('copy');
-      ta.remove();
-    } catch {
-      return;
-    }
-  }
-  markCopied(true);
-  setTimeout(() => markCopied(false), keepMs);
-}
+// APK 下载/复制链接已抽公共模块 @/lib/ios/apk-download（系统设置的「APP 更新」入口共用）
 
 export function PerceptionSettingsPage({
   variant,

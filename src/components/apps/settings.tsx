@@ -113,6 +113,10 @@ import {
 } from '@/lib/ios/accounts';
 import { displayNameOf, type ContactRecord } from '@/lib/contacts';
 import { isWebSpeechSupported } from '@/lib/ios/web-speech';
+// v1.3 AI 动手（Shizuku 自主权）+ APP 更新：设置页新入口
+import { AUTONOMY_CAPS, getAutonomyConfig, setAutonomyCap, setAutonomyMaster } from '@/lib/ios/shizuku-autonomy';
+import { isNativePerception, nativeShizukuStatus } from '@/lib/ios/native-perception';
+import { copyApkLink, getApkUrl, launchApkDownload } from '@/lib/ios/apk-download';
 import { lastPushStatus, setupPushSubscription, teardownPushSubscription } from '@/lib/ios/push-client';
 import { showSystemNotification } from '@/lib/ios/system-notify';
 import { deleteOfflineModel, initOfflineAsr, useOfflineAsr } from '@/lib/ios/offline-asr';
@@ -174,7 +178,7 @@ import {
 
 // ---------------- 常量与类型 ----------------
 
-type Page = 'root' | 'account' | 'profile' | 'theme' | 'notification' | 'storage' | 'wallpaper' | 'font' | 'api' | 'vision' | 'imggen' | 'voice' | 'about' | 'lock' | 'prompts';
+type Page = 'root' | 'account' | 'profile' | 'theme' | 'notification' | 'storage' | 'wallpaper' | 'font' | 'api' | 'vision' | 'imggen' | 'voice' | 'about' | 'lock' | 'prompts' | 'autonomy' | 'appupdate';
 
 const IOS_RED = '#FF453A';
 
@@ -452,6 +456,12 @@ function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
 
   const [airplane, setAirplane] = useState(false);
 
+  // v1.3 AI 动手（Shizuku 自主权）：主列表入口右侧状态（localStorage 现场读取；
+  // 从子页开关改完返回时 RootPage 重挂载，状态自动刷新）
+  const autonomy = getAutonomyConfig();
+  const autonomyMaster = autonomy.master;
+  const autonomyOnCount = autonomy.master ? AUTONOMY_CAPS.filter((c) => autonomy.caps[c.key]).length : 0;
+
   // 挂载读取持久化的飞行模式开关（演示项）
   useEffect(() => {
     let cancelled = false;
@@ -720,6 +730,27 @@ function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
           </div>
         </div>
 
+        {/* AI 感知与操控（v1.3）：Shizuku 自主权总入口——逐项开关控制 AI 能真实动手机的哪些能力 */}
+        <div className="mb-2 mt-6 px-8 text-[13px] text-muted-foreground">AI 感知与操控</div>
+        <div className="mx-4 divide-y divide-black/[0.05] overflow-hidden rounded-[22px] bg-white/55 shadow-[0_8px_28px_rgba(17,24,39,0.06)] ring-1 ring-white/70 backdrop-blur-2xl dark:divide-white/[0.06] dark:bg-white/[0.06] dark:ring-white/[0.09]">
+          <button
+            type="button"
+            data-testid="settings-autonomy-entry"
+            onClick={() => onOpen('autonomy')}
+            className="flex min-h-[52px] w-full items-center gap-3 px-4 py-2 text-left transition-colors active:bg-muted/50"
+          >
+            <RowIcon icon={ScanEye} tone={TONE_GREEN} />
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-[16px]">AI 动手</span>
+              <span className="mt-0.5 block truncate text-[12px] text-muted-foreground">点按/滑动/开关App/截屏…逐项授权</span>
+            </span>
+            <span className="max-w-[50%] shrink-0 truncate text-[15px] text-muted-foreground">
+              {autonomyMaster ? `已开启 · ${autonomyOnCount} 项` : '已关闭'}
+            </span>
+            <ChevronRight className="h-5 w-5 shrink-0 text-muted-foreground/60" />
+          </button>
+        </div>
+
         {/* 开发者 */}
         <div className="mb-2 mt-6 px-8 text-[13px] text-muted-foreground">开发者</div>
         <div className="mx-4 divide-y divide-black/[0.05] overflow-hidden rounded-[22px] bg-white/55 shadow-[0_8px_28px_rgba(17,24,39,0.06)] ring-1 ring-white/70 backdrop-blur-2xl dark:divide-white/[0.06] dark:bg-white/[0.06] dark:ring-white/[0.09]">
@@ -783,9 +814,17 @@ function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
           <MainRow icon={Database} tone={TONE_GREEN} label="存储" onClick={() => onOpen('storage')} />
         </div>
 
-        {/* 关于本机 */}
+        {/* 关于本机 + APP 更新（v1.3：APK 下载入口从感知设置提升到系统设置） */}
         <div className="mx-4 mt-4 divide-y divide-black/[0.05] overflow-hidden rounded-[22px] bg-white/55 shadow-[0_8px_28px_rgba(17,24,39,0.06)] ring-1 ring-white/70 backdrop-blur-2xl dark:divide-white/[0.06] dark:bg-white/[0.06] dark:ring-white/[0.09]">
           <MainRow icon={Info} tone={TONE_GRAY} label="关于本机" onClick={() => onOpen('about')} />
+          <MainRow
+            icon={Download}
+            tone={TONE_CYAN}
+            label="APP 更新"
+            value="v1.3"
+            onClick={() => onOpen('appupdate')}
+            testId="settings-appupdate-entry"
+          />
         </div>
 
         <p className="py-6 text-center text-[12px] text-muted-foreground">
@@ -793,6 +832,217 @@ function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
         </p>
       </div>
     </>
+  );
+}
+
+// ---------------- AI 动手（v1.3 Shizuku 自主权：逐项开关） ----------------
+
+/** iOS 原生 51×31 大开关（与飞行模式/状态栏同款；开启态 #34C759 绿） */
+function AutonomySwitch({ on, onToggle, label, testId }: { on: boolean; onToggle: () => void; label: string; testId?: string }) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={on}
+      aria-label={label}
+      data-testid={testId}
+      onClick={onToggle}
+      className={`relative h-[31px] w-[51px] shrink-0 rounded-full transition-colors duration-200 ${
+        on ? 'bg-[#34C759]' : 'bg-black/15 dark:bg-white/25'
+      }`}
+    >
+      <span
+        className={`pointer-events-none absolute left-[2px] top-[2px] block h-[27px] w-[27px] rounded-full bg-white shadow-[0_2px_5px_rgba(0,0,0,0.25)] transition-transform duration-200 ${
+          on ? 'translate-x-[20px]' : 'translate-x-0'
+        }`}
+      />
+    </button>
+  );
+}
+
+/** 能力开关行：名称 + 一句话说明 + 大开关（危险项名称带红色「危险」角标） */
+function AutonomyCapRow({
+  cap,
+  on,
+  onToggle,
+}: {
+  cap: (typeof AUTONOMY_CAPS)[number];
+  on: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <div className="flex min-h-[52px] items-center gap-3 px-4 py-2">
+      <span className="min-w-0 flex-1">
+        <span className="flex items-center gap-1.5">
+          <span className="truncate text-[16px]">{cap.label}</span>
+          {cap.danger ? (
+            <span className="shrink-0 rounded-[4px] bg-[#FF3B30]/10 px-1 py-px text-[10px] font-medium text-[#FF3B30]">危险</span>
+          ) : null}
+        </span>
+        <span className="mt-0.5 block truncate text-[11.5px] text-muted-foreground">{cap.desc}</span>
+      </span>
+      <AutonomySwitch on={on} onToggle={onToggle} label={cap.label} testId={`autonomy-cap-${cap.key}`} />
+    </div>
+  );
+}
+
+function ShizukuAutonomyPage({ onBack }: { onBack: () => void }) {
+  // 惰性初始化（页面仅在用户交互后挂载 = 纯客户端，可安全读 localStorage）
+  const [cfg, setCfg] = useState(() => getAutonomyConfig());
+  const nativeMode = isNativePerception();
+  // Shizuku 实时状态：undefined = 探测中；null = 非原生/超时；对象 = 状态
+  const [shizuku, setShizuku] = useState<{ running: boolean; granted: boolean; version: number } | null | undefined>(undefined);
+
+  useEffect(() => {
+    if (!nativeMode) return;
+    let cancelled = false;
+    void (async () => {
+      const r = await nativeShizukuStatus();
+      if (!cancelled) setShizuku(r && typeof r === 'object' ? { running: Boolean(r.running), granted: Boolean(r.granted), version: Number(r.version) || 0 } : null);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [nativeMode]);
+
+  const flipMaster = () => setCfg(setAutonomyMaster(!cfg.master));
+  const flipCap = (key: string) => setCfg(setAutonomyCap(key, !cfg.caps[key]));
+  const hands = AUTONOMY_CAPS.filter((c) => c.group === 'hands');
+  const eyes = AUTONOMY_CAPS.filter((c) => c.group === 'eyes');
+
+  return (
+    <DetailShell title="AI 动手" onBack={onBack} gray>
+      <div className="no-scrollbar flex-1 overflow-y-auto pb-8">
+        {/* 说明卡 */}
+        <div className="mx-4 mt-4 rounded-[22px] bg-white/55 p-4 text-[13px] leading-relaxed ring-1 ring-white/70 backdrop-blur-2xl dark:bg-white/[0.06] dark:ring-white/[0.09]">
+          <p className="font-medium">让 AI 真实操控这部手机（Shizuku 引擎）</p>
+          <p className="mt-1.5 text-muted-foreground">
+            总开关打开后，AI 会按 TA 的人设、记忆和聊天上下文自主决定何时动手（你说「帮我关掉抖音」就强杀抖音、深夜劝睡可以关流量）；
+            下面每一项都可以单独关掉——关掉的项 AI 既不知道也用不了，硬来会被直接拒绝。
+          </p>
+          {!nativeMode ? (
+            <p className="mt-2 text-[12px] text-[#FF9500]">
+              当前在浏览器里：这些开关只在手机 APP（AI-Phone v1.3+）里生效，网页端预览无效。去「APP 更新」装最新版。
+            </p>
+          ) : shizuku === undefined ? (
+            <p className="mt-2 text-[12px] text-muted-foreground">正在检测 Shizuku 状态…</p>
+          ) : shizuku && shizuku.running && shizuku.granted ? (
+            <p className="mt-2 text-[12px] text-[#34C759]">Shizuku 已就绪（v{shizuku.version || '?'}）· 重启手机后需在 Shizuku APP 里重新激活</p>
+          ) : shizuku && shizuku.running && !shizuku.granted ? (
+            <p className="mt-2 text-[12px] text-[#FF9500]">
+              Shizuku 已运行但未授权本 APP——去聊天设置 → 感知设置 → Shizuku 区块点「去授权」，或用能力实验室的「一键自授权」。
+            </p>
+          ) : (
+            <p className="mt-2 text-[12px] text-[#FF9500]">
+              Shizuku 未运行：先在手机上打开 Shizuku APP 激活（每次重启手机后需重新激活），未激活时 AI 的动手指令会如实报失败。
+            </p>
+          )}
+        </div>
+
+        {/* 总开关 */}
+        <div className="mx-4 mt-4 divide-y divide-black/[0.05] overflow-hidden rounded-[22px] bg-white/55 shadow-[0_8px_28px_rgba(17,24,39,0.06)] ring-1 ring-white/70 backdrop-blur-2xl dark:divide-white/[0.06] dark:bg-white/[0.06] dark:ring-white/[0.09]">
+          <div className="flex min-h-[52px] items-center gap-3 px-4 py-2">
+            <RowIcon icon={ScanEye} tone={TONE_GREEN} />
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-[16px]">允许 AI 动手</span>
+              <span className="mt-0.5 block truncate text-[11.5px] text-muted-foreground">
+                {cfg.master ? 'AI 已获授权，按人设与语境自主使用下面的能力' : '关着 = AI 完全不知道自己能操控手机'}
+              </span>
+            </span>
+            <AutonomySwitch on={cfg.master} onToggle={flipMaster} label="允许 AI 动手" testId="autonomy-master-switch" />
+          </div>
+        </div>
+
+        {/* 动手组 */}
+        <div className="mb-2 mt-6 px-8 text-[13px] text-muted-foreground">动手（真实操作）</div>
+        <div className={`mx-4 divide-y divide-black/[0.05] overflow-hidden rounded-[22px] bg-white/55 shadow-[0_8px_28px_rgba(17,24,39,0.06)] ring-1 ring-white/70 backdrop-blur-2xl dark:divide-white/[0.06] dark:bg-white/[0.06] dark:ring-white/[0.09] ${cfg.master ? '' : 'opacity-55'}`}>
+          {hands.map((cap) => (
+            <AutonomyCapRow key={cap.key} cap={cap} on={Boolean(cfg.caps[cap.key])} onToggle={() => flipCap(cap.key)} />
+          ))}
+        </div>
+
+        {/* 看见组 */}
+        <div className="mb-2 mt-6 px-8 text-[13px] text-muted-foreground">看见（只读探测）</div>
+        <div className={`mx-4 divide-y divide-black/[0.05] overflow-hidden rounded-[22px] bg-white/55 shadow-[0_8px_28px_rgba(17,24,39,0.06)] ring-1 ring-white/70 backdrop-blur-2xl dark:divide-white/[0.06] dark:bg-white/[0.06] dark:ring-white/[0.09] ${cfg.master ? '' : 'opacity-55'}`}>
+          {eyes.map((cap) => (
+            <AutonomyCapRow key={cap.key} cap={cap} on={Boolean(cfg.caps[cap.key])} onToggle={() => flipCap(cap.key)} />
+          ))}
+        </div>
+
+        <p className="mx-4 mt-4 text-[11.5px] leading-relaxed text-muted-foreground">
+          开关即点即存（下一次发消息立即生效）。危险项默认关着，确认要让 AI 碰再手动开。
+          想手动试用这些能力：聊天设置 → 感知设置 → Shizuku 能力实验室。
+        </p>
+      </div>
+    </DetailShell>
+  );
+}
+
+// ---------------- APP 更新（v1.3：APK 下载从感知设置提升到系统设置） ----------------
+
+function AppUpdatePage({ onBack }: { onBack: () => void }) {
+  const nativeMode = isNativePerception();
+  const [copied, setCopied] = useState(false);
+  const apkUrl = getApkUrl();
+
+  return (
+    <DetailShell title="APP 更新" onBack={onBack} gray>
+      <div className="no-scrollbar flex-1 overflow-y-auto pb-8">
+        {/* 版本说明卡 */}
+        <div className="mx-4 mt-4 rounded-[22px] bg-white/55 p-4 text-[13px] leading-relaxed ring-1 ring-white/70 backdrop-blur-2xl dark:bg-white/[0.06] dark:ring-white/[0.09]">
+          <p className="font-medium">AI-Phone v1.3（Shizuku 能力实验室 + 自主权）</p>
+          <p className="mt-1.5 text-muted-foreground">
+            v1.3 新增：AI 真实操控手机（设置 → AI 动手，逐项开关授权点按/滑动/开关App/媒体音量/截屏等）
+            + 静默截屏/通知栏/前台App/电量/剪贴板感知 + 一键自授权；并含 v1.2.1 的时长口径修正（息屏/锁屏不计入使用时长）。
+          </p>
+          <p className="mt-1.5 text-muted-foreground">覆盖安装、数据不丢（聊天记录都在服务器和本地存储里）。</p>
+        </div>
+
+        {/* 下载区 */}
+        <div className="mx-4 mt-4 space-y-2">
+          {nativeMode ? (
+            <>
+              <button
+                type="button"
+                data-testid="appupdate-download-btn"
+                onClick={() => launchApkDownload(setCopied)}
+                className="block w-full rounded-full bg-[#34C759] py-2.5 text-center text-[14px] font-medium text-white transition-opacity active:opacity-70"
+              >
+                {copied ? '✓ 下载链接已复制，等下载完从通知栏安装' : '下载 v1.3（自动复制链接）'}
+              </button>
+              <p className="text-[12px] leading-snug text-muted-foreground">
+                点按钮自动复制下载链接并尝试拉起手机浏览器（页面不会跳走）；下载完从顶部下拉通知栏点开安装，
+                提示「未知应用」按系统引导允许。
+              </p>
+            </>
+          ) : (
+            <>
+              <a
+                href="/AI-Phone.apk"
+                download
+                data-testid="appupdate-download-btn"
+                className="block w-full rounded-full bg-[#34C759] py-2.5 text-center text-[14px] font-medium text-white transition-opacity active:opacity-70"
+              >
+                下载 v1.3（AI-Phone.apk）
+              </a>
+              <p className="text-[12px] leading-snug text-muted-foreground">
+                浏览器直接下载 APK 后传到手机安装（或用手机浏览器打开本页下载）；已装旧版直接覆盖安装，数据不丢。
+              </p>
+            </>
+          )}
+          <button
+            type="button"
+            onClick={() => void copyApkLink(setCopied)}
+            className="block w-full rounded-full border border-black/10 py-2 text-center text-[13px] font-medium text-foreground/70 transition-colors active:bg-muted/50 dark:border-white/15"
+          >
+            {copied ? '✓ 链接已复制' : '复制下载链接'}
+          </button>
+          <p className="break-all text-[10.5px] leading-snug text-muted-foreground/70">
+            直链（长按可复制）：{apkUrl}
+          </p>
+        </div>
+      </div>
+    </DetailShell>
   );
 }
 
@@ -6960,7 +7210,7 @@ export default function SettingsApp() {
   // 消费清空放到挂载后的 effect 里——渲染期间写 store 会触发「渲染中更新其它组件」告警。
   const [page, setPage] = useState<Page>(() => {
     const pending = useUI.getState().pendingSettingsPage;
-    if (pending && ['root', 'account', 'profile', 'theme', 'notification', 'storage', 'wallpaper', 'font', 'api', 'vision', 'imggen', 'voice', 'about', 'lock', 'prompts'].includes(pending)) {
+    if (pending && ['root', 'account', 'profile', 'theme', 'notification', 'storage', 'wallpaper', 'font', 'api', 'vision', 'imggen', 'voice', 'about', 'lock', 'prompts', 'autonomy', 'appupdate'].includes(pending)) {
       return pending as Page;
     }
     return 'root';
@@ -6986,6 +7236,8 @@ export default function SettingsApp() {
       {page === 'lock' && <LockPage onBack={() => setPage('root')} />}
       {page === 'prompts' && <PromptEntriesPage onBack={() => setPage('root')} />}
       {page === 'about' && <AboutPage onBack={() => setPage('root')} />}
+      {page === 'autonomy' && <ShizukuAutonomyPage onBack={() => setPage('root')} />}
+      {page === 'appupdate' && <AppUpdatePage onBack={() => setPage('root')} />}
     </IOSScreen>
   );
 }

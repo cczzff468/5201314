@@ -251,6 +251,8 @@ import {
   markAiReplyEnd,
 } from '@/lib/perception';
 import { useEnterSend, setEnterSend, guardEnterToSend } from '@/lib/enter-send';
+// v1.3 Shizuku 自主权：[手机操作:命令] 标记的执行器 + 按开关动态注入的教学规则（设置 APP → AI 动手）
+import { buildShizukuAutonomyRules, executePhoneOp } from '@/lib/ios/shizuku-autonomy';
 import { kvGet, kvGetRaw, kvSet, kvSetDebounced, kvDel } from '@/lib/ios/idb-kv';
 import { getMemSettings, memAddEventFragment, memAfterAiTurn, memChatRecallBlock, memConvoFromRaw, memPurgeMessageSources, memResetConvoCounters, setMemScopeForApp } from '@/lib/memory';
 import { aiWriteLetterOnRequest, coupleChatBlock, coupleLetterAskHit } from '@/lib/ios/couple-ai';
@@ -5137,6 +5139,8 @@ interface WxTurnCtx {
   wantVideoCallSeen: boolean;
   /** 一起听遥控（第三十七轮）：本轮回复里剥出并执行过播控指令（纯指令回复不再落「暂无回复」兑底） */
   musicActed: boolean;
+  /** v1.3 Shizuku 自主权：本轮执行过 [手机操作:…]（纯动作回复不落空回复失败徽标，与 musicActed 同口径） */
+  phoneActed?: boolean;
   /** Task 30 AI 引用（v56 恢复）：[引用:M编号] 标记剥出后暂存的编号——挂到紧随其后的第一条正文消息上；
  *  标记与正文跨流式分段时靠它跨段接力（buildReplyMsgs 各次调用共享同一 ctx） */
   pendingQuote?: string;
@@ -6612,6 +6616,38 @@ export function ChatPage({
           t += 1;
           continue;
         }
+        // v1.3 Shizuku 自主权（[手机操作:命令:参数]）：AI 真实操控手机（点按/滑动/打开App/强杀/媒体/截屏…）。
+        // 执行是异步的（Shizuku 通道 1~3s）：结果不占正文，完成后以系统行落盘——下一轮 AI 天然看到
+        // （成功才说成功、失败如实报）。开关 gate 在 executePhoneOp 内（系统设置 → AI 动手，关了直接拒）；
+        // 拉黑（仅申请卡模式）下与资金/视觉标记同口径拦截——拉黑期间 AI 不许动手机。
+        if (part.action.kind === 'phone-op') {
+          const argText = part.action.targetId.trim();
+          if (argText && !loadBlock('wx', peer.id).byUser) {
+            ctx.phoneActed = true; // 纯动作回复（无正文）不落空回复失败徽标
+            const cmdName = argText.split(/[:：]/)[0] ?? '';
+            out.push({ id: uid(), role: 'peer', content: '', time: t, kind: 'sys', sys: { text: `「${peer.name}」正在操作手机（${cmdName}）…` } });
+            t += 1;
+            void (async () => {
+              let res: { ok: boolean; text: string };
+              try {
+                res = await executePhoneOp(argText);
+              } catch {
+                res = { ok: false, text: '执行器异常（原生桥调用抛错）' };
+              }
+              const sysMsg: WxMsg = {
+                id: uid(),
+                role: 'peer',
+                content: '',
+                time: Date.now(),
+                kind: 'sys',
+                sys: { text: `手机操作${res.ok ? '成功' : '失败'}：${res.text}` },
+              };
+              saveMsgs(peer.id, appendWithBoundary(sessionKey, loadMsgs(peer.id), sysMsg));
+              setMsgs((prev) => (prev.some((m) => m.id === sysMsg.id) ? prev : [...prev, sysMsg]));
+            })();
+          }
+          continue;
+        }
         // 46-e 视觉自主决策动作（[换头像]/[换朋友圈背景]/[存相册] 取用户当回合发的图；[选图设头像]/
         // [选图设背景]/[选图发送] 从相册缓存挑图）：sys 通知行同步入列（队列投递时按 t 排序），
         // 异步写入（updateContact/setPeerBg/addAlbum + addVisionDecision）fire-and-forget；
@@ -7482,6 +7518,8 @@ export function ChatPage({
       '【视频通话能力】如果你此刻很想看看对方（想TA了、有值得分享的时刻、对方说想见你/想看看你等自然原因），可以在回复的最开头单独加上标记 [视频通话] 发起一次视频通话邀请，对方手机会弹出你的视频来电邀请；平时聊天不要加这个标记，最多偶尔一次，连续使用会很烦人。注意：标记必须是单独四个字 [视频通话]，严禁模仿聊天记录里「[视频通话：时长/内容摘要]」这类卡片描述文字的格式（那是系统卡片不是标记），不要输出带冒号的 [视频通话：……]。',
       timeBlock,
       perceptionBlock,
+      // v1.3 Shizuku 自主权：[手机操作:…] 教学规则按当前开关注入（总开关关/非手机APP环境 → 空，零 token）
+      ...buildShizukuAutonomyRules(),
       wbBlocks.afterSystem,
       wbRulesBlock(wbBlocks),
     ]
@@ -7634,14 +7672,14 @@ export function ChatPage({
         const finalBatch: WxMsg[] =
           built.length > 0
             ? built
-            : deliveredAny || ctx.musicActed
+            : deliveredAny || ctx.musicActed || ctx.phoneActed
               ? []
               : requestOnly
                 ? []
                 : (setReplyFail(true, CHAT_PARSE_FAIL_TEXT), recordChatFail(sessionKey, '空回复'), []);
         // 有任何产出（分段投递/动作/本轮落盘消息）：清除触发消息上的失败徽标（重试成功场景）；
         // Task 40：本轮有产出 = 成功 → 连续失败冷却计数清零（空回复失败分支不进这里，刚记的失败不会被误清）
-        if (built.length > 0 || deliveredAny || ctx.musicActed) {
+        if (built.length > 0 || deliveredAny || ctx.musicActed || ctx.phoneActed) {
           setReplyFail(false);
           recordChatSuccess(sessionKey);
         }
