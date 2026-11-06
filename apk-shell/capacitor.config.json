@@ -1,0 +1,11 @@
+{
+  "appId": "com.love5201314.app",
+  "appName": "5201314",
+  "webDir": "www",
+  "android": {
+    "allowNavigation": ["*"]
+  },
+  "server": {
+    "androidScheme": "https"
+  }
+}
