@@ -4,16 +4,20 @@
  * 原生感知桥（APP 壳内自动激活，浏览器里全部静默降级）：
  *
  * 运行环境判定：Capacitor 壳（android-shell/ 编译出的 APK）里的 WebView 通过
- * addJavascriptInterface 全局注入 window.androidBridge —— 网页只要引了
- * @capacitor/core，Capacitor.isNativePlatform() 即为 true（跨域页面不受影响），
- * 浏览器/桌面里恒为 false，走原有 ActivityWatch / 屏幕分享逻辑。
+ * WebMessageListener / addJavascriptInterface 全局注入 window.androidBridge，
+ * 跨域页面（沙箱预览地址）同样可见 —— 网页侧据此判定原生环境。
+ *
+ * 关键补丁（修复「当前环境不支持原生屏幕感知」）：Capacitor 8 的注入脚本
+ * （native-bridge.js + 插件代理）只覆盖壳自身的源，跨域页面拿不到
+ * window.Capacitor.Plugins —— 因此这里自建一份 Capacitor 消息协议客户端，
+ * 直接经 androidBridge.postMessage 调原生插件，回传双通道兼容：
+ * ① WebMessageListener（现代 WebView）：androidBridge.onmessage(event.data)
+ * ② legacy addJavascriptInterface：evaluateJavascript 调 window.Capacitor.fromNative
  *
  * 能力（对应 NativePerceptionPlugin.java）：
  * - UsageStats 真机感知：getUsageSnapshot（免装 ActivityWatch，替代其 502 链路）；
  * - 屏幕抓帧：requestScreenCapture（MediaProjection 授权，每会话一次）+
  *   grabScreenFrame（抓一帧 dataURL 喂 VLM，替代手机端不可用的 getDisplayMedia）。
- *
- * @capacitor/core 动态 import：浏览器首屏不打包，仅原生环境按需加载。
  */
 
 import type { AwSnapshot } from './activitywatch';
@@ -62,19 +66,126 @@ async function loadCapacitor(): Promise<CapacitorCore | null> {
   }
 }
 
+// ---------------- 自建 Capacitor 消息协议（跨域页面补丁） ----------------
+// 原生注入脚本只覆盖壳源；沙箱预览页上 Plugins['NativePerception'] 不存在，
+// 这里按同一协议直连 androidBridge：postMessage({callbackId, pluginId, methodName, options})
+// 回传见 MessageHandler.sendResponseMessage：replyProxy.postMessage → onmessage 事件，
+// 或 legacy evaluateJavascript("window.Capacitor.fromNative(...)")。
+
+type NativeResult = {
+  callbackId?: string;
+  success?: boolean;
+  data?: unknown;
+  error?: { message?: string } & Record<string, unknown>;
+  save?: boolean;
+};
+
+type AndroidBridgeLike = {
+  postMessage(data: string): void;
+  onmessage?: ((event: { data: string }) => void) | null;
+};
+
+const pendingCalls = new Map<string, { resolve: (v: unknown) => void; reject: (e?: unknown) => void }>();
+let bridgeCallbackId = Math.floor(Math.random() * 1_000_000);
+let bridgeHookInstalled = false;
+
+/** 处理原生回传结果（onmessage 与 fromNative 两通道同构） */
+function handleNativeResult(result: NativeResult | null | undefined): void {
+  if (!result || typeof result.callbackId !== 'string') return;
+  const stored = pendingCalls.get(result.callbackId);
+  if (!stored) return;
+  pendingCalls.delete(result.callbackId);
+  if (result.success) {
+    stored.resolve(result.data ?? {});
+  } else {
+    stored.reject(result.error ?? new Error('原生调用失败'));
+  }
+}
+
+/**
+ * 安装回传钩子（幂等；绝不覆盖原生注入已有的 onmessage / fromNative，
+ * 同源页面上 native-bridge.js 先于页面 JS 执行，此处检测到已存在即跳过）
+ */
+function ensureBridgeHook(): boolean {
+  if (bridgeHookInstalled) return true;
+  if (typeof window === 'undefined') return false;
+  const w = window as typeof window & { androidBridge?: AndroidBridgeLike; Capacitor?: { fromNative?: (r: NativeResult) => void } };
+  const bridge = w.androidBridge;
+  if (!bridge || typeof bridge.postMessage !== 'function') return false;
+  try {
+    // ① WebMessageListener 模式（现代 WebView）：原生经 replyProxy 触发 onmessage 事件
+    if (typeof bridge.onmessage !== 'function') {
+      bridge.onmessage = (event: { data: string }) => {
+        try {
+          handleNativeResult(JSON.parse(event?.data));
+        } catch {
+          /* 非法载荷忽略 */
+        }
+      };
+    }
+    // ② legacy addJavascriptInterface 模式（老 WebView）：原生 evaluateJavascript 调 fromNative
+    w.Capacitor = w.Capacitor ?? {};
+    if (typeof w.Capacitor.fromNative !== 'function') {
+      w.Capacitor.fromNative = (r: NativeResult) => handleNativeResult(r);
+    }
+    bridgeHookInstalled = true;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** 经自建协议调用原生插件方法（与 native-bridge 的 toNative 同构） */
+function bridgeCall<T>(methodName: string, options: Record<string, unknown> = {}): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    if (!ensureBridgeHook()) {
+      reject(new Error('androidBridge 不可用'));
+      return;
+    }
+    const callbackId = String(++bridgeCallbackId);
+    pendingCalls.set(callbackId, { resolve: resolve as (v: unknown) => void, reject });
+    try {
+      (window as { androidBridge?: AndroidBridgeLike }).androidBridge?.postMessage(
+        JSON.stringify({ callbackId, pluginId: 'NativePerception', methodName, options })
+      );
+    } catch (e) {
+      pendingCalls.delete(callbackId);
+      reject(e);
+    }
+  });
+}
+
+type UsageSnapshotResult = Awaited<ReturnType<CapPlugin['getUsageSnapshot']>>;
+
+/** 自建协议插件代理（方法集与 NativePerceptionPlugin.java 一致） */
+function bridgePlugin(): CapPlugin {
+  return {
+    hasUsagePermission: () => bridgeCall<{ granted: boolean }>('hasUsagePermission'),
+    openUsagePermissionSettings: () => bridgeCall<void>('openUsagePermissionSettings'),
+    getUsageSnapshot: () => bridgeCall<UsageSnapshotResult>('getUsageSnapshot'),
+    requestScreenCapture: () => bridgeCall<{ ok: boolean; canceled?: boolean }>('requestScreenCapture'),
+    grabScreenFrame: () => bridgeCall<{ ok: boolean; needSession?: boolean; frame?: string }>('grabScreenFrame'),
+    stopScreenCapture: () => bridgeCall<void>('stopScreenCapture'),
+  };
+}
+
 /** 同步判定：是否运行在原生壳里（androidBridge 由 WebView 注入，无需加载 SDK） */
 export function isNativePerception(): boolean {
   if (typeof window === 'undefined') return false;
-  return !!(window as { androidBridge?: unknown }).androidBridge;
+  const bridge = (window as { androidBridge?: unknown }).androidBridge;
+  return !!bridge && typeof (bridge as AndroidBridgeLike).postMessage === 'function';
 }
 
-/** 原生感知插件（原生环境才有；拿不到返回 null） */
+/** 原生感知插件：优先官方注入的代理（同源页面），否则自建协议直连（跨域页面） */
 async function nativePlugin(): Promise<CapPlugin | null> {
   if (!isNativePerception()) return null;
+  // 路径 A：Capacitor 注入脚本覆盖的页面（壳本地源）——Plugins 上已有插件代理
   const cap = await loadCapacitor();
-  if (!cap || !cap.isNativePlatform()) return null;
-  const plugin = cap.Plugins?.['NativePerception'];
-  return plugin ?? null;
+  const plugin = cap?.Plugins?.['NativePerception'];
+  if (plugin) return plugin;
+  // 路径 B：跨域页面（注入脚本不覆盖外域）——自建消息协议直连 androidBridge
+  if (ensureBridgeHook()) return bridgePlugin();
+  return null;
 }
 
 // ---------------- UsageStats（真机感知） ----------------
@@ -139,7 +250,7 @@ export async function requestNativeScreenCapture(): Promise<'ok' | 'canceled' | 
   try {
     const r = await p.requestScreenCapture();
     if (r && r.ok) return 'ok';
-    return r?.canceled ? 'canceled' : 'canceled';
+    return 'canceled';
   } catch {
     return 'canceled';
   }
