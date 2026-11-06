@@ -786,24 +786,6 @@ function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
         {/* 关于本机 */}
         <div className="mx-4 mt-4 divide-y divide-black/[0.05] overflow-hidden rounded-[22px] bg-white/55 shadow-[0_8px_28px_rgba(17,24,39,0.06)] ring-1 ring-white/70 backdrop-blur-2xl dark:divide-white/[0.06] dark:bg-white/[0.06] dark:ring-white/[0.09]">
           <MainRow icon={Info} tone={TONE_GRAY} label="关于本机" onClick={() => onOpen('about')} />
-          <MainRow
-            icon={Download}
-            tone={TONE_GRAY}
-            label="下载安卓 APP"
-            value="5201314.apk"
-            onClick={() => {
-              // 优先新标签页打开（走平台代理会话通道）；被拦截则在当前页触发下载
-              const w = window.open('/5201314.apk', '_blank');
-              if (!w) {
-                const a = document.createElement('a');
-                a.href = '/5201314.apk';
-                a.download = '5201314.apk';
-                document.body.appendChild(a);
-                a.click();
-                a.remove();
-              }
-            }}
-          />
         </div>
 
         <p className="py-6 text-center text-[12px] text-muted-foreground">
