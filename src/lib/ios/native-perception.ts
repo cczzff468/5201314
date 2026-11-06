@@ -40,6 +40,15 @@ type UsageSnapshotResult = {
 
 type ShizukuStatusResult = { supported?: boolean; running?: boolean; granted?: boolean; version?: number };
 type ShizukuPermissionResult = { ok?: boolean; granted?: boolean; reason?: string };
+type ShizukuExecOptions = {
+  /** 行过滤 token（全部命中的行才保留；控制回传体积） */
+  mustContain?: string[];
+  /** 回传行数上限（默认 1000，硬顶 20000） */
+  maxLines?: number;
+  /** 看门狗超时毫秒（默认 8000，硬顶 30000） */
+  timeoutMs?: number;
+};
+type ShizukuExecResult = { ok?: boolean; out?: string; reason?: string };
 
 type CapPlugin = {
   hasUsagePermission(): Promise<{ granted: boolean }>;
@@ -66,6 +75,8 @@ type CapPlugin = {
   stopScreenCapture(): Promise<void>;
   shizukuStatus(): Promise<ShizukuStatusResult>;
   requestShizukuPermission(): Promise<ShizukuPermissionResult>;
+  shizukuExec(options?: { cmd?: string[] } & ShizukuExecOptions): Promise<ShizukuExecResult>;
+  shizukuScreencap(): Promise<{ ok?: boolean; frame?: string; reason?: string }>;
 };
 
 type CapacitorCore = {
@@ -252,6 +263,8 @@ function bridgePlugin(): CapPlugin {
     stopScreenCapture: () => nativeCall<void>('stopScreenCapture'),
     shizukuStatus: () => nativeCall<ShizukuStatusResult>('shizukuStatus'),
     requestShizukuPermission: () => nativeCall<ShizukuPermissionResult>('requestShizukuPermission', {}, 35_000),
+    shizukuExec: (options) => nativeCall<ShizukuExecResult>('shizukuExec', options ?? {}, (options?.timeoutMs ?? 8000) + 16_000),
+    shizukuScreencap: () => nativeCall<{ ok?: boolean; frame?: string; reason?: string }>('shizukuScreencap', {}, 30_000),
   };
 }
 
@@ -616,6 +629,56 @@ export async function nativeRequestShizukuPermission(): Promise<ShizukuPermissio
   if (!(await shizukuBridgeAlive())) return null;
   try {
     return await nativeCall<ShizukuPermissionResult>('requestShizukuPermission', {}, 35_000);
+  } catch {
+    return null;
+  }
+}
+
+// ---------------- Shizuku 能力实验室（v1.3：通用 shell 执行 + 静默截屏） ----------------
+// 原生侧只提供带白名单的 shizukuExec / shizukuScreencap 两个底座方法，
+// 全部具体能力（点按/滑动/输入/按键/打开App/强杀/冻结/安装/媒体/网络开关/
+// 通知快照/前台App/电量/剪贴板/短信/通话/logcat/自授权）在 @/lib/ios/shizuku-lab
+// 里拼 argv + 解析 —— 加能力只改网页、不用重新打包 APK。
+
+export type { ShizukuExecOptions, ShizukuExecResult };
+
+let shizukuLabState: boolean | null = null; // null = 未探测；false = 旧版 APP（v1.2.1 及更早）
+
+/** 能力实验室桥能力探测（新 APK 立即响应；旧 APK 对未知方法不回包 → 超时即 false） */
+export async function nativeShizukuLabSupported(): Promise<boolean | null> {
+  if (!isNativePerception()) return null;
+  if (shizukuLabState !== null) return shizukuLabState;
+  try {
+    // 用最轻的只读命令探测：旧壳无 shizukuExec 方法 → 3s 无响应判 false
+    const r = await Promise.race([
+      nativeCall<ShizukuExecResult>('shizukuExec', { cmd: ['wm', 'size'], maxLines: 8 }, 2500),
+      new Promise<never>((_, rej) => window.setTimeout(() => rej(new Error('probe-timeout')), 2600)),
+    ]);
+    shizukuLabState = typeof r?.ok === 'boolean' || typeof r?.reason === 'string';
+  } catch {
+    shizukuLabState = false;
+  }
+  return shizukuLabState;
+}
+
+/** 通用 Shizuku shell 执行（白名单见原生 SHIZUKU_ALLOWED_BINARIES；null = 非原生环境/桥断） */
+export async function nativeShizukuExec(
+  cmd: string[],
+  opts: ShizukuExecOptions = {},
+): Promise<ShizukuExecResult | null> {
+  if (!isNativePerception()) return null;
+  try {
+    return await nativeCall<ShizukuExecResult>('shizukuExec', { cmd, ...opts }, (opts.timeoutMs ?? 8000) + 16_000);
+  } catch {
+    return null;
+  }
+}
+
+/** 静默截屏（免 MediaProjection 授权弹窗；dataURL 或 null） */
+export async function nativeShizukuScreencap(): Promise<{ ok?: boolean; frame?: string; reason?: string } | null> {
+  if (!isNativePerception()) return null;
+  try {
+    return await nativeCall<{ ok?: boolean; frame?: string; reason?: string }>('shizukuScreencap', {}, 30_000);
   } catch {
     return null;
   }

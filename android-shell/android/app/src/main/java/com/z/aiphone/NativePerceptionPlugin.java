@@ -26,6 +26,7 @@ import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Calendar;
 import java.util.Date;
 import java.util.HashMap;
@@ -66,6 +67,14 @@ import rikka.shizuku.Shizuku;
  *
  * ④ Shizuku 状态：shizukuStatus（binder 活性/授权/版本）+ requestShizukuPermission
  *    （拉起 Shizuku 授权页，结果经监听器回传）。
+ *
+ * ⑤ Shizuku 能力实验室（v1.3）：
+ *    - shizukuExec({cmd, mustContain?, maxLines?, timeoutMs?})：通用 shell 命令执行，
+ *      argv[0] 必须命中白名单（默认拒绝 rm/dd/reboot/mount 等一切危险二进制）；
+ *      网页侧在此基础上拼出全部能力（点按/滑动/输入/按键/打开App/强杀/冻结/
+ *      安装卸载/媒体音量/网络开关/通知快照/前台App/电量/剪贴板/短信/通话/logcat/
+ *      自授权……），加能力只改网页、不用重新打包 APK；
+ *    - shizukuScreencap()：静默截屏（服务端降采样 JPEG base64，免 MediaProjection 授权弹窗）。
  */
 @CapacitorPlugin(name = "NativePerception")
 public class NativePerceptionPlugin extends Plugin {
@@ -81,6 +90,26 @@ public class NativePerceptionPlugin extends Plugin {
     private static final long SHIZUKU_DUMP_TIMEOUT_MS = 8000L;
     /** dumpsys 解析保留的事件上限（防异常巨大输出） */
     private static final int DUMP_EVENT_LIMIT = 60_000;
+
+    /** shizukuExec 允许执行的二进制白名单（argv[0]，默认拒绝一切其余命令：
+     *  rm/dd/reboot/mount/kill/sh 等均不在名单内；Runtime.exec 数组参数不经 shell，
+     *  不存在拼接注入间道，白名单首元即足够拦截） */
+    private static final Set<String> SHIZUKU_ALLOWED_BINARIES = new HashSet<>(Arrays.asList(
+            "input",      // 点按/滑动/打字/按键
+            "am",         // 打开App/强杀
+            "pm",         // 冻结/解冻/安装/卸载/包列表
+            "monkey",     // 按包名拉起 App（免 Activity 名）
+            "svc",        // wifi/流量/蓝牙开关
+            "media",      // 媒体按键/音量
+            "dumpsys",    // 通知/前台App/媒体会话/电量/剪贴板等只读快照
+            "cmd",        // appops 自授权 / notification allow_listener
+            "settings",   // 系统设置读写（实验室谨慎用）
+            "content",    // 短信/通话记录/日历 provider 查询
+            "logcat",     // 系统日志（排查真机 bug）
+            "screencap",  // 截屏（配合 shScreencap）
+            "wm",         // 屏幕尺寸（滑动坐标计算用）
+            "cat"         // 读文件（仅限 shell 可读路径）
+    ));
 
     private PluginCall pendingCaptureCall;
 
@@ -622,6 +651,136 @@ public class NativePerceptionPlugin extends Plugin {
 
     private Shizuku.OnRequestPermissionResultListener shizukuPermListener;
 
+    // ================= Shizuku 能力实验室（v1.3：通用 shell 执行 + 静默截屏） =================
+
+    /** Shizuku 就绪态检查：未运行/未授权时返回对应 reason，否则 null */
+    private String shizukuGateReason() {
+        if (!shizukuBinderAlive()) return "shizuku-not-running";
+        if (!shizukuPermissionGranted()) return "shizuku-no-permission";
+        return null;
+    }
+
+    /** argv 数组参数提取（null/空数组返回 null） */
+    private String[] stringArrayArg(PluginCall call, String key) {
+        try {
+            JSArray arr = call.getArray(key, null);
+            if (arr == null || arr.length() == 0) return null;
+            String[] out = new String[arr.length()];
+            for (int i = 0; i < arr.length(); i++) {
+                Object o = arr.opt(i);
+                if (o == null) return null;
+                out[i] = String.valueOf(o).trim();
+                if (out[i].isEmpty()) return null;
+            }
+            return out;
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    /**
+     * 通用 shell 命令执行（能力实验室底座）：
+     * - cmd：argv 数组，argv[0] 必须命中 SHIZUKU_ALLOWED_BINARIES 白名单；
+     * - mustContain：可选行过滤 token（全部命中的行才保留，控制回传体积）；
+     * - maxLines：回传行数上限（默认 1000，硬顶 20000；服务端另有 400K 字符环形上限）；
+     * - timeoutMs：看门狗超时（默认 8s，硬顶 30s）；
+     * 返回 { ok, out } / { ok:false, reason }（reason：shizuku-not-running /
+     * shizuku-no-permission / bind-* / 不在白名单时直接 reject）。
+     */
+    @PluginMethod
+    public void shizukuExec(PluginCall call) {
+        final String[] cmd = stringArrayArg(call, "cmd");
+        if (cmd == null) {
+            call.reject("缺少或非法的 cmd 参数（非空字符串数组）");
+            return;
+        }
+        if (!SHIZUKU_ALLOWED_BINARIES.contains(cmd[0])) {
+            call.reject("命令不在白名单：" + cmd[0]);
+            return;
+        }
+        for (String a : cmd) {
+            if (a.indexOf('\0') >= 0) { // 防御性：二进制安全
+                call.reject("cmd 含非法字符");
+                return;
+            }
+        }
+        final String[] mustContain = stringArrayArg(call, "mustContain");
+        int ml;
+        long tm;
+        try {
+            ml = call.getInt("maxLines", 1000);
+        } catch (Throwable t) {
+            ml = 1000;
+        }
+        try {
+            tm = call.getLong("timeoutMs", 8000L);
+        } catch (Throwable t) {
+            tm = 8000L;
+        }
+        final int maxLines = Math.max(1, Math.min(20_000, ml));
+        final long timeoutMs = Math.max(1000L, Math.min(30_000L, tm));
+
+        String gate = shizukuGateReason();
+        if (gate != null) {
+            JSObject ret = new JSObject();
+            ret.put("ok", false);
+            ret.put("reason", gate);
+            call.resolve(ret);
+            return;
+        }
+        new Thread(() -> {
+            try {
+                IPerceptionShellService svc = requireShellService(6000);
+                String out = svc.execFiltered(cmd, mustContain, 0L, maxLines, timeoutMs);
+                JSObject ret = new JSObject();
+                ret.put("ok", true);
+                ret.put("out", out == null ? "" : out);
+                call.resolve(ret);
+            } catch (Throwable t) {
+                JSObject ret = new JSObject();
+                ret.put("ok", false);
+                ret.put("reason", t instanceof IllegalStateException ? t.getMessage() : "exec-error");
+                call.resolve(ret);
+            }
+        }, "shizuku-exec").start();
+    }
+
+    /**
+     * 静默截屏（免 MediaProjection 授权弹窗）：screencap → 服务端降采样 JPEG base64 dataURL。
+     * FLAG_SECURE 页面/失败 → { ok:false, reason:'empty' }。
+     */
+    @PluginMethod
+    public void shizukuScreencap(PluginCall call) {
+        String gate = shizukuGateReason();
+        if (gate != null) {
+            JSObject ret = new JSObject();
+            ret.put("ok", false);
+            ret.put("reason", gate);
+            call.resolve(ret);
+            return;
+        }
+        new Thread(() -> {
+            try {
+                IPerceptionShellService svc = requireShellService(6000);
+                String frame = svc.shScreencap(10_000L);
+                JSObject ret = new JSObject();
+                if (frame != null && !frame.isEmpty()) {
+                    ret.put("ok", true);
+                    ret.put("frame", frame);
+                } else {
+                    ret.put("ok", false);
+                    ret.put("reason", "empty");
+                }
+                call.resolve(ret);
+            } catch (Throwable t) {
+                JSObject ret = new JSObject();
+                ret.put("ok", false);
+                ret.put("reason", t instanceof IllegalStateException ? t.getMessage() : "exec-error");
+                call.resolve(ret);
+            }
+        }, "shizuku-screencap").start();
+    }
+
     // ---------------- Shizuku UserService（shell 权限命令执行） ----------------
 
     private Shizuku.UserServiceArgs shellServiceArgs;
@@ -638,7 +797,7 @@ public class NativePerceptionPlugin extends Plugin {
                             new ComponentName(getContext(), PerceptionShellService.class))
                     .processNameSuffix("perception_shell")
                     .daemon(false)
-                    .version(2); // v2：改为「超限保留最新事件」的环形过滤（v1 逻辑改动必须 bump）
+                    .version(3); // v3：AIDL 新增 shScreencap（静默截屏）；v2 曾改为「超限保留最新事件」；逻辑/AIDL 改动必须 bump
         }
         final CountDownLatch latch = new CountDownLatch(1);
         final AtomicReference<IPerceptionShellService> ref = new AtomicReference<>(null);

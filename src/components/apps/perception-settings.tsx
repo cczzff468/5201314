@@ -66,6 +66,7 @@ import {
   setUsageEngine,
   type UsageEngine,
 } from '@/lib/ios/native-perception';
+import { ShizukuLabSection } from './shizuku-lab';
 
 /** 开关行（图标 + 名称 + 说明 + 开关） */
 function ToggleRow({
@@ -702,7 +703,7 @@ export function PerceptionSettingsPage({
                       <p className="text-[12px] text-black/35 dark:text-white/35">Shizuku 状态检测中…</p>
                     ) : shizuku === null ? (
                       <p className="text-[12px] leading-snug text-[#E4554F]">
-                        当前 APP 版本不支持双引擎（看不到 Shizuku 状态）：用下方按钮更新到 v1.2.1 后可用；
+                        当前 APP 版本不支持双引擎（看不到 Shizuku 状态）：用下方按钮更新到 v1.3 后可用；
                         更新前会自动用标准模式统计。
                       </p>
                     ) : !shizuku.running ? (
@@ -736,17 +737,17 @@ export function PerceptionSettingsPage({
                     )}
                   </div>
                 )}
-                {/* v1.2.1 更新入口：新壳用户（旧版下载块对他不可见）也能拿到修复版 */}
+                {/* v1.3 更新入口：能力实验室（新壳用户也能拿到新功能） */}
                 {nativeMode && mediaSupported !== false ? (
                   <div className="space-y-1.5 pt-1">
                     <div className={`border-t ${dividerCls} my-0.5`} />
                     <span className="block text-[12px] font-medium text-black/55 dark:text-white/55">
-                      APP 更新（v1.2.1 · 修复使用时长）
+                      APP 更新（v1.3 · Shizuku 能力实验室）
                     </span>
                     <p className="text-[11px] leading-snug text-black/40 dark:text-white/40">
-                      v1.2.1 修正时长口径：息屏、锁屏时段不再计入使用时长（旧版会把整晚
-                      熄屏时间算成在用 App）；解锁回到原 App 自动继续计时。已装 v1.2 也
-                      建议更新，覆盖安装、数据不丢。
+                      v1.3 新增 Shizuku 能力实验室：AI 动手（点按/滑动/打开·强杀·冻结App/媒体音量/网络开关）
+                      + AI 看见（静默截屏/通知栏/前台App/电量/剪贴板）+ 一键自授权；并含 v1.2.1 的时长口径
+                      修正（息屏/锁屏不计入使用时长）。已装旧版建议更新，覆盖安装、数据不丢。
                     </p>
                     <button
                       type="button"
@@ -755,7 +756,7 @@ export function PerceptionSettingsPage({
                       className="block w-full rounded-full py-2 text-center text-[13px] font-medium text-white active:opacity-70"
                       style={{ backgroundColor: accent }}
                     >
-                      {apkLinkCopied ? '✓ 链接已复制，去浏览器粘贴下载' : '下载 v1.2.1（自动复制链接）'}
+                      {apkLinkCopied ? '✓ 链接已复制，去浏览器粘贴下载' : '下载 v1.3（自动复制链接）'}
                     </button>
                     {apkUrl ? (
                       <p className="break-all text-[10.5px] leading-snug text-black/30 dark:text-white/30">
@@ -782,7 +783,7 @@ export function PerceptionSettingsPage({
                           className="block w-full rounded-full py-2 text-center text-[13.5px] font-medium text-white active:opacity-70"
                           style={{ backgroundColor: accent }}
                         >
-                          下载新版 APP（v1.2.1）
+                          下载新版 APP（v1.3）
                         </a>
                       );
                     }
@@ -798,7 +799,7 @@ export function PerceptionSettingsPage({
                           className="block w-full rounded-full py-2 text-center text-[13.5px] font-medium text-white active:opacity-70"
                           style={{ backgroundColor: accent }}
                         >
-                          下载新版 APP（v1.2.1）
+                          下载新版 APP（v1.3）
                         </button>
                         <p className="text-[12px] leading-snug text-black/40 dark:text-white/40">
                           {apkLinkCopied
@@ -977,6 +978,18 @@ export function PerceptionSettingsPage({
             testId={`${testPrefix}-settings-perception-stats`}
           />
         </div>
+
+        {/* Shizuku 能力实验室（v1.3）：AI 动手/看见/自授权 全能力点单（仅 APP 原生模式显示） */}
+        {nativeMode ? (
+          <ShizukuLabSection
+            accent={accent}
+            testPrefix={testPrefix}
+            cardCls={cardCls}
+            dividerCls={dividerCls}
+            fieldCls={fieldCls}
+            shizuku={shizuku}
+          />
+        ) : null}
 
         {/* 看屏幕 · VLM */}
         <div className={`${cardCls} mt-3 overflow-hidden`}>
