@@ -2,6 +2,7 @@ package com.z.aiphone;
 
 import android.app.Activity;
 import android.app.AppOpsManager;
+import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.ApplicationInfo;
@@ -9,6 +10,7 @@ import android.content.pm.PackageManager;
 import android.os.Build;
 import android.os.Process;
 import android.provider.Settings;
+import android.service.notification.NotificationListenerService;
 
 import com.getcapacitor.JSArray;
 import com.getcapacitor.JSObject;
@@ -32,10 +34,16 @@ import java.util.Map;
  * ① UsageStats 真机感知（免装 ActivityWatch 的替代数据源）：
  *    - hasUsagePermission / openUsagePermissionSettings：PACKAGE_USAGE_STATS
  *      特殊权限检测与跳系统设置（一次授权终身有效）；
- *    - getUsageSnapshot：今日前台 App 流水（UsageEvents）→ 当前 App + 已持续 /
- *      分 App 时长 / 总时长 / 切换次数 / 近期历史，应用名友好化；
+ *    - getUsageSnapshot：今日前台 App 流水 → 精确前台会话（RESUMED→PAUSED 配对，
+ *      息屏/锁屏时间不再计入）→ 当前 App + 已持续 / 分 App 时长 / 打开次数 /
+ *      总时长 / 切换次数 / 最长单次 / 近期历史 / 近 3 小时打开过的 App；
  *
- * ② 屏幕抓帧（「让 TA 看到我的屏幕」）：
+ * ② 媒体感知（正在听什么歌）：NotificationListenerService（MediaListenerService）
+ *    读取音乐 App 的媒体通知/媒体会话 → 歌名/歌手/专辑/播放状态；
+ *    - hasMediaPermission / openMediaPermissionSettings：「通知使用权」检测与跳设置；
+ *    - getNowPlaying：当前正在播放的媒体快照；
+ *
+ * ③ 屏幕抓帧（「让 TA 看到我的屏幕」）：
  *    - requestScreenCapture：MediaProjection 授权（系统弹窗，每会话一次）→
  *      ScreenCaptureService 前台服务建流；
  *    - grabScreenFrame：抓一帧 → dataURL（网页端直接喂 VLM 识图）；
@@ -44,10 +52,8 @@ import java.util.Map;
 @CapacitorPlugin(name = "NativePerception")
 public class NativePerceptionPlugin extends Plugin {
 
-    private static final int REQ_USAGE_EVENT = 1;
     private static final int REQ_SCREEN_CAPTURE = 2;
 
-    private PluginCall pendingUsageCall;
     private PluginCall pendingCaptureCall;
 
     // ================= UsageStats（真机感知） =================
@@ -72,13 +78,13 @@ public class NativePerceptionPlugin extends Plugin {
         }
     }
 
-    /** 授权页返回事件（用户从系统设置回来）→ 立刻回报权限状态 */
-    @PluginMethod
-    public void awaitUsagePermission(PluginCall call) {
-        pendingUsageCall = call;
-        // 不阻塞 resolve：设置页回不回来都先回当前状态由轮询兜底，这里挂起等待
-    }
-
+    /**
+     * 今日前台会话聚合（v1.1 数据质量重写）：
+     *
+     * 旧版只统计 RESUMED 事件、把「上一次打开 → 下一次打开」的整段时间（含息屏/
+     * 锁屏/放下的时间）全记进上一个 App —— 时长严重虚高。新版按
+     * ACTIVITY_RESUMED(1)/ACTIVITY_PAUSED(2) 配对计时：息屏与切走即停止计时。
+     */
     @PluginMethod
     public void getUsageSnapshot(PluginCall call) {
         if (!checkUsagePermission()) {
@@ -102,51 +108,108 @@ public class NativePerceptionPlugin extends Plugin {
             android.app.usage.UsageEvents events = usm.queryEvents(startOfDay, now);
             android.app.usage.UsageEvents.Event ev = new android.app.usage.UsageEvents.Event();
 
-            Map<String, Long> durationByApp = new HashMap<>();
-            List<long[]> history = new ArrayList<>(); // {ts, hashCode-of-pkg 由 map 查}
-            List<String> historyPkgs = new ArrayList<>();
+            final int TYPE_RESUMED = android.app.usage.UsageEvents.Event.ACTIVITY_RESUMED;   // = 1
+            final int TYPE_PAUSED = android.app.usage.UsageEvents.Event.ACTIVITY_PAUSED;    // = 2
 
+            // 分 App 聚合
+            final Map<String, Long> durationByApp = new HashMap<>();   // 前台总时长（精确）
+            final Map<String, Integer> opensByApp = new HashMap<>();   // 打开次数（RESUMED 计数）
+            final Map<String, Long> lastOpenByApp = new HashMap<>();   // 最近一次打开时间
+            final List<long[]> history = new ArrayList<>();            // {ts} 与 historyPkgs 平行
+            final List<String> historyPkgs = new ArrayList<>();
+
+            // 当前打开中的会话（尚未收到 PAUSED = 仍在前台）
+            String openApp = null;
+            long openStart = 0;
+            // 最后一个会话（可能已暂停）：用于「最近用过」
             String lastApp = null;
-            long lastTs = 0;
+            long lastAppStart = 0;
+
+            String longestApp = null;
+            long longestMs = 0;
             int switchCount = 0;
 
             while (events.hasNextEvent()) {
                 events.getNextEvent(ev);
                 int type = ev.getEventType();
-                if (type == android.app.usage.UsageEvents.Event.MOVE_TO_FOREGROUND
-                        || type == android.app.usage.UsageEvents.Event.ACTIVITY_RESUMED) {
-                    String pkg = ev.getPackageName();
-                    long ts = ev.getTimeStamp();
-                    if (lastApp != null && ts > lastTs) {
-                        durationByApp.merge(lastApp, ts - lastTs, Long::sum);
+                if (type != TYPE_RESUMED && type != TYPE_PAUSED) continue;
+                String pkg = ev.getPackageName();
+                long ts = ev.getTimeStamp();
+                if (pkg == null) continue;
+
+                if (type == TYPE_RESUMED) {
+                    // 新 App 到前台：先结算当前打开中的会话（部分 ROM 不发 PAUSED）
+                    if (openApp != null && ts > openStart) {
+                        long dur = ts - openStart;
+                        durationByApp.merge(openApp, dur, Long::sum);
+                        if (dur > longestMs) { longestMs = dur; longestApp = openApp; }
                     }
+                    openApp = pkg;
+                    openStart = ts;
                     lastApp = pkg;
-                    lastTs = ts;
+                    lastAppStart = ts;
+                    opensByApp.merge(pkg, 1, Integer::sum);
+                    lastOpenByApp.put(pkg, ts);
                     switchCount++;
                     history.add(new long[]{ts});
                     historyPkgs.add(pkg);
+                } else { // TYPE_PAUSED
+                    if (openApp != null && openApp.equals(pkg) && ts >= openStart) {
+                        long dur = ts - openStart;
+                        durationByApp.merge(openApp, dur, Long::sum);
+                        if (dur > longestMs) { longestMs = dur; longestApp = openApp; }
+                        openApp = null; // 息屏/切走：停止计时
+                    }
+                    // 非当前会话的 PAUSED（乱序/重复）：忽略
                 }
             }
-            // 收尾：最后一个 App 持续到现在（写入 todayApps 里由「当前」单独表达，不折入总量）
 
             PackageManager pm = getContext().getPackageManager();
             SimpleDateFormat hhmm = new SimpleDateFormat("HH:mm", Locale.getDefault());
 
+            // 分 App 时长列表（降序；带上打开次数与最近打开时间，最多 30 个）
             JSArray todayApps = new JSArray();
             List<Map.Entry<String, Long>> sorted = new ArrayList<>(durationByApp.entrySet());
             sorted.sort((a, b) -> Long.compare(b.getValue(), a.getValue()));
             long totalMs = 0;
+            int appCount = 0;
             for (Map.Entry<String, Long> e : sorted) {
                 totalMs += e.getValue();
+                if (appCount++ >= 30) continue;
                 JSObject o = new JSObject();
                 o.put("app", e.getKey());
                 o.put("name", appLabel(pm, e.getKey()));
                 o.put("ms", e.getValue());
+                o.put("opens", opensByApp.getOrDefault(e.getKey(), 0));
+                Long lastOpen = lastOpenByApp.get(e.getKey());
+                o.put("lastOpenTs", lastOpen == null ? 0 : lastOpen);
                 todayApps.put(o);
             }
 
+            // 近 3 小时打开过的 App（最近打开在前；「我最近打开了什么App」直接可答）
+            JSArray recentApps = new JSArray();
+            final long RECENT_WINDOW = 3 * 60 * 60 * 1000L;
+            List<String> recentPkgs = new ArrayList<>();
+            for (Map.Entry<String, Long> e : lastOpenByApp.entrySet()) {
+                if (now - e.getValue() <= RECENT_WINDOW) recentPkgs.add(e.getKey());
+            }
+            recentPkgs.sort((a, b) -> Long.compare(lastOpenByApp.get(b), lastOpenByApp.get(a)));
+            int recentCount = 0;
+            for (String pkg : recentPkgs) {
+                if (recentCount++ >= 10) break;
+                JSObject o = new JSObject();
+                o.put("app", pkg);
+                o.put("name", appLabel(pm, pkg));
+                Long ts = lastOpenByApp.get(pkg);
+                o.put("hhmm", hhmm.format(new Date(ts == null ? now : ts)));
+                o.put("opens", opensByApp.getOrDefault(pkg, 0));
+                o.put("ms", durationByApp.getOrDefault(pkg, 0L));
+                recentApps.put(o);
+            }
+
+            // 近期切换时间线（最后 24 条）
             JSArray hist = new JSArray();
-            int from = Math.max(0, historyPkgs.size() - 6);
+            int from = Math.max(0, historyPkgs.size() - 24);
             for (int i = from; i < historyPkgs.size(); i++) {
                 JSObject o = new JSObject();
                 o.put("hhmm", hhmm.format(new Date(history.get(i)[0])));
@@ -157,17 +220,35 @@ public class NativePerceptionPlugin extends Plugin {
 
             JSObject ret = new JSObject();
             ret.put("ok", true);
-            if (lastApp != null && lastTs > 0) {
+            if (openApp != null && openStart > 0) {
+                // 正在前台：会话起点精确
+                JSObject cur = new JSObject();
+                cur.put("app", openApp);
+                cur.put("name", appLabel(pm, openApp));
+                cur.put("ongoingMs", Math.max(0, now - openStart));
+                cur.put("at", openStart);
+                ret.put("current", cur);
+            } else if (lastApp != null && lastAppStart > 0) {
+                // 已息屏/切走：报「最近使用」，at = 最后一次打开时间（网页按此老化）
                 JSObject cur = new JSObject();
                 cur.put("app", lastApp);
                 cur.put("name", appLabel(pm, lastApp));
-                cur.put("ongoingMs", Math.max(0, now - lastTs));
+                cur.put("ongoingMs", 0);
+                cur.put("at", lastAppStart);
+                cur.put("closed", true);
                 ret.put("current", cur);
             }
             ret.put("todayApps", todayApps);
             ret.put("todayTotalMs", totalMs);
             ret.put("switchCount", switchCount);
             ret.put("history", hist);
+            ret.put("recentApps", recentApps);
+            if (longestApp != null) {
+                JSObject lg = new JSObject();
+                lg.put("app", appLabel(pm, longestApp));
+                lg.put("ms", longestMs);
+                ret.put("longest", lg);
+            }
             call.resolve(ret);
         } catch (Exception e) {
             call.reject("查询使用情况失败：" + e.getMessage());
@@ -193,6 +274,91 @@ public class NativePerceptionPlugin extends Plugin {
         } catch (Exception e) {
             return pkg;
         }
+    }
+
+    // ================= 媒体感知（正在听什么歌） =================
+
+    /** 「通知使用权」是否已授予本 APP（读取 enabled_notification_listeners） */
+    private boolean checkMediaPermission() {
+        try {
+            String flat = Settings.Secure.getString(
+                    getContext().getContentResolver(), "enabled_notification_listeners");
+            return flat != null && flat.contains(getContext().getPackageName());
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    @PluginMethod
+    public void hasMediaPermission(PluginCall call) {
+        JSObject ret = new JSObject();
+        ret.put("granted", checkMediaPermission());
+        ret.put("supported", true);
+        call.resolve(ret);
+    }
+
+    @PluginMethod
+    public void openMediaPermissionSettings(PluginCall call) {
+        try {
+            // 先尝试让系统（重新）绑定监听服务，再跳设置页
+            try {
+                if (Build.VERSION.SDK_INT >= 24) {
+                    NotificationListenerService.requestRebind(
+                            new ComponentName(getContext(), MediaListenerService.class));
+                }
+            } catch (Throwable ignored) {
+            }
+            Intent i = new Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS);
+            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            getContext().startActivity(i);
+            call.resolve();
+        } catch (Exception e) {
+            call.reject("无法打开系统设置：" + e.getMessage());
+        }
+    }
+
+    /** 当前正在播放的媒体（歌名/歌手/专辑/状态）；无权限或暂无媒体时相应标记 */
+    @PluginMethod
+    public void getNowPlaying(PluginCall call) {
+        if (!checkMediaPermission()) {
+            JSObject ret = new JSObject();
+            ret.put("ok", false);
+            ret.put("needPermission", true);
+            call.resolve(ret);
+            return;
+        }
+        // 有权限但服务还没连上（刚授权/进程重启）：请求系统重绑，本轮先回空
+        if (MediaListenerService.instance == null) {
+            try {
+                if (Build.VERSION.SDK_INT >= 24) {
+                    NotificationListenerService.requestRebind(
+                            new ComponentName(getContext(), MediaListenerService.class));
+                }
+            } catch (Throwable ignored) {
+            }
+            JSObject ret = new JSObject();
+            ret.put("ok", true);
+            ret.put("connecting", true);
+            call.resolve(ret);
+            return;
+        }
+        JSObject ret = new JSObject();
+        ret.put("ok", true);
+        MediaListenerService.Info info = MediaListenerService.latest();
+        if (info != null) {
+            JSObject p = new JSObject();
+            p.put("app", appLabel(getContext().getPackageManager(), info.pkg));
+            p.put("pkg", info.pkg);
+            p.put("title", info.title == null ? "" : info.title);
+            p.put("artist", info.artist == null ? "" : info.artist);
+            p.put("album", info.album == null ? "" : info.album);
+            p.put("state", info.state == null ? "" : info.state);
+            p.put("updatedAt", info.updatedAt);
+            ret.put("playing", p);
+        } else {
+            ret.put("playing", null);
+        }
+        call.resolve(ret);
     }
 
     // ================= 屏幕抓帧（TA 看到我的屏幕） =================
@@ -268,19 +434,6 @@ public class NativePerceptionPlugin extends Plugin {
                 ret.put("ok", false);
                 ret.put("canceled", true);
             }
-            call.resolve(ret);
-        }
-    }
-
-    @Override
-    protected void handleOnResume() {
-        super.handleOnResume();
-        // 从系统授权设置页回到 APP：回报当前权限状态（awaitUsagePermission 的调用方）
-        PluginCall call = pendingUsageCall;
-        if (call != null) {
-            pendingUsageCall = null;
-            JSObject ret = new JSObject();
-            ret.put("granted", checkUsagePermission());
             call.resolve(ret);
         }
     }

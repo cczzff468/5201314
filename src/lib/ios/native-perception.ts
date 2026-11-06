@@ -28,11 +28,29 @@ type CapPlugin = {
   getUsageSnapshot(): Promise<{
     ok: boolean;
     needPermission?: boolean;
-    current?: { app: string; name: string; ongoingMs: number };
-    todayApps?: { app: string; name: string; ms: number }[];
+    current?: { app: string; name: string; ongoingMs: number; at?: number; closed?: boolean };
+    todayApps?: { app: string; name: string; ms: number; opens?: number; lastOpenTs?: number }[];
     todayTotalMs?: number;
     switchCount?: number;
+    longest?: { app: string; ms: number };
     history?: { hhmm: string; app: string; name: string }[];
+    recentApps?: { app: string; name: string; hhmm: string; opens: number; ms: number }[];
+  }>;
+  hasMediaPermission(): Promise<{ granted: boolean }>;
+  openMediaPermissionSettings(): Promise<void>;
+  getNowPlaying(): Promise<{
+    ok: boolean;
+    needPermission?: boolean;
+    connecting?: boolean;
+    playing?: {
+      app: string;
+      pkg: string;
+      title: string;
+      artist: string;
+      album: string;
+      state: string;
+      updatedAt: number;
+    } | null;
   }>;
   requestScreenCapture(): Promise<{ ok: boolean; canceled?: boolean }>;
   grabScreenFrame(): Promise<{ ok: boolean; needSession?: boolean; frame?: string }>;
@@ -172,6 +190,33 @@ function bridgeCall<T>(methodName: string, options: Record<string, unknown> = {}
 }
 
 type UsageSnapshotResult = Awaited<ReturnType<CapPlugin['getUsageSnapshot']>>;
+type NowPlayingResult = Awaited<ReturnType<CapPlugin['getNowPlaying']>>;
+
+// ---------------- 媒体桥新旧壳探测 ----------------
+// 旧 APK（v1.0）没有 hasMediaPermission/getNowPlaying 方法，且 Capacitor 对未知方法
+// 只记日志不回包 —— 直接调用会挂到 10s 超时。这里用短超时探测一次并缓存：
+// 新壳 → 立即响应；旧壳 → 超时后未页面会话内不再尝试（零后续成本）。
+let mediaBridgeState: boolean | null = null; // null = 未探测
+
+async function mediaBridgeAlive(): Promise<boolean> {
+  if (mediaBridgeState !== null) return mediaBridgeState;
+  const p = await nativePlugin();
+  if (!p) {
+    mediaBridgeState = false;
+    return false;
+  }
+  try {
+    // 2s 探测超时（正常响应在几十毫秒内；旧壳永不回包）
+    const r = await Promise.race([
+      p.hasMediaPermission(),
+      new Promise<never>((_, rej) => window.setTimeout(() => rej(new Error('probe-timeout')), 2000)),
+    ]);
+    mediaBridgeState = !!r && typeof r.granted === 'boolean';
+  } catch {
+    mediaBridgeState = false; // 桥无响应 = 旧壳无此方法
+  }
+  return mediaBridgeState;
+}
 
 /** 自建协议插件代理（方法集与 NativePerceptionPlugin.java 一致） */
 function bridgePlugin(): CapPlugin {
@@ -179,6 +224,9 @@ function bridgePlugin(): CapPlugin {
     hasUsagePermission: () => bridgeCall<{ granted: boolean }>('hasUsagePermission'),
     openUsagePermissionSettings: () => bridgeCall<void>('openUsagePermissionSettings'),
     getUsageSnapshot: () => bridgeCall<UsageSnapshotResult>('getUsageSnapshot'),
+    hasMediaPermission: () => bridgeCall<{ granted: boolean }>('hasMediaPermission'),
+    openMediaPermissionSettings: () => bridgeCall<void>('openMediaPermissionSettings'),
+    getNowPlaying: () => bridgeCall<NowPlayingResult>('getNowPlaying'),
     requestScreenCapture: () => bridgeCall<{ ok: boolean; canceled?: boolean }>('requestScreenCapture'),
     grabScreenFrame: () => bridgeCall<{ ok: boolean; needSession?: boolean; frame?: string }>('grabScreenFrame'),
     stopScreenCapture: () => bridgeCall<void>('stopScreenCapture'),
@@ -230,7 +278,58 @@ export async function openNativeUsageSettings(): Promise<boolean> {
   }
 }
 
-/** 原生 UsageStats 快照 → AwSnapshot 形状（下游感知块/设置页零改动兼容） */
+// ---------------- 媒体感知（正在听什么歌） ----------------
+
+/** 媒体桥能力（新 APK true；旧 APK false；浏览器 null）。2s 探测一次并缓存 */
+export async function nativeMediaSupported(): Promise<boolean | null> {
+  if (!isNativePerception()) return null;
+  return mediaBridgeAlive();
+}
+
+/** 原生「通知使用权」状态（读歌名/歌手需要；null = 非原生环境或旧版 APP 不支持） */
+export async function nativeMediaPermission(): Promise<boolean | null> {
+  const p = await nativePlugin();
+  if (!p) return null;
+  if (!(await mediaBridgeAlive())) return null;
+  try {
+    const r = await p.hasMediaPermission();
+    return !!r.granted;
+  } catch {
+    return false;
+  }
+}
+
+/** 跳系统设置「通知使用权」（找到 AI Phone 开启，一次授权终身有效） */
+export async function openNativeMediaSettings(): Promise<boolean> {
+  const p = await nativePlugin();
+  if (!p) return false;
+  if (!(await mediaBridgeAlive())) return false;
+  try {
+    await p.openMediaPermissionSettings();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** 原生正在播放的媒体（无权限/暂无播放/非原生/旧壳返回 null） */
+export async function nativeNowPlaying(): Promise<NowPlayingResult['playing'] | null> {
+  const p = await nativePlugin();
+  if (!p) return null;
+  if (!(await mediaBridgeAlive())) return null;
+  try {
+    const r = await p.getNowPlaying();
+    if (!r || !r.ok) return null;
+    return r.playing ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** 原生 UsageStats 快照 → AwSnapshot 形状（下游感知块/设置页零改动兼容）
+ *
+ * v1.1：同步携带媒体会话（歌名/歌手，需「通知使用权」）与最近打开的 App 列表；
+ * 时长已由原生侧按 RESUMED→PAUSED 配对精确计算（息屏不计入）。 */
 export async function nativeUsageSnapshot(): Promise<AwSnapshot | null> {
   const p = await nativePlugin();
   if (!p) return null;
@@ -238,18 +337,46 @@ export async function nativeUsageSnapshot(): Promise<AwSnapshot | null> {
     const r = await p.getUsageSnapshot();
     if (!r || !r.ok) return null;
     const now = Date.now();
+    // 媒体感知一并取（同一快照里下行；旧壳探测失败/无权限/未播放时静默省略）
+    let media: AwSnapshot['media'] | undefined;
+    if (await mediaBridgeAlive()) {
+      try {
+        const np = await p.getNowPlaying();
+        if (np && np.ok && np.playing && (np.playing.title || np.playing.state === 'playing')) {
+          media = {
+            app: np.playing.app || np.playing.pkg,
+            title: np.playing.title || '',
+            artist: np.playing.artist || '',
+            state: np.playing.state === 'playing' ? 'playing' : 'paused',
+          };
+        }
+      } catch {
+        /* 媒体不可用不影响其余数据 */
+      }
+    }
     return {
       fetchedAt: now,
       current: r.current
-        ? { app: r.current.name || r.current.app, ongoingMs: r.current.ongoingMs, at: now - (r.current.ongoingMs || 0) }
+        ? {
+            app: r.current.name || r.current.app,
+            ongoingMs: r.current.ongoingMs || 0,
+            at: r.current.at && r.current.at > 0 ? r.current.at : now - (r.current.ongoingMs || 0),
+          }
         : undefined,
-      todayApps: (r.todayApps ?? []).map((x) => ({ app: x.name || x.app, ms: x.ms })),
+      todayApps: (r.todayApps ?? []).map((x) => ({ app: x.name || x.app, ms: x.ms, opens: x.opens })),
       todayTotalMs: r.todayTotalMs ?? 0,
       switchCount: r.switchCount ?? 0,
+      longest: r.longest,
       history: (r.history ?? []).map((x) => ({ hhmm: x.hhmm, app: x.name || x.app })),
-      // UsageStats 拿不到解锁/媒体/网页事件：省略（AwSnapshot 全字段可选）
+      recentApps: (r.recentApps ?? []).map((x) => ({
+        app: x.name || x.app,
+        hhmm: x.hhmm,
+        opens: x.opens,
+        ms: x.ms,
+      })),
+      // UsageStats 拿不到解锁/网页事件：省略（AwSnapshot 全字段可选）
       unlocks: undefined,
-      media: undefined,
+      media,
       web: undefined,
     } satisfies AwSnapshot;
   } catch {

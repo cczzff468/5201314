@@ -55,6 +55,9 @@ import {
   isNativePerception,
   nativeUsagePermission,
   openNativeUsageSettings,
+  nativeMediaPermission,
+  nativeMediaSupported,
+  openNativeMediaSettings,
   requestNativeScreenCapture,
   stopNativeScreenCapture,
 } from '@/lib/ios/native-perception';
@@ -146,16 +149,19 @@ export function PerceptionSettingsPage({
   const [streamTesting, setStreamTesting] = useState(false);
   const [streamResult, setStreamResult] = useState<{ ok: boolean; detail: string } | null>(null);
   const [shareActive, setShareActive] = useState(() => isScreenShareActive());
-  // ---------------- APP 壳原生模式（UsageStats / MediaProjection） ----------------
+  // ---------------- APP 壳原生模式（UsageStats / 媒体监听 / MediaProjection） ----------------
   const nativeMode = isNativePerception();
   const [usageGranted, setUsageGranted] = useState<boolean | null>(null);
+  const [mediaGranted, setMediaGranted] = useState<boolean | null>(null);
+  // 媒体桥能力：null = 探测中；false = 旧版 APK（无音乐感知，引导重装）；true = 新 APK
+  const [mediaSupported, setMediaSupported] = useState<boolean | null>(null);
   const [nativeSessionOn, setNativeSessionOn] = useState(false);
   // 自检结果（逐步打印；null = 未跑过）
   const [selfTesting, setSelfTesting] = useState(false);
   const [selfTestSteps, setSelfTestSteps] = useState<{ ok: boolean | null; text: string }[] | null>(null);
   // 授权状态记录（检测「刚授权」时刻：强制刷数据击穿授权前留下的 45s 空缓存）
   const grantSeenRef = useRef<boolean | null>(null);
-  // 原生模式挂载即查 UsageStats 权限；从系统授权页回来时刷新（页面 onShow 时 Cap 桥不会自动回调，用轻轮询）
+  // 原生模式挂载即查 UsageStats/媒体权限；从系统授权页回来时刷新（页面 onShow 时 Cap 桥不会自动回调，用轻轮询）
   useEffect(() => {
     if (!nativeMode) return;
     let alive = true;
@@ -169,6 +175,15 @@ export function PerceptionSettingsPage({
         grantSeenRef.current = g;
         setUsageGranted(g);
       });
+      // 媒体能力与（新版壳上的）通知使用权状态同步探（旧壳时 nativeMediaPermission 自守卫直接回 null）
+      void nativeMediaSupported().then((s) => {
+        if (!alive) return;
+        setMediaSupported(s);
+      });
+      void nativeMediaPermission().then((g) => {
+        if (!alive || g === null) return;
+        setMediaGranted(g);
+      });
     };
     probe();
     const t = window.setInterval(probe, 3000);
@@ -181,6 +196,11 @@ export function PerceptionSettingsPage({
   const openUsageGrant = async () => {
     const ok = await openNativeUsageSettings();
     if (ok) showToast('已跳转系统设置：找到 AI Phone 开「有权查看使用情况」');
+  };
+
+  const openMediaGrant = async () => {
+    const ok = await openNativeMediaSettings();
+    if (ok) showToast('已跳转系统设置：找到 AI Phone 开「通知使用权」（读歌名需要）');
   };
 
   const onNativeCapture = async () => {
@@ -234,6 +254,13 @@ export function PerceptionSettingsPage({
         } else {
           push(false, '系统权限：未开启 —— 点上方「去授权」，在系统设置里找到 AI Phone 打开');
         }
+        // ②b 媒体权限（通知使用权：读歌名/歌手）
+        const mediaOk = await nativeMediaPermission();
+        if (mediaOk === true) {
+          push(true, '媒体权限：「通知使用权」已开启（可读歌名/歌手）');
+        } else if (mediaOk === false) {
+          push(false, '媒体权限：「通知使用权」未开启 —— 想让 TA 知道你在听什么歌，点上方「去授权」');
+        }
         // ③ 实时数据（force 击穿旧缓存，同时把结果写入缓存供下一次发送直接用）
         if (granted === true) {
           const snap = await fetchAwSnapshot(getPerception(sessionKey).awUrl, true);
@@ -244,6 +271,7 @@ export function PerceptionSettingsPage({
               parts.push(`今日Top：${snap.todayApps.slice(0, 3).map((x) => `${x.app} ${fmtMs(x.ms)}`).join('、')}`);
             }
             if (snap.todayTotalMs && snap.todayTotalMs > 0) parts.push(`总时长 ${fmtMs(snap.todayTotalMs)}`);
+            if (snap.media && snap.media.title) parts.push(`正在听 ${snap.media.app}《${snap.media.title}》`);
             push(true, `实时数据：${parts.length > 0 ? parts.join('；') : '今日暂无使用记录（刚开机/统计需几分钟累计）'}`);
           } else {
             push(false, '实时数据：未取到 —— 刚授权后系统统计需要几分钟开始累计，稍后再试');
@@ -469,8 +497,9 @@ export function PerceptionSettingsPage({
           {nativeMode ? (
             <div className="space-y-2.5 px-4 py-3">
               <p className="text-[12px] leading-relaxed text-black/45 dark:text-white/45">
-                安装版 APP 直读系统使用统计（无需装 ActivityWatch、无需填地址/穿透）。
-                在下方开关按需开启；「解锁事件 / 媒体播放 / 浏览器 URL」暂需 ActivityWatch，其余原生即用。
+                安装版 APP 直读系统使用统计（无需装 ActivityWatch、无需填地址/穿透）；
+                使用时长按前台会话精确计算（息屏不计入）。在下方开关按需开启；
+                想让 TA 知道你「在听什么歌」请再开下方通知使用权（解锁/浏览器URL 暂需 ActivityWatch）。
               </p>
               <div className="flex items-center justify-between gap-2">
                 <span className={`text-[13px] font-medium ${usageGranted === true ? 'text-[#07C160]' : usageGranted === false ? 'text-[#E4554F]' : 'text-black/40 dark:text-white/40'}`}>
@@ -488,6 +517,42 @@ export function PerceptionSettingsPage({
                 </button>
               </div>
               <p className="text-[12px] leading-snug text-black/35 dark:text-white/35">系统设置 →「有权查看使用情况」→ 找到 AI Phone 打开，一次授权长期有效。</p>
+              <div className={`border-t ${dividerCls} my-0.5`} />
+              {mediaSupported === false ? (
+                <div className="space-y-1.5">
+                  <p className="text-[13px] font-medium text-[#E4554F]">当前 APP 是旧版本（不能读歌名）</p>
+                  <p className="text-[12px] leading-snug text-black/40 dark:text-white/40">
+                    音乐感知（歌名/歌手）与精确使用时长需要新版 APP。点下方重新下载安装（会覆盖安装，数据都在服务器/本地存储里不会丢）。
+                  </p>
+                  <a
+                    href="/AI-Phone.apk"
+                    download
+                    className="block w-full rounded-full py-2 text-center text-[13.5px] font-medium text-white active:opacity-70"
+                    style={{ backgroundColor: accent }}
+                  >
+                    下载新版 APP（v1.1）
+                  </a>
+                </div>
+              ) : (
+                <>
+                  <div className="flex items-center justify-between gap-2">
+                    <span className={`text-[13px] font-medium ${mediaGranted === true ? 'text-[#07C160]' : mediaGranted === false ? 'text-[#E4554F]' : 'text-black/40 dark:text-white/40'}`}>
+                      {mediaGranted === true ? '✓ 通知使用权已开启（可读歌名）' : mediaGranted === false ? '✗ 通知使用权未开启（不知道歌名）' : '媒体权限检测中…'}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => void openMediaGrant()}
+                      disabled={mediaGranted === true}
+                      data-testid={`${testPrefix}-perception-native-media-grant`}
+                      className="shrink-0 rounded-full px-3.5 py-2 text-[13px] font-medium text-white active:opacity-70 disabled:opacity-50"
+                      style={{ backgroundColor: accent }}
+                    >
+                      {mediaGranted === true ? '已授权' : '去授权'}
+                    </button>
+                  </div>
+                  <p className="text-[12px] leading-snug text-black/35 dark:text-white/35">系统设置 →「通知使用权」/「设备和应用通知」→ 找到 AI Phone 打开（播放音乐时 TA 能读到歌名歌手）。</p>
+                </>
+              )}
             </div>
           ) : (
             <div className="space-y-2 px-4 py-3">
@@ -596,7 +661,7 @@ export function PerceptionSettingsPage({
           <ToggleRow
             icon={<Music2 size={I.size} strokeWidth={I.strokeWidth} />}
             title="媒体播放"
-            desc="真机正在听的歌 / 看的视频（歌名歌手）"
+            desc={nativeMode ? '正在听的歌/看的视频（歌名歌手；需上方通知使用权）' : '真机正在听的歌 / 看的视频（歌名歌手）'}
             on={cfg.media}
             onChange={(v) => update({ media: v })}
             accent={accent}

@@ -348,25 +348,44 @@ export interface PerceptionBlockOptions {
   lastMsgTime?: number | null;
 }
 
-/** ActivityWatch 快照 → 各开关对应行 */
+/** ActivityWatch/原生快照 → 各开关对应行 */
 function awLines(cfg: PerceptionConfig, aw: AwSnapshot): string[] {
   const out: string[] = [];
   if (cfg.currentApp && aw.current) {
     // 已持续时长按 at 时间戳现场计算：缓存哪怕几分钟前的快照也能正确老化（正在玩 → 可能已放下）
     const ongoingMs = aw.current.at > 0 ? Math.max(0, Date.now() - aw.current.at) : aw.current.ongoingMs;
     const { app } = aw.current;
-    if (ongoingMs < 15 * 60_000) {
+    if (aw.current.ongoingMs > 0 && ongoingMs < 15 * 60_000) {
       out.push(`用户此刻真机正在用：${app}（已持续 ${fmtDur(ongoingMs)}）`);
-    } else {
+    } else if (aw.current.ongoingMs > 0) {
       out.push(`用户真机最近使用的前台 App：${app}（约 ${fmtDur(ongoingMs)} 前开始，现在可能已放下手机）`);
+    } else {
+      out.push(`用户真机最后使用的前台 App：${app}（约 ${fmtDur(ongoingMs)} 前用的，现在大概率已息屏或放下手机）`);
     }
   }
   if (cfg.screenTime && Array.isArray(aw.todayApps) && aw.todayApps.length > 0) {
-    const top = aw.todayApps.slice(0, 5).map((x) => `${x.app} ${fmtDur(x.ms)}`).join('、');
-    out.push(`用户今日真机分App使用：${top}（共 ${fmtDur(aw.todayTotalMs ?? 0)}）`);
+    // v1.1：Top 5 → Top 8 + 打开次数 + 「等共 N 个」，别再只能报那几个
+    const apps = aw.todayApps;
+    const shown = apps
+      .slice(0, 8)
+      .map((x) => `${x.app} ${fmtDur(x.ms)}${x.opens ? `（今日打开 ${x.opens} 次）` : ''}`)
+      .join('、');
+    const rest = apps.length > 8 ? `等共 ${apps.length} 个 App` : '';
+    out.push(`用户今日真机分App使用：${shown}${rest}（合计 ${fmtDur(aw.todayTotalMs ?? 0)}）`);
   }
-  if (cfg.appHistory && Array.isArray(aw.history) && aw.history.length > 0) {
-    out.push(`用户近期App切换：${aw.history.map((h) => `${h.hhmm} ${h.app}`).join(' → ')}`);
+  if (cfg.appHistory) {
+    // 近 3 小时打开过哪些 App（用户问「我最近打开了什么」直接可答）
+    if (Array.isArray(aw.recentApps) && aw.recentApps.length > 0) {
+      const r = aw.recentApps
+        .slice(0, 8)
+        .map((x) => `${x.app}（最后 ${x.hhmm}${x.opens && x.opens > 1 ? `，今日第 ${x.opens} 次` : ''}）`)
+        .join('、');
+      out.push(`用户近 3 小时真机打开过的App：${r}`);
+    }
+    if (Array.isArray(aw.history) && aw.history.length > 0) {
+      const h = aw.history.slice(-12).map((x) => `${x.hhmm} ${x.app}`).join(' → ');
+      out.push(`用户近期App切换时间线：${h}`);
+    }
   }
   if (cfg.unlocks && aw.unlocks && aw.unlocks.count > 0) {
     const u = aw.unlocks;

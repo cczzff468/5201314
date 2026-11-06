@@ -39,16 +39,18 @@ export interface AwEvent {
 export interface AwSnapshot {
   /** 前台 App（正在玩什么）：最后一次前台会话 + 已持续时长 */
   current?: { app: string; ongoingMs: number; at: number };
-  /** 今日分 App 使用时长（毫秒，按 app 名聚合，降序） */
-  todayApps?: { app: string; ms: number }[];
+  /** 今日分 App 使用时长（毫秒，按 app 名聚合，降序；opens = 打开次数） */
+  todayApps?: { app: string; ms: number; opens?: number }[];
   /** 今日总使用时长（毫秒） */
   todayTotalMs?: number;
   /** 今日前台会话切换次数 */
   switchCount?: number;
   /** 今日最长单次前台使用 */
   longest?: { app: string; ms: number };
-  /** 近期 App 切换记录（时间 + App，最新在后，最多 6 条） */
+  /** 近期 App 切换记录（时间 + App，最新在后，最多 24 条） */
   history?: { hhmm: string; app: string }[];
+  /** 近 3 小时打开过的 App（最近在前；含最后一次打开时间与次数） */
+  recentApps?: { app: string; hhmm: string; opens?: number; ms?: number }[];
   /** 今日解锁事件 */
   unlocks?: { count: number; lastHhmm?: string; nightCount: number };
   /** 正在播放的媒体（歌/视频） */
@@ -128,10 +130,12 @@ function hhmmOf(iso: string): string {
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 }
 
-/** 聚合今日前台事件 → 分 App 时长 / 总时长 / 切换次数 / 最长单次 / 近期切换 / 当前前台 */
-function aggregateSessions(events: AwEvent[]): Pick<AwSnapshot, 'current' | 'todayApps' | 'todayTotalMs' | 'switchCount' | 'longest' | 'history'> {
+/** 聚合今日前台事件 → 分 App 时长 / 总时长 / 切换次数 / 最长单次 / 近期切换 / 当前前台 / 近3小时打开过的App */
+function aggregateSessions(events: AwEvent[]): Pick<AwSnapshot, 'current' | 'todayApps' | 'todayTotalMs' | 'switchCount' | 'longest' | 'history' | 'recentApps'> {
   const sorted = [...events].sort((a, b) => a.timestamp.localeCompare(b.timestamp));
   const byApp = new Map<string, number>();
+  const opensByApp = new Map<string, number>();
+  const lastOpenByApp = new Map<string, string>();
   let total = 0;
   let longestApp = '';
   let longestMs = 0;
@@ -146,6 +150,12 @@ function aggregateSessions(events: AwEvent[]): Pick<AwSnapshot, 'current' | 'tod
       longestApp = app;
     }
   }
+  for (const e of sorted) {
+    const app = (e.data.app || e.data.package || '').trim();
+    if (!app) continue;
+    opensByApp.set(app, (opensByApp.get(app) ?? 0) + 1);
+    lastOpenByApp.set(app, e.timestamp);
+  }
   const last = sorted.length > 0 ? sorted[sorted.length - 1] : null;
   const currentApp = last ? (last.data.app || last.data.package || '').trim() : '';
   const lastAt = last ? new Date(last.timestamp).getTime() : 0;
@@ -154,16 +164,30 @@ function aggregateSessions(events: AwEvent[]): Pick<AwSnapshot, 'current' | 'tod
     current = { app: currentApp, ongoingMs: Math.max(0, Date.now() - lastAt), at: lastAt };
   }
   const history = sorted
-    .slice(-6)
+    .slice(-24)
     .map((e) => ({ hhmm: hhmmOf(e.timestamp), app: (e.data.app || e.data.package || '').trim() }))
     .filter((x) => x.app);
+  // 近 3 小时打开过的 App（最近在前）
+  const threeHoursAgo = Date.now() - 3 * 3600_000;
+  const recent: { app: string; hhmm: string; ts: number }[] = [];
+  for (const [app, iso] of lastOpenByApp) {
+    const ts = new Date(iso).getTime();
+    if (!Number.isNaN(ts) && ts >= threeHoursAgo) recent.push({ app, hhmm: hhmmOf(iso), ts });
+  }
+  recent.sort((a, b) => b.ts - a.ts);
   return {
     current,
-    todayApps: [...byApp.entries()].map(([app, ms]) => ({ app, ms })).sort((a, b) => b.ms - a.ms),
+    todayApps: [...byApp.entries()].map(([app, ms]) => ({ app, ms, opens: opensByApp.get(app) })).sort((a, b) => b.ms - a.ms),
     todayTotalMs: total,
     switchCount: sorted.filter((e) => (e.data.app || e.data.package || '').trim()).length,
     longest: longestApp ? { app: longestApp, ms: longestMs } : undefined,
     history,
+    recentApps: recent.slice(0, 10).map(({ app, hhmm }) => ({
+      app,
+      hhmm,
+      opens: opensByApp.get(app),
+      ms: byApp.get(app),
+    })),
   };
 }
 
