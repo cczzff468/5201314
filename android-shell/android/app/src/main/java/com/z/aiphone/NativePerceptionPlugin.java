@@ -43,12 +43,15 @@ import rikka.shizuku.Shizuku;
 /**
  * 原生感知插件（网页 window.Capacitor.Plugins.NativePerception）：
  *
- * ① UsageStats 真机感知（时长数据源双引擎，v1.2）：
+ * ① UsageStats 真机感知（时长数据源双引擎，v1.2.1）：
  *    - getUsageSnapshot({source})：
  *      · source=standard（默认）：UsageStatsManager.queryEvents 事件流配对
- *        （RESUMED→PAUSED，息屏即停）；v1.2 口径修正：查询窗口带 2h 回看（跨零点
- *        会话不丢起点）、时长按「今日」裁剪、桌面 Launcher 时间不计入任何 App、
- *        同 App 内部页面切换（3s 内 PAUSED→RESUMED）不重复计「打开次数」；
+ *        （RESUMED→PAUSED）；v1.2.1 口径修正：息屏（SCREEN_NON_INTERACTIVE 16）/
+ *        锁屏（KEYGUARD_SHOWN 17）/关机（26）立即结算当前会话——否则安卓账本里
+ *        前台 App 息屏后一直「挂着 RESUMED」，整晚睡眠时间会被算成使用时长；
+ *        解锁（KEYGUARD_HIDDEN 18）后若仍停留在锁屏前那个 App，自动续计同一会话
+ *        （系统对同一 Activity 不会补发 RESUMED）；其余同 v1.2：查询窗口带 2h 回看、
+ *        时长按「今日」裁剪、桌面 Launcher 不计入、3s 内同 App 页面切换不重复计打开；
  *      · source=shizuku：经 Shizuku 以 shell 权限执行 dumpsys usagestats -c，
  *        解析系统事件账本 → 同一套配对聚合（免「使用情况」授权、不受锁屏查询限制）；
  *        Shizuku 未运行/未授权/超时失败时自动降级 standard 并以 engineNote 标注；
@@ -83,11 +86,29 @@ public class NativePerceptionPlugin extends Plugin {
 
     // ================= 事件模型（双引擎共用聚合口径） =================
 
-    /** 前台事件：type 1 = RESUMED（打开），2 = PAUSED/STOPPED（关闭） */
+    /* 事件类型（归一化后）：
+     *   1 = 前台（ACTIVITY_RESUMED / MOVE_TO_FOREGROUND）
+     *   2 = 失焦（ACTIVITY_PAUSED / ACTIVITY_STOPPED，即 MOVE_TO_BACKGROUND）
+     *   3 = 息屏（SCREEN_NON_INTERACTIVE 16）
+     *   4 = 亮屏（SCREEN_INTERACTIVE 15）
+     *   5 = 锁屏显示（KEYGUARD_SHOWN 17）
+     *   6 = 锁屏解除/解锁（KEYGUARD_HIDDEN 18）
+     *   7 = 关机（DEVICE_SHUTDOWN 26）
+     *   8 = 开机（DEVICE_STARTUP 27）
+     * 3~8 为「门控事件」：pkg 可能为空（系统事件无归属包）。 */
     private static final class Ev {
+        static final int T_RESUMED = 1;
+        static final int T_CLOSED = 2;
+        static final int T_SCREEN_OFF = 3;
+        static final int T_SCREEN_ON = 4;
+        static final int T_KEYGUARD_SHOWN = 5;
+        static final int T_KEYGUARD_HIDDEN = 6;
+        static final int T_SHUTDOWN = 7;
+        static final int T_BOOT = 8;
+
         final long ts;
         final int type;
-        final String pkg;
+        final String pkg; // 门控事件可为 null
 
         Ev(long ts, int type, String pkg) {
             this.ts = ts;
@@ -214,7 +235,7 @@ public class NativePerceptionPlugin extends Plugin {
         return cal.getTimeInMillis();
     }
 
-    /** UsageStatsManager 事件流 → Ev 列表（保留 RESUMED/PAUSED/STOPPED） */
+    /** UsageStatsManager 事件流 → Ev 列表（前台/失焦 + 息屏/锁屏/开关机门控事件） */
     private List<Ev> queryEventsList(long from, long to) {
         List<Ev> out = new ArrayList<>();
         android.app.usage.UsageStatsManager usm =
@@ -224,21 +245,39 @@ public class NativePerceptionPlugin extends Plugin {
         while (events.hasNextEvent()) {
             events.getNextEvent(ev);
             int type = ev.getEventType();
-            if (type != android.app.usage.UsageEvents.Event.ACTIVITY_RESUMED   // 1
-                    && type != android.app.usage.UsageEvents.Event.ACTIVITY_PAUSED    // 2
-                    && type != android.app.usage.UsageEvents.Event.ACTIVITY_STOPPED) { // 23
-                continue;
+            int t;
+            if (type == android.app.usage.UsageEvents.Event.ACTIVITY_RESUMED) {          // 1
+                t = Ev.T_RESUMED;
+            } else if (type == android.app.usage.UsageEvents.Event.ACTIVITY_PAUSED       // 2
+                    || type == android.app.usage.UsageEvents.Event.ACTIVITY_STOPPED) {    // 23
+                t = Ev.T_CLOSED;
+            } else if (type == android.app.usage.UsageEvents.Event.SCREEN_NON_INTERACTIVE // 16
+                    || type == android.app.usage.UsageEvents.Event.KEYGUARD_SHOWN         // 17
+                    || type == android.app.usage.UsageEvents.Event.DEVICE_SHUTDOWN) {     // 26
+                t = (type == android.app.usage.UsageEvents.Event.KEYGUARD_SHOWN)
+                        ? Ev.T_KEYGUARD_SHOWN
+                        : (type == android.app.usage.UsageEvents.Event.DEVICE_SHUTDOWN)
+                        ? Ev.T_SHUTDOWN : Ev.T_SCREEN_OFF;
+            } else if (type == android.app.usage.UsageEvents.Event.SCREEN_INTERACTIVE     // 15
+                    || type == android.app.usage.UsageEvents.Event.KEYGUARD_HIDDEN        // 18
+                    || type == android.app.usage.UsageEvents.Event.DEVICE_STARTUP) {      // 27
+                t = (type == android.app.usage.UsageEvents.Event.KEYGUARD_HIDDEN)
+                        ? Ev.T_KEYGUARD_HIDDEN
+                        : (type == android.app.usage.UsageEvents.Event.DEVICE_STARTUP)
+                        ? Ev.T_BOOT : Ev.T_SCREEN_ON;
+            } else {
+                continue; // SHUTDOWN 之外其余系统事件（CONFIGURATION_CHANGE 等）无关
             }
-            String pkg = ev.getPackageName();
-            if (pkg == null) continue;
-            out.add(new Ev(ev.getTimeStamp(), type == android.app.usage.UsageEvents.Event.ACTIVITY_RESUMED ? 1 : 2, pkg));
+            // 门控事件（息屏/锁屏等）无归属包，packageName 可能为 null，照样保留
+            out.add(new Ev(ev.getTimeStamp(), t, ev.getPackageName()));
         }
         return out;
     }
 
     /**
      * 双引擎共用的会话聚合：产出与 v1.1 同构的快照（todayApps/current/recentApps/…），
-     * 口径升级：回看裁剪 / Launcher 排除 / 同 App 内页面切换不重复计数。
+     * 口径升级（v1.2.1）：回看裁剪 / Launcher 排除 / 同 App 内页面切换不重复计数 /
+     * 息屏、锁屏、关机即停 + 解锁后自动续计原 App。
      */
     private JSObject buildSnapshot(List<Ev> evs, long startOfDay, long now) {
         final PackageManager pm = getContext().getPackageManager();
@@ -256,6 +295,8 @@ public class NativePerceptionPlugin extends Plugin {
         long lastAppStart = 0;
         String lastClosedPkg = null;  // 上一个被关闭的会话（同 App 内切换判定）
         long lastClosedTs = 0;
+        String autoResumePkg = null;  // 息屏/锁屏前正在用的 App（解锁后自动续计同一会话）
+        boolean keyguardArmed = false; // 拉起过锁屏（决定亮屏时是否自动续计）
 
         String longestApp = null;
         long longestMs = 0;
@@ -263,10 +304,11 @@ public class NativePerceptionPlugin extends Plugin {
 
         for (Ev ev : evs) {
             long ts = ev.ts;
-            String pkg = ev.pkg;
             if (ts > now + 60_000L) continue; // 时钟跳变产生的未来事件忽略
 
-            if (ev.type == 1) { // RESUMED
+            if (ev.type == Ev.T_RESUMED) { // RESUMED
+                // 显式前台事件接管一切：清掉解锁自动续计的候补
+                autoResumePkg = null;
                 // 结算当前打开中的会话（部分 ROM 不发 PAUSED，切走即结束）
                 if (openApp != null && ts > openStart) {
                     long dur = settle(durationByApp, openApp, openStart, ts, startOfDay, now);
@@ -274,36 +316,78 @@ public class NativePerceptionPlugin extends Plugin {
                     lastClosedPkg = openApp;
                     lastClosedTs = ts;
                 }
-                if (pkg.equals(launcherPkg)) {
+                if (ev.pkg == null || ev.pkg.equals(launcherPkg)) {
                     // 桌面停留：只结束上一会话，自身不计入任何 App
                     openApp = null;
                     continue;
                 }
                 boolean inToday = ts >= startOfDay;
                 boolean intraAppSwitch = openApp == null
-                        && pkg.equals(lastClosedPkg)
+                        && ev.pkg.equals(lastClosedPkg)
                         && ts - lastClosedTs <= INTRA_APP_GAP_MS;
-                openApp = pkg;
+                openApp = ev.pkg;
                 openStart = ts;
                 if (inToday) {
                     if (!intraAppSwitch) {
-                        opensByApp.merge(pkg, 1, Integer::sum);
+                        opensByApp.merge(ev.pkg, 1, Integer::sum);
                         switchCount++;
-                        lastOpenByApp.put(pkg, ts);
+                        lastOpenByApp.put(ev.pkg, ts);
                     }
-                    lastApp = pkg;
+                    lastApp = ev.pkg;
                     lastAppStart = ts;
                     historyTs.add(ts);
-                    historyPkgs.add(pkg);
+                    historyPkgs.add(ev.pkg);
                 }
-            } else { // PAUSED / STOPPED（关闭）
-                if (openApp != null && openApp.equals(pkg)) {
+            } else if (ev.type == Ev.T_CLOSED) { // PAUSED / STOPPED（关闭）
+                if (openApp != null && openApp.equals(ev.pkg)) {
                     long dur = settle(durationByApp, openApp, openStart, ts, startOfDay, now);
                     if (dur > longestMs) { longestMs = dur; longestApp = openApp; }
                     lastClosedPkg = openApp;
                     lastClosedTs = ts;
                     openApp = null; // 息屏/切走：停止计时
                 }
+            } else if (ev.type == Ev.T_SCREEN_OFF || ev.type == Ev.T_KEYGUARD_SHOWN || ev.type == Ev.T_SHUTDOWN) {
+                // 息屏/锁屏/关机：当前会话立刻结算（账本里 App 会一直「挂着 RESUMED」，
+                // 不结算的话整段睡眠时间都会被算成使用时长 —— v1.2.1 修正）
+                if (ev.type == Ev.T_KEYGUARD_SHOWN) keyguardArmed = true;
+                if (openApp != null && ts > openStart) {
+                    long dur = settle(durationByApp, openApp, openStart, ts, startOfDay, now);
+                    if (dur > longestMs) { longestMs = dur; longestApp = openApp; }
+                    lastClosedPkg = openApp;
+                    lastClosedTs = ts;
+                    autoResumePkg = openApp; // 记住锁屏前在用的 App，解锁后自动续计
+                    openApp = null;
+                }
+                if (ev.type == Ev.T_SHUTDOWN) {
+                    autoResumePkg = null; // 关机后不存在「还在原 App」
+                    keyguardArmed = false;
+                }
+            } else if (ev.type == Ev.T_KEYGUARD_HIDDEN) {
+                // 解锁：若仍停留在锁屏前那个 App（系统不会为同一 Activity 补发
+                // RESUMED），自动续计同一会话；随后若真是别的 App 前台，会有
+                // RESUMED 事件来结算这个短暂误开（误差 <1s）
+                keyguardArmed = false;
+                if (openApp == null && autoResumePkg != null
+                        && (launcherPkg == null || !autoResumePkg.equals(launcherPkg))) {
+                    openApp = autoResumePkg;
+                    openStart = ts;
+                }
+                autoResumePkg = null;
+            } else if (ev.type == Ev.T_SCREEN_ON) {
+                // 亮屏：仅当锁屏从未拉起（无锁屏/保持解锁的设备）才自动续计；
+                // 有锁屏时等 KEYGUARD_HIDDEN（解锁）再续，避免「亮屏看锁屏」被计费。
+                // 若本事件先于 KEYGUARD_SHOWN 到达导致误开，随后的 KEYGUARD_SHOWN
+                // 会立即结算掉（误差 <1s）。
+                if (!keyguardArmed && openApp == null && autoResumePkg != null
+                        && (launcherPkg == null || !autoResumePkg.equals(launcherPkg))) {
+                    openApp = autoResumePkg;
+                    openStart = ts;
+                    autoResumePkg = null;
+                }
+            } else { // T_BOOT：开机，一切状态清零
+                openApp = null;
+                autoResumePkg = null;
+                keyguardArmed = false;
             }
         }
 
@@ -554,7 +638,7 @@ public class NativePerceptionPlugin extends Plugin {
                             new ComponentName(getContext(), PerceptionShellService.class))
                     .processNameSuffix("perception_shell")
                     .daemon(false)
-                    .version(1);
+                    .version(2); // v2：改为「超限保留最新事件」的环形过滤（v1 逻辑改动必须 bump）
         }
         final CountDownLatch latch = new CountDownLatch(1);
         final AtomicReference<IPerceptionShellService> ref = new AtomicReference<>(null);
@@ -591,11 +675,13 @@ public class NativePerceptionPlugin extends Plugin {
     }
 
     /**
-     * 经 Shizuku（shell 权限）读 dumpsys usagestats -c 的事件账本：
-     * 服务端已按 mustContain 与时间窗预过滤（控制 Binder 回传体积），
-     * 行形如「time=1705312830000 type=ACTIVITY_RESUMED package=com.x class=… flags=0x0」；
-     * 事件类型兼容字符串（ACTIVITY_RESUMED/MOVE_TO_FOREGROUND）与数字（1/2/23）两种形态；
-     * 多 interval 段可能重复倾倒同一事件 → 按 (ts|type|pkg) 去重；SHUTDOWN(26) 等一律忽略。
+     * 经 Shizuku（shell 权限）读 dumpsys usagestats -c 的事件账本（-c 为 compact 模式：
+     * 事件行 time=<epoch毫秒> type=<事件名> package=<包名|无>；事件段为「Last 24
+     * hour events」，窗口足以覆盖今日-2h 回看）：
+     * 服务端已按 mustContain 与时间窗预过滤（控制 Binder 回传体积，超限时保留最新事件）；
+     * 事件类型兼容字符串（ACTIVITY_RESUMED/MOVE_TO_FOREGROUND）与数字（1/2/23）两种形态，
+     * 并保留息屏/锁屏/开关机门控事件（v1.2.1）；
+     * 多 interval 段可能重复倾倒同一事件 → 按 (ts|type|pkg) 去重。
      */
     private List<Ev> shizukuDumpEvents(long fromTs, long toTs) throws Exception {
         IPerceptionShellService svc = requireShellService(6000);
@@ -612,7 +698,7 @@ public class NativePerceptionPlugin extends Plugin {
             Ev ev = parseDumpEventLine(line);
             if (ev == null) continue;
             if (ev.ts < fromTs || ev.ts > toTs + 60_000L) continue;
-            String key = ev.ts + "|" + ev.type + "|" + ev.pkg;
+            String key = ev.ts + "|" + ev.type + "|" + (ev.pkg == null ? "" : ev.pkg);
             if (!seen.add(key)) continue;
             outList.add(ev);
         }
@@ -620,7 +706,7 @@ public class NativePerceptionPlugin extends Plugin {
         return outList;
     }
 
-    /** 解析单行 dumpsys 事件（非事件行/无关类型返回 null） */
+    /** 解析单行 dumpsys 事件（非事件行/无关类型返回 null；门控事件可无 package） */
     private Ev parseDumpEventLine(String line) {
         if (line == null || line.length() < 10) return null;
         String time = null, type = null, pkg = null;
@@ -637,24 +723,51 @@ public class NativePerceptionPlugin extends Plugin {
                 pkg = v;
             }
         }
-        if (time == null || type == null || pkg == null || pkg.isEmpty()) return null;
+        if (time == null || type == null) return null;
+        if (pkg == null || pkg.isEmpty() || "null".equals(pkg)) pkg = null; // 系统事件无归属包
         int t;
         switch (type) {
             case "ACTIVITY_RESUMED":
             case "MOVE_TO_FOREGROUND":
             case "1":
-                t = 1;
+                t = Ev.T_RESUMED;
                 break;
             case "ACTIVITY_PAUSED":
             case "MOVE_TO_BACKGROUND":
             case "2":
             case "ACTIVITY_STOPPED":
             case "23":
-                t = 2;
+                t = Ev.T_CLOSED;
+                break;
+            // ---- 门控事件（v1.2.1：息屏/锁屏即停 + 解锁续计）----
+            case "SCREEN_NON_INTERACTIVE":
+            case "16":
+                t = Ev.T_SCREEN_OFF;
+                break;
+            case "SCREEN_INTERACTIVE":
+            case "15":
+                t = Ev.T_SCREEN_ON;
+                break;
+            case "KEYGUARD_SHOWN":
+            case "17":
+                t = Ev.T_KEYGUARD_SHOWN;
+                break;
+            case "KEYGUARD_HIDDEN":
+            case "18":
+                t = Ev.T_KEYGUARD_HIDDEN;
+                break;
+            case "DEVICE_SHUTDOWN":
+            case "26":
+                t = Ev.T_SHUTDOWN;
+                break;
+            case "DEVICE_STARTUP":
+            case "27":
+                t = Ev.T_BOOT;
                 break;
             default:
-                return null; // SHUTDOWN(26)/CONFIGURATION_CHANGE/NOTIFICATION_SEEN 等
+                return null; // CONFIGURATION_CHANGE/NOTIFICATION_SEEN/USER_INTERACTION 等
         }
+        if (pkg == null && t <= Ev.T_CLOSED) return null; // 前台/失焦事件必须有包名
         long ts;
         try {
             ts = Long.parseLong(time);

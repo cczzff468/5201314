@@ -2,10 +2,16 @@ package com.z.aiphone;
 
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
+import java.util.ArrayDeque;
 
 /**
  * Shizuku UserService 实现（跑在 Shizuku 服务进程，shell/root 权限）：
  * 执行 dumpsys usagestats -c 并在服务端做行级预过滤，把 Binder 回传体积压到今日事件规模。
+ *
+ * v2（ UserServiceArgs.version 必须 bump 才会重新加载本类）：
+ *   - 超过行数/字符上限时改为「保留最新的事件」——事件按时间顺序输出，
+ *     旧的截头策略会把晚间/最近的使用记录丢掉，导致时长统计莫名偏小；
+ *   - 时间过滤（minTimeMs）不变：窗口外的旧行依旧直接丢弃，不占环形缓冲。
  *
  * 注意：此类由 Shizuku 服务进程用本 APP 的 ClassLoader 加载执行 —— 不要引用
  * Android 生命周期相关的东西；逻辑改动时必须同步 bump UserServiceArgs.version。
@@ -34,10 +40,12 @@ public class PerceptionShellService extends IPerceptionShellService.Stub {
             watchdog.setDaemon(true);
             watchdog.start();
 
+            // 环形缓冲：行数/字符超限时从头（=最旧）淘汰，保住最新事件
+            ArrayDeque<String> keptLines = new ArrayDeque<>();
+            long keptChars = 0;
             try (BufferedReader r = new BufferedReader(new InputStreamReader(proc.getInputStream()), 1 << 16)) {
                 String line;
-                int kept = 0;
-                while ((line = r.readLine()) != null && kept < maxLines && sb.length() < MAX_OUTPUT_CHARS) {
+                while ((line = r.readLine()) != null) {
                     if (mustContain != null && mustContain.length > 0) {
                         boolean hasAll = true;
                         for (String tok : mustContain) {
@@ -52,9 +60,17 @@ public class PerceptionShellService extends IPerceptionShellService.Stub {
                         long ts = extractTimeToken(line);
                         if (ts >= 0 && ts < minTimeMs) continue; // 时间窗外的旧行直接丢
                     }
-                    sb.append(line).append('\n');
-                    kept++;
+                    keptLines.addLast(line);
+                    keptChars += line.length() + 1;
+                    while (keptLines.size() > Math.max(1, maxLines) || keptChars > MAX_OUTPUT_CHARS) {
+                        String dropped = keptLines.pollFirst();
+                        if (dropped == null) break;
+                        keptChars -= dropped.length() + 1;
+                    }
                 }
+            }
+            for (String l : keptLines) {
+                sb.append(l).append('\n');
             }
             try {
                 proc.waitFor();

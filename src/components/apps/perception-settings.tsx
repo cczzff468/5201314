@@ -224,6 +224,15 @@ export function PerceptionSettingsPage({
   const [selfTestSteps, setSelfTestSteps] = useState<{ ok: boolean | null; text: string }[] | null>(null);
   // 旧版 APK 内下载引导：复制链接成功提示
   const [apkLinkCopied, setApkLinkCopied] = useState(false);
+  // 下载直链明文（长按可手动复制；页面仅在交互后挂载 → 惰性求值即可）
+  const [apkUrl] = useState(() => {
+    if (typeof window === 'undefined') return '';
+    try {
+      return new URL('/AI-Phone.apk', window.location.href).href;
+    } catch {
+      return '/AI-Phone.apk';
+    }
+  });
   // 授权状态记录（检测「刚授权」时刻：强制刷数据击穿授权前留下的 45s 空缓存）
   const grantSeenRef = useRef<boolean | null>(null);
   // 原生模式挂载即查 UsageStats/媒体权限；从系统授权页回来时刷新（页面 onShow 时 Cap 桥不会自动回调，用轻轮询）
@@ -693,7 +702,7 @@ export function PerceptionSettingsPage({
                       <p className="text-[12px] text-black/35 dark:text-white/35">Shizuku 状态检测中…</p>
                     ) : shizuku === null ? (
                       <p className="text-[12px] leading-snug text-[#E4554F]">
-                        当前 APP 版本不支持双引擎（看不到 Shizuku 状态）：用下方按钮更新到 v1.2 后可用；
+                        当前 APP 版本不支持双引擎（看不到 Shizuku 状态）：用下方按钮更新到 v1.2.1 后可用；
                         更新前会自动用标准模式统计。
                       </p>
                     ) : !shizuku.running ? (
@@ -727,6 +736,34 @@ export function PerceptionSettingsPage({
                     )}
                   </div>
                 )}
+                {/* v1.2.1 更新入口：新壳用户（旧版下载块对他不可见）也能拿到修复版 */}
+                {nativeMode && mediaSupported !== false ? (
+                  <div className="space-y-1.5 pt-1">
+                    <div className={`border-t ${dividerCls} my-0.5`} />
+                    <span className="block text-[12px] font-medium text-black/55 dark:text-white/55">
+                      APP 更新（v1.2.1 · 修复使用时长）
+                    </span>
+                    <p className="text-[11px] leading-snug text-black/40 dark:text-white/40">
+                      v1.2.1 修正时长口径：息屏、锁屏时段不再计入使用时长（旧版会把整晚
+                      熄屏时间算成在用 App）；解锁回到原 App 自动继续计时。已装 v1.2 也
+                      建议更新，覆盖安装、数据不丢。
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => launchApkDownload(setApkLinkCopied)}
+                      data-testid={`${testPrefix}-perception-apk-update`}
+                      className="block w-full rounded-full py-2 text-center text-[13px] font-medium text-white active:opacity-70"
+                      style={{ backgroundColor: accent }}
+                    >
+                      {apkLinkCopied ? '✓ 链接已复制，去浏览器粘贴下载' : '下载 v1.2.1（自动复制链接）'}
+                    </button>
+                    {apkUrl ? (
+                      <p className="break-all text-[10.5px] leading-snug text-black/30 dark:text-white/30">
+                        直链（长按可复制）：{apkUrl}
+                      </p>
+                    ) : null}
+                  </div>
+                ) : null}
               </div>
               <div className={`border-t ${dividerCls} my-0.5`} />
               {mediaSupported === false ? (
@@ -745,7 +782,7 @@ export function PerceptionSettingsPage({
                           className="block w-full rounded-full py-2 text-center text-[13.5px] font-medium text-white active:opacity-70"
                           style={{ backgroundColor: accent }}
                         >
-                          下载新版 APP（v1.2）
+                          下载新版 APP（v1.2.1）
                         </a>
                       );
                     }
@@ -761,7 +798,7 @@ export function PerceptionSettingsPage({
                           className="block w-full rounded-full py-2 text-center text-[13.5px] font-medium text-white active:opacity-70"
                           style={{ backgroundColor: accent }}
                         >
-                          下载新版 APP（v1.2）
+                          下载新版 APP（v1.2.1）
                         </button>
                         <p className="text-[12px] leading-snug text-black/40 dark:text-white/40">
                           {apkLinkCopied
@@ -776,6 +813,11 @@ export function PerceptionSettingsPage({
                         >
                           {apkLinkCopied ? '✓ 已复制，去浏览器粘贴打开' : '备用：复制下载链接'}
                         </button>
+                        {apkUrl ? (
+                          <p className="break-all text-[10.5px] leading-snug text-black/30 dark:text-white/30">
+                            直链（长按可复制）：{apkUrl}
+                          </p>
+                        ) : null}
                       </div>
                     );
                   })()}

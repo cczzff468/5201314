@@ -411,15 +411,37 @@ async function capgoUsageSnapshot(): Promise<AwSnapshot | null> {
     return !!l && (l.includes('launcher') || l.includes('桌面'));
   };
 
-  type Ev = { ts: number; type: 1 | 2; pkg: string };
+  /* 事件类型归一（与原生 v1.2.1 同口径）：
+   *   1 前台 / 2 失焦 / 3 息屏(16) / 4 亮屏(15) / 5 锁屏(17) / 6 解锁(18) / 7 关机(26) / 8 开机(27)
+   * 门控事件（3~8）无归属包，packageName 可能为空。 */
+  type Ev = { ts: number; type: number; pkg: string | null };
   const evs: Ev[] = (evRes?.events ?? [])
-    .filter((e): e is { packageName: string; timeStamp: number; eventType: number } =>
-      !!e.packageName && typeof e.timeStamp === 'number' && (e.eventType === 1 || e.eventType === 2 || e.eventType === 23))
-    .map((e) => ({ ts: e.timeStamp, type: (e.eventType === 1 ? 1 : 2) as 1 | 2, pkg: e.packageName }))
+    .filter((e): e is { packageName?: string | null; timeStamp: number; eventType: number } => {
+      if (typeof e.timeStamp !== 'number') return false;
+      const t = e.eventType;
+      if (t === 1 || t === 2 || t === 23) return true;
+      if (t === 15 || t === 16 || t === 17 || t === 18 || t === 26 || t === 27) return true; // 门控事件可无包名
+      return false;
+    })
+    .map((e) => {
+      const t = e.eventType;
+      let type: number;
+      if (t === 1) type = 1;
+      else if (t === 2 || t === 23) type = 2;
+      else if (t === 16) type = 3;
+      else if (t === 15) type = 4;
+      else if (t === 17) type = 5;
+      else if (t === 18) type = 6;
+      else if (t === 26) type = 7;
+      else type = 8;
+      return { ts: e.timeStamp, type, pkg: e.packageName ?? null };
+    })
     .sort((a, b) => a.ts - b.ts);
 
-  // 与原生 buildSnapshot 同口径：RESUMED→PAUSED 配对 + 今日裁剪 + 桌面排除
-  // + 同 App 内页面切换（3s 内 PAUSED→RESUMED）不重复计打开次数
+  // 与原生 buildSnapshot 同口径（v1.2.1）：RESUMED→PAUSED 配对 + 今日裁剪 + 桌面排除
+  // + 3s 内同 App 页面切换不重复计打开 + 息屏/锁屏/关机即停 + 解锁后自动续计原 App
+  // （安卓账本里前台 App 息屏后一直「挂着 RESUMED」且解锁不补发 RESUMED，不处理会把
+  //   整段睡眠时间算成使用时长）
   const durationByApp = new Map<string, number>();
   const opensByApp = new Map<string, number>();
   const lastOpenByApp = new Map<string, number>();
@@ -430,6 +452,8 @@ async function capgoUsageSnapshot(): Promise<AwSnapshot | null> {
   let lastAppStart = 0;
   let lastClosedPkg: string | null = null;
   let lastClosedTs = 0;
+  let autoResumePkg: string | null = null; // 锁屏前在用的 App（解锁后续计）
+  let keyguardArmed = false;
   let longestApp: string | null = null;
   let longestMs = 0;
   let switchCount = 0;
@@ -443,16 +467,25 @@ async function capgoUsageSnapshot(): Promise<AwSnapshot | null> {
     return dur;
   };
 
+  const autoResume = (ts: number): void => {
+    if (openApp == null && autoResumePkg != null && !isLauncher(autoResumePkg)) {
+      openApp = autoResumePkg;
+      openStart = ts;
+    }
+    autoResumePkg = null;
+  };
+
   for (const ev of evs) {
     if (ev.ts > now + 60_000) continue; // 时钟跳变产生的未来事件
     if (ev.type === 1) {
+      autoResumePkg = null; // 显式前台事件接管自动续计
       if (openApp && ev.ts > openStart) {
         const dur = settle(openApp, openStart, ev.ts);
         if (dur > longestMs) { longestMs = dur; longestApp = openApp; }
         lastClosedPkg = openApp;
         lastClosedTs = ev.ts;
       }
-      if (isLauncher(ev.pkg)) {
+      if (ev.pkg == null || isLauncher(ev.pkg)) {
         openApp = null; // 桌面停留不计入任何 App
         continue;
       }
@@ -470,7 +503,7 @@ async function capgoUsageSnapshot(): Promise<AwSnapshot | null> {
         lastAppStart = ev.ts;
         history.push({ hhmm: hhmmOf(ev.ts), app: labelOf(ev.pkg) });
       }
-    } else {
+    } else if (ev.type === 2) {
       if (openApp && openApp === ev.pkg) {
         const dur = settle(openApp, openStart, ev.ts);
         if (dur > longestMs) { longestMs = dur; longestApp = openApp; }
@@ -478,6 +511,30 @@ async function capgoUsageSnapshot(): Promise<AwSnapshot | null> {
         lastClosedTs = ev.ts;
         openApp = null;
       }
+    } else if (ev.type === 3 || ev.type === 5 || ev.type === 7) {
+      // 息屏/锁屏/关机：立即结算当前会话
+      if (ev.type === 5) keyguardArmed = true;
+      if (openApp && ev.ts > openStart) {
+        const dur = settle(openApp, openStart, ev.ts);
+        if (dur > longestMs) { longestMs = dur; longestApp = openApp; }
+        lastClosedPkg = openApp;
+        lastClosedTs = ev.ts;
+        autoResumePkg = openApp;
+        openApp = null;
+      }
+      if (ev.type === 7) { autoResumePkg = null; keyguardArmed = false; }
+    } else if (ev.type === 6) {
+      // 解锁：自动续计锁屏前的 App（系统不会为同一 Activity 补发 RESUMED）
+      keyguardArmed = false;
+      autoResume(ev.ts);
+    } else if (ev.type === 4) {
+      // 亮屏：无锁屏（未拉起 keyguard）才续计；有锁屏等解锁事件
+      if (!keyguardArmed) autoResume(ev.ts);
+    } else {
+      // 开机：状态清零
+      openApp = null;
+      autoResumePkg = null;
+      keyguardArmed = false;
     }
   }
 
