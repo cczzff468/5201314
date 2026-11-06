@@ -9,7 +9,7 @@ import { shellScale } from '@/lib/ios/shell-scale';
 import { useHomeWallpaperLight } from '@/lib/ios/foreground';
 import { localDB } from '@/lib/ios/db';
 import { useUnreadTotal, useBadge, wxUnreads, qqUnreads, chatBadge, phoneBadge } from '@/lib/unread-store';
-import { DOCK_APPS, APPS, APP_MAP, AppIconById, AppMiniIcon } from '../apps/registry';
+import { DOCK_APPS, APPS, APP_MAP, AppIconById, AppMiniIcon, preloadApp } from '../apps/registry';
 import {
   ProfileCardEditor,
   ProfileCardWidget,
@@ -2135,8 +2135,11 @@ export default function HomeScreen() {
     }
   };
 
-  /** 打开 App（顺带退出编辑模式，并清掉可能残留的长按计时器） */
+  /** 打开 App（顺带退出编辑模式，并清掉可能残留的长按计时器）；
+   * 开头先 preloadApp 抢跑拉 chunk（幂等）——PhoneShell 的 pointerdown 预载已覆盖
+   * 大多数路径，这里兑底键盘/程序化调用等剩余路径 */
   const openWith = (id: AppId) => {
+    preloadApp(id);
     if (pressTimer.current !== null) {
       window.clearTimeout(pressTimer.current);
       pressTimer.current = null;

@@ -2021,3 +2021,23 @@ Stage Summary:
 - 5201314 仓库完整部署并运行于 /home/z/my-project：AI Phone 仿 iOS 智能助手（105+ App）
 - git 推送链路就绪：本地分支 主 ↔ origin/主（PAT 已配置，直连 push 实测可用；如再遇超时可换 gh-proxy.com/https://github.com/... 前缀）
 - 修复存量 bug：instrumentation 动态导入不调 register() 导致 ncm-keeper/网易云 API 本机实例从不自动启动（已提交 2bf8e06 并推送）
+
+---
+
+Task ID: 7
+Agent: 主控 Agent（Z.ai Code）
+Task: 修复「点击打开界面显示太慢」——App 启动加载屏 + 按下即预载 + 预热补全
+
+Work Log:
+- [诊断] 所有 App 为 dynamic 懒加载但无 loading 组件：chunk 未就绪期间（外网首开 1~5s）AppWindow 弹出的动画窗里是背景色空白，观感即「点了没反应/显示太慢」；localhost 实测缓存命中时 350~450ms、无缓存时更长且全程无任何加载指示
+- [启动屏] 新增 AppSplash.tsx：84px 大图标（复用 APP_MAP icon，真实 PNG/磨砂玻璃随主题）+ App 名 + iOS 风格菊花转（12 根亮度递减短棒绕圆心匀速旋转）；全部内容 150ms 延迟淡入——缓存命中一两帧内就位则启动屏从未可见（防闪屏），真慢加载才完整显示
+- [启动屏] registry.tsx 全部 27 个 dynamic() 挂 loading: () => <AppSplash appId=.../>（AppId 修正 memory/couple 联合类型口径）；与 AppWindow 打开缩放动画（0.18→1）叠加成真 iOS「图标放大成 App」观感
+- [预载] 新增 APP_IMPORTERS（AppId→import 映射，与 dynamic 同一模块引用幂等）+ preloadApp(id)；PhoneShell 全局捕获监听 pointerdown（触屏比 click 早 100~300ms）与桌面 pointerover 悬停预载——closest 匹配 [data-id]（网格/Dock）、[data-testid^=folder-app-]（文件夹）、button[aria-label^=打开]（Spotlight）；HomeScreen openWith 开头兑底 preloadApp
+- [预热] preloadHeavyApps 重 App 串行列表后追加全部轻量 App（photos/camera/browser/weather/clock/themes/files/reminders/calculator/notes/calendar/recorder/appstore）——预热完成后任何点击零等待命中模块缓存
+- [CSS] globals.css 新增 app-splash-in（淡入+上浮）与 app-splash-spin（旋转）关键帧
+- [验证] tsc 通过；eslint 5 处均为 HomeScreen 既有基线（0 新增）
+- [验证] Agent Browser E2E：①真实加载中启动屏 DOM 出现且淡入动画进行（峰值透明度 0.19~0.31 后被内容替换=防闪屏生效）②TLA 冻结 chunk 定格真实启动屏 → VLM 审图确认「黄色美团大图标+名称+菊花转，居中无变形」③回归：美团/计算器/App Store/微信正常打开（364/351/445/369ms）④金路径：新会话解锁立即点微信 壳133ms/内容369ms ⑤控制台/页面零错误（dev.log 仅 2 条为测试注入的 mock 语法错误）
+
+Stage Summary:
+- App 打开体验三连修：慢加载有 iOS 风格启动屏（不再是空白）、按下/悬停即抢跑拉 chunk（与打开动画重叠）、空闲预热覆盖全部 27 个 App
+- 关键文件：AppSplash.tsx（新）、registry.tsx、PhoneShell.tsx、HomeScreen.tsx、globals.css

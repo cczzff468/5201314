@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
 import { AnimatePresence } from 'framer-motion';
-import { selectResolvedTheme, useSettings, useSystemDark, useUI, useWallpaperStyle } from '@/lib/ios/store';
+import { selectResolvedTheme, useSettings, useSystemDark, useUI, useWallpaperStyle, type AppId } from '@/lib/ios/store';
 import { useIslandNotify } from '@/lib/ios/island-notify';
 import { useIncomingCall } from '@/lib/ios/incoming-call';
 import { GLOBAL_CSS_SCOPE, scopeCss } from '@/lib/ios/custom-css';
@@ -18,7 +18,7 @@ import { migrateLegacyAccounts } from '@/lib/ios/accounts';
 import { shellScale } from '@/lib/ios/shell-scale';
 import StatusBar from './StatusBar';
 import HomeScreen from './HomeScreen';
-import { preloadHeavyApps } from '@/components/apps/registry';
+import { APP_MAP, preloadApp, preloadHeavyApps } from '@/components/apps/registry';
 import { CustomWallpaperLayers } from './WallpaperLayers';
 import AppWindow from './AppWindow';
 import AppSwitcher from './AppSwitcher';
@@ -205,6 +205,49 @@ export default function PhoneShell() {
   useEffect(() => {
     const t = window.setTimeout(() => preloadHeavyApps(), 2500);
     return () => window.clearTimeout(t);
+  }, []);
+
+  // 按下即预载 App chunk（修「点击打开界面显示太慢」的抢跑层）：
+  // 图标 pointerdown（触屏比 click 早 ~100-300ms）与桌面 hover（早几百 ms）就
+  // 开始拉对应 App 的 chunk，等 click 真正触发打开时 chunk 大概率已在下载中/
+  // 已就绪——外网首开的干等时间被这段抢跑与打开缩放动画重叠吃掉。
+  // 捕获阶段监听 + closest 匹配，覆盖主屏网格/Dock [data-id]、文件夹单元格
+  // [data-testid^="folder-app-"]、Spotlight 搜索结果 button[aria-label^="打开"]；
+  // preloadApp 幂等（模块缓存命中零成本），非 App 目标自然 no-op。
+  useEffect(() => {
+    const idFromTarget = (target: EventTarget | null): string | null => {
+      const el = (target as HTMLElement | null)?.closest?.(
+        '[data-id],[data-testid^="folder-app-"],button[aria-label^="打开"]',
+      ) as HTMLElement | null;
+      if (!el) return null;
+      const dataId = el.getAttribute('data-id');
+      if (dataId) return dataId;
+      const testId = el.getAttribute('data-testid');
+      if (testId?.startsWith('folder-app-')) return testId.slice('folder-app-'.length);
+      const label = el.getAttribute('aria-label') ?? '';
+      if (label.startsWith('打开')) {
+        const name = label.slice(2).replace(/应用$/, '');
+        const hit = Object.values(APP_MAP).find((a) => a.name === name);
+        if (hit) return hit.id;
+      }
+      return null;
+    };
+    const onDown = (e: PointerEvent) => {
+      const id = idFromTarget(e.target);
+      if (id) preloadApp(id as AppId);
+    };
+    // 悬停预载仅限鼠标（触屏 pointerover 与 pointerdown 几乎同时，无额外收益）
+    const onOver = (e: PointerEvent) => {
+      if (e.pointerType !== 'mouse') return;
+      const id = idFromTarget(e.target);
+      if (id) preloadApp(id as AppId);
+    };
+    window.addEventListener('pointerdown', onDown, { capture: true });
+    window.addEventListener('pointerover', onOver, { capture: true });
+    return () => {
+      window.removeEventListener('pointerdown', onDown, { capture: true });
+      window.removeEventListener('pointerover', onOver, { capture: true });
+    };
   }, []);
 
   // v70 开机提速：全局调度器/监听器延迟挂载——它们各自 dynamic import 的重模块

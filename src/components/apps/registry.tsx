@@ -33,36 +33,81 @@ import {
 import type { AppId, IconStyle } from '@/lib/ios/store';
 import { selectResolvedTheme, useSettings, useSystemDark } from '@/lib/ios/store';
 import { useHomeWallpaperLight } from '@/lib/ios/foreground';
+import AppSplash from './AppSplash';
 
 // App 组件全部懒加载：主屏/锁屏只需图标，App 代码在点开时才拉取
 // （首屏包体积大幅下降，网页打开/水合明显变快）
-const ChatApp = dynamic(() => import('./chat'), { ssr: false });
-const PhotosApp = dynamic(() => import('./photos'), { ssr: false });
-const CameraApp = dynamic(() => import('./camera'), { ssr: false }) as ComponentType;
-const MusicApp = dynamic(() => import('./music'), { ssr: false });
-const BrowserApp = dynamic(() => import('./browser'), { ssr: false });
-const WeatherApp = dynamic(() => import('./weather'), { ssr: false });
-const ClockApp = dynamic(() => import('./clock'), { ssr: false });
-const ThemesApp = dynamic(() => import('./themes'), { ssr: false });
-const FilesApp = dynamic(() => import('./files'), { ssr: false });
-const RemindersApp = dynamic(() => import('./reminders'), { ssr: false });
-const CalculatorApp = dynamic(() => import('./calculator'), { ssr: false });
-const NotesApp = dynamic(() => import('./notes'), { ssr: false });
-const CalendarApp = dynamic(() => import('./calendar'), { ssr: false });
-const RecorderApp = dynamic(() => import('./recorder'), { ssr: false });
-const SettingsApp = dynamic(() => import('./settings'), { ssr: false });
-const ContactsApp = dynamic(() => import('./contacts'), { ssr: false });
-const PhoneApp = dynamic(() => import('./phone'), { ssr: false });
-const WeChatApp = dynamic(() => import('./wechat'), { ssr: false });
-const QQApp = dynamic(() => import('./qq'), { ssr: false });
-const AppStoreApp = dynamic(() => import('./appstore'), { ssr: false });
-const MemoryBankApp = dynamic(() => import('./memory-bank'), { ssr: false });
-const WorldBookApp = dynamic(() => import('./worldbook'), { ssr: false });
-const MeituanApp = dynamic(() => import('./meituan'), { ssr: false });
-const TaobaoApp = dynamic(() => import('./taobao'), { ssr: false });
-const CoupleSpaceApp = dynamic(() => import('./couple-space'), { ssr: false });
-const CottageApp = dynamic(() => import('./cottage'), { ssr: false });
-const ForumApp = dynamic(() => import('./forum/forum'), { ssr: false });
+// loading=AppSplash：chunk 未就绪期间显示 iOS 风格启动屏（大图标+名+菊花转，
+// 延迟 150ms 淡入不闪屏）——修「点击打开界面一块空白等好几秒」的观感问题
+const ChatApp = dynamic(() => import('./chat'), { ssr: false, loading: () => <AppSplash appId="chat" /> });
+const PhotosApp = dynamic(() => import('./photos'), { ssr: false, loading: () => <AppSplash appId="photos" /> });
+const CameraApp = dynamic(() => import('./camera'), {
+  ssr: false,
+  loading: () => <AppSplash appId="camera" />,
+}) as ComponentType;
+const MusicApp = dynamic(() => import('./music'), { ssr: false, loading: () => <AppSplash appId="music" /> });
+const BrowserApp = dynamic(() => import('./browser'), { ssr: false, loading: () => <AppSplash appId="browser" /> });
+const WeatherApp = dynamic(() => import('./weather'), { ssr: false, loading: () => <AppSplash appId="weather" /> });
+const ClockApp = dynamic(() => import('./clock'), { ssr: false, loading: () => <AppSplash appId="clock" /> });
+const ThemesApp = dynamic(() => import('./themes'), { ssr: false, loading: () => <AppSplash appId="themes" /> });
+const FilesApp = dynamic(() => import('./files'), { ssr: false, loading: () => <AppSplash appId="files" /> });
+const RemindersApp = dynamic(() => import('./reminders'), {
+  ssr: false,
+  loading: () => <AppSplash appId="reminders" />,
+});
+const CalculatorApp = dynamic(() => import('./calculator'), {
+  ssr: false,
+  loading: () => <AppSplash appId="calculator" />,
+});
+const NotesApp = dynamic(() => import('./notes'), { ssr: false, loading: () => <AppSplash appId="notes" /> });
+const CalendarApp = dynamic(() => import('./calendar'), {
+  ssr: false,
+  loading: () => <AppSplash appId="calendar" />,
+});
+const RecorderApp = dynamic(() => import('./recorder'), {
+  ssr: false,
+  loading: () => <AppSplash appId="recorder" />,
+});
+const SettingsApp = dynamic(() => import('./settings'), {
+  ssr: false,
+  loading: () => <AppSplash appId="settings" />,
+});
+const ContactsApp = dynamic(() => import('./contacts'), {
+  ssr: false,
+  loading: () => <AppSplash appId="contacts" />,
+});
+const PhoneApp = dynamic(() => import('./phone'), { ssr: false, loading: () => <AppSplash appId="phone" /> });
+const WeChatApp = dynamic(() => import('./wechat'), { ssr: false, loading: () => <AppSplash appId="wechat" /> });
+const QQApp = dynamic(() => import('./qq'), { ssr: false, loading: () => <AppSplash appId="qq" /> });
+const AppStoreApp = dynamic(() => import('./appstore'), {
+  ssr: false,
+  loading: () => <AppSplash appId="appstore" />,
+});
+const MemoryBankApp = dynamic(() => import('./memory-bank'), {
+  ssr: false,
+  loading: () => <AppSplash appId="memory" />,
+});
+const WorldBookApp = dynamic(() => import('./worldbook'), {
+  ssr: false,
+  loading: () => <AppSplash appId="worldbook" />,
+});
+const MeituanApp = dynamic(() => import('./meituan'), {
+  ssr: false,
+  loading: () => <AppSplash appId="meituan" />,
+});
+const TaobaoApp = dynamic(() => import('./taobao'), {
+  ssr: false,
+  loading: () => <AppSplash appId="taobao" />,
+});
+const CoupleSpaceApp = dynamic(() => import('./couple-space'), {
+  ssr: false,
+  loading: () => <AppSplash appId="couple" />,
+});
+const CottageApp = dynamic(() => import('./cottage'), {
+  ssr: false,
+  loading: () => <AppSplash appId="cottage" />,
+});
+const ForumApp = dynamic(() => import('./forum/forum'), { ssr: false, loading: () => <AppSplash appId="forum" /> });
 
 export interface AppMeta {
   id: AppId;
@@ -584,6 +629,45 @@ export const GRID_APPS: AppMeta[] = APPS.filter((a) => !DOCK_IDS.includes(a.id))
 /** 底部 Dock（4 个） */
 export const DOCK_APPS: AppMeta[] = DOCK_IDS.map((id) => APP_MAP[id]);
 
+/** 按下即预载：appId → chunk 预载器（与上方 dynamic 同一模块引用，重复调用幂等）。
+ * 挂在图标 pointerdown/悬停上（PhoneShell 全局捕获监听），比 click 提前 100~300ms
+ * 开始拉 chunk——外网首开时这段抢跑与打开缩放动画重叠，实际等待明显变短 */
+const APP_IMPORTERS: Record<AppId, () => Promise<unknown>> = {
+  chat: () => import('./chat'),
+  photos: () => import('./photos'),
+  camera: () => import('./camera'),
+  music: () => import('./music'),
+  browser: () => import('./browser'),
+  weather: () => import('./weather'),
+  clock: () => import('./clock'),
+  themes: () => import('./themes'),
+  files: () => import('./files'),
+  reminders: () => import('./reminders'),
+  calculator: () => import('./calculator'),
+  notes: () => import('./notes'),
+  calendar: () => import('./calendar'),
+  recorder: () => import('./recorder'),
+  settings: () => import('./settings'),
+  contacts: () => import('./contacts'),
+  phone: () => import('./phone'),
+  wechat: () => import('./wechat'),
+  qq: () => import('./qq'),
+  appstore: () => import('./appstore'),
+  memory: () => import('./memory-bank'),
+  worldbook: () => import('./worldbook'),
+  meituan: () => import('./meituan'),
+  taobao: () => import('./taobao'),
+  couple: () => import('./couple-space'),
+  cottage: () => import('./cottage'),
+  forum: () => import('./forum/forum'),
+};
+
+/** 预载指定 App 的 chunk（幂等、失败静默）：图标按下/悬停时调用 */
+export function preloadApp(id: AppId): void {
+  const fn = APP_IMPORTERS[id];
+  if (fn) void fn().catch(() => undefined);
+}
+
 /**
  * 主屏空闲预热重 App（解决「点击进入任何界面都要等一会」）：
  * 所有 App 组件都是 dynamic 懒加载，chunk 只在首次点开时才拉取——dev 下未压缩
@@ -613,6 +697,21 @@ export function preloadHeavyApps(): void {
     () => import('./worldbook'),
     () => import('./contacts'),
     () => import('./music'),
+    // 轻量 App 排在重 App 之后继续预热（每个只有几十~几百 KB，成本低）：
+    // 全部 App 预热完成后，任何点击都是零等待命中模块缓存
+    () => import('./photos'),
+    () => import('./camera'),
+    () => import('./browser'),
+    () => import('./weather'),
+    () => import('./clock'),
+    () => import('./themes'),
+    () => import('./files'),
+    () => import('./reminders'),
+    () => import('./calculator'),
+    () => import('./notes'),
+    () => import('./calendar'),
+    () => import('./recorder'),
+    () => import('./appstore'),
   ];
   // 空闲串行调度：只在浏览器空闲帧里预载下一个（每次让出主线程，不与首帧/
   // 主屏滑动/用户点击抢资源）；页面隐藏时 idle 回调暂停，回前台自动续上。
