@@ -60,3 +60,7 @@ tool-results/
 db/*.db
 db/*.db-journal
 .data/
+
+# local clone workspace
+/repo-5201314/
+
