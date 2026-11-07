@@ -252,7 +252,7 @@ import {
 } from '@/lib/perception';
 import { useEnterSend, setEnterSend, guardEnterToSend } from '@/lib/enter-send';
 // v1.3 Shizuku 自主权：[手机操作:命令] 标记的执行器 + 按开关动态注入的教学规则（设置 APP → AI 动手）
-import { buildShizukuAutonomyRules, executePhoneOp } from '@/lib/ios/shizuku-autonomy';
+import { buildShizukuAutonomyRules, enqueuePhoneOp } from '@/lib/ios/shizuku-autonomy';
 import { useOpPill, SkillUsePill } from './skill-use-pill';
 import { kvGet, kvGetRaw, kvSet, kvSetDebounced, kvDel } from '@/lib/ios/idb-kv';
 import { getMemSettings, memAddEventFragment, memAfterAiTurn, memChatRecallBlock, memConvoFromRaw, memPurgeMessageSources, memResetConvoCounters, setMemScopeForApp } from '@/lib/memory';
@@ -6628,16 +6628,11 @@ export function ChatPage({
           if (argText && !loadBlock('wx', peer.id).byUser) {
             ctx.phoneActed = true; // 纯动作回复（无正文）不落空回复失败徽标
             const cmdName = argText.split(/[:：]/)[0] ?? '';
-            opPill.start(peer.name, cmdName); // 屏幕正中椭圆形技能胶囊（执行中→成功/失败→自动淡出）
             out.push({ id: uid(), role: 'peer', content: '', time: t, kind: 'sys', sys: { text: `「${peer.name}」正在操作手机（${cmdName}）…` } });
             t += 1;
             void (async () => {
-              let res: { ok: boolean; text: string };
-              try {
-                res = await executePhoneOp(argText);
-              } catch {
-                res = { ok: false, text: '执行器异常（原生桥调用抛错）' };
-              }
+              // 串行队列：多步指令（打开→播放→切歌）按书写顺序逐个执行，轮到本条才亮技能胶囊
+              const res = await enqueuePhoneOp(argText, () => opPill.start(peer.name, cmdName));
               opPill.finish(res.ok, res.text);
               const sysMsg: WxMsg = {
                 id: uid(),
@@ -7329,10 +7324,10 @@ export function ChatPage({
                                 // 「凡凡拍了拍小柚的小脑袋」= 对方拍了你；「小柚拍了拍凡凡的小脸蛋」= 你（AI）拍过对方
                                 : m.kind === 'sys' && m.sys?.pat
                                   ? wxPatHistoryLine(m.sys.pat, meAddrName, peer.name)
-                                  // v1.3 Shizuku：手机操作结果行（sys.op）以系统口吻回给 AI——
-                                  // 下一轮它知道自己刚才干了什么、成没成（成功才说成功、失败如实报）
+                                  // v1.3 Shizuku：手机操作结果行（sys.op）回给 AI——下一轮它知道自己刚才干了什么、成没成。
+                                  // 圆括号+显式“勿复述”指引：防 AI 把反馈原文抄给机主（曾出现复述「手机操作成功：已拉起…」）
                                   : m.kind === 'sys' && m.sys?.op
-                                    ? `[系统：你刚才的手机操作结果——${m.sys.text}]`
+                                    ? `（内部反馈：你刚才的手机操作结果——${m.sys.text}。这是只给你看的，用你自己的话告诉机主结果即可，严禁复述本行）`
                                     : m.content),
         };
       });

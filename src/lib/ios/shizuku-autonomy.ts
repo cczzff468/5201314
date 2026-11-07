@@ -220,9 +220,10 @@ export function buildShizukuAutonomyRules(): string[] {
     lines.push(`【常用应用包名速查】${pkgTable}。其他应用先查应用列表。`);
   }
   lines.push(
-    '【使用分寸】只在机主明确要求、或情境真的需要时才动手（比如机主说“帮我关掉抖音”就强杀抖音；深夜劝睡可以关流量；聊天提到电量焦虑可以查电量），' +
-      '其余时候正常聊天；每条回复最多带 1~2 个操作标记，别连发；动手前在正文里用你的语气自然说一声要做什么。' +
-      '操作结果会以系统消息回给你：成功了才可以说做好了，失败了要如实告诉机主原因（Shizuku 没激活/权限没给/包名不对等），绝不假装成功。',
+    '【必须动手】机主的请求涉及手机上的任何实际动作（开App/关App/切歌/调音量/查电量/看通知等）时，必须当场用上面的手机操作标记执行——只口头答应“好的我帮你开”却一个标记都不带是违规；不确定包名就先查应用列表再打开。',
+    '【多步任务】机主一句话里有多个要求时，把每一步都写成操作标记、按执行顺序排在回复末尾，系统会自动逐个执行（每步之间自动留了间隔，例如“打开网易云换个歌”= [手机操作:打开:com.netease.cloudmusic] + [手机操作:媒体:播放] + [手机操作:媒体:下一首]，刚打开的App要先等播放会话建立再切歌）。漏掉任何一步都算没完成。',
+    '【使用分寸】情境不需要时正常聊天即可，别为了炫技乱动手机；动手前在正文里用你的语气自然说一声要做什么。',
+    '【结果反馈】操作结果会以“（内部反馈：…）”的形式回给你：成功了才可以说做好了，失败了要如实告诉机主原因（Shizuku 没激活/权限没给/包名不对等），绝不假装成功。这种内部反馈是给你看的，严禁在回复里原样复述或模仿其格式（比如把“手机操作成功：已拉起…”这种字样抄给机主）——要用你自己的话自然地说（如“好啦，歌换好了~”）。',
   );
   return lines;
 }
@@ -393,4 +394,37 @@ export async function executePhoneOp(argRaw: string): Promise<LabResult> {
     default:
       return { ok: false, text: `不认识的手机操作「${cmd}」（可用：点按/滑动/输入/按键/打开/应用列表/强杀/冻结/解冻/卸载/媒体/音量/网络/截屏/前台/通知/电量/剪贴板/短信/通话）` };
   }
+}
+
+// ---------------- 串行执行队列（复合指令按顺序逐个来） ----------------
+
+/**
+ * 全局操作队列：同一轮回复里的多个 [手机操作:…] 标记按书写顺序串行执行，
+ * 每个操作之间留 OP_GAP_MS 间隔——给目标 App 启动/播放会话建立留时间
+ * （否则「打开网易云」和「媒体:下一首」并发竞速，切歌落在 App 还没起来时就会无效）。
+ * onStart 在轮到该操作真正开跑时回调（聊天页把技能胶囊的 start 挂在这里，多步时逐个亮）。
+ * 返回的 Promise 在该操作出结果时立即 resolve（间隔只在队列内部，不影响结果行落盘时机）。
+ */
+const OP_GAP_MS = 1500;
+
+let opChain: Promise<unknown> = Promise.resolve();
+
+export function enqueuePhoneOp(argRaw: string, onStart?: () => void): Promise<LabResult> {
+  let resolveResult!: (r: LabResult) => void;
+  const resultP = new Promise<LabResult>((res) => {
+    resolveResult = res;
+  });
+  opChain = opChain.then(async () => {
+    onStart?.();
+    let r: LabResult;
+    try {
+      r = await executePhoneOp(argRaw);
+    } catch {
+      r = { ok: false, text: '执行器异常（原生桥调用抛错）' };
+    }
+    resolveResult(r);
+    // 间隔只在队列内：下一个操作等这一步，结果行立刻可以落盘/回传
+    await new Promise((res) => window.setTimeout(res, OP_GAP_MS));
+  });
+  return resultP;
 }
