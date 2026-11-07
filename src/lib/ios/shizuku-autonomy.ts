@@ -30,6 +30,7 @@ import {
   labVolume,
   labSvc,
   labScreencap,
+  labScreenSize,
   labForegroundApp,
   labNotificationSnapshot,
   labBattery,
@@ -40,6 +41,8 @@ import {
   type LabResult,
 } from './shizuku-lab';
 import { isNativePerception } from './native-perception';
+import { describeImagesAuto } from '@/lib/vision-client';
+import { useSettings } from '@/lib/ios/store';
 
 // ---------------- 能力注册表 ----------------
 
@@ -62,20 +65,19 @@ export interface AutonomyCap {
  */
 export const AUTONOMY_CAPS: AutonomyCap[] = [
   // ---- 动手（真实操作手机） ----
-  { key: 'tap', label: '点按屏幕', desc: 'AI 点击指定坐标（配合截屏看清再点）', group: 'hands' },
+  { key: 'tap', label: '点按屏幕', desc: 'AI 自己看屏幕点按钮（自动识图定位文字按钮，或点指定坐标）', group: 'hands' },
   { key: 'swipe', label: '滑动屏幕', desc: 'AI 上滑/下滑/左右滑（翻页、滚动列表）', group: 'hands' },
   { key: 'type', label: '输入文字', desc: 'AI 在输入框打字（系统限制仅英文数字）', group: 'hands' },
   { key: 'key', label: '按按键', desc: '返回/主页/回车/音量/媒体键等', group: 'hands' },
   { key: 'open', label: '打开应用', desc: 'AI 按包名拉起任意已安装 App', group: 'hands' },
   { key: 'applist', label: '查应用列表', desc: 'AI 查手机装了哪些 App（找包名用）', group: 'hands' },
-  { key: 'media', label: '媒体控制', desc: '播放/暂停/切歌（不依赖本 APP 的音乐遥控）', group: 'hands' },
   { key: 'volume', label: '音量调节', desc: '调高/调低/静音/指定音量值', group: 'hands' },
   { key: 'kill', label: '强杀应用', desc: '立即结束指定 App（防沉迷场景）', group: 'hands', danger: true },
   { key: 'freeze', label: '冻结/解冻应用', desc: '冻结后图标消失、解冻即恢复（可逆）', group: 'hands', danger: true },
   { key: 'uninstall', label: '卸载应用', desc: '移除 App（可恢复、数据保留，仍需谨慎）', group: 'hands', danger: true },
   { key: 'net', label: '网络开关', desc: 'Wi-Fi/流量/蓝牙的开关（部分 ROM 需 root）', group: 'hands', danger: true },
   // ---- 看见（只读探测） ----
-  { key: 'screencap', label: '静默截屏', desc: '免授权弹窗截全屏（AI 看清屏幕再操作）', group: 'eyes' },
+  { key: 'screencap', label: '看屏幕', desc: '截屏+自动识图：当前界面内容与按钮坐标', group: 'eyes' },
   { key: 'foreground', label: '前台应用', desc: '机主当前正在用哪个 App', group: 'eyes' },
   { key: 'notify', label: '通知栏快照', desc: '读最近的通知（App + 标题 + 内容）', group: 'eyes' },
   { key: 'battery', label: '电量状态', desc: '电量百分比 + 是否在充电', group: 'eyes' },
@@ -173,19 +175,18 @@ export function isCapEnabled(key: string): boolean {
 
 /** 命令语法表：cap key → [手机操作:…] 的写法说明（仅开着的进教学块） */
 const CAP_SYNTAX: Record<string, string> = {
-  tap: '[手机操作:点按:x:y]（点屏幕坐标，例：[手机操作:点按:540:1200]；不确定位置就先截屏看）',
+  tap: '[手机操作:点文字:文字]（推荐：自动看屏幕→定位显示该文字的按钮/标签→点击，例：[手机操作:点文字:下一首]）；也可以直接点坐标 [手机操作:点按:x:y]（例：[手机操作:点按:540:1200]，不确定位置就先看屏幕）',
   swipe: '[手机操作:滑动:x1:y1:x2:y2:毫秒]（可省毫秒，例：上滑 [手机操作:滑动:540:1800:540:400]）',
   type: '[手机操作:输入:文字]（只能输英文/数字/符号——中文是系统限制，输不了要如实说）',
-  key: '[手机操作:按键:名称]（名称：返回/主页/切换/回车/删除/音量加/音量减/播放暂停/下一首/上一首）',
+  key: '[手机操作:按键:名称]（名称：返回/主页/切换/回车/删除/音量加/音量减）',
   open: '[手机操作:打开:包名]（包名见下方速查表；不认识的应用先 [手机操作:应用列表:关键词] 查）',
   applist: '[手机操作:应用列表:关键词]（关键词可省=全部；查到的是包名，配合「打开」用）',
   kill: '[手机操作:强杀:包名]（立即杀掉该 App；适合防沉迷/劝睡场景，配合人设使用）',
   freeze: '[手机操作:冻结:包名] / [手机操作:解冻:包名]（冻结=图标消失打不开，解冻即恢复）',
   uninstall: '[手机操作:卸载:包名]（移除应用；除非机主明确要求，否则不要用）',
-  media: '[手机操作:媒体:播放暂停/播放/暂停/下一首/上一首]',
   volume: '[手机操作:音量:加/减/静音] 或 [手机操作:音量:0~15的数字]',
   net: '[手机操作:网络:开或关:wifi/流量/蓝牙]（例：[手机操作:网络:关:流量]）',
-  screencap: '[手机操作:截屏]（免授权弹窗截全屏——先看清屏幕再点按/输入，位置才准）',
+  screencap: '[手机操作:看屏幕]（截屏并自动识别：当前什么App什么页面、可见内容、可点元素及坐标——想确认状态或找目标时用）',
   foreground: '[手机操作:前台]（机主此刻正在用的 App）',
   notify: '[手机操作:通知]（通知栏最近的条目：哪个 App、什么内容）',
   battery: '[手机操作:电量]（电量百分比 + 是否在充电）',

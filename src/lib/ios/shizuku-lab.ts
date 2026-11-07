@@ -61,6 +61,16 @@ export async function labScreencap(): Promise<LabResult & { image?: string }> {
   return { ok: false, text: '截屏失败（可能命中 FLAG_SECURE 防截屏页面，或 Shizuku 服务异常）' };
 }
 
+/** 屏幕分辨率（wm size；识图坐标换算用，Override 优先于 Physical） */
+export async function labScreenSize(): Promise<{ w: number; h: number } | null> {
+  const r = await run(['wm', 'size']);
+  const out = r.ok ? r.text : '';
+  const ovr = /Override size:\s*(\d{3,4})\s*[x×]\s*(\d{3,4})/i.exec(out);
+  const phys = /Physical size:\s*(\d{3,4})\s*[x×]\s*(\d{3,4})/i.exec(out);
+  const m = ovr ?? phys;
+  return m ? { w: Number(m[1]), h: Number(m[2]) } : null;
+}
+
 /** 实时前台应用（dumpsys window 焦点行 → 包名 + Activity） */
 export async function labForegroundApp(): Promise<LabResult> {
   return run(['dumpsys', 'window'], {
