@@ -27,6 +27,8 @@ import IslandNotificationLayer from './IslandNotification';
 
 // 通知权限友好申请卡（首次使用时应用内说明卡，代替裸浏览器授权框）：常驻挂载，不弹时不渲染内容
 const NotifyPermissionCard = dynamic(() => import('./NotifyPermissionCard'), { ssr: false });
+// v1.4.2 APP 更新弹窗（开机后自动检查，有新版弹窗提示；锁屏时不出场，解锁后再弹）
+const AppUpdateDialog = dynamic(() => import('./AppUpdateDialog'), { ssr: false });
 
 // 闹钟监听懒加载：避免为一个小组件把整个时钟 App 拖进首屏包
 const AlarmWatcher = dynamic(() => import('@/components/apps/clock').then((m) => m.AlarmWatcher), { ssr: false });
@@ -561,6 +563,9 @@ export default function PhoneShell() {
 
         {/* 通知权限友好申请卡（首次使用时展示，应用内说明 → 用户手势内才弹浏览器授权框） */}
         <NotifyPermissionCard />
+
+        {/* APP 更新弹窗（v1.4.2：开机后自动检查，有新版弹窗提示一键下载安装） */}
+        <AppUpdateDialog />
 
         {/* v70：以下全局调度器/监听器延迟 8s 挂载（watchersReady 门控）——
             重模块移出首屏关键路径，开机更快；功能不受影响 */}
