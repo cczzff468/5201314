@@ -67,6 +67,7 @@ import {
   type BubbleMenuItem,
 } from '@/components/apps/bubble-menu';
 import { addressNameOf, displayNameOf, isFriendIn, meTileLabel, nameVariantHit, contactNameVariants, type ContactRecord } from '@/lib/contacts';
+import { buildShizukuAutonomyRules, executePhoneOp } from '@/lib/ios/shizuku-autonomy';
 import { aiVoiceFreqLabel, decideAiVoiceMessage, getAiVoiceFreq, saveAiVoiceFreq, synthesizeAiVoice } from '@/lib/ios/ai-voice';
 import { buildNpcPromptExtra } from '@/lib/ios/npc-bond';
 import { buildPersonaSystemPrompt } from '@/lib/ios/persona';
@@ -2412,6 +2413,10 @@ export function QqGroupChatPage({
         ? `[聊天记录：${(m.fwd.records ?? []).slice(-8).map((r) => `${r.name}：${r.text}`).join(' ／ ')}]`
         : `[转发] ${m.content}`;
     }
+    // v1.3 Shizuku：手机操作结果行（notice）以系统口吻注入——动手成员下一轮看到自己刚才的结果
+    if (m.kind === 'notice' && (m.noticeText ?? '').startsWith('手机操作')) {
+      return `[系统：你刚才的手机操作结果——${m.noticeText}]`;
+    }
     return m.content;
   };
 
@@ -2650,7 +2655,9 @@ export function QqGroupChatPage({
         // 排序把尾巴放回用户消息之前，成员读到的对话时序才正确
         const pending = peekPendingMsgs<WxGroupMsg>(sKey);
         const ctxMsgs = sortMsgsByTime(
-          [...loadGroupMsgs(gid), ...pending].filter((m) => m.kind !== 'notice' && !m.recalled),
+          // v1.3 Shizuku：手机操作结果行（noticeText 以「手机操作」开头）保留进上下文——
+          // 动手的成员下一轮要知道自己刚才干成没干成；其余 notice（进群/红包过期等群事件）照旧过滤
+          [...loadGroupMsgs(gid), ...pending].filter((m) => (m.kind !== 'notice' || (m.noticeText ?? '').startsWith('手机操作')) && !m.recalled),
         ).slice(-24);
         // 上下文映射：自己 → assistant；机主/其他成员 → 「发言者：内容」user 消息（富媒体按占位文本；
         // 任何成员引用了别的消息都带「（引用 名字：「内容」）」前缀，群里 AI 也能理解引用关系）
@@ -2864,6 +2871,8 @@ export function QqGroupChatPage({
           memoryBlock,
           locBlock,
           timeBlock,
+          // v1.3 Shizuku 自主权：[手机操作:…] 教学规则按当前开关注入（总开关关/非手机APP环境 → 空，零 token）
+          ...buildShizukuAutonomyRules(),
           wbBlocks.afterSystem,
           wbRulesBlock(wbBlocks),
         ]
@@ -2986,6 +2995,30 @@ export function QqGroupChatPage({
           const { text: tagStripped, tags: photoTags } = extractPhotoTags(rawText);
           for (const part of extractRichActionParts(tagStripped)) {
             if (part.type === 'action') {
+              // v1.3 Shizuku 自主权（[手机操作:命令:参数]）：AI 群成员真实操控机主手机。
+              // 执行异步（Shizuku 通道 1~3s）：占位系统行同步入列，结果行完成后落盘回传 AI（下一轮天然看到：
+              // 成功才说成功、失败如实报）。开关 gate 在 executePhoneOp 内（系统设置 → AI 动手，关了直接拒）。
+              if (part.action.kind === 'phone-op') {
+                const argText = part.action.targetId.trim();
+                if (argText) {
+                  const cmdName = argText.split(/[:：]/)[0] ?? '';
+                  all.push({ id: `${aiMsgId}-sys-${all.length}`, role: 'peer', senderId: char.id, senderName: charName, content: '', time: t, kind: 'notice', noticeText: `${charName} 正在操作手机（${cmdName}）…` });
+                  t += 1;
+                  void (async () => {
+                    let res: { ok: boolean; text: string };
+                    try {
+                      res = await executePhoneOp(argText);
+                    } catch {
+                      res = { ok: false, text: '执行器异常（原生桥调用抛错）' };
+                    }
+                    const sysMsg: WxGroupMsg = { id: `${aiMsgId}-sysres-${Date.now()}`, role: 'peer', senderId: char.id, senderName: charName, content: '', time: Date.now(), kind: 'notice', noticeText: `手机操作${res.ok ? '成功' : '失败'}：${res.text}` };
+                    const cur = loadGroupMsgs(gid);
+                    saveGroupMsgs(gid, [...cur, sysMsg]);
+                    if (mountedRef.current) setMsgs(loadGroupMsgs(gid));
+                  })();
+                }
+                continue;
+              }
               // 美团代点（C11 群内帮点外卖）：[帮点外卖:商家ID|菜名x数量,...] → 代点草稿卡
               //（机主确认后才真正下单并自己付；群里不接代付/帮付/请客/自己点）。
               // 成员只帮机主代点：草稿发起人 = 当前发言成员（char），确认入口/订单归属都在机主侧

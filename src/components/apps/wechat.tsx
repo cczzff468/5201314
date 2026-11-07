@@ -541,7 +541,7 @@ interface WxMsg {
   /** 系统提示行数据（kind = 'sys' 时有值）：拉黑/解除拉黑等状态变更提示。
    *  pat = 拍一拍事件（Task 30）：by='me' 我拍对方（self=我拍了自己）/ by='peer' 对方拍我，
    *  text = 拍一拍文案后缀——带 pat 的系统行进 AI 上下文（按双方真名序列化），让 AI 知道被拍/拍过谁与文案 */
-  sys?: { text: string; pat?: { by: 'me' | 'peer'; self?: boolean; text?: string } };
+  sys?: { text: string; pat?: { by: 'me' | 'peer'; self?: boolean; text?: string }; op?: boolean };
   /** 申请解除拉黑卡片数据（kind = 'blockreq' 时有值）：status pending=待处理 accepted=已同意 rejected=已拒绝；
    *  40-a 起双向——from 缺省视为 'char'（角色发起，用户点同意/拒绝）；from='user'（用户发起，角色用标记决策） */
   blkreq?: { reason: string; status: 'pending' | 'accepted' | 'rejected'; from?: 'char' | 'user' };
@@ -6640,7 +6640,7 @@ export function ChatPage({
                 content: '',
                 time: Date.now(),
                 kind: 'sys',
-                sys: { text: `手机操作${res.ok ? '成功' : '失败'}：${res.text}` },
+                sys: { text: `手机操作${res.ok ? '成功' : '失败'}：${res.text}`, op: true },
               };
               saveMsgs(peer.id, appendWithBoundary(sessionKey, loadMsgs(peer.id), sysMsg));
               setMsgs((prev) => (prev.some((m) => m.id === sysMsg.id) ? prev : [...prev, sysMsg]));
@@ -7204,7 +7204,7 @@ export function ChatPage({
         (m) =>
           // 图片以 [图片] 占位、语音以转写文本/占位、位置以完整位置文本进入历史（本轮图片实际内容由识图模型描述追加在末尾）；
           // 拍一拍系统行（Task 30）也进历史：AI 要知道被拍/拍过谁与文案（按双方名字序列化，无主语歧义）
-          (!m.recalled && ((m.content || m.kind === 'sticker' || m.kind === 'image' || m.kind === 'textcard' || m.kind === 'voice' || m.kind === 'call' || m.kind === 'redpacket' || m.kind === 'transfer' || m.kind === 'family' || m.kind === 'groupcard' || m.kind === 'relcard' || m.kind === 'pactcard' || m.kind === 'examcard' || m.kind === 'lettercard' || m.kind === 'giftcard' || m.kind === 'location' || m.kind === 'song' || (m.kind === 'sys' && !!m.sys?.pat)) && !m.content.startsWith('〔') && !m.content.startsWith('（AI'))) as boolean
+          (!m.recalled && ((m.content || m.kind === 'sticker' || m.kind === 'image' || m.kind === 'textcard' || m.kind === 'voice' || m.kind === 'call' || m.kind === 'redpacket' || m.kind === 'transfer' || m.kind === 'family' || m.kind === 'groupcard' || m.kind === 'relcard' || m.kind === 'pactcard' || m.kind === 'examcard' || m.kind === 'lettercard' || m.kind === 'giftcard' || m.kind === 'location' || m.kind === 'song' || (m.kind === 'sys' && (m.sys?.pat || m.sys?.op))) && !m.content.startsWith('〔') && !m.content.startsWith('（AI'))) as boolean
       )
       .slice(-20)
       .map((m) => {
@@ -7324,7 +7324,11 @@ export function ChatPage({
                                 // 「凡凡拍了拍小柚的小脑袋」= 对方拍了你；「小柚拍了拍凡凡的小脸蛋」= 你（AI）拍过对方
                                 : m.kind === 'sys' && m.sys?.pat
                                   ? wxPatHistoryLine(m.sys.pat, meAddrName, peer.name)
-                                  : m.content),
+                                  // v1.3 Shizuku：手机操作结果行（sys.op）以系统口吻回给 AI——
+                                  // 下一轮它知道自己刚才干了什么、成没成（成功才说成功、失败如实报）
+                                  : m.kind === 'sys' && m.sys?.op
+                                    ? `[系统：你刚才的手机操作结果——${m.sys.text}]`
+                                    : m.content),
         };
       });
 

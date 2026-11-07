@@ -351,6 +351,7 @@ import {
 } from '@/lib/ios/stickers';
 import { BUILTIN_STICKER_GROUP_ID } from '@/lib/ios/builtin-stickers';
 import type { Sticker, StickerGroup } from '@/lib/ios/stickers';
+import { buildShizukuAutonomyRules, executePhoneOp } from '@/lib/ios/shizuku-autonomy';
 import {
   buildRichRules,
   buildActionRules,
@@ -511,7 +512,7 @@ interface QQMsg {
   /** 系统提示行数据（kind = 'sys' 时有值）：拉黑/解除拉黑等状态变更提示。
    *  pat = 拍一拍事件（Task 30）：by='me' 我拍对方（self=我拍了自己）/ by='peer' 对方拍我，
    *  text = 拍一拍文案后缀——带 pat 的系统行进 AI 上下文（按双方真名序列化），让 AI 知道被拍/拍过谁与文案 */
-  sys?: { text: string; pat?: { by: 'me' | 'peer'; self?: boolean; text?: string } };
+  sys?: { text: string; pat?: { by: 'me' | 'peer'; self?: boolean; text?: string }; op?: boolean };
   /** 申请解除拉黑卡片数据（kind = 'blockreq' 时有值）：status pending=待处理 accepted=已同意 rejected=已拒绝；
    *  40-a 起双向——from 缺省视为 'char'（角色发起，用户点同意/拒绝）；from='user'（用户发起，角色用标记决策） */
   blkreq?: { reason: string; status: 'pending' | 'accepted' | 'rejected'; from?: 'char' | 'user' };
@@ -4908,6 +4909,31 @@ function ChatPage({
             t += 1;
             continue;
           }
+          // v1.3 Shizuku 自主权（[手机操作:命令:参数]）：AI 真实操控手机（点按/滑动/打开App/强杀/媒体/截屏…）。
+          // 执行异步（Shizuku 通道 1~3s）：占位系统行同步入列，结果行完成后落盘回传 AI（下一轮 AI 天然看到：
+          // 成功才说成功、失败如实报）。开关 gate 在 executePhoneOp 内（系统设置 → AI 动手，关了直接拒）；
+          // 拉黑（仅申请卡模式）下与资金/视觉标记同口径拦截——拉黑期间 AI 不许动手机。
+          if (part.action.kind === 'phone-op') {
+            const argText = part.action.targetId.trim();
+            if (argText && !loadBlock('qq', peer.id).byUser) {
+              musicActedRef.current = true; // 纯动作回复（无正文）不落空回复失败徽标（与播控同口径）
+              const cmdName = argText.split(/[:：]/)[0] ?? '';
+              out.push({ id: uid(), role: 'peer', content: '', time: t, kind: 'sys', sys: { text: `「${peer.name}」正在操作手机（${cmdName}）…` } });
+              t += 1;
+              void (async () => {
+                let res: { ok: boolean; text: string };
+                try {
+                  res = await executePhoneOp(argText);
+                } catch {
+                  res = { ok: false, text: '执行器异常（原生桥调用抛错）' };
+                }
+                const sysMsg = { id: uid(), role: 'peer' as const, content: '', time: Date.now(), kind: 'sys' as const, sys: { text: `手机操作${res.ok ? '成功' : '失败'}：${res.text}`, op: true } } as unknown as QQMsg;
+                saveMsgs(peer.id, appendWithBoundary(sessionKey, loadMsgs(peer.id), sysMsg));
+                setMsgs((prev) => (prev.some((m) => m.id === sysMsg.id) ? prev : [...prev, sysMsg]));
+              })();
+            }
+            continue;
+          }
           // 第二十九轮「AI 主动换头像」：[生成新头像:外观描述] → 系统按人设锁脸生成新照片 →
           // 设为 AI 的 QQ 头像 + 头像描述落库 + 决策日志；未配置生图时静默丢弃（教学规则只在配置完整时下发）
           if (part.action.kind === 'gen-avatar') {
@@ -5263,8 +5289,9 @@ function ChatPage({
     const history = base
       .filter(
         (m) =>
-          // 拍一拍系统行（Task 30）也进历史：AI 要知道被拍/拍过谁与文案（按双方名字序列化，无主语歧义）
-          (!m.recalled && ((m.content || m.kind === 'image' || m.kind === 'textcard' || m.kind === 'voice' || m.kind === 'sticker' || m.kind === 'redpacket' || m.kind === 'transfer' || m.kind === 'family' || m.kind === 'groupcard' || m.kind === 'relcard' || m.kind === 'pactcard' || m.kind === 'examcard' || m.kind === 'lettercard' || m.kind === 'call' || m.kind === 'location' || m.kind === 'song' || (m.kind === 'sys' && !!m.sys?.pat)) && !m.content.startsWith('〔') && !m.content.startsWith('（AI')))
+          // 拍一拍系统行（Task 30）也进历史：AI 要知道被拍/拍过谁与文案（按双方名字序列化，无主语歧义）；
+          // v1.3 Shizuku：手机操作结果行（sys.op）同样进历史——AI 下一轮知道自己刚才动手的结果
+          (!m.recalled && ((m.content || m.kind === 'image' || m.kind === 'textcard' || m.kind === 'voice' || m.kind === 'sticker' || m.kind === 'redpacket' || m.kind === 'transfer' || m.kind === 'family' || m.kind === 'groupcard' || m.kind === 'relcard' || m.kind === 'pactcard' || m.kind === 'examcard' || m.kind === 'lettercard' || m.kind === 'call' || m.kind === 'location' || m.kind === 'song' || (m.kind === 'sys' && (m.sys?.pat || m.sys?.op))) && !m.content.startsWith('〔') && !m.content.startsWith('（AI')))
       )
       .slice(-20)
       .map((m) => {
@@ -5371,7 +5398,11 @@ function ChatPage({
                                 // 拍一拍系统行（Task 30）：按双方名字显式序列化（文案后缀原样拼接），AI 无主语歧义
                                 : m.kind === 'sys' && m.sys?.pat
                                   ? qqPatHistoryLine(m.sys.pat, me.realName || me.name, peer.name)
-                                  : m.content),
+                                  // v1.3 Shizuku：手机操作结果行（sys.op）以系统口吻回给 AI——
+                                  // 下一轮它知道自己刚才干了什么、成没成（成功才说成功、失败如实报）
+                                  : m.kind === 'sys' && m.sys?.op
+                                    ? `[系统：你刚才的手机操作结果——${m.sys.text}]`
+                                    : m.content),
         };
       });
 
@@ -5579,6 +5610,8 @@ function ChatPage({
       '【视频通话能力】如果你此刻很想看看对方（想TA了、有值得分享的时刻、对方说想见你/想看看你等自然原因），可以在回复的最开头单独加上标记 [视频通话] 发起一次视频通话邀请，对方手机会弹出你的视频来电邀请；平时聊天不要加这个标记，最多偶尔一次，连续使用会很烦人。注意：标记必须是单独四个字 [视频通话]，严禁模仿聊天记录里「[视频通话：时长/内容摘要]」这类卡片描述文字的格式（那是系统卡片不是标记），不要输出带冒号的 [视频通话：……]。',
       timeBlock,
       perceptionBlock,
+      // v1.3 Shizuku 自主权：[手机操作:…] 教学规则按当前开关注入（总开关关/非手机APP环境 → 空，零 token）
+      ...buildShizukuAutonomyRules(),
       ...(visionRules.length > 0 ? [visionRules.join('\n\n')] : []),
       // 生图（锁脸）：照片标签规则（自动生图开启时；AI 输出 [照片:描述] 系统自动生图并以图片消息投递）
       ...(photoRule ? [photoRule] : []),

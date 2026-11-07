@@ -200,7 +200,7 @@ interface ChatMsg {
   /** 已撤回（渲染为居中灰字「你撤回一条消息 / 对方撤回一条消息」，不再参与上下文） */
   recalled?: boolean;
   /** 系统提示行（拉黑/解除拉黑等状态变更；居中灰字胶囊，不参与上下文） */
-  sys?: { text: string };
+  sys?: { text: string; op?: boolean };
   /** 申请解除拉黑卡片：40-a 起双向——from 缺省视为 'char'（角色发起，用户点同意/拒绝）；
    *  from='user'（用户发起，角色用 [同意/拒绝解除拉黑] 标记决策） */
   blkreq?: { reason: string; status: 'pending' | 'accepted' | 'rejected'; from?: 'char' | 'user' };
@@ -1690,7 +1690,7 @@ function ChatView({
                 } catch {
                   res = { ok: false, text: '执行器异常（原生桥调用抛错）' };
                 }
-                const sysMsg = { id: uid(), role: 'assistant' as const, content: '', time: Date.now(), sys: { text: `手机操作${res.ok ? '成功' : '失败'}：${res.text}` } } as unknown as ChatMsg;
+                const sysMsg = { id: uid(), role: 'assistant' as const, content: '', time: Date.now(), sys: { text: `手机操作${res.ok ? '成功' : '失败'}：${res.text}`, op: true } } as unknown as ChatMsg;
                 saveMsgs(storageKey, appendWithBoundary(sessionKey, loadMsgs(storageKey) ?? [], sysMsg));
                 setMsgs((prev) => (prev.some((m) => m.id === sysMsg.id) ? prev : [...prev, sysMsg]));
               })();
@@ -1857,7 +1857,9 @@ function ChatView({
         (m) =>
           !m.error &&
           !m.recalled &&
-          (m.content || m.kind === 'voice' || (m.kind === 'image' && m.img) || (m.kind === 'textcard' && m.card) || (m.kind === 'forumshare' && m.forumshare))
+          // v1.3 Shizuku：手机操作结果行（sys.op）进历史——AI 必须看到自己上一轮动手的结果
+          //（成功才说成功、失败如实报；否则会以为没动手而重复操作）
+          (m.content || m.sys?.op || m.kind === 'voice' || (m.kind === 'image' && m.img) || (m.kind === 'textcard' && m.card) || (m.kind === 'forumshare' && m.forumshare))
       )
       .sort((a, b) => a.time - b.time)
       .slice(-20)
@@ -1882,7 +1884,10 @@ function ChatView({
                 : m.kind === 'forumshare' && m.forumshare
                   ? // v39：帖子分享卡序列化成「帖子正文＋热门评论」可读文本（AI 能看懂卡片内容）
                     forumShareHistoryLine(m.forumshare.pid, wbContactId ?? undefined)
-                  : m.content
+                  : m.sys?.op
+                    ? // v1.3 Shizuku：操作结果行以系统口吻回给 AI（下一轮它知道自己刚才干了什么、成没成）
+                      `[系统：你刚才的手机操作结果——${m.sys.text}]`
+                    : m.content
         }`,
       }));
 
