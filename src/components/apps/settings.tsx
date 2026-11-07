@@ -983,10 +983,11 @@ function AppUpdatePage({ onBack }: { onBack: () => void }) {
       <div className="no-scrollbar flex-1 overflow-y-auto pb-8">
         {/* 版本说明卡 */}
         <div className="mx-4 mt-4 rounded-[22px] bg-white/55 p-4 text-[13px] leading-relaxed ring-1 ring-white/70 backdrop-blur-2xl dark:bg-white/[0.06] dark:ring-white/[0.09]">
-          <p className="font-medium">AI-Phone v1.3（Shizuku 能力实验室 + 自主权）</p>
+          <p className="font-medium">AI-Phone v1.4（AI 自主 UI 操作）</p>
           <p className="mt-1.5 text-muted-foreground">
-            v1.3 新增：AI 真实操控手机（设置 → AI 动手，逐项开关授权点按/滑动/开关App/媒体音量/截屏等）
-            + 静默截屏/通知栏/前台App/电量/剪贴板感知 + 一键自授权；并含 v1.2.1 的时长口径修正（息屏/锁屏不计入使用时长）。
+            v1.4 新增：AI 像人一样操作手机——自动截屏看界面、找到写着目标文字的按钮点下去（点文字），
+            不再用不可靠的媒体按键（冷启动会被系统丢弃）；切歌/暂停/播放/翻页全部 UI 级点按，滑动支持上下左右语义方向。
+            并含 v1.3 的 Shizuku 能力实验室 + 自主权全套。
           </p>
           <p className="mt-1.5 text-muted-foreground">覆盖安装、数据不丢（聊天记录都在服务器和本地存储里）。</p>
         </div>

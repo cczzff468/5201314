@@ -237,15 +237,6 @@ export async function labLogcat(lines = 200): Promise<LabResult> {
   });
 }
 
-/** 屏幕分辨率（wm size；滑动手势坐标计算用） */
-export async function labScreenSize(): Promise<{ w: number; h: number } | null> {
-  const r = await nativeShizukuExec(['wm', 'size'], { maxLines: 10 });
-  if (!r?.ok) return null;
-  const m = /(?:Override|Physical) size:\s*(\d+)x(\d+)/.exec(r.out ?? '');
-  if (!m) return null;
-  return { w: Number(m[1]), h: Number(m[2]) };
-}
-
 /** 已安装应用列表（pm list packages；可按关键词过滤，AI 自主找包名用） */
 export async function labPackageList(filter?: string): Promise<LabResult> {
   return run(['pm', 'list', 'packages'], {
