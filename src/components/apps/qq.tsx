@@ -352,6 +352,7 @@ import {
 import { BUILTIN_STICKER_GROUP_ID } from '@/lib/ios/builtin-stickers';
 import type { Sticker, StickerGroup } from '@/lib/ios/stickers';
 import { buildShizukuAutonomyRules, executePhoneOp } from '@/lib/ios/shizuku-autonomy';
+import { useOpPill, SkillUsePill } from './skill-use-pill';
 import {
   buildRichRules,
   buildActionRules,
@@ -3397,6 +3398,8 @@ function ChatPage({
   const qqCssKey = chatContactKey('qq', peer.id);
   const chatCustomCss = useSettings((s) => s.customCss.chats[qqCssKey]);
   const [msgs, setMsgs] = useState<QQMsg[]>(() => loadMsgs(peer.id));
+  // v1.3 Shizuku：AI 使用技能时聊天界面正中的椭圆形胶囊浮层（start/finish 稳定引用，异步闭包里安全调用）
+  const opPill = useOpPill();
   // 40-b 跨 App 环境感知：会话打开即预热（其他三个 App 最近原始消息 + 共同群近况），
   // 每轮 AI 回合开头再异步刷新一次；回合内同步读最近一次构建结果（systemFull 拼装是同步的）
   const crossCtxRef = useRef<{ crossAppBlock: string; groupBlock: string }>({ crossAppBlock: '', groupBlock: '' });
@@ -4918,6 +4921,7 @@ function ChatPage({
             if (argText && !loadBlock('qq', peer.id).byUser) {
               musicActedRef.current = true; // 纯动作回复（无正文）不落空回复失败徽标（与播控同口径）
               const cmdName = argText.split(/[:：]/)[0] ?? '';
+              opPill.start(peer.name, cmdName); // 屏幕正中椭圆形技能胶囊（执行中→成功/失败→自动淡出）
               out.push({ id: uid(), role: 'peer', content: '', time: t, kind: 'sys', sys: { text: `「${peer.name}」正在操作手机（${cmdName}）…` } });
               t += 1;
               void (async () => {
@@ -4927,6 +4931,7 @@ function ChatPage({
                 } catch {
                   res = { ok: false, text: '执行器异常（原生桥调用抛错）' };
                 }
+                opPill.finish(res.ok, res.text);
                 const sysMsg = { id: uid(), role: 'peer' as const, content: '', time: Date.now(), kind: 'sys' as const, sys: { text: `手机操作${res.ok ? '成功' : '失败'}：${res.text}`, op: true } } as unknown as QQMsg;
                 saveMsgs(peer.id, appendWithBoundary(sessionKey, loadMsgs(peer.id), sysMsg));
                 setMsgs((prev) => (prev.some((m) => m.id === sysMsg.id) ? prev : [...prev, sysMsg]));
@@ -7195,6 +7200,8 @@ function ChatPage({
         swipe.current = null;
       }}
     >
+      {/* v1.3 Shizuku：AI 使用技能 → 聊天界面正中的椭圆形胶囊浮层（pointer-events-none 不挡滑动返回等手势） */}
+      <SkillUsePill pill={opPill.pill} />
       {/* 自定义 CSS（聊天作用域，按联系人隔离）：只影响本联系人的聊天页；前缀
           [data-phone-shell] [data-chat-css="qq:联系人ID"] 比全局多一级属性 → 特异性压制全局 */}
       {chatCustomCss?.trim() ? <style>{scopeCss(chatCustomCss, chatCssScopeSelector(qqCssKey))}</style> : null}

@@ -95,6 +95,7 @@ import {
 import { getTimeAware, setTimeAware, buildTimeAwareBlock } from '@/lib/time-aware';
 // v1.3 Shizuku 自主权：[手机操作:命令] 标记的执行器 + 按开关动态注入的教学规则（设置 APP → AI 动手）
 import { buildShizukuAutonomyRules, executePhoneOp } from '@/lib/ios/shizuku-autonomy';
+import { useOpPill, SkillUsePill } from './skill-use-pill';
 import {
   buildPerceptionBlock,
   prewarmPerception,
@@ -1145,6 +1146,8 @@ function ChatView({
   const stream = useChatStream(sessionKey);
   const streaming = stream?.status === 'streaming';
   const scrollRef = useRef<HTMLDivElement>(null);
+  // v1.3 Shizuku：AI 使用技能时聊天界面正中的椭圆形胶囊浮层（useOpPill 是稳定引用，异步闭包里安全调用）
+  const opPill = useOpPill();
   // 退出聊天页/切换会话（组件按 key 重挂载）：停止语音气泡播放与朗读并释放（防跨会话串音）
   useEffect(
     () => () => {
@@ -1680,6 +1683,7 @@ function ChatView({
             const argText = part.action.targetId.trim();
             if (argText) {
               const cmdName = argText.split(/[:：]/)[0] ?? '';
+              opPill.start(peer.name ?? peer.title, cmdName); // 屏幕正中椭圆形技能胶囊（执行中→成功/失败→自动淡出）
               out.push({ id: `${idBase}-sys-${msgIdx}`, role: 'assistant', content: '', time: t, sys: { text: `「${peer.name ?? peer.title}」正在操作手机（${cmdName}）…` } });
               t += 1;
               msgIdx += 1;
@@ -1690,6 +1694,7 @@ function ChatView({
                 } catch {
                   res = { ok: false, text: '执行器异常（原生桥调用抛错）' };
                 }
+                opPill.finish(res.ok, res.text);
                 const sysMsg = { id: uid(), role: 'assistant' as const, content: '', time: Date.now(), sys: { text: `手机操作${res.ok ? '成功' : '失败'}：${res.text}`, op: true } } as unknown as ChatMsg;
                 saveMsgs(storageKey, appendWithBoundary(sessionKey, loadMsgs(storageKey) ?? [], sysMsg));
                 setMsgs((prev) => (prev.some((m) => m.id === sysMsg.id) ? prev : [...prev, sysMsg]));
@@ -3286,6 +3291,8 @@ function ChatView({
 
   return (
     <div ref={pageRef} className="relative flex h-full min-h-0 flex-col">
+      {/* v1.3 Shizuku：AI 使用技能 → 聊天界面正中的椭圆形胶囊浮层（pointer-events-none 不挡交互） */}
+      <SkillUsePill pill={opPill.pill} />
       {/* 默认顶栏：返回箭头 + 居中头像/手机号（不显示名字）+ 摄像机图标（聊天设置入口） */}
       {/* sms-topbar：顶部栏锚点（自定义 CSS 示例模板可改底色/横线） */}
       <div className="sms-topbar z-20 shrink-0 border-b border-white/60 bg-white/60 pt-[54px] backdrop-blur-2xl dark:border-white/[0.09] dark:bg-white/[0.06]">

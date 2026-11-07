@@ -68,6 +68,7 @@ import {
 } from '@/components/apps/bubble-menu';
 import { addressNameOf, displayNameOf, isFriendIn, meTileLabel, nameVariantHit, contactNameVariants, type ContactRecord } from '@/lib/contacts';
 import { buildShizukuAutonomyRules, executePhoneOp } from '@/lib/ios/shizuku-autonomy';
+import { useOpPill, SkillUsePill } from './skill-use-pill';
 import { aiVoiceFreqLabel, decideAiVoiceMessage, getAiVoiceFreq, saveAiVoiceFreq, synthesizeAiVoice } from '@/lib/ios/ai-voice';
 import { buildNpcPromptExtra } from '@/lib/ios/npc-bond';
 import { buildPersonaSystemPrompt } from '@/lib/ios/persona';
@@ -2111,6 +2112,8 @@ export function QqGroupChatPage({
     return () => window.removeEventListener(VOICE_PLAY_ERROR_EVENT, fn);
   }, []);
   const [msgs, setMsgs] = useState<WxGroupMsg[]>(() => loadGroupMsgs(gid));
+  // v1.3 Shizuku：AI 使用技能时聊天界面正中的椭圆形胶囊浮层（start/finish 稳定引用，异步闭包里安全调用）
+  const opPill = useOpPill();
   // 存储侧追加（后台落盘的事件/开场白）→ 广播后即时重读（与微信同构）
   useEffect(() => {
     const fn = (e: Event) => {
@@ -3002,6 +3005,7 @@ export function QqGroupChatPage({
                 const argText = part.action.targetId.trim();
                 if (argText) {
                   const cmdName = argText.split(/[:：]/)[0] ?? '';
+                  opPill.start(charName, cmdName); // 屏幕正中椭圆形技能胶囊（执行中→成功/失败→自动淡出）
                   all.push({ id: `${aiMsgId}-sys-${all.length}`, role: 'peer', senderId: char.id, senderName: charName, content: '', time: t, kind: 'notice', noticeText: `${charName} 正在操作手机（${cmdName}）…` });
                   t += 1;
                   void (async () => {
@@ -3011,6 +3015,7 @@ export function QqGroupChatPage({
                     } catch {
                       res = { ok: false, text: '执行器异常（原生桥调用抛错）' };
                     }
+                    opPill.finish(res.ok, res.text);
                     const sysMsg: WxGroupMsg = { id: `${aiMsgId}-sysres-${Date.now()}`, role: 'peer', senderId: char.id, senderName: charName, content: '', time: Date.now(), kind: 'notice', noticeText: `手机操作${res.ok ? '成功' : '失败'}：${res.text}` };
                     const cur = loadGroupMsgs(gid);
                     saveGroupMsgs(gid, [...cur, sysMsg]);
@@ -4671,6 +4676,8 @@ export function QqGroupChatPage({
 
   return (
     <div className="relative flex h-full flex-col bg-[#F5F6F7] dark:bg-[#111214]">
+      {/* v1.3 Shizuku：AI 使用技能 → 聊天界面正中的椭圆形胶囊浮层（pointer-events-none 不挡交互） */}
+      <SkillUsePill pill={opPill.pill} />
       {/* 面板上浮动画（加号/表情面板，与单聊共用同一套 keyframes） */}
       <style>{'@keyframes qqPanelIn{from{transform:translateY(65%);opacity:.35}to{transform:translateY(0);opacity:1}}'}</style>
       {/* 聊天背景层（聊天信息页设置：纯色/图片；顶栏与输入栏自身有底色，不受影响；按群独立，与单聊互不影响） */}
