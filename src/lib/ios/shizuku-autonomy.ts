@@ -23,6 +23,8 @@ import {
   labKey,
   KEY_CODES,
   labOpenApp,
+  labOpenUri,
+  labNowPlaying,
   labForceStop,
   labSetAppFrozen,
   labUninstall,
@@ -178,6 +180,7 @@ const CAP_SYNTAX: Record<string, string> = {
   type: '[手机操作:输入:文字]（只能输英文/数字/符号——中文是系统限制，输不了要如实说）',
   key: '[手机操作:按键:名称]（名称：返回/主页/切换/回车/删除/音量加/音量减）',
   open: '[手机操作:打开:包名]（包名见下方速查表；不认识的应用先 [手机操作:应用列表:关键词] 查）',
+  播歌: '[手机操作:播歌:歌名]（点名要听某首歌时用：自动云端搜歌→拉起网易云歌曲页自动播放→核实真在播，一条搞定；例：[手机操作:播歌:他不懂]、[手机操作:播歌:晴天 周杰伦]。严禁拆成打开+点文字去找歌名——歌名要搜索才会出现，屏幕上找不到）',
   applist: '[手机操作:应用列表:关键词]（关键词可省=全部；查到的是包名，配合「打开」用）',
   kill: '[手机操作:强杀:包名]（立即杀掉该 App；适合防沉迷/劝睡场景，配合人设使用）',
   freeze: '[手机操作:冻结:包名] / [手机操作:解冻:包名]（冻结=图标消失打不开，解冻即恢复）',
@@ -209,6 +212,8 @@ export function buildShizukuAutonomyRules(): string[] {
   if (hands.length > 0) {
     lines.push('【真实操控手机·动手】你能通过 [手机操作:命令:参数] 标记真实操控机主的手机（Shizuku 引擎）。可用命令（标记单独占一行，放回复末尾）：');
     for (const c of hands) lines.push(`- ${CAP_SYNTAX[c.key]}`);
+    // 播歌是复合能力（搜歌在云端）：挂在「打开应用」开关下教学，不单独设开关
+    if (cfg.caps['open'] === true) lines.push(`- ${CAP_SYNTAX['播歌']}`);
   }
   if (eyes.length > 0) {
     lines.push('【真实看见手机·只读】想知道手机状态时同样用 [手机操作:命令]（单独占一行）：');
@@ -220,7 +225,8 @@ export function buildShizukuAutonomyRules(): string[] {
   }
   lines.push(
     '【必须动手】机主的请求涉及手机上的任何实际动作（开App/关App/切歌/调音量/查电量/看通知等）时，必须当场用上面的手机操作标记执行——只口头答应“好的我帮你开”却一个标记都不带是违规；不确定包名就先查应用列表再打开。',
-    '【像人一样用手机】你操作手机的方式和人一样：看屏幕→找到写着目标文字的按钮→点它。首选 [手机操作:点文字:文字]（系统自动截屏认位再点，图标按钮也认得，如播放▶/暂停⏸/下一首⏭）；不确定界面长什么样就先 [手机操作:看屏幕]（返回当前页面内容与可点元素坐标）；目标不在屏上就 [手机操作:滑动:上/下] 翻页再点。严禁用「媒体」按键指令——系统经常静默丢弃它，显示成功实际没反应；切歌/暂停/播放一律点文字。',
+    '【像人一样用手机】你操作手机的方式和人一样：看屏幕→找到写着目标文字的按钮→点它。首选 [手机操作:点文字:文字]（系统自动截屏认位再点，图标按钮也认得，如播放▶/暂停⏸/下一首⏭）；不确定界面长什么样就先 [手机操作:看屏幕]（返回当前页面内容与可点元素坐标）；目标不在屏上就 [手机操作:滑动:上/下] 翻页再点。严禁用「媒体」按键指令——系统经常静默丢弃它，显示成功实际没反应；切歌/暂停/播放一律点文字。点文字报“没找到”时不要重复硬点——先看屏幕判断当前在哪，或者该内容根本不在屏幕上（比如歌名要先搜）。',
+    '【听歌的两种情况】①机主点名要听某首歌（“放他不懂”“换成晴天”）→ 用 [手机操作:播歌:歌名] 一条搞定（自动搜歌+播放+核实），严禁拆成打开+点文字去找歌名（歌名要搜索才会出现，屏幕上没有）；②只要换歌不点名（“换个歌”“下一首”）→ 打开网易云 + [手机操作:点文字:下一首]。',
     '【多步任务】机主一句话里有多个要求时，把每一步都写成操作标记、按执行顺序排在回复末尾、每个标记单独成一行，系统会自动逐个执行（打开App后的下一步会自动等它启动完成）。经典示例“打开网易云换个歌”＝两行：\n[手机操作:打开:com.netease.cloudmusic]\n[手机操作:点文字:下一首]\n（点文字＝系统看屏幕找到写着「下一首」的按钮点下去；切歌交给App的播放列表，不要多发“播放”——刚打开的音乐App常自动播放，多发反而可能把它暂停）。漏掉任何一步都算没完成。',
     '【使用分寸】情境不需要时正常聊天即可，别为了炫技乱动手机；动手前在正文里用你的语气自然说一声要做什么。',
     '【结果反馈】操作结果会以“（内部反馈：…）”的形式回给你：成功了才可以说做好了，失败了要如实告诉机主原因（Shizuku 没激活/权限没给/包名不对等），绝不假装成功。这种内部反馈是给你看的，严禁在回复里原样复述或模仿其格式（比如把“手机操作成功：已拉起…”这种字样抄给机主）——要用你自己的话自然地说（如“好啦，歌换好了~”）。',
@@ -293,6 +299,99 @@ function findAsk(target: string): string {
 /** 「看屏幕」的分析提示词：界面要素 + 可点元素清单（供 AI 读屏决策） */
 function lookAsk(): string {
   return '分析这张安卓手机屏幕截图，紧凑输出三部分：1)当前App与页面；2)页面可见内容一两句；3)主要可点元素清单（每行一个：文字或图标名@x,y，坐标为相对整图0~1000归一化，仅列最可能需要点的元素，最多12个）。总共200字内。';
+}
+
+// ---------------- 「播歌」：指定歌名自动搜+放（云端搜歌 → orpheus 深链自动播放 → 核实） ----------------
+
+/** 网易云 cloudsearch 返回的歌曲条目（只需要这几个字段） */
+interface NcmSong {
+  id: number;
+  name: string;
+  ar?: Array<{ name?: string }>;
+  artists?: Array<{ name?: string }>;
+}
+
+/** 播放状态核实用提示词（歌曲页截图：播放/暂停按钮 + VIP/版权限制） */
+function playingAsk(songName: string): string {
+  return `这是手机屏幕截图（应为网易云音乐「${songName}」的歌曲页或播放页）。紧凑回答三问：1)页面歌名；2)播放控制按钮是暂停⏸（=正在播放）还是播放▶（=未播）；3)有无VIP/付费/版权限制提示。总共40字内。`;
+}
+
+/**
+ * 「播歌」：机主点名要听某首歌时的正规通道（v1.4.1）。
+ * 为什么存在：点文字只能点屏幕上已有的文字——歌名要先「搜索」才会出现，
+ * 而中文搜索输入是 input text 的系统限制打不了；所以走云端：
+ *  1) 服务器网易云 API（与音乐App同一通道）搜歌取第一条；
+ *  2) orpheus://song/<id>/?autoplay=1 深链拉起歌曲页并自动播放
+ *     （NFC 音乐墙同款通道，安卓通用，免任何屏幕操作）；
+ *  3) 核实真的在播（先查媒体会话，再截屏看；未播且有tap能力时补点播放钮）；
+ *  4) VIP/无版权等限制如实报给 AI（绝不假报成功）。
+ */
+async function runPlaySong(query: string): Promise<LabResult> {
+  // 1) 云端搜歌
+  let songs: NcmSong[] = [];
+  try {
+    const res = await fetch(`/api/music/ncm/cloudsearch?keywords=${encodeURIComponent(query)}&limit=5`, {
+      signal: AbortSignal.timeout(20_000),
+    });
+    const data = (await res.json().catch(() => null)) as
+      | { code?: number; result?: { songs?: NcmSong[] } }
+      | null;
+    if (data && data.code === 200 && Array.isArray(data.result?.songs)) {
+      songs = data.result.songs;
+    }
+  } catch {
+    /* 网络失败按未搜到处理（错误文案由下方统一给） */
+  }
+  if (songs.length === 0) {
+    return {
+      ok: false,
+      text: `网易云没搜到「${query}」（换更准的歌名、或加上歌手名如「${query} 张杰」再试；也可能是音乐服务暂时不可用）`,
+    };
+  }
+  const s = songs[0];
+  const artist = (s.ar ?? s.artists ?? []).map((a) => a.name ?? '').filter(Boolean).join('/');
+  const label = artist ? `《${s.name}》-${artist}` : `《${s.name}》`;
+
+  // 2) 深链拉起歌曲页并自动播放
+  const r = await labOpenUri(`orpheus://song/${s.id}/?autoplay=1`);
+  if (!r.ok) {
+    return { ok: false, text: `已搜到${label}，但拉起网易云失败：${r.text}` };
+  }
+
+  // 3) 等歌曲页落定 + 自动播放起播（冷启动几秒）
+  await new Promise((res) => window.setTimeout(res, 5000));
+
+  // 4) 核实是否真的在播（尽力而为，失败不影响主结果）
+  const cfg = getAutonomyConfig();
+  let verify = '';
+  try {
+    const np = await labNowPlaying();
+    if (np.ok && s.name && np.text.includes(s.name)) {
+      verify = `媒体会话已在播《${s.name}》`;
+    }
+  } catch {
+    /* 继续走截屏核实 */
+  }
+  if (!verify && cfg.caps['screencap'] === true) {
+    try {
+      const shot = await labScreencap();
+      if (shot.ok && shot.image) {
+        const out = await phoneVision(shot.image, playingAsk(s.name));
+        verify = out.slice(0, 140);
+        // 明确「未播」且有tap能力 → 补点一次播放按钮（深链 autoplay 在个别版本不生效）
+        if (/▶|未播|暂停后再试/.test(out) && !/⏸|正在播放/.test(out) && cfg.caps['tap'] === true) {
+          const t = await runPointAtText('播放');
+          if (t.ok) verify += '；（发现未播，已补点播放按钮）';
+        }
+      }
+    } catch {
+      /* 视觉校验失败不影响主结果 */
+    }
+  }
+  return {
+    ok: true,
+    text: `已播放${label}${verify ? `（${verify}）` : '（已请求自动播放，未能核实实际状态）'}`,
+  };
 }
 
 /**
@@ -457,6 +556,14 @@ export async function executePhoneOp(argRaw: string): Promise<LabResult> {
       if (!p[0]) return { ok: false, text: '打开命令缺包名（[手机操作:打开:包名]）' };
       return labOpenApp(p[0]);
     }
+    case '播歌': {
+      // 指定歌名自动搜+放（复合能力：搜歌在云端，拉起/点按用 open/tap，核实用 screencap；
+      // 主 gate 是「打开应用」——播歌本质是拉起网易云）
+      if (!on('open')) return DENIED;
+      const q = argRaw.split(/[:：]/).slice(1).join(':').trim();
+      if (!q) return { ok: false, text: '播歌缺歌名（[手机操作:播歌:歌名]，可带歌手名）' };
+      return runPlaySong(q);
+    }
     case '应用列表': {
       if (!on('applist')) return DENIED;
       return labPackageList(p[0] || undefined);
@@ -551,7 +658,7 @@ export async function executePhoneOp(argRaw: string): Promise<LabResult> {
       return labCallLog(n !== null && n > 0 ? Math.min(30, Math.floor(n)) : 10);
     }
     default:
-      return { ok: false, text: `不认识的手机操作「${cmd}」（可用：点文字/点按/滑动/输入/按键/打开/应用列表/音量/强杀/冻结/解冻/卸载/网络/看屏幕/前台/通知/电量/剪贴板/短信/通话）` };
+      return { ok: false, text: `不认识的手机操作「${cmd}」（可用：点文字/点按/滑动/输入/按键/打开/播歌/应用列表/音量/强杀/冻结/解冻/卸载/网络/看屏幕/前台/通知/电量/剪贴板/短信/通话）` };
   }
 }
 
@@ -571,8 +678,8 @@ export async function executePhoneOp(argRaw: string): Promise<LabResult> {
 const OP_GAP_MS = 1200;
 const OPEN_SETTLE_MS = 4000;
 const UI_SETTLE_MS = 2500;
-/** 会触发界面变化的操作（下一步需要等动画/渲染落定再动） */
-const UI_TOUCH_CMDS = ['点文字', '点按', '滑动', '输入', '按键'];
+/** 会触发界面变化的操作（下一步需要等动画/渲染落定再动；播歌结尾可能含补点播放按钮） */
+const UI_TOUCH_CMDS = ['点文字', '点按', '滑动', '输入', '按键', '播歌'];
 
 let opChain: Promise<unknown> = Promise.resolve();
 /** 队列级状态：上一步是否为「打开」且成功（跨轮次残留无害——多等几秒不会出错） */

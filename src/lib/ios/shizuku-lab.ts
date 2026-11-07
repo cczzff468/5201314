@@ -328,6 +328,31 @@ export async function labOpenUrl(url: string): Promise<LabResult> {
   });
 }
 
+/**
+ * 打开任意 URI 深链（am start VIEW）：App 自定义 scheme 用（如网易云
+ * orpheus://song/<id>/?autoplay=1 直达歌曲页并自动播放）。只做 scheme
+ * 格式校验，具体是否被系统/App 接住以 am 的输出为准（如实报）。
+ */
+export async function labOpenUri(uri: string): Promise<LabResult> {
+  if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(uri) || /\s/.test(uri)) {
+    return { ok: false, text: 'URI 不合法（需 scheme://… 且不含空格）' };
+  }
+  return run(['am', 'start', '-a', 'android.intent.action.VIEW', '-d', uri], {
+    doneText: `已请求打开：${uri}`,
+    trim: (out) => {
+      // 「Warning: Activity not started, its current task has been brought to the front」
+      // 是 App 已在前台的正常情况（不算失败）；只有 Error/Exception 才算失败
+      const bad = /Error|Exception|aborted/i.test(out);
+      return {
+        ok: !bad,
+        text: bad
+          ? `打开失败（未安装对应App或ROM拦截）：${out.trim().split('\n').filter((l) => /Error|Exception/i.test(l)).slice(0, 2).join('；').slice(0, 200)}`
+          : `已请求打开：${uri}`,
+      };
+    },
+  });
+}
+
 /** 强杀 App（am force-stop） */
 export async function labForceStop(pkg: string): Promise<LabResult> {
   if (!/^[\w.]+$/.test(pkg)) return { ok: false, text: '包名不合法' };
