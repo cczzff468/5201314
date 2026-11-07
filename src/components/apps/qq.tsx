@@ -7212,7 +7212,7 @@ function ChatPage({
           </div>
           )
         ) : (
-        <div className="flex h-12 items-center gap-1 px-3 [&_button]:pointer-events-auto">
+        <div className="relative flex h-12 items-center gap-1 px-3 [&_button]:pointer-events-auto">
         <button
           type="button"
           aria-label="返回"
@@ -7232,9 +7232,9 @@ function ChatPage({
             {otherUnread > 99 ? '99+' : otherUnread}
           </span>
         )}
-        {/* 名字区（本轮用户指定「名字在中间」）：flex-col items-center 让名字行与在线状态整体水平居中
-            （原版 QQ 为左对齐；居中后与微信/信息聊天页同款视觉锚点） */}
-        <div className="ml-1 flex min-w-0 flex-1 flex-col items-center">
+        {/* 名字区（用户指定：「名字在屏幕中间，不是按钮中间」）：绝对定位 left-1/2 平移居中（同 IOSNavBar），
+            左右按钮宽度不再影响名字位置；w-max 收缩到内容宽 + max-w 限长截断，绝不与两侧按钮重叠 */}
+        <div className="absolute left-1/2 top-1/2 flex w-max max-w-[calc(100%-132px)] -translate-x-1/2 -translate-y-1/2 flex-col items-center">
           {liquid && liquidSkinQq.headerMode === 'dualName' ? (
             /* 液态·双头像+名字（本轮用户指定）：我的名字也显示——名字在各自头像下面（两列布局）；
                中间可插自定义文字；正在输入时中间显示「正在输入…」 */
@@ -7332,6 +7332,7 @@ function ChatPage({
             <ChevronRight className="h-3 w-3" aria-hidden="true" />
           </button>
         </div>
+        <div className="min-w-0 flex-1" aria-hidden="true" />
         <button
           type="button"
           aria-label="聊天设置"

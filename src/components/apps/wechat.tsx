@@ -9260,7 +9260,7 @@ export function ChatPage({
           </div>
           )
         ) : (
-        <div className="flex h-11 items-center px-2 [&_button]:pointer-events-auto">
+        <div className="relative flex h-11 items-center px-2 [&_button]:pointer-events-auto">
           {/* 液态顶栏（第四十五轮，用户指定）：删模糊带后名字改椭圆形玻璃胶囊包裹；返回/更多独立玻璃圆钮 */}
           <button
             type="button"
@@ -9290,7 +9290,9 @@ export function ChatPage({
               {otherUnread > 99 ? '99+' : otherUnread}
             </span>
           )}
-          <div className="flex min-w-0 flex-1 items-center justify-center" data-testid="wx-chat-peer-name">
+          {/* 名字区（用户指定：「名字在屏幕中间，不是按钮中间」）：绝对定位 left-1/2 平移居中（同 IOSNavBar/QQ 同款），
+              右侧两个按钮较宽不再把名字挤偏；w-max 收缩到内容宽 + max-w 限长截断，绝不与两侧按钮重叠 */}
+          <div className="absolute left-1/2 top-1/2 flex w-max max-w-[calc(100%-150px)] -translate-x-1/2 -translate-y-1/2 items-center justify-center" data-testid="wx-chat-peer-name">
             {liquid && liquidSkinWx.headerMode === 'dualName' ? (
               /* 液态·双头像+名字（本轮用户指定）：我的名字也显示——名字在各自头像下面（两列布局）；
                  中间可插自定义文字；正在输入时中间显示「正在输入…」 */
@@ -9372,6 +9374,8 @@ export function ChatPage({
               </span>
             )}
           </div>
+          {/* 占位：名字区改绝对定位后不再占 flex 空间，用弹性占位把右侧按钮推到最右 */}
+          <div className="min-w-0 flex-1" aria-hidden="true" />
           {/* v73 小窗模式：当前聊天缩小为全局悬浮小窗（切 App 不断、与全屏实时互通）——
               点击即开小窗并退出全屏聊天（返回会话列表）；小窗顶栏不再显示本按钮 */}
           {!float && (
