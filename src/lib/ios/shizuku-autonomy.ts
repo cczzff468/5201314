@@ -221,7 +221,7 @@ export function buildShizukuAutonomyRules(): string[] {
   }
   lines.push(
     '【必须动手】机主的请求涉及手机上的任何实际动作（开App/关App/切歌/调音量/查电量/看通知等）时，必须当场用上面的手机操作标记执行——只口头答应“好的我帮你开”却一个标记都不带是违规；不确定包名就先查应用列表再打开。',
-    '【多步任务】机主一句话里有多个要求时，把每一步都写成操作标记、按执行顺序排在回复末尾，系统会自动逐个执行（每步之间自动留了间隔，例如“打开网易云换个歌”= [手机操作:打开:com.netease.cloudmusic] + [手机操作:媒体:播放] + [手机操作:媒体:下一首]，刚打开的App要先等播放会话建立再切歌）。漏掉任何一步都算没完成。',
+    '【多步任务】机主一句话里有多个要求时，把每一步都写成操作标记、按执行顺序排在回复末尾、每个标记单独成一行，系统会自动逐个执行（打开App后的下一步会自动等它启动完成）。经典示例“打开网易云换个歌”＝两行：\n[手机操作:打开:com.netease.cloudmusic]\n[手机操作:媒体:下一首]\n（切歌不用纠结选哪首，交给App的播放列表；也不要多发“播放”，刚打开的音乐App常会自动播放，多发播放反而可能把它暂停）。漏掉任何一步都算没完成。',
     '【使用分寸】情境不需要时正常聊天即可，别为了炫技乱动手机；动手前在正文里用你的语气自然说一声要做什么。',
     '【结果反馈】操作结果会以“（内部反馈：…）”的形式回给你：成功了才可以说做好了，失败了要如实告诉机主原因（Shizuku 没激活/权限没给/包名不对等），绝不假装成功。这种内部反馈是给你看的，严禁在回复里原样复述或模仿其格式（比如把“手机操作成功：已拉起…”这种字样抄给机主）——要用你自己的话自然地说（如“好啦，歌换好了~”）。',
   );
@@ -399,21 +399,27 @@ export async function executePhoneOp(argRaw: string): Promise<LabResult> {
 // ---------------- 串行执行队列（复合指令按顺序逐个来） ----------------
 
 /**
- * 全局操作队列：同一轮回复里的多个 [手机操作:…] 标记按书写顺序串行执行，
- * 每个操作之间留 OP_GAP_MS 间隔——给目标 App 启动/播放会话建立留时间
- * （否则「打开网易云」和「媒体:下一首」并发竞速，切歌落在 App 还没起来时就会无效）。
+ * 全局操作队列：同一轮回复里的多个 [手机操作:…] 标记按书写顺序串行执行。
+ * 关键间隔策略：「打开」只是异步发起启动（monkey 命令返回时 App 才刚开始冷启动，
+ * 进主界面+建立播放会话要好几秒）——若下一步紧跟媒体键/点按，会落在 App 还没起来时
+ * 被系统丢弃（命令显示成功实际无效，曾出现“打开了网易云但没换歌”）。
+ * 所以「打开」成功后下一步统一等 OPEN_SETTLE_MS（4s），其余操作间 OP_GAP_MS（1.2s）。
  * onStart 在轮到该操作真正开跑时回调（聊天页把技能胶囊的 start 挂在这里，多步时逐个亮）。
  * 返回的 Promise 在该操作出结果时立即 resolve（间隔只在队列内部，不影响结果行落盘时机）。
  */
-const OP_GAP_MS = 1500;
+const OP_GAP_MS = 1200;
+const OPEN_SETTLE_MS = 4000;
 
 let opChain: Promise<unknown> = Promise.resolve();
+/** 队列级状态：上一步是否为「打开」且成功（跨轮次残留无害——多等几秒不会出错） */
+let lastOpenOk = false;
 
 export function enqueuePhoneOp(argRaw: string, onStart?: () => void): Promise<LabResult> {
   let resolveResult!: (r: LabResult) => void;
   const resultP = new Promise<LabResult>((res) => {
     resolveResult = res;
   });
+  const cmd = (argRaw.split(/[:：]/)[0] ?? '').trim().toLowerCase();
   opChain = opChain.then(async () => {
     onStart?.();
     let r: LabResult;
@@ -423,8 +429,10 @@ export function enqueuePhoneOp(argRaw: string, onStart?: () => void): Promise<La
       r = { ok: false, text: '执行器异常（原生桥调用抛错）' };
     }
     resolveResult(r);
-    // 间隔只在队列内：下一个操作等这一步，结果行立刻可以落盘/回传
-    await new Promise((res) => window.setTimeout(res, OP_GAP_MS));
+    // 下一步的间隔：刚「打开」成功 → 等 App 启动落定；否则常规间隔
+    const gap = lastOpenOk ? OPEN_SETTLE_MS : OP_GAP_MS;
+    lastOpenOk = cmd === '打开' && r.ok;
+    await new Promise((res) => window.setTimeout(res, gap));
   });
   return resultP;
 }
