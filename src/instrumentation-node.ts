@@ -123,7 +123,8 @@ function installRobustFetch(): void {
  * 不经过外网网关，robust-fetch 包装对 localhost 不生效（保持直连低延迟）。
  */
 async function warmHomePage(): Promise<void> {
-  const url = 'http://127.0.0.1:3000/';
+  const port = process.env.PORT || '3000';
+  const url = `http://127.0.0.1:${port}/`;
   for (let i = 0; i < 45; i++) {
     try {
       const res = await fetch(url, { cache: 'no-store' });
@@ -151,17 +152,23 @@ export async function register() {
 
   try {
     // 2) 拉起 ncm-keeper（netease-api 守护）
-    const child = spawn(
-      'bash',
-      ['/home/z/my-project/mini-services/netease-api/ncm-keeper.sh'],
-      {
-        cwd: '/home/z/my-project/mini-services/netease-api',
-        detached: true,
-        stdio: 'ignore',
-      },
-    );
-    child.unref();
-    console.log(`[instrumentation] ncm-keeper spawned pid=${child.pid}`);
+    //    Railway 等容器部署跳过：entrypoint 已直接起 netease-api 进程，
+    //    且本脚本硬编码沙箱路径 /home/z/my-project（RAILWAY_SERVICE_ID 由平台自动注入）
+    if (!process.env.RAILWAY_SERVICE_ID) {
+      const child = spawn(
+        'bash',
+        ['/home/z/my-project/mini-services/netease-api/ncm-keeper.sh'],
+        {
+          cwd: '/home/z/my-project/mini-services/netease-api',
+          detached: true,
+          stdio: 'ignore',
+        },
+      );
+      child.unref();
+      console.log(`[instrumentation] ncm-keeper spawned pid=${child.pid}`);
+    } else {
+      console.log('[instrumentation] container runtime detected, ncm-keeper skipped');
+    }
   } catch (e) {
     console.error('[instrumentation] spawn ncm-keeper failed:', e);
   }

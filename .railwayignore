@@ -1,0 +1,25 @@
+# Railway 构建上下文排除（加速上传与构建；敏感文件双重保险）
+.git
+node_modules
+.next
+.z-ai-config
+
+# 原生壳构建链（云端用不到，省 100MB+）
+android-shell
+
+# 沙箱运行时产物与环境专属
+db
+download
+upload
+tmp-analysis
+agent-ctx
+examples
+tests
+skills
+.zscripts
+dev.log
+dev.pid
+*.md.tmp
+
+# 生成产物（APK 4MB 也不上传，云端从版本 API 判断 apkReady=false 即可）
+public/AI-Phone.apk
