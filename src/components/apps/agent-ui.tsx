@@ -162,3 +162,16 @@ export function AgentGlobalLayers() {
     </>
   );
 }
+
+/**
+ * Agent 运行状态探针（C1 语音唤起智能体用）：渲染 null，纯副作用——
+ * 订阅 Agent 运行态并以布尔回传。给不能静态引入 shizuku-agent（引擎体量大）的
+ * 轻组件（悬浮球）借道本文件（PhoneShell 本就 dynamic 引它）订阅运行态。
+ */
+export function AgentRunningProbe({ onChange }: { onChange: (running: boolean) => void }) {
+  const running = useAgentState().running;
+  useEffect(() => {
+    onChange(running);
+  }, [running, onChange]);
+  return null;
+}

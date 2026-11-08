@@ -27,6 +27,7 @@ import {
   Loader2,
   Lock,
   MessageSquareText,
+  Mic,
   Minus,
   Monitor,
   Moon,
@@ -117,6 +118,8 @@ import { isWebSpeechSupported } from '@/lib/ios/web-speech';
 // v1.3 AI 动手（Shizuku 自主权）+ APP 更新：设置页新入口
 import { AUTONOMY_CAPS, getAutonomyConfig, setAutonomyCap, setAutonomyMaster } from '@/lib/ios/shizuku-autonomy';
 import { isNativePerception, nativeShizukuStatus } from '@/lib/ios/native-perception';
+// C1 语音唤起智能体：AI 动手页内设置卡（唤醒名 / 悬浮球 / 连续监听）
+import { DEFAULT_WAKE_NAME, updateAgentVoiceCfg, useAgentVoice } from '@/lib/ios/agent-voice';
 import { copyApkLink, getApkUrl, launchApkDownload } from '@/lib/ios/apk-download';
 // v1.4.2 APP 更新：自动检查 + 红点 + 版本历史
 import { useAppUpdate } from '@/lib/ios/app-update';
@@ -899,6 +902,113 @@ function AutonomyCapRow({
   );
 }
 
+// ---------------- C1 语音唤起智能体（AI 动手页内设置卡） ----------------
+
+/**
+ * 「语音唤起智能体」卡：唤醒名（≤6 字）/ 悬浮球开关 / 连续唤醒监听开关（带耗电提示）。
+ * 配置存 agent-voice-wake-v1（localStorage 单键 + zustand 镜像），悬浮球即时生效；
+ * 连续监听只在 APP 原生壳 + 离线识别模型就绪时真正生效，否则自动降级「点球才识别」（下方提示行说明）。
+ */
+function AgentVoiceCard() {
+  const cfg = useAgentVoice((s) => s.cfg);
+  const wakeBlocked = useAgentVoice((s) => s.wakeBlocked);
+  const asrStatus = useOfflineAsr((s) => s.status);
+  const nativeMode = isNativePerception();
+  // 唤醒名输入草稿：失焦才落盘（≤6 字，清空回默认「小灵」）。
+  // 本卡是 cfg.name 的唯一写入方（提交后草稿即等于新值），无需 effect 反向同步草稿
+  const [nameDraft, setNameDraft] = useState(cfg.name);
+  const commitName = () => {
+    const t = nameDraft.trim().slice(0, 6);
+    if (t === cfg.name) return;
+    updateAgentVoiceCfg({ name: t || DEFAULT_WAKE_NAME });
+    setNameDraft(t || DEFAULT_WAKE_NAME);
+  };
+
+  const asrNotReady = asrStatus !== 'ready';
+
+  return (
+    <>
+      <div className="mb-2 mt-6 px-8 text-[13px] text-muted-foreground">语音唤起智能体</div>
+      <div
+        className="mx-4 overflow-hidden rounded-[22px] bg-white/55 shadow-[0_8px_28px_rgba(17,24,39,0.06)] ring-1 ring-white/70 backdrop-blur-2xl dark:bg-white/[0.06] dark:ring-white/[0.09]"
+        data-testid="settings-agent-voice-card"
+      >
+        {/* 一行说明 */}
+        <div className="flex items-start gap-3 px-4 pt-3">
+          <RowIcon icon={Mic} tone={TONE_GREEN} />
+          <p className="min-w-0 flex-1 pb-1 text-[11.5px] leading-relaxed text-muted-foreground">
+            喊出唤醒名或点悬浮球，说出任务，智能体接管手机执行
+          </p>
+        </div>
+        <div className="mt-1 divide-y divide-black/[0.05] dark:divide-white/[0.06]">
+          {/* 唤醒名 */}
+          <div className="flex min-h-[52px] items-center gap-3 px-4 py-2">
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-[16px]">唤醒名</span>
+              <span className="mt-0.5 block truncate text-[11.5px] text-muted-foreground">连续监听时喊出即唤起（≤6 字）</span>
+            </span>
+            <Input
+              value={nameDraft}
+              onChange={(e) => setNameDraft(e.target.value)}
+              onBlur={commitName}
+              maxLength={6}
+              placeholder={DEFAULT_WAKE_NAME}
+              inputMode="text"
+              aria-label="唤醒名"
+              className="h-9 w-28 shrink-0 text-right"
+              data-testid="agent-voice-name-input"
+            />
+          </div>
+          {/* 悬浮球 */}
+          <div className="flex min-h-[52px] items-center gap-3 px-4 py-2">
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-[16px]">悬浮球</span>
+              <span className="mt-0.5 block truncate text-[11.5px] text-muted-foreground">屏幕右缘小球，点按说话下发任务</span>
+            </span>
+            <AutonomySwitch
+              on={cfg.ball}
+              onToggle={() => updateAgentVoiceCfg({ ball: !cfg.ball })}
+              label="悬浮球"
+              testId="agent-voice-ball-switch"
+            />
+          </div>
+          {/* 连续唤醒监听 */}
+          <div className="flex min-h-[52px] items-center gap-3 px-4 py-2">
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-[16px]">连续唤醒监听</span>
+              <span className="mt-0.5 block text-[11.5px] leading-snug text-muted-foreground">
+                后台循环听唤醒名，命中即震动唤起 · 电量提示：连续监听会增加耗电
+              </span>
+            </span>
+            <AutonomySwitch
+              on={cfg.listen}
+              onToggle={() => updateAgentVoiceCfg({ listen: !cfg.listen })}
+              label="连续唤醒监听"
+              testId="agent-voice-listen-switch"
+            />
+          </div>
+        </div>
+      </div>
+      {/* 状态提示行（条件显示） */}
+      {!nativeMode ? (
+        <p className="mx-6 mt-2 text-[11.5px] leading-relaxed text-muted-foreground">
+          当前在浏览器里：悬浮球只在手机 APP（AI-Phone）里显示，网页端预览无效。
+        </p>
+      ) : null}
+      {cfg.listen && nativeMode && asrNotReady ? (
+        <p className="mx-6 mt-2 text-[11.5px] leading-relaxed text-[#FF9500]">
+          离线识别模型未就绪：连续唤醒已降级为「点球才识别」——到设置 › 语音 API 下载离线模型后自动恢复监听。
+        </p>
+      ) : null}
+      {wakeBlocked ? (
+        <p className="mx-6 mt-2 text-[11.5px] leading-relaxed text-[#FF3B30]" role="alert">
+          {wakeBlocked}
+        </p>
+      ) : null}
+    </>
+  );
+}
+
 function ShizukuAutonomyPage({ onBack }: { onBack: () => void }) {
   // 惰性初始化（页面仅在用户交互后挂载 = 纯客户端，可安全读 localStorage）
   const [cfg, setCfg] = useState(() => getAutonomyConfig());
@@ -965,6 +1075,9 @@ function ShizukuAutonomyPage({ onBack }: { onBack: () => void }) {
             <AutonomySwitch on={cfg.master} onToggle={flipMaster} label="允许 AI 动手" testId="autonomy-master-switch" />
           </div>
         </div>
+
+        {/* C1 语音唤起智能体（唤醒名 / 悬浮球 / 连续监听） */}
+        <AgentVoiceCard />
 
         {/* 动手组 */}
         <div className="mb-2 mt-6 px-8 text-[13px] text-muted-foreground">动手（真实操作）</div>

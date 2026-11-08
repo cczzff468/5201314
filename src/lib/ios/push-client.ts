@@ -22,6 +22,29 @@ export interface PushSetupStatus {
 }
 
 const STATUS_KEY = 'ios-push-status';
+/** 本设备稳定标识的 localStorage 键（C2：/api/push 上报为订阅 tag，供服务端 excludeTag 排除发起设备） */
+const DEVICE_TAG_KEY = 'ios-push-device-tag';
+
+/**
+ * 本设备稳定标识（localStorage 生成一次终身不变）：随订阅一起 POST 到 /api/push 存为该
+ * 订阅的 tag 字段 —— 服务端广播「对方可见动态」时按 excludeTag 排除发起设备自己的订阅，
+ * 避免自己发的东西通知自己。存储不可用返回空串（不带 tag，旧订阅口径，永不被排除）。
+ */
+function deviceTag(): string {
+  try {
+    let tag = window.localStorage.getItem(DEVICE_TAG_KEY);
+    if (!tag) {
+      tag =
+        typeof crypto !== 'undefined' && 'randomUUID' in crypto
+          ? crypto.randomUUID()
+          : `dev-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+      window.localStorage.setItem(DEVICE_TAG_KEY, tag);
+    }
+    return tag;
+  } catch {
+    return '';
+  }
+}
 
 function saveStatus(status: Omit<PushSetupStatus, 'at'>): void {
   try {
@@ -109,10 +132,12 @@ export async function setupPushSubscription(opts?: PushSetupOptions): Promise<Pu
         });
       if (!sub) return lastPushStatus() ?? { state: 'subscribe-failed', at: Date.now() };
     }
+    // tag：本设备稳定标识（可选增强，向后兼容 —— 服务端存为订阅 tag 供 excludeTag 过滤）
+    const dTag = deviceTag();
     await fetch('/api/push', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ subscription: sub.toJSON() }),
+      body: JSON.stringify({ subscription: sub.toJSON(), ...(dTag ? { tag: dTag } : {}) }),
     });
     const s = { state: 'subscribed' as const };
     saveStatus(s);

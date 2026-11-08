@@ -38,6 +38,7 @@ import { getMemSettings, memRecallBlock } from '@/lib/memory';
 import { buildTimeAwareBlock } from '@/lib/time-aware';
 import { getReplyCount } from '@/lib/reply-count';
 import { isBranchBirthSilent } from './branch-meta';
+import { cancelLocalNotify, notifyIfHidden } from './local-notify';
 import type { ContactRecord } from '@/lib/contacts';
 
 // ---------------- 常量与档位（调参集中在这里） ----------------
@@ -519,6 +520,12 @@ async function recordMissedPhoneCall(
         createdAt: Date.now(),
       });
     }
+    // C2 通知：留言确实落库后才提醒 —— 撤「来电中」通知、改发「未接+语音留言」
+    // （页面在后台时用户收不到界面弹窗，这才是有实义的时机；前台时内部静默跳过）
+    if (texts.length > 0) {
+      cancelLocalNotify(`ai-call-${contactId}`);
+      void notifyIfHidden(displayName, '未接来电 · 给你留了语音留言，点回听听', { tag: `ai-vm-${contactId}`, url: '/' });
+    }
   } catch {
     // 留言失败静默（记录已落，留言缺失可接受）
   }
@@ -774,6 +781,12 @@ async function tickInner(): Promise<void> {
   // C3 统一来电守卫：登记本次 AI 来电（聊天标记来电通道拨出前会互查，防贴脸连打）
   markAiCall(contact.id, nowMs);
   const callMedia = decision.media === 'video' ? ('video' as const) : ('voice' as const);
+  // C2 通知：页面在后台时全屏来电 UI 看不见 → 先补一条本地通知提醒来电
+  //（前台内部静默跳过；拒接/超时未接时由 recordMissedPhoneCall 撤销并改发留言提醒）
+  void notifyIfHidden('来电', `${name} 打来一通${callMedia === 'video' ? '视频' : '语音'}电话`, {
+    tag: `ai-call-${contact.id}`,
+    url: '/',
+  });
   triggerIncomingCall({
     source: 'phone',
     bannerStage: 'pill',
@@ -825,6 +838,8 @@ export function triggerBlockCall(contact: ContactRecord, contextHint: string): b
     markAiCall(contact.id);
     const number = contact.phone || derivePlaceholderNumber(contact.id);
     const name = contact.name;
+    // C2 通知：页面在后台时提醒这次拉黑事件直拨（前台内部静默跳过）
+    void notifyIfHidden('来电', `${name} 打来电话`, { tag: `ai-call-${contact.id}`, url: '/' });
     triggerIncomingCall({
       source: 'phone',
       bannerStage: 'pill',

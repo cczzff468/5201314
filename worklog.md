@@ -2222,3 +2222,25 @@ Stage Summary:
 - Mobile Agent 系统全链路完成：聊天框一句话（如「给怡怡发微信说我想你了」）→ AI 输出 [手机操作:agent:任务] → 智能体接管真机：看屏幕（uiautomator 结构树）→ LLM 规划 JSON → 逐步执行（openApp/clickElement/inputTextToFocus 中文/pressEnter）→ 每步验证 → 失败自动重规划（≤3 轮）→ 全程聊天播报
 - 安全：二进制白名单依旧、危险项开关默认关、敏感步骤强制弹窗、急停三通道（界面红钮/通知栏 action/本地+原生双旗标）、运行结束自动还原输入法
 - 关键文件：NativePerceptionPlugin.java（+9 方法）、AdbImeService.java（新）、shizuku-agent.ts（新 1078 行）、agent-ui.tsx（新）、shizuku-autonomy.ts（agent 接入）、五端聊天、native-perception.ts（+9 封装）、PhoneShell.tsx、app-version.ts/build.gradle（1.5.0/9）
+
+## 2026-11-08 · v85（APK v1.5.1）智能体增强 + 语音唤起 + 系统通知 + 存量 eslint 清零
+
+Task ID: 35
+Agent: 主控 Agent（Z.ai Code）+ 4 个子代理（4-a Agent核心 / 4-b eslint / 4-c 语音 / 4-d 推送）
+Task: 用户选定六项优化：A1 动作原语补全（longPress/doubleClick/drag）、A2 截屏视觉自动验证、A6 坐标缓存学习、B2 存量 eslint 治理（chat 15/qq-group 52/wx-group 18）、C1 语音唤起智能体（悬浮球+唤醒名+ASR）、C2 推送到手机通知栏（Agent完成/AI来电/情侣小家，PWA+APK 双通道）
+
+Work Log:
+- [4-a·Agent核心] ①A1 三个新动作：longPress（input swipe 同坐标 800ms 原地长按，文字目标走 findClickableByText 或 "x,y"）、doubleClick（两次 input tap 间隔 100ms）、drag（input swipe 四坐标+时长 100~10000ms 钳制）；接入 execAgentStep/ACTION_CAP（tap/tap/swipe）/AGENT_ACTIONS_DOC（11~13 条含示例）/ACTION_ALIASES（中文别名防御）/UI_TOUCH_ACTIONS；②A2 视觉验证层：步骤落定（settleAfterStep）后 labScreencap→visionAsk（15s 看门狗）→extractJsonObject 判 {"ok","note"}，判 false→ok:false StepResult「视觉验证未通过：<note>」走既有重规划路径；护栏=AGENT_VISUAL_VERIFY 总开关+screencap 能力闸+连败 3 次本任务自动停用+任何异常信任 UI 树绝不中断；③A6 坐标缓存：localStorage agent-coord-cache-v1（{app,target,nx,ny,hits,lastUsed} 归一化坐标分辨率无关，120 条 LRU）；命中=clickElement/longPress 文本版 dumpUI 前直点+轻量 UI 树复核（元素消失/原地=信任 hits+1，挪位超屏对角 8%=弃条目同调用内回落 dumpUI）；写入=正常路径成功后记实际坐标（app 取自 obs.fg 零额外 dump，分辨率任务级 memo）；④shizuku-autonomy 教学块补「④ 进阶手势」+phoneVision 加超时参补 visionAsk 导出
+- [4-b·eslint] 85 个存量 error 全部清零（chat 15→0 / qq-group 52→0 / wx-group 18→0）：set-state-in-effect×12（lazy useState×7/useSyncExternalStore×1/外部回调×2/useMemo 派生×1/合并 setTimeout(0)×1）、refs-during-render×~21（render 写 ref→effect×10/state 镜像×5/直读源值×2/ref 分发×4）、preserve-manual-memoization×2（showToastRef 镜像）、immutability×4（声明上移×2/自引用 useCallback 改 ref×1/重复声明块删除×1）；语义形状修复 6 处（跨 App 跳转 nonce 哨兵消费重构最复杂）；连带修复 wx-group 上个代理遗留的重复声明块（TS2451×6）；tsc 三文件从基线名单消失
+- [4-c·语音唤起] 新建 agent-voice.ts（682 行：zustand 配置 store+matchWakeName+vibrateSafely+recognizeAgentBlob 识别链 offline-asr→Web Speech→/api/stt→引导文案+useAgentRecorder 录音/静默检测/波形+useAgentWakeLoop 连续监听循环 3~4s 轮次/命中唤醒名→剩余≥4字直进确认卡/自动暂停条件 hidden/任务/通话/播放）+ agent-voice-ball.tsx（494 行：吸边悬浮球拖动记忆/展开录音面板波形/确认卡可编辑文本/文本输入兜底/识别链降级引导）；PhoneShell 挂载（locked/非原生/master 关/agent 关/任务中/通话中 全 gate）；设置 › AI 动手新增「语音唤起智能体」卡（唤醒名 ≤6 字 onBlur 落盘/悬浮球开关/连续监听开关+耗电提示）
+- [4-d·推送] ①新建 local-notify.ts（notifyIfHidden 统一入口：前台跳过→原生 NativePerception.localNotify→浏览器 SW showNotification→页面构造器兜底，全程静默）；②NativePerceptionPlugin.java +107 行：localNotify({title,body,tag})/localNotifyCancel({tag})（渠道 local_notify 独立可静音/非常驻可滑除/tag.hashCode 稳定 id 去重/SDK≥33 checkSelfPermission+areNotificationsEnabled 双闸/contentIntent 开主 Activity）；③三事件源接线：Agent 任务 finally 通知、AI 来电 tickInner/triggerBlockCall + 未接语音留言落库后撤「来电中」改发「未接·留言」、情侣小家复用 G8 未读便签 effect 补后台通知；④push-send 加 excludeTag + push-client/api/push 加 deviceTag（localStorage 终身稳定，向后兼容）；⑤couple-home 结论：按 X-Workspace-Id 每浏览器独立无跨设备通道→选客户端 notifyIfHidden 方案（服务端广播=自己通知自己）
+- [版本] app-version.ts 1.5.1/10 + 发版说明 4 条；build.gradle versionCode 10/versionName 1.5.1；gradle 重打 BUILD SUCCESSFUL 50s（增量），APK 4.19MB 部署 public/；/api/app-version 返回 {version:1.5.1, code:10, apkReady:true}
+- [验证] tsc 全库仅剩 7 个基线文件错误（chat/qq-group/wx-group 已清出名单）；eslint 六个核心改动文件全 0 error；浏览器 E2E：解锁→更新弹窗「发现新版本 v1.5.1 · 4.0MB」完整发版说明✓→信息 App 会话列表/会话页渲染正常（eslint 重构零回归）→输入「你好」发送成功✓（未配 AI 无回复属 v82 预期）→设置›AI 动手语音卡 6 要素全渲染✓→唤醒名改「小芯」blur 落盘 localStorage✓→浏览器悬浮球不显示（isNativePerception gate 生效）✓→控制台零错误✓
+- [边界] 悬浮球/连续唤醒/坐标缓存/视觉验证/localNotify 均需真机（isNativePerception）实际验证；APK 内连续监听耗电已在设置页注明；dev.log 的 useSyncExternalStore 瞬态报错为并行开发期 HMR 伪象（刷新后控制台干净）
+
+Stage Summary:
+- 智能体四件套升级：长按/双击/拖拽动作 + 每步截屏视觉验证（连败自动停用）+ 坐标缓存学习（二次任务提速）+ 教学块同步
+- 语音唤起智能体全链路：悬浮球（拖动吸边/录音波形/确认卡/文本兜底）+ 自定义唤醒名 + 连续监听（喊名字唤起，自动暂停条件齐全）+ 识别链三级降级
+- 系统通知三源接入：智能体完成/AI 来电与语音留言/情侣小家便签——页面后台时 PWA 走 SW、APK 走新原生 localNotify（Android 13+ 双权限闸）
+- 工程治理：三端 85 个存量 eslint 清零（零行为变更）+ APK v1.5.1 重打入库
+- 关键文件：shizuku-agent.ts（+465 行）、agent-voice.ts/agent-voice-ball.tsx/local-notify.ts（新）、NativePerceptionPlugin.java（+localNotify）、五端聊天 lint 清零、app-version.ts/build.gradle（1.5.1/10）

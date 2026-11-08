@@ -1,0 +1,682 @@
+'use client';
+
+/**
+ * C1 语音唤起智能体——逻辑层（悬浮球组件保持薄，UI 之外的全部在这里）：
+ *
+ * - 配置存储：localStorage 单键 agent-voice-wake-v1 { name, ball, listen }
+ *   + zustand 镜像（设置页 / 悬浮球共享同一份，改动即时生效）
+ * - 识别链路（recognizeAgentBlob）：离线 SenseVoice（APK 首选，端侧 WASM）→
+ *   Web Speech 实时识别文本（离线引擎未就绪且浏览器支持时，录音期间并行起）→
+ *   transcribeAudioBlob（已配置 OpenAI 兼容 STT 时服务端兜底）；
+ *   全部不可用抛中文引导（面板提供打字输入框兜底，永远存在）
+ * - 录音器（useAgentRecorder）：MediaRecorder + AnalyserNode 实时振幅 +
+ *   静默自动停止（持续 1.4s 无声）+ 30s 上限 + 0.7s 下限，仿 voice-input 的已验证链路
+ * - 连续唤醒监听（useAgentWakeLoop）：后台每轮录 3.2s → 离线转写 → 匹配唤醒名；
+ *   命中即震动 + 回调（去掉唤醒名后剩余 ≥4 字直接作任务文本，否则让用户继续说）；
+ *   页面隐藏 / Agent 任务运行 / 通话 / TTS·语音播放 / 面板打开 时自动暂停，
+ *   恢复空闲后续听（每轮 900ms 轮询 + 轮间 ≥1.5s 间隔省电）；
+ *   离线引擎未就绪时循环根本不启动（降级「点球才识别」），麦克风连续失败熔断并记录原因
+ */
+
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { create } from 'zustand';
+import { pickRecorderMime } from './audio-utils';
+import { isOfflineAsrReady, offlineAsrTranscribe } from './offline-asr';
+import { isWebSpeechSupported, startWebSpeechSession, type WebSpeechSession } from './web-speech';
+import { isSttReady, transcribeAudioBlob } from './stt-client';
+import { isSpeaking } from './tts-client';
+import { useVoicePlayback } from './voice-player';
+import { isNativePerception } from './native-perception';
+import { useIncomingCall } from './incoming-call';
+import { useUI } from './store';
+
+// ============================================================
+// A1. 配置存储（localStorage 单键 + zustand 镜像）
+// ============================================================
+
+const STORE_KEY = 'agent-voice-wake-v1';
+
+/** 默认唤醒名（可在设置里改，≤6 字） */
+export const DEFAULT_WAKE_NAME = '小灵';
+
+export interface AgentVoiceCfg {
+  /** 唤醒名（喊出即唤起，忽略大小写/空格/标点） */
+  name: string;
+  /** 悬浮球开关（默认开） */
+  ball: boolean;
+  /** 连续唤醒监听（默认关；耗电较高） */
+  listen: boolean;
+}
+
+const DEFAULT_CFG: AgentVoiceCfg = { name: DEFAULT_WAKE_NAME, ball: true, listen: false };
+
+function readCfg(): AgentVoiceCfg {
+  if (typeof window === 'undefined') return { ...DEFAULT_CFG };
+  try {
+    const raw = window.localStorage.getItem(STORE_KEY);
+    if (!raw) return { ...DEFAULT_CFG };
+    const p = JSON.parse(raw) as Partial<AgentVoiceCfg>;
+    const name = (typeof p.name === 'string' ? p.name.trim().slice(0, 6) : '') || DEFAULT_WAKE_NAME;
+    return { name, ball: p.ball !== false, listen: p.listen === true };
+  } catch {
+    return { ...DEFAULT_CFG };
+  }
+}
+
+interface AgentVoiceStore {
+  cfg: AgentVoiceCfg;
+  /** 连续唤醒熔断原因（麦克风不可用等）；null = 正常 */
+  wakeBlocked: string | null;
+}
+
+/** 悬浮球/设置页共享的配置 store（懒初始化：两端都是交互后挂载的纯客户端组件） */
+export const useAgentVoice = create<AgentVoiceStore>(() => ({ cfg: readCfg(), wakeBlocked: null }));
+
+/** 现场读配置（非 React 上下文用） */
+export function getAgentVoiceCfg(): AgentVoiceCfg {
+  return useAgentVoice.getState().cfg;
+}
+
+/** 更新配置（localStorage + store 同步写；任意开关改动立即生效并清除熔断态） */
+export function updateAgentVoiceCfg(patch: Partial<AgentVoiceCfg>): AgentVoiceCfg {
+  const next = { ...useAgentVoice.getState().cfg, ...patch };
+  next.name = next.name.trim().slice(0, 6) || DEFAULT_WAKE_NAME;
+  try {
+    window.localStorage.setItem(STORE_KEY, JSON.stringify(next));
+  } catch {
+    /* 隐私模式等写入失败静默 */
+  }
+  useAgentVoice.setState({ cfg: next, wakeBlocked: null });
+  return next;
+}
+
+// ============================================================
+// A2. 唤醒名匹配 + 震动
+// ============================================================
+
+/** 匹配前清洗：忽略大小写/空格/常见中英文标点（ASR 输出形态多变，只按字面音节匹配） */
+const WAKE_STRIP_RE = /[\s,，.。!！?？、;；:：'’‘"“”~·…\-_*#（）()[\]【】]/g;
+
+function cleanForWake(s: string): string {
+  return s.toLowerCase().replace(WAKE_STRIP_RE, '');
+}
+
+/**
+ * 唤醒名匹配：转写包含唤醒名即命中（忽略大小写/空格/标点）。
+ * 命中 → 返回去掉唤醒名后的剩余文本（空串 = 只喊了名字；≥4 字可作一句话任务）；
+ * 未命中 → 返回 null。
+ */
+export function matchWakeName(transcript: string, wakeName: string): string | null {
+  const name = cleanForWake(wakeName);
+  const hay = cleanForWake(transcript);
+  if (!name || !hay) return null;
+  const idx = hay.indexOf(name);
+  if (idx < 0) return null;
+  return (hay.slice(0, idx) + hay.slice(idx + name.length)).trim();
+}
+
+/** 震动反馈（防御式：WebView/浏览器不支持时静默） */
+export function vibrateSafely(pattern: number | number[]): void {
+  try {
+    const nav = typeof navigator !== 'undefined' ? (navigator as Navigator & { vibrate?: (p: number | number[]) => boolean }) : null;
+    if (nav && typeof nav.vibrate === 'function') nav.vibrate(pattern);
+  } catch {
+    /* 不支持震动静默 */
+  }
+}
+
+// ============================================================
+// A3. 识别链路（offline → Web Speech 实时文本 → 云端 STT）
+// ============================================================
+
+export type AgentAsrVia = 'offline' | 'webspeech' | 'cloud';
+
+/** 识别链路全部不可用时的中文引导（面板同时提供打字输入框兜底） */
+export const ASR_GUIDE_TEXT = '语音识别不可用：请到设置 › 语音 API 配置，或直接打字';
+
+/**
+ * 一段录音 → 任务文本。优先级：
+ * ① 离线 SenseVoice（APK 首选，端侧推理断网可用）；
+ * ② Web Speech 实时识别文本（录音期间浏览器内置识别的累计结果，离线引擎未就绪时才有）；
+ * ③ transcribeAudioBlob（配置了 OpenAI 兼容 STT 时服务端兜底）。
+ * 全部不可用 → 抛 Error（中文文案）：链路全缺给引导，链路在但没听清给重试提示。
+ */
+export async function recognizeAgentBlob(blob: Blob, liveText = ''): Promise<{ text: string; via: AgentAsrVia }> {
+  const live = liveText.trim();
+  if (isOfflineAsrReady()) {
+    try {
+      const t = await offlineAsrTranscribe(blob);
+      if (t) return { text: t, via: 'offline' };
+    } catch {
+      /* 端侧失败（初始化中/解码异常/超时）：静默降级下一链路 */
+    }
+  }
+  if (live) return { text: live, via: 'webspeech' };
+  if (isSttReady()) {
+    try {
+      const t = await transcribeAudioBlob(blob);
+      if (t) return { text: t, via: 'cloud' };
+    } catch {
+      /* 云端失败：走统一错误文案 */
+    }
+  }
+  if (!isOfflineAsrReady() && !live && !isSttReady()) throw new Error(ASR_GUIDE_TEXT);
+  throw new Error('没有听清，请再说一遍或直接打字');
+}
+
+// ============================================================
+// A4. 录音基建（MediaRecorder + 振幅采样 + Blob 组装，仿 voice-input）
+// ============================================================
+
+const sleep = (ms: number): Promise<void> => new Promise<void>((resolve) => window.setTimeout(resolve, ms));
+
+/** Safari 录音实际是 audio/mp4，MIME 探测失败时按浏览器分支兜底（voice-input #43 同款） */
+function fallbackMime(): string {
+  const ua = (typeof navigator !== 'undefined' && navigator.userAgent) || '';
+  const isSafari = /^((?!chrome|android).)*safari/i.test(ua) || (/AppleWebKit/i.test(ua) && !/Chrome/i.test(ua));
+  return isSafari ? 'audio/mp4' : 'audio/webm';
+}
+
+function buildBlob(chunks: Blob[], mime: string): Blob {
+  return new Blob(chunks, { type: mime.includes('audio') ? mime : fallbackMime() });
+}
+
+export type AgentRecPhase = 'idle' | 'starting' | 'recording' | 'recognizing';
+
+export interface AgentRecResult {
+  ok: true;
+  text: string;
+  via: AgentAsrVia;
+}
+export interface AgentRecError {
+  ok: false;
+  error: string;
+}
+
+export interface AgentRecHandle {
+  phase: AgentRecPhase;
+  /** 已录秒数（100ms 刷新） */
+  seconds: number;
+  /** 实时振幅（0~1，约每 100ms 一个） */
+  levels: number[];
+  /** Web Speech 实时增量文本（离线引擎未就绪且浏览器支持时才有） */
+  partial: string;
+  start: () => void;
+  /** 手动停止 → 收尾识别 */
+  stop: () => void;
+  /** 直接丢弃（关面板/执行时） */
+  cancel: () => void;
+}
+
+/** 面板录音上限（秒） */
+const REC_MAX_SEC = 30;
+/** 静默自动停止（持续无声毫秒数，需求 1.2-1.5s 取 1.4s） */
+const REC_SILENCE_MS = 1400;
+/** 有效录音下限（秒）：更短视为没说到内容 */
+const REC_MIN_SEC = 0.7;
+/** 静默判定 RMS 阈值（原始 0~1 振幅；低于视为无声） */
+const REC_SILENCE_RMS = 0.018;
+
+/**
+ * 面板录音器：MediaRecorder 录音（MIME 能力探测 + 24kbps opus）+ AnalyserNode 实时振幅，
+ * 静默 1.4s 自动停止（已录 >1s 才判定），30s 上限自动结束，0.7s 以下视为无效；
+ * 离线引擎未就绪且浏览器支持时并行跑 Web Speech（实时增量文本展示 + 转写兜底）。
+ * 结果统一走 onResult（null = 太短没内容；ok:false = 识别链路报错，文案已中文）。
+ */
+export function useAgentRecorder(opts: {
+  onResult: (r: AgentRecResult | AgentRecError | null) => void;
+  onStartError: (msg: string) => void;
+}): AgentRecHandle {
+  const [phase, setPhase] = useState<AgentRecPhase>('idle');
+  const [seconds, setSeconds] = useState(0);
+  const [levels, setLevels] = useState<number[]>([]);
+  const [partial, setPartial] = useState('');
+
+  const optsRef = useRef(opts);
+  // 回调经 ref 透传（避免 handle 随 onResult 身份变化重建，面板 effect 依赖稳定）
+  useEffect(() => {
+    optsRef.current = opts;
+  });
+
+  const phaseRef = useRef<AgentRecPhase>('idle');
+  const streamRef = useRef<MediaStream | null>(null);
+  const recRef = useRef<MediaRecorder | null>(null);
+  const chunksRef = useRef<Blob[]>([]);
+  const mimeRef = useRef('');
+  const ctxRef = useRef<AudioContext | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const timerRef = useRef<number | null>(null);
+  const startRef = useRef(0);
+  const silenceRef = useRef(0);
+  const lastSampleRef = useRef(0);
+  const levelBufRef = useRef<number[]>([]);
+  const speechRef = useRef<WebSpeechSession | null>(null);
+  const partialRef = useRef('');
+  const stopReqRef = useRef(false);
+  const deadRef = useRef(false);
+  const stopRef = useRef<() => void>(() => undefined);
+
+  const setPhaseSafe = (p: AgentRecPhase): void => {
+    phaseRef.current = p;
+    setPhase(p);
+  };
+
+  const cleanupCapture = useCallback(() => {
+    if (timerRef.current !== null) {
+      window.clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+    try {
+      ctxRef.current?.close();
+    } catch {
+      /* ignore */
+    }
+    ctxRef.current = null;
+    analyserRef.current = null;
+    streamRef.current?.getTracks().forEach((t) => t.stop());
+    streamRef.current = null;
+  }, []);
+
+  // 卸载时若还在录音：静默丢弃并释放麦克风
+  useEffect(
+    () => () => {
+      deadRef.current = true;
+      const rec = recRef.current;
+      if (rec && rec.state !== 'inactive') {
+        rec.onstop = null;
+        try {
+          rec.stop();
+        } catch {
+          /* ignore */
+        }
+      }
+      recRef.current = null;
+      speechRef.current?.abort();
+      speechRef.current = null;
+      cleanupCapture();
+    },
+    [cleanupCapture],
+  );
+
+  const finalize = useCallback(async () => {
+    const rec = recRef.current;
+    recRef.current = null;
+    const elapsed = (performance.now() - startRef.current) / 1000;
+    const speech = speechRef.current;
+    speechRef.current = null;
+    cleanupCapture();
+    const chunks = chunksRef.current;
+    chunksRef.current = [];
+    setSeconds(0);
+    setLevels([]);
+    if (!rec || elapsed < REC_MIN_SEC || chunks.length === 0) {
+      // 太短（静默过早触发/秒点停止）：不算错误，让面板回到可重录态
+      speech?.abort();
+      setPhaseSafe('idle');
+      setPartial('');
+      partialRef.current = '';
+      optsRef.current.onResult(null);
+      return;
+    }
+    const blob = buildBlob(chunks, mimeRef.current);
+    const live = partialRef.current;
+    partialRef.current = '';
+    setPartial('');
+    setPhaseSafe('recognizing');
+    try {
+      const r = await recognizeAgentBlob(blob, live);
+      setPhaseSafe('idle');
+      optsRef.current.onResult({ ok: true, text: r.text, via: r.via });
+    } catch (err) {
+      setPhaseSafe('idle');
+      optsRef.current.onResult({ ok: false, error: err instanceof Error ? err.message : '识别失败，请重试' });
+    }
+  }, [cleanupCapture]);
+
+  const stop = useCallback(() => {
+    if (phaseRef.current === 'starting') {
+      // 还在等权限/启动：标记，等真正开始录音后立即结束
+      stopReqRef.current = true;
+      return;
+    }
+    if (phaseRef.current !== 'recording') return;
+    const rec = recRef.current;
+    if (!rec) return;
+    try {
+      if (rec.state !== 'inactive') rec.stop();
+      else void finalize();
+    } catch {
+      void finalize();
+    }
+  }, [finalize]);
+  // 计时器回调里要拿到最新 stop（ref 中转，避免闭包过期）
+  useEffect(() => {
+    stopRef.current = stop;
+  }, [stop]);
+
+  const cancel = useCallback(() => {
+    const rec = recRef.current;
+    if (rec && rec.state !== 'inactive') {
+      rec.onstop = null; // 阻断 finalize：丢弃音频
+      try {
+        rec.stop();
+      } catch {
+        /* ignore */
+      }
+    }
+    recRef.current = null;
+    speechRef.current?.abort();
+    speechRef.current = null;
+    chunksRef.current = [];
+    cleanupCapture();
+    setPhaseSafe('idle');
+    setSeconds(0);
+    setLevels([]);
+    setPartial('');
+    partialRef.current = '';
+    stopReqRef.current = false;
+  }, [cleanupCapture]);
+
+  const start = useCallback(() => {
+    if (phaseRef.current !== 'idle') return;
+    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
+      optsRef.current.onStartError('当前环境不支持录音，可直接打字下发任务');
+      return;
+    }
+    stopReqRef.current = false;
+    chunksRef.current = [];
+    levelBufRef.current = [];
+    silenceRef.current = 0;
+    lastSampleRef.current = 0;
+    partialRef.current = '';
+    setPartial('');
+    // Web Speech 实时识别：仅离线引擎未就绪且浏览器支持时并行起
+    // （APK 内首选端侧链路，不重复占识别通道；浏览器网页预览靠它兜底）
+    if (!isOfflineAsrReady() && isWebSpeechSupported()) {
+      speechRef.current?.abort();
+      speechRef.current = startWebSpeechSession({
+        onPartial: (t) => {
+          partialRef.current = t;
+          setPartial(t);
+        },
+      });
+    }
+    setPhaseSafe('starting');
+    navigator.mediaDevices
+      .getUserMedia({ audio: true })
+      .then((stream) => {
+        if (phaseRef.current !== 'starting' || deadRef.current) {
+          // 等权限期间已关面板/卸载
+          stream.getTracks().forEach((t) => t.stop());
+          speechRef.current?.abort();
+          speechRef.current = null;
+          return;
+        }
+        streamRef.current = stream;
+        const mime = pickRecorderMime();
+        mimeRef.current = mime ?? 'audio/webm';
+        let rec: MediaRecorder;
+        try {
+          rec = new MediaRecorder(stream, { mimeType: mime, audioBitsPerSecond: 24000 });
+        } catch {
+          try {
+            rec = new MediaRecorder(stream);
+            mimeRef.current = rec.mimeType || 'audio/webm';
+          } catch {
+            stream.getTracks().forEach((t) => t.stop());
+            setPhaseSafe('idle');
+            optsRef.current.onStartError('当前环境不支持录音，可直接打字下发任务');
+            return;
+          }
+        }
+        chunksRef.current = [];
+        rec.ondataavailable = (e: BlobEvent) => {
+          if (e.data && e.data.size > 0) chunksRef.current.push(e.data);
+        };
+        rec.onstop = () => void finalize();
+        rec.start(200);
+        recRef.current = rec;
+
+        // 实时振幅采样（波形动画 + 静默判定）；失败不影响录音本身
+        try {
+          const w = window as Window & { webkitAudioContext?: typeof AudioContext };
+          const Ctor = window.AudioContext ?? w.webkitAudioContext;
+          if (Ctor) {
+            const ctx = new Ctor();
+            void ctx.resume().catch(() => undefined);
+            const source = ctx.createMediaStreamSource(stream);
+            const analyser = ctx.createAnalyser();
+            analyser.fftSize = 256;
+            source.connect(analyser);
+            ctxRef.current = ctx;
+            analyserRef.current = analyser;
+          }
+        } catch {
+          /* 采样失败静默 */
+        }
+
+        startRef.current = performance.now();
+        silenceRef.current = 0;
+        setSeconds(0);
+        setPhaseSafe('recording');
+        timerRef.current = window.setInterval(() => {
+          const sec = (performance.now() - startRef.current) / 1000;
+          setSeconds(sec);
+          // 每 ~100ms 采一个 RMS（波形 + 静默判定）
+          const analyser = analyserRef.current;
+          let rms = 0;
+          if (analyser && performance.now() - lastSampleRef.current > 100) {
+            lastSampleRef.current = performance.now();
+            const buf = new Uint8Array(analyser.fftSize);
+            analyser.getByteTimeDomainData(buf);
+            let sum = 0;
+            for (let i = 0; i < buf.length; i++) {
+              const d = (buf[i] - 128) / 128;
+              sum += d * d;
+            }
+            rms = Math.sqrt(sum / buf.length);
+            levelBufRef.current.push(Math.max(0.08, Math.min(1, rms * 3.2)));
+            setLevels(levelBufRef.current.slice(-140));
+          }
+          // 静默自动停止：已录 >1s 且持续 1.4s 无声（无分析器时跳过，仅 30s 上限兜底）
+          if (rms > 0) {
+            if (rms < REC_SILENCE_RMS) silenceRef.current += 100;
+            else silenceRef.current = 0;
+            if (sec > 1 && silenceRef.current >= REC_SILENCE_MS) {
+              stopRef.current();
+              return;
+            }
+          }
+          if (sec >= REC_MAX_SEC) {
+            stopRef.current();
+            return; // 30 秒上限：自动结束并识别
+          }
+        }, 100);
+        // 启动期间就请求了停止：立即收尾
+        if (stopReqRef.current) {
+          stopReqRef.current = false;
+          stopRef.current();
+        }
+      })
+      .catch((err: unknown) => {
+        // 启动失败（权限拒绝/无麦克风等）：释放可能已取得的资源，给出中文引导
+        const rec = recRef.current;
+        if (rec && rec.state !== 'inactive') {
+          rec.onstop = null;
+          try {
+            rec.stop();
+          } catch {
+            /* ignore */
+          }
+        }
+        recRef.current = null;
+        speechRef.current?.abort();
+        speechRef.current = null;
+        streamRef.current?.getTracks().forEach((t) => t.stop());
+        streamRef.current = null;
+        cleanupCapture();
+        setPhaseSafe('idle');
+        const name = typeof err === 'object' && err !== null ? (err as { name?: string }).name : '';
+        if (name === 'NotAllowedError' || name === 'SecurityError' || name === 'PermissionDeniedError') {
+          optsRef.current.onStartError('无法使用麦克风：请允许录音权限，或直接打字下发任务');
+        } else if (name === 'NotFoundError' || name === 'DevicesNotFoundError') {
+          optsRef.current.onStartError('未找到可用麦克风，可直接打字下发任务');
+        } else {
+          optsRef.current.onStartError('无法访问麦克风，可直接打字下发任务');
+        }
+      });
+  }, [cleanupCapture, finalize]);
+
+  return { phase, seconds, levels, partial, start, stop, cancel };
+}
+
+// ============================================================
+// A5. 连续唤醒监听（喊名字唤醒，默认关）
+// ============================================================
+
+/**
+ * 连续唤醒能否开录（每轮开录前 + 录音中每 200ms 复查）。
+ * panelOpen/agentRunning 由组件传入；其余现场读各 store：
+ * 页面隐藏 / 锁屏 / 熄屏 / 多任务 / 通话（主动+来电） / TTS 朗读 / 语音消息播放 → 暂停。
+ */
+export function canAgentWakeListen(panelOpen: boolean, agentRunning: boolean): boolean {
+  if (panelOpen || agentRunning) return false;
+  if (typeof document === 'undefined' || document.hidden) return false;
+  try {
+    const ui = useUI.getState();
+    if (ui.locked || ui.screenOff || ui.switcherOpen || ui.callActive) return false;
+    if (useIncomingCall.getState().call) return false;
+  } catch {
+    /* store 异常不阻断监听 */
+  }
+  try {
+    if (isSpeaking()) return false; // TTS 朗读中（电话/语音条实时朗读）
+    if (useVoicePlayback.getState().playing) return false; // 语音消息播放中
+  } catch {
+    /* 播放状态读取失败不阻断 */
+  }
+  return true;
+}
+
+/** 单轮唤醒录音：固定毫秒窗口；shouldAbort 命中即提前收尾并丢弃（返回 null）。 */
+async function recordWakeChunk(ms: number, shouldAbort: () => boolean): Promise<Blob | null> {
+  if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
+    throw new Error('当前环境不支持录音');
+  }
+  const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  try {
+    const mime = pickRecorderMime();
+    let rec: MediaRecorder;
+    try {
+      rec = new MediaRecorder(stream, { mimeType: mime, audioBitsPerSecond: 24000 });
+    } catch {
+      rec = new MediaRecorder(stream);
+    }
+    const chunks: Blob[] = [];
+    rec.ondataavailable = (e: BlobEvent) => {
+      if (e.data && e.data.size > 0) chunks.push(e.data);
+    };
+    const stopped = new Promise<void>((resolve) => {
+      rec.onstop = () => resolve();
+    });
+    rec.start(250);
+    let aborted = false;
+    const deadline = Date.now() + ms;
+    while (Date.now() < deadline) {
+      await sleep(200);
+      if (shouldAbort()) {
+        aborted = true;
+        break;
+      }
+    }
+    try {
+      if (rec.state !== 'inactive') rec.stop();
+    } catch {
+      /* ignore */
+    }
+    await Promise.race([stopped, sleep(800)]);
+    if (aborted) return null;
+    return chunks.length > 0 ? buildBlob(chunks, rec.mimeType || mime || '') : null;
+  } finally {
+    stream.getTracks().forEach((t) => t.stop());
+  }
+}
+
+/** 唤醒命中后剩余字数门槛：≥4 字直接作任务文本进确认卡（一句话直达） */
+const WAKE_REST_MIN = 4;
+/** 每轮监听录音时长（需求 3-4s 取 3.2s） */
+const WAKE_CHUNK_MS = 3200;
+/** 未命中轮间间隔（省电，需求 ≥1.5s） */
+const WAKE_GAP_MS = 1500;
+/** 麦克风连续失败熔断阈值 */
+const WAKE_FAIL_FUSE = 3;
+
+/**
+ * 连续唤醒循环（挂载即后台跑，由 enabled 一键启停）：
+ * 每轮 录 3.2s → 离线转写 → 匹配唤醒名；命中震动 + onWake（剩余 ≥4 字带任务文本）；
+ * 暂停条件见 canAgentWakeListen；麦克风连续 3 轮失败 → 熔断停循环并记录原因
+ * （设置页展示，重新拨动开关即重试）。
+ */
+export function useAgentWakeLoop(opts: {
+  /** 总启用（listen 开关 && 原生壳 && 离线引擎就绪 && 未熔断）——外层算好传入 */
+  enabled: boolean;
+  /** 唤醒名（经 optsRef 透传，设置页改完下一轮立即生效） */
+  name: string;
+  /** 每轮开录前动态检查（含面板打开/Agent 运行，组件用 ref 透传最新值） */
+  canListen: () => boolean;
+  /** 命中唤醒名：task=null 表示只喊了名字（面板进录音态等继续说），否则直接进确认卡 */
+  onWake: (task: string | null) => void;
+}): void {
+  const optsRef = useRef(opts);
+  useEffect(() => {
+    optsRef.current = opts;
+  });
+
+  useEffect(() => {
+    if (!opts.enabled) return undefined;
+    let aborted = false;
+    let micFails = 0;
+
+    void (async () => {
+      // 首轮小延迟：避开开开关瞬间的其它音频操作与权限弹窗竞争
+      await sleep(1200);
+      while (!aborted) {
+        if (!optsRef.current.canListen()) {
+          await sleep(900); // 暂停期低频轮询，恢复可见/空闲后 1s 内续听
+          continue;
+        }
+        try {
+          const blob = await recordWakeChunk(WAKE_CHUNK_MS, () => aborted || !optsRef.current.canListen());
+          if (aborted) break;
+          if (!blob) continue; // 中途被暂停打断：不消耗轮间隔
+          const text = await offlineAsrTranscribe(blob).catch(() => '');
+          if (aborted) break;
+          const rest = matchWakeName(text, optsRef.current.name);
+          micFails = 0;
+          if (rest !== null) {
+            vibrateSafely([40, 80, 40]); // 命中反馈：短震动两连
+            optsRef.current.onWake(rest.length >= WAKE_REST_MIN ? rest : null);
+            await sleep(WAKE_GAP_MS); // 面板打开期间 canListen 会挡住后续轮
+          } else {
+            await sleep(WAKE_GAP_MS); // 未命中：轮间 ≥1.5s 省电
+          }
+        } catch {
+          micFails += 1;
+          if (micFails >= WAKE_FAIL_FUSE) {
+            // 熔断：大概率无麦克风权限/不支持录音——停循环并记录原因，重新拨动开关即重试
+            useAgentVoice.setState({
+              wakeBlocked: '无法访问麦克风：连续唤醒已自动停用（检查 APP 麦克风权限后重新打开此开关）',
+            });
+            break;
+          }
+          await sleep(2500);
+        }
+      }
+    })();
+
+    return () => {
+      aborted = true;
+    };
+    // 只随 enabled 启停；name/canListen/onWake 经 optsRef 透传最新值（刻意不进依赖）
+  }, [opts.enabled]);
+}

@@ -1,6 +1,6 @@
 'use client';
 
-import { Fragment, useLayoutEffect, useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type MouseEvent } from 'react';
+import { Fragment, useLayoutEffect, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type FormEvent, type MouseEvent } from 'react';
 import { motion } from 'framer-motion';
 import {
   ArrowUp,
@@ -1194,30 +1194,19 @@ function ChatView({
   const [translateOpen, setTranslateOpen] = useState(false);
   /** 回复条数选择页（设置页「回复条数」进入的独立二级页，按会话隔离） */
   const [replyCountOpen, setReplyCountOpen] = useState(false);
-  /** 当前会话的回复条数（信息端每会话独立；未设置默认 5 条，与微信端同口径） */
+  /** 当前会话的回复条数（信息端每会话独立；未设置默认 5 条，与微信端同口径）。
+   *  会话级 state：ChatView 按 storageKey keyed 重挂载（切换会话先卸旧再挂新），
+   *  惰性初始化即完成「切会话重读」，无需 [sessionKey] 同步 effect（react-hooks/set-state-in-effect） */
   const [replyCountValue, setReplyCountValue] = useState(() => getReplyCount(sessionKey));
-  // 切换会话时重读新会话的回复条数（与 transCfg/sentenceSend 既有会话级 state 同模式）
-  useEffect(() => {
-    setReplyCountValue(getReplyCount(sessionKey));
-  }, [sessionKey]);
-  /** 当前会话的翻译配置（开启后文字消息气泡下方显示所选语言的译文） */
+  /** 当前会话的翻译配置（开启后文字消息气泡下方显示所选语言的译文；会话级 state，同上惰性重读） */
   const [transCfg, setTransCfgState] = useState<ChatTranslateCfg>(() => getTranslateCfg(sessionKey));
-  useEffect(() => {
-    setTransCfgState(getTranslateCfg(sessionKey));
-  }, [sessionKey]);
   /** 译文缓存（key = `${msgId}|${langCode}`）与失败标记（避免每帧重试） */
   const [translations, setTranslations] = useState<Record<string, string>>({});
   const [trFailed, setTrFailed] = useState<Record<string, boolean>>({});
-  /** 分句发送开关（开启后连续发消息 AI 不回复，输入框为空再点一次发送才触发回复） */
+  /** 分句发送开关（开启后连续发消息 AI 不回复，输入框为空再点一次发送才触发回复；会话级 state，同上惰性重读） */
   const [sentenceSend, setSentenceSendState] = useState(() => getSentenceSend(sessionKey));
-  useEffect(() => {
-    setSentenceSendState(getSentenceSend(sessionKey));
-  }, [sessionKey]);
-  /** 时间感知开关（本会话独立，发送时现场读取；见 @/lib/time-aware） */
+  /** 时间感知开关（本会话独立，发送时现场读取；见 @/lib/time-aware；会话级 state，同上惰性重读） */
   const [timeAware, setTimeAwareState] = useState(() => getTimeAware(sessionKey));
-  useEffect(() => {
-    setTimeAwareState(getTimeAware(sessionKey));
-  }, [sessionKey]);
   // 动作描写开关（渲染订阅版）：设置页切换后经事件即时刷新，历史消息显示同步生效
   const actionDescOn = useActionDescOn(sessionKey);
   // 「回车键发送消息」开关（信息 App 级、按账号隔离；默认开启=回车发送，关闭=回车换行）
@@ -1307,20 +1296,15 @@ function ChatView({
   const [avatarOverride, setAvatarOverride] = useState<string | null>(null);
   /** 顶栏头像（pick-album-avatar 落库后本地 override 优先；切会话随组件重挂载复位 → 自动回退 peer.avatarSrc） */
   const peerAvatarSrc = avatarOverride ?? peer.avatarSrc;
+  // 世界书绑定列表（会话级 state：ChatView 按 storageKey keyed 重挂载，惰性初始化即完成切会话重读）
   const [wbBound, setWbBound] = useState<string[]>(() => (wbContactId ? getBoundBookIds(wbContactId) : []));
-  useEffect(() => {
-    setWbBound(wbContactId ? getBoundBookIds(wbContactId) : []);
-  }, [wbContactId]);
   /** 「他的声音」页（聊天设置二级页，仅联系人会话）与 AI 语音频率页（其下的频率选择页，按会话独立） */
   const [voiceOpen, setVoiceOpen] = useState(false);
   const [voiceFreqOpen, setVoiceFreqOpen] = useState(false);
   /** 我的音色库（「他的声音」入口行摘要解析：音色 id → 展示名，见 @/lib/ios/my-voices） */
   const myVoicesForSummary = useMyVoices((s) => s.voices);
-  /** 分句发送批次「待 AI 回复」标记（跨页面切换持久，见 @/lib/sentence-send） */
+  /** 分句发送批次「待 AI 回复」标记（跨页面切换持久，见 @/lib/sentence-send；会话级 state，惰性初始化即完成切会话重读） */
   const [pendingDispatch, setPendingDispatch] = useState(() => hasPendingBatch(sessionKey));
-  useEffect(() => {
-    setPendingDispatch(hasPendingBatch(sessionKey));
-  }, [sessionKey]);
   const onMsgsChangeRef = useRef(onMsgsChange);
   // ref 更新入 effect（react-hooks/refs：不在渲染期写 ref）
   useEffect(() => {
@@ -1432,12 +1416,14 @@ function ChatView({
     });
   }, [sessionKey, storageKey]);
 
-  /** 投递进行中（含排队批次）：流结束后仍维持「正在输入」打字指示，直到最后一条消息发出 */
-  const [delivering, setDelivering] = useState(() => isAiDelivering(sessionKey));
-  useEffect(() => {
-    setDelivering(isAiDelivering(sessionKey));
-    return subscribeAiDeliveryActive(() => setDelivering(isAiDelivering(sessionKey)));
-  }, [sessionKey]);
+  /** 投递进行中（含排队批次）：流结束后仍维持「正在输入」打字指示，直到最后一条消息发出。
+   *  投递状态属外部系统（ai-delivery 模块层），用 useSyncExternalStore 订阅（原 useState+同步 effect 改写，
+   *  react-hooks/set-state-in-effect）：订阅覆盖 running/队列增减（emitActive 全量通知），快照即真值 */
+  const delivering = useSyncExternalStore(
+    subscribeAiDeliveryActive,
+    () => isAiDelivering(sessionKey),
+    () => false,
+  );
 
   /** [语音通话] 标记本轮是否出现过（流中分段/最后一段/接力回复共用同一 ref）：startAiTurn 开回合时重置，
    *  buildReplyMsgs 解析到标记时置位——原来是回合内局部变量，buildReplyMsgs 提升到组件层后改用 ref 传递 */
@@ -2689,6 +2675,13 @@ function ChatView({
     if (toastTimer.current) window.clearTimeout(toastTimer.current);
     toastTimer.current = window.setTimeout(() => setToastMsg(''), 1500);
   }, []);
+  // showToast 的 ref 镜像（react-hooks/preserve-manual-memoization：showToast 内部改写 toastTimer ref，
+  // 编译器视其为「可变依赖」，下游 useMemo/useCallback 依赖它会导致手工 memoization 无法保留——
+  // commitVoiceMsg/sendTextAsVoice 改经 ref 读最新实现，依赖数组不再含 showToast）
+  const showToastRef = useRef(showToast);
+  useEffect(() => {
+    showToastRef.current = showToast;
+  });
   useEffect(
     () => () => {
       if (toastTimer.current) window.clearTimeout(toastTimer.current);
@@ -2885,7 +2878,7 @@ function ChatView({
     (clip: VoiceClip, presetTranscript?: string) => {
       // 40-a 拉黑拦截：被角色拉黑（byChar）后语音消息也不能发（按住说话/文字转语音/划转文字共用本入口）
       if (wbContactId && loadBlock('sms', wbContactId).byChar) {
-        showToast('对方已将你拉黑，无法发送');
+        showToastRef.current('对方已将你拉黑，无法发送');
         return;
       }
       const hasText = typeof presetTranscript === 'string' && presetTranscript.trim().length > 0;
@@ -2921,7 +2914,8 @@ function ChatView({
         window.setTimeout(kickTurn, 150); // 等重渲染 + startAiTurnRef 回填新闭包（含转写文本）
       });
     },
-    [enqueueQueuedTurn, sessionKey, showToast, wbContactId],
+    // showToast 经 ref 读取（见 showToastRef 注释：可变依赖会破坏手工 memoization 保留）
+    [enqueueQueuedTurn, sessionKey, wbContactId],
   );
 
   /** 「划到转文字」松开后：先识别再预览，由用户决定发送文字 / 发送语音（原始录音）/ 取消 */
@@ -2986,9 +2980,10 @@ function ChatView({
       setQuote(null);
       void synthesizeSelfVoice(text)
         .then((clip) => commitVoiceMsg(clip, text))
-        .catch((e: unknown) => showToast(e instanceof Error && e.message ? e.message : '语音生成失败，请重试'));
+        .catch((e: unknown) => showToastRef.current(e instanceof Error && e.message ? e.message : '语音生成失败，请重试'));
     },
-    [commitVoiceMsg, showToast, storageKey],
+    // showToast 经 ref 读取（见 showToastRef 注释：可变依赖会破坏手工 memoization 保留）
+    [commitVoiceMsg, storageKey],
   );
   // ref 更新入 effect（react-hooks/refs：不在渲染期写 ref）；send 前引用经此拿到最新实现
   useEffect(() => {
@@ -4975,8 +4970,6 @@ export default function ChatApp() {
   const [chatSession, setChatSession] = useState<ChatSession | null>(null);
   /** 角色状态卡（聊天界面点击对方头像弹出：三端共用 PeerStatusCard；小助手会话不弹） */
   const [statusCardOpen, setStatusCardOpen] = useState(false);
-  /** 好友会话预览（信息列表：有聊天记录的好友 CHAR/NPC） */
-  const [contactSessions, setContactSessions] = useState<ContactSessionPreview[]>([]);
   // 多账号 v2（Task 40-E/40-2c）：当前 sms 账号是否匿名号（顶栏 EyeOff 蓝点角标提示身份非本号）。
   // 切号不刷新网页（switchAccountFor 派发事件）：监听 ACCOUNT_CHANGED_EVENT 实时更新角标 + 重读数据
   const [anonActive, setAnonActive] = useState(() => getActiveAccountFor('sms').kind === 'anon');
@@ -5157,14 +5150,36 @@ export default function ChatApp() {
     if (useUI.getState().pendingChatContact) useUI.getState().setPendingChatContact(null);
   }, []);
 
-  // 电话 App 跳转过来的：联系人载入后自动打开对应会话（相当于添加好友直达聊天）；
-  // 找不到（已被删）或载入失败则静默留在信息主界面
+  // 跨 App 跳转消费（电话 App 跳转 / 灵动岛通知点击指向联系人时）：联系人载入后自动打开对应会话
+  // （相当于添加好友直达聊天）；找不到（已被删）或载入失败则静默留在信息主界面。
+  // react-hooks/set-state-in-effect / react-hooks/globals：消费动作含 setState 与模块级变量写入
+  // （openContactChat 内部落 activeContactRelation/setMemScopeForApp），不能出现在 effect 同步体或
+  // render 期——故全部收敛到外部系统回调：① 联系人载入完成（loadContacts .then/.catch）时消费在途请求；
+  // ② 灵动岛事件回调里联系人已就绪时现场消费。去重用「次数哨兵」：每次请求 nonce+1，按 nonce 恰好
+  // 消费一次（consume 后置空 pendingJump 解除渲染期加载门 if (pendingJump) Loader，与原版
+  // 「消费后置空防重入」语义一致）。ref 仅在事件/回调中读写，render 期不触碰。
+  const pendingJumpRef = useRef<string | null>(useUI.getState().pendingChatContact);
+  const jumpNonceRef = useRef(0);
+  const jumpConsumedRef = useRef(-1);
+  const contactsRef = useRef(contacts);
+  const contactStateRef = useRef(contactState);
   useEffect(() => {
-    if (!pendingJump || contactState === 'loading') return;
-    const c = contacts.find((x) => x.id === pendingJump);
-    setPendingJump(null);
-    if (c && c.kind !== 'user') openContactChat(c);
-  }, [pendingJump, contactState, contacts]);
+    contactsRef.current = contacts;
+    contactStateRef.current = contactState;
+  }, [contacts, contactState]);
+  // 最新消费器经 ref 分发：loadContacts/灵动岛订阅都是空依赖长闭包，直引会捕获首帧过期 contacts
+  const consumeJumpRef = useRef<(list: ContactRecord[]) => void>(() => {});
+  useEffect(() => {
+    consumeJumpRef.current = (list: ContactRecord[]) => {
+      const pid = pendingJumpRef.current;
+      if (!pid || jumpConsumedRef.current === jumpNonceRef.current) return;
+      jumpConsumedRef.current = jumpNonceRef.current;
+      pendingJumpRef.current = null;
+      setPendingJump(null);
+      const c = list.find((x) => x.id === pid);
+      if (c && c.kind !== 'user') openContactChat(c);
+    };
+  });
 
   // 灵动岛通知点击跳转：打开通知对应的会话（信息 App 已打开时由事件驱动，
   // 未打开时挂载后消费；联系人未就绪时复用 pendingJump 等载入后自动进入）
@@ -5173,7 +5188,11 @@ export default function ChatApp() {
       const t = takeNotifyNavigation('chat');
       if (!t) return;
       if (t.contactId) {
+        pendingJumpRef.current = t.contactId;
+        jumpNonceRef.current += 1; // 次数哨兵：同联系人重复跳转也重新消费（与原置空重触发语义一致）
         setPendingJump(t.contactId);
+        // 联系人已就绪时现场消费；仍在载入则等 loadContacts 回调消费
+        if (contactStateRef.current !== 'loading') consumeJumpRef.current(contactsRef.current);
       } else {
         openAssistantChat();
       }
@@ -5183,18 +5202,27 @@ export default function ChatApp() {
     return () => window.removeEventListener(ISLAND_NAV_EVENT, consume);
   }, []);
 
-  // 拉取联系人（CHAR/NPC 进信息 App，USER 不出现；本地 IndexedDB）
-  const loadContacts = useCallback(async () => {
-    setContactState('loading');
-    try {
-      // 信息 App 内显示昵称（昵称优先于真实名字，与 QQ/微信一致）；
-      // 头像按 App 投影：读 sms 槽位（无槽位回退全局默认头像）；
-      // 备注按 App 隔离（第四十八轮）：读 sms 槽位（未设置回退全局 remark）
-      setContacts(withDisplayNames(await listContactsFor('sms'), { app: 'sms' }));
-      setContactState('ready');
-    } catch {
-      setContactState('error');
-    }
+  // 拉取联系人（CHAR/NPC 进信息 App，USER 不出现；本地 IndexedDB）。
+  // setStates 全部在 .then/.catch 回调里（react-hooks/set-state-in-effect：同步调用链上不能有 setState，
+  // 经回调触发的属外部系统回写）——「loading」中间态由事件/重试等调用方现场置位，挂载时初始值本就是 loading
+  const loadContacts = useCallback(() => {
+    return listContactsFor('sms')
+      .then((list) => {
+        // 信息 App 内显示昵称（昵称优先于真实名字，与 QQ/微信一致）；
+        // 头像按 App 投影：读 sms 槽位（无槽位回退全局默认头像）；
+        // 备注按 App 隔离（第四十八轮）：读 sms 槽位（未设置回退全局 remark）
+        const shown = withDisplayNames(list, { app: 'sms' });
+        setContacts(shown);
+        setContactState('ready');
+        // 联系人就绪：消费挂起的跨 App 跳转（若灵动岛事件已在就绪态现场消费过，此处按 nonce 幂等跳过）
+        consumeJumpRef.current(shown);
+      })
+      .catch(() => {
+        setContactState('error');
+        // 载入失败同样解除跳转等待（原版 effect 在 error 态消费：清 pendingJump 静默留在主界面；
+        // 传最后已知联系人快照，若目标在旧列表里仍可直达，与原版一致）
+        consumeJumpRef.current(contactsRef.current);
+      });
   }, []);
 
   useEffect(() => {
@@ -5227,12 +5255,13 @@ export default function ChatApp() {
     });
   }, []);
 
-  // 会话列表预览：回到主视图时重扫本地聊天记录（从聊天返回也能刷新预览）；
-  // reloadKey：sms 账号切换后强制重扫（scanContactSessions 读 loadMsgs，kv 按新账号作用域返回新数据）
-  useEffect(() => {
-    if (view !== 'main') return;
-    setContactSessions(scanContactSessions(contacts));
-  }, [contacts, view, reloadKey]);
+  // 好友会话预览（信息列表：有聊天记录的好友 CHAR/NPC）：
+  // 进入/回到主视图时重扫本地聊天记录（从聊天返回也能刷新预览）；
+  // reloadKey：sms 账号切换后强制重扫（scanContactSessions 读 loadMsgs，kv 按新账号作用域返回新数据）。
+  // react-hooks/set-state-in-effect：原为 effect 内同步 setContactSessions——改为 render 期 useMemo 派生，
+  // 依赖集与原 effect 触发时机一致（contacts 变化 / view 回到 main / reloadKey 变更）；
+  // 非 main 视图不渲染该列表，期间的重算不影响显示（值语义与原「view!=='main' 时保留上次结果」等价）
+  const contactSessions = useMemo(() => scanContactSessions(contacts), [contacts, view, reloadKey]);
 
   // 进入添加好友页时刷新联系人：同步「联系人」App 里新建的 CHAR/NPC（新的朋友列表保持最新）
   useEffect(() => {

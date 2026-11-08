@@ -5,6 +5,8 @@ import { NextRequest, NextResponse } from 'next/server';
  * - GET：返回 VAPID 公钥（客户端订阅用）；密钥来源：环境变量 VAPID_PUBLIC_KEY/VAPID_PRIVATE_KEY
  *   （Netlify 等只读 FS 部署设置一次即稳定）→ .data/vapid.json → 首次现场生成；
  * - POST：保存浏览器推送订阅（push-subs.json，按 endpoint 去重；只读 FS 自动落 /tmp 兜底）；
+ *   可选 tag 字段（C2）：客户端上报的本设备稳定标识（deviceTag），存进订阅记录供
+ *   push-send.ts 的 excludeTag 过滤（广播时排除发起设备自己的订阅）；不上报则无 tag（旧订阅口径，永不被排除）。
  * - DELETE：移除订阅（浏览器退订时调用）。
  * 订阅在服务端为尽力而为的增强能力：不支持 Service Worker / Push 的环境注册失败静默跳过，
  * 应用内灵动岛弹窗与页面隐藏时的 Web Notification 不受影响。
@@ -52,8 +54,11 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   if (!tokenOk(req)) return unauthorized();
   const body = (await req.json().catch(() => null)) as {
     subscription?: { endpoint?: unknown; keys?: { p256dh?: unknown; auth?: unknown } };
+    tag?: unknown;
   } | null;
   const endpoint = body?.subscription?.endpoint;
+  // 可选设备标识（C2 excludeTag 依据）：仅接受非空字符串，钳 64 字符；非法/缺失一律不带 tag（向后兼容）
+  const tag = typeof body?.tag === 'string' && body.tag.trim() ? body.tag.trim().slice(0, 64) : undefined;
   // 最小形状校验：endpoint 必须为非空字符串，且 keys.p256dh/auth 必须为字符串——
   // web-push 协议必需这两项作为加密材料，缺失会让发送时 422 直接报错且占用订阅槽位。
   if (
@@ -70,7 +75,7 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
   const result = await runSubsMutation(async () => {
     const subs = await readPushJson<SubRec[]>('push-subs.json', []);
     const next = Array.isArray(subs) ? subs.filter((s) => s && s.endpoint !== endpoint) : [];
-    next.push(body!.subscription as SubRec);
+    next.push({ ...(body!.subscription as SubRec), ...(tag ? { tag } : {}) });
     await writePushJson('push-subs.json', next.slice(-50));
     return NextResponse.json({ ok: true });
   });

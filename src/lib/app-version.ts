@@ -11,9 +11,9 @@
  */
 
 /** 当前最新版本（与 android-shell versionName 保持一致） */
-export const APP_VERSION = '1.5.0';
+export const APP_VERSION = '1.5.1';
 /** 版本号数字（与 android-shell versionCode 保持一致；覆盖安装要求只增不减） */
-export const APP_VERSION_CODE = 9;
+export const APP_VERSION_CODE = 10;
 
 export interface AppReleaseNote {
   version: string;
@@ -24,6 +24,16 @@ export interface AppReleaseNote {
 
 /** 版本历史（新→旧；设置 › APP 更新 页渲染，最新一条即当前版本） */
 export const APP_RELEASE_NOTES: AppReleaseNote[] = [
+  {
+    version: '1.5.1',
+    date: '2026-11-08',
+    items: [
+      '智能体新动作：长按弹菜单、双击点赞、拖进度条/滑块；每步执行后自动截屏视觉验证（UI 树读不到的内容也能确认），看不出来才重新规划',
+      '智能体学会记路：常用按钮坐标自动记忆，同类任务二次执行直接命中，更快更省 token',
+      '语音唤起智能体：桌面悬浮球一键说话下达任务；可自定义唤醒名，开启连续监听后喊一声名字即唤起（设置 › AI 动手）',
+      '系统通知增强：智能体任务完成、AI 来电/语音留言、情侣小家新便签——页面在后台时推送到手机通知栏',
+    ],
+  },
   {
     version: '1.5.0',
     date: '2026-11-08',

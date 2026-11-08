@@ -20,6 +20,16 @@
  *
  * 输入法自愈：中文输入经原生 inputChinese（可能临时切到中文 IME），任务结束
  * 统一 restoreIme 还原机主原输入法（originalIme 模块级记录）。
+ *
+ * v1.6 三项增强：
+ *  - 动作原语补全：longPress（同坐标原地 swipe 800ms = 长按）/ doubleClick（两次快速 tap）/
+ *    drag（swipe x1y1→x2y2 定时拖拽），能力开关分别挂 tap/tap/swipe；
+ *  - 截屏视觉自动验证（A2）：改变屏幕状态的步骤执行成功后，再截屏交 VLM 复核「画面是否
+ *    体现该步预期」，不通过按失败走重规划；接口失败/超时/未配置/「看屏幕」能力关闭 →
+ *    自动降级信任 UI 树结果（绝不因验证拖垮任务），连续 3 次验证调用失败本任务停用视觉层；
+ *  - 坐标缓存学习（A6）：clickElement/longPress 文本定位成功点击后，把归一化坐标写入
+ *    localStorage LRU 缓存（≤120 条）；同 App 重复任务先查缓存直接点击（跳过 dumpUI→查找），
+ *    命中复核失败自动弃条目并回落 UI 树路径。对 LLM 透明（不改计划 schema）。
  */
 
 import { useSyncExternalStore } from 'react';
@@ -41,13 +51,15 @@ import {
   labInputText,
   labKey,
   labOpenApp,
+  labScreencap,
   labScreenSize,
   labSwipe,
   labTap,
 } from './shizuku-lab';
-import { AUTONOMY_CAPS, getAutonomyConfig, isCapEnabled } from './shizuku-autonomy';
+import { AUTONOMY_CAPS, getAutonomyConfig, isCapEnabled, visionAsk } from './shizuku-autonomy';
 import { extractJsonObject } from './call-upstream';
 import { useSettings } from '@/lib/ios/store';
+import { notifyIfHidden } from './local-notify';
 
 // ============================================================
 // B1. Agent 运行状态 store（轻量 pub/sub + useSyncExternalStore）
@@ -446,6 +458,9 @@ const ACTION_CAP: Record<string, string> = {
   pressDelete: 'key',
   back: 'key',
   scroll: 'swipe',
+  longPress: 'tap',
+  doubleClick: 'tap',
+  drag: 'swipe',
 };
 
 /** 单项能力被关的统一文案（与 executePhoneOp 的 DENIED 同语义：硬拦截） */
@@ -462,6 +477,16 @@ async function agentScreenSize(): Promise<{ w: number; h: number }> {
   }
   const lab = await labScreenSize();
   return lab ?? { w: 1080, h: 2340 };
+}
+
+/** 屏幕分辨率任务级 memo（A6 坐标缓存换算用；runAgentTask 开始时清空，任务内不重复查） */
+let screenSizeMemo: { w: number; h: number } | null = null;
+
+/** memo 版分辨率（仅坐标缓存换算用，省一次原生桥往返；scroll 等语义滑动仍走 agentScreenSize 现查） */
+async function agentScreenSizeMemo(): Promise<{ w: number; h: number }> {
+  if (screenSizeMemo) return screenSizeMemo;
+  screenSizeMemo = await agentScreenSize();
+  return screenSizeMemo;
 }
 
 /** 任务期间被临时切走的原输入法（任务结束 finally 里 restoreIme 还原） */
@@ -502,10 +527,210 @@ async function stepOpenApp(pkg: string): Promise<StepResult> {
     : { ok: false, text: `打开 ${pkg} 失败：${monkey.text}` };
 }
 
-/** clickElement：看屏幕（UI 树）→ 文字匹配 → 点中心坐标；失败带观察现场给 replan */
+// ============================================================
+// B5a. 坐标缓存学习（A6）：同 App 内重复任务的点击直接命中，跳过 dumpUI→查找
+// ============================================================
+
+/**
+ * localStorage 坐标缓存（key: agent-coord-cache-v1）：
+ *  - 条目 { app, target, nx, ny, hits, lastUsed }：app=前台包名，target=归一化目标文本
+ *    （小写 trim + 压空白），nx/ny=0~1 归一化坐标（相对屏幕 w/h，分辨率无关），
+ *    hits=命中次数，lastUsed=最近使用时间戳（LRU 依据）。
+ *  - 上限 120 条，超出按 lastUsed 最旧驱逐；读写全 try-catch（隐私模式/异常静默，不致命）。
+ *  - 对 LLM 透明：不改计划 schema，纯执行层加速；命中复核失败自动弃条目回落 UI 树路径。
+ */
+const COORD_CACHE_KEY = 'agent-coord-cache-v1';
+const COORD_CACHE_MAX = 120;
+/** 缓存命中复核：UI 树里目标元素中心与缓存点击点的归一化距离超过该比例 → 布局已变（缓存过期） */
+const COORD_CACHE_STALE_RATIO = 0.08;
+
+interface CoordCacheEntry {
+  app: string;
+  target: string;
+  nx: number;
+  ny: number;
+  hits: number;
+  lastUsed: number;
+}
+
+/** 目标文本归一化（缓存 key 的一半；与 findClickableByText 的小写匹配口径一致） */
+function normalizeTargetText(t: string): string {
+  return t.trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+/** 从「前台应用：com.x.y」/ mCurrentFocus=Window{…} 原始行里抠包名（拿不到返回 ''，读写都跳过缓存） */
+function fgPackageOf(fgLine: string): string {
+  const m = /(\w+(?:\.\w+)+)/.exec(fgLine ?? '');
+  return m ? m[1] : '';
+}
+
+/** 当前前台包名（缓存 key 用；dumpsys window 查询，比 dumpUi 便宜得多） */
+async function currentFgPackage(): Promise<string> {
+  try {
+    const r = await labForegroundApp();
+    if (r?.ok) return fgPackageOf((r.text.split('\n')[0] ?? '').trim());
+  } catch {
+    /* 拿不到前台就跳过缓存 */
+  }
+  return '';
+}
+
+function loadCoordCache(): CoordCacheEntry[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = window.localStorage.getItem(COORD_CACHE_KEY);
+    if (!raw) return [];
+    const arr = JSON.parse(raw) as unknown;
+    if (!Array.isArray(arr)) return [];
+    return arr.filter((e): e is CoordCacheEntry => {
+      const it = e as Partial<CoordCacheEntry> | null;
+      return (
+        !!it &&
+        typeof it.app === 'string' &&
+        typeof it.target === 'string' &&
+        Number.isFinite(it.nx) &&
+        Number.isFinite(it.ny)
+      );
+    });
+  } catch {
+    return [];
+  }
+}
+
+function saveCoordCache(list: CoordCacheEntry[]): void {
+  if (typeof window === 'undefined') return;
+  try {
+    // LRU：按 lastUsed 新→旧排序，超上限驱逐最旧
+    const sorted = [...list].sort((a, b) => b.lastUsed - a.lastUsed).slice(0, COORD_CACHE_MAX);
+    window.localStorage.setItem(COORD_CACHE_KEY, JSON.stringify(sorted));
+  } catch {
+    /* 写失败静默（隐私模式等） */
+  }
+}
+
+/** 查缓存（不改动条目；hits/lastUsed 在验证通过后由 bumpCoordCacheHit 刷新） */
+function lookupCoordCache(app: string, target: string): CoordCacheEntry | null {
+  if (!app) return null;
+  const t = normalizeTargetText(target);
+  if (!t) return null;
+  try {
+    const hit = loadCoordCache().find((e) => e.app === app && e.target === t);
+    return hit ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** 命中验证通过：hits+1 + 刷新 lastUsed（LRU 保活） */
+function bumpCoordCacheHit(app: string, target: string): void {
+  try {
+    const t = normalizeTargetText(target);
+    const list = loadCoordCache();
+    const e = list.find((x) => x.app === app && x.target === t);
+    if (!e) return;
+    e.hits += 1;
+    e.lastUsed = Date.now();
+    saveCoordCache(list);
+  } catch {
+    /* 缓存维护失败不影响主流程 */
+  }
+}
+
+/** 丢弃过期条目（复核失败 = 布局已变，旧坐标不可信；回落前先清掉防反复踩坑） */
+function dropCoordCache(app: string, target: string): void {
+  try {
+    const t = normalizeTargetText(target);
+    const list = loadCoordCache();
+    const next = list.filter((x) => !(x.app === app && x.target === t));
+    if (next.length !== list.length) saveCoordCache(next);
+  } catch {
+    /* 忽略 */
+  }
+}
+
+/** 写入/更新条目（dumpUI 路径成功点击后调用；坐标按当前屏幕尺寸归一化，换机/旋转不失效） */
+function recordCoordCache(app: string, target: string, cx: number, cy: number, sw: number, sh: number): void {
+  try {
+    const t = normalizeTargetText(target);
+    if (!app || !t || sw <= 0 || sh <= 0) return;
+    const list = loadCoordCache();
+    const e = list.find((x) => x.app === app && x.target === t);
+    if (e) {
+      e.nx = cx / sw;
+      e.ny = cy / sh;
+      e.lastUsed = Date.now();
+    } else {
+      list.push({ app, target: t, nx: cx / sw, ny: cy / sh, hits: 0, lastUsed: Date.now() });
+    }
+    saveCoordCache(list);
+  } catch {
+    /* 忽略 */
+  }
+}
+
+/**
+ * A6 缓存命中快速路径（clickElement / longPress 文本定位版共用）：
+ * 查缓存 → 命中则换算真实坐标直接执行点击（longPressMode 时为原地 swipe 800ms）
+ * → UI 树轻量复核：
+ *   - 点击命令失败 / 目标元素仍在但位置远离点击点（布局已变=缓存过期）→ 弃缓存条目，
+ *     返回 null 由调用方在同一调用内回落正常 dumpUI 路径（绝不返回失败）；
+ *   - 目标元素已消失（点击已导航走）/ 仍原地（驻留类按钮，点击大概率生效）/ UI 树读不了
+ *     （游戏/视频全屏）→ 信任点击：hits+1 快速返回，text 注明「坐标缓存命中」。
+ * 返回 null = 未命中或已弃缓存（走正常路径）；否则为 ok:true 的 StepResult。
+ */
+async function tryClickViaCoordCache(target: string, longPressMode: boolean): Promise<StepResult | null> {
+  const t = target.trim();
+  if (!t) return null;
+  let app = '';
+  let entry: CoordCacheEntry | null = null;
+  try {
+    app = await currentFgPackage();
+    entry = app ? lookupCoordCache(app, t) : null;
+  } catch {
+    return null;
+  }
+  if (!entry) return null;
+  const size = await agentScreenSizeMemo();
+  const x = Math.round(entry.nx * size.w);
+  const y = Math.round(entry.ny * size.h);
+  const r = longPressMode ? await labSwipe(x, y, x, y, 800) : await labTap(x, y);
+  if (!r.ok) {
+    dropCoordCache(app, t);
+    return null; // 点击命令失败：弃缓存回落正常路径
+  }
+  // 轻量 UI 树复核（尽力而为：读不了树就信任点击，主循环的 A2 视觉层兜底）
+  let stale = false;
+  try {
+    const obs = await agentObserve();
+    if (obs.ok) {
+      const hit = findClickableByText(obs.nodes, t);
+      if (hit) {
+        // 元素还在：离点击点太远 = 布局已变（缓存过期）；原地 = 驻留按钮（信任）
+        const dx = (hit.cx - x) / size.w;
+        const dy = (hit.cy - y) / size.h;
+        if (Math.hypot(dx, dy) > COORD_CACHE_STALE_RATIO) stale = true;
+      }
+      // 没找到 = 已导航离开 = 成功
+    }
+  } catch {
+    /* 复核失败不否决点击 */
+  }
+  if (stale) {
+    dropCoordCache(app, t);
+    return null; // 缓存过期：弃条目回落正常 dumpUI 路径
+  }
+  bumpCoordCacheHit(app, t);
+  const label = longPressMode ? '长按' : '点击';
+  return { ok: true, text: `已${label}「${t}」（坐标缓存命中 ${x},${y}）` };
+}
+
+/** clickElement：坐标缓存快路径（A6）→ 看屏幕（UI 树）→ 文字匹配 → 点中心坐标；失败带观察现场给 replan */
 async function stepClickElement(target: string): Promise<StepResult> {
   const t = target.trim();
   if (!t) return { ok: false, text: 'clickElement 缺目标文字' };
+  // A6 缓存命中：直接点（null = 未命中/已弃缓存，回落下方正常路径）
+  const fast = await tryClickViaCoordCache(t, false);
+  if (fast) return fast;
   const obs = await agentObserve();
   const hit = obs.ok ? findClickableByText(obs.nodes, t) : null;
   if (!hit) {
@@ -515,7 +740,18 @@ async function stepClickElement(target: string): Promise<StepResult> {
     };
   }
   const tap = await labTap(hit.cx, hit.cy);
-  return tap.ok ? { ok: true, text: `已点击「${t}」(${hit.cx},${hit.cy})` } : { ok: false, text: `点击「${t}」失败：${tap.text}` };
+  if (!tap.ok) return { ok: false, text: `点击「${t}」失败：${tap.text}` };
+  // A6 写缓存：app 取自本次观察的前台行（不多一次 dump）；分辨率走任务级 memo
+  try {
+    const app = fgPackageOf(obs.fg);
+    if (app) {
+      const s = await agentScreenSizeMemo();
+      recordCoordCache(app, t, hit.cx, hit.cy, s.w, s.h);
+    }
+  } catch {
+    /* 缓存写入失败不影响主流程 */
+  }
+  return { ok: true, text: `已点击「${t}」(${hit.cx},${hit.cy})` };
 }
 
 /** inputTextToFocus：纯 ASCII 直输；含中文走原生 inputChinese（必要时临时切 IME） */
@@ -570,6 +806,102 @@ async function stepScroll(dir: string): Promise<StepResult> {
   const c = dirMap[a];
   const r = await labSwipe(c[0], c[1], c[2], c[3], 450);
   return r.ok ? { ok: true, text: `已向${a}滑动` } : { ok: false, text: `滑动失败：${r.text}` };
+}
+
+/**
+ * longPress（v1.6）：长按 = input swipe 同坐标原地滑动 800ms（ADB 标准长按技巧，
+ * 不需要新二进制/新桥）。args 支持文字目标（走 UI 树 findClickableByText，与 clickElement
+ * 同路径，含坐标缓存）或 "x,y" 坐标。用于长按消息弹菜单、长按图标呼出副选项等。
+ */
+async function stepLongPress(args: string): Promise<StepResult> {
+  const a = args.trim();
+  if (!a) return { ok: false, text: 'longPress 缺参数（文字目标或 "x,y"）' };
+  const m = /^\s*(\d{1,5})\s*[,，]\s*(\d{1,5})\s*$/.exec(a);
+  if (m) {
+    const x = Number(m[1]);
+    const y = Number(m[2]);
+    const r = await labSwipe(x, y, x, y, 800);
+    return r.ok ? { ok: true, text: `已长按 (${x},${y}) 800ms` } : { ok: false, text: `长按失败：${r.text}` };
+  }
+  // 文字目标：先查坐标缓存（A6），未命中走 UI 树定位（与 clickElement 同路径）
+  const fast = await tryClickViaCoordCache(a, true);
+  if (fast) return fast;
+  const obs = await agentObserve();
+  const hit = obs.ok ? findClickableByText(obs.nodes, a) : null;
+  if (!hit) {
+    return {
+      ok: false,
+      text: `屏幕上没有找到含「${a}」的可长按元素（当前在 ${obs.fg}，可见元素：${obs.summary.slice(0, 300)}）`,
+    };
+  }
+  const r = await labSwipe(hit.cx, hit.cy, hit.cx, hit.cy, 800);
+  if (!r.ok) return { ok: false, text: `长按「${a}」失败：${r.text}` };
+  // A6 写缓存（与 clickElement 同款：app 取自本次观察的前台行）
+  try {
+    const app = fgPackageOf(obs.fg);
+    if (app) {
+      const s = await agentScreenSizeMemo();
+      recordCoordCache(app, a, hit.cx, hit.cy, s.w, s.h);
+    }
+  } catch {
+    /* 缓存写入失败不影响主流程 */
+  }
+  return { ok: true, text: `已长按「${a}」(${hit.cx},${hit.cy}) 800ms` };
+}
+
+/**
+ * doubleClick（v1.6）：两次快速 input tap（间隔约 100ms；Shizuku 两次调用开销可接受）。
+ * args 同 clickElement（文字目标走 UI 树定位，或 "x,y" 坐标）。用于双击点赞、双击快进等。
+ */
+async function stepDoubleClick(args: string): Promise<StepResult> {
+  const a = args.trim();
+  if (!a) return { ok: false, text: 'doubleClick 缺参数（文字目标或 "x,y"）' };
+  let x: number;
+  let y: number;
+  let fromText = false;
+  const m = /^\s*(\d{1,5})\s*[,，]\s*(\d{1,5})\s*$/.exec(a);
+  if (m) {
+    x = Number(m[1]);
+    y = Number(m[2]);
+  } else {
+    const obs = await agentObserve();
+    const hit = obs.ok ? findClickableByText(obs.nodes, a) : null;
+    if (!hit) {
+      return {
+        ok: false,
+        text: `屏幕上没有找到含「${a}」的可点元素（当前在 ${obs.fg}，可见元素：${obs.summary.slice(0, 300)}）`,
+      };
+    }
+    x = hit.cx;
+    y = hit.cy;
+    fromText = true;
+  }
+  const first = await labTap(x, y);
+  if (!first.ok) return { ok: false, text: `双击第一击失败：${first.text}` };
+  await new Promise((res) => window.setTimeout(res, 100)); // 两击间隔（系统双击窗口内）
+  const second = await labTap(x, y);
+  if (!second.ok) return { ok: false, text: `双击第二击失败：${second.text}` };
+  return { ok: true, text: `已双击${fromText ? `「${a}」` : ''} (${x},${y})` };
+}
+
+/**
+ * drag（v1.6）：拖拽 = input swipe x1 y1 x2 y2 duration（默认 700ms，拖拽要比滑动慢才跟手）。
+ * args 格式 "x1,y1,x2,y2[,durationMs]"。用于拖进度条/音量滑块/侧边栏/卡片排序等。
+ */
+async function stepDrag(args: string): Promise<StepResult> {
+  const m = /^\s*(\d{1,5})\s*[,，]\s*(\d{1,5})\s*[,，]\s*(\d{1,5})\s*[,，]\s*(\d{1,5})(?:\s*[,，]\s*(\d{2,5})\s*)?$/.exec(args);
+  if (!m) {
+    return { ok: false, text: `drag 参数不合法（需要 "x1,y1,x2,y2[,durationMs]"，收到「${args}」）` };
+  }
+  const x1 = Number(m[1]);
+  const y1 = Number(m[2]);
+  const x2 = Number(m[3]);
+  const y2 = Number(m[4]);
+  const dur = m[5] ? Math.max(100, Math.min(10000, Number(m[5]))) : 700;
+  const r = await labSwipe(x1, y1, x2, y2, dur);
+  return r.ok
+    ? { ok: true, text: `已拖拽 (${x1},${y1})→(${x2},${y2})，${dur}ms` }
+    : { ok: false, text: `拖拽失败：${r.text}` };
 }
 
 /** 可打断睡眠：每 300ms 查一次本地旗标；被打断返回 false */
@@ -644,6 +976,18 @@ export async function execAgentStep(step: AgentStep): Promise<StepResult> {
         if (!isCapEnabled('swipe')) return capDenied('swipe');
         return await stepScroll(args);
       }
+      case 'longPress': {
+        if (!isCapEnabled('tap')) return capDenied('tap');
+        return await stepLongPress(args);
+      }
+      case 'doubleClick': {
+        if (!isCapEnabled('tap')) return capDenied('tap');
+        return await stepDoubleClick(args);
+      }
+      case 'drag': {
+        if (!isCapEnabled('swipe')) return capDenied('swipe');
+        return await stepDrag(args);
+      }
       case 'wait':
         return await stepWait(args);
       case 'lookScreen': {
@@ -654,7 +998,7 @@ export async function execAgentStep(step: AgentStep): Promise<StepResult> {
       default:
         return {
           ok: false,
-          text: `未知动作「${action}」（可用：openApp/clickElement/tapPoint/inputTextToFocus/pressEnter/pressDelete/back/scroll/wait/lookScreen）`,
+          text: `未知动作「${action}」（可用：openApp/clickElement/tapPoint/inputTextToFocus/pressEnter/pressDelete/back/scroll/wait/lookScreen/longPress/doubleClick/drag）`,
         };
     }
   } catch (e) {
@@ -739,7 +1083,10 @@ const AGENT_ACTIONS_DOC = `可用动作（plan 数组元素，args 一律 string
 7. {"action":"scroll","args":"下"} —— 语义滑动翻页（上/下/左/右）
 8. {"action":"back","args":""} —— 按返回键
 9. {"action":"wait","args":"3000"} —— 等待毫秒数（等页面加载/动画落定，200~10000）
-10. {"action":"lookScreen","args":""} —— 观察当前屏幕（结果在下一轮反馈里给你，不确定界面就先用它）`;
+10. {"action":"lookScreen","args":""} —— 观察当前屏幕（结果在下一轮反馈里给你，不确定界面就先用它）
+11. {"action":"longPress","args":"消息"} —— 长按（原地按住 800ms）：长按聊天消息弹菜单、长按图标呼出副选项；args 同 clickElement（文字目标或 "x,y"）
+12. {"action":"doubleClick","args":"540,1200"} —— 双击（两次快速点击）：双击点赞、双击快进；args 同 clickElement（文字目标或 "x,y"）
+13. {"action":"drag","args":"200,1800,880,1800,700"} —— 拖拽：拖进度条/音量滑块/侧边栏/卡片排序；args "x1,y1,x2,y2[,毫秒]"（默认 700ms，坐标只来自观察反馈里的元素信息）`;
 
 /** 组装 Agent 规划的 system prompt（人设/记忆注入 + 行为准则 + 语法表 + 输出格式） */
 function buildAgentSystemPrompt(ctx: AgentCtx | undefined): string {
@@ -802,6 +1149,13 @@ const ACTION_ALIASES: Record<string, string> = {
   observe: 'lookScreen',
   screenshot: 'lookScreen',
   看屏幕: 'lookScreen',
+  long_press: 'longPress',
+  长按: 'longPress',
+  doubleclick: 'doubleClick',
+  double_click: 'doubleClick',
+  双击: 'doubleClick',
+  拖拽: 'drag',
+  拖动: 'drag',
 };
 
 function normalizePlan(obj: Record<string, unknown>): AgentPlan | null {
@@ -901,6 +1255,95 @@ async function planWithLLM(task: string, history: AgentHistoryEntry[], ctx: Agen
 }
 
 // ============================================================
+// B6b. 截屏视觉自动验证（A2）：UI 树读不到的图片/验证码/地图类结果靠 VLM 复核
+// ============================================================
+
+/** 总开关常量：一键关闭视觉验证层（改 false 即全跳过，UI 树验证照旧） */
+const AGENT_VISUAL_VERIFY = true;
+
+/** 值得视觉复核的「改变屏幕状态」动作（wait/lookScreen 是等待/只读、pressDelete 是输入辅助——不复核） */
+const VISUAL_VERIFY_ACTIONS = new Set([
+  'openApp',
+  'clickElement',
+  'tapPoint',
+  'inputTextToFocus',
+  'pressEnter',
+  'back',
+  'longPress',
+  'doubleClick',
+  'drag',
+]);
+
+const VISION_VERIFY_TIMEOUT_MS = 15_000; // 看门狗：验证超时不拖任务
+/** 连续 N 次视觉验证「调用失败」→ 本任务自动停用视觉层（护栏：接口挂了别拖垮任务） */
+const VISION_FAIL_STREAK_LIMIT = 3;
+
+/** 视觉层任务级状态（每次 runAgentTask 新建：failStreak 连败计数 / disabled 本任务停用） */
+interface VisionVerifyState {
+  failStreak: number;
+  disabled: boolean;
+}
+
+/** 验证提示词：任务全文 + 本步意图 → 严格 JSON {"ok":boolean,"note":"≤30字"} */
+function visionVerifyAsk(task: string, step: AgentStep): string {
+  const desc = `${step.action}${step.args ? ` ${step.args}` : ''}`;
+  return [
+    '这是安卓手机刚执行完一个操作步骤后的屏幕截图，请判断该步骤是否达到预期效果。',
+    `总任务：「${task.slice(0, 80)}」`,
+    `刚执行的步骤：${desc}${step.why?.trim() ? `（目的：${step.why.trim()}）` : ''}`,
+    '判断标准：当前画面是否已体现该步骤的预期结果（页面切换/目标元素出现/状态更新等，凭画面证据判断，不要凭空猜测）。',
+    '只输出严格 JSON，不要 markdown 包裹、不要任何多余文字：{"ok":true或false,"note":"≤30字依据"}',
+    '拿不准/画面看不清/无法确定时 ok 判 true（宁可宽松，避免误杀正常步骤）。',
+  ].join('\n');
+}
+
+/**
+ * 视觉验证一个刚执行成功的步骤（在步间落定等待之后调用，避免截到转场动画中间态）。
+ * 返回 null = 未执行验证（总开关关/能力关/本任务停用/非状态变更动作）或「验证不可用」
+ *（截屏失败/接口失败/超时/输出不可解析——护栏：信任 UI 树结果继续，绝不中断任务）；
+ * 返回 StepResult（ok:false）= VLM 明确判定画面未体现预期 → 该步按失败处理走重规划，
+ * text 写「视觉验证未通过：…」（自然进 history，重规划的 LLM 能看到失败原因）。
+ */
+async function visualVerifyStep(task: string, step: AgentStep, vst: VisionVerifyState): Promise<StepResult | null> {
+  if (!AGENT_VISUAL_VERIFY || vst.disabled) return null;
+  if (!VISUAL_VERIFY_ACTIONS.has(step.action)) return null;
+  // 能力 gate：复用「看见·看屏幕（screencap）」开关——机主关掉看屏幕 = 不允许 Agent 截屏
+  if (!isCapEnabled('screencap')) return null;
+  // UI 条步骤文案标注复核中（纯展示；下一步会覆盖）
+  const desc = `${step.action}${step.args ? ` ${step.args}` : ''}`.slice(0, 40);
+  patchAgentState({ stepDesc: `${desc}（视觉复核…）` });
+  try {
+    const shot = await labScreencap();
+    if (!shot.ok || !shot.image) {
+      vst.failStreak += 1;
+    } else {
+      try {
+        const out = await visionAsk(shot.image, visionVerifyAsk(task, step), VISION_VERIFY_TIMEOUT_MS);
+        const obj = extractJsonObject(out);
+        const verdict = obj && typeof obj.ok === 'boolean' ? obj.ok : null;
+        if (verdict !== null) {
+          vst.failStreak = 0; // 调用成功（无论判定结果）都清零连败
+          if (verdict) return null; // 画面证实预期 → 静默通过
+          const note = obj && typeof obj.note === 'string' ? obj.note.trim().slice(0, 40) : '';
+          return {
+            ok: false,
+            text: `视觉验证未通过：${note || '画面未见预期效果'}（上一步命令执行成功但截图复核存疑——换策略/换定位方式重试）`,
+          };
+        }
+        vst.failStreak += 1; // 输出不含合法 JSON = 验证不可用
+      } catch {
+        vst.failStreak += 1; // /api/phone-vision 失败/超时（15s 看门狗 abort）
+      }
+    }
+  } catch {
+    vst.failStreak += 1; // 截屏桥异常
+  }
+  // 护栏：连续失败达上限 → 本任务停用视觉层（后续步骤只信 UI 树，速度回到纯 UI 模式）
+  if (vst.failStreak >= VISION_FAIL_STREAK_LIMIT) vst.disabled = true;
+  return null; // 验证不可用 ≠ 步骤失败：信任 UI 树结果继续
+}
+
+// ============================================================
 // B7. 主循环（观察 → 规划 → 逐步执行 → replan）
 // ============================================================
 
@@ -919,7 +1362,18 @@ const DANGER_PATTERNS =
 const OPEN_SETTLE_MS = 3500;
 const UI_SETTLE_MS = 2000;
 const OP_GAP_MS = 800;
-const UI_TOUCH_ACTIONS = new Set(['clickElement', 'tapPoint', 'inputTextToFocus', 'pressEnter', 'pressDelete', 'scroll', 'back']);
+const UI_TOUCH_ACTIONS = new Set([
+  'clickElement',
+  'tapPoint',
+  'inputTextToFocus',
+  'pressEnter',
+  'pressDelete',
+  'scroll',
+  'back',
+  'longPress',
+  'doubleClick',
+  'drag',
+]);
 
 /** 步间等待（可被急停打断；被打断返回 false） */
 async function settleAfterStep(step: AgentStep): Promise<boolean> {
@@ -983,6 +1437,8 @@ export async function runAgentTask(
   stopFlag = false;
   stopSource = '';
   originalIme = null;
+  screenSizeMemo = null; // 屏幕分辨率任务级 memo 清空（旋转屏/换机场景下一任务自然刷新）
+  const visionCtl: VisionVerifyState = { failStreak: 0, disabled: false }; // A2 视觉层任务级状态
   void nativeAgentResetStop();
   void nativeAgentNotify('AI 智能体运行中', t.slice(0, 50));
   patchAgentState({
@@ -1076,8 +1532,18 @@ export async function runAgentTask(
           emit('stepfail', r.text);
           break;
         }
-        // 步间落定间隔（可被急停打断）
+        // 步间落定间隔（可被急停打断）——先落定再视觉复核，避免截到转场动画中间态
         if (!(await settleAfterStep(step))) return stoppedResult();
+        // A2 视觉验证层：VLM 复核「画面是否体现该步预期」；判定未通过 → 该步按失败处理
+        //（结果文本自然进 history，重规划的 LLM 能看到「视觉验证未通过：…」原因）。
+        // 验证不可用（接口失败/超时/能力关/连败停用）时返回 null，信任 UI 树结果继续。
+        const vr = await visualVerifyStep(t, step, visionCtl);
+        if (vr && !vr.ok) {
+          history.push({ kind: 'step', round, text: vr.text.slice(0, HISTORY_STEP_SLICE), step, ok: false });
+          allOk = false;
+          emit('stepfail', vr.text);
+          break;
+        }
       }
       if (!allOk) continue; // 下一轮重规划
 
@@ -1114,5 +1580,8 @@ export async function runAgentTask(
       stepDesc: '',
       stopRequested: false,
     });
+    // C2 收尾通知：页面在后台（用户已切走）时经本地通知通道告知任务结果（done/fail/stopped
+    // 终态统一走这里）；前台时内部静默跳过（界面内有状态条/弹窗）。失败静默，不影响收尾。
+    void notifyIfHidden('智能体', (result.text || 'Agent 任务已结束').split('\n')[0].slice(0, 120), { tag: 'agent', url: '/' });
   }
 }

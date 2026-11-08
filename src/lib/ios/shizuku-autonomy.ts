@@ -233,7 +233,7 @@ export function buildShizukuAutonomyRules(): string[] {
   // v1.5 智能体教学块：仅当 agent 开关打开时注入（多步真实任务的首选通道）
   if (cfg.caps['agent'] === true) {
     lines.push(
-      '【智能体模式·多步真实任务】机主让你「在真实手机上完成一件需要多个步骤的事」（给某人发微信/QQ消息、去某App搜索某内容、设置里改某个开关等）时，首选输出 [手机操作:agent:任务一句话描述]——系统会进入智能体循环：看屏幕→规划→执行→验证→失败重规划，每步都会以「（内部反馈）」回给你。agent 模式下输入中文、找不在首屏的元素都不用你操心。补充规则：①机主任务里提到的联系人/内容名要原样放进任务描述里（如「给怡怡发微信说我想你了」就写「给微信联系人怡怡发送消息：我想你了」）；②agent 适合 3~10 步的任务，单步操作用单步命令；③不要在同一条回复里既用 agent 又用其他手机操作标记。',
+      '【智能体模式·多步真实任务】机主让你「在真实手机上完成一件需要多个步骤的事」（给某人发微信/QQ消息、去某App搜索某内容、设置里改某个开关等）时，首选输出 [手机操作:agent:任务一句话描述]——系统会进入智能体循环：看屏幕→规划→执行→验证→失败重规划，每步都会以「（内部反馈）」回给你。agent 模式下输入中文、找不在首屏的元素都不用你操心。补充规则：①机主任务里提到的联系人/内容名要原样放进任务描述里（如「给怡怡发微信说我想你了」就写「给微信联系人怡怡发送消息：我想你了」）；②agent 适合 3~10 步的任务，单步操作用单步命令；③不要在同一条回复里既用 agent 又用其他手机操作标记；④智能体掌握进阶手势：长按（长按消息弹菜单/长按图标呼出副选项）、双击（点赞/快进）、拖拽（拖进度条/滑块/排序），任务需要时它会自行规划使用，你无需拆解成基础步骤。',
     );
   }
   lines.push(
@@ -249,18 +249,28 @@ export function buildShizukuAutonomyRules(): string[] {
  * 屏幕视觉分析：截图 → 服务端视觉模型（用户识图模型或内置 glm-4.5v），返回模型输出。
  * 这是 v1.4「UI 级操作」的核心——AI 不再发盲目的媒体按键，而是像人一样
  * 「看屏幕 → 找到写着目标文字的按钮 → 点它」。
+ * v1.6：超时可调（默认 90s 不变；Agent 视觉验证走 15s 看门狗，见 visionAsk）。
  */
-async function phoneVision(image: string, ask: string): Promise<string> {
+async function phoneVision(image: string, ask: string, timeoutMs = 90_000): Promise<string> {
   const res = await fetch('/api/phone-vision', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ image, ask, config: useSettings.getState().visionConfig }),
-    signal: AbortSignal.timeout(90_000),
+    signal: AbortSignal.timeout(timeoutMs),
   });
   const data = (await res.json().catch(() => null)) as { desc?: unknown; error?: unknown } | null;
   if (res.ok && data && typeof data.desc === 'string' && data.desc.trim()) return data.desc.trim();
   const msg = typeof data?.error === 'string' && data.error ? data.error : `屏幕分析请求失败（HTTP ${res.status}）`;
   throw new Error(msg);
+}
+
+/**
+ * Agent 视觉验证出口（v1.6 A2，shizuku-agent 调用）：与 phoneVision 同链路
+ * （截屏 dataURL → /api/phone-vision → { desc }），差异仅在超时可调——Agent 逐步验证
+ * 用短超时（15s 看门狗），超时/失败由调用方按「验证不可用」降级，不中断任务。
+ */
+export async function visionAsk(image: string, ask: string, timeoutMs = 90_000): Promise<string> {
+  return phoneVision(image, ask, timeoutMs);
 }
 
 /** dataURL 图的实际像素尺寸（归一化坐标换算用；失败回退 wm size） */

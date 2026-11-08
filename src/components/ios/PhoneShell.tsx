@@ -92,6 +92,10 @@ const AgentGlobalLayers = dynamic(() => import('@/components/apps/agent-ui').the
   ssr: false,
 });
 
+// C1 语音唤起智能体（悬浮球 + 语音面板）：懒加载，仅 APP 原生壳 + 解锁 + 能力开关全满足时显示；
+// 组件内部含门槛 gate，浏览器网页预览恒不渲染
+const AgentVoiceBall = dynamic(() => import('@/components/apps/agent-voice-ball'), { ssr: false });
+
 /** 底部边缘识别带高度：比 28px 可视横杠更高，按下点在屏幕最底部一段内即开始识别（真机好滑起见给了 72px） */
 const EDGE_ZONE = 72;
 /** 上滑超过该距离即打开多任务切换器（真机好滑：短距离即触发） */
@@ -543,6 +547,9 @@ export default function PhoneShell() {
 
         {/* v1.5 Mobile Agent：运行进度条（含紧急停止，z-60）+ 敏感操作确认弹层（z-95，Agent 运行中全局可见） */}
         {layersReady && <AgentGlobalLayers />}
+
+        {/* C1 语音唤起智能体：悬浮球（z-57，右侧可拖动吸边）+ 语音面板，门槛见组件内注释 */}
+        {layersReady && <AgentVoiceBall />}
 
         {/* 全局来电层：AI 来电弹窗（电话横幅/微信大窗 5s→胶囊，z-94，灵动岛原位弹出/收回、弹出期间盖住灵动岛）+
             iOS 全屏来电界面（z-84，仅电话来电自动显示、左上可退出，界面可见时不叠加弹窗；

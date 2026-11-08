@@ -18,6 +18,13 @@ export interface PushEnvelope {
   icon?: string;
   /** 通知点击落地页（缺省 '/'，由 sw.js notificationclick 聚焦/新开窗口） */
   url?: string;
+  /**
+   * 排除发起设备自己的订阅（C2）：按订阅存储里的 tag 字段（/api/push POST 时客户端上报的
+   * 设备标识 deviceTag）过滤 —— 服务端无法区分「是谁的动作」时，由客户端在请求里带上自己的
+   * tag 并在这里回传，广播时排除发起设备、只推对方设备。向后兼容：无 tag 的旧订阅（或
+   * excludeTag 缺省）永不被排除，行为与历史完全一致。
+   */
+  excludeTag?: string;
 }
 
 /** 粗略形状的订阅记录（与 /api/push POST 存入的 PushSubscriptionJSON 同形） */
@@ -60,7 +67,10 @@ export async function pushToAllSubscribers(envelope: PushEnvelope, bodies: strin
       subs.map(async (sub) => {
         try {
           if (typeof sub.endpoint !== 'string') return;
-          alive.push(sub);
+          alive.push(sub); // 只要有合法 endpoint 就保留订阅（下方跳过发送 ≠ 订阅失效）
+          // excludeTag：跳过发起设备自己的订阅（无 tag 的旧订阅永不被排除，向后兼容）
+          const subTag = typeof sub.tag === 'string' ? sub.tag : '';
+          if (envelope.excludeTag && subTag && subTag === envelope.excludeTag) return;
           for (let i = 0; i < bodies.length; i++) {
             const body = previewOf(bodies[i]);
             if (!body) continue;

@@ -836,15 +836,11 @@ export function QqGroupInfoPage({
   const [replyCount, setReplyCount] = useState(() => getReplyCount(sessionKeyOf(group.id)));
   const [sentenceOn, setSentenceOn] = useState(() => getSentenceSend(sessionKeyOf(group.id)));
   const gid = group.id;
-  /** 群号（建群时分配的唯一 9 位数字；旧群缺省时惰性补发并落盘，保证每个群的群号都不一样） */
-  const [groupNo, setGroupNo] = useState<string>(() => group.no ?? '');
-  useEffect(() => {
-    if (group.no) {
-      setGroupNo(group.no);
-      return;
-    }
-    setGroupNo(ensureGroupNo(gid));
-  }, [group.no, gid]);
+  // 群号（建群时分配的唯一 9 位数字；旧群缺省时惰性补发并落盘，保证每个群的群号都不一样）。
+  // react-hooks/set-state-in-effect：原为 effect 内同步 setGroupNo——改为 lazy useState 初始化
+  //（页面按 gid key 重挂载，切群即随 key 重新初始化；ensureGroupNo 幂等：生成后同步落盘，
+  // StrictMode 重复初始化读取到已落盘同号；挂载后宿主刷新带来的 group.no 与初始生成值一致）
+  const [groupNo] = useState<string>(() => group.no ?? ensureGroupNo(gid));
   /** 公告页元信息：发布人（群主显示名）+ 发布时间 */
   const annPublisher = useMemo(() => {
     const o = contacts.find((c) => c.id === group.ownerId);
@@ -2105,7 +2101,10 @@ export function QqGroupChatPage({
   }, [gid]);
   // Task 40：语音气泡播放失败 → toast（voice-player 无 UI，经全局事件解耦；onToast 走 ref 保持监听器稳定）
   const onToastRef = useRef(onToast);
-  onToastRef.current = onToast;
+  // react-hooks/refs：render 期写 ref → 移入 effect（事件回调运行晚于 effect，读到最新值）
+  useEffect(() => {
+    onToastRef.current = onToast;
+  });
   useEffect(() => {
     const fn = (e: Event) => onToastRef.current((e as CustomEvent<string>).detail || '语音播放失败，请稍后重试');
     window.addEventListener(VOICE_PLAY_ERROR_EVENT, fn);
@@ -2162,6 +2161,9 @@ export function QqGroupChatPage({
   const stream = useChatStream(sKey);
   const apiConfig = useSettings((s) => s.apiConfig);
   const runningRef = useRef(false);
+  // react-hooks/refs：render 期需要读「回合进行中」标记（canDispatch/发送按钮态）——ref 不能在 render 读，
+  // 增加 state 镜像：回合开始/收尾与 runningRef 同点置位（同一回调内连续写，批处理后渲染值一致）
+  const [running, setRunning] = useState(false);
   /** 排队回复标记：回合进行中用户又发了消息 → 本回合结束后自动再起一轮 */
   const groupQueuedRef = useRef(false);
   // Task 40「错误提示优化」：失败提示行「隐藏这条提示」的内存态（重挂载/刷新后恢复显示）
@@ -2179,9 +2181,12 @@ export function QqGroupChatPage({
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const photoInputRef = useRef<HTMLInputElement>(null);
   const contactsRef = useRef(contacts);
-  contactsRef.current = contacts;
   const groupRef = useRef(group);
-  groupRef.current = group;
+  // react-hooks/refs：render 期写 ref → 移入 effect（读取方均为事件/异步回调，晚于 effect 执行）
+  useEffect(() => {
+    contactsRef.current = contacts;
+    groupRef.current = group;
+  });
   // 机主全部可识别名字（真名/展示名/昵称/「我」「机主」）：AI 管理标记与转账收款对象的目标解析共用
   const meVariants = useMemo(
     () => [...new Set([me.name, me.realName ?? '', me.nickname ?? '', '我', '机主'].map((v) => v.trim()).filter(Boolean))],
@@ -2221,7 +2226,9 @@ export function QqGroupChatPage({
 
   const members = useMemo(
     () =>
-      groupRef.current.memberIds
+      // react-hooks/refs：原读 groupRef.current（render 期读 ref）——镜像赋值在 render 期与 group 同值，
+      // 直接读 group.memberIds 等价（依赖数组本就含 group.memberIds）
+      group.memberIds
         .map((id) => contacts.find((c) => c.id === id))
         .filter((c): c is ContactRecord => !!c),
     [contacts, group.memberIds]
@@ -2242,12 +2249,15 @@ export function QqGroupChatPage({
     };
   }, [sKey]);
 
-  /** 流结束后同步落盘消息并清流（与私聊同款：页面存活与否都正确） */
+  /** 流结束后同步落盘消息并清流（与私聊同款：页面存活与否都正确）。
+   *  react-hooks/set-state-in-effect：setMsgs 同步调用会级联渲染——并入清流同一个 setTimeout 回调
+   *  （外部系统回写；相对原实现仅延后一个宏任务，落库消息快照更新鲜；清流时机不变、先后顺序不变） */
   useEffect(() => {
     if (stream && stream.status !== 'streaming') {
-      const latest = loadGroupMsgs(gid);
-      setMsgs(latest);
-      const t = setTimeout(() => clearChatStream(sKey), 0);
+      const t = setTimeout(() => {
+        setMsgs(loadGroupMsgs(gid));
+        clearChatStream(sKey);
+      }, 0);
       return () => clearTimeout(t);
     }
   }, [stream, gid, sKey]);
@@ -3332,7 +3342,9 @@ export function QqGroupChatPage({
       // （倒挂随存储持久化）；等尾巴按边界归位（插到用户消息之前）落库完再起本轮，
       // 与单聊「流收尾且投递完毕再补跑」同口径
       if (isAiDelivering(sKey)) {
-        window.setTimeout(() => void runGroupTurn(trigger), 400);
+        // react-hooks/immutability：useCallback 体内不能自引用声明中的 const——
+        // 与全文件既有分发口径一致（事件回调/定时器统一走 runGroupTurnRef 调最新实例）
+        window.setTimeout(() => void runGroupTurnRef.current(trigger), 400);
         return;
       }
       const g = getGroup(gid);
@@ -3353,6 +3365,8 @@ export function QqGroupChatPage({
         return;
       }
       runningRef.current = true;
+      // render 期读 ref 的镜像 state（canDispatch/发送按钮态用）：与 ref 同点置位（同一回调内批处理）
+      if (mountedRef.current) setRunning(true);
       try {
         expireStalePackets(); // 每轮开始前先清算过期红包（终态不可再改）
         // 六.5 禁言执行：被禁言的成员本轮不能发言（被 @ 也不行，物理禁言；禁言过期自动恢复）
@@ -3495,6 +3509,7 @@ export function QqGroupChatPage({
         }
       } finally {
         runningRef.current = false;
+        if (mountedRef.current) setRunning(false);
         groupSpeaker.delete(sKey);
         if (mountedRef.current) setSpeakerId(null);
         // 排队补跑：回合进行中用户又发了消息 → 本回合结束后自动再起一轮（消息已在群消息库，成员都能看到）。
@@ -3508,7 +3523,10 @@ export function QqGroupChatPage({
     },
     [appendMsg, expireStalePackets, gid, runCharTurn, sKey, patchGroupMsg]
   );
-  runGroupTurnRef.current = runGroupTurn;
+  // react-hooks/refs：render 期写 ref → 移入 effect（调用方均为事件回调/定时器，晚于 effect 执行）
+  useEffect(() => {
+    runGroupTurnRef.current = runGroupTurn;
+  });
 
   /** 红色 ! 徽标/失败灰字行重试：整轮群回复失败的消息点击后重跑群回合（占用时静默，徽标保留可再点；
    *  任一成员产出后由 runGroupTurn 收口清除标记）。Task 40 冷却拦截：连续失败进入冷却后不再立刻
@@ -3831,7 +3849,10 @@ export function QqGroupChatPage({
     },
     [commitVoiceMsg, gid, onToast],
   );
-  sendTextAsVoiceRef.current = sendTextAsVoice;
+  // react-hooks/refs：render 期写 ref → 移入 effect（同 runGroupTurnRef 口径）
+  useEffect(() => {
+    sendTextAsVoiceRef.current = sendTextAsVoice;
+  });
 
   /** 表情面板点选发送（表情包消息按群聊会话独立保存；成员结合表情含义按人设回应）。
    *  B-7：回合进行中与文字消息同口径——表情照常上屏并入队，本回合结束后自动补跑（不再硬挡丢弃）。 */
@@ -4146,6 +4167,8 @@ export function QqGroupChatPage({
 
   /** 气泡长按手势（fire 里用 data-mid 反查消息并现场组装菜单项；多选模式下不弹菜单改为点选勾选）。
    *  onClickCapture 单独解出：多选模式下行级勾选拦截优先，普通模式沿用长按的点击拦截 */
+  // react-hooks/immutability：setMenuRect 在声明前被闭包引用——useState 声明上移（hook 顺序稳定，无行为影响）
+  const [menuRect, setMenuRect] = useState<ReturnType<typeof computeBubbleMenuPos> | null>(null);
   const { onClickCapture: pressClickCapture, ...pressHandlers } = useBubbleLongPress((el) => {
     const mid = el.closest('[data-mid]')?.getAttribute('data-mid') ?? null;
     const msg = mid ? msgs.find((x) => x.id === mid) ?? null : null;
@@ -4156,7 +4179,6 @@ export function QqGroupChatPage({
     setMenu({ mid: msg.id });
   }, !selectMode);
   const bubblePress = pressHandlers;
-  const [menuRect, setMenuRect] = useState<ReturnType<typeof computeBubbleMenuPos> | null>(null);
 
   /** 退出多选模式（同时退出转发流程） */
   const exitSelect = useCallback(() => {
@@ -4597,8 +4619,9 @@ export function QqGroupChatPage({
   const speaker = speakerId ? memberById.get(speakerId) ?? null : null;
   const streaming = stream?.status === 'streaming';
 
-  /** 空输入时可点「发送」触发批次回复（分句发送开启且有未回复的批次） */
-  const canDispatch = sentenceSend && pendingDispatch && !streaming && !runningRef.current;
+  /** 空输入时可点「发送」触发批次回复（分句发送开启且有未回复的批次）。
+   *  react-hooks/refs：原读 runningRef.current（render 期读 ref）——改读同步置位的 running state（值一致） */
+  const canDispatch = sentenceSend && pendingDispatch && !streaming && !running;
   const layerMsg = layer && 'msgId' in layer ? msgs.find((m) => m.id === layer.msgId) ?? null : null;
 
   /** 富媒体消息行（图片/位置/表情包）：与文字行同一套头像/名字/宽度几何；多选模式下行首插入勾选圈 */
@@ -5194,13 +5217,13 @@ export function QqGroupChatPage({
               <button
                 type="button"
                 onClick={send}
-                disabled={streaming || runningRef.current || (!draft.trim() && !canDispatch && pendingImgs.length === 0)}
+                disabled={streaming || running || (!draft.trim() && !canDispatch && pendingImgs.length === 0)}
                 data-testid="qq-groupchat-send"
                 aria-label={ttsSend ? '发送（转语音）' : '发送'}
                 className={`h-[40px] shrink-0 rounded-[12px] px-5 text-[16px] font-medium text-white transition-all duration-150 ${
-                  (draft.trim() || canDispatch || pendingImgs.length > 0) && !streaming && !runningRef.current ? 'shadow-[0_2px_10px_rgba(0,153,255,0.30)] active:scale-[0.97] active:brightness-95' : 'opacity-90'
+                  (draft.trim() || canDispatch || pendingImgs.length > 0) && !streaming && !running ? 'shadow-[0_2px_10px_rgba(0,153,255,0.30)] active:scale-[0.97] active:brightness-95' : 'opacity-90'
                 }`}
-                style={{ backgroundColor: (draft.trim() || canDispatch || pendingImgs.length > 0) && !streaming && !runningRef.current ? '#0099FF' : '#8AD4F7' }}
+                style={{ backgroundColor: (draft.trim() || canDispatch || pendingImgs.length > 0) && !streaming && !running ? '#0099FF' : '#8AD4F7' }}
               >
                 发送
               </button>

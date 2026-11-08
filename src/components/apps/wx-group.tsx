@@ -2526,6 +2526,11 @@ export function WxGroupChatPage({
   // 聊天输入框自定义（本轮新增）：输入框占位文字 + 加号面板功能（与单聊共用；两种界面主题都生效）
   const chatDecorWx = useSettings((s) => s.chatDecor.wx);
   const runningRef = useRef(false);
+  // react-hooks/refs：render 期需要读「回合进行中」标记（canDispatch/发送按钮态）——ref 不能在 render 读，
+  // 增加 state 镜像：回合开始/收尾与 runningRef 同点置位（同一回调内连续写，批处理后渲染值一致）
+  const [running, setRunning] = useState(false);
+  // 分发最新 runGroupTurn 实例（#7 延迟重试自引用声明中的 const，改走 ref；与 QQ 群同口径）
+  const runGroupTurnRef = useRef<(trigger?: WxGroupMsg) => void>(() => undefined);
   /** 排队回复标记：回合进行中用户又发了消息 → 本回合结束后自动再起一轮 */
   const groupQueuedRef = useRef(false);
   // Task 40「错误提示优化」：失败提示行「隐藏这条提示」的内存态（重挂载/刷新后恢复显示）
@@ -2539,9 +2544,12 @@ export function WxGroupChatPage({
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const photoInputRef = useRef<HTMLInputElement>(null);
   const contactsRef = useRef(contacts);
-  contactsRef.current = contacts;
   const groupRef = useRef(group);
-  groupRef.current = group;
+  // react-hooks/refs：render 期写 ref → 移入 effect（读取方均为事件/异步回调，晚于 effect 执行）
+  useEffect(() => {
+    contactsRef.current = contacts;
+    groupRef.current = group;
+  });
   // 机主全部可识别名字（真名/展示名/昵称/「我」「机主」）：AI 管理标记与转账收款对象的目标解析共用
   const meVariants = useMemo(
     () => [...new Set([me.name, me.realName ?? '', me.nickname ?? '', '我', '机主'].map((v) => v.trim()).filter(Boolean))],
@@ -2582,7 +2590,9 @@ export function WxGroupChatPage({
 
   const members = useMemo(
     () =>
-      groupRef.current.memberIds
+      // react-hooks/refs：原读 groupRef.current（render 期读 ref）——镜像赋值在 render 期与 group 同值，
+      // 直接读 group.memberIds 等价（依赖数组本就含 group.memberIds）
+      group.memberIds
         .map((id) => contacts.find((c) => c.id === id))
         .filter((c): c is ContactRecord => !!c),
     [contacts, group.memberIds]
@@ -2684,12 +2694,15 @@ export function WxGroupChatPage({
     };
   }, [sKey]);
 
-  /** 流结束后同步落盘消息并清流（与私聊同款：页面存活与否都正确） */
+  /** 流结束后同步落盘消息并清流（与私聊同款：页面存活与否都正确）。
+   *  react-hooks/set-state-in-effect：setMsgs 同步调用会级联渲染——并入清流同一个 setTimeout 回调
+   *  （外部系统回写；相对原实现仅延后一个宏任务，落库消息快照更新鲜；清流时机不变、先后顺序不变） */
   useEffect(() => {
     if (stream && stream.status !== 'streaming') {
-      const latest = loadGroupMsgs(gid);
-      setMsgs(latest);
-      const t = setTimeout(() => clearChatStream(sKey), 0);
+      const t = setTimeout(() => {
+        setMsgs(loadGroupMsgs(gid));
+        clearChatStream(sKey);
+      }, 0);
       return () => clearTimeout(t);
     }
   }, [stream, gid, sKey]);
@@ -3745,7 +3758,8 @@ export function WxGroupChatPage({
       // （倒挂随存储持久化）；等尾巴按边界归位（插到用户消息之前）落库完再起本轮，
       // 与单聊「流收尾且投递完毕再补跑」同口径
       if (isAiDelivering(sKey)) {
-        window.setTimeout(() => void runGroupTurn(trigger), 400);
+        // react-hooks/immutability：useCallback 体内不能自引用声明中的 const——改走 ref 分发最新实例
+        window.setTimeout(() => void runGroupTurnRef.current(trigger), 400);
         return;
       }
       const g = getGroup(gid);
@@ -3766,6 +3780,8 @@ export function WxGroupChatPage({
         return;
       }
       runningRef.current = true;
+      // render 期读 ref 的镜像 state（canDispatch/发送按钮态用）：与 ref 同点置位（同一回调内批处理）
+      if (mountedRef.current) setRunning(true);
       try {
         expireStalePackets(); // 每轮开始前先清算过期红包（终态不可再改）
         // 六.5 禁言执行：被禁言的成员本轮不能发言（被 @ 也不行，物理禁言；禁言过期自动恢复）
@@ -3908,6 +3924,7 @@ export function WxGroupChatPage({
         }
       } finally {
         runningRef.current = false;
+        if (mountedRef.current) setRunning(false);
         groupSpeaker.delete(sKey);
         if (mountedRef.current) setSpeakerId(null);
         // 排队补跑：回合进行中用户又发了消息 → 本回合结束后自动再起一轮（消息已在群消息库，成员都能看到）。
@@ -3922,6 +3939,10 @@ export function WxGroupChatPage({
      
     [appendMsg, expireStalePackets, gid, runCharTurn, sKey, patchGroupMsg]
   );
+  // react-hooks/refs：render 期写 ref → 移入 effect（调用方均为事件回调/定时器，晚于 effect 执行）
+  useEffect(() => {
+    runGroupTurnRef.current = runGroupTurn;
+  });
 
   /** 红色 ! 徽标/失败灰字行重试：整轮群回复失败的消息点击后重跑群回合（占用时静默，徽标保留可再点；
    *  任一成员产出后由 runGroupTurn 收口清除标记）。Task 40 冷却拦截：连续失败进入冷却后不再立刻
@@ -4147,7 +4168,10 @@ export function WxGroupChatPage({
     },
     [commitVoiceMsg, gid, onToast],
   );
-  sendTextAsVoiceRef.current = sendTextAsVoice;
+  // react-hooks/refs：render 期写 ref → 移入 effect（调用方均为事件回调，晚于 effect 执行）
+  useEffect(() => {
+    sendTextAsVoiceRef.current = sendTextAsVoice;
+  });
 
   // ---------------- 发图先预览（需求2）：相机/相册选图 → 待发列表（输入行下缩略图条）→ 主发送按钮才上屏（可与文字组合发送，见 send） ----------------
 
@@ -4510,6 +4534,8 @@ export function WxGroupChatPage({
 
   /** 气泡长按手势（fire 里用 data-mid 反查消息并现场组装菜单项；多选模式下不弹菜单改为点选勾选）。
    *  onClickCapture 单独解出：多选模式下行级勾选拦截优先，普通模式沿用长按的点击拦截 */
+  // react-hooks/immutability：setMenuRect 在声明前被闭包引用——useState 声明上移（hook 顺序稳定，无行为影响）
+  const [menuRect, setMenuRect] = useState<ReturnType<typeof computeBubbleMenuPos> | null>(null);
   const { onClickCapture: pressClickCapture, ...pressHandlers } = useBubbleLongPress((el) => {
     const mid = el.closest('[data-mid]')?.getAttribute('data-mid') ?? null;
     const msg = mid ? msgs.find((x) => x.id === mid) ?? null : null;
@@ -4520,7 +4546,6 @@ export function WxGroupChatPage({
     setMenu({ mid: msg.id });
   }, !selectMode);
   const bubblePress = pressHandlers;
-  const [menuRect, setMenuRect] = useState<ReturnType<typeof computeBubbleMenuPos> | null>(null);
 
   /** 退出多选模式（同时退出转发流程） */
   const exitSelect = useCallback(() => {
@@ -4955,8 +4980,9 @@ export function WxGroupChatPage({
   const speaker = speakerId ? memberById.get(speakerId) ?? null : null;
   const streaming = stream?.status === 'streaming';
 
-  /** 空输入时可点「发送」触发批次回复（分句发送开启且有未回复的批次） */
-  const canDispatch = sentenceSend && pendingDispatch && !streaming && !runningRef.current;
+  /** 空输入时可点「发送」触发批次回复（分句发送开启且有未回复的批次）。
+   *  react-hooks/refs：原读 runningRef.current（render 期读 ref）——改读同步置位的 running state（值一致） */
+  const canDispatch = sentenceSend && pendingDispatch && !streaming && !running;
   const rpComposeLayer = layer?.view === 'rp-compose' ? layer : null;
   const layerMsg = layer && 'msgId' in layer ? msgs.find((m) => m.id === layer.msgId) ?? null : null;
 
@@ -5650,7 +5676,7 @@ export function WxGroupChatPage({
                 type="button"
                 aria-label={ttsSend && draft.trim() ? '发送（转语音）' : pendingImgs.length > 0 ? (draft.trim() ? `发送文字和 ${pendingImgs.length} 张图片` : `发送 ${pendingImgs.length} 张图片`) : draft.trim() ? '发送' : '发送（让成员回复）'}
                 data-testid="wx-groupchat-send"
-                disabled={streaming || runningRef.current}
+                disabled={streaming || running}
                 onClick={() => {
                   // 有文字或待发图 → send()（内部处理组合/纯文字/纯图）；否则分句批次兜底
                   if (draft.trim() || pendingImgs.length) send();

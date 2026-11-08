@@ -1255,6 +1255,113 @@ public class NativePerceptionPlugin extends Plugin {
         call.resolve(ret);
     }
 
+    // ---------------- 本地通知（C2：页面后台提醒统一出口，网页 notifyIfHidden 的原生通道） ----------------
+
+    /** 本地通知渠道 id（与 Agent 常驻通知 agent_runner 分开，用户可在系统设置单独静音/关闭） */
+    private static final String LOCAL_NOTIFY_CHANNEL = "local_notify";
+    /** 无 tag 本地通知的自增 id 起点（避开 Agent 常驻通知 id 7788） */
+    private static final java.util.concurrent.atomic.AtomicInteger LOCAL_NOTIFY_SEQ =
+            new java.util.concurrent.atomic.AtomicInteger(8100);
+
+    /**
+     * 本地通知 localNotify({title, body, tag?})：页面在后台时的即时提醒（Agent 任务完成 /
+     * AI 来电 / 情侣小家动态等事件源调用）。与 agentNotify 的差异：不带「紧急停止」action、
+     * 不常驻（autoCancel + 非 ongoing，可被滑动清除）、tag 用于同 tag 去重（后发替换先发）
+     * 与 localNotifyCancel 定向撤销；点击通知打开应用主 Activity（launchMode=singleTask，
+     * 带回前台不重开实例）。
+     * Android 13+ POST_NOTIFICATIONS 运行时权限（AndroidManifest 已声明）+ 全版本「应用通知
+     * 总开关」双检查：未授予/已关闭时静默返回 {ok:false}（通知是增强能力，不 crash 不打扰）。
+     */
+    @PluginMethod
+    public void localNotify(PluginCall call) {
+        String title = call.getString("title", "");
+        String body = call.getString("body", "");
+        String tag = call.getString("tag", null);
+        JSObject ret = new JSObject();
+        try {
+            Context ctx = getContext();
+            NotificationManager nm =
+                    (NotificationManager) ctx.getSystemService(Context.NOTIFICATION_SERVICE);
+            if (nm == null) {
+                ret.put("ok", false);
+                ret.put("reason", "no-notification-service");
+                call.resolve(ret);
+                return;
+            }
+            // Android 13+（API 33）运行时权限检查：未授予 POST_NOTIFICATIONS → 静默放弃
+            if (Build.VERSION.SDK_INT >= 33
+                    && ContextCompat.checkSelfPermission(ctx, android.Manifest.permission.POST_NOTIFICATIONS)
+                            != PackageManager.PERMISSION_GRANTED) {
+                ret.put("ok", false);
+                ret.put("reason", "no-notification-permission");
+                call.resolve(ret);
+                return;
+            }
+            // 应用级通知总开关（低版本 ROM 也覆盖；13+ 关权限时同样为 false，双保险）
+            if (!nm.areNotificationsEnabled()) {
+                ret.put("ok", false);
+                ret.put("reason", "notifications-disabled");
+                call.resolve(ret);
+                return;
+            }
+            if (Build.VERSION.SDK_INT >= 26) { // NotificationChannel 需 API 26+（minSdk 24 做版本闸）
+                NotificationChannel ch = new NotificationChannel(
+                        LOCAL_NOTIFY_CHANNEL, "应用提醒", NotificationManager.IMPORTANCE_DEFAULT);
+                ch.setDescription("页面在后台时的提醒通知（Agent 完成 / AI 来电 / 情侣小家动态等）");
+                nm.createNotificationChannel(ch); // 仅首次创建生效，重复调用幂等
+            }
+            // 有 tag：id 取 tag.hashCode()，与 tag 组成稳定 (tag,id) 对 → 同 tag 后发替换先发（去重）、
+            // localNotifyCancel 按同对撤销；无 tag：自增 id，多条互不替换
+            int id = (tag == null || tag.isEmpty()) ? LOCAL_NOTIFY_SEQ.getAndIncrement() : tag.hashCode();
+            Intent contentIntent = new Intent(ctx, MainActivity.class);
+            contentIntent.setPackage(ctx.getPackageName());
+            contentIntent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+            PendingIntent contentPi = PendingIntent.getActivity(ctx, id, contentIntent,
+                    PendingIntent.FLAG_IMMUTABLE);
+            NotificationCompat.Builder builder =
+                    new NotificationCompat.Builder(ctx, LOCAL_NOTIFY_CHANNEL)
+                            // 项目无自定义通知图标（res/drawable 仅 splash），用框架信息图标（与 agentNotify 一致）
+                            .setSmallIcon(android.R.drawable.ic_dialog_info)
+                            .setContentTitle(title == null || title.isEmpty() ? "提醒" : title)
+                            .setAutoCancel(true) // 点击后自动消失；非常驻，也可被滑动清除
+                            .setContentIntent(contentPi);
+            if (body != null && !body.isEmpty()) {
+                builder.setContentText(body);
+            }
+            if (tag != null && !tag.isEmpty()) {
+                nm.notify(tag, id, builder.build());
+            } else {
+                nm.notify(id, builder.build());
+            }
+            ret.put("ok", true);
+            call.resolve(ret);
+        } catch (Throwable t) {
+            ret.put("ok", false);
+            ret.put("reason", t.getMessage() == null ? t.getClass().getSimpleName() : t.getMessage());
+            call.resolve(ret);
+        }
+    }
+
+    /** 撤销一条本地通知 localNotifyCancel({tag})：按与 localNotify 相同的 (tag, tag.hashCode()) 配对 cancel */
+    @PluginMethod
+    public void localNotifyCancel(PluginCall call) {
+        String tag = call.getString("tag", null);
+        JSObject ret = new JSObject();
+        try {
+            if (tag != null && !tag.isEmpty()) {
+                NotificationManager nm =
+                        (NotificationManager) getContext().getSystemService(Context.NOTIFICATION_SERVICE);
+                if (nm != null) nm.cancel(tag, tag.hashCode());
+            }
+            ret.put("ok", true);
+            call.resolve(ret);
+        } catch (Throwable t) {
+            ret.put("ok", false);
+            ret.put("reason", t.getMessage() == null ? t.getClass().getSimpleName() : t.getMessage());
+            call.resolve(ret);
+        }
+    }
+
     // ---------------- Shizuku UserService（shell 权限命令执行） ----------------
 
     private Shizuku.UserServiceArgs shellServiceArgs;

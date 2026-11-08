@@ -88,6 +88,7 @@ import Joystick from './Joystick';
 import InstrumentOverlay from './InstrumentOverlay';
 import { SongSheet } from './SongSheet';
 import { useMusic } from '@/lib/ios/music-store';
+import { notifyIfHidden } from '@/lib/ios/local-notify';
 import { useMiniPlayer } from '@/components/ios/MusicGlobalMini';
 import { localDB, genId } from '@/lib/ios/db';
 import { useWeatherSnapshot } from '../weather-core';
@@ -3300,7 +3301,11 @@ export default function CoupleHome({ close }: { close: () => void }) {
     notesRemindRef.current = true;
     const seen = notesSeenRef.current.me ?? 0;
     const unread = notes.filter((n) => n.by === 'partner' && n.ts > seen).length;
-    if (unread > 0) toast(`TA给你留了 ${unread} 条便签，点留言板看看～`);
+    if (unread > 0) {
+      toast(`TA给你留了 ${unread} 条便签，点留言板看看～`);
+      // C2 通知：页面在后台时 toast 看不见 → 经本地通知通道补一条（前台时内部静默跳过）
+      void notifyIfHidden('情侣小家', `TA给你留了 ${unread} 条便签，点留言板看看～`, { tag: 'couple-home-notes', url: '/' });
+    }
   }, [notes, toast]);
 
   // —— G10 咖啡拉花：ok/perfect 才开煮（走既有「端一杯」动作链） ——
