@@ -44,6 +44,8 @@ export interface CallFollowupContact {
   realName?: string | null;
   /** 说话风格（联系人卡的最高优先级口吻字段；回访跟进沿用同人设口径） */
   expressStyle?: string | null;
+  /** 自定义规则（联系人卡自定义规则；与 turn API InlineContact 同形，服务端 followup 注入人设用） */
+  customRules: string | null;
 }
 
 export interface CallFollowupTurn {

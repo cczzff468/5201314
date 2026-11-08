@@ -2187,3 +2187,38 @@ Stage Summary:
 - 运行时代码零 z-ai-web-dev-sdk 引用（rg 验证仅剩注释与开发期脚本）；沙箱与 Railway 行为完全一致：无隐藏 AI，全部功能要么走用户自配 API 要么明确引导
 - 各功能降级路径：聊天/翻译/识图→配置引导；美团/淘宝 feed→种子数据/本地生成器；通话语音→浏览器本地朗读；ASR→离线模型；搜索/AI 生图→下线说明
 - 用户影响：不填 Key 不再有免费内置聊天（原沙箱福利），填 Key 后全链路不变；Railway 部署无需再配 ZAI_* 环境变量
+
+## 2026-11-08 · v83 APK 入库（方案A）：下载链路三端打通
+
+Task ID: 33
+Agent: 主控 Agent（Z.ai Code）
+Task: 用户反馈「设置里下载 APP 没反应，能不能离开沙箱也能下载」——调研后选定方案 A（APK 入库）并实施
+
+Work Log:
+- [诊断] 下载按钮点击后请求 /AI-Phone.apk → 404（public/AI-Phone.apk 被 .gitignore L74 排除，git 历史从未入库；GitHub 实查 public/ 无 APK、Releases 0 个；.railwayignore 也排除 → 沙箱重建与 Railway 部署双双丢包）→ apkReady=false，设置页仍显示下载按钮，点击无反应
+- [调研] 四方案对比（A 入库 / B GitHub Releases / C GitHub Actions / D Railway 卷）：选 A——国内手机直连 GitHub 不稳，而 APK 跟 Railway 自有域名走（能开网页就能下载）；android-shell 61 文件全入库使 C 成为未来升级路径
+- [实施] scripts/build-apk.sh 重打（JDK21+SDK36+gradle 6m39s）→ .gitignore/.railwayignore 各删一行 APK 排除 → commit 5e48a7f push main
+- [验证] apkReady=true（4.0MB 进指纹）；/AI-Phone.apk 直链 200；自动更新弹窗复活（解锁即弹「发现新版本 v1.4.3 · 4.0MB」——此前无包永不弹）；点「立即更新」→「✓ 开始下载 APK」；GitHub API 确认 public/AI-Phone.apk 4.0MB 在库
+
+Stage Summary:
+- APK 入库后下载链路三端打通：沙箱/Railway 镜像/手机浏览器走同一 /AI-Phone.apk 直链，APK 永不再丢；发版流程=改码→跑 build-apk.sh→commit APK 一起 push
+- 关键文件：.gitignore、.railwayignore、public/AI-Phone.apk（4.0MB 入库）
+
+## 2026-11-08 · v84（APK v1.5.0）Mobile Agent 智能体：Shizuku 桥接扩展 + Agentic Loop + 中文输入
+
+Task ID: 34
+Agent: 主控 Agent（Z.ai Code）+ 3 个子代理（3-a Android / 3-b 前端核心 / 3-c 集成）
+Task: 用户要求在 APP 内实现真正的「Mobile Agent」系统：底层 Shizuku 桥接模块（executeShell/getScreenResolution/dumpUI/takeScreenshot/inputText 中文）、前端 Function Calling（openApp/clickElement/inputTextToFocus/pressEnter）、Agentic Workflow（计划 JSON→逐步执行→dumpUI 验证→失败重规划）、人设记忆注入+实时播报、高危确认+紧急停止
+
+Work Log:
+- [调研·摸底] 项目已有 80% 底座：Shizuku 白名单 shell 通道（shizukuExec+UserService v3）、静默截屏（shScreencap）、21 个手机操作命令、VLM 定位点击微循环（runPointAtText）、文本标记协议（[手机操作:xxx] → ACTION_RE → enqueuePhoneOp 串行队列 → 系统行回喂）、记忆/世界书/感知注入。缺口：真 Agent 循环、UI 结构化读取、中文输入、急停、高危确认
+- [3-a·Android 原生] ①白名单 +uiautomator/+ime；②shizukuExec 内核抽 runWhitelistedShell 共用（对外行为不变）；③新增 9 个 @PluginMethod：executeShell/getScreenResolution(wm size 解析)/dumpUi(uiautomator dump --compressed→cat，失败 900ms 重试一次)/inputChinese(纯 ASCII 走 input text，中文自动 ime enable+set→am broadcast→commitText，不自动恢复)/restoreIme/agentShouldStop/agentResetStop/agentNotify(常驻通知+「■ 紧急停止」action→PendingIntent 广播)/agentNotifyEnd；④新建 AdbImeService（无 UI IME，onCreate/onDestroy 挂 receiver 收 AGENT_IME_INPUT 广播 commitText 注入中文/emoji；RECEIVER_EXPORTED 因广播来自 shell uid 2000，NOT_EXPORTED 会拒收——ADBKeyboard 在 Android 14 失灵同款根因）；⑤Manifest 声明 IME + method.xml；⑥versionCode 9/1.5.0；gradle 首编 17s 通过
+- [3-b·前端核心] ①native-perception.ts 追加 9 个桥封装（照 nativeShizukuExec 防御模式）；②新建 shizuku-agent.ts（1078 行）：轻量 pub/sub store（useSyncExternalStore）+ 高危确认 Promise store + uiautomator XML 轻量栈解析器（parseUiXml/summarizeUi/findClickableByText，HTML 实体解码、clickable 优先、截断容错）+ agentObserve（前台App+UI 树摘要）+ 10 动作执行器（openApp=resolve-activity→am start 降级 monkey/clickElement=inputTextToFocus=pressEnter=tapPoint/scroll/back/wait/lookScreen/pressDelete）+ planWithLLM（/api/chat 纯文本流聚合→extractJsonObject→{say,plan[{action,args,dangerous,why}]}）+ runAgentTask 主循环（三道闸→防重入→发急停通知→轮循环{observe→plan→say 播报→逐步执行（双通道停止检查 nativeAgentShouldStop+本地旗标；DANGER_PATTERNS 或 dangerous 步骤弹确认卡拒绝即终止；失败 break 进下一轮带现场重规划）}→finally restoreIme+notifyEnd+复位）；③agent-ui.tsx：AgentRunnerBar（轮次/步骤/播报/急停钮，结束后 4s 淡出）+AgentConfirmHost（壳内 absolute 遮罩确认卡，非 fixed 防穿帮）；④PhoneShell 挂 AgentGlobalLayers
+- [3-c·集成] ①AUTONOMY_CAPS 注册 agent 能力（默认开，敏感步骤自有确认层）；②CAP_SYNTAX.agent 语法教学+【智能体模式·多步真实任务】教学块（任务描述含联系人原文名、3~10 步适用、不与单步标记混用）；③executePhoneOp 新 case 'agent'（能力前置检查 open/tap/type/key）+case '输入' 升级中文（agentInputText 自动路由 ASCII/CJK，IME 用完即还原）+case '点文字' 升级（UI 树精确点击优先→VLM 视觉兜底）；④五端聊天接线 onProgress（wechat L6637/chat L1693/qq L4930/qq-group L3016/wx-group L3427）：逐步播报写纯展示 sys 行（无 op 字段——逐端核查序列化过滤确认不回喂 AI，群端用 notice 形制带「〔智能体〕」前缀防误命中），最终结果仍走原结果行回喂闭环；⑤app-version 1.5.0/9+发版说明 4 条
+- [验证] tsc 改动文件零错（存量基线：couple-space/chat/qq-group/wx-group 原样）；eslint 改动文件零 error（chat 15/qq-group 52/wx-group 18 为 git stash 基线法核实的存量告警）；gradle 重编 BUILD SUCCESSFUL 且 classes7.dex 验证含 AGENT_IME_INPUT（APK 4.18MB 部署 public/）；浏览器 E2E：设置›AI 动手出现「智能体多步任务」开关+「输入文字（中文经 AI 输入引擎）」新文案→开总开关 localStorage 默认值正确（agent:true，kill/freeze/uninstall/net/sms/calls 默认关）→信息 App 发消息链路无回归（未配 API 走 v82 引导文案，发送/错误/重试全正常）；控制台零错误
+- [边界] 网页端/浏览器无法真验 Agent 执行（isNativePerception 三道闸第一道即拒，文案如实引导）；真机链路（Shizuku 激活→dump→点击→IME 中文→急停）需用户在手机 APP 实测；旧 APK 壳无新桥时点文字/输入自动降级 VLM/失败文案，向后兼容
+
+Stage Summary:
+- Mobile Agent 系统全链路完成：聊天框一句话（如「给怡怡发微信说我想你了」）→ AI 输出 [手机操作:agent:任务] → 智能体接管真机：看屏幕（uiautomator 结构树）→ LLM 规划 JSON → 逐步执行（openApp/clickElement/inputTextToFocus 中文/pressEnter）→ 每步验证 → 失败自动重规划（≤3 轮）→ 全程聊天播报
+- 安全：二进制白名单依旧、危险项开关默认关、敏感步骤强制弹窗、急停三通道（界面红钮/通知栏 action/本地+原生双旗标）、运行结束自动还原输入法
+- 关键文件：NativePerceptionPlugin.java（+9 方法）、AdbImeService.java（新）、shizuku-agent.ts（新 1078 行）、agent-ui.tsx（新）、shizuku-autonomy.ts（agent 接入）、五端聊天、native-perception.ts（+9 封装）、PhoneShell.tsx、app-version.ts/build.gradle（1.5.0/9）

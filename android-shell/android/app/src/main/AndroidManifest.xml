@@ -42,6 +42,21 @@
             </intent-filter>
         </service>
 
+        <!-- v1.5 Mobile Agent：中文输入引擎（无 UI 的 IME，shell ime set 切入后经广播 commitText 注入中文/emoji；
+             仅在 Agent 任务执行期间被切换启用，结束后恢复原输入法） -->
+        <service
+            android:name=".AdbImeService"
+            android:label="AI Phone 输入引擎"
+            android:exported="true"
+            android:permission="android.permission.BIND_INPUT_METHOD">
+            <intent-filter>
+                <action android:name="android.view.InputMethod" />
+            </intent-filter>
+            <meta-data
+                android:name="android.view.im"
+                android:resource="@xml/method" />
+        </service>
+
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"

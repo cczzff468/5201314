@@ -86,6 +86,12 @@ const GlobalCallLayer = dynamic(() => import('./GlobalCallLayer'), { ssr: false 
 // 全局来电层（AI 来电弹窗胶囊/微信大窗 + iOS 全屏来电界面）：懒加载，仅在有来电时渲染内容
 const IncomingCallLayer = dynamic(() => import('./IncomingCallLayer'), { ssr: false });
 
+// v1.5 Mobile Agent 全局层（运行进度条含紧急停止 + 敏感操作确认卡）：懒加载，
+// 仅在 Agent 运行中/刚结束/待确认时渲染内容，闲置零开销
+const AgentGlobalLayers = dynamic(() => import('@/components/apps/agent-ui').then((m) => m.AgentGlobalLayers), {
+  ssr: false,
+});
+
 /** 底部边缘识别带高度：比 28px 可视横杠更高，按下点在屏幕最底部一段内即开始识别（真机好滑起见给了 72px） */
 const EDGE_ZONE = 72;
 /** 上滑超过该距离即打开多任务切换器（真机好滑：短距离即触发） */
@@ -534,6 +540,9 @@ export default function PhoneShell() {
             消息与会话状态同全屏实时互通（会话消息共享源）。
             v78：解锁后空闲挂载——小窗仅在用户主动开启后才有内容，延迟挂载无感知 */}
         {layersReady && <ChatFloatWindow />}
+
+        {/* v1.5 Mobile Agent：运行进度条（含紧急停止，z-60）+ 敏感操作确认弹层（z-95，Agent 运行中全局可见） */}
+        {layersReady && <AgentGlobalLayers />}
 
         {/* 全局来电层：AI 来电弹窗（电话横幅/微信大窗 5s→胶囊，z-94，灵动岛原位弹出/收回、弹出期间盖住灵动岛）+
             iOS 全屏来电界面（z-84，仅电话来电自动显示、左上可退出，界面可见时不叠加弹窗；

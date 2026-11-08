@@ -11,9 +11,9 @@
  */
 
 /** 当前最新版本（与 android-shell versionName 保持一致） */
-export const APP_VERSION = '1.4.3';
+export const APP_VERSION = '1.5.0';
 /** 版本号数字（与 android-shell versionCode 保持一致；覆盖安装要求只增不减） */
-export const APP_VERSION_CODE = 8;
+export const APP_VERSION_CODE = 9;
 
 export interface AppReleaseNote {
   version: string;
@@ -24,6 +24,16 @@ export interface AppReleaseNote {
 
 /** 版本历史（新→旧；设置 › APP 更新 页渲染，最新一条即当前版本） */
 export const APP_RELEASE_NOTES: AppReleaseNote[] = [
+  {
+    version: '1.5.0',
+    date: '2026-11-08',
+    items: [
+      'Mobile Agent 智能体上线：AI 接管手机多步操作（看屏幕→规划→点击→中文输入→验证→失败重规划），设置 › AI 动手 › 智能体多步任务 开关',
+      '中文输入支持：内置 AI 输入引擎（无需安装第三方输入法），聊天打字/搜索框输入中文都行',
+      '点文字升级：优先 UI 结构树精确点击（更快更准），找不到再视觉识别；新增屏幕结构读取（uiautomator）',
+      '安全控制：敏感操作（转账/卸载/删除等）执行前强制弹窗确认；运行中随时可按「■ 停止」或通知栏急停',
+    ],
+  },
   {
     version: '1.4.3',
     date: '2026-11-08',

@@ -428,8 +428,9 @@ async function capgoUsageSnapshot(): Promise<AwSnapshot | null> {
    *   1 前台 / 2 失焦 / 3 息屏(16) / 4 亮屏(15) / 5 锁屏(17) / 6 解锁(18) / 7 关机(26) / 8 开机(27)
    * 门控事件（3~8）无归属包，packageName 可能为空。 */
   type Ev = { ts: number; type: number; pkg: string | null };
+  type RawEv = { packageName?: string; timeStamp?: number; eventType?: number };
   const evs: Ev[] = (evRes?.events ?? [])
-    .filter((e): e is { packageName?: string | null; timeStamp: number; eventType: number } => {
+    .filter((e): e is RawEv & { timeStamp: number } => {
       if (typeof e.timeStamp !== 'number') return false;
       const t = e.eventType;
       if (t === 1 || t === 2 || t === 23) return true;
@@ -882,6 +883,129 @@ export async function nativeGrabScreenFrame(): Promise<string | null> {
     const r = await p.grabScreenFrame();
     if (r && r.ok && r.frame) return r.frame;
     return null;
+  } catch {
+    return null;
+  }
+}
+
+// ---------------- v1.5 Mobile Agent：智能体专用桥方法 ----------------
+// 全部照抄 nativeShizukuExec 的防御模式：非原生环境/null、调用异常/null ——
+// 调用方拿到 null 就按「桥无响应（非原生环境或原生调用超时）」处理，绝不抛错
+// 打断 Agent 主循环（runAgentTask 里任何异常都会终止任务，这里必须兜死）。
+
+export interface AgentShellResult {
+  ok?: boolean;
+  /** 命令标准输出+标准错误混合文本 */
+  out?: string;
+  reason?: string;
+}
+
+/** 通用 shell 执行（Agent 用：resolve-activity/am start 等；白名单见原生侧 executeShell） */
+export async function nativeAgentExecuteShell(cmd: string[], timeoutMs = 15000): Promise<AgentShellResult | null> {
+  if (!isNativePerception()) return null;
+  try {
+    return await nativeCall<AgentShellResult>('executeShell', { cmd, timeoutMs }, timeoutMs + 16000);
+  } catch {
+    return null;
+  }
+}
+
+/** 屏幕分辨率（Agent 滑动坐标换算用；width/height 或 raw 原始输出） */
+export async function nativeGetScreenResolution(): Promise<{
+  ok?: boolean;
+  width?: number;
+  height?: number;
+  raw?: string;
+  reason?: string;
+} | null> {
+  if (!isNativePerception()) return null;
+  try {
+    return await nativeCall<{ ok?: boolean; width?: number; height?: number; raw?: string; reason?: string }>(
+      'getScreenResolution',
+      {},
+      12000,
+    );
+  } catch {
+    return null;
+  }
+}
+
+/** uiautomator dump UI 树（Agent 看屏核心；游戏/视频全屏等场景可能失败） */
+export async function nativeDumpUi(): Promise<{ ok?: boolean; xml?: string; reason?: string } | null> {
+  if (!isNativePerception()) return null;
+  try {
+    return await nativeCall<{ ok?: boolean; xml?: string; reason?: string }>('dumpUi', {}, 30000);
+  } catch {
+    return null;
+  }
+}
+
+export interface ChineseInputResult {
+  ok?: boolean;
+  /** 实际输入通道：ascii = input text 直输；ime = 原生输入法通道（必要时临时切中文 IME） */
+  via?: 'ascii' | 'ime';
+  /** 是否发生了 IME 临时切换（true 时 currentIme 带切换前的原输入法，任务结束要还原） */
+  switched?: boolean;
+  /** 切换前的原输入法 id（restoreIme 用） */
+  currentIme?: string;
+  reason?: string;
+}
+
+/** 中文/非 ASCII 输入（input text 只支持 ASCII；原生侧经输入法通道注入） */
+export async function nativeInputChinese(text: string): Promise<ChineseInputResult | null> {
+  if (!isNativePerception()) return null;
+  try {
+    return await nativeCall<ChineseInputResult>('inputChinese', { text }, 25000);
+  } catch {
+    return null;
+  }
+}
+
+/** 还原机主原输入法（Agent 中文输入临时切换后的收尾） */
+export async function nativeRestoreIme(imeId: string): Promise<{ ok?: boolean; reason?: string } | null> {
+  if (!isNativePerception()) return null;
+  try {
+    return await nativeCall<{ ok?: boolean; reason?: string }>('restoreIme', { imeId }, 10000);
+  } catch {
+    return null;
+  }
+}
+
+/** 原生急停旗标查询（通知栏「急停」按钮置位；Agent 主循环每步前轮询） */
+export async function nativeAgentShouldStop(): Promise<{ stop?: boolean } | null> {
+  if (!isNativePerception()) return null;
+  try {
+    return await nativeCall<{ stop?: boolean }>('agentShouldStop', {}, 5000);
+  } catch {
+    return null;
+  }
+}
+
+/** 复位原生急停旗标（任务开始/结束时调用，保证下次任务干净） */
+export async function nativeAgentResetStop(): Promise<{ ok?: boolean } | null> {
+  if (!isNativePerception()) return null;
+  try {
+    return await nativeCall<{ ok?: boolean }>('agentResetStop', {}, 5000);
+  } catch {
+    return null;
+  }
+}
+
+/** 常驻通知「AI 智能体运行中」（任务开始时发布，带急停按钮的原生侧实现） */
+export async function nativeAgentNotify(title: string, text?: string): Promise<{ ok?: boolean; reason?: string } | null> {
+  if (!isNativePerception()) return null;
+  try {
+    return await nativeCall<{ ok?: boolean; reason?: string }>('agentNotify', { title, text: text ?? '' }, 10000);
+  } catch {
+    return null;
+  }
+}
+
+/** 撤掉常驻通知（任务结束/急停/异常的收尾） */
+export async function nativeAgentNotifyEnd(): Promise<{ ok?: boolean } | null> {
+  if (!isNativePerception()) return null;
+  try {
+    return await nativeCall<{ ok?: boolean }>('agentNotifyEnd', {}, 5000);
   } catch {
     return null;
   }

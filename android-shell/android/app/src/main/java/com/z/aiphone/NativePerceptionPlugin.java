@@ -2,9 +2,14 @@ package com.z.aiphone;
 
 import android.app.Activity;
 import android.app.AppOpsManager;
+import android.app.NotificationChannel;
+import android.app.NotificationManager;
+import android.app.PendingIntent;
+import android.content.BroadcastReceiver;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.ServiceConnection;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
@@ -14,6 +19,9 @@ import android.os.IBinder;
 import android.os.Process;
 import android.provider.Settings;
 import android.service.notification.NotificationListenerService;
+
+import androidx.core.app.NotificationCompat;
+import androidx.core.content.ContextCompat;
 
 import com.getcapacitor.JSArray;
 import com.getcapacitor.JSObject;
@@ -38,6 +46,8 @@ import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import rikka.shizuku.Shizuku;
 
@@ -75,6 +85,23 @@ import rikka.shizuku.Shizuku;
  *      安装卸载/媒体音量/网络开关/通知快照/前台App/电量/剪贴板/短信/通话/logcat/
  *      自授权……），加能力只改网页、不用重新打包 APK；
  *    - shizukuScreencap()：静默截屏（服务端降采样 JPEG base64，免 MediaProjection 授权弹窗）。
+ *
+ * ⑥ Mobile Agent（v1.5）：Agent 动作执行底座（网页侧 Agent 运行时全部经本组方法操作手机）：
+ *    - executeShell({cmd, timeoutMs?})：白名单 shell 执行（与 shizukuExec 同内核
+ *      runWhitelistedShell，无行过滤、maxLines 4000、默认 15s / 硬顶 30s）；
+ *    - getScreenResolution()：wm size 解析屏幕分辨率（Override 优先 / Physical 兜底），
+ *      网页侧滑动坐标换算用；
+ *    - dumpUi()：uiautomator dump --compressed 落盘 → cat 取控件树 XML 全文回传
+ *      （dump 失败等 900ms 自动重试一次），网页侧解析控件树做「看屏幕」；
+ *    - inputChinese({text})：中文/emoji 输入 —— 纯 ASCII 直接 input text（空格转 %s）；
+ *      含非 ASCII 自动 ime enable+set 切到本应用无 UI 输入法（AdbImeService，
+ *      见 AdbImeService.java）后经广播 commitText 注入（原生支持中文/emoji）；
+ *      不在方法内恢复原输入法（Agent 多步输入只切一次，任务结束由前端调 restoreIme）；
+ *    - restoreIme({imeId})：恢复任务前的原输入法；
+ *    - agentShouldStop() / agentResetStop()：紧急停止标志（static volatile，
+ *      通知栏「■ 紧急停止」按钮置位、网页每步动作前轮询）；
+ *    - agentNotify({title, text?}) / agentNotifyEnd()：执行期常驻状态通知
+ *      （id 7788，渠道 agent_runner，IMPORTANCE_LOW 静默），带紧急停止按钮。
  */
 @CapacitorPlugin(name = "NativePerception")
 public class NativePerceptionPlugin extends Plugin {
@@ -108,7 +135,9 @@ public class NativePerceptionPlugin extends Plugin {
             "logcat",     // 系统日志（排查真机 bug）
             "screencap",  // 截屏（配合 shScreencap）
             "wm",         // 屏幕尺寸（滑动坐标计算用）
-            "cat"         // 读文件（仅限 shell 可读路径）
+            "cat",        // 读文件（仅限 shell 可读路径）
+            "uiautomator",// 控件树倾倒（Agent「看屏幕」：dump --compressed 落盘后 cat 读取）
+            "ime"         // 输入法管理（Agent 中文输入：ime enable/set 切换无 UI 输入法）
     ));
 
     private PluginCall pendingCaptureCall;
@@ -694,16 +723,6 @@ public class NativePerceptionPlugin extends Plugin {
             call.reject("缺少或非法的 cmd 参数（非空字符串数组）");
             return;
         }
-        if (!SHIZUKU_ALLOWED_BINARIES.contains(cmd[0])) {
-            call.reject("命令不在白名单：" + cmd[0]);
-            return;
-        }
-        for (String a : cmd) {
-            if (a.indexOf('\0') >= 0) { // 防御性：二进制安全
-                call.reject("cmd 含非法字符");
-                return;
-            }
-        }
         final String[] mustContain = stringArrayArg(call, "mustContain");
         int ml;
         long tm;
@@ -719,7 +738,32 @@ public class NativePerceptionPlugin extends Plugin {
         }
         final int maxLines = Math.max(1, Math.min(20_000, ml));
         final long timeoutMs = Math.max(1000L, Math.min(30_000L, tm));
+        // 内核抽出为 runWhitelistedShell（v1.5，与 executeShell 共用；对外行为完全不变）
+        runWhitelistedShell(call, cmd, mustContain, maxLines, timeoutMs);
+    }
 
+    /**
+     * 白名单 shell 执行共用内核（v1.5 从 shizukuExec 抽出，shizukuExec / executeShell 共用）：
+     * 白名单检查 → 二进制安全检查 → Shizuku gate → 后台线程 execFiltered → resolve。
+     * 对外行为与原 shizukuExec 完全一致（含 reject/resolve 形态与线程名）。
+     * cmd 由调用方保证非空（stringArrayArg 产出）。
+     */
+    private void runWhitelistedShell(PluginCall call, String[] cmd, String[] mustContain,
+                                     int maxLines, long timeoutMs) {
+        if (cmd == null || cmd.length == 0) {
+            call.reject("缺少或非法的 cmd 参数（非空字符串数组）");
+            return;
+        }
+        if (!SHIZUKU_ALLOWED_BINARIES.contains(cmd[0])) {
+            call.reject("命令不在白名单：" + cmd[0]);
+            return;
+        }
+        for (String a : cmd) {
+            if (a.indexOf('\0') >= 0) { // 防御性：二进制安全
+                call.reject("cmd 含非法字符");
+                return;
+            }
+        }
         String gate = shizukuGateReason();
         if (gate != null) {
             JSObject ret = new JSObject();
@@ -779,6 +823,436 @@ public class NativePerceptionPlugin extends Plugin {
                 call.resolve(ret);
             }
         }, "shizuku-screencap").start();
+    }
+
+    // ================= Mobile Agent（v1.5：Agent 动作执行底座） =================
+
+    /** Agent 紧急停止广播 action（通知栏「■ 紧急停止」按钮 → 本插件动态 receiver 置位） */
+    public static final String AGENT_STOP_ACTION = "com.z.aiphone.AGENT_STOP_ACTION";
+
+    /** Agent 紧急停止标志（static volatile：广播 receiver 线程置位、网页 agentShouldStop
+     *  轮询读取，跨 bridge/插件实例共享；agentResetStop 复位） */
+    private static volatile boolean AGENT_ABORT = false;
+
+    /** Agent 常驻状态通知 id（agentNotify 刷新 / agentNotifyEnd 撤销共用） */
+    private static final int AGENT_NOTIFY_ID = 7788;
+    /** Agent 常驻通知渠道 id（仅首次创建） */
+    private static final String AGENT_NOTIFY_CHANNEL = "agent_runner";
+    /** Agent 无 UI 输入法的 ime id（flattenToShortString 形态） */
+    private static final String AGENT_IME_ID = "com.z.aiphone/.AdbImeService";
+    /** uiautomator dump 的固定落盘路径（shell 权限可写） */
+    private static final String UI_DUMP_PATH = "/sdcard/window_dump.xml";
+
+    private BroadcastReceiver agentStopReceiver;
+
+    /**
+     * 插件接入 bridge 的标准初始化点（注册「紧急停止」广播 receiver）：
+     * 注：Capacitor 8 的 Plugin 基类没有 pluginInitialize() 钩子（v3 时代已移除），
+     * load() 是插件连接 bridge 之后、任何 @PluginMethod 调用之前的初始化回调，
+     * 此时 getContext() 已注入可用 —— 比构造函数可靠（构造时 bridge/context 尚未就绪）。
+     */
+    @Override
+    public void load() {
+        super.load();
+        if (agentStopReceiver != null) return; // 防重入（每 bridge 实例只 load 一次）
+        agentStopReceiver = new BroadcastReceiver() {
+            @Override
+            public void onReceive(Context context, Intent intent) {
+                AGENT_ABORT = true;
+            }
+        };
+        // 通知按钮的 PendingIntent 由本应用自己创建并发送（同 UID 自发自收），
+        // RECEIVER_NOT_EXPORTED 足够且更安全；若个别 ROM 拦截自发自收导致按钮失效，
+        // 可降级 RECEIVER_EXPORTED（intent 已 setPackage 限定本应用，暴露面等同）。
+        ContextCompat.registerReceiver(getContext(), agentStopReceiver,
+                new IntentFilter(AGENT_STOP_ACTION), ContextCompat.RECEIVER_NOT_EXPORTED);
+    }
+
+    @Override
+    protected void handleOnDestroy() {
+        if (agentStopReceiver != null) {
+            try {
+                getContext().unregisterReceiver(agentStopReceiver);
+            } catch (Throwable ignored) {
+            }
+            agentStopReceiver = null;
+        }
+        super.handleOnDestroy();
+    }
+
+    /**
+     * Agent 通用 shell 执行（executeShell）：与 shizukuExec 同内核（runWhitelistedShell），
+     * 面向 Agent 运行时的简化封装 —— 无行过滤、maxLines 固定 4000、默认 15s / 硬顶 30s。
+     * 入参 { cmd: string[], timeoutMs?: number } → { ok:true, out } / { ok:false, reason }
+     * （cmd 缺失/不在白名单时 reject，与 shizukuExec 口径一致）。
+     */
+    @PluginMethod
+    public void executeShell(PluginCall call) {
+        final String[] cmd = stringArrayArg(call, "cmd");
+        if (cmd == null) {
+            call.reject("缺少或非法的 cmd 参数（非空字符串数组）");
+            return;
+        }
+        long tm;
+        try {
+            tm = call.getLong("timeoutMs", 15_000L);
+        } catch (Throwable t) {
+            tm = 15_000L;
+        }
+        final long timeoutMs = Math.max(1000L, Math.min(30_000L, tm));
+        runWhitelistedShell(call, cmd, null, 4000, timeoutMs);
+    }
+
+    /**
+     * 屏幕分辨率（滑动坐标换算用）：wm size 输出解析 ——
+     * 优先 "Override size: WxH" 行（用户改过显示设置后的覆盖值，点击/滑动按这个来），
+     * 其次 "Physical size: WxH"（出厂物理分辨率）。
+     * → { ok:true, width, height, raw } / { ok:false, reason:'parse'|gate }
+     */
+    @PluginMethod
+    public void getScreenResolution(PluginCall call) {
+        String gate = shizukuGateReason();
+        if (gate != null) {
+            JSObject ret = new JSObject();
+            ret.put("ok", false);
+            ret.put("reason", gate);
+            call.resolve(ret);
+            return;
+        }
+        new Thread(() -> {
+            try {
+                IPerceptionShellService svc = requireShellService(6000);
+                String out = svc.execFiltered(new String[]{"wm", "size"}, null, 0L, 50, 8000L);
+                int[] wh = parseWmSize(out);
+                JSObject ret = new JSObject();
+                if (wh == null) {
+                    ret.put("ok", false);
+                    ret.put("reason", "parse");
+                } else {
+                    ret.put("ok", true);
+                    ret.put("width", wh[0]);
+                    ret.put("height", wh[1]);
+                }
+                ret.put("raw", out == null ? "" : out);
+                call.resolve(ret);
+            } catch (Throwable t) {
+                JSObject ret = new JSObject();
+                ret.put("ok", false);
+                ret.put("reason", t instanceof IllegalStateException ? t.getMessage() : "exec-error");
+                call.resolve(ret);
+            }
+        }, "shizuku-resolution").start();
+    }
+
+    /** wm size 数值对正则：抓取形如 1080x2400 */
+    private static final Pattern WM_SIZE_RX = Pattern.compile("(\\d+)x(\\d+)");
+
+    /** 解析 wm size 输出：Override 优先、Physical 兜底；返回 [width, height] 或 null */
+    private int[] parseWmSize(String out) {
+        if (out == null || out.isEmpty()) return null;
+        int[] wh = matchSizeLine(out, "Override size:");
+        if (wh != null) return wh;
+        return matchSizeLine(out, "Physical size:");
+    }
+
+    /** 在指定前缀的行里抓第一个 WxH 数值对（无则 null） */
+    private int[] matchSizeLine(String out, String prefix) {
+        for (String line : out.split("\n")) {
+            String t = line.trim();
+            if (!t.startsWith(prefix)) continue;
+            Matcher m = WM_SIZE_RX.matcher(t);
+            if (m.find()) {
+                try {
+                    int w = Integer.parseInt(m.group(1));
+                    int h = Integer.parseInt(m.group(2));
+                    if (w > 0 && h > 0) return new int[]{w, h};
+                } catch (NumberFormatException ignored) {
+                }
+            }
+        }
+        return null;
+    }
+
+    /**
+     * 控件树倾倒（Agent「看屏幕」）：uiautomator dump --compressed 写入
+     * /sdcard/window_dump.xml → cat 取 XML 全文回传，网页侧自行解析控件树
+     * （可点节点/文本/坐标）。dump 失败（常见 "could not get idle state"，
+     * 页面动画未停）等 900ms 重试一次；cat 为空重试一次。
+     * → { ok:true, xml } / { ok:false, reason:'dump-failed', out:输出片段 }
+     */
+    @PluginMethod
+    public void dumpUi(PluginCall call) {
+        String gate = shizukuGateReason();
+        if (gate != null) {
+            JSObject ret = new JSObject();
+            ret.put("ok", false);
+            ret.put("reason", gate);
+            call.resolve(ret);
+            return;
+        }
+        new Thread(() -> {
+            try {
+                IPerceptionShellService svc = requireShellService(6000);
+                String[] dumpCmd = {"uiautomator", "dump", "--compressed", UI_DUMP_PATH};
+                String dumpOut = svc.execFiltered(dumpCmd, null, 0L, 50, 15_000L);
+                if (dumpOut == null || !dumpOut.contains("dumped")) {
+                    // 成功输出形如 "UI hierchary dumped to: ..."（AOSP 原生拼写如此）
+                    try {
+                        Thread.sleep(900L);
+                    } catch (InterruptedException ignored) {
+                    }
+                    dumpOut = svc.execFiltered(dumpCmd, null, 0L, 50, 15_000L);
+                }
+                if (dumpOut == null || !dumpOut.contains("dumped")) {
+                    JSObject ret = new JSObject();
+                    ret.put("ok", false);
+                    ret.put("reason", "dump-failed");
+                    String frag = dumpOut == null ? "" : dumpOut;
+                    ret.put("out", frag.length() > 400 ? frag.substring(0, 400) : frag);
+                    call.resolve(ret);
+                    return;
+                }
+                String[] catCmd = {"cat", UI_DUMP_PATH};
+                // XML 为单行超长文本，execFiltered 环形缓冲按行算，maxLines 给大没关系
+                String xml = svc.execFiltered(catCmd, null, 0L, 400, 10_000L);
+                if (xml == null || xml.trim().isEmpty()) {
+                    // 偶发：文件落盘可见性延迟 → 等 300ms 重试 cat 一次
+                    try {
+                        Thread.sleep(300L);
+                    } catch (InterruptedException ignored) {
+                    }
+                    xml = svc.execFiltered(catCmd, null, 0L, 400, 10_000L);
+                }
+                JSObject ret = new JSObject();
+                ret.put("ok", true);
+                ret.put("xml", xml == null ? "" : xml);
+                call.resolve(ret);
+            } catch (Throwable t) {
+                JSObject ret = new JSObject();
+                ret.put("ok", false);
+                ret.put("reason", t instanceof IllegalStateException ? t.getMessage() : "exec-error");
+                call.resolve(ret);
+            }
+        }, "shizuku-dumpui").start();
+    }
+
+    /**
+     * 中文/emoji 输入（inputChinese）：
+     * - 纯 ASCII 文本：直接 input text（空格转 %s），不动输入法
+     *   → { ok:true, via:'ascii', switched:false, currentIme:'' }；
+     * - 含非 ASCII（中文/emoji）：读取当前默认输入法 → 首次经 ime enable+set 切到
+     *   本应用无 UI 输入法（com.z.aiphone/.AdbImeService，见 AdbImeService.java）
+     *   后广播 AGENT_IME_INPUT 注入 commitText（原生支持中文/emoji）
+     *   → { ok:true, via:'ime', switched, currentIme }。
+     * 注意：不在此恢复原输入法 —— Agent 多步输入只切一次，任务结束由前端调 restoreIme。
+     */
+    @PluginMethod
+    public void inputChinese(PluginCall call) {
+        final String text = call.getString("text", "");
+        if (text == null || text.isEmpty()) {
+            call.reject("缺少或非法的 text 参数（非空字符串）");
+            return;
+        }
+        String gate = shizukuGateReason();
+        if (gate != null) {
+            JSObject ret = new JSObject();
+            ret.put("ok", false);
+            ret.put("reason", gate);
+            call.resolve(ret);
+            return;
+        }
+        new Thread(() -> {
+            try {
+                IPerceptionShellService svc = requireShellService(6000);
+                if (isPureAscii(text)) {
+                    // 纯 ASCII：input text 直注（%s 是 input 命令的空格转义约定）
+                    svc.execFiltered(new String[]{"input", "text", text.replace(" ", "%s")},
+                            null, 0L, 50, 8000L);
+                    JSObject ret = new JSObject();
+                    ret.put("ok", true);
+                    ret.put("via", "ascii");
+                    ret.put("switched", false);
+                    ret.put("currentIme", "");
+                    call.resolve(ret);
+                    return;
+                }
+                // 含中文/emoji：读取当前默认输入法 → 首次切换到 Agent IME → 广播注入
+                String cur = svc.execFiltered(
+                        new String[]{"settings", "get", "secure", "default_input_method"},
+                        null, 0L, 20, 5000L);
+                cur = cur == null ? "" : cur.trim();
+                boolean switched = false;
+                if (!AGENT_IME_ID.equals(cur)) {
+                    svc.execFiltered(new String[]{"ime", "enable", AGENT_IME_ID},
+                            null, 0L, 50, 8000L);
+                    svc.execFiltered(new String[]{"ime", "set", AGENT_IME_ID},
+                            null, 0L, 50, 8000L);
+                    switched = true;
+                    // ime set 是异步绑定：给 IMMS 一点时间绑上本 IME（含 onStartInput 流程），
+                    // 否则紧随的广播到达时 getCurrentInputConnection() 还是 null，首个输入会丢
+                    try {
+                        Thread.sleep(800L);
+                    } catch (InterruptedException ignored) {
+                    }
+                }
+                svc.execFiltered(new String[]{"am", "broadcast", "-a", "com.z.aiphone.AGENT_IME_INPUT",
+                        "--es", "text", text}, null, 0L, 50, 8000L);
+                JSObject ret = new JSObject();
+                ret.put("ok", true);
+                ret.put("via", "ime");
+                ret.put("switched", switched);
+                ret.put("currentIme", cur);
+                call.resolve(ret);
+            } catch (Throwable t) {
+                JSObject ret = new JSObject();
+                ret.put("ok", false);
+                ret.put("reason", t instanceof IllegalStateException ? t.getMessage() : "exec-error");
+                call.resolve(ret);
+            }
+        }, "shizuku-input").start();
+    }
+
+    /** 纯 ASCII 判定（无任何 >0x7F 字符）：决定 input text 直注 vs 切 IME 注入 */
+    private static boolean isPureAscii(String s) {
+        for (int i = 0; i < s.length(); i++) {
+            if (s.charAt(i) > 0x7F) return false;
+        }
+        return true;
+    }
+
+    /**
+     * 恢复原输入法（Agent 任务结束收尾；inputChinese 切换时前端先存下 currentIme）。
+     * 入参 { imeId: string }；为空 → { ok:false, reason:'no-ime' }。
+     */
+    @PluginMethod
+    public void restoreIme(PluginCall call) {
+        String imeId = call.getString("imeId", "");
+        if (imeId == null || imeId.trim().isEmpty()) {
+            JSObject ret = new JSObject();
+            ret.put("ok", false);
+            ret.put("reason", "no-ime");
+            call.resolve(ret);
+            return;
+        }
+        final String id = imeId.trim();
+        String gate = shizukuGateReason();
+        if (gate != null) {
+            JSObject ret = new JSObject();
+            ret.put("ok", false);
+            ret.put("reason", gate);
+            call.resolve(ret);
+            return;
+        }
+        new Thread(() -> {
+            try {
+                IPerceptionShellService svc = requireShellService(6000);
+                svc.execFiltered(new String[]{"ime", "set", id}, null, 0L, 50, 8000L);
+                JSObject ret = new JSObject();
+                ret.put("ok", true);
+                call.resolve(ret);
+            } catch (Throwable t) {
+                JSObject ret = new JSObject();
+                ret.put("ok", false);
+                ret.put("reason", t instanceof IllegalStateException ? t.getMessage() : "exec-error");
+                call.resolve(ret);
+            }
+        }, "shizuku-ime").start();
+    }
+
+    /** Agent 是否已被要求紧急停止（网页侧每步动作前轮询） */
+    @PluginMethod
+    public void agentShouldStop(PluginCall call) {
+        JSObject ret = new JSObject();
+        ret.put("stop", AGENT_ABORT);
+        call.resolve(ret);
+    }
+
+    /** 复位紧急停止标志（新任务开始时调用） */
+    @PluginMethod
+    public void agentResetStop(PluginCall call) {
+        AGENT_ABORT = false;
+        JSObject ret = new JSObject();
+        ret.put("ok", true);
+        call.resolve(ret);
+    }
+
+    /**
+     * Agent 执行期常驻状态通知（id 7788，渠道 agent_runner，IMPORTANCE_LOW 静默不打扰）：
+     * 带「■ 紧急停止」按钮 → 广播 AGENT_STOP_ACTION → 本插件动态 receiver 置位
+     * AGENT_ABORT（PendingIntent 由本应用自发自收，receiver 为 NOT_EXPORTED）。
+     * 先 cancel 再 notify，支持任务中刷新文案。POST_NOTIFICATIONS 运行时权限由前端在
+     * 开启 Agent 总开关时引导授权；未授权（Android 13+）时 notify 抛 SecurityException →
+     * { ok:false, reason:'no-notification-permission' }，不 crash。
+     */
+    @PluginMethod
+    public void agentNotify(PluginCall call) {
+        String title = call.getString("title", "AI Agent 执行中");
+        if (title == null || title.trim().isEmpty()) title = "AI Agent 执行中";
+        String text = call.getString("text", "");
+        try {
+            Context ctx = getContext();
+            NotificationManager nm =
+                    (NotificationManager) ctx.getSystemService(Context.NOTIFICATION_SERVICE);
+            if (nm == null) {
+                JSObject ret = new JSObject();
+                ret.put("ok", false);
+                ret.put("reason", "no-notification-service");
+                call.resolve(ret);
+                return;
+            }
+            if (Build.VERSION.SDK_INT >= 26) { // NotificationChannel 需 API 26+（minSdk 24 做版本闸）
+                NotificationChannel ch = new NotificationChannel(
+                        AGENT_NOTIFY_CHANNEL, "Agent 执行状态", NotificationManager.IMPORTANCE_LOW);
+                ch.setDescription("Mobile Agent 任务执行期间的常驻状态通知");
+                ch.setShowBadge(false);
+                nm.createNotificationChannel(ch); // 仅首次创建生效，重复调用幂等
+            }
+            Intent stopIntent = new Intent(AGENT_STOP_ACTION).setPackage(ctx.getPackageName());
+            PendingIntent stopPi = PendingIntent.getBroadcast(ctx, 0, stopIntent,
+                    PendingIntent.FLAG_IMMUTABLE);
+            NotificationCompat.Builder builder =
+                    new NotificationCompat.Builder(ctx, AGENT_NOTIFY_CHANNEL)
+                            // 项目无自定义通知图标（res/drawable 仅 splash），用框架信息图标
+                            .setSmallIcon(android.R.drawable.ic_dialog_info)
+                            .setContentTitle(title)
+                            .setOngoing(true)
+                            .setOnlyAlertOnce(true)
+                            .addAction(new NotificationCompat.Action.Builder(
+                                    0, "■ 紧急停止", stopPi).build());
+            if (text != null && !text.isEmpty()) {
+                builder.setContentText(text);
+            }
+            nm.cancel(AGENT_NOTIFY_ID);
+            nm.notify(AGENT_NOTIFY_ID, builder.build());
+            JSObject ret = new JSObject();
+            ret.put("ok", true);
+            call.resolve(ret);
+        } catch (SecurityException se) {
+            // Android 13+ 未授予 POST_NOTIFICATIONS 运行时权限
+            JSObject ret = new JSObject();
+            ret.put("ok", false);
+            ret.put("reason", "no-notification-permission");
+            call.resolve(ret);
+        } catch (Throwable t) {
+            JSObject ret = new JSObject();
+            ret.put("ok", false);
+            ret.put("reason", t.getMessage() == null ? t.getClass().getSimpleName() : t.getMessage());
+            call.resolve(ret);
+        }
+    }
+
+    /** Agent 结束：撤销常驻状态通知 */
+    @PluginMethod
+    public void agentNotifyEnd(PluginCall call) {
+        try {
+            NotificationManager nm =
+                    (NotificationManager) getContext().getSystemService(Context.NOTIFICATION_SERVICE);
+            if (nm != null) nm.cancel(AGENT_NOTIFY_ID);
+        } catch (Throwable ignored) {
+        }
+        JSObject ret = new JSObject();
+        ret.put("ok", true);
+        call.resolve(ret);
     }
 
     // ---------------- Shizuku UserService（shell 权限命令执行） ----------------

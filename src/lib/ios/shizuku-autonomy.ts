@@ -19,7 +19,6 @@
 import {
   labTap,
   labSwipe,
-  labInputText,
   labKey,
   KEY_CODES,
   labOpenApp,
@@ -67,9 +66,10 @@ export const AUTONOMY_CAPS: AutonomyCap[] = [
   // ---- 动手（真实操作手机） ----
   { key: 'tap', label: '点按屏幕', desc: 'AI 自己看屏幕点按钮（自动识图定位文字按钮，或点指定坐标）', group: 'hands' },
   { key: 'swipe', label: '滑动屏幕', desc: 'AI 上滑/下滑/左右滑（翻页、滚动列表）', group: 'hands' },
-  { key: 'type', label: '输入文字', desc: 'AI 在输入框打字（系统限制仅英文数字）', group: 'hands' },
+  { key: 'type', label: '输入文字', desc: 'AI 在输入框打字（中文经 AI 输入引擎自动注入，英文数字直输）', group: 'hands' },
   { key: 'key', label: '按按键', desc: '返回/主页/回车/音量/媒体键等', group: 'hands' },
   { key: 'open', label: '打开应用', desc: 'AI 按包名拉起任意已安装 App', group: 'hands' },
+  { key: 'agent', label: '智能体多步任务', desc: 'AI 接管手机连续多步操作（打开→找界面→点击→输入中文→发送），带逐步验证与失败自动重规划；敏感操作会先弹窗征求你的同意', group: 'hands' },
   { key: 'applist', label: '查应用列表', desc: 'AI 查手机装了哪些 App（找包名用）', group: 'hands' },
   { key: 'volume', label: '音量调节', desc: '调高/调低/静音/指定音量值', group: 'hands' },
   { key: 'kill', label: '强杀应用', desc: '立即结束指定 App（防沉迷场景）', group: 'hands', danger: true },
@@ -177,10 +177,11 @@ export function isCapEnabled(key: string): boolean {
 const CAP_SYNTAX: Record<string, string> = {
   tap: '[手机操作:点文字:文字]（首选：自动看屏幕→定位写着该文字的按钮/图标→点它，例：[手机操作:点文字:下一首]，图标按钮也能认如播放▶/暂停⏸）；也可直接点坐标 [手机操作:点按:x:y]（例：[手机操作:点按:540:1200]，不确定位置就先看屏幕）',
   swipe: '[手机操作:滑动:上/下/左/右]（语义滑动，系统按屏分辨率自动算坐标，例：[手机操作:滑动:上]）；也可全坐标 [手机操作:滑动:x1:y1:x2:y2:毫秒]',
-  type: '[手机操作:输入:文字]（只能输英文/数字/符号——中文是系统限制，输不了要如实说）',
+  type: '[手机操作:输入:文字]（支持中文与英文数字，中文自动经输入引擎注入；需输入框已聚焦）',
   key: '[手机操作:按键:名称]（名称：返回/主页/切换/回车/删除/音量加/音量减）',
   open: '[手机操作:打开:包名]（包名见下方速查表；不认识的应用先 [手机操作:应用列表:关键词] 查）',
   播歌: '[手机操作:播歌:歌名]（点名要听某首歌时用：自动云端搜歌→拉起网易云歌曲页自动播放→核实真在播，一条搞定；例：[手机操作:播歌:他不懂]、[手机操作:播歌:晴天 周杰伦]。严禁拆成打开+点文字去找歌名——歌名要搜索才会出现，屏幕上找不到）',
+  agent: '[手机操作:agent:一句话任务]（多步真实任务首选。例：[手机操作:agent:给怡怡发微信说我想你了]、[手机操作:agent:打开B站搜索流浪地球2预告片播放]。系统会接管手机执行：看屏幕→自动规划→逐步点击/滑动/输入（支持中文）→验证结果，失败自动重新规划，全程每步播报进度；涉及转账/支付/卸载/删除的步骤会先弹窗征求机主同意。注意：单步就能完成的简单操作（打开个App/点个按钮）不要用 agent，直接用对应的单步命令更省事）',
   applist: '[手机操作:应用列表:关键词]（关键词可省=全部；查到的是包名，配合「打开」用）',
   kill: '[手机操作:强杀:包名]（立即杀掉该 App；适合防沉迷/劝睡场景，配合人设使用）',
   freeze: '[手机操作:冻结:包名] / [手机操作:解冻:包名]（冻结=图标消失打不开，解冻即恢复）',
@@ -228,6 +229,14 @@ export function buildShizukuAutonomyRules(): string[] {
     '【像人一样用手机】你操作手机的方式和人一样：看屏幕→找到写着目标文字的按钮→点它。首选 [手机操作:点文字:文字]（系统自动截屏认位再点，图标按钮也认得，如播放▶/暂停⏸/下一首⏭）；不确定界面长什么样就先 [手机操作:看屏幕]（返回当前页面内容与可点元素坐标）；目标不在屏上就 [手机操作:滑动:上/下] 翻页再点。严禁用「媒体」按键指令——系统经常静默丢弃它，显示成功实际没反应；切歌/暂停/播放一律点文字。点文字报“没找到”时不要重复硬点——先看屏幕判断当前在哪，或者该内容根本不在屏幕上（比如歌名要先搜）。',
     '【听歌的两种情况】①机主点名要听某首歌（“放他不懂”“换成晴天”）→ 用 [手机操作:播歌:歌名] 一条搞定（自动搜歌+播放+核实），严禁拆成打开+点文字去找歌名（歌名要搜索才会出现，屏幕上没有）；②只要换歌不点名（“换个歌”“下一首”）→ 打开网易云 + [手机操作:点文字:下一首]。',
     '【多步任务】机主一句话里有多个要求时，把每一步都写成操作标记、按执行顺序排在回复末尾、每个标记单独成一行，系统会自动逐个执行（打开App后的下一步会自动等它启动完成）。经典示例“打开网易云换个歌”＝两行：\n[手机操作:打开:com.netease.cloudmusic]\n[手机操作:点文字:下一首]\n（点文字＝系统看屏幕找到写着「下一首」的按钮点下去；切歌交给App的播放列表，不要多发“播放”——刚打开的音乐App常自动播放，多发反而可能把它暂停）。漏掉任何一步都算没完成。',
+  );
+  // v1.5 智能体教学块：仅当 agent 开关打开时注入（多步真实任务的首选通道）
+  if (cfg.caps['agent'] === true) {
+    lines.push(
+      '【智能体模式·多步真实任务】机主让你「在真实手机上完成一件需要多个步骤的事」（给某人发微信/QQ消息、去某App搜索某内容、设置里改某个开关等）时，首选输出 [手机操作:agent:任务一句话描述]——系统会进入智能体循环：看屏幕→规划→执行→验证→失败重规划，每步都会以「（内部反馈）」回给你。agent 模式下输入中文、找不在首屏的元素都不用你操心。补充规则：①机主任务里提到的联系人/内容名要原样放进任务描述里（如「给怡怡发微信说我想你了」就写「给微信联系人怡怡发送消息：我想你了」）；②agent 适合 3~10 步的任务，单步操作用单步命令；③不要在同一条回复里既用 agent 又用其他手机操作标记。',
+    );
+  }
+  lines.push(
     '【使用分寸】情境不需要时正常聊天即可，别为了炫技乱动手机；动手前在正文里用你的语气自然说一声要做什么。',
     '【结果反馈】操作结果会以“（内部反馈：…）”的形式回给你：成功了才可以说做好了，失败了要如实告诉机主原因（Shizuku 没激活/权限没给/包名不对等），绝不假装成功。这种内部反馈是给你看的，严禁在回复里原样复述或模仿其格式（比如把“手机操作成功：已拉起…”这种字样抄给机主）——要用你自己的话自然地说（如“好啦，歌换好了~”）。',
   );
@@ -470,8 +479,10 @@ const DENIED: LabResult = { ok: false, text: '该能力已被机主在设置里�
 /**
  * 执行 [手机操作:命令:参数…] 的完整参数段（ACTION_RE 捕获的整段 arg，冒号已含）。
  * 返回 { ok, text } 给调用方落系统行；这里做开关硬 gate（总开关/单项/原生环境三道闸）。
+ * v1.5：第二个可选参数 progress——agent 命令的逐步播报出口（say/step/stepfail/danger），
+ * 其余单步命令不会调用它；不传时行为与 v1.4 完全一致。
  */
-export async function executePhoneOp(argRaw: string): Promise<LabResult> {
+export async function executePhoneOp(argRaw: string, progress?: (text: string) => void): Promise<LabResult> {
   const parts = argRaw.split(/[:：]/).map((s) => s.trim());
   const cmd = (parts.shift() ?? '').toLowerCase();
   const p = parts; // 剩余参数段
@@ -490,12 +501,21 @@ export async function executePhoneOp(argRaw: string): Promise<LabResult> {
     // ---- 动手（UI 级：像人一样看屏幕点按钮） ----
     case '点文字': {
       if (!on('tap')) return DENIED;
-      if (!on('screencap')) {
-        return { ok: false, text: '「点文字」需要「看屏幕」能力配合（设置里已关）——可改用 [手机操作:点按:x:y] 直接点坐标' };
-      }
       // 参数段可能含冒号：取完整剩余段为目标文字
       const target = argRaw.split(/[:：]/).slice(1).join(':').trim();
       if (!target) return { ok: false, text: '点文字缺目标文字（[手机操作:点文字:文字]）' };
+      // v1.5 首选：uiautomator UI 树精确匹配文字节点→点中心（无需截屏识别，快且省 token）
+      try {
+        const { agentClickText } = await import('./shizuku-agent');
+        const r = await agentClickText(target);
+        if (r.ok) return r;
+        // UI 树没找到 → 降级 VLM 视觉定位（原 v1.4 路径，图标/无文字按钮靠它）
+      } catch {
+        /* 降级（旧壳无 dumpUi 桥等） */
+      }
+      if (!on('screencap')) {
+        return { ok: false, text: '「点文字」UI 树未命中且「看屏幕」能力已关（无法视觉定位）——可在设置开启看屏幕，或改用 [手机操作:点按:x:y]' };
+      }
       return runPointAtText(target);
     }
     case '点按': {
@@ -534,7 +554,10 @@ export async function executePhoneOp(argRaw: string): Promise<LabResult> {
       if (!on('type')) return DENIED;
       // 参数段里可能再含冒号：把剩余段原样拼回（保留原文）
       const text = argRaw.split(/[:：]/).slice(1).join(':').trim();
-      return labInputText(text);
+      if (!text) return { ok: false, text: '输入缺文字（[手机操作:输入:文字]）' };
+      // v1.5：中文经 Agent 输入引擎注入（ASCII 走原生 input text 直输）
+      const { agentInputText } = await import('./shizuku-agent');
+      return agentInputText(text);
     }
     case '按键': {
       if (!on('key')) return DENIED;
@@ -563,6 +586,26 @@ export async function executePhoneOp(argRaw: string): Promise<LabResult> {
       const q = argRaw.split(/[:：]/).slice(1).join(':').trim();
       if (!q) return { ok: false, text: '播歌缺歌名（[手机操作:播歌:歌名]，可带歌手名）' };
       return runPlaySong(q);
+    }
+    case 'agent':
+    case '智能体': {
+      if (!on('agent')) return { ok: false, text: '「智能体多步任务」能力未开启（设置 › AI 动手）' };
+      const task = argRaw.split(/[:：]/).slice(1).join(':').trim();
+      if (!task) return { ok: false, text: 'agent 缺任务描述（[手机操作:agent:一句话任务]）' };
+      // 能力前置检查（open/tap/type/key）
+      const need = (['open', 'tap', 'type', 'key'] as const).filter((k) => !on(k));
+      if (need.length > 0) return { ok: false, text: `Agent 任务需要这些能力开关全开：${need.join('、')}（设置 › AI 动手）` };
+      const { runAgentTask } = await import('./shizuku-agent');
+      const r = await runAgentTask(task, {
+        // v1.5 逐步播报：say/step/stepfail/danger 事件推给聊天页（纯展示行）；
+        // done/fail 是终态——由下方返回值走结果行回喂，不重复播
+        onEvent: (e) => {
+          if (e.type === 'say' || e.type === 'step' || e.type === 'stepfail' || e.type === 'danger') {
+            progress?.(`〔智能体〕${e.text}`);
+          }
+        },
+      });
+      return { ok: r.ok, text: r.text };
     }
     case '应用列表': {
       if (!on('applist')) return DENIED;
@@ -658,7 +701,7 @@ export async function executePhoneOp(argRaw: string): Promise<LabResult> {
       return labCallLog(n !== null && n > 0 ? Math.min(30, Math.floor(n)) : 10);
     }
     default:
-      return { ok: false, text: `不认识的手机操作「${cmd}」（可用：点文字/点按/滑动/输入/按键/打开/播歌/应用列表/音量/强杀/冻结/解冻/卸载/网络/看屏幕/前台/通知/电量/剪贴板/短信/通话）` };
+      return { ok: false, text: `不认识的手机操作「${cmd}」（可用：点文字/点按/滑动/输入/按键/打开/播歌/agent/应用列表/音量/强杀/冻结/解冻/卸载/网络/看屏幕/前台/通知/电量/剪贴板/短信/通话）` };
   }
 }
 
@@ -673,6 +716,7 @@ export async function executePhoneOp(argRaw: string): Promise<LabResult> {
  *    → 下一步等 UI_SETTLE_MS（2.5s），否则紧跟着的「看屏幕」会截到动画中间态；
  *  - 其余操作间 OP_GAP_MS（1.2s）。
  * onStart 在轮到该操作真正开跑时回调（聊天页把技能胶囊的 start 挂在这里，多步时逐个亮）。
+ * v1.5：progress 可选透传给 executePhoneOp——agent 命令的逐步播报出口（聊天页落纯展示系统行）。
  * 返回的 Promise 在该操作出结果时立即 resolve（间隔只在队列内部，不影响结果行落盘时机）。
  */
 const OP_GAP_MS = 1200;
@@ -685,7 +729,7 @@ let opChain: Promise<unknown> = Promise.resolve();
 /** 队列级状态：上一步是否为「打开」且成功（跨轮次残留无害——多等几秒不会出错） */
 let lastOpenOk = false;
 
-export function enqueuePhoneOp(argRaw: string, onStart?: () => void): Promise<LabResult> {
+export function enqueuePhoneOp(argRaw: string, onStart?: () => void, progress?: (text: string) => void): Promise<LabResult> {
   let resolveResult!: (r: LabResult) => void;
   const resultP = new Promise<LabResult>((res) => {
     resolveResult = res;
@@ -695,7 +739,7 @@ export function enqueuePhoneOp(argRaw: string, onStart?: () => void): Promise<La
     onStart?.();
     let r: LabResult;
     try {
-      r = await executePhoneOp(argRaw);
+      r = await executePhoneOp(argRaw, progress);
     } catch {
       r = { ok: false, text: '执行器异常（原生桥调用抛错）' };
     }
