@@ -14,7 +14,9 @@
 FROM node:20-bookworm-slim
 
 # bun：install/build 提速（node:20 跑 netease-api 更稳）
-RUN curl -fsSL https://bun.sh/install | bash && ln -s /root/.bun/bin/bun /usr/local/bin/bun
+# npm 全局装 bun：bun.sh/install 脚本在 Railway 构建环境会静默失败（实测 bun: not found），
+# npm registry 在构建机访问稳定可靠
+RUN npm install -g bun
 # prisma 引擎与 netease-api 原生依赖需要的运行库
 RUN apt-get update && apt-get install -y --no-install-recommends openssl ca-certificates tini && rm -rf /var/lib/apt/lists/*
 
