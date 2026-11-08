@@ -688,46 +688,11 @@ const LLM_TAG_TTL = 6 * 3600_000;
 const llmTagCache = new Map<string, { q: string | null; at: number }>();
 const llmTagInflight = new Map<string, Promise<string | null>>();
 
-/** 内置模型把任意品类词（如「flower-shop」「3c」）译成 Wikimedia Commons 英文搜索短语（1~4 个英文词）。
- *  结果按 tag 缓存 6h；同一 tag 并发去重；失败返回 null（落默认图）。 */
-async function llmCommonsQuery(tag: string): Promise<string | null> {
-  const hit = llmTagCache.get(tag);
-  if (hit && Date.now() - hit.at < LLM_TAG_TTL) return hit.q;
-  const running = llmTagInflight.get(tag);
-  if (running) return running;
-  const task = (async (): Promise<string | null> => {
-    try {
-      const ZAI = (await import('z-ai-web-dev-sdk')).default;
-      const zai = await ZAI.create();
-      const completion = await zai.chat.completions.create({
-        messages: [
-          {
-            role: 'assistant',
-            content:
-              'You translate commerce/scene category words into short English image-search phrases for Wikimedia Commons photo search. Reply with ONLY the phrase: 1-4 plain English words, lowercase, no punctuation, no explanation. Prefer concrete everyday visual scenes over abstract concepts.',
-          },
-          { role: 'user', content: tag.replace(/-+/g, ' ').slice(0, 30) },
-        ],
-        thinking: { type: 'disabled' },
-      });
-      const raw = (completion.choices[0]?.message?.content ?? '')
-        .toLowerCase()
-        .replace(/[^a-z ]+/g, ' ')
-        .replace(/\s+/g, ' ')
-        .trim()
-        .slice(0, 60);
-      const q = /^[a-z]{2,}( [a-z]{2,}){0,3}$/.test(raw) ? raw : null;
-      llmTagCache.set(tag, { q, at: Date.now() });
-      return q;
-    } catch {
-      llmTagCache.set(tag, { q: null, at: Date.now() }); // 负缓存：同一 tag 6h 内不再重试打模型
-      return null;
-    } finally {
-      llmTagInflight.delete(tag);
-    }
-  })();
-  llmTagInflight.set(tag, task);
-  return task;
+/** v82：内置模型翻译英文搜索短语已移除（z-ai-web-dev-sdk 下线）——恒返回 null，
+ *  调用方直接落本地默认图/SVG 兜底（任何情况下都有图可显示）。 */
+async function llmCommonsQuery(_tag: string): Promise<string | null> {
+  void _tag;
+  return null;
 }
 
 // ---------------- sharp 按展示尺寸裁剪压缩（内存流转，不落盘） ----------------

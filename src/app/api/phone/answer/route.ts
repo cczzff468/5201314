@@ -26,7 +26,6 @@ import {
   isPrivateHost,
   normalizeHistory,
   parseInlineContact,
-  sdkTurn,
   unknownPersona,
 } from '@/lib/ios/call-upstream';
 
@@ -171,12 +170,8 @@ export async function POST(req: NextRequest) {
 
   const config = extractUpstreamConfig(root.config);
   if (!config) {
-    // 未配置：内置模型决策，再失败兜底 answer
-    try {
-      return NextResponse.json({ ...normalizeDecision(await sdkTurn(messages)), viaSdk: true } satisfies AnswerDecision);
-    } catch {
-      return NextResponse.json({ decision: 'answer' } satisfies AnswerDecision);
-    }
+    // v82：内置模型已移除——未配置直接走默认接听（决策是后台体验增强，不阻断来电）
+    return NextResponse.json({ decision: 'answer' } satisfies AnswerDecision);
   }
   let hostname = '';
   try {
@@ -184,22 +179,14 @@ export async function POST(req: NextRequest) {
   } catch {
     return NextResponse.json({ decision: 'answer' } satisfies AnswerDecision);
   }
-  // 内网地址：云端不可达 → 内置模型决策（决策是后台体验增强，不走浏览器直连）
+  // 内网地址：云端不可达 → 默认接听（决策是后台体验增强，不走浏览器直连）
   if (isPrivateHost(hostname)) {
-    try {
-      return NextResponse.json({ ...normalizeDecision(await sdkTurn(messages)), viaSdk: true } satisfies AnswerDecision);
-    } catch {
-      return NextResponse.json({ decision: 'answer' } satisfies AnswerDecision);
-    }
+    return NextResponse.json({ decision: 'answer' } satisfies AnswerDecision);
   }
   const result = await callUpstream(config, messages);
   if (result.reply) {
     return NextResponse.json(normalizeDecision(result.reply) satisfies AnswerDecision);
   }
-  // 上游故障：内置模型兜底，再失败 answer
-  try {
-    return NextResponse.json({ ...normalizeDecision(await sdkTurn(messages)), viaSdk: true } satisfies AnswerDecision);
-  } catch {
-    return NextResponse.json({ decision: 'answer' } satisfies AnswerDecision);
-  }
+  // 上游故障（v82：不再内置兜底）→ 默认接听
+  return NextResponse.json({ decision: 'answer' } satisfies AnswerDecision);
 }

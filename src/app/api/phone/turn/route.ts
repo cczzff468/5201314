@@ -40,7 +40,6 @@ import {
   isPrivateHost,
   normalizeHistory,
   parseInlineContact,
-  sdkTurn,
   unknownPersona,
 } from '@/lib/ios/call-upstream';
 
@@ -306,24 +305,15 @@ export async function POST(req: NextRequest) {
     messages.push({ role: 'user', content: proactiveAttempt >= 1 ? '（对方迟迟没有说话，请主动开口）' : '（请继续用口语回应）' });
   }
 
-  // ---------- 统一走用户自己的 API；未配置 / 上游故障时内置模型兜底 ----------
+  // ---------- v82：只走用户自己的 API；未配置返回配置引导 ----------
   const config = extractUpstreamConfig(root.config);
 
-  /** 内置模型兜底：把人设/记忆/时间块照常注入，保证通话体验不中断；viaSdk 供前端统计 */
-  const sdkFallback = async (): Promise<NextResponse> => {
-    try {
-      const reply = cleanCallReply(await sdkTurn(messages));
-      if (reply) return NextResponse.json({ reply, name: peerName, viaSdk: true });
-      return NextResponse.json({ error: '对方没有回应，请稍后再试' }, { status: 502 });
-    } catch (err) {
-      const detail = err instanceof Error && err.message ? err.message : '未知错误';
-      return NextResponse.json({ error: `内置模型也不可用：${detail}` }, { status: 502 });
-    }
-  };
-
   if (!config) {
-    // 未配置也能通话：直接内置模型接听
-    return sdkFallback();
+    // v82：内置模型兜底已移除——未配置返回明确引导，前端在通话界面展示
+    return NextResponse.json(
+      { error: '还没有配置 AI 接口：请到「设置 › API 配置」填写后才能拨打电话（联系人无法出声）' },
+      { status: 502 }
+    );
   }
   let hostname = '';
   try {
@@ -342,6 +332,9 @@ export async function POST(req: NextRequest) {
     const reply = cleanCallReply(result.reply);
     if (reply) return NextResponse.json({ reply, name: peerName });
   }
-  // 上游故障（连接失败/401/403/404/429/空回复）：内置模型兜底，通话不中断
-  return sdkFallback();
+  // 上游故障（连接失败/401/403/404/429/空回复）：透传真实错误（v82：不再内置兜底）
+  return NextResponse.json(
+    { error: result.error ?? '对方没有回应，请稍后再试（请检查 设置 › API 配置）' },
+    { status: 502 }
+  );
 }

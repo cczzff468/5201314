@@ -113,30 +113,7 @@ function extractText(payload: unknown): string {
   return '';
 }
 
-/**
- * 内置识图兜底（z-ai-web-dev-sdk createVision）：用户识图接口故障 / 未配置时把图片描述救回来。
- * 与 /api/chat 兜底策略一致；图片 data URL 直接作为 image_url 传入。
- */
-async function sdkVision(images: string[], text: string): Promise<string> {
-  const ZAI = (await import('z-ai-web-dev-sdk')).default;
-  const zai = await ZAI.create();
-  const userContent = [
-    { type: 'text' as const, text: text || '请描述这张图片' },
-    ...images.map((url) => ({ type: 'image_url' as const, image_url: { url } })),
-  ];
-  const completion = await zai.chat.completions.createVision({
-    model: 'glm-4.5v',
-    messages: [
-      { role: 'system', content: SYSTEM_PROMPT },
-      { role: 'user', content: userContent },
-    ],
-  });
-  const payload = completion as { choices?: Array<{ message?: { content?: unknown } }> };
-  const content = payload?.choices?.[0]?.message?.content;
-  const desc = typeof content === 'string' ? content.trim() : '';
-  if (!desc) throw new Error('内置识图模型返回空内容');
-  return desc;
-}
+// v82：内置识图兜底（z-ai-web-dev-sdk createVision）已移除——未配置/上游失败返回明确错误
 
 export async function POST(req: NextRequest) {
   let body: unknown;
@@ -154,21 +131,12 @@ export async function POST(req: NextRequest) {
   }
   const text = typeof root.text === 'string' ? root.text.trim().slice(0, 500) : '';
 
-  // forceSdk：前端识图链路故障后的兜底请求；未配置识图模型时也直接用内置识图
+  // forceSdk / 未配置识图模型（v82：内置识图已移除）→ 返回配置引导
   if (root.forceSdk === true || !config || !config.model) {
-    try {
-      return NextResponse.json({ desc: await sdkVision(images, text), viaSdk: true });
-    } catch (err) {
-      const detail = err instanceof Error && err.message ? err.message : '未知错误';
-      if (root.forceSdk === true) {
-        return NextResponse.json({ error: `内置识图模型失败：${detail}` }, { status: 502 });
-      }
-      // 未配置：保留原提示语义，附带内置模型失败原因
-      return NextResponse.json(
-        { error: `还没有配置识图模型（内置识图也不可用：${detail}），请到「设置 › 识图模型」填写` },
-        { status: 502 }
-      );
-    }
+    return NextResponse.json(
+      { error: '还没有配置识图模型：请到「设置 › 识图模型」填写支持图片输入的模型（如 gpt-4o-mini / glm-4v-flash）' },
+      { status: 502 }
+    );
   }
 
   // 内网地址：云端服务器必然不可达，标记 directOnly 让客户端改用浏览器直连
@@ -252,13 +220,7 @@ export async function POST(req: NextRequest) {
     break;
   }
 
-  // 上游识图接口全部失败：内置识图兜底，识图体验不中断
-  try {
-    return NextResponse.json({ desc: await sdkVision(images, text), viaSdk: true });
-  } catch {
-    // 内置识图也失败：返回上游侧真实原因
-  }
-
+  // 上游识图接口全部失败（v82：直接返回真实原因，不再内置兜底）
   return NextResponse.json(
     { error: lastErr || '识图接口不可用，请稍后重试' },
     { status: 502 }

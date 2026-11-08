@@ -352,35 +352,7 @@ async function upstreamText(cfg: FeedConfig, system: string, user: string): Prom
   throw new Error('上游接口重试次数用尽');
 }
 
-/** 内置模型兜底（z-ai-web-dev-sdk，仅后端）；429 限流自动退避重试 */
-async function sdkText(system: string, user: string): Promise<string> {
-  const ZAI = (await import('z-ai-web-dev-sdk')).default;
-  const zai = await ZAI.create();
-  let lastErr: unknown = null;
-  for (let attempt = 0; attempt < 3; attempt++) {
-    try {
-      const completion = await zai.chat.completions.create({
-        messages: [
-          { role: 'assistant', content: system },
-          { role: 'user', content: user },
-        ],
-        thinking: { type: 'disabled' },
-      });
-      const text = completion.choices[0]?.message?.content ?? '';
-      if (!text.trim()) throw new Error('内置模型返回空内容');
-      return text;
-    } catch (err) {
-      lastErr = err;
-      const msg = err instanceof Error ? err.message : String(err);
-      if (/429|Too many requests/i.test(msg) && attempt < 2) {
-        await new Promise((r) => setTimeout(r, 2500 * (attempt + 1)));
-        continue;
-      }
-      throw err;
-    }
-  }
-  throw lastErr instanceof Error ? lastErr : new Error('内置模型请求失败');
-}
+// v82：内置模型兜底（z-ai-web-dev-sdk sdkText）已移除——生成只走用户模型
 
 // ---------------- 输出解析 ----------------
 
@@ -798,17 +770,8 @@ export async function POST(req: NextRequest) {
       }
     }
     if (rawItems.length === 0) {
-      rawItems = parseItems(await sdkText(system, user));
-      // 内置模型偶发空/坏输出（典型：照抄排除名单里的名字 → 全部被过滤）→
-      // 换口令重试一次，并明确「黑名单只是查重用，禁止照抄其中任何名字」
-      if (rawItems.length === 0) {
-        rawItems = parseItems(
-          await sdkText(
-            system,
-            `${user}\n【重试要求】上一次输出无效（很可能照抄了排除名单里的名字而被全部过滤）。排除名单只是查重黑名单，输出中严禁出现其中任何一个名字或其近似变体；${count} 条必须全部为全新原创，与黑名单完全无关。`,
-          ),
-        );
-      }
+      // v82：未配置/用户模型失败——不再内置兜底，抛错走 ok:false（前端落本地种子）
+      throw new Error('还没有配置 AI 接口或生成失败：请到「设置 › API 配置」填写后重试');
     }
   } catch (err) {
     return NextResponse.json(

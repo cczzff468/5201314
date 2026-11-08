@@ -2161,3 +2161,29 @@ Stage Summary:
 - AI Phone 永久在线版上线：https://5201314-production.up.railway.app（Railway 项目「AI Phone」trial 额度 $5）
 - 部署全链路走 GraphQL API（项目/服务/变量/卷/域名/指定 commit 构建），无需 CLI
 - 关键文件：Dockerfile、docker-entrypoint.sh、.railwayignore、src/instrumentation-node.ts
+
+## 2026-11-08 · v82 移除内置模型：z-ai-web-dev-sdk 服务端兜底全量下线
+
+Task ID: 32
+Agent: 主控 Agent（Z.ai Code）
+Task: 用户要求「把 z-ai-web-dev-sdk 服务端兜底删除」——AI 能力完全走用户自配的 OpenAI 兼容接口，无任何隐藏内置通道
+
+Work Log:
+- [范围] 全库 17 个直接引用 + 10 个间接引用（completeWithFallback/sdkTurn）共 27 处，分四条链路逐一拆除
+- [lib 层] server-llm.ts：删 sdkComplete + SDK 全局串行队列（runInSdkQueue/runSdkHiSession 双优先级会话锁整体移除），completeWithFallback → 纯上游（未配置抛中文引导错误）；call-upstream.ts：删 sdkTurn；cloud-tts.ts 整文件删除
+- [聊天链路] /api/chat：删 sdkChat/forceSdk 路径/X-Reply-Via 头，未配置→502「还没有配置 AI 接口：请先到设置›API 配置」，上游失败→透传真实错误；chat-stream-store.ts（前端）：删 sdkFallbackOnce 死请求，isApiUnconfigured 直接落引导文案；chat-errors.ts：classifyChatError 正则补「还没有配置 AI 接口」→ auth 类透传（否则落「消息没有送达」通用文案）
+- [识图链路] /api/vision、/api/phone-vision：删 sdkVision（glm-4.5v 兜底），未配置/上游失败返回配置引导
+- [翻译] /api/translate：删 sdkTranslate（8 次退避重试+高优会话锁），forceSdk→引导错误，上游连不通→directOnly 让浏览器直连
+- [电话] phone/answer（未配置→默认接听）、phone/turn（未配置→502 引导「联系人无法出声」，上游失败透传 result.error）、phone/followup（静默跳过）、phone/proactive（action:skip）——决策类保留静态降级不阻断来电
+- [语音] /api/phone/tts、/api/phone/asr、/api/tts(provider=server) → 501 下线说明（前端 catch 后回退浏览器本地朗读/SenseVoice 离线识别/键盘输入，cabin-voice ①②链路不受影响）
+- [SDK 专有] /api/search（微信「网络结果」）→ 501+空 results（本地聊天记录/联系人搜索不受影响）；/api/ai-product-img → 502 引导（客户端落卡通占位图）；mt-img llmCommonsQuery → 恒 null（落本地默认图）
+- [内容生成] tb-feed/mt-feed/mt-fun：删 sdkText，未配置/上游失败 → ok:false 或 seed:true 种子数据（频道永远可用）
+- [部署] docker-entrypoint.sh 删 .z-ai-config 注入段（ZAI_BASE_URL/ZAI_API_KEY 环境变量不再需要）；Dockerfile 注释更新为「AI 完全走用户自配」；package.json 保留 z-ai-web-dev-sdk 依赖（scripts/gen-* 开发期资源生成工具仍用，Next standalone 零引用不打包进运行时）
+- [验证] tsc 改动文件 0 新错误（存量基线不变）；ESLint 20 个改动文件全绿；API 冒烟：chat/translate/vision/tb-feed/offline 未配置→引导错误，mt-fun→完整种子数据，search/tts/asr→501 下线说明，phone/answer→默认接听，内网地址→directOnly 直连链路保留
+- [E2E·浏览器] 解锁→信息→小助手→发消息：「还没有配置 AI 接口：请到『设置 › API 配置』填写 API 地址与 Key 后重试」正确展示（带点击重试入口），页面零控制台错误；配置不可达上游→directOnly 浏览器直连链路完好
+- [排障] E2E 时发现 classifyChatError 正则未覆盖新文案（落到通用「消息没有送达」）→ 补正则修复后验证通过；浏览器首开白屏为 SW 陈旧缓存+HMR origin 拦截（127.0.0.1 vs localhost），清 storage+注销 SW 后正常（存量现象，非本次引入）
+
+Stage Summary:
+- 运行时代码零 z-ai-web-dev-sdk 引用（rg 验证仅剩注释与开发期脚本）；沙箱与 Railway 行为完全一致：无隐藏 AI，全部功能要么走用户自配 API 要么明确引导
+- 各功能降级路径：聊天/翻译/识图→配置引导；美团/淘宝 feed→种子数据/本地生成器；通话语音→浏览器本地朗读；ASR→离线模型；搜索/AI 生图→下线说明
+- 用户影响：不填 Key 不再有免费内置聊天（原沙箱福利），填 Key 后全链路不变；Railway 部署无需再配 ZAI_* 环境变量

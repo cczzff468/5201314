@@ -182,35 +182,7 @@ async function upstreamText(cfg: FeedConfig, system: string, user: string): Prom
   throw new Error('上游接口重试次数用尽');
 }
 
-/** 内置模型兜底（z-ai-web-dev-sdk，仅后端）；429 限流自动退避重试 */
-async function sdkText(system: string, user: string): Promise<string> {
-  const ZAI = (await import('z-ai-web-dev-sdk')).default;
-  const zai = await ZAI.create();
-  let lastErr: unknown = null;
-  for (let attempt = 0; attempt < 3; attempt++) {
-    try {
-      const completion = await zai.chat.completions.create({
-        messages: [
-          { role: 'assistant', content: system },
-          { role: 'user', content: user },
-        ],
-        thinking: { type: 'disabled' },
-      });
-      const text = completion.choices[0]?.message?.content ?? '';
-      if (!text.trim()) throw new Error('内置模型返回空内容');
-      return text;
-    } catch (err) {
-      lastErr = err;
-      const msg = err instanceof Error ? err.message : String(err);
-      if (/429|Too many requests/i.test(msg) && attempt < 2) {
-        await new Promise((r) => setTimeout(r, 2500 * (attempt + 1)));
-        continue;
-      }
-      throw err;
-    }
-  }
-  throw lastErr instanceof Error ? lastErr : new Error('内置模型请求失败');
-}
+// v82：内置模型兜底（z-ai-web-dev-sdk sdkText）已移除——生成只走用户模型
 
 // ---------------- 输出解析 ----------------
 
@@ -601,14 +573,12 @@ export async function POST(req: NextRequest) {
     // v67 全量预设库：lib:meituan-3.1（美团信息流生成提示词 system+user；禁用=不发起本次生成，前端走本地生成器）
     const user = libPromptTextMulti(['lib:meituan-3.1'], { topic, count: n, nonce }, buildUser({ topic, mode, count: n, exclude, nonce })) ?? '';
     if (!user) return { items: [], source: 'sdk' };
+    if (!userCfg) return { items: [], source: 'sdk' }; // v82：未配置——不再内置兜底，前端落本地生成器
     try {
-      if (userCfg) {
-        return { items: parseItems(await upstreamText(userCfg, system, user)), source: 'user' };
-      }
-      return { items: parseItems(await sdkText(system, user)), source: 'sdk' };
+      return { items: parseItems(await upstreamText(userCfg, system, user)), source: 'user' };
     } catch {
-      // 用户模型失败 → 内置模型兜底
-      return { items: parseItems(await sdkText(system, user)), source: 'sdk' };
+      // 用户模型失败（v82：不再内置兜底）→ 本地生成器
+      return { items: [], source: 'sdk' };
     }
   };
 

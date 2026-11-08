@@ -74,7 +74,7 @@ function sanitizeImages(images: string[]): string[] {
   return images.filter((u) => typeof u === 'string' && u.startsWith('data:image/'));
 }
 
-/** 内置识图兜底：POST /api/vision { forceSdk: true }（直连失败后的最终手段） */
+/** 识图最终请求：POST /api/vision { forceSdk: true }（v82：内置识图已移除，返回配置引导错误） */
 async function describeViaSdk(req: VisionRequest): Promise<string> {
   const images = sanitizeImages(req.images);
   if (images.length === 0) return '';

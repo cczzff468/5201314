@@ -13,7 +13,7 @@ import { completeWithFallback, extractUpstreamConfig, readJsonBody, type LLMMess
  * - temperature?: 覆盖 config.temperature（可选）
  *
  * 响应：{ text, via: 'upstream'|'sdk' }；失败 { error } + 4xx/5xx。
- * 上游未配置/失败时自动落 z-ai-web-dev-sdk 内置模型兜底（与 /api/chat 同策略）。
+ * v82：只走用户配置的上游（内置模型兜底已移除）；未配置/失败返回 502 错误（与 /api/chat 同策略）。
  */
 export async function POST(req: NextRequest) {
   const body = await readJsonBody(req);

@@ -203,8 +203,7 @@ function sseToTextStream(upstreamBody: ReadableStream<Uint8Array>): ReadableStre
           // 已关闭
         }
       } catch (err) {
-        // 上游异常：把错误传播到下游 reader.read()，让客户端 streamOnce 外层 catch 捕获并
-        // 走 SDK 兜底（配合 chat-stream-store 重建 raw/scanner 后由 SDK 文本接管）；
+        // 上游异常：把错误传播到下游 reader.read()，让客户端 streamOnce 外层 catch 捕获并展示错误；
         // 不再静默 close()，否则客户端会把「截断回复」当成完整回复落地
         try {
           controller.error(err);
@@ -457,39 +456,13 @@ async function proxyToUpstream(config: UpstreamConfig, messages: ChatApiMessage[
   });
 }
 
-// ---------------- 内置模型兜底（与 server-llm.ts 同策略） ----------------
+// ---------------- 配置引导错误（v82：内置模型已移除，未配置时统一提示） ----------------
 
-/** 服务端内置模型（z-ai-web-dev-sdk）：用户上游故障 / 未配置时把回复救回来，聊天体验不中断。
- *  temperature（可选）：客户端传入时透传给内置模型——Task 20：低温度下同输入得到近乎相同的回复，
- *  是「一起听」复读体验的根因之一，SDK 兜底同样需要多样性。 */
-async function sdkChat(messages: ChatApiMessage[], temperature?: number): Promise<string> {
-  const ZAI = (await import('z-ai-web-dev-sdk')).default;
-  const zai = await ZAI.create();
-  const completion = await zai.chat.completions.create({
-    // z-ai SDK 的 ChatMessage 类型实际接受 system 角色，直接传人设/世界书/记忆 system 块
-    messages: messages.map((m) => ({ role: m.role, content: m.content })),
-    thinking: { type: 'disabled' },
-    ...(typeof temperature === 'number' && Number.isFinite(temperature) ? { temperature } : {}),
-  });
-  const text = completion.choices[0]?.message?.content ?? '';
-  if (!text.trim()) throw new Error('内置模型返回空内容');
-  return text;
-}
+const NOT_CONFIGURED_MSG =
+  '还没有配置 AI 接口：请先到「设置 › API 配置」填写 OpenAI 兼容的 API 地址与 API Key（配置后即可正常聊天）';
 
-function textResponse(text: string): Response {
-  return new Response(text, {
-    headers: {
-      'Content-Type': 'text/plain; charset=utf-8',
-      'Cache-Control': 'no-cache, no-transform',
-      'X-Reply-Via': 'sdk-fallback',
-    },
-  });
-}
-
-/** SDK 兜底失败时的统一错误响应 */
-function sdkErrorResponse(sdkErr: unknown, hint: string): NextResponse {
-  const detail = sdkErr instanceof Error && sdkErr.message ? sdkErr.message : '未知错误';
-  return NextResponse.json({ error: `${hint}（内置模型也不可用：${detail}）` }, { status: 502 });
+function notConfiguredResponse(): NextResponse {
+  return NextResponse.json({ error: NOT_CONFIGURED_MSG }, { status: 502 });
 }
 
 // ---------------- 路由入口 ----------------
@@ -517,29 +490,18 @@ export async function POST(req: NextRequest) {
       ? allMsgs.slice(0, 1).concat(allMsgs.slice(-39))
       : allMsgs.slice(-40);
 
-  // 可选 temperature（Task 20）：SDK 兜底路径透传，驱动输出多样性；非法/缺省时不传（SDK 用自身默认值）
-  const temperature = typeof root.temperature === 'number' && Number.isFinite(root.temperature) ? root.temperature : undefined;
+  // v82：root.temperature（原 SDK 兜底透传用）已随内置模型移除；上游温度走 config.temperature
 
-  // forceSdk：前端在代理 + 浏览器直连都失败后的最终兜底请求（直接用内置模型生成）
+  // forceSdk：前端在代理 + 浏览器直连都失败后的最终兜底请求（v82：内置模型已移除，
+  // 语义变为直接返回配置引导，前端会把它作为最终错误展示）
   if (root.forceSdk === true) {
-    try {
-      return textResponse(await sdkChat(messages, temperature));
-    } catch (sdkErr) {
-      return sdkErrorResponse(sdkErr, '内置模型生成失败');
-    }
+    return notConfiguredResponse();
   }
 
   const config = extractConfig(root.config);
   if (!config) {
-    // 未配置也能聊：直接用服务端内置模型，不再拦截报错
-    try {
-      return textResponse(await sdkChat(messages, temperature));
-    } catch (sdkErr) {
-      return sdkErrorResponse(
-        sdkErr,
-        '还没有配置 AI 接口：请先到「设置 › API 配置」填写 OpenAI 兼容的 API 地址与 API Key'
-      );
-    }
+    // v82：未配置直接返回引导（不再内置模型免配置聊天）
+    return notConfiguredResponse();
   }
   // 内网地址：云端服务器必然不可达，返回 directOnly 标记让客户端改用浏览器直连
   try {
@@ -571,13 +533,9 @@ export async function POST(req: NextRequest) {
       // 非 JSON 错误体按非 directOnly 处理
     }
     if (directOnly) return res;
-    // 其余上游失败（连接失败 / 401 / 404 / 空响应 / 5xx）：服务端直接用内置模型兜底，聊天不中断
-    try {
-      return textResponse(await sdkChat(messages, temperature));
-    } catch {
-      // SDK 也失败：返回原始上游错误，保留真实原因
-      return res;
-    }
+    // 其余上游失败（连接失败 / 401 / 404 / 空响应 / 5xx）：直接透传真实错误
+    // （v82：内置模型兜底已移除，保留原响应让前端看到真实原因）
+    return res;
   } catch (err) {
     const detail = err instanceof Error && err.message ? err.message : '未知错误';
     return NextResponse.json({ error: `AI 服务暂时不可用：${detail}` }, { status: 500 });

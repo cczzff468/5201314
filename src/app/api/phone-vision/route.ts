@@ -13,10 +13,8 @@ export const runtime = 'nodejs';
  *           config?: { baseUrl, apiKey, model }（用户配置的识图模型，可空） }
  * 响应：{ desc: string }。
  *
- * 策略：配置了识图模型 → 转发（OpenAI 兼容多模态，非流式）；未配置 / 内网地址 /
- * 上游故障 → 内置 z-ai-web-dev-sdk（glm-4.5v，原生 grounding 坐标能力，正好吃
- * 「归一化 0~1000 bbox」这种格式）。屏幕坐标定位对模型要求比聊天描述高，
- * 内置兜底反而是主路径，优先保证能定位。
+ * 策略：只走用户配置的识图模型（OpenAI 兼容多模态，非流式）；未配置 / 内网地址 /
+ * 上游故障返回明确错误（v82：内置 z-ai-web-dev-sdk 兜底已移除）。
  */
 
 interface VisionUpstreamConfig {
@@ -72,29 +70,7 @@ function extractErrorMessage(payload: unknown): string {
   return '';
 }
 
-/** 内置屏幕视觉分析（z-ai-web-dev-sdk createVision · glm-4.5v：grounding 坐标是强项） */
-async function sdkVision(image: string, ask: string): Promise<string> {
-  const ZAI = (await import('z-ai-web-dev-sdk')).default;
-  const zai = await ZAI.create();
-  const completion = await zai.chat.completions.createVision({
-    model: 'glm-4.5v',
-    messages: [
-      { role: 'system', content: SYSTEM_PROMPT },
-      {
-        role: 'user',
-        content: [
-          { type: 'text' as const, text: ask },
-          { type: 'image_url' as const, image_url: { url: image } },
-        ],
-      },
-    ],
-  });
-  const payload = completion as { choices?: Array<{ message?: { content?: unknown } }> };
-  const content = payload?.choices?.[0]?.message?.content;
-  const desc = typeof content === 'string' ? content.trim() : '';
-  if (!desc) throw new Error('内置视觉模型返回空内容');
-  return desc;
-}
+// v82：内置屏幕视觉分析（z-ai-web-dev-sdk createVision）已移除——未配置/失败返回明确错误
 
 export async function POST(req: NextRequest) {
   let body: unknown;
@@ -116,14 +92,20 @@ export async function POST(req: NextRequest) {
 
   const config = extractConfig(root.config);
 
-  // 未配置识图模型 / 内网地址（服务器不可达且本端点无直连链路）→ 直接内置 SDK
-  if (!config || isPrivateHost(new URL(config.baseUrl).hostname)) {
+  // 未配置识图模型 / 内网地址（v82：不再内置兜底）→ 配置引导
+  let privateHost = false;
+  if (config) {
     try {
-      return NextResponse.json({ desc: await sdkVision(image, ask), viaSdk: true });
-    } catch (err) {
-      const detail = err instanceof Error && err.message ? err.message : '未知错误';
-      return NextResponse.json({ error: `内置视觉模型失败：${detail}` }, { status: 502 });
+      privateHost = isPrivateHost(new URL(config.baseUrl).hostname);
+    } catch {
+      privateHost = false;
     }
+  }
+  if (!config || privateHost) {
+    return NextResponse.json(
+      { error: '还没有配置识图模型：请到「设置 › 识图模型」填写支持图片输入的模型（屏幕分析需要视觉能力）' },
+      { status: 502 }
+    );
   }
 
   // 用户识图模型（公网）→ 转发；失败降级内置 SDK（定位是硬需求，尽量救回来）
@@ -197,11 +179,9 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // 上游全部失败 → 内置 SDK 兜底（「点文字」是硬操作，尽力救）
-  try {
-    return NextResponse.json({ desc: await sdkVision(image, ask), viaSdk: true, upstreamError: lastErr });
-  } catch (err) {
-    const detail = err instanceof Error && err.message ? err.message : '未知错误';
-    return NextResponse.json({ error: `屏幕视觉分析失败：上游 ${lastErr || '不可用'}；内置模型 ${detail}` }, { status: 502 });
-  }
+  // 上游全部失败（v82：直接返回真实原因）
+  return NextResponse.json(
+    { error: `屏幕视觉分析失败：${lastErr || '识图接口不可用'}` },
+    { status: 502 }
+  );
 }

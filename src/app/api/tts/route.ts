@@ -6,11 +6,10 @@ import { NextRequest, NextResponse } from 'next/server';
  * 返回 audio/mpeg 二进制；失败返回 JSON { error }（中文文案，不回显 API Key）。
  * 配置由前端「设置 › 语音 API」下发，保存后下一次请求即生效（无缓存、无重启）。
  *
- * provider='server'：零配置云端合成兜底（内置 SDK，无需任何 Key）——本地 speechSynthesis
- * 引擎静音（国内安卓常见）时由客户端自动降级调用，保证语音功能「一定有声音」。 */
+ * v82：provider='server'（内置 SDK 零配置兜底）已下线——本地 speechSynthesis 静音时
+ * 由客户端提示配置第三方语音服务（MiniMax / OpenAI 兼容 / Fish Audio）。 */
 
 import { fishaudioSynthesize, minimaxSynthesize, openaiSynthesize, type TtsProvider, type TtsUpstreamConfig } from '@/lib/server-tts';
-import { cloudSynthesize } from '@/lib/server/cloud-tts';
 
 export const runtime = 'nodejs';
 
@@ -35,26 +34,12 @@ export async function POST(req: NextRequest) {
   const cfgRoot = typeof root.config === 'object' && root.config !== null ? (root.config as Record<string, unknown>) : {};
 
   const provider = PROVIDERS.includes(cfgRoot.provider as TtsProvider) ? (cfgRoot.provider as TtsProvider) : null;
-  // ---- 零配置云端合成兜底（provider='server'，无需 baseUrl/apiKey）----
+  // ---- provider='server'（内置 SDK 零配置兜底，v82 已下线）----
   if (cfgRoot.provider === 'server') {
-    const text = typeof root.text === 'string' ? root.text.trim().slice(0, MAX_TEXT) : '';
-    if (!text) return NextResponse.json({ error: '缺少文本' }, { status: 400 });
-    const voiceId = typeof root.voiceId === 'string' ? root.voiceId.trim().slice(0, 200) : '';
-    const speedRaw = typeof root.speed === 'number' && Number.isFinite(root.speed) ? root.speed : 1;
-    try {
-      const buffer = await cloudSynthesize(text, voiceId, speedRaw);
-      return new NextResponse(new Uint8Array(buffer), {
-        status: 200,
-        headers: {
-          'Content-Type': 'audio/wav',
-          'Content-Length': String(buffer.length),
-          'Cache-Control': 'no-store',
-        },
-      });
-    } catch (err) {
-      const detail = err instanceof Error && err.message ? err.message : '未知错误';
-      return NextResponse.json({ error: detail }, { status: 502 });
-    }
+    return NextResponse.json(
+      { error: '云端语音已下线（内置语音服务已移除）：请在 设置 › 语音 API 配置 MiniMax / OpenAI 兼容 / Fish Audio' },
+      { status: 501 }
+    );
   }
   if (!provider) {
     return NextResponse.json({ error: '不支持的服务商' }, { status: 400 });

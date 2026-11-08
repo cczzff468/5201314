@@ -2,7 +2,7 @@
  * AI 自创商品真图自动生成（第十四轮用户反馈：AI 自创商品用真图，走「设置 → 图像生成」）：
  * - 之前 AI 自主创建的淘宝宝贝/美团菜品/店铺门头只有本地卡通图（按名字配品类图）；
  *   本模块在创建瞬间自动生成写实商品图：优先「设置 › 图像生成」配置的模型（与手动
- *   「生成商品图片」弹层同一管线 generateFreePhoto），未配置任何模型时兜底走内置
+ *   「生成商品图片」弹层同一管线 generateFreePhoto），未配置任何模型时兜底走服务端
  *   服务端生图（/api/ai-product-img，z-ai SDK）——开箱即真图；
  * - 生成成功写入既有图片覆盖管线（tbSetProductImg / mtSetProductImg / 门头 mutate+persist，
  *   全部自动持久化），全 App 渲染点即时生效；并广播 AI_PRODUCT_IMG_EVENT 让打开中的
@@ -35,7 +35,7 @@ function buildPrompt(kind: AiProductImgKind, name: string): string {
   return libPromptTextMulti(['lib:taobao-8.1'], {}, `街边温馨小店门头实拍照片：暖色灯箱招牌的小店外观，招牌上文字柔和虚化不可辨认，白天自然光，干净整洁，高清写实街景摄影，无水印`) ?? '';
 }
 
-// ---------------- 模型选择：设置›图像生成 当前配置/预设优先，无配置走内置服务端兜底 ----------------
+// ---------------- 模型选择：设置›图像生成 当前配置/预设优先（v82：无配置时服务端返回引导，落卡通占位图） ----------------
 
 function pickUserCfg(): (ImgGenConfig & { mode?: 'proxy' | 'direct' }) | null {
   try {
@@ -52,7 +52,7 @@ function pickUserCfg(): (ImgGenConfig & { mode?: 'proxy' | 'direct' }) | null {
 
 async function generateOne(cfg: (ImgGenConfig & { mode?: 'proxy' | 'direct' }) | null, prompt: string): Promise<string> {
   if (cfg) return generateFreePhoto(cfg, prompt); // 用户模型管线（内部已压缩 1024px）
-  // 内置兜底：服务端 z-ai SDK 文生图 → 客户端压缩到 640px 落库（控制 kv 体积）
+  // 服务端生图（v82：需在 设置›图像生成 配置模型）→ 客户端压缩到 640px 落库（控制 kv 体积）
   const res = await fetch('/api/ai-product-img', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

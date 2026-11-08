@@ -246,34 +246,7 @@ async function upstreamText(cfg: FeedConfig, system: string, user: string): Prom
   throw new Error('上游接口重试次数用尽');
 }
 
-async function sdkText(system: string, user: string): Promise<string> {
-  const ZAI = (await import('z-ai-web-dev-sdk')).default;
-  const zai = await ZAI.create();
-  let lastErr: unknown = null;
-  for (let attempt = 0; attempt < 3; attempt++) {
-    try {
-      const completion = await zai.chat.completions.create({
-        messages: [
-          { role: 'assistant', content: system },
-          { role: 'user', content: user },
-        ],
-        thinking: { type: 'disabled' },
-      });
-      const text = completion.choices[0]?.message?.content ?? '';
-      if (!text.trim()) throw new Error('内置模型返回空内容');
-      return text;
-    } catch (err) {
-      lastErr = err;
-      const msg = err instanceof Error ? err.message : String(err);
-      if (/429|Too many requests/i.test(msg) && attempt < 2) {
-        await new Promise((r) => setTimeout(r, 2500 * (attempt + 1)));
-        continue;
-      }
-      throw err;
-    }
-  }
-  throw lastErr instanceof Error ? lastErr : new Error('内置模型请求失败');
-}
+// v82：内置模型兜底（z-ai-web-dev-sdk sdkText）已移除——生成只走用户模型，失败落种子数据
 
 // ---------------- 输出解析（与 /api/mt-feed 同实现） ----------------
 
@@ -695,14 +668,9 @@ export async function POST(req: NextRequest) {
         if (items.length > 0) return items;
       }
     } catch {
-      // 用户模型失败 → 内置模型兑底
+      // 用户模型失败（v82：不再内置兜底）→ 种子数据
     }
-    try {
-      const items = parseItems(await sdkText(system, user));
-      return items.length > 0 ? items : null;
-    } catch {
-      return null;
-    }
+    return null; // v82：未配置/生成失败 → 内置种子数据
   };
 
   const items = (await generate()) ?? [];

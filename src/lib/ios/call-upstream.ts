@@ -6,7 +6,7 @@
  * - 公网地址 → 服务端代理转发（浏览器无感）；
  * - 内网 / 本机地址 → 返回 directOnly + 组装好的 messages，由浏览器直连
  *   （云端服务器不可达内网，见 src/lib/ios/direct-api.ts）。
- * 未配置 / 上游报错 → 内置模型（z-ai-web-dev-sdk）兜底。
+ * 未配置 / 内网地址 → 返回明确错误（v82：内置模型兜底已移除，只走用户自己的 API）。
  *
  * 前端直传联系人资料（联系人存浏览器本地 IndexedDB，服务端不查库）。
  */
@@ -127,33 +127,6 @@ export function extractReplyText(raw: string): string {
   } catch {
     return '';
   }
-}
-
-/**
- * 内置模型兜底（z-ai-web-dev-sdk）：用户上游故障 / 未配置时把通话对话救回来，
- * 与 /api/chat、server-llm.ts 同策略；SDK 不接收 system 角色，人设并入 assistant。
- */
-export async function sdkTurn(messages: CallApiMessage[]): Promise<string> {
-  const ZAI = (await import('z-ai-web-dev-sdk')).default;
-  const zai = await ZAI.create();
-  // #20 通话请求超时看门狗：SDK 不接收 signal 参数，用 Promise.race 包 60s 硬超时——
-  // 内置模型卡死时抛「内置模型响应超时」，让 /api/phone/turn 等路由走既有错误兜底（502 + 友好文案），
-  // 前端不再永远「正在思考」
-  const completion = await Promise.race([
-    zai.chat.completions.create({
-      messages: messages.map((m) => ({
-        role: m.role === 'system' ? ('assistant' as const) : m.role,
-        content: m.content,
-      })),
-      thinking: { type: 'disabled' },
-    }),
-    new Promise<never>((_, reject) => {
-      setTimeout(() => reject(new Error('内置模型响应超时')), 60000);
-    }),
-  ]);
-  const text = completion.choices[0]?.message?.content ?? '';
-  if (!text.trim()) throw new Error('内置模型返回空内容');
-  return text;
 }
 
 /** 通话回复清理：去 markdown 符号 / 首尾引号包裹（TTS 朗读友好） */

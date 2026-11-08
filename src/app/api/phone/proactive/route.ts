@@ -26,7 +26,6 @@ import {
   extractUpstreamConfig,
   isPrivateHost,
   parseInlineContact,
-  sdkTurn,
 } from '@/lib/ios/call-upstream';
 
 export interface ProactiveDecision {
@@ -220,14 +219,10 @@ export async function POST(req: NextRequest) {
     },
   ];
 
-  // 与 answer 路由同款上游策略：未配置/内网地址 → 内置模型；公网 → 服务端代理；上游故障 → 内置模型兜底
+  // 与 answer 路由同款上游策略（v82：只走用户自己的 API，未配置/故障→跳过）
   const config = extractUpstreamConfig(root.config);
   if (!config) {
-    try {
-      return NextResponse.json(normalizeProactiveDecision(await sdkTurn(messages)) satisfies ProactiveDecision);
-    } catch {
-      return NextResponse.json({ action: 'skip', reason: 'decide-failed' } satisfies ProactiveDecision);
-    }
+    return NextResponse.json({ action: 'skip', reason: 'decide-failed' } satisfies ProactiveDecision);
   }
   let hostname = '';
   try {
@@ -236,20 +231,12 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ action: 'skip', reason: 'decide-failed' } satisfies ProactiveDecision);
   }
   if (isPrivateHost(hostname)) {
-    // 内网地址：云端不可达 → 决策是后台体验增强，不走浏览器直连，直接内置模型
-    try {
-      return NextResponse.json(normalizeProactiveDecision(await sdkTurn(messages)) satisfies ProactiveDecision);
-    } catch {
-      return NextResponse.json({ action: 'skip', reason: 'decide-failed' } satisfies ProactiveDecision);
-    }
+    // 内网地址：云端不可达 → 决策是后台体验增强，不走浏览器直连，直接跳过
+    return NextResponse.json({ action: 'skip', reason: 'decide-failed' } satisfies ProactiveDecision);
   }
   const result = await callUpstream(config, messages);
   if (result.reply) {
     return NextResponse.json(normalizeProactiveDecision(result.reply) satisfies ProactiveDecision);
   }
-  try {
-    return NextResponse.json(normalizeProactiveDecision(await sdkTurn(messages)) satisfies ProactiveDecision);
-  } catch {
-    return NextResponse.json({ action: 'skip', reason: 'decide-failed' } satisfies ProactiveDecision);
-  }
+  return NextResponse.json({ action: 'skip', reason: 'decide-failed' } satisfies ProactiveDecision);
 }

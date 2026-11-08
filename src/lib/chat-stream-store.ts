@@ -547,7 +547,7 @@ function patchState(rt: StreamRuntime, patch: Partial<ChatStreamState>): void {
 /**
  * 用户聊天 API 是否处于「未配置」状态：API Key 为空，且地址为空或仍是内置默认官方地址。
  * 此状态下 /api/chat 代理必然失败（服务端要求填写 API Key）、浏览器直连必然被 CORS 拦截，
- * 白白多等 1~3 秒并制造控制台 403 噪音——调用方应直接走服务端内置模型（forceSdk）兜底。
+ * 白白多等 1~3 秒并制造控制台 403 噪音——v82：直接落「未配置」错误引导（内置模型已移除）。
  * 注意：Key 为空但地址是自定义网关时不算未配置（存在免 Key 的本地网关），仍走正常链路。
  */
 function isApiUnconfigured(cfg: ApiConfig): boolean {
@@ -663,27 +663,6 @@ async function runStream(rt: StreamRuntime, opts: BeginChatStreamOptions): Promi
         if (done) break;
         onDelta(decoder.decode(value, { stream: true }));
       }
-    }
-  };
-
-  /**
-   * 最终兜底：代理 + 浏览器直连都失败后，请求服务端内置模型（forceSdk）生成回复；
-   * 成功把全量文本交给 onDelta 返回 true，失败（含非 200 / 空文本）返回 false 保留原错误。
-   */
-  const sdkFallbackOnce = async (roundMessages: ChatPayloadMessage[]): Promise<boolean> => {
-    try {
-      const res = await fetch('/api/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages: roundMessages, forceSdk: true }),
-      });
-      if (!res.ok) return false;
-      const text = await res.text();
-      if (!text.trim()) return false;
-      onDelta(text);
-      return true;
-    } catch {
-      return false;
     }
   };
 
@@ -818,17 +797,11 @@ async function runStream(rt: StreamRuntime, opts: BeginChatStreamOptions): Promi
     // 记录实际 payload：用户在流结束前关闭网页时，pagehide 上报服务端接力生成（bg-turn）
     activePayloads.set(rt.state.sessionKey, { messages: workMessages, config: effConfig });
     if (isApiUnconfigured(apiConfig)) {
-      // 未配置用户 API（无 Key + 官方默认地址）：代理与直连必然失败，跳过等待直接走
-      // 服务端内置模型（与下游失败兜底同一函数）；兜底失败才落错误文案引导用户去配置
-      const viaSdk = await sdkFallbackOnce(workMessages);
-      if (viaSdk) {
-        patchState(rt, { status: 'done' });
-      } else {
-        patchState(rt, {
-          status: 'error',
-          error: '还没有配置 API Key，内置模型也不可用；请到「设置 › API 配置」填写后重试',
-        });
-      }
+      // v82：内置模型已移除——未配置直接落错误引导（不再请求 forceSdk）
+      patchState(rt, {
+        status: 'error',
+        error: '还没有配置 AI 接口：请到「设置 › API 配置」填写 API 地址与 Key 后重试',
+      });
     } else {
       await streamOnce(workMessages);
       patchState(rt, { status: 'done' });
@@ -836,12 +809,9 @@ async function runStream(rt: StreamRuntime, opts: BeginChatStreamOptions): Promi
   } catch (err) {
     // 换号中止后不再补救：旧账号会话的回复已整体作废（SDK 兜底请求与错误状态一并跳过）
     if (rt.aborted) return;
-    // 代理与浏览器直连都失败：最后用服务端内置模型兜底一次（forceSdk），救回本轮回复；
-    // 兜底成功按正常完成收尾，失败才落错误文案（保留最先的代理侧错误，便于区分原因）；
-    // 流中已凑齐的分段已经过 onSegment 逐条投递上屏，出错不影响它们（不丢已到手的正文）
-    // 关键：进入 SDK 兜底前清空 raw 并重建分段器，避免「半截上游文本 + 完整 SDK 文本」拼接成乱文；
-    // 旧分段器已放出的分段保留上屏、不计入新分段器的条数计数
-    // 深度思考：剥离器/思考收集/实况状态同口径重建清零（半截思考随旧正文一并作废，不混入 SDK 回复）
+    // v82：内置模型兜底已移除——代理与浏览器直连都失败时直接落真实错误；
+    // 流中已凑齐的分段已经过 onSegment 逐条投递上屏，出错不影响它们（不丢已到手的正文）；
+    // raw/分段器/思考状态同口径清零（半截正文不落盘、不混入后续状态）
     raw = '';
     thinkFilter = createThinkFilter();
     thinkText = '';
@@ -853,15 +823,10 @@ async function runStream(rt: StreamRuntime, opts: BeginChatStreamOptions): Promi
     } else {
       scanner = null;
     }
-    const viaSdk = await sdkFallbackOnce(workMessages);
-    if (viaSdk) {
-      patchState(rt, { status: 'done' });
-    } else {
-      patchState(rt, {
-        status: 'error',
-        error: err instanceof Error && err.message ? err.message : '消息没有送达，请稍后重试',
-      });
-    }
+    patchState(rt, {
+      status: 'error',
+      error: err instanceof Error && err.message ? err.message : '消息没有送达，请稍后重试',
+    });
   }
   // ---- 收尾（status 补丁与 finalize 在同一微任务里，订阅方重渲染时落盘已完成）----
   // 换号中止（abortStreamsByPrefix）：整段收尾跳过——finalize 不再落盘（finalized 已预置）；

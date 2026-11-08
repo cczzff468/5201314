@@ -37,8 +37,8 @@ export function classifyChatError(rawMessage: string): ChatErrorInfo {
   const msg = String(rawMessage || '');
   const lower = msg.toLowerCase();
   // 项目内建的引导文案（更具体、本身已友好）直接透传，不套分类模板：
-  // 「还没有配置 API Key，内置模型也不可用；请到设置…」≠「Key 无效」——是没配置，不是配错
-  if (/还没有配置 ?api ?key|未配置.*api|内置模型也不可用/.test(lower)) {
+  // 「还没有配置 AI 接口/API Key…」≠「Key 无效」——是没配置，不是配错（v82：匹配新的「还没有配置 AI 接口」文案）
+  if (/还没有配置|未配置.*api|内置模型也不可用/.test(lower)) {
     return { kind: 'auth', text: msg.length <= 60 ? msg : 'API 未配置，请到「设置 › API 配置」填写后重试' };
   }
   // 状态码提取：「请求失败（401）」/「请求失败(429)」

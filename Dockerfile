@@ -6,10 +6,9 @@
 #      海外访问 music.163.com 可能慢/受限，失败仅音乐降级，不阻断主服务
 #   2. Next.js standalone（端口 $PORT，Railway 注入）——主应用
 #
-# AI 网关（z-ai-web-dev-sdk）通过 entrypoint 生成的 /app/.z-ai-config 注入：
-#   ZAI_BASE_URL + ZAI_API_KEY 环境变量（OpenAI 兼容 /v1 端点）→ 聊天/图生成可用；
-#   未配置时 SDK 直接初始化失败 → AI 功能返回错误，其余功能正常。
-#   （沙箱版网关 172.23.x.x 是内网地址，公网部署无法使用——此为架构边界）
+# AI 能力（v82）：z-ai-web-dev-sdk 已从运行时移除——AI 完全走用户在
+#   「设置 › API 配置」自行配置的 OpenAI 兼容接口（客户端随请求传入服务端代理，
+#   无需任何环境变量/网关注入）；未配置时返回明确引导，其余功能正常。
 
 FROM node:20-bookworm-slim
 
@@ -41,7 +40,7 @@ ENV NEXT_TELEMETRY_DISABLED=1
 ENV DATABASE_URL=file:/tmp/build-placeholder.db
 RUN bun run build
 
-# entrypoint：AI 网关配置注入 + netease-api + db push + 主服务
+# entrypoint：netease-api + db push + 主服务
 COPY docker-entrypoint.sh /app/docker-entrypoint.sh
 RUN chmod +x /app/docker-entrypoint.sh
 

@@ -5,9 +5,10 @@ export const runtime = 'nodejs';
 /**
  * 电话 App · 通话语音识别（ASR）
  * POST { audioBase64: string }（WAV 16kHz 单声道，客户端 AudioContext 解码后重采样编码）
- * 返回 { text }。
+ * v82：内置 z-ai-web-dev-sdk ASR 兜底已移除——该通道依赖沙箱专属 SDK。
+ * 识别链降级为：① SenseVoice 端侧模型（离线）→ ② 用户配置的云端 STT（设置 › 语音识别）；
+ * 两者都不可用时语音输入返回错误（键盘输入不受影响）。
  */
-
 export async function POST(req: NextRequest) {
   let body: unknown;
   try {
@@ -20,23 +21,11 @@ export async function POST(req: NextRequest) {
   if (!audioBase64) {
     return NextResponse.json({ error: '缺少音频数据' }, { status: 400 });
   }
-  // 60 秒 16kHz 16bit 单声道 ≈ 1.9MB ≈ base64 2.5MB，超限直接拒绝
-  if (audioBase64.length > 4_000_000) {
-    return NextResponse.json({ error: '录音太长，请说短一点' }, { status: 413 });
-  }
-
-  try {
-    const ZAI = (await import('z-ai-web-dev-sdk')).default;
-    const zai = await ZAI.create();
-    const response = await zai.audio.asr.create({ file_base64: audioBase64 });
-    const text = (response?.text ?? '').trim();
-    if (!text) {
-      return NextResponse.json({ error: '没有听清，请再说一遍' }, { status: 200 });
-    }
-    return NextResponse.json({ text });
-  } catch (err) {
-    console.error('[phone:asr]', err);
-    const detail = err instanceof Error && err.message ? err.message : '未知错误';
-    return NextResponse.json({ error: `语音识别失败：${detail}` }, { status: 502 });
-  }
+  return NextResponse.json(
+    {
+      error:
+        '内置语音识别已下线：请在 设置 › 语音识别 里下载离线识别模型（SenseVoice）或配置云端 STT；也可以改用键盘输入',
+    },
+    { status: 501 }
+  );
 }

@@ -42,7 +42,6 @@ import {
   isPrivateHost,
   normalizeHistory,
   parseInlineContact,
-  sdkTurn,
 } from '@/lib/ios/call-upstream';
 import { callOutcomeOf, outcomeConnected, type CallOutcome } from '@/lib/ios/call-outcome';
 
@@ -369,21 +368,14 @@ export async function POST(req: NextRequest) {
   const messages: CallApiMessage[] = [{ role: 'system', content: systemFull }, { role: 'user', content: recap.join('\n') }];
 
   const fail = () => NextResponse.json({ messages: [] });
-  const viaSdk = async (): Promise<NextResponse> => {
-    try {
-      return NextResponse.json({ messages: normalizeFollowup(await sdkTurn(messages), maxCount), viaSdk: true });
-    } catch {
-      return fail();
-    }
-  };
 
   const config = extractUpstreamConfig(root.config);
-  if (!config) return viaSdk();
+  if (!config) return fail(); // v82：未配置——后续消息是后台体验增强，静默跳过
   let hostname = '';
   try {
     hostname = new URL(config.baseUrl).hostname;
   } catch {
-    return viaSdk();
+    return fail();
   }
   // 内网 / 本机地址：云端不可达 → 浏览器直连（与 turn 路由同策略，保住用户自己的模型）
   if (isPrivateHost(hostname)) {
@@ -395,6 +387,6 @@ export async function POST(req: NextRequest) {
     const parsed = normalizeFollowup(result.reply, maxCount);
     if (parsed.length > 0) return NextResponse.json({ messages: parsed });
   }
-  // 上游故障 / 解析不出：内置模型兜底，再失败静默
-  return viaSdk();
+  // 上游故障 / 解析不出（v82：不再内置兜底）→ 静默跳过
+  return fail();
 }

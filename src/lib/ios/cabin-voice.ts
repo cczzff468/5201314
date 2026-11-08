@@ -11,7 +11,7 @@
  * 3. transcribeBlob —— 识别优先级链（v11）：
  *    ① 设置 App 已下载的 SenseVoice 端侧模型（offline-asr，断网可用、零配置零等待）；
  *    ② 设置 App 配置的云端 STT（stt-client → /api/stt，OpenAI 兼容服务商）；
- *    ③ 内置 z-ai ASR（POST /api/phone/asr，免配置服务端兑底）；
+ *    ③ 服务端 /api/phone/asr（v82：内置 z-ai ASR 已移除，恒 501——提示配置 ①②）；
  *    麦克风按钮与连续对讲共用本函数，一处接入全部生效；
  * 4. createVoiceSegmenter —— 连续对讲的自动分段：RMS 音量检测，
  *    检测到说话自动开录，静音 ~1.1s 自动收段 → onSegment(blob) → 逐句识别发送。
@@ -100,7 +100,7 @@ export async function blobToWav16kBase64(blob: Blob): Promise<string> {
  * v11 识别优先级链（接入设置 App 的 SenseVoice 模型）：
  * ① SenseVoice 端侧模型（设置里下载后就绪即用：断网可用、零成本、无外发流量）；
  * ② 用户在设置里配置的云端 STT（OpenAI 兼容 /audio/transcriptions，经 /api/stt 代理）；
- * ③ 内置 z-ai ASR（/api/phone/asr，免配置服务端兑底）。
+ * ③ /api/phone/asr（v82：内置 z-ai ASR 已移除，返回 501 提示走 ①②）。
  * 三级全失败才抛错 —— 只要有任何一路可用，语音输入就不再是「没反应」。
  */
 export async function transcribeBlob(blob: Blob): Promise<string> {
@@ -122,11 +122,11 @@ export async function transcribeBlob(blob: Blob): Promise<string> {
       const cloudText = await transcribeAudioBlob(blob);
       if (cloudText) return cloudText;
     } catch {
-      // 云端失败：降级内置兑底
+      // 云端失败：降级 ③（v82 恒 501，实际提示配置 ①②）
     }
   }
 
-  // ③ 内置 z-ai ASR 兑底（免配置，服务端转发）
+  // ③ 服务端 ASR（v82：已下线，返回 501 → 抛错由调用方提示「没听清/去配置」）
   const audioBase64 = await blobToWav16kBase64(blob);
   const res = await fetch('/api/phone/asr', {
     method: 'POST',

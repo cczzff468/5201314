@@ -10,7 +10,7 @@ export const runtime = 'nodejs';
  * 返回 { facts: { category: 'like'|'dislike'|'habit'|'identity'|'date', topic, content, weight }[] }
  * （0-6 条；非法分类/空白 topic 丢弃，权重缺省按关键词自动分类兜底）
  * 与 /api/memory/extract 同一服务端模式：用户 API 配置优先（非流式代理），
- * z-ai-web-dev-sdk 兜底（completeWithFallback）；失败返回 502，客户端静默降级不阻塞聊天。
+ * v82：只走用户配置的上游（completeWithFallback，内置模型已移除）；失败返回 502，客户端静默降级不阻塞聊天。
  * 只提取「稳定事实」（喜好/忌讳/习惯/身份/重要日子），一次性事件/临时安排/当下情绪一律忽略；
  * topic 是合并去重键（1~6 字关键词）：同一事物的变化沿用旧 topic（客户端按
  * contactId+category+topic 覆盖更新旧值而非堆叠，见 memory.ts upsertProfileFact）。
