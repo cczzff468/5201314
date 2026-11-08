@@ -21,5 +21,4 @@ dev.log
 dev.pid
 *.md.tmp
 
-# 生成产物（APK 4MB 也不上传，云端从版本 API 判断 apkReady=false 即可）
-public/AI-Phone.apk
+# v83 方案A：APK 随镜像部署（不再排除）——云端 /AI-Phone.apk 直链可下载，apkReady=true

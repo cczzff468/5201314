@@ -71,7 +71,8 @@ android-shell/android/.gradle/
 android-shell/android/app/build/
 android-shell/android/local.properties
 android-shell/node_modules/
-public/AI-Phone.apk
+# v83 方案A：APK 入库——沙箱/Railway 三端同一下载直链（/AI-Phone.apk），
+# 沙箱重建或云端部署都不再丢包（4MB 对 git 无压力，发版时重新 commit 覆盖即可）
 
 # v82 杂项：Railway 部署会话的临时文件
 cli-dl2.status
