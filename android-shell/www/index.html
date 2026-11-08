@@ -75,6 +75,29 @@
   }
   .tips p { color: rgba(255,255,255,0.4); font-size: 12px; line-height: 1.7; }
   .tips b { color: rgba(255,255,255,0.7); font-weight: 500; }
+  .dead {
+    display: none;
+    margin-top: 16px;
+    text-align: left;
+    background: rgba(255,107,107,0.08);
+    border: 1px solid rgba(255,107,107,0.25);
+    border-radius: 14px;
+    padding: 13px 14px;
+  }
+  .dead p { color: rgba(255,140,140,0.95); font-size: 12px; line-height: 1.7; }
+  .dead b { color: #ff8f8f; font-weight: 600; }
+  .connecting {
+    display: none;
+    margin-top: 26px;
+    color: rgba(255,255,255,0.35);
+    font-size: 13px;
+    letter-spacing: 1px;
+  }
+  .connecting .dots::after {
+    content: '';
+    animation: dots 1.2s steps(4) infinite;
+  }
+  @keyframes dots { 0% { content: ''; } 25% { content: '.'; } 50% { content: '..'; } 75% { content: '...'; } }
 </style>
 </head>
 <body>
@@ -82,23 +105,52 @@
     <div class="logo">📱</div>
     <h1>AI Phone</h1>
     <p class="sub">首次使用：填入你的 AI Phone 网站地址<br>之后打开 APP 直接进入</p>
+    <div class="connecting" id="connecting">正在连接服务器<span class="dots"></span></div>
     <input id="url" type="url" placeholder="https://你的预览地址" autocomplete="off" spellcheck="false">
     <div class="err" id="err"></div>
     <button onclick="go()">进 入</button>
+    <div class="dead" id="dead">
+      <p><b>上次的服务器连不上了</b>（会话可能已结束或正在重启）：<br>· 重启后回来点「进入」即可重连<br>· 换了新的预览地址 → 粘贴新地址进入</p>
+    </div>
     <div class="tips">
       <p><b>地址在哪？</b> 在电脑或手机上打开 AI Phone 网页，复制浏览器<b>地址栏</b>的完整网址，粘贴到这里（末尾不用带 / ）。</p>
     </div>
   </div>
 <script>
-  // 已保存地址 → 自动进入（静默跳转，200ms 让黑屏过渡不突兀）
+  // v1.4.3：已保存地址 → 先探活再自动进入。
+  // 背景：预览服务器（沙箱）会随会话结束而关闭。旧版「保存过就无条件跳转」，
+  // 服务器关了 APP 就变白屏砖——没有任何入口换新地址。现在先向 /api/app-version
+  // 发一个 no-cors 探针（能收到任何 HTTP 响应即视为活着，连接拒绝/超时视为不在）：
+  //   · 活着  → 静默自动进入（与旧版体验一致）；
+  //   · 不在了 → 停在配置页：预填旧地址 + 红色提示「服务器连不上」+ 重连/换址引导。
+  // 探针容忍一次超时重试（首次冷启动可能要 1~3s 唤醒编译）。
   try {
     var saved = localStorage.getItem('aiphone_server');
     if (saved && /^https?:\/\//i.test(saved)) {
-      setTimeout(function () { location.replace(normalize(saved)); }, 200);
+      var u = normalize(saved);
+      document.getElementById('url').value = u;
+      document.getElementById('connecting').style.display = 'block';
+      probe(u, 0);
     } else if (saved) {
       document.getElementById('url').value = saved;
     }
   } catch (e) {}
+
+  function probe(u, attempt) {
+    var ctrl = ('AbortController' in window) ? new AbortController() : null;
+    var timer = ctrl ? setTimeout(function () { ctrl.abort(); }, 6000) : null;
+    fetch(u + '/api/app-version', { mode: 'no-cors', cache: 'no-store', signal: ctrl ? ctrl.signal : undefined })
+      .then(function () {
+        clearTimeout(timer);
+        location.replace(u + '/');
+      })
+      .catch(function () {
+        clearTimeout(timer);
+        if (attempt === 0) { setTimeout(function () { probe(u, 1); }, 1200); return; }
+        document.getElementById('connecting').style.display = 'none';
+        document.getElementById('dead').style.display = 'block';
+      });
+  }
 
   function normalize(u) {
     u = (u || '').trim().replace(/\/+$/, '');

@@ -2119,3 +2119,24 @@ Work Log:
 Stage Summary:
 - 预览/锁屏/APP 二次打开全面提速：SW 资源缓存让所有静态资源零网络等待（54/54 transferSize=0），刷新 DCL 340ms；dev server 重启后自动预热编译，首位访客不再白屏等待
 - 关键文件：public/sw.js（fetch SWR + 缓存版本化）、src/app/layout.tsx（启动注册）、src/instrumentation-node.ts（warmHomePage）
+
+## 2026-11-08 · v1.4.3 APK 下载修复 + 壳防变砖（探活引导）+ 一键重打脚本
+
+Task ID: 30
+Agent: 主控 Agent（Z.ai Code）
+Task: 用户反馈「网页变成APP下载不了了」+ 期望「离开沙箱也能用的APP」——重打 APK 并解决服务器关闭后 APP 变砖问题
+
+Work Log:
+- [诊断] APK 下载失效根因：public/AI-Phone.apk 在 .gitignore（74 行，体积考量不入库），沙箱重建即消失 → /api/app-version apkReady=false → 弹窗不弹、设置页永远「打包中」；本沙箱无 Android SDK 无 javac（系统 java 是 JRE），全链路需重装
+- [工具链] 华为云镜像装 OpenJDK 21.0.2 到 ~/jdk（194MB，系统 JRE 无 javac 不可用）；dl.google.com 装 cmdline-tools + platform-tools + android-36 + build-tools 36.0.0 到 ~/android-sdk（153MB）；android-shell bun install + cap sync
+- [构建] gradlew assembleDebug（腾讯镜像 gradle 8.14.3）：首战失败「Toolchain does not provide JAVA_COMPILER」→ 换 JAVA_HOME=/home/z/jdk 后 BUILD SUCCESSFUL（3m2s，124 tasks）→ app-debug.apk 4.0MB 部署 public/AI-Phone.apk
+- [防变砖·壳配置页] www/index.html v1.4.3：原「保存过地址就无条件跳转」，服务器关闭即白屏砖。现在先向 /api/app-version 发 no-cors 探针（6s 超时 + 1.2s 后重试一次，容忍冷启动唤醒编译）：活着静默自动进入（体验不变）；不在了停在配置页——预填旧地址 + 红色提示「上次的服务器连不上了（会话可能已结束或正在重启）」+ 重连/换新地址双路径引导 + 连接中动画
+- [版本] v1.4.2→v1.4.3（versionCode 7→8）：build.gradle + app-version.ts 同步；发版说明三条（防变砖/SW 缓存秒开/自动预热）
+- [脚本] 新增 scripts/build-apk.sh 一键重打（JDK→SDK→bun install→cap sync→gradle→部署 public/），沙箱重建后 APK 失效跑一条命令即恢复，全量 5~8 分钟/增量 3 分钟
+- [E2E·Agent Browser] 版本指纹：模拟旧指纹 → 解锁后 6s 弹「发现新版本 v1.4.3」✓ → 点立即更新（弹窗收起 + app-update-seen-v1 写入新指纹 + 下载触发）✓；壳配置页三路径：活服务器（localhost:3000）自动跳转✓、死服务器（localhost:9999）16s 内停在配置页显示红色引导+预填旧地址✓、输入新地址点「进入」保存并跳转✓；/AI-Phone.apk 直链 HTTP 200
+- [边界说明] APK 是「智能壳」：AI 聊天/TTS/识图等能力跑在沙箱服务端（z-ai-web-dev-sdk 沙箱专属），服务器关闭时 APP 不变砖但 AI 功能不可用——停在配置页等服务器重启或填新地址；计算器/备忘录等纯前端功能同样需网页加载（服务器在线时已由 SW 缓存秒开）
+
+Stage Summary:
+- APK 下载链路完全恢复（4.0MB debug 签名可直接安装，设置›APP 更新/更新弹窗均可下载）
+- 壳不再变砖：服务器关闭 → 配置页引导重连/换址；服务器在线 → 体验与旧版一致（自动进入）
+- 关键文件：android-shell/www/index.html（探活）、scripts/build-apk.sh（一键重打）、src/lib/app-version.ts + build.gradle（v1.4.3）

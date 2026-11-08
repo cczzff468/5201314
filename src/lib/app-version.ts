@@ -11,9 +11,9 @@
  */
 
 /** 当前最新版本（与 android-shell versionName 保持一致） */
-export const APP_VERSION = '1.4.2';
+export const APP_VERSION = '1.4.3';
 /** 版本号数字（与 android-shell versionCode 保持一致；覆盖安装要求只增不减） */
-export const APP_VERSION_CODE = 7;
+export const APP_VERSION_CODE = 8;
 
 export interface AppReleaseNote {
   version: string;
@@ -24,6 +24,15 @@ export interface AppReleaseNote {
 
 /** 版本历史（新→旧；设置 › APP 更新 页渲染，最新一条即当前版本） */
 export const APP_RELEASE_NOTES: AppReleaseNote[] = [
+  {
+    version: '1.4.3',
+    date: '2026-11-08',
+    items: [
+      '防变砖：打开 APP 先探活服务器——在线自动进入（体验不变），服务器关闭则停在配置页引导重连/换新地址，不再白屏卡死',
+      '加载提速：静态资源全部本地缓存秒开（Service Worker），二次进入锁屏/APP 秒出',
+      '服务器重启后首位用户不再等冷编译（自动预热）',
+    ],
+  },
   {
     version: '1.4.2',
     date: '2025-12-24',
