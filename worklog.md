@@ -2082,3 +2082,20 @@ Work Log:
 Stage Summary:
 - 锁屏/首屏冷启动 JS 降 73%（5.4MB→1.48MB），锁屏秒开；解锁后空闲时才拉全局组件，功能零变化
 - 关键文件：src/components/ios/PhoneShell.tsx（unlockedOnce/layersReady/watchersReady 三级门控）
+
+## 2026-11-08 · v79 预览加载提速（图标瘦身 + 静态资源长缓存）
+
+Task ID: 28
+Agent: 主控 Agent（Z.ai Code）
+Task: 用户反馈 v78 后「预览还是很慢」——继续排查资源加载链路
+
+Work Log:
+- [诊断] 服务端 HTML 仅 20-30ms、v78 后冷启动 JS 已 1.48MB，本地 FCP 1.4s——瓶颈不在渲染而在「预览走外网网关的资源链路」：①29 个图标源文件共 6.4MB（taobao 838KB/appstore 549KB/music 546KB，显示仅 60px），每次冷加载 sharp 逐张处理大图；②dev 下 /_next/image 优化器与静态资源一律 Cache-Control: max-age=0，预览每次刷新 25 张图标逐个重验证（每张一个公网 RTT，观感=图标慢慢冒出来）；③另发现平台会在整点附近重启 dev server（03:09 全进程链更换），撞上重启窗口的首访要付全量冷编译（Turbopack FS 缓存已默认开启，重启后编译本身 ~1s 级）
+- [修复·图标源瘦身] sharp 批处理 public/icons 29 张：>512px 的缩到 512（palette PNG q95）→ 再统一压到 256px 上限（图标最大显示 60px CSS=120px 视网膜，256 绰绰有余）：6464KB → 365KB（-94%）；icons-dark 已废弃不动，pwa 子目录（192/512 规格要求）不动
+- [修复·缓存头] next.config headers()：/icons /wallpapers /stickers /qq-emojis /avatar-library /tarot /board-bg /board-cards /pets /mt /home /images /couriers /fonts /icons-dark 15 组静态路径给 public, max-age=86400, stale-while-revalidate=604800（内容按文件名寻址不变，可安全强缓存）
+- [修复·绕过优化器] registry.tsx RealIconTile 的 next/image(fill) 改原生 <img loading=lazy>：dev 下优化器强制 max-age=0 无法覆盖（Next 官方警告且实测被覆盖），原生 img 直连静态文件吃 24h 强缓存；保留 scale-[1.07]（源图自带 22% 透明圆角需容器裁切）；顺带消除主屏 105+ 条「parent position static」dev 警告
+- [验证·Agent Browser] 冷缓存 FCP 1.58s / loadEvent 1.0s；二次加载 FCP 696ms、图标网络请求 0 个（25 张全命中本地缓存）、传输仅 8KB；解锁→主屏 VLM 检查图标清晰无缺失无色带、Dock 正常；信息 App 打开正常；控制台 0 错误 0 警告；netease-api(3010) 守护链重启后正常
+
+Stage Summary:
+- 图标源 6.4MB→365KB（-94%）+ 静态资源 24h 强缓存 + 图标绕过 dev 优化器：预览二次加载图标零请求，冷加载少传输 6MB 且省掉逐张 sharp 处理
+- 关键文件：next.config.ts（headers）、src/components/apps/registry.tsx（原生 img）、public/icons/*（压缩）

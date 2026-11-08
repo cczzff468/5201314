@@ -2,7 +2,6 @@
 
 import { cloneElement, isValidElement, useId, type ComponentType, type ReactElement, type ReactNode } from 'react';
 import dynamic from 'next/dynamic';
-import Image from 'next/image';
 import {
   AudioLines,
   BookMarked,
@@ -212,16 +211,18 @@ function RealIconTile({ src }: { src: string; variant?: 'auto' | 'card' }) {
         aria-hidden="true"
         className="relative block h-full w-full overflow-hidden rounded-[15px] shadow-[0_2px_8px_rgba(0,0,0,0.16)] ring-1 ring-black/[0.06]"
       >
-        {/* 性能：去掉 loading="eager"——主屏 3 页 DOM 全量挂载，eager 会让 ~22 枚图标
-            （源图共 ~6MB）首帧全部并发请求；默认 lazy 下视口内图标首帧立即加载（观感不变），
-            非当前页的图标推迟到滑动接近时再拉 */}
-        <Image
+        {/* v79 预览提速：改用原生 <img> 直连静态文件——dev 下 next/image 优化器
+            强制 max-age=0，预览走外网网关时每次刷新都要逐张重验证（每张一个 RTT，
+            观感是图标慢慢冒出来）；源图已压到 ≤83KB 且静态路径带 24h 强缓存，
+            原生 <img> 冷加载更快、二次加载零请求。lazy 保留：非当前页图标
+            推迟到滑动接近时再拉 */}
+        <img
           src={src}
           alt=""
-          fill
-          sizes="60px"
+          loading="lazy"
+          decoding="async"
           draggable={false}
-          className="scale-[1.07] object-cover"
+          className="block h-full w-full scale-[1.07] select-none object-cover"
         />
       </span>
     </IconTile>
