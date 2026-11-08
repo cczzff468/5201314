@@ -109,7 +109,35 @@ function installRobustFetch(): void {
   console.log('[instrumentation] robust fetch installed (ipv4first, no happy-eyeballs race, retry x2)');
 }
 
-/* ================= 守护链路 ================= */
+/* ================= 守护链路 + 预览提速：首页自预热 ================= */
+
+/**
+ * dev server 就绪后自我请求首页，预热 Turbopack 编译。
+ *
+ * 背景：平台会在整点附近重启 dev server（全进程链更换），重启后首位访客要付
+ * 全量冷编译等待（1~3s 白屏）。这里在 instrumentation（启动树内、随 dev server
+ * 每次重启都会重跑）里轮询首页直至 200 —— 编译发生在无人访问的窗口，用户
+ * 到达时直接命中 Turbopack FS 缓存内的编译产物。
+ *
+ * fire-and-forget：不 await，不阻塞 register() / server 启动；请求走 127.0.0.1
+ * 不经过外网网关，robust-fetch 包装对 localhost 不生效（保持直连低延迟）。
+ */
+async function warmHomePage(): Promise<void> {
+  const url = 'http://127.0.0.1:3000/';
+  for (let i = 0; i < 45; i++) {
+    try {
+      const res = await fetch(url, { cache: 'no-store' });
+      if (res.ok) {
+        console.log(`[instrumentation] home warmed (try ${i + 1})`);
+        return;
+      }
+    } catch {
+      /* server 尚未监听，继续等 */
+    }
+    await new Promise((r) => setTimeout(r, 2000));
+  }
+  console.warn('[instrumentation] home warm-up failed after 45 tries');
+}
 
 export async function register() {
   try {
@@ -137,4 +165,7 @@ export async function register() {
   } catch (e) {
     console.error('[instrumentation] spawn ncm-keeper failed:', e);
   }
+
+  // 3) 首页自预热（v80 预览提速；不阻塞启动）
+  void warmHomePage();
 }

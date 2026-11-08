@@ -1,16 +1,115 @@
 /**
- * Web Push Service Worker（退出网页后也收「每条消息一条系统通知」）：
- * - push 事件：每条推送 show 一条系统通知（tag 唯一 → 每条消息一个独立弹窗，不互相替换）；
- * - 点击通知：聚焦已打开的页面 / 新开页面（落地到首页，由用户进入对应会话）。
+ * Web Push Service Worker（退出网页后也收「每条消息一条系统通知」）＋ 静态资源 SWR 缓存。
+ *
+ * —— push 事件：每条推送 show 一条系统通知（tag 唯一 → 每条消息一个独立弹窗，不互相替换）；
+ * —— 点击通知：聚焦已打开的页面 / 新开页面（落地到首页，由用户进入对应会话）。
  * 注册失败（iframe/不支持）静默降级：应用内灵动岛弹窗与页面隐藏时的 Web Notification 不受影响。
+ *
+ * —— v80 预览提速（资源缓存）：预览走外网网关时，dev 模式 /_next/static/chunks 是
+ *   no-cache/must-revalidate —— 每次刷新 40+ 个 JS chunk 都要逐个发协商请求（每个一趟公网
+ *   RTT），锁屏/APP 二次打开全部卡在资源重验证上。这里对「内容寻址」的静态资源做
+ *   stale-while-revalidate：命中缓存立即返回（0 网络等待），同时后台拉网络刷新缓存，
+ *   下次加载自然取到新版本；代码变更后 Turbopack 会生成新哈希 URL，新 URL 缓存未命中
+ *   会直接走网络，不影响热更新。
+ *   不缓存：HTML 导航、/api/**（含 SSE）、/_next/image（dev 优化器）、非 GET、跨域。
  */
+
+/** 缓存版本号：资源缓存策略变更时 bump（旧缓存会在 activate 时清除） */
+const CACHE_VER = 'ai-static-v80';
+
+/** 可缓存的同源静态路径前缀（内容按文件名寻址、变更即换名） */
+const CACHEABLE_PREFIXES = [
+  '/_next/static/', // Turbopack chunks / media / css（URL 含内容哈希）
+  '/icons/',
+  '/icons-dark/',
+  '/wallpapers/',
+  '/home/',
+  '/images/',
+  '/stickers/',
+  '/qq-emojis/',
+  '/avatar-library/',
+  '/tarot/',
+  '/board-bg/',
+  '/board-cards/',
+  '/pets/',
+  '/mt/',
+  '/couriers/',
+  '/fonts/',
+  '/models/',
+  '/goods/',
+  '/goods-sketch/',
+  '/gifts/',
+  '/asr/',
+];
+
+/** 根路径下的单文件静态资源（PWA 清单与站点 logo） */
+const CACHEABLE_EXACT = new Set(['/manifest.json', '/logo.svg']);
+
+/** 该请求是否可走 SWR 缓存（同源 GET + 命中静态路径清单） */
+function isCacheable(url) {
+  if (url.origin !== self.location.origin) return false;
+  return (
+    CACHEABLE_EXACT.has(url.pathname) ||
+    CACHEABLE_PREFIXES.some((p) => url.pathname.startsWith(p))
+  );
+}
 
 self.addEventListener('install', () => {
   self.skipWaiting();
 });
 
 self.addEventListener('activate', (event) => {
-  event.waitUntil(self.clients.claim());
+  event.waitUntil(
+    (async () => {
+      // 清除旧版本资源缓存（升级部署后自动失效）
+      try {
+        const keys = await caches.keys();
+        await Promise.all(
+          keys.filter((k) => k !== CACHE_VER).map((k) => caches.delete(k)),
+        );
+      } catch (e) {
+        /* 缓存清理失败不影响激活 */
+      }
+      await self.clients.claim();
+    })(),
+  );
+});
+
+self.addEventListener('fetch', (event) => {
+  const req = event.request;
+  if (req.method !== 'GET') return;
+  let url;
+  try {
+    url = new URL(req.url);
+  } catch (e) {
+    return;
+  }
+  if (!isCacheable(url)) return; // HTML 导航 / API / SSE 等直接放行
+  event.respondWith(
+    (async () => {
+      const cache = await caches.open(CACHE_VER);
+      // ignoreVary：防御性处理（Next 响应可能携带 Vary 头，同 URL 静态资源无需按它区分）
+      const cached = await cache.match(req, { ignoreVary: true }).catch(() => null);
+      const net = fetch(req).catch(() => null);
+      if (cached) {
+        // stale-while-revalidate：立即回缓存，后台把网络结果写入缓存供下次使用
+        event.waitUntil(
+          net
+            .then((res) => {
+              if (res && res.status === 200) return cache.put(req, res.clone());
+            })
+            .catch(() => {}),
+        );
+        return cached;
+      }
+      const fresh = await net;
+      if (fresh && fresh.status === 200) {
+        const clone = fresh.clone();
+        event.waitUntil(cache.put(req, clone).catch(() => {}));
+      }
+      return fresh || new Response('offline', { status: 504, statusText: 'offline' });
+    })(),
+  );
 });
 
 self.addEventListener('push', (event) => {

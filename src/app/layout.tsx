@@ -49,6 +49,14 @@ export default function RootLayout({
       <body className={`${geistSans.variable} antialiased bg-background text-foreground`}>
         {children}
         <Toaster />
+        {/* v80 预览提速：启动即注册 Service Worker（资源 SWR 缓存）。
+            原先只有开启通知权限才会注册（push-client），大多数会话享受不到静态资源缓存。
+            register 幂等（同 URL 同 scope），与 push-client 的注册不冲突；iframe/不支持环境静默失败。 */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `try{if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catch(function(){});}}catch(e){}`,
+          }}
+        />
       </body>
     </html>
   );

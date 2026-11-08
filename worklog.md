@@ -2099,3 +2099,23 @@ Work Log:
 Stage Summary:
 - 图标源 6.4MB→365KB（-94%）+ 静态资源 24h 强缓存 + 图标绕过 dev 优化器：预览二次加载图标零请求，冷加载少传输 6MB 且省掉逐张 sharp 处理
 - 关键文件：next.config.ts（headers）、src/components/apps/registry.tsx（原生 img）、public/icons/*（压缩）
+
+## 2026-11-08 · v80 预览提速（Service Worker SWR 资源缓存 + 启动即注册 + 编译自预热）
+
+Task ID: 29
+Agent: 主控 Agent（Z.ai Code）
+Task: 用户反馈「预览和锁屏还有 APP 界面加载好慢」——v78/v79 后继续排查剩余瓶颈
+
+Work Log:
+- [诊断] 服务端 HTML 仅 43ms 非瓶颈；冷会话实测锁屏阶段 40+ 个 /_next/static chunk + 25 张图标；v79 已给 /icons 24h 强缓存，但 /_next/static/chunks 在 dev 下是 no-cache,must-revalidate——预览走外网网关时每次刷新每个 chunk 一趟公网 RTT 协商，锁屏/APP 二次打开全部卡在资源重验证；另发现 SW（public/sw.js）只挂 push 处理器且仅用户开启通知权限才注册（push-client），绝大多数会话无任何资源缓存能力
+- [SW·缓存] sw.js 新增 fetch 处理器（stale-while-revalidate）：命中缓存立即返回（0 网络等待）+ 后台拉网络刷新缓存供下次使用；可缓存清单＝/_next/static/（chunks/media/css）+ 21 个 public 静态目录前缀 + manifest.json/logo.svg；排除 HTML 导航、/api/**（含 SSE）、非 GET、跨域；仅缓存 200（不碰 206 range）；activate 时清理旧版本缓存（CACHE_VER=ai-static-v80，升级自动失效）
+- [SW·注册] layout.tsx body 尾部内联脚本启动即注册 /sw.js（原仅通知权限 granted 才注册）；register 幂等同 URL 同 scope，与 push-client 不冲突；iframe/不支持环境 try-catch 静默降级
+- [预热] instrumentation-node.ts register() 增 fire-and-forget warmHomePage()：轮询 127.0.0.1:3000/ 至 200（2s 间隔×45 次）——平台整点重启 dev server 后编译发生在无人访问窗口，首位访客不再付 1~3s 冷编译白屏
+- [验证·性能] 刷新实测（Agent Browser）：DCL 340ms / loadEvent 410ms / FCP 672ms；静态资源 54/54 全部 transferSize=0（SW 缓存秒回，网络日志中的请求均为后台 SWR 刷新不阻塞渲染）
+- [验证·功能] 锁屏渲染✓（农历/时间/电量/上滑提示）→ 上滑解锁✓ → 计算器 App 打开（启动屏→完整界面）✓ → 7×8=56 交互✓ → 零控制台错误✓；warm-up 日志出现（home warmed try 1）
+- [验证·HMR] 改 LockScreen 文案实测：热更新走 ws 不受 SW 影响；手动刷新第 1 次可能短暂回缓存旧版（Turbopack dev chunk URL 不随内容变），SWR 后台刷新后第 2 次刷新即用新版且仍零等待——用户预览场景（不自改代码）每次刷新都是「秒开+最新」，代价可接受
+- [验证·质量] tsc 三个变更文件零错（chat/couple-space 为存量基线）；eslint 变更文件零输出
+
+Stage Summary:
+- 预览/锁屏/APP 二次打开全面提速：SW 资源缓存让所有静态资源零网络等待（54/54 transferSize=0），刷新 DCL 340ms；dev server 重启后自动预热编译，首位访客不再白屏等待
+- 关键文件：public/sw.js（fetch SWR + 缓存版本化）、src/app/layout.tsx（启动注册）、src/instrumentation-node.ts（warmHomePage）
