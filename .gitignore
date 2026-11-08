@@ -41,6 +41,8 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 local-*
+# 例外：local-notify.ts 是 C2 系统通知的真实源码（客户端本地通知统一入口），不得被 local-* 误伤
+!src/lib/ios/local-notify.ts
 .claude
 .z-ai-config
 *.log
