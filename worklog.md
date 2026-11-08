@@ -2041,3 +2041,24 @@ Work Log:
 Stage Summary:
 - App 打开体验三连修：慢加载有 iOS 风格启动屏（不再是空白）、按下/悬停即抢跑拉 chunk（与打开动画重叠）、空闲预热覆盖全部 27 个 App
 - 关键文件：AppSplash.tsx（新）、registry.tsx、PhoneShell.tsx、HomeScreen.tsx、globals.css
+
+## 2026-11-08 · v78「锁屏/首屏打开慢」修复（全局组件挂载时机收敛）
+
+Task ID: 27
+Agent: 主控 Agent（Z.ai Code）
+Task: 用户反馈「打开锁屏和界面显示的好慢」——排查并解决
+
+Work Log:
+- [诊断] 服务端 API 全部几十 ms 级（非瓶颈）；Agent Browser 冷缓存实测首屏：99 资源 / 5.4MB JS，含 wechat.tsx(306KB)、wx-group、07gu1(262KB)、0l0iba(220KB)、0o809(105KB)、0_tjm8(106KB) 等巨型 chunk 与 2.1MB 共享 chunk——全部出现在锁屏阶段
+- [根因] dynamic() 组件「挂载即拉 chunk」（与是否渲染内容无关）：PhoneShell 里 15+ 个全局层组件（ChatFloatWindow/MusicIsland/MeituanIsland/TaobaoIsland/MusicGlobalMini/AssistiveTools/GlobalCallLayer/NotifyPermissionCard/AppUpdateDialog 等）无条件挂载；ChatFloatWindow 顶层静态 import 整个 wechat.tsx；v70 的 watchersReady 门控（固定 8s）在用户停留锁屏时照样到点拉取调度器 chunk。这些组件的公共依赖被 Turbopark 打进同一批共享 chunk（music/couple/forum/qq/meituan 聚合），冷启动网络+主线程被打满 → 锁屏秒开变十几秒
+- [修复·PhoneShell.tsx] 新增 unlockedOnce（useUI.subscribe 订阅式单向 armed，初始 !locked）+ 两级空闲门控：
+  - layersReady（解锁后 400ms + requestIdleCallback）：GlobalCallLayer/MusicGlobalMini/AssistiveTools/ChatFloatWindow/MusicIsland/MeituanIsland/TaobaoIsland/NotifyPermissionCard/AppUpdateDialog 九组件改条件挂载
+  - watchersReady（解锁后 2.5s + idle，替代旧固定 8s）：11 个调度器/监听器维持原有门控但改为「解锁后才启动」——锁屏期间零后台拉取
+  - IncomingCallLayer 例外保持立即挂载（锁屏也要显示来电，iOS 行为；其依赖均为轻量 store/framer-motion/lucide）
+  - armed 单向：解锁后重新锁屏不卸载已挂载组件（不丢调度状态/小窗状态）
+- [效果·冷缓存实测] 锁屏阶段 JS 5.4MB → 1.48MB（-73%），资源 99 → 58，wechat/wx-group/forum/music chunk 零拉取；解锁后 idle 后台陆续拉完全局组件+预热（总 9.4MB 不抢首屏带宽）；剩余大 chunk 均为框架必需（react-dom/next client/devtools——devtools 生产构建不存在）
+- [验证] tsc PhoneShell 零错（存量 chat/couple-space 基线不变）；eslint PhoneShell 零输出（set-state-in-effect 以 zustand subscribe 模式消除）；E2E 两轮冷会话：解锁→信息 App→AI 聊天（已送达+13″ TTS）✓、通知权限卡（layersReady 组件）正常弹出✓、微信 App 打开（登录页渲染）✓、零控制台错误✓
+
+Stage Summary:
+- 锁屏/首屏冷启动 JS 降 73%（5.4MB→1.48MB），锁屏秒开；解锁后空闲时才拉全局组件，功能零变化
+- 关键文件：src/components/ios/PhoneShell.tsx（unlockedOnce/layersReady/watchersReady 三级门控）

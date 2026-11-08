@@ -255,14 +255,51 @@ export default function PhoneShell() {
     };
   }, []);
 
-  // v70 开机提速：全局调度器/监听器延迟挂载——它们各自 dynamic import 的重模块
-  // （forum / memory / couple-ai / moments 等，合计数百 KB）不再挤进首屏关键路径，
-  // 首帧渲染与主屏滑动更顺；各调度器内部本就有 10s 级首跳延迟，+8s 挂载不影响功能
+  // v70 开机提速 → v78 收敛：全局调度器/监听器延迟挂载——它们各自 dynamic import 的重模块
+  // （forum / memory / couple-ai / moments 等，合计数百 KB）不再挤进首屏关键路径。
+  // v78 修正：旧方案从页面加载起固定 8s —— 冷启动停在锁屏时 8s 后照样拉 chunk 抢锁屏带宽；
+  // 现改为「解锁过一次 + 空闲时机」才挂载，锁屏期间零后台拉取（与 preloadHeavyApps 同期，
+  // 解锁 ≈ 即将用 App，此时预热正当其时）。armed 单向：解锁后重新锁屏不卸载（不丢调度状态）。
+  const [unlockedOnce, setUnlockedOnce] = useState(() => !useUI.getState().locked);
+  useEffect(
+    () =>
+      useUI.subscribe((s) => {
+        if (!s.locked) setUnlockedOnce(true);
+      }),
+    [],
+  );
+
   const [watchersReady, setWatchersReady] = useState(false);
   useEffect(() => {
-    const t = window.setTimeout(() => setWatchersReady(true), 8000);
+    if (!unlockedOnce) return;
+    const t = window.setTimeout(() => {
+      if (typeof window.requestIdleCallback === 'function') {
+        window.requestIdleCallback(() => setWatchersReady(true), { timeout: 2500 });
+      } else {
+        window.setTimeout(() => setWatchersReady(true), 300);
+      }
+    }, 2500);
     return () => window.clearTimeout(t);
-  }, []);
+  }, [unlockedOnce]);
+
+  // v78 首屏提速（修「锁屏/界面打开慢」）：这些全局层组件虽是 dynamic，但旧代码无条件挂载
+  // ——dynamic 组件一挂载就开始拉 chunk（与是否渲染内容无关）：ChatFloatWindow 静态引入整个
+  // wechat.tsx(306KB)，叠加 MusicIsland/MeituanIsland/TaobaoIsland/MusicGlobalMini 等，实测冷启动
+  // 首屏拉 99 个资源 / 5.4MB JS（含 2.1MB 共享 chunk），把网络与主线程打满——锁屏秒开变十几秒。
+  // 现统一改「解锁 + 空闲后」挂载：锁屏阶段只保留核心（主屏/App 窗口/锁屏/状态栏/灵动岛/来电层）。
+  // IncomingCallLayer 例外保持立即——锁屏也要显示来电（iOS 行为）。armed 同样单向，挂载后不卸载。
+  const [layersReady, setLayersReady] = useState(false);
+  useEffect(() => {
+    if (!unlockedOnce) return;
+    const t = window.setTimeout(() => {
+      if (typeof window.requestIdleCallback === 'function') {
+        window.requestIdleCallback(() => setLayersReady(true), { timeout: 2000 });
+      } else {
+        window.setTimeout(() => setLayersReady(true), 200);
+      }
+    }, 400);
+    return () => window.clearTimeout(t);
+  }, [unlockedOnce]);
 
   // 底部边缘上滑手势（全局）：从屏幕最底下往上滑 → 打开多任务切换器，主屏幕与所有 App 内均生效（含时钟）。
   // 用 window 捕获阶段原生 Pointer 监听而非组件 onTouch 事件：
@@ -482,19 +519,21 @@ export default function PhoneShell() {
         <AppWindow />
 
         {/* 全局语音通话层：全屏通话页（z-62）+ 悬浮小窗（z-64，可拖动/边缘吸附隐藏）——
-            与 App 窗口平级，退出聊天页/切换 App 电话不断；点小窗回通话页，拖到边缘只露一条边 */}
-        <GlobalCallLayer />
+            与 App 窗口平级，退出聊天页/切换 App 电话不断；点小窗回通话页，拖到边缘只露一条边。
+            v78：解锁后空闲挂载（冷启动不可能有进行中的通话会话） */}
+        {layersReady && <GlobalCallLayer />}
 
         {/* 全局迷你播放器（z-55：高于 App 窗口 z-40，低于切换器/锁屏；音乐 App 前台时不显示） */}
-        <MusicGlobalMini />
+        {layersReady && <MusicGlobalMini />}
 
         {/* 全局悬浮工具（z-56：悬浮球 + 提示词查看器/快捷操作弹窗；设置 › 悬浮工具 控制） */}
-        <AssistiveTools />
+        {layersReady && <AssistiveTools />}
 
         {/* v73 AI 聊天悬浮小窗（z-58）：聊天页顶栏「小窗模式」打开——切 App 不卸载、
             拖拽吸附左右边缘、拖到底部松手销毁、最小化成胶囊；内容复用 ChatPage（float 变体），
-            消息与会话状态同全屏实时互通（会话消息共享源） */}
-        <ChatFloatWindow />
+            消息与会话状态同全屏实时互通（会话消息共享源）。
+            v78：解锁后空闲挂载——小窗仅在用户主动开启后才有内容，延迟挂载无感知 */}
+        {layersReady && <ChatFloatWindow />}
 
         {/* 全局来电层：AI 来电弹窗（电话横幅/微信大窗 5s→胶囊，z-94，灵动岛原位弹出/收回、弹出期间盖住灵动岛）+
             iOS 全屏来电界面（z-84，仅电话来电自动显示、左上可退出，界面可见时不叠加弹窗；
@@ -550,25 +589,28 @@ export default function PhoneShell() {
         )}
         <IslandNotificationLayer />
 
-        {/* 音乐灵动岛（z-81：同位盖住静态灵动岛，低于聊天通知 z-93；消息通知展示期间整层隐身） */}
-        <MusicIsland />
+        {/* 音乐灵动岛（z-81：同位盖住静态灵动岛，低于聊天通知 z-93；消息通知展示期间整层隐身）。
+            v78：解锁后空闲挂载（未播放时组件渲染 null，延迟无感知） */}
+        {layersReady && <MusicIsland />}
 
         {/* 美团外卖灵动岛（z-82：同锚位盖住音乐灵动岛 z-81，低于聊天通知 z-93；
             小窗常驻（骑手+送货中+剩余分钟），状态变化大窗 5 秒，点大窗进订单详情） */}
-        <MeituanIsland />
+        {layersReady && <MeituanIsland />}
 
         {/* 淘宝快递灵动岛（z-82：与美团岛同规格同锚位，两者都有进行中单时「最新事件方」展示；
             小窗常驻（快递员+状态+剩余分钟），状态变化大窗 5 秒，点大窗进淘宝订单详情） */}
-        <TaobaoIsland />
+        {layersReady && <TaobaoIsland />}
 
-        {/* 通知权限友好申请卡（首次使用时展示，应用内说明 → 用户手势内才弹浏览器授权框） */}
-        <NotifyPermissionCard />
+        {/* 通知权限友好申请卡（首次使用时展示，应用内说明 → 用户手势内才弹浏览器授权框）。
+            v78：解锁后空闲挂载（首用前用户必然已解锁） */}
+        {layersReady && <NotifyPermissionCard />}
 
-        {/* APP 更新弹窗（v1.4.2：开机后自动检查，有新版弹窗提示一键下载安装） */}
-        <AppUpdateDialog />
+        {/* APP 更新弹窗（v1.4.2：开机后自动检查，有新版弹窗提示一键下载安装；锁屏时不出场，解锁后再弹）。
+            v78：解锁后空闲挂载，与组件自身「锁屏不出场」逻辑天然对齐 */}
+        {layersReady && <AppUpdateDialog />}
 
-        {/* v70：以下全局调度器/监听器延迟 8s 挂载（watchersReady 门控）——
-            重模块移出首屏关键路径，开机更快；功能不受影响 */}
+        {/* v70→v78：以下全局调度器/监听器「解锁后空闲」挂载（watchersReady 门控）——
+            重模块移出首屏关键路径；锁屏期间零拉取，各调度器内部本就有 10s 级首跳延迟 */}
         {watchersReady && (
           <>
             {/* 全局闹钟监听（锁屏时也会响铃，铃声弹层 z-90 高于锁屏） */}
