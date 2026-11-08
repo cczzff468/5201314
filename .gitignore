@@ -72,3 +72,7 @@ android-shell/android/app/build/
 android-shell/android/local.properties
 android-shell/node_modules/
 public/AI-Phone.apk
+
+# v82 杂项：Railway 部署会话的临时文件
+cli-dl2.status
+railway-proxy.tar.gz
