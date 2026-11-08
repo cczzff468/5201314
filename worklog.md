@@ -2140,3 +2140,24 @@ Stage Summary:
 - APK 下载链路完全恢复（4.0MB debug 签名可直接安装，设置›APP 更新/更新弹窗均可下载）
 - 壳不再变砖：服务器关闭 → 配置页引导重连/换址；服务器在线 → 体验与旧版一致（自动进入）
 - 关键文件：android-shell/www/index.html（探活）、scripts/build-apk.sh（一键重打）、src/lib/app-version.ts + build.gradle（v1.4.3）
+
+## 2026-11-08 · v81 永久在线版：Railway 公网部署成功
+
+Task ID: 31
+Agent: 主控 Agent（Z.ai Code）
+Task: 用户提供 Railway Account Token——把 AI Phone 部署成离开沙箱也能用的公网应用
+
+Work Log:
+- [调研] z-ai-web-dev-sdk 凭证机制：从 .z-ai-config 文件读 {baseUrl, apiKey}（沙箱网关 172.23.4.166 是内网地址，公网不可达——Railway 版 AI 必须外接 OpenAI 兼容网关）；SDK 端点 /chat/completions、/images/generations 均为 OpenAI 兼容路径
+- [Railway API] 沙箱连不上 GitHub release（CLI 下载失败），改走 backboard.railway.app/graphql/v2 GraphQL API 全程部署：projectCreate → githubRepoDeploy（repo 短格式 cczzff468/5201314 + 中文分支「主」可用，完整 URL 格式反被拒）→ variableUpsert → volumeCreate（/data 持久卷）→ serviceDomainCreate（公网域名）
+- [部署文件] Dockerfile（node:20-bookworm-slim 基础 + npm 全局装 bun 构建提速——bun.sh/install 脚本在 Railway 构建环境静默失效实测 bun:not found）+ docker-entrypoint.sh（四步：ZAI_BASE_URL/ZAI_API_KEY 环境变量生成 .z-ai-config 注入 SDK → 后台起 netease-api:3010 → prisma db push 初始化 /data/custom.db → Next standalone）+ .railwayignore（排除 android-shell/db/APK 等 100MB+）
+- [代码适配] instrumentation：RAILWAY_SERVICE_ID 存在时跳过 ncm-keeper 守护（entrypoint 直接起进程）；warmHomePage 端口改读 process.env.PORT（Railway 注入 8080）
+- [排障] 第一次构建失败 bun:not found（curl|bash 装 bun 失败）→ 改 npm install -g bun 修复；serviceInstanceRedeploy 重用旧 commit 缓存不拉新代码 → 改用 serviceInstanceDeployV2(commitSha) 指定提交；域名 targetPort 3000 → 8080（Railway 注入 PORT=8080）
+- [架构] 单容器双进程：Next standalone（:8080 主服务）+ netease-api（:3010 容器内 localhost，海外访问网易云可能慢，仅音乐降级）；SQLite 挂 /data 持久卷；githubRepoDeploy 的 URL 部署模式没有 webhook 自动追踪——代码更新需手动 serviceInstanceDeployV2(commitSha) 或转 GitHub App 集成
+- [E2E·公网] https://5201314-production.up.railway.app：HTTP 200（2.3s）→ 锁屏完整渲染（iPhone/电量/上滑）→ 解锁 → 主屏 14+ App → 计算器打开可用 → 零控制台错误；AI 聊天优雅降级（消息已送达 + 明确引导「设置 › API 配置」填写 Key）——/api/app-version 正常返回 v1.4.3
+- [边界] Railway 版 AI 能力待用户配置：Railway 变量面板填 ZAI_BASE_URL + ZAI_API_KEY（任一 OpenAI 兼容网关：DeepSeek/OpenAI/智谱）→ 聊天+图生成复活；TTS/ASR/识图为 SDK 专有路径（/audio/tts 与 OpenAI /audio/speech 不同名）暂不可用；APK 更新下载在云端 apkReady=false（APK 未随部署上传，属预期）
+
+Stage Summary:
+- AI Phone 永久在线版上线：https://5201314-production.up.railway.app（Railway 项目「AI Phone」trial 额度 $5）
+- 部署全链路走 GraphQL API（项目/服务/变量/卷/域名/指定 commit 构建），无需 CLI
+- 关键文件：Dockerfile、docker-entrypoint.sh、.railwayignore、src/instrumentation-node.ts
