@@ -234,14 +234,11 @@ let pinyinModPromise: Promise<PinyinModule> | null = null;
 
 /** 惰性加载 pinyin-pro（只在唤醒匹配首次进入拼音分支时加载，不进首屏包体） */
 async function loadPinyin(): Promise<PinyinModule> {
-  if (!pinyinMod) {
-    pinyinModPromise ??= import('pinyin-pro').then((m) => {
-      pinyinMod = m;
-      return m;
-    });
-    await pinyinModPromise;
-  }
-  return pinyinMod;
+  pinyinModPromise ??= import('pinyin-pro').then((m) => {
+    pinyinMod = m;
+    return m;
+  });
+  return pinyinMod ?? (await pinyinModPromise);
 }
 
 /** 唤醒名拼音 key 缓存（按清洗后名字缓存；改名/首次各算一次） */
@@ -816,6 +813,8 @@ const WAKE_GAP_MS = 1500;
 const WAKE_FAIL_FUSE = 3;
 /** 通道 C 服务端识别连续失败降级阈值：连续 N 次不可达改走 Web Speech 兜底 */
 const WAKE_SERVER_FAIL_DEGRADE = 4;
+/** 通道 C 服务端失败指数退避（第 1~4 次失败后的等待；替代旧版固定 0.8s——连续快重试会把上游 WAF 越打越死） */
+const WAKE_SERVER_BACKOFF_MS = [1500, 3000, 6000, 12000];
 
 // ---------------- 通道 C：VAD 说话检测 + 服务端识别（不依赖 Google，大陆网络可靠） ----------------
 
@@ -877,16 +876,37 @@ function blobToBase64(b: Blob): Promise<string> {
   });
 }
 
-/** 服务端唤醒识别：16k 单声道样本 → WAV base64 → POST /api/wake-asr → 文本（12s 看门狗） */
+/** 服务端唤醒识别：16k 单声道样本 → WAV base64 → POST /api/wake-asr → 文本（12s 看门狗；AbortSignal.timeout 旧 WebView 缺失，改 AbortController 兼容实现） */
 async function wakeAsrTranscribe(samples: Float32Array): Promise<string> {
   const b64 = await blobToBase64(new Blob([encodeWav16k(samples)], { type: 'audio/wav' }));
-  const res = await fetch('/api/wake-asr', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ audio: b64 }),
-    signal: AbortSignal.timeout(12_000),
-  });
-  if (!res.ok) throw new Error(`wake-asr ${res.status}`);
+  // 旧 WebView（Safari <16.4 等）没有 AbortSignal.timeout，同步访问即 TypeError——
+  // 旧版被 catch 当成「服务端不可达」每轮都失败，服务端通道在那类设备上永久失效
+  const ctrl = new AbortController();
+  const timer = window.setTimeout(() => ctrl.abort(), 12_000);
+  let res: Response;
+  try {
+    res = await fetch('/api/wake-asr', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ audio: b64 }),
+      signal: ctrl.signal,
+    });
+  } catch {
+    throw new Error('wake-asr 0'); // 网络层失败/超时：无 HTTP 状态
+  } finally {
+    window.clearTimeout(timer);
+  }
+  if (!res.ok) {
+    // 读服务端建议的冷却秒数（429/503 带 retryAfter，客户端按它退避，不硬打）
+    let retryAfter = 0;
+    try {
+      const j = (await res.clone().json()) as { retryAfter?: unknown };
+      retryAfter = typeof j.retryAfter === 'number' ? j.retryAfter : 0;
+    } catch {
+      /* 无 JSON 体：按无建议处理 */
+    }
+    throw new Error(`wake-asr ${res.status}${retryAfter > 0 ? ` r${retryAfter}` : ''}`);
+  }
   const j = (await res.json()) as { text?: unknown };
   return typeof j.text === 'string' ? j.text : '';
 }
@@ -937,7 +957,7 @@ export function useAgentWakeLoop(opts: {
     /** 通道级资源即时释放钩子（通道 C 常驻流挂这里；卸载 cleanup 调用） */
     let onAbort: (() => void) | null = null;
     const MIC_FUSE_MSG =
-      '无法访问麦克风：喊名唤醒已自动暂停，每 40 秒自动重试（允许麦克风权限后自动恢复；点悬浮球仍可对话）';
+      '无法访问麦克风：喊名唤醒已自动暂停，每 40 秒自动重试（允许麦克风权限后自动恢复；点悬浮球仍可对话）。若在预览/嵌入窗口里，请点「在新标签页打开」后允许麦克风';
     /** 熔断：大概率无麦克风权限/不支持录音——记录原因并进自愈探针（不再永久停摆） */
     const fuseMic = () => {
       if (micFused) return;
@@ -1073,7 +1093,7 @@ export function useAgentWakeLoop(opts: {
             an.fftSize = 2048;
             c.createMediaStreamSource(stream).connect(an);
             let r: MediaRecorder;
-            recMime = pickRecorderMime();
+            recMime = pickRecorderMime() ?? '';
             try {
               r = new MediaRecorder(stream, { mimeType: recMime, audioBitsPerSecond: 24000 });
             } catch {
@@ -1207,10 +1227,17 @@ export function useAgentWakeLoop(opts: {
           serverFails = 0; // 服务端健康：清零降级计数
           micFails = 0;
           setWakeDiag({ server: 'ok', lastError: '' });
-        } catch {
-          serverFails += 1; // 服务端不可达（接口挂/断网）：累计，连续 4 次让主循环换路
-          setWakeDiag({ server: 'fail', lastError: `识别服务暂不可达（第 ${serverFails} 次），自动重试中` });
-          await sleep(VAD_GAP_MS);
+        } catch (err) {
+          // 服务端不可达：指数退避（1.5→3→6→12s）；429/503 带服务端冷却建议时听服务端的（上限 30s），
+          // 旧版固定 0.8s 重试会把上游 WAF 越打越死（连发 4 次=封几分钟=喊名永远没反应）
+          serverFails += 1;
+          const msg = err instanceof Error ? err.message : '';
+          const rm = /\br(\d+)\b/.exec(msg);
+          const retrySec = rm ? Number(rm[1]) : 0;
+          const base = WAKE_SERVER_BACKOFF_MS[Math.min(serverFails - 1, WAKE_SERVER_BACKOFF_MS.length - 1)];
+          const wait = retrySec > 0 ? Math.min(30_000, Math.max(base, retrySec * 1000)) : base;
+          setWakeDiag({ server: 'fail', lastError: `识别服务暂不可达（第 ${serverFails} 次），${Math.round(wait / 1000)}s 后自动重试` });
+          await sleep(wait);
           continue;
         }
         if (text.trim()) setWakeDiag({ lastText: truncateDiagText(text), rounds: useWakeDiag.getState().rounds + 1 });

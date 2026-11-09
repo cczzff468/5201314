@@ -178,8 +178,8 @@ export async function runWeatherReport(location: string): Promise<WeatherReportR
       const query = capital || q;
       const results = await searchCity(query).catch(() => []);
       // 只信中国结果；open-meteo 相关度排序取第一个即可（与天气 App 城市搜索同源）
-      pick = results.find((r) => r.country === '中国' || r.country === 'China') ?? results[0] ?? null;
-      pick = pick ? toCityPick(pick) : null;
+      const hit = results.find((r) => r.country === '中国' || r.country === 'China') ?? results[0] ?? null;
+      pick = hit ? toCityPick(hit) : null;
     }
     if (!pick) pick = await resolveCityPick();
 

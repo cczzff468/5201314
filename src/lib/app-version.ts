@@ -11,9 +11,9 @@
  */
 
 /** 当前最新版本（与 android-shell versionName 保持一致） */
-export const APP_VERSION = '1.8.2';
+export const APP_VERSION = '1.8.3';
 /** 版本号数字（与 android-shell versionCode 保持一致；覆盖安装要求只增不减） */
-export const APP_VERSION_CODE = 18;
+export const APP_VERSION_CODE = 19;
 
 export interface AppReleaseNote {
   version: string;
@@ -24,6 +24,16 @@ export interface AppReleaseNote {
 
 /** 版本历史（新→旧；设置 › APP 更新 页渲染，最新一条即当前版本） */
 export const APP_RELEASE_NOTES: AppReleaseNote[] = [
+  {
+    version: '1.8.3',
+    date: '2026-11-10',
+    items: [
+      '修复「连续说几句话后喊名永久没反应」：识别服务被限流后客户端改指数退避（1.5→3→6→12 秒），服务端新增同音频缓存与全局冷却，不再持续触发上游封禁',
+      '服务端识别请求防抖：同一段音频 10 分钟内直接返回缓存结果（零上游调用），请求间隔过短直接限流保护，上游恢复后喊名自动复活',
+      '兼容性修复：旧机型 WebView 缺失 AbortSignal.timeout 导致服务端识别通道永久失效的问题（改用兼容实现）',
+      '喊名唤醒「没反应」更好排查：悬浮球红点提示新增预览/嵌入窗口指引（新标签页打开并允许麦克风）',
+    ],
+  },
   {
     version: '1.8.2',
     date: '2026-11-10',

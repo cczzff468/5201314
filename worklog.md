@@ -2312,3 +2312,28 @@ Stage Summary:
 - 能开任何应用+什么都能做：agent-screen.ts DOM 自动化五动作（开屏/观察/点击/输入/滚动）接入 Agent 规划回路，建联系人/发消息/写备忘录类任务全自主完成
 - 悬浮球美化：彩虹渐变环+深色玻璃+呼吸光环
 - 关键文件：agent-screen.ts/agent-chat.ts（新）、agent-voice-ball.tsx（重写 733 行）、shizuku-agent.ts（+5 动作+prompt）、settings.tsx（文案）、app-version.ts/build.gradle（1.7.0/13）
+
+## 2026-11-10 · v89（APP v1.8.3）喊名唤醒「连续说话后永久没反应」根治：上游限流退避 + 服务端防护 + 兼容性修复
+
+Task ID: 39
+Agent: 主控 Agent（Z.ai Code）
+Task: 用户反馈「在界面里叫唤醒名完全没反应，不弹全屏会话」——全链路排查（麦克风常驻监听 / 唤醒回调→状态→全屏 UI 状态机 / 权限与音频抢占三模块）并修复
+
+Work Log:
+- [E2E 复现环境] 自建无麦克风环境的完整唤醒链路测试台：z-ai TTS 合成真实语音「小灵」（24480 样本 WAV）→ 浏览器内注入 FakeAudioContext（state=running + AnalyserNode 合成说话波形驱动 VAD + decodeAudioData 返回真实语音 AudioBuffer）+ Fake getUserMedia（MediaStreamDestination 真流）+ MediaRecorder 包装注入真实 WAV chunk（绕过挂起上下文零帧）→ VAD→录音→解码→请求→匹配→开会话全状态机真实运转
+- [根因①·上游限流] 复现实锤：唤醒识别 /api/wake-asr（z-ai SDK ASR）连续 4 次请求（间隔 ~4s）→ 上游网关 WAF 405 拉黑数分钟（期间连单发都 405，实测 >60s 才解封）；旧客户端固定 0.8s 间隔重试 → 越打越死 → 4 次后降级 Web Speech（大陆不可达）→ 25s 冷却回炉再撞 → 喊名永久无反应；设置页诊断只显示「识别服务暂不可达，自动重试中」
+- [修复①·客户端退避] agent-voice.ts：服务端失败改指数退避 WAKE_SERVER_BACKOFF_MS=[1.5,3,6,12]s（按 serverFails 取值）；429/503 带 retryAfter 时听服务端的（clamp ≤30s）；诊断行显示倒计时「N s 后自动重试」
+- [修复②·服务端防护] /api/wake-asr/route.ts 重写：①结果缓存（audio sha256 → text，10min TTL/50 条 LRU，同音频重复上传零上游调用）；②每 IP 最小转发间隔 1.2s（超频 429+Retry-After，绝不转发触发 WAF）；③上游失败全路由冷却 30s（冷却期 503+retryAfter=30 秒回，负缓存 60s 同音频快速返回）；④ZAI 实例单例复用（旧版每请求重新 create）；⑤12s 看门狗 race 定时器 finally 清理
+- [修复③·兼容性] wakeAsrTranscribe 弃用 AbortSignal.timeout（Safari<16.4/旧 WebView 同步 TypeError → 服务端通道该设备永久失效）→ AbortController + setTimeout 兼容实现，网络层失败统一 'wake-asr 0'
+- [修复④·可观测] MIC_FUSE_MSG 增补预览/嵌入窗口指引：「若在预览/嵌入窗口里，请点『在新标签页打开』后允许麦克风」（iframe permissions-policy 禁麦是网页预览喊名无反应的第二大场景）
+- [顺手清零] tsc 全库 4 条基线错误清零：agent-voice.ts loadPinyin 惰性收窄 + recMime ?? ''、agent-weather.ts runWeatherReport CitySearchResult 误赋 CityPick（结果行与转换行合并为 hit→toCityPick）
+- [验证·E2E 全链路] Agent Browser + 测试台三连：①mock 响应「小玲」→ 拼音同音命中 → 全屏会话弹出（名牌「小灵」+ 问候「嗨，找我什么事呀？」+ 自动开录）✓；②mock 响应「小玲帮我打开微信」→ 一句话直达 → 会话展示 1.4s → 收起 → 微信 App 真实打开（手机号登录页截图）✓；③解除 mock 走真实服务端（上游已解封）→ 会话弹出 + asrLog 收到真实转写「小玲」✓
+- [验证·服务端防护] 连发 3 次：req1 转发（失败→503+retryAfter30+冷却置位）、req2/3 冷却期秒回 503 不触上游 ✓；解封后单发 {"text":"小玲"} ✓ 且进缓存
+- [验证·静态] tsc 全库 0 错误；eslint 改动 3 文件（agent-voice.ts / agent-weather.ts / wake-asr route.ts）0 error
+- [边界] 上游 WAF 对「同 IP 连续快请求」的封锁时长实测 >60s 且行为不可控——服务端冷却 30s + 客户端指数退避后，最坏情况是喊名延迟恢复而非永久死亡；真机 APK 侧离线通道（通道 B）不受上游影响，本修复主要救浏览器/未下模型场景
+- [版本] app-version.ts 1.8.3/19 + 发版说明 4 条（APK 壳无原生改动，未重打 APK，网页端 bundle 更新即生效）
+
+Stage Summary:
+- 「喊名没反应」两大根因根治：①上游 WAF 限流被固定间隔重试持续触发（客户端指数退避 + 服务端缓存/限流/冷却三重防护）；②旧 WebView AbortSignal.timeout 缺失致服务端通道永久失效（兼容实现）
+- 全链路 E2E 测试台建成（无麦克风环境也能验证唤醒状态机），喊名唤起、一句话直达开 App、真实服务端转写三条路径全部浏览器实测通过
+- 关键文件：src/lib/ios/agent-voice.ts（退避+兼容超时）、src/app/api/wake-asr/route.ts（重写：缓存/限流/冷却/单例）、src/lib/ios/agent-weather.ts（类型修复）、src/lib/app-version.ts（1.8.3/19）
