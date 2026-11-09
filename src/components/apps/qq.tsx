@@ -16009,19 +16009,27 @@ function refundToWallet(amount: number, kind: 'redpacket' | 'transfer'): void {
 
 // ---------------- 支付密码 / 支付方式（红包/转账可选余额或银行卡支付） ----------------
 
+// 支付密码加密落盘（v1.9.2）：与微信/美团共用 pay-pwd-box —— 内存明文缓存同步读（函数签名零变化），
+// kv 里落 secret-box enc:v1 密文串，IndexedDB 不再存明文；锁键（qq-pay-pwd-lock）非秘密仍存 localStorage 不动
+import { createPwdBox, QQ_PAY_PWD_KEY } from '@/lib/ios/pay-pwd-box';
+
 interface PayPwdData {
   enabled: boolean;
-  /** 6 位数字密码（仅本机 localStorage 保存） */
+  /** 6 位数字密码（AES-GCM 加密存本机 IndexedDB，不外传） */
   pwd: string | null;
 }
 
-const LS_PAY_PWD = 'qq-pay-pwd';
+// 键的唯一事实来源在 pay-pwd-box（开机注水按同一常量建 box），此处引用保持 kv 键不变
+const LS_PAY_PWD = QQ_PAY_PWD_KEY;
+
+/** 支付密码 kv box：明文进内存缓存（同步读快路径），密文落 IndexedDB（createPwdBox 按 key 去重，与开机注水共享实例） */
+const qqPayPwdBox = createPwdBox<Partial<PayPwdData>>(LS_PAY_PWD);
 
 export function loadPayPwd(): PayPwdData {
   try {
-    const p: unknown = kvGet(LS_PAY_PWD);
-    if (p && typeof p === 'object') {
-      const d = p as Partial<PayPwdData>;
+    const d = qqPayPwdBox.load();
+    if (d) {
+      // 6 位数字语义校验保持在调用侧（与旧版一致）：box 只管存取形态，不管业务规则
       const pwd = typeof d.pwd === 'string' && /^\d{6}$/.test(d.pwd) ? d.pwd : null;
       return { enabled: d.enabled === true && pwd !== null, pwd };
     }
@@ -16032,11 +16040,7 @@ export function loadPayPwd(): PayPwdData {
 }
 
 function savePayPwd(d: PayPwdData): void {
-  try {
-    kvSet(LS_PAY_PWD, d);
-  } catch {
-    // 忽略
-  }
+  qqPayPwdBox.save(d);
 }
 
 // #97 支付密码暴力试错保护——照搬微信 #48 同款：5 次失败 30s 锁定（localStorage 跨组件共享）

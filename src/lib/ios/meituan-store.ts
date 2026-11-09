@@ -9,6 +9,7 @@
  * 支付不在这里：meituan-pay.ts 动态 import 微信/QQ 钱包模块（避免全局加载 1.4 万行聊天模块）。
  */
 import { kvGet, kvSet } from '@/lib/ios/idb-kv';
+import { createPwdBox, MT_PAY_PWD_KEY_PREFIX } from './pay-pwd-box';
 import { dsMinutesFor } from './delivery-speed';
 import { accLs, getActiveAccountFor, isForceLoginWallActive } from '@/lib/ios/accounts';
 import { getContact, listContacts } from '@/lib/ios/contacts-store';
@@ -1353,15 +1354,19 @@ export function mtWalletWithdraw(uid: string, cardId: string, amount: number): {
 /** 美团支付密码（钱包右上角设置：开启/关闭/修改；提现/充值前验证） */
 export interface MtPayPwd {
   enabled: boolean;
-  /** 6 位数字密码（仅本机存储，不外传） */
+  /** 6 位数字密码（AES-GCM 加密存本机 IndexedDB，不外传） */
   pwd: string | null;
 }
 
-const payPwdKey = (uid: string) => `mt-pay-pwd:${uid}`;
+const payPwdKey = (uid: string) => `${MT_PAY_PWD_KEY_PREFIX}${uid}`;
+
+/** 每 uid 一份支付密码的加密 box（createPwdBox 按键去重：同 uid 恒定同一实例/缓存，
+ *  开机注水扫 mt-pay-pwd:* 前缀建的也是同一实例）；kv 键保持 mt-pay-pwd:<uid> 不变 */
+const mtPayPwdBoxOf = (uid: string) => createPwdBox<Partial<MtPayPwd>>(payPwdKey(uid));
 
 export function mtLoadPayPwd(uid: string): MtPayPwd {
-  const p = kvGet<Partial<MtPayPwd>>(payPwdKey(uid));
-  if (p && typeof p === 'object') {
+  const p = mtPayPwdBoxOf(uid).load();
+  if (p) {
     const pwd = typeof p.pwd === 'string' && /^\d{6}$/.test(p.pwd) ? p.pwd : null;
     return { enabled: p.enabled === true && pwd !== null, pwd };
   }
@@ -1369,7 +1374,7 @@ export function mtLoadPayPwd(uid: string): MtPayPwd {
 }
 
 export function mtSavePayPwd(uid: string, d: MtPayPwd): void {
-  kvSet(payPwdKey(uid), d);
+  mtPayPwdBoxOf(uid).save(d);
 }
 
 // 支付密码暴力试错保护（5 次失败锁定 30s；localStorage 跨组件共享，按账号隔离）

@@ -1080,6 +1080,13 @@ interface ChatSession {
   systemPrompt: string | null;
 }
 
+/** v1.9.2 分窗渲染（与微信/QQ 端 v71 同款）：聊天页初始只渲染最近 WINDOW_FIRST 条消息，
+ *  上滑到顶按 WINDOW_STEP 向前扩——长会话几千条一次性 map 渲染是「点进聊天界面卡顿」的主因，
+ *  分窗后首屏只建百级 DOM；时间分隔/连发合并/已送达回执等按消息原始索引计算的逻辑
+ *  全部带原索引渲染，行为与全量渲染完全一致 */
+const WINDOW_FIRST = 120;
+const WINDOW_STEP = 160;
+
 function ChatView({
   storageKey,
   initialMsgs,
@@ -1146,6 +1153,22 @@ function ChatView({
   const stream = useChatStream(sessionKey);
   const streaming = stream?.status === 'streaming';
   const scrollRef = useRef<HTMLDivElement>(null);
+  // ---- v1.9.2 分窗渲染（界面提速）：初始只渲染最近 WINDOW_FIRST 条，上滑到顶自动向前扩 ----
+  // 长会话几千条消息一次性 map 是点进聊天卡顿的主因；分窗后首屏只建百级 DOM，
+  // 上翻历史时按 WINDOW_STEP 步进补更早的（配合下方锚定 effect 保持视口不跳，与微信/QQ 端同款）。
+  // 窗口尾部锚定：新消息到达时 winStart 数学上自然跟随，自动滚底行为不受影响
+  const [visibleCount, setVisibleCount] = useState(WINDOW_FIRST);
+  const winStart = Math.max(0, msgs.length - visibleCount);
+  /** 向前扩窗时记录「加载前内容底缘到视口顶的距离」，渲染提交后把 scrollTop 顶回，
+   *  用户视口停留在原来的消息上（iOS 原生上翻加载同款体验） */
+  const topAnchorRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (topAnchorRef.current != null && scrollRef.current) {
+      const el = scrollRef.current;
+      el.scrollTop = Math.max(0, el.scrollHeight - topAnchorRef.current);
+      topAnchorRef.current = null;
+    }
+  });
   // v1.3 Shizuku：AI 使用技能时聊天界面正中的椭圆形胶囊浮层（useOpPill 是稳定引用，异步闭包里安全调用）
   const opPill = useOpPill();
   // 退出聊天页/切换会话（组件按 key 重挂载）：停止语音气泡播放与朗读并释放（防跨会话串音）
@@ -3328,12 +3351,21 @@ function ChatView({
         </div>
       </div>
 
-      {/* 消息流 */}
+      {/* 消息流：
+          v1.9.2 分窗渲染：onScroll 里滚到顶部 140px 内且前面还有未渲染的更早消息 → 记锚扩窗 */}
       <div
         ref={scrollRef}
         role="log"
         aria-label="聊天消息"
         aria-live="polite"
+        onScroll={(e) => {
+          if (winStart <= 0) return;
+          const el = e.currentTarget;
+          if (el.scrollTop <= 140) {
+            topAnchorRef.current = el.scrollHeight - el.scrollTop;
+            setVisibleCount((v) => v + WINDOW_STEP);
+          }
+        }}
         className="sms-chat-list no-scrollbar min-h-0 flex-1 overflow-y-auto px-3 pb-2 pt-1"
       >
         {!msgs.some((m) => !m.error) && (
@@ -3344,7 +3376,10 @@ function ChatView({
             <p className="text-[14px] font-medium text-muted-foreground">发条短信打个招呼吧</p>
           </div>
         )}
-        {msgs.map((m, i) => {
+        {msgs.slice(winStart).map((m, wi) => {
+          // 原始全量索引（时间分隔 msgs[i-1]/msgs[i+1] / 已送达回执 i===lastUserIdx / 七彩序号等
+          // 都按全量索引计算，分窗渲染也带原索引 → 行为与全量渲染完全一致）
+          const i = winStart + wi;
           // 错误占位消息（旧版失败落库文案）：新版失败改由触发消息上的红色 ! 徽标表达，不再渲染占位文字行
           if (m.error) return null;
           const prev = i > 0 ? msgs[i - 1] : undefined;

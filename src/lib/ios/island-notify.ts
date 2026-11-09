@@ -37,6 +37,9 @@ import { showSystemNotification, isPageBackground } from './system-notify';
 import { pushSysNotifyViaSse, type SseNotifyPayload } from './notify-sse';
 import { wxChatFlags, qqChatFlags } from '@/lib/chat-flags';
 import { playNotifySound } from './notify-sound';
+// v1.9.2 真 DND 总开关 getter：pushChatNotification 在最早汇合点一次拦净三类出口
+//（横幅/提示音/系统通知）；notification-center 运行时零重依赖，不会拖慢本模块加载
+import { isNotifyDndActive } from './notification-center';
 // v73.5：通知导航进微信单聊全屏时关闭同会话悬浮小窗/胶囊（防全屏与小窗双开同一聊天）
 import { useChatFloat } from './chat-float-store';
 
@@ -225,6 +228,12 @@ export function pushChatNotification(input: ChatNotifyInput): void {
   const body = truncateBody(input.body);
   if (!body) return;
   if (chatMuted(input.sessionKey)) return; // 消息免打扰：不弹灵动岛、不发系统通知（#15）
+  // v1.9.2 真 DND：总开关开启时，聊天消息的三类出口（灵动岛横幅动画 / 提示音 / 系统通知）
+  // 在这个最早汇合点一次拦净——下游 playNotifySound 与 maybeWebNotification（SSE/SW/
+  // 原生兑底）都只在本函数内被调，提前 return 即全覆盖。未读角标/会话列表由各自消费端
+  // 处理不受影响；聊天消息本就不入通知中心历史（中心唯一入口是 local-notify.notifyIfHidden），
+  // 不存在「丢记录」问题，无需再走记录钩子。
+  if (isNotifyDndActive()) return;
   // 通知提示音（设置 › 通知可配）：群会话走「群消息」，其余走「接收消息」；
   // 声音闸门（总开关/分类开关/免打扰）由 playNotifySound 内部判定——静音时弹窗与记录照常
   playNotifySound(input.sessionKey.includes(':group:') ? 'group' : 'receive');

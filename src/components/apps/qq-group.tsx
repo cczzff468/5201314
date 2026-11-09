@@ -2060,6 +2060,13 @@ const GROUP_CASCADE_COOLDOWN_MS = 5 * 60_000;
 const groupCascadeAt = new Map<string, number>();
 let groupCascadeDepth = 0;
 
+/** v1.9.2 分窗渲染（与微信/QQ 单聊端 v71 同款）：群聊页初始只渲染最近 WINDOW_FIRST 条消息，
+ *  上滑到顶按 WINDOW_STEP 向前扩——长会话几千条一次性 map 渲染是「点进群聊界面卡顿」的主因，
+ *  分窗后首屏只建百级 DOM；时间分隔等按消息原始索引计算的逻辑全部带原索引渲染，
+ *  行为与全量渲染完全一致 */
+const WINDOW_FIRST = 120;
+const WINDOW_STEP = 160;
+
 export function QqGroupChatPage({
   group,
   me,
@@ -2177,6 +2184,22 @@ export function QqGroupChatPage({
   const sendTextAsVoiceRef = useRef<(t: string) => void>(() => undefined);
   const mountedRef = useRef(true);
   const listRef = useRef<HTMLDivElement>(null);
+  // ---- v1.9.2 分窗渲染（界面提速）：初始只渲染最近 WINDOW_FIRST 条，上滑到顶自动向前扩 ----
+  // 长会话几千条消息一次性 map 是点进群聊卡顿的主因；分窗后首屏只建百级 DOM，
+  // 上翻历史时按 WINDOW_STEP 步进补更早的（配合下方锚定 effect 保持视口不跳，与单聊同款）。
+  // 窗口尾部锚定：新消息到达时 winStart 数学上自然跟随，既有「新消息滚到底」effect 不受影响
+  const [visibleCount, setVisibleCount] = useState(WINDOW_FIRST);
+  const winStart = Math.max(0, msgs.length - visibleCount);
+  /** 向前扩窗时记录「加载前内容底缘到视口顶的距离」，渲染提交后把 scrollTop 顶回，
+   *  用户视口停留在原来的消息上（iOS 原生上翻加载同款体验） */
+  const topAnchorRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (topAnchorRef.current != null && listRef.current) {
+      const el = listRef.current;
+      el.scrollTop = Math.max(0, el.scrollHeight - topAnchorRef.current);
+      topAnchorRef.current = null;
+    }
+  });
   const inputRef = useRef<ChatRichInputHandle | null>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const photoInputRef = useRef<HTMLInputElement>(null);
@@ -4759,8 +4782,21 @@ export function QqGroupChatPage({
         )}
       </div>
 
-      {/* 消息列表：自定义聊天背景时透出背景层 */}
-      <div ref={listRef} className="no-scrollbar relative z-10 min-h-0 flex-1 overflow-y-auto px-3.5 py-3" data-testid="qq-groupchat-list">
+      {/* 消息列表：自定义聊天背景时透出背景层
+          v1.9.2 分窗渲染：onScroll 里滚到顶部 140px 内且前面还有未渲染的更早消息 → 记锚扩窗 */}
+      <div
+        ref={listRef}
+        onScroll={(e) => {
+          if (winStart <= 0) return;
+          const el = e.currentTarget;
+          if (el.scrollTop <= 140) {
+            topAnchorRef.current = el.scrollHeight - el.scrollTop;
+            setVisibleCount((v) => v + WINDOW_STEP);
+          }
+        }}
+        className="no-scrollbar relative z-10 min-h-0 flex-1 overflow-y-auto px-3.5 py-3"
+        data-testid="qq-groupchat-list"
+      >
         {msgs.length === 0 && (
           <div className="pt-16 text-center text-[12px] leading-relaxed text-black/35 dark:text-white/35">
             群聊已创建
@@ -4768,7 +4804,9 @@ export function QqGroupChatPage({
             发条消息打个招呼吧（@某位成员可让它优先回复）
           </div>
         )}
-        {msgs.map((m, i) => {
+        {msgs.slice(winStart).map((m, wi) => {
+          // 原始全量索引（时间分隔 msgs[i-1] 按全量索引计算，分窗渲染也带原索引 → 行为与全量渲染完全一致）
+          const i = winStart + wi;
           // 旧版失败占位（「（…）」空回复兜底 / 「（网络开小差了…）」整轮失败提示行）：不再渲染，
           // 失败统一改由触发消息上的红色 ! 徽标表达
           if (m.role === 'peer' && m.content === '（…）') return null;

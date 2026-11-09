@@ -21,7 +21,13 @@
 import { isNativePerception } from './native-perception';
 import { ensureSwRegistration } from './system-notify';
 // C6 应用内通知中心：记录钩子（先于通道判断）+ 原生点击回传处理（已读/导航/收面板）
-import { recordCenterNotification, removeCenterByTag, openCenterItem } from './notification-center';
+// v1.9.2 真 DND 总开关 getter：notifyIfHidden 在记录之后、通道之前加闸（静但不丢）
+import {
+  isNotifyDndActive,
+  recordCenterNotification,
+  removeCenterByTag,
+  openCenterItem,
+} from './notification-center';
 
 export interface LocalNotifyOptions {
   /** 通知 tag：同 tag 后发替换先发（去重），cancelLocalNotify 按 tag 定向撤销 */
@@ -36,6 +42,19 @@ export interface LocalNotifyOptions {
    *  - 原生通道序列化为 JSON 字符串随 NativePerception.localNotify({target}) 透传，
    *    点击通知由原生侧注入 'local-notify-open' 事件回传（事件契约见 NativePerceptionPlugin）。 */
   target?: unknown;
+}
+
+/**
+ * 真 DND 豁免 tag 前缀（v1.9.2）：AI 来电（ai-call-*）与未接语音留言（ai-vm-*）。
+ * 为什么按 tag 前缀豁免：proactive-call.ts 的来电/留言提醒是本文件唯二需要穿透 DND 的入口，
+ * 用 tag 识别可以不动白名单外的调用方文件（避免给 LocalNotifyOptions 加可选字段再逐点传参）；
+ * 闹钟/提醒（ReminderWatcher）走各自独立的 Notification 通道，本就不经过 notifyIfHidden，天然豁免。
+ */
+const DND_EXEMPT_TAG_PREFIXES = ['ai-call-', 'ai-vm-'] as const;
+
+function isDndExemptTag(tag?: string): boolean {
+  if (!tag) return false;
+  return DND_EXEMPT_TAG_PREFIXES.some((p) => tag.startsWith(p));
 }
 
 /**
@@ -87,6 +106,12 @@ export async function notifyIfHidden(title: string, body: string, opts: LocalNot
         ? { target: (opts as { target?: unknown }).target }
         : {}),
     });
+
+    // ★★★ v1.9.2 真 DND 闸门：中心记录之后、一切通道之前 ★★★
+    // 顺序理由与上方记录钩子相同：DND 的语义是「静但不丢」——先落账再静音；
+    // 这里静的是「系统通知」出口（灵动岛横幅与提示音分别在 pushChatNotification /
+    // playNotifySound 的闸门处理），豁免名单见 isDndExemptTag（来电/留言不静）。
+    if (isNotifyDndActive() && !isDndExemptTag(opts.tag)) return;
 
     // 前台闸门：用户正看着页面 → 页内弹窗已足够，不发系统通知
     if (!document.hidden) return;

@@ -69,6 +69,12 @@ function fmtOrderTime(at: number): string {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
+/** v1.9.2 分窗渲染（与微信/QQ 端 v71 同款）：客服聊天页初始只渲染最近 WINDOW_FIRST 条消息，
+ *  上滑到顶按 WINDOW_STEP 向前扩——会话通常较短，但为一致性同样接入：行为与全量渲染完全一致，
+ *  时间分隔（msgs[i-1].at）/已读回执（i === lastUserIdx）等按消息原始索引计算的逻辑全部带原索引 */
+const WINDOW_FIRST = 120;
+const WINDOW_STEP = 160;
+
 /**
  * 商品卡消息（bot 推荐 / 买家购物袋按钮发送共用；独立白卡不走气泡）。
  * 商品已不存在（productById 未命中）→ 灰卡「商品已下架」。
@@ -195,6 +201,20 @@ export function TbMsgChatPage({
   const [typing, setTyping] = useState(false); // 客服回复等待中（头部变「对方正在输入...」+ 三点气泡）
   const [input, setInput] = useState('');
   const scrollerRef = useRef<HTMLDivElement | null>(null);
+  // ---- v1.9.2 分窗渲染（界面提速）：初始只渲染最近 WINDOW_FIRST 条，上滑到顶自动向前扩 ----
+  // 窗口尾部锚定：新消息到达时 winStart 数学上自然跟随，既有「滚到底部」effect 不受影响
+  const [visibleCount, setVisibleCount] = useState(WINDOW_FIRST);
+  const winStart = Math.max(0, msgs.length - visibleCount);
+  /** 向前扩窗时记录「加载前内容底缘到视口顶的距离」，渲染提交后把 scrollTop 顶回，
+   *  用户视口停留在原来的消息上（iOS 原生上翻加载同款体验） */
+  const topAnchorRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (topAnchorRef.current != null && scrollerRef.current) {
+      const el = scrollerRef.current;
+      el.scrollTop = Math.max(0, el.scrollHeight - topAnchorRef.current);
+      topAnchorRef.current = null;
+    }
+  });
   const aliveRef = useRef(true); // 卸载标记（防卸载后 setState）
   const sendingRef = useRef(false); // 发送防并发（一轮问答进行中忽略新发送）
   // 入口参数经 ref 读最新值：挂载 effect 依赖保持 [uid, shopId]（规格口径），父级重渲染不重复补卡
@@ -427,9 +447,24 @@ export function TbMsgChatPage({
           拒收本店营销活动消息
         </button>
       </div>
-      {/* 消息区（滚动条隐藏） */}
-      <div ref={scrollerRef} className="flex-1 overflow-y-auto px-3 py-3 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-        {msgs.map((m, i) => {
+      {/* 消息区（滚动条隐藏）
+          v1.9.2 分窗渲染：onScroll 里滚到顶部 140px 内且前面还有未渲染的更早消息 → 记锚扩窗 */}
+      <div
+        ref={scrollerRef}
+        onScroll={(e) => {
+          if (winStart <= 0) return;
+          const el = e.currentTarget;
+          if (el.scrollTop <= 140) {
+            topAnchorRef.current = el.scrollHeight - el.scrollTop;
+            setVisibleCount((v) => v + WINDOW_STEP);
+          }
+        }}
+        className="flex-1 overflow-y-auto px-3 py-3 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+      >
+        {msgs.slice(winStart).map((m, wi) => {
+          // 原始全量索引（时间分隔 msgs[i-1].at / 已读回执 i === lastUserIdx 都按全量索引计算，
+          // 分窗渲染也带原索引 → 行为与全量渲染完全一致）
+          const i = winStart + wi;
           const divider = timeDivider(m.at, i > 0 ? msgs[i - 1].at : null);
           const showRead = m.role === 'user' && i === lastUserIdx;
           return (

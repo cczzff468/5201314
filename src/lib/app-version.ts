@@ -11,9 +11,9 @@
  */
 
 /** 当前最新版本（与 android-shell versionName 保持一致） */
-export const APP_VERSION = '1.9.1';
+export const APP_VERSION = '1.9.2';
 /** 版本号数字（与 android-shell versionCode 保持一致；覆盖安装要求只增不减） */
-export const APP_VERSION_CODE = 21;
+export const APP_VERSION_CODE = 22;
 
 export interface AppReleaseNote {
   version: string;
@@ -24,6 +24,16 @@ export interface AppReleaseNote {
 
 /** 版本历史（新→旧；设置 › APP 更新 页渲染，最新一条即当前版本） */
 export const APP_RELEASE_NOTES: AppReleaseNote[] = [
+  {
+    version: '1.9.2',
+    date: '2026-11-10',
+    items: [
+      '隐私收尾：微信/QQ/美团支付密码改为加密存储（AES-GCM），旧数据启动时自动升级为密文，备份导出自动兼容，换机恢复后自动重新加密',
+      '免打扰模式：设置或通知中心一键开启，横幅/声音/系统通知全静但通知照常收入中心（闹钟、提醒、来电不受影响）',
+      '通知中心按 App 分组：每组可折叠、可整组清除，未读数一目了然；面板底部新增免打扰快捷开关',
+      '聊天提速：信息/微信群/QQ 群/淘宝客服聊天页接入分窗渲染，几千条记录的会话点开秒进、上翻历史不卡',
+    ],
+  },
   {
     version: '1.9.1',
     date: '2026-11-10',

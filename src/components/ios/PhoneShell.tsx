@@ -13,6 +13,7 @@ import { ensureAccountOwnerContacts, migrateFromServer } from '@/lib/ios/contact
 import { startOwnerProfileSync } from '@/lib/ios/owner-profile-sync';
 import { ensureAppFontApplied } from '@/lib/ios/fonts';
 import { ensureKvReady } from '@/lib/ios/idb-kv';
+import { ensurePayPwdBoxesHydrated } from '@/lib/ios/pay-pwd-box';
 import { ensurePromptEntriesClientReady } from '@/lib/ios/prompt-entries-client';
 import { migrateLegacyAccounts } from '@/lib/ios/accounts';
 import { shellScale } from '@/lib/ios/shell-scale';
@@ -418,6 +419,9 @@ export default function PhoneShell() {
       // 必须在 ensureKvReady 注水之前——迁移产生的后缀键要进同一份内存
       await migrateLegacyAccounts();
       await ensureKvReady();
+      // 支付密码密文注水（v1.9.2）：wx/qq/美团支付密码 kv 里落的是 enc:v1 密文串，同步读靠内存明文
+      // 缓存 —— 必须在开机门控结束前解密进缓存，否则设了密码的用户会短暂读到「未设置」（升级后无需重设）
+      await ensurePayPwdBoxesHydrated();
       // v63 全局预设管理器：注册提示词状态同步读取源（kvGet 内存缓存）并同步服务端内存镜像
       //（phone/memory/moments/forum 等服务端组装提示词的路由此后读到用户设置）
       ensurePromptEntriesClientReady();

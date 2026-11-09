@@ -22,15 +22,17 @@
  * 收面板经 store.closeCenter（原生 local-notify-open 回传同源），本组件只订阅 store.open。
  */
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { animate, motion, useMotionValue, useTransform } from 'framer-motion';
 import { useUI } from '@/lib/ios/store';
 import { useIncomingCall } from '@/lib/ios/incoming-call';
 import { shellScale } from '@/lib/ios/shell-scale';
 import {
   activateCenterItem,
+  setNotifyDnd,
   unreadCountOf,
   useNotifyCenter,
+  useNotifyDnd,
   type NotificationCenterItem,
 } from '@/lib/ios/notification-center';
 
@@ -60,15 +62,72 @@ interface TopDrag {
 
 // ---------------- 工具 ----------------
 
-/** 按 tag 映射来源图标（不引入新资源：项目 public/icons 现成图 + emoji 兜底） */
-function iconForItem(item: NotificationCenterItem): { src?: string; emoji?: string } {
-  if (item.icon) return { src: item.icon };
+/** 来源 App 元数据（v1.9.2 分组折叠 + 行图标共用一份推导，避免两套映射漂移） */
+interface NcAppMeta {
+  /** 分组键（同 key 聚拢一组；未知 tag 全部归入 system「系统」组） */
+  key: string;
+  /** 组头展示名 */
+  name: string;
+  /** 行/组头图标（图片路径；与旧 iconForItem 同序：调用方自带 item.icon 永远胜出） */
+  src?: string;
+  /** 行/组头图标（emoji 兜底，当无图片路径时） */
+  emoji?: string;
+}
+
+/**
+ * 按 tag 推导来源 App（调研结论：通知中心记录的唯一入口是 local-notify.notifyIfHidden →
+ * recordCenterNotification，真实存在的 tag 形态只有四种——
+ * 'agent'（shizuku-agent 任务结束）/ 'couple-home-notes'（CoupleHome 便签）/
+ * 'ai-call-<id>'（proactive-call 来电提醒）/ 'ai-vm-<id>'（proactive-call 未接留言）；
+ * pushChatNotification 聊天链路不入中心，故聊天 tag 当前实际不存在——下面的微信/QQ/信息
+ * 分支是按 sessionKey 前缀约定做的防御性映射，兜住未来/测试注入（__ncTest）的形态，
+ * 避免聊天条目错归「系统」组；未知/无 tag（含浏览器通道自动 local-*）归「系统」。
+ * 图标解析顺序与旧 iconForItem 完全一致（item.icon > tag 映射 > 缺省应用图标），行视觉不变。
+ */
+function appMetaOf(item: NotificationCenterItem): NcAppMeta {
   const tag = item.tag ?? '';
-  if (tag === 'agent' || tag.startsWith('agent-') || tag.startsWith('agent:')) return { emoji: '🤖' };
-  if (tag.startsWith('ai-call-')) return { src: '/icons/phone.png' }; // AI 来电
-  if (tag.startsWith('ai-vm-')) return { src: '/icons/recorder.png' }; // 未接语音留言
-  if (tag.startsWith('couple')) return { src: '/icons/couple.png' }; // 情侣小家便签
-  return { src: '/icons/pwa/icon-192.png' }; // 缺省：应用图标
+  let key = 'system';
+  let name = '系统';
+  let src: string | undefined = '/icons/pwa/icon-192.png'; // 缺省：应用图标
+  let emoji: string | undefined;
+  if (tag === 'agent' || tag.startsWith('agent-') || tag.startsWith('agent:')) {
+    key = 'agent';
+    name = 'AI 助手';
+    src = undefined;
+    emoji = '🤖';
+  } else if (tag.startsWith('ai-call-')) {
+    key = 'phone';
+    name = '电话';
+    src = '/icons/phone.png';
+  } else if (tag.startsWith('ai-vm-')) {
+    key = 'voicemail';
+    name = '语音留言';
+    src = '/icons/recorder.png';
+  } else if (tag.startsWith('couple')) {
+    key = 'couple';
+    name = '情侣小家';
+    src = '/icons/couple.png';
+  } else if (/^wx([:-]|$)/.test(tag) || tag.startsWith('wx:group') || tag.startsWith('wx-group')) {
+    key = 'wechat';
+    name = '微信';
+    src = '/icons/wechat.png';
+  } else if (/^qq([:-]|$)/.test(tag) || tag.startsWith('qq:group') || tag.startsWith('qq-group')) {
+    key = 'qq';
+    name = 'QQ';
+    src = '/icons/qq.png';
+  } else if (/^(sms|chat)([:.-]|$)/.test(tag)) {
+    key = 'chat';
+    name = '信息';
+    src = '/icons/chat.png';
+  }
+  // 调用方自带图标永远胜出（与旧 iconForItem 首分支一致，行视觉行为不变）
+  if (item.icon) src = item.icon;
+  return {
+    key,
+    name,
+    ...(src ? { src } : {}),
+    ...(emoji ? { emoji } : {}),
+  };
 }
 
 /** 相对时间：刚刚 / N 分钟前 / N 小时前 / 昨天 / M月D日 */
@@ -86,7 +145,7 @@ function relativeTime(ts: number, now: number): string {
 // ---------------- 单条通知行 ----------------
 
 function NotificationRow({ item, now }: { item: NotificationCenterItem; now: number }) {
-  const icon = iconForItem(item);
+  const icon = appMetaOf(item); // 行图标与分组共用同一推导（v1.9.2），视觉与旧 iconForItem 一致
   return (
     <button
       type="button"
@@ -128,6 +187,17 @@ function NotificationRow({ item, now }: { item: NotificationCenterItem; now: num
   );
 }
 
+// ---------------- 分组视图模型（纯视图层派生：items 持久化格式不变） ----------------
+
+interface NcGroup {
+  key: string;
+  name: string;
+  /** 组头图标（取组内最新条目的来源 App 元数据） */
+  meta: NcAppMeta;
+  items: NotificationCenterItem[];
+  unread: number;
+}
+
 // ---------------- 主组件 ----------------
 
 export default function NotificationCenter() {
@@ -148,6 +218,34 @@ export default function NotificationCenter() {
   // 相对时间的基准：渲染时取当前时间（30s 心跳 tick 只负责触发重渲染刷新展示）
   const [, setTick] = useState(0);
   const now = Date.now();
+
+  // v1.9.2 真 DND 快捷开关：订阅响应式镜像 store（setNotifyDnd 先落盘再同步镜像）——
+  // 设置 › 通知页与面板两个入口天然联动，无需 useState 镜像 + effect 同步
+  const dndOn = useNotifyDnd((s) => s.on);
+
+  // 分组折叠状态（仅组件内存，不持久化：iOS 通知中心每次展开同样默认全展开）
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
+  const toggleGroup = (key: string): void => setCollapsed((m) => ({ ...m, [key]: !m[key] }));
+
+  // 按 App 分组（items 本身 ts 倒序：首遇即组内最新，Map 插入序即组间倒序；
+  // 组内再显式倒序一次、组间按最新条目 ts 再排一次，兜底历史数据的顺序毛刺）
+  const groups = useMemo<NcGroup[]>(() => {
+    const map = new Map<string, NcGroup>();
+    for (const it of items) {
+      const meta = appMetaOf(it);
+      let g = map.get(meta.key);
+      if (!g) {
+        g = { key: meta.key, name: meta.name, meta, items: [], unread: 0 };
+        map.set(meta.key, g);
+      }
+      g.items.push(it);
+      if (!it.read) g.unread++;
+    }
+    const list = Array.from(map.values());
+    for (const g of list) g.items.sort((a, b) => b.ts - a.ts);
+    list.sort((a, b) => (b.items[0]?.ts ?? 0) - (a.items[0]?.ts ?? 0));
+    return list;
+  }, [items]);
 
   // 入口 gate：仅解锁后可拉出；切换器/响铃/通话/来电层显示时禁用（它们的交互优先）
   const entryEnabled = !locked && !screenOff && !switcherOpen && !alarmRinging && !callActive && !incomingCall;
@@ -332,14 +430,15 @@ export default function NotificationCenter() {
         style={{ y: contentY, pointerEvents: open ? 'auto' : 'none' }}
         className="absolute inset-x-0 top-0 flex h-[82%] flex-col px-3 pt-[56px]"
       >
-        {/* 拉手（点按收起） */}
+        {/* 拉手（点按收起）；DND 生效时附小 🌙 标识（v1.9.2 可选细节，极简不加新区块） */}
         <button
           type="button"
           aria-label="收起通知中心"
           data-testid="nc-grabber"
           onClick={() => useNotifyCenter.getState().closeCenter()}
-          className="pointer-events-auto mx-auto mb-1 flex h-6 w-16 shrink-0 items-center justify-center"
+          className="pointer-events-auto mx-auto mb-1 flex h-6 min-w-16 shrink-0 items-center justify-center gap-1.5 px-1"
         >
+          {dndOn && <span aria-label="免打扰开启中" className="text-[11px] leading-none">🌙</span>}
           <span className="h-[5px] w-[38px] rounded-full bg-white/40" />
         </button>
 
@@ -350,13 +449,64 @@ export default function NotificationCenter() {
           </div>
         ) : (
           <div data-testid="nc-list" className="min-h-0 flex-1 overflow-y-auto">
-            {items.map((it) => (
-              <NotificationRow key={it.id} item={it} now={now} />
-            ))}
+            {groups.map((g) => {
+              const isCollapsed = collapsed[g.key] === true;
+              return (
+                <div key={g.key} className="mb-2">
+                  {/* 组头：小图标 + App 名 + 未读徽标 + 组级清除 ✕ + 折叠箭头；点按整条 = 折叠/展开。
+                      sticky 悬停在滚动区顶部（毛玻璃透出行滚动，iOS 通知中心同款观感） */}
+                  <div
+                    data-testid="nc-group"
+                    role="button"
+                    tabIndex={0}
+                    aria-expanded={!isCollapsed}
+                    onClick={() => toggleGroup(g.key)}
+                    className="pointer-events-auto sticky top-0 z-10 flex h-9 cursor-pointer items-center gap-2 rounded-xl bg-white/[0.18] px-2.5 backdrop-blur-md"
+                  >
+                    <span className="flex h-6 w-6 shrink-0 items-center justify-center overflow-hidden rounded-[7px] bg-white/20">
+                      {g.meta.src ? (
+                        <img src={g.meta.src} alt="" className="h-4 w-4 object-contain" /> // 壳内小尺寸静态图标，直接 img
+                      ) : (
+                        <span className="text-[13px] leading-none">{g.meta.emoji}</span>
+                      )}
+                    </span>
+                    <span className="min-w-0 flex-1 truncate text-[13px] font-semibold text-white">{g.name}</span>
+                    {g.unread > 0 && (
+                      <span className="shrink-0 rounded-full bg-[#0A84FF] px-1.5 text-[11px] leading-4 text-white">
+                        {g.unread > 99 ? '99+' : g.unread}
+                      </span>
+                    )}
+                    {/* 组级清除（阻断组头折叠点击）：removeMany 一次 set 一次落盘 */}
+                    <span
+                      role="button"
+                      aria-label={`清除${g.name}的全部通知`}
+                      data-testid="nc-group-clear"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        useNotifyCenter.getState().removeMany(g.items.map((i) => i.id));
+                      }}
+                      className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-white/15 text-[10px] leading-none text-white/70 active:bg-white/30"
+                    >
+                      ✕
+                    </span>
+                    <span aria-hidden className={`shrink-0 text-[9px] leading-none text-white/60 transition-transform ${isCollapsed ? '' : 'rotate-180'}`}>
+                      ▼
+                    </span>
+                  </div>
+                  {!isCollapsed && (
+                    <div data-testid="nc-group-items">
+                      {g.items.map((it) => (
+                        <NotificationRow key={it.id} item={it} now={now} />
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         )}
 
-        {/* 底部操作 */}
+        {/* 底部操作（v1.9.2 加第三个「🌙 免打扰」快捷开关：与设置页同一持久化真值，激活态蓝色高亮） */}
         <div className="flex shrink-0 gap-2 py-2.5">
           <button
             type="button"
@@ -366,6 +516,19 @@ export default function NotificationCenter() {
             className="pointer-events-auto h-9 flex-1 rounded-full bg-white/15 text-[13px] font-medium text-white backdrop-blur-md transition-opacity active:bg-white/25 disabled:opacity-40"
           >
             全部已读
+          </button>
+          <button
+            type="button"
+            data-testid="nc-dnd-toggle"
+            aria-pressed={dndOn}
+            onClick={() => {
+              setNotifyDnd(!dndOn); // 先落盘（唯一真相）再同步镜像，订阅处自动重渲染
+            }}
+            className={`pointer-events-auto h-9 flex-1 rounded-full text-[13px] font-medium text-white backdrop-blur-md transition-colors active:brightness-110 ${
+              dndOn ? 'bg-[#0A84FF]' : 'bg-white/15'
+            }`}
+          >
+            🌙 免打扰
           </button>
           <button
             type="button"

@@ -8,6 +8,7 @@ import {
   ArrowUpRight,
   AudioLines,
   Bell,
+  BellOff,
   Bluetooth,
   Camera,
   Check,
@@ -138,6 +139,9 @@ import { clearPushStatus, lastPushStatus, setupPushSubscription, teardownPushSub
 import { showSystemNotification, querySystemNotifyPermission, requestSystemNotifyPermission, type SystemNotifyChannel } from '@/lib/ios/system-notify';
 import { deleteOfflineModel, initOfflineAsr, useOfflineAsr } from '@/lib/ios/offline-asr';
 import { isSysNotifyEnabled, setSysNotifyEnabled } from '@/lib/ios/island-notify';
+// v1.9.2 真 DND 总开关（localStorage ios-notify-dnd-master）：开关行订阅响应式镜像 store，
+// 与通知中心面板快捷开关双向即时联动（setNotifyDnd 先落盘再同步镜像）
+import { setNotifyDnd, useNotifyDnd } from '@/lib/ios/notification-center';
 import {
   addCustomRingtone,
   BUILTIN_NOTIFY_TONES,
@@ -2059,6 +2063,10 @@ function NotifySoundSection() {
   const previewTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const [toastMsg, showToast] = useLocalToast();
+  // v1.9.2 真 DND 总开关：订阅响应式镜像（useNotifyDnd）而非本地 useState——
+  // 与下方「提示音」总开关相互独立（那个只关声音，这个连横幅与系统通知一起静，中心记录照常），
+  // 与面板快捷开关双向联动（面板点了设置页立即反映，反之亦然）
+  const dndMaster = useNotifyDnd((s) => s.on);
 
   // 分类独立开关已从界面移除（总开关 + 音量/免打扰已足够，界面更简洁）：
   // 历史数据里手动关过的分类一次性恢复，避免「无声且无处再开启」的死角
@@ -2132,6 +2140,23 @@ function NotifySoundSection() {
 
   return (
     <div>
+      {/* ---------- v1.9.2 真 DND 总开关（横幅/声音/系统通知三出口全静，中心记录照常入账；
+          闹钟/提醒/AI 来电豁免——用户明确要求的打扰不静） ---------- */}
+      <p className="mt-6 px-1 pb-1.5 text-[13px] font-medium text-muted-foreground">免打扰模式</p>
+      <GroupCard>
+        <div className="flex h-[48px] items-center gap-3 px-4">
+          <RowIcon icon={BellOff} tone={TONE_RED} />
+          <span className="min-w-0 flex-1 text-[16px]">免打扰模式</span>
+          <Switch
+            checked={dndMaster}
+            onCheckedChange={(v) => setNotifyDnd(v)}
+            aria-label="免打扰模式"
+          />
+        </div>
+        <p className="px-4 pb-3.5 pt-1 text-[12px] leading-relaxed text-muted-foreground">
+          横幅与声音全静，通知照常收入通知中心（闹钟/提醒/来电不受影响）
+        </p>
+      </GroupCard>
       {/* ---------- 全局 ---------- */}
       <p className="mt-6 px-1 pb-1.5 text-[13px] font-medium text-muted-foreground">声音与铃声</p>
       <GroupCard>

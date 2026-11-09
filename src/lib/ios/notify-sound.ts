@@ -26,6 +26,9 @@
 import { create } from 'zustand';
 import { genId, localDB } from './db';
 import { measureAudioDuration } from './audio-utils';
+// v1.9.2 真 DND 总开关 getter（notification-center 运行时零重依赖，无循环依赖）：
+// 声音闸与 AI 主动行为闸都要在「总开关开启」时静音/静默
+import { isNotifyDndActive } from './notification-center';
 
 // ---------------- 类型 ----------------
 
@@ -628,9 +631,8 @@ export function inDndWindow(from: string, to: string, now?: Date): boolean {
 
 // ---------------- 提示音触发入口 ----------------
 
-/** B1：系统免打扰时段（设置›通知的全局 DND）当前是否生效——AI 主动行为闸（主动来电/自主消息）用：
- *  用户配置「22:00-08:00 免打扰」后，AI 不得在该时段主动来电/自主发消息打扰（用户明确配置的定时/事件/提醒照发） */
-export function isDndWindowActive(now?: Date): boolean {
+/** 全局免打扰时段纯判定（读声音设置的全局 dndFrom/dndTo；纯时段查询也可直接用 inDndWindow(settings.dndFrom, settings.dndTo)） */
+function dndTimeWindowActive(now?: Date): boolean {
   try {
     const st = useNotifySound.getState().settings;
     return inDndWindow(st.dndFrom, st.dndTo, now);
@@ -639,10 +641,31 @@ export function isDndWindowActive(now?: Date): boolean {
   }
 }
 
-/** 该类当前是否静音（总开关 / 分类开关 / 全局免打扰 / 分类免打扰 任一命中 = 静音） */
+/**
+ * B1：系统免打扰时段（设置›通知的全局 DND）当前是否生效——AI 主动行为闸（主动来电/自主消息）用：
+ *  用户配置「22:00-08:00 免打扰」后，AI 不得在该时段主动来电/自主发消息打扰（用户明确配置的定时/事件/提醒照发）
+ * v1.9.2 并入真 DND 总开关：本函数的既有消费方全部是 AI 主动行为闸（proactive-call 主动来电
+ * tick 守卫 / proactive-msg 自主决策与焦虑追发到点，语义相同），而那两个文件不在本任务白名单——
+ * 等价改写在此一处（时段命中或总开关开启任一为真）即可让全部 AI 主动闸尊重总开关，
+ * 行为与「使用点逐点替换为 isDndNow()」完全一致。新消费方请直接用 isDndNow()。
+ */
+export function isDndWindowActive(now?: Date): boolean {
+  return isDndNow(now);
+}
+
+/** v1.9.2 真 DND「现在生效吗」规范入口（= 主开关 || 全局免打扰时段，任务约定的 isDndNow 公式） */
+export function isDndNow(now?: Date): boolean {
+  return dndTimeWindowActive(now) || isNotifyDndActive();
+}
+
+/** 该类当前是否静音（总开关 / 真 DND / 全局免打扰 / 分类免打扰 任一命中 = 静音） */
 export function isNotifySoundSilent(cat: NotifySoundCategory, now?: Date): boolean {
   const s = useNotifySound.getState().settings;
   if (!s.master) return true;
+  // v1.9.2 真 DND：总开关开启时「收到类」提示音全类别静音（横幅/系统通知在各自闸门静，
+  // 三类出口同时生效）。send 例外：用户自己发消息的音效是操作反馈不是「被通知」，
+  // 不受 DND（对齐 iOS 勿扰语义：勿扰不吞用户自己的操作声）。
+  if (cat !== 'send' && isNotifyDndActive()) return true;
   const c = s.categories[cat];
   if (!c.enabled) return true;
   if (inDndWindow(s.dndFrom, s.dndTo, now)) return true;

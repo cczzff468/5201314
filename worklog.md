@@ -2384,3 +2384,25 @@ Stage Summary:
 - APP 内「通知不能用」三根因一锅端：测试通知接入原生 localNotify 通道（WebView 前置权限闸绕开）+ 旧 bundle 误落的推送诊断挂载即清 + 失败文案按环境/原因分流（含旧壳升级引导）
 - 顺带修复 island-notify/notify-sse 在 APP 内静默失败的历史问题——AI 来电/消息系统通知在 APP 内真正可用
 - 关键文件：system-notify.ts（原生通道+类型）、native-perception.ts（+localNotify 带回执封装）、push-client.ts（+clearPushStatus）、settings.tsx（通知页四处分流）、app-version.ts（1.9.1/21）
+
+## 2026-11-10 · v92（网页端 v1.9.2）支付密码加密收尾 + 通知管理增强 + 聊天分窗渲染推广
+
+Task ID: 42
+Agent: 主控 Agent（Z.ai Code）+ 3 个子代理并行（1 支付密码加密 / 2 通知管理增强 / 3 聊天分窗推广）
+Task: 用户三项选定（清单 1/5/11）：支付密码加密收尾、通知管理增强、聊天长会话性能
+
+Work Log:
+- [调研] 支付密码三站点确认：wx-pay-pwd（wechat-wallet saveJSON/kvGet）、qq-pay-pwd（qq.tsx 同款）、mt-pay-pwd:<uid>（meituan-store 按 uid）；锁键 *-pay-pwd-lock 只存失败计数非秘密不动；backup.ts 导出已按「enc:v1 形态探测」自动解密——密文落成字符串形态即自动兼容，零改动；开机挂点=PhoneShell IIFE 内 ensureKvReady() 之后
+- [Task 1·加密] 新建 src/lib/ios/pay-pwd-box.ts：createPwdBox<T>(semanticKey) 工厂（同键恒同实例）——load() 同步（缓存→kvGet 多形态兼容读：旧明文对象/明文 JSON 串进缓存+自愈回写、enc:v1 串等注水返回 null）、save() 同步签名保持（先 kvSet 明文保命→异步 encryptSecret 密文覆盖，注释写明中断自愈理由）、remove() 清槽+作废在途写、ensureHydrated() 幂等注水；脏标记+每作用域 writeSeq 双保险防竞态/防已删复活；缓存按原样存储键分槽（accounts.ts scopedKvKey 与 idb-kv effKey 同源，防切账号串号），开机把语义键大号+各小号变体全部注水；三站点 wxLoadPayPwd/wxSavePayPwd、loadPayPwd/savePayPwd、mtLoadPayPwd/mtSavePayPwd 内部改走 box，函数名/签名/6 位校验语义零变化；PhoneShell 开机门控 ensureKvReady 后加 await ensurePayPwdBoxesHydrated()（PBKDF2 会话仅一次 <100ms）；backup.ts 验证零改动（导出形态探测自动解密、导入明文落库自愈闭环）
+- [Task 2·DND] notification-center.ts 新增 isNotifyDndActive()/setNotifyDnd()（localStorage ios-notify-dnd-master，'on'/'off'）+ useNotifyDnd 镜像 store（设置页⇄面板跨 UI 即时联动）；三闸：①island-notify.pushChatNotification 入口拦（聊天消息横幅+声音+系统通知三类出口一次拦净）②local-notify.notifyIfHidden 在 recordCenterNotification 之后闸（静但不丢：中心记录先落账）③notify-sound.isNotifySoundSilent 加闸（send 类例外=用户自己发消息的操作反馈）；豁免名单逐一验证：闹钟/提醒（独立链路不经闸点）、AI 来电/未接留言（ai-call-/ai-vm- 前缀豁免）、用户配置定时事件（proactive 路径无闸照发）；AI 主动闸：isDndWindowActive 并入总开关（其消费方 100% 是 proactive 三闸，等价零冲突）+ 新规范入口 isDndNow()
+- [Task 2·分组] NotificationCenter.tsx：iconForItem 升级 appMetaOf（真实 tag 调研：recordCenterNotification 唯一入口=notifyIfHidden，实际仅 agent/couple-home-notes/ai-call-*/ai-vm-* 四种，wx:/qq:/sms: 防御性映射兜未来）；useMemo 聚组（组间最新 ts 倒序+组内倒序），组头 sticky 毛玻璃（小图标+App 名+未读徽标 99+ 封顶+nc-group-clear ✕ 走新 store.removeMany 单次落盘+折叠箭头），折叠态组件 useState 不持久化；NotificationRow/空态/已读/导航/持久化格式零变化；面板底部第三按钮 nc-dnd-toggle（激活高亮）+拉手区 DND 生效显示 🌙；settings.tsx 通知页 NotifySoundSection 顶部加「免打扰模式」GroupCard（BellOff+Switch+副文案，4 个 surgical hunk）
+- [Task 3·分窗] wechat/qq v71 模式（WINDOW_FIRST=120/WINDOW_STEP=160/140px 扩窗/topAnchorRef 锚定）推广 4 面：chat.tsx ChatView（信息，渲染源即 msgs，派生数组核实为提示词构造非渲染数组）、wx-group.tsx WxGroupChatPage（照片堆叠 stackHead/stackMember 三个 useMemo 全量原始索引不动，渲染经原索引查表）、qq-group.tsx QqGroupChatPage（仅时间分隔）、taobao-msg-chat.tsx TbMsgChatPage（时间分隔+lastUserIdx 全量倒序扫描）；四面均无「跳转到消息」功能（群聊搜索钮为 toast 占位）无需双 rAF 兜底；既有滚底 effect 一行未动，尾部锚定下 winStart 随新消息自然前移
+- [验证·E2E] agent-browser 全链路：①Task 1：kv 直写明文 {enabled,pwd:'123456'}→reload→开机注水自愈→kv 读回 'enc:v1:ahPAQrE97QUXAase:…' 密文✅；②Task 3：播种 200 条信息会话→进会话 DOM 恰 120 条（#81–#200）✅→scrollTop=0 扩窗→全量 200（#1–#200）✅；③Task 2：__ncTest 注入 7 条 6 类 tag→面板 6 组正确（系统2/微信1/语音留言1/电话1/情侣小家1/AI助手1，组间最新倒序）✅→nc-dnd-toggle 点击→localStorage='on'+按钮「🌙 免打扰」高亮✅→组头折叠（组内条目 0 渲染）✅→组级 ✕ 清除（7→6 条，微信组消失）✅→设置›通知页「免打扰模式」行渲染且开关为开（跨 UI 同步）✅；tsc 全库 0 错误；eslint 改动文件 0 新增（settings 3 条+taobao 1 条经 stash 对照确认存量）
+- [版本] app-version.ts 1.9.2/22 + 发版说明 4 条；APK 不重打（无原生改动，网页 bundle 更新即生效）
+- [边界] 支付密码 save 两步写之间进程被杀残留明文→下次 load 自愈升级（既定收敛路径，最终态恒密文/降级明文）；DND 实际静音链路（pushChatNotification 闸后无横幅）静态审查+代码走查通过，横幅真机表现与各组折叠手感待真机回归；分窗尾窗在长会话末尾持续来新消息时最旧一条滑出窗口（与参考实现同语义）；taobao 存量 eslint set-state-in-effect 建议后续专门任务处理
+
+Stage Summary:
+- 隐私闭环：微信/QQ/美团支付密码 AES-GCM 加密落库，旧数据自动升级、备份自动兼容、跨设备恢复自动重加密——v1.9.0 遗留清零
+- 通知管理：真·免打扰模式（静而不丢，闹钟/提醒/来电豁免）+ 通知中心按 App 分组折叠/组清除 + 面板与设置双入口快捷开关
+- 性能：分窗渲染覆盖全部 6 个聊天面（微信/QQ 单聊原有 + 信息/双群/淘宝客服新增），长会话点开秒进
+- 关键文件：pay-pwd-box.ts（新建）、wechat-wallet.tsx/qq.tsx/meituan-store.ts/PhoneShell.tsx（加密接入）、notification-center.ts/local-notify.ts/island-notify.ts/notify-sound.ts（DND 三闸）、NotificationCenter.tsx/settings.tsx（分组+开关）、chat.tsx/wx-group.tsx/qq-group.tsx/taobao-msg-chat.tsx（分窗）、app-version.ts（1.9.2/22）

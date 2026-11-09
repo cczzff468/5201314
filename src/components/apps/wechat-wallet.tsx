@@ -3286,13 +3286,18 @@ export function WxServices({ friends, myRealName, onExit }: { friends: ContactRe
 
 // ---------------- 支付设置 / 支付密码（发红包/转账支付验证；微信风格 6 位自绘键盘） ----------------
 
+// 支付密码加密落盘（v1.9.2）：与 QQ/美团共用 pay-pwd-box —— 内存明文缓存同步读（函数签名零变化），
+// kv 里落 secret-box enc:v1 密文串，IndexedDB 不再存明文；锁键（wx-pay-pwd-lock）非秘密仍存 localStorage 不动
+import { createPwdBox, WX_PAY_PWD_KEY } from '@/lib/ios/pay-pwd-box';
+
 interface WxPayPwdData {
   enabled: boolean;
-  /** 6 位数字密码（仅本机 IndexedDB 加密存储之外的本机保存，不外传） */
+  /** 6 位数字密码（AES-GCM 加密存本机 IndexedDB，不外传） */
   pwd: string | null;
 }
 
-export const WX_LS_PAY_PWD = 'wx-pay-pwd';
+// 键的唯一事实来源在 pay-pwd-box（开机注水按同一常量建 box），此处别名保持导出名不变
+export const WX_LS_PAY_PWD = WX_PAY_PWD_KEY;
 
 // #48：支付密码暴力试错保护——失败次数与锁定到期时间戳（5 次失败 30s 锁定），存 localStorage 跨组件共享
 export const WX_LS_PAY_PWD_LOCK = 'wx-pay-pwd-lock';
@@ -3343,11 +3348,14 @@ export function wxRecordPayPwdFail(): WxPayPwdLockData {
   return next;
 }
 
+/** 支付密码 kv box：明文进内存缓存（同步读快路径），密文落 IndexedDB（createPwdBox 按 key 去重，与开机注水共享实例） */
+const wxPayPwdBox = createPwdBox<Partial<WxPayPwdData>>(WX_LS_PAY_PWD);
+
 export function wxLoadPayPwd(): WxPayPwdData {
   try {
-    const p: unknown = kvGet(WX_LS_PAY_PWD);
-    if (p && typeof p === 'object') {
-      const d = p as Partial<WxPayPwdData>;
+    const d = wxPayPwdBox.load();
+    if (d) {
+      // 6 位数字语义校验保持在调用侧（与旧版一致）：box 只管存取形态，不管业务规则
       const pwd = typeof d.pwd === 'string' && /^\d{6}$/.test(d.pwd) ? d.pwd : null;
       return { enabled: d.enabled === true && pwd !== null, pwd };
     }
@@ -3358,7 +3366,7 @@ export function wxLoadPayPwd(): WxPayPwdData {
 }
 
 export function wxSavePayPwd(d: WxPayPwdData): void {
-  saveJSON(WX_LS_PAY_PWD, d);
+  wxPayPwdBox.save(d);
 }
 
 /** 微信风格 6 位支付密码自绘数字键盘（不唤起系统键盘；校验由父级完成，errorKey 变化时父级重挂载 → 清空并抖动） */

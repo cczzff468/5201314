@@ -39,7 +39,7 @@ export interface NotificationCenterItem {
   url?: string;
   /** 2-b 原生侧点击导航 target（NotifyTarget 形状），这里按 unknown 容错透传 */
   target?: unknown;
-  /** 来源应用图标（可选；缺省按 tag 映射，见 NotificationCenter.tsx iconForItem） */
+  /** 来源应用图标（可选；缺省按 tag 映射，见 NotificationCenter.tsx appMetaOf） */
   icon?: string;
   /** 记录时间戳（相对时间展示用） */
   ts: number;
@@ -65,6 +65,8 @@ interface NotificationCenterState {
   add: (n: CenterRecordInput) => void;
   /** 单条删除（条目上的「清除」按钮） */
   remove: (id: string) => void;
+  /** 批量删除（v1.9.2 分组组级清除：一次 set 一次落盘，避免逐条 remove 反复触发持久化订阅） */
+  removeMany: (ids: string[]) => void;
   /** 按 tag 移除（cancelLocalNotify 同步撤销中心内条目） */
   removeByTag: (tag: string) => void;
   /** 按 id 置已读 */
@@ -167,6 +169,12 @@ export const useNotifyCenter = create<NotificationCenterState>((set) => ({
 
   remove: (id) => set((s) => ({ items: s.items.filter((i) => i.id !== id) })),
 
+  removeMany: (ids) => {
+    if (ids.length === 0) return;
+    const dead = new Set(ids);
+    set((s) => ({ items: s.items.filter((i) => !dead.has(i.id)) }));
+  },
+
   removeByTag: (tag) => {
     if (!tag) return;
     set((s) => ({ items: s.items.filter((i) => i.tag !== tag) }));
@@ -229,6 +237,55 @@ export function removeCenterByTag(tag: string): void {
   } catch {
     // 静默
   }
+}
+
+// ---------------- 真 DND 总开关（v1.9.2 全局免打扰模式） ----------------
+
+/**
+ * 持久化键（localStorage）：'on' / 'off'，缺省视为 'off'（老用户无记录 = 未开启）。
+ *
+ * 真 DND 语义（与「声音与铃声」的提示音总开关相互独立、同时生效）：
+ * 开 = 静掉「灵动岛横幅动画 + 通知声音 + 系统通知」三类出口，通知中心记录照常入账（静但不丢）；
+ * 闹钟 / 提醒（ReminderWatcher）/ AI 来电与未接留言（ai-call-* / ai-vm-* 链路）豁免——
+ * 用户明确要求的打扰不受 DND 影响（与 notify-sound 免打扰时段的豁免哲学一致）。
+ *
+ * 为什么放在本文件：DND 闸门的三个消费方（island-notify / local-notify / notify-sound）都需要它，
+ * 而本模块是唯一被它们共同依赖、运行时近乎零依赖（仅 zustand）的轻模块——不会引入循环依赖，
+ * 也不会把重模块拖进轻入口包（与 local-notify 只静态依赖本模块的既有设计一致）。
+ */
+const NOTIFY_DND_MASTER_KEY = 'ios-notify-dnd-master';
+
+/** 真 DND 是否开启（模块级 getter，非 hook 环境安全；与 island-notify.isSysNotifyEnabled 同风格） */
+export function isNotifyDndActive(): boolean {
+  try {
+    return window.localStorage.getItem(NOTIFY_DND_MASTER_KEY) === 'on';
+  } catch {
+    return false; // 存储不可用/SSR：按未开启（DND 是增强行为，缺省绝不能吞通知）
+  }
+}
+
+/**
+ * 轻量响应式镜像 store：设置页开关行与通知中心面板快捷开关订阅它获得跨入口即时联动。
+ * 为什么不直接用 localStorage：它不是响应式源，UI 侧得各自 useState 镜像 + effect 同步
+ * （既写重渲染又报 react-hooks/set-state-in-effect）；这里以 getter/setter 为持久化真相，
+ * store 只是「已水合的镜像」。缺省 false 为 SSR 安全值；本模块在客户端加载即水合一次，
+ * 而消费方 NotificationCenter 是 ssr:false 动态组件（水合前已就绪），无撕裂窗口。
+ */
+export const useNotifyDnd = create<{ on: boolean }>(() => ({ on: false }));
+
+/** 写入真 DND 开关（设置 › 通知开关行 / 通知中心面板快捷开关调用）：先落盘再同步镜像 */
+export function setNotifyDnd(on: boolean): void {
+  try {
+    window.localStorage.setItem(NOTIFY_DND_MASTER_KEY, on ? 'on' : 'off');
+  } catch {
+    // 存储不可用：仅本次会话生效
+  }
+  useNotifyDnd.setState({ on }); // 镜像同步：所有订阅入口即时联动（无 effect、无重渲染级联）
+}
+
+// 客户端模块加载即从 localStorage 水合镜像（闸门读 getter 不受影响；早于任何面板渲染）
+if (typeof window !== 'undefined') {
+  useNotifyDnd.setState({ on: isNotifyDndActive() });
 }
 
 // ---------------- 未读计数 hook（状态栏小红点用；返回原始 number 避免重渲染） ----------------
