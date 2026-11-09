@@ -11,8 +11,8 @@ android {
         applicationId "com.z.aiphone"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 11          // v1.6.0 提速+语音闭环+通知直达+通知中心（v10 = 1.5.1）
-        versionName "1.6.0"     // v1.6.0 A7提速 + C4语音闭环 + C5通知直达（handleOnNewIntent）+ C6通知中心
+        versionCode 12          // v1.6.1 麦克风/通知权限修复（RECORD_AUDIO+系统框+真实通知状态）（v11 = 1.6.0）
+        versionName "1.6.1"     // v1.6.1 真机语音三问题修复（麦克风授权框+通知真实状态）
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.

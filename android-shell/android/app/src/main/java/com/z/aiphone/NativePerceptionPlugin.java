@@ -26,10 +26,13 @@ import androidx.core.content.ContextCompat;
 import com.getcapacitor.Bridge;
 import com.getcapacitor.JSArray;
 import com.getcapacitor.JSObject;
+import com.getcapacitor.PermissionState;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
+import com.getcapacitor.annotation.Permission;
+import com.getcapacitor.annotation.PermissionCallback;
 
 import org.json.JSONObject;
 import org.json.JSONTokener;
@@ -107,7 +110,17 @@ import rikka.shizuku.Shizuku;
  *    - agentNotify({title, text?}) / agentNotifyEnd()：执行期常驻状态通知
  *      （id 7788，渠道 agent_runner，IMPORTANCE_LOW 静默），带紧急停止按钮。
  */
-@CapacitorPlugin(name = "NativePerception")
+@CapacitorPlugin(
+    name = "NativePerception",
+    permissions = {
+        // v1.6.1 语音唤起修复：麦克风运行时权限（Manifest 已声明 RECORD_AUDIO）——
+        // WebView 的 getUserMedia 在 Android 权限未授予时被静默拒绝且不弹框，
+        // JS 侧一律先经 requestMicPermission 弹系统授权框
+        @Permission(strings = { android.Manifest.permission.RECORD_AUDIO }, alias = "microphone"),
+        // Android 13+ 通知运行时权限（设置页「允许通知」开关用）
+        @Permission(strings = { android.Manifest.permission.POST_NOTIFICATIONS }, alias = "notifications")
+    }
+)
 public class NativePerceptionPlugin extends Plugin {
 
     private static final int REQ_SCREEN_CAPTURE = 2;
@@ -1177,6 +1190,108 @@ public class NativePerceptionPlugin extends Plugin {
         AGENT_ABORT = false;
         JSObject ret = new JSObject();
         ret.put("ok", true);
+        call.resolve(ret);
+    }
+
+    // ==================== v1.6.1 麦克风 / 通知运行时权限（真机语音三问题修复） ====================
+
+    /**
+     * 麦克风权限状态查询 micPermission()：WebView 里 Web API 拿不到 Android 运行时权限
+     * 真实状态（Notification.permission 同理不可信），JS 侧一律经本插件查询/申请。
+     * 返回 { granted, canAsk }（canAsk=true 表示可弹系统授权框）。
+     */
+    @PluginMethod
+    public void micPermission(PluginCall call) {
+        PermissionState s = getPermissionStates().get("microphone");
+        JSObject ret = new JSObject();
+        ret.put("granted", s == PermissionState.GRANTED);
+        ret.put("canAsk", s == PermissionState.PROMPT);
+        call.resolve(ret);
+    }
+
+    /**
+     * 麦克风运行时权限申请 requestMicPermission()：未授予时弹系统授权框（修复「点击说话
+     * 不弹授权弹窗」——根因是 Manifest 未声明 RECORD_AUDIO 时 requestPermissions 被
+     * 系统静默拒绝且无任何 UI，前端一直报「无法使用麦克风」甚至引发部分设备 WebView 异常）。
+     */
+    @PluginMethod
+    public void requestMicPermission(PluginCall call) {
+        PermissionState s = getPermissionStates().get("microphone");
+        if (s == PermissionState.GRANTED) {
+            JSObject ret = new JSObject();
+            ret.put("granted", true);
+            ret.put("canAsk", false);
+            call.resolve(ret);
+            return;
+        }
+        if (s == PermissionState.PROMPT) {
+            requestPermissionForAlias("microphone", call, "micPermissionCallback");
+            return;
+        }
+        // PROMPT 之外（理论上的 DENIED 持久拒绝态）：如实回传，由 JS 引导去系统设置
+        JSObject ret = new JSObject();
+        ret.put("granted", false);
+        ret.put("canAsk", false);
+        call.resolve(ret);
+    }
+
+    @PermissionCallback
+    private void micPermissionCallback(PluginCall call) {
+        PermissionState s = getPermissionStates().get("microphone");
+        JSObject ret = new JSObject();
+        ret.put("granted", s == PermissionState.GRANTED);
+        ret.put("canAsk", s == PermissionState.PROMPT);
+        call.resolve(ret);
+    }
+
+    /**
+     * 系统通知权限真实状态 notificationPermission()：areNotificationsEnabled() 覆盖
+     * Android 13+ POST_NOTIFICATIONS 运行时权限与全版本「应用通知总闸」。
+     * WebView 里 Notification.permission 恒为 'denied'（Web API 不映射 Android 权限），
+     * 设置页读它必然误报「已在设置中关闭系统通知」——APK 内一律以此为准。
+     */
+    @PluginMethod
+    public void notificationPermission(PluginCall call) {
+        Context ctx = getContext();
+        NotificationManager nm =
+                (NotificationManager) ctx.getSystemService(Context.NOTIFICATION_SERVICE);
+        boolean granted = nm != null && nm.areNotificationsEnabled();
+        JSObject ret = new JSObject();
+        ret.put("granted", granted);
+        ret.put("sdk", Build.VERSION.SDK_INT);
+        ret.put("canAsk", Build.VERSION.SDK_INT >= 33 && !granted
+                && ContextCompat.checkSelfPermission(ctx, android.Manifest.permission.POST_NOTIFICATIONS)
+                        != PackageManager.PERMISSION_GRANTED);
+        call.resolve(ret);
+    }
+
+    /**
+     * 系统通知权限申请 requestNotificationPermission()：Android 13+ 弹 POST_NOTIFICATIONS
+     * 系统授权框；13 以下无运行时申请概念，直接返回当前 areNotificationsEnabled 状态。
+     */
+    @PluginMethod
+    public void requestNotificationPermission(PluginCall call) {
+        if (Build.VERSION.SDK_INT < 33) {
+            Context ctx = getContext();
+            NotificationManager nm =
+                    (NotificationManager) ctx.getSystemService(Context.NOTIFICATION_SERVICE);
+            JSObject ret = new JSObject();
+            ret.put("granted", nm != null && nm.areNotificationsEnabled());
+            ret.put("canAsk", false);
+            call.resolve(ret);
+            return;
+        }
+        requestPermissionForAlias("notifications", call, "notificationPermissionCallback");
+    }
+
+    @PermissionCallback
+    private void notificationPermissionCallback(PluginCall call) {
+        Context ctx = getContext();
+        NotificationManager nm =
+                (NotificationManager) ctx.getSystemService(Context.NOTIFICATION_SERVICE);
+        JSObject ret = new JSObject();
+        ret.put("granted", nm != null && nm.areNotificationsEnabled());
+        ret.put("canAsk", false);
         call.resolve(ret);
     }
 

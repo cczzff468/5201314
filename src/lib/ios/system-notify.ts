@@ -87,6 +87,55 @@ export interface SystemNotifyOptions {
 
 export type SystemNotifyChannel = 'sw' | 'page' | null;
 
+// ---------------- v1.6.1 系统通知权限统一判定（APK 原生壳修复「明明授权了却说已关闭」） ----------------
+// WebView 里 Web Notification API 不映射 Android 运行时权限：Notification.permission 恒为
+// 'denied'（接口存在但永远不可用）——设置页/推送订阅读它必然误判「已在设置中关闭系统通知」。
+// 原生壳内一律经 NativePerception.notificationPermission 读 Android 真实状态
+// （areNotificationsEnabled：13+ 运行时权限 + 全版本应用内总闸），网页环境维持 Web API。
+
+export type SystemNotifyPermission = 'granted' | 'denied' | 'default';
+
+/** 系统通知权限真实状态（原生壳读 Android 运行时权限；网页读 Web API；查询失败按 'default' 兜底） */
+export async function querySystemNotifyPermission(): Promise<SystemNotifyPermission> {
+  try {
+    const np = await import('./native-perception');
+    if (np.isNativePerception()) {
+      const r = await np.notificationPermission();
+      if (r && typeof r.granted === 'boolean') return r.granted ? 'granted' : 'denied';
+      // 桥无响应/旧壳：退化按 'denied'（与旧行为一致，不阻塞设置页）
+      return 'denied';
+    }
+  } catch {
+    /* 动态加载失败（纯网页环境不会走到原生分支）→ 落 Web API */
+  }
+  if (typeof window === 'undefined' || typeof Notification === 'undefined') return 'default';
+  return Notification.permission as SystemNotifyPermission;
+}
+
+/**
+ * 请求系统通知权限：APK 原生壳弹 Android 13+ POST_NOTIFICATIONS 系统授权框
+ * （13 以下由原生直接返回当前状态）；网页环境走浏览器授权框。
+ * 返回终态（'default' = 未拿到结果，如环境不支持）。
+ */
+export async function requestSystemNotifyPermission(): Promise<SystemNotifyPermission> {
+  try {
+    const np = await import('./native-perception');
+    if (np.isNativePerception()) {
+      const r = await np.requestNotificationPermission();
+      if (r && typeof r.granted === 'boolean') return r.granted ? 'granted' : 'denied';
+      return 'denied';
+    }
+  } catch {
+    /* 落 Web 流程 */
+  }
+  if (typeof window === 'undefined' || typeof Notification === 'undefined') return 'default';
+  try {
+    return (await Notification.requestPermission()) as SystemNotifyPermission;
+  } catch {
+    return 'denied';
+  }
+}
+
 /**
  * 弹一条系统通知：SW 通道优先（全平台一致、Android 唯一正路）→ 页面构造器兜底。
  * 返回实际使用的通道；null = 两条路都失败（调用方自行降级应用内弹窗）。

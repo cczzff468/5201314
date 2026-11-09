@@ -37,6 +37,7 @@ import { transcribeAudioBlob } from '@/lib/ios/stt-client';
 import { stopVoicePlayback } from '@/lib/ios/voice-player';
 import { useSettings } from '@/lib/ios/store';
 import { isWebSpeechSupported, startWebSpeechSession, type WebSpeechSession } from '@/lib/ios/web-speech';
+import { isNativePerception, requestMicPermission } from '@/lib/ios/native-perception';
 
 export interface VoiceRecordResult {
   blob: Blob;
@@ -326,124 +327,143 @@ export function useVoiceRecorder(opts: {
       });
     }
     setPhaseSafe('starting');
-    navigator.mediaDevices
-      .getUserMedia({ audio: true })
-      .then((stream) => {
-        if (phaseRef.current !== 'starting' || deadRef.current) {
-          // 等权限期间已卸载/取消
-          stream.getTracks().forEach((t) => t.stop());
-          speechRef.current?.abort();
-          speechRef.current = null;
-          return;
-        }
-        streamRef.current = stream;
-        const mime = pickRecorderMime();
-        mimeRef.current = mime ?? 'audio/webm';
-        let rec: MediaRecorder;
-        try {
-          rec = new MediaRecorder(stream, { mimeType: mime, audioBitsPerSecond: 24000 });
-        } catch {
-          try {
-            rec = new MediaRecorder(stream);
-            mimeRef.current = rec.mimeType || 'audio/webm';
-          } catch {
+    const beginCapture = (): void => {
+      navigator.mediaDevices
+        .getUserMedia({ audio: true })
+        .then((stream) => {
+          if (phaseRef.current !== 'starting' || deadRef.current) {
+            // 等权限期间已卸载/取消
             stream.getTracks().forEach((t) => t.stop());
-            setPhaseSafe('idle');
-            optsRef.current.onStartError('当前浏览器不支持录音');
+            speechRef.current?.abort();
+            speechRef.current = null;
             return;
           }
-        }
-        chunksRef.current = [];
-        levelBufRef.current = [];
-        lastSampleRef.current = 0;
-        rec.ondataavailable = (e: BlobEvent) => {
-          if (e.data && e.data.size > 0) chunksRef.current.push(e.data);
-        };
-        rec.onstop = () => finalize(false);
-        rec.start(200);
-        recRef.current = rec;
-
-        // 实时振幅采样（overlay 波形动画 + 气泡静态波形）
-        try {
-          const w = window as Window & { webkitAudioContext?: typeof AudioContext };
-          const Ctor = window.AudioContext ?? w.webkitAudioContext;
-          if (Ctor) {
-            const ctx = new Ctor();
-            void ctx.resume().catch(() => undefined);
-            const source = ctx.createMediaStreamSource(stream);
-            const analyser = ctx.createAnalyser();
-            analyser.fftSize = 256;
-            source.connect(analyser);
-            ctxRef.current = ctx;
-            analyserRef.current = analyser;
-          }
-        } catch {
-          // 采样失败不影响录音本身
-        }
-
-        startRef.current = performance.now();
-        setSeconds(0);
-        setPhaseSafe('recording');
-        timerRef.current = window.setInterval(() => {
-          const sec = (performance.now() - startRef.current) / 1000;
-          setSeconds(sec);
-          // 每 ~100ms 采一个 RMS
-          const analyser = analyserRef.current;
-          if (analyser && performance.now() - lastSampleRef.current > 100) {
-            lastSampleRef.current = performance.now();
-            const buf = new Uint8Array(analyser.fftSize);
-            analyser.getByteTimeDomainData(buf);
-            let sum = 0;
-            for (let i = 0; i < buf.length; i++) {
-              const d = (buf[i] - 128) / 128;
-              sum += d * d;
+          streamRef.current = stream;
+          const mime = pickRecorderMime();
+          mimeRef.current = mime ?? 'audio/webm';
+          let rec: MediaRecorder;
+          try {
+            rec = new MediaRecorder(stream, { mimeType: mime, audioBitsPerSecond: 24000 });
+          } catch {
+            try {
+              rec = new MediaRecorder(stream);
+              mimeRef.current = rec.mimeType || 'audio/webm';
+            } catch {
+              stream.getTracks().forEach((t) => t.stop());
+              setPhaseSafe('idle');
+              optsRef.current.onStartError('当前浏览器不支持录音');
+              return;
             }
-            const rms = Math.sqrt(sum / buf.length);
-            levelBufRef.current.push(Math.max(0.08, Math.min(1, rms * 3.2)));
-            setLevels(levelBufRef.current.slice(-160));
           }
-          if (sec >= MAX_SEC) {
-            // 60 秒上限：自动结束并发送（与松开同路径，走 onstop → finalize）
-            const cur = recRef.current;
-            if (cur && cur.state !== 'inactive') {
-              try {
-                cur.stop();
-              } catch {
-                finalize(false);
+          chunksRef.current = [];
+          levelBufRef.current = [];
+          lastSampleRef.current = 0;
+          rec.ondataavailable = (e: BlobEvent) => {
+            if (e.data && e.data.size > 0) chunksRef.current.push(e.data);
+          };
+          rec.onstop = () => finalize(false);
+          rec.start(200);
+          recRef.current = rec;
+
+          // 实时振幅采样（overlay 波形动画 + 气泡静态波形）
+          try {
+            const w = window as Window & { webkitAudioContext?: typeof AudioContext };
+            const Ctor = window.AudioContext ?? w.webkitAudioContext;
+            if (Ctor) {
+              const ctx = new Ctor();
+              void ctx.resume().catch(() => undefined);
+              const source = ctx.createMediaStreamSource(stream);
+              const analyser = ctx.createAnalyser();
+              analyser.fftSize = 256;
+              source.connect(analyser);
+              ctxRef.current = ctx;
+              analyserRef.current = analyser;
+            }
+          } catch {
+            // 采样失败不影响录音本身
+          }
+
+          startRef.current = performance.now();
+          setSeconds(0);
+          setPhaseSafe('recording');
+          timerRef.current = window.setInterval(() => {
+            const sec = (performance.now() - startRef.current) / 1000;
+            setSeconds(sec);
+            // 每 ~100ms 采一个 RMS
+            const analyser = analyserRef.current;
+            if (analyser && performance.now() - lastSampleRef.current > 100) {
+              lastSampleRef.current = performance.now();
+              const buf = new Uint8Array(analyser.fftSize);
+              analyser.getByteTimeDomainData(buf);
+              let sum = 0;
+              for (let i = 0; i < buf.length; i++) {
+                const d = (buf[i] - 128) / 128;
+                sum += d * d;
+              }
+              const rms = Math.sqrt(sum / buf.length);
+              levelBufRef.current.push(Math.max(0.08, Math.min(1, rms * 3.2)));
+              setLevels(levelBufRef.current.slice(-160));
+            }
+            if (sec >= MAX_SEC) {
+              // 60 秒上限：自动结束并发送（与松开同路径，走 onstop → finalize）
+              const cur = recRef.current;
+              if (cur && cur.state !== 'inactive') {
+                try {
+                  cur.stop();
+                } catch {
+                  finalize(false);
+                }
               }
             }
+          }, 100);
+          // 按住期间就松手（getUserMedia 等待中）：进入录音后立刻结束
+          if (stopRequestedRef.current) finalize(false);
+        })
+        .catch((err: unknown) => {
+          // 启动失败（权限拒绝 / 构造或启动录音器异常）：释放可能已取得的媒体流与录音器，避免麦克风占用泄漏
+          const rec = recRef.current;
+          if (rec && rec.state !== 'inactive') {
+            rec.onstop = null;
+            try {
+              rec.stop();
+            } catch {
+              /* ignore */
+            }
           }
-        }, 100);
-        // 按住期间就松手（getUserMedia 等待中）：进入录音后立刻结束
-        if (stopRequestedRef.current) finalize(false);
-      })
-      .catch((err: unknown) => {
-        // 启动失败（权限拒绝 / 构造或启动录音器异常）：释放可能已取得的媒体流与录音器，避免麦克风占用泄漏
-        const rec = recRef.current;
-        if (rec && rec.state !== 'inactive') {
-          rec.onstop = null;
-          try {
-            rec.stop();
-          } catch {
-            /* ignore */
+          recRef.current = null;
+          speechRef.current?.abort();
+          speechRef.current = null;
+          streamRef.current?.getTracks().forEach((t) => t.stop());
+          streamRef.current = null;
+          cleanupCapture();
+          setPhaseSafe('idle');
+          const name = typeof err === 'object' && err !== null ? (err as { name?: string }).name : '';
+          if (name === 'NotAllowedError' || name === 'SecurityError' || name === 'PermissionDeniedError') {
+            optsRef.current.onStartError('无法使用麦克风：请在浏览器设置中允许录音权限');
+          } else if (name === 'NotFoundError' || name === 'DevicesNotFoundError') {
+            optsRef.current.onStartError('未找到可用麦克风');
+          } else {
+            optsRef.current.onStartError('无法访问麦克风，请检查权限设置');
           }
+        });
+    };
+    // v1.6.1 APK 原生壳：先走原生运行时权限申请（未授予时弹系统授权框）——WebView 的
+    // getUserMedia 在 Android 权限未授予时被静默拒绝（永不弹框），与语音唤起同款修复
+    void (async () => {
+      if (isNativePerception()) {
+        const mp = await requestMicPermission().catch(() => null);
+        if (!mp || mp.granted !== true) {
+          if (phaseRef.current === 'starting' && !deadRef.current) {
+            setPhaseSafe('idle');
+            optsRef.current.onStartError(
+              '无法使用麦克风：请在系统设置 › 应用 › AI Phone › 权限中允许「麦克风」'
+            );
+          }
+          return;
         }
-        recRef.current = null;
-        speechRef.current?.abort();
-        speechRef.current = null;
-        streamRef.current?.getTracks().forEach((t) => t.stop());
-        streamRef.current = null;
-        cleanupCapture();
-        setPhaseSafe('idle');
-        const name = typeof err === 'object' && err !== null ? (err as { name?: string }).name : '';
-        if (name === 'NotAllowedError' || name === 'SecurityError' || name === 'PermissionDeniedError') {
-          optsRef.current.onStartError('无法使用麦克风：请在浏览器设置中允许录音权限');
-        } else if (name === 'NotFoundError' || name === 'DevicesNotFoundError') {
-          optsRef.current.onStartError('未找到可用麦克风');
-        } else {
-          optsRef.current.onStartError('无法访问麦克风，请检查权限设置');
-        }
-      });
+      }
+      beginCapture();
+    })();
   }, [cleanupCapture, finalize]);
 
   const finish = useCallback(() => {

@@ -127,7 +127,7 @@ import { copyApkLink, getApkUrl, launchApkDownload } from '@/lib/ios/apk-downloa
 import { useAppUpdate } from '@/lib/ios/app-update';
 import { APP_RELEASE_NOTES, APP_VERSION } from '@/lib/app-version';
 import { lastPushStatus, setupPushSubscription, teardownPushSubscription } from '@/lib/ios/push-client';
-import { showSystemNotification } from '@/lib/ios/system-notify';
+import { showSystemNotification, querySystemNotifyPermission, requestSystemNotifyPermission } from '@/lib/ios/system-notify';
 import { deleteOfflineModel, initOfflineAsr, useOfflineAsr } from '@/lib/ios/offline-asr';
 import { isSysNotifyEnabled, setSysNotifyEnabled } from '@/lib/ios/island-notify';
 import {
@@ -1368,11 +1368,20 @@ function NotificationPage({ onBack }: { onBack: () => void }) {
   // 修复：原实现是组件局部 state，退出页面再进来又显示「开」，关掉后 Web Notification 照弹。
   // 该开关只管系统级通道（Web Notification / Web Push）；应用内灵动岛弹窗不受影响。
   const [enabled, setEnabled] = useState<boolean>(() => isSysNotifyEnabled());
-  const [denied, setDenied] = useState<boolean>(() =>
-    typeof window !== 'undefined' && typeof Notification !== 'undefined'
-      ? Notification.permission === 'denied'
-      : false
-  );
+  // v1.6.1：APK 原生壳里 Notification.permission 恒为 'denied'（WebView 不映射 Android 运行时
+  // 权限）——改用 querySystemNotifyPermission 异步取真实状态（原生读 areNotificationsEnabled），
+  // 修复「系统弹窗已授权但开关仍弹回关闭 + 误报已在设置中关闭」。
+  const [denied, setDenied] = useState<boolean>(false);
+  useEffect(() => {
+    let dead = false;
+    void querySystemNotifyPermission().then((p) => {
+      if (dead) return;
+      setDenied(p === 'denied');
+    });
+    return () => {
+      dead = true;
+    };
+  }, []);
   // 测试通知结果：ok=已弹出 / fail=构造失败（iframe 权限策略拦截）
   const [testResult, setTestResult] = useState<'idle' | 'busy' | 'ok' | 'fail'>('idle');
   // 预览面板 iframe 提示：iframe 里系统通知/推送常被浏览器权限策略拦截
@@ -1394,6 +1403,9 @@ function NotificationPage({ onBack }: { onBack: () => void }) {
    *  重置单次锁重跑订阅链路，首次订阅瞬时失败后不再被锁死到刷新整页 */
   const ensureSubscription = async (): Promise<void> => {
     const s = await setupPushSubscription({ force: true });
+    // APK 原生壳：系统通知走原生 localNotify 通道，Web Push 订阅在 WebView 里不可靠也不需要
+    // ——如实标注但不落红字诊断行（否则用户看到「推送订阅未完成」以为通知坏了）
+    if (isNativePerception() && s.state === 'unsupported') return;
     setPushState(s.state);
     setPushDetail(s.detail ?? '');
   };
@@ -1410,23 +1422,21 @@ function NotificationPage({ onBack }: { onBack: () => void }) {
       setPushDetail(s.detail ?? '');
       return;
     }
-    if (typeof window === 'undefined' || typeof Notification === 'undefined') {
+    if (typeof window === 'undefined') {
       setEnabled(false);
       return;
     }
-    if (Notification.permission === 'granted') {
+    // v1.6.1：统一走真实状态查询/申请（APK 原生壳弹 Android 13+ 系统授权框，
+    // 网页走浏览器授权框），不再读 WebView 里恒为 'denied' 的 Web API
+    const p = await querySystemNotifyPermission();
+    if (p === 'granted') {
       setEnabled(true);
       setDenied(false);
       void ensureSubscription();
       return;
     }
-    if (Notification.permission === 'denied') {
-      setEnabled(false);
-      setDenied(true);
-      return;
-    }
-    // 'default'：向浏览器请求授权
-    const result = await Notification.requestPermission();
+    // 'default'（可申请）或 'denied'：APK 原生壳在 13+ 未永久拒绝时仍能拉起系统授权框
+    const result = await requestSystemNotifyPermission();
     if (result === 'granted') {
       setEnabled(true);
       setDenied(false);
@@ -1449,7 +1459,11 @@ function NotificationPage({ onBack }: { onBack: () => void }) {
       setTestResult('fail');
       return;
     }
-    if (Notification.permission !== 'granted') {
+    // v1.6.1：APK 内 Notification.permission 恒 'denied'，改读真实状态（原生已授权 → 走
+    // localNotify 原生通道也能弹；此处 showSystemNotification 的 SW/构造器两通道在 WebView
+    // 内均不可用，测试通知在 APK 内预期 fail——原生通道的真实性由通知栏实际通知验证）
+    const perm = await querySystemNotifyPermission();
+    if (perm !== 'granted') {
       setTestResult('fail');
       return;
     }
@@ -1478,7 +1492,9 @@ function NotificationPage({ onBack }: { onBack: () => void }) {
       </GroupCard>
       {denied && (
         <p className="mt-3 px-1 text-[13px] leading-relaxed" style={{ color: IOS_RED }}>
-          通知已被浏览器拒绝，请在浏览器设置中恢复。
+          {isNativePerception()
+            ? '系统通知权限未开启：请在系统设置 › 应用 › AI Phone › 通知 中允许；Android 13+ 也可重新打开上方开关触发系统授权弹窗。'
+            : '通知已被浏览器拒绝，请在浏览器设置中恢复。'}
         </p>
       )}
       {inIframe && (

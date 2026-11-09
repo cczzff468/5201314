@@ -2269,3 +2269,23 @@ Stage Summary:
 - 应用内通知中心：记录先于通道（不漏消息）+ 顶部下拉毛玻璃面板 + 点击直达 + 全部已读/清空
 - 安全与类型健康：API Key AES-GCM 落盘加密（旧数据自动升级）；tsc 42 条清零 + 三处隐性 bug（TDZ/守卫/常量缺失）修复
 - 关键文件：shizuku-agent.ts（+320 行）、notification-center.ts/NotificationCenter.tsx/secret-box.ts（新）、NativePerceptionPlugin.java（+115）、local-notify.ts/island-notify.ts/agent-voice*/proactive-call.ts/CoupleHome/store.ts/app-version.ts/build.gradle（1.6.0/11）
+
+## 2026-11-09 · v87（APK v1.6.1）真机语音三问题修复（麦克风授权 + 通知真实状态）
+
+Task ID: 37
+Agent: 主控 Agent（Z.ai Code）
+Task: 用户真机反馈：①点悬浮球说话退出 APP ②提示「无法使用麦克风」且从不弹授权弹窗 ③系统通知明明已授权却显示「已在设置中关闭系统通知」
+
+Work Log:
+- [根因1·麦克风] AndroidManifest.xml 从未声明 RECORD_AUDIO → Android 运行时 requestPermissions 被系统静默拒绝（永不弹框）→ WebView getUserMedia 直接 NotAllowedError → 前端一直「无法使用麦克风」；部分设备 WebView 在该异常权限路径上崩溃退出 APP。修复：Manifest 补 RECORD_AUDIO + MODIFY_AUDIO_SETTINGS
+- [根因2·权限面不互通] WebView 里 Web API 与 Android 运行时权限互不映射：Notification.permission 恒 'denied' → 设置页/推送订阅全部误判「已在设置中关闭系统通知」。修复：NativePerceptionPlugin 加 @Permission 别名 microphone/notifications + 五方法（micPermission/requestMicPermission+Callback/notificationPermission/requestNotificationPermission+Callback，requestPermissionForAlias 弹系统授权框，notificationPermission 用 areNotificationsEnabled 读 13+ 运行时权限与全版本应用内总闸真实状态）
+- [JS 接线] native-perception.ts：CapPlugin 接口 + bridgePlugin 自建协议 + 四个导出封装（requestMicPermission 看门狗 60s 等用户犹豫；非原生壳返回 null 调用方回落 Web 流程）；system-notify.ts 加 querySystemNotifyPermission/requestSystemNotifyPermission 统一入口（原生读真实状态/网页走 Web API）
+- [录音前置拿权] agent-voice.ts start() 重构：getUserMedia 链抽 beginCapture + 原生壳先 requestMicPermission（未授弹系统框，拒绝给「系统设置›应用›AI Phone›权限」中文引导；桥异常回落 getUserMedia 兜底）；recordWakeChunk 前置拿权（被拒抛错→唤醒循环既有熔断收口，不再每轮空转）；voice-input.tsx（聊天语音条）同款修复
+- [通知真实状态] settings.tsx NotificationPage：denied 改异步 querySystemNotifyPermission；handleToggle 统一走 query/request（APK 13+ 未永久拒绝可拉起系统框）；测试通知闸门同改；红字文案原生感知；ensureSubscription 原生壳 unsupported 不落诊断行。push-client.ts：setupPushSubscription 原生壳如实短路（unsupported「APK 内通知走原生通道，无需浏览器推送」，不落诊断），网页闸门改 querySystemNotifyPermission
+- [版本] app-version.ts 1.6.1/12 + 发版说明 4 条；build.gradle versionCode 12/versionName 1.6.1；gradle 重打 BUILD SUCCESSFUL 32s（增量），APK 4.0MB 部署 public/
+- [验证] tsc 全库 0 错误；eslint 改动文件仅 settings 3 条既有基线（5476+ 试听区，零新增）；dev.log ✓ Compiled；浏览器加载零 JS 异常；Java 经 gradle 真实编译通过
+- [边界] 系统授权框真弹/授权后录音/通知状态显示均需真机回归（装 v1.6.1 后：点说话应弹「允许 AI Phone 录音？」）；若此前永久拒绝过麦克风，需到系统设置手动开（新文案已引导）
+
+Stage Summary:
+- 三问题一锅端：RECORD_AUDIO 补声明（授权框从此会弹）+ 录音前置原生拿权（说话不再异常退出/不再误报无法用麦克风）+ 通知状态读 Android 真值（授权了就显示开启）
+- 关键文件：AndroidManifest.xml、NativePerceptionPlugin.java（+5 方法）、native-perception.ts/system-notify.ts（+统一权限入口）、agent-voice.ts/voice-input.tsx（前置拿权）、settings.tsx/push-client.ts（真实状态）、app-version.ts/build.gradle（1.6.1/12）

@@ -49,6 +49,8 @@ type ShizukuExecOptions = {
   timeoutMs?: number;
 };
 type ShizukuExecResult = { ok?: boolean; out?: string; reason?: string };
+/** 麦克风 / 系统通知运行时权限查询与申请结果（v1.6.1 真机语音三问题修复） */
+type RuntimePermResult = { granted?: boolean; canAsk?: boolean };
 
 type CapPlugin = {
   hasUsagePermission(): Promise<{ granted: boolean }>;
@@ -77,6 +79,10 @@ type CapPlugin = {
   requestShizukuPermission(): Promise<ShizukuPermissionResult>;
   shizukuExec(options?: { cmd?: string[] } & ShizukuExecOptions): Promise<ShizukuExecResult>;
   shizukuScreencap(): Promise<{ ok?: boolean; frame?: string; reason?: string }>;
+  micPermission(): Promise<RuntimePermResult>;
+  requestMicPermission(): Promise<RuntimePermResult>;
+  notificationPermission(): Promise<RuntimePermResult & { sdk?: number }>;
+  requestNotificationPermission(): Promise<RuntimePermResult>;
 };
 
 type CapacitorCore = {
@@ -265,6 +271,11 @@ function bridgePlugin(): CapPlugin {
     requestShizukuPermission: () => nativeCall<ShizukuPermissionResult>('requestShizukuPermission', {}, 35_000),
     shizukuExec: (options) => nativeCall<ShizukuExecResult>('shizukuExec', options ?? {}, (options?.timeoutMs ?? 8000) + 16_000),
     shizukuScreencap: () => nativeCall<{ ok?: boolean; frame?: string; reason?: string }>('shizukuScreencap', {}, 30_000),
+    micPermission: () => nativeCall<RuntimePermResult>('micPermission'),
+    // 首次弹系统授权框：用户可能犹豫许久，看门狗放宽到 60s（已授予时毫秒级直通）
+    requestMicPermission: () => nativeCall<RuntimePermResult>('requestMicPermission', {}, 60_000),
+    notificationPermission: () => nativeCall<RuntimePermResult & { sdk?: number }>('notificationPermission'),
+    requestNotificationPermission: () => nativeCall<RuntimePermResult>('requestNotificationPermission', {}, 60_000),
   };
 }
 
@@ -273,6 +284,37 @@ export function isNativePerception(): boolean {
   if (typeof window === 'undefined') return false;
   const bridge = (window as { androidBridge?: unknown }).androidBridge;
   return !!bridge && typeof (bridge as AndroidBridgeLike).postMessage === 'function';
+}
+
+// ---------------- v1.6.1 麦克风 / 通知运行时权限（真机语音三问题修复） ----------------
+// 背景：WebView 里 Web API 的权限面与 Android 运行时权限不互通 ——
+// ① getUserMedia 录音：Manifest 未声明 RECORD_AUDIO 时被系统静默拒绝（永不弹框）；
+// ② Notification.permission：WebView 恒为 'denied'（Web API 不映射 Android 权限），
+//    设置页读它必然误报「已在设置中关闭系统通知」。
+// 因此原生壳内一律经本插件查询/申请（弹系统授权框），非原生壳返回 null 由调用方回落 Web 流程。
+
+/** 查询 Android 运行时麦克风权限（非原生壳返回 null） */
+export async function micPermission(): Promise<RuntimePermResult | null> {
+  const p = await nativePlugin();
+  return p ? p.micPermission() : null;
+}
+
+/** 申请 Android 运行时麦克风权限（未授予时弹系统授权框，已授予毫秒级直通；非原生壳返回 null） */
+export async function requestMicPermission(): Promise<RuntimePermResult | null> {
+  const p = await nativePlugin();
+  return p ? p.requestMicPermission() : null;
+}
+
+/** 查询系统通知权限真实状态（areNotificationsEnabled，含 13+ 运行时权限与应用内总闸；非原生壳返回 null） */
+export async function notificationPermission(): Promise<(RuntimePermResult & { sdk?: number }) | null> {
+  const p = await nativePlugin();
+  return p ? p.notificationPermission() : null;
+}
+
+/** 申请系统通知权限（Android 13+ 弹 POST_NOTIFICATIONS 系统框；非原生壳返回 null） */
+export async function requestNotificationPermission(): Promise<RuntimePermResult | null> {
+  const p = await nativePlugin();
+  return p ? p.requestNotificationPermission() : null;
 }
 
 /** 原生感知插件：优先官方注入的代理（同源页面），否则自建协议直连（跨域页面） */

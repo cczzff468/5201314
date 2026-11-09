@@ -11,9 +11,9 @@
  */
 
 /** 当前最新版本（与 android-shell versionName 保持一致） */
-export const APP_VERSION = '1.6.0';
+export const APP_VERSION = '1.6.1';
 /** 版本号数字（与 android-shell versionCode 保持一致；覆盖安装要求只增不减） */
-export const APP_VERSION_CODE = 11;
+export const APP_VERSION_CODE = 12;
 
 export interface AppReleaseNote {
   version: string;
@@ -24,6 +24,16 @@ export interface AppReleaseNote {
 
 /** 版本历史（新→旧；设置 › APP 更新 页渲染，最新一条即当前版本） */
 export const APP_RELEASE_NOTES: AppReleaseNote[] = [
+  {
+    version: '1.6.1',
+    date: '2026-11-09',
+    items: [
+      '修复：点悬浮球说话不再退出 APP——录音权限缺失时部分设备 WebView 会异常，已补齐麦克风权限并在点击时弹系统授权框',
+      '修复：说话提示「无法使用麦克风」且不弹授权窗——APK 壳未声明 RECORD_AUDIO，本次已在原生层前置申请',
+      '修复：系统通知明明已授权却提示「在设置中关闭」——设置页/推送改读 Android 真实通知状态，不再依赖 WebView 里恒为拒绝的网页 API',
+      '聊天语音条输入同样受益：按住说话在 APK 内首次使用会正常弹麦克风授权',
+    ],
+  },
   {
     version: '1.6.0',
     date: '2026-11-09',

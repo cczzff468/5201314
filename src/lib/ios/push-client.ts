@@ -1,5 +1,8 @@
 'use client';
 
+import { isNativePerception } from './native-perception';
+import { querySystemNotifyPermission } from './system-notify';
+
 /**
  * Web Push 订阅客户端（退出网页后也收「每条消息一条系统通知」）：
  * - 前提：浏览器通知权限已 granted + 支持 Service Worker / PushManager；
@@ -93,7 +96,16 @@ export async function setupPushSubscription(opts?: PushSetupOptions): Promise<Pu
       saveStatus(s);
       return { ...s, at: Date.now() };
     }
-    if (Notification.permission !== 'granted') {
+    // APK 原生壳：系统通知走原生 localNotify 通道（进程存活即达）；WebView 的 Web Push
+    // 不可靠也不需要 —— 如实短路不落诊断（设置页据此隐藏推送行，避免误报「订阅未完成」）
+    if (isNativePerception()) {
+      return { state: 'unsupported' as const, detail: 'APK 内通知走原生通道，无需浏览器推送', at: Date.now() };
+    }
+    // v1.6.1：APK WebView 里 Notification.permission 恒 'denied'（不映射 Android 运行时权限），
+    // 统一改读真实状态（原生 areNotificationsEnabled / 网页 Web API），
+    // 修复「系统弹窗已授权却报 no-permission」
+    const notifyPerm = await querySystemNotifyPermission();
+    if (notifyPerm !== 'granted') {
       const s = { state: 'no-permission' as const };
       saveStatus(s);
       return { ...s, at: Date.now() };

@@ -93,4 +93,9 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- v1.6.1 语音唤起修复：WebView 的 getUserMedia 录音需要 RECORD_AUDIO（危险权限，运行时弹系统授权框）。
+         未声明时 requestPermissions 被系统静默拒绝（永不弹窗）→ 前端一直报「无法使用麦克风」。
+         MODIFY_AUDIO_SETTINGS 为普通权限，供 AudioContext 波形采样/回声处理使用。 -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
 </manifest>
