@@ -117,3 +117,54 @@ export function openAppPage(appId: AppId): boolean {
     return false;
   }
 }
+
+// ============================================================
+// D. 系统包名/应用名 → 网页内应用映射（v1.8 Shizuku 未启动兜底）
+// ============================================================
+
+/**
+ * 聊天里 AI 输出 [手机操作:打开:包名] 时，若 Shizuku 未运行（或根本在浏览器里），
+ * 与其回一句冷冰冰的失败，不如把「这台手机里也有的应用」直接在网页内打开。
+ * 下表只收与网页内 App 对得上的常用包名（键全小写）；抖音/B站等没有网页内对应体的不收，
+ * 照旧走失败反馈。
+ */
+const PKG_TO_APP: [string, AppId, string][] = [
+  // [包名/别名（小写），网页内 AppId，展示名]
+  ['com.tencent.mm', 'wechat', '微信'],
+  ['微信', 'wechat', '微信'],
+  ['weixin', 'wechat', '微信'],
+  ['com.tencent.mobileqq', 'qq', 'QQ'],
+  ['qq', 'qq', 'QQ'],
+  ['com.taobao.taobao', 'taobao', '淘宝'],
+  ['淘宝', 'taobao', '淘宝'],
+  ['taobao', 'taobao', '淘宝'],
+  ['com.sankuai.meituan', 'meituan', '美团'],
+  ['com.sankuai.meituan.takeoutnew', 'meituan', '美团'],
+  ['美团', 'meituan', '美团'],
+  ['com.netease.cloudmusic', 'music', '音乐'],
+  ['网易云音乐', 'music', '音乐'],
+  ['com.android.settings', 'settings', '设置'],
+  ['设置', 'settings', '设置'],
+  ['com.android.contacts', 'contacts', '通讯录'],
+  ['com.android.dialer', 'phone', '电话'],
+  ['com.android.deskclock', 'clock', '时钟'],
+  ['com.android.calendar', 'calendar', '日历'],
+  ['com.android.camera', 'camera', '相机'],
+  ['com.android.gallery3d', 'photos', '照片'],
+  ['com.android.browser', 'browser', '浏览器'],
+  ['com.android.notes', 'notes', '备忘录'],
+  ['天气', 'weather', '天气'],
+];
+
+/**
+ * 包名（或中文应用名）→ 网页内应用匹配。
+ * 返回 null = 网页内没有对应体（如抖音/原神），调用方照旧走失败反馈。
+ */
+export function matchWebAppByPackage(pkg: string): { appId: AppId; label: string } | null {
+  const key = pkg.trim().toLowerCase();
+  if (!key || key.length > 40) return null;
+  for (const [k, appId, label] of PKG_TO_APP) {
+    if (k === key) return { appId, label };
+  }
+  return null;
+}

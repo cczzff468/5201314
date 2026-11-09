@@ -122,7 +122,7 @@ import { isNativePerception, nativeShizukuStatus } from '@/lib/ios/native-percep
 import { DEFAULT_WAKE_NAME, updateAgentVoiceCfg, useAgentVoice } from '@/lib/ios/agent-voice';
 import { ASSISTANT_PERSONA_TAGLINE } from '@/lib/ios/assistant-persona';
 // C4 播报开关提示用：判断 TTS 是否已配置（内置语音恒可用，第三方需 Key+地址）
-import { isTtsConfigured } from '@/lib/ios/tts-client';
+import { isTtsConfigured, speakUserTts, stopSpeaking } from '@/lib/ios/tts-client';
 import { copyApkLink, getApkUrl, launchApkDownload } from '@/lib/ios/apk-download';
 // v1.4.2 APP 更新：自动检查 + 红点 + 版本历史
 import { useAppUpdate } from '@/lib/ios/app-update';
@@ -170,7 +170,7 @@ import { activePromptOf, setPromptOverride } from '@/lib/forum/gen-settings';
 import type { PromptKey } from '@/lib/forum/prompt-defs';
 import { describeImages } from '@/lib/vision-client';
 import { BUILTIN_TTS_VOICES, isBuiltinVoiceId, isBuiltinVoiceSupported, speakBuiltin, stopBuiltinSpeech } from '@/lib/ios/builtin-voices';
-import { useMyVoices } from '@/lib/ios/my-voices';
+import { describeVoiceId, useMyVoices } from '@/lib/ios/my-voices';
 import {
   applyAppFont,
   BUILTIN_APP_FONTS,
@@ -932,6 +932,37 @@ function AgentVoiceCard() {
     setNameDraft(t || DEFAULT_WAKE_NAME);
   };
 
+  // ---- 助手音色（v1.8）：TA 说话的声音（跟随全局/内置声线/我的音色），展开式选择器 + 试听 ----
+  const myVoices = useMyVoices((s) => s.voices);
+  const [voiceOpen, setVoiceOpen] = useState(false);
+  const [previewingVoice, setPreviewingVoice] = useState<string | null>(null);
+  interface AssistantVoiceOpt {
+    key: string;
+    voiceId: string;
+    name: string;
+    sub: string;
+  }
+  const voiceOpts: AssistantVoiceOpt[] = [
+    { key: 'follow', voiceId: '', name: '跟随语音 API 默认', sub: '用「语音 API」里设置的默认音色' },
+    ...BUILTIN_TTS_VOICES.map((v) => ({ key: v.id, voiceId: v.id, name: `${v.name}（${v.label}）`, sub: '内置声线 · 免费离线' })),
+    ...myVoices.map((v) => ({ key: v.id, voiceId: v.voiceId, name: v.name, sub: '我的音色' })),
+  ];
+  /** 试听：内置声线走本地引擎；其它走当前语音 API（显式 voiceId 优先级最高） */
+  const previewAssistantVoice = (voiceId: string) => {
+    stopSpeaking();
+    if (previewingVoice) {
+      setPreviewingVoice(null);
+      if (previewingVoice === voiceId) return;
+    }
+    setPreviewingVoice(voiceId);
+    const done = () => setPreviewingVoice(null);
+    if (isBuiltinVoiceId(voiceId)) {
+      void speakBuiltin({ text: '你好，选这个声音和我聊天吧。', voiceId, onEnd: done, onError: done }).catch(done);
+      return;
+    }
+    void speakUserTts({ text: '你好，选这个声音和我聊天吧。', voiceId }).then(done, done);
+  };
+
   const asrNotReady = asrStatus !== 'ready';
 
   return (
@@ -976,6 +1007,76 @@ function AgentVoiceCard() {
               className="h-9 w-28 shrink-0 text-right"
               data-testid="agent-voice-name-input"
             />
+          </div>
+          {/* 助手音色（v1.8）：TA 说话用的声音 */}
+          <div>
+            <button
+              type="button"
+              className="flex min-h-[52px] w-full items-center gap-3 px-4 py-2 text-left"
+              onClick={() => setVoiceOpen((v) => !v)}
+              aria-expanded={voiceOpen}
+              data-testid="agent-voice-voice-row"
+            >
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-[16px]">助手音色</span>
+                <span className="mt-0.5 block truncate text-[11.5px] text-muted-foreground">TA 说话用的声音（语音 API 里添加的音色也能选）</span>
+              </span>
+              <span className="shrink-0 text-[13px] text-muted-foreground" data-testid="agent-voice-voice-value">
+                {cfg.voice ? describeVoiceId(cfg.voice, myVoices) : '跟随语音 API 默认'}
+              </span>
+              <ChevronDown className={`h-4 w-4 shrink-0 text-muted-foreground/70 transition-transform ${voiceOpen ? 'rotate-180' : ''}`} aria-hidden="true" />
+            </button>
+            {voiceOpen ? (
+              <div className="bg-black/[0.02] px-4 pb-3 dark:bg-white/[0.03]">
+                <p className="pt-1.5 text-[11px] leading-relaxed text-muted-foreground">点行选用 · 点右侧喇叭试听（免配置的内置声线离线也能用）</p>
+                <div className="thin-scrollbar mt-2 flex max-h-72 flex-col gap-1 overflow-y-auto">
+                  {voiceOpts.map((opt) => {
+                    const active = cfg.voice === opt.voiceId;
+                    const canPreview = opt.voiceId !== '';
+                    return (
+                      <div
+                        key={opt.key}
+                        role="button"
+                        tabIndex={0}
+                        aria-pressed={active}
+                        data-testid={`agent-voice-opt-${opt.key}`}
+                        onClick={() => updateAgentVoiceCfg({ voice: opt.voiceId })}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault();
+                            updateAgentVoiceCfg({ voice: opt.voiceId });
+                          }
+                        }}
+                        className={`flex min-h-[44px] cursor-pointer items-center gap-2.5 rounded-[14px] px-3 py-1.5 transition-all ${
+                          active ? 'bg-white/85 ring-1 ring-black/[0.06] dark:bg-white/[0.12] dark:ring-white/[0.14]' : 'bg-white/45 ring-1 ring-transparent hover:bg-white/70 dark:bg-white/[0.05] dark:hover:bg-white/[0.09]'
+                        }`}
+                      >
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate text-[14px] font-medium">{opt.name}</span>
+                          <span className="block truncate text-[10.5px] text-muted-foreground">{opt.sub}</span>
+                        </span>
+                        {canPreview ? (
+                          <button
+                            type="button"
+                            aria-label={`试听${opt.name}`}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              previewAssistantVoice(opt.voiceId);
+                            }}
+                            className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-all ${
+                              previewingVoice === opt.voiceId ? 'bg-foreground text-background' : 'bg-white/70 text-muted-foreground ring-1 ring-black/[0.05] active:bg-white/90 dark:bg-white/[0.09] dark:ring-white/[0.1]'
+                            }`}
+                          >
+                            <AudioLines className={`h-3.5 w-3.5 ${previewingVoice === opt.voiceId ? 'animate-pulse' : ''}`} aria-hidden="true" />
+                          </button>
+                        ) : null}
+                        {active ? <Check className="h-4 w-4 shrink-0" strokeWidth={2.5} aria-hidden="true" /> : null}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ) : null}
           </div>
           {/* 悬浮球 */}
           <div className="flex min-h-[52px] items-center gap-3 px-4 py-2">

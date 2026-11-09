@@ -11,13 +11,14 @@
  *   全部不可用抛中文引导（面板提供打字输入框兜底，永远存在）
  * - 录音器（useAgentRecorder）：MediaRecorder + AnalyserNode 实时振幅 +
  *   静默自动停止（持续 1.4s 无声）+ 30s 上限 + 0.7s 下限，仿 voice-input 的已验证链路
- * - 连续唤醒监听（useAgentWakeLoop）三通道：① 离线（APK 已下载模型时首选）每轮录 3.2s →
- *   端侧转写 → 匹配唤醒名；② Web Speech 实时监听（免下载模型，但 Chrome 语音服务走 Google，
- *   大陆不可达 → 持续无数据自动降级）；③ VAD 说话检测 + 服务端识别 /api/wake-asr（
- *   不依赖 Google，安静环境零请求、说一句才发一次）。命中即震动 + 回调（去掉唤醒名后
- *   剩余 ≥4 字直接作任务文本，否则让用户继续说）；
+ * - 连续唤醒监听（useAgentWakeLoop）三通道（v1.8 通道顺序重排，大陆网络秒起听）：
+ *   ① 离线（APK 已下载模型时首选）每轮录 3.2s → 端侧转写 → 匹配唤醒名；
+ *   ② VAD 说话检测 + 服务端识别 /api/wake-asr（不依赖 Google，安静环境零请求、说一句才发
+ *      一次；APK 原生壳先请求系统麦克风权限；服务端连续多次不可达才降级③）；
+ *   ③ Web Speech 实时监听（免下载模型，但 Chrome 语音服务走 Google，大陆不可达，只作兜底）。
+ *   命中即震动 + 回调（去掉唤醒名后剩余 ≥4 字直接作任务文本，否则让用户继续说）；
  *   页面隐藏 / Agent 任务运行 / 通话 / TTS·语音播放 / 面板打开 时自动暂停，
- *   恢复空闲后续听；麦克风连续失败熔断并记录原因
+ *   恢复空闲后续听；麦克风连续失败熔断并记录原因（悬浮球红点 + 设置页文案双重提示）
  * - C4 任务终态播报（speakAgentResult）：任务结束后按开关/语音来源 + 闸门（canAgentVoiceActNow）
  *   用共享 TTS 栈（tts-client）朗读结果摘要；语音来源标记（markAgentTaskVoiceOrigin）由
  *   悬浮球在任务真正跑起来时置位、终态播报钩子消费
@@ -55,6 +56,9 @@ export interface AgentVoiceCfg {
   announce: boolean;
   /** 任务后追问窗口（C4，默认开）：语音任务结束后面板保持展开 10s，可直接追问免喊唤醒名 */
   followup: boolean;
+  /** 助手音色（v1.8）：TA 说话用的声音（设置 › 语音智能体可选内置声线/我的音色）。
+   *  空 = 跟随「语音 API」里的全局默认音色。 */
+  voice: string;
 }
 
 const DEFAULT_CFG: AgentVoiceCfg = {
@@ -64,6 +68,7 @@ const DEFAULT_CFG: AgentVoiceCfg = {
   listen: true,
   announce: false,
   followup: true,
+  voice: '',
 };
 
 /** v1.7.2 一次性迁移键：老版本把 listen=false 写进了存储，迁移一次翻成默认开（之后用户可再关） */
@@ -87,6 +92,7 @@ function readCfg(): AgentVoiceCfg {
       listen: p.listen === true,
       announce: p.announce === true,
       followup: p.followup !== false,
+      voice: typeof p.voice === 'string' ? p.voice.trim() : '',
     };
     if (migrated) {
       try {
@@ -742,6 +748,8 @@ const WAKE_CHUNK_MS = 3200;
 const WAKE_GAP_MS = 1500;
 /** 麦克风连续失败熔断阈值 */
 const WAKE_FAIL_FUSE = 3;
+/** 通道 C 服务端识别连续失败降级阈值：连续 N 次不可达改走 Web Speech 兜底 */
+const WAKE_SERVER_FAIL_DEGRADE = 4;
 
 // ---------------- 通道 C：VAD 说话检测 + 服务端识别（不依赖 Google，大陆网络可靠） ----------------
 
@@ -820,14 +828,15 @@ async function wakeAsrTranscribe(samples: Float32Array): Promise<string> {
 }
 
 /**
- * 连续唤醒循环（挂载即后台跑，由 enabled 一键启停）三通道（本次会话固定，依可用性择一）：
+ * 连续唤醒循环（挂载即后台跑，由 enabled 一键启停）三通道（本次会话固定，依可用性择一；
+ * v1.8 通道顺序重排：大陆网络秒起听，不再让 Google 不可达的 Web Speech 先白跑几十秒）：
  * - 通道 B（离线引擎就绪，APK 已下载模型时首选）：每轮 录 3.2s → 端侧转写 → 匹配唤醒名，断网可用；
- * - 通道 A（浏览器支持 Web Speech）：实时监听免下载模型；但 Chrome 语音服务走 Google，
- *   大陆网络持续 network 错误 → 连续 4 轮「自然死亡且零识别数据」自动降级通道 C；
- * - 通道 C（VAD + 服务端识别，终极兜底）：AnalyserNode 监测说话（安静零请求）→ 录 ≤4s →
- *   16k WAV → POST /api/wake-asr（z-ai ASR）→ 匹配唤醒名；不依赖 Google，大陆网络可靠。
+ * - 通道 C（VAD + 服务端识别）：AnalyserNode 监测说话（安静零请求）→ 录 ≤4s →
+ *   16k WAV → POST /api/wake-asr（z-ai ASR）→ 匹配唤醒名；不依赖 Google，大陆网络可靠；
+ *   APK 原生壳先弹系统麦克风权限；服务端连续 4 次不可达才降级通道 A；
+ * - 通道 A（Web Speech）：实时监听免下载模型，但 Chrome 语音服务走 Google，大陆常不可达，只作兜底。
  * 命中统一：震动 + onWake（剩余 ≥4 字带任务文本）；麦克风连续 3 轮失败 → 熔断停循环并记录原因
- * （设置页展示，重新拨动开关即重试）；暂停条件见 canAgentWakeListen。
+ * （悬浮球红点 + 设置页展示，重新拨动开关即重试）；暂停条件见 canAgentWakeListen。
  */
 export function useAgentWakeLoop(opts: {
   /** 总启用（listen 开关 && [离线就绪 || Web Speech 可用 || VAD+服务端可用] && 未熔断）——外层算好传入 */
@@ -848,7 +857,7 @@ export function useAgentWakeLoop(opts: {
     if (!opts.enabled) return undefined;
     let aborted = false;
     let micFails = 0;
-    const MIC_FUSE_MSG = '无法访问麦克风：连续唤醒已自动停用（允许麦克风权限后重新打开此开关）';
+    const MIC_FUSE_MSG = '无法访问麦克风：喊名唤醒已自动停用（允许麦克风权限后重新打开此开关；点悬浮球仍可对话）';
     /** 熔断：大概率无麦克风权限/不支持录音——停循环并记录原因，重新拨动开关即重试 */
     const fuseMic = () => {
       useAgentVoice.setState({ wakeBlocked: MIC_FUSE_MSG });
@@ -893,87 +902,30 @@ export function useAgentWakeLoop(opts: {
         return;
       }
 
-      // —— 通道 A：Web Speech 实时监听（免下载模型；Google 不可达时自动降级通道 C）——
-      // SpeechRecognition continuous 持续听（onend 自动重启），识别文本含唤醒名即命中。
-      if (isWebSpeechSupported()) {
-        let emptySessions = 0; // 连续「自然死亡且零识别数据」轮数（Google 不可达的信号）
-        let degraded = false;
-        while (!aborted && !degraded) {
-          if (!optsRef.current.canListen()) {
-            await sleep(900); // 暂停期低频轮询，恢复可见/空闲后 1s 内续听
-            continue;
-          }
-          let woke = false;
-          let dead = false; // 本轮会话已结束（致命错误/无法重启）→ 重起新会话续听
-          let paused = false;
-          let gotData = false; // 本轮收到过任何识别文本（健康信号）
-          let lastText = ''; // 最新累计识别文本（onPartial 只记录；同音匹配是 async，在等待循环里做）
-          let session: WebSpeechSession | null = null;
-          session = startWebSpeechSession({
-            lang: 'zh-CN',
-            onPartial: (text) => {
-              lastText = text;
-              if (text.trim()) gotData = true;
-            },
-            onError: (code) => {
-              if (code === 'not-allowed' || code === 'service-not-allowed' || code === 'audio-capture') {
-                micFails += 1;
-                if (micFails >= WAKE_FAIL_FUSE) fuseMic();
-              }
-              dead = true; // 所有错误都终结本轮：not-allowed 等不再自动重启；no-speech 等下轮重起更稳
-            },
-          });
-          if (!session) {
-            await sleep(2500); // 起监听失败（罕见）：稍后重试
-            continue;
-          }
-          // 等待：命中 / 暂停条件（面板打开等）/ 卸载 / 本轮结束；新文本落地即异步匹配
-          const startedAt = Date.now();
-          let matchedLen = 0;
-          while (!aborted && !woke && !dead) {
-            await sleep(300);
-            if (Date.now() - startedAt > 10_000) micFails = 0; // 会话健康存活 10s+：权限正常，清零熔断计数
-            if (lastText.length > matchedLen) {
-              matchedLen = lastText.length;
-              const rest = await matchWakeNameSmart(lastText, optsRef.current.name).catch(() => null);
-              if (rest !== null) {
-                woke = true;
-                vibrateSafely([40, 80, 40]); // 命中反馈：短震动两连
-                optsRef.current.onWake(rest.length >= WAKE_REST_MIN ? rest : null);
-                break;
-              }
-            }
-            if (!woke && !optsRef.current.canListen()) {
-              paused = true;
-              break;
-            }
-          }
-          try {
-            session.abort();
-          } catch {
-            /* ignore */
-          }
-          if (aborted) break;
-          if (woke || paused || gotData) {
-            emptySessions = 0; // 命中/暂停/有数据都是健康信号
-          } else {
-            emptySessions += 1;
-            if (emptySessions >= 4) degraded = true; // 连续 4 轮零数据死亡 → 判定语音服务不可达，降级 C
-          }
-          await sleep(woke ? WAKE_GAP_MS : 600); // 命中后停一拍等面板开；未命中很快重起续听
-        }
-        if (aborted) return;
-        // degraded → 落入通道 C
-      }
-
-      // —— 通道 C：VAD 说话检测 + 服务端识别 /api/wake-asr（终极兜底，不依赖 Google）——
+      // —— 通道 C：VAD 说话检测 + 服务端识别 /api/wake-asr（大陆网络首选，不依赖 Google）——
       // AnalyserNode 持续监测振幅：安静环境零请求；连续 ~240ms 超阈值视为开口 → 录至
       // 静默 1.2s（上限 4s）→ 16k WAV → 服务端 z-ai ASR → 匹配唤醒名。
+      // 服务端连续 4 次不可达（接口挂/断网）→ 落到下方通道 A（Web Speech）兜底。
+      let serverFails = 0;
       if (canWakeVad()) {
-        while (!aborted) {
+        while (!aborted && serverFails < WAKE_SERVER_FAIL_DEGRADE) {
           if (!optsRef.current.canListen()) {
             await sleep(900);
             continue;
+          }
+          // v1.8 APK 原生壳：前置拿 Android 运行时麦克风权限（与面板录音同款）——
+          // WebView 的 getUserMedia 在权限未授予时被静默拒绝，不弹框也不报给人听
+          if (isNativePerception()) {
+            const mp = await requestMicPermission().catch(() => null);
+            if (!mp || mp.granted !== true) {
+              micFails += 1;
+              if (micFails >= WAKE_FAIL_FUSE) {
+                fuseMic();
+                break;
+              }
+              await sleep(2500);
+              continue;
+            }
           }
           let stream: MediaStream | null = null;
           let ctx: AudioContext | null = null;
@@ -1004,13 +956,20 @@ export function useAgentWakeLoop(opts: {
             // VAD 等待开口：连续 4 帧超阈值视为开始说话
             let hot = 0;
             let spoke = false;
+            let suspendedFrames = 0; // AudioContext 被自动播放策略挂起（页面刚加载无手势）：持续重试 resume，超 8s 放弃本轮
             while (!aborted && !spoke) {
               await sleep(VAD_FRAME_MS);
               if (!optsRef.current.canListen()) break;
+              if (ctx.state !== 'running') {
+                void ctx.resume().catch(() => undefined);
+                suspendedFrames += 1;
+                if (suspendedFrames * VAD_FRAME_MS >= 8000) break;
+                continue;
+              }
               hot = rms() > VAD_THRESHOLD ? hot + 1 : 0;
               if (hot >= VAD_ON_FRAMES) spoke = true;
             }
-            if (!spoke) continue; // 暂停/卸载打断（finally 清流），下轮重开
+            if (!spoke) continue; // 暂停/卸载/挂起打断（finally 清流），下轮重开
             // 开录：唤醒词与后续指令通常同段；静默 ~1.2s 或 4s 上限收尾
             const mime = pickRecorderMime();
             let rec: MediaRecorder;
@@ -1054,7 +1013,15 @@ export function useAgentWakeLoop(opts: {
               await sleep(VAD_GAP_MS);
               continue;
             }
-            const text = await wakeAsrTranscribe(samples).catch(() => '');
+            let text = '';
+            try {
+              text = await wakeAsrTranscribe(samples);
+              serverFails = 0; // 服务端健康：清零降级计数
+            } catch {
+              serverFails += 1; // 服务端不可达（接口挂/断网）：累计，连续 4 次降级通道 A
+              await sleep(VAD_GAP_MS);
+              continue;
+            }
             micFails = 0;
             if (aborted) break;
             const rest = await matchWakeNameSmart(text, optsRef.current.name);
@@ -1077,6 +1044,66 @@ export function useAgentWakeLoop(opts: {
               /* ignore */
             }
           }
+        }
+      }
+
+      // —— 通道 A：Web Speech 实时监听（服务端识别连败/无 MediaRecorder 时的兜底）——
+      // SpeechRecognition continuous 持续听（onend 自动重启），识别文本含唤醒名即命中；
+      // Chrome 语音服务走 Google，大陆网络常不可达 → 「自然死亡且零识别数据」空转，仅在
+      // 通道 C 不可用时启用（岛外浏览器老接口/服务端挂掉的场景）。
+      if (isWebSpeechSupported()) {
+        while (!aborted) {
+          if (!optsRef.current.canListen()) {
+            await sleep(900); // 暂停期低频轮询，恢复可见/空闲后 1s 内续听
+            continue;
+          }
+          let woke = false;
+          let dead = false; // 本轮会话已结束（致命错误/无法重启）→ 重起新会话续听
+          let gotData = false; // 本轮收到过任何识别文本（健康信号）
+          let lastText = ''; // 最新累计识别文本（onPartial 只记录；同音匹配是 async，在等待循环里做）
+          const session = startWebSpeechSession({
+            lang: 'zh-CN',
+            onPartial: (text) => {
+              lastText = text;
+              if (text.trim()) gotData = true;
+            },
+            onError: (code) => {
+              if (code === 'not-allowed' || code === 'service-not-allowed' || code === 'audio-capture') {
+                micFails += 1;
+                if (micFails >= WAKE_FAIL_FUSE) fuseMic();
+              }
+              dead = true; // 所有错误都终结本轮：not-allowed 等不再自动重启；no-speech 等下轮重起更稳
+            },
+          });
+          if (!session) {
+            await sleep(2500); // 起监听失败（罕见）：稍后重试
+            continue;
+          }
+          // 等待：命中 / 暂停条件（面板打开等）/ 卸载 / 本轮结束；新文本落地即异步匹配
+          const startedAt = Date.now();
+          let matchedLen = 0;
+          while (!aborted && !woke && !dead) {
+            await sleep(300);
+            if (Date.now() - startedAt > 10_000) micFails = 0; // 会话健康存活 10s+：权限正常，清零熔断计数
+            if (lastText.length > matchedLen) {
+              matchedLen = lastText.length;
+              const rest = await matchWakeNameSmart(lastText, optsRef.current.name).catch(() => null);
+              if (rest !== null) {
+                woke = true;
+                vibrateSafely([40, 80, 40]); // 命中反馈：短震动两连
+                optsRef.current.onWake(rest.length >= WAKE_REST_MIN ? rest : null);
+                break;
+              }
+            }
+            if (!woke && !optsRef.current.canListen()) break; // 暂停：下轮重开
+          }
+          try {
+            session.abort();
+          } catch {
+            /* ignore */
+          }
+          if (aborted) break;
+          await sleep(woke ? WAKE_GAP_MS : 600); // 命中后停一拍等面板开；未命中很快重起续听
         }
       }
     })();
@@ -1142,6 +1169,15 @@ export function canAgentVoiceActNow(): boolean {
 }
 
 /**
+ * 助手音色（v1.8）：语音智能体（小灵）说话用的 voiceId。空串 = 跟随「语音 API」全局默认
+ * （speakUserTts 的默认解析链），非空则显式传给 speakUserTts（显式音色优先级最高）。
+ * 音色在设置 › AI 动手 › 语音智能体 › 「助手音色」选择（内置声线 / 我的音色）。
+ */
+export function assistantVoiceId(): string {
+  return getAgentVoiceCfg().voice.trim();
+}
+
+/**
  * 任务终态语音播报（C4，Siri 式闭环）：复用共享 TTS 栈（tts-client，音色/清理/云端兜底全继承）。
  * 播报条件（全部满足才出声，否则静默跳过——不弹任何打扰，未配置的提示放设置页）：
  * ① 「执行结果语音播报」开关开，或本次任务是语音唤起启动的（voiceOrigin，任一满足）；
@@ -1149,16 +1185,19 @@ export function canAgentVoiceActNow(): boolean {
  * ③ canAgentVoiceActNow() 闸门通过（通话/锁屏/熄屏/多任务/页面隐藏/其它音频在放）。
  * 播报前先 stopSpeaking() 显式打断上一条未播完的播报（token 机制：stopSpeaking 令牌 +1，
  * 旧链路收尾不再触碰公共状态）；播报失败静默（合成超时/引擎哑火等），绝不影响任务收尾。
+ * 音色用助手音色（assistantVoiceId，未设则跟随语音 API 全局默认）。
  */
 export function speakAgentResult(text: string, opts: { voiceOrigin: boolean }): void {
   const cfg = getAgentVoiceCfg();
   if (!cfg.announce && !opts.voiceOrigin) return;
   if (!isTtsConfigured()) return;
   if (!canAgentVoiceActNow()) return;
+  const voice = cfg.voice.trim();
   selfAnnouncing = true;
   stopSpeaking();
   void speakUserTts({
     text,
+    voiceId: voice || undefined,
     onEnd: () => {
       selfAnnouncing = false;
     },

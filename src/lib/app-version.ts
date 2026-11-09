@@ -11,9 +11,9 @@
  */
 
 /** 当前最新版本（与 android-shell versionName 保持一致） */
-export const APP_VERSION = '1.7.2';
+export const APP_VERSION = '1.8.0';
 /** 版本号数字（与 android-shell versionCode 保持一致；覆盖安装要求只增不减） */
-export const APP_VERSION_CODE = 15;
+export const APP_VERSION_CODE = 16;
 
 export interface AppReleaseNote {
   version: string;
@@ -24,6 +24,17 @@ export interface AppReleaseNote {
 
 /** 版本历史（新→旧；设置 › APP 更新 页渲染，最新一条即当前版本） */
 export const APP_RELEASE_NOTES: AppReleaseNote[] = [
+  {
+    version: '1.8.0',
+    date: '2026-11-10',
+    items: [
+      '喊名唤起提速：重排唤醒通道——服务端识别优先（大陆网络不再先等浏览器语音服务白跑几十秒），APK 内还会主动弹麦克风授权',
+      '修复：查天气只开个天气 App 就没了——现在「帮我看河南的天气」会换到河南（省会郑州）、自动打开天气 App 并把天气读出来',
+      '助手音色可选：设置 › AI 动手 › 语音智能体 › 助手音色，内置声线/语音 API 里添加的我的音色都能选，可试听',
+      'Shizuku 没开时对联系人/语音助手说「打开微信」→ 自动改开手机里的微信（网页内应用），不再报错',
+      '唤醒熔断悬浮球显红点：喊名唤醒因麦克风权限停用时一眼可见，点球看原因',
+    ],
+  },
   {
     version: '1.7.2',
     date: '2026-11-10',

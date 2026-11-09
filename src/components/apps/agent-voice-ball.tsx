@@ -45,6 +45,7 @@ import {
   consumeAgentTaskVoiceOrigin,
   markAgentTaskVoiceOrigin,
   speakAgentResult,
+  assistantVoiceId,
   vibrateSafely,
 } from '@/lib/ios/agent-voice';
 import { isSpeaking, isTtsConfigured, speakUserTts, stopSpeaking } from '@/lib/ios/tts-client';
@@ -52,6 +53,7 @@ import { isWebSpeechSupported } from '@/lib/ios/web-speech';
 import { voiceTurn } from '@/lib/ios/agent-chat';
 import { assistantGreeting } from '@/lib/ios/assistant-persona';
 import { matchOpenAppIntent, openAppPage } from '@/lib/ios/agent-app-nav';
+import { matchWeatherIntent, runWeatherReport } from '@/lib/ios/agent-weather';
 
 // Agent 运行状态探针：shizuku-agent 引擎体量大，不能静态打进本组件包体——
 // 借道 agent-ui（PhoneShell 本就 dynamic 引它）订阅运行态，只回传一个轻量布尔
@@ -258,13 +260,13 @@ export default function AgentVoiceBall() {
   /** 开会话时跳过自动开录（追问重开/播报在放等场景；一次性，用后即清） */
   const skipAutoStartRef = useRef(false);
 
-  // ---- 会话内 TTS（聊天回复朗读；共享 tts-client 栈）----
+  // ---- 会话内 TTS（聊天回复朗读；共享 tts-client 栈，音色=助手音色（v1.8），未设则跟随语音 API 全局默认）----
   const speakInSession = useCallback(async (text: string): Promise<void> => {
     if (!isTtsConfigured()) return;
     stopSpeaking(); // 打断上一条未播完的播报（token 机制）
     setSpeaking(true);
     try {
-      await speakUserTts({ text });
+      await speakUserTts({ text, voiceId: assistantVoiceId() || undefined });
     } catch {
       /* 合成失败静默：文字已在对话流里 */
     } finally {
@@ -378,6 +380,34 @@ export default function AgentVoiceBall() {
       recRef.current.cancel();
       vibrateSafely(12);
       appendTurnRef.current('user', text);
+      // ---- 直达 ①：天气查询（v1.8，纯本地意图零 LLM 延迟）——查城市+写天气 App+朗读一步
+      //      到位，修「查天气只开个天气 App 就没了」；「打开天气」（无地点、句首打开动词）
+      //      不算查询，落到直达 ② 只开 App 不播报
+      const openLead = /^(帮我打开|给我打开|打开|开启|启动|进入|切到|切换到)/.test(text);
+      const wIntent = matchWeatherIntent(text);
+      if (wIntent && (wIntent.location || !openLead)) {
+        setThinking(true);
+        const rep = await runWeatherReport(wIntent.location);
+        setThinking(false);
+        appendTurnRef.current('agent', rep.reply);
+        if (rep.ok) {
+          closeSession(); // App 窗口 z-40 在会话层下：先收会话再切页
+          openAppPage('weather');
+        }
+        await speakInSession(rep.reply);
+        return;
+      }
+      // ---- 直达 ②：纯打开意图（打开微信/淘宝…）——不进 LLM、不依赖 Shizuku 是否启动，
+      //      直接切**网页内（本项目虚拟手机）**对应应用页面；真实手机应用不会被拉起
+      const nav = matchOpenAppIntent(text);
+      if (nav) {
+        const ok = openAppPage(nav.appId);
+        const reply = ok ? `好嘞，${nav.label}打开啦~` : `现在不方便打开${nav.label}哦~`;
+        closeSession();
+        appendTurnRef.current('agent', reply); // 会话流保留记录，下次打开可见
+        await speakInSession(reply);
+        return;
+      }
       setThinking(true);
       try {
         const history = turnsRef.current
@@ -388,15 +418,14 @@ export default function AgentVoiceBall() {
         if (history.length > 0 && history[history.length - 1].role === 'user') history.pop();
         const r = await voiceTurn(text, history);
         if (r.mode === 'task') {
-          // 「打开微信」类纯打开意图：不走 Agent（不依赖 Shizuku 是否启动），
-          // 直接切到**网页内（本项目虚拟手机）**的对应应用页面——真实手机微信/淘宝不会被拉起
-          const nav = matchOpenAppIntent(r.task) ?? matchOpenAppIntent(text);
-          if (nav) {
-            const ok = openAppPage(nav.appId); // App 窗口 z-40 在会话层下，先收会话再切页
-            const reply = ok ? `好嘞，${nav.label}打开啦~` : `现在不方便打开${nav.label}哦~`;
+          // LLM 判成任务但其实是纯打开意图（改写后动词丢失等）：再兜一次网页内直达
+          const nav2 = matchOpenAppIntent(r.task);
+          if (nav2) {
+            const ok = openAppPage(nav2.appId);
+            const reply = ok ? `好嘞，${nav2.label}打开啦~` : `现在不方便打开${nav2.label}哦~`;
             setThinking(false);
             closeSession();
-            appendTurnRef.current('agent', reply); // 会话流保留记录，下次打开可见
+            appendTurnRef.current('agent', reply);
             await speakInSession(reply);
             return;
           }
@@ -773,6 +802,10 @@ export default function AgentVoiceBall() {
         {/* 呼吸光环（连续唤醒监听中） */}
         {listening ? (
           <span aria-hidden="true" className="absolute inset-[-4px] animate-ping rounded-full bg-white/25" style={{ animationDuration: '2.4s' }} />
+        ) : null}
+        {/* 唤醒熔断红点：喊名唤醒因麦克风权限等原因停用时，点球仍可对话，但让用户一眼看到原因（设置页/点球提示有详情） */}
+        {wakeBlocked ? (
+          <span aria-hidden="true" data-testid="agent-voice-ball-alert" className="absolute -right-0.5 -top-0.5 z-10 h-3.5 w-3.5 rounded-full bg-[#FF453A] shadow-[0_1px_4px_rgba(0,0,0,0.4)] ring-2 ring-black/50" />
         ) : null}
         {/* 柔和彩虹外发光 */}
         <span aria-hidden="true" className="absolute -inset-[5px] rounded-full opacity-55 blur-md" style={{ background: SIRI_CONIC }} />

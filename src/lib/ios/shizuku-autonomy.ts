@@ -41,6 +41,7 @@ import {
   type LabResult,
 } from './shizuku-lab';
 import { isNativePerception } from './native-perception';
+import { matchWebAppByPackage, openAppPage } from './agent-app-nav';
 import { useSettings } from '@/lib/ios/store';
 
 // ---------------- 能力注册表 ----------------
@@ -497,7 +498,9 @@ export async function executePhoneOp(argRaw: string, progress?: (text: string) =
   const cmd = (parts.shift() ?? '').toLowerCase();
   const p = parts; // 剩余参数段
   if (!cmd) return { ok: false, text: '手机操作命令为空' };
-  if (!isNativePerception()) return { ok: false, text: '当前不在手机 APP 里（浏览器无法操控手机）' };
+  // v1.8：「打开」在浏览器里也有意义——聊到「打开微信」可兑成网页内应用（下方 case 内处理），
+  // 其余命令真得依赖原生 Shizuku 通道，非原生环境一律拒
+  if (!isNativePerception() && cmd !== '打开') return { ok: false, text: '当前不在手机 APP 里（浏览器无法操控手机）' };
   const cfg = getAutonomyConfig();
   if (!cfg.master) return DENIED;
   const on = (k: string) => cfg.caps[k] === true;
@@ -586,8 +589,22 @@ export async function executePhoneOp(argRaw: string, progress?: (text: string) =
     }
     case '打开': {
       if (!on('open')) return DENIED;
-      if (!p[0]) return { ok: false, text: '打开命令缺包名（[手机操作:打开:包名]）' };
-      return labOpenApp(p[0]);
+      const pkg = (p[0] ?? '').trim();
+      if (!pkg) return { ok: false, text: '打开命令缺包名（[手机操作:打开:包名]）' };
+      // v1.8 网页内兜底：Shizuku 没启动（或根本在浏览器）时，「打开微信」不再停在
+      // 「Shizuku 未运行」的失败上——手机里也有的应用（微信/QQ/淘宝…）直接开网页内页面。
+      // 折叠路径：浏览器里唯一可走的路；原生壳里 labOpenApp 失败且报 Shizuku 时兜底。
+      const web = matchWebAppByPackage(pkg);
+      if (!isNativePerception()) {
+        if (web && openAppPage(web.appId)) return { ok: true, text: `已打开手机里的${web.label}（网页内应用）` };
+        return { ok: false, text: '当前不在手机 APP 里（浏览器无法操控手机）' };
+      }
+      const r = await labOpenApp(pkg);
+      if (r.ok) return r;
+      if (web && /Shizuku/.test(r.text) && openAppPage(web.appId)) {
+        return { ok: true, text: `Shizuku 未运行，已改为打开手机里的${web.label}（网页内应用）` };
+      }
+      return r;
     }
     case '播歌': {
       // 指定歌名自动搜+放（复合能力：搜歌在云端，拉起/点按用 open/tap，核实用 screencap；
