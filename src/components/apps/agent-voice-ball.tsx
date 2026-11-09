@@ -41,6 +41,7 @@ import {
   useAgentWakeLoop,
   canAgentWakeListen,
   canAgentVoiceActNow,
+  canWakeVad,
   consumeAgentTaskVoiceOrigin,
   markAgentTaskVoiceOrigin,
   speakAgentResult,
@@ -473,11 +474,12 @@ export default function AgentVoiceBall() {
   }, []);
 
   // ---- 连续唤醒监听 ----
-  // 通道选择（useAgentWakeLoop 内）：离线引擎就绪 → 端侧分块转写；未就绪但浏览器支持
-  // Web Speech → 实时监听兜底（免下载 239MB 模型，需联网+麦克风权限）。此处只判「至少一条通道可用」
-  // （组件 dynamic ssr:false，惰性初始化时 window 必可用，与 native 同模式）
+  // 通道选择（useAgentWakeLoop 内）：① 离线引擎就绪 → 端侧分块转写；② Web Speech → 实时监听
+  // （Google 不可达自动降级）；③ VAD 说话检测 + 服务端识别（免下载模型、不依赖 Google）。
+  // 此处只判「至少一条通道可用」（组件 dynamic ssr:false，惰性初始化时 window 必可用）
   const [wsWakeOk] = useState(() => isWebSpeechSupported());
-  const wakeOn = layerOn && cfg.listen && !wakeBlocked && (asrReady || wsWakeOk);
+  const [vadOk] = useState(() => canWakeVad());
+  const wakeOn = layerOn && cfg.listen && !wakeBlocked && (asrReady || wsWakeOk || vadOk);
   const onWake = useCallback(
     (task: string | null) => {
       setSessionMsg('');
@@ -527,6 +529,9 @@ export default function AgentVoiceBall() {
   const openFromBall = useCallback(() => {
     clearFollowup(); // 手动开会话：不处于追问模式
     openSession({ greet: true });
+    // 唤醒监听被熔断时点球给出可见原因（此前只藏设置页，用户不知道喊名为何没反应）
+    const blocked = useAgentVoice.getState().wakeBlocked;
+    if (blocked) setSessionMsg(blocked);
   }, [clearFollowup, openSession]);
 
   const toggleMic = useCallback(() => {

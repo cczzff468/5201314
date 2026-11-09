@@ -11,9 +11,11 @@
  *   全部不可用抛中文引导（面板提供打字输入框兜底，永远存在）
  * - 录音器（useAgentRecorder）：MediaRecorder + AnalyserNode 实时振幅 +
  *   静默自动停止（持续 1.4s 无声）+ 30s 上限 + 0.7s 下限，仿 voice-input 的已验证链路
- * - 连续唤醒监听（useAgentWakeLoop）双通道：① 离线（APK 首选）后台每轮录 3.2s → 端侧转写
- *   → 匹配唤醒名；② 浏览器兜底（离线引擎未就绪时）Web Speech 实时监听，无需下载模型。
- *   命中即震动 + 回调（去掉唤醒名后剩余 ≥4 字直接作任务文本，否则让用户继续说）；
+ * - 连续唤醒监听（useAgentWakeLoop）三通道：① 离线（APK 已下载模型时首选）每轮录 3.2s →
+ *   端侧转写 → 匹配唤醒名；② Web Speech 实时监听（免下载模型，但 Chrome 语音服务走 Google，
+ *   大陆不可达 → 持续无数据自动降级）；③ VAD 说话检测 + 服务端识别 /api/wake-asr（
+ *   不依赖 Google，安静环境零请求、说一句才发一次）。命中即震动 + 回调（去掉唤醒名后
+ *   剩余 ≥4 字直接作任务文本，否则让用户继续说）；
  *   页面隐藏 / Agent 任务运行 / 通话 / TTS·语音播放 / 面板打开 时自动暂停，
  *   恢复空闲后续听；麦克风连续失败熔断并记录原因
  * - C4 任务终态播报（speakAgentResult）：任务结束后按开关/语音来源 + 闸门（canAgentVoiceActNow）
@@ -24,7 +26,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { create } from 'zustand';
 import { pickRecorderMime } from './audio-utils';
-import { isOfflineAsrReady, offlineAsrTranscribe } from './offline-asr';
+import { blobTo16kMono, isOfflineAsrReady, offlineAsrTranscribe } from './offline-asr';
 import { isWebSpeechSupported, startWebSpeechSession, type WebSpeechSession } from './web-speech';
 import { isSttReady, transcribeAudioBlob } from './stt-client';
 import { isSpeaking, isTtsConfigured, speakUserTts, stopSpeaking } from './tts-client';
@@ -139,7 +141,7 @@ function cleanForWake(s: string): string {
 }
 
 /**
- * 唤醒名匹配：转写包含唤醒名即命中（忽略大小写/空格/标点）。
+ * 唤醒名匹配（字面）：转写包含唤醒名即命中（忽略大小写/空格/标点）。
  * 命中 → 返回去掉唤醒名后的剩余文本（空串 = 只喊了名字；≥4 字可作一句话任务）；
  * 未命中 → 返回 null。
  */
@@ -150,6 +152,72 @@ export function matchWakeName(transcript: string, wakeName: string): string | nu
   const idx = hay.indexOf(name);
   if (idx < 0) return null;
   return (hay.slice(0, idx) + hay.slice(idx + name.length)).trim();
+}
+
+// ---------------- 同音容错匹配（拼音级）：ASR 常把唤醒名转成同音别字（小灵→小玲/小凌） ----------------
+
+type PinyinModule = typeof import('pinyin-pro');
+let pinyinMod: PinyinModule | null = null;
+let pinyinModPromise: Promise<PinyinModule> | null = null;
+
+/** 惰性加载 pinyin-pro（只在唤醒匹配首次进入拼音分支时加载，不进首屏包体） */
+async function loadPinyin(): Promise<PinyinModule> {
+  if (!pinyinMod) {
+    pinyinModPromise ??= import('pinyin-pro').then((m) => {
+      pinyinMod = m;
+      return m;
+    });
+    await pinyinModPromise;
+  }
+  return pinyinMod;
+}
+
+/** 唤醒名拼音 key 缓存（按清洗后名字缓存；改名/首次各算一次） */
+const wakeKeyCache = new Map<string, string>();
+
+/** 单字/短句 → 无音调拼音串（小写；英文数字原样），失败回退原文 */
+async function toPinyinKey(s: string): Promise<string> {
+  try {
+    const { pinyin } = await loadPinyin();
+    const py = pinyin(s, { toneType: 'none', type: 'string', separator: '' }).toLowerCase();
+    return py.replace(/[^a-z0-9]/g, '') || s.toLowerCase();
+  } catch {
+    return s.toLowerCase();
+  }
+}
+
+/**
+ * 唤醒名匹配（智能版，三通道统一入口）：
+ * ① 字面包含（快路径，已有行为）；② 拼音同音滑窗（慢路径）：对转写中与唤醒名等长的片段
+ * 逐段比较无音调拼音，同音即命中（如「小玲/小凌打开微信」≈「小灵打开微信」）；
+ * 命中同样返回去掉该片段后的剩余文本；两路都未命中返回 null。
+ */
+export async function matchWakeNameSmart(transcript: string, wakeName: string): Promise<string | null> {
+  const literal = matchWakeName(transcript, wakeName);
+  if (literal !== null) return literal;
+  const name = cleanForWake(wakeName);
+  const hay = cleanForWake(transcript);
+  if (!name || !hay || hay.length < name.length) return null;
+  let nameKey = wakeKeyCache.get(name);
+  if (!nameKey) {
+    nameKey = await toPinyinKey(name);
+    wakeKeyCache.set(name, nameKey);
+    if (wakeKeyCache.size > 8) wakeKeyCache.delete(wakeKeyCache.keys().next().value as string);
+  }
+  if (!nameKey) return null;
+  // 滑窗：片段长度=名字长度（±1 容错多字/漏字），逐段拼音比较；超长转写只扫尾部 80 字
+  // （唤醒词几乎不会在更早位置仍未命中），控制 O(n²) 拼音调用在几十毫秒内
+  const WIN = 80;
+  const scanFrom = hay.length > WIN ? hay.length - WIN : 0;
+  for (let take = name.length; take <= Math.min(name.length + 1, hay.length); take++) {
+    for (let i = scanFrom; i + take <= hay.length; i++) {
+      const segKey = await toPinyinKey(hay.slice(i, i + take));
+      if (segKey && segKey === nameKey) {
+        return (hay.slice(0, i) + hay.slice(i + take)).trim();
+      }
+    }
+  }
+  return null;
 }
 
 /** 震动反馈（防御式：WebView/浏览器不支持时静默） */
@@ -675,17 +743,94 @@ const WAKE_GAP_MS = 1500;
 /** 麦克风连续失败熔断阈值 */
 const WAKE_FAIL_FUSE = 3;
 
+// ---------------- 通道 C：VAD 说话检测 + 服务端识别（不依赖 Google，大陆网络可靠） ----------------
+
+/** VAD 分析帧长 */
+const VAD_FRAME_MS = 60;
+/** 说话检测阈值（rms；正常说话 0.1+，环境噪声 <0.03） */
+const VAD_THRESHOLD = 0.05;
+/** 连续多少帧超阈值视为开口（4 帧 ≈ 240ms 防误触发） */
+const VAD_ON_FRAMES = 4;
+/** 录中连续多少帧静默视为说完（20 帧 ≈ 1.2s） */
+const VAD_OFF_FRAMES = 20;
+/** 单段录音上限 */
+const VAD_MAX_MS = 4000;
+/** 未命中段间防重触发间隔 */
+const VAD_GAP_MS = 800;
+
+/** 通道 C 可用性：能开麦 + 能录音即可（浏览器与 APK WebView 均满足；悬浮球组件判定 wakeOn 用） */
+export function canWakeVad(): boolean {
+  return typeof navigator !== 'undefined' && !!navigator.mediaDevices?.getUserMedia && typeof MediaRecorder !== 'undefined';
+}
+
+/** Float32（16k 单声道）→ 16bit PCM WAV ArrayBuffer（服务端 ASR 明确支持 WAV） */
+function encodeWav16k(samples: Float32Array): ArrayBuffer {
+  const buf = new ArrayBuffer(44 + samples.length * 2);
+  const v = new DataView(buf);
+  const ws = (o: number, s: string) => {
+    for (let i = 0; i < s.length; i++) v.setUint8(o + i, s.charCodeAt(i));
+  };
+  ws(0, 'RIFF');
+  v.setUint32(4, 36 + samples.length * 2, true);
+  ws(8, 'WAVE');
+  ws(12, 'fmt ');
+  v.setUint32(16, 16, true);
+  v.setUint16(20, 1, true); // PCM
+  v.setUint16(22, 1, true); // 单声道
+  v.setUint32(24, 16000, true);
+  v.setUint32(28, 32000, true); // 16000 * 2 字节率
+  v.setUint16(32, 2, true);
+  v.setUint16(34, 16, true);
+  ws(36, 'data');
+  v.setUint32(40, samples.length * 2, true);
+  let o = 44;
+  for (let i = 0; i < samples.length; i++, o += 2) {
+    const s = Math.max(-1, Math.min(1, samples[i]));
+    v.setInt16(o, s < 0 ? s * 0x8000 : s * 0x7fff, true);
+  }
+  return buf;
+}
+
+/** Blob → 去掉 dataURL 前缀的 base64（FileReader 实现，避开 btoa 大数组栈溢出） */
+function blobToBase64(b: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const fr = new FileReader();
+    fr.onload = () => {
+      const s = String(fr.result || '');
+      const i = s.indexOf(',');
+      resolve(i >= 0 ? s.slice(i + 1) : s);
+    };
+    fr.onerror = () => reject(new Error('音频读取失败'));
+    fr.readAsDataURL(b);
+  });
+}
+
+/** 服务端唤醒识别：16k 单声道样本 → WAV base64 → POST /api/wake-asr → 文本（12s 看门狗） */
+async function wakeAsrTranscribe(samples: Float32Array): Promise<string> {
+  const b64 = await blobToBase64(new Blob([encodeWav16k(samples)], { type: 'audio/wav' }));
+  const res = await fetch('/api/wake-asr', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ audio: b64 }),
+    signal: AbortSignal.timeout(12_000),
+  });
+  if (!res.ok) throw new Error(`wake-asr ${res.status}`);
+  const j = (await res.json()) as { text?: unknown };
+  return typeof j.text === 'string' ? j.text : '';
+}
+
 /**
- * 连续唤醒循环（挂载即后台跑，由 enabled 一键启停）双通道：
- * - 通道 A（离线引擎未就绪 && 浏览器支持 Web Speech）：浏览器实时监听，无需下载模型，
- *   需联网 + 麦克风权限；识别文本含唤醒名即命中震动 + onWake；
- *   not-allowed 等致命错连续 3 次 → 熔断停循环并记录原因（重新拨动开关即重试）；
- * - 通道 B（离线引擎就绪，APK 原生链路）：每轮 录 3.2s → 端侧转写 → 匹配唤醒名；
- *   麦克风连续 3 轮失败 → 熔断停循环并记录原因。
- * 暂停条件见 canAgentWakeListen；两条通道由外层 enabled 一致性保证互斥（本次会话固定通道）。
+ * 连续唤醒循环（挂载即后台跑，由 enabled 一键启停）三通道（本次会话固定，依可用性择一）：
+ * - 通道 B（离线引擎就绪，APK 已下载模型时首选）：每轮 录 3.2s → 端侧转写 → 匹配唤醒名，断网可用；
+ * - 通道 A（浏览器支持 Web Speech）：实时监听免下载模型；但 Chrome 语音服务走 Google，
+ *   大陆网络持续 network 错误 → 连续 4 轮「自然死亡且零识别数据」自动降级通道 C；
+ * - 通道 C（VAD + 服务端识别，终极兜底）：AnalyserNode 监测说话（安静零请求）→ 录 ≤4s →
+ *   16k WAV → POST /api/wake-asr（z-ai ASR）→ 匹配唤醒名；不依赖 Google，大陆网络可靠。
+ * 命中统一：震动 + onWake（剩余 ≥4 字带任务文本）；麦克风连续 3 轮失败 → 熔断停循环并记录原因
+ * （设置页展示，重新拨动开关即重试）；暂停条件见 canAgentWakeListen。
  */
 export function useAgentWakeLoop(opts: {
-  /** 总启用（listen 开关 && [离线引擎就绪 || 浏览器实时识别可用] && 未熔断）——外层算好传入 */
+  /** 总启用（listen 开关 && [离线就绪 || Web Speech 可用 || VAD+服务端可用] && 未熔断）——外层算好传入 */
   enabled: boolean;
   /** 唤醒名（经 optsRef 透传，设置页改完下一轮立即生效） */
   name: string;
@@ -703,43 +848,77 @@ export function useAgentWakeLoop(opts: {
     if (!opts.enabled) return undefined;
     let aborted = false;
     let micFails = 0;
+    const MIC_FUSE_MSG = '无法访问麦克风：连续唤醒已自动停用（允许麦克风权限后重新打开此开关）';
+    /** 熔断：大概率无麦克风权限/不支持录音——停循环并记录原因，重新拨动开关即重试 */
+    const fuseMic = () => {
+      useAgentVoice.setState({ wakeBlocked: MIC_FUSE_MSG });
+      aborted = true;
+    };
 
-    // —— 通道 A：Web Speech 实时监听（离线引擎未就绪时的浏览器兜底：免下载模型）——
-    // SpeechRecognition continuous 持续听（onend 自动重启），识别文本含唤醒名即命中。
-    // 需联网 + 麦克风权限；APK WebView 无此 API（外层 enabled 保证只在支持的浏览器走到这）。
-    if (!isOfflineAsrReady() && isWebSpeechSupported()) {
-      void (async () => {
-        // 首轮小延迟：避开开开关瞬间的其它音频操作与权限弹窗竞争
-        await sleep(1200);
+    void (async () => {
+      // 首轮小延迟：避开开开关瞬间的其它音频操作与权限弹窗竞争
+      await sleep(1200);
+
+      // —— 通道 B：MediaRecorder 3.2s 分块 + 端侧转写（离线引擎就绪时首选，断网可用）——
+      if (isOfflineAsrReady()) {
         while (!aborted) {
+          if (!optsRef.current.canListen()) {
+            await sleep(900); // 暂停期低频轮询，恢复可见/空闲后 1s 内续听
+            continue;
+          }
+          try {
+            const blob = await recordWakeChunk(WAKE_CHUNK_MS, () => aborted || !optsRef.current.canListen());
+            if (aborted) break;
+            if (!blob) continue; // 中途被暂停打断：不消耗轮间隔
+            const text = await offlineAsrTranscribe(blob).catch(() => '');
+            if (aborted) break;
+            const rest = await matchWakeNameSmart(text, optsRef.current.name);
+            micFails = 0;
+            if (rest !== null) {
+              vibrateSafely([40, 80, 40]); // 命中反馈：短震动两连
+              optsRef.current.onWake(rest.length >= WAKE_REST_MIN ? rest : null);
+              await sleep(WAKE_GAP_MS); // 面板打开期间 canListen 会挡住后续轮
+            } else {
+              await sleep(WAKE_GAP_MS); // 未命中：轮间 ≥1.5s 省电
+            }
+          } catch {
+            micFails += 1;
+            if (micFails >= WAKE_FAIL_FUSE) {
+              fuseMic();
+              break;
+            }
+            await sleep(2500);
+          }
+        }
+        return;
+      }
+
+      // —— 通道 A：Web Speech 实时监听（免下载模型；Google 不可达时自动降级通道 C）——
+      // SpeechRecognition continuous 持续听（onend 自动重启），识别文本含唤醒名即命中。
+      if (isWebSpeechSupported()) {
+        let emptySessions = 0; // 连续「自然死亡且零识别数据」轮数（Google 不可达的信号）
+        let degraded = false;
+        while (!aborted && !degraded) {
           if (!optsRef.current.canListen()) {
             await sleep(900); // 暂停期低频轮询，恢复可见/空闲后 1s 内续听
             continue;
           }
           let woke = false;
           let dead = false; // 本轮会话已结束（致命错误/无法重启）→ 重起新会话续听
+          let paused = false;
+          let gotData = false; // 本轮收到过任何识别文本（健康信号）
+          let lastText = ''; // 最新累计识别文本（onPartial 只记录；同音匹配是 async，在等待循环里做）
           let session: WebSpeechSession | null = null;
           session = startWebSpeechSession({
             lang: 'zh-CN',
             onPartial: (text) => {
-              if (woke || dead || aborted || !session) return;
-              const rest = matchWakeName(text, optsRef.current.name);
-              if (rest === null) return;
-              woke = true;
-              vibrateSafely([40, 80, 40]); // 命中反馈：短震动两连
-              session.abort();
-              optsRef.current.onWake(rest.length >= WAKE_REST_MIN ? rest : null);
+              lastText = text;
+              if (text.trim()) gotData = true;
             },
             onError: (code) => {
               if (code === 'not-allowed' || code === 'service-not-allowed' || code === 'audio-capture') {
                 micFails += 1;
-                if (micFails >= WAKE_FAIL_FUSE) {
-                  // 熔断：大概率麦克风权限被拒（iframe 未放行/浏览器拒绝）——停循环并记录原因
-                  useAgentVoice.setState({
-                    wakeBlocked: '无法访问麦克风：连续唤醒已自动停用（允许浏览器麦克风权限后重新打开此开关）',
-                  });
-                  aborted = true;
-                }
+                if (micFails >= WAKE_FAIL_FUSE) fuseMic();
               }
               dead = true; // 所有错误都终结本轮：not-allowed 等不再自动重启；no-speech 等下轮重起更稳
             },
@@ -748,12 +927,26 @@ export function useAgentWakeLoop(opts: {
             await sleep(2500); // 起监听失败（罕见）：稍后重试
             continue;
           }
-          // 等待：命中 / 暂停条件（面板打开等）/ 卸载 / 本轮结束
+          // 等待：命中 / 暂停条件（面板打开等）/ 卸载 / 本轮结束；新文本落地即异步匹配
           const startedAt = Date.now();
+          let matchedLen = 0;
           while (!aborted && !woke && !dead) {
             await sleep(300);
             if (Date.now() - startedAt > 10_000) micFails = 0; // 会话健康存活 10s+：权限正常，清零熔断计数
-            if (!woke && !optsRef.current.canListen()) break;
+            if (lastText.length > matchedLen) {
+              matchedLen = lastText.length;
+              const rest = await matchWakeNameSmart(lastText, optsRef.current.name).catch(() => null);
+              if (rest !== null) {
+                woke = true;
+                vibrateSafely([40, 80, 40]); // 命中反馈：短震动两连
+                optsRef.current.onWake(rest.length >= WAKE_REST_MIN ? rest : null);
+                break;
+              }
+            }
+            if (!woke && !optsRef.current.canListen()) {
+              paused = true;
+              break;
+            }
           }
           try {
             session.abort();
@@ -761,49 +954,129 @@ export function useAgentWakeLoop(opts: {
             /* ignore */
           }
           if (aborted) break;
+          if (woke || paused || gotData) {
+            emptySessions = 0; // 命中/暂停/有数据都是健康信号
+          } else {
+            emptySessions += 1;
+            if (emptySessions >= 4) degraded = true; // 连续 4 轮零数据死亡 → 判定语音服务不可达，降级 C
+          }
           await sleep(woke ? WAKE_GAP_MS : 600); // 命中后停一拍等面板开；未命中很快重起续听
         }
-      })();
+        if (aborted) return;
+        // degraded → 落入通道 C
+      }
 
-      return () => {
-        aborted = true;
-      };
-    }
-
-    // —— 通道 B：MediaRecorder 3.2s 分块 + 端侧转写（APK 原生链路，断网可用）——
-    void (async () => {
-      // 首轮小延迟：避开开开关瞬间的其它音频操作与权限弹窗竞争
-      await sleep(1200);
-      while (!aborted) {
-        if (!optsRef.current.canListen()) {
-          await sleep(900); // 暂停期低频轮询，恢复可见/空闲后 1s 内续听
-          continue;
-        }
-        try {
-          const blob = await recordWakeChunk(WAKE_CHUNK_MS, () => aborted || !optsRef.current.canListen());
-          if (aborted) break;
-          if (!blob) continue; // 中途被暂停打断：不消耗轮间隔
-          const text = await offlineAsrTranscribe(blob).catch(() => '');
-          if (aborted) break;
-          const rest = matchWakeName(text, optsRef.current.name);
-          micFails = 0;
-          if (rest !== null) {
-            vibrateSafely([40, 80, 40]); // 命中反馈：短震动两连
-            optsRef.current.onWake(rest.length >= WAKE_REST_MIN ? rest : null);
-            await sleep(WAKE_GAP_MS); // 面板打开期间 canListen 会挡住后续轮
-          } else {
-            await sleep(WAKE_GAP_MS); // 未命中：轮间 ≥1.5s 省电
+      // —— 通道 C：VAD 说话检测 + 服务端识别 /api/wake-asr（终极兜底，不依赖 Google）——
+      // AnalyserNode 持续监测振幅：安静环境零请求；连续 ~240ms 超阈值视为开口 → 录至
+      // 静默 1.2s（上限 4s）→ 16k WAV → 服务端 z-ai ASR → 匹配唤醒名。
+      if (canWakeVad()) {
+        while (!aborted) {
+          if (!optsRef.current.canListen()) {
+            await sleep(900);
+            continue;
           }
-        } catch {
-          micFails += 1;
-          if (micFails >= WAKE_FAIL_FUSE) {
-            // 熔断：大概率无麦克风权限/不支持录音——停循环并记录原因，重新拨动开关即重试
-            useAgentVoice.setState({
-              wakeBlocked: '无法访问麦克风：连续唤醒已自动停用（检查 APP 麦克风权限后重新打开此开关）',
+          let stream: MediaStream | null = null;
+          let ctx: AudioContext | null = null;
+          try {
+            stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          } catch {
+            micFails += 1;
+            if (micFails >= WAKE_FAIL_FUSE) {
+              fuseMic();
+              break;
+            }
+            await sleep(2500);
+            continue;
+          }
+          try {
+            ctx = new AudioContext();
+            if (ctx.state === 'suspended') void ctx.resume().catch(() => undefined);
+            const analyser = ctx.createAnalyser();
+            analyser.fftSize = 2048;
+            ctx.createMediaStreamSource(stream).connect(analyser);
+            const frame = new Float32Array(analyser.fftSize);
+            const rms = (): number => {
+              analyser.getFloatTimeDomainData(frame);
+              let sum = 0;
+              for (let i = 0; i < frame.length; i++) sum += frame[i] * frame[i];
+              return Math.sqrt(sum / frame.length);
+            };
+            // VAD 等待开口：连续 4 帧超阈值视为开始说话
+            let hot = 0;
+            let spoke = false;
+            while (!aborted && !spoke) {
+              await sleep(VAD_FRAME_MS);
+              if (!optsRef.current.canListen()) break;
+              hot = rms() > VAD_THRESHOLD ? hot + 1 : 0;
+              if (hot >= VAD_ON_FRAMES) spoke = true;
+            }
+            if (!spoke) continue; // 暂停/卸载打断（finally 清流），下轮重开
+            // 开录：唤醒词与后续指令通常同段；静默 ~1.2s 或 4s 上限收尾
+            const mime = pickRecorderMime();
+            let rec: MediaRecorder;
+            try {
+              rec = new MediaRecorder(stream, { mimeType: mime, audioBitsPerSecond: 24000 });
+            } catch {
+              rec = new MediaRecorder(stream);
+            }
+            const chunks: Blob[] = [];
+            rec.ondataavailable = (e: BlobEvent) => {
+              if (e.data && e.data.size > 0) chunks.push(e.data);
+            };
+            const stopped = new Promise<void>((resolve) => {
+              rec.onstop = () => resolve();
             });
-            break;
+            rec.start(250);
+            const startedAt = Date.now();
+            let quiet = 0;
+            while (!aborted && Date.now() - startedAt < VAD_MAX_MS) {
+              await sleep(VAD_FRAME_MS);
+              if (!optsRef.current.canListen()) break;
+              quiet = rms() > VAD_THRESHOLD ? 0 : quiet + 1;
+              if (quiet >= VAD_OFF_FRAMES) break;
+            }
+            try {
+              if (rec.state !== 'inactive') rec.stop();
+            } catch {
+              /* ignore */
+            }
+            await Promise.race([stopped, sleep(800)]);
+            if (aborted || !optsRef.current.canListen()) continue;
+            if (chunks.length === 0) {
+              await sleep(VAD_GAP_MS);
+              continue;
+            }
+            const blob = buildBlob(chunks, rec.mimeType || mime || '');
+            // 解码重采样 16k 单声道（复用离线链路的已验证实现），太短的误触发丢弃
+            const samples = await blobTo16kMono(blob).catch(() => new Float32Array(0));
+            if (aborted) break;
+            if (samples.length < 4000) {
+              await sleep(VAD_GAP_MS);
+              continue;
+            }
+            const text = await wakeAsrTranscribe(samples).catch(() => '');
+            micFails = 0;
+            if (aborted) break;
+            const rest = await matchWakeNameSmart(text, optsRef.current.name);
+            if (rest !== null) {
+              vibrateSafely([40, 80, 40]); // 命中反馈：短震动两连
+              optsRef.current.onWake(rest.length >= WAKE_REST_MIN ? rest : null);
+              await sleep(WAKE_GAP_MS); // 面板打开期间 canListen 会挡住后续轮
+            } else {
+              await sleep(VAD_GAP_MS); // 未命中：防连触
+            }
+          } finally {
+            try {
+              stream?.getTracks().forEach((t) => t.stop());
+            } catch {
+              /* ignore */
+            }
+            try {
+              void ctx?.close().catch(() => undefined);
+            } catch {
+              /* ignore */
+            }
           }
-          await sleep(2500);
         }
       }
     })();

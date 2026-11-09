@@ -350,8 +350,9 @@ export function initOfflineAsr(): Promise<void> {
   return w.initPromise;
 }
 
-/** 音频 Blob → 16k 单声道 Float32Array（decodeAudioData 本地解码，断网可用） */
-async function blobTo16kMono(blob: Blob): Promise<Float32Array> {
+/** 音频 Blob → 16k 单声道 Float32Array（decodeAudioData 本地解码，断网可用）。
+ *  导出：连续唤醒的服务端兜底通道（agent-voice.ts 通道 C）录完也用它重采样成 WAV 上传 */
+export async function blobTo16kMono(blob: Blob): Promise<Float32Array> {
   const ab = await blob.arrayBuffer();
   const Ctx = window.AudioContext ?? (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
   const ctx = new Ctx();

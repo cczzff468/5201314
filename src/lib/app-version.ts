@@ -11,9 +11,9 @@
  */
 
 /** 当前最新版本（与 android-shell versionName 保持一致） */
-export const APP_VERSION = '1.7.1';
+export const APP_VERSION = '1.7.2';
 /** 版本号数字（与 android-shell versionCode 保持一致；覆盖安装要求只增不减） */
-export const APP_VERSION_CODE = 14;
+export const APP_VERSION_CODE = 15;
 
 export interface AppReleaseNote {
   version: string;
@@ -24,6 +24,15 @@ export interface AppReleaseNote {
 
 /** 版本历史（新→旧；设置 › APP 更新 页渲染，最新一条即当前版本） */
 export const APP_RELEASE_NOTES: AppReleaseNote[] = [
+  {
+    version: '1.7.2',
+    date: '2026-11-10',
+    items: [
+      '喊名唤醒更可靠：新增服务端识别通道——说话时才识别一小段（安静零请求），不再依赖浏览器语音服务（大陆网络不可达时也能喊名唤起）',
+      '同音字容错：喊「小灵」即使被识别成「小玲/小凌」等同音别字也能命中唤醒（拼音级匹配）',
+      '唤醒不可用时点悬浮球会直接看到原因提示（麦克风权限等），不用再去设置页找',
+    ],
+  },
   {
     version: '1.7.1',
     date: '2026-11-10',
