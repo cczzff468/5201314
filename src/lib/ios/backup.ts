@@ -15,14 +15,16 @@
  *   都是 Blob（含嵌在 kv 数组里的深层字段）——Blob 无法 JSON 序列化，导出时全深度递归转
  *   { __aiPhoneBlob, dataUrl } 包装，导入时对称还原 Blob；
  * - cryptoKey（AES-GCM 非可提取密钥）无法导出且绑设备：导出时跳过该记录；
- * - 设置里的密文信封（API Key 等）导出时解密为明文——否则换设备后无法解密（新设备密钥不同），
- *   导入后加载流程会把含 apiKey 的明文自动重新加密回写（secure-store 静默升级语义，跨设备闭环）；
+ * - 设置里的密文信封（API Key 等）与 kv 里的 secret-box 密文记录（music-api-cfg / music-login）
+ *   导出时解密为明文——否则换设备后无法解密（新设备密钥不同），
+ *   导入后加载流程会把明文自动重新加密回写（secure-store/secret-box 静默升级语义，跨设备闭环）；
  * - 恢复语义 = 整库快照覆盖：每个 store 先 clear 再写入；localStorage 先 clear 再全量还原。
  *   恢复后需刷新页面（内存缓存/kv 注水层全部重建）。
  */
 
 import { DB_NAME } from './db';
 import { decryptValue } from './secure-store';
+import { decryptSecret, isEncrypted } from './secret-box';
 
 export const BACKUP_APP = 'ai-phone';
 export const BACKUP_SCHEMA = 1;
@@ -166,6 +168,16 @@ export async function collectBackup(): Promise<BackupFile> {
           if (store === 'settings' && rec && typeof rec.value === 'object' && rec.value !== null) {
             const dec = await decryptValue(rec.value);
             if (dec !== null) rec = { ...rec, value: dec as unknown };
+          }
+          // kv 密文记录（music-api-cfg / music-login 等 secret-box `enc:v1:` 串）→ 同样解密为明文导出：
+          // 密文绑设备种子（localStorage ios-kv-seed），换设备后种子不一致即成解不开的死数据；
+          // 与上方 settings 信封先例同一考量——导出明文，导入落明文，各模块加载读到明文后
+          // 自愈回写加密（secret-box 静默升级语义，跨设备闭环）。
+          // 识别方式：按密文形态探测（enc:v1: 前缀 + 两段结构）而非硬编码键名清单——
+          // secret-box 是全库唯一密文生产者，今后新增的加密 kv 键自动被覆盖，本文件零维护。
+          // 解密失败（密文损坏）原样退回密文串，导入侧按「无配置」兜底，行为与旧版一致。
+          if (store === 'kv' && rec && typeof rec.value === 'string' && isEncrypted(rec.value)) {
+            rec = { ...rec, value: await decryptSecret(rec.value) };
           }
           exported.push((await deepBlobToTag(rec, 0)) as Record<string, unknown>);
         } catch (err) {

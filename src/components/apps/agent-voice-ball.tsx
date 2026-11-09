@@ -18,6 +18,12 @@
  *   播完自动开录（应声→聆听闭环）；继续上次对话不重复问候
  * - 追问模式：语音来源任务结束 → 全屏会话自动重开（结果进对话流 + 15s 无操作自动收起，
  *   任意触摸重新计时）；期间点麦克风即可继续说，免喊唤醒名
+ * - 连续对话（Siri 式一问一答，cfg.contChat 默认开）：会话内播报完自动续听进入下一轮
+ *   （聊天回合收尾 resumeListening；任务终态追问播报完经 speakAgentResult onEnd 续听）；
+ *   播报中用户开口即打断（barge-in：独立麦流 echoCancellation+noiseSuppression + 能量检测，
+ *   超阈连续 ~250ms → stopSpeaking + 开录；TTS 前 600ms 起振保护防扬声器回声）；
+ *   自动续听轮连续 2 次没听到 → 停止续听提示点麦克风/打字（防对着空气无限循环）；
+ *   任务交接（直达动作/任务执行）已同步关会话，续听自然跳过；任务运行中不续听不 barge-in
  * - 显示门槛：APP 原生壳（受「AI 动手」总闸管）或网页端（悬浮球开关默认开即显示，
  *   喊唤醒名/点球都能唤起；真任务仍被原生闸拒绝并原样说明）+ 已解锁 +
  *   悬浮球开关 + 无 Agent 任务运行 + 无通话/来电
@@ -34,7 +40,7 @@ import { useUI } from '@/lib/ios/store';
 import { useIncomingCall } from '@/lib/ios/incoming-call';
 import { useOfflineAsr } from '@/lib/ios/offline-asr';
 import { getAutonomyConfig } from '@/lib/ios/shizuku-autonomy';
-import { isNativePerception } from '@/lib/ios/native-perception';
+import { isNativePerception, requestMicPermission } from '@/lib/ios/native-perception';
 import {
   useAgentVoice,
   useAgentRecorder,
@@ -77,6 +83,18 @@ const TAP_SLOP = 8;
 const MSG_CLEAR_MS = 6000;
 /** 追问模式自动收起（任务后自动重开的会话，无操作到点收起；任意触摸重新计时） */
 const FOLLOWUP_AUTO_CLOSE_MS = 15000;
+
+/** 连续对话防空气循环：自动续听轮连续没听到几次后停止（提示点麦克风/打字继续） */
+const CONT_NOHEAR_MAX = 2;
+/** barge-in 能量检测采样帧长（ms） */
+const BARGE_FRAME_MS = 60;
+/** barge-in 连续超阈帧数（4×60ms≈250ms：持续说话才触发，咳嗽/碰撞等瞬态不触发） */
+const BARGE_ON_FRAMES = 4;
+/** barge-in 能量 RMS 阈值（0~1，固定中等值）：echoCancellation 下 TTS 泄漏远低于此、
+ *  人声易超过；可经 window.__ballDebug.bargeRms 现场调（调试口见组件尾部） */
+const BARGE_RMS = 0.045;
+/** barge-in 起振保护：TTS 开始后前 600ms 忽略能量（扬声器起振/首包延迟期防误触发） */
+const BARGE_ONSET_IGNORE_MS = 600;
 
 /** Siri 彩虹渐变（悬浮球环 + 会话光球共用色板：青→紫→粉→橙→黄→绿） */
 const SIRI_CONIC =
@@ -178,6 +196,8 @@ export default function AgentVoiceBall() {
   const routingRef = useRef(false);
   const [inputDraft, setInputDraft] = useState('');
   const sessionMsgClearRef = useRef<number | null>(null);
+  /** 连续对话：当前是否处于自动续听（UI 状态行用「聆听中…」，逻辑用 autoListenRef） */
+  const [autoListenUi, setAutoListenUi] = useState(false);
 
   const appendTurn = useCallback((role: 'user' | 'agent', text: string): void => {
     const t = text.trim();
@@ -237,16 +257,44 @@ export default function AgentVoiceBall() {
   // ---- 录音器（链路：离线 → Web Speech → 云端，见 agent-voice.ts） ----
   // 路由函数经 ref 透传（routeUtterance 声明在后；识别结果落地时取最新闭包）
   const routeRef = useRef<(t: string) => Promise<void> | void>(() => undefined);
+  // 连续对话：续听开录实现（声明在后，经 ref 透传给 recorder onResult，照 routeRef 同款打破声明序）
+  const resumeListeningRef = useRef<() => void>(() => undefined);
+  /** 当前录音轮是否为「连续对话自动开录」（问候/续听 = true；用户手点 = false）：
+   *  只有自动轮的空结果才走续听循环，防空气无限循环；用户说话命中即清零 */
+  const autoListenRef = useRef(false);
+  /** 自动轮连续「没听到」计数（连续 CONT_NOHEAR_MAX 次 → 停止自动续听） */
+  const noHearStreakRef = useRef(0);
+  /** 续听累计次数（window.__ballDebug 调试口观测用） */
+  const resumeCountRef = useRef(0);
   const rec = useAgentRecorder({
     onResult: (r) => {
       if (r === null) {
+        // 连续对话防空气循环：自动续听轮连续 2 次没听到 → 停止续听（提示点麦克风/打字继续），
+        // 未到上限则自动再听一轮（Siri 式持续听，波形 UI 即续听态）；用户手点的轮维持原提示
+        if (autoListenRef.current && sessionOpenRef.current && useAgentVoice.getState().cfg.contChat) {
+          noHearStreakRef.current += 1;
+          if (noHearStreakRef.current >= CONT_NOHEAR_MAX) {
+            autoListenRef.current = false;
+            noHearStreakRef.current = 0;
+            setAutoListenUi(false);
+            setSessionMsg('先说到这里，点麦克风或打字继续');
+            return;
+          }
+          resumeListeningRef.current();
+          return;
+        }
         setSessionMsg('没听到有效内容，请再试一次或直接打字');
         return;
       }
       if (r.ok) {
+        noHearStreakRef.current = 0; // 命中即重置：下一轮重新计数
+        autoListenRef.current = false; // 本轮已进路由，是否续听由回合收尾决定
+        setAutoListenUi(false);
         setSessionMsg('');
         void routeRef.current(r.text);
       } else {
+        autoListenRef.current = false; // 识别链路报错不自动续听（避免错误无限循环）
+        setAutoListenUi(false);
         setSessionMsg(r.error);
       }
     },
@@ -256,6 +304,24 @@ export default function AgentVoiceBall() {
   useEffect(() => {
     recRef.current = rec;
   }, [rec]);
+
+  // ---- 连续对话 ①：自动续听 ----
+  // 调用点：聊天/打字回合收尾（routeUtterance finally，routingRef 清零后）与任务终态追问播报完
+  // （speakAgentResult onEnd）。任务/直达动作收尾时已同步关会话（sessionOpenRef 同 tick 置 false），
+  // 这里自然跳过；任务运行中（agentRunning）不续听。守卫全部用 ref/现场读，不依赖渲染时序。
+  const resumeListening = useCallback((): void => {
+    if (!sessionOpenRef.current || routingRef.current || agentRunningRef.current) return;
+    if (!useAgentVoice.getState().cfg.contChat) return;
+    if (recRef.current.phase !== 'idle') return; // 已在录/正在起录（如 barge-in 已先开）：不重复开
+    autoListenRef.current = true;
+    setAutoListenUi(true);
+    resumeCountRef.current += 1;
+    recRef.current.start();
+  }, []);
+  // 最新实现经 ref 透传（recorder onResult 声明在前拿不到闭包；照 routeRef 同款模式）
+  useEffect(() => {
+    resumeListeningRef.current = resumeListening;
+  }, [resumeListening]);
 
   // ---- 会话开合 ----
   /** 开会话时跳过自动开录（追问重开/播报在放等场景；一次性，用后即清） */
@@ -287,6 +353,8 @@ export default function AgentVoiceBall() {
     appendTurnRef.current('agent', line);
     await speakInSession(line);
     if (sessionOpenRef.current && !routingRef.current && recRef.current.phase === 'idle') {
+      autoListenRef.current = true; // 问候后的开录算自动轮：空结果走续听循环
+      setAutoListenUi(true);
       recRef.current.start();
     }
   }, [speakInSession]);
@@ -298,6 +366,7 @@ export default function AgentVoiceBall() {
       skipAutoStartRef.current = willGreet || opts?.autoRecord === false || isSpeaking();
       setSessionMsg('');
       setThinking(false);
+      sessionOpenRef.current = true; // 同步置位：问候/续听守卫不等 commit（旧 ref 未同步时 TTS 未配置路径会漏开录）
       setSessionOpen(true);
       if (willGreet) void greetOnOpen();
       if (opts?.followupMode) {
@@ -311,11 +380,15 @@ export default function AgentVoiceBall() {
 
   const closeSession = useCallback((): void => {
     clearFollowup();
+    sessionOpenRef.current = false; // 同步收口：续听/barge-in 守卫同 tick 内即见「已关」（不等 commit）
     setSessionOpen(false);
     setSessionMsg('');
     setThinking(false);
     setSpeaking(false);
     routingRef.current = false;
+    autoListenRef.current = false;
+    noHearStreakRef.current = 0;
+    setAutoListenUi(false);
     recRef.current.cancel();
     stopSpeaking();
   }, [clearFollowup]);
@@ -330,7 +403,10 @@ export default function AgentVoiceBall() {
       skipAutoStartRef.current = false;
       return undefined;
     }
-    if (recRef.current.phase === 'idle') recRef.current.start();
+    if (recRef.current.phase === 'idle') {
+      autoListenRef.current = false; // 开会话自动开录（非续听轮）：空结果走原提示不循环
+      recRef.current.start();
+    }
     return undefined;
   }, [sessionOpen]);
 
@@ -350,6 +426,10 @@ export default function AgentVoiceBall() {
       setSpeaking(false);
       setThinking(false);
       routingRef.current = false;
+      autoListenRef.current = false; // 任务交接：退出连续对话循环（结果由追问模式收口）
+      noHearStreakRef.current = 0;
+      setAutoListenUi(false);
+      sessionOpenRef.current = false; // 同步收口（同 closeSession）：防交接窗口内续听/barge-in 误触发
       setSessionOpen(false);
       setSessionMsg('');
       try {
@@ -451,18 +531,135 @@ export default function AgentVoiceBall() {
           return; // execute 内部已收尾（会话关闭/重开），不再回 idle 提示
         }
         appendTurnRef.current('agent', r.reply);
+        setThinking(false); // 播报期间不占「思考中」：状态行显示正在说，麦克风可点（手动打断与 barge-in 同语义）
         await speakInSession(r.reply);
       } finally {
         setThinking(false);
         routingRef.current = false;
+        // 连续对话：聊天/打字回合自然收尾 → 自动续听进入下一轮（任务/直达动作已同步关会话，这里自然跳过）
+        resumeListening();
       }
     },
-    [execute, speakInSession, closeSession],
+    [execute, speakInSession, closeSession, resumeListening],
   );
   // 识别结果落地 → 最新路由闭包（recorder 的 onResult 经 routeRef 透传）
   useEffect(() => {
     routeRef.current = routeUtterance;
   }, [routeUtterance]);
+
+  // ---- 连续对话 ②：barge-in 播报打断 ----
+  // speaking 期间挂轻量麦克风监听：独立 getUserMedia 流（必须 echoCancellation+noiseSuppression，
+  // 否则扬声器里的 TTS 声会误触发）+ AudioContext + AnalyserNode 能量检测；
+  // 超阈连续 BARGE_ON_FRAMES 帧（≈250ms）→ fireBargeIn（stopSpeaking + 转入聆听）。
+  // 防 TTS 回声：TTS 开始后前 600ms 忽略能量（扬声器起振期）+ AEC 硬约束 + 持续超阈才触发。
+  // 资源收口：停止播报/关会话/任务运行/组件卸载 → effect cleanup 立即停轨 + close(ctx)；
+  // 无麦克风权限/设备占用 → 静默放弃 barge-in（播报照常播完，点麦克风仍可打断）。
+  const bargeRef = useRef({ armed: false, triggered: 0, lastRms: 0 });
+  /** barge-in 触发收口：打断 TTS → 立即开录（仅会话内；任务运行中不接） */
+  const fireBargeIn = useCallback((): void => {
+    stopSpeaking();
+    setSpeaking(false); // 立即同步熄「正在说」态（播报 promise 随后 resolve，状态行不再矛盾）
+    if (sessionOpenRef.current && recRef.current.phase === 'idle' && !agentRunningRef.current) {
+      autoListenRef.current = true; // barge-in 转入的聆听算自动轮：空结果走续听循环
+      setAutoListenUi(true);
+      recRef.current.start();
+    }
+  }, []);
+  useEffect(() => {
+    // 不监听的条件：非播报中 / 会话已关 / 任务运行中 / 录音器已在录音（续听轮本身就在听）/
+    // 环境无麦克风能力（静默放弃，不打扰播报）
+    if (!speaking || !sessionOpen || agentRunning) return undefined;
+    if (recRef.current.phase !== 'idle') return undefined;
+    if (!navigator.mediaDevices?.getUserMedia) return undefined;
+    let aborted = false;
+    let timer: number | null = null;
+    let stream: MediaStream | null = null;
+    let ctx: AudioContext | null = null;
+    const release = (): void => {
+      if (timer !== null) {
+        window.clearInterval(timer);
+        timer = null;
+      }
+      try {
+        stream?.getTracks().forEach((t) => t.stop());
+      } catch {
+        /* ignore */
+      }
+      stream = null;
+      try {
+        void ctx?.close().catch(() => undefined);
+      } catch {
+        /* ignore */
+      }
+      ctx = null;
+      bargeRef.current.armed = false;
+    };
+    bargeRef.current.armed = true;
+    bargeRef.current.lastRms = 0;
+    void (async (): Promise<void> => {
+      try {
+        // APK 原生壳：与唤醒/录音同款前置权限（已授予零开销直通；未授予弹系统框，授权后下次生效）
+        if (isNativePerception()) {
+          const mp = await requestMicPermission().catch(() => null);
+          if (!mp || mp.granted !== true) {
+            release();
+            return;
+          }
+        }
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: { echoCancellation: true, noiseSuppression: true },
+        });
+        if (aborted) {
+          release();
+          return;
+        }
+        const w = window as Window & { webkitAudioContext?: typeof AudioContext };
+        const Ctor = window.AudioContext ?? w.webkitAudioContext;
+        if (!Ctor) {
+          release();
+          return;
+        }
+        const c = new Ctor();
+        void c.resume().catch(() => undefined);
+        const analyser = c.createAnalyser();
+        analyser.fftSize = 512;
+        c.createMediaStreamSource(stream).connect(analyser);
+        ctx = c;
+        const buf = new Float32Array(analyser.fftSize);
+        const onsetAt = performance.now(); // 起振保护起点（≈TTS 出声起点）
+        let hot = 0;
+        timer = window.setInterval(() => {
+          if (aborted) return;
+          if (performance.now() - onsetAt < BARGE_ONSET_IGNORE_MS) return; // 起振保护
+          if (c.state !== 'running') {
+            void c.resume().catch(() => undefined);
+            return;
+          }
+          analyser.getFloatTimeDomainData(buf);
+          let sum = 0;
+          for (let i = 0; i < buf.length; i++) sum += buf[i] * buf[i];
+          const rms = Math.sqrt(sum / buf.length);
+          bargeRef.current.lastRms = rms;
+          // 阈值可经 window.__ballDebug.bargeRms 现场调（默认固定中等值，别过度工程）
+          const dbg = (window as Window & { __ballDebug?: { bargeRms?: unknown } }).__ballDebug;
+          const th = typeof dbg?.bargeRms === 'number' ? dbg.bargeRms : BARGE_RMS;
+          hot = rms >= th ? hot + 1 : 0;
+          if (hot >= BARGE_ON_FRAMES) {
+            aborted = true;
+            release(); // 先释放监听流再开录：避免两路争麦
+            bargeRef.current.triggered += 1;
+            fireBargeIn();
+          }
+        }, BARGE_FRAME_MS);
+      } catch {
+        release(); // 无权限/设备占用等：静默放弃 barge-in
+      }
+    })();
+    return () => {
+      aborted = true;
+      release();
+    };
+  }, [speaking, sessionOpen, agentRunning, fireBargeIn]);
 
   // ---- 追问倒计时（followup && 会话开 && 全空闲才走表；任意触摸经 bumpFollowup 续期）----
   useEffect(() => {
@@ -496,8 +693,13 @@ export default function AgentVoiceBall() {
       appendTurnRef.current('agent', text);
       openSession({ autoRecord: false, followupMode: true });
     }
-    // ② TTS 播报（内部再判 开关||语音来源、isTtsConfigured、闸门，不满足静默跳过）
-    speakAgentResult(text, { voiceOrigin });
+    // ② TTS 播报（内部再判 开关||语音来源、isTtsConfigured、闸门，不满足静默跳过）；
+    //    播报完（或被打断/失败的收尾）且会话开着（追问窗口）→ 连续对话自动续听，
+    //    优先级不变：仍是「播报完再听」，不抢在会话重开/播报之前
+    speakAgentResult(text, {
+      voiceOrigin,
+      onEnd: () => resumeListeningRef.current(),
+    });
   };
   useEffect(() => {
     handleResultRef.current = onAgentFinished;
@@ -586,12 +788,16 @@ export default function AgentVoiceBall() {
 
   const toggleMic = useCallback(() => {
     bumpFollowup();
+    // 手动接管：退出自动续听循环（下一轮回复播报完按开关重新续听）
+    autoListenRef.current = false;
+    noHearStreakRef.current = 0;
+    setAutoListenUi(false);
     if (recRef.current.phase === 'recording' || recRef.current.phase === 'starting') {
       recRef.current.stop();
       return;
     }
     if (speaking) {
-      stopSpeaking(); // 播报中点麦克风：先打断 TTS 再开录
+      stopSpeaking(); // 播报中点麦克风：先打断 TTS 再开录（barge-in 的手动同义路径）
       setSpeaking(false);
     }
     if (recRef.current.phase === 'idle' && !thinking) recRef.current.start();
@@ -602,6 +808,26 @@ export default function AgentVoiceBall() {
     turnIdRef.current = 0;
     setSessionMsg('已清空对话');
   }, []);
+
+  // ---- 调试口（验完保留，供浏览器 E2E/真机排查连续对话状态机与 barge-in 建流/释流）----
+  // window.__ballDebug：每次渲染同步快照；bargeRms 可写自定义阈值（检测循环每帧读取，
+  // 这里只兜底初始化不覆盖用户设置）；bargeFire() 可无麦模拟一次打断（stopSpeaking+开录）
+  useEffect(() => {
+    const w = window as Window & { __ballDebug?: Record<string, unknown> };
+    const d = (w.__ballDebug ??= {});
+    d.sessionOpen = sessionOpen;
+    d.thinking = thinking;
+    d.speaking = speaking;
+    d.recPhase = rec.phase;
+    d.autoListen = autoListenRef.current;
+    d.noHearStreak = noHearStreakRef.current;
+    d.resumeCount = resumeCountRef.current;
+    d.bargeArmed = bargeRef.current.armed;
+    d.bargeTriggered = bargeRef.current.triggered;
+    d.bargeLastRms = bargeRef.current.lastRms;
+    if (typeof d.bargeRms !== 'number') d.bargeRms = BARGE_RMS;
+    d.bargeFire = () => fireBargeIn();
+  });
 
   if (!layerOn) return null;
 
@@ -748,7 +974,9 @@ export default function AgentVoiceBall() {
                   {sessionMsg}
                 </span>
               ) : recBusy ? (
-                <span className="text-[12.5px] text-white/55">请说出任务或想聊的…（说完自动停止）</span>
+                <span className="text-[12.5px] text-white/55">
+                  {autoListenUi ? '聆听中…（说完自动停止）' : '请说出任务或想聊的…（说完自动停止）'}
+                </span>
               ) : null}
             </div>
 

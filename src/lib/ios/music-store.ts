@@ -25,6 +25,7 @@ import {
   buildLyricLines,
   musicUid,
   normalizeSong,
+  ensureMusicSecretsLoaded,
   type NcmSong,
   type NcmLyric,
 } from './music-api';
@@ -438,6 +439,11 @@ export const useMusic = create<MusicState>((set, get) => ({
   boot: async () => {
     if (get().booted) return;
     set({ booted: true });
+    // B1 收尾：登录凭证（MUSIC_U cookie）/ API 配置已 AES-GCM 密文落 kv，先解密注水内存缓存
+    // 再恢复本地数据——快照/历史/时长等键都带 musicUid 前缀（依赖登录态），且随后的
+    // refreshLoginUi 校验 login/status 也要带上 cookie。幂等：music-api 模块加载时已
+    // fire-and-forget 注水，通常此处瞬时完成，await 只是保证时序的硬闸。
+    await ensureMusicSecretsLoaded();
     ensureAudio();
     // 旧全局键一次性归属当前网易云账号（时长/快照真正按账号隔离）
     migrateLegacyAccountKeys();

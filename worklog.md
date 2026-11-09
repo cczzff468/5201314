@@ -2337,3 +2337,27 @@ Stage Summary:
 - 「喊名没反应」两大根因根治：①上游 WAF 限流被固定间隔重试持续触发（客户端指数退避 + 服务端缓存/限流/冷却三重防护）；②旧 WebView AbortSignal.timeout 缺失致服务端通道永久失效（兼容实现）
 - 全链路 E2E 测试台建成（无麦克风环境也能验证唤醒状态机），喊名唤起、一句话直达开 App、真实服务端转写三条路径全部浏览器实测通过
 - 关键文件：src/lib/ios/agent-voice.ts（退避+兼容超时）、src/app/api/wake-asr/route.ts（重写：缓存/限流/冷却/单例）、src/lib/ios/agent-weather.ts（类型修复）、src/lib/app-version.ts（1.8.3/19）
+
+## 2026-11-10 · v90（网页端 v1.9.0）本地唤醒闭环 + Siri 式连续对话 + 密钥加密收尾 + 深色模式补齐
+
+Task ID: 40
+Agent: 主控 Agent（Z.ai Code）+ 4 个子代理两波并行（1-b 加密 / 2-a 连续对话 → 1-a 唤醒重构 / 2-b 深色）
+Task: 用户四项选定：①离线唤醒词（调研后 KWS WASM 运行时官方从未发布且 ModelScope 无镜像，重定为「本地唤醒闭环强化」）②密钥加密收尾 ③深色模式 ④会话内连续对话
+
+Work Log:
+- [调研·KWS] sherpa-onnx KWS 路线证伪：speech-asr 包与现用 WASM 二进制均无 createKeywordSpotter（strings 0 命中）；官方 releases 仅 TTS/VAD/增强类 WASM（kws 资产 0 个）；GitHub kws-models 标签有模型（wenetspeech 3.3M mobile 15.3MB）但无运行时不可用；ModelScope 已知模型路径全 404 → 重定方案：通道 B 全面重构兑现「纯本地唤醒」实质（有模型用户零流量零延迟断网可用）
+- [1-a·通道B重构] agent-voice.ts channelOffline 全量重写：常驻链路一次建立（getUserMedia{AEC,NS}+AudioContext+AnalyserNode+ScriptProcessor4096+静音 Gain 收尾）；静默期 60ms 能量 RMS + 预卷环形缓冲 0.7s（唤醒词首音节不被吃）+ 自适应噪声校准（逐行镜像通道 C：8 帧中位数噪声底、每 8 轮重校、阈值 min(0.09,max(0.028,底×2.8+0.008))）；开口（连续 4 帧超阈≈240ms 或突发>0.2）→ 实时累积 Float32 → 静默 13 帧≈0.8s 说完即停（延迟优化核心：不再等 3.2s 固定块）→ 线性降采样 16k → encodeWav16k → offlineAsrTranscribe → matchWakeNameSmart；最长 6s 截断/<400ms 丢弃/暂停打断丢弃；转写间隙新说话段忽略（SenseVoice 3~6s 段推理通常<1s）；暂停期常驻流保持只停 VAD；AudioContext 挂起 8s 整链重建；转写 Worker 异常独立退避 2→4→8→15→30s 封顶不计入麦熔断；每轮重查 isOfflineAsrReady（模型被删自动让位回主循环）；删死代码 recordWakeChunk/WAKE_CHUNK_MS
+- [1-a·一键下载] settings.tsx 抽共用组件 OfflineAsrDownloadInline（检查中/按钮/进度%/MB/主备源/失败重试），「语音 API」页 OfflineAsrSection 与「AI 动手」页 WakeStatusRow 两处复用；WakeStatusRow 在通道=服务端识别且模型未下载时显示「下载离线识别模型（喊名零流量零延迟，断网可用）」；useAgentWakeLoop 新增 offlineReady store 订阅进主循环依赖——下载完成瞬间重建循环切通道 B
+- [1-b·加密] tb 系追踪结论：tb-ai-store.ts 的 config 仅函数参数（POST 即弃），真实落盘=store.ts apiConfig 已在 v86 加密——无需动；music-api.ts 配置持久化节重写：内存明文缓存（同步 getter 签名零变化）+ fire-and-forget encryptSecret 落 enc:v1 密文 + ensureMusicSecretsLoaded 幂等注水（三形态兼容读+旧明文自愈回写+脏标记防竞态），注入点=模块级+music-store.boot() await+getter 兜底；music-login（网易云 cookie）同款加密；backup.ts 导出循环新增：kv store 记录 isEncrypted 探测→decryptSecret 解密为明文导出（形态探测而非硬编码键名，新增加密键自动覆盖）；WebCrypto 不可用优雅降级=明文直写等同旧版
+- [1-b·顺带清点] 其余 idb-kv 明文敏感键：wx-pay-pwd/qq-pay-pwd/mt-pay-pwd:<uid> 三类支付密码（后续轮次候选）；mt-ai-engage 键只存草稿/索引无密钥
+- [2-a·连续对话] AgentVoiceCfg+contChat（默认 true，readCfg 缺字段兼容）；agent-voice-ball.tsx：resumeListening（routeUtterance finally + 任务终态播报 onEnd 两落点，守卫 sessionOpen&&contChat&&!routing&&!agentRunning&&rec idle）→ rec.start() 续听；recorder 空结果 streak≥2 防空气循环（「先说到这里，点麦克风或打字继续」）；barge-in effect（speaking 期间独立麦流 AEC/NS 约束+Analyser 512 采 RMS 60ms+600ms 起振保护+连续 4 帧≥0.045≈250ms→stopSpeaking+start）；open/close/execute 同步 sessionOpenRef 修 commit 前陈旧 ref 竞态；speakAgentResult 加可选 onEnd（单次触发语义）；chat 播报中 setThinking(false)（播报中麦克风可点手动打断）；调试口 window.__ballDebug（resumeCount/bargeArmed/bargeTriggered/bargeRms 可调/bargeFire()）；settings.tsx 语音卡加「连续对话」行
+- [2-b·深色] 运行时 computed-style 扫描 24 App 首屏+子页：真漏仅 2 处（notes-pages.tsx 内联 BG_WARM 页头压过一切 dark: 变体、notes-ui.tsx 内联 SEARCH_BG 压过自己的 dark:bg-white/[0.09]）→ 改 bg-[#F3F2F8] dark:bg-background / bg-[#E9E8ED] dark:bg-white/[0.09]；globals.css 集中兜底：.dark{color-scheme:dark}（原生 select 弹层/time 拾取器/滚动条/光标跟随）+ .dark [data-phone-shell] input:-webkit-autofill 深色（inset 万级投影盖亮底+#F2F2F7 文字+万秒 transition 压闪烁）；明确注释为什么不做 .bg-white 一刀切（开关钮/激活胶囊/相机件等「设计即白」误伤面大）；旧报告「chat 41 处/settings 175 处硬编码」经实核大多已伴生 dark: 或在 dark 三元分支内
+- [验证] tsc 全库 0 错误；eslint 九改动文件 0 新增（settings 存量 4→3 净降 1）；agent-browser E2E：解锁→开 debug 球→全屏会话→打字→回复→__ballDebug.resumeCount=1 自动续听触发→无麦守卫拦停不循环✓；AI 动手页「连续对话」开关渲染+contChat 落盘 false↔true 双向✓；唤醒状态行「下载离线识别模型」+229MB 提示+自动切回说明✓；IDB 直写 theme=dark→reload→.dark 挂载+color-scheme:dark✓；深色主屏/浏览器/备忘录文件夹页/全部备忘录页截图目检全深✓；切回浅色页头颜色零回归✓
+- [边界] 真 KWS（5MB 级模型+专用 WASM）待上游发布运行时后再评估；通道 B 新链路真机表现（ScriptProcessor 回调率/预卷覆盖/0.8s 静默对句中停顿/下载完 C→B 切换首轮延迟）需真机回归，可调参数已留（VADB_*）；barge-in AEC 真实回声表现真机验证（__ballDebug.bargeRms 现场可调）；离线唤醒 229MB 模型下载仍需用户主动点一次；三类支付密码明文遗留未修
+
+Stage Summary:
+- 本地唤醒闭环：有模型用户喊名全程不出网（静默零开销+说完即转写），未下载用户一键下载自动切路——上游 WAF 从「拦路虎」降级为「兜底」
+- Siri 式连续对话：回答完自动续听+开口即打断+防空气循环，喊名→对话→任务全流程免碰手机
+- 隐私：音乐 API Key 与网易云登录凭据 AES-GCM 落盘加密，备份导出自动解密兼容换机
+- 深色：24 屏运行时审计收口（2 处真漏+原生控件+autofill），浅色零回归
+- 关键文件：agent-voice.ts（通道 B 重写+下载引导）、agent-voice-ball.tsx（续听+barge-in）、settings.tsx（OfflineAsrDownloadInline+连续对话开关）、music-api.ts/music-store.ts/backup.ts（加密+备份兼容）、globals.css（color-scheme+autofill）、notes-pages.tsx/notes-ui.tsx（内联色修复）、app-version.ts（1.9.0/20）

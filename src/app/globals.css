@@ -1558,6 +1558,34 @@
 }
 
 /* ---------------------------------------------------------------------------
+ * 深色模式集中兜底（2-b 查缺补修）
+ * ---------------------------------------------------------------------------
+ * 背景现状：各 App 表面已普遍带 dark: 变体 / dark 三元配色，运行时逐屏审计
+ * （computed style 扫描）未再发现成片的浅色硬编码；剩余的深色下浅色面集中在
+ * Tailwind 管不到的原生层，此处统一接管：
+ * ① color-scheme：原生控件（<select> 弹层、type=time 拾取器、原生滚动条、
+ *    文本光标）跟随深色渲染——壳内 files/moments/couple 等都在用这些原生控件；
+ * ② 自动填充：Chrome autofill 会把输入框底色强行刷成亮白/亮蓝（不走 dark: 类），
+ *    用 inset 大面积投影盖掉 + 文字转浅，与 iOS 深色输入框一致。
+ * 注意：不做「.bg-white 一刀切反转」——壳内存在大量深色下刻意保持白色的元素
+ * （开关圆钮、滑块拇指、相机控制件、激活胶囊、彩底聊天气泡等），按类名全局
+ * 反转无法区分「未适配白面」与「设计即白」，误伤面大于收益。
+ * ------------------------------------------------------------------------- */
+.dark {
+  color-scheme: dark;
+}
+.dark [data-phone-shell] input:-webkit-autofill,
+.dark [data-phone-shell] input:-webkit-autofill:hover,
+.dark [data-phone-shell] input:-webkit-autofill:focus {
+  -webkit-box-shadow: 0 0 0 1000px #1c1c1e inset;
+  box-shadow: 0 0 0 1000px #1c1c1e inset;
+  -webkit-text-fill-color: #f2f2f7;
+  caret-color: #f2f2f7;
+  /* 压掉 autofill 自带的背景色过渡闪烁（万秒过渡 ≈ 永不变色） */
+  transition: background-color 9999s ease-in-out 0s;
+}
+
+/* ---------------------------------------------------------------------------
  * 液态玻璃主题全局接管（第五十五轮：用户指定液态也覆盖所有界面）
  * ---------------------------------------------------------------------------
  *  作用域 = App 根容器 data-liquid-theme="true"。子页批量接管：

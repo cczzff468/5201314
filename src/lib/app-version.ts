@@ -11,9 +11,9 @@
  */
 
 /** 当前最新版本（与 android-shell versionName 保持一致） */
-export const APP_VERSION = '1.8.3';
+export const APP_VERSION = '1.9.0';
 /** 版本号数字（与 android-shell versionCode 保持一致；覆盖安装要求只增不减） */
-export const APP_VERSION_CODE = 19;
+export const APP_VERSION_CODE = 20;
 
 export interface AppReleaseNote {
   version: string;
@@ -24,6 +24,16 @@ export interface AppReleaseNote {
 
 /** 版本历史（新→旧；设置 › APP 更新 页渲染，最新一条即当前版本） */
 export const APP_RELEASE_NOTES: AppReleaseNote[] = [
+  {
+    version: '1.9.0',
+    date: '2026-11-10',
+    items: [
+      '喊名唤醒本地闭环：下载离线识别模型后喊名不再上传音频（零流量零延迟断网可用），说完即刻识别不再等固定录音段，设置页唤醒状态可一键下载',
+      '语音会话连续对话（Siri 式）：助手回答后自动继续听，一问一答不碰手机；播报中开口说话直接打断；连帧两轮没听到自动停下；设置可关',
+      '隐私加固：音乐 API 密钥与网易云登录凭据改为加密存储（含备份导出兼容），换机备份不丢配置',
+      '深色模式补齐：备忘录页头/搜索框、原生控件（下拉菜单/时间拾取器/滚动条）与表单自动填充跟随深色，其余界面全面复核',
+    ],
+  },
   {
     version: '1.8.3',
     date: '2026-11-10',

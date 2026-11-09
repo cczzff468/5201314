@@ -11,7 +11,8 @@
  * - 自定义（baseUrl 非空）：直连用户自部署的 NeteaseCloudMusicApi 服务（其 server.js 默认
  *   带 CORS: *），可选 apiKey（header X-API-Key + query apikey 双通道兼容不同部署）。
  *
- * 登录凭证（MUSIC_U cookie）由本模块持有（IndexedDB kv 持久化），请求时 ?cookie= 回传；
+ * 登录凭证（MUSIC_U cookie）由本模块持有（IndexedDB kv 持久化，B1 收尾起整条 AES-GCM
+ * 密文落盘，见「配置持久化」节），请求时 ?cookie= 回传；
  * 音乐数据按网易云账号（uid）隔离：历史/红心/一起听等本地数据键都带 uid 前缀。
  */
 
@@ -117,21 +118,120 @@ export interface NcmLyric {
   hasTranslation: boolean;
 }
 
-// ---------------- 配置持久化 ----------------
+// ---------------- 配置持久化（B1 收尾：AES-GCM 密文落盘，与 store.ts settings 8 条同模式） ----------------
 
 const CFG_KEY = 'music-api-cfg';
 const LOGIN_KEY = 'music-login';
 
-import { kvGet, kvSet, kvDel } from './idb-kv';
+import { ensureKvReady, kvGet, kvSet, kvDel } from './idb-kv';
+import { decryptSecret, encryptSecret, isEncrypted } from './secret-box';
+
+/**
+ * 【密文落盘】CFG_KEY（含 apiKey）与 LOGIN_KEY（含网易云 MUSIC_U cookie，最敏感）两条 kv
+ * 记录原为明文 JSON；本版起写入侧整条 JSON 序列化 → secret-box AES-GCM 加密 →
+ * `enc:v1:<iv>:<cipher>` 密文字符串落 kv，IndexedDB 不再存明文；内存缓存始终是明文对象，
+ * 业务读取点（同步 getter）签名零改动。降级语义与 secret-box 一致：加密环境不可用时
+ * encryptSecret 原样返回明文（等同旧版行为），绝不抛错。
+ *
+ * 【同步读兼容】getMusicApiCfg/getMusicLogin 调用方遍布音乐 App 与 lib（music-remote/
+ * cross-app-context 等），不允许改 async。方案 = 内存明文缓存 + 异步注水：
+ * - ensureMusicSecretsLoaded()：await ensureKvReady()（与 PhoneShell 开机门控同一幂等入口，
+ *   保证 kv 内存层已注水）→ 读 kv 原始值 → 三形态兼容读（enc:v1 密文串解密 / 旧明文对象
+ *   直用 + 自愈回写加密 / 无记录），与 store.ts readSecretRecord 的策略对齐；
+ * - 注入点选 music-store.boot() 开头 await（uid 前缀的本地数据键依赖登录态，必须先就位，
+ *   之后 refreshLoginUi 的 login/status 请求才能带上 cookie）——音乐 App 全部 UI（含设置页
+ *   的 useState 种子值）都在 boot 之后渲染，无需额外订阅刷新；boot 之外的事件驱动调用方
+ *   （如聊天流里的 music-remote）每次现场调用 getter，加载完成后自然拿到真值；
+ * - 模块级 fire-and-forget 提前启动注水（本模块被 cross-app-context 等静态引入，开机屏期间
+ *   即完成）；同步 getter 里再兜底触发一次（未经 boot 的调用方也能尽早注水）。
+ * 首帧语义：注水完成前的同步读返回默认空值（与 kv 无键时旧行为一致），完成后为真值。
+ */
+
+/** 内存明文缓存（同步读唯一数据源；null = 尚未注水或确无数据） */
+let memCfg: MusicApiCfg | null = null;
+let memLogin: MusicLogin | null = null;
+/** 会话内已写入过对应缓存（此时缓存新于 kv 旧值，注水不得覆盖，旧明文也不再自愈回写） */
+let cfgDirty = false;
+let loginDirty = false;
+/** 注水是否完成（完成后的同步读即为终值） */
+let secretsReady = false;
+let loadPromise: Promise<void> | null = null;
+
+/** 旧明文对象 → 规范化 MusicApiCfg（字段校验与旧版 getMusicApiCfg 完全一致） */
+function normalizeCfg(v: unknown): MusicApiCfg {
+  if (!v || typeof v !== 'object' || typeof (v as MusicApiCfg).baseUrl !== 'string') {
+    return { ...DEFAULT_MUSIC_API_CFG };
+  }
+  const c = v as MusicApiCfg;
+  return { baseUrl: c.baseUrl.trim(), apiKey: typeof c.apiKey === 'string' ? c.apiKey.trim() : '' };
+}
+
+/** 旧明文对象 → 规范化 MusicLogin（缺 cookie/profile.userId 视为无效，与旧版 getMusicLogin 一致） */
+function normalizeLogin(v: unknown): MusicLogin | null {
+  const l = v as MusicLogin | null;
+  if (!l || !l.cookie || !l.profile?.userId) return null;
+  return l;
+}
+
+/** 从 kv 读一条「密文串 / 旧明文对象 / 无记录」三形态兼容的记录。
+ *  legacy=true 表示记录存在且还是明文形态（调用方负责自愈回写加密）。 */
+async function readKvSecret(key: string): Promise<{ value: unknown; legacy: boolean }> {
+  const raw = kvGet<unknown>(key);
+  if (typeof raw === 'string') {
+    if (!isEncrypted(raw)) return { value: null, legacy: false }; // 未知字符串 → 按无记录处理
+    // 密文损坏/换设备种子：decryptSecret 原样退回密文串 → JSON.parse 必失败 → 视为无配置（重填即可）
+    const plain = await decryptSecret(raw);
+    try {
+      return { value: JSON.parse(plain) as unknown, legacy: false };
+    } catch {
+      return { value: null, legacy: false };
+    }
+  }
+  // 旧明文对象（首次升级）：原样返回并标记 legacy，注水时自愈回写为 enc:v1 密文
+  return { value: raw, legacy: raw != null };
+}
+
+/** 异步注水内存明文缓存（幂等；模块级 fire-and-forget + music-store.boot await + getter 兜底触发） */
+export function ensureMusicSecretsLoaded(): Promise<void> {
+  if (loadPromise) return loadPromise;
+  loadPromise = (async () => {
+    try {
+      await ensureKvReady();
+      const [cfgRec, loginRec] = await Promise.all([readKvSecret(CFG_KEY), readKvSecret(LOGIN_KEY)]);
+      if (!cfgDirty && cfgRec.value != null) {
+        memCfg = normalizeCfg(cfgRec.value);
+        // 自愈回写：旧明文 → 密文（对齐 store.ts「无 Key 占位配置不动」的口径，免无谓写放大；
+        // 加密环境不可用时 encryptSecret 原样返回，等同旧版明文落盘）
+        if (cfgRec.legacy && (memCfg.baseUrl || memCfg.apiKey)) {
+          void encryptSecret(JSON.stringify(memCfg)).then((enc) => kvSet(CFG_KEY, enc));
+        }
+      }
+      if (!loginDirty && loginRec.value != null) {
+        memLogin = normalizeLogin(loginRec.value);
+        if (loginRec.legacy && memLogin) {
+          void encryptSecret(JSON.stringify(memLogin)).then((enc) => kvSet(LOGIN_KEY, enc));
+        }
+      }
+    } catch {
+      // 降级：注水失败按无配置处理（与旧版无键时行为一致），不阻塞音乐 App
+    } finally {
+      secretsReady = true;
+    }
+  })();
+  return loadPromise;
+}
 
 export function getMusicApiCfg(): MusicApiCfg {
-  const v = kvGet<MusicApiCfg>(CFG_KEY);
-  if (!v || typeof v.baseUrl !== 'string') return { ...DEFAULT_MUSIC_API_CFG };
-  return { baseUrl: v.baseUrl.trim(), apiKey: typeof v.apiKey === 'string' ? v.apiKey.trim() : '' };
+  if (!secretsReady) void ensureMusicSecretsLoaded(); // 兜底触发（幂等）
+  return memCfg ? { ...memCfg } : { ...DEFAULT_MUSIC_API_CFG };
 }
 
 export function setMusicApiCfg(cfg: MusicApiCfg): void {
-  kvSet(CFG_KEY, { baseUrl: (cfg.baseUrl || '').trim(), apiKey: (cfg.apiKey || '').trim() });
+  const next = { baseUrl: (cfg.baseUrl || '').trim(), apiKey: (cfg.apiKey || '').trim() };
+  memCfg = next; // 内存同步生效（调用方下一次同步读立即拿到新值）
+  cfgDirty = true;
+  // 异步加密写穿（fire-and-forget）：密文字符串落 kv，IndexedDB 不存明文
+  void encryptSecret(JSON.stringify(next)).then((enc) => kvSet(CFG_KEY, enc));
 }
 
 export interface MusicLogin {
@@ -141,18 +241,25 @@ export interface MusicLogin {
 }
 
 export function getMusicLogin(): MusicLogin | null {
-  const v = kvGet<MusicLogin>(LOGIN_KEY);
-  if (!v || !v.cookie || !v.profile?.userId) return null;
-  return v;
+  if (!secretsReady) void ensureMusicSecretsLoaded(); // 兜底触发（幂等）
+  return memLogin;
 }
 
 export function setMusicLogin(l: MusicLogin): void {
-  kvSet(LOGIN_KEY, l);
+  memLogin = l;
+  loginDirty = true;
+  void encryptSecret(JSON.stringify(l)).then((enc) => kvSet(LOGIN_KEY, enc));
 }
 
 export function clearMusicLogin(): void {
+  memLogin = null;
+  loginDirty = true;
   kvDel(LOGIN_KEY);
 }
+
+// 模块加载即提前注水（fire-and-forget）：SSR（无 window）不执行；浏览器端在开机屏期间完成，
+// 之后任何时机、任何调用方的同步读都直接命中缓存。
+if (typeof window !== 'undefined') void ensureMusicSecretsLoaded();
 
 /** 当前账号 uid（本地数据隔离前缀；未登录 = guest） */
 export function musicUid(): string {

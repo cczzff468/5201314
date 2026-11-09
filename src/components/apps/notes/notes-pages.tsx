@@ -19,7 +19,6 @@ import {
 } from 'lucide-react';
 import type { NoteRecord } from '@/lib/ios/db';
 import {
-  BG_WARM,
   FOLDER_ALL,
   FOLDER_DEFAULT,
   FOLDER_TRASH,
@@ -73,7 +72,10 @@ function PageShell({
 }) {
   return (
     <div className="flex h-full flex-col">
-      <div className="shrink-0 px-4 pt-[46px] backdrop-blur-xl" style={{ backgroundColor: BG_WARM }}>
+      {/* 页头底色：与 notes-editor 顶栏同口径（浅色蔚衣草灰 / 深色 background）。
+          原先是内联 style 写死 BG_WARM——内联优先级压过一切 dark: 变体，
+          深色模式下页头整条保持浅色（2-b 审计实测到的唯二深色漏面之一） */}
+      <div className="shrink-0 bg-[#F3F2F8] px-4 pt-[46px] backdrop-blur-xl dark:bg-background">
         <div className="flex h-12 items-center justify-between">
           <div className="flex min-w-[68px] items-center">{navLeft}</div>
           <div className="flex min-w-[68px] items-center justify-end">{navRight}</div>

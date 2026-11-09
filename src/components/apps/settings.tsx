@@ -925,11 +925,15 @@ const WAKE_CHANNEL_LABEL: Record<WakeDiagChannel, string> = {
 /**
  * 唤醒监听状态行（v1.8.2 诊断）：喊名没反应时一眼定位卡在哪一环——
  * 监听中显示当前通道 + 最近听到的转写（能看到 TA 到底听见了什么）；
- * 熔断/全不可用显示原因并提供「重试」按钮（清熔断 + 立即重建唤醒循环）。
+ * 熔断/全不可用显示原因并提供「重试」按钮（清熔断 + 立即重建唤醒循环）；
+ * 当前走「服务端识别」且端侧模型未就绪时内嵌一键下载入口（Task 1-a，共用
+ * OfflineAsrDownloadInline）：下载完成 useOfflineAsr.status→ready，唤醒循环自动
+ * 切回端侧离线识别（零流量零延迟、断网可用），通道标签随之变为「端侧离线识别」。
  */
 function WakeStatusRow({ name }: { name: string }) {
   const diag = useWakeDiag();
   const blocked = useAgentVoice((s) => s.wakeBlocked);
+  const asrStatus = useOfflineAsr((s) => s.status);
   let dot = 'bg-emerald-500';
   let text = `正在监听「${name}」· ${WAKE_CHANNEL_LABEL[diag.channel]}`;
   if (blocked) {
@@ -943,9 +947,13 @@ function WakeStatusRow({ name }: { name: string }) {
     text = '已暂时静音（会话/通话/朗读中），空闲自动恢复';
   }
   const degraded = diag.listening && diag.server === 'fail';
+  // 一键引导：唤醒正走服务端识别（每次说话都要上传、受上游波动影响）且端侧模型未就绪时展示；
+  // 下载中/失败重试态也展示（进度条/重试按钮在共用控件内），就绪后随通道切换自然消失
+  const showModelGuide =
+    diag.channel === 'server-vad' && (asrStatus === 'not-downloaded' || asrStatus === 'downloading' || asrStatus === 'error');
   return (
     <div className="flex min-h-[46px] items-center gap-3 px-4 py-2" data-testid="agent-voice-wake-status">
-      <span className="min-w-0 flex-1">
+      <div className="min-w-0 flex-1">
         <span className="flex items-center gap-1.5">
           <span
             aria-hidden="true"
@@ -963,7 +971,15 @@ function WakeStatusRow({ name }: { name: string }) {
         {degraded && !blocked ? (
           <span className="mt-0.5 block truncate text-[11px] text-[#FF9500]">识别服务波动：已自动换通道重试，喊名可能暂时不灵</span>
         ) : null}
-      </span>
+        {showModelGuide ? (
+          <div className="mt-1.5 border-t border-black/[0.05] pt-2 dark:border-white/[0.08]">
+            <OfflineAsrDownloadInline
+              label="下载离线识别模型（喊名零流量零延迟，断网可用）"
+              hint="下载完成后喊名自动切回端侧识别，不再上传音频（约 229MB，仅一次）"
+            />
+          </div>
+        ) : null}
+      </div>
       {blocked || !diag.listening ? (
         <button
           type="button"
@@ -981,7 +997,8 @@ function WakeStatusRow({ name }: { name: string }) {
 /**
  * 「语音唤起智能体」卡：专属人设说明行（小灵，名字跟随唤醒名）/ 唤醒名（≤6 字）/
  * 悬浮球开关 / 连续唤醒监听开关（带耗电提示）/ 唤醒状态诊断行（v1.8.2）/
- * C4 执行结果语音播报开关（默认关）/ C4 任务后追问窗口开关（默认开）。
+ * C4 执行结果语音播报开关（默认关）/ C4 任务后追问窗口开关（默认开）/
+ * 连续对话开关（Siri 式一问一答：播报完自动续听 + 说话即打断，默认开）。
  * 配置存 agent-voice-wake-v1（localStorage 单键 + zustand 镜像），悬浮球即时生效；
  * 连续监听三通道自愈路由（离线端侧 → VAD+服务端识别 → Web Speech），喊名没反应时
  * 状态行直接给出答案（哪个通道/最近听到什么/为什么暂停）；
@@ -1209,6 +1226,21 @@ function AgentVoiceCard() {
               testId="agent-voice-followup-switch"
             />
           </div>
+          {/* 连续对话（Siri 式一问一答）：播报完自动续听 + 播报中说话即打断 */}
+          <div className="flex min-h-[52px] items-center gap-3 px-4 py-2">
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-[16px]">连续对话</span>
+              <span className="mt-0.5 block text-[11.5px] leading-snug text-muted-foreground">
+                助手回答后自动继续听，说话即打断 · 关掉后每句都要再点麦克风
+              </span>
+            </span>
+            <AutonomySwitch
+              on={cfg.contChat}
+              onToggle={() => updateAgentVoiceCfg({ contChat: !cfg.contChat })}
+              label="连续对话"
+              testId="agent-voice-contchat-switch"
+            />
+          </div>
         </div>
       </div>
       {/* 状态提示行（条件显示） */}
@@ -1221,7 +1253,8 @@ function AgentVoiceCard() {
       {cfg.listen && nativeMode && asrNotReady ? (
         <p className="mx-6 mt-2 text-[11.5px] leading-relaxed text-[#FF9500]">
           离线识别模型未就绪：喊名唤醒已改走服务端识别（需联网、每次说话识别一小段）——
-          到设置 › 语音 API 下载离线模型后断网也能唤醒、响应更快。
+          点上方「唤醒状态」行里的「下载离线识别模型」一键下载（或到设置 › 语音 API），
+          完成后自动切回端侧识别：断网也能唤醒、响应更快、不再耗流量。
         </p>
       ) : null}
       {/* C4：播报开着但 TTS 未配置（第三方缺 Key/地址）——提醒会静默跳过 */}
@@ -6562,16 +6595,26 @@ function VoicePage({ onBack }: { onBack: () => void }) {
 // ---------------- 字体 ----------------
 
 /**
- * 离线识别（端侧模型，可选）下载模块：
- * - 模型：SenseVoice int8（约 229 MB）+ tokens，阿里云 ModelScope 直链（国内直连不走 HF）；
- * - 缓存：浏览器 Cache API 持久化，只需下载一次；进度条实时更新（流式读取 Content-Length）；
- * - 主源失败自动切换备用源；下载完成自动注入 WASM 引擎（MEMFS），状态置「已就绪」；
- * - 就绪后按住说话/转文字优先本地识别（断网可用），失败静默降级云端 STT（stt-client 已接）。
+ * 离线识别模型下载控件（Task 1-a 抽取共用）：检查中提示 / 下载按钮 / 进度条 / 失败原因+重试。
+ * 「语音 API」页的 OfflineAsrSection 与「AI 动手」页唤醒状态行共用同一份状态机与 UI——
+ * 下载动作幂等（initOfflineAsr 内部去重），两处入口并发发起也只会跑一次；下载完成 status→ready
+ * 由 offline-asr Worker 消息置位，唤醒循环订阅该状态自动切回端侧通道（无需本组件通知）。
+ * 就绪态（ready）不在此渲染：由调用方按需展示（语音 API 页有删除模型按钮，唤醒行无需）。
  */
-function OfflineAsrSection() {
+function OfflineAsrDownloadInline({
+  label = '下载模型（约 229 MB）',
+  hint = '阿里云 ModelScope 直链，国内不绕墙',
+  onReady,
+}: {
+  /** 下载按钮文案（不同入口不同话术：语音 API 页通用，唤醒行强调喊名收益） */
+  label?: string;
+  /** 按钮下的一行说明 */
+  hint?: string;
+  /** 下载完成（引擎就绪）回调：语音 API 页弹 toast 提示，唤醒行无需 */
+  onReady?: () => void;
+}) {
   const { status, progress, sourceIndex, error } = useOfflineAsr();
   const [busy, setBusy] = useState(false);
-  const [toastMsg, showToast] = useLocalToast();
 
   const totalMb = progress ? progress.total / 1048576 : 229;
   const loadedMb = progress ? progress.loaded / 1048576 : 0;
@@ -6586,13 +6629,74 @@ function OfflineAsrSection() {
     });
     try {
       await initOfflineAsr(); // 内部：下载（进度实时写 store）→ 注入 → ready 状态
-      showToast('离线识别模型已就绪，按住说话优先本地识别');
+      onReady?.();
     } catch {
       // 错误状态已由 offline-asr 内部写入（store.error），UI 展示
     } finally {
       setBusy(false);
     }
   };
+
+  if (status === 'ready') return null;
+
+  return (
+    <div className="mt-2">
+      {status === 'checking' && <p className="text-[12px] text-muted-foreground">正在检查本地缓存…</p>}
+
+      {(status === 'not-downloaded' || (status === 'error' && !busy)) && (
+        <>
+          <button
+            type="button"
+            onClick={() => void startDownload()}
+            disabled={busy}
+            className="rounded-xl bg-foreground px-4 py-2 text-[13px] font-medium text-background transition-all active:scale-[0.97] disabled:opacity-50"
+          >
+            {status === 'error' ? `重试${label}` : label}
+          </button>
+          <p className="mt-1.5 text-[12px] text-muted-foreground/70">{hint}</p>
+        </>
+      )}
+
+      {status === 'error' && error && (
+        <p className="mt-1.5 text-[12px] leading-relaxed" style={{ color: IOS_RED }}>
+          {error}
+        </p>
+      )}
+
+      {status === 'downloading' && (
+        <div>
+          <div className="h-2 overflow-hidden rounded-full bg-black/[0.07] dark:bg-white/[0.12]">
+            <div
+              className="h-full rounded-full bg-[#07C160] transition-[width] duration-300"
+              style={{ width: `${Math.max(2, progress?.pct ?? 0)}%` }}
+            />
+          </div>
+          <div className="mt-1.5 flex items-center justify-between text-[12px] text-muted-foreground">
+            <span>
+              下载中 {progress ? `${progress.pct.toFixed(1)}%` : '准备中…'}
+              {progress ? ` · ${loadedMb.toFixed(1)}/${totalMb.toFixed(0)} MB` : ''}
+            </span>
+            <span>{sourceIndex === 0 ? '主源' : '备用源'}</span>
+          </div>
+          <p className="mt-1 text-[12px] text-muted-foreground/60">下载完成后自动注入引擎，可离开本页（下次进入续传整包）。</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * 离线识别（端侧模型，可选）下载模块：
+ * - 模型：SenseVoice int8（约 229 MB）+ tokens，阿里云 ModelScope 直链（国内直连不走 HF）；
+ * - 缓存：浏览器 Cache API 持久化，只需下载一次；进度条实时更新（流式读取 Content-Length）；
+ * - 主源失败自动切换备用源；下载完成自动注入 WASM 引擎（MEMFS），状态置「已就绪」；
+ * - 就绪后按住说话/转文字优先本地识别（断网可用），失败静默降级云端 STT（stt-client 已接）；
+ * - 下载 UI 抽为 OfflineAsrDownloadInline 共用（Task 1-a）：唤醒状态行同款入口，此处传回调弹提示。
+ */
+function OfflineAsrSection() {
+  const { status } = useOfflineAsr();
+  const [busy, setBusy] = useState(false);
+  const [toastMsg, showToast] = useLocalToast();
 
   const removeModel = async (): Promise<void> => {
     setBusy(true);
@@ -6615,49 +6719,8 @@ function OfflineAsrSection() {
         </div>
       </div>
 
-      {/* 状态区 */}
-      {status === 'checking' && (
-        <p className="mt-2 text-[12px] text-muted-foreground">正在检查本地缓存…</p>
-      )}
-
-      {(status === 'not-downloaded' || (status === 'error' && !busy)) && (
-        <div className="mt-2">
-          <button
-            type="button"
-            onClick={() => void startDownload()}
-            disabled={busy}
-            className="whitespace-nowrap rounded-xl bg-foreground px-4 py-2 text-[13px] font-medium text-background transition-all active:scale-[0.97] disabled:opacity-50"
-          >
-            {status === 'error' ? '重试下载模型（约 229 MB）' : '下载模型（约 229 MB）'}
-          </button>
-          <p className="mt-1.5 text-[12px] text-muted-foreground/70">阿里云 ModelScope 直链，国内不绕墙</p>
-        </div>
-      )}
-
-      {status === 'error' && error && (
-        <p className="mt-1.5 text-[12px] leading-relaxed" style={{ color: IOS_RED }}>
-          {error}
-        </p>
-      )}
-
-      {status === 'downloading' && (
-        <div className="mt-2">
-          <div className="h-2 overflow-hidden rounded-full bg-black/[0.07] dark:bg-white/[0.12]">
-            <div
-              className="h-full rounded-full bg-[#07C160] transition-[width] duration-300"
-              style={{ width: `${Math.max(2, progress?.pct ?? 0)}%` }}
-            />
-          </div>
-          <div className="mt-1.5 flex items-center justify-between text-[12px] text-muted-foreground">
-            <span>
-              下载中 {progress ? `${progress.pct.toFixed(1)}%` : '准备中…'}
-              {progress ? ` · ${loadedMb.toFixed(1)}/${totalMb.toFixed(0)} MB` : ''}
-            </span>
-            <span>{sourceIndex === 0 ? '主源' : '备用源'}</span>
-          </div>
-          <p className="mt-1 text-[12px] text-muted-foreground/60">下载完成后自动注入引擎，可离开本页（下次进入续传整包）。</p>
-        </div>
-      )}
+      {/* 检查中/未下载/下载进度/失败重试（与唤醒状态行共用同一控件） */}
+      <OfflineAsrDownloadInline onReady={() => showToast('离线识别模型已就绪，按住说话优先本地识别')} />
 
       {status === 'ready' && (
         <div className="mt-2 flex items-center justify-between gap-3">

@@ -26,7 +26,6 @@ import {
   CARD_CLS,
   MUTED_META_CLS,
   MUTED_TEXT_CLS,
-  SEARCH_BG,
   WARM_RED,
   displayPreview,
   displayTitle,
@@ -244,17 +243,18 @@ export function SearchBox({
       )}
     </>
   );
+  // 搜索框底色走类而非内联 style：原先内联 SEARCH_BG 压过了 dark:bg-white/[0.09]，
+  // 深色模式下搜索框保持浅色（2-b 审计实测到的唯二深色漏面之一）
   const cls =
-    'flex h-9 items-center gap-2 rounded-[10px] px-3';
-  const bgStyle = { backgroundColor: SEARCH_BG };
+    'flex h-9 items-center gap-2 rounded-[10px] bg-[#E9E8ED] px-3 dark:bg-white/[0.09]';
   if (tappable) {
     return (
-      <button type="button" aria-label="打开搜索" onClick={onTap} className={`${cls} w-full text-left dark:bg-white/[0.09]`} style={bgStyle}>
+      <button type="button" aria-label="打开搜索" onClick={onTap} className={`${cls} w-full text-left`}>
         {inner}
       </button>
     );
   }
-  return <div className={cls} style={bgStyle}>{inner}</div>;
+  return <div className={cls}>{inner}</div>;
 }
 
 // ---------------- 勾选圆（金色） ----------------
