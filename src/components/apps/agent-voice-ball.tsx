@@ -39,6 +39,7 @@ import {
   useAgentVoice,
   useAgentRecorder,
   useAgentWakeLoop,
+  useWakeDiag,
   canAgentWakeListen,
   canAgentVoiceActNow,
   canWakeVad,
@@ -526,6 +527,9 @@ export default function AgentVoiceBall() {
   const [wsWakeOk] = useState(() => isWebSpeechSupported());
   const [vadOk] = useState(() => canWakeVad());
   const wakeOn = layerOn && cfg.listen && !wakeBlocked && (asrReady || wsWakeOk || vadOk);
+  // 重试信号：设置页「重试」按钮 bump → 唤醒循环立即重建（清熔断/换通道）
+  const retrySeq = useWakeDiag((s) => s.retrySeq);
+  const serverDegraded = useWakeDiag((s) => s.listening && s.server === 'fail');
   const onWake = useCallback(
     (task: string | null) => {
       setSessionMsg('');
@@ -542,7 +546,7 @@ export default function AgentVoiceBall() {
   );
   const canListen = useCallback(() => canAgentWakeListen(sessionOpenRef.current, agentRunningRef.current), []);
   // enabled 只随总启用态启停；锁屏/通话/会话打开等暂停条件由 canListen 每轮动态判断
-  useAgentWakeLoop({ enabled: wakeOn, name: cfg.name, canListen, onWake });
+  useAgentWakeLoop({ enabled: wakeOn, name: cfg.name, canListen, onWake, retrySignal: retrySeq });
 
   // ---- 悬浮球拖拽（framer-motion，吸边 + 位置记忆） ----
   const layerRef = useRef<HTMLDivElement | null>(null);
@@ -820,9 +824,11 @@ export default function AgentVoiceBall() {
         {listening ? (
           <span aria-hidden="true" className="absolute inset-[-4px] animate-ping rounded-full bg-white/25" style={{ animationDuration: '2.4s' }} />
         ) : null}
-        {/* 唤醒熔断红点：喊名唤醒因麦克风权限等原因停用时，点球仍可对话，但让用户一眼看到原因（设置页/点球提示有详情） */}
+        {/* 唤醒状态点：熔断=红点（点球可见原因）；服务端识别连败降级中=琥珀点（自动换通道重试，喊名可能暂时失灵） */}
         {wakeBlocked ? (
           <span aria-hidden="true" data-testid="agent-voice-ball-alert" className="absolute -right-0.5 -top-0.5 z-10 h-3.5 w-3.5 rounded-full bg-[#FF453A] shadow-[0_1px_4px_rgba(0,0,0,0.4)] ring-2 ring-black/50" />
+        ) : serverDegraded ? (
+          <span aria-hidden="true" data-testid="agent-voice-ball-degraded" className="absolute -right-0.5 -top-0.5 z-10 h-3 w-3 rounded-full bg-[#FF9500] shadow-[0_1px_4px_rgba(0,0,0,0.4)] ring-2 ring-black/50" />
         ) : null}
         {/* 柔和彩虹外发光 */}
         <span aria-hidden="true" className="absolute -inset-[5px] rounded-full opacity-55 blur-md" style={{ background: SIRI_CONIC }} />

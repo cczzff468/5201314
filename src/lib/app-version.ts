@@ -11,9 +11,9 @@
  */
 
 /** 当前最新版本（与 android-shell versionName 保持一致） */
-export const APP_VERSION = '1.8.1';
+export const APP_VERSION = '1.8.2';
 /** 版本号数字（与 android-shell versionCode 保持一致；覆盖安装要求只增不减） */
-export const APP_VERSION_CODE = 17;
+export const APP_VERSION_CODE = 18;
 
 export interface AppReleaseNote {
   version: string;
@@ -24,6 +24,16 @@ export interface AppReleaseNote {
 
 /** 版本历史（新→旧；设置 › APP 更新 页渲染，最新一条即当前版本） */
 export const APP_RELEASE_NOTES: AppReleaseNote[] = [
+  {
+    version: '1.8.2',
+    date: '2026-11-10',
+    items: [
+      '喊名唤醒自愈重构：任何故障不再静默死亡——服务端识别挂了自动冷却重试、浏览器识别失效自动换通道、麦克风权限被拒后每 40 秒自动探针（授权后无需任何操作自动恢复）',
+      '唤醒更灵敏：环境噪声自适应阈值（弱麦克风/远场也能喊到）+ 突发强音立即触发 + 音频被系统挂起超 8 秒自动重建录音链',
+      '设置 › AI 动手 › 语音智能体新增「唤醒状态」：正在用哪个通道、最近听到了什么、为什么暂停一目了然，支持手动重试',
+      '悬浮球状态点：熔断红点之外新增琥珀点（识别服务波动自动重试中），喊名暂时不灵时能一眼看到原因',
+    ],
+  },
   {
     version: '1.8.1',
     date: '2026-11-10',

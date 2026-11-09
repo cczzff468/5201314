@@ -119,7 +119,14 @@ import { isWebSpeechSupported } from '@/lib/ios/web-speech';
 import { AUTONOMY_CAPS, getAutonomyConfig, setAutonomyCap, setAutonomyMaster } from '@/lib/ios/shizuku-autonomy';
 import { isNativePerception, nativeShizukuStatus } from '@/lib/ios/native-perception';
 // C1 语音唤起智能体：AI 动手页内设置卡（唤醒名 / 悬浮球 / 连续监听）
-import { DEFAULT_WAKE_NAME, updateAgentVoiceCfg, useAgentVoice } from '@/lib/ios/agent-voice';
+import {
+  DEFAULT_WAKE_NAME,
+  retryAgentWake,
+  updateAgentVoiceCfg,
+  useAgentVoice,
+  useWakeDiag,
+  type WakeDiagChannel,
+} from '@/lib/ios/agent-voice';
 import { ASSISTANT_PERSONA_TAGLINE } from '@/lib/ios/assistant-persona';
 // C4 播报开关提示用：判断 TTS 是否已配置（内置语音恒可用，第三方需 Key+地址）
 import { isTtsConfigured, speakUserTts, stopSpeaking } from '@/lib/ios/tts-client';
@@ -907,13 +914,77 @@ function AutonomyCapRow({
 
 // ---------------- C1 语音唤起智能体（AI 动手页内设置卡） ----------------
 
+/** 唤醒通道 → 人话标签（诊断行展示用） */
+const WAKE_CHANNEL_LABEL: Record<WakeDiagChannel, string> = {
+  offline: '端侧离线识别',
+  'server-vad': '服务端识别',
+  'web-speech': '浏览器实时识别',
+  none: '不可用',
+};
+
+/**
+ * 唤醒监听状态行（v1.8.2 诊断）：喊名没反应时一眼定位卡在哪一环——
+ * 监听中显示当前通道 + 最近听到的转写（能看到 TA 到底听见了什么）；
+ * 熔断/全不可用显示原因并提供「重试」按钮（清熔断 + 立即重建唤醒循环）。
+ */
+function WakeStatusRow({ name }: { name: string }) {
+  const diag = useWakeDiag();
+  const blocked = useAgentVoice((s) => s.wakeBlocked);
+  let dot = 'bg-emerald-500';
+  let text = `正在监听「${name}」· ${WAKE_CHANNEL_LABEL[diag.channel]}`;
+  if (blocked) {
+    dot = 'bg-[#FF9500]';
+    text = '喊名唤醒已暂停 · 每 40 秒自动重试';
+  } else if (!diag.listening) {
+    dot = 'bg-muted-foreground/40';
+    text = diag.lastError || '唤醒监听启动中…';
+  } else if (diag.paused) {
+    dot = 'bg-muted-foreground/40';
+    text = '已暂时静音（会话/通话/朗读中），空闲自动恢复';
+  }
+  const degraded = diag.listening && diag.server === 'fail';
+  return (
+    <div className="flex min-h-[46px] items-center gap-3 px-4 py-2" data-testid="agent-voice-wake-status">
+      <span className="min-w-0 flex-1">
+        <span className="flex items-center gap-1.5">
+          <span
+            aria-hidden="true"
+            className={`h-2 w-2 shrink-0 rounded-full ${dot} ${diag.listening && !diag.paused && !blocked ? 'animate-pulse' : ''}`}
+          />
+          <span className="truncate text-[13px] text-foreground/90" data-testid="agent-voice-wake-status-text">
+            {text}
+          </span>
+        </span>
+        {diag.lastText ? (
+          <span className="mt-0.5 block truncate text-[11px] text-muted-foreground" data-testid="agent-voice-wake-last-text">
+            最近听到：{diag.lastText}
+          </span>
+        ) : null}
+        {degraded && !blocked ? (
+          <span className="mt-0.5 block truncate text-[11px] text-[#FF9500]">识别服务波动：已自动换通道重试，喊名可能暂时不灵</span>
+        ) : null}
+      </span>
+      {blocked || !diag.listening ? (
+        <button
+          type="button"
+          onClick={retryAgentWake}
+          data-testid="agent-voice-wake-retry"
+          className="flex h-8 shrink-0 items-center rounded-full bg-foreground/90 px-3 text-[12px] text-background transition active:scale-95"
+        >
+          重试
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
 /**
  * 「语音唤起智能体」卡：专属人设说明行（小灵，名字跟随唤醒名）/ 唤醒名（≤6 字）/
- * 悬浮球开关 / 连续唤醒监听开关（带耗电提示）/
+ * 悬浮球开关 / 连续唤醒监听开关（带耗电提示）/ 唤醒状态诊断行（v1.8.2）/
  * C4 执行结果语音播报开关（默认关）/ C4 任务后追问窗口开关（默认开）。
  * 配置存 agent-voice-wake-v1（localStorage 单键 + zustand 镜像），悬浮球即时生效；
- * 连续监听双通道：APP 原生壳走离线模型端侧转写，浏览器走 Web Speech 实时识别兜底
- * （免下载模型，需联网+麦克风权限）；两条通道都不可用才降级「点球才识别」（下方提示行说明）；
+ * 连续监听三通道自愈路由（离线端侧 → VAD+服务端识别 → Web Speech），喊名没反应时
+ * 状态行直接给出答案（哪个通道/最近听到什么/为什么暂停）；
  * 播报开着但 TTS 未配置（第三方服务商缺 Key/地址）时下方提示「将静默跳过」。
  */
 function AgentVoiceCard() {
@@ -1106,6 +1177,8 @@ function AgentVoiceCard() {
               testId="agent-voice-listen-switch"
             />
           </div>
+          {/* 唤醒状态（v1.8.2 诊断行）：监听开着才展示——通道/最近听到/异常，喊名没反应一眼定位 */}
+          {cfg.listen ? <WakeStatusRow name={cfg.name || DEFAULT_WAKE_NAME} /> : null}
           {/* C4 执行结果语音播报 */}
           <div className="flex min-h-[52px] items-center gap-3 px-4 py-2">
             <span className="min-w-0 flex-1">

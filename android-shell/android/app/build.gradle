@@ -11,8 +11,8 @@ android {
         applicationId "com.z.aiphone"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 17          // v1.8.1 唤醒常驻流+Agent验收轮（v16 = 1.8.0）
-        versionName "1.8.1"     // v1.8.1 唤醒常驻流+Agent验收轮（纯网页更新不重打 APK）
+        versionCode 18          // v1.8.2 唤醒自愈+诊断可视化（v17 = 1.8.1）
+        versionName "1.8.2"     // v1.8.2 唤醒自愈+诊断可视化（纯网页更新不重打 APK）
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
