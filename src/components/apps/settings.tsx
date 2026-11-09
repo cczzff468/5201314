@@ -994,7 +994,7 @@ function AgentVoiceCard() {
             <span className="min-w-0 flex-1">
               <span className="block truncate text-[16px]">连续唤醒监听</span>
               <span className="mt-0.5 block text-[11.5px] leading-snug text-muted-foreground">
-                后台循环听唤醒名，命中即震动唤起 · 电量提示：连续监听会增加耗电
+                默认开启：后台循环听唤醒名，喊出即自动唤起语音界面 · 会增加耗电，可关闭
               </span>
             </span>
             <AutonomySwitch

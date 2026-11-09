@@ -49,6 +49,7 @@ import {
 import { isSpeaking, isTtsConfigured, speakUserTts, stopSpeaking } from '@/lib/ios/tts-client';
 import { voiceTurn } from '@/lib/ios/agent-chat';
 import { assistantGreeting } from '@/lib/ios/assistant-persona';
+import { matchOpenAppIntent, openAppPage } from '@/lib/ios/agent-app-nav';
 
 // Agent 运行状态探针：shizuku-agent 引擎体量大，不能静态打进本组件包体——
 // 借道 agent-ui（PhoneShell 本就 dynamic 引它）订阅运行态，只回传一个轻量布尔
@@ -384,6 +385,18 @@ export default function AgentVoiceBall() {
         if (history.length > 0 && history[history.length - 1].role === 'user') history.pop();
         const r = await voiceTurn(text, history);
         if (r.mode === 'task') {
+          // 「打开微信」类纯打开意图：不走 Agent（不依赖 Shizuku 是否启动），
+          // 直接切到**网页内（本项目虚拟手机）**的对应应用页面——真实手机微信/淘宝不会被拉起
+          const nav = matchOpenAppIntent(r.task) ?? matchOpenAppIntent(text);
+          if (nav) {
+            const ok = openAppPage(nav.appId); // App 窗口 z-40 在会话层下，先收会话再切页
+            const reply = ok ? `好嘞，${nav.label}打开啦~` : `现在不方便打开${nav.label}哦~`;
+            setThinking(false);
+            closeSession();
+            appendTurnRef.current('agent', reply); // 会话流保留记录，下次打开可见
+            await speakInSession(reply);
+            return;
+          }
           await execute(r.task);
           return; // execute 内部已收尾（会话关闭/重开），不再回 idle 提示
         }
@@ -394,7 +407,7 @@ export default function AgentVoiceBall() {
         routingRef.current = false;
       }
     },
-    [execute, speakInSession],
+    [execute, speakInSession, closeSession],
   );
   // 识别结果落地 → 最新路由闭包（recorder 的 onResult 经 routeRef 透传）
   useEffect(() => {
@@ -576,29 +589,31 @@ export default function AgentVoiceBall() {
               <X className="h-5 w-5" />
             </button>
 
-            {/* Siri 光球（顶部居中；状态越忙光越亮） */}
-            <div className="pointer-events-none absolute left-1/2 top-[96px] h-[112px] w-[170px] -translate-x-1/2" aria-hidden="true">
-              {/* 外发光 */}
+            {/* Siri 光球（极简版：环境柔光 + 慢旋柔化极光盘 + 白芯，无硬边；状态越忙呼吸越亮） */}
+            <div className="pointer-events-none absolute left-1/2 top-[108px] h-[92px] w-[92px] -translate-x-1/2" aria-hidden="true">
+              {/* 环境柔光（忙碌时呼吸） */}
               <div
-                className="absolute -inset-6 rounded-[50%] opacity-40 blur-2xl"
-                style={{ background: SIRI_CONIC, animation: recBusy || thinking || speaking ? 'agentVoiceBreath 1.6s ease-in-out infinite' : undefined }}
+                className="absolute -inset-4 rounded-full opacity-25 blur-xl"
+                style={{ background: SIRI_CONIC, animation: recBusy || thinking || speaking ? 'agentVoiceBreath 1.8s ease-in-out infinite' : undefined }}
               />
-              {/* 彩虹边缘（慢旋转） */}
-              <div className="absolute inset-0 rounded-[50%]" style={{ background: SIRI_CONIC, animation: 'agentVoiceSpin 9s linear infinite' }} />
-              {/* 黑色主体 */}
-              <div className="absolute inset-[2.5px] rounded-[50%] bg-[#050508]" />
-              {/* 内部彩虹高光（Siri 光球质感） */}
-              <div
-                className="absolute inset-[2.5px] rounded-[50%]"
-                style={{
-                  background:
-                    'radial-gradient(85% 58% at 50% 36%, rgba(110,231,249,0.30), transparent 55%), radial-gradient(70% 52% at 46% 54%, rgba(244,114,182,0.32), transparent 60%), radial-gradient(58% 42% at 55% 68%, rgba(251,146,60,0.28), transparent 65%)',
-                }}
-              />
+              {/* 主体：圆盘内慢旋 aurora（blur 柔化，无硬边） */}
+              <div className="absolute inset-0 overflow-hidden rounded-full ring-1 ring-white/10">
+                <div
+                  className="absolute -inset-[30%]"
+                  style={{ background: SIRI_CONIC, filter: 'blur(16px)', opacity: 0.8, animation: 'agentVoiceSpin 16s linear infinite' }}
+                />
+                {/* 中心白芯（通透感） */}
+                <div
+                  className="absolute inset-[18%] rounded-full"
+                  style={{ background: 'radial-gradient(closest-side, rgba(255,255,255,0.5), rgba(255,255,255,0.08) 62%, transparent)' }}
+                />
+                {/* 顶部内高光（玻璃质感） */}
+                <div className="absolute inset-0 rounded-full" style={{ background: 'radial-gradient(120% 70% at 50% 0%, rgba(255,255,255,0.16), transparent 55%)' }} />
+              </div>
             </div>
 
             {/* 助手名牌（光球正下方，Siri 呼出后的身份标识） */}
-            <div className="pointer-events-none absolute inset-x-0 top-[218px] flex flex-col items-center gap-0.5" aria-hidden="true">
+            <div className="pointer-events-none absolute inset-x-0 top-[210px] flex flex-col items-center gap-0.5" aria-hidden="true">
               <span className="text-[15px] font-medium tracking-wide text-white/85" data-testid="agent-voice-name">
                 {cfg.name || '小灵'}
               </span>

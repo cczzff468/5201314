@@ -47,7 +47,7 @@ export interface AgentVoiceCfg {
   name: string;
   /** 悬浮球开关（默认开） */
   ball: boolean;
-  /** 连续唤醒监听（默认关；耗电较高） */
+  /** 连续唤醒监听（v1.7.2 默认开：喊唤醒名自动唤起；耗电较高，可在设置关） */
   listen: boolean;
   /** 任务完成后 TTS 播报结果摘要（C4，默认关；语音唤起启动的任务不受此限，始终播报） */
   announce: boolean;
@@ -58,10 +58,14 @@ export interface AgentVoiceCfg {
 const DEFAULT_CFG: AgentVoiceCfg = {
   name: DEFAULT_WAKE_NAME,
   ball: true,
-  listen: false,
+  // v1.7.2 默认开：喊唤醒名自动唤起语音界面（离线识别引擎就绪才会真正跑，浏览器/未就绪自动空转）
+  listen: true,
   announce: false,
   followup: true,
 };
+
+/** v1.7.2 一次性迁移键：老版本把 listen=false 写进了存储，迁移一次翻成默认开（之后用户可再关） */
+const WAKE_LISTEN_MIGRATION_KEY = 'agent-voice-wake-listen-v2';
 
 function readCfg(): AgentVoiceCfg {
   if (typeof window === 'undefined') return { ...DEFAULT_CFG };
@@ -69,14 +73,28 @@ function readCfg(): AgentVoiceCfg {
     const raw = window.localStorage.getItem(STORE_KEY);
     if (!raw) return { ...DEFAULT_CFG };
     const p = JSON.parse(raw) as Partial<AgentVoiceCfg>;
+    let migrated = false;
+    if (!window.localStorage.getItem(WAKE_LISTEN_MIGRATION_KEY)) {
+      p.listen = true; // 老配置翻新：喊名字默认唤起（设置页仍可手动关）
+      migrated = true;
+    }
     const name = (typeof p.name === 'string' ? p.name.trim().slice(0, 6) : '') || DEFAULT_WAKE_NAME;
-    return {
+    const cfg: AgentVoiceCfg = {
       name,
       ball: p.ball !== false,
       listen: p.listen === true,
       announce: p.announce === true,
       followup: p.followup !== false,
     };
+    if (migrated) {
+      try {
+        window.localStorage.setItem(STORE_KEY, JSON.stringify(cfg));
+        window.localStorage.setItem(WAKE_LISTEN_MIGRATION_KEY, '1');
+      } catch {
+        /* 存储不可用仅本次会话生效 */
+      }
+    }
+    return cfg;
   } catch {
     return { ...DEFAULT_CFG };
   }
