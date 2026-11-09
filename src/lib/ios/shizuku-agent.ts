@@ -1296,6 +1296,9 @@ export interface AgentCtx {
   persona?: string;
   memory?: string;
   peerName?: string;
+  /** 语音会话最近几轮对话（v1.7.2）：「再试一次/继续/还是不行」这类模糊指代脱离会话就没法办，
+   *  语音层 execute 时把会话上下文带给规划层，LLM 才知道要重试的是什么任务 */
+  recentChat?: string;
 }
 
 interface AgentHistoryEntry {
@@ -1335,13 +1338,18 @@ const AGENT_ACTIONS_DOC = `可用动作（plan 数组元素，args 一律 string
 17. {"action":"uiType","args":"要输入的文字"} —— 向已聚焦的输入框输入文字（替换旧内容；先 uiClick 点输入框聚焦）
 18. {"action":"uiScroll","args":"下"} —— 在当前应用界面里滚动翻页（上/下/左/右）`;
 
-/** 组装 Agent 规划的 system prompt（人设/记忆注入 + 行为准则 + 语法表 + 输出格式） */
-function buildAgentSystemPrompt(ctx: AgentCtx | undefined): string {
+/** 组装 Agent 规划的 system prompt（人设/记忆注入 + 行为准则 + 语法表 + 输出格式）。
+ *  verifying=true 时进入「验收模式」：上一轮计划已全部执行成功，要求 LLM 对照任务目标
+ *  核对最新界面——真正达成才输出 TASK_DONE 空计划，没达成就给补救计划（v1.7.2 防虚报完成）。 */
+function buildAgentSystemPrompt(ctx: AgentCtx | undefined, verifying = false): string {
   const owner = ctx?.ownerName?.trim() || '机主';
   const lines: string[] = [];
   lines.push(`你是「${owner}」的手机智能体（Mobile Agent），直接操控 ${owner} 的真实手机完成任务——你输出的每个动作都会真实执行，成功与否都会如实反馈给你。`);
   if (ctx?.peerName?.trim()) {
     lines.push(`当前对话对象是「${ctx.peerName.trim()}」：涉及给某人发消息类任务时，对象默认是 ta（界面上按名字找联系人）。`);
+  }
+  if (ctx?.recentChat?.trim()) {
+    lines.push(`【语音会话上下文】任务里的「再试一次/继续/还是不行」等说法指代下面这段刚发生的对话，按上下文理解任务：\n${ctx.recentChat.trim().slice(0, 1200)}`);
   }
   if (ctx?.persona?.trim()) {
     lines.push(`【你的人设（说话与行事都遵循）】\n${ctx.persona.trim().slice(0, 2000)}`);
@@ -1349,15 +1357,26 @@ function buildAgentSystemPrompt(ctx: AgentCtx | undefined): string {
   if (ctx?.memory?.trim()) {
     lines.push(`【与任务可能相关的记忆】\n${ctx.memory.trim().slice(0, 1200)}`);
   }
+  if (verifying) {
+    lines.push(
+      '【任务验收（本轮只核对，不轻易动手）】上一轮计划的步骤都已执行成功，但「动作成功」不等于「任务完成」。请对照任务目标检查最新屏幕观察：',
+      '- 任务目标已真正达成（成品已出现在界面上：如备忘录列表里能看到刚记的那条内容、联系人列表有新联系人、消息已发出）→ 输出空计划并给 note，note 必须以 TASK_DONE 开头，后接一句话结果，say 用你的语气播报结果。',
+      '- 目标没达成/只做了一半（内容没输入、没保存、点错了按钮、界面停在中间态等）→ 正常输出补救计划（先 uiObserve 看清界面再纠正），不要输出 TASK_DONE。',
+      '- 宁可多补救一轮，也不许在成品没出现时报完成。',
+    );
+  }
   lines.push(
     '【行为准则】',
     '- 一次规划 3~8 步，每步动作最小化（一步只做一件事），并把完成整个任务所需的全部步骤放进同一次 plan。',
     '- 【两类任务分清】任务发生在「机主手机里的应用」（微信/信息/QQ/淘宝/美团/联系人/备忘录/提醒事项/日历/浏览器/天气/音乐/设置等这台手机内渲染的界面）→ 用 openScreen 打开 + uiObserve 观察 + uiClick/uiType/uiScroll 操作；只有操作 Android 系统级真实应用（虚拟手机之外的真实桌面 App）才用 openApp(包名)+clickElement 等。',
     '- 应用内任务的标准流程：openScreen 打开 → uiObserve 看界面 → 按清单 uiClick（按钮/列表项/输入框）→ uiType 输入 → 需要时 pressEnter（聚焦输入框发消息等效）→ 再 uiObserve 核对结果。uiClick/uiType 的反馈会告诉你点到了什么/输了什么。',
+    '- 【uiClick 的 args 必须照抄 uiObserve 清单里的完整文字，一字不差】界面同时有「新建文件夹」「新建备忘录」时，写「新建」会点错——必须写全称。含图标按钮以清单文字为准，禁止自创缩写。',
     '- 例（建联系人）：openScreen contacts → uiObserve → uiClick「+」或「新建」→ uiClick 姓名输入框 → uiType 名字 → uiClick 人设/性格输入框 → uiType 性格描述 → uiClick「保存/完成」→ uiObserve 核对。界面和示例不符时以 uiObserve 实际返回为准。',
+    '- 例（记备忘录）：openScreen notes → uiObserve → uiClick「新建备忘录」（不是「新建文件夹」）→ uiType「要记的内容」（标题/正文输入框）→ back 返回列表 → uiObserve 核对列表出现这条内容。',
+    '- 【完成标准（写入类任务）】内容必须真正输入且结果出现在界面上才算完成：备忘录要看到列表里那条内容、消息要看到进入会话、提醒要看到条目存在。界面停在输入框/抽屉/弹窗=没完成，继续操作直到成品出现；计划最后一步必须是 uiObserve 核对。',
     '- 操作输入框前必须先 clickElement/uiClick 点输入框使其聚焦，才能 inputTextToFocus/uiType；发送消息用 pressEnter。',
     '- 输入框里有旧内容时：uiType 会整体替换旧内容；系统级输入框优先找界面上的清空/清除类按钮，没有就连续 pressDelete 逐字删（按旧内容长度控制次数，别无限删）。',
-    '- 上一步失败时，失败反馈里通常带着当前界面与可见元素线索——换策略（换匹配文字、先 scroll/uiScroll 翻页、改 tapPoint、先 lookScreen/uiObserve），不要原样重试。',
+    '- 上一步失败时，失败反馈里通常带着当前界面与可见元素线索——换策略（换匹配文字、先 scroll/uiScroll 翻页、改 tapPoint、先 lookScreen/uiObserve），不要原样重试。uiClick 反馈里出现「另有相近元素」提示时，说明你可能点到了相近但错误的按钮——立即用完整名称重试正确目标。',
     '- 不要编造屏幕上没有的元素文字；目标可能不在当前页，先 scroll/uiScroll 翻页再找；不确定当前界面就先 lookScreen/uiObserve。',
     '- 涉及转账/付款/红包/充值/卸载/删除/关闭网络等敏感动作：该步必须加 "dangerous":true（系统会先征求机主同意）。',
     '- 规划要贴合机主的意图与你的性格（见人设），say 播报用你的语气自然说，不要复述命令格式。',
@@ -1365,7 +1384,7 @@ function buildAgentSystemPrompt(ctx: AgentCtx | undefined): string {
     AGENT_ACTIONS_DOC,
     '【输出格式】严格输出一个 JSON 对象，前后不带任何其他文字、不用 markdown 代码块包裹：',
     '{"say":"给用户看的进度播报（用你的语气，一句话）","plan":[{"action":"openScreen","args":"wechat","why":"打开微信"},{"action":"uiObserve","args":"","why":"看界面"}]}',
-    '- 每步可带 "why"（一句话给机主看的理由）；plan 为空数组时必须给 "note"（一句话解释为什么做不了/不用做）。',
+    '- 每步可带 "why"（一句话给机主看的理由）；plan 为空数组时必须给 "note"（验收通过时以 TASK_DONE 开头；做不了/不用做时一句话解释原因）。',
     '- args 一律 string；不要输出动作表以外的动作名。',
   );
   return lines.join('\n');
@@ -1465,13 +1484,19 @@ const HISTORY_STEP_SLICE = 400;
 /**
  * 调 /api/chat 生成一轮计划：纯文本流聚合 → 宽松 JSON 提取 → AgentPlan。
  * fetch 失败/超时（90s）/格式异常/用户急停 → null（调用方处理）。
+ * verifying=true：验收模式（system prompt 换成验收指令，见 buildAgentSystemPrompt）。
  */
-async function planWithLLM(task: string, history: AgentHistoryEntry[], ctx: AgentCtx | undefined): Promise<AgentPlan | null> {
+async function planWithLLM(
+  task: string,
+  history: AgentHistoryEntry[],
+  ctx: AgentCtx | undefined,
+  verifying = false,
+): Promise<AgentPlan | null> {
   const apiCfg = useSettings.getState().apiConfig;
   // 照抄 chat-stream-store 的 effConfig 构造：长 JSON 计划抬高 maxTokens 下限防截断
   const effConfig = { ...apiCfg, maxTokens: Math.max(apiCfg.maxTokens, 1500) };
 
-  const sys = buildAgentSystemPrompt(ctx);
+  const sys = buildAgentSystemPrompt(ctx, verifying);
   const msgs: { role: string; content: string }[] = [{ role: 'system', content: sys }];
   for (const h of history.slice(-HISTORY_MAX_ENTRIES)) {
     if (h.kind === 'obs') {
@@ -1785,7 +1810,9 @@ export function setAgentResultAnnouncer(fn: ((text: string) => void) | null): vo
 /**
  * 运行一个 Agent 任务（多轮闭环）：
  * 三道闸 → 防重入 → 初始化（通知/旗标）→ 轮循环（观察 → 规划 → 逐步执行）
- * → 全步成功即完成；有失败带现场进下一轮 replan；敏感步骤弹确认卡；
+ * → 全步成功后进「验收轮」（v1.7.2：LLM 对照任务目标核对最新界面，真正达成才
+ * TASK_DONE 宣布完成；只做一半拿补救计划继续干）——防「动作成功就算完成」的虚报；
+ * 有失败带现场进下一轮 replan；敏感步骤弹确认卡；
  * 本地/原生急停双通道随时可停；finally 统一还原输入法/撤通知/落定状态。
  */
 export async function runAgentTask(
@@ -1832,7 +1859,7 @@ export async function runAgentTask(
   const t = task.trim();
   if (!t) return { ok: false, text: '任务内容为空' };
 
-  const maxRounds = Math.max(1, Math.min(6, opts?.maxRounds ?? 3));
+  const maxRounds = Math.max(1, Math.min(6, opts?.maxRounds ?? 4));
 
   // ---- 初始化 ----
   stopFlag = false;
@@ -1874,19 +1901,29 @@ export async function runAgentTask(
   };
 
   try {
+    /** 验收旗标（v1.7.2 防虚报完成）：上一轮计划刚全部执行成功 → 下一轮先进「验收模式」，
+     *  LLM 对照任务目标核对最新界面，真正达成才 TASK_DONE 宣布完成；只做一半会拿到补救计划。 */
+    let needVerify = false;
     for (let round = 1; round <= maxRounds; round++) {
       if (await checkStopped()) return stoppedResult();
 
       // a. 观察屏幕（前台 + UI 树摘要）
-      patchAgentState({ round, stepIndex: 0, stepTotal: 0, stepDesc: '观察屏幕…' });
+      patchAgentState({ round, stepIndex: 0, stepTotal: 0, stepDesc: needVerify ? '核对任务结果…' : '观察屏幕…' });
       const obs = await agentObserve();
       history.push({ kind: 'obs', round, text: obs.summary });
       if (await checkStopped()) return stoppedResult();
 
-      // b. LLM 规划（null = 接口失败/格式异常/急停断流）
-      const plan = await planWithLLM(t, history, opts?.ctx);
+      // b. LLM 规划（验收轮用验收模式 prompt；null = 接口失败/格式异常/急停断流）
+      const plan = await planWithLLM(t, history, opts?.ctx, needVerify);
       if (await checkStopped()) return stoppedResult();
       if (plan === null) {
+        if (needVerify) {
+          // 验收轮接口挂了：上轮步骤确实都执行成功过——按完成处理但注明未经最终核对
+          //（不谎报也不误伤：文字里明确「未经最终核对」，用户可自查界面）
+          const text = `Agent 任务完成：${lastSay || t}（结果未经最终核对）`;
+          emit('done', text);
+          return finish({ ok: true, text });
+        }
         return finish({ ok: false, text: '规划失败：AI 接口未响应或返回格式异常（检查 设置›API 配置）' });
       }
 
@@ -1897,13 +1934,21 @@ export async function runAgentTask(
         emit('say', plan.say);
       }
 
-      // d. 空计划 → LLM 判断做不了/不用做，note 解释
+      // d. 空计划：验收模式 + note 以 TASK_DONE 开头 → 任务目标已真正达成，宣布完成；
+      //    其余空计划 = LLM 判断做不了/不用做，note 解释（如实失败）
       if (!plan.plan || plan.plan.length === 0) {
-        emit('fail', plan.note || 'AI 没有给出可执行的计划');
-        return finish({ ok: false, text: plan.note || 'AI 没有给出可执行的计划（可能判断任务无法完成）' });
+        const note = (plan.note || '').trim();
+        if (needVerify && /^TASK_DONE/i.test(note)) {
+          const summary = plan.say || note.replace(/^TASK_DONE[:：,，.]?\s*/i, '').trim() || t;
+          emit('done', `Agent 任务完成：${summary}`);
+          return finish({ ok: true, text: `Agent 任务完成：${summary}` });
+        }
+        emit('fail', note || 'AI 没有给出可执行的计划');
+        return finish({ ok: false, text: note || 'AI 没有给出可执行的计划（可能判断任务无法完成）' });
       }
 
-      // e. 逐步执行
+      // e. 逐步执行（验收轮拿到的是补救计划：清验收旗标，按普通轮执行）
+      needVerify = false;
       patchAgentState({ stepIndex: 0, stepTotal: plan.plan.length });
       let allOk = true;
       for (let i = 0; i < plan.plan.length; i++) {
@@ -1953,13 +1998,21 @@ export async function runAgentTask(
       }
       if (!allOk) continue; // 下一轮重规划
 
-      // 本轮计划全部成功 → 任务完成
-      emit('done', `Agent 任务完成：${lastSay || t}`);
-      return finish({ ok: true, text: `Agent 任务完成：${lastSay || t}` });
+      // 本轮计划全部成功 → 不立即宣布完成（「动作成功」≠「任务达成」，此前会虚报）：
+      // 置验收旗标，下一轮以验收模式对照任务目标核对最新界面，真正达成才 TASK_DONE。
+      // 验收轮若拿到补救计划会照常执行（needVerify 已清零），循环直至 maxRounds。
+      needVerify = true;
+      continue;
     }
 
     // 轮数耗尽仍未成功
     if (!settled) {
+      if (needVerify) {
+        // 最后一轮计划全步成功、只是没轮到验收：按完成处理但注明未经最终核对（同验收接口挂掉的降级）
+        const text = `Agent 任务完成：${lastSay || t}（结果未经最终核对）`;
+        emit('done', text);
+        return finish({ ok: true, text });
+      }
       emit('fail', `已达最大轮数（${maxRounds}），任务未完成`);
       return finish({ ok: false, text: `已达最大轮数（${maxRounds}），任务未完成。最后进展：${lastSay || '（无播报）'}` });
     }

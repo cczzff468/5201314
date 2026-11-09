@@ -274,6 +274,11 @@ export default function AgentVoiceBall() {
     }
   }, []);
 
+  /** 直达动作前让会话「出现并可读」的最短停留：喊名唤起必须能看到全屏会话与自己说的话、
+   *  以及助手的应答，之后才收起去切页/执行（修「喊名字全屏会话不出现/一闪而过」） */
+  const SESSION_SHOW_MS = 1400;
+  const sleepBrief = useCallback((): Promise<void> => new Promise<void>((r) => window.setTimeout(r, SESSION_SHOW_MS)), []);
+
   /** Siri 式开场：应一声（分时段随机问候）→ 朗读 → 播完自动开录（应声→聆听闭环）。
    *  仅在新会话（对话流为空）时用，继续上次对话不重复问候；TTS 未配置则立即开录。 */
   const greetOnOpen = useCallback(async (): Promise<void> => {
@@ -348,8 +353,14 @@ export default function AgentVoiceBall() {
       setSessionMsg('');
       try {
         const { runAgentTask } = await import('@/lib/ios/shizuku-agent');
+        // 「再试一次/继续/还是不行」这类模糊指代脱离会话就没法办：把最近对话一并交给
+        // Agent 规划层（recentChat 注入 system prompt），LLM 才知道「再试」的是什么任务
+        const recent = turnsRef.current
+          .slice(-6)
+          .map((t) => `${t.role === 'user' ? '机主' : '助手'}：${t.text}`)
+          .join('\n');
         // 闸拒绝会在同一微任务链里返回；250ms 内有结果即视为被拒（真任务不可能秒完成）
-        const running = runAgentTask(text);
+        const running = runAgentTask(text, { ctx: recent ? { recentChat: recent } : undefined });
         const early = await Promise.race([
           running,
           new Promise<null>((resolve) => window.setTimeout(() => resolve(null), 250)),
@@ -382,7 +393,9 @@ export default function AgentVoiceBall() {
       appendTurnRef.current('user', text);
       // ---- 直达 ①：天气查询（v1.8，纯本地意图零 LLM 延迟）——查城市+写天气 App+朗读一步
       //      到位，修「查天气只开个天气 App 就没了」；「打开天气」（无地点、句首打开动词）
-      //      不算查询，落到直达 ② 只开 App 不播报
+      //      不算查询，落到直达 ② 只开 App 不播报。
+      //      喊名唤起时全屏会话必须先出现（用户看到自己说的话+助手应答，停 1.4s），
+      //      再收起切进天气页——朗读走全局 TTS 栈，收会话后继续播完
       const openLead = /^(帮我打开|给我打开|打开|开启|启动|进入|切到|切换到)/.test(text);
       const wIntent = matchWeatherIntent(text);
       if (wIntent && (wIntent.location || !openLead)) {
@@ -391,6 +404,7 @@ export default function AgentVoiceBall() {
         setThinking(false);
         appendTurnRef.current('agent', rep.reply);
         if (rep.ok) {
+          await sleepBrief(); // 会话可见停留（修喊名直达闪退）
           closeSession(); // App 窗口 z-40 在会话层下：先收会话再切页
           openAppPage('weather');
         }
@@ -398,13 +412,15 @@ export default function AgentVoiceBall() {
         return;
       }
       // ---- 直达 ②：纯打开意图（打开微信/淘宝…）——不进 LLM、不依赖 Shizuku 是否启动，
-      //      直接切**网页内（本项目虚拟手机）**对应应用页面；真实手机应用不会被拉起
+      //      直接切**网页内（本项目虚拟手机）**对应应用页面；真实手机应用不会被拉起。
+      //      会话先出现应答（1.4s）再收起切页，朗读收会话后继续
       const nav = matchOpenAppIntent(text);
       if (nav) {
         const ok = openAppPage(nav.appId);
         const reply = ok ? `好嘞，${nav.label}打开啦~` : `现在不方便打开${nav.label}哦~`;
+        appendTurnRef.current('agent', reply);
+        if (ok) await sleepBrief();
         closeSession();
-        appendTurnRef.current('agent', reply); // 会话流保留记录，下次打开可见
         await speakInSession(reply);
         return;
       }
@@ -424,8 +440,9 @@ export default function AgentVoiceBall() {
             const ok = openAppPage(nav2.appId);
             const reply = ok ? `好嘞，${nav2.label}打开啦~` : `现在不方便打开${nav2.label}哦~`;
             setThinking(false);
-            closeSession();
             appendTurnRef.current('agent', reply);
+            if (ok) await sleepBrief();
+            closeSession();
             await speakInSession(reply);
             return;
           }

@@ -11,9 +11,9 @@
  */
 
 /** 当前最新版本（与 android-shell versionName 保持一致） */
-export const APP_VERSION = '1.8.0';
+export const APP_VERSION = '1.8.1';
 /** 版本号数字（与 android-shell versionCode 保持一致；覆盖安装要求只增不减） */
-export const APP_VERSION_CODE = 16;
+export const APP_VERSION_CODE = 17;
 
 export interface AppReleaseNote {
   version: string;
@@ -24,6 +24,17 @@ export interface AppReleaseNote {
 
 /** 版本历史（新→旧；设置 › APP 更新 页渲染，最新一条即当前版本） */
 export const APP_RELEASE_NOTES: AppReleaseNote[] = [
+  {
+    version: '1.8.1',
+    date: '2026-11-10',
+    items: [
+      '喊名唤起更稳：唤醒监听改常驻麦克风（不再每轮重开漏听），喊名字后全屏会话稳定自动出现；「小灵打开微信」也会先看到会话应答再进应用',
+      '智能体不再「只做一半还报完成」：宣布完成前先验收——对照任务目标核对界面，备忘录没记上/内容没输入会自动补救，没做完就如实说',
+      '修「记备忘录点成添加文件夹」：写备忘录的完整操作示例进规划指南，点错相近按钮会在反馈里提示并用全称重试',
+      '语音会话的模糊指令带上文：对「小灵」说「再试一次」，现在知道要重试的是什么任务',
+      '喊名唤醒录音上限 4s→6s：唤醒词带一句话任务不再被截断',
+    ],
+  },
   {
     version: '1.8.0',
     date: '2026-11-10',

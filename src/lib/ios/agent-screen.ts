@@ -343,11 +343,17 @@ export function clickScreenDom(target: string): ScreenDomResult {
   const items = collectClickables(root, root.getBoundingClientRect());
   let best: ClickableItem | null = null;
   let bestScore = 0;
+  /** 同为包含匹配（score<3）时的其它候选项（歧义提示用） */
+  const others: { label: string; score: number }[] = [];
   for (const it of items) {
     const s = scoreMatch(it.label, t);
+    if (s <= 0) continue;
     if (s > bestScore || (s === bestScore && s > 0 && best && it.area < best.area)) {
+      if (best && bestScore >= s) others.push({ label: best.label, score: bestScore });
       best = it;
       bestScore = s;
+    } else if (best) {
+      others.push({ label: it.label, score: s });
     }
   }
   if (!best || bestScore === 0) {
@@ -370,7 +376,17 @@ export function clickScreenDom(target: string): ScreenDomResult {
     }
   }
   dispatchTap(el);
-  return { ok: true, text: `已点击「${best.label}」` };
+  // 歧义护栏（v1.7.2 修「写备忘录点成新建文件夹」）：目标不是全称精确匹配、且界面上还有
+  // 其它文字相近的候选时，把候选列进成功反馈——LLM（含验收轮）能看到并立即纠正
+  let hint = '';
+  if (bestScore < 3 && others.length > 0) {
+    const near = [...new Set(others.filter((o) => o.score >= 2).map((o) => o.label))]
+      .slice(0, 3)
+      .map((l) => `「${l}」`)
+      .join(' ');
+    if (near) hint = `（注意：界面上还有相近元素 ${near}——如点错了，请用完整名称重试）`;
+  }
+  return { ok: true, text: `已点击「${best.label}」${hint}` };
 }
 
 // ============================================================
