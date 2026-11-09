@@ -11,9 +11,9 @@
  */
 
 /** 当前最新版本（与 android-shell versionName 保持一致） */
-export const APP_VERSION = '1.9.0';
+export const APP_VERSION = '1.9.1';
 /** 版本号数字（与 android-shell versionCode 保持一致；覆盖安装要求只增不减） */
-export const APP_VERSION_CODE = 20;
+export const APP_VERSION_CODE = 21;
 
 export interface AppReleaseNote {
   version: string;
@@ -24,6 +24,16 @@ export interface AppReleaseNote {
 
 /** 版本历史（新→旧；设置 › APP 更新 页渲染，最新一条即当前版本） */
 export const APP_RELEASE_NOTES: AppReleaseNote[] = [
+  {
+    version: '1.9.1',
+    date: '2026-11-10',
+    items: [
+      '修复 APP 内通知不能用：测试通知现直发 Android 系统通知栏（原生通道），不再误报「页面构造与 Service Worker 被拦截」；发通知时不再读 WebView 里恒为拒绝状态的浏览器权限',
+      '清理误报「已在设置中关闭系统通知」：旧版本误落的推送诊断在 APP 内自动清除，通知页不再显示误导红字',
+      '测试通知失败原因分流：权限未授/APP 版本过旧（附升级引导）/浏览器策略，各自给对应解法文案',
+      'APP 内 AI 来电/消息类系统通知同样受益：灵动岛广播兜底与 SSE 推送链路在 APP 内现在也能真弹通知栏',
+    ],
+  },
   {
     version: '1.9.0',
     date: '2026-11-10',

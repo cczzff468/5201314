@@ -134,8 +134,8 @@ import { copyApkLink, getApkUrl, launchApkDownload } from '@/lib/ios/apk-downloa
 // v1.4.2 APP 更新：自动检查 + 红点 + 版本历史
 import { useAppUpdate } from '@/lib/ios/app-update';
 import { APP_RELEASE_NOTES, APP_VERSION } from '@/lib/app-version';
-import { lastPushStatus, setupPushSubscription, teardownPushSubscription } from '@/lib/ios/push-client';
-import { showSystemNotification, querySystemNotifyPermission, requestSystemNotifyPermission } from '@/lib/ios/system-notify';
+import { clearPushStatus, lastPushStatus, setupPushSubscription, teardownPushSubscription } from '@/lib/ios/push-client';
+import { showSystemNotification, querySystemNotifyPermission, requestSystemNotifyPermission, type SystemNotifyChannel } from '@/lib/ios/system-notify';
 import { deleteOfflineModel, initOfflineAsr, useOfflineAsr } from '@/lib/ios/offline-asr';
 import { isSysNotifyEnabled, setSysNotifyEnabled } from '@/lib/ios/island-notify';
 import {
@@ -1604,8 +1604,9 @@ function NotificationPage({ onBack }: { onBack: () => void }) {
       dead = true;
     };
   }, []);
-  // 测试通知结果：ok=已弹出 / fail=构造失败（iframe 权限策略拦截）
-  const [testResult, setTestResult] = useState<'idle' | 'busy' | 'ok' | 'fail'>('idle');
+  // 测试通知结果：ok=已弹出（testChannel 区分原生/网页通道）/ fail-perm=权限未授 / fail-channel=所有通道不可用
+  const [testResult, setTestResult] = useState<'idle' | 'busy' | 'ok' | 'fail-perm' | 'fail-channel'>('idle');
+  const [testChannel, setTestChannel] = useState<SystemNotifyChannel>(null);
   // 预览面板 iframe 提示：iframe 里系统通知/推送常被浏览器权限策略拦截
   // （本页在客户端交互后才挂载，惰性初始化读 window 安全；跨域访问 window.top 抛错 → 必在 iframe）
   const [inIframe] = useState<boolean>(() => {
@@ -1616,8 +1617,16 @@ function NotificationPage({ onBack }: { onBack: () => void }) {
     }
   });
   // 推送订阅诊断（真实环境失败原因，不再静默）：setupPushSubscription 每次尝试后都会落盘
-  const [pushState, setPushState] = useState<string>(() => lastPushStatus()?.state ?? '');
-  const [pushDetail, setPushDetail] = useState<string>(() => lastPushStatus()?.detail ?? '');
+  // v1.9.1：APK 原生壳里 Web Push 诊断不再适用（旧 bundle 时代误落的「已在设置中关闭系统通知」
+  // 永不更新、永远误导）——挂载时直接清掋旧诊断并不再展示推送诊断行
+  const [pushState, setPushState] = useState<string>(() => {
+    if (isNativePerception()) {
+      clearPushStatus();
+      return '';
+    }
+    return lastPushStatus()?.state ?? '';
+  });
+  const [pushDetail, setPushDetail] = useState<string>(() => (isNativePerception() ? '' : (lastPushStatus()?.detail ?? '')));
   // 页内 toast（关闭开关后的说明）
   const [toastMsg, showToast] = useLocalToast();
 
@@ -1640,8 +1649,11 @@ function NotificationPage({ onBack }: { onBack: () => void }) {
       showToast('已关闭系统通知，应用内提醒不受影响');
       // 关闭系统级通知的同时退订 Web Push（服务端离线不再向本浏览器推送）
       const s = await teardownPushSubscription();
-      setPushState(s.state);
-      setPushDetail(s.detail ?? '');
+      // v1.9.1：APK 原生壳不落退订诊断（退订是 Web Push 语义，原生壳走通知栏通道）
+      if (!isNativePerception()) {
+        setPushState(s.state);
+        setPushDetail(s.detail ?? '');
+      }
       return;
     }
     if (typeof window === 'undefined') {
@@ -1669,35 +1681,34 @@ function NotificationPage({ onBack }: { onBack: () => void }) {
     }
   };
 
-  /** 测试系统通知：走 SW showNotification 优先（Android Chrome 页面里无 Notification 构造器，
-   *  直接 new 会抛 Illegal constructor——必须走 Service Worker 通道），桌面无 SW 时落到页面构造器 */
+  /** 测试系统通知（v1.9.1 通道链重构）：showSystemNotification 现已内置原生 localNotify 通道——
+   *  APK 内真实弹系统通知栏（旧版 WebView 里 SW/构造器两通道全不可用必败，误报浏览器策略问题）；
+   *  失败原因细分：权限未授（fail-perm）vs 通道不可用（fail-channel，原生壳=壳过旧需升级） */
   const fireTestNotification = async (): Promise<void> => {
-    if (typeof window === 'undefined' || typeof Notification === 'undefined') {
-      setTestResult('fail');
+    if (typeof window === 'undefined') {
+      setTestResult('fail-channel');
       return;
     }
     // 系统级通知总闸：开关关闭时测试通知同样不投递（与真实通知同口径）
     if (!enabled || !isSysNotifyEnabled()) {
-      setTestResult('fail');
+      setTestResult('fail-perm');
       return;
     }
-    // v1.6.1：APK 内 Notification.permission 恒 'denied'，改读真实状态（原生已授权 → 走
-    // localNotify 原生通道也能弹；此处 showSystemNotification 的 SW/构造器两通道在 WebView
-    // 内均不可用，测试通知在 APK 内预期 fail——原生通道的真实性由通知栏实际通知验证）
     const perm = await querySystemNotifyPermission();
     if (perm !== 'granted') {
-      setTestResult('fail');
+      setTestResult('fail-perm');
       return;
     }
     setTestResult('busy');
     const channel = await showSystemNotification('测试通知', {
-      body: '系统通知通道正常：切走标签页 / 最小化时，AI 的新消息会像这样弹出。',
+      body: '系统通知通道正常：切走 APP / 最小化时，AI 的新消息会像这样弹出。',
       tag: `test-${Date.now()}`,
       icon: '/icons/chat.png',
       badge: '/icons/chat.png',
       onclick: () => window.focus(),
     });
-    setTestResult(channel ? 'ok' : 'fail');
+    setTestChannel(channel);
+    setTestResult(channel ? 'ok' : 'fail-channel');
   };
 
   return (
@@ -1744,13 +1755,23 @@ function NotificationPage({ onBack }: { onBack: () => void }) {
       </div>
       {testResult === 'ok' && (
         <p className="mt-2 px-1 text-[12px] leading-relaxed text-muted-foreground">
-          已发送：如果没看到弹窗，检查系统/浏览器是否开了「勿扰」或隐藏了通知横幅。
+          {testChannel === 'native'
+            ? '已发送到系统通知栏：下拉通知栏查看；APP 切后台/最小化时，AI 的新消息会像这样弹出。'
+            : '已发送：如果没看到弹窗，检查系统/浏览器是否开了「勿扰」或隐藏了通知横幅。'}
         </p>
       )}
-      {testResult === 'fail' && (
+      {testResult === 'fail-perm' && (
         <p className="mt-2 px-1 text-[12px] leading-relaxed" style={{ color: IOS_RED }}>
-          系统通知未能弹出：页面构造与 Service Worker 两条通道都被拦截。若在预览面板里请用新标签页打开；
-          独立部署时多为浏览器策略限制（Android 需允许站点通知）。
+          {isNativePerception()
+            ? '通知权限未开启：请在系统设置 › 应用 › AI Phone › 通知 中允许；Android 13+ 也可重新打开上方开关触发系统授权弹窗。'
+            : '通知权限被浏览器拒绝：请先在浏览器站点设置中允许通知，再发送测试。'}
+        </p>
+      )}
+      {testResult === 'fail-channel' && (
+        <p className="mt-2 px-1 text-[12px] leading-relaxed" style={{ color: IOS_RED }}>
+          {isNativePerception()
+            ? '测试通知未能下发：当前 APP 版本过旧（需 v1.5.0+），请到 设置 › APP 更新 升级后重试。'
+            : '系统通知未能弹出：页面构造与 Service Worker 两条通道都被拦截。若在预览面板里请用新标签页打开；独立部署时多为浏览器策略限制（Android 需允许站点通知）。'}
         </p>
       )}
       {pushState && pushStatusText(pushState, pushDetail) && (

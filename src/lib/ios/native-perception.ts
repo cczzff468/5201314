@@ -317,6 +317,35 @@ export async function requestNotificationPermission(): Promise<RuntimePermResult
   return p ? p.requestNotificationPermission() : null;
 }
 
+/**
+ * 弹一条 Android 系统通知栏通知（v1.9.1，设置 › 通知「发送测试通知」及 showSystemNotification 原生通道共用）：
+ *
+ * - 非原生壳 → null（调用方回落 Web 通道）；
+ * - v1.5.0+ 壳有 localNotify @PluginMethod → nativeCall 拿真实回执，返回 true=已交给系统通知栏
+ *   （Android 13+ 通知未授权时原生侧静默忽略并回 ok——语义与真实通知一致，权限状态由
+ *   notificationPermission/querySystemNotifyPermission 单独反映）；
+ * - 旧壳（< v1.5.0）无该方法 → 原生 Bridge 报错或超时 → false（调用方给「升级 APP」引导，
+ *   不再误报浏览器策略问题）。
+ */
+export async function localNotify(opts: {
+  title: string;
+  body?: string;
+  tag?: string;
+  /** 点击通知落地的站内路径（原生 contentIntent 打开 APP 后经 'local-notify-open' 事件回传） */
+  url?: string;
+  /** 点击直达目标（island-notify NotifyTarget 同构纯对象，随事件回传给导航总线） */
+  target?: unknown;
+}): Promise<boolean | null> {
+  const p = await nativePlugin();
+  if (!p) return null;
+  try {
+    await nativeCall('localNotify', { title: opts.title, body: opts.body, tag: opts.tag, url: opts.url, target: opts.target }, 5000);
+    return true;
+  } catch {
+    return false; // 旧壳无该方法 / 桥异常
+  }
+}
+
 /** 原生感知插件：优先官方注入的代理（同源页面），否则自建协议直连（跨域页面） */
 async function nativePlugin(): Promise<CapPlugin | null> {
   if (!isNativePerception()) return null;

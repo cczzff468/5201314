@@ -85,7 +85,7 @@ export interface SystemNotifyOptions {
   onclick?: () => void;
 }
 
-export type SystemNotifyChannel = 'sw' | 'page' | null;
+export type SystemNotifyChannel = 'native' | 'sw' | 'page' | null;
 
 // ---------------- v1.6.1 系统通知权限统一判定（APK 原生壳修复「明明授权了却说已关闭」） ----------------
 // WebView 里 Web Notification API 不映射 Android 运行时权限：Notification.permission 恒为
@@ -137,10 +137,32 @@ export async function requestSystemNotifyPermission(): Promise<SystemNotifyPermi
 }
 
 /**
- * 弹一条系统通知：SW 通道优先（全平台一致、Android 唯一正路）→ 页面构造器兜底。
- * 返回实际使用的通道；null = 两条路都失败（调用方自行降级应用内弹窗）。
+ * 弹一条系统通知（v1.9.1 通道链重构）：
+ * ① 原生壳 → Android localNotify 通知栏直发（拿真实回执；【不读 Web permission】——
+ *    WebView 里 Notification.permission 恒 'denied'，旧版在这里直接 return null 导致
+ *    APP 内测试通知必败，而真实通知走的 localNotify 反而是好的）；
+ * ② SW 通道（全平台一致、Android 浏览器唯一正路）→ ③ 页面构造器兜底（桌面）。
+ * 返回实际使用的通道；null = 所有路都失败（调用方自行降级应用内弹窗/给环境文案）。
  */
 export async function showSystemNotification(title: string, options: SystemNotifyOptions = {}): Promise<SystemNotifyChannel> {
+  // ① 原生壳：Android 通知栏直发（双权限闸/点击直达由原生侧处理；旧壳无方法返回 false）
+  try {
+    const np = await import('./native-perception');
+    if (np.isNativePerception()) {
+      const ok = await np.localNotify({
+        title,
+        body: options.body,
+        tag: options.tag ?? `sys-${Date.now()}`,
+        // 点击落地：有显式 url 用之；data 里带 target（与 SW 通道同源）则首页+target 直达
+        url: typeof (options.data as { url?: unknown } | null)?.url === 'string' ? (options.data as { url: string }).url : '/',
+        target: (options.data as { target?: unknown } | null)?.target,
+      });
+      if (ok) return 'native';
+      // false = 旧壳无 localNotify 方法 → 落 Web 通道（也必败，但调用方文案能分流「壳过旧」）
+    }
+  } catch {
+    /* 动态加载失败/桥异常 → 落 Web 通道 */
+  }
   if (typeof window === 'undefined' || !('Notification' in window)) return null;
   if (Notification.permission !== 'granted') return null;
   const payload: NotificationOptions & { data?: unknown } = {

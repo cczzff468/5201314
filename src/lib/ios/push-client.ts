@@ -74,6 +74,19 @@ export function lastPushStatus(): PushSetupStatus | null {
   }
 }
 
+/**
+ * 清除落盘的订阅诊断（v1.9.1）：APK 原生壳里 Web Push 诊断（旧 bundle 时代误落的
+ * 「已在设置中关闭系统通知」等）不再适用且永不更新 —— 通知页挂载时清掉，避免用户
+ * 永远看到一条来自旧版本的误导性红字。纯浏览器环境不清（诊断仍有效）。
+ */
+export function clearPushStatus(): void {
+  try {
+    window.localStorage.removeItem(STATUS_KEY);
+  } catch {
+    // 存储不可用忽略
+  }
+}
+
 let tried = false;
 
 export interface PushSetupOptions {

@@ -2361,3 +2361,26 @@ Stage Summary:
 - 隐私：音乐 API Key 与网易云登录凭据 AES-GCM 落盘加密，备份导出自动解密兼容换机
 - 深色：24 屏运行时审计收口（2 处真漏+原生控件+autofill），浅色零回归
 - 关键文件：agent-voice.ts（通道 B 重写+下载引导）、agent-voice-ball.tsx（续听+barge-in）、settings.tsx（OfflineAsrDownloadInline+连续对话开关）、music-api.ts/music-store.ts/backup.ts（加密+备份兼容）、globals.css（color-scheme+autofill）、notes-pages.tsx/notes-ui.tsx（内联色修复）、app-version.ts（1.9.0/20）
+
+## 2026-11-10 · v91（网页端 v1.9.1）APP 内通知不能用根治：测试通知直发系统通知栏 + 旧误报清理
+
+Task ID: 41
+Agent: 主控 Agent（Z.ai Code）
+Task: 用户真机反馈「弄成 APP 以后通知不能用」+ 截图：通知页点「发送测试通知」必红字「页面构造与 Service Worker 两条通道都被拦截」+「已在设置中关闭系统通知」+「重新尝试订阅后台推送」
+
+Work Log:
+- [根因①·测试通知没接原生通道] showSystemNotification 只有 SW showNotification/new Notification 两条 Web 通道——APK WebView 里都不可用必返回 null → 测试通知必 fail；而真实通知（notifyIfHidden）走的原生 localNotify 通道（v1.5.0+）其实是好的——用户被测试按钮误导以为通知全坏；且 showSystemNotification 开头有 `Notification.permission !== 'granted'` 前置闸（WebView 恒 'denied'）直接 return null
+- [根因②·误报诊断永不清理] 「已在设置中关闭系统通知」= push-client 旧 bundle 时代落盘的 Web Push 订阅诊断（localStorage ios-push-status）；v87 修复只挡了新写入（setupPushSubscription 原生壳短路不落盘）没清旧值，通知页挂载 useState 直接读旧值 → 红字+重试链接永远显示
+- [修复①·system-notify.ts] showSystemNotification 通道链加「原生 localNotify 最高优先」：isNativePerception 时先走原生（不读 Web permission 前置闸），SystemNotifyChannel 类型 +'native'；点击落地 url/data.target 透传原生（与 SW 通道同源）；原生失败（旧壳无方法）才落 Web 通道
+- [修复②·native-perception.ts] 新增带真实回执的 localNotify() 封装：nativeCall('localNotify',…,5s 超时)——非原生壳 null / v1.5.0+ 壳 true（Android 13+ 通知未授权时原生侧静默 ok，权限状态由 notificationPermission 单独反映）/ 旧壳 false（调用方给升级引导）
+- [修复③·push-client.ts] 新增 clearPushStatus()：清除落盘的 Web Push 诊断（APK 内不适用且永不更新）
+- [修复④·settings.tsx 通知页] ①挂载时原生壳清旧诊断（pushState/pushDetail initializer 内 isNativePerception→clearPushStatus+空串）——红字「已在设置中关闭系统通知」与「重新尝试订阅后台推送」从此不再出现；②handleToggle 关闭分支原生壳不落退订诊断；③fireTestNotification 失败细分 fail-perm（权限未授）/fail-channel（通道不可用）+ testChannel 记录实际通道；④文案按环境分流：ok+native「已发送到系统通知栏：下拉通知栏查看…」/ fail-perm+native「系统设置›应用›AI Phone›通知 中允许…」/ fail-channel+native「当前 APP 版本过旧（需 v1.5.0+），请到 设置›APP 更新 升级后重试」/ 浏览器侧文案保留（fail-perm 新增浏览器权限引导）
+- [连带增强] island-notify 广播兜底直发、notify-sse 前台 SSE 链路此前在 APP 内静默失败——经 showSystemNotification 原生通道现在都能真弹通知栏（单调用点无双发风险）
+- [验证·E2E] 浏览器三路径全通：①浏览器态（无桥）：旧诊断保留（预期）+ fail-channel 浏览器文案不回归；②mock 原生桥：挂载即清旧误报（红字/重试链接消失 ✓）→ 测试通知 → mockCalls=[…, localNotify] → 「已发送到系统通知栏」✓；③mock 拒答 localNotify（旧壳模拟）→ 5s 超时 → fail-channel → 「当前 APP 版本过旧（需 v1.5.0+）」升级引导 ✓
+- [版本] app-version.ts 1.9.1/21 + 发版说明 4 条；APK 不重打（无原生改动，壳 v1.8.2/18 桥齐全，网页 bundle 更新即生效）
+- [边界] 真机回归点：APP 内重进 → 通知页旧红字应消失 → 点「发送测试通知」→ 通知栏应真弹（Android 13+ 需通知权限已授，未授会引导系统设置）；旧壳（<v1.5.0，2026-03 前下载）用户会看到升级引导
+
+Stage Summary:
+- APP 内「通知不能用」三根因一锅端：测试通知接入原生 localNotify 通道（WebView 前置权限闸绕开）+ 旧 bundle 误落的推送诊断挂载即清 + 失败文案按环境/原因分流（含旧壳升级引导）
+- 顺带修复 island-notify/notify-sse 在 APP 内静默失败的历史问题——AI 来电/消息系统通知在 APP 内真正可用
+- 关键文件：system-notify.ts（原生通道+类型）、native-perception.ts（+localNotify 带回执封装）、push-client.ts（+clearPushStatus）、settings.tsx（通知页四处分流）、app-version.ts（1.9.1/21）
