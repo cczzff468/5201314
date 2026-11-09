@@ -1012,7 +1012,7 @@ function AgentVoiceCard() {
             <span className="min-w-0 flex-1">
               <span className="block truncate text-[16px]">任务后追问窗口</span>
               <span className="mt-0.5 block text-[11.5px] leading-snug text-muted-foreground">
-                语音任务结束后面板保持 10 秒，可直接追问，无需再喊唤醒名
+                语音任务结束后语音会话自动重开并播报结果，可直接继续说下一个任务，无需再喊唤醒名
               </span>
             </span>
             <AutonomySwitch

@@ -11,9 +11,9 @@
  */
 
 /** 当前最新版本（与 android-shell versionName 保持一致） */
-export const APP_VERSION = '1.6.1';
+export const APP_VERSION = '1.7.0';
 /** 版本号数字（与 android-shell versionCode 保持一致；覆盖安装要求只增不减） */
-export const APP_VERSION_CODE = 12;
+export const APP_VERSION_CODE = 13;
 
 export interface AppReleaseNote {
   version: string;
@@ -24,6 +24,17 @@ export interface AppReleaseNote {
 
 /** 版本历史（新→旧；设置 › APP 更新 页渲染，最新一条即当前版本） */
 export const APP_RELEASE_NOTES: AppReleaseNote[] = [
+  {
+    version: '1.7.0',
+    date: '2026-11-09',
+    items: [
+      '语音会话全新改版：像 Siri 一样的全屏界面——顶部彩虹光球、对话流、底部输入栏，说话/打字都能用',
+      '语音智能体能聊天了：问候、闲聊、提问直接用 TA 的性格回复（和微信里同一个人、同一副人设），回复还会朗读出来',
+      '智能体能打开手机里的任何应用了：微信/淘宝/联系人/备忘录/美团…说到就打开，还能看界面、点按钮、打字、翻页',
+      '智能体什么都能做：说「创建一个联系人叫XX、性格XX」它就自己打开通讯录一步步建好；发消息、写备忘录、写提醒、搜商品都能自动完成',
+      '悬浮球美化：Siri 同款彩虹渐变环 + 深色玻璃质感，更简约好看',
+    ],
+  },
   {
     version: '1.6.1',
     date: '2026-11-09',

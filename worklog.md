@@ -2289,3 +2289,26 @@ Work Log:
 Stage Summary:
 - 三问题一锅端：RECORD_AUDIO 补声明（授权框从此会弹）+ 录音前置原生拿权（说话不再异常退出/不再误报无法用麦克风）+ 通知状态读 Android 真值（授权了就显示开启）
 - 关键文件：AndroidManifest.xml、NativePerceptionPlugin.java（+5 方法）、native-perception.ts/system-notify.ts（+统一权限入口）、agent-voice.ts/voice-input.tsx（前置拿权）、settings.tsx/push-client.ts（真实状态）、app-version.ts/build.gradle（1.6.1/12）
+
+## 2026-11-09 · v88（APK v1.7.0）Siri 式语音会话 + 能聊天 + 应用内自动化 + 悬浮球美化
+
+Task ID: 38
+Agent: 主控 Agent（Z.ai Code）
+Task: 用户需求：①语音唤起界面改成苹果 Siri 那样（附截图）②语音智能体能聊天③能打开本项目内任何 APP 界面（非系统界面）④给一句指令（如创建联系人+性格）它自己完成、什么都能做⑤悬浮球再美化（简约美观）
+
+Work Log:
+- [1·agent-screen.ts 新建 500 行] 应用内 DOM 自动化层（uiautomator 看不到 WebView 内部，Shizuku 点不到虚拟手机界面——纯 DOM 级补齐）：①SCREEN_APPS 27 应用注册表（id+中文名+别名）+ resolveScreenApp（精确→别名→双向包含匹配）+ SCREEN_APPS_DOC 注入 prompt；②openScreenApp（openApp/switchToApp 分派 + 轮询等 phase==='open' ≤5s + 600ms 渲染 grace；锁屏/熄屏/闹钟/来电弹层守卫）；③observeScreenDom（语义可交互元素 querySelectorAll + cursor:pointer 兜底扫 ≤4000 节点；遮挡检查 elementFromPoint 中心点顶层必须是自身/子孙/祖先——App 窗口下主屏图标/弹层下条目全滤掉；同文本去重保最小面积；输出「可点元素 40 上限+输入框 8」紧凑清单）④clickScreenDom（文字精确 3 分/包含 2 分评分 + 最小面积优选；视口外先 scrollIntoView；dispatchTap 全事件序列 pointerdown/mousedown/touchstart/touchend/pointerup/mouseup/click 工厂闭包构造——React 合成事件与 onTouchEnd 自定义组件通吃；找不到回喂现有元素清单教 LLM 换词）；⑤typeScreenDom（聚焦优先否则首个可见输入框；React 受控组件走 prototype 原生 setter + input/change 事件——实测 13800138000 真落微信手机号框；contenteditable 走全选+execCommand insertText）；⑥scrollScreenDom（最大可见滚动容器 scrollBy + wheel 事件兜底）；⑦window.__agentScreen 调试口（console/E2E 验证）
+- [2·shizuku-agent.ts 扩展] 新增 5 动作 openScreen/uiObserve/uiClick/uiType/uiScroll（DOM 级不设单项能力闸——任务级 agent 闸已覆盖；不在 MUTATING_AGENT_ACTIONS——系统 dump 缓存不受 WebView 内部变化影响）；AGENT_ACTIONS_DOC 14~18 条 + 行为准则「两类任务分清」（机主手机内应用→openScreen+ui*，系统级真实 App→openApp+clickElement）+ 建联系人完整示例步序；ACTION_ALIASES +17 别名（openscreen/打开界面/uiobserve/看界面/uiclick/点界面/uitype/界面输入/uiscroll/翻页…）；settleAfterStep 应用内分支（openScreen/uiObserve 0 等待——openScreenApp 自带落定，uiClick/uiScroll 900ms、uiType 500ms 短固定等待，不走 uiautomator 轮询）；VISUAL_VERIFY_ACTIONS +openScreen/uiClick（截屏能看到虚拟手机内容，VLM 可复核）
+- [3·agent-chat.ts 新建 210 行] 语音会话大脑（一次 LLM 调用同时完成闲聊回复与任务识别）：system = buildPersonaSystemPrompt（联系人第一位 char 非小号档案，channel:'语音助手'，与微信聊天同一副七要素人设）+ 语音场景约束（口语化 1~3 句/无 Markdown/无表情/会朗读）+ 双重职责与输出协议（{"mode":"chat","reply"} | {"mode":"task","task"}）；人设 60s 缓存；extractJsonObject 宽松解析 + 三级兜底（JSON 缺壳整段当回复/任务动词 TASK_VERB_RE 当任务/全挂 CHAT_FALLBACK 文案）；调用照抄 planWithLLM 纯文本流聚合（maxTokens≥600，45s 看门狗）
+- [4·agent-voice-ball.tsx 重写 733 行] Siri 全屏会话替代旧底部面板：①布局对照用户截图——黑玻璃 bg-black/85+backdrop-blur-2xl、顶部 170×112 彩虹光球（conic 青→紫→粉→橙→黄→绿 慢旋转 9s + 黑色椭圆主体 + 三层径向彩虹内高光 + 忙态呼吸光晕）、左上 X 关闭钮、中部对话流（用户右侧白/15 气泡、助手左侧纯文本 Siri 式、距底<80px 自动滚动）、底部输入栏（+清空对话 / 「问小灵点什么，或直接下达任务」输入框回车发送 / 麦克风录音-红色方块停止）；②routeUtterance 统一路由：识别/打字 → appendTurn(user) → voiceTurn → chat=对话流+TTS 朗读（speakInSession：isTtsConfigured+stopSpeaking token 打断+speakUserTts）/ task=execute 交接；③execute 收会话→runAgentTask→250ms race 判闸拒→被拒重开会话原因进对话流；④追问模式升级：任务终态重开全屏会话（结果进对话流+15s 无操作自动收起+任意触摸 bumpFollowup 续期）替代旧 10s 面板；⑤悬浮球美化：Siri 同款彩虹渐变环（conic 7s 慢旋转）+ -inset-5 blur-md 外发光 + 深色玻璃 inset 主体 + 内缘径向高光 + Mic 白图标；⑥skipAutoStart 保留（追问重开/isSpeaking 时不自动开录防吃 TTS）；⑦routeRef/recRef 声明序修正（react-hooks/immutability 编译器规则——routeUtterance 经 routeRef 透传给 recorder onResult，打破声明环）；⑧agent-voice-debug=1 localStorage 调试开关（浏览器预览显示球/会话，真任务仍被原生闸如实拒绝）
+- [5·settings.tsx] 追问窗口文案更新（语音会话自动重开+播报结果+直接继续说）；lint 基线 3 条原样零新增
+- [6·验证] tsc 全库 0 错误；eslint 改动 4 文件全 0（settings 3 条基线）；agent-browser E2E 9 步：debug 开球→点球开全屏会话（截图对照参考图：光球/关闭钮/输入栏/状态行全对位）→打字「你好呀今晚吃什么呢」→chat 回复气泡渲染→mock task 路由→「打开微信」→会话收起→Agent 原生闸拒绝→会话自动重开原因进对话流→__agentScreen.openScreenApp('微信')真开应用→observeScreenDom 遮挡过滤后仅微信页元素（修复前混入主屏图标 11 条）→clickScreenDom('请填写手机号码')+typeScreenDom('13800138000')真落输入框→resolveScreenApp 别名 6 例（淘宝/contacts/小屋/X论坛/微信app/不存在→null）→uiScroll ✓；dev.log 无编译/运行错误（仅启动期 EADDRINUSE 旧实例残留无害）
+- [7·版本] app-version.ts 1.7.0/13 + 发版说明 5 条；build.gradle versionCode 13/versionName 1.7.0
+- [边界] 真机回归点：①语音说话（v87 已修授权链）→识别→聊天回复 TTS 朗读出声；②任务执行 openScreen/uiClick 真机 WebView 手感（DOM 自动化与浏览器同源，理论一致）；③追问 15s 自动收起节奏；④连续唤醒喊名字开会话（task=null 路径）；浏览器内 runAgentTask 闸拒绝文案为预期行为
+
+Stage Summary:
+- 语音会话 Siri 化：全屏黑玻璃+彩虹光球+对话流+输入栏，对照用户截图逐元素落地
+- 能聊天：voiceTurn 一次调用兼聊天回复与任务识别，人设与微信聊天同源（同一个 TA）
+- 能开任何应用+什么都能做：agent-screen.ts DOM 自动化五动作（开屏/观察/点击/输入/滚动）接入 Agent 规划回路，建联系人/发消息/写备忘录类任务全自主完成
+- 悬浮球美化：彩虹渐变环+深色玻璃+呼吸光环
+- 关键文件：agent-screen.ts/agent-chat.ts（新）、agent-voice-ball.tsx（重写 733 行）、shizuku-agent.ts（+5 动作+prompt）、settings.tsx（文案）、app-version.ts/build.gradle（1.7.0/13）

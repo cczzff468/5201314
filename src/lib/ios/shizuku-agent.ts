@@ -69,6 +69,14 @@ import { AUTONOMY_CAPS, getAutonomyConfig, isCapEnabled, visionAsk } from './shi
 import { extractJsonObject } from './call-upstream';
 import { useSettings } from '@/lib/ios/store';
 import { notifyIfHidden } from './local-notify';
+import {
+  SCREEN_APPS_DOC,
+  clickScreenDom,
+  observeScreenDom,
+  openScreenApp,
+  scrollScreenDom,
+  typeScreenDom,
+} from './agent-screen';
 
 // ============================================================
 // B1. Agent 运行状态 store（轻量 pub/sub + useSyncExternalStore）
@@ -488,6 +496,12 @@ const MUTATING_AGENT_ACTIONS = new Set([
   'doubleClick',
   'drag',
 ]);
+
+/**
+ * 应用内动作集合（v1.7.0）：DOM 级操作「项目内 APP 界面」，不经过 Shizuku/uiautomator——
+ * 系统级 dump 缓存不受它们影响（WebView 在系统树里是同一个节点），settle 单独走短等待。
+ */
+const IN_APP_AGENT_ACTIONS = new Set(['openScreen', 'uiObserve', 'uiClick', 'uiType', 'uiScroll']);
 
 /** 任何屏幕变更后调用：缓存立即作废（进行中的旧 dump 落地时也会被 generation 拦下不入缓存） */
 function invalidateDumpCache(): void {
@@ -1194,10 +1208,28 @@ export async function execAgentStep(step: AgentStep): Promise<StepResult> {
         r = { ok: true, text: obs.summary };
         break;
       }
+      // ---- v1.7.0 应用内界面动作（DOM 级，不设单项能力闸——任务级 agent 闸已覆盖）----
+      case 'openScreen':
+        r = await openScreenApp(args);
+        break;
+      case 'uiObserve': {
+        const o = observeScreenDom();
+        r = { ok: o.ok, text: o.text };
+        break;
+      }
+      case 'uiClick':
+        r = clickScreenDom(args);
+        break;
+      case 'uiType':
+        r = typeScreenDom(args);
+        break;
+      case 'uiScroll':
+        r = scrollScreenDom(args);
+        break;
       default:
         r = {
           ok: false,
-          text: `未知动作「${action}」（可用：openApp/clickElement/tapPoint/inputTextToFocus/pressEnter/pressDelete/back/scroll/wait/lookScreen/longPress/doubleClick/drag）`,
+          text: `未知动作「${action}」（可用：openApp/clickElement/tapPoint/inputTextToFocus/pressEnter/pressDelete/back/scroll/wait/lookScreen/longPress/doubleClick/drag/openScreen/uiObserve/uiClick/uiType/uiScroll）`,
         };
     }
   } catch (e) {
@@ -1295,7 +1327,13 @@ const AGENT_ACTIONS_DOC = `可用动作（plan 数组元素，args 一律 string
 10. {"action":"lookScreen","args":""} —— 观察当前屏幕（结果在下一轮反馈里给你，不确定界面就先用它）
 11. {"action":"longPress","args":"消息"} —— 长按（原地按住 800ms）：长按聊天消息弹菜单、长按图标呼出副选项；args 同 clickElement（文字目标或 "x,y"）
 12. {"action":"doubleClick","args":"540,1200"} —— 双击（两次快速点击）：双击点赞、双击快进；args 同 clickElement（文字目标或 "x,y"）
-13. {"action":"drag","args":"200,1800,880,1800,700"} —— 拖拽：拖进度条/音量滑块/侧边栏/卡片排序；args "x1,y1,x2,y2[,毫秒]"（默认 700ms，坐标只来自观察反馈里的元素信息）`;
+13. {"action":"drag","args":"200,1800,880,1800,700"} —— 拖拽：拖进度条/音量滑块/侧边栏/卡片排序；args "x1,y1,x2,y2[,毫秒]"（默认 700ms，坐标只来自观察反馈里的元素信息）
+——以下为「机主手机内应用界面」动作（虚拟手机里渲染的 App：微信/淘宝/联系人/备忘录/美团等）——
+14. {"action":"openScreen","args":"contacts"} —— 打开机主手机里的应用界面。args 填应用 id 或中文名：${SCREEN_APPS_DOC}。【凡是「这台手机里的应用」的任务（建联系人/发消息/写备忘录/写提醒/搜商品/下单等）一律优先 openScreen + uiClick/uiType，不要用系统级 openApp】
+15. {"action":"uiObserve","args":""} —— 观察当前应用界面：返回可点元素清单与输入框清单（uiClick 的 args 照抄清单文字）；进任何应用后先用它看一眼
+16. {"action":"uiClick","args":"新建联系人"} —— 点击当前应用界面里文字匹配的元素（按钮/列表项/标签页/输入框聚焦）
+17. {"action":"uiType","args":"要输入的文字"} —— 向已聚焦的输入框输入文字（替换旧内容；先 uiClick 点输入框聚焦）
+18. {"action":"uiScroll","args":"下"} —— 在当前应用界面里滚动翻页（上/下/左/右）`;
 
 /** 组装 Agent 规划的 system prompt（人设/记忆注入 + 行为准则 + 语法表 + 输出格式） */
 function buildAgentSystemPrompt(ctx: AgentCtx | undefined): string {
@@ -1314,16 +1352,19 @@ function buildAgentSystemPrompt(ctx: AgentCtx | undefined): string {
   lines.push(
     '【行为准则】',
     '- 一次规划 3~8 步，每步动作最小化（一步只做一件事），并把完成整个任务所需的全部步骤放进同一次 plan。',
-    '- 操作输入框前必须先 clickElement 点输入框使其聚焦，才能 inputTextToFocus；发送消息用 pressEnter。',
-    '- 输入框里有旧内容时：优先找界面上的清空/清除类按钮点掉；没有就连续 pressDelete 逐字删（按旧内容长度控制次数，别无限删）。',
-    '- 上一步失败时，失败反馈里通常带着当前界面与可见元素线索——换策略（换匹配文字、先 scroll 翻页、改 tapPoint、先 lookScreen），不要原样重试。',
-    '- 不要编造屏幕上没有的元素文字；目标可能不在当前页，先 scroll 翻页再找；不确定当前界面就先 lookScreen。',
+    '- 【两类任务分清】任务发生在「机主手机里的应用」（微信/信息/QQ/淘宝/美团/联系人/备忘录/提醒事项/日历/浏览器/天气/音乐/设置等这台手机内渲染的界面）→ 用 openScreen 打开 + uiObserve 观察 + uiClick/uiType/uiScroll 操作；只有操作 Android 系统级真实应用（虚拟手机之外的真实桌面 App）才用 openApp(包名)+clickElement 等。',
+    '- 应用内任务的标准流程：openScreen 打开 → uiObserve 看界面 → 按清单 uiClick（按钮/列表项/输入框）→ uiType 输入 → 需要时 pressEnter（聚焦输入框发消息等效）→ 再 uiObserve 核对结果。uiClick/uiType 的反馈会告诉你点到了什么/输了什么。',
+    '- 例（建联系人）：openScreen contacts → uiObserve → uiClick「+」或「新建」→ uiClick 姓名输入框 → uiType 名字 → uiClick 人设/性格输入框 → uiType 性格描述 → uiClick「保存/完成」→ uiObserve 核对。界面和示例不符时以 uiObserve 实际返回为准。',
+    '- 操作输入框前必须先 clickElement/uiClick 点输入框使其聚焦，才能 inputTextToFocus/uiType；发送消息用 pressEnter。',
+    '- 输入框里有旧内容时：uiType 会整体替换旧内容；系统级输入框优先找界面上的清空/清除类按钮，没有就连续 pressDelete 逐字删（按旧内容长度控制次数，别无限删）。',
+    '- 上一步失败时，失败反馈里通常带着当前界面与可见元素线索——换策略（换匹配文字、先 scroll/uiScroll 翻页、改 tapPoint、先 lookScreen/uiObserve），不要原样重试。',
+    '- 不要编造屏幕上没有的元素文字；目标可能不在当前页，先 scroll/uiScroll 翻页再找；不确定当前界面就先 lookScreen/uiObserve。',
     '- 涉及转账/付款/红包/充值/卸载/删除/关闭网络等敏感动作：该步必须加 "dangerous":true（系统会先征求机主同意）。',
     '- 规划要贴合机主的意图与你的性格（见人设），say 播报用你的语气自然说，不要复述命令格式。',
     '【动作语法表】',
     AGENT_ACTIONS_DOC,
     '【输出格式】严格输出一个 JSON 对象，前后不带任何其他文字、不用 markdown 代码块包裹：',
-    '{"say":"给用户看的进度播报（用你的语气，一句话）","plan":[{"action":"openApp","args":"com.tencent.mm","why":"打开微信"},{"action":"clickElement","args":"搜索","why":"进搜索页"}]}',
+    '{"say":"给用户看的进度播报（用你的语气，一句话）","plan":[{"action":"openScreen","args":"wechat","why":"打开微信"},{"action":"uiObserve","args":"","why":"看界面"}]}',
     '- 每步可带 "why"（一句话给机主看的理由）；plan 为空数组时必须给 "note"（一句话解释为什么做不了/不用做）。',
     '- args 一律 string；不要输出动作表以外的动作名。',
   );
@@ -1365,6 +1406,29 @@ const ACTION_ALIASES: Record<string, string> = {
   双击: 'doubleClick',
   拖拽: 'drag',
   拖动: 'drag',
+  // v1.7.0 应用内界面动作别名
+  openscreen: 'openScreen',
+  open_screen: 'openScreen',
+  openapp_screen: 'openScreen',
+  打开界面: 'openScreen',
+  打开屏幕: 'openScreen',
+  进入应用: 'openScreen',
+  uiobserve: 'uiObserve',
+  observeui: 'uiObserve',
+  看界面: 'uiObserve',
+  观察界面: 'uiObserve',
+  uiclick: 'uiClick',
+  clickui: 'uiClick',
+  点界面: 'uiClick',
+  点击界面: 'uiClick',
+  uitype: 'uiType',
+  typeui: 'uiType',
+  界面输入: 'uiType',
+  输入界面: 'uiType',
+  uiscroll: 'uiScroll',
+  scrollui: 'uiScroll',
+  界面滚动: 'uiScroll',
+  翻页: 'uiScroll',
 };
 
 function normalizePlan(obj: Record<string, unknown>): AgentPlan | null {
@@ -1470,7 +1534,9 @@ async function planWithLLM(task: string, history: AgentHistoryEntry[], ctx: Agen
 /** 总开关常量：一键关闭视觉验证层（改 false 即全跳过，UI 树验证照旧） */
 const AGENT_VISUAL_VERIFY = true;
 
-/** 值得视觉复核的「改变屏幕状态」动作（wait/lookScreen 是等待/只读、pressDelete 是输入辅助——不复核） */
+/** 值得视觉复核的「改变屏幕状态」动作（wait/lookScreen 是等待/只读、pressDelete 是输入辅助——不复核）；
+ *  v1.7.0：应用内 openScreen/uiClick 也复核（截屏能看到虚拟手机界面内容）；uiType/uiScroll/uiObserve
+ *  是输入/滚动/只读——不在列 */
 const VISUAL_VERIFY_ACTIONS = new Set([
   'openApp',
   'clickElement',
@@ -1481,6 +1547,8 @@ const VISUAL_VERIFY_ACTIONS = new Set([
   'longPress',
   'doubleClick',
   'drag',
+  'openScreen',
+  'uiClick',
 ]);
 
 const VISION_VERIFY_TIMEOUT_MS = 15_000; // 看门狗：验证超时不拖任务
@@ -1630,6 +1698,13 @@ const SETTLE_POLL_ACTIONS = new Set(['openApp', 'clickElement', 'tapPoint', 'pre
  *  - 每个 await 点都查急停，急停返回 false。
  */
 async function settleAfterStep(step: AgentStep): Promise<boolean> {
+  // v1.7.0 应用内动作：DOM 级操作不走系统 UI settle 轮询（uiautomator 看不到 WebView 内部）——
+  // openScreen 自带「等 App 展开 + 渲染 grace」、uiObserve 只读零等待；uiClick/uiScroll 等
+  // 界面转场（React 重渲染 + 页面推栈动画 ~300ms）给短固定等待，uiType 纯输入更短
+  if (IN_APP_AGENT_ACTIONS.has(step.action)) {
+    const fixed = step.action === 'uiType' ? 500 : step.action === 'uiObserve' || step.action === 'openScreen' ? 0 : 900;
+    return fixed <= 0 ? true : sleepStoppable(fixed);
+  }
   const max = step.action === 'openApp' ? OPEN_SETTLE_MS : UI_TOUCH_ACTIONS.has(step.action) ? UI_SETTLE_MS : OP_GAP_MS;
   const deadline = Date.now() + max;
   // ① 最小防抖
