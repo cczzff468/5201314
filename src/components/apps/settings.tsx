@@ -912,7 +912,8 @@ function AutonomyCapRow({
  * 悬浮球开关 / 连续唤醒监听开关（带耗电提示）/
  * C4 执行结果语音播报开关（默认关）/ C4 任务后追问窗口开关（默认开）。
  * 配置存 agent-voice-wake-v1（localStorage 单键 + zustand 镜像），悬浮球即时生效；
- * 连续监听只在 APP 原生壳 + 离线识别模型就绪时真正生效，否则自动降级「点球才识别」（下方提示行说明）；
+ * 连续监听双通道：APP 原生壳走离线模型端侧转写，浏览器走 Web Speech 实时识别兜底
+ * （免下载模型，需联网+麦克风权限）；两条通道都不可用才降级「点球才识别」（下方提示行说明）；
  * 播报开着但 TTS 未配置（第三方服务商缺 Key/地址）时下方提示「将静默跳过」。
  */
 function AgentVoiceCard() {
@@ -1039,7 +1040,8 @@ function AgentVoiceCard() {
       {/* 状态提示行（条件显示） */}
       {!nativeMode ? (
         <p className="mx-6 mt-2 text-[11.5px] leading-relaxed text-muted-foreground">
-          当前在浏览器里：悬浮球只在手机 APP（AI-Phone）里显示，网页端预览无效。
+          当前在浏览器里：悬浮球同样显示，喊唤醒名或点球都能唤起。喊名用浏览器实时识别（需允许麦克风权限并联网）；
+          下载离线模型后断网也能唤醒。真机任务（控制真实手机）仍只在 APP 内可用。
         </p>
       ) : null}
       {cfg.listen && nativeMode && asrNotReady ? (

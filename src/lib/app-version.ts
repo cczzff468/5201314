@@ -11,9 +11,9 @@
  */
 
 /** 当前最新版本（与 android-shell versionName 保持一致） */
-export const APP_VERSION = '1.7.0';
+export const APP_VERSION = '1.7.1';
 /** 版本号数字（与 android-shell versionCode 保持一致；覆盖安装要求只增不减） */
-export const APP_VERSION_CODE = 13;
+export const APP_VERSION_CODE = 14;
 
 export interface AppReleaseNote {
   version: string;
@@ -24,6 +24,17 @@ export interface AppReleaseNote {
 
 /** 版本历史（新→旧；设置 › APP 更新 页渲染，最新一条即当前版本） */
 export const APP_RELEASE_NOTES: AppReleaseNote[] = [
+  {
+    version: '1.7.1',
+    date: '2026-11-10',
+    items: [
+      '修复：喊唤醒名没反应——网页端现在同样显示悬浮球，喊「小灵」或点球都能唤起（喊名用浏览器实时识别，首次需允许麦克风权限并联网）',
+      '未下载离线模型也能喊名唤醒：浏览器实时监听兜底，不再强制先下载 239MB 端侧模型（APP 内模型就绪时仍优先离线，断网可用）',
+      '语音助手有专属人设了：小灵——像小爱同学/Siri 一样能闲聊会陪唠、有自己的性格，名字跟随唤醒名',
+      '「打开微信」等指令直达网页内的应用页面（虚拟手机里的微信），不再尝试控制真实手机微信；Shizuku 未启动也照常打开',
+      '语音界面光球美化：更简约的呼吸光环与名牌',
+    ],
+  },
   {
     version: '1.7.0',
     date: '2026-11-09',

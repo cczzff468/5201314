@@ -18,9 +18,9 @@
  *   播完自动开录（应声→聆听闭环）；继续上次对话不重复问候
  * - 追问模式：语音来源任务结束 → 全屏会话自动重开（结果进对话流 + 15s 无操作自动收起，
  *   任意触摸重新计时）；期间点麦克风即可继续说，免喊唤醒名
- * - 显示门槛：APP 原生壳（浏览器可用 agent-voice-debug=1 调试预览，仅聊天/路由可用，
- *   真任务仍被原生闸拒绝并原样说明）+ 已解锁 + 「AI 动手」总开关 + 智能体能力 +
- *   悬浮球开关（默认开）+ 无 Agent 任务运行 + 无通话/来电
+ * - 显示门槛：APP 原生壳（受「AI 动手」总闸管）或网页端（悬浮球开关默认开即显示，
+ *   喊唤醒名/点球都能唤起；真任务仍被原生闸拒绝并原样说明）+ 已解锁 +
+ *   悬浮球开关 + 无 Agent 任务运行 + 无通话/来电
  *
  * 逻辑在 lib/ios/agent-voice.ts（识别/唤醒/播报）与 lib/ios/agent-chat.ts（聊天大脑），
  * 本组件只做状态编排与渲染。
@@ -47,6 +47,7 @@ import {
   vibrateSafely,
 } from '@/lib/ios/agent-voice';
 import { isSpeaking, isTtsConfigured, speakUserTts, stopSpeaking } from '@/lib/ios/tts-client';
+import { isWebSpeechSupported } from '@/lib/ios/web-speech';
 import { voiceTurn } from '@/lib/ios/agent-chat';
 import { assistantGreeting } from '@/lib/ios/assistant-persona';
 import { matchOpenAppIntent, openAppPage } from '@/lib/ios/agent-app-nav';
@@ -131,7 +132,7 @@ export default function AgentVoiceBall() {
   }, []);
 
   // autonomy 开关是纯 localStorage（无 store），1.2s 轮询兜出「设置页改完球即时消失」；
-  // 调试模式下免检（网页预览没有 autonomy 面板数据）
+  // 网页端不受 autonomy 总闸管（layerOn 里恒 true，球显隐只由悬浮球开关控制）；调试模式免检
   const [autoOn, setAutoOn] = useState(false);
   useEffect(() => {
     if (!native) return undefined;
@@ -148,8 +149,9 @@ export default function AgentVoiceBall() {
     return () => window.clearInterval(t);
   }, [native]);
 
-  // 挂载级开关：全关时整层卸载零开销（浏览器预览 native=false 恒卸载）
-  const layerOn = native && cfg.ball && autoOn;
+  // 挂载级开关：APP 原生壳看 autonomy 总闸；网页端只看悬浮球开关（v90.1 起网页也出球，
+  // 喊唤醒名/点球都能唤起——修复「叫名字没反应」：此前网页整层不挂载）
+  const layerOn = cfg.ball && (native ? autoOn : true);
   // 瞬时隐藏（保持挂载：唤醒循环/探针不停，只是看不见）
   const visible = layerOn && !locked && !screenOff && !switcherOpen && !agentRunning && !callActive && !incomingCall;
 
@@ -471,7 +473,11 @@ export default function AgentVoiceBall() {
   }, []);
 
   // ---- 连续唤醒监听 ----
-  const wakeOn = layerOn && cfg.listen && asrReady && !wakeBlocked;
+  // 通道选择（useAgentWakeLoop 内）：离线引擎就绪 → 端侧分块转写；未就绪但浏览器支持
+  // Web Speech → 实时监听兜底（免下载 239MB 模型，需联网+麦克风权限）。此处只判「至少一条通道可用」
+  // （组件 dynamic ssr:false，惰性初始化时 window 必可用，与 native 同模式）
+  const [wsWakeOk] = useState(() => isWebSpeechSupported());
+  const wakeOn = layerOn && cfg.listen && !wakeBlocked && (asrReady || wsWakeOk);
   const onWake = useCallback(
     (task: string | null) => {
       setSessionMsg('');

@@ -11,8 +11,8 @@ android {
         applicationId "com.z.aiphone"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 13          // v1.7.0 Siri 式语音会话+聊天+应用内自动化（v12 = 1.6.1）
-        versionName "1.7.0"     // v1.7.0 语音会话改版（Siri 界面/能聊天/能开应用/自主办事）+ 悬浮球美化
+        versionCode 14          // v1.7.1 网页端喊名唤醒修复+小灵人设+打开网页内应用（v13 = 1.7.0）
+        versionName "1.7.1"     // v1.7.1 喊唤醒名唤起双通道（浏览器实时识别兜底）+ 网页端悬浮球 + 小灵人设
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.

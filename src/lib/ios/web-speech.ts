@@ -76,6 +76,12 @@ export function startWebSpeechSession(opts: {
   onPartial?: (text: string) => void;
   /** 每句定稿回调（v10 对讲机模式：逐句自动发送） */
   onFinal?: (text: string) => void;
+  /**
+   * 错误回调（所有 onerror 错误码原样透传；连续唤醒监听据此熔断/重起）。
+   * not-allowed / service-not-allowed / audio-capture 属致命错（会话不再自动重启），
+   * no-speech / network / aborted 等非致命错会自动重启但本轮提前结束。
+   */
+  onError?: (code: string) => void;
 }): WebSpeechSession | null {
   if (typeof window === 'undefined') return null;
   const w = window as unknown as { SpeechRecognition?: SpeechRecognitionCtor; webkitSpeechRecognition?: SpeechRecognitionCtor };
@@ -134,6 +140,7 @@ export function startWebSpeechSession(opts: {
       fatal = true;
     }
     // no-speech / aborted / network 等非致命错误：交给 onend 决定是否重启
+    opts.onError?.(e.error);
   };
 
   rec.onend = () => {

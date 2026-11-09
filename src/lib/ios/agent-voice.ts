@@ -11,11 +11,11 @@
  *   全部不可用抛中文引导（面板提供打字输入框兜底，永远存在）
  * - 录音器（useAgentRecorder）：MediaRecorder + AnalyserNode 实时振幅 +
  *   静默自动停止（持续 1.4s 无声）+ 30s 上限 + 0.7s 下限，仿 voice-input 的已验证链路
- * - 连续唤醒监听（useAgentWakeLoop）：后台每轮录 3.2s → 离线转写 → 匹配唤醒名；
+ * - 连续唤醒监听（useAgentWakeLoop）双通道：① 离线（APK 首选）后台每轮录 3.2s → 端侧转写
+ *   → 匹配唤醒名；② 浏览器兜底（离线引擎未就绪时）Web Speech 实时监听，无需下载模型。
  *   命中即震动 + 回调（去掉唤醒名后剩余 ≥4 字直接作任务文本，否则让用户继续说）；
  *   页面隐藏 / Agent 任务运行 / 通话 / TTS·语音播放 / 面板打开 时自动暂停，
- *   恢复空闲后续听（每轮 900ms 轮询 + 轮间 ≥1.5s 间隔省电）；
- *   离线引擎未就绪时循环根本不启动（降级「点球才识别」），麦克风连续失败熔断并记录原因
+ *   恢复空闲后续听；麦克风连续失败熔断并记录原因
  * - C4 任务终态播报（speakAgentResult）：任务结束后按开关/语音来源 + 闸门（canAgentVoiceActNow）
  *   用共享 TTS 栈（tts-client）朗读结果摘要；语音来源标记（markAgentTaskVoiceOrigin）由
  *   悬浮球在任务真正跑起来时置位、终态播报钩子消费
@@ -676,13 +676,16 @@ const WAKE_GAP_MS = 1500;
 const WAKE_FAIL_FUSE = 3;
 
 /**
- * 连续唤醒循环（挂载即后台跑，由 enabled 一键启停）：
- * 每轮 录 3.2s → 离线转写 → 匹配唤醒名；命中震动 + onWake（剩余 ≥4 字带任务文本）；
- * 暂停条件见 canAgentWakeListen；麦克风连续 3 轮失败 → 熔断停循环并记录原因
- * （设置页展示，重新拨动开关即重试）。
+ * 连续唤醒循环（挂载即后台跑，由 enabled 一键启停）双通道：
+ * - 通道 A（离线引擎未就绪 && 浏览器支持 Web Speech）：浏览器实时监听，无需下载模型，
+ *   需联网 + 麦克风权限；识别文本含唤醒名即命中震动 + onWake；
+ *   not-allowed 等致命错连续 3 次 → 熔断停循环并记录原因（重新拨动开关即重试）；
+ * - 通道 B（离线引擎就绪，APK 原生链路）：每轮 录 3.2s → 端侧转写 → 匹配唤醒名；
+ *   麦克风连续 3 轮失败 → 熔断停循环并记录原因。
+ * 暂停条件见 canAgentWakeListen；两条通道由外层 enabled 一致性保证互斥（本次会话固定通道）。
  */
 export function useAgentWakeLoop(opts: {
-  /** 总启用（listen 开关 && 原生壳 && 离线引擎就绪 && 未熔断）——外层算好传入 */
+  /** 总启用（listen 开关 && [离线引擎就绪 || 浏览器实时识别可用] && 未熔断）——外层算好传入 */
   enabled: boolean;
   /** 唤醒名（经 optsRef 透传，设置页改完下一轮立即生效） */
   name: string;
@@ -701,6 +704,73 @@ export function useAgentWakeLoop(opts: {
     let aborted = false;
     let micFails = 0;
 
+    // —— 通道 A：Web Speech 实时监听（离线引擎未就绪时的浏览器兜底：免下载模型）——
+    // SpeechRecognition continuous 持续听（onend 自动重启），识别文本含唤醒名即命中。
+    // 需联网 + 麦克风权限；APK WebView 无此 API（外层 enabled 保证只在支持的浏览器走到这）。
+    if (!isOfflineAsrReady() && isWebSpeechSupported()) {
+      void (async () => {
+        // 首轮小延迟：避开开开关瞬间的其它音频操作与权限弹窗竞争
+        await sleep(1200);
+        while (!aborted) {
+          if (!optsRef.current.canListen()) {
+            await sleep(900); // 暂停期低频轮询，恢复可见/空闲后 1s 内续听
+            continue;
+          }
+          let woke = false;
+          let dead = false; // 本轮会话已结束（致命错误/无法重启）→ 重起新会话续听
+          let session: WebSpeechSession | null = null;
+          session = startWebSpeechSession({
+            lang: 'zh-CN',
+            onPartial: (text) => {
+              if (woke || dead || aborted || !session) return;
+              const rest = matchWakeName(text, optsRef.current.name);
+              if (rest === null) return;
+              woke = true;
+              vibrateSafely([40, 80, 40]); // 命中反馈：短震动两连
+              session.abort();
+              optsRef.current.onWake(rest.length >= WAKE_REST_MIN ? rest : null);
+            },
+            onError: (code) => {
+              if (code === 'not-allowed' || code === 'service-not-allowed' || code === 'audio-capture') {
+                micFails += 1;
+                if (micFails >= WAKE_FAIL_FUSE) {
+                  // 熔断：大概率麦克风权限被拒（iframe 未放行/浏览器拒绝）——停循环并记录原因
+                  useAgentVoice.setState({
+                    wakeBlocked: '无法访问麦克风：连续唤醒已自动停用（允许浏览器麦克风权限后重新打开此开关）',
+                  });
+                  aborted = true;
+                }
+              }
+              dead = true; // 所有错误都终结本轮：not-allowed 等不再自动重启；no-speech 等下轮重起更稳
+            },
+          });
+          if (!session) {
+            await sleep(2500); // 起监听失败（罕见）：稍后重试
+            continue;
+          }
+          // 等待：命中 / 暂停条件（面板打开等）/ 卸载 / 本轮结束
+          const startedAt = Date.now();
+          while (!aborted && !woke && !dead) {
+            await sleep(300);
+            if (Date.now() - startedAt > 10_000) micFails = 0; // 会话健康存活 10s+：权限正常，清零熔断计数
+            if (!woke && !optsRef.current.canListen()) break;
+          }
+          try {
+            session.abort();
+          } catch {
+            /* ignore */
+          }
+          if (aborted) break;
+          await sleep(woke ? WAKE_GAP_MS : 600); // 命中后停一拍等面板开；未命中很快重起续听
+        }
+      })();
+
+      return () => {
+        aborted = true;
+      };
+    }
+
+    // —— 通道 B：MediaRecorder 3.2s 分块 + 端侧转写（APK 原生链路，断网可用）——
     void (async () => {
       // 首轮小延迟：避开开开关瞬间的其它音频操作与权限弹窗竞争
       await sleep(1200);
