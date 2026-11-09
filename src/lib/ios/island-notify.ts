@@ -567,6 +567,9 @@ function navigateFromSystemNotify(target: NotifyTarget): void {
   if (!ui.locked && !ui.screenOff) runNotifyNav(target);
 }
 
+// C6 应用内通知中心：本函数需被 notification-center.ts（原生 local-notify-open 回传导航）复用
+export { navigateFromSystemNotify };
+
 // v75 解锁/亮屏补跳：系统通知点击时手机在锁屏态 → 意图已挂起，解锁/亮屏的瞬间落地导航
 //（60s 内有效，与 takeNotifyNavigation 同口径；订阅挂 useUI 状态变化）
 if (typeof window !== 'undefined') {

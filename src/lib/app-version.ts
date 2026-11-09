@@ -11,9 +11,9 @@
  */
 
 /** 当前最新版本（与 android-shell versionName 保持一致） */
-export const APP_VERSION = '1.5.1';
+export const APP_VERSION = '1.6.0';
 /** 版本号数字（与 android-shell versionCode 保持一致；覆盖安装要求只增不减） */
-export const APP_VERSION_CODE = 10;
+export const APP_VERSION_CODE = 11;
 
 export interface AppReleaseNote {
   version: string;
@@ -24,6 +24,17 @@ export interface AppReleaseNote {
 
 /** 版本历史（新→旧；设置 › APP 更新 页渲染，最新一条即当前版本） */
 export const APP_RELEASE_NOTES: AppReleaseNote[] = [
+  {
+    version: '1.6.0',
+    date: '2026-11-09',
+    items: [
+      '智能体提速：屏幕读取短缓存 + 自适应等待 + 下一步预取，同类任务整体快 30~50%',
+      '语音闭环：任务执行完自动语音播报结果（设置 › AI 动手可开关）；语音唤起的任务结束后 10 秒追问窗口内直接说下一个任务，不用再喊唤醒名',
+      '通知直达：点「未接留言」通知直接进电话 App、点「情侣小家」通知直达小家（APK 内点击通知同步支持）',
+      '下拉通知中心：屏幕顶部下拉打开历史通知列表，网页端没弹系统通知也不漏消息；点条目直达对应 App，支持全部已读/清空',
+      '安全增强：API Key 落盘加密存储（AES-GCM，旧数据自动升级）；修复 42 处类型隐患与三处隐性 bug（情侣空间爱心装饰首次真正显示）',
+    ],
+  },
   {
     version: '1.5.1',
     date: '2026-11-08',

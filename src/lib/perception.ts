@@ -89,19 +89,30 @@ const DEFAULT_CFG: PerceptionConfig = {
   streamUrl: '',
 };
 
-const BOOL_KEYS: (keyof PerceptionConfig)[] = [
+// 布尔/字符串键分桶派生：out[k] 以联合键写入时 TS 会把写入类型算成各属性类型交集（boolean & string = never），
+// 按值类型分桶后每桶写入类型才是 boolean / string
+type BoolCfgKey = { [K in keyof PerceptionConfig]: PerceptionConfig[K] extends boolean ? K : never }[keyof PerceptionConfig];
+type StrCfgKey = { [K in keyof PerceptionConfig]: PerceptionConfig[K] extends string ? K : never }[keyof PerceptionConfig];
+
+const BOOL_KEYS: BoolCfgKey[] = [
   'typing', 'battery', 'calendar', 'weather',
   'screenTime', 'currentApp', 'appHistory', 'unlocks',
   'media', 'browser', 'stats', 'vlmScreen',
 ];
-const STR_KEYS: (keyof PerceptionConfig)[] = ['userLoc', 'aiLoc', 'awUrl', 'streamUrl'];
+const STR_KEYS: StrCfgKey[] = ['userLoc', 'aiLoc', 'awUrl', 'streamUrl'];
 
 function sanitize(v: unknown): PerceptionConfig {
   const out = { ...DEFAULT_CFG };
   if (typeof v !== 'object' || v === null) return out;
   const o = v as Record<string, unknown>;
-  for (const k of BOOL_KEYS) if (typeof o[k] === 'boolean') out[k] = o[k] as boolean;
-  for (const k of STR_KEYS) if (typeof o[k] === 'string') out[k] = (o[k] as string).slice(0, 300);
+  for (const k of BOOL_KEYS) {
+    const val = o[k];
+    if (typeof val === 'boolean') out[k] = val;
+  }
+  for (const k of STR_KEYS) {
+    const val = o[k];
+    if (typeof val === 'string') out[k] = val.slice(0, 300);
+  }
   return out;
 }
 

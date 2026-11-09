@@ -32,11 +32,52 @@ import {
 } from './custom-css';
 import { useSyncExternalStore, useMemo, useState, useEffect, type CSSProperties } from 'react';
 import { localDB } from './db';
-import { encryptValue, decryptValue } from './secure-store';
+import { decryptValue } from './secure-store';
+import { encryptSecret, decryptSecret, isEncrypted } from './secret-box';
 import { clearAllChatCooldowns } from '../chat-errors';
 import { useGlobalCall } from './global-call';
 import { useIncomingCall } from './incoming-call';
 import type { AddressMode } from '../contacts';
+
+// ---------------- 密文落库边界（B1：API Key AES-GCM 加密存储） ----------------
+
+/** 加密覆盖清单（含 apiKey 的全部 settings 记录，共 8 条）：
+ *  apiConfig / apiPresets / visionConfig / visionPresets /
+ *  ttsConfig（顶层字段 + accounts 三个分服务商槽位各含 apiKey）/ sttConfig /
+ *  imgGenConfig / imgGenPresets。
+ *  写入：整条记录 JSON 序列化 → secret-box AES-GCM 加密 → `enc:v1:<iv>:<cipher>`
+ *  密文字符串存 IndexedDB settings.value；内存 store 状态始终明文，业务读取点零改动。 */
+async function putSecretRecord(recordKey: string, value: unknown): Promise<void> {
+  const enc = await encryptSecret(JSON.stringify(value));
+  await localDB.put('settings', { key: recordKey, value: enc });
+}
+
+/** 读取一条可能是三种历史形态之一的 settings 记录：
+ *  - 新版：`enc:v1:` 密文字符串 → 解密 + JSON.parse（legacy=false，终态）；
+ *  - 旧版一：secure-store 密文信封对象 { __enc, iv, ct } → 仍用旧密钥解出（legacy=true，
+ *    跨版本兼容防丢 Key，load() 会自愈回写为 enc:v1）；
+ *  - 旧版二：明文对象/数组（更早版本数据）→ 原样（legacy=true，同样自愈）。
+ *  返回 legacy=true 表示「记录存在但还不是 enc:v1 形态」：含非空 apiKey 的记录会在
+ *  load() 里立即重新加密回写。 */
+async function readSecretRecord<T>(raw: unknown): Promise<{ value: T | null; legacy: boolean }> {
+  if (typeof raw === 'string') {
+    if (!isEncrypted(raw)) return { value: null, legacy: false }; // 未知字符串 → 按无记录处理
+    try {
+      const plain = await decryptSecret(raw);
+      return { value: JSON.parse(plain) as T, legacy: false };
+    } catch {
+      // 密文损坏/种子被清：decryptSecret 原样退回密文串，JSON.parse 必失败 → 视为无配置（用户重填即可）
+      return { value: null, legacy: false };
+    }
+  }
+  if (raw && typeof raw === 'object' && '__enc' in (raw as Record<string, unknown>)) {
+    // 旧版 secure-store 信封：老密钥解出（解不开返回 null → 上层回默认值）
+    const dec = await decryptValue<T>(raw);
+    return { value: dec, legacy: true };
+  }
+  // 旧版明文对象（首次升级）：原样返回并标记 legacy，下次任意一次状态写入即变密文
+  return { value: (raw ?? null) as T | null, legacy: raw != null };
+}
 
 // ---------------- 类型 ----------------
 
@@ -551,17 +592,19 @@ export const useSettings = create<SettingsState>((set, get) => ({
         localDB.get('settings', 'customCss'),
       ]);
 
-      // 性能：八个含密文信封的字段并行解密（getKey 并发单飞，密钥只读一次 IDB）——
-      // 原先逐个 await 串行 ≈ 16 次异步（读 key + 解密 ×8），开机黑屏期的固定开销
-      const [apiDec, presetsDec, visionDec, visionPresetsDec, ttsDec, sttDec, imgGenDec, imgGenPresetsDec] = await Promise.all([
-        decryptValue<Partial<ApiConfig>>(apiRec?.value),
-        decryptValue<ApiPreset[]>(presetsRec?.value),
-        decryptValue<Partial<VisionConfig>>(visionRec?.value),
-        decryptValue<VisionPreset[]>(visionPresetsRec?.value),
-        decryptValue<Partial<TtsConfig>>(ttsRec?.value),
-        decryptValue<Partial<SttConfig>>(sttRec?.value),
-        decryptValue<Partial<ImgGenConfig>>(imgGenRec?.value),
-        decryptValue<ImgGenPreset[]>(imgGenPresetsRec?.value),
+      // 性能：八个含敏感 Key 的字段并行解密（secret-box 的 PBKDF2 密钥进程内缓存只派生一次）——
+      // 原先逐个 await 串行 ≈ 16 次异步，开机黑屏期的固定开销；保持单轮 Promise.all。
+      // 迁移：三种历史形态（enc:v1 密文串 / secure-store 信封 / 明文）统一解出到内存明文；
+      // legacy=true 的记录含非空 apiKey 时会在下方各分支立即自愈回写为 enc:v1 密文。
+      const [apiRead, presetsRead, visionRead, visionPresetsRead, ttsRead, sttRead, imgGenRead, imgGenPresetsRead] = await Promise.all([
+        readSecretRecord<Partial<ApiConfig>>(apiRec?.value),
+        readSecretRecord<ApiPreset[]>(presetsRec?.value),
+        readSecretRecord<Partial<VisionConfig>>(visionRec?.value),
+        readSecretRecord<VisionPreset[]>(visionPresetsRec?.value),
+        readSecretRecord<Partial<TtsConfig>>(ttsRec?.value),
+        readSecretRecord<Partial<SttConfig>>(sttRec?.value),
+        readSecretRecord<Partial<ImgGenConfig>>(imgGenRec?.value),
+        readSecretRecord<ImgGenPreset[]>(imgGenPresetsRec?.value),
       ]);
 
       // 图标风格：无记录/记录非法 → 'real'（真实图标）
@@ -645,9 +688,10 @@ export const useSettings = create<SettingsState>((set, get) => ({
       }
 
       let apiConfig: ApiConfig = { ...DEFAULT_API_CONFIG };
-      if (apiRec && typeof apiRec.value === 'object' && apiRec.value !== null) {
-        // 兼容：旧版明文记录 / 新版密文信封都从这里解出
-        const v = (apiDec ?? apiRec.value) as Partial<ApiConfig>;
+      // 注意：新版记录 value 是 enc:v1 密文字符串（typeof 'string'），旧版是对象——守卫必须两种都放行
+      if (apiRec && apiRec.value != null) {
+        // 兼容：旧版明文 / 旧 secure-store 信封 / 新版 enc:v1 密文串都从这里解出
+        const v = (apiRead.value ?? apiRec.value) as Partial<ApiConfig>;
         apiConfig = {
           baseUrl: typeof v.baseUrl === 'string' && v.baseUrl ? v.baseUrl : DEFAULT_API_CONFIG.baseUrl,
           apiKey: typeof v.apiKey === 'string' ? v.apiKey : '',
@@ -658,19 +702,17 @@ export const useSettings = create<SettingsState>((set, get) => ({
               : DEFAULT_API_CONFIG.temperature,
           maxTokens: typeof v.maxTokens === 'number' ? v.maxTokens : DEFAULT_API_CONFIG.maxTokens,
         };
-        // 旧版明文静默升级：立即以密文回写（有 apiKey 才有必要；无 key 的占位配置不动）
-        const wasPlain = !('__enc' in (apiRec.value as object));
-        if (wasPlain && typeof apiConfig.apiKey === 'string' && apiConfig.apiKey.length > 0) {
-          void encryptValue(apiConfig)
-            .then((enc) => localDB.put('settings', { key: 'apiConfig', value: enc }))
-            .catch(() => undefined);
+        // 自愈迁移（无专门迁移函数）：记录还不是 enc:v1 密文形态（旧明文 / 旧 secure-store 信封）
+        // 且带非空 apiKey → 立即以 enc:v1 密文回写；无 key 的占位配置不动，避免无谓写放大。
+        if (apiRead.legacy && typeof apiConfig.apiKey === 'string' && apiConfig.apiKey.length > 0) {
+          void putSecretRecord('apiConfig', apiConfig).catch(() => undefined);
         }
       }
 
       let apiPresets: ApiPreset[] = [];
       if (presetsRec && presetsRec.value) {
-        // 兼容：旧版明文数组 / 新版密文信封
-        const pv = presetsDec ?? presetsRec.value;
+        // 兼容：旧版明文数组 / 旧信封 / 新版 enc:v1 密文串
+        const pv = presetsRead.value ?? presetsRec.value;
         if (Array.isArray(pv)) {
           apiPresets = pv.filter(
             (p): p is ApiPreset =>
@@ -680,36 +722,32 @@ export const useSettings = create<SettingsState>((set, get) => ({
               typeof (p as ApiPreset).name === 'string' &&
               typeof (p as ApiPreset).config === 'object'
           );
-          // 旧版明文含 apiKey 时静默升级为密文
+          // 旧版明文/旧信封含 apiKey 时自愈升级为 enc:v1 密文
           const hasKey = apiPresets.some((p) => typeof p.config?.apiKey === 'string' && p.config.apiKey.length > 0);
-          if (!('__enc' in (presetsRec.value as object)) && hasKey) {
-            void encryptValue(apiPresets)
-              .then((enc) => localDB.put('settings', { key: 'apiPresets', value: enc }))
-              .catch(() => undefined);
+          if (presetsRead.legacy && hasKey) {
+            void putSecretRecord('apiPresets', apiPresets).catch(() => undefined);
           }
         }
       }
 
-      // 识图模型配置（含 apiKey，密文信封，与 apiConfig 同策略；未配置 = baseUrl 空）
+      // 识图模型配置（含 apiKey，enc:v1 密文落盘，与 apiConfig 同策略；未配置 = baseUrl 空）
       let visionConfig: VisionConfig = { ...DEFAULT_VISION_CONFIG };
-      if (visionRec && typeof visionRec.value === 'object' && visionRec.value !== null) {
-        const v = (visionDec ?? visionRec.value) as Partial<VisionConfig>;
+      // 守卫放行 enc:v1 密文串（string）与旧版对象两种形态
+      if (visionRec && visionRec.value != null) {
+        const v = (visionRead.value ?? visionRec.value) as Partial<VisionConfig>;
         visionConfig = {
           baseUrl: typeof v.baseUrl === 'string' ? v.baseUrl : '',
           apiKey: typeof v.apiKey === 'string' ? v.apiKey : '',
           model: typeof v.model === 'string' ? v.model : '',
         };
-        const visionWasPlain = !('__enc' in (visionRec.value as object));
-        if (visionWasPlain && visionConfig.apiKey.length > 0) {
-          void encryptValue(visionConfig)
-            .then((enc) => localDB.put('settings', { key: 'visionConfig', value: enc }))
-            .catch(() => undefined);
+        if (visionRead.legacy && visionConfig.apiKey.length > 0) {
+          void putSecretRecord('visionConfig', visionConfig).catch(() => undefined);
         }
       }
 
       let visionPresets: VisionPreset[] = [];
       if (visionPresetsRec && visionPresetsRec.value) {
-        const vv = visionPresetsDec ?? visionPresetsRec.value;
+        const vv = visionPresetsRead.value ?? visionPresetsRec.value;
         if (Array.isArray(vv)) {
           visionPresets = vv.filter(
             (p): p is VisionPreset =>
@@ -720,18 +758,17 @@ export const useSettings = create<SettingsState>((set, get) => ({
               typeof (p as VisionPreset).config === 'object'
           );
           const visionHasKey = visionPresets.some((p) => typeof p.config?.apiKey === 'string' && p.config.apiKey.length > 0);
-          if (!('__enc' in (visionPresetsRec.value as object)) && visionHasKey) {
-            void encryptValue(visionPresets)
-              .then((enc) => localDB.put('settings', { key: 'visionPresets', value: enc }))
-              .catch(() => undefined);
+          if (visionPresetsRead.legacy && visionHasKey) {
+            void putSecretRecord('visionPresets', visionPresets).catch(() => undefined);
           }
         }
       }
 
-      // 语音 API 配置（含 apiKey，密文信封，与 apiConfig 同策略）
+      // 语音 API 配置（含 apiKey，enc:v1 密文落盘，与 apiConfig 同策略）
       let ttsConfig: TtsConfig = { ...DEFAULT_TTS_CONFIG };
-      if (ttsRec && typeof ttsRec.value === 'object' && ttsRec.value !== null) {
-        const v = (ttsDec ?? ttsRec.value) as Partial<TtsConfig>;
+      // 守卫放行 enc:v1 密文串（string）与旧版对象两种形态
+      if (ttsRec && ttsRec.value != null) {
+        const v = (ttsRead.value ?? ttsRec.value) as Partial<TtsConfig>;
         ttsConfig = {
           provider: v.provider === 'builtin' || v.provider === 'openai' || v.provider === 'fishaudio' ? v.provider : 'minimax',
           baseUrl: typeof v.baseUrl === 'string' ? v.baseUrl : DEFAULT_TTS_CONFIG.baseUrl,
@@ -743,18 +780,16 @@ export const useSettings = create<SettingsState>((set, get) => ({
           // 多服务商分槽（Task 29）：旧存档无此字段 → 空对象（首次切换服务商时自动把当前配置快照进槽）
           accounts: sanitizeTtsAccounts(v.accounts),
         };
-        const ttsWasPlain = !('__enc' in (ttsRec.value as object));
-        if (ttsWasPlain && ttsConfig.apiKey.length > 0) {
-          void encryptValue(ttsConfig)
-            .then((enc) => localDB.put('settings', { key: 'ttsConfig', value: enc }))
-            .catch(() => undefined);
+        if (ttsRead.legacy && ttsConfig.apiKey.length > 0) {
+          void putSecretRecord('ttsConfig', ttsConfig).catch(() => undefined);
         }
       }
 
-      // 语音识别（STT）配置（含 apiKey，密文信封，与 TTS 同策略；provider 缺省 builtin）
+      // 语音识别（STT）配置（含 apiKey，enc:v1 密文落盘，与 TTS 同策略；provider 缺省 builtin）
       let sttConfig: SttConfig = { ...DEFAULT_STT_CONFIG };
-      if (sttRec && typeof sttRec.value === 'object' && sttRec.value !== null) {
-        const v = (sttDec ?? sttRec.value) as Partial<SttConfig>;
+      // 守卫放行 enc:v1 密文串（string）与旧版对象两种形态
+      if (sttRec && sttRec.value != null) {
+        const v = (sttRead.value ?? sttRec.value) as Partial<SttConfig>;
         sttConfig = {
           provider: v.provider === 'openai' ? 'openai' : 'builtin',
           baseUrl: typeof v.baseUrl === 'string' && v.baseUrl ? v.baseUrl : DEFAULT_STT_CONFIG.baseUrl,
@@ -763,18 +798,16 @@ export const useSettings = create<SettingsState>((set, get) => ({
           // 旧存档无此字段：默认开启浏览器实时识别
           webSpeech: typeof v.webSpeech === 'boolean' ? v.webSpeech : DEFAULT_STT_CONFIG.webSpeech,
         };
-        const sttWasPlain = !('__enc' in (sttRec.value as object));
-        if (sttWasPlain && sttConfig.apiKey.length > 0) {
-          void encryptValue(sttConfig)
-            .then((enc) => localDB.put('settings', { key: 'sttConfig', value: enc }))
-            .catch(() => undefined);
+        if (sttRead.legacy && sttConfig.apiKey.length > 0) {
+          void putSecretRecord('sttConfig', sttConfig).catch(() => undefined);
         }
       }
 
-      // 生图配置（含 apiKey，密文信封，与 visionConfig 同策略）
+      // 生图配置（含 apiKey，enc:v1 密文落盘，与 visionConfig 同策略）
       let imgGenConfig: ImgGenConfig = { ...DEFAULT_IMGGEN_CONFIG };
-      if (imgGenRec && typeof imgGenRec.value === 'object' && imgGenRec.value !== null) {
-        const v = (imgGenDec ?? imgGenRec.value) as Partial<ImgGenConfig>;
+      // 守卫放行 enc:v1 密文串（string）与旧版对象两种形态
+      if (imgGenRec && imgGenRec.value != null) {
+        const v = (imgGenRead.value ?? imgGenRec.value) as Partial<ImgGenConfig>;
         imgGenConfig = {
           enabled: v.enabled === true,
           mode: v.mode === 'direct' ? 'direct' : 'proxy',
@@ -785,17 +818,14 @@ export const useSettings = create<SettingsState>((set, get) => ({
           quality: typeof v.quality === 'string' && v.quality ? v.quality : DEFAULT_IMGGEN_CONFIG.quality,
           extraPrompt: typeof v.extraPrompt === 'string' ? v.extraPrompt : '',
         };
-        const imgGenWasPlain = !('__enc' in (imgGenRec.value as object));
-        if (imgGenWasPlain && imgGenConfig.apiKey.length > 0) {
-          void encryptValue(imgGenConfig)
-            .then((enc) => localDB.put('settings', { key: 'imgGenConfig', value: enc }))
-            .catch(() => undefined);
+        if (imgGenRead.legacy && imgGenConfig.apiKey.length > 0) {
+          void putSecretRecord('imgGenConfig', imgGenConfig).catch(() => undefined);
         }
       }
 
       let imgGenPresets: ImgGenPreset[] = [];
       if (imgGenPresetsRec && imgGenPresetsRec.value) {
-        const gv = imgGenPresetsDec ?? imgGenPresetsRec.value;
+        const gv = imgGenPresetsRead.value ?? imgGenPresetsRec.value;
         if (Array.isArray(gv)) {
           imgGenPresets = gv.filter(
             (p): p is ImgGenPreset =>
@@ -806,10 +836,8 @@ export const useSettings = create<SettingsState>((set, get) => ({
               typeof (p as ImgGenPreset).config === 'object'
           );
           const imgGenHasKey = imgGenPresets.some((p) => typeof p.config?.apiKey === 'string' && p.config.apiKey.length > 0);
-          if (!('__enc' in (imgGenPresetsRec.value as object)) && imgGenHasKey) {
-            void encryptValue(imgGenPresets)
-              .then((enc) => localDB.put('settings', { key: 'imgGenPresets', value: enc }))
-              .catch(() => undefined);
+          if (imgGenPresetsRead.legacy && imgGenHasKey) {
+            void putSecretRecord('imgGenPresets', imgGenPresets).catch(() => undefined);
           }
         }
       }
@@ -1055,50 +1083,38 @@ export const useSettings = create<SettingsState>((set, get) => ({
     // 「设置 › API 配置」保存即清空聊天重试冷却：用户填好配置回来重试立即放行，
     // 不再被「失败次数较多，请 N 秒后再试」拦住（配置已变，旧失败计数作废）
     clearAllChatCooldowns();
-    // 安全：含 apiKey，密文落盘（AES-GCM 非可提取密钥），IndexedDB 不存明文
-    void encryptValue(apiConfig)
-      .then((v) => localDB.put('settings', { key: 'apiConfig', value: v }))
-      .catch(() => undefined);
+    // 安全：含 apiKey，整条记录经 secret-box 加密为 enc:v1 密文串落盘，IndexedDB 不存明文
+    void putSecretRecord('apiConfig', apiConfig).catch(() => undefined);
   },
 
   setApiPresets: (list) => {
     set({ apiPresets: list });
-    // 安全：预设的 config 可能含 apiKey，同样密文落盘
-    void encryptValue(list)
-      .then((v) => localDB.put('settings', { key: 'apiPresets', value: v }))
-      .catch(() => undefined);
+    // 安全：预设的 config 可能含 apiKey，同样 enc:v1 密文落盘
+    void putSecretRecord('apiPresets', list).catch(() => undefined);
   },
 
   updateVisionConfig: (patch) => {
     const visionConfig = { ...get().visionConfig, ...patch };
     set({ visionConfig });
-    // 安全：含 apiKey，密文落盘（与 apiConfig 同策略）
-    void encryptValue(visionConfig)
-      .then((v) => localDB.put('settings', { key: 'visionConfig', value: v }))
-      .catch(() => undefined);
+    // 安全：含 apiKey，enc:v1 密文落盘（与 apiConfig 同策略）
+    void putSecretRecord('visionConfig', visionConfig).catch(() => undefined);
   },
 
   setVisionPresets: (list) => {
     set({ visionPresets: list });
-    void encryptValue(list)
-      .then((v) => localDB.put('settings', { key: 'visionPresets', value: v }))
-      .catch(() => undefined);
+    void putSecretRecord('visionPresets', list).catch(() => undefined);
   },
 
   updateImgGenConfig: (patch) => {
     const imgGenConfig = { ...get().imgGenConfig, ...patch };
     set({ imgGenConfig });
-    // 安全：含 apiKey，密文落盘（与 visionConfig 同策略）
-    void encryptValue(imgGenConfig)
-      .then((v) => localDB.put('settings', { key: 'imgGenConfig', value: v }))
-      .catch(() => undefined);
+    // 安全：含 apiKey，enc:v1 密文落盘（与 visionConfig 同策略）
+    void putSecretRecord('imgGenConfig', imgGenConfig).catch(() => undefined);
   },
 
   setImgGenPresets: (list) => {
     set({ imgGenPresets: list });
-    void encryptValue(list)
-      .then((v) => localDB.put('settings', { key: 'imgGenPresets', value: v }))
-      .catch(() => undefined);
+    void putSecretRecord('imgGenPresets', list).catch(() => undefined);
   },
 
   updateTtsConfig: (patch) => {
@@ -1117,10 +1133,8 @@ export const useSettings = create<SettingsState>((set, get) => ({
       };
     }
     set({ ttsConfig });
-    // 安全：含 apiKey，密文落盘（与 apiConfig 同策略）
-    void encryptValue(ttsConfig)
-      .then((v) => localDB.put('settings', { key: 'ttsConfig', value: v }))
-      .catch(() => undefined);
+    // 安全：含 apiKey（含 accounts 槽位），enc:v1 密文落盘（与 apiConfig 同策略）
+    void putSecretRecord('ttsConfig', ttsConfig).catch(() => undefined);
   },
 
   /** 切换语音服务商（Task 29）：快照当前连接配置进本家槽位 → 恢复目标槽位（首次切换填该家默认值）。
@@ -1156,18 +1170,14 @@ export const useSettings = create<SettingsState>((set, get) => ({
       accounts,
     };
     set({ ttsConfig });
-    void encryptValue(ttsConfig)
-      .then((v) => localDB.put('settings', { key: 'ttsConfig', value: v }))
-      .catch(() => undefined);
+    void putSecretRecord('ttsConfig', ttsConfig).catch(() => undefined);
   },
 
   updateSttConfig: (patch) => {
     const sttConfig = { ...get().sttConfig, ...patch };
     set({ sttConfig });
-    // 安全：含 apiKey，密文落盘（与 TTS 同策略）
-    void encryptValue(sttConfig)
-      .then((v) => localDB.put('settings', { key: 'sttConfig', value: v }))
-      .catch(() => undefined);
+    // 安全：含 apiKey，enc:v1 密文落盘（与 TTS 同策略）
+    void putSecretRecord('sttConfig', sttConfig).catch(() => undefined);
   },
 
   applyLockConfig: (cfg) => {

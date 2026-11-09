@@ -38,7 +38,7 @@ import { buildCrossContextBlocks } from '@/lib/ios/cross-app-context';
 import { buildBranchPromptBlock } from '@/lib/ios/branch';
 import { buildDynamicStateBlocks } from '@/lib/ios/ai-mood';
 import { buildAvatarBlock } from '@/lib/ios/avatar-ai';
-import { buildLocationBlock, locationAiText } from '@/lib/ios/chat-location';
+import { buildLocationBlock, locationAiText, type ChatLocScanMsg } from '@/lib/ios/chat-location';
 import { buildBlockPromptBlock } from '@/lib/ios/block-state';
 import { buildVoicePlaceholderRule, buildImagePlaceholderRule } from '@/lib/chat-media-rules';
 import { buildKickNoticeSection, buildGroupSocialRules } from '@/lib/ios/group-social';
@@ -333,6 +333,19 @@ function scanTextOf(m: RawMsg): string {
   return asStr(m.content);
 }
 
+/** kv 宽松消息 → 位置块扫描消息：buildLocationBlock 内部只按 role 是否 'me' 分流，这里同口径归一（'user' 等非机主一律 peer）；
+ * 其余字段原值透传（缺类型给等价回退：time 缺失给 NaN，locTimeText 对 Invalid Date 返回空串，与原先宽松读取行为一致） */
+function toLocScanMsgs(base: RawMsg[]): ChatLocScanMsg[] {
+  return base.map((m) => ({
+    role: m.role === 'me' ? 'me' : 'peer',
+    time: typeof m.time === 'number' ? m.time : Number.NaN,
+    kind: typeof m.kind === 'string' ? m.kind : undefined,
+    loc: m.loc,
+    senderName: typeof m.senderName === 'string' ? m.senderName : undefined,
+    recalled: asBool(m.recalled),
+  }));
+}
+
 function kvMsgs(key: string): RawMsg[] {
   const raw = kvGet<unknown>(key);
   return Array.isArray(raw) ? (raw as RawMsg[]) : [];
@@ -438,7 +451,8 @@ export async function buildChatPreview(channel: PreviewChannel, contactId: strin
   // ---- 记忆召回（预览无新消息：扫描文本用最近历史） ----
   const recentScan = base.slice(-8).map(scanTextOf).filter((t) => t.length > 0);
   const memoryBlock = memChatRecallBlock(contactId, memApp, recentScan.slice(-7).join(' '), {
-    interopOn: channel === 'sms' ? memSettings.share : effectiveInterop,
+    // sms 无群聊、groupId 恒空：互通开关用总开关 share（包一层回调对齐 interopOn 的谓词签名，同 quit-flow 口径）
+    interopOn: channel === 'sms' ? () => memSettings.share : effectiveInterop,
     disclosureText: base.slice(-8).filter((m) => m.role === 'me' || m.role === 'user').map(scanTextOf).filter(Boolean).join(' '),
     altMainName: cachedOwnerName(),
     altMainRelation: peer.relation?.trim() || '',
@@ -488,7 +502,7 @@ export async function buildChatPreview(channel: PreviewChannel, contactId: strin
   const musicBlock = channel === 'sms' ? '' : togetherLiveBlock(contactId, meAddrName);
   pushSection('music', '音乐情境', musicBlock);
 
-  const locBlock = channel === 'sms' ? '' : buildLocationBlock(base as Parameters<typeof buildLocationBlock>[0], { userLabel: meAddrName, peerLabel: `「${peer.name}」` });
+  const locBlock = channel === 'sms' ? '' : buildLocationBlock(toLocScanMsgs(base), { userLabel: meAddrName, peerLabel: `「${peer.name}」` });
   pushSection('loc', '位置感知', locBlock);
 
   const avatarBlock = buildAvatarBlock(contactId, meCard.id, meAddrName);

@@ -11,8 +11,8 @@ android {
         applicationId "com.z.aiphone"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 10          // v1.5.1 智能体增强+语音唤起+本地通知（v9 = 1.5.0）
-        versionName "1.5.1"     // v1.5.1 智能体增强（longPress/doubleClick/drag+视觉验证+坐标缓存）+ 语音唤起 + localNotify
+        versionCode 11          // v1.6.0 提速+语音闭环+通知直达+通知中心（v10 = 1.5.1）
+        versionName "1.6.0"     // v1.6.0 A7提速 + C4语音闭环 + C5通知直达（handleOnNewIntent）+ C6通知中心
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.

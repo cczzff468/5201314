@@ -1695,7 +1695,7 @@ async function aiTickMood(snap: CoupleSnap, me: string, ta: string, p: TaPersona
       .filter(Boolean)
       .join('\n'),
   ) ?? '';
-  if (!sys) return false; // v63：couple-mood-diary 条目关闭 → 跳过今天的心情日记
+  if (!sys) return; // v63：couple-mood-diary 条目关闭 → 跳过今天的心情日记（函数返回 void，调用方不消费返回值）
   let moodLabel = '';
   let text = '';
   try {

@@ -86,6 +86,10 @@ const GlobalCallLayer = dynamic(() => import('./GlobalCallLayer'), { ssr: false 
 // 全局来电层（AI 来电弹窗胶囊/微信大窗 + iOS 全屏来电界面）：懒加载，仅在有来电时渲染内容
 const IncomingCallLayer = dynamic(() => import('./IncomingCallLayer'), { ssr: false });
 
+// C6 应用内通知中心（下拉面板 + 顶部手势/点按入口）：层级 z-[61]（App 窗口上、锁屏下），
+// 入口 gate 在组件内部（仅解锁后可用）；懒加载与其它全局层同套路
+const NotificationCenter = dynamic(() => import('./NotificationCenter'), { ssr: false });
+
 // v1.5 Mobile Agent 全局层（运行进度条含紧急停止 + 敏感操作确认卡）：懒加载，
 // 仅在 Agent 运行中/刚结束/待确认时渲染内容，闲置零开销
 const AgentGlobalLayers = dynamic(() => import('@/components/apps/agent-ui').then((m) => m.AgentGlobalLayers), {
@@ -555,6 +559,10 @@ export default function PhoneShell() {
             iOS 全屏来电界面（z-84，仅电话来电自动显示、左上可退出，界面可见时不叠加弹窗；
             微信来电响铃期间不显示任何通话 UI，点弹窗非按钮区域才展开全屏来电页）——高于一切 App/锁屏，任何界面都显示 */}
         <IncomingCallLayer />
+
+        {/* C6 应用内通知中心：z-[61]（App 窗口之上、锁屏/来电层之下）；入口手势/点按热区由组件
+            自带 window 捕获阶段监听实现（gate：仅解锁后可用），不侵入状态栏/灵动岛既有交互 */}
+        <NotificationCenter />
 
         {/* Home 指示条：所有界面常显，颜色由 useLightForeground 随身后背景明暗选黑/白
             （白底黑杠、黑底白杠；饱和色背景按明暗取色，不像 mix-blend-difference 那样变互补色）。

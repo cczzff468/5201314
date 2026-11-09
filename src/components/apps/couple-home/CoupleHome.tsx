@@ -3304,7 +3304,13 @@ export default function CoupleHome({ close }: { close: () => void }) {
     if (unread > 0) {
       toast(`TA给你留了 ${unread} 条便签，点留言板看看～`);
       // C2 通知：页面在后台时 toast 看不见 → 经本地通知通道补一条（前台时内部静默跳过）
-      void notifyIfHidden('情侣小家', `TA给你留了 ${unread} 条便签，点留言板看看～`, { tag: 'couple-home-notes', url: '/' });
+      // C5 点击直达：小家在情侣空间 App 内（registry couple → couple-space 挂 CoupleHome，
+      // 页内无更细路由参数），target 切到 couple App 落在情侣空间本体
+      void notifyIfHidden('情侣小家', `TA给你留了 ${unread} 条便签，点留言板看看～`, {
+        tag: 'couple-home-notes',
+        url: '/',
+        target: { app: 'couple' },
+      });
     }
   }, [notes, toast]);
 

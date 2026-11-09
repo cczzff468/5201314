@@ -120,6 +120,8 @@ import { AUTONOMY_CAPS, getAutonomyConfig, setAutonomyCap, setAutonomyMaster } f
 import { isNativePerception, nativeShizukuStatus } from '@/lib/ios/native-perception';
 // C1 语音唤起智能体：AI 动手页内设置卡（唤醒名 / 悬浮球 / 连续监听）
 import { DEFAULT_WAKE_NAME, updateAgentVoiceCfg, useAgentVoice } from '@/lib/ios/agent-voice';
+// C4 播报开关提示用：判断 TTS 是否已配置（内置语音恒可用，第三方需 Key+地址）
+import { isTtsConfigured } from '@/lib/ios/tts-client';
 import { copyApkLink, getApkUrl, launchApkDownload } from '@/lib/ios/apk-download';
 // v1.4.2 APP 更新：自动检查 + 红点 + 版本历史
 import { useAppUpdate } from '@/lib/ios/app-update';
@@ -905,14 +907,17 @@ function AutonomyCapRow({
 // ---------------- C1 语音唤起智能体（AI 动手页内设置卡） ----------------
 
 /**
- * 「语音唤起智能体」卡：唤醒名（≤6 字）/ 悬浮球开关 / 连续唤醒监听开关（带耗电提示）。
+ * 「语音唤起智能体」卡：唤醒名（≤6 字）/ 悬浮球开关 / 连续唤醒监听开关（带耗电提示）/
+ * C4 执行结果语音播报开关（默认关）/ C4 任务后追问窗口开关（默认开）。
  * 配置存 agent-voice-wake-v1（localStorage 单键 + zustand 镜像），悬浮球即时生效；
- * 连续监听只在 APP 原生壳 + 离线识别模型就绪时真正生效，否则自动降级「点球才识别」（下方提示行说明）。
+ * 连续监听只在 APP 原生壳 + 离线识别模型就绪时真正生效，否则自动降级「点球才识别」（下方提示行说明）；
+ * 播报开着但 TTS 未配置（第三方服务商缺 Key/地址）时下方提示「将静默跳过」。
  */
 function AgentVoiceCard() {
   const cfg = useAgentVoice((s) => s.cfg);
   const wakeBlocked = useAgentVoice((s) => s.wakeBlocked);
   const asrStatus = useOfflineAsr((s) => s.status);
+  const ttsCfg = useSettings((s) => s.ttsConfig);
   const nativeMode = isNativePerception();
   // 唤醒名输入草稿：失焦才落盘（≤6 字，清空回默认「小灵」）。
   // 本卡是 cfg.name 的唯一写入方（提交后草稿即等于新值），无需 effect 反向同步草稿
@@ -987,6 +992,36 @@ function AgentVoiceCard() {
               testId="agent-voice-listen-switch"
             />
           </div>
+          {/* C4 执行结果语音播报 */}
+          <div className="flex min-h-[52px] items-center gap-3 px-4 py-2">
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-[16px]">执行结果语音播报</span>
+              <span className="mt-0.5 block text-[11.5px] leading-snug text-muted-foreground">
+                任务完成后朗读结果摘要（Siri 式闭环）· 语音唤起的任务始终播报，不受此开关限制
+              </span>
+            </span>
+            <AutonomySwitch
+              on={cfg.announce}
+              onToggle={() => updateAgentVoiceCfg({ announce: !cfg.announce })}
+              label="执行结果语音播报"
+              testId="agent-voice-announce-switch"
+            />
+          </div>
+          {/* C4 任务后追问窗口 */}
+          <div className="flex min-h-[52px] items-center gap-3 px-4 py-2">
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-[16px]">任务后追问窗口</span>
+              <span className="mt-0.5 block text-[11.5px] leading-snug text-muted-foreground">
+                语音任务结束后面板保持 10 秒，可直接追问，无需再喊唤醒名
+              </span>
+            </span>
+            <AutonomySwitch
+              on={cfg.followup}
+              onToggle={() => updateAgentVoiceCfg({ followup: !cfg.followup })}
+              label="任务后追问窗口"
+              testId="agent-voice-followup-switch"
+            />
+          </div>
         </div>
       </div>
       {/* 状态提示行（条件显示） */}
@@ -998,6 +1033,12 @@ function AgentVoiceCard() {
       {cfg.listen && nativeMode && asrNotReady ? (
         <p className="mx-6 mt-2 text-[11.5px] leading-relaxed text-[#FF9500]">
           离线识别模型未就绪：连续唤醒已降级为「点球才识别」——到设置 › 语音 API 下载离线模型后自动恢复监听。
+        </p>
+      ) : null}
+      {/* C4：播报开着但 TTS 未配置（第三方缺 Key/地址）——提醒会静默跳过 */}
+      {cfg.announce && !isTtsConfigured(ttsCfg) ? (
+        <p className="mx-6 mt-2 text-[11.5px] leading-relaxed text-[#FF9500]">
+          未配置语音 API：执行结果播报将静默跳过——到「语音 API」选择内置语音或填好服务商 Key 后生效。
         </p>
       ) : null}
       {wakeBlocked ? (

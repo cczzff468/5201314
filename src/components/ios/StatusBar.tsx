@@ -9,6 +9,8 @@ import { useLightForeground } from '@/lib/ios/foreground';
 import { useMusicIslandVisible } from '@/lib/ios/music-island-flag';
 import { useMtIsland } from '@/lib/ios/mt-island-store';
 import { useTbIsland } from '@/lib/ios/tb-island-store';
+// C6 通知中心未读计数（状态栏小红点；纯视觉，无任何点击交互）
+import { useNotifyUnreadCount } from '@/lib/ios/notification-center';
 
 function SignalBars() {
   return (
@@ -79,6 +81,8 @@ export default function StatusBar() {
   const musicIslandVisible = useMusicIslandVisible();
   const mtIslandVisible = useMtIsland((s) => s.visible);
   const tbIslandVisible = useTbIsland((s) => s.visible);
+  // C6：通知中心未读数（>0 时电量左侧亮一枚小红点；纯视觉徽标，不影响任何点击/手势）
+  const ncUnread = useNotifyUnreadCount();
   // 音乐灵动岛：仅隐藏信号（第二十三轮口径）；美团/淘宝配送灵动岛：信号 + WiFi 一起隐藏，仅保留电量（最新反馈）
   const hideSignal = musicIslandVisible || mtIslandVisible || tbIslandVisible;
   const hideWifi = mtIslandVisible || tbIslandVisible;
@@ -96,6 +100,14 @@ export default function StatusBar() {
     >
       <time className="w-[70px] leading-none tabular-nums tracking-tight">{now ? formatIOSTime(now) : ''}</time>
       <div className="flex items-center gap-[4px] leading-none">
+        {/* C6 未读红点：通知中心有待读消息时点亮（电量图标左侧，比信号图标更靠右） */}
+        {ncUnread > 0 && (
+          <span
+            data-testid="nc-statusbar-dot"
+            aria-label={`${ncUnread} 条未读通知`}
+            className="mr-[1px] h-[7px] w-[7px] rounded-full bg-[#FF3B30] shadow-[0_0_0_1px_rgba(0,0,0,0.25)]"
+          />
+        )}
         {/* 移动数据（信号）：任一灵动岛弹窗可见时隐藏，弹窗消失后恢复 */}
         {!hideSignal && <SignalBars />}
         {/* WiFi（加大版）：美团外卖灵动岛小窗/大窗可见期间随信号一起隐藏（真机灵动岛同语义），其余时刻常驻 */}

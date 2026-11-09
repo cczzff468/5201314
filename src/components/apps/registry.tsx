@@ -698,7 +698,8 @@ export function preloadHeavyApps(): void {
     if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
       window.requestIdleCallback(fn, { timeout: 4000 });
     } else {
-      window.setTimeout(fn, 1000);
+      // 全局 setTimeout（浏览器环境即 window.setTimeout 同一函数；上面 in 取反分支会把 window 收窄成 never，不能再用 window. 前缀）
+      setTimeout(fn, 1000);
     }
   };
   const next = (i: number): void => {

@@ -30,6 +30,15 @@
  *  - 坐标缓存学习（A6）：clickElement/longPress 文本定位成功点击后，把归一化坐标写入
  *    localStorage LRU 缓存（≤120 条）；同 App 重复任务先查缓存直接点击（跳过 dumpUI→查找），
  *    命中复核失败自动弃条目并回落 UI 树路径。对 LLM 透明（不改计划 schema）。
+ *
+ * v1.7 提速（A7，目标：执行循环提速 30~50%，语义/护栏不变）：
+ *  - dumpUI 任务内短缓存（B4a）：同一任务内、前台 App 未变、距上次 dump < 4s 复用上一份
+ *    UI 树（省 0.5~2s 桥往返）；任何变更类动作（tap/longPress/doubleClick/drag/input/
+ *    enter/key/swipe/openApp…）执行后立即失效（含失败尝试），任务起止清缓存；
+ *  - 自适应 settle（B7）：固定步间等待改为「300ms 防抖 + 轮询稳定检测（openApp 轮询前台
+ *    包名、tap/key 类两次 dump 采样比对）+ 尾段并行预取下一步观察所需 dump」；上限沿用
+ *    原值、失败/急停语义不变。视觉验证的 screencap→visionAsk 数据依赖链保持串行
+ *    （判定正确性优先，见 settleAfterStep / visualVerifyStep 注释）。
  */
 
 import { useSyncExternalStore } from 'react';
@@ -404,9 +413,16 @@ export interface AgentObservation {
   nodes: UiNode[];
 }
 
-/** 一次完整观察：前台 App + uiautomator UI 树 → LLM 可读摘要（并行取，失败不互相拖垮） */
+/**
+ * 一次完整观察：前台 App + uiautomator UI 树 → LLM 可读摘要（并行取，失败不互相拖垮）。
+ * A7：dump 走任务内短缓存（B4a）——4s 内且前台未变时复用上一份树，省一次最贵的
+ * uiautomator dump 往返；fg 查询与 dump 仍并行，且 fg Promise 同时作为缓存命中判定
+ * 与回填标记的来源（一次查询两用，不额外多花桥往返）。
+ */
 export async function agentObserve(): Promise<AgentObservation> {
-  const [fgRes, dump] = await Promise.all([labForegroundApp().catch(() => null), nativeDumpUi()]);
+  const fgLineP = labForegroundApp().catch(() => null);
+  const fgPkgP = fgLineP.then((r) => (r && r.ok ? fgPackageOf((r.text.split('\n')[0] ?? '').trim()) : ''));
+  const [fgRes, dump] = await Promise.all([fgLineP, dumpUICached(fgPkgP)]);
   const fg = fgRes && fgRes.ok ? ((fgRes.text.split('\n')[0] ?? '').trim() || '（前台未知）') : '（前台未知）';
   const nodes = dump?.ok && dump.xml ? parseUiXml(dump.xml) : [];
   if (!dump) {
@@ -429,6 +445,138 @@ export async function agentObserve(): Promise<AgentObservation> {
   }
   const summary = `前台：${fg}\n${summarizeUi(nodes)}`;
   return { fg, summary, nodeCount: nodes.length, ok: nodes.length > 0, nodes };
+}
+
+// ============================================================
+// B4a. dumpUI 任务内短缓存（A7 提速一）
+// ============================================================
+
+/**
+ * uiautomator dump 是观察链路里最贵的一次原生桥往返（典型 0.5~2s，忙屏更久）。
+ * 任务内短缓存复用条件（三者同时满足）：同一任务内 + 前台 App 未变 + 距上次 dump < 4s。
+ * 护栏：
+ *  - 4s TTL 硬上限：通知横幅/时钟/视频帧等「前台不变但内容自变」的画面不会被当成新观察；
+ *  - fg 标记：前台包名对不上立即失效（App 切换/弹窗抢占场景绝不复用旧树；前台查询失败
+ *    按未命中处理，安全第一）；
+ *  - 变更即失效：所有会改变屏幕的动作（tap/longPress/doubleClick/drag/input/enter/key/
+ *    swipe/openApp…）执行后（含失败尝试——命令失败也可能已落屏）立刻 invalidateDumpCache；
+ *  - 任务级隔离：任务开始/结束都清缓存，不跨任务、不跨 [手机操作] 单步标记复用；
+ *  - 单飞（single-flight）：并发请求共享同一次 dump——既省重复开销，也避免两个
+ *    uiautomator dump 并发写同一个 window_dump.xml 互踩；跨代（已失效）的旧 dump
+ *    只等它落地不取其数据，保证调用方拿到与当前失效状态一致的新鲜树。
+ */
+const DUMP_CACHE_TTL_MS = 4000;
+
+/** nativeDumpUi 的返回形状（缓存原样存取，agentObserve 下游逻辑零改动） */
+type DumpUiResult = Awaited<ReturnType<typeof nativeDumpUi>>;
+
+let dumpCacheEntry: { fg: string; at: number; res: DumpUiResult } | null = null;
+let dumpCacheGen = 0;
+let dumpInflight: { gen: number; promise: Promise<DumpUiResult> } | null = null;
+
+/** 变更类动作集合（执行后必须失效 dump 缓存；wait/lookScreen 只读不在列） */
+const MUTATING_AGENT_ACTIONS = new Set([
+  'openApp',
+  'clickElement',
+  'tapPoint',
+  'inputTextToFocus',
+  'pressEnter',
+  'pressDelete',
+  'back',
+  'scroll',
+  'longPress',
+  'doubleClick',
+  'drag',
+]);
+
+/** 任何屏幕变更后调用：缓存立即作废（进行中的旧 dump 落地时也会被 generation 拦下不入缓存） */
+function invalidateDumpCache(): void {
+  dumpCacheGen += 1;
+  dumpCacheEntry = null;
+}
+
+/** 把一份 dump 结果写入缓存（自适应 settle 确认稳定后喂缓存用；空 fg/失败结果拒收） */
+function dumpCacheStore(fg: string, res: DumpUiResult): void {
+  if (!fg || !res || !res.ok || !res.xml) return;
+  dumpCacheEntry = { fg, at: Date.now(), res };
+}
+
+/** 安全取 fg 包名（查询失败按空串处理：无法验证「前台未变」→ 一律当未命中，安全第一） */
+async function fgOfPromise(fgP: Promise<string> | null): Promise<string> {
+  try {
+    return fgP ? await fgP : '';
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * 带任务内短缓存的 dumpUI。
+ * @param fgP 当前前台包名 Promise（调用方多半本来就要查前台——命中判定/回填标记共用这
+ *            一次查询，不额外多花桥往返；传 null 表示调用方不关心前台，只直取）
+ * @param write 结果是否回填缓存（自适应 settle 的稳定性轮询传 false：中间态树不入缓存）
+ */
+async function dumpUICached(fgP: Promise<string> | null, write = true): Promise<DumpUiResult> {
+  const gen = dumpCacheGen;
+  // 1) 命中判定：TTL 内 + 前台包名一致（gen 复查：等待 fg 期间若发生变更立即放弃复用）
+  const entry = dumpCacheEntry;
+  if (entry && Date.now() - entry.at < DUMP_CACHE_TTL_MS) {
+    const fg = await fgOfPromise(fgP);
+    if (gen === dumpCacheGen && fg && fg === entry.fg) return entry.res;
+  }
+  // 2) 单飞：同代请求共享同一次 dump；跨代旧 dump 只等它落地（串行化，避免两个
+  //    uiautomator dump 并发互踩），不取其数据——那是变更前的旧树
+  if (dumpInflight) {
+    if (dumpInflight.gen === gen) return dumpInflight.promise;
+    try {
+      await dumpInflight.promise;
+    } catch {
+      /* 旧 dump 失败不影响新请求 */
+    }
+    if (dumpInflight && dumpInflight.gen === dumpCacheGen) return dumpInflight.promise;
+  }
+  const myGen = dumpCacheGen;
+  const promise = nativeDumpUi();
+  dumpInflight = { gen: myGen, promise };
+  try {
+    const res = await promise;
+    if (write && myGen === dumpCacheGen && res && res.ok && res.xml) {
+      const fg = await fgOfPromise(fgP);
+      if (myGen === dumpCacheGen && fg) dumpCacheEntry = { fg, at: Date.now(), res };
+    }
+    return res;
+  } finally {
+    if (dumpInflight && dumpInflight.promise === promise) dumpInflight = null;
+  }
+}
+
+/**
+ * 带超时护栏的 dump（自适应 settle 稳定性轮询专用，write=false：中间态树不入缓存）。
+ * uiautomator 在忙屏（动画/加载）上会一直等 idle，桥超时 30s 太慢——超过 budget 视为
+ * 「屏幕不稳定」；底层 dump 继续在后台飞（单飞共享），不浪费已发出的往返。
+ */
+async function dumpUICachedWithTimeout(fgP: Promise<string> | null, budgetMs: number): Promise<DumpUiResult> {
+  let timer = 0;
+  const guard = new Promise<null>((resolve) => {
+    timer = window.setTimeout(() => resolve(null), Math.max(50, budgetMs));
+  });
+  try {
+    return await Promise.race([dumpUICached(fgP, false), guard]);
+  } finally {
+    window.clearTimeout(timer);
+  }
+}
+
+/** 双积聚字符串哈希（dump 内容稳定性比对用；64 位散列，碰撞概率对本用途足够低） */
+function hashDumpXml(s: string): string {
+  let h1 = 0x811c9dc5;
+  let h2 = 0x1003f;
+  for (let i = 0; i < s.length; i++) {
+    const c = s.charCodeAt(i);
+    h1 = Math.imul(h1 ^ c, 0x01000193);
+    h2 = Math.imul(h2 + c, 0x85ebca6b);
+  }
+  return `${(h1 >>> 0).toString(16)}-${(h2 >>> 0).toString(16)}`;
 }
 
 // ============================================================
@@ -694,6 +842,10 @@ async function tryClickViaCoordCache(target: string, longPressMode: boolean): Pr
   const x = Math.round(entry.nx * size.w);
   const y = Math.round(entry.ny * size.h);
   const r = longPressMode ? await labSwipe(x, y, x, y, 800) : await labTap(x, y);
+  // A7：点击已发生（无论命令成败都可能改变屏幕）→ 立即失效 dump 短缓存。
+  // 必须在下方 UI 树复核前失效：否则复核会命中点击前的旧树（元素必然「原地」），
+  // A6 的「布局已变 = 缓存过期」判定就永远触发不了了
+  invalidateDumpCache();
   if (!r.ok) {
     dropCoordCache(app, t);
     return null; // 点击命令失败：弃缓存回落正常路径
@@ -939,71 +1091,124 @@ async function stepWait(msRaw: string): Promise<StepResult> {
 export async function execAgentStep(step: AgentStep): Promise<StepResult> {
   const action = (step.action || '').trim();
   const args = typeof step.args === 'string' ? step.args : '';
+  let r: StepResult;
   try {
     switch (action) {
       case 'openApp': {
-        if (!isCapEnabled('open')) return capDenied('open');
-        return await stepOpenApp(args.trim());
+        if (!isCapEnabled('open')) {
+          r = capDenied('open');
+          break;
+        }
+        r = await stepOpenApp(args.trim());
+        break;
       }
       case 'clickElement': {
-        if (!isCapEnabled('tap')) return capDenied('tap');
-        return await stepClickElement(args);
+        if (!isCapEnabled('tap')) {
+          r = capDenied('tap');
+          break;
+        }
+        r = await stepClickElement(args);
+        break;
       }
       case 'tapPoint': {
-        if (!isCapEnabled('tap')) return capDenied('tap');
-        return await stepTapPoint(args);
+        if (!isCapEnabled('tap')) {
+          r = capDenied('tap');
+          break;
+        }
+        r = await stepTapPoint(args);
+        break;
       }
       case 'inputTextToFocus': {
-        if (!isCapEnabled('type')) return capDenied('type');
-        return await stepInputText(args);
+        if (!isCapEnabled('type')) {
+          r = capDenied('type');
+          break;
+        }
+        r = await stepInputText(args);
+        break;
       }
       case 'pressEnter': {
-        if (!isCapEnabled('key')) return capDenied('key');
-        const r = await labKey(KEY_CODES.enter);
-        return r.ok ? { ok: true, text: '已按回车（Enter）' } : { ok: false, text: `回车失败：${r.text}` };
+        if (!isCapEnabled('key')) {
+          r = capDenied('key');
+          break;
+        }
+        const kr = await labKey(KEY_CODES.enter);
+        r = kr.ok ? { ok: true, text: '已按回车（Enter）' } : { ok: false, text: `回车失败：${kr.text}` };
+        break;
       }
       case 'pressDelete': {
-        if (!isCapEnabled('key')) return capDenied('key');
-        const r = await labKey(KEY_CODES.del);
-        return r.ok ? { ok: true, text: '已按删除键' } : { ok: false, text: `删除键失败：${r.text}` };
+        if (!isCapEnabled('key')) {
+          r = capDenied('key');
+          break;
+        }
+        const dr = await labKey(KEY_CODES.del);
+        r = dr.ok ? { ok: true, text: '已按删除键' } : { ok: false, text: `删除键失败：${dr.text}` };
+        break;
       }
       case 'back': {
-        if (!isCapEnabled('key')) return capDenied('key');
-        const r = await labKey(KEY_CODES.back);
-        return r.ok ? { ok: true, text: '已按返回键' } : { ok: false, text: `返回失败：${r.text}` };
+        if (!isCapEnabled('key')) {
+          r = capDenied('key');
+          break;
+        }
+        const br = await labKey(KEY_CODES.back);
+        r = br.ok ? { ok: true, text: '已按返回键' } : { ok: false, text: `返回失败：${br.text}` };
+        break;
       }
       case 'scroll': {
-        if (!isCapEnabled('swipe')) return capDenied('swipe');
-        return await stepScroll(args);
+        if (!isCapEnabled('swipe')) {
+          r = capDenied('swipe');
+          break;
+        }
+        r = await stepScroll(args);
+        break;
       }
       case 'longPress': {
-        if (!isCapEnabled('tap')) return capDenied('tap');
-        return await stepLongPress(args);
+        if (!isCapEnabled('tap')) {
+          r = capDenied('tap');
+          break;
+        }
+        r = await stepLongPress(args);
+        break;
       }
       case 'doubleClick': {
-        if (!isCapEnabled('tap')) return capDenied('tap');
-        return await stepDoubleClick(args);
+        if (!isCapEnabled('tap')) {
+          r = capDenied('tap');
+          break;
+        }
+        r = await stepDoubleClick(args);
+        break;
       }
       case 'drag': {
-        if (!isCapEnabled('swipe')) return capDenied('swipe');
-        return await stepDrag(args);
+        if (!isCapEnabled('swipe')) {
+          r = capDenied('swipe');
+          break;
+        }
+        r = await stepDrag(args);
+        break;
       }
       case 'wait':
-        return await stepWait(args);
+        r = await stepWait(args);
+        break;
       case 'lookScreen': {
         // 纯观察步：结果（摘要）进 history 给 LLM 下轮决策
         const obs = await agentObserve();
-        return { ok: true, text: obs.summary };
+        r = { ok: true, text: obs.summary };
+        break;
       }
       default:
-        return {
+        r = {
           ok: false,
           text: `未知动作「${action}」（可用：openApp/clickElement/tapPoint/inputTextToFocus/pressEnter/pressDelete/back/scroll/wait/lookScreen/longPress/doubleClick/drag）`,
         };
     }
   } catch (e) {
+    // A7：异常路径同样失效——动作可能执行到一半（半次输入/半次滑动），屏幕状态未知
+    if (MUTATING_AGENT_ACTIONS.has(action)) invalidateDumpCache();
     return { ok: false, text: `动作 ${action} 执行异常：${e instanceof Error ? e.message : String(e)}` };
   }
+  // A7 提速一护栏：变更类步骤执行后立即失效 dump 短缓存——即使命令报失败也可能已改变
+  // 屏幕（如 tap 已落在对话框按钮上），一律失效，宁滥勿缺；wait/lookScreen 只读不失效
+  if (MUTATING_AGENT_ACTIONS.has(action)) invalidateDumpCache();
+  return r;
 }
 
 // ============================================================
@@ -1020,6 +1225,8 @@ export async function execAgentStep(step: AgentStep): Promise<StepResult> {
  */
 export async function agentInputText(text: string): Promise<StepResult> {
   const r = await stepInputText(text);
+  // A7：输入改变屏幕（输入框内容/候选栏/可能触发跳转），立即失效 dump 短缓存（宁滥勿缺）
+  invalidateDumpCache();
   if (!agentState.running && originalIme) {
     void nativeRestoreIme(originalIme);
     originalIme = null;
@@ -1041,6 +1248,8 @@ export async function agentClickText(target: string): Promise<StepResult> {
   const hit = findClickableByText(obs.nodes, t);
   if (!hit) return { ok: false, text: `UI 树未找到「${t}」` };
   const tap = await labTap(hit.cx, hit.cy);
+  // A7：点击可能改变屏幕（导航/弹窗），立即失效 dump 短缓存（含失败尝试，宁滥勿缺）
+  invalidateDumpCache();
   return tap.ok
     ? { ok: true, text: `已点击「${t}」（UI 树定位 ${hit.cx},${hit.cy}）` }
     : { ok: false, text: `点击「${t}」失败：${tap.text}` };
@@ -1303,6 +1512,8 @@ function visionVerifyAsk(task: string, step: AgentStep): string {
  *（截屏失败/接口失败/超时/输出不可解析——护栏：信任 UI 树结果继续，绝不中断任务）；
  * 返回 StepResult（ok:false）= VLM 明确判定画面未体现预期 → 该步按失败处理走重规划，
  * text 写「视觉验证未通过：…」（自然进 history，重规划的 LLM 能看到失败原因）。
+ * A7 注：截屏 → visionAsk 是数据依赖（ask 要用截图），无法并行；15s 看门狗与
+ * 「连败 3 次自动停用」护栏原样保留，UI 树结果权威、视觉结果辅助的判定优先级不变。
  */
 async function visualVerifyStep(task: string, step: AgentStep, vst: VisionVerifyState): Promise<StepResult | null> {
   if (!AGENT_VISUAL_VERIFY || vst.disabled) return null;
@@ -1375,10 +1586,125 @@ const UI_TOUCH_ACTIONS = new Set([
   'drag',
 ]);
 
-/** 步间等待（可被急停打断；被打断返回 false） */
+// ---- A7 自适应 settle 参数 ----
+/** 最小防抖下限：转场动画起点（~300ms 内画面必是中间态，检测无意义），先睡过 */
+const SETTLE_MIN_MS = 300;
+/** 稳定性轮询间隔（150~250ms；dump 本身耗时，实际间隔 ≥ 此值） */
+const SETTLE_POLL_INTERVAL_MS = 200;
+/** 单次轮询 dump 的超时预算（uiautomator 忙屏等 idle 可能拖满 30s 桥超时，必须自带护栏） */
+const SETTLE_POLL_DUMP_BUDGET_MS = 1200;
+/** 轮询 dump 允许超出 deadline 的余量（让快完成的 dump 落地，总时长最多超上限 ~200ms） */
+const SETTLE_POLL_OVERSHOOT_MS = 200;
+/** 轮询窗口下限：剩余时间不足以容纳一轮检测（fg 查询 + dump）就不开轮询，直接睡满 */
+const SETTLE_POLL_MIN_WINDOW_MS = 1100;
+/** openApp 前台命中后的渲染 grace（App 冷启动首帧后仍需短渲染时间） */
+const SETTLE_OPEN_GRACE_MS = 500;
+/**
+ * 参与轮询稳定检测的动作：只挑「会触发界面跳转」的类型（成本权衡）——每轮检测要
+ * 1~2 次 uiautomator dump（0.5~2s/次），对轻量动作反而更慢：
+ *  - openApp：只轮询前台包名（dumpsys，比 dump 便宜一个量级），零 dump 检测；
+ *  - tap/key 类（clickElement/tapPoint/pressEnter/back/longPress/doubleClick）：
+ *    两次 dump 采样比对，UI_SETTLE_MS=2000 窗口内成本可控；
+ *  - inputTextToFocus/pressDelete（纯输入几乎不跳转）、scroll/drag（惯性滚动期 dump
+ *    又慢又不稳）：沿用原固定等待，不多花桥往返。
+ */
+const SETTLE_POLL_ACTIONS = new Set(['openApp', 'clickElement', 'tapPoint', 'pressEnter', 'back', 'longPress', 'doubleClick']);
+
+/**
+ * 步间等待（A7 自适应版，返回值语义与原版一致：false=被急停打断，true=正常放行）。
+ *
+ * 三段式：
+ *  ① 最小防抖 300ms：转场动画起点，任何检测此刻都拿不到有效画面，先睡过；
+ *  ② 轮询稳定检测（仅「会触发界面跳转」的动作，成本权衡见 SETTLE_POLL_ACTIONS）：
+ *    - openApp：轮询前台包名（dumpsys）直到切到目标包 → fire-and-forget 预取 UI 树喂
+ *      短缓存 + 500ms 渲染 grace 即放行（冷启动通常 1~2.5s，较固定 3.5s 省 ~1~2s）；
+ *    - tap/key 类：两次 dump 采样内容 hash 一致 + 前台未变 → 判稳定提前放行，并把这份
+ *      稳定树喂短缓存（下一步观察 0 等待）；窗口放不下两次采样/采样超时/到上限 → 回落固定等待；
+ *  ③ 尾段：非轮询的变更类动作（输入类）在剩余等待里 fire-and-forget 预取下一步观察所需
+ *     UI 树（与睡眠重叠，不加总时长，下一步 agentObserve 直接命中缓存）。
+ *
+ * 护栏（失败/超时/急停行为与原固定等待完全一致）：
+ *  - 最大等待上限沿用原值（轮询 dump 预算按 deadline 收口，最多超 ~200ms）；
+ *  - 轮询采样的中间态树一律不写入缓存（write=false），只有确认稳定的树才喂缓存；
+ *  - 到上限仍未确认稳定 → 不预取（屏幕仍在变化，预取 = 过期画面），睡满剩余；
+ *  - 每个 await 点都查急停，急停返回 false。
+ */
 async function settleAfterStep(step: AgentStep): Promise<boolean> {
-  const ms = step.action === 'openApp' ? OPEN_SETTLE_MS : UI_TOUCH_ACTIONS.has(step.action) ? UI_SETTLE_MS : OP_GAP_MS;
-  return sleepStoppable(ms);
+  const max = step.action === 'openApp' ? OPEN_SETTLE_MS : UI_TOUCH_ACTIONS.has(step.action) ? UI_SETTLE_MS : OP_GAP_MS;
+  const deadline = Date.now() + max;
+  // ① 最小防抖
+  if (!(await sleepStoppable(Math.min(SETTLE_MIN_MS, max)))) return false;
+
+  // ② 轮询稳定检测（进入此分支的动作都是变更类：缓存已在 execAgentStep 末尾失效，采样必是新树）
+  if (SETTLE_POLL_ACTIONS.has(step.action)) {
+    if (step.action === 'openApp' && /^[\w.]+$/.test(step.args.trim())) {
+      const targetPkg = step.args.trim();
+      while (Date.now() < deadline) {
+        if (isStopRequested()) return false;
+        const fgPkg = await currentFgPackage();
+        if (isStopRequested()) return false;
+        if (fgPkg && fgPkg === targetPkg) {
+          // 前台已切到目标包 = 启动成功：预取 UI 树（喂缓存，不阻塞放行）+ 渲染 grace；
+          // 预取的 dump 与 grace 并行，即使 dump 稍慢也会被单飞共享，下一步观察不重复发
+          void dumpUICached(Promise.resolve(fgPkg)).catch(() => undefined);
+          return sleepStoppable(SETTLE_OPEN_GRACE_MS);
+        }
+        const gap = Math.min(SETTLE_POLL_INTERVAL_MS, Math.max(0, deadline - Date.now()));
+        if (gap <= 0) break;
+        if (!(await sleepStoppable(gap))) return false;
+      }
+    } else if (step.action !== 'openApp' && deadline - Date.now() >= SETTLE_POLL_MIN_WINDOW_MS) {
+      // tap/key 类：固定两次采样比对（成本可控：最多 2 次 dump，预算按 deadline 收口）；
+      // uiautomator dump 自带「等 idle」语义，第一次采样本身就会等过转场动画
+      const fg1P = currentFgPackage();
+      const d1 = await dumpUICachedWithTimeout(fg1P, Math.min(SETTLE_POLL_DUMP_BUDGET_MS, deadline - Date.now() + SETTLE_POLL_OVERSHOOT_MS));
+      if (isStopRequested()) return false;
+      const gap = Math.min(SETTLE_POLL_INTERVAL_MS, Math.max(0, deadline - Date.now()));
+      if (!(await sleepStoppable(gap))) return false;
+      const fg2P = currentFgPackage();
+      const fg2 = await fg2P;
+      if (isStopRequested()) return false;
+      const d2 = await dumpUICachedWithTimeout(fg2P, Math.min(SETTLE_POLL_DUMP_BUDGET_MS, deadline - Date.now() + SETTLE_POLL_OVERSHOOT_MS));
+      if (isStopRequested()) return false;
+      const fg1 = await fg1P;
+      const h1 = d1 && d1.ok && d1.xml ? hashDumpXml(d1.xml) : '';
+      const h2 = d2 && d2.ok && d2.xml ? hashDumpXml(d2.xml) : '';
+      if (h1 !== '' && h1 === h2 && fg1 !== '' && fg1 === fg2) {
+        dumpCacheStore(fg2, d2); // 稳定树喂缓存：下一步 agentObserve 0 等待
+        return true;
+      }
+    }
+    // 到上限仍未确认稳定：屏幕可能仍在变化 → 不预取中间态，睡满剩余（与原行为一致）
+    if (isStopRequested()) return false;
+    const remainPoll = deadline - Date.now();
+    return remainPoll <= 0 ? true : sleepStoppable(remainPoll);
+  }
+
+  // ③ 非轮询动作：变更类（输入类）尾段并行预取（与剩余睡眠重叠，不加总时长）；
+  //    wait/lookScreen 只读，缓存本就有效，不预取
+  if (MUTATING_AGENT_ACTIONS.has(step.action)) {
+    void dumpUICached(currentFgPackage()).catch(() => undefined);
+  }
+  const remain = deadline - Date.now();
+  return remain <= 0 ? true : sleepStoppable(remain);
+}
+
+// ============================================================
+// C4. 任务终态播报钩子（语音层注册，Siri 式闭环）
+// ============================================================
+
+/**
+ * 任务终态播报钩子：由语音层（agent-voice-ball 挂载时经 dynamic import 注册，
+ * 卸载时传 null 解绑）。runAgentTask 收尾（finally，C2 收尾通知之后）以「结果摘要」
+ * 调用——done/fail/stopped/异常四类终态统一触发；开关/TTS 闸门（未配置、通话中等
+ * 静默跳过）由语音层自行判定，本层只负责在终态时通知。摘要与通知文案同源：
+ * result.text 首行、截 120 字。
+ */
+let agentResultAnnouncer: ((text: string) => void) | null = null;
+
+/** 注册/解绑（传 null）任务终态播报回调 */
+export function setAgentResultAnnouncer(fn: ((text: string) => void) | null): void {
+  agentResultAnnouncer = typeof fn === 'function' ? fn : null;
 }
 
 /**
@@ -1438,6 +1764,7 @@ export async function runAgentTask(
   stopSource = '';
   originalIme = null;
   screenSizeMemo = null; // 屏幕分辨率任务级 memo 清空（旋转屏/换机场景下一任务自然刷新）
+  invalidateDumpCache(); // A7：任务起点冷缓存——dump 短缓存只在任务内复用，不跨任务/单步残留
   const visionCtl: VisionVerifyState = { failStreak: 0, disabled: false }; // A2 视觉层任务级状态
   void nativeAgentResetStop();
   void nativeAgentNotify('AI 智能体运行中', t.slice(0, 50));
@@ -1532,7 +1859,11 @@ export async function runAgentTask(
           emit('stepfail', r.text);
           break;
         }
-        // 步间落定间隔（可被急停打断）——先落定再视觉复核，避免截到转场动画中间态
+        // 步间落定间隔（可被急停打断）——先落定再视觉复核，避免截到转场动画中间态。
+        // A7 说明（为何不把验证与 settle/观察强行并行）：视觉验证的截屏必须等 settle 完成
+        //（转场动画期间截图 = 中间态，会误判），screencap→visionAsk 又是数据依赖链（ask
+        // 要用截图），强行并行会牺牲判定正确性；提速改由 settle 自适应缩短 + settle 尾段
+        // 并行预取下一步观察所需 UI 树承担（见 settleAfterStep）。
         if (!(await settleAfterStep(step))) return stoppedResult();
         // A2 视觉验证层：VLM 复核「画面是否体现该步预期」；判定未通过 → 该步按失败处理
         //（结果文本自然进 history，重规划的 LLM 能看到「视觉验证未通过：…」原因）。
@@ -1570,6 +1901,7 @@ export async function runAgentTask(
     }
     stopFlag = false;
     stopSource = '';
+    invalidateDumpCache(); // A7：任务结束即失效，防 4s TTL 内的残留树泄给后续 [手机操作] 单步
     void nativeAgentResetStop();
     void nativeAgentNotifyEnd();
     patchAgentState({
@@ -1583,5 +1915,12 @@ export async function runAgentTask(
     // C2 收尾通知：页面在后台（用户已切走）时经本地通知通道告知任务结果（done/fail/stopped
     // 终态统一走这里）；前台时内部静默跳过（界面内有状态条/弹窗）。失败静默，不影响收尾。
     void notifyIfHidden('智能体', (result.text || 'Agent 任务已结束').split('\n')[0].slice(0, 120), { tag: 'agent', url: '/' });
+    // C4 播报钩子：任务终态（完成/失败/急停/异常统一走 finally）触发语音播报 + 追问模式；
+    // 摘要与上方通知文案同源（首行、120 字）。语音层未注册时自然空操作，异常不外泄。
+    try {
+      agentResultAnnouncer?.((result.text || 'Agent 任务已结束').split('\n')[0].slice(0, 120));
+    } catch {
+      /* 播报层异常不影响收尾 */
+    }
   }
 }

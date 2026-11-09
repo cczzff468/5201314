@@ -155,6 +155,11 @@ function PromptViewerSheet({ onClose }: { onClose: () => void }) {
   });
   const [copied, setCopied] = useState(false);
 
+  // v72.3：App 标签移除——渠道渲染期自动推导（正在聊天的 App 优先，
+  // 其次最近有消息的 App，兜底微信；同步内存读，无副作用），统计行里以小胶囊展示结果
+  // （声明须在下方 flags 之前：flags 拼装要用渠道名，原来放在 flags 之后会触发 TDZ ReferenceError 被 catch 吞掉，flag 恒为 false）
+  const channel = contactId ? resolvePreviewChannel(contactId) : 'wx';
+
   // 追发 / 线下 开关状态（同步 kv 读，随角色/App 变化重算——渲染期直接派生，不用 effect）
   const flags = (() => {
     if (!contactId) return { anxietyOn: false, offlineOn: false };
@@ -167,10 +172,6 @@ function PromptViewerSheet({ onClose }: { onClose: () => void }) {
       return { anxietyOn: false, offlineOn: false };
     }
   })();
-
-  // v72.3：App 标签移除——渠道渲染期自动推导（正在聊天的 App 优先，
-  // 其次最近有消息的 App，兜底微信；同步内存读，无副作用），统计行里以小胶囊展示结果
-  const channel = contactId ? resolvePreviewChannel(contactId) : 'wx';
 
   useEffect(() => {
     let alive = true;

@@ -54,6 +54,9 @@ import { purgeContactFromGroups } from './groups';
 import { abortStreamsByPrefix } from '@/lib/chat-stream-store';
 import { purgeDeliveryQueueByPrefix } from './ai-delivery';
 
+// 联系人记录类型统一从本模块透出（组件层只认 contacts-store 这个门面，不必感知 @/lib/contacts）
+export type { ContactRecord };
+
 const MIGRATED_KEY = 'ios-contacts-migrated';
 
 // 多账号 Task 41：好友标记按账号隔离的读取口径在 lib/contacts.isFriendIn（纯函数模块）——

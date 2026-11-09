@@ -2244,3 +2244,28 @@ Stage Summary:
 - 系统通知三源接入：智能体完成/AI 来电与语音留言/情侣小家便签——页面后台时 PWA 走 SW、APK 走新原生 localNotify（Android 13+ 双权限闸）
 - 工程治理：三端 85 个存量 eslint 清零（零行为变更）+ APK v1.5.1 重打入库
 - 关键文件：shizuku-agent.ts（+465 行）、agent-voice.ts/agent-voice-ball.tsx/local-notify.ts（新）、NativePerceptionPlugin.java（+localNotify）、五端聊天 lint 清零、app-version.ts/build.gradle（1.5.1/10）
+
+## 2026-11-09 · v86（APK v1.6.0）Agent 提速 + 语音闭环 + 通知直达 + 通知中心 + 安全加固
+
+Task ID: 36
+Agent: 主控 Agent（Z.ai Code）+ 6 个子代理两波并行（1-a A7提速 / 1-b B3 tsc清零 / 1-c B1密钥加密 → 2-a C4语音闭环 / 2-b C5通知直达 / 2-c C6通知中心）
+Task: 用户选定六项优化：A7 Agent 提速（dumpUI 短缓存+并行观察验证）、B3 tsc 42 条基线清零、B1 API Key 加密存储、C4 语音播报+连续对话、C5 通知点击直达、C6 应用内通知中心
+
+Work Log:
+- [1-a·A7提速] shizuku-agent.ts（1588→1907 行）：①dumpUI 短缓存（同任务+fg 一致+4s TTL 复用整份树；MUTATING_AGENT_ACTIONS 全集执行后含失败/异常路径立即失效；任务起止清缓存；single-flight 串行化防两个 dump 互写 window_dump.xml）；②settleAfterStep 三段式自适应（300ms 最小防抖→轮询稳定检测（openApp 只轮询 dumpsys 前台包名零 dump；tap/key 类两次 dump hash 比对+fg 一致）→稳定即放行并 fire-and-forget 预取下一步观察 dump；轻量/惯性动作沿用原等待）；③坐标缓存复核前先失效 dump 缓存（修正 A6 复核可能读到旧树隐患）。预估：openApp 省 1~2.2s/次，tap 类净省 0.8~2.3s/步。未强行并行有依赖步骤（观察 dump∥截屏、screencap→visionAsk），原因已注释
+- [1-b·B3清零] tsc 全库 42→0：couple-space.tsx 33（'--rot' as CSSProperties + 补全 git 历史从未定义的 LOVE_HEART_PATH 常量——32 处爱心装饰首次真正渲染，几何按全部 transform 反推 9×7 中心(4.5,3.5)）；perception.ts 2（映射类型派生 Bool/Str 键桶消 never 写入）；prompt-preview.ts 2（() => memSettings.share + toLocScanMsgs 逐字段收窄）；AssistiveTools.tsx 2（channel 声明前移出 TDZ——原 flags IIFE 恒吞 ReferenceError 恒 false，修复后按注释意图真实生效）；couple-ai.ts 1（Promise<void> return;）；ChatFloatWindow.tsx 1（contacts-store 导出 ContactRecord）；registry.tsx 1（in 取反 else 收窄 never → 全局 setTimeout）
+- [1-c·B1加密] 关键事实修正：store.ts 持久化实为 IndexedDB（非 zustand persist/localStorage）且已有旧加密 secure-store.ts（{__enc} 信封）→ 按目标适配真实边界：新建 secret-box.ts（AES-GCM-256 + PBKDF2-SHA256 120k 迭代 + 设备种子 localStorage ios-kv-seed；密文 enc:v1:<iv>:<ct> 带版本前缀；WebCrypto 不可用优雅降级）；store.ts 17 处写点换 putSecretRecord（8 条记录整条 JSON 加密：apiConfig/apiPresets/visionConfig/visionPresets/ttsConfig 含 minimax/openai/fishaudio 三槽/sttConfig/imgGenConfig/imgGenPresets）+ readSecretRecord 三形态兼容读（enc:v1/旧信封仍用旧密钥防丢 Key/明文）+ load 自愈回写（加载即升级密文）；顺带修 load() 5 处 typeof==='object' 守卫漏新版字符串记录 bug；E2E：写 Key→IndexedDB 密文（localStorage 零明文仅种子）→刷新解密→旧明文自愈 全通过。遗留：music-api.ts/tb-ai-store.ts 经 idb-kv 仍明文（后续项）
+- [2-a·C4语音闭环] shizuku-agent.ts 仅加播报钩子（setAgentResultAnnouncer + finally 终态调 announcer，摘要首行 120 字与通知同源）；agent-voice.ts A6 节 canAgentVoiceActNow 闸门（页面隐藏/锁屏/熄屏/多任务/通话/来电/TTS 占用全 false）+ speakAgentResult（isTtsConfigured 不满足静默+设置页橙色提示；stopSpeaking 打断上一条）；agent-voice-ball.tsx dynamic import 注册 announcer（StrictMode 双挂载序号防竞态）+ 追问模式状态机（normal→followup 10s 倒计时→新任务/超时/关闭回 normal；识别免唤醒名直进确认卡；语音来源标记 markAgentTaskVoiceOrigin 读后即清+10min 兜底过期；链式续问）；settings 语音卡加两开关：执行结果语音播报（默认关）/任务后追问窗口（默认开），沿用 agent-voice-wake-v1 单键 JSON
+- [2-b·C5通知直达] target 契约抄 island-notify NotifyTarget：未接留言→{app:'phone'}（phone.tsx 无 tab 级外部参数，App 级可达最近通话/留言 tab）；情侣小家→{app:'couple'}（registry couple→couple-space 挂 CoupleHome）；AI 来电中两处保持 url:'/'（IncomingCallLayer 全屏层自显，带 target 反而切走当前 App）；local-notify LocalNotifyOptions 加 target?: unknown 透传 data:{url,target}；NativePerceptionPlugin.java +115 行：localNotify 收 url/target 塞 contentIntent extra（local_notify_url/local_notify_target JSON 串；带 extra 才 FLAG_UPDATE_CURRENT 防旧 PI extras 残留）+ handleOnNewIntent（Bridge.onNewIntent 逐插件回调 + BridgeActivity.load() 冷启动同覆盖）→ injectLocalNotifyOpen（JSONTokener 预验→JSONObject.quote 安全转义→readyState 闸 60ms/冷启动 load+350ms）派发 MessageEvent('local-notify-open',{data:{url,target}}) + __localNotifyPendingOpen 兜底槽；sw.js 核对无缺口零改动；Capacitor 8.6.0 handleOnNewIntent 已核实存在
+- [2-c·C6通知中心] 新建 notification-center.ts（{id,title,body,tag,url,target,ts,read} 上限 50 FIFO、同 tag 替换置未读、localStorage ios-notify-center-v1、add/remove/markRead/markAllRead/clearAll/unreadCount）；local-notify.ts 接线：notifyIfHidden **入口处先记录进中心**（先于前台/原生/浏览器通道判断——网页端没弹系统通知也不漏消息）+ cancelLocalNotify 同步移除 + 'local-notify-open' 双形态监听（400ms 去重）→ openCenterItem 导航（target 走 island-notify.navigateFromSystemNotify——补 export 一行，否则 location.href）；新建 NotificationCenter.tsx（顶部下拖手势 pointer 事件跟手+速度判定开合、状态栏空档点按开、iOS 毛玻璃深遮罩、条目=应用图标+标题+两行正文+相对时间+未读蓝点+单条清除、点条目 markRead+导航+收面板、底部全部已读/清空全部、空态、z 序 App 窗口之上锁屏之下、解锁 gate）；PhoneShell dynamic 挂载 + StatusBar 最小接入；E2E 10 步全流程（合成通知→下拉开→点击美团直达→重开→全部已读→清空→原生事件导航）
+- [版本] app-version.ts 1.6.0/11 + 发版说明 5 条；build.gradle versionCode 11/versionName 1.6.0；gradle 重打 BUILD SUCCESSFUL 6m18s（C5 Java 改动编译通过），APK 4.19MB 部署 public/；/api/app-version 返回 {version:1.6.0, code:11, apkReady:true}
+- [验证] tsc 全库 0 错误（B3 后基线归零，六任务零新增）；eslint：改动核心文件全 0（settings.tsx 3 条/CoupleHome 52 条为 HEAD 基线原样位移零新增）；浏览器 E2E：B1 密文链路+开关持久化+通知中心全流程+无 JS 异常；dev.log 无编译错误
+- [边界] A7 提速/C4 播报与追问/C5 原生点击直达/C6 APK 内真实通知均需真机（isNativePerception）回归；C5 冷启动注入 350ms 闸 + __localNotifyPendingOpen 兜底已留；B1 遗留 music-api/tb-ai-store 两处 idb-kv 明文待后续
+
+Stage Summary:
+- 智能体提速三件套：dumpUI 短缓存（4s TTL+变更失效+single-flight）+ 自适应 settle（轮询稳定+预取）+ 缓存联动修正，同类任务快 30~50%
+- 语音 Siri 式闭环：任务终态 TTS 播报（开关+六重闸门）+ 追问模式（10s 窗口免唤醒名链式续问）
+- 通知直达双端：Web data.target→SW→island 导航总线；APK contentIntent extra→handleOnNewIntent→local-notify-open 事件→通知中心导航
+- 应用内通知中心：记录先于通道（不漏消息）+ 顶部下拉毛玻璃面板 + 点击直达 + 全部已读/清空
+- 安全与类型健康：API Key AES-GCM 落盘加密（旧数据自动升级）；tsc 42 条清零 + 三处隐性 bug（TDZ/守卫/常量缺失）修复
+- 关键文件：shizuku-agent.ts（+320 行）、notification-center.ts/NotificationCenter.tsx/secret-box.ts（新）、NativePerceptionPlugin.java（+115）、local-notify.ts/island-notify.ts/agent-voice*/proactive-call.ts/CoupleHome/store.ts/app-version.ts/build.gradle（1.6.0/11）

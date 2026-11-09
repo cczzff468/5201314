@@ -23,12 +23,16 @@ import android.service.notification.NotificationListenerService;
 import androidx.core.app.NotificationCompat;
 import androidx.core.content.ContextCompat;
 
+import com.getcapacitor.Bridge;
 import com.getcapacitor.JSArray;
 import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
+
+import org.json.JSONObject;
+import org.json.JSONTokener;
 
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
@@ -1263,12 +1267,23 @@ public class NativePerceptionPlugin extends Plugin {
     private static final java.util.concurrent.atomic.AtomicInteger LOCAL_NOTIFY_SEQ =
             new java.util.concurrent.atomic.AtomicInteger(8100);
 
+    // ---------------- C5 点击直达：通知带目的地回传 WebView ----------------
+
+    /** localNotify 可选 url（落地页路径字符串，如 "/"）extra 键：
+     *  塞进通知 contentIntent，点击通知回到本 Activity 时读出并注入 WebView（见 handleOnNewIntent） */
+    private static final String EXTRA_LOCAL_NOTIFY_URL = "local_notify_url";
+    /** localNotify 可选 target（island-notify NotifyTarget 同构对象的 JSON 字符串，如 {"app":"phone"}）extra 键 */
+    private static final String EXTRA_LOCAL_NOTIFY_TARGET = "local_notify_target";
+
     /**
-     * 本地通知 localNotify({title, body, tag?})：页面在后台时的即时提醒（Agent 任务完成 /
-     * AI 来电 / 情侣小家动态等事件源调用）。与 agentNotify 的差异：不带「紧急停止」action、
-     * 不常驻（autoCancel + 非 ongoing，可被滑动清除）、tag 用于同 tag 去重（后发替换先发）
-     * 与 localNotifyCancel 定向撤销；点击通知打开应用主 Activity（launchMode=singleTask，
-     * 带回前台不重开实例）。
+     * 本地通知 localNotify({title, body, tag?, url?, target?})：页面在后台时的即时提醒
+     * （Agent 任务完成 / AI 来电 / 情侣小家动态等事件源调用）。与 agentNotify 的差异：
+     * 不带「紧急停止」action、不常驻（autoCancel + 非 ongoing，可被滑动清除）、tag 用于同 tag
+     * 去重（后发替换先发）与 localNotifyCancel 定向撤销；点击通知打开应用主 Activity
+     * （launchMode=singleTask，带回前台不重开实例）。
+     * C5 点击直达：可选 url（落地页路径）/ target（NotifyTarget 同构对象的 JSON 字符串）
+     * 塞进 contentIntent extra —— 点击通知回到本 Activity 时由 handleOnNewIntent 读出，
+     * 以 MessageEvent('local-notify-open') 注入 WebView 回传页面导航。
      * Android 13+ POST_NOTIFICATIONS 运行时权限（AndroidManifest 已声明）+ 全版本「应用通知
      * 总开关」双检查：未授予/已关闭时静默返回 {ok:false}（通知是增强能力，不 crash 不打扰）。
      */
@@ -1277,6 +1292,9 @@ public class NativePerceptionPlugin extends Plugin {
         String title = call.getString("title", "");
         String body = call.getString("body", "");
         String tag = call.getString("tag", null);
+        // C5 点击直达（可选）：url = 落地页路径字符串；target = island-notify NotifyTarget 的 JSON 字符串
+        String url = call.getString("url", null);
+        String target = call.getString("target", null);
         JSObject ret = new JSObject();
         try {
             Context ctx = getContext();
@@ -1316,8 +1334,20 @@ public class NativePerceptionPlugin extends Plugin {
             Intent contentIntent = new Intent(ctx, MainActivity.class);
             contentIntent.setPackage(ctx.getPackageName());
             contentIntent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+            // C5 点击直达：带目的地时塞 extra（handleOnNewIntent 读出后注入 WebView 回传页面）
+            boolean hasDest = (url != null && !url.isEmpty()) || (target != null && !target.isEmpty());
+            if (url != null && !url.isEmpty()) {
+                contentIntent.putExtra(EXTRA_LOCAL_NOTIFY_URL, url);
+            }
+            if (target != null && !target.isEmpty()) {
+                contentIntent.putExtra(EXTRA_LOCAL_NOTIFY_TARGET, target);
+            }
+            // 带 extra 时加 FLAG_UPDATE_CURRENT：同 requestCode 复用既有 PendingIntent 时 extras
+            // 也会刷新为本次最新目的地（否则旧目的地残留）；不带 extra 保持原样（零行为变化）
             PendingIntent contentPi = PendingIntent.getActivity(ctx, id, contentIntent,
-                    PendingIntent.FLAG_IMMUTABLE);
+                    hasDest
+                            ? (PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT)
+                            : PendingIntent.FLAG_IMMUTABLE);
             NotificationCompat.Builder builder =
                     new NotificationCompat.Builder(ctx, LOCAL_NOTIFY_CHANNEL)
                             // 项目无自定义通知图标（res/drawable 仅 splash），用框架信息图标（与 agentNotify 一致）
@@ -1359,6 +1389,79 @@ public class NativePerceptionPlugin extends Plugin {
             ret.put("ok", false);
             ret.put("reason", t.getMessage() == null ? t.getClass().getSimpleName() : t.getMessage());
             call.resolve(ret);
+        }
+    }
+
+    // ---------------- C5 点击直达：通知点击 → 目的地回传 WebView（事件契约供并行任务 2-c 监听） ----------------
+
+    /**
+     * Capacitor 生命周期钩子：每个 Intent 进入 MainActivity 时由 Bridge 逐插件回调
+     * （Bridge.onNewIntent → plugin.handleOnNewIntent）。两个场景都会到达这里：
+     * ① 热回前台 —— 应用在后台，用户点通知，singleTask 走 Activity.onNewIntent；
+     * ② 冷启动 —— 进程已死时点通知，BridgeActivity.load() 里会 onNewIntent(getIntent())，
+     *    启动 Intent 里的 extra 同样能被读到（此时页面尚未就绪，见 injectLocalNotifyOpen 的就绪闸）。
+     * 带目的地 extra（EXTRA_LOCAL_NOTIFY_URL / EXTRA_LOCAL_NOTIFY_TARGET）的 Intent =
+     * 用户点击了 localNotify 发出的通知 → 向 WebView 注入事件；普通启动/其他通知无 extra，
+     * 第一行就返回，对既有启动链路零打扰。
+     *
+     * 事件契约（2-c 按此实现监听）：
+     *   事件名 'local-notify-open'（window.dispatchEvent(new MessageEvent(...))）；
+     *   event.data = { url: string, target?: object }
+     *   url 为落地页路径字符串；target 为 island-notify NotifyTarget 同构对象
+     *   （extra JSON 解析失败时只带 url）。
+     */
+    @Override
+    protected void handleOnNewIntent(Intent intent) {
+        super.handleOnNewIntent(intent);
+        if (intent == null) return;
+        String url = intent.getStringExtra(EXTRA_LOCAL_NOTIFY_URL);
+        String targetJson = intent.getStringExtra(EXTRA_LOCAL_NOTIFY_TARGET);
+        boolean hasUrl = url != null && !url.isEmpty();
+        boolean hasTarget = targetJson != null && !targetJson.isEmpty();
+        if (!hasUrl && !hasTarget) return; // 无目的地 extra（普通启动/其他通知）→ 不打扰页面
+        injectLocalNotifyOpen(hasUrl ? url : null, hasTarget ? targetJson : null);
+    }
+
+    /**
+     * 向 WebView 注入 'local-notify-open' 事件（只读 extra 并派发，不做业务判断；
+     * 权限闸/渠道/去重等既有逻辑全部不变）。注入脚本等页面 ready 后再派发：
+     * - 页面已加载完（热回前台）→ 60ms 后派发；
+     * - 冷启动早注入（页面脚本/监听器尚未挂）→ 等 window load + 350ms 派发，并把目的地
+     *   暂存 window.__localNotifyPendingOpen（监听方若错过事件可在挂载时消费该槽兜底；
+     *   纯增强项，不消费也不影响事件契约）。
+     * target 的 JSON 只在注入前用 JSONTokener 验证一次（非法则只带 url，事件契约口径）；
+     * JS 侧再 JSON.parse 一次（quote 转义安全嵌入，解析失败同样只带 url）。
+     */
+    private void injectLocalNotifyOpen(String url, String targetJson) {
+        try {
+            Bridge bridge = getBridge();
+            if (bridge == null) return;
+            StringBuilder js = new StringBuilder("(function(){try{var d={");
+            js.append(url != null ? "url:" + JSONObject.quote(url) : "");
+            js.append("};");
+            if (targetJson != null) {
+                // target 必须是 JSON 对象（island-notify NotifyTarget 同构）：非法/非对象 → 只带 url。
+                // 局部 try：解析失败只降级 target，绝不连 url 一起丢（事件契约口径）
+                try {
+                    Object parsed = new JSONTokener(targetJson).nextValue();
+                    if (parsed instanceof JSONObject) {
+                        js.append("try{var t=JSON.parse(")
+                                .append(JSONObject.quote(targetJson))
+                                .append(");if(t&&typeof t==='object')d.target=t;}catch(e){}");
+                    }
+                } catch (Throwable ignore) {
+                    // 非法 JSON：按事件契约只带 url
+                }
+            }
+            js.append("var fire=function(){try{window.dispatchEvent(")
+                    .append("new MessageEvent('local-notify-open',{data:d}))}catch(e){}};");
+            js.append("if(document.readyState==='complete'){setTimeout(fire,60);}")
+                    .append("else{try{window.__localNotifyPendingOpen=d;}catch(e){}")
+                    .append("window.addEventListener('load',function(){setTimeout(fire,350);},{once:true});}");
+            js.append("}catch(e){}})();");
+            bridge.eval(js.toString(), null);
+        } catch (Throwable t) {
+            // 注入失败静默：目的地丢失只影响点击直达体验，不影响通知主链路
         }
     }
 

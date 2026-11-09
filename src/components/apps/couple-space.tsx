@@ -311,6 +311,11 @@ export interface CoupleState {
 
 const STATE_KEY = 'couple-space:state';
 
+/** 9×7 小爱心 path（局部坐标包围盒 0≤x≤9 / 0≤y≤7，中心恰为 (4.5,3.5)），
+ * 配套 transform="translate(x y) scale(s) translate(-4.5 -3.5)" 定位——平移坐标即爱心中心 */
+const LOVE_HEART_PATH =
+  'M4.5 7 C4.5 7 0 4.2 0 1.75 C0 0.78 0.9 0 2 0 C3 0 3.95 0.57 4.5 1.45 C5.05 0.57 6 0 7 0 C8.1 0 9 0.78 9 1.75 C9 4.2 4.5 7 4.5 7 Z';
+
 function defaultState(): CoupleState {
   return {
     v: 1,
@@ -3002,7 +3007,7 @@ function BoardNoteCard({
       }}
       aria-label={selecting ? (locked ? '一颗还没开启的时间胶囊' : '勾选这张便签') : locked ? '一颗还没开启的时间胶囊' : '查看这张便签'}
       className={`relative mb-2.5 flex w-full select-none flex-col justify-start break-inside-avoid rounded-[10px] px-3.5 pb-2.5 pt-[17px] text-left shadow-[0_3px_10px_rgba(0,0,0,0.22)] transition-transform duration-150 active:scale-[0.96] ${flash ? '[animation:board-pin-in_.45s_ease-out]' : ''} ${selecting && selected ? 'ring-[3px] ring-black/70 brightness-[0.96]' : ''}`}
-      style={{ ...face, transform: `rotate(${rot}deg)`, '--rot': `${rot}deg`, ...(skin?.span ? { columnSpan: 'all' as const } : {}) }}
+      style={{ ...face, transform: `rotate(${rot}deg)`, '--rot': `${rot}deg`, ...(skin?.span ? { columnSpan: 'all' as const } : {}) } as CSSProperties}
     >
       {/* v44：自带胶带装饰的卡面（便签纸）不再叠金属别针 */}
       {!skin?.noPin && <NoteClip />}

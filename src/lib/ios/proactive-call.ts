@@ -524,7 +524,15 @@ async function recordMissedPhoneCall(
     // （页面在后台时用户收不到界面弹窗，这才是有实义的时机；前台时内部静默跳过）
     if (texts.length > 0) {
       cancelLocalNotify(`ai-call-${contactId}`);
-      void notifyIfHidden(displayName, '未接来电 · 给你留了语音留言，点回听听', { tag: `ai-vm-${contactId}`, url: '/' });
+      // C5 点击直达：target 切到电话 App（island-notify switchToApp('phone')）。
+      // phone.tsx 没有可用的外部 tab 跳转参数（tab 仅由 localStorage 'ios-phone-tab' 恢复，
+      // 也不消费 takeNotifyNavigation/pending 类 store 字段），故只能 App 级落地：
+      // 未接来电在「最近通话」、本条留言在「语音留言」tab，一键可达，不再只是回首页。
+      void notifyIfHidden(displayName, '未接来电 · 给你留了语音留言，点回听听', {
+        tag: `ai-vm-${contactId}`,
+        url: '/',
+        target: { app: 'phone' },
+      });
     }
   } catch {
     // 留言失败静默（记录已落，留言缺失可接受）
@@ -783,6 +791,9 @@ async function tickInner(): Promise<void> {
   const callMedia = decision.media === 'video' ? ('video' as const) : ('voice' as const);
   // C2 通知：页面在后台时全屏来电 UI 看不见 → 先补一条本地通知提醒来电
   //（前台内部静默跳过；拒接/超时未接时由 recordMissedPhoneCall 撤销并改发留言提醒）
+  // C5：故意不带 target —— 点击通知只需聚焦回应用，AI 来电全屏层（triggerIncomingCall 挂在
+  // 全局 IncomingCallLayer）自会盖在任何 App 上显示接听/拒绝界面，落点由它接管；
+  // 带 target 反而会 switchToApp 切走用户当前 App，适得其反，故保持 url '/' 仅聚焦。
   void notifyIfHidden('来电', `${name} 打来一通${callMedia === 'video' ? '视频' : '语音'}电话`, {
     tag: `ai-call-${contact.id}`,
     url: '/',
@@ -839,6 +850,7 @@ export function triggerBlockCall(contact: ContactRecord, contextHint: string): b
     const number = contact.phone || derivePlaceholderNumber(contact.id);
     const name = contact.name;
     // C2 通知：页面在后台时提醒这次拉黑事件直拨（前台内部静默跳过）
+    // C5：同上不带 target —— 来电全屏层自显（见 runProactiveCallTick 处说明），点击聚焦即可
     void notifyIfHidden('来电', `${name} 打来电话`, { tag: `ai-call-${contact.id}`, url: '/' });
     triggerIncomingCall({
       source: 'phone',

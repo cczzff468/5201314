@@ -14,6 +14,10 @@
  *   执行经 dynamic import 拉起 runAgentTask（进度条/急停由 AgentGlobalLayers 接管），
  *   被能力闸/防重入拒绝时重开面板用中文说明原因；打字输入框兜底永远存在
  * - 连续唤醒：喊出唤醒名（默认「小灵」）震动唤起；一句话（去唤醒名 ≥4 字）直达确认卡
+ * - C4 任务终态播报 + 追问模式：挂载时经 dynamic import 注册终态播报钩子
+ *   （setAgentResultAnnouncer，避免把引擎静态打进本组件包体）——语音唤起启动的任务
+ *   结束后：①按开关/来源用共享 TTS 栈播报结果摘要（Siri 式闭环）；
+ *   ②面板重开进「追问模式」（倒计时 10s，见下方状态机注释），期间录音免喊唤醒名
  *
  * 逻辑全在 lib/ios/agent-voice.ts，本组件只做状态编排与渲染。
  */
@@ -32,8 +36,13 @@ import {
   useAgentRecorder,
   useAgentWakeLoop,
   canAgentWakeListen,
+  canAgentVoiceActNow,
+  consumeAgentTaskVoiceOrigin,
+  markAgentTaskVoiceOrigin,
+  speakAgentResult,
   vibrateSafely,
 } from '@/lib/ios/agent-voice';
+import { stopSpeaking } from '@/lib/ios/tts-client';
 
 // Agent 运行状态探针：shizuku-agent 引擎体量大，不能静态打进本组件——
 // 借道 agent-ui（PhoneShell 本就 dynamic 引它）订阅运行态，只回传一个轻量布尔
@@ -54,6 +63,8 @@ const POS_KEY = 'agent-voice-ball-pos-v1';
 const TAP_SLOP = 8;
 /** 拒绝原因 toast 自动消退 */
 const MSG_CLEAR_MS = 6000;
+/** 追问模式窗口（C4）：任务结束后面板保持展开供直接追问的时长 */
+const FOLLOWUP_WINDOW_MS = 10000;
 
 const clamp = (v: number, lo: number, hi: number): number => Math.min(Math.max(v, lo), hi);
 
@@ -128,6 +139,81 @@ export default function AgentVoiceBall() {
     return () => window.clearTimeout(t);
   }, [panelMsg]);
 
+  // ---- 追问模式状态机（C4，任务后免喊唤醒名直接追问）----
+  //
+  // normal ──(语音来源任务结束，追问窗口开)──▶ followup
+  // followup ──(倒计时 10s 到点 / 用户点关闭/背板)──▶ normal（关面板，恢复常规唤醒循环）
+  // followup ──(用户开录/确认卡出现)──▶ 倒计时暂停（视为已响应；执行/取消后随面板流转）
+  // followup ──(用户执行新任务)──▶ normal（面板收起；新任务结束且语音来源时再进 followup）
+  //
+  // 进入闸门（在 onAgentFinished 里判）：语音来源任务 && cfg.followup && layerOn &&
+  // canAgentVoiceActNow()（无锁屏/熄屏/多任务/通话/来电/页面隐藏/其它音频在放）；
+  // 任务刚结束不算「执行中」。追问期间面板不自动开录（结果播报可能正在放，避免麦克风吃 TTS），
+  // 用户点麦克风后走既有录音→确认卡→执行链路（录音本身就不需要唤醒名，
+  // 唤醒名只用于后台唤醒循环——追问期间唤醒循环因面板打开而自然暂停）。
+  const [followup, setFollowup] = useState(false);
+  /** 倒计时剩余毫秒（展示用；绝对期限在 followupUntilRef） */
+  const [followupLeft, setFollowupLeft] = useState(FOLLOWUP_WINDOW_MS);
+  const followupUntilRef = useRef(0);
+
+  /** 退出追问模式（仅清状态不关面板：执行/录音动作等场景面板继续用） */
+  const clearFollowup = useCallback(() => {
+    followupUntilRef.current = 0;
+    setFollowup(false);
+    setFollowupLeft(FOLLOWUP_WINDOW_MS);
+  }, []);
+
+  /** 进入追问模式：面板重开展开 + 10s 倒计时；不自动开录（skipAutoStart） */
+  const enterFollowup = useCallback(() => {
+    skipAutoStartRef.current = true; // 结果播报可能正在放：不自动开录，避免麦克风吃 TTS
+    setPanelMsg('');
+    setConfirmText(null);
+    setPanelOpen(true);
+    followupUntilRef.current = Date.now() + FOLLOWUP_WINDOW_MS;
+    setFollowupLeft(FOLLOWUP_WINDOW_MS);
+    setFollowup(true);
+  }, []);
+
+  // ---- C4 任务终态播报 + 追问模式入口 ----
+  // 终态回调经 ref 透传最新逻辑（shizuku-agent 只持一个稳定蹦床，避免闭包过期）；
+  // 悬浮球层启用态经 ref 同步（终态瞬间可能还没有一次重渲染）
+  const layerOnRef = useRef(layerOn);
+  useEffect(() => {
+    layerOnRef.current = layerOn;
+  }, [layerOn]);
+  const handleResultRef = useRef<(text: string) => void>(() => undefined);
+  const onAgentFinished = (text: string) => {
+    // 语音来源标记读后即清：本次终态是否属于「语音唤起启动的任务」
+    const voiceOrigin = consumeAgentTaskVoiceOrigin();
+    const cfgNow = useAgentVoice.getState().cfg;
+    // ① 追问模式入口（闸门见上方状态机注释；开关关/闸门不过→直接回常规循环）
+    if (voiceOrigin && cfgNow.followup && layerOnRef.current && canAgentVoiceActNow()) {
+      enterFollowup();
+    }
+    // ② TTS 播报（内部再判 开关||语音来源、isTtsConfigured、闸门，不满足静默跳过）
+    speakAgentResult(text, { voiceOrigin });
+  };
+  useEffect(() => {
+    handleResultRef.current = onAgentFinished;
+  });
+  // 注册终态播报钩子：dynamic import（不把引擎静态打进本组件包体）；卸载解绑。
+  // 序号防竞态：StrictMode 双挂载时旧 cleanup 不得误清新一次注册
+  const regSeqRef = useRef(0);
+  useEffect(() => {
+    const seq = ++regSeqRef.current;
+    let alive = true;
+    void import('@/lib/ios/shizuku-agent').then((m) => {
+      if (!alive || seq !== regSeqRef.current) return;
+      m.setAgentResultAnnouncer((text: string) => handleResultRef.current(text));
+    });
+    return () => {
+      alive = false;
+      void import('@/lib/ios/shizuku-agent').then((m) => {
+        if (seq === regSeqRef.current) m.setAgentResultAnnouncer(null);
+      });
+    };
+  }, []);
+
   // ---- 录音器（链路：离线 → Web Speech → 云端，见 agent-voice.ts） ----
   const rec = useAgentRecorder({
     onResult: (r) => {
@@ -148,6 +234,27 @@ export default function AgentVoiceBall() {
   useEffect(() => {
     recRef.current = rec;
   }, [rec]);
+
+  // 追问倒计时（C4）：仅在「追问模式 && 无确认卡 && 空闲态」走表（开录/识别中=已响应，暂停）。
+  // 到点退出追问模式并收起面板，恢复常规唤醒循环；期限是绝对值，暂停后恢复不重置。
+  useEffect(() => {
+    if (!followup) return undefined;
+    if (confirmText !== null || rec.phase !== 'idle') return undefined;
+    const tick = () => {
+      const left = followupUntilRef.current - Date.now();
+      if (left <= 0) {
+        clearFollowup();
+        setPanelOpen(false);
+        setConfirmText(null);
+        setPanelMsg('');
+        return;
+      }
+      setFollowupLeft(left);
+    };
+    tick();
+    const t = window.setInterval(tick, 250);
+    return () => window.clearInterval(t);
+  }, [followup, confirmText, rec.phase, clearFollowup]);
 
   // 开面板（非确认卡路径）自动开录；关面板/执行时收尾丢弃
   useEffect(() => {
@@ -204,49 +311,63 @@ export default function AgentVoiceBall() {
 
   // ---- 动作 ----
   const openPanel = useCallback(() => {
+    clearFollowup(); // 手动开面板：不处于追问模式（若已在追问，重置为常规面板）
     skipAutoStartRef.current = false;
     setPanelMsg('');
     setConfirmText(null);
     setPanelOpen(true);
-  }, []);
+  }, [clearFollowup]);
   const closePanel = useCallback(() => {
+    clearFollowup(); // 用户点关闭：退出追问模式，恢复常规唤醒循环
     setPanelOpen(false);
     setConfirmText(null);
     setPanelMsg('');
-  }, []);
+  }, [clearFollowup]);
   const retryRecord = useCallback(() => {
     setPanelMsg('');
     recRef.current.start();
   }, []);
 
   /** 执行任务：收起面板 → dynamic import 拉起 runAgentTask → 全局进度条接管；
-   *  被能力闸/防重入拒绝（闸全部同步判定，promise 秒回）→ 重开面板中文说明原因 */
-  const execute = useCallback(async (raw: string) => {
-    const text = raw.trim();
-    if (!text) return;
-    vibrateSafely(18);
-    recRef.current.cancel();
-    setPanelOpen(false);
-    setConfirmText(null);
-    setPanelMsg('');
-    try {
-      const { runAgentTask } = await import('@/lib/ios/shizuku-agent');
-      // 闸拒绝会在同一微任务链里返回；250ms 内有结果即视为被拒（真任务不可能秒完成）
-      const early = await Promise.race([
-        runAgentTask(text),
-        new Promise<null>((resolve) => window.setTimeout(() => resolve(null), 250)),
-      ]);
-      if (early && !early.ok) {
+   *  被能力闸/防重入拒绝（闸全部同步判定，promise 秒回）→ 重开面板中文说明原因。
+   *  C4：执行即退出追问模式；上一条结果播报若还在放立即打断（TTS token 机制）；
+   *  任务真正跑起来后标记「语音唤起来源」（终态播报/追问模式据此判定） */
+  const execute = useCallback(
+    async (raw: string) => {
+      const text = raw.trim();
+      if (!text) return;
+      vibrateSafely(18);
+      recRef.current.cancel();
+      clearFollowup(); // 追问模式随执行退出（新任务结束后按需再进）
+      stopSpeaking(); // 上一条播报若还在放：立即打断，不与新任务播报叠音
+      setPanelOpen(false);
+      setConfirmText(null);
+      setPanelMsg('');
+      try {
+        const { runAgentTask } = await import('@/lib/ios/shizuku-agent');
+        // 闸拒绝会在同一微任务链里返回；250ms 内有结果即视为被拒（真任务不可能秒完成）
+        const running = runAgentTask(text);
+        const early = await Promise.race([
+          running,
+          new Promise<null>((resolve) => window.setTimeout(() => resolve(null), 250)),
+        ]);
+        if (early === null) {
+          // 任务真正跑起来了：标记「语音唤起来源」。（能力闸/防重入拒绝不会走到
+          // runAgentTask 的 finally，提前标记会污染后续非语音任务）
+          markAgentTaskVoiceOrigin();
+        } else if (!early.ok) {
+          skipAutoStartRef.current = true;
+          setPanelMsg(early.text);
+          setPanelOpen(true);
+        }
+      } catch (err) {
         skipAutoStartRef.current = true;
-        setPanelMsg(early.text);
+        setPanelMsg(err instanceof Error ? err.message : '任务启动失败，请重试');
         setPanelOpen(true);
       }
-    } catch (err) {
-      skipAutoStartRef.current = true;
-      setPanelMsg(err instanceof Error ? err.message : '任务启动失败，请重试');
-      setPanelOpen(true);
-    }
-  }, []);
+    },
+    [clearFollowup],
+  );
 
   if (!layerOn) return null;
 
@@ -305,6 +426,20 @@ export default function AgentVoiceBall() {
                 <X className="h-4 w-4" />
               </button>
             </div>
+
+            {/* 追问模式提示（C4）：面板保持展开 + 倒计时；期间录音免喊唤醒名（10s 内点麦克风即可） */}
+            {followup ? (
+              <div
+                className="mt-2 flex items-center gap-1.5 rounded-xl bg-[#34C759]/10 px-3 py-2 text-[12px] leading-relaxed text-[#248A3D] dark:text-[#34C759]"
+                role="status"
+                data-testid="agent-voice-followup-hint"
+              >
+                <Sparkles className="h-3 w-3 shrink-0" aria-hidden="true" />
+                <span className="min-w-0 flex-1">
+                  追问 · {Math.max(1, Math.ceil(followupLeft / 1000))}s 内可直接说下一个任务，无需再喊{cfg.name}
+                </span>
+              </div>
+            ) : null}
 
             {/* 提示/错误（toast 式） */}
             {panelMsg ? (

@@ -16,6 +16,9 @@
  *   页面隐藏 / Agent 任务运行 / 通话 / TTS·语音播放 / 面板打开 时自动暂停，
  *   恢复空闲后续听（每轮 900ms 轮询 + 轮间 ≥1.5s 间隔省电）；
  *   离线引擎未就绪时循环根本不启动（降级「点球才识别」），麦克风连续失败熔断并记录原因
+ * - C4 任务终态播报（speakAgentResult）：任务结束后按开关/语音来源 + 闸门（canAgentVoiceActNow）
+ *   用共享 TTS 栈（tts-client）朗读结果摘要；语音来源标记（markAgentTaskVoiceOrigin）由
+ *   悬浮球在任务真正跑起来时置位、终态播报钩子消费
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -24,7 +27,7 @@ import { pickRecorderMime } from './audio-utils';
 import { isOfflineAsrReady, offlineAsrTranscribe } from './offline-asr';
 import { isWebSpeechSupported, startWebSpeechSession, type WebSpeechSession } from './web-speech';
 import { isSttReady, transcribeAudioBlob } from './stt-client';
-import { isSpeaking } from './tts-client';
+import { isSpeaking, isTtsConfigured, speakUserTts, stopSpeaking } from './tts-client';
 import { useVoicePlayback } from './voice-player';
 import { isNativePerception } from './native-perception';
 import { useIncomingCall } from './incoming-call';
@@ -46,9 +49,19 @@ export interface AgentVoiceCfg {
   ball: boolean;
   /** 连续唤醒监听（默认关；耗电较高） */
   listen: boolean;
+  /** 任务完成后 TTS 播报结果摘要（C4，默认关；语音唤起启动的任务不受此限，始终播报） */
+  announce: boolean;
+  /** 任务后追问窗口（C4，默认开）：语音任务结束后面板保持展开 10s，可直接追问免喊唤醒名 */
+  followup: boolean;
 }
 
-const DEFAULT_CFG: AgentVoiceCfg = { name: DEFAULT_WAKE_NAME, ball: true, listen: false };
+const DEFAULT_CFG: AgentVoiceCfg = {
+  name: DEFAULT_WAKE_NAME,
+  ball: true,
+  listen: false,
+  announce: false,
+  followup: true,
+};
 
 function readCfg(): AgentVoiceCfg {
   if (typeof window === 'undefined') return { ...DEFAULT_CFG };
@@ -57,7 +70,13 @@ function readCfg(): AgentVoiceCfg {
     if (!raw) return { ...DEFAULT_CFG };
     const p = JSON.parse(raw) as Partial<AgentVoiceCfg>;
     const name = (typeof p.name === 'string' ? p.name.trim().slice(0, 6) : '') || DEFAULT_WAKE_NAME;
-    return { name, ball: p.ball !== false, listen: p.listen === true };
+    return {
+      name,
+      ball: p.ball !== false,
+      listen: p.listen === true,
+      announce: p.announce === true,
+      followup: p.followup !== false,
+    };
   } catch {
     return { ...DEFAULT_CFG };
   }
@@ -679,4 +698,85 @@ export function useAgentWakeLoop(opts: {
     };
     // 只随 enabled 启停；name/canListen/onWake 经 optsRef 透传最新值（刻意不进依赖）
   }, [opts.enabled]);
+}
+
+// ============================================================
+// A6. C4 任务终态播报（Siri 式闭环）+ 语音来源标记 + 播报/追问统一闸门
+// ============================================================
+
+/**
+ * 最近一次「语音唤起启动」的 Agent 任务时间戳（0 = 无）：
+ * 悬浮球语音面板执行任务、且确认真正跑起来（未被能力闸/防重入秒拒）后置位；
+ * 任务终态播报钩子（shizuku-agent.setAgentResultAnnouncer 回调）读后即清。
+ * 10min 兜底过期：语音层中途卸载等极端场景下标记没被消费，避免污染后续非语音任务。
+ */
+let voiceOriginAt = 0;
+
+/** 悬浮球语音面板执行任务且确认真正跑起来后调用：标记本任务为语音唤起来源 */
+export function markAgentTaskVoiceOrigin(): void {
+  voiceOriginAt = Date.now();
+}
+
+/** 终态播报钩子消费语音来源标记（读后即清；超过 10min 的陈旧标记视为无效） */
+export function consumeAgentTaskVoiceOrigin(): boolean {
+  if (!voiceOriginAt) return false;
+  const ok = Date.now() - voiceOriginAt < 10 * 60_000;
+  voiceOriginAt = 0;
+  return ok;
+}
+
+/** 播报闸门用：当前正在出声的是否我们自己的任务播报（是 → 允许打断重播，不算抢话筒） */
+let selfAnnouncing = false;
+
+/**
+ * 播报/追问统一闸门（C4）：任务终态瞬间语音层能否动作（TTS 播报 + 进追问模式共用）。
+ * 与唤醒监听暂停条件（canAgentWakeListen）同源，但不含 panelOpen/agentRunning——
+ * 终态时 running 已落 false（任务刚结束不算「执行中」，且防重入保证同一时刻只有一个任务，
+ * 终态回调触发时不可能有新任务在跑），追问模式本身就要求面板展开：
+ * 页面隐藏 / 锁屏 / 熄屏 / 多任务 / 通话（主动+来电）/ 语音消息播放中 / 其它 TTS 朗读中 → false。
+ */
+export function canAgentVoiceActNow(): boolean {
+  if (typeof document === 'undefined' || document.hidden) return false;
+  try {
+    const ui = useUI.getState();
+    if (ui.locked || ui.screenOff || ui.switcherOpen || ui.callActive) return false;
+    if (useIncomingCall.getState().call) return false;
+  } catch {
+    /* store 异常不阻断 */
+  }
+  try {
+    if (useVoicePlayback.getState().playing) return false; // 语音消息播放中：不抢话筒
+    if (isSpeaking() && !selfAnnouncing) return false; // 其它 TTS 在放（电话/语音条实时朗读）：让路
+  } catch {
+    /* 播放状态读取失败不阻断 */
+  }
+  return true;
+}
+
+/**
+ * 任务终态语音播报（C4，Siri 式闭环）：复用共享 TTS 栈（tts-client，音色/清理/云端兜底全继承）。
+ * 播报条件（全部满足才出声，否则静默跳过——不弹任何打扰，未配置的提示放设置页）：
+ * ① 「执行结果语音播报」开关开，或本次任务是语音唤起启动的（voiceOrigin，任一满足）；
+ * ② TTS 已配置（isTtsConfigured；第三方服务商没填 Key/地址时跳过）；
+ * ③ canAgentVoiceActNow() 闸门通过（通话/锁屏/熄屏/多任务/页面隐藏/其它音频在放）。
+ * 播报前先 stopSpeaking() 显式打断上一条未播完的播报（token 机制：stopSpeaking 令牌 +1，
+ * 旧链路收尾不再触碰公共状态）；播报失败静默（合成超时/引擎哑火等），绝不影响任务收尾。
+ */
+export function speakAgentResult(text: string, opts: { voiceOrigin: boolean }): void {
+  const cfg = getAgentVoiceCfg();
+  if (!cfg.announce && !opts.voiceOrigin) return;
+  if (!isTtsConfigured()) return;
+  if (!canAgentVoiceActNow()) return;
+  selfAnnouncing = true;
+  stopSpeaking();
+  void speakUserTts({
+    text,
+    onEnd: () => {
+      selfAnnouncing = false;
+    },
+  })
+    .catch(() => undefined)
+    .finally(() => {
+      selfAnnouncing = false;
+    });
 }
