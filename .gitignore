@@ -79,3 +79,9 @@ android-shell/node_modules/
 # v82 杂项：Railway 部署会话的临时文件
 cli-dl2.status
 railway-proxy.tar.gz
+
+# gh-api-push baseline marker
+.gh-remote-head
+# GitHub 推送凭据（绝不入库）
+.gh-token
+.gh-remote-head
