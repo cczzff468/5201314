@@ -120,6 +120,7 @@ import { AUTONOMY_CAPS, getAutonomyConfig, setAutonomyCap, setAutonomyMaster } f
 import { isNativePerception, nativeShizukuStatus } from '@/lib/ios/native-perception';
 // C1 语音唤起智能体：AI 动手页内设置卡（唤醒名 / 悬浮球 / 连续监听）
 import { DEFAULT_WAKE_NAME, updateAgentVoiceCfg, useAgentVoice } from '@/lib/ios/agent-voice';
+import { ASSISTANT_PERSONA_TAGLINE } from '@/lib/ios/assistant-persona';
 // C4 播报开关提示用：判断 TTS 是否已配置（内置语音恒可用，第三方需 Key+地址）
 import { isTtsConfigured } from '@/lib/ios/tts-client';
 import { copyApkLink, getApkUrl, launchApkDownload } from '@/lib/ios/apk-download';
@@ -907,7 +908,8 @@ function AutonomyCapRow({
 // ---------------- C1 语音唤起智能体（AI 动手页内设置卡） ----------------
 
 /**
- * 「语音唤起智能体」卡：唤醒名（≤6 字）/ 悬浮球开关 / 连续唤醒监听开关（带耗电提示）/
+ * 「语音唤起智能体」卡：专属人设说明行（小灵，名字跟随唤醒名）/ 唤醒名（≤6 字）/
+ * 悬浮球开关 / 连续唤醒监听开关（带耗电提示）/
  * C4 执行结果语音播报开关（默认关）/ C4 任务后追问窗口开关（默认开）。
  * 配置存 agent-voice-wake-v1（localStorage 单键 + zustand 镜像），悬浮球即时生效；
  * 连续监听只在 APP 原生壳 + 离线识别模型就绪时真正生效，否则自动降级「点球才识别」（下方提示行说明）；
@@ -942,15 +944,25 @@ function AgentVoiceCard() {
         <div className="flex items-start gap-3 px-4 pt-3">
           <RowIcon icon={Mic} tone={TONE_GREEN} />
           <p className="min-w-0 flex-1 pb-1 text-[11.5px] leading-relaxed text-muted-foreground">
-            喊出唤醒名或点悬浮球，说出任务，智能体接管手机执行
+            喊唤醒名或点悬浮球唤起：能闲聊会陪唠、有自己的性格，也能动手帮你操作手机（像小爱同学/Siri）
           </p>
         </div>
         <div className="mt-1 divide-y divide-black/[0.05] dark:divide-white/[0.06]">
+          {/* 专属人设（静态说明行） */}
+          <div className="flex min-h-[52px] items-center gap-3 px-4 py-2">
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-[16px]">专属人设</span>
+              <span className="mt-0.5 block truncate text-[11.5px] text-muted-foreground">{ASSISTANT_PERSONA_TAGLINE}</span>
+            </span>
+            <span className="shrink-0 rounded-full bg-emerald-500/10 px-2.5 py-1 text-[11px] text-emerald-600 dark:text-emerald-400" data-testid="agent-voice-persona-badge">
+              {cfg.name || DEFAULT_WAKE_NAME}
+            </span>
+          </div>
           {/* 唤醒名 */}
           <div className="flex min-h-[52px] items-center gap-3 px-4 py-2">
             <span className="min-w-0 flex-1">
               <span className="block truncate text-[16px]">唤醒名</span>
-              <span className="mt-0.5 block truncate text-[11.5px] text-muted-foreground">连续监听时喊出即唤起（≤6 字）</span>
+              <span className="mt-0.5 block truncate text-[11.5px] text-muted-foreground">喊出即唤起，也是 TA 的名字（≤6 字）</span>
             </span>
             <Input
               value={nameDraft}

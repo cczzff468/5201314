@@ -1,24 +1,24 @@
 'use client';
 
 /**
- * 语音会话大脑（v1.7.0「语音智能体能聊天」）：
+ * 语音会话大脑（v1.7.1「专属人设智能体」）：
  *
  * 语音会话里用户说的每一句话经 voiceTurn 统一路由，一次 LLM 调用同时完成
- * 「闲聊回复」与「任务识别」——像 Siri：问候/闲聊/提问直接口语化回复，
+ * 「闲聊回复」与「任务识别」——像小爱同学/Siri：问候/闲聊/提问用人设口语化回复，
  * 「打开微信」「创建一个联系人叫XX性格XX」这类要动手机的话整理成任务交给 Agent。
  *
- * - 人设注入：取联系人里第一位 AI 角色（char，非小号档案），经 buildPersonaSystemPrompt
- *   组装七要素人设（与微信/QQ/信息聊天完全同源——语音里 TA 就是同一个人）；
- *   没有角色数据时回退通用语音助手。
+ * - 人设注入：内置专属人设「小灵」（assistant-persona，与小爱/Siri 同级的独立智能体，
+ *   有自己的名字/性格/说话风格），名字跟随唤醒名、机主名字注入，不再借用联系人角色；
  * - 输出协议：严格 JSON {"mode":"chat","reply":"…"} 或 {"mode":"task","task":"…"}；
- *   模型没按格式输出时兜底解析（整段文本当回复；命中任务动词当任务）。
+ *   模型没按格式输出时兜底解析（整段文本当回复；命中任务动词当任务）；
  * - 场景约束：回复必须口语化、1~3 句、适合 TTS 朗读（无 Markdown/表情/列表）。
  */
 
 import { extractJsonObject } from './call-upstream';
 import { useSettings } from './store';
-import { buildPersonaSystemPrompt } from './persona';
-import { cachedOwnerName, listContacts } from './contacts-store';
+import { cachedOwnerName } from './contacts-store';
+import { getAgentVoiceCfg } from './agent-voice';
+import { ASSISTANT_DEFAULT_NAME, assistantFallbackReply, buildAssistantPersonaPrompt } from './assistant-persona';
 
 // ============================================================
 // A. 类型与常量
@@ -40,8 +40,8 @@ const VOICE_LLM_TIMEOUT_MS = 45_000;
 const TASK_VERB_RE =
   /打开|关闭|退出|发(一条?|个)?(消息|短信|微信|qq|邮件)|给.{1,8}(发|说)|创建|新建|添加|删(除|掉)|设置|修改|查询|查一?下|搜(索|一下)|播放|放(一首?|首歌)|暂停|下一首|上一首|写(一?条)?(备忘录|提醒|笔记)|记一?(条|下|笔)|提醒我|下单|点外卖|订(个|一?)|叫(车|外卖)|转账|付款|导航(去|到)?|拍(照|张照)|截屏|截图|清空|帮我(看|办|弄|做)/;
 
-/** 接口失败时的聊天兜底回复 */
-const CHAT_FALLBACK = '我这会儿网络不太顺，等会儿再聊好不好？';
+/** 接口失败时的聊天兜底回复（保持人设，随机挑一条） */
+const chatFallback = (): string => assistantFallbackReply();
 
 // ============================================================
 // B. LLM 调用（照抄 planWithLLM 的纯文本流聚合）
@@ -84,34 +84,21 @@ async function callChatLLM(
 // C. 人设注入
 // ============================================================
 
-let personaCache: { sys: string; at: number } | null = null;
+let personaCache: { key: string; sys: string; at: number } | null = null;
 const PERSONA_CACHE_TTL = 60_000;
 
 /**
- * 语音会话 system prompt：角色人设（与聊天链路同源）+ 语音场景约束 + 路由/输出协议。
- * 人设 60s 内缓存（语音多轮不长，避免每句都读一遍 IndexedDB）。
+ * 语音会话 system prompt：专属人设（assistant-persona）+ 语音场景约束 + 路由/输出协议。
+ * 名字跟随唤醒名；人设 60s 内缓存（键含名字，改唤醒名立即换名；避免每句都重拼）。
  */
 async function buildVoiceSystemPrompt(): Promise<string> {
-  if (personaCache && Date.now() - personaCache.at < PERSONA_CACHE_TTL) return personaCache.sys;
-  let persona = '';
-  try {
-    const contacts = await listContacts();
-    const char = contacts.find((c) => c.kind === 'char' && !c.altOf);
-    if (char) {
-      persona = buildPersonaSystemPrompt(char, {
-        userName: cachedOwnerName() || null,
-        channel: '语音助手',
-      });
-    }
-  } catch {
-    /* 联系人读取失败：用通用助手 */
-  }
-  if (!persona) {
-    persona = '你是机主手机里的智能语音助手，说话自然友好、简短口语化。';
+  const name = getAgentVoiceCfg().name || ASSISTANT_DEFAULT_NAME;
+  if (personaCache && personaCache.key === name && Date.now() - personaCache.at < PERSONA_CACHE_TTL) {
+    return personaCache.sys;
   }
   const sys = [
-    persona,
-    '【当前场景】你正在和机主语音对话（像 Siri 一样的语音助手会话）。你的回复会被朗读出来，所以必须：',
+    buildAssistantPersonaPrompt(name, cachedOwnerName() || null),
+    '【当前场景】你正在和机主语音对话（手机顶层的语音助手会话）。你的回复会被朗读出来，所以必须：',
     '- 口语化，像说话不像写字；一轮 1~3 句，不要长篇大论；',
     '- 不要用任何 Markdown、列表、表情符号、括号动作描写（如「微笑」）。',
     '【你的双重职责】',
@@ -122,7 +109,7 @@ async function buildVoiceSystemPrompt(): Promise<string> {
     '- 要动手：{"mode":"task","task":"<整理后的任务描述>"}',
     '【判定规则】出现操作动词或应用名（打开/发/建/创建/删/设/查/放/搜/订/写/记/提醒/下单…）→ task；打招呼/闲聊/情绪陪伴/知识问答 → chat；拿不准 → chat。',
   ].join('\n');
-  personaCache = { sys, at: Date.now() };
+  personaCache = { key: name, sys, at: Date.now() };
   return sys;
 }
 
@@ -147,7 +134,7 @@ function cleanReply(raw: string): string {
  */
 export async function voiceTurn(text: string, history: VoiceTurn[]): Promise<VoiceTurnResult> {
   const t = text.trim();
-  if (!t) return { mode: 'chat', reply: CHAT_FALLBACK };
+  if (!t) return { mode: 'chat', reply: chatFallback() };
   const sys = await buildVoiceSystemPrompt();
   const msgs: { role: string; content: string }[] = [{ role: 'system', content: sys }];
   for (const h of history.slice(-HISTORY_MAX)) {
@@ -175,5 +162,5 @@ export async function voiceTurn(text: string, history: VoiceTurn[]): Promise<Voi
   }
   // 兜底：接口挂/解析失败——任务动词明显就直接当任务，否则兜底回复
   if (TASK_VERB_RE.test(t)) return { mode: 'task', task: t };
-  return { mode: 'chat', reply: CHAT_FALLBACK };
+  return { mode: 'chat', reply: chatFallback() };
 }

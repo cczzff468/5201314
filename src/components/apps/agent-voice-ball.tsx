@@ -1,19 +1,21 @@
 'use client';
 
 /**
- * C1 语音唤起智能体——Siri 式全屏语音会话 + 悬浮球（v1.7.0 重构）：
+ * C1 语音唤起智能体——Siri 式全屏语音会话 + 悬浮球（v1.7.1 专属人设）：
  *
  * - 悬浮球：屏幕右侧边缘可拖动（Siri 彩虹渐变环 + 深色玻璃 + 麦克风），拖动跟手、
  *   松手吸左右边、位置记忆（localStorage agent-voice-ball-pos-v1）；点按（位移 < 8px）
  *   打开全屏语音会话；连续唤醒监听开着时带一圈呼吸光环（提示「正在听」）
- * - 全屏会话（苹果 Siri 式，参考 iOS 截图）：黑玻璃背景 + 顶部彩虹光球 + 左上关闭 +
- *   中部对话流（用户右侧气泡 / 助手左侧纯文本）+ 底部输入栏（+ 清空对话 / 输入框 / 麦克风）
+ * - 全屏会话（苹果 Siri 式）：黑玻璃背景 + 顶部彩虹光球 + 光球下方助手名牌（名字=
+ *   唤醒名）+ 左上关闭 + 中部对话流（用户右侧气泡 / 助手左侧纯文本）+ 底部输入栏
  * - 双重职责（Siri 式闭环）：
- *   ① 闲聊/问答：经 agent-chat.voiceTurn 按角色人设直接回复（与微信聊天同一个 TA），
- *      回复经共享 TTS 栈朗读出来；
+ *   ① 闲聊/问答：经 agent-chat.voiceTurn 按专属人设「小灵」（assistant-persona，
+ *      名字跟随唤醒名）直接回复，回复经共享 TTS 栈朗读出来；
  *   ② 任务/操作：voiceTurn 识别为 task → 收起会话 → runAgentTask 接管（进度条/急停
  *      由 AgentGlobalLayers 负责）→ 任务结束按追问设置重开会话播报结果（C4）；
  *   语音识别链（离线 → Web Speech → 云端）与连续唤醒循环全部沿用 v1.6.1。
+ * - Siri 式开场（新会话）：应一声（assistant-persona 分时段随机问候）→ 朗读 →
+ *   播完自动开录（应声→聆听闭环）；继续上次对话不重复问候
  * - 追问模式：语音来源任务结束 → 全屏会话自动重开（结果进对话流 + 15s 无操作自动收起，
  *   任意触摸重新计时）；期间点麦克风即可继续说，免喊唤醒名
  * - 显示门槛：APP 原生壳（浏览器可用 agent-voice-debug=1 调试预览，仅聊天/路由可用，
@@ -46,6 +48,7 @@ import {
 } from '@/lib/ios/agent-voice';
 import { isSpeaking, isTtsConfigured, speakUserTts, stopSpeaking } from '@/lib/ios/tts-client';
 import { voiceTurn } from '@/lib/ios/agent-chat';
+import { assistantGreeting } from '@/lib/ios/assistant-persona';
 
 // Agent 运行状态探针：shizuku-agent 引擎体量大，不能静态打进本组件包体——
 // 借道 agent-ui（PhoneShell 本就 dynamic 引它）订阅运行态，只回传一个轻量布尔
@@ -250,20 +253,48 @@ export default function AgentVoiceBall() {
   // ---- 会话开合 ----
   /** 开会话时跳过自动开录（追问重开/播报在放等场景；一次性，用后即清） */
   const skipAutoStartRef = useRef(false);
+
+  // ---- 会话内 TTS（聊天回复朗读；共享 tts-client 栈）----
+  const speakInSession = useCallback(async (text: string): Promise<void> => {
+    if (!isTtsConfigured()) return;
+    stopSpeaking(); // 打断上一条未播完的播报（token 机制）
+    setSpeaking(true);
+    try {
+      await speakUserTts({ text });
+    } catch {
+      /* 合成失败静默：文字已在对话流里 */
+    } finally {
+      setSpeaking(false);
+    }
+  }, []);
+
+  /** Siri 式开场：应一声（分时段随机问候）→ 朗读 → 播完自动开录（应声→聆听闭环）。
+   *  仅在新会话（对话流为空）时用，继续上次对话不重复问候；TTS 未配置则立即开录。 */
+  const greetOnOpen = useCallback(async (): Promise<void> => {
+    const line = assistantGreeting();
+    appendTurnRef.current('agent', line);
+    await speakInSession(line);
+    if (sessionOpenRef.current && !routingRef.current && recRef.current.phase === 'idle') {
+      recRef.current.start();
+    }
+  }, [speakInSession]);
+
   const openSession = useCallback(
-    (opts?: { autoRecord?: boolean; followupMode?: boolean }) => {
-      // 结果播报/其它 TTS 正在放：不自动开录（避免麦克风吃 TTS），用户点麦克风再说
-      skipAutoStartRef.current = opts?.autoRecord === false || isSpeaking();
+    (opts?: { autoRecord?: boolean; followupMode?: boolean; greet?: boolean }) => {
+      // 开场问候时先不录（麦克风吃 TTS）：问候播完由 greetOnOpen 自动开录
+      const willGreet = opts?.greet === true && turnsRef.current.length === 0;
+      skipAutoStartRef.current = willGreet || opts?.autoRecord === false || isSpeaking();
       setSessionMsg('');
       setThinking(false);
       setSessionOpen(true);
+      if (willGreet) void greetOnOpen();
       if (opts?.followupMode) {
         followupUntilRef.current = Date.now() + FOLLOWUP_AUTO_CLOSE_MS;
         setFollowupLeft(FOLLOWUP_AUTO_CLOSE_MS);
         setFollowup(true);
       }
     },
-    [],
+    [greetOnOpen],
   );
 
   const closeSession = useCallback((): void => {
@@ -290,20 +321,6 @@ export default function AgentVoiceBall() {
     if (recRef.current.phase === 'idle') recRef.current.start();
     return undefined;
   }, [sessionOpen]);
-
-  // ---- 会话内 TTS（聊天回复朗读；共享 tts-client 栈） ----
-  const speakInSession = useCallback(async (text: string): Promise<void> => {
-    if (!isTtsConfigured()) return;
-    stopSpeaking(); // 打断上一条未播完的播报（token 机制）
-    setSpeaking(true);
-    try {
-      await speakUserTts({ text });
-    } catch {
-      /* 合成失败静默：文字已在对话流里 */
-    } finally {
-      setSpeaking(false);
-    }
-  }, []);
 
   // ---- 任务执行（Siri → Agent 交接）----
   /** 执行任务：收起会话 → dynamic import 拉起 runAgentTask → 全局进度条接管；
@@ -445,12 +462,16 @@ export default function AgentVoiceBall() {
   const onWake = useCallback(
     (task: string | null) => {
       setSessionMsg('');
-      if (task) appendTurnRef.current('user', task); // 一句话直达：先记进对话流再路由
-      setSessionOpen(true);
-      if (task) void routeUtterance(task);
-      // task=null：只喊了名字 → 会话开着自动录音（open effect 会 start），等继续说
+      if (task) {
+        appendTurnRef.current('user', task); // 一句话直达：先记进对话流再路由
+        setSessionOpen(true);
+        void routeUtterance(task);
+      } else {
+        // 只喊了名字 → 应一声（新会话问候，播完自动开录），等继续说
+        openSession({ greet: true });
+      }
     },
-    [routeUtterance],
+    [routeUtterance, openSession],
   );
   const canListen = useCallback(() => canAgentWakeListen(sessionOpenRef.current, agentRunningRef.current), []);
   // enabled 只随总启用态启停；锁屏/通话/会话打开等暂停条件由 canListen 每轮动态判断
@@ -486,7 +507,7 @@ export default function AgentVoiceBall() {
   // ---- 动作 ----
   const openFromBall = useCallback(() => {
     clearFollowup(); // 手动开会话：不处于追问模式
-    openSession({ autoRecord: true });
+    openSession({ greet: true });
   }, [clearFollowup, openSession]);
 
   const toggleMic = useCallback(() => {
@@ -574,6 +595,14 @@ export default function AgentVoiceBall() {
                     'radial-gradient(85% 58% at 50% 36%, rgba(110,231,249,0.30), transparent 55%), radial-gradient(70% 52% at 46% 54%, rgba(244,114,182,0.32), transparent 60%), radial-gradient(58% 42% at 55% 68%, rgba(251,146,60,0.28), transparent 65%)',
                 }}
               />
+            </div>
+
+            {/* 助手名牌（光球正下方，Siri 呼出后的身份标识） */}
+            <div className="pointer-events-none absolute inset-x-0 top-[218px] flex flex-col items-center gap-0.5" aria-hidden="true">
+              <span className="text-[15px] font-medium tracking-wide text-white/85" data-testid="agent-voice-name">
+                {cfg.name || '小灵'}
+              </span>
+              <span className="text-[11px] text-white/35">你的专属语音助手 · 能聊也能办</span>
             </div>
 
             {/* 对话流（用户右侧气泡 / 助手左侧纯文本，Siri 式） */}
