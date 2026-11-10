@@ -103,7 +103,7 @@ const initialAgentState: AgentState = {
   running: false,
   task: '',
   round: 0,
-  maxRounds: 3,
+  maxRounds: 8,
   stepIndex: 0,
   stepTotal: 0,
   stepDesc: '',
@@ -1362,18 +1362,20 @@ function buildAgentSystemPrompt(ctx: AgentCtx | undefined, verifying = false): s
       '【任务验收（本轮只核对，不轻易动手）】上一轮计划的步骤都已执行成功，但「动作成功」不等于「任务完成」。请对照任务目标检查最新屏幕观察：',
       '- 任务目标已真正达成（成品已出现在界面上：如备忘录列表里能看到刚记的那条内容、联系人列表有新联系人、消息已发出）→ 输出空计划并给 note，note 必须以 TASK_DONE 开头，后接一句话结果，say 用你的语气播报结果。',
       '- 目标没达成/只做了一半（内容没输入、没保存、点错了按钮、界面停在中间态等）→ 正常输出补救计划（先 uiObserve 看清界面再纠正），不要输出 TASK_DONE。',
+      '- 【补救优先级】如果上一轮已经输入了内容但还没点保存/完成/发送：补救计划的第一步就是点保存（uiClick 保存/完成/发送/对勾），再 uiObserve 核对成品出现，不要重新走一遍已完成的步骤。',
       '- 宁可多补救一轮，也不许在成品没出现时报完成。',
     );
   }
   lines.push(
     '【行为准则】',
-    '- 一次规划 3~8 步，每步动作最小化（一步只做一件事），并把完成整个任务所需的全部步骤放进同一次 plan。',
+    '- 一次规划 3~10 步，每步动作最小化（一步只做一件事），并把完成整个任务所需的全部步骤放进同一次 plan——包括最后的保存/发送与成品核对，不要拆到下一轮。',
     '- 【两类任务分清】任务发生在「机主手机里的应用」（微信/信息/QQ/淘宝/美团/联系人/备忘录/提醒事项/日历/浏览器/天气/音乐/设置等这台手机内渲染的界面）→ 用 openScreen 打开 + uiObserve 观察 + uiClick/uiType/uiScroll 操作；只有操作 Android 系统级真实应用（虚拟手机之外的真实桌面 App）才用 openApp(包名)+clickElement 等。',
     '- 应用内任务的标准流程：openScreen 打开 → uiObserve 看界面 → 按清单 uiClick（按钮/列表项/输入框）→ uiType 输入 → 需要时 pressEnter（聚焦输入框发消息等效）→ 再 uiObserve 核对结果。uiClick/uiType 的反馈会告诉你点到了什么/输了什么。',
     '- 【uiClick 的 args 必须照抄 uiObserve 清单里的完整文字，一字不差】界面同时有「新建文件夹」「新建备忘录」时，写「新建」会点错——必须写全称。含图标按钮以清单文字为准，禁止自创缩写。',
     '- 例（建联系人）：openScreen contacts → uiObserve → uiClick「+」或「新建」→ uiClick 姓名输入框 → uiType 名字 → uiClick 人设/性格输入框 → uiType 性格描述 → uiClick「保存/完成」→ uiObserve 核对。界面和示例不符时以 uiObserve 实际返回为准。',
-    '- 例（记备忘录）：openScreen notes → uiObserve → uiClick「新建备忘录」（不是「新建文件夹」）→ uiType「要记的内容」（标题/正文输入框）→ back 返回列表 → uiObserve 核对列表出现这条内容。',
+    '- 例（记备忘录）：openScreen notes → uiObserve → uiClick「新建备忘录」（不是「新建文件夹」）→ uiClick 标题/正文输入框 → uiType「要记的内容」→ uiClick「保存/完成/对勾」→ uiObserve 核对列表出现这条内容。界面和示例不符时以 uiObserve 实际返回为准。',
     '- 【完成标准（写入类任务）】内容必须真正输入且结果出现在界面上才算完成：备忘录要看到列表里那条内容、消息要看到进入会话、提醒要看到条目存在。界面停在输入框/抽屉/弹窗=没完成，继续操作直到成品出现；计划最后一步必须是 uiObserve 核对。',
+    '- 【保存铁律（最高优先级）】需要输入内容/填表的任务：uiType 输入完成后，同一次 plan 里必须接着点「保存/完成/发送/对勾」按钮（或 pressEnter），绝不把保存动作留到下一轮——「输入了内容却没保存」等同任务失败。新建/编辑类界面通常保存按钮在右上角或底部工具栏，找不到就先 uiObserve 看全界面元素再点。',
     '- 操作输入框前必须先 clickElement/uiClick 点输入框使其聚焦，才能 inputTextToFocus/uiType；发送消息用 pressEnter。',
     '- 输入框里有旧内容时：uiType 会整体替换旧内容；系统级输入框优先找界面上的清空/清除类按钮，没有就连续 pressDelete 逐字删（按旧内容长度控制次数，别无限删）。',
     '- 上一步失败时，失败反馈里通常带着当前界面与可见元素线索——换策略（换匹配文字、先 scroll/uiScroll 翻页、改 tapPoint、先 lookScreen/uiObserve），不要原样重试。uiClick 反馈里出现「另有相近元素」提示时，说明你可能点到了相近但错误的按钮——立即用完整名称重试正确目标。',
@@ -1859,7 +1861,10 @@ export async function runAgentTask(
   const t = task.trim();
   if (!t) return { ok: false, text: '任务内容为空' };
 
-  const maxRounds = Math.max(1, Math.min(6, opts?.maxRounds ?? 4));
+  // v1.9.4 用户反馈「任务总差最后一步没做」：默认轮数 4→8、上限 6→12。
+  // 此前验收轮 + 补救轮消耗下，4 轮常常刚好在「输入内容/点保存」前耗尽（如记备忘录）。
+  // 轮内步骤数不受影响；急停/防重入语义不变。
+  const maxRounds = Math.max(1, Math.min(12, opts?.maxRounds ?? 8));
 
   // ---- 初始化 ----
   stopFlag = false;

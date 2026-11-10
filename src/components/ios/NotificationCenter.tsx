@@ -20,6 +20,9 @@
  *
  * 点击条目：markRead + 导航（target 走 island-notify 导航总线 / 否则 location.href）+ 收面板；
  * 收面板经 store.closeCenter（原生 local-notify-open 回传同源），本组件只订阅 store.open。
+ *
+ * v1.9.4（用户需求）：① 列表改平铺——组头标签（「AI 助手」等）整行移除，每条通知自带
+ * APP 图标/标题/时间/单条清除，信息不重复更简约；② 单条通知保留未读蓝点与全部已读/清空。
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -226,17 +229,6 @@ function NotificationRow({ item, now }: { item: NotificationCenterItem; now: num
   );
 }
 
-// ---------------- 分组视图模型（纯视图层派生：items 持久化格式不变） ----------------
-
-interface NcGroup {
-  key: string;
-  name: string;
-  /** 组头图标（取组内最新条目的来源 App 元数据） */
-  meta: NcAppMeta;
-  items: NotificationCenterItem[];
-  unread: number;
-}
-
 // ---------------- 主组件 ----------------
 
 export default function NotificationCenter() {
@@ -262,29 +254,9 @@ export default function NotificationCenter() {
   // 设置 › 通知页与面板两个入口天然联动，无需 useState 镜像 + effect 同步
   const dndOn = useNotifyDnd((s) => s.on);
 
-  // 分组折叠状态（仅组件内存，不持久化：iOS 通知中心每次展开同样默认全展开）
-  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
-  const toggleGroup = (key: string): void => setCollapsed((m) => ({ ...m, [key]: !m[key] }));
-
-  // 按 App 分组（items 本身 ts 倒序：首遇即组内最新，Map 插入序即组间倒序；
-  // 组内再显式倒序一次、组间按最新条目 ts 再排一次，兜底历史数据的顺序毛刺）
-  const groups = useMemo<NcGroup[]>(() => {
-    const map = new Map<string, NcGroup>();
-    for (const it of items) {
-      const meta = appMetaOf(it);
-      let g = map.get(meta.key);
-      if (!g) {
-        g = { key: meta.key, name: meta.name, meta, items: [], unread: 0 };
-        map.set(meta.key, g);
-      }
-      g.items.push(it);
-      if (!it.read) g.unread++;
-    }
-    const list = Array.from(map.values());
-    for (const g of list) g.items.sort((a, b) => b.ts - a.ts);
-    list.sort((a, b) => (b.items[0]?.ts ?? 0) - (a.items[0]?.ts ?? 0));
-    return list;
-  }, [items]);
+  // v1.9.4 用户需求：组头标签（「AI 助手」等）整体移除，改 iOS 式平铺列表——
+  // 每条通知自带 APP 图标/标题/时间，分组头属重复信息；条目本身 ts 倒序直达
+  const flatItems = useMemo(() => [...items].sort((a, b) => b.ts - a.ts), [items]);
 
   // 入口 gate：仅解锁后可拉出；切换器/响铃/通话/来电层显示时禁用（它们的交互优先）
   const entryEnabled = !locked && !screenOff && !switcherOpen && !alarmRinging && !callActive && !incomingCall;
@@ -488,56 +460,10 @@ export default function NotificationCenter() {
           </div>
         ) : (
           <div data-testid="nc-list" className="min-h-0 flex-1 overflow-y-auto">
-            {groups.map((g) => {
-              const isCollapsed = collapsed[g.key] === true;
-              return (
-                <div key={g.key} className="mb-2">
-                  {/* 组头：小图标 + App 名 + 未读徽标 + 组级清除 ✕ + 折叠箭头；点按整条 = 折叠/展开。
-                      sticky 悬停在滚动区顶部（毛玻璃透出行滚动，iOS 通知中心同款观感） */}
-                  <div
-                    data-testid="nc-group"
-                    role="button"
-                    tabIndex={0}
-                    aria-expanded={!isCollapsed}
-                    onClick={() => toggleGroup(g.key)}
-                    className="pointer-events-auto sticky top-0 z-10 flex h-10 cursor-pointer items-center gap-2.5 rounded-[14px] bg-white/[0.16] px-2.5 ring-1 ring-white/[0.08] backdrop-blur-md"
-                  >
-                    <span className="flex h-[26px] w-[26px] shrink-0 items-center justify-center overflow-hidden rounded-[8px] bg-white/10 ring-1 ring-white/20">
-                      <NcAppIcon meta={g.meta} size={26} />
-                    </span>
-                    <span className="min-w-0 flex-1 truncate text-[13px] font-semibold text-white">{g.name}</span>
-                    {g.unread > 0 && (
-                      <span className="shrink-0 rounded-full bg-[#0A84FF] px-1.5 text-[11px] leading-4 text-white">
-                        {g.unread > 99 ? '99+' : g.unread}
-                      </span>
-                    )}
-                    {/* 组级清除（阻断组头折叠点击）：removeMany 一次 set 一次落盘 */}
-                    <span
-                      role="button"
-                      aria-label={`清除${g.name}的全部通知`}
-                      data-testid="nc-group-clear"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        useNotifyCenter.getState().removeMany(g.items.map((i) => i.id));
-                      }}
-                      className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-white/15 text-[10px] leading-none text-white/70 active:bg-white/30"
-                    >
-                      ✕
-                    </span>
-                    <span aria-hidden className={`shrink-0 text-[9px] leading-none text-white/60 transition-transform ${isCollapsed ? '' : 'rotate-180'}`}>
-                      ▼
-                    </span>
-                  </div>
-                  {!isCollapsed && (
-                    <div data-testid="nc-group-items">
-                      {g.items.map((it) => (
-                        <NotificationRow key={it.id} item={it} now={now} />
-                      ))}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
+            {/* 平铺列表（v1.9.4：组头标签已按需求移除）：每条自带 APP 图标/标题/相对时间/单条清除 */}
+            {flatItems.map((it) => (
+              <NotificationRow key={it.id} item={it} now={now} />
+            ))}
           </div>
         )}
 

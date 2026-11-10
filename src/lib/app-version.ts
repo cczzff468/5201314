@@ -11,9 +11,9 @@
  */
 
 /** 当前最新版本（与 android-shell versionName 保持一致） */
-export const APP_VERSION = '1.9.3';
+export const APP_VERSION = '1.9.4';
 /** 版本号数字（与 android-shell versionCode 保持一致；覆盖安装要求只增不减） */
-export const APP_VERSION_CODE = 23;
+export const APP_VERSION_CODE = 24;
 
 export interface AppReleaseNote {
   version: string;
@@ -24,6 +24,16 @@ export interface AppReleaseNote {
 
 /** 版本历史（新→旧；设置 › APP 更新 页渲染，最新一条即当前版本） */
 export const APP_RELEASE_NOTES: AppReleaseNote[] = [
+  {
+    version: '1.9.4',
+    date: '2026-11-10',
+    items: [
+      '语音智能体悬浮球删除重建：极简磨砂玻璃球（深色半透+细白描边+白麦克风），监听中仅一圈轻呼吸光环',
+      '灵动岛右侧小红点移除：状态栏不再显示通知未读红点（用户要求）',
+      '下滑通知面板去掉「AI 助手」等分组标签：改 iOS 式平铺列表，每条通知自带 APP 图标更简约',
+      '修复 Agent 任务总差最后一步：轮数上限 4→8、强化「保存铁律」——输入内容后必须同轮点保存/完成并核对成品',
+    ],
+  },
   {
     version: '1.9.3',
     date: '2026-11-10',

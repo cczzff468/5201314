@@ -3,9 +3,9 @@
 /**
  * C1 语音唤起智能体——Siri 式全屏语音会话 + 悬浮球（v1.7.1 专属人设）：
  *
- * - 悬浮球：屏幕右侧边缘可拖动（Siri 彩虹渐变环 + 深色玻璃 + 麦克风），拖动跟手、
- *   松手吸左右边、位置记忆（localStorage agent-voice-ball-pos-v1）；点按（位移 < 8px）
- *   打开全屏语音会话；连续唤醒监听开着时带一圈呼吸光环（提示「正在听」）
+ * - 悬浮球：屏幕右侧边缘可拖动（v1.9.4 极简磨砂玻璃球：深色半透 + 细白描边 + 白麦克风），
+ *   拖动跟手、松手吸左右边、位置记忆（localStorage agent-voice-ball-pos-v1）；
+ *   点按（位移 < 8px）打开全屏语音会话；连续唤醒监听开着时带一圈极细呼吸光环（提示「正在听」）
  * - 全屏会话（苹果 Siri 式）：黑玻璃背景 + 顶部彩虹光球 + 光球下方助手名牌（名字=
  *   唤醒名）+ 左上关闭 + 中部对话流（用户右侧气泡 / 助手左侧纯文本）+ 底部输入栏
  * - 双重职责（Siri 式闭环）：
@@ -70,7 +70,7 @@ const AgentRunningProbe = dynamic(() => import('@/components/apps/agent-ui').the
 
 // ---------------- 常量 ----------------
 
-const BALL_SIZE = 48;
+const BALL_SIZE = 44;
 /** 吸边后距屏幕左右边缘的间距 */
 const BALL_EDGE = 6;
 /** 球默认锚位（bottom 偏移，与 className 同步） */
@@ -731,7 +731,6 @@ export default function AgentVoiceBall() {
   const wakeOn = layerOn && cfg.listen && !wakeBlocked && (asrReady || wsWakeOk || vadOk);
   // 重试信号：设置页「重试」按钮 bump → 唤醒循环立即重建（清熔断/换通道）
   const retrySeq = useWakeDiag((s) => s.retrySeq);
-  const serverDegraded = useWakeDiag((s) => s.listening && s.server === 'fail');
   const onWake = useCallback(
     (task: string | null) => {
       setSessionMsg('');
@@ -1024,7 +1023,9 @@ export default function AgentVoiceBall() {
         ) : null}
       </AnimatePresence>
 
-      {/* ================= 悬浮球（Siri 渐变环 + 深色玻璃，可拖动吸边） ================= */}
+      {/* ================= 悬浮球（v1.9.4 删除重建：极简磨砂玻璃球，可拖动吸边） =================
+          设计语言：一层深色磨砂玻璃 + 细白描边 + 白色麦克风，无彩虹渐变/无光晕——
+          状态表达只留两个：连续唤醒监听中（极细呼吸光环）与唤醒熔断（右上小 ALERT 点） */}
       <motion.button
         type="button"
         aria-label="语音助手（拖动移位，点按说话）"
@@ -1045,43 +1046,38 @@ export default function AgentVoiceBall() {
         onDragEnd={(_e, info) => onDragEnd(info)}
         animate={pos ? { x: pos.x, y: pos.y } : undefined}
         transition={{ duration: 0.16 }}
-        className="pointer-events-auto absolute bottom-[140px] right-0 flex h-[48px] w-[48px] touch-none select-none items-center justify-center rounded-full"
+        style={{ visibility: sessionOpen ? 'hidden' : 'visible' }}
+        className="pointer-events-auto absolute bottom-[140px] right-0 flex h-[44px] w-[44px] touch-none select-none items-center justify-center rounded-full"
         data-testid="agent-voice-ball"
       >
-        {/* 呼吸光环（连续唤醒监听中）：柔和外圈呼吸，替代旧生硬 ping */}
+        {/* 呼吸光环（连续唤醒监听中）：极细白圈轻呼吸，替代彩虹旋环 */}
         {listening ? (
           <span
             aria-hidden="true"
-            className="absolute -inset-[7px] rounded-full ring-1 ring-white/35"
-            style={{ animation: 'agentVoiceBreath 2.6s ease-in-out infinite' }}
+            className="absolute -inset-[5px] rounded-full ring-1 ring-white/30"
+            style={{ animation: 'agentVoiceBreath 2.8s ease-in-out infinite' }}
           />
         ) : null}
-        {/* 唤醒状态点：熔断=红点（点球可见原因）；服务端识别连败降级中=琥珀点（自动换通道重试，喊名可能暂时失灵） */}
+        {/* 唤醒熔断提示点（唯一状态点）：喊名唤醒因麦克风权限等原因停用时点亮，点球看原因 */}
         {wakeBlocked ? (
-          <span aria-hidden="true" data-testid="agent-voice-ball-alert" className="absolute -right-0.5 -top-0.5 z-10 h-3.5 w-3.5 rounded-full bg-[#FF453A] shadow-[0_1px_4px_rgba(0,0,0,0.4)] ring-2 ring-black/50" />
-        ) : serverDegraded ? (
-          <span aria-hidden="true" data-testid="agent-voice-ball-degraded" className="absolute -right-0.5 -top-0.5 z-10 h-3 w-3 rounded-full bg-[#FF9500] shadow-[0_1px_4px_rgba(0,0,0,0.4)] ring-2 ring-black/50" />
+          <span
+            aria-hidden="true"
+            data-testid="agent-voice-ball-alert"
+            className="absolute right-[3px] top-[3px] z-10 h-2 w-2 rounded-full bg-[#FF453A] ring-[1.5px] ring-black/45"
+          />
         ) : null}
-        {/* 极简玻璃球：静置时一层细彩虹描边 + 柔和底部微光；监听中描边慢旋（简约不抢眼） */}
+        {/* 磨砂玻璃球体：深色半透 + 细白描边 + 柔和投影（简约玻璃质感） */}
         <span
           aria-hidden="true"
-          className="absolute -inset-[2px] rounded-full opacity-45 blur-[6px]"
-          style={{ background: 'linear-gradient(140deg, rgba(110,231,249,0.55), rgba(167,139,250,0.5) 45%, rgba(244,114,182,0.5))' }}
+          className="absolute inset-0 rounded-full bg-black/55 backdrop-blur-xl ring-1 ring-white/25 shadow-[0_4px_14px_rgba(0,0,0,0.35)]"
         />
+        {/* 顶部内高光（玻璃质感，极轻） */}
         <span
           aria-hidden="true"
-          className={`absolute inset-0 rounded-full ${listening ? '' : 'opacity-80'}`}
-          style={{ background: SIRI_CONIC, animation: listening ? 'agentVoiceSpin 10s linear infinite' : undefined }}
+          className="absolute inset-0 rounded-full"
+          style={{ background: 'radial-gradient(120% 90% at 30% 14%, rgba(255,255,255,0.16), transparent 46%)' }}
         />
-        {/* 深色玻璃主体（1.5px 内缩露出细描边） */}
-        <span aria-hidden="true" className="absolute inset-[1.5px] rounded-full bg-[#0E0E13]/92 backdrop-blur-xl" />
-        {/* 内缘高光（玻璃质感，弱化） */}
-        <span
-          aria-hidden="true"
-          className="absolute inset-[1.5px] rounded-full"
-          style={{ background: 'radial-gradient(120% 90% at 30% 16%, rgba(255,255,255,0.16), transparent 40%)' }}
-        />
-        <Mic className="relative h-[17px] w-[17px] text-white/95" strokeWidth={2.1} />
+        <Mic className="relative h-[18px] w-[18px] text-white/90" strokeWidth={1.8} />
       </motion.button>
     </div>
   );
