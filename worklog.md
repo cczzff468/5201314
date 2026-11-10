@@ -2406,3 +2406,26 @@ Stage Summary:
 - 通知管理：真·免打扰模式（静而不丢，闹钟/提醒/来电豁免）+ 通知中心按 App 分组折叠/组清除 + 面板与设置双入口快捷开关
 - 性能：分窗渲染覆盖全部 6 个聊天面（微信/QQ 单聊原有 + 信息/双群/淘宝客服新增），长会话点开秒进
 - 关键文件：pay-pwd-box.ts（新建）、wechat-wallet.tsx/qq.tsx/meituan-store.ts/PhoneShell.tsx（加密接入）、notification-center.ts/local-notify.ts/island-notify.ts/notify-sound.ts（DND 三闸）、NotificationCenter.tsx/settings.tsx（分组+开关）、chat.tsx/wx-group.tsx/qq-group.tsx/taobao-msg-chat.tsx（分窗）、app-version.ts（1.9.2/22）
+
+## 2026-11-10 · v93（网页端 v1.9.7）通知横幅点击展开全文+输入框快捷回复 + 备忘录「文件夹」标签退出 APP
+
+Task ID: 43
+Agent: 主控 Agent（Z.ai Code）
+Task: 机主两项选定（清单 14 + 备忘录返回微调）：①顶部通知横幅点击展开全文+输入框，不点进 APP 就能回信息；②备忘录列表页左上「文件夹」标签点击退出 APP 回手机主页面，大标题（全部备忘录等）不再承担退出
+
+Work Log:
+- [调研] 各端发送链路深耦合组件态（wechat send 读 input state/runAiTurnRef/wxSessionMsgsMap），挂载中的 ChatView 有整存落盘 effect（saveMsgs(peer.id, msgs) on [msgs]）——外部直写 kv 会被覆盖，故快捷回复只服务「目标会话未挂载」场景（isProactiveChatActive 闸门，正被查看时面板只展开不供输入框，屏幕下方本就是聊天输入框）；AI 回复生成/投递复用主动消息管线同源件（persona/memChatRecall/buildMomentsChatBlock/buildCrossAppBlock/buildDynamicStateBlocks/time-aware/scheduleAiDelivery/memAfterAiTurn/pushChatNotification），零侵入 proactive-msg.ts
+- [Task 1·横幅展开回复] IslandNotification.tsx 重做点击行为：聊天类（微信/QQ/信息）点击 → 卡片原地展开面板（全文块 max-h-44 滚动 + 输入框 + 圆形发送键 + 进入聊天/小窗打开）；美团/淘宝订单通知保持点击直达；群聊/小助手（信息端 target 无 contactId）/订单目标只展开不供输入；锁屏/熄屏点击只收起（与通知点击锁屏口径一致）；面板展开冻结自动收起计时 + 点卡片外收起；v73.4 的 wechat 单聊菜单并入面板（进入聊天/小窗打开两键）；发送成功 900ms 展示「已发送」状态行后收起让位（带通知 id 校验防误收下一条）；失败文案分流（busy=对方正在回复/blocked=被拉黑/fail=发送失败）
+- [Task 1·island-reply.ts 新模块] sendIslandReply：①用户消息按三端 ChatView send() 同构形态落盘（wx 带 unread、sms role=user、kv 键 wx-chat-msgs:/qq-chat-msgs:/ios-chat-msgs:c:，上限 200/200/100）→ 立即返回 'sent'；②后台按会话串行队列（genTails）生成：LLM 调用三级策略（isPrivateApiUrl → directChatStream 浏览器直连优先 / 公网 → /api/chat 代理 + directOnly 标记落 directChatStream / 空回包 → forceSdk 兜底——与三端聊天 runAiTurn 同策略；主动消息 callLlmTwoTier 只走代理是它的既有边界，本模块补齐直连）；清洗与主动消息同口径（extractThinkBlocks/剥引号/剥列表前缀/按行拆条去重/上限 6 条）；③deliverReply：scheduleAiDelivery 逐条落盘+pushChatNotification（AI 回复照常逐条弹横幅）+未读角标（isProactiveChatActive 闸）+memAfterAiTurn 记忆管线（scene=通知横幅快捷回复）
+- [Task 1·island-notify.ts] IslandNotification +fullBody 字段（FULL_BODY_MAX=500）：横幅预览仍截 80 字，展开面板展示未截文本（notifyPreviewText 占位类如[图片]天然等长）；dev-only 测试钩子 __islandNotifyTest.push（NODE_ENV 闸，走真实 pushChatNotification 入口）与 __islandReplyDebug.lastError（生成失败留痕，E2E 排查）
+- [Task 2·备忘录] notes-pages.tsx ListPage：左上「文件夹」GoldNavButton 点击 → onExitHome()（v1.9.6 的大标题点击退出迁移到此标签；批量选择中先 exitSelect 停留页内）；大标题 onTitleClick 移除（disabled 按钮，FoldersPage 同款惰性模式）；onBackToFolders prop 删除（AppWindow 退出即卸载，重开 APP 自然回文件夹根页）；notes.tsx 同步去掉 onBackToFolders 接线；编辑器左上「< 备忘录」保持 v1.9.6 退出口径不动
+- [版本] app-version.ts 1.9.7/27 + 发版说明 2 条；APK 不重打（无原生改动，网页 bundle 更新即生效）
+- [验证·E2E mock-llm 3032] 播种联系人 e2e-xiaoling(char)+apiConfig→mock；__islandNotifyTest.push 长文本通知 → 主屏横幅两行预览+省略号 ✓ → 点击 → 面板全文块(99字全显)+输入框+发送键+进入聊天 ✓ → 输入「嗯嗯我在的，你吃午饭了吗」发送 → kv ios-chat-msgs:c:e2e-xiaoling 落 user 消息 ✓ → 数秒后 AI 回复经 scheduleAiDelivery 落 assistant 消息+横幅 ✓ → 面板「进入聊天」→ 信息 APP 直开小灵会话，蓝灰气泡与已送达状态齐全 ✓；期间修 E2E 发现的两处真问题：/api/chat 对内网 baseUrl 返回 502+directOnly（服务端不代理本机地址）→ 补 directChatStream 直连兜底；island-reply 同名重复 import 编译错 → 去重；最终 bundle 复验：发送→落盘→回复 err=null ✓
+- [验证·备忘录] 打开 APP→全部备忘录：大标题 disabled（titleDisabled=true）点击不退出（notesStillOpen=true）✓；点「文件夹」标签 → APP 退出回主屏（dialog 消失+主屏可见）✓；解锁手势配方（x=195 y=700→380 PointerEvent touch 序列派发到 elementFromPoint 元素——React 合成事件依赖冒泡，派发到 shell 父级无效）
+- [边界] 挂载中的会话不供横幅输入（防 ChatView 整存覆盖丢数据）；生成期间再发消息按会话串行排队不重叠；会话 busy（流式/投递中）时用户消息照落盘但不开新回复轮（防双回复）；群聊/小助手/订单无输入框只展开；横幅 key=通知 id，新通知顶替时面板态重置（输入中被打断为既有语义可接受）；mock-llm 回显式回复内容为 E2E 工具产物非真实模型输出
+- [console] 全新加载零报错（历史缓冲中的 shizuku HMR/重复 import/嵌套 button 均为旧条目）；tsc 全库 0 错误；eslint 六改动文件 0 新增
+
+Stage Summary:
+- 通知横幅从「点击即跳转」升级为「点击展开全文 + 输入框直接回消息」：微信/QQ/信息单聊不进 APP 就能回，AI 回复照常逐条弹横幅；群聊/小助手/订单展开看全文+进入聊天
+- 备忘录返回语义按机主要求收敛：左上「文件夹」标签=退出 APP 回手机主页面，大标题（全部备忘录等）不再响应点击
+- 关键文件：island-reply.ts（新建）、IslandNotification.tsx（展开面板）、island-notify.ts（fullBody+测试钩子）、notes-pages.tsx/notes.tsx（标签退出迁移）、app-version.ts（1.9.7/27）

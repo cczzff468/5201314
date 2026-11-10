@@ -11,9 +11,9 @@
  */
 
 /** 当前最新版本（与 android-shell versionName 保持一致） */
-export const APP_VERSION = '1.9.6';
+export const APP_VERSION = '1.9.7';
 /** 版本号数字（与 android-shell versionCode 保持一致；覆盖安装要求只增不减） */
-export const APP_VERSION_CODE = 26;
+export const APP_VERSION_CODE = 27;
 
 export interface AppReleaseNote {
   version: string;
@@ -24,6 +24,14 @@ export interface AppReleaseNote {
 
 /** 版本历史（新→旧；设置 › APP 更新 页渲染，最新一条即当前版本） */
 export const APP_RELEASE_NOTES: AppReleaseNote[] = [
+  {
+    version: '1.9.7',
+    date: '2026-11-10',
+    items: [
+      '通知横幅能直接回消息：顶部横幅点击展开全文 + 输入框，不点进 APP 就能回信息（微信/QQ/信息单聊），发送后 AI 回复照常逐条弹横幅；群聊/小助手/订单通知展开看全文 + 进入聊天',
+      '备忘录：左上「文件夹」标签点击退出 APP 回手机主页面；顶部大标题（全部备忘录等）不再响应点击',
+    ],
+  },
   {
     version: '1.9.6',
     date: '2026-11-10',

@@ -84,6 +84,9 @@ export interface IslandNotification {
   title: string;
   subtitle: string;
   body: string;
+  /** v1.9.7 横幅点击展开全文：未截 80 字预览前的较完整文本（500 字保护上限）；
+   *  缺省（旧构造/非聊天通知）回退展示 body */
+  fullBody: string;
   /** 合并条数（同一会话连续多条 > 1 时展示） */
   count: number;
   target: NotifyTarget;
@@ -106,6 +109,8 @@ interface IslandNotifyState {
 
 /** 弹窗停留时长（需求：显示时长可控，默认 3 秒后自动收起；点击可立即收起） */
 export const AUTO_DISMISS_MS = 3000;
+/** v1.9.7 横幅展开全文的字符保护上限（正文超长时展开也只看到前 500 字，完整内容进聊天看） */
+const FULL_BODY_MAX = 500;
 /** 不同会话排队上限（超出丢最旧，防刷屏） */
 const MAX_QUEUE = 4;
 /** 通知正文最大字符数 */
@@ -190,6 +195,17 @@ if (typeof window !== 'undefined') {
       if (st.current && !st.exiting) armAutoDismiss();
     }
   });
+
+  // 测试钩子（仅 dev）：E2E / 手工验证注入口 —— window.__islandNotifyTest.push(通知输入)
+  // （与 notification-center 的 __ncTest 同模式；直接走真实 pushChatNotification 入口，
+  //  生产构建被 NODE_ENV 闸挡掉，零泄漏）
+  if (process.env.NODE_ENV !== 'production') {
+    const w = window as unknown as { __islandNotifyTest?: { push: typeof pushChatNotification; state: () => unknown } };
+    w.__islandNotifyTest = {
+      push: (input) => pushChatNotification(input),
+      state: () => useIslandNotify.getState(),
+    };
+  }
 }
 
 // ---------------- 推送入口（各聊天端 finalize 调用） ----------------
@@ -248,6 +264,7 @@ export function pushChatNotification(input: ChatNotifyInput): void {
     title: input.title,
     subtitle: input.subtitle ?? '',
     body,
+    fullBody: truncateBody(input.body, FULL_BODY_MAX),
     count: 1,
     target: input.target,
   };

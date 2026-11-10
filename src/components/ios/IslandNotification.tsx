@@ -8,10 +8,12 @@
  *   内容在卡片基本展开后淡入，形变过程无重排闪烁；
  * - 收起：内容先淡出，卡片缩回胶囊几何，动画完成后由 finishExit 恢复灵动岛 / 展示队列下一条
  *   （收起期间灵动岛保持隐藏，缩回终点与静态灵动岛同位同色，交接无缝）；
- * - 3 秒自动收起（计时在页面不可见/熄屏时冻结）；点击立即收起并跳转对应聊天。
- *   v73.4：微信单聊通知点击改为弹出选择菜单（进入全屏 / 小窗打开）——灵动岛卡向下长出
- *   两枚按钮；菜单期间冻结自动收起，点卡片外/再点卡片本体收回；其余目标（QQ/群聊/信息/
- *   美团/淘宝）小窗不支持，点击仍直接进全屏。
+ * - 3 秒自动收起（计时在页面不可见/熄屏时冻结）。
+ *   v1.9.7 点击行为重做：聊天类通知（微信/QQ/信息）点击 → 卡片原地展开「全文 + 快捷回复」面板
+ *   （输入框直接回信息，不点进 APP——回完 AI 回复照常逐条弹横幅）；美团/淘宝订单通知保持
+ *   点击直达。面板底部带「进入聊天」（微信单聊另有「小窗打开」）；群聊/小助手/订单目标
+ *   只展开全文不提供输入框。
+ *   锁屏/熄屏时点击只收起不展开（快捷回复需要解锁后进行，与通知点击跳转的锁屏口径一致）。
  *
  * 层级 z-[93]：高于锁屏/切换器/闹钟/状态栏，仅低于熄屏黑遮罩（熄屏=屏幕关了，不看）。
  * v1.9.5：卡片带 data-agent-ui 标记——通知卡展示的 3 秒内不算 Agent 眼里的遮挡
@@ -27,7 +29,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { motion, type Transition } from 'framer-motion';
-import { MessageCircle, PictureInPicture2 } from 'lucide-react';
+import { ArrowUp, MessageCircle, PictureInPicture2 } from 'lucide-react';
 import {
   activateCurrentNotification,
   armAutoDismiss,
@@ -38,6 +40,14 @@ import {
   type NotifyApp,
 } from '@/lib/ios/island-notify';
 import { openChatFloat } from '@/lib/ios/chat-float-store';
+import {
+  isReplyableNotifyTarget,
+  isReplyTargetChatActive,
+  mapNotifyAppToChatApp,
+  sendIslandReply,
+  type IslandReplyResult,
+} from '@/lib/ios/island-reply';
+import { playNotifySound } from '@/lib/ios/notify-sound';
 import { useGlobalCall } from '@/lib/ios/global-call';
 import { useIncomingCall } from '@/lib/ios/incoming-call';
 import { selectResolvedTheme, useSettings, useSystemDark, useUI } from '@/lib/ios/store';
@@ -78,47 +88,100 @@ function useIncomingCallPresenting(): boolean {
   return false;
 }
 
+/** 快捷回复结果 → 面板状态行文案 */
+function replyStatusText(state: IslandReplyResult | 'sending'): string {
+  switch (state) {
+    case 'sending':
+      return '发送中…';
+    case 'sent':
+      return '已发送，等 TA 回复';
+    case 'busy':
+      return 'TA 正在回复，稍后再试';
+    case 'blocked':
+      return '对方已将你拉黑，无法发送';
+    case 'fail':
+      return '发送失败，请进聊天重试';
+  }
+}
+
 function NotifyCard({ held }: { held: boolean }) {
   const current = useIslandNotify((s) => s.current)!;
   const exiting = useIslandNotify((s) => s.exiting);
-  // v73.4 点击选择菜单：微信单聊可开小窗 → 点卡片弹菜单；其余目标直接进全屏（原行为）
+  // v1.9.7 点击展开面板：聊天类通知（微信/QQ/信息）点击 → 全文 + 快捷回复输入框；
+  // 美团/淘宝订单通知保持点击直达。微信单聊面板底部另有「小窗打开」。
   const canFloat = current.app === 'wechat' && !!current.target.contactId && !current.target.groupId;
-  const [menuOpen, setMenuOpen] = useState(false);
+  const chatApp = mapNotifyAppToChatApp(current.target.app);
+  const replyable = isReplyableNotifyTarget(current.target) && !isReplyTargetChatActive(current.target);
+  const [panelOpen, setPanelOpen] = useState(false);
+  const [replyText, setReplyText] = useState('');
+  const [replyState, setReplyState] = useState<IslandReplyResult | 'sending' | 'idle'>('idle');
   const cardRef = useRef<HTMLDivElement>(null);
   // 跟随手机主题（浅色=浅色磨砂卡片深色文字；深色=纯黑卡片白字），auto 跟随系统
   const themeMode = useSettings((s) => s.theme);
   const systemDark = useSystemDark();
   const dark = selectResolvedTheme(themeMode, systemDark) === 'dark';
   // 熄屏/来电暂缓期间冻结自动收起，唤醒（熄屏）/来电层消失（暂缓解除）后续期（与页面不可见冻结同策略）
-  // 菜单展开期间同样冻结：用户正在选择，不能让卡片自己溜走
+  // 面板展开期间同样冻结：用户正在看全文/回信息，不能让卡片自己溜走
   const screenOff = useUI((s) => s.screenOff);
   useEffect(() => {
-    if (screenOff || held || exiting || menuOpen) {
+    if (screenOff || held || exiting || panelOpen) {
       clearAutoDismiss();
     } else {
       armAutoDismiss();
     }
     return clearAutoDismiss;
-  }, [screenOff, held, exiting, menuOpen, current]);
+  }, [screenOff, held, exiting, panelOpen, current]);
 
-  // 菜单展开时点卡片外 → 收起菜单（选择层不能变成无法关闭的常驻）
+  // 面板展开时点卡片外 → 收起面板（展开层不能变成无法关闭的常驻）
   useEffect(() => {
-    if (!menuOpen) return;
+    if (!panelOpen) return;
     const onDocPointerDown = (e: PointerEvent) => {
-      if (cardRef.current && !cardRef.current.contains(e.target as Node)) setMenuOpen(false);
+      if (cardRef.current && !cardRef.current.contains(e.target as Node)) setPanelOpen(false);
     };
     document.addEventListener('pointerdown', onDocPointerDown, true);
     return () => document.removeEventListener('pointerdown', onDocPointerDown, true);
-  }, [menuOpen]);
+  }, [panelOpen]);
 
   const onCardClick = () => {
     if (exiting) return;
-    if (!canFloat) {
+    // 锁屏/熄屏：快捷回复与跳转都不做，只收起（与原通知点击锁屏口径一致）
+    const ui = useUI.getState();
+    if (ui.locked || ui.screenOff) {
+      useIslandNotify.getState().beginExit();
+      return;
+    }
+    // 订单类通知（美团/淘宝）：没有「回信息」语义，点击直达（原行为）
+    if (!chatApp) {
       activateCurrentNotification();
       return;
     }
-    setMenuOpen((v) => !v);
+    setPanelOpen((v) => !v);
   };
+
+  const sendReply = async () => {
+    const text = replyText.trim();
+    if (!text || replyState === 'sending') return;
+    setReplyState('sending');
+    try {
+      const res = await sendIslandReply(current.target, text);
+      setReplyState(res);
+      if (res === 'sent') {
+        setReplyText('');
+        playNotifySound('send');
+        // 已发送短停一下让用户看到状态行，再收起让位（AI 回复随后逐条弹横幅）；
+        // 收起前校验：若队列已推进到下一条通知（id 变了）则不动它
+        const nid = current.id;
+        window.setTimeout(() => {
+          const st = useIslandNotify.getState();
+          if (st.current?.id === nid && !st.exiting) st.beginExit();
+        }, 900);
+      }
+    } catch {
+      setReplyState('fail');
+    }
+  };
+
+  const statusText = replyState === 'idle' ? null : replyStatusText(replyState);
 
   return (
     <motion.div
@@ -128,7 +191,7 @@ function NotifyCard({ held }: { held: boolean }) {
       data-agent-ui=""
       role="button"
       aria-label={`${APP_NAME[current.app]}通知：${current.title} ${current.body}`}
-      aria-expanded={canFloat ? menuOpen : undefined}
+      aria-expanded={chatApp ? panelOpen : undefined}
       initial={{ ...PILL, backgroundColor: CARD_BG_DARK }}
       animate={{
         ...(exiting ? PILL : EXPANDED),
@@ -196,50 +259,135 @@ function NotifyCard({ held }: { held: boolean }) {
               </span>
             ) : null}
           </div>
-          <div className={`mt-0.5 line-clamp-2 text-[12px] leading-[16px] ${dark ? 'text-white/85' : 'text-black/75'}`}>
+          {/* 面板展开时正文放开两行钳制（展开区另有全文块）；收起态保持两行预览 */}
+          <div
+            className={`mt-0.5 text-[12px] leading-[16px] ${panelOpen ? '' : 'line-clamp-2'} ${
+              dark ? 'text-white/85' : 'text-black/75'
+            }`}
+          >
             {current.body}
           </div>
         </div>
       </motion.div>
 
-      {/* v73.4 点击选择菜单：进入全屏 / 小窗打开（仅微信单聊目标；卡片高度自适应向下长出） */}
-      {menuOpen && !exiting && (
+      {/* v1.9.7 点击展开面板：全文 + 快捷回复输入框 + 进入聊天/小窗打开（卡片高度自适应向下长出） */}
+      {panelOpen && !exiting && (
         <motion.div
-          data-testid="island-notify-menu"
+          data-testid="island-notify-panel"
           initial={{ opacity: 0, y: -4 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.14 }}
-          className="flex gap-2 px-2 pb-2.5"
+          className="px-2 pb-2.5"
           onClick={(e) => e.stopPropagation()}
         >
-          <button
-            type="button"
-            aria-label="进入聊天"
-            data-testid="island-notify-open-full"
-            onClick={() => activateCurrentNotification()}
-            className={`flex flex-1 items-center justify-center gap-1.5 rounded-[14px] py-[7px] text-[12.5px] font-medium active:opacity-55 ${
-              dark ? 'bg-white/12 text-white' : 'bg-black/8 text-black'
+          {/* 全文（未截 80 字预览前的较完整文本；超长部分进聊天看，滚动区防把卡片撑爆屏） */}
+          <div
+            className={`no-scrollbar max-h-44 overflow-y-auto whitespace-pre-wrap break-words rounded-[14px] px-2.5 py-2 text-[12.5px] leading-[18px] ${
+              dark ? 'bg-white/[0.08] text-white/90' : 'bg-black/[0.05] text-black/85'
             }`}
           >
-            <MessageCircle className="h-[15px] w-[15px]" strokeWidth={2.1} />
-            进入聊天
-          </button>
-          <button
-            type="button"
-            aria-label="小窗打开"
-            data-testid="island-notify-open-float"
-            onClick={() => {
-              const cid = current.target.contactId;
-              if (cid) openChatFloat(cid);
-              useIslandNotify.getState().beginExit();
-            }}
-            className={`flex flex-1 items-center justify-center gap-1.5 rounded-[14px] py-[7px] text-[12.5px] font-medium active:opacity-55 ${
-              dark ? 'bg-white/12 text-white' : 'bg-black/8 text-black'
-            }`}
-          >
-            <PictureInPicture2 className="h-[15px] w-[15px]" strokeWidth={2.1} />
-            小窗打开
-          </button>
+            {current.fullBody || current.body}
+          </div>
+
+          {/* 快捷回复输入框（仅三端单聊且会话未被查看时提供） */}
+          {replyable ? (
+            <div className="mt-1.5 flex items-center gap-1.5">
+              <input
+                data-testid="island-notify-reply-input"
+                aria-label={`回复${current.title}`}
+                enterKeyHint="send"
+                value={replyText}
+                onChange={(e) => {
+                  setReplyText(e.target.value);
+                  if (replyState !== 'idle' && replyState !== 'sending') setReplyState('idle');
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
+                    e.preventDefault();
+                    void sendReply();
+                  }
+                }}
+                placeholder={`回复${current.title}…`}
+                className={`h-8 min-w-0 flex-1 rounded-full px-3 text-[12.5px] outline-none transition-colors ${
+                  dark
+                    ? 'bg-white/[0.12] text-white placeholder:text-white/40 focus:bg-white/[0.16]'
+                    : 'bg-black/[0.07] text-black placeholder:text-black/35 focus:bg-black/[0.1]'
+                }`}
+              />
+              <button
+                type="button"
+                aria-label="发送回复"
+                data-testid="island-notify-reply-send"
+                disabled={!replyText.trim() || replyState === 'sending'}
+                onClick={() => void sendReply()}
+                className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-opacity active:opacity-55 ${
+                  replyText.trim() && replyState !== 'sending'
+                    ? dark
+                      ? 'bg-white text-black'
+                      : 'bg-black text-white'
+                    : dark
+                      ? 'bg-white/20 text-white/50'
+                      : 'bg-black/15 text-black/40'
+                }`}
+              >
+                <ArrowUp className="h-4 w-4" strokeWidth={2.6} />
+              </button>
+            </div>
+          ) : null}
+
+          {/* 状态行（发送中/已发送/失败提示） */}
+          {statusText ? (
+            <div
+              data-testid="island-notify-reply-status"
+              className={`mt-1.5 px-1 text-[11px] leading-[15px] ${
+                replyState === 'sent'
+                  ? dark
+                    ? 'text-white/60'
+                    : 'text-black/50'
+                  : replyState === 'sending'
+                    ? dark
+                      ? 'text-white/55'
+                      : 'text-black/45'
+                    : 'text-red-400'
+              }`}
+            >
+              {statusText}
+            </div>
+          ) : null}
+
+          {/* 进入聊天 / 小窗打开 */}
+          <div className="mt-2 flex gap-2">
+            <button
+              type="button"
+              aria-label="进入聊天"
+              data-testid="island-notify-open-full"
+              onClick={() => activateCurrentNotification()}
+              className={`flex flex-1 items-center justify-center gap-1.5 rounded-[14px] py-[7px] text-[12.5px] font-medium active:opacity-55 ${
+                dark ? 'bg-white/12 text-white' : 'bg-black/8 text-black'
+              }`}
+            >
+              <MessageCircle className="h-[15px] w-[15px]" strokeWidth={2.1} />
+              进入聊天
+            </button>
+            {canFloat && (
+              <button
+                type="button"
+                aria-label="小窗打开"
+                data-testid="island-notify-open-float"
+                onClick={() => {
+                  const cid = current.target.contactId;
+                  if (cid) openChatFloat(cid);
+                  useIslandNotify.getState().beginExit();
+                }}
+                className={`flex flex-1 items-center justify-center gap-1.5 rounded-[14px] py-[7px] text-[12.5px] font-medium active:opacity-55 ${
+                  dark ? 'bg-white/12 text-white' : 'bg-black/8 text-black'
+                }`}
+              >
+                <PictureInPicture2 className="h-[15px] w-[15px]" strokeWidth={2.1} />
+                小窗打开
+              </button>
+            )}
+          </div>
         </motion.div>
       )}
     </motion.div>

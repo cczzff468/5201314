@@ -303,7 +303,6 @@ export function ListPage({
   folderName,
   notes,
   folders,
-  onBackToFolders,
   onOpenSearch,
   onOpenNote,
   onNoteActions,
@@ -317,7 +316,6 @@ export function ListPage({
   folderName: string;
   notes: NoteRecord[];
   folders: FolderInfo[];
-  onBackToFolders: () => void;
   onOpenSearch: () => void;
   onOpenNote: (n: NoteRecord) => void;
   onNoteActions: (n: NoteRecord) => void;
@@ -325,8 +323,9 @@ export function ListPage({
   onNewFolder: () => void;
   onMoveSelected: (ids: string[]) => void;
   onDeleteSelected: (ids: string[]) => void;
-  /** v1.9.6：点击页头大标题（「备忘录/全部备忘录」等）→ 退出 APP 回手机主页面；
-   *  批量选择中标题变「已选择 N 条」，不响应（undefined → 按钮禁用） */
+  /** v1.9.7：左上「文件夹」标签点击 → 退出 APP 回手机主页面（v1.9.6 的页头大标题点击退出
+   *  迁移到本标签；大标题「全部备忘录/备忘录/…」不再响应点击）。
+   *  批量选择中标签先退出选择模式（停留在列表页，再点一次才退出主屏） */
   onExitHome?: () => void;
 }) {
   const [selectMode, setSelectMode] = useState(false);
@@ -363,8 +362,13 @@ export function ListPage({
             label="文件夹"
             icon={<ChevronRight className="h-[18px] w-[18px] rotate-180" strokeWidth={2.4} />}
             onClick={() => {
-              if (selectMode) exitSelect();
-              onBackToFolders();
+              if (selectMode) {
+                exitSelect();
+                return;
+              }
+              // v1.9.7：「文件夹」标签 = 退出 APP 回手机主页面（文件夹页在 APP 重开时自然回到，
+              // AppWindow 退出即卸载、页面状态重置）
+              onExitHome?.();
             }}
           />
         }
@@ -379,7 +383,6 @@ export function ListPage({
           )
         }
         title={selectMode ? `已选择 ${selIds.size} 条` : folderName}
-        onTitleClick={selectMode ? undefined : onExitHome}
       >
         <div className="px-4 pb-[130px]">
           <div className="mt-1">

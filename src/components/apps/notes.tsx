@@ -202,7 +202,8 @@ export default function NotesApp() {
     useUI.getState().exitForegroundApp();
   }
 
-  /** v1.9.6：列表页页头大标题（「备忘录/全部备忘录」等）点击 → 退出 APP 回手机主页面 */
+  /** v1.9.7：列表页左上「文件夹」标签点击 → 退出 APP 回手机主页面。
+   *  （v1.9.6 是页头大标题点击退出，机主要求迁移到「文件夹」标签；大标题不再响应点击） */
   function exitToPhoneHome() {
     useUI.getState().exitForegroundApp();
   }
@@ -397,7 +398,6 @@ export default function NotesApp() {
               folderName={folderNameOf(folderId, folders)}
               notes={loaded ? filtered : []}
               folders={folders}
-              onBackToFolders={() => setPage({ kind: 'folders' })}
               onOpenSearch={() => openSearchFrom(folderId)}
               onOpenNote={openNote}
               onNoteActions={(n) => setActionsNote(n)}
