@@ -2569,3 +2569,19 @@ Work Log:
 
 Stage Summary:
 - v1.9.14 已提交：三页图标外框方形圆角全删、AI 动手/语音唤起逐行专属黑白图标、悬浮球简约毛玻璃化，E2E 全通过
+
+---
+Task ID: 22
+Agent: 主控 Agent（Z.ai Code）
+Task: v1.9.15 AI 回复条数加量轮——默认 8 条、每次回复 3~8 条、话多放开/话少人设豁免
+
+Work Log:
+- reply-count.ts：DEFAULT_REPLY_COUNT 5→8（机主「每次回复 3~8 个消息」）；REPLY_COUNT_OPTIONS [1,3,5,7,...]→[1,3,5,8,15,20,25,30]（7→8 档位替换，旧存值 7 自动回落新默认）；replyMinTarget 公式 floor(N×0.8)→max(3, floor(N×0.4))（8→3、15→6、30→12，N=1 单条模式不变）；buildReplyCountPrompt 私聊文案重写：「本次发 3~8 条，往多了发，目标接近 8 条」+「3 条是下限：绝大多数回复都要发够，绝不许一条消息就结束回复」+ 话少豁免改人设层面（只有人设惜字如金才可以少发，不许拿「内容少」当借口，也不许「嗯/哦/在」敷衍收尾）+「话多放开连发可超 8 条」；群聊文案常规下限抬到 2 条（硬上限 min(N,5) 防刷屏不变）
+- prompt-entries.ts：reply-count / reply-count-group 内置条目静态内容同步（tokens 新增 min 占位符），预设库展示与实际注入一致
+- chat-settings.tsx：回复条数页脚说明补「话少的角色可以少发，话多的角色会放开连发」；phone.tsx / chat.tsx 共 4 处「默认 5 条」注释同步为 8
+- app-version.ts：bump 1.9.15（versionCode 35）+ 2 条更新说明
+- 验证：bun 直跑模块确定性验证（DEFAULT=8、N=8→min=3、注入文案逐行正确、群聊 2~5 条）✅；agent-browser E2E——清 Service Worker 陈旧缓存后「回复条数」行显示 8 条、选择页选项 [1,3,5,8,15,20,25,30] 且 8 条选中态 true✅、更新弹窗正确展示 v1.9.15 两条说明✅；沙箱无上游 AI 配置（/api/chat 502 引导未配置），真实连发条数无法实测，切分管线（v1.9.12 已 E2E）未改动
+- eslint：5 个改动文件——phone.tsx 12 处均为 v1.9.12 前存量 react-hooks 错误（本次仅改 1215 行注释），其余文件零错误
+
+Stage Summary:
+- v1.9.15 已提交：AI 每次回复默认发 3~8 条（往多了发、话多可超），下限 3 条人设豁免制，默认档位 5→8 全端生效，群聊节奏保留

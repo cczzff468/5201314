@@ -1212,7 +1212,7 @@ function CallScreen({
               // #15 多端互通开关（与 chat-call.ts:512 同位路径同源）：续聊也感知跨 App 身份；陌生来电不下发
               multiApp: callerUnknown ? undefined : getMemSettings(peerContact.id).share,
               // 条数上限 = 该联系人「信息」会话聊天设置里的回复条数（sms:c:<id>，与信息 App 同一份数据，
-              // 未设置走全局 DEFAULT_REPLY_COUNT=5）；上限不是任务，没话可以少发
+              // 未设置走全局 DEFAULT_REPLY_COUNT=8）；上限不是任务，实在话少的角色可以少发
               replyCount: getReplyCount(`sms:c:${peerContact.id}`),
               // 机主称呼：只传真名（用户规则：AI 永远不知道机主昵称，userNickname 不再下传）
               userRealName: owner?.realName || undefined,

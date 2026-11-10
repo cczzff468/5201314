@@ -11,9 +11,9 @@
  */
 
 /** 当前最新版本（与 android-shell versionName 保持一致） */
-export const APP_VERSION = '1.9.14';
+export const APP_VERSION = '1.9.15';
 /** 版本号数字（与 android-shell versionCode 保持一致；覆盖安装要求只增不减） */
-export const APP_VERSION_CODE = 34;
+export const APP_VERSION_CODE = 35;
 
 export interface AppReleaseNote {
   version: string;
@@ -24,6 +24,14 @@ export interface AppReleaseNote {
 
 /** 版本历史（新→旧；设置 › APP 更新 页渲染，最新一条即当前版本） */
 export const APP_RELEASE_NOTES: AppReleaseNote[] = [
+  {
+    version: '1.9.15',
+    date: '2026-11-11',
+    items: [
+      'AI 回复条数全面加量：默认从 5 条提到 8 条——每次回复正常发 3~8 条消息（往多了发），话多的角色聊上头可以超过 8 条，只有人设本身惜字如金的角色才可以少发，且不再允许拿「内容少」当借口一条消息就结束回复',
+      '「回复条数」选择页新增 8 条档位（替换原 7 条档），所有聊天（微信/QQ/信息/淘宝客服/群聊等）默认生效，无需逐个重新设置；群聊节奏不变（每位成员每轮最多 5 条，常规 2 条起）',
+    ],
+  },
   {
     version: '1.9.14',
     date: '2026-11-11',

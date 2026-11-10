@@ -515,7 +515,7 @@ async function recordMissedPhoneCall(
       timeBlock: buildSmsTimeBlock({ lastMsgTime: recent.length > 0 ? recent[recent.length - 1].time : null, regionHint: contact.region || null }),
       multiApp: getMemSettings(contact.id).share,
       // 留言条数 = 该联系人在信息聊天设置页选定的回复条数
-      // （未设置默认 5 条，与微信端默认口径一致）。
+      // （未设置默认 8 条，与微信端默认口径一致）。
       replyCount: getReplyCount(`sms:c:${contact.id}`),
       // 机主称呼：只传真名（用户规则：AI 永远不知道机主昵称，userNickname 不再下传）
       userRealName: owner?.realName || undefined,
@@ -1225,7 +1225,7 @@ function ChatView({
   const [translateOpen, setTranslateOpen] = useState(false);
   /** 回复条数选择页（设置页「回复条数」进入的独立二级页，按会话隔离） */
   const [replyCountOpen, setReplyCountOpen] = useState(false);
-  /** 当前会话的回复条数（信息端每会话独立；未设置默认 5 条，与微信端同口径）。
+  /** 当前会话的回复条数（信息端每会话独立；未设置默认 8 条，与微信端同口径）。
    *  会话级 state：ChatView 按 storageKey keyed 重挂载（切换会话先卸旧再挂新），
    *  惰性初始化即完成「切会话重读」，无需 [sessionKey] 同步 effect（react-hooks/set-state-in-effect） */
   const [replyCountValue, setReplyCountValue] = useState(() => getReplyCount(sessionKey));
@@ -1903,7 +1903,7 @@ function ChatView({
 
     // 联系人聊天：人设作为 system 消息插在上下文最前（/api/chat 支持 system 透传）
     // 回复条数：信息端每会话独立设置（信息聊天设置页 → 回复条数，读写 sms:c:<id> 键），
-    // 未设置默认 5 条（与微信端同口径）；AI 助手会话（无 systemPrompt 人设）恒 1 条不变。
+    // 未设置默认 8 条（与微信端同口径）；AI 助手会话（无 systemPrompt 人设）恒 1 条不变。
     const replyCount = systemPrompt ? getReplyCount(sessionKey) : 1;
     // 记忆库：联系人会话召回记忆（memContactId 为组件级常量：storageKey 形如 c:<contactId>；AI 助手会话无联系人 → 不注入）
     const memoryBlock = memContactId
