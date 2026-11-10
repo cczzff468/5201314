@@ -42,14 +42,15 @@ import { getDeliveringSessionKeys, subscribeAiDeliveryActive } from './ai-delive
 
 // ---------------- 常量 ----------------
 
-/** 兜底轮询间隔（收不到 SSE 广播的场景：多实例部署/断线重连空窗） */
-const POLL_MS = 20_000;
-/** 启动延迟（避开首屏挂载高峰；期间到达的接力由首次 peek 捕获） */
-const START_DELAY_MS = 2_500;
-/** 启动后首次 peek 延迟（捕获上次会话遗留的 pending） */
-const FIRST_PEEK_DELAY_MS = 3_000;
-/** bg-pending 事件抖动合并（同一时刻多会话入队只拉一次） */
-const EVENT_DEBOUNCE_MS = 300;
+/** 兜底轮询间隔（收不到 SSE 广播的场景：多实例部署/断线重连空窗；v1.9.10 提速 20s→10s） */
+const POLL_MS = 10_000;
+/** 启动延迟（避开首屏挂载高峰；期间到达的接力由首次 peek 捕获；v1.9.10 提速 2.5s→0.6s） */
+const START_DELAY_MS = 600;
+/** 启动后首次 peek 延迟（捕获上次会话遗留的 pending；v1.9.10 提速 3s→1s，
+ *  重开页面后遗留消息不再等 5.5s 才弹横幅） */
+const FIRST_PEEK_DELAY_MS = 1_000;
+/** bg-pending 事件抖动合并（同一时刻多会话入队只拉一次；v1.9.10 提速 300ms→120ms） */
+const EVENT_DEBOUNCE_MS = 120;
 /** 已弹横幅批次去重持久化键 */
 const SEEN_KEY = 'bg-relay-bannered';
 /** 去重集合上限（超出淘汰最旧；旧条目残留无害——服务端队列被消费后重复键不再出现） */

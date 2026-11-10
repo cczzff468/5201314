@@ -2473,3 +2473,27 @@ Stage Summary:
 - 系统通知点击全面升级：APK 通知栏、浏览器 SW 通知、关页 Web Push、桌面页面构造器四通道，点系统通知一律弹出「全文+输入框」展开面板（锁屏点击解锁后复现），不进会话直接回消息；解析失败自动回退旧行为直达会话
 - AI 连发节奏提速近一半；站内横幅 v1.9.7 行为不变
 - 关键文件：island-notify.ts（注册表+expandSystemNotification+四路接线+意图携带载荷）、IslandNotification.tsx（startExpanded）、sw.js（回传字段+hash 新格式+push target）、notification-center.ts（原生回传 preferExpand）、push-send.ts + /api/chat/bg（推送载荷 target）、ai-delivery.ts（节奏）、app-version.ts（1.9.9/29）
+
+## 2026-11-10 · v96（网页端 v1.9.10）下线横幅展开回复功能 + 通知面板布局调整 + 接力横幅再提速
+
+Task ID: 46
+Agent: 主控 Agent（Z.ai Code）
+Task: 机主四项需求——①通知还是有时慢；②删除「通知横幅点击展开全文+输入框直接回消息」功能；③下拉通知面板语音留言图标改电话图标、全部已读/清空全部移右上角、删除免打扰；④顶部拉手横杠移到底部
+
+Work Log:
+- [下线展开回复] IslandNotification.tsx 整体恢复 v1.9.6 基线（git show c0eb54e 导出覆盖）：点击横幅 → 直达目标会话，微信单聊恢复 v73.4「进入聊天/小窗打开」选择菜单，其余目标（QQ/群聊/信息/订单）点击直达；文件头补 v1.9.10 下线说明。island-reply.ts 整文件删除（快捷回复生成/落盘/投递管线，唯一消费方就是横幅面板）
+- [island-notify.ts] 移除 v1.9.7/v1.9.9 展开复现机制：IslandNotification 接口删 fullBody/startExpanded 字段与 FULL_BODY_MAX 常量；删通知注册表（recentByTag/recentByTarget/rememberNotification/notifyTargetKey）；删 expandSystemNotification 与 SystemNotifyClickInfo；四路点击接线全部改回 navigateFromSystemNotify 直达（桌面构造器 onclick/SW postMessage 监听/开机 hash 消费——兼容 {target} 包装与裸 target 两格式/解锁补跳订阅）；pendingNav 去掉 info 字段；dev 测试钩子删 sysClick（保留 push/state）
+- [notification-center.ts] navigateForItem 删 preferExpand 参数（原生 local-notify-open 回传统一直达）；openCenterItem 注释更新
+- [sw.js] notificationclick 恢复 target-only 回传（postMessage {type:'notify-nav',target} + hash 裸 target 格式）；push 处理器 target 透传保留（点击直达仍需要）
+- [push-send.ts + /api/chat/bg] 注释更新（target 载荷语义改为「点击直达会话」），功能不变
+- [通知面板 NotificationCenter.tsx] ①appMetaOf ai-vm-* 分支 appId recorder→phone（语音留言通知用电话 APP 实体图标）；②底部三钮改右上角两钮（全部已读/清空全部，h-8 紧凑胶囊右对齐），nc-dnd-toggle 删除（useNotifyDnd/setNotifyDnd import 同步移除，设置 › 通知页 DND 开关保留生效）；③拉手横杠从面板顶部移到底部（grabberY 实测 662 ≈ 面板底部），点按收起不变，grabber 上的 🌙 标识随免打扰开关一并移除
+- [接力守望器再提速 bg-relay-watcher.ts] START_DELAY_MS 2500→600、FIRST_PEEK_DELAY_MS 3000→1000（重开页面遗留消息横幅等待 5.5s→约 1.6s）、POLL_MS 20s→10s（断线兜底）、EVENT_DEBOUNCE_MS 300→120
+- [「还慢」的残余根因说明] 在页生成路径已无可削人工延迟（v1.9.9 打字节奏已减半、守望者事件驱动已就位）；剩余延迟主体是 LLM 生成耗时本身（首段落地才弹横幅，真人感设计的固有成本），本版再压缩的是接力/遗留场景的四段机械延迟
+- [版本] app-version.ts 1.9.10/30 + 发版说明 3 条；APK 不重打（无原生改动）
+- [验证·E2E agent-browser 390x844] tsc 全库 0 错误；eslint 八改动文件 0 问题；①横幅注入→点击→直达信息 APP（hadPanel:false/hadReplyInput:false，无展开面板残留）✓；②面板右上角「全部已读/清空全部」、无免打扰钮、底部拉手点按收起（grabberY=662）✓；③语音留言条目=绿色电话图标、agent=渐变星光标 ✓；④全部已读功能回归（未读蓝点 true→false）✓；⑤版本更新弹窗 v1.9.10 如期弹出 ✓；⑥全新加载 console 零报错（仅历史 HMR 陈旧缓冲警告）✓
+
+Stage Summary:
+- 「点击展开全文+输入框直接回消息」全链路下线（横幅面板/系统通知复现面板/island-reply 管线/四路接线），点击通知恢复直达会话
+- 通知面板四项 UI 调整（电话图标/右上角按钮/删免打扰/底部拉手）落地
+- 接力横幅机械延迟再压缩（遗留消息 5.5s→1.6s、兜底轮询 10s、事件响应 120ms）
+- 关键文件：IslandNotification.tsx（v1.9.6 基线恢复）、island-reply.ts（删除）、island-notify.ts（机制移除）、notification-center.ts、sw.js、NotificationCenter.tsx、bg-relay-watcher.ts、push-send.ts、/api/chat/bg、app-version.ts（1.9.10/30）

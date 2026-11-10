@@ -11,9 +11,9 @@
  */
 
 /** 当前最新版本（与 android-shell versionName 保持一致） */
-export const APP_VERSION = '1.9.9';
+export const APP_VERSION = '1.9.10';
 /** 版本号数字（与 android-shell versionCode 保持一致；覆盖安装要求只增不减） */
-export const APP_VERSION_CODE = 29;
+export const APP_VERSION_CODE = 30;
 
 export interface AppReleaseNote {
   version: string;
@@ -24,6 +24,15 @@ export interface AppReleaseNote {
 
 /** 版本历史（新→旧；设置 › APP 更新 页渲染，最新一条即当前版本） */
 export const APP_RELEASE_NOTES: AppReleaseNote[] = [
+  {
+    version: '1.9.10',
+    date: '2026-11-10',
+    items: [
+      '按机主要求下线「通知横幅点击展开全文+输入框直接回消息」：点通知横幅/系统通知恢复为直接进入对应会话（微信单聊恢复「进入聊天/小窗打开」选择菜单）',
+      '通知提速再加一档：关页/刷新后遗留的消息横幅等待从最长 5.5 秒缩短到约 1.6 秒，断线兜底轮询 20 秒→10 秒，广播事件响应 300→120 毫秒',
+      '下拉通知面板：语音留言通知改用电话图标；「全部已读/清空全部」移到面板右上角；免打扰快捷开关移除；顶部拉手横杠移到面板底部',
+    ],
+  },
   {
     version: '1.9.9',
     date: '2026-11-10',

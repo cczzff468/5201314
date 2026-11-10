@@ -23,6 +23,9 @@
  *
  * v1.9.4（用户需求）：① 列表改平铺——组头标签（「AI 助手」等）整行移除，每条通知自带
  * APP 图标/标题/时间/单条清除，信息不重复更简约；② 单条通知保留未读蓝点与全部已读/清空。
+ * v1.9.10（用户需求）：① 语音留言（ai-vm-*）图标改用电话 APP 实体图标；② 「全部已读/
+ * 清空全部」两钮从底部移到面板右上角，免打扰快捷开关删除（设置 › 通知页仍可开关）；
+ * ③ 顶部拉手横杠移到面板底部（点按仍收起面板）。
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -34,10 +37,8 @@ import { shellScale } from '@/lib/ios/shell-scale';
 import { appImage } from '@/components/apps/registry';
 import {
   activateCenterItem,
-  setNotifyDnd,
   unreadCountOf,
   useNotifyCenter,
-  useNotifyDnd,
   type NotificationCenterItem,
 } from '@/lib/ios/notification-center';
 
@@ -112,7 +113,7 @@ function appMetaOf(item: NotificationCenterItem): NcAppMeta {
   } else if (tag.startsWith('ai-vm-')) {
     key = 'voicemail';
     name = '语音留言';
-    appId = 'recorder';
+    appId = 'phone'; // v1.9.10 用户需求：语音留言通知用电话 APP 实体图标（原录音机图标）
     src = undefined;
   } else if (tag.startsWith('couple')) {
     key = 'couple';
@@ -249,10 +250,6 @@ export default function NotificationCenter() {
   // 相对时间的基准：渲染时取当前时间（30s 心跳 tick 只负责触发重渲染刷新展示）
   const [, setTick] = useState(0);
   const now = Date.now();
-
-  // v1.9.2 真 DND 快捷开关：订阅响应式镜像 store（setNotifyDnd 先落盘再同步镜像）——
-  // 设置 › 通知页与面板两个入口天然联动，无需 useState 镜像 + effect 同步
-  const dndOn = useNotifyDnd((s) => s.on);
 
   // v1.9.4 用户需求：组头标签（「AI 助手」等）整体移除，改 iOS 式平铺列表——
   // 每条通知自带 APP 图标/标题/时间，分组头属重复信息；条目本身 ts 倒序直达
@@ -441,17 +438,28 @@ export default function NotificationCenter() {
         style={{ y: contentY, pointerEvents: open ? 'auto' : 'none' }}
         className="absolute inset-x-0 top-0 flex h-[82%] flex-col px-3 pt-[56px]"
       >
-        {/* 拉手（点按收起）；DND 生效时附小 🌙 标识（v1.9.2 可选细节，极简不加新区块） */}
-        <button
-          type="button"
-          aria-label="收起通知中心"
-          data-testid="nc-grabber"
-          onClick={() => useNotifyCenter.getState().closeCenter()}
-          className="pointer-events-auto mx-auto mb-1 flex h-6 min-w-16 shrink-0 items-center justify-center gap-1.5 px-1"
-        >
-          {dndOn && <span aria-label="免打扰开启中" className="text-[11px] leading-none">🌙</span>}
-          <span className="h-[5px] w-[38px] rounded-full bg-white/40" />
-        </button>
+        {/* 顶部操作行（v1.9.10 用户需求：原底部「全部已读/清空全部」上移到右上角；
+            免打扰快捷开关删除——设置 › 通知页开关保留生效） */}
+        <div className="flex shrink-0 items-center justify-end gap-2 pb-2">
+          <button
+            type="button"
+            data-testid="nc-mark-all"
+            disabled={unread === 0}
+            onClick={() => useNotifyCenter.getState().markAllRead()}
+            className="pointer-events-auto h-8 rounded-full bg-white/[0.14] px-4 text-[12.5px] font-medium text-white ring-1 ring-white/[0.08] backdrop-blur-md transition-colors active:bg-white/[0.24] disabled:opacity-40"
+          >
+            全部已读
+          </button>
+          <button
+            type="button"
+            data-testid="nc-clear-all"
+            disabled={items.length === 0}
+            onClick={() => useNotifyCenter.getState().clearAll()}
+            className="pointer-events-auto h-8 rounded-full bg-white/[0.14] px-4 text-[12.5px] font-medium text-white ring-1 ring-white/[0.08] backdrop-blur-md transition-colors active:bg-white/[0.24] disabled:opacity-40"
+          >
+            清空全部
+          </button>
+        </div>
 
         {/* 列表 / 空态 */}
         {items.length === 0 ? (
@@ -467,40 +475,16 @@ export default function NotificationCenter() {
           </div>
         )}
 
-        {/* 底部操作（毛玻璃精修 v1.9.3）：全部已读 / 🌙免打扰（激活蓝色）/ 清空全部 */}
-        <div className="flex shrink-0 gap-2 py-2.5">
-          <button
-            type="button"
-            data-testid="nc-mark-all"
-            disabled={unread === 0}
-            onClick={() => useNotifyCenter.getState().markAllRead()}
-            className="pointer-events-auto h-9 flex-1 rounded-full bg-white/[0.14] text-[13px] font-medium text-white ring-1 ring-white/[0.08] backdrop-blur-md transition-colors active:bg-white/[0.24] disabled:opacity-40"
-          >
-            全部已读
-          </button>
-          <button
-            type="button"
-            data-testid="nc-dnd-toggle"
-            aria-pressed={dndOn}
-            onClick={() => {
-              setNotifyDnd(!dndOn); // 先落盘（唯一真相）再同步镜像，订阅处自动重渲染
-            }}
-            className={`pointer-events-auto h-9 flex-1 rounded-full text-[13px] font-medium text-white backdrop-blur-md transition-colors active:brightness-110 ${
-              dndOn ? 'bg-[#0A84FF]' : 'bg-white/[0.14] ring-1 ring-white/[0.08]'
-            }`}
-          >
-            🌙 免打扰
-          </button>
-          <button
-            type="button"
-            data-testid="nc-clear-all"
-            disabled={items.length === 0}
-            onClick={() => useNotifyCenter.getState().clearAll()}
-            className="pointer-events-auto h-9 flex-1 rounded-full bg-white/[0.14] text-[13px] font-medium text-white ring-1 ring-white/[0.08] backdrop-blur-md transition-colors active:bg-white/[0.24] disabled:opacity-40"
-          >
-            清空全部
-          </button>
-        </div>
+        {/* 底部拉手（v1.9.10 用户需求：原顶部拉手横杠移到面板底部；点按收起面板） */}
+        <button
+          type="button"
+          aria-label="收起通知中心"
+          data-testid="nc-grabber"
+          onClick={() => useNotifyCenter.getState().closeCenter()}
+          className="pointer-events-auto mx-auto mb-1.5 mt-1 flex h-6 shrink-0 items-center justify-center px-1"
+        >
+          <span className="h-[5px] w-[38px] rounded-full bg-white/40" />
+        </button>
       </motion.div>
     </div>
   );

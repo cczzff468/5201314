@@ -178,9 +178,8 @@ function enqueue(sessionKey: string, texts: string[], single: boolean, title: st
     at: item.createdAt,
   });
   // ② Web Push：页面已关/已冻结时的系统通知（带角色头像；发送/失效清理在 push-send 内）
-  // v1.9.9：target（sessionKey 反解的点击跳转目标）随载荷下发 —— 用户点开关页期间的
-  // 推送通知，页面重开后 expandSystemNotification 用载荷 title/body/target 构造已展开
-  // 面板（全文+快捷回复），不再裸开首页
+  // target（sessionKey 反解的点击跳转目标）随载荷下发 —— 用户点开关页期间的
+  // 推送通知，页面重开后直达对应会话，不再裸开首页
   const relayTarget = relayTargetOf(sessionKey);
   void pushToAllSubscribers(
     {

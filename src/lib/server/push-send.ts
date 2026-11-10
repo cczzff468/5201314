@@ -18,9 +18,9 @@ export interface PushEnvelope {
   icon?: string;
   /** 通知点击落地页（缺省 '/'，由 sw.js notificationclick 聚焦/新开窗口） */
   url?: string;
-  /** v1.9.9：点击跳转目标（NotifyTarget 同构纯对象）——随载荷下发 → sw.js push 处理器
-   *  透传进通知 data → notificationclick 回传页面 → expandSystemNotification 展开面板复现
-   *  （关页期间 Web Push 点开也能展开全文+快捷回复，不再裸开首页） */
+  /** 点击跳转目标（NotifyTarget 同构纯对象）——随载荷下发 → sw.js push 处理器
+   *  透传进通知 data → notificationclick 回传页面直达目标会话
+   *  （关页期间 Web Push 点开也能跳进对应聊天，不再裸开首页） */
   target?: unknown;
   /**
    * 排除发起设备自己的订阅（C2）：按订阅存储里的 tag 字段（/api/push POST 时客户端上报的
