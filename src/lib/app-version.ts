@@ -11,9 +11,9 @@
  */
 
 /** 当前最新版本（与 android-shell versionName 保持一致） */
-export const APP_VERSION = '1.9.13';
+export const APP_VERSION = '1.9.14';
 /** 版本号数字（与 android-shell versionCode 保持一致；覆盖安装要求只增不减） */
-export const APP_VERSION_CODE = 33;
+export const APP_VERSION_CODE = 34;
 
 export interface AppReleaseNote {
   version: string;
@@ -24,6 +24,14 @@ export interface AppReleaseNote {
 
 /** 版本历史（新→旧；设置 › APP 更新 页渲染，最新一条即当前版本） */
 export const APP_RELEASE_NOTES: AppReleaseNote[] = [
+  {
+    version: '1.9.14',
+    date: '2026-11-11',
+    items: [
+      '默认预设 / AI 动手 / 语音唤起智能体三个界面：图标外框方形圆角全部删除，只留黑白细线裸图标（AI 动手每项能力、语音唤起每行设置都配上了专属黑白线条图标）',
+      '麦克风悬浮球改简约毛玻璃风：单层半透黑磨砂玻璃 + 细白描边 + 白细线麦克风，去掉多层渐变/高光堆叠，监听呼吸光环简化为单圈',
+    ],
+  },
   {
     version: '1.9.13',
     date: '2026-11-11',

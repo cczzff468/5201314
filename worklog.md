@@ -2553,3 +2553,19 @@ Work Log:
 
 Stage Summary:
 - v1.9.13 已提交并推送 origin/main；三页黑白线条图标 + 两页卡片延伸 + 默认预设排序调整 + 人设自定义与机主称呼全链路（设置 UI → localStorage → 语音会话 system prompt）+ 悬浮球美化全部落地
+
+---
+Task ID: 21
+Agent: 主控 Agent（Z.ai Code）
+Task: v1.9.14 图标裸化轮——三页黑白图标去外框方形圆角 + AI 动手/语音唤起逐行配专属图标 + 悬浮球改简约毛玻璃
+
+Work Log:
+- settings.tsx：LineIcon 删除外框（v1.9.13 的 rounded-[8px]+ring-1 中性框整圈去掉），改纯裸图标（20px 前景色细线 + 不可见槽位对齐）；AI 动手页 19 项能力行新增专属黑白线条图标（AUTONOMY_CAP_ICONS 映射：点按 MousePointerClick/滑动 Hand/输入 Keyboard/按键 Command/打开 AppWindow/多步任务 Bot/应用列表 LayoutGrid/音量 Volume2/强杀 XCircle/冻结 Snowflake/卸载 Trash2/网络 Wifi/看屏幕 Camera/前台 Layers/通知 Bell/电量 BatteryCharging/剪贴板 ClipboardList/短信 MessageSquare/通话 PhoneIncoming）；语音唤起智能体页逐行配图标（说明 Sparkles/专属人设 Fingerprint/唤醒名 Mic/TA 怎么称呼你 Smile/助手音色 AudioLines/悬浮球 CircleDot/连续监听 Ear/播报 Volume2/追问窗口 MessagesSquare/连续对话 Repeat）
+- settings-preset-library.tsx：AppIcon 删除外框方形圆角（rounded-[8px]+ring-1 去掉），改 20px 黑白裸图标（strokeWidth 1.7），默认预设页 18 个 App 行全部裸化
+- agent-voice-ball.tsx：悬浮球改简约毛玻璃——删掉 v1.9.13 渐变描边圈/双层内高光/径向反光三层堆叠，收敛为单层（bg-black/35 + backdrop-blur-2xl + ring-white/35 + 柔和落影 + 顶缘一线内光）；白细线麦克风 strokeWidth 1.8；监听呼吸光环双层→单圈
+- app-version.ts：bump 1.9.14（versionCode 34）+ 2 条更新说明
+- E2E（agent-browser 390×844）：解锁→设置→语音唤起智能体页逐行裸图标✅；AI 动手页主开关 ScanEye + 19 项能力专属图标全部渲染（DOM 验证 lucide-mouse-pointer-click h-20 无外框）✅；默认预设页 18 App 行裸图标 + 微信面板展开正常✅；更新弹窗正确显示 v1.9.14 与两条说明✅；悬浮球放大截图：浅色背景上毛玻璃透出模糊（卡片边缘透镜可见）+ 细白描边 + 白麦克风✅
+- eslint：settings.tsx 仅 3 处 set-state-in-effect 存量错误（v1.9.12 前已有，行号偏移所致），本次零新增；其余文件零错误
+
+Stage Summary:
+- v1.9.14 已提交：三页图标外框方形圆角全删、AI 动手/语音唤起逐行专属黑白图标、悬浮球简约毛玻璃化，E2E 全通过

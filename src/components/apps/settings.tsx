@@ -4,12 +4,15 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ChangeEvent, ReactNode } from 'react';
 import {
   AlertCircle,
+  AppWindow,
   ArrowDownLeft,
   ArrowUpRight,
   AudioLines,
+  BatteryCharging,
   Bell,
   BellOff,
   Bluetooth,
+  Bot,
   Camera,
   Check,
   CheckCircle2,
@@ -17,31 +20,46 @@ import {
   ChevronLeft,
   ChevronRight,
   ChevronsUpDown,
+  CircleDot,
+  ClipboardList,
+  Command,
   Database,
   Download,
+  Ear,
   Eye,
   EyeOff,
+  Fingerprint,
+  Hand,
   Heart,
   Image as ImageIcon,
   ImagePlus,
   Info,
+  Keyboard,
+  Layers,
+  LayoutGrid,
   Loader2,
   Lock,
+  MessageSquare,
   MessageSquareText,
+  MessagesSquare,
   Mic,
   Minus,
   Monitor,
   Moon,
-  Plane,
+  MousePointerClick,
+  PanelTop,
   PenLine,
+  PhoneIncoming,
+  Plane,
   Plus,
   RefreshCw,
-  Layers,
-  PanelTop,
+  Repeat,
   ScanEye,
   ScanFace,
   SlidersHorizontal,
   Smartphone,
+  Smile,
+  Snowflake,
   Sparkles,
   Star,
   Sun,
@@ -55,6 +73,7 @@ import {
   Wifi,
   Wrench,
   X,
+  XCircle,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { IOSBackButton, IOSNavBar, IOSScreen } from '@/components/ios/IOSNavBar';
@@ -289,13 +308,14 @@ function RowIcon({ icon: Icon, tone }: { icon: LucideIcon; tone: string }) {
 }
 
 /**
- * 黑白线条行图标（v1.9.13：默认预设 / AI 动手 / 语音唤起智能体页专用）：
- * 无底色方块，细描边中性框 + 前景色细线条图标（黑白线条风，机主要求）
+ * 黑白线条行图标（v1.9.14：默认预设 / AI 动手 / 语音唤起智能体页专用）：
+ * 裸图标——外框方形圆角已按机主要求删除（v1.9.13 的细描边中性框不要了），
+ * 只留前景色细线条黑白图标，对齐用不可见槽位保行高一致
  */
 function LineIcon({ icon: Icon }: { icon: LucideIcon }) {
   return (
-    <span className="flex h-[30px] w-[30px] shrink-0 items-center justify-center rounded-[8px] ring-1 ring-foreground/15 dark:ring-white/20">
-      <Icon className="h-[17px] w-[17px] text-foreground/85 dark:text-white/85" strokeWidth={1.8} />
+    <span className="flex h-[30px] w-[24px] shrink-0 items-center justify-center">
+      <Icon className="h-[20px] w-[20px] text-foreground/85 dark:text-white/85" strokeWidth={1.8} />
     </span>
   );
 }
@@ -923,7 +943,30 @@ function AutonomySwitch({ on, onToggle, label, testId }: { on: boolean; onToggle
   );
 }
 
-/** 能力开关行：名称 + 一句话说明 + 大开关（危险项名称带红色「危险」角标） */
+/** v1.9.14：能力行黑白线条裸图标（每项一个语义图标，美化 AI 动手页；无外框） */
+const AUTONOMY_CAP_ICONS: Record<string, LucideIcon> = {
+  tap: MousePointerClick,
+  swipe: Hand,
+  type: Keyboard,
+  key: Command,
+  open: AppWindow,
+  agent: Bot,
+  applist: LayoutGrid,
+  volume: Volume2,
+  kill: XCircle,
+  freeze: Snowflake,
+  uninstall: Trash2,
+  net: Wifi,
+  screencap: Camera,
+  foreground: Layers,
+  notify: Bell,
+  battery: BatteryCharging,
+  clipboard: ClipboardList,
+  sms: MessageSquare,
+  calls: PhoneIncoming,
+};
+
+/** 能力开关行：黑白线条图标 + 名称 + 一句话说明 + 大开关（危险项名称带红色「危险」角标） */
 function AutonomyCapRow({
   cap,
   on,
@@ -935,6 +978,7 @@ function AutonomyCapRow({
 }) {
   return (
     <div className="flex min-h-[52px] items-center gap-3 px-4 py-2">
+      <LineIcon icon={AUTONOMY_CAP_ICONS[cap.key] ?? Wrench} />
       <span className="min-w-0 flex-1">
         <span className="flex items-center gap-1.5">
           <span className="truncate text-[16px]">{cap.label}</span>
@@ -1120,7 +1164,7 @@ function AgentVoiceCard() {
       >
         {/* 一行说明 */}
         <div className="flex items-start gap-3 px-4 pt-3">
-          <LineIcon icon={Mic} />
+          <LineIcon icon={Sparkles} />
           <p className="min-w-0 flex-1 pb-1 text-[11.5px] leading-relaxed text-muted-foreground">
             喊唤醒名或点悬浮球唤起：能闲聊会陪唠、有自己的性格，也能动手帮你操作手机（像小爱同学/Siri）
           </p>
@@ -1135,6 +1179,7 @@ function AgentVoiceCard() {
               aria-expanded={personaOpen}
               data-testid="agent-voice-persona-row"
             >
+              <LineIcon icon={Fingerprint} />
               <span className="min-w-0 flex-1">
                 <span className="block truncate text-[16px]">专属人设</span>
                 <span className="mt-0.5 block truncate text-[11.5px] text-muted-foreground">
@@ -1207,6 +1252,7 @@ function AgentVoiceCard() {
           </div>
           {/* 唤醒名 */}
           <div className="flex min-h-[52px] items-center gap-3 px-4 py-2">
+            <LineIcon icon={Mic} />
             <span className="min-w-0 flex-1">
               <span className="block truncate text-[16px]">唤醒名</span>
               <span className="mt-0.5 block truncate text-[11.5px] text-muted-foreground">喊出即唤起，也是 TA 的名字（≤6 字）</span>
@@ -1225,6 +1271,7 @@ function AgentVoiceCard() {
           </div>
           {/* v1.9.13 机主称呼（「你希望 TA 叫你什么」）：有值时 TA 会这样叫你；留空沿用联系人机主名 */}
           <div className="flex min-h-[52px] items-center gap-3 px-4 py-2">
+            <LineIcon icon={Smile} />
             <span className="min-w-0 flex-1">
               <span className="block truncate text-[16px]">TA 怎么称呼你</span>
               <span className="mt-0.5 block truncate text-[11.5px] text-muted-foreground">
@@ -1252,6 +1299,7 @@ function AgentVoiceCard() {
               aria-expanded={voiceOpen}
               data-testid="agent-voice-voice-row"
             >
+              <LineIcon icon={AudioLines} />
               <span className="min-w-0 flex-1">
                 <span className="block truncate text-[16px]">助手音色</span>
                 <span className="mt-0.5 block truncate text-[11.5px] text-muted-foreground">TA 说话用的声音（语音 API 里添加的音色也能选）</span>
@@ -1315,6 +1363,7 @@ function AgentVoiceCard() {
           </div>
           {/* 悬浮球 */}
           <div className="flex min-h-[52px] items-center gap-3 px-4 py-2">
+            <LineIcon icon={CircleDot} />
             <span className="min-w-0 flex-1">
               <span className="block truncate text-[16px]">悬浮球</span>
               <span className="mt-0.5 block truncate text-[11.5px] text-muted-foreground">屏幕右缘小球，点按说话下发任务</span>
@@ -1328,6 +1377,7 @@ function AgentVoiceCard() {
           </div>
           {/* 连续唤醒监听 */}
           <div className="flex min-h-[52px] items-center gap-3 px-4 py-2">
+            <LineIcon icon={Ear} />
             <span className="min-w-0 flex-1">
               <span className="block truncate text-[16px]">连续唤醒监听</span>
               <span className="mt-0.5 block text-[11.5px] leading-snug text-muted-foreground">
@@ -1345,6 +1395,7 @@ function AgentVoiceCard() {
           {cfg.listen ? <WakeStatusRow name={cfg.name || DEFAULT_WAKE_NAME} /> : null}
           {/* C4 执行结果语音播报 */}
           <div className="flex min-h-[52px] items-center gap-3 px-4 py-2">
+            <LineIcon icon={Volume2} />
             <span className="min-w-0 flex-1">
               <span className="block truncate text-[16px]">执行结果语音播报</span>
               <span className="mt-0.5 block text-[11.5px] leading-snug text-muted-foreground">
@@ -1360,6 +1411,7 @@ function AgentVoiceCard() {
           </div>
           {/* C4 任务后追问窗口 */}
           <div className="flex min-h-[52px] items-center gap-3 px-4 py-2">
+            <LineIcon icon={MessagesSquare} />
             <span className="min-w-0 flex-1">
               <span className="block truncate text-[16px]">任务后追问窗口</span>
               <span className="mt-0.5 block text-[11.5px] leading-snug text-muted-foreground">
@@ -1375,6 +1427,7 @@ function AgentVoiceCard() {
           </div>
           {/* 连续对话（Siri 式一问一答）：播报完自动续听 + 播报中说话即打断 */}
           <div className="flex min-h-[52px] items-center gap-3 px-4 py-2">
+            <LineIcon icon={Repeat} />
             <span className="min-w-0 flex-1">
               <span className="block truncate text-[16px]">连续对话</span>
               <span className="mt-0.5 block text-[11.5px] leading-snug text-muted-foreground">

@@ -3,8 +3,9 @@
 /**
  * C1 语音唤起智能体——Siri 式全屏语音会话 + 悬浮球（v1.7.1 专属人设）：
  *
- * - 悬浮球：屏幕右侧边缘可拖动（v1.9.4 极简磨砂玻璃球：深色半透 + 细白描边 + 白麦克风），
- *   拖动跟手、松手吸左右边、位置记忆（localStorage agent-voice-ball-pos-v1）；
+ * - 悬浮球：屏幕右侧边缘可拖动（v1.9.14 简约毛玻璃：单层半透黑 + backdrop-blur +
+ *   细白描边 + 白细线麦克风，去多层堆叠），拖动跟手、松手吸左右边、
+ *   位置记忆（localStorage agent-voice-ball-pos-v1）；
  *   点按（位移 < 8px）打开全屏语音会话；连续唤醒监听开着时带一圈极细呼吸光环（提示「正在听」）
  * - 全屏会话（苹果 Siri 式）：黑玻璃背景 + 顶部彩虹光球 + 光球下方助手名牌（名字=
  *   唤醒名）+ 左上关闭 + 中部对话流（用户右侧气泡 / 助手左侧纯文本）+ 底部输入栏
@@ -1023,9 +1024,11 @@ export default function AgentVoiceBall() {
         ) : null}
       </AnimatePresence>
 
-      {/* ================= 悬浮球（v1.9.13 美化：高质感黑白玻璃球，可拖动吸边） =================
-          设计语言：渐变细白描边圈 + 深色磨砂玻璃球体 + 双层内高光（顶部镜面反光/底部微光），
-          黑白极简但更立体通透；状态表达仍是两个：连续唤醒监听中（双层呼吸光环）与唤醒熔断（右上 ALERT 点） */}
+      {/* ================= 悬浮球（v1.9.14 简约毛玻璃，可拖动吸边） =================
+          设计语言：单层中性磨砂玻璃圆片（半透黑 + backdrop-blur + 细白描边 + 柔和落影），
+          去掉 v1.9.13 的渐变描边圈/双层内高光/径向反光等多层堆叠——极简「毛玻璃」，
+          白色细线麦克风浮在玻璃上；状态表达仍是两个：连续唤醒监听中（单圈呼吸光环）与
+          唤醒熔断（右上 ALERT 点） */}
       <motion.button
         type="button"
         aria-label="语音助手（拖动移位，点按说话）"
@@ -1050,20 +1053,13 @@ export default function AgentVoiceBall() {
         className="pointer-events-auto absolute bottom-[140px] right-0 flex h-[44px] w-[44px] touch-none select-none items-center justify-center rounded-full"
         data-testid="agent-voice-ball"
       >
-        {/* 呼吸光环（连续唤醒监听中）：双层细白圈错相呼吸，内圈亮外圈淡，「正在听」更灵动 */}
+        {/* 呼吸光环（连续唤醒监听中）：单圈细白线慢呼吸，「正在听」的安静提示 */}
         {listening ? (
-          <>
-            <span
-              aria-hidden="true"
-              className="absolute -inset-[5px] rounded-full ring-1 ring-white/35"
-              style={{ animation: 'agentVoiceBreath 2.8s ease-in-out infinite' }}
-            />
-            <span
-              aria-hidden="true"
-              className="absolute -inset-[10px] rounded-full ring-1 ring-white/15"
-              style={{ animation: 'agentVoiceBreath 2.8s ease-in-out -0.7s infinite' }}
-            />
-          </>
+          <span
+            aria-hidden="true"
+            className="absolute -inset-[5px] rounded-full ring-1 ring-white/30"
+            style={{ animation: 'agentVoiceBreath 2.8s ease-in-out infinite' }}
+          />
         ) : null}
         {/* 唤醒熔断提示点（唯一状态点）：喊名唤醒因麦克风权限等原因停用时点亮，点球看原因 */}
         {wakeBlocked ? (
@@ -1073,31 +1069,13 @@ export default function AgentVoiceBall() {
             className="absolute right-[3px] top-[3px] z-10 h-2 w-2 rounded-full bg-[#FF453A] ring-[1.5px] ring-black/45"
           />
         ) : null}
-        {/* 渐变描边圈：左上亮的玻璃边缘（替代单色 ring，立体感）+ 柔和落影 */}
+        {/* 球体：单层毛玻璃——中性半透黑 + 大半径 backdrop-blur + 细白描边，内壁一线微光 */}
         <span
           aria-hidden="true"
-          className="absolute inset-0 rounded-full"
-          style={{
-            background: 'linear-gradient(150deg, rgba(255,255,255,0.42), rgba(255,255,255,0.08) 45%, rgba(255,255,255,0.18))',
-            boxShadow: '0 6px 18px rgba(0,0,0,0.42), 0 1.5px 4px rgba(0,0,0,0.32)',
-          }}
+          className="absolute inset-0 rounded-full bg-black/35 ring-1 ring-white/35 backdrop-blur-2xl"
+          style={{ boxShadow: '0 4px 14px rgba(0,0,0,0.30), inset 0 1px 0 rgba(255,255,255,0.14)' }}
         />
-        {/* 球体：深色磨砂玻璃（内收 1px 露出描边圈）+ 内侧上下微光 */}
-        <span
-          aria-hidden="true"
-          className="absolute inset-[1px] rounded-full bg-[#16161A]/85 backdrop-blur-xl"
-          style={{ boxShadow: 'inset 0 1px 1px rgba(255,255,255,0.16), inset 0 -6px 12px rgba(255,255,255,0.06)' }}
-        />
-        {/* 双层内高光：顶部左上镜面反光 + 底部右下微透光（玻璃通透感） */}
-        <span
-          aria-hidden="true"
-          className="absolute inset-[1px] rounded-full"
-          style={{
-            background:
-              'radial-gradient(110% 70% at 30% 12%, rgba(255,255,255,0.22), transparent 44%), radial-gradient(90% 60% at 72% 96%, rgba(255,255,255,0.10), transparent 55%)',
-          }}
-        />
-        <Mic className="relative h-[18px] w-[18px] text-white" strokeWidth={1.9} />
+        <Mic className="relative h-[17px] w-[17px] text-white/90" strokeWidth={1.8} />
       </motion.button>
     </div>
   );
