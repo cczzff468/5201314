@@ -1375,7 +1375,8 @@ function buildAgentSystemPrompt(ctx: AgentCtx | undefined, verifying = false): s
     '- 例（建联系人）：openScreen contacts → uiObserve → uiClick「+」或「新建」→ uiClick 姓名输入框 → uiType 名字 → uiClick 人设/性格输入框 → uiType 性格描述 → uiClick「保存/完成」→ uiObserve 核对。界面和示例不符时以 uiObserve 实际返回为准。',
     '- 例（记备忘录）：openScreen notes → uiObserve → uiClick「新建备忘录」（不是「新建文件夹」）→ uiClick 标题/正文输入框 → uiType「要记的内容」→ uiClick「保存/完成/对勾」→ uiObserve 核对列表出现这条内容。界面和示例不符时以 uiObserve 实际返回为准。',
     '- 【完成标准（写入类任务）】内容必须真正输入且结果出现在界面上才算完成：备忘录要看到列表里那条内容、消息要看到进入会话、提醒要看到条目存在。界面停在输入框/抽屉/弹窗=没完成，继续操作直到成品出现；计划最后一步必须是 uiObserve 核对。',
-    '- 【保存铁律（最高优先级）】需要输入内容/填表的任务：uiType 输入完成后，同一次 plan 里必须接着点「保存/完成/发送/对勾」按钮（或 pressEnter），绝不把保存动作留到下一轮——「输入了内容却没保存」等同任务失败。新建/编辑类界面通常保存按钮在右上角或底部工具栏，找不到就先 uiObserve 看全界面元素再点。',
+    '- 【保存铁律（最高优先级）】需要输入内容/填表的任务：uiType 输入完成后，同一次 plan 里必须接着点「保存/完成/发送/对勾」按钮（或 pressEnter），绝不把保存动作留到下一轮——「输入了内容却没保存」等同任务失败。新建/编辑类界面通常保存按钮在右上角或底部工具栏，找不到就先 uiObserve 看全界面元素再点；「保存」找不到就点「完成/对勾」——备忘录等编辑器输入即自动保存，点完成即收尾。',
+    '- 【按钮看不到就重看】uiObserve 清单里没出现预期的按钮时（刚转场/浮层恰好盖住），先再 uiObserve 一次再定；绝不因「没看到保存/完成按钮」就空手报告完成——重新观察、换词重试（完成/对勾/✓/保存），直到成品出现或如实说明卡点。',
     '- 操作输入框前必须先 clickElement/uiClick 点输入框使其聚焦，才能 inputTextToFocus/uiType；发送消息用 pressEnter。',
     '- 输入框里有旧内容时：uiType 会整体替换旧内容；系统级输入框优先找界面上的清空/清除类按钮，没有就连续 pressDelete 逐字删（按旧内容长度控制次数，别无限删）。',
     '- 上一步失败时，失败反馈里通常带着当前界面与可见元素线索——换策略（换匹配文字、先 scroll/uiScroll 翻页、改 tapPoint、先 lookScreen/uiObserve），不要原样重试。uiClick 反馈里出现「另有相近元素」提示时，说明你可能点到了相近但错误的按钮——立即用完整名称重试正确目标。',
@@ -1919,7 +1920,20 @@ export async function runAgentTask(
       if (await checkStopped()) return stoppedResult();
 
       // b. LLM 规划（验收轮用验收模式 prompt；null = 接口失败/格式异常/急停断流）
-      const plan = await planWithLLM(t, history, opts?.ctx, needVerify);
+      let plan = await planWithLLM(t, history, opts?.ctx, needVerify);
+      // v1.9.5：验收轮规划失败重试一次（短退避 + 重观察 + 重规划）——此前直接降级
+      // 「任务完成（结果未经最终核对）」，把「没核对」当「完成」报给机主；接口抖动
+      // /一次 JSON 解析失败重试后基本能恢复正常验收，任务收尾更可靠
+      if (plan === null && needVerify) {
+        if (await sleepStoppable(1200)) {
+          if (await checkStopped()) return stoppedResult();
+          patchAgentState({ stepDesc: '验收重试：重新观察…' });
+          const obs2 = await agentObserve();
+          history.push({ kind: 'obs', round, text: obs2.summary });
+          if (await checkStopped()) return stoppedResult();
+          plan = await planWithLLM(t, history, opts?.ctx, true);
+        }
+      }
       if (await checkStopped()) return stoppedResult();
       if (plan === null) {
         if (needVerify) {

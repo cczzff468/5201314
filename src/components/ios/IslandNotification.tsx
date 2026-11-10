@@ -14,6 +14,9 @@
  *   美团/淘宝）小窗不支持，点击仍直接进全屏。
  *
  * 层级 z-[93]：高于锁屏/切换器/闹钟/状态栏，仅低于熄屏黑遮罩（熄屏=屏幕关了，不看）。
+ * v1.9.5：卡片带 data-agent-ui 标记——通知卡展示的 3 秒内不算 Agent 眼里的遮挡
+ *（否则恰好盖住 App 顶部导航时，Agent 又「看不见」完成/保存类按钮了），
+ * 卡片自身也不进 Agent 的可点清单（通知点击是机主的交互，不归 Agent 管）。
  *
  * 来电互斥暂缓（C-3）：电话来电响铃全程（全屏来电界面 z-84 / 退出后的顶部横幅 z-94 都占住
  * 通知锚位或整屏）与微信/QQ 语音来电响铃阶段（来电弹窗 z-94 / 展开的来电页）展示期间，本层整体
@@ -122,6 +125,7 @@ function NotifyCard({ held }: { held: boolean }) {
       key={current.id}
       ref={cardRef}
       data-testid="island-notification"
+      data-agent-ui=""
       role="button"
       aria-label={`${APP_NAME[current.app]}通知：${current.title} ${current.body}`}
       aria-expanded={canFloat ? menuOpen : undefined}

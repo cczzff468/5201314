@@ -8,6 +8,8 @@
  * 本层补上「这个项目自己的 APP 界面」的直接操控能力——纯 DOM 级，不需要 Shizuku：
  *
  * - openScreen：打开项目内任意 App 界面（AppId 或中文名，如「微信」「contacts」）
+ *   （v1.9.5：Agent 运行进度卡等自身浮层不再遮挡观察/点按——任务期间顶部导航的
+ *   完成/保存类按钮照常可见可点，任务不再总差最后一步）
  * - uiObserve：观察当前打开的 App 界面——枚举可点元素（按钮/列表项/标签页）与输入框，
  *   输出紧凑清单喂给 LLM（uiClick 的 args 照抄清单里的文字即可）
  * - uiClick：按文字匹配点击界面元素（pointer/touch/mouse 全事件序列，兼容 React 合成事件
@@ -101,6 +103,16 @@ export interface ScreenDomResult {
 /** 语音会话层自身（观察/点按时排除，避免 Agent 操控自己的 UI） */
 const EXCLUDE_ATTR = 'data-agent-voice-layer';
 
+/**
+ * v1.9.5 Agent 全局浮层标记（AgentRunnerBar / 灵动岛通知卡）：观察清单排除 + 遮挡判定豁免。
+ *
+ * 为什么必须豁免：这些浮层悬浮在 App 界面之上（进度卡正好盖住顶部导航），若按普通遮挡
+ * 判定，任务运行期间 Agent 永远「看不见」App 顶栏的完成/保存类按钮——UI 任务总差最后
+ * 一步（用户实测：写备忘录内容输完了，就是找不到保存按钮）。点按走 dispatchTap 直接
+ * 对元素派发事件（不经过 elementFromPoint），所以豁免遮挡后观察与点按双通，任务不再
+ * 被自己的浮层拦住。敏感操作确认卡（AgentConfirmHost）是有意不豁免的模态——必须先应答。 */
+const OVERLAY_ATTR = 'data-agent-ui';
+
 /** 找当前可见的手机壳根元素（横竖屏/桌面壳多个副本里取有尺寸的那个） */
 function shellRoot(): HTMLElement | null {
   if (typeof document === 'undefined') return null;
@@ -119,17 +131,19 @@ function isVisible(el: Element, shellRect: DOMRect): boolean {
   const st = getComputedStyle(el);
   if (st.display === 'none' || st.visibility === 'hidden' || Number(st.opacity) < 0.08) return false;
   // 遮挡检查：中心点最顶层的元素必须是自身/子孙/祖先（App 窗口下面的主屏图标、
-  // 弹层下面的列表项都会在此被滤掉，观察清单不再混入「看不见」的元素）
+  // 弹层下面的列表项都会在此被滤掉，观察清单不再混入「看不见」的元素）。
+  // v1.9.5：Agent 自身浮层（[data-agent-ui]，运行进度卡/灵动岛通知卡）不算遮挡——
+  // 否则任务运行期间顶部导航的「完成/保存」类按钮被进度卡盖住，永远看不见点不着。
   const cx = Math.min(Math.max(r.left + r.width / 2, r.left + 1), r.right - 1);
   const cy = Math.min(Math.max(r.top + r.height / 2, r.top + 1), r.bottom - 1);
   const top = document.elementFromPoint(cx, cy);
-  if (top && !el.contains(top) && !top.contains(el)) return false;
+  if (top && !el.contains(top) && !top.contains(el) && !top.closest(`[${OVERLAY_ATTR}]`)) return false;
   return true;
 }
 
-/** 元素是否在排除子树里（语音会话层等 Agent 自身 UI） */
+/** 元素是否在排除子树里（语音会话层、Agent 运行进度卡等 Agent 自身 UI） */
 function inExcluded(el: Element): boolean {
-  return !!el.closest(`[${EXCLUDE_ATTR}]`);
+  return !!el.closest(`[${EXCLUDE_ATTR}],[${OVERLAY_ATTR}]`);
 }
 
 /** 压缩空白并截断的元素标签文本 */

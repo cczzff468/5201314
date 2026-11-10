@@ -40,6 +40,9 @@ const SPRING = { type: 'spring', stiffness: 420, damping: 34, mass: 0.9 } as con
  *   （红点已按需求移除），只展示结果摘要 4s 自动缩回；
  * - 层级 z-[82]：盖过静态灵动岛（z-80）、状态栏（z-70），低于灵动岛通知卡（z-93）
  *   与敏感操作确认卡（z-95）；锁屏/熄屏/多任务切换器打开时整卡隐身（任务继续跑）。
+ * - v1.9.5：根节点带 data-agent-ui 标记——agent-screen 的观察/遮挡判定把本卡视为
+ *   透明浮层（不算遮挡、不入可点清单）：否则展开时盖住 App 顶部导航，Agent 永远
+ *   看不见「完成/保存」类按钮，任务总差最后一步。急停按钮只留给机主本人。
  */
 export function AgentRunnerBar() {
   const st = useAgentState();
@@ -79,6 +82,7 @@ export function AgentRunnerBar() {
           role="status"
           aria-live="polite"
           data-testid="agent-runner-bar"
+          data-agent-ui=""
           className="pointer-events-auto absolute left-1/2 top-[11px] z-[82] w-[calc(100%-24px)] max-w-[340px] -translate-x-1/2 overflow-hidden bg-[#101014]/72 text-white shadow-[0_16px_44px_-12px_rgba(0,0,0,0.6)] ring-1 ring-white/14 backdrop-blur-2xl"
         >
           {/* 内容：形变基本完成后淡入，收起立即淡出（防形变过程重排可见） */}

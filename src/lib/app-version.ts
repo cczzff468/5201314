@@ -11,9 +11,9 @@
  */
 
 /** 当前最新版本（与 android-shell versionName 保持一致） */
-export const APP_VERSION = '1.9.4';
+export const APP_VERSION = '1.9.5';
 /** 版本号数字（与 android-shell versionCode 保持一致；覆盖安装要求只增不减） */
-export const APP_VERSION_CODE = 24;
+export const APP_VERSION_CODE = 25;
 
 export interface AppReleaseNote {
   version: string;
@@ -24,6 +24,15 @@ export interface AppReleaseNote {
 
 /** 版本历史（新→旧；设置 › APP 更新 页渲染，最新一条即当前版本） */
 export const APP_RELEASE_NOTES: AppReleaseNote[] = [
+  {
+    version: '1.9.5',
+    date: '2026-11-10',
+    items: [
+      '根治「Agent 任务总差最后一步」：任务进度卡/灵动岛通知卡不再遮挡 Agent 的观察与点按——写备忘录等内容输完后，顶部的「完成/保存」按钮现在看得见、点得着，任何任务都能把最后一步做完',
+      '验收更可靠：验收轮规划失败自动重试一次，不再把「未经核对」直接当「完成」报给机主',
+      '规划指南补强：找不到保存按钮时自动重看界面、换词重试（完成/对勾），不再空手报完成',
+    ],
+  },
   {
     version: '1.9.4',
     date: '2026-11-10',
