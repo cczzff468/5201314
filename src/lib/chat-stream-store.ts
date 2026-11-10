@@ -188,13 +188,6 @@ export interface BeginChatStreamOptions {
    */
   onVision?: (desc: string) => void;
   /**
-   * v1.9.11 灵动岛「正在输入」实时活动（可选）：回合开始后 800ms 仍无首段内容时弹
-   * 「正在输入…」占位横幅（LLM 生成期的即时反馈，真实消息横幅到达后自动顶替）。
-   * 由各聊天端从自己的会话信息拼装（app/展示名/头像/点击跳转目标），不传 = 无占位
-   * （接力/系统等间接路径不需要）。守卫（DND/免打扰/接力抑制/岛忙）在 island-notify 内统一生效。
-   */
-  typing?: { app: 'wechat' | 'qq' | 'chat'; title: string; avatar?: string | null; target: { app: 'wechat' | 'qq' | 'chat'; contactId?: string; groupId?: string } };
-  /**
    * 流结束（成功或失败，恰好一次）后把最终 AI 消息写入该角色的聊天记录。
    * 由各 App 在发起时提供：内部使用该 App 的 loadMsgs/saveMsgs 与消息类型，
    * 不依赖任何组件存活（页面已退出也能正确落盘）。
@@ -923,22 +916,6 @@ export function beginChatStream(opts: BeginChatStreamOptions): boolean {
   emit();
   // 服务端可能还留着上一次关页接力的生成中回复：本轮用户已回页接管，让它作废（防双回复）
   cancelBgRelay(opts.sessionKey);
-  // v1.9.11 灵动岛「正在输入」实时活动：LLM 生成首段回复期间（常 2-4s）灵动岛无任何反馈，
-  // 体感「通知迟迟不来」——回合开始 800ms 后仍无首段就弹占位卡，真实横幅到达自动顶替。
-  // 动态 import：island-notify 是重模块（推送/SSE/导航总线），避免静态链拖进轻入口包
-  if (opts.typing) {
-    void import('./ios/island-notify')
-      .then(({ pushTypingActivity }) =>
-        pushTypingActivity({
-          sessionKey: opts.sessionKey,
-          app: opts.typing!.app,
-          title: opts.typing!.title,
-          avatar: opts.typing!.avatar ?? null,
-          target: opts.typing!.target,
-        }),
-      )
-      .catch(() => undefined);
-  }
   // 流一开始就登记初始 payload：pagehide 接力不再漏掉识图前置阶段（发图后立刻关页的窗口）。
   // 识图成功后 runStream 会用 workMessages/effConfig 覆盖为实际 payload。
   activePayloads.set(opts.sessionKey, { messages: opts.messages, config: opts.apiConfig });

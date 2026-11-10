@@ -139,6 +139,8 @@ import {
   X,
 } from 'lucide-react';
 import { useSettings, useUI } from '@/lib/ios/store';
+// v1.9.12 聊天滚动重做（全端共享）：进入即到底/发送必到底/贴底跟随/看历史时「有新消息」轻提示
+import { ChatNewMsgPill, useChatAutoScroll } from '@/hooks/use-chat-autoscroll';
 import { ScanOverlayWhen, openScan } from './mt-scan';
 import { pushChatNotification, notifyPreviewText, takeNotifyNavigation, ISLAND_NAV_EVENT } from '@/lib/ios/island-notify';
 import { playNotifySound } from '@/lib/ios/notify-sound';
@@ -3455,7 +3457,13 @@ function ChatPage({
   const sessionKey = `qq:${peer.id}`;
   const stream = useChatStream(sessionKey);
   const streaming = stream?.status === 'streaming';
-  const scrollRef = useRef<HTMLDivElement>(null);
+  // v1.9.12 聊天滚动重做（全端共享 hook，见 hooks/use-chat-autoscroll.tsx 头注释）：
+  // 进入即到底（无动画）、发送（末条=机主消息）必到底、AI 消息贴底跟随/看历史时浮轻提示；
+  // 滚底签名守卫同旧实现：仅结构性变化（条数/末条 id/流式内容）才评估，转文字等原地更新不拽动视口
+  const { scrollRef, scrollToBottom, showNewMsg } = useChatAutoScroll(
+    `${msgs.length}:${msgs[msgs.length - 1]?.id ?? ''}:${stream?.content ?? ''}`,
+    { mine: msgs[msgs.length - 1]?.role === 'me' },
+  );
   // ---- v71 分窗渲染（界面提速）：初始只渲染最近 WINDOW_FIRST 条，上滑到顶自动向前扩 ----
   const [visibleCount, setVisibleCount] = useState(WINDOW_FIRST);
   const winStart = Math.max(0, msgs.length - visibleCount);
@@ -3922,25 +3930,6 @@ function ChatPage({
       alive = false;
     };
   }, [bg.mode, flags.bgV, peer.id]);
-
-  // 滚底签名守卫：仅结构性变化（条数/末条 id/流式内容）才滚底；
-  // 转文字等原地更新（msgs 引用变但结构不变）不触发滚动，避免转写面板出现时气泡被拽上移
-  // 性能+体验：仅当用户本就停在底部附近（距底 ≤160px）或首次进入时才跟随滚底——
-  // 上翻历史阅读时 AI 分段投递不再把视口拽走；滚动放入 rAF，scrollHeight 读取
-  // （强制 layout，长会话数千节点）不再随每条分段同步发生，同帧多次触发也合并成一次
-  const scrollSigRef = useRef('');
-  useEffect(() => {
-    const sig = `${msgs.length}:${msgs[msgs.length - 1]?.id ?? ''}:${stream?.content ?? ''}`;
-    if (sig === scrollSigRef.current) return;
-    const first = scrollSigRef.current === '';
-    scrollSigRef.current = sig;
-    const el = scrollRef.current;
-    if (!el) return;
-    requestAnimationFrame(() => {
-      const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 160;
-      if (first || nearBottom) el.scrollTop = el.scrollHeight;
-    });
-  }, [msgs, stream]);
 
   // 翻译：开启后把文字消息（最近 60 条，排除错误/兑底文案）按检测到的语言双向翻译成另一侧
   // （左侧语言的消息译成右侧，右侧语言的消息译成左侧）。缓存、并发闸、在途去重都在
@@ -5730,13 +5719,6 @@ function ChatPage({
       messages: payloadMsgs,
       apiConfig,
       replyCount,
-      // v1.9.11 灵动岛「正在输入」实时活动：LLM 生成首段期间（常 2-4s）即时反馈占位
-      typing: {
-        app: 'qq',
-        title: peer.name,
-        avatar: peer.avatar ?? null,
-        target: { app: 'qq', contactId: peer.id },
-      },
       ...(turnImages.length > 0
         ? {
             vision: { images: turnImages, text: userMsg?.content ?? '' },
@@ -8102,6 +8084,8 @@ function ChatPage({
           </div>
           );
         })()}
+        {/* v1.9.12 「有新消息 ⬇️」轻提示：机主上翻看历史时 AI 来新消息不拽回底部，浮出胶囊点击才回底部 */}
+        <ChatNewMsgPill show={showNewMsg} onClick={scrollToBottom} />
       </div>
 
       {/* 底部：输入行 + 六图标工具栏 + 加号面板（弹出时输入框与工具栏被整体顶起，跟随面板上浮）；多选模式下变为批量操作栏 */}

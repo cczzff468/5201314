@@ -566,13 +566,6 @@ async function sendGroupOpening(g: ChatGroup, char: ContactRecord): Promise<void
       ],
       apiConfig: useSettings.getState().apiConfig,
       replyCount: 1,
-      // v1.9.11 灵动岛「正在输入」实时活动：建群开场白生成期即时反馈占位（群名/群头像）
-      typing: {
-        app: g.app === 'wx' ? 'wechat' : 'qq',
-        title: g.name,
-        avatar: g.avatar ?? null,
-        target: g.app === 'wx' ? { app: 'wechat', groupId: g.id } : { app: 'qq', groupId: g.id },
-      },
       finalize: (result) => {
         const text = (result.content ?? '').trim();
         if (result.error || !text || SKIP_RE.test(text)) return;

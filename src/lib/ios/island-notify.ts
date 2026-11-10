@@ -87,8 +87,6 @@ export interface IslandNotification {
   /** 合并条数（同一会话连续多条 > 1 时展示） */
   count: number;
   target: NotifyTarget;
-  /** v1.9.11「正在输入」实时活动卡：AI 回复流式生成期间的即时反馈占位（真消息横幅到达后自动替换） */
-  typing?: boolean;
 }
 
 interface IslandNotifyState {
@@ -301,98 +299,11 @@ function isSessionBannerSuppressed(sessionKey: string): boolean {
   return true;
 }
 
-// ---------------- 灵动岛「正在输入」实时活动（v1.9.11：回复生成期即时反馈） ----------------
-
-/**
- * 机主反馈「系统通知还是要延迟 3-4 秒」：实测管线本身零延迟（消息流中分段完成到横幅
- * 弹出 <20ms），剩余 3-4s = LLM 生成首段回复的耗时（不可消除）——期间灵动岛完全无反馈，
- * 体感就是「通知迟迟不来」。本实时活动补上这段死区：
- * - 回合开始（beginChatStream）时登记会话的打字占位，延迟 800ms 防快回复闪帧：
- *   800ms 内真实横幅已到 → 取消，什么都不弹；
- * - 到期时若灵动岛空闲 → 弹「正在输入…」实时活动卡（无提示音、不入通知中心、不进系统通知，
- *   3s 自动收起与普通横幅同策略）；灵动岛忙 → 直接放弃（真实横幅马上会替换，不抢位）；
- * - 真实消息横幅到达（pushChatNotification）→ 该会话的占位计时器作废，展示中的占位卡
- *   被真实横幅自然顶替 —— 从「打字中」到「消息到达」无缝过渡。
- */
-
-/** 占位延迟：快回复（首段 <800ms 到达）完全不弹，避免闪烁 */
-const TYPING_DELAY_MS = 800;
-/** sessionKey → 待弹占位计时器（回合开始登记；真实横幅到达/新回合重登时重置） */
-const typingTimers = new Map<string, ReturnType<typeof setTimeout>>();
-
-if (typeof window !== 'undefined' && process.env.NODE_ENV !== 'production') {
-  // dev 测试钩子：E2E 观察占位登记情况（生产构建不存在）
-  const w = window as unknown as { __typingDebug?: { pending: () => string[] } };
-  const expose = (): void => {
-    w.__typingDebug = { pending: () => [...typingTimers.keys()] };
-  };
-  expose();
-}
-
-/** 「正在输入」实时活动的输入（与 ChatNotifyInput 同构，但无正文） */
-export interface TypingActivityInput {
-  /** 合并键：会话键（wx:<id> / wx:group:<gid> / qq:<id> / qq:group:<gid> / sms:<key>） */
-  sessionKey: string;
-  app: NotifyApp;
-  /** 展示名（单聊 = 角色名，群聊 = 群名） */
-  title: string;
-  /** 角色头像（路径或 dataURL；空展示首字符占位） */
-  avatar?: string | null;
-  target: NotifyTarget;
-}
-
-/** 取消会话的打字占位计时器（真实横幅到达时由 pushChatNotification 调用；幂等） */
-function clearTypingTimer(sessionKey: string): void {
-  const t = typingTimers.get(sessionKey);
-  if (t) {
-    clearTimeout(t);
-    typingTimers.delete(sessionKey);
-  }
-}
-
-/** 显式取消（预留；常规取消在 pushChatNotification 汇合点） */
-export function cancelTypingActivity(sessionKey: string): void {
-  clearTypingTimer(sessionKey);
-}
-
-/**
- * 登记一轮 AI 回复的打字占位（beginChatStream 各端调用）：延迟 800ms 后若流还没出首段
- * 且灵动岛空闲，弹「正在输入…」实时活动卡。同一会话重复登记（重试/新回合）重置计时器。
- */
-export function pushTypingActivity(input: TypingActivityInput): void {
-  if (typeof window === 'undefined') return;
-  // 与真实横幅同闸门：DND / 会话免打扰 / 接力守望者抑制期间不弹
-  if (isNotifyDndActive()) return;
-  if (chatMuted(input.sessionKey)) return;
-  if (isSessionBannerSuppressed(input.sessionKey)) return;
-  clearTypingTimer(input.sessionKey);
-  typingTimers.set(
-    input.sessionKey,
-    window.setTimeout(() => {
-      typingTimers.delete(input.sessionKey);
-      const st = useIslandNotify.getState();
-      // 岛忙（其他会话的真实横幅在展示/收起动画中）：直接放弃，不排队不抢位——
-      // 本会话的真实横幅到达时会正常顶替/入队
-      if (st.current || st.exiting) return;
-      st.show({
-        id: genNotifyId(),
-        mergeKey: input.sessionKey,
-        app: input.app,
-        avatar: input.avatar ?? null,
-        title: input.title,
-        subtitle: '',
-        body: '正在输入…',
-        count: 1,
-        target: input.target,
-        typing: true,
-      });
-      armAutoDismiss();
-    }, TYPING_DELAY_MS),
-  );
-}
-
 /**
  * 推送一条 AI 消息通知（每条消息独立弹窗，不合并计数）：
+ * v1.9.12「正在输入」实时活动已按机主要求整体下线：通知只在真实消息落盘时弹一条，
+ * 不再有「正在输入…」占位卡；后台体感延迟由 ai-delivery 的快速投递（会话没被看着时
+ * 跳过打字节奏）压到最短，见 ai-delivery.shouldFastDeliver。
  * - 会话开了「消息免打扰」（#15）→ 灵动岛弹层与 Web Notification 全部跳过
  *   （未读角标/会话列表逻辑由各自消费端处理，不受本闸门影响）；
  * - 有正在展示的通知 → 直接替换为本次内容（旧条立即让位，视觉上每条消息都弹了一次）；
@@ -400,10 +311,6 @@ export function pushTypingActivity(input: TypingActivityInput): void {
  * 页面不可见时同时走 Web Notification 通道（支持且已授权时，每条一个独立系统通知）。
  */
 export function pushChatNotification(input: ChatNotifyInput): void {
-  // v1.9.11：该会话的「正在输入」占位作废（真实内容已到，计时器里的占位不再需要；
-  // 展示中的占位卡由下方 st.show(n) 自然顶替）。无条件取消：即使本条被抑制/免打扰拦截，
-  // 消息已落盘，过期的「正在输入」也不该再弹
-  clearTypingTimer(input.sessionKey);
   const body = truncateBody(input.body);
   if (!body) return;
   if (chatMuted(input.sessionKey)) return; // 消息免打扰：不弹灵动岛、不发系统通知（#15）
@@ -416,6 +323,13 @@ export function pushChatNotification(input: ChatNotifyInput): void {
   // v1.9.8 接力守望者抑制：守望者已为该会话的服务端待达消息弹过横幅/提示音/系统通知，
   // 聊天页正式投递同一批消息时三出口跳过（消息落盘、未读角标不受影响，见上方注释）
   if (isSessionBannerSuppressed(input.sessionKey)) return;
+  // v1.9.12 机主需求：通知所属 App 正被使用（用户就在该 App 界面里）→ 不弹横幅不提示
+  // 不进系统通知（iOS 语义：App 在前台时系统不弹它的通知）；退出 App（回主屏/切别的 App）
+  // 或锁屏/熄屏（不算正在使用）才弹。消息照常落盘，未读角标/会话列表预览由各自消费端处理
+  if (typeof window !== 'undefined') {
+    const ui = useUI.getState();
+    if (!ui.locked && !ui.screenOff && ui.activeApp === input.target.app) return;
+  }
   // 通知提示音（设置 › 通知可配）：群会话走「群消息」，其余走「接收消息」；
   // 声音闸门（总开关/分类开关/免打扰）由 playNotifySound 内部判定——静音时弹窗与记录照常
   playNotifySound(input.sessionKey.includes(':group:') ? 'group' : 'receive');
@@ -678,6 +592,9 @@ function maybeWebNotification(n: IslandNotification): void {
   // 'local-notify-open' → openCenterItem → navigateFromSystemNotify 精确切到会话。
   // 应用内灵动岛弹窗（pushChatNotification 前半段）不受影响，照常逐条弹。
   if (isNativePerception()) {
+    // v1.9.12 机主需求：机主正在用 APP（页面可见）时不发 Android 系统通知——前台提醒由
+    // 应用内灵动岛横幅负责；只有 APP 退到后台（页面不可见）才走系统通知栏
+    if (!isPageBackground()) return;
     void showSystemNotification(n.title, {
       body: n.subtitle ? `【${n.subtitle}】${n.body}` : n.body,
       tag: `chat-${n.id}`,

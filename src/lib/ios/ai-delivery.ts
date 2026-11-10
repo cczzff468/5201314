@@ -6,7 +6,13 @@
  *
  * 调度器在模块层运行，与聊天页是否存活无关（退出聊天页/切 App 都继续投递，重进后无缝接上）。
  * 同一会话的批次串行排队（上一批投完才跑下一批），保证多轮/群聊多角色的消息上屏顺序与落盘顺序一致。
+ *
+ * v1.9.12 快速投递（修「通知在后台有时慢 3-4 秒」）：会话没被机主看着（在别的 App / 主屏 /
+ * 页面隐藏）时，逐条打字节奏纯属浪费——用户只关心通知什么时候到。此时把节奏压缩到
+ * FAST_DELIVER_GAP_MS，消息即到即落盘即弹横幅；机主正看着该会话 → 保留真人节奏。
  */
+
+import { useUI } from './store';
 
 /** 单批投递选项 */
 export interface AiDeliveryOptions {
@@ -57,6 +63,38 @@ function defaultDelay(): number {
  */
 function isPageHidden(): boolean {
   return typeof document !== 'undefined' && document.visibilityState === 'hidden';
+}
+
+// ---------------- v1.9.12 快速投递（会话没被看着时跳过打字节奏） ----------------
+
+/** 快速投递时的条间最小间隔（保持投递顺序 + 给通知队列留出让位时间） */
+const FAST_DELIVER_GAP_MS = 80;
+
+/** 会话键 → 通知归属 App（与 island-notify/bg-relay-watcher 的前缀约定一致） */
+function sessionAppOf(sessionKey: string): 'wechat' | 'qq' | 'chat' | null {
+  if (sessionKey.startsWith('wx:')) return 'wechat';
+  if (sessionKey.startsWith('qq:')) return 'qq';
+  if (sessionKey.startsWith('sms:')) return 'chat';
+  return null;
+}
+
+/**
+ * 该会话当前是否应该快速投递：
+ * - 页面隐藏（切走标签页/最小化/APP 退后台）→ 快（已有隐藏分块通道，双保险）；
+ * - 会话归属 App 不是当前前台 App（机主在主屏/别的 App）→ 快：消息对机主不可见，
+ *   逐条打字节奏只会推迟通知到达；
+ * - 机主正看着该会话（activeApp === 归属 App）→ 慢（保留真人节奏，看得到逐条冒出）。
+ * store 读取异常按慢速兜底（不改变历史行为）。
+ */
+function shouldFastDeliver(sessionKey: string): boolean {
+  if (isPageHidden()) return true;
+  const app = sessionAppOf(sessionKey);
+  if (!app) return false;
+  try {
+    return useUI.getState().activeApp !== app;
+  } catch {
+    return false;
+  }
 }
 
 /** 按内容长度估算停顿（各端文字消息用；卡片类消息走默认）。
@@ -157,14 +195,18 @@ function pump(sessionKey: string): void {
     batch.deliveredIndex = index + 1;
     emitTick(sessionKey);
     index += 1;
-    const wait = Math.max(0, Math.round(delayOf(index - 1, items.length)));
+    // v1.9.12：会话没被机主看着 → 快速投递（80ms 条间），通知即到即弹；
+    // 机主正看着 → 按内容长度模拟打字节奏（逐条冒出的真人节奏）
+    const wait = shouldFastDeliver(sessionKey)
+      ? FAST_DELIVER_GAP_MS
+      : Math.max(0, Math.round(delayOf(index - 1, items.length)));
     window.setTimeout(step, wait);
   };
   running.add(sessionKey);
   emitActive();
   // 首条前停顿（分段投递的批间打字节奏）；期间 running 保持，聊天页「正在输入」不闪断。
-  // 页面不可见时跳过停顿（定时器被节流，等不到；直接同步投递）
-  if (opts?.initialDelay && opts.initialDelay > 0 && !isPageHidden()) {
+  // 页面不可见 / 机主没看着该会话时跳过停顿（节奏对不可见的消息毫无意义，通知越快越好）
+  if (opts?.initialDelay && opts.initialDelay > 0 && !isPageHidden() && !shouldFastDeliver(sessionKey)) {
     window.setTimeout(step, Math.round(opts.initialDelay));
   } else {
     step();

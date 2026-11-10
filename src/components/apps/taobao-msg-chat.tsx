@@ -31,6 +31,8 @@ import {
 import { productById, shopById, tbImg, tbKefuAvatarOf } from '@/lib/ios/taobao-data';
 import { tbLoadOrders } from '@/lib/ios/taobao-store';
 import { getContact } from '@/lib/ios/contacts-store';
+// v1.9.12 聊天滚动重做（全端共享）：进入即到底/发送必到底/贴底跟随/看历史时「有新消息」轻提示
+import { ChatNewMsgPill, useChatAutoScroll } from '@/hooks/use-chat-autoscroll';
 import { TbImg } from './tb-img';
 import {
   tbChatAppend,
@@ -200,7 +202,12 @@ export function TbMsgChatPage({
   const [msgs, setMsgs] = useState<TbCsMsg[]>(() => tbChatLoad(uid, shopId));
   const [typing, setTyping] = useState(false); // 客服回复等待中（头部变「对方正在输入...」+ 三点气泡）
   const [input, setInput] = useState('');
-  const scrollerRef = useRef<HTMLDivElement | null>(null);
+  /** v1.9.12 聊天滚动重做（全端共享 hook）：进入即到底/发送必到底/贴底跟随/看历史时浮轻提示；
+   *  打字态变化也参与签名（贴底时滚下去露出打字气泡，看历史时不拽动视口） */
+  const { scrollRef: scrollerRef, scrollToBottom, showNewMsg } = useChatAutoScroll(
+    `${msgs.length}:${msgs[msgs.length - 1]?.id ?? ''}:${typing ? 1 : 0}`,
+    { mine: msgs[msgs.length - 1]?.role === 'user' },
+  );
   // ---- v1.9.2 分窗渲染（界面提速）：初始只渲染最近 WINDOW_FIRST 条，上滑到顶自动向前扩 ----
   // 窗口尾部锚定：新消息到达时 winStart 数学上自然跟随，既有「滚到底部」effect 不受影响
   const [visibleCount, setVisibleCount] = useState(WINDOW_FIRST);
@@ -252,20 +259,6 @@ export function TbMsgChatPage({
       aliveRef.current = false;
     };
   }, [uid, shopId]);
-
-  // 消息/打字态变化后滚到底部（双 rAF 等布局稳定）
-  useEffect(() => {
-    const el = scrollerRef.current;
-    if (!el) return;
-    let raf2 = 0;
-    const raf1 = requestAnimationFrame(() => {
-      raf2 = requestAnimationFrame(() => el.scrollTo({ top: el.scrollHeight }));
-    });
-    return () => {
-      cancelAnimationFrame(raf1);
-      cancelAnimationFrame(raf2);
-    };
-  }, [msgs, typing]);
 
   /** 给触发消息打/清 replyFail 徽标（tbChatPatch 落库 + setState 双写，参照微信/QQ setReplyFail） */
   const setReplyFail = (msgId: string | null, fail: boolean) => {
@@ -569,6 +562,8 @@ export function TbMsgChatPage({
             </div>
           </div>
         ) : null}
+        {/* v1.9.12 「有新消息 ⬇️」轻提示：上翻看历史时新消息不拽回底部，点击胶囊才回底部 */}
+        <ChatNewMsgPill show={showNewMsg} onClick={scrollToBottom} />
       </div>
       {/* 快捷行：评价客服 / 自助服务 */}
       <div className="flex gap-2 bg-[#F6F6F6] px-3 pb-1.5 pt-1">

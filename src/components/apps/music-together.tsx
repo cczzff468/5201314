@@ -8,11 +8,13 @@
  * AI 回复/主动评论/记忆写入逻辑在 music-ai.ts；此组件纯视图 + 调用入口。
  */
 
-import { useEffect, useRef, useState } from 'react';
+import { useState } from 'react';
 import { AudioLines, Loader2, Music4, RefreshCw, SendHorizonal, Smile } from 'lucide-react';
 import { useMusic, getGuestAvatar } from '@/lib/ios/music-store';
 import { retryTogetherReply, sendTogetherText, togetherRecommend, useTogetherLive } from '@/lib/ios/music-ai';
 import { CoverImg } from './music-shared';
+// v1.9.12 聊天滚动重做（全端共享）：进入即到底/发送必到底/贴底跟随/看历史时「有新消息」轻提示
+import { ChatNewMsgPill, useChatAutoScroll } from '@/hooks/use-chat-autoscroll';
 
 export function TogetherChat() {
   const msgs = useMusic((s) => s.togetherMsgs);
@@ -22,15 +24,16 @@ export function TogetherChat() {
   const loginAvatar = useMusic((s) => s.loginAvatar);
   // 对方信息跟随全局联系人（改头像/昵称立即同步）
   const together = useTogetherLive();
-  const listRef = useRef<HTMLDivElement>(null);
   const cid = together?.contactId ?? '';
   const myAvatar = loginUid ? loginAvatar : getGuestAvatar();
 
-  useEffect(() => {
-    // 只滚动消息流容器自身（scrollIntoView 会冒泡滚动外层播放容器，把整页顶出屏幕）
-    const box = listRef.current;
-    if (box) box.scrollTo({ top: box.scrollHeight, behavior: 'smooth' });
-  }, [msgs.length, aiBusy]);
+  // v1.9.12 聊天滚动重做（全端共享 hook）：进入即到底（无动画）/发送必到底/贴底跟随/看历史时浮轻提示。
+  // 只滚动消息流容器自身（scrollIntoView 会冒泡滚动外层播放容器，把整页顶出屏幕）；
+  // 平滑滚底改 scrollTop 直赋（不再有漫长滚动动画）
+  const { scrollRef: listRef, scrollToBottom, showNewMsg } = useChatAutoScroll(
+    `${msgs.length}:${msgs[msgs.length - 1]?.id ?? ''}:${aiBusy ? 1 : 0}`,
+    { mine: msgs[msgs.length - 1]?.role === 'me' },
+  );
 
   if (!together) {
     return (
@@ -136,6 +139,8 @@ export function TogetherChat() {
           </div>
         </div>
       )}
+      {/* v1.9.12 「有新消息 ⬇️」轻提示：上翻看历史时新消息不拽回底部，点击胶囊才回底部 */}
+      <ChatNewMsgPill show={showNewMsg} onClick={scrollToBottom} />
     </div>
   );
 }

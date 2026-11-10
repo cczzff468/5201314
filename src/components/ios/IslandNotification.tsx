@@ -199,23 +199,7 @@ function NotifyCard({ held }: { held: boolean }) {
             ) : null}
           </div>
           <div className={`mt-0.5 line-clamp-2 text-[12px] leading-[16px] ${dark ? 'text-white/85' : 'text-black/75'}`}>
-            {current.typing ? (
-              // v1.9.11「正在输入」实时活动：三点脉动打字指示（真实消息横幅到达后整卡顶替）
-              <span className="inline-flex items-center gap-1.5" data-testid="island-notify-typing">
-                正在输入
-                <span className="inline-flex items-center gap-[3px]" aria-hidden="true">
-                  {[0, 1, 2].map((i) => (
-                    <span
-                      key={i}
-                      className={`h-[4px] w-[4px] rounded-full animate-pulse ${dark ? 'bg-white/70' : 'bg-black/55'}`}
-                      style={{ animationDelay: `${i * 0.18}s` }}
-                    />
-                  ))}
-                </span>
-              </span>
-            ) : (
-              current.body
-            )}
+            {current.body}
           </div>
         </div>
       </motion.div>

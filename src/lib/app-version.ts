@@ -11,9 +11,9 @@
  */
 
 /** 当前最新版本（与 android-shell versionName 保持一致） */
-export const APP_VERSION = '1.9.11';
+export const APP_VERSION = '1.9.12';
 /** 版本号数字（与 android-shell versionCode 保持一致；覆盖安装要求只增不减） */
-export const APP_VERSION_CODE = 31;
+export const APP_VERSION_CODE = 32;
 
 export interface AppReleaseNote {
   version: string;
@@ -24,6 +24,15 @@ export interface AppReleaseNote {
 
 /** 版本历史（新→旧；设置 › APP 更新 页渲染，最新一条即当前版本） */
 export const APP_RELEASE_NOTES: AppReleaseNote[] = [
+  {
+    version: '1.9.12',
+    date: '2026-11-11',
+    items: [
+      '通知行为对齐真机 iOS：通知所属 App 正在用（就在里面）时不弹横幅不响提示，退出 App 回主屏/切别的 App 才弹；APP 退到后台才发系统通知栏通知',
+      '后台通知提速：机主没看着的会话跳过逐条打字节奏，消息即到即弹横幅；下线「正在输入…」占位卡（按机主要求，通知只弹真实消息）',
+      '聊天滚动全面重做：进入聊天瞬间直达最底部（无滚动动画）；发送消息立刻回到底部；上翻看历史时新消息不再拽走视口，改为底部「有新消息 ⬇️」轻提示点击才回底；键盘弹起输入框与最新消息不被遮挡（信息/微信/QQ/群聊/淘宝客服/X论坛私信/一起听全接入）',
+    ],
+  },
   {
     version: '1.9.11',
     date: '2026-11-10',

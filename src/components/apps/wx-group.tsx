@@ -192,6 +192,8 @@ import { useEnterSend, setEnterSend, guardEnterToSend } from '@/lib/enter-send';
 import { applyWbUserBlocks, collectWbBlocks, wbRulesBlock, wbScanText } from '@/lib/ios/worldbook';
 import { buildLocationBlock, locationAiText, locFromRich } from '@/lib/ios/chat-location';
 import { useSettings } from '@/lib/ios/store';
+// v1.9.12 聊天滚动重做（全端共享）：进入即到底/发送必到底/贴底跟随/看历史时「有新消息」轻提示
+import { ChatNewMsgPill, useChatAutoScroll } from '@/hooks/use-chat-autoscroll';
 import { chatPlaceholder, resolveQuickKeys } from '@/lib/ios/chat-decor';
 import { ChatQuickBar, type QuickBarItem } from './chat-quick-bar';
 import { pushChatNotification, notifyPreviewText } from '@/lib/ios/island-notify';
@@ -2530,6 +2532,11 @@ export function WxGroupChatPage({
   const [speakerId, setSpeakerId] = useState<string | null>(() => groupSpeaker.get(sKey) ?? null);
   const stream = useChatStream(sKey);
   const apiConfig = useSettings((s) => s.apiConfig);
+  /** v1.9.12 聊天滚动重做（全端共享 hook）：进入即到底/发送必到底/贴底跟随/看历史时浮轻提示 */
+  const { scrollRef: listRef, scrollToBottom, showNewMsg } = useChatAutoScroll(
+    `${msgs.length}:${msgs[msgs.length - 1]?.id ?? ''}:${stream?.content ?? ''}`,
+    { mine: msgs[msgs.length - 1]?.role === 'me' },
+  );
   // 聊天输入框自定义（本轮新增）：输入框占位文字 + 加号面板功能（与单聊共用；两种界面主题都生效）
   const chatDecorWx = useSettings((s) => s.chatDecor.wx);
   const runningRef = useRef(false);
@@ -2546,7 +2553,6 @@ export function WxGroupChatPage({
   // 不改 resolve('error') 的取值语义，regenerate/级联等既有消费点零扰动）
   const lastTurnErrRef = useRef('');
   const mountedRef = useRef(true);
-  const listRef = useRef<HTMLDivElement>(null);
   // ---- v1.9.2 分窗渲染（界面提速）：初始只渲染最近 WINDOW_FIRST 条，上滑到顶自动向前扩 ----
   // 长会话几千条消息一次性 map 是点进群聊卡顿的主因；分窗后首屏只建百级 DOM，
   // 上翻历史时按 WINDOW_STEP 步进补更早的（配合下方锚定 effect 保持视口不跳，与单聊同款）。
@@ -2737,12 +2743,6 @@ export function WxGroupChatPage({
       if (mountedRef.current) setMsgs(loadGroupMsgs(gid));
     });
   }, [sKey, gid]);
-
-  /** 新消息滚动到底 */
-  useEffect(() => {
-    const el = listRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
-  }, [msgs.length, stream?.content]);
 
   /** 落盘一条消息（finalize 与本地发送共用；组件不在也正确写存储）。
    *  #7 投递插入边界（对照单聊 wechat 同款）：机主消息（所有发送路径共用本函数，含回合中排队/分句入列）
@@ -3636,13 +3636,6 @@ export function WxGroupChatPage({
           messages,
           apiConfig,
           replyCount,
-          // v1.9.11 灵动岛「正在输入」实时活动：群聊以群名/群头像占位（发言人由生成决定，先展示群维度反馈）
-          typing: {
-            app: 'wechat',
-            title: g.name,
-            avatar: g.avatar ?? null,
-            target: { app: 'wechat', groupId: gid },
-          },
           // 配置识图模型后：群里发的图片先识图，成员结合图片按人设回复（与单聊同管线）；
           // 描述经 onVision 按图拆分回写本回合各张图片消息（img.desc 持久化，之后的聊天历史 AI 都能读到）
           ...(turnImageSrcs.length > 0
@@ -5539,6 +5532,8 @@ export function WxGroupChatPage({
             </div>
           </div>
         )}
+        {/* v1.9.12 「有新消息 ⬇️」轻提示：上翻看历史时新消息不拽回底部，点击胶囊才回底部 */}
+        <ChatNewMsgPill show={showNewMsg} onClick={scrollToBottom} />
       </div>
 
       {/* 输入区：与私聊同款灰底；@ 描边圆钮；表情/加号/图片/相机/位置与单聊完全对齐（共用同一套组件）；

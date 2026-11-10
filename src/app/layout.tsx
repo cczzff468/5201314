@@ -37,6 +37,9 @@ export const viewport: Viewport = {
   maximumScale: 1,
   userScalable: false,
   viewportFit: "cover",
+  // v1.9.12 键盘弹起时收缩布局视口（而非覆盖）：聊天输入条/底部消息不被软键盘遮挡
+  //（配合 useChatAutoScroll 的 visualViewport 贴底跟随，键盘弹出后最新消息仍在可视范围）
+  interactiveWidget: "resizes-content",
 };
 
 export default function RootLayout({

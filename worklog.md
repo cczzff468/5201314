@@ -2518,3 +2518,19 @@ Stage Summary:
 - 通知体感延迟根治：LLM 生成死区（800ms 后）由灵动岛「正在输入」实时活动即时反馈，首条消息一到自动变横幅——发送后 <1s 必有视觉响应
 - 五类后台事件心跳收紧至 2s，提醒/论坛/朋友圈/订单/挽留私信到点即弹
 - 关键文件：island-notify.ts（typing 活动）、IslandNotification.tsx（三点指示）、chat-stream-store.ts（typing 选项+动态调用）、chat/wechat/qq/wx-group/qq-group/quit-flow/group-social（七端接线）、ReminderWatcher/MomentsScheduler/ForumScheduler/QuitFlowScheduler/MeituanOrderWatcher（心跳）、app-version.ts（1.9.11/31）
+
+## 2026-11-11 · v98（网页端 v1.9.12）删除「正在输入」实时活动 + 通知前后台语义对齐 iOS + 聊天滚动全面重做
+
+改动清单：
+- [删除·机主指定] 灵动岛「正在输入」实时活动整体下线：island-notify.ts（TYPING_DELAY_MS/typingTimers/pushTypingActivity/cancelTypingActivity/IslandNotification.typing 字段全删）、chat-stream-store.ts（BeginChatStreamOptions.typing 选项 + pushTypingActivity 动态调用删除）、7 个调用端（chat/wechat/qq/wx-group/qq-group/quit-flow/group-social）typing 入参移除、IslandNotification.tsx 三点脉动渲染分支删除。通知只在真实消息落盘时弹
+- [通知语义·机主需求] pushChatNotification 新增前台闸门：通知所属 App 正被使用（useUI.activeApp === target.app 且未锁屏未熄屏）→ 不弹横幅不响提示不进系统通知（iOS 语义）；回主屏/切别的 App/锁屏熄屏才弹。maybeWebNotification 原生壳分支补 isPageBackground() 闸：机主正在用 APP 不发 Android 通知栏通知，APP 退后台才发（对齐「退出 APP 才系统通知」）
+- [后台通知提速] ai-delivery.ts 快速投递：shouldFastDeliver（页面隐藏 或 会话归属 App ≠ 当前前台 App）→ 跳过逐条打字节奏（initialDelay 跳过 + 条间 80ms FAST_DELIVER_GAP_MS），消息即到即落盘即弹横幅；机主正看着该会话保留真人节奏。实测后台场景横幅 = LLM 生成耗时 + ~100ms
+- [聊天滚动·机主规格] 新共享 hook src/hooks/use-chat-autoscroll.tsx：①进入聊天 scrollTop 直赋瞬到底（无滚动动画）；②发送（末条=机主消息）强制滚底；③AI 消息贴底（≤160px）跟随 / 上翻看历史时不拽动视口，改为 sticky「有新消息 ⬇️」胶囊（ChatNewMsgPill）点击才回底；④visualViewport resize 贴底重粘（键盘弹起输入框与最新消息不被遮挡）。滚底签名守卫沿用（条数/末条 id/流式内容，原地更新不拽动）
+- [接入面] 信息 chat.tsx、微信 wechat.tsx、QQ qq.tsx、微信群 wx-group.tsx、QQ群 qq-group.tsx、淘宝客服 taobao-msg-chat.tsx、X论坛私信 forum/dms.tsx（scrollIntoView smooth 改瞬滚+防打扰）、一起听 music-together.tsx（无条件 smooth 滚底改同规格）；情侣空间轨迹页原有贴底跟随已符合规格不动。layout.tsx viewport 补 interactiveWidget: 'resizes-content'（键盘收缩布局视口）
+- [版本] app-version.ts 1.9.12/32 + 发版说明 3 条；APK 不重打（无原生改动）
+
+Stage Summary:
+- 「正在输入」占位卡按机主要求删除，通知行为对齐真机 iOS：App 内不弹、后台才弹、系统通知仅后台发
+- 后台通知体感延迟 = 纯 LLM 生成时间（投递/通知管线 <100ms），「点进 APP 才出现」由守望者+快速投递双保险
+- 聊天滚动九端统一规格：进即到底/发必到底/贴底跟随/防打扰胶囊/键盘不遮挡
+- 关键文件：src/hooks/use-chat-autoscroll.tsx（新增）、island-notify.ts、ai-delivery.ts、chat-stream-store.ts、chat/wechat/qq/wx-group/qq-group/taobao-msg-chat/forum-dms/music-together、IslandNotification.tsx、layout.tsx、app-version.ts（1.9.12/32）

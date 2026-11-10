@@ -186,6 +186,8 @@ import { useEnterSend, setEnterSend, guardEnterToSend } from '@/lib/enter-send';
 import { applyWbUserBlocks, collectWbBlocks, wbRulesBlock, wbScanText } from '@/lib/ios/worldbook';
 import { buildLocationBlock, locationAiText, locFromRich } from '@/lib/ios/chat-location';
 import { useSettings } from '@/lib/ios/store';
+// v1.9.12 聊天滚动重做（全端共享）：进入即到底/发送必到底/贴底跟随/看历史时「有新消息」轻提示
+import { ChatNewMsgPill, useChatAutoScroll } from '@/hooks/use-chat-autoscroll';
 import { chatPlaceholder, resolveQuickKeys } from '@/lib/ios/chat-decor';
 import { ChatQuickBar, type QuickBarItem } from './chat-quick-bar';
 import { pushChatNotification, notifyPreviewText } from '@/lib/ios/island-notify';
@@ -2167,6 +2169,11 @@ export function QqGroupChatPage({
   const [speakerId, setSpeakerId] = useState<string | null>(() => groupSpeaker.get(sKey) ?? null);
   const stream = useChatStream(sKey);
   const apiConfig = useSettings((s) => s.apiConfig);
+  /** v1.9.12 聊天滚动重做（全端共享 hook）：进入即到底/发送必到底/贴底跟随/看历史时浮轻提示 */
+  const { scrollRef: listRef, scrollToBottom, showNewMsg } = useChatAutoScroll(
+    `${msgs.length}:${msgs[msgs.length - 1]?.id ?? ''}:${stream?.content ?? ''}`,
+    { mine: msgs[msgs.length - 1]?.role === 'me' },
+  );
   const runningRef = useRef(false);
   // react-hooks/refs：render 期需要读「回合进行中」标记（canDispatch/发送按钮态）——ref 不能在 render 读，
   // 增加 state 镜像：回合开始/收尾与 runningRef 同点置位（同一回调内连续写，批处理后渲染值一致）
@@ -2183,7 +2190,6 @@ export function QqGroupChatPage({
   /** 文字转语音发送（定义在下方；send 在前引用 → 同 runGroupTurnRef 的 ref 模式） */
   const sendTextAsVoiceRef = useRef<(t: string) => void>(() => undefined);
   const mountedRef = useRef(true);
-  const listRef = useRef<HTMLDivElement>(null);
   // ---- v1.9.2 分窗渲染（界面提速）：初始只渲染最近 WINDOW_FIRST 条，上滑到顶自动向前扩 ----
   // 长会话几千条消息一次性 map 是点进群聊卡顿的主因；分窗后首屏只建百级 DOM，
   // 上翻历史时按 WINDOW_STEP 步进补更早的（配合下方锚定 effect 保持视口不跳，与单聊同款）。
@@ -2292,12 +2298,6 @@ export function QqGroupChatPage({
       if (mountedRef.current) setMsgs(loadGroupMsgs(gid));
     });
   }, [sKey, gid]);
-
-  /** 新消息滚动到底 */
-  useEffect(() => {
-    const el = listRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
-  }, [msgs.length, stream?.content]);
 
   /** 落盘一条消息（finalize 与本地发送共用；组件不在也正确写存储）。
    *  #7 投递插入边界（对照单聊 qq.tsx 同款）：机主消息（所有发送路径共用本函数，含回合中排队/分句入列）
@@ -3222,13 +3222,6 @@ export function QqGroupChatPage({
           messages,
           apiConfig,
           replyCount,
-          // v1.9.11 灵动岛「正在输入」实时活动：群聊以群名/群头像占位（发言人由生成决定，先展示群维度反馈）
-          typing: {
-            app: 'qq',
-            title: g.name,
-            avatar: g.avatar ?? null,
-            target: { app: 'qq', groupId: gid },
-          },
           // 配置识图模型后：群里发的图片先识图，成员结合图片按人设回复（与单聊同管线）
           ...(turnImageSrcs.length > 0
             ? {
@@ -5147,6 +5140,8 @@ export function QqGroupChatPage({
             </div>
           </div>
         )}
+        {/* v1.9.12 「有新消息 ⬇️」轻提示：上翻看历史时新消息不拽回底部，点击胶囊才回底部 */}
+        <ChatNewMsgPill show={showNewMsg} onClick={scrollToBottom} />
       </div>
 
       {/* 输入区：与单聊同款几何（输入行 + 六图标工具栏）；键入 @ 唤起成员浮层（无独立 @ 钮）；表情/加号/图片/相机/位置与单聊完全对齐（共用同一套组件）；

@@ -8,7 +8,7 @@
  *   （LLM 人设驱动，官方小助手不聊天）。
  */
 
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import {
   forumData,
   forumSnapshot,
@@ -27,6 +27,8 @@ import { markDmPeerDisclosed } from '@/lib/forum/dm-memory';
 import { detectForumAnonDisclosure } from '@/lib/ios/forum-anon';
 import { XAvatar, XIcons, VerifiedBadge } from './shared';
 import { useForum } from './ctx';
+// v1.9.12 聊天滚动重做（全端共享）：进入即到底/发送必到底/贴底跟随/看历史时「有新消息」轻提示
+import { ChatNewMsgPill, useChatAutoScroll } from '@/hooks/use-chat-autoscroll';
 
 /** 会话内时钟 tick：多条错峰气泡（at 在未来）→ 到点逐条揭示（流式输出观感） */
 function useArrivedTicker(ms: number): number {
@@ -123,8 +125,6 @@ export function DmThread({ peerKey }: { peerKey: AuthorKey }) {
   const peer = resolveAuthor(peerKey);
   const dm = d.dms.find((x) => x.peerKey === peerKey);
   const [draft, setDraft] = useState('');
-  const scrollRef = useRef<HTMLDivElement | null>(null);
-  const bottomRef = useRef<HTMLDivElement | null>(null);
   // 流式输出（用户规格六）：对方连发的多条气泡 at 在未来（打字节奏）→
   // 会话内时钟逐条揭示，到点一条条冒出来 + 底部「正在输入…」占位
   const nowT = useArrivedTicker(400);
@@ -134,10 +134,12 @@ export function DmThread({ peerKey }: { peerKey: AuthorKey }) {
   const peerTyping = useMemo(() => all.some((m) => m.at > nowT && !isUserAuthor(m.from)), [all, nowT]);
   const lastLen = visible.length;
 
-  // 新消息到达 / 打字状态变化 → 自动滚底
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ block: 'end', behavior: lastLen > 0 ? 'smooth' : 'auto' });
-  }, [lastLen, peerTyping]);
+  // v1.9.12 聊天滚动重做（全端共享 hook）：进入即到底（无动画）/发送必到底/贴底跟随/看历史时浮轻提示。
+  // 原 scrollIntoView 平滑滚底换成 scrollTop 直赋（无漫长滚动动画），且上翻阅读时不再被拽回底部
+  const { scrollRef, scrollToBottom, showNewMsg } = useChatAutoScroll(
+    `${lastLen}:${visible[lastLen - 1]?.id ?? ''}:${peerTyping ? 1 : 0}`,
+    { mine: isUserAuthor(visible[lastLen - 1]?.from ?? '') },
+  );
 
   const send = () => {
     const text = draft.trim();
@@ -245,7 +247,8 @@ export function DmThread({ peerKey }: { peerKey: AuthorKey }) {
             </span>
           </div>
         )}
-        <div ref={bottomRef} />
+        {/* v1.9.12 「有新消息 ⬇️」轻提示：上翻看历史时新消息不拽回底部，点击胶囊才回底部 */}
+        <ChatNewMsgPill show={showNewMsg} onClick={scrollToBottom} />
       </div>
 
       {/* 输入条 */}
