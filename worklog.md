@@ -2597,3 +2597,17 @@ Work Log:
 
 Stage Summary:
 - v1.9.16 已提交：修复「通知铃声不响」（App 内提示音回归）与「后台系统通知不显示」（页面退后台一律放行系统通知）两处 v1.9.12 回归
+---
+Task ID: 24
+Agent: 主控 Agent（Z.ai Code）
+Task: v1.9.17 后台通知停摆根治（MessageChannel 免节流通道）+ 深度思考胶囊毛玻璃化
+
+Work Log:
+- ai-delivery.ts：①隐藏分块投递的块间让出 setTimeout(0)→yieldToEventLoop()（MessageChannel 宏任务，非定时器任务源不受后台节流——旧实现是「后台消息积压、点进 APP 才一次性冒出来」的直接根因：setTimeout 在后台先被拖到 1s、约 5 分钟后 1 次/分钟）；②isPageHidden 改 isPageBackground 双信号（visibilityState=hidden 或曾聚焦后失焦——桌面切窗口/WebView 可见性漏报时同样走即时通道）；③导出 yieldToEventLoop + 新增 dev 钩子 __aiDeliveryTest（E2E 用）
+- bg-relay-watcher.ts：①scheduleEventPeek 页面在后台时跳过 120ms 防抖立即 peek（后台防抖会退化成 1s~1 分钟，接力横幅「点进 APP 才弹」根因之一）；②peekOnce 尾随重跑 setTimeout(50)→yieldToEventLoop
+- think-card.tsx：折叠/流式两态小卡改椭圆毛玻璃胶囊（rounded-[6px]→rounded-full + backdrop-blur-md + 半透底 + 细描边），折叠文案「已深度思考 (点击展开)」→「深度思考」（删「点击展开」与「已」字），展开态「思考过程」保留
+- app-version.ts：bump 1.9.17（versionCode 37）+ 3 条更新说明
+- 验证：agent-browser E2E——①模拟 WebView 后台定时器暂停（stub setTimeout 永不触发）+ visibilityState hidden：__aiDeliveryTest 调度 12 条 103ms 全部投完 + 12 条灵动岛通知逐条弹出（旧实现在第 5 条后永久停摆，brokenTimers=12 证明旧路径必死）✅；②隐藏态 __bgRelayWatcher.peek() 16ms 即时完成 ✅；③注入测试联系人+c: 会话带 thinking 消息+deep-think 开关：胶囊渲染「深度思考」+ borderRadius≈3.4e7px（全圆角）+ backdropFilter blur(12px) + oklab 半透底，点击展开思考过程面板正常 ✅；测试数据已清理；eslint 四文件零错误
+
+Stage Summary:
+- v1.9.17 已提交：后台投递/接力全链路改走 MessageChannel 免节流通道（退后台消息即到即投即弹系统通知），前台判定补双信号；深度思考卡改椭圆毛玻璃胶囊并删「点击展开/已」文案

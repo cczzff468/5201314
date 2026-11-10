@@ -11,9 +11,9 @@
  */
 
 /** 当前最新版本（与 android-shell versionName 保持一致） */
-export const APP_VERSION = '1.9.16';
+export const APP_VERSION = '1.9.17';
 /** 版本号数字（与 android-shell versionCode 保持一致；覆盖安装要求只增不减） */
-export const APP_VERSION_CODE = 36;
+export const APP_VERSION_CODE = 37;
 
 export interface AppReleaseNote {
   version: string;
@@ -24,6 +24,15 @@ export interface AppReleaseNote {
 
 /** 版本历史（新→旧；设置 › APP 更新 页渲染，最新一条即当前版本） */
 export const APP_RELEASE_NOTES: AppReleaseNote[] = [
+  {
+    version: '1.9.17',
+    date: '2026-11-11',
+    items: [
+      '根治后台通知停摆：APP 退后台后 AI 消息投递与接力横幅改走不受后台节流的通道（旧实现依赖的定时器在后台会被浏览器拖慢到 1 秒起步、几分钟后每分钟才跑一次——消息和通知积压着，点进 APP 才一次性冒出来）；现在退后台消息即到即投即弹系统通知',
+      '后台判定补漏：从 App 里切走（页面被遮住但未隐藏、失焦）同样走即时投递，通知不再等',
+      '深度思考卡片焕新：方角小卡改椭圆毛玻璃胶囊，删掉「点击展开」与「已」字，只显示「深度思考」',
+    ],
+  },
   {
     version: '1.9.16',
     date: '2026-11-11',

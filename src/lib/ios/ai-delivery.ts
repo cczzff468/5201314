@@ -13,6 +13,10 @@
  */
 
 import { useUI } from './store';
+// v1.9.17 后台通知停深根治：页面隐藏/失焦判定与系统通知同口径（visibilityState + focus 双信号）；
+// 后台页 setTimeout 会被 Chromium 强节流（先 1s 对齐、约 5 分钟后降到 1 次/分钟）甚至暂停，
+// 所有「页面不在前台」的调度路径一律改走 MessageChannel 让出（非定时器任务源，后台不被节流）
+import { isPageBackground } from './system-notify';
 
 /** 单批投递选项 */
 export interface AiDeliveryOptions {
@@ -55,14 +59,33 @@ function defaultDelay(): number {
 }
 
 /**
- * 页面不可见（切走标签页 / 最小化）时浏览器会对后台 setTimeout 链强节流
- * （先 1s 对齐、几分钟后降到 1 次/分钟），逐条打字节奏会被拖到分钟级——
- * 用户感知就是「打开网页以后 AI 才回复」。页面不可见时改为立即同步投完：
- * 每条立刻落盘 + 走 Web Notification 弹系统通知（页面隐藏时 island-notify 会发系统通知），
- * 回到页面后恢复正常节奏。
+ * 页面不在前台（切走标签页 / 最小化 / APP 退后台 / 桌面切到别的窗口）——与系统通知同口径：
+ * v1.9.17 由「仅 visibilityState=hidden」改为 isPageBackground 双信号（曾聚焦后失焦也算）：
+ * 失焦但页可见时 setTimeout 同样被节流，且用户不在看着，投递应走即时通道。
  */
 function isPageHidden(): boolean {
-  return typeof document !== 'undefined' && document.visibilityState === 'hidden';
+  return isPageBackground();
+}
+
+/**
+ * 让出主事件循环（v1.9.17）：MessageChannel 宏任务让出——非定时器任务源，后台页
+ * setTimeout 被强节流（隐藏分块投递的旧实现每块间 setTimeout(0)，先被拖到 1s、
+ * 约 5 分钟后 1 次/分钟，用户感知就是「消息积在后台，点进 APP 才一次性冒出来」）
+ * 时 MessageChannel 依旧即时，后台投递节奏不再退化。导出给 bg-relay-watcher 复用。
+ */
+export function yieldToEventLoop(): Promise<void> {
+  return new Promise<void>((resolve) => {
+    if (typeof MessageChannel !== 'undefined') {
+      const mc = new MessageChannel();
+      mc.port1.onmessage = (): void => {
+        mc.port1.close();
+        resolve();
+      };
+      mc.port2.postMessage(0);
+    } else {
+      window.setTimeout(resolve, 0);
+    }
+  });
 }
 
 // ---------------- v1.9.12 快速投递（会话没被看着时跳过打字节奏） ----------------
@@ -175,7 +198,9 @@ function pump(sessionKey: string): void {
             index += 1;
           }
           if (index < items.length) {
-            await new Promise<void>((r) => window.setTimeout(r, 0));
+            // v1.9.17：MessageChannel 让出替代 setTimeout(0)——后台页定时器被强节流/暂停时
+            // 分块投递不再停深（旧实现点进 APP 才一次性冒出来的直接根因）
+            await yieldToEventLoop();
           }
         }
         const q = queues.get(sessionKey);
@@ -370,4 +395,22 @@ export function subscribeAiDelivery(sessionKey: string, cb: () => void): () => v
 export function subscribeAiDeliveryActive(cb: () => void): () => void {
   activeListeners.add(cb);
   return () => activeListeners.delete(cb);
+}
+
+if (typeof window !== 'undefined' && process.env.NODE_ENV !== 'production') {
+  // dev 测试钩子（仅 dev）：E2E 验证后台分块投递 / 让出机制用（生产构建被 NODE_ENV 闸挡掉）
+  const w = window as unknown as {
+    __aiDeliveryTest?: {
+      schedule: typeof scheduleAiDelivery;
+      peekPending: typeof peekPendingMsgs;
+      delivering: (key: string) => boolean;
+      hidden: () => boolean;
+    };
+  };
+  w.__aiDeliveryTest = {
+    schedule: (sessionKey, items, deliver) => scheduleAiDelivery(sessionKey, items, deliver),
+    peekPending: (sessionKey) => peekPendingMsgs<unknown>(sessionKey),
+    delivering: (key) => isAiDelivering(key),
+    hidden: () => isPageHidden(),
+  };
 }

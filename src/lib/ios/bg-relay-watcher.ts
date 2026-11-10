@@ -38,7 +38,10 @@ import {
   type NotifyApp,
   type NotifyTarget,
 } from './island-notify';
-import { getDeliveringSessionKeys, subscribeAiDeliveryActive } from './ai-delivery';
+import { getDeliveringSessionKeys, subscribeAiDeliveryActive, yieldToEventLoop } from './ai-delivery';
+// v1.9.17 后台接力提速：isPageBackground 双信号判定——页面在后台时事件驱动 peek 立即执行
+//（后台 setTimeout 被强节流 1s→1次/分钟，防抖反而把接力横幅拖慢，机主退后台收不到通知的根因之一）
+import { isPageBackground } from './system-notify';
 
 // ---------------- 常量 ----------------
 
@@ -169,14 +172,21 @@ async function peekOnce(): Promise<void> {
     peekInflight = false;
     if (peekQueued) {
       peekQueued = false;
-      window.setTimeout(() => void peekOnce(), 50);
+      // v1.9.17：MessageChannel 让出替代 setTimeout(50)——后台页定时器被节流时尾随重跑不再被拖慢
+      void yieldToEventLoop().then(() => peekOnce());
     }
   }
 }
 
-/** 事件驱动 peek（300ms 抖动合并：服务端一批多会话入队广播多条事件只拉一次） */
+/** 事件驱动 peek：前台 120ms 防抖合并（多会话同时入队只拉一次）；
+ *  页面在后台（隐藏/失焦）时立即执行——v1.9.17：后台 setTimeout 被强节流，
+ *  120ms 防抖在后台会退化成 1s 甚至 1 分钟，接力横幅「点进 APP 才弹」的直接根因之一 */
 let eventTimer: ReturnType<typeof setTimeout> | null = null;
 function scheduleEventPeek(): void {
+  if (isPageBackground()) {
+    void peekOnce();
+    return;
+  }
   if (eventTimer) return;
   eventTimer = setTimeout(() => {
     eventTimer = null;
