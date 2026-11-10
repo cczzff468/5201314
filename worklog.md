@@ -2534,3 +2534,22 @@ Stage Summary:
 - 后台通知体感延迟 = 纯 LLM 生成时间（投递/通知管线 <100ms），「点进 APP 才出现」由守望者+快速投递双保险
 - 聊天滚动九端统一规格：进即到底/发必到底/贴底跟随/防打扰胶囊/键盘不遮挡
 - 关键文件：src/hooks/use-chat-autoscroll.tsx（新增）、island-notify.ts、ai-delivery.ts、chat-stream-store.ts、chat/wechat/qq/wx-group/qq-group/taobao-msg-chat/forum-dms/music-together、IslandNotification.tsx、layout.tsx、app-version.ts（1.9.12/32）
+
+---
+Task ID: 20
+Agent: 主控 Agent（Z.ai Code）
+Task: v1.9.13 设置界面美化轮——三页图标黑白线条化 + AI 动手/语音唤起页卡片延伸 + 默认预设排序 + 智能体人设可自定义 + 「TA 怎么称呼你」+ 悬浮球再美化
+
+Work Log:
+- assistant-persona.ts：buildAssistantPersonaPrompt 增加 customPersona 参数——机主自定义人设整段替代内置【性格】【说话风格】段；ownerLine 语义改为「机主希望被称呼为」
+- agent-voice.ts：AgentVoiceCfg 新增 ownerTitle（≤8 字机主称呼）与 persona（≤500 字自定义人设）字段，readCfg/updateAgentVoiceCfg 口径与旧 JSON 兼容（缺省空串）
+- agent-chat.ts：buildVoiceSystemPrompt 注入 ownerTitle（优先于联系人机主名）与 customPersona；personaCache 键改为 name+owner+persona 三元组，任一变化立即换 prompt
+- settings.tsx：新增 LineIcon 黑白线条图标组件（细描边中性框+前景色线条）；语音唤起智能体页 Mic 图标与 AI 动手页 ScanEye 图标换 LineIcon；两页卡片 mx-4→mx-1 左右延伸（DetailShell px-4 内不再双重缩进），分组标题 px-8→px-5，提示行 mx-6→mx-4；专属人设行改可展开编辑器（Textarea+保存人设/取消编辑/恢复默认，badge 已自定义/唤醒名）；新增「TA 怎么称呼你」输入行（失焦落盘）；设置主列表默认预设入口移到悬浮工具组提示词查看器上方（开发者组移除）
+- settings-preset-library.tsx：AppIcon 去彩色方块底，改黑白线条风（ring-1 中性框+foreground 线条，strokeWidth 1.7）
+- agent-voice-ball.tsx：悬浮球美化——渐变细白描边圈（150deg 白渐变）+深色磨砂球体（内收 1px 露描边）+双层内高光（顶部镜面/底部微光）+柔和落影；监听中呼吸光环升级双层错相
+- app-version.ts：bump 1.9.13（versionCode 33）+ 5 条更新说明
+- E2E（agent-browser 390×844）：解锁→设置→默认预设位于提示词查看器上方✅；默认预设页 18 App 行黑白线条图标✅；AI 动手页图标+卡片延伸✅；语音唤起智能体页图标+延伸+人设编辑（保存→badge 已自定义→localStorage persona 持久化）✅；「TA 怎么称呼你」输入「老板」focusout 落盘✅；悬浮球渐变描边玻璃质感✅；console/dev.log 零错误
+- eslint：7 个改动文件全部通过（settings.tsx 3 处 set-state-in-effect 为 v1.9.12 存量，非本次引入）
+
+Stage Summary:
+- v1.9.13 已提交并推送 origin/main；三页黑白线条图标 + 两页卡片延伸 + 默认预设排序调整 + 人设自定义与机主称呼全链路（设置 UI → localStorage → 语音会话 system prompt）+ 悬浮球美化全部落地

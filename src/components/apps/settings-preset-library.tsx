@@ -624,13 +624,13 @@ export function PresetAppPanels({
 function AppIcon({ id }: { id: string }) {
   const meta = APP_META[id] ?? APP_META.global;
   const Icon = meta.icon;
+  // v1.9.13 黑白线条图标（机主要求）：去掉彩色方块底，改细描边中性框 + 前景色细线条
   return (
     <span
-      className="flex h-[28px] w-[28px] shrink-0 items-center justify-center rounded-[8px]"
-      style={{ backgroundColor: meta.tone }}
+      className="flex h-[28px] w-[28px] shrink-0 items-center justify-center rounded-[8px] ring-1 ring-foreground/15 dark:ring-white/20"
       aria-hidden
     >
-      <Icon className="h-4 w-4 text-white" strokeWidth={2.2} />
+      <Icon className="h-4 w-4 text-foreground/85 dark:text-white/85" strokeWidth={1.7} />
     </span>
   );
 }

@@ -1023,9 +1023,9 @@ export default function AgentVoiceBall() {
         ) : null}
       </AnimatePresence>
 
-      {/* ================= 悬浮球（v1.9.4 删除重建：极简磨砂玻璃球，可拖动吸边） =================
-          设计语言：一层深色磨砂玻璃 + 细白描边 + 白色麦克风，无彩虹渐变/无光晕——
-          状态表达只留两个：连续唤醒监听中（极细呼吸光环）与唤醒熔断（右上小 ALERT 点） */}
+      {/* ================= 悬浮球（v1.9.13 美化：高质感黑白玻璃球，可拖动吸边） =================
+          设计语言：渐变细白描边圈 + 深色磨砂玻璃球体 + 双层内高光（顶部镜面反光/底部微光），
+          黑白极简但更立体通透；状态表达仍是两个：连续唤醒监听中（双层呼吸光环）与唤醒熔断（右上 ALERT 点） */}
       <motion.button
         type="button"
         aria-label="语音助手（拖动移位，点按说话）"
@@ -1050,13 +1050,20 @@ export default function AgentVoiceBall() {
         className="pointer-events-auto absolute bottom-[140px] right-0 flex h-[44px] w-[44px] touch-none select-none items-center justify-center rounded-full"
         data-testid="agent-voice-ball"
       >
-        {/* 呼吸光环（连续唤醒监听中）：极细白圈轻呼吸，替代彩虹旋环 */}
+        {/* 呼吸光环（连续唤醒监听中）：双层细白圈错相呼吸，内圈亮外圈淡，「正在听」更灵动 */}
         {listening ? (
-          <span
-            aria-hidden="true"
-            className="absolute -inset-[5px] rounded-full ring-1 ring-white/30"
-            style={{ animation: 'agentVoiceBreath 2.8s ease-in-out infinite' }}
-          />
+          <>
+            <span
+              aria-hidden="true"
+              className="absolute -inset-[5px] rounded-full ring-1 ring-white/35"
+              style={{ animation: 'agentVoiceBreath 2.8s ease-in-out infinite' }}
+            />
+            <span
+              aria-hidden="true"
+              className="absolute -inset-[10px] rounded-full ring-1 ring-white/15"
+              style={{ animation: 'agentVoiceBreath 2.8s ease-in-out -0.7s infinite' }}
+            />
+          </>
         ) : null}
         {/* 唤醒熔断提示点（唯一状态点）：喊名唤醒因麦克风权限等原因停用时点亮，点球看原因 */}
         {wakeBlocked ? (
@@ -1066,18 +1073,31 @@ export default function AgentVoiceBall() {
             className="absolute right-[3px] top-[3px] z-10 h-2 w-2 rounded-full bg-[#FF453A] ring-[1.5px] ring-black/45"
           />
         ) : null}
-        {/* 磨砂玻璃球体：深色半透 + 细白描边 + 柔和投影（简约玻璃质感） */}
-        <span
-          aria-hidden="true"
-          className="absolute inset-0 rounded-full bg-black/55 backdrop-blur-xl ring-1 ring-white/25 shadow-[0_4px_14px_rgba(0,0,0,0.35)]"
-        />
-        {/* 顶部内高光（玻璃质感，极轻） */}
+        {/* 渐变描边圈：左上亮的玻璃边缘（替代单色 ring，立体感）+ 柔和落影 */}
         <span
           aria-hidden="true"
           className="absolute inset-0 rounded-full"
-          style={{ background: 'radial-gradient(120% 90% at 30% 14%, rgba(255,255,255,0.16), transparent 46%)' }}
+          style={{
+            background: 'linear-gradient(150deg, rgba(255,255,255,0.42), rgba(255,255,255,0.08) 45%, rgba(255,255,255,0.18))',
+            boxShadow: '0 6px 18px rgba(0,0,0,0.42), 0 1.5px 4px rgba(0,0,0,0.32)',
+          }}
         />
-        <Mic className="relative h-[18px] w-[18px] text-white/90" strokeWidth={1.8} />
+        {/* 球体：深色磨砂玻璃（内收 1px 露出描边圈）+ 内侧上下微光 */}
+        <span
+          aria-hidden="true"
+          className="absolute inset-[1px] rounded-full bg-[#16161A]/85 backdrop-blur-xl"
+          style={{ boxShadow: 'inset 0 1px 1px rgba(255,255,255,0.16), inset 0 -6px 12px rgba(255,255,255,0.06)' }}
+        />
+        {/* 双层内高光：顶部左上镜面反光 + 底部右下微透光（玻璃通透感） */}
+        <span
+          aria-hidden="true"
+          className="absolute inset-[1px] rounded-full"
+          style={{
+            background:
+              'radial-gradient(110% 70% at 30% 12%, rgba(255,255,255,0.22), transparent 44%), radial-gradient(90% 60% at 72% 96%, rgba(255,255,255,0.10), transparent 55%)',
+          }}
+        />
+        <Mic className="relative h-[18px] w-[18px] text-white" strokeWidth={1.9} />
       </motion.button>
     </div>
   );

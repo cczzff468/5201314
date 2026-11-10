@@ -11,9 +11,9 @@
  */
 
 /** 当前最新版本（与 android-shell versionName 保持一致） */
-export const APP_VERSION = '1.9.12';
+export const APP_VERSION = '1.9.13';
 /** 版本号数字（与 android-shell versionCode 保持一致；覆盖安装要求只增不减） */
-export const APP_VERSION_CODE = 32;
+export const APP_VERSION_CODE = 33;
 
 export interface AppReleaseNote {
   version: string;
@@ -24,6 +24,17 @@ export interface AppReleaseNote {
 
 /** 版本历史（新→旧；设置 › APP 更新 页渲染，最新一条即当前版本） */
 export const APP_RELEASE_NOTES: AppReleaseNote[] = [
+  {
+    version: '1.9.13',
+    date: '2026-11-11',
+    items: [
+      '默认预设 / AI 动手 / 语音唤起智能体三个界面图标全部换黑白线条风（去彩色底，细描边中性框+前景色线条），AI 动手与语音唤起智能体页卡片左右延伸更满屏',
+      '设置页排序调整：「默认预设」入口移到「提示词查看器」上面',
+      '语音智能体人设可自定义：专属人设行点开即可写下你想要的性格与说话方式，TA 就按这个人设说话（可一键恢复内置默认）',
+      '新增「TA 怎么称呼你」：写上你希望被叫的名字，语音对话里 TA 就这样称呼你',
+      '麦克风悬浮球再美化：渐变细白描边玻璃球 + 双层镜面高光，监听中双层呼吸光环更灵动',
+    ],
+  },
   {
     version: '1.9.12',
     date: '2026-11-11',

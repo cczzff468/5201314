@@ -89,15 +89,20 @@ const PERSONA_CACHE_TTL = 60_000;
 
 /**
  * 语音会话 system prompt：专属人设（assistant-persona）+ 语音场景约束 + 路由/输出协议。
- * 名字跟随唤醒名；人设 60s 内缓存（键含名字，改唤醒名立即换名；避免每句都重拼）。
+ * 名字跟随唤醒名；人设/称呼/自定义人设任一变化即换 prompt（60s 内缓存，避免每句都重拼）。
  */
 async function buildVoiceSystemPrompt(): Promise<string> {
-  const name = getAgentVoiceCfg().name || ASSISTANT_DEFAULT_NAME;
-  if (personaCache && personaCache.key === name && Date.now() - personaCache.at < PERSONA_CACHE_TTL) {
+  const vcfg = getAgentVoiceCfg();
+  const name = vcfg.name || ASSISTANT_DEFAULT_NAME;
+  // 机主称呼：设置页「TA 怎么称呼你」优先，未填沿用联系人机主名（原逻辑）
+  const owner = vcfg.ownerTitle.trim() || cachedOwnerName() || null;
+  const customPersona = vcfg.persona.trim();
+  const cacheKey = `${name}\n${owner ?? ''}\n${customPersona}`;
+  if (personaCache && personaCache.key === cacheKey && Date.now() - personaCache.at < PERSONA_CACHE_TTL) {
     return personaCache.sys;
   }
   const sys = [
-    buildAssistantPersonaPrompt(name, cachedOwnerName() || null),
+    buildAssistantPersonaPrompt(name, owner, customPersona || null),
     '【当前场景】你正在和机主语音对话（手机顶层的语音助手会话）。你的回复会被朗读出来，所以必须：',
     '- 口语化，像说话不像写字；一轮 1~3 句，不要长篇大论；',
     '- 不要用任何 Markdown、列表、表情符号、括号动作描写（如「微笑」）。',
@@ -109,7 +114,7 @@ async function buildVoiceSystemPrompt(): Promise<string> {
     '- 要动手：{"mode":"task","task":"<整理后的任务描述>"}',
     '【判定规则】出现操作动词或应用名（打开/发/建/创建/删/设/查/放/搜/订/写/记/提醒/下单…）→ task；打招呼/闲聊/情绪陪伴/知识问答 → chat；拿不准 → chat。',
   ].join('\n');
-  personaCache = { key: name, sys, at: Date.now() };
+  personaCache = { key: cacheKey, sys, at: Date.now() };
   return sys;
 }
 

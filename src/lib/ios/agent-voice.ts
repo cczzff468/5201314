@@ -68,6 +68,12 @@ export interface AgentVoiceCfg {
   /** 助手音色（v1.8）：TA 说话用的声音（设置 › 语音智能体可选内置声线/我的音色）。
    *  空 = 跟随「语音 API」里的全局默认音色。 */
   voice: string;
+  /** 机主希望被怎么称呼（v1.9.13「你希望 TA 叫你什么」，≤8 字）：
+   *  有值时语音会话人设注入这个称呼（优先于联系人机主名）；空 = 沿用原逻辑 */
+  ownerTitle: string;
+  /** 自定义人设（v1.9.13，≤500 字）：机主写的性格/说话方式描述，
+   *  有值时整段替代内置「性格/说话风格」人设段；空 = 内置默认人设 */
+  persona: string;
 }
 
 const DEFAULT_CFG: AgentVoiceCfg = {
@@ -79,6 +85,8 @@ const DEFAULT_CFG: AgentVoiceCfg = {
   followup: true,
   contChat: true,
   voice: '',
+  ownerTitle: '',
+  persona: '',
 };
 
 /** v1.7.2 一次性迁移键：老版本把 listen=false 写进了存储，迁移一次翻成默认开（之后用户可再关） */
@@ -105,6 +113,9 @@ function readCfg(): AgentVoiceCfg {
       // 旧 JSON 缺字段 → 默认开（连续对话是新默认体验，用户可显式关）
       contChat: p.contChat !== false,
       voice: typeof p.voice === 'string' ? p.voice.trim() : '',
+      // v1.9.13 新字段：旧 JSON 缺失 → 空串（称呼沿用联系人机主名/人设用内置默认）
+      ownerTitle: typeof p.ownerTitle === 'string' ? p.ownerTitle.trim().slice(0, 8) : '',
+      persona: typeof p.persona === 'string' ? p.persona.slice(0, 500) : '',
     };
     if (migrated) {
       try {
@@ -201,6 +212,9 @@ export function retryAgentWake(): void {
 export function updateAgentVoiceCfg(patch: Partial<AgentVoiceCfg>): AgentVoiceCfg {
   const next = { ...useAgentVoice.getState().cfg, ...patch };
   next.name = next.name.trim().slice(0, 6) || DEFAULT_WAKE_NAME;
+  // v1.9.13 新字段口径：称呼去空白截 8 字（允许空）；人设截 500 字（允许空 = 内置默认）
+  next.ownerTitle = next.ownerTitle.trim().slice(0, 8);
+  next.persona = next.persona.slice(0, 500);
   try {
     window.localStorage.setItem(STORE_KEY, JSON.stringify(next));
   } catch {

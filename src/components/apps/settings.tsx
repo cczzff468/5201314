@@ -288,6 +288,18 @@ function RowIcon({ icon: Icon, tone }: { icon: LucideIcon; tone: string }) {
   );
 }
 
+/**
+ * 黑白线条行图标（v1.9.13：默认预设 / AI 动手 / 语音唤起智能体页专用）：
+ * 无底色方块，细描边中性框 + 前景色细线条图标（黑白线条风，机主要求）
+ */
+function LineIcon({ icon: Icon }: { icon: LucideIcon }) {
+  return (
+    <span className="flex h-[30px] w-[30px] shrink-0 items-center justify-center rounded-[8px] ring-1 ring-foreground/15 dark:ring-white/20">
+      <Icon className="h-[17px] w-[17px] text-foreground/85 dark:text-white/85" strokeWidth={1.8} />
+    </span>
+  );
+}
+
 /** 主列表行：左彩色方块图标 + 标签，右侧可选值 / ChevronRight（testId：需要 E2E 定位的行传入） */
 function MainRow({
   icon,
@@ -709,9 +721,18 @@ function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
 
         {/* 悬浮工具（v72）：两个开关控制手机右下角的可拖拽悬浮球——
             提示词查看器（下一轮完整 Prompt 只读预览）与快捷操作（API/世界书一键切换）。
-            两个开关全关时不显示悬浮球；与状态栏/灵动岛同款 iOS 原生 51×31 大开关 */}
+            两个开关全关时不显示悬浮球；与状态栏/灵动岛同款 iOS 原生 51×31 大开关。
+            v1.9.13：默认预设入口移到「提示词查看器」上方（机主要求的排序） */}
         <div className="mb-2 mt-6 px-8 text-[13px] text-muted-foreground">悬浮工具</div>
         <div className="mx-4 divide-y divide-black/[0.05] overflow-hidden rounded-[22px] bg-white/55 shadow-[0_8px_28px_rgba(17,24,39,0.06)] ring-1 ring-white/70 backdrop-blur-2xl dark:divide-white/[0.06] dark:bg-white/[0.06] dark:ring-white/[0.09]">
+          <MainRow
+            icon={Layers}
+            tone={TONE_PURPLE}
+            label="默认预设（内置）"
+            value="按 App 整理 · 501 条 · 模块 12 组"
+            onClick={() => onOpen('prompts')}
+            testId="settings-prompts-row"
+          />
           <div className="flex min-h-[52px] items-center gap-3 px-4 py-2">
             <RowIcon icon={Eye} tone={TONE_CYAN} />
             <span className="min-w-0 flex-1">
@@ -809,14 +830,6 @@ function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
             label="API 配置"
             value={apiKey.trim() ? `已配置 · ${apiModel}` : '未配置'}
             onClick={() => onOpen('api')}
-          />
-          <MainRow
-            icon={Layers}
-            tone={TONE_PURPLE}
-            label="默认预设（内置）"
-            value="按 App 整理 · 501 条 · 模块 12 组"
-            onClick={() => onOpen('prompts')}
-            testId="settings-prompts-row"
           />
           <MainRow
             icon={Eye}
@@ -1045,6 +1058,25 @@ function AgentVoiceCard() {
     setNameDraft(t || DEFAULT_WAKE_NAME);
   };
 
+  // ---- v1.9.13 机主称呼（「你希望 TA 叫你什么」）：失焦落盘（≤8 字，可留空） ----
+  const [ownerDraft, setOwnerDraft] = useState(cfg.ownerTitle);
+  const commitOwnerTitle = () => {
+    const t = ownerDraft.trim().slice(0, 8);
+    if (t === cfg.ownerTitle) return;
+    updateAgentVoiceCfg({ ownerTitle: t });
+    setOwnerDraft(t);
+  };
+
+  // ---- v1.9.13 自定义人设（可编辑）：专属人设行点开展开编辑器，保存/恢复默认 ----
+  const personaCustom = cfg.persona.trim().length > 0;
+  const [personaOpen, setPersonaOpen] = useState(false);
+  const [personaDraft, setPersonaDraft] = useState<string | null>(null);
+  const savePersona = () => {
+    if (personaDraft === null) return;
+    updateAgentVoiceCfg({ persona: personaDraft.slice(0, 500) });
+    setPersonaDraft(null);
+  };
+
   // ---- 助手音色（v1.8）：TA 说话的声音（跟随全局/内置声线/我的音色），展开式选择器 + 试听 ----
   const myVoices = useMyVoices((s) => s.voices);
   const [voiceOpen, setVoiceOpen] = useState(false);
@@ -1080,28 +1112,98 @@ function AgentVoiceCard() {
 
   return (
     <>
-      {/* v1.9.3：独立设置页（标题走 DetailShell 导航栏），卡片直接紧跟内容区 */}
+      {/* v1.9.3：独立设置页（标题走 DetailShell 导航栏），卡片直接紧跟内容区；
+          v1.9.13：卡片左右延伸（mx-4→mx-1，DetailShell px-4 内不再双重缩进），图标改黑白线条 */}
       <div
-        className="mx-4 mt-2 overflow-hidden rounded-[22px] bg-white/55 shadow-[0_8px_28px_rgba(17,24,39,0.06)] ring-1 ring-white/70 backdrop-blur-2xl dark:bg-white/[0.06] dark:ring-white/[0.09]"
+        className="mx-1 mt-2 overflow-hidden rounded-[22px] bg-white/55 shadow-[0_8px_28px_rgba(17,24,39,0.06)] ring-1 ring-white/70 backdrop-blur-2xl dark:bg-white/[0.06] dark:ring-white/[0.09]"
         data-testid="settings-agent-voice-card"
       >
         {/* 一行说明 */}
         <div className="flex items-start gap-3 px-4 pt-3">
-          <RowIcon icon={Mic} tone={TONE_GREEN} />
+          <LineIcon icon={Mic} />
           <p className="min-w-0 flex-1 pb-1 text-[11.5px] leading-relaxed text-muted-foreground">
             喊唤醒名或点悬浮球唤起：能闲聊会陪唠、有自己的性格，也能动手帮你操作手机（像小爱同学/Siri）
           </p>
         </div>
         <div className="mt-1 divide-y divide-black/[0.05] dark:divide-white/[0.06]">
-          {/* 专属人设（静态说明行） */}
-          <div className="flex min-h-[52px] items-center gap-3 px-4 py-2">
-            <span className="min-w-0 flex-1">
-              <span className="block truncate text-[16px]">专属人设</span>
-              <span className="mt-0.5 block truncate text-[11.5px] text-muted-foreground">{ASSISTANT_PERSONA_TAGLINE}</span>
-            </span>
-            <span className="shrink-0 rounded-full bg-emerald-500/10 px-2.5 py-1 text-[11px] text-emerald-600 dark:text-emerald-400" data-testid="agent-voice-persona-badge">
-              {cfg.name || DEFAULT_WAKE_NAME}
-            </span>
+          {/* 专属人设（v1.9.13 可编辑：点开展开编辑器，自定义性格与说话方式；空 = 内置默认） */}
+          <div>
+            <button
+              type="button"
+              className="flex min-h-[52px] w-full items-center gap-3 px-4 py-2 text-left"
+              onClick={() => setPersonaOpen((v) => !v)}
+              aria-expanded={personaOpen}
+              data-testid="agent-voice-persona-row"
+            >
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-[16px]">专属人设</span>
+                <span className="mt-0.5 block truncate text-[11.5px] text-muted-foreground">
+                  {personaCustom ? cfg.persona.trim().slice(0, 40) : ASSISTANT_PERSONA_TAGLINE}
+                </span>
+              </span>
+              <span
+                className={`shrink-0 rounded-full px-2.5 py-1 text-[11px] ${
+                  personaCustom
+                    ? 'bg-[#007AFF]/10 text-[#007AFF] dark:text-[#64B5FF]'
+                    : 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+                }`}
+                data-testid="agent-voice-persona-badge"
+              >
+                {personaCustom ? '已自定义' : cfg.name || DEFAULT_WAKE_NAME}
+              </span>
+              <ChevronDown
+                className={`h-4 w-4 shrink-0 text-muted-foreground/70 transition-transform ${personaOpen ? 'rotate-180' : ''}`}
+                aria-hidden="true"
+              />
+            </button>
+            {personaOpen ? (
+              <div className="bg-black/[0.02] px-4 pb-3 dark:bg-white/[0.03]">
+                <p className="pt-1.5 text-[11px] leading-relaxed text-muted-foreground">
+                  写下你想要的性格与说话方式（如「高冷毒舌但关键时刻靠得住」「说话温柔，爱用叠词」），
+                  TA 就按这个人设说话；留空保存 = 恢复内置默认（{ASSISTANT_PERSONA_TAGLINE}）。
+                </p>
+                <Textarea
+                  value={personaDraft ?? cfg.persona}
+                  onChange={(e) => setPersonaDraft(e.target.value)}
+                  maxLength={500}
+                  placeholder={`留空用内置默认：${ASSISTANT_PERSONA_TAGLINE}`}
+                  aria-label="自定义人设"
+                  className="mt-2 min-h-28 text-[13px] leading-relaxed"
+                  data-testid="agent-voice-persona-input"
+                />
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={savePersona}
+                    disabled={personaDraft === null}
+                    className="rounded-full bg-[#007AFF] px-4 py-[6px] text-[11.5px] font-medium text-white transition-colors active:bg-[#0066D6] disabled:opacity-40"
+                    data-testid="agent-voice-persona-save"
+                  >
+                    保存人设
+                  </button>
+                  {personaDraft !== null ? (
+                    <button
+                      type="button"
+                      onClick={() => setPersonaDraft(null)}
+                      className="flex items-center gap-1 rounded-full bg-black/[0.05] px-3 py-[6px] text-[11.5px] font-medium text-foreground/70 transition-colors active:bg-black/[0.08] dark:bg-white/10 dark:text-muted-foreground"
+                    >
+                      取消编辑
+                    </button>
+                  ) : null}
+                  {personaCustom && personaDraft === null ? (
+                    <button
+                      type="button"
+                      onClick={() => updateAgentVoiceCfg({ persona: '' })}
+                      className="flex items-center gap-1 rounded-full bg-black/[0.05] px-3 py-[6px] text-[11.5px] font-medium text-foreground/70 transition-colors active:bg-black/[0.08] dark:bg-white/10 dark:text-muted-foreground"
+                      data-testid="agent-voice-persona-reset"
+                    >
+                      <RefreshCw className="h-3 w-3" />
+                      恢复默认
+                    </button>
+                  ) : null}
+                </div>
+              </div>
+            ) : null}
           </div>
           {/* 唤醒名 */}
           <div className="flex min-h-[52px] items-center gap-3 px-4 py-2">
@@ -1119,6 +1221,26 @@ function AgentVoiceCard() {
               aria-label="唤醒名"
               className="h-9 w-28 shrink-0 text-right"
               data-testid="agent-voice-name-input"
+            />
+          </div>
+          {/* v1.9.13 机主称呼（「你希望 TA 叫你什么」）：有值时 TA 会这样叫你；留空沿用联系人机主名 */}
+          <div className="flex min-h-[52px] items-center gap-3 px-4 py-2">
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-[16px]">TA 怎么称呼你</span>
+              <span className="mt-0.5 block truncate text-[11.5px] text-muted-foreground">
+                你希望 TA 叫你什么（≤8 字，可不填）· 对话里 TA 会这样称呼你
+              </span>
+            </span>
+            <Input
+              value={ownerDraft}
+              onChange={(e) => setOwnerDraft(e.target.value)}
+              onBlur={commitOwnerTitle}
+              maxLength={8}
+              placeholder="随口称呼"
+              inputMode="text"
+              aria-label="TA 怎么称呼你"
+              className="h-9 w-28 shrink-0 text-right"
+              data-testid="agent-voice-owner-title-input"
             />
           </div>
           {/* 助手音色（v1.8）：TA 说话用的声音 */}
@@ -1270,13 +1392,13 @@ function AgentVoiceCard() {
       </div>
       {/* 状态提示行（条件显示） */}
       {!nativeMode ? (
-        <p className="mx-6 mt-2 text-[11.5px] leading-relaxed text-muted-foreground">
+        <p className="mx-4 mt-2 text-[11.5px] leading-relaxed text-muted-foreground">
           当前在浏览器里：悬浮球同样显示，喊唤醒名或点球都能唤起。喊名识别自动择优（浏览器实时识别 →
           服务端识别兜底，需允许麦克风权限并联网）；下载离线模型后断网也能唤醒。真机任务仍只在 APP 内可用。
         </p>
       ) : null}
       {cfg.listen && nativeMode && asrNotReady ? (
-        <p className="mx-6 mt-2 text-[11.5px] leading-relaxed text-[#FF9500]">
+        <p className="mx-4 mt-2 text-[11.5px] leading-relaxed text-[#FF9500]">
           离线识别模型未就绪：喊名唤醒已改走服务端识别（需联网、每次说话识别一小段）——
           点上方「唤醒状态」行里的「下载离线识别模型」一键下载（或到设置 › 语音 API），
           完成后自动切回端侧识别：断网也能唤醒、响应更快、不再耗流量。
@@ -1284,12 +1406,12 @@ function AgentVoiceCard() {
       ) : null}
       {/* C4：播报开着但 TTS 未配置（第三方缺 Key/地址）——提醒会静默跳过 */}
       {cfg.announce && !isTtsConfigured(ttsCfg) ? (
-        <p className="mx-6 mt-2 text-[11.5px] leading-relaxed text-[#FF9500]">
+        <p className="mx-4 mt-2 text-[11.5px] leading-relaxed text-[#FF9500]">
           未配置语音 API：执行结果播报将静默跳过——到「语音 API」选择内置语音或填好服务商 Key 后生效。
         </p>
       ) : null}
       {wakeBlocked ? (
-        <p className="mx-6 mt-2 text-[11.5px] leading-relaxed text-[#FF3B30]" role="alert">
+        <p className="mx-4 mt-2 text-[11.5px] leading-relaxed text-[#FF3B30]" role="alert">
           {wakeBlocked}
         </p>
       ) : null}
@@ -1336,8 +1458,8 @@ function ShizukuAutonomyPage({ onBack }: { onBack: () => void }) {
   return (
     <DetailShell title="AI 动手" onBack={onBack} gray>
       <div className="no-scrollbar flex-1 overflow-y-auto pb-8">
-        {/* 说明卡 */}
-        <div className="mx-4 mt-4 rounded-[22px] bg-white/55 p-4 text-[13px] leading-relaxed ring-1 ring-white/70 backdrop-blur-2xl dark:bg-white/[0.06] dark:ring-white/[0.09]">
+        {/* 说明卡；v1.9.13 卡片左右延伸（mx-4→mx-1）+ 图标改黑白线条 */}
+        <div className="mx-1 mt-4 rounded-[22px] bg-white/55 p-4 text-[13px] leading-relaxed ring-1 ring-white/70 backdrop-blur-2xl dark:bg-white/[0.06] dark:ring-white/[0.09]">
           <p className="font-medium">让 AI 真实操控这部手机（Shizuku 引擎）</p>
           <p className="mt-1.5 text-muted-foreground">
             总开关打开后，AI 会按 TA 的人设、记忆和聊天上下文自主决定何时动手（你说「帮我关掉抖音」就强杀抖音、深夜劝睡可以关流量）；
@@ -1363,9 +1485,9 @@ function ShizukuAutonomyPage({ onBack }: { onBack: () => void }) {
         </div>
 
         {/* 总开关 */}
-        <div className="mx-4 mt-4 divide-y divide-black/[0.05] overflow-hidden rounded-[22px] bg-white/55 shadow-[0_8px_28px_rgba(17,24,39,0.06)] ring-1 ring-white/70 backdrop-blur-2xl dark:divide-white/[0.06] dark:bg-white/[0.06] dark:ring-white/[0.09]">
+        <div className="mx-1 mt-4 divide-y divide-black/[0.05] overflow-hidden rounded-[22px] bg-white/55 shadow-[0_8px_28px_rgba(17,24,39,0.06)] ring-1 ring-white/70 backdrop-blur-2xl dark:divide-white/[0.06] dark:bg-white/[0.06] dark:ring-white/[0.09]">
           <div className="flex min-h-[52px] items-center gap-3 px-4 py-2">
-            <RowIcon icon={ScanEye} tone={TONE_GREEN} />
+            <LineIcon icon={ScanEye} />
             <span className="min-w-0 flex-1">
               <span className="block truncate text-[16px]">允许 AI 动手</span>
               <span className="mt-0.5 block truncate text-[11.5px] text-muted-foreground">
@@ -1379,22 +1501,22 @@ function ShizukuAutonomyPage({ onBack }: { onBack: () => void }) {
         {/* v1.9.3：语音唤起智能体已拆出为独立设置页（设置 › 语音唤起智能体） */}
 
         {/* 动手组 */}
-        <div className="mb-2 mt-6 px-8 text-[13px] text-muted-foreground">动手（真实操作）</div>
-        <div className={`mx-4 divide-y divide-black/[0.05] overflow-hidden rounded-[22px] bg-white/55 shadow-[0_8px_28px_rgba(17,24,39,0.06)] ring-1 ring-white/70 backdrop-blur-2xl dark:divide-white/[0.06] dark:bg-white/[0.06] dark:ring-white/[0.09] ${cfg.master ? '' : 'opacity-55'}`}>
+        <div className="mb-2 mt-6 px-5 text-[13px] text-muted-foreground">动手（真实操作）</div>
+        <div className={`mx-1 divide-y divide-black/[0.05] overflow-hidden rounded-[22px] bg-white/55 shadow-[0_8px_28px_rgba(17,24,39,0.06)] ring-1 ring-white/70 backdrop-blur-2xl dark:divide-white/[0.06] dark:bg-white/[0.06] dark:ring-white/[0.09] ${cfg.master ? '' : 'opacity-55'}`}>
           {hands.map((cap) => (
             <AutonomyCapRow key={cap.key} cap={cap} on={Boolean(cfg.caps[cap.key])} onToggle={() => flipCap(cap.key)} />
           ))}
         </div>
 
         {/* 看见组 */}
-        <div className="mb-2 mt-6 px-8 text-[13px] text-muted-foreground">看见（只读探测）</div>
-        <div className={`mx-4 divide-y divide-black/[0.05] overflow-hidden rounded-[22px] bg-white/55 shadow-[0_8px_28px_rgba(17,24,39,0.06)] ring-1 ring-white/70 backdrop-blur-2xl dark:divide-white/[0.06] dark:bg-white/[0.06] dark:ring-white/[0.09] ${cfg.master ? '' : 'opacity-55'}`}>
+        <div className="mb-2 mt-6 px-5 text-[13px] text-muted-foreground">看见（只读探测）</div>
+        <div className={`mx-1 divide-y divide-black/[0.05] overflow-hidden rounded-[22px] bg-white/55 shadow-[0_8px_28px_rgba(17,24,39,0.06)] ring-1 ring-white/70 backdrop-blur-2xl dark:divide-white/[0.06] dark:bg-white/[0.06] dark:ring-white/[0.09] ${cfg.master ? '' : 'opacity-55'}`}>
           {eyes.map((cap) => (
             <AutonomyCapRow key={cap.key} cap={cap} on={Boolean(cfg.caps[cap.key])} onToggle={() => flipCap(cap.key)} />
           ))}
         </div>
 
-        <p className="mx-4 mt-4 text-[11.5px] leading-relaxed text-muted-foreground">
+        <p className="mx-1 mt-4 text-[11.5px] leading-relaxed text-muted-foreground">
           开关即点即存（下一次发消息立即生效）。危险项默认关着，确认要让 AI 碰再手动开。
           想手动试用这些能力：聊天设置 → 感知设置 → Shizuku 能力实验室。
         </p>
