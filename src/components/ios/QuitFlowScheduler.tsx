@@ -1,7 +1,7 @@
 'use client';
 
 /**
- * 退群挽留全局调度器：挂在 PhoneShell（App 不打开也照常结算），每 5s 调一次 runQuitFlowTick：
+ * 退群挽留全局调度器：挂在 PhoneShell（App 不打开也照常结算），每 2s 调一次 runQuitFlowTick：
  * - 退群快照（用户退出群聊时由 groups.ts 退群钩子写入）到点后，让群里最合适的一员按人设
  *   在 1 分钟窗口内主动私信机主（落入对应 App 的私聊，未读/预览自动刷新）；
  * - 私信后机主回复 → 私聊管线注入退群背景，AI 可按人设把人拉回群（quit-flow 模块执行）。
@@ -14,7 +14,7 @@ import type { ContactRecord } from '@/lib/contacts';
 import { ensureQuitHook, runQuitFlowTick } from '@/lib/ios/quit-flow';
 import { ensureGroupSocialHooks } from '@/lib/ios/group-social';
 
-const TICK_MS = 5000;
+const TICK_MS = 2000;
 const CONTACTS_REFRESH_MS = 60_000;
 
 export default function QuitFlowScheduler() {

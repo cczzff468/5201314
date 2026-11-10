@@ -1,7 +1,7 @@
 'use client';
 
 /**
- * X论坛 · AI 真人社交 全局调度器：挂在 PhoneShell（论坛 App 不打开也照常调度），每 15s 心跳：
+ * X论坛 · AI 真人社交 全局调度器：挂在 PhoneShell（论坛 App 不打开也照常调度），每 2s 心跳：
  * - runPending 重挂延迟任务（分钟~小时级的远期任务进入 90s 窗口时自动上 timer）；
  * - 活跃度开 → 每个角色按节奏排「主动发帖」任务（人设+情绪+记忆+今日事件素材）；
  * - 用户发帖/评论后排好的角色互动（点赞/评论/神回复）到点执行。
@@ -15,7 +15,7 @@ import { tickForumSocial } from '@/lib/forum/engine';
 // 【时间流增长】帖子数据动态增长引擎（用户规格一）：心跳驱动 + 内部 20 分钟节流
 import { tickForumGrowth } from '@/lib/forum/growth';
 
-const TICK_MS = 15_000;
+const TICK_MS = 2000;
 
 export default function ForumScheduler() {
   useEffect(() => {

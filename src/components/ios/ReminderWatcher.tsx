@@ -28,8 +28,9 @@ import { selectResolvedTheme, useSettings, useSystemDark, useUI } from '@/lib/io
 
 // ---------------- 常量 ----------------
 
-/** 轮询间隔（与 AlarmWatcher 同量级；后台标签页被浏览器节流至 1/min 仍在宽限内） */
-const POLL_MS = 10_000;
+/** 轮询间隔（v1.9.11 提速 10s→2s：到期提醒最晚 2s 内弹横幅，不再平均迟 5s；
+ *  后台标签页被浏览器节流至 1/min 仍在宽限内，IndexedDB getAll 每 2s 一次开销可忽略） */
+const POLL_MS = 2_000;
 /** 到期宽限：超过该时长的陈旧到期不再补弹（如隔天打开网页） */
 const GRACE_MS = 2 * 60_000;
 /** 仅日期（无时间）的提醒 / 全天事件的默认提醒时刻 */

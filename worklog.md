@@ -2497,3 +2497,24 @@ Stage Summary:
 - 通知面板四项 UI 调整（电话图标/右上角按钮/删免打扰/底部拉手）落地
 - 接力横幅机械延迟再压缩（遗留消息 5.5s→1.6s、兜底轮询 10s、事件响应 120ms）
 - 关键文件：IslandNotification.tsx（v1.9.6 基线恢复）、island-reply.ts（删除）、island-notify.ts（机制移除）、notification-center.ts、sw.js、NotificationCenter.tsx、bg-relay-watcher.ts、push-send.ts、/api/chat/bg、app-version.ts（1.9.10/30）
+
+## 2026-11-10 · v97（网页端 v1.9.11）通知「正在输入」实时活动 + 后台事件心跳全面收紧
+
+Task ID: 47
+Agent: 主控 Agent（Z.ai Code）
+Task: 机主反馈「系统通知还是会延迟 3-4 秒」——根因定位与体感修复
+
+Work Log:
+- [根因实测] mock OpenAI 接口（mini-services/mock-llm，首 token/间隔可控）+ agent-browser 探针全链路计时：发送 → 代理 502(directOnly) 40ms → 浏览器直连首字节 48ms → 首段流完 → 横幅弹出仅 +17ms；代理路径（nip.io 主机名绕过 isPrivateHost）流式无缓冲（首字节 570ms、分块渐进到达）。结论：应用内管线零人工延迟，3-4s = LLM 生成首段回复的固有耗时，且回复条数=1 的会话（小助手等）要等全文生成完才弹，死区最明显
+- [核心修复·灵动岛「正在输入」实时活动] island-notify.ts 新增 pushTypingActivity/cancelTypingActivity + IslandNotification.typing 字段：回合开始 800ms 仍无首段内容 → 灵动岛空闲时弹「正在输入…」占位卡（三点脉动，无提示音、不入通知中心、不进系统通知，3s 自动收起同普通横幅）；真实消息横幅到达时 pushChatNotification 无条件取消该会话占位计时器、展示中占位卡被 st.show 自然顶替——「打字中→消息到达」无缝过渡。守卫同真实横幅口径（DND/会话免打扰/接力守望者抑制/岛忙不弹不排队）
+- [IslandNotification.tsx] typing 卡渲染三点脉动打字指示（animate-pulse 交错 180ms，data-testid=island-notify-typing）
+- [chat-stream-store.ts] BeginChatStreamOptions 新增 typing 选项（app/title/avatar/target 结构），beginChatStream 守卫通过后动态 import island-notify 调 pushTypingActivity（避免静态链拖重模块）
+- [七端接线] chat.tsx（peerLabel/peerAvatarSrc，target 按 c: 前缀）/ wechat.tsx / qq.tsx（peer.name/peer.avatar）/ wx-group.tsx / qq-group.tsx（群名/群头像，群维度占位）/ quit-flow.ts（挽留私信）/ group-social.ts（建群开场白）全部传 typing
+- [后台事件心跳收紧] ReminderWatcher 10s→2s（提醒/日历到期最晚 2s 内弹，不再平均迟 5s）；MomentsScheduler 5s→2s（互动延迟队列）；ForumScheduler 15s→2s（论坛互动到点执行，原来最多迟 15s）；QuitFlowScheduler 5s→2s；MeituanOrderWatcher 4s→2s（订单状态推进）；proactive-msg 5s tick 保持（分钟级排程下占比可忽略）
+- [版本] app-version.ts 1.9.11/31 + 发版说明 2 条；APK 不重打（无原生改动）
+- [验证·E2E agent-browser 390x844] tsc 全库 0 错误；eslint 全部改动文件 0 问题；mock 首 token 2.5s 慢 LLM 场景实测时间线：发送 → 859ms 灵动岛弹「正在输入」卡（150ms 采样 typing=true 连续在位）→ 3699ms 自动顶替为真实消息横幅（typing=false）✓；1.6s 截图确认卡片视觉（头像+信息角标+三点脉动）✓；5s 后自动收起无残留 ✓；版本更新弹窗 v1.9.11 如期弹出 ✓
+
+Stage Summary:
+- 通知体感延迟根治：LLM 生成死区（800ms 后）由灵动岛「正在输入」实时活动即时反馈，首条消息一到自动变横幅——发送后 <1s 必有视觉响应
+- 五类后台事件心跳收紧至 2s，提醒/论坛/朋友圈/订单/挽留私信到点即弹
+- 关键文件：island-notify.ts（typing 活动）、IslandNotification.tsx（三点指示）、chat-stream-store.ts（typing 选项+动态调用）、chat/wechat/qq/wx-group/qq-group/quit-flow/group-social（七端接线）、ReminderWatcher/MomentsScheduler/ForumScheduler/QuitFlowScheduler/MeituanOrderWatcher（心跳）、app-version.ts（1.9.11/31）

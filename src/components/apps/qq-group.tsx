@@ -3222,6 +3222,13 @@ export function QqGroupChatPage({
           messages,
           apiConfig,
           replyCount,
+          // v1.9.11 灵动岛「正在输入」实时活动：群聊以群名/群头像占位（发言人由生成决定，先展示群维度反馈）
+          typing: {
+            app: 'qq',
+            title: g.name,
+            avatar: g.avatar ?? null,
+            target: { app: 'qq', groupId: gid },
+          },
           // 配置识图模型后：群里发的图片先识图，成员结合图片按人设回复（与单聊同管线）
           ...(turnImageSrcs.length > 0
             ? {

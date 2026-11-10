@@ -2095,6 +2095,13 @@ function ChatView({
       messages: payload,
       apiConfig,
       replyCount,
+      // v1.9.11 灵动岛「正在输入」实时活动：LLM 生成首段期间（常 2-4s）即时反馈占位
+      typing: {
+        app: 'chat',
+        title: peerLabel,
+        avatar: peerAvatarSrc ?? null,
+        target: storageKey.startsWith('c:') ? { app: 'chat', contactId: storageKey.slice(2) } : { app: 'chat' },
+      },
       ...(turnImages.length > 0
         ? {
             vision: { images: turnImages, text: '' },

@@ -5730,6 +5730,13 @@ function ChatPage({
       messages: payloadMsgs,
       apiConfig,
       replyCount,
+      // v1.9.11 灵动岛「正在输入」实时活动：LLM 生成首段期间（常 2-4s）即时反馈占位
+      typing: {
+        app: 'qq',
+        title: peer.name,
+        avatar: peer.avatar ?? null,
+        target: { app: 'qq', contactId: peer.id },
+      },
       ...(turnImages.length > 0
         ? {
             vision: { images: turnImages, text: userMsg?.content ?? '' },

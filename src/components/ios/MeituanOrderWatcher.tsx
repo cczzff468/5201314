@@ -40,7 +40,8 @@ export default function MeituanOrderWatcher() {
       }
     };
     tick();
-    const iv = setInterval(tick, 4000);
+    // v1.9.11 提速 4s→2s：订单状态（商家接单/骑手取餐/送达）到点即推进，灵动岛小窗不再晚弹
+    const iv = setInterval(tick, 2000);
     const onVis = () => {
       if (!document.hidden) tick();
     };

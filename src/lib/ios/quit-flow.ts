@@ -589,6 +589,13 @@ async function sendQuitDm(st: QuitFlowState, contacts: ContactRecord[]): Promise
     ],
     apiConfig: useSettings.getState().apiConfig,
     replyCount: 1,
+    // v1.9.11 灵动岛「正在输入」实时活动：挽留私信生成期即时反馈占位
+    typing: {
+      app: app === 'wx' ? 'wechat' : 'qq',
+      title: contact.name,
+      avatar: contact.avatar ?? null,
+      target: app === 'wx' ? { app: 'wechat', contactId: contact.id } : { app: 'qq', contactId: contact.id },
+    },
     finalize: (result) => {
       const cur = loadState(st.gid);
       const text = (result.content ?? '').trim();

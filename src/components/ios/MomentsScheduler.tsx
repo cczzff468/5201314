@@ -1,7 +1,7 @@
 'use client';
 
 /**
- * 朋友圈/QQ动态 全局调度器：挂在 PhoneShell（App 不打开也照常结算），每 5s 调一次 runMomentsTick：
+ * 朋友圈/QQ动态 全局调度器：挂在 PhoneShell（App 不打开也照常结算），每 2s 调一次 runMomentsTick：
  * - 结算延迟队列：用户动态的 AI 互动（1-2 位好友点赞/评论）+ 用户回复 AI 评论后的多轮再回复（重启不丢）；
  * - 自动发布：每角色×平台的三种触发（定时 / 频率 / 聊天灵感），内容由 AI 按人设生成，失败退避重试。
  *
@@ -17,7 +17,7 @@ import { listContacts } from '@/lib/ios/contacts-store';
 import { useSettings } from '@/lib/ios/store';
 import { repairLegacyMomentData, repairMomentIdentityData, runMomentsTick, stripMomentAvatarSnapshots, type MomentTickDeps } from '@/lib/moments';
 
-const TICK_MS = 5000;
+const TICK_MS = 2000;
 const CONTACTS_REFRESH_MS = 60_000;
 
 /** 登录会话 → 机主展示名（与微信/QQ App 内 me.name 同源；未登录返回空串跳过该平台）。
