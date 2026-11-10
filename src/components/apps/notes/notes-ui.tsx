@@ -259,33 +259,23 @@ export function SearchBox({
 
 // ---------------- 勾选圆（金色） ----------------
 
-/** 金色勾选圆：未勾 = 金色描边空心，已勾 = 金底白勾（清单/批量选择共用） */
+/**
+ * 金色勾选圆：未勾 = 金色描边空心，已勾 = 金底白勾（批量选择卡片共用）。
+ * 渲染为非交互 <span>：勾选圆只出现在 NoteCard 外层按钮内部，
+ * 再渲染 <button> 会触发「button 不能嵌套 button」hydration 报错；
+ * 点击/无障碍语义由外层卡片按钮（aria-label="选择：xx"）统一承接。
+ */
 export function CheckCircle({
   checked,
   size = 22,
-  onToggle,
-  ariaLabel,
 }: {
   checked: boolean;
   size?: number;
-  onToggle?: () => void;
-  ariaLabel?: string;
 }) {
   return (
-    <button
-      type="button"
-      role="checkbox"
-      aria-checked={checked}
-      aria-label={ariaLabel ?? (checked ? '已选择' : '未选择')}
-      onClick={
-        onToggle
-          ? (e) => {
-              e.stopPropagation();
-              onToggle();
-            }
-          : undefined
-      }
-      className="flex shrink-0 items-center justify-center rounded-full transition-transform active:scale-90"
+    <span
+      aria-hidden="true"
+      className="flex shrink-0 items-center justify-center rounded-full"
       style={
         checked
           ? { width: size, height: size, backgroundColor: 'var(--notes-gold)', border: 'none' }
@@ -293,7 +283,7 @@ export function CheckCircle({
       }
     >
       {checked && <Check className="text-white" style={{ width: size * 0.6, height: size * 0.6 }} strokeWidth={3} />}
-    </button>
+    </span>
   );
 }
 
@@ -501,7 +491,7 @@ export function NoteCard({
         aria-label={`${checked ? '取消选择' : '选择'}：${title}`}
         className={`${CARD_CLS} flex w-full select-none items-center gap-3 p-3.5 text-left transition-opacity active:opacity-70`}
       >
-        <CheckCircle checked={checked} ariaLabel={checked ? '已选择' : '未选择'} />
+        <CheckCircle checked={checked} />
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-1.5">
             <span className="min-w-0 flex-1 truncate text-[15.5px] font-semibold leading-snug text-foreground">
