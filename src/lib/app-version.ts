@@ -11,9 +11,9 @@
  */
 
 /** 当前最新版本（与 android-shell versionName 保持一致） */
-export const APP_VERSION = '1.9.8';
+export const APP_VERSION = '1.9.9';
 /** 版本号数字（与 android-shell versionCode 保持一致；覆盖安装要求只增不减） */
-export const APP_VERSION_CODE = 28;
+export const APP_VERSION_CODE = 29;
 
 export interface AppReleaseNote {
   version: string;
@@ -24,6 +24,14 @@ export interface AppReleaseNote {
 
 /** 版本历史（新→旧；设置 › APP 更新 页渲染，最新一条即当前版本） */
 export const APP_RELEASE_NOTES: AppReleaseNote[] = [
+  {
+    version: '1.9.9',
+    date: '2026-11-10',
+    items: [
+      '系统通知也能直接回消息：点通知栏/浏览器系统通知不再直接跳进会话，而是在页内弹出「全文+输入框」面板，不进 APP 就能回信息；APK 通知、网页系统通知、关页期间的推送通知三条路全部生效',
+      '回复提速：AI 连发的多条消息间隔节奏整体调快近一半（保留逐条冒出的真人感），多条回复的等待明显缩短',
+    ],
+  },
   {
     version: '1.9.8',
     date: '2026-11-10',

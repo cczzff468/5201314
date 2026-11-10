@@ -112,7 +112,9 @@ function NotifyCard({ held }: { held: boolean }) {
   const canFloat = current.app === 'wechat' && !!current.target.contactId && !current.target.groupId;
   const chatApp = mapNotifyAppToChatApp(current.target.app);
   const replyable = isReplyableNotifyTarget(current.target) && !isReplyTargetChatActive(current.target);
-  const [panelOpen, setPanelOpen] = useState(false);
+  // v1.9.9 系统通知点击复现：startExpanded=true 时卡片直接以展开面板姿态出现
+  // （NotifyCard 按 current.id key 重挂载，useState 初始化器只在该通知首次挂载时求值）
+  const [panelOpen, setPanelOpen] = useState(() => !!current.startExpanded);
   const [replyText, setReplyText] = useState('');
   const [replyState, setReplyState] = useState<IslandReplyResult | 'sending' | 'idle'>('idle');
   const cardRef = useRef<HTMLDivElement>(null);

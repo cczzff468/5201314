@@ -2451,3 +2451,25 @@ Stage Summary:
 - 「慢」部分为模拟真人设计使然（LLM 生成 + 打字节奏），接力横幅不再叠加「进 APP 才投递」的额外延迟
 - 关键文件：bg-relay-watcher.ts（新建）、bg-turn.ts（SSE 常驻+常驻订阅）、island-notify.ts（横幅抑制）、/api/chat/bg（peekAll preview）、PhoneShell.tsx（引入）、app-version.ts（1.9.8/28）
 - E2E（agent-browser 390x844 解锁手势）：主屏注入接力 deliver → 1.3s 内横幅弹出（标题+预览+APP 图标）✓ → 点击展开全文+进入聊天 ✓ → 进入后消息正式落盘（语音转换管线正常）+ 无重复横幅（cur=null）✓ → serverPending=0 ✓ → 投递排空后再注入新批次横幅恢复弹出（latch 解除生效）✓；测试数据已清理（助手会话 16→7 条，bg-relay-bannered/peeked 键清除）
+
+## 2026-11-10 · v95（网页端 v1.9.9）系统通知点击 → 展开面板复现（全文+快捷回复）+ 打字节奏提速
+
+Task ID: 45
+Agent: 主控 Agent（Z.ai Code）
+Task: 机主澄清两点：①通知「慢」还有没有更好的办法；②v1.9.7 的「点击展开全文+输入框回消息」说的是**系统通知**（通知栏/浏览器 OS 通知），不是网站内的灵动岛横幅
+
+Work Log:
+- [澄清与方案] OS 系统通知本身无法内嵌输入框（平台限制）——正确做法：点击系统通知后，应用内以「已展开面板」姿态复现该通知（灵动岛锚位弹出：全文块+快捷回复输入框+进入聊天按钮），不直接跳会话；点「进入聊天」才跳转。站内横幅 v1.9.7 语义保持不变
+- [island-notify.ts] ①通知注册表 recentByTag（含原生壳 chat-<id> 口径）+ recentByTarget（NotifyTarget 键），pushChatNotification 注册、上限 30 淘汰最旧；②expandSystemNotification(info) 统一入口：tag 精确命中 → target 兜底（原生回传只有 target：取该会话最近一条，堆叠通知点顶条=最新条）→ 点击载荷构造（页面重开注册表为空时用 title/body/target 构造最小面板）——三级都解析不出返回 false 回退直达；仅 target 无内容不构造空面板（比「新消息」空壳更贴近点击预期）；锁屏/熄屏挂起意图 pendingNav 现携带 title/body/tag（v1.9.9.1 修复：原只存 target 导致解锁后注册表为空就静默丢失）；复现卡 id 重新生成（key 变化强制重挂载、startExpanded 生效）+ 载荷 body 覆盖全文块
+- [接线四路] SW postMessage（sw.js 回传 title/body/tag，读取 event.notification 自带字段）→ expandSystemNotification；APK 原生 local-notify-open → notification-center.openCenterItem → navigateForItem(preferExpand=true)（解析失败自动回退直达；中心面板内点击条目保持直达 iOS 语义）；开机 #notify= hash：sw.js openWindow 新格式 {target,title,body}（旧格式裸 target 兼容直达）+ 提取 consumeNotifyHash 在模块加载与 hashchange 各消费一次（修启动器工具后置设置 hash 错过消费的缺口）；桌面页面构造器兜底 onclick → expandSystemNotification
+- [sw.js] notificationclick 透传 title/body/tag（notification 对象自带字段）进 postMessage 与 hash 载荷；push 处理器把服务端载荷 target 透传进通知 data
+- [服务端] push-send.ts PushEnvelope + target 字段（随载荷 JSON 下发）；/api/chat/bg enqueue relayTargetOf(sessionKey) 反解点击跳转目标（wx/qq 单聊群聊/sms c: 前缀，与客户端 parseSessionTarget 同规则）——关页期间 Web Push 通知点开也能展开面板回消息
+- [IslandNotification.tsx] panelOpen 初始化读 current.startExpanded（NotifyCard 按 id key 重挂载，useState 初始化器只在挂载时求值）；展开面板冻结自动收起计时（既有 effect 天然覆盖）
+- [提速·ai-delivery.ts] typingDelayOf 850+45/字 上限2.4s → 480+22/字 上限1.4s；defaultDelay 700±600 → 450±350——保留逐条冒出的真人节奏，多条回复整体等待近乎减半（首条本就 immediate，此改主要缩短后续条间隔）
+- [验证·E2E] ①sysClick 注册表 target 命中 → 展开面板（全文块+回复小灵输入框+发送键）✓ → 面板输入发送 → status 行+user 消息落盘+AI 回复落盘（卡片 900ms 收起让位 AI 回复横幅=既有生命周期）✓；②APK 原生事件 local-notify-open → 完整面板（头像/标题/两行预览/全文块/回复框/进入聊天）✓；③载荷构造（注册表未命中 wechat e2e-only-push）→ 面板显示载荷全文 ✓；④SW postMessage 通道 → 全文块显示载荷 body（覆盖注册表）✓；⑤hash 开机消费+锁屏意图携带 title/body → 解锁后复现面板（v1.9.9.1 缺陷修复验证）✓；⑥站内横幅回归：点击展开✓、无 contactId 目标不供输入（v1.9.7 语义不变）✓；⑦排查插页：hash 消费曾「不生效」实为 agent-browser open 同 URL 同文档导航（不重载）+ 测试者忽略重载回锁屏的挂起分支——SW 注销+清缓存排除缓存嫌疑后全链路走通
+- [版本] app-version.ts 1.9.9/29 + 发版说明 2 条；APK 不重打（原生回传契约 {url,target} 不变，靠注册表 target 键解析；未来原生回传带 tag/title 可让面板内容更精确，非必需）
+
+Stage Summary:
+- 系统通知点击全面升级：APK 通知栏、浏览器 SW 通知、关页 Web Push、桌面页面构造器四通道，点系统通知一律弹出「全文+输入框」展开面板（锁屏点击解锁后复现），不进会话直接回消息；解析失败自动回退旧行为直达会话
+- AI 连发节奏提速近一半；站内横幅 v1.9.7 行为不变
+- 关键文件：island-notify.ts（注册表+expandSystemNotification+四路接线+意图携带载荷）、IslandNotification.tsx（startExpanded）、sw.js（回传字段+hash 新格式+push target）、notification-center.ts（原生回传 preferExpand）、push-send.ts + /api/chat/bg（推送载荷 target）、ai-delivery.ts（节奏）、app-version.ts（1.9.9/29）

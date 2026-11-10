@@ -45,7 +45,7 @@ const activeListeners = new Set<() => void>();
 
 /** 默认停顿：各端通常传 typingDelayOf 按内容长度模拟打字；这里给一个保守的通用节奏 */
 function defaultDelay(): number {
-  return 700 + Math.random() * 600;
+  return 450 + Math.random() * 350;
 }
 
 /**
@@ -59,10 +59,12 @@ function isPageHidden(): boolean {
   return typeof document !== 'undefined' && document.visibilityState === 'hidden';
 }
 
-/** 按内容长度估算停顿（各端文字消息用；卡片类消息走默认） */
+/** 按内容长度估算停顿（各端文字消息用；卡片类消息走默认）。
+ *  v1.9.9 提速一档（机主反馈通知/连发偏慢）：480ms 起步 + 22ms/字（原 850+45/字）、
+ *  上限 2.4s→1.4s——保留逐条冒出的真人节奏感，多条回复的整体等待近乎减半 */
 export function typingDelayOf(text: string): number {
   const len = text.trim().length;
-  return Math.min(2400, 850 + len * 45 + Math.random() * 400);
+  return Math.min(1400, 480 + len * 22 + Math.random() * 250);
 }
 
 function emitActive(): void {

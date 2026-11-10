@@ -90,6 +90,9 @@ export interface IslandNotification {
   /** 合并条数（同一会话连续多条 > 1 时展示） */
   count: number;
   target: NotifyTarget;
+  /** v1.9.9 系统通知点击复现：卡片以「已展开面板」姿态弹出（全文+快捷回复直接可用），
+   *  仅由 showExpandedSystemNotification 构造时置 true，常规推送永不携带 */
+  startExpanded?: boolean;
 }
 
 interface IslandNotifyState {
@@ -199,11 +202,19 @@ if (typeof window !== 'undefined') {
   // 测试钩子（仅 dev）：E2E / 手工验证注入口 —— window.__islandNotifyTest.push(通知输入)
   // （与 notification-center 的 __ncTest 同模式；直接走真实 pushChatNotification 入口，
   //  生产构建被 NODE_ENV 闸挡掉，零泄漏）
+  // v1.9.9 sysClick：模拟系统通知点击（SW postMessage / 原生回传同入口，E2E 展开面板验证）
   if (process.env.NODE_ENV !== 'production') {
-    const w = window as unknown as { __islandNotifyTest?: { push: typeof pushChatNotification; state: () => unknown } };
+    const w = window as unknown as {
+      __islandNotifyTest?: {
+        push: typeof pushChatNotification;
+        state: () => unknown;
+        sysClick: typeof expandSystemNotification;
+      };
+    };
     w.__islandNotifyTest = {
       push: (input) => pushChatNotification(input),
       state: () => useIslandNotify.getState(),
+      sysClick: (info) => expandSystemNotification(info),
     };
   }
 }
@@ -336,6 +347,7 @@ export function pushChatNotification(input: ChatNotifyInput): void {
     count: 1,
     target: input.target,
   };
+  rememberNotification(n); // v1.9.9 系统通知点击复现注册表（tag + target 双键）
   if (!st.current && !st.exiting) {
     st.show(n);
     armAutoDismiss();
@@ -565,7 +577,14 @@ async function postWebNotification(n: IslandNotification): Promise<void> {
       icon: payload.icon,
       badge: payload.badge,
       data: { target: n.target },
-      onclick: () => navigateToNotifyTarget(n.target),
+      // v1.9.9 页面构造器兜底通道（桌面）：点击 → 展开面板复现（与 SW/原生通道同语义）
+      onclick: () =>
+        expandSystemNotification({
+          target: n.target,
+          title: n.title,
+          body: payload.body,
+          tag: n.id,
+        }),
     }).catch(() => null);
   }
 }
@@ -641,12 +660,122 @@ if (
   ensurePushSubscription();
 }
 
+// ---------------- v1.9.9 系统通知点击复现（点击 OS 通知 → 应用内弹出已展开面板，不直接跳会话） ----------------
+
+/**
+ * 系统通知（Web SW 通知 / APK 原生通知栏）被用户点击时，应用内不复现通知就无法提供
+ * 「展开全文 + 输入框回消息」——OS 通知本身不支持内嵌输入框。因此点击系统通知后：
+ * 在灵动岛锚位以「已展开面板」姿态复现该通知（全文块 + 快捷回复输入框 + 进入聊天按钮），
+ * 用户不进会话就能回消息；点「进入聊天」才真正跳转。
+ *
+ * 内容解析三级：① tag 精确命中（SW 通道 postMessage 带 tag；注册表键含原生壳 chat-<id> 口径）
+ * ② target 兜底（原生壳回传只有 target：取该会话最近一条通知——堆叠通知点顶条即最新条，语义一致）
+ * ③ 点击载荷构造（页面重开注册表为空：SW postMessage / Web Push 载荷 / hash 携带 title+body+target）。
+ * 三级都解析不出 → 返回 false，调用方回退旧行为（直达会话）。
+ */
+
+/** 最近弹出的通知注册表（tag 键含原生壳 chat-<id> 口径；target 键兜底；上限淘汰最旧） */
+const recentByTag = new Map<string, IslandNotification>();
+const recentByTarget = new Map<string, IslandNotification>();
+const RECENT_MAX = 30;
+
+function notifyTargetKey(t: NotifyTarget): string {
+  return `${t.app}|${t.contactId ?? ''}|${t.groupId ?? ''}|${t.pay ? 1 : 0}`;
+}
+
+function rememberNotification(n: IslandNotification): void {
+  recentByTag.set(n.id, n);
+  recentByTag.set(`chat-${n.id}`, n); // 原生壳 localNotify tag 口径（maybeWebNotification）
+  recentByTarget.set(notifyTargetKey(n.target), n);
+  while (recentByTag.size > RECENT_MAX * 2) {
+    const oldest = recentByTag.keys().next().value;
+    if (oldest === undefined) break;
+    recentByTag.delete(oldest);
+  }
+  while (recentByTarget.size > RECENT_MAX) {
+    const oldest = recentByTarget.keys().next().value;
+    if (oldest === undefined) break;
+    recentByTarget.delete(oldest);
+  }
+}
+
+/** 系统通知点击信息（SW postMessage / Web Push 载荷 / 原生回传的交集） */
+export interface SystemNotifyClickInfo {
+  target?: NotifyTarget;
+  title?: string;
+  body?: string;
+  tag?: string;
+}
+
+/**
+ * 系统通知点击统一入口：以「已展开面板」复现对应通知；内容解析失败时回退直达会话。
+ * 锁屏/熄屏时不展开（快捷回复需解锁后进行），意图挂起由解锁订阅复现（优先面板、
+ * 注册表/载荷都解析不出再直达）。
+ * 返回 true = 本次点击已被处理（面板或回退导航）；false = 无内容可复现且未挂起意图（调用方自行兜底）。
+ */
+export function expandSystemNotification(info: SystemNotifyClickInfo): boolean {
+  const target = info.target && typeof info.target.app === 'string' ? info.target : undefined;
+  const ui = useUI.getState();
+  if (ui.locked || ui.screenOff) {
+    // 锁屏/熄屏：与直达导航同口径挂起意图（携带 title/body/tag），解锁/亮屏后由订阅复现
+    if (target) {
+      pendingNav = {
+        target,
+        at: Date.now(),
+        info: {
+          ...(info.title ? { title: info.title } : {}),
+          ...(info.body ? { body: info.body } : {}),
+          ...(info.tag ? { tag: info.tag } : {}),
+        },
+      };
+      return true;
+    }
+    return false;
+  }
+  // ① tag 精确命中（含原生壳 chat-<id> 口径）
+  let hit: IslandNotification | null = null;
+  if (info.tag) {
+    hit = recentByTag.get(info.tag) ?? recentByTag.get(info.tag.replace(/^chat-/, '')) ?? null;
+  }
+  // ② target 兜底（原生壳回传只有 target）
+  if (!hit && target) hit = recentByTarget.get(notifyTargetKey(target)) ?? null;
+  // ③ 载荷构造（页面重开注册表为空：SW postMessage / Web Push / hash 携带 title+body）。
+  // 只有 target 而无任何内容（原生回传 + 注册表已淘汰/页面重开）→ 不构造空面板，
+  // 返回 false 回退直达会话（比「新消息」空壳面板更贴近点击预期）
+  const payloadBody = (info.body ?? '').trim();
+  if (!hit && !payloadBody) return false;
+  const shown: IslandNotification = hit
+    ? { ...hit, id: genNotifyId(), startExpanded: true }
+    : {
+        id: genNotifyId(),
+        mergeKey: 'sys-click',
+        app: target?.app ?? 'chat',
+        avatar: null,
+        title: info.title?.trim() || '新消息',
+        subtitle: '',
+        body: truncateBody(payloadBody || '新消息'),
+        fullBody: truncateBody(payloadBody || '新消息', FULL_BODY_MAX),
+        count: 1,
+        target: target ?? { app: 'chat' },
+        startExpanded: true,
+      };
+  // 载荷 body（SW/推送通知展示的正文）比注册表 fullBody 更贴近用户点的那条 → 用它覆盖全文块
+  if (hit && payloadBody) shown.fullBody = truncateBody(payloadBody, FULL_BODY_MAX);
+  pendingNav = null;
+  // 直接接管展示位（若正在收起动画中，重置 exiting 由新卡接管——key=id 变化天然重挂载）
+  useIslandNotify.setState({ current: shown, exiting: false });
+  // 展开面板不自动收起（panelOpen 冻结计时由组件 effect 处理；这里不 arm）
+  return true;
+}
+
 // ---------------- 点击导航总线 ----------------
 
 /** 导航事件名（已挂载的聊天页监听；新挂载的聊天页挂载时消费 pending） */
 export const ISLAND_NAV_EVENT = 'island-notify-nav';
 
-let pendingNav: { target: NotifyTarget; at: number } | null = null;
+/** v1.9.9 意图挂起携带点击信息（title/body/tag）：锁屏时点系统通知 → 解锁后复现展开面板，
+ *  注册表为空（页面重开）时载荷 title/body 仍可构造面板，不再静默丢失 */
+let pendingNav: { target: NotifyTarget; at: number; info?: SystemNotifyClickInfo } | null = null;
 
 /** 实际执行通知导航：切 App + 关同会话悬浮小窗 + 广播导航事件（由聊天页消费打开会话） */
 function runNotifyNav(target: NotifyTarget): void {
@@ -673,6 +802,8 @@ function navigateToNotifyTarget(target: NotifyTarget): void {
  * v75 系统通知点击导航（sw.js postMessage / 开机 #notify= hash 消费共用）：
  * 与应用内卡片点击的差异——锁屏/熄屏时**先记下意图**（不丢弃），用户解锁/亮屏后
  * 由下方订阅补跳（系统通知唤起浏览器时手机常处于锁屏态，直接丢意图会让点击失效）。
+ * v1.9.9 起仅作为展开面板解析失败时的回退直达路径（SW 消息/hash/原生回传主入口是
+ * expandSystemNotification）；通知中心面板内点击条目仍直达（iOS 语义：点开即进 App）。
  */
 function navigateFromSystemNotify(target: NotifyTarget): void {
   if (!target || typeof target.app !== 'string') return;
@@ -684,41 +815,72 @@ function navigateFromSystemNotify(target: NotifyTarget): void {
 // C6 应用内通知中心：本函数需被 notification-center.ts（原生 local-notify-open 回传导航）复用
 export { navigateFromSystemNotify };
 
-// v75 解锁/亮屏补跳：系统通知点击时手机在锁屏态 → 意图已挂起，解锁/亮屏的瞬间落地导航
+// v75 解锁/亮屏补跳：系统通知点击时手机在锁屏态 → 意图已挂起，解锁/亮屏的瞬间落地
 //（60s 内有效，与 takeNotifyNavigation 同口径；订阅挂 useUI 状态变化）
+// v1.9.9：落地优先复现「已展开面板」（注册表/载荷可解析时），解析不出再直达会话
 if (typeof window !== 'undefined') {
   useUI.subscribe((s, prev) => {
     const woke = (prev.locked && !s.locked) || (prev.screenOff && !s.screenOff);
     if (!woke) return;
     const p = pendingNav;
-    if (p && Date.now() - p.at <= NAV_TTL_MS && p.target.app) runNotifyNav(p.target);
+    if (p && Date.now() - p.at <= NAV_TTL_MS && p.target.app) {
+      pendingNav = null;
+      // v1.9.9：优先复现展开面板（挂起的 title/body/tag 一并带上）；解析不出自动回退直达
+      expandSystemNotification({ target: p.target, ...(p.info ?? {}) });
+    }
   });
 
   // v75 SW 点击消息监听：sw.js notificationclick → client.postMessage({type:'notify-nav',target})
   // → 走系统通知导航（含锁屏意图挂起）——「点击系统通知唤起浏览器并跳回对应聊天界面」的接收端
+  // v1.9.9：payload 增加 title/body/tag → expandSystemNotification 以已展开面板复现
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.addEventListener('message', (ev: MessageEvent) => {
-      const d = ev.data as { type?: string; target?: NotifyTarget } | null;
-      if (d && d.type === 'notify-nav' && d.target) navigateFromSystemNotify(d.target);
+      const d = ev.data as
+        | { type?: string; target?: NotifyTarget; title?: unknown; body?: unknown; tag?: unknown }
+        | null;
+      if (d && d.type === 'notify-nav' && d.target) {
+        expandSystemNotification({
+          target: d.target,
+          ...(typeof d.title === 'string' ? { title: d.title } : {}),
+          ...(typeof d.body === 'string' ? { body: d.body } : {}),
+          ...(typeof d.tag === 'string' ? { tag: d.tag } : {}),
+        });
+      }
     });
   }
 
   // v75 开机 hash 消费：sw.js 无已开窗口时 openWindow('/#notify=<encoded>') 新开页面——
   // 应用启动后消费该 hash 跳到对应聊天（手机启动默认锁屏 → 意图挂起，解锁后补跳）
-  try {
-    const hm = /[#&]notify=([^&]+)/.exec(window.location.hash);
-    if (hm) {
-      const target = JSON.parse(decodeURIComponent(hm[1])) as NotifyTarget;
+  // v1.9.9：hash 载荷支持 {target,title,body} 新格式（展开面板复现），旧格式（裸 target）兼容直达；
+  // 提取为 consumeNotifyHash —— 模块加载、hashchange（后置设置 hash 的启动器工具）各消费一次
+  const consumeNotifyHash = (): void => {
+    try {
+      const hm = /[#&]notify=([^&]+)/.exec(window.location.hash);
+      if (!hm) return;
+      const parsed: unknown = JSON.parse(decodeURIComponent(hm[1]));
       // 清掉 hash 防刷新重复跳转
       window.history.replaceState(null, '', window.location.pathname + window.location.search);
-      if (target && typeof target.app === 'string') {
-        // 等应用壳挂载（store 就绪）后再落地；锁屏时由上面的订阅在解锁后补跳
-        window.setTimeout(() => navigateFromSystemNotify(target), 900);
+      const isNotifyTarget = (v: unknown): v is NotifyTarget =>
+        !!v && typeof v === 'object' && typeof (v as NotifyTarget).app === 'string';
+      const rec = parsed as { target?: unknown; title?: unknown; body?: unknown } | null;
+      if (rec && isNotifyTarget(rec.target)) {
+        const info: SystemNotifyClickInfo = {
+          target: rec.target,
+          ...(typeof rec.title === 'string' ? { title: rec.title } : {}),
+          ...(typeof rec.body === 'string' ? { body: rec.body } : {}),
+        };
+        window.setTimeout(() => expandSystemNotification(info), 900);
+      } else if (isNotifyTarget(parsed)) {
+        // 旧格式：裸 target 直达会话（与历史行为一致）
+        const t = parsed;
+        window.setTimeout(() => navigateFromSystemNotify(t), 900);
       }
+    } catch {
+      /* 非法 hash 静默忽略 */
     }
-  } catch {
-    /* 非法 hash 静默忽略 */
-  }
+  };
+  consumeNotifyHash();
+  window.addEventListener('hashchange', consumeNotifyHash);
 }
 
 /** 点击通知卡片：跳转目标会话（锁屏/熄屏/闹钟时只收起不跳转）+ 收起弹窗 */

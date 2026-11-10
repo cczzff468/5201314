@@ -296,13 +296,25 @@ export function useNotifyUnreadCount(): number {
 
 // ---------------- 点击激活（面板条目 / 原生回传共用导航与收面板） ----------------
 
-/** 单条目激活导航：target 优先走灵动岛导航总线，否则 location.href（'/' 不跳） */
-function navigateForItem(item: { url?: string; target?: unknown }): void {
+/** 单条目激活导航：target 优先走灵动岛导航总线，否则 location.href（'/' 不跳）。
+ *  preferExpand=true（v1.9.9，原生通知栏点击回传）：走 expandSystemNotification——
+ *  以「已展开面板」复现该通知（全文+快捷回复），解析失败自动回退直达；中心面板内
+ *  点击条目保持直达（iOS 语义：点开即进 App）。 */
+function navigateForItem(item: { url?: string; target?: unknown }, preferExpand = false): void {
   if (isNotifyTarget(item.target)) {
     // 动态 import：island-notify 是重模块（推送/SSE/聊天标志等），只在真正需要导航时加载，
     // 也避免 local-notify → 本模块 → island-notify 的静态链把大模块拖进轻入口包
     void import('./island-notify')
-      .then((m) => m.navigateFromSystemNotify(item.target as NotifyTarget))
+      .then((m) => {
+        if (preferExpand) {
+          // v1.9.9 系统通知（APK 通知栏）点击：展开面板复现（tag/title 原生回传暂不携带，
+          // 靠 island-notify 注册表 target 键解析；解析失败返回 false → 回退直达会话）
+          const ok = m.expandSystemNotification({ target: item.target as NotifyTarget });
+          if (!ok) m.navigateFromSystemNotify(item.target as NotifyTarget);
+        } else {
+          m.navigateFromSystemNotify(item.target as NotifyTarget);
+        }
+      })
       .catch(() => {
         // 动态加载失败 → url 兜底
         if (item.url && item.url !== '/') {
@@ -337,11 +349,13 @@ export function activateCenterItem(item: NotificationCenterItem): void {
 /**
  * 原生 local-notify-open 回传处理（local-notify.ts 的 MessageEvent 监听调用）：
  * 按 tag/url 匹配置已读 + 导航 + 收起面板（导航后不能让面板挡住新落地的界面）。
+ * v1.9.9：APK 通知栏点击 → 优先「已展开面板」复现（expandSystemNotification，
+ * 解析失败自动回退直达会话），机主不进会话即可回消息。
  */
 export function openCenterItem(payload: { url?: string; target?: unknown }): void {
   useNotifyCenter.getState().markReadBy({ url: payload.url });
   useNotifyCenter.getState().closeCenter();
-  navigateForItem(payload);
+  navigateForItem(payload, true);
 }
 
 // ---------------- 测试钩子（仅 dev 生效） ----------------

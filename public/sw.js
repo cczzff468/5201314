@@ -126,12 +126,15 @@ self.addEventListener('push', (event) => {
   // 角色头像（服务端携带的压缩 dataURL / 路径）：离线通知也显示「谁发来的」；
   // 缺失时回落到信息 App 图标（与历史行为一致）
   const icon = typeof data.icon === 'string' && data.icon ? data.icon : '/icons/chat.png';
+  // v1.9.9：target（点击跳转目标，服务端 push-send 载荷携带）透传进通知 data ——
+  // notificationclick 读到后 postMessage/hash 回页面，点击推送通知也能展开面板回消息
+  const ntfData = { url, ...(data.target && typeof data.target === 'object' ? { target: data.target } : {}) };
   event.waitUntil(
     self.registration.showNotification(title, {
       body,
       tag,
       icon,
-      data: { url },
+      data: ntfData,
       badge: '/icons/wechat.png',
       silent: true,
     }),
@@ -146,9 +149,15 @@ self.addEventListener('notificationclick', (event) => {
   // - 已有打开的页面：聚焦它 + postMessage 把 target 交回页面导航总线
   //   （island-notify 监听 'notify-nav' → 切 App + 打开对应聊天会话；锁屏时先记意图解锁后补跳）
   // - 没有已开页面：openWindow 带 #notify=<encoded> hash，应用启动后消费跳转
+  // v1.9.9：title/body/tag 随消息一并回传（通知对象自带字段）——页面据此以「已展开面板」
+  // 复现该通知（全文+快捷回复），不再是裸跳会话；target 仍为主键。
   const target = data.target && typeof data.target === 'object' ? data.target : null;
+  const info = {};
+  if (typeof event.notification.title === 'string' && event.notification.title) info.title = event.notification.title;
+  if (typeof event.notification.body === 'string' && event.notification.body) info.body = event.notification.body;
+  if (typeof event.notification.tag === 'string' && event.notification.tag) info.tag = event.notification.tag;
   const openUrl = target
-    ? `/#notify=${encodeURIComponent(JSON.stringify(target))}`
+    ? `/#notify=${encodeURIComponent(JSON.stringify({ target, ...info }))}`
     : url;
   event.waitUntil(
     self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((list) => {
@@ -157,7 +166,7 @@ self.addEventListener('notificationclick', (event) => {
           client.focus();
           if (target) {
             try {
-              client.postMessage({ type: 'notify-nav', target });
+              client.postMessage({ type: 'notify-nav', target, ...info });
             } catch (e) {
               /* postMessage 失败不影响聚焦 */
             }
