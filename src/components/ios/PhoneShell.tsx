@@ -16,6 +16,9 @@ import { ensureKvReady } from '@/lib/ios/idb-kv';
 import { ensurePayPwdBoxesHydrated } from '@/lib/ios/pay-pwd-box';
 import { ensurePromptEntriesClientReady } from '@/lib/ios/prompt-entries-client';
 import { migrateLegacyAccounts } from '@/lib/ios/accounts';
+// v1.9.8 全局接力守望者：SSE 常驻 + 事件/轮询驱动 peek —— 服务端待达接力消息不进 APP 直接弹横幅
+// （副作用引入即启动，模块级单例与页面存活解耦）
+import '@/lib/ios/bg-relay-watcher';
 import { shellScale } from '@/lib/ios/shell-scale';
 import StatusBar from './StatusBar';
 import HomeScreen from './HomeScreen';

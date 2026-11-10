@@ -21,6 +21,10 @@
  *   - 接力窗口内：旧实现是 2.5s 轮询，已废除 —— 改为常驻 SSE 长连接（/api/events），
  *     服务端 enqueue 时广播 bg-pending 事件，pullBgPending 收到事件立即拉取（零轮询、零延迟）；
  *     SSE 断线/多实例部署收不到广播时靠挂载/回前台首拉与 Web Push 保底，不丢消息。
+ *   - v1.9.8 全局接力守望者（bg-relay-watcher.ts，PhoneShell 引入）：SSE 连接改为启动即常驻
+ *     （startBgSse，原懒启动平时无连接、广播无人听），守望者常驻订阅 bg-pending 事件 +
+ *     回前台/重连补拉 + 20s 兜底轮询 peekAll —— 服务端有待达消息时**不进 APP 直接弹灵动岛
+ *     横幅**（正式落盘投递仍由聊天页挂载拉取完成，守望者弹过的会话做横幅抑制防重复弹）。
  *
  * 会话显示名/头像由聊天页挂载时 registerBgSession 注册（beacon 携带，Web Push 标题/头像用；
  * 未注册时服务端回退为 App 名、无头像）。
@@ -281,7 +285,36 @@ if (typeof window !== 'undefined') {
  */
 type BgSseWaiter = (sessionKey: string) => void;
 const sseWaiters = new Set<BgSseWaiter>();
+/** v1.9.8 常驻订阅（全局接力守望者 bg-relay-watcher）：不随单次等待窗口注销 */
+const ssePermanentListeners = new Set<BgSseWaiter>();
+/** v1.9.8 SSE 连接建立/重连成功回调（守望者重连后补拉一次 pending 兜底） */
+const sseOpenListeners = new Set<() => void>();
 let sseStarted = false;
+
+/** v1.9.8 注册常驻 bg-pending 订阅（返回退订函数）：守望者用它事件驱动即时拉取 */
+export function onBgPendingEvent(cb: (sessionKey: string) => void): () => void {
+  ssePermanentListeners.add(cb);
+  return () => {
+    ssePermanentListeners.delete(cb);
+  };
+}
+
+/** v1.9.8 注册 SSE 连接建立/重连回调（返回退订函数） */
+export function onBgSseOpen(cb: () => void): () => void {
+  sseOpenListeners.add(cb);
+  return () => {
+    sseOpenListeners.delete(cb);
+  };
+}
+
+/**
+ * v1.9.8 启动常驻 SSE 连接（原为懒启动：只在接力窗口等待期间才有连接——平时广播无人听，
+ * 是「接力消息要点进 APP 才出现」的根因之一）。守望者启动时调用一次让连接常驻，
+ * waitForBgSseEvent 复用同一条连接（幂等）。
+ */
+export function startBgSse(): void {
+  ensureBgSse();
+}
 
 function ensureBgSse(): void {
   if (sseStarted || typeof window === 'undefined' || typeof EventSource === 'undefined') return;
@@ -297,6 +330,13 @@ function ensureBgSse(): void {
         return;
       }
       if (!key) return;
+      for (const w of [...ssePermanentListeners]) {
+        try {
+          w(key);
+        } catch {
+          // 单个订阅者异常不影响其它
+        }
+      }
       for (const w of [...sseWaiters]) {
         try {
           w(key);
@@ -305,6 +345,15 @@ function ensureBgSse(): void {
         }
       }
     });
+    es.onopen = () => {
+      for (const cb of [...sseOpenListeners]) {
+        try {
+          cb();
+        } catch {
+          // 单个回调异常不影响其它
+        }
+      }
+    };
     es.onerror = () => {
       // 浏览器自动重连；不手动 close（close 后接力窗口只能靠超时兜底）
     };

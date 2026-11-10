@@ -11,9 +11,9 @@
  */
 
 /** 当前最新版本（与 android-shell versionName 保持一致） */
-export const APP_VERSION = '1.9.7';
+export const APP_VERSION = '1.9.8';
 /** 版本号数字（与 android-shell versionCode 保持一致；覆盖安装要求只增不减） */
-export const APP_VERSION_CODE = 27;
+export const APP_VERSION_CODE = 28;
 
 export interface AppReleaseNote {
   version: string;
@@ -24,6 +24,14 @@ export interface AppReleaseNote {
 
 /** 版本历史（新→旧；设置 › APP 更新 页渲染，最新一条即当前版本） */
 export const APP_RELEASE_NOTES: AppReleaseNote[] = [
+  {
+    version: '1.9.8',
+    date: '2026-11-10',
+    items: [
+      '修复「通知有时候要点进 APP 才出现」：全局接力守望者常驻监听，关页/刷新期间 AI 生成的回复一就绪立即弹横幅+提示音（页面在后台时弹系统通知），不用再点进 APP；点进会话后正式落盘，同一批消息不重复弹',
+      '通知链路提速兜底：通知长连接改为启动即常驻（原来平时根本没连接，广播发出来没人听），断线重连自动补拉，再加 20 秒兜底轮询，多场景丢广播也不漏弹',
+    ],
+  },
   {
     version: '1.9.7',
     date: '2026-11-10',

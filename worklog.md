@@ -2429,3 +2429,25 @@ Stage Summary:
 - 通知横幅从「点击即跳转」升级为「点击展开全文 + 输入框直接回消息」：微信/QQ/信息单聊不进 APP 就能回，AI 回复照常逐条弹横幅；群聊/小助手/订单展开看全文+进入聊天
 - 备忘录返回语义按机主要求收敛：左上「文件夹」标签=退出 APP 回手机主页面，大标题（全部备忘录等）不再响应点击
 - 关键文件：island-reply.ts（新建）、IslandNotification.tsx（展开面板）、island-notify.ts（fullBody+测试钩子）、notes-pages.tsx/notes.tsx（标签退出迁移）、app-version.ts（1.9.7/27）
+
+## 2026-11-10 · v94（网页端 v1.9.8）全局接力守望者：关页/刷新期间的 AI 回复不进 APP 直接弹横幅
+
+Task ID: 44
+Agent: 主控 Agent（Z.ai Code）
+Task: 机主反馈「系统 APP 通知显示有时候好慢，有时候需要点进去 APP 才出现」——排查根因并修复
+
+Work Log:
+- [根因] ①横幅挂在「每条消息落盘投递」时点（LLM 生成延迟 + 模拟真人打字节奏 850ms+字数×45ms/条）——慢是模拟真人设计的固有成本；②关页/刷新时正在生成的回复走服务端接力（/api/chat/bg pending 队列），正式投递+弹横幅只发生在聊天页挂载/回前台拉取（= 点进 APP），且 SSE 连接是懒启动（waitForBgSseEvent 才建立）——平时广播发出来无人监听，广播丢失（刷新空窗/断线/多实例）时消息一直躺在服务端队列不点进去永不弹，会话列表只有角标（peekBgBadgeCounts 不弹横幅）——「点进去才出现」的根因
+- [服务端] /api/chat/bg GET peekAll 新增 preview=1 参数：返回每会话 { count, title, avatar?, preview }（title/avatar 用 beacon 上报的 sessionMetas，preview 用 relayPreviewText 净化首条文本——剥 &&& 分段取首段、剥 ≤30 字方括号动作/媒体标记、截 100 字、空回退 [新消息]）；不带 preview 响应 {counts} 完全不变（peekBgBadgeCounts 零感知）
+- [island-notify.ts] 新增横幅抑制 API：suppressSessionBanner/clearSessionBannerSuppress/clearStaleSessionBannerSuppress（Map+TTL 5min）；pushChatNotification 在 DND 闸后加抑制闸——抑制只跳过横幅/提示音/系统通知三出口，消息落盘/未读角标/会话列表预览不受影响
+- [bg-turn.ts] SSE 常驻化：导出 startBgSse（原 ensureBgSse 懒启动，守望者启动即调用让 /api/events 连接常驻，waitForBgSseEvent 幂等复用）；新增常驻订阅 onBgPendingEvent（不随等待窗口注销）与 onBgSseOpen（重连成功回调）
+- [bg-relay-watcher.ts 新模块] PhoneShell 副作用引入（启动延迟 2.5s 避开首屏高峰）模块级单例：startBgSse 常驻连接 + onBgPendingEvent 事件驱动 peek（300ms 抖动合并）+ onBgSseOpen 重连补拉 + visibilitychange/focus 回前台补拉 + 20s 兜底轮询（多实例/断线最后防线）+ 启动 5.5s 首拉（捕获刷新前遗留 pending）；peek（peekAll=1&preview=1）对每个有待达消息会话：parseSessionTarget 解析通知归属与点击跳转目标（wx/qq 单聊群聊/sms c: 前缀口径与三端通知一致）→ 忙会话（流式/投递中）跳过 → 否则 pushChatNotification 直接弹横幅+提示音（页面隐藏走系统通知；DND/会话免打扰/系统通知总闸在 pushChatNotification 内统一生效）→ suppressSessionBanner 防正式投递重复弹；不消费服务端队列（正式落盘投递仍由聊天页挂载拉取完成）；去重键 `${sessionKey}#${count}#${preview hash}` localStorage 持久化上限 200（数量或首条预览变化才再弹，刷新后不重复弹）；订阅 subscribeAiDeliveryActive → clearStaleSessionBannerSuppress(getDeliveringSessionKeys())——观察到抑制会话投递「忙→闲」跃迁即解除（后续新回复照常弹），TTL 兜底防永久静音
+- [关键修复 v1.9.8.1] 新批次弹横幅前必须先 clearSessionBannerSuppress：实测首 peek 弹批次#3 并抑制会话后，5min 内到达的新批次#4 横幅被旧抑制吞掉（抑制是会话级的，批次是批次的）——清旧→弹新→重新武装，抑制永远只覆盖「已弹过横幅的当前批」
+- [排查插页] 验证期间出现「接力批次部分消息丢失」（8 条丢 5/3 条丢 1）：深挖 ai-delivery 泵/投递链/双写竞态后定位为 **dev Turbopack HMR 模块换代产物**（编辑后立即 reload 时 chunk 新旧混跑，"Unexpected import … deleted by an HMR update" 警告佐证）；干净环境下同管线 3/3 全落盘（控制台可见正式投递 3 次 push 全部被抑制=防重复弹生效）；生产构建无 HMR 不存在此问题，投递链路本身无 bug
+- [版本] app-version.ts 1.9.8/28 + 发版说明 2 条；APK 不重打（无原生改动）
+
+Stage Summary:
+- 「点进去才出现」根治：全局接力守望者让关页/刷新期间的 AI 回复一就绪立即弹横幅+提示音（页面后台时弹系统通知），SSE 常驻 + 事件驱动 + 20s 兜底轮询 + 重连补拉四通道保投递；点进会话正式落盘不重复弹（抑制随投递忙→闲自动解除）
+- 「慢」部分为模拟真人设计使然（LLM 生成 + 打字节奏），接力横幅不再叠加「进 APP 才投递」的额外延迟
+- 关键文件：bg-relay-watcher.ts（新建）、bg-turn.ts（SSE 常驻+常驻订阅）、island-notify.ts（横幅抑制）、/api/chat/bg（peekAll preview）、PhoneShell.tsx（引入）、app-version.ts（1.9.8/28）
+- E2E（agent-browser 390x844 解锁手势）：主屏注入接力 deliver → 1.3s 内横幅弹出（标题+预览+APP 图标）✓ → 点击展开全文+进入聊天 ✓ → 进入后消息正式落盘（语音转换管线正常）+ 无重复横幅（cur=null）✓ → serverPending=0 ✓ → 投递排空后再注入新批次横幅恢复弹出（latch 解除生效）✓；测试数据已清理（助手会话 16→7 条，bg-relay-bannered/peeked 键清除）

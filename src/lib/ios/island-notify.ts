@@ -234,6 +234,71 @@ function chatMuted(sessionKey: string): boolean {
   }
 }
 
+// ---------------- v1.9.8 接力守望者横幅抑制（防同一批接力消息弹两次横幅） ----------------
+
+/**
+ * 全局接力守望者（bg-relay-watcher）在消息「还没正式落盘」时就为服务端待达消息弹过横幅
+ * （不点进 APP 先看到）；用户随后点进聊天页时，挂载拉取会把同一批消息经原管线正式投递，
+ * 投递路径也会调 pushChatNotification —— 若不抑制，同一批消息会弹第二次横幅。
+ *
+ * 抑制解除（clearStaleSessionBannerSuppress，由守望者订阅 ai-delivery 状态广播调用）：
+ * - 观察到该会话投递「忙 → 闲」一次（接力波已正式投完）→ 立即解除，后续新回复照常弹；
+ * - 超过 TTL 未观察到投递（用户一直没进聊天页）→ 到期解除，兜底防永久静音。
+ * 抑制只跳过横幅/提示音/系统通知三出口，消息落盘、未读角标、会话列表预览都不受影响。
+ */
+const bannerSuppressUntil = new Map<string, number>();
+/** 已观察到「投递中」的抑制会话（忙→闲跃迁后解除） */
+const bannerSuppressSeenBusy = new Set<string>();
+/** 抑制兜底 TTL：用户始终没进聊天页时最多静音这么久 */
+const BANNER_SUPPRESS_TTL_MS = 5 * 60_000;
+
+/** 守望者弹过横幅后调用：该会话后续 pushChatNotification 三出口全部跳过（直到解除/TTL） */
+export function suppressSessionBanner(sessionKey: string): void {
+  bannerSuppressUntil.set(sessionKey, Date.now() + BANNER_SUPPRESS_TTL_MS);
+  bannerSuppressSeenBusy.delete(sessionKey);
+}
+
+/** 显式解除（预留；常规解除走 clearStaleSessionBannerSuppress） */
+export function clearSessionBannerSuppress(sessionKey: string): void {
+  bannerSuppressUntil.delete(sessionKey);
+  bannerSuppressSeenBusy.delete(sessionKey);
+}
+
+/**
+ * 投递状态广播回调：busyKeys = getDeliveringSessionKeys() 快照。
+ * 对每个抑制中的会话：先记录「已观察到忙」，再观察到闲（同一波投递排空）即解除；
+ * TTL 到期的无条件解除。只在有抑制条目时才有开销（常态 Map 为空，O(1) 返回）。
+ */
+export function clearStaleSessionBannerSuppress(busyKeys: readonly string[]): void {
+  if (bannerSuppressUntil.size === 0) return;
+  const busy = new Set(busyKeys);
+  const now = Date.now();
+  for (const [key, until] of [...bannerSuppressUntil]) {
+    if (now >= until) {
+      bannerSuppressUntil.delete(key);
+      bannerSuppressSeenBusy.delete(key);
+      continue;
+    }
+    if (busy.has(key)) {
+      bannerSuppressSeenBusy.add(key);
+    } else if (bannerSuppressSeenBusy.has(key)) {
+      bannerSuppressUntil.delete(key);
+      bannerSuppressSeenBusy.delete(key);
+    }
+  }
+}
+
+function isSessionBannerSuppressed(sessionKey: string): boolean {
+  const until = bannerSuppressUntil.get(sessionKey);
+  if (until === undefined) return false;
+  if (Date.now() >= until) {
+    bannerSuppressUntil.delete(sessionKey);
+    bannerSuppressSeenBusy.delete(sessionKey);
+    return false;
+  }
+  return true;
+}
+
 /**
  * 推送一条 AI 消息通知（每条消息独立弹窗，不合并计数）：
  * - 会话开了「消息免打扰」（#15）→ 灵动岛弹层与 Web Notification 全部跳过
@@ -252,6 +317,9 @@ export function pushChatNotification(input: ChatNotifyInput): void {
   // 处理不受影响；聊天消息本就不入通知中心历史（中心唯一入口是 local-notify.notifyIfHidden），
   // 不存在「丢记录」问题，无需再走记录钩子。
   if (isNotifyDndActive()) return;
+  // v1.9.8 接力守望者抑制：守望者已为该会话的服务端待达消息弹过横幅/提示音/系统通知，
+  // 聊天页正式投递同一批消息时三出口跳过（消息落盘、未读角标不受影响，见上方注释）
+  if (isSessionBannerSuppressed(input.sessionKey)) return;
   // 通知提示音（设置 › 通知可配）：群会话走「群消息」，其余走「接收消息」；
   // 声音闸门（总开关/分类开关/免打扰）由 playNotifySound 内部判定——静音时弹窗与记录照常
   playNotifySound(input.sessionKey.includes(':group:') ? 'group' : 'receive');

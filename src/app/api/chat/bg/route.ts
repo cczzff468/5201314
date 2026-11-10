@@ -140,6 +140,19 @@ function appDefaultName(sessionKey: string): string {
   return '信息';
 }
 
+/**
+ * v1.9.8 接力横幅预览净化：完整回复原文（可能含 &&& 分段、[拍照:…] / [语音] 等动作标记）
+ * → 横幅一条预览文本。只用于守望者横幅展示，不参与投递（投递仍由聊天页 buildReplyMsgs
+ * 按各端语义完整解析）。净化不出可读文本时回退 [新消息]。
+ */
+function relayPreviewText(raw: string): string {
+  let t = (raw || '').split('&&&')[0] ?? '';
+  // 剥方括号动作/媒体标记（[拍照:xxx] [语音] [图片] 等；只剥 ≤30 字的短标记，防误伤长正文）
+  t = t.replace(/\[[^\[\]]{1,30}\]/g, ' ');
+  t = t.replace(/\s+/g, ' ').trim().slice(0, 100);
+  return t || '[新消息]';
+}
+
 function enqueue(sessionKey: string, texts: string[], single: boolean, title: string): PendingItem {
   const item: PendingItem = {
     id: `bg-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
@@ -322,13 +335,33 @@ export async function GET(req: Request): Promise<NextResponse> {
   const sp = new URL(req.url).searchParams;
 
   // 会话列表角标查询：各会话待拉取消息条数（不清除；客户端对已提示过的条目去重）
+  // v1.9.8 preview=1：附带每会话 { count, title, avatar?, preview } —— 全局接力守望者
+  //（bg-relay-watcher）用它不进 APP 直接弹灵动岛横幅：标题/头像用 beacon 上报的会话元数据，
+  // preview 用第一批第一条文本的净化预览（剥分段/动作标记，只做横幅预览不参与投递）
   if (sp.get('peekAll')) {
     const counts: Record<string, number> = {};
+    const previews: Record<
+      string,
+      { count: number; title: string; avatar?: string; preview: string }
+    > = {};
+    const wantPreview = sp.get('preview') === '1';
     pending.forEach((arr, key) => {
       const n = arr.reduce((s, it) => s + it.texts.length, 0);
-      if (n > 0) counts[key] = n;
+      if (n <= 0) return;
+      counts[key] = n;
+      if (!wantPreview) return;
+      const first = arr[0];
+      const meta = sessionMetas.get(key);
+      previews[key] = {
+        count: n,
+        title: meta?.title || first?.title || appDefaultName(key),
+        ...(meta?.avatar ? { avatar: meta.avatar } : {}),
+        preview: relayPreviewText(first?.texts?.[0] ?? ''),
+      };
     });
-    return NextResponse.json({ counts });
+    return wantPreview
+      ? NextResponse.json({ counts, previews })
+      : NextResponse.json({ counts });
   }
 
   const sessionKey = sp.get('sessionKey');
