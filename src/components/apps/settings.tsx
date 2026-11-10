@@ -119,7 +119,7 @@ import { isWebSpeechSupported } from '@/lib/ios/web-speech';
 // v1.3 AI 动手（Shizuku 自主权）+ APP 更新：设置页新入口
 import { AUTONOMY_CAPS, getAutonomyConfig, setAutonomyCap, setAutonomyMaster } from '@/lib/ios/shizuku-autonomy';
 import { isNativePerception, nativeShizukuStatus } from '@/lib/ios/native-perception';
-// C1 语音唤起智能体：AI 动手页内设置卡（唤醒名 / 悬浮球 / 连续监听）
+// C1 语音唤起智能体（v1.9.3 独立设置页：唤醒名 / 悬浮球 / 连续监听）
 import {
   DEFAULT_WAKE_NAME,
   retryAgentWake,
@@ -199,7 +199,7 @@ import {
 
 // ---------------- 常量与类型 ----------------
 
-type Page = 'root' | 'account' | 'profile' | 'theme' | 'notification' | 'storage' | 'wallpaper' | 'font' | 'api' | 'vision' | 'imggen' | 'voice' | 'about' | 'lock' | 'prompts' | 'autonomy' | 'appupdate';
+type Page = 'root' | 'account' | 'profile' | 'theme' | 'notification' | 'storage' | 'wallpaper' | 'font' | 'api' | 'vision' | 'imggen' | 'voice' | 'about' | 'lock' | 'prompts' | 'autonomy' | 'voiceagent' | 'appupdate';
 
 const IOS_RED = '#FF453A';
 
@@ -490,6 +490,9 @@ function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
   const autonomy = getAutonomyConfig();
   const autonomyMaster = autonomy.master;
   const autonomyOnCount = autonomy.master ? AUTONOMY_CAPS.filter((c) => autonomy.caps[c.key]).length : 0;
+  // v1.9.3 语音唤起智能体（独立设置页入口）：右侧状态（悬浮球/监听任一开=已开启，显示唤醒名）
+  const agentVoiceCfg = useAgentVoice((s) => s.cfg);
+  const agentVoiceOn = agentVoiceCfg.ball || agentVoiceCfg.listen;
 
   // 挂载读取持久化的飞行模式开关（演示项）
   useEffect(() => {
@@ -759,7 +762,8 @@ function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
           </div>
         </div>
 
-        {/* AI 感知与操控（v1.3）：Shizuku 自主权总入口——逐项开关控制 AI 能真实动手机的哪些能力 */}
+        {/* AI 感知与操控（v1.3）：Shizuku 自主权总入口——逐项开关控制 AI 能真实动手机的哪些能力；
+            v1.9.3 语音唤起智能体拆出为独立设置页（同分组独立入口） */}
         <div className="mb-2 mt-6 px-8 text-[13px] text-muted-foreground">AI 感知与操控</div>
         <div className="mx-4 divide-y divide-black/[0.05] overflow-hidden rounded-[22px] bg-white/55 shadow-[0_8px_28px_rgba(17,24,39,0.06)] ring-1 ring-white/70 backdrop-blur-2xl dark:divide-white/[0.06] dark:bg-white/[0.06] dark:ring-white/[0.09]">
           <button
@@ -775,6 +779,22 @@ function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
             </span>
             <span className="max-w-[50%] shrink-0 truncate text-[15px] text-muted-foreground">
               {autonomyMaster ? `已开启 · ${autonomyOnCount} 项` : '已关闭'}
+            </span>
+            <ChevronRight className="h-5 w-5 shrink-0 text-muted-foreground/60" />
+          </button>
+          <button
+            type="button"
+            data-testid="settings-agentvoice-entry"
+            onClick={() => onOpen('voiceagent')}
+            className="flex min-h-[52px] w-full items-center gap-3 px-4 py-2 text-left transition-colors active:bg-muted/50"
+          >
+            <RowIcon icon={Mic} tone={TONE_CYAN} />
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-[16px]">语音唤起智能体</span>
+              <span className="mt-0.5 block truncate text-[12px] text-muted-foreground">喊唤醒名/点悬浮球唤起 · 能聊也能办</span>
+            </span>
+            <span className="max-w-[50%] shrink-0 truncate text-[15px] text-muted-foreground">
+              {agentVoiceOn ? `「${agentVoiceCfg.name || DEFAULT_WAKE_NAME}」已开启` : '已关闭'}
             </span>
             <ChevronRight className="h-5 w-5 shrink-0 text-muted-foreground/60" />
           </button>
@@ -999,7 +1019,8 @@ function WakeStatusRow({ name }: { name: string }) {
 }
 
 /**
- * 「语音唤起智能体」卡：专属人设说明行（小灵，名字跟随唤醒名）/ 唤醒名（≤6 字）/
+ * 「语音唤起智能体」卡（v1.9.3 起独立成设置页「语音唤起智能体」，不再嵌入 AI 动手页）：
+ * 专属人设说明行（小灵，名字跟随唤醒名）/ 唤醒名（≤6 字）/
  * 悬浮球开关 / 连续唤醒监听开关（带耗电提示）/ 唤醒状态诊断行（v1.8.2）/
  * C4 执行结果语音播报开关（默认关）/ C4 任务后追问窗口开关（默认开）/
  * 连续对话开关（Siri 式一问一答：播报完自动续听 + 说话即打断，默认开）。
@@ -1059,9 +1080,9 @@ function AgentVoiceCard() {
 
   return (
     <>
-      <div className="mb-2 mt-6 px-8 text-[13px] text-muted-foreground">语音唤起智能体</div>
+      {/* v1.9.3：独立设置页（标题走 DetailShell 导航栏），卡片直接紧跟内容区 */}
       <div
-        className="mx-4 overflow-hidden rounded-[22px] bg-white/55 shadow-[0_8px_28px_rgba(17,24,39,0.06)] ring-1 ring-white/70 backdrop-blur-2xl dark:bg-white/[0.06] dark:ring-white/[0.09]"
+        className="mx-4 mt-2 overflow-hidden rounded-[22px] bg-white/55 shadow-[0_8px_28px_rgba(17,24,39,0.06)] ring-1 ring-white/70 backdrop-blur-2xl dark:bg-white/[0.06] dark:ring-white/[0.09]"
         data-testid="settings-agent-voice-card"
       >
         {/* 一行说明 */}
@@ -1276,6 +1297,18 @@ function AgentVoiceCard() {
   );
 }
 
+/**
+ * 「语音唤起智能体」独立设置页（v1.9.3）：从 AI 动手页拆出，主列表「AI 感知与操控」
+ * 分组独立入口直达；页内容复用 AgentVoiceCard（唤醒名/音色/悬浮球/监听/播报等）。
+ */
+function AgentVoicePage({ onBack }: { onBack: () => void }) {
+  return (
+    <DetailShell title="语音唤起智能体" onBack={onBack} gray>
+      <AgentVoiceCard />
+    </DetailShell>
+  );
+}
+
 function ShizukuAutonomyPage({ onBack }: { onBack: () => void }) {
   // 惰性初始化（页面仅在用户交互后挂载 = 纯客户端，可安全读 localStorage）
   const [cfg, setCfg] = useState(() => getAutonomyConfig());
@@ -1343,8 +1376,7 @@ function ShizukuAutonomyPage({ onBack }: { onBack: () => void }) {
           </div>
         </div>
 
-        {/* C1 语音唤起智能体（唤醒名 / 悬浮球 / 连续监听） */}
-        <AgentVoiceCard />
+        {/* v1.9.3：语音唤起智能体已拆出为独立设置页（设置 › 语音唤起智能体） */}
 
         {/* 动手组 */}
         <div className="mb-2 mt-6 px-8 text-[13px] text-muted-foreground">动手（真实操作）</div>
@@ -7776,7 +7808,7 @@ export default function SettingsApp() {
   // 消费清空放到挂载后的 effect 里——渲染期间写 store 会触发「渲染中更新其它组件」告警。
   const [page, setPage] = useState<Page>(() => {
     const pending = useUI.getState().pendingSettingsPage;
-    if (pending && ['root', 'account', 'profile', 'theme', 'notification', 'storage', 'wallpaper', 'font', 'api', 'vision', 'imggen', 'voice', 'about', 'lock', 'prompts', 'autonomy', 'appupdate'].includes(pending)) {
+    if (pending && ['root', 'account', 'profile', 'theme', 'notification', 'storage', 'wallpaper', 'font', 'api', 'vision', 'imggen', 'voice', 'about', 'lock', 'prompts', 'autonomy', 'voiceagent', 'appupdate'].includes(pending)) {
       return pending as Page;
     }
     return 'root';
@@ -7803,6 +7835,7 @@ export default function SettingsApp() {
       {page === 'prompts' && <PromptEntriesPage onBack={() => setPage('root')} />}
       {page === 'about' && <AboutPage onBack={() => setPage('root')} />}
       {page === 'autonomy' && <ShizukuAutonomyPage onBack={() => setPage('root')} />}
+      {page === 'voiceagent' && <AgentVoicePage onBack={() => setPage('root')} />}
       {page === 'appupdate' && <AppUpdatePage onBack={() => setPage('root')} />}
     </IOSScreen>
   );

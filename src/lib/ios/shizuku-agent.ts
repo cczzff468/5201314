@@ -2052,3 +2052,52 @@ export async function runAgentTask(
     }
   }
 }
+
+// ---------------- 测试钩子（仅 dev）：E2E / 手工验证灵动岛弹出进度卡 ----------------
+// window.__agentTest.show() 注入「运行中」态 → AgentRunnerBar 从灵动岛弹出；
+// done() 注入「完成」态（无红点、摘要 4s 后缩回）；idle() 复位。
+// 生产构建（NODE_ENV=production）不挂载，无任何暴露面。
+if (typeof window !== 'undefined' && process.env.NODE_ENV !== 'production') {
+  const w = window as typeof window & {
+    __agentTest?: {
+      show: (task?: string) => void;
+      done: (summary?: string) => void;
+      idle: () => void;
+    };
+  };
+  w.__agentTest = {
+    show: (task = '演示任务：打开天气并播报今日气温') =>
+      patchAgentState({
+        running: true,
+        finished: false,
+        task,
+        round: 1,
+        maxRounds: 3,
+        stepIndex: 2,
+        stepTotal: 4,
+        stepDesc: '截屏识别当前界面',
+        narration: '正在查看屏幕…',
+        stopRequested: false,
+      }),
+    done: (summary = '已为你打开天气并播报今日气温 0~12°C') =>
+      patchAgentState({
+        running: false,
+        finished: true,
+        ok: true,
+        summary,
+        stepDesc: '',
+        narration: '',
+        stopRequested: false,
+      }),
+    idle: () =>
+      patchAgentState({
+        running: false,
+        finished: false,
+        task: '',
+        summary: '',
+        narration: '',
+        stepDesc: '',
+        stopRequested: false,
+      }),
+  };
+}

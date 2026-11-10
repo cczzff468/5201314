@@ -1048,9 +1048,13 @@ export default function AgentVoiceBall() {
         className="pointer-events-auto absolute bottom-[140px] right-0 flex h-[48px] w-[48px] touch-none select-none items-center justify-center rounded-full"
         data-testid="agent-voice-ball"
       >
-        {/* 呼吸光环（连续唤醒监听中） */}
+        {/* 呼吸光环（连续唤醒监听中）：柔和外圈呼吸，替代旧生硬 ping */}
         {listening ? (
-          <span aria-hidden="true" className="absolute inset-[-4px] animate-ping rounded-full bg-white/25" style={{ animationDuration: '2.4s' }} />
+          <span
+            aria-hidden="true"
+            className="absolute -inset-[7px] rounded-full ring-1 ring-white/35"
+            style={{ animation: 'agentVoiceBreath 2.6s ease-in-out infinite' }}
+          />
         ) : null}
         {/* 唤醒状态点：熔断=红点（点球可见原因）；服务端识别连败降级中=琥珀点（自动换通道重试，喊名可能暂时失灵） */}
         {wakeBlocked ? (
@@ -1058,19 +1062,26 @@ export default function AgentVoiceBall() {
         ) : serverDegraded ? (
           <span aria-hidden="true" data-testid="agent-voice-ball-degraded" className="absolute -right-0.5 -top-0.5 z-10 h-3 w-3 rounded-full bg-[#FF9500] shadow-[0_1px_4px_rgba(0,0,0,0.4)] ring-2 ring-black/50" />
         ) : null}
-        {/* 柔和彩虹外发光 */}
-        <span aria-hidden="true" className="absolute -inset-[5px] rounded-full opacity-55 blur-md" style={{ background: SIRI_CONIC }} />
-        {/* 旋转彩虹环 */}
-        <span aria-hidden="true" className="absolute inset-0 rounded-full" style={{ background: SIRI_CONIC, animation: 'agentVoiceSpin 7s linear infinite' }} />
-        {/* 深色玻璃主体 */}
-        <span aria-hidden="true" className="absolute inset-[2.5px] rounded-full bg-[#0B0B10]/90 backdrop-blur-xl ring-1 ring-white/10" />
-        {/* 内缘高光（玻璃质感） */}
+        {/* 极简玻璃球：静置时一层细彩虹描边 + 柔和底部微光；监听中描边慢旋（简约不抢眼） */}
         <span
           aria-hidden="true"
-          className="absolute inset-[2.5px] rounded-full"
-          style={{ background: 'radial-gradient(120% 90% at 30% 18%, rgba(255,255,255,0.22), transparent 42%)' }}
+          className="absolute -inset-[2px] rounded-full opacity-45 blur-[6px]"
+          style={{ background: 'linear-gradient(140deg, rgba(110,231,249,0.55), rgba(167,139,250,0.5) 45%, rgba(244,114,182,0.5))' }}
         />
-        <Mic className="relative h-[18px] w-[18px] text-white" />
+        <span
+          aria-hidden="true"
+          className={`absolute inset-0 rounded-full ${listening ? '' : 'opacity-80'}`}
+          style={{ background: SIRI_CONIC, animation: listening ? 'agentVoiceSpin 10s linear infinite' : undefined }}
+        />
+        {/* 深色玻璃主体（1.5px 内缩露出细描边） */}
+        <span aria-hidden="true" className="absolute inset-[1.5px] rounded-full bg-[#0E0E13]/92 backdrop-blur-xl" />
+        {/* 内缘高光（玻璃质感，弱化） */}
+        <span
+          aria-hidden="true"
+          className="absolute inset-[1.5px] rounded-full"
+          style={{ background: 'radial-gradient(120% 90% at 30% 16%, rgba(255,255,255,0.16), transparent 40%)' }}
+        />
+        <Mic className="relative h-[17px] w-[17px] text-white/95" strokeWidth={2.1} />
       </motion.button>
     </div>
   );

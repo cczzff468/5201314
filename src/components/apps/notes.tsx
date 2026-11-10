@@ -170,13 +170,13 @@ export default function NotesApp() {
     void localDB.put('notes', rec).catch(() => undefined);
   }
 
-  /** 回到来源页（完成/返回）：新建草稿若仍为空白未置顶 → 按 iOS 语义丢弃；重新加载 */
-  function backFromEditor() {
+  /** 回到指定页（离开编辑器统一收口）；新建草稿若仍为空白未置顶 → 按 iOS 语义丢弃；重新加载 */
+  function backFromEditor(target: Page) {
     const draftId = draftIdRef.current;
     draftIdRef.current = null;
     setActive(null);
     setFocusOn(null);
-    setPage(returnPageRef.current);
+    setPage(target);
     void (async () => {
       if (draftId) {
         try {
@@ -188,6 +188,16 @@ export default function NotesApp() {
       }
       await reloadNotes();
     })();
+  }
+
+  /** 完成/返回：回来源页 */
+  function backFromEditorToOrigin() {
+    backFromEditor(returnPageRef.current);
+  }
+
+  /** v1.9.3：左上「< 备忘录」标签点击 → 直接回备忘录 App 主界面（文件夹页） */
+  function backToMainFromEditor() {
+    backFromEditor({ kind: 'folders' });
   }
 
   // ---------------- 页面动作 ----------------
@@ -337,7 +347,8 @@ export default function NotesApp() {
           note={active}
           folderName={folderNameOf(active.folder ?? FOLDER_DEFAULT, folders)}
           focusOn={focusOn}
-          onDone={backFromEditor}
+          onDone={backFromEditorToOrigin}
+          onBackMain={backToMainFromEditor}
           onOpenCalendar={() => useUI.getState().switchToApp('calendar')}
         />
         <LocalToast msg={toast} />

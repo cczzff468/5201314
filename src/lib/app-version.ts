@@ -11,9 +11,9 @@
  */
 
 /** 当前最新版本（与 android-shell versionName 保持一致） */
-export const APP_VERSION = '1.9.2';
+export const APP_VERSION = '1.9.3';
 /** 版本号数字（与 android-shell versionCode 保持一致；覆盖安装要求只增不减） */
-export const APP_VERSION_CODE = 22;
+export const APP_VERSION_CODE = 23;
 
 export interface AppReleaseNote {
   version: string;
@@ -24,6 +24,17 @@ export interface AppReleaseNote {
 
 /** 版本历史（新→旧；设置 › APP 更新 页渲染，最新一条即当前版本） */
 export const APP_RELEASE_NOTES: AppReleaseNote[] = [
+  {
+    version: '1.9.3',
+    date: '2026-11-10',
+    items: [
+      '语音智能体悬浮球焕新：极简玻璃球（细彩虹描边+柔和微光），监听中呼吸更柔和不抢眼',
+      '语音唤起智能体设置独立成页：不再藏在「AI 动手」里，设置 › AI 感知与操控 › 语音唤起智能体 直达',
+      'Agent 任务进度卡从灵动岛弹出：iOS 实时活动同款形变动画，深色毛玻璃简约风；任务完成后不再显示红点，展示结果摘要后自动缩回灵动岛',
+      '通知中心换上主屏同款 APP 图标（AI 助手为渐变星光标），卡片与分组头毛玻璃精修',
+      '备忘录：编辑页左上「< 备忘录」标签点击直接返回备忘录主界面（文件夹页）',
+    ],
+  },
   {
     version: '1.9.2',
     date: '2026-11-10',

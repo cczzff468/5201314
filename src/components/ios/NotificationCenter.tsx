@@ -24,9 +24,11 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { animate, motion, useMotionValue, useTransform } from 'framer-motion';
-import { useUI } from '@/lib/ios/store';
+import { Sparkles } from 'lucide-react';
+import { useUI, type AppId } from '@/lib/ios/store';
 import { useIncomingCall } from '@/lib/ios/incoming-call';
 import { shellScale } from '@/lib/ios/shell-scale';
+import { appImage } from '@/components/apps/registry';
 import {
   activateCenterItem,
   setNotifyDnd,
@@ -62,13 +64,15 @@ interface TopDrag {
 
 // ---------------- 工具 ----------------
 
-/** 来源 App 元数据（v1.9.2 分组折叠 + 行图标共用一份推导，避免两套映射漂移） */
+/** 来源 App 元数据（v1.9.3 分组折叠 + 主屏同款 APP 图标共用一份推导） */
 interface NcAppMeta {
   /** 分组键（同 key 聚拢一组；未知 tag 全部归入 system「系统」组） */
   key: string;
   /** 组头展示名 */
   name: string;
-  /** 行/组头图标（图片路径；与旧 iconForItem 同序：调用方自带 item.icon 永远胜出） */
+  /** 主屏同款 APP 图标（registry appImage 实体图；'agent' 为渐变+星光定制标） */
+  appId?: AppId | 'agent';
+  /** 行/组头图标（图片路径；调用方自带 item.icon 永远胜出） */
   src?: string;
   /** 行/组头图标（emoji 兜底，当无图片路径时） */
   emoji?: string;
@@ -82,52 +86,91 @@ interface NcAppMeta {
  * pushChatNotification 聊天链路不入中心，故聊天 tag 当前实际不存在——下面的微信/QQ/信息
  * 分支是按 sessionKey 前缀约定做的防御性映射，兜住未来/测试注入（__ncTest）的形态，
  * 避免聊天条目错归「系统」组；未知/无 tag（含浏览器通道自动 local-*）归「系统」。
- * 图标解析顺序与旧 iconForItem 完全一致（item.icon > tag 映射 > 缺省应用图标），行视觉不变。
+ * v1.9.3：图标升级为主屏同款 APP 实体图标（registry appImage 直连，与 HomeScreen 同源），
+ * agent 组用渐变+星光定制标；解析顺序：item.icon > appId 实体图 > src > emoji。
  */
 function appMetaOf(item: NotificationCenterItem): NcAppMeta {
   const tag = item.tag ?? '';
   let key = 'system';
   let name = '系统';
-  let src: string | undefined = '/icons/pwa/icon-192.png'; // 缺省：应用图标
+  let appId: NcAppMeta['appId'];
+  let src: string | undefined = '/icons/pwa/icon-192.png'; // 缺省：AI Phone 应用图标
   let emoji: string | undefined;
   if (tag === 'agent' || tag.startsWith('agent-') || tag.startsWith('agent:')) {
     key = 'agent';
     name = 'AI 助手';
+    appId = 'agent';
     src = undefined;
-    emoji = '🤖';
   } else if (tag.startsWith('ai-call-')) {
     key = 'phone';
     name = '电话';
-    src = '/icons/phone.png';
+    appId = 'phone';
+    src = undefined;
   } else if (tag.startsWith('ai-vm-')) {
     key = 'voicemail';
     name = '语音留言';
-    src = '/icons/recorder.png';
+    appId = 'recorder';
+    src = undefined;
   } else if (tag.startsWith('couple')) {
     key = 'couple';
     name = '情侣小家';
-    src = '/icons/couple.png';
+    appId = 'cottage';
+    src = undefined;
   } else if (/^wx([:-]|$)/.test(tag) || tag.startsWith('wx:group') || tag.startsWith('wx-group')) {
     key = 'wechat';
     name = '微信';
-    src = '/icons/wechat.png';
+    appId = 'wechat';
+    src = undefined;
   } else if (/^qq([:-]|$)/.test(tag) || tag.startsWith('qq:group') || tag.startsWith('qq-group')) {
     key = 'qq';
     name = 'QQ';
-    src = '/icons/qq.png';
+    appId = 'qq';
+    src = undefined;
   } else if (/^(sms|chat)([:.-]|$)/.test(tag)) {
     key = 'chat';
     name = '信息';
-    src = '/icons/chat.png';
+    appId = 'chat';
+    src = undefined;
   }
-  // 调用方自带图标永远胜出（与旧 iconForItem 首分支一致，行视觉行为不变）
-  if (item.icon) src = item.icon;
+  // 调用方自带图标永远胜出（旧 iconForItem 首分支语义；带 src 时忽略 appId 映射）
+  if (item.icon) return { key, name, src: item.icon };
   return {
     key,
     name,
+    ...(appId ? { appId } : {}),
     ...(src ? { src } : {}),
     ...(emoji ? { emoji } : {}),
   };
+}
+
+/**
+ * 通知行/组头 APP 图标（v1.9.3）：优先主屏同款实体 APP 图标（registry appImage，
+ * 与 HomeScreen 同源）；agent 组=绿→青→紫渐变底+白色星光（AI 助手身份标识）；
+ * 其余回退 src 图片 / emoji。容器自带圆角裁切，图片满铺（PNG 自带圆角与容器几乎重合）。
+ */
+function NcAppIcon({ meta, size }: { meta: NcAppMeta; size: number }) {
+  if (meta.appId === 'agent') {
+    return (
+      <span
+        className="flex h-full w-full items-center justify-center"
+        style={{ background: 'linear-gradient(140deg, #34C759 0%, #32ADE6 55%, #A78BFA 100%)' }}
+      >
+        <Sparkles
+          style={{ width: Math.round(size * 0.52), height: Math.round(size * 0.52) }}
+          className="text-white"
+          strokeWidth={2.2}
+          aria-hidden="true"
+        />
+      </span>
+    );
+  }
+  if (meta.appId) {
+    const img = appImage(meta.appId as AppId);
+    if (img) return <img src={img} alt="" draggable={false} className="block h-full w-full select-none object-cover" />;
+  }
+  if (meta.src) return <img src={meta.src} alt="" draggable={false} className="block h-full w-full object-contain" />;
+  if (meta.emoji) return <span style={{ fontSize: Math.round(size * 0.58), lineHeight: 1 }}>{meta.emoji}</span>;
+  return null;
 }
 
 /** 相对时间：刚刚 / N 分钟前 / N 小时前 / 昨天 / M月D日 */
@@ -145,25 +188,21 @@ function relativeTime(ts: number, now: number): string {
 // ---------------- 单条通知行 ----------------
 
 function NotificationRow({ item, now }: { item: NotificationCenterItem; now: number }) {
-  const icon = appMetaOf(item); // 行图标与分组共用同一推导（v1.9.2），视觉与旧 iconForItem 一致
+  const icon = appMetaOf(item); // 行图标与分组共用同一推导（v1.9.3：主屏同款 APP 图标）
   return (
     <button
       type="button"
       data-testid="nc-item"
       onClick={() => activateCenterItem(item)}
-      className="pointer-events-auto relative mb-2 flex w-full items-start gap-2.5 rounded-2xl bg-white/[0.14] p-3 pr-8 text-left backdrop-blur-md transition-colors active:bg-white/[0.26]"
+      className="pointer-events-auto relative mb-2 flex w-full items-start gap-3 rounded-[20px] bg-white/[0.13] p-3 pr-9 text-left ring-1 ring-white/[0.09] shadow-[0_6px_20px_-12px_rgba(0,0,0,0.5)] backdrop-blur-xl transition-colors active:bg-white/[0.22]"
     >
-      {/* 应用小图标（按 tag 映射） */}
-      <span className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-[9px] bg-white/15">
-        {icon.src ? (
-          <img src={icon.src} alt="" className="h-6 w-6 object-contain" /> // 手机壳内小尺寸静态图标，直接 img
-        ) : (
-          <span className="text-[18px] leading-none">{icon.emoji}</span>
-        )}
+      {/* APP 图标（主屏同款实体图标 / agent 渐变星光） */}
+      <span className="flex h-[38px] w-[38px] shrink-0 items-center justify-center overflow-hidden rounded-[11px] bg-white/10 ring-1 ring-white/20">
+        <NcAppIcon meta={icon} size={38} />
       </span>
       <span className="min-w-0 flex-1">
         <span className="flex items-center gap-1.5">
-          <span className="min-w-0 flex-1 truncate text-[13px] font-semibold text-white">{item.title}</span>
+          <span className="min-w-0 flex-1 truncate text-[13.5px] font-semibold text-white">{item.title}</span>
           <span className="shrink-0 text-[11px] text-white/50">{relativeTime(item.ts, now)}</span>
           {/* 未读蓝点 */}
           {!item.read && <span aria-label="未读" className="h-[7px] w-[7px] shrink-0 rounded-full bg-[#0A84FF]" />}
@@ -461,14 +500,10 @@ export default function NotificationCenter() {
                     tabIndex={0}
                     aria-expanded={!isCollapsed}
                     onClick={() => toggleGroup(g.key)}
-                    className="pointer-events-auto sticky top-0 z-10 flex h-9 cursor-pointer items-center gap-2 rounded-xl bg-white/[0.18] px-2.5 backdrop-blur-md"
+                    className="pointer-events-auto sticky top-0 z-10 flex h-10 cursor-pointer items-center gap-2.5 rounded-[14px] bg-white/[0.16] px-2.5 ring-1 ring-white/[0.08] backdrop-blur-md"
                   >
-                    <span className="flex h-6 w-6 shrink-0 items-center justify-center overflow-hidden rounded-[7px] bg-white/20">
-                      {g.meta.src ? (
-                        <img src={g.meta.src} alt="" className="h-4 w-4 object-contain" /> // 壳内小尺寸静态图标，直接 img
-                      ) : (
-                        <span className="text-[13px] leading-none">{g.meta.emoji}</span>
-                      )}
+                    <span className="flex h-[26px] w-[26px] shrink-0 items-center justify-center overflow-hidden rounded-[8px] bg-white/10 ring-1 ring-white/20">
+                      <NcAppIcon meta={g.meta} size={26} />
                     </span>
                     <span className="min-w-0 flex-1 truncate text-[13px] font-semibold text-white">{g.name}</span>
                     {g.unread > 0 && (
@@ -506,14 +541,14 @@ export default function NotificationCenter() {
           </div>
         )}
 
-        {/* 底部操作（v1.9.2 加第三个「🌙 免打扰」快捷开关：与设置页同一持久化真值，激活态蓝色高亮） */}
+        {/* 底部操作（毛玻璃精修 v1.9.3）：全部已读 / 🌙免打扰（激活蓝色）/ 清空全部 */}
         <div className="flex shrink-0 gap-2 py-2.5">
           <button
             type="button"
             data-testid="nc-mark-all"
             disabled={unread === 0}
             onClick={() => useNotifyCenter.getState().markAllRead()}
-            className="pointer-events-auto h-9 flex-1 rounded-full bg-white/15 text-[13px] font-medium text-white backdrop-blur-md transition-opacity active:bg-white/25 disabled:opacity-40"
+            className="pointer-events-auto h-9 flex-1 rounded-full bg-white/[0.14] text-[13px] font-medium text-white ring-1 ring-white/[0.08] backdrop-blur-md transition-colors active:bg-white/[0.24] disabled:opacity-40"
           >
             全部已读
           </button>
@@ -525,7 +560,7 @@ export default function NotificationCenter() {
               setNotifyDnd(!dndOn); // 先落盘（唯一真相）再同步镜像，订阅处自动重渲染
             }}
             className={`pointer-events-auto h-9 flex-1 rounded-full text-[13px] font-medium text-white backdrop-blur-md transition-colors active:brightness-110 ${
-              dndOn ? 'bg-[#0A84FF]' : 'bg-white/15'
+              dndOn ? 'bg-[#0A84FF]' : 'bg-white/[0.14] ring-1 ring-white/[0.08]'
             }`}
           >
             🌙 免打扰
@@ -535,7 +570,7 @@ export default function NotificationCenter() {
             data-testid="nc-clear-all"
             disabled={items.length === 0}
             onClick={() => useNotifyCenter.getState().clearAll()}
-            className="pointer-events-auto h-9 flex-1 rounded-full bg-white/15 text-[13px] font-medium text-white backdrop-blur-md transition-opacity active:bg-white/25 disabled:opacity-40"
+            className="pointer-events-auto h-9 flex-1 rounded-full bg-white/[0.14] text-[13px] font-medium text-white ring-1 ring-white/[0.08] backdrop-blur-md transition-colors active:bg-white/[0.24] disabled:opacity-40"
           >
             清空全部
           </button>

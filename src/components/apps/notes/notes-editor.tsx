@@ -63,6 +63,7 @@ export function NoteEditor({
   folderName,
   focusOn,
   onDone,
+  onBackMain,
   onOpenCalendar,
 }: {
   /** 打开时的快照；编辑器内部独立保存，不经 props 回流 */
@@ -70,6 +71,9 @@ export function NoteEditor({
   folderName: string;
   focusOn: 'title' | 'body' | 'checklist' | null;
   onDone: () => void;
+  /** 左上「< 备忘录」标签点击（v1.9.3 需求：直接返回备忘录 App 主界面/文件夹页）；
+   *  未提供时同 onDone（回来源列表） */
+  onBackMain?: () => void;
   /** 点击日历胶囊：跳日历 App */
   onOpenCalendar: () => void;
 }) {
@@ -463,8 +467,8 @@ export function NoteEditor({
         <div className="flex h-11 items-center justify-between px-4">
           <button
             type="button"
-            onClick={handleDone}
-            aria-label="返回备忘录列表"
+            onClick={onBackMain ?? handleDone}
+            aria-label={onBackMain ? '返回备忘录主界面' : '返回备忘录列表'}
             className="-ml-1 flex items-center transition-opacity active:opacity-50"
             style={goldStyle}
           >
