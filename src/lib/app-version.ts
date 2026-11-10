@@ -11,9 +11,9 @@
  */
 
 /** 当前最新版本（与 android-shell versionName 保持一致） */
-export const APP_VERSION = '1.9.15';
+export const APP_VERSION = '1.9.16';
 /** 版本号数字（与 android-shell versionCode 保持一致；覆盖安装要求只增不减） */
-export const APP_VERSION_CODE = 35;
+export const APP_VERSION_CODE = 36;
 
 export interface AppReleaseNote {
   version: string;
@@ -24,6 +24,14 @@ export interface AppReleaseNote {
 
 /** 版本历史（新→旧；设置 › APP 更新 页渲染，最新一条即当前版本） */
 export const APP_RELEASE_NOTES: AppReleaseNote[] = [
+  {
+    version: '1.9.16',
+    date: '2026-11-11',
+    items: [
+      '修复通知铃声不响：在微信/信息等 App 里收消息，提示音重新响起（上个版本误把 App 内提示音一并静音了，现在恢复：App 里照响铃，横幅照旧不弹）',
+      '修复后台系统通知不显示：从 App 里直接退到后台（切走/锁屏）后，系统通知栏照常逐条弹出——上个版本只要退出前停在对应 App 就会被前台判定误拦，现在页面退到真实后台一律放行',
+    ],
+  },
   {
     version: '1.9.15',
     date: '2026-11-11',

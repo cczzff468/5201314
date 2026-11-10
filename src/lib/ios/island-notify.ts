@@ -304,6 +304,11 @@ function isSessionBannerSuppressed(sessionKey: string): boolean {
  * v1.9.12「正在输入」实时活动已按机主要求整体下线：通知只在真实消息落盘时弹一条，
  * 不再有「正在输入…」占位卡；后台体感延迟由 ai-delivery 的快速投递（会话没被看着时
  * 跳过打字节奏）压到最短，见 ai-delivery.shouldFastDeliver。
+ * v1.9.16 前台闸细化（修复 v1.9.12 两处回归）：
+ * - 「App 正被看着」（页面可见 + 未锁屏 + 停在所属 App）→ 不弹横幅不发系统通知，
+ *   但提示音照常响（v1.9.12 把铃声一并吞了，机主反馈「通知铃声不响了」）；
+ * - 页面已退真实后台（切走标签页/切 App/锁真机屏）→ 绝不被前台闸拦，照常发系统通知
+ *   （v1.9.12 的闸没看页面可见性，activeApp 停在目标 App 时退后台收不到通知）。
  * - 会话开了「消息免打扰」（#15）→ 灵动岛弹层与 Web Notification 全部跳过
  *   （未读角标/会话列表逻辑由各自消费端处理，不受本闸门影响）；
  * - 有正在展示的通知 → 直接替换为本次内容（旧条立即让位，视觉上每条消息都弹了一次）；
@@ -323,12 +328,21 @@ export function pushChatNotification(input: ChatNotifyInput): void {
   // v1.9.8 接力守望者抑制：守望者已为该会话的服务端待达消息弹过横幅/提示音/系统通知，
   // 聊天页正式投递同一批消息时三出口跳过（消息落盘、未读角标不受影响，见上方注释）
   if (isSessionBannerSuppressed(input.sessionKey)) return;
-  // v1.9.12 机主需求：通知所属 App 正被使用（用户就在该 App 界面里）→ 不弹横幅不提示
-  // 不进系统通知（iOS 语义：App 在前台时系统不弹它的通知）；退出 App（回主屏/切别的 App）
-  // 或锁屏/熄屏（不算正在使用）才弹。消息照常落盘，未读角标/会话列表预览由各自消费端处理
+  // v1.9.16 前台闸细化（修复 v1.9.12 两处回归：App 内铃声不响 + 退后台系统通知不显示）：
+  // - 「App 正被看着」= 页面可见（未退真实后台）+ 未锁屏未熄屏 + 停在所属 App：
+  //   只跳过横幅与系统通知（iOS 前台语义），提示音照常响——v1.9.12 把铃声一并吞了，
+  //   机主反馈「通知铃声不响了」，本版回归：App 内收消息照响铃，横幅照旧不弹；
+  // - 页面已退真实后台（切走标签页/切 App/锁真机屏，visibilityState=hidden）时绝不能被
+  //   本闸吞掉——此时 activeApp 可能仍停在目标 App（模拟器状态不随页面隐藏复位），
+  //   必须照常走完整管线（横幅冻结计时 + 系统通知），机主退后台就能收到通知栏通知
   if (typeof window !== 'undefined') {
     const ui = useUI.getState();
-    if (!ui.locked && !ui.screenOff && ui.activeApp === input.target.app) return;
+    const pageHidden = typeof document !== 'undefined' && document.visibilityState === 'hidden';
+    if (!ui.locked && !ui.screenOff && !pageHidden && ui.activeApp === input.target.app) {
+      // App 正被看着：提示音照常（回归铃声）；横幅与系统通知跳过（iOS 前台语义）
+      playNotifySound(input.sessionKey.includes(':group:') ? 'group' : 'receive');
+      return;
+    }
   }
   // 通知提示音（设置 › 通知可配）：群会话走「群消息」，其余走「接收消息」；
   // 声音闸门（总开关/分类开关/免打扰）由 playNotifySound 内部判定——静音时弹窗与记录照常

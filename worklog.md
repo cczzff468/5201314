@@ -2585,3 +2585,15 @@ Work Log:
 
 Stage Summary:
 - v1.9.15 已提交：AI 每次回复默认发 3~8 条（往多了发、话多可超），下限 3 条人设豁免制，默认档位 5→8 全端生效，群聊节奏保留
+---
+Task ID: 23
+Agent: 主控 Agent（Z.ai Code）
+Task: v1.9.16 通知回归修复——App 内铃声恢复 + 退后台系统通知放行
+
+Work Log:
+- island-notify.ts pushChatNotification：v1.9.12 前台闸细化修复两处回归——①「App 正被看着」（页面可见+未锁屏+停在所属 App）分支不再整体 return，改为先 playNotifySound 再 return：App 内收消息铃声恢复（横幅/系统通知照旧不弹，iOS 前台语义保留）；②闸门条件补 pageHidden（visibilityState==='hidden'）：页面退真实后台（切走标签页/切 App/锁真机屏）时即使 activeApp 仍停在目标 App（模拟器状态不随页面隐藏复位，v1.9.12 漏判）也照常走完整管线——横幅冻结计时入岛 + maybeWebNotification 系统通知放行
+- app-version.ts：bump 1.9.16（versionCode 36）+ 2 条更新说明
+- 验证：agent-browser E2E 三场景——A App 内推送（target=chat）：oscSpy=3（内置「备注」铃声合成执行）+ bannerCurrent=null（横幅抑制保留）✅；B 模拟页面 hidden + Notification.permission granted + activeApp 停留：bannerCurrent 非空（闸门放行）+ pushSpy=1（POST /api/notify/push 发出）+ SSE received=1（广播回环→SW showNotification）✅；C 恢复 visible + 其他 App target：横幅正常展示 + 铃声 oscSpy 3→9 ✅；dev.log 无新错误（解析报错为编辑间隙 HMR 瞬态，最终编译干净）；eslint 两文件零错误
+
+Stage Summary:
+- v1.9.16 已提交：修复「通知铃声不响」（App 内提示音回归）与「后台系统通知不显示」（页面退后台一律放行系统通知）两处 v1.9.12 回归
