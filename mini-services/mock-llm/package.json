@@ -1,0 +1,1 @@
+{"name":"mock-llm","scripts":{"dev":"bun --hot index.ts"}}

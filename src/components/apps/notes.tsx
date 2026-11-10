@@ -195,9 +195,16 @@ export default function NotesApp() {
     backFromEditor(returnPageRef.current);
   }
 
-  /** v1.9.3：左上「< 备忘录」标签点击 → 直接回备忘录 App 主界面（文件夹页） */
-  function backToMainFromEditor() {
-    backFromEditor({ kind: 'folders' });
+  /** v1.9.6：编辑器左上「< 备忘录」标签点击 → 保存收尾（空草稿按 iOS 语义丢弃）后退出 APP 回手机主页面。
+   *  （v1.9.3 曾改为回文件夹页，机主实测后仍要「主页面」= 手机桌面，故升级为退出 APP） */
+  function exitHomeFromEditor() {
+    backFromEditor(returnPageRef.current);
+    useUI.getState().exitForegroundApp();
+  }
+
+  /** v1.9.6：列表页页头大标题（「备忘录/全部备忘录」等）点击 → 退出 APP 回手机主页面 */
+  function exitToPhoneHome() {
+    useUI.getState().exitForegroundApp();
   }
 
   // ---------------- 页面动作 ----------------
@@ -348,7 +355,7 @@ export default function NotesApp() {
           folderName={folderNameOf(active.folder ?? FOLDER_DEFAULT, folders)}
           focusOn={focusOn}
           onDone={backFromEditorToOrigin}
-          onBackMain={backToMainFromEditor}
+          onBackMain={exitHomeFromEditor}
           onOpenCalendar={() => useUI.getState().switchToApp('calendar')}
         />
         <LocalToast msg={toast} />
@@ -398,6 +405,7 @@ export default function NotesApp() {
               onNewFolder={() => setFolderSheet({ editing: null })}
               onMoveSelected={(ids) => setMoveIds(ids)}
               onDeleteSelected={(ids) => trashByIds(ids)}
+              onExitHome={exitToPhoneHome}
             />
           );
         })()}

@@ -311,6 +311,7 @@ export function ListPage({
   onNewFolder,
   onMoveSelected,
   onDeleteSelected,
+  onExitHome,
 }: {
   folderId: string;
   folderName: string;
@@ -324,6 +325,9 @@ export function ListPage({
   onNewFolder: () => void;
   onMoveSelected: (ids: string[]) => void;
   onDeleteSelected: (ids: string[]) => void;
+  /** v1.9.6：点击页头大标题（「备忘录/全部备忘录」等）→ 退出 APP 回手机主页面；
+   *  批量选择中标题变「已选择 N 条」，不响应（undefined → 按钮禁用） */
+  onExitHome?: () => void;
 }) {
   const [selectMode, setSelectMode] = useState(false);
   const [selIds, setSelIds] = useState<Set<string>>(new Set());
@@ -375,6 +379,7 @@ export function ListPage({
           )
         }
         title={selectMode ? `已选择 ${selIds.size} 条` : folderName}
+        onTitleClick={selectMode ? undefined : onExitHome}
       >
         <div className="px-4 pb-[130px]">
           <div className="mt-1">

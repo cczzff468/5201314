@@ -11,9 +11,9 @@
  */
 
 /** 当前最新版本（与 android-shell versionName 保持一致） */
-export const APP_VERSION = '1.9.5';
+export const APP_VERSION = '1.9.6';
 /** 版本号数字（与 android-shell versionCode 保持一致；覆盖安装要求只增不减） */
-export const APP_VERSION_CODE = 25;
+export const APP_VERSION_CODE = 26;
 
 export interface AppReleaseNote {
   version: string;
@@ -24,6 +24,15 @@ export interface AppReleaseNote {
 
 /** 版本历史（新→旧；设置 › APP 更新 页渲染，最新一条即当前版本） */
 export const APP_RELEASE_NOTES: AppReleaseNote[] = [
+  {
+    version: '1.9.6',
+    date: '2026-11-10',
+    items: [
+      'APP 内 AI 消息逐条弹系统通知：AI 每发一条消息，Android 通知栏就多一条独立通知（有几条弹几条），不再只有测试通知能弹；点通知直达对应会话',
+      'APP 内真实通知不再被前台拦住：智能体任务完成、AI 语音留言、情侣便签等通知现在机主正在用手机时也能真弹通知栏',
+      '备忘录：列表页顶部大标题（如「备忘录」）与编辑页左上「< 备忘录」标签，点击直接回到手机主页面',
+    ],
+  },
   {
     version: '1.9.5',
     date: '2026-11-10',

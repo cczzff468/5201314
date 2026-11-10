@@ -71,7 +71,7 @@ export function NoteEditor({
   folderName: string;
   focusOn: 'title' | 'body' | 'checklist' | null;
   onDone: () => void;
-  /** 左上「< 备忘录」标签点击（v1.9.3 需求：直接返回备忘录 App 主界面/文件夹页）；
+  /** 左上「< 备忘录」标签点击（v1.9.6：保存收尾后退出 APP 回手机主页面；
    *  未提供时同 onDone（回来源列表） */
   onBackMain?: () => void;
   /** 点击日历胶囊：跳日历 App */

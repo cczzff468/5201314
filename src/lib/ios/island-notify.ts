@@ -33,6 +33,8 @@ import { create } from 'zustand';
 import { useUI } from './store';
 import { setupPushSubscription } from './push-client';
 import { showSystemNotification, isPageBackground } from './system-notify';
+// v1.9.6 原生壳判定：APK 内每条 AI 消息直发 Android 系统通知（一条一弹）
+import { isNativePerception } from './native-perception';
 // v57 通知系统：SSE 长连接（服务端广播 → SW showNotification）；notify-sse 模块加载即挂连接
 import { pushSysNotifyViaSse, type SseNotifyPayload } from './notify-sse';
 import { wxChatFlags, qqChatFlags } from '@/lib/chat-flags';
@@ -484,6 +486,24 @@ async function postWebNotification(n: IslandNotification): Promise<void> {
 }
 
 function maybeWebNotification(n: IslandNotification): void {
+  // v1.9.6 原生壳（APK）内每条 AI 消息直发 Android 系统通知——一条一弹，有几条消息弹几条：
+  // 用户实测根因（测试通知正常、真实消息从不弹）：
+  // ① WebView 里 Notification.permission 恒 'denied'（Web API 不映射 Android 运行时权限）
+  //    → 下方 Web 分支（perm === 'granted'）永不命中；
+  // ② 机主正在使用 APP 时 isPageBackground() 恒 false → 即使有权限也被前台闸拦死。
+  // 原生壳不走 Web 通道：showSystemNotification 首选 NativePerception.localNotify（通知栏
+  // 即达，双权限闸在原生侧）；tag = chat-<通知id> 每条消息唯一 → Android 按 (tag,hashCode)
+  // 独立堆叠，不替换先发（一条消息一条通知）。点击 target 透传 → 原生回传
+  // 'local-notify-open' → openCenterItem → navigateFromSystemNotify 精确切到会话。
+  // 应用内灵动岛弹窗（pushChatNotification 前半段）不受影响，照常逐条弹。
+  if (isNativePerception()) {
+    void showSystemNotification(n.title, {
+      body: n.subtitle ? `【${n.subtitle}】${n.body}` : n.body,
+      tag: `chat-${n.id}`,
+      data: { target: n.target },
+    }).catch(() => null);
+    return;
+  }
   if (typeof window === 'undefined' || !('Notification' in window)) return; // 不支持 → 应用内弹窗
   // 系统级通知总闸：用户在设置里关了「允许通知」→ Web Notification / Web Push /
   // 预提示卡全部跳过（应用内灵动岛弹窗已在 pushChatNotification 完成，不受影响）

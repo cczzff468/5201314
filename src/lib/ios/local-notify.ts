@@ -113,8 +113,12 @@ export async function notifyIfHidden(title: string, body: string, opts: LocalNot
     // playNotifySound 的闸门处理），豁免名单见 isDndExemptTag（来电/留言不静）。
     if (isNotifyDndActive() && !isDndExemptTag(opts.tag)) return;
 
-    // 前台闸门：用户正看着页面 → 页内弹窗已足够，不发系统通知
-    if (!document.hidden) return;
+    // 前台闸门：浏览器里用户正看着页面 → 页内弹窗已足够，不发系统通知。
+    // v1.9.6 原生壳豁免：APK 机主正在使用 APP 时（WebView 前台，hidden 恒 false）也要
+    // 逐条真弹 Android 通知栏——用户实测：测试通知正常，但智能体任务完成 / AI 语音留言 /
+    // 情侣便签等真实通知从不弹，根因即此前台闸把原生出口拦死。原生侧自有双权限闸
+    // （Android 13+ POST_NOTIFICATIONS + 应用内总闸）与 tag 去重，浏览器行为零变化。
+    if (!document.hidden && !isNativePerception()) return;
 
     // ① 原生壳：直发原生本地通知（权限闸/渠道/去重全在原生侧）
     if (isNativePerception()) {
