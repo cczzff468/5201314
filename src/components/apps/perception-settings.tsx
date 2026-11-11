@@ -67,6 +67,7 @@ import {
   type UsageEngine,
 } from '@/lib/ios/native-perception';
 import { ShizukuLabSection } from './shizuku-lab';
+import { JealousyLockSection } from './jealousy-lock-settings';
 import { copyApkLink, launchApkDownload } from '@/lib/ios/apk-download';
 
 /** 开关行（图标 + 名称 + 说明 + 开关） */
@@ -452,8 +453,11 @@ export function PerceptionSettingsPage({
     showToast('已停止屏幕分享');
   };
 
+  // z-50：与聊天设置页（z-50）同层、JSX 挂载在其后 → 后渲染盖在其上。v74 起误用 z-40
+  // 导致感知页被同时挂载的聊天设置页整页盖住（点「感知设置」无反应的既有 bug），v1.9.19 修复
+  // （其余兄弟二级页 ProactiveMsg/Translate/ReplyCount/WorldBook 全是 z-50、Theme z-60，本页对齐）。
   return (
-    <div className={`absolute inset-0 z-40 flex h-full w-full flex-col ${pageCls}`} data-testid={`${testPrefix}-perception-page`}>
+    <div className={`absolute inset-0 z-50 flex h-full w-full flex-col ${pageCls}`} data-testid={`${testPrefix}-perception-page`}>
       <LocalToast msg={toast} />
       {/* 顶栏 */}
       <div className={`shrink-0 pt-[54px] ${barCls}`}>
@@ -941,6 +945,9 @@ export function PerceptionSettingsPage({
           />
         ) : null}
 
+        {/* v1.9.19 AI 吃醋锁（触发阈值/娱乐 App 清单/锁定状态；网页端可配置+模拟剧情，真机真锁） */}
+        <JealousyLockSection accent={accent} testPrefix={testPrefix} cardCls={cardCls} dividerCls={dividerCls} />
+
         {/* 看屏幕 · VLM */}
         <div className={`${cardCls} mt-3 overflow-hidden`}>
           <ToggleRow
@@ -1055,3 +1062,4 @@ export function PerceptionSettingsPage({
     </div>
   );
 }
+

@@ -789,7 +789,7 @@ function convoLines(norm: NormMsg[], count: number, peerName: string, userName: 
   return lines.join('\n');
 }
 
-interface FireTrigger {
+export interface FireTrigger {
   kind: 'timer' | 'event' | 'auto' | 'reminder' | 'anxiety';
   eventName?: string;
   note?: string;
@@ -1073,7 +1073,7 @@ async function decideAutonomous(app: ProactiveApp, contact: ContactRecord, npcEx
 
 /** 主动消息投递：写三端消息记录 + pushChatNotification + wx/qq 未读角标（正在看不计数）。
  *  v53 五类触发都可传多条——经 scheduleAiDelivery 按真人打字节奏逐条连发上屏；单条可为一大段长文。 */
-async function deliverProactiveMsg(app: ProactiveApp, contact: ContactRecord, texts: string[], trigger: FireTrigger): Promise<void> {
+export async function deliverProactiveMsg(app: ProactiveApp, contact: ContactRecord, texts: string[], trigger: FireTrigger): Promise<void> {
   if (texts.length === 0) return;
   const cid = contact.id;
   const sessionKey = app === 'wx' ? `wx:${cid}` : app === 'qq' ? `qq:${cid}` : `sms:c:${cid}`;

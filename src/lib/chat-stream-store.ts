@@ -62,6 +62,7 @@ import { cachedOwnerName } from '@/lib/ios/contacts-store';
 import { noteUserMsgMood } from '@/lib/ios/ai-mood';
 import { noteUserEmotion } from '@/lib/ios/user-mood';
 import { noteUserReply } from '@/lib/ios/anxiety';
+import { noteJealousyEngagement } from '@/lib/ios/jealousy-lock';
 import { noteActive } from '@/lib/ios/routine';
 
 /** 会话键 → 账号所属 App（v2 per-app 账号）：wx:* → 微信、qq:* → QQ、其余（sms 开头与 assistant 等历史键）→ 信息 */
@@ -253,6 +254,8 @@ function noteEngagement(sessionKey: string, messages: ChatPayloadMessage[]): voi
         noteUserMsgMood(bs.contactId, msg.content);
         noteUserEmotion(bs.contactId, msg.content);
         noteUserReply(bs.contactId, bs.app, msg.content);
+        // v1.9.19 吃醋锁：记录最近私聊会话 + 检测「去看剧/刷视频后消失」意图（触发 B）
+        noteJealousyEngagement(bs.contactId, bs.app, msg.content);
         return;
       }
     }

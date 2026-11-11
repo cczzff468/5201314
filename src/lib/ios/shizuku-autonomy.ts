@@ -43,6 +43,7 @@ import {
 import { isNativePerception } from './native-perception';
 import { matchWebAppByPackage, openAppPage } from './agent-app-nav';
 import { useSettings } from '@/lib/ios/store';
+import { isJealousyUnlockAllowed, onJealousyUnfreeze } from './jealousy-lock';
 
 // ---------------- 能力注册表 ----------------
 
@@ -499,8 +500,10 @@ export async function executePhoneOp(argRaw: string, progress?: (text: string) =
   const p = parts; // 剩余参数段
   if (!cmd) return { ok: false, text: '手机操作命令为空' };
   // v1.8：「打开」在浏览器里也有意义——聊到「打开微信」可兑成网页内应用（下方 case 内处理），
-  // 其余命令真得依赖原生 Shizuku 通道，非原生环境一律拒
-  if (!isNativePerception() && cmd !== '打开') return { ok: false, text: '当前不在手机 APP 里（浏览器无法操控手机）' };
+  // 其余命令真得依赖原生 Shizuku 通道，非原生环境一律拒；
+  // v1.9.19 例外：吃醋锁活跃期间 AI 被哄好输出的「解冻」放行（锁在网页端是模拟的，解冻同镜像模拟）
+  if (!isNativePerception() && cmd !== '打开' && !(cmd === '解冻' && parts[0] && isJealousyUnlockAllowed(parts[0])))
+    return { ok: false, text: '当前不在手机 APP 里（浏览器无法操控手机）' };
   const cfg = getAutonomyConfig();
   if (!cfg.master) return DENIED;
   const on = (k: string) => cfg.caps[k] === true;
@@ -645,9 +648,19 @@ export async function executePhoneOp(argRaw: string, progress?: (text: string) =
     }
     case '冻结':
     case '解冻': {
-      if (!on('freeze')) return DENIED;
+      // v1.9.19：哄好解锁旁路——吃醋锁活跃期间，AI 被哄好后输出的解冻指令不受
+      // 「AI 动手」单项开关限制（锁是吃醋锁系统上的，解锁同源放行）
+      if (!on('freeze') && !(cmd === '解冻' && p[0] && isJealousyUnlockAllowed(p[0]))) return DENIED;
       if (!p[0]) return { ok: false, text: `${cmd}命令缺包名（[手机操作:${cmd}:包名]）` };
-      return labSetAppFrozen(p[0], cmd === '冻结');
+      // v1.9.19 网页端模拟：吃醋锁在网页端本就是「模拟锁」（runJealousyDecision 不执行真实冻结），
+      // 哄好解锁同镜像——不落 Shizuku 通道、直接清锁写记忆，保证网页剧情链路完整闭环
+      if (!isNativePerception() && cmd === '解冻' && isJealousyUnlockAllowed(p[0])) {
+        onJealousyUnfreeze(p[0]); // 钩子：清锁状态 + lastUnlock(coaxed) + 写哄好记忆
+        return { ok: true, text: `已解冻 ${p[0]}（网页预览模拟解锁）` };
+      }
+      const resFreeze = await labSetAppFrozen(p[0], cmd === '冻结');
+      if (resFreeze.ok && cmd === '解冻') onJealousyUnfreeze(p[0]); // 钩子：吃醋锁哄好解锁（清状态+写记忆）
+      return resFreeze;
     }
     case '卸载': {
       if (!on('uninstall')) return DENIED;

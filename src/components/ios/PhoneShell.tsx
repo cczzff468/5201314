@@ -54,6 +54,9 @@ const ProactiveCallWatcher = dynamic(() => import('./ProactiveCallWatcher'), { s
 
 // AI 主动发消息全局调度（定时/事件/自主/自然语言提醒四类触发，App 不打开也生效）：同样懒加载，挂载即后台运行
 const ProactiveMsgWatcher = dynamic(() => import('./ProactiveMsgWatcher'), { ssr: false });
+// v1.9.19 吃醋锁：全局守望（前台探测→触发→AI 决策→pm suspend 锁定）+ 全屏锁定弹窗
+const JealousyWatcher = dynamic(() => import('./JealousyWatcher'), { ssr: false });
+const JealousyLockOverlay = dynamic(() => import('./JealousyLockOverlay'), { ssr: false });
 const MeituanOrderWatcher = dynamic(() => import('./MeituanOrderWatcher'), { ssr: false });
 
 // 情侣空间 AI 常驻调度（第十四轮：自主决策链开机即起，刷新自动续链，不用先打开情侣空间）
@@ -567,6 +570,10 @@ export default function PhoneShell() {
             微信来电响铃期间不显示任何通话 UI，点弹窗非按钮区域才展开全屏来电页）——高于一切 App/锁屏，任何界面都显示 */}
         <IncomingCallLayer />
 
+        {/* v1.9.19 吃醋锁全屏弹窗（z-86，高于锁屏/全屏来电）：活跃锁存在且用户回到 APP 时强制弹
+            「角色名 · 锁定原因」+【去哄哄 TA】/【强制解锁】；锁屏期间不弹、解锁后第一时间出现 */}
+        <JealousyLockOverlay />
+
         {/* C6 应用内通知中心：z-[61]（App 窗口之上、锁屏/来电层之下）；入口手势/点按热区由组件
             自带 window 捕获阶段监听实现（gate：仅解锁后可用），不侵入状态栏/灵动岛既有交互 */}
         <NotificationCenter />
@@ -662,6 +669,10 @@ export default function PhoneShell() {
 
             {/* AI 主动发消息全局调度：定时/事件/自主/自然语言提醒四类触发，到点 AI 主动给用户发消息（App 不打开也生效） */}
             <ProactiveMsgWatcher />
+
+            {/* v1.9.19 吃醋锁全局守望：前台应用探测→三类触发（连续娱乐/说去看剧后消失/焦虑阈值）→AI 决策
+                →pm suspend 锁定→剧情消息；倒计时到点自动解锁（App 不打开也生效，后台节流 ~1min 粒度） */}
+            <JealousyWatcher />
 
             {/* 情侣空间 AI 常驻调度：自主决策链开机即起、刷新自动续链（不用先打开情侣空间，App 不打开也生效） */}
             <CoupleResidentWatcher />

@@ -16,6 +16,7 @@
  */
 
 import {
+  isNativePerception,
   nativeShizukuExec,
   nativeShizukuScreencap,
   type ShizukuExecResult,
@@ -83,6 +84,18 @@ export async function labForegroundApp(): Promise<LabResult> {
       return { ok: true, text: line || out.slice(0, 400) || '未取到焦点信息' };
     },
   });
+}
+
+/**
+ * 前台应用原始包名（吃醋锁守望者高频探测用；null = 非原生环境/桥断/未取到焦点）。
+ * 与 labForegroundApp 同一条 dumpsys window 解析（复用其 trim 产物的确定性格式），
+ * 但只回包名、不做中文名包装——调用方按需自行映射展示名。
+ */
+export async function labForegroundPkg(): Promise<string | null> {
+  if (!isNativePerception()) return null;
+  const r = await labForegroundApp();
+  const m = /前台应用：([\w.$]+)/.exec(r.text);
+  return m ? m[1] : null;
 }
 
 /** 通知栏快照（dumpsys notification --noredact → 最近通知的 App + 文本） */

@@ -11,9 +11,9 @@
  */
 
 /** 当前最新版本（与 android-shell versionName 保持一致） */
-export const APP_VERSION = '1.9.18';
+export const APP_VERSION = '1.9.19';
 /** 版本号数字（与 android-shell versionCode 保持一致；覆盖安装要求只增不减） */
-export const APP_VERSION_CODE = 38;
+export const APP_VERSION_CODE = 39;
 
 export interface AppReleaseNote {
   version: string;
@@ -24,6 +24,16 @@ export interface AppReleaseNote {
 
 /** 版本历史（新→旧；设置 › APP 更新 页渲染，最新一条即当前版本） */
 export const APP_RELEASE_NOTES: AppReleaseNote[] = [
+  {
+    version: '1.9.19',
+    date: '2026-11-11',
+    items: [
+      'AI 吃醋锁：把 Shizuku 的 pm suspend 能力与情绪系统深度绑定——你冷落 TA 刷娱乐 App 超时、说去看剧却消失、或 TA 焦虑值爆表时，TA 会真的吃醋把那个 App 锁住（桌面图标变灰、提示「由 Shell 所管理」），并在聊天里发吃醋消息',
+      '锁定后回 APP 强制弹全屏提示（角色名+锁定原因+倒计时），两个按钮：【去哄哄 TA】或【强制解锁】；哄好了 TA 会自己解开，倒计时到点也会自动解锁',
+      '强制解锁会写入一条戏剧性记忆（按人设生成「我很委屈，但我更讨厌他了/但我更爱他了」）；哄好解锁、倒计时解锁也全部写入记忆，TA 以后聊起这事都有据可依',
+      '任意聊天 › 聊天设置 › 感知设置 › AI 吃醋锁：触发分钟数/焦虑阈值/倒计时/冷却全可自定义，娱乐 App 清单预设+自定义包名；微信/QQ/短信/本 APP 永不锁定（锁了你就没法回来哄 TA 了）',
+    ],
+  },
   {
     version: '1.9.18',
     date: '2026-11-11',
