@@ -2651,3 +2651,20 @@ Stage Summary:
 - v1.9.19 已提交：「AI 真实吃醋并锁应用」全链路落地——三类触发（连续刷娱乐超时/说去看剧后消失/焦虑爆表）→ LLM 按人设决策锁不锁 → pm suspend 真锁（网页模拟）→ 全屏锁定弹窗+剧情消息+系统通知+锁定记忆 → 三通道解锁（哄好 AI 输出解冻指令/强制解锁写戏剧性记忆/倒计时自动解）全部写入记忆，配置全自定义（任意聊天›聊天设置›感知设置›AI 吃醋锁）
 - 顺手修复 v74 起感知设置页被聊天设置页整页盖住的既有 z-index bug（z-40→z-50）
 - 关键文件：src/lib/ios/jealousy-lock.ts、src/components/ios/JealousyWatcher.tsx、src/components/ios/JealousyLockOverlay.tsx、src/components/apps/jealousy-lock-settings.tsx、src/lib/ios/shizuku-autonomy.ts、src/lib/ios/shizuku-lab.ts、src/lib/chat-stream-store.ts、src/lib/ios/ai-mood.ts、src/lib/ios/proactive-msg.ts、src/components/apps/perception-settings.tsx、src/components/ios/PhoneShell.tsx、src/lib/app-version.ts
+
+---
+Task ID: 28（本环境：v1.9.19 审计 + 缺陷修复）
+Agent: 主控 Agent（Z.ai Code）
+Task: 用户重提「Shizuku pm suspend × 情绪感知深度绑定（AI 真实吃醋并锁应用）」需求——v1.9.19 已完整实现，本轮逐条审计 + 本环境全链路 E2E 复验 + 修复一处倒计时解锁闸门缺陷（v1.9.20）
+
+Work Log:
+- [审计] 逐条核对四大需求点：①三类触发（A 连续娱乐超时可自定义 5~180 分钟且期间未回消息会重置计时 / B 说「去看剧」DEPART_RE 意图 2h 有效 + 娱乐前台坐实 3 分钟 / C 焦虑阈值可自定义 50~100）✓ ②决策（包名+焦虑值+memChatRecallBlock 记忆上下文+buildPersonaSystemPrompt 人设 → LLM 严格 JSON {lock,reason,messages} → labSetAppFrozen 执行 pm suspend；原生通道为 Capacitor WebMessageListener 桥——与需求所述 WebSocket 等价的 APP 壳原生通信）✓ ③剧情（deliverProactiveMsg 分句连发进聊天 + notifyIfHidden 系统通知 + JealousyLockOverlay z-[86] 全屏弹窗「角色名+人设锁定原因+挂起说明+倒计时」+ 强制双按钮【去哄哄 TA】/【强制解锁】）✓ ④解锁三通道（coaxed：活跃锁期间 buildJealousyLockBlock 注入哄好教学 → AI 输出 [手机操作:解冻:包名] → executePhoneOp 网页模拟旁路/真机 Shizuku + onJealousyUnfreeze 清锁写记忆 / timeout：tick+弹窗双路到点自动解锁 / forced：立即解封+LLM 按人设写戏剧性记忆+模板兜底）✓ 全部落地
+- [缺陷] tickInner 活跃锁倒计时检查位于 `!cfg.enabled || !isNativePerception()` 闸门之后——两类场景会把用户锁死：①真机锁定期手动关掉「AI 吃醋锁」总开关 → tick 在闸门处 return，倒计时停摆，同时设置页因 enabled=false 折叠连「立即解锁」按钮都消失 → 被锁应用（pm suspend 真挂起）永不解锁；②网页预览模拟锁在弹窗展示过（overlayShownAt>0）后同理，tick 永不解锁
+- [修复] jealousy-lock.ts tickInner：活跃锁倒计时解锁块前移到功能闸门之前（pendingUnfreeze 兜底重试之后）——已存在的锁无论开关状态/环境都到点自解（每轮守望最多延迟 30s）；锁存在期间照旧不做新探测
+- [版本] app-version.ts bump 1.9.20（versionCode 40）+ 1 条更新说明；APK 不重打（纯前端逻辑，无原生改动）
+- [E2E 复验] agent-browser 390×844 + /api/chat 网络拦截 mock LLM（本沙箱 /api/chat 未配 API 恒 502，v82 起无内置模型；mock 决策 JSON/哄好回复/戏剧性记忆三态切换；注意 network route 需先 unroute 再重设才生效）：种子林小满（scripts/seed-jealousy.mjs 同款注入）→ 信息 App 真发消息建立 lastChat 打点 → trigger('entertain','com.ss.android.ugc.aweme') → 模拟锁创建（pkg/charName/reason/triggerKind/unlockAt+30min 全字段正确）→ 全屏弹窗渲染 VLM 确认（林小满锁住抖音+人设原因+29:54 倒计时+去哄哄TA/强制解锁双按钮+「由 Shell 所管理」说明）→ 剧情消息 3 条进聊天 ✓；哄好链路：去哄哄TA→markShown+聊天小窗开→发送哄人消息→AI 原谅回复含 [手机操作:解冻:com.ss.android.ugc.aweme]→sys 行「手机操作成功：已解冻（网页预览模拟解锁）」→lock 清除+lastUnlock(coaxed)+记忆「TA 来哄我了，我心软原谅了 TA，亲手把抖音解开了」✓（首次因 autonomy master 未开被拒——属预期：走设置 UI 打开吃醋锁开关后自动 setAutonomyMaster(true)+setAutonomyCap('freeze',true) 联动验证通过）；强制链路：二次锁→弹窗→强制解锁→立即解封+lastUnlock(forced)+LLM 戏剧性记忆「TA就这么直接解开了……一句哄我的话都没有。我很委屈……可是我心里还是放不下TA，我更讨厌这样的自己了」✓；倒计时+修复链路：三次锁→markShown→localStorage 关掉 enabled→IndexedDB 快进 unlockAt 到过去→reload→解锁手机→JealousyWatcher 首跳 tick 在 enabled=false 状态下 22s 内自动解锁+lastUnlock(timeout)+模板记忆「我赌气锁住的抖音到时间自己解开了，TA 一直没来哄我」✓（修复前该场景锁永不解开）；设置页 E2E：总开关/四步进器/娱乐 chips/状态区/网页预览说明文案渲染 ✓ + localStorage 持久化 ✓；tsc 仅 ai-delivery.ts 既有基线；eslint 两改动文件零问题
+
+Stage Summary:
+- v1.9.19「AI 真实吃醋并锁应用」经逐条审计四大需求全部落地，本环境三解锁通道+触发+弹窗+剧情消息+记忆全链路 E2E 复验通过
+- v1.9.20 修复：活跃锁倒计时解锁前移到 enabled/native 闸门之前——锁定期关总开关/网页模拟锁不再把用户永久锁死
+- 关键文件：src/lib/ios/jealousy-lock.ts、src/lib/app-version.ts

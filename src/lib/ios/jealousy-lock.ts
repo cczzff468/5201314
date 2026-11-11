@@ -343,14 +343,17 @@ async function tickInner(): Promise<void> {
     }
   }
 
-  if (!cfg.enabled || !isNativePerception()) return;
+  // 活跃锁：倒计时到点 → 自动解锁（timeout 通道）。
+  // v1.9.20：前移到功能闸门之前——已存在的锁必须能到点自解，无论此刻功能开关是否被
+  // 关闭、是否原生环境（网页模拟锁同理）。否则「锁定期关掉总开关」会同时停掉倒计时
+  // 与设置页折叠后的立即解锁按钮，用户会被无限锁死；锁存在期间照旧不做新探测。
   const rt = readJealousyRuntime();
-
-  // 活跃锁：倒计时到点 → 自动解锁（timeout 通道）
   if (rt.lock) {
     if (now >= rt.lock.unlockAt) await unlockJealousy('timeout');
     return; // 锁存在期间不做新探测（一次只锁一个）
   }
+
+  if (!cfg.enabled || !isNativePerception()) return;
 
   // 冷却与决策节流
   if (now - rt.lastLockAt < cfg.cooldownMin * 60_000) return;

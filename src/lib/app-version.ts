@@ -11,9 +11,9 @@
  */
 
 /** 当前最新版本（与 android-shell versionName 保持一致） */
-export const APP_VERSION = '1.9.19';
+export const APP_VERSION = '1.9.20';
 /** 版本号数字（与 android-shell versionCode 保持一致；覆盖安装要求只增不减） */
-export const APP_VERSION_CODE = 39;
+export const APP_VERSION_CODE = 40;
 
 export interface AppReleaseNote {
   version: string;
@@ -24,6 +24,13 @@ export interface AppReleaseNote {
 
 /** 版本历史（新→旧；设置 › APP 更新 页渲染，最新一条即当前版本） */
 export const APP_RELEASE_NOTES: AppReleaseNote[] = [
+  {
+    version: '1.9.20',
+    date: '2026-11-11',
+    items: [
+      '修复吃醋锁倒计时解锁通道的一个隐患：锁还生效时如果关掉「AI 吃醋锁」总开关（或网页预览模拟锁关闭弹窗后），倒计时自动解锁会被一并停掉、设置页里的「立即解锁」按钮也随开关折叠隐藏——被锁的应用可能一直解不开；现在已存在的锁无论开关状态都会到点自动解开（每轮守望最多延迟 30 秒）',
+    ],
+  },
   {
     version: '1.9.19',
     date: '2026-11-11',
