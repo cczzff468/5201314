@@ -822,8 +822,23 @@ async function runStream(rt: StreamRuntime, opts: BeginChatStreamOptions): Promi
               fcDone = true;
               let text = typeof fc.text === 'string' ? fc.text : '';
               if (fc.usedTools) text = text.replace(/\[手机操作:[^\][]*\]/g, '');
-              if (text.trim()) onDelta(text);
-              else if (fc.usedTools) onDelta('（TA 没说话，只是安静地摆弄了一会儿你的手机）');
+              if (!text.trim() && fc.usedTools) text = '（TA 没说话，只是安静地摆弄了一会儿你的手机）';
+              if (text.trim() && !rt.aborted) {
+                // 工具轮最终文本是整段一次性到手（非真流式）：多条模式直接走 onSegment
+                // 分段投递管线（各 App 的 deliverSegment→splitReplySegments 稳定再切成
+                // 多条气泡→scheduleAiDelivery 逐条节奏，已验证可靠）。不喂 onDelta 的
+                // 分段扫描器——扫描器为真流式增量设计，整段一次喂入时句尾 held/碎句扣合
+                // 状态会把正文滞留到 finalize 兜底，收尾空批链路在该场景实测不稳定。
+                // raw 仍按同口径累加（finalize 统计/思考回填一致；多条模式扫描器未喂入
+                // → tail 为空串，finalize 只做收尾动作不再落正文）。单条模式无扫描器，
+                // onDelta→finalize 旧管线本就可靠，照旧。换号中止（aborted）不投递。
+                if (multi && opts.onSegment) {
+                  raw += text;
+                  opts.onSegment(text);
+                } else {
+                  onDelta(text);
+                }
+              }
             }
           }
         } catch {
