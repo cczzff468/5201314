@@ -52,12 +52,17 @@ export default function RootLayout({
       <body className={`${geistSans.variable} antialiased bg-background text-foreground`}>
         {children}
         <Toaster />
-        {/* v80 预览提速：启动即注册 Service Worker（资源 SWR 缓存）。
+        {/* v80 预览提速：启动即注册 Service Worker（资源 SWR 缓存 + v1.9.22 离线壳）。
             原先只有开启通知权限才会注册（push-client），大多数会话享受不到静态资源缓存。
-            register 幂等（同 URL 同 scope），与 push-client 的注册不冲突；iframe/不支持环境静默失败。 */}
+            register 幂等（同 URL 同 scope），与 push-client 的注册不冲突；iframe/不支持环境静默失败。
+            v1.9.22：同一脚本尽早捕获 beforeinstallprompt（Chrome 在页面加载早期就可能派发，
+            React 挂载后再监听会错过）——preventDefault 收下事件存 window.__pwaInstallEvt，
+            设置 › 添加到主屏幕 页的「立即安装」按钮消费它；appinstalled 后清空并广播。 */}
         <script
           dangerouslySetInnerHTML={{
-            __html: `try{if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catch(function(){});}}catch(e){}`,
+            __html: `try{if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catch(function(){});}}catch(e){}
+try{window.addEventListener('beforeinstallprompt',function(e){e.preventDefault();window.__pwaInstallEvt=e;window.dispatchEvent(new CustomEvent('pwa-installable'));});
+window.addEventListener('appinstalled',function(){window.__pwaInstallEvt=null;window.dispatchEvent(new CustomEvent('pwa-installed'));});}catch(e){}`,
           }}
         />
       </body>

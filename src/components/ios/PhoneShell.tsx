@@ -16,6 +16,7 @@ import { ensureKvReady } from '@/lib/ios/idb-kv';
 import { ensurePayPwdBoxesHydrated } from '@/lib/ios/pay-pwd-box';
 import { ensurePromptEntriesClientReady } from '@/lib/ios/prompt-entries-client';
 import { migrateLegacyAccounts } from '@/lib/ios/accounts';
+import { useToast } from '@/hooks/use-toast';
 // v1.9.8 全局接力守望者：SSE 常驻 + 事件/轮询驱动 peek —— 服务端待达接力消息不进 APP 直接弹横幅
 // （副作用引入即启动，模块级单例与页面存活解耦）
 import '@/lib/ios/bg-relay-watcher';
@@ -291,6 +292,9 @@ export default function PhoneShell() {
   );
 
   const [watchersReady, setWatchersReady] = useState(false);
+
+  // v1.9.22 PWA 轻提示（useToast 取一次；effect 内只做事件监听，不参与渲染）
+  const { toast } = useToast();
   useEffect(() => {
     if (!unlockedOnce) return;
     const t = window.setTimeout(() => {
@@ -458,6 +462,46 @@ export default function PhoneShell() {
     return () => document.documentElement.classList.remove('dark');
   }, [dark]);
 
+  // v1.9.22 PWA：安装引导 + 断网/恢复轻提示——
+  // ① Chrome 判定可安装（beforeinstallprompt 已被 layout 内联脚本捕获并广播
+  //    'pwa-installable'）时，每会话最多一次 toast 引导去「设置 › 添加到主屏幕」；
+  // ② 真实断网 toast 说明离线壳仍可用（AI 聊天/在线音乐等需联网的功能暂停），恢复时轻提示。
+  //    已安装（standalone）/嵌入 iframe 预览不引导。挂载即生效（无需解锁）。  
+  useEffect(() => {
+    const w = window as typeof window & { __pwaInstallEvt?: unknown };
+    const standalone =
+      (window.matchMedia?.('(display-mode: standalone)').matches ?? false) ||
+      (window.navigator as Navigator & { standalone?: boolean }).standalone === true;
+    const hintInstall = () => {
+      if (standalone || w.__pwaInstallEvt === undefined) return;
+      try {
+        if (sessionStorage.getItem('pwa-hint-shown')) return;
+        sessionStorage.setItem('pwa-hint-shown', '1');
+      } catch {
+        /* 隐私模式 sessionStorage 不可用时也照常提示一次 */
+      }
+      toast({
+        title: '📲 可安装到主屏幕',
+        description: '设置 › 添加到主屏幕：像真 App 一样全屏使用，断网也能打开',
+      });
+    };
+    if (w.__pwaInstallEvt) hintInstall();
+    else window.addEventListener('pwa-installable', hintInstall, { once: true });
+    const onOffline = () =>
+      toast({
+        title: '📴 网络已断开',
+        description: 'AI 聊天、在线音乐等联网功能暂停；已打开过的页面仍可离线浏览',
+      });
+    const onOnline = () => toast({ title: '📶 网络已恢复' });
+    window.addEventListener('offline', onOffline);
+    window.addEventListener('online', onOnline);
+    return () => {
+      window.removeEventListener('pwa-installable', hintInstall);
+      window.removeEventListener('offline', onOffline);
+      window.removeEventListener('online', onOnline);
+    };
+  }, [toast]);
+
   // 开机门控：设置从 IndexedDB 读出前只显示纯黑开机屏。
   // 若用户关闭了锁屏，locked 会在 load() 内同步纠正为 false——
   // 先等 loaded 再渲染锁屏/主屏，锁屏就不会“闪现一下再消失”。
@@ -469,7 +513,10 @@ export default function PhoneShell() {
         ? { width: FRAME_W * fit.scale, height: FRAME_H * fit.scale }
         : undefined;
     return (
-      <div className="flex min-h-[100svh] w-full items-center justify-center bg-[#dcdce1] dark:bg-black sm:p-8">
+      <div
+        data-pwa-wrap=""
+        className="flex min-h-[100svh] w-full items-center justify-center bg-[#dcdce1] dark:bg-black sm:p-8"
+      >
         {/* 外层按缩放后尺寸占位（transform 不改变布局，需显式给包裹盒防溢出/滚动条） */}
         <div
           className="relative h-[100svh] w-full shrink-0 sm:h-auto sm:w-auto"
@@ -495,6 +542,7 @@ export default function PhoneShell() {
           ) : (
             <div
               data-phone-shell=""
+              data-pwa-portrait-shell=""
               className={`relative h-[100svh] w-full overflow-hidden bg-black sm:h-[844px] sm:w-[390px] sm:rounded-[56px] sm:border-[12px] sm:border-[#151517] sm:shadow-[0_40px_90px_-20px_rgba(0,0,0,0.55),0_0_0_1px_rgba(255,255,255,0.08)] ${
                 dark ? 'dark' : ''
               }`}
@@ -704,6 +752,7 @@ export default function PhoneShell() {
     <div
       ref={shellRef}
       data-phone-shell=""
+      data-pwa-portrait-shell={fit.landscape ? undefined : ''}
       className={
         fit.landscape
           ? `relative overflow-hidden rounded-[56px] border-[12px] border-[#151517] bg-black text-foreground shadow-[0_40px_90px_-20px_rgba(0,0,0,0.55),0_0_0_1px_rgba(255,255,255,0.08)] ${dark ? 'dark' : ''}`
@@ -720,7 +769,10 @@ export default function PhoneShell() {
   );
 
   return (
-    <div className="flex min-h-[100svh] w-full items-center justify-center bg-[#dcdce1] dark:bg-black sm:p-8">
+    <div
+      data-pwa-wrap=""
+      className="flex min-h-[100svh] w-full items-center justify-center bg-[#dcdce1] dark:bg-black sm:p-8"
+    >
       {/* 外层按缩放后尺寸占位（transform 不改变布局，需显式给包裹盒防溢出/滚动条）；
           移动端不缩放，保持全屏 */}
       <div

@@ -11,9 +11,9 @@
  */
 
 /** 当前最新版本（与 android-shell versionName 保持一致） */
-export const APP_VERSION = '1.9.21';
+export const APP_VERSION = '1.9.22';
 /** 版本号数字（与 android-shell versionCode 保持一致；覆盖安装要求只增不减） */
-export const APP_VERSION_CODE = 41;
+export const APP_VERSION_CODE = 42;
 
 export interface AppReleaseNote {
   version: string;
@@ -24,6 +24,16 @@ export interface AppReleaseNote {
 
 /** 版本历史（新→旧；设置 › APP 更新 页渲染，最新一条即当前版本） */
 export const APP_RELEASE_NOTES: AppReleaseNote[] = [
+  {
+    version: '1.9.22',
+    date: '2026-11-11',
+    items: [
+      'PWA 完善——「添加到主屏幕」后像真 App 一样独立窗口全屏运行：iPhone 刘海/底部小白条安全区自动避让（机身缩进安全区、露出黑边如真机边框），普通浏览器打开完全无感',
+      '离线壳：断网也能打开！在线时页面自动缓存（整页 HTML + 静态资源 + 单键壳缓存），断网后从主屏幕图标照常进入手机——微信/信息/相册/备忘录等本机数据应用均可离线浏览，联网恢复自动可用；从未打开过则显示离线提示页（在线自动恢复刷新）',
+      '设置 › 添加到主屏幕（新增页面）：Android/Chrome 一键安装按钮、iPhone Safari 分步指引（分享 › 添加到主屏幕）、已安装/离线就绪/缓存占用状态一目了然，可一键清除离线缓存（不动聊天数据与推送）+ 检查更新',
+      '安装邀请：Chrome 判定可安装时每会话一次 toast 引导；断网/恢复网络轻提示；长按桌面图标快捷直达（和 TA 聊天/微信/网易云音乐/情侣空间）；浏览器标签页 favicon 补齐，manifest 完善（描述/分类/快捷方式/遮罩图标）',
+    ],
+  },
   {
     version: '1.9.21',
     date: '2026-11-11',

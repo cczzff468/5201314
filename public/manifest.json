@@ -1,12 +1,18 @@
 {
+  "id": "/",
   "name": "AI Phone — 仿 iOS 智能助手",
   "short_name": "AI Phone",
+  "description": "高还原度 iOS 风格 AI 恋人手机：微信/QQ/信息三端聊天、朋友圈、情侣空间 3D 小屋、网易云音乐、美团、淘宝、塔罗等 20+ 应用；数据本地优先存于浏览器 IndexedDB，可安装到主屏幕全屏使用、断网也能打开。",
+  "lang": "zh-CN",
+  "dir": "ltr",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
+  "display_override": ["standalone", "minimal-ui"],
   "orientation": "portrait",
   "background_color": "#ffffff",
   "theme_color": "#ffffff",
+  "categories": ["social", "entertainment", "lifestyle"],
   "icons": [
     {
       "src": "/icons/pwa/icon-192.png",
@@ -21,10 +27,46 @@
       "purpose": "any"
     },
     {
+      "src": "/icons/pwa/maskable-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
       "src": "/icons/pwa/maskable-512.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "和 TA 聊天",
+      "short_name": "信息",
+      "description": "直达信息 App 会话列表",
+      "url": "/?open=chat",
+      "icons": [{ "src": "/icons/pwa/icon-192.png", "sizes": "192x192", "type": "image/png" }]
+    },
+    {
+      "name": "微信",
+      "short_name": "微信",
+      "description": "直达微信",
+      "url": "/?open=wechat",
+      "icons": [{ "src": "/icons/pwa/icon-192.png", "sizes": "192x192", "type": "image/png" }]
+    },
+    {
+      "name": "网易云音乐",
+      "short_name": "音乐",
+      "description": "直达网易云音乐",
+      "url": "/?open=music",
+      "icons": [{ "src": "/icons/pwa/icon-192.png", "sizes": "192x192", "type": "image/png" }]
+    },
+    {
+      "name": "情侣空间",
+      "short_name": "情侣空间",
+      "description": "直达情侣空间 3D 小屋",
+      "url": "/?open=couple",
+      "icons": [{ "src": "/icons/pwa/icon-192.png", "sizes": "192x192", "type": "image/png" }]
     }
   ]
 }

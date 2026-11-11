@@ -1627,3 +1627,23 @@
     inset 0 0 0 0.5px rgba(255, 255, 255, 0.12),
     0 8px 28px rgba(0, 0, 0, 0.38);
 }
+
+/* ---------------- v1.9.22 PWA 独立窗口安全区（「添加到主屏幕」安装后） ----------------
+   iPhone/Android 安装到主屏幕后：black-translucent 状态栏 + viewport-fit=cover 让页面
+   延伸到真机刘海与底部小白条下面——虚拟手机的状态栏/灵动岛会被真刘海盖住。
+   仅 standalone 显示模式 + 竖屏移动布局（<sm 断点、非横屏分支）生效：
+   外壳容器留出四边安全区（露出黑底=机身延伸，观感如真机边框）、机身高度收缩到安全区内；
+   普通浏览器标签页 display-mode 为 browser，env() 全为 0，完全无感。 */
+@media (display-mode: standalone) and (max-width: 639px) {
+  [data-pwa-wrap] {
+    padding-top: env(safe-area-inset-top);
+    padding-bottom: env(safe-area-inset-bottom);
+    padding-left: env(safe-area-inset-left);
+    padding-right: env(safe-area-inset-right);
+    background: #000 !important; /* 安全区露出纯黑（真机边框观感，压过浅色页面底 #dcdce1） */
+  }
+  [data-pwa-portrait-shell] {
+    /* 机身从 100svh 收缩为「视口减上下安全区」（外壳已 padding，正好填满剩余空间） */
+    height: calc(100svh - env(safe-area-inset-top) - env(safe-area-inset-bottom)) !important;
+  }
+}

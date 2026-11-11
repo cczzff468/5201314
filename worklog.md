@@ -2689,3 +2689,25 @@ Stage Summary:
 - v1.9.21「Shizuku 未连接 → 锁网页里的 App」完整落地：网页降级下吃醋锁不再只是剧情——真的锁住虚拟手机里的 6 个可锁 App（图标变灰+小锁角标+名字变「由 XX 管理」+点开只弹 TA 的留言全屏提示+多任务卡片冻结遮罩），三解锁通道（哄好/倒计时/强制）全部真实生效、解锁即恢复
 - 前台探测/触发判定/LLM 决策/提示词/记忆文案在网页模式全链路适配（不提 pm suspend，与实际体验对齐）；真机 + Shizuku 行为不变
 - 关键文件：src/lib/ios/web-app-lock.ts（新增）、src/lib/ios/jealousy-lock.ts、src/lib/ios/store.ts、src/components/ios/HomeScreen.tsx、src/components/ios/AppSwitcher.tsx、src/components/ios/JealousyLockOverlay.tsx、src/components/apps/jealousy-lock-settings.tsx、src/lib/app-version.ts
+
+---
+Task ID: 30
+Agent: 主控 Agent（Z.ai Code）
+Task: 用户选定 #15「PWA 完善」——添加到主屏幕全屏运行 + 离线壳，真机浏览器体验接近原生（v1.9.22）
+
+Work Log:
+- [调研] v80 起已有基础：manifest（缺 id/description/lang/categories/shortcuts）、4 个 PWA 图标（有效无透明）、layout 已挂 manifest/appleWebApp/viewport-fit=cover、sw.js 有静态 SWR 缓存+推送通知——真正缺口：①SW 明确不缓存 HTML 导航（离线白屏）②无安装引导 UI ③无 favicon ④standalone 刘海/小白条无避让
+- [资产] maskable-192.png（maskable-512 LANCZOS 降采样）+ src/app/favicon.ico（16/32/48 多尺寸，App Router 约定路径，浏览器标签页图标补齐）
+- [manifest] 补 id/lang/dir/description/categories/display_override(standalone→minimal-ui) + 4 个长按快捷方式（?open=chat/wechat/music/couple 深链复用既有开机直达）+ maskable-192 图标项
+- [sw.js v81] 离线壳：HTML 导航 network-first（在线零行为变化，成功响应归一化单键写壳缓存）→ 断网/超时8s/5xx 回退缓存壳 → 无壳回退内联离线提示页（在线自动刷新）；壳/静态缓存同版本号 activate 一并重建（杜绝新 HTML 引旧 chunk 分叉）；静态缓存 400 条 FIFO 上限防 dev 热编译膨胀；push/notificationclick/SWR 原样保留
+- [layout] 内联脚本尽早捕获 beforeinstallprompt（preventDefault 存 window.__pwaInstallEvt + 广播 pwa-installable；React 挂载后再监听会错过）+ appinstalled 清空广播
+- [PhoneShell] ①data-pwa-wrap/data-pwa-portrait-shell 数据属性（开机黑屏+主壳两分支）+ globals.css @media (display-mode: standalone) and (max-width:639px) 安全区避让：外壳四边 env(safe-area-inset-*) 留黑边（真机边框观感）、机身高度收缩（calc(100svh-insets)，横屏分支不受影响；普通浏览器 env 全 0 无感）②PWA 轻提示 effect：Chrome 可安装事件每会话一次 toast 引导去设置安装（standalone/已提示过不弹）+ 断网/恢复网络 toast + SW controllerchange 新版本就绪提示
+- [设置页] 新增「添加到主屏幕」页（Page 'pwa'，关于本机卡片内 MainRow 入口）：状态卡（运行环境 standalone 检测/离线能力 SW+壳就绪/离线缓存条目+近似占用 content-length 求和/网络）+ 安装卡三分支（Android 一键调起原生安装弹窗（事件一次性用后清）/iOS Safari 分步指引（含 iPadOS MacIntel+touchPoints 判定）/通用指引）+ 离线可用说明 + 管理卡（当前版本 v1.9.22/检查更新 reg.update()/清除离线缓存两次确认，不动 SW 注册与推送）+ pwa-installable/pwa-installed/online/offline 实时事件
+- [版本] bump 1.9.22（versionCode 42）+ 4 条更新说明
+- [E2E 深度排障记录] Playwright 沙箱三坑：①set offline 不作用于 SW 上下文（SW fetch 照样 200）②离线 reload 由 Chromium 内部缓存服务（绕过 SW，navLog 无 fetch 事件实证）③一度以为「SW 缓存壳无法启动」——实为自研诊断注入的 TURBOPACK.push 包装器漏调原始 push 把注册管线弄断（自伤）；修正诊断后 ?swoffline=1 强制缓存壳分支验证：aiDelivery=object/next=object/children=10/零错误——**SW 缓存壳+缓存 chunk 完整启动实证通过**；真机断网走同一缓存壳路径（真离线时 SW fetch 真失败才回退缓存，设计一致）
+- [验证] manifest 200 含全部新字段+4 shortcuts；favicon/maskable-192 200；全新环境 SW 注册激活 v81 双缓存；锁屏上滑解锁→设置→添加到主屏幕页全渲染（离线缓存「约 1.2 MB · 156 项」+「立即安装到主屏幕」按钮出现（headless Chrome 已判定可安装）+清除离线缓存）；console 零错误；eslint 改动文件零新增（3 个 set-state-in-effect 为既有基线 stash 复验）；tsc 仅 ai-delivery.ts 既有基线
+- [清理] sw.js 诊断代码全数移除（280 行干净版）：diag 注入/?swoffline 强制分支/turbopack runtime chunk resolver 补丁/__navLog/__swVersion message handler
+
+Stage Summary:
+- v1.9.22 已提交：「添加到主屏幕」后像真 App 全屏运行（刘海/小白条安全区避让）+ 断网可打开（在线自动缓存整页 HTML+静态资源，离线从主屏幕图标照常进手机，本机数据应用可浏览）+ 设置 › 添加到主屏幕（Android 一键安装/iOS 指引/离线缓存管理/检查更新）+ 安装邀请与断网恢复轻提示 + 长按图标快捷直达 + favicon
+- 关键文件：public/sw.js、public/manifest.json、src/app/layout.tsx、src/app/globals.css、src/components/ios/PhoneShell.tsx、src/components/apps/settings.tsx、src/lib/app-version.ts、public/icons/pwa/maskable-192.png、src/app/favicon.ico
