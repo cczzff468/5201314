@@ -34,6 +34,7 @@
 import { useCallback, useEffect, useRef, useSyncExternalStore } from 'react';
 import type { ApiConfig } from '@/lib/ios/store';
 import { useSettings } from '@/lib/ios/store';
+import { apiChainOf } from '@/lib/api-fallback';
 import { directChatStream, isPrivateApiUrl } from '@/lib/ios/direct-api';
 import { createReplySegmentScanner } from '@/lib/reply-count';
 // 深度思考：流式统一剥离 [思考]…[/思考] 块（正文/分段器只见纯正文，思考内容单独收集交 finalize）
@@ -618,14 +619,15 @@ async function runStream(rt: StreamRuntime, opts: BeginChatStreamOptions): Promi
   /**
    * 发起一轮流式请求并读完整条流（增量统一交给 onDelta）。
    * 服务器代理失败 / directOnly / 内网地址时回退浏览器直连（SSE 解析）；抛错交给调用方。
+   * reqConfig：本轮实际使用的渠道（故障转移时逐个尝试；内网判定与直连都按该渠道自身地址算）。
    */
-  const streamOnce = async (roundMessages: ChatPayloadMessage[]): Promise<void> => {
+  const streamOnce = async (roundMessages: ChatPayloadMessage[], reqConfig: ApiConfig): Promise<void> => {
     const res = await fetch('/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         messages: roundMessages,
-        config: effConfig,
+        config: reqConfig,
       }),
     });
     if (!res.ok || !res.body) {
@@ -641,15 +643,15 @@ async function runStream(rt: StreamRuntime, opts: BeginChatStreamOptions): Promi
       } catch {
         // 忽略解析失败
       }
-      if (directOnly || isPrivateApiUrl(apiConfig.baseUrl)) {
+      if (directOnly || isPrivateApiUrl(reqConfig.baseUrl)) {
         // 内网地址 / 服务器建议直连：改用浏览器直连流式请求（SSE 解析）；
         // 空回复不在此处兜底：finalize 由各 App 写入自己的兜底文案
         try {
-          await directChatStream(effConfig, roundMessages, onDelta);
+          await directChatStream(reqConfig, roundMessages, onDelta);
         } catch (directErr) {
           // 公网地址直连也失败：保留服务器侧原因，便于区分地区限制还是 CORS 问题
           const directMsg = directErr instanceof Error && directErr.message ? directErr.message : '';
-          if (!isPrivateApiUrl(apiConfig.baseUrl) && detail) {
+          if (!isPrivateApiUrl(reqConfig.baseUrl) && detail) {
             throw new Error(`${detail}；浏览器直连也不可用${directMsg ? `：${directMsg}` : ''}`);
           }
           throw directErr;
@@ -762,8 +764,9 @@ async function runStream(rt: StreamRuntime, opts: BeginChatStreamOptions): Promi
     if (opts.vision && opts.vision.images.length > 0) {
       const visionConfig = useSettings.getState().visionConfig;
       // 第二十九轮「让 AI 知道上传的图片长什么样」：识图不再依赖用户配置——
-      // describeImagesAuto 配置了走用户模型（失败自动降级），未配置直接用内置识图兜底；
-      // 内置也失败才回落「图片还在加载中」临时上下文（本轮按无图继续，不阻断聊天）
+      // describeImagesAuto（v1.9.25）：配置了识图模型走用户模型（失败降级聊天模型直识），
+      // 未配置直接用聊天模型看图（渠道链含备用故障转移）；全部失败才回落「图片还在加载中」
+      // 临时上下文（本轮按无图继续，不阻断聊天）
       try {
         const desc = await describeImagesAuto(visionConfig, { images: opts.vision.images, text: opts.vision.text });
         if (!desc) throw new Error('识图模型返回空内容');
@@ -846,7 +849,39 @@ async function runStream(rt: StreamRuntime, opts: BeginChatStreamOptions): Promi
         }
       }
       if (!fcDone) {
-        await streamOnce(workMessages);
+        // 多渠道故障转移（v1.9.25）：主渠道失败且本轮还没有任何已产出内容（正文/思考均空）时，
+        // 静默按序改用备用渠道重发整轮；已有部分产出（流中断在中途）则沿用既有行为——
+        // 保留已上屏分段 + 落错误，不重发防重复；换号/取消（aborted）立即上抛不转移。
+        // 每次重试前按错误收尾同口径重置流层状态（分段器/思考剥离器/实况），防上一渠道的
+        // 半截状态污染下一渠道的流。
+        const chain = apiChainOf(effConfig, useSettings.getState().apiFallbacks);
+        for (let ci = 0; ci < chain.length; ci++) {
+          try {
+            await streamOnce(workMessages, chain[ci]);
+            break;
+          } catch (err) {
+            if (rt.aborted || ci + 1 >= chain.length || raw !== '' || thinkText !== '') {
+              // 全渠道都试过才附注备用情况；仅主渠道失败时保持原报错不变（错误分类文案不受影响）
+              if (!rt.aborted && ci + 1 >= chain.length && ci > 0 && raw === '' && thinkText === '') {
+                const msg = err instanceof Error && err.message ? err.message : '请求失败';
+                throw new Error(`${msg}（主渠道与 ${ci} 个备用渠道均失败，可到「设置 › API 配置 › 备用渠道」检查）`);
+              }
+              throw err;
+            }
+            // 还有备用渠道且本轮零产出：重置流层状态后换下一个渠道重发
+            raw = '';
+            thinkFilter = createThinkFilter();
+            thinkText = '';
+            liveThinkShown = false;
+            thinkDonePatched = false;
+            if (rt.state.liveThink !== undefined) patchState(rt, { liveThink: undefined, thinkDone: undefined });
+            if (multi && opts.onSegment) {
+              scanner = createReplySegmentScanner(opts.onSegment);
+            } else {
+              scanner = null;
+            }
+          }
+        }
       }
       patchState(rt, { status: 'done' });
     }

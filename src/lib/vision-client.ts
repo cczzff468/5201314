@@ -9,11 +9,15 @@
  * 调用策略与聊天一致：优先走服务器代理 /api/vision（服务器转发到用户配置的接口，
  * 避开浏览器 CORS）；内网地址 / 服务器建议直连（directOnly）时回退浏览器直连。
  * 图片只以 data URL 内联传给用户自己配置的识图接口，不经过任何第三方图床/公网上传。
- * 未配置（baseUrl 为空）时调用方应直接跳过识图，文字聊天完全不受影响。
+ *
+ * v1.9.25 未配置识图模型（或识图模型失败）时：自动改用【聊天模型】直接看图——多模态
+ * 请求发往聊天渠道（含备用渠道故障转移），聊天模型支持图片输入（gpt-4o / gemini /
+ * qwen-vl / glm-4v 等）即可识图，无需单独配置识图模型；全部失败才按未识图处理。
  */
 
 import type { VisionConfig } from '@/lib/ios/store';
 import { directVisionDescribe, isPrivateApiUrl } from '@/lib/ios/direct-api';
+import { currentApiChain } from '@/lib/api-fallback';
 
 /** 识图 system 提示：客观、简洁、不寒暄，输出描述本身（服务端 /api/vision 用同一份文案）；
  *  多张图片时要求按「图N：」分行逐张描述（splitVisionDesc 按此格式拆分回写各图） */
@@ -74,73 +78,96 @@ function sanitizeImages(images: string[]): string[] {
   return images.filter((u) => typeof u === 'string' && u.startsWith('data:image/'));
 }
 
-/** 识图最终请求：POST /api/vision { forceSdk: true }（v82：内置识图已移除，返回配置引导错误） */
-async function describeViaSdk(req: VisionRequest): Promise<string> {
-  const images = sanitizeImages(req.images);
-  if (images.length === 0) return '';
-  const res = await fetch('/api/vision', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ images, text: req.text, forceSdk: true }),
-  });
-  const data = (await res.json().catch(() => null)) as { desc?: unknown; error?: unknown } | null;
-  if (res.ok && data && typeof data.desc === 'string' && data.desc.trim()) return data.desc.trim();
-  const msg = typeof data?.error === 'string' && data.error ? data.error : `识图请求失败（HTTP ${res.status}）`;
-  throw new Error(msg);
-}
-
 /**
  * 请求识图描述：返回描述文本（可能为空串 = 模型没产出，调用方按未识图处理）。
  * 失败抛 Error（友好文案，由调用方展示为系统提示；绝不把错误当角色台词）。
  */
+/** 单渠道单次识图尝试：内网直连 / 代理 → directOnly 直连；失败抛【真实】错误（不掩盖） */
+async function describeOnce(config: VisionConfig, images: string[], text: string): Promise<string> {
+  // 内网/本机地址：云端服务器必然不可达 → 浏览器直连
+  if (isPrivateApiUrl(config.baseUrl)) {
+    return directVisionDescribe(config, images, text, VISION_SYSTEM_PROMPT);
+  }
+  const res = await fetch('/api/vision', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ images, text, config }),
+  });
+  const data = (await res.json().catch(() => null)) as
+    | { desc?: unknown; error?: unknown; directOnly?: unknown }
+    | null;
+  if (res.ok && data && typeof data.desc === 'string') return data.desc.trim();
+  // 服务器建议直连（地区限制/网络不可达）→ 浏览器直连兜底
+  if (data?.directOnly === true) {
+    return directVisionDescribe(config, images, text, VISION_SYSTEM_PROMPT);
+  }
+  const msg = typeof data?.error === 'string' && data.error ? data.error : `识图请求失败（HTTP ${res.status}）`;
+  throw new Error(msg);
+}
+
 export async function describeImages(config: VisionConfig, req: VisionRequest): Promise<string> {
   if (!visionConfigReady(config)) {
     throw new Error('还没有配置识图模型：请到「设置 › 识图模型」填写 API 地址与模型名');
   }
   const images = sanitizeImages(req.images);
   if (images.length === 0) return '';
-  // 内网/本机地址：云端服务器必然不可达 → 浏览器直连；直连也失败 → 内置识图兜底
-  if (isPrivateApiUrl(config.baseUrl)) {
+  return describeOnce(config, images, req.text);
+}
+
+/**
+ * 聊天模型直接识图（v1.9.25）：把聊天渠道链（主渠道 + 备用渠道）逐个当作识图渠道尝试——
+ * 聊天模型支持图片输入即可看懂图，用户无需单独配置识图模型。全部失败抛最后一个错误。
+ */
+async function describeViaChatModel(req: VisionRequest): Promise<string> {
+  const images = sanitizeImages(req.images);
+  if (images.length === 0) return '';
+  const chain = currentApiChain();
+  let lastErr: unknown = null;
+  for (const cfg of chain) {
+    if (!cfg.baseUrl.trim() || !cfg.model.trim()) continue;
     try {
-      return await directVisionDescribe(config, images, req.text, VISION_SYSTEM_PROMPT);
-    } catch {
-      return describeViaSdk(req);
+      return await describeOnce(
+        { baseUrl: cfg.baseUrl, apiKey: cfg.apiKey, model: cfg.model },
+        images,
+        req.text,
+      );
+    } catch (err) {
+      lastErr = err;
     }
   }
-  const res = await fetch('/api/vision', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ images, text: req.text, config }),
-  });
-  const data = (await res.json().catch(() => null)) as
-    | { desc?: unknown; error?: unknown; directOnly?: unknown }
-    | null;
-  if (res.ok && data && typeof data.desc === 'string') return data.desc.trim();
-  // 服务器建议直连（地区限制/网络不可达）→ 浏览器直连兜底；直连也失败 → 内置识图兜底
-  if (data?.directOnly === true) {
-    try {
-      return await directVisionDescribe(config, images, req.text, VISION_SYSTEM_PROMPT);
-    } catch {
-      return describeViaSdk(req);
-    }
-  }
-  const msg = typeof data?.error === 'string' && data.error ? data.error : `识图请求失败（HTTP ${res.status}）`;
-  throw new Error(msg);
+  throw lastErr instanceof Error ? lastErr : new Error('识图请求失败');
 }
 
 /**
  * 自动识图（第二十九轮「让 AI 知道图片长什么样」）：
- * 配置了识图模型 → 走用户模型（失败自动降级内置模型）；未配置 → 直接用内置识图兜底。
- * 相册自动描述 / 头像感知 / 聊天发图兜底统一走这里——用户零配置 AI 也能「看懂」图。
- * 返回空串 = 没产出描述（调用方按未识图处理）；全部失败抛最后的错误。
+ * 配置了识图模型 → 走用户模型；未配置或失败 → 自动降级【聊天模型】直接看图（v1.9.25，
+ * 聊天渠道链逐个尝试，支持图片输入的聊天模型零配置即可识图）。
+ * 相册自动描述 / 头像感知 / 聊天发图统一走这里。
+ * 返回空串 = 没产出描述（调用方按未识图处理）；全部失败抛组合后的真实错误。
  */
 export async function describeImagesAuto(config: VisionConfig, req: VisionRequest): Promise<string> {
+  const images = sanitizeImages(req.images);
+  if (images.length === 0) return '';
+  let visionErr: unknown = null;
   if (visionConfigReady(config)) {
     try {
       return await describeImages(config, req);
-    } catch {
-      // 用户识图模型失败：降级内置识图再试一次（救回本轮描述）
+    } catch (err) {
+      // 专用识图模型失败：先记下真实原因，降级聊天模型直识再试（救回本轮描述）
+      visionErr = err;
     }
   }
-  return describeViaSdk(req);
+  // 未配置识图模型 / 识图模型失败：自动用聊天模型直接看图（渠道链逐个尝试；
+  // 聊天模型支持图片输入即可，无需单独配置识图模型）
+  try {
+    return await describeViaChatModel(req);
+  } catch (chatErr) {
+    // 两路都失败：优先报专用识图模型的错误（更可定位），附聊天模型直识的失败原因
+    if (visionErr) {
+      const vm = visionErr instanceof Error && visionErr.message ? visionErr.message : '';
+      const cm = chatErr instanceof Error && chatErr.message ? chatErr.message : '';
+      throw new Error(vm && cm ? `${vm}；尝试用聊天模型直接识图也失败：${cm}` : vm || cm || '识图失败');
+    }
+    throw chatErr;
+  }
 }

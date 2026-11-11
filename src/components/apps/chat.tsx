@@ -2112,6 +2112,19 @@ function ChatView({
               turnImageMsgIds.forEach((targetId, i) => {
                 const part = parts[i]?.trim();
                 if (!part) return;
+                // v1.9.25 修复（潜伏竞态）：描述回写除 state 外【同步写穿存储】——投递 tick 的同 id 合并
+                // 以存储为权威（语音升级口径），秒回/极快上游场景下首条投递可能先于 persist effect
+                // 落盘，旧存储版会把 state 里刚写入的 desc 又合并回去（实测复现：desc 永久丢失）。
+                // 与 setReplyFail 同款双写口径：loadMsgs → 打补丁 → saveMsgs（kv 内存同步）+ setMsgs。
+                try {
+                  const cur = loadMsgs(storageKey) ?? [];
+                  const patched = cur.map((x) =>
+                    x.id === targetId && x.img ? { ...x, img: { ...x.img, desc: part } } : x,
+                  );
+                  if (patched !== cur) saveMsgs(storageKey, patched);
+                } catch {
+                  // 存储写失败不影响 state 侧回写（persist effect 仍会兜底）
+                }
                 setMsgs((prev) =>
                   prev.map((x) => (x.id === targetId && x.img ? { ...x, img: { ...x.img, desc: part } } : x)),
                 );

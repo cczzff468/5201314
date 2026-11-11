@@ -102,6 +102,15 @@ export interface ApiPreset {
   config: ApiConfig;
 }
 
+/** 备用渠道（多渠道故障转移）：主渠道请求失败（连接不上/鉴权失败/限流等）且本轮还没有任何
+ *  已投递内容时，自动按顺序改用备用渠道重发。每个备用渠道只需地址/Key/模型三项
+ *（温度与最大 Token 继承主渠道）；留空地址/模型的项在故障转移时直接跳过。 */
+export interface ApiFallback {
+  baseUrl: string;
+  apiKey: string;
+  model: string;
+}
+
 /** 识图模型配置：与聊天模型（ApiConfig）完全独立、互不覆盖，只负责「看图」，不负责回复
  *  ——聊天发图时先用它把图片转成文字描述，再交给聊天模型生成最终回复；未配置（baseUrl 空）时不影响文字聊天 */
 export interface VisionConfig {
@@ -398,6 +407,8 @@ interface SettingsState {
   apiConfig: ApiConfig;
   /** 用户自己保存的 API 预设 */
   apiPresets: ApiPreset[];
+  /** 备用渠道列表（故障转移按序尝试；密文持久化） */
+  apiFallbacks: ApiFallback[];
   /** 识图模型配置（与 apiConfig 互相独立、互不覆盖；密文持久化） */
   visionConfig: VisionConfig;
   /** 用户自己保存的识图模型预设 */
@@ -499,6 +510,8 @@ interface SettingsState {
   setLockCustomWallpaper: (blob: Blob | null) => void;
   updateApiConfig: (patch: Partial<ApiConfig>) => void;
   setApiPresets: (list: ApiPreset[]) => void;
+  /** 设置备用渠道列表（故障转移；含 Key 密文持久化，保存即清聊天重试冷却） */
+  setApiFallbacks: (list: ApiFallback[]) => void;
   /** 更新识图模型配置（立即持久化；聊天发送时现场读取 → 保存后自动生效，无需重启） */
   updateVisionConfig: (patch: Partial<VisionConfig>) => void;
   setVisionPresets: (list: VisionPreset[]) => void;
@@ -532,6 +545,7 @@ export const useSettings = create<SettingsState>((set, get) => ({
   lockCustomWallpaperUrl: null,
   apiConfig: { ...DEFAULT_API_CONFIG },
   apiPresets: [],
+  apiFallbacks: [],
   visionConfig: { ...DEFAULT_VISION_CONFIG },
   visionPresets: [],
   imgGenConfig: { ...DEFAULT_IMGGEN_CONFIG },
@@ -562,12 +576,13 @@ export const useSettings = create<SettingsState>((set, get) => ({
   load: async () => {
     if (get().loaded) return;
     try {
-      const [themeRec, wallpaperRec, lockWallpaperRec, apiRec, presetsRec, visionRec, visionPresetsRec, lockRec, profileRec, iconsRec, ttsRec, sttRec, imgGenRec, imgGenPresetsRec, fontRec, fontScaleRec, fontWeightRec, statusBarRec, iconStyleRec, goodsImgStyleRec, themeResetRec, islandPersistentRec, assistViewerRec, assistQuickOpsRec, bubbleStyleRec, bubbleSchemesRec, liquidSkinRec, chatDecorRec, customCssRec] = await Promise.all([
+      const [themeRec, wallpaperRec, lockWallpaperRec, apiRec, presetsRec, apiFallbacksRec, visionRec, visionPresetsRec, lockRec, profileRec, iconsRec, ttsRec, sttRec, imgGenRec, imgGenPresetsRec, fontRec, fontScaleRec, fontWeightRec, statusBarRec, iconStyleRec, goodsImgStyleRec, themeResetRec, islandPersistentRec, assistViewerRec, assistQuickOpsRec, bubbleStyleRec, bubbleSchemesRec, liquidSkinRec, chatDecorRec, customCssRec] = await Promise.all([
         localDB.get('settings', 'theme'),
         localDB.get('settings', 'wallpaper'),
         localDB.get('settings', 'lockWallpaper'),
         localDB.get('settings', 'apiConfig'),
         localDB.get('settings', 'apiPresets'),
+        localDB.get('settings', 'apiFallbacks'),
         localDB.get('settings', 'visionConfig'),
         localDB.get('settings', 'visionPresets'),
         localDB.get('settings', 'lock'),
@@ -598,9 +613,10 @@ export const useSettings = create<SettingsState>((set, get) => ({
       // 原先逐个 await 串行 ≈ 16 次异步，开机黑屏期的固定开销；保持单轮 Promise.all。
       // 迁移：三种历史形态（enc:v1 密文串 / secure-store 信封 / 明文）统一解出到内存明文；
       // legacy=true 的记录含非空 apiKey 时会在下方各分支立即自愈回写为 enc:v1 密文。
-      const [apiRead, presetsRead, visionRead, visionPresetsRead, ttsRead, sttRead, imgGenRead, imgGenPresetsRead] = await Promise.all([
+      const [apiRead, presetsRead, apiFallbacksRead, visionRead, visionPresetsRead, ttsRead, sttRead, imgGenRead, imgGenPresetsRead] = await Promise.all([
         readSecretRecord<Partial<ApiConfig>>(apiRec?.value),
         readSecretRecord<ApiPreset[]>(presetsRec?.value),
+        readSecretRecord<ApiFallback[]>(apiFallbacksRec?.value),
         readSecretRecord<Partial<VisionConfig>>(visionRec?.value),
         readSecretRecord<VisionPreset[]>(visionPresetsRec?.value),
         readSecretRecord<Partial<TtsConfig>>(ttsRec?.value),
@@ -728,6 +744,26 @@ export const useSettings = create<SettingsState>((set, get) => ({
           const hasKey = apiPresets.some((p) => typeof p.config?.apiKey === 'string' && p.config.apiKey.length > 0);
           if (presetsRead.legacy && hasKey) {
             void putSecretRecord('apiPresets', apiPresets).catch(() => undefined);
+          }
+        }
+      }
+
+      // 备用渠道（故障转移；含 apiKey，enc:v1 密文落盘，与 apiPresets 同策略）
+      let apiFallbacks: ApiFallback[] = [];
+      if (apiFallbacksRec && apiFallbacksRec.value) {
+        const fv = apiFallbacksRead.value ?? apiFallbacksRec.value;
+        if (Array.isArray(fv)) {
+          apiFallbacks = fv.filter(
+            (f): f is ApiFallback =>
+              typeof f === 'object' &&
+              f !== null &&
+              typeof (f as ApiFallback).baseUrl === 'string' &&
+              typeof (f as ApiFallback).apiKey === 'string' &&
+              typeof (f as ApiFallback).model === 'string'
+          );
+          const fallbackHasKey = apiFallbacks.some((f) => f.apiKey.length > 0);
+          if (apiFallbacksRead.legacy && fallbackHasKey) {
+            void putSecretRecord('apiFallbacks', apiFallbacks).catch(() => undefined);
           }
         }
       }
@@ -862,6 +898,7 @@ export const useSettings = create<SettingsState>((set, get) => ({
         lockCustomWallpaperUrl,
         apiConfig,
         apiPresets,
+        apiFallbacks,
         visionConfig,
         visionPresets,
         imgGenConfig,
@@ -1093,6 +1130,17 @@ export const useSettings = create<SettingsState>((set, get) => ({
     set({ apiPresets: list });
     // 安全：预设的 config 可能含 apiKey，同样 enc:v1 密文落盘
     void putSecretRecord('apiPresets', list).catch(() => undefined);
+  },
+
+  setApiFallbacks: (list) => {
+    // 编辑中的未填完空行原样保留（防「正在填第 1 行时第 2 行凭空消失」）；
+    // 发送时刻由渠道链（apiChainOf）自动跳过地址/模型为空的项
+    const apiFallbacks = list.slice(0, 5);
+    set({ apiFallbacks });
+    // 渠道配置已变：与 updateApiConfig 同口径清空聊天重试冷却（旧失败计数作废）
+    clearAllChatCooldowns();
+    // 安全：含 apiKey，enc:v1 密文落盘（与 apiConfig 同策略）
+    void putSecretRecord('apiFallbacks', apiFallbacks).catch(() => undefined);
   },
 
   updateVisionConfig: (patch) => {

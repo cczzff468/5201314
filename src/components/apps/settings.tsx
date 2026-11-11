@@ -88,6 +88,7 @@ import {
   DEFAULT_API_CONFIG,
   WALLPAPER_PRESETS,
   useSettings,
+  type ApiFallback,
   type ApiPreset,
   type AppId,
   type ImgGenConfig,
@@ -3279,6 +3280,8 @@ function ApiPage({ onBack }: { onBack: () => void }) {
   const apiPresets = useSettings((s) => s.apiPresets);
   const updateApiConfig = useSettings((s) => s.updateApiConfig);
   const setApiPresets = useSettings((s) => s.setApiPresets);
+  const apiFallbacks = useSettings((s) => s.apiFallbacks);
+  const setApiFallbacks = useSettings((s) => s.setApiFallbacks);
 
   const [showKey, setShowKey] = useState(false);
   const [saveOpen, setSaveOpen] = useState(false);
@@ -3327,6 +3330,11 @@ function ApiPage({ onBack }: { onBack: () => void }) {
     setApiPresets([...apiPresets, { id: genId(), name, config: { ...apiConfig } }]);
     setPresetName('');
     setSaveOpen(false);
+  };
+
+  /** 修改第 i 个备用渠道的单个字段（未填完的空行保留在编辑中，发送时由渠道链自动跳过） */
+  const patchFallback = (i: number, patch: Partial<ApiFallback>) => {
+    setApiFallbacks(apiFallbacks.map((f, j) => (j === i ? { ...f, ...patch } : f)));
   };
 
   const fetchModels = async () => {
@@ -3727,6 +3735,70 @@ function ApiPage({ onBack }: { onBack: () => void }) {
               <div className="rounded-[16px] border border-amber-500/30 bg-amber-300/15 px-3.5 py-2.5 text-[12px] leading-relaxed text-amber-700 backdrop-blur-xl dark:border-amber-400/25 dark:bg-amber-300/[0.08] dark:text-amber-200/90">
                 未配置 API Key 时，AI 助手无法回复；请填写 OpenAI 兼容接口地址与 API Key 后再聊天。
               </div>
+            )}
+          </div>
+        </section>
+
+        {/* 备用渠道（多渠道故障转移） */}
+        <section>
+          <SectionLabel
+            icon={Repeat}
+            tone={TONE_BLUE}
+            right={<span className="text-[11px] text-muted-foreground/70">主渠道失败时自动切换</span>}
+          >
+            备用渠道
+          </SectionLabel>
+          <div className="flex flex-col gap-4 rounded-[22px] bg-white/55 p-4 shadow-[0_8px_28px_rgba(17,24,39,0.06)] ring-1 ring-white/70 backdrop-blur-2xl dark:bg-white/[0.06] dark:ring-white/[0.09]">
+            <p className="text-[12px] leading-relaxed text-muted-foreground">
+              主渠道请求失败（连接不上 / 鉴权失败 / 限流等）且本轮还没有内容产出时，自动按顺序改用下面配置的备用渠道重发，消息照常送达；温度与最大 Token 沿用主渠道。
+            </p>
+            {apiFallbacks.map((f, i) => (
+              <div
+                key={i}
+                className="flex flex-col gap-2.5 rounded-[16px] bg-white/45 p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.6)] ring-1 ring-black/[0.04] dark:bg-white/[0.05] dark:ring-white/[0.07]"
+              >
+                <div className="flex items-center justify-between">
+                  <span className="text-[12px] font-medium text-muted-foreground">备用渠道 {i + 1}</span>
+                  <button
+                    type="button"
+                    onClick={() => setApiFallbacks(apiFallbacks.filter((_, j) => j !== i))}
+                    aria-label={`删除备用渠道 ${i + 1}`}
+                    className="p-1 text-muted-foreground transition-colors hover:text-red-500"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                </div>
+                <Input
+                  value={f.baseUrl}
+                  onChange={(e) => patchFallback(i, { baseUrl: e.target.value })}
+                  placeholder="API 地址（如 https://api.deepseek.com/v1）"
+                  className="h-10 rounded-[12px] border-black/[0.05] bg-white/55 text-[13px] shadow-sm backdrop-blur-xl dark:border-white/[0.09] dark:bg-white/[0.07]"
+                />
+                <Input
+                  value={f.apiKey}
+                  onChange={(e) => patchFallback(i, { apiKey: e.target.value })}
+                  type="password"
+                  autoComplete="off"
+                  placeholder="API Key（反代可留空）"
+                  className="h-10 rounded-[12px] border-black/[0.05] bg-white/55 text-[13px] shadow-sm backdrop-blur-xl dark:border-white/[0.09] dark:bg-white/[0.07]"
+                />
+                <Input
+                  value={f.model}
+                  onChange={(e) => patchFallback(i, { model: e.target.value })}
+                  placeholder="模型（如 deepseek-chat）"
+                  className="h-10 rounded-[12px] border-black/[0.05] bg-white/55 text-[13px] shadow-sm backdrop-blur-xl dark:border-white/[0.09] dark:bg-white/[0.07]"
+                />
+              </div>
+            ))}
+            {apiFallbacks.length < 5 && (
+              <button
+                type="button"
+                onClick={() => setApiFallbacks([...apiFallbacks, { baseUrl: '', apiKey: '', model: '' }])}
+                className="flex h-10 w-full items-center justify-center gap-1.5 rounded-[14px] border border-dashed border-black/15 text-[13px] font-medium text-muted-foreground transition-all active:scale-[0.98] hover:border-black/25 hover:text-foreground dark:border-white/15 dark:hover:border-white/30"
+              >
+                <Plus className="h-4 w-4" />
+                添加备用渠道
+              </button>
             )}
           </div>
         </section>
@@ -4185,10 +4257,10 @@ function VisionPage({ onBack }: { onBack: () => void }) {
               )}
             </div>
 
-            {/* 未配置提示（精简） */}
+            {/* 未配置提示（精简）：v1.9.25 起未配置时自动用聊天模型直识（支持图片输入即可） */}
             {!visionConfig.baseUrl.trim() && (
-              <div className="rounded-[16px] border border-amber-500/30 bg-amber-300/15 px-3.5 py-2.5 text-[12px] leading-relaxed text-amber-700 backdrop-blur-xl dark:border-amber-400/25 dark:bg-amber-300/[0.08] dark:text-amber-200/90">
-                未配置：聊天发图不会触发识图（不影响文字聊天）。
+              <div className="rounded-[16px] border border-emerald-500/30 bg-emerald-300/15 px-3.5 py-2.5 text-[12px] leading-relaxed text-emerald-700 backdrop-blur-xl dark:border-emerald-400/25 dark:bg-emerald-300/[0.08] dark:text-emerald-200/90">
+                未配置专用识图模型：发图时将自动用聊天模型直接看图（需聊天模型支持图片输入，如 gpt-4o / gemini / qwen-vl / glm-4v 等）；不支持时本次回复不结合图片，可在此另配识图模型。
               </div>
             )}
 
@@ -4229,7 +4301,7 @@ function VisionPage({ onBack }: { onBack: () => void }) {
 
         {/* 使用说明（精简为一段） */}
         <p className="px-1 text-[12px] leading-relaxed text-muted-foreground">
-          识图模型只负责「看图」：发图先转文字描述再交给聊天模型；图片仅传给你自己配置的接口，预设存本机。
+          识图模型只负责「看图」：发图先转文字描述再交给聊天模型；未配置时自动用聊天模型直接看图；图片仅传给你自己配置的接口，预设存本机。
         </p>
       </div>
     </DetailShell>

@@ -2062,6 +2062,12 @@ const GROUP_CASCADE_COOLDOWN_MS = 5 * 60_000;
 const groupCascadeAt = new Map<string, number>();
 let groupCascadeDepth = 0;
 
+// v1.9.25 成员互相接话节流（模块态，双端同构，与微信群同款）：groupInterjectAt 记录同群上次
+// 「自然插话」的时间（3 分钟群级冷却）；是否插话由触发现场掷骰（最后一条是表情包 → 60%
+// 斗图机会，普通消息 → 32%），深度标记复用 groupCascadeDepth（旁路回合统一防重入口径）。
+const GROUP_INTERJECT_COOLDOWN_MS = 3 * 60_000;
+const groupInterjectAt = new Map<string, number>();
+
 /** v1.9.2 分窗渲染（与微信/QQ 单聊端 v71 同款）：群聊页初始只渲染最近 WINDOW_FIRST 条消息，
  *  上滑到顶按 WINDOW_STEP 向前扩——长会话几千条一次性 map 渲染是「点进群聊界面卡顿」的主因，
  *  分窗后首屏只建百级 DOM；时间分隔等按消息原始索引计算的逻辑全部带原索引渲染，
@@ -2668,7 +2674,9 @@ export function QqGroupChatPage({
    *  audit4-L14：onSegmentDelivered 可选回调——流中每有分段排队投递（onSegment）时回调该批条数，
    *  重新生成（regenerate 直调旁路）据此维护「本轮已投递数」，error 收口时据此决定是否回滚原消息。 */
   const runCharTurn = useCallback(
-    (char: ContactRecord, allowSkip: boolean, turnImageSrcs: { src: string; id: string }[], onSegmentDelivered?: (count: number) => void) =>
+    // v1.9.25 interject：插话回合专属提示（成员互相接话，与微信群同款）——告知「谁刚说了话/
+    // 是否表情包」，接不接、怎么接（接梗/@ 对方/回表情包斗图）由人设自决，[SKIP] 即沉默
+    (char: ContactRecord, allowSkip: boolean, turnImageSrcs: { src: string; id: string }[], onSegmentDelivered?: (count: number) => void, interject?: { speakerName: string; isSticker: boolean }) =>
       new Promise<'ok' | 'skip' | 'error'>((resolve) => {
         const g = getGroup(gid);
         if (!g) {
@@ -2728,7 +2736,8 @@ export function QqGroupChatPage({
         // #10 客户端硬上限：群聊单成员连发条数收敛 min(N,5)——提示词层 buildReplyCountPrompt groupMode
         // 已同口径收敛，这里对传给 chat-stream-store 的分段器 cap 与 maxTokens 同步收敛（原实现把
         // 原始 replyCount（最大 30）直接传下去，分段器 cap/maxTokens 不受限，单成员可连发 30 条刷屏）
-        const replyCount = Math.min(getReplyCount(sKey), GROUP_REPLY_CAP);
+        // 插话回合固定单条模式（「插话要短，一条就好」；多条连发是正常回合的节奏）
+        const replyCount = interject ? 1 : Math.min(getReplyCount(sKey), GROUP_REPLY_CAP);
         // 群聊规则（每个角色独立声明：当前是群聊、参与者有谁、只代表自己、禁复读、可互相对话）
         const others = g.memberIds
           .map((id) => contactsRef.current.find((c) => c.id === id))
@@ -2860,6 +2869,14 @@ export function QqGroupChatPage({
         // （弱模型拿不准就一律 SKIP 潜水）——明确「与你无关」的口径，宁可说话也不误潜水
         if (allowSkip) {
           groupRules.push('【发言判断】刚发出的这条消息如果与你无关、不需要你表态或你无话可说（比如别人在单独聊天），只回复 [SKIP] 两个词，不要说任何其他内容；有你要说的就正常回复。——『与你无关』指话题跟你完全沾不上边（没被问到、也插不上话）；被@/被点名/被问、或话题涉及你和你在意的人时就正常回应；大家聊得热闹、你自然想接一句时也可以正常发言，实在拿不准才 [SKIP]。');
+        }
+        // v1.9.25 插话回合专属规则（成员互相接话，与微信群同款）：非 @ 触发的自然插话机会
+        if (interject) {
+          groupRules.push(
+            `【插话机会】${interject.speakerName} 刚刚在群里${interject.isSticker ? '发了一个表情包' : '说了话'}。你没有被 @，纯属自己想不想说话：想接就自然插一句嘴（接梗、吐槽、回应都可以，也可以 @${interject.speakerName} 单独对 TA 说），${
+              interject.isSticker ? '想斗图就回一个表情包（用 [表情包:…] 标记）' : '也可以只丢一个表情包（用 [表情包:…] 标记）'
+            }；没什么好说的就只回 [SKIP] 保持沉默。插话要短，一条就好，别刷屏。`,
+          );
         }
         // 美团×AI 联动（C11 群内帮点外卖）：机主订单动态 + 食物话题命中时的商家目录与代点教学
         //（scope 'group'：只下帮点外卖草稿，代付/帮付/请客/自己点是单聊语义不下发）
@@ -3430,8 +3447,10 @@ export function QqGroupChatPage({
         // 收集每个成员的回合结果（#21）：'ok'=有产出 / 'skip'=自判沉默等 / 'error'=流失败
         const results: ('ok' | 'skip' | 'error')[] = [];
         lastTurnErrRef.current = ''; // Task 40：清上一轮错误中转，防旧错误串轮
-        // #27 级联素材：本轮最后一条 AI 成功发言（发言人 id + 消息文本），供回合结束后解析 @ 提及
-        let lastOkMsg: { senderId: string; text: string } | null = null;
+        // v1.9.25 本轮实际说过话的成员（插话人选优先挑没说话的）
+        const spokeIds = new Set<string>();
+        // #27 级联素材：本轮最后一条 AI 成功发言（发言人 id + 消息文本 + 是否表情包），供回合结束后解析 @ 提及/插话
+        let lastOkMsg: { senderId: string; text: string; isSticker: boolean } | null = null;
         for (const char of ordered) {
           // 中途变动守卫（audit-chat #6）：每次开口前重读群当前状态（getGroup 现读存储，非回合开始
           // 快照）——群已解散 → 整轮终止；前面成员的 [移出群聊]/[禁言] 管理标记当场生效后，排在
@@ -3451,7 +3470,8 @@ export function QqGroupChatPage({
               ),
             );
             const lastM = produced[produced.length - 1];
-            if (lastM) lastOkMsg = { senderId: char.id, text: msgTextOf(lastM) };
+            if (lastM) lastOkMsg = { senderId: char.id, text: msgTextOf(lastM), isSticker: lastM.kind === 'sticker' };
+            spokeIds.add(char.id);
           }
           await sleep(420);
         }
@@ -3478,6 +3498,7 @@ export function QqGroupChatPage({
         // 防刷屏三保险：单回合最多触发 1 个级联；同成员 5 分钟冷却（模块级 groupCascadeAt）；
         // groupCascadeDepth>0（级联回合进行中）不再触发，不会 A@B → B@C → … 无限链。
         const cascadeSrc = lastOkMsg;
+        let cascadeScheduled = false; // v1.9.25：级联真的排上了才压制插话（冷却挡下不算）
         if (cascadeSrc && groupCascadeDepth === 0) {
           const gEnd = getGroup(gid);
           const cascadeTargets = gEnd
@@ -3490,6 +3511,7 @@ export function QqGroupChatPage({
             const coolKey = `${gid}:${target.id}`;
             if (Date.now() - (groupCascadeAt.get(coolKey) ?? 0) >= GROUP_CASCADE_COOLDOWN_MS) {
               groupCascadeAt.set(coolKey, Date.now());
+              cascadeScheduled = true;
               window.setTimeout(() => {
                 if (runningRef.current || isChatStreaming(sKey)) return;
                 // 80ms 窗口内群可能解散/成员变动/被禁言（AI 管理标记随时生效），触发前再核一次
@@ -3529,6 +3551,77 @@ export function QqGroupChatPage({
               }, 80);
             }
           }
+        }
+        // ---- v1.9.25 成员互相接话：@ 级联没触发时的「自然插话 / 斗图」机会（与微信群同款） ----
+        // 触发条件（全部满足才掷骰）：本轮有成员成功发言；@ 级联本轮未排上（防叠加刷屏）；
+        // 最后发言者之外还有可发言成员；群级 3 分钟冷却通过；概率命中（最后一条是表情包 →
+        // 60% 斗图机会，普通消息 → 32%）。人选优先本轮没说过话的成员，延迟 1.2~2.6s（真人
+        // 「看到别人说完犹豫一下才插嘴」的节奏）后跑一次自判插话回合（allowSkip=true + 专属
+        // 插话规则 + 单条模式）：接不接、怎么接完全由人设决定，[SKIP] 即自然沉默。深度标记
+        // 复用 groupCascadeDepth；触发前等投递尾巴落库；等待期间用户插话/新回合开始 → 让位。
+        const interjectSrc = lastOkMsg;
+        const interjectCands =
+          interjectSrc && groupCascadeDepth === 0 && !cascadeScheduled
+            ? (() => {
+                const gEnd2 = getGroup(gid);
+                if (!gEnd2) return [];
+                return gEnd2.memberIds
+                  .filter((id) => id !== interjectSrc.senderId && !isGroupMuted(gEnd2, id))
+                  .map((id) => contactsRef.current.find((c) => c.id === id))
+                  .filter((c): c is ContactRecord => !!c);
+              })()
+            : [];
+        const interjectChar =
+          interjectCands.length > 0 && Date.now() - (groupInterjectAt.get(gid) ?? 0) >= GROUP_INTERJECT_COOLDOWN_MS
+            ? Math.random() < (interjectSrc?.isSticker ? 0.6 : 0.32)
+              ? (() => {
+                  const silent = interjectCands.filter((c) => !spokeIds.has(c.id));
+                  const pool = silent.length > 0 ? silent : interjectCands;
+                  return pool[Math.floor(Math.random() * pool.length)] ?? null;
+                })()
+              : null
+            : null;
+        if (interjectChar && interjectSrc) {
+          groupInterjectAt.set(gid, Date.now()); // 无论最终是否开口，冷却都从这里起算（含 [SKIP] 沉默的空转）
+          window.setTimeout(() => {
+            if (runningRef.current || isChatStreaming(sKey)) return; // 新回合已开始：让位
+            if (groupQueuedRef.current) return; // 用户已插话：让位排队补跑
+            const gNow = getGroup(gid);
+            if (!gNow || !gNow.memberIds.includes(interjectChar.id) || isGroupMuted(gNow, interjectChar.id)) return;
+            const lastSpk = contactsRef.current.find((c) => c.id === interjectSrc.senderId);
+            const lastSpkName = lastSpk ? memberNameOf(lastSpk) : '群友';
+            groupCascadeDepth = 1; // 旁路回合标记：插话进行中不再触发级联/插话（复用级联深度位）
+            const kickInterject = () => {
+              if (runningRef.current || isChatStreaming(sKey)) {
+                groupCascadeDepth = 0;
+                return;
+              }
+              if (isAiDelivering(sKey)) {
+                window.setTimeout(kickInterject, 400);
+                return;
+              }
+              if (groupQueuedRef.current) {
+                groupCascadeDepth = 0;
+                return;
+              }
+              groupSpeaker.set(sKey, interjectChar.id);
+              if (mountedRef.current) setSpeakerId(interjectChar.id);
+              void runCharTurn(interjectChar, true, [], undefined, {
+                speakerName: lastSpkName,
+                isSticker: interjectSrc.isSticker,
+              }).finally(() => {
+                groupCascadeDepth = 0;
+                groupSpeaker.delete(sKey);
+                if (mountedRef.current) setSpeakerId(null);
+                // 旁路回合排队补跑（与级联同款兜底）：插话期间用户发过消息 → 补跑不让消息石沉大海
+                if (groupQueuedRef.current) {
+                  groupQueuedRef.current = false;
+                  kickMakeup();
+                }
+              });
+            };
+            kickInterject();
+          }, 1200 + Math.random() * 1400);
         }
       } finally {
         runningRef.current = false;
