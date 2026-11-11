@@ -2711,3 +2711,24 @@ Work Log:
 Stage Summary:
 - v1.9.22 已提交：「添加到主屏幕」后像真 App 全屏运行（刘海/小白条安全区避让）+ 断网可打开（在线自动缓存整页 HTML+静态资源，离线从主屏幕图标照常进手机，本机数据应用可浏览）+ 设置 › 添加到主屏幕（Android 一键安装/iOS 指引/离线缓存管理/检查更新）+ 安装邀请与断网恢复轻提示 + 长按图标快捷直达 + favicon
 - 关键文件：public/sw.js、public/manifest.json、src/app/layout.tsx、src/app/globals.css、src/components/ios/PhoneShell.tsx、src/components/apps/settings.tsx、src/lib/app-version.ts、public/icons/pwa/maskable-192.png、src/app/favicon.ico
+
+---
+Task ID: 31
+Agent: 主控 Agent（Z.ai Code）
+Task: 用户四点需求——重构 Function Calling 底层（工具强制注入/逼迫动手 System Prompt/Agentic 多步循环/tool 结果回传）+ 锁应用免看屏幕 + AI 拉取应用列表自加吃醋锁定（v1.9.23）
+
+Work Log:
+- [Bug 修复] ①冻结/解冻/打开/强杀/查列表/电量等教学明确「直接执行，绝对不要先看屏幕」；②看屏幕失败文案补「可改用 [手机操作:读屏幕] 读取文字版界面，无需视觉能力」；③新增 [手机操作:读屏幕] 操作 + readScreenText 工具：复用 shizuku-agent 的 agentObserve()（前台 App + uiautomator 控件树摘要），无识图模型也能读屏
+- [phone-tools.ts 新建 ~600 行] ①buildPhoneTools()：按「AI 动手」UI 开关动态生成 OpenAI tools 参数（20 个工具：openApp/findAndClick/tapScreen/swipeScreen/inputText/pressKey/getInstalledApps/forceStopApp/freezeApp/unfreezeApp/setVolume/takeScreenshot/readScreenText/getForegroundApp/getNotifications/getBattery/getClipboard/getSmsInbox/getCallLog/addJealousyLockApps；真机全量、网页端 5 个镜像工具）每次请求现场读、改动下轮生效；②execPhoneTool()：全部复用 executePhoneOp 三道闸（总开关/单项/原生环境）+ 网页内应用镜像；③runPhoneToolRound()：Agentic 主循环（≤6 轮）——带 tools 非流式请求 → tool_calls 解析执行（串行，系统行实时落 kv + chat-stream-sysline 事件）→ role:"tool" 结果回传继续 → 纯文字收尾；只调工具不说话自动补一轮「汇报结果」；④fcRequest：/api/chat toolMode 优先，directOnly/内网 → directChatJson 浏览器直连兜底；上游不支持 tools 记忆 30 分钟（FC_UNSUPPORTED）降级回流式；⑤pushToolSysLine：按 wx/qq/sms 三端各自消息形状直接落 kv（「正在操作手机（X）…」非 op 行 + 「手机操作成功/失败」op:true 回喂行）
+- [shizuku-autonomy.ts] ①phoneFcReady() 导出（已配 API + 总开关 + 能力面判定）；②buildPhoneToolRules() 强制教学块（机主原文语义：「你绝对不能只回复文字，必须立刻输出对应的工具调用，只说不做是违规，系统将惩罚你」）按 FC 就绪注入 buildShizukuAutonomyRules 尾部（关闭/未配置零 token，标记协议保留为兜底，工具优先规则明确）；③WELL_KNOWN_PACKAGES 导出（网页端 getInstalledApps 复用）；④executePhoneOp 冻结/解冻放行进 case + 网页端镜像：AI 主动冻结走 web-app-lock（setWebFrozen src:'ai' 30 分钟自解、正开着踢回主屏）、解冻吃醋锁旁路优先否则清网页冻结态；入口闸门只拦打开/冻结/解冻以外的命令
+- [web-app-lock.ts] WebFrozenRec 加 src 来源标记（'jealousy' 默认/'ai'）；jealousy-lock.ts tick「无锁清残留」只清吃醋来源（src='ai' 的 AI 冻结不清，自身 unlockAt 到期自愈）——修复 AI 冻结被吃醋锁守望者 30 秒内误清的问题；jealousy-lock 新增 addJealousyEntertainPkgs()（包名校验去重上限 60）
+- [/api/chat route] toolMode 分支：isValidToolRoundMessages（role:'tool' 需 tool_call_id、assistant 可带 tool_calls）+ sanitizeTools（函数名白名单正则、最多 24 个）+ proxyToolRound（非流式转发 tools+tool_choice:auto，max_completion_tokens/温度兼容重试同款，400 报 tools 不支持 → toolsUnsupported:true 告知客户端降级，孤儿 tool 消息截断保护）；direct-api.ts 新增 directChatJson()（直连非流式工具轮，CORS 兜底同款）
+- [chat-stream-store] beginChatStream 私聊（群聊/助手除外）+ FC 就绪 → runPhoneToolRound 先行；成功则最终文本本地喂 onDelta（思考剥离/分段/投递节奏管线全复用），usedTools 时剥离 [手机操作:…] 标记防双执行；任何异常无缝回退原流式
+- [三端 App] chat.tsx/wechat.tsx/qq.tsx 各加 chat-stream-sysline 监听（~15 行/端）：工具系统行按会话增量合并上屏（不清进行中的流式状态）
+- [E2E] 沙箱网页端全链路（fetch mock /api/chat toolMode 双态 + 林小满种子 + 自主权 localStorage + 假 API 配置）：①工具注入 ✓ 首轮请求 tools=[openApp,getInstalledApps,freezeApp,unfreezeApp,addJealousyLockApps]（网页端按开关生成的 5 个）；②tool_calls→freezeApp(com.netease.cloudmusic)→执行成功「已冻结网易云音乐（网页内应用…）」→ 系统行 kv+实时上屏 ✓；③role:tool 结果回传第二轮 ✓ → 最终回复；④web 冻结态 src:'ai' 落盘且 35 秒后仍在（吃醋锁 tick 不再误清）✓；⑤无工具路径（模型直接文字回复）渲染 ✓；⑥工具路径最终回复经投递队列延迟到达（连发测试下分钟级延迟+偶发首条丢失——segment/typing 节奏队列行为，后续版本跟进优化，见已知问题）
+- [已知问题·跟进] 工具轮后的最终回复经 scheduleAiDelivery 投递队列在急速连发/headless 环境下出现分钟级延迟与偶发首条丢失（无工具路径正常）；推测与投递队列打字节奏/多批积压相关，待真机环境复验与队列保活加固
+- [清理] 全部 E2E 调试打点移除（__fcDebug/__accDbg/__finDbg/__finErr/__segLog/__appFin/__appFin2）
+
+Stage Summary:
+- v1.9.23 已提交：AI 动手从「文字标记协议」升级为真 Function Calling——按 UI 开关动态注入 tools、逼迫动手 System Prompt、tool_calls 解析执行 + role:tool 回传多步 Agentic 循环；锁应用彻底免看屏幕（+文字版读屏工具）；网页端 AI 可真锁应用（src 标记防吃醋锁误清）；AI 可自拉应用列表并增补吃醋锁定清单；上游不支持自动降级 + 标记协议兜底
+- 关键文件：src/lib/ios/phone-tools.ts（新）、src/lib/ios/shizuku-autonomy.ts、src/lib/ios/web-app-lock.ts、src/lib/ios/jealousy-lock.ts、src/lib/ios/direct-api.ts、src/lib/chat-stream-store.ts、src/app/api/chat/route.ts、src/components/apps/chat.tsx、src/components/apps/wechat.tsx、src/components/apps/qq.tsx、src/lib/app-version.ts

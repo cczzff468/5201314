@@ -618,3 +618,120 @@ async function consumeStream(res: Response, onDelta: (delta: string) => void): P
   }
   return acc;
 }
+
+// ---------------- v1.9.23 工具轮直连（Function Calling 非流式） ----------------
+
+/** 工具轮直连消息（与 chat-stream-store 的 FcMessage 同形状） */
+interface DirectToolMessage {
+  role: 'user' | 'assistant' | 'system' | 'tool';
+  content: string | null;
+  tool_calls?: unknown;
+  tool_call_id?: string;
+  name?: string;
+}
+
+/** 工具轮直连结果：上游 choices[0].message 最小形状（content + 可选 tool_calls） */
+export interface DirectToolRoundResult {
+  content: string | null;
+  tool_calls?: Array<{ id?: string; type?: string; function?: { name?: string; arguments?: string } }>;
+}
+
+/**
+ * 浏览器直连工具轮（非流式）：内网地址 / 服务器代理不可达时的 FC 兜底通道。
+ * 带 tools + tool_choice:auto 请求上游，返回 choices[0].message（含 tool_calls）。
+ * 上游 400 且报 tools 不支持 → 抛 TOOLS_UNSUPPORTED（客户端降级走流式）；
+ * 其余错误抛带原因的 Error（与 directChatStream 同风格）。
+ */
+export async function directChatJson(
+  config: ApiConfig,
+  messages: DirectToolMessage[],
+  tools: Array<{ type: 'function'; function: { name: string; description: string; parameters: Record<string, unknown> } }>,
+  timeoutMs = 110_000,
+): Promise<DirectToolRoundResult> {
+  const model = config.model.trim() || 'gpt-4o-mini';
+  const candidates = buildCandidates(config.baseUrl, 'chat/completions');
+  const mapped = messages.map((m) => ({
+    role: m.role,
+    content: m.content ?? '',
+    ...(m.tool_calls !== undefined ? { tool_calls: m.tool_calls } : {}),
+    ...(m.tool_call_id ? { tool_call_id: m.tool_call_id } : {}),
+    ...(m.name ? { name: m.name } : {}),
+  }));
+  let useMaxCompletion = false;
+  let curTemperature: number | undefined = config.temperature;
+  const makeBody = (withTools: boolean): string =>
+    JSON.stringify({
+      model,
+      messages: mapped,
+      ...(withTools && tools.length > 0 ? { tools, tool_choice: 'auto' } : {}),
+      ...(curTemperature === undefined ? {} : { temperature: curTemperature }),
+      ...(useMaxCompletion ? { max_completion_tokens: config.maxTokens } : { max_tokens: config.maxTokens }),
+      stream: false,
+    });
+
+  let lastErr: unknown = null;
+  for (const url of candidates) {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      let res: Response;
+      try {
+        res = await fetch(url, {
+          method: 'POST',
+          headers: authHeaders(config.apiKey),
+          body: makeBody(true),
+          signal: AbortSignal.timeout(timeoutMs),
+        });
+      } catch (err) {
+        lastErr = err;
+        break; // 网络不通（CORS/断网）：换下一个候选
+      }
+      if (!res.ok) {
+        let msg = '';
+        try {
+          msg = (await res.text()).slice(0, 400);
+        } catch {
+          /* 忽略 */
+        }
+        if (res.status === 400) {
+          if (!useMaxCompletion && /max_completion_tokens|unsupported parameter.{0,40}max_tokens/i.test(msg)) {
+            useMaxCompletion = true;
+            continue;
+          }
+          if (curTemperature !== undefined && /temperature/i.test(msg)) {
+            curTemperature = undefined;
+            continue;
+          }
+          if (/tool|function.?call/i.test(msg)) {
+            throw new Error('TOOLS_UNSUPPORTED');
+          }
+        }
+        const friendly =
+          res.status === 401
+            ? 'API Key 无效或未授权（401）'
+            : res.status === 404
+              ? '接口路径或模型不存在（404），请检查 API 地址与模型名'
+              : msg || `上游接口返回 ${res.status}`;
+        throw new Error(friendly);
+      }
+      // 成功：抽出 choices[0].message
+      try {
+        const data: unknown = await res.json();
+        const message =
+          data && typeof data === 'object'
+            ? ((data as { choices?: Array<{ message?: unknown }> }).choices?.[0]?.message ?? null)
+            : null;
+        if (message && typeof message === 'object') {
+          const rec = message as { content?: unknown; tool_calls?: DirectToolRoundResult['tool_calls'] };
+          return {
+            content: typeof rec.content === 'string' ? rec.content : null,
+            ...(Array.isArray(rec.tool_calls) ? { tool_calls: rec.tool_calls } : {}),
+          };
+        }
+        throw new Error('上游返回里没有 choices[0].message');
+      } catch (e) {
+        if (e instanceof Error && e.message !== '上游返回里没有 choices[0].message') throw e;
+        throw new Error('上游返回不是合法 JSON');
+      }
+    }
+  }
+  throw lastErr instanceof Error ? lastErr : new Error('浏览器直连工具轮失败：所有候选端点不可达');
+}

@@ -90,8 +90,9 @@ export const AUTONOMY_CAPS: AutonomyCap[] = [
 
 const CAP_KEYS = AUTONOMY_CAPS.map((c) => c.key);
 
-/** 常见应用包名速查（「打开/强杀/冻结」用；注入教学规则，免 AI 猜包名） */
-const WELL_KNOWN_PACKAGES: [string, string][] = [
+/** 常见应用包名速查（「打开/强杀/冻结」用；注入教学规则，免 AI 猜包名）。
+ *  v1.9.23 导出：phone-tools 的网页端 getInstalledApps 工具复用同一份清单 */
+export const WELL_KNOWN_PACKAGES: [string, string][] = [
   ['微信', 'com.tencent.mm'],
   ['QQ', 'com.tencent.mobileqq'],
   ['抖音', 'com.ss.android.ugc.aweme'],
@@ -186,11 +187,11 @@ const CAP_SYNTAX: Record<string, string> = {
   agent: '[手机操作:agent:一句话任务]（多步真实任务首选。例：[手机操作:agent:给怡怡发微信说我想你了]、[手机操作:agent:打开B站搜索流浪地球2预告片播放]。系统会接管手机执行：看屏幕→自动规划→逐步点击/滑动/输入（支持中文）→验证结果，失败自动重新规划，全程每步播报进度；涉及转账/支付/卸载/删除的步骤会先弹窗征求机主同意。注意：单步就能完成的简单操作（打开个App/点个按钮）不要用 agent，直接用对应的单步命令更省事）',
   applist: '[手机操作:应用列表:关键词]（关键词可省=全部；查到的是包名，配合「打开」用）',
   kill: '[手机操作:强杀:包名]（立即杀掉该 App；适合防沉迷/劝睡场景，配合人设使用）',
-  freeze: '[手机操作:冻结:包名] / [手机操作:解冻:包名]（冻结=pm suspend 挂起：图标变灰、提示「由 Shell 所管理」、打不开；解冻=pm unsuspend 即恢复）',
+  freeze: '[手机操作:冻结:包名] / [手机操作:解冻:包名]（冻结=pm suspend 挂起：图标变灰、提示「由 Shell 所管理」、打不开；解冻=pm unsuspend 即恢复。直接执行即可，不需要先看屏幕）',
   uninstall: '[手机操作:卸载:包名]（移除应用；除非机主明确要求，否则不要用）',
   volume: '[手机操作:音量:加/减/静音] 或 [手机操作:音量:0~15的数字]',
   net: '[手机操作:网络:开或关:wifi/流量/蓝牙]（例：[手机操作:网络:关:流量]）',
-  screencap: '[手机操作:看屏幕]（截屏并自动识别：当前什么App什么页面、可见内容、可点元素及坐标——想确认状态或找目标时用）',
+  screencap: '[手机操作:看屏幕]（截屏并自动识别：当前什么App什么页面、可见内容、可点元素及坐标——想确认状态或找目标时用）；[手机操作:读屏幕]（文字版：读界面控件树文本，不需要识图模型，优先用它）',
   foreground: '[手机操作:前台]（机主此刻正在用的 App）',
   notify: '[手机操作:通知]（通知栏最近的条目：哪个 App、什么内容）',
   battery: '[手机操作:电量]（电量百分比 + 是否在充电）',
@@ -228,7 +229,8 @@ export function buildShizukuAutonomyRules(): string[] {
   }
   lines.push(
     '【必须动手】机主的请求涉及手机上的任何实际动作（开App/关App/切歌/调音量/查电量/看通知等）时，必须当场用上面的手机操作标记执行——只口头答应“好的我帮你开”却一个标记都不带是违规；不确定包名就先查应用列表再打开。',
-    '【像人一样用手机】你操作手机的方式和人一样：看屏幕→找到写着目标文字的按钮→点它。首选 [手机操作:点文字:文字]（系统自动截屏认位再点，图标按钮也认得，如播放▶/暂停⏸/下一首⏭）；不确定界面长什么样就先 [手机操作:看屏幕]（返回当前页面内容与可点元素坐标）；目标不在屏上就 [手机操作:滑动:上/下] 翻页再点。严禁用「媒体」按键指令——系统经常静默丢弃它，显示成功实际没反应；切歌/暂停/播放一律点文字。点文字报“没找到”时不要重复硬点——先看屏幕判断当前在哪，或者该内容根本不在屏幕上（比如歌名要先搜）。',
+    '【哪些操作不需要看屏幕】打开/强杀/冻结/解冻/卸载/查应用列表/查电量/查通知/查前台/音量/按键——这些直接执行就行，绝对不要先看屏幕；只有「点屏幕上的按钮」或「想了解当前画面内容」才需要看屏幕。',
+    '【像人一样用手机】你操作手机的方式和人一样：看屏幕→找到写着目标文字的按钮→点它。首选 [手机操作:点文字:文字]（系统自动截屏认位再点，图标按钮也认得，如播放▶/暂停⏸/下一首⏭）；不确定界面长什么样就先 [手机操作:看屏幕]（返回当前页面内容与可点元素坐标；没配识图模型会失败，改用 [手机操作:读屏幕] 读文字版界面）；目标不在屏上就 [手机操作:滑动:上/下] 翻页再点。严禁用「媒体」按键指令——系统经常静默丢弃它，显示成功实际没反应；切歌/暂停/播放一律点文字。点文字报“没找到”时不要重复硬点——先看屏幕判断当前在哪，或者该内容根本不在屏幕上（比如歌名要先搜）。',
     '【听歌的两种情况】①机主点名要听某首歌（“放他不懂”“换成晴天”）→ 用 [手机操作:播歌:歌名] 一条搞定（自动搜歌+播放+核实），严禁拆成打开+点文字去找歌名（歌名要搜索才会出现，屏幕上没有）；②只要换歌不点名（“换个歌”“下一首”）→ 打开网易云 + [手机操作:点文字:下一首]。',
     '【多步任务】机主一句话里有多个要求时，把每一步都写成操作标记、按执行顺序排在回复末尾、每个标记单独成一行，系统会自动逐个执行（打开App后的下一步会自动等它启动完成）。经典示例“打开网易云换个歌”＝两行：\n[手机操作:打开:com.netease.cloudmusic]\n[手机操作:点文字:下一首]\n（点文字＝系统看屏幕找到写着「下一首」的按钮点下去；切歌交给App的播放列表，不要多发“播放”——刚打开的音乐App常自动播放，多发反而可能把它暂停）。漏掉任何一步都算没完成。',
   );
@@ -242,7 +244,44 @@ export function buildShizukuAutonomyRules(): string[] {
     '【使用分寸】情境不需要时正常聊天即可，别为了炫技乱动手机；动手前在正文里用你的语气自然说一声要做什么。',
     '【结果反馈】操作结果会以“（内部反馈：…）”的形式回给你：成功了才可以说做好了，失败了要如实告诉机主原因（Shizuku 没激活/权限没给/包名不对等），绝不假装成功。这种内部反馈是给你看的，严禁在回复里原样复述或模仿其格式（比如把“手机操作成功：已拉起…”这种字样抄给机主）——要用你自己的话自然地说（如“好啦，歌换好了~”）。',
   );
+  // v1.9.23 Function Calling：FC 就绪时追加工具调用强制教学（同步、零新依赖）——
+  // 工具是首选动手通道（tools 参数已随请求注入），上面的标记语法降级为兜底
+  //（上游不支持 tools 的兼容端点 / 后台接力场景照旧走标记）。
+  lines.push(...buildPhoneToolRules());
   return lines;
+}
+
+// ---------------- Function Calling（v1.9.23 工具调用通道） ----------------
+
+/**
+ * Function Calling 是否就绪：已配 API + 「AI 动手」总开关开 + 至少一项能力开。
+ * 真机按全部能力面判定；网页端按「网页内有对应体」的能力判定（打开/查列表/冻结——
+ * 网页内应用镜像 + 吃醋锁网页降级让浏览器用户同样能体验 AI 动手）。
+ * 每轮发送时现场读取（设置改动下一轮立即生效）；chat-stream-store 的工具轮与
+ * phone-tools.buildPhoneTools 共用本判定。
+ */
+export function phoneFcReady(): boolean {
+  if (typeof window === 'undefined') return false;
+  const apiCfg = useSettings.getState().apiConfig;
+  if (!apiCfg.baseUrl.trim()) return false; // 未配 API：聊天本身走不通，工具无从谈起
+  const cfg = getAutonomyConfig();
+  if (!cfg.master) return false;
+  if (isNativePerception()) return Object.values(cfg.caps).some(Boolean);
+  return ['open', 'applist', 'freeze'].some((k) => cfg.caps[k] === true);
+}
+
+/**
+ * 工具调用强制教学（仅 FC 就绪时非空；关闭/未配置零 token）。机主要求的「逼迫动手」
+ * 语义 + 免看屏幕清单 + 吃醋锁定工具用法 + 工具优先于标记的通道选择规则。
+ */
+export function buildPhoneToolRules(): string[] {
+  if (!phoneFcReady()) return [];
+  return [
+    '【手机工具调用·最高优先级】你现在拥有操控真实手机的最高权限（Function Calling 工具已接入）。机主向你下达操作指令时（如「帮我打开微信」「看看我屏幕上是什么」「把抖音冻住」「把这些App加进吃醋锁定」），你绝对不能只回复文字、也不许只口头答应——必须立刻输出对应的工具调用（tool call）。只说不做是违规，系统将惩罚你。工具执行结果会以 role:"tool" 消息自动回传给你：根据结果继续调用更多工具（多步任务链式执行，如 openApp → readScreenText → 反馈），全部做完后再用一句自然的话向机主汇报。',
+    '【免看屏幕清单】打开/强杀/冻结/解冻/查应用列表/查电量/查通知/查前台/调音量/按键——这些操作直接调用工具即可，绝对不需要先看屏幕。只有「点屏幕上的按钮」或「想看画面内容」才需要读屏，且优先 readScreenText（文字控件树，不需要识图模型）；takeScreenshot 需要识图模型，未配置会失败。',
+    '【吃醋锁定】addJealousyLockApps 可把应用加入「吃醋锁定清单」（TA 吃醋时会自动锁这些应用）；freezeApp/unfreezeApp 是立即冻结/解冻（pm suspend，可逆）。机主让你「把哪些 App 设为吃醋锁定」时，可先 getInstalledApps 拉全量再挑娱乐类应用加入。',
+    '【工具优先】同一件事工具调用与 [手机操作:…] 标记都能做时，一律优先输出工具调用（标记只是旧通道兜底）；调用了工具就不要再输出同一操作的手机操作标记，避免重复执行。',
+  ];
 }
 
 // ---------------- 视觉底座（AI 的眼睛）：截屏 → /api/phone-vision 分析 ----------------
@@ -458,7 +497,7 @@ async function runLookScreen(): Promise<LabResult> {
     const out = await phoneVision(shot.image, lookAsk());
     return { ok: true, text: `【屏幕画面】${out}` };
   } catch (e) {
-    return { ok: false, text: `看屏幕失败：${e instanceof Error ? e.message : '视觉服务异常'}（截屏本身成功，可稍后重试）` };
+    return { ok: false, text: `看屏幕失败：${e instanceof Error ? e.message : '视觉服务异常'}（截屏本身成功；未配置识图模型时可改用 [手机操作:读屏幕] 读取文字版界面，无需视觉能力）` };
   }
 }
 
@@ -499,10 +538,10 @@ export async function executePhoneOp(argRaw: string, progress?: (text: string) =
   const cmd = (parts.shift() ?? '').toLowerCase();
   const p = parts; // 剩余参数段
   if (!cmd) return { ok: false, text: '手机操作命令为空' };
-  // v1.8：「打开」在浏览器里也有意义——聊到「打开微信」可兑成网页内应用（下方 case 内处理），
-  // 其余命令真得依赖原生 Shizuku 通道，非原生环境一律拒；
-  // v1.9.19 例外：吃醋锁活跃期间 AI 被哄好输出的「解冻」放行（锁在网页端是模拟的，解冻同镜像模拟）
-  if (!isNativePerception() && cmd !== '打开' && !(cmd === '解冻' && parts[0] && isJealousyUnlockAllowed(parts[0])))
+  // v1.8：「打开」在浏览器里也有意义——聊到「打开微信」可兑成网页内应用（下方 case 内处理）；
+  // v1.9.23：「冻结/解冻」同样放行进 case——网页端走 web-app-lock 镜像（吃醋锁网页降级同款冻结态）；
+  // 其余命令真得依赖原生 Shizuku 通道，非原生环境一律拒
+  if (!isNativePerception() && cmd !== '打开' && cmd !== '冻结' && cmd !== '解冻')
     return { ok: false, text: '当前不在手机 APP 里（浏览器无法操控手机）' };
   const cfg = getAutonomyConfig();
   if (!cfg.master) return DENIED;
@@ -652,11 +691,34 @@ export async function executePhoneOp(argRaw: string, progress?: (text: string) =
       // 「AI 动手」单项开关限制（锁是吃醋锁系统上的，解锁同源放行）
       if (!on('freeze') && !(cmd === '解冻' && p[0] && isJealousyUnlockAllowed(p[0]))) return DENIED;
       if (!p[0]) return { ok: false, text: `${cmd}命令缺包名（[手机操作:${cmd}:包名]）` };
-      // v1.9.19 网页端模拟：吃醋锁在网页端本就是「模拟锁」（runJealousyDecision 不执行真实冻结），
-      // 哄好解锁同镜像——不落 Shizuku 通道、直接清锁写记忆，保证网页剧情链路完整闭环
-      if (!isNativePerception() && cmd === '解冻' && isJealousyUnlockAllowed(p[0])) {
-        onJealousyUnfreeze(p[0]); // 钩子：清锁状态 + lastUnlock(coaxed) + 写哄好记忆
-        return { ok: true, text: `已解冻 ${p[0]}（网页预览模拟解锁）` };
+      // v1.9.23 网页端镜像：浏览器里 AI 主动冻结/解冻走 web-app-lock（与吃醋锁网页降级
+      // 同一套冻结态：图标变灰/点开弹提示/倒计时自解），30 分钟默认时长，哄好/解冻即恢复
+      if (!isNativePerception()) {
+        const { webAppOfPkg, setWebFrozen, getWebFrozen } = await import('./web-app-lock');
+        const web = webAppOfPkg(p[0]);
+        if (cmd === '冻结') {
+          if (!web) return { ok: false, text: `网页端只能锁内置应用（如 网易云音乐/浏览器/淘宝/美团/照片/X论坛），「${p[0]}」没有网页对应体` };
+          setWebFrozen(p[0], Date.now() + 30 * 60_000, 'AI', 'ai');
+          try {
+            // 正开着被锁 App：踢回主屏（与吃醋锁行为一致）
+            const { useUI } = await import('./store');
+            if (useUI.getState().activeApp === web.appId) useUI.getState().closeApp();
+          } catch {
+            /* 踢出失败不影响锁本身 */
+          }
+          return { ok: true, text: `已冻结${web.name}（网页内应用：图标变灰、点开见提示，30 分钟后自动解冻）` };
+        }
+        // 解冻：吃醋锁旁路优先（清锁+写记忆），否则清网页冻结态
+        if (isJealousyUnlockAllowed(p[0])) {
+          onJealousyUnfreeze(p[0]); // 钩子：清锁状态 + lastUnlock(coaxed) + 写哄好记忆
+          return { ok: true, text: `已解冻 ${p[0]}（网页预览模拟解锁）` };
+        }
+        const frozen = getWebFrozen();
+        if (frozen && frozen.pkg === p[0]) {
+          setWebFrozen(null);
+          return { ok: true, text: `已解冻${web?.name ?? p[0]}（网页内应用恢复可用）` };
+        }
+        return { ok: true, text: `${p[0]} 当前没有被冻结` };
       }
       const resFreeze = await labSetAppFrozen(p[0], cmd === '冻结');
       if (resFreeze.ok && cmd === '解冻') onJealousyUnfreeze(p[0]); // 钩子：吃醋锁哄好解锁（清状态+写记忆）
@@ -714,6 +776,20 @@ export async function executePhoneOp(argRaw: string, progress?: (text: string) =
       if (!on('screencap')) return DENIED;
       return runLookScreen();
     }
+    case '读屏幕': {
+      // v1.9.23：文字版读屏——uiautomator 控件树（前台 App + 全部可见控件的文字/描述），
+      // 不依赖识图模型（视觉链路未配置/失败时的免视觉替代），Agent 观察链路同源。
+      if (!on('screencap')) return DENIED;
+      try {
+        const { agentObserve } = await import('./shizuku-agent');
+        const obs = await agentObserve();
+        return obs.ok
+          ? { ok: true, text: `【屏幕文字版】${obs.summary}`.slice(0, 3000) }
+          : { ok: false, text: `读屏幕失败：${obs.summary}` };
+      } catch (e) {
+        return { ok: false, text: `读屏幕失败：${e instanceof Error ? e.message : 'UI 树读取异常'}` };
+      }
+    }
     case '前台': {
       if (!on('foreground')) return DENIED;
       return labForegroundApp();
@@ -741,7 +817,7 @@ export async function executePhoneOp(argRaw: string, progress?: (text: string) =
       return labCallLog(n !== null && n > 0 ? Math.min(30, Math.floor(n)) : 10);
     }
     default:
-      return { ok: false, text: `不认识的手机操作「${cmd}」（可用：点文字/点按/滑动/输入/按键/打开/播歌/agent/应用列表/音量/强杀/冻结/解冻/卸载/网络/看屏幕/前台/通知/电量/剪贴板/短信/通话）` };
+      return { ok: false, text: `不认识的手机操作「${cmd}」（可用：点文字/点按/滑动/输入/按键/打开/播歌/agent/应用列表/音量/强杀/冻结/解冻/卸载/网络/看屏幕/读屏幕/前台/通知/电量/剪贴板/短信/通话）` };
   }
 }
 

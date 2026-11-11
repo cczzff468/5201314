@@ -33,7 +33,7 @@ import { listContacts, cachedOwnerName } from './contacts-store';
 import type { ContactRecord } from '@/lib/contacts';
 import { notifyIfHidden } from './local-notify';
 import { setAutonomyMaster, setAutonomyCap } from './shizuku-autonomy';
-import { webAppOfPkg, webPkgOfApp, setWebFrozen } from './web-app-lock';
+import { webAppOfPkg, webPkgOfApp, setWebFrozen, getWebFrozen } from './web-app-lock';
 
 // 注意：memory.ts 反向依赖 chat-stream-store（abortStreamsByPrefix），而 chat-stream-store →
 // jealousy-lock（noteJealousyEngagement）——静态导入 memory 会成环，故全部动态导入（调用点均为异步上下文）。
@@ -125,6 +125,33 @@ export function getJealousyConfig(): JealousyConfig {
 function clampNum(v: unknown, min: number, max: number, dft: number): number {
   const n = typeof v === 'number' && Number.isFinite(v) ? Math.round(v) : dft;
   return Math.max(min, Math.min(max, n));
+}
+
+/**
+ * v1.9.23 AI 工具调用：把一批包名加入吃醋锁「娱乐 App 清单」（AI 经 addJealousyLockApps
+ * 工具自动拉取手机应用列表后增补用）。包名格式校验 + 去重 + 60 上限；返回增补结果供工具回话。
+ */
+export function addJealousyEntertainPkgs(pkgs: string[]): { added: string[]; skipped: string[] } {
+  const cfg = getJealousyConfig();
+  const added: string[] = [];
+  const skipped: string[] = [];
+  for (const p of pkgs) {
+    const pkg = typeof p === 'string' ? p.trim() : '';
+    if (!/^[\w.]+$/.test(pkg) || cfg.entertainPkgs.includes(pkg) || added.includes(pkg)) {
+      skipped.push(pkg);
+      continue;
+    }
+    if (cfg.entertainPkgs.length + added.length >= 60) {
+      skipped.push(pkg);
+      continue;
+    }
+    added.push(pkg);
+  }
+  if (added.length > 0 && typeof window !== 'undefined') {
+    cfg.entertainPkgs = [...cfg.entertainPkgs, ...added];
+    window.localStorage.setItem(CFG_KEY, JSON.stringify(cfg));
+  }
+  return { added, skipped };
 }
 
 export function updateJealousyConfig(patch: Partial<JealousyConfig>): JealousyConfig {
@@ -373,8 +400,13 @@ async function tickInner(): Promise<void> {
     return; // 锁存在期间不做新探测（一次只锁一个）
   }
 
-  // v1.9.21：无锁时清掉可能残留的网页冻结态（IndexedDB 锁已不存在而 localStorage 还冻着 → 分叉自愈）
-  if (!isNativePerception()) setWebFrozen(null);
+  // v1.9.21：无锁时清掉可能残留的网页冻结态（IndexedDB 锁已不存在而 localStorage 还冻着 → 分叉自愈）。
+  // v1.9.23 例外：src='ai'（AI 经工具/标记协议主动冻的，无吃醋锁记录）不清——它有自己的
+  // unlockAt 到期自愈；被这里误清会让「AI 帮我锁应用」几秒后悄悄失效
+  if (!isNativePerception()) {
+    const fz = getWebFrozen();
+    if (fz && fz.src !== 'ai') setWebFrozen(null);
+  }
 
   if (!cfg.enabled) return;
 

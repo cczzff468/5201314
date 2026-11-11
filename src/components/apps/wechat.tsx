@@ -5329,6 +5329,23 @@ export function ChatPage({
   const [ttsSend, setTtsSend] = useState(false);
   /** 全局流式回复状态（请求由 chat-stream-store 发起并接收，退出聊天页/退出 App 不中断） */
   const sessionKey = `wx:${peer.id}`;
+  // v1.9.23 工具轮系统行实时上屏：phone-tools 直接落 kv 后广播 chat-stream-sysline，按会话增量合并
+  useEffect(() => {
+    const h = (e: Event) => {
+      const d = (e as CustomEvent<{ sessionKey: string }>).detail;
+      if (!d || d.sessionKey !== sessionKey) return;
+      const loaded = loadMsgs(peer.id);
+      if (!loaded) return;
+      setMsgs((prev) => {
+        const seen = new Set(prev.map((m) => m.id));
+        const add = loaded.filter((m) => !seen.has(m.id));
+        return add.length ? [...prev, ...add] : prev;
+      });
+    };
+    window.addEventListener('chat-stream-sysline', h);
+    return () => window.removeEventListener('chat-stream-sysline', h);
+  }, [sessionKey, peer.id]);
+
   const stream = useChatStream(sessionKey);
   const streaming = stream?.status === 'streaming';
   // v1.9.12 聊天滚动重做（全端共享 hook，见 hooks/use-chat-autoscroll.tsx 头注释）：

@@ -1179,6 +1179,24 @@ function ChatView({
   });
   // v1.3 Shizuku：AI 使用技能时聊天界面正中的椭圆形胶囊浮层（useOpPill 是稳定引用，异步闭包里安全调用）
   const opPill = useOpPill();
+  // v1.9.23 工具轮系统行实时上屏：phone-tools 直接落 kv 后广播 chat-stream-sysline，
+  // 按会话增量合并进当前消息列表（不清空进行中的流式内容，只补 kv 里多出来的行）
+  useEffect(() => {
+    const h = (e: Event) => {
+      const d = (e as CustomEvent<{ sessionKey: string }>).detail;
+      if (!d || d.sessionKey !== sessionKey) return;
+      const loaded = loadMsgs(storageKey);
+      if (!loaded) return;
+      setMsgs((prev) => {
+        const seen = new Set(prev.map((m) => m.id));
+        const add = loaded.filter((m) => !seen.has(m.id));
+        return add.length ? [...prev, ...add] : prev;
+      });
+    };
+    window.addEventListener('chat-stream-sysline', h);
+    return () => window.removeEventListener('chat-stream-sysline', h);
+  }, [sessionKey, storageKey]);
+
   // 退出聊天页/切换会话（组件按 key 重挂载）：停止语音气泡播放与朗读并释放（防跨会话串音）
   useEffect(
     () => () => {

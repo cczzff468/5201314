@@ -61,6 +61,7 @@ export function webPkgOfApp(appId: AppId): string | null {
 
 const FROZEN_KEY = 'jealousy-web-frozen-v1';
 
+/** v1.9.23 src：冻结来源——'jealousy'=吃醋锁（默认，缺省视为吃醋）；'ai'=AI 工具/标记协议主动冻结（吃醋锁 tick 的「无锁清残留」不清它，自身 unlockAt 到期自愈） */
 export interface WebFrozenRec {
   pkg: string;
   /** 倒计时到点时间戳（与 jealousy-lock 的 lock.unlockAt 同源） */
@@ -114,10 +115,10 @@ export function webFrozenBy(): string | null {
  * 写冻结态（唯一写入方：jealousy-lock 锁定/解锁/自愈同步）。
  * pkg=null 清除。unlockAt/charName 用于宽限自愈与角标展示。
  */
-export function setWebFrozen(pkg: string | null, unlockAt = 0, charName = ''): void {
+export function setWebFrozen(pkg: string | null, unlockAt = 0, charName = '', src: 'jealousy' | 'ai' = 'jealousy'): void {
   if (typeof window === 'undefined') return;
   if (pkg) {
-    const next: WebFrozenRec = { pkg, unlockAt, charName };
+    const next: WebFrozenRec = { pkg, unlockAt, charName, src };
     const prev = readFrozen();
     if (prev && prev.pkg === next.pkg && prev.unlockAt === next.unlockAt && prev.charName === next.charName) return; // 无变化不 bump（tick 每 30s 同步一次）
     frozen = next;

@@ -5,8 +5,33 @@ export const runtime = 'nodejs';
 // ---------------- 类型 ----------------
 
 interface ChatApiMessage {
-  role: 'user' | 'assistant' | 'system';
+  role: 'user' | 'assistant' | 'system' | 'tool';
   content: string;
+  /** v1.9.23 工具轮：assistant 消息携带的 tool_calls（原样透传上游） */
+  tool_calls?: unknown;
+  /** v1.9.23 工具轮：role:"tool" 消息对应的调用 id */
+  tool_call_id?: string;
+  /** v1.9.23 工具轮：assistant 空内容时的兼容标记（content 传空串，不传 null） */
+  name?: string;
+}
+
+/** v1.9.23 工具轮消息（content 可为 null——assistant 携带 tool_calls 时上游允许空内容） */
+interface ToolRoundMessage {
+  role: 'user' | 'assistant' | 'system' | 'tool';
+  content: string | null;
+  tool_calls?: unknown;
+  tool_call_id?: string;
+  name?: string;
+}
+
+/** v1.9.23 客户端传入的工具定义（最小形状；服务端只透传不改写） */
+interface ToolDef {
+  type?: unknown;
+  function?: {
+    name?: unknown;
+    description?: unknown;
+    parameters?: unknown;
+  };
 }
 
 interface UpstreamConfig {
@@ -35,6 +60,50 @@ function isValidMessages(value: unknown): value is ChatApiMessage[] {
     if (rec.role !== 'user' && rec.role !== 'assistant' && rec.role !== 'system') return false;
     return typeof rec.content === 'string';
   });
+}
+
+/** v1.9.23 工具轮消息校验：允许 role:'tool' + tool_call_id；assistant 可带 tool_calls 且 content 可为空串 */
+function isValidToolRoundMessages(value: unknown): value is ToolRoundMessage[] {
+  if (!Array.isArray(value) || value.length === 0) return false;
+  return value.every((item) => {
+    if (typeof item !== 'object' || item === null) return false;
+    const rec = item as { role?: unknown; content?: unknown; tool_call_id?: unknown; tool_calls?: unknown };
+    if (rec.role !== 'user' && rec.role !== 'assistant' && rec.role !== 'system' && rec.role !== 'tool') return false;
+    if (rec.role === 'tool') {
+      return typeof rec.content === 'string' && typeof rec.tool_call_id === 'string';
+    }
+    if (rec.role === 'assistant' && rec.tool_calls !== undefined) {
+      return rec.content === null || typeof rec.content === 'string';
+    }
+    return typeof rec.content === 'string';
+  });
+}
+
+/** v1.9.23 工具定义收窄：只放行 type:function 且函数名/描述/参数形状合法的项（最多 24 个） */
+function sanitizeTools(value: unknown): ToolDef[] {
+  if (!Array.isArray(value)) return [];
+  const out: ToolDef[] = [];
+  for (const item of value) {
+    if (out.length >= 24) break;
+    if (typeof item !== 'object' || item === null) continue;
+    const rec = item as Record<string, unknown>;
+    const fn = rec.function;
+    if (typeof fn !== 'object' || fn === null) continue;
+    const name = (fn as { name?: unknown }).name;
+    if (typeof name !== 'string' || !/^[a-zA-Z][a-zA-Z0-9_]{0,63}$/.test(name)) continue;
+    out.push({
+      type: 'function',
+      function: {
+        name,
+        description: typeof (fn as { description?: unknown }).description === 'string' ? (fn as { description: string }).description : '',
+        parameters:
+          (fn as { parameters?: unknown }).parameters && typeof (fn as { parameters?: unknown }).parameters === 'object'
+            ? (fn as { parameters: Record<string, unknown> }).parameters
+            : { type: 'object', properties: {} },
+      },
+    });
+  }
+  return out;
 }
 
 function extractConfig(value: unknown): UpstreamConfig | null {
@@ -456,6 +525,124 @@ async function proxyToUpstream(config: UpstreamConfig, messages: ChatApiMessage[
   });
 }
 
+// ---------------- v1.9.23 工具轮（Function Calling 非流式转发） ----------------
+
+/**
+ * 工具轮代理：非流式转发（stream:false + tools + tool_choice:auto），上游返回的
+ * choices[0].message（含 tool_calls）以 { message } JSON 原样回给客户端。
+ * - 消息映射：tool_calls / tool_call_id / name 透传上游（content 为 null 时传空串——
+ *   部分兼容端点不接受 null content）；
+ * - 参数兼容：与 proxyToUpstream 同款（max_completion_tokens / 温度按 400 报错换参重试）；
+ * - 上游 400 且报错含 tools 相关字样 → 返回 { error, toolsUnsupported:true }（客户端
+ *   记住该模型不支持，后续轮次直接走原流式，标记协议兜底）。
+ */
+async function proxyToolRound(
+  config: UpstreamConfig,
+  messages: ToolRoundMessage[],
+  tools: ToolDef[],
+): Promise<NextResponse> {
+  const candidates = buildChatCandidates(config.baseUrl);
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    ...(config.apiKey ? { Authorization: `Bearer ${config.apiKey}` } : {}),
+  };
+  const mapped = messages.map((m) => ({
+    role: m.role,
+    content: m.content ?? '',
+    ...(m.tool_calls !== undefined ? { tool_calls: m.tool_calls } : {}),
+    ...(m.tool_call_id ? { tool_call_id: m.tool_call_id } : {}),
+    ...(m.name ? { name: m.name } : {}),
+  }));
+
+  let useMaxCompletion = false;
+  let curTemperature: number | undefined = config.temperature;
+  const makeBody = (withTools: boolean): string =>
+    JSON.stringify({
+      model: config.model,
+      messages: mapped,
+      ...(withTools && tools.length > 0 ? { tools, tool_choice: 'auto' } : {}),
+      ...(curTemperature === undefined ? {} : { temperature: curTemperature }),
+      ...(useMaxCompletion ? { max_completion_tokens: config.maxTokens } : { max_tokens: config.maxTokens }),
+      stream: false,
+    });
+
+  const read400 = async (res: Response): Promise<string> => {
+    try {
+      return (await res.text()).slice(0, 500);
+    } catch {
+      return '';
+    }
+  };
+
+  for (let attempt = 0; attempt < 3; attempt++) {
+    let res: Response | null = null;
+    let endpoint = candidates[0];
+    let lastErr: unknown = null;
+    for (const ep of candidates) {
+      endpoint = ep;
+      try {
+        const r = await fetch(ep, {
+          method: 'POST',
+          headers,
+          body: makeBody(true),
+          signal: AbortSignal.timeout(110_000),
+        });
+        if (r.status === 404 && ep !== candidates[candidates.length - 1]) continue;
+        res = r;
+        break;
+      } catch (err) {
+        lastErr = err;
+      }
+    }
+    if (!res) {
+      const detail = lastErr instanceof Error ? lastErr.message : String(lastErr ?? '');
+      return NextResponse.json(
+        { error: `无法连接到上游接口：${detail}（实际请求端点：${endpoint}）`, directOnly: true },
+        { status: 502 },
+      );
+    }
+    if (res.status === 400) {
+      const msg = await read400(res);
+      if (!useMaxCompletion && /max_completion_tokens|unsupported parameter.{0,40}max_tokens/i.test(msg)) {
+        useMaxCompletion = true;
+        continue;
+      }
+      if (curTemperature !== undefined && /temperature/i.test(msg)) {
+        curTemperature = undefined;
+        continue;
+      }
+      if (/tool|function.?call/i.test(msg)) {
+        // 上游不支持 tools 参数：告知客户端降级（本轮起 30 分钟内不再尝试）
+        return NextResponse.json(
+          { error: `该接口不支持工具调用（tools）：${msg.slice(0, 160)}`, toolsUnsupported: true },
+          { status: 400 },
+        );
+      }
+      return NextResponse.json({ error: `上游拒绝请求（400）：${msg.slice(0, 200)}` }, { status: 400 });
+    }
+    if (!res.ok) {
+      const msg = await read400(res);
+      // 内网地址代理必然失败的场景由上游主路径处理；这里统一回传错误详情
+      return NextResponse.json({ error: `上游返回 ${res.status}：${msg.slice(0, 200)}` }, { status: res.status });
+    }
+    // 成功：解析上游 JSON，抽出 choices[0].message 回传
+    try {
+      const data: unknown = await res.json();
+      const message =
+        data && typeof data === 'object'
+          ? ((data as { choices?: Array<{ message?: unknown }> }).choices?.[0]?.message ?? null)
+          : null;
+      if (!message) {
+        return NextResponse.json({ error: '上游返回里没有 choices[0].message' }, { status: 502 });
+      }
+      return NextResponse.json({ message, endpoint });
+    } catch {
+      return NextResponse.json({ error: '上游返回不是合法 JSON' }, { status: 502 });
+    }
+  }
+  return NextResponse.json({ error: '工具轮参数兼容重试用尽' }, { status: 502 });
+}
+
 // ---------------- 配置引导错误（v82：内置模型已移除，未配置时统一提示） ----------------
 
 const NOT_CONFIGURED_MSG =
@@ -502,6 +689,30 @@ export async function POST(req: NextRequest) {
   if (!config) {
     // v82：未配置直接返回引导（不再内置模型免配置聊天）
     return notConfiguredResponse();
+  }
+
+  // v1.9.23 Function Calling 工具轮：非流式转发（tools + tool_calls 透传）。
+  // 校验失败回 400（客户端按普通失败回退流式，不打断聊天）。
+  if (root.toolMode === true) {
+    if (!isValidToolRoundMessages(root.messages)) {
+      return NextResponse.json(
+        { error: 'toolMode 下 messages 不合法（role:"tool" 需要 tool_call_id；assistant.tool_calls 消息 content 可为空）' },
+        { status: 400 },
+      );
+    }
+    const tools = sanitizeTools(root.tools);
+    if (tools.length === 0) {
+      return NextResponse.json({ error: 'tools 不能为空或全部不合法' }, { status: 400 });
+    }
+    // 上下文裁剪（与流式同款）+ 工具轮特例：截断后不得以孤儿 role:"tool" 开头——
+    // 逐个丢弃开头失去配对的 tool 消息，直到首条不再是 tool（上游 400 会拒绝孤儿）
+    const toolAll = root.messages as ToolRoundMessage[];
+    let toolMsgs: ToolRoundMessage[] =
+      toolAll.length > 60 && toolAll[0]?.role === 'system'
+        ? toolAll.slice(0, 1).concat(toolAll.slice(-59))
+        : toolAll.slice(-60);
+    while (toolMsgs.length > 0 && toolMsgs[0].role === 'tool') toolMsgs = toolMsgs.slice(1);
+    return proxyToolRound(config, toolMsgs, tools);
   }
   // 内网地址：云端服务器必然不可达，返回 directOnly 标记让客户端改用浏览器直连
   try {

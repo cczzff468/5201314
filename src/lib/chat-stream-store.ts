@@ -806,7 +806,33 @@ async function runStream(rt: StreamRuntime, opts: BeginChatStreamOptions): Promi
         error: '还没有配置 AI 接口：请到「设置 › API 配置」填写 API 地址与 Key 后重试',
       });
     } else {
-      await streamOnce(workMessages);
+      // v1.9.23 Function Calling 工具轮：私聊（群聊多成员流不接）+ FC 就绪时先走
+      // 非流式工具循环——模型返回 tool_calls 则真实执行（Shizuku/网页内应用镜像）并把
+      // role:"tool" 结果回传继续，直到给出最终文字；最终文本本地伪流式投喂 onDelta
+      // （思考剥离/分段/逐条投递节奏管线全部复用）。通道不可用/上游不支持 tools →
+      // 无缝回退原流式（标记协议兜底仍在人设里）；调过工具则剥离最终文本里的
+      // [手机操作:…] 标记防双执行。
+      let fcDone = false;
+      if (!opts.sessionKey.includes(':group:') && opts.sessionKey !== 'sms:assistant') {
+        try {
+          const { phoneFcReady, runPhoneToolRound } = await import('@/lib/ios/phone-tools');
+          if (phoneFcReady()) {
+            const fc = await runPhoneToolRound(workMessages, effConfig, opts.sessionKey, () => rt.aborted);
+            if (fc) {
+              fcDone = true;
+              let text = typeof fc.text === 'string' ? fc.text : '';
+              if (fc.usedTools) text = text.replace(/\[手机操作:[^\][]*\]/g, '');
+              if (text.trim()) onDelta(text);
+              else if (fc.usedTools) onDelta('（TA 没说话，只是安静地摆弄了一会儿你的手机）');
+            }
+          }
+        } catch {
+          /* 工具轮异常（网络/上游错）：回退原流式，不打断聊天 */
+        }
+      }
+      if (!fcDone) {
+        await streamOnce(workMessages);
+      }
       patchState(rt, { status: 'done' });
     }
   } catch (err) {

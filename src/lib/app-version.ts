@@ -11,9 +11,9 @@
  */
 
 /** 当前最新版本（与 android-shell versionName 保持一致） */
-export const APP_VERSION = '1.9.22';
+export const APP_VERSION = '1.9.23';
 /** 版本号数字（与 android-shell versionCode 保持一致；覆盖安装要求只增不减） */
-export const APP_VERSION_CODE = 42;
+export const APP_VERSION_CODE = 43;
 
 export interface AppReleaseNote {
   version: string;
@@ -24,6 +24,18 @@ export interface AppReleaseNote {
 
 /** 版本历史（新→旧；设置 › APP 更新 页渲染，最新一条即当前版本） */
 export const APP_RELEASE_NOTES: AppReleaseNote[] = [
+  {
+    version: '1.9.23',
+    date: '2026-11-11',
+    items: [
+      'AI 动手底层重构为真 Function Calling：每次请求大模型时按「AI 动手」页面开启的权限动态生成工具清单（OpenAI tools 参数 JSON Schema 强行注入）——开了「打开应用」就带 openApp(包名)、开了「点按屏幕」就带 findAndClick(文字)/tapScreen(x,y)、开了「查应用列表」就带 getInstalledApps()……共 20 个工具按开关逐项注入，改动下一轮立即生效',
+      'System Prompt 强制注入「逼迫动手」指令（权限开启时才注入，关闭零 token）：「机主下达操作指令时你绝对不能只回复文字，必须立刻输出工具调用，只说不做是违规，系统将惩罚你」+ 免看屏幕清单（冻结/解冻/打开/强杀/查列表/电量等直接执行，不需要先看屏幕）+ 工具优先于文字标记的通道规则',
+      '多步任务 Agentic 闭环：AI 返回 tool_calls → 前端解析执行（复用既有 Shizuku 三道闸 + 网页内应用镜像）→ 执行结果作为 role:"tool" 消息回传大模型继续走（最多 6 轮链式执行）→ 全部做完后自然语言汇报；执行过程「正在操作手机（X）…」与「手机操作成功/失败」系统行照常实时上屏并回喂下一轮',
+      '锁应用不再依赖看屏幕：冻结/解冻直接执行，绝不再先截屏；新增 [手机操作:读屏幕] 与 readScreenText 工具（uiautomator 文字控件树版读屏，不需要识图模型——没配识图也能看界面）；网页端 AI 也能真锁了（freezeApp/unfreezeApp 走网页内应用冻结，30 分钟自动解冻，吃醋锁系统不会误清）',
+      '新工具：getInstalledApps（AI 自己拉取手机应用列表）+ addJealousyLockApps（AI 自动把应用加进吃醋锁定清单）——「把这几个App设为吃醋锁定」一句话搞定',
+      '兼容与降级：上游接口不支持 tools 参数自动记住并降级回原流式（[手机操作:…] 文字标记协议保留为兜底）；调用了工具的回复自动剥离文字标记防双执行；群聊保持原协议不接工具轮',
+    ],
+  },
   {
     version: '1.9.22',
     date: '2026-11-11',
