@@ -2668,3 +2668,24 @@ Stage Summary:
 - v1.9.19「AI 真实吃醋并锁应用」经逐条审计四大需求全部落地，本环境三解锁通道+触发+弹窗+剧情消息+记忆全链路 E2E 复验通过
 - v1.9.20 修复：活跃锁倒计时解锁前移到 enabled/native 闸门之前——锁定期关总开关/网页模拟锁不再把用户永久锁死
 - 关键文件：src/lib/ios/jealousy-lock.ts、src/lib/app-version.ts
+
+---
+Task ID: 29
+Agent: 主控 Agent（Z.ai Code）
+Task: 用户需求「如果 Shizuku 没有打开那就是锁定网页里面的 APP」——吃醋锁网页降级真锁（v1.9.21）
+
+Work Log:
+- [背景] v1.9.19/1.9.20 吃醋锁在原生环境经 Shizuku pm suspend 真锁应用，但网页端（Shizuku 未连接）只走「模拟剧情」不执行任何冻结——用户要求降级为真的锁住虚拟手机里的 App
+- [设计] 新建 src/lib/ios/web-app-lock.ts（零运行时依赖小模块，仅 type import AppId——store.ts 不能静态依赖 jealousy-lock（经 shizuku-autonomy→agent-app-nav 成环），而 openApp 拦截必须落在 store）：①WEB_LOCK_APPS 可锁清单（音乐→com.netease.cloudmusic/浏览器→com.android.browser/淘宝→com.taobao.taobao/美团→com.sankuai.meituan/照片→com.android.gallery3d/X论坛→com.x.forum，与 ENTERTAIN_PRESETS/PKG_DISPLAY 同一包名命名空间，决策/记忆/文案全复用；微信/QQ/信息/电话/通讯录/设置/相机沿永不锁清单，情侣空间/拾光小屋是我们俩的家不收）②冻结态 localStorage `jealousy-web-frozen-v1`（pkg/unlockAt/charName）+ unlockAt+5min 宽限自愈（两份存储分叉绝不永久锁死）③blockWebAppOpen（openApp/switchToApp 拦截+请求弹全屏提示）④requestWebLockOverlay 复弹请求 + useSyncExternalStore 订阅
+- [改造] jealousy-lock.ts 网页模式全链路降级：tickInner 闸门从「!enabled || !native 早退」改为「网页模式照常探测」（前台=useUI.activeApp 映射包名，主屏/不可锁 App=null 走 fg 清空）；isEntertainPkg 网页模式=可锁网页 App 全算娱乐（网页手机娱乐面窄，逛淘宝点外卖不理 AI 同为吃醋叙事，最终锁不锁仍由 AI 按人设决策）；canLock 网页模式要求包名有网页对应体；锁定执行 setWebFrozen+被锁 App 在前台则 closeApp 踢回主屏+锁音乐时 toggle() 停歌；锁记录新增 web 字段；tick 活跃锁期间重申冻结态/无锁清残留（分叉自愈，无变化不广播）；unlockJealousy/onJealousyUnfreeze 三通道全部同步 setWebFrozen(null)；决策 LLM 提示词与 buildJealousyLockBlock 聊天注入按 web 分支改写（不提 pm suspend/Shell，改「手机里的应用被冻结」与实际体验对齐）；PKG_DISPLAY 补浏览器/照片/X论坛
+- [拦截] store.ts openApp/switchToApp 开头 blockWebAppOpen（拦截冻结 App 打开并请求弹全屏提示——多任务卡片/跨 App 跳转/一起听邀请/通知直达全部经此总线覆盖）
+- [视觉] HomeScreen：appIconNode 冻结态 grayscale+opacity-50+右下粉色小锁角标（网格/Dock/Spotlight/文件夹面板同源复用），图标名换「由 XX 管理」（真机 pm suspend 后 Launcher 同款），aria-label 换「XX·被锁住了」；AppSwitcher：冻结卡片盖深色遮罩+粉锁+「由 XX 锁住了/哄好 TA 或等倒计时结束才能打开」；JealousyLockOverlay：显隐判定加「复弹请求」通道（点冻结图标 500ms 内复弹，webVer 进 effect 依赖即时响应），挂起说明行按 lock.web 分支「应用已被冻结 · 图标变灰 · 由 XX 管理」，去哄哄/强制解锁消费复弹请求
+- [设置页] jealousy-lock-settings.tsx：网页模式新增锁定对象卡片（6 个带锁 chips+说明），顶部描述与底部免责按 native/web 分支（「TA 会真的锁住这台虚拟手机里的 App……哄好/倒计时/强制解锁三通道照常」）
+- [版本] app-version.ts bump 1.9.21（versionCode 41）+ 4 条更新说明
+- [E2E] agent-browser 390×844 全链路验证（mock /api/chat 决策 JSON；注：聊天发送在 API 未配置时客户端短路不走网络，需先在设置›API 配置填假 Key 才能 mock 哄好回复）：种子林小满→真发消息建立 lastChat→trigger('entertain','com.netease.cloudmusic')→锁创建（web:true+冻结态落盘）→全屏弹窗 VLM 确认（林小满锁住网易云音乐+人设原因+倒计时+双按钮+网页文案「由 林小满 管理」）→剧情消息 3 条进聊天+系统通知「林小满把网易云音乐锁住了」→主屏音乐图标灰+粉锁+「由林小满管理」（VLM 确认，微信/QQ 正常）→点冻结图标：App 不开+弹窗复弹（初版依赖 4s 兜底轮询，补 webVer 依赖修复后 500ms 内即时复弹；期间两次误判为不生效实为 activeApp 早退防御——App 开着时主屏 tile 点击被既有 openApp 前置闸门拦截，属正确行为，需先返回主屏幕）→前台锁音乐：当场踢回主屏→多任务卡片冻结遮罩（VLM 确认）→强制解锁：立即解封+图标恢复+音乐 App 可正常打开→哄好链路：假 API 配置+mock 原谅回复含 [手机操作:解冻:com.netease.cloudmusic]→聊天 sys 行「林小满正在操作手机（解冻）…」「手机操作成功：已解冻（网页预览模拟解锁）」→lock 清除+lastUnlock(coaxed)+web 冻结同步清+图标恢复；设置页 web-targets 卡片渲染 ✓；tsc 仅 ai-delivery.ts 既有基线；eslint 7 个改动/新增文件零问题（HomeScreen 5 个 error 为 stash 对比确认的既有基线）；dev.log 无错误；浏览器无 React/hydron 错误
+- [自愈双保险] 锁记录（IndexedDB）与冻结态（localStorage）每 30s tick 对齐+宽限过期失效，任一存储被清都不会把用户 App 永久锁死
+
+Stage Summary:
+- v1.9.21「Shizuku 未连接 → 锁网页里的 App」完整落地：网页降级下吃醋锁不再只是剧情——真的锁住虚拟手机里的 6 个可锁 App（图标变灰+小锁角标+名字变「由 XX 管理」+点开只弹 TA 的留言全屏提示+多任务卡片冻结遮罩），三解锁通道（哄好/倒计时/强制）全部真实生效、解锁即恢复
+- 前台探测/触发判定/LLM 决策/提示词/记忆文案在网页模式全链路适配（不提 pm suspend，与实际体验对齐）；真机 + Shizuku 行为不变
+- 关键文件：src/lib/ios/web-app-lock.ts（新增）、src/lib/ios/jealousy-lock.ts、src/lib/ios/store.ts、src/components/ios/HomeScreen.tsx、src/components/ios/AppSwitcher.tsx、src/components/ios/JealousyLockOverlay.tsx、src/components/apps/jealousy-lock-settings.tsx、src/lib/app-version.ts

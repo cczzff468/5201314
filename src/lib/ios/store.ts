@@ -37,6 +37,8 @@ import { encryptSecret, decryptSecret, isEncrypted } from './secret-box';
 import { clearAllChatCooldowns } from '../chat-errors';
 import { useGlobalCall } from './global-call';
 import { useIncomingCall } from './incoming-call';
+// v1.9.21 吃醋锁网页降级：openApp/switchToApp 拦截被冻结的网页 App（web-app-lock 零运行时依赖，无循环引用）
+import { blockWebAppOpen } from './web-app-lock';
 import type { AddressMode } from '../contacts';
 
 // ---------------- 密文落库边界（B1：API Key AES-GCM 加密存储） ----------------
@@ -1665,6 +1667,8 @@ export const useUI = create<UIState>((set, get) => ({
   openApp: (id) => {
     if (get().locked) return; // 锁屏时禁止打开 App（锁屏直达相机走 lockCameraOpen）
     if (get().activeApp || get().phase !== 'closed') return;
+    // v1.9.21 吃醋锁网页降级：被 TA 冻结的 App 拦截打开，并弹全屏锁定提示（与真机 pm suspend 后点灰图标同体验）
+    if (blockWebAppOpen(id)) return;
     set({
       activeApp: id,
       phase: 'opening',
@@ -1711,6 +1715,7 @@ export const useUI = create<UIState>((set, get) => ({
   },
   switchToApp: (id) => {
     if (get().locked) return;
+    if (blockWebAppOpen(id)) return; // v1.9.21：多任务切换/跨 App 跳转同样拦截冻结 App
     set({
       activeApp: id,
       phase: 'open',

@@ -11,9 +11,9 @@
  */
 
 /** 当前最新版本（与 android-shell versionName 保持一致） */
-export const APP_VERSION = '1.9.20';
+export const APP_VERSION = '1.9.21';
 /** 版本号数字（与 android-shell versionCode 保持一致；覆盖安装要求只增不减） */
-export const APP_VERSION_CODE = 40;
+export const APP_VERSION_CODE = 41;
 
 export interface AppReleaseNote {
   version: string;
@@ -24,6 +24,16 @@ export interface AppReleaseNote {
 
 /** 版本历史（新→旧；设置 › APP 更新 页渲染，最新一条即当前版本） */
 export const APP_RELEASE_NOTES: AppReleaseNote[] = [
+  {
+    version: '1.9.21',
+    date: '2026-11-11',
+    items: [
+      '吃醋锁网页降级真锁：Shizuku 没打开（网页预览/浏览器）时，TA 吃醋锁的不只是剧情——会真的锁住这台虚拟手机里的 App（音乐/浏览器/淘宝/美团/照片/X论坛）：图标变灰、名字变「由 XX 管理」、点开只弹 TA 的留言全屏提示，多任务卡片同步盖「已冻结」遮罩',
+      '网页降级下三类触发照常工作（前台探测改读虚拟手机当前打开的 App）：连续刷可锁 App 超时且没回 TA 消息 / 说去看剧后消失坐实 / 焦虑值达危险阈值，都交给 TA 按人设决定锁不锁；锁音乐还会当场停掉正在响的歌、把人踢回主屏',
+      '哄好/倒计时/强制解锁三条通道在网页锁下全部真实生效：解锁后图标立刻恢复、App 重新能打开；冻结态跨刷新持久化并带 5 分钟宽限自愈，绝不把 App 永久锁死',
+      '真机 + Shizuku 授权后行为不变（pm suspend 锁真实应用，提示「由 Shell 所管理」）；设置 › 感知设置 › AI 吃醋锁新增网页锁定对象清单展示',
+    ],
+  },
   {
     version: '1.9.20',
     date: '2026-11-11',

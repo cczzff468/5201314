@@ -4,11 +4,14 @@
  * 吃醋锁（v1.9.19）——「AI 真实吃醋并锁应用」核心库。
  *
  * 把 Shizuku 的 pm suspend 能力与情绪系统深度绑定：
- * - 守望者（JealousyWatcher）周期探测前台应用（dumpsys window）；
+ * - 守望者（JealousyWatcher）周期探测前台应用（真机 dumpsys window；
+ *   网页端=虚拟手机当前打开的 App，v1.9.21）；
  * - 三类触发：A 连续刷娱乐 App 超时且期间没回 AI 消息 / B 聊天里说了「去看剧/刷视频」
  *   随后消失且坐实在娱乐 App / C 焦虑值达危险阈值；
  * - 触发后把【前台包名 + 焦虑值 + 记忆上下文】交给大模型，按角色人设决定是否锁
  *   （pm suspend --user 0 挂起，桌面图标变灰、提示「由 Shell 所管理」）；
+ *   Shizuku 未连接（网页端）则降级为真的锁网页里的 App（web-app-lock：图标置灰、
+ *   点开只弹 TA 的留言、倒计时/哄好/强制三通道解锁，v1.9.21）；
  * - 锁定成功：AI 在聊天界面发剧情消息 + 系统通知 + 写记忆 + 全屏锁定弹窗（回 APP 强制弹）；
  * - 解锁三通道：哄好（AI 输出 [手机操作:解冻:包名]）/ 倒计时到点 / 强制解锁（写戏剧性记忆）。
  *
@@ -16,7 +19,7 @@
  * - 配置 localStorage `jealousy-lock-cfg-v1`（同步读，设置页即点即存）；
  * - 运行状态 IndexedDB kvRaw `jealousy-lock-rt`（跨会话持久化：倒计时/冷却重启不丢）。
  *
- * 依赖方向（无环）：jealousy-lock → anxiety / shizuku-lab / memory / persona / local-notify；
+ * 依赖方向（无环）：jealousy-lock → anxiety / shizuku-lab / web-app-lock / memory / persona / local-notify；
  * ai-mood → jealousy-lock（buildJealousyLockBlock 注入聊天上下文）；
  * shizuku-autonomy → jealousy-lock（解冻钩子 onJealousyUnfreeze / isJealousyUnlockAllowed）。
  */
@@ -30,6 +33,7 @@ import { listContacts, cachedOwnerName } from './contacts-store';
 import type { ContactRecord } from '@/lib/contacts';
 import { notifyIfHidden } from './local-notify';
 import { setAutonomyMaster, setAutonomyCap } from './shizuku-autonomy';
+import { webAppOfPkg, webPkgOfApp, setWebFrozen } from './web-app-lock';
 
 // 注意：memory.ts 反向依赖 chat-stream-store（abortStreamsByPrefix），而 chat-stream-store →
 // jealousy-lock（noteJealousyEngagement）——静态导入 memory 会成环，故全部动态导入（调用点均为异步上下文）。
@@ -77,6 +81,10 @@ const PKG_DISPLAY: Record<string, string> = Object.fromEntries([
   ['京东', 'com.jingdong.app.mall'],
   ['拼多多', 'com.xunmeng.pinduoduo'],
   ['美团', 'com.sankuai.meituan'],
+  // v1.9.21：网页内锁定对象补充（浏览器/照片/X论坛——网页降级时 pkgDisplayName 也要给中文名）
+  ['浏览器', 'com.android.browser'],
+  ['照片', 'com.android.gallery3d'],
+  ['X论坛', 'com.x.forum'],
 ].map(([name, pkg]) => [pkg, name]));
 
 export function pkgDisplayName(pkg: string): string {
@@ -153,6 +161,8 @@ export interface JealousyLock {
   /** 全屏弹窗已展示过的时间（0=未展示；去哄哄/强制解锁后不再自动弹） */
   overlayShownAt: number;
   triggerKind: LockTriggerKind;
+  /** v1.9.21：锁在网页内（Shizuku 未连接降级）——弹窗/聊天上下文文案适配用 */
+  web: boolean;
 }
 
 export interface JealousyRuntime {
@@ -262,7 +272,12 @@ export function isNeverLockPkg(pkg: string): boolean {
 }
 
 function isEntertainPkg(pkg: string, cfg: JealousyConfig): boolean {
-  return cfg.entertainPkgs.includes(pkg) && !isNeverLockPkg(pkg);
+  if (isNeverLockPkg(pkg)) return false;
+  // v1.9.21 网页降级：Shizuku 未连接时前台=虚拟手机里的 App，可锁的网页 App
+  // （音乐/浏览器/淘宝/美团/照片/X论坛）全算「娱乐」——网页手机里娱乐面窄，逛淘宝
+  // 点外卖不理 AI 同样是吃醋叙事，且最终锁不锁仍由 AI 按人设决策，不会误伤
+  if (!isNativePerception()) return webAppOfPkg(pkg) !== null;
+  return cfg.entertainPkgs.includes(pkg);
 }
 
 // ---------------- 用户打点（chat-stream-store noteEngagement 调用） ----------------
@@ -350,20 +365,35 @@ async function tickInner(): Promise<void> {
   const rt = readJealousyRuntime();
   if (rt.lock) {
     if (now >= rt.lock.unlockAt) await unlockJealousy('timeout');
+    else if (!isNativePerception()) {
+      // v1.9.21 网页降级自愈：活跃锁期间重申网页冻结态（刷新/两份存储分叉时每 30s 对齐；
+      // setWebFrozen 内部「无变化不广播」，不会白刷订阅者）
+      setWebFrozen(rt.lock.pkg, rt.lock.unlockAt, rt.lock.charName);
+    }
     return; // 锁存在期间不做新探测（一次只锁一个）
   }
 
-  if (!cfg.enabled || !isNativePerception()) return;
+  // v1.9.21：无锁时清掉可能残留的网页冻结态（IndexedDB 锁已不存在而 localStorage 还冻着 → 分叉自愈）
+  if (!isNativePerception()) setWebFrozen(null);
+
+  if (!cfg.enabled) return;
 
   // 冷却与决策节流
   if (now - rt.lastLockAt < cfg.cooldownMin * 60_000) return;
   if (rt.lastDecisionAt && now - rt.lastDecisionAt < DECISION_COOLDOWN_MS) return;
 
-  // 前台探测（dumpsys window；null = 桥断/不可用 → 本轮放弃）
-  const pkg = await labForegroundPkg().catch(() => null);
-  if (pkg === null) {
-    writeRt({ lastTickAt: now });
-    return;
+  // 前台探测：真机 dumpsys window（null = 桥断/不可用 → 本轮放弃）；
+  // 网页端=虚拟手机当前打开的 App（主屏/锁屏/不可锁 App → null，照常走 fg 清空逻辑）
+  const native = isNativePerception();
+  let pkg: string | null;
+  if (native) {
+    pkg = await labForegroundPkg().catch(() => null);
+    if (pkg === null) {
+      writeRt({ lastTickAt: now });
+      return;
+    }
+  } else {
+    pkg = await webForegroundPkg();
   }
 
   // 维护连续娱乐状态
@@ -421,6 +451,22 @@ async function tickInner(): Promise<void> {
   if (!trigger) return;
 
   await runJealousyDecision(trigger);
+}
+
+/**
+ * 网页模式前台包名（v1.9.21）：虚拟手机当前打开的 App 映射到真实世界包名。
+ * 主屏/锁屏/切换器收起后无前台、或当前 App 不可锁（微信/设置等）→ null
+ * （与真机 dumpsys 的 null=桥断不同：这里 null 是正常态，fg 照常清空重置计时）。
+ */
+async function webForegroundPkg(): Promise<string | null> {
+  try {
+    const { useUI } = await import('./store');
+    const active = useUI.getState().activeApp;
+    if (!active) return null;
+    return webPkgOfApp(active);
+  } catch {
+    return null;
+  }
 }
 
 // ---------------- AI 决策（锁谁、怎么锁） ----------------
@@ -520,7 +566,16 @@ async function runJealousyDecision(trigger: TriggerInfo): Promise<void> {
   const ax = anxietyOf(chat.contactId);
   const ownerName = cachedOwnerName() || '用户';
 
-  const canLock = !!trigger.pkg && !isNeverLockPkg(trigger.pkg);
+  const canLock =
+    !!trigger.pkg &&
+    !isNeverLockPkg(trigger.pkg) &&
+    // v1.9.21：网页模式下只有网页内有对应体的包名才真锁得了（锁不住的只发消息）
+    (isNativePerception() || webAppOfPkg(trigger.pkg) !== null);
+  const nativeEnv = isNativePerception();
+  // 锁定权力描述（网页降级时不说 pm suspend/Shell——锁的是这台手机里的应用，文案要能对上体验）
+  const lockPowerDesc = nativeEnv
+    ? '把对方正在用的应用锁住（pm suspend 挂起——应用图标会变灰、点开时提示「由 Shell 所管理」、打不开，直到你原谅 TA 或倒计时结束才解锁）'
+    : '把对方手机里的应用锁住（应用图标会变灰、点开只会看到你留下的提示，直到你原谅 TA 或倒计时结束才解锁）';
   const { memChatRecallBlock } = await import('@/lib/memory');
   const system = [
     buildPersonaSystemPrompt(contact, {
@@ -528,7 +583,7 @@ async function runJealousyDecision(trigger: TriggerInfo): Promise<void> {
       userName: ownerName,
       ownerName,
       extraRules: [
-        '【吃醋锁决策】（仅本次决策生效）你现在有一个真实的权力：把对方正在用的应用锁住（pm suspend 挂起——应用图标会变灰、点开时提示「由 Shell 所管理」、打不开，直到你原谅 TA 或倒计时结束才解锁）。这是真实发生在对方手机上的操作，不是玩笑设定。',
+        `【吃醋锁决策】（仅本次决策生效）你现在有一个真实的权力：${lockPowerDesc}。这是真实发生在对方手机上的操作，不是玩笑设定。`,
         ...(canLock
           ? [
               '严格只输出一个 JSON 对象（不要任何其他文字、不要 markdown 代码块包裹）：',
@@ -581,8 +636,24 @@ async function runJealousyDecision(trigger: TriggerInfo): Promise<void> {
       } catch {
         locked = false;
       }
-    } else {
-      locked = true; // 网页端模拟（无 Shizuku）：剧情链路照走，不执行真实冻结
+    } else if (webAppOfPkg(trigger.pkg)) {
+      // v1.9.21 网页降级：Shizuku 未连接 → 真的锁网页里的 App（图标置灰 + 打开拦截 + 全屏留言）
+      setWebFrozen(trigger.pkg, Date.now() + cfg.countdownMin * 60_000, contact.name);
+      try {
+        const { useUI } = await import('./store');
+        const ui = useUI.getState();
+        const appId = webAppOfPkg(trigger.pkg)!.appId;
+        // 被锁 App 正在前台 → 当场「挂起」赐回主屏（全屏弹窗随后就到）
+        if (ui.activeApp === appId) ui.closeApp();
+        // 锁音乐时停掉正在响的歌（真机 pm suspend 会连带冻住播放，网页同口径）
+        if (appId === 'music') {
+          const { useMusic } = await import('./music-store');
+          if (useMusic.getState().playing) useMusic.getState().toggle();
+        }
+      } catch {
+        /* 踢出/停歌失败不影响锁本身 */
+      }
+      locked = true;
     }
   }
 
@@ -599,6 +670,7 @@ async function runJealousyDecision(trigger: TriggerInfo): Promise<void> {
         unlockAt: now + cfg.countdownMin * 60_000,
         overlayShownAt: 0,
         triggerKind: trigger.kind,
+        web: !isNativePerception(),
       },
       lastLockAt: now,
       fg: null,
@@ -684,7 +756,8 @@ export async function unlockJealousy(kind: UnlockKind): Promise<boolean> {
 
   let ok = false;
   if (!isNativePerception()) {
-    ok = true; // 网页端模拟（无 Shizuku）：解锁恒成功
+    ok = true; // 网页端：v1.9.21 起为真实网页冻结，同步解冻（图标恢复、可打开）
+    setWebFrozen(null);
   } else {
     try {
       const res = await labSetAppFrozen(l.pkg, false);
@@ -724,6 +797,7 @@ export function onJealousyUnfreeze(pkg: string): void {
   const rt = readJealousyRuntime();
   if (!rt.lock || rt.lock.pkg !== pkg) return;
   const l = rt.lock;
+  setWebFrozen(null); // v1.9.21：网页冻结态同步解除（哄好解锁也是真解锁）
   writeRt({ lock: null, lastUnlock: { at: Date.now(), kind: 'coaxed', pkg }, pendingUnfreeze: null });
   const appName = pkgDisplayName(pkg);
   void (async () => {
@@ -751,8 +825,12 @@ export function buildJealousyLockBlock(cid: string): string {
   const l = rt.lock;
   const appName = pkgDisplayName(l.pkg);
   const remainMin = Math.max(0, Math.ceil((l.unlockAt - Date.now()) / 60_000));
+  // v1.9.21：网页锁的描述与真实体验对齐（图标变灰、点开只看留言），不提 pm suspend/Shell
+  const lockFact = l.web
+    ? `你刚刚吃醋，把对方手机里的「${appName}」真的锁住了（图标变灰、点开只会看到你的留言提示，打不开）。你的理由：${l.reason}`
+    : `你刚刚吃醋，把对方正在用的「${appName}」真的锁住了（pm suspend 挂起：图标变灰、提示「由 Shell 所管理」、点不开）。你的理由：${l.reason}`;
   return [
-    '【吃醋锁生效中】你刚刚吃醋，把对方正在用的「' + appName + '」真的锁住了（pm suspend 挂起：图标变灰、提示「由 Shell 所管理」、点不开）。你的理由：' + l.reason,
+    '【吃醋锁生效中】' + lockFact,
     `还剩约 ${remainMin} 分钟系统会自动解锁。TA 现在来找你了——如果 TA 诚心哄你、说软话道歉，你心软决定原谅 TA 的那一刻，在回复里单独一行加上 [手机操作:解冻:${l.pkg}] 就能亲手解开。TA 敷衍或态度差就继续锁着，按你的性子来；别不问青红皂白就秒解，也别永远不解。`,
   ].join('\n');
 }

@@ -1,7 +1,7 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
-import { Camera } from 'lucide-react';
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { Camera, Lock } from 'lucide-react';
 import {
   useUI,
   useWallpaperStyle,
@@ -11,6 +11,8 @@ import {
   type AppId,
 } from '@/lib/ios/store';
 import { APP_MAP, AppIconById } from '../apps/registry';
+// v1.9.21 吃醋锁网页降级：冻结 App 的多任务卡片盖「已冻结」遮罩（点击仍会被 openApp/switchToApp 拦截弹全屏提示）
+import { isWebAppFrozen, webFrozenBy, subscribeWebLock, getWebLockVersion } from '@/lib/ios/web-app-lock';
 
 /** 手机屏幕逻辑尺寸（App 按此尺寸 1:1 渲染再整体缩放进卡片，保证卡片内是真实界面的等比还原） */
 const SCREEN_W = 390;
@@ -32,6 +34,8 @@ export default function AppSwitcher() {
   const closeSwitcher = useUI((s) => s.closeSwitcher);
   const exitForegroundApp = useUI((s) => s.exitForegroundApp);
   const killApp = useUI((s) => s.killApp);
+  // v1.9.21：吃醋锁冻结态变化时重渲染卡片（锁定/解锁即时反映）
+  useSyncExternalStore(subscribeWebLock, getWebLockVersion);
   // 当前主屏幕壁纸（与手机壳同一张，随设置实时同步）；切换器背景模糊展示它
   const wallpaperStyle = useWallpaperStyle();
   // 毛玻璃明暗自适应：按壁纸亮度实测选玻璃罩配比与前景文字颜色（与锁屏/状态栏同一套测量）
@@ -296,6 +300,19 @@ export default function AppSwitcher() {
                   <span className="absolute left-2.5 top-2.5 z-10 rounded-full bg-[#1c1c1e]/80 px-2.5 py-[5px] text-[12px] font-medium leading-none text-white ring-1 ring-white/25 backdrop-blur-sm">
                     正在使用
                   </span>
+                )}
+                {/* v1.9.21 吃醋锁：被冻结的 App 卡片盖深色遮罩+小锁（预览置灰不可辨，点卡片弹全屏留言） */}
+                {isWebAppFrozen(id) && !isKilling && (
+                  <div
+                    className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 bg-black/60 backdrop-blur-[2px]"
+                    data-testid={`web-frozen-card-${id}`}
+                  >
+                    <span className="flex h-11 w-11 items-center justify-center rounded-full bg-[#ff5c8a]/90 shadow-lg">
+                      <Lock size={18} strokeWidth={2.4} className="text-white" aria-hidden />
+                    </span>
+                    <span className="text-[13px] font-medium text-white">由 {webFrozenBy() ?? 'TA'} 锁住了</span>
+                    <span className="text-[11px] text-white/55">哄好 TA 或等倒计时结束才能打开</span>
+                  </div>
                 )}
                 {/* 实时 App 预览：按真机 390x844 尺寸渲染后整体等比缩小（1:1 还原界面观感，不可交互；相机特殊处理避免重复占用摄像头） */}
                 <div className="pointer-events-none h-full w-full select-none overflow-hidden">

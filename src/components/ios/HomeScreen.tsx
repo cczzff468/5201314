@@ -1,13 +1,15 @@
 'use client';
 
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { kvSet } from '@/lib/ios/idb-kv';
 import dynamic from 'next/dynamic';
-import { Plus, Search, X } from 'lucide-react';
+import { Lock, Plus, Search, X } from 'lucide-react';
 import { useUI, useSettings, useSystemDark, selectResolvedTheme, type AppId } from '@/lib/ios/store';
 import { shellScale } from '@/lib/ios/shell-scale';
 import { useHomeWallpaperLight } from '@/lib/ios/foreground';
 import { localDB } from '@/lib/ios/db';
+// v1.9.21 吃醋锁网页降级：冻结 App 图标置灰 + 小锁角标 + 「由 XX 管理」标签
+import { isWebAppFrozen, webFrozenBy, subscribeWebLock, getWebLockVersion } from '@/lib/ios/web-app-lock';
 import { useUnreadTotal, useBadge, wxUnreads, qqUnreads, chatBadge, phoneBadge } from '@/lib/unread-store';
 import { DOCK_APPS, APPS, APP_MAP, AppIconById, AppMiniIcon, preloadApp } from '../apps/registry';
 import {
@@ -1210,6 +1212,8 @@ function FolderPanel({
 export default function HomeScreen() {
   const openApp = useUI((s) => s.openApp);
   const activeApp = useUI((s) => s.activeApp);
+  // v1.9.21：吃醋锁冻结态变化（锁定/解锁）时重渲染图标（网格/Dock/Spotlight 同源）
+  useSyncExternalStore(subscribeWebLock, getWebLockVersion);
   // v72.4：closing 阶段主屏就开始淡入（App 缩小时身后露出的是完整主屏+图标，
   // 与 iOS 一致）；之前 activeApp 还在 → 主屏 opacity-0，App 缩完只剩壁纸，
   // 即刻图标才突然淡入——叠加 scale 跳变就是「退出闪烁」的观感
@@ -2919,10 +2923,25 @@ export default function HomeScreen() {
    *  （真实/毛玻璃/液态透明，主题页三选一）渲染默认图标 */
   const appIconNode = (id: AppId) => {
     const url = customIcons[id];
-    if (url) {
-      return <img src={url} alt="" draggable={false} className="h-full w-full select-none object-cover" />;
-    }
-    return <AppIconById id={id} />;
+    const icon = url ? (
+      <img src={url} alt="" draggable={false} className="h-full w-full select-none object-cover" />
+    ) : (
+      <AppIconById id={id} />
+    );
+    // v1.9.21 吃醋锁网页降级：被冻结的 App 图标置灰（grayscale+降不透明度，与真机
+    // pm suspend 后 Launcher 图标变灰同观感）+ 右下小锁角标（点开只会弹 TA 的留言）
+    if (!isWebAppFrozen(id)) return icon;
+    return (
+      <span className="relative block h-full w-full" data-testid={`web-frozen-icon-${id}`}>
+        <span className="block h-full w-full grayscale-[0.9] opacity-50">{icon}</span>
+        <span
+          aria-hidden
+          className="absolute bottom-[3px] right-[3px] flex h-[17px] w-[17px] items-center justify-center rounded-full bg-[#ff5c8a] shadow-[0_1px_3px_rgba(0,0,0,0.4)] ring-[1.5px] ring-white/80"
+        >
+          <Lock size={9} strokeWidth={3} className="text-white" />
+        </span>
+      </span>
+    );
   };
 
   /** 画廊内各小组件是否已在主屏上（+ 浮层用；已在屏上的不可重复添加） */
@@ -3088,7 +3107,8 @@ export default function HomeScreen() {
               : 'text-white [text-shadow:0_1px_3px_rgba(0,0,0,0.65)]'
           }`}
         >
-          {app.name}
+          {/* v1.9.21 吃醋锁：冻结 App 名字位置改「由 XX 管理」（真机 pm suspend 后 Launcher 同款提示） */}
+          {isWebAppFrozen(tile.id) ? `由${webFrozenBy() ?? 'TA'}管理` : app.name}
         </span>
       </div>
     );
@@ -3260,7 +3280,7 @@ export default function HomeScreen() {
         className={`relative col-span-1 flex select-none justify-center ${edit ? 'touch-none' : '[touch-action:pan-y]'}`}
         role="button"
         tabIndex={0}
-        aria-label={`打开${app.name}`}
+        aria-label={isWebAppFrozen(tile.id) ? `${app.name}·被锁住了` : `打开${app.name}`}
         onClick={() => {
           if (!edit) openWith(tile.id);
         }}
@@ -3467,7 +3487,7 @@ export default function HomeScreen() {
                 className="pointer-events-auto relative block h-[58px] w-[58px] touch-none select-none"
                 role="button"
                 tabIndex={0}
-                aria-label={`打开${app.name}`}
+                aria-label={isWebAppFrozen(id) ? `${app.name}·被锁住了` : `打开${app.name}`}
                 onClick={() => {
                   if (!edit) openWith(id);
                 }}
@@ -3714,7 +3734,7 @@ export default function HomeScreen() {
                   <AppUnreadBadge appId={app.id} count={appUnreadOf(app.id)} />
                 </span>
                 <span className="max-w-[74px] truncate text-center text-[11px] font-medium leading-none text-white">
-                  {app.name}
+                  {isWebAppFrozen(app.id) ? `由${webFrozenBy() ?? 'TA'}管理` : app.name}
                 </span>
               </button>
             ))}

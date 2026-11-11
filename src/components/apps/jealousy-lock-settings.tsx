@@ -10,7 +10,9 @@
  * - 当前状态：活跃锁（App/角色/剩余倒计时/立即解锁）与冷却提示。
  *
  * 配置 localStorage 即点即存（jealousy-lock-cfg-v1）；状态行订阅 jealousy 版本号实时刷新。
- * 网页端（无 Shizuku）可完整配置与模拟剧情（决策走「模拟锁」不执行真实冻结），真机才真正 pm suspend。
+ * v1.9.21：网页端（无 Shizuku）不再只是模拟剧情——会真的锁住虚拟手机里的 App
+ * （音乐/浏览器/淘宝/美团/照片/X论坛：图标变灰点不开、点开弹 TA 的留言），
+ * 真机 + Shizuku 授权后锁真实应用（pm suspend）。
  */
 
 import { useState, useSyncExternalStore } from 'react';
@@ -28,6 +30,8 @@ import {
   jealousyRemainSec,
 } from '@/lib/ios/jealousy-lock';
 import { isNativePerception } from '@/lib/ios/native-perception';
+// v1.9.21：网页模式锁定对象清单展示（Shizuku 未连接时锁这些网页内 App）
+import { WEB_LOCK_APPS } from '@/lib/ios/web-app-lock';
 
 /** 数值步进器（- 值 +） */
 function Stepper({
@@ -126,7 +130,8 @@ export function JealousyLockSection({
           <span className="min-w-0">
             <span className="block truncate text-[15.5px]">AI 吃醋锁</span>
             <span className="mt-0.5 block text-[12px] leading-tight text-black/40 dark:text-white/40">
-              TA 真的会吃醋：冷落 TA 刷娱乐 App / 说去看剧却消失 / 焦虑爆表时，TA 可能直接把那个 App 锁住（图标变灰「由 Shell 所管理」），哄好或倒计时后解锁
+              TA 真的会吃醋：冷落 TA 刷娱乐 App / 说去看剧却消失 / 焦虑爆表时，TA 可能直接把那个 App 锁住（图标变灰打不开），哄好或倒计时后解锁
+              {!native ? '；Shizuku 未连接时锁的是这台手机里的 App' : '（提示「由 Shell 所管理」）'}
             </span>
           </span>
         </span>
@@ -154,6 +159,22 @@ export function JealousyLockSection({
             <p className="mt-0.5 text-[11.5px] leading-tight text-black/40 dark:text-white/40">
               TA 只锁这些 App（微信/QQ/短信/本 APP 永远不锁——锁了你就没法回来哄 TA 了）
             </p>
+            {!native ? (
+              <div className="mt-2.5 rounded-xl bg-[#fff0f4] p-2.5 dark:bg-[#ff5c8a]/[0.08]" data-testid={`${prefix}-web-targets`}>
+                <p className="text-[11.5px] font-medium">Shizuku 未连接，TA 会锁这台手机里的 App：</p>
+                <div className="mt-1.5 flex flex-wrap gap-1.5">
+                  {WEB_LOCK_APPS.map((a) => (
+                    <span key={a.pkg} className="flex items-center gap-1 rounded-full bg-[#ff5c8a]/12 px-2.5 py-1 text-[11.5px] text-[#c2255c] dark:bg-[#ff5c8a]/25 dark:text-[#ffb3c8]">
+                      <Lock size={10} strokeWidth={2.4} aria-hidden />
+                      {a.name}
+                    </span>
+                  ))}
+                </div>
+                <p className="mt-1.5 text-[10.5px] leading-snug text-black/40 dark:text-white/40">
+                  被锁的 App 图标变灰点不开，点开只弹 TA 的留言；下面的真机 App 清单要到手机 APP（Shizuku 授权）里才生效
+                </p>
+              </div>
+            ) : null}
             <div className="mt-2.5 flex flex-wrap gap-1.5" data-testid={`${prefix}-pkg-chips`}>
               {ENTERTAIN_PRESETS.map(([name, pkg]) => {
                 const on = cfg.entertainPkgs.includes(pkg);
@@ -263,7 +284,7 @@ export function JealousyLockSection({
             <p className="text-[10.5px] leading-snug text-black/35 dark:text-white/35">
               {native
                 ? '真锁：经 Shizuku 的 ADB Shell 执行 pm suspend --user 0（可逆、数据保留），解锁执行 pm unsuspend --user 0。锁不锁由 TA 按人设自己决定，系统只提供触发与权力。'
-                : '网页预览：剧情链路可模拟体验（不会真的冻结应用）；真机安装 APP 并授权 Shizuku 后为真实锁定（pm suspend）。'}
+                : '网页预览（Shizuku 未连接）：TA 会真的锁住这台虚拟手机里的 App（音乐/浏览器/淘宝/美团/照片/X论坛）——图标变灰点不开、点开只弹 TA 的留言，哄好/倒计时/强制解锁三通道照常；真机安装 APP 并授权 Shizuku 后锁真实应用（pm suspend）。'}
             </p>
           </div>
         </>

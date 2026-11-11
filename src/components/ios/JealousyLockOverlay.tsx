@@ -32,6 +32,8 @@ import { useUI } from '@/lib/ios/store';
 import { openChatFloat } from '@/lib/ios/chat-float-store';
 import { avatarFor } from '@/lib/contacts';
 import { listContacts } from '@/lib/ios/contacts-store';
+// v1.9.21：点被冻结的网页 App 图标 → 请求复弹本弹窗（首次自动弹过后仍可再看 TA 的留言）
+import { isWebLockOverlayPending, clearWebLockOverlayPending, subscribeWebLock, getWebLockVersion } from '@/lib/ios/web-app-lock';
 
 function fmt(sec: number): string {
   const m = Math.floor(sec / 60);
@@ -41,6 +43,8 @@ function fmt(sec: number): string {
 
 export default function JealousyLockOverlay() {
   const version = useSyncExternalStore(subscribeJealousy, getJealousyVersion);
+  // v1.9.21：网页冻结态/复弹请求变化 → 即时重渲染（点冻结图标马上弹，不等 4s 兑底轮询）
+  const webVer = useSyncExternalStore(subscribeWebLock, getWebLockVersion);
   const locked = useUI((s) => s.locked);
   const screenOff = useUI((s) => s.screenOff);
 
@@ -56,11 +60,17 @@ export default function JealousyLockOverlay() {
   const remain = lock ? Math.max(0, Math.ceil((lock.unlockAt - Date.now()) / 1000)) : null;
   void tick;
 
-  // 弹窗显隐判定（锁存在 + 未展示 + 手机可用 + 页面在前台）
+  // 弹窗显隐判定（锁存在 +（未展示过 或 点了冻结图标请求复弹）+ 手机可用 + 页面在前台）
   useEffect(() => {
     const check = () => {
       const l = readJealousyRuntime().lock;
-      setVisible(!!l && l.overlayShownAt === 0 && !useUI.getState().locked && !useUI.getState().screenOff && document.visibilityState === 'visible');
+      setVisible(
+        !!l &&
+          (l.overlayShownAt === 0 || isWebLockOverlayPending()) &&
+          !useUI.getState().locked &&
+          !useUI.getState().screenOff &&
+          document.visibilityState === 'visible',
+      );
     };
     check();
     document.addEventListener('visibilitychange', check);
@@ -69,7 +79,7 @@ export default function JealousyLockOverlay() {
       document.removeEventListener('visibilitychange', check);
       clearInterval(t);
     };
-  }, [version, locked, screenOff]);
+  }, [version, webVer, locked, screenOff]);
 
   // 倒计时每秒驱动；到点直接触发解锁（与守望者同源，免等下一轮 tick）
   useEffect(() => {
@@ -110,6 +120,7 @@ export default function JealousyLockOverlay() {
   const onCoax = () => {
     if (!lock) return;
     markJealousyOverlayShown(); // 本次锁不再自动弹
+    clearWebLockOverlayPending(); // 复弹请求一并消费（去哄哄了，不再重复弹）
     setVisible(false);
     openChatFloat(lock.contactId); // 直达与 TA 的聊天（哄哄去）
   };
@@ -120,6 +131,7 @@ export default function JealousyLockOverlay() {
       await unlockJealousy('forced'); // 立即解封 + 异步写戏剧性记忆
     } finally {
       setUnlocking(false);
+      clearWebLockOverlayPending(); // 复弹请求一并消费（锁已解，不再弹）
       setVisible(false);
     }
   };
@@ -176,7 +188,9 @@ export default function JealousyLockOverlay() {
               </div>
               <p className="flex items-center gap-1.5 text-[12px] text-white/40">
                 <Lock size={11} strokeWidth={2} aria-hidden />
-                应用已被挂起 · 桌面图标变灰 · 由 Shell 所管理
+                {lock.web
+                  ? `应用已被冻结 · 图标变灰 · 由 ${lock.charName} 管理`
+                  : '应用已被挂起 · 桌面图标变灰 · 由 Shell 所管理'}
               </p>
             </div>
 
