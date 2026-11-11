@@ -74,7 +74,7 @@ export const AUTONOMY_CAPS: AutonomyCap[] = [
   { key: 'applist', label: '查应用列表', desc: 'AI 查手机装了哪些 App（找包名用）', group: 'hands' },
   { key: 'volume', label: '音量调节', desc: '调高/调低/静音/指定音量值', group: 'hands' },
   { key: 'kill', label: '强杀应用', desc: '立即结束指定 App（防沉迷场景）', group: 'hands', danger: true },
-  { key: 'freeze', label: '冻结/解冻应用', desc: '冻结后图标消失、解冻即恢复（可逆）', group: 'hands', danger: true },
+  { key: 'freeze', label: '冻结/解冻应用', desc: '经 Shizuku ADB Shell 执行 pm suspend 挂起应用（图标变灰、提示「由 Shell 所管理」），解冻即恢复（可逆）', group: 'hands', danger: true },
   { key: 'uninstall', label: '卸载应用', desc: '移除 App（可恢复、数据保留，仍需谨慎）', group: 'hands', danger: true },
   { key: 'net', label: '网络开关', desc: 'Wi-Fi/流量/蓝牙的开关（部分 ROM 需 root）', group: 'hands', danger: true },
   // ---- 看见（只读探测） ----
@@ -185,7 +185,7 @@ const CAP_SYNTAX: Record<string, string> = {
   agent: '[手机操作:agent:一句话任务]（多步真实任务首选。例：[手机操作:agent:给怡怡发微信说我想你了]、[手机操作:agent:打开B站搜索流浪地球2预告片播放]。系统会接管手机执行：看屏幕→自动规划→逐步点击/滑动/输入（支持中文）→验证结果，失败自动重新规划，全程每步播报进度；涉及转账/支付/卸载/删除的步骤会先弹窗征求机主同意。注意：单步就能完成的简单操作（打开个App/点个按钮）不要用 agent，直接用对应的单步命令更省事）',
   applist: '[手机操作:应用列表:关键词]（关键词可省=全部；查到的是包名，配合「打开」用）',
   kill: '[手机操作:强杀:包名]（立即杀掉该 App；适合防沉迷/劝睡场景，配合人设使用）',
-  freeze: '[手机操作:冻结:包名] / [手机操作:解冻:包名]（冻结=图标消失打不开，解冻即恢复）',
+  freeze: '[手机操作:冻结:包名] / [手机操作:解冻:包名]（冻结=pm suspend 挂起：图标变灰、提示「由 Shell 所管理」、打不开；解冻=pm unsuspend 即恢复）',
   uninstall: '[手机操作:卸载:包名]（移除应用；除非机主明确要求，否则不要用）',
   volume: '[手机操作:音量:加/减/静音] 或 [手机操作:音量:0~15的数字]',
   net: '[手机操作:网络:开或关:wifi/流量/蓝牙]（例：[手机操作:网络:关:流量]）',

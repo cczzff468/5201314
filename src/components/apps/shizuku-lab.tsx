@@ -518,7 +518,7 @@ export function ShizukuLabSection({
 
           <Row
             title="冻结 / 解冻 App"
-            desc="pm disable-user · 冻结到「明天」的防沉迷大招（可逆、数据保留）"
+            desc="pm suspend · 冻结到「明天」的防沉迷大招（图标变灰、提示「由 Shell 所管理」，可逆、数据保留）"
             actions={
               <>
                 <Pill
@@ -526,7 +526,7 @@ export function ShizukuLabSection({
                   danger
                   busy={busy.freeze}
                   onClick={() => {
-                    if (ask(`确定冻结 ${pkg}？桌面图标会消失，解冻后恢复原样（数据不丢）。`)) {
+                    if (ask(`确定冻结 ${pkg}？桌面图标会变灰（提示「由 Shell 所管理」），解冻后恢复原样（数据不丢）。`)) {
                       void exec('freeze', () => labSetAppFrozen(pkg, true));
                     }
                   }}

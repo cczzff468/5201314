@@ -11,9 +11,9 @@
  */
 
 /** 当前最新版本（与 android-shell versionName 保持一致） */
-export const APP_VERSION = '1.9.17';
+export const APP_VERSION = '1.9.18';
 /** 版本号数字（与 android-shell versionCode 保持一致；覆盖安装要求只增不减） */
-export const APP_VERSION_CODE = 37;
+export const APP_VERSION_CODE = 38;
 
 export interface AppReleaseNote {
   version: string;
@@ -24,6 +24,14 @@ export interface AppReleaseNote {
 
 /** 版本历史（新→旧；设置 › APP 更新 页渲染，最新一条即当前版本） */
 export const APP_RELEASE_NOTES: AppReleaseNote[] = [
+  {
+    version: '1.9.18',
+    date: '2026-11-11',
+    items: [
+      '冻结/解冻应用换底层方案：改经 Shizuku 的 ADB Shell 权限执行 pm suspend --user 0 挂起应用（原 pm disable-user 停用）——冻结后桌面图标变灰、提示「由 Shell 所管理」，不再是图标直接消失；解冻执行 pm unsuspend --user 0 即恢复，可逆、数据保留',
+      'AI 动手教学规则与能力说明同步更新，AI 执行冻结/解冻与新底层一致',
+    ],
+  },
   {
     version: '1.9.17',
     date: '2026-11-11',

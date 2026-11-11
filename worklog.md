@@ -2611,3 +2611,19 @@ Work Log:
 
 Stage Summary:
 - v1.9.17 已提交：后台投递/接力全链路改走 MessageChannel 免节流通道（退后台消息即到即投即弹系统通知），前台判定补双信号；深度思考卡改椭圆毛玻璃胶囊并删「点击展开/已」文案
+
+---
+Task ID: 25
+Agent: 主控 Agent（Z.ai Code）
+Task: v1.9.18 冻结/解冻应用底层换 Shizuku ADB Shell pm suspend 方案（机主已确认）
+
+Work Log:
+- shizuku-lab.ts labSetAppFrozen：冻结命令 pm disable-user --user 0 <pkg> → pm suspend --user 0 <pkg>；解冻命令 pm enable <pkg> → pm unsuspend --user 0 <pkg>（Shizuku 白名单只校验二进制名，pm 已在列，suspend/unsuspend 直接放行）；完成文案改「已冻结（图标变灰、提示『由 Shell 所管理』，解冻即恢复）」；头部能力注释同步（pm disable/enable → pm suspend/unsuspend）
+- shizuku-autonomy.ts：AUTONOMY_CAPS freeze 能力 desc 改「经 Shizuku ADB Shell 执行 pm suspend 挂起应用（图标变灰、提示『由 Shell 所管理』），解冻即恢复（可逆）」；CAP_SYNTAX 教学规则改「冻结=pm suspend 挂起：图标变灰、提示『由 Shell 所管理』、打不开；解冻=pm unsuspend 即恢复」——AI 学到的语义与真实行为一致（挂起 vs 停用）
+- shizuku-lab.tsx（能力实验室 UI）：冻结/解冻卡片 desc 改「pm suspend · 冻结到『明天』的防沉迷大招（图标变灰、提示『由 Shell 所管理』，可逆、数据保留）」；冻结按钮二次确认弹窗改「桌面图标会变灰（提示『由 Shell 所管理』）」
+- app-version.ts：bump 1.9.18（versionCode 38）+ 2 条更新说明；APK 不重打（无原生改动，白名单底座未变）
+- 验证：tsc 仅 1 处 ai-delivery.ts 既有基线错误（stash 后复现，非本次引入）；eslint 4 个改动文件零错误；agent-browser E2E——清 Service Worker 陈旧缓存后设置 › AI 感知与操控 › AI 动手页「冻结/解冻应用」行显示新 desc「经 Shizuku ADB Shell 执行 pm suspend 挂起应用（图标变灰、提示『由 Shell 所管理』），解冻即恢复」✅；console/dev.log 零错误
+
+Stage Summary:
+- v1.9.18 已提交：冻结/解冻应用按机主确认方案切到 pm suspend --user 0 / pm unsuspend --user 0（挂起语义：桌面图标变灰、提示「由 Shell 所管理」、可逆、数据保留），实现/教学规则/设置页/实验室 UI 四端文案同步
+- 关键文件：src/lib/ios/shizuku-lab.ts、src/lib/ios/shizuku-autonomy.ts、src/components/apps/shizuku-lab.tsx、src/lib/app-version.ts

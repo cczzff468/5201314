@@ -5,7 +5,7 @@
  * 实现用户点单的全部「AI 动手 / AI 看见 / 自授权」能力。
  *
  * 分层：NativePerceptionPlugin.shizukuExec 只认白名单二进制；本文件负责——
- *  - 动手：input tap/swipe/text/keyevent · am start/force-stop · pm disable/enable/
+ *  - 动手：input tap/swipe/text/keyevent · am start/force-stop · pm suspend/unsuspend/
  *    install/uninstall · monkey 拉起 · media dispatch/volume · svc wifi/data/bt
  *  - 看见：screencap（专用 AIDL 通道，服务端降采样）· dumpsys notification/
  *    window/media_session/battery/clipboard · content query 短信/通话 · logcat
@@ -359,14 +359,14 @@ export async function labForceStop(pkg: string): Promise<LabResult> {
   return run(['am', 'force-stop', pkg], { doneText: `已强杀 ${pkg}` });
 }
 
-/** 冻结 / 解冻 App（pm disable-user --user 0 / pm enable；冻结可逆、数据保留） */
+/** 冻结 / 解冻 App（pm suspend --user 0 / pm unsuspend --user 0；挂起可逆、数据保留，图标变灰提示「由 Shell 所管理」） */
 export async function labSetAppFrozen(pkg: string, freeze: boolean): Promise<LabResult> {
   if (!/^[\w.]+$/.test(pkg)) return { ok: false, text: '包名不合法' };
   const cmd = freeze
-    ? ['pm', 'disable-user', '--user', '0', pkg]
-    : ['pm', 'enable', pkg];
+    ? ['pm', 'suspend', '--user', '0', pkg]
+    : ['pm', 'unsuspend', '--user', '0', pkg];
   return run(cmd, {
-    doneText: freeze ? `已冻结 ${pkg}（桌面图标消失，解冻即恢复）` : `已解冻 ${pkg}`,
+    doneText: freeze ? `已冻结 ${pkg}（图标变灰、提示「由 Shell 所管理」，解冻即恢复）` : `已解冻 ${pkg}`,
     trim: (out) => {
       const bad = /Error|Unknown|Failed/i.test(out);
       return { ok: !bad, text: bad ? `操作失败：${out.trim().slice(0, 200)}` : (freeze ? `已冻结 ${pkg}` : `已解冻 ${pkg}`) };
