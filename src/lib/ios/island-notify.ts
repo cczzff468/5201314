@@ -638,6 +638,19 @@ function maybeWebNotification(n: IslandNotification): void {
       let skipped = false;
       try {
         skipped = window.localStorage.getItem(PREPROMPT_KEY) === 'later';
+        // 预览面板 iframe 里的引导卡有独立静音键（ios-notify-iframe-hint）：iframe 里关过
+        // 引导只静音 iframe 场景，不影响新标签页里正常申请卡的弹出（两张卡职责不同）
+        if (!skipped) {
+          let inIframe = false;
+          try {
+            inIframe = window.self !== window.top;
+          } catch {
+            inIframe = true;
+          }
+          if (inIframe && window.localStorage.getItem('ios-notify-iframe-hint') === 'later') {
+            skipped = true;
+          }
+        }
       } catch {
         // 存储不可用：仍展示一次预提示
       }

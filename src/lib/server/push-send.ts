@@ -69,15 +69,19 @@ export async function pushToAllSubscribers(envelope: PushEnvelope, bodies: strin
     const alive: PushSubLike[] = [];
     await Promise.all(
       subs.map(async (sub) => {
-        try {
-          if (typeof sub.endpoint !== 'string') return;
-          alive.push(sub); // 只要有合法 endpoint 就保留订阅（下方跳过发送 ≠ 订阅失效）
-          // excludeTag：跳过发起设备自己的订阅（无 tag 的旧订阅永不被排除，向后兼容）
-          const subTag = typeof sub.tag === 'string' ? sub.tag : '';
-          if (envelope.excludeTag && subTag && subTag === envelope.excludeTag) return;
-          for (let i = 0; i < bodies.length; i++) {
-            const body = previewOf(bodies[i]);
-            if (!body) continue;
+        if (typeof sub.endpoint !== 'string') return; // 形状非法：不回收进表（自然淘汰）
+        // excludeTag：跳过发起设备自己的订阅（无 tag 的旧订阅永不被排除，向后兼容）。
+        // 「跳过发送」≠「订阅失效」，保留在表里
+        const subTag = typeof sub.tag === 'string' ? sub.tag : '';
+        if (envelope.excludeTag && subTag && subTag === envelope.excludeTag) {
+          alive.push(sub);
+          return;
+        }
+        let dead = false;
+        for (let i = 0; i < bodies.length; i++) {
+          const body = previewOf(bodies[i]);
+          if (!body) continue;
+          try {
             await webpush.sendNotification(
               sub as unknown as Parameters<typeof webpush.sendNotification>[0],
               JSON.stringify({
@@ -96,12 +100,18 @@ export async function pushToAllSubscribers(envelope: PushEnvelope, bodies: strin
                 },
               },
             );
+          } catch (err) {
+            const e = err as { statusCode?: number };
+            // 404/410 = 订阅已失效/已退订；401/403 = VAPID 钥不匹配/未授权（服务端重置换钥后
+            // 旧公钥订阅的典型回执）——都不可恢复，剔除让客户端下次打开时重新订阅；
+            // 其余错误（瞬时网络失败等）保留订阅
+            if (e?.statusCode === 404 || e?.statusCode === 410 || e?.statusCode === 401 || e?.statusCode === 403) {
+              dead = true;
+              break;
+            }
           }
-        } catch (err) {
-          const e = err as { statusCode?: number };
-          // 404/410 = 订阅已失效 → 剔除；其余错误保留（可能只是瞬时网络失败）
-          if (e?.statusCode !== 404 && e?.statusCode !== 410) alive.push(sub);
         }
+        if (!dead) alive.push(sub);
       }),
     );
     await writePushJson('push-subs.json', alive);

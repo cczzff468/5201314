@@ -25,25 +25,54 @@ import {
 /** 无操作自动收起时长 */
 const AUTO_HIDE_MS = 15_000;
 
+/** iframe 引导关闭记忆键（与正常申请卡的 ios-notify-preprompt 分开）：
+ *  预览面板里的引导卡关掉只记在这里，不写 preprompt——localStorage 同源共享，
+ *  若混用会把新标签页里的正常申请卡也永久静音（用户照引导开新标签页反而弹不出卡）。 */
+const IFRAME_HINT_KEY = 'ios-notify-iframe-hint';
+
 export default function NotifyPermissionCard() {
   const open = useNotifyPrompt((s) => s.open);
   const hide = useNotifyPrompt((s) => s.hide);
   const [asking, setAsking] = useState(false);
   const [result, setResult] = useState<'granted' | 'denied' | null>(null);
+  // 预览面板 iframe 识别（与设置 › 通知页同款判定）：本组件 ssr:false 懒加载，window 安全；
+  // 跨域访问 window.top 抛错 → 必在 iframe。iframe 里浏览器会拦截 Notification.requestPermission
+  // （静默 denied，授权框根本不弹）——按钮点了也是白点，必须引导用户「在新标签页打开」。
+  const [inIframe] = useState<boolean>(() => {
+    try {
+      return window.self !== window.top;
+    } catch {
+      return true;
+    }
+  });
   const askingRef = useRef(false);
   // ref 更新入 effect（react-hooks/refs：不在渲染期写 ref）
   useEffect(() => {
     askingRef.current = asking;
   });
 
+  // 关闭/超时收起：iframe 里只记 IFRAME_HINT_KEY（不污染新标签页的申请卡静音标记）
+  const dismissCard = (): void => {
+    if (inIframe) {
+      try {
+        window.localStorage.setItem(IFRAME_HINT_KEY, 'later');
+      } catch {
+        /* 存储不可用：仅本次会话不再弹 */
+      }
+      hide();
+      return;
+    }
+    void dismissNotifyPrompt();
+  };
+
   // 无操作 15s 自动收起（与「暂不」同口径：写入不再弹标记，避免每次刷新后的第一条消息都弹=骚扰）
   useEffect(() => {
     if (!open) return;
     const t = setTimeout(() => {
-      if (!askingRef.current) void dismissNotifyPrompt();
+      if (!askingRef.current) dismissCard();
     }, AUTO_HIDE_MS);
     return () => clearTimeout(t);
-  }, [open]);
+  }, [open, inIframe]);
 
   if (!open) return null;
 
@@ -80,7 +109,7 @@ export default function NotifyPermissionCard() {
               <button
                 type="button"
                 aria-label="关闭"
-                onClick={() => void dismissNotifyPrompt()}
+                onClick={dismissCard}
                 className="ml-auto -mr-1 -mt-1 rounded-full p-1.5 text-muted-foreground/70 transition-colors hover:bg-muted hover:text-foreground"
               >
                 <X className="h-3.5 w-3.5" aria-hidden="true" />
@@ -88,34 +117,52 @@ export default function NotifyPermissionCard() {
             </div>
             {result === null ? (
               <p className="mt-0.5 text-[12px] leading-relaxed text-muted-foreground">
-                切走标签页、最小化或锁屏时，也能及时收到 AI 的新消息；随时可在「设置 › 通知」更改。
+                {inIframe
+                  ? '当前嵌在预览面板里，浏览器不允许在这里开启系统通知。点预览面板右上角「在新标签页打开」，再从「设置 › 通知」开启——切走页面、最小化或锁屏时，AI 的新消息也能弹出系统通知。'
+                  : '切走标签页、最小化或锁屏时，也能及时收到 AI 的新消息；随时可在「设置 › 通知」更改。'}
               </p>
             ) : (
               <p className={`mt-0.5 text-[12px] leading-relaxed ${result === 'granted' ? 'text-foreground' : 'text-muted-foreground'}`}>
-                {result === 'granted' ? '已开启：离开网页也能收到通知了。' : '未开启：将在应用内弹窗提醒，不影响聊天。'}
+                {result === 'granted'
+                  ? '已开启：离开网页也能收到通知了。'
+                  : inIframe
+                    ? '此处无法开启（预览面板限制）：请点预览面板右上角「在新标签页打开」后，在「设置 › 通知」里重新开启。'
+                    : '未开启：将在应用内弹窗提醒，不影响聊天。'}
               </p>
             )}
           </div>
         </div>
-        {result === null && (
-          <div className="mt-3 flex items-center justify-end gap-2">
-            <button
-              type="button"
-              onClick={() => void dismissNotifyPrompt()}
-              className="h-8 rounded-full px-3.5 text-[13px] text-muted-foreground transition-colors hover:bg-muted"
-            >
-              暂不
-            </button>
-            <button
-              type="button"
-              onClick={() => void accept()}
-              disabled={asking}
-              className="h-8 rounded-full bg-foreground px-4 text-[13px] font-medium text-background transition-opacity hover:opacity-85 disabled:opacity-50"
-            >
-              {asking ? '正在开启…' : '开启通知'}
-            </button>
-          </div>
-        )}
+        {result === null &&
+          (inIframe ? (
+            // iframe 里授权必被浏览器静默拒绝：不给「开启通知」假按钮，只留「知道了」收起
+            <div className="mt-3 flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={dismissCard}
+                className="h-8 rounded-full bg-foreground px-4 text-[13px] font-medium text-background transition-opacity hover:opacity-85"
+              >
+                知道了
+              </button>
+            </div>
+          ) : (
+            <div className="mt-3 flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={dismissCard}
+                className="h-8 rounded-full px-3.5 text-[13px] text-muted-foreground transition-colors hover:bg-muted"
+              >
+                暂不
+              </button>
+              <button
+                type="button"
+                onClick={() => void accept()}
+                disabled={asking}
+                className="h-8 rounded-full bg-foreground px-4 text-[13px] font-medium text-background transition-opacity hover:opacity-85 disabled:opacity-50"
+              >
+                {asking ? '正在开启…' : '开启通知'}
+              </button>
+            </div>
+          ))}
       </div>
     </div>
   );

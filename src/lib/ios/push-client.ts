@@ -142,6 +142,13 @@ export async function setupPushSubscription(opts?: PushSetupOptions): Promise<Pu
       return { ...s, at: Date.now() };
     }
     let sub = await reg.pushManager.getSubscription();
+    // VAPID 密钥轮换自愈：已有订阅是用旧公钥创建的（服务端重置后 .data/vapid.json 换了新钥）
+    // → 新私钥推这条订阅必被推送服务 401/403 拒绝，且永远自愈不了（旧代码直接复用旧订阅，
+    // 页面关闭后的离线推送全部静默丢失）。检测到钥不匹配 → 退订旧订阅 → 用新钥重建。
+    if (sub && !(await subscriptionKeyMatches(sub, urlBase64ToUint8Array(data.publicKey)))) {
+      await sub.unsubscribe().catch(() => null);
+      sub = null;
+    }
     if (!sub) {
       sub = await reg.pushManager
         .subscribe({
@@ -224,4 +231,26 @@ function urlBase64ToUint8Array(base64String: string): Uint8Array {
   const out = new Uint8Array(raw.length);
   for (let i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i);
   return out;
+}
+
+/**
+ * 已有订阅的 applicationServerKey 是否与服务端当前 VAPID 公钥一致（逐字节比对）。
+ * 读不到（旧浏览器返回 null）/比对异常 → 视为一致（保持旧订阅，不折腾）；
+ * 不一致 → 订阅是旧公钥创建的，新私钥推送必被推送服务 401/403 拒绝，
+ * 必须退订重建（沙箱/服务器重置后 .data/vapid.json 重新生成新钥的典型场景）。
+ */
+async function subscriptionKeyMatches(sub: PushSubscription, expected: Uint8Array): Promise<boolean> {
+  try {
+    // 旧版 dom lib 未声明 applicationServerKey（Chrome/Firefox 实际都有）→ 结构化读取
+    const raw = (sub as { applicationServerKey?: ArrayBuffer | Uint8Array | null }).applicationServerKey;
+    if (!raw) return true;
+    const cur = raw instanceof Uint8Array ? raw : new Uint8Array(raw);
+    if (cur.length !== expected.length) return false;
+    for (let i = 0; i < cur.length; i++) {
+      if (cur[i] !== expected[i]) return false;
+    }
+    return true;
+  } catch {
+    return true;
+  }
 }
