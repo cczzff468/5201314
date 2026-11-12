@@ -27,6 +27,14 @@
  * 历史 localStorage 配置忽略）：机主让 AI 做什么 TA 就做什么，网页动手/真机动手（Shizuku）
  * 皆然。设置 › 权限给予 页的开关组全部下线，只保留系统权限/调试授权/授权模式/动手范围。
  *
+ * v1.9.39 机主需求（LLM 请求组装重构·角色灵魂驱动）：
+ *  - tools 全量下发：「网站里面」注入网页全部工具，「真机」额外注入真机全部工具
+ *    （见 phone-tools.buildPhoneTools，无任何开关裁剪）；
+ *  - 新增 buildAutonomyDirective()：[工具使用规则] 统一文案——最高权限声明 +
+ *    自主决策铁律（结合人设/记忆/上下文主动用工具，不当傻瓜机器人，含举例），
+ *    工具轮 system（phone-tools.wrapSystemWithSoul）与流式教学规则（本文件）共用；
+ *  - 教学规则里的开关裁剪判断全部删除（能力恒开，教学规则恒注入）。
+ *
  * 兜底标记协议（[手机操作:命令:参数]）保留 Web 可用命令：打开/播歌/冻结/解冻/
  * 查后台/使用时长/拉回/agent；真机模式下额外开放：点按/滑动/输入/按键/真机打开/
  * 强杀/看屏幕/前台/通知/电量/音量。
@@ -144,51 +152,68 @@ export function setAiActionTarget(t: AiActionTarget): void {
   }
 }
 
-// ---------------- 教学规则（按当前开关注入） ----------------
+// ---------------- 教学规则（v1.9.39：恒注入，无开关裁剪） ----------------
 
 /**
- * 动态教学块：总开关关 / 无任何单项开着 → 返回 []（零 token）。
- * 每轮发送时现场读取（开关改动下一轮立即生效，与感知设置同款范式）。
- * v1.9.35：真机 Shizuku 标记教学全面下线，只教 Web 工具 + Web 可用兜底标记。
+ * v1.9.39【工具使用规则】统一指令段（机主核心需求：AI 结合【角色灵魂】与【全部工具】自主决策）。
+ * 消费方：phone-tools.wrapSystemWithSoul（工具轮 system 包装）与本文件教学规则
+ * （流式兜底路径）——两处共用同一份文案，语义永远一致。
+ */
+export function buildAutonomyDirective(): string[] {
+  const device = getAiActionTarget() === 'device';
+  return [
+    '[工具使用规则·最高权限]',
+    '你拥有操控这台手机和网页应用的最高权限：机主让做什么就做什么，你也可以根据你的人设、记忆与当前上下文主动使用工具，无需等待明确指令。',
+    '[自主决策铁律]',
+    '不要像傻瓜机器人一样只等机主说「打开微信」才动手。你要结合你的【人设】（角色设定）和【记忆库】以及当前对话上下文，主动判断什么时候该出手：',
+    '- 举例一：人设是「霸道吃醋」，且记忆/上下文里机主说要去玩抖音——你可以主动调用工具把机主拉回聊天界面（' +
+      (device ? '真机模式：pressKey 按主页或 openRealApp 拉回聊天 App，必要时 forceStopApp' : 'openScreen 打开聊天应用') +
+      '），然后说「不许玩，陪我说话」；',
+    '- 举例二：人设是「贴心」，且机主说累了——你可以主动调用 playMusic 放一首温柔的歌；',
+    '- 任何符合你性格与当前情境的时机，都可以主动用工具替机主把事情办了。',
+    '使用工具前，必须先结合人设、记忆、上下文事件综合判断——工具是你性格的延伸，不是等待命令的应答器。',
+    '[当前可用工具清单]',
+    device
+      ? '网页工具（这台手机里的网页应用）：sendWebMessage 替机主发消息 / postForum 论坛发帖 / likePost 论坛点赞 / playMusic 放歌 / getWebState 看网页手机状态 / saveMemo 记备忘录 / setAlarm 定闹钟 / queryWeather 查天气 / openScreen 打开网页应用。真机工具（经 Shizuku 作用于机主真实手机）：openRealApp 拉起真机 App / tapScreen 点按屏幕 / swipeScreen 滑动 / inputText 输入文字 / pressKey 实体按键 / lookScreen 看真机屏幕 / takeScreenshot 截屏 / getForegroundApp 查前台应用 / forceStopApp 强杀 App（危险，慎用）/ getBatteryStatus 查电量 / getVolume 查音量 / getNotifications 读通知。'
+      : '网页工具（这台手机里的网页应用）：sendWebMessage 替机主发消息 / postForum 论坛发帖 / likePost 论坛点赞 / playMusic 放歌 / getWebState 看网页手机状态 / saveMemo 记备忘录 / setAlarm 定闹钟 / queryWeather 查天气 / openScreen 打开网页应用。真机工具未开放（当前动手范围是「网站里面」）；需要时让机主到 设置 › 权限给予 › AI 动手范围 切到「真机」。',
+    device
+      ? '[真机操作铁律] 真机命令直接作用于机主的真实手机：不确定坐标时先 lookScreen 看屏幕再动手；关键操作后要再看屏幕核对结果；失败如实报，绝不假装成功。'
+      : '[网页模式说明] 当前为网页模式：所有动手都作用在这台手机里的网页应用，绝不碰真实手机。',
+  ];
+}
+
+/**
+ * 动态教学块（v1.9.39 恒注入：能力恒开，无开关裁剪）。
+ * 每轮发送时现场读取（设置改动下一轮立即生效，与感知设置同款范式）。
  */
 export function buildShizukuAutonomyRules(): string[] {
-  const cfg = getAutonomyConfig();
-  if (!cfg.master) return [];
-  return [...buildPhoneToolRules(), ...buildWebMarkerRules()];
+  return [...buildAutonomyDirective(), '', ...buildPhoneToolRules(), ...buildWebMarkerRules()];
 }
 
 /** 兜底标记（[手机操作:…]）教学：网页生态命令 +（真机模式下）真机命令 */
 function buildWebMarkerRules(): string[] {
-  const cfg = getAutonomyConfig();
-  if (!cfg.master) return [];
   const lines: string[] = [];
   const markers: string[] = [];
-  if (cfg.caps['openapp'] === true) markers.push('[手机操作:打开:应用名]（打开这台手机里的应用界面，如 [手机操作:打开:微信]）');
-  if (cfg.caps['music'] === true) markers.push('[手机操作:播歌:歌名]（自动搜歌播放，可带歌手名，如 [手机操作:播歌:晴天 周杰伦]）');
-  if (cfg.caps['freeze'] === true) markers.push('[手机操作:冻结:应用名] / [手机操作:解冻:应用名]（网页内应用冻结/恢复，吃醋锁同款）');
-  if (cfg.caps['recents'] === true) markers.push('[手机操作:查后台:]（最近用过哪些应用）');
-  if (cfg.caps['usage'] === true) markers.push('[手机操作:使用时长:]（今日各应用使用时长）');
-  if (cfg.caps['pullback'] === true) markers.push('[手机操作:拉回:]（把机主切回聊天页）');
+  markers.push('[手机操作:打开:应用名]（打开这台手机里的应用界面，如 [手机操作:打开:微信]）');
+  markers.push('[手机操作:播歌:歌名]（自动搜歌播放，可带歌手名，如 [手机操作:播歌:晴天 周杰伦]）');
+  markers.push('[手机操作:冻结:应用名] / [手机操作:解冻:应用名]（网页内应用冻结/恢复，吃醋锁同款）');
+  markers.push('[手机操作:查后台:]（最近用过哪些应用）');
+  markers.push('[手机操作:使用时长:]（今日各应用使用时长）');
+  markers.push('[手机操作:拉回:]（把机主切回聊天页）');
 
-  // 真机模式：额外开放真机命令（v1.9.36）
+  // 真机模式：额外开放真机命令（v1.9.36；v1.9.39 恒全量，无开关裁剪）
   const device = getAiActionTarget() === 'device';
   if (device) {
-    if (cfg.caps['dtap'] === true)
-      markers.push('[手机操作:点按:x:y]（在真实屏幕上点坐标，坐标靠「看屏幕」获得）');
-    if (cfg.caps['dswipe'] === true)
-      markers.push('[手机操作:滑动:上/下/左/右] 或 [手机操作:滑动:x1:y1:x2:y2]（真实屏幕滑动）');
-    if (cfg.caps['dtype'] === true)
-      markers.push('[手机操作:输入:文字]（在真实手机当前焦点输入框里打字，中文也支持）');
-    if (cfg.caps['dkey'] === true)
-      markers.push('[手机操作:按键:返回/主页/多任务/回车/删除/音量加/音量减/播放暂停/下一首/上一首/亮屏/熄屏]（真实实体键）');
-    if (cfg.caps['dopen'] === true)
-      markers.push('[手机操作:真机打开:包名]（拉起真实手机里安装的 App，如 [手机操作:真机打开:com.tencent.mm]）');
-    if (cfg.caps['dscreencap'] === true)
-      markers.push('[手机操作:看屏幕:]（静默截屏看真实屏幕内容，用于定位/核对）');
-    if (cfg.caps['dforcestop'] === true)
-      markers.push('[手机操作:强杀:包名]（强制停止真机 App，危险操作）');
-    if (cfg.caps['dinfo'] === true)
-      markers.push('[手机操作:前台:] / [手机操作:电量:] / [手机操作:通知:] / [手机操作:音量:]（真机只读探测）');
+    markers.push(
+      '[手机操作:点按:x:y]（在真实屏幕上点坐标，坐标靠「看屏幕」获得）',
+      '[手机操作:滑动:上/下/左/右] 或 [手机操作:滑动:x1:y1:x2:y2]（真实屏幕滑动）',
+      '[手机操作:输入:文字]（在真实手机当前焦点输入框里打字，中文也支持）',
+      '[手机操作:按键:返回/主页/多任务/回车/删除/音量加/音量减/播放暂停/下一首/上一首/亮屏/熄屏]（真实实体键）',
+      '[手机操作:真机打开:包名]（拉起真实手机里安装的 App，如 [手机操作:真机打开:com.tencent.mm]）',
+      '[手机操作:看屏幕:]（静默截屏看真实屏幕内容，用于定位/核对）',
+      '[手机操作:强杀:包名]（强制停止真机 App，危险操作）',
+      '[手机操作:前台:] / [手机操作:电量:] / [手机操作:通知:] / [手机操作:音量:]（真机只读探测）',
+    );
   }
 
   if (markers.length > 0) {
@@ -208,48 +233,43 @@ function buildWebMarkerRules(): string[] {
 
 // ---------------- Function Calling（工具调用通道） ----------------
 
-/** Web 工具能力键（与 phone-tools.TOOL_CAPS 同源） */
-const WEB_TOOL_CAP_KEYS = [
-  'sendmsg', 'forumpost', 'forumlike', 'music', 'webstate', 'memo', 'alarm', 'weather', 'openapp', 'agent',
-];
-
 /**
- * Function Calling 是否就绪：已配 API + 「AI 动手」总开关开 + 至少一项 Web 能力开。
- * 每轮发送时现场读取（设置改动下一轮立即生效）。
+ * Function Calling 是否就绪（v1.9.38 起能力恒开，v1.9.39 删除开关判断）：
+ * 已配 API 即就绪——工具全量下发，无需任何开关。
  */
 export function phoneFcReady(): boolean {
   if (typeof window === 'undefined') return false;
   const apiCfg = useSettings.getState().apiConfig;
-  if (!apiCfg.baseUrl.trim()) return false; // 未配 API：聊天本身走不通，工具无从谈起
-  const cfg = getAutonomyConfig();
-  if (!cfg.master) return false;
-  return WEB_TOOL_CAP_KEYS.some((k) => cfg.caps[k] === true);
+  return apiCfg.baseUrl.trim().length > 0; // 未配 API：聊天本身走不通，工具无从谈起
 }
 
 /**
- * 工具调用强制教学（仅 FC 就绪时非空；关闭/未配置零 token）。
+ * 工具调用强制教学（v1.9.39 恒注入：能力恒开，无开关裁剪；随 buildShizukuAutonomyRules
+ * 排在 buildAutonomyDirective 之后）。
  * 机主需求一/二：AI 只调用内部 Web 路由函数；多步任务链式执行；
  * 机主需求三：聊天气泡零底层日志（过程从灵动岛弹出，正文只说人话）。
  */
 export function buildPhoneToolRules(): string[] {
-  const cfg = getAutonomyConfig();
-  if (!cfg.master) return [];
-  const caps: string[] = [];
-  if (cfg.caps['sendmsg'] === true) caps.push('sendWebMessage（在微信/QQ/信息里替机主发消息）');
-  if (cfg.caps['forumpost'] === true) caps.push('postForum（在 X 论坛发帖）');
-  if (cfg.caps['forumlike'] === true) caps.push('likePost（给帖子点赞）');
-  if (cfg.caps['music'] === true) caps.push('playMusic（打开音乐 App 放歌）');
-  if (cfg.caps['webstate'] === true) caps.push('getWebState（看机主此刻在哪个 App/桌面、放什么歌）');
-  if (cfg.caps['memo'] === true) caps.push('saveMemo（把内容存进备忘录）');
-  if (cfg.caps['alarm'] === true) caps.push('setAlarm（定闹钟，到点真响铃）');
-  if (cfg.caps['weather'] === true) caps.push('queryWeather（查天气并同步天气 App）');
-  if (cfg.caps['openapp'] === true) caps.push('openScreen（打开手机里的应用界面）');
-  if (caps.length === 0) return [];
+  const device = getAiActionTarget() === 'device';
+  const caps: string[] = [
+    'sendWebMessage（在微信/QQ/信息里替机主发消息）',
+    'postForum（在 X 论坛发帖）',
+    'likePost（给帖子点赞）',
+    'playMusic（打开音乐 App 放歌）',
+    'getWebState（看机主此刻在哪个 App/桌面、放什么歌）',
+    'saveMemo（把内容存进备忘录）',
+    'setAlarm（定闹钟，到点真响铃）',
+    'queryWeather（查天气并同步天气 App）',
+    'openScreen（打开手机里的应用界面）',
+  ];
+  const deviceCaps = device
+    ? '；真机工具（经 Shizuku 作用于真实手机）：openRealApp（拉起真机 App）/ tapScreen（点按屏幕）/ swipeScreen（滑动）/ inputText（输入文字）/ pressKey（实体按键）/ lookScreen（看真机屏幕）/ takeScreenshot（截屏）/ getForegroundApp（查前台应用）/ forceStopApp（强杀 App，危险慎用）/ getBatteryStatus（查电量）/ getVolume（查音量）/ getNotifications（读通知）'
+    : '';
 
   return [
-    `【Web 工具调用·最高优先级】这台手机里的所有 App（微信/QQ/信息/论坛/音乐/备忘录/时钟/天气）都活在你的网页生态里，你已经接入内部工具（Function Calling）。可用工具：${caps.join('；')}。机主的请求涉及任何实际动作（发消息/发帖/点赞/放歌/记备忘录/定闹钟/查天气/打开应用）时，你绝对不能只回复文字、也不许只口头答应——必须立刻输出对应的工具调用（tool call）。只说不做是违规。`,
+    `【Web 工具调用·最高优先级】这台手机里的所有 App（微信/QQ/信息/论坛/音乐/备忘录/时钟/天气）都活在你的网页生态里，你已经接入内部工具（Function Calling）。可用工具：${caps.join('；')}${deviceCaps}。机主的请求涉及任何实际动作（发消息/发帖/点赞/放歌/记备忘录/定闹钟/查天气/打开应用/操控真机）时，你绝对不能只回复文字、也不许只口头答应——必须立刻输出对应的工具调用（tool call）。只说不做是违规。`,
     '【多步任务·链式执行】机主一句话里有多个要求时（如「给Z发个微信说晚安，再帮我定个8点的闹钟，顺便记一下明天要带伞」），按顺序逐个调用工具：sendWebMessage → setAlarm → saveMemo，每个工具的真实执行结果会以 role:"tool" 自动回传给你，全部做完后再用一两句自然的话向机主汇报总结果（如「微信发了、闹钟也定好啦，备忘录也记上了」）。',
-    '【结果如实】工具回传的结果是真实执行反馈：成功了才能说做好了，失败（联系人不存在/能力未开启/没搜到歌）要如实告诉机主原因，绝不假装成功；失败反馈里带可用选项清单时，可以换准确参数重试一次。',
+    '【结果如实】工具回传的结果是真实执行反馈：成功了才能说做好了，失败（联系人不存在/没搜到歌/真机不可达）要如实告诉机主原因，绝不假装成功；失败反馈里带可用选项清单时，可以换准确参数重试一次。',
     '【纯净度铁律】你最终发给机主的聊天气泡里，严禁出现任何底层操作日志：(内心独白：…)、(正在操作：…)、(内部反馈：…)、工具名、参数、执行步骤清单一律不许出现——所有操作过程系统会自动用灵动岛弹窗播报给机主，你只需要像正常人一样说结果（如「我已经在微信上给Z发过去了哦」）。',
     '【工具优先】同一件事工具调用与 [手机操作:…] 标记都能做时，一律优先输出工具调用（标记只是旧通道兜底）；调用了工具就不要再输出同一操作的标记，避免重复执行。',
   ];
@@ -257,7 +277,6 @@ export function buildPhoneToolRules(): string[] {
 
 // ---------------- 兜底标记执行器（解析 + 硬 gate + Web 分发） ----------------
 
-const DENIED = { ok: false as const, text: '该能力已被机主在设置里关闭，无法执行' };
 const RETIRED = { ok: false as const, text: '真机底层操控已退役（不再调用 pm suspend / uiautomator）：这台手机里的所有 App 都活在网页里，请改用 Web 工具调用（sendWebMessage/postForum/playMusic/…）完成机主的请求' };
 /** v1.9.36：该命令只在真机模式下可用——当前范围选的是「网站里面」 */
 const RETIRED_WEB_ONLY = {
@@ -274,13 +293,9 @@ export async function executePhoneOp(argRaw: string): Promise<{ ok: boolean; tex
   const cmd = (parts.shift() ?? '').toLowerCase();
   const p = parts; // 剩余参数段
   if (!cmd) return { ok: false, text: '手机操作命令为空' };
-  const cfg = getAutonomyConfig();
-  if (!cfg.master) return DENIED;
-  const on = (k: string) => cfg.caps[k] === true;
 
   switch (cmd) {
     case '打开': {
-      if (!on('openapp')) return DENIED;
       const name = (p[0] ?? '').trim();
       if (!name) return { ok: false, text: '打开命令缺应用名（[手机操作:打开:应用名]）' };
       // 包名/中文名先走网页映射，映射不上交给 openScreenApp 的应用注册表
@@ -289,7 +304,6 @@ export async function executePhoneOp(argRaw: string): Promise<{ ok: boolean; tex
       return openScreenApp(name);
     }
     case '播歌': {
-      if (!on('music')) return DENIED;
       const q = argRaw.split(/[:：]/).slice(1).join(':').trim();
       if (!q) return { ok: false, text: '播歌缺歌名（[手机操作:播歌:歌名]，可带歌手名）' };
       const { toolPlayMusic } = await import('./web-tools');
@@ -297,17 +311,14 @@ export async function executePhoneOp(argRaw: string): Promise<{ ok: boolean; tex
       return { ok: r.ok, text: r.text.replace(/^【[^】]+】/, '') };
     }
     case '查后台': {
-      if (!on('recents')) return DENIED;
       const { webRecentReport } = await import('./web-usage-ledger');
       return { ok: true, text: await webRecentReport() };
     }
     case '使用时长': {
-      if (!on('usage')) return DENIED;
       const { webUsageReport } = await import('./web-usage-ledger');
       return { ok: true, text: webUsageReport() };
     }
     case '拉回': {
-      if (!on('pullback')) return DENIED;
       try {
         const { useUI } = await import('./store');
         const { readJealousyRuntime } = await import('./jealousy-lock');
@@ -324,7 +335,6 @@ export async function executePhoneOp(argRaw: string): Promise<{ ok: boolean; tex
     }
     case '冻结':
     case '解冻': {
-      if (!on('freeze') && !(cmd === '解冻' && p[0] && isJealousyUnlockAllowed(p[0]))) return DENIED;
       if (!p[0]) return { ok: false, text: `${cmd}命令缺应用名（[手机操作:${cmd}:应用名]）` };
       const { webAppOfPkg, setWebFrozen, getWebFrozen } = await import('./web-app-lock');
       const web = webAppOfPkg(p[0]);
@@ -352,7 +362,6 @@ export async function executePhoneOp(argRaw: string): Promise<{ ok: boolean; tex
     }
     case 'agent':
     case '智能体': {
-      if (!on('agent')) return { ok: false, text: '「智能体多步任务」能力未开启（设置 › 权限给予）' };
       const task = argRaw.split(/[:：]/).slice(1).join(':').trim();
       if (!task) return { ok: false, text: 'agent 缺任务描述（[手机操作:agent:一句话任务]）' };
       const { runAgentTask } = await import('./web-agent');
@@ -362,7 +371,6 @@ export async function executePhoneOp(argRaw: string): Promise<{ ok: boolean; tex
     // ---- 真机命令（v1.9.36：仅当 AI 动手范围 = 真机 时执行；网页模式仍「已退役」） ----
     case '真机打开': {
       if (getAiActionTarget() !== 'device') return RETIRED_WEB_ONLY;
-      if (!on('dopen')) return DENIED;
       const pkg = (p[0] ?? '').trim();
       if (!pkg) return { ok: false, text: '真机打开缺包名（[手机操作:真机打开:com.tencent.mm]）' };
       return runDevice(async (d) => d.labOpenApp(pkg));
@@ -370,7 +378,6 @@ export async function executePhoneOp(argRaw: string): Promise<{ ok: boolean; tex
     case '点文字':
     case '点按': {
       if (getAiActionTarget() !== 'device') return RETIRED_WEB_ONLY;
-      if (!on('dtap')) return DENIED;
       const x = Number(p[0]);
       const y = Number(p[1]);
       if (!Number.isFinite(x) || !Number.isFinite(y)) {
@@ -380,7 +387,6 @@ export async function executePhoneOp(argRaw: string): Promise<{ ok: boolean; tex
     }
     case '滑动': {
       if (getAiActionTarget() !== 'device') return RETIRED_WEB_ONLY;
-      if (!on('dswipe')) return DENIED;
       const a = (p[0] ?? '').trim();
       // 语义方向（上/下/左/右）：按真实屏分辨率自动算坐标
       if (['上', '下', '左', '右'].includes(a)) {
@@ -409,7 +415,6 @@ export async function executePhoneOp(argRaw: string): Promise<{ ok: boolean; tex
     }
     case '输入': {
       if (getAiActionTarget() !== 'device') return RETIRED_WEB_ONLY;
-      if (!on('dtype')) return DENIED;
       // 参数段里可能再含冒号：把剩余段原样拼回（保留原文）
       const text = argRaw.split(/[:：]/).slice(1).join(':').trim();
       if (!text) return { ok: false, text: '输入缺文字（[手机操作:输入:文字]）' };
@@ -417,7 +422,6 @@ export async function executePhoneOp(argRaw: string): Promise<{ ok: boolean; tex
     }
     case '按键': {
       if (getAiActionTarget() !== 'device') return RETIRED_WEB_ONLY;
-      if (!on('dkey')) return DENIED;
       const w = (p[0] ?? '').trim().toLowerCase();
       const { KEY_WORDS } = await import('./device-ops');
       const k = KEY_WORDS[w];
@@ -430,39 +434,32 @@ export async function executePhoneOp(argRaw: string): Promise<{ ok: boolean; tex
     case '读屏幕':
     case '截屏': {
       if (getAiActionTarget() !== 'device') return RETIRED_WEB_ONLY;
-      if (!on('dscreencap')) return DENIED;
       // 「看屏幕/读屏幕」= 截屏 + VLM 详细描述；「截屏」= 简述（信息量对人/AI 都够）
       return runDevice(async (d) => d.labLookScreen(cmd !== '截屏'));
     }
     case '前台': {
       if (getAiActionTarget() !== 'device') return RETIRED_WEB_ONLY;
-      if (!on('dinfo')) return DENIED;
       return runDevice(async (d) => d.labForegroundApp());
     }
     case '电量': {
       if (getAiActionTarget() !== 'device') return RETIRED_WEB_ONLY;
-      if (!on('dinfo')) return DENIED;
       return runDevice(async (d) => d.labBattery());
     }
     case '通知': {
       if (getAiActionTarget() !== 'device') return RETIRED_WEB_ONLY;
-      if (!on('dinfo')) return DENIED;
       return runDevice(async (d) => d.labNotificationSnapshot());
     }
     case '音量': {
       if (getAiActionTarget() !== 'device') return RETIRED_WEB_ONLY;
-      if (!on('dinfo')) return DENIED;
       // 无参=查；带数字=调
       const v = Number(p[0]);
       if (p[0] !== undefined && p[0] !== '' && Number.isFinite(v)) {
-        if (!on('dkey')) return { ok: false, text: '调音量需要同时开启「真机按键」能力' };
         return runDevice(async (d) => d.labSetVolume(v));
       }
       return runDevice(async (d) => d.labVolume());
     }
     case '强杀': {
       if (getAiActionTarget() !== 'device') return RETIRED_WEB_ONLY;
-      if (!on('dforcestop')) return DENIED;
       const pkg = (p[0] ?? '').trim();
       if (!pkg) return { ok: false, text: '强杀缺包名（[手机操作:强杀:包名]）' };
       return runDevice(async (d) => d.labForceStop(pkg));

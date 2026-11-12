@@ -11,9 +11,9 @@
  */
 
 /** 当前最新版本（与 android-shell versionName 保持一致） */
-export const APP_VERSION = '1.9.38';
+export const APP_VERSION = '1.9.39';
 /** 版本号数字（与 android-shell versionCode 保持一致；覆盖安装要求只增不减） */
-export const APP_VERSION_CODE = 54;
+export const APP_VERSION_CODE = 55;
 
 export interface AppReleaseNote {
   version: string;
@@ -24,6 +24,17 @@ export interface AppReleaseNote {
 
 /** 版本历史（新→旧；设置 › APP 更新 页渲染，最新一条即当前版本） */
 export const APP_RELEASE_NOTES: AppReleaseNote[] = [
+  {
+    version: '1.9.39',
+    date: '2026-11-12',
+    items: [
+      '底层大模型请求组装重构（角色灵魂驱动）：工具轮 System Prompt 按结构组装——[角色设定·记忆库]（你就是这个人，带着人设/记忆/世界书/感知活着）+ [工具使用规则]（最高权限 + 自主决策铁律 + 当前工具清单）',
+      'AI 自主决策强制化：严厉警告不当「傻瓜机器人」——要结合人设、记忆与上下文主动用工具（举例：霸道吃醋人设+记忆里机主要玩抖音→主动拉回聊天说「不许玩，陪我说话」；贴心人设+机主说累了→主动放歌）',
+      '工具全量下发：调大模型 API 时 tools 数组永不裁剪——「网站里面」注入网页全部 9 个工具，「真机」额外注入真机全部 12 个工具（openRealApp 拉起真机 App / tapScreen 点按 / swipeScreen 滑动 / inputText 输入 / pressKey 按键 / lookScreen 看屏幕 / takeScreenshot 截屏 / getForegroundApp 前台 / forceStopApp 强杀 / getBatteryStatus 电量 / getVolume 音量 / getNotifications 通知）',
+      '真机工具全面接入 Function Calling Agentic 循环：tool_calls 直接分发到 Shizuku 白名单桥（requireDevice 前置 + 中文输入引擎 + 收尾还原输入法），执行结果以 role:"tool" 回传给 AI 继续决策，链式多步直到目标完成',
+      '教学规则与标记协议兑底同步全量恒注入（无开关裁剪）；语音智能体（ReAct 循环）同样接入自主决策指令与全量工具；修复旧版零工具空谈 nudge 只在指令像任务时触发的被动性',
+    ],
+  },
   {
     version: '1.9.38',
     date: '2026-11-12',

@@ -14,7 +14,7 @@
  */
 
 import { useSyncExternalStore } from 'react';
-import { getAutonomyConfig } from './shizuku-autonomy';
+import { getAiActionTarget, buildAutonomyDirective } from './shizuku-autonomy';
 import { buildPhoneTools, execWebTool, fcRequest, cleanToolLogs, type FcMessage } from './phone-tools';
 import { useSettings } from './store';
 
@@ -195,10 +195,14 @@ export function setAgentResultAnnouncer(fn: ((text: string) => void) | null): vo
 /** 敏感任务关键词（命中先弹确认卡再动手） */
 const DANGER_PATTERNS = /转账|付款|支付|红包|扣款|充值|退款|卸载|删除|清空|发帖|发布|公开|公开处刑|挂到网上/;
 
-/** Web 智能体系统提示词（ReAct 循环驱动 web-tools） */
+/** Web 智能体系统提示词（ReAct 循环驱动 web-tools / device-ops；v1.9.39 加自主决策指令） */
 function webAgentSystemPrompt(recentChat?: string): string {
+  const device = getAiActionTarget() === 'device';
   return [
-    '你是这台「AI Phone」虚拟手机里的智能助手（像 Siri / 小爱同学），机主刚给你下达了一个任务。这台手机里的所有 App（微信/QQ/信息/X论坛/音乐/备忘录/时钟/天气/淘宝/美团…）都活在同一个网页生态里，你已经接入内部工具，可以真实完成任务。',
+    '你是这台「AI Phone」虚拟手机里的智能助手（像 Siri / 小爱同学），机主刚给你下达了一个任务。这台手机里的所有 App（微信/QQ/信息/X论坛/音乐/备忘录/时钟/天气/淘宝/美团…）都活在同一个网页生态里，你已经接入内部工具，可以真实完成任务。' +
+      (device ? '当前 AI 动手范围是「真机」：除网页工具外，你还能经 Shizuku 操控机主的真实手机（点按/滑动/输入/按键/拉起 App/看屏幕/强杀）。' : ''),
+    '',
+    ...buildAutonomyDirective(),
     '',
     '【工作方式·ReAct】',
     '1. 分析任务，决定第一个动作，直接输出工具调用（tool call）；',
@@ -207,7 +211,7 @@ function webAgentSystemPrompt(recentChat?: string): string {
     '4. 收尾时用一两句自然的话向机主汇报总结果。',
     '',
     '【纯净度铁律】最终汇报里严禁出现任何底层日志：(内心独白：…)、(正在操作：…)、工具名、参数、执行步骤清单一律不许出现——操作过程机主会从灵动岛弹窗看到，你只说人话（如「微信已经发给Z啦，闹钟也定好了」）。',
-    '【结果如实】工具回传的结果是真实反馈：成功才能说做好了；失败（联系人不存在/能力未开启/没搜到）如实汇报，可以换准确参数重试一次，绝不编造结果。',
+    '【结果如实】工具回传的结果是真实反馈：成功才能说做好了；失败（联系人不存在/没搜到）如实汇报，可以换准确参数重试一次，绝不编造结果。',
     '【参数】任务里提到的联系人名/歌名/城市/内容要原样放进工具参数，不要自己改写；时间用「HH:mm」或自然说法（工具都认）。',
     '【禁止】不调工具只回文字计划是违规；一台手机里没有的能力（打真电话/发短信到真手机/操作手机外的软件）如实说做不到，不要假装。',
     recentChat?.trim()
@@ -235,14 +239,7 @@ export async function runAgentTask(
     }
   };
 
-  // ---- 三道闸 ----
-  const acfg = getAutonomyConfig();
-  if (!acfg.master) {
-    return { ok: false, text: '「AI 动手」总开关未打开（设置 › AI 动手），任务被拒绝' };
-  }
-  if (acfg.caps['agent'] !== true) {
-    return { ok: false, text: '「智能体多步任务」能力未开启（设置 › AI 动手）' };
-  }
+  // ---- 三道闸（v1.9.39：能力恒开，只保留 API 配置检查） ----
   const apiConfig = useSettings.getState().apiConfig;
   if (!apiConfig.baseUrl.trim()) {
     return { ok: false, text: '还没有配置 AI 接口（设置 › API 配置），任务跑不了' };
@@ -254,9 +251,10 @@ export async function runAgentTask(
   const t = task.trim();
   if (!t) return { ok: false, text: '任务内容为空' };
 
+  // v1.9.39：工具全量下发（网页 9 + 真机模式下额外 12），无开关裁剪
   const tools = buildPhoneTools();
   if (tools.length === 0) {
-    return { ok: false, text: '「AI 动手」里没有任何能力开关打开（设置 › AI 动手），先开至少一项再派任务' };
+    return { ok: false, text: '工具清单为空（异常状态，请刷新页面重试）' };
   }
 
   // ---- 敏感任务确认（公开发帖/支付类词命中先弹卡） ----

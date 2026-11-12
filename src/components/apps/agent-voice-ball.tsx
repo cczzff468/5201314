@@ -40,7 +40,6 @@ import { Loader2, Mic, Plus, Square, X } from 'lucide-react';
 import { useUI } from '@/lib/ios/store';
 import { useIncomingCall } from '@/lib/ios/incoming-call';
 import { useOfflineAsr } from '@/lib/ios/offline-asr';
-import { getAutonomyConfig } from '@/lib/ios/shizuku-autonomy';
 import { isNativePerception, requestMicPermission } from '@/lib/ios/native-perception';
 import {
   useAgentVoice,
@@ -164,8 +163,8 @@ export default function AgentVoiceBall() {
         setAutoOn(true);
         return;
       }
-      const c = getAutonomyConfig();
-      setAutoOn(c.master && c.caps['agent'] === true);
+      // v1.9.39：AI 动手能力恒开（无开关）——agent 能力视为常开
+      setAutoOn(true);
     };
     check();
     const t = window.setInterval(check, 1200);
