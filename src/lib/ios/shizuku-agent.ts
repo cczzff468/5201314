@@ -39,6 +39,21 @@
  *    包名、tap/key 类两次 dump 采样比对）+ 尾段并行预取下一步观察所需 dump」；上限沿用
  *    原值、失败/急停语义不变。视觉验证的 screencap→visionAsk 数据依赖链保持串行
  *    （判定正确性优先，见 settleAfterStep / visualVerifyStep 注释）。
+ *
+ * v1.10 ReAct 多步连续执行（Agentic Loop 重构）——用户实测「去 QQ 给第一个人发信息」
+ * 只打开 QQ 没有后续，根治「单步执行」问题：
+ *  - 「一次规划多步盲执行」改为「每轮一个动作」的严格 ReAct 循环：每执行一步就重新
+ *    观察屏幕回传 LLM，逼它基于最新界面输出下一步，直到任务真正完成；
+ *  - 完成声明硬闸（代码级，非仅提示词）：发消息类任务必须「已输入+已发送」、写入类
+ *    任务必须「已输入」才允许宣布完成；刚打开 App 就宣布完成会被系统拦截强制继续，
+ *    连拦 3 次仍无证据 → 如实报失败；
+ *  - 完成后仍走验收轮（v1.7.2 语义保留）：证据闸 → 重新观察 + 验收模式核对 →
+ *    双确认才收任务；
+ *  - 开屏广告/弹窗自动容错：观察后自动点「跳过/我知道了/以后再说/同意并继续」等常见
+ *    关闭按钮（≤4 次/任务），点掉后不消耗 LLM 决策；
+ *  - 视觉兜底：连续 2 次点击类失败 → 自动截图 + VLM 分析屏幕（可点元素+像素坐标）
+ *    喂给下一轮决策；新增 lookScreenshot 动作让 LLM 主动截图分析（控件树抓不到时）；
+ *  - 历史消息改「观察=user / 执行结果=assistant」的真实 ReAct 交替序列，决策更稳。
  */
 
 import { useSyncExternalStore } from 'react';
@@ -374,8 +389,8 @@ export function summarizeUi(nodes: UiNode[], maxLines = 70): string {
     rows.push({ line, clickable: n.clickable });
   }
   if (rows.length === 0) return '（屏幕上没有可读元素）';
-  // 稳定排序（同优先级保持文档顺序 ≈ 界面自上而下）
-  rows.sort((a, b) => Number(b.clickable) - Number(a.clickable));
+  // v1.10：保持文档顺序（≈界面自上而下）不再把可点元素排前——「第一个人/第一项」这类
+  // 位置语义靠顺序才好判；可点性已由行首 [可点] 标注，排序增益不再必要
   const shown = rows.slice(0, maxLines).map((r) => r.line);
   const tail = rows.length > maxLines ? `\n（还有 ${rows.length - maxLines} 个节点未列出）` : '';
   return `共 ${nodes.length} 个节点，有效 ${rows.length} 个：\n${shown.join('\n')}${tail}`;
@@ -591,6 +606,113 @@ function hashDumpXml(s: string): string {
     h2 = Math.imul(h2 + c, 0x85ebca6b);
   }
   return `${(h1 >>> 0).toString(16)}-${(h2 >>> 0).toString(16)}`;
+}
+
+// ============================================================
+// B4c. ReAct 组件（v1.10）：视觉观察 / 任务证据分类 / 广告自动关 / 预算护栏
+// ============================================================
+
+/** 当前任务文本（lookScreenshot 的视觉提问带任务上下文；runAgentTask 里赋值/清空） */
+let activeTaskText = '';
+
+// ---------------- ReAct 预算与护栏常量 ----------------
+/** LLM 决策调用预算（略高于动作预算：覆盖验收/重试/放弃说明等无动作调用） */
+const REACT_LLM_CALL_BUDGET = 42;
+/** 完成声明被证据闸拦截的次数上限（超过 → 如实报失败，防「没证据却反复宣布完成」） */
+const REACT_DONE_REJECT_LIMIT = 3;
+/** 自动关开屏广告/弹窗的次数上限（每任务） */
+const REACT_AUTO_AD_LIMIT = 4;
+/** 自动截图视觉兜底的次数上限（每任务） */
+const REACT_AUTO_VISION_LIMIT = 3;
+/** 连续点击类失败多少次后触发自动截图视觉兜底 */
+const CLICK_FAIL_VISION_THRESHOLD = 2;
+/** 计入连败 streak 的点击类动作 */
+const CLICK_STREAK_ACTIONS = new Set(['clickElement', 'tapPoint', 'uiClick', 'longPress', 'doubleClick']);
+
+/** 视觉观察提问词（截图 + VLM：界面描述 + 可点元素像素坐标） */
+function visionScreenAsk(task: string): string {
+  return [
+    '这是一台安卓手机的实时截图，请分析当前屏幕并紧凑输出：',
+    '1. 当前是什么界面/页面（一句话）。',
+    '2. 主要可点元素（按钮/输入框/列表项/关闭X图标）及其在截图上的像素坐标，每行格式：元素名 (x,y)。',
+    '3. 如有开屏广告/弹窗，明确指出其关闭按钮坐标。',
+    task ? `用户正在执行的任务：「${task.slice(0, 60)}」，优先分析与任务相关的元素（联系人/输入框/发送等）。` : '',
+    '坐标一律用截图原始像素；不要猜测画面上看不见的内容。',
+  ]
+    .filter(Boolean)
+    .join('\n');
+}
+
+/** 截图 + VLM 视觉观察（连败自动兜底与 lookScreenshot 动作共用）；失败返回 null 不拖垮任务 */
+async function visualObserveScreen(task: string): Promise<string | null> {
+  if (!isCapEnabled('screencap')) return null;
+  try {
+    const shot = await labScreencap();
+    if (!shot.ok || !shot.image) return null;
+    const out = await visionAsk(shot.image, visionScreenAsk(task), 22_000);
+    const s = out.trim();
+    return s ? s.slice(0, 1600) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** 任务完成证据分类：send=必须「已输入+已发送」；input=必须「已输入」；none=无硬性要求 */
+type TaskEvidence = 'send' | 'input' | 'none';
+
+function classifyTask(t: string): TaskEvidence {
+  if (/发(送|出)?(个|条|点)?(消息|信息|内容|文字)|发过去|发一?下|给她?发|给他?发|回(个|一)?(消息|信息)/.test(t)) return 'send';
+  if (/输入|写一?下|写个|记一?下|记个|添加|新建|建一?个|搜(索|一?下)|修改|编辑|备注/.test(t)) return 'input';
+  return 'none';
+}
+
+/** 完成证据闸（代码级硬闸）：LLM 宣布完成时核对执行轨迹里的证据，不齐直接驳回 */
+function completionGate(kind: TaskEvidence, inputDone: boolean, sendDone: boolean, actions: number): { ok: boolean; text: string } {
+  if (actions === 0) return { ok: false, text: '还没有执行任何操作' };
+  if (kind === 'send') {
+    if (!inputDone) return { ok: false, text: '消息内容尚未输入到输入框' };
+    if (!sendDone) return { ok: false, text: '内容已输入但尚未发送（缺发送动作：点「发送」按钮或按回车）' };
+  }
+  if (kind === 'input' && !inputDone) return { ok: false, text: '内容尚未输入' };
+  return { ok: true, text: '' };
+}
+
+/** 开屏广告/常见弹窗关闭按钮文案（exact 匹配；≤12 字防误伤大段正文） */
+const AD_DISMISS_EXACT = new Set([
+  '跳过',
+  '跳过广告',
+  '我知道了',
+  '知道了',
+  '以后再说',
+  '稍后再说',
+  '同意并继续',
+  '同意并进入',
+  '暂不升级',
+  '暂不开启',
+  '暂不设置',
+  '暂不使用',
+  '跳过教程',
+  '关闭广告',
+]);
+
+function isAdDismissText(s: string): boolean {
+  const x = s.trim();
+  if (!x || x.length > 12) return false;
+  if (AD_DISMISS_EXACT.has(x)) return true;
+  return /^跳过\s*\d+\s*s?$/i.test(x); // 「跳过 3 / 跳过 3s」倒计时按钮
+}
+
+/** 在节点表里找开屏弹窗关闭按钮（可点 + 文案命中 + 避开与上次相同按钮防死循环） */
+function findAdDismiss(nodes: UiNode[], last: string): { label: string; cx: number; cy: number } | null {
+  let best: { label: string; cx: number; cy: number; area: number } | null = null;
+  for (const n of nodes) {
+    if (!n.clickable) continue;
+    const label = (n.text && n.text.trim()) || (n.desc && n.desc.trim()) || '';
+    if (!label || label === last || !isAdDismissText(label)) continue;
+    const area = n.w * n.h;
+    if (!best || area < best.area) best = { label, cx: n.cx, cy: n.cy, area };
+  }
+  return best;
 }
 
 // ============================================================
@@ -1208,6 +1330,25 @@ export async function execAgentStep(step: AgentStep): Promise<StepResult> {
         r = { ok: true, text: obs.summary };
         break;
       }
+      case 'lookScreenshot': {
+        // v1.10 视觉观察：截图 + VLM 分析屏幕（控件树抓不到目标时的兜底；只读不失效缓存）
+        if (!isCapEnabled('screencap')) {
+          r = { ok: false, text: '截图观察需要「看见·看屏幕」能力（设置 › AI 动手），当前未开启' };
+          break;
+        }
+        const shot = await labScreencap();
+        if (!shot.ok || !shot.image) {
+          r = { ok: false, text: `截图失败：${shot.text || '截图桥无响应'}` };
+          break;
+        }
+        try {
+          const out = await visionAsk(shot.image, visionScreenAsk(activeTaskText), 22_000);
+          r = { ok: true, text: `【视觉观察】${out.trim().slice(0, 1600)}` };
+        } catch {
+          r = { ok: false, text: '视觉观察失败：识图接口无响应/超时（检查 设置›API 配置 的识图模型）' };
+        }
+        break;
+      }
       // ---- v1.7.0 应用内界面动作（DOM 级，不设单项能力闸——任务级 agent 闸已覆盖）----
       case 'openScreen':
         r = await openScreenApp(args);
@@ -1229,7 +1370,7 @@ export async function execAgentStep(step: AgentStep): Promise<StepResult> {
       default:
         r = {
           ok: false,
-          text: `未知动作「${action}」（可用：openApp/clickElement/tapPoint/inputTextToFocus/pressEnter/pressDelete/back/scroll/wait/lookScreen/longPress/doubleClick/drag/openScreen/uiObserve/uiClick/uiType/uiScroll）`,
+          text: `未知动作「${action}」（可用：openApp/clickElement/tapPoint/inputTextToFocus/pressEnter/pressDelete/back/scroll/wait/lookScreen/lookScreenshot/longPress/doubleClick/drag/openScreen/uiObserve/uiClick/uiType/uiScroll）`,
         };
     }
   } catch (e) {
@@ -1288,7 +1429,7 @@ export async function agentClickText(target: string): Promise<StepResult> {
 }
 
 // ============================================================
-// B6. LLM 规划（/api/chat 纯文本流 → 严格 JSON 计划）
+// B6. LLM ReAct 决策（/api/chat 纯文本流 → 严格 JSON：单动作 / 完成声明 / 放弃说明）
 // ============================================================
 
 export interface AgentCtx {
@@ -1310,41 +1451,47 @@ interface AgentHistoryEntry {
   ok?: boolean;
 }
 
-interface AgentPlan {
-  say?: string;
-  plan?: AgentStep[];
+interface AgentDecision {
+  say: string;
+  /** 本轮要执行的单个动作（ReAct：每轮一个；老格式 plan 数组只取第一步） */
+  step?: AgentStep;
+  /** LLM 宣布任务完成（note 以 TASK_DONE 开头或 done:true 且无动作）——需过证据闸 + 验收轮双确认 */
+  done?: boolean;
   note?: string;
+  /** 老格式 plan 数组被丢弃的后续步数（喂回提示：教模型每轮只输出一个动作） */
+  dropped?: number;
 }
 
-/** 动作语法表（与 execAgentStep 的 switch 一一对应） */
-const AGENT_ACTIONS_DOC = `可用动作（plan 数组元素，args 一律 string，哪怕是数字/坐标）：
-1. {"action":"openApp","args":"com.tencent.mm"} —— 打开 App（填包名；不确定包名先 lookScreen 看桌面图标或失败反馈里找线索）
-2. {"action":"clickElement","args":"搜索"} —— 看屏幕找含该文字/描述的可点元素并点它（首选动作，别瞎猜坐标）
-3. {"action":"inputTextToFocus","args":"你好呀"} —— 向已聚焦的输入框输入文字（中英文均可；必须先 clickElement 点输入框使其聚焦）
-4. {"action":"pressEnter","args":""} —— 按回车键（发送消息/确认搜索）
-5. {"action":"pressDelete","args":""} —— 按删除键（清输入框旧内容时逐字删）
-6. {"action":"tapPoint","args":"540,1200"} —— 直接按坐标点（clickElement 找不到时的兜底；坐标只来自观察反馈里的元素信息）
-7. {"action":"scroll","args":"下"} —— 语义滑动翻页（上/下/左/右）
-8. {"action":"back","args":""} —— 按返回键
-9. {"action":"wait","args":"3000"} —— 等待毫秒数（等页面加载/动画落定，200~10000）
-10. {"action":"lookScreen","args":""} —— 观察当前屏幕（结果在下一轮反馈里给你，不确定界面就先用它）
-11. {"action":"longPress","args":"消息"} —— 长按（原地按住 800ms）：长按聊天消息弹菜单、长按图标呼出副选项；args 同 clickElement（文字目标或 "x,y"）
-12. {"action":"doubleClick","args":"540,1200"} —— 双击（两次快速点击）：双击点赞、双击快进；args 同 clickElement（文字目标或 "x,y"）
-13. {"action":"drag","args":"200,1800,880,1800,700"} —— 拖拽：拖进度条/音量滑块/侧边栏/卡片排序；args "x1,y1,x2,y2[,毫秒]"（默认 700ms，坐标只来自观察反馈里的元素信息）
+/** 动作语法表（与 execAgentStep 的 switch 一一对应；v1.10：每轮只选一个动作） */
+const AGENT_ACTIONS_DOC = `可用动作（每轮只输出一个；args 一律 string，哪怕是数字/坐标）：
+1. {"action":"openApp","args":"com.tencent.mm"} —— 打开 App（填包名；不确定包名先观察桌面/失败反馈找线索）
+2. {"action":"clickElement","args":"搜索"} —— 看屏幕找含该文字/描述的可点元素并点它（首选点击方式，别瞎猜坐标）
+3. {"action":"lookScreen","args":""} —— 读当前屏幕（控件树摘要：可见元素+坐标）；不确定界面就先用它
+4. {"action":"lookScreenshot","args":""} —— 截图交视觉模型分析（控件树抓不到目标/纯图标界面时用；返回界面描述与可点元素像素坐标，供 tapPoint 用）
+5. {"action":"tapPoint","args":"540,1200"} —— 直接按坐标点（clickElement 找不到时的兜底；坐标只来自观察反馈/视觉观察，禁止瞎猜）
+6. {"action":"inputTextToFocus","args":"你好呀"} —— 向已聚焦的输入框输入文字（中英文均可；必须先点输入框使其聚焦）
+7. {"action":"pressEnter","args":""} —— 按回车键（发送消息/确认搜索）
+8. {"action":"pressDelete","args":""} —— 按删除键（清输入框旧内容时逐字删）
+9. {"action":"scroll","args":"下"} —— 语义滑动翻页（上/下/左/右）
+10. {"action":"back","args":""} —— 按返回键（关弹窗；可能直接退出 App，慎用）
+11. {"action":"wait","args":"3000"} —— 等待毫秒数（等页面加载/动画落定，200~10000）
+12. {"action":"longPress","args":"消息"} —— 长按（原地按住 800ms）：长按聊天消息弹菜单、长按图标呼出副选项；args 同 clickElement（文字目标或 "x,y"）
+13. {"action":"doubleClick","args":"540,1200"} —— 双击（两次快速点击）：双击点赞、双击快进；args 同 clickElement（文字目标或 "x,y"）
+14. {"action":"drag","args":"200,1800,880,1800,700"} —— 拖拽：拖进度条/音量滑块/侧边栏/卡片排序；args "x1,y1,x2,y2[,毫秒]"（默认 700ms，坐标只来自观察反馈里的元素信息）
 ——以下为「机主手机内应用界面」动作（虚拟手机里渲染的 App：微信/淘宝/联系人/备忘录/美团等）——
-14. {"action":"openScreen","args":"contacts"} —— 打开机主手机里的应用界面。args 填应用 id 或中文名：${SCREEN_APPS_DOC}。【凡是「这台手机里的应用」的任务（建联系人/发消息/写备忘录/写提醒/搜商品/下单等）一律优先 openScreen + uiClick/uiType，不要用系统级 openApp】
-15. {"action":"uiObserve","args":""} —— 观察当前应用界面：返回可点元素清单与输入框清单（uiClick 的 args 照抄清单文字）；进任何应用后先用它看一眼
-16. {"action":"uiClick","args":"新建联系人"} —— 点击当前应用界面里文字匹配的元素（按钮/列表项/标签页/输入框聚焦）
-17. {"action":"uiType","args":"要输入的文字"} —— 向已聚焦的输入框输入文字（替换旧内容；先 uiClick 点输入框聚焦）
-18. {"action":"uiScroll","args":"下"} —— 在当前应用界面里滚动翻页（上/下/左/右）`;
+15. {"action":"openScreen","args":"contacts"} —— 打开机主手机里的应用界面。args 填应用 id 或中文名：${SCREEN_APPS_DOC}。【凡是「这台手机里的应用」的任务（建联系人/发消息/写备忘录/写提醒/搜商品/下单等）一律优先 openScreen + uiClick/uiType，不要用系统级 openApp】
+16. {"action":"uiObserve","args":""} —— 观察当前应用界面：返回可点元素清单与输入框清单（uiClick 的 args 照抄清单文字）；进任何应用后先用它看一眼
+17. {"action":"uiClick","args":"新建联系人"} —— 点击当前应用界面里文字匹配的元素（按钮/列表项/标签页/输入框聚焦）
+18. {"action":"uiType","args":"要输入的文字"} —— 向已聚焦的输入框输入文字（替换旧内容；先 uiClick 点输入框聚焦）
+19. {"action":"uiScroll","args":"下"} —— 在当前应用界面里滚动翻页（上/下/左/右）`;
 
-/** 组装 Agent 规划的 system prompt（人设/记忆注入 + 行为准则 + 语法表 + 输出格式）。
- *  verifying=true 时进入「验收模式」：上一轮计划已全部执行成功，要求 LLM 对照任务目标
- *  核对最新界面——真正达成才输出 TASK_DONE 空计划，没达成就给补救计划（v1.7.2 防虚报完成）。 */
+/** 组装 Agent 的 system prompt（人设/记忆注入 + ReAct 行为准则 + 语法表 + 输出格式）。
+ *  verifying=true 时进入「验收模式」：LLM 刚宣布完成，要求对照任务目标核对最新屏幕观察——
+ *  证据确凿才再次 TASK_DONE，否则输出补救动作继续（v1.10：单动作 ReAct）。 */
 function buildAgentSystemPrompt(ctx: AgentCtx | undefined, verifying = false): string {
   const owner = ctx?.ownerName?.trim() || '机主';
   const lines: string[] = [];
-  lines.push(`你是「${owner}」的手机智能体（Mobile Agent），直接操控 ${owner} 的真实手机完成任务——你输出的每个动作都会真实执行，成功与否都会如实反馈给你。`);
+  lines.push(`你是「${owner}」的手机智能体（Mobile Agent），以 ReAct 多步连续执行的方式操控 ${owner} 的真实手机完成任务——你每轮输出一个动作，系统真实执行后把最新屏幕观察回传给你，你再输出下一个动作，循环往复直到任务真正完成。屏幕观察是你每一步决策的唯一事实依据，绝不凭空想象界面。`);
   if (ctx?.peerName?.trim()) {
     lines.push(`当前对话对象是「${ctx.peerName.trim()}」：涉及给某人发消息类任务时，对象默认是 ta（界面上按名字找联系人）。`);
   }
@@ -1359,35 +1506,34 @@ function buildAgentSystemPrompt(ctx: AgentCtx | undefined, verifying = false): s
   }
   if (verifying) {
     lines.push(
-      '【任务验收（本轮只核对，不轻易动手）】上一轮计划的步骤都已执行成功，但「动作成功」不等于「任务完成」。请对照任务目标检查最新屏幕观察：',
-      '- 任务目标已真正达成（成品已出现在界面上：如备忘录列表里能看到刚记的那条内容、联系人列表有新联系人、消息已发出）→ 输出空计划并给 note，note 必须以 TASK_DONE 开头，后接一句话结果，say 用你的语气播报结果。',
-      '- 目标没达成/只做了一半（内容没输入、没保存、点错了按钮、界面停在中间态等）→ 正常输出补救计划（先 uiObserve 看清界面再纠正），不要输出 TASK_DONE。',
-      '- 【补救优先级】如果上一轮已经输入了内容但还没点保存/完成/发送：补救计划的第一步就是点保存（uiClick 保存/完成/发送/对勾），再 uiObserve 核对成品出现，不要重新走一遍已完成的步骤。',
+      '【任务验收（本轮只核对，不轻易动手）】你刚宣布了任务完成，但「动作成功」不等于「任务完成」。请对照任务目标检查最新屏幕观察：',
+      '- 证据确凿（成品已出现在界面上：备忘录列表能看到刚记的那条内容、联系人列表有新联系人、消息已出现在会话流里）→ 再次宣布完成：输出 {"say":"结果播报","note":"TASK_DONE: 一句话证据"}（不带 action）。',
+      '- 证据不足/只做了一半（内容没输入、没点发送、点错了按钮、界面停在中间态等）→ 输出补救动作继续执行（先 uiObserve/lookScreen 看清界面再纠正），不要输出 TASK_DONE。',
+      '- 【补救优先级】内容已输入但还没点保存/完成/发送：第一个动作就点保存（uiClick 保存/完成/发送/对勾）或 pressEnter，再观察核对成品出现，不要重走已完成的步骤。',
       '- 宁可多补救一轮，也不许在成品没出现时报完成。',
     );
   }
   lines.push(
-    '【行为准则】',
-    '- 一次规划 3~10 步，每步动作最小化（一步只做一件事），并把完成整个任务所需的全部步骤放进同一次 plan——包括最后的保存/发送与成品核对，不要拆到下一轮。',
-    '- 【两类任务分清】任务发生在「机主手机里的应用」（微信/信息/QQ/淘宝/美团/联系人/备忘录/提醒事项/日历/浏览器/天气/音乐/设置等这台手机内渲染的界面）→ 用 openScreen 打开 + uiObserve 观察 + uiClick/uiType/uiScroll 操作；只有操作 Android 系统级真实应用（虚拟手机之外的真实桌面 App）才用 openApp(包名)+clickElement 等。',
-    '- 应用内任务的标准流程：openScreen 打开 → uiObserve 看界面 → 按清单 uiClick（按钮/列表项/输入框）→ uiType 输入 → 需要时 pressEnter（聚焦输入框发消息等效）→ 再 uiObserve 核对结果。uiClick/uiType 的反馈会告诉你点到了什么/输了什么。',
-    '- 【uiClick 的 args 必须照抄 uiObserve 清单里的完整文字，一字不差】界面同时有「新建文件夹」「新建备忘录」时，写「新建」会点错——必须写全称。含图标按钮以清单文字为准，禁止自创缩写。',
-    '- 例（建联系人）：openScreen contacts → uiObserve → uiClick「+」或「新建」→ uiClick 姓名输入框 → uiType 名字 → uiClick 人设/性格输入框 → uiType 性格描述 → uiClick「保存/完成」→ uiObserve 核对。界面和示例不符时以 uiObserve 实际返回为准。',
+    '【多步任务铁律（最高优先级，不可违反）】打开 App 只是第一步，绝不等于任务完成！发消息/输入/点击/选择/搜索等操作类任务，必须通过观察屏幕不断点击、滑动、输入，直到目标真正达成（消息已发出、内容已出现在界面上）。刚打开 App 就宣布完成是严重错误——系统会核对完成证据并拦截没有证据的完成声明，强制你继续执行。任务完成前绝不允许输出 TASK_DONE。',
+    '【发消息类任务的标准拆解（一步都不能少）】① openApp 打开目标 App → ② 观察屏幕处理开屏广告/弹窗 → ③ 点击目标联系人/会话（名字从观察清单里照抄）→ ④ 点击输入框使其聚焦 → ⑤ inputTextToFocus 输入内容 → ⑥ 点「发送」按钮或 pressEnter → ⑦ 再观察核对消息已出现在会话里。以上任何一步缺失都不算完成。',
+    '【开屏广告/弹窗容错】刚打开 App 常有开屏广告、隐私弹窗：优先 clickElement 点「跳过/关闭/我知道了/以后再说」；找不到文字按钮（纯图标 X）就 lookScreenshot 让视觉模型拿坐标再 tapPoint；仍不行才 back（小心直接退出 App）。系统也会自动点常见关闭按钮，观察反馈里会标注「系统自动」。',
+    '【视觉兜底】控件树抓不到目标（列表是纯图片、按钮无文字）时必须改用 lookScreenshot 截图分析屏幕、拿可点元素的像素坐标，再用 tapPoint 点击。连续两次点击失败后系统也会自动截图分析一次。',
+    '【两类任务分清】任务发生在「机主手机里的应用」（这台手机内渲染的界面：微信/信息/QQ/淘宝/美团/联系人/备忘录/提醒事项/日历/浏览器/天气/音乐/设置等）→ 用 openScreen 打开 + uiObserve 观察 + uiClick/uiType/uiScroll 操作；操作 Android 系统级真实应用（虚拟手机之外的真实桌面 App）才用 openApp(包名) + clickElement/inputTextToFocus 等。',
+    '【应用内界面标准流程】openScreen 打开 → uiObserve 看清单 → uiClick（args 必须照抄清单完整文字，一字不差——界面同时有「新建文件夹」「新建备忘录」时写「新建」会点错）→ uiType 输入 → 点保存/完成/发送（或 pressEnter）→ uiObserve 核对成品出现。uiClick 反馈出现「另有相近元素」提示时立即用完整名称重试正确目标。',
     '- 例（记备忘录）：openScreen notes → uiObserve → uiClick「新建备忘录」（不是「新建文件夹」）→ uiClick 标题/正文输入框 → uiType「要记的内容」→ uiClick「保存/完成/对勾」→ uiObserve 核对列表出现这条内容。界面和示例不符时以 uiObserve 实际返回为准。',
-    '- 【完成标准（写入类任务）】内容必须真正输入且结果出现在界面上才算完成：备忘录要看到列表里那条内容、消息要看到进入会话、提醒要看到条目存在。界面停在输入框/抽屉/弹窗=没完成，继续操作直到成品出现；计划最后一步必须是 uiObserve 核对。',
-    '- 【保存铁律（最高优先级）】需要输入内容/填表的任务：uiType 输入完成后，同一次 plan 里必须接着点「保存/完成/发送/对勾」按钮（或 pressEnter），绝不把保存动作留到下一轮——「输入了内容却没保存」等同任务失败。新建/编辑类界面通常保存按钮在右上角或底部工具栏，找不到就先 uiObserve 看全界面元素再点；「保存」找不到就点「完成/对勾」——备忘录等编辑器输入即自动保存，点完成即收尾。',
-    '- 【按钮看不到就重看】uiObserve 清单里没出现预期的按钮时（刚转场/浮层恰好盖住），先再 uiObserve 一次再定；绝不因「没看到保存/完成按钮」就空手报告完成——重新观察、换词重试（完成/对勾/✓/保存），直到成品出现或如实说明卡点。',
-    '- 操作输入框前必须先 clickElement/uiClick 点输入框使其聚焦，才能 inputTextToFocus/uiType；发送消息用 pressEnter。',
+    '- 操作输入框前必须先 clickElement/uiClick 点输入框使其聚焦，才能 inputTextToFocus/uiType；发送消息用 pressEnter 或点「发送」。',
     '- 输入框里有旧内容时：uiType 会整体替换旧内容；系统级输入框优先找界面上的清空/清除类按钮，没有就连续 pressDelete 逐字删（按旧内容长度控制次数，别无限删）。',
-    '- 上一步失败时，失败反馈里通常带着当前界面与可见元素线索——换策略（换匹配文字、先 scroll/uiScroll 翻页、改 tapPoint、先 lookScreen/uiObserve），不要原样重试。uiClick 反馈里出现「另有相近元素」提示时，说明你可能点到了相近但错误的按钮——立即用完整名称重试正确目标。',
-    '- 不要编造屏幕上没有的元素文字；目标可能不在当前页，先 scroll/uiScroll 翻页再找；不确定当前界面就先 lookScreen/uiObserve。',
-    '- 涉及转账/付款/红包/充值/卸载/删除/关闭网络等敏感动作：该步必须加 "dangerous":true（系统会先征求机主同意）。',
-    '- 规划要贴合机主的意图与你的性格（见人设），say 播报用你的语气自然说，不要复述命令格式。',
+    '【完成标准】只有最新观察里出现成品证据才允许宣布完成（消息出现在会话流/列表出现新条目/内容已保存显示）。拿不准就再观察一轮——宁可多做一步，不可虚报完成。',
+    '【失败重试】上一步失败时反馈里带着当前界面与可见元素线索——换策略（换匹配文字、scroll/uiScroll 翻页、先 lookScreen/uiObserve 观察、改 tapPoint），不要原样重试；不要编造屏幕上没有的元素文字；目标可能不在当前页，先翻页再找。',
+    '涉及转账/付款/红包/充值/卸载/删除/关闭网络等敏感动作：该动作必须加 "dangerous":true（系统会先征求机主同意）。',
+    'say 播报用你的语气自然说（贴合人设），不要复述命令格式。',
     '【动作语法表】',
     AGENT_ACTIONS_DOC,
     '【输出格式】严格输出一个 JSON 对象，前后不带任何其他文字、不用 markdown 代码块包裹：',
-    '{"say":"给用户看的进度播报（用你的语气，一句话）","plan":[{"action":"openScreen","args":"wechat","why":"打开微信"},{"action":"uiObserve","args":"","why":"看界面"}]}',
-    '- 每步可带 "why"（一句话给机主看的理由）；plan 为空数组时必须给 "note"（验收通过时以 TASK_DONE 开头；做不了/不用做时一句话解释原因）。',
+    '{"say":"给机主的进度播报（用你的语气，一句话）","action":{"action":"clickElement","args":"跳过","why":"关闭开屏广告"}}',
+    '- 每轮只输出一个动作（一个 action 对象，可带 why）；后续动作等执行结果与新观察回来后再决定。',
+    '- 任务完成：不带 action，输出 {"say":"结果播报","note":"TASK_DONE: 一句话证据"}。',
+    '- 确实做不了/不用做：不带 action，输出 {"say":"说明","note":"一句话卡点原因"}。',
     '- args 一律 string；不要输出动作表以外的动作名。',
   );
   return lines.join('\n');
@@ -1419,8 +1565,18 @@ const ACTION_ALIASES: Record<string, string> = {
   等待: 'wait',
   look: 'lookScreen',
   observe: 'lookScreen',
-  screenshot: 'lookScreen',
   看屏幕: 'lookScreen',
+  lookss: 'lookScreenshot',
+  lookscreenshot: 'lookScreenshot',
+  look_screenshot: 'lookScreenshot',
+  screenshot_look: 'lookScreenshot',
+  screenshot: 'lookScreenshot',
+  截图: 'lookScreenshot',
+  截屏: 'lookScreenshot',
+  截图观察: 'lookScreenshot',
+  视觉观察: 'lookScreenshot',
+  识屏: 'lookScreenshot',
+  看截图: 'lookScreenshot',
   long_press: 'longPress',
   长按: 'longPress',
   doubleclick: 'doubleClick',
@@ -1453,51 +1609,79 @@ const ACTION_ALIASES: Record<string, string> = {
   翻页: 'uiScroll',
 };
 
-function normalizePlan(obj: Record<string, unknown>): AgentPlan | null {
-  const plan: AgentStep[] = [];
-  if (Array.isArray(obj.plan)) {
-    for (const it of obj.plan) {
-      if (!it || typeof it !== 'object') continue;
-      const rec = it as Record<string, unknown>;
-      const raw = typeof rec.action === 'string' ? rec.action.trim() : '';
-      if (!raw) continue;
-      const action = ACTION_ALIASES[raw.toLowerCase()] ?? raw;
-      const args = typeof rec.args === 'string' ? rec.args : rec.args == null ? '' : String(rec.args);
-      plan.push({
-        action,
-        args,
-        dangerous: rec.dangerous === true,
-        why: typeof rec.why === 'string' && rec.why.trim() ? rec.why.trim() : undefined,
-      });
-      if (plan.length >= 12) break; // 上限保护（教学是 3~8 步）
-    }
-  }
+/**
+ * LLM 决策 JSON → AgentDecision（宽松归一，v1.10）：
+ *  - {"say","action":{…}} 单动作（ReAct 规范格式）；
+ *  - {"action":"…","args":"…"} 顶层平铺格式（常见变体）；
+ *  - {"say","plan":[…]} 老格式多步计划：只取第一步执行，丢弃数记入 dropped（喂回教学）；
+ *  - note 以 TASK_DONE 开头或 done:true 且无动作 → done=true（完成声明，证据闸+验收轮把关）。
+ */
+function normalizeDecision(obj: Record<string, unknown>): AgentDecision | null {
   const say = typeof obj.say === 'string' ? obj.say.trim() : '';
   const note = typeof obj.note === 'string' ? obj.note.trim() : '';
-  if (plan.length === 0 && !say && !note) return null;
-  return { say, plan, note };
+  let step: AgentStep | undefined;
+  let dropped = 0;
+
+  const normStep = (rec: Record<string, unknown>): AgentStep | null => {
+    const raw = typeof rec.action === 'string' ? rec.action.trim() : '';
+    if (!raw) return null;
+    const action = ACTION_ALIASES[raw.toLowerCase()] ?? raw;
+    const args = typeof rec.args === 'string' ? rec.args : rec.args == null ? '' : String(rec.args);
+    return {
+      action,
+      args,
+      dangerous: rec.dangerous === true,
+      why: typeof rec.why === 'string' && rec.why.trim() ? rec.why.trim() : undefined,
+    };
+  };
+
+  // ① v1.10 单动作格式（action 是对象）
+  if (obj.action && typeof obj.action === 'object') {
+    step = normStep(obj.action as Record<string, unknown>) ?? undefined;
+  }
+  // ①' 平铺格式（action 是字符串、args 平级）
+  if (!step && typeof obj.action === 'string' && obj.action.trim()) {
+    step = normStep(obj as Record<string, unknown>) ?? undefined;
+  }
+  // ② 老格式 plan 数组：只取第一步（ReAct 单步铁律），其余丢弃计数
+  if (!step && Array.isArray(obj.plan)) {
+    for (const it of obj.plan) {
+      if (!it || typeof it !== 'object') continue;
+      const s = normStep(it as Record<string, unknown>);
+      if (s) {
+        step = s;
+        dropped = Math.max(0, obj.plan.length - 1);
+        break;
+      }
+    }
+  }
+
+  const done = !step && (obj.done === true || /^TASK_DONE/i.test(note));
+  if (!step && !done && !say && !note) return null;
+  return { say, step, done, note, dropped };
 }
 
 const PLAN_TIMEOUT_MS = 90_000;
-/** history 序列化条数上限（控制 token；obs 单条也截断） */
-const HISTORY_MAX_ENTRIES = 24;
-const HISTORY_OBS_SLICE = 2500;
-const HISTORY_STEP_SLICE = 400;
+/** history 序列化条数上限（ReAct 每轮 2 条（观察+执行），40 条 ≈ 最近 20 轮） */
+const HISTORY_MAX_ENTRIES = 40;
+const HISTORY_OBS_SLICE = 2000;
+const HISTORY_STEP_SLICE = 350;
 
 /**
- * 调 /api/chat 生成一轮计划：纯文本流聚合 → 宽松 JSON 提取 → AgentPlan。
- * fetch 失败/超时（90s）/格式异常/用户急停 → null（调用方处理）。
+ * 调 /api/chat 生成一轮 ReAct 决策（单动作/完成声明/放弃说明）：纯文本流聚合 → 宽松
+ * JSON 提取 → AgentDecision。历史「观察」编为 user、「执行结果」编为 assistant（真实
+ * ReAct 交替序列）。fetch 失败/超时（90s）/格式异常/用户急停 → null（调用方处理）。
  * verifying=true：验收模式（system prompt 换成验收指令，见 buildAgentSystemPrompt）。
  */
-async function planWithLLM(
+async function decideWithLLM(
   task: string,
   history: AgentHistoryEntry[],
   ctx: AgentCtx | undefined,
   verifying = false,
-): Promise<AgentPlan | null> {
+): Promise<AgentDecision | null> {
   const apiCfg = useSettings.getState().apiConfig;
-  // 照抄 chat-stream-store 的 effConfig 构造：长 JSON 计划抬高 maxTokens 下限防截断
-  const effConfig = { ...apiCfg, maxTokens: Math.max(apiCfg.maxTokens, 1500) };
+  // 照抄 chat-stream-store 的 effConfig 构造：抬 maxTokens 下限防 JSON 截断（单动作输出较短）
+  const effConfig = { ...apiCfg, maxTokens: Math.max(apiCfg.maxTokens, 1000) };
 
   const sys = buildAgentSystemPrompt(ctx, verifying);
   const msgs: { role: string; content: string }[] = [{ role: 'system', content: sys }];
@@ -1507,14 +1691,14 @@ async function planWithLLM(
     } else {
       msgs.push({
         role: 'assistant',
-        content: `[第${h.round}轮] 执行 ${h.step?.action ?? '?'}(${h.step?.args ?? ''}) → ${h.ok ? '成功' : '失败'}：${h.text.slice(0, HISTORY_STEP_SLICE)}`,
+        content: `[第${h.round}轮] ${h.step ? `执行 ${h.step.action}${h.step.args ? `(${h.step.args})` : ''}` : '动作'} → ${h.ok ? '成功' : '失败'}：${h.text.slice(0, HISTORY_STEP_SLICE)}`,
       });
     }
   }
   const lastObs = [...history].reverse().find((h) => h.kind === 'obs');
   msgs.push({
     role: 'user',
-    content: `任务：${task}\n当前屏幕观察：\n${lastObs ? lastObs.text : '（未取到观察，请先安排 lookScreen）'}`,
+    content: `任务：${task}\n当前屏幕观察：\n${lastObs ? lastObs.text : '（未取到观察，请先安排 lookScreen）'}\n\n请输出下一个动作（仅一个），或基于证据宣布完成/说明放弃。`,
   });
 
   const ctl = new AbortController();
@@ -1547,7 +1731,7 @@ async function planWithLLM(
     }
     const obj = extractJsonObject(full);
     if (!obj) return null;
-    return normalizePlan(obj);
+    return normalizeDecision(obj);
   } catch {
     return null;
   } finally {
@@ -1811,12 +1995,12 @@ export function setAgentResultAnnouncer(fn: ((text: string) => void) | null): vo
 }
 
 /**
- * 运行一个 Agent 任务（多轮闭环）：
- * 三道闸 → 防重入 → 初始化（通知/旗标）→ 轮循环（观察 → 规划 → 逐步执行）
- * → 全步成功后进「验收轮」（v1.7.2：LLM 对照任务目标核对最新界面，真正达成才
- * TASK_DONE 宣布完成；只做一半拿补救计划继续干）——防「动作成功就算完成」的虚报；
- * 有失败带现场进下一轮 replan；敏感步骤弹确认卡；
- * 本地/原生急停双通道随时可停；finally 统一还原输入法/撤通知/落定状态。
+ * 运行一个 Agent 任务（v1.10 ReAct 多步连续执行）：
+ * 三道闸 → 防重入 → 初始化 → while 循环：观察屏幕 → 自动关开屏弹窗/连续点失败的
+ * 截图视觉兜底 → LLM 决策「下一个动作」（每轮一个）→ 执行 → 重新观察……直到任务
+ * 真正完成。完成声明必须过「完成证据闸」（发消息=已输入+已发送；写入=已输入）并在
+ * 验收轮双确认后才收任务——刚打开 App 就宣布完成会被系统硬拦截强制继续；
+ * 敏感步骤弹确认卡；本地/原生急停双通道随时可停；finally 统一还原输入法/撤通知/落定状态。
  */
 export async function runAgentTask(
   task: string,
@@ -1862,10 +2046,9 @@ export async function runAgentTask(
   const t = task.trim();
   if (!t) return { ok: false, text: '任务内容为空' };
 
-  // v1.9.4 用户反馈「任务总差最后一步没做」：默认轮数 4→8、上限 6→12。
-  // 此前验收轮 + 补救轮消耗下，4 轮常常刚好在「输入内容/点保存」前耗尽（如记备忘录）。
-  // 轮内步骤数不受影响；急停/防重入语义不变。
-  const maxRounds = Math.max(1, Math.min(12, opts?.maxRounds ?? 8));
+  // v1.10 ReAct：maxRounds 语义变为动作预算系数（每轮=1 个动作）：默认 8×4=32 个
+  // 动作上限（maxRounds 传 12 时为 48）。发消息类任务全程约 8~15 个动作，32 余量充足。
+  const actBudget = Math.max(16, Math.min(48, (opts?.maxRounds ?? 8) * 4));
 
   // ---- 初始化 ----
   stopFlag = false;
@@ -1880,7 +2063,7 @@ export async function runAgentTask(
     running: true,
     task: t,
     round: 0,
-    maxRounds,
+    maxRounds: actBudget,
     stepIndex: 0,
     stepTotal: 0,
     stepDesc: '',
@@ -1907,38 +2090,83 @@ export async function runAgentTask(
   };
 
   try {
-    /** 验收旗标（v1.7.2 防虚报完成）：上一轮计划刚全部执行成功 → 下一轮先进「验收模式」，
-     *  LLM 对照任务目标核对最新界面，真正达成才 TASK_DONE 宣布完成；只做一半会拿到补救计划。 */
-    let needVerify = false;
-    for (let round = 1; round <= maxRounds; round++) {
+    // ---- ReAct 多步循环（v1.10）：每执行一个动作就重新观察屏幕回传 LLM，逼它基于
+    // 最新界面输出下一步，直到任务真正完成（done 过证据闸 + 验收轮双确认）/ 预算耗尽 / 急停。
+    let needVerify = false; // 下一次 LLM 决策是否在「验收模式」下进行
+    let actions = 0; // 已执行动作数（含 wait/观察）
+    let llmCalls = 0; // LLM 决策调用数（含验收调用）
+    let doneRejects = 0; // 完成声明被证据闸拦截的次数
+    let lastAutoAd = ''; // 上一次系统自动点掉的弹窗按钮（防对同一按钮死循环）
+    let autoAds = 0; // 自动关广告次数（上限护栏）
+    let autoVis = 0; // 自动视觉兜底次数（上限护栏）
+    let clickFailStreak = 0; // 连续点击类失败次数（≥2 触发自动截图兜底）
+    let inputDone = false; // 完成证据：已成功输入内容
+    let sendDone = false; // 完成证据：已发送（回车/点发送/结果含发送成功）
+    const evidence = classifyTask(t); // 任务完成证据要求（send/input/none）
+    let seq = 0; // 历史条目序号（[第N轮] 展示用）
+    const actRound = (): number => Math.min(actions + 1, actBudget);
+    activeTaskText = t;
+
+    while (actions < actBudget && llmCalls < REACT_LLM_CALL_BUDGET) {
       if (await checkStopped()) return stoppedResult();
 
-      // a. 观察屏幕（前台 + UI 树摘要）
-      patchAgentState({ round, stepIndex: 0, stepTotal: 0, stepDesc: needVerify ? '核对任务结果…' : '观察屏幕…' });
+      // a. 观察当前屏幕（前台 + UI 树摘要）——ReAct 的「O」
+      patchAgentState({ round: actRound(), stepIndex: 0, stepTotal: 0, stepDesc: needVerify ? '核对任务结果…' : '观察屏幕…' });
       const obs = await agentObserve();
-      history.push({ kind: 'obs', round, text: obs.summary });
+      history.push({ kind: 'obs', round: ++seq, text: obs.summary });
       if (await checkStopped()) return stoppedResult();
 
-      // b. LLM 规划（验收轮用验收模式 prompt；null = 接口失败/格式异常/急停断流）
-      let plan = await planWithLLM(t, history, opts?.ctx, needVerify);
-      // v1.9.5：验收轮规划失败重试一次（短退避 + 重观察 + 重规划）——此前直接降级
-      // 「任务完成（结果未经最终核对）」，把「没核对」当「完成」报给机主；接口抖动
-      // /一次 JSON 解析失败重试后基本能恢复正常验收，任务收尾更可靠
-      if (plan === null && needVerify) {
-        if (await sleepStoppable(1200)) {
-          if (await checkStopped()) return stoppedResult();
-          patchAgentState({ stepDesc: '验收重试：重新观察…' });
-          const obs2 = await agentObserve();
-          history.push({ kind: 'obs', round, text: obs2.summary });
-          if (await checkStopped()) return stoppedResult();
-          plan = await planWithLLM(t, history, opts?.ctx, true);
+      // b. 开屏广告/常见弹窗自动容错：点掉常见关闭按钮后重新观察（不消耗 LLM 决策）
+      if (autoAds < REACT_AUTO_AD_LIMIT && isCapEnabled('tap')) {
+        const ad = findAdDismiss(obs.nodes, lastAutoAd);
+        if (ad) {
+          lastAutoAd = ad.label;
+          autoAds += 1;
+          emit('step', `〔自动〕关闭开屏弹窗「${ad.label}」`);
+          const tap = await labTap(ad.cx, ad.cy);
+          invalidateDumpCache();
+          history.push({
+            kind: 'obs',
+            round: ++seq,
+            text: tap.ok
+              ? `【系统自动】已点掉开屏广告/弹窗按钮「${ad.label}」（${ad.cx},${ad.cy}），无需再处理广告。`
+              : `【系统自动】点弹窗按钮「${ad.label}」失败：${tap.text}`,
+          });
+          if (!(await settleAfterStep({ action: 'clickElement', args: '' }))) return stoppedResult();
+          continue;
         }
       }
+
+      // c. 连续点击失败 ≥2 → 自动截图 + VLM 视觉兜底（可点元素坐标喂给下一轮决策）
+      if (clickFailStreak >= CLICK_FAIL_VISION_THRESHOLD && autoVis < REACT_AUTO_VISION_LIMIT) {
+        const vis = await visualObserveScreen(t);
+        if (vis) {
+          autoVis += 1;
+          clickFailStreak = 0;
+          history.push({ kind: 'obs', round: ++seq, text: `【视觉观察兜底】${vis}` });
+          if (await checkStopped()) return stoppedResult();
+        }
+      }
+
+      // d. LLM 决策（ReAct 的「T/A」）：验收轮用验收模式；null = 接口失败/格式异常/急停断流
+      const wasVerify = needVerify;
+      let decision = await decideWithLLM(t, history, opts?.ctx, wasVerify);
+      llmCalls += 1;
+      if (decision === null && (await sleepStoppable(1200))) {
+        // 短退避 + 重观察后重试一次：验收轮防「接口抖动当成完成」，普通轮防一次网络抖动秒败
+        if (await checkStopped()) return stoppedResult();
+        patchAgentState({ stepDesc: '决策重试：重新观察…' });
+        const obs2 = await agentObserve();
+        history.push({ kind: 'obs', round: ++seq, text: obs2.summary });
+        if (await checkStopped()) return stoppedResult();
+        decision = await decideWithLLM(t, history, opts?.ctx, wasVerify);
+        llmCalls += 1;
+      }
+      needVerify = false; // 验收模式已消费
       if (await checkStopped()) return stoppedResult();
-      if (plan === null) {
-        if (needVerify) {
-          // 验收轮接口挂了：上轮步骤确实都执行成功过——按完成处理但注明未经最终核对
-          //（不谎报也不误伤：文字里明确「未经最终核对」，用户可自查界面）
+      if (decision === null) {
+        if (wasVerify) {
+          // 验收轮接口挂了：完成声明已过证据闸——按完成处理但注明未经最终核对
           const text = `Agent 任务完成：${lastSay || t}（结果未经最终核对）`;
           emit('done', text);
           return finish({ ok: true, text });
@@ -1946,94 +2174,110 @@ export async function runAgentTask(
         return finish({ ok: false, text: '规划失败：AI 接口未响应或返回格式异常（检查 设置›API 配置）' });
       }
 
-      // c. 播报
-      if (plan.say) {
-        lastSay = plan.say;
-        patchAgentState({ narration: plan.say });
-        emit('say', plan.say);
+      // e. 播报
+      if (decision.say) {
+        lastSay = decision.say;
+        patchAgentState({ narration: decision.say });
+        emit('say', decision.say);
       }
 
-      // d. 空计划：验收模式 + note 以 TASK_DONE 开头 → 任务目标已真正达成，宣布完成；
-      //    其余空计划 = LLM 判断做不了/不用做，note 解释（如实失败）
-      if (!plan.plan || plan.plan.length === 0) {
-        const note = (plan.note || '').trim();
-        if (needVerify && /^TASK_DONE/i.test(note)) {
-          const summary = plan.say || note.replace(/^TASK_DONE[:：,，.]?\s*/i, '').trim() || t;
+      // f. 完成声明：先过完成证据闸（send=输入+发送、input=输入），再进验收轮双确认
+      if (decision.done) {
+        const gate = completionGate(evidence, inputDone, sendDone, actions);
+        if (!gate.ok) {
+          doneRejects += 1;
+          if (doneRejects > REACT_DONE_REJECT_LIMIT) {
+            const text = `任务未能完成：AI 连续 ${doneRejects} 次在没有完成证据时宣布完成，已停止。（${gate.text}）${lastSay ? ` 最后进展：${lastSay}` : ''}`;
+            emit('fail', text);
+            return finish({ ok: false, text });
+          }
+          history.push({
+            kind: 'obs',
+            round: ++seq,
+            text: `【系统拦截】完成声明被驳回：${gate.text}。打开 App 只是第一步，必须继续点击/滑动/输入直到目标真正达成——没有完成证据的 TASK_DONE 一律无效。`,
+          });
+          continue;
+        }
+        if (wasVerify) {
+          // 验收轮确认完成：任务真正结束
+          const summary = decision.say || (decision.note || '').replace(/^TASK_DONE[:：,，.]?\s*/i, '').trim() || t;
           emit('done', `Agent 任务完成：${summary}`);
           return finish({ ok: true, text: `Agent 任务完成：${summary}` });
         }
-        emit('fail', note || 'AI 没有给出可执行的计划');
-        return finish({ ok: false, text: note || 'AI 没有给出可执行的计划（可能判断任务无法完成）' });
+        // 首次完成声明（证据已齐）→ 重新观察 + 验收模式核对后才算数
+        needVerify = true;
+        continue;
       }
 
-      // e. 逐步执行（验收轮拿到的是补救计划：清验收旗标，按普通轮执行）
-      needVerify = false;
-      patchAgentState({ stepIndex: 0, stepTotal: plan.plan.length });
-      let allOk = true;
-      for (let i = 0; i < plan.plan.length; i++) {
-        const step = plan.plan[i];
-        const desc = `${step.action}${step.args ? ` ${step.args}` : ''}`;
-        patchAgentState({ stepIndex: i + 1, stepDesc: desc.slice(0, 40) });
-        emit('step', `${desc}${step.why ? `（${step.why}）` : ''}`);
+      // g. 无动作且未宣布完成 = LLM 判断做不了/不用做（如实失败）
+      if (!decision.step) {
+        const note = (decision.note || '').trim();
+        emit('fail', note || 'AI 没有给出可执行的动作');
+        return finish({ ok: false, text: note || 'AI 没有给出可执行的动作（可能判断任务无法完成）' });
+      }
 
-        if (await checkStopped()) return stoppedResult();
+      // h. 执行本轮的单个动作（ReAct 的「A」）
+      const step = decision.step;
+      const desc = `${step.action}${step.args ? ` ${step.args}` : ''}`;
+      patchAgentState({ round: actRound(), stepIndex: 0, stepTotal: 0, stepDesc: desc.slice(0, 40) });
+      emit('step', `${desc}${step.why ? `（${step.why}）` : ''}`);
+      if (await checkStopped()) return stoppedResult();
 
-        // 敏感操作确认（LLM 标记或关键词命中 → 弹卡；拒绝终止整个任务）
-        if (step.dangerous === true || DANGER_PATTERNS.test(`${t}\n${step.action}\n${step.args}`)) {
-          const ok = await requestDangerConfirm(
-            '智能体请求执行敏感操作',
-            `步骤：${step.action} → ${step.args}\n${step.why ?? ''}`,
-          );
-          if (!ok) {
-            emit('danger', '用户拒绝了敏感操作');
-            return finish({ ok: false, text: '用户拒绝了敏感操作，任务已停止' });
-          }
-        }
-
-        const r = await execAgentStep(step);
-        history.push({ kind: 'step', round, text: r.text.slice(0, HISTORY_STEP_SLICE), step, ok: r.ok });
-        if (!r.ok) {
-          // 失败：带现场进下一轮 replan（观察会带回失败后的界面状态）
-          allOk = false;
-          emit('stepfail', r.text);
-          break;
-        }
-        // 步间落定间隔（可被急停打断）——先落定再视觉复核，避免截到转场动画中间态。
-        // A7 说明（为何不把验证与 settle/观察强行并行）：视觉验证的截屏必须等 settle 完成
-        //（转场动画期间截图 = 中间态，会误判），screencap→visionAsk 又是数据依赖链（ask
-        // 要用截图），强行并行会牺牲判定正确性；提速改由 settle 自适应缩短 + settle 尾段
-        // 并行预取下一步观察所需 UI 树承担（见 settleAfterStep）。
-        if (!(await settleAfterStep(step))) return stoppedResult();
-        // A2 视觉验证层：VLM 复核「画面是否体现该步预期」；判定未通过 → 该步按失败处理
-        //（结果文本自然进 history，重规划的 LLM 能看到「视觉验证未通过：…」原因）。
-        // 验证不可用（接口失败/超时/能力关/连败停用）时返回 null，信任 UI 树结果继续。
-        const vr = await visualVerifyStep(t, step, visionCtl);
-        if (vr && !vr.ok) {
-          history.push({ kind: 'step', round, text: vr.text.slice(0, HISTORY_STEP_SLICE), step, ok: false });
-          allOk = false;
-          emit('stepfail', vr.text);
-          break;
+      // 敏感操作确认（LLM 标记或关键词命中 → 弹卡；拒绝终止整个任务）
+      if (step.dangerous === true || DANGER_PATTERNS.test(`${t}\n${step.action}\n${step.args}`)) {
+        const ok = await requestDangerConfirm('智能体请求执行敏感操作', `步骤：${step.action} → ${step.args}\n${step.why ?? ''}`);
+        if (!ok) {
+          emit('danger', '用户拒绝了敏感操作');
+          return finish({ ok: false, text: '用户拒绝了敏感操作，任务已停止' });
         }
       }
-      if (!allOk) continue; // 下一轮重规划
 
-      // 本轮计划全部成功 → 不立即宣布完成（「动作成功」≠「任务达成」，此前会虚报）：
-      // 置验收旗标，下一轮以验收模式对照任务目标核对最新界面，真正达成才 TASK_DONE。
-      // 验收轮若拿到补救计划会照常执行（needVerify 已清零），循环直至 maxRounds。
-      needVerify = true;
-      continue;
+      const r = await execAgentStep(step);
+      actions += 1;
+      history.push({ kind: 'step', round: ++seq, step, ok: r.ok, text: r.text.slice(0, HISTORY_STEP_SLICE) });
+      if (decision.dropped && decision.dropped > 0) {
+        history.push({
+          kind: 'obs',
+          round: ++seq,
+          text: `【系统提示】你本轮还规划了 ${decision.dropped} 个后续步骤，已按「每轮只输出一个动作」规则丢弃——请基于最新屏幕观察重新决定下一步。`,
+        });
+      }
+      if (!r.ok) {
+        emit('stepfail', r.text);
+        if (CLICK_STREAK_ACTIONS.has(step.action)) clickFailStreak += 1;
+        continue; // 失败现场已进 history：回循环顶重新观察，下一步由 LLM 决定
+      }
+
+      // 成功：完成证据记账（证据闸判定用）
+      if (step.action === 'inputTextToFocus' || step.action === 'uiType') inputDone = true;
+      if (step.action === 'pressEnter') sendDone = true;
+      if ((step.action === 'clickElement' || step.action === 'uiClick') && /发送|发出|发表|发布|send/i.test(step.args)) sendDone = true;
+      if (/已发送|已发出|发送成功|发出成功/.test(r.text)) sendDone = true;
+      clickFailStreak = 0;
+
+      // 步间落定 + A2 视觉复核（语义与 v1.7 一致；失败同样回循环顶重规划）
+      if (!(await settleAfterStep(step))) return stoppedResult();
+      const vr = await visualVerifyStep(t, step, visionCtl);
+      if (vr && !vr.ok) {
+        history.push({ kind: 'step', round: ++seq, text: vr.text.slice(0, HISTORY_STEP_SLICE), step, ok: false });
+        emit('stepfail', vr.text);
+        if (CLICK_STREAK_ACTIONS.has(step.action)) clickFailStreak += 1;
+        continue;
+      }
+      // 成功也回循环顶：重新观察 → 下一个动作（ReAct 心脏，绝不「打开 App 就收工」）
     }
 
-    // 轮数耗尽仍未成功
+    // 预算耗尽仍未终态
     if (!settled) {
       if (needVerify) {
-        // 最后一轮计划全步成功、只是没轮到验收：按完成处理但注明未经最终核对（同验收接口挂掉的降级）
+        // 完成声明已过证据闸、只是没轮到最终验收：按完成处理但注明未经最终核对
         const text = `Agent 任务完成：${lastSay || t}（结果未经最终核对）`;
         emit('done', text);
         return finish({ ok: true, text });
       }
-      emit('fail', `已达最大轮数（${maxRounds}），任务未完成`);
-      return finish({ ok: false, text: `已达最大轮数（${maxRounds}），任务未完成。最后进展：${lastSay || '（无播报）'}` });
+      const budgetText = actions >= actBudget ? `已达最大动作数（${actBudget}）` : '已达决策调用上限';
+      emit('fail', `${budgetText}，任务未完成`);
+      return finish({ ok: false, text: `${budgetText}，任务未完成。最后进展：${lastSay || '（无播报）'}` });
     }
     return result;
   } catch (e) {
@@ -2042,6 +2286,7 @@ export async function runAgentTask(
     return finish({ ok: false, text: `Agent 执行异常：${msg}` });
   } finally {
     // 收尾：还原输入法 → 复位旗标 → 撤常驻通知 → 状态落定（finished 后 UI 条 4s 淡出）
+    activeTaskText = '';
     if (originalIme) {
       void nativeRestoreIme(originalIme);
       originalIme = null;
@@ -2090,12 +2335,12 @@ if (typeof window !== 'undefined' && process.env.NODE_ENV !== 'production') {
         running: true,
         finished: false,
         task,
-        round: 1,
-        maxRounds: 3,
-        stepIndex: 2,
-        stepTotal: 4,
-        stepDesc: '截屏识别当前界面',
-        narration: '正在查看屏幕…',
+        round: 2,
+        maxRounds: 32,
+        stepIndex: 0,
+        stepTotal: 0,
+        stepDesc: 'clickElement 跳过（关闭开屏广告）',
+        narration: '已观察屏幕，正在执行下一步…',
         stopRequested: false,
       }),
     done: (summary = '已为你打开天气并播报今日气温 0~12°C') =>

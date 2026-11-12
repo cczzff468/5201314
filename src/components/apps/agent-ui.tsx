@@ -133,7 +133,8 @@ export function AgentRunnerBar() {
             {/* 行2：进度（运行中）/ 结果摘要（结束后，红点已移除的简约收尾） */}
             {st.running ? (
               <p className="mt-0.5 truncate text-[11px] text-white/60">
-                第 {st.round}/{st.maxRounds} 轮 · 步骤 {st.stepIndex}/{st.stepTotal}
+                第 {st.round}/{st.maxRounds} 轮
+                {st.stepTotal > 0 ? ` · 步骤 ${st.stepIndex}/${st.stepTotal}` : ''}
                 {st.stepDesc ? ` · ${trunc(st.stepDesc, 16)}` : ''}
               </p>
             ) : st.summary ? (

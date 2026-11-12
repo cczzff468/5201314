@@ -20,8 +20,9 @@ const CameraApp = dynamic(() => import('@/components/apps/camera'), { ssr: false
 const WEEK_FMT = new Intl.DateTimeFormat('zh-CN', { weekday: 'short' });
 
 /**
- * 锁屏（仿 iOS）：
- * - 日期（含农历）+ 超大时钟 + 「×××的iPhone」电量 / 天气 / 日期小组件；
+ * 锁屏（仿 iOS，v2 简约黑白灰风）：
+ * - 日期（含农历）+ 超大时钟；小组件收敛为一条磨砂胶囊（设备电量 / 天气 / 日期，
+ *   hairline 分隔、全单色玻璃——不再有红字日历与浓重彩色投影）；
  * - 上滑解锁：未设密码直接解锁，已设密码进入密码键盘；
  * - 手电筒（优先系统硬件闪光灯 Web Torch API，设备不支持时回退白屏补光模拟）与相机快捷入口（锁屏直达相机，不解锁，关闭相机回锁屏）；
  * - 密码验证失败抖动 + 提示，验证通过播放解锁退场动画（由 PhoneShell 的 AnimatePresence 播放）。
@@ -77,10 +78,19 @@ export default function LockScreen() {
   const lightWallpaperBottom = measured.bottom ?? presetLight;
   const lightText = !lightWallpaper;
   const lightTextBottom = !lightWallpaperBottom;
+  // v2 简约黑白灰：前景与玻璃控件全部单色化——深色壁纸用淡白玻璃、浅色壁纸用淡灰玻璃，
+  // 去掉红字日历/浓重投影等彩色装饰，信息收敛进一条磨砂胶囊
   const fg = lightText ? 'text-white' : 'text-black/85';
-  const widgetBg = lightText ? 'bg-white/45' : 'bg-white/15 backdrop-blur-md';
-  const quickBtn = `flex h-[50px] w-[50px] items-center justify-center rounded-full backdrop-blur-md transition active:scale-90 ${
-    lightTextBottom ? 'bg-white/45 text-black/80 active:bg-white/60' : 'bg-white/20 text-white active:bg-white/35'
+  /** 小组件统一玻璃底（按壁纸明暗选淡白/淡灰，均带细描边增加边界感） */
+  const glassPanel = lightText
+    ? 'bg-white/12 ring-1 ring-white/15 backdrop-blur-xl'
+    : 'bg-black/6 ring-1 ring-black/10 backdrop-blur-xl';
+  /** 胶囊内 hairline 分隔（跟文字同色系，低透明度） */
+  const hairline = lightText ? 'bg-white/20' : 'bg-black/15';
+  const quickBtn = `flex h-[50px] w-[50px] items-center justify-center rounded-full backdrop-blur-xl transition active:scale-90 ${
+    lightTextBottom
+      ? 'bg-white/15 text-white ring-1 ring-white/18 active:bg-white/30'
+      : 'bg-black/8 text-black/80 ring-1 ring-black/10 active:bg-black/15'
   }`;
 
   // 下一个即将响铃的闹钟已随闹钟小组件移除；天气快照供天气小组件使用
@@ -311,54 +321,53 @@ export default function LockScreen() {
                   : 'transform 0.32s cubic-bezier(0.32,0.72,0,1), opacity 0.32s ease',
               }}
             >
-              {/* 日期 + 农历 + 大时钟 */}
-              <div className="flex flex-col items-center px-6 pt-[84px]">
-                {dateLine && <p className="text-center text-[17px] font-semibold tracking-wide opacity-95">{dateLine}</p>}
+              {/* 日期 + 农历 + 大时钟（v2 简约：更轻的字重 + 更克制的透明度层级） */}
+              <div className="flex flex-col items-center px-6 pt-[82px]">
+                {dateLine && <p className="text-center text-[15px] font-medium tracking-[0.02em] opacity-90">{dateLine}</p>}
                 <p
-                  className="mt-1 text-center text-[88px] font-semibold leading-[1.05] tracking-[-0.02em] tabular-nums"
-                  style={lightText ? { textShadow: '0 2px 18px rgba(0,0,0,0.15)' } : undefined}
+                  className="mt-1.5 text-center text-[86px] font-medium leading-[1.04] tracking-[-0.02em] tabular-nums"
+                  style={lightText ? { textShadow: '0 2px 20px rgba(0,0,0,0.18)' } : undefined}
                 >
                   {now ? formatIOSTime(now) : ''}
                 </p>
               </div>
 
-              {/* 锁屏小组件：×××的iPhone（电量）/ 天气 / 日期（小巧版） */}
-              <div className="mt-6 flex items-center justify-center gap-2.5 px-6">
-                <div className={`flex h-[64px] w-[118px] flex-col justify-between rounded-[22px] px-3 py-2.5 ${widgetBg}`}>
-                  <div className="flex min-w-0 items-center">
-                    <span className="min-w-0 truncate text-[11px] font-semibold">{deviceName}</span>
-                  </div>
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-[12px] font-semibold tabular-nums">
-                      {batteryLevel === null ? '--' : `${batteryLevel}%`}
-                    </span>
-                    <div className={`h-[4px] min-w-0 flex-1 overflow-hidden rounded-full ${lightText ? 'bg-black/15' : 'bg-white/25'}`}>
-                      <div
-                        className={`h-full rounded-full transition-[width] duration-300 ${
-                          lowBattery ? 'bg-[#FF453A]' : lightText ? 'bg-black/70' : 'bg-white/90'
-                        }`}
-                        style={{ width: `${batteryLevel === null ? 0 : Math.min(100, Math.max(2, batteryLevel))}%` }}
-                      />
+              {/* 锁屏小组件（v2 简约黑白灰）：信息收敛为一条磨砂胶囊——设备电量 / 天气 / 日期，hairline 分隔 */}
+              <div className="mt-7 flex justify-center px-6">
+                <div className={`flex h-[58px] items-center gap-4 rounded-[29px] px-5 ${glassPanel}`} role="status" aria-label="锁屏小组件">
+                  {/* 设备电量 */}
+                  <div className="flex flex-col gap-[6px]">
+                    <span className="max-w-[110px] truncate text-[11px] font-semibold leading-none opacity-95">{deviceName}</span>
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[11px] font-semibold leading-none tabular-nums">
+                        {batteryLevel === null ? '--%' : `${batteryLevel}%`}
+                      </span>
+                      <div className={`h-[3px] w-[32px] overflow-hidden rounded-full ${lightText ? 'bg-white/20' : 'bg-black/15'}`}>
+                        <div
+                          className={`h-full rounded-full transition-[width] duration-300 ${
+                            lowBattery ? 'bg-[#FF453A]' : lightText ? 'bg-white/85' : 'bg-black/70'
+                          }`}
+                          style={{ width: `${batteryLevel === null ? 0 : Math.min(100, Math.max(2, batteryLevel))}%` }}
+                        />
+                      </div>
                     </div>
                   </div>
-                </div>
-                <div className={`flex h-[64px] w-[64px] flex-col items-center justify-center gap-1 rounded-full ${widgetBg}`} aria-label="锁屏天气">
-                  {WeatherIcon ? (
-                    <WeatherIcon className="h-[18px] w-[18px]" strokeWidth={2} />
-                  ) : (
-                    <CloudSun className="h-[18px] w-[18px] opacity-60" strokeWidth={2} />
-                  )}
-                  <span className="text-[12px] font-semibold tabular-nums">{wTemp}</span>
-                </div>
-                {/* 日期小组件（iOS 日历风：白底红字） */}
-                <div
-                  className="flex h-[64px] w-[64px] flex-col items-center justify-center gap-[3px] rounded-full bg-white shadow-[0_5px_14px_rgba(0,0,0,0.2)]"
-                  aria-label="锁屏日期"
-                >
-                  <span className="text-[22px] font-semibold leading-none tabular-nums text-[#FF453A]">
-                    {now ? now.getDate() : '--'}
-                  </span>
-                  <span className="text-[11px] font-medium leading-none text-black/70">{weekShort || '周--'}</span>
+                  <span className={`h-7 w-px ${hairline}`} aria-hidden="true" />
+                  {/* 天气 */}
+                  <div className="flex items-center gap-1.5" aria-label="锁屏天气">
+                    {WeatherIcon ? (
+                      <WeatherIcon className="h-[17px] w-[17px]" strokeWidth={1.8} />
+                    ) : (
+                      <CloudSun className="h-[17px] w-[17px] opacity-60" strokeWidth={1.8} />
+                    )}
+                    <span className="text-[12px] font-semibold leading-none tabular-nums">{wTemp}</span>
+                  </div>
+                  <span className={`h-7 w-px ${hairline}`} aria-hidden="true" />
+                  {/* 日期 */}
+                  <div className="flex items-baseline gap-[3px]" aria-label="锁屏日期">
+                    <span className="text-[15px] font-semibold leading-none tabular-nums">{now ? now.getDate() : '--'}</span>
+                    <span className="text-[10px] font-medium leading-none opacity-70">{weekShort || '周--'}</span>
+                  </div>
                 </div>
               </div>
 
@@ -366,7 +375,7 @@ export default function LockScreen() {
 
               {/* 底部快捷入口 + 提示 + Home 指示条（颜色跟底部区域壁纸明暗） */}
               <p
-                className={`pb-4 text-center text-[13px] font-medium opacity-70 ${
+                className={`pb-4 text-center text-[12px] font-normal tracking-[0.18em] opacity-55 ${
                   lightTextBottom ? 'text-white' : 'text-black/80'
                 }`}
               >
@@ -378,7 +387,11 @@ export default function LockScreen() {
                   aria-label={torch ? '关闭锁屏手电筒' : '打开锁屏手电筒'}
                   aria-pressed={torch}
                   onClick={() => setTorch(!torch)}
-                  className={torch ? 'flex h-[50px] w-[50px] items-center justify-center rounded-full bg-white text-black transition active:scale-90' : quickBtn}
+                  className={
+                    torch
+                      ? 'flex h-[50px] w-[50px] items-center justify-center rounded-full bg-white text-black ring-1 ring-black/10 transition active:scale-90'
+                      : quickBtn
+                  }
                 >
                   <Flashlight className="h-[22px] w-[22px]" strokeWidth={1.9} />
                 </button>
