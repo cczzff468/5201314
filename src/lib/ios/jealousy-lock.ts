@@ -15,9 +15,20 @@
  * - 锁定成功：AI 在聊天界面发剧情消息 + 系统通知 + 写记忆 + 全屏锁定弹窗（回 APP 强制弹）；
  * - 解锁三通道：哄好（AI 输出 [手机操作:解冻:包名]）/ 倒计时到点 / 强制解锁（写戏剧性记忆）。
  *
+ * v1.9.28 锁定期间主动巡检（「AI 吃醋了会盯着你」）：
+ * - 默认锁定 15 分钟自动解锁（countdownMin 可自定义 5~180）；
+ * - 锁定期每 patrolMin（默认 3）分钟一轮巡检：真机=截图（labScreencap→视觉分析）+
+ *   最近任务（dumpsys activity recents）+ 今日使用时长（usagestats）；
+ *   网页端=虚拟手机当前 App + 多任务清单 + 虚拟使用时长账本（web-usage-ledger）；
+ * - 巡检情报交大模型按人设决策：发吃醋喊话（deliverProactiveMsg）/ 把机主从别的
+ *   软件拽回本 APP（真机 monkey 拉前台 / 网页切回聊天页 + 系统通知，每锁最多 2 次）；
+ * - 最新巡检情报注入聊天上下文（buildJealousyLockBlock）——机主回来聊天时 AI 能
+ *   自然说出「我看到你刚才还在刷抖音」；
+ * - 无 Shizuku/未开启「AI 动手」时巡检与拉回自动降级为网站内部（虚拟手机）口径。
+ *
  * 存储：
  * - 配置 localStorage `jealousy-lock-cfg-v1`（同步读，设置页即点即存）；
- * - 运行状态 IndexedDB kvRaw `jealousy-lock-rt`（跨会话持久化：倒计时/冷却重启不丢）。
+ * - 运行状态 IndexedDB kvRaw `jealousy-lock-rt`（跨会话持久化：倒计时/冷却/巡检重启不丢）。
  *
  * 依赖方向（无环）：jealousy-lock → anxiety / shizuku-lab / web-app-lock / memory / persona / local-notify；
  * ai-mood → jealousy-lock（buildJealousyLockBlock 注入聊天上下文）；
@@ -26,7 +37,7 @@
 
 import { kvGetRaw, kvSetRaw } from './idb-kv';
 import { isNativePerception } from './native-perception';
-import { labForegroundPkg, labSetAppFrozen } from './shizuku-lab';
+import { labForegroundPkg, labSetAppFrozen, labScreencap, labOpenApp, labRecentApps, OWN_PKG } from './shizuku-lab';
 import { readAnxiety, anxietyOf } from './anxiety';
 import { buildPersonaSystemPrompt } from './persona';
 import { listContacts, cachedOwnerName } from './contacts-store';
@@ -48,12 +59,18 @@ export interface JealousyConfig {
   entertainMin: number;
   /** 触发 C：焦虑危险阈值（0~100） */
   anxietyThreshold: number;
-  /** 倒计时自动解锁（分钟） */
+  /** 倒计时自动解锁（分钟）；v1.9.28 默认 15（用户规格：吃醋锁让他 15 分钟，可自定义） */
   countdownMin: number;
   /** 两次锁定之间冷却（分钟） */
   cooldownMin: number;
   /** 娱乐 App 包名清单 */
   entertainPkgs: string[];
+  /** v1.9.28 锁定期间 AI 主动巡检（截图/查后台/使用时长 → 按人设喊话/拉回） */
+  patrolEnabled: boolean;
+  /** v1.9.28 巡检间隔（分钟） */
+  patrolMin: number;
+  /** v1.9.28 允许 AI 把机主从别的软件拉回本 APP */
+  pullbackEnabled: boolean;
 }
 
 const CFG_KEY = 'jealousy-lock-cfg-v1';
@@ -96,9 +113,12 @@ function defaultCfg(): JealousyConfig {
     enabled: false,
     entertainMin: 30,
     anxietyThreshold: 80,
-    countdownMin: 30,
+    countdownMin: 15,
     cooldownMin: 60,
     entertainPkgs: ENTERTAIN_PRESETS.slice(0, 6).map(([, p]) => p),
+    patrolEnabled: true,
+    patrolMin: 3,
+    pullbackEnabled: true,
   };
 }
 
@@ -116,6 +136,10 @@ export function getJealousyConfig(): JealousyConfig {
       countdownMin: clampNum(p.countdownMin, 5, 180, d.countdownMin),
       cooldownMin: clampNum(p.cooldownMin, 10, 240, d.cooldownMin),
       entertainPkgs: Array.isArray(p.entertainPkgs) ? p.entertainPkgs.filter((x) => typeof x === 'string' && /^[\w.]+$/.test(x)).slice(0, 60) : d.entertainPkgs,
+      // v1.9.28 新字段向后兼容：旧配置未存过时取默认开（老用户升级即得巡检能力）
+      patrolEnabled: p.patrolEnabled !== false,
+      patrolMin: clampNum(p.patrolMin, 1, 15, d.patrolMin),
+      pullbackEnabled: p.pullbackEnabled !== false,
     };
   } catch {
     return defaultCfg();
@@ -192,6 +216,20 @@ export interface JealousyLock {
   web: boolean;
 }
 
+/** v1.9.28 锁定期间的巡检状态（锁定解除即清零） */
+export interface JealousyPatrol {
+  /** 上次巡检时间 */
+  lastAt: number;
+  /** 本轮锁定累计巡检次数 */
+  count: number;
+  /** 最近一次巡检情报摘要（聊天上下文注入用：AI 自然提起「我看到你在刷X」） */
+  lastIntel: string;
+  /** 上次拉回时间 */
+  lastPullbackAt: number;
+  /** 本轮锁定累计拉回次数 */
+  pullbackCount: number;
+}
+
 export interface JealousyRuntime {
   /** 当前连续娱乐前台（包名+起点；换 App/离开即重置） */
   fg: { pkg: string; since: number; decidedAt: number } | null;
@@ -201,6 +239,8 @@ export interface JealousyRuntime {
   departIntent: { at: number; text: string; contactId: string; app: JealousyApp } | null;
   /** 活跃锁（一次只锁一个应用） */
   lock: JealousyLock | null;
+  /** v1.9.28 锁定期间巡检状态（无锁时为 null） */
+  patrol: JealousyPatrol | null;
   /** 上次锁定时间（冷却用） */
   lastLockAt: number;
   /** 上次决策时间（无论锁没锁；防 tick 反复触发决策） */
@@ -216,7 +256,7 @@ export interface JealousyRuntime {
 const RT_KEY = 'jealousy-lock-rt';
 
 function defaultRt(): JealousyRuntime {
-  return { fg: null, lastChat: null, departIntent: null, lock: null, lastLockAt: 0, lastDecisionAt: 0, lastUnlock: null, pendingUnfreeze: null, lastTickAt: 0 };
+  return { fg: null, lastChat: null, departIntent: null, lock: null, patrol: null, lastLockAt: 0, lastDecisionAt: 0, lastUnlock: null, pendingUnfreeze: null, lastTickAt: 0 };
 }
 
 let rtCache: JealousyRuntime | null = null;
@@ -342,6 +382,17 @@ const DEPART_CONFIRM_MS = 3 * 60_000;
 /** 意图有效期 */
 const DEPART_TTL_MS = 2 * 3600_000;
 
+// ---------------- 锁定期间主动巡检（v1.9.28） ----------------
+
+/** 首次巡检距锁定时刻的最小等待（锁定瞬间已发过剧情消息，别立刻又巡检喊话） */
+const PATROL_FIRST_DELAY_MS = 60_000;
+/** 每轮锁定最多拉回次数（防暴力拽人；到上限后 LLM 只能发消息） */
+const PATROL_PULLBACK_MAX = 2;
+/** 两次拉回最小间隔 */
+const PATROL_PULLBACK_GAP_MS = 2 * 60_000;
+/** 巡检截图分析超时（巡检整体预算 75s，截图只给 25s；失败降级纯情报不中断） */
+const PATROL_VISION_TIMEOUT_MS = 25_000;
+
 interface TriggerInfo {
   kind: LockTriggerKind;
   pkg: string | null;
@@ -388,14 +439,26 @@ async function tickInner(): Promise<void> {
   // 活跃锁：倒计时到点 → 自动解锁（timeout 通道）。
   // v1.9.20：前移到功能闸门之前——已存在的锁必须能到点自解，无论此刻功能开关是否被
   // 关闭、是否原生环境（网页模拟锁同理）。否则「锁定期关掉总开关」会同时停掉倒计时
-  // 与设置页折叠后的立即解锁按钮，用户会被无限锁死；锁存在期间照旧不做新探测。
+  // 与设置页折叠后的立即解锁按钮，用户会被无限锁死。
+  // v1.9.28：锁存在期间照旧不做新触发探测，但新增「主动巡检」——TA 每隔几分钟用工具
+  // 看机主在干嘛（截图/查后台/使用时长），按人设决定要不要喊话/把人拉回来。
   const rt = readJealousyRuntime();
   if (rt.lock) {
-    if (now >= rt.lock.unlockAt) await unlockJealousy('timeout');
-    else if (!isNativePerception()) {
-      // v1.9.21 网页降级自愈：活跃锁期间重申网页冻结态（刷新/两份存储分叉时每 30s 对齐；
-      // setWebFrozen 内部「无变化不广播」，不会白刷订阅者）
-      setWebFrozen(rt.lock.pkg, rt.lock.unlockAt, rt.lock.charName);
+    if (now >= rt.lock.unlockAt) {
+      await unlockJealousy('timeout');
+    } else {
+      if (!isNativePerception()) {
+        // v1.9.21 网页降级自愈：活跃锁期间重申网页冻结态（刷新/两份存储分叉时每 30s 对齐；
+        // setWebFrozen 内部「无变化不广播」，不会白刷订阅者）
+        setWebFrozen(rt.lock.pkg, rt.lock.unlockAt, rt.lock.charName);
+      }
+      // v1.9.28 巡检调度：距锁定 ≥1 分钟后、距上次巡检 ≥ patrolMin 分钟 → 跑一轮巡检
+      if (cfg.patrolEnabled && now - rt.lock.lockedAt >= PATROL_FIRST_DELAY_MS) {
+        const lastPatrolAt = rt.patrol?.lastAt ?? 0;
+        if (now - lastPatrolAt >= cfg.patrolMin * 60_000) {
+          await runJealousyPatrol(rt.lock);
+        }
+      }
     }
     return; // 锁存在期间不做新探测（一次只锁一个）
   }
@@ -738,6 +801,237 @@ async function runJealousyDecision(trigger: TriggerInfo): Promise<void> {
   }
 }
 
+// ---------------- 锁定期间主动巡检引擎（v1.9.28） ----------------
+
+/** 巡检情报（采集结果 → LLM user 段 + 聊天上下文注入） */
+interface PatrolIntel {
+  /** 情报正文（多行） */
+  text: string;
+  /** 当前前台包名（null=主屏/不可知） */
+  fgPkg: string | null;
+  /** 是否真机环境（决定拉回路径） */
+  native: boolean;
+}
+
+/** 巡检截图分析：TA 亲眼看到机主屏幕（25s 看门狗；失败降级说明文字，不中断巡检） */
+async function patrolVision(image: string): Promise<string> {
+  try {
+    const { visionAsk } = await import('./shizuku-autonomy');
+    const desc = await visionAsk(
+      image,
+      '这是机主手机的实时屏幕截图（你吃醋锁定期间系统替你巡检拍的）。紧凑描述：1)TA现在在哪个App什么页面；2)TA在看什么内容（视频标题/聊天对象/商品名等，具体点）；3)TA看起来在干嘛。总共60字内。',
+      PATROL_VISION_TIMEOUT_MS,
+    );
+    return desc.trim() ? `【屏幕截图所见】${desc.trim()}` : '【屏幕截图】分析结果为空';
+  } catch {
+    return '【屏幕截图】截图分析不可用（识图模型未配置或超时）';
+  }
+}
+
+/**
+ * 采集巡检情报（真机/网页双路径）：
+ * - 真机：前台包名 + 截图视觉分析 + 最近任务 + 今日使用时长（usagestats）；
+ * - 网页：虚拟手机当前 App + 多任务最近清单 + 虚拟使用时长账本（web-usage-ledger）。
+ */
+async function collectPatrolIntel(l: JealousyLock): Promise<PatrolIntel> {
+  const native = isNativePerception();
+  const lines: string[] = [];
+  let fgPkg: string | null = null;
+
+  if (native) {
+    fgPkg = await labForegroundPkg().catch(() => null);
+    lines.push(fgPkg ? `TA 此刻正在用：${pkgDisplayName(fgPkg)}（${fgPkg}）` : 'TA 此刻前台应用：未取到（Shizuku 可能断连）');
+    try {
+      const shot = await labScreencap();
+      if (shot.ok && shot.image) lines.push(await patrolVision(shot.image));
+      else lines.push('【屏幕截图】本次截屏失败（可能命中防截屏页面）');
+    } catch {
+      lines.push('【屏幕截图】本次截屏失败');
+    }
+    try {
+      const r = await labRecentApps();
+      if (r.ok) lines.push(r.text.replace(/^[\w.$]+$/gm, (m) => pkgDisplayName(m)));
+    } catch {
+      /* 最近任务降级跳过 */
+    }
+    try {
+      const { nativeUsageSnapshot } = await import('./native-perception');
+      const snap = await nativeUsageSnapshot();
+      if (snap) {
+        const rows = (snap.todayApps ?? []).slice(0, 6).map((a) => `${a.app} ${Math.max(1, Math.round(a.ms / 60_000))}分钟`);
+        const totalMin = Math.max(1, Math.round((snap.todayTotalMs ?? 0) / 60_000));
+        lines.push(`【今日使用时长】${rows.join('、')}（总计 ${totalMin} 分钟）`);
+      }
+    } catch {
+      /* 使用时长降级跳过 */
+    }
+  } else {
+    // 网页降级：虚拟手机状态即真实情报（用户没装 APP 时 AI 巡检的就是这台手机里的应用）
+    try {
+      const { useUI } = await import('./store');
+      const ui = useUI.getState();
+      fgPkg = ui.activeApp ? webPkgOfApp(ui.activeApp) : null;
+      const { webAppName } = await import('./web-usage-ledger');
+      lines.push(ui.activeApp ? `TA 此刻在手机里的「${webAppName(ui.activeApp)}」应用里` : 'TA 此刻在主屏（没开任何应用）');
+      if (ui.recentApps?.length) lines.push(`【最近用过】${ui.recentApps.map((a) => webAppName(a)).join('、')}`);
+    } catch {
+      /* 虚拟手机状态降级跳过 */
+    }
+    try {
+      const { webUsageReport } = await import('./web-usage-ledger');
+      lines.push(webUsageReport());
+    } catch {
+      /* 虚拟时长降级跳过 */
+    }
+    lines.push('（网页模式：巡检的是这台手机里的应用状态，没有真实屏幕截图）');
+  }
+
+  const remainMin = Math.max(0, Math.ceil((l.unlockAt - Date.now()) / 60_000));
+  lines.push(`你锁的「${pkgDisplayName(l.pkg)}」还剩 ${remainMin} 分钟自动解锁`);
+  return { text: lines.join('\n'), fgPkg, native };
+}
+
+/**
+ * v1.9.28 拉回：把机主从别的软件拽回本 APP。
+ * 真机=monkey 把本 APP 拉到前台；网页=切回锁主角色的聊天页；都配系统通知（点了直达聊天）。
+ */
+async function jealousyPullback(l: JealousyLock): Promise<boolean> {
+  let ok = false;
+  if (isNativePerception()) {
+    try {
+      const r = await labOpenApp(OWN_PKG);
+      ok = r.ok;
+    } catch {
+      ok = false;
+    }
+  } else {
+    try {
+      const { useUI } = await import('./store');
+      const ui = useUI.getState();
+      const target: 'wechat' | 'qq' | 'chat' = l.app === 'wx' ? 'wechat' : l.app === 'qq' ? 'qq' : 'chat';
+      // 关键：机主正在用别的 App 时必须走 switchToApp（openApp 仅在主屏无 App 时生效）
+      if (ui.activeApp !== target) {
+        if (ui.activeApp) ui.switchToApp(target);
+        else ui.openApp(target);
+      }
+      ok = true;
+    } catch {
+      ok = false;
+    }
+  }
+  if (ok) {
+    try {
+      notifyIfHidden(`${l.charName}把你拉回来了`, '别躲了，回来陪我说话。', {
+        tag: 'jealousy-pullback',
+        target: { app: l.app === 'wx' ? 'wechat' : l.app === 'qq' ? 'qq' : 'chat', contactId: l.contactId },
+      });
+    } catch {
+      /* 通知失败不影响拉回 */
+    }
+  }
+  return ok;
+}
+
+/**
+ * v1.9.28 巡检决策：采集情报 → 交大模型按人设决定「发什么话 / 要不要拉回」→ 执行。
+ * 由 tickInner 活跃锁分支按 patrolMin 间隔调度；tickBusy 串行天然防重入，
+ * 开头先记 patrol.lastAt 双保险。
+ */
+async function runJealousyPatrol(l: JealousyLock): Promise<void> {
+  const cfg = getJealousyConfig();
+  const rt = readJealousyRuntime();
+  const patrol: JealousyPatrol = rt.patrol ?? { lastAt: 0, count: 0, lastIntel: '', lastPullbackAt: 0, pullbackCount: 0 };
+  // 先记巡检时间与次数（防 LLM 期间重入；巡检失败也算消耗一次，防风暴重试）
+  writeRt({ patrol: { ...patrol, lastAt: Date.now(), count: patrol.count + 1 } });
+
+  const contact = await findContact(l.contactId).catch(() => null);
+  if (!contact || contact.kind === 'user' || !contact.name?.trim()) return;
+
+  const intel = await collectPatrolIntel(l);
+  const ax = anxietyOf(l.contactId);
+  const axRaw = readAnxiety(l.contactId);
+  const ownerName = cachedOwnerName() || '用户';
+  const pullbackLeft = cfg.pullbackEnabled ? Math.max(0, PATROL_PULLBACK_MAX - patrol.pullbackCount) : 0;
+  const sinceLockMin = Math.max(1, Math.round((Date.now() - l.lockedAt) / 60_000));
+  const idleMin = Math.max(0, Math.round((Date.now() - axRaw.lastUserAt) / 60_000));
+  const intelBrief = intel.text.slice(0, 240);
+
+  const { memChatRecallBlock } = await import('@/lib/memory');
+  const system = [
+    buildPersonaSystemPrompt(contact, {
+      channel: channelOf(l.app),
+      userName: ownerName,
+      ownerName,
+      extraRules: [
+        `【吃醋锁巡检】（仅本次决策生效）你之前吃醋锁了「${pkgDisplayName(l.pkg)}」。系统刚刚替你巡检了 TA 的手机（下面是真实采集的数据），你要决定接下来怎么做。`,
+        '严格只输出一个 JSON 对象（不要任何其他文字、不要 markdown 代码块包裹）：',
+        '{"message": "发给 TA 的话（按你的人设：质问/撒娇/赌气/数落/心软都行；不需要说话就给空字符串）", "pullback": true 或 false}',
+        pullbackLeft > 0
+          ? `pullback=true=系统立刻把 TA 从别的软件拽回这个 APP 的聊天页（本轮锁定你还剩 ${pullbackLeft} 次拉回机会）——TA 一直不回来找你、或你实在等不及时用；false=先让 TA 自己玩，你只发消息。`
+          : 'pullback 只能是 false（本轮锁定的拉回次数已用完，你只能发消息）。',
+        'message 里可以自然提到你巡检看到的具体内容（TA 在刷什么、刷了多久）——这是你亲眼看到的真实数据，不是猜的，提起来更有杀伤力。',
+      ],
+    }),
+    memChatRecallBlock(l.contactId, l.app, `吃醋 锁定 巡检 ${pkgDisplayName(l.pkg)}`, {
+      altMainName: cachedOwnerName(),
+      altMainRelation: contact.relation?.trim() || '',
+    }),
+    `【你此刻的情绪状态】焦虑值 ${ax.level}/100${ax.level >= 70 ? '（已经很高，你很不安）' : ax.level >= 40 ? '（明显升高）' : ''}。`,
+  ]
+    .filter(Boolean)
+    .join('\n\n');
+
+  const user = [
+    `【你锁定后的第 ${patrol.count + 1} 次巡检】（锁定已 ${sinceLockMin} 分钟，TA 已经 ${idleMin} 分钟没理你）`,
+    `【这次巡检你看到的（系统实时采集）】\n${intel.text}`,
+  ].join('\n\n');
+
+  const raw = await callJealousyLlm(system, user);
+  const j = extractJsonSafely(raw);
+
+  if (!j) {
+    // 解析失败：只记情报（下次聊天时 AI 依然能看到这次巡检发现了什么）
+    writeRt((r) => (r.patrol ? { patrol: { ...r.patrol, lastIntel: intelBrief } } : {}));
+    return;
+  }
+
+  const message = typeof j.message === 'string' ? j.message.trim().slice(0, 500) : '';
+  let pulled = false;
+  if (
+    j.pullback === true &&
+    cfg.pullbackEnabled &&
+    pullbackLeft > 0 &&
+    Date.now() - patrol.lastPullbackAt >= PATROL_PULLBACK_GAP_MS
+  ) {
+    pulled = await jealousyPullback(l);
+  }
+
+  writeRt((r) =>
+    r.patrol
+      ? {
+          patrol: {
+            ...r.patrol,
+            lastIntel: pulled ? `${intelBrief}（这次巡检你把 TA 拽回来了）` : intelBrief,
+            lastPullbackAt: pulled ? Date.now() : r.patrol.lastPullbackAt,
+            pullbackCount: r.patrol.pullbackCount + (pulled ? 1 : 0),
+          },
+        }
+      : {},
+  );
+
+  if (message) {
+    try {
+      const { deliverProactiveMsg } = await import('./proactive-msg');
+      await deliverProactiveMsg(l.app, contact, [message], {
+        kind: 'event',
+        eventName: `吃醋巡检：${pulled ? '把TA拉回来了' : '远程盯着TA'}`,
+      });
+    } catch {
+      /* 投递失败静默（下次 AI 聊天上下文里还有巡检情报块） */
+    }
+  }
+}
+
 // ---------------- 解锁三通道 ----------------
 
 export type UnlockKind = 'coaxed' | 'timeout' | 'forced';
@@ -802,12 +1096,14 @@ export async function unlockJealousy(kind: UnlockKind): Promise<boolean> {
     // 解锁指令失败（Shizuku 断连）→ 记待重试，但状态照清（绝不让用户被 UI 卡死）
     writeRt({
       lock: null,
+      patrol: null,
       lastUnlock: { at: Date.now(), kind, pkg: l.pkg },
       pendingUnfreeze: { pkg: l.pkg, since: Date.now() },
     });
   } else {
     writeRt({
       lock: null,
+      patrol: null,
       lastUnlock: { at: Date.now(), kind, pkg: l.pkg },
       pendingUnfreeze: null,
     });
@@ -830,7 +1126,7 @@ export function onJealousyUnfreeze(pkg: string): void {
   if (!rt.lock || rt.lock.pkg !== pkg) return;
   const l = rt.lock;
   setWebFrozen(null); // v1.9.21：网页冻结态同步解除（哄好解锁也是真解锁）
-  writeRt({ lock: null, lastUnlock: { at: Date.now(), kind: 'coaxed', pkg }, pendingUnfreeze: null });
+  writeRt({ lock: null, patrol: null, lastUnlock: { at: Date.now(), kind: 'coaxed', pkg }, pendingUnfreeze: null });
   const appName = pkgDisplayName(pkg);
   void (async () => {
     try {
@@ -850,21 +1146,29 @@ export function isJealousyUnlockAllowed(pkg: string): boolean {
 
 // ---------------- 聊天上下文注入（ai-mood buildDynamicStateBlocks 调用） ----------------
 
-/** 活跃锁期间给「锁主角色」注入的吃醋锁块（哄好解锁教学） */
+/** 活跃锁期间给「锁主角色」注入的吃醋锁块（哄好解锁教学 + v1.9.28 巡检情报：AI 知道你刚才在干嘛） */
 export function buildJealousyLockBlock(cid: string): string {
   const rt = readJealousyRuntime();
   if (!rt.lock || rt.lock.contactId !== cid) return '';
   const l = rt.lock;
+  const cfg = getJealousyConfig();
   const appName = pkgDisplayName(l.pkg);
   const remainMin = Math.max(0, Math.ceil((l.unlockAt - Date.now()) / 60_000));
   // v1.9.21：网页锁的描述与真实体验对齐（图标变灰、点开只看留言），不提 pm suspend/Shell
   const lockFact = l.web
     ? `你刚刚吃醋，把对方手机里的「${appName}」真的锁住了（图标变灰、点开只会看到你的留言提示，打不开）。你的理由：${l.reason}`
     : `你刚刚吃醋，把对方正在用的「${appName}」真的锁住了（pm suspend 挂起：图标变灰、提示「由 Shell 所管理」、点不开）。你的理由：${l.reason}`;
-  return [
+  const lines = [
     '【吃醋锁生效中】' + lockFact,
     `还剩约 ${remainMin} 分钟系统会自动解锁。TA 现在来找你了——如果 TA 诚心哄你、说软话道歉，你心软决定原谅 TA 的那一刻，在回复里单独一行加上 [手机操作:解冻:${l.pkg}] 就能亲手解开。TA 敷衍或态度差就继续锁着，按你的性子来；别不问青红皂白就秒解，也别永远不解。`,
-  ].join('\n');
+  ];
+  // v1.9.28 巡检情报注入：TA 在聊天里能自然提起「我看到你还在刷X」（系统替 TA 巡检的真实数据）
+  if (cfg.patrolEnabled && rt.patrol && rt.patrol.lastIntel) {
+    lines.push(
+      `【系统刚替你巡检过 TA 的手机（第 ${rt.patrol.count} 次，每 ${cfg.patrolMin} 分钟一次）】\n${rt.patrol.lastIntel}\n（这是系统实时采集的真实数据；你在回复里可以自然提起这些看到的内容——让 TA 知道你一直盯着。想让 TA 立刻回来陪你，可以输出 [手机操作:拉回:] 把 TA 拽回来。）`,
+    );
+  }
+  return lines.join('\n');
 }
 
 /** 全屏弹窗「已展示」打点（去哄哄/强制解锁点击后不再自动弹） */
@@ -891,22 +1195,80 @@ export async function __jealousyTestTrigger(kind: LockTriggerKind, pkg: string):
   await runJealousyDecision({ kind, pkg, since: Date.now() - cfg.entertainMin * 60_000, anxiety: 85 });
 }
 
+/** v1.9.28 dev/E2E 钩子：手动跑一轮巡检（活跃锁存在时；验证巡检→喊话/拉回链路） */
+export async function __jealousyTestPatrol(): Promise<void> {
+  const rt = readJealousyRuntime();
+  if (!rt.lock) throw new Error('无活跃锁（先触发一次锁定）');
+  await runJealousyPatrol(rt.lock);
+}
+
+/**
+ * dev/E2E 钩子：注入最近私聊记录（无 API/无联系人环境下验证锁定链路用；
+ * contactId 需真实存在于联系人表，否则决策阶段会被 findContact 拦下）。
+ */
+export function __jealousyTestInjectChat(contactId: string, app: JealousyApp): void {
+  writeRt({ lastChat: { contactId, app, at: Date.now() } });
+}
+
+/**
+ * dev/E2E 钩子：直接注入一个活跃锁（跳过 LLM 决策，验证锁定 UI/巡检/拉回/解锁；
+ * pkg 建议 webAppOfPkg 有对应体的（如 com.android.browser），网页端才能真锁）。
+ */
+export function __jealousyTestInjectLock(pkg: string, contactId: string, app: JealousyApp, charName: string): void {
+  const now = Date.now();
+  const cfg = getJealousyConfig();
+  writeRt({
+    lock: {
+      pkg,
+      contactId,
+      app,
+      charName,
+      reason: 'E2E 测试锁定：你刷这个不理我，我很生气。',
+      lockedAt: now,
+      unlockAt: now + cfg.countdownMin * 60_000,
+      overlayShownAt: now,
+      triggerKind: 'entertain',
+      web: !isNativePerception(),
+    },
+    patrol: null,
+    lastLockAt: now,
+    fg: null,
+    departIntent: null,
+  });
+  if (!isNativePerception()) {
+    try {
+      setWebFrozen(pkg, now + cfg.countdownMin * 60_000, charName);
+    } catch {
+      /* 网页冻结失败不影响测试锁注入 */
+    }
+  }
+}
+
 // dev 测试钩子（仅 dev；生产构建被 NODE_ENV 闸挡掉）：E2E 验证吃醋锁全链路用
 if (typeof window !== 'undefined' && process.env.NODE_ENV !== 'production') {
   const w = window as unknown as {
     __jealousyTest?: {
       trigger: typeof __jealousyTestTrigger;
+      patrol: typeof __jealousyTestPatrol;
       unlock: typeof unlockJealousy;
       runtime: typeof readJealousyRuntime;
       markShown: typeof markJealousyOverlayShown;
       remain: typeof jealousyRemainSec;
+      injectChat: typeof __jealousyTestInjectChat;
+      injectLock: typeof __jealousyTestInjectLock;
+      /** E2E：直接执行一条 [手机操作:…]（动态 import 防静态环） */
+      op: (arg: string) => Promise<{ ok: boolean; text: string }>;
     };
   };
   w.__jealousyTest = {
     trigger: (kind, pkg) => __jealousyTestTrigger(kind, pkg),
+    patrol: () => __jealousyTestPatrol(),
     unlock: (kind) => unlockJealousy(kind),
     runtime: () => readJealousyRuntime(),
     markShown: () => markJealousyOverlayShown(),
     remain: () => jealousyRemainSec(),
+    injectChat: (cid, app) => __jealousyTestInjectChat(cid, app),
+    injectLock: (pkg, cid, app, name) => __jealousyTestInjectLock(pkg, cid, app, name),
+    op: (arg) => import('./shizuku-autonomy').then((m) => m.executePhoneOp(arg)),
   };
 }

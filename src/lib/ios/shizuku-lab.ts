@@ -24,8 +24,8 @@ import {
 
 export type LabResult = { ok: boolean; text: string };
 
-/** 本 APP 包名（自授权命令用） */
-const OWN_PKG = 'com.z.aiphone';
+/** 本 APP 包名（自授权命令用；v1.9.28 导出：吃醋锁拉回/autonomy 拉回命令用） */
+export const OWN_PKG = 'com.z.aiphone';
 
 /** Shizuku 未就绪的统一文案（reason → 人话） */
 function gateText(r: ShizukuExecResult | null): string {
@@ -266,6 +266,40 @@ export async function labPackageList(filter?: string): Promise<LabResult> {
       if (hit.length === 0) return { ok: true, text: `手机装了 ${pkgs.length} 个应用，没有包名含「${filter}」的（换关键词或查全部）` };
       const head = `手机共 ${pkgs.length} 个应用${kw ? `，包名含「${filter}」的 ${hit.length} 个` : ''}`;
       return { ok: true, text: `${head}：\n${hit.slice(0, 40).join('\n')}${hit.length > 40 ? `\n…（共${hit.length}个，加关键词缩小范围）` : ''}` };
+    },
+  });
+}
+
+/**
+ * 最近使用的应用（v1.9.28 吃醋锁巡检用）：dumpsys activity recents → 最近任务包名清单。
+ * 输出包名（去重、过滤桌面/系统 UI），中文名映射由调用方（autonomy/jealousy-lock）做
+ * （shizuku-lab 不依赖 jealousy-lock，保持分层）。取不到时降级回原输出片段。
+ */
+export async function labRecentApps(): Promise<LabResult> {
+  return run(['dumpsys', 'activity', 'recents'], {
+    mustContain: ['Recent #'],
+    maxLines: 600,
+    timeoutMs: 10_000,
+    trim: (out) => {
+      const pkgs: string[] = [];
+      for (const m of out.matchAll(/Recent #\d+:.*?[Aa]=\d+:([\w.$]+)\//g)) {
+        const p = m[1];
+        if (!p || pkgs.includes(p)) continue;
+        if (/launcher|systemui|inputmethod/i.test(p)) continue; // 桌面/系统 UI 不算「TA 在用」
+        pkgs.push(p);
+        if (pkgs.length >= 10) break;
+      }
+      if (pkgs.length === 0) {
+        // 某些 ROM recents 格式不同（无 A= 段）：抓 task #N 行的包名形态
+        for (const m of out.matchAll(/#[\d]+ [\w.$]*?([\w.$]+)\/[\w.$]+/g)) {
+          const p = m[1];
+          if (!p || pkgs.includes(p) || /launcher|systemui|inputmethod/i.test(p)) continue;
+          pkgs.push(p);
+          if (pkgs.length >= 10) break;
+        }
+      }
+      if (pkgs.length === 0) return { ok: true, text: '【后台/最近应用】未取到最近任务列表（这台 ROM 的 recents 格式不认识）' };
+      return { ok: true, text: `【后台/最近应用（按最近使用排序）】\n${pkgs.join('\n')}` };
     },
   });
 }

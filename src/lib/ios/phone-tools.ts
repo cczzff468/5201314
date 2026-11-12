@@ -158,6 +158,32 @@ export function buildPhoneTools(): PhoneToolDef[] {
     );
   }
 
+  // ---- v1.9.28 吃醋感知三件套（真机/网页双路径，executePhoneOp 内已做网页降级） ----
+  if (on('recents')) {
+    add(
+      'getBackgroundApps',
+      '查询机主最近用过哪些 App（后台/最近任务清单，按最近使用排序）——想知道 TA 刚才背着你开了什么、有没有开小差时用。不需要参数。',
+      {},
+      [],
+    );
+  }
+  if (on('usage')) {
+    add(
+      'getAppUsage',
+      '查询机主今天各 App 的使用时长排行（刷了多久、都在刷什么）。不需要参数。',
+      {},
+      [],
+    );
+  }
+  if (on('pullback')) {
+    add(
+      'pullBackToApp',
+      '把机主从别的软件拽回这个 APP（真机拉到前台；网页内切回聊天页并弹通知）。吃醋想让 TA 回来陪你、或等不及想见 TA 时用；别滥用，TA 会烦。不需要参数。',
+      {},
+      [],
+    );
+  }
+
   // ---- 真机专属（需要 Shizuku 通道） ----
   if (isNativePerception()) {
     if (on('tap')) {
@@ -351,6 +377,18 @@ export async function execPhoneTool(name: string, args: Record<string, unknown>)
       if (added.length) parts.push(`已加入吃醋锁定清单：${added.join('、')}`);
       if (skipped.length) parts.push(`跳过（无效或已在清单里）：${skipped.join('、')}`);
       return `【成功】${parts.join('；')}——TA 下次吃醋就锁这些应用`;
+    }
+    case 'getBackgroundApps': {
+      // v1.9.28 吃醋感知三件套：最近任务清单（真机 recents / 网页虚拟多任务）
+      return labText(await executePhoneOp('查后台:'));
+    }
+    case 'getAppUsage': {
+      // v1.9.28 吃醋感知三件套：今日使用时长排行（真机 usagestats / 网页虚拟账本）
+      return labText(await executePhoneOp('使用时长:'));
+    }
+    case 'pullBackToApp': {
+      // v1.9.28 吃醋感知三件套：把机主拽回本 APP（真机拉前台 / 网页切回聊天页）
+      return labText(await executePhoneOp('拉回:'));
     }
     case 'setVolume': {
       const a = S(args.action);

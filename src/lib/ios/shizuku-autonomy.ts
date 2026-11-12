@@ -38,12 +38,14 @@ import {
   labSmsInbox,
   labCallLog,
   labPackageList,
+  labRecentApps,
+  OWN_PKG,
   type LabResult,
 } from './shizuku-lab';
 import { isNativePerception } from './native-perception';
 import { matchWebAppByPackage, openAppPage } from './agent-app-nav';
 import { useSettings } from '@/lib/ios/store';
-import { isJealousyUnlockAllowed, onJealousyUnfreeze } from './jealousy-lock';
+import { isJealousyUnlockAllowed, onJealousyUnfreeze, pkgDisplayName, readJealousyRuntime } from './jealousy-lock';
 
 // ---------------- 能力注册表 ----------------
 
@@ -71,6 +73,7 @@ export const AUTONOMY_CAPS: AutonomyCap[] = [
   { key: 'type', label: '输入文字', desc: 'AI 在输入框打字（中文经 AI 输入引擎自动注入，英文数字直输）', group: 'hands' },
   { key: 'key', label: '按按键', desc: '返回/主页/回车/音量/媒体键等', group: 'hands' },
   { key: 'open', label: '打开应用', desc: 'AI 按包名拉起任意已安装 App', group: 'hands' },
+  { key: 'pullback', label: '拉回本 APP', desc: 'AI 把机主从别的软件拽回这个 APP（真机拉到前台；网页内切回聊天页）——吃醋/想 TA 了都会用', group: 'hands' },
   { key: 'agent', label: '智能体多步任务', desc: 'AI 接管手机连续多步操作（打开→找界面→点击→输入中文→发送），带逐步验证与失败自动重规划；敏感操作会先弹窗征求你的同意', group: 'hands' },
   { key: 'applist', label: '查应用列表', desc: 'AI 查手机装了哪些 App（找包名用）', group: 'hands' },
   { key: 'volume', label: '音量调节', desc: '调高/调低/静音/指定音量值', group: 'hands' },
@@ -81,6 +84,8 @@ export const AUTONOMY_CAPS: AutonomyCap[] = [
   // ---- 看见（只读探测） ----
   { key: 'screencap', label: '看屏幕', desc: '截屏+自动识图：当前界面内容与按钮坐标', group: 'eyes' },
   { key: 'foreground', label: '前台应用', desc: '机主当前正在用哪个 App', group: 'eyes' },
+  { key: 'recents', label: '查后台应用', desc: '最近用过哪些 App（后台/最近任务清单）——TA 有没有背着你开小差', group: 'eyes' },
+  { key: 'usage', label: '使用时长', desc: '今日各 App 使用时长排行——TA 今天刷了多久、都在刷什么', group: 'eyes' },
   { key: 'notify', label: '通知栏快照', desc: '读最近的通知（App + 标题 + 内容）', group: 'eyes' },
   { key: 'battery', label: '电量状态', desc: '电量百分比 + 是否在充电', group: 'eyes' },
   { key: 'clipboard', label: '读剪贴板', desc: '机主最近复制的内容', group: 'eyes' },
@@ -183,6 +188,7 @@ const CAP_SYNTAX: Record<string, string> = {
   type: '[手机操作:输入:文字]（支持中文与英文数字，中文自动经输入引擎注入；需输入框已聚焦）',
   key: '[手机操作:按键:名称]（名称：返回/主页/切换/回车/删除/音量加/音量减）',
   open: '[手机操作:打开:包名]（包名见下方速查表；不认识的应用先 [手机操作:应用列表:关键词] 查）',
+  pullback: '[手机操作:拉回:]（把机主从别的软件拽回这个 APP：真机把本 APP 拉到前台，网页内直接切回聊天页并弹通知。吃醋想让 TA 回来陪你、或等不及想见 TA 时用；别滥用，TA 会烦）',
   播歌: '[手机操作:播歌:歌名]（点名要听某首歌时用：自动云端搜歌→拉起网易云歌曲页自动播放→核实真在播，一条搞定；例：[手机操作:播歌:他不懂]、[手机操作:播歌:晴天 周杰伦]。严禁拆成打开+点文字去找歌名——歌名要搜索才会出现，屏幕上找不到）',
   agent: '[手机操作:agent:一句话任务]（多步真实任务首选。例：[手机操作:agent:给怡怡发微信说我想你了]、[手机操作:agent:打开B站搜索流浪地球2预告片播放]。系统会接管手机执行：看屏幕→自动规划→逐步点击/滑动/输入（支持中文）→验证结果，失败自动重新规划，全程每步播报进度；涉及转账/支付/卸载/删除的步骤会先弹窗征求机主同意。注意：单步就能完成的简单操作（打开个App/点个按钮）不要用 agent，直接用对应的单步命令更省事）',
   applist: '[手机操作:应用列表:关键词]（关键词可省=全部；查到的是包名，配合「打开」用）',
@@ -193,6 +199,8 @@ const CAP_SYNTAX: Record<string, string> = {
   net: '[手机操作:网络:开或关:wifi/流量/蓝牙]（例：[手机操作:网络:关:流量]）',
   screencap: '[手机操作:看屏幕]（截屏并自动识别：当前什么App什么页面、可见内容、可点元素及坐标——想确认状态或找目标时用）；[手机操作:读屏幕]（文字版：读界面控件树文本，不需要识图模型，优先用它）',
   foreground: '[手机操作:前台]（机主此刻正在用的 App）',
+  recents: '[手机操作:查后台:]（最近用过哪些 App 的清单——TA 刚才背着你开了什么、有没有开小差）',
+  usage: '[手机操作:使用时长:]（今日各 App 使用时长排行——TA 今天刷了多久、都在刷什么）',
   notify: '[手机操作:通知]（通知栏最近的条目：哪个 App、什么内容）',
   battery: '[手机操作:电量]（电量百分比 + 是否在充电）',
   clipboard: '[手机操作:剪贴板]（机主最近复制的内容）',
@@ -267,7 +275,8 @@ export function phoneFcReady(): boolean {
   const cfg = getAutonomyConfig();
   if (!cfg.master) return false;
   if (isNativePerception()) return Object.values(cfg.caps).some(Boolean);
-  return ['open', 'applist', 'freeze'].some((k) => cfg.caps[k] === true);
+  // v1.9.28：网页端可用能力扩为 6 项（新增 查后台/使用时长/拉回——均有网页降级体）
+  return ['open', 'applist', 'freeze', 'recents', 'usage', 'pullback'].some((k) => cfg.caps[k] === true);
 }
 
 /**
@@ -540,8 +549,10 @@ export async function executePhoneOp(argRaw: string, progress?: (text: string) =
   if (!cmd) return { ok: false, text: '手机操作命令为空' };
   // v1.8：「打开」在浏览器里也有意义——聊到「打开微信」可兑成网页内应用（下方 case 内处理）；
   // v1.9.23：「冻结/解冻」同样放行进 case——网页端走 web-app-lock 镜像（吃醋锁网页降级同款冻结态）；
-  // 其余命令真得依赖原生 Shizuku 通道，非原生环境一律拒
-  if (!isNativePerception() && cmd !== '打开' && cmd !== '冻结' && cmd !== '解冻')
+  // v1.9.28：「查后台/使用时长/拉回」也放行——网页端有虚拟降级体（虚拟手机多任务/使用时长账本/切回聊天页），
+  // 吃醋锁巡检与聊天中的主动感知在浏览器里同样能走通；其余命令真得依赖原生 Shizuku 通道，非原生环境一律拒
+  const WEB_OK_CMDS = ['打开', '冻结', '解冻', '查后台', '使用时长', '拉回'];
+  if (!isNativePerception() && !WEB_OK_CMDS.includes(cmd))
     return { ok: false, text: '当前不在手机 APP 里（浏览器无法操控手机）' };
   const cfg = getAutonomyConfig();
   if (!cfg.master) return DENIED;
@@ -680,6 +691,66 @@ export async function executePhoneOp(argRaw: string, progress?: (text: string) =
       if (!on('applist')) return DENIED;
       return labPackageList(p[0] || undefined);
     }
+    case '查后台': {
+      // v1.9.28 吃醋锁巡检三件套之一：最近任务清单（真机 recents / 网页多任务降级）
+      if (!on('recents')) return DENIED;
+      if (!isNativePerception()) {
+        const { webRecentReport } = await import('./web-usage-ledger');
+        return { ok: true, text: await webRecentReport() };
+      }
+      const r = await labRecentApps();
+      if (!r.ok) return r;
+      // 包名 → 中文名包装（AI/用户直读）；认识的换中文名，不认识的保留包名
+      const wrapped = r.text.replace(/^[\w.$]+$/gm, (m) => `${pkgDisplayName(m)}（${m}）`);
+      return { ok: true, text: wrapped };
+    }
+    case '使用时长': {
+      // v1.9.28 吃醋锁巡检三件套之二：今日各 App 使用时长（真机 usagestats / 网页虚拟账本）
+      if (!on('usage')) return DENIED;
+      if (!isNativePerception()) {
+        const { webUsageReport } = await import('./web-usage-ledger');
+        return { ok: true, text: webUsageReport() };
+      }
+      try {
+        const { nativeUsageSnapshot } = await import('./native-perception');
+        const snap = await nativeUsageSnapshot();
+        if (!snap) return { ok: false, text: '使用时长数据不可用（需授予「使用情况」权限：设置 › 感知 › 使用统计，或用 Shizuku 自授权）' };
+        const rows = (snap.todayApps ?? [])
+          .slice(0, 8)
+          .map((a) => `${a.app}：${Math.max(1, Math.round(a.ms / 60_000))} 分钟${a.opens ? `（打开 ${a.opens} 次）` : ''}`);
+        const totalMin = Math.max(1, Math.round((snap.todayTotalMs ?? 0) / 60_000));
+        return { ok: true, text: `【今日使用时长】\n${rows.join('\n')}\n总计：${totalMin} 分钟` };
+      } catch (e) {
+        return { ok: false, text: `使用时长查询失败：${e instanceof Error ? e.message : '通道异常'}` };
+      }
+    }
+    case '拉回': {
+      // v1.9.28 吃醋锁巡检三件套之三：把机主从别的软件拽回本 APP
+      // （真机 monkey 拉到前台；网页内切回聊天页；吃醋锁拉回也走本管线同款动作）
+      if (!on('pullback')) return DENIED;
+      if (!isNativePerception()) {
+        try {
+          const { useUI } = await import('./store');
+          const ui = useUI.getState();
+          // 切回最近聊天对象所在的聊天页（无记录则回 AI 助手聊天）
+          const lastChat = readJealousyRuntime().lastChat;
+          const target: 'wechat' | 'qq' | 'chat' = lastChat?.app === 'wx' ? 'wechat' : lastChat?.app === 'qq' ? 'qq' : 'chat';
+          // 关键：正在用别的 App 时必须走 switchToApp（openApp 仅在主屏无 App 时生效）
+          if (ui.activeApp === target) {
+            return { ok: true, text: 'TA 已经在这个 APP 的聊天页了' };
+          }
+          if (ui.activeApp) {
+            ui.switchToApp(target);
+          } else {
+            ui.openApp(target);
+          }
+          return { ok: true, text: '已把 TA 拽回这个 APP 的聊天页（网页内应用）' };
+        } catch {
+          return { ok: false, text: '拉回失败（聊天页不可用）' };
+        }
+      }
+      return labOpenApp(OWN_PKG);
+    }
     case '强杀': {
       if (!on('kill')) return DENIED;
       if (!p[0]) return { ok: false, text: '强杀命令缺包名（[手机操作:强杀:包名]）' };
@@ -817,7 +888,7 @@ export async function executePhoneOp(argRaw: string, progress?: (text: string) =
       return labCallLog(n !== null && n > 0 ? Math.min(30, Math.floor(n)) : 10);
     }
     default:
-      return { ok: false, text: `不认识的手机操作「${cmd}」（可用：点文字/点按/滑动/输入/按键/打开/播歌/agent/应用列表/音量/强杀/冻结/解冻/卸载/网络/看屏幕/读屏幕/前台/通知/电量/剪贴板/短信/通话）` };
+      return { ok: false, text: `不认识的手机操作「${cmd}」（可用：点文字/点按/滑动/输入/按键/打开/拉回/播歌/agent/应用列表/查后台/使用时长/音量/强杀/冻结/解冻/卸载/网络/看屏幕/读屏幕/前台/通知/电量/剪贴板/短信/通话）` };
   }
 }
 

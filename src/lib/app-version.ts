@@ -11,9 +11,9 @@
  */
 
 /** 当前最新版本（与 android-shell versionName 保持一致） */
-export const APP_VERSION = '1.9.23';
+export const APP_VERSION = '1.9.28';
 /** 版本号数字（与 android-shell versionCode 保持一致；覆盖安装要求只增不减） */
-export const APP_VERSION_CODE = 43;
+export const APP_VERSION_CODE = 48;
 
 export interface AppReleaseNote {
   version: string;
@@ -24,6 +24,18 @@ export interface AppReleaseNote {
 
 /** 版本历史（新→旧；设置 › APP 更新 页渲染，最新一条即当前版本） */
 export const APP_RELEASE_NOTES: AppReleaseNote[] = [
+  {
+    version: '1.9.28',
+    date: '2026-11-12',
+    items: [
+      '吃醋锁升级「主动巡检」：锁定期默认 15 分钟自动解锁（可自定义 5~180），期间 TA 每隔几分钟（默认 3 分钟，可调 1~15）用工具看你在干嘛——真机截图（识图模型分析你屏幕上在看什么）+ 查后台最近应用 + 今日各 App 使用时长，发现你还在浪就按人设发消息数落你',
+      'AI 拉回：巡检后 TA 可以把你从别的软件拽回这个 APP（真机 monkey 拉前台 + 系统通知；网页内直接切回聊天页），每轮锁定最多 2 次、间隔 ≥2 分钟，防暴力拽人；设置可一键关闭',
+      '巡检情报注入聊天上下文：你回来找 TA 聊天时，TA 能自然说出「我看到你刚才还在刷抖音 40 分钟」——这些是系统替 TA 实时采集的真实数据',
+      '新工具（AI 动手页可逐项开关）：查后台 [手机操作:查后台:]（真机 recents/网页多任务）、使用时长 [手机操作:使用时长:]（真机 usagestats/网页虚拟账本）、拉回 [手机操作:拉回:]，同步新增 FC 工具 getBackgroundApps/getAppUsage/pullBackToApp；网页端（无 Shizuku）三项均可用的降级体——没装 APP 也能体验「网站内部的 APP」口径',
+      '网页虚拟使用时长账本：订阅虚拟手机前台应用变化记账（今日各 App 累计时长、跨日清零、刷新不丢），吃醋锁巡检与工具查询共用',
+      '结构优化：qq.tsx（19017 行）/wechat.tsx（17601 行）按功能域拆至 qq-app/、wx-app/ 子模块，入口收敛为桶文件，对外导入路径零变化（v1.9.27）；本次 v1.9.28 全部改动在 lib/组件层，无外部接口变化',
+    ],
+  },
   {
     version: '1.9.23',
     date: '2026-11-11',

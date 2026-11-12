@@ -16,7 +16,7 @@
  */
 
 import { useState, useSyncExternalStore } from 'react';
-import { Heart, Lock, Minus, Plus, ShieldAlert, Unlock } from 'lucide-react';
+import { Eye, Heart, Lock, Minus, Plus, ShieldAlert, Unlock, Magnet } from 'lucide-react';
 import { ChatToggle } from './chat-settings';
 import {
   ENTERTAIN_PRESETS,
@@ -153,6 +153,45 @@ export function JealousyLockSection({
 
           <div className={`border-t ${dividerCls}`} />
 
+          {/* v1.9.28 锁定期间主动巡检 */}
+          <div className="flex w-full items-center justify-between gap-3 px-4 py-2.5">
+            <span className="flex min-w-0 items-center gap-2.5">
+              <Eye size={17} strokeWidth={1.9} className="shrink-0 text-black/50 dark:text-white/50" aria-hidden />
+              <span className="min-w-0">
+                <span className="block text-[14.5px]">锁定期间主动巡检</span>
+                <span className="mt-0.5 block text-[11.5px] leading-tight text-black/40 dark:text-white/40">
+                  锁住后 TA 每隔几分钟用工具看你在干嘛（截图/查后台/使用时长），发现你还在浪就发消息数落你
+                  {native ? '（真实手机：真截图真后台）' : '（网页内：看这台手机里的应用状态）'}
+                </span>
+              </span>
+            </span>
+            <ChatToggle on={cfg.patrolEnabled} onChange={(v) => patch({ patrolEnabled: v })} accent="#ff5c8a" testId={`${prefix}-patrol-toggle`} label="锁定期间主动巡检" />
+          </div>
+          {cfg.patrolEnabled ? (
+            <>
+              <div className={`border-t ${dividerCls}`} />
+              <Stepper label="巡检间隔" value={cfg.patrolMin} min={1} max={15} step={1} unit="分钟" onChange={(v) => patch({ patrolMin: v })} />
+            </>
+          ) : null}
+
+          <div className={`border-t ${dividerCls}`} />
+
+          {/* v1.9.28 拉回 */}
+          <div className="flex w-full items-center justify-between gap-3 px-4 py-2.5">
+            <span className="flex min-w-0 items-center gap-2.5">
+              <Magnet size={17} strokeWidth={1.9} className="shrink-0 text-black/50 dark:text-white/50" aria-hidden />
+              <span className="min-w-0">
+                <span className="block text-[14.5px]">允许 TA 把我拉回来</span>
+                <span className="mt-0.5 block text-[11.5px] leading-tight text-black/40 dark:text-white/40">
+                  巡检时 TA 可以把你从别的软件拽回这个 APP 聊天页（每轮锁定最多 2 次；真机拉前台，网页内直接切页）
+                </span>
+              </span>
+            </span>
+            <ChatToggle on={cfg.pullbackEnabled} onChange={(v) => patch({ pullbackEnabled: v })} accent="#ff5c8a" testId={`${prefix}-pullback-toggle`} label="允许拉回" />
+          </div>
+
+          <div className={`border-t ${dividerCls}`} />
+
           {/* 娱乐 App 清单 */}
           <div className="px-4 py-3">
             <p className="text-[14px]">吃醋锁定的「娱乐 App」</p>
@@ -250,6 +289,11 @@ export function JealousyLockSection({
                   {remainMin !== null && remainMin > 0 ? `，${remainMin} 分钟后自动解锁` : '，即将自动解锁'}
                 </p>
                 <p className="mt-1 text-[11.5px] leading-snug text-black/45 dark:text-white/45">“{rt.lock.reason}”</p>
+                {rt.patrol && rt.patrol.count > 0 ? (
+                  <p className="mt-1.5 text-[11px] leading-snug text-[#c2255c] dark:text-[#ffb3c8]" data-testid={`${prefix}-patrol-status`}>
+                    已替 TA 巡检 {rt.patrol.count} 次{rt.patrol.pullbackCount > 0 ? `、拉回过你 ${rt.patrol.pullbackCount} 次` : ''}；最近发现：{rt.patrol.lastIntel.split('\n')[0]}
+                  </p>
+                ) : null}
                 <button
                   type="button"
                   onClick={() => {
@@ -283,8 +327,8 @@ export function JealousyLockSection({
             <ShieldAlert size={12} strokeWidth={2} className="mt-0.5 shrink-0 text-black/30 dark:text-white/30" aria-hidden />
             <p className="text-[10.5px] leading-snug text-black/35 dark:text-white/35">
               {native
-                ? '真锁：经 Shizuku 的 ADB Shell 执行 pm suspend --user 0（可逆、数据保留），解锁执行 pm unsuspend --user 0。锁不锁由 TA 按人设自己决定，系统只提供触发与权力。'
-                : '网页预览（Shizuku 未连接）：TA 会真的锁住这台虚拟手机里的 App（音乐/浏览器/淘宝/美团/照片/X论坛）——图标变灰点不开、点开只弹 TA 的留言，哄好/倒计时/强制解锁三通道照常；真机安装 APP 并授权 Shizuku 后锁真实应用（pm suspend）。'}
+                ? '真锁：经 Shizuku 的 ADB Shell 执行 pm suspend --user 0（可逆、数据保留），解锁执行 pm unsuspend --user 0。锁不锁由 TA 按人设自己决定，系统只提供触发与权力；锁定期 TA 会用工具主动巡检（截图/查后台/使用时长）并可能把你拉回这个 APP。'
+                : '网页预览（Shizuku 未连接）：TA 会真的锁住这台虚拟手机里的 App（音乐/浏览器/淘宝/美团/照片/X论坛）——图标变灰点不开、点开只弹 TA 的留言，哄好/倒计时/强制解锁三通道照常；锁定期 TA 的巡检看的是这台手机里的应用状态（当前应用/多任务/使用时长），拉回=切回聊天页；真机安装 APP 并授权 Shizuku 后升级为真截图/真后台/真拉前台。'}
             </p>
           </div>
         </>

@@ -2732,3 +2732,17 @@ Work Log:
 Stage Summary:
 - v1.9.23 已提交：AI 动手从「文字标记协议」升级为真 Function Calling——按 UI 开关动态注入 tools、逼迫动手 System Prompt、tool_calls 解析执行 + role:tool 回传多步 Agentic 循环；锁应用彻底免看屏幕（+文字版读屏工具）；网页端 AI 可真锁应用（src 标记防吃醋锁误清）；AI 可自拉应用列表并增补吃醋锁定清单；上游不支持自动降级 + 标记协议兜底
 - 关键文件：src/lib/ios/phone-tools.ts（新）、src/lib/ios/shizuku-autonomy.ts、src/lib/ios/web-app-lock.ts、src/lib/ios/jealousy-lock.ts、src/lib/ios/direct-api.ts、src/lib/chat-stream-store.ts、src/app/api/chat/route.ts、src/components/apps/chat.tsx、src/components/apps/wechat.tsx、src/components/apps/qq.tsx、src/lib/app-version.ts
+
+## v1.9.28 吃醋锁主动巡检 + AI 拉回（2026-11-12）
+
+Task: 用户需求「ai吃醋锁让他15分钟（可以自定义时间）主动使用工具能知道我在干嘛，可以截图，可以知道后台，可以知道软件使用了多长时间，他可以从别的软件切回APP等等……如果没有绑定shizuku，没有开启ai动手就是网站内部的APP」
+
+- 锁定时长默认 30→15 分钟（countdownMin，仍可自定义 5~180；设置页 Stepper 不变即得）
+- 巡检引擎（jealousy-lock.ts）：活跃锁期间 tick 不再空转——距锁定 ≥1 分钟后每 patrolMin（默认 3，1~15 可调）分钟跑一轮 runJealousyPatrol：采集情报→LLM 按人设决策（message+pullback JSON 契约）→喊话（deliverProactiveMsg）/拉回
+- 情报采集双路径（collectPatrolIntel）：真机=labForegroundPkg+labScreencap→visionAsk 25s 看门狗识图+labRecentApps（新 dumpsys activity recents）+nativeUsageSnapshot（todayApps）；网页=useUI.activeApp/recentApps+web-usage-ledger 虚拟时长账本（新文件，订阅 store 记账，localStorage 跨日清零）
+- 拉回（jealousyPullback + [手机操作:拉回:] + pullBackToApp 工具）：真机 labOpenApp(OWN_PKG monkey 拉前台)；网页切回锁主聊天页（wx→wechat/qq→qq/sms→chat）+notifyIfHidden；每锁最多 2 次、间隔 ≥2 分钟
+- 新 caps：recents/usage/pullback（eyes/eyes/hands，安全项默认开）+CAP_SYNTAX 教学+executePhoneOp 三 case（网页 gate 白名单放行，均有网页降级体）；phoneFcReady 网页端判定扩为 6 项
+- 聊天上下文：buildJealousyLockBlock 注入最新巡检情报（AI 能说「我看到你还在刷X」+ 拉回教学）
+- 解锁三通道统一清 patrol；dev 钩子 __jealousyTest.patrol() 手动触发巡检（E2E 用）
+- 设置页：巡检开关+间隔 Stepper+拉回开关+状态卡巡检信息行（次数/拉回/最近发现）+能力分级文案（真机/网页两版）
+- app-version 1.9.23→1.9.28（code 43→48）+ release note

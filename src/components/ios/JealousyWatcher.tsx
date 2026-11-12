@@ -14,6 +14,7 @@
 
 import { useEffect } from 'react';
 import { runJealousyTick } from '@/lib/ios/jealousy-lock';
+import { initWebUsageLedger } from '@/lib/ios/web-usage-ledger';
 
 /** tick 间隔（前台 30s；后台被节流到 ~1min 也够用） */
 const JEALOUSY_TICK_MS = 30_000;
@@ -29,6 +30,9 @@ export default function JealousyWatcher() {
     owned = true;
     let stopped = false;
     let timer: ReturnType<typeof setTimeout> | null = null;
+
+    // v1.9.28：网页虚拟使用时长账本（吃醋锁巡检的网页降级数据源；内部自带单例守卫）
+    initWebUsageLedger();
 
     const loop = async () => {
       if (stopped) return;
