@@ -11,8 +11,8 @@ android {
         applicationId "com.z.aiphone"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 18          // v1.8.2 唤醒自愈+诊断可视化（v17 = 1.8.1）
-        versionName "1.8.2"     // v1.8.2 唤醒自愈+诊断可视化（纯网页更新不重打 APK）
+        versionCode 19          // v1.9.36 权限给予页：overlay/battery/location 六个新插件方法（v18 = 1.8.2）
+        versionName "1.9.36"    // 需重打 APK 才有新权限方法；旧 APK 网页侧经 Shizuku 通道兼容直授
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.

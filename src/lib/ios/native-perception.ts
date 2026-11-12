@@ -83,6 +83,12 @@ type CapPlugin = {
   requestMicPermission(): Promise<RuntimePermResult>;
   notificationPermission(): Promise<RuntimePermResult & { sdk?: number }>;
   requestNotificationPermission(): Promise<RuntimePermResult>;
+  overlayPermission(): Promise<RuntimePermResult>;
+  requestOverlayPermission(): Promise<{ ok?: boolean; reason?: string }>;
+  batteryPermission(): Promise<RuntimePermResult>;
+  requestBatteryPermission(): Promise<{ ok?: boolean; reason?: string }>;
+  locationPermission(): Promise<RuntimePermResult & { fine?: boolean; coarse?: boolean }>;
+  requestLocationPermission(): Promise<RuntimePermResult & { fine?: boolean; coarse?: boolean }>;
 };
 
 type CapacitorCore = {
@@ -276,6 +282,13 @@ function bridgePlugin(): CapPlugin {
     requestMicPermission: () => nativeCall<RuntimePermResult>('requestMicPermission', {}, 60_000),
     notificationPermission: () => nativeCall<RuntimePermResult & { sdk?: number }>('notificationPermission'),
     requestNotificationPermission: () => nativeCall<RuntimePermResult>('requestNotificationPermission', {}, 60_000),
+    overlayPermission: () => nativeCall<RuntimePermResult>('overlayPermission'),
+    requestOverlayPermission: () => nativeCall<{ ok?: boolean; reason?: string }>('requestOverlayPermission'),
+    batteryPermission: () => nativeCall<RuntimePermResult>('batteryPermission'),
+    requestBatteryPermission: () => nativeCall<{ ok?: boolean; reason?: string }>('requestBatteryPermission'),
+    locationPermission: () => nativeCall<RuntimePermResult & { fine?: boolean; coarse?: boolean }>('locationPermission'),
+    requestLocationPermission: () =>
+      nativeCall<RuntimePermResult & { fine?: boolean; coarse?: boolean }>('requestLocationPermission', {}, 60_000),
   };
 }
 
@@ -315,6 +328,148 @@ export async function notificationPermission(): Promise<(RuntimePermResult & { s
 export async function requestNotificationPermission(): Promise<RuntimePermResult | null> {
   const p = await nativePlugin();
   return p ? p.requestNotificationPermission() : null;
+}
+
+// ---------------- v1.9.36 权限给予页：悬浮窗 / 电池优化豁免 / 位置（三通道级联） ----------------
+// 级联策略（每个权限状态查询/申请都一样）：
+//  ① 新 APK（v1.9.36+ 原生方法）：nativeCall 直查/直弹系统框（毫秒级）；
+//  ② 旧 APK + Shizuku 已授权：经 shizukuExec（shell 权限）查 appops/dumpsys/pm
+//     真实状态，或直接 appops set / dumpsys deviceidle whitelist / pm grant 授予；
+//  ③ 都不可用 → null / 'unavailable'（设置页展示「需真机/旧 APK 提示升级」）。
+
+/** 本 APP 包名（Shizuku shell 命令的权限主体） */
+const APP_PKG = 'com.z.aiphone';
+
+/** 原生方法短超时探测（旧 APK 对未知方法不回包，卡满超时才回落；3s 判定足够） */
+async function nativeOrTimeout<T>(p: Promise<T>, ms = 3000): Promise<T> {
+  return Promise.race([p, new Promise<never>((_, rej) => window.setTimeout(() => rej(new Error('probe-timeout')), ms))]);
+}
+
+/** Shizuku 是否已连接且授权（沿能力实验室探测口径） */
+async function shizukuReady(): Promise<boolean> {
+  const st = await nativeShizukuStatus();
+  return Boolean(st?.running && st?.granted);
+}
+
+/** 悬浮窗权限状态（①新 APK 原生 ②Shizuku appops 查询；都不可用 null） */
+export async function overlayPermission(): Promise<RuntimePermResult | null> {
+  const p = await nativePlugin();
+  if (p) {
+    try {
+      return await nativeOrTimeout(p.overlayPermission());
+    } catch {
+      /* 旧 APK 无此方法 → Shizuku 回退 */
+    }
+  }
+  if (await shizukuReady()) {
+    const r = await nativeShizukuExec(['cmd', 'appops', 'get', APP_PKG, 'SYSTEM_ALERT_WINDOW'], { maxLines: 4, timeoutMs: 4000 });
+    if (r?.ok && r.out) {
+      const granted = /allow/i.test(r.out);
+      return { granted, canAsk: true };
+    }
+  }
+  return null;
+}
+
+/** 申请悬浮窗权限（①新 APK 跳系统开关页 ②Shizuku appops set 直授；返回执行通道说明） */
+export async function requestOverlayPermission(): Promise<{ ok: boolean; via: 'native' | 'shizuku' | 'unavailable' }> {
+  const p = await nativePlugin();
+  if (p) {
+    try {
+      const r = await nativeOrTimeout(p.requestOverlayPermission());
+      if (r?.ok) return { ok: true, via: 'native' };
+    } catch {
+      /* 旧 APK → Shizuku 回退 */
+    }
+  }
+  if (await shizukuReady()) {
+    const r = await nativeShizukuExec(['cmd', 'appops', 'set', APP_PKG, 'SYSTEM_ALERT_WINDOW', 'allow'], { maxLines: 4, timeoutMs: 5000 });
+    if (r?.ok) return { ok: true, via: 'shizuku' };
+  }
+  return { ok: false, via: 'unavailable' };
+}
+
+/** 电池优化豁免状态（①新 APK 原生 ②Shizuku dumpsys deviceidle 白名单查询） */
+export async function batteryPermission(): Promise<RuntimePermResult | null> {
+  const p = await nativePlugin();
+  if (p) {
+    try {
+      return await nativeOrTimeout(p.batteryPermission());
+    } catch {
+      /* 旧 APK → Shizuku 回退 */
+    }
+  }
+  if (await shizukuReady()) {
+    const r = await nativeShizukuExec(['dumpsys', 'deviceidle', 'whitelist'], { maxLines: 80, timeoutMs: 4000 });
+    if (r?.ok && r.out) {
+      const granted = r.out.split('\n').some((l) => l.includes(APP_PKG));
+      return { granted, canAsk: true };
+    }
+  }
+  return null;
+}
+
+/** 申请电池优化豁免（①新 APK 弹系统确认框 ②Shizuku dumpsys 白名单直加） */
+export async function requestBatteryPermission(): Promise<{ ok: boolean; via: 'native' | 'shizuku' | 'unavailable' }> {
+  const p = await nativePlugin();
+  if (p) {
+    try {
+      const r = await nativeOrTimeout(p.requestBatteryPermission());
+      if (r?.ok) return { ok: true, via: 'native' };
+    } catch {
+      /* 旧 APK → Shizuku 回退 */
+    }
+  }
+  if (await shizukuReady()) {
+    const r = await nativeShizukuExec(['dumpsys', 'deviceidle', 'whitelist', `+${APP_PKG}`], { maxLines: 4, timeoutMs: 5000 });
+    if (r?.ok) return { ok: true, via: 'shizuku' };
+  }
+  return { ok: false, via: 'unavailable' };
+}
+
+/** 位置权限状态（①新 APK 原生 ②Shizuku pm check-permission 查询） */
+export async function locationPermission(): Promise<(RuntimePermResult & { fine?: boolean; coarse?: boolean }) | null> {
+  const p = await nativePlugin();
+  if (p) {
+    try {
+      return await nativeOrTimeout(p.locationPermission());
+    } catch {
+      /* 旧 APK → Shizuku 回退 */
+    }
+  }
+  if (await shizukuReady()) {
+    const r = await nativeShizukuExec(
+      ['pm', 'check-permission', 'android.permission.ACCESS_FINE_LOCATION', APP_PKG],
+      { maxLines: 4, timeoutMs: 4000 },
+    );
+    if (r?.ok && r.out) {
+      const granted = /granted\s*=\s*true/i.test(r.out);
+      return { granted, fine: granted, coarse: granted, canAsk: !granted };
+    }
+  }
+  return null;
+}
+
+/** 申请位置权限（①新 APK 弹系统授权框 ②Shizuku pm grant 直授——需 Manifest 已声明） */
+export async function requestLocationPermission(): Promise<{ ok: boolean; via: 'native' | 'shizuku' | 'unavailable' }> {
+  const p = await nativePlugin();
+  if (p) {
+    try {
+      const r = await nativeOrTimeout(p.requestLocationPermission(), 60_000);
+      if (r?.granted) return { ok: true, via: 'native' };
+      if (r && !r.granted && r.canAsk === false) return { ok: false, via: 'native' }; // 用户拒绝：如实回传
+    } catch {
+      /* 旧 APK → Shizuku 回退 */
+    }
+  }
+  if (await shizukuReady()) {
+    const r = await nativeShizukuExec(
+      ['pm', 'grant', APP_PKG, 'android.permission.ACCESS_FINE_LOCATION'],
+      { maxLines: 4, timeoutMs: 5000 },
+    );
+    if (r?.ok) return { ok: true, via: 'shizuku' };
+  }
+  return { ok: false, via: 'unavailable' };
 }
 
 /**

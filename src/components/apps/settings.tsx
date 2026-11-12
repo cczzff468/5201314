@@ -83,6 +83,10 @@ import {
   Wrench,
   X,
   XCircle,
+  ShieldCheck,
+  MapPin,
+  Terminal,
+  Cpu,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { IOSBackButton, IOSNavBar, IOSScreen } from '@/components/ios/IOSNavBar';
@@ -146,9 +150,38 @@ import {
 } from '@/lib/ios/accounts';
 import { displayNameOf, type ContactRecord } from '@/lib/contacts';
 import { isWebSpeechSupported } from '@/lib/ios/web-speech';
-// v1.3 AI 动手（Shizuku 自主权）+ APP 更新：设置页新入口
-import { AUTONOMY_CAPS, getAutonomyConfig, setAutonomyCap, setAutonomyMaster } from '@/lib/ios/shizuku-autonomy';
-import { isNativePerception } from '@/lib/ios/native-perception';
+// v1.3 AI 动手（Shizuku 自主权）+ APP 更新：设置页新入口；v1.9.36 重命名为「权限给予」
+import {
+  AUTONOMY_CAPS,
+  getAiActionTarget,
+  getAutonomyConfig,
+  setAiActionTarget,
+  setAutonomyCap,
+  setAutonomyMaster,
+  type AiActionTarget,
+} from '@/lib/ios/shizuku-autonomy';
+import {
+  batteryPermission,
+  getUsageEngine,
+  isNativePerception,
+  locationPermission,
+  micPermission,
+  nativeMediaPermission,
+  nativeRequestShizukuPermission,
+  nativeShizukuStatus,
+  nativeUsagePermission,
+  notificationPermission,
+  openNativeMediaSettings,
+  openNativeUsageSettings,
+  overlayPermission,
+  requestBatteryPermission,
+  requestLocationPermission,
+  requestMicPermission,
+  requestNotificationPermission,
+  requestOverlayPermission,
+  setUsageEngine,
+  type UsageEngine,
+} from '@/lib/ios/native-perception';
 // C1 语音唤起智能体（v1.9.3 独立设置页：唤醒名 / 悬浮球 / 连续监听）
 import {
   DEFAULT_WAKE_NAME,
@@ -814,7 +847,8 @@ function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
           </div>
         </div>
 
-        {/* AI 感知与操控：Web 工具自主权总入口——逐项开关控制 AI 能真实操作哪些网页应用能力；
+        {/* AI 感知与操控：v1.9.36「AI 动手」入口改为「权限给予」——系统权限/调试授权/
+            授权模式（CAP-go vs Shizuku）/AI 动手范围（真机 vs 网站）/能力开关一页全管；
             v1.9.3 语音唤起智能体拆出为独立设置页（同分组独立入口） */}
         <div className="mb-2 mt-6 px-8 text-[13px] text-muted-foreground">AI 感知与操控</div>
         <div className="mx-4 divide-y divide-black/[0.05] overflow-hidden rounded-[22px] bg-white/55 shadow-[0_8px_28px_rgba(17,24,39,0.06)] ring-1 ring-white/70 backdrop-blur-2xl dark:divide-white/[0.06] dark:bg-white/[0.06] dark:ring-white/[0.09]">
@@ -824,13 +858,13 @@ function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
             onClick={() => onOpen('autonomy')}
             className="flex min-h-[52px] w-full items-center gap-3 px-4 py-2 text-left transition-colors active:bg-muted/50"
           >
-            <RowIcon icon={ScanEye} tone={TONE_GREEN} />
+            <RowIcon icon={ShieldCheck} tone={TONE_GREEN} />
             <span className="min-w-0 flex-1">
-              <span className="block truncate text-[16px]">AI 动手</span>
-              <span className="mt-0.5 block truncate text-[12px] text-muted-foreground">发消息/发帖/放歌/备忘录/闹钟…逐项授权</span>
+              <span className="block truncate text-[16px]">权限给予</span>
+              <span className="mt-0.5 block truncate text-[12px] text-muted-foreground">通知/悬浮窗/位置/电池…系统权限 · CAP-go/Shizuku · AI 动手范围与能力</span>
             </span>
             <span className="max-w-[50%] shrink-0 truncate text-[15px] text-muted-foreground">
-              {autonomyMaster ? `已开启 · ${autonomyOnCount} 项` : '已关闭'}
+              {autonomyMaster ? `AI 已开启 · ${autonomyOnCount} 项` : 'AI 已关闭'}
             </span>
             <ChevronRight className="h-5 w-5 shrink-0 text-muted-foreground/60" />
           </button>
@@ -1498,30 +1532,476 @@ function AgentVoicePage({ onBack }: { onBack: () => void }) {
   );
 }
 
-function ShizukuAutonomyPage({ onBack }: { onBack: () => void }) {
+// ---------------- 权限给予（v1.9.36：系统权限/调试授权/授权模式/AI 动手范围/能力开关） ----------------
+
+/** 单个权限的运行时状态（null=非原生环境需真机） */
+type PermState = 'checking' | 'granted' | 'denied' | 'web-denied' | 'native-only' | 'web-ok';
+
+/** 权限行状态胶囊 */
+function PermStatusPill({ state }: { state: PermState }) {
+  const map: Record<PermState, { text: string; cls: string }> = {
+    checking: { text: '查询中…', cls: 'bg-black/[0.06] text-muted-foreground dark:bg-white/10' },
+    granted: { text: '已授权', cls: 'bg-[#34C759]/12 text-[#248A3D] dark:text-[#30D158]' },
+    'web-ok': { text: '已授权', cls: 'bg-[#34C759]/12 text-[#248A3D] dark:text-[#30D158]' },
+    denied: { text: '未授权', cls: 'bg-[#FF9500]/12 text-[#C25000] dark:text-[#FF9F0A]' },
+    'web-denied': { text: '已在系统关闭', cls: 'bg-[#FF3B30]/10 text-[#D70015] dark:text-[#FF453A]' },
+    'native-only': { text: '需真机', cls: 'bg-black/[0.06] text-muted-foreground dark:bg-white/10' },
+  };
+  const s = map[state];
+  const green = state === 'granted' || state === 'web-ok';
+  return (
+    <span
+      className={`flex shrink-0 items-center gap-1 rounded-full px-2.5 py-1 text-[12px] font-medium ${s.cls}`}
+      data-testid={`perm-pill-${state}`}
+    >
+      {green ? <CheckCircle2 className="h-3.5 w-3.5" strokeWidth={2.4} /> : null}
+      {state === 'checking' ? <Loader2 className="h-3.5 w-3.5 animate-spin" strokeWidth={2.4} /> : null}
+      {s.text}
+    </span>
+  );
+}
+
+/** 权限定义（权限给予页数据源） */
+interface PermDef {
+  key: string;
+  label: string;
+  desc: string;
+  icon: LucideIcon;
+  /** 授权弹窗里的详细说明 */
+  detail: string;
+  /** 申请按钮文案 */
+  actionLabel: string;
+  /** 状态查询（返回 null = 非原生环境；granted 可选——桥异常时只有 canAsk） */
+  query: () => Promise<{ granted?: boolean; canAsk?: boolean } | null>;
+  /** 申请动作（弹系统授权框 / 跳系统设置页 / Shizuku 直授）；返回操作结果文案 */
+  request: () => Promise<{ ok: boolean; note?: string }>;
+}
+
+/**
+ * 权限给予页的权限清单。
+ * 通知权限在浏览器里走 Web Notification（querySystemNotifyPermission 已适配双环境），
+ * 其余权限需要 APK 原生壳（或 Shizuku 通道兜底）。
+ */
+const PERM_DEFS: PermDef[] = [
+  {
+    key: 'notify',
+    label: '通知权限',
+    desc: '系统通知栏弹消息、后台离线推送',
+    icon: Bell,
+    detail: '允许 AI Phone 发送系统通知（聊天气泡不在前台时的提醒、闹钟、来电、后台消息推送都需要通知权限）。Android 13+ 会弹系统授权框；浏览器里走浏览器通知授权。',
+    actionLabel: '允许通知',
+    query: async () => {
+      const p = await querySystemNotifyPermission();
+      if (p === 'granted') return { granted: true };
+      if (p === 'denied') return { granted: false, canAsk: isNativePerception() };
+      return { granted: false, canAsk: true };
+    },
+    request: async () => {
+      const r = await requestSystemNotifyPermission();
+      return { ok: r === 'granted', note: r === 'granted' ? undefined : r === 'denied' ? '已在系统设置中关闭通知（需去系统设置手动打开）' : '未完成授权' };
+    },
+  },
+  {
+    key: 'mic',
+    label: '麦克风权限',
+    desc: '语音聊天、按住说话、喊名唤醒',
+    icon: Mic,
+    detail: '录音需要 Android 运行时麦克风权限（RECORD_AUDIO）。点「允许」会弹系统授权框；拒绝后想再开需去系统设置。',
+    actionLabel: '允许麦克风',
+    query: () => micPermission(),
+    request: async () => {
+      const r = await requestMicPermission();
+      if (r === null) return { ok: false, note: '当前环境无法申请（需 APK）' };
+      return { ok: Boolean(r.granted), note: r.granted ? undefined : r.canAsk ? '未完成授权' : '已被拒绝，需去系统设置开启' };
+    },
+  },
+  {
+    key: 'location',
+    label: '位置权限',
+    desc: '天气定位、地图、外卖/打车场景',
+    icon: MapPin,
+    detail: '精确定位权限（ACCESS_FINE_LOCATION）。点「允许」弹系统授权框；Shizuku 已授权时也可经 pm grant 直授。',
+    actionLabel: '允许定位',
+    query: () => locationPermission(),
+    request: async () => {
+      const r = await requestLocationPermission();
+      const note = r.via === 'shizuku' ? '已经 Shizuku 直授' : r.via === 'unavailable' ? '无法申请（需 APK 或 Shizuku）' : undefined;
+      return { ok: r.ok, note };
+    },
+  },
+  {
+    key: 'overlay',
+    label: '悬浮窗权限',
+    desc: '聊天悬浮窗、悬浮球在其他应用上层显示',
+    icon: PanelTop,
+    detail: '特殊权限（SYSTEM_ALERT_WINDOW）：让悬浮窗/悬浮球能显示在其他应用上层。系统会跳到「在其他应用上层显示」设置页，找到 AI Phone 打开开关后返回；Shizuku 已授权时可直授免跳转。',
+    actionLabel: '去开启悬浮窗',
+    query: () => overlayPermission(),
+    request: async () => {
+      const r = await requestOverlayPermission();
+      const note = r.via === 'shizuku' ? '已经 Shizuku 直授' : r.via === 'native' ? '已跳转系统设置页，打开开关后返回' : '无法申请（需 APK 或 Shizuku）';
+      return { ok: r.ok, note };
+    },
+  },
+  {
+    key: 'battery',
+    label: '电池优化豁免',
+    desc: '息屏后保持监听/常驻通知不被系统限制',
+    icon: BatteryCharging,
+    detail: '加入电池优化白名单（不因息屏休眠被系统限制后台），语音唤醒监听、后台消息、闹钟才可靠。系统会弹确认框，点「允许」即可；Shizuku 已授权时可直授。',
+    actionLabel: '允许忽略电池优化',
+    query: () => batteryPermission(),
+    request: async () => {
+      const r = await requestBatteryPermission();
+      const note = r.via === 'shizuku' ? '已经 Shizuku 直授' : r.via === 'native' ? '已弹出系统确认框' : '无法申请（需 APK 或 Shizuku）';
+      return { ok: r.ok, note };
+    },
+  },
+  {
+    key: 'storage',
+    label: '存储权限',
+    desc: '媒体库读取（正在听什么歌的识别）',
+    icon: Database,
+    detail: '「正在收听检测」需要通知使用权（媒体通知读取）。点「去开启」跳到系统通知使用权设置页，找到 AI Phone 打开；返回后点刷新核对。',
+    actionLabel: '去系统设置开启',
+    query: async () => {
+      const r = await nativeMediaPermission();
+      return r === null ? null : { granted: r };
+    },
+    request: async () => {
+      const ok = await openNativeMediaSettings();
+      return { ok, note: ok ? '已跳转系统设置页，开启后返回刷新' : '当前环境无法跳转（需 APK）' };
+    },
+  },
+  {
+    key: 'usage',
+    label: '使用情况权限',
+    desc: 'App 使用时长感知（Cap-go 标准引擎）',
+    icon: BarChart3,
+    detail: '使用情况访问权限（PACKAGE_USAGE_STATS）：AI 感知「你今天用了多久手机、都在用什么App」需要它。点「去开启」跳系统设置页。',
+    actionLabel: '去系统设置开启',
+    query: async () => {
+      const r = await nativeUsagePermission();
+      return r === null ? null : { granted: r };
+    },
+    request: async () => {
+      const ok = await openNativeUsageSettings();
+      return { ok, note: ok ? '已跳转系统设置页，开启后返回刷新' : '当前环境无法跳转（需 APK）' };
+    },
+  },
+];
+
+/** 单行权限（点击弹授权说明框） */
+function PermissionRow({
+  def,
+  state,
+  onClick,
+}: {
+  def: PermDef;
+  state: PermState;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      data-testid={`perm-row-${def.key}`}
+      onClick={onClick}
+      className="flex min-h-[52px] w-full items-center gap-3 px-4 py-2 text-left transition-colors active:bg-muted/50"
+    >
+      <LineIcon icon={def.icon} />
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-[16px]">{def.label}</span>
+        <span className="mt-0.5 block truncate text-[11.5px] text-muted-foreground">{def.desc}</span>
+      </span>
+      <PermStatusPill state={state} />
+      <ChevronRight className="h-5 w-5 shrink-0 text-muted-foreground/60" />
+    </button>
+  );
+}
+
+/** 模式单选行（CAP-go/Shizuku、网站/真机 两组选择器共用） */
+function ModeRadioRow({
+  icon: Icon,
+  label,
+  desc,
+  selected,
+  onSelect,
+  testId,
+}: {
+  icon: LucideIcon;
+  label: string;
+  desc: string;
+  selected: boolean;
+  onSelect: () => void;
+  testId?: string;
+}) {
+  return (
+    <button
+      type="button"
+      role="radio"
+      aria-checked={selected}
+      data-testid={testId}
+      onClick={onSelect}
+      className="flex min-h-[52px] w-full items-center gap-3 px-4 py-2 text-left transition-colors active:bg-muted/50"
+    >
+      <LineIcon icon={Icon} />
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-[16px]">{label}</span>
+        <span className="mt-0.5 block truncate text-[11.5px] text-muted-foreground">{desc}</span>
+      </span>
+      <span
+        aria-hidden="true"
+        className={`flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-full border-[1.5px] transition-colors ${
+          selected ? 'border-[#34C759] bg-[#34C759]' : 'border-black/20 dark:border-white/30'
+        }`}
+      >
+        {selected ? <Check className="h-3.5 w-3.5 text-white" strokeWidth={3} /> : null}
+      </span>
+    </button>
+  );
+}
+
+function PermissionHubPage({ onBack }: { onBack: () => void }) {
   // 惰性初始化（页面仅在用户交互后挂载 = 纯客户端，可安全读 localStorage）
   const [cfg, setCfg] = useState(() => getAutonomyConfig());
+  const [target, setTarget] = useState<AiActionTarget>(() => getAiActionTarget());
+  const [engine, setEngine] = useState<UsageEngine>(() => getUsageEngine());
+  const [toastMsg, showToast] = useLocalToast();
 
+  const native = isNativePerception();
   const flipMaster = () => setCfg(setAutonomyMaster(!cfg.master));
   const flipCap = (key: string) => setCfg(setAutonomyCap(key, !cfg.caps[key]));
   const hands = AUTONOMY_CAPS.filter((c) => c.group === 'hands');
   const eyes = AUTONOMY_CAPS.filter((c) => c.group === 'eyes');
+  const deviceCaps = AUTONOMY_CAPS.filter((c) => c.group === 'device');
+
+  // ---- 基础权限状态（挂载时逐项查询；null → native-only） ----
+  const [permStates, setPermStates] = useState<Record<string, PermState>>(() => {
+    const init: Record<string, PermState> = {};
+    for (const d of PERM_DEFS) init[d.key] = 'checking';
+    return init;
+  });
+  const refreshPerm = useCallback(async (key: string) => {
+    const def = PERM_DEFS.find((d) => d.key === key);
+    if (!def) return;
+    try {
+      const r = await def.query();
+      setPermStates((prev) => ({
+        ...prev,
+        [key]: r === null ? 'native-only' : r.granted === true ? 'granted' : r.canAsk === false ? 'web-denied' : 'denied',
+      }));
+    } catch {
+      setPermStates((prev) => ({ ...prev, [key]: 'native-only' }));
+    }
+  }, []);
+  const refreshAllPerms = useCallback(() => {
+    for (const d of PERM_DEFS) void refreshPerm(d.key);
+  }, [refreshPerm]);
+  // 初始查询经 setTimeout 调度（setState 全部发生在定时器回调里，避免 effect 体内同步级联渲染）
+  useEffect(() => {
+    const t = window.setTimeout(() => refreshAllPerms(), 0);
+    return () => window.clearTimeout(t);
+  }, [refreshAllPerms]);
+
+  // ---- 调试权限：Shizuku 状态 ----
+  const [shizuku, setShizuku] = useState<'checking' | 'running' | 'stopped' | 'native-only'>('checking');
+  const refreshShizuku = useCallback(async () => {
+    try {
+      const r = await nativeShizukuStatus();
+      setShizuku(r === null ? 'native-only' : r.running && r.granted ? 'running' : 'stopped');
+    } catch {
+      setShizuku('native-only');
+    }
+  }, []);
+  useEffect(() => {
+    const t = window.setTimeout(() => void refreshShizuku(), 0);
+    return () => window.clearTimeout(t);
+  }, [refreshShizuku]);
+
+  // ---- 授权弹窗（当前选中的权限） ----
+  const [dialogPerm, setDialogPerm] = useState<PermDef | null>(null);
+  const [grantBusy, setGrantBusy] = useState(false);
+  /** 从系统设置页返回（存储/使用情况/悬浮窗）后重新核对 */
+  useEffect(() => {
+    if (dialogPerm) return;
+    // 弹窗关闭后延迟 800ms 刷新（用户可能刚从系统设置返回）
+    const t = window.setTimeout(() => {
+      refreshAllPerms();
+      void refreshShizuku();
+    }, 800);
+    return () => window.clearTimeout(t);
+  }, [dialogPerm, refreshAllPerms, refreshShizuku]);
+
+  const doGrant = async () => {
+    if (!dialogPerm) return;
+    setGrantBusy(true);
+    try {
+      const r = await dialogPerm.request();
+      if (r.ok) {
+        setDialogPerm(null);
+        showToast(r.note ?? '已授权');
+      } else {
+        showToast(r.note ?? '未完成授权');
+      }
+    } catch {
+      showToast('申请失败（通道异常）');
+    } finally {
+      setGrantBusy(false);
+      // 授权动作完成即刷新对应项（系统框当场出结果；跳设置页的等返回后刷新）
+      void refreshPerm(dialogPerm.key);
+    }
+  };
+
+  // ---- Shizuku 授权 ----
+  const [shizukuBusy, setShizukuBusy] = useState(false);
+  const doShizukuGrant = async () => {
+    setShizukuBusy(true);
+    try {
+      const r = await nativeRequestShizukuPermission();
+      if (r === null) {
+        showToast('当前环境无法授权（需 APK）');
+      } else if (r.granted) {
+        showToast('Shizuku 已授权');
+      } else {
+        showToast(r.reason === 'shizuku-not-running' ? 'Shizuku 未运行：先打开 Shizuku APP 激活' : '未完成授权');
+      }
+    } finally {
+      setShizukuBusy(false);
+      void refreshShizuku();
+    }
+  };
+
+  const pickTarget = (t: AiActionTarget) => {
+    setTarget(t);
+    setAiActionTarget(t);
+  };
+  const pickEngine = (e: UsageEngine) => {
+    setEngine(e);
+    setUsageEngine(e);
+  };
 
   return (
-    <DetailShell title="AI 动手" onBack={onBack} gray>
+    <DetailShell title="权限给予" onBack={onBack} gray>
       <div className="no-scrollbar flex-1 overflow-y-auto pb-8">
-        {/* 说明卡；v1.9.13 卡片左右延伸（mx-4→mx-1）+ 图标改黑白线条 */}
+        {/* 说明卡 */}
         <div className="mx-1 mt-4 rounded-[22px] bg-white/55 p-4 text-[13px] leading-relaxed ring-1 ring-white/70 backdrop-blur-2xl dark:bg-white/[0.06] dark:ring-white/[0.09]">
-          <p className="font-medium">让 AI 真实操作这台手机里的网页应用</p>
+          <p className="font-medium">权限中心：系统权限 · 调试授权 · AI 动手</p>
           <p className="mt-1.5 text-muted-foreground">
-            这台手机里的所有 App（微信/QQ/信息/X论坛/音乐/备忘录/时钟/天气）都活在网页里；
-            总开关打开后，TA 会按人设、记忆和聊天上下文自主决定何时动手（你说「去微信给Z发条消息」TA 就真的发、
-            「帮我记一下」TA 就真的存备忘录）；下面每一项都可以单独关掉——关掉的项 AI 既不知道也用不了，硬来会被直接拒绝。
+            在这里给 AI Phone 授予真实手机的系统权限（点进去就能弹授权）；选择 CAP-go 插件还是
+            Shizuku 模式；决定 AI 动手是作用在这台手机里的网站还是真实手机。
+            {!native ? '（当前在浏览器里，系统权限需安装 APK 后使用；通知权限除外）' : ''}
           </p>
         </div>
 
-        {/* 总开关 */}
-        <div className="mx-1 mt-4 divide-y divide-black/[0.05] overflow-hidden rounded-[22px] bg-white/55 shadow-[0_8px_28px_rgba(17,24,39,0.06)] ring-1 ring-white/70 backdrop-blur-2xl dark:divide-white/[0.06] dark:bg-white/[0.06] dark:ring-white/[0.09]">
+        {/* ===== 基础权限 ===== */}
+        <SectionLabel icon={ShieldCheck} tone="#34C759" right={
+          <button
+            type="button"
+            onClick={() => { refreshAllPerms(); void refreshShizuku(); }}
+            className="flex items-center gap-1 rounded-full bg-black/[0.05] px-2.5 py-1 text-[12px] text-muted-foreground transition-colors active:bg-black/10 dark:bg-white/10 dark:active:bg-white/20"
+            data-testid="perm-refresh"
+          >
+            <RefreshCw className="h-3 w-3" strokeWidth={2.4} />
+            刷新状态
+          </button>
+        }>
+          基础权限
+        </SectionLabel>
+        <div className="mx-1 divide-y divide-black/[0.05] overflow-hidden rounded-[22px] bg-white/55 shadow-[0_8px_28px_rgba(17,24,39,0.06)] ring-1 ring-white/70 backdrop-blur-2xl dark:divide-white/[0.06] dark:bg-white/[0.06] dark:ring-white/[0.09]">
+          {PERM_DEFS.map((d) => (
+            <PermissionRow key={d.key} def={d} state={permStates[d.key] ?? 'checking'} onClick={() => setDialogPerm(d)} />
+          ))}
+        </div>
+
+        {/* ===== 调试权限 ===== */}
+        <SectionLabel icon={Terminal} tone="#5856D6">调试权限</SectionLabel>
+        <div className="mx-1 divide-y divide-black/[0.05] overflow-hidden rounded-[22px] bg-white/55 shadow-[0_8px_28px_rgba(17,24,39,0.06)] ring-1 ring-white/70 backdrop-blur-2xl dark:divide-white/[0.06] dark:bg-white/[0.06] dark:ring-white/[0.09]">
+          <div className="flex min-h-[52px] items-center gap-3 px-4 py-2">
+            <LineIcon icon={Terminal} />
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-[16px]">Shizuku 服务</span>
+              <span className="mt-0.5 block truncate text-[11.5px] text-muted-foreground">
+                {shizuku === 'running'
+                  ? '已连接并授权 · 真机命令/直授通道可用'
+                  : shizuku === 'stopped'
+                    ? '未运行或未授权（真机模式需要它）'
+                    : shizuku === 'checking'
+                      ? '检测中…'
+                      : '需 APK 真机环境'}
+              </span>
+            </span>
+            <PermStatusPill
+              state={shizuku === 'running' ? 'granted' : shizuku === 'checking' ? 'checking' : shizuku === 'stopped' ? 'denied' : 'native-only'}
+            />
+            {shizuku === 'stopped' ? (
+              <button
+                type="button"
+                disabled={shizukuBusy}
+                onClick={() => void doShizukuGrant()}
+                className="shrink-0 rounded-full bg-[#007AFF] px-3 py-1.5 text-[12.5px] font-medium text-white transition-colors active:bg-[#0071E3] disabled:opacity-50"
+                data-testid="shizuku-grant-btn"
+              >
+                {shizukuBusy ? '授权中…' : '去授权'}
+              </button>
+            ) : null}
+          </div>
+        </div>
+
+        {/* ===== 授权模式 ===== */}
+        <SectionLabel icon={Cpu} tone="#FF9500">授权模式</SectionLabel>
+        <div className="mx-1 divide-y divide-black/[0.05] overflow-hidden rounded-[22px] bg-white/55 shadow-[0_8px_28px_rgba(17,24,39,0.06)] ring-1 ring-white/70 backdrop-blur-2xl dark:divide-white/[0.06] dark:bg-white/[0.06] dark:ring-white/[0.09]" role="radiogroup" aria-label="授权模式">
+          <ModeRadioRow
+            icon={Cpu}
+            label="CAP-go 插件"
+            desc="标准引擎：使用时长/感知走 Cap-go 插件，免额外授权"
+            selected={engine === 'standard'}
+            onSelect={() => pickEngine('standard')}
+            testId="engine-capgo"
+          />
+          <ModeRadioRow
+            icon={Terminal}
+            label="Shizuku 模式"
+            desc="shell 权限直读系统账本：更快更强，需 Shizuku 已授权"
+            selected={engine === 'shizuku'}
+            onSelect={() => pickEngine('shizuku')}
+            testId="engine-shizuku"
+          />
+        </div>
+        <p className="mx-1 mt-1.5 text-[11.5px] leading-relaxed text-muted-foreground">
+          授权模式决定感知数据（使用时长/后台应用）的采集通道：CAP-go 插件是标准通道（需上面「使用情况权限」）；
+          Shizuku 模式经 shell 权限直读系统账本（免使用情况授权、不受锁屏限制，Shizuku 不可用时自动降级 CAP-go）。
+          {!native ? '当前在浏览器里，仅 APK 真机生效。' : ''}
+        </p>
+
+        {/* ===== AI 动手范围 ===== */}
+        <SectionLabel icon={MousePointerClick} tone="#FF2D55">AI 动手范围</SectionLabel>
+        <div className="mx-1 divide-y divide-black/[0.05] overflow-hidden rounded-[22px] bg-white/55 shadow-[0_8px_28px_rgba(17,24,39,0.06)] ring-1 ring-white/70 backdrop-blur-2xl dark:divide-white/[0.06] dark:bg-white/[0.06] dark:ring-white/[0.09]" role="radiogroup" aria-label="AI 动手范围">
+          <ModeRadioRow
+            icon={AppWindow}
+            label="网站里面"
+            desc="AI 只操作这台手机里的网页应用（微信/QQ/论坛/音乐…）"
+            selected={target === 'web'}
+            onSelect={() => pickTarget('web')}
+            testId="target-web"
+          />
+          <ModeRadioRow
+            icon={Smartphone}
+            label="真机"
+            desc="AI 经 Shizuku 操作真实手机：点按/滑动/输入/拉起App/截屏"
+            selected={target === 'device'}
+            onSelect={() => pickTarget('device')}
+            testId="target-device"
+          />
+        </div>
+        <p className="mx-1 mt-1.5 text-[11.5px] leading-relaxed text-muted-foreground">
+          {target === 'device'
+            ? '真机模式：AI 发出的 [手机操作:点按/滑动/输入/按键/真机打开/看屏幕/强杀…] 会真实作用在你的手机上（需要 APK + Shizuku 已授权 + 下方对应能力开关打开）。网页应用工具（发消息/放歌/备忘录…）不受影响仍然可用。'
+            : '网站模式（默认）：AI 的全部动手能力都作用在这台虚拟手机里的网页应用上，绝不碰真实手机。'}
+        </p>
+
+        {/* ===== AI 动手总开关 ===== */}
+        <SectionLabel icon={ScanEye} tone="#34C759">AI 动手</SectionLabel>
+        <div className="mx-1 divide-y divide-black/[0.05] overflow-hidden rounded-[22px] bg-white/55 shadow-[0_8px_28px_rgba(17,24,39,0.06)] ring-1 ring-white/70 backdrop-blur-2xl dark:divide-white/[0.06] dark:bg-white/[0.06] dark:ring-white/[0.09]">
           <div className="flex min-h-[52px] items-center gap-3 px-4 py-2">
             <LineIcon icon={ScanEye} />
             <span className="min-w-0 flex-1">
@@ -1534,10 +2014,8 @@ function ShizukuAutonomyPage({ onBack }: { onBack: () => void }) {
           </div>
         </div>
 
-        {/* v1.9.3：语音唤起智能体已拆出为独立设置页（设置 › 语音唤起智能体） */}
-
         {/* 动手组 */}
-        <div className="mb-2 mt-6 px-5 text-[13px] text-muted-foreground">动手（真实操作）</div>
+        <div className="mb-2 mt-6 px-5 text-[13px] text-muted-foreground">动手（真实操作网页应用）</div>
         <div className={`mx-1 divide-y divide-black/[0.05] overflow-hidden rounded-[22px] bg-white/55 shadow-[0_8px_28px_rgba(17,24,39,0.06)] ring-1 ring-white/70 backdrop-blur-2xl dark:divide-white/[0.06] dark:bg-white/[0.06] dark:ring-white/[0.09] ${cfg.master ? '' : 'opacity-55'}`}>
           {hands.map((cap) => (
             <AutonomyCapRow key={cap.key} cap={cap} on={Boolean(cfg.caps[cap.key])} onToggle={() => flipCap(cap.key)} />
@@ -1552,11 +2030,55 @@ function ShizukuAutonomyPage({ onBack }: { onBack: () => void }) {
           ))}
         </div>
 
+        {/* 真机组（仅真机模式显示） */}
+        {target === 'device' ? (
+          <>
+            <div className="mb-2 mt-6 px-5 text-[13px] text-muted-foreground">真机（作用于真实手机 · 需 Shizuku）</div>
+            <div className={`mx-1 divide-y divide-black/[0.05] overflow-hidden rounded-[22px] bg-white/55 shadow-[0_8px_28px_rgba(17,24,39,0.06)] ring-1 ring-white/70 backdrop-blur-2xl dark:divide-white/[0.06] dark:bg-white/[0.06] dark:ring-white/[0.09] ${cfg.master ? '' : 'opacity-55'}`}>
+              {deviceCaps.map((cap) => (
+                <AutonomyCapRow key={cap.key} cap={cap} on={Boolean(cfg.caps[cap.key])} onToggle={() => flipCap(cap.key)} />
+              ))}
+            </div>
+          </>
+        ) : null}
+
         <p className="mx-1 mt-4 text-[11.5px] leading-relaxed text-muted-foreground">
           开关即点即存（下一次发消息立即生效）。危险项默认关着，确认要让 AI 碰再手动开。
-          （v1.9.35：真机 Shizuku 操控已退役，这些能力全部作用在这台手机的网页生态内。）
+          真机能力只在「AI 动手范围 = 真机」时展示与生效。
         </p>
       </div>
+
+      {/* 权限授权确认弹窗（点权限行弹出：说明 + 去开启） */}
+      <AlertDialog open={!!dialogPerm} onOpenChange={(o) => { if (!o) setDialogPerm(null); }}>
+        <AlertDialogContent className="w-[270px] gap-0 rounded-[14px] p-0 sm:w-[270px] sm:max-w-[270px]">
+          <AlertDialogHeader className="gap-1.5 px-5 pb-4 pt-5 sm:text-center">
+            <AlertDialogTitle className="text-center text-[17px] font-semibold leading-snug">
+              {dialogPerm ? `开启${dialogPerm.label}？` : ''}
+            </AlertDialogTitle>
+            <AlertDialogDescription className="text-center text-[13px] leading-snug">
+              {dialogPerm?.detail}
+            </AlertDialogDescription>
+            {dialogPerm && permStates[dialogPerm.key] === 'native-only' ? (
+              <span className="block text-center text-[12px] text-[#FF9500]">
+                当前在浏览器里，此项需安装 APK 后使用
+              </span>
+            ) : null}
+          </AlertDialogHeader>
+          <AlertDialogFooter className="flex-row border-t border-black/[0.08] dark:border-white/[0.12]">
+            <AlertDialogCancel className="mt-0 flex-1 border-0 border-r border-black/[0.08] py-3 text-[16px] dark:border-white/[0.12]">暂不</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => void doGrant()}
+              disabled={grantBusy}
+              className="mt-0 flex-1 border-0 bg-transparent py-3 text-[16px] font-semibold text-[#007AFF] hover:bg-transparent disabled:opacity-50"
+              data-testid="perm-grant-confirm"
+            >
+              {grantBusy ? '申请中…' : (dialogPerm?.actionLabel ?? '去开启')}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <LocalToast msg={toastMsg} />
     </DetailShell>
   );
 }
@@ -8401,7 +8923,7 @@ export default function SettingsApp() {
       {page === 'lock' && <LockPage onBack={() => setPage('root')} />}
       {page === 'prompts' && <PromptEntriesPage onBack={() => setPage('root')} />}
       {page === 'about' && <AboutPage onBack={() => setPage('root')} />}
-      {page === 'autonomy' && <ShizukuAutonomyPage onBack={() => setPage('root')} />}
+      {page === 'autonomy' && <PermissionHubPage onBack={() => setPage('root')} />}
       {page === 'voiceagent' && <AgentVoicePage onBack={() => setPage('root')} />}
       {page === 'appupdate' && <AppUpdatePage onBack={() => setPage('root')} />}
       {page === 'pwa' && <PwaInstallPage onBack={() => setPage('root')} />}

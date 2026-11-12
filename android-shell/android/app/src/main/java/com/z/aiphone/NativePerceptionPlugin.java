@@ -118,7 +118,12 @@ import rikka.shizuku.Shizuku;
         // JS 侧一律先经 requestMicPermission 弹系统授权框
         @Permission(strings = { android.Manifest.permission.RECORD_AUDIO }, alias = "microphone"),
         // Android 13+ 通知运行时权限（设置页「允许通知」开关用）
-        @Permission(strings = { android.Manifest.permission.POST_NOTIFICATIONS }, alias = "notifications")
+        @Permission(strings = { android.Manifest.permission.POST_NOTIFICATIONS }, alias = "notifications"),
+        // v1.9.36 权限给予页：位置运行时权限（ACCESS_FINE_LOCATION 含 COARSE 位，Manifest 已声明）
+        @Permission(strings = {
+                android.Manifest.permission.ACCESS_FINE_LOCATION,
+                android.Manifest.permission.ACCESS_COARSE_LOCATION
+        }, alias = "location")
     }
 )
 public class NativePerceptionPlugin extends Plugin {
@@ -1291,6 +1296,140 @@ public class NativePerceptionPlugin extends Plugin {
                 (NotificationManager) ctx.getSystemService(Context.NOTIFICATION_SERVICE);
         JSObject ret = new JSObject();
         ret.put("granted", nm != null && nm.areNotificationsEnabled());
+        ret.put("canAsk", false);
+        call.resolve(ret);
+    }
+
+    // ==================== v1.9.36 权限给予页：悬浮窗 / 电池优化豁免 / 位置（设置 › 权限给予） ====================
+
+    /**
+     * 悬浮窗权限状态 overlayPermission()：Settings.canDrawOverlays 真实状态。
+     * 特殊权限（SYSTEM_ALERT_WINDOW / AppOps）无运行时弹框概念，只能引导到
+     * 系统设置开关页（requestOverlayPermission 拉起）或经 Shizuku appops 直改。
+     */
+    @PluginMethod
+    public void overlayPermission(PluginCall call) {
+        Context ctx = getContext();
+        boolean granted = Settings.canDrawOverlays(ctx);
+        JSObject ret = new JSObject();
+        ret.put("granted", granted);
+        // 特殊权限随时可引导（跳系统开关页），canAsk 恒 true
+        ret.put("canAsk", true);
+        call.resolve(ret);
+    }
+
+    /**
+     * 悬浮窗权限申请 requestOverlayPermission()：拉起系统的「在其他应用上层显示」
+     * 开关页（ACTION_MANAGE_OVERLAY_PERMISSION + 包名深链直达本 APP 条目）。
+     * 用户手动开开关后返回，前端重新查 overlayPermission 刷新状态。
+     */
+    @PluginMethod
+    public void requestOverlayPermission(PluginCall call) {
+        try {
+            Context ctx = getContext();
+            Intent i = new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                    android.net.Uri.parse("package:" + ctx.getPackageName()));
+            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            ctx.startActivity(i);
+            JSObject ret = new JSObject();
+            ret.put("ok", true);
+            call.resolve(ret);
+        } catch (Exception e) {
+            JSObject ret = new JSObject();
+            ret.put("ok", false);
+            ret.put("reason", e.getMessage() == null ? "start-activity-failed" : e.getMessage());
+            call.resolve(ret);
+        }
+    }
+
+    /**
+     * 电池优化豁免状态 batteryPermission()：PowerManager.isIgnoringBatteryOptimizations
+     * （是否在 Doze 白名单里——不豁免时息屏后台会被系统限制，影响常驻通知/监听）。
+     */
+    @PluginMethod
+    public void batteryPermission(PluginCall call) {
+        Context ctx = getContext();
+        android.os.PowerManager pm =
+                (android.os.PowerManager) ctx.getSystemService(Context.POWER_SERVICE);
+        boolean granted = pm != null && pm.isIgnoringBatteryOptimizations(ctx.getPackageName());
+        JSObject ret = new JSObject();
+        ret.put("granted", granted);
+        ret.put("canAsk", true);
+        call.resolve(ret);
+    }
+
+    /**
+     * 电池优化豁免申请 requestBatteryPermission()：拉起系统「允许忽略电池优化」
+     * 确认弹窗（ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS + 包名深链）。
+     */
+    @PluginMethod
+    public void requestBatteryPermission(PluginCall call) {
+        try {
+            Context ctx = getContext();
+            Intent i = new Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+                    android.net.Uri.parse("package:" + ctx.getPackageName()));
+            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            ctx.startActivity(i);
+            JSObject ret = new JSObject();
+            ret.put("ok", true);
+            call.resolve(ret);
+        } catch (Exception e) {
+            JSObject ret = new JSObject();
+            ret.put("ok", false);
+            ret.put("reason", e.getMessage() == null ? "start-activity-failed" : e.getMessage());
+            call.resolve(ret);
+        }
+    }
+
+    /**
+     * 位置权限状态 locationPermission()：ACCESS_FINE_LOCATION 运行时权限真实状态
+     * （checkSelfPermission；granted=精确或粗略任一授予，canAsk=PROMPT 可弹系统授权框）。
+     */
+    @PluginMethod
+    public void locationPermission(PluginCall call) {
+        Context ctx = getContext();
+        boolean fine = ContextCompat.checkSelfPermission(ctx,
+                android.Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED;
+        boolean coarse = ContextCompat.checkSelfPermission(ctx,
+                android.Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED;
+        JSObject ret = new JSObject();
+        ret.put("granted", fine || coarse);
+        ret.put("fine", fine);
+        ret.put("coarse", coarse);
+        ret.put("canAsk", !fine && !coarse); // 简化口径：未授予即视为可申请（DENIED 持久拒绝时 requestPermissions 不再弹框，回传如实）
+        call.resolve(ret);
+    }
+
+    /**
+     * 位置权限申请 requestLocationPermission()：未授予时弹系统授权框
+     * （requestPermissionForAlias("location")，Manifest 已声明 FINE+COARSE）。
+     */
+    @PluginMethod
+    public void requestLocationPermission(PluginCall call) {
+        boolean fine = ContextCompat.checkSelfPermission(getContext(),
+                android.Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED;
+        boolean coarse = ContextCompat.checkSelfPermission(getContext(),
+                android.Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED;
+        if (fine || coarse) {
+            JSObject ret = new JSObject();
+            ret.put("granted", true);
+            ret.put("canAsk", false);
+            call.resolve(ret);
+            return;
+        }
+        requestPermissionForAlias("location", call, "locationPermissionCallback");
+    }
+
+    @PermissionCallback
+    private void locationPermissionCallback(PluginCall call) {
+        boolean fine = ContextCompat.checkSelfPermission(getContext(),
+                android.Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED;
+        boolean coarse = ContextCompat.checkSelfPermission(getContext(),
+                android.Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED;
+        JSObject ret = new JSObject();
+        ret.put("granted", fine || coarse);
+        ret.put("fine", fine);
+        ret.put("coarse", coarse);
         ret.put("canAsk", false);
         call.resolve(ret);
     }

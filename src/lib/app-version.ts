@@ -11,9 +11,9 @@
  */
 
 /** 当前最新版本（与 android-shell versionName 保持一致） */
-export const APP_VERSION = '1.9.35';
+export const APP_VERSION = '1.9.36';
 /** 版本号数字（与 android-shell versionCode 保持一致；覆盖安装要求只增不减） */
-export const APP_VERSION_CODE = 51;
+export const APP_VERSION_CODE = 52;
 
 export interface AppReleaseNote {
   version: string;
@@ -24,6 +24,17 @@ export interface AppReleaseNote {
 
 /** 版本历史（新→旧；设置 › APP 更新 页渲染，最新一条即当前版本） */
 export const APP_RELEASE_NOTES: AppReleaseNote[] = [
+  {
+    version: '1.9.36',
+    date: '2026-11-12',
+    items: [
+      '设置 ›「AI 动手」全新升级为「权限给予」：系统权限、调试授权、授权模式、AI 动手范围、能力开关一页全管',
+      '基础权限一键授权：通知/麦克风/位置/悬浮窗/电池优化豁免/存储/使用情况七项系统权限，点击即可弹授权（系统授权框或跳系统设置），状态实时显示已授权/未授权/需真机',
+      '悬浮窗/电池优化/位置三项新增原生方法（新 APK 生效）：旧 APK 也兼容——Shizuku 已授权时经 appops/dumpsys/pm grant 直授，免升级也能用',
+      '授权模式可选：CAP-go 插件（标准引擎）或 Shizuku 模式（shell 权限直读系统账本，不可用时自动降级）',
+      'AI 动手范围可选「网站里面」或「真机」：真机模式下恢复 [手机操作:点按/滑动/输入/按键/真机打开/看屏幕/前台/电量/通知/音量/强杀] 等命令（经 Shizuku 作用于真实手机，八项能力逐个开关可控制），网站模式行为与 v1.9.35 完全一致',
+    ],
+  },
   {
     version: '1.9.35',
     date: '2026-11-12',
