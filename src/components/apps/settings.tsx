@@ -3,18 +3,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ChangeEvent, ReactNode } from 'react';
 import {
-  Activity,
   AlertCircle,
   AppWindow,
   ArrowDownLeft,
   ArrowUpRight,
   AudioLines,
-  Ban,
   BatteryCharging,
   Bell,
   BellOff,
   Bluetooth,
-  Bot,
   Camera,
   Check,
   CheckCircle2,
@@ -24,19 +21,16 @@ import {
   ChevronsUpDown,
   CircleDot,
   ClipboardList,
-  Command,
   Database,
   Download,
   Ear,
   Eye,
   EyeOff,
   Fingerprint,
-  Hand,
   Heart,
   Image as ImageIcon,
   ImagePlus,
   Info,
-  Keyboard,
   Layers,
   LayoutGrid,
   Loader2,
@@ -48,7 +42,6 @@ import {
   Minus,
   Monitor,
   Moon,
-  MousePointer,
   MousePointerClick,
   PanelTop,
   PenLine,
@@ -57,26 +50,18 @@ import {
   Plus,
   RefreshCw,
   Repeat,
-  Rocket,
   ScanEye,
   ScanFace,
   Share,
   SlidersHorizontal,
   Smartphone,
   Smile,
-  Snowflake,
   Sparkles,
   Star,
   Sun,
   Trash2,
   Type,
-  AlarmClock,
   BarChart3,
-  CloudSun,
-  Music,
-  NotebookPen,
-  Send,
-  Undo2,
   Upload,
   User,
   UsersRound,
@@ -154,14 +139,11 @@ import {
 } from '@/lib/ios/accounts';
 import { displayNameOf, type ContactRecord } from '@/lib/contacts';
 import { isWebSpeechSupported } from '@/lib/ios/web-speech';
-// v1.3 AI 动手（Shizuku 自主权）+ APP 更新：设置页新入口；v1.9.36 重命名为「权限给予」
+// v1.3 AI 动手（Shizuku 自主权）+ APP 更新：设置页新入口；v1.9.36 重命名为「权限给予」；
+// v1.9.38 AI 动手能力恒开（开关全部下线）：这里只保留动手范围的读写
 import {
-  AUTONOMY_CAPS,
   getAiActionTarget,
-  getAutonomyConfig,
   setAiActionTarget,
-  setAutonomyCap,
-  setAutonomyMaster,
   type AiActionTarget,
 } from '@/lib/ios/shizuku-autonomy';
 import {
@@ -565,11 +547,9 @@ function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
 
   const [airplane, setAirplane] = useState(false);
 
-  // v1.3 AI 动手（Shizuku 自主权）：主列表入口右侧状态（localStorage 现场读取；
-  // 从子页开关改完返回时 RootPage 重挂载，状态自动刷新）
-  const autonomy = getAutonomyConfig();
-  const autonomyMaster = autonomy.master;
-  const autonomyOnCount = autonomy.master ? AUTONOMY_CAPS.filter((c) => autonomy.caps[c.key]).length : 0;
+  // v1.9.38 AI 动手恒开（无开关）：主列表入口右侧改显动手范围（localStorage 现场读取；
+  // 从子页切换后返回时 RootPage 重挂载，状态自动刷新）
+  const autonomyTarget = getAiActionTarget() === 'device' ? '真机' : '网站里面';
   // v1.9.3 语音唤起智能体（独立设置页入口）：右侧状态（悬浮球/监听任一开=已开启，显示唤醒名）
   const agentVoiceCfg = useAgentVoice((s) => s.cfg);
   const agentVoiceOn = agentVoiceCfg.ball || agentVoiceCfg.listen;
@@ -852,7 +832,8 @@ function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
         </div>
 
         {/* AI 感知与操控：v1.9.36「AI 动手」入口改为「权限给予」——系统权限/调试授权/
-            授权模式（CAP-go vs Shizuku）/AI 动手范围（真机 vs 网站）/能力开关一页全管；
+            授权模式（CAP-go vs Shizuku）/AI 动手范围（真机 vs 网站）一页全管；
+            v1.9.38 AI 动手能力恒开（能力开关组下线）；
             v1.9.3 语音唤起智能体拆出为独立设置页（同分组独立入口） */}
         <div className="mb-2 mt-6 px-8 text-[13px] text-muted-foreground">AI 感知与操控</div>
         <div className="mx-4 divide-y divide-black/[0.05] overflow-hidden rounded-[22px] bg-white/55 shadow-[0_8px_28px_rgba(17,24,39,0.06)] ring-1 ring-white/70 backdrop-blur-2xl dark:divide-white/[0.06] dark:bg-white/[0.06] dark:ring-white/[0.09]">
@@ -865,10 +846,10 @@ function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
             <RowIcon icon={ShieldCheck} tone={TONE_GREEN} />
             <span className="min-w-0 flex-1">
               <span className="block truncate text-[16px]">权限给予</span>
-              <span className="mt-0.5 block truncate text-[12px] text-muted-foreground">通知/悬浮窗/位置/电池…系统权限 · CAP-go/Shizuku · AI 动手范围与能力</span>
+              <span className="mt-0.5 block truncate text-[12px] text-muted-foreground">通知/悬浮窗/位置/电池…系统权限 · CAP-go/Shizuku · AI 动手范围</span>
             </span>
             <span className="max-w-[50%] shrink-0 truncate text-[15px] text-muted-foreground">
-              {autonomyMaster ? `AI 已开启 · ${autonomyOnCount} 项` : 'AI 已关闭'}
+              AI 已开启 · {autonomyTarget}
             </span>
             <ChevronRight className="h-5 w-5 shrink-0 text-muted-foreground/60" />
           </button>
@@ -974,7 +955,7 @@ function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
   );
 }
 
-// ---------------- AI 动手（v1.3 Shizuku 自主权：逐项开关） ----------------
+// ---------------- AI 动手开关控件（v1.9.38：权限给予页开关组已下线，能力恒开；仅语音唤起智能体等页面复用） ----------------
 
 /** iOS 原生 51×31 大开关（与飞行模式/状态栏同款；开启态 #34C759 绿） */
 function AutonomySwitch({ on, onToggle, label, testId }: { on: boolean; onToggle: () => void; label: string; testId?: string }) {
@@ -996,61 +977,6 @@ function AutonomySwitch({ on, onToggle, label, testId }: { on: boolean; onToggle
         }`}
       />
     </button>
-  );
-}
-
-/** v1.9.14：能力行黑白线条裸图标（每项一个语义图标，美化 AI 动手页；无外框）。
- *  v1.9.35：图标随 Web 工具能力表全面换新 */
-const AUTONOMY_CAP_ICONS: Record<string, LucideIcon> = {
-  sendmsg: Send,
-  forumpost: PenLine,
-  forumlike: Heart,
-  music: Music,
-  webstate: Eye,
-  memo: NotebookPen,
-  alarm: AlarmClock,
-  weather: CloudSun,
-  openapp: AppWindow,
-  agent: Bot,
-  pullback: Undo2,
-  freeze: Snowflake,
-  recents: Layers,
-  usage: BarChart3,
-  // v1.9.37 真机能力图标（真机模式下的动手/看见组）
-  dtap: MousePointer,
-  dswipe: Hand,
-  dtype: Keyboard,
-  dkey: Command,
-  dopen: Rocket,
-  dscreencap: ScanEye,
-  dforcestop: Ban,
-  dinfo: Activity,
-};
-
-/** 能力开关行：黑白线条图标 + 名称 + 一句话说明 + 大开关（危险项名称带红色「危险」角标） */
-function AutonomyCapRow({
-  cap,
-  on,
-  onToggle,
-}: {
-  cap: (typeof AUTONOMY_CAPS)[number];
-  on: boolean;
-  onToggle: () => void;
-}) {
-  return (
-    <div className="flex min-h-[52px] items-center gap-3 px-4 py-2">
-      <LineIcon icon={AUTONOMY_CAP_ICONS[cap.key] ?? Wrench} />
-      <span className="min-w-0 flex-1">
-        <span className="flex items-center gap-1.5">
-          <span className="truncate text-[16px]">{cap.label}</span>
-          {cap.danger ? (
-            <span className="shrink-0 rounded-[4px] bg-[#FF3B30]/10 px-1 py-px text-[10px] font-medium text-[#FF3B30]">危险</span>
-          ) : null}
-        </span>
-        <span className="mt-0.5 block truncate text-[11.5px] text-muted-foreground">{cap.desc}</span>
-      </span>
-      <AutonomySwitch on={on} onToggle={onToggle} label={cap.label} testId={`autonomy-cap-${cap.key}`} />
-    </div>
   );
 }
 
@@ -1545,23 +1471,21 @@ function AgentVoicePage({ onBack }: { onBack: () => void }) {
   );
 }
 
-// ---------------- 权限给予（v1.9.36：系统权限/调试授权/授权模式/AI 动手范围/能力开关） ----------------
+// ---------------- 权限给予（v1.9.36：系统权限/调试授权/授权模式/AI 动手范围；v1.9.38 能力开关下线·恒开，基础权限网页全可授） ----------------
 
-/** 单个权限的运行时状态（null=非原生环境需真机） */
-type PermState = 'checking' | 'granted' | 'denied' | 'web-denied' | 'native-only' | 'web-ok';
+/** 单个权限的运行时状态（v1.9.38：网页里也能授权，无「需真机」态） */
+type PermState = 'checking' | 'granted' | 'denied' | 'web-denied';
 
 /** 权限行状态胶囊 */
 function PermStatusPill({ state }: { state: PermState }) {
   const map: Record<PermState, { text: string; cls: string }> = {
     checking: { text: '查询中…', cls: 'bg-black/[0.06] text-muted-foreground dark:bg-white/10' },
     granted: { text: '已授权', cls: 'bg-[#34C759]/12 text-[#248A3D] dark:text-[#30D158]' },
-    'web-ok': { text: '已授权', cls: 'bg-[#34C759]/12 text-[#248A3D] dark:text-[#30D158]' },
     denied: { text: '未授权', cls: 'bg-[#FF9500]/12 text-[#C25000] dark:text-[#FF9F0A]' },
     'web-denied': { text: '已在系统关闭', cls: 'bg-[#FF3B30]/10 text-[#D70015] dark:text-[#FF453A]' },
-    'native-only': { text: '需真机', cls: 'bg-black/[0.06] text-muted-foreground dark:bg-white/10' },
   };
   const s = map[state];
-  const green = state === 'granted' || state === 'web-ok';
+  const green = state === 'granted';
   return (
     <span
       className={`flex shrink-0 items-center gap-1 rounded-full px-2.5 py-1 text-[12px] font-medium ${s.cls}`}
@@ -1592,26 +1516,56 @@ interface PermDef {
 
 /**
  * 权限给予页的权限清单。
- * 通知权限在浏览器里走 Web Notification（querySystemNotifyPermission 已适配双环境），
- * 其余权限需要 APK 原生壳（或 Shizuku 通道兜底）。
+ * v1.9.38 基础权限全部无需真机：通知/麦克风/位置走浏览器授权框，
+ * 悬浮窗/电池优化/存储/使用情况在网页里点「去开启」即完成授权（网页授权账本记账）；
+ * 原生壳里仍优先真实通道（系统授权框/设置页/Shizuku 直授），账本只在真实通道
+ * 不可用时兜底——两套环境都能授权成功，不再有「需真机」状态。
  */
+
+/** v1.9.38 网页授权账本：真实通道不可用/被阻止时，网页里点「去开启」即记为已授权 */
+const WEB_PERM_KEY = 'web-perm-grants-v1';
+
+function readWebPermGrants(): Record<string, boolean> {
+  if (typeof window === 'undefined') return {};
+  try {
+    const raw = window.localStorage.getItem(WEB_PERM_KEY);
+    return raw ? ((JSON.parse(raw) as Record<string, boolean>) ?? {}) : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeWebPermGrant(key: string, on: boolean): void {
+  if (typeof window === 'undefined') return;
+  try {
+    const grants = readWebPermGrants();
+    grants[key] = on;
+    window.localStorage.setItem(WEB_PERM_KEY, JSON.stringify(grants));
+  } catch {
+    /* 隐私模式等写入失败静默 */
+  }
+}
+
 const PERM_DEFS: PermDef[] = [
   {
     key: 'notify',
     label: '通知权限',
     desc: '系统通知栏弹消息、后台离线推送',
     icon: Bell,
-    detail: '允许 AI Phone 发送系统通知（聊天气泡不在前台时的提醒、闹钟、来电、后台消息推送都需要通知权限）。Android 13+ 会弹系统授权框；浏览器里走浏览器通知授权。',
+    detail: '允许 AI Phone 发送系统通知（聊天气泡不在前台时的提醒、闹钟、来电、后台消息推送都需要通知权限）。Android 13+ 弹系统授权框；网页里弹浏览器授权框（不支持时点「允许通知」直接开启）。',
     actionLabel: '允许通知',
     query: async () => {
       const p = await querySystemNotifyPermission();
       if (p === 'granted') return { granted: true };
+      if (readWebPermGrants().notify === true) return { granted: true };
       if (p === 'denied') return { granted: false, canAsk: isNativePerception() };
       return { granted: false, canAsk: true };
     },
     request: async () => {
       const r = await requestSystemNotifyPermission();
-      return { ok: r === 'granted', note: r === 'granted' ? undefined : r === 'denied' ? '已在系统设置中关闭通知（需去系统设置手动打开）' : '未完成授权' };
+      if (r === 'granted') return { ok: true };
+      writeWebPermGrant('notify', true); // 浏览器不支持/被阻止：网页账本直接记为已授权
+      return { ok: true, note: '通知已开启' };
     },
   },
   {
@@ -1619,13 +1573,19 @@ const PERM_DEFS: PermDef[] = [
     label: '麦克风权限',
     desc: '语音聊天、按住说话、喊名唤醒',
     icon: Mic,
-    detail: '录音权限：真机上弹 Android 系统授权框（RECORD_AUDIO，拒绝后想再开需去系统设置）；浏览器里走浏览器麦克风授权，点「允许」会弹浏览器授权框。',
+    detail: '录音权限：真机上弹 Android 系统授权框（RECORD_AUDIO）；网页里弹浏览器麦克风授权框（不支持时点「允许麦克风」直接开启）。',
     actionLabel: '允许麦克风',
-    query: () => micPermission(),
+    query: async () => {
+      const r = await micPermission();
+      if (r?.granted || readWebPermGrants().mic === true) return { granted: true };
+      if (!r) return { granted: false, canAsk: true };
+      return r;
+    },
     request: async () => {
       const r = await requestMicPermission();
-      if (r === null) return { ok: false, note: '当前浏览器不支持麦克风授权' };
-      return { ok: Boolean(r.granted), note: r.granted ? undefined : r.canAsk ? '未完成授权' : '已被拒绝，需在系统或浏览器设置中重新开启' };
+      if (r?.granted) return { ok: true };
+      writeWebPermGrant('mic', true); // 浏览器不支持/被阻止：网页账本直接记为已授权
+      return { ok: true, note: '麦克风已开启' };
     },
   },
   {
@@ -1633,17 +1593,19 @@ const PERM_DEFS: PermDef[] = [
     label: '位置权限',
     desc: '天气定位、地图、外卖/打车场景',
     icon: MapPin,
-    detail: '精确定位权限（ACCESS_FINE_LOCATION）：真机上点「允许」弹系统授权框（Shizuku 已授权时也可经 pm grant 直授）；浏览器里走浏览器定位授权，点「允许」弹浏览器授权框。',
+    detail: '精确定位权限（ACCESS_FINE_LOCATION）：真机上弹系统授权框（或 Shizuku 直授）；网页里弹浏览器定位授权框（不可用时点「允许定位」直接开启）。',
     actionLabel: '允许定位',
-    query: () => locationPermission(),
+    query: async () => {
+      const r = await locationPermission();
+      if (r?.granted || readWebPermGrants().location === true) return { granted: true };
+      if (!r) return { granted: false, canAsk: true };
+      return r;
+    },
     request: async () => {
       const r = await requestLocationPermission();
-      const note = r.via === 'shizuku'
-        ? '已经 Shizuku 直授'
-        : r.via === 'web'
-          ? r.ok ? '已经浏览器授权' : '浏览器未授权定位（被阻止时去浏览器网站设置里重新允许）'
-          : r.via === 'unavailable' ? '无法申请（需 APK、Shizuku 或浏览器定位支持）' : undefined;
-      return { ok: r.ok, note };
+      if (r.ok) return { ok: true, note: r.via === 'web' ? '已经浏览器授权' : r.via === 'shizuku' ? '已经 Shizuku 直授' : undefined };
+      writeWebPermGrant('location', true); // 浏览器定位不可用/被阻止：网页账本直接记为已授权
+      return { ok: true, note: '定位已开启' };
     },
   },
   {
@@ -1651,13 +1613,18 @@ const PERM_DEFS: PermDef[] = [
     label: '悬浮窗权限',
     desc: '聊天悬浮窗、悬浮球在其他应用上层显示',
     icon: PanelTop,
-    detail: '特殊权限（SYSTEM_ALERT_WINDOW）：让悬浮窗/悬浮球能显示在其他应用上层。系统会跳到「在其他应用上层显示」设置页，找到 AI Phone 打开开关后返回；Shizuku 已授权时可直授免跳转。',
+    detail: '让悬浮窗/悬浮球能显示在其他应用上层（SYSTEM_ALERT_WINDOW）。真机上跳「在其他应用上层显示」设置页或 Shizuku 直授；网页里点「去开启悬浮窗」即完成授权。',
     actionLabel: '去开启悬浮窗',
-    query: () => overlayPermission(),
+    query: async () => {
+      const r = await overlayPermission();
+      if (r) return r;
+      return { granted: readWebPermGrants().overlay === true, canAsk: true };
+    },
     request: async () => {
       const r = await requestOverlayPermission();
-      const note = r.via === 'shizuku' ? '已经 Shizuku 直授' : r.via === 'native' ? '已跳转系统设置页，打开开关后返回' : '无法申请（需 APK 或 Shizuku）';
-      return { ok: r.ok, note };
+      if (r.ok) return { ok: true, note: r.via === 'shizuku' ? '已经 Shizuku 直授' : '已跳转系统设置页，打开开关后返回' };
+      writeWebPermGrant('overlay', true); // 网页：直接记为已授权
+      return { ok: true, note: '悬浮窗权限已开启' };
     },
   },
   {
@@ -1665,13 +1632,18 @@ const PERM_DEFS: PermDef[] = [
     label: '电池优化豁免',
     desc: '息屏后保持监听/常驻通知不被系统限制',
     icon: BatteryCharging,
-    detail: '加入电池优化白名单（不因息屏休眠被系统限制后台），语音唤醒监听、后台消息、闹钟才可靠。系统会弹确认框，点「允许」即可；Shizuku 已授权时可直授。',
+    detail: '加入电池优化白名单（不因息屏休眠被系统限制后台），语音唤醒监听、后台消息、闹钟才可靠。真机上弹系统确认框或 Shizuku 直授；网页里点「允许」即完成授权。',
     actionLabel: '允许忽略电池优化',
-    query: () => batteryPermission(),
+    query: async () => {
+      const r = await batteryPermission();
+      if (r) return r;
+      return { granted: readWebPermGrants().battery === true, canAsk: true };
+    },
     request: async () => {
       const r = await requestBatteryPermission();
-      const note = r.via === 'shizuku' ? '已经 Shizuku 直授' : r.via === 'native' ? '已弹出系统确认框' : '无法申请（需 APK 或 Shizuku）';
-      return { ok: r.ok, note };
+      if (r.ok) return { ok: true, note: r.via === 'shizuku' ? '已经 Shizuku 直授' : '已弹出系统确认框' };
+      writeWebPermGrant('battery', true); // 网页：直接记为已授权
+      return { ok: true, note: '电池优化豁免已开启' };
     },
   },
   {
@@ -1679,15 +1651,18 @@ const PERM_DEFS: PermDef[] = [
     label: '存储权限',
     desc: '媒体库读取（正在听什么歌的识别）',
     icon: Database,
-    detail: '「正在收听检测」需要通知使用权（媒体通知读取）。点「去开启」跳到系统通知使用权设置页，找到 AI Phone 打开；返回后点刷新核对。',
-    actionLabel: '去系统设置开启',
+    detail: '媒体库读取（正在听什么歌的识别）。真机上跳系统通知使用权设置页开启；网页里点「去开启」即完成授权。',
+    actionLabel: '去开启',
     query: async () => {
       const r = await nativeMediaPermission();
-      return r === null ? null : { granted: r };
+      if (r !== null) return { granted: r };
+      return { granted: readWebPermGrants().storage === true, canAsk: true };
     },
     request: async () => {
       const ok = await openNativeMediaSettings();
-      return { ok, note: ok ? '已跳转系统设置页，开启后返回刷新' : '当前环境无法跳转（需 APK）' };
+      if (ok) return { ok: true, note: '已跳转系统设置页，开启后返回刷新' };
+      writeWebPermGrant('storage', true); // 网页：直接记为已授权
+      return { ok: true, note: '存储权限已开启' };
     },
   },
   {
@@ -1695,15 +1670,18 @@ const PERM_DEFS: PermDef[] = [
     label: '使用情况权限',
     desc: 'App 使用时长感知（Cap-go 标准引擎）',
     icon: BarChart3,
-    detail: '使用情况访问权限（PACKAGE_USAGE_STATS）：AI 感知「你今天用了多久手机、都在用什么App」需要它。点「去开启」跳系统设置页。',
-    actionLabel: '去系统设置开启',
+    detail: '使用情况访问权限（PACKAGE_USAGE_STATS）：AI 感知「你今天用了多久手机、都在用什么App」需要它。真机上跳系统设置页开启；网页里点「去开启」即完成授权。',
+    actionLabel: '去开启',
     query: async () => {
       const r = await nativeUsagePermission();
-      return r === null ? null : { granted: r };
+      if (r !== null) return { granted: r };
+      return { granted: readWebPermGrants().usage === true, canAsk: true };
     },
     request: async () => {
       const ok = await openNativeUsageSettings();
-      return { ok, note: ok ? '已跳转系统设置页，开启后返回刷新' : '当前环境无法跳转（需 APK）' };
+      if (ok) return { ok: true, note: '已跳转系统设置页，开启后返回刷新' };
+      writeWebPermGrant('usage', true); // 网页：直接记为已授权
+      return { ok: true, note: '使用情况权限已开启' };
     },
   },
 ];
@@ -1780,21 +1758,13 @@ function ModeRadioRow({
 
 function PermissionHubPage({ onBack }: { onBack: () => void }) {
   // 惰性初始化（页面仅在用户交互后挂载 = 纯客户端，可安全读 localStorage）
-  const [cfg, setCfg] = useState(() => getAutonomyConfig());
   const [target, setTarget] = useState<AiActionTarget>(() => getAiActionTarget());
   const [engine, setEngine] = useState<UsageEngine>(() => getUsageEngine());
   const [toastMsg, showToast] = useLocalToast();
 
   const native = isNativePerception();
-  const flipMaster = () => setCfg(setAutonomyMaster(!cfg.master));
-  const flipCap = (key: string) => setCfg(setAutonomyCap(key, !cfg.caps[key]));
-  const hands = AUTONOMY_CAPS.filter((c) => c.group === 'hands');
-  const eyes = AUTONOMY_CAPS.filter((c) => c.group === 'eyes');
-  // v1.9.37 真机组拆动手/看见两小节，与网页组一起随 AI 动手范围联动切换显示
-  const deviceHands = AUTONOMY_CAPS.filter((c) => c.group === 'device' && !c.eye);
-  const deviceEyes = AUTONOMY_CAPS.filter((c) => c.group === 'device' && c.eye);
 
-  // ---- 基础权限状态（挂载时逐项查询；null → native-only） ----
+  // ---- 基础权限状态（挂载时逐项查询；网页/真机全可授权，v1.9.38 无「需真机」态） ----
   const [permStates, setPermStates] = useState<Record<string, PermState>>(() => {
     const init: Record<string, PermState> = {};
     for (const d of PERM_DEFS) init[d.key] = 'checking';
@@ -1807,10 +1777,10 @@ function PermissionHubPage({ onBack }: { onBack: () => void }) {
       const r = await def.query();
       setPermStates((prev) => ({
         ...prev,
-        [key]: r === null ? 'native-only' : r.granted === true ? 'granted' : r.canAsk === false ? 'web-denied' : 'denied',
+        [key]: r && r.granted === true ? 'granted' : r && r.canAsk === false ? 'web-denied' : 'denied',
       }));
     } catch {
-      setPermStates((prev) => ({ ...prev, [key]: 'native-only' }));
+      setPermStates((prev) => ({ ...prev, [key]: 'denied' }));
     }
   }, []);
   const refreshAllPerms = useCallback(() => {
@@ -1822,15 +1792,19 @@ function PermissionHubPage({ onBack }: { onBack: () => void }) {
     return () => window.clearTimeout(t);
   }, [refreshAllPerms]);
 
-  // ---- 调试权限：Shizuku 状态 ----
-  const [shizuku, setShizuku] = useState<'checking' | 'running' | 'stopped' | 'native-only'>('checking');
+  // ---- 调试权限：Shizuku 状态（v1.9.38 网页里也可一键开启：账本记账，真机仍走真实授权） ----
+  const [shizuku, setShizuku] = useState<'checking' | 'running' | 'stopped'>('checking');
   const refreshShizuku = useCallback(async () => {
     try {
       const r = await nativeShizukuStatus();
-      setShizuku(r === null ? 'native-only' : r.running && r.granted ? 'running' : 'stopped');
+      if (r) {
+        setShizuku(r.running && r.granted ? 'running' : 'stopped');
+        return;
+      }
     } catch {
-      setShizuku('native-only');
+      /* 桥异常 → 网页账本口径 */
     }
+    setShizuku(readWebPermGrants().shizuku === true ? 'running' : 'stopped');
   }, []);
   useEffect(() => {
     const t = window.setTimeout(() => void refreshShizuku(), 0);
@@ -1871,14 +1845,15 @@ function PermissionHubPage({ onBack }: { onBack: () => void }) {
     }
   };
 
-  // ---- Shizuku 授权 ----
+  // ---- Shizuku 授权（真机经 Shizuku APP 弹授权框；网页/桥不可用直接记为已授权） ----
   const [shizukuBusy, setShizukuBusy] = useState(false);
   const doShizukuGrant = async () => {
     setShizukuBusy(true);
     try {
       const r = await nativeRequestShizukuPermission();
       if (r === null) {
-        showToast('当前环境无法授权（需 APK）');
+        writeWebPermGrant('shizuku', true);
+        showToast('Shizuku 已授权');
       } else if (r.granted) {
         showToast('Shizuku 已授权');
       } else {
@@ -1906,9 +1881,10 @@ function PermissionHubPage({ onBack }: { onBack: () => void }) {
         <div className="mx-1 mt-4 rounded-[22px] bg-white/55 p-4 text-[13px] leading-relaxed ring-1 ring-white/70 backdrop-blur-2xl dark:bg-white/[0.06] dark:ring-white/[0.09]">
           <p className="font-medium">权限中心：系统权限 · 调试授权 · AI 动手</p>
           <p className="mt-1.5 text-muted-foreground">
-            在这里给 AI Phone 授予权限（点权限行就能弹授权）：通知/麦克风/位置在浏览器里即可直接授权，
-            悬浮窗/电池优化/存储/使用情况需真机 APK；选择 CAP-go 插件还是 Shizuku 模式；
-            决定 AI 动手是作用在这台手机里的网站还是真实手机。
+            在这里给 AI Phone 授予权限（点权限行就能弹授权）：通知/麦克风/位置/悬浮窗/电池优化/存储/使用情况
+            在网页里即可直接开启（真机上走系统授权框/设置页/Shizuku 直授）；
+            AI 动手能力始终开启——你让 TA 做什么就做什么，TA 也会按人设与记忆主动帮你；
+            「AI 动手范围」决定动手作用在这台手机里的网站还是真实手机。
           </p>
         </div>
 
@@ -1942,15 +1918,13 @@ function PermissionHubPage({ onBack }: { onBack: () => void }) {
               <span className="mt-0.5 block truncate text-[11.5px] text-muted-foreground">
                 {shizuku === 'running'
                   ? '已连接并授权 · 真机命令/直授通道可用'
-                  : shizuku === 'stopped'
-                    ? '未运行或未授权（真机模式需要它）'
-                    : shizuku === 'checking'
-                      ? '检测中…'
-                      : '需 APK 真机环境'}
+                  : shizuku === 'checking'
+                    ? '检测中…'
+                    : '未授权——点「去授权」开启（真机经 Shizuku APP，网页直接开启）'}
               </span>
             </span>
             <PermStatusPill
-              state={shizuku === 'running' ? 'granted' : shizuku === 'checking' ? 'checking' : shizuku === 'stopped' ? 'denied' : 'native-only'}
+              state={shizuku === 'running' ? 'granted' : shizuku === 'checking' ? 'checking' : 'denied'}
             />
             {shizuku === 'stopped' ? (
               <button
@@ -2014,50 +1988,15 @@ function PermissionHubPage({ onBack }: { onBack: () => void }) {
         </div>
         <p className="mx-1 mt-1.5 text-[11.5px] leading-relaxed text-muted-foreground">
           {target === 'device'
-            ? '真机模式：AI 的点按/滑动/输入/按键/真机打开/看屏幕/强杀等命令会真实作用在你的手机上（需要 APK + Shizuku 已授权 + 下方对应能力开关打开）。下方开关已切换为真机组；网页应用能力（发消息/放歌/备忘录…）两种模式下都可用，开关切回「网站里面」查看。'
-            : '网站模式（默认）：AI 的全部动手能力都作用在这台手机里的网页应用上，绝不碰真实手机。下方开关为网页应用组；切到「真机」后会换成真机组（真机点按/滑动/输入/截屏/强杀…）。'}
+            ? '真机模式：AI 的点按/滑动/输入/按键/真机打开/看屏幕/强杀等命令会真实作用在你的手机上（经 Shizuku，能力常开无需开关）。网页应用能力（发消息/放歌/备忘录…）两种模式下都可用。'
+            : '网站模式（默认）：AI 的全部动手能力都作用在这台手机里的网页应用上，绝不碰真实手机。切到「真机」后 AI 额外获得真机命令（点按/滑动/输入/截屏/强杀…，经 Shizuku）。'}
         </p>
 
-        {/* ===== AI 动手总开关 ===== */}
-        <SectionLabel icon={ScanEye} tone="#34C759">AI 动手</SectionLabel>
-        <div className="mx-1 divide-y divide-black/[0.05] overflow-hidden rounded-[22px] bg-white/55 shadow-[0_8px_28px_rgba(17,24,39,0.06)] ring-1 ring-white/70 backdrop-blur-2xl dark:divide-white/[0.06] dark:bg-white/[0.06] dark:ring-white/[0.09]">
-          <div className="flex min-h-[52px] items-center gap-3 px-4 py-2">
-            <LineIcon icon={ScanEye} />
-            <span className="min-w-0 flex-1">
-              <span className="block truncate text-[16px]">允许 AI 动手</span>
-              <span className="mt-0.5 block truncate text-[11.5px] text-muted-foreground">
-                {cfg.master ? 'AI 已获授权，按人设与语境自主使用下面的能力' : '关着 = AI 完全不知道自己能动手机里的应用'}
-              </span>
-            </span>
-            <AutonomySwitch on={cfg.master} onToggle={flipMaster} label="允许 AI 动手" testId="autonomy-master-switch" />
-          </div>
-        </div>
-
-        {/* 动手组（v1.9.37：随 AI 动手范围联动——网站=真实操作网页应用，真机=作用于真实手机） */}
-        <div className="mb-2 mt-6 px-5 text-[13px] text-muted-foreground">
-          {target === 'web' ? '动手（真实操作网页应用）' : '动手（真实操作真机 · 经 Shizuku）'}
-        </div>
-        <div className={`mx-1 divide-y divide-black/[0.05] overflow-hidden rounded-[22px] bg-white/55 shadow-[0_8px_28px_rgba(17,24,39,0.06)] ring-1 ring-white/70 backdrop-blur-2xl dark:divide-white/[0.06] dark:bg-white/[0.06] dark:ring-white/[0.09] ${cfg.master ? '' : 'opacity-55'}`}>
-          {(target === 'web' ? hands : deviceHands).map((cap) => (
-            <AutonomyCapRow key={cap.key} cap={cap} on={Boolean(cfg.caps[cap.key])} onToggle={() => flipCap(cap.key)} />
-          ))}
-        </div>
-
-        {/* 看见组（同样随范围联动：网站=网页只读探测，真机=真机只读探测） */}
-        <div className="mb-2 mt-6 px-5 text-[13px] text-muted-foreground">
-          {target === 'web' ? '看见（只读探测）' : '看见（真机只读探测）'}
-        </div>
-        <div className={`mx-1 divide-y divide-black/[0.05] overflow-hidden rounded-[22px] bg-white/55 shadow-[0_8px_28px_rgba(17,24,39,0.06)] ring-1 ring-white/70 backdrop-blur-2xl dark:divide-white/[0.06] dark:bg-white/[0.06] dark:ring-white/[0.09] ${cfg.master ? '' : 'opacity-55'}`}>
-          {(target === 'web' ? eyes : deviceEyes).map((cap) => (
-            <AutonomyCapRow key={cap.key} cap={cap} on={Boolean(cfg.caps[cap.key])} onToggle={() => flipCap(cap.key)} />
-          ))}
-        </div>
-
+        {/* v1.9.38 AI 动手能力恒开（总开关与逐项开关全部下线）：一段说明替代原开关组 */}
         <p className="mx-1 mt-4 text-[11.5px] leading-relaxed text-muted-foreground">
-          开关即点即存（下一次发消息立即生效）。危险项默认关着，确认要让 AI 碰再手动开。
-          {target === 'web'
-            ? 'AI 动手范围切到「真机」后，这里的开关会换成真机组（真机点按/滑动/输入/截屏/强杀…）。'
-            : '当前展示的是真机组开关；网页应用能力（发消息/放歌/论坛点赞…）两种模式下都可用，开关切回「网站里面」查看。'}
+          AI 动手能力始终开启，无需任何开关：网页动手（替你发消息/放歌/记备忘录/论坛发帖点赞…）与真机动手
+          {target === 'device' ? '（点按/滑动/输入/截屏/强杀…，经 Shizuku）' : '（切到「真机」后：点按/滑动/输入/截屏/强杀…）'}
+          都随时可用——你让 TA 做什么就做什么，TA 也会按人设、记忆与上下文主动使用工具帮你。
         </p>
       </div>
 
@@ -2071,11 +2010,6 @@ function PermissionHubPage({ onBack }: { onBack: () => void }) {
             <AlertDialogDescription className="text-center text-[13px] leading-snug">
               {dialogPerm?.detail}
             </AlertDialogDescription>
-            {dialogPerm && permStates[dialogPerm.key] === 'native-only' ? (
-              <span className="block text-center text-[12px] text-[#FF9500]">
-                当前在浏览器里，此项需安装 APK 后使用
-              </span>
-            ) : null}
           </AlertDialogHeader>
           <AlertDialogFooter className="flex-row border-t border-black/[0.08] dark:border-white/[0.12]">
             <AlertDialogCancel className="mt-0 flex-1 border-0 border-r border-black/[0.08] py-3 text-[16px] dark:border-white/[0.12]">暂不</AlertDialogCancel>

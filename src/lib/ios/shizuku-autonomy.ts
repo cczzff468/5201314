@@ -90,9 +90,7 @@ export const AUTONOMY_CAPS: AutonomyCap[] = [
   { key: 'dinfo', label: '真机状态探测', desc: 'AI 读前台应用/电量/通知栏/音量（只读）', group: 'device', eye: true },
 ];
 
-// ---------------- 持久化（localStorage 单键；v1.9.38 起只写不读，兼容回滚） ----------------
-
-const STORE_KEY = 'shizuku-autonomy-v1';
+// ---------------- 配置（v1.9.38：能力恒开，无持久化——历史 localStorage 键弃用） ----------------
 
 export interface AutonomyConfig {
   /** v1.9.38 起恒为 true（能力常开，无开关） */
@@ -109,15 +107,6 @@ export function getAutonomyConfig(): AutonomyConfig {
   const caps: Record<string, boolean> = {};
   for (const c of AUTONOMY_CAPS) caps[c.key] = true;
   return { master: true, caps };
-}
-
-function saveAutonomyConfig(cfg: AutonomyConfig): void {
-  if (typeof window === 'undefined') return;
-  try {
-    window.localStorage.setItem(STORE_KEY, JSON.stringify(cfg));
-  } catch {
-    /* 隐私模式等写入失败静默 */
-  }
 }
 
 /** v1.9.38 起兼容空操作（能力恒开；吃醋锁等历史调用方保留） */

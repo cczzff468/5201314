@@ -11,9 +11,9 @@
  */
 
 /** 当前最新版本（与 android-shell versionName 保持一致） */
-export const APP_VERSION = '1.9.37';
+export const APP_VERSION = '1.9.38';
 /** 版本号数字（与 android-shell versionCode 保持一致；覆盖安装要求只增不减） */
-export const APP_VERSION_CODE = 53;
+export const APP_VERSION_CODE = 54;
 
 export interface AppReleaseNote {
   version: string;
@@ -24,6 +24,15 @@ export interface AppReleaseNote {
 
 /** 版本历史（新→旧；设置 › APP 更新 页渲染，最新一条即当前版本） */
 export const APP_RELEASE_NOTES: AppReleaseNote[] = [
+  {
+    version: '1.9.38',
+    date: '2026-11-12',
+    items: [
+      'AI 动手能力全面常开：总开关与逐项能力开关全部下线——你让 TA 做什么就做什么，TA 也会按人设、记忆与上下文主动使用工具（网页动手与真机 Shizuku 动手一视同仁，无需任何设置）',
+      '基础权限网页全可授：悬浮窗/电池优化/存储/使用情况在网页里点「去开启」即完成授权（真机上仍优先走系统授权框/设置页/Shizuku 直授），「需真机」标签全面移除',
+      'Shizuku 调试授权在网页里也可一键开启；权限给予页瘦身为基础权限/调试权限/授权模式/AI 动手范围四块，主列表右侧改显当前动手范围（网站里面/真机）',
+    ],
+  },
   {
     version: '1.9.37',
     date: '2026-11-13',
