@@ -23,12 +23,17 @@
  *    以附加段落追加进首条 system 消息末尾（computeAltAccountsDigest → mergeAltDigestIntoMessages），
  *    覆盖经本总线发起的全部会话（wx/qq 私聊与群聊、信息联系人会话、信息小助手会话、社交/退圈后台流）；
  *    小号/匿名号侧与电话通话（服务端 persona 直调）不注入。
- * 7. 回复条数（v1.9.33 连发不足自动续发）：条数指令（min~N 区间）由各 App 注入人设 system 消息，
- *    但生成端不听指令是常态（机主反馈「AI 一直只发一两条」）——首轮流（含 FC 工具轮）结束后
- *    由本模块数一数真正发出的分段数，低于 replyMinTarget 下限时把已说内容以 assistant 消息回填、
- *    注入「继续说完」指令再补一轮流（最多 2 轮，复用同一分段器/投递管线，凑够下限才收尾）；
- *    群聊（多成员节奏归群聊条数指令管）、单条模式、空回复、换号中止不补；补发失败不升级错误
- *    （首轮已成功，保住已有产出按原样收尾）。
+ * 7. 回复条数（v1.9.34 连发不足自动续发·强化）：条数指令（min~N 区间）由各 App 注入人设
+ *    system 消息，但生成端不听指令是常态（机主反馈「AI 一直只发一两条」）——首轮流（含
+ *    FC 工具轮）结束后由本模块数一数真正发出的分段数，低于下限时把已说内容以 assistant
+ *    消息回填、注入「继续说完」指令再补轮流（复用同一分段器/投递管线，凑够下限才收尾）。
+ *    v1.9.33 版机主实测「第一次发 4 条、第二次只发 1 条」：补发只在主渠道试一次，撞上限流/
+ *    网络抖动即静默放弃。v1.9.34 四重强化：①补发与抢救都走全渠道链（主渠道失败换备用重试，
+ *    半截产出不重发防重复）；②私聊补发轮次 2→3、文案逐轮加码（禁「好的/嗯」应答开头，防模型
+ *    只回一句确认就停）；③首轮零产出（全部输出被包进未闭合思考块/FC 空文本）新增一轮「开口
+ *    说话」抢救（换新思考剥离器后重发一轮，不再直接落解析失败）；④群聊不再一刀切跳过——
+ *    单成员只发 1 条时补一轮「再补 1~2 条」（目标就低不就高 2 条封顶，防刷屏语义保留）。
+ *    单条模式、换号中止不补；补发全渠道失败仍不升级错误（首轮已成功，保住已有产出收尾）。
  *
  * 响应格式：/api/chat 返回 text/plain 纯文本增量流（服务端已把上游 SSE 解析为纯文本），
  * 客户端按「字节累积 = 已收内容」处理；上游不可达 / directOnly 时回退浏览器直连
@@ -903,43 +908,106 @@ async function runStream(rt: StreamRuntime, opts: BeginChatStreamOptions): Promi
           }
         }
       }
-      // ---- v1.9.33 连发不足自动续发（机主反馈「AI 一直只发一两条」）----
+      // ---- v1.9.34 连发不足自动续发·四重强化（机主实测「第一次发 4 条、第二次只发 1 条」）----
       // 生成端不听条数指令是常态：首轮流（含 FC 工具轮）结束后数一数真正发出的分段数，
-      // 低于本会话下限（replyMinTarget，与提示词同一把尺）时把已说内容以 assistant 消息
-      // 回填、注入「继续说完」指令再补一轮流（最多 2 轮），复用同一分段器/投递管线——
-      // 新增内容继续经 onSegment 逐条上屏，凑够下限才收尾。客户端兑底，无论模型听不听话。
-      // 不补：群聊（多成员节奏归群聊条数指令管，防单成员刷屏）、单条模式、首轮空回复
-      // （交 finalize 走各 App 空回复兑底）、换号中止。补发失败不升级错误（首轮已成功，
-      // 保住已有产出按原样收尾）。status 在补发期间维持 streaming：本回合没结束，
-      // 聊天页「正在输入」不闪断、新回合照旧被 isChatStreaming 拒绝排队。
-      if (multi && opts.replyCount && segSink && !opts.sessionKey.includes(':group:')) {
-        const minTarget = replyMinTarget(opts.replyCount);
-        for (let contRound = 0; contRound < 2; contRound++) {
+      // 低于本会话下限（与提示词同一把尺）时把已说内容以 assistant 消息回填、注入「继续
+      // 说完」指令再补一轮流，复用同一分段器/投递管线——新增内容继续经 onSegment 逐条上屏，
+      // 凑够下限才收尾。客户端兑底，无论模型听不听话。v1.9.33 版的洞：补发只在主渠道上
+      // 试一次，撞上限流/网络抖动即静默放弃（连续两轮聊天时第二轮流最容易中招），且群聊
+      // 一刀切跳过、首轮空回复直接落解析失败。本次：
+      //   ① 补发/抢救都走全渠道链（apiChainOf：主渠道失败换备用渠道重试，与主轮同口径；
+      //      本轮已有半截产出不换渠道重发，防重复投递）；
+      //   ② 私聊补发轮次 2 → 3，提醒文案逐轮加码（第二次/最后一次措辞更硬、给具体续话
+      //      方向、禁「好的/嗯」应答开头——防模型只回一句确认就停）；
+      //   ③ 首轮零产出（模型把全部输出包进未闭合 [思考] 块 / FC 轮空文本）先换新思考剥离器
+      //      抢救一轮「把想说的连发出来」，有产出后照常进补发凑数（不再直接落解析失败徽标）；
+      //   ④ 群聊不再一刀切跳过：单成员只发出 1 条时补一轮「再补 1~2 条」（目标就低不就高
+      //      2 条封顶、最多 1 轮、文案按群聊节奏，防刷屏语义保留）。
+      // 不补：单条模式、换号中止。补发全渠道失败不升级错误（首轮已成功，保住已有产出按原样
+      // 收尾）。status 在补发期间维持 streaming：本回合没结束，聊天页「正在输入」不闪断、
+      // 新回合照旧被 isChatStreaming 拒绝排队。
+      if (multi && opts.replyCount && segSink) {
+        const isGroup = opts.sessionKey.includes(':group:');
+        const minTarget = isGroup ? Math.min(2, opts.replyCount) : replyMinTarget(opts.replyCount);
+        // ③ 首轮零产出抢救（最多一轮）：把「空回复」从落解析失败徽标救回成真实连发
+        if (!rt.aborted && !raw.trim()) {
+          const rescueMessages: ChatPayloadMessage[] = [
+            ...workMessages,
+            {
+              role: 'user',
+              content:
+                `（系统内部提醒，这条只给你自己看、绝不向对方提起：你这次一条消息都还没有发出去。` +
+                `现在把你想说的连发出来：先回应${isGroup ? '群里' : '他'}刚才说的最新一句，再展开说你自己想说的，` +
+                `一句一条、口语化、每条单独一行，${isGroup ? `发 2~${Math.min(opts.replyCount, 5)} 条` : `发 ${minTarget}~${opts.replyCount} 条`}；` +
+                `不要解释这条提醒、不要客套铺垫，直接输出消息本身。）`,
+            },
+          ];
+          // 旧思考剥离器可能卡在未闭合的 [思考] 块里（后续输出会被继续吞进思考不进气泡）：
+          // 抢救轮换新实例；已解析出的思考文本仍在 thinkText 里，不丢
+          thinkFilter = createThinkFilter();
+          thinkDonePatched = false;
+          activePayloads.set(rt.state.sessionKey, { messages: rescueMessages, config: effConfig });
+          const rescueChain = apiChainOf(effConfig, useSettings.getState().apiFallbacks);
+          for (let ci = 0; ci < rescueChain.length; ci++) {
+            try {
+              await streamOnce(rescueMessages, rescueChain[ci]);
+              break;
+            } catch {
+              // 抢救轮零产出才换下一渠道（有产出即成功）；换号中止立即停
+              if (rt.aborted || ci + 1 >= rescueChain.length || raw.trim()) break;
+            }
+          }
+        }
+        for (let contRound = 0; contRound < (isGroup ? 1 : 3); contRound++) {
           if (rt.aborted || !raw.trim()) break;
           const pendingTail = scanner ? scanner.peek() : '';
           const got = segEmitted + (pendingTail.trim() ? 1 : 0);
           if (got >= minTarget) break;
-          const stillNeed = Math.max(2, minTarget - got);
+          const stillNeed = Math.max(isGroup ? 1 : 2, minTarget - got);
+          const nudge = isGroup
+            ? `（系统内部提醒，这条只给你自己看、绝不向对方提起：你在群聊里刚才只发出了 ${got} 条消息。` +
+              `继续补发 ${stillNeed}~${Math.min(stillNeed + 1, 2)} 条短消息：补充一句细节、追问一句或接着话头再说一句，` +
+              `保持群聊节奏、一句一条、每条单独一行、不要刷屏；不要解释这条提醒、不要客套铺垫，直接输出消息本身。）`
+            : contRound === 0
+              ? `（系统内部提醒，这条只给你自己看、绝不向对方提起：你这次回复到目前只发出了 ${got} 条消息，比你想说的少。` +
+                `你现在还开着聊天框，想起还有话没说完——从你刚才最后一条消息接着继续连发：至少再发 ${stillNeed} 条短消息。` +
+                `仍然一句一条、口语化、每条单独一行；把话题往前推（展开刚才的话、补充细节、说说你自己今天的情况、反问对方、抛个新话题都行），` +
+                `绝不重复已经说过的句子；不要解释这条提醒、不要客套铺垫、不要问「还有什么想说的吗」这类收尾，直接输出要连发的内容本身。）`
+              : contRound === 1
+                ? `（系统内部提醒，第二次：你到目前只发出了 ${got} 条消息，还差很多——对方还抱着手机等你把话说完。` +
+                  `不要停，继续连发至少 ${stillNeed} 条短消息：从你最后一条消息接着往下说——展开刚才那句的细节、突然想起的另一件事、` +
+                  `你现在的状态或今天遇到的事、反问对方一句都可以。第一条消息必须是聊天内容本身，绝不能以「好的」「嗯」「哦」这类应答开头，` +
+                  `绝不能解释或道歉，绝不重复已经说过的句子。仍然一句一条、口语化、每条单独一行。）`
+                : `（系统内部提醒，第三次、最后一次：你的连发还没说完——目前只有 ${got} 条，至少要说到 ${minTarget} 条。` +
+                  `继续发 ${stillNeed} 条：把刚才的话再展开讲讲、分享你今天的一件小事、猜猜对方现在在干嘛、或者抛一个新话题问他。` +
+                  `仍然是聊天消息本身，一句一条、口语化、每条单独一行，不要任何解释、不要客套收尾。哪怕觉得话不多了也要继续说，凑够 ${minTarget} 条为止。）`;
           const contMessages: ChatPayloadMessage[] = [
             ...workMessages,
             { role: 'assistant', content: raw },
-            {
-              role: 'user',
-              content:
-                `（系统内部提醒，这条只给你自己看、绝不向对方提起：你这次回复到目前只发出了 ${got} 条消息，比你想说的少。` +
-                `你现在还开着聊天框，想起还有话没说完——从你刚才最后一条消息接着继续连发：至少再发 ${stillNeed} 条短消息。` +
-                `仍然一句一条、口语化、每条单独一行；把话题往前推（展开刚才的话、补充细节、说说你自己今天的情况、反问对方、抛个新话题都行），` +
-                `绝不重复已经说过的句子；不要解释这条提醒、不要客套铺垫、不要问「还有什么想说的吗」这类收尾，直接输出要连发的内容本身。）`,
-            },
+            { role: 'user', content: nudge },
           ];
           // pagehide 接力按最新一轮 payload 登记（补发上下文的续跑语义正确：
           // 中途关页时服务端接着把没说完的话说完，不从头重发整轮）
           activePayloads.set(rt.state.sessionKey, { messages: contMessages, config: effConfig });
-          try {
-            await streamOnce(contMessages, effConfig);
-          } catch {
-            break; // 补发渠道失败：保住已有产出按首轮结果收尾（错误不升级——首轮已成功）
+          // 补发轮同样换新思考剥离器（防上一轮未闭合思考块吞掉补发正文；已解析思考仍在
+          // thinkText）；thinkDonePatched 复位让「思考中→已思考」相位切换在补发轮内正确重放
+          thinkFilter = createThinkFilter();
+          thinkDonePatched = false;
+          const contChain = apiChainOf(effConfig, useSettings.getState().apiFallbacks);
+          const rawAtRoundStart = raw;
+          for (let ci = 0; ci < contChain.length; ci++) {
+            const rawBefore = raw;
+            try {
+              await streamOnce(contMessages, contChain[ci]);
+              break;
+            } catch {
+              // 半截产出（分段已上屏）不换渠道重发防重复；换号中止立即停
+              if (rt.aborted || ci + 1 >= contChain.length || raw !== rawBefore) break;
+            }
           }
+          // 本轮全渠道零新增才放弃（半截产出也算进展：下一轮用更新后的 raw 重新计数继续凑）；
+          // 错误不升级——首轮已成功，保住已有产出按原样收尾
+          if (raw === rawAtRoundStart) break;
         }
       }
       patchState(rt, { status: 'done' });

@@ -11,9 +11,9 @@
  */
 
 /** 当前最新版本（与 android-shell versionName 保持一致） */
-export const APP_VERSION = '1.9.29';
+export const APP_VERSION = '1.9.34';
 /** 版本号数字（与 android-shell versionCode 保持一致；覆盖安装要求只增不减） */
-export const APP_VERSION_CODE = 49;
+export const APP_VERSION_CODE = 50;
 
 export interface AppReleaseNote {
   version: string;
@@ -24,6 +24,15 @@ export interface AppReleaseNote {
 
 /** 版本历史（新→旧；设置 › APP 更新 页渲染，最新一条即当前版本） */
 export const APP_RELEASE_NOTES: AppReleaseNote[] = [
+  {
+    version: '1.9.34',
+    date: '2026-11-12',
+    items: [
+      'AI 连发条数硬保障四重强化（修复「第一次发 4 条、第二次只发 1 条」）：回复不够条数时自动补发，补发也走主渠道+备用渠道全链路（主渠道限流/网络抖动不再直接放弃）、最多连催 3 轮且逐轮加码，每次回复都把话说够',
+      'AI 忘了说话自动抢救：模型把输出全包进思考块/工具轮空手而归时，自动追加一轮「把想说的连发出来」，不再整轮只回一条甚至空回复',
+      '群聊回复下限兑底：单成员只发 1 条时自动补发 1~2 条，群聊指令同步撤掉「合并成一条也行」的许可——话再少也至少 2 条（先回应、再补充）',
+    ],
+  },
   {
     version: '1.9.29',
     date: '2026-11-12',
