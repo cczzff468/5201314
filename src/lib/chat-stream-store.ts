@@ -23,7 +23,12 @@
  *    以附加段落追加进首条 system 消息末尾（computeAltAccountsDigest → mergeAltDigestIntoMessages），
  *    覆盖经本总线发起的全部会话（wx/qq 私聊与群聊、信息联系人会话、信息小助手会话、社交/退圈后台流）；
  *    小号/匿名号侧与电话通话（服务端 persona 直调）不注入。
- * 7. 回复条数：条数指令（N 条上限）由各 App 注入人设 system 消息，一轮发完、不做补发；
+ * 7. 回复条数（v1.9.33 连发不足自动续发）：条数指令（min~N 区间）由各 App 注入人设 system 消息，
+ *    但生成端不听指令是常态（机主反馈「AI 一直只发一两条」）——首轮流（含 FC 工具轮）结束后
+ *    由本模块数一数真正发出的分段数，低于 replyMinTarget 下限时把已说内容以 assistant 消息回填、
+ *    注入「继续说完」指令再补一轮流（最多 2 轮，复用同一分段器/投递管线，凑够下限才收尾）；
+ *    群聊（多成员节奏归群聊条数指令管）、单条模式、空回复、换号中止不补；补发失败不升级错误
+ *    （首轮已成功，保住已有产出按原样收尾）。
  *
  * 响应格式：/api/chat 返回 text/plain 纯文本增量流（服务端已把上游 SSE 解析为纯文本），
  * 客户端按「字节累积 = 已收内容」处理；上游不可达 / directOnly 时回退浏览器直连
@@ -36,7 +41,7 @@ import type { ApiConfig } from '@/lib/ios/store';
 import { useSettings } from '@/lib/ios/store';
 import { apiChainOf } from '@/lib/api-fallback';
 import { directChatStream, isPrivateApiUrl } from '@/lib/ios/direct-api';
-import { createReplySegmentScanner } from '@/lib/reply-count';
+import { createReplySegmentScanner, replyMinTarget, splitReplySegments } from '@/lib/reply-count';
 // 深度思考：流式统一剥离 [思考]…[/思考] 块（正文/分段器只见纯正文，思考内容单独收集交 finalize）
 import { createThinkFilter } from '@/lib/deep-think';
 import { describeImagesAuto } from '@/lib/vision-client';
@@ -575,7 +580,16 @@ async function runStream(rt: StreamRuntime, opts: BeginChatStreamOptions): Promi
   // 原文只在本模块累计（raw），不写入展示状态 —— 流式期间页面只显示「正在输入」，
   // 不再有「先全文后消失」的流式气泡；分段与展示状态完全分离（流式和分条不改同一块状态）
   const multi = typeof opts.replyCount === 'number' && opts.replyCount > 1;
-  let scanner = multi && opts.onSegment ? createReplySegmentScanner(opts.onSegment) : null;
+  // v1.9.33 连发不足自动续发：包装 onSegment 计数已投分段（补发判定用；真流式路径每个分段
+  // 恰好回调一次，FC 整段路径在 FC 分支按 splitReplySegments 预估计数）
+  let segEmitted = 0;
+  const segSink = opts.onSegment
+    ? (seg: string): void => {
+        segEmitted += 1;
+        opts.onSegment?.(seg);
+      }
+    : null;
+  let scanner = multi && segSink ? createReplySegmentScanner(segSink) : null;
   // 深度思考剥离器：与分段器同源同生命周期（SDK 兜底重建时一并重建）；未输出 [思考] 块的
   // 会话零行为变化（纯透传），输出过则正文/思考两侧永不合流
   let thinkFilter = createThinkFilter();
@@ -838,8 +852,11 @@ async function runStream(rt: StreamRuntime, opts: BeginChatStreamOptions): Promi
                 // raw 仍按同口径累加（finalize 统计/思考回填一致；多条模式扫描器未喂入
                 // → tail 为空串，finalize 只做收尾动作不再落正文）。单条模式无扫描器，
                 // onDelta→finalize 旧管线本就可靠，照旧。换号中止（aborted）不投递。
-                if (multi && opts.onSegment) {
+                if (multi && segSink && opts.onSegment) {
                   raw += text;
+                  // v1.9.33 补发计数：FC 整段一次到手，条数按稳定切分预估计数
+                  //（各 App 落地时同样按 splitReplySegments 再切成多条气泡，口径一致）
+                  segEmitted += Math.max(1, splitReplySegments(text, true).length);
                   opts.onSegment(text);
                 } else {
                   onDelta(text);
@@ -878,11 +895,50 @@ async function runStream(rt: StreamRuntime, opts: BeginChatStreamOptions): Promi
             liveThinkShown = false;
             thinkDonePatched = false;
             if (rt.state.liveThink !== undefined) patchState(rt, { liveThink: undefined, thinkDone: undefined });
-            if (multi && opts.onSegment) {
-              scanner = createReplySegmentScanner(opts.onSegment);
+            if (multi && segSink) {
+              scanner = createReplySegmentScanner(segSink);
             } else {
               scanner = null;
             }
+          }
+        }
+      }
+      // ---- v1.9.33 连发不足自动续发（机主反馈「AI 一直只发一两条」）----
+      // 生成端不听条数指令是常态：首轮流（含 FC 工具轮）结束后数一数真正发出的分段数，
+      // 低于本会话下限（replyMinTarget，与提示词同一把尺）时把已说内容以 assistant 消息
+      // 回填、注入「继续说完」指令再补一轮流（最多 2 轮），复用同一分段器/投递管线——
+      // 新增内容继续经 onSegment 逐条上屏，凑够下限才收尾。客户端兑底，无论模型听不听话。
+      // 不补：群聊（多成员节奏归群聊条数指令管，防单成员刷屏）、单条模式、首轮空回复
+      // （交 finalize 走各 App 空回复兑底）、换号中止。补发失败不升级错误（首轮已成功，
+      // 保住已有产出按原样收尾）。status 在补发期间维持 streaming：本回合没结束，
+      // 聊天页「正在输入」不闪断、新回合照旧被 isChatStreaming 拒绝排队。
+      if (multi && opts.replyCount && segSink && !opts.sessionKey.includes(':group:')) {
+        const minTarget = replyMinTarget(opts.replyCount);
+        for (let contRound = 0; contRound < 2; contRound++) {
+          if (rt.aborted || !raw.trim()) break;
+          const pendingTail = scanner ? scanner.peek() : '';
+          const got = segEmitted + (pendingTail.trim() ? 1 : 0);
+          if (got >= minTarget) break;
+          const stillNeed = Math.max(2, minTarget - got);
+          const contMessages: ChatPayloadMessage[] = [
+            ...workMessages,
+            { role: 'assistant', content: raw },
+            {
+              role: 'user',
+              content:
+                `（系统内部提醒，这条只给你自己看、绝不向对方提起：你这次回复到目前只发出了 ${got} 条消息，比你想说的少。` +
+                `你现在还开着聊天框，想起还有话没说完——从你刚才最后一条消息接着继续连发：至少再发 ${stillNeed} 条短消息。` +
+                `仍然一句一条、口语化、每条单独一行；把话题往前推（展开刚才的话、补充细节、说说你自己今天的情况、反问对方、抛个新话题都行），` +
+                `绝不重复已经说过的句子；不要解释这条提醒、不要客套铺垫、不要问「还有什么想说的吗」这类收尾，直接输出要连发的内容本身。）`,
+            },
+          ];
+          // pagehide 接力按最新一轮 payload 登记（补发上下文的续跑语义正确：
+          // 中途关页时服务端接着把没说完的话说完，不从头重发整轮）
+          activePayloads.set(rt.state.sessionKey, { messages: contMessages, config: effConfig });
+          try {
+            await streamOnce(contMessages, effConfig);
+          } catch {
+            break; // 补发渠道失败：保住已有产出按首轮结果收尾（错误不升级——首轮已成功）
           }
         }
       }
@@ -900,8 +956,8 @@ async function runStream(rt: StreamRuntime, opts: BeginChatStreamOptions): Promi
     liveThinkShown = false;
     thinkDonePatched = false;
     if (rt.state.liveThink !== undefined) patchState(rt, { liveThink: undefined, thinkDone: undefined });
-    if (multi && opts.onSegment) {
-      scanner = createReplySegmentScanner(opts.onSegment);
+    if (multi && segSink) {
+      scanner = createReplySegmentScanner(segSink);
     } else {
       scanner = null;
     }

@@ -11,14 +11,15 @@ import { scopedConvKey } from './ios/accounts';
  *   sms:<storageKey>，天然按角色/App 隔离），localStorage 单键 JSON map 持久化；
  *   切换角色时各 App 在发送现场读取该角色自己的值，互不影响；
  * - buildReplyCountPrompt：追加在角色人设 system 消息之后，约定「min~N 条」的连发区间语义
- *   （v1.9.15 按机主「每次回复 3~8 条」重写：默认条数 8、下限收紧为 max(3, floor(N×0.4))
- *   ——默认档 3~8 条；「绝大多数回复必须发够下限、绝不许一条消息就结束」+「话少豁免改为人设层面」
- *   （只有人设本身惜字如金才可以少发，不再允许拿「内容少」当借口）+「话多放开连发可超 N」。
+ *   （v1.9.33 按机主「AI 一直只发一两条」再强化：下限抬到 max(4, floor(N×0.6))——默认档
+ *   4~8 条；「连发条数是硬性要求，不是建议」+「发完前先自查条数：写到第 2 条就想停时
+ *   必须继续说」双保险；话少豁免仍留在人设层面，话多放开连发可超 N。
  *   说什么内容完全交给角色人设自由发挥；
- * - replyMinTarget：最低条数目标（v1.9.15：max(3, floor(N×0.4))——8 条 → 3~8 条、15 条 → 6~15 条、
- *   5 条 → 3~5 条；旧版 0.8 倍下限配「内容少可合并一条」措辞，模型常只发 1~2 条，按机主
- *   「AI 回复条数太少」反馈重写：下限改成人设层面豁免 + 明确「绝不许一条消息结束回复」），
- *   至少 3 条）——提示词用「min~max」区间引导；
+ * - replyMinTarget：最低条数目标（v1.9.33：max(4, floor(N×0.6))，夹在 [4, N]（N≥4）——
+ *   8 条 → 4~8 条、15 条 → 9~15 条、5 条 → 4~5 条、3 条 → 恒 3 条。
+ *   v1.9.15 的 max(3, floor(N×0.4)) 模型仍常只发 1~2 条（机主再次反馈「AI 一直发一两条」），
+ *   本次下限改 0.6 倍、地板抬到 4，同时配套「连发不足自动续发」（chat-stream-store 总线侧：
+ *   首轮流结束后数分段，不够下限就把已说内容回填再补一轮「继续说完」，提示词不听也有兑底）。
  * - 消息边界 = 「&&&」标记 或 换行 或 句末标点（。！？!? ～〜，不含省略号/半角~）：AI 守「一句一行」
  *   约定时按行切；把多句话写在同一行里时按句子切开（句末标点保留在气泡文本里）——
  *   一句就是一条消息，逐条连发。省略号/逗号这类句中停顿不是边界：切分稳定，不会把
@@ -43,7 +44,8 @@ import { scopedConvKey } from './ios/accounts';
 
 /** 可选回复条数（v1.9.15：默认 8 条——机主「每次回复 3~8 个消息」；7 与 8 档位几乎无感，替换） */
 export const REPLY_COUNT_OPTIONS: readonly number[] = [1, 3, 5, 8, 15, 20, 25, 30];
-/** 默认回复条数（v1.9.15：5 → 8——按机主要求 AI 每次回复发 3~8 条消息） */
+/** 默认回复条数（v1.9.15：5 → 8——按机主要求 AI 每次回复发 3~8 条消息；v1.9.33 维持 8，
+ *  下限由 replyMinTarget 抬到 4 + 总线侧自动续发兑底，见 chat-stream-store） */
 export const DEFAULT_REPLY_COUNT = 8;
 
 const STORE_KEY = 'chat-reply-counts';
@@ -129,17 +131,17 @@ export function saveReplyCount(sessionKey: string, n: number): void {
 }
 
 /**
- * 最低条数目标（v1.9.15：max(3, floor(N×0.4))，夹在 [3, N]）：设置 8 条 → 3~8 条、
- * 15 条 → 6~15 条、5 条 → 3~5 条、3 条 → 恒 3 条。
+ * 最低条数目标（v1.9.33：max(4, floor(N×0.6))，夹在 [min(N,4), N]）：设置 8 条 → 4~8 条、
+ * 15 条 → 9~15 条、5 条 → 4~5 条、3 条 → 恒 3 条（N<4 时夹到 N）。
  * N=1 是单条模式没有「多条」概念；其余 N 作为 min~N 连发区间提示的下限。
- * 旧版 0.8 倍下限（floor(N×0.8)）偏窄且配「内容少可合并一条」的措辞，模型实际常只发 1~2 条
- * （机主反馈「AI 回复条数太少」）——本次下限改为 0.4 倍、地板抬高到 3，并配合提示词重写：
- * 「绝大多数回复必须发够下限」「话少豁免只给人设本身惜字如金的角色」「话多放开连发可超 N」。
+ * v1.9.15 的 max(3, floor(N×0.4)) 模型实际仍常只发 1~2 条（机主再反馈「AI 一直发一两条」）——
+ * 本次下限改 0.6 倍、地板抬到 4，并配套总线侧「连发不足自动续发」（chat-stream-store）：
+ * 提示词不听指令时由客户端数分段补发兑底，见该文件。
  */
 export function replyMinTarget(n: number): number {
   const cap = Math.max(1, Math.floor(n) || 1);
   if (cap <= 1) return 1;
-  return Math.min(cap, Math.max(3, Math.floor(cap * 0.4)));
+  return Math.min(cap, Math.max(4, Math.floor(cap * 0.6)));
 }
 
 /**
@@ -168,11 +170,11 @@ export function buildReplyCountPrompt(n: number, opts?: { groupMode?: boolean })
   const range = min >= n ? `${n} 条` : `${min}~${n} 条`;
   return promptTextOf('reply-count', { range, n, min }, [
     `【连发短消息】本次回复模仿真人在手机上聊天：像真人那样把想说的话拆成一条一条的短消息，一句一条、连续发出来（本次发 ${range}，往多了发，目标接近 ${n} 条）。`,
-    `${min} 条是下限：绝大多数回复都要发够 ${min} 条——把想法拆成几条说、顺着话头多聊几句（回应 → 补充 → 追问或顺着话题补充），绝不许一条消息就结束回复。`,
-    `实在话少的可以少发：只有你的人设本身就是惜字如金、且眼下确实没什么可说的，才可以少于 ${min} 条；即便少发，也绝不用「嗯」「哦」「在」这种两三个字的敷衍消息收尾。`,
+    `连发条数是硬性要求，不是建议：${min} 条是下限——绝大多数回复都要发够 ${min} 条，绝不许一条消息就结束回复，也不许两条就草草收场。把想法拆开说：先回应对方 → 再补充你的想法或近况 → 再追问或抛新话题，像真人抱着手机一口气发好几条那样。`,
+    `发完前先自查条数：写到第 2 条就想停的时候，必须继续往下说——展开刚才那句、补充细节、说说你自己今天的情况、反问对方、抛个新话题都行，随口多聊几句，凑到 ${min} 条再收尾。只有你的人设本身就是惜字如金、且眼下确实没什么可说的，才可以少于 ${min} 条；即便少发，也绝不用「嗯」「哦」「在」这种两三个字的敷衍消息收尾。`,
+    `每条消息只写一句简短、口语化的话，单独占一行；消息内部不要换行，不要加序号、项目符号或任何分隔标记（方括号系统标记是操作指令，按对应功能块的说明输出，不受这条限制）。`,
     `话多就放开连发：聊得热闹、情绪上来、想说的多时尽管多发，超过 ${n} 条也没问题，像真人抱着手机聊上头一样。`,
     `多条消息之间要有递进：像真人连发那样把话题往前推，不要原地重复、不要车轱辘话。`,
-    `每条消息只写一句简短、口语化的话，单独占一行；消息内部不要换行，不要加序号、项目符号或任何分隔标记（方括号系统标记是操作指令，按对应功能块的说明输出，不受这条限制）。`,
     `不允许重复：不要把同一句话或同一个意思换个说法再发一遍；不允许发完全空的消息凑数。`,
   ].join('\n')) ?? '';
 }
@@ -298,6 +300,13 @@ export interface ReplySegmentScanner {
   push: (delta: string) => void;
   /** 流接收结束：返回剩余的最后一段（可为空串，调用方跳过投递） */
   finish: () => string;
+  /**
+   * 只读预览：finish() 即将交付的最后一段（不动任何状态，可反复调用）。
+   * v1.9.33 连发不足自动续发（chat-stream-store）判定用——补发前数「已投分段 +
+   * 待收尾尾段」够不够下限；peek 后流还会继续 push 新增内容，finish 仍在流真正
+   * 收尾时消费一次，两路互不影响。
+   */
+  peek: () => string;
 }
 
 /** 段内是否有未闭合的「[」（标记被边界切碎时先不放出，等闭合后再扫）。
@@ -375,6 +384,20 @@ export function createReplySegmentScanner(onSegment: (segment: string) => void):
         if (tail === h || tail === lastEmitted) return h;
         if (isTinySegment(tail)) return joinTinySegments(h, tail);
         return `${h}\n${tail}`;
+      }
+      if (!tail || tail === lastEmitted) return '';
+      return tail;
+    },
+    peek() {
+      // finish() 的只读镜像：不消费 held、不推进任何游标——补发判定只读预览，
+      // 后续 push 的新增内容仍从原游标继续扫（尾段会与新内容自然拼接成完整段，不重复）
+      let tail = trimBlank(full.slice(segStart).replace(MARKER_RE, '\n'));
+      tail = trimBlank(tail.replace(HALF_MARKER_RE, ''));
+      if (held) {
+        if (!tail) return held;
+        if (tail === held || tail === lastEmitted) return held;
+        if (isTinySegment(tail)) return joinTinySegments(held, tail);
+        return `${held}\n${tail}`;
       }
       if (!tail || tail === lastEmitted) return '';
       return tail;
