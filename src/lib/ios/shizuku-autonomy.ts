@@ -23,6 +23,10 @@
  * 显示网页应用能力（发消息/论坛点赞/放歌…），「真机」显示真机能力（点按/滑动/输入/
  * 截屏/强杀…，无论坛点赞等网页项）；网页工具在两种模式下都仍可用（只是开关视图切换）。
  *
+ * v1.9.38 机主需求：AI 动手不再设开关——能力恒为全开（master + 全部 caps 恒 true，
+ * 历史 localStorage 配置忽略）：机主让 AI 做什么 TA 就做什么，网页动手/真机动手（Shizuku）
+ * 皆然。设置 › 权限给予 页的开关组全部下线，只保留系统权限/调试授权/授权模式/动手范围。
+ *
  * 兜底标记协议（[手机操作:命令:参数]）保留 Web 可用命令：打开/播歌/冻结/解冻/
  * 查后台/使用时长/拉回/agent；真机模式下额外开放：点按/滑动/输入/按键/真机打开/
  * 强杀/看屏幕/前台/通知/电量/音量。
@@ -86,38 +90,25 @@ export const AUTONOMY_CAPS: AutonomyCap[] = [
   { key: 'dinfo', label: '真机状态探测', desc: 'AI 读前台应用/电量/通知栏/音量（只读）', group: 'device', eye: true },
 ];
 
-const CAP_KEYS = AUTONOMY_CAPS.map((c) => c.key);
-
-// ---------------- 持久化（localStorage 单键） ----------------
+// ---------------- 持久化（localStorage 单键；v1.9.38 起只写不读，兼容回滚） ----------------
 
 const STORE_KEY = 'shizuku-autonomy-v1';
 
 export interface AutonomyConfig {
-  /** 总开关：关 = 整个「AI 动手」能力不存在（教学不注入 + 执行全拒） */
+  /** v1.9.38 起恒为 true（能力常开，无开关） */
   master: boolean;
-  /** 逐项开关（key → on）；缺省项按 danger 取默认 */
+  /** v1.9.38 起全部恒为 true（能力常开，无开关） */
   caps: Record<string, boolean>;
 }
 
-function defaultCaps(): Record<string, boolean> {
-  const caps: Record<string, boolean> = {};
-  for (const c of AUTONOMY_CAPS) caps[c.key] = !c.danger;
-  return caps;
-}
-
+/**
+ * v1.9.38：AI 动手能力恒开——不再读 localStorage，master 与全部能力恒为 true。
+ * （开关 UI 已从「权限给予」页下线；历史存储键保留不读，兼容回滚。）
+ */
 export function getAutonomyConfig(): AutonomyConfig {
-  if (typeof window === 'undefined') return { master: false, caps: {} };
-  try {
-    const raw = window.localStorage.getItem(STORE_KEY);
-    if (!raw) return { master: false, caps: defaultCaps() };
-    const parsed = JSON.parse(raw) as Partial<AutonomyConfig>;
-    const caps = { ...defaultCaps(), ...(parsed.caps ?? {}) };
-    // 清掉已下线的真机时代脏键（tap/swipe/type/key/open/screencap/notify/…）
-    for (const k of Object.keys(caps)) if (!CAP_KEYS.includes(k)) delete caps[k];
-    return { master: Boolean(parsed.master), caps };
-  } catch {
-    return { master: false, caps: defaultCaps() };
-  }
+  const caps: Record<string, boolean> = {};
+  for (const c of AUTONOMY_CAPS) caps[c.key] = true;
+  return { master: true, caps };
 }
 
 function saveAutonomyConfig(cfg: AutonomyConfig): void {
@@ -129,20 +120,14 @@ function saveAutonomyConfig(cfg: AutonomyConfig): void {
   }
 }
 
-export function setAutonomyMaster(on: boolean): AutonomyConfig {
-  const cfg = getAutonomyConfig();
-  cfg.master = on;
-  saveAutonomyConfig(cfg);
-  return cfg;
+/** v1.9.38 起兼容空操作（能力恒开；吃醋锁等历史调用方保留） */
+export function setAutonomyMaster(_on: boolean): AutonomyConfig {
+  return getAutonomyConfig();
 }
 
-export function setAutonomyCap(key: string, on: boolean): AutonomyConfig {
-  const cfg = getAutonomyConfig();
-  if (CAP_KEYS.includes(key)) {
-    cfg.caps[key] = on;
-    saveAutonomyConfig(cfg);
-  }
-  return cfg;
+/** v1.9.38 起兼容空操作（能力恒开；吃醋锁等历史调用方保留） */
+export function setAutonomyCap(_key: string, _on: boolean): AutonomyConfig {
+  return getAutonomyConfig();
 }
 
 // ---------------- AI 动手范围（v1.9.36：网页生态 vs 真机） ----------------
