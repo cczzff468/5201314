@@ -1226,7 +1226,7 @@ export function __jealousyTestInjectLock(pkg: string, contactId: string, app: Je
       reason: 'E2E 测试锁定：你刷这个不理我，我很生气。',
       lockedAt: now,
       unlockAt: now + cfg.countdownMin * 60_000,
-      overlayShownAt: now,
+      overlayShownAt: 0, // v1.9.31 E2E：注入即弹（0=未展示过，弹窗判定立即可见）
       triggerKind: 'entertain',
       web: !isNativePerception(),
     },

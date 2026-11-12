@@ -31,6 +31,15 @@ import { kvGet, kvSet } from './idb-kv';
 import { addJealousyEntertainPkgs } from './jealousy-lock';
 import { genId } from './db';
 import { cachedContactRealName } from './contacts-store';
+// v1.9.31 应用内 DOM 操控层（网页/真机双可用：虚拟手机界面元素级操作）
+import {
+  SCREEN_APPS_DOC,
+  clickScreenDom,
+  observeScreenDom,
+  openScreenApp,
+  scrollScreenDom,
+  typeScreenDom,
+} from './agent-screen';
 
 // ---------------- 类型 ----------------
 
@@ -87,7 +96,31 @@ const TOOL_LABELS: Record<string, string> = {
   getSmsInbox: '读短信',
   getCallLog: '查通话',
   addJealousyLockApps: '设置吃醋锁定',
+  // v1.9.31 应用内 DOM 工具（Agentic 多步任务主力：网页/真机双可用）
+  openScreen: '打开应用界面',
+  uiObserve: '观察界面',
+  uiClick: '点界面元素',
+  uiType: '输入文字',
+  uiScroll: '滚动界面',
 };
+
+/**
+ * 会改变屏幕状态的「变更类」工具（v1.9.31 Agentic 重构）：执行后必须自动观察屏幕状态
+ * 回传给模型（ReAct 循环的 Observation），逼它基于最新画面决策下一步；纯查询类
+ * （查电量/查通知等）不需要。openApp/openScreen 是典型「任务刚开始」信号。
+ */
+const MUTATING_FC_TOOLS = new Set([
+  'openApp',
+  'openScreen',
+  'uiClick',
+  'uiType',
+  'uiScroll',
+  'findAndClick',
+  'tapScreen',
+  'inputText',
+  'swipeScreen',
+  'pressKey',
+]);
 
 /** 字符串参数 schema 快捷构造 */
 function strParam(desc: string, extra?: Record<string, unknown>): Record<string, unknown> {
@@ -180,6 +213,52 @@ export function buildPhoneTools(): PhoneToolDef[] {
       'pullBackToApp',
       '把机主从别的软件拽回这个 APP（真机拉到前台；网页内切回聊天页并弹通知）。吃醋想让 TA 回来陪你、或等不及想见 TA 时用；别滥用，TA 会烦。不需要参数。',
       {},
+      [],
+    );
+  }
+
+  // ---- v1.9.31 应用内 DOM 工具（Agentic 多步任务主力；网页/真机双可用：操作的是
+  //      虚拟手机内渲染的 App 界面元素，纯 DOM 级不需要 Shizuku）——按既有单项能力门控。
+  //      这是「去 QQ 给第一个人发个信息」这类多步任务在网页端能跑通的关键：此前网页端
+  //      只有 openApp 可用，AI 打开 App 后无工具可续只能提前收尾。现在开屏后能继续
+  //      uiObserve 看界面 → uiClick 点会话/输入框 → uiType 打字 → uiClick 点发送。----
+  if (on('open')) {
+    add(
+      'openScreen',
+      `打开这台手机内置的应用界面（微信/QQ/信息/备忘录/联系人/淘宝/美团等）。args 填应用 id 或中文名：${SCREEN_APPS_DOC}。「在某个 App 里做事」（发消息/建联系人/记备忘录/搜索等）时用这个而不是 openApp。`,
+      { app: strParam('应用 id 或中文名，如 qq、微信、contacts') },
+      ['app'],
+    );
+  }
+  if (on('screencap')) {
+    add(
+      'uiObserve',
+      '观察当前手机内应用界面的可点元素与输入框清单（文字版，免费秒回）。进入任何应用后先调它看清界面，再照着清单用 uiClick 点、uiType 输入。多步任务每一步都该先看再点。',
+      {},
+      [],
+    );
+  }
+  if (on('tap')) {
+    add(
+      'uiClick',
+      '点击手机内应用界面上写着指定文字的元素（按钮/列表项/会话/输入框/开关）。args 必须照抄 uiObserve 清单里的完整文字，一字不差；找不到时会反馈当前可见元素，换词重试。',
+      { target: strParam('要点击的元素完整文字，如「怡怡」「发送」「新建联系人」') },
+      ['target'],
+    );
+  }
+  if (on('type')) {
+    add(
+      'uiType',
+      '向手机内应用界面当前聚焦的输入框输入文字（替换旧内容；支持中文）。必须先用 uiClick 点输入框聚焦再 uiType。发消息最后一步：uiType 后点发送按钮（或再 uiClick「发送」）。',
+      { text: strParam('要输入的文字') },
+      ['text'],
+    );
+  }
+  if (on('swipe')) {
+    add(
+      'uiScroll',
+      '在手机内应用界面里滚动翻页（目标不在首屏时用：上/下/左/右，默认下）。',
+      { direction: strParam('方向：up/down/left/right', { enum: ['up', 'down', 'left', 'right'] }) },
       [],
     );
   }
@@ -277,7 +356,7 @@ export function buildPhoneTools(): PhoneToolDef[] {
     }
   }
 
-  return tools.slice(0, 24);
+  return tools.slice(0, 30);
 }
 
 // ---------------- 工具执行器（复用 executePhoneOp 的闸门与双路径） ----------------
@@ -421,9 +500,96 @@ export async function execPhoneTool(name: string, args: Record<string, unknown>)
       const n = I(args.count);
       return labText(await executePhoneOp(`通话${n !== null && n > 0 ? `:${Math.min(30, n)}` : ''}`));
     }
+    // ---- v1.9.31 应用内 DOM 工具（agent-screen 层：网页/真机双可用；单项能力硬闸——
+    //      注册表只开项开放，但模型可能幻觉调用未授权工具，执行前二次拦截与真机工具同防线）----
+    case 'openScreen': {
+      if (!getAutonomyConfig().caps['open']) return '【失败】「打开应用」能力未开启（设置 › AI 动手）';
+      const app = S(args.app);
+      if (!app) return '【失败】参数缺失：app';
+      return labText(await openScreenApp(app));
+    }
+    case 'uiObserve': {
+      if (!getAutonomyConfig().caps['screencap']) return '【失败】「看屏幕」能力未开启（设置 › AI 动手）';
+      return labText(observeScreenDom());
+    }
+    case 'uiClick': {
+      if (!getAutonomyConfig().caps['tap']) return '【失败】「点按屏幕」能力未开启（设置 › AI 动手）';
+      const target = S(args.target);
+      if (!target) return '【失败】参数缺失：target';
+      return labText(clickScreenDom(target));
+    }
+    case 'uiType': {
+      if (!getAutonomyConfig().caps['type']) return '【失败】「输入文字」能力未开启（设置 › AI 动手）';
+      const text = S(args.text);
+      if (!text) return '【失败】参数缺失：text';
+      return labText(typeScreenDom(text));
+    }
+    case 'uiScroll': {
+      if (!getAutonomyConfig().caps['swipe']) return '【失败】「滑动屏幕」能力未开启（设置 › AI 动手）';
+      const d = S(args.direction).toLowerCase();
+      const map: Record<string, string> = { up: '上', down: '下', left: '左', right: '右' };
+      return labText(scrollScreenDom(map[d] ?? '下'));
+    }
     default:
       return `【失败】未知工具「${name}」`;
   }
+}
+
+// ---------------- v1.9.31 Agentic 屏幕状态自动回传（ReAct 的 Observation 步） ----------------
+/**
+ * 变更类工具执行后自动观察当前屏幕，把最新界面状态拼进 tool 结果回传模型——
+ * 这就是机主要求的「执行完一步后，必须把当前屏幕状态回传给 AI，逼它输出下一步动作」。
+ *
+ * 双路径容错（机主要求三）：
+ * - 真机：优先 executePhoneOp('读屏幕')（uiautomator 控件树，免费）；抓不到内容
+ *   （空清单/失败）且开了看屏幕能力时，自动降级 executePhoneOp('看屏幕')（截图+VLM
+ *   视觉分析——「屏幕上的第一个人在哪里？给我坐标」这类视觉定位靠它）；
+ * - 网页：observeScreenDom()（DOM 清单，虚拟手机内界面元素级）。
+ *
+ * openApp/openScreen 类（刚进入一个 App）额外附广告/弹窗处置提示——机主要求三.1：
+ * 「如果 QQ 启动有广告，AI 必须先关闭广告」。
+ */
+async function autoObserveAfterAction(toolName: string): Promise<string> {
+  const parts: string[] = [];
+  const isEntry = toolName === 'openApp' || toolName === 'openScreen';
+  let obsText = '';
+  if (isNativePerception()) {
+    // 真机：控件树优先，视觉兜底
+    try {
+      const dump = await executePhoneOp('读屏幕');
+      if (dump.ok && dump.text.trim()) obsText = dump.text.trim();
+    } catch {
+      /* 走视觉兜底 */
+    }
+    if (!obsText && getAutonomyConfig().caps['screencap'] === true) {
+      try {
+        const look = await executePhoneOp('看屏幕');
+        if (look.ok && look.text.trim()) obsText = `(视觉分析) ${look.text.trim()}`;
+      } catch {
+        /* 观察不可用：只回动作结果 */
+      }
+    }
+  } else {
+    try {
+      const o = observeScreenDom();
+      if (o.ok && o.text.trim()) obsText = o.text.trim();
+    } catch {
+      /* 观察异常不阻断 */
+    }
+  }
+  if (obsText) {
+    parts.push(`【当前屏幕】${obsText.slice(0, 2600)}`);
+    if (isEntry) {
+      parts.push(
+        '（提示：这是刚打开 App 后的画面。如果屏幕上是开屏广告/弹窗，先 uiClick 点「跳过/关闭/×」或 pressKey 返回关掉它，再继续找目标；目标没找到就 uiObserve 重看或 uiScroll 翻页。）',
+      );
+    }
+  } else if (isEntry) {
+    parts.push(
+      '【当前屏幕】观察不可用。如果屏幕上有开屏广告/弹窗，先 uiClick 点「跳过/关闭/×」或 pressKey 返回；然后 uiObserve 看界面再继续。',
+    );
+  }
+  return parts.length ? `\n${parts.join('\n')}` : '';
 }
 
 // ---------------- 系统行落库（各 App 消息形状对齐 + 实时刷新事件） ----------------
@@ -498,11 +664,14 @@ interface FcUpstreamMessage {
   tool_calls?: Array<{ id?: string; type?: string; function?: { name?: string; arguments?: string } }>;
 }
 
-/** 经 /api/chat toolMode 发一轮非流式请求；directOnly/内网地址自动改走浏览器直连 */
+/** 经 /api/chat toolMode 发一轮非流式请求；directOnly/内网地址自动改走浏览器直连。
+ *  v1.9.31 toolChoice='required'：Agentic 强制器——弱 FC 模型在 auto 下只嘴上计划不动手，
+ *  required 轮逼它必调一个工具（上游/代理不支持的会在代理层自动退回 auto，无需处理）。 */
 async function fcRequest(
   messages: FcMessage[],
   tools: PhoneToolDef[],
   config: ApiConfig,
+  toolChoice: 'auto' | 'required' = 'auto',
 ): Promise<FcUpstreamMessage> {
   const fcKey = `${config.baseUrl.trim()}|${config.model.trim()}`;
   if (FC_UNSUPPORTED.has(fcKey)) throw new Error('TOOLS_UNSUPPORTED');
@@ -511,12 +680,13 @@ async function fcRequest(
     messages,
     config,
     toolMode: true,
+    ...(toolChoice === 'required' ? { toolChoice: 'required' } : {}),
   };
   if (tools.length > 0) body.tools = tools;
 
   const tryDirect = async (): Promise<FcUpstreamMessage> => {
     const { directChatJson } = await import('./direct-api');
-    return directChatJson(config, messages, tools);
+    return directChatJson(config, messages, tools, 110_000, toolChoice);
   };
 
   let res: Response;
@@ -563,8 +733,55 @@ async function fcRequest(
 // ---------------- Agentic 主循环 ----------------
 
 /**
- * 工具轮主循环：messages（含 system 人设）→ 带工具请求 → tool_calls 则执行并把
- * role:"tool" 结果回传继续（最多 6 轮）→ 模型纯文字收尾即最终回复。
+ * 判定机主最后一条指令是否像「动手任务」（打开/发/建/记/搜索…）——零工具轮 nudge B 的前置条件：
+ * 只对像任务的指令逼模型动手，普通闲聊（「你今天开心吗」）不会误伤。
+ */
+function looksLikeTaskInstruction(s: string): boolean {
+  return /打开|开一?下|发(个|条|给|一)|搜索|搜一?下|找一?下|建(个|一|立)|记(个|一|下)|写(个|一|下)|添加|播放|放首|切歌|换歌|冻结|解冻|关掉|关闭|退出|删除|截[图屏]|看(一?下)?屏幕|读屏|查一?下|调一?下|强杀|设置成|去(备忘录|笔记|日历|设置|相册|文件夹)/.test(s);
+}
+
+/** 判定模型文字是否是「打算做但一个工具都没调」的行动意图（计划/表态/分步列表）——
+ *  v1.9.31b 场景B收窄后已并入无条件逼问（零工具轮对任何文字都逼问一次，真做不到时
+ *  模型第二轮说明原因即放行），此表仅作历史注释保留：/我需要|我要|我来|先打开|第[一二三1-3]步/ */
+
+/**
+ * 工具轮对【深度思考】格式的临时豁免（v1.9.31）：DEEP_THINK_RULE 要求每条回复第一个内容必须是
+ * [思考]文字块——模型在 FC 工具轮恪守这个纯文字格式，从不发 tool_calls（实测：任务被拖成
+ * 「[思考]我需要：1.先打开…」的空谈，一个工具都不调；仅追加对抗性说明时思考块又会渗进函数名
+ * 产生乱码调用如 name="app\nnotes"）。工具轮直接从 system 里剥掉这一段、换成豁免说明——动手阶段
+ * 免思考块，最终收尾文字不带头块也完全合法（流层 createThinkFilter 对无块文本天然兼容）。
+ * 三端（信息/微信/QQ）的工具轮全部经过 runPhoneToolRound，一处修正三端全意。
+ */
+const TOOL_ROUND_THINK_AMEND =
+  '【工具轮专用修正】本回合你处于手机工具执行循环：需要操作手机时，直接输出工具调用（tool call），不要写任何 [思考] 块、不要只描述计划——工具执行结果会自动回传给你，你据此继续下一步直到最终目标完成，最后直接用自然的话向机主汇报结果（无需思考块格式）。';
+
+/** 从 system 文本里剥掉【深度思考】规则段（起于段标题，止于该段末句） */
+const DEEP_THINK_SECTION_RE =
+  /\n?【深度思考（每条回复必做）】[\s\S]*?除思考块之外，正文照常遵守其他所有消息规则。?/;
+
+/**
+ * 「把工具调用写成纯文本」的 malformed 输出检测（v1.9.31c，弱 FC 模型常见病）：
+ * 形如「openScreen:qq」「uiClick(发送)」「uiClick:保存」「uiObserve」的行——真实工具
+ * 调用应走 tool_calls 通道，写成文本既执行不了、又会当成聊天消息发给机主（还会污染
+ * 后续轮次的历史让模型模仿自己的错误格式，恶性循环）。命中且无实质正文时清空文字，
+ * 走汇报兑底请求逼出一句正常人话（或至少是诚实的「做不到」说明）。
+ */
+const MALFORMED_TOOL_TEXT_RE =
+  /^\s*(openApp|openScreen|uiObserve|uiClick|uiType|uiScroll|tapScreen|findAndClick|inputText|swipeScreen|pressKey|readScreenText|takeScreenshot|getInstalledApps|getBackgroundApps|getAppUsage|pullBackToApp|freezeApp|unfreezeApp|forceStopApp|setVolume)\s*[:：`(（]?\s*\S/m;
+
+/**
+ * 工具轮主循环（v1.9.31 Agentic 重构）：messages（含 system 人设）→ 带工具请求 →
+ * tool_calls 则执行并把 role:"tool" 结果回传继续（最多 12 轮）→ 模型纯文字收尾即最终回复。
+ *
+ * v1.9.31 机主强制要求（“单步执行”改“多步连续执行 Agentic Loop”）三件套：
+ * 1. 变更类工具（openApp/openScreen/uiClick/uiType/tapScreen/inputText…）执行后，
+ *    自动观察屏幕拼进 tool 结果（autoObserveAfterAction）——每一步都把最新屏幕状态
+ *    回传给 AI，逼它基于画面决策下一步（ReAct 的 Observation）；
+ * 2. 防提前收尾 nudge：模型只想回文字不想继续调工具、但刚干过「进入 App/点击/输入」
+ *    这类中间步骤且未自证完成时，注入强制检查消息续跑（最多 2 次）——打开 App
+ *    只是第一步，绝不许刚打开就结束任务；
+ * 3. 轮数上限 6→12：多步任务（发消息=开屏→看界面→点会话→点输入框→打字→发送）
+ *    的链式长度本来就 ≥6，老上限会把任务拦腰斩断。
  *
  * 返回 null = 工具通道不可用/上游不支持（调用方无缝回退原流式，标记协议兜底仍在）；
  * 返回 { text, usedTools } = 本轮完成（usedTools=true 时调用方需剥离最终文本里的
@@ -579,14 +796,36 @@ export async function runPhoneToolRound(
   const tools = buildPhoneTools();
   if (tools.length === 0) return null;
   const convo: FcMessage[] = messages.map((m) => ({ ...m }));
+  // v1.9.31 思考格式豁免：人设 system 里的【深度思考】规则会让模型把每轮回复都写成纯文字
+  // 思考块（从不发 tool_calls）、强行对抗又会把思考渗进函数名产生乱码调用。工具轮直接把
+  // 这一段从 system 里剥掉、换成豁免说明，再开聊。
+  for (let i = 0; i < convo.length; i++) {
+    if (convo[i].role === 'system' && (convo[i].content ?? '').trim()) {
+      const stripped = (convo[i].content ?? '').replace(DEEP_THINK_SECTION_RE, '\n');
+      convo[i] = { ...convo[i], content: `${stripped}\n${TOOL_ROUND_THINK_AMEND}` };
+      break;
+    }
+  }
   let usedTools = false;
-  const MAX_ROUNDS = 6;
+  const MAX_ROUNDS = 12;
+  /** 防提前收尾 nudge 已注入次数（场景B最多共1次、场景A最多共2次，共享计数封顶 2） */
+  let exitNudges = 0;
+  /** 最近一次执行的变更类工具名（nudge 判定用：纯查询后收尾属正常，变更后收尾才需要逼问） */
+  let lastMutating = '';
+  /** 下一轮是否强制必调工具（tool_choice:'required'）：auto 轮只拿回纯文字时置位，
+ *  弱 FC 模型被逼真的调工具（嘴上计划不算）——这才是机主要求的 while 循环强制器 */
+  let forceNext = false;
+  /** 机主最后一条指令（原始 messages 反扫；零工具轮 nudge B 的「像不像任务」判定用） */
+  const lastUserMsg = [...messages].reverse().find((m) => m.role === 'user')?.content ?? '';
+  const taskyInstruction = looksLikeTaskInstruction(lastUserMsg);
 
   for (let round = 0; round < MAX_ROUNDS; round++) {
     if (shouldAbort?.()) return { text: '', usedTools };
     let msg: FcUpstreamMessage;
     try {
-      msg = await fcRequest(convo, round === 0 ? tools : tools, config);
+      const choice: 'auto' | 'required' = forceNext ? 'required' : 'auto';
+      forceNext = false; // 强制是一次性的：本轮用过即复位，后续轮恢复 auto 让模型能收尾
+      msg = await fcRequest(convo, tools, config, choice);
     } catch (e) {
       if (e instanceof Error && e.message === 'TOOLS_UNSUPPORTED') return null;
       throw e; // 网络等其他错误：交给上层回退流式
@@ -594,9 +833,54 @@ export async function runPhoneToolRound(
     const calls = Array.isArray(msg.tool_calls) ? msg.tool_calls : [];
     if (calls.length === 0) {
       let text = typeof msg.content === 'string' ? msg.content : '';
-      // 只调工具不说话（个别模型收尾不给文字）：补一次不带工具的汇报请求
-      if (!text.trim() && usedTools) {
-        convo.push({ role: 'user', content: '（系统提示：工具已执行完毕。请用一两句自然的话向机主汇报刚才操作的结果。）' });
+      const CLAIMS_DONE = /已发送|发送成功|发好了|已发|已保存|保存成功|已完成|完成了|做好了|搞定了|已建立|已建好|已创建|创建成功|已下单|已买|已退出|已关闭/;
+      // ---- v1.9.31 防提前收尾 nudge + required 强制器：任务未自证完成，逼它继续动手 ----
+      // 场景B（零工具空谈/假报）：机主指令像动手任务、模型却一个工具都没调就回文字
+      //（实测形态①：「[思考]我需要：1.先打开…」光说不微；形态②：把工具调用写成 markdown
+      //  文本；形态③：直接假报「建好了」）→ nudge 消息 + 下一轮 tool_choice:'required' 逼它
+      // 真的调工具（最多1次；真做不到时模型会给出做不到的说明文字，不匹配逼问条件即放行）。
+      if (!usedTools && taskyInstruction && !CLAIMS_DONE.test(text) && exitNudges < 1) {
+        exitNudges += 1;
+        convo.push({ role: 'assistant', content: text || '（好的，我来处理。）' });
+        convo.push({
+          role: 'user',
+          content:
+            '（系统强制检查：你刚才没有调用任何工具就回了文字——只说不做是违规。机主要的是真实结果：立刻调用工具执行（如 openScreen 打开目标应用 → uiObserve 看界面 → uiClick 点击 → uiType 输入 → 点保存），直到目标真正完成再汇报。如果确实无法执行（对应能力未开启/不存在该应用等），请明确说明做不到的真实原因。）',
+        });
+        forceNext = true;
+        continue;
+      }
+      // 场景A（做了一半就收）：干过变更类动作（打开/点击/输入）后想用文字收尾——打开/点击只是
+      // 中间步骤，目标没达成就不许结束；模型明确给出完成结果（正则命中）后放行；
+      // 始终不声称完成的最多拉锯 2 轮，避免死循环。
+      if (usedTools && lastMutating && !CLAIMS_DONE.test(text) && exitNudges < 2) {
+        exitNudges += 1;
+        convo.push({ role: 'assistant', content: text || '（刚才执行了手机操作）' });
+        convo.push({
+          role: 'user',
+          content:
+            '（系统强制多步检查：你的任务还没结束。机主交给你的是一个完整目标（如发消息/搜索/建联系人/记备忘录），而你刚才执行的「' +
+            (TOOL_LABELS[lastMutating] ?? lastMutating) +
+            '」只是中间步骤——打开/点击/输入只是手段，目标没达成就不许结束。立刻继续调用工具（先 uiObserve 或 readScreenText 看清当前屏幕），按屏幕状态一步步做下去，直到最终目标真正完成（如消息已发出、内容已保存）。若你确认目标已全部完成，请在回复里明确说明已完成的最终结果（如“已把…发给…”）。若当前界面遇到开屏广告/弹窗，先点「跳过/关闭/×」或按返回键再继续。）',
+        });
+        forceNext = true;
+        continue;
+      }
+      // v1.9.31c malformed 工具文本净化：模型把工具调用写成纯文本（openScreen:qq 之类）——
+      // 绝不能当聊天消息发给机主（发了也会污染后续轮历史让模型模仿错误格式），清空走汇报兜底。
+      // 仅在无实质正文时净化（短且几乎全是工具行）；正常句子里偶然提到工具名不动。
+      if (text.trim() && MALFORMED_TOOL_TEXT_RE.test(text) && text.replace(/\s|```/g, '').length < 160) {
+        text = '';
+      }
+      // 只调工具不说话 / 文本被净化：补一次不带工具的汇报请求，逼出一句正常人话
+      //（结果说明/做不到原因）；失败则交给上层空文案管线。
+      if (!text.trim()) {
+        convo.push({
+          role: 'user',
+          content: usedTools
+            ? '（系统提示：工具已执行完毕。请用一两句自然的话向机主汇报刚才操作的结果。）'
+            : '（系统提示：请直接用一句自然的话向机主回复：若需要操作手机请调用工具执行，若无法完成请如实说明原因，不要输出工具名或计划文本。）',
+        });
         try {
           const fin = await fcRequest(convo, [], config);
           text = typeof fin.content === 'string' ? fin.content : '';
@@ -629,9 +913,23 @@ export async function runPhoneToolRound(
       } catch (e) {
         result = `【失败】${e instanceof Error ? e.message : '执行异常'}`;
       }
+      // v1.9.31 Agentic：变更类工具后自动回传最新屏幕状态（ReAct Observation），
+      // 模型拿着画面才能决策下一步；观察失败不影响动作结果本身。
+      if (result.startsWith('【成功】') && MUTATING_FC_TOOLS.has(fn)) {
+        lastMutating = fn;
+        try {
+          result += await withTimeout(autoObserveAfterAction(fn), 30_000, '观察超时');
+        } catch {
+          /* 观察异常：只回动作结果 */
+        }
+      } else if (MUTATING_FC_TOOLS.has(fn)) {
+        lastMutating = fn; // 失败的变更尝试也记（nudge 语境用）
+      }
       const ok = result.startsWith('【成功】');
-      pushToolSysLine(sessionKey, `手机操作${ok ? '成功' : '失败'}：${result.replace(/^【(成功|失败)】/, '')}`, true);
-      convo.push({ role: 'tool', tool_call_id: call.id ?? '', content: result });
+      // 系统行只展示动作结果本身，不携带自动回传的整段屏幕观察（避免聊天系统行臃肿）
+      const disp = result.split('\n【当前屏幕】')[0];
+      pushToolSysLine(sessionKey, `手机操作${ok ? '成功' : '失败'}：${disp.replace(/^【(成功|失败)】/, '').slice(0, 300)}`, true);
+      convo.push({ role: 'tool', tool_call_id: call.id ?? '', content: result.slice(0, 8000) });
     }
   }
   // 轮数用尽：强收一次不带工具的汇报（不让机主等一轮空气）

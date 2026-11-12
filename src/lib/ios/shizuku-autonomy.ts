@@ -213,9 +213,15 @@ const CAP_SYNTAX: Record<string, string> = {
  * 每轮发送时现场读取（开关改动下一轮立即生效，与感知设置同款范式）。
  */
 export function buildShizukuAutonomyRules(): string[] {
-  if (!isNativePerception()) return [];
   const cfg = getAutonomyConfig();
   if (!cfg.master) return [];
+  // v1.9.31 网页端不再零注入：此前非原生环境直接 return []，浏览器里 FC 工具虽然随
+  // 请求注入、但系统提示词里一句教学都没有——模型不知道有工具可用/怎么链式用，
+  // 「去 QQ 发个消息」只能开个 App 就收尾。现在网页端也注入工具教学 + 多步铁律
+  //（标记语法大多需要 Shizuku，真机才教；网页只教工具通道）。
+  if (!isNativePerception()) {
+    return [...buildPhoneToolRules()];
+  }
   const enabled = AUTONOMY_CAPS.filter((c) => cfg.caps[c.key] === true);
   if (enabled.length === 0) return [];
   const hands = enabled.filter((c) => c.group === 'hands');
@@ -263,7 +269,8 @@ export function buildShizukuAutonomyRules(): string[] {
 
 /**
  * Function Calling 是否就绪：已配 API + 「AI 动手」总开关开 + 至少一项能力开。
- * 真机按全部能力面判定；网页端按「网页内有对应体」的能力判定（打开/查列表/冻结——
+ * 真机按全部能力面判定；网页端按「网页内有对应体」的能力判定（打开/查列表/冻结 +
+ * v1.9.31 新增 tap/type/swipe/screencap——网页内应用 DOM 操控四件套挂这四项下——
  * 网页内应用镜像 + 吃醋锁网页降级让浏览器用户同样能体验 AI 动手）。
  * 每轮发送时现场读取（设置改动下一轮立即生效）；chat-stream-store 的工具轮与
  * phone-tools.buildPhoneTools 共用本判定。
@@ -275,19 +282,29 @@ export function phoneFcReady(): boolean {
   const cfg = getAutonomyConfig();
   if (!cfg.master) return false;
   if (isNativePerception()) return Object.values(cfg.caps).some(Boolean);
-  // v1.9.28：网页端可用能力扩为 6 项（新增 查后台/使用时长/拉回——均有网页降级体）
-  return ['open', 'applist', 'freeze', 'recents', 'usage', 'pullback'].some((k) => cfg.caps[k] === true);
+  // v1.9.31：网页端可用能力扩为 11 项——新增 tap/type/swipe/screencap：网页内应用
+  // DOM 操控工具（openScreen/uiObserve/uiClick/uiType/uiScroll）挂在这四项下，
+  // 「去 QQ 发个消息」这类多步任务在浏览器里才能跑通（以前只有 openApp，开了 App
+  // 就断链）
+  return ['open', 'applist', 'freeze', 'recents', 'usage', 'pullback', 'tap', 'type', 'swipe', 'screencap'].some(
+    (k) => cfg.caps[k] === true,
+  );
 }
 
 /**
  * 工具调用强制教学（仅 FC 就绪时非空；关闭/未配置零 token）。机主要求的「逼迫动手」
  * 语义 + 免看屏幕清单 + 吃醋锁定工具用法 + 工具优先于标记的通道选择规则。
+ * v1.9.31 新增多步任务铁律（机主明令要求写进系统提示词）：打开 App 只是第一步，
+ * 必须看屏幕→点击/滑动→输入→发送直到最终目标完成，绝不能刚打开就结束。
  */
 export function buildPhoneToolRules(): string[] {
   if (!phoneFcReady()) return [];
   return [
-    '【手机工具调用·最高优先级】你现在拥有操控真实手机的最高权限（Function Calling 工具已接入）。机主向你下达操作指令时（如「帮我打开微信」「看看我屏幕上是什么」「把抖音冻住」「把这些App加进吃醋锁定」），你绝对不能只回复文字、也不许只口头答应——必须立刻输出对应的工具调用（tool call）。只说不做是违规，系统将惩罚你。工具执行结果会以 role:"tool" 消息自动回传给你：根据结果继续调用更多工具（多步任务链式执行，如 openApp → readScreenText → 反馈），全部做完后再用一句自然的话向机主汇报。',
-    '【免看屏幕清单】打开/强杀/冻结/解冻/查应用列表/查电量/查通知/查前台/调音量/按键——这些操作直接调用工具即可，绝对不需要先看屏幕。只有「点屏幕上的按钮」或「想看画面内容」才需要读屏，且优先 readScreenText（文字控件树，不需要识图模型）；takeScreenshot 需要识图模型，未配置会失败。',
+    '【手机工具调用·最高优先级】你现在拥有操控手机的最高权限（Function Calling 工具已接入）。机主向你下达操作指令时（如「帮我打开微信」「看看我屏幕上是什么」「把抖音冻住」「把这些App加进吃醋锁定」），你绝对不能只回复文字、也不许只口头答应——必须立刻输出对应的工具调用（tool call）。只说不做是违规，系统将惩罚你。工具执行结果会以 role:"tool" 消息自动回传给你：根据结果继续调用更多工具（多步任务链式执行，如 openScreen → uiObserve → uiClick → uiType → uiClick 发送），全部做完后再用一句自然的话向机主汇报。',
+    // v1.9.31 机主明令：Agentic 多步铁律，逐字要求写入
+    '【多步任务铁律·Agentic Workflow】当你需要在一个 App 内完成一个目标（发消息/搜索/建联系人/记备忘录/下单等）时，打开 App 只是第一步。你必须通过获取屏幕信息（uiObserve 观察界面 / readScreenText 读屏），不断点击或滑动，直到最终目标（如发送消息）真正完成。绝对不能在刚打开 App 时就结束任务。标准链路：openScreen 打开 → uiObserve 看界面 → uiClick 点目标（会话/列表项/输入框）→ uiType 输入内容 → uiClick 点发送/保存 → 再 uiObserve 核对。每步工具结果都会附带最新屏幕状态，照着它继续下一步；系统还会在你试图提前收尾时强制检查——只有最终结果真正出现在屏幕上（消息已发出、内容已保存）才算完成。',
+    '【屏幕障碍处置】若打开 App 后遇到开屏广告/弹窗/授权弹窗挡住目标：先 uiClick 点「跳过/关闭/×/允许」，或 pressKey 返回键关掉，再继续找目标。目标不在当前屏就 uiScroll 翻页后重新 uiObserve。uiClick 报「找不到」时，反馈里带着当前可见元素清单——照着换词重试，不要原样硬点。遇到登录页/需要账号密码的界面：绝不编造账号密码尝试登录，如实告诉机主该 App 需要先登录，等机主处理后再继续。',
+    '【免看屏幕清单】打开/强杀/冻结/解冻/查应用列表/查电量/查通知/查前台/调音量/按键——这些操作直接调用工具即可，绝对不需要先看屏幕。只有「点屏幕上的按钮」或「想看画面内容」才需要读屏，且优先 uiObserve（手机内应用）/ readScreenText（真机系统界面，文字控件树）；takeScreenshot 需要识图模型，未配置会失败。',
     '【吃醋锁定】addJealousyLockApps 可把应用加入「吃醋锁定清单」（TA 吃醋时会自动锁这些应用）；freezeApp/unfreezeApp 是立即冻结/解冻（pm suspend，可逆）。机主让你「把哪些 App 设为吃醋锁定」时，可先 getInstalledApps 拉全量再挑娱乐类应用加入。',
     '【工具优先】同一件事工具调用与 [手机操作:…] 标记都能做时，一律优先输出工具调用（标记只是旧通道兜底）；调用了工具就不要再输出同一操作的手机操作标记，避免重复执行。',
   ];

@@ -647,6 +647,7 @@ export async function directChatJson(
   messages: DirectToolMessage[],
   tools: Array<{ type: 'function'; function: { name: string; description: string; parameters: Record<string, unknown> } }>,
   timeoutMs = 110_000,
+  toolChoice: 'auto' | 'required' = 'auto',
 ): Promise<DirectToolRoundResult> {
   const model = config.model.trim() || 'gpt-4o-mini';
   const candidates = buildCandidates(config.baseUrl, 'chat/completions');
@@ -659,11 +660,12 @@ export async function directChatJson(
   }));
   let useMaxCompletion = false;
   let curTemperature: number | undefined = config.temperature;
+  let curRequired = toolChoice === 'required';
   const makeBody = (withTools: boolean): string =>
     JSON.stringify({
       model,
       messages: mapped,
-      ...(withTools && tools.length > 0 ? { tools, tool_choice: 'auto' } : {}),
+      ...(withTools && tools.length > 0 ? { tools, tool_choice: curRequired ? 'required' : 'auto' } : {}),
       ...(curTemperature === undefined ? {} : { temperature: curTemperature }),
       ...(useMaxCompletion ? { max_completion_tokens: config.maxTokens } : { max_tokens: config.maxTokens }),
       stream: false,
@@ -698,6 +700,11 @@ export async function directChatJson(
           }
           if (curTemperature !== undefined && /temperature/i.test(msg)) {
             curTemperature = undefined;
+            continue;
+          }
+          // v1.9.31：上游不支持 tool_choice:'required' → 退回 auto 重试
+          if (curRequired && /tool_choice/i.test(msg)) {
+            curRequired = false;
             continue;
           }
           if (/tool|function.?call/i.test(msg)) {

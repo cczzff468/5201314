@@ -2,6 +2,8 @@
 
 /**
  * 吃醋锁全屏弹窗（v1.9.19）：活跃锁存在且用户回到 APP 时强制弹出。
+ * v1.9.31 界面美化：机主要求简约黑白灰风——纯灰阶径向渐变背景、头像灰度化、
+ * 去彩色光晕/粉色按钮，主按钮改白底黑字（iOS 高对比风），次按钮灰阶幽灯风。
  *
  * 需求三.2/3：用户点桌面 App 发现被冻结（「由 Shell 所管理」）→ 必须强制弹全屏提示：
  * 「[角色名] · [锁定原因]（人设生成）」+ 强制两个按钮【去哄哄 TA】/【强制解锁】。
@@ -149,44 +151,42 @@ export default function JealousyLockOverlay() {
           transition={{ duration: 0.28, ease: [0.32, 0.72, 0, 1] }}
           className="pointer-events-auto absolute inset-0 z-[86] flex select-none flex-col items-center overflow-hidden px-7"
           style={{
+            // v1.9.31 黑白灰简约风：纯灰阶径向渐变，无任何彩色
             background:
-              'radial-gradient(120% 80% at 50% 0%, #7f1d3a 0%, #58142b 45%, #2b0a17 100%), linear-gradient(#2b0a17, #1a060f)',
+              'radial-gradient(120% 85% at 50% 0%, #333336 0%, #1e1e21 46%, #0a0a0c 100%), linear-gradient(#0e0e10, #060607)',
           }}
         >
-          {/* 顶部光晕 */}
-          <div aria-hidden className="pointer-events-none absolute -top-24 left-1/2 h-72 w-72 -translate-x-1/2 rounded-full bg-[#ff5c8a]/25 blur-3xl" />
+          {/* 顶部柔光（灰阶） */}
+          <div aria-hidden className="pointer-events-none absolute -top-24 left-1/2 h-72 w-72 -translate-x-1/2 rounded-full bg-white/[0.07] blur-3xl" />
 
           <div className="relative flex h-full w-full max-w-sm flex-col items-center justify-between py-14">
             {/* 头部：角色名 + 被锁应用 */}
             <div className="flex flex-col items-center gap-3 pt-2">
               <div className="relative">
                 {avatar ? (
-                  <img src={avatar} alt={lock.charName} className="h-20 w-20 rounded-full object-cover ring-2 ring-white/25" />
+                  <img src={avatar} alt={lock.charName} className="h-20 w-20 rounded-full object-cover grayscale ring-1 ring-white/25" />
                 ) : (
-                  <div className="flex h-20 w-20 items-center justify-center rounded-full bg-white/10 text-3xl font-semibold text-white ring-2 ring-white/25">
+                  <div className="flex h-20 w-20 items-center justify-center rounded-full bg-white/10 text-3xl font-semibold text-white ring-1 ring-white/25">
                     {lock.charName.slice(0, 1)}
                   </div>
                 )}
-                <span className="absolute -bottom-1 -right-1 flex h-8 w-8 items-center justify-center rounded-full bg-[#1a060f] ring-2 ring-[#ff5c8a]/60">
-                  <Lock size={14} strokeWidth={2.2} className="text-[#ff8fab]" aria-hidden />
+                <span className="absolute -bottom-1 -right-1 flex h-8 w-8 items-center justify-center rounded-full bg-[#141416] ring-1 ring-white/30">
+                  <Lock size={14} strokeWidth={2.2} className="text-white/85" aria-hidden />
                 </span>
               </div>
-              <p className="text-[15px] font-medium text-white/60">{lock.charName}把</p>
-              <p className="flex items-center gap-1.5 text-[26px] font-semibold tracking-wide text-white">
-                <span className="opacity-40 grayscale filter" aria-hidden>
-                  📱
-                </span>
+              <p className="text-[15px] font-medium text-white/55">{lock.charName}把</p>
+              <p className="text-[26px] font-semibold tracking-wide text-white">
                 {appName}
               </p>
-              <p className="text-[15px] font-medium text-white/60">锁住了</p>
+              <p className="text-[15px] font-medium text-white/55">锁住了</p>
             </div>
 
             {/* 中部：锁定原因（人设生成）+ 图标变灰说明 */}
             <div className="flex w-full flex-col items-center gap-4">
-              <div className="rounded-2xl bg-white/[0.07] px-6 py-5 ring-1 ring-white/10 backdrop-blur-sm">
-                <p className="text-center text-[17px] leading-relaxed text-[#ffd9e2]">“{lock.reason}”</p>
+              <div className="w-full rounded-2xl bg-white/[0.06] px-6 py-5 ring-1 ring-white/10">
+                <p className="text-center text-[17px] font-medium leading-relaxed text-white/90">“{lock.reason}”</p>
               </div>
-              <p className="flex items-center gap-1.5 text-[12px] text-white/40">
+              <p className="flex items-center gap-1.5 text-[12px] text-white/35">
                 <Lock size={11} strokeWidth={2} aria-hidden />
                 {lock.web
                   ? `应用已被冻结 · 图标变灰 · 由 ${lock.charName} 管理`
@@ -196,7 +196,7 @@ export default function JealousyLockOverlay() {
 
             {/* 底部：倒计时 + 两个强制按钮 */}
             <div className="flex w-full flex-col items-center gap-4">
-              <p className="flex items-center gap-1.5 text-[12.5px] tabular-nums text-white/45" data-testid="jealousy-lock-remain">
+              <p className="flex items-center gap-1.5 text-[12.5px] tabular-nums text-white/40" data-testid="jealousy-lock-remain">
                 <Clock size={12} strokeWidth={2} aria-hidden />
                 {remain !== null && remain > 0 ? `${fmt(remain)} 后自动解锁` : '即将自动解锁'}
               </p>
@@ -205,7 +205,7 @@ export default function JealousyLockOverlay() {
                 type="button"
                 onClick={onCoax}
                 data-testid="jealousy-lock-coax-btn"
-                className="flex w-full items-center justify-center gap-2 rounded-full bg-gradient-to-r from-[#ff5c8a] to-[#ff8fab] py-3.5 text-[16px] font-semibold text-white shadow-lg shadow-[#ff5c8a]/30 transition-transform active:scale-[0.97]"
+                className="flex w-full items-center justify-center gap-2 rounded-full bg-white py-3.5 text-[16px] font-semibold text-black shadow-lg shadow-black/40 transition-transform active:scale-[0.97] active:bg-white/90"
               >
                 <Heart size={17} strokeWidth={2.2} aria-hidden />
                 去哄哄 TA
@@ -216,12 +216,12 @@ export default function JealousyLockOverlay() {
                 onClick={() => void onForce()}
                 disabled={unlocking}
                 data-testid="jealousy-lock-force-btn"
-                className="flex w-full items-center justify-center gap-2 rounded-full bg-white/[0.08] py-3 text-[14px] font-medium text-white/70 ring-1 ring-white/15 backdrop-blur-sm transition-transform active:scale-[0.97] disabled:opacity-50"
+                className="flex w-full items-center justify-center gap-2 rounded-full bg-white/[0.07] py-3 text-[14px] font-medium text-white/75 ring-1 ring-white/12 transition-transform active:scale-[0.97] disabled:opacity-50"
               >
                 <Unlock size={14} strokeWidth={2.2} aria-hidden />
                 {unlocking ? '正在解开…' : '强制解锁'}
               </button>
-              <p className="text-[11px] text-white/30">强行解开会让 TA 更委屈——确定吗？</p>
+              <p className="text-[11px] text-white/25">强行解开会让 TA 更委屈——确定吗？</p>
             </div>
           </div>
         </motion.div>

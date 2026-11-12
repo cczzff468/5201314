@@ -540,6 +540,7 @@ async function proxyToolRound(
   config: UpstreamConfig,
   messages: ToolRoundMessage[],
   tools: ToolDef[],
+  toolChoice: 'auto' | 'required' = 'auto',
 ): Promise<NextResponse> {
   const candidates = buildChatCandidates(config.baseUrl);
   const headers: Record<string, string> = {
@@ -556,11 +557,12 @@ async function proxyToolRound(
 
   let useMaxCompletion = false;
   let curTemperature: number | undefined = config.temperature;
+  let curRequired = toolChoice === 'required';
   const makeBody = (withTools: boolean): string =>
     JSON.stringify({
       model: config.model,
       messages: mapped,
-      ...(withTools && tools.length > 0 ? { tools, tool_choice: 'auto' } : {}),
+      ...(withTools && tools.length > 0 ? { tools, tool_choice: curRequired ? 'required' : 'auto' } : {}),
       ...(curTemperature === undefined ? {} : { temperature: curTemperature }),
       ...(useMaxCompletion ? { max_completion_tokens: config.maxTokens } : { max_tokens: config.maxTokens }),
       stream: false,
@@ -609,6 +611,11 @@ async function proxyToolRound(
       }
       if (curTemperature !== undefined && /temperature/i.test(msg)) {
         curTemperature = undefined;
+        continue;
+      }
+      // v1.9.31：上游不支持 tool_choice:'required' → 退回 auto 重试（不影响支持的标准端点）
+      if (curRequired && /tool_choice/i.test(msg)) {
+        curRequired = false;
         continue;
       }
       if (/tool|function.?call/i.test(msg)) {
@@ -663,7 +670,18 @@ export async function POST(req: NextRequest) {
   }
 
   const root = typeof body === 'object' && body !== null ? (body as Record<string, unknown>) : {};
-  if (!isValidMessages(root.messages)) {
+  // v1.9.31 致命 bug 修复：工具轮消息含 role:'tool'/tool_calls（合法形态），但下方通用
+  // 校验只认 user/assistant/system —— 第二轮起的 FC 请求（带工具结果）全部被 400 秒拒，
+  // 回退流式后模型只能嘴上收尾（机主实测症状：「只打开了 QQ，没有后续操作」的元凶）。
+  // toolMode 请求改走工具轮专用校验（允许 role:'tool' + tool_call_id），流式路径照旧。
+  if (root.toolMode === true) {
+    if (!isValidToolRoundMessages(root.messages)) {
+      return NextResponse.json(
+        { error: 'toolMode 下 messages 不合法（role:"tool" 需要 tool_call_id；assistant.tool_calls 消息 content 可为空）' },
+        { status: 400 }
+      );
+    }
+  } else if (!isValidMessages(root.messages)) {
     return NextResponse.json(
       { error: 'messages 不能为空，且每条消息必须包含合法的 role 与 content' },
       { status: 400 }
@@ -701,8 +719,13 @@ export async function POST(req: NextRequest) {
       );
     }
     const tools = sanitizeTools(root.tools);
-    if (tools.length === 0) {
-      return NextResponse.json({ error: 'tools 不能为空或全部不合法' }, { status: 400 });
+    // v1.9.31：空 tools 的 toolMode 请求 = 工具轮的「最终汇报轮」（客户端 runPhoneToolRound
+    // 收尾用 fcRequest(convo, [], config) 请求纯文字总结）——此前被 400 秒拒，导致
+    // 「TA 没说话，只是安静地摆弄了一会儿你的手机」兜底文案常年顶包。放行：不带 tools
+    // 直接向上游要一轮非流式纯文字回复（proxyToolRound 的 makeBody 对空 tools 自然省略
+    // tools/tool_choice 字段）。
+    if (tools.length === 0 && !Array.isArray(root.messages)) {
+      return NextResponse.json({ error: 'toolMode 下 messages 不合法' }, { status: 400 });
     }
     // 上下文裁剪（与流式同款）+ 工具轮特例：截断后不得以孤儿 role:"tool" 开头——
     // 逐个丢弃开头失去配对的 tool 消息，直到首条不再是 tool（上游 400 会拒绝孤儿）
@@ -712,7 +735,11 @@ export async function POST(req: NextRequest) {
         ? toolAll.slice(0, 1).concat(toolAll.slice(-59))
         : toolAll.slice(-60);
     while (toolMsgs.length > 0 && toolMsgs[0].role === 'tool') toolMsgs = toolMsgs.slice(1);
-    return proxyToolRound(config, toolMsgs, tools);
+    // v1.9.31 Agentic 强制器：客户端可传 toolChoice='required'（模型必调一个工具）——
+    // 弱 FC 模型在 auto 下只会嘴上计划不动手，required 轮逼它真的调。非法值回落 auto。
+    const rawChoice = root.toolChoice;
+    const toolChoice = rawChoice === 'required' || rawChoice === 'auto' ? rawChoice : 'auto';
+    return proxyToolRound(config, toolMsgs, tools, toolChoice);
   }
   // 内网地址：云端服务器必然不可达，返回 directOnly 标记让客户端改用浏览器直连
   try {
