@@ -32,7 +32,7 @@ import { getActiveAccountIdFor } from '@/lib/ios/accounts';
 import { listContacts, ownerProfileFor } from '@/lib/ios/contacts-store';
 import { buildNpcPromptExtra } from '@/lib/ios/npc-bond';
 import { getMemSettings, memAddEventFragment, memRecentConvo, memRecallBlock } from '@/lib/memory';
-import { anxietyOf, anxietyLabel, anxietyUnansweredLabel, type AnxietyState } from '@/lib/ios/anxiety';
+import { anxietyOf, anxietyLabel, anxietyUnansweredLabel, anxietyExplain, type AnxietyState } from '@/lib/ios/anxiety';
 import { DefaultAvatar } from '@/components/apps/default-avatar';
 
 /** 状态卡数据（与 /api/character-status 返回形状一致） */
@@ -372,6 +372,15 @@ export default function PeerStatusCard({
                         />
                       </div>
                       <p className="mt-1 text-[10.5px] leading-none text-muted-foreground/80">{anxietyUnansweredLabel(anx)} · 超过阈值会忍不住主动找你</p>
+                      {/* v1.9.29 焦虑v2：为什么焦虑（事件/相位/记忆幽灵/心情多因素解释，≤2 条） */}
+                      {anx.level >= 20 &&
+                        anxietyExplain(contact.id, anx)
+                          .slice(0, 2)
+                          .map((line, i) => (
+                            <p key={i} className="mt-1.5 text-[10.5px] leading-snug text-muted-foreground/70" data-testid="peer-status-anxiety-why">
+                              · {line}
+                            </p>
+                          ))}
                     </div>
                   )}
                   {/* 心声（液态 = 内嵌玻璃胶囊） */}

@@ -48,6 +48,7 @@ import {
   type MemApp,
 } from '@/lib/memory';
 import { DEFAULT_BILINGUAL_PROMPT, getMomentsSettings } from '@/lib/ios/moments-settings';
+import { noteUserMomentPublished } from '@/lib/ios/anxiety-events';
 import { loadBlock } from '@/lib/ios/block-state';
 // 相册挂点：动态配图生成成功后同步写入该角色的 AI 相册（与聊天端 flushPhotoJobs 同口径）
 import { addAlbum } from '@/lib/ios/album-store';
@@ -1163,6 +1164,9 @@ export function addUserMomentPost(
   };
   const list = listMomentPosts(platform, args.userName);
   persistMomentPosts(platform, [post, ...list]);
+  // v1.9.29 焦虑v2⑥：「破防」事件——TA 发了动态却没回私聊（对该平台上被眖着的
+  // watching 联系人 +50；异步 fire-and-forget，不影响发布链路）
+  noteUserMomentPublished(platform);
   return post;
 }
 

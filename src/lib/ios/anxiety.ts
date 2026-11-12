@@ -971,3 +971,29 @@ export function __anxietyTestClearPhaseCache(cid: string): void {
     /* 静默 */
   }
 }
+
+// dev 测试钩子（仅 dev；生产构建被 NODE_ENV 闸挡掉）：E2E 验证焦虑引擎多维链路用
+if (typeof window !== 'undefined' && process.env.NODE_ENV !== 'production') {
+  const w = window as unknown as {
+    __anxietyTest?: {
+      read: typeof readAnxiety;
+      of: typeof anxietyOf;
+      setState: typeof __anxietyTestSetState;
+      clearPhase: typeof __anxietyTestClearPhaseCache;
+      event: typeof noteAnxietyEvent;
+      reply: typeof noteUserReply;
+      explain: typeof anxietyExplain;
+      reset: typeof resetAnxiety;
+    };
+  };
+  w.__anxietyTest = {
+    read: (cid) => readAnxiety(cid),
+    of: (cid, opts) => anxietyOf(cid, opts),
+    setState: (cid, patch) => __anxietyTestSetState(cid, patch),
+    clearPhase: (cid) => __anxietyTestClearPhaseCache(cid),
+    event: (cid, kind, detail) => noteAnxietyEvent(cid, kind, detail),
+    reply: (cid, app, text) => noteUserReply(cid, app, text),
+    explain: (cid, s) => anxietyExplain(cid, s),
+    reset: (cid) => resetAnxiety(cid),
+  };
+}

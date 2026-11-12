@@ -68,6 +68,8 @@ export interface WebFrozenRec {
   unlockAt: number;
   /** 锁定者角色名（图标「由 XX 管理」角标与切换器卡片用） */
   charName: string;
+  /** 冻结来源：'jealousy'=吃醋锁（缺省视为吃醋）；'ai'=AI 工具/标记协议主动冻结（吃醋锁 tick 的「无锁清残留」不清它，自身 unlockAt 到期自愈） */
+  src?: 'jealousy' | 'ai';
 }
 
 /** undefined=尚未从 localStorage 读过 */

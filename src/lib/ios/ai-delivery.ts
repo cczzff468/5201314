@@ -402,7 +402,7 @@ if (typeof window !== 'undefined' && process.env.NODE_ENV !== 'production') {
   const w = window as unknown as {
     __aiDeliveryTest?: {
       schedule: typeof scheduleAiDelivery;
-      peekPending: typeof peekPendingMsgs;
+      peekPending: (sessionKey: string) => unknown[];
       delivering: (key: string) => boolean;
       hidden: () => boolean;
     };

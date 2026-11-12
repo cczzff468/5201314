@@ -62,7 +62,7 @@ import { cachedOwnerName } from '@/lib/ios/contacts-store';
 // 第十六轮：AI 情绪系统（用户消息打点→情绪变化）+ 作息记忆（活跃时间直方图）
 import { noteUserMsgMood } from '@/lib/ios/ai-mood';
 import { noteUserEmotion } from '@/lib/ios/user-mood';
-import { noteUserReply } from '@/lib/ios/anxiety';
+import { noteUserReply, noteUserActivityHeat } from '@/lib/ios/anxiety';
 import { noteJealousyEngagement } from '@/lib/ios/jealousy-lock';
 import { noteActive } from '@/lib/ios/routine';
 
@@ -242,6 +242,9 @@ const notedUserMsgIds = new Map<string, string>();
 function noteEngagement(sessionKey: string, messages: ChatPayloadMessage[]): void {
   try {
     noteActive();
+    // v1.9.29 焦虑v2③：用户真实消息按「星期×小时」落桶——热力图驱动 workbusy/active 相位
+    // （「TA 平时这个点在上班很少回」/「平时很活跃突然安静才可疑」）
+    noteUserActivityHeat();
     const bs = blockSessionOf(sessionKey);
     if (!bs) return;
     for (let i = messages.length - 1; i >= 0; i--) {

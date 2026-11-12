@@ -46,6 +46,7 @@ import {
 } from '@/lib/forum/core';
 import { bootForum, generateMoreFeedPosts, generateNewFeedPosts, queueUserPostInteractions, queueCharEngagements, queueCharThanksForLike, setForumAiActivity } from '@/lib/forum/engine';
 import { writeUserLikeMemory, writeUserPostMemory } from '@/lib/forum/social';
+import { noteForumEngagement } from '@/lib/ios/anxiety-events';
 import { notePostPublished } from '@/lib/forum/post-memory';
 // v43【NPC 记忆系统】：马甲暴露检测（用户在大号帖里自己点名小号 → NPC 侧从此认得马甲）
 import { exposeAnonIdentityIn, markNpcAnonKnown } from '@/lib/forum/npc-memory';
@@ -403,6 +404,9 @@ export default function ForumApp() {
         writeUserLikeMemory(p.authorKey.slice(5), p);
         queueCharThanksForLike(p);
       }
+      // v1.9.29 焦虑v2⑥：论坛点赞事件——给别人点 → watching 联系人吃醋+20；
+      // 给角色本人点 → 该角色安心-8（分发器内部判定，匿名小号不触发）
+      noteForumEngagement('like', { authorKey: p.authorKey, authorName: resolveAuthor(p.authorKey).name }, me);
     }
     saveForum({ ...d });
   }, []);

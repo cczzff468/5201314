@@ -43,6 +43,7 @@ import {
 } from '@/lib/forum/core';
 import { generateMoreComments, queueAiReplyToUserReply } from '@/lib/forum/engine';
 import { writeUserCommentMemory } from '@/lib/forum/social';
+import { noteForumEngagement } from '@/lib/ios/anxiety-events';
 import { detectMessageLang, requestTranslation } from '@/lib/chat-translate';
 import { useSettings } from '@/lib/ios/store';
 import { XAvatar, XIcons, VerifiedBadge } from './shared';
@@ -618,6 +619,11 @@ export function ThreadView({ postId }: { postId: string }) {
     saveForum({ ...nd });
     setDraft('');
     const targetPost = nd.posts.find((p) => p.id === exactId);
+    // v1.9.29 焦虑v2⑥：论坛评论事件——给别人评论 → watching 联系人吃醋+20
+    // （匿名小号不触发；目标作者是角色本人时该角色不吃自己的醋，分发器内部判定）
+    const commentTargetKey = targetPost?.authorKey ?? post.authorKey;
+    const commentTargetName = replyTarget?.name ?? a.name;
+    noteForumEngagement('comment', { authorKey: commentTargetKey, authorName: commentTargetName }, me);
     // 网友/角色内容被回复 → 排围观回复（匿名小号的评论对 AI 也是陌生网友发言）；
     // 记忆写入/神回复仅大号（匿名评论不写角色记忆——认知隔离）
     if (targetPost && !isUserAuthor(targetPost.authorKey)) queueAiReplyToUserReply(exactId, reply.id, groupId, post.id);

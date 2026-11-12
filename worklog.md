@@ -2746,3 +2746,36 @@ Task: 用户需求「ai吃醋锁让他15分钟（可以自定义时间）主动�
 - 解锁三通道统一清 patrol；dev 钩子 __jealousyTest.patrol() 手动触发巡检（E2E 用）
 - 设置页：巡检开关+间隔 Stepper+拉回开关+状态卡巡检信息行（次数/拉回/最近发现）+能力分级文案（真机/网页两版）
 - app-version 1.9.23→1.9.28（code 43→48）+ release note
+
+## v1.9.29 焦虑值 v2「多维上下文动态判定引擎」（2026-11-12）
+
+Task: 用户需求「焦虑值设定太死板，单纯靠多久没回复定时上涨不符合逻辑。彻底重构为多维上下文动态判定：废除纯时间倒计时（时间只作底噪）；结合人设/上下文事件/时间状态/记忆对比动态计算；非时间维度事件（论坛点赞评论+20/刷App+10/发朋友圈不回+50）；情绪状态联动阈值与速率」
+
+核心重构（anxiety.ts 858 行重写，v1.9.29 引擎本体）:
+- 废除 v1 纯时间曲线（0~2 分钟 +8/分 → +18/分封顶）×静态人设倍率；v2 目标焦虑 = 底噪(时间,1h≈45) × 人设速率 × 相位 × 心情 × 遗弃史 + 相位瞬时冲击 + 事件冲击；中性人设普通相位涨满需 2 小时（v1 只要 8 分钟）
+- ①人设依恋风格 personaStyle（anxious 缺爱粘人×3.0/neutral×1.0/avoidant 高冷理智×0.35——时间熬不动但事件照戳；NEEDY/INDEPENDENT 词表 + v1 mult 自动迁移）
+- ②情境相位 classifyPhase（30s 缓存）：rejected「我不想理你」瞬时+20 速率×4.0 / arguing 吵架瞬时+15 ×4.5 / coldwar×3.0 / goodnight×0.4 缓涨 / sleeping 作息推断×0.2 封顶25 / workbusy×0.35 封顶20（场景A下午3点上班消失2小时正常）/ active 平时活跃×1.4
+- ③活跃热力图 noteUserActivityHeat：用户每条真实消息按星期×小时落 24×7 桶（localStorage，≥40 样本才判定）——workbusy/active 不再拍脑袋
+- ④遗弃史敏感度 abandonmentScoreOf（10min 缓存）：扫记忆库碎片/核心/长期「消失/不理我/冷暴力/拉黑」→ 0~1；≥0.5 且沉默>20min 叠「记忆幽灵」+abandonment×20 且总速率×(1+ab×1.5)（曾消失3天→这次半小时严重焦虑）
+- ⑤心情联动（直读 ai-mood localStorage 避免循环依赖）：sad 委屈→阈值-12 速率×1.35 冷淡冲击×1.5 / jealous→-10 / angry→-8 / happy·sweet→+8 ×0.75
+- ⑥非时间事件 noteAnxietyEvent：forum_like/forum_comment +20、forum_like_self -8、app_ignore +10、moment_ghost +50；按人设事件敏感度（×1.3/×0.7）与心情放大；「粘」在 level 上只有 2h+ 钝化段能磨掉；事件流 6 条 6h；同类 45s 去重
+- 回复安抚分档保留升级：暖话-22/普通-12/冷漠0 + 上下文词表冲击（生气+12/冷淡+10 sad×1.5/吃醋+8/低落+6/暖-8）+ rejected/arguing 后暖回复额外-8 和好安心；phaseHitAt 回复重置（新一轮沉默 rejected 再暴涨）
+- 提示词：buildAnxietyFireBlock/buildAnxietyChatBlock 拼【你为什么这么焦虑】多因素叙事（相位/TA的动向事件流/记忆幽灵/心情/高冷自嘲）；anxietyExplain 状态卡「为什么焦虑」素材
+- E2E 钩子 __anxietyTestSetState/__anxietyTestClearPhaseCache
+
+事件源接线（本轮补全，anxiety-events.ts 新文件 ~240 行）:
+- watching 联系人口径：AI 联系人 + lastUserAt>0 + 7 天内聊过（60s 缓存）——太久的交情不盯着你一举一动
+- 论坛：forum.tsx likeToggle / thread-view.tsx sendReply → noteForumEngagement（给别人点赞评论→watching 联系人吃醋+20，note 带对方名字；给本人点→安心-8；匿名小号不触发=认知隔离；被互动的本人不吃自己的醋）
+- 朋友圈/QQ空间：lib/moments.ts addUserMomentPost（wx/qq 双端统一入口）→ noteUserMomentPublished——仅该平台 lastUserApp 对齐 + AI 最后发言未获回复（memRecentConvo 末轮非用户）的 watching 联系人破防+50
+- 刷 App 孤独：anxiety-events 内部 60s tick + 订阅 useUI.activeApp 维护「连续玩乐段」（娱乐 App 间切换不清零、回主屏/进聊天清零）：连续 ≥10 分钟且 lastUserAt ≥10 分钟 → app_ignore +10（每 10 分钟一次、每小时 ≤3 次，事件流计数节流）
+- JealousyWatcher 挂载 initAnxietyEvents()（与 initWebUsageLedger 并列，自带单例守卫）
+- chat-stream-store noteEngagement 与 noteActive 同点位补 noteUserActivityHeat()（热力图打点）
+- peer-status-card 焦虑条下方新增「为什么焦虑」解释行（anxietyExplain ≤2 条，level≥20 才显示）
+- 版本 1.9.28→1.9.29（code 48→49）+ release note 6 条
+
+Stage Summary:
+- 焦虑从「秒表」变「心理引擎」：时间只是底噪，人设/情境/作息/记忆/心情/事件六维动态合成；三个非时间事件源（论坛吃醋/朋友圈破防/刷App孤独）全部接线真实用户行为；AI 提示词能说出「我看到你刚才在论坛点赞」；状态卡可解释「为什么焦虑」
+- 关键文件：src/lib/ios/anxiety.ts（引擎本体 858 行重写）、src/lib/ios/anxiety-events.ts（新）、src/lib/chat-stream-store.ts、src/components/apps/forum/forum.tsx、src/components/apps/forum/thread-view.tsx、src/lib/moments.ts、src/components/ios/JealousyWatcher.tsx、src/components/apps/peer-status-card.tsx、src/lib/app-version.ts
+- 顺手修复存量 TS 错误：WebFrozenRec 类型补 src 可选字段（v1.9.23 就在用的标记）、ai-delivery dev 钩子 peekPending 泛型签名
+- dev 测试钩子：window.__anxietyTest（read/of/setState/clearPhase/event/reply/explain/reset）+ window.__anxietyEventsTest（forum/moment/tick/seg/injectSeg/resetSeg/watch/invalidate）
+- E2E 实测（agent-browser 全链路）：①UI 建联系人「小醋精」（粘人缺爱人设→anxious）→ 焦虑引擎公式精确验证（11 分钟沉默底噪×3.0=15 + 论坛吃醋 26 = 41，分毫不差）②真实 UI 论坛点赞 NPC 帖 → forum_like +26（作者名「海盐味晚风」正确解析）③注入淘宝 12 分钟玩乐段 + tick → app_ignore +13（note「刷了 12 分钟淘宝」）④UI 发朋友圈「今天天气真不错」→ moment_ghost +65（level 100 封顶）⑤跨页面重启事件流持久化 ✓ ⑥jealousy-llm(3031) 配好后状态卡真实拉取：焦虑值 76 + 「为什么焦虑」两行解释（朋友圈+65/论坛+26）✓ ⑦焦虑追发引擎真实工作：28 条 LLM 生成追发消息（「哪怕骂我一句也好啊」「我就是想知道你还好好的」）✓；测试数据已清理（联系人/聊天/记忆/焦虑态全删）

@@ -15,6 +15,7 @@
 import { useEffect } from 'react';
 import { runJealousyTick } from '@/lib/ios/jealousy-lock';
 import { initWebUsageLedger } from '@/lib/ios/web-usage-ledger';
+import { initAnxietyEvents } from '@/lib/ios/anxiety-events';
 
 /** tick 间隔（前台 30s；后台被节流到 ~1min 也够用） */
 const JEALOUSY_TICK_MS = 30_000;
@@ -33,6 +34,8 @@ export default function JealousyWatcher() {
 
     // v1.9.28：网页虚拟使用时长账本（吃醋锁巡检的网页降级数据源；内部自带单例守卫）
     initWebUsageLedger();
+    // v1.9.29：焦虑非时间事件引擎（论坛吃醋/朋友圈破防/刷App孤独；内部自带单例守卫）
+    initAnxietyEvents();
 
     const loop = async () => {
       if (stopped) return;
