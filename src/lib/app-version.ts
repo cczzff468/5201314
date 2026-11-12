@@ -11,9 +11,9 @@
  */
 
 /** 当前最新版本（与 android-shell versionName 保持一致） */
-export const APP_VERSION = '1.9.36';
+export const APP_VERSION = '1.9.37';
 /** 版本号数字（与 android-shell versionCode 保持一致；覆盖安装要求只增不减） */
-export const APP_VERSION_CODE = 52;
+export const APP_VERSION_CODE = 53;
 
 export interface AppReleaseNote {
   version: string;
@@ -24,6 +24,15 @@ export interface AppReleaseNote {
 
 /** 版本历史（新→旧；设置 › APP 更新 页渲染，最新一条即当前版本） */
 export const APP_RELEASE_NOTES: AppReleaseNote[] = [
+  {
+    version: '1.9.37',
+    date: '2026-11-13',
+    items: [
+      '基础权限浏览器可授权：麦克风（getUserMedia 浏览器授权框）、位置（Geolocation 浏览器授权框）在网页里就能直接弹授权、真实回写状态，不再标「需真机」；悬浮窗/电池优化/存储/使用情况仍需真机 APK（标签如实保留）',
+      '能力开关随「AI 动手范围」联动：选「网站里面」显示网页应用能力（替发消息/论坛点赞/放歌/备忘录…），选「真机」显示真机能力（真机点按/滑动/输入文字/按键/拉起 App/强杀 + 看真机屏幕/状态探测）——真机视图不再出现论坛点赞等网页项',
+      '真机能力补齐专属图标（点按/滑动/键盘/实体键/火箭/截屏/禁止/脉湃）；网页应用能力在两种模式下都仍可用，开关在「网站里面」视图里管理',
+    ],
+  },
   {
     version: '1.9.36',
     date: '2026-11-12',

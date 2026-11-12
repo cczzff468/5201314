@@ -3,11 +3,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ChangeEvent, ReactNode } from 'react';
 import {
+  Activity,
   AlertCircle,
   AppWindow,
   ArrowDownLeft,
   ArrowUpRight,
   AudioLines,
+  Ban,
   BatteryCharging,
   Bell,
   BellOff,
@@ -46,6 +48,7 @@ import {
   Minus,
   Monitor,
   Moon,
+  MousePointer,
   MousePointerClick,
   PanelTop,
   PenLine,
@@ -54,6 +57,7 @@ import {
   Plus,
   RefreshCw,
   Repeat,
+  Rocket,
   ScanEye,
   ScanFace,
   Share,
@@ -1012,6 +1016,15 @@ const AUTONOMY_CAP_ICONS: Record<string, LucideIcon> = {
   freeze: Snowflake,
   recents: Layers,
   usage: BarChart3,
+  // v1.9.37 真机能力图标（真机模式下的动手/看见组）
+  dtap: MousePointer,
+  dswipe: Hand,
+  dtype: Keyboard,
+  dkey: Command,
+  dopen: Rocket,
+  dscreencap: ScanEye,
+  dforcestop: Ban,
+  dinfo: Activity,
 };
 
 /** 能力开关行：黑白线条图标 + 名称 + 一句话说明 + 大开关（危险项名称带红色「危险」角标） */
@@ -1606,13 +1619,13 @@ const PERM_DEFS: PermDef[] = [
     label: '麦克风权限',
     desc: '语音聊天、按住说话、喊名唤醒',
     icon: Mic,
-    detail: '录音需要 Android 运行时麦克风权限（RECORD_AUDIO）。点「允许」会弹系统授权框；拒绝后想再开需去系统设置。',
+    detail: '录音权限：真机上弹 Android 系统授权框（RECORD_AUDIO，拒绝后想再开需去系统设置）；浏览器里走浏览器麦克风授权，点「允许」会弹浏览器授权框。',
     actionLabel: '允许麦克风',
     query: () => micPermission(),
     request: async () => {
       const r = await requestMicPermission();
-      if (r === null) return { ok: false, note: '当前环境无法申请（需 APK）' };
-      return { ok: Boolean(r.granted), note: r.granted ? undefined : r.canAsk ? '未完成授权' : '已被拒绝，需去系统设置开启' };
+      if (r === null) return { ok: false, note: '当前浏览器不支持麦克风授权' };
+      return { ok: Boolean(r.granted), note: r.granted ? undefined : r.canAsk ? '未完成授权' : '已被拒绝，需在系统或浏览器设置中重新开启' };
     },
   },
   {
@@ -1620,12 +1633,16 @@ const PERM_DEFS: PermDef[] = [
     label: '位置权限',
     desc: '天气定位、地图、外卖/打车场景',
     icon: MapPin,
-    detail: '精确定位权限（ACCESS_FINE_LOCATION）。点「允许」弹系统授权框；Shizuku 已授权时也可经 pm grant 直授。',
+    detail: '精确定位权限（ACCESS_FINE_LOCATION）：真机上点「允许」弹系统授权框（Shizuku 已授权时也可经 pm grant 直授）；浏览器里走浏览器定位授权，点「允许」弹浏览器授权框。',
     actionLabel: '允许定位',
     query: () => locationPermission(),
     request: async () => {
       const r = await requestLocationPermission();
-      const note = r.via === 'shizuku' ? '已经 Shizuku 直授' : r.via === 'unavailable' ? '无法申请（需 APK 或 Shizuku）' : undefined;
+      const note = r.via === 'shizuku'
+        ? '已经 Shizuku 直授'
+        : r.via === 'web'
+          ? r.ok ? '已经浏览器授权' : '浏览器未授权定位（被阻止时去浏览器网站设置里重新允许）'
+          : r.via === 'unavailable' ? '无法申请（需 APK、Shizuku 或浏览器定位支持）' : undefined;
       return { ok: r.ok, note };
     },
   },
@@ -1773,7 +1790,9 @@ function PermissionHubPage({ onBack }: { onBack: () => void }) {
   const flipCap = (key: string) => setCfg(setAutonomyCap(key, !cfg.caps[key]));
   const hands = AUTONOMY_CAPS.filter((c) => c.group === 'hands');
   const eyes = AUTONOMY_CAPS.filter((c) => c.group === 'eyes');
-  const deviceCaps = AUTONOMY_CAPS.filter((c) => c.group === 'device');
+  // v1.9.37 真机组拆动手/看见两小节，与网页组一起随 AI 动手范围联动切换显示
+  const deviceHands = AUTONOMY_CAPS.filter((c) => c.group === 'device' && !c.eye);
+  const deviceEyes = AUTONOMY_CAPS.filter((c) => c.group === 'device' && c.eye);
 
   // ---- 基础权限状态（挂载时逐项查询；null → native-only） ----
   const [permStates, setPermStates] = useState<Record<string, PermState>>(() => {
@@ -1887,9 +1906,9 @@ function PermissionHubPage({ onBack }: { onBack: () => void }) {
         <div className="mx-1 mt-4 rounded-[22px] bg-white/55 p-4 text-[13px] leading-relaxed ring-1 ring-white/70 backdrop-blur-2xl dark:bg-white/[0.06] dark:ring-white/[0.09]">
           <p className="font-medium">权限中心：系统权限 · 调试授权 · AI 动手</p>
           <p className="mt-1.5 text-muted-foreground">
-            在这里给 AI Phone 授予真实手机的系统权限（点进去就能弹授权）；选择 CAP-go 插件还是
-            Shizuku 模式；决定 AI 动手是作用在这台手机里的网站还是真实手机。
-            {!native ? '（当前在浏览器里，系统权限需安装 APK 后使用；通知权限除外）' : ''}
+            在这里给 AI Phone 授予权限（点权限行就能弹授权）：通知/麦克风/位置在浏览器里即可直接授权，
+            悬浮窗/电池优化/存储/使用情况需真机 APK；选择 CAP-go 插件还是 Shizuku 模式；
+            决定 AI 动手是作用在这台手机里的网站还是真实手机。
           </p>
         </div>
 
@@ -1995,8 +2014,8 @@ function PermissionHubPage({ onBack }: { onBack: () => void }) {
         </div>
         <p className="mx-1 mt-1.5 text-[11.5px] leading-relaxed text-muted-foreground">
           {target === 'device'
-            ? '真机模式：AI 发出的 [手机操作:点按/滑动/输入/按键/真机打开/看屏幕/强杀…] 会真实作用在你的手机上（需要 APK + Shizuku 已授权 + 下方对应能力开关打开）。网页应用工具（发消息/放歌/备忘录…）不受影响仍然可用。'
-            : '网站模式（默认）：AI 的全部动手能力都作用在这台虚拟手机里的网页应用上，绝不碰真实手机。'}
+            ? '真机模式：AI 的点按/滑动/输入/按键/真机打开/看屏幕/强杀等命令会真实作用在你的手机上（需要 APK + Shizuku 已授权 + 下方对应能力开关打开）。下方开关已切换为真机组；网页应用能力（发消息/放歌/备忘录…）两种模式下都可用，开关切回「网站里面」查看。'
+            : '网站模式（默认）：AI 的全部动手能力都作用在这台手机里的网页应用上，绝不碰真实手机。下方开关为网页应用组；切到「真机」后会换成真机组（真机点按/滑动/输入/截屏/强杀…）。'}
         </p>
 
         {/* ===== AI 动手总开关 ===== */}
@@ -2014,37 +2033,31 @@ function PermissionHubPage({ onBack }: { onBack: () => void }) {
           </div>
         </div>
 
-        {/* 动手组 */}
-        <div className="mb-2 mt-6 px-5 text-[13px] text-muted-foreground">动手（真实操作网页应用）</div>
+        {/* 动手组（v1.9.37：随 AI 动手范围联动——网站=真实操作网页应用，真机=作用于真实手机） */}
+        <div className="mb-2 mt-6 px-5 text-[13px] text-muted-foreground">
+          {target === 'web' ? '动手（真实操作网页应用）' : '动手（真实操作真机 · 经 Shizuku）'}
+        </div>
         <div className={`mx-1 divide-y divide-black/[0.05] overflow-hidden rounded-[22px] bg-white/55 shadow-[0_8px_28px_rgba(17,24,39,0.06)] ring-1 ring-white/70 backdrop-blur-2xl dark:divide-white/[0.06] dark:bg-white/[0.06] dark:ring-white/[0.09] ${cfg.master ? '' : 'opacity-55'}`}>
-          {hands.map((cap) => (
+          {(target === 'web' ? hands : deviceHands).map((cap) => (
             <AutonomyCapRow key={cap.key} cap={cap} on={Boolean(cfg.caps[cap.key])} onToggle={() => flipCap(cap.key)} />
           ))}
         </div>
 
-        {/* 看见组 */}
-        <div className="mb-2 mt-6 px-5 text-[13px] text-muted-foreground">看见（只读探测）</div>
+        {/* 看见组（同样随范围联动：网站=网页只读探测，真机=真机只读探测） */}
+        <div className="mb-2 mt-6 px-5 text-[13px] text-muted-foreground">
+          {target === 'web' ? '看见（只读探测）' : '看见（真机只读探测）'}
+        </div>
         <div className={`mx-1 divide-y divide-black/[0.05] overflow-hidden rounded-[22px] bg-white/55 shadow-[0_8px_28px_rgba(17,24,39,0.06)] ring-1 ring-white/70 backdrop-blur-2xl dark:divide-white/[0.06] dark:bg-white/[0.06] dark:ring-white/[0.09] ${cfg.master ? '' : 'opacity-55'}`}>
-          {eyes.map((cap) => (
+          {(target === 'web' ? eyes : deviceEyes).map((cap) => (
             <AutonomyCapRow key={cap.key} cap={cap} on={Boolean(cfg.caps[cap.key])} onToggle={() => flipCap(cap.key)} />
           ))}
         </div>
-
-        {/* 真机组（仅真机模式显示） */}
-        {target === 'device' ? (
-          <>
-            <div className="mb-2 mt-6 px-5 text-[13px] text-muted-foreground">真机（作用于真实手机 · 需 Shizuku）</div>
-            <div className={`mx-1 divide-y divide-black/[0.05] overflow-hidden rounded-[22px] bg-white/55 shadow-[0_8px_28px_rgba(17,24,39,0.06)] ring-1 ring-white/70 backdrop-blur-2xl dark:divide-white/[0.06] dark:bg-white/[0.06] dark:ring-white/[0.09] ${cfg.master ? '' : 'opacity-55'}`}>
-              {deviceCaps.map((cap) => (
-                <AutonomyCapRow key={cap.key} cap={cap} on={Boolean(cfg.caps[cap.key])} onToggle={() => flipCap(cap.key)} />
-              ))}
-            </div>
-          </>
-        ) : null}
 
         <p className="mx-1 mt-4 text-[11.5px] leading-relaxed text-muted-foreground">
           开关即点即存（下一次发消息立即生效）。危险项默认关着，确认要让 AI 碰再手动开。
-          真机能力只在「AI 动手范围 = 真机」时展示与生效。
+          {target === 'web'
+            ? 'AI 动手范围切到「真机」后，这里的开关会换成真机组（真机点按/滑动/输入/截屏/强杀…）。'
+            : '当前展示的是真机组开关；网页应用能力（发消息/放歌/论坛点赞…）两种模式下都可用，开关切回「网站里面」查看。'}
         </p>
       </div>
 

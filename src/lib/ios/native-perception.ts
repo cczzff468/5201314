@@ -304,18 +304,55 @@ export function isNativePerception(): boolean {
 // ① getUserMedia 录音：Manifest 未声明 RECORD_AUDIO 时被系统静默拒绝（永不弹框）；
 // ② Notification.permission：WebView 恒为 'denied'（Web API 不映射 Android 权限），
 //    设置页读它必然误报「已在设置中关闭系统通知」。
-// 因此原生壳内一律经本插件查询/申请（弹系统授权框），非原生壳返回 null 由调用方回落 Web 流程。
+// 因此原生壳内一律经本插件查询/申请（弹系统授权框）。
+//
+// v1.9.37 浏览器授权回退：麦克风/位置在浏览器里也有对应的 Web 权限面
+// （getUserMedia / Geolocation，点「允许」弹浏览器授权框）——非原生壳不再返回
+// null（不再标「需真机」），而是真实查询/申请浏览器授权状态。
 
-/** 查询 Android 运行时麦克风权限（非原生壳返回 null） */
-export async function micPermission(): Promise<RuntimePermResult | null> {
-  const p = await nativePlugin();
-  return p ? p.micPermission() : null;
+/** 浏览器 Permissions API 查询（权限名不支持/无此 API 时回 undefined） */
+async function webPermState(name: 'microphone' | 'geolocation'): Promise<PermissionState | undefined> {
+  if (typeof navigator === 'undefined' || !navigator.permissions?.query) return undefined;
+  try {
+    const st = await navigator.permissions.query({ name } as unknown as PermissionDescriptor);
+    return st.state;
+  } catch {
+    return undefined;
+  }
 }
 
-/** 申请 Android 运行时麦克风权限（未授予时弹系统授权框，已授予毫秒级直通；非原生壳返回 null） */
+/** 查询麦克风权限（原生壳读 Android 运行时权限；浏览器读 Web 权限面，非真机也能授权） */
+export async function micPermission(): Promise<RuntimePermResult | null> {
+  const p = await nativePlugin();
+  if (p) return p.micPermission();
+  const s = await webPermState('microphone');
+  if (s === 'granted') return { granted: true };
+  if (s === 'denied') return { granted: false, canAsk: false }; // 浏览器站点设置里已阻止
+  return { granted: false, canAsk: true }; // prompt / 查不到（Safari 等）：未授权但可申请
+}
+
+/**
+ * 申请麦克风权限（原生壳弹系统授权框；浏览器经 getUserMedia 弹浏览器授权框，
+ * 拿到结果立即释放录音流不占麦克风）。
+ */
 export async function requestMicPermission(): Promise<RuntimePermResult | null> {
   const p = await nativePlugin();
-  return p ? p.requestMicPermission() : null;
+  if (p) return p.requestMicPermission();
+  if (typeof navigator === 'undefined' || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    return null; // 非安全上下文等：浏览器确实申请不了
+  }
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    for (const t of stream.getTracks()) t.stop();
+    return { granted: true };
+  } catch (e) {
+    const refused = e instanceof DOMException && (e.name === 'NotAllowedError' || e.name === 'SecurityError');
+    if (refused) {
+      const s = await webPermState('microphone');
+      return { granted: false, canAsk: s !== 'denied' }; // 站点被阻止 → 需去浏览器设置
+    }
+    return { granted: false, canAsk: true }; // 无麦克风设备等：不算被系统关闭
+  }
 }
 
 /** 查询系统通知权限真实状态（areNotificationsEnabled，含 13+ 运行时权限与应用内总闸；非原生壳返回 null） */
@@ -427,7 +464,7 @@ export async function requestBatteryPermission(): Promise<{ ok: boolean; via: 'n
   return { ok: false, via: 'unavailable' };
 }
 
-/** 位置权限状态（①新 APK 原生 ②Shizuku pm check-permission 查询） */
+/** 位置权限状态（①新 APK 原生 ②Shizuku pm check-permission ③浏览器 Geolocation 权限面） */
 export async function locationPermission(): Promise<(RuntimePermResult & { fine?: boolean; coarse?: boolean }) | null> {
   const p = await nativePlugin();
   if (p) {
@@ -447,11 +484,21 @@ export async function locationPermission(): Promise<(RuntimePermResult & { fine?
       return { granted, fine: granted, coarse: granted, canAsk: !granted };
     }
   }
+  // 浏览器：Geolocation 授权状态（v1.9.37 非真机也能授权，不再标「需真机」）
+  if (!isNativePerception()) {
+    const s = await webPermState('geolocation');
+    if (s === 'granted') return { granted: true, fine: true, coarse: true };
+    if (s === 'denied') return { granted: false, canAsk: false }; // 浏览器站点设置里已阻止
+    return { granted: false, canAsk: true };
+  }
   return null;
 }
 
-/** 申请位置权限（①新 APK 弹系统授权框 ②Shizuku pm grant 直授——需 Manifest 已声明） */
-export async function requestLocationPermission(): Promise<{ ok: boolean; via: 'native' | 'shizuku' | 'unavailable' }> {
+/**
+ * 申请位置权限（①新 APK 弹系统授权框 ②Shizuku pm grant 直授——需 Manifest 已声明
+ * ③浏览器经 Geolocation 弹浏览器授权框，拿到一次定位即视为已授权）。
+ */
+export async function requestLocationPermission(): Promise<{ ok: boolean; via: 'native' | 'shizuku' | 'web' | 'unavailable' }> {
   const p = await nativePlugin();
   if (p) {
     try {
@@ -468,6 +515,17 @@ export async function requestLocationPermission(): Promise<{ ok: boolean; via: '
       { maxLines: 4, timeoutMs: 5000 },
     );
     if (r?.ok) return { ok: true, via: 'shizuku' };
+  }
+  // 浏览器：弹浏览器定位授权框（用户点了「允许」拿到一次定位 = 已授权）
+  if (!isNativePerception() && typeof navigator !== 'undefined' && navigator.geolocation) {
+    const r = await new Promise<GeolocationPosition | number | null>((res) => {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => res(pos),
+        (err) => res(err.code), // 1=用户拒绝/站点被阻止 2=位置不可用 3=超时
+        { timeout: 15_000, maximumAge: 600_000 },
+      );
+    });
+    return { ok: Boolean(r && typeof r !== 'number'), via: 'web' };
   }
   return { ok: false, via: 'unavailable' };
 }

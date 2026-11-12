@@ -19,6 +19,10 @@
  *    输入/拉起 App/强杀/截屏等经 Shizuku 作用于真实手机，底座见 device-ops.ts）；
  *  - 真机命令仅 target='device' 且原生环境 + Shizuku 就绪时执行，其余场合仍「已退役」话术。
  *
+ * v1.9.37 机主需求：设置 › 权限给予 的能力开关组随 AI 动手范围联动——「网站里面」
+ * 显示网页应用能力（发消息/论坛点赞/放歌…），「真机」显示真机能力（点按/滑动/输入/
+ * 截屏/强杀…，无论坛点赞等网页项）；网页工具在两种模式下都仍可用（只是开关视图切换）。
+ *
  * 兜底标记协议（[手机操作:命令:参数]）保留 Web 可用命令：打开/播歌/冻结/解冻/
  * 查后台/使用时长/拉回/agent；真机模式下额外开放：点按/滑动/输入/按键/真机打开/
  * 强杀/看屏幕/前台/通知/电量/音量。
@@ -44,6 +48,9 @@ export interface AutonomyCap {
   group: AutonomyCapGroup;
   /** 危险项：默认关（总开关开了也不放开，需手动逐项开） */
   danger?: boolean;
+  /** v1.9.37 真机组只读探测类（看屏幕/状态探测）：设置页里归入「看见」小节，
+   *  其余真机能力归入「动手」小节——两组随 AI 动手范围（网站/真机）联动切换显示 */
+  eye?: boolean;
 }
 
 /**
@@ -67,15 +74,16 @@ export const AUTONOMY_CAPS: AutonomyCap[] = [
   { key: 'webstate', label: '看网页状态', desc: 'AI 知道你此刻在哪个 App/桌面、锁屏熄屏、正在放什么歌', group: 'eyes' },
   { key: 'recents', label: '查后台应用', desc: '最近用过哪些应用（吃醋锁巡检「TA 刚才在干嘛」）', group: 'eyes' },
   { key: 'usage', label: '使用时长', desc: '今日各应用使用时长排行（刷了多久都在刷什么）', group: 'eyes' },
-  // ---- 真机（v1.9.36：AI 动手范围选「真机」时才显示/生效；经 Shizuku 作用于真实手机） ----
+  // ---- 真机（v1.9.37：AI 动手范围选「真机」时才显示/生效；经 Shizuku 作用于真实手机。
+  //      eye=true 的两项归「看见」，其余归「动手」——设置页两组随范围联动切换） ----
   { key: 'dtap', label: '真机点按', desc: 'AI 在真实手机屏幕上点坐标/点文字对应控件', group: 'device' },
   { key: 'dswipe', label: '真机滑动', desc: 'AI 在真实屏幕上滑动（上/下/左/右或指定坐标）', group: 'device' },
   { key: 'dtype', label: '真机输入文字', desc: 'AI 在真实手机的输入框里打字（英文直输、中文走输入引擎）', group: 'device', danger: true },
   { key: 'dkey', label: '真机按键', desc: 'AI 按返回/主页/回车/音量/播放等实体键', group: 'device' },
   { key: 'dopen', label: '拉起真机 App', desc: 'AI 打开真实手机里安装的应用（按包名拉起）', group: 'device' },
-  { key: 'dscreencap', label: '看真机屏幕', desc: 'AI 静默截屏看真实屏幕内容（识图定位/核对结果）', group: 'device' },
+  { key: 'dscreencap', label: '看真机屏幕', desc: 'AI 静默截屏看真实屏幕内容（识图定位/核对结果）', group: 'device', eye: true },
   { key: 'dforcestop', label: '强杀真机 App', desc: 'AI 强制停止真实手机里的应用', group: 'device', danger: true },
-  { key: 'dinfo', label: '真机状态探测', desc: 'AI 读前台应用/电量/通知栏/音量（只读）', group: 'device' },
+  { key: 'dinfo', label: '真机状态探测', desc: 'AI 读前台应用/电量/通知栏/音量（只读）', group: 'device', eye: true },
 ];
 
 const CAP_KEYS = AUTONOMY_CAPS.map((c) => c.key);
