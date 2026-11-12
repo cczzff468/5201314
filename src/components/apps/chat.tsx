@@ -1705,13 +1705,7 @@ function ChatView({
               msgIdx += 1;
               void (async () => {
                 // 串行队列：多步指令（打开→播放→切歌）按书写顺序逐个执行，轮到本条才亮技能胶囊
-                // v1.5 Agent 逐步播报：纯展示 sys 行（content 为空且 sys 不带 op → 历史组装的基础过滤
-                // 直接剔除，不回喂 AI；最终结果仍走下方 op:true 结果行回喂）
-                const res = await enqueuePhoneOp(argText, () => opPill.start(peer.name ?? peer.title, cmdName), (text) => {
-                  const pm = { id: uid(), role: 'assistant' as const, content: '', time: Date.now(), sys: { text } } as unknown as ChatMsg;
-                  saveMsgs(storageKey, appendWithBoundary(sessionKey, loadMsgs(storageKey) ?? [], pm));
-                  setMsgs((prev) => (prev.some((m) => m.id === pm.id) ? prev : [...prev, pm]));
-                });
+                const res = await enqueuePhoneOp(argText, () => opPill.start(peer.name ?? peer.title, cmdName));
                 opPill.finish(res.ok, res.text);
                 const sysMsg = { id: uid(), role: 'assistant' as const, content: '', time: Date.now(), sys: { text: `手机操作${res.ok ? '成功' : '失败'}：${res.text}`, op: true } } as unknown as ChatMsg;
                 saveMsgs(storageKey, appendWithBoundary(sessionKey, loadMsgs(storageKey) ?? [], sysMsg));

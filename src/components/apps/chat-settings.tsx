@@ -190,7 +190,7 @@ export function ChatSettingsPage({
   onOpenProactive,
   /** 主动发消息入口行摘要（宿主用 proactiveCfgSummary 计算） */
   proactiveSummary,
-  /** 打开「感知设置」页（打字/电量/天气/日历/真机感知/看屏）；不传 = 隐藏该入口行 */
+  /** 打开「感知设置」页（打字/电量/天气/日历/看屏幕）；不传 = 隐藏该入口行 */
   onOpenPerception,
   /** 感知设置入口行摘要（宿主用 perceptionSummary 计算） */
   perceptionSummary,
@@ -274,7 +274,7 @@ export function ChatSettingsPage({
   onOpenProactive?: () => void;
   /** 主动发消息入口行摘要（宿主用 proactiveCfgSummary 计算；空 = 未开启） */
   proactiveSummary?: string;
-  /** 打开「感知设置」页（打字耗时/电量/天气/日历/ActivityWatch 真机感知/看屏）；不传 = 隐藏该入口行 */
+  /** 打开「感知设置」页（打字耗时/电量/天气/日历/看屏幕）；不传 = 隐藏该入口行 */
   onOpenPerception?: () => void;
   /** 感知设置入口行摘要（宿主用 perceptionSummary(sessionKey) 计算；空 = 未开启） */
   perceptionSummary?: string;
@@ -532,7 +532,7 @@ export function ChatSettingsPage({
           </div>
         </div>
 
-        {/* 感知设置：打字耗时/电量/天气/日历/ActivityWatch真机感知/看屏（独立二级页，按会话独立开关，发送时现场读取） */}
+        {/* 感知设置：打字耗时/电量/天气/日历/看屏幕（独立二级页，按会话独立开关，发送时现场读取） */}
         {onOpenPerception && (
           <div className={`${cardCls} mt-3 overflow-hidden`}>
             <button type="button" data-testid={`${testPrefix}-settings-perception`} onClick={onOpenPerception} className={rowCls}>
@@ -1565,7 +1565,7 @@ export function SmsChatSettingsPage({
   onOpenProactive,
   /** 主动发消息入口行摘要（宿主用 proactiveCfgSummary 计算） */
   proactiveSummary,
-  /** 打开「感知设置」页（打字/电量/天气/日历/真机感知/看屏）；不传 = 隐藏该入口行 */
+  /** 打开「感知设置」页（打字/电量/天气/日历/看屏幕）；不传 = 隐藏该入口行 */
   onOpenPerception,
   /** 感知设置入口行摘要（宿主用 perceptionSummary 计算） */
   perceptionSummary,
@@ -1632,7 +1632,7 @@ export function SmsChatSettingsPage({
   onOpenProactive?: () => void;
   /** 主动发消息入口行摘要（宿主用 proactiveCfgSummary 计算；空 = 未开启） */
   proactiveSummary?: string;
-  /** 打开「感知设置」页（打字耗时/电量/天气/日历/ActivityWatch 真机感知/看屏）；不传 = 隐藏该入口行 */
+  /** 打开「感知设置」页（打字耗时/电量/天气/日历/看屏幕）；不传 = 隐藏该入口行 */
   onOpenPerception?: () => void;
   /** 感知设置入口行摘要（宿主用 perceptionSummary(sessionKey) 计算；空 = 未开启） */
   perceptionSummary?: string;
@@ -1816,7 +1816,7 @@ export function SmsChatSettingsPage({
           </div>
         </div>
 
-        {/* 感知设置：打字耗时/电量/天气/日历/ActivityWatch真机感知/看屏（独立二级页，按会话独立开关，发送时现场读取） */}
+        {/* 感知设置：打字耗时/电量/天气/日历/看屏幕（独立二级页，按会话独立开关，发送时现场读取） */}
         {onOpenPerception && (
           <div className={`${t.cardCls} mt-3`}>
             <button type="button" data-testid="sms-settings-perception" onClick={onOpenPerception} className={t.rowCls}>

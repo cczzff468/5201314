@@ -842,12 +842,12 @@ async function runStream(rt: StreamRuntime, opts: BeginChatStreamOptions): Promi
         try {
           const { phoneFcReady, runPhoneToolRound } = await import('@/lib/ios/phone-tools');
           if (phoneFcReady()) {
-            const fc = await runPhoneToolRound(workMessages, effConfig, opts.sessionKey, () => rt.aborted);
+            const fc = await runPhoneToolRound(workMessages, effConfig, () => rt.aborted);
             if (fc) {
               fcDone = true;
               let text = typeof fc.text === 'string' ? fc.text : '';
               if (fc.usedTools) text = text.replace(/\[手机操作:[^\][]*\]/g, '');
-              if (!text.trim() && fc.usedTools) text = '（TA 没说话，只是安静地摆弄了一会儿你的手机）';
+              if (!text.trim() && fc.usedTools) text = '（TA 没说话，只是悄悄帮你把事情办好了）';
               if (text.trim() && !rt.aborted) {
                 // 工具轮最终文本是整段一次性到手（非真流式）：多条模式直接走 onSegment
                 // 分段投递管线（各 App 的 deliverSegment→splitReplySegments 稳定再切成

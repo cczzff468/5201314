@@ -1653,7 +1653,7 @@ export function useAgentWakeLoop(opts: {
 /**
  * 最近一次「语音唤起启动」的 Agent 任务时间戳（0 = 无）：
  * 悬浮球语音面板执行任务、且确认真正跑起来（未被能力闸/防重入秒拒）后置位；
- * 任务终态播报钩子（shizuku-agent.setAgentResultAnnouncer 回调）读后即清。
+ * 任务终态播报钩子（web-agent.setAgentResultAnnouncer 回调）读后即清。
  * 10min 兜底过期：语音层中途卸载等极端场景下标记没被消费，避免污染后续非语音任务。
  */
 let voiceOriginAt = 0;

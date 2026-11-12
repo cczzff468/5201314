@@ -708,8 +708,7 @@ export async function nativeRequestShizukuPermission(): Promise<ShizukuPermissio
 
 // ---------------- Shizuku 能力实验室（v1.3：通用 shell 执行 + 静默截屏） ----------------
 // 原生侧只提供带白名单的 shizukuExec / shizukuScreencap 两个底座方法，
-// 全部具体能力（点按/滑动/输入/按键/打开App/强杀/冻结/安装/媒体/网络开关/
-// 通知快照/前台App/电量/剪贴板/短信/通话/logcat/自授权）在 @/lib/ios/shizuku-lab
+// 全部具体能力（已随 v1.9.35 真机操控退役下线）原在 @/lib/ios/shizuku-lab
 // 里拼 argv + 解析 —— 加能力只改网页、不用重新打包 APK。
 
 export type { ShizukuExecOptions, ShizukuExecResult };

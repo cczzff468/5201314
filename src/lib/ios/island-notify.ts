@@ -47,8 +47,9 @@ import { useChatFloat } from './chat-float-store';
 
 // ---------------- 类型 ----------------
 
-/** 通知归属 App（AppId 的聊天/生活服务子集；meituan = 订单状态通知，taobao = 淘宝订单状态通知） */
-export type NotifyApp = 'wechat' | 'qq' | 'chat' | 'meituan' | 'taobao';
+/** 通知归属 App（AppId 的聊天/生活服务子集；meituan = 订单状态通知，taobao = 淘宝订单状态通知；
+ *  v1.9.35 新增 music/forum/notes/clock/weather = Web 工具操作过程卡专用（不进聊天导航链路） */
+export type NotifyApp = 'wechat' | 'qq' | 'chat' | 'meituan' | 'taobao' | 'music' | 'forum' | 'notes' | 'clock' | 'weather';
 
 /** 点击跳转目标：单聊给 contactId，群聊给 groupId（群聊宿主在 wechat/qq App 内）；
  *  meituan/taobao 订单目标 contactId = 订单 id（目标订单待支付时可带 pay=true 直达收银台，否则进订单详情） */
@@ -87,6 +88,10 @@ export interface IslandNotification {
   /** 合并条数（同一会话连续多条 > 1 时展示） */
   count: number;
   target: NotifyTarget;
+  /** v1.9.35 Web 工具操作弹窗标记：AI 动手做底层操作时灵动岛弹出的过程卡
+   *  （机主需求：底层操作过程不在聊天气泡里出日志，全部改为灵动岛弹窗播报）。
+   *  true 时卡片点击=收起（不跳转）、不走聊天免打扰/提示音/系统通知链路。 */
+  tool?: boolean;
 }
 
 interface IslandNotifyState {
@@ -374,15 +379,59 @@ export function pushChatNotification(input: ChatNotifyInput): void {
   maybeWebNotification(n);
 }
 
+// ---------------- Web 工具操作弹窗（v1.9.35：底层操作过程灵动岛播报） ----------------
+
+/**
+ * AI 调用 Web 工具（发消息/发帖/放歌/记备忘录/定闹钟…）时，每一次底层操作都从
+ * 灵动岛弹出一张过程卡（机主需求：聊天气泡里严禁出现操作日志，过程全部走这里）。
+ *
+ * 与聊天通知的差异：
+ * - 不走聊天免打扰 / DND / 提示音 / Web 系统通知链路（这是界面反馈不是消息）；
+ * - 卡片点击 = 直接收起（不跳转任何会话）；
+ * - 同一时间最多排队 4 条（复用聊天通知队列上限，防工具链刷屏）。
+ */
+export function pushToolIslandCard(input: { app?: NotifyApp; title: string; body: string; avatar?: string | null }): void {
+  if (typeof window === 'undefined') return;
+  const body = truncateBody(input.body, 100);
+  if (!body && !input.title.trim()) return;
+  const st = useIslandNotify.getState();
+  const n: IslandNotification = {
+    id: genNotifyId(),
+    mergeKey: 'tool-op',
+    app: input.app ?? 'chat',
+    avatar: input.avatar ?? null,
+    title: truncateBody(input.title, 24),
+    subtitle: '',
+    body: body || '…',
+    count: 1,
+    target: { app: input.app ?? 'chat' },
+    tool: true,
+  };
+  if (!st.current && !st.exiting) {
+    st.show(n);
+    armAutoDismiss();
+  } else if (st.current) {
+    st.show(n);
+    if (!st.exiting) armAutoDismiss();
+  } else {
+    st.enqueue(n);
+  }
+}
+
 // ---------------- Web Notification（离开网页也通知；不支持/拒绝 → 应用内弹窗兜底） ----------------
 
-/** App 图标（public 下真实图标，与主屏一致） */
+/** App 图标（public 下真实图标，与主屏一致；music/forum/notes/clock/weather 为工具过程卡角标用） */
 export const NOTIFY_APP_ICON: Record<NotifyApp, string> = {
   wechat: '/icons/wechat.png',
   qq: '/icons/qq.png',
   chat: '/icons/chat.png',
   meituan: '/icons/meituan-app.png',
   taobao: '/icons/taobao.png',
+  music: '/icons/music.png',
+  forum: '/icons/forum.png',
+  notes: '/icons/notes.png',
+  clock: '/icons/clock.png',
+  weather: '/icons/weather.png',
 };
 
 let webPermAsked = false;

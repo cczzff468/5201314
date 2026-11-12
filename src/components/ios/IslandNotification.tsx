@@ -29,7 +29,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { motion, type Transition } from 'framer-motion';
-import { MessageCircle, PictureInPicture2 } from 'lucide-react';
+import { MessageCircle, PictureInPicture2, Sparkles } from 'lucide-react';
 import {
   activateCurrentNotification,
   armAutoDismiss,
@@ -44,7 +44,7 @@ import { useGlobalCall } from '@/lib/ios/global-call';
 import { useIncomingCall } from '@/lib/ios/incoming-call';
 import { selectResolvedTheme, useSettings, useSystemDark, useUI } from '@/lib/ios/store';
 
-const APP_NAME: Record<NotifyApp, string> = { wechat: '微信', qq: 'QQ', chat: '信息', meituan: '美团', taobao: '淘宝' };
+const APP_NAME: Record<NotifyApp, string> = { wechat: '微信', qq: 'QQ', chat: '信息', meituan: '美团', taobao: '淘宝', music: '音乐', forum: 'X论坛', notes: '备忘录', clock: '时钟', weather: '天气' };
 
 /** 展开姿态：宽高自适应内容（framer 会测 auto 尺寸做补间） */
 const EXPANDED = { width: 'auto', height: 'auto', borderRadius: 24 } as const;
@@ -84,7 +84,8 @@ function NotifyCard({ held }: { held: boolean }) {
   const current = useIslandNotify((s) => s.current)!;
   const exiting = useIslandNotify((s) => s.exiting);
   // v73.4 点击选择菜单：微信单聊可开小窗 → 点卡片弹菜单；其余目标直接进全屏（原行为）
-  const canFloat = current.app === 'wechat' && !!current.target.contactId && !current.target.groupId;
+  // v1.9.35 工具过程卡（tool=true）：点击一律只收起，不弹菜单不跳转
+  const canFloat = !current.tool && current.app === 'wechat' && !!current.target.contactId && !current.target.groupId;
   const [menuOpen, setMenuOpen] = useState(false);
   const cardRef = useRef<HTMLDivElement>(null);
   // 跟随手机主题（浅色=浅色磨砂卡片深色文字；深色=纯黑卡片白字），auto 跟随系统
@@ -115,6 +116,11 @@ function NotifyCard({ held }: { held: boolean }) {
 
   const onCardClick = () => {
     if (exiting) return;
+    // v1.9.35 工具过程卡：点击 = 直接收起（灵动岛播报完自然消失，不跳转）
+    if (current.tool) {
+      useIslandNotify.getState().beginExit();
+      return;
+    }
     if (!canFloat) {
       activateCurrentNotification();
       return;
@@ -152,9 +158,18 @@ function NotifyCard({ held }: { held: boolean }) {
         transition={exiting ? { duration: 0.08 } : { duration: 0.16, delay: 0.14 }}
         className="flex w-[336px] max-w-full items-center gap-2.5 px-2 py-2.5"
       >
-        {/* 角色头像 + App 图标角标（微信消息带微信角标、QQ 消息带 QQ 角标、信息带信息角标） */}
+        {/* 头像位：工具过程卡用 Sparkles 灵动标识，其余 = 角色头像 + App 图标角标 */}
         <div className="relative h-[38px] w-[38px] shrink-0">
-          {current.avatar ? (
+          {current.tool ? (
+            <div
+              aria-hidden
+              className={`flex h-full w-full items-center justify-center rounded-full ${
+                dark ? 'bg-white/15 text-white' : 'bg-black/10 text-black/60'
+              }`}
+            >
+              <Sparkles className="h-[18px] w-[18px]" strokeWidth={2} />
+            </div>
+          ) : current.avatar ? (
             <img
               src={current.avatar}
               alt=""

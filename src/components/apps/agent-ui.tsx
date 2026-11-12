@@ -19,7 +19,7 @@ import {
   subscribeDangerRequests,
   useAgentState,
   type DangerConfirmRequest,
-} from '@/lib/ios/shizuku-agent';
+} from '@/lib/ios/web-agent';
 import { useUI } from '@/lib/ios/store';
 
 const trunc = (s: string, n: number): string => (s.length > n ? `${s.slice(0, n)}…` : s);
@@ -154,7 +154,7 @@ export function AgentRunnerBar() {
 
 /**
  * 敏感操作确认卡宿主（z-[95]：高于来电胶囊层之下的全部界面）。
- * 订阅未决请求，同一时间只展示最早一条；挂载状态同步给 shizuku-agent
+ * 订阅未决请求，同一时间只展示最早一条；挂载状态同步给 web-agent
  * （未挂载时 requestDangerConfirm 自动降级 window.confirm）。
  */
 export function AgentConfirmHost() {
@@ -218,7 +218,7 @@ export function AgentGlobalLayers() {
 
 /**
  * Agent 运行状态探针（C1 语音唤起智能体用）：渲染 null，纯副作用——
- * 订阅 Agent 运行态并以布尔回传。给不能静态引入 shizuku-agent（引擎体量大）的
+ * 订阅 Agent 运行态并以布尔回传。给不能静态引入 web-agent（引擎体量大）的
  * 轻组件（悬浮球）借道本文件（PhoneShell 本就 dynamic 引它）订阅运行态。
  */
 export function AgentRunningProbe({ onChange }: { onChange: (running: boolean) => void }) {

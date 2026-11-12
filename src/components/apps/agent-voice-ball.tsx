@@ -63,7 +63,7 @@ import { assistantGreeting } from '@/lib/ios/assistant-persona';
 import { matchOpenAppIntent, openAppPage } from '@/lib/ios/agent-app-nav';
 import { matchWeatherIntent, runWeatherReport } from '@/lib/ios/agent-weather';
 
-// Agent 运行状态探针：shizuku-agent 引擎体量大，不能静态打进本组件包体——
+// Agent 运行状态探针：web-agent 引擎体量大，不能静态打进本组件包体——
 // 借道 agent-ui（PhoneShell 本就 dynamic 引它）订阅运行态，只回传一个轻量布尔
 const AgentRunningProbe = dynamic(() => import('@/components/apps/agent-ui').then((m) => m.AgentRunningProbe), {
   ssr: false,
@@ -434,7 +434,7 @@ export default function AgentVoiceBall() {
       setSessionOpen(false);
       setSessionMsg('');
       try {
-        const { runAgentTask } = await import('@/lib/ios/shizuku-agent');
+        const { runAgentTask } = await import('@/lib/ios/web-agent');
         // 「再试一次/继续/还是不行」这类模糊指代脱离会话就没法办：把最近对话一并交给
         // Agent 规划层（recentChat 注入 system prompt），LLM 才知道「再试」的是什么任务
         const recent = turnsRef.current
@@ -711,13 +711,13 @@ export default function AgentVoiceBall() {
   useEffect(() => {
     const seq = ++regSeqRef.current;
     let alive = true;
-    void import('@/lib/ios/shizuku-agent').then((m) => {
+    void import('@/lib/ios/web-agent').then((m) => {
       if (!alive || seq !== regSeqRef.current) return;
       m.setAgentResultAnnouncer((text: string) => handleResultRef.current(text));
     });
     return () => {
       alive = false;
-      void import('@/lib/ios/shizuku-agent').then((m) => {
+      void import('@/lib/ios/web-agent').then((m) => {
         if (seq === regSeqRef.current) m.setAgentResultAnnouncer(null);
       });
     };
@@ -847,7 +847,7 @@ export default function AgentVoiceBall() {
       {/* 本组件专用动画/滚动条样式（类名唯一，不外泄） */}
       <style>{`@keyframes agentVoiceSpin{to{transform:rotate(360deg)}}@keyframes agentVoiceBreath{0%,100%{transform:scale(1);opacity:.7}50%{transform:scale(1.05);opacity:1}}.ph-voice-scroll{scrollbar-width:none;-ms-overflow-style:none}.ph-voice-scroll::-webkit-scrollbar{display:none}`}</style>
 
-      {/* Agent 运行状态探针（dynamic 拉起 agent-ui → shizuku-agent；纯副作用不渲染内容） */}
+      {/* Agent 运行状态探针（dynamic 拉起 agent-ui → web-agent；纯副作用不渲染内容） */}
       <AgentRunningProbe onChange={onRunningChange} />
 
       {/* ================= 全屏语音会话（Siri 式） ================= */}

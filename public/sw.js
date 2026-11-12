@@ -19,14 +19,14 @@
  *   携带 ?open= 深链/hash 变体不膨胀）→ 断网 / 超时(8s) / 5xx 时回退缓存壳（上次在线时整页
  *   HTML + 它引用的静态 chunk 都在缓存里 → 应用能完整启动，IndexedDB 数据本就在本地）→
  *   连壳缓存都没有（装完从没成功打开过）才回退内联「离线提示页」。
- *   壳缓存与静态缓存同版本（v81）：版本升级 activate 时一并重建，杜绝「新 HTML 引用已被
+ *   壳缓存与静态缓存同版本（v82）：版本升级 activate 时一并重建（v1.9.35 删除 shizuku-agent/shizuku-lab 模块，旧缓存会引用已删 chunk——bump 强制全量重建），杜绝「新 HTML 引用已被
  *   清掉的旧 chunk」的分叉；静态缓存加 400 条 FIFO 上限，防 dev 热编译 chunk 无限膨胀。
  */
 
 /** 缓存版本号：缓存策略变更时 bump（旧缓存会在 activate 时清除） */
-const CACHE_VER = 'ai-static-v81';
+const CACHE_VER = 'ai-static-v82';
 /** 离线壳缓存（HTML 导航；与静态缓存同版本号，activate 一并清理重建） */
-const SHELL_CACHE = 'ai-shell-v81';
+const SHELL_CACHE = 'ai-shell-v82';
 /** 壳缓存键：所有导航变体（?open=… / #hash）归一化为根路径单键，防变体膨胀 */
 const SHELL_KEY = new URL('/', self.location.origin).href;
 /** 静态缓存条目上限（FIFO 修剪：dev 热编译不断换 chunk URL，不设限会无限膨胀） */

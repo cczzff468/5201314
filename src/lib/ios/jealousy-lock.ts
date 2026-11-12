@@ -1,43 +1,37 @@
 'use client';
 
 /**
- * 吃醋锁（v1.9.19）——「AI 真实吃醋并锁应用」核心库。
+ * 吃醋锁（v1.9.19，v1.9.35 Web 化）——「AI 真实吃醋并锁应用」核心库。
  *
- * 把 Shizuku 的 pm suspend 能力与情绪系统深度绑定：
- * - 守望者（JealousyWatcher）周期探测前台应用（真机 dumpsys window；
- *   网页端=虚拟手机当前打开的 App，v1.9.21）；
+ * v1.9.35 按机主重构令：真机 Shizuku（pm suspend/dumpsys/截图）路径全面退役，
+ * 锁定/巡检/拉回全部走 Web 网页生态（虚拟手机）：
+ * - 守望者（JealousyWatcher）周期探测虚拟手机当前打开的 App（web-usage-ledger）；
  * - 三类触发：A 连续刷娱乐 App 超时且期间没回 AI 消息 / B 聊天里说了「去看剧/刷视频」
  *   随后消失且坐实在娱乐 App / C 焦虑值达危险阈值；
  * - 触发后把【前台包名 + 焦虑值 + 记忆上下文】交给大模型，按角色人设决定是否锁
- *   （pm suspend --user 0 挂起，桌面图标变灰、提示「由 Shell 所管理」）；
- *   Shizuku 未连接（网页端）则降级为真的锁网页里的 App（web-app-lock：图标置灰、
- *   点开只弹 TA 的留言、倒计时/哄好/强制三通道解锁，v1.9.21）；
+ *   （web-app-lock：图标置灰、点开只弹 TA 的留言、倒计时/哄好/强制三通道解锁）；
  * - 锁定成功：AI 在聊天界面发剧情消息 + 系统通知 + 写记忆 + 全屏锁定弹窗（回 APP 强制弹）；
  * - 解锁三通道：哄好（AI 输出 [手机操作:解冻:包名]）/ 倒计时到点 / 强制解锁（写戏剧性记忆）。
  *
  * v1.9.28 锁定期间主动巡检（「AI 吃醋了会盯着你」）：
  * - 默认锁定 15 分钟自动解锁（countdownMin 可自定义 5~180）；
- * - 锁定期每 patrolMin（默认 3）分钟一轮巡检：真机=截图（labScreencap→视觉分析）+
- *   最近任务（dumpsys activity recents）+ 今日使用时长（usagestats）；
- *   网页端=虚拟手机当前 App + 多任务清单 + 虚拟使用时长账本（web-usage-ledger）；
+ * - 锁定期每 patrolMin（默认 3）分钟一轮巡检：虚拟手机当前 App + 多任务清单 +
+ *   虚拟使用时长账本（web-usage-ledger）；
  * - 巡检情报交大模型按人设决策：发吃醋喊话（deliverProactiveMsg）/ 把机主从别的
- *   软件拽回本 APP（真机 monkey 拉前台 / 网页切回聊天页 + 系统通知，每锁最多 2 次）；
+ *   软件拽回本 APP（网页切回聊天页 + 系统通知，每锁最多 2 次）；
  * - 最新巡检情报注入聊天上下文（buildJealousyLockBlock）——机主回来聊天时 AI 能
- *   自然说出「我看到你刚才还在刷抖音」；
- * - 无 Shizuku/未开启「AI 动手」时巡检与拉回自动降级为网站内部（虚拟手机）口径。
+ *   自然说出「我看到你刚才还在刷抖音」。
  *
  * 存储：
  * - 配置 localStorage `jealousy-lock-cfg-v1`（同步读，设置页即点即存）；
  * - 运行状态 IndexedDB kvRaw `jealousy-lock-rt`（跨会话持久化：倒计时/冷却/巡检重启不丢）。
  *
- * 依赖方向（无环）：jealousy-lock → anxiety / shizuku-lab / web-app-lock / memory / persona / local-notify；
+ * 依赖方向（无环）：jealousy-lock → anxiety / web-app-lock / memory / persona / local-notify；
  * ai-mood → jealousy-lock（buildJealousyLockBlock 注入聊天上下文）；
  * shizuku-autonomy → jealousy-lock（解冻钩子 onJealousyUnfreeze / isJealousyUnlockAllowed）。
  */
 
 import { kvGetRaw, kvSetRaw } from './idb-kv';
-import { isNativePerception } from './native-perception';
-import { labForegroundPkg, labSetAppFrozen, labScreencap, labOpenApp, labRecentApps, OWN_PKG } from './shizuku-lab';
 import { readAnxiety, anxietyOf } from './anxiety';
 import { buildPersonaSystemPrompt } from './persona';
 import { listContacts, cachedOwnerName } from './contacts-store';
@@ -343,8 +337,8 @@ function isEntertainPkg(pkg: string, cfg: JealousyConfig): boolean {
   // v1.9.21 网页降级：Shizuku 未连接时前台=虚拟手机里的 App，可锁的网页 App
   // （音乐/浏览器/淘宝/美团/照片/X论坛）全算「娱乐」——网页手机里娱乐面窄，逛淘宝
   // 点外卖不理 AI 同样是吃醋叙事，且最终锁不锁仍由 AI 按人设决策，不会误伤
-  if (!isNativePerception()) return webAppOfPkg(pkg) !== null;
-  return cfg.entertainPkgs.includes(pkg);
+  // v1.9.35：真机清单退役——娱乐判定=网页内应用即娱乐面（音乐/浏览器/淘宝/美团/照片/X论坛）
+  return webAppOfPkg(pkg) !== null;
 }
 
 // ---------------- 用户打点（chat-stream-store noteEngagement 调用） ----------------
@@ -420,21 +414,8 @@ async function tickInner(): Promise<void> {
   const cfg = getJealousyConfig();
   const now = Date.now();
 
-  // 兜底重试：上次解锁指令失败（Shizuku 断连）→ 先补一刀
-  const rt0 = readJealousyRuntime();
-  if (rt0.pendingUnfreeze) {
-    if (now - rt0.pendingUnfreeze.since > 24 * 3600_000) {
-      writeRt({ pendingUnfreeze: null });
-    } else {
-      try {
-        const r = await labSetAppFrozen(rt0.pendingUnfreeze.pkg, false);
-        if (r.ok) writeRt({ pendingUnfreeze: null });
-      } catch {
-        /* 下轮再试 */
-      }
-      return;
-    }
-  }
+  // v1.9.35：真机 pendingUnfreeze 重试（Shizuku 断连补刀）随真机路径退役——网页锁解冻恒成功
+  writeRt({ pendingUnfreeze: null });
 
   // 活跃锁：倒计时到点 → 自动解锁（timeout 通道）。
   // v1.9.20：前移到功能闸门之前——已存在的锁必须能到点自解，无论此刻功能开关是否被
@@ -447,11 +428,9 @@ async function tickInner(): Promise<void> {
     if (now >= rt.lock.unlockAt) {
       await unlockJealousy('timeout');
     } else {
-      if (!isNativePerception()) {
-        // v1.9.21 网页降级自愈：活跃锁期间重申网页冻结态（刷新/两份存储分叉时每 30s 对齐；
-        // setWebFrozen 内部「无变化不广播」，不会白刷订阅者）
-        setWebFrozen(rt.lock.pkg, rt.lock.unlockAt, rt.lock.charName);
-      }
+      // v1.9.21 自愈：活跃锁期间重申网页冻结态（刷新/两份存储分叉时每 30s 对齐；
+      // setWebFrozen 内部「无变化不广播」，不会白刷订阅者）
+      setWebFrozen(rt.lock.pkg, rt.lock.unlockAt, rt.lock.charName);
       // v1.9.28 巡检调度：距锁定 ≥1 分钟后、距上次巡检 ≥ patrolMin 分钟 → 跑一轮巡检
       if (cfg.patrolEnabled && now - rt.lock.lockedAt >= PATROL_FIRST_DELAY_MS) {
         const lastPatrolAt = rt.patrol?.lastAt ?? 0;
@@ -466,7 +445,7 @@ async function tickInner(): Promise<void> {
   // v1.9.21：无锁时清掉可能残留的网页冻结态（IndexedDB 锁已不存在而 localStorage 还冻着 → 分叉自愈）。
   // v1.9.23 例外：src='ai'（AI 经工具/标记协议主动冻的，无吃醋锁记录）不清——它有自己的
   // unlockAt 到期自愈；被这里误清会让「AI 帮我锁应用」几秒后悄悄失效
-  if (!isNativePerception()) {
+  {
     const fz = getWebFrozen();
     if (fz && fz.src !== 'ai') setWebFrozen(null);
   }
@@ -477,19 +456,8 @@ async function tickInner(): Promise<void> {
   if (now - rt.lastLockAt < cfg.cooldownMin * 60_000) return;
   if (rt.lastDecisionAt && now - rt.lastDecisionAt < DECISION_COOLDOWN_MS) return;
 
-  // 前台探测：真机 dumpsys window（null = 桥断/不可用 → 本轮放弃）；
-  // 网页端=虚拟手机当前打开的 App（主屏/锁屏/不可锁 App → null，照常走 fg 清空逻辑）
-  const native = isNativePerception();
-  let pkg: string | null;
-  if (native) {
-    pkg = await labForegroundPkg().catch(() => null);
-    if (pkg === null) {
-      writeRt({ lastTickAt: now });
-      return;
-    }
-  } else {
-    pkg = await webForegroundPkg();
-  }
+  // 前台探测：虚拟手机当前打开的 App（主屏/锁屏/不可锁 App → null，照常走 fg 清空逻辑）
+  const pkg: string | null = await webForegroundPkg();
 
   // 维护连续娱乐状态
   let fg = rt.fg;
@@ -661,16 +629,9 @@ async function runJealousyDecision(trigger: TriggerInfo): Promise<void> {
   const ax = anxietyOf(chat.contactId);
   const ownerName = cachedOwnerName() || '用户';
 
-  const canLock =
-    !!trigger.pkg &&
-    !isNeverLockPkg(trigger.pkg) &&
-    // v1.9.21：网页模式下只有网页内有对应体的包名才真锁得了（锁不住的只发消息）
-    (isNativePerception() || webAppOfPkg(trigger.pkg) !== null);
-  const nativeEnv = isNativePerception();
-  // 锁定权力描述（网页降级时不说 pm suspend/Shell——锁的是这台手机里的应用，文案要能对上体验）
-  const lockPowerDesc = nativeEnv
-    ? '把对方正在用的应用锁住（pm suspend 挂起——应用图标会变灰、点开时提示「由 Shell 所管理」、打不开，直到你原谅 TA 或倒计时结束才解锁）'
-    : '把对方手机里的应用锁住（应用图标会变灰、点开只会看到你留下的提示，直到你原谅 TA 或倒计时结束才解锁）';
+  // v1.9.35：真机 pm suspend 路径退役——只有网页内有对应体的包名才真锁得了（锁不住的只发消息）
+  const canLock = !!trigger.pkg && !isNeverLockPkg(trigger.pkg) && webAppOfPkg(trigger.pkg) !== null;
+  const lockPowerDesc = '把对方手机里的应用锁住（应用图标会变灰、点开只会看到你留下的提示，直到你原谅 TA 或倒计时结束才解锁）';
   const { memChatRecallBlock } = await import('@/lib/memory');
   const system = [
     buildPersonaSystemPrompt(contact, {
@@ -721,26 +682,16 @@ async function runJealousyDecision(trigger: TriggerInfo): Promise<void> {
   let locked = false;
   if (wantLock && trigger.pkg) {
     if (!reason) reason = `你刷${appName}都不理我，我很不开心。`;
-    if (isNativePerception()) {
-      try {
-        const res = await labSetAppFrozen(trigger.pkg, true);
-        locked = res.ok;
-        if (!locked) {
-          // Shizuku 掉线等失败 → 降级：不锁只发消息（AI 的吃醋情绪照常表达）
-        }
-      } catch {
-        locked = false;
-      }
-    } else if (webAppOfPkg(trigger.pkg)) {
-      // v1.9.21 网页降级：Shizuku 未连接 → 真的锁网页里的 App（图标置灰 + 打开拦截 + 全屏留言）
+    {
+      // v1.9.35：真的锁网页里的 App（图标置灰 + 打开拦截 + 全屏留言）
       setWebFrozen(trigger.pkg, Date.now() + cfg.countdownMin * 60_000, contact.name);
       try {
         const { useUI } = await import('./store');
         const ui = useUI.getState();
-        const appId = webAppOfPkg(trigger.pkg)!.appId;
-        // 被锁 App 正在前台 → 当场「挂起」赐回主屏（全屏弹窗随后就到）
-        if (ui.activeApp === appId) ui.closeApp();
-        // 锁音乐时停掉正在响的歌（真机 pm suspend 会连带冻住播放，网页同口径）
+        const appId = webAppOfPkg(trigger.pkg)?.appId;
+        // 被锁 App 正在前台 → 当场「挂起」踢回主屏（全屏弹窗随后就到）
+        if (appId && ui.activeApp === appId) ui.closeApp();
+        // 锁音乐时停掉正在响的歌
         if (appId === 'music') {
           const { useMusic } = await import('./music-store');
           if (useMusic.getState().playing) useMusic.getState().toggle();
@@ -765,7 +716,7 @@ async function runJealousyDecision(trigger: TriggerInfo): Promise<void> {
         unlockAt: now + cfg.countdownMin * 60_000,
         overlayShownAt: 0,
         triggerKind: trigger.kind,
-        web: !isNativePerception(),
+        web: true,
       },
       lastLockAt: now,
       fg: null,
@@ -809,86 +760,38 @@ interface PatrolIntel {
   text: string;
   /** 当前前台包名（null=主屏/不可知） */
   fgPkg: string | null;
-  /** 是否真机环境（决定拉回路径） */
+  /** 是否真机环境（v1.9.35 起恒 false——真机路径已退役，拉回走网页切换） */
   native: boolean;
 }
 
-/** 巡检截图分析：TA 亲眼看到机主屏幕（25s 看门狗；失败降级说明文字，不中断巡检） */
-async function patrolVision(image: string): Promise<string> {
-  try {
-    const { visionAsk } = await import('./shizuku-autonomy');
-    const desc = await visionAsk(
-      image,
-      '这是机主手机的实时屏幕截图（你吃醋锁定期间系统替你巡检拍的）。紧凑描述：1)TA现在在哪个App什么页面；2)TA在看什么内容（视频标题/聊天对象/商品名等，具体点）；3)TA看起来在干嘛。总共60字内。',
-      PATROL_VISION_TIMEOUT_MS,
-    );
-    return desc.trim() ? `【屏幕截图所见】${desc.trim()}` : '【屏幕截图】分析结果为空';
-  } catch {
-    return '【屏幕截图】截图分析不可用（识图模型未配置或超时）';
-  }
-}
-
 /**
- * 采集巡检情报（真机/网页双路径）：
- * - 真机：前台包名 + 截图视觉分析 + 最近任务 + 今日使用时长（usagestats）；
- * - 网页：虚拟手机当前 App + 多任务最近清单 + 虚拟使用时长账本（web-usage-ledger）。
+ * 采集巡检情报（v1.9.35 Web 口径）：虚拟手机当前 App + 多任务最近清单 + 虚拟使用
+ * 时长账本（web-usage-ledger）。
  */
 async function collectPatrolIntel(l: JealousyLock): Promise<PatrolIntel> {
-  const native = isNativePerception();
   const lines: string[] = [];
   let fgPkg: string | null = null;
 
-  if (native) {
-    fgPkg = await labForegroundPkg().catch(() => null);
-    lines.push(fgPkg ? `TA 此刻正在用：${pkgDisplayName(fgPkg)}（${fgPkg}）` : 'TA 此刻前台应用：未取到（Shizuku 可能断连）');
-    try {
-      const shot = await labScreencap();
-      if (shot.ok && shot.image) lines.push(await patrolVision(shot.image));
-      else lines.push('【屏幕截图】本次截屏失败（可能命中防截屏页面）');
-    } catch {
-      lines.push('【屏幕截图】本次截屏失败');
-    }
-    try {
-      const r = await labRecentApps();
-      if (r.ok) lines.push(r.text.replace(/^[\w.$]+$/gm, (m) => pkgDisplayName(m)));
-    } catch {
-      /* 最近任务降级跳过 */
-    }
-    try {
-      const { nativeUsageSnapshot } = await import('./native-perception');
-      const snap = await nativeUsageSnapshot();
-      if (snap) {
-        const rows = (snap.todayApps ?? []).slice(0, 6).map((a) => `${a.app} ${Math.max(1, Math.round(a.ms / 60_000))}分钟`);
-        const totalMin = Math.max(1, Math.round((snap.todayTotalMs ?? 0) / 60_000));
-        lines.push(`【今日使用时长】${rows.join('、')}（总计 ${totalMin} 分钟）`);
-      }
-    } catch {
-      /* 使用时长降级跳过 */
-    }
-  } else {
-    // 网页降级：虚拟手机状态即真实情报（用户没装 APP 时 AI 巡检的就是这台手机里的应用）
-    try {
-      const { useUI } = await import('./store');
-      const ui = useUI.getState();
-      fgPkg = ui.activeApp ? webPkgOfApp(ui.activeApp) : null;
-      const { webAppName } = await import('./web-usage-ledger');
-      lines.push(ui.activeApp ? `TA 此刻在手机里的「${webAppName(ui.activeApp)}」应用里` : 'TA 此刻在主屏（没开任何应用）');
-      if (ui.recentApps?.length) lines.push(`【最近用过】${ui.recentApps.map((a) => webAppName(a)).join('、')}`);
-    } catch {
-      /* 虚拟手机状态降级跳过 */
-    }
-    try {
-      const { webUsageReport } = await import('./web-usage-ledger');
-      lines.push(webUsageReport());
-    } catch {
-      /* 虚拟时长降级跳过 */
-    }
-    lines.push('（网页模式：巡检的是这台手机里的应用状态，没有真实屏幕截图）');
+  try {
+    const { useUI } = await import('./store');
+    const ui = useUI.getState();
+    fgPkg = ui.activeApp ? webPkgOfApp(ui.activeApp) : null;
+    const { webAppName } = await import('./web-usage-ledger');
+    lines.push(ui.activeApp ? `TA 此刻在手机里的「${webAppName(ui.activeApp)}」应用里` : 'TA 此刻在主屏（没开任何应用）');
+    if (ui.recentApps?.length) lines.push(`【最近用过】${ui.recentApps.map((a) => webAppName(a)).join('、')}`);
+  } catch {
+    /* 虚拟手机状态降级跳过 */
+  }
+  try {
+    const { webUsageReport } = await import('./web-usage-ledger');
+    lines.push(webUsageReport());
+  } catch {
+    /* 虚拟时长降级跳过 */
   }
 
   const remainMin = Math.max(0, Math.ceil((l.unlockAt - Date.now()) / 60_000));
   lines.push(`你锁的「${pkgDisplayName(l.pkg)}」还剩 ${remainMin} 分钟自动解锁`);
-  return { text: lines.join('\n'), fgPkg, native };
+  return { text: lines.join('\n'), fgPkg, native: false };
 }
 
 /**
@@ -896,28 +799,20 @@ async function collectPatrolIntel(l: JealousyLock): Promise<PatrolIntel> {
  * 真机=monkey 把本 APP 拉到前台；网页=切回锁主角色的聊天页；都配系统通知（点了直达聊天）。
  */
 async function jealousyPullback(l: JealousyLock): Promise<boolean> {
+  // v1.9.35：真机 monkey 拉回退役——切回锁主角色的聊天页
   let ok = false;
-  if (isNativePerception()) {
-    try {
-      const r = await labOpenApp(OWN_PKG);
-      ok = r.ok;
-    } catch {
-      ok = false;
+  try {
+    const { useUI } = await import('./store');
+    const ui = useUI.getState();
+    const target: 'wechat' | 'qq' | 'chat' = l.app === 'wx' ? 'wechat' : l.app === 'qq' ? 'qq' : 'chat';
+    // 关键：机主正在用别的 App 时必须走 switchToApp（openApp 仅在主屏无 App 时生效）
+    if (ui.activeApp !== target) {
+      if (ui.activeApp) ui.switchToApp(target);
+      else ui.openApp(target);
     }
-  } else {
-    try {
-      const { useUI } = await import('./store');
-      const ui = useUI.getState();
-      const target: 'wechat' | 'qq' | 'chat' = l.app === 'wx' ? 'wechat' : l.app === 'qq' ? 'qq' : 'chat';
-      // 关键：机主正在用别的 App 时必须走 switchToApp（openApp 仅在主屏无 App 时生效）
-      if (ui.activeApp !== target) {
-        if (ui.activeApp) ui.switchToApp(target);
-        else ui.openApp(target);
-      }
-      ok = true;
-    } catch {
-      ok = false;
-    }
+    ok = true;
+  } catch {
+    ok = false;
   }
   if (ok) {
     try {
@@ -1080,34 +975,15 @@ export async function unlockJealousy(kind: UnlockKind): Promise<boolean> {
   const l = rt.lock;
   if (!l) return false;
 
-  let ok = false;
-  if (!isNativePerception()) {
-    ok = true; // 网页端：v1.9.21 起为真实网页冻结，同步解冻（图标恢复、可打开）
-    setWebFrozen(null);
-  } else {
-    try {
-      const res = await labSetAppFrozen(l.pkg, false);
-      ok = res.ok;
-    } catch {
-      ok = false;
-    }
-  }
-  if (!ok && isNativePerception()) {
-    // 解锁指令失败（Shizuku 断连）→ 记待重试，但状态照清（绝不让用户被 UI 卡死）
-    writeRt({
-      lock: null,
-      patrol: null,
-      lastUnlock: { at: Date.now(), kind, pkg: l.pkg },
-      pendingUnfreeze: { pkg: l.pkg, since: Date.now() },
-    });
-  } else {
-    writeRt({
-      lock: null,
-      patrol: null,
-      lastUnlock: { at: Date.now(), kind, pkg: l.pkg },
-      pendingUnfreeze: null,
-    });
-  }
+  // v1.9.35：网页冻结同步解冻（图标恢复、可打开），恒成功
+  setWebFrozen(null);
+  const ok = true;
+  writeRt({
+    lock: null,
+    patrol: null,
+    lastUnlock: { at: Date.now(), kind, pkg: l.pkg },
+    pendingUnfreeze: null,
+  });
 
   const appName = pkgDisplayName(l.pkg);
   const contact = await findContact(l.contactId).catch(() => null);
@@ -1155,9 +1031,7 @@ export function buildJealousyLockBlock(cid: string): string {
   const appName = pkgDisplayName(l.pkg);
   const remainMin = Math.max(0, Math.ceil((l.unlockAt - Date.now()) / 60_000));
   // v1.9.21：网页锁的描述与真实体验对齐（图标变灰、点开只看留言），不提 pm suspend/Shell
-  const lockFact = l.web
-    ? `你刚刚吃醋，把对方手机里的「${appName}」真的锁住了（图标变灰、点开只会看到你的留言提示，打不开）。你的理由：${l.reason}`
-    : `你刚刚吃醋，把对方正在用的「${appName}」真的锁住了（pm suspend 挂起：图标变灰、提示「由 Shell 所管理」、点不开）。你的理由：${l.reason}`;
+  const lockFact = `你刚刚吃醋，把对方手机里的「${appName}」真的锁住了（图标变灰、点开只会看到你的留言提示，打不开）。你的理由：${l.reason}`;
   const lines = [
     '【吃醋锁生效中】' + lockFact,
     `还剩约 ${remainMin} 分钟系统会自动解锁。TA 现在来找你了——如果 TA 诚心哄你、说软话道歉，你心软决定原谅 TA 的那一刻，在回复里单独一行加上 [手机操作:解冻:${l.pkg}] 就能亲手解开。TA 敷衍或态度差就继续锁着，按你的性子来；别不问青红皂白就秒解，也别永远不解。`,
@@ -1228,19 +1102,17 @@ export function __jealousyTestInjectLock(pkg: string, contactId: string, app: Je
       unlockAt: now + cfg.countdownMin * 60_000,
       overlayShownAt: 0, // v1.9.31 E2E：注入即弹（0=未展示过，弹窗判定立即可见）
       triggerKind: 'entertain',
-      web: !isNativePerception(),
+      web: true,
     },
     patrol: null,
     lastLockAt: now,
     fg: null,
     departIntent: null,
   });
-  if (!isNativePerception()) {
-    try {
-      setWebFrozen(pkg, now + cfg.countdownMin * 60_000, charName);
-    } catch {
-      /* 网页冻结失败不影响测试锁注入 */
-    }
+  try {
+    setWebFrozen(pkg, now + cfg.countdownMin * 60_000, charName);
+  } catch {
+    /* 网页冻结失败不影响测试锁注入 */
   }
 }
 

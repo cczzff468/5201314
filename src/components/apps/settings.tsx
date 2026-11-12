@@ -66,6 +66,13 @@ import {
   Sun,
   Trash2,
   Type,
+  AlarmClock,
+  BarChart3,
+  CloudSun,
+  Music,
+  NotebookPen,
+  Send,
+  Undo2,
   Upload,
   User,
   UsersRound,
@@ -141,7 +148,7 @@ import { displayNameOf, type ContactRecord } from '@/lib/contacts';
 import { isWebSpeechSupported } from '@/lib/ios/web-speech';
 // v1.3 AI 动手（Shizuku 自主权）+ APP 更新：设置页新入口
 import { AUTONOMY_CAPS, getAutonomyConfig, setAutonomyCap, setAutonomyMaster } from '@/lib/ios/shizuku-autonomy';
-import { isNativePerception, nativeShizukuStatus } from '@/lib/ios/native-perception';
+import { isNativePerception } from '@/lib/ios/native-perception';
 // C1 语音唤起智能体（v1.9.3 独立设置页：唤醒名 / 悬浮球 / 连续监听）
 import {
   DEFAULT_WAKE_NAME,
@@ -807,7 +814,7 @@ function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
           </div>
         </div>
 
-        {/* AI 感知与操控（v1.3）：Shizuku 自主权总入口——逐项开关控制 AI 能真实动手机的哪些能力；
+        {/* AI 感知与操控：Web 工具自主权总入口——逐项开关控制 AI 能真实操作哪些网页应用能力；
             v1.9.3 语音唤起智能体拆出为独立设置页（同分组独立入口） */}
         <div className="mb-2 mt-6 px-8 text-[13px] text-muted-foreground">AI 感知与操控</div>
         <div className="mx-4 divide-y divide-black/[0.05] overflow-hidden rounded-[22px] bg-white/55 shadow-[0_8px_28px_rgba(17,24,39,0.06)] ring-1 ring-white/70 backdrop-blur-2xl dark:divide-white/[0.06] dark:bg-white/[0.06] dark:ring-white/[0.09]">
@@ -820,7 +827,7 @@ function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
             <RowIcon icon={ScanEye} tone={TONE_GREEN} />
             <span className="min-w-0 flex-1">
               <span className="block truncate text-[16px]">AI 动手</span>
-              <span className="mt-0.5 block truncate text-[12px] text-muted-foreground">点按/滑动/开关App/截屏…逐项授权</span>
+              <span className="mt-0.5 block truncate text-[12px] text-muted-foreground">发消息/发帖/放歌/备忘录/闹钟…逐项授权</span>
             </span>
             <span className="max-w-[50%] shrink-0 truncate text-[15px] text-muted-foreground">
               {autonomyMaster ? `已开启 · ${autonomyOnCount} 项` : '已关闭'}
@@ -954,27 +961,23 @@ function AutonomySwitch({ on, onToggle, label, testId }: { on: boolean; onToggle
   );
 }
 
-/** v1.9.14：能力行黑白线条裸图标（每项一个语义图标，美化 AI 动手页；无外框） */
+/** v1.9.14：能力行黑白线条裸图标（每项一个语义图标，美化 AI 动手页；无外框）。
+ *  v1.9.35：图标随 Web 工具能力表全面换新 */
 const AUTONOMY_CAP_ICONS: Record<string, LucideIcon> = {
-  tap: MousePointerClick,
-  swipe: Hand,
-  type: Keyboard,
-  key: Command,
-  open: AppWindow,
+  sendmsg: Send,
+  forumpost: PenLine,
+  forumlike: Heart,
+  music: Music,
+  webstate: Eye,
+  memo: NotebookPen,
+  alarm: AlarmClock,
+  weather: CloudSun,
+  openapp: AppWindow,
   agent: Bot,
-  applist: LayoutGrid,
-  volume: Volume2,
-  kill: XCircle,
+  pullback: Undo2,
   freeze: Snowflake,
-  uninstall: Trash2,
-  net: Wifi,
-  screencap: Camera,
-  foreground: Layers,
-  notify: Bell,
-  battery: BatteryCharging,
-  clipboard: ClipboardList,
-  sms: MessageSquare,
-  calls: PhoneIncoming,
+  recents: Layers,
+  usage: BarChart3,
 };
 
 /** 能力开关行：黑白线条图标 + 名称 + 一句话说明 + 大开关（危险项名称带红色「危险」角标） */
@@ -1498,21 +1501,6 @@ function AgentVoicePage({ onBack }: { onBack: () => void }) {
 function ShizukuAutonomyPage({ onBack }: { onBack: () => void }) {
   // 惰性初始化（页面仅在用户交互后挂载 = 纯客户端，可安全读 localStorage）
   const [cfg, setCfg] = useState(() => getAutonomyConfig());
-  const nativeMode = isNativePerception();
-  // Shizuku 实时状态：undefined = 探测中；null = 非原生/超时；对象 = 状态
-  const [shizuku, setShizuku] = useState<{ running: boolean; granted: boolean; version: number } | null | undefined>(undefined);
-
-  useEffect(() => {
-    if (!nativeMode) return;
-    let cancelled = false;
-    void (async () => {
-      const r = await nativeShizukuStatus();
-      if (!cancelled) setShizuku(r && typeof r === 'object' ? { running: Boolean(r.running), granted: Boolean(r.granted), version: Number(r.version) || 0 } : null);
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [nativeMode]);
 
   const flipMaster = () => setCfg(setAutonomyMaster(!cfg.master));
   const flipCap = (key: string) => setCfg(setAutonomyCap(key, !cfg.caps[key]));
@@ -1524,28 +1512,12 @@ function ShizukuAutonomyPage({ onBack }: { onBack: () => void }) {
       <div className="no-scrollbar flex-1 overflow-y-auto pb-8">
         {/* 说明卡；v1.9.13 卡片左右延伸（mx-4→mx-1）+ 图标改黑白线条 */}
         <div className="mx-1 mt-4 rounded-[22px] bg-white/55 p-4 text-[13px] leading-relaxed ring-1 ring-white/70 backdrop-blur-2xl dark:bg-white/[0.06] dark:ring-white/[0.09]">
-          <p className="font-medium">让 AI 真实操控这部手机（Shizuku 引擎）</p>
+          <p className="font-medium">让 AI 真实操作这台手机里的网页应用</p>
           <p className="mt-1.5 text-muted-foreground">
-            总开关打开后，AI 会按 TA 的人设、记忆和聊天上下文自主决定何时动手（你说「帮我关掉抖音」就强杀抖音、深夜劝睡可以关流量）；
-            下面每一项都可以单独关掉——关掉的项 AI 既不知道也用不了，硬来会被直接拒绝。
+            这台手机里的所有 App（微信/QQ/信息/X论坛/音乐/备忘录/时钟/天气）都活在网页里；
+            总开关打开后，TA 会按人设、记忆和聊天上下文自主决定何时动手（你说「去微信给Z发条消息」TA 就真的发、
+            「帮我记一下」TA 就真的存备忘录）；下面每一项都可以单独关掉——关掉的项 AI 既不知道也用不了，硬来会被直接拒绝。
           </p>
-          {!nativeMode ? (
-            <p className="mt-2 text-[12px] text-[#FF9500]">
-              当前在浏览器里：这些开关只在手机 APP（AI-Phone v1.3+）里生效，网页端预览无效。去「APP 更新」装最新版。
-            </p>
-          ) : shizuku === undefined ? (
-            <p className="mt-2 text-[12px] text-muted-foreground">正在检测 Shizuku 状态…</p>
-          ) : shizuku && shizuku.running && shizuku.granted ? (
-            <p className="mt-2 text-[12px] text-[#34C759]">Shizuku 已就绪（v{shizuku.version || '?'}）· 重启手机后需在 Shizuku APP 里重新激活</p>
-          ) : shizuku && shizuku.running && !shizuku.granted ? (
-            <p className="mt-2 text-[12px] text-[#FF9500]">
-              Shizuku 已运行但未授权本 APP——去聊天设置 → 感知设置 → Shizuku 区块点「去授权」，或用能力实验室的「一键自授权」。
-            </p>
-          ) : (
-            <p className="mt-2 text-[12px] text-[#FF9500]">
-              Shizuku 未运行：先在手机上打开 Shizuku APP 激活（每次重启手机后需重新激活），未激活时 AI 的动手指令会如实报失败。
-            </p>
-          )}
         </div>
 
         {/* 总开关 */}
@@ -1555,7 +1527,7 @@ function ShizukuAutonomyPage({ onBack }: { onBack: () => void }) {
             <span className="min-w-0 flex-1">
               <span className="block truncate text-[16px]">允许 AI 动手</span>
               <span className="mt-0.5 block truncate text-[11.5px] text-muted-foreground">
-                {cfg.master ? 'AI 已获授权，按人设与语境自主使用下面的能力' : '关着 = AI 完全不知道自己能操控手机'}
+                {cfg.master ? 'AI 已获授权，按人设与语境自主使用下面的能力' : '关着 = AI 完全不知道自己能动手机里的应用'}
               </span>
             </span>
             <AutonomySwitch on={cfg.master} onToggle={flipMaster} label="允许 AI 动手" testId="autonomy-master-switch" />
@@ -1582,7 +1554,7 @@ function ShizukuAutonomyPage({ onBack }: { onBack: () => void }) {
 
         <p className="mx-1 mt-4 text-[11.5px] leading-relaxed text-muted-foreground">
           开关即点即存（下一次发消息立即生效）。危险项默认关着，确认要让 AI 碰再手动开。
-          想手动试用这些能力：聊天设置 → 感知设置 → Shizuku 能力实验室。
+          （v1.9.35：真机 Shizuku 操控已退役，这些能力全部作用在这台手机的网页生态内。）
         </p>
       </div>
     </DetailShell>

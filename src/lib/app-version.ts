@@ -11,9 +11,9 @@
  */
 
 /** 当前最新版本（与 android-shell versionName 保持一致） */
-export const APP_VERSION = '1.9.34';
+export const APP_VERSION = '1.9.35';
 /** 版本号数字（与 android-shell versionCode 保持一致；覆盖安装要求只增不减） */
-export const APP_VERSION_CODE = 50;
+export const APP_VERSION_CODE = 51;
 
 export interface AppReleaseNote {
   version: string;
@@ -24,6 +24,17 @@ export interface AppReleaseNote {
 
 /** 版本历史（新→旧；设置 › APP 更新 页渲染，最新一条即当前版本） */
 export const APP_RELEASE_NOTES: AppReleaseNote[] = [
+  {
+    version: '1.9.35',
+    date: '2026-11-12',
+    items: [
+      '智能体工作流全面转入 Web 网页生态：真机底层操控（pm suspend/uiautomator/Shizuku 截屏点按）全面退役——不再依赖真机授权与登录，所有操作都在这台手机里的网页应用内真实完成，再也不会卡顿、读错界面',
+      'AI 工具调用全面重定义：sendWebMessage（微信/QQ/信息里替你发消息）、postForum（论坛发帖）、likePost（点赞）、playMusic（放歌）、getWebState（看你此刻在哪）、saveMemo（记备忘录）、setAlarm（定闹钟）、queryWeather（查天气）——多步任务链式执行，真实结果回传 AI，AI 再用自然话汇报（「我已经在微信上给Z发过去了哦」）',
+      '聊天气泡彻底干净：底层操作过程一律从灵动岛弹出过程卡播报，严禁 (内心独白)(正在操作) 等日志出现在气泡里',
+      '感知设置瘦身：「真机感知」（APP 原生/ActivityWatch）整卡下线，保留打字思考/电量/日历/两地天气/看屏幕；Shizuku 能力实验室同步下线；吃醋锁/巡检/拉回全部转为网页内口径',
+      '语音智能体任务换新引擎：悬浮球一句话委派的任务改由 Web 智能体循环执行（同一套网页工具），进度卡照常从灵动岛弹出、可随时急停',
+    ],
+  },
   {
     version: '1.9.34',
     date: '2026-11-12',

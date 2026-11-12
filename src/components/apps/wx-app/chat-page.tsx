@@ -1679,20 +1679,7 @@ export function ChatPage({
             t += 1;
             void (async () => {
               // 串行队列：多步指令（打开→播放→切歌）按书写顺序逐个执行，轮到本条才亮技能胶囊
-              // v1.5 Agent 逐步播报：纯展示 sys 行（sys 不带 op → 历史组装的基础过滤只放行 sys.pat/sys.op，
-              // 本行直接被剔除不回喂 AI；最终结果仍走下方 op:true 结果行回喂）
-              const res = await enqueuePhoneOp(argText, () => opPill.start(peer.name, cmdName), (text) => {
-                const pm: WxMsg = {
-                  id: uid(),
-                  role: 'peer',
-                  content: '',
-                  time: Date.now(),
-                  kind: 'sys',
-                  sys: { text },
-                };
-                saveMsgs(peer.id, appendWithBoundary(sessionKey, loadMsgs(peer.id), pm));
-                setMsgs((prev) => (prev.some((m) => m.id === pm.id) ? prev : [...prev, pm]));
-              });
+              const res = await enqueuePhoneOp(argText, () => opPill.start(peer.name, cmdName));
               opPill.finish(res.ok, res.text);
               const sysMsg: WxMsg = {
                 id: uid(),

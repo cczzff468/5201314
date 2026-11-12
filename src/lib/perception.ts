@@ -1,7 +1,8 @@
 'use client';
 
 /**
- * 感知设置（第七十四轮）：让 AI 感知真实世界的一组开关 + 上下文块构建。
+ * 感知设置：让 AI 感知真实世界的一组开关 + 上下文块构建 —— v1.9.35 真机感知（ActivityWatch/
+ * APP 原生 UsageStats）随真机操控一起退役，只保留网页内可用的感知项。
  *
  * 数据源（用户在「聊天设置 › 感知设置」按会话开关，localStorage 单键 JSON map
  * chat-perception-v1 持久化，经 scopedConvKey 按账号隔离，默认全关）：
@@ -10,8 +11,6 @@
  *  - 电量感知：真实设备电量/充电状态（Battery Status API，@/lib/ios/battery）；
  *  - 日历/节假日感知：公历+农历日期、星期、节假日、最近节日倒计时（复用 time-aware 的节日算法）；
  *  - 天气感知：用户所在地 + 角色所在地两处天气（Open-Meteo 代理 + 城市搜索，30 分钟缓存）；
- *  - 真机感知（ActivityWatch）：屏幕使用时间 / 正在玩什么App / 前台切换记录 /
- *    解锁事件 / 媒体播放 / 浏览器URL / 今日统计聚合（@/lib/ios/activitywatch）；
  *  - 看屏幕（VLM）：串流地址或浏览器屏幕分享抓帧 → 识图描述（@/lib/ios/screen-share）。
  *
  * 采集范式（与 crossCtxRef 同款）：runAiTurn 是同步函数不能 await ——
@@ -24,12 +23,10 @@
 import { toBjTime, getFestivals } from './time-aware';
 import { solarToLunar } from './ios/lunar';
 import { getBatterySnapshot } from './ios/battery';
-import { fetchAwSnapshot, getCachedAw, normalizeAwUrl, type AwSnapshot } from './ios/activitywatch';
 import { getCachedScreenDescription, refreshScreenDescription } from './ios/screen-share';
 import { promptTextOf } from '@/lib/prompt-entries';
 import { scopedConvKey } from './ios/accounts';
 import { searchCity, fetchWeather, weatherCodeInfo } from '@/components/apps/weather-core';
-import { isNativePerception } from './ios/native-perception';
 
 // ---------------- 配置存取 ----------------
 
@@ -46,25 +43,9 @@ export interface PerceptionConfig {
   userLoc: string;
   /** 角色（TA）所在地（天气查询用，自由文本城市名） */
   aiLoc: string;
-  /** ActivityWatch 服务地址（如 http://localhost:5600；真机感知数据源） */
-  awUrl: string;
-  /** 屏幕使用时间（今日分 App 时长） */
-  screenTime: boolean;
-  /** 正在玩什么 App（当前前台） */
-  currentApp: boolean;
-  /** 前台 App 切换记录（近期时间线） */
-  appHistory: boolean;
-  /** 解锁事件（今日次数/最近一次/凌晨次数） */
-  unlocks: boolean;
-  /** 媒体播放（正在听的歌/视频） */
-  media: boolean;
-  /** 浏览器 URL（正在浏览的网页） */
-  browser: boolean;
-  /** 今日统计聚合（总时长/切换次数/最长单次） */
-  stats: boolean;
   /** 看屏幕（VLM）：发送时抓一帧让 AI「看到」屏幕 */
   vlmScreen: boolean;
-  /** 屏幕串流地址（串流 App 的 MJPEG/单帧 JPEG 地址；空 = 用浏览器屏幕分享） */
+  /** 屏幕串流地址（串流工具的 MJPEG/单帧 JPEG 地址；空 = 用浏览器屏幕分享） */
   streamUrl: string;
 }
 
@@ -77,14 +58,6 @@ const DEFAULT_CFG: PerceptionConfig = {
   weather: false,
   userLoc: '',
   aiLoc: '',
-  awUrl: '',
-  screenTime: false,
-  currentApp: false,
-  appHistory: false,
-  unlocks: false,
-  media: false,
-  browser: false,
-  stats: false,
   vlmScreen: false,
   streamUrl: '',
 };
@@ -94,12 +67,8 @@ const DEFAULT_CFG: PerceptionConfig = {
 type BoolCfgKey = { [K in keyof PerceptionConfig]: PerceptionConfig[K] extends boolean ? K : never }[keyof PerceptionConfig];
 type StrCfgKey = { [K in keyof PerceptionConfig]: PerceptionConfig[K] extends string ? K : never }[keyof PerceptionConfig];
 
-const BOOL_KEYS: BoolCfgKey[] = [
-  'typing', 'battery', 'calendar', 'weather',
-  'screenTime', 'currentApp', 'appHistory', 'unlocks',
-  'media', 'browser', 'stats', 'vlmScreen',
-];
-const STR_KEYS: StrCfgKey[] = ['userLoc', 'aiLoc', 'awUrl', 'streamUrl'];
+const BOOL_KEYS: BoolCfgKey[] = ['typing', 'battery', 'calendar', 'weather', 'vlmScreen'];
+const STR_KEYS: StrCfgKey[] = ['userLoc', 'aiLoc', 'streamUrl'];
 
 function sanitize(v: unknown): PerceptionConfig {
   const out = { ...DEFAULT_CFG };
@@ -151,14 +120,9 @@ export function setPerception(sessionKey: string, patch: Partial<PerceptionConfi
   }
 }
 
-/** 任一 ActivityWatch 项开启（决定是否需要拉真机数据） */
-export function anyAwOn(cfg: PerceptionConfig): boolean {
-  return cfg.screenTime || cfg.currentApp || cfg.appHistory || cfg.unlocks || cfg.media || cfg.browser || cfg.stats;
-}
-
 /** 任一感知项开启 */
 export function perceptionAnyOn(cfg: PerceptionConfig): boolean {
-  return cfg.typing || cfg.battery || cfg.calendar || cfg.weather || anyAwOn(cfg) || cfg.vlmScreen;
+  return cfg.typing || cfg.battery || cfg.calendar || cfg.weather || cfg.vlmScreen;
 }
 
 /** 已开启项数（设置入口行摘要用） */
@@ -293,8 +257,6 @@ export async function prewarmPerception(sessionKey: string): Promise<void> {
     if (cfg.userLoc.trim()) jobs.push(weatherLineFor(cfg.userLoc).catch(() => null));
     if (cfg.aiLoc.trim()) jobs.push(weatherLineFor(cfg.aiLoc).catch(() => null));
   }
-  // APP 壳内无 awUrl 也拉（原生 UsageStats 优先，免装 ActivityWatch）
-  if (anyAwOn(cfg) && (normalizeAwUrl(cfg.awUrl) || isNativePerception())) jobs.push(fetchAwSnapshot(cfg.awUrl).catch(() => null));
   if (cfg.vlmScreen) jobs.push(refreshScreenDescription(cfg.streamUrl).catch(() => null));
   if (jobs.length === 0) return;
   await Promise.allSettled(jobs);
@@ -344,84 +306,11 @@ function calendarLines(): string {
   return parts.join('；');
 }
 
-function hostOfUrl(u: string): string {
-  try {
-    return new URL(u).hostname;
-  } catch {
-    return u.slice(0, 40);
-  }
-}
-
 // ---------------- 感知块构建（发送瞬间现场读取，同步） ----------------
 
 export interface PerceptionBlockOptions {
   /** 会话最后一条消息时间戳（打字计时兜底基线；AI 回复落地时间优先） */
   lastMsgTime?: number | null;
-}
-
-/** ActivityWatch/原生快照 → 各开关对应行 */
-function awLines(cfg: PerceptionConfig, aw: AwSnapshot): string[] {
-  const out: string[] = [];
-  if (cfg.currentApp && aw.current) {
-    // 已持续时长按 at 时间戳现场计算：缓存哪怕几分钟前的快照也能正确老化（正在玩 → 可能已放下）
-    const ongoingMs = aw.current.at > 0 ? Math.max(0, Date.now() - aw.current.at) : aw.current.ongoingMs;
-    const { app } = aw.current;
-    if (aw.current.ongoingMs > 0 && ongoingMs < 15 * 60_000) {
-      out.push(`用户此刻真机正在用：${app}（已持续 ${fmtDur(ongoingMs)}）`);
-    } else if (aw.current.ongoingMs > 0) {
-      out.push(`用户真机最近使用的前台 App：${app}（约 ${fmtDur(ongoingMs)} 前开始，现在可能已放下手机）`);
-    } else {
-      out.push(`用户真机最后使用的前台 App：${app}（约 ${fmtDur(ongoingMs)} 前用的，现在大概率已息屏或放下手机）`);
-    }
-  }
-  if (cfg.screenTime && Array.isArray(aw.todayApps) && aw.todayApps.length > 0) {
-    // v1.1：Top 5 → Top 8 + 打开次数 + 「等共 N 个」，别再只能报那几个
-    const apps = aw.todayApps;
-    const shown = apps
-      .slice(0, 8)
-      .map((x) => `${x.app} ${fmtDur(x.ms)}${x.opens ? `（今日打开 ${x.opens} 次）` : ''}`)
-      .join('、');
-    const rest = apps.length > 8 ? `等共 ${apps.length} 个 App` : '';
-    out.push(`用户今日真机分App使用：${shown}${rest}（合计 ${fmtDur(aw.todayTotalMs ?? 0)}）`);
-  }
-  if (cfg.appHistory) {
-    // 近 3 小时打开过哪些 App（用户问「我最近打开了什么」直接可答）
-    if (Array.isArray(aw.recentApps) && aw.recentApps.length > 0) {
-      const r = aw.recentApps
-        .slice(0, 8)
-        .map((x) => `${x.app}（最后 ${x.hhmm}${x.opens && x.opens > 1 ? `，今日第 ${x.opens} 次` : ''}）`)
-        .join('、');
-      out.push(`用户近 3 小时真机打开过的App：${r}`);
-    }
-    if (Array.isArray(aw.history) && aw.history.length > 0) {
-      const h = aw.history.slice(-12).map((x) => `${x.hhmm} ${x.app}`).join(' → ');
-      out.push(`用户近期App切换时间线：${h}`);
-    }
-  }
-  if (cfg.unlocks && aw.unlocks && aw.unlocks.count > 0) {
-    const u = aw.unlocks;
-    out.push(
-      `用户今日解锁手机 ${u.count} 次` +
-        (u.lastHhmm ? `（最近一次 ${u.lastHhmm}` + (u.nightCount > 0 ? `，凌晨 0-6 点解锁过 ${u.nightCount} 次` : '') + '）' : ''),
-    );
-  }
-  if (cfg.media && aw.media && (aw.media.title || aw.media.app)) {
-    const m = aw.media;
-    out.push(
-      `用户手机正在播放：${m.app}${m.title ? `《${m.title}》` : ''}${m.artist ? ` - ${m.artist}` : ''}` +
-        (m.state === 'playing' ? '' : `（${m.state === 'paused' ? '已暂停' : m.state || '未知状态'}）`),
-    );
-  }
-  if (cfg.browser && aw.web && aw.web.url) {
-    out.push(`用户正在浏览网页：${aw.web.title ? `「${aw.web.title}」（${hostOfUrl(aw.web.url)}）` : hostOfUrl(aw.web.url)}`);
-  }
-  if (cfg.stats && typeof aw.todayTotalMs === 'number' && aw.todayTotalMs > 0) {
-    out.push(
-      `用户今日真机统计：总使用 ${fmtDur(aw.todayTotalMs)}，切换 App ${aw.switchCount ?? 0} 次` +
-        (aw.longest ? `，最长单次 ${aw.longest.app} ${fmtDur(aw.longest.ms)}` : ''),
-    );
-  }
-  return out;
 }
 
 /**
@@ -459,11 +348,6 @@ export function buildPerceptionBlock(sessionKey: string, opts: PerceptionBlockOp
     const aiLine = cfg.aiLoc.trim() ? cache[cfg.aiLoc.trim()]?.line : undefined;
     if (userLine) lines.push(`用户所在地天气：${userLine}`);
     if (aiLine) lines.push(`你（角色）所在地天气：${aiLine}`);
-  }
-
-  if (anyAwOn(cfg)) {
-    const aw = getCachedAw(cfg.awUrl);
-    if (aw) lines.push(...awLines(cfg, aw));
   }
 
   if (cfg.vlmScreen) {

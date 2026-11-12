@@ -3482,13 +3482,7 @@ export function WxGroupChatPage({
                   void (async () => {
                     let agentSeq = 0; // v1.5 Agent 进度行序号（防同毫秒 id 撞车）
                     // 串行队列：多步指令（打开→播放→切歌）按书写顺序逐个执行，轮到本条才亮技能胶囊
-                    // v1.5 Agent 逐步播报：notice 纯展示行——noticeText 不以「手机操作」开头（〔智能体〕前缀），
-                    // 历史组装的基础过滤会把非「手机操作」notice 整体剔除，不回喂 AI；最终结果仍走下方结果行回喂
-                    const res = await enqueuePhoneOp(argText, () => opPill.start(charName, cmdName), (text) => {
-                      const pm: WxGroupMsg = { id: `${aiMsgId}-agent-${Date.now()}-${agentSeq++}`, role: 'peer', senderId: char.id, senderName: charName, content: '', time: Date.now(), kind: 'notice', noticeText: text };
-                      saveGroupMsgs(gid, [...loadGroupMsgs(gid), pm]);
-                      if (mountedRef.current) setMsgs(loadGroupMsgs(gid));
-                    });
+                    const res = await enqueuePhoneOp(argText, () => opPill.start(charName, cmdName));
                     opPill.finish(res.ok, res.text);
                     const sysMsg: WxGroupMsg = { id: `${aiMsgId}-sysres-${Date.now()}`, role: 'peer', senderId: char.id, senderName: charName, content: '', time: Date.now(), kind: 'notice', noticeText: `手机操作${res.ok ? '成功' : '失败'}：${res.text}` };
                     const cur = loadGroupMsgs(gid);
