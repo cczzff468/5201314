@@ -605,10 +605,12 @@ async function runStream(rt: StreamRuntime, opts: BeginChatStreamOptions): Promi
   let thinkDonePatched = false;
   let lastLivePatchAt = 0;
   const LIVE_THINK_PATCH_MS = 150;
-  // 条数多时消息总长更长：抬高 max_tokens 下限，防止多条连发被截断（代理与浏览器直连共用该配置）
+  // 条数多时消息总长更长：抬高 max_tokens 下限，防止多条连发被截断（代理与浏览器直连共用该配置）。
+  // v2.2：N×120 → N×220（8 条档从 960 → 1760 tokens）——机主反馈「AI 有时一次只发一条」，
+  // 下限系数已抬到 0.75、提示词区间更收紧，token 空间同步放宽让模型有足够余量发够下限条数。
   const effConfig =
     multi && opts.replyCount
-      ? { ...apiConfig, maxTokens: Math.max(apiConfig.maxTokens, opts.replyCount * 120) }
+      ? { ...apiConfig, maxTokens: Math.max(apiConfig.maxTokens, opts.replyCount * 220) }
       : apiConfig;
   /** 增量统一入口：原文累计 + 多条模式进分段器（立刻放出已凑齐的完整消息） */
   let raw = '';
