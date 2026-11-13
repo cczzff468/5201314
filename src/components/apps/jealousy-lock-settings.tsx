@@ -35,7 +35,6 @@ import {
   Radar,
   ShieldAlert,
   Smartphone,
-  Sparkles,
   Unlock,
 } from 'lucide-react';
 import { ChatToggle } from './chat-settings';
@@ -366,15 +365,6 @@ export function JealousyLockSection({
 
           <div className={`border-t ${dividerCls}`} />
 
-          {/* 锁定时长由 AI 按人设/记忆/上下文自定（v2.1：固定倒计时与两次吃醋冷却已下线） */}
-          <div className="flex w-full items-start gap-2.5 px-4 py-2.5">
-            <Sparkles size={17} strokeWidth={1.9} className="mt-0.5 shrink-0 text-black/50 dark:text-white/50" aria-hidden />
-            <p className="min-w-0 text-[13px] leading-relaxed text-black/55 dark:text-white/55">
-              锁多久由 TA 按人设/记忆/上下文自定
-            </p>
-          </div>
-
-          <div className={`border-t ${dividerCls}`} />
 
           {/* v1.9.28 锁定期间主动巡检 */}
           <div className="flex w-full items-center justify-between gap-3 px-4 py-2.5">
