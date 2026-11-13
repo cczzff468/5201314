@@ -1471,7 +1471,7 @@ function AgentVoicePage({ onBack }: { onBack: () => void }) {
   );
 }
 
-// ---------------- 权限给予（v1.9.36：系统权限/调试授权/授权模式/AI 动手范围；v1.9.38 能力开关下线·恒开，基础权限网页全可授） ----------------
+// ---------------- 权限给予（v1.9.36：系统权限/调试授权/授权模式/AI 动手范围；v1.9.38 能力开关下线·恒开；v1.9.40 弹窗去长文·提示精简·看门狗防卡「申请中」） ----------------
 
 /** 单个权限的运行时状态（v1.9.38：网页里也能授权，无「需真机」态） */
 type PermState = 'checking' | 'granted' | 'denied' | 'web-denied';
@@ -1498,14 +1498,12 @@ function PermStatusPill({ state }: { state: PermState }) {
   );
 }
 
-/** 权限定义（权限给予页数据源） */
+/** 权限定义（权限给予页数据源；v1.9.40 弹窗只留标题+按钮，不再带长说明） */
 interface PermDef {
   key: string;
   label: string;
   desc: string;
   icon: LucideIcon;
-  /** 授权弹窗里的详细说明 */
-  detail: string;
   /** 申请按钮文案 */
   actionLabel: string;
   /** 状态查询（返回 null = 非原生环境；granted 可选——桥异常时只有 canAsk） */
@@ -1552,7 +1550,6 @@ const PERM_DEFS: PermDef[] = [
     label: '通知权限',
     desc: '系统通知栏弹消息、后台离线推送',
     icon: Bell,
-    detail: '允许 AI Phone 发送系统通知（聊天气泡不在前台时的提醒、闹钟、来电、后台消息推送都需要通知权限）。Android 13+ 弹系统授权框；网页里弹浏览器授权框（不支持时点「允许通知」直接开启）。',
     actionLabel: '允许通知',
     query: async () => {
       const p = await querySystemNotifyPermission();
@@ -1573,7 +1570,6 @@ const PERM_DEFS: PermDef[] = [
     label: '麦克风权限',
     desc: '语音聊天、按住说话、喊名唤醒',
     icon: Mic,
-    detail: '录音权限：真机上弹 Android 系统授权框（RECORD_AUDIO）；网页里弹浏览器麦克风授权框（不支持时点「允许麦克风」直接开启）。',
     actionLabel: '允许麦克风',
     query: async () => {
       const r = await micPermission();
@@ -1593,7 +1589,6 @@ const PERM_DEFS: PermDef[] = [
     label: '位置权限',
     desc: '天气定位、地图、外卖/打车场景',
     icon: MapPin,
-    detail: '精确定位权限（ACCESS_FINE_LOCATION）：真机上弹系统授权框（或 Shizuku 直授）；网页里弹浏览器定位授权框（不可用时点「允许定位」直接开启）。',
     actionLabel: '允许定位',
     query: async () => {
       const r = await locationPermission();
@@ -1613,7 +1608,6 @@ const PERM_DEFS: PermDef[] = [
     label: '悬浮窗权限',
     desc: '聊天悬浮窗、悬浮球在其他应用上层显示',
     icon: PanelTop,
-    detail: '让悬浮窗/悬浮球能显示在其他应用上层（SYSTEM_ALERT_WINDOW）。真机上跳「在其他应用上层显示」设置页或 Shizuku 直授；网页里点「去开启悬浮窗」即完成授权。',
     actionLabel: '去开启悬浮窗',
     query: async () => {
       const r = await overlayPermission();
@@ -1632,7 +1626,6 @@ const PERM_DEFS: PermDef[] = [
     label: '电池优化豁免',
     desc: '息屏后保持监听/常驻通知不被系统限制',
     icon: BatteryCharging,
-    detail: '加入电池优化白名单（不因息屏休眠被系统限制后台），语音唤醒监听、后台消息、闹钟才可靠。真机上弹系统确认框或 Shizuku 直授；网页里点「允许」即完成授权。',
     actionLabel: '允许忽略电池优化',
     query: async () => {
       const r = await batteryPermission();
@@ -1651,7 +1644,6 @@ const PERM_DEFS: PermDef[] = [
     label: '存储权限',
     desc: '媒体库读取（正在听什么歌的识别）',
     icon: Database,
-    detail: '媒体库读取（正在听什么歌的识别）。真机上跳系统通知使用权设置页开启；网页里点「去开启」即完成授权。',
     actionLabel: '去开启',
     query: async () => {
       const r = await nativeMediaPermission();
@@ -1670,7 +1662,6 @@ const PERM_DEFS: PermDef[] = [
     label: '使用情况权限',
     desc: 'App 使用时长感知（Cap-go 标准引擎）',
     icon: BarChart3,
-    detail: '使用情况访问权限（PACKAGE_USAGE_STATS）：AI 感知「你今天用了多久手机、都在用什么App」需要它。真机上跳系统设置页开启；网页里点「去开启」即完成授权。',
     actionLabel: '去开启',
     query: async () => {
       const r = await nativeUsagePermission();
@@ -1829,7 +1820,23 @@ function PermissionHubPage({ onBack }: { onBack: () => void }) {
     if (!dialogPerm) return;
     setGrantBusy(true);
     try {
-      const r = await dialogPerm.request();
+      // v1.9.40 看门狗（仅网页环境）：浏览器授权框不弹/不响应（微信·小红书等内嵌 WebView、被 iframe 策略拦截）时
+      // Promise.race 9 秒强制完成并落网页授权账本——按钮绝不再永远卡在「申请中…」；
+      // 真机保持原行为（系统授权框等待用户点选属正常态）。
+      let r: { ok: boolean; note?: string };
+      if (native) {
+        r = await dialogPerm.request();
+      } else {
+        r = await Promise.race([
+          dialogPerm.request(),
+          new Promise<{ ok: boolean; note?: string }>((res) => {
+            window.setTimeout(() => {
+              writeWebPermGrant(dialogPerm.key, true);
+              res({ ok: true, note: '已开启' });
+            }, 9000);
+          }),
+        ]);
+      }
       if (r.ok) {
         setDialogPerm(null);
         showToast(r.note ?? '已授权');
@@ -1877,14 +1884,10 @@ function PermissionHubPage({ onBack }: { onBack: () => void }) {
   return (
     <DetailShell title="权限给予" onBack={onBack} gray>
       <div className="no-scrollbar flex-1 overflow-y-auto pb-8">
-        {/* 说明卡 */}
+        {/* 说明卡（v1.9.40 精简为一行） */}
         <div className="mx-1 mt-4 rounded-[22px] bg-white/55 p-4 text-[13px] leading-relaxed ring-1 ring-white/70 backdrop-blur-2xl dark:bg-white/[0.06] dark:ring-white/[0.09]">
-          <p className="font-medium">权限中心：系统权限 · 调试授权 · AI 动手</p>
-          <p className="mt-1.5 text-muted-foreground">
-            在这里给 AI Phone 授予权限（点权限行就能弹授权）：通知/麦克风/位置/悬浮窗/电池优化/存储/使用情况
-            在网页里即可直接开启（真机上走系统授权框/设置页/Shizuku 直授）；
-            AI 动手能力始终开启——你让 TA 做什么就做什么，TA 也会按人设与记忆主动帮你；
-            「AI 动手范围」决定动手作用在这台手机里的网站还是真实手机。
+          <p className="text-muted-foreground">
+            点权限行即可开启；AI 动手能力始终开启——你让 TA 做什么就做什么，TA 也会按人设与记忆主动帮你。
           </p>
         </div>
 
@@ -1917,10 +1920,10 @@ function PermissionHubPage({ onBack }: { onBack: () => void }) {
               <span className="block truncate text-[16px]">Shizuku 服务</span>
               <span className="mt-0.5 block truncate text-[11.5px] text-muted-foreground">
                 {shizuku === 'running'
-                  ? '已连接并授权 · 真机命令/直授通道可用'
+                  ? '已连接并授权'
                   : shizuku === 'checking'
                     ? '检测中…'
-                    : '未授权——点「去授权」开启（真机经 Shizuku APP，网页直接开启）'}
+                    : '未授权'}
               </span>
             </span>
             <PermStatusPill
@@ -1946,7 +1949,7 @@ function PermissionHubPage({ onBack }: { onBack: () => void }) {
           <ModeRadioRow
             icon={Cpu}
             label="CAP-go 插件"
-            desc="标准引擎：使用时长/感知走 Cap-go 插件，免额外授权"
+            desc="使用时长/感知走 Cap-go 插件"
             selected={engine === 'standard'}
             onSelect={() => pickEngine('standard')}
             testId="engine-capgo"
@@ -1954,17 +1957,12 @@ function PermissionHubPage({ onBack }: { onBack: () => void }) {
           <ModeRadioRow
             icon={Terminal}
             label="Shizuku 模式"
-            desc="shell 权限直读系统账本：更快更强，需 Shizuku 已授权"
+            desc="shell 直读系统账本，需 Shizuku"
             selected={engine === 'shizuku'}
             onSelect={() => pickEngine('shizuku')}
             testId="engine-shizuku"
           />
         </div>
-        <p className="mx-1 mt-1.5 text-[11.5px] leading-relaxed text-muted-foreground">
-          授权模式决定感知数据（使用时长/后台应用）的采集通道：CAP-go 插件是标准通道（需上面「使用情况权限」）；
-          Shizuku 模式经 shell 权限直读系统账本（免使用情况授权、不受锁屏限制，Shizuku 不可用时自动降级 CAP-go）。
-          {!native ? '当前在浏览器里，仅 APK 真机生效。' : ''}
-        </p>
 
         {/* ===== AI 动手范围 ===== */}
         <SectionLabel icon={MousePointerClick} tone="#FF2D55">AI 动手范围</SectionLabel>
@@ -1972,7 +1970,7 @@ function PermissionHubPage({ onBack }: { onBack: () => void }) {
           <ModeRadioRow
             icon={AppWindow}
             label="网站里面"
-            desc="AI 只操作这台手机里的网页应用（微信/QQ/论坛/音乐…）"
+            desc="AI 只操作手机里的网页应用"
             selected={target === 'web'}
             onSelect={() => pickTarget('web')}
             testId="target-web"
@@ -1980,36 +1978,24 @@ function PermissionHubPage({ onBack }: { onBack: () => void }) {
           <ModeRadioRow
             icon={Smartphone}
             label="真机"
-            desc="AI 经 Shizuku 操作真实手机：点按/滑动/输入/拉起App/截屏"
+            desc="AI 经 Shizuku 操作真实手机"
             selected={target === 'device'}
             onSelect={() => pickTarget('device')}
             testId="target-device"
           />
         </div>
         <p className="mx-1 mt-1.5 text-[11.5px] leading-relaxed text-muted-foreground">
-          {target === 'device'
-            ? '真机模式：AI 的点按/滑动/输入/按键/真机打开/看屏幕/强杀等命令会真实作用在你的手机上（经 Shizuku，能力常开无需开关）。网页应用能力（发消息/放歌/备忘录…）两种模式下都可用。'
-            : '网站模式（默认）：AI 的全部动手能力都作用在这台手机里的网页应用上，绝不碰真实手机。切到「真机」后 AI 额外获得真机命令（点按/滑动/输入/截屏/强杀…，经 Shizuku）。'}
-        </p>
-
-        {/* v1.9.38 AI 动手能力恒开（总开关与逐项开关全部下线）：一段说明替代原开关组 */}
-        <p className="mx-1 mt-4 text-[11.5px] leading-relaxed text-muted-foreground">
-          AI 动手能力始终开启，无需任何开关：网页动手（替你发消息/放歌/记备忘录/论坛发帖点赞…）与真机动手
-          {target === 'device' ? '（点按/滑动/输入/截屏/强杀…，经 Shizuku）' : '（切到「真机」后：点按/滑动/输入/截屏/强杀…）'}
-          都随时可用——你让 TA 做什么就做什么，TA 也会按人设、记忆与上下文主动使用工具帮你。
+          {target === 'device' ? '真机命令会真实作用在你的手机上（经 Shizuku）。' : '动手只作用在手机里的网页应用，不碰真实手机。'}
         </p>
       </div>
 
-      {/* 权限授权确认弹窗（点权限行弹出：说明 + 去开启） */}
+      {/* 权限授权确认弹窗（v1.9.40 iOS 式：标题 + 暂不/开启，无长说明） */}
       <AlertDialog open={!!dialogPerm} onOpenChange={(o) => { if (!o) setDialogPerm(null); }}>
         <AlertDialogContent className="w-[270px] gap-0 rounded-[14px] p-0 sm:w-[270px] sm:max-w-[270px]">
-          <AlertDialogHeader className="gap-1.5 px-5 pb-4 pt-5 sm:text-center">
+          <AlertDialogHeader className="px-5 pb-5 pt-6 sm:text-center">
             <AlertDialogTitle className="text-center text-[17px] font-semibold leading-snug">
               {dialogPerm ? `开启${dialogPerm.label}？` : ''}
             </AlertDialogTitle>
-            <AlertDialogDescription className="text-center text-[13px] leading-snug">
-              {dialogPerm?.detail}
-            </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter className="flex-row border-t border-black/[0.08] dark:border-white/[0.12]">
             <AlertDialogCancel className="mt-0 flex-1 border-0 border-r border-black/[0.08] py-3 text-[16px] dark:border-white/[0.12]">暂不</AlertDialogCancel>

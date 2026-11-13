@@ -522,7 +522,9 @@ export async function requestLocationPermission(): Promise<{ ok: boolean; via: '
       navigator.geolocation.getCurrentPosition(
         (pos) => res(pos),
         (err) => res(err.code), // 1=用户拒绝/站点被阻止 2=位置不可用 3=超时
-        { timeout: 15_000, maximumAge: 600_000 },
+        // v1.9.40：15s→8s——授权框不弹/不响应的环境（内嵌 WebView、iframe 策略拦截）里别让弹窗干等太久；
+        // 设置页 doGrant 还有 9s 看门狗兜底，两层保障「申请中」绝不永卡
+        { timeout: 8_000, maximumAge: 600_000 },
       );
     });
     return { ok: Boolean(r && typeof r !== 'number'), via: 'web' };

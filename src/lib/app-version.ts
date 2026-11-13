@@ -11,9 +11,9 @@
  */
 
 /** 当前最新版本（与 android-shell versionName 保持一致） */
-export const APP_VERSION = '1.9.39';
+export const APP_VERSION = '1.9.40';
 /** 版本号数字（与 android-shell versionCode 保持一致；覆盖安装要求只增不减） */
-export const APP_VERSION_CODE = 55;
+export const APP_VERSION_CODE = 56;
 
 export interface AppReleaseNote {
   version: string;
@@ -24,6 +24,15 @@ export interface AppReleaseNote {
 
 /** 版本历史（新→旧；设置 › APP 更新 页渲染，最新一条即当前版本） */
 export const APP_RELEASE_NOTES: AppReleaseNote[] = [
+  {
+    version: '1.9.40',
+    date: '2026-11-13',
+    items: [
+      '修复授权弹窗永远卡在「申请中…」：浏览器授权框不弹/不响应的环境（微信·小红书等内嵌 WebView、iframe 策略拦截）里，9 秒看门狗自动完成并直接开启；浏览器定位等待同步从 15 秒缩到 8 秒',
+      '授权弹窗告别长篇说明：ACCESS_FINE_LOCATION 等技术黑话全部删除，只留「开启××权限？+ 暂不/开启」纯 iOS 风格',
+      '权限给予页提示文案减半：说明卡精简为一行、授权模式/AI 动手范围的段落说明缩短、重复的「能力常开」说明合并——页面更干净清爽',
+    ],
+  },
   {
     version: '1.9.39',
     date: '2026-11-12',
