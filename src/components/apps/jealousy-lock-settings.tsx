@@ -28,7 +28,6 @@ import {
   Clock,
   Eye,
   Heart,
-  Lock,
   Magnet,
   Minus,
   Monitor,
@@ -51,8 +50,6 @@ import {
   jealousyRemainSec,
   jealousyWatchNow,
 } from '@/lib/ios/jealousy-lock';
-// v1.9.35：锁定对象清单（这台手机里的网页应用；v2.0 真机模式降级时也锁这些）
-import { WEB_LOCK_APPS } from '@/lib/ios/web-app-lock';
 
 /** jealousyWatchNow 一轮结果的本地展示态（null=尚未查过） */
 type WatchNowResult = { ran: boolean; act: string; intel: string };
@@ -180,7 +177,6 @@ export function JealousyLockSection({
   const rt = readJealousyRuntime();
   const remain = jealousyRemainSec();
   const remainMin = remain !== null ? Math.ceil(remain / 60) : null;
-  const cooldownLeft = Math.max(0, Math.ceil((cfg.cooldownMin * 60_000 - (Date.now() - rt.lastLockAt)) / 60_000));
 
   const patch = (p: Parameters<typeof updateJealousyConfig>[0]) => {
     setCfg(updateJealousyConfig(p));
@@ -367,23 +363,15 @@ export function JealousyLockSection({
           {/* 阈值配置 */}
           <Stepper label="连续刷娱乐触发" value={cfg.entertainMin} min={5} max={180} step={5} unit="分钟" onChange={(v) => patch({ entertainMin: v })} />
           <Stepper label="焦虑危险阈值" value={cfg.anxietyThreshold} min={50} max={100} step={5} unit="/100" onChange={(v) => patch({ anxietyThreshold: v })} />
-          <Stepper label="锁定后自动解锁" value={cfg.countdownMin} min={5} max={180} step={5} unit="分钟" onChange={(v) => patch({ countdownMin: v })} />
-          <Stepper label="两次吃醋冷却" value={cfg.cooldownMin} min={10} max={240} step={10} unit="分钟" onChange={(v) => patch({ cooldownMin: v })} />
 
           <div className={`border-t ${dividerCls}`} />
 
-          {/* v2.0 AI 自定锁定时长（关=一律用上面的「锁定后自动解锁」分钟数） */}
-          <div className="flex w-full items-center justify-between gap-3 px-4 py-2.5">
-            <span className="flex min-w-0 items-center gap-2.5">
-              <Sparkles size={17} strokeWidth={1.9} className="shrink-0 text-black/50 dark:text-white/50" aria-hidden />
-              <span className="min-w-0">
-                <span className="block text-[14.5px]">AI 自定锁定时长</span>
-                <span className="mt-0.5 block text-[11.5px] leading-tight text-black/40 dark:text-white/40">
-                  开=TA 自己决定锁多久（3、5、15、30 分钟、锁到哄好都行）；关=一律用上面的固定分钟数
-                </span>
-              </span>
-            </span>
-            <ChatToggle on={cfg.lockMinByAi} onChange={(v) => patch({ lockMinByAi: v })} accent="#ff5c8a" testId={`${prefix}-lockmin-ai-toggle`} label="AI 自定锁定时长" />
+          {/* 锁定时长由 AI 按人设/记忆/上下文自定（v2.1：固定倒计时与两次吃醋冷却已下线） */}
+          <div className="flex w-full items-start gap-2.5 px-4 py-2.5">
+            <Sparkles size={17} strokeWidth={1.9} className="mt-0.5 shrink-0 text-black/50 dark:text-white/50" aria-hidden />
+            <p className="min-w-0 text-[13px] leading-relaxed text-black/55 dark:text-white/55">
+              锁多久由 TA 自己定：按 TA 的人设、你们的关系、记忆里的过往和此刻的情况决定（几分钟、几十分钟、或锁到哄好都行）。
+            </p>
           </div>
 
           <div className={`border-t ${dividerCls}`} />
@@ -422,33 +410,6 @@ export function JealousyLockSection({
               </span>
             </span>
             <ChatToggle on={cfg.pullbackEnabled} onChange={(v) => patch({ pullbackEnabled: v })} accent="#ff5c8a" testId={`${prefix}-pullback-toggle`} label="允许拉回" />
-          </div>
-
-          <div className={`border-t ${dividerCls}`} />
-
-          {/* 锁定对象（v2.0 真机模式=真实手机正刷的娱乐 App；降级/网页模式=网页清单） */}
-          <div className="px-4 py-3">
-            <p className="text-[14px]">吃醋锁定的「娱乐 App」</p>
-            <p className="mt-0.5 text-[11.5px] leading-tight text-black/40 dark:text-white/40">
-              {deviceSense
-                ? '真机模式：TA 锁的是你真实手机里正刷的娱乐 App；浏览器里打开本页（自动降级）时，锁的是下面这些网页 App（微信/QQ/短信/本 APP 永远不锁）'
-                : 'TA 锁的是这台手机里的这些应用（微信/QQ/短信/本 APP 永远不锁——锁了你就没法回来哄 TA 了）'}
-            </p>
-            <div className="mt-2.5 rounded-xl bg-[#fff0f4] p-2.5 dark:bg-[#ff5c8a]/[0.08]" data-testid={`${prefix}-web-targets`}>
-              <div className="flex flex-wrap gap-1.5">
-                {WEB_LOCK_APPS.map((a) => (
-                  <span key={a.pkg} className="flex items-center gap-1 rounded-full bg-[#ff5c8a]/12 px-2.5 py-1 text-[11.5px] text-[#c2255c] dark:bg-[#ff5c8a]/25 dark:text-[#ffb3c8]">
-                    <Lock size={10} strokeWidth={2.4} aria-hidden />
-                    {a.name}
-                  </span>
-                ))}
-              </div>
-              <p className="mt-1.5 text-[10.5px] leading-snug text-black/40 dark:text-white/40">
-                {deviceSense
-                  ? '真机锁=pm suspend（图标变灰打不开）；降级到网页时图标置灰、点开只弹 TA 的留言；到点自动解锁'
-                  : '被锁的 App 图标变灰点不开，点开只弹 TA 的留言；到点自动解锁'}
-              </p>
-            </div>
           </div>
 
           <div className={`border-t ${dividerCls}`} />
@@ -492,54 +453,39 @@ export function JealousyLockSection({
             ) : null}
           </div>
 
-          <div className={`border-t ${dividerCls}`} />
-
-          {/* 当前状态 */}
-          <div className="px-4 py-3" data-testid={`${prefix}-status`}>
-            <p className="flex items-center gap-1.5 text-[14px]">
-              <Lock size={13} strokeWidth={2} aria-hidden />
-              当前状态
-            </p>
-            {rt.lock ? (
-              <div className="mt-2 rounded-xl bg-[#fff0f4] p-3 dark:bg-[#ff5c8a]/[0.08]">
-                <p className="text-[13px] leading-relaxed">
-                  <span className="font-medium">{rt.lock.charName}</span>已锁住
-                  <span className="font-medium">{pkgDisplayName(rt.lock.pkg)}</span>
-                  {remainMin !== null && remainMin > 0 ? `，${remainMin} 分钟后自动解锁` : '，即将自动解锁'}
-                </p>
-                <p className="mt-1 text-[11.5px] leading-snug text-black/45 dark:text-white/45">“{rt.lock.reason}”</p>
-                {rt.patrol && rt.patrol.count > 0 ? (
-                  <p className="mt-1.5 text-[11px] leading-snug text-[#c2255c] dark:text-[#ffb3c8]" data-testid={`${prefix}-patrol-status`}>
-                    已替 TA 巡检 {rt.patrol.count} 次{rt.patrol.pullbackCount > 0 ? `、拉回过你 ${rt.patrol.pullbackCount} 次` : ''}；最近发现：{rt.patrol.lastIntel.split('\n')[0]}
+          {rt.lock ? (
+            <>
+              <div className={`border-t ${dividerCls}`} />
+              <div className="px-4 py-3" data-testid={`${prefix}-status`}>
+                <div className="rounded-xl bg-[#fff0f4] p-3 dark:bg-[#ff5c8a]/[0.08]">
+                  <p className="text-[13px] leading-relaxed">
+                    <span className="font-medium">{rt.lock.charName}</span>已锁住
+                    <span className="font-medium">{pkgDisplayName(rt.lock.pkg)}</span>
+                    {remainMin !== null && remainMin > 0 ? `，${remainMin} 分钟后解锁` : '，即将解锁'}
                   </p>
-                ) : null}
-                <button
-                  type="button"
-                  onClick={() => {
-                    setForceBusy(true);
-                    void unlockJealousy('forced').finally(() => setForceBusy(false));
-                  }}
-                  disabled={forceBusy}
-                  data-testid={`${prefix}-unlock-now`}
-                  className="mt-2.5 flex items-center gap-1.5 rounded-full bg-[#ff5c8a] px-3.5 py-1.5 text-[12.5px] font-medium text-white active:opacity-70 disabled:opacity-50"
-                >
-                  <Unlock size={12} strokeWidth={2.2} aria-hidden />
-                  {forceBusy ? '正在解开…' : '立即解锁'}
-                </button>
+                  <p className="mt-1 text-[11.5px] leading-snug text-black/45 dark:text-white/45">“{rt.lock.reason}”</p>
+                  {rt.patrol && rt.patrol.count > 0 ? (
+                    <p className="mt-1.5 text-[11px] leading-snug text-[#c2255c] dark:text-[#ffb3c8]" data-testid={`${prefix}-patrol-status`}>
+                      已替 TA 巡检 {rt.patrol.count} 次{rt.patrol.pullbackCount > 0 ? `、拉回过你 ${rt.patrol.pullbackCount} 次` : ''}；最近发现：{rt.patrol.lastIntel.split('\n')[0]}
+                    </p>
+                  ) : null}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setForceBusy(true);
+                      void unlockJealousy('forced').finally(() => setForceBusy(false));
+                    }}
+                    disabled={forceBusy}
+                    data-testid={`${prefix}-unlock-now`}
+                    className="mt-2.5 flex items-center gap-1.5 rounded-full bg-[#ff5c8a] px-3.5 py-1.5 text-[12.5px] font-medium text-white active:opacity-70 disabled:opacity-50"
+                  >
+                    <Unlock size={12} strokeWidth={2.2} aria-hidden />
+                    {forceBusy ? '正在解开…' : '立即解锁'}
+                  </button>
+                </div>
               </div>
-            ) : rt.lastLockAt > 0 && cooldownLeft > 0 ? (
-              <p className="mt-1.5 text-[12.5px] text-black/45 dark:text-white/45">
-                TA 刚吃过一次醋，正在平复心情（约 {cooldownLeft} 分钟内不会再锁）
-              </p>
-            ) : (
-              <p className="mt-1.5 text-[12.5px] text-black/45 dark:text-white/45">TA 现在心情平静，没有锁定任何应用</p>
-            )}
-            {rt.departIntent ? (
-              <p className="mt-1.5 text-[11.5px] text-black/35 dark:text-white/35">
-                （记着你说过的「{rt.departIntent.text.slice(0, 24)}…」——说到做到的话 TA 会看见的）
-              </p>
-            ) : null}
-          </div>
+            </>
+          ) : null}
 
           {/* v1.9.43 原生吃醋守护状态行（仅真机模式） */}
           {deviceSense ? (
@@ -562,8 +508,8 @@ export function JealousyLockSection({
             <ShieldAlert size={12} strokeWidth={2} className="mt-0.5 shrink-0 text-black/30 dark:text-white/30" aria-hidden />
             <p className="text-[10.5px] leading-snug text-black/35 dark:text-white/35">
               {deviceSense
-                ? '真机模式下 TA 会经 Shizuku 真的锁住你真实手机上的娱乐 App（pm suspend，图标变灰打不开）、必要时 am start 把你拽回本 APP、静默截屏取证；浏览器里打开本页会自动降级（只锁网页 App，如实回报）。哄好/倒计时/强制解锁三通道照常；原生守护前台服务保证 WebView 被杀也能到点解锁/检测强解。锁不锁由 TA 按人设自己决定，系统只提供触发与权力。'
-                : 'TA 会真的锁住这台手机里的应用（音乐/浏览器/淘宝/美团/照片/X论坛）——图标变灰点不开、点开只弹 TA 的留言，哄好/倒计时/强制解锁三通道照常；锁定期 TA 的巡检看的是这台手机里的应用状态（当前应用/多任务/使用时长），拉回=切回聊天页。锁不锁由 TA 按人设自己决定，系统只提供触发与权力。'}
+                ? '真机模式下 TA 会经 Shizuku 真的锁住你真实手机里正在用的任何 App（除本 APP 自身——锁了你就没法回来哄 TA 了；pm suspend，图标变灰打不开）、必要时 am start 把你拽回本 APP、静默截屏取证；浏览器里打开本页会自动降级（只锁网页 App，如实回报）。锁多久由 TA 按人设/记忆/上下文自己定；哄好/强制解锁两通道照常；原生守护前台服务保证 WebView 被杀也能到点解锁/检测强解。锁不锁由 TA 按人设自己决定，系统只提供触发与权力。'
+                : 'TA 会真的锁住这台手机里的应用——图标变灰点不开、点开只弹 TA 的留言；锁多久由 TA 按人设/记忆/上下文自己定；哄好/强制解锁两通道照常；锁不锁由 TA 按人设自己决定，系统只提供触发与权力。'}
             </p>
           </div>
         </>

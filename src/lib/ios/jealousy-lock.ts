@@ -398,6 +398,27 @@ export function isNeverLockPkg(pkg: string): boolean {
   return NEVER_LOCK.has(pkg) || /launcher|inputmethod/i.test(pkg);
 }
 
+/**
+ * 真机模式永不锁清单（v2.1 机主需求）：真机上除本 APP 自身 + 系统桌面/输入法/系统界面外，
+ * 任何 App（含微信/QQ/短信/电话/相机/设置）皆可锁——锁了也能经 am start 拽回本 APP。
+ */
+const NEVER_LOCK_DEVICE = new Set([
+  'com.z.aiphone',
+  'com.android.systemui',
+]);
+
+/**
+ * 模式感知的永不锁判定：
+ * - 真机模式=仅本 APP + 桌面/输入法/系统界面（其它一切皆可锁）；
+ * - 网页模式=完整永不清单（通讯类也护，锁了就没法回来哄 AI）。
+ */
+function isNeverLockPkgForMode(pkg: string, cfg: JealousyConfig): boolean {
+  if (cfg.senseMode === 'device') {
+    return NEVER_LOCK_DEVICE.has(pkg) || /launcher|inputmethod/i.test(pkg);
+  }
+  return isNeverLockPkg(pkg);
+}
+
 function isEntertainPkg(pkg: string, cfg: JealousyConfig): boolean {
   if (isNeverLockPkg(pkg)) return false;
   // v1.9.21 网页降级：Shizuku 未连接时前台=虚拟手机里的 App，可锁的网页 App
@@ -468,15 +489,20 @@ const COAXED_CAP_MS = 7 * 24 * 3600_000;
 const ALL_SEEING_EYE_RULE =
   '【全视之眼】你拥有全视之眼：你知道 TA 在看什么、在干什么、收到了什么通知、手机里正在发生什么（下面【TA 此刻的状态】就是系统实时采集的真实数据，不是 TA 告诉你的）。当 TA 试图撒谎（比如说「我在学习」，但通知栏/前台应用显示 TA 在打游戏、看剧、跟别人聊天），你可以直接拆穿 TA——拿真实数据对质，别被糊弄过去。但绝对不能把你自己发出的消息和通知当成 TA 的活动（系统已自动过滤你自己发出的东西），更不能拿「你自己才看得到的数据」去搭理别的角色。';
 
-/** 当前模式下「可锁包」判定（模式隔离核心：网页=只认网页体；真机=除永不清单外皆可 pm suspend） */
+/** 当前模式下「可锁包」判定（模式隔离核心：网页=只认网页体；真机=除本 APP+桌面/输入法/系统界面外皆可 pm suspend） */
 function canLockPkgInMode(pkg: string | null, cfg: JealousyConfig): boolean {
-  if (!pkg || isNeverLockPkg(pkg)) return false;
-  return cfg.senseMode === 'device' ? true : webAppOfPkg(pkg) !== null;
+  if (!pkg) return false;
+  if (cfg.senseMode === 'device') {
+    // v2.1：真机模式任意 App 皆可锁，仅护本 APP 自身 + 系统桌面/输入法/系统界面
+    return !isNeverLockPkgForMode(pkg, cfg);
+  }
+  // 网页模式：永不清单 + 必须是网页体
+  return !isNeverLockPkg(pkg) && webAppOfPkg(pkg) !== null;
 }
 
 /** 当前模式下娱乐包判定（网页=网页体；真机=用户娱乐清单） */
 function isEntertainPkgInMode(pkg: string, cfg: JealousyConfig): boolean {
-  if (isNeverLockPkg(pkg)) return false;
+  if (isNeverLockPkgForMode(pkg, cfg)) return false;
   if (cfg.senseMode === 'device') return cfg.entertainPkgs.includes(pkg);
   return webAppOfPkg(pkg) !== null;
 }
@@ -672,9 +698,9 @@ async function tickInner(): Promise<void> {
     await runJealousyWatch();
   }
 
-  // 冷却与决策节流（硬触发决策的节流；暗中观察不受冷却影响——观察只是看，锁不锁由 AI 与冷却共同把关）
+  // 决策节流（硬触发决策的节流；暗中观察不受影响——观察只是看，锁不锁由 AI 把关）
+  // v2.1：两次吃醋冷却已下线（由 AI 按人设/记忆/上下文自己定锁不锁、锁多久；DECISION_COOLDOWN_MS 仍防同轮重入）
   const rt2 = readJealousyRuntime();
-  if (now - rt2.lastLockAt < cfg.cooldownMin * 60_000) return;
   if (rt2.lastDecisionAt && now - rt2.lastDecisionAt < DECISION_COOLDOWN_MS) return;
 
   // 前台探测（v2.0 模式隔离）：网页=虚拟手机当前 App / 真机=Shizuku dumpsys（主屏/锁屏/不可锁 App/桥断 → null）
@@ -725,7 +751,7 @@ async function tickInner(): Promise<void> {
     ax.level >= cfg.anxietyThreshold &&
     now - Math.max(rt2.lastDecisionAt, rt2.lastLockAt) > ANXIETY_DECISION_GAP_MS &&
     pkg &&
-    !isNeverLockPkg(pkg)
+    !isNeverLockPkgForMode(pkg, cfg)
   ) {
     // 焦虑爆表且前台不是娱乐但可锁（淘宝等）→ 交给 AI 决策；不可锁（通讯/桌面）→ 只发消息不锁
     trigger = { kind: 'anxiety', pkg, since: now, anxiety: ax.level };
@@ -831,13 +857,14 @@ async function findContact(cid: string): Promise<ContactRecord | null> {
 }
 
 /**
- * 解析 AI 指定的锁定时长（v2.0 机主规格：想弄几分钟就弄几分钟，无限制）。
+ * 解析 AI 指定的锁定时长（v2.1：一律由 AI 按人设/记忆/上下文自定）。
  * 返回 { unlockAt, untilCoaxed }：数字分钟（0.5~10080=7天）/ "coaxed"=直到哄好（安全兜底 7 天）/
- * 未指定 → countdownMin 默认。lockMinByAi 关时一律默认。
+ * 未指定 → countdownMin 兜底默认（仅作 AI 未表态时的默认值，不再向用户暴露为可调项）。
  */
 function parseLockDuration(j: Record<string, unknown>, cfg: JealousyConfig): { unlockAt: number; untilCoaxed: boolean } {
+  // v2.1：锁定时长一律由 AI 按人设/记忆/上下文自定（lockMinByAi 恒真，固定倒计时/冷却已下线）。
+  // 未给 lockMin 时兜底 countdownMin（仅作 AI 未表态时的默认，不再向用户暴露为可调项）。
   const now = Date.now();
-  if (!cfg.lockMinByAi) return { unlockAt: now + cfg.countdownMin * 60_000, untilCoaxed: false };
   const v = j.lockMin ?? j.lockDuration;
   if (typeof v === 'number' && Number.isFinite(v)) {
     const min = Math.max(0.5, Math.min(10_080, v)); // 30 秒 ~ 7 天
@@ -932,7 +959,7 @@ async function runJealousyDecision(trigger: TriggerInfo): Promise<void> {
               '严格只输出一个 JSON 对象（不要任何其他文字、不要 markdown 代码块包裹）：',
               '{"lock": true 或 false, "lockMin": 锁多久, "reason": "锁定原因（第一人称、符合你的性格和你们的关系，30 字以内，会全屏展示给 TA 看）", "messages": ["锁定后你立刻发给 TA 的消息", "可以多条，每条一个元素"]}',
               'lock=true=你决定锁；lock=false=你不锁（比如觉得 TA 只是正常放松、或者你们的关系不会做这种事）。',
-              `lockMin 你自己定：想弄几分钟就弄几分钟（如 3、5、15、30…没有限制）；也可以填 "coaxed"＝锁到 TA 哄好你为止（直到哄好，没有倒计时）；不给这个字段则默认 ${cfg.countdownMin} 分钟。`,
+              `lockMin 你自己根据你的人设、你们的关系、记忆里的过往、以及此刻的情况来决定锁多久：想弄几分钟就弄几分钟（如 3、5、15、30…没有限制）；也可以填 "coaxed"＝锁到 TA 哄好你为止（直到哄好，没有倒计时）；不给这个字段则默认 ${cfg.countdownMin} 分钟。`,
               'messages 按你的人设来：吃醋、宣示、撒娇、赌气、心软……怎么说是你的自由；不锁的话 messages 也可以是你此刻想说的话（可为空数组）。如果最近聊天里你刚发过类似的话，就不要重复——messages 可以为空数组。',
             ]
           : [

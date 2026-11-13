@@ -5378,7 +5378,7 @@ export function ChatPage({
                       ? /* 液态：毛玻璃椭圆输入胶囊（比背景稍深一档 + 内阴影下陷感） */ 'lg-input min-h-[36px] rounded-full shadow-[inset_0_1px_3px_rgba(31,38,135,0.10)]'
                       : retro
                       ? /* 古早（第五十四轮）：白底内凹硬边输入框 */ 'rt-input min-h-[34px] rounded-[4px] text-black'
-                      : /* 第八十九轮（用户指定美化）：软圆角 + 加高一档 + 单层柔影，更接近真机微信的干净观感 */ 'min-h-[36px] rounded-[8px] bg-white shadow-[0_1px_3px_rgba(0,0,0,0.06)] dark:bg-[#232323] dark:shadow-none'
+                      : /* 第九十二轮（用户反馈圆角偏圆）：圆角收窄 8→6px、与发送键同口径，更接近真机微信的干净观感 */ 'min-h-[36px] rounded-[6px] bg-white shadow-[0_1px_3px_rgba(0,0,0,0.06)] dark:bg-[#232323] dark:shadow-none'
                   }`}
                 />
                 {/* 文字转语音开关（第三十二轮：输入框内右侧灰麦克风；开启后输入文字发送为语音气泡）；
