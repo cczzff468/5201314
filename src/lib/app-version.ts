@@ -11,9 +11,9 @@
  */
 
 /** 当前最新版本（与 android-shell versionName 保持一致） */
-export const APP_VERSION = '1.9.41';
+export const APP_VERSION = '1.9.42';
 /** 版本号数字（与 android-shell versionCode 保持一致；覆盖安装要求只增不减） */
-export const APP_VERSION_CODE = 57;
+export const APP_VERSION_CODE = 58;
 
 export interface AppReleaseNote {
   version: string;
@@ -24,6 +24,18 @@ export interface AppReleaseNote {
 
 /** 版本历史（新→旧；设置 › APP 更新 页渲染，最新一条即当前版本） */
 export const APP_RELEASE_NOTES: AppReleaseNote[] = [
+  {
+    version: '1.9.42',
+    date: '2026-11-13',
+    items: [
+      '修复真机「点击悬浮球退出 APP」：悬浮球贴屏幕右缘，轻触的微滑被安卓手势导航当成「返回」直接退出——现在返回不再退出（第一次提示再按一次，两秒内再按才退到后台），本条需更新 APK 生效',
+      '悬浮球彻底极简：删掉球体外圈的透明描边与监听光环，只留纯白磨砂圆片 + 深色细线麦克风',
+      '微信翻译气泡焕新（截图同款）：译文改为独立白色气泡挂在原气泡下方，底部带「✓ 由微信提供翻译支持」小字，不再显示语言名前缀',
+      '信息 App 翻译焕新（iMessage 截图同款）：译文进气泡内部——原文缩小变浅，细分隔线，译文加大加粗',
+      '微信输入栏焕新：输入框软圆角加高更清爽；有文字时框内麦克风图标自动隐藏（真机微信同款）；表情与加号图标挨得更近更贴右缘',
+      '语音会话提示精简：删名牌副标题与空屏长文案，聆听提示去括号说明',
+    ],
+  },
   {
     version: '1.9.41',
     date: '2026-11-13',

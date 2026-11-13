@@ -790,7 +790,9 @@ export function ChatPage({
     };
   }, [msgs, transCfg, translations, trFailed, apiConfig]);
 
-  /** 气泡下方译文行（翻译开启时按消息语言显示对侧语言的译文，带语言名前缀） */
+  /** 气泡下方译文（翻译开启时按消息语言显示对侧语言的译文）——第八十九轮（用户指定截图样式）：
+   *  独立白色圆角气泡挂在原气泡正下方（微信原生翻译气泡同款），译文与正文同字号，
+   *  气泡底部一行灰色小字「由微信提供翻译支持」；不再显示语言名前缀 */
   const renderTranslations = (msgId: string, content: string) => {
     if (!transCfg.on) return null;
     if (!content.trim() || content.startsWith('〔') || content.startsWith('（AI') || content.startsWith('（对方暂时')) return null;
@@ -798,12 +800,14 @@ export function ChatPage({
     const text = translations[`${msgId}|${code}`];
     if (typeof text !== 'string' || !text) return null;
     return (
-      <p
+      <div
         data-testid="wx-translate-row"
-        className="mt-1 max-w-full whitespace-pre-wrap break-words text-[12.5px] leading-[1.45] text-black/45 dark:text-white/45"
+        data-wx-tr-bubble=""
+        className="mt-[6px] w-fit max-w-full select-none rounded-[5px] bg-white px-3 py-2 shadow-[0_1px_2px_rgba(0,0,0,0.05)] dark:bg-[#1E1E1E] dark:shadow-none"
       >
-        {`${translateLangLabel(code)}：${text}`}
-      </p>
+        <p className="whitespace-pre-wrap break-words text-[16px] leading-[1.45] text-black dark:text-white">{text}</p>
+        <p className="mt-[3px] text-[11px] leading-[1.35] text-black/35 dark:text-white/35">✓ 由微信提供翻译支持</p>
+      </div>
     );
   };
 
@@ -5283,8 +5287,9 @@ export function ChatPage({
         )}
         {/* 第三十三轮：pt-2→pt-1（顶部上移一点）；items-end→items-center（图标和输入框对齐）
             第三十四轮：gap-2.5→gap-2（输入框往右延伸）
-            第四十七轮（用户指定）：液态底距 pb-2→pb-[13px]——输入框整体再往上提一点 */}
-        <div className={liquid ? 'px-2.5 pb-[13px] pt-1' : 'px-2.5 pb-[18px] pt-1'}>
+            第四十七轮（用户指定）：液态底距 pb-2→pb-[13px]——输入框整体再往上提一点
+            第八十九轮（用户指定）：默认主题右内边距 pr-2.5→pr-2，表情/加号更贴右缘 */}
+        <div className={liquid ? 'px-2.5 pb-[13px] pt-1' : 'pl-2.5 pr-2 pb-[18px] pt-1'}>
           {/* 输入框上方快捷功能条（输入框自定义 › 输入框上方功能）：把加号面板里的功能放到输入框上面；
               点一下与点面板里那一项等效；未添加 = 不显示；「+」面板本身不受影响 */}
           {quickItems.length > 0 && (
@@ -5293,8 +5298,9 @@ export function ChatPage({
             </div>
           )}
           {/* 液态输入栏（第四十四轮，用户指定）：删除大椭圆包裹——语音钮 = 玻璃圆圈内嵌黑圈、
-              输入框毛玻璃椭圆、表情+加号共用一个玻璃椭圆；默认主题原样 */}
-          <div className="flex items-center gap-2">
+              输入框毛玻璃椭圆、表情+加号共用一个玻璃椭圆；默认主题原样
+              第八十九轮（用户指定）：默认主题 gap-2→gap-1.5（图标与输入框更紧凑） */}
+          <div className={liquid ? 'flex items-center gap-2' : 'flex items-center gap-1.5'}>
             <button
               type="button"
               aria-label={voiceMode ? '切换到键盘输入' : '语音输入'}
@@ -5363,32 +5369,37 @@ export function ChatPage({
                   }}
                   enterKeyHint={enterSend ? 'send' : undefined}
                   placeholder={ttsSend ? '输入文字，发送后转为语音' : chatPlaceholder(chatDecorWx)}
-                  placeholderClass="absolute inset-0 flex items-center pl-3.5 pr-11 text-[16px] text-black/30 dark:text-white/30"
+                  placeholderClass={`absolute inset-0 flex items-center pl-3.5 text-[16px] text-black/30 dark:text-white/30 ${input.trim() ? 'pr-4' : 'pr-11'}`}
                   testId="wx-chat-input"
-                  className={`block max-h-[132px] w-full overflow-y-auto py-[8px] pl-3.5 pr-11 text-[16px] leading-[22px] caret-[#07C160] outline-none transition-all duration-200 selection:bg-[#07C160]/20 ${
+                  className={`block max-h-[132px] w-full overflow-y-auto py-[8px] pl-3.5 text-[16px] leading-[22px] caret-[#07C160] outline-none transition-all duration-200 selection:bg-[#07C160]/20 ${
+                    input.trim() ? 'pr-4' : 'pr-11'
+                  } ${
                     liquid
                       ? /* 液态：毛玻璃椭圆输入胶囊（比背景稍深一档 + 内阴影下陷感） */ 'lg-input min-h-[36px] rounded-full shadow-[inset_0_1px_3px_rgba(31,38,135,0.10)]'
                       : retro
                       ? /* 古早（第五十四轮）：白底内凹硬边输入框 */ 'rt-input min-h-[34px] rounded-[4px] text-black'
-                      : 'min-h-[34px] rounded-[4px] bg-white shadow-[0_1px_2px_rgba(0,0,0,0.04),0_5px_14px_rgba(0,0,0,0.05)] dark:bg-[#232323] dark:shadow-none'
+                      : /* 第八十九轮（用户指定美化）：软圆角 + 加高一档 + 单层柔影，更接近真机微信的干净观感 */ 'min-h-[36px] rounded-[8px] bg-white shadow-[0_1px_3px_rgba(0,0,0,0.06)] dark:bg-[#232323] dark:shadow-none'
                   }`}
                 />
-                {/* 文字转语音开关（第三十二轮：图标改麦克风——与微信参考图一致的输入框内右侧灰麦克风；
-                    开启后输入文字发送为语音气泡（本地仿真）；切到「按住说话」模式时随输入框一起隐藏） */}
-                <button
-                  type="button"
-                  aria-label={ttsSend ? '文字转语音发送：已开启，点击关闭' : '文字转语音发送：点击开启'}
-                  aria-pressed={ttsSend}
-                  data-testid="wx-tts-toggle"
-                  onClick={() => {
-                    const nv = !ttsSend;
-                    setTtsSend(nv);
-                    onToast(nv ? '已开启文字转语音：发送后为语音气泡' : '已关闭文字转语音');
-                  }}
-                  className={`absolute right-1.5 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-full transition-colors active:opacity-60 ${ttsSend ? 'text-[#07C160]' : 'text-black/40 dark:text-white/40'}`}
-                >
-                  <Mic className="h-[21px] w-[21px]" strokeWidth={ttsSend ? 2.1 : 1.8} />
-                </button>
+                {/* 文字转语音开关（第三十二轮：输入框内右侧灰麦克风；开启后输入文字发送为语音气泡）；
+                    第八十九轮（用户指定，真机微信同款）：输入框有文字时麦克风图标隐藏（语音输入入口只在空框时出现），
+                    切到「按住说话」模式时随输入框一起隐藏 */}
+                {!input.trim() && (
+                  <button
+                    type="button"
+                    aria-label={ttsSend ? '文字转语音发送：已开启，点击关闭' : '文字转语音发送：点击开启'}
+                    aria-pressed={ttsSend}
+                    data-testid="wx-tts-toggle"
+                    onClick={() => {
+                      const nv = !ttsSend;
+                      setTtsSend(nv);
+                      onToast(nv ? '已开启文字转语音：发送后为语音气泡' : '已关闭文字转语音');
+                    }}
+                    className={`absolute right-1.5 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-full transition-colors active:opacity-60 ${ttsSend ? 'text-[#07C160]' : 'text-black/40 dark:text-white/40'}`}
+                  >
+                    <Mic className="h-[21px] w-[21px]" strokeWidth={ttsSend ? 2.1 : 1.8} />
+                  </button>
+                )}
               </div>
             )}
             {/* 表情 + 加号（液态，用户指定）：共用一个玻璃椭圆包裹，无内容时加号在内、有内容时移出换发送键；
@@ -5437,6 +5448,7 @@ export function ChatPage({
                 )}
               </div>
             ) : (
+              /* 第八十九轮（用户指定）：表情钮窄体化（40→34px），图标与加号挨得更近更贴右缘 */
               <button
                 type="button"
                 aria-label="表情"
@@ -5449,9 +5461,9 @@ export function ChatPage({
                   setPlusOpen(false);
                   setStickerOpen((v) => !v);
                 }}
-                className="flex h-10 w-10 shrink-0 items-center justify-center active:opacity-60"
+                className="flex h-10 w-[34px] shrink-0 items-center justify-center active:opacity-60"
               >
-                <Smile className="h-[25px] w-[25px]" strokeWidth={2} />
+                <Smile className="h-[24px] w-[24px]" strokeWidth={2} />
               </button>
             )}
             {(input.trim() || canDispatch || pendingImgs.length > 0) ? (
@@ -5471,12 +5483,13 @@ export function ChatPage({
                     : retro
                     ? /* 古早（第五十四轮）：复古绿渐变拟物发送键 */
                       'rt-send flex h-9 shrink-0 items-center justify-center px-4 text-[14px] font-semibold text-[#1E3A0C] active:opacity-80 disabled:opacity-50'
-                    : 'flex h-9 shrink-0 items-center justify-center rounded-[4px] bg-[#07C160] px-4 text-[14px] font-medium text-white active:bg-[#06AD56] disabled:opacity-50'
+                    : /* 第八十九轮：软圆角与输入框同步 */ 'flex h-[34px] shrink-0 items-center justify-center rounded-[6px] bg-[#07C160] px-4 text-[14px] font-medium text-white active:bg-[#06AD56] disabled:opacity-50'
                 }
               >
                 发送
               </button>
             ) : !liquid ? (
+              /* 第八十九轮（用户指定）：加号钮窄体化 + 负边距收紧与表情的间距（图标间距 17.5→约 7px） */
               <button
                 type="button"
                 aria-label="更多功能"
@@ -5488,10 +5501,10 @@ export function ChatPage({
                   setStickerOpen(false);
                   setPlusOpen((v) => !v);
                 }}
-                className="-ml-1 flex h-10 w-10 shrink-0 items-center justify-center active:opacity-60"
+                className="-ml-2 flex h-10 w-[34px] shrink-0 items-center justify-center active:opacity-60"
               >
                 <CirclePlus
-                  className={`h-[28px] w-[28px] transition-transform duration-200 ${plusOpen ? 'rotate-45' : ''}`}
+                  className={`h-[27px] w-[27px] transition-transform duration-200 ${plusOpen ? 'rotate-45' : ''}`}
                   strokeWidth={1.8}
                 />
               </button>

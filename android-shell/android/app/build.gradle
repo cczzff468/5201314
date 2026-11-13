@@ -11,8 +11,8 @@ android {
         applicationId "com.z.aiphone"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 19          // v1.9.36 权限给予页：overlay/battery/location 六个新插件方法（v18 = 1.8.2）
-        versionName "1.9.41"    // v1.9.41 为纯网页侧改动（连发补发强化 + 权限弹窗/状态修复 + 悬浮球白色简约 + 语音助手改名），无需重打 APK
+        versionCode 20          // v1.9.42 返回键双击退出修复（悬浮球贴右缘误触发安卓返回手势直接退出 APP；v19 = 1.9.41）
+        versionName "1.9.42"    // v1.9.42：MainActivity onBackPressed 双击退出 + 网页侧悬浮球/翻译气泡/微信输入栏焕新
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.

@@ -1397,21 +1397,15 @@ function ChatView({
     };
   }, [msgs, transCfg, translations, trFailed, apiConfig]);
 
-  /** 气泡下方译文行（翻译开启时按消息语言显示对侧语言的译文，带语言名前缀） */
-  const renderTranslations = (msgId: string, content: string, error?: boolean) => {
+  /** 取一条消息的译文文本（翻译开启时按消息语言显示对侧语言的译文；无译文返回 null）。
+   *  第八十九轮（用户指定 iMessage 截图样式）：译文改渲染进气泡内部（原文缩小变浅 +
+   *  细分隔线 + 译文加大加粗），本函数只负责取文本 */
+  const trTextOf = (msgId: string, content: string, error?: boolean): string | null => {
     if (error || !transCfg.on) return null;
     if (!content.trim() || content.startsWith('（AI')) return null;
     const code = detectTranslateTarget(content, transCfg.left, transCfg.right);
     const text = translations[`${msgId}|${code}`];
-    if (typeof text !== 'string' || !text) return null;
-    return (
-      <p
-        data-testid="sms-translate-row"
-        className="mt-1 max-w-full whitespace-pre-wrap break-words text-[12.5px] leading-[1.45] text-muted-foreground"
-      >
-        {`${translateLangLabel(code)}：${text}`}
-      </p>
-    );
+    return typeof text === 'string' && text ? text : null;
   };
 
   /** 全局流结束（成功/失败）：finalize 已把最终消息落盘，把落盘后的完整记录并回本地并清理流状态。
@@ -3787,10 +3781,26 @@ function ChatView({
                           style={{ clipPath: TAIL_CLIP_RIGHT, ...(bvis.override && bvis.tailColor ? { backgroundColor: bvis.tailColor } : {}) }}
                         />
                       )}
-                      <span className={`relative ${m.error && !mine ? 'text-[#FF3B30]' : ''}`}>{bubbleContent}</span>
+                      {(() => {
+                        /* 第八十九轮（用户指定 iMessage 截图样式）：译文渲染进气泡内部——
+                           原文缩小变浅（text-[13px]+opacity-60）→ 细分隔线（气泡色 18% 透明）→
+                           译文加大加粗（text-[15px] font-medium 全彩）；无译文时原样只渲染正文 */
+                        const tr = trTextOf(m.id, m.content, m.error && !mine);
+                        return (
+                          <>
+                            <span className={`relative ${tr ? 'text-[13px] opacity-60' : ''} ${m.error && !mine ? 'text-[#FF3B30]' : ''}`}>{bubbleContent}</span>
+                            {tr ? (
+                              <>
+                                <span aria-hidden="true" className="my-[5px] block h-px w-full bg-current opacity-[0.18]" />
+                                <span data-testid="sms-translate-row" className="relative block text-[15px] font-medium leading-[1.45]">
+                                  {tr}
+                                </span>
+                              </>
+                            ) : null}
+                          </>
+                        );
+                      })()}
                     </div>
-                  {/* 翻译开启时在气泡下方显示所选语言的译文 */}
-                  {renderTranslations(m.id, m.content, m.error && !mine)}
                   {/* iMessage：已送达挂在气泡下沿、小尾巴另一侧（气泡左下角，与气泡左缘对齐） */}
                   {mine && i === lastUserIdx && !m.error && (
                     <p className="mt-1 self-stretch pl-1 text-left text-[11px] leading-none text-muted-foreground">已送达</p>

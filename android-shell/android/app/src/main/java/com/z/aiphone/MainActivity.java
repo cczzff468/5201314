@@ -21,6 +21,28 @@ public class MainActivity extends BridgeActivity {
     /** 公共下载目录里的目标文件名（与 getUriForFile / FileProvider 路径对应） */
     private static final String APK_FILE_NAME = "AI-Phone.apk";
 
+    /** 返回键/返回手势：上一次按下时间（双击退出的窗口判定） */
+    private long lastBackAt = 0;
+
+    /** 返回键/返回手势处理（v1.9.42 修复「点击悬浮球退出 APP」）：
+     *  语音助手悬浮球吸附在屏幕右缘，轻触时的微小位移会被 Android 手势导航
+     *  识别成「返回」——Capacitor 默认行为在 WebView 无历史（配置页经
+     *  location.replace 进入，无回退栈）时直接 finish 整个 APP，表现为
+     *  「点一下悬浮球就退出了」。现在返回一律不退出：第一次提示「再按一次
+     *  退出」，2 秒内再按才退到后台（moveTaskToBack 保活，不销毁 WebView
+     *  状态，聊天/登录态不丢）。 */
+    @Override
+    public void onBackPressed() {
+        long now = System.currentTimeMillis();
+        if (now - lastBackAt < 2000) {
+            lastBackAt = 0;
+            moveTaskToBack(true);
+            return;
+        }
+        lastBackAt = now;
+        Toast.makeText(this, "再按一次退出 AI Phone", Toast.LENGTH_SHORT).show();
+    }
+
     @Override
     public void onCreate(Bundle savedInstanceState) {
         // 原生感知插件注册（必须先于 super.onCreate）

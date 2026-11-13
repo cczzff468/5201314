@@ -3,10 +3,10 @@
 /**
  * C1 语音唤起智能体——Siri 式全屏语音会话 + 悬浮球（v1.7.1 专属人设）：
  *
- * - 悬浮球：屏幕右侧边缘可拖动（v1.9.14 简约毛玻璃：单层半透黑 + backdrop-blur +
- *   细白描边 + 白细线麦克风，去多层堆叠），拖动跟手、松手吸左右边、
+ * - 悬浮球：屏幕右侧边缘可拖动（v1.9.42 纯白磨砂：白底微透 + backdrop-blur +
+ *   柔和落影 + 深色细线麦克风，无任何描边/光环/红点），拖动跟手、松手吸左右边、
  *   位置记忆（localStorage agent-voice-ball-pos-v1）；
- *   点按（位移 < 8px）打开全屏语音会话；连续唤醒监听开着时带一圈极细呼吸光环（提示「正在听」）
+ *   点按（位移 < 8px）打开全屏语音会话
  * - 全屏会话（苹果 Siri 式）：黑玻璃背景 + 顶部彩虹光球 + 光球下方助手名牌（名字=
  *   唤醒名）+ 左上关闭 + 中部对话流（用户右侧气泡 / 助手左侧纯文本）+ 底部输入栏
  * - 双重职责（Siri 式闭环）：
@@ -830,7 +830,6 @@ export default function AgentVoiceBall() {
 
   if (!layerOn) return null;
 
-  const listening = wakeOn && visible && !sessionOpen; // 呼吸光环：连续唤醒在听（会话开时不闪）
   const recBusy = rec.phase === 'starting' || rec.phase === 'recording';
   const showWave = recBusy && rec.levels.length > 0;
 
@@ -899,11 +898,10 @@ export default function AgentVoiceBall() {
             </div>
 
             {/* 助手名牌（光球正下方，Siri 呼出后的身份标识） */}
-            <div className="pointer-events-none absolute inset-x-0 top-[210px] flex flex-col items-center gap-0.5" aria-hidden="true">
+            <div className="pointer-events-none absolute inset-x-0 top-[210px] flex flex-col items-center" aria-hidden="true">
               <span className="text-[15px] font-medium tracking-wide text-white/85" data-testid="agent-voice-name">
                 {cfg.name || '小灵'}
               </span>
-              <span className="text-[11px] text-white/35">你的专属语音助手 · 能聊也能办</span>
             </div>
 
             {/* 对话流（用户右侧气泡 / 助手左侧纯文本，Siri 式） */}
@@ -914,9 +912,7 @@ export default function AgentVoiceBall() {
             >
               {turns.length === 0 && !sessionMsg ? (
                 <div className="mt-2 text-center text-[14px] leading-relaxed text-white/40">
-                  问候、闲聊、提问都可以
-                  <br />
-                  要我做事直接说，比如「创建一个联系人，性格温柔」
+                  说点什么，或直接下达任务
                 </div>
               ) : null}
               {turns.map((t) =>
@@ -936,7 +932,7 @@ export default function AgentVoiceBall() {
               {/* 追问模式提示（C4） */}
               {followup ? (
                 <div className="mx-auto rounded-full bg-white/10 px-3.5 py-1.5 text-[12px] text-white/60" role="status" data-testid="agent-voice-followup-hint">
-                  可直接继续说 · {Math.max(1, Math.ceil(followupLeft / 1000))}s 无操作自动收起
+                  可直接继续说 · {Math.max(1, Math.ceil(followupLeft / 1000))}s
                 </div>
               ) : null}
             </div>
@@ -973,9 +969,7 @@ export default function AgentVoiceBall() {
                   {sessionMsg}
                 </span>
               ) : recBusy ? (
-                <span className="text-[12.5px] text-white/55">
-                  {autoListenUi ? '聆听中…（说完自动停止）' : '请说出任务或想聊的…（说完自动停止）'}
-                </span>
+                <span className="text-[12.5px] text-white/55">{autoListenUi ? '聆听中…' : '请说出任务或想聊的…'}</span>
               ) : null}
             </div>
 
@@ -1023,10 +1017,10 @@ export default function AgentVoiceBall() {
         ) : null}
       </AnimatePresence>
 
-      {/* ================= 悬浮球（v1.9.41 白色简约，可拖动吸边） =================
-          设计语言：纯白磨砂玻璃圆片（白底微透 + 细灰描边 + 柔和落影 + 深色细线麦克风），
-          极简不抢镜。状态表达只留一个：连续唤醒监听中的单圈细呼吸光环（机主要求：
-          删除右上角红点——唤醒暂停等原因改为点球时以会话消息提示，见 openFromBall） */}
+      {/* ================= 悬浮球（v1.9.42 白色简约，可拖动吸边） =================
+          设计语言：纯白磨砂玻璃圆片（白底微透 + 柔和落影 + 深色细线麦克风），
+          极简不抢镜。无边框无光环无红点——任何附加装饰都已删除（机主指定：
+          删透明边框；唤醒暂停等原因点球时以会话消息提示，见 openFromBall） */}
       <motion.button
         type="button"
         aria-label="语音助手（拖动移位，点按说话）"
@@ -1051,18 +1045,10 @@ export default function AgentVoiceBall() {
         className="pointer-events-auto absolute bottom-[140px] right-0 flex h-[44px] w-[44px] touch-none select-none items-center justify-center rounded-full"
         data-testid="agent-voice-ball"
       >
-        {/* 呼吸光环（连续唤醒监听中）：单圈细白线慢呼吸，「正在听」的安静提示 */}
-        {listening ? (
-          <span
-            aria-hidden="true"
-            className="absolute -inset-[5px] rounded-full ring-1 ring-white/55"
-            style={{ animation: 'agentVoiceBreath 2.8s ease-in-out infinite', boxShadow: '0 0 0 1px rgba(0,0,0,0.05)' }}
-          />
-        ) : null}
-        {/* 球体：白色磨砂玻璃——白底微透 + 细灰描边 + 大半径 backdrop-blur，内壁一线高光 */}
+        {/* 球体：白色磨砂玻璃——白底微透 + 大半径 backdrop-blur，内壁一线高光（无任何描边/光环） */}
         <span
           aria-hidden="true"
-          className="absolute inset-0 rounded-full bg-white/85 ring-1 ring-black/[0.06] backdrop-blur-2xl"
+          className="absolute inset-0 rounded-full bg-white/85 backdrop-blur-2xl"
           style={{ boxShadow: '0 4px 14px rgba(0,0,0,0.22), inset 0 1px 0 rgba(255,255,255,0.95)' }}
         />
         <Mic className="relative h-[17px] w-[17px] text-black/75" strokeWidth={1.8} />
