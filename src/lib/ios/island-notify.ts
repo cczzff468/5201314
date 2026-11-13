@@ -41,7 +41,9 @@ import { wxChatFlags, qqChatFlags } from '@/lib/chat-flags';
 import { playNotifySound } from './notify-sound';
 // v1.9.2 真 DND 总开关 getter：pushChatNotification 在最早汇合点一次拦净三类出口
 //（横幅/提示音/系统通知）；notification-center 运行时零重依赖，不会拖慢本模块加载
-import { isNotifyDndActive } from './notification-center';
+// v2.1 聊天通知入中心：recordCenterNotification 记录钩（先于一切闸门——免打扰/接力抑制/前台闸
+// 都不该影响「什么通知都要显示在下拉通知面板里」的历史账本；同会话 tag 替换=Android 同会话去重心智）
+import { isNotifyDndActive, recordCenterNotification } from './notification-center';
 // v73.5：通知导航进微信单聊全屏时关闭同会话悬浮小窗/胶囊（防全屏与小窗双开同一聊天）
 import { useChatFloat } from './chat-float-store';
 
@@ -74,6 +76,49 @@ export interface ChatNotifyInput {
   /** 消息预览文本（调用方用 notifyPreviewText 映射，模块内再截断） */
   body: string;
   target: NotifyTarget;
+}
+
+/** v2.1 会话键前缀 → 虚拟来源包名（通知中心感知层自我过滤用）：
+ *  AI 吃醋感知据此识别通知由哪个「虚拟 App」发出；chat 通知的 pkg 不是 com.z.aiphone，
+ *  过滤 AI 自己消息靠观察者 contactId 匹配（jealousy-sense-extra），而非一刀切。 */
+const SESSION_APP_PKG: Partial<Record<NotifyApp, string>> = {
+  wechat: 'com.tencent.mm',
+  qq: 'com.tencent.mobileqq',
+  chat: 'com.android.mms',
+  meituan: 'com.sankai.meituan',
+  taobao: 'com.taobao.taobao',
+  forum: 'com.x.forum',
+};
+
+/**
+ * v2.1 聊天通知记录进通知中心（用户需求：AI 发来的通知也要显示在下拉面板上，什么通知都要显示）：
+ * - 在一切闸门（免打扰/DND/接力抑制/前台闸）之前先记账——与 notifyIfHidden 的记录钩同口径
+ *   （静但不丢）；tag=会话键：同一会话多条消息互相替换，面板里一条会话只留最新预览；
+ * - 群聊 title 拼「群名：发言人」，点条目走 target 导航总线直达该会话；
+ * - 图标优先发件人头像（真实手机通知也是发件人头像），无头像时按 tag 映射 App 实体图标；
+ * - 全程 try-catch 静默：记录绝不影响通知主链路。
+ */
+function recordChatToCenter(input: ChatNotifyInput, body: string): void {
+  try {
+    const title = input.subtitle?.trim() ? `${input.subtitle.trim()}：${input.title}` : input.title;
+    // 图标：仅收「路径」或短 dataURL（≤8KB）——大体积 dataURL 头像会把 localStorage
+    // 通知中心配额（50 条 × 数百 KB）撑爆导致持久化静默失效；超限时回退按 tag 映射 App 图标
+    const avatar = input.avatar;
+    const icon =
+      typeof avatar === 'string' && (avatar.startsWith('/') || (avatar.startsWith('data:') && avatar.length <= 8192))
+        ? avatar
+        : undefined;
+    recordCenterNotification({
+      title,
+      body,
+      tag: input.sessionKey,
+      ...(input.target ? { target: input.target } : {}),
+      ...(icon ? { icon } : {}),
+      ...(SESSION_APP_PKG[input.app] ? { pkg: SESSION_APP_PKG[input.app] } : {}),
+    });
+  } catch {
+    // 静默：记录失败不影响通知主链路
+  }
 }
 
 export interface IslandNotification {
@@ -323,12 +368,15 @@ function isSessionBannerSuppressed(sessionKey: string): boolean {
 export function pushChatNotification(input: ChatNotifyInput): void {
   const body = truncateBody(input.body);
   if (!body) return;
+  // v2.1 通知中心记录钩：先于一切闸门（免打扰/DND/接力抑制/前台闸）——用户需求
+  // 「什么通知都要显示在下拉通知面板上」；同会话 tag 替换，历史账本不丢不重。
+  recordChatToCenter(input, body);
   if (chatMuted(input.sessionKey)) return; // 消息免打扰：不弹灵动岛、不发系统通知（#15）
   // v1.9.2 真 DND：总开关开启时，聊天消息的三类出口（灵动岛横幅动画 / 提示音 / 系统通知）
   // 在这个最早汇合点一次拦净——下游 playNotifySound 与 maybeWebNotification（SSE/SW/
   // 原生兑底）都只在本函数内被调，提前 return 即全覆盖。未读角标/会话列表由各自消费端
-  // 处理不受影响；聊天消息本就不入通知中心历史（中心唯一入口是 local-notify.notifyIfHidden），
-  // 不存在「丢记录」问题，无需再走记录钩子。
+  // 处理不受影响；v2.1 起聊天消息已入通知中心（记录钩在更早处），「静但不丢」口径与
+  // 其余通知一致，不存在「丢记录」问题。
   if (isNotifyDndActive()) return;
   // v1.9.8 接力守望者抑制：守望者已为该会话的服务端待达消息弹过横幅/提示音/系统通知，
   // 聊天页正式投递同一批消息时三出口跳过（消息落盘、未读角标不受影响，见上方注释）

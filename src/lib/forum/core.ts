@@ -13,6 +13,8 @@ import { kvGet, kvSet } from '@/lib/ios/idb-kv';
 import { listContacts, ownerRealName } from '@/lib/ios/contacts-store';
 import type { ContactRecord } from '@/lib/contacts';
 import { MNPC_INDEX_KEY, type MatrixAuthorRec } from './worldview-store';
+// v2.1 论坛通知镜像：论坛回复/赞/关注/NPC 私信同步进手机通知中心（notification-center 仅依赖 zustand，轻量零环）
+import { recordCenterNotification } from '@/lib/ios/notification-center';
 
 // ---------------- 常量 ----------------
 
@@ -1529,10 +1531,83 @@ export function saveForum(next: ForumData): void {
   if (Array.isArray(next.notifications) && next.notifications.length > 200) {
     next.notifications = next.notifications.slice(0, 200);
   }
+  // v2.1 通知镜像钩：此刻 cache 仍是旧快照——先 diff 再换缓存（顺序不能反）
+  mirrorForumNotifiesToCenter(cache, next);
   cache = next;
   rev += 1;
   void kvSet(FORUM_KEY, next);
   if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent(CHANGED_EVENT));
+}
+
+/**
+ * v2.1 论坛通知镜像进手机通知中心（用户需求：网页内部触发的各类系统通知——论坛有人
+ * 回复、NPC 私信——也要进下拉通知面板，供用户回看与 AI 感知）：
+ * - 通知数组 diff（新 id 不在旧集合）→ 逐条记录（tag=forum-n:<id>，独立不替换）；
+ * - 私信数组 diff（某会话出现新的「对方发出的最后一条消息」）→ 记录（tag=forum-dm:<peer>，
+ *   同会话替换，对齐聊天通知的会话级去重心智）；
+ * - 每次 saveForum 最多镜像 3 条（首刷播种期防历史通知一次性灌满面板）；
+ * - 全程 try-catch 静默：镜像失败绝不影响论坛主链路。
+ */
+function mirrorForumNotifiesToCenter(prev: ForumData | null, next: ForumData): void {
+  if (typeof window === 'undefined') return;
+  try {
+    let budget = 3;
+    if (prev && Array.isArray(prev.notifications) && Array.isArray(next.notifications)) {
+      const oldIds = new Set(prev.notifications.map((n) => n.id));
+      const fresh = next.notifications.filter((n) => !oldIds.has(n.id));
+      for (const n of fresh.slice(0, budget)) {
+        const name = forumAuthorNameOf(n.fromKey);
+        const text =
+          n.type === 'like'
+            ? `${name} 赞了你的帖子`
+            : n.type === 'reply'
+              ? `${name} 回复了你`
+              : n.type === 'repost'
+                ? `${name} 转发了你的帖子`
+                : n.type === 'follow'
+                  ? `${name} 关注了你`
+                  : n.text?.trim() || '论坛有新动态';
+        recordCenterNotification({
+          title: 'X论坛',
+          body: text,
+          tag: `forum-n:${n.id}`,
+          target: { app: 'forum' },
+          pkg: 'com.x.forum',
+        });
+      }
+      budget -= Math.min(budget, fresh.length);
+    }
+    if (budget > 0 && prev && Array.isArray(prev.dms) && Array.isArray(next.dms)) {
+      for (const dm of next.dms) {
+        if (budget <= 0) break;
+        const last = dm.messages[dm.messages.length - 1];
+        if (!last || last.from === 'user' || last.from === 'anon') continue; // 自己（大号/小号）发的私信不通知
+        const prevDm = prev.dms.find((d) => d.peerKey === dm.peerKey);
+        const prevLast = prevDm?.messages[prevDm.messages.length - 1];
+        if (prevLast && prevLast.id === last.id) continue; // 最后一条没变（本轮无新私信）
+        const name = forumAuthorNameOf(last.from);
+        recordCenterNotification({
+          title: 'X论坛',
+          body: `${name}：${(last.text ?? '').replace(/\s+/g, ' ').slice(0, 60)}`,
+          tag: `forum-dm:${dm.peerKey}`,
+          target: { app: 'forum' },
+          pkg: 'com.x.forum',
+        });
+        budget -= 1;
+      }
+    }
+  } catch {
+    // 静默：镜像失败绝不影响论坛主链路
+  }
+}
+
+/** 镜像钩的作者名（resolveAuthor 在本文件后部定义，函数声明提升后运行期可用；失败回退「网友」） */
+function forumAuthorNameOf(key: string): string {
+  try {
+    return resolveAuthor(key as AuthorKey).name || '网友';
+  } catch {
+    return '网友';
+  }
 }
 
 /** 原子读改写（v41 A5）：读最新快照 → fn 就地修改 → 落盘。

@@ -41,6 +41,10 @@ export interface NotificationCenterItem {
   target?: unknown;
   /** 来源应用图标（可选；缺省按 tag 映射，见 NotificationCenter.tsx appMetaOf） */
   icon?: string;
+  /** v2.1 来源包名（感知层自我过滤用）：通知由哪个「虚拟 App」发出（如 com.tencent.mm /
+   *  com.sankai.meituan / com.z.aiphone=本 App 自身系统提示）。吃醋感知层据此精准剔除 AI
+   *  自己的通知与当前 App 自己发的系统提示，绝不自己吃自己的醋 */
+  pkg?: string;
   /** 记录时间戳（相对时间展示用） */
   ts: number;
   /** 已读标记（点条目 / 全部已读 / 原生点击回传匹配后置 true） */
@@ -55,6 +59,8 @@ export interface CenterRecordInput {
   url?: string;
   target?: unknown;
   icon?: string;
+  /** v2.1 来源包名（感知层自我过滤用，见 NotificationCenterItem.pkg） */
+  pkg?: string;
 }
 
 interface NotificationCenterState {
@@ -110,6 +116,7 @@ function loadItems(): NotificationCenterItem[] {
           ...(o.url ? { url: o.url } : {}),
           ...(o.target !== undefined ? { target: o.target } : {}),
           ...(o.icon ? { icon: o.icon } : {}),
+          ...(o.pkg ? { pkg: o.pkg } : {}),
           ts: o.ts,
           read: o.read === true,
         });
@@ -159,6 +166,7 @@ export const useNotifyCenter = create<NotificationCenterState>((set) => ({
         ...(n.url ? { url: n.url } : {}),
         ...(n.target !== undefined ? { target: n.target } : {}),
         ...(n.icon ? { icon: n.icon } : {}),
+        ...(n.pkg ? { pkg: n.pkg } : {}),
         ts: Date.now(),
         read: false,
       };

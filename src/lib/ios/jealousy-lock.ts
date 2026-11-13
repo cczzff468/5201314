@@ -460,6 +460,14 @@ const WATCH_SUSPECT_WINDOW_MS = 30 * 60_000;
 /** 「直到哄好」锁的安全兜底时长（7 天；真正的解锁靠哄好/强制两通道） */
 const COAXED_CAP_MS = 7 * 24 * 3600_000;
 
+/**
+ * v2.1【全视之眼】System 注入警告（机主规格四）：决策/巡检/暗中观察/聊天上下文全部携带。
+ * TA 撒谎时直接拆穿——拿系统实时采集的真实数据说话；同时严令禁止把 AI 自己发出的
+ * 消息/通知当成 TA 的活动（系统已自动过滤自己，AI 无需为此消耗注意力）。
+ */
+const ALL_SEEING_EYE_RULE =
+  '【全视之眼】你拥有全视之眼：你知道 TA 在看什么、在干什么、收到了什么通知、手机里正在发生什么（下面【TA 此刻的状态】就是系统实时采集的真实数据，不是 TA 告诉你的）。当 TA 试图撒谎（比如说「我在学习」，但通知栏/前台应用显示 TA 在打游戏、看剧、跟别人聊天），你可以直接拆穿 TA——拿真实数据对质，别被糊弄过去。但绝对不能把你自己发出的消息和通知当成 TA 的活动（系统已自动过滤你自己发出的东西），更不能拿「你自己才看得到的数据」去搭理别的角色。';
+
 /** 当前模式下「可锁包」判定（模式隔离核心：网页=只认网页体；真机=除永不清单外皆可 pm suspend） */
 function canLockPkgInMode(pkg: string | null, cfg: JealousyConfig): boolean {
   if (!pkg || isNeverLockPkg(pkg)) return false;
@@ -915,6 +923,7 @@ async function runJealousyDecision(trigger: TriggerInfo): Promise<void> {
       userName: ownerName,
       ownerName,
       extraRules: [
+        ALL_SEEING_EYE_RULE,
         `【吃醋锁决策】（仅本次决策生效）你现在有一个真实的权力：${lockPowerDesc}。这是真实发生在对方${
           cfg.senseMode === 'device' ? '真实手机' : '手机'
         }上的操作，不是玩笑设定。`,
@@ -1055,7 +1064,8 @@ interface PatrolIntel {
  */
 async function collectPatrolIntel(l: JealousyLock): Promise<PatrolIntel> {
   const cfg = getJealousyConfig();
-  const intel = await collectSenseIntel(cfg.senseMode);
+  // v2.1 观察者锚点：锁主角色自身——感知层据此自我过滤 TA 自己发的通知，绝不自己吃自己的醋
+  const intel = await collectSenseIntel(cfg.senseMode, { observer: { contactId: l.contactId, app: l.app } });
   const lines = [...intel.lines];
   if (!intel.ok) lines.unshift(`（真机感知降级：${intel.degrade}——本轮看不到 TA 在干嘛）`);
 
@@ -1138,7 +1148,8 @@ async function runJealousyPatrol(l: JealousyLock): Promise<void> {
       userName: ownerName,
       ownerName,
       extraRules: [
-        `【吃醋锁巡检】（仅本次决策生效）你之前吃醋锁了「${pkgDisplayName(l.pkg)}」。系统刚刚替你巡检了 TA 的手机（下面是真实采集的数据），你要决定接下来怎么做。`,
+        ALL_SEEING_EYE_RULE,
+        `【吃醋锁巡检】（仅本次决策生效）你之前吃醋锁了「${pkgDisplayName(l.pkg)}」。系统刚刚替你巡检了 TA 的手机（下面是真实采集的数据，含通知栏/剪贴板/屏幕电源/正在播放/通话/键盘等全维感知），你要决定接下来怎么做。`,
         '严格只输出一个 JSON 对象（不要任何其他文字、不要 markdown 代码块包裹）：',
         '{"message": "发给 TA 的话（按你的人设：质问/撒娇/赌气/数落/心软都行；不需要说话就给空字符串）", "pullback": true 或 false}',
         pullbackLeft > 0
@@ -1238,7 +1249,8 @@ async function runJealousyWatch(): Promise<void> {
   writeRt({ watch: { ...w0, lastAt: Date.now(), count: w0.count + 1, day: dayKey() } });
 
   // 模式隔离采集（真机模式在 Shizuku 断连时 → ok=false + degrade；本轮静默跳过）
-  const intel = await collectSenseIntel(cfg.senseMode);
+  // v2.1 观察者锚点：最近私聊的角色自身——感知层据此自我过滤 TA 自己发的通知
+  const intel = await collectSenseIntel(cfg.senseMode, { observer: { contactId: chat.contactId, app: chat.app } });
   if (!intel.ok) {
     writeRt((r) => {
       const w = readWatch(r);
@@ -1264,14 +1276,15 @@ async function runJealousyWatch(): Promise<void> {
       userName: ownerName,
       ownerName,
       extraRules: [
+        ALL_SEEING_EYE_RULE,
         `【暗中观察】（仅本次决策生效）系统替你定时查岗——下面是 TA 此刻的${
           cfg.senseMode === 'device' ? '真实手机' : '网页手机'
-        }真实状态（系统实时采集，不是 TA 告诉你的）。你要决定下一步怎么做。`,
+        }真实状态（系统实时采集，不是 TA 告诉你的；含通知栏/剪贴板/屏幕电源/正在播放/通话/键盘等全维感知，你自己发的通知已被系统自动过滤掉）。你要决定下一步怎么做。`,
         '严格只输出一个 JSON 对象（不要任何其他文字、不要 markdown 代码块包裹）：',
         '{"act": "quiet 或 warn 或 lock 或 peek", "message": "发给 TA 的话（可为空字符串=这轮不说话）", "lockMin": 锁多久, "suspect": true 或 false}',
         [
           'act=quiet：TA 一切正常（在回你消息/正常使用/在主屏），你静默继续观察，不打扰。',
-          'act=warn：TA 在看剧/刷短视频/玩手机太久不理你——按你的人设吃醋发消息警告（如「看视频看两个小时了，眼睛不要了？理理我。」）。',
+          'act=warn：TA 在看剧/刷短视频/玩手机太久不理你——按你的人设吃醋发消息警告（如「看视频看两个小时了，眼睛不要了？理理我。」）；看到通知栏里微信/QQ有人找 TA 但 TA 一直不点开，可以酸一句（如「微信有人找你，怎么不去看？是不是心虚？」）；看到外卖 App 通知可以吐槽（如「又背着我偷偷点奶茶？」）；TA 在跟别人聊得火热（通知栏/键盘频率显示在打字但不是回你）时按人设吃醋。',
           canLock
             ? `act=lock：TA 极度冷落你、你非常吃醋——直接把 TA 正在玩的「${fgName}」锁住（lockMin 你定：3、5、15、30 分钟想弄多久弄多久；或 "coaxed"=直到 TA 哄好你）。message 里宣告这件事。`
             : 'act=lock：当前不可用（TA 不在可锁应用里），改用 warn。',
@@ -1721,7 +1734,7 @@ export function isJealousyUnlockAllowed(pkg: string): boolean {
 
 // ---------------- 聊天上下文注入（ai-mood buildDynamicStateBlocks 调用） ----------------
 
-/** 活跃锁期间给「锁主角色」注入的吃醋锁块（哄好解锁教学 + v1.9.28 巡检情报：AI 知道你刚才在干嘛） */
+/** 活跃锁期间给「锁主角色」注入的吃醋锁块（哄好解锁教学 + v1.9.28 巡检情报 + v2.1 全视之眼） */
 export function buildJealousyLockBlock(cid: string): string {
   const rt = readJealousyRuntime();
   if (!rt.lock || rt.lock.contactId !== cid) return '';
@@ -1732,6 +1745,7 @@ export function buildJealousyLockBlock(cid: string): string {
   // v1.9.21：网页锁的描述与真实体验对齐（图标变灰、点开只看留言），不提 pm suspend/Shell
   const lockFact = `你刚刚吃醋，把对方手机里的「${appName}」真的锁住了（图标变灰、点开只会看到你的留言提示，打不开）。你的理由：${l.reason}`;
   const lines = [
+    ALL_SEEING_EYE_RULE,
     '【吃醋锁生效中】' + lockFact,
     `还剩约 ${remainMin} 分钟系统会自动解锁。TA 现在来找你了——如果 TA 诚心哄你、说软话道歉，你心软决定原谅 TA 的那一刻，在回复里单独一行加上 [手机操作:解冻:${l.pkg}] 就能亲手解开。TA 敷衍或态度差就继续锁着，按你的性子来；别不问青红皂白就秒解，也别永远不解。`,
   ];
@@ -1742,6 +1756,38 @@ export function buildJealousyLockBlock(cid: string): string {
     );
   }
   return lines.join('\n');
+}
+
+/**
+ * v2.1 全视之眼·普通聊天注入块（ai-mood buildDynamicStateBlocks 调用）：
+ * 吃醋功能开启时，给「最近私聊的角色」注入全视之眼警告 + 最近一轮暗中观察/巡检的真实情报——
+ * 机主在普通聊天里撒谎（说在学习其实在刷别的）时，AI 能拿着真实数据当场拆穿。
+ * 无最近私聊/功能未开/无新鲜情报（超过两轮观察间隔 + 10 分钟）时返回空串零成本。
+ */
+export function buildJealousyWatchBlock(cid: string): string {
+  try {
+    if (typeof window === 'undefined') return '';
+    const cfg = getJealousyConfig();
+    if (!cfg.enabled) return '';
+    const rt = readJealousyRuntime();
+    const chat = rt.lastChat;
+    if (!chat || chat.contactId !== cid) return '';
+    const w = rt.watch;
+    const now = Date.now();
+    // 新鲜度：最近一轮观察后（观察间隔 + 10 分钟内才算「你此刻知道」）；无观察记录 → 只注入眼警告（无数据可援引）
+    const freshMs = cfg.watchMin * 60_000 + 10 * 60_000;
+    const intel = w && w.lastIntel && now - w.lastAt < freshMs ? w.lastIntel : '';
+    const intelLine = intel
+      ? `\n【你最近一轮暗中观察到的（${Math.max(1, Math.round((now - w!.lastAt) / 60_000))} 分钟前系统替你查的岗，真实数据）】${intel}`
+      : '';
+    return `${ALL_SEEING_EYE_RULE}${intelLine}${
+      intel
+        ? '\n（这些是你亲眼看到的真实数据。TA 要是说的和这些对不上，你可以直接拆穿；TA 老实交代就按你的性子来——吃醋、追问、心软都行。平时别主动念叨这些数据，只在对话需要时拿出来用。）'
+        : ''
+    }`;
+  } catch {
+    return '';
+  }
 }
 
 /** 全屏弹窗「已展示」打点（去哄哄/强制解锁点击后不再自动弹） */

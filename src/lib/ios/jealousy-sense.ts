@@ -18,14 +18,20 @@
  * - dumpsys window / usagestats    —— 前台包名 / 今日亮屏时长
  * - shizukuScreencap               —— 静默截屏（免授权弹窗）
  *
+ * v2.1「全视之眼」升级：感知维度从「前台+时长」扩到七维——新增通知栏（含自我过滤）、
+ * 剪贴板、充电与屏幕（含深夜亮屏）、移动感知、正在播放、通话与未接、键盘与击键频率
+ * （全部在 jealousy-sense-extra 姊妹模块；observer=观察者锚点，自我过滤 AI 自己的通知）。
+ *
  * 容错（多品牌兜底）：所有真机调用失败（Shizuku 未运行/未授权/绑定失败/
  * 厂商 ROM 对 pm suspend 的额外限制）都返回结构化降级原因（degrade），
  * 上层据此静默跳过本轮或改发消息，绝不把异常炸进决策链。
  */
 
 import type { SenseMode } from './jealousy-sense-types';
+import { collectWebExtraLines, collectDeviceExtraLines, type SenseObserver } from './jealousy-sense-extra';
 
 export type { SenseMode };
+export type { SenseObserver };
 
 // ---------------- 情报结构 ----------------
 
@@ -75,8 +81,8 @@ function webLedgerCurrent(): { app: string | null; since: number } {
   }
 }
 
-/** 网页模式情报采集：虚拟手机当前 App + 停留时长 + 今日使用账本 */
-async function collectWebIntel(): Promise<SenseIntel> {
+/** 网页模式情报采集：虚拟手机当前 App + 停留时长 + 今日使用账本 + 全视之眼七维（v2.1） */
+async function collectWebIntel(observer: SenseObserver | null): Promise<SenseIntel> {
   const lines: string[] = [];
   let fgPkg: string | null = null;
   let stayMs = 0;
@@ -122,6 +128,14 @@ async function collectWebIntel(): Promise<SenseIntel> {
     /* 账本降级跳过 */
   }
 
+  // v2.1 全视之眼七维：通知栏（自我过滤）/剪贴板/屏幕电源/移动/正在播放/通话/键盘
+  // 每维独立降级：缺一维少一行，绝不炸整轮采集
+  try {
+    lines.push(...(await collectWebExtraLines(observer)));
+  } catch {
+    /* 扩展感知降级跳过 */
+  }
+
   return { ok: true, mode: 'web', lines, fgPkg, stayMs, todayTotalMs, peekNote: null, degrade: null };
 }
 
@@ -160,7 +174,7 @@ export function shizukuDegradeText(reason: string | undefined | null): string {
   }
 }
 
-/** 真机模式情报采集：前台包名 + 当前应用时长 + 今日亮屏 + （可选）截屏偷窥 */
+/** 真机模式情报采集：前台包名 + 当前应用时长 + 今日亮屏 + （可选）截屏偷窥 + 全视之眼七维（v2.1） */
 async function collectDeviceIntel(peek: boolean): Promise<SenseIntel> {
   const lines: string[] = [];
   let fgPkg: string | null = null;
@@ -212,6 +226,14 @@ async function collectDeviceIntel(peek: boolean): Promise<SenseIntel> {
     else lines.push('（截屏偷窥失败：Shizuku 截屏通道或识图模型不可用）');
   }
 
+  // v2.1 全视之眼七维（真机）：dumpsys 通知/剪贴板/电量亮屏亮度/传感器移动/媒体会话/通话未接/键盘
+  // 全部 Promise.allSettled 并行、单项失败各自缺席（jealousy-sense-extra 容错口径）
+  try {
+    lines.push(...(await collectDeviceExtraLines()));
+  } catch {
+    /* 扩展感知降级跳过：主情报（前台+时长）不受影响 */
+  }
+
   return { ok: true, mode: 'device', lines, fgPkg, stayMs, todayTotalMs, peekNote, degrade: null };
 }
 
@@ -230,10 +252,15 @@ function isNativeEnv(): boolean {
 /**
  * 按模式采集查岗情报。**模式隔离的唯一入口**——mode='web' 走网页分支、
  * mode='device' 走真机分支，绝不混读。
+ * v2.1：observer=观察者（正在吃醋的 AI）——扩展感知据此自我过滤 AI 自己的通知，
+ * 绝不自己吃自己的醋；不传则不过滤观察者会话（仅过滤本 App 自身系统提示）。
  */
-export async function collectSenseIntel(mode: SenseMode, opts: { peek?: boolean } = {}): Promise<SenseIntel> {
+export async function collectSenseIntel(
+  mode: SenseMode,
+  opts: { peek?: boolean; observer?: SenseObserver | null } = {},
+): Promise<SenseIntel> {
   if (mode === 'device') return collectDeviceIntel(!!opts.peek);
-  return collectWebIntel();
+  return collectWebIntel(opts.observer ?? null);
 }
 
 // ---------------- 真机操控原语（锁/解锁/拉回/偷窥） ----------------
@@ -344,4 +371,18 @@ export async function devicePeekScreen(): Promise<string | null> {
   } catch {
     return null;
   }
+}
+
+// ---------------- dev 测试钩子（仅 dev 生效；生产构建零暴露面） ----------------
+
+if (typeof window !== 'undefined' && process.env.NODE_ENV !== 'production') {
+  const w = window as typeof window & {
+    __senseTest?: {
+      /** 直接跑一轮双模式采集（v2.1 全视之眼七维验证入口） */
+      collect: (mode: SenseMode, observer?: { contactId: string; app: 'wx' | 'qq' | 'sms' } | null) => Promise<SenseIntel>;
+    };
+  };
+  w.__senseTest = {
+    collect: (mode, observer) => collectSenseIntel(mode, { observer: observer ?? null }),
+  };
 }

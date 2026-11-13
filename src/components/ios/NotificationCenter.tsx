@@ -26,6 +26,8 @@
  * v1.9.10（用户需求）：① 语音留言（ai-vm-*）图标改用电话 APP 实体图标；② 「全部已读/
  * 清空全部」两钮从底部移到面板右上角，免打扰快捷开关删除（设置 › 通知页仍可开关）；
  * ③ 顶部拉手横杠移到面板底部（点按仍收起面板）。
+ * v2.1（用户需求）：① 单条通知右上角的未读蓝点删除；② 聊天通知（AI 消息/群聊/NPC/美团
+ * 订单/论坛回复与私信）全部入面板——appMetaOf 补充美团/淘宝/X论坛/论坛私信来源映射。
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -83,15 +85,11 @@ interface NcAppMeta {
 }
 
 /**
- * 按 tag 推导来源 App（调研结论：通知中心记录的唯一入口是 local-notify.notifyIfHidden →
- * recordCenterNotification，真实存在的 tag 形态只有四种——
- * 'agent'（shizuku-agent 任务结束）/ 'couple-home-notes'（CoupleHome 便签）/
- * 'ai-call-<id>'（proactive-call 来电提醒）/ 'ai-vm-<id>'（proactive-call 未接留言）；
- * pushChatNotification 聊天链路不入中心，故聊天 tag 当前实际不存在——下面的微信/QQ/信息
- * 分支是按 sessionKey 前缀约定做的防御性映射，兜住未来/测试注入（__ncTest）的形态，
- * 避免聊天条目错归「系统」组；未知/无 tag（含浏览器通道自动 local-*）归「系统」。
- * v1.9.3：图标升级为主屏同款 APP 实体图标（registry appImage 直连，与 HomeScreen 同源），
- * agent 组用渐变+星光定制标；解析顺序：item.icon > appId 实体图 > src > emoji。
+ * 按 tag 推导来源 App：
+ * v2.1 聊天通知（pushChatNotification 记录钩）与论坛通知（saveForum 写穿钩）全部入中心，
+ * 新增 tag 形态：'wx:<cid>'/'qq:<cid>'/'sms:<key>'（单聊消息，tag=会话键，同会话替换）、
+ * 'mtshop:<mid>'（美团商家新订单）、'forum-n:<id>'（论坛通知）、'forum-dm:<peer>'（论坛私信）。
+ * 解析顺序：item.icon > appId 实体图 > src > emoji；未知/无 tag（含浏览器通道自动 local-*）归「系统」。
  */
 function appMetaOf(item: NotificationCenterItem): NcAppMeta {
   const tag = item.tag ?? '';
@@ -134,6 +132,21 @@ function appMetaOf(item: NotificationCenterItem): NcAppMeta {
     key = 'chat';
     name = '信息';
     appId = 'chat';
+    src = undefined;
+  } else if (tag.startsWith('mtshop') || tag.startsWith('mt-') || tag.startsWith('meituan')) {
+    key = 'meituan';
+    name = '美团';
+    appId = 'meituan';
+    src = undefined;
+  } else if (tag.startsWith('tb-') || tag.startsWith('taobao')) {
+    key = 'taobao';
+    name = '淘宝';
+    appId = 'taobao';
+    src = undefined;
+  } else if (tag.startsWith('forum-')) {
+    key = 'forum';
+    name = 'X论坛';
+    appId = 'forum';
     src = undefined;
   }
   // 调用方自带图标永远胜出（旧 iconForItem 首分支语义；带 src 时忽略 appId 映射）
@@ -208,8 +221,7 @@ function NotificationRow({ item, now }: { item: NotificationCenterItem; now: num
         <span className="flex items-center gap-1.5">
           <span className="min-w-0 flex-1 truncate text-[13.5px] font-semibold text-white">{item.title}</span>
           <span className="shrink-0 text-[11px] text-white/50">{relativeTime(item.ts, now)}</span>
-          {/* 未读蓝点 */}
-          {!item.read && <span aria-label="未读" className="h-[7px] w-[7px] shrink-0 rounded-full bg-[#0A84FF]" />}
+          {/* v2.1 用户需求：未读蓝点删除（未读状态仅保留在数据层供状态栏红点/全部已读） */}
         </span>
         <span className="mt-0.5 line-clamp-2 block text-[12px] leading-snug text-white/75">{item.body}</span>
       </span>

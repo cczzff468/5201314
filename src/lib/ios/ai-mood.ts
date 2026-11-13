@@ -200,7 +200,7 @@ export function buildMoodBlock(cid: string): string {
 import { buildRoutineBlock } from './routine';
 import { buildUserMoodBlock } from './user-mood';
 import { buildAnxietyChatBlock } from './anxiety';
-import { buildJealousyLockBlock } from './jealousy-lock';
+import { buildJealousyLockBlock, buildJealousyWatchBlock } from './jealousy-lock';
 
 /**
  * AI 动态状态块 = 情绪块 + 作息块（第十六轮）+ 用户情绪感知块（v49 功能四）+ 焦虑情绪带入块（v51）。
@@ -214,7 +214,19 @@ import { buildJealousyLockBlock } from './jealousy-lock';
  * 未回复期间不再注入「TA 现在回来了」描述（修复 AI 把自己追发的消息当成用户回复的幻觉）。
  * v1.9.19：buildJealousyLockBlock（【吃醋锁生效中】：活跃锁期间给锁主角色注入锁定事实
  * 与「哄好就解冻」教学）并入——三端聊天/主动消息/情侣空间行为自动带上。
+ * v2.1：buildJealousyWatchBlock（【全视之眼】：吃醋开启时给最近私聊角色注入全视之眼警告
+ * + 最近一轮暗中观察的真实情报）并入——机主在普通聊天里撒谎（说在学习其实在刷别的）
+ * 时，AI 能拿着系统实时采集的数据当场拆穿。
  */
 export function buildDynamicStateBlocks(cid: string, opts?: { userPresent?: boolean }): string {
-  return [buildMoodBlock(cid), buildUserMoodBlock(cid), buildAnxietyChatBlock(cid, opts), buildRoutineBlock(), buildJealousyLockBlock(cid)].filter(Boolean).join('\n');
+  return [
+    buildMoodBlock(cid),
+    buildUserMoodBlock(cid),
+    buildAnxietyChatBlock(cid, opts),
+    buildRoutineBlock(),
+    buildJealousyLockBlock(cid),
+    buildJealousyWatchBlock(cid),
+  ]
+    .filter(Boolean)
+    .join('\n');
 }
