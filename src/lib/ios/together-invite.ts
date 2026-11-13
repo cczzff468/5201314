@@ -73,26 +73,21 @@ export function triggerTogetherInvite(inv: Omit<TogetherInvite, 'id'>): void {
 
 /** 全局冷却：两次主动邀约最少间隔（聊天里 AI 标记触发不受此限） */
 const GLOBAL_COOLDOWN_MS = 12 * 60_000;
-/** 每角色冷却 */
-const PER_CONTACT_COOLDOWN_MS = 8 * 60 * 60_000;
+/** v2.1：每联系人 8h 冷却已删除（原 PER_CONTACT_COOLDOWN_MS）——同一联系人可重复邀约，仅受全局 12min 节流 */
 
 function globalLastKey(): string {
   return `music-invite-last:${musicUid()}`;
 }
-function contactLastKey(cid: string): string {
-  return `music-invite-cid:${musicUid()}:${cid}`;
-}
 
 function inCooldown(cid: string): boolean {
   const now = Date.now();
+  // v2.1：每联系人冷却已删除，只保留全局 12min 节流
   if (now - (kvGet<number>(globalLastKey()) ?? 0) < GLOBAL_COOLDOWN_MS) return true;
-  if (now - (kvGet<number>(contactLastKey(cid)) ?? 0) < PER_CONTACT_COOLDOWN_MS) return true;
   return false;
 }
 
 function markInvited(cid: string): void {
   kvSet(globalLastKey(), Date.now());
-  kvSet(contactLastKey(cid), Date.now());
 }
 
 // ---------------- 接受 / 拒绝 ----------------

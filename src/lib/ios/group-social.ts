@@ -147,8 +147,7 @@ interface GroupSocialState {
 }
 
 const SOCIAL_KEY = (contactId: string) => `ai-group-social:${contactId}`;
-export const GROUP_CREATE_COOLDOWN_MS = 24 * 60 * 60_000;
-export const GROUP_INVITE_COOLDOWN_MS = 24 * 60 * 60_000;
+/** v2.1：建群/邀人 24h 冷却已删除（原 GROUP_CREATE/INVITE_COOLDOWN_MS）——机主想让 AI 建多少群、邀多少人都行 */
 /** 状态保留上限（防膨胀）：邀请记录最多 50 条 */
 const INVITE_CAP = 50;
 
@@ -182,10 +181,9 @@ function saveSocialState(contactId: string, st: GroupSocialState): void {
   }
 }
 
-/** 同一角色 24h 内是否还能建群 */
+/** v2.1：建群 24h 冷却已删除——恒返 true（可建群） */
 export function canCharCreateGroup(charId: string): boolean {
-  const st = loadSocialState(charId);
-  return !st.lastCreateAt || Date.now() - st.lastCreateAt >= GROUP_CREATE_COOLDOWN_MS;
+  return true;
 }
 
 function markCharCreated(charId: string): void {
@@ -194,12 +192,11 @@ function markCharCreated(charId: string): void {
   saveSocialState(charId, st);
 }
 
-/** 同一角色对同一群同一目标是否还能邀请（24h 一次；拒绝过永不再拉） */
+/** v2.1：邀人 24h 冷却已删除——只看是否被拒过（拒绝过永不再拉），不再有间隔限制 */
 export function canCharInvite(charId: string, gid: string, targetId: string): boolean {
   const st = loadSocialState(charId);
   const rec = st.invites[`${gid}:${targetId}`];
   if (rec?.refused) return false;
-  if (rec && Date.now() - rec.at < GROUP_INVITE_COOLDOWN_MS) return false;
   if (st.refusedGroups[gid]) return false;
   return true;
 }

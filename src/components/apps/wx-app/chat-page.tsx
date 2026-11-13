@@ -5299,8 +5299,8 @@ export function ChatPage({
           )}
           {/* 液态输入栏（第四十四轮，用户指定）：删除大椭圆包裹——语音钮 = 玻璃圆圈内嵌黑圈、
               输入框毛玻璃椭圆、表情+加号共用一个玻璃椭圆；默认主题原样
-              第八十九轮（用户指定）：默认主题 gap-2→gap-1.5（图标与输入框更紧凑） */}
-          <div className={liquid ? 'flex items-center gap-2' : 'flex items-center gap-1.5'}>
+              第九十三轮（用户反馈输入框比例）：默认主题 gap-1.5→gap-3（图标与输入框间距 12px）、输入框高 40px、左 14/右 12、圆角 6px、垂直居中 */}
+          <div className={liquid ? 'flex items-center gap-2' : 'flex items-center gap-3'}>
             <button
               type="button"
               aria-label={voiceMode ? '切换到键盘输入' : '语音输入'}
@@ -5369,16 +5369,16 @@ export function ChatPage({
                   }}
                   enterKeyHint={enterSend ? 'send' : undefined}
                   placeholder={ttsSend ? '输入文字，发送后转为语音' : chatPlaceholder(chatDecorWx)}
-                  placeholderClass={`absolute inset-0 flex items-center pl-3.5 text-[16px] text-black/30 dark:text-white/30 ${input.trim() ? 'pr-4' : 'pr-11'}`}
+                  placeholderClass={`absolute inset-0 flex items-center pl-3.5 text-[16px] text-black/30 dark:text-white/30 ${input.trim() ? 'pr-3' : 'pr-11'}`}
                   testId="wx-chat-input"
-                  className={`block max-h-[132px] w-full overflow-y-auto py-[8px] pl-3.5 text-[16px] leading-[22px] caret-[#07C160] outline-none transition-all duration-200 selection:bg-[#07C160]/20 ${
-                    input.trim() ? 'pr-4' : 'pr-11'
+                  className={`block max-h-[132px] w-full overflow-y-auto py-[9px] pl-3.5 text-[16px] leading-[22px] caret-[#07C160] outline-none transition-all duration-200 selection:bg-[#07C160]/20 ${
+                    input.trim() ? 'pr-3' : 'pr-11'
                   } ${
                     liquid
                       ? /* 液态：毛玻璃椭圆输入胶囊（比背景稍深一档 + 内阴影下陷感） */ 'lg-input min-h-[36px] rounded-full shadow-[inset_0_1px_3px_rgba(31,38,135,0.10)]'
                       : retro
                       ? /* 古早（第五十四轮）：白底内凹硬边输入框 */ 'rt-input min-h-[34px] rounded-[4px] text-black'
-                      : /* 第九十二轮（用户反馈圆角偏圆）：圆角收窄 8→6px、与发送键同口径，更接近真机微信的干净观感 */ 'min-h-[36px] rounded-[6px] bg-white shadow-[0_1px_3px_rgba(0,0,0,0.06)] dark:bg-[#232323] dark:shadow-none'
+                      : /* 第九十三轮（用户反馈输入框比例）：高 40px、左 14/右 12、圆角 6px、垂直居中，贴近真机微信 */ 'min-h-[40px] rounded-[6px] bg-white shadow-[0_1px_3px_rgba(0,0,0,0.06)] dark:bg-[#232323] dark:shadow-none'
                   }`}
                 />
                 {/* 文字转语音开关（第三十二轮：输入框内右侧灰麦克风；开启后输入文字发送为语音气泡）；

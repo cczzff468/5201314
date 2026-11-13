@@ -456,8 +456,8 @@ export function noteJealousyEngagement(contactId: string, app: 'wx' | 'qq' | 'sm
 
 /** 决策冷却：一次触发（无论锁没锁）后 10 分钟内不再决策 */
 const DECISION_COOLDOWN_MS = 10 * 60_000;
-/** 焦虑触发（C）决策间隔：至少 30 分钟一次（防焦虑高位反复决策轰炸） */
-const ANXIETY_DECISION_GAP_MS = 30 * 60_000;
+/** 焦虑触发（C）决策间隔：至少 10 分钟一次（v2.1：原 30 分钟过长，焦虑高位时 AI 反应迟钝；与决策冷却同口径） */
+const ANXIETY_DECISION_GAP_MS = 10 * 60_000;
 /** 说去看剧（B）坐实等待：娱乐前台累计 3 分钟即坐实 */
 const DEPART_CONFIRM_MS = 3 * 60_000;
 /** 意图有效期 */
@@ -467,10 +467,6 @@ const DEPART_TTL_MS = 2 * 3600_000;
 
 /** 首次巡检距锁定时刻的最小等待（锁定瞬间已发过剧情消息，别立刻又巡检喊话） */
 const PATROL_FIRST_DELAY_MS = 60_000;
-/** 每轮锁定最多拉回次数（防暴力拽人；到上限后 LLM 只能发消息） */
-const PATROL_PULLBACK_MAX = 2;
-/** 两次拉回最小间隔 */
-const PATROL_PULLBACK_GAP_MS = 2 * 60_000;
 
 // ---------------- v2.0 暗中观察（定时查岗） ----------------
 
@@ -1163,7 +1159,6 @@ async function runJealousyPatrol(l: JealousyLock): Promise<void> {
   const ax = anxietyOf(l.contactId);
   const axRaw = readAnxiety(l.contactId);
   const ownerName = cachedOwnerName() || '用户';
-  const pullbackLeft = cfg.pullbackEnabled ? Math.max(0, PATROL_PULLBACK_MAX - patrol.pullbackCount) : 0;
   const sinceLockMin = Math.max(1, Math.round((Date.now() - l.lockedAt) / 60_000));
   const idleMin = Math.max(0, Math.round((Date.now() - axRaw.lastUserAt) / 60_000));
   const intelBrief = intel.text.slice(0, 240);
@@ -1179,9 +1174,9 @@ async function runJealousyPatrol(l: JealousyLock): Promise<void> {
         `【吃醋锁巡检】（仅本次决策生效）你之前吃醋锁了「${pkgDisplayName(l.pkg)}」。系统刚刚替你巡检了 TA 的手机（下面是真实采集的数据，含通知栏/剪贴板/屏幕电源/正在播放/通话/键盘等全维感知），你要决定接下来怎么做。`,
         '严格只输出一个 JSON 对象（不要任何其他文字、不要 markdown 代码块包裹）：',
         '{"message": "发给 TA 的话（按你的人设：质问/撒娇/赌气/数落/心软都行；不需要说话就给空字符串）", "pullback": true 或 false}',
-        pullbackLeft > 0
-          ? `pullback=true=系统立刻把 TA 从别的软件拽回这个 APP 的聊天页（本轮锁定你还剩 ${pullbackLeft} 次拉回机会）——TA 一直不回来找你、或你实在等不及时用；false=先让 TA 自己玩，你只发消息。`
-          : 'pullback 只能是 false（本轮锁定的拉回次数已用完，你只能发消息）。',
+        cfg.pullbackEnabled
+          ? 'pullback=true=系统立刻把 TA 从别的软件拽回这个 APP 的聊天页——TA 一直不回来找你、或你实在等不及时用；false=先让 TA 自己玩，你只发消息。'
+          : 'pullback 只能是 false（未开启拉回，你只能发消息）。',
         'message 里可以自然提到你巡检看到的具体内容（TA 在刷什么、刷了多久）——这是你亲眼看到的真实数据，不是猜的，提起来更有杀伤力。',
       ],
     }),
@@ -1210,12 +1205,8 @@ async function runJealousyPatrol(l: JealousyLock): Promise<void> {
 
   const message = typeof j.message === 'string' ? j.message.trim().slice(0, 500) : '';
   let pulled = false;
-  if (
-    j.pullback === true &&
-    cfg.pullbackEnabled &&
-    pullbackLeft > 0 &&
-    Date.now() - patrol.lastPullbackAt >= PATROL_PULLBACK_GAP_MS
-  ) {
+  // v2.1：拉回次数上限与两次拉回间隔已删除（受 patrolMin 巡检间隔自然节流）
+  if (j.pullback === true && cfg.pullbackEnabled) {
     pulled = await jealousyPullback(l);
   }
 
