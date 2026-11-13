@@ -5289,7 +5289,7 @@ export function ChatPage({
             第三十四轮：gap-2.5→gap-2（输入框往右延伸）
             第四十七轮（用户指定）：液态底距 pb-2→pb-[13px]——输入框整体再往上提一点
             第八十九轮（用户指定）：默认主题右内边距 pr-2.5→pr-2，表情/加号更贴右缘 */}
-        <div className={liquid ? 'px-2.5 pb-[13px] pt-1' : 'pl-2.5 pr-1 pb-[18px] pt-1'}>
+        <div className={liquid ? 'px-2.5 pb-[13px] pt-1' : 'pl-2 pr-0.5 pb-[18px] pt-1'}>
           {/* 输入框上方快捷功能条（输入框自定义 › 输入框上方功能）：把加号面板里的功能放到输入框上面；
               点一下与点面板里那一项等效；未添加 = 不显示；「+」面板本身不受影响 */}
           {quickItems.length > 0 && (
@@ -5299,7 +5299,7 @@ export function ChatPage({
           )}
           {/* 液态输入栏（第四十四轮，用户指定）：删除大椭圆包裹——语音钮 = 玻璃圆圈内嵌黑圈、
               输入框毛玻璃椭圆、表情+加号共用一个玻璃椭圆；默认主题原样
-              第九十五轮（用户反馈）：文字更贴边框 pl-3→pl-2.5 / pr-2→pr-1.5、右内边距 pr-1.5→pr-1（表情/发送往右贴）、发送键 -ml-1 贴表情钮、输入框更宽 */}
+              第九十六轮（用户反馈）：文字再贴边 pl-2.5→pl-2 / pr-1.5→pr-1、容器 pl-2.5→pl-2 / pr-1→pr-0.5（输入框左右再变长）、发送键 -ml-1→-ml-1.5、表情/加号钮窄化 34→30px */}
           <div className="flex items-center gap-2">
             <button
               type="button"
@@ -5369,10 +5369,10 @@ export function ChatPage({
                   }}
                   enterKeyHint={enterSend ? 'send' : undefined}
                   placeholder={ttsSend ? '输入文字，发送后转为语音' : chatPlaceholder(chatDecorWx)}
-                  placeholderClass={`absolute inset-0 flex items-center pl-2.5 text-[16px] text-black/30 dark:text-white/30 ${input.trim() ? 'pr-1.5' : 'pr-11'}`}
+                  placeholderClass={`absolute inset-0 flex items-center pl-2 text-[16px] text-black/30 dark:text-white/30 ${input.trim() ? 'pr-1' : 'pr-11'}`}
                   testId="wx-chat-input"
-                  className={`block max-h-[132px] w-full overflow-y-auto py-[9px] pl-2.5 text-[16px] leading-[22px] caret-[#07C160] outline-none transition-all duration-200 selection:bg-[#07C160]/20 ${
-                    input.trim() ? 'pr-1.5' : 'pr-11'
+                  className={`block max-h-[132px] w-full overflow-y-auto py-[9px] pl-2 text-[16px] leading-[22px] caret-[#07C160] outline-none transition-all duration-200 selection:bg-[#07C160]/20 ${
+                    input.trim() ? 'pr-1' : 'pr-11'
                   } ${
                     liquid
                       ? /* 液态：毛玻璃椭圆输入胶囊（比背景稍深一档 + 内阴影下陷感） */ 'lg-input min-h-[36px] rounded-full shadow-[inset_0_1px_3px_rgba(31,38,135,0.10)]'
@@ -5461,7 +5461,7 @@ export function ChatPage({
                   setPlusOpen(false);
                   setStickerOpen((v) => !v);
                 }}
-                className="flex h-10 w-[34px] shrink-0 items-center justify-center active:opacity-60"
+                className="flex h-10 w-[30px] shrink-0 items-center justify-center active:opacity-60"
               >
                 <Smile className="h-[24px] w-[24px]" strokeWidth={2} />
               </button>
@@ -5483,7 +5483,7 @@ export function ChatPage({
                     : retro
                     ? /* 古早（第五十四轮）：复古绿渐变拟物发送键 */
                       'rt-send flex h-9 shrink-0 items-center justify-center px-4 text-[14px] font-semibold text-[#1E3A0C] active:opacity-80 disabled:opacity-50'
-                    : /* 第九十五轮：贴表情钮（-ml-1）、圆角同步 */ '-ml-1 flex h-[34px] shrink-0 items-center justify-center rounded-[6px] bg-[#07C160] px-4 text-[14px] font-medium text-white active:bg-[#06AD56] disabled:opacity-50'
+                    : /* 第九十六轮：更贴表情钮（-ml-1.5）、圆角同步 */ '-ml-1.5 flex h-[34px] shrink-0 items-center justify-center rounded-[6px] bg-[#07C160] px-4 text-[14px] font-medium text-white active:bg-[#06AD56] disabled:opacity-50'
                 }
               >
                 发送
@@ -5501,7 +5501,7 @@ export function ChatPage({
                   setStickerOpen(false);
                   setPlusOpen((v) => !v);
                 }}
-                className="-ml-2 flex h-10 w-[34px] shrink-0 items-center justify-center active:opacity-60"
+                className="-ml-1.5 flex h-10 w-[30px] shrink-0 items-center justify-center active:opacity-60"
               >
                 <CirclePlus
                   className={`h-[27px] w-[27px] transition-transform duration-200 ${plusOpen ? 'rotate-45' : ''}`}
