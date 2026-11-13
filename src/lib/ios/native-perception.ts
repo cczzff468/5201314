@@ -79,6 +79,9 @@ type CapPlugin = {
   requestShizukuPermission(): Promise<ShizukuPermissionResult>;
   shizukuExec(options?: { cmd?: string[] } & ShizukuExecOptions): Promise<ShizukuExecResult>;
   shizukuScreencap(): Promise<{ ok?: boolean; frame?: string; reason?: string }>;
+  jealousyGuardSyncLock(options?: { pkg?: string; unlockAt?: number; charName?: string }): Promise<{ ok?: boolean; reason?: string }>;
+  jealousyGuardStatus(): Promise<JealousyGuardStatusResult>;
+  jealousyGuardDrainEvents(): Promise<{ events?: JealousyGuardEvent[] }>;
   micPermission(): Promise<RuntimePermResult>;
   requestMicPermission(): Promise<RuntimePermResult>;
   notificationPermission(): Promise<RuntimePermResult & { sdk?: number }>;
@@ -277,6 +280,10 @@ function bridgePlugin(): CapPlugin {
     requestShizukuPermission: () => nativeCall<ShizukuPermissionResult>('requestShizukuPermission', {}, 35_000),
     shizukuExec: (options) => nativeCall<ShizukuExecResult>('shizukuExec', options ?? {}, (options?.timeoutMs ?? 8000) + 16_000),
     shizukuScreencap: () => nativeCall<{ ok?: boolean; frame?: string; reason?: string }>('shizukuScreencap', {}, 30_000),
+    jealousyGuardSyncLock: (options) =>
+      nativeCall<{ ok?: boolean; reason?: string }>('jealousyGuardSyncLock', options ?? {}, 8000),
+    jealousyGuardStatus: () => nativeCall<JealousyGuardStatusResult>('jealousyGuardStatus'),
+    jealousyGuardDrainEvents: () => nativeCall<{ events?: JealousyGuardEvent[] }>('jealousyGuardDrainEvents'),
     micPermission: () => nativeCall<RuntimePermResult>('micPermission'),
     // 首次弹系统授权框：用户可能犹豫许久，看门狗放宽到 60s（已授予时毫秒级直通）
     requestMicPermission: () => nativeCall<RuntimePermResult>('requestMicPermission', {}, 60_000),
@@ -965,6 +972,106 @@ export async function nativeShizukuScreencap(): Promise<{ ok?: boolean; frame?: 
   if (!isNativePerception()) return null;
   try {
     return await nativeCall<{ ok?: boolean; frame?: string; reason?: string }>('shizukuScreencap', {}, 30_000);
+  } catch {
+    return null;
+  }
+}
+
+// ---------------- 吃醋守护前台服务（v1.9.43：真机模式后台调度兜底） ----------------
+// 原生 JealousyGuardService（specialUse 前台服务）独立于 WebView 存活：
+// - 锁到期自动 pm unsuspend（WebView 被杀/冻结也到点解锁）；
+// - 每 2 分钟轮询 dumpsys package 检测强制解锁（高优通知 + 事件落盘，AI 醒来取走）；
+// - Shizuku 断连/厂商限制 → degrade 事件如实记录，绝不硬锁。
+// 事件经 jealousyGuardDrainEvents 取走（取后即清）；旧 APK（无此三方法）超时探测 → false。
+
+/** 原生守护事件（WebView 醒来后 drain 进吃醋决策链） */
+export interface JealousyGuardEvent {
+  /** 事件时间戳（epoch ms） */
+  ts: number;
+  /**
+   * 事件类型：
+   * - 'native-unlock'：锁到期由原生服务解开（pm unsuspend 成功执行）
+   * - 'breach'：锁仍活跃但 suspend 已被强行打破（用户从系统设置/其他软件解锁）
+   * - 'degrade'：原生守护遇到容错降级（Shizuku 断连/厂商 ROM 限制等）
+   */
+  type: 'native-unlock' | 'breach' | 'degrade';
+  /** 涉事应用包名 */
+  pkg: string;
+  /** 人话说明（进 AI 决策与通知链路） */
+  text: string;
+}
+
+/** 原生守护服务状态 */
+export interface JealousyGuardStatusResult {
+  /** 守护服务是否在运行 */
+  running: boolean;
+  /** 正在守护（锁定）的应用包名（null=无锁） */
+  pkg?: string | null;
+  /** 锁定到期时间（epoch ms；-1=无锁） */
+  unlockAt?: number;
+  /** 未取走的事件条数 */
+  eventCount?: number;
+  /** Shizuku 通道是否可用（守护的命令底座） */
+  shizuku?: boolean;
+}
+
+let guardBridgeState: boolean | null = null; // null=未探测；false=旧 APK（v1.9.42 及更早）
+
+/** 守护桥能力探测（新 APK 立即响应；旧 APK 对未知方法不回包 → 超时即 false） */
+export async function nativeJealousyGuardSupported(): Promise<boolean> {
+  if (!isNativePerception()) return false;
+  if (guardBridgeState !== null) return guardBridgeState;
+  try {
+    const r = await Promise.race([
+      nativeCall<JealousyGuardStatusResult>('jealousyGuardStatus', {}, 2500),
+      new Promise<never>((_, rej) => window.setTimeout(() => rej(new Error('probe-timeout')), 2600)),
+    ]);
+    guardBridgeState = typeof r?.running === 'boolean';
+  } catch {
+    guardBridgeState = false;
+  }
+  return guardBridgeState;
+}
+
+/**
+ * 同步锁状态给原生守护服务（jealousy-lock 锁定/解锁/更新时调用）：
+ * - 传 pkg → 启动/更新前台服务守护（unlockAt 倒计时 + 强解检测）；
+ * - 不传 pkg → 停止守护。
+ * 返回 ok（false=旧 APK/桥断/启动失败，reason 给人话）。
+ */
+export async function nativeJealousyGuardSyncLock(opts: {
+  pkg?: string;
+  unlockAt?: number;
+  charName?: string;
+}): Promise<{ ok: boolean; reason?: string }> {
+  if (!isNativePerception()) return { ok: false, reason: 'not-native' };
+  if (!(await nativeJealousyGuardSupported())) return { ok: false, reason: 'old-apk' };
+  try {
+    const r = await nativeCall<{ ok?: boolean; reason?: string }>('jealousyGuardSyncLock', opts, 8000);
+    return { ok: r?.ok === true, reason: r?.reason };
+  } catch {
+    return { ok: false, reason: '桥无响应' };
+  }
+}
+
+/** 查询守护服务运行状态（null=旧 APK/非原生环境） */
+export async function nativeJealousyGuardStatus(): Promise<JealousyGuardStatusResult | null> {
+  if (!isNativePerception()) return null;
+  if (!(await nativeJealousyGuardSupported())) return null;
+  try {
+    return await nativeCall<JealousyGuardStatusResult>('jealousyGuardStatus', {}, 5000);
+  } catch {
+    return null;
+  }
+}
+
+/** 取走守护服务积累的全部事件（取后即清；null=旧 APK/非原生环境） */
+export async function nativeJealousyGuardDrainEvents(): Promise<JealousyGuardEvent[] | null> {
+  if (!isNativePerception()) return null;
+  if (!(await nativeJealousyGuardSupported())) return null;
+  try {
+    const r = await nativeCall<{ events?: JealousyGuardEvent[] }>('jealousyGuardDrainEvents', {}, 5000);
+    return Array.isArray(r?.events) ? r.events : [];
   } catch {
     return null;
   }

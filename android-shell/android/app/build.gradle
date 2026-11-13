@@ -11,8 +11,8 @@ android {
         applicationId "com.z.aiphone"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 20          // v1.9.42 返回键双击退出修复（悬浮球贴右缘误触发安卓返回手势直接退出 APP；v19 = 1.9.41）
-        versionName "1.9.42"    // v1.9.42：MainActivity onBackPressed 双击退出 + 网页侧悬浮球/翻译气泡/微信输入栏焕新
+        versionCode 21          // v1.9.43 吃醋守护前台服务（真机吃醋锁的后台调度兜底：WebView 被杀/冻结时原生独立完成锁到期自动解锁+强解检测；v20 = 1.9.42）
+        versionName "1.9.43"    // v1.9.43：JealousyGuardService 前台服务 + jealousyGuardSyncLock/Status/DrainEvents 桥方法
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.

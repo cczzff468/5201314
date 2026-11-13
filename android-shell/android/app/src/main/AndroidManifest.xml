@@ -57,6 +57,19 @@
                 android:resource="@xml/method" />
         </service>
 
+        <!-- v1.9.43 吃醋守护前台服务（specialUse 类型）：真机模式「吃醋锁」的原生兜底——
+             WebView 被杀/冻结时独立完成「锁到期 pm unsuspend 自动解锁 + dumpsys 强解检测」，
+             事件落盘等 JS 醒来取走（见 JealousyGuardService.java） -->
+        <service
+            android:name=".JealousyGuardService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <!-- Android 14+ 强制：specialUse 类型必须声明子类型（用途说明，供系统/审核识别） -->
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="companion_jealousy_guard" />
+        </service>
+
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"
@@ -92,6 +105,8 @@
     <!-- 屏幕捕获前台服务（Android 9+ / 14+ 要求） -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
+    <!-- v1.9.43 吃醋守护前台服务（specialUse 类型需配对声明，Android 14+） -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!-- v1.6.1 语音唤起修复：WebView 的 getUserMedia 录音需要 RECORD_AUDIO（危险权限，运行时弹系统授权框）。
          未声明时 requestPermissions 被系统静默拒绝（永不弹窗）→ 前端一直报「无法使用麦克风」。

@@ -41,6 +41,8 @@ import { setAutonomyMaster, setAutonomyCap } from './shizuku-autonomy';
 import { webAppOfPkg, webPkgOfApp, setWebFrozen, getWebFrozen } from './web-app-lock';
 // v2.0 双模式感知层（模式隔离：网页/真机各自采集；锁应用 pm suspend / 强行拉回 am start / 偷窥截屏）
 import { collectSenseIntel, deviceSuspendApp, deviceUnsuspendApp, deviceSuspendState, devicePullback, devicePeekScreen, fmtMs, type SenseIntel } from './jealousy-sense';
+// v1.9.43 原生吃醋守护前台服务（真机模式后台调度兑底：WebView 被杀也到点解锁/检测强解）
+import { nativeJealousyGuardSyncLock, nativeJealousyGuardDrainEvents } from './native-perception';
 import type { SenseMode } from './jealousy-sense-types';
 
 // 注意：memory.ts 反向依赖 chat-stream-store（abortStreamsByPrefix），而 chat-stream-store →
@@ -503,6 +505,81 @@ interface TriggerInfo {
 
 let tickBusy = false;
 
+// ---------------- v1.9.43 原生吃醋守护（前台服务）对接 ----------------
+
+/**
+ * 同步锁状态给原生守护前台服务（真机模式专用）：
+ * - 有锁 → 启动/更新 FGS（独立倒计时到期 pm unsuspend + 每 2 分钟强解检测）；
+ * - 无锁 → 停止守护。
+ * 网页模式 / 旧 APK / 非原生环境 → nativeJealousyGuardSyncLock 内部直接 false，零副作用。
+ */
+function syncJealousyGuard(pkg: string | null, unlockAt: number, charName: string): void {
+  const cfg = getJealousyConfig();
+  if (cfg.senseMode !== 'device') return; // 网页锁在网页内部，原生守护无意义
+  void nativeJealousyGuardSyncLock(
+    pkg
+      ? { pkg, unlockAt, charName }
+      : {},
+  ).catch(() => null);
+}
+
+/**
+ * 回收原生守护事件（每 tick 开头调用）：
+ * - native-unlock：锁到期由原生服务解开（WebView 死过一段时间的场景）→ JS 侧对齐锁状态，
+ *   走 timeout 通道记忆（AI 下轮聊天能自然提起）；JS 活着时 tick 已先行解锁 → 事件幂等忽略；
+ * - breach：原生服务检测到强解 → 若 JS 轮询还没发现（WebView 刚醒）→ 走 detectForcedBreach
+ *   同款链路（内部再查一次 dumpsys 双保险防误报，之后 AI 阴阳怪气）；
+ * - degrade：守护降级（Shizuku 断连/厂商限制）→ 记进 watch.lastIntel（AI 下轮可见）。
+ * 事件取后即清（原生侧环形 50 条上限，不担心膨胀）。
+ */
+async function drainJealousyGuardEvents(): Promise<void> {
+  const cfg = getJealousyConfig();
+  if (cfg.senseMode !== 'device') return;
+  let events: import('./native-perception').JealousyGuardEvent[] | null;
+  try {
+    events = await nativeJealousyGuardDrainEvents();
+  } catch {
+    return;
+  }
+  if (!events || events.length === 0) return;
+
+  for (const ev of events) {
+    if (ev.type === 'native-unlock') {
+      const rt = readJealousyRuntime();
+      // 锁仍活跃且正是这个应用 → 原生已替我们执行了 pm unsuspend，JS 只需对齐状态
+      if (rt.lock && !rt.lock.web && rt.lock.pkg === ev.pkg && Date.now() < rt.lock.unlockAt + 60_000) {
+        writeRt({
+          lock: null,
+          patrol: null,
+          lastUnlock: { at: ev.ts, kind: 'timeout', pkg: ev.pkg },
+          pendingUnfreeze: null,
+        });
+        try {
+          const l = rt.lock;
+          const contact = await findContact(l.contactId).catch(() => null);
+          await writeUnlockMemory('timeout', contact, l.app, pkgDisplayName(ev.pkg));
+        } catch {
+          /* 记忆失败不影响对齐 */
+        }
+      }
+      // 锁已被 JS 侧先解开（正常 tick 驱动）或包名不匹配 → 幂等忽略
+    } else if (ev.type === 'breach') {
+      const rt = readJealousyRuntime();
+      // JS 轮询尚未发现（WebView 刚醒来）且锁仍活跃 → 触发强解反应链路
+      if (rt.lock && !rt.lock.web && !rt.lock.breachNotified && rt.lock.pkg === ev.pkg) {
+        await detectForcedBreach(rt.lock);
+      }
+      // 否则幂等忽略（JS 已先处理过）
+    } else if (ev.type === 'degrade') {
+      // 守护降级记进观察情报（AI 下轮暗中观察/聊天上下文都能看到）
+      writeRt((r) => {
+        const w = readWatch(r);
+        return { watch: { ...w, lastIntel: `（原生守护降级：${ev.text}）${w.lastIntel ? `；${w.lastIntel}` : ''}` } };
+      });
+    }
+  }
+}
+
 export async function runJealousyTick(): Promise<void> {
   if (tickBusy) return;
   tickBusy = true;
@@ -519,6 +596,11 @@ async function tickInner(): Promise<void> {
   if (typeof window === 'undefined') return;
   const cfg = getJealousyConfig();
   const now = Date.now();
+
+  // v1.9.43 原生守护事件回收：WebView 被杀/冻结期间，原生前台服务独立把该干的活干了
+  // （到期解锁 pm unsuspend / 强解检测），醒来后在这里取走事件对齐状态 + 补发 AI 反应。
+  // 网页模式 / 旧 APK / 非原生环境 → drain 返回 null，零开销跳过。
+  await drainJealousyGuardEvents();
 
   // v2.0：真机锁的 unsuspend 补刀重试（Shizuku 断连时 unlockJealousy 落 pendingUnfreeze；
   // 这里每 tick 重试 pm unsuspend，成功即清；4h 过期放弃——网页锁解冻恒成功不受影响）
@@ -777,6 +859,8 @@ async function executeJealousyLock(
   if (cfg.senseMode === 'device') {
     const r = await deviceSuspendApp(pkg);
     if (!r.ok) return { ok: false, web: false, failNote: r.text };
+    // v1.9.43：锁成功 → 同步原生守护前台服务（WebView 被杀也能到点解锁 + 检测强解）
+    syncJealousyGuard(pkg, unlockAt, charName);
     return { ok: true, web: false, failNote: '' };
   }
   // 网页模式：冻结网页内 App（图标置灰 + 打开拦截 + 全屏留言）
@@ -1236,7 +1320,13 @@ async function runJealousyWatch(): Promise<void> {
       ? j.messages.filter((m): m is string => typeof m === 'string' && !!m.trim()).map((m) => m.trim().slice(0, 500)).slice(0, 8)
       : [],
     lockPkg: typeof j.lockPkg === 'string' && /^[\w.]+$/.test(j.lockPkg) ? j.lockPkg : intel.fgPkg,
-    lockMin: (typeof j.lockMin === 'number' || typeof j.lockMin === 'string') ? (j.lockMin as number | string) : null,
+    // lockMin：数字分钟或 "coaxed"/哄好/直到哄好（其余字符串形态一律 null 走默认）
+    lockMin:
+      typeof j.lockMin === 'number' && Number.isFinite(j.lockMin)
+        ? j.lockMin
+        : typeof j.lockMin === 'string' && /coaxed|哄好/.test(j.lockMin)
+            ? 'coaxed'
+            : null,
     suspect: j.suspect === true,
     pullback: j.pullback === true,
   };
@@ -1377,6 +1467,40 @@ async function runJealousyWatch(): Promise<void> {
       },
     };
   });
+}
+
+// ---------------- v2.0 手动查岗入口（设置页「立刻替 TA 查一次岗」按钮） ----------------
+
+/** 手动查岗节流（防连点风暴：10s 内只跑一轮） */
+let lastManualWatchAt = 0;
+
+/**
+ * 立刻替 TA 查一次岗（设置页按钮入口）：无视 watchMin 间隔强制跑一轮暗中观察。
+ * - 无最近私聊角色（TA 无从吃醋）/ 观察进行中（watchBusy 软闸）/ 10s 节流内 → 静默跳过；
+ * - 返回本轮动作（quiet/warn/lock/peek）与情报摘要，设置页据此给即时反馈。
+ */
+export async function jealousyWatchNow(): Promise<{ ran: boolean; act: string; intel: string }> {
+  const now = Date.now();
+  if (now - lastManualWatchAt < 10_000) {
+    const w = readJealousyRuntime().watch;
+    return { ran: false, act: 'throttled', intel: w?.lastIntel ?? '' };
+  }
+  lastManualWatchAt = now;
+  const rt = readJealousyRuntime();
+  if (!rt.lastChat) return { ran: false, act: 'no-chat', intel: '还没有和 TA 聊过天，TA 无从查起' };
+  if (rt.lock) {
+    const remain = jealousyRemainSec();
+    return { ran: false, act: 'locked', intel: `TA 正在锁着 ${pkgDisplayName(rt.lock.pkg)}${remain ? `（${Math.ceil(remain / 60)} 分钟后解）` : ''}，锁定期巡检自会盯着` };
+  }
+  const before = readJealousyRuntime().watch;
+  await runJealousyWatch();
+  const after = readJealousyRuntime().watch;
+  const intel = after?.lastIntel ?? before?.lastIntel ?? '';
+  return {
+    ran: !!(after && after.lastAt !== before?.lastAt),
+    act: after?.lastAct ?? 'quiet',
+    intel,
+  };
 }
 
 // ---------------- v2.0 强制解锁感知引擎 ----------------
@@ -1532,13 +1656,26 @@ export async function unlockJealousy(kind: UnlockKind): Promise<boolean> {
 
   // v1.9.35：网页冻结同步解冻（图标恢复、可打开），恒成功
   setWebFrozen(null);
-  const ok = true;
+
+  // v1.9.43 修复（真机解锁链路）：真机锁的解锁必须真正执行 pm unsuspend——
+  // 此前 timeout/forced/coaxed 三通道都只清 JS 状态，真实手机上的应用仍处于
+  // suspended（图标变灰打不开），直到 7 天死循环。现在：解冻失败（Shizuku 断连）
+  // → 落 pendingUnfreeze 由 tick 每 30s 补刀重试，绝不丢。
+  let pending: { pkg: string; since: number } | null = null;
+  if (!l.web) {
+    const r = await deviceUnsuspendApp(l.pkg);
+    if (!r.ok) pending = { pkg: l.pkg, since: Date.now() };
+  }
+
   writeRt({
     lock: null,
     patrol: null,
     lastUnlock: { at: Date.now(), kind, pkg: l.pkg },
-    pendingUnfreeze: null,
+    pendingUnfreeze: pending,
   });
+
+  // v1.9.43：真机锁 → 同步停掉原生守护前台服务（无锁即停）
+  if (!l.web) syncJealousyGuard(null, 0, '');
 
   const appName = pkgDisplayName(l.pkg);
   const contact = await findContact(l.contactId).catch(() => null);
@@ -1557,6 +1694,13 @@ export function onJealousyUnfreeze(pkg: string): void {
   if (!rt.lock || rt.lock.pkg !== pkg) return;
   const l = rt.lock;
   setWebFrozen(null); // v1.9.21：网页冻结态同步解除（哄好解锁也是真解锁）
+  // v1.9.43：真机锁补 pm unsuspend（异步补刀；失败落 pendingUnfreeze 由 tick 重试）
+  if (!l.web) {
+    void deviceUnsuspendApp(pkg).then((r) => {
+      if (!r.ok) writeRt({ pendingUnfreeze: { pkg, since: Date.now() } });
+    });
+    syncJealousyGuard(null, 0, '');
+  }
   writeRt({ lock: null, patrol: null, lastUnlock: { at: Date.now(), kind: 'coaxed', pkg }, pendingUnfreeze: null });
   const appName = pkgDisplayName(pkg);
   void (async () => {
@@ -1658,6 +1802,9 @@ export function __jealousyTestInjectLock(pkg: string, contactId: string, app: Je
       overlayShownAt: 0, // v1.9.31 E2E：注入即弹（0=未展示过，弹窗判定立即可见）
       triggerKind: 'entertain',
       web: true,
+      bornFrom: 'trigger',
+      untilCoaxed: false,
+      breachNotified: false,
     },
     patrol: null,
     lastLockAt: now,

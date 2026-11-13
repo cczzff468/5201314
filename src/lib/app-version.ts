@@ -11,9 +11,9 @@
  */
 
 /** 当前最新版本（与 android-shell versionName 保持一致） */
-export const APP_VERSION = '1.9.42';
+export const APP_VERSION = '1.9.43';
 /** 版本号数字（与 android-shell versionCode 保持一致；覆盖安装要求只增不减） */
-export const APP_VERSION_CODE = 58;
+export const APP_VERSION_CODE = 59;
 
 export interface AppReleaseNote {
   version: string;
@@ -24,6 +24,18 @@ export interface AppReleaseNote {
 
 /** 版本历史（新→旧；设置 › APP 更新 页渲染，最新一条即当前版本） */
 export const APP_RELEASE_NOTES: AppReleaseNote[] = [
+  {
+    version: '1.9.43',
+    date: '2026-11-14',
+    items: [
+      '吃醋/查岗系统全面升级「赛博伴侣」：定时暗中观察（默认每 15 分钟看一眼你在干嘛，5~120 分钟可调）+ 主动查岗（TA 怀疑你做坏事时接下来 30 分钟加急到每 3 分钟查一次），设置页新增「立刻替 TA 查一次岗」按钮',
+      '查岗双模式产格隔离：网页模式只看网页手机内部（当前页面/停留时长/今日账本）；真机模式只经 Shizuku 读真实手机（前台包名/当前应用时长/今日亮屏总时长），互不冒充；设置页可切换并附醒目警示',
+      '真机模式截屏偷窥：TA 可以静默截屏你的真实手机屏幕，识图模型看一眼你在看什么——拿着真凭实据发「别以为我不知道你在看什么」',
+      '原生吃醋守护前台服务（需更新 APK）：真机锁生效期间 WebView 被杀/冻结也能到点自动 pm unsuspend 解锁 + 每 2 分钟检测强行解锁（发现即刻高优通知）；守护事件落盘，AI 醒来取走对账——TA 的锁不再依赖网页活着',
+      '修复真机锁解锁链路断链：此前倒计时/强制/哄好三通道解锁都只清网页状态，真实手机上的应用一直挂起解不开；现在 pm unsuspend 必执行，Shizuku 断连时 30s 补刀重试；AI 自定锁定时长（3/5/15/30 分钟、直到哄好）开关同步上线',
+      '后台调度双通道：Web Worker 准点节拍器（页面后台不被浏览器节流，倒计时到点解锁/暗中观察准点跑）+ 原生前台服务兜底（真机）；旧 APK 全兼容降级',
+    ],
+  },
   {
     version: '1.9.42',
     date: '2026-11-13',

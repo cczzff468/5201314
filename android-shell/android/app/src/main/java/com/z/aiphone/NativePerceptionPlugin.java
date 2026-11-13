@@ -109,6 +109,14 @@ import rikka.shizuku.Shizuku;
  *      通知栏「■ 紧急停止」按钮置位、网页每步动作前轮询）；
  *    - agentNotify({title, text?}) / agentNotifyEnd()：执行期常驻状态通知
  *      （id 7788，渠道 agent_runner，IMPORTANCE_LOW 静默），带紧急停止按钮。
+ *
+ * ⑦ 吃醋守护前台服务（v1.9.43）：JealousyGuardService 的桥面（真机模式吃醋锁的
+ *    原生兜底——WebView 被杀/冻结时由前台服务独立完成「锁到期 pm unsuspend 自动
+ *    解锁 + dumpsys 强解检测」，事件落盘等 JS 醒来取走）：
+ *    - jealousyGuardSyncLock({pkg, unlockAt?, charName?})：JS 建锁/续锁时同步
+ *      （pkg 空 = JS 已解锁，停守护）；永不 reject，失败 {ok:false, reason}；
+ *    - jealousyGuardStatus()：{running, pkg, unlockAt, eventCount, shizuku}；
+ *    - jealousyGuardDrainEvents()：取走并清空落盘事件 {events:[{ts,type,pkg,text}]}。
  */
 @CapacitorPlugin(
     name = "NativePerception",
@@ -845,6 +853,109 @@ public class NativePerceptionPlugin extends Plugin {
                 call.resolve(ret);
             }
         }, "shizuku-screencap").start();
+    }
+
+    // ================= 吃醋守护前台服务（v1.9.43：jealousy-lock 的原生兜底调度） =================
+
+    /**
+     * 吃醋守护锁同步 jealousyGuardSyncLock({pkg, unlockAt?, charName?})：
+     * JS 侧 jealousy-lock.ts 建锁/续锁时把 pkg/到期时刻/角色名交给原生——真机模式下
+     * WebView 被杀/冻结后由 JealousyGuardService 前台服务独立兜底（到期自动解锁 +
+     * 强解检测 + 事件落盘）；pkg 传空 = JS 已自己解锁，停掉守护。
+     * bridge 调用时 WebView 在前台或刚后台，startForegroundService 合法；系统拒绝
+     * 等一切失败只 resolve {ok:false, reason}（绝不 reject——JS 侧超时兜底会兜住）。
+     */
+    @PluginMethod
+    public void jealousyGuardSyncLock(PluginCall call) {
+        String pkg = null;
+        String charName = null;
+        long unlockAt = 0L;
+        try {
+            pkg = call.getString("pkg", null);
+        } catch (Throwable ignored) {
+        }
+        try {
+            charName = call.getString("charName", null);
+        } catch (Throwable ignored) {
+        }
+        try {
+            unlockAt = call.getLong("unlockAt", 0L);
+        } catch (Throwable t) {
+            unlockAt = 0L;
+        }
+        try {
+            String fail = JealousyGuardService.syncLock(getContext(), pkg, unlockAt, charName);
+            JSObject ret = new JSObject();
+            if (fail == null) {
+                ret.put("ok", true);
+            } else {
+                ret.put("ok", false);
+                ret.put("reason", fail);
+            }
+            call.resolve(ret);
+        } catch (Throwable t) {
+            JSObject ret = new JSObject();
+            ret.put("ok", false);
+            ret.put("reason", "同步守护锁失败：" + (t.getMessage() == null ? t.getClass().getSimpleName() : t.getMessage()));
+            call.resolve(ret);
+        }
+    }
+
+    /**
+     * 守护状态查询 jealousyGuardStatus() → {running, pkg, unlockAt, eventCount, shizuku}：
+     * running=前台服务活着、pkg/unlockAt=当前守护的锁、eventCount=落盘事件数（JS 未取走的）、
+     * shizuku=Shizuku binder 活性（原生兜底当前可用性）。查询失败不 reject，给全零安全形态。
+     */
+    @PluginMethod
+    public void jealousyGuardStatus(PluginCall call) {
+        try {
+            JealousyGuardService.Snapshot snap = JealousyGuardService.snapshot(getContext());
+            JSObject ret = new JSObject();
+            ret.put("running", snap.running);
+            ret.put("pkg", snap.pkg == null ? JSONObject.NULL : snap.pkg);
+            ret.put("unlockAt", snap.unlockAt);
+            ret.put("eventCount", snap.eventCount);
+            ret.put("shizuku", snap.shizukuAlive);
+            call.resolve(ret);
+        } catch (Throwable t) {
+            JSObject ret = new JSObject();
+            ret.put("running", false);
+            ret.put("pkg", JSONObject.NULL);
+            ret.put("unlockAt", 0L);
+            ret.put("eventCount", 0);
+            ret.put("shizuku", false);
+            ret.put("reason", t.getMessage() == null ? t.getClass().getSimpleName() : t.getMessage());
+            call.resolve(ret);
+        }
+    }
+
+    /**
+     * 取走守护事件 jealousyGuardDrainEvents() → {events:[{ts,type,pkg,text}...]}：
+     * JS 醒来（WebView 重启/回前台）后一次性取走原生守护期间落盘的事件并清空存储：
+     * native-unlock（到期自动解开——JS 锁状态机据此收尾）/ breach（被强行打破——JS
+     * 视图对账）/ degrade（原生兜底失效线索）。旧事件/脏数据兼容为空数组，绝不 reject。
+     */
+    @PluginMethod
+    public void jealousyGuardDrainEvents(PluginCall call) {
+        JSObject ret = new JSObject();
+        JSArray events = new JSArray();
+        try {
+            List<JSONObject> list = JealousyGuardService.drainEvents(getContext());
+            if (list != null) {
+                for (JSONObject o : list) {
+                    JSObject ev = new JSObject();
+                    ev.put("ts", o.optLong("ts", 0L));
+                    ev.put("type", o.optString("type", ""));
+                    ev.put("pkg", o.isNull("pkg") ? JSONObject.NULL : o.optString("pkg", ""));
+                    ev.put("text", o.optString("text", ""));
+                    events.put(ev);
+                }
+            }
+        } catch (Throwable ignored) {
+            // 兼容旧事件：解析失败 → 空数组（drain 内已清掉脏存储，幂等可重试）
+        }
+        ret.put("events", events);
+        call.resolve(ret);
     }
 
     // ================= Mobile Agent（v1.5：Agent 动作执行底座） =================
