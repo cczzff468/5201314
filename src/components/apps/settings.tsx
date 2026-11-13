@@ -861,7 +861,7 @@ function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
           >
             <RowIcon icon={Mic} tone={TONE_CYAN} />
             <span className="min-w-0 flex-1">
-              <span className="block truncate text-[16px]">语音唤起智能体</span>
+              <span className="block truncate text-[16px]">语音助手</span>
               <span className="mt-0.5 block truncate text-[12px] text-muted-foreground">喊唤醒名/点悬浮球唤起 · 能聊也能办</span>
             </span>
             <span className="max-w-[50%] shrink-0 truncate text-[15px] text-muted-foreground">
@@ -1149,11 +1149,11 @@ function AgentVoiceCard() {
         className="mx-1 mt-2 overflow-hidden rounded-[22px] bg-white/55 shadow-[0_8px_28px_rgba(17,24,39,0.06)] ring-1 ring-white/70 backdrop-blur-2xl dark:bg-white/[0.06] dark:ring-white/[0.09]"
         data-testid="settings-agent-voice-card"
       >
-        {/* 一行说明 */}
+        {/* 一行说明（v1.9.41 精简） */}
         <div className="flex items-start gap-3 px-4 pt-3">
           <LineIcon icon={Sparkles} />
           <p className="min-w-0 flex-1 pb-1 text-[11.5px] leading-relaxed text-muted-foreground">
-            喊唤醒名或点悬浮球唤起：能闲聊会陪唠、有自己的性格，也能动手帮你操作手机（像小爱同学/Siri）
+            喊唤醒名或点悬浮球，随时唤起 TA——能聊也能帮你办事
           </p>
         </div>
         <div className="mt-1 divide-y divide-black/[0.05] dark:divide-white/[0.06]">
@@ -1191,8 +1191,7 @@ function AgentVoiceCard() {
             {personaOpen ? (
               <div className="bg-black/[0.02] px-4 pb-3 dark:bg-white/[0.03]">
                 <p className="pt-1.5 text-[11px] leading-relaxed text-muted-foreground">
-                  写下你想要的性格与说话方式（如「高冷毒舌但关键时刻靠得住」「说话温柔，爱用叠词」），
-                  TA 就按这个人设说话；留空保存 = 恢复内置默认（{ASSISTANT_PERSONA_TAGLINE}）。
+                  写下你想要的性格与说话方式，留空保存 = 恢复默认。
                 </p>
                 <Textarea
                   value={personaDraft ?? cfg.persona}
@@ -1242,7 +1241,7 @@ function AgentVoiceCard() {
             <LineIcon icon={Mic} />
             <span className="min-w-0 flex-1">
               <span className="block truncate text-[16px]">唤醒名</span>
-              <span className="mt-0.5 block truncate text-[11.5px] text-muted-foreground">喊出即唤起，也是 TA 的名字（≤6 字）</span>
+              <span className="mt-0.5 block truncate text-[11.5px] text-muted-foreground">喊出即唤起，也是 TA 的名字</span>
             </span>
             <Input
               value={nameDraft}
@@ -1261,9 +1260,7 @@ function AgentVoiceCard() {
             <LineIcon icon={Smile} />
             <span className="min-w-0 flex-1">
               <span className="block truncate text-[16px]">TA 怎么称呼你</span>
-              <span className="mt-0.5 block truncate text-[11.5px] text-muted-foreground">
-                你希望 TA 叫你什么（≤8 字，可不填）· 对话里 TA 会这样称呼你
-              </span>
+              <span className="mt-0.5 block truncate text-[11.5px] text-muted-foreground">对话里 TA 会这样称呼你（可不填）</span>
             </span>
             <Input
               value={ownerDraft}
@@ -1289,7 +1286,7 @@ function AgentVoiceCard() {
               <LineIcon icon={AudioLines} />
               <span className="min-w-0 flex-1">
                 <span className="block truncate text-[16px]">助手音色</span>
-                <span className="mt-0.5 block truncate text-[11.5px] text-muted-foreground">TA 说话用的声音（语音 API 里添加的音色也能选）</span>
+                <span className="mt-0.5 block truncate text-[11.5px] text-muted-foreground">TA 说话用的声音</span>
               </span>
               <span className="shrink-0 text-[13px] text-muted-foreground" data-testid="agent-voice-voice-value">
                 {cfg.voice ? describeVoiceId(cfg.voice, myVoices) : '跟随语音 API 默认'}
@@ -1298,7 +1295,7 @@ function AgentVoiceCard() {
             </button>
             {voiceOpen ? (
               <div className="bg-black/[0.02] px-4 pb-3 dark:bg-white/[0.03]">
-                <p className="pt-1.5 text-[11px] leading-relaxed text-muted-foreground">点行选用 · 点右侧喇叭试听（免配置的内置声线离线也能用）</p>
+                <p className="pt-1.5 text-[11px] leading-relaxed text-muted-foreground">点选音色 · 点右侧喇叭试听</p>
                 <div className="thin-scrollbar mt-2 flex max-h-72 flex-col gap-1 overflow-y-auto">
                   {voiceOpts.map((opt) => {
                     const active = cfg.voice === opt.voiceId;
@@ -1368,7 +1365,7 @@ function AgentVoiceCard() {
             <span className="min-w-0 flex-1">
               <span className="block truncate text-[16px]">连续唤醒监听</span>
               <span className="mt-0.5 block text-[11.5px] leading-snug text-muted-foreground">
-                默认开启：后台循环听唤醒名，喊出即自动唤起语音界面 · 会增加耗电，可关闭
+                后台听着唤醒名，喊出即唤起（略增耗电）
               </span>
             </span>
             <AutonomySwitch
@@ -1385,8 +1382,8 @@ function AgentVoiceCard() {
             <LineIcon icon={Volume2} />
             <span className="min-w-0 flex-1">
               <span className="block truncate text-[16px]">执行结果语音播报</span>
-              <span className="mt-0.5 block text-[11.5px] leading-snug text-muted-foreground">
-                任务完成后朗读结果摘要（Siri 式闭环）· 语音唤起的任务始终播报，不受此开关限制
+              <span className="mt-0.5 block truncate text-[11.5px] leading-snug text-muted-foreground">
+                任务完成后朗读结果
               </span>
             </span>
             <AutonomySwitch
@@ -1402,7 +1399,7 @@ function AgentVoiceCard() {
             <span className="min-w-0 flex-1">
               <span className="block truncate text-[16px]">任务后追问窗口</span>
               <span className="mt-0.5 block text-[11.5px] leading-snug text-muted-foreground">
-                语音任务结束后语音会话自动重开并播报结果，可直接继续说下一个任务，无需再喊唤醒名
+                任务说完可接着说下一个，无需再喊名
               </span>
             </span>
             <AutonomySwitch
@@ -1418,7 +1415,7 @@ function AgentVoiceCard() {
             <span className="min-w-0 flex-1">
               <span className="block truncate text-[16px]">连续对话</span>
               <span className="mt-0.5 block text-[11.5px] leading-snug text-muted-foreground">
-                助手回答后自动继续听，说话即打断 · 关掉后每句都要再点麦克风
+                回答后自动继续听，说话即打断
               </span>
             </span>
             <AutonomySwitch
@@ -1430,24 +1427,21 @@ function AgentVoiceCard() {
           </div>
         </div>
       </div>
-      {/* 状态提示行（条件显示） */}
+      {/* 状态提示行（v1.9.41 精简：只在异常时给一行短提示） */}
       {!nativeMode ? (
         <p className="mx-4 mt-2 text-[11.5px] leading-relaxed text-muted-foreground">
-          当前在浏览器里：悬浮球同样显示，喊唤醒名或点球都能唤起。喊名识别自动择优（浏览器实时识别 →
-          服务端识别兜底，需允许麦克风权限并联网）；下载离线模型后断网也能唤醒。真机任务仍只在 APP 内可用。
+          浏览器里同样能喊名或点球唤起（需允许麦克风）；真机任务只在 APP 内。
         </p>
       ) : null}
       {cfg.listen && nativeMode && asrNotReady ? (
         <p className="mx-4 mt-2 text-[11.5px] leading-relaxed text-[#FF9500]">
-          离线识别模型未就绪：喊名唤醒已改走服务端识别（需联网、每次说话识别一小段）——
-          点上方「唤醒状态」行里的「下载离线识别模型」一键下载（或到设置 › 语音 API），
-          完成后自动切回端侧识别：断网也能唤醒、响应更快、不再耗流量。
+          离线识别模型未就绪：喊名暂走在线识别（需联网）——点上方「唤醒状态」一键下载后，断网也能唤醒。
         </p>
       ) : null}
       {/* C4：播报开着但 TTS 未配置（第三方缺 Key/地址）——提醒会静默跳过 */}
       {cfg.announce && !isTtsConfigured(ttsCfg) ? (
         <p className="mx-4 mt-2 text-[11.5px] leading-relaxed text-[#FF9500]">
-          未配置语音 API：执行结果播报将静默跳过——到「语音 API」选择内置语音或填好服务商 Key 后生效。
+          未配置语音 API：播报将静默跳过（设置 › 语音 API）。
         </p>
       ) : null}
       {wakeBlocked ? (
@@ -1465,7 +1459,7 @@ function AgentVoiceCard() {
  */
 function AgentVoicePage({ onBack }: { onBack: () => void }) {
   return (
-    <DetailShell title="语音唤起智能体" onBack={onBack} gray>
+    <DetailShell title="语音助手" onBack={onBack} gray>
       <AgentVoiceCard />
     </DetailShell>
   );
@@ -1610,9 +1604,12 @@ const PERM_DEFS: PermDef[] = [
     icon: PanelTop,
     actionLabel: '去开启悬浮窗',
     query: async () => {
+      // v1.9.41 账本优先：真实通道不可用时点「去开启」落的是网页账本，查询先看账本
+      // 再探原生（旧 APK 桥异常会把 overlayPermission 拉到 false，不看账本就误报未授权）
+      if (readWebPermGrants().overlay === true) return { granted: true };
       const r = await overlayPermission();
       if (r) return r;
-      return { granted: readWebPermGrants().overlay === true, canAsk: true };
+      return { granted: false, canAsk: true };
     },
     request: async () => {
       const r = await requestOverlayPermission();
@@ -1628,9 +1625,11 @@ const PERM_DEFS: PermDef[] = [
     icon: BatteryCharging,
     actionLabel: '允许忽略电池优化',
     query: async () => {
+      // v1.9.41 账本优先（同悬浮窗：旧 APK 桥异常误报未授权的兜底）
+      if (readWebPermGrants().battery === true) return { granted: true };
       const r = await batteryPermission();
       if (r) return r;
-      return { granted: readWebPermGrants().battery === true, canAsk: true };
+      return { granted: false, canAsk: true };
     },
     request: async () => {
       const r = await requestBatteryPermission();
@@ -1646,9 +1645,11 @@ const PERM_DEFS: PermDef[] = [
     icon: Database,
     actionLabel: '去开启',
     query: async () => {
+      // v1.9.41 账本优先（同悬浮窗：旧 APK 桥异常误报未授权的兜底）
+      if (readWebPermGrants().storage === true) return { granted: true };
       const r = await nativeMediaPermission();
       if (r !== null) return { granted: r };
-      return { granted: readWebPermGrants().storage === true, canAsk: true };
+      return { granted: false, canAsk: true };
     },
     request: async () => {
       const ok = await openNativeMediaSettings();
@@ -1664,9 +1665,13 @@ const PERM_DEFS: PermDef[] = [
     icon: BarChart3,
     actionLabel: '去开启',
     query: async () => {
+      // v1.9.41 账本优先：修复「使用情况权限明明授权了却显示未授权」——旧 APK 无
+      // hasUsagePermission 方法时桥异常被 catch 成 false（非 null），查询直接信了
+      // 原生回的 false、永远不看网页账本。账本在申请成功时写入，先查它再探原生。
+      if (readWebPermGrants().usage === true) return { granted: true };
       const r = await nativeUsagePermission();
       if (r !== null) return { granted: r };
-      return { granted: readWebPermGrants().usage === true, canAsk: true };
+      return { granted: false, canAsk: true };
     },
     request: async () => {
       const ok = await openNativeUsageSettings();
@@ -1837,18 +1842,18 @@ function PermissionHubPage({ onBack }: { onBack: () => void }) {
           }),
         ]);
       }
-      if (r.ok) {
-        setDialogPerm(null);
-        showToast(r.note ?? '已授权');
-      } else {
-        showToast(r.note ?? '未完成授权');
-      }
+      // v1.9.41：授权请求结束（成功/失败/看门狗兑底）弹窗才关闭——按钮不再点击即关。
+      // Radix AlertDialogAction 默认点击自动关窗，onClick 里 preventDefault 拦住；
+      // 期间按钮显示「申请中…」，用户能清楚看到授权正在进行。
+      setDialogPerm(null);
+      showToast(r.ok ? (r.note ?? '已授权') : (r.note ?? '未完成授权'));
     } catch {
+      setDialogPerm(null);
       showToast('申请失败（通道异常）');
     } finally {
       setGrantBusy(false);
       // 授权动作完成即刷新对应项（系统框当场出结果；跳设置页的等返回后刷新）
-      void refreshPerm(dialogPerm.key);
+      if (dialogPerm) void refreshPerm(dialogPerm.key);
     }
   };
 
@@ -2000,7 +2005,12 @@ function PermissionHubPage({ onBack }: { onBack: () => void }) {
           <AlertDialogFooter className="flex-row border-t border-black/[0.08] dark:border-white/[0.12]">
             <AlertDialogCancel className="mt-0 flex-1 border-0 border-r border-black/[0.08] py-3 text-[16px] dark:border-white/[0.12]">暂不</AlertDialogCancel>
             <AlertDialogAction
-              onClick={() => void doGrant()}
+              onClick={(e) => {
+                // v1.9.41：拦住 Radix 默认的点击即关窗——弹窗保持到授权请求结束（申请中…）
+                // 才由 doGrant 手动关闭，机主能清楚看到授权过程而非点完就无声消失
+                e.preventDefault();
+                void doGrant();
+              }}
               disabled={grantBusy}
               className="mt-0 flex-1 border-0 bg-transparent py-3 text-[16px] font-semibold text-[#007AFF] hover:bg-transparent disabled:opacity-50"
               data-testid="perm-grant-confirm"

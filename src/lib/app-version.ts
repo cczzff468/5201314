@@ -11,9 +11,9 @@
  */
 
 /** 当前最新版本（与 android-shell versionName 保持一致） */
-export const APP_VERSION = '1.9.40';
+export const APP_VERSION = '1.9.41';
 /** 版本号数字（与 android-shell versionCode 保持一致；覆盖安装要求只增不减） */
-export const APP_VERSION_CODE = 56;
+export const APP_VERSION_CODE = 57;
 
 export interface AppReleaseNote {
   version: string;
@@ -24,6 +24,17 @@ export interface AppReleaseNote {
 
 /** 版本历史（新→旧；设置 › APP 更新 页渲染，最新一条即当前版本） */
 export const APP_RELEASE_NOTES: AppReleaseNote[] = [
+  {
+    version: '1.9.41',
+    date: '2026-11-13',
+    items: [
+      '修复 AI 偶尔只发一条就停：补发轮撞限流/网络抖动不再静默放弃（退避 1.8 秒后重试，连续两轮零进展才收尾）；主轮流中断但已有消息上屏时不再直接报错收场，改为落进补发循环把剩余内容补齐；工具轮收尾带 [思考] 块时条数虚计导致跳过补发的口径 bug 修正',
+      '权限弹窗改为「授权完成才关闭」：点「允许」后弹窗保持并显示申请中…，授权结束（成功/失败/兑底）才消失，不再点完就无声消失',
+      '修复使用情况等权限「明明授权了却显示未授权」：状态查询改为网页授权账本优先，旧 APK 桥异常误报不再覆盖已授权结果',
+      '语音助手悬浮球焕新：删除右上角红点（唤醒暂停原因改为点球时提示），球体改纯白磨砂玻璃 + 深色细线麦克风，更简约耐看',
+      '「语音唤起智能体」改名「语音助手」，设置页提示文案全面精简（行描述与底部提示都缩到一行）',
+    ],
+  },
   {
     version: '1.9.40',
     date: '2026-11-13',

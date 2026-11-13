@@ -48,7 +48,7 @@ import { apiChainOf } from '@/lib/api-fallback';
 import { directChatStream, isPrivateApiUrl } from '@/lib/ios/direct-api';
 import { createReplySegmentScanner, replyMinTarget, splitReplySegments } from '@/lib/reply-count';
 // 深度思考：流式统一剥离 [思考]…[/思考] 块（正文/分段器只见纯正文，思考内容单独收集交 finalize）
-import { createThinkFilter } from '@/lib/deep-think';
+import { createThinkFilter, extractThinkBlocks } from '@/lib/deep-think';
 import { describeImagesAuto } from '@/lib/vision-client';
 import { clearDeliverBoundary, isAiDelivering, scheduleAiDelivery } from '@/lib/ios/ai-delivery';
 import { charRequestOnlyOf, loadBlock, type BlockApp } from '@/lib/ios/block-state';
@@ -860,8 +860,13 @@ async function runStream(rt: StreamRuntime, opts: BeginChatStreamOptions): Promi
                 if (multi && segSink && opts.onSegment) {
                   raw += text;
                   // v1.9.33 补发计数：FC 整段一次到手，条数按稳定切分预估计数
-                  //（各 App 落地时同样按 splitReplySegments 再切成多条气泡，口径一致）
-                  segEmitted += Math.max(1, splitReplySegments(text, true).length);
+                  //（各 App 落地时同样按 splitReplySegments 再切成多条气泡，口径一致）。
+                  // v1.9.41 口径对齐：App 侧 buildReplyMsgs 切泡前会先 extractThinkBlocks 剥掉
+                  // [思考]块——预估计数若直接用原文，思考块里的句末标点会被虚算成 N 条，
+                  // got ≥ minTarget 假满足 → 连催一次都不发，工具轮收尾只剩 1 条正文气泡
+                  //（机主实测「想往下发但最后只发一条」的路径之一）。先剥思考再计数。
+                  const fcVisible = extractThinkBlocks(text).text;
+                  segEmitted += Math.max(1, splitReplySegments(fcVisible, true).length);
                   opts.onSegment(text);
                 } else {
                   onDelta(text);
@@ -875,8 +880,11 @@ async function runStream(rt: StreamRuntime, opts: BeginChatStreamOptions): Promi
       }
       if (!fcDone) {
         // 多渠道故障转移（v1.9.25）：主渠道失败且本轮还没有任何已产出内容（正文/思考均空）时，
-        // 静默按序改用备用渠道重发整轮；已有部分产出（流中断在中途）则沿用既有行为——
-        // 保留已上屏分段 + 落错误，不重发防重复；换号/取消（aborted）立即上抛不转移。
+        // 静默按序改用备用渠道重发整轮；已有部分产出（流中断在中途）则 v1.9.41 起新逻辑——
+        // 不再直接抛错跳过整个补发块：保住已上屏分段，落进下方「条数不足自动续发」把剩余
+        // 内容补齐（旧行为：错误收尾 + App 侧见已投分段静默合窗 → 屏上只剩那几条、无补发
+        // 无提示，「正在输入」熄灭——机主看到的就是「想往下发但断掉只剩一条」）。
+        // 换号/取消（aborted）立即上抛不转移。
         // 每次重试前按错误收尾同口径重置流层状态（分段器/思考剥离器/实况），防上一渠道的
         // 半截状态污染下一渠道的流。
         const chain = apiChainOf(effConfig, useSettings.getState().apiFallbacks);
@@ -885,26 +893,32 @@ async function runStream(rt: StreamRuntime, opts: BeginChatStreamOptions): Promi
             await streamOnce(workMessages, chain[ci]);
             break;
           } catch (err) {
-            if (rt.aborted || ci + 1 >= chain.length || raw !== '' || thinkText !== '') {
-              // 全渠道都试过才附注备用情况；仅主渠道失败时保持原报错不变（错误分类文案不受影响）
-              if (!rt.aborted && ci + 1 >= chain.length && ci > 0 && raw === '' && thinkText === '') {
-                const msg = err instanceof Error && err.message ? err.message : '请求失败';
-                throw new Error(`${msg}（主渠道与 ${ci} 个备用渠道均失败，可到「设置 › API 配置 › 备用渠道」检查）`);
-              }
-              throw err;
-            }
+            if (rt.aborted) throw err;
+            const hasPartial = raw !== '' || thinkText !== '';
             // 还有备用渠道且本轮零产出：重置流层状态后换下一个渠道重发
-            raw = '';
-            thinkFilter = createThinkFilter();
-            thinkText = '';
-            liveThinkShown = false;
-            thinkDonePatched = false;
-            if (rt.state.liveThink !== undefined) patchState(rt, { liveThink: undefined, thinkDone: undefined });
-            if (multi && segSink) {
-              scanner = createReplySegmentScanner(segSink);
-            } else {
-              scanner = null;
+            if (!hasPartial && ci + 1 < chain.length) {
+              raw = '';
+              thinkFilter = createThinkFilter();
+              thinkText = '';
+              liveThinkShown = false;
+              thinkDonePatched = false;
+              if (rt.state.liveThink !== undefined) patchState(rt, { liveThink: undefined, thinkDone: undefined });
+              if (multi && segSink) {
+                scanner = createReplySegmentScanner(segSink);
+              } else {
+                scanner = null;
+              }
+              continue;
             }
+            // 半截产出（流中断但已有分段上屏）：不抛错、不重发防重复——直接落进下方
+            // 补发循环续齐剩余内容（v1.9.41：旧行为抛错跳过补发，屏上只剩已投的那几条）
+            if (hasPartial) break;
+            // 零产出且全渠道都试过：附注备用情况后上抛（错误分类文案不受影响）
+            if (ci > 0) {
+              const msg = err instanceof Error && err.message ? err.message : '请求失败';
+              throw new Error(`${msg}（主渠道与 ${ci} 个备用渠道均失败，可到「设置 › API 配置 › 备用渠道」检查）`);
+            }
+            throw err;
           }
         }
       }
@@ -958,6 +972,8 @@ async function runStream(rt: StreamRuntime, opts: BeginChatStreamOptions): Promi
             }
           }
         }
+        // v1.9.41 连续零进展计数（见循环尾注释：退避后重试，两轮零进展才放弃）
+        let zeroProgress = 0;
         for (let contRound = 0; contRound < (isGroup ? 1 : 3); contRound++) {
           if (rt.aborted || !raw.trim()) break;
           const pendingTail = scanner ? scanner.peek() : '';
@@ -1005,9 +1021,18 @@ async function runStream(rt: StreamRuntime, opts: BeginChatStreamOptions): Promi
               if (rt.aborted || ci + 1 >= contChain.length || raw !== rawBefore) break;
             }
           }
-          // 本轮全渠道零新增才放弃（半截产出也算进展：下一轮用更新后的 raw 重新计数继续凑）；
+          // v1.9.41：本轮全渠道零新增不再立即放弃——默认配置没有备用渠道（apiFallbacks 空）时
+          // 旧版「连催 3 轮」每轮实际只发一次请求：补发轮撞上限流/网络抖动直接静默收场，屏上
+          // 只剩首轮那 1 条（typing 亮着是补发轮在跑的可见证据，机主实测「想往下发但断掉」
+          // 的主因）。现在退避 1.8s 后下一轮仍给机会，连续两轮零进展才放弃；有进展则计数清零。
           // 错误不升级——首轮已成功，保住已有产出按原样收尾
-          if (raw === rawAtRoundStart) break;
+          if (raw === rawAtRoundStart) {
+            zeroProgress += 1;
+            if (zeroProgress >= 2 || rt.aborted) break;
+            await new Promise((r) => setTimeout(r, 1800));
+          } else {
+            zeroProgress = 0;
+          }
         }
       }
       patchState(rt, { status: 'done' });

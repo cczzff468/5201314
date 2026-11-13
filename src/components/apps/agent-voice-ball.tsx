@@ -1023,11 +1023,10 @@ export default function AgentVoiceBall() {
         ) : null}
       </AnimatePresence>
 
-      {/* ================= 悬浮球（v1.9.14 简约毛玻璃，可拖动吸边） =================
-          设计语言：单层中性磨砂玻璃圆片（半透黑 + backdrop-blur + 细白描边 + 柔和落影），
-          去掉 v1.9.13 的渐变描边圈/双层内高光/径向反光等多层堆叠——极简「毛玻璃」，
-          白色细线麦克风浮在玻璃上；状态表达仍是两个：连续唤醒监听中（单圈呼吸光环）与
-          唤醒熔断（右上 ALERT 点） */}
+      {/* ================= 悬浮球（v1.9.41 白色简约，可拖动吸边） =================
+          设计语言：纯白磨砂玻璃圆片（白底微透 + 细灰描边 + 柔和落影 + 深色细线麦克风），
+          极简不抢镜。状态表达只留一个：连续唤醒监听中的单圈细呼吸光环（机主要求：
+          删除右上角红点——唤醒暂停等原因改为点球时以会话消息提示，见 openFromBall） */}
       <motion.button
         type="button"
         aria-label="语音助手（拖动移位，点按说话）"
@@ -1056,25 +1055,17 @@ export default function AgentVoiceBall() {
         {listening ? (
           <span
             aria-hidden="true"
-            className="absolute -inset-[5px] rounded-full ring-1 ring-white/30"
-            style={{ animation: 'agentVoiceBreath 2.8s ease-in-out infinite' }}
+            className="absolute -inset-[5px] rounded-full ring-1 ring-white/55"
+            style={{ animation: 'agentVoiceBreath 2.8s ease-in-out infinite', boxShadow: '0 0 0 1px rgba(0,0,0,0.05)' }}
           />
         ) : null}
-        {/* 唤醒熔断提示点（唯一状态点）：喊名唤醒因麦克风权限等原因停用时点亮，点球看原因 */}
-        {wakeBlocked ? (
-          <span
-            aria-hidden="true"
-            data-testid="agent-voice-ball-alert"
-            className="absolute right-[3px] top-[3px] z-10 h-2 w-2 rounded-full bg-[#FF453A] ring-[1.5px] ring-black/45"
-          />
-        ) : null}
-        {/* 球体：单层毛玻璃——中性半透黑 + 大半径 backdrop-blur + 细白描边，内壁一线微光 */}
+        {/* 球体：白色磨砂玻璃——白底微透 + 细灰描边 + 大半径 backdrop-blur，内壁一线高光 */}
         <span
           aria-hidden="true"
-          className="absolute inset-0 rounded-full bg-black/35 ring-1 ring-white/35 backdrop-blur-2xl"
-          style={{ boxShadow: '0 4px 14px rgba(0,0,0,0.30), inset 0 1px 0 rgba(255,255,255,0.14)' }}
+          className="absolute inset-0 rounded-full bg-white/85 ring-1 ring-black/[0.06] backdrop-blur-2xl"
+          style={{ boxShadow: '0 4px 14px rgba(0,0,0,0.22), inset 0 1px 0 rgba(255,255,255,0.95)' }}
         />
-        <Mic className="relative h-[17px] w-[17px] text-white/90" strokeWidth={1.8} />
+        <Mic className="relative h-[17px] w-[17px] text-black/75" strokeWidth={1.8} />
       </motion.button>
     </div>
   );
