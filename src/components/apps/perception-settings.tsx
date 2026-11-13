@@ -14,16 +14,13 @@
  * 屏幕分享需在用户手势中授权（持续流，跨页保持）。
  */
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import {
   BatteryCharging,
   CalendarDays,
   ChevronLeft,
   CloudSun,
-  Eye,
   Keyboard,
-  Loader2,
-  ScanFace,
 } from 'lucide-react';
 import { ChatToggle } from './chat-settings';
 import { useChatSkin } from '@/lib/ios/chat-skin';
@@ -34,13 +31,6 @@ import {
   prewarmPerception,
   type PerceptionConfig,
 } from '@/lib/perception';
-import {
-  isScreenShareActive,
-  isScreenShareSupported,
-  startScreenShare,
-  stopScreenShare,
-  testStreamUrl,
-} from '@/lib/ios/screen-share';
 import { JealousyLockSection } from './jealousy-lock-settings';
 
 /** 开关行（图标 + 名称 + 说明 + 开关） */
@@ -123,16 +113,6 @@ export function PerceptionSettingsPage({
   const [cfg, setCfg] = useState<PerceptionConfig>(() => getPerception(sessionKey));
   const [userLocDraft, setUserLocDraft] = useState(cfg.userLoc);
   const [aiLocDraft, setAiLocDraft] = useState(cfg.aiLoc);
-  const [streamUrlDraft, setStreamUrlDraft] = useState(cfg.streamUrl);
-  const [streamTesting, setStreamTesting] = useState(false);
-  const [streamResult, setStreamResult] = useState<{ ok: boolean; detail: string } | null>(null);
-  const [shareActive, setShareActive] = useState(() => isScreenShareActive());
-
-  // 屏幕分享状态轻轮询（用户可能从浏览器原生 UI 停止共享，页面状态需跟随）
-  useEffect(() => {
-    const t = window.setInterval(() => setShareActive(isScreenShareActive()), 2000);
-    return () => window.clearInterval(t);
-  }, []);
 
   /** 更新并持久化（即点即存，下一次发送现场读取生效）+ 预热相关数据 */
   const update = (patch: Partial<PerceptionConfig>) => {
@@ -148,36 +128,6 @@ export function PerceptionSettingsPage({
     if (userLocDraft.trim() === cfg.userLoc && aiLocDraft.trim() === cfg.aiLoc) return;
     update({ userLoc: userLocDraft.trim(), aiLoc: aiLocDraft.trim() });
     showToast('位置已保存，天气将自动更新');
-  };
-
-  const saveStreamUrl = () => {
-    const v = streamUrlDraft.trim();
-    if (v === cfg.streamUrl) return;
-    update({ streamUrl: v });
-    showToast(v ? '串流地址已保存' : '已清空串流地址');
-  };
-
-  const runStreamTest = async () => {
-    setStreamTesting(true);
-    setStreamResult(null);
-    try {
-      const r = await testStreamUrl(streamUrlDraft.trim());
-      setStreamResult(r);
-    } finally {
-      setStreamTesting(false);
-    }
-  };
-
-  const onShare = async () => {
-    const ok = await startScreenShare();
-    setShareActive(isScreenShareActive());
-    showToast(ok ? '屏幕分享已开始：发送消息时 TA 能「看到」你的屏幕' : '未能开始屏幕分享（浏览器不支持或已取消）');
-  };
-
-  const offShare = () => {
-    stopScreenShare();
-    setShareActive(false);
-    showToast('已停止屏幕分享');
   };
 
   // z-50：与聊天设置页（z-50）同层、JSX 挂载在其后 → 后渲染盖在其上（v1.9.19 修复）。
@@ -202,11 +152,9 @@ export function PerceptionSettingsPage({
 
       <div className="flex-1 overflow-y-auto px-4 pb-10 pt-2">
         {/* 说明卡 */}
-        <div className={`${cardCls} px-4 py-3.5`}>
+        <div className={`${cardCls} px-4 py-3`}>
           <p className="text-[12.5px] leading-relaxed text-black/50 dark:text-white/50">
-            开启后，AI 能在聊天中感知你的真实世界：回复耗时、设备电量、两地天气、农历节日。
-            所有数据只在<span className="text-black/70 dark:text-white/70">你发送消息的瞬间</span>现场采集，
-            仅用于生成 TA 的对话上下文。
+            开启后，AI 能感知你的真实世界（打字耗时、电量、天气、节日），仅在发送消息时采集。
           </p>
         </div>
 
@@ -217,7 +165,7 @@ export function PerceptionSettingsPage({
           <ToggleRow
             icon={<Keyboard size={I.size} strokeWidth={I.strokeWidth} />}
             title="打字思考感知"
-            desc="TA 能感知你回复前思考+打字了多久（含纯打字时长）"
+            desc="回复前思考+打字了多久"
             on={cfg.typing}
             onChange={(v) => update({ typing: v })}
             accent={accent}
@@ -227,7 +175,7 @@ export function PerceptionSettingsPage({
           <ToggleRow
             icon={<BatteryCharging size={I.size} strokeWidth={I.strokeWidth} />}
             title="电量感知"
-            desc="TA 能知道你当前设备的电量与充电状态（浏览器电量权限）"
+            desc="设备电量与充电状态"
             on={cfg.battery}
             onChange={(v) => update({ battery: v })}
             accent={accent}
@@ -237,7 +185,7 @@ export function PerceptionSettingsPage({
           <ToggleRow
             icon={<CalendarDays size={I.size} strokeWidth={I.strokeWidth} />}
             title="日历 / 节假日感知"
-            desc="公历+农历日期、星期、节假日、最近节日倒计时"
+            desc="公历+农历日期、节假日倒计时"
             on={cfg.calendar}
             onChange={(v) => update({ calendar: v })}
             accent={accent}
@@ -250,7 +198,7 @@ export function PerceptionSettingsPage({
           <ToggleRow
             icon={<CloudSun size={I.size} strokeWidth={I.strokeWidth} />}
             title="天气感知"
-            desc="填两个城市，TA 知道两边天气、能聊「我这边下雨了」"
+            desc="两个城市的天气"
             on={cfg.weather}
             onChange={(v) => update({ weather: v })}
             accent={accent}
@@ -291,83 +239,6 @@ export function PerceptionSettingsPage({
 
         {/* v1.9.19 AI 吃醋锁（触发阈值/娱乐 App 清单/锁定状态；网页端可配置+模拟剧情） */}
         <JealousyLockSection accent={accent} testPrefix={testPrefix} cardCls={cardCls} dividerCls={dividerCls} />
-
-        {/* 看屏幕 · VLM */}
-        <div className={`${cardCls} mt-3 overflow-hidden`}>
-          <ToggleRow
-            icon={<Eye size={I.size} strokeWidth={I.strokeWidth} />}
-            title="让 TA 看到我的屏幕"
-            desc="发送消息时抓一帧屏幕给识图模型，TA 能「看到」你此刻在看什么"
-            on={cfg.vlmScreen}
-            onChange={(v) => update({ vlmScreen: v })}
-            accent={accent}
-            testId={`${testPrefix}-settings-perception-vlmscreen`}
-          />
-          {cfg.vlmScreen ? (
-            <>
-              <div className={`border-t ${dividerCls}`} />
-              <div className="space-y-2.5 px-4 py-3">
-                <p className="text-[12px] leading-relaxed text-black/45 dark:text-white/45">
-                  两种画面来源（优先串流地址）：桌面串流工具（能输出 MJPEG/单帧画面的均可）填下方地址；
-                  电脑上直接用浏览器「屏幕分享」，零配置。
-                </p>
-                <div className="flex items-center gap-2">
-                  <input
-                    value={streamUrlDraft}
-                    onChange={(e) => setStreamUrlDraft(e.target.value)}
-                    onBlur={saveStreamUrl}
-                    placeholder="串流地址（如 http://192.168.1.5:8080）"
-                    inputMode="url"
-                    data-testid={`${testPrefix}-perception-streamurl-input`}
-                    className={fieldCls}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => void runStreamTest()}
-                    disabled={streamTesting || !streamUrlDraft.trim()}
-                    data-testid={`${testPrefix}-perception-stream-test`}
-                    className="shrink-0 rounded-full px-3.5 py-2 text-[13px] font-medium text-white active:opacity-70 disabled:opacity-50"
-                    style={{ backgroundColor: accent }}
-                  >
-                    {streamTesting ? <Loader2 className="h-4 w-4 animate-spin" /> : '测试'}
-                  </button>
-                </div>
-                {streamResult ? (
-                  <p className={`text-[12px] leading-snug ${streamResult.ok ? 'text-[#07C160]' : 'text-[#E4554F]'}`}>{streamResult.detail}</p>
-                ) : null}
-                {isScreenShareSupported() ? (
-                  <div className="flex items-center gap-2 pt-0.5">
-                    {shareActive ? (
-                      <button
-                        type="button"
-                        onClick={offShare}
-                        data-testid={`${testPrefix}-perception-share-stop`}
-                        className="flex-1 rounded-full bg-[#E4554F] py-2 text-[13.5px] font-medium text-white active:opacity-70"
-                      >
-                        停止屏幕分享（进行中）
-                      </button>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={() => void onShare()}
-                        data-testid={`${testPrefix}-perception-share-start`}
-                        className="flex-1 rounded-full py-2 text-[13.5px] font-medium text-white active:opacity-70"
-                        style={{ backgroundColor: accent }}
-                      >
-                        <span className="inline-flex items-center gap-1.5">
-                          <ScanFace size={15} strokeWidth={1.9} />
-                          选择要分享的屏幕 / 窗口
-                        </span>
-                      </button>
-                    )}
-                  </div>
-                ) : (
-                  <p className="text-[12px] text-black/35 dark:text-white/35">当前浏览器不支持屏幕分享（多数手机浏览器如此），请使用串流地址。</p>
-                )}
-              </div>
-            </>
-          ) : null}
-        </div>
       </div>
     </div>
   );

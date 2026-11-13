@@ -972,68 +972,9 @@ async function runStream(rt: StreamRuntime, opts: BeginChatStreamOptions): Promi
             }
           }
         }
-        // v1.9.41 连续零进展计数（见循环尾注释：退避后重试，两轮零进展才放弃）
-        let zeroProgress = 0;
-        for (let contRound = 0; contRound < (isGroup ? 1 : 3); contRound++) {
-          if (rt.aborted || !raw.trim()) break;
-          const pendingTail = scanner ? scanner.peek() : '';
-          const got = segEmitted + (pendingTail.trim() ? 1 : 0);
-          if (got >= minTarget) break;
-          const stillNeed = Math.max(isGroup ? 1 : 2, minTarget - got);
-          const nudge = isGroup
-            ? `（系统内部提醒，这条只给你自己看、绝不向对方提起：你在群聊里刚才只发出了 ${got} 条消息。` +
-              `继续补发 ${stillNeed}~${Math.min(stillNeed + 1, 2)} 条短消息：补充一句细节、追问一句或接着话头再说一句，` +
-              `保持群聊节奏、一句一条、每条单独一行、不要刷屏；不要解释这条提醒、不要客套铺垫，直接输出消息本身。）`
-            : contRound === 0
-              ? `（系统内部提醒，这条只给你自己看、绝不向对方提起：你这次回复到目前只发出了 ${got} 条消息，比你想说的少。` +
-                `你现在还开着聊天框，想起还有话没说完——从你刚才最后一条消息接着继续连发：至少再发 ${stillNeed} 条短消息。` +
-                `仍然一句一条、口语化、每条单独一行；把话题往前推（展开刚才的话、补充细节、说说你自己今天的情况、反问对方、抛个新话题都行），` +
-                `绝不重复已经说过的句子；不要解释这条提醒、不要客套铺垫、不要问「还有什么想说的吗」这类收尾，直接输出要连发的内容本身。）`
-              : contRound === 1
-                ? `（系统内部提醒，第二次：你到目前只发出了 ${got} 条消息，还差很多——对方还抱着手机等你把话说完。` +
-                  `不要停，继续连发至少 ${stillNeed} 条短消息：从你最后一条消息接着往下说——展开刚才那句的细节、突然想起的另一件事、` +
-                  `你现在的状态或今天遇到的事、反问对方一句都可以。第一条消息必须是聊天内容本身，绝不能以「好的」「嗯」「哦」这类应答开头，` +
-                  `绝不能解释或道歉，绝不重复已经说过的句子。仍然一句一条、口语化、每条单独一行。）`
-                : `（系统内部提醒，第三次、最后一次：你的连发还没说完——目前只有 ${got} 条，至少要说到 ${minTarget} 条。` +
-                  `继续发 ${stillNeed} 条：把刚才的话再展开讲讲、分享你今天的一件小事、猜猜对方现在在干嘛、或者抛一个新话题问他。` +
-                  `仍然是聊天消息本身，一句一条、口语化、每条单独一行，不要任何解释、不要客套收尾。哪怕觉得话不多了也要继续说，凑够 ${minTarget} 条为止。）`;
-          const contMessages: ChatPayloadMessage[] = [
-            ...workMessages,
-            { role: 'assistant', content: raw },
-            { role: 'user', content: nudge },
-          ];
-          // pagehide 接力按最新一轮 payload 登记（补发上下文的续跑语义正确：
-          // 中途关页时服务端接着把没说完的话说完，不从头重发整轮）
-          activePayloads.set(rt.state.sessionKey, { messages: contMessages, config: effConfig });
-          // 补发轮同样换新思考剥离器（防上一轮未闭合思考块吞掉补发正文；已解析思考仍在
-          // thinkText）；thinkDonePatched 复位让「思考中→已思考」相位切换在补发轮内正确重放
-          thinkFilter = createThinkFilter();
-          thinkDonePatched = false;
-          const contChain = apiChainOf(effConfig, useSettings.getState().apiFallbacks);
-          const rawAtRoundStart = raw;
-          for (let ci = 0; ci < contChain.length; ci++) {
-            const rawBefore = raw;
-            try {
-              await streamOnce(contMessages, contChain[ci]);
-              break;
-            } catch {
-              // 半截产出（分段已上屏）不换渠道重发防重复；换号中止立即停
-              if (rt.aborted || ci + 1 >= contChain.length || raw !== rawBefore) break;
-            }
-          }
-          // v1.9.41：本轮全渠道零新增不再立即放弃——默认配置没有备用渠道（apiFallbacks 空）时
-          // 旧版「连催 3 轮」每轮实际只发一次请求：补发轮撞上限流/网络抖动直接静默收场，屏上
-          // 只剩首轮那 1 条（typing 亮着是补发轮在跑的可见证据，机主实测「想往下发但断掉」
-          // 的主因）。现在退避 1.8s 后下一轮仍给机会，连续两轮零进展才放弃；有进展则计数清零。
-          // 错误不升级——首轮已成功，保住已有产出按原样收尾
-          if (raw === rawAtRoundStart) {
-            zeroProgress += 1;
-            if (zeroProgress >= 2 || rt.aborted) break;
-            await new Promise((r) => setTimeout(r, 1800));
-          } else {
-            zeroProgress = 0;
-          }
-        }
+        // v2.1：补发循环已删除（机主反馈「AI发信息一卡一卡的，跟发了两次信息一样」）——
+        // 补发是第二轮 LLM 请求，屏上先出第一批、停顿后再出第二批，观感就是「发了两次」。
+        // 现在完全依赖首轮流式 + reply count 提示词让 AI 一次说够；首轮零产出仍由上方抢救兜底。
       }
       patchState(rt, { status: 'done' });
     }

@@ -5289,7 +5289,7 @@ export function ChatPage({
             第三十四轮：gap-2.5→gap-2（输入框往右延伸）
             第四十七轮（用户指定）：液态底距 pb-2→pb-[13px]——输入框整体再往上提一点
             第八十九轮（用户指定）：默认主题右内边距 pr-2.5→pr-2，表情/加号更贴右缘 */}
-        <div className={liquid ? 'px-2.5 pb-[13px] pt-1' : 'pl-2.5 pr-2 pb-[18px] pt-1'}>
+        <div className={liquid ? 'px-2.5 pb-[13px] pt-1' : 'pl-2.5 pr-1.5 pb-[18px] pt-1'}>
           {/* 输入框上方快捷功能条（输入框自定义 › 输入框上方功能）：把加号面板里的功能放到输入框上面；
               点一下与点面板里那一项等效；未添加 = 不显示；「+」面板本身不受影响 */}
           {quickItems.length > 0 && (
@@ -5299,8 +5299,8 @@ export function ChatPage({
           )}
           {/* 液态输入栏（第四十四轮，用户指定）：删除大椭圆包裹——语音钮 = 玻璃圆圈内嵌黑圈、
               输入框毛玻璃椭圆、表情+加号共用一个玻璃椭圆；默认主题原样
-              第九十三轮（用户反馈输入框比例）：默认主题 gap-1.5→gap-3（图标与输入框间距 12px）、输入框高 40px、左 14/右 12、圆角 6px、垂直居中 */}
-          <div className={liquid ? 'flex items-center gap-2' : 'flex items-center gap-3'}>
+              第九十四轮（用户反馈）：默认主题 gap-3→gap-2（图标更挨近、输入框更宽）、右内边距 pr-2→pr-1.5（表情/加号往右贴）、输入框文字 pl-3.5→pl-3 / pr-3→pr-2（文字贴边框） */}
+          <div className="flex items-center gap-2">
             <button
               type="button"
               aria-label={voiceMode ? '切换到键盘输入' : '语音输入'}
@@ -5369,10 +5369,10 @@ export function ChatPage({
                   }}
                   enterKeyHint={enterSend ? 'send' : undefined}
                   placeholder={ttsSend ? '输入文字，发送后转为语音' : chatPlaceholder(chatDecorWx)}
-                  placeholderClass={`absolute inset-0 flex items-center pl-3.5 text-[16px] text-black/30 dark:text-white/30 ${input.trim() ? 'pr-3' : 'pr-11'}`}
+                  placeholderClass={`absolute inset-0 flex items-center pl-3 text-[16px] text-black/30 dark:text-white/30 ${input.trim() ? 'pr-2' : 'pr-11'}`}
                   testId="wx-chat-input"
-                  className={`block max-h-[132px] w-full overflow-y-auto py-[9px] pl-3.5 text-[16px] leading-[22px] caret-[#07C160] outline-none transition-all duration-200 selection:bg-[#07C160]/20 ${
-                    input.trim() ? 'pr-3' : 'pr-11'
+                  className={`block max-h-[132px] w-full overflow-y-auto py-[9px] pl-3 text-[16px] leading-[22px] caret-[#07C160] outline-none transition-all duration-200 selection:bg-[#07C160]/20 ${
+                    input.trim() ? 'pr-2' : 'pr-11'
                   } ${
                     liquid
                       ? /* 液态：毛玻璃椭圆输入胶囊（比背景稍深一档 + 内阴影下陷感） */ 'lg-input min-h-[36px] rounded-full shadow-[inset_0_1px_3px_rgba(31,38,135,0.10)]'

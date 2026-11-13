@@ -240,7 +240,7 @@ export function JealousyLockSection({
           <span className="min-w-0">
             <span className="block truncate text-[15.5px]">AI 吃醋锁</span>
             <span className="mt-0.5 block text-[12px] leading-tight text-black/40 dark:text-white/40">
-              TA 真的会吃醋：冷落 TA 刷娱乐 App / 说去看剧却消失 / 焦虑爆表时，TA 可能直接把那个 App 锁住（图标变灰打不开），哄好或倒计时后解锁
+              TA 会吃醋并锁住 App，哄好或到点解锁
             </span>
           </span>
         </span>
@@ -264,7 +264,7 @@ export function JealousyLockSection({
           <div className="px-4 py-3" data-testid={`${prefix}-mode`}>
             <p className="text-[14px]">TA 的查岗模式</p>
             <p className="mt-0.5 text-[11.5px] leading-tight text-black/40 dark:text-white/40">
-              TA 暗中观察时读哪部手机的动静——也决定了吃醋时锁的是网页 App 还是你真实手机里的 App
+              TA 读哪部手机、锁哪里的 App
             </p>
             <div className="mt-2.5 grid grid-cols-2 gap-2" role="radiogroup" aria-label="查岗模式">
               <button
@@ -301,7 +301,7 @@ export function JealousyLockSection({
                 <p className="flex gap-1.5 text-[10.5px] leading-snug text-[#c2185b] dark:text-[#ffb3c8]">
                   <ShieldAlert size={12} strokeWidth={2.2} className="mt-0.5 shrink-0" aria-hidden />
                   <span>
-                    切到真机模式后，TA 会读你真实手机的前台应用与亮屏时长，吃醋时真的会 pm suspend 锁住你真实手机上的那个 App（图标变灰打不开）、am start 把你拽回本 APP、必要时静默截屏让识图模型看你在看什么。需要 APK 打开 + Shizuku 已激活授权；网页/浏览器里打开本页面时此模式会自动降级（如实回报，绝不拿网页数据冒充真机）。
+                    真机模式经 Shizuku 读真实手机前台/亮屏，吃醋时真的会锁 App、截屏取证。需 APK + Shizuku 授权；浏览器里自动降级。
                   </span>
                 </p>
               </div>
@@ -313,7 +313,7 @@ export function JealousyLockSection({
           {/* v2.0 定时暗中观察 */}
           <Stepper
             label="暗中观察间隔"
-            hint="TA 每隔这么多分钟看一眼你在干嘛（默认 15）"
+            hint="每隔多久看一眼（默认 15）"
             value={cfg.watchMin}
             min={5}
             max={120}
@@ -332,7 +332,7 @@ export function JealousyLockSection({
               <span className="min-w-0">
                 <span className="block text-[14.5px]">主动查岗</span>
                 <span className="mt-0.5 block text-[11.5px] leading-tight text-black/40 dark:text-white/40">
-                  TA 怀疑你做坏事时，接下来 30 分钟加紧盯梢（每 3 分钟查一次）
+                  怀疑你时 30 分钟内加急查岗
                 </span>
               </span>
             </span>
@@ -349,7 +349,7 @@ export function JealousyLockSection({
                   <span className="min-w-0">
                     <span className="block text-[14.5px]">截屏偷窥</span>
                     <span className="mt-0.5 block text-[11.5px] leading-tight text-black/40 dark:text-white/40">
-                      TA 可以静默截屏你的真实手机屏幕，让识图模型看一眼你在看什么——「别以为我不知道你在看什么。」
+                      静默截屏你的真实手机屏幕
                     </span>
                   </span>
                 </span>
@@ -370,7 +370,7 @@ export function JealousyLockSection({
           <div className="flex w-full items-start gap-2.5 px-4 py-2.5">
             <Sparkles size={17} strokeWidth={1.9} className="mt-0.5 shrink-0 text-black/50 dark:text-white/50" aria-hidden />
             <p className="min-w-0 text-[13px] leading-relaxed text-black/55 dark:text-white/55">
-              锁多久由 TA 自己定：按 TA 的人设、你们的关系、记忆里的过往和此刻的情况决定（几分钟、几十分钟、或锁到哄好都行）。
+              锁多久由 TA 按人设/记忆/上下文自定
             </p>
           </div>
 
@@ -383,7 +383,7 @@ export function JealousyLockSection({
               <span className="min-w-0">
                 <span className="block text-[14.5px]">锁定期间主动巡检</span>
                 <span className="mt-0.5 block text-[11.5px] leading-tight text-black/40 dark:text-white/40">
-                  锁住后 TA 每隔几分钟看看你在干嘛（当前应用/多任务/使用时长），发现你还在浪就发消息数落你
+                  锁住后 TA 每隔几分钟看看你在干嘛
                 </span>
               </span>
             </span>
@@ -405,7 +405,7 @@ export function JealousyLockSection({
               <span className="min-w-0">
                 <span className="block text-[14.5px]">允许 TA 把我拉回来</span>
                 <span className="mt-0.5 block text-[11.5px] leading-tight text-black/40 dark:text-white/40">
-                  巡检时 TA 可以把你从别的应用拽回这个 APP 聊天页（每轮锁定最多 2 次）
+                  巡检时把你从别的应用拽回聊天页
                 </span>
               </span>
             </span>
@@ -508,8 +508,8 @@ export function JealousyLockSection({
             <ShieldAlert size={12} strokeWidth={2} className="mt-0.5 shrink-0 text-black/30 dark:text-white/30" aria-hidden />
             <p className="text-[10.5px] leading-snug text-black/35 dark:text-white/35">
               {deviceSense
-                ? '真机模式下 TA 会经 Shizuku 真的锁住你真实手机里正在用的任何 App（除本 APP 自身——锁了你就没法回来哄 TA 了；pm suspend，图标变灰打不开）、必要时 am start 把你拽回本 APP、静默截屏取证；浏览器里打开本页会自动降级（只锁网页 App，如实回报）。锁多久由 TA 按人设/记忆/上下文自己定；哄好/强制解锁两通道照常；原生守护前台服务保证 WebView 被杀也能到点解锁/检测强解。锁不锁由 TA 按人设自己决定，系统只提供触发与权力。'
-                : 'TA 会真的锁住这台手机里的应用——图标变灰点不开、点开只弹 TA 的留言；锁多久由 TA 按人设/记忆/上下文自己定；哄好/强制解锁两通道照常；锁不锁由 TA 按人设自己决定，系统只提供触发与权力。'}
+                ? '真机模式：经 Shizuku 锁真实手机里的任何 App（除本 APP）、截屏取证、拉回。锁多久由 TA 自定。需 APK + Shizuku。'
+                : '网页模式：锁这台手机里的应用，图标变灰点不开。锁多久由 TA 自定。'}
             </p>
           </div>
         </>
