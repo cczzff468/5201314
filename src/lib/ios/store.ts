@@ -296,7 +296,9 @@ export const DEFAULT_API_CONFIG: ApiConfig = {
   apiKey: '',
   model: 'gpt-4o-mini',
   temperature: 0.7,
-  maxTokens: 2048,
+  // v2.2：2048 → 20480（机主要求默认 token 抬高，配合回复条数下限收紧让 AI 有充足 token 空间多发消息）；
+  // 用户仍可在 API 设置界面自行修改（maxTokens Input 控件）
+  maxTokens: 20480,
 };
 
 /** 个人信息（设置根页个人卡片 + 锁屏「×××的iPhone」小组件共用） */

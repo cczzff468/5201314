@@ -3738,6 +3738,8 @@ function ApiPage({ onBack }: { onBack: () => void }) {
   const [testUrl, setTestUrl] = useState('');
 
   const [maxText, setMaxText] = useState(() => String(apiConfig.maxTokens));
+  // v2.2：温度数值输入缓冲（与 Slider 双向同步——拖滑块更新 tempText，输入框改值也回写 apiConfig）
+  const [tempText, setTempText] = useState(() => apiConfig.temperature.toFixed(1));
 
   const clearTestResult = () => {
     setTestOk(null);
@@ -3754,6 +3756,7 @@ function ApiPage({ onBack }: { onBack: () => void }) {
   const applyUserPreset = (p: ApiPreset) => {
     updateApiConfig(p.config);
     setMaxText(String(p.config.maxTokens));
+    setTempText(p.config.temperature.toFixed(1));
     clearTestResult();
   };
 
@@ -3905,6 +3908,26 @@ function ApiPage({ onBack }: { onBack: () => void }) {
     } else {
       setMaxText(String(n));
       updateApiConfig({ maxTokens: n });
+    }
+  };
+
+  // v2.2：温度输入框（与 Slider 同源）——输入时实时回写 apiConfig（clamp 0~2，保留 1 位小数）
+  const handleTempChange = (v: string) => {
+    setTempText(v);
+    const n = Number.parseFloat(v);
+    if (Number.isFinite(n) && n >= 0 && n <= 2) {
+      updateApiConfig({ temperature: Math.round(n * 10) / 10 });
+    }
+  };
+  // 失焦兜底：非法/超范围值回退到当前 apiConfig.temperature
+  const handleTempBlur = () => {
+    const n = Number.parseFloat(tempText);
+    if (!Number.isFinite(n) || n < 0 || n > 2) {
+      setTempText(apiConfig.temperature.toFixed(1));
+    } else {
+      const clamped = Math.max(0, Math.min(2, Math.round(n * 10) / 10));
+      setTempText(clamped.toFixed(1));
+      updateApiConfig({ temperature: clamped });
     }
   };
 
@@ -4143,13 +4166,25 @@ function ApiPage({ onBack }: { onBack: () => void }) {
                   max={2}
                   step={0.1}
                   value={[apiConfig.temperature]}
-                  onValueChange={(v) => updateApiConfig({ temperature: v[0] ?? 0.7 })}
+                  onValueChange={(v) => {
+                    const t = v[0] ?? 0.7;
+                    updateApiConfig({ temperature: t });
+                    setTempText(t.toFixed(1));
+                  }}
                   className="flex-1"
                   aria-label="温度"
                 />
-                <span className="min-w-[48px] rounded-full bg-white/65 px-2.5 py-1 text-center text-[13px] tabular-nums shadow-sm ring-1 ring-black/[0.05] backdrop-blur-xl dark:bg-white/[0.1] dark:ring-white/[0.1]">
-                  {apiConfig.temperature.toFixed(1)}
-                </span>
+                <Input
+                  type="number"
+                  min={0}
+                  max={2}
+                  step={0.1}
+                  value={tempText}
+                  onChange={(e) => handleTempChange(e.target.value)}
+                  onBlur={handleTempBlur}
+                  aria-label="温度数值"
+                  className="h-9 w-[76px] rounded-full border-black/[0.05] bg-white/65 text-center text-[13px] tabular-nums shadow-sm ring-1 ring-black/[0.05] backdrop-blur-xl dark:border-white/[0.09] dark:bg-white/[0.1] dark:ring-white/[0.1]"
+                />
               </div>
             </div>
 
