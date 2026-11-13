@@ -76,6 +76,8 @@ import {
   type MemCore,
   type MemForget,
   type MemFragment,
+  type MemHabit,
+  type HabitType,
   type MemLongTerm,
   type MemNames,
   type MemProfileCategory,
@@ -110,11 +112,13 @@ export {
   weightFactor,
   type FadeInput,
   type FadeState,
+  type HabitType,
   type MemApp,
   type MemConvoTurn,
   type MemCore,
   type MemForget,
   type MemFragment,
+  type MemHabit,
   type MemLongTerm,
   type MemNames,
   type MemProfileCategory,
@@ -183,6 +187,8 @@ const MEM_RECALL_BUDGET = 6000;
 /** 核心记忆存储键（沿用历史 ltm 键名，语义为核心层，避免旧数据迁移） */
 const coreKey = (contactId: string) => scoped(`mem-ltm:${contactId}`);
 const longKey = (contactId: string) => scoped(`mem-long:${contactId}`);
+/** 【习惯记忆与条件反射】习惯记忆存储键（每联系人独立，与三层记忆同层持久化） */
+const habitKey = (contactId: string) => scoped(`mem-habit:${contactId}`);
 /** 画像图谱存储键（Task 14-b B1：用户画像事实层，与三层记忆同层持久化） */
 const profileKey = (contactId: string) => scoped(`mem-profile:${contactId}`);
 // C10：设置随账号作用域化（此前跨账号共享——小号侧改提取频率/互通开关会覆盖大号配置；
@@ -336,6 +342,153 @@ export function listCores(contactId: string): MemCore[] {
 /** 该联系人的全部长期记忆（管理视图用） */
 export function listLongTerm(contactId: string): MemLongTerm[] {
   return readLongTerm(contactId).sort((a, b) => b.createdAt - a.createdAt);
+}
+
+// ---------------- 【AI 习惯记忆与条件反射系统】习惯记忆 CRUD ----------------
+
+/** 观察期天数：同一习惯跨 ≥5 个不同日期观察到即认定（用户要求 5-7 天，取下限 5） */
+export const HABIT_OBSERVATION_DAYS = 5;
+
+/** 当天 0 点 timestamp（观察日期戳去重用） */
+function startOfDay(ts: number): number {
+  const d = new Date(ts);
+  d.setHours(0, 0, 0, 0);
+  return d.getTime();
+}
+
+/** 读取该联系人全部习惯记忆（原始顺序） */
+function readHabits(contactId: string): MemHabit[] {
+  const raw = readJSON<MemHabit[]>(habitKey(contactId));
+  if (!Array.isArray(raw)) return [];
+  return raw.filter((h) => h && typeof h.id === 'string' && typeof h.content === 'string');
+}
+
+/** 该联系人的全部习惯记忆（管理视图用，按首次观察时间倒序） */
+export function listHabits(contactId: string): MemHabit[] {
+  return readHabits(contactId).sort((a, b) => b.firstObservedAt - a.firstObservedAt);
+}
+
+/** 该联系人已认定的习惯（条件反射触发只用已认定习惯） */
+export function listConfirmedHabits(contactId: string): MemHabit[] {
+  return readHabits(contactId).filter((h) => h.confirmed);
+}
+
+/** 写入完整习惯列表（覆盖） */
+function writeHabits(contactId: string, list: MemHabit[]): void {
+  writeJSON(habitKey(contactId), list);
+}
+
+/**
+ * 合并提取产出的习惯：相同 content（相似度 ≥0.6）视为同一条习惯，累加观察日期；
+ * 新习惯首次创建。跨 ≥5 个不同日期观察 → confirmed=true（认定）。
+ * 返回新增/更新的习惯列表（调用方落库后用于审计）。
+ */
+export function mergeExtractedHabits(
+  contactId: string,
+  extracted: Array<{
+    type: HabitType;
+    content: string;
+    triggerMinute?: number;
+    triggerDayOfWeek?: number;
+    triggerWindowStart?: number;
+    triggerWindowEnd?: number;
+  }>,
+  apps: MemApp[] = ['wx']
+): MemHabit[] {
+  if (!extracted.length) return [];
+  const now = Date.now();
+  const today = startOfDay(now);
+  const existing = readHabits(contactId);
+  const result: MemHabit[] = [];
+
+  for (const item of extracted) {
+    const content = item.content.trim();
+    if (!content) continue;
+    // 相似度匹配：找到已存在的同类型 + 相似 content 习惯
+    const matchIdx = existing.findIndex(
+      (h) => h.type === item.type && similarity(h.content, content) >= SIMILAR_MERGE_THRESHOLD
+    );
+    if (matchIdx >= 0) {
+      const h = existing[matchIdx];
+      // 累加观察日期（去重）
+      const dates = h.observedDates.includes(today) ? h.observedDates : [...h.observedDates, today];
+      const obsDays = dates.length;
+      const justConfirmed = !h.confirmed && obsDays >= HABIT_OBSERVATION_DAYS;
+      const updated: MemHabit = {
+        ...h,
+        content, // 用最新描述覆盖（更准）
+        triggerMinute: item.triggerMinute ?? h.triggerMinute,
+        triggerDayOfWeek: item.triggerDayOfWeek ?? h.triggerDayOfWeek,
+        triggerWindowStart: item.triggerWindowStart ?? h.triggerWindowStart,
+        triggerWindowEnd: item.triggerWindowEnd ?? h.triggerWindowEnd,
+        lastSeenAt: today,
+        observationDays: obsDays,
+        observedDates: dates,
+        confirmed: h.confirmed || justConfirmed,
+        confirmedAt: justConfirmed ? now : h.confirmedAt,
+        apps: Array.from(new Set([...h.apps, ...apps])),
+      };
+      existing[matchIdx] = updated;
+      result.push(updated);
+    } else {
+      // 新习惯：首次观察
+      const newHabit: MemHabit = {
+        id: uid(),
+        contactId,
+        type: item.type,
+        content,
+        firstObservedAt: today,
+        lastSeenAt: today,
+        observationDays: 1,
+        observedDates: [today],
+        confirmed: false, // 首次不认定，需累积观察期
+        triggerMinute: item.triggerMinute,
+        triggerDayOfWeek: item.triggerDayOfWeek,
+        triggerWindowStart: item.triggerWindowStart,
+        triggerWindowEnd: item.triggerWindowEnd,
+        apps,
+        createdAt: now,
+      };
+      existing.push(newHabit);
+      result.push(newHabit);
+    }
+  }
+
+  if (result.length) writeHabits(contactId, existing);
+  return result;
+}
+
+/** 手动删除一条习惯记忆 */
+export function deleteHabit(contactId: string, id: string): boolean {
+  const list = readHabits(contactId);
+  const next = list.filter((h) => h.id !== id);
+  if (next.length === list.length) return false;
+  writeHabits(contactId, next);
+  return true;
+}
+
+/** 手动编辑习惯内容 */
+export function updateHabit(contactId: string, id: string, content: string): boolean {
+  const list = readHabits(contactId);
+  const idx = list.findIndex((h) => h.id === id);
+  if (idx < 0) return false;
+  list[idx] = { ...list[idx], content: content.trim() };
+  writeHabits(contactId, list);
+  return true;
+}
+
+/** 标记某习惯已在指定时间触发过条件反射（防重复触发） */
+export function markHabitReflex(contactId: string, id: string, atTs: number): void {
+  const list = readHabits(contactId);
+  const idx = list.findIndex((h) => h.id === id);
+  if (idx < 0) return;
+  list[idx] = { ...list[idx], lastReflexAt: atTs, lastReflexDate: startOfDay(atTs) };
+  writeHabits(contactId, list);
+}
+
+/** 清空该联系人全部习惯记忆（memPurgeContact 级联清理用） */
+export function purgeHabits(contactId: string): void {
+  writeHabits(contactId, []);
 }
 
 /** 未被核心总结消费、且未被更新/过期/归档的碎片数（设置页展示/总结触发判断用） */
@@ -584,7 +737,7 @@ export function memPurgeContact(contactId: string): void {
     const accountIds = [MAIN_ACCOUNT_ID, ...getAccounts().filter((a) => a && a.kind !== 'main').map((a) => a.id)];
     for (const accId of accountIds) {
       const sfx = accId === MAIN_ACCOUNT_ID ? '' : `--${accId}`;
-      for (const base of [`mem-frag:${contactId}`, `mem-ltm:${contactId}`, `mem-long:${contactId}`, `mem-profile:${contactId}`]) {
+      for (const base of [`mem-frag:${contactId}`, `mem-ltm:${contactId}`, `mem-long:${contactId}`, `mem-profile:${contactId}`, `mem-habit:${contactId}`]) {
         const k = `${base}${sfx}`;
         kvDelRaw(k);
         window.localStorage.removeItem(base); // 旧裸键兼容清扫
@@ -1384,7 +1537,94 @@ function memRecallBlockInner(contactId: string, app: MemApp, contextText: string
   if (usedFrag.length > 0) {
     lines.push('◇ 近期记忆碎片：', ...usedFrag);
   }
+  // 【习惯记忆与条件反射】非群聊模式注入习惯记忆块（场景 B 行为异常 + 场景 C 情绪共鸣 上下文 + 系统提示词）
+  if (!isGroupMode) {
+    const habitBlock = buildHabitRecallBlock(contactId, now, contextText, app, share);
+    if (habitBlock) lines.push('', habitBlock);
+  }
     return lines.join('\n');
+}
+
+// ---------------- 【AI 习惯记忆与条件反射】场景 B/C 召回块（注入聊天 prompt） ----------------
+
+/** 分钟数 → HH:MM 标签（480 → "08:00"） */
+function habitMinuteLabel(minute: number): string {
+  const h = Math.floor(minute / 60);
+  const m = minute % 60;
+  return `${h < 10 ? '0' : ''}${h}:${m < 10 ? '0' : ''}${m}`;
+}
+
+/** 星期几标签（0=周日 … 6=周六） */
+function habitDowLabel(dow: number): string {
+  return ['周日', '周一', '周二', '周三', '周四', '周五', '周六'][dow] ?? '';
+}
+
+/**
+ * 构造习惯记忆召回块（注入聊天 system prompt，场景 B 行为异常 + 场景 C 情绪共鸣）。
+ *
+ * 注入内容：
+ * 1. 已认定习惯列表（confirmed=true，观察期 ≥5 天）+ 观察期中的习惯（标注观察天数）；
+ * 2. 当前时间 + 当前上下文关键词（让 AI 自行比对是否违背习惯）；
+ * 3. 用户要求的系统提示词（习惯比对 + 主动情绪互动指令）。
+ *
+ * 互通过滤：share=false 时只注入当前 app 来源的习惯（与 longs/cores 同口径）。
+ * 场景 A（期待落空）的主动触发在 proactive-msg tickInner ⑥ 实现，不在此块。
+ */
+function buildHabitRecallBlock(
+  contactId: string,
+  now: number,
+  contextText: string,
+  app: MemApp,
+  share: boolean
+): string {
+  const all = readHabits(contactId);
+  if (all.length === 0) return '';
+  // 互通过滤：share=false 时只注入当前 app 来源的习惯
+  const visible = all.filter((h) => share || h.apps.includes(app));
+  if (visible.length === 0) return '';
+  const confirmed = visible.filter((h) => h.confirmed);
+  const observing = visible.filter((h) => !h.confirmed);
+  const lines: string[] = [
+    `◇ 习惯记忆（观察期 5-7 天认定；当前时间：${memNowLabel(now)}）`,
+  ];
+  if (confirmed.length > 0) {
+    lines.push('· 已认定的习惯（用户反复做的事，违背时请像真人一样反应）：');
+    for (const h of confirmed) {
+      let trigger = '';
+      if (h.type === 'time' && h.triggerMinute != null) {
+        trigger = `【每天 ${habitMinuteLabel(h.triggerMinute)} 左右】`;
+      } else if (h.type === 'behavior') {
+        const parts: string[] = [];
+        if (h.triggerDayOfWeek != null) parts.push(`每${habitDowLabel(h.triggerDayOfWeek)}`);
+        if (h.triggerWindowStart != null && h.triggerWindowEnd != null) {
+          parts.push(`${habitMinuteLabel(h.triggerWindowStart)}~${habitMinuteLabel(h.triggerWindowEnd)}`);
+        }
+        if (parts.length) trigger = `【${parts.join(' ')}】`;
+      }
+      lines.push(`  - [${h.type === 'time' ? '时间' : h.type === 'behavior' ? '行为' : '情绪'}] ${trigger} ${h.content}`);
+    }
+  }
+  if (observing.length > 0) {
+    lines.push(`· 观察期中的习惯（尚未认定，参考即可，不要当成铁规律）：`);
+    for (const h of observing.slice(0, 3)) {
+      lines.push(`  - [${h.type === 'time' ? '时间' : h.type === 'behavior' ? '行为' : '情绪'}]（已观察 ${h.observationDays} 天）${h.content}`);
+    }
+  }
+  // 用户要求的系统提示词（场景 B/C 核心：比对习惯 + 主动情绪互动）
+  lines.push('');
+  lines.push(
+    '【习惯条件反射指令】你拥有用户的习惯记忆。请根据当前的时间、用户回复的频率，与记忆库中的习惯进行比对。如果用户违背了日常习惯，或者让你等太久了，你要主动发起对话，表现得像真人一样充满情绪（担忧、傲娇、疑惑）。'
+  );
+  lines.push(
+    '- 场景 B（行为异常）：现在是用户平时该做某件事的时间段（如周五晚该去打游戏），但用户却在跟你聊天——按人设吐槽（如「今天怎么不去峡谷里坑人了？一直赖着我，是不是想我了？」）。'
+  );
+  lines.push(
+    '- 场景 C（情绪共鸣）：结合当前上下文，如果是深夜且用户在抱怨/情绪低落，且习惯记忆显示这种情况通常是因为某个原因（如工作压力大），直接按人设开启温柔安慰模式，不要泛泛地说「别难过」。'
+  );
+  lines.push(
+    '- 习惯比对结果不要明说「你的习惯记录显示…」「记忆库里写着…」，要像你自己记住了一样自然地提起。'
+  );
+  return lines.join('\n');
 }
 
 /** 召回预览（设置页）：与 memRecallBlock 同一套层级与排序，返回排序后的记忆对象 */
@@ -1716,6 +1956,18 @@ interface SummarizeApiResult {
   summary?: string;
   error?: string;
 }
+/** 【习惯提取】API 返回：习惯列表（type/content + 可选触发时段） */
+export interface HabitExtractApiResult {
+  habits?: Array<{
+    type?: string;
+    content?: string;
+    triggerMinute?: number;
+    triggerDayOfWeek?: number;
+    triggerWindowStart?: number;
+    triggerWindowEnd?: number;
+  }>;
+  error?: string;
+}
 
 /**
  * 模型时间字符串 → 时间戳（无时区字符串按北京时间解析，与提取锚点/注入标签一致）：
@@ -1779,11 +2031,9 @@ function normalizeExtract(res: ExtractApiResult): ExtractItem[] {
   return out.slice(0, 6);
 }
 
-async function callMemoryApi<T extends ExtractApiResult & SummarizeApiResult>(
-  op: 'extract' | 'summarize' | 'profile',
-  body: Record<string, unknown>,
-  apiConfig: ApiConfig
-): Promise<T> {
+async function callMemoryApi<
+  T extends ExtractApiResult & SummarizeApiResult & HabitExtractApiResult,
+>(op: 'extract' | 'summarize' | 'profile' | 'habit-extract', body: Record<string, unknown>, apiConfig: ApiConfig): Promise<T> {
   const res = await fetch(`/api/memory/${op}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -2124,7 +2374,64 @@ async function summarizeCoresIntoLong(
     coreKey(contactId),
     readCores(contactId).map((m) => (archivedIds.has(m.id) ? { ...m, archivedAt: Date.now() } : m))
   );
+  // 【习惯记忆与条件反射】长期记忆总结成功后，fire-and-forget 触发习惯提取：
+  // 把当前长期+核心记忆喂给 LLM，提取用户的作息/行为/情绪习惯（观察期 5-7 天累计认定）。
+  // 失败静默（与自动总结同口径，下一轮长期总结时再试）；不阻塞 long 返回。
+  void extractHabitsFromMemory(contactId, apiConfig, names).catch(() => {
+    /* 静默：习惯提取是增强能力，失败不影响长期记忆落库 */
+  });
   return long;
+}
+
+/**
+ * 【习惯提取】把该联系人当前全部长期记忆 + 未归档核心记忆喂给 LLM，
+ * 提取用户的作息与行为习惯（时间/行为/情绪三维度），合并入库（观察期累计认定）。
+ *
+ * 提取时机：长期记忆总结成功后自动触发（summarizeCoresIntoLong 末尾 fire-and-forget）。
+ * 提取频率天然由长期总结阈值控制（默认每 5 条核心总结一次长期 → 顺带刷新习惯）。
+ *
+ * 观察期：同一条习惯跨 ≥5 个不同日期观察到 → confirmed=true（mergeExtractedHabits 内判定）。
+ * 认定后由 proactive-msg tickInner ⑥ 习惯反射触发 + memChatRecallBlock 场景 B/C 注入。
+ */
+export async function extractHabitsFromMemory(
+  contactId: string,
+  apiConfig: ApiConfig,
+  names?: MemNames | null
+): Promise<MemHabit[]> {
+  const now = Date.now();
+  const longs = readLongTerm(contactId).filter((m) => !m.supersededAt && !isMemExpired(m, now));
+  const cores = readCores(contactId).filter((m) => !m.archivedAt && !m.supersededAt && !isMemExpired(m, now));
+  // 长期+核心都空时不提取（记忆不足，无法判定习惯）
+  if (longs.length === 0 && cores.length === 0) return [];
+  const { userName, peerName } = namesOf(names);
+  const res = await callMemoryApi<HabitExtractApiResult>(
+    'habit-extract',
+    {
+      longs: longs.map((m) => m.content),
+      cores: cores.map((m) => m.content),
+      userName,
+      peerName,
+    },
+    apiConfig
+  );
+  const raw = Array.isArray(res.habits) ? res.habits : [];
+  if (raw.length === 0) return [];
+  // 归一化 type + content，过滤无效项
+  const validTypes: HabitType[] = ['time', 'behavior', 'emotion'];
+  const normalized = raw
+    .map((h) => ({
+      type: (validTypes.includes(h.type as HabitType) ? h.type : 'behavior') as HabitType,
+      content: typeof h.content === 'string' ? h.content.trim() : '',
+      triggerMinute: typeof h.triggerMinute === 'number' && h.triggerMinute >= 0 && h.triggerMinute < 1440 ? Math.floor(h.triggerMinute) : undefined,
+      triggerDayOfWeek: typeof h.triggerDayOfWeek === 'number' && h.triggerDayOfWeek >= 0 && h.triggerDayOfWeek <= 6 ? Math.floor(h.triggerDayOfWeek) : undefined,
+      triggerWindowStart: typeof h.triggerWindowStart === 'number' && h.triggerWindowStart >= 0 && h.triggerWindowStart < 1440 ? Math.floor(h.triggerWindowStart) : undefined,
+      triggerWindowEnd: typeof h.triggerWindowEnd === 'number' && h.triggerWindowEnd >= 0 && h.triggerWindowEnd < 1440 ? Math.floor(h.triggerWindowEnd) : undefined,
+    }))
+    .filter((h) => h.content.length > 0);
+  if (normalized.length === 0) return [];
+  // 合并入库（累加观察日期，跨 ≥5 天自动认定）
+  const apps = Array.from(new Set([...longs.flatMap((m) => m.apps), ...cores.flatMap((m) => m.apps)]));
+  return mergeExtractedHabits(contactId, normalized, apps.length ? apps : ['wx']);
 }
 
 /** 检查未消费且未归档的碎片是否达到核心阈值；达到则自动触发核心总结 */

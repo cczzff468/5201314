@@ -149,6 +149,55 @@ export interface MemLongTerm {
 // ---------------- 画像图谱（用户画像事实层，Task 14-b B1） ----------------
 
 /**
+ * 【AI 习惯记忆与条件反射系统】习惯类型：
+ * - time = 时间规律（如「每天早上 8 点会说早安」「通常晚上 11 点睡觉」）
+ * - behavior = 行为规律（如「每周五晚上会去玩王者荣耀」「心情不好时会频繁发短句」）
+ * - emotion = 情绪规律（如「深夜连续抱怨时通常是因为工作压力大」）
+ */
+export type HabitType = 'time' | 'behavior' | 'emotion';
+
+/**
+ * 习惯记忆：从记忆总结中提取的用户作息与行为习惯，用于条件反射触发。
+ * 观察期 5-7 天：同一习惯跨 ≥5 个不同日期观察到 → confirmed=true（认定习惯成立）。
+ * 认定后由 proactive-msg 定时比对当前时间 vs 习惯，违背时主动触发互动。
+ */
+export interface MemHabit {
+  id: string;
+  contactId: string;
+  /** 习惯类型 */
+  type: HabitType;
+  /** 习惯内容（自然语言描述，提取 prompt 产出） */
+  content: string;
+  /** 第一次观察到的日期戳（当天 0 点 timestamp） */
+  firstObservedAt: number;
+  /** 最近一次观察到的日期戳 */
+  lastSeenAt: number;
+  /** 累计观察到的不同日期数（观察期判定用：≥5 天则认定） */
+  observationDays: number;
+  /** 观察到的具体日期戳列表（去重，防同一天多次提取重复计数） */
+  observedDates: number[];
+  /** 是否已认定（观察期 ≥5 天自动转 true） */
+  confirmed: boolean;
+  /** 认定时间戳 */
+  confirmedAt?: number;
+  /** 时间习惯的触发时刻（分钟数 0-1439，如 8:00=480；time 类型专用，提取时解析） */
+  triggerMinute?: number;
+  /** 行为习惯的触发星期几（0=周日 … 6=周六；behavior 类型专用，可选） */
+  triggerDayOfWeek?: number;
+  /** 行为习惯的触发时段起始分钟（如周五晚=星期5+18:00=1080；behavior 类型专用，可选） */
+  triggerWindowStart?: number;
+  /** 触发时段结束分钟（与 triggerWindowStart 配对；behavior 类型专用，可选） */
+  triggerWindowEnd?: number;
+  /** 来源 App 集合（互通关闭时召回过滤用） */
+  apps: MemApp[];
+  createdAt: number;
+  /** 上次习惯反射触发的时间戳（场景 A 期待落空防重复触发用） */
+  lastReflexAt?: number;
+  /** 上次习惯反射触发的日期戳（同一天内不重复触发同一条习惯） */
+  lastReflexDate?: number;
+}
+
+/**
  * 画像事实分类（五类稳定事实）：
  * like=喜好 / dislike=忌讳 / habit=习惯 / identity=身份 / date=重要日子
  */

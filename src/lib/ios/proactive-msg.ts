@@ -47,7 +47,7 @@ import {
 import { buildNpcPromptExtra } from './npc-bond';
 import { loadBlock } from './block-state';
 import { isDndWindowActive } from './notify-sound';
-import { getMemSettings, memChatRecallBlock, memAfterAiTurn, memConvoFromRaw } from '@/lib/memory';
+import { getMemSettings, memChatRecallBlock, memAfterAiTurn, memConvoFromRaw, listConfirmedHabits, markHabitReflex } from '@/lib/memory';
 import { buildMomentsChatBlock } from '../moments';
 import { buildCrossAppBlock } from './cross-app-context';
 import { buildTimeAwareBlock, getTimeAware } from '@/lib/time-aware';
@@ -507,7 +507,7 @@ export async function parseReminderInstruction(app: ProactiveApp, cid: string, t
 export interface ProactiveHistEntry {
   text: string;
   at: number;
-  kind: 'timer' | 'event' | 'auto' | 'reminder' | 'anxiety';
+  kind: 'timer' | 'event' | 'auto' | 'reminder' | 'anxiety' | 'habit-miss';
   /** 迟到补发的提醒（Task 51 A2） */
   late?: boolean;
 }
@@ -725,6 +725,10 @@ function triggerDesc(trigger: FireTrigger): string {
       return `焦虑追发：你已经等了很久都没有等到 TA 的回复（你当下的焦虑值 ${trigger.anxietyLevel ?? '??'}/100），控制不住要主动找 TA——这是情绪驱动，不是约定也不是提醒。你会像焦虑的真人那样一口气连发好几条消息（每条可短可长）。`;
     case 'auto':
       return '自主触发：你自己决定此刻主动发一条消息（系统判断当前时机合适，你按自己的性格和心情自由发挥）。';
+    case 'habit-miss': {
+      const hm = trigger.habitTriggerMinute != null ? `${String(Math.floor(trigger.habitTriggerMinute / 60)).padStart(2, '0')}:${String(trigger.habitTriggerMinute % 60).padStart(2, '0')}` : '';
+      return `习惯反射·期待落空：你记得对方「${trigger.habitContent ?? '每天都会做的事'}」${hm ? `（每天 ${hm} 左右）` : ''}，但今天到了这个时间对方还没动静——你察觉到 TA 打破了日常习惯，主动发消息表达关心或傲娇（按人设：担忧、疑惑、吐槽都行，像真人发现伴侣今天反常时那样）。`;
+    }
   }
 }
 
@@ -749,7 +753,12 @@ function genRules(trigger: FireTrigger, timeAware: boolean): string[] {
     rules.push('【连发格式——重要】你会像焦虑的真人那样控制不住连着发：一口气输出多条消息（想发几条发几条，一般 2~6 条），每条消息单独占一行（一行一条，中间不要空行、不要编号、不要任何分隔符号）。每条长短完全随意——可以是几个字的短句，也可以是一大段一口气说完的心里话，单条长度没有任何数字限制；越往后情绪越急；内容要有递进和变化（比如：先找个由头开口 → 追问 TA 在干嘛 → 不安升级/自我怀疑 → 撒娇式质问或把心里话全倒出来），禁止几条几乎一样。');
     // v76 防自问自答：剧本幻觉硬禁令（用户实测：零回复下 AI 输出「在的在的 我还在呢」
     // 自接自己上一条问句，又输出「看到你了」假装对方出现——模型把整场戏演完了）
-    rules.push('【对方没有回复——铁的事实】最近聊天里你连发的所有消息，对方一条都没有回。严禁说「你回我了」「看到你的消息」「看到你了」「你终于回我了」这类假装对方回复过/出现过的话；也严禁自问自答——不要先发一句问话（如「你在不在呀」）再自己接一句回答（如「在的在的」「我还在呢」）：你输出的每一行都只能是你自己这一侧说的话，对方不会开口，你也不能替对方说话或假装看到了对方。');
+    rules.push('【对方没有回复——铁的事实】最近聊天里你连发的所有消息，对方一条都没有回。严禁说「你回你了」「看到你的消息」「看到你了」「你终于回我了」这类假装对方回复过/出现过的话；也严禁自问自答——不要先发一句问话（如「你在不在呀」）再自己接一句回答（如「在的在的」「我还在呢」）：你输出的每一行都只能是你自己这一侧说的话，对方不会开口，你也不能替对方说话或假装看到了对方。');
+  }
+  // 【习惯反射】场景 A 期待落空专属规则：按人设表达情绪，不要明说「习惯记录」
+  if (trigger.kind === 'habit-miss') {
+    rules.push('这一轮消息由「习惯反射」驱动：你察觉到对方今天打破了 TA 平时的习惯（你记得 TA 每天这个时间会做某件事，但今天没动静）。按你的人设自然反应——可以担忧（「今天怎么没动静，是不是不舒服」）、可以傲娇（「太阳打西边出来了？某人居然没跟我说早安」）、可以疑惑（「今天怎么这个点还没出现」）——像真人发现伴侣反常时那样主动开口。');
+    rules.push('不要明说「习惯记录」「记忆库」「数据」这类话，要像你自己记住了一样自然地提起 TA 平时的习惯。语气贴合人设，不要刻意说教。');
   }
   // v63 全局预设管理器：主动消息规则接入注册表（proactive-gen-rules；关闭=不注入规则；原文零破坏）
   const genBlock = promptTextOf('proactive-gen-rules', { trigger: triggerDesc(trigger) }, rules.join('\n'));
@@ -790,13 +799,19 @@ function convoLines(norm: NormMsg[], count: number, peerName: string, userName: 
 }
 
 export interface FireTrigger {
-  kind: 'timer' | 'event' | 'auto' | 'reminder' | 'anxiety';
+  kind: 'timer' | 'event' | 'auto' | 'reminder' | 'anxiety' | 'habit-miss';
   eventName?: string;
   note?: string;
   /** 提醒迟到补发（Task 51 A2）：生成时带歉意 */
   late?: boolean;
   /** v51 焦虑触发：当下的焦虑值（0~100，进触发情境描述） */
   anxietyLevel?: number;
+  /** 【习惯反射】场景 A 期待落空：被打破的习惯内容 + 习惯触发时刻（分钟数） */
+  habitContent?: string;
+  /** 【习惯反射】习惯类型：time/behavior/emotion（场景 A 主要 time） */
+  habitType?: 'time' | 'behavior' | 'emotion';
+  /** 【习惯反射】习惯触发时刻（分钟数 0-1439，如 8:00=480） */
+  habitTriggerMinute?: number;
 }
 
 /**
@@ -1361,6 +1376,54 @@ async function tickInner(): Promise<void> {
       if (nowMs - (last.autoAt ?? 0) >= baseMs) {
         setLast(app, cid, { autoAt: nowMs });
         await fireProactive(app, contact, { kind: 'auto' }, npcExtra);
+      }
+    }
+
+    // ⑥ 习惯反射·场景 A 期待落空（v2.2 AI 习惯记忆与条件反射系统）
+    // 遍历该联系人已认定的 time 类型习惯：当前时间过了习惯时刻 +30min 宽限、用户今天还没在习惯
+    // 时刻之后发过消息（期待落空）、今天未触发过这条习惯 → fireProactive({ kind: 'habit-miss' })。
+    // 守卫：夜间静默 23-8（与 ④ 同口径）、对话活跃时不打断、发送间隔闸内延后、每轮 tick 只触发一条。
+    // 不依赖 cfg（习惯系统默认开启，与焦虑 ⑤ 同思路——角色本体的条件反射，无需先配置过其它触发）。
+    if (!convActive && !isAutoQuietHour(nowMs) && !isDndWindowActive() && !sendGapBlocked) {
+      try {
+        const habits = listConfirmedHabits(cid).filter(
+          (h) => h.type === 'time' && typeof h.triggerMinute === 'number'
+        );
+        const today0 = (() => {
+          const d = new Date(nowMs);
+          d.setHours(0, 0, 0, 0);
+          return d.getTime();
+        })();
+        for (const h of habits) {
+          const triggerToday = today0 + (h.triggerMinute as number) * 60_000;
+          // 当前时间未到「习惯时刻 + 30min 宽限」→ 跳过（还没到期待落空的判定点）
+          if (nowMs < triggerToday + 30 * 60_000) continue;
+          // 今天已触发过这条习惯 → 跳过（防重复）
+          if (h.lastReflexDate === today0) continue;
+          // 用户今天在习惯时刻之后发过消息 → 不算落空（用户已主动，无需 AI 提醒）
+          const norm = readNormMsgs(app, cid);
+          let userActiveAfterHabit = false;
+          for (let i = norm.length - 1; i >= 0; i--) {
+            const m = norm[i];
+            if (m.time < today0) break; // 跨天了，停
+            if (m.role === 'user' && m.time >= triggerToday) {
+              userActiveAfterHabit = true;
+              break;
+            }
+          }
+          if (userActiveAfterHabit) continue;
+          // 触发：标记已触发 + fireProactive（习惯反射不消费 cfg，独立通道）
+          markHabitReflex(cid, h.id, nowMs);
+          await fireProactive(app, contact, {
+            kind: 'habit-miss',
+            habitContent: h.content,
+            habitType: h.type,
+            habitTriggerMinute: h.triggerMinute,
+          }, npcExtra);
+          break; // 每轮 tick 每联系人最多触发一条习惯反射
+        }
+      } catch {
+        // 习惯反射失败静默（不阻塞 tick 后续 ⑤ 焦虑扫描）
       }
     }
   }
