@@ -57,10 +57,13 @@ export default function RootLayout({
             register 幂等（同 URL 同 scope），与 push-client 的注册不冲突；iframe/不支持环境静默失败。
             v1.9.22：同一脚本尽早捕获 beforeinstallprompt（Chrome 在页面加载早期就可能派发，
             React 挂载后再监听会错过）——preventDefault 收下事件存 window.__pwaInstallEvt，
-            设置 › 添加到主屏幕 页的「立即安装」按钮消费它；appinstalled 后清空并广播。 */}
+            设置 › 添加到主屏幕 页的「立即安装」按钮消费它；appinstalled 后清空并广播。
+            v2.2：dev 模式不注册 SW——Turbopack dev 重启后 chunk 内容变但 SW 的 SWR 缓存返回旧
+            chunk，导致 next/dynamic 组件「module factory is not available」运行时错误。
+            SW 缓存只对生产环境（稳定 chunk）有意义；dev 模式 chunks 是 no-cache，SW 反而干扰。 */}
         <script
           dangerouslySetInnerHTML={{
-            __html: `try{if('serviceWorker' in navigator){navigator.serviceWorker.register('/sw.js').catch(function(){});}}catch(e){}
+            __html: `try{if('serviceWorker' in navigator){if(${process.env.NODE_ENV === 'production'}){navigator.serviceWorker.register('/sw.js').catch(function(){});}else{navigator.serviceWorker.getRegistrations().then(function(rs){rs.forEach(function(r){r.unregister();});}).catch(function(){});if(window.caches){window.caches.keys().then(function(ks){ks.forEach(function(k){window.caches.delete(k);});}).catch(function(){});}}}}catch(e){}
 try{window.addEventListener('beforeinstallprompt',function(e){e.preventDefault();window.__pwaInstallEvt=e;window.dispatchEvent(new CustomEvent('pwa-installable'));});
 window.addEventListener('appinstalled',function(){window.__pwaInstallEvt=null;window.dispatchEvent(new CustomEvent('pwa-installed'));});}catch(e){}`,
           }}
