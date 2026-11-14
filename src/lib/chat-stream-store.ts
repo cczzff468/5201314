@@ -1056,12 +1056,20 @@ async function runStream(rt: StreamRuntime, opts: BeginChatStreamOptions): Promi
           scanner?.push(tkEnd.text);
         }
         if (tkEnd.thinking) thinkText += tkEnd.thinking;
+        // v2.4-fix2：finalize 前先放出 scanner 全部剩余段（held 里扣住的多句）。
+        // 症状：第二句「三个点」显示但没发——held 里的段没通过 onSegment 投递，
+        // 仅靠 finalize.tail 只能取回最后一段，前面的 held 段丢失。
+        // 修复：finalize 前先 scanner.finish() + segSink 投递所有 held，再让 finalize.tail 取空。
+        if (scanner && segSink) {
+          const tailSeg = scanner.finish();
+          if (tailSeg) segSink(tailSeg);
+        }
         opts.finalize({
           aiMsgId: rt.state.aiMsgId,
           content: raw,
           thinking: thinkText || undefined,
-          // 多条模式：tail = 分段器剩余的最后一条（第 N 条，可能含溢出合并的句子）；
-          // 单条模式：tail = 完整内容（finalize 按旧管线处理，行为与旧版一致）
+          // 多条模式：scanner 已在上方 finish 放出 held，这里返回空（segSink 已投递）；
+          // 单条模式：scanner 为 null，tail = 完整内容（finalize 按旧管线处理）
           tail: scanner ? scanner.finish() : raw,
           error: rt.state.error,
           startedAt: rt.state.startedAt,
