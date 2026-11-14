@@ -1478,6 +1478,7 @@ function memRecallBlockInner(contactId: string, app: MemApp, contextText: string
   const identitySeg = headerOpts?.identitySegment ?? `现在和你聊天的人用的是：${memScopeAccountName()}`;
   const lines: string[] = [
     `【共同经历（${headScope}；${identitySeg}；当前时间：${memNowLabel(now)}；聊天时自然运用：这些都是你自己经历过、记得的事，不要逐条罗列复述，也不要说「记录」「记忆库」「看过资料」这类话）】`,
+    '（这些记忆用第三人称写你的名字只是存档格式，回复时一律用「我」自称——绝不要用自己的名字自称或用第三人称描述自己，如不要说「谢予安假装没听见」，要说「我假装没听见」）',
     '（长期记忆/核心记忆是稳定的画像，记忆碎片是最新进展：同一件事新旧不一致时，通常按更新的理解——人是在变化的；拿旧印象纠正对方刚说的话之前，先想想对方是不是已经变了）',
     ...(headerOpts?.extraNoteLines ?? []),
     ...(showRoleTagNote
