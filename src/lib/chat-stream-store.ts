@@ -974,8 +974,17 @@ async function runStream(rt: StreamRuntime, opts: BeginChatStreamOptions): Promi
             }
           }
         }
+        // v2.4-fix：补发前先放出首轮 scanner 的剩余段（held 里的未放出内容）。
+        // 症状：AI 第二句已显示「正在输入」（三个点），但最后没发出来——因为第二句停在
+        // scanner 的 held 里（没带句末标点 / ≤4 字碎句扣住），补发循环重建 scanner 时 held 丢失。
+        // 修复：重建前先 finish 旧 scanner 放出 held 段（segSink 投递 + segEmitted++），
+        // 放出后 segEmitted 可能已够下限，无需补发。
+        if (scanner) {
+          const tailSeg = scanner.finish();
+          if (tailSeg && segSink) segSink(tailSeg);
+        }
         // v2.4：再次恢复补发循环（纯提示词已多轮调整 803017b/a5bb77b/a49d164/a4fd1d5 都无效，
-        // AI 仍只发 1 条，必须有客户端兜底）——补发内容经同一分段器逐条流式上屏（非"发两次"观感，
+        // AI 仍只发 1 条，必须有客户端兜底）——补发内容经同一分段器逐条流式上屏（非"发两次"观感,
         // 是"AI 继续打字"）；话少豁免（实在没话说不硬凑）。门槛 segEmitted < minTarget（发够下限不补）。
         if (!isGroup && !rt.aborted && raw.trim() && segEmitted < minTarget) {
           const continueMessages: ChatPayloadMessage[] = [
