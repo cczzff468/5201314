@@ -558,7 +558,13 @@ export function cleanBubbleText(text: string): string {
  * v54：同层并入「（引用 名字：「内容」）」字面存档前缀的剥除（见 stripLiteralQuotePrefix）。
  */
 export function stripMsgHandleText(text: string): string {
-  return stripLiteralQuotePrefix(text.replace(/\[\s*M\s*\d{1,5}\s*\]/g, ' '));
+  return stripLiteralQuotePrefix(
+    text
+      .replace(/\[\s*M\s*\d{1,5}\s*\]/g, ' ') // [M数字] 带方括号（标准门牌号误抄）
+      // v2.3：AI 偶尔丢方括号输出裸 `M54 内容`（行首 M数字+空格+内容）——剥除行首裸编号前缀
+      // 只剥行首、后跟空格+非空非数字内容（消息正文）；不伤 "M54公链"/"M54" 单独成行
+      .replace(/(^|\n)\s*M\d{1,5}(?=\s+[^\s\d])/g, '$1'),
+  );
 }
 
 /** AI 发红包/转账/亲属卡但没写金额（或金额非法）时的兑底：照样出卡片，不让标记变成干巴巴的文字 */
