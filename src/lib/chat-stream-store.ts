@@ -983,38 +983,9 @@ async function runStream(rt: StreamRuntime, opts: BeginChatStreamOptions): Promi
           const tailSeg = scanner.finish();
           if (tailSeg && segSink) segSink(tailSeg);
         }
-        // v2.4：再次恢复补发循环（纯提示词已多轮调整 803017b/a5bb77b/a49d164/a4fd1d5 都无效，
-        // AI 仍只发 1 条，必须有客户端兜底）——补发内容经同一分段器逐条流式上屏（非"发两次"观感,
-        // 是"AI 继续打字"）；话少豁免（实在没话说不硬凑）。门槛 segEmitted < minTarget（发够下限不补）。
-        if (!isGroup && !rt.aborted && raw.trim() && segEmitted < minTarget) {
-          const continueMessages: ChatPayloadMessage[] = [
-            ...workMessages,
-            { role: 'assistant', content: raw },
-            {
-              role: 'user',
-              content:
-                `（系统内部提醒，只给你自己看、绝不向对方提起：你刚才只发了 ${segEmitted} 条消息，偏少。` +
-                `如果还有想说的，继续说——补充细节、说说你的想法或近况、追问对方、抛个新话题都行，再发几条。` +
-                `一句一条、每条单独一行，口语化；不要重复刚才说过的、不要客套铺垫、不要解释这条提醒，直接输出消息。` +
-                `【话少豁免】如果确实没话说了——话题聊尽、对方回句不需要展开、人设惜字如金且没话说——可以不发或少发，` +
-                `但绝不为凑数说空话、废话、重复的话或「嗯/哦/在/好的」敷衍短句；话少就诚实话少，只有真有想说的才继续说。）`,
-            },
-          ];
-          // 重建分段器 + 思考剥离器：补发轮是新流，scanner 重置避免残留半截片段
-          scanner = createReplySegmentScanner(segSink);
-          thinkFilter = createThinkFilter();
-          thinkDonePatched = false;
-          activePayloads.set(rt.state.sessionKey, { messages: continueMessages, config: effConfig });
-          const continueChain = apiChainOf(effConfig, useSettings.getState().apiFallbacks);
-          for (let ci = 0; ci < continueChain.length; ci++) {
-            try {
-              await streamOnce(continueMessages, continueChain[ci]);
-              break;
-            } catch {
-              if (rt.aborted || ci + 1 >= continueChain.length) break;
-            }
-          }
-        }
+        // 补发循环已删除（机主要求不要补发功能）——完全依赖首轮流式 + Few-shot 示例 + 提示词。
+        // held 段投递修复（上方 finish + 下方 finalize 前 finish）保留，确保分段器 held 里扣住的
+        // 第二句等正常上屏不丢失。首轮零产出仍由上方抢救兜底。
       }
       patchState(rt, { status: 'done' });
     }
