@@ -974,9 +974,41 @@ async function runStream(rt: StreamRuntime, opts: BeginChatStreamOptions): Promi
             }
           }
         }
-        // v2.1：补发循环已删除（机主反馈「AI发信息一卡一卡的，跟发了两次信息一样」）——
-        // 补发是第二轮 LLM 请求，屏上先出第一批、停顿后再出第二批，观感就是「发了两次」。
-        // 现在完全依赖首轮流式 + reply count 提示词让 AI 一次说够；首轮零产出仍由上方抢救兜底。
+        // v2.3：恢复补发循环（机主反馈"经常只发1条，极少数发好几条"）——
+        // 首轮流结束后数分段（segEmitted），低于 minTarget 时补一轮"继续说完"。
+        // 补发内容经同一分段器逐条投递（流式连续上屏，非"发两次"观感——补发是接续说，不是重新回答）。
+        // 只在私聊补发（群聊节奏低不补避免刷屏）；首轮零产出已由上方抢救兜底，不重复触发。
+        // 换号中止/全渠道失败：保住已有产出按原样收尾（不升级错误，首轮已成功）。
+        if (!isGroup && !rt.aborted && raw.trim() && segEmitted < minTarget) {
+          const continueMessages: ChatPayloadMessage[] = [
+            ...workMessages,
+            { role: 'assistant', content: raw },
+            {
+              role: 'user',
+              content:
+                `（系统内部提醒，这条只给你自己看、绝不向对方提起：你刚才只发了 ${segEmitted} 条消息，还没说够。` +
+                `继续把刚才的话题展开说——补充细节、说说你自己的想法或近况、追问对方、抛个新话题都行，` +
+                `再发几条短消息收尾（目标凑到 ${minTarget}~${opts.replyCount} 条）。一句一条、每条单独一行，口语化；` +
+                `不要重复刚才说过的、不要客套铺垫、不要解释这条提醒，直接输出消息本身。）`,
+            },
+          ];
+          // 重建分段器 + 思考剥离器：补发轮是新流，scanner 重置避免残留半截片段；
+          // thinkFilter 同口径重建（旧实例可能卡在未闭合 [思考] 块）
+          scanner = createReplySegmentScanner(segSink);
+          thinkFilter = createThinkFilter();
+          thinkDonePatched = false;
+          activePayloads.set(rt.state.sessionKey, { messages: continueMessages, config: effConfig });
+          const continueChain = apiChainOf(effConfig, useSettings.getState().apiFallbacks);
+          for (let ci = 0; ci < continueChain.length; ci++) {
+            try {
+              await streamOnce(continueMessages, continueChain[ci]);
+              break;
+            } catch {
+              // 补发轮失败换下一渠道（有产出即成功）；换号中止立即停
+              if (rt.aborted || ci + 1 >= continueChain.length) break;
+            }
+          }
+        }
       }
       patchState(rt, { status: 'done' });
     }
