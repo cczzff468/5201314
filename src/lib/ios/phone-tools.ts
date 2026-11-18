@@ -905,9 +905,11 @@ function looksLikeTaskInstruction(s: string): boolean {
 /**
  * v2.5 表情包诉求识别（与 chat-rich.ts STICKER_DEMAND_RE 同口径）——零工具轮
  * nudge 的豁免前提：用户要表情包/要抱抱蹭蹭时，模型零工具回文字是【正确动作】。
+ * v2.7 补：点名要具体动物/贴纸（要小狗/来张猫咪贴纸）与斗图还价（换一个/再来一张）也是
+ * 表情包诉求——用户实测「要小狗」被当成动手任务逼出了放歌。
  */
 const STICKER_DEMAND_TEXT_RE =
-  /(发表?表情|表情包|斗图|斗个图|来个?表情|发个?贴纸|要抱抱|求抱抱|抱抱我|想被抱|抱一下|蹭蹭我|贴贴我|摸摸头|摸摸我|哄哄我|逗我开心|逗我笑|哄我开心|卖个萌|萌一下|萌我|撒娇)/;
+  /(发表?表情|表情包|斗图|斗个图|来个?表情|发个?贴纸|要抱抱|求抱抱|抱抱我|想被抱|抱一下|蹭蹭我|贴贴我|摸摸头|摸摸我|哄哄我|逗我开心|逗我笑|哄我开心|卖个萌|萌一下|萌我|撒娇|要(?:一?个|一?张)?(?:小狗|狗狗|狗子|柴犬|猫咪|小猫|兔兔|仓鼠|企鹅|贴纸|狗勾)|来(?:一?张|一?个)(?:小狗|狗狗|柴犬|猫咪|企鹅|兔兔|仓鼠|贴纸)|换(?:一?个|一?张|一下)(?!头像|名字|昵称|主题|铃声|皮肤|背景)|再来(?:一?个|一?张)(?!红包|转账|一次|一遍))/;
 
 /**
  * v2.5 整轮回复里是否已带表情标记尝试（与 chat-rich.ts ANY_STICKER_ATTEMPT_RE 同口径）
@@ -931,11 +933,12 @@ function isPureStickerDemand(s: string): boolean {
 }
 
 /**
- * v2.6 聊天基本功诉求合并识别：表情包/抱抱蹭蹭（v2.5 既有）+ 引用消息（v2.6 新增）。
+ * v2.6 聊天基本功诉求合并识别：表情包/抱抱蹭蹭（v2.5 既有）+ 引用消息（v2.6 新增）+
+ * v2.7 点名要贴纸主体（要小狗/来张猫咪）与斗图还价（换一个/再来一张）。
  * 这些都是回复文本里的标记能力（[表情包:ID] / [引用:M编号]），一律不该走工具通道。
  */
 const CHAT_NATIVE_DEMAND_TEXT_RE =
-  /(发表?表情|表情包|斗图|斗个图|来个?表情|发个?贴纸|要抱抱|求抱抱|抱抱我|想被抱|抱一下|蹭蹭我|贴贴我|摸摸头|摸摸我|哄哄我|逗我开心|逗我笑|哄我开心|卖个萌|萌一下|萌我|撒娇|引用)/;
+  /(发表?表情|表情包|斗图|斗个图|来个?表情|发个?贴纸|要抱抱|求抱抱|抱抱我|想被抱|抱一下|蹭蹭我|贴贴我|摸摸头|摸摸我|哄哄我|逗我开心|逗我笑|哄我开心|卖个萌|萌一下|萌我|撒娇|引用|要(?:一?个|一?张)?(?:小狗|狗狗|狗子|柴犬|猫咪|小猫|兔兔|仓鼠|企鹅|贴纸|狗勾)|来(?:一?张|一?个)(?:小狗|狗狗|柴犬|猫咪|企鹅|兔兔|仓鼠|贴纸)|换(?:一?个|一?张|一下)(?!头像|名字|昵称|主题|铃声|皮肤|背景)|再来(?:一?个|一?张)(?!红包|转账|一次|一遍))/;
 
 /**
  * 剥掉聊天基本功词后判定残留是否还像动手任务——比 looksLikeTaskInstruction 稍宽：
@@ -960,6 +963,42 @@ function isPureChatNativeDemand(s: string): boolean {
     .replace(CHAT_NATIVE_DEMAND_TEXT_RE, ' ')
     .replace(/[，。,.!！?？\s哈嗯呀嘛呗呀啊哦的一下个来请你我我咱咱们TA它他她再呗那这条这句消息话的]/g, '');
   return rest.trim() === '' || !residualLooksTasky(rest);
+}
+
+// ---------------- v2.7 工具轮门槛（chat-stream-store 调用） ----------------
+
+/**
+ * 剥掉消息文本里「已序列化的聊天内容存档标记」：
+ * - 用户发表情/图片/语音进历史时的存档格式：[发送了表情：小狗] / [你发送了表情包：抱抱] /
+ *   [发送了图片：…] / [发送了语音：…]；无冒号的占位 [图片] / [语音] / [表情包:ID] 同样剥掉。
+ * 根因（机主实测「我发给 ai 表情包，他给我打开了音乐」）：存档里的「发送」字样被
+ * looksLikeTaskInstruction 命中成动手任务 → 零工具轮 nudge 逼模型调工具 → 乱抓 playMusic。
+ * 意图检测前先把这些存档剥掉，剩下什么才是机主真正说的话。
+ */
+export function stripChatNativeArchives(s: string): string {
+  return String(s || '')
+    .replace(
+      /[【\[]\s*(?:你|对方)?\s*(?:发送了|发出了|发了)\s*(?:表情包|表情|图片|照片|语音|贴纸|Sticker)\s*[:：][^\]】]{0,40}[\]】]/g,
+      ' ',
+    )
+    .replace(/[【\[]\s*(?:图片|语音|表情包|表情)\s*[\]】]/g, ' ');
+}
+
+/**
+ * v2.7 工具轮门槛：本轮是否要走 FC 工具轮（chat-stream-store.beginChatStream 调用）。
+ * - 纯聊天（闲聊、发表情、发图片语音、要表情包但无动手任务）→ false：不进工具轮，直接
+ *   走流式管线（人设自带标记协议）。此前所有私聊回合无差别进工具轮——「任务汇报」框架天然
+ *   只出一句短话（机主实测「ai 还是发一条信息」），且弱模型看见工具清单就会乱调
+ *   （放歌误命中）。主动用工具的能力在流式路径由 [手机操作:…] 标记兜底承担，不受影响。
+ * - 像动手任务 / 表情包与任务混合 / 引用类诉求 → true：照旧走 runPhoneToolRound
+ *  （纯表情包诉求在内部被分流到无工具直通轮）。
+ */
+export function toolRoundNeeded(userText: string): boolean {
+  const normalized = stripChatNativeArchives(String(userText || ''));
+  if (!normalized.trim()) return false; // 纯表情/图片/语音消息：聊天，绝不进工具轮
+  if (looksLikeTaskInstruction(normalized)) return true; // 动手任务（含混合：带任务动词就进）
+  if (CHAT_NATIVE_DEMAND_TEXT_RE.test(normalized)) return true; // 表情包/引用诉求：进内部直通/混合分流
+  return false; // 纯闲聊：流式直连，工具误命中从机制上杜绝
 }
 
 /**
@@ -1086,8 +1125,11 @@ export async function runPhoneToolRound(
   if (tools.length === 0) return null;
   const convo: FcMessage[] = messages.map((m) => ({ ...m }));
   // v2.6 诉求判定（先于 system 包装：纯聊天基本功直通轮要换 system 包装方式）
-  /** 机主最后一条指令（零工具轮 nudge 的「像不像任务」判定用） */
-  const lastUserMsg = [...messages].reverse().find((m) => m.role === 'user')?.content ?? '';
+  /** 机主最后一条指令（零工具轮 nudge 的「像不像任务」判定用；v2.7 先剥掉表情/图片/语音
+   *  存档标记——存档里的「发送」字样曾把纯表情消息误判成动手任务，逼出放歌误命中） */
+  const lastUserMsg = stripChatNativeArchives(
+    [...messages].reverse().find((m) => m.role === 'user')?.content ?? '',
+  );
   const taskyInstruction = looksLikeTaskInstruction(lastUserMsg);
   // v2.5 表情包豁免：纯表情包诉求（发个表情包/斗图/要抱抱——不含其它动手动词）
   // 永不触发零工具轮 nudge——发表情包是聊天基本功不是工具，逼工具只会逼出放歌/查动态

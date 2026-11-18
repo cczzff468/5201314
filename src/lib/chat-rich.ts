@@ -20,6 +20,34 @@
 import type { Sticker } from './ios/stickers';
 import { libPromptTextMulti } from '@/lib/prompt-entries';
 
+// ---------------- 内置大贴纸包的「主体」词（v75） ----------------
+
+/** 内置表情包分组 ID → 显示名（与 sticker-packs.ts BUILTIN_PACKS 同源镜像；避免值导入耦合） */
+const PACK_GROUP_NAMES: Record<string, string> = {
+  'pk-sunny': '太阳小狗',
+  'pk-leopard': '小狗豹',
+  'pk-xcou': '小凑狗',
+  'pk-peng': '古早企鹅',
+};
+
+/**
+ * 内置表情包分组的「主体」词（太阳小狗/小狗豹/小凑狗 = 狗、古早企鹅 = 企鹅）：
+ * 包内贴纸的意思多为情绪短语（贴贴/喜欢你呀/扭捏…），用户点名「要小狗/来只企鹅」时
+ * 意思匹配永远对不上——按分组主体兑底命中（机主实测「ai 发的表情包，表情包里面没有」：
+ * 要小狗发不出小狗贴纸，只能拿经典小表情敷衍）。
+ */
+const PACK_SUBJECT_WORDS: Record<string, string[]> = {
+  'pk-sunny': ['小狗', '狗'],
+  'pk-leopard': ['小狗', '狗'],
+  'pk-xcou': ['小狗', '狗'],
+  'pk-peng': ['企鹅'],
+};
+
+/** 清单/兑底展示用：贴纸的主体标注（内置包分组名，如「太阳小狗」）；非包贴纸返回空 */
+function packSubjectLabelOf(s: Sticker): string {
+  return s.groupId ? PACK_GROUP_NAMES[s.groupId] ?? '' : '';
+}
+
 // ---------------- 标记解析结果 ----------------
 
 /** 红包标记：[红包:金额:祝福语]；群聊模式 [红包:总金额:个数:祝福语]（count 有值 = 群聊解析结果） */
@@ -493,8 +521,10 @@ const OPEN_TAIL_NATURAL_RE = /[【\[]\s*(?:发送了|发了|发一个|发送一�
  * AI 仿写用户记录格式的表情标记变体（聊天历史里用户表情以「[发送了表情：意思]」进入上下文，
  * AI 经常照葫芦画瓢输出同款格式，或把意思当 ID 写成 [表情:XX]）——这些变体在普通文字段里
  * 二次扫描，按意思匹配到本地表情包就转成表情消息，匹配不到保留原文。
+ * v75：补「带主语」变体——AI 自己的无 sid 表情进历史时序列化成「[你发送了表情：xx]」（历史
+ * 教学反噬，模型照抄该格式输出），此前主语「你」挡在关键词前导致正则漏接、气泡里落出裸文字。
  */
-const STICKER_LOOSE_RE = /[【\[]\s*(?:发送了表情包|发送了表情|发送表情包|发送表情|表情包|表情|Emoji|emoji|EMOJI)\s*[:：]\s*([^\]】]{1,40})\s*[】\]]/g;
+const STICKER_LOOSE_RE = /[【\[]\s*(?:你|我|TA|ta)?\s*(?:发送了表情包|发送了表情|发送表情包|发送表情|表情包|表情|Emoji|emoji|EMOJI)\s*[:：]\s*([^\]】]{1,40})\s*[】\]]/g;
 
 /**
  * 表情包自然语句变体（用户实测：「让 AI 发表情包，AI 回 [发送了一个"抱抱"表情包] 文字模拟」）：
@@ -515,7 +545,8 @@ const STICKER_NATURAL_RE =
 const STICKER_IMAGE_RE = /[【\[]\s*图片\s*[:：]\s*([^\]】]{2,60})\s*[】\]]/g;
 
 /** [图片:描述] 的表情匹配：① 描述含表情库主词（meaning 任一分段，≥2 字）→ 该表情；
- *  ② 高频情感词兜底（抱/贴/摸/亲/哭/笑/委屈/怒/睡/猫/狗…）→ 库内 meaning 包含该词的第一个
+ *  ② 内置大贴纸包主体兑底（描述含「小狗/狗/企鹅」→ 太阳小狗/小狗豹/小凑狗/古早企鹅包内贴纸）；
+ *  ③ 高频情感词兜底（抱/贴/摸/亲/哭/笑/委屈/怒/睡/猫/狗…）→ 库内 meaning 包含该词的第一个
  *  （resolveStickerFromDesc：AI 用画面描述点表情时按意思在表情库里挑同一套匹配逻辑） */
 export function resolveStickerFromDesc(desc: string, stickers: Sticker[]): Sticker | null {
   const d = desc.trim();
@@ -527,6 +558,11 @@ export function resolveStickerFromDesc(desc: string, stickers: Sticker[]): Stick
     // （只查第一段会漏——描述写「小猫」而主词第一段是「猫咪」时对不上）
     const segs = m.split(/[，,。.·—\-!！?？\s]/).map((x) => x.trim()).filter((x) => x.length >= 2);
     if (segs.some((key) => d.includes(key))) return s;
+  }
+  // v75 包主体兑底：包内贴纸意思是情绪短语（贴贴/扭捏…），点名「小狗/企鹅」按分组主体命中
+  for (const s of stickers) {
+    const subs = s.groupId ? PACK_SUBJECT_WORDS[s.groupId] : undefined;
+    if (subs && subs.some((w) => d.includes(w))) return s;
   }
   const FEEL: Array<[RegExp, string]> = [
     [/抱|搂/, '抱'],
@@ -551,9 +587,10 @@ export function resolveStickerFromDesc(desc: string, stickers: Sticker[]): Stick
   return null;
 }
 
-/** 用户「点名要表情包」的意图识别（信息端实测语料：发表情包/斗图/要抱抱/逗我开心…） */
+/** 用户「点名要表情包」的意图识别（信息端实测语料：发表情包/斗图/要抱抱/逗我开心…；
+ *  v75 补：点名要具体动物贴纸（要小狗/来张猫咪）与斗图还价（换一个/再来一张）） */
 const STICKER_DEMAND_RE =
-  /(发表?表情|表情包|斗图|斗个图|来个?表情|发个?贴纸|要抱抱|求抱抱|抱抱我|想被抱|抱一下|蹭蹭我|贴贴我|摸摸头|摸摸我|哄哄我|逗我开心|逗我笑|哄我开心|卖个萌|萌一下|萌我|撒娇)/;
+  /(发表?表情|表情包|斗图|斗个图|来个?表情|发个?贴纸|要抱抱|求抱抱|抱抱我|想被抱|抱一下|蹭蹭我|贴贴我|摸摸头|摸摸我|哄哄我|逗我开心|逗我笑|哄我开心|卖个萌|萌一下|萌我|撒娇|要(?:一?个|一?张)?(?:小狗|狗狗|狗子|柴犬|猫咪|小猫|兔兔|仓鼠|企鹅|贴纸|狗勾)|来(?:一?张|一?个)(?:小狗|狗狗|柴犬|猫咪|企鹅|兔兔|仓鼠|贴纸)|换(?:一?个|一?张|一下)(?!头像|名字|昵称|主题|铃声|皮肤|背景)|再来(?:一?个|一?张)(?!红包|转账|一次|一遍))/;
 
 /** 整轮回复里是否已带任何表情标记尝试（标准/变体/画面描述都算「TA试过了」） */
 const ANY_STICKER_ATTEMPT_RE = /[【\[]\s*[^\]】]{0,16}(?:表情包|表情|贴纸)\s*[】\]]|[【\[]\s*图片\s*[:：]/;
@@ -960,18 +997,33 @@ export function buildRichRules(stickers: Sticker[], opts?: { familyCard?: boolea
     ) ?? '',
   ];
   if (stickers.length > 0) {
-    // 内置表情（builtin）常量数组顺序即官方经典顺序 → 前 20 个即高频精选；
-    // 用户收藏表情永远优先（前 20），清单总量 ≤ 40 防提示词过长
+    // 用户收藏表情永远优先（前 20）；内置表情（builtin）常量数组顺序即官方经典顺序 → 高频精选。
+    // v75 大贴纸包进清单：此前 builtin.slice(0,20) 全是 wxb 经典小表情，四套内置大贴纸包
+    // （太阳小狗/小狗豹/小凑狗/古早企鹅）从未进过清单——机主要「小狗/企鹅」贴纸时 AI 清单里
+    // 根本没有（实测「ai 发的表情包，表情包里面没有」），只能拿经典小表情敷衍。现在经典表情
+    // 取前 12 + 四套包各取几张（带主体标注，AI 看得出 sunny-xx 就是小狗贴纸），总量 ≤ 44。
     const user = stickers.filter((s) => !s.builtin);
     const builtin = stickers.filter((s) => s.builtin);
-    const chosen = [...user.slice(0, 20), ...builtin.slice(0, 20)];
+    const classic = builtin.filter((s) => !PACK_SUBJECT_WORDS[s.groupId ?? '']).slice(0, 12);
+    const packs = builtin.filter((s) => PACK_SUBJECT_WORDS[s.groupId ?? '']);
+    const pickPack = (gid: string, n: number) => packs.filter((s) => s.groupId === gid).slice(0, n);
+    const packPicks = [
+      ...pickPack('pk-sunny', 5),
+      ...pickPack('pk-leopard', 3),
+      ...pickPack('pk-xcou', 3),
+      ...pickPack('pk-peng', 2),
+    ];
+    const chosen = [...user.slice(0, 20), ...classic, ...packPicks].slice(0, 44);
     const list = chosen
-      .map((s) => `${s.id}${s.meaning ? `:${s.meaning}` : ''}`)
+      .map((s) => {
+        const subj = packSubjectLabelOf(s);
+        return `${s.id}${s.meaning ? `:${s.meaning}` : ''}${subj ? `（${subj}）` : ''}`;
+      })
       .join('；');
     const stickerListRule = libPromptTextMulti(
       ['lib:wechat-25', 'lib:qq-29'],
       { list },
-      '【表情包清单】（ID:意思，含内置经典表情与收藏表情）：' + list,
+      '【表情包清单】（ID:意思，含内置经典表情与收藏表情；带括号标注的是该贴纸的主体——对方点名要「小狗/企鹅」这类贴纸时，从对应主体的贴纸里选）：' + list,
     );
     if (stickerListRule) rules.push(stickerListRule);
   }
@@ -1018,20 +1070,34 @@ export function buildGroupRichRules(stickers: Sticker[]): string[] {
   ].filter(Boolean);
   let stickerList = '';
   if (stickers.length > 0) {
-    // 内置表情（builtin）常量数组顺序即官方经典顺序 → 前 20 个即高频精选；
-    // 用户收藏表情永远优先（前 20），清单总量 ≤ 40 防提示词过长
+    // v75 与单聊同款修复：内置大贴纸包（太阳小狗/小狗豹/小凑狗/古早企鹅）此前从未进过清单
+    // （builtin.slice(0,20) 全是 wxb 经典小表情）——机主要「小狗」贴纸时群聊清单里也没有。
+    // 经典表情取前 12 + 四套包各几张（带主体标注），总量 ≤ 44。
     const user = stickers.filter((s) => !s.builtin);
     const builtin = stickers.filter((s) => s.builtin);
-    const chosen = [...user.slice(0, 20), ...builtin.slice(0, 20)];
+    const classic = builtin.filter((s) => !PACK_SUBJECT_WORDS[s.groupId ?? '']).slice(0, 12);
+    const packs = builtin.filter((s) => PACK_SUBJECT_WORDS[s.groupId ?? '']);
+    const pickPack = (gid: string, n: number) => packs.filter((s) => s.groupId === gid).slice(0, n);
+    const chosen = [
+      ...user.slice(0, 20),
+      ...classic,
+      ...pickPack('pk-sunny', 5),
+      ...pickPack('pk-leopard', 3),
+      ...pickPack('pk-xcou', 3),
+      ...pickPack('pk-peng', 2),
+    ].slice(0, 44);
     stickerList = chosen
-      .map((s) => `${s.id}${s.meaning ? `:${s.meaning}` : ''}`)
+      .map((s) => {
+        const subj = packSubjectLabelOf(s);
+        return `${s.id}${s.meaning ? `:${s.meaning}` : ''}${subj ? `（${subj}）` : ''}`;
+      })
       .join('；');
     // qq-43：【发表情包·格式强调】+【表情包清单】整块（微信侧无单独条目，由外层 wechat-26 罩住）
     const zone = [
       '【发表情包·格式强调】聊天记录里的「[发送了表情：XX]」只是别人发表情的存档记录，不是你的输出格式，禁止模仿！' +
         '你自己想发表情包时，必须原样输出一行 [表情包:表情ID]，ID 只能从下面的清单里选（方括号+冒号+ID，多一个字都发不出去）。' +
         '表情包要符合当下的语境和你的性格，别刷屏。',
-      '【表情包清单】（ID:意思，含内置经典表情与收藏表情）：' + stickerList,
+      '【表情包清单】（ID:意思，含内置经典表情与收藏表情；带括号标注的是该贴纸的主体——有人点名要「小狗/企鹅」这类贴纸时，从对应主体的贴纸里选）：' + stickerList,
     ];
     const zoneText = zone.join('\n');
     const stickerZone = libPromptTextMulti(['lib:qq-43'], { list: stickerList }, zoneText);

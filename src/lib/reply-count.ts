@@ -327,6 +327,12 @@ export function createReplySegmentScanner(onSegment: (segment: string) => void):
   // 碰到不碎的段/流结束时才放行。下游各 App 拿到段后还会过一遍 splitReplySegments(..., true)
   // 稳定再切（把「好。嗯。」切回两句、再被全员碎片合并并回一条），流式与整段两路口径一致。
   let held = ''; // 扣住待合并的碎片段（空串 = 没有扣住的）
+  // v75 幂等修复：finish() 只允许真正交出尾段一次。此前 finish() 可重复调用且每次都从
+  // segStart 重新切同一段尾文——聊天总线收尾管线会连调三次（①收尾放出 / ②finalize 前放出 /
+  // ③finalize.tail 取尾），回复末段没带句末标点时同一条消息被投递三遍（E2E 实测贴纸回合
+  // 连出三条一模一样的气泡）。置 finished 后后续 finish 一律返回空串——held 被消费、
+  // 尾段已交给首个调用方，后续收尾自然拿空串，不重不漏。
+  let finished = false;
 
   return {
     push(delta) {
@@ -373,7 +379,10 @@ export function createReplySegmentScanner(onSegment: (segment: string) => void):
     },
     finish() {
       // 剩余未放出的一段（收尾没带句末标点的裸行 / 溢出内容）：标记换成换行，
-      // 半截「&&」与首尾不可见字符不进气泡；各 App 侧会再按稳定边界细切，这里整段交出
+      // 半截「&&」与首尾不可见字符不进气泡；各 App 侧会再按稳定边界细切，这里整段交出。
+      // v75 幂等：只有第一次调用真正交出尾段（收尾管线会连调多次，重复交出 = 同一条消息投递多遍）
+      if (finished) return '';
+      finished = true;
       let tail = trimBlank(full.slice(segStart).replace(MARKER_RE, '\n'));
       tail = trimBlank(tail.replace(HALF_MARKER_RE, ''));
       if (held) {
@@ -391,7 +400,9 @@ export function createReplySegmentScanner(onSegment: (segment: string) => void):
     },
     peek() {
       // finish() 的只读镜像：不消费 held、不推进任何游标——补发判定只读预览，
-      // 后续 push 的新增内容仍从原游标继续扫（尾段会与新内容自然拼接成完整段，不重复）
+      // 后续 push 的新增内容仍从原游标继续扫（尾段会与新内容自然拼接成完整段，不重复）。
+      // v75：finish 已交出过的尾段，peek 也拿空串（已交给调用方，不再是「即将交付」状态）
+      if (finished) return '';
       let tail = trimBlank(full.slice(segStart).replace(MARKER_RE, '\n'));
       tail = trimBlank(tail.replace(HALF_MARKER_RE, ''));
       if (held) {

@@ -821,9 +821,29 @@ async function runStream(rt: StreamRuntime, opts: BeginChatStreamOptions): Promi
     }
     // 换号中止（识图等待窗口内发生）：旧账号会话整体作废，不再登记 payload/发起请求
     if (rt.aborted) return;
+    // v75 连发条数·末端提醒（一次性注入最后一条 user 消息，非补发循环）：条数指令块在人设
+    // system 里位置靠前，弱模型对「多条」遵循率低（机主实测「ai 还是发一条信息」）；在上下文
+    // 最末端（recency 效应遵循率最高）再钉一句短指令，一轮请求内直接产出多条——生成完按实际
+    // 产出收尾，客户端绝不补发（v74 删补发循环的决策不变）。
+    // 措辞注意：指令文本里绝不出现「发个/发条/发送/播放」这类任务动词——工具轮门槛
+    // （toolRoundNeeded）与零工具 nudge 都会对末条 user 消息做任务动词正则，提醒文本自带
+    // 这些词会把纯聊天/纯表情消息误判成动手任务（E2E 实测：贴纸消息 + 提醒文本里的
+    // 「别只发一条」把工具轮和 nudge 都误触发了）。
+    const multiCount = Math.max(1, Math.floor(Number(opts.replyCount) || 0));
+    let requestMessages: ChatPayloadMessage[] = workMessages;
+    if (multiCount > 1) {
+      const isGroupKey = opts.sessionKey.includes(':group:');
+      const range = isGroupKey ? `2~${Math.min(multiCount, 5)}` : `${replyMinTarget(multiCount)}~${multiCount}`;
+      const note = isGroupKey
+        ? `（系统注：这是群聊——把想说的话拆成 ${range} 条短消息连着输出，一句一条、每条单独占一行，按群聊节奏别刷屏。）`
+        : `（系统注：这次像真人抱着手机连着说话——把想说的话拆成 ${range} 条短消息，一句一条、每条单独占一行；先回应对方刚说的话，再补充/追问把话题往前滚，不要一句话就结束。）`;
+      requestMessages = workMessages.map((m, i) =>
+        i === workMessages.length - 1 && m.role === 'user' ? { ...m, content: `${m.content}\n${note}` } : m,
+      );
+    }
     // 按各 App 组装的消息发起请求（条数指令已注入人设 system 消息，一轮发完、不做补发）；
     // 记录实际 payload：用户在流结束前关闭网页时，pagehide 上报服务端接力生成（bg-turn）
-    activePayloads.set(rt.state.sessionKey, { messages: workMessages, config: effConfig });
+    activePayloads.set(rt.state.sessionKey, { messages: requestMessages, config: effConfig });
     if (isApiUnconfigured(apiConfig)) {
       // v82：内置模型已移除——未配置直接落错误引导（不再请求 forceSdk）
       patchState(rt, {
@@ -837,12 +857,22 @@ async function runStream(rt: StreamRuntime, opts: BeginChatStreamOptions): Promi
       // （思考剥离/分段/逐条投递节奏管线全部复用）。通道不可用/上游不支持 tools →
       // 无缝回退原流式（标记协议兜底仍在人设里）；调过工具则剥离最终文本里的
       // [手机操作:…] 标记防双执行。
+      // v2.7 工具轮门槛（机主实测两连缺陷）：①「我发给 AI 表情包，TA 给我打开了音乐」——
+      // 表情/闲聊消息无差别进工具轮，弱模型看见工具清单就乱调（放歌误命中）；②「AI 还是
+      // 只发一条信息」——工具轮的「任务汇报」框架天然只产出一句短话，多条连发管线被旁路。
+      // 现在 toolRoundNeeded 先剥掉 [发送了表情：…] 存档再判意图：纯聊天（闲聊/表情/贴纸
+      // 诉求）直接走流式管线（人设自带 [手机操作:…] 标记兜底，主动用工具能力不受影响）；
+      // 只有像动手任务或表情包混合任务的回合才进工具轮。
       let fcDone = false;
       if (!opts.sessionKey.includes(':group:') && opts.sessionKey !== 'sms:assistant') {
         try {
-          const { phoneFcReady, runPhoneToolRound } = await import('@/lib/ios/phone-tools');
-          if (phoneFcReady()) {
-            const fc = await runPhoneToolRound(workMessages, effConfig, () => rt.aborted, {
+          const { phoneFcReady, runPhoneToolRound, toolRoundNeeded } = await import('@/lib/ios/phone-tools');
+          // v2.7 门槛判据读【注入提醒前的】原始末条 user 消息：连发提醒文本（或其它系统注）
+          // 不参与意图判定——否则提醒里的措辞会污染任务动词正则（E2E 实测：贴纸消息 +
+          // 提醒文本里的任务动词把纯聊天误判成动手任务，工具轮和零工具 nudge 全被误触发）。
+          const turnUserText = [...workMessages].reverse().find((m) => m.role === 'user')?.content ?? '';
+          if (phoneFcReady() && toolRoundNeeded(turnUserText)) {
+            const fc = await runPhoneToolRound(requestMessages, effConfig, () => rt.aborted, {
               sessionKey: opts.sessionKey,
               charName: opts.charName,
             });
@@ -884,7 +914,7 @@ async function runStream(rt: StreamRuntime, opts: BeginChatStreamOptions): Promi
         const chain = apiChainOf(effConfig, useSettings.getState().apiFallbacks);
         for (let ci = 0; ci < chain.length; ci++) {
           try {
-            await streamOnce(workMessages, chain[ci]);
+            await streamOnce(requestMessages, chain[ci]);
             break;
           } catch (err) {
             if (rt.aborted) throw err;
@@ -931,7 +961,7 @@ async function runStream(rt: StreamRuntime, opts: BeginChatStreamOptions): Promi
         // ③ 首轮零产出抢救（最多一轮）：把「空回复」从落解析失败徽标救回成真实连发
         if (!rt.aborted && !raw.trim()) {
           const rescueMessages: ChatPayloadMessage[] = [
-            ...workMessages,
+            ...requestMessages,
             {
               role: 'user',
               content:
