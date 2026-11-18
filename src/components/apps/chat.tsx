@@ -2029,8 +2029,9 @@ function ChatView({
 
     // 联系人聊天：人设作为 system 消息插在上下文最前（/api/chat 支持 system 透传）
     // 回复条数：信息端每会话独立设置（信息聊天设置页 → 回复条数，读写 sms:c:<id> 键），
-    // 未设置默认 8 条（与微信端同口径）；AI 助手会话（无 systemPrompt 人设）恒 1 条不变。
-    const replyCount = systemPrompt ? getReplyCount(sessionKey) : 1;
+    // 未设置默认 8 条（与微信端同口径）；小助手会话（sms:assistant 键）同口径按设置连发
+    //（机主反馈「小助手还是只发一条」：此前无人设恒 1 条，已解除——设置几条就发几条）。
+    const replyCount = getReplyCount(sessionKey);
     // 记忆库：联系人会话召回记忆（memContactId 为组件级常量：storageKey 形如 c:<contactId>；AI 助手会话无联系人 → 不注入）
     // 极简省流模式：记忆块仍注入，但限 5 条最相关（maxRows）；世界书/人设/感知/工具规则永不裁剪
     const memoryBlock =
@@ -2478,8 +2479,8 @@ function ChatView({
   const deliverBgItems = useCallback(
     (items: BgPendingItem[]) => {
       // 接力 generate 存的是完整回复原文：按该会话自己的回复条数决定解析模式（与 finalize 同语义；
-      // AI 助手会话运行时恒为单条（无人设不给条数指令），接力投递同口径不切句）
-      const bgAsSingle = sessionKey === 'sms:assistant' || getReplyCount(sessionKey) <= 1;
+      // 小助手会话同口径按设置连发——无人设不再恒单条）
+      const bgAsSingle = getReplyCount(sessionKey) <= 1;
       // 表情包需求兜底（enforcer）：接力回合拿不到原始 userMsg，用存储里最后一条我的消息近似
       const lastUserText = [...(loadMsgs(storageKey) ?? [])].reverse().find((m) => m.role === 'user' && !m.recalled)?.content ?? '';
       for (const item of items) {
@@ -2854,7 +2855,7 @@ function ChatView({
   /** 空输入时可点「发送」触发批次回复（分句发送开启且有未回复的批次；回复中也可点，走排队补跑） */
   const canDispatch = sentenceSend && pendingDispatch;
 
-  // ---------------- 气泡长按菜单：复制/删除/编辑/引用/多选/撤回（信息端无转发/收藏/重新生成） ----------------
+  // ---------------- 气泡长按菜单：复制/删除/编辑/引用/多选/撤回/重新生成（信息端无转发/收藏；AI 文字气泡有重新生成） ----------------
 
   /** 轻量提示（复制/删除等动作反馈；信息端无全局 toast） */
   const [toastMsg, setToastMsg] = useState('');
@@ -3246,11 +3247,41 @@ function ChatView({
     }
     items.push({ key: 'multi', label: '多选', icon: B.multi });
     items.push({ key: 'recall', label: '撤回', icon: B.recall });
+    // 重新生成（对齐微信/QQ 端）：AI 的文字/文字图片气泡可截断该轮重跑；AI 图片走 regenimg 原地重绘、
+    // 语音/表情包不适用；我的消息没有「重新生成」（有编辑/重试徽标）
+    if (m.role === 'assistant' && !isVoice && !isImage && !isSticker) {
+      items.push({ key: 'regen', label: '重新生成', icon: B.regen });
+    }
     // AI 图片与「文字图片卡片转出的图片」：重新生成图片（自填描述，原地替换）；我的实拍图不提供
     if (isImage && (m.role === 'assistant' || m.img?.fromCard)) items.push({ key: 'regenimg', label: '重新生成', icon: B.regenimg });
     // G2 恢复上一张：重新生成前的上一版图还在时可恢复（src↔prevSrc 互换；目标约束与重新生成一致）
     if (isImage && m.img?.prevSrc) items.push({ key: 'restoreimg', label: '恢复上一张', icon: History });
     return items;
+  };
+
+  /**
+   * 重新生成（对齐微信/QQ 端）：删除该条 AI 回复所在轮次及其后的全部消息（包括我又发出去的
+   * 消息），以剩余历史重新发起请求（回复条数按本会话设置重新连发）；任意历史 AI 气泡都可触发。
+   * 连发投递中也拒绝：旧回复尾巴还在队列里逐条落盘，此刻截断会把队列尾部拽进新轮上下文。
+   */
+  const regenerate = (m: ChatMsg) => {
+    if (isChatStreaming(sessionKey) || isAiDelivering(sessionKey)) {
+      showToast('对方正在回复，请稍后再试');
+      return;
+    }
+    const idx = msgs.findIndex((x) => x.id === m.id);
+    if (idx < 0) return;
+    let lastUser = -1;
+    for (let k = Math.min(idx, msgs.length - 1); k >= 0; k--) {
+      if (msgs[k].role === 'user') {
+        lastUser = k;
+        break;
+      }
+    }
+    const kept = lastUser >= 0 ? msgs.slice(0, lastUser + 1) : [];
+    setMsgs(kept);
+    saveMsgs(sessionKey, kept); // 立即落盘，避免 finalize 合并时把已删回复带回来
+    window.setTimeout(() => startAiTurnRef.current?.(null, undefined, kept), 80); // 等重渲染 + ref 回填新闭包
   };
 
   /** 气泡长按手势（fire 里用 data-mid 反查消息；多选模式下不弹菜单改为点选勾选） */
@@ -3391,6 +3422,10 @@ function ChatView({
       case 'multi':
         setSelectMode(true);
         setSelectedIds([m.id]);
+        break;
+      case 'regen':
+        // 重新生成（AI 文字气泡）：截断该轮回复及其后消息，以剩余历史重跑回合（对齐微信/QQ 端）
+        regenerate(m);
         break;
       case 'recall': {
         if (isChatStreaming(sessionKey) || isAiDelivering(sessionKey)) {
