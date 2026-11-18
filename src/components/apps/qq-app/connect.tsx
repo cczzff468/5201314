@@ -28,15 +28,13 @@ import {
   DownloadCloud,
   Eye,
   EyeOff,
-  ImagePlus,
   Info,
   Loader2,
   RefreshCw,
-  ScanLine,
   ShieldCheck,
   X,
 } from 'lucide-react';
-import { parseQqQrImage, pullQqCloudHistory, useQqConnect } from '@/lib/ios/qq-connect';
+import { pullQqCloudHistory, useQqConnect } from '@/lib/ios/qq-connect';
 import { useWxCloud, PLATFORM_LABELS } from '@/lib/ios/wx-cloud/store';
 import { getContact } from '@/lib/ios/contacts-store';
 import { avatarFor, displayNameOf } from '@/lib/contacts';
@@ -62,24 +60,24 @@ function fmtConnected(t: number): string {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
-/** 扫码识别失败提示（三种支持格式：AppID:AppSecret / JSON / 网址查询串） */
-const QR_FAIL_MSG = '没认出这是凭证二维码（支持 AppID:AppSecret / JSON / 网址格式）';
-
-/** 角色选择网格（QQ 版）：头像 + 名字，选中 QQ 蓝描边 */
-function CharPickerGrid({
+/** 角色选择列表（弹窗/底部弹层用）：头像左 + 名字右横排，选中行 QQ 蓝高亮——
+ *  用户定调「不要头像名字上下，要头像名字左右的」 */
+function RoleRowList({
   chars,
   selectedId,
   onPick,
+  testidBase,
 }: {
   chars: ContactRecord[];
   selectedId: string | null;
   onPick: (c: ContactRecord) => void;
+  testidBase: string;
 }) {
   if (chars.length === 0) {
-    return <p className="mt-2 text-[13px] leading-[1.5] text-black/40 dark:text-white/40">还没有 AI 角色：先到手机的「联系人」App 创建一个 AI 角色再来接入</p>;
+    return <p className="py-4 text-center text-[13px] text-black/40 dark:text-white/40">还没有 AI 角色：先到「联系人」App 创建一个</p>;
   }
   return (
-    <div className="mt-3 grid grid-cols-4 gap-x-2 gap-y-3.5">
+    <div className="mt-2 divide-y divide-black/[0.05] dark:divide-white/[0.06]">
       {chars.map((c) => {
         const name = displayNameOf(c) || c.name;
         const sel = selectedId === c.id;
@@ -87,16 +85,14 @@ function CharPickerGrid({
           <button
             key={c.id}
             type="button"
-            data-testid={`qq-bot-contact-${c.id}`}
+            data-testid={`${testidBase}-${c.id}`}
             aria-label={`选择 ${name}`}
             onClick={() => onPick(c)}
-            className="flex w-full flex-col items-center gap-1.5"
+            className={`flex w-full items-center gap-3 py-2.5 text-left transition-colors active:bg-black/[0.03] dark:active:bg-white/[0.06] ${sel ? 'bg-[#0099FF]/[0.07]' : ''}`}
           >
-            {/* 选中态：外层 QQ 蓝底 padding 形成描边圈 */}
-            <span className={`rounded-[13px] p-[2.5px] ${sel ? 'bg-[#0099FF]' : 'bg-transparent'}`}>
-              <QqAvatar src={avatarFor(c, 'qq')} alt={name} size={54} />
-            </span>
-            <span className={`w-full truncate text-center text-[12px] ${sel ? 'font-medium text-[#0099FF]' : ''}`}>{name}</span>
+            <QqAvatar src={avatarFor(c, 'qq')} alt={name} size={44} />
+            <span className={`min-w-0 flex-1 truncate text-[15px] ${sel ? 'font-medium text-[#0099FF]' : ''}`}>{name}</span>
+            {sel ? <Check className="h-[18px] w-[18px] shrink-0 text-[#0099FF]" strokeWidth={2.5} aria-hidden="true" /> : null}
           </button>
         );
       })}
@@ -197,13 +193,9 @@ export function QqConnectPage({ contacts, onBack }: { contacts: ContactRecord[];
   const [addTab, setAddTab] = useState<'scan' | 'manual'>('scan');
   // 官方扫码绑定：二维码渲染成图（qrcode 库 dataURL；库体积大走动态 import）
   const [qrImg, setQrImg] = useState<string | null>(null);
-  // 凭证二维码图片识别（填写凭证 tab 的辅助入口）：转圈 / 结果行 / 两个 file input ref
-  const [scanBusy, setScanBusy] = useState(false);
-  const [scanMsg, setScanMsg] = useState<{ ok: boolean; msg: string } | null>(null);
-  const cameraRef = useRef<HTMLInputElement>(null);
-  const galleryRef = useRef<HTMLInputElement>(null);
-  // 段二本地选中（确认绑定才写 store）/ 换绑弹层 / 绑定轻提示 / 拉取结果行
+  // 段二角色选择弹窗（接入成功但未绑定：弹窗里选人 + 确认绑定）/ 换绑弹层 / 绑定轻提示 / 拉取结果行
   const [picked, setPicked] = useState<ContactRecord | null>(null);
+  const [roleSheetOpen, setRoleSheetOpen] = useState(false);
   const [rebindOpen, setRebindOpen] = useState(false);
   const [offDialog, setOffDialog] = useState(false);
   const [bindNote, setBindNote] = useState('');
@@ -212,7 +204,7 @@ export function QqConnectPage({ contacts, onBack }: { contacts: ContactRecord[];
   // 云端助手状态：QQ 收发消息必须走云端 Webhook，顶部横幅依据它提示（订阅粒度刷新）
   const cloudReady = useWxCloud((s) => s.ready);
   const cloudPlatform = useWxCloud((s) => s.platform);
-  // 接入/换绑/断开后的后台自动同步结果（非空 = 已部署过云端且刚自动重推过运行包）
+  // 接入/换绑/断开后的后台自动同步结果（只看 QQ 渠道；微信渠道的同步结果只在微信接入页展示）
   const lastAutoSync = useWxCloud((s) => s.lastAutoSync);
   // 「真部署过」证据：选了平台 ≠ 部署了；QQ 必须真部署才能收发 Webhook
   const cloudDeployed = useWxCloud((s) =>
@@ -235,6 +227,17 @@ export function QqConnectPage({ contacts, onBack }: { contacts: ContactRecord[];
     const t = window.setTimeout(() => setBindNote(''), 4000);
     return () => window.clearTimeout(t);
   }, [bindNote]);
+
+  // 步骤二 · 选择角色弹窗：已接入但还没绑角色时自动弹一次（用户定调「选择角色要弹窗」）；
+  // 关掉后可从「步骤二 · 选择角色」卡片按钮重新打开
+  const roleSheetShown = useRef(false);
+  useEffect(() => {
+     
+    if (login && !login.boundContactId && !roleSheetShown.current) {
+      roleSheetShown.current = true;
+      setRoleSheetOpen(true);
+    }
+  }, [login]);
 
   // 官方扫码绑定会话生命周期：未接入 + 停在扫码 tab + 云端就绪 → 启动轮询；
   // 切走 tab / 接入成功 / 组件卸载 → 停止（stopQrBind 会话令牌自增，旧循环自动退出）
@@ -292,35 +295,12 @@ export function QqConnectPage({ contacts, onBack }: { contacts: ContactRecord[];
     void test(id, secret);
   };
 
-  /**
-   * 扫码/选图识别凭证二维码：jsQR 解码 → 自动填入输入框 → 直接测试接入（识别即连接）。
-   * 网络不通时 store 会兑底保存凭证并切到已连接态（503 = 地域屏蔽不是凭证错误）。
-   */
-  const pickQrImage = async (file: File) => {
-    setScanBusy(true);
-    setScanMsg(null);
-    try {
-      const cred = await parseQqQrImage(file);
-      if (cred) {
-        setAppId(cred.appId);
-        setAppSecret(cred.appSecret);
-        setScanMsg({ ok: true, msg: '已识别，正在测试接入…' });
-        runTest(cred.appId, cred.appSecret);
-      } else {
-        setScanMsg({ ok: false, msg: QR_FAIL_MSG });
-      }
-    } catch {
-      setScanMsg({ ok: false, msg: QR_FAIL_MSG });
-    } finally {
-      setScanBusy(false);
-    }
-  };
-
   /** 段二确认绑定：写入 store——从这一刻起，机器人在真机 QQ 里就是这个角色 */
   const doBind = async (c: ContactRecord) => {
     const name = displayNameOf(c) || c.name;
     await bindContact(c.id, name);
     setPicked(null);
+    setRoleSheetOpen(false);
     setBindNote(`已绑定「${name}」——打开 QQ 直接和 TA 聊`);
   };
 
@@ -429,10 +409,8 @@ export function QqConnectPage({ contacts, onBack }: { contacts: ContactRecord[];
                   </CollapsibleTrigger>
                   <CollapsibleContent>
                     <div className="mt-2 space-y-2 text-[12px] leading-[1.55] text-black/45 dark:text-white/45">
-                      <p>先在 q.qq.com 创建你自己的 AI（一分钟搞定，创建完 TA 就在你的 QQ 里，不用再添加），拿到 AppID/AppSecret 后在这里扫码或填入。接入后机器人在真机 QQ 里就是你选的那个 AI 角色。</p>
-                      <p>还没有机器人？手机 QQ 扫码登录 q.qq.com → 点「创建机器人」，然后回来扫上面的码连接。</p>
-                      <p>能发什么：文字、表情包、语音条（官方富媒体接口；语音条需在 设置 → 语音设置 配 OpenAI 兼容 TTS）· 通话/QQ空间（协议不开放）。</p>
-                      <p>收发消息走云端 Webhook（必须先部署云端助手）；聊天记录用「拉取云端聊天记录」同步进手机 QQ 聊天界面。</p>
+                      <p>先在 q.qq.com 创建你自己的 AI（一分钟搞定，创建完 TA 就在你的 QQ 里，不用再添加），然后回来扫码连接。</p>
+                      <p>能发文字、表情包、语音条；收发消息走云端 Webhook（先部署云端助手）。</p>
                     </div>
                   </CollapsibleContent>
                 </Collapsible>
@@ -536,124 +514,67 @@ export function QqConnectPage({ contacts, onBack }: { contacts: ContactRecord[];
                 )}
               </div>
             ) : (
-              /* 填写凭证 tab：识别入口 + 一行去哪找（详细说明收在上方「接入指引」） */
+              /* 填写凭证 tab：一行去哪找 + AppID/AppSecret 输入 + 测试并接入（扫码 tab 下不显示凭证输入） */
               <div className="mt-2.5 rounded-[14px] bg-white px-4 py-4 dark:bg-[#1B1C1F]">
                 <p className="text-[12px] leading-relaxed text-black/40 dark:text-white/40">
                   q.qq.com 控制台「开发设置」可查看 AppID 与 AppSecret（Secret 忘了可随时重置）
                 </p>
-                {/* 辅助入口：识别凭证二维码图片（拍照 / 相册选图，识别成功自动填入并测试接入） */}
-                <div className="mt-3 flex gap-2">
-                  <button
-                    type="button"
-                    data-testid="qq-bot-scan-camera"
-                    disabled={scanBusy || testing}
-                    onClick={() => cameraRef.current?.click()}
-                    className="flex h-[44px] flex-1 items-center justify-center gap-1.5 rounded-[12px] border border-dashed border-black/15 text-[13.5px] text-black/70 active:bg-black/[0.03] disabled:opacity-50 dark:border-white/20 dark:text-white/70 dark:active:bg-white/[0.06]"
-                  >
-                    {scanBusy ? (
-                      <Loader2 className="h-[16px] w-[16px] animate-spin" strokeWidth={2.2} aria-hidden="true" />
-                    ) : (
-                      <ScanLine className="h-[16px] w-[16px]" strokeWidth={2} aria-hidden="true" />
-                    )}
-                    {scanBusy ? '识别中…' : '拍照识别凭证码'}
-                  </button>
-                  <button
-                    type="button"
-                    data-testid="qq-bot-scan-file"
-                    disabled={scanBusy || testing}
-                    onClick={() => galleryRef.current?.click()}
-                    className="flex h-[44px] flex-1 items-center justify-center gap-1.5 rounded-[12px] border border-dashed border-black/15 text-[13.5px] text-black/70 active:bg-black/[0.03] disabled:opacity-50 dark:border-white/20 dark:text-white/70 dark:active:bg-white/[0.06]"
-                  >
-                    <ImagePlus className="h-[16px] w-[16px]" strokeWidth={2} aria-hidden="true" />
-                    相册 / 截图识别
-                  </button>
-                </div>
-                {/* 隐藏 file input ①：capture 调相机（手机上直接开摄像头扫凭证码） */}
-                <input
-                  ref={cameraRef}
-                  type="file"
-                  accept="image/*"
-                  capture="environment"
-                  className="hidden"
-                  onChange={(e) => {
-                    const f = e.target.files?.[0] ?? null;
-                    if (f) void pickQrImage(f);
-                    e.target.value = '';
-                  }}
-                />
-                {/* 隐藏 file input ②：相册选图（选完立即复位 value，同一张图可重复选择） */}
-                <input
-                  ref={galleryRef}
-                  type="file"
-                  accept="image/*"
-                  className="hidden"
-                  onChange={(e) => {
-                    const f = e.target.files?.[0] ?? null;
-                    if (f) void pickQrImage(f);
-                    e.target.value = '';
-                  }}
-                />
-                {scanMsg && (
-                  <p className={`mt-2.5 text-[13px] leading-relaxed ${scanMsg.ok ? 'text-[#34C759]' : 'text-[#F5455C]'}`} data-testid="qq-bot-scan-result">
-                    {scanMsg.msg}
-                  </p>
-                )}
-              </div>
-            )}
 
-            {/* 凭证输入（填写凭证 tab 用：凭证码识别后自动填到这里，也可手动改；官方扫码绑定不经此输入） */}
-            <div className="mt-3 overflow-hidden rounded-[14px] bg-white dark:bg-[#1B1C1F]">
-              <div className="flex h-[56px] items-center gap-3 px-4">
-                <span className="w-[72px] shrink-0 text-[14px] text-black/45 dark:text-white/45">AppID</span>
-                <input
-                  data-testid="qq-bot-appid"
-                  value={appId}
-                  onChange={(e) => setAppId(e.target.value)}
-                  placeholder="机器人 AppID"
-                  autoCapitalize="off"
-                  autoCorrect="off"
-                  autoComplete="off"
-                  spellCheck={false}
-                  className="h-full w-full bg-transparent text-[16px] outline-none placeholder:text-black/25 dark:placeholder:text-white/30"
-                />
-              </div>
-              <div className="flex h-[56px] items-center gap-3 border-t border-black/[0.04] px-4 dark:border-white/[0.05]">
-                <span className="w-[72px] shrink-0 text-[14px] text-black/45 dark:text-white/45">AppSecret</span>
-                <input
-                  data-testid="qq-bot-secret"
-                  type={showSecret ? 'text' : 'password'}
-                  value={appSecret}
-                  onChange={(e) => setAppSecret(e.target.value)}
-                  placeholder="机器人 AppSecret"
-                  autoCapitalize="off"
-                  autoCorrect="off"
-                  autoComplete="off"
-                  spellCheck={false}
-                  className="h-full w-full bg-transparent text-[16px] outline-none placeholder:text-black/25 dark:placeholder:text-white/30"
-                />
-                {/* 明文/密文切换 */}
+                {/* 凭证输入（手动填写；官方扫码绑定不经此输入） */}
+                <div className="mt-3 overflow-hidden rounded-[14px] bg-black/[0.02] dark:bg-white/[0.04]">
+                  <div className="flex h-[56px] items-center gap-3 px-4">
+                    <span className="w-[72px] shrink-0 text-[14px] text-black/45 dark:text-white/45">AppID</span>
+                    <input
+                      data-testid="qq-bot-appid"
+                      value={appId}
+                      onChange={(e) => setAppId(e.target.value)}
+                      placeholder="机器人 AppID"
+                      autoCapitalize="off"
+                      autoCorrect="off"
+                      autoComplete="off"
+                      spellCheck={false}
+                      className="h-full w-full bg-transparent text-[16px] outline-none placeholder:text-black/25 dark:placeholder:text-white/30"
+                    />
+                  </div>
+                  <div className="flex h-[56px] items-center gap-3 border-t border-black/[0.04] px-4 dark:border-white/[0.05]">
+                    <span className="w-[72px] shrink-0 text-[14px] text-black/45 dark:text-white/45">AppSecret</span>
+                    <input
+                      data-testid="qq-bot-secret"
+                      type={showSecret ? 'text' : 'password'}
+                      value={appSecret}
+                      onChange={(e) => setAppSecret(e.target.value)}
+                      placeholder="机器人 AppSecret"
+                      autoCapitalize="off"
+                      autoCorrect="off"
+                      autoComplete="off"
+                      spellCheck={false}
+                      className="h-full w-full bg-transparent text-[16px] outline-none placeholder:text-black/25 dark:placeholder:text-white/30"
+                    />
+                    {/* 明文/密文切换 */}
+                    <button
+                      type="button"
+                      aria-label={showSecret ? '隐藏 AppSecret' : '显示 AppSecret'}
+                      onClick={() => setShowSecret((v) => !v)}
+                      className="-mr-1 shrink-0 rounded-full p-1.5 text-black/35 active:bg-black/5 dark:text-white/35 dark:active:bg-white/10"
+                    >
+                      {showSecret ? <EyeOff className="h-[18px] w-[18px]" strokeWidth={2} aria-hidden="true" /> : <Eye className="h-[18px] w-[18px]" strokeWidth={2} aria-hidden="true" />}
+                    </button>
+                  </div>
+                </div>
+
+                {/* 测试并接入（store 先本地校验格式，再双路换 token；转圈时禁用） */}
                 <button
                   type="button"
-                  aria-label={showSecret ? '隐藏 AppSecret' : '显示 AppSecret'}
-                  onClick={() => setShowSecret((v) => !v)}
-                  className="-mr-1 shrink-0 rounded-full p-1.5 text-black/35 active:bg-black/5 dark:text-white/35 dark:active:bg-white/10"
+                  data-testid="qq-bot-test"
+                  disabled={testing}
+                  onClick={() => runTest(appId, appSecret)}
+                  className="mt-4 flex h-[50px] w-full items-center justify-center gap-2 rounded-[13px] bg-[#0099FF] text-[16px] font-medium text-white shadow-[0_4px_12px_rgba(0,153,255,0.25)] active:opacity-80 disabled:opacity-60"
                 >
-                  {showSecret ? <EyeOff className="h-[18px] w-[18px]" strokeWidth={2} aria-hidden="true" /> : <Eye className="h-[18px] w-[18px]" strokeWidth={2} aria-hidden="true" />}
+                  {testing && <Loader2 className="h-[18px] w-[18px] animate-spin" strokeWidth={2.4} aria-hidden="true" />}
+                  {testing ? '正在测试连接…' : '测试并接入'}
                 </button>
               </div>
-            </div>
-
-            {/* 测试并接入（store 先本地校验格式，再双路换 token；转圈时禁用） */}
-            <button
-              type="button"
-              data-testid="qq-bot-test"
-              disabled={testing}
-              onClick={() => runTest(appId, appSecret)}
-              className="mt-4 flex h-[50px] w-full items-center justify-center gap-2 rounded-[13px] bg-[#0099FF] text-[16px] font-medium text-white shadow-[0_4px_12px_rgba(0,153,255,0.25)] active:opacity-80 disabled:opacity-60"
-            >
-              {testing && <Loader2 className="h-[18px] w-[18px] animate-spin" strokeWidth={2.4} aria-hidden="true" />}
-              {testing ? '正在测试连接…' : '测试并接入'}
-            </button>
+            )}
           </>
           )
         ) : (
@@ -680,19 +601,15 @@ export function QqConnectPage({ contacts, onBack }: { contacts: ContactRecord[];
                 <p className="mt-1 truncate text-[12.5px] text-black/40 dark:text-white/40">
                   机器人「{login.botName || login.appId}」 · 接入于 {fmtConnected(login.connectedAt)}
                 </p>
-                <p className="mt-0.5 text-[12px] leading-relaxed text-black/35 dark:text-white/35">
-                  {login.boundContactId
-                    ? `在真机 QQ 里，TA 就是「${boundName || login.boundContactName || '绑定的角色'}」`
-                    : '在下面选一个角色，机器人在真机 QQ 里就是 TA'}
-                </p>
               </div>
             </div>
 
             {/* 绑定/换绑轻提示（4 秒自动消失） */}
             {bindNote && <p className="mt-2 px-1 text-[12.5px] leading-relaxed text-[#34C759]">{bindNote}</p>}
 
-            {/* 云端自动同步状态行：接入/换绑/断开后后台重推运行包的结果（只有部署过云端才会有值） */}
-            {lastAutoSync ? (
+            {/* 云端自动同步状态行：接入/换绑/断开后后台重推运行包的结果（只看 QQ 渠道，
+                微信渠道的同步提示只在微信接入页展示） */}
+            {lastAutoSync?.channel === 'qq' ? (
               <p
                 data-testid="qq-bot-autosync"
                 className={`mt-2 rounded-[10px] px-3.5 py-2 text-[12px] leading-[1.5] ${
@@ -706,20 +623,19 @@ export function QqConnectPage({ contacts, onBack }: { contacts: ContactRecord[];
             ) : null}
 
             {!login.boundContactId ? (
-              /* ===== 段二 · 选择角色（接入成功但未绑定）：网格点选 + 确认绑定 ===== */
-              <div className="mt-3 rounded-[14px] bg-white px-4 py-3.5 dark:bg-[#1B1C1F]">
-                <p className="text-[12px] font-semibold text-black/40 dark:text-white/40">步骤二 · 选择角色</p>
-                <CharPickerGrid chars={chars} selectedId={picked?.id ?? null} onPick={setPicked} />
-                <button
-                  type="button"
-                  data-testid="qq-bot-bind"
-                  disabled={!picked}
-                  onClick={() => picked && void doBind(picked)}
-                  className="mt-4 flex h-[46px] w-full items-center justify-center rounded-[12px] bg-[#0099FF] text-[15px] font-medium text-white shadow-[0_4px_12px_rgba(0,153,255,0.25)] active:opacity-80 disabled:opacity-50"
-                >
-                  {picked ? `确认绑定「${displayNameOf(picked) || picked.name}」` : '先在上方选择一个角色'}
-                </button>
-              </div>
+              /* ===== 步骤二 · 选择角色：弹窗入口卡（点开底部弹层选人，弹窗里头像名字左右横排） ===== */
+              <button
+                type="button"
+                data-testid="qq-bot-role-entry"
+                onClick={() => setRoleSheetOpen(true)}
+                className="mt-3 flex w-full items-center justify-between gap-3 rounded-[14px] bg-white px-4 py-3.5 text-left active:bg-black/[0.03] dark:bg-[#1B1C1F] dark:active:bg-white/[0.06]"
+              >
+                <span className="min-w-0 flex-1">
+                  <span className="block text-[15px] font-medium">步骤二 · 选择角色</span>
+                  <span className="mt-0.5 block text-[12px] text-black/40 dark:text-white/40">选一个角色，机器人在真机 QQ 里就是 TA</span>
+                </span>
+                <ChevronRight className="h-[18px] w-[18px] shrink-0 text-black/25 dark:text-white/25" strokeWidth={2} aria-hidden="true" />
+              </button>
             ) : (
               <>
                 {/* ===== 管理分组列表（v7 简约版：一张卡分行的 iOS 列表） ===== */}
@@ -810,13 +726,12 @@ export function QqConnectPage({ contacts, onBack }: { contacts: ContactRecord[];
               </>
             )}
 
-            {/* 说明收缩区（v7 简约版：原长提示段全收进来） */}
+            {/* 说明收缩区（v8 精简：提示收敛为两行） */}
             <div className="mt-3">
               <Fold title="说明" testid="qq-bot-help-fold">
                 <div className="space-y-2 text-[12.5px] leading-[1.55] text-black/50 dark:text-white/50">
-                  <p>TA 就是你自己在 QQ 创建的那个 AI——打开 QQ 找到 TA 直接聊。QQ 官方机器人需在 q.qq.com 控制台配置回调地址（用云端助手部署成功卡片里的函数 URL）；沙箱/未发布机器人可能需把自己加进沙箱测试名单。</p>
-                  <p>断开后凭证从本机删除；重新接入扫一次码（或填写凭证）即可。</p>
-                  <p>两侧独立：你在本站聊天界面对话只在网站里显示（不会发到真机 QQ）；真机 QQ 上和 TA 的聊天由云端自动回复，点「拉取云端聊天记录」同步进来看。</p>
+                  <p>QQ 官方机器人需在 q.qq.com 控制台配置回调地址（用部署成功后的函数 URL）；聊天记录用「拉取云端聊天记录」同步进手机 QQ 聊天界面。</p>
+                  <p>断开后凭证从本机删除，重新扫一次码即可再接入。</p>
                 </div>
               </Fold>
             </div>
@@ -834,7 +749,42 @@ export function QqConnectPage({ contacts, onBack }: { contacts: ContactRecord[];
         {!ready && <p className="mt-3 px-1 text-center text-[12px] text-black/25 dark:text-white/25">正在读取本机接入状态…</p>}
       </div>
 
-      {/* 更换角色弹层（底部半屏：同段二的选择网格，点选即 bindContact 生效） */}
+      {/* 步骤二 · 选择角色弹窗（底部半屏：头像+名字左右横排；选中后确认绑定） */}
+      {roleSheetOpen && login && !login.boundContactId && (
+        <div
+          role="dialog"
+          aria-label="步骤二 · 选择角色"
+          className="absolute inset-0 z-30 flex flex-col justify-end bg-black/40"
+          onClick={() => setRoleSheetOpen(false)}
+        >
+          <div className="max-h-[72%] overflow-y-auto rounded-t-[14px] bg-[#F6F7F9] px-4 pb-8 pt-4 dark:bg-[#1B1C1F]" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between">
+              <span className="text-[16px] font-medium">步骤二 · 选择角色</span>
+              <button
+                type="button"
+                aria-label="关闭"
+                onClick={() => setRoleSheetOpen(false)}
+                className="rounded-full p-1 text-black/40 active:bg-black/5 dark:text-white/40 dark:active:bg-white/10"
+              >
+                <X className="h-5 w-5" strokeWidth={2} />
+              </button>
+            </div>
+            <p className="mt-1 text-[12px] text-black/40 dark:text-white/40">选一个角色，机器人在真机 QQ 里就是 TA</p>
+            <RoleRowList chars={chars} selectedId={picked?.id ?? null} onPick={setPicked} testidBase="qq-bot-contact" />
+            <button
+              type="button"
+              data-testid="qq-bot-bind"
+              disabled={!picked}
+              onClick={() => picked && void doBind(picked)}
+              className="mt-4 flex h-[46px] w-full items-center justify-center rounded-[12px] bg-[#0099FF] text-[15px] font-medium text-white shadow-[0_4px_12px_rgba(0,153,255,0.25)] active:opacity-80 disabled:opacity-50"
+            >
+              {picked ? `确认绑定「${displayNameOf(picked) || picked.name}」` : '先选一个角色'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* 更换角色弹层（底部半屏：同款左右横排列表，点选即 bindContact 生效） */}
       {rebindOpen && login && (
         <div
           role="dialog"
@@ -855,7 +805,7 @@ export function QqConnectPage({ contacts, onBack }: { contacts: ContactRecord[];
               </button>
             </div>
             <p className="mt-1 text-[12px] text-black/40 dark:text-white/40">选中即生效；云端会自动同步运行包用新人设代答</p>
-            <CharPickerGrid chars={chars} selectedId={login.boundContactId ?? null} onPick={(c) => void doRebind(c)} />
+            <RoleRowList chars={chars} selectedId={login.boundContactId ?? null} onPick={(c) => void doRebind(c)} testidBase="qq-bot-contact" />
           </div>
         </div>
       )}

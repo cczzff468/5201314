@@ -17,6 +17,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   Bot,
+  Check,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
@@ -67,44 +68,44 @@ function fmtHm(t: number): string {
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 }
 
-/** 角色选择器（CHAR 联系人）：头像 + 名字，选中微信绿描边；
- *  scroll = 横滑条（接入流程步骤一），grid = 网格（换绑弹层里空间更大） */
-function CharPicker({
+/** 角色选择列表（弹窗/底部弹层用）：头像左 + 名字右横排，选中行微信绿高亮——
+ *  用户定调「不要头像名字上下，要头像名字左右的」 */
+function RoleRowList({
   chars,
   selectedId,
   onPick,
-  mode = 'scroll',
+  testidBase,
 }: {
   chars: ContactRecord[];
   selectedId: string | null;
   onPick: (c: ContactRecord) => void;
-  mode?: 'scroll' | 'grid';
+  testidBase: string;
 }) {
   if (chars.length === 0) {
-    return <p className="mt-2 text-[13px] leading-[1.5] text-black/40 dark:text-white/40">还没有 AI 角色：先在联系人 App 创建一个 AI 角色再来接入</p>;
+    return <p className="py-4 text-center text-[13px] text-black/40 dark:text-white/40">还没有 AI 角色：先在「联系人」App 创建一个</p>;
   }
-  const items = chars.map((c) => {
-    const name = displayNameOf(c) || c.name;
-    const sel = selectedId === c.id;
-    return (
-      <button
-        key={c.id}
-        type="button"
-        data-testid={`wx-ilink-contact-${c.id}`}
-        aria-label={`选择 ${name}`}
-        onClick={() => onPick(c)}
-        className={mode === 'grid' ? 'flex w-full flex-col items-center gap-1.5' : 'flex w-[62px] shrink-0 flex-col items-center gap-1.5'}
-      >
-        {/* 选中态：外层绿底 padding 形成描边圈（同微信选中头像高亮） */}
-        <span className={`rounded-[13px] p-[2.5px] ${sel ? 'bg-[#07C160]' : 'bg-transparent'}`}>
-          <WxAvatar src={avatarFor(c, 'wx')} alt={name} size={54} />
-        </span>
-        <span className={`w-full truncate text-center text-[12px] ${sel ? 'font-medium text-[#07C160]' : ''}`}>{name}</span>
-      </button>
-    );
-  });
-  if (mode === 'grid') return <div className="mt-3 grid grid-cols-4 gap-x-2 gap-y-3.5">{items}</div>;
-  return <div className="no-scrollbar -mx-1 mt-3 flex gap-3.5 overflow-x-auto px-1 pb-1">{items}</div>;
+  return (
+    <div className="mt-2 divide-y divide-black/[0.05] dark:divide-white/[0.06]">
+      {chars.map((c) => {
+        const name = displayNameOf(c) || c.name;
+        const sel = selectedId === c.id;
+        return (
+          <button
+            key={c.id}
+            type="button"
+            data-testid={`${testidBase}-${c.id}`}
+            aria-label={`选择 ${name}`}
+            onClick={() => onPick(c)}
+            className={`flex w-full items-center gap-3 py-2.5 text-left transition-colors active:bg-black/[0.03] dark:active:bg-white/[0.06] ${sel ? 'bg-[#07C160]/[0.08]' : ''}`}
+          >
+            <WxAvatar src={avatarFor(c, 'wx')} alt={name} size={44} />
+            <span className={`min-w-0 flex-1 truncate text-[15px] ${sel ? 'font-medium text-[#07C160]' : ''}`}>{name}</span>
+            {sel ? <Check className="h-[18px] w-[18px] shrink-0 text-[#07C160]" strokeWidth={2.5} aria-hidden="true" /> : null}
+          </button>
+        );
+      })}
+    </div>
+  );
 }
 
 /** 收缩区块外壳（v4 简约版「收缩选择」）：一行触发头 + 展开内容 */
@@ -178,6 +179,8 @@ export function WeixinConnectPage({ contacts, onBack }: { contacts: ContactRecor
   const chars = useMemo(() => contacts.filter((c) => c.kind === 'char'), [contacts]);
   /** 步骤一选中的角色（本地态；扫码确认后才写进 store） */
   const [picked, setPicked] = useState<ContactRecord | null>(null);
+  /** 步骤一角色选择弹窗（点开底部弹层选人，弹窗里头像名字左右横排） */
+  const [roleSheetOpen, setRoleSheetOpen] = useState(false);
   /** 获取二维码失败的错误文案（startQr 抛错时展示） */
   const [qrErr, setQrErr] = useState('');
   /** 换绑角色弹层 */
@@ -203,6 +206,16 @@ export function WeixinConnectPage({ contacts, onBack }: { contacts: ContactRecor
     if (!ready || !login || !cloudDeployed) return;
     void pullWxCloudHistory().then(() => undefined);
   }, [ready, login, cloudDeployed]);
+
+  // binded_redirect（已绑其它环境）自动更新状态：解绑回来后页面自动换新码重试
+  //（用户定调「让他可以自动更新状态」）；页面开着期间每 15 秒重取一次，手动「更新状态」按钮兑底
+  useEffect(() => {
+    if (qr?.status !== 'binded_redirect' || qrLoading || !picked) return;
+    const t = window.setTimeout(() => {
+      void startQr(picked.id, displayNameOf(picked) || picked.name);
+    }, 15_000);
+    return () => window.clearTimeout(t);
+  }, [qr?.status, qr?.img, qrLoading, picked, startQr]);
 
   // 绑定角色详情：异步取联系人（联系人被删时为 null；换绑/断开的过渡期派生值兜底为 null）
   const boundId = login?.boundContactId ?? null;
@@ -326,8 +339,9 @@ export function WeixinConnectPage({ contacts, onBack }: { contacts: ContactRecor
             </div>
           ) : null}
 
-          {/* 云端自动同步状态行：接入/换绑/断开后后台重推运行包的结果（只有部署过云端才会有值） */}
-          {lastAutoSync ? (
+          {/* 云端自动同步状态行：接入/换绑/断开后后台重推运行包的结果——只看微信渠道
+              （QQ 渠道的同步提示只在 QQ 接入页展示，不再串页） */}
+          {lastAutoSync?.channel === 'wx' ? (
             <p
               data-testid="wx-ilink-autosync"
               className={`flex items-start gap-1.5 rounded-[10px] px-3.5 py-2 text-[12px] leading-[1.5] ${
@@ -481,13 +495,11 @@ export function WeixinConnectPage({ contacts, onBack }: { contacts: ContactRecor
             </div>
           </Fold>
 
-          {/* 说明收缩区（v4 简约版：原状态卡/说明卡里的三段说明全收进来，页面主体只留操作） */}
+          {/* 说明收缩区（v5 精简：提示收敛为两行） */}
           <Fold title="说明" testid="wx-ilink-help-fold">
             <div className="space-y-2 text-[12.5px] leading-[1.55] text-black/55 dark:text-white/55">
-              <p>TA 的真机微信聊天会同步到手机里的微信聊天界面；在手机里继续聊，TA 的新回复也会发到微信上。</p>
-              <p>能发什么：文字（已开放）· 图片、视频、文件（官方通道支持，逐步开放）· 语音/视频通话、朋友圈（微信协议不开放）。</p>
-              <p>官方 iLink 通道（ilinkai.weixin.qq.com），合法、零封号风险；Token 过期后回本页重新扫码。</p>
-              <p>两侧独立：你在本站聊天界面对话只在网站里显示（不会发到真机微信）；真机微信上和 TA 的聊天由云端自动回复，点「拉取云端聊天记录」同步进来。</p>
+              <p>TA 的真机微信聊天会同步到手机里的微信聊天界面；官方 iLink 通道，合法、零封号风险。</p>
+              <p>断开后 Token 即废弃，重新接入再扫一次码即可。</p>
             </div>
           </Fold>
         </div>
@@ -528,10 +540,8 @@ export function WeixinConnectPage({ contacts, onBack }: { contacts: ContactRecor
                 </CollapsibleTrigger>
                 <CollapsibleContent>
                   <div className="mt-2 space-y-2 text-[12px] leading-[1.55] text-black/45 dark:text-white/45">
-                    <p>拿一个微信号（建议小号）扫二维码，这个微信号就会变成你选的角色；用你常用的微信加 TA 为好友，就能在真机微信里直接和 TA 聊天——人设、记忆、世界书和手机里完全一致。</p>
-                    <p>官方 iLink 通道（ilinkai.weixin.qq.com），合法、零封号风险；Token 过期后回本页重新扫码。</p>
-                    <p>能发什么：文字（已开放）· 图片、视频、文件（官方通道支持，逐步开放）· 语音/视频通话、朋友圈（微信协议不开放）。</p>
-                    <p>两侧独立：你在本站聊天界面对话只在网站里显示（不会发到真机微信）；真机微信上和 TA 的聊天由云端自动回复，聊天记录会同步进网站里查看。</p>
+                    <p>拿一个微信号（建议小号）扫二维码，这个微信号就会变成你选的角色；用你常用的微信加 TA 为好友直接聊。</p>
+                    <p>官方 iLink 通道，合法、零封号风险；Token 过期后回本页重新扫码。</p>
                   </div>
                 </CollapsibleContent>
               </Collapsible>
@@ -568,17 +578,27 @@ export function WeixinConnectPage({ contacts, onBack }: { contacts: ContactRecor
             </div>
           ) : (
             <>
-              {/* 步骤一：选择角色（CHAR；扫码后那个微信号就「变成」TA） */}
-              <div className="rounded-[10px] bg-white px-4 py-3.5 dark:bg-[#1A1A1A]">
-                <p className="text-[12.5px] font-semibold text-black/40 dark:text-white/40">步骤一 · 选择角色</p>
-                <CharPicker chars={chars} selectedId={picked?.id ?? null} onPick={setPicked} />
-              </div>
+              {/* 步骤一：选择角色（点开底部弹层选人；弹窗里头像名字左右横排，扫码后那个微信号就「变成」TA） */}
+              <button
+                type="button"
+                data-testid="wx-ilink-role-entry"
+                onClick={() => setRoleSheetOpen(true)}
+                className="flex w-full items-center justify-between gap-3 rounded-[10px] bg-white px-4 py-3.5 text-left active:bg-black/[0.03] dark:bg-[#1A1A1A] dark:active:bg-white/[0.05]"
+              >
+                <span className="min-w-0 flex-1">
+                  <span className="block text-[15.5px] font-medium">步骤一 · 选择角色</span>
+                  <span className="mt-0.5 block text-[12px] text-black/40 dark:text-white/40">
+                    {picked ? `已选：${displayNameOf(picked) || picked.name}` : '选一个角色，扫码后那个微信号就「变成」TA'}
+                  </span>
+                </span>
+                <ChevronRight className="h-[18px] w-[18px] shrink-0 text-black/25 dark:text-white/25" strokeWidth={2} aria-hidden="true" />
+              </button>
 
               {/* 步骤二：用微信号扫码接入 */}
               <div className="rounded-[10px] bg-white px-4 py-3.5 dark:bg-[#1A1A1A]">
                 <p className="text-[12.5px] font-semibold text-black/40 dark:text-white/40">步骤二 · 用微信号扫码</p>
                 {!picked ? (
-                  <p className="mt-2 text-[13px] text-black/40 dark:text-white/40">先在上方选择一个角色</p>
+                  <p className="mt-2 text-[13px] text-black/40 dark:text-white/40">先选一个角色，再获取二维码</p>
                 ) : !qr ? (
                   <div className="mt-3">
                     <button
@@ -653,6 +673,35 @@ export function WeixinConnectPage({ contacts, onBack }: { contacts: ContactRecor
                         {qr.pinErr}
                       </p>
                     ) : null}
+                    {/* 已绑别处：解绑后自动/手动更新状态（用户定调：自动更新 + 手动按钮兑底） */}
+                    {qr.status === 'binded_redirect' && (
+                      <div className="mt-3 flex w-full flex-col items-center" data-testid="wx-ilink-bind-redirect">
+                        <p className="text-[12px] leading-relaxed text-black/45 dark:text-white/45">已在那边解绑？页面会自动更新，或点下方按钮立即更新</p>
+                        <button
+                          type="button"
+                          data-testid="wx-ilink-status-refresh"
+                          disabled={qrLoading}
+                          onClick={() => void fetchQr()}
+                          className="mt-2 flex h-[38px] items-center justify-center gap-1.5 rounded-full bg-[#07C160] px-5 text-[13.5px] font-medium text-white active:brightness-95 disabled:opacity-60"
+                        >
+                          {qrLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" strokeWidth={2} aria-hidden="true" /> : <RefreshCw className="h-3.5 w-3.5" strokeWidth={2} aria-hidden="true" />}
+                          更新状态
+                        </button>
+                      </div>
+                    )}
+                    {/* 更新二维码：随时换一张新码（扫不出来 / 想重扫时用） */}
+                    {(qr.status === 'wait' || qr.status === 'scaned' || qr.status === 'need_verifycode') && (
+                      <button
+                        type="button"
+                        data-testid="wx-ilink-qr-refresh"
+                        disabled={qrLoading}
+                        onClick={() => void fetchQr()}
+                        className="mt-2.5 flex h-[34px] items-center justify-center gap-1.5 rounded-full bg-black/[0.05] px-4 text-[12.5px] font-medium text-black/60 active:opacity-70 disabled:opacity-60 dark:bg-white/[0.08] dark:text-white/60"
+                      >
+                        <RefreshCw className="h-3.5 w-3.5" strokeWidth={2} aria-hidden="true" />
+                        更新二维码
+                      </button>
+                    )}
                     {qr.status === 'expired' && (
                       <button
                         type="button"
@@ -677,7 +726,41 @@ export function WeixinConnectPage({ contacts, onBack }: { contacts: ContactRecor
         </div>
       )}
 
-      {/* 换绑角色弹层（底部半屏：网格选人，选中即生效） */}
+      {/* 步骤一 · 选择角色弹窗（底部半屏：头像+名字左右横排；点选即返回步骤二） */}
+      {roleSheetOpen && !login && (
+        <div
+          role="dialog"
+          aria-label="步骤一 · 选择角色"
+          className="absolute inset-0 z-30 flex flex-col justify-end bg-black/40"
+          onClick={() => setRoleSheetOpen(false)}
+        >
+          <div className="max-h-[72%] overflow-y-auto rounded-t-[14px] bg-[#F7F7F7] px-4 pb-8 pt-4 dark:bg-[#1A1A1A]" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between">
+              <span className="text-[16px] font-medium">步骤一 · 选择角色</span>
+              <button
+                type="button"
+                aria-label="关闭"
+                onClick={() => setRoleSheetOpen(false)}
+                className="rounded-full p-1 text-black/40 active:bg-black/5 dark:text-white/40 dark:active:bg-white/10"
+              >
+                <X className="h-5 w-5" strokeWidth={2} />
+              </button>
+            </div>
+            <p className="mt-1 text-[12px] text-black/40 dark:text-white/40">选一个角色，扫码后那个微信号就「变成」TA</p>
+            <RoleRowList
+              chars={chars}
+              selectedId={picked?.id ?? null}
+              onPick={(c) => {
+                setPicked(c);
+                setRoleSheetOpen(false);
+              }}
+              testidBase="wx-ilink-contact"
+            />
+          </div>
+        </div>
+      )}
+
+      {/* 换绑角色弹层（底部半屏：同款左右横排列表，选中即生效） */}
       {rebindOpen && login && (
         <div
           role="dialog"
@@ -698,7 +781,7 @@ export function WeixinConnectPage({ contacts, onBack }: { contacts: ContactRecor
               </button>
             </div>
             <p className="mt-1 text-[12px] text-black/40 dark:text-white/40">选中即生效，无需重新扫码</p>
-            <CharPicker chars={chars} selectedId={login.boundContactId} onPick={(c) => void onRebind(c)} mode="grid" />
+            <RoleRowList chars={chars} selectedId={login.boundContactId} onPick={(c) => void onRebind(c)} testidBase="wx-ilink-contact" />
           </div>
         </div>
       )}

@@ -58,7 +58,7 @@ import { BUILTIN_WX_STICKERS } from './builtin-stickers';
 /** 接入/换绑/断开后自动重推运行包到云端（已部署过才推；动态 import 避免与 wx-cloud 的循环依赖） */
 function cloudAutoSync(reason: string): void {
   void import('./wx-cloud/supabase')
-    .then((m) => m.autoSyncRunPackageIfDeployed(reason))
+    .then((m) => m.autoSyncRunPackageIfDeployed(reason, 'wx'))
     .catch(() => undefined);
 }
 

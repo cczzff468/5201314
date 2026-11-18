@@ -7,3 +7,4 @@ tsconfig.tsbuildinfo
 tool-results/
 dev.log
 .zscripts/dev.log
+tmp-analysis/

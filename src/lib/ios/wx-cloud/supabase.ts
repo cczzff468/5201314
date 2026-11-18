@@ -207,8 +207,8 @@ export async function syncRunPackage(): Promise<DeployResult> {
 
 /** 接入/断开微信/QQ 后的后台自动同步：已部署过云端就重新推一次运行包（无需用户手动点同步）。
  *  返回 null = 还没部署过（接入页本身也被「先部署」阻断，这里只是兑底）；结果写进
- *  useWxCloud.lastAutoSync 供接入页展示同步状态行。 */
-export async function autoSyncRunPackageIfDeployed(reason: string): Promise<DeployResult | null> {
+ *  useWxCloud.lastAutoSync（带 channel 标记，只在对应接入页展示）供接入页展示同步状态行。 */
+export async function autoSyncRunPackageIfDeployed(reason: string, channel: 'qq' | 'wx'): Promise<DeployResult | null> {
   const st = wxCloudSnapshot();
   const supa = st.supabase;
   const deployed =
@@ -222,7 +222,7 @@ export async function autoSyncRunPackageIfDeployed(reason: string): Promise<Depl
   } catch (e) {
     r = { ok: false, msg: e instanceof Error ? e.message : String(e) };
   }
-  useWxCloud.getState().setLastAutoSync({ ok: r.ok, msg: r.ok ? `${reason}：云端配置已自动同步` : `${reason}后自动同步失败（${r.msg.slice(0, 80)}）——到 设置 → 云端助手 点「重新同步运行包」` });
+  useWxCloud.getState().setLastAutoSync({ ok: r.ok, msg: r.ok ? `${reason}：云端配置已自动同步` : `${reason}后自动同步失败（${r.msg.slice(0, 80)}）——到 设置 → 云端助手 点「重新同步运行包」`, channel });
   return r;
 }
 
@@ -252,16 +252,20 @@ export async function deploySupabase(): Promise<DeployResult> {
   // 自动开启定时轮询（函数直连用户库执行 cron.schedule；失败时 UI 可用手动 SQL 兜底）
   // v3：走同源代理转发（旧版函数无 CORS 头，浏览器直连 funcUrl 必 Failed to fetch →
   // 定时开不了 → 微信云端接管后 AI 不回消息；代理转发无 CORS 问题，存量部署立即修复）
+  let cronOk = false;
   let cronMsg = '';
   try {
     const r = await funcViaProxy(supa.ref, supa.secret, 'setup-cron', {}, 60_000);
     const jr = r.j as { ok?: boolean; error?: string } | null;
-    cronMsg = r.ok && jr?.ok
-      ? '，定时轮询已自动开启（微信云端接管即刻生效）'
-      : `（自动开定时失败：${(jr?.error || r.text || r.status).toString().slice(0, 60)}，可用下方「手动 SQL」兜底）`;
+    cronOk = r.ok && !!jr?.ok;
+    cronMsg = cronOk
+      ? '，云端轮询已开启'
+      : `（自动开启失败：${(jr?.error || r.text || r.status).toString().slice(0, 60)}，可用开关重开或手动 SQL 兜底）`;
   } catch (e) {
-    cronMsg = `（自动开定时失败：${(e instanceof Error ? e.message : String(e)).slice(0, 60)}，可用下方「手动 SQL」兜底）`;
+    cronMsg = `（自动开启失败：${(e instanceof Error ? e.message : String(e)).slice(0, 60)}，可用开关重开或手动 SQL 兜底）`;
   }
+  // 部署后同步开关状态（cronOn 跟随 setup-cron 真实结果；「云端轮询」开关据此展示）
+  useWxCloud.getState().saveSupabase({ ...(wxCloudSnapshot().supabase ?? supa), cronOn: cronOk });
 
   return {
     ok: true,
@@ -271,14 +275,37 @@ export async function deploySupabase(): Promise<DeployResult> {
   };
 }
 
-/** 停用云端定时轮询（自动；失败用手动 SQL）——v3 走同源代理（旧版函数无 CORS 头，直连会 Failed to fetch） */
+/** 开启云端定时轮询（「云端轮询」开关 ON：云端每分钟自动收发一轮、TA 全天在线）——
+ *  v3 走同源代理（旧版函数无 CORS 头，直连会 Failed to fetch）；成功后写 cronOn=true */
+export async function startSupabaseCron(): Promise<{ ok: boolean; msg: string }> {
+  const supa = wxCloudSnapshot().supabase;
+  if (!supa?.ref) return { ok: false, msg: '还没部署：先完成一键部署' };
+  try {
+    const r = await funcViaProxy(supa.ref, supa.secret, 'setup-cron', {}, 60_000);
+    const j = r.j as { ok?: boolean; error?: string } | null;
+    if (r.ok && j?.ok) {
+      useWxCloud.getState().saveSupabase({ ...supa, cronOn: true });
+      return { ok: true, msg: '云端轮询已开启：TA 全天在线自动回复' };
+    }
+    return { ok: false, msg: j?.error || `开启失败（${r.status}）——可用「定时轮询手动 SQL」兑底` };
+  } catch (e) {
+    return { ok: false, msg: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+/** 停用云端定时轮询（「云端轮询」开关 OFF：不再被 cron 唤醒，零配额消耗）——v3 走同源代理
+ *  （旧版函数无 CORS 头，直连会 Failed to fetch）；成功后写 cronOn=false */
 export async function stopSupabaseCron(): Promise<{ ok: boolean; msg: string }> {
   const supa = wxCloudSnapshot().supabase;
   if (!supa?.ref) return { ok: false, msg: '还没部署' };
   try {
     const r = await funcViaProxy(supa.ref, supa.secret, 'stop-cron', {}, 30_000);
     const j = r.j as { ok?: boolean; error?: string } | null;
-    return r.ok && j?.ok ? { ok: true, msg: '已停用云端定时轮询（零配额消耗）' } : { ok: false, msg: j?.error || `停用失败（${r.status}）` };
+    if (r.ok && j?.ok) {
+      useWxCloud.getState().saveSupabase({ ...supa, cronOn: false });
+      return { ok: true, msg: '已停用云端轮询（零配额消耗）' };
+    }
+    return { ok: false, msg: j?.error || `停用失败（${r.status}）` };
   } catch (e) {
     return { ok: false, msg: e instanceof Error ? e.message : String(e) };
   }

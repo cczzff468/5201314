@@ -37,10 +37,10 @@ import { decryptSecret, encryptSecret, isEncrypted } from './secret-box';
 import { loadMsgs, saveMsgs } from '@/components/apps/qq-app/core';
 import { wxCloudSnapshot } from './wx-cloud/store';
 
-/** 接入/换绑/断开后自动重推运行包到云端（已部署过才推；动态 import 避免与 wx-cloud/supabase 的循环依赖） */
+/** 接入/换绑/断开后自动重推运行包到云端（已部署过才推；动态 import 避免循环依赖） */
 function cloudAutoSync(reason: string): void {
   void import('./wx-cloud/supabase')
-    .then((m) => m.autoSyncRunPackageIfDeployed(reason))
+    .then((m) => m.autoSyncRunPackageIfDeployed(reason, 'qq'))
     .catch(() => undefined);
 }
 

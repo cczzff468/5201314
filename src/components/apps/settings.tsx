@@ -258,6 +258,7 @@ import {
   listProjects,
   pingSupabase,
   saveSupabaseConn,
+  startSupabaseCron,
   stopSupabaseCron,
   syncRunPackage,
   type DeployResult,
@@ -9141,9 +9142,10 @@ function CloudPage({ onBack }: { onBack: () => void }) {
     if (deployResult?.code === 'need_manual_key' || syncResult?.code === 'need_manual_key') setManualKeyOpen(true);
   }, [deployResult, syncResult]);
   const [pingLoading, setPingLoading] = useState(false);
-  const [pingResult, setPingResult] = useState<{ ok: boolean; msg: string } | null>(null);
-  const [stopCronLoading, setStopCronLoading] = useState(false);
-  const [stopCronResult, setStopCronResult] = useState<{ ok: boolean; msg: string } | null>(null);
+  /** 云端轮询开关切换中（setup-cron / stop-cron 在跑；成功后库写 cronOn 驱动开关位置） */
+  const [cronBusy, setCronBusy] = useState(false);
+  /** 结果弹窗（部署失败 / 云端测试结果 / 开关失败：标题 + 正文 + 「知道了」） */
+  const [resultDialog, setResultDialog] = useState<{ title: string; body: string } | null>(null);
 
   // —— 危险操作 ——
   const [confirmWipe, setConfirmWipe] = useState(false);
@@ -9179,8 +9181,16 @@ function CloudPage({ onBack }: { onBack: () => void }) {
   const supaKey = supa?.serviceKey ?? '';
   // v80 状态卡派生：大图标状态标题/副标 + 测试异常信号（pingBad 置顶优先）
   const pingBad = lastPing?.ok === false;
+  /** 云端轮询开关（存量状态没写过 cronOn 时按「部署过即开着」推导） */
+  const cronOn = !!supa && (supa.cronOn ?? supa.deployedAt > 0);
   const statusTitle = !cloudOn ? '未使用云端（仅本机）' : pingBad ? '云端异常' : supaDeployed ? '云端已部署' : '已选云端 · 待部署';
-  const statusSub = !cloudOn ? '页面开着时 TA 才回复，关掉就停' : !supaDeployed ? '填 Token → 选项目 → 一键部署' : '真机消息云端秒回 · 页面关掉也不停';
+  const statusSub = !cloudOn
+    ? '页面开着时 TA 才回复，关掉就停'
+    : !supaDeployed
+      ? '填 Token → 选项目 → 一键部署'
+      : cronOn
+        ? '云端轮询中 · TA 全天在线自动回复'
+        : '云端轮询已停用 · 零配额消耗';
   const cronSqlText = supa?.ref ? cronSql() : '';
 
   // Token 输入框与已保存值不一致时先回写快照（用户换 token 后免重选项目）
@@ -9216,8 +9226,7 @@ function CloudPage({ onBack }: { onBack: () => void }) {
     setProjName(p.name);
     setDeployResult(null);
     setSyncResult(null);
-    setPingResult(null);
-    setStopCronResult(null);
+    setResultDialog(null);
     showToast(`已选择项目 ${p.name}`);
   };
 
@@ -9257,15 +9266,20 @@ function CloudPage({ onBack }: { onBack: () => void }) {
     }
   };
 
-  /** 一键部署：同步运行包 + 部署 Edge Function + 自动开定时轮询（转圈最长约 3 分钟） */
+  /** 一键部署：同步运行包 + 部署 Edge Function + 自动开云端轮询（转圈最长约 3 分钟）。
+   *  失败弹「部署失败」弹窗（正文=具体问题）；成功用绿色结果框 + funcUrl。 */
   const runDeploy = async () => {
     ensureTokenSynced();
     setDeployLoading(true);
     setDeployResult(null);
     try {
-      setDeployResult(await deploySupabase());
+      const r = await deploySupabase();
+      setDeployResult(r);
+      if (!r.ok) setResultDialog({ title: '部署失败', body: r.msg });
     } catch (e) {
-      setDeployResult({ ok: false, msg: e instanceof Error ? e.message : String(e) });
+      const msg = e instanceof Error ? e.message : String(e);
+      setDeployResult({ ok: false, msg });
+      setResultDialog({ title: '部署失败', body: msg });
     } finally {
       setDeployLoading(false);
     }
@@ -9305,29 +9319,32 @@ function CloudPage({ onBack }: { onBack: () => void }) {
     return r;
   };
 
-  /** 测试云端：直接调一次函数（带任务密钥；最长约 130 秒，含 100 秒轮询窗口） */
+  /** 云端测试一次：直接调一次函数（带任务密钥；最长约 130 秒，含 100 秒收发窗口）。
+   *  结果弹「云端测试」弹窗（成功 / 失败都弹，正文=具体结果）。 */
   const runPing = async () => {
     setPingLoading(true);
-    setPingResult(null);
+    setResultDialog(null);
     try {
-      setPingResult(await pingAndSync());
+      const r = await pingAndSync();
+      setResultDialog({ title: '云端测试', body: r.msg });
     } catch (e) {
-      setPingResult({ ok: false, msg: e instanceof Error ? e.message : String(e) });
+      setResultDialog({ title: '云端测试', body: e instanceof Error ? e.message : String(e) });
     } finally {
       setPingLoading(false);
     }
   };
 
-  /** 停用定时轮询：函数直连用户库 unschedule（停不掉时用折叠里的手动 SQL 兜底） */
-  const runStopCron = async () => {
-    setStopCronLoading(true);
-    setStopCronResult(null);
+  /** 云端轮询开关：ON=云端每分钟自动收发（TA 全天在线自动回复）；OFF=完全停（零配额消耗）。
+   *  失败弹结果弹窗并保持原位（库成功才写 cronOn，UI 派生值随之更新）。 */
+  const toggleCron = async (on: boolean) => {
+    setCronBusy(true);
     try {
-      setStopCronResult(await stopSupabaseCron());
+      const r = on ? await startSupabaseCron() : await stopSupabaseCron();
+      if (!r.ok) setResultDialog({ title: on ? '开启云端轮询失败' : '停用云端轮询失败', body: r.msg });
     } catch (e) {
-      setStopCronResult({ ok: false, msg: e instanceof Error ? e.message : String(e) });
+      setResultDialog({ title: on ? '开启云端轮询失败' : '停用云端轮询失败', body: e instanceof Error ? e.message : String(e) });
     } finally {
-      setStopCronLoading(false);
+      setCronBusy(false);
     }
   };
 
@@ -9340,8 +9357,7 @@ function CloudPage({ onBack }: { onBack: () => void }) {
     setProjName('');
     setDeployResult(null);
     setSyncResult(null);
-    setPingResult(null);
-    setStopCronResult(null);
+    setResultDialog(null);
     setSupaToken('');
     backfilled.current = false;
     setConfirmWipe(false);
@@ -9395,11 +9411,11 @@ function CloudPage({ onBack }: { onBack: () => void }) {
           )}
 
           <div className="mt-2.5">
-            <CloudFold title="说明（作用 / 使用顺序 / 测试云端会做什么）" testid="cloud-help-fold">
+            <CloudFold title="说明（作用 / 使用顺序 / 测试会做什么）" testid="cloud-help-fold">
               <div className="space-y-2 text-[12px] leading-relaxed text-muted-foreground">
-                <p>部署后，接入的微信/QQ 角色 7x24 在线替你收发消息——真机消息云端秒回，页面关掉也不停。</p>
-                <p>顺序（必须按这个顺序）：① 这里先部署 Supabase → ② 再到微信「我」页 / QQ「动态」页接入真机（微信扫码，QQ 扫码或填 AppID/AppSecret）。凭证只存你自己的浏览器。</p>
-                <p>「测试云端」会真实跑一轮约 100 秒的收发窗口——期间 TA 真的会在微信里回消息；处理过的对话自动同步回手机聊天界面。</p>
+                <p>部署并打开「云端轮询」后，接入的微信/QQ 角色 7x24 在线替你收发消息；关掉开关即完全停止、零配额消耗。</p>
+                <p>顺序：① 这里一键部署 → ② 到微信「我」页 / QQ「动态」页接入真机。凭证只存你自己的浏览器。</p>
+                <p>「云端测试一次」会真实跑一轮约 100 秒的收发窗口——期间 TA 真的会在微信里回消息，结果弹窗展示。</p>
               </div>
             </CloudFold>
           </div>
@@ -9546,17 +9562,11 @@ function CloudPage({ onBack }: { onBack: () => void }) {
                 </div>
               )}
 
-              {/* 已连接：项目 ref + 一键部署 / 重新同步 / 测试云端 / 停用定时轮询 */}
+              {/* 已连接：一键部署 / 云端轮询开关 / 云端测试一次 / 重新同步运行包（v6 简约版） */}
               {supa?.ref && (
                 <div className="rounded-[16px] bg-white/45 p-3.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.6)] ring-1 ring-black/[0.04] dark:bg-white/[0.05] dark:ring-white/[0.07]">
-                  <p className="text-[13px] leading-relaxed">
-                    已连接：{projName ? `${projName} · ` : ''}<span className="break-all">{supa.ref}</span>
-                    {supa.deployedAt > 0 && (
-                      <span className="text-emerald-600 dark:text-emerald-300"> · 已部署 {new Date(supa.deployedAt).toLocaleString()}</span>
-                    )}
-                  </p>
-                  <div className="mt-2.5 flex flex-col gap-2">
-                    {/* 一键部署（同步运行包 + 部署 Edge Function + 自动开定时轮询；msg 自带定时状态） */}
+                  <div className="flex flex-col gap-2">
+                    {/* 一键部署（同步运行包 + 部署 Edge Function + 自动开云端轮询；msg 自带轮询状态） */}
                     <button
                       type="button"
                       onClick={() => void runDeploy()}
@@ -9619,65 +9629,56 @@ function CloudPage({ onBack }: { onBack: () => void }) {
                         )}
                       </div>
                     </CloudFold>
-                    {/* v5 简约版：次级动作合并为分组列表行（重新同步 / 测试云端 / 停用定时轮询） */}
-                    <div className="divide-y divide-black/[0.05] overflow-hidden rounded-[14px] bg-white/60 ring-1 ring-black/[0.04] dark:divide-white/[0.08] dark:bg-white/[0.06] dark:ring-white/[0.08]">
-                      {/* 重新同步运行包：换绑定角色 / 改「API 设置」后用 */}
-                      <button
-                        type="button"
-                        onClick={() => void runSync()}
-                        disabled={syncLoading}
-                        className="flex w-full items-center justify-between gap-2 px-4 py-3 text-left transition-colors active:bg-muted/50 disabled:opacity-50"
-                        data-testid="cloud-supa-sync"
-                      >
-                        <span className="min-w-0 flex-1">
-                          <span className="block text-[14.5px] font-medium">重新同步运行包</span>
-                          <span className="mt-0.5 block text-[11px] text-muted-foreground">改 API 设置后用；接入/换绑/断开微信 QQ 会自动同步</span>
+                    {/* v6 简约版：云端轮询开关（开=自动回复；关=零配额消耗） */}
+                    <div className="flex items-center justify-between gap-3 rounded-[14px] bg-white/60 px-4 py-3 ring-1 ring-black/[0.04] dark:bg-white/[0.06] dark:ring-white/[0.08]">
+                      <span className="min-w-0 flex-1">
+                        <span className="block text-[14.5px] font-medium">云端轮询</span>
+                        <span className="mt-0.5 block text-[11px] leading-relaxed text-muted-foreground">
+                          {cronOn ? '每分钟自动收发一轮，TA 全天在线自动回复' : '已停用——不再自动回复，零配额消耗；打开开关即可恢复'}
                         </span>
-                        {syncLoading ? (
-                          <Loader2 className="h-4 w-4 shrink-0 animate-spin text-muted-foreground" />
-                        ) : (
-                          <RefreshCw className="h-4 w-4 shrink-0 text-muted-foreground/70" />
-                        )}
-                      </button>
-                      {/* 测试云端：直接调一次函数（含 100 秒收发窗口；会真的在微信里回复并同步回聊天界面） */}
-                      <button
-                        type="button"
-                        onClick={() => void runPing()}
-                        disabled={pingLoading}
-                        className="flex w-full items-center justify-between gap-2 px-4 py-3 text-left transition-colors active:bg-muted/50 disabled:opacity-50"
-                        data-testid="cloud-supa-ping"
-                      >
-                        <span className="min-w-0 flex-1">
-                          <span className="block text-[14.5px] font-medium">测试云端</span>
-                          <span className="mt-0.5 block text-[11px] text-muted-foreground">真实跑一轮 100 秒收发窗口（期间 TA 会在微信里回复）</span>
-                        </span>
-                        {pingLoading ? (
-                          <Loader2 className="h-4 w-4 shrink-0 animate-spin text-muted-foreground" />
-                        ) : (
-                          <RefreshCw className="h-4 w-4 shrink-0 text-muted-foreground/70" />
-                        )}
-                      </button>
-                      {/* 停用定时轮询（停了就不再 7x24 自动回复；重新一键部署可再开回来） */}
-                      <button
-                        type="button"
-                        onClick={() => void runStopCron()}
-                        disabled={stopCronLoading}
-                        className="flex w-full items-center justify-between gap-2 px-4 py-3 text-left transition-colors active:bg-muted/50 disabled:opacity-50"
-                      >
-                        <span className="min-w-0 flex-1">
-                          <span className="block text-[14.5px] font-medium">停用定时轮询</span>
-                          <span className="mt-0.5 block text-[11px] text-muted-foreground">停了就不再 7x24 自动回复；重新一键部署可再开</span>
-                        </span>
-                        {stopCronLoading ? (
-                          <Loader2 className="h-4 w-4 shrink-0 animate-spin text-muted-foreground" />
-                        ) : (
-                          <span className="shrink-0 text-[11px] text-muted-foreground/70">关闭</span>
-                        )}
-                      </button>
+                      </span>
+                      {cronBusy ? (
+                        <Loader2 className="h-[20px] w-[20px] shrink-0 animate-spin text-muted-foreground" aria-hidden="true" />
+                      ) : (
+                        <Switch
+                          checked={cronOn}
+                          disabled={!supaDeployed}
+                          onCheckedChange={(v) => void toggleCron(v)}
+                          data-testid="cloud-cron-toggle"
+                          aria-label="云端轮询"
+                        />
+                      )}
                     </div>
+                    {/* 云端测试一次：用户自己动手跑一轮（结果弹「云端测试」弹窗） */}
+                    <button
+                      type="button"
+                      onClick={() => void runPing()}
+                      disabled={pingLoading || !supaDeployed}
+                      className={CLOUD_BTN_CLS}
+                      data-testid="cloud-supa-ping"
+                    >
+                      {pingLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                      {pingLoading ? '正在测试（约 100 秒收发窗口）…' : '云端测试一次'}
+                    </button>
+                    {/* 重新同步运行包：换绑定角色 / 改「API 设置」后用 */}
+                    <button
+                      type="button"
+                      onClick={() => void runSync()}
+                      disabled={syncLoading}
+                      className="flex w-full items-center justify-between gap-2 rounded-[14px] bg-white/60 px-4 py-3 text-left transition-colors active:bg-muted/50 disabled:opacity-50 ring-1 ring-black/[0.04] dark:bg-white/[0.06] dark:ring-white/[0.08]"
+                      data-testid="cloud-supa-sync"
+                    >
+                      <span className="min-w-0 flex-1">
+                        <span className="block text-[14.5px] font-medium">重新同步运行包</span>
+                        <span className="mt-0.5 block text-[11px] text-muted-foreground">改 API 设置后用；接入 / 换绑 / 断开微信 QQ 会自动同步</span>
+                      </span>
+                      {syncLoading ? (
+                        <Loader2 className="h-4 w-4 shrink-0 animate-spin text-muted-foreground" />
+                      ) : (
+                        <RefreshCw className="h-4 w-4 shrink-0 text-muted-foreground/70" />
+                      )}
+                    </button>
                     <CloudResultBox r={syncResult} />
-                    <CloudResultBox r={pingResult} />
-                    <CloudResultBox r={stopCronResult} />
                   </div>
                 </div>
               )}
@@ -9726,6 +9727,29 @@ function CloudPage({ onBack }: { onBack: () => void }) {
         </section>
       </div>
 
+      {/* 结果弹窗（部署失败 / 云端测试结果 / 开关失败：标题 + 问题 + 知道了） */}
+      <AlertDialog open={!!resultDialog} onOpenChange={(o) => { if (!o) setResultDialog(null); }}>
+        <AlertDialogContent className="w-[290px] gap-0 rounded-[14px] p-0 sm:w-[290px] sm:max-w-[290px]">
+          <AlertDialogHeader className="gap-2 px-5 pb-4 pt-5">
+            <AlertDialogTitle className="text-center text-[17px] font-semibold leading-snug">
+              {resultDialog?.title}
+            </AlertDialogTitle>
+            <AlertDialogDescription className="max-h-[50vh] overflow-y-auto whitespace-pre-wrap break-words text-left text-[13px] leading-relaxed">
+              {resultDialog?.body}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="flex-row gap-0 border-t border-border sm:flex-row">
+            <AlertDialogAction
+              data-testid="cloud-result-dialog-ok"
+              className="h-12 w-full flex-1 rounded-none border-0 bg-transparent text-[16px] font-medium text-[#0071E3] shadow-none hover:bg-transparent focus-visible:ring-0 active:bg-muted/60 sm:mt-0"
+              onClick={() => setResultDialog(null)}
+            >
+              知道了
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
       {/* 清除云端配置 · 二次确认（仿锁屏页关闭确认弹窗） */}
       <AlertDialog open={confirmWipe} onOpenChange={setConfirmWipe}>
         <AlertDialogContent className="w-[270px] gap-0 rounded-[14px] p-0 sm:w-[270px] sm:max-w-[270px]">
@@ -9734,7 +9758,7 @@ function CloudPage({ onBack }: { onBack: () => void }) {
               清除云端配置？
             </AlertDialogTitle>
             <AlertDialogDescription className="text-center text-[13px] leading-snug">
-              将清除平台选择与 Supabase 凭证（本机聊天数据不受影响）。已部署的云端服务不会自动删除，如需停用请先执行「停用定时轮询」。
+              将清除平台选择与 Supabase 凭证（本机聊天数据不受影响）。已部署的云端服务不会自动删除，如需停用请先关掉「云端轮询」开关。
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter className="flex-row gap-0 border-t border-border sm:flex-row">

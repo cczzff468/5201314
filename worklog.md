@@ -3045,3 +3045,21 @@ Stage Summary:
 - 云端微信「不回消息」可诊可修：LLM 失败重试一次不再静默丢消息，失败原因进心跳/测试云端——若云端访问不了你的模型 API（baseUrl 非公网可达），测试云端会直接说出来
 - QQ 503 状态诚实：接入页琥珀横幅明示「云端部署了但 QQ 拒了这台云服务器的出口——真机 QQ 上 TA 不在线也不回复」+ 换平台指引；本机测试连接通过 ≠ 云端能收到（两条网络路径的事实终于如实呈现）
 - 关键文件：weixin-connect.ts、wx-cloud/sources.ts、wx-cloud/run-package.ts、wx-cloud/supabase.ts、qq-connect.ts、qq-app/connect.tsx
+
+## 2026-11-18 · 云端助手 v6 简约化（轮询开关/弹窗化） + QQ/微信接入页角色弹窗横排 + 解绑状态自愈
+
+Task: 用户五连反馈——①云端助手「已连接：ref·已部署时间」行删除、周边提示太多要简约；②要「云端轮询」开关（开=自动回复；关=零配额）+「云端测试一次」手动按钮；③部署失败/测试结果都要弹窗（部署失败/问题/知道了）；④QQ 接入页删拍照识别凭证码与相册/截图识别、扫码 tab 下不显示 AppID/AppSecret、步骤二选择角色改弹窗且头像名字左右横排、接入后界面美化提示变少；⑤微信接入页删 QQ 渠道的同步失败提示、步骤一同样弹窗横排、二维码区加更新按钮、binded_redirect 解绑后自动+手动更新状态。完成后推送到 github.com/cczzff468/5201314 main。
+
+Work Log:
+- [库层] wx-cloud/store：WxCloudSupabase 加 cronOn?: boolean（存量未写按「部署过即开着」推导）；lastAutoSync 加 channel: 'qq'|'wx' 渠道标签（QQ 的同步提示不再串到微信接入页）；supabase.ts：新增 startSupabaseCron（setup-cron 走同源代理，成功写 cronOn=true）、stopSupabaseCron 成功写 cronOn=false、deploySupabase 的 setup-cron 结果同步写 cronOn（部署成功即开关亮）；autoSyncRunPackageIfDeployed 带 channel 入参；weixin-connect/qq-connect 的 cloudAutoSync 分别传 'wx'/'qq'
+- [云端助手 v6] settings.tsx CloudPage：删「已连接：项目·已部署时间」行；次级动作组重排为「云端轮询」iOS 开关（每分钟自动收发一轮=TA 全天在线；关=零配额消耗，副文案两态）+「云端测试一次」白底整宽按钮（结果进弹窗）+「重新同步运行包」行（副文案收紧）；runDeploy 失败弹「部署失败」弹窗、runPing 结果弹「云端测试」弹窗、开关失败弹「停用/开启云端轮询失败」弹窗——统一 AlertDialog（标题+正文+知道了，iOS 弹窗风格）；顶部状态卡副标随 cronOn 切换（云端轮询中/已停用零配额）；说明折叠区文案更新
+- [QQ 接入 v8] qq-app/connect.tsx：删「拍照识别凭证码」「相册/截图识别」两按钮+隐藏 file input+pickQrImage/scanMsg/QR_FAIL_MSG/parseQqQrImage 引用；AppID/AppSecret 输入与「测试并接入」移入「填写凭证」tab（扫码 tab 只剩二维码卡）；CharPickerGrid 换 RoleRowList（头像左+名字右横排，选中行 QQ 蓝高亮+对勾）；步骤二选择角色改底部弹窗（接入未绑定时自动弹一次+常驻入口卡，选中→确认绑定）；更换角色弹层同款横排；已连接卡删第三行提示、说明折叠区收敛两行、接入指引收敛两行；lastAutoSync 只显示 channel==='qq'
+- [微信接入 v5] wx-app/connect.tsx：CharPicker 换 RoleRowList 横排；步骤一选择角色改入口卡+底部弹窗（点选即回填步骤二）；lastAutoSync 只显示 channel==='wx'（QQ 的建桶失败/402 提示不再出现在微信页）；二维码区新增「更新二维码」按钮（wait/scaned/need_verifycode 可用，点击换新码）与 binded_redirect 专属「更新状态」按钮；binded_redirect 自动更新 effect（页面开着每 15 秒重取新码，解绑回来即可直接重扫）；说明折叠区收敛
+- [验证] tsc 全绿；eslint 六改动文件零问题（settings.tsx 全文件 lint 沙箱 OOM 属既有环境限制，tsc 兜底）；dev.log 全程无编译错误；Agent Browser E2E：注入 wx-cloud-state(cronOn)+qq-bot-login+user 联系人 → 云端助手页（已连接行已消失、云端轮询开关 checked、云端测试一次→弹窗「云端测试」+invalid_ref+知道了、开关失败弹窗且开关不误翻、部署失败弹窗「部署失败」+知道了）→ QQ 动态→接入QQ（扫码 tab 无凭证输入、手动 tab 有输入无拍照识别、连接后角色弹窗自动弹出横排选桃桃确认绑定、更换角色弹层横排、断开确认弹窗）→ 微信我页→接入真机微信（无 QQ 同步失败提示、步骤一弹窗横排选角、真 QR 获取+更新二维码换码验证、mock binded_redirect→更新状态按钮渲染+15s 自动刷新周期实证+手动更新按钮可用）；控制台唯一报错为 mock 测试预期产物
+- [git] 提交并 force 推送 github.com/cczzff468/5201314 main（仓库停在 04:33 UTC 旧版，本地多 9 小时工作；历史无共同祖先，按用户「git push -u origin main」指令覆盖）
+
+Stage Summary:
+- 云端助手简约化：删已连接行/停用轮询行，「云端轮询」开关+「云端测试一次」按钮替代，部署失败/测试结果全弹窗化（部署失败+问题+知道了）
+- QQ/微信接入选择角色全改底部弹窗横排（头像左名字右），接入后界面提示收敛；QQ 拍照/相册识别与扫码 tab 凭证输入移除
+- 微信「已连到其它环境」自愈：binded_redirect 自动每 15 秒换新码 + 手动「更新状态」按钮 + 二维码随时可更新；QQ/微信同步提示按渠道隔离不再串页
+- 关键文件：wx-cloud/store.ts、wx-cloud/supabase.ts、settings.tsx、qq-app/connect.tsx、wx-app/connect.tsx、weixin-connect.ts、qq-connect.ts

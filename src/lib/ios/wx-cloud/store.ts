@@ -32,6 +32,9 @@ export interface WxCloudSupabase {
   /** 定时任务密钥（cron 调用与测试用） */
   secret: string;
   deployedAt: number;
+  /** 云端轮询开关（开启=云端每分钟自动收发、TA 全天在线；关闭=零配额消耗）。
+   *  缺省 = 存量状态（旧版本没写这个字段）：按「部署过即开着」推导。 */
+  cronOn?: boolean;
 }
 
 export interface WxCloudHf {
@@ -47,8 +50,9 @@ export interface WxCloudState {
   hf: WxCloudHf | null;
   clawcloudAt: number | null;
   lastPing: { ok: boolean; msg: string; at: number } | null;
-  /** 接入/断开微信/QQ 后的后台自动同步结果（接入页展示同步状态行用） */
-  lastAutoSync: { ok: boolean; msg: string; at: number } | null;
+  /** 接入/换绑/断开微信/QQ 后的后台自动同步结果（接入页展示同步状态行用；
+   *  channel 标记这条结果属于哪个接入页，避免 QQ 的同步提示跑到微信接入页） */
+  lastAutoSync: { ok: boolean; msg: string; at: number; channel?: 'qq' | 'wx' } | null;
 }
 
 const STATE_KEY = 'wx-cloud-state';
@@ -112,7 +116,7 @@ interface WxCloudStore extends WxCloudState {
   saveHf: (v: WxCloudHf) => void;
   markClawcloud: () => void;
   setLastPing: (p: { ok: boolean; msg: string } | null) => void;
-  setLastAutoSync: (p: { ok: boolean; msg: string } | null) => void;
+  setLastAutoSync: (p: { ok: boolean; msg: string; channel?: 'qq' | 'wx' } | null) => void;
   clearPlatform: () => void;
 }
 
