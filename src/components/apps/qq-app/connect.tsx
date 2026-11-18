@@ -81,7 +81,7 @@ function CharPickerGrid({
 export function QqConnectPage({ contacts, onBack }: { contacts: ContactRecord[]; onBack: () => void }) {
   // store：boot 读本地凭证；test 成功（或网络不通兜底）即保存；bindContact 绑定角色；disconnect 清除；
   // qr/startQrBind/stopQrBind：官方扫码绑定会话（页面生成二维码 → 手机 QQ 扫码确认即接入）
-  const { ready, login, testing, verifying, lastTest, pulling, boot, test, verifyViaCloud, bindContact, disconnect, qr, startQrBind, stopQrBind } = useQqConnect();
+  const { ready, login, testing, verifying, lastTest, lastCloudVerify, pulling, boot, test, verifyViaCloud, bindContact, disconnect, qr, startQrBind, stopQrBind } = useQqConnect();
   // 本地 UI 状态：凭证草稿 / Secret 明文开关
   const [appId, setAppId] = useState('');
   const [appSecret, setAppSecret] = useState('');
@@ -252,9 +252,24 @@ export function QqConnectPage({ contacts, onBack }: { contacts: ContactRecord[];
       </div>
 
       <div className="flex-1 overflow-y-auto px-4 pb-[44px] pt-2">
-        {/* 云端横幅（页面顶部）：已部署绿条；未部署且已接入过 → 黄色警告（新接入的阻断卡在段一位置）；
-            boot 完成后再显示，避免读到旧值闪黄 */}
-        {cloudReady && cloudDeployed ? (
+        {/* 云端横幅（页面顶部）：已部署绿条；云端验证失败（如 503 出口被拒）降为琥珀警告——
+            部署成功 ≠ QQ 平台收得到：验证失败时真机 QQ 上 TA 实际不在线也不回复（用户实测
+            「网站显示已接入/QQ 里显示未接入」的矛盾根源）；未部署且已接入过 → 黄色警告 */}
+        {cloudReady && cloudDeployed && login && lastCloudVerify && !lastCloudVerify.ok ? (
+          <div className="flex items-start gap-2.5 rounded-[14px] bg-[#FFF4D6] px-3.5 py-3 dark:bg-[#3B3113]" data-testid="qq-bot-cloud-reject">
+            <AlertTriangle className="mt-[1.5px] h-[18px] w-[18px] shrink-0 text-[#C77700] dark:text-[#F0C24B]" strokeWidth={2} aria-hidden="true" />
+            <div className="min-w-0 flex-1">
+              <p className="text-[13px] font-medium leading-snug text-[#8A5A00] dark:text-[#F0C24B]">
+                云端已部署，但 QQ 平台拒绝了这台云服务器的出口（验证失败）——真机 QQ 上 TA 现在不在线、也不会回复
+              </p>
+              <p className="mt-1 text-[12px] leading-relaxed text-[#8A5A00] dark:text-[#F0C24B]">
+                本机「测试连接」走你自己的网络，能通过只代表凭证正确；QQ 收发消息由云端代发，出口被拒
+                （503）就收不到。可换一个部署平台（境内出口）到 设置 → 云端助手 重新部署后再点
+                「云端验证凭证」；同时确认 q.qq.com 控制台已配置回调地址。
+              </p>
+            </div>
+          </div>
+        ) : cloudReady && cloudDeployed ? (
           <div className="flex items-center gap-2 rounded-[14px] bg-[#34C759]/10 px-3.5 py-2.5">
             <CheckCircle2 className="h-4 w-4 shrink-0 text-[#34C759]" strokeWidth={2.2} aria-hidden="true" />
             <p className="text-[13px] font-medium text-[#34C759]">云端已就绪（{PLATFORM_LABELS[cloudPlatform]}），TA 7x24 在线</p>
@@ -579,6 +594,11 @@ export function QqConnectPage({ contacts, onBack }: { contacts: ContactRecord[];
                     ? `在真机 QQ 里，TA 就是「${boundName || login.boundContactName || '绑定的角色'}」`
                     : '在下面选一个角色，机器人在真机 QQ 里就是 TA'}
                 </p>
+                {lastCloudVerify && !lastCloudVerify.ok ? (
+                  <p className="mt-1 text-[12px] leading-relaxed text-[#C77700] dark:text-[#F0C24B]" data-testid="qq-bot-cloud-reject-note">
+                    凭证在本机验证可用，但云端出口被 QQ 平台拒（见顶部横幅）——真机 QQ 上 TA 暂时无法回复消息
+                  </p>
+                ) : null}
               </div>
             </div>
 

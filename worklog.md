@@ -3024,3 +3024,24 @@ Stage Summary:
   src/components/apps/chat.tsx、src/components/apps/wx-app/chat-page.tsx、
   src/components/apps/qq-app/chat-page.tsx、src/lib/ios/wx-cloud/sources.ts、
   src/lib/ios/wx-cloud/run-package.ts、src/components/apps/qq-app/connect.tsx
+
+## 2026-11-18 · 真机微信表情包根治 + 云端回复可靠性 + QQ 503 状态诚实化
+
+Task: 用户三连反馈——①云端接入微信后关闭本机实时回复，真机微信上给 AI 发消息不回；②让 AI 发表情包，回复「哈哈，你怎么不聊点别的，一上来就要表情包 [表情包:wwb-调皮]」标记以裸文字出现在真机微信；③QQ 网站里显示已接入、QQ 里显示未接入、测试连接通过但云端验证凭证 503
+
+Work Log:
+- [表情包·根因] 站内微信的 [表情包:ID] 标记教学随共享线程/人设习惯带进真机微信通道（iLink 只能发文字），提示词拦不住 LLM 的标记惯性——必须发送边界确定性转换
+- [表情包·方案] 大表情标记 → 经典表情代码：去 ID 前缀（wwb-/wxb-/qqb-/wx-/qq-）后名字在微信经典表情清单（109 项，程序化取自 BUILTIN_WX_STICKERS）内 → 转 [名字]（真机微信客户端把该文本渲染成真表情——AI 等于真会发表情了）；不在清单（用户收藏大表情/图片/语音标记）→ 剥除；净空 → 颜文字兜底
+- [表情包·落地] 本机路径 weixin-connect.ts：sanitizeWxOutText（handleIncoming 回复 + forwardThreadWatcher 转发两处发送边界）+ 本机 extraRules 教学经典代码；云端路径 sources.ts：模板内联同款函数（String.raw 内 \u 转义语义等价，node --check 通过）+ handleWxMsg 出站净化；run-package.ts EXTRA_RULES_WX v4 教学（[调皮][偷笑][捂脸] 可发、大表情标记禁止）
+- [可靠性·根因] 云端 handleWxMsg 一次 LLM 失败该消息即被静默丢弃（getupdates 游标已推进）——用户看到「ai 不回信息」且完全无排查线索
+- [可靠性·落地] 云端 handleWxMsg：LLM 失败重试一次（2 轮尝试）；失败原因记入 WX_MSG_ERR（10 分钟新鲜度）；tick 逐条失败不再完全静默；writeHeartbeat 带 wxMsgError/wxMsgErrorAt；Edge 默认分支响应与 Node 状态页都带 wxMsgError；pingSupabase「测试云端」把 wxMsgError 展示出来（多为云端访问不了你的模型 API → 核对 API 配置是否公网可达）
+- [QQ·状态诚实化] 已接入徽标=本机凭证已保存（测试连接走本机网络），与云端出口被拒（503）并不矛盾但原先 UI 无从体现：qq-connect store 新增 lastCloudVerify（localStorage 持久化，boot 回读）；接入页云端横幅三态——验证失败降为琥珀警告（云端已部署但 QQ 平台拒绝了这台云服务器的出口……真机 QQ 上 TA 现在不在线、也不会回复，附换平台/配置回调地址指引），已连接卡同步琥珀注记；verifyQqCreds 503 文案补行动指引（换境内出口平台部署后重新验证）
+- [503·本质] 沙箱实测：api.bot.qq.com 新端点海外可达（200+业务错误），旧端点网关拦海外 503；用户云端双端点皆 503 = 该云平台出口 IP 被腾讯风控拦截——代码层无法绕过，唯一解是换部署平台（境内出口）
+- [验证] tsc 仅两处既有基线（chat.tsx stickerId / qq-connect Ed25519 BufferSource，均非本次触碰）；eslint 六改动文件零问题（全库 lint 因 couple-space.tsx 500KB 触发沙箱 OOM，属环境限制）；云端模板 node --check 通过 + sanitizeWxOutText 十用例单测全过（用户实拍用例「…[表情包:wwb-调皮]」→「…[调皮]」完美转换）；本机版同款六用例全过；Agent Browser E2E：注入 qq-bot-login + wx-cloud-state + qq-cloud-verify(失败) → 站内 QQ 登录（建 e2e 用户联系人）→ 动态 → 接入QQ：琥珀横幅（data-testid=qq-bot-cloud-reject）+ 已连接卡注记（qq-bot-cloud-reject-note）渲染 ✓、绿色「云端已就绪」被正确替换 ✓、VLM 截图复核 ✓、控制台清空重载零错误 ✓；测试数据全部清理
+- [git] 沙箱重置后 PAT 丢失无法推远端——本地提交保留（.next/dev.log/tool-results/tsbuildinfo 补入 .gitignore 并取消跟踪）
+
+Stage Summary:
+- 真机微信 AI 真会发表情了：大表情标记在发送边界确定性转成经典表情代码（109 项），真机微信渲染成真表情；发不了的剥除、纯表情兜颜文字——提示词层 + 确定性双层防线
+- 云端微信「不回消息」可诊可修：LLM 失败重试一次不再静默丢消息，失败原因进心跳/测试云端——若云端访问不了你的模型 API（baseUrl 非公网可达），测试云端会直接说出来
+- QQ 503 状态诚实：接入页琥珀横幅明示「云端部署了但 QQ 拒了这台云服务器的出口——真机 QQ 上 TA 不在线也不回复」+ 换平台指引；本机测试连接通过 ≠ 云端能收到（两条网络路径的事实终于如实呈现）
+- 关键文件：weixin-connect.ts、wx-cloud/sources.ts、wx-cloud/run-package.ts、wx-cloud/supabase.ts、qq-connect.ts、qq-app/connect.tsx

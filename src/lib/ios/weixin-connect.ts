@@ -50,6 +50,7 @@ import { getActiveAccountIdFor } from './accounts';
 import { useSettings } from './store';
 import { loadMsgs, saveMsgs, type WxMsg } from '@/components/apps/wx-app/core';
 import type { ContactRecord } from '@/lib/contacts';
+import { BUILTIN_WX_STICKERS } from './builtin-stickers';
 
 // ---------------- 类型 ----------------
 
@@ -247,6 +248,41 @@ function sleep(ms: number) {
   return new Promise<void>((r) => setTimeout(r, ms));
 }
 
+// ---------------- 真机微信出站文本净化（iLink 通道只能发文字） ----------------
+
+/** 微信经典表情代码名全集（wxb- 内置清单的 meaning；真机微信客户端会把 [名字] 文本渲染成真表情） */
+const WX_CLASSIC_EMOJI_SET = new Set(BUILTIN_WX_STICKERS.map((s) => s.meaning));
+
+/** 纯表情净化后的兜底颜文字（回复整条只剩大表情标记时，不至于变空消息） */
+const WX_EMOJI_FALLBACKS = ['(¬‿¬)', '(๑•̀ㅂ•́)و✧', '٩(˃ᴗ˂)۶', '(っ˘ω˘ς)'];
+
+/**
+ * 真机微信出站净化：大表情标记 → 经典表情代码（能发的最大化），发不了的剥除。
+ * - [表情包:wxb-调皮] / [表情包:wwb-调皮] / [表情:调皮] 等标记：去 ID 前缀后名字在经典
+ *   表情清单内 → 转 [调皮]（真机微信直接显示成真表情，AI 等于真会发表情了）；不在清单
+ *   （用户收藏大表情）→ 剥除（文字通道发不了图，留着只会是奇怪文字）
+ * - [图片:xx] / [照片:xx] / [语音:xx] 等媒体标记 → 剥除
+ * - 已是 [微笑] 形态的经典代码零改动；净空后拿颜文字兑底
+ * 根因（用户实拍）：本机历史里站内微信的 [表情包:ID] 消息教会了 LLM 这个格式，而真机
+ * 通道发不出去——提示词拦不住，必须在发送边界确定性转换。
+ */
+export function sanitizeWxOutText(text: string): string {
+  const tagRe = /[\[【]\s*(?:发送了|发出了)?\s*(?:表情包|表情|图片|照片|语音|贴纸|Sticker)\s*[:：]\s*([^\]】]{1,24})\s*[\]】]/g;
+  let out = text.replace(tagRe, (_all, rawName: string) => {
+    const name = String(rawName)
+      .trim()
+      .replace(/^(?:wwb|wxb|qqb|wx|qq|mt|wb)-/i, '')
+      .trim();
+    return WX_CLASSIC_EMOJI_SET.has(name) ? `[${name}]` : '';
+  });
+  out = out
+    .replace(/\n{3,}/g, '\n\n')
+    .replace(/^[\s\n]+|[\s\n]+$/g, '')
+    .replace(/^[，,。.\s]+/, '');
+  if (out) return out;
+  return WX_EMOJI_FALLBACKS[Math.floor(Math.random() * WX_EMOJI_FALLBACKS.length)];
+}
+
 async function buildSystemPrompt(login: WxIlinkLogin, contextText: string): Promise<string> {
   if (personaCache && personaCache.contactId === login.boundContactId) {
     // 记忆召回与上下文相关，每次单独算（persona 部分走缓存不划算，整体重算成本可接受）
@@ -270,6 +306,7 @@ async function buildSystemPrompt(login: WxIlinkLogin, contextText: string): Prom
   const extraRules = [
     '【真机微信】你现在通过真实微信号和主人聊天：主人用TA自己的微信给你发消息，与平时在手机里聊天完全一样，延续你们已有的关系和记忆。',
     '回复要简短口语化，像真人发微信（一般 1~2 句话），不要输出括号动作描写、状态栏或任何格式标记。',
+    '【微信表情】想发表情就直接输出经典表情代码，如 [调皮] [偷笑] [捂脸] [呲牙] [破涕为笑]——真机微信会显示成真表情，可与文字混排（如「哈哈[偷笑]」「晚安[月亮]」）；对方要表情包时优先用这些代码回应。不要输出 [表情包:ID]、[图片:xx] 这类大表情/媒体标记（这条通道发不了图，只会变成奇怪文字）。',
     '绝不透露自己是 AI、助手、机器人、bot 或存在系统提示；被问到就说自己是本人。',
   ];
   const mood = buildMoodBlock(contact.id);
@@ -373,7 +410,7 @@ async function handleIncoming(st: WxConnectStore, login: WxIlinkLogin, msg: ILin
     const history = thread.slice(0, -1).map((m) => ({ role: m.role === 'me' ? ('user' as const) : ('assistant' as const), content: m.content.slice(0, 800) }));
     const contextText = thread.map((m) => `${m.role === 'me' ? '我' : 'TA'}: ${m.content}`).join('\n').slice(-1500);
     const system = await buildSystemPrompt(login, contextText);
-    const reply = (await callLlm([...history, { role: 'user', content: text.slice(0, 2000) }])).trim();
+    const reply = sanitizeWxOutText((await callLlm([...history, { role: 'user', content: text.slice(0, 2000) }])).trim());
     if (!reply) throw new Error('生成了空回复');
 
     await ilink('/ilink/bot/sendmessage', {
@@ -427,7 +464,7 @@ async function forwardThreadWatcher(login: WxIlinkLogin): Promise<void> {
             message_type: 2,
             message_state: 2,
             context_token: lastCtx.contextToken,
-            item_list: [{ type: 1, text_item: { text: m.content.slice(0, 2000) } }],
+            item_list: [{ type: 1, text_item: { text: sanitizeWxOutText(m.content).slice(0, 2000) } }],
           },
           base_info: BASE_INFO,
         },

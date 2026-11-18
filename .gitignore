@@ -1,2 +1,9 @@
 skills/
 node_modules/
+
+# 构建产物与工具输出（不入库）
+.next/
+tsconfig.tsbuildinfo
+tool-results/
+dev.log
+.zscripts/dev.log

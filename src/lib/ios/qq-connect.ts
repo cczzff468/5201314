@@ -386,6 +386,10 @@ interface QqConnectStore {
   login: QqBotLogin | null;
   testing: boolean;
   lastTest: QqBotTestResult | null;
+  /** 最近一次云端验证凭证的结果（会话内）：ok=false 时接入页顶部横幅降为琥珀警告——
+ *  「已接入」徽标只代表本机凭证已保存，云端出口被 QQ 平台拒（如 503）时真机 QQ 上
+ *  TA 实际不在线、也不会回复（用户实测反馈：网站显示已接入/QQ 里未接入的矛盾根源） */
+  lastCloudVerify: { ok: boolean; msg: string; at: number } | null;
   /** 云端记录拉取状态 */
   pulling: boolean;
   /** 云端验证凭证进行中（verifyViaCloud 的防重入闸） */
@@ -394,6 +398,8 @@ interface QqConnectStore {
   qr: QqQrBindState;
 
   boot: () => Promise<void>;
+  /** 云端验证结果落盘（localStorage 轻持久化） */
+  persistCloudVerify: (v: { ok: boolean; msg: string; at: number } | null) => void;
   /** 测试连接（成功即保存凭证） */
   test: (appId: string, appSecret: string) => Promise<QqBotTestResult>;
   /** 云端验证凭证：走 func-call 同源代理（v3：存量无 CORS 旧函数也能用） */
@@ -413,6 +419,7 @@ export const useQqConnect = create<QqConnectStore>((set, get) => ({
   login: null,
   testing: false,
   lastTest: null,
+  lastCloudVerify: null,
   pulling: false,
   verifying: false,
   qr: { phase: 'idle' },
@@ -428,10 +435,27 @@ export const useQqConnect = create<QqConnectStore>((set, get) => ({
         const v = JSON.parse(plain) as QqBotLogin;
         memQqBot = v && v.appId ? v : null;
       }
-      set({ login: memQqBot, ready: true });
+      // 云端验证结果持久化（会话间不失忆：刷新后琥珀横幅仍在，不误报「云端已就绪」）
+      let cloudVerify: QqConnectStore['lastCloudVerify'] = null;
+      try {
+        const cv = localStorage.getItem('qq-cloud-verify');
+        if (cv) {
+          const p = JSON.parse(cv) as { ok?: boolean; msg?: string; at?: number };
+          if (p && typeof p.ok === 'boolean') cloudVerify = { ok: p.ok, msg: String(p.msg || '').slice(0, 200), at: Number(p.at) || 0 };
+        }
+      } catch { /* 形态异常忽略 */ }
+      set({ login: memQqBot, ready: true, lastCloudVerify: cloudVerify });
     } catch {
       set({ ready: true });
     }
+  },
+
+  /** 云端验证结果落盘（localStorage 轻持久化——状态说明无秘密，不值得上密文 kv） */
+  persistCloudVerify(v: { ok: boolean; msg: string; at: number } | null): void {
+    try {
+      if (v) localStorage.setItem('qq-cloud-verify', JSON.stringify(v));
+      else localStorage.removeItem('qq-cloud-verify');
+    } catch { /* 隐私模式等忽略 */ }
   },
 
   test: async (appId, appSecret) => {
@@ -551,23 +575,27 @@ export const useQqConnect = create<QqConnectStore>((set, get) => ({
           ok: true,
           msg: `云端验证通过${j.botName ? `：机器人「${j.botName}」` : ''}，凭证有效`,
         };
-        set({ lastTest: r, login: next });
+        set({ lastTest: r, login: next, lastCloudVerify: { ok: true, msg: r.msg, at: Date.now() } });
+        get().persistCloudVerify({ ok: true, msg: r.msg, at: Date.now() });
         cloudAutoSync('QQ 云端验证通过');
         return r;
       }
       if (res.status === 401) {
         const r: QqBotTestResult = { ok: false, msg: '任务密钥不匹配：到 设置 → 云端助手 重新点「一键部署」后再试' };
-        set({ lastTest: r });
+        set({ lastTest: r, lastCloudVerify: { ok: false, msg: r.msg, at: Date.now() } });
+        get().persistCloudVerify({ ok: false, msg: r.msg, at: Date.now() });
         return r;
       }
       if (res.status === 504) {
         const r: QqBotTestResult = { ok: false, msg: '连不上云端函数：请确认已一键部署（刚部署需 10-30 秒冷启动，稍等再试）' };
-        set({ lastTest: r });
+        set({ lastTest: r, lastCloudVerify: { ok: false, msg: r.msg, at: Date.now() } });
+        get().persistCloudVerify({ ok: false, msg: r.msg, at: Date.now() });
         return r;
       }
       const fallback = text ? `云端返回 ${res.status}：${text.slice(0, 60)}` : `云端返回 ${res.status}（云端助手可能还没更新到支持 verify-qq 的版本）`;
       const r: QqBotTestResult = { ok: false, msg: (j?.error || j?.message || fallback).slice(0, 120) };
-      set({ lastTest: r });
+      set({ lastTest: r, lastCloudVerify: { ok: false, msg: r.msg, at: Date.now() } });
+      get().persistCloudVerify({ ok: false, msg: r.msg, at: Date.now() });
       return r;
     } catch (e) {
       const timedOut = e instanceof DOMException && e.name === 'TimeoutError';
@@ -575,7 +603,8 @@ export const useQqConnect = create<QqConnectStore>((set, get) => ({
       const r: QqBotTestResult = timedOut
         ? { ok: false, msg: '云端验证超时（80 秒）：请重试；多次超时请到 设置 → 云端助手 重新部署最新版' }
         : { ok: false, msg: `连不上云端助手（${detail.slice(0, 80)}）：请稍后重试` };
-      set({ lastTest: r });
+      set({ lastTest: r, lastCloudVerify: { ok: false, msg: r.msg, at: Date.now() } });
+      get().persistCloudVerify({ ok: false, msg: r.msg, at: Date.now() });
       return r;
     } finally {
       set({ verifying: false });

@@ -164,6 +164,28 @@ function extractText(msg) {
   return '';
 }
 
+// ---- 真机微信出站净化（iLink 通道只能发文字；v4：大表情标记 → 经典表情代码） ----
+// 根因（用户实拍）：云端人设沿用了站内微信的 [表情包:ID] 习惯（历史/人设教学带进去的），
+// iLink 通道发不了图 → 标记以裸文字出现在真机微信上。提示词拦不住，发送边界确定性转换。
+// 转换规则：去 ID 前缀后名字在经典表情清单内 → [名字]（真机微信客户端把该文本渲染成真
+// 表情，AI 等于真会发表情）；不在清单 → 剩除；净空 → 颜文字兑底（不空消息）。
+var WX_CLASSIC = ('微笑,撇嘴,色,发呆,得意,流泪,害羞,闭嘴,睡,大哭,尴尬,发怒,调皮,呲牙,惊讶,难过,囧,抓狂,吐,偷笑,愉快,白眼,傲慢,困,惊恐,憨笑,悠闲,咒骂,疑问,嘘,晕,衰,骷髅,敲打,再见,擦汗,抠鼻,鼓掌,坏笑,右哼哼,鄙视,委屈,快哭了,阴险,亲亲,可怜,笑脸,生病,脸红,破涕为笑,恐惧,失望,无语,嘿哈,捂脸,奸笑,机智,皱眉,耶,吃瓜,加油,汗,天啊,Emm,社会社会,旺柴,好的,打脸,哇,翻白眼,666,让我看看,叹气,苦涩,裂开,嘴唇,爱心,心碎,拥抱,强,弱,握手,胜利,抱拳,勾引,拳头,OK,合十,猪头,便便,月亮,太阳,庆祝,红包,發,福,烟花,爆竹,礼物,跳跳,发抖,转圈,啤酒,咖啡,蛋糕,玫瑰,凋谢,菜刀,炸弹').split(',');
+var WX_CLASSIC_SET = {};
+for (var wci = 0; wci < WX_CLASSIC.length; wci++) WX_CLASSIC_SET[WX_CLASSIC[wci]] = 1;
+var WX_EMOJI_FALLBACKS = ['(¬‿¬)', '(๑•̀ㅂ•́)و✧', '٩(˃ᴗ˂)۶', '(っ˘ω˘ς)'];
+var WX_MSG_ERR = '';
+var WX_MSG_ERR_AT = 0;
+function sanitizeWxOutText(text) {
+  var tagRe = /[\[【]\s*(?:发送了|发出了)?\s*(?:表情包|表情|图片|照片|语音|贴纸|Sticker)\s*[:：]\s*([^\]】]{1,24})\s*[\]】]/g;
+  var out = String(text || '').replace(tagRe, function (_all, rawName) {
+    var name = String(rawName || '').trim().replace(/^(?:wwb|wxb|qqb|wx|qq|mt|wb)-/i, '').trim();
+    return WX_CLASSIC_SET[name] ? '[' + name + ']' : '';
+  });
+  out = out.replace(/\n{3,}/g, '\n\n').replace(/^[\s\n]+|[\s\n]+$/g, '').replace(/^[，,。.\s]+/, '');
+  if (out) return out;
+  return WX_EMOJI_FALLBACKS[Math.floor(Math.random() * WX_EMOJI_FALLBACKS.length)];
+}
+
 async function sendWxText(cfg, toUserId, contextToken, text) {
   await ilinkCall('/ilink/bot/sendmessage', cfg.wechat.botToken, {
     msg: {
@@ -179,7 +201,10 @@ async function sendWxText(cfg, toUserId, contextToken, text) {
   });
 }
 
-/** 微信：处理一条来消息，返回是否成功回复 */
+/** 微信：处理一条来消息，返回是否成功回复。
+ *  v4：①LLM 失败重试一次（原来一次失败消息就被静默丢弃，主人看到「ai不回信息」）；
+ *  ②出站文本经 sanitizeWxOutText 净化（大表情标记→经典表情代码/剥除）；
+ *  ③失败原因记入 WX_MSG_ERR（心跳/ping 可见——原来逐条失败完全不可见，无法排查） */
 async function handleWxMsg(cfg, msg) {
   var text = extractText(msg);
   if (!text || !msg.from_user_id || !msg.context_token) return false;
@@ -200,8 +225,20 @@ async function handleWxMsg(cfg, msg) {
     var msgs = [{ role: 'system', content: system }];
     for (var i = Math.max(0, hist.length - 12); i < hist.length; i++) msgs.push(hist[i]);
     msgs.push({ role: 'user', content: text.slice(0, 2000) });
-    var reply = await callLlm(cfg, msgs);
+    var reply = '';
+    var lastLlmErr = null;
+    for (var att = 0; att < 2 && !reply; att++) {
+      try {
+        reply = sanitizeWxOutText(await callLlm(cfg, msgs));
+      } catch (le) { lastLlmErr = le; }
+    }
+    if (!reply) {
+      WX_MSG_ERR = ('LLM 回复失败：' + String((lastLlmErr && lastLlmErr.message) || lastLlmErr)).slice(0, 160);
+      WX_MSG_ERR_AT = Date.now();
+      throw new Error(WX_MSG_ERR);
+    }
     await sendWxText(cfg, msg.from_user_id, msg.context_token, reply);
+    if (WX_MSG_ERR_AT && Date.now() - WX_MSG_ERR_AT > 600000) WX_MSG_ERR = '';
     HIST_WX = (HIST_WX || []).concat([
       { role: 'user', content: text.slice(0, 500), ts: Date.now() },
       { role: 'assistant', content: reply.slice(0, 500), ts: Date.now() },
@@ -209,6 +246,10 @@ async function handleWxMsg(cfg, msg) {
     await saveWxHistory();
     return true;
   } catch (e) {
+    if (!WX_MSG_ERR) {
+      WX_MSG_ERR = ('微信回复失败：' + String(e && e.message)).slice(0, 160);
+      WX_MSG_ERR_AT = Date.now();
+    }
     throw e;
   }
 }
@@ -229,7 +270,7 @@ async function tick() {
       if (await handleWxMsg(cfg, msgs[i])) n++;
     } catch (e) {
       if (String(e && e.message).indexOf('TOKEN_EXPIRED') >= 0) throw e;
-      /* 单条失败继续下一条 */
+      /* 单条失败继续下一条；原因已记入 WX_MSG_ERR（心跳/ping 可见） */
     }
   }
   return n;
@@ -477,8 +518,8 @@ async function verifyQqCreds(appId, appSecret) {
       lastErr = String(e && e.message).slice(0, 120);
     }
   }
-  // 双端点都没拿到业务回包：唯一剩下的典型就是旧端点网关 503（新端点也 503 时说明这台云服务器出口被两个网关同时拦）
-  var geo = lastStatus === 503 ? '（503：QQ 网关拒绝了这台云服务器的出口 IP）' : '';
+  // 双端点都没拿到业务回包：典型是网关 503（新端点也 503 时说明这台云服务器出口被两个网关同时拦）
+  var geo = lastStatus === 503 ? '（503：QQ 网关拒绝了这台云服务器的出口 IP）——QQ 收发消息走不了这台云端，也不会回复。可换一个部署平台（境内出口，如 ClawCloud 境内节点/国内服务器）重新部署后再点本按钮验证' : '';
   return { ok: false, error: '云端连不上 QQ 平台：' + (lastErr || 'HTTP ' + lastStatus).slice(0, 120) + geo };
 }
 
@@ -616,6 +657,8 @@ async function writeHeartbeat(extra) {
     lastRunAt: Date.now(),
     codeSource: CODE_SOURCE,
     ok: true,
+    wxMsgError: WX_MSG_ERR || undefined,
+    wxMsgErrorAt: WX_MSG_ERR_AT || undefined,
   }, extra || {}));
 }
 `;
@@ -855,9 +898,10 @@ async function main() {
         res.end(JSON.stringify(vr));
         return;
       }
-      // 状态页（保活 ping / 测试）
+      // 状态页（保活 ping / 测试）：带 wxMsgError（微信逐条回复失败的原因——LLM 配置无效/
+      // 网络不通时主人在「测试云端」里就能看到，不再静默丢消息）
       res.writeHead(200, Object.assign({ 'Content-Type': 'application/json' }, corsHeaders()));
-      res.end(JSON.stringify({ ok: true, source: 'node', lastRunAt: LAST_RUN_AT, lastError: LAST_ERROR, cfgLoaded: !!CFG }));
+      res.end(JSON.stringify({ ok: true, source: 'node', lastRunAt: LAST_RUN_AT, lastError: LAST_ERROR, wxMsgError: WX_MSG_ERR, cfgLoaded: !!CFG }));
     } catch (e) {
       res.writeHead(500, Object.assign({ 'Content-Type': 'application/json' }, corsHeaders()));
       res.end(JSON.stringify({ ok: false, error: String(e && e.message) }));
@@ -975,7 +1019,7 @@ Deno.serve(async (req) => {
       }
     }
     await writeHeartbeat({ handled: handled, lastError: lastError });
-    return jr({ ok: !lastError, handled: handled, lastError: lastError, ranMs: Date.now() - t0 });
+    return jr({ ok: !lastError, handled: handled, lastError: lastError, wxMsgError: WX_MSG_ERR || '', ranMs: Date.now() - t0 });
   } catch (e) {
     return jr({ ok: false, error: String(e && e.message).slice(0, 200) }, 500);
   }

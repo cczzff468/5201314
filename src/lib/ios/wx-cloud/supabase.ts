@@ -329,7 +329,9 @@ export async function pingSupabase(): Promise<{ ok: boolean; msg: string }> {
       /* 非 JSON */
     }
     if (r.ok && j?.ok) {
-      const res = { ok: true, msg: `云端正常：本轮处理 ${j.handled ?? 0} 条消息（含 100 秒轮询窗口）` };
+      // v4：微信逐条回复失败不再静默（LLM 配置无效/网络不通等）——ping 里直接看到原因
+      const warn = j.wxMsgError ? `；注意：最近一条微信回复失败——${String(j.wxMsgError).slice(0, 100)}（多为云端访问不了你的模型 API：核对 设置 → API 配置 的地址是否公网可达，改完重新同步运行包）` : '';
+      const res = { ok: true, msg: `云端正常：本轮处理 ${j.handled ?? 0} 条消息（含 100 秒轮询窗口）${warn}` };
       useWxCloud.getState().setLastPing(res);
       return res;
     }
