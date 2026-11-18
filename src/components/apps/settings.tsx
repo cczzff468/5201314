@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ChangeEvent, ReactNode } from 'react';
 import {
+  Activity,
   AlertCircle,
   AppWindow,
   ArrowDownLeft,
@@ -21,6 +22,7 @@ import {
   ChevronsUpDown,
   CircleDot,
   ClipboardList,
+  CloudOff,
   CloudUpload,
   Database,
   Download,
@@ -548,6 +550,9 @@ function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
   // 灵动岛常驻开关（用户需求）：关闭后隐藏顶部黑色胶囊基础灵动岛，只显示 APP 灵动岛
   const islandPersistent = useSettings((s) => s.islandPersistent);
   const setIslandPersistent = useSettings((s) => s.setIslandPersistent);
+  // 后台保活开关（v80）：开启后切后台/锁屏时尽量保持网页运行——主动消息与轮询不中断
+  const bgKeepAlive = useSettings((s) => s.bgKeepAlive);
+  const setBgKeepAlive = useSettings((s) => s.setBgKeepAlive);
   // 全局悬浮工具（v72）：提示词查看器 / 快捷操作——开启后手机右下角出现可拖拽悬浮球
   const assistViewer = useSettings((s) => s.assistViewer);
   const setAssistViewer = useSettings((s) => s.setAssistViewer);
@@ -777,6 +782,33 @@ function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
               <span
                 className={`pointer-events-none absolute left-[2px] top-[2px] block h-[27px] w-[27px] rounded-full bg-white shadow-[0_2px_5px_rgba(0,0,0,0.25)] transition-transform duration-200 ${
                   islandPersistent ? 'translate-x-[20px]' : 'translate-x-0'
+                }`}
+              />
+            </button>
+          </div>
+          {/* v80 后台保活开关：Worker 心跳 + 无声音频双通道——切到后台/锁屏时尽量保持
+              网页运行（防定时器节流/防冻结），AI 主动消息与后台接力轮询不中断；代价是略更耗电。
+              与飞行模式同款 iOS 原生 51×31 大开关，默认关（省电），开启态 #34C759 绿 */}
+          <div className="flex min-h-[52px] items-center gap-3 px-4 py-2">
+            <RowIcon icon={Activity} tone={TONE_GRAY} />
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-[16px]">后台保活</span>
+              <span className="mt-0.5 block truncate text-[11.5px] text-muted-foreground">切后台保持网页运行，主动消息与轮询不中断</span>
+            </span>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={bgKeepAlive}
+              aria-label="后台保活"
+              data-testid="settings-keepalive-switch"
+              onClick={() => setBgKeepAlive(!bgKeepAlive)}
+              className={`relative h-[31px] w-[51px] shrink-0 rounded-full transition-colors duration-200 ${
+                bgKeepAlive ? 'bg-[#34C759]' : 'bg-black/15 dark:bg-white/25'
+              }`}
+            >
+              <span
+                className={`pointer-events-none absolute left-[2px] top-[2px] block h-[27px] w-[27px] rounded-full bg-white shadow-[0_2px_5px_rgba(0,0,0,0.25)] transition-transform duration-200 ${
+                  bgKeepAlive ? 'translate-x-[20px]' : 'translate-x-0'
                 }`}
               />
             </button>
@@ -8981,6 +9013,30 @@ function CloudCopyButton({
   );
 }
 
+/** 云端助手 · 状态小胶囊（v80 状态卡 chips）：平台 / 部署 / 最近测试 一排小标签，
+ *  tone=green/red 时带彩色文字（成功/异常一眼可辨） */
+function CloudChip({
+  children,
+  tone = 'gray',
+}: {
+  children: ReactNode;
+  tone?: 'gray' | 'green' | 'red';
+}) {
+  const toneCls =
+    tone === 'green'
+      ? 'text-emerald-600 ring-emerald-500/25 dark:text-emerald-300'
+      : tone === 'red'
+        ? 'text-[#FF453A] ring-[#FF453A]/25'
+        : 'text-foreground/70 ring-black/[0.05] dark:text-muted-foreground dark:ring-white/[0.08]';
+  return (
+    <span
+      className={`inline-flex max-w-full items-center gap-1 truncate rounded-full bg-black/[0.035] px-2.5 py-[5px] text-[11px] font-medium ring-1 backdrop-blur-xl dark:bg-white/[0.06] ${toneCls}`}
+    >
+      {children}
+    </span>
+  );
+}
+
 /** 云端助手 · 简单结果提示（一键部署/HF 成功框内容多单独写；这里只包「绿/红一行消息」的结果） */
 function CloudResultBox({ r, mt = false }: { r: { ok: boolean; msg: string } | null; mt?: boolean }) {
   if (!r) return null;
@@ -9121,6 +9177,10 @@ function CloudPage({ onBack }: { onBack: () => void }) {
   const supaDeployed = (supa?.deployedAt ?? 0) > 0;
   const supaUrl = supa?.projectUrl ?? '';
   const supaKey = supa?.serviceKey ?? '';
+  // v80 状态卡派生：大图标状态标题/副标 + 测试异常信号（pingBad 置顶优先）
+  const pingBad = lastPing?.ok === false;
+  const statusTitle = !cloudOn ? '未使用云端（仅本机）' : pingBad ? '云端异常' : supaDeployed ? '云端已部署' : '已选云端 · 待部署';
+  const statusSub = !cloudOn ? '页面开着时 TA 才回复，关掉就停' : !supaDeployed ? '填 Token → 选项目 → 一键部署' : '真机消息云端秒回 · 页面关掉也不停';
   const cronSqlText = supa?.ref ? cronSql() : '';
 
   // Token 输入框与已保存值不一致时先回写快照（用户换 token 后免重选项目）
@@ -9291,32 +9351,55 @@ function CloudPage({ onBack }: { onBack: () => void }) {
   return (
     <DetailShell title="云端助手" onBack={onBack} gray>
       <div className="flex flex-col gap-5">
-        {/* 顶部状态卡（v5 简约版）：状态点 + 当前平台 + 最近测试一行；说明全收「说明」收缩区 */}
+        {/* 顶部状态卡（v80 重做）：大状态图标 + 一句话状态 + 关键信息 chips（平台/部署/最近测试）；
+            长说明全收「说明」收缩区——页面主体一眼看清当前状态 */}
         <GrayCard>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-3.5">
             <span
               aria-hidden="true"
-              className={`h-2 w-2 shrink-0 rounded-full ${
-                !cloudOn || !lastPing ? 'bg-[#8E8E93]' : lastPing.ok ? 'bg-[#34C759]' : 'bg-[#FF453A]'
-              }`}
-            />
-            <span className="text-[15px] font-medium">当前平台：{PLATFORM_LABELS[platform]}</span>
-          </div>
-          {lastPing && (
-            <p
-              className={`mt-1.5 text-[12.5px] leading-relaxed ${
-                lastPing.ok ? 'text-emerald-600 dark:text-emerald-300' : 'text-[#FF453A]'
+              className={`flex h-[46px] w-[46px] shrink-0 items-center justify-center rounded-full ${
+                pingBad ? 'bg-[#FF453A]/[0.12]' : cloudOn ? 'bg-[#34C759]/[0.12]' : 'bg-black/[0.05] dark:bg-white/[0.08]'
               }`}
             >
-              {lastPing.ok ? '云端正常' : '云端异常'}：{lastPing.msg}（{new Date(lastPing.at).toLocaleString()}）
+              {pingBad ? (
+                <XCircle className="h-6 w-6 text-[#FF453A]" strokeWidth={2} />
+              ) : cloudOn ? (
+                <CloudUpload className="h-6 w-6 text-[#34C759]" strokeWidth={2} />
+              ) : (
+                <CloudOff className="h-6 w-6 text-muted-foreground/80" strokeWidth={2} />
+              )}
+            </span>
+            <div className="min-w-0 flex-1">
+              <p className="text-[17px] font-semibold leading-snug">{statusTitle}</p>
+              <p className="mt-0.5 text-[12.5px] leading-snug text-muted-foreground">{statusSub}</p>
+            </div>
+          </div>
+
+          {/* 关键信息 chips：平台 / 部署状态 / 最近测试（一排小胶囊，扫一眼全知道） */}
+          <div className="mt-3 flex flex-wrap gap-1.5" aria-label="云端状态概览">
+            {cloudOn && <CloudChip>{PLATFORM_LABELS[platform]}</CloudChip>}
+            <CloudChip tone={supaDeployed ? 'green' : 'gray'}>
+              {supaDeployed ? `已部署 · ${new Date(supa?.deployedAt ?? 0).toLocaleString()}` : '未部署'}
+            </CloudChip>
+            <CloudChip tone={lastPing ? (lastPing.ok ? 'green' : 'red') : 'gray'}>
+              {lastPing ? `最近测试${lastPing.ok ? '正常' : '异常'} · ${new Date(lastPing.at).toLocaleString()}` : '未测试'}
+            </CloudChip>
+          </div>
+
+          {lastPing && lastPing.msg && (
+            <p
+              className={`mt-2.5 text-[12.5px] leading-relaxed ${pingBad ? 'text-[#FF453A]' : 'text-emerald-600 dark:text-emerald-300'}`}
+            >
+              {lastPing.msg}
             </p>
           )}
-          <div className="mt-2">
-            <CloudFold title="说明（部署作用 / 使用顺序 / 测试云端为什么会让 TA 在微信里说话）" testid="cloud-help-fold">
+
+          <div className="mt-2.5">
+            <CloudFold title="说明（作用 / 使用顺序 / 测试云端会做什么）" testid="cloud-help-fold">
               <div className="space-y-2 text-[12px] leading-relaxed text-muted-foreground">
-                <p>部署后，你接入的微信/QQ 角色 7x24 小时在线替你收发消息——真机消息云端秒回，手机页面关掉也不停。</p>
-                <p>使用顺序（必须按这个顺序）：① 先在这里部署 Supabase 云端 → ② 再到微信「我」页 / QQ「动态」页接入真机（微信扫码，QQ 扫码连接或填 AppID/AppSecret）。所有凭证只在你自己的浏览器密文保存。</p>
-                <p>「测试云端」会真实跑一轮约 100 秒的微信收发窗口——期间真机微信上收到的消息会被云端处理并回复（所以点完测试后 AI 真的会在微信里说话）；处理过的对话会自动同步进手机里的聊天界面，也可在微信接入页点「拉取云端聊天记录」。</p>
+                <p>部署后，接入的微信/QQ 角色 7x24 在线替你收发消息——真机消息云端秒回，页面关掉也不停。</p>
+                <p>顺序（必须按这个顺序）：① 这里先部署 Supabase → ② 再到微信「我」页 / QQ「动态」页接入真机（微信扫码，QQ 扫码或填 AppID/AppSecret）。凭证只存你自己的浏览器。</p>
+                <p>「测试云端」会真实跑一轮约 100 秒的收发窗口——期间 TA 真的会在微信里回消息；处理过的对话自动同步回手机聊天界面。</p>
               </div>
             </CloudFold>
           </div>
@@ -9337,7 +9420,9 @@ function CloudPage({ onBack }: { onBack: () => void }) {
                     aria-checked={active}
                     data-testid={`cloud-platform-${o.id}`}
                     onClick={() => setPlatform(o.id)}
-                    className="flex min-h-[56px] w-full items-center gap-3 px-4 py-2 text-left transition-colors active:bg-muted/50"
+                    className={`flex min-h-[56px] w-full items-center gap-3 px-4 py-2 text-left transition-colors active:bg-muted/50 ${
+                      active ? 'bg-[#34C759]/[0.05]' : ''
+                    }`}
                   >
                     <RowIcon icon={o.icon} tone={o.tone} />
                     <span className="min-w-0 flex-1">
@@ -9358,8 +9443,9 @@ function CloudPage({ onBack }: { onBack: () => void }) {
             </GroupCard>
           </div>
           {platform === 'none' && (
-            <div className="mt-2 rounded-[16px] border border-amber-500/30 bg-amber-300/15 px-3.5 py-2.5 text-[12px] leading-relaxed text-amber-700 backdrop-blur-xl dark:border-amber-400/25 dark:bg-amber-300/[0.08] dark:text-amber-200/90">
-              仅本机模式：未部署云端，无法接入真机微信/QQ。想让 TA 7x24 在线，从上面选一个云端平台完成部署，再去微信「我」页 / QQ「动态」页接入。
+            <div className="mt-2 flex flex-col gap-1.5 rounded-[16px] border border-amber-500/30 bg-amber-300/15 px-3.5 py-3 text-[12px] leading-relaxed text-amber-700 backdrop-blur-xl dark:border-amber-400/25 dark:bg-amber-300/[0.08] dark:text-amber-200/90">
+              <p className="font-medium">仅本机模式——页面开着 TA 才回复，关掉就停。</p>
+              <p>两步开启 7x24：① 选上面的「Supabase」并一键部署（免费）→ ② 到微信「我」页 / QQ「动态」页接入真机。</p>
             </div>
           )}
         </section>

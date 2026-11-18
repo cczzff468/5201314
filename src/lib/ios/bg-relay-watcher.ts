@@ -42,6 +42,7 @@ import { getDeliveringSessionKeys, subscribeAiDeliveryActive, yieldToEventLoop }
 // v1.9.17 后台接力提速：isPageBackground 双信号判定——页面在后台时事件驱动 peek 立即执行
 //（后台 setTimeout 被强节流 1s→1次/分钟，防抖反而把接力横幅拖慢，机主退后台收不到通知的根因之一）
 import { isPageBackground } from './system-notify';
+import { onKeepAliveTick } from './keepalive';
 
 // ---------------- 常量 ----------------
 
@@ -218,7 +219,20 @@ function start(): void {
   };
   document.addEventListener('visibilitychange', onVisible);
   window.addEventListener('focus', onVisible);
-  const pollTimer = window.setInterval(() => void peekOnce(), POLL_MS);
+  // v80 后台保活第二通道：Worker 心跳驱动的兜底轮询（页面后台时 setInterval 被节流到
+  // 1 次/分钟，Worker 消息不受节流——10s 兜底轮询照常节奏，接力横幅/系统通知不再拖慢）。
+  // lastPoll 与原生 setInterval 共用节奏闸，两通道不会双发同一轮。
+  let lastPoll = Date.now();
+  const maybePeek = (): void => {
+    if (Date.now() - lastPoll < POLL_MS) return;
+    lastPoll = Date.now();
+    void peekOnce();
+  };
+  onKeepAliveTick(maybePeek);
+  const pollTimer = window.setInterval(() => {
+    lastPoll = Date.now();
+    void peekOnce();
+  }, POLL_MS);
   if (pollTimer) void pollTimer; // 定时器句柄随页面生命周期，无需清理
   subscribeAiDeliveryActive(onDeliveryActiveChange);
   // 首拉：捕获上次会话（刷新/重开）遗留的 pending

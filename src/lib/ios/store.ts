@@ -1,6 +1,7 @@
 'use client';
 
 import { create } from 'zustand';
+import { startKeepAlive, stopKeepAlive } from './keepalive';
 import {
   DEFAULT_BUBBLE_STYLE,
   normalizeBubbleSchemes,
@@ -443,6 +444,9 @@ interface SettingsState {
    *  只显示 APP 灵动岛（音乐岛大/小窗、美团/淘宝配送岛、灵动岛通知卡、来电胶囊等）。
    *  与状态栏开关独立：关灵动岛不影响状态栏文字/图标 */
   islandPersistent: boolean;
+  /** 后台保活开关（v80）：开启后切到后台/锁屏时尽量保持网页运行——Worker 心跳 +
+   *  无声音频双通道防节流/防冻结，AI 主动消息与后台接力轮询不中断（代价是略更耗电） */
+  bgKeepAlive: boolean;
   /** 全局悬浮工具·提示词查看器开关（悬浮球菜单里的「提示词查看器」入口）：
    *  开启后悬浮球可打开提示词预览弹窗（无副作用，只读拼装，不消耗 Token） */
   assistViewer: boolean;
@@ -502,6 +506,8 @@ interface SettingsState {
   setStatusBarVisible: (v: boolean) => void;
   /** 灵动岛常驻开关；立即持久化，PhoneShell 实时响应（APP 灵动岛不受影响） */
   setIslandPersistent: (v: boolean) => void;
+  /** 后台保活开关；立即持久化并启停 keepalive 双通道（Worker 心跳 + 无声音频） */
+  setBgKeepAlive: (v: boolean) => void;
   setAssistViewer: (v: boolean) => void;
   setAssistQuickOps: (v: boolean) => void;
   setWallpaperPreset: (id: string) => void;
@@ -564,6 +570,7 @@ export const useSettings = create<SettingsState>((set, get) => ({
   appFontWeight: 400,
   statusBarVisible: true,
   islandPersistent: true,
+  bgKeepAlive: false,
   assistViewer: false,
   assistQuickOps: false,
   iconStyle: 'real',
@@ -578,7 +585,7 @@ export const useSettings = create<SettingsState>((set, get) => ({
   load: async () => {
     if (get().loaded) return;
     try {
-      const [themeRec, wallpaperRec, lockWallpaperRec, apiRec, presetsRec, apiFallbacksRec, visionRec, visionPresetsRec, lockRec, profileRec, iconsRec, ttsRec, sttRec, imgGenRec, imgGenPresetsRec, fontRec, fontScaleRec, fontWeightRec, statusBarRec, iconStyleRec, goodsImgStyleRec, themeResetRec, islandPersistentRec, assistViewerRec, assistQuickOpsRec, bubbleStyleRec, bubbleSchemesRec, liquidSkinRec, chatDecorRec, customCssRec] = await Promise.all([
+      const [themeRec, wallpaperRec, lockWallpaperRec, apiRec, presetsRec, apiFallbacksRec, visionRec, visionPresetsRec, lockRec, profileRec, iconsRec, ttsRec, sttRec, imgGenRec, imgGenPresetsRec, fontRec, fontScaleRec, fontWeightRec, statusBarRec, iconStyleRec, goodsImgStyleRec, themeResetRec, islandPersistentRec, assistViewerRec, assistQuickOpsRec, bubbleStyleRec, bubbleSchemesRec, liquidSkinRec, chatDecorRec, customCssRec, bgKeepAliveRec] = await Promise.all([
         localDB.get('settings', 'theme'),
         localDB.get('settings', 'wallpaper'),
         localDB.get('settings', 'lockWallpaper'),
@@ -609,6 +616,7 @@ export const useSettings = create<SettingsState>((set, get) => ({
         localDB.get('settings', 'liquidSkin'),
         localDB.get('settings', 'chatDecor'),
         localDB.get('settings', 'customCss'),
+        localDB.get('settings', 'bgKeepAlive'),
       ]);
 
       // 性能：八个含敏感 Key 的字段并行解密（secret-box 的 PBKDF2 密钥进程内缓存只派生一次）——
@@ -928,6 +936,8 @@ export const useSettings = create<SettingsState>((set, get) => ({
         islandPersistent: typeof islandPersistentRec?.value === 'boolean' ? islandPersistentRec.value : true,
         assistViewer: assistViewerRec?.value === true,
         assistQuickOps: assistQuickOpsRec?.value === true,
+        // 后台保活：无记录 = 关（默认关，省电；用户按需开启）
+        bgKeepAlive: bgKeepAliveRec?.value === true,
         iconStyle,
         goodsImgStyle,
         // 聊天气泡装扮 + 收藏夹：无记录/脏数据回默认（normalize 内部校验 kind/color/结构）
@@ -943,6 +953,8 @@ export const useSettings = create<SettingsState>((set, get) => ({
       });
       // 锁屏被用户关闭：本次开机直接进主屏幕（跳过锁屏）
       if (!lockConfig.lockScreen) useUI.setState({ locked: false });
+      // v80 后台保活：开机即按持久化状态拉起（冷启动无手势时音频通道等第一次交互自动续播）
+      if (get().bgKeepAlive) startKeepAlive();
     } catch {
       set({ loaded: true });
     }
@@ -1065,6 +1077,14 @@ export const useSettings = create<SettingsState>((set, get) => ({
   setIslandPersistent: (v) => {
     set({ islandPersistent: v });
     void localDB.put('settings', { key: 'islandPersistent', value: v });
+  },
+
+  setBgKeepAlive: (v) => {
+    set({ bgKeepAlive: v });
+    void localDB.put('settings', { key: 'bgKeepAlive', value: v });
+    // 开关点击本身就是用户手势：开启时 AudioContext 可直接 resume；关闭立即全停
+    if (v) startKeepAlive();
+    else stopKeepAlive();
   },
 
   setAssistViewer: (v) => {

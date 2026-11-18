@@ -91,9 +91,16 @@ interface LibIndex {
 
 // ---------------- 简约设计令牌（实底白卡，无 blur） ----------------
 
-/** L1 面板：iOS 设置风实底白卡 */
-const PANEL =
-  'overflow-hidden rounded-[16px] bg-white ring-1 ring-black/[0.05] dark:bg-[#1C1C1E] dark:ring-white/[0.08]';
+/** v80 毛玻璃胶囊（机主要求：App 选择行改毛玻璃胶囊并加大）：
+ *  收起 = 全圆角胶囊（rounded-full）+ backdrop-blur 毛玻璃 + 加大的行高/图标/文字；
+ *  展开 = 同款毛玻璃底切 24px 圆角卡（内容区照旧）。顶层数量级仅 ~18 行，blur 层可控
+ *  （v70 拆掉的是数百层嵌套列表项的 blur，这里不回到那个量级）。 */
+const appPanelCls = (open: boolean) =>
+  `overflow-hidden ring-1 backdrop-blur-2xl transition-[border-radius,background-color] duration-200 ${
+    open
+      ? 'rounded-[24px] bg-white/70 ring-black/[0.05] shadow-[0_8px_28px_rgba(17,24,39,0.06)] dark:bg-[#1C1C1E]/75 dark:ring-white/[0.12]'
+      : 'rounded-full bg-white/60 ring-white/70 shadow-[0_6px_20px_rgba(17,24,39,0.08)] dark:bg-white/[0.09] dark:ring-white/[0.12]'
+  }`;
 
 /** L2 分类块：浅灰底内嵌块 */
 const SUB =
@@ -495,14 +502,14 @@ export function PresetAppPanels({
         {wiredSet.size > 0 ? ` · 已接线 ${wiredSet.size} 条（修改即时生效）` : ''}
       </p>
 
-      {/* 搜索框（扁平） */}
-      <div className="relative mb-2.5">
-        <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground/60" />
+      {/* 搜索框（毛玻璃胶囊同款观感） */}
+      <div className="relative mb-3">
+        <Search className="pointer-events-none absolute left-4 top-1/2 h-[18px] w-[18px] -translate-y-1/2 text-muted-foreground/60" />
         <Input
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder="搜索全部提示词"
-          className="h-10 rounded-full border-0 bg-white pl-9 pr-4 text-[13px] ring-1 ring-black/[0.06] focus-visible:ring-2 focus-visible:ring-[#007AFF]/40 dark:bg-[#1C1C1E] dark:ring-white/[0.1]"
+          className="h-11 rounded-full border-0 bg-white/60 pl-10 pr-4 text-[14px] ring-1 ring-white/70 backdrop-blur-2xl focus-visible:ring-2 focus-visible:ring-[#007AFF]/40 dark:bg-white/[0.08] dark:ring-white/[0.12]"
           inputMode="search"
         />
       </div>
@@ -535,28 +542,28 @@ export function PresetAppPanels({
         </div>
       )}
 
-      {/* 浏览模式：App 折叠面板（预设模块 + 提示词库 同居一屏，v71 起两段不再分节标注） */}
+      {/* 浏览模式：App 毛玻璃胶囊面板（v80：选择行加大 + 毛玻璃；预设模块 + 提示词库 同居一屏） */}
       {!searchingAll && (
-        <div className="flex flex-col gap-2" data-testid="preset-library-apps">
+        <div className="flex flex-col gap-2.5" data-testid="preset-library-apps">
           {orderedApps.map((meta) => {
             const open = openApps.has(meta.id);
             const data = appData[meta.id];
             const loading = loadingApp === meta.id;
             const modules = renderAppModules?.(meta.id) ?? null;
             return (
-              <div key={meta.id} className={PANEL}>
+              <div key={meta.id} className={appPanelCls(open)}>
                 <button
                   type="button"
                   onClick={() => void toggleApp(meta.id)}
-                  className="flex min-h-[48px] w-full items-center gap-3 px-3.5 py-2 text-left transition-colors active:bg-black/[0.03] dark:active:bg-white/[0.05]"
+                  className="flex min-h-[60px] w-full items-center gap-3.5 px-5 py-2.5 text-left transition-colors active:bg-black/[0.03] dark:active:bg-white/[0.05]"
                   aria-expanded={open}
                   data-testid={`preset-lib-app-${meta.id}`}
                 >
                   <AppIcon id={meta.id} />
-                  <span className="min-w-0 flex-1 truncate text-[15px] font-medium">{meta.name}</span>
-                  <span className="shrink-0 text-[11.5px] text-muted-foreground">{totalCountOf(meta)}</span>
+                  <span className="min-w-0 flex-1 truncate text-[16.5px] font-semibold">{meta.name}</span>
+                  <span className="shrink-0 text-[12px] text-muted-foreground">{totalCountOf(meta)}</span>
                   <ChevronDown
-                    className={`h-[18px] w-[18px] shrink-0 text-muted-foreground/60 transition-transform duration-200 ${open ? 'rotate-180' : ''}`}
+                    className={`h-5 w-5 shrink-0 text-muted-foreground/70 transition-transform duration-200 ${open ? 'rotate-180' : ''}`}
                   />
                 </button>
 
@@ -624,11 +631,10 @@ export function PresetAppPanels({
 function AppIcon({ id }: { id: string }) {
   const meta = APP_META[id] ?? APP_META.global;
   const Icon = meta.icon;
-  // v1.9.14 黑白线条裸图标（机主要求）：外框方形圆角删除（v1.9.13 的细描边中性框不要了），
-  // 纯前景色细线条图标 + 不可见槽位对齐
+  // v80 毛玻璃胶囊行配套：图标加大一档（h-6 线条；外框仍是无框裸图标，v1.9.14 口径不变）
   return (
-    <span className="flex h-[28px] w-[24px] shrink-0 items-center justify-center" aria-hidden>
-      <Icon className="h-5 w-5 text-foreground/85 dark:text-white/85" strokeWidth={1.7} />
+    <span className="flex h-[32px] w-[28px] shrink-0 items-center justify-center" aria-hidden>
+      <Icon className="h-6 w-6 text-foreground/85 dark:text-white/85" strokeWidth={1.8} />
     </span>
   );
 }
