@@ -217,15 +217,18 @@ import { buildJealousyLockBlock, buildJealousyWatchBlock } from './jealousy-lock
  * v2.1：buildJealousyWatchBlock（【全视之眼】：吃醋开启时给最近私聊角色注入全视之眼警告
  * + 最近一轮暗中观察的真实情报）并入——机主在普通聊天里撒谎（说在学习其实在刷别的）
  * 时，AI 能拿着系统实时采集的数据当场拆穿。
+ * v78：excludeWatch——机主定的提示词顺序（【全视之眼】放到【视频能力】后面）：微信/QQ
+ * 私聊与预览传 true 把全视之眼块从组合块里拆出，由调用方在【视频通话能力】之后单独注入；
+ * 信息端/主动消息/情侣空间等无视频能力块的调用方不传（行为与原来完全一致）。
  */
-export function buildDynamicStateBlocks(cid: string, opts?: { userPresent?: boolean }): string {
+export function buildDynamicStateBlocks(cid: string, opts?: { userPresent?: boolean; excludeWatch?: boolean }): string {
   return [
     buildMoodBlock(cid),
     buildUserMoodBlock(cid),
     buildAnxietyChatBlock(cid, opts),
     buildRoutineBlock(),
     buildJealousyLockBlock(cid),
-    buildJealousyWatchBlock(cid),
+    ...(opts?.excludeWatch ? [] : [buildJealousyWatchBlock(cid)]),
   ]
     .filter(Boolean)
     .join('\n');

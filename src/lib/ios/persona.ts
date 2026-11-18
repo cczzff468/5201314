@@ -98,6 +98,10 @@ export interface PersonaPromptCtx {
    *  （relationForAccount 口径：大号用全局 relation，小号用 relationByAcc[accId] ?? 兼容回退）；
    *  不传 = 大号口径（旧全局 relation），零破坏。 */
   accountId?: string | null;
+  /** v78 提示词顺序重排（机主反馈）：拼在人设块正下方、App 沉浸规则（extraRules）之前的能力块注入位
+   *  ——微信/QQ/信息私聊传【连发短消息】（回复条数指令，原来拼在 system 最末尾，现在上移到人设下面）；
+   *  不传 = 不注入（群聊/电话/主动消息等调用方行为不变）。 */
+  afterPersona?: string;
   /** 陌生身份模式（用户规则：换号/匿名联系时 AI 不知道对面是谁）：
    *  - 'caller'：电话/视频通话——来电的是一个 AI 不认识的陌生号码；
    *  - 'text'：文字渠道——消息/好友申请来自一个 AI 不认识的身份（陌生号码/陌生账号）。
@@ -400,15 +404,8 @@ export function buildPersonaSystemPrompt(peer: PersonaSource, ctx: PersonaPrompt
     promptTextOf('persona-personality', vars, `【性格】${vars.persona}`),
   );
   sec('persona-speak-style', promptTextOf('persona-speak-style', vars, `【说话风格】${vars.style}`));
-  sec(
-    'persona-pinyin',
-    promptTextOf('persona-pinyin', vars, [
-      '【读懂拼音缩写】对方发的纯英文字母串（如 wyxn、hxhx、xswl、yyds）基本都是中文的拼音首字母缩写——把每个字母当作一个字的拼音首字母逐字拆解、组词成句，并结合你们正在聊的话题和关系选最贴切的含义，绝不要当成无意义乱码，更不要瞎猜一个错误意思：',
-      '- 常见缩写按固定含义理解：wyxn=我也想你（w-我 y-也 x-想 n-你）、hxhx=好想好想、xswl=笑死我了、yyds=永远的神、nsdd=你说得对、dbq=对不起、bdjw=不懂就问、u1s1=有一说一、zqsg=真情实感、pyq=朋友圈、awsl=啊我死了（被甜到/萌到）、gkd=搞快点、srds=虽然但是、kdl=磕到了、plmm=漂亮妹妹、3q=谢谢；',
-      '- 拆解优先级：先套上面的常见缩写表；表里没有的按拼音首字母逐字组词（像 wyxn 就拆成 w-我/y-也/x-想/n-你 这样组出通顺的话）；叠字母（hxhx、kkl）优先当叠词（好想好想、看看）；夹数字的按谐音（3q=谢谢、666=厉害、u1s1=有一说一）；',
-      '- 对方问「你知道XX是什么意思吗」时，必须先按拆解规则给出正确含义再回应情绪（比如 wyxn 是「我也想你」，绝不能答成「我爱你想你」这类拆错的答案）；拆不准时结合你们的关系和话题挑一个最自然、最贴近对方心意的解释，不要硬编一个明显不对的。',
-    ].join('\n')),
-  );
+  // v78：【读懂拼音缩写】移出人设主体（原夹在【说话风格】与【背景】之间，打断人设连续阅读）——
+  // 改到人设块之后注入（见下方 pinyinRule：连发信息之后、extraRules 之前）
   // 背景：有数据才注入（条目关闭=即使有数据也不注入）
   sec(
     'persona-background',
@@ -594,6 +591,17 @@ export function buildPersonaSystemPrompt(peer: PersonaSource, ctx: PersonaPrompt
     return sorted.join('\n');
   });
 
+  // v78：【读懂拼音缩写】独立注入（机主定的顺序：人设 → 连发信息 → 读懂拼音缩写 → App 沉浸规则）。
+  // persona-core 组被编辑（模板已含该段）或整组关闭时 isPromptGroupMemberSuppressed 命中 → null 不注入（不重复）；
+  // 条目被单独关闭 → null；被单独编辑 → 编辑版文本。
+  const pinyinRule =
+    promptTextOf('persona-pinyin', vars, [
+      '【读懂拼音缩写】对方发的纯英文字母串（如 wyxn、hxhx、xswl、yyds）基本都是中文的拼音首字母缩写——把每个字母当作一个字的拼音首字母逐字拆解、组词成句，并结合你们正在聊的话题和关系选最贴切的含义，绝不要当成无意义乱码，更不要瞎猜一个错误意思：',
+      '- 常见缩写按固定含义理解：wyxn=我也想你（w-我 y-也 x-想 n-你）、hxhx=好想好想、xswl=笑死我了、yyds=永远的神、nsdd=你说得对、dbq=对不起、bdjw=不懂就问、u1s1=有一说一、zqsg=真情实感、pyq=朋友圈、awsl=啊我死了（被甜到/萌到）、gkd=搞快点、srds=虽然但是、kdl=磕到了、plmm=漂亮妹妹、3q=谢谢；',
+      '- 拆解优先级：先套上面的常见缩写表；表里没有的按拼音首字母逐字组词（像 wyxn 就拆成 w-我/y-也/x-想/n-你 这样组出通顺的话）；叠字母（hxhx、kkl）优先当叠词（好想好想、看看）；夹数字的按谐音（3q=谢谢、666=厉害、u1s1=有一说一）；',
+      '- 对方问「你知道XX是什么意思吗」时，必须先按拆解规则给出正确含义再回应情绪（比如 wyxn 是「我也想你」，绝不能答成「我爱你想你」这类拆错的答案）；拆不准时结合你们的关系和话题挑一个最自然、最贴近对方心意的解释，不要硬编一个明显不对的。',
+    ].join('\n')) ?? '';
+
   // extraRules（各 App 沉浸规则，接入方各自走注册表 lookup）：人设块之后独立成行——
   // persona-core 关闭/编辑时 App 规则不受影响（wx-rules/qq-rules 等组各自管辖）
   const ruleLines: string[] = [];
@@ -601,5 +609,11 @@ export function buildPersonaSystemPrompt(peer: PersonaSource, ctx: PersonaPrompt
     const r = clean(rule);
     if (r) ruleLines.push(`- ${r}`);
   }
-  return [...(personaBlock ? [personaBlock] : []), ...ruleLines].join('\n');
+  // v78 顺序（机主定）：人设块 → 连发信息（afterPersona）→ 读懂拼音缩写 → App 沉浸规则行
+  return [
+    ...(personaBlock ? [personaBlock] : []),
+    ...(ctx.afterPersona ? [ctx.afterPersona] : []),
+    ...(pinyinRule ? [pinyinRule] : []),
+    ...ruleLines,
+  ].join('\n');
 }

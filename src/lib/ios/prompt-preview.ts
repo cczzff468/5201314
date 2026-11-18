@@ -37,6 +37,8 @@ import { applyWbUserBlocks, collectWbBlocks, wbRulesBlock, wbScanText } from '@/
 import { buildCrossContextBlocks } from '@/lib/ios/cross-app-context';
 import { buildBranchPromptBlock } from '@/lib/ios/branch';
 import { buildDynamicStateBlocks } from '@/lib/ios/ai-mood';
+// v78：【全视之眼】块（与微信/QQ 真实发送同序——拆出动态状态组合块，放到【视频能力】后面）
+import { buildJealousyWatchBlock } from '@/lib/ios/jealousy-lock';
 import { buildAvatarBlock } from '@/lib/ios/avatar-ai';
 import { buildLocationBlock, locationAiText, type ChatLocScanMsg } from '@/lib/ios/chat-location';
 import { buildBlockPromptBlock } from '@/lib/ios/block-state';
@@ -404,10 +406,14 @@ export async function buildChatPreview(channel: PreviewChannel, contactId: strin
     const stickers = loadStickers(channel);
     const rich = buildRichRules(stickersOn ? stickers : [], channel === 'qq' ? { familyCard: false } : undefined);
     const richBlock = rich.length === 0 ? '' : promptTextOf(`${p}-rich-rules`, {}, rich.join('\n')) ?? '';
+    // v78 机主定的顺序：【内置小表情】放到【特殊消息】后面——与 wx/qq core.tsx 真实发送同构
+    //（richBlock 首行是【特殊消息】，先发它、再插小表情、然后才是其余 rich 规则）
+    const richLines = richBlock.split('\n');
     const ruleParts = promptGroupParts(`${p}-rules`, { richRules: richBlock }, () =>
       [
+        ...richLines.slice(0, 1),
         ...(stickersOn ? [promptRule(`${p}-emoji-code`) ?? ''] : []),
-        ...richBlock.split('\n'),
+        ...richLines.slice(1),
         ...(stickersOn ? [] : [promptRule(`${p}-sticker-off`) ?? '']),
         ...(actionDescOn
           ? [promptRule(`${p}-action-desc`) ?? '']
@@ -422,6 +428,8 @@ export async function buildChatPreview(channel: PreviewChannel, contactId: strin
       accountId: accId,
       multiApp: memSettings.share,
       ...npcExtra,
+      // v78：【连发短消息】拼在人设块正下方（与真实发送同序；原拼在 system 末尾）
+      afterPersona: replyCount > 1 ? buildReplyCountPrompt(replyCount) : '',
       extraRules: ruleParts ?? [],
     });
   } else {
@@ -471,8 +479,10 @@ export async function buildChatPreview(channel: PreviewChannel, contactId: strin
   pushSection('wbRules', '世界书使用规则', wbRulesBlock(wbBlocks));
 
   // ---- 动态块（全部与真实发送同源：kv/内存现场读） ----
-  const dynamicState = buildDynamicStateBlocks(contactId);
-  pushSection('mood', '动态状态', dynamicState);
+  // v78：微信/QQ 与真实发送同序——【全视之眼】拆出到【视频能力】后面；信息端保持原组合块（无视频能力块）
+  const dynamicState = buildDynamicStateBlocks(contactId, channel === 'sms' ? undefined : { excludeWatch: true });
+  const jealousyWatchBlock = channel === 'sms' ? '' : buildJealousyWatchBlock(contactId);
+  pushSection('mood', '动态状态', dynamicState + jealousyWatchBlock);
 
   const crossBlocks = await buildCrossContextBlocks(contactId, memApp, channel === 'sms' ? useSettings.getState().profile.name : meReal).catch(() => null);
   pushSection('crossApp', '跨 App 上下文', crossBlocks?.crossAppBlock ?? '');
@@ -568,11 +578,14 @@ export async function buildChatPreview(channel: PreviewChannel, contactId: strin
   pushSection('momentPost', '发动态能力', momentPostRule);
 
   // ---- System Prompt 拼装（与 sendTurn 同序） ----
+  // v78：连发信息（人设下方）/全视之眼（视频能力后面）与真实发送同序；信息端连发插在 charBlock 后（同 chat.tsx）
+  const replyCountBlock = replyCount > 1 ? buildReplyCountPrompt(replyCount) : '';
   const systemFull =
     channel === 'sms'
       ? [
           wbBlocks.beforeSystem,
           [wbBlocks.beforeChar, system, wbBlocks.afterChar].filter(Boolean).join('\n\n'),
+          replyCountBlock,
           memoryBlock,
           dynamicState,
           profileRecallBlock(contactId),
@@ -620,6 +633,8 @@ export async function buildChatPreview(channel: PreviewChannel, contactId: strin
           momentPostRule,
           VOICE_CALL_RULE,
           VIDEO_CALL_RULE,
+          // v78：【全视之眼】放到【视频能力】后面（机主定的顺序；与微信/QQ 真实发送同序）
+          jealousyWatchBlock,
           timeBlock,
           wbBlocks.afterSystem,
           wbRulesBlock(wbBlocks),
@@ -628,7 +643,8 @@ export async function buildChatPreview(channel: PreviewChannel, contactId: strin
           .join('\n\n');
 
   // v2.8：深度思考指令只在总开关开启时注入（与三端真实发送同口径），预览所见即所得
-  const sysContent = `${systemFull}\n\n${replyCount > 1 ? `${buildReplyCountPrompt(replyCount)}\n\n` : ''}${
+  // v78：【连发短消息】已上移（微信/QQ 在人设下面、信息在 charBlock 后），此处不再末尾追加
+  const sysContent = `${systemFull}\n\n${
     contactId && getDeepThinkOn(contactId) ? (promptRule('deep-think', DEEP_THINK_RULE) ?? '') : ''
   }`;
 

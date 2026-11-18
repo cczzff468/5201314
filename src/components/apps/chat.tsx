@@ -2109,6 +2109,9 @@ function ChatView({
     const baseSys = [
       ...(wbBlocks ? [wbBlocks.beforeSystem] : []),
       charBlock,
+      // v78 机主定的顺序：连发信息放在人设下面——charBlock（人设+信息规则）正下方即注入
+      //（原来拼在 system 最末尾）；信息端发送时现场读取条数，与微信/QQ 私聊同语义
+      ...(replyCount > 1 ? [buildReplyCountPrompt(replyCount)] : []),
       memoryBlock,
       // 第十六轮：AI 动态状态（情绪+作息）——AI 带着当前心情说话、按 TA 记住的作息规律拿捏分寸
       //（仅联系人会话；AI 助手无角色身份不注入）
@@ -2176,13 +2179,10 @@ function ChatView({
       .join('\n\n');
     // 深度思考指令（v2.8 用户指定「关闭以后不要深度思考了」）：只在总开关开启时注入——
     // 关闭 = 不注入、模型完全不思考；开启 = 注入 [思考] 块指令（展示与否由「显示思考过程」子开关控制）。
-    // 拼在 system 真正的最末尾（条数指令之后）：最新指令最受模型关注，短回复场景也不跳过思考块
+    // 拼在 system 真正的最末尾：最新指令最受模型关注，短回复场景也不跳过思考块
+    // v78：【连发短消息】已上移到人设块下方（baseSys 第二位注入），此处不再末尾追加
     const thinkRuleNow = getDeepThinkOn(wbContactId ?? '') ? (promptRule('deep-think', DEEP_THINK_RULE) ?? '') : '';
-    const sysContent = baseSys
-      ? replyCount > 1
-        ? `${baseSys}\n\n${buildReplyCountPrompt(replyCount)}\n\n${thinkRuleNow}`
-        : `${baseSys}\n\n${thinkRuleNow}`
-      : null;
+    const sysContent = baseSys ? `${baseSys}\n\n${thinkRuleNow}` : null;
     const payload: ChatPayloadMessage[] = applyWbUserBlocks(
       sysContent ? [{ role: 'system' as const, content: sysContent }, ...history] : history,
       wbBlocks ?? WB_EMPTY_BLOCKS,

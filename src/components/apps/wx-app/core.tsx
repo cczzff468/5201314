@@ -1255,8 +1255,10 @@ export const AI_VOICE_DELIVERY_RULE =
  *  并注入禁用 emoji/表情包的显式规则）；
  *  actionDescOn：动作描写开关（开启注入 *...* 格式约定、关闭注入显式禁令，见 @/lib/action-desc）；
  *  npcExtra：配角圈注入（CHAR=认识的配角/背景近况，NPC=归属者资料卡/背景近况）；
- *  aiVoiceOn：AI 语音频率开关（100-e，开启时告知「文字消息可能以语音条送达」，见 AI_VOICE_DELIVERY_RULE） */
-export function buildPersonaPrompt(peer: ContactRecord, me: WxUser, ownerName: string | null, stickers: Sticker[], stickersOn: boolean, actionDescOn: boolean, npcExtra?: NpcPromptExtra | null, aiVoiceOn?: boolean): string {
+ *  aiVoiceOn：AI 语音频率开关（100-e，开启时告知「文字消息可能以语音条送达」，见 AI_VOICE_DELIVERY_RULE）；
+ *  afterPersona：拼在人设块正下方的能力块（v78 机主定的顺序：连发信息放人设下面）——微信私聊传【连发短消息】，
+ *  不传（群聊/其他调用方）行为不变 */
+export function buildPersonaPrompt(peer: ContactRecord, me: WxUser, ownerName: string | null, stickers: Sticker[], stickersOn: boolean, actionDescOn: boolean, npcExtra?: NpcPromptExtra | null, aiVoiceOn?: boolean, afterPersona?: string): string {
   // 名字/昵称区分：AI 称呼用户按全局设置（默认用名字「凡凡」，用户选「用昵称称呼」才用「凑凑」）；
   // 用户规则：AI 永远不知道机主的昵称——人设只注入真称呼名（真名），不注入任何昵称信息
   const mode = useSettings.getState().addressMode;
@@ -1272,11 +1274,17 @@ export function buildPersonaPrompt(peer: ContactRecord, me: WxUser, ownerName: s
   // v65：微信沉浸规则整块走 wx-rules 合并组——组关闭=微信不再注入任何沉浸规则；
   // 组编辑=编辑版大模板整块接管（{{richRules}} 填入当前表情包动态规则）；
   // 默认=原逐条组装（零破坏，成员级开关/编辑照旧）
+  // v78 机主定的顺序：【内置小表情】放到【特殊消息】后面——richBlock 首行是【特殊消息】，
+  // 先发它、再插小表情代码约定、然后才是其余 rich 规则（发钱纪律/表情包清单/拍一拍/分享歌曲…）
+  const richLines = richBlock.split('\n');
   const wxRuleParts = promptGroupParts('wx-rules', { richRules: richBlock }, () => [
       // v71：wx-sticker-recv（对方表情包回应规则）按用户要求整条移除，不再注入
-      // 内置小表情 [微笑] 代码约定（开关开启才注入；用户点面板内置表情即以此格式入历史，AI 也可同格式回复）
+      // 【特殊消息】标记总纲排最前（richBlock 首行）
+      ...richLines.slice(0, 1),
+      // 【内置小表情】[微笑] 代码约定紧跟【特殊消息】（开关开启才注入；用户点面板内置表情即以此格式入历史，AI 也可同格式回复）
       ...(stickersOn ? [promptRule('wx-emoji-code', EMOJI_CODE_RULE) ?? ''] : []),
-      ...richBlock.split('\n'),
+      // 其余 rich 规则（发红包铁律/发钱纪律/表情包格式强调+清单/引用/拍一拍/分享歌曲）
+      ...richLines.slice(1),
       ...(stickersOn ? [] : [promptRule('wx-sticker-off', STICKER_OFF_RULE) ?? '']),
       ...(actionDescOn
         ? [promptRule('wx-action-desc', ACTION_DESC_RULE) ?? '']
@@ -1292,6 +1300,8 @@ export function buildPersonaPrompt(peer: ContactRecord, me: WxUser, ownerName: s
     // 跨 App 身份感知：互通开关（每联系人设置，发送时现场读取）
     multiApp: getMemSettings(peer.id).share,
     ...npcExtra,
+    // v78：连发信息（回复条数指令）拼在人设块正下方（机主定的顺序）
+    afterPersona,
     extraRules: wxRuleParts ?? [],
   });
 }

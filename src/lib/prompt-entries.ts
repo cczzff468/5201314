@@ -296,10 +296,12 @@ const BUILTIN_PERSONA: PromptEntry[] = [
     id: 'persona-pinyin',
     appId: 'global',
     role: 'system',
-    depth: 19,
+    // v78：从人设主体中段（说话风格与背景之间）移到人设块之后注入（persona.ts 拼在连发信息下面）；
+    // 深度同步后移（31 守密之后、41 App 规则之前），与实际注入位置一致
+    depth: 32,
     order: 0,
     title: '【读懂拼音缩写】',
-    desc: 'wyxn/hxhx/xswl 等字母串的拆解码规则（第四十一轮加入）',
+    desc: 'wyxn/hxhx/xswl 等字母串的拆解码规则（v78 移到人设块后、连发信息下方注入）',
     category: 'persona',
     content:
       '【读懂拼音缩写】对方发的纯英文字母串（如 wyxn、hxhx、xswl、yyds）基本都是中文的拼音首字母缩写——把每个字母当作一个字的拼音首字母逐字拆解、组词成句，并结合你们正在聊的话题和关系选最贴切的含义，绝不要当成无意义乱码，更不要瞎猜一个错误意思：\n' +
@@ -561,27 +563,11 @@ function chatRuleEntries(app: 'wechat' | 'qq', label: string): PromptEntry[] {
   const p = app === 'wechat' ? 'wx' : 'qq';
   return [
     {
-      id: `${p}-emoji-code`,
-      appId: app,
-      role: 'system',
-      depth: 41,
-      order: 0,
-      title: `${label}·内置小表情代码`,
-      desc: '[微笑][呲牙] 等方括号小表情的读写约定（清单内选名）',
-      category: 'immersion',
-      content:
-        '【内置小表情】消息里的方括号表情代码（如 [微笑][呲牙][裂开]）是对方发的内置小表情，括号里的名字就是含义，理解并自然回应即可；' +
-        '你自己想发这类小表情时，直接在句子里写 [内置表情的意思]（意思必须来自下面表情包清单里的内置表情，写意思不写 ID，' +
-        '如清单里有「xx-微笑:微笑」就输出 [微笑]），可与文字混排（如「哈哈[捂脸]」「晚安[月亮]」）；' +
-        '写错名字对方只会看到文字；要不要发表情完全自然决定，不要每句都带。',
-      builtin: true,
-      source: 'lib/ios/emoji-codes.ts EMOJI_CODE_RULE',
-    },
-    {
       id: `${p}-rich-rules`,
       appId: app,
       role: 'system',
-      depth: 42,
+      // v78 机主定的顺序：【特殊消息】在前、【内置小表情】随后——深度对调（41/42 ↔）
+      depth: 41,
       order: 0,
       title: `${label}·特殊消息标记`,
       desc: '红包/转账/亲属卡/位置/表情包/分享歌曲的输出标记教学（含表情包清单）',
@@ -591,6 +577,23 @@ function chatRuleEntries(app: 'wechat' | 'qq', label: string): PromptEntry[] {
       tokens: [],
       builtin: true,
       source: 'lib/chat-rich.ts buildRichRules（动态组装）',
+    },
+    {
+      id: `${p}-emoji-code`,
+      appId: app,
+      role: 'system',
+      depth: 42,
+      order: 0,
+      title: `${label}·内置小表情代码`,
+      desc: '[微笑][呲牙] 等方括号小表情的读写约定（清单内选名；v78 移到【特殊消息】后面注入）',
+      category: 'immersion',
+      content:
+        '【内置小表情】消息里的方括号表情代码（如 [微笑][呲牙][裂开]）是对方发的内置小表情，括号里的名字就是含义，理解并自然回应即可；' +
+        '你自己想发这类小表情时，直接在句子里写 [内置表情的意思]（意思必须来自下面表情包清单里的内置表情，写意思不写 ID，' +
+        '如清单里有「xx-微笑:微笑」就输出 [微笑]），可与文字混排（如「哈哈[捂脸]」「晚安[月亮]」）；' +
+        '写错名字对方只会看到文字；要不要发表情完全自然决定，不要每句都带。',
+      builtin: true,
+      source: 'lib/ios/emoji-codes.ts EMOJI_CODE_RULE',
     },
     {
       id: `${p}-sticker-off`,
@@ -1634,7 +1637,6 @@ const PERSONA_CORE_TEMPLATE = [
   'persona-facts',
   'persona-personality',
   'persona-speak-style',
-  'persona-pinyin',
   'persona-background',
   'persona-express-style',
   'persona-relation',
@@ -1645,6 +1647,8 @@ const PERSONA_CORE_TEMPLATE = [
   'persona-prohibit',
   'persona-selfintro',
   'persona-npc-secret',
+  // v78：【读懂拼音缩写】移到人设末尾（默认拼装时在人设块之后、连发信息下面注入）
+  'persona-pinyin',
 ];
 
 const PERSONA_ALL = [
@@ -1658,7 +1662,6 @@ const PERSONA_ALL = [
   'persona-facts',
   'persona-personality',
   'persona-speak-style',
-  'persona-pinyin',
   'persona-background',
   'persona-express-style',
   'persona-stranger-rel',
@@ -1673,6 +1676,8 @@ const PERSONA_ALL = [
   'persona-group-turn',
   'persona-selfintro',
   'persona-npc-secret',
+  // v78：【读懂拼音缩写】移到人设末尾（与默认拼装的新位置一致）
+  'persona-pinyin',
 ];
 
 /** 合并模板构建：成员 content 按序拼接（动态段用 overrides 换成 {{token}}）+ tokens 并集 */
@@ -1725,9 +1730,9 @@ export const PROMPT_GROUPS: PromptGroup[] = [
     appId: 'wechat',
     kind: 'merged',
     title: '微信',
-    desc: '微信聊天规则整块（表情包/小表情/特殊消息/动作描写/语音条告知）',
-    members: ['wx-emoji-code', 'wx-rich-rules', 'wx-sticker-off', 'wx-action-desc', 'wx-action-desc-off', 'wx-ai-voice'],
-    templateMembers: ['wx-emoji-code', 'wx-rich-rules', 'wx-action-desc', 'wx-ai-voice'],
+    desc: '微信聊天规则整块（特殊消息/小表情/表情包/动作描写/语音条告知；v78 顺序：特殊消息在前、内置小表情随后）',
+    members: ['wx-rich-rules', 'wx-emoji-code', 'wx-sticker-off', 'wx-action-desc', 'wx-action-desc-off', 'wx-ai-voice'],
+    templateMembers: ['wx-rich-rules', 'wx-emoji-code', 'wx-action-desc', 'wx-ai-voice'],
     templateOverrides: { 'wx-rich-rules': '{{richRules}}' },
   },
   {
@@ -1735,9 +1740,9 @@ export const PROMPT_GROUPS: PromptGroup[] = [
     appId: 'qq',
     kind: 'merged',
     title: 'QQ',
-    desc: 'QQ 聊天规则整块（表情包/小表情/特殊消息/动作描写/语音条告知）',
-    members: ['qq-emoji-code', 'qq-rich-rules', 'qq-sticker-off', 'qq-action-desc', 'qq-action-desc-off', 'qq-ai-voice'],
-    templateMembers: ['qq-emoji-code', 'qq-rich-rules', 'qq-action-desc', 'qq-ai-voice'],
+    desc: 'QQ 聊天规则整块（特殊消息/小表情/表情包/动作描写/语音条告知；v78 顺序：特殊消息在前、内置小表情随后）',
+    members: ['qq-rich-rules', 'qq-emoji-code', 'qq-sticker-off', 'qq-action-desc', 'qq-action-desc-off', 'qq-ai-voice'],
+    templateMembers: ['qq-rich-rules', 'qq-emoji-code', 'qq-action-desc', 'qq-ai-voice'],
     templateOverrides: { 'qq-rich-rules': '{{richRules}}' },
   },
   {

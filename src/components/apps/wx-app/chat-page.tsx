@@ -122,6 +122,8 @@ import { getMemSettings, memAfterAiTurn, memChatRecallBlock, memConvoFromRaw, me
 import { aiWriteLetterOnRequest, coupleChatBlock, coupleLetterAskHit } from '@/lib/ios/couple-ai';
 // 第十六轮：AI 动态状态（情绪+作息）注入 + 送礼物情绪事件
 import { buildDynamicStateBlocks, noteMoodEvent } from '@/lib/ios/ai-mood';
+// v78：【全视之眼】块（拆出动态状态组合块，按机主定的顺序放到【视频能力】后面）
+import { buildJealousyWatchBlock } from '@/lib/ios/jealousy-lock';
 import { addCharMomentPost, buildMomentsChatBlock, emitMomentsChanged, enqueuePostInteractions, markMomentAutoAttempt } from '@/lib/moments';
 // v33【AI 真人社交】：X论坛近况感知块（TA 发的帖/我发的帖/评论互动 → 私聊能自然提起）
 import { buildForumChatBlock } from '@/lib/forum/social';
@@ -2460,10 +2462,15 @@ export function ChatPage({
     // 深度思考：重置本轮上下文（重试/新回合互不串台；firstMsgId 由 buildReplyMsgs 首次产出时记录）
     turnThinkRef.current = { firstMsgId: null, text: '' };
 
-    // 回复条数（本会话独立设置，发送时现场读取）：>1 时在人设后追加多条消息指令；
+    // 回复条数（本会话独立设置，发送时现场读取）：>1 时拼【连发短消息】指令；
+    // v78 机主定的顺序：连发信息放在人设下面——经 buildPersonaPrompt 的 afterPersona 拼进人设块正下方
+    //（原来拼在 system 最末尾），人设 → 连发 → 读懂拼音缩写 → 沉浸规则自然衔接；
     // 特殊消息规则（红包/转账/亲属卡/位置/表情包标记 + 表情包 ID 清单）随表情包清单一起注入；
     // 我发给 AI 的待处理红包/转账/亲属卡 → 注入处理动作规则与待处理清单（AI 用 [领取红包:ID:…] 等标记处理）
     const replyCount = getReplyCount(sessionKey);
+    // v78 机主定的顺序：连发信息放在人设下面——经 buildPersonaPrompt 的 afterPersona 拼进人设块正下方
+    //（原来拼在 system 最末尾），人设 → 连发 → 读懂拼音缩写 → 沉浸规则自然衔接
+    const replyCountBlock = replyCount > 1 ? buildReplyCountPrompt(replyCount) : '';
     const stickers = loadStickers('wx');
     // 表情包开关（本会话独立，发送时现场读取；关闭后 AI 不发表情包也不发 emoji）
     const stickersOn = getStickersOn(sessionKey);
@@ -2473,7 +2480,7 @@ export function ChatPage({
     // 而作用域此前在下方 memChatRecallBlock 才设定——人设组装提前显式落位（否则首轮发送
     // NPC 近况可能沿用上一次聊天的作用域读错账号的记忆库）
     setMemScopeForApp('wx');
-    const system = buildPersonaPrompt(peer, me, ownerName, stickers, stickersOn, actionDescOn, buildNpcPromptExtra(peer, contacts), getAiVoiceFreq(sessionKey) !== 'off');
+    const system = buildPersonaPrompt(peer, me, ownerName, stickers, stickersOn, actionDescOn, buildNpcPromptExtra(peer, contacts), getAiVoiceFreq(sessionKey) !== 'off', replyCountBlock);
     // 40-a 拉黑拦截（仅申请卡模式）：待处理卡清单不注入（buildActionRules 空清单返回空数组）——
     // 否则 AI 照提示词输出 [领取红包:ID]/[收款转账:ID] 等标记；动作分支虽已拦截，提示词层面也不该给。
     // 拉黑类动作说明由 blkBlock（buildBlockPromptBlock）单独注入，与此处无关
@@ -2614,7 +2621,8 @@ export function ChatPage({
       memoryBlock,
       // 第十六轮：AI 动态状态（情绪+作息）——AI 带着当前心情说话（开心/吃醋/委屈…影响语气与表情选择）、
       // 按 TA 记住的作息规律拿捏说话时机（清早道早安/深夜催睡/饭点关心）
-      buildDynamicStateBlocks(peer.id),
+      // v78：【全视之眼】拆出本块（机主定的顺序：放到【视频能力】后面），此处不再携带
+      buildDynamicStateBlocks(peer.id, { excludeWatch: true }),
       // 40-b 跨 App 环境感知：当前 App 记忆 → 其他 App 最近 10 条 → 群聊最近 10 条（长期/核心在 memoryBlock 内）
       // 极简省流模式：跳过跨 App 近况块（shouldInjectCrossAppBlock 返回 false）
       ...(shouldInjectCrossAppBlock(ctxMode) ? [crossCtxRef.current.crossAppBlock, crossCtxRef.current.groupBlock] : []),
@@ -2650,6 +2658,9 @@ export function ChatPage({
       momentPostRule,
       '【语音通话能力】如果你此刻非常想和对方马上说话（想TA了、有急事、聊到特别开心等自然原因），可以在回复的最开头单独加上标记 [语音通话] 发起一次语音通话邀请，对方手机会弹出你的来电邀请；平时聊天不要加这个标记，最多偶尔一次，连续使用会很烦人。',
       '【视频通话能力】如果你此刻很想看看对方（想TA了、有值得分享的时刻、对方说想见你/想看看你等自然原因），可以在回复的最开头单独加上标记 [视频通话] 发起一次视频通话邀请，对方手机会弹出你的视频来电邀请；平时聊天不要加这个标记，最多偶尔一次，连续使用会很烦人。注意：标记必须是单独四个字 [视频通话]，严禁模仿聊天记录里「[视频通话：时长/内容摘要]」这类卡片描述文字的格式（那是系统卡片不是标记），不要输出带冒号的 [视频通话：……]。',
+      // v78：【全视之眼】放到【视频能力】后面（机主定的顺序）——普通聊天的全视之眼警告 + 暗中观察情报；
+      // 吃醋功能未开/无新鲜情报时返回空串零成本
+      buildJealousyWatchBlock(peer.id),
       timeBlock,
       perceptionBlock,
       // v1.3 Shizuku 自主权：[手机操作:…] 教学规则按当前开关注入（总开关关/非手机APP环境 → 空，零 token）
@@ -2669,7 +2680,8 @@ export function ChatPage({
           role: 'system' as const,
           // v2.8（用户指定「关闭以后不要深度思考了」）：深度思考指令只在总开关开启时注入——
           // 关闭 = 不注入、模型完全不思考；开启 = 注入 [思考] 块指令（展示与否由「显示思考过程」子开关控制）
-          content: `${systemFull}\n\n${replyCount > 1 ? `${buildReplyCountPrompt(replyCount)}\n\n` : ''}${
+          // v78：【连发短消息】已上移到人设下面（经 buildPersonaPrompt afterPersona 注入），此处不再末尾追加
+          content: `${systemFull}\n\n${
             getDeepThinkOn(peer.id) ? (promptRule('deep-think', DEEP_THINK_RULE) ?? '') : ''
           }`,
         },
