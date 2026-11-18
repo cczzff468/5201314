@@ -4329,9 +4329,9 @@ export function ChatPage({
             {otherUnread > 99 ? '99+' : otherUnread}
           </span>
         )}
-        {/* 名字区（用户指定：「名字在屏幕中间，不是按钮中间」）：绝对定位 left-1/2 平移居中（同 IOSNavBar），
-            左右按钮宽度不再影响名字位置；w-max 收缩到内容宽 + max-w 限长截断，绝不与两侧按钮重叠 */}
-        <div className="absolute left-1/2 top-1/2 flex w-max max-w-[calc(100%-132px)] -translate-x-1/2 -translate-y-1/2 flex-col items-center">
+        {/* 名字区（用户指定：「名字在左上角，不是在中间」）：不再绝对居中——紧跟返回按钮
+            按行排列、左对齐（液态/双头像皮肤同享该布局）；右侧菜单按钮仍靠右（弹性占位隔开） */}
+        <div className="flex min-w-0 max-w-[calc(100%-118px)] flex-col items-start">
           {liquid && liquidSkinQq.headerMode === 'dualName' ? (
             /* 液态·双头像+名字（本轮用户指定）：我的名字也显示——名字在各自头像下面（两列布局）；
                中间可插自定义文字；正在输入时中间显示「正在输入…」 */

@@ -315,10 +315,10 @@ export function VoiceMsgBubble({
           </>
         )}
       </button>
-      {/* 转文字结果：识别中提示 / 已完成的结果（长按菜单「复制」可复制）。微信端为「气泡
-          下方白色面板」——v2.7 用户反馈「文字和面板太大」：由 18px/14×10 内边距收紧为
-          13px/10×6 小面板，与 QQ / 信息端的轻量小面板同一档位（不再做微信特别放大）；
-          QQ / 信息端维持此前的轻量小面板 */}
+      {/* 转文字结果：识别中提示 / 已完成的结果（长按菜单「复制」可复制）。v2.8 用户指定
+          「语音面板跟普通气泡一样大」：微信端转文字面板全面对齐同会话普通文字气泡的
+          同规格尺寸（padding 14×10 + 15px 字号 + line-height 1.5 + 圆角 5px，白底小面板），
+          不再是小字紧凑面板；QQ / 信息端维持此前的轻量小面板 */}
       {voice.stt === 'pending' && (
         <span className="mt-[3px] px-1 text-[12px] leading-[1.4] opacity-50" data-testid="voice-stt-pending">
           转文字中…
@@ -330,13 +330,11 @@ export function VoiceMsgBubble({
           className={
             tvis?.override
               ? /* 装扮接管：与气泡同语言（染色面板/磨砂玻璃/液态玻璃）。第四十九轮：圆角跟随气泡样式
-                   （inline borderRadius = tvis.radius——纯色/七彩与气泡同规格、毛玻璃/液态胶囊 999px），
-                   不再统一硬编码 12px。v2.7 同步缩小：内边距 14/10 → 10/6，微信加成 15px → 13.5px */
-                `mt-[5px] max-w-full whitespace-pre-wrap break-words px-2.5 py-1.5 text-[13px] leading-[1.5] ${
-                    isWx ? 'text-[13.5px]' : ''
-                  } ${tvis.className}`
+                   （inline borderRadius = tvis.radius——纯色/七彩与气泡同规格、毛玻璃/液态胶囊 999px）。
+                   v2.8 同步对齐普通气泡尺寸：内边距 10/6 → 14/10、字号 → 15px（微信与 QQ/信息同档） */
+                `mt-[5px] max-w-full whitespace-pre-wrap break-words px-[14px] py-[10px] text-[15px] leading-[1.5] ${tvis.className}`
               : isWx
-              ? `mt-[6px] w-fit max-w-full whitespace-pre-wrap break-words rounded-[6px] bg-white px-2.5 py-1.5 text-[13px] leading-[1.5] dark:bg-[#2C2C2C] ${
+              ? `mt-[6px] w-fit max-w-full whitespace-pre-wrap break-words rounded-[5px] bg-white px-[14px] py-[10px] text-[15px] leading-[1.5] dark:bg-[#1E1E1E] ${
                   mine ? t.ownTranscript : t.peerTranscript
                 }`
               : `mt-[5px] w-fit max-w-full whitespace-pre-wrap break-words rounded-[8px] bg-white px-2 py-1.5 text-[12.5px] leading-[1.5] shadow-[0_1px_4px_rgba(0,0,0,0.08)] ring-1 ring-black/[0.05] dark:bg-[#2C2C2C] dark:ring-white/[0.07] ${
@@ -345,8 +343,8 @@ export function VoiceMsgBubble({
           }
           style={{
             // v2.6（用户指定「上下一样大，没说左右一样长」）：转文字面板不再与语音气泡同宽——
-            // 宽度自然收缩随内容（w-fit，上限仍受消息列限宽）；v2.7 起内边距/字号整体收紧
-            //（padding 10/6 + 13px 文字 + line-height 1.5 的紧凑小面板）；删掉 v2.4 的 width: 语音气泡宽
+            // 宽度自然收缩随内容（w-fit，上限仍受消息列限宽）；v2.8 微信端内边距/字号
+            // 对齐普通文字气泡同规格（14×10 + 15px，与文字气泡一样大）；删掉 v2.4 的 width: 语音气泡宽
             ...(tvis?.override ? { borderRadius: tvis.radius, ...tvis.style } : undefined),
           }}
         >

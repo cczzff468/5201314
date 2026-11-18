@@ -903,6 +903,34 @@ function looksLikeTaskInstruction(s: string): boolean {
 }
 
 /**
+ * v2.5 表情包诉求识别（与 chat-rich.ts STICKER_DEMAND_RE 同口径）——零工具轮
+ * nudge 的豁免前提：用户要表情包/要抱抱蹭蹭时，模型零工具回文字是【正确动作】。
+ */
+const STICKER_DEMAND_TEXT_RE =
+  /(发表?表情|表情包|斗图|斗个图|来个?表情|发个?贴纸|要抱抱|求抱抱|抱抱我|想被抱|抱一下|蹭蹭我|贴贴我|摸摸头|摸摸我|哄哄我|逗我开心|逗我笑|哄我开心|卖个萌|萌一下|萌我|撒娇)/;
+
+/**
+ * v2.5 整轮回复里是否已带表情标记尝试（与 chat-rich.ts ANY_STICKER_ATTEMPT_RE 同口径）
+ * ——已带标记 = 模型已正确完成了表情包动作，零工具轮绝不 nudge。
+ */
+const ANY_STICKER_ATTEMPT_TEXT_RE = /[【\[]\s*[^\]】]{0,16}(?:表情包|表情|贴纸)\s*[】\]]|[【\[]\s*图片\s*[:：]/;
+
+/**
+ * v2.5 纯表情包诉求判定：用户这否话【只要表情包/抱抱】，没混杂其它动手任务（放歌/
+ * 备忘/发消息…）。纯表情包诉求永远不该触发零工具轮 nudge——发表情包是聊天基本功不是
+ * 工具，tool_choice:'required' 逼出来的只可能是放歌/查动态（用户实测：「让他发表情包，
+ * 他不是给我放歌，就是查我的手机动态」）。判法：把表情包用词全部剔除后，剩余文本
+ * 不再像动手任务 → 纯表情包诉求。
+ */
+function isPureStickerDemand(s: string): boolean {
+  if (!STICKER_DEMAND_TEXT_RE.test(s)) return false;
+  const rest = String(s || '')
+    .replace(STICKER_DEMAND_TEXT_RE, ' ')
+    .replace(/[，。,.!！?？\s哈嗯呀嘛呗呀啊哦的一下个来请你我我咱咱们TA它他她再呗]/g, '');
+  return rest.trim() === '' || !looksLikeTaskInstruction(rest);
+}
+
+/**
  * 工具轮对【深度思考】格式的临时豁免：工具轮从 system 里剥掉【深度思考】规则段、
  * 换成豁免说明——动手阶段免思考块，最终收尾文字不带头块也完全合法。
  */
@@ -1014,6 +1042,9 @@ export async function runPhoneToolRound(
   /** 机主最后一条指令（零工具轮 nudge 的「像不像任务」判定用） */
   const lastUserMsg = [...messages].reverse().find((m) => m.role === 'user')?.content ?? '';
   const taskyInstruction = looksLikeTaskInstruction(lastUserMsg);
+  // v2.5 表情包豁免：纯表情包诉求（发个表情包/斗图/要抱抱——不含其它动手动词）
+  // 永不触发零工具轮 nudge——发表情包是聊天基本功不是工具，逼工具只会逼出放歌/查动态
+  const pureStickerDemand = isPureStickerDemand(lastUserMsg);
 
   for (let round = 0; round < MAX_ROUNDS; round++) {
     if (shouldAbort?.()) return { text: '', usedTools };
@@ -1032,13 +1063,18 @@ export async function runPhoneToolRound(
       // 零工具空谈/假报：机主指令像动手任务、模型却一个工具都没调就回文字
       //（光说计划不动手 / 直接假报「发好了」）→ nudge + 下一轮 tool_choice:'required'
       // 逼它真的调工具（最多 1 次；真做不到时模型会说明原因，不匹配逼问条件即放行）。
-      if (!usedTools && taskyInstruction && exitNudges < 1) {
+      // v2.5 表情包豁免①：纯表情包诉求不 nudge（发表情包不是工具，零工具回文字正确）；
+      // ② 剥掉表情包用词后还残留其它动手动词（混合诉求如「发个表情包再放首歌」）
+      //   → 仍可 nudge 干工具部分，但提示词显式要求最终回复保留 [表情包:ID] 标记行；
+      // ③ 本轮回复已带表情标记尝试 → 说明模型已正确发表情包，绝不 nudge。
+      const stickerTried = ANY_STICKER_ATTEMPT_TEXT_RE.test(text);
+      if (!usedTools && taskyInstruction && exitNudges < 1 && !pureStickerDemand && !stickerTried) {
         exitNudges += 1;
         convo.push({ role: 'assistant', content: text || '（好的，我来处理。）' });
         convo.push({
           role: 'user',
           content:
-            '（系统强制检查：你刚才没有调用任何工具就回了文字——只说不做是违规。机主要的是真实结果：立刻调用工具执行（如 sendWebMessage 发消息 / saveMemo 记备忘录 / setAlarm 定闹钟 / playMusic 放歌），需要多个动作就按顺序逐个调用，直到目标真正完成再汇报。如果确实无法执行（对应能力未开启/联系人不存在等），请明确说明做不到的真实原因。）',
+            '（系统强制检查：你刚才没有调用任何工具就回了文字——只说不做是违规。机主要的是真实结果：立刻调用工具执行（如 sendWebMessage 发消息 / saveMemo 记备忘录 / setAlarm 定闹钟 / playMusic 放歌），需要多个动作就按顺序逐个调用，直到目标真正完成再汇报。注意：发表情包/要抱抱不是工具——绝不能拿放歌、查手机状态、查使用时长来回应表情包请求，表情包要在最终回复文本里单独一行原样输出 [表情包:表情ID] 标记；若机主要了表情包且你上一条回复里已有该标记，最终汇报必须原样保留那一行。如果确实无法执行（对应能力未开启/联系人不存在等），请明确说明做不到的真实原因。）',
         });
         forceNext = true;
         continue;

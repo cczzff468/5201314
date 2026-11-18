@@ -1,32 +1,59 @@
 'use client';
 
 /**
- * 「接入QQ」页（动态页入口）—— QQ 官方机器人平台（q.qq.com）接入 UI · v6。
+ * 「接入QQ」页（动态页入口）—— QQ 官方机器人平台（q.qq.com）接入 UI · v7 简约版。
  *
- * v6（官方扫码连接，用户定调）：「扫码连接」tab 改为 q.qq.com 官方扫码绑定——本页生成
- * 二维码，用户手机 QQ 扫码 → 选择自己创建的机器人 → 确认绑定 → 凭证（AES-256-GCM
- * 加密回传）自动解密接入，无需手动填 AppID/AppSecret，也不碰被腾讯地域拦的 token
- * 验证口。「填写凭证」保留手动方式 + 凭证二维码图片识别（拍照/选图，jsQR）。
- * 接入前置：云端助手必须已部署（未部署时阻断接入——QQ 收发消息走云端 Webhook）。
+ * v7（用户定调「提示词少一点、简约、要弹窗的弹窗、要收缩选择」）：
+ *  - 长说明/引导段全部收进收缩区（「接入指引 / 说明」Collapsible），主体只留操作；
+ *  - 云端警告横幅压缩为一行 + 「详情」弹窗（Dialog）——503 出口被拒 / 未部署等完整解释在弹窗里；
+ *  - 已接入的管理动作合并为一张 iOS 分组列表卡（拉取云端聊天记录 / 云端验证凭证 / 测试连接 /
+ *    更换角色（底部弹窗）/ 断开接入（AlertDialog 确认弹窗））。
+ * v6（官方扫码连接）：「扫码连接」走 q.qq.com 官方扫码绑定——本页生成二维码，手机 QQ 扫码 →
+ * 选择自己创建的机器人 → 确认绑定 → 凭证加密回传自动接入；「填写凭证」保留手动方式 +
+ * 凭证二维码图片识别。接入前置：云端助手必须已部署（QQ 收发消息走云端 Webhook）。
  *
- * 收发通道：QQ 官方已停止维护 WebSocket，走 Webhook——须先在 设置 → 云端助手 部署；
- * 聊天记录通过云端同步，「拉取云端聊天记录」把云端收到的 QQ 聊天合进手机 App 的 QQ
- * 聊天界面。
- *
- * 底层库 src/lib/ios/qq-connect.ts（zustand store + kv 加密持久化）：凭证保存、双路测试
- * 连接、官方扫码绑定状态机（q.qq.com/lite 协议）、bindContact 角色绑定、
- * pullQqCloudHistory 云端拉取；本文件只做页面展示与动作接线。
+ * 底层库 src/lib/ios/qq-connect.ts（zustand store + kv 加密持久化）；本文件只做页面展示与动作接线。
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, Bot, Check, CheckCircle2, ChevronLeft, ChevronRight, CloudOff, Eye, EyeOff, ImagePlus, Loader2, RefreshCw, ScanLine, ShieldCheck, X } from 'lucide-react';
+import {
+  AlertTriangle,
+  Bot,
+  Check,
+  CheckCircle2,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  CloudOff,
+  DownloadCloud,
+  Eye,
+  EyeOff,
+  ImagePlus,
+  Info,
+  Loader2,
+  RefreshCw,
+  ScanLine,
+  ShieldCheck,
+  X,
+} from 'lucide-react';
 import { parseQqQrImage, pullQqCloudHistory, useQqConnect } from '@/lib/ios/qq-connect';
 import { useWxCloud, PLATFORM_LABELS } from '@/lib/ios/wx-cloud/store';
 import { getContact } from '@/lib/ios/contacts-store';
 import { avatarFor, displayNameOf } from '@/lib/contacts';
 import type { ContactRecord } from '@/lib/contacts';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { QqAvatar } from './widgets';
-
 
 /** 接入时间格式化（YYYY-MM-DD HH:mm） */
 function fmtConnected(t: number): string {
@@ -38,8 +65,7 @@ function fmtConnected(t: number): string {
 /** 扫码识别失败提示（三种支持格式：AppID:AppSecret / JSON / 网址查询串） */
 const QR_FAIL_MSG = '没认出这是凭证二维码（支持 AppID:AppSecret / JSON / 网址格式）';
 
-/** 角色选择网格（QQ 版，参考微信接入页 CharPicker）：头像 + 名字，选中 QQ 蓝描边；
- *  点选只做本地暂存，需再按「确认绑定」才写入 store——段二与「更换角色」弹层共用 */
+/** 角色选择网格（QQ 版）：头像 + 名字，选中 QQ 蓝描边 */
 function CharPickerGrid({
   chars,
   selectedId,
@@ -66,7 +92,7 @@ function CharPickerGrid({
             onClick={() => onPick(c)}
             className="flex w-full flex-col items-center gap-1.5"
           >
-            {/* 选中态：外层 QQ 蓝底 padding 形成描边圈（同微信选中头像高亮的 QQ 配色版） */}
+            {/* 选中态：外层 QQ 蓝底 padding 形成描边圈 */}
             <span className={`rounded-[13px] p-[2.5px] ${sel ? 'bg-[#0099FF]' : 'bg-transparent'}`}>
               <QqAvatar src={avatarFor(c, 'qq')} alt={name} size={54} />
             </span>
@@ -74,6 +100,87 @@ function CharPickerGrid({
           </button>
         );
       })}
+    </div>
+  );
+}
+
+/** 收缩区块外壳（v7 简约版「收缩选择」）：一行触发头 + 展开内容 */
+function Fold({
+  title,
+  hint,
+  children,
+  testid,
+}: {
+  title: string;
+  hint?: string;
+  children: React.ReactNode;
+  testid?: string;
+}) {
+  return (
+    <Collapsible className="rounded-[14px] bg-white dark:bg-[#1B1C1F]">
+      <CollapsibleTrigger
+        data-testid={testid}
+        className="group flex w-full items-center justify-between gap-3 px-4 py-3 text-left active:bg-black/[0.03] dark:active:bg-white/[0.05]"
+      >
+        <span className="min-w-0 flex-1 truncate text-[15px] font-medium">{title}</span>
+        {hint ? <span className="shrink-0 truncate text-[12.5px] text-black/35 dark:text-white/35">{hint}</span> : null}
+        <ChevronDown className="h-[18px] w-[18px] shrink-0 text-black/25 transition-transform duration-200 group-data-[state=open]:rotate-180 dark:text-white/25" strokeWidth={2} aria-hidden="true" />
+      </CollapsibleTrigger>
+      <CollapsibleContent className="px-4 pb-3.5">{children}</CollapsibleContent>
+    </Collapsible>
+  );
+}
+
+/** 一行状态横幅（v7 简约版）：图标 + 一句话 + 可选「详情」弹窗（完整解释收弹窗里） */
+function BannerLine({
+  tone,
+  text,
+  detail,
+  testid,
+  children,
+}: {
+  tone: 'ok' | 'warn';
+  text: string;
+  detail?: { title: string; paras: string[] };
+  testid?: string;
+  children?: React.ReactNode;
+}) {
+  const warn = tone === 'warn';
+  return (
+    <div
+      data-testid={testid}
+      className={`flex items-center gap-2 rounded-[14px] px-3.5 py-2.5 ${
+        warn ? 'bg-[#FFF4D6] dark:bg-[#3B3113]' : 'bg-[#34C759]/10'
+      }`}
+    >
+      {warn ? (
+        <AlertTriangle className="h-4 w-4 shrink-0 text-[#C77700] dark:text-[#F0C24B]" strokeWidth={2} aria-hidden="true" />
+      ) : (
+        <CheckCircle2 className="h-4 w-4 shrink-0 text-[#34C759]" strokeWidth={2.2} aria-hidden="true" />
+      )}
+      <p className={`min-w-0 flex-1 text-[13px] font-medium leading-[1.4] ${warn ? 'text-[#8A5A00] dark:text-[#F0C24B]' : 'text-[#34C759]'}`}>
+        {text}
+      </p>
+      {detail ? (
+        <Dialog>
+          <DialogTrigger asChild>
+            <button type="button" className={`shrink-0 text-[12.5px] font-medium underline underline-offset-2 ${warn ? 'text-[#8A6A00] dark:text-[#F0C24B]' : 'text-[#34C759]'}`}>
+              详情
+            </button>
+          </DialogTrigger>
+          <DialogContent className="max-w-[320px] rounded-[16px]">
+            <DialogHeader>
+              <DialogTitle className="text-[16px]">{detail.title}</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-2 text-[13px] leading-[1.6] text-black/70 dark:text-white/75">
+              {detail.paras.map((p, i) => (
+                <p key={i}>{p}</p>
+              ))}
+            </div>
+            {children}
+          </DialogContent>
+        </Dialog>
+      ) : null}
     </div>
   );
 }
@@ -86,7 +193,7 @@ export function QqConnectPage({ contacts, onBack }: { contacts: ContactRecord[];
   const [appId, setAppId] = useState('');
   const [appSecret, setAppSecret] = useState('');
   const [showSecret, setShowSecret] = useState(false);
-  // 段一视图 tab：扫码连接（官方扫码绑定：页面生成二维码给手机 QQ 扫）/ 填写凭证——只切视图，凭证草稿在父组件不丢
+  // 段一视图 tab：扫码连接（官方扫码绑定）/ 填写凭证——只切视图，凭证草稿在父组件不丢
   const [addTab, setAddTab] = useState<'scan' | 'manual'>('scan');
   // 官方扫码绑定：二维码渲染成图（qrcode 库 dataURL；库体积大走动态 import）
   const [qrImg, setQrImg] = useState<string | null>(null);
@@ -98,6 +205,7 @@ export function QqConnectPage({ contacts, onBack }: { contacts: ContactRecord[];
   // 段二本地选中（确认绑定才写 store）/ 换绑弹层 / 绑定轻提示 / 拉取结果行
   const [picked, setPicked] = useState<ContactRecord | null>(null);
   const [rebindOpen, setRebindOpen] = useState(false);
+  const [offDialog, setOffDialog] = useState(false);
   const [bindNote, setBindNote] = useState('');
   const [pullMsg, setPullMsg] = useState<{ ok: boolean; msg: string } | null>(null);
 
@@ -139,7 +247,7 @@ export function QqConnectPage({ contacts, onBack }: { contacts: ContactRecord[];
     };
   }, [qrActive, startQrBind, stopQrBind]);
 
-  // 二维码内容变化 → qrcode 库渲染成图（微信接入同款用法；动态 import 避开主包体积）。
+  // 二维码内容变化 → qrcode 库渲染成图（动态 import 避开主包体积）。
   // 不在 effect 体内同步 setState（react-hooks/set-state-in-effect）：无码/换码的清空由
   // 渲染层的 qrImg && qr.qrUrl 守门（旧图不渲染，新图异步渲染完成后才上屏）
   useEffect(() => {
@@ -213,7 +321,7 @@ export function QqConnectPage({ contacts, onBack }: { contacts: ContactRecord[];
     const name = displayNameOf(c) || c.name;
     await bindContact(c.id, name);
     setPicked(null);
-    setBindNote(`已绑定「${name}」——TA 就是你 QQ 里创建的那个 AI，打开 QQ 直接聊`);
+    setBindNote(`已绑定「${name}」——打开 QQ 直接和 TA 聊`);
   };
 
   /** 更换角色（弹层里点选即生效）：换绑后云端运行包自动重推（cloudAutoSync），新人设即刻生效 */
@@ -252,91 +360,87 @@ export function QqConnectPage({ contacts, onBack }: { contacts: ContactRecord[];
       </div>
 
       <div className="flex-1 overflow-y-auto px-4 pb-[44px] pt-2">
-        {/* 云端横幅（页面顶部）：已部署绿条；云端验证失败（如 503 出口被拒）降为琥珀警告——
-            部署成功 ≠ QQ 平台收得到：验证失败时真机 QQ 上 TA 实际不在线也不回复（用户实测
-            「网站显示已接入/QQ 里显示未接入」的矛盾根源）；未部署且已接入过 → 黄色警告 */}
+        {/* ===== 云端状态横幅（v7 简约版：一行 + 详情弹窗） ===== */}
         {cloudReady && cloudDeployed && login && lastCloudVerify && !lastCloudVerify.ok ? (
-          <div className="flex items-start gap-2.5 rounded-[14px] bg-[#FFF4D6] px-3.5 py-3 dark:bg-[#3B3113]" data-testid="qq-bot-cloud-reject">
-            <AlertTriangle className="mt-[1.5px] h-[18px] w-[18px] shrink-0 text-[#C77700] dark:text-[#F0C24B]" strokeWidth={2} aria-hidden="true" />
-            <div className="min-w-0 flex-1">
-              <p className="text-[13px] font-medium leading-snug text-[#8A5A00] dark:text-[#F0C24B]">
-                云端已部署，但 QQ 平台拒绝了这台云服务器的出口（验证失败）——真机 QQ 上 TA 现在不在线、也不会回复
-              </p>
-              <p className="mt-1 text-[12px] leading-relaxed text-[#8A5A00] dark:text-[#F0C24B]">
-                本机「测试连接」走你自己的网络，能通过只代表凭证正确；QQ 收发消息由云端代发，出口被拒
-                （503）就收不到。可换一个部署平台（境内出口）到 设置 → 云端助手 重新部署后再点
-                「云端验证凭证」；同时确认 q.qq.com 控制台已配置回调地址。
-              </p>
-            </div>
-          </div>
-        ) : cloudReady && cloudDeployed ? (
-          <div className="flex items-center gap-2 rounded-[14px] bg-[#34C759]/10 px-3.5 py-2.5">
-            <CheckCircle2 className="h-4 w-4 shrink-0 text-[#34C759]" strokeWidth={2.2} aria-hidden="true" />
-            <p className="text-[13px] font-medium text-[#34C759]">云端已就绪（{PLATFORM_LABELS[cloudPlatform]}），TA 7x24 在线</p>
-          </div>
-        ) : cloudReady && !cloudDeployed && login ? (
-          <div className="flex items-start gap-2.5 rounded-[14px] bg-[#FFF4D6] px-3.5 py-3 dark:bg-[#3B3113]">
-            <AlertTriangle className="mt-[1.5px] h-[18px] w-[18px] shrink-0 text-[#C77700] dark:text-[#F0C24B]" strokeWidth={2} aria-hidden="true" />
-            <p className="text-[13px] leading-relaxed text-[#8A5A00] dark:text-[#F0C24B]">
-              云端未部署：QQ 收发消息已停摆。到 设置 → 云端助手 完成部署（Supabase 一键部署即可）后自动恢复
+          <div data-testid="qq-bot-cloud-reject">
+            <BannerLine
+              tone="warn"
+              text="QQ 平台拒绝了云端出口，真机 QQ 上 TA 暂时不在线"
+              detail={{
+                title: '云端出口被 QQ 平台拒绝',
+                paras: [
+                  '本机「测试连接」走你自己的网络，能通过只代表凭证正确；QQ 收发消息由云端代发，云端出口被腾讯拒绝（503）就收不到。',
+                  '可换一个部署平台（境内出口）到 设置 → 云端助手 重新部署后再点「云端验证凭证」。',
+                ],
+              }}
+            />
+            <p className="mt-2 px-1 text-[12px] leading-relaxed text-[#C77700] dark:text-[#F0C24B]" data-testid="qq-bot-cloud-reject-note">
+              凭证本身可用——换部署平台（境内出口）后即可恢复
             </p>
           </div>
+        ) : cloudReady && cloudDeployed ? (
+          <BannerLine tone="ok" text={`云端已就绪（${PLATFORM_LABELS[cloudPlatform]}），TA 7×24 在线`} />
+        ) : cloudReady && !cloudDeployed && login ? (
+          <BannerLine
+            tone="warn"
+            text="云端未部署：QQ 收发消息已停摆"
+            detail={{ title: '云端未部署会怎样？', paras: ['QQ 收发消息走云端 Webhook——不部署云端就无法收发。', '路径：设置 → 云端助手（Supabase 一键部署即可），部署完自动恢复。'] }}
+          />
         ) : null}
-
-        {/* 说明卡：功能定位——把 TA 带到你的真机 QQ 上（你本人在真机 QQ 里和 TA 聊） */}
-        <div className={`${cloudReady ? 'mt-3 ' : ''}rounded-[14px] bg-white px-4 py-3.5 dark:bg-[#1B1C1F]`}>
-          <div className="flex items-center gap-3">
-            <span className="grid h-10 w-10 shrink-0 place-items-center rounded-[10px] bg-[#0099FF]/10 text-[#0099FF]" aria-hidden="true">
-              <Bot className="h-[22px] w-[22px]" strokeWidth={2} />
-            </span>
-            <div className="min-w-0 flex-1">
-              <p className="text-[16px] font-medium leading-tight">把 TA 带到你的真机 QQ 上</p>
-              <button
-                type="button"
-                className="mt-0.5 text-[13px] text-[#1E6FFF] active:opacity-60 dark:text-[#4AA3FF]"
-                onClick={() => window.open('https://q.qq.com', '_blank', 'noopener')}
-              >
-                q.qq.com · 个人开发者免费注册
-              </button>
-            </div>
-          </div>
-          <p className="mt-2.5 text-[13px] leading-relaxed text-black/50 dark:text-white/50">
-            先在 QQ 里创建你自己的 AI（q.qq.com，创建完 TA 就在你的 QQ 里，不用再添加），拿到
-            AppID/AppSecret 后在这里扫码连接或手动填入。接入后机器人就是你在手机里选的那个 AI
-            角色——打开 QQ 直接聊；收发消息走云端 Webhook（必须先部署云端助手）。
-          </p>
-          {/* 能力边界：文字/表情包图片/语音条走官方富媒体接口（已接入云端）；通话/QQ空间协议不开放 */}
-          <p className="mt-2 text-[12px] leading-relaxed text-black/40 dark:text-white/40">
-            能发什么：文字、表情包、语音条（官方富媒体接口，云端部署后可用——语音条需在 设置 → 语音设置 配 OpenAI 兼容 TTS）·
-            语音/视频通话、QQ空间（QQ 协议不开放，做不到）
-          </p>
-          <p className="mt-1.5 text-[11.5px] leading-relaxed text-black/35 dark:text-white/35">
-            两侧独立：你在本站聊天界面对话只在网站里显示（不会发到真机 QQ）；真机 QQ 上和 TA 的聊天由云端自动回复，点「拉取云端聊天记录」同步进来看。
-          </p>
-        </div>
 
         {!login ? (
           cloudReady && !cloudDeployed ? (
-            /* ===== 未部署云端 → 阻断接入（QQ 收发走云端 Webhook，必须先部署） ===== */
-            <div className="mt-4 rounded-[14px] bg-[#FFF4D6] px-4 py-4 dark:bg-[#3B3113]" data-testid="qq-bot-cloud-block">
-              <div className="flex items-start gap-2.5">
-                <CloudOff className="mt-[2px] h-[18px] w-[18px] shrink-0 text-[#C77700] dark:text-[#F0C24B]" strokeWidth={2} aria-hidden="true" />
-                <div className="min-w-0 flex-1">
-                  <p className="text-[14.5px] font-medium leading-snug text-[#8A5A00] dark:text-[#F0C24B]">先部署云端助手，才能接入 QQ</p>
-                  <p className="mt-1.5 text-[12.5px] leading-relaxed text-[#8A5A00] dark:text-[#F0C24B]">
-                    QQ 收发消息走云端 Webhook——不部署云端就无法接入。路径：设置 → 云端助手（Supabase
-                    一键部署即可），部署完回来这里扫码连接或填 AppID/AppSecret。
-                  </p>
-                </div>
-              </div>
+            /* ===== 未部署云端 → 阻断接入（一行 + 详情弹窗） ===== */
+            <div data-testid="qq-bot-cloud-block">
+              <BannerLine
+                tone="warn"
+                text="先部署云端助手，才能接入 QQ"
+                detail={{ title: '为什么要先部署云端？', paras: ['QQ 收发消息走云端 Webhook——不部署云端就无法接入。', '路径：设置 → 云端助手（Supabase 一键部署即可），部署完回来扫码或填凭证。'] }}
+              />
             </div>
           ) : (
           <>
-            {/* ===== 段一 · 接入 QQ 机器人：扫码连接（官方扫码绑定，默认）/ 填写凭证（手动 + 凭证码图片识别） ===== */}
-            <p className="mt-4 px-1 text-[12px] font-semibold text-black/40 dark:text-white/40">步骤一 · 接入你创建的 AI</p>
+            {/* ===== 段一 · 接入 QQ 机器人（简约说明卡 + 收缩的完整指引） ===== */}
+            <div className="rounded-[14px] bg-white px-4 py-3.5 dark:bg-[#1B1C1F]">
+              <div className="flex items-center gap-3">
+                <span className="grid h-10 w-10 shrink-0 place-items-center rounded-[10px] bg-[#0099FF]/10 text-[#0099FF]" aria-hidden="true">
+                  <Bot className="h-[22px] w-[22px]" strokeWidth={2} />
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p className="text-[16px] font-medium leading-tight">把 TA 带到你的真机 QQ 上</p>
+                  <button
+                    type="button"
+                    className="mt-0.5 text-[13px] text-[#1E6FFF] active:opacity-60 dark:text-[#4AA3FF]"
+                    onClick={() => window.open('https://q.qq.com', '_blank', 'noopener')}
+                  >
+                    q.qq.com · 免费创建你的机器人
+                  </button>
+                </div>
+              </div>
+              <div className="mt-2">
+                <Collapsible defaultOpen={false}>
+                  <CollapsibleTrigger
+                    data-testid="qq-bot-help-fold"
+                    className="group flex items-center gap-1 text-[12.5px] font-medium text-[#1E6FFF] active:opacity-60 dark:text-[#4AA3FF]"
+                  >
+                    <Info className="h-[14px] w-[14px]" strokeWidth={2} aria-hidden="true" />
+                    展开接入指引
+                    <ChevronDown className="h-[14px] w-[14px] transition-transform duration-200 group-data-[state=open]:rotate-180" strokeWidth={2} aria-hidden="true" />
+                  </CollapsibleTrigger>
+                  <CollapsibleContent>
+                    <div className="mt-2 space-y-2 text-[12px] leading-[1.55] text-black/45 dark:text-white/45">
+                      <p>先在 q.qq.com 创建你自己的 AI（一分钟搞定，创建完 TA 就在你的 QQ 里，不用再添加），拿到 AppID/AppSecret 后在这里扫码或填入。接入后机器人在真机 QQ 里就是你选的那个 AI 角色。</p>
+                      <p>还没有机器人？手机 QQ 扫码登录 q.qq.com → 点「创建机器人」，然后回来扫上面的码连接。</p>
+                      <p>能发什么：文字、表情包、语音条（官方富媒体接口；语音条需在 设置 → 语音设置 配 OpenAI 兼容 TTS）· 通话/QQ空间（协议不开放）。</p>
+                      <p>收发消息走云端 Webhook（必须先部署云端助手）；聊天记录用「拉取云端聊天记录」同步进手机 QQ 聊天界面。</p>
+                    </div>
+                  </CollapsibleContent>
+                </Collapsible>
+              </div>
+            </div>
 
-            {/* 接入方式 tab 胶囊：扫码连接（官方扫码绑定：本页生成二维码给手机 QQ 扫）/ 填写凭证（手动填） */}
-            <div className="mt-2.5 flex gap-2" role="tablist" aria-label="接入方式">
+            {/* 接入方式 tab 胶囊：扫码连接（官方扫码绑定）/ 填写凭证（手动填） */}
+            <div className="mt-3 flex gap-2" role="tablist" aria-label="接入方式">
               <button
                 type="button"
                 role="tab"
@@ -364,13 +468,9 @@ export function QqConnectPage({ contacts, onBack }: { contacts: ContactRecord[];
             </div>
 
             {addTab === 'scan' ? (
-              /* 扫码连接 tab（v6 官方协议）：本页生成二维码 → 手机 QQ 扫码 → 选择你创建的
-                 机器人 → 确认绑定 → 凭证加密回传自动解密接入（无需手动填 AppID/AppSecret） */
+              /* 扫码连接 tab（v6 官方协议）：二维码 + 状态行 + 刷新 */
               <div className="mt-2.5 rounded-[14px] bg-white px-4 py-4 dark:bg-[#1B1C1F]" data-testid="qq-bot-qr-card">
                 <p className="text-center text-[15px] font-medium text-black/85 dark:text-white/90">QQ 扫码连接</p>
-                <p className="mt-1 text-center text-[11.5px] leading-relaxed text-black/40 dark:text-white/40">
-                  本页生成二维码，用手机 QQ 扫码即可连上你创建的机器人
-                </p>
                 {/* 二维码（白底码牌）：starting 无码转圈 / saving 盖半透明蒙层转圈 */}
                 <div
                   className="relative mx-auto mt-3 grid aspect-square w-[min(200px,100%)] place-items-center overflow-hidden rounded-[14px] bg-white p-2.5 shadow-[inset_0_0_0_1px_rgba(0,0,0,0.06)] dark:shadow-[inset_0_0_0_1px_rgba(255,255,255,0.08)]"
@@ -399,7 +499,7 @@ export function QqConnectPage({ contacts, onBack }: { contacts: ContactRecord[];
                 )}
                 {qr.phase === 'waiting' && (
                   <p className="mt-3 text-center text-[13.5px] leading-relaxed text-black/60 dark:text-white/60" data-testid="qq-bot-qr-waiting">
-                    打开手机 QQ 扫上面的码<br />→ 选择你创建的机器人 → 确认绑定
+                    手机 QQ 扫上面的码 → 选你创建的机器人 → 确认绑定
                   </p>
                 )}
                 {qr.phase === 'saving' && (
@@ -431,21 +531,15 @@ export function QqConnectPage({ contacts, onBack }: { contacts: ContactRecord[];
                     className="mx-auto mt-2 flex h-[34px] items-center justify-center gap-1.5 rounded-full px-4 text-[12.5px] text-black/45 active:opacity-70 dark:text-white/45"
                   >
                     <RefreshCw className="h-[14px] w-[14px]" strokeWidth={2} aria-hidden="true" />
-                    二维码扫不出来？刷新一下
+                    刷新二维码
                   </button>
                 )}
-                {/* 引导：还没有机器人的用户 */}
-                <p className="mt-3 rounded-[10px] bg-black/[0.03] px-3 py-2.5 text-[11.5px] leading-relaxed text-black/40 dark:bg-white/[0.05] dark:text-white/40">
-                  还没有机器人？用手机 QQ 扫码登录 q.qq.com → 点「创建机器人」（一分钟搞定，创建完它会在你
-                  QQ 里发条消息），然后回来扫上面的码连接。二维码过期会自动刷新，无需手动操作。
-                </p>
               </div>
             ) : (
-              /* 填写凭证 tab：去哪找凭证（q.qq.com 控制台「开发设置」）+ 凭证二维码图片识别辅助 */
+              /* 填写凭证 tab：识别入口 + 一行去哪找（详细说明收在上方「接入指引」） */
               <div className="mt-2.5 rounded-[14px] bg-white px-4 py-4 dark:bg-[#1B1C1F]">
-                <p className="text-[12px] leading-relaxed text-black/35 dark:text-white/35">
-                  打开 q.qq.com 控制台「开发设置」即可查看 AppID 与 AppSecret；Secret
-                  只在创建时完整展示一次，忘了可随时重置。
+                <p className="text-[12px] leading-relaxed text-black/40 dark:text-white/40">
+                  q.qq.com 控制台「开发设置」可查看 AppID 与 AppSecret（Secret 忘了可随时重置）
                 </p>
                 {/* 辅助入口：识别凭证二维码图片（拍照 / 相册选图，识别成功自动填入并测试接入） */}
                 <div className="mt-3 flex gap-2">
@@ -504,9 +598,6 @@ export function QqConnectPage({ contacts, onBack }: { contacts: ContactRecord[];
                     {scanMsg.msg}
                   </p>
                 )}
-                <p className="mt-2.5 text-[11.5px] leading-relaxed text-black/35 dark:text-white/35">
-                  凭证二维码识别（旧方式）：把 AppID/AppSecret 做成二维码（任意二维码生成器，支持「AppID:AppSecret」、JSON、网址查询串三种格式）再拍——识别后自动填入下方输入框并测试接入。
-                </p>
               </div>
             )}
 
@@ -568,7 +659,7 @@ export function QqConnectPage({ contacts, onBack }: { contacts: ContactRecord[];
         ) : (
           <>
             {/* ===== 已连接状态卡：绑定角色（头像+名字）+ 机器人名 + 接入时间 + 已接入徽标 ===== */}
-            <div className="mt-4 flex items-center gap-3 rounded-[14px] bg-white px-4 py-4 dark:bg-[#1B1C1F]">
+            <div className="mt-1 flex items-center gap-3 rounded-[14px] bg-white px-4 py-4 dark:bg-[#1B1C1F]">
               {login.boundContactId ? (
                 <QqAvatar src={boundAvatar} alt={boundName || '已绑定的角色'} size={52} />
               ) : (
@@ -594,11 +685,6 @@ export function QqConnectPage({ contacts, onBack }: { contacts: ContactRecord[];
                     ? `在真机 QQ 里，TA 就是「${boundName || login.boundContactName || '绑定的角色'}」`
                     : '在下面选一个角色，机器人在真机 QQ 里就是 TA'}
                 </p>
-                {lastCloudVerify && !lastCloudVerify.ok ? (
-                  <p className="mt-1 text-[12px] leading-relaxed text-[#C77700] dark:text-[#F0C24B]" data-testid="qq-bot-cloud-reject-note">
-                    凭证在本机验证可用，但云端出口被 QQ 平台拒（见顶部横幅）——真机 QQ 上 TA 暂时无法回复消息
-                  </p>
-                ) : null}
               </div>
             </div>
 
@@ -636,97 +722,104 @@ export function QqConnectPage({ contacts, onBack }: { contacts: ContactRecord[];
               </div>
             ) : (
               <>
-                {/* 更换角色：行入口 → 底部弹层（同段二网格，点选即 bindContact 生效） */}
-                <button
-                  type="button"
-                  onClick={() => setRebindOpen(true)}
-                  className="mt-3 flex w-full items-center justify-between gap-3 rounded-[14px] bg-white px-4 py-3 text-left active:bg-black/[0.03] dark:bg-[#1B1C1F] dark:active:bg-white/[0.06]"
-                >
-                  <span className="text-[15px]">更换角色</span>
-                  <span className="flex min-w-0 items-center gap-1">
-                    <span className="max-w-[140px] truncate text-[13px] text-black/40 dark:text-white/40">{boundName || '未设置'}</span>
-                    <ChevronRight className="h-[18px] w-[18px] shrink-0 text-black/25 dark:text-white/25" strokeWidth={2} aria-hidden="true" />
-                  </span>
-                </button>
-
-                {/* 拉取云端聊天记录：云端 Webhook 收到的 QQ 聊天合进手机 QQ 聊天界面 */}
-                <button
-                  type="button"
-                  data-testid="qq-bot-pull"
-                  disabled={pulling}
-                  onClick={() => void doPull()}
-                  className="mt-3 flex h-[46px] w-full items-center justify-center gap-2 rounded-[13px] bg-white text-[15px] font-medium active:bg-black/[0.03] disabled:opacity-60 dark:bg-[#1B1C1F] dark:active:bg-white/[0.06]"
-                >
-                  {pulling ? (
-                    <Loader2 className="h-[18px] w-[18px] animate-spin text-[#0099FF]" strokeWidth={2.2} aria-hidden="true" />
-                  ) : (
-                    <RefreshCw className="h-[18px] w-[18px] text-[#0099FF]" strokeWidth={2} aria-hidden="true" />
+                {/* ===== 管理分组列表（v7 简约版：一张卡分行的 iOS 列表） ===== */}
+                <div className="mt-3 divide-y divide-black/[0.05] overflow-hidden rounded-[14px] bg-white dark:divide-white/[0.08] dark:bg-[#1B1C1F]">
+                  {/* 拉取云端聊天记录：云端 Webhook 收到的 QQ 聊天合进手机 QQ 聊天界面 */}
+                  <button
+                    type="button"
+                    data-testid="qq-bot-pull"
+                    disabled={pulling}
+                    onClick={() => void doPull()}
+                    className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left active:bg-black/[0.03] disabled:opacity-60 dark:active:bg-white/[0.06]"
+                  >
+                    <span className="min-w-0 flex-1 text-[15px] font-medium">拉取云端聊天记录</span>
+                    {pulling ? (
+                      <Loader2 className="h-[17px] w-[17px] shrink-0 animate-spin text-[#0099FF]" strokeWidth={2.2} aria-hidden="true" />
+                    ) : (
+                      <DownloadCloud className="h-[17px] w-[17px] shrink-0 text-black/25 dark:text-white/25" strokeWidth={2} aria-hidden="true" />
+                    )}
+                  </button>
+                  {pullMsg && (
+                    <p className={`px-4 pb-3 pt-0 text-[13px] leading-relaxed ${pullMsg.ok ? 'text-[#34C759]' : 'text-[#F5455C]'}`} data-testid="qq-bot-pull-result">
+                      {pullMsg.msg}
+                    </p>
                   )}
-                  {pulling ? '正在拉取…' : '拉取云端聊天记录'}
-                </button>
-                {pullMsg && (
-                  <p className={`mt-2 px-1 text-[13px] leading-relaxed ${pullMsg.ok ? 'text-[#34C759]' : 'text-[#F5455C]'}`} data-testid="qq-bot-pull-result">
-                    {pullMsg.msg}
-                  </p>
-                )}
 
-                {/* 提示行：AI 是你自己在 QQ 创建的，本来就在你的 QQ 里（无需再「添加 TA」）；
-                    回调地址到 设置 → 云端助手 → QQ Webhook 配置 里复制现成的 */}
-                <p className="mt-3 rounded-[10px] bg-black/[0.03] px-3.5 py-3 text-[12.5px] leading-relaxed text-black/50 dark:bg-white/[0.05] dark:text-white/50">
-                  TA 就是你自己在 QQ 创建的那个 AI——打开 QQ 找到 TA 直接聊。QQ 官方机器人需在
-                  q.qq.com 控制台配置回调地址（设置 → 云端助手 → QQ Webhook 配置 里有现成的可复制）；
-                  沙箱/未发布机器人可能需要把自己加进沙箱测试名单。
-                </p>
+                  {/* 云端验证凭证：新取凭证端点海外可达，本地两路都不通时由云端助手 verify-qq 代验 */}
+                  {cloudDeployed ? (
+                    <button
+                      type="button"
+                      data-testid="qq-bot-verify-cloud"
+                      disabled={verifying}
+                      onClick={() => void verifyViaCloud()}
+                      className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left active:bg-black/[0.03] disabled:opacity-60 dark:active:bg-white/[0.06]"
+                    >
+                      <span className="min-w-0 flex-1 text-[15px] font-medium">云端验证凭证</span>
+                      {verifying ? (
+                        <Loader2 className="h-[17px] w-[17px] shrink-0 animate-spin text-[#0099FF]" strokeWidth={2.2} aria-hidden="true" />
+                      ) : (
+                        <ShieldCheck className="h-[17px] w-[17px] shrink-0 text-black/25 dark:text-white/25" strokeWidth={2} aria-hidden="true" />
+                      )}
+                    </button>
+                  ) : (
+                    <p className="px-4 py-3 text-[12.5px] leading-relaxed text-black/35 dark:text-white/35" data-testid="qq-bot-verify-hint">
+                      当前网络连不上 QQ 平台：部署云端后可验证凭证
+                    </p>
+                  )}
+
+                  {/* 更换角色：行入口 → 底部弹层（同段二网格，点选即 bindContact 生效） */}
+                  <button
+                    type="button"
+                    onClick={() => setRebindOpen(true)}
+                    className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left active:bg-black/[0.03] dark:active:bg-white/[0.06]"
+                  >
+                    <span className="text-[15px] font-medium">更换角色</span>
+                    <span className="flex min-w-0 items-center gap-1">
+                      <span className="max-w-[140px] truncate text-[13px] text-black/40 dark:text-white/40">{boundName || '未设置'}</span>
+                      <ChevronRight className="h-[18px] w-[18px] shrink-0 text-black/25 dark:text-white/25" strokeWidth={2} aria-hidden="true" />
+                    </span>
+                  </button>
+
+                  {/* 测试连接（用已存凭证再测一次） */}
+                  <button
+                    type="button"
+                    data-testid="qq-bot-test"
+                    disabled={testing}
+                    onClick={() => runTest(login.appId, login.appSecret)}
+                    className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left active:bg-black/[0.03] disabled:opacity-60 dark:active:bg-white/[0.06]"
+                  >
+                    <span className="min-w-0 flex-1 text-[15px] font-medium">测试连接</span>
+                    {testing ? (
+                      <Loader2 className="h-[17px] w-[17px] shrink-0 animate-spin text-[#0099FF]" strokeWidth={2.2} aria-hidden="true" />
+                    ) : (
+                      <RefreshCw className="h-[17px] w-[17px] shrink-0 text-black/25 dark:text-white/25" strokeWidth={2} aria-hidden="true" />
+                    )}
+                  </button>
+
+                  {/* 断开接入 → AlertDialog 确认弹窗（v7 弹窗化） */}
+                  <button
+                    type="button"
+                    data-testid="qq-bot-disconnect"
+                    disabled={testing}
+                    onClick={() => setOffDialog(true)}
+                    className="flex w-full items-center justify-center gap-3 px-4 py-3 text-center text-[15px] font-medium text-[#F5455C] active:bg-black/[0.03] disabled:opacity-50 dark:active:bg-white/[0.06]"
+                  >
+                    断开接入
+                  </button>
+                </div>
               </>
             )}
 
-            {/* 云端验证凭证：新取凭证端点（api.bot.qq.com）海外可达，本地两路都不通时由云端助手 verify-qq 代验 */}
-            {cloudDeployed ? (
-              <button
-                type="button"
-                data-testid="qq-bot-verify-cloud"
-                disabled={verifying}
-                onClick={() => void verifyViaCloud()}
-                className="mt-4 flex h-[46px] w-full items-center justify-center gap-2 rounded-[13px] bg-white text-[15px] font-medium active:bg-black/[0.03] disabled:opacity-60 dark:bg-[#1B1C1F] dark:active:bg-white/[0.06]"
-              >
-                {verifying ? (
-                  <Loader2 className="h-[18px] w-[18px] animate-spin text-[#0099FF]" strokeWidth={2.2} aria-hidden="true" />
-                ) : (
-                  <ShieldCheck className="h-[18px] w-[18px] text-[#0099FF]" strokeWidth={2} aria-hidden="true" />
-                )}
-                {verifying ? '正在验证…' : '云端验证凭证'}
-              </button>
-            ) : (
-              <p className="mt-4 px-1 text-[12.5px] leading-relaxed text-black/35 dark:text-white/35" data-testid="qq-bot-verify-hint">
-                当前网络连不上 QQ 平台：部署云端后可在这里验证凭证（也可稍后重试「测试连接」）
-              </p>
-            )}
-
-            {/* 用已存凭证再测一次（网络恢复后可确认连通） */}
-            <button
-              type="button"
-              data-testid="qq-bot-test"
-              disabled={testing}
-              onClick={() => runTest(login.appId, login.appSecret)}
-              className="mt-4 flex h-[50px] w-full items-center justify-center gap-2 rounded-[13px] bg-[#0099FF] text-[16px] font-medium text-white shadow-[0_4px_12px_rgba(0,153,255,0.25)] active:opacity-80 disabled:opacity-60"
-            >
-              {testing && <Loader2 className="h-[18px] w-[18px] animate-spin" strokeWidth={2.4} aria-hidden="true" />}
-              {testing ? '正在测试连接…' : '测试连接'}
-            </button>
-
-            {/* 断开接入：删除本机凭证（重新接入再扫一次码即可） */}
-            <button
-              type="button"
-              data-testid="qq-bot-disconnect"
-              disabled={testing}
-              onClick={() => void disconnect()}
-              className="mt-3 flex h-[46px] w-full items-center justify-center rounded-[13px] bg-white text-[15px] font-medium text-[#F5455C] active:bg-black/[0.03] disabled:opacity-50 dark:bg-[#1B1C1F] dark:active:bg-white/[0.06]"
-            >
-              断开接入
-            </button>
-            <p className="mt-3 px-1 text-[12px] leading-relaxed text-black/30 dark:text-white/30">
-              断开后凭证从本机删除；重新接入扫一次码（或填写凭证）即可。
-            </p>
+            {/* 说明收缩区（v7 简约版：原长提示段全收进来） */}
+            <div className="mt-3">
+              <Fold title="说明" testid="qq-bot-help-fold">
+                <div className="space-y-2 text-[12.5px] leading-[1.55] text-black/50 dark:text-white/50">
+                  <p>TA 就是你自己在 QQ 创建的那个 AI——打开 QQ 找到 TA 直接聊。QQ 官方机器人需在 q.qq.com 控制台配置回调地址（设置 → 云端助手 → QQ Webhook 配置 里有现成的可复制）；沙箱/未发布机器人可能需把自己加进沙箱测试名单。</p>
+                  <p>断开后凭证从本机删除；重新接入扫一次码（或填写凭证）即可。</p>
+                  <p>两侧独立：你在本站聊天界面对话只在网站里显示（不会发到真机 QQ）；真机 QQ 上和 TA 的聊天由云端自动回复，点「拉取云端聊天记录」同步进来看。</p>
+                </div>
+              </Fold>
+            </div>
           </>
         )}
 
@@ -761,11 +854,40 @@ export function QqConnectPage({ contacts, onBack }: { contacts: ContactRecord[];
                 <X className="h-5 w-5" strokeWidth={2} />
               </button>
             </div>
-            <p className="mt-1 text-[12px] text-black/40 dark:text-white/40">选中即生效；云端需重新同步运行包才会用新人设代答</p>
+            <p className="mt-1 text-[12px] text-black/40 dark:text-white/40">选中即生效；云端会自动同步运行包用新人设代答</p>
             <CharPickerGrid chars={chars} selectedId={login.boundContactId ?? null} onPick={(c) => void doRebind(c)} />
           </div>
         </div>
       )}
+
+      {/* 断开确认弹窗（v7：AlertDialog 弹窗替代直接断开） */}
+      <AlertDialog open={offDialog} onOpenChange={setOffDialog}>
+        <AlertDialogContent className="max-w-[300px] rounded-[16px]">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="text-[16px]">断开 QQ 接入？</AlertDialogTitle>
+            <AlertDialogDescription className="text-[13px] leading-[1.6]">
+              断开后凭证从本机删除，真机 QQ 上 TA 不再回复；重新接入扫一次码（或填写凭证）即可。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="flex-row gap-2.5">
+            <AlertDialogCancel className="mt-0 h-11 flex-1 rounded-[10px] bg-black/[0.05] text-[15px] dark:bg-white/[0.08]">
+              取消
+            </AlertDialogCancel>
+            <AlertDialogAction
+              data-testid="qq-bot-disconnect-confirm"
+              disabled={testing}
+              onClick={(e) => {
+                e.preventDefault();
+                setOffDialog(false);
+                void disconnect();
+              }}
+              className="h-11 flex-1 rounded-[10px] bg-[#F5455C] text-[15px] font-medium text-white hover:bg-[#F5455C] disabled:opacity-50"
+            >
+              确认断开
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

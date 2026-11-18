@@ -49,6 +49,7 @@ import { getContact, ownerProfileFor } from './contacts-store';
 import { getActiveAccountIdFor } from './accounts';
 import { useSettings } from './store';
 import { loadMsgs, saveMsgs, type WxMsg } from '@/components/apps/wx-app/core';
+import { wxCloudSnapshot } from './wx-cloud/store';
 import type { ContactRecord } from '@/lib/contacts';
 import { BUILTIN_WX_STICKERS } from './builtin-stickers';
 
@@ -528,6 +529,8 @@ interface WxConnectStore {
   qrLoading: boolean;
   testing: boolean;
   lastTest: { ok: boolean; msg: string; at: number } | null;
+  /** 云端聊天记录拉取中（拉取云端代答的真机微信对话合进手机聊天界面） */
+  pulling: boolean;
 
   boot: () => Promise<void>;
   /** 选好绑定联系人后取二维码并开始官方协议状态机（长轮询 + PIN + 重定向 + 换码） */
@@ -544,6 +547,8 @@ interface WxConnectStore {
   pushMsg: (m: WxIlinkMsg) => void;
   patchMsg: (id: string, patch: Partial<WxIlinkMsg>) => void;
   clearMsgs: () => void;
+  /** 拉取云端微信聊天记录（测试云端/云端轮询代答的对话同步进手机聊天界面） */
+  pullHistory: () => Promise<void>;
   setLoop: (s: 'off' | 'running' | 'error', err: string) => void;
 }
 
@@ -564,6 +569,7 @@ export const useWxConnect = create<WxConnectStore>((set, get) => ({
   qrLoading: false,
   testing: false,
   lastTest: null,
+  pulling: false,
 
   boot: async () => {
     if (wxConnectReady) return;
@@ -877,9 +883,81 @@ export const useWxConnect = create<WxConnectStore>((set, get) => ({
   },
 
   setLoop: (s, err) => set({ loopStatus: s, loopError: err }),
+
+  pullHistory: async () => {
+    if (get().pulling) return;
+    set({ pulling: true });
+    try {
+      await pullWxCloudHistory();
+    } finally {
+      set({ pulling: false });
+    }
+  },
 }));
 
 /** 读消息日志（云部署模块组运行包历史用；同步读内存态） */
 export function wxIlinkMsgsSnapshot(): WxIlinkMsg[] {
   return useWxConnect.getState().msgs;
+}
+
+// ---------------- 云端聊天记录拉取（云端代答的真机微信对话合进手机聊天界面） ----------------
+
+/** 云端 wx-cloud/history.json 的条目（角色视角：user=真机微信上发消息的人、assistant=TA 的回复） */
+interface WxCloudHistItem {
+  role?: string;
+  content?: string;
+  ts?: number;
+}
+
+/**
+ * 拉取云端微信聊天记录：云端助手代答（测试云端/定时轮询代跑）收发的对话存在 Supabase
+ * Storage wx-cloud/history.json（最近 30 条）——拉回来按「真机微信上的人=me、TA=peer」合进
+ * 手机里与绑定角色的微信聊天界面（去重：确定性 id，拉过的不会重复入列）。
+ * 与「本机实时回复」互不干扰：本机路径的消息已直接落聊天界面；这里只补云端路径的记录
+ * （用户实测反馈：点「测试云端」后 TA 在真机微信里回复了，但网站聊天界面里看不到——
+ * 云端代答的对话只有云端有，拉一次即合进来看）。
+ */
+export async function pullWxCloudHistory(): Promise<{ ok: boolean; msg: string; added?: number }> {
+  const cloud = wxCloudSnapshot();
+  const supa = cloud.supabase;
+  const login = memLogin;
+  if (!login) return { ok: false, msg: '还没接入真机微信' };
+  if (!login.boundContactId) return { ok: false, msg: '还没绑定角色：请先选择一个 AI 角色' };
+  if (!supa?.ref || !supa.serviceKey) return { ok: false, msg: '云端未就绪：请先到 设置 → 云端助手 完成部署' };
+  try {
+    // 新式 sb_secret_ key 只能放 apikey 头（Bearer 会被当 JWT 报 400 Invalid Compact JWS）
+    const k = supa.serviceKey;
+    const isNewStyle = k.startsWith('sb_secret_') || k.startsWith('sb_publishable_');
+    const res = await fetch(`https://${supa.ref}.supabase.co/storage/v1/object/wx-cloud/history.json`, {
+      headers: isNewStyle ? { apikey: k } : { apikey: k, Authorization: `Bearer ${k}` },
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (!res.ok) return { ok: false, msg: '云端还没有微信聊天记录（真机微信上和 TA 聊过之后才有）' };
+    const j = (await res.json()) as { msgs?: WxCloudHistItem[] };
+    const list = Array.isArray(j.msgs) ? j.msgs : [];
+    const cur = loadMsgs(login.boundContactId);
+    const seen = new Set(cur.map((m) => m.id));
+    const add: WxMsg[] = [];
+    for (const m of list) {
+      if (!m || typeof m.content !== 'string' || !m.content.trim()) continue;
+      const mine = m.role === 'user'; // 云端视角：user=真机微信上发消息的人（=机主）→ 站内 me
+      const ts = Number(m.ts) || Date.now();
+      // 确定性 id：ts+角色+内容散列——同一云端记录重复拉取不重复入列（head 截断不撞号）
+      let h = 0;
+      const c = m.content.slice(0, 64);
+      for (let i = 0; i < c.length; i++) h = (h * 31 + c.charCodeAt(i)) >>> 0;
+      const id = `wxcloud-${ts}-${mine ? 'u' : 'a'}-${h % 9973}`;
+      if (seen.has(id)) continue;
+      add.push({ id, role: mine ? 'me' : 'peer', content: m.content.slice(0, 2000), time: ts });
+    }
+    if (add.length) {
+      add.sort((a, b) => a.time - b.time);
+      saveMsgs(login.boundContactId, [...cur, ...add]);
+      // 聊天页开着时实时增量合并（与工具轮系统行同款事件）
+      window.dispatchEvent(new CustomEvent('chat-stream-sysline', { detail: { sessionKey: `wx:${login.boundContactId}` } }));
+    }
+    return { ok: true, msg: add.length ? `已同步 ${add.length} 条到微信聊天界面` : '云端暂无新记录', added: add.length };
+  } catch (e) {
+    return { ok: false, msg: e instanceof Error ? e.message : String(e) };
+  }
 }
