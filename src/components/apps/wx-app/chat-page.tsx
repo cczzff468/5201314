@@ -207,6 +207,8 @@ export interface WxTurnCtx {
   quoteMap?: Map<string, WxMsg>;
   /** v56 引用冷却：本轮是否已成功挂载过引用块（一轮连发最多一条带引用，挂过即丢弃后续引用标记） */
   turnQuoted?: boolean;
+  /** v2.6 机主明确要求引用（「引用那条消息」等）→ 豁免 AI_QUOTE_COOL_MS 冷却闸（限速是对「AI 自动挂引用」的，不是对机主点名要求的） */
+  userQuoteDemand?: boolean;
 }
 
 /** v56 引用冷却窗口：距上次成功挂载引用不足该时长的轮次一律丢弃引用标记——用户要「学会引用」
@@ -1695,9 +1697,10 @@ export function ChatPage({
         }
         // Task 30 AI 引用（[引用:M编号]，v56 恢复）：编号暂存 ctx，挂到紧随其后的第一条正文消息上
         //（见下方文字分支；标记与正文跨流式分段/切分边界时靠 ctx 跨段接力）。
-        // v56 冷却闸：本轮已挂过引用、或距上次挂载不足 AI_QUOTE_COOL_MS → 静默丢弃（正文照常）
+        // v56 冷却闸：本轮已挂过引用、或距上次挂载不足 AI_QUOTE_COOL_MS → 静默丢弃（正文照常）；
+        // v2.6 豁免：机主明确要求引用时冷却闸让路（限速是对 AI 自动挂引用的，机主点名必须兑现）。
         if (part.action.kind === 'quote') {
-          if (!ctx.turnQuoted && Date.now() - quoteLastAtRef.current >= AI_QUOTE_COOL_MS) {
+          if (!ctx.turnQuoted && (ctx.userQuoteDemand || Date.now() - quoteLastAtRef.current >= AI_QUOTE_COOL_MS)) {
             ctx.pendingQuote = part.action.targetId.trim();
           }
           continue;
@@ -2437,8 +2440,10 @@ export function ChatPage({
       });
 
     // 本轮投递上下文（投递管线与接力拉取共用，见组件层 deliverAiMsg/enqueueBatch/buildReplyMsgs）。
-    // v56 恢复：带上 quoteMap（本轮历史窗口的编号映射——[引用:M编号] 反查挂引用块用）
-    const ctx: WxTurnCtx = { aiId: uid(), msgIdx: 0, batchStarted: false, wantCallSeen: false, wantVideoCallSeen: false, musicActed: false, quoteMap };
+    // v56 恢复：带上 quoteMap（本轮历史窗口的编号映射——[引用:M编号] 反查挂引用块用）。
+    // v2.6：机主明确要求引用（本轮最后一条我的消息含「引用」）→ 带上豁免标记，冷却闸让路
+    const quoteDemandText = userMsg?.content ?? [...loadMsgs(peer.id)].reverse().find((m) => m.role === 'me' && !m.recalled)?.content ?? '';
+    const ctx: WxTurnCtx = { aiId: uid(), msgIdx: 0, batchStarted: false, wantCallSeen: false, wantVideoCallSeen: false, musicActed: false, quoteMap, userQuoteDemand: /引用/.test(quoteDemandText) };
     carryTextRef.current = ''; // F1 回合开始清 carry：跨段残留只可能属于上一回合，不复用
     musicHoldRef.current = ''; // 一起听遥控：同款回合开始清留存（半截播控指令不串回合）
     // 用户消息立即入列（保存 effect 随即落盘）；AI 回复在全局 store 流式接收，

@@ -33,7 +33,6 @@ import {
   ImagePlus,
   Info,
   Layers,
-  LayoutGrid,
   Loader2,
   Lock,
   MessageSquare,
@@ -247,11 +246,10 @@ import {
   FONT_WEIGHT_OPTIONS,
   type AppFontMeta,
 } from '@/lib/ios/fonts';
-// 云端助手（微信 7x24 自动回复）：部署到用户自己的 Supabase / HF Spaces / ClawCloud。
-// 状态中心 + 各平台部署管线都在 src/lib/ios/wx-cloud/，凭证只在用户浏览器密文保存。
-import { PLATFORM_LABELS, useWxCloud, wipeWxCloud, wxCloudSnapshot, type CloudPlatform } from '@/lib/ios/wx-cloud/store';
+// 云端助手（微信 7x24 自动回复）：部署到用户自己的 Supabase。
+// 状态中心 + 部署管线都在 src/lib/ios/wx-cloud/，凭证只在用户浏览器密文保存。
+import { PLATFORM_LABELS, useWxCloud, wipeWxCloud, type CloudPlatform } from '@/lib/ios/wx-cloud/store';
 import {
-  BUCKET_PUBLIC,
   checkServiceKey,
   cronSql,
   deploySupabase,
@@ -264,8 +262,6 @@ import {
   type DeployResult,
   type SupaProject,
 } from '@/lib/ios/wx-cloud/supabase';
-import { deployHf, hfStatusUrl, pingHf, HF_REPO_NAME, type HfDeployResult } from '@/lib/ios/wx-cloud/hf';
-import { hfDeployGuide } from '@/lib/ios/wx-cloud/sources';
 
 // ---------------- 常量与类型 ----------------
 
@@ -8902,14 +8898,14 @@ function PromptEntriesPage({ onBack }: { onBack: () => void }) {
 }
 
 
-// ---------------- 云端助手（部署用户自己的 Supabase / HF Spaces / ClawCloud） ----------------
+// ---------------- 云端助手（部署用户自己的 Supabase） ----------------
 
-/** 运行平台四选一的行定义（radio 式，选中即 setPlatform；云端含义见 wx-cloud/store） */
+/** 运行平台选择的行定义（radio 式，选中即 setPlatform；云端含义见 wx-cloud/store）
+ *  v5.1 收敛：Hugging Face Spaces（国内需代理）与 ClawCloud Run（官方 2026-05-11 停服）已下架，
+ *  平台只留 Supabase 一键部署——存量选中已下架平台的在页面打开时自动切回「仅本机」 */
 const CLOUD_PLATFORM_OPTIONS: { id: CloudPlatform; label: string; desc: string; icon: LucideIcon; tone: string }[] = [
   { id: 'none', label: '不使用云端（仅本机）', desc: '页面开着时 TA 才回复；关页面就停', icon: Smartphone, tone: TONE_GRAY },
   { id: 'supabase', label: 'Supabase', desc: '推荐 · 全免费 · 一键部署', icon: Database, tone: TONE_GREEN },
-  { id: 'hf', label: 'Hugging Face Spaces', desc: '免费常驻容器；国内网络可能需代理', icon: LayoutGrid, tone: TONE_CYAN },
-  { id: 'clawcloud', label: 'ClawCloud Run', desc: '已于 2026-05-11 停止服务（存量可继续用）', icon: CloudUpload, tone: TONE_GRAY },
 ];
 
 /** 云端助手 · 输入框样式（API 设置页同款观感） */
@@ -9043,23 +9039,19 @@ function CloudFold({
 }
 
 /**
- * 云端助手页：把「微信/QQ 接入凭证 + 绑定角色人设」打包成运行包，部署到用户自己的免费账号
- * （Supabase 一键部署 / HF Spaces 浏览器直连 / ClawCloud 指引部署），部署后接入的微信/QQ
- * 角色 7x24 在线收发消息（真机消息云端秒回）。使用顺序（强制）：必须先在这里部署云端，
- * 才能到微信「我」页 / QQ「动态」页接入真机——不部署云端就无法接入。凭证只在用户浏览器
- * 密文保存（wx-cloud/store）。
+ * 云端助手页：把「微信/QQ 接入凭证 + 绑定角色人设」打包成运行包，部署到用户自己的免费
+ * Supabase 账号（一键部署），部署后接入的微信/QQ 角色 7x24 在线收发消息（真机消息云端
+ * 秒回）。使用顺序（强制）：必须先在这里部署云端，才能到微信「我」页 / QQ「动态」页接入
+ * 真机——不部署云端就无法接入。凭证只在用户浏览器密文保存（wx-cloud/store）。
  */
 function CloudPage({ onBack }: { onBack: () => void }) {
   // —— 部署状态中心（挂载时 boot 拉取密文持久化状态） ——
   const ready = useWxCloud((s) => s.ready);
   const platform = useWxCloud((s) => s.platform);
   const supa = useWxCloud((s) => s.supabase);
-  const hf = useWxCloud((s) => s.hf);
-  const clawcloudAt = useWxCloud((s) => s.clawcloudAt);
   const lastPing = useWxCloud((s) => s.lastPing);
   const boot = useWxCloud((s) => s.boot);
   const setPlatform = useWxCloud((s) => s.setPlatform);
-  const markClawcloud = useWxCloud((s) => s.markClawcloud);
   const clearPlatform = useWxCloud((s) => s.clearPlatform);
 
   const [toastMsg, showToast] = useLocalToast();
@@ -9098,18 +9090,6 @@ function CloudPage({ onBack }: { onBack: () => void }) {
   const [stopCronLoading, setStopCronLoading] = useState(false);
   const [stopCronResult, setStopCronResult] = useState<{ ok: boolean; msg: string } | null>(null);
 
-  // —— HF Spaces ——
-  const [hfToken, setHfToken] = useState('');
-  const [showHfToken, setShowHfToken] = useState(false);
-  const [hfDeployLoading, setHfDeployLoading] = useState(false);
-  const [hfResult, setHfResult] = useState<HfDeployResult | null>(null);
-  const [hfPingLoading, setHfPingLoading] = useState(false);
-  const [hfPingResult, setHfPingResult] = useState<{ ok: boolean; msg: string } | null>(null);
-
-  // —— ClawCloud ——
-  const [clawTestLoading, setClawTestLoading] = useState(false);
-  const [clawTestResult, setClawTestResult] = useState<{ ok: boolean; msg: string } | null>(null);
-
   // —— 危险操作 ——
   const [confirmWipe, setConfirmWipe] = useState(false);
 
@@ -9122,8 +9102,19 @@ function CloudPage({ onBack }: { onBack: () => void }) {
     // 从密文 store 回填输入框（仅一次）：非级联渲染，是 store → 本地草图的同步
     // eslint-disable-next-line react-hooks/set-state-in-effect
     if (st.supabase?.token) setSupaToken(st.supabase.token);
-    if (st.hf?.token) setHfToken(st.hf.token);
   }, [ready]);
+
+  // v5.1 平台收敛迁移：存量选中已下架平台（HF Spaces / ClawCloud Run）的自动切回「仅本机」
+  //（Supabase 凭证保留，随时可重新一键部署）；一次性提示，不打扰正常用户
+  const legacyPlatformMigrated = useRef(false);
+  useEffect(() => {
+    if (!ready || legacyPlatformMigrated.current) return;
+    if (platform === 'hf' || platform === 'clawcloud') {
+      legacyPlatformMigrated.current = true;
+      setPlatform('none');
+      showToast('Hugging Face Spaces / ClawCloud Run 已下架：已切回仅本机，可改用 Supabase 一键部署');
+    }
+  }, [ready, platform, setPlatform, showToast]);
 
   // —— 派生值（均与 wxCloudSnapshot() 同源：store 变更会触发本组件重渲染） ——
   const cloudOn = platform !== 'none';
@@ -9131,22 +9122,12 @@ function CloudPage({ onBack }: { onBack: () => void }) {
   const supaDeployed = (supa?.deployedAt ?? 0) > 0;
   const supaUrl = supa?.projectUrl ?? '';
   const supaKey = supa?.serviceKey ?? '';
-  // ClawCloud 部署参数：从 wxCloudSnapshot() 取（项目地址 / service_role key；后者部署时自动补齐）
-  const clawSupaUrl = wxCloudSnapshot().supabase?.projectUrl ?? '';
-  const clawSupaKey = wxCloudSnapshot().supabase?.serviceKey ?? '';
-  const clawAssistantUrl = clawSupaUrl ? `${clawSupaUrl}/storage/v1/object/public/${BUCKET_PUBLIC}/assistant.mjs` : '';
-  const clawStartCmd = clawAssistantUrl ? `sh -c "wget -qO assistant.mjs '${clawAssistantUrl}' && node assistant.mjs"` : '';
-  const clawReady = Boolean(clawSupaUrl && clawSupaKey);
   const cronSqlText = supa?.ref ? cronSql() : '';
-  // HF 部署成功后的两步指引文案（hfDeployGuide 生成，直接展示 + 可复制）
-  const hfGuide = hfResult?.ok && hfResult.spaceUrl && hfResult.statusUrl ? hfDeployGuide(hfResult.spaceUrl, hfResult.statusUrl) : '';
-  // QQ Webhook 回调地址：Supabase = 函数 URL；HF = 状态页地址去掉末尾斜杠 + /qq；ClawCloud = 盒子对外地址 + /qq（用户自拼，无固定值）
+  // QQ Webhook 回调地址：Supabase = 函数 URL
   const qqWebhookUrl =
     platform === 'supabase' && supaDeployed && supa
       ? `${supa.projectUrl}/functions/v1/${FUNC_SLUG}`
-      : platform === 'hf' && hf?.user
-        ? `${hfStatusUrl(hf.user).replace(/\/+$/, '')}/qq`
-        : '';
+      : '';
 
   // Token 输入框与已保存值不一致时先回写快照（用户换 token 后免重选项目）
   const ensureTokenSynced = () => {
@@ -9296,50 +9277,7 @@ function CloudPage({ onBack }: { onBack: () => void }) {
     }
   };
 
-  /** 一键部署到 HF（浏览器直连 huggingface.co，先同步运行包到用户 Supabase 再建 Space 传文件） */
-  const runHfDeploy = async () => {
-    setHfDeployLoading(true);
-    setHfResult(null);
-    try {
-      setHfResult(await deployHf(hfToken));
-    } catch (e) {
-      setHfResult({ ok: false, msg: e instanceof Error ? e.message : String(e) });
-    } finally {
-      setHfDeployLoading(false);
-    }
-  };
-
-  /** 测试 HF 容器：访问状态页拿心跳（公共 Space，大陆网络可能直连失败） */
-  const runHfPing = async () => {
-    setHfPingLoading(true);
-    setHfPingResult(null);
-    try {
-      setHfPingResult(await pingHf());
-    } catch (e) {
-      setHfPingResult({ ok: false, msg: e instanceof Error ? e.message : String(e) });
-    } finally {
-      setHfPingLoading(false);
-    }
-  };
-
-  /**
-   * ClawCloud 测试：盒子本身没有对外测试 API，这里走 Supabase 链路间接验证运行包侧正常
-   * （心跳写的是同一个桶）；容器是否在跑需用户自行观察 ClawCloud 日志。同步闭环同
-   * pingAndSync（测试跑的微信收发窗口里处理过的对话一并拉回手机聊天界面）。
-   */
-  const runClawTest = async () => {
-    setClawTestLoading(true);
-    setClawTestResult(null);
-    try {
-      setClawTestResult(await pingAndSync());
-    } catch (e) {
-      setClawTestResult({ ok: false, msg: e instanceof Error ? e.message : String(e) });
-    } finally {
-      setClawTestLoading(false);
-    }
-  };
-
-  /** 清除云端配置：平台选择 + Supabase / HF 凭证全部抹掉（二次确认后；本机聊天数据不受影响） */
+  /** 清除云端配置：平台选择 + Supabase 凭证全部抹掉（二次确认后；本机聊天数据不受影响） */
   const doWipe = async () => {
     clearPlatform();
     await wipeWxCloud();
@@ -9350,11 +9288,7 @@ function CloudPage({ onBack }: { onBack: () => void }) {
     setSyncResult(null);
     setPingResult(null);
     setStopCronResult(null);
-    setHfResult(null);
-    setHfPingResult(null);
-    setClawTestResult(null);
     setSupaToken('');
-    setHfToken('');
     backfilled.current = false;
     setConfirmWipe(false);
     showToast('已清除全部云端配置');
@@ -9387,7 +9321,7 @@ function CloudPage({ onBack }: { onBack: () => void }) {
             <CloudFold title="说明（部署作用 / 使用顺序 / 测试云端为什么会让 TA 在微信里说话）" testid="cloud-help-fold">
               <div className="space-y-2 text-[12px] leading-relaxed text-muted-foreground">
                 <p>部署后，你接入的微信/QQ 角色 7x24 小时在线替你收发消息——真机消息云端秒回，手机页面关掉也不停。</p>
-                <p>使用顺序（必须按这个顺序）：① 先在这里部署云端 → ② 再到微信「我」页 / QQ「动态」页接入真机（微信扫码，QQ 扫码连接或填 AppID/AppSecret）。所有凭证只在你自己的浏览器密文保存。</p>
+                <p>使用顺序（必须按这个顺序）：① 先在这里部署 Supabase 云端 → ② 再到微信「我」页 / QQ「动态」页接入真机（微信扫码，QQ 扫码连接或填 AppID/AppSecret）。所有凭证只在你自己的浏览器密文保存。</p>
                 <p>「测试云端」会真实跑一轮约 100 秒的微信收发窗口——期间真机微信上收到的消息会被云端处理并回复（所以点完测试后 AI 真的会在微信里说话）；处理过的对话会自动同步进手机里的聊天界面，也可在微信接入页点「拉取云端聊天记录」。</p>
               </div>
             </CloudFold>
@@ -9436,13 +9370,13 @@ function CloudPage({ onBack }: { onBack: () => void }) {
           )}
         </section>
 
-        {/* 分组二：Supabase 连接（supabase / hf / clawcloud 三种平台都显示——云端配置都存用户自己的 Supabase） */}
+        {/* 分组二：Supabase 连接（云端配置都存用户自己的 Supabase） */}
         {cloudOn && (
           <section>
             <SectionLabel icon={Database} tone={TONE_GREEN}>Supabase 连接</SectionLabel>
             <div className={CLOUD_CARD_CLS}>
               <p className="text-[12px] leading-relaxed text-muted-foreground">
-                三种云端平台都以你自己的 Supabase 为配置中心（运行包 / 聊天历史 / 心跳都存这里）：填 Token → 读取项目 → 选择项目，再按所选平台部署。
+                云端以你自己的 Supabase 为配置中心（运行包 / 聊天历史 / 心跳都存这里）：填 Token → 读取项目 → 选择项目，再一键部署。
               </p>
 
               {/* Access Token */}
@@ -9695,271 +9629,29 @@ function CloudPage({ onBack }: { onBack: () => void }) {
           </section>
         )}
 
-        {/* 分组三：QQ Webhook 配置（Supabase 已部署显示函数 URL；HF 已部署显示容器 /qq；ClawCloud 提示盒子地址拼法） */}
-        {(qqWebhookUrl || platform === 'clawcloud') && (
+        {/* 分组三：QQ Webhook 配置（Supabase 已部署显示函数 URL） */}
+        {qqWebhookUrl && (
           <section>
             <SectionLabel icon={MessageSquareText} tone={TONE_BLUE}>QQ Webhook 配置</SectionLabel>
             <div className={CLOUD_CARD_CLS}>
               <p className="text-[12px] leading-relaxed text-muted-foreground">
                 q.qq.com → 你的机器人 → 开发设置 / 事件回调：回调地址填下面这行，勾选「单聊消息（C2C_MESSAGE_CREATE）」。
               </p>
-              {qqWebhookUrl ? (
-                <div className="flex items-center gap-2 rounded-[12px] bg-black/[0.03] px-3 py-2 ring-1 ring-black/[0.05] dark:bg-white/[0.06] dark:ring-white/10">
-                  <code className="min-w-0 flex-1 break-all font-mono text-[11px] text-foreground/80">{qqWebhookUrl}</code>
-                  <CloudCopyButton
-                    text={qqWebhookUrl}
-                    label="复制回调地址"
-                    testId="cloud-qq-webhook-url"
-                    onCopied={(ok) => showToast(ok ? '回调地址已复制' : '复制失败，请长按手动复制')}
-                  />
-                </div>
-              ) : (
-                <p className="text-[12px] leading-relaxed text-muted-foreground">
-                  ClawCloud 平台的回调地址 = 你的盒子对外地址 + <code className="font-mono">/qq</code>（在 App Launchpad 配好对外访问地址后拼上）。
-                </p>
-              )}
-              {(platform === 'supabase' || platform === 'hf') && (
-                <CloudFold title="平台说明" testid="cloud-qq-webhook-fold">
-                  <div className="space-y-1.5 text-[11.5px] leading-relaxed text-muted-foreground">
-                    {platform === 'supabase' && <p>Supabase 平台的回调地址就是你的函数 URL（上面已拼好）：微信轮询与 QQ 回调共用这一个函数。</p>}
-                    {platform === 'hf' && <p>HF 平台的回调地址 = 状态页地址去掉末尾斜杠 + /qq（上面已拼好），QQ 消息由 HF 容器直接代答。</p>}
-                    <p>回调校验（Ed25519 签名）由云端助手自动完成，无需其它配置；群聊可选 GROUP_AT_MESSAGE_CREATE。</p>
-                  </div>
-                </CloudFold>
-              )}
-            </div>
-          </section>
-        )}
-
-        {/* 分组四：HF Spaces（platform=hf 时显示，浏览器直连 huggingface.co 部署） */}
-        {platform === 'hf' && (
-          <section>
-            <SectionLabel icon={LayoutGrid} tone={TONE_CYAN}>HF Spaces</SectionLabel>
-            <div className={CLOUD_CARD_CLS}>
-              <p className="text-[12px] leading-relaxed text-muted-foreground">
-                部署 Docker Space 到你自己的 HF 免费账号（Space 名固定为 {HF_REPO_NAME}），容器从上面的 Supabase 读运行包——部署前先完成 Supabase 连接；国内网络可能需代理。
-              </p>
-              <div>
-                <FieldLabel>HF Token</FieldLabel>
-                <div className="relative">
-                  <Input
-                    type={showHfToken ? 'text' : 'password'}
-                    value={hfToken}
-                    onChange={(e) => setHfToken(e.target.value)}
-                    placeholder="hf_..."
-                    autoComplete="off"
-                    data-testid="cloud-hf-token"
-                    className={`${CLOUD_INPUT_CLS} pr-10`}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowHfToken((v) => !v)}
-                    aria-label={showHfToken ? '隐藏 Token' : '显示 Token'}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-muted-foreground transition-opacity hover:opacity-80"
-                  >
-                    {showHfToken ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                  </button>
-                </div>
-                <p className="mt-1.5 text-[11px] leading-relaxed text-muted-foreground/80">
-                  huggingface.co → Settings → Access Tokens 生成（需要 write 权限）。
-                </p>
+              <div className="flex items-center gap-2 rounded-[12px] bg-black/[0.03] px-3 py-2 ring-1 ring-black/[0.05] dark:bg-white/[0.06] dark:ring-white/10">
+                <code className="min-w-0 flex-1 break-all font-mono text-[11px] text-foreground/80">{qqWebhookUrl}</code>
+                <CloudCopyButton
+                  text={qqWebhookUrl}
+                  label="复制回调地址"
+                  testId="cloud-qq-webhook-url"
+                  onCopied={(ok) => showToast(ok ? '回调地址已复制' : '复制失败，请长按手动复制')}
+                />
               </div>
-              <button
-                type="button"
-                onClick={() => void runHfDeploy()}
-                disabled={hfDeployLoading}
-                className={CLOUD_BTN_BLUE_CLS}
-                data-testid="cloud-hf-deploy"
-              >
-                {hfDeployLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <CloudUpload className="h-4 w-4" />}
-                {hfDeployLoading ? '部署中（先同步运行包再建 Space）…' : '一键部署到 HF'}
-              </button>
-              {hfResult &&
-                (hfResult.ok ? (
-                  <div className={CLOUD_OK_BOX_CLS}>
-                    <span className="flex items-start gap-1.5">
-                      <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
-                      {hfResult.msg}
-                    </span>
-                    {hfResult.spaceUrl && (
-                      <a
-                        href={hfResult.spaceUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="mt-1 block break-all font-mono text-[11px] underline opacity-80"
-                      >
-                        Space：{hfResult.spaceUrl}
-                      </a>
-                    )}
-                    {hfResult.statusUrl && (
-                      <a
-                        href={hfResult.statusUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="block break-all font-mono text-[11px] underline opacity-80"
-                      >
-                        状态页：{hfResult.statusUrl}
-                      </a>
-                    )}
-                    {/* Secrets 两步的值直接给复制（HF 模式下看不到 ClawCloud 分组，就在这里给同款参数） */}
-                    <div className="mt-2 space-y-1.5">
-                      <div className="flex items-center gap-2">
-                        <code className="min-w-0 flex-1 break-all font-mono text-[11px] opacity-90">
-                          SUPA_URL={supaUrl || '（先完成上方 Supabase 连接）'}
-                        </code>
-                        {supaUrl && <CloudCopyButton text={supaUrl} testId="cloud-hf-supaurl-copy" />}
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <code className="min-w-0 flex-1 break-all font-mono text-[11px] opacity-90">
-                          SUPA_KEY={supaKey ? `${supaKey.slice(0, 18)}…` : '（部署后自动补齐）'}
-                        </code>
-                        {supaKey && <CloudCopyButton text={supaKey} testId="cloud-hf-supakey-copy" />}
-                      </div>
-                    </div>
-                    {/* 部署后两步指引（补 Secrets + cron-job.org 保活），hfDeployGuide 生成后直接展示 */}
-                    {hfGuide && (
-                      <div className="mt-2">
-                        <div className="flex items-center justify-between gap-2">
-                          <span className="text-[11px] font-medium opacity-80">部署后两步指引：</span>
-                          <CloudCopyButton
-                            text={hfGuide}
-                            label="复制指引"
-                            testId="cloud-hf-guide-copy"
-                            onCopied={(ok) => showToast(ok ? '指引已复制' : '复制失败，请长按手动复制')}
-                          />
-                        </div>
-                        <pre className="no-scrollbar mt-1 max-h-44 overflow-auto whitespace-pre-wrap break-all rounded-[12px] bg-black/[0.06] p-3 font-mono text-[10.5px] leading-relaxed opacity-90">
-                          {hfGuide}
-                        </pre>
-                      </div>
-                    )}
-                  </div>
-                ) : (
-                  <div className={CLOUD_ERR_BOX_CLS} role="alert">
-                    <span className="flex items-start gap-1.5">
-                      <XCircle className="mt-0.5 h-4 w-4 shrink-0" />
-                      {hfResult.msg}
-                    </span>
-                  </div>
-                ))}
-              {hf?.user && !hfResult && (
-                <p className="text-[11.5px] leading-relaxed text-muted-foreground">
-                  上次部署：{new Date(hf.deployedAt).toLocaleString()} · 状态页 <span className="break-all">{hfStatusUrl(hf.user)}</span>
-                </p>
-              )}
-              <button
-                type="button"
-                onClick={() => void runHfPing()}
-                disabled={hfPingLoading}
-                className={CLOUD_BTN_CLS}
-                data-testid="cloud-hf-ping"
-              >
-                {hfPingLoading && <Loader2 className="h-4 w-4 animate-spin" />}
-                测试 HF 容器
-              </button>
-              <CloudResultBox r={hfPingResult} />
-            </div>
-          </section>
-        )}
-
-        {/* 分组五：ClawCloud Run（platform=clawcloud 时显示，指引式部署）——官方已于 2026-05-11 停止服务 */}
-        {platform === 'clawcloud' && (
-          <section>
-            <SectionLabel icon={CloudUpload} tone={TONE_BLUE}>ClawCloud Run</SectionLabel>
-            <div className={CLOUD_CARD_CLS}>
-              {/* 停服公告（用户反馈「run.claw.cloud 打不开」的真相：官方 2026-05-11 停止产品及服务，
-                  页面打不开不是网络问题；新部署请改用 Supabase / HF Spaces，存量容器可能仍在跑） */}
-              <div className="rounded-[16px] border border-amber-500/30 bg-amber-300/15 px-3.5 py-2.5 text-[12px] leading-relaxed text-amber-700 backdrop-blur-xl dark:border-amber-400/25 dark:bg-amber-300/[0.08] dark:text-amber-200/90">
-                ClawCloud Run 官方已于 2026-05-11 停止产品及服务——run.claw.cloud 打不开不是你的网络问题。新部署请改用
-                Supabase（一键部署）或 HF Spaces；存量已部署的容器如仍在跑可继续用（但随时可能失效）。
-              </div>
-              {!clawReady && (
-                <div className="rounded-[16px] border border-amber-500/30 bg-amber-300/15 px-3.5 py-2.5 text-[12px] leading-relaxed text-amber-700 backdrop-blur-xl dark:border-amber-400/25 dark:bg-amber-300/[0.08] dark:text-amber-200/90">
-                  还没就绪：先完成上方「Supabase 连接」并点一次「一键部署」（或「重新同步运行包」），这里才会显示可复制的部署参数。
-                </div>
-              )}
-              {/* 存量部署参数（v5 收缩化：五步指引与参数全部收进折叠区） */}
-              <CloudFold title="存量部署参数（已停服平台，仅供仍在跑的容器重配）" testid="cloud-claw-params-fold">
-                <div className="space-y-2.5">
-                  {/* ① 创建应用 */}
-                  <p className="text-[12px] leading-relaxed text-muted-foreground">
-                    ① run.claw.cloud 用 GitHub 登录 → App Launchpad 创建应用
-                  </p>
-                  {/* ② 镜像 */}
-                  <div className="flex items-center justify-between gap-2 rounded-[12px] bg-black/[0.03] px-3 py-2 ring-1 ring-black/[0.05] dark:bg-white/[0.06] dark:ring-white/10">
-                    <span className="min-w-0 flex-1 text-[12px]">
-                      <span className="text-muted-foreground">② 镜像：</span>
-                      <code className="font-mono">node:20-alpine</code>
-                    </span>
-                    <CloudCopyButton text="node:20-alpine" testId="cloud-claw-image-copy" />
-                  </div>
-                  {/* ③ 环境变量 */}
-                  <div className="rounded-[12px] bg-black/[0.03] px-3 py-2 ring-1 ring-black/[0.05] dark:bg-white/[0.06] dark:ring-white/10">
-                    <p className="text-[12px] text-muted-foreground">③ 环境变量：</p>
-                    <div className="mt-1.5 space-y-1.5">
-                      <div className="flex items-center gap-2">
-                        <code className="min-w-0 flex-1 break-all font-mono text-[11px] text-foreground/80">
-                          SUPA_URL={clawSupaUrl || '（先完成上方 Supabase 连接 + 一键部署）'}
-                        </code>
-                        {clawSupaUrl && <CloudCopyButton text={clawSupaUrl} testId="cloud-claw-supurl-copy" />}
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <code className="min-w-0 flex-1 break-all font-mono text-[11px] text-foreground/80">
-                          SUPA_KEY={clawSupaKey ? `${clawSupaKey.slice(0, 18)}…` : '（一键部署后自动补齐）'}
-                        </code>
-                        {clawSupaKey && <CloudCopyButton text={clawSupaKey} testId="cloud-claw-supkey-copy" />}
-                      </div>
-                    </div>
-                  </div>
-                  {/* ④ 启动命令 */}
-                  <div className="rounded-[12px] bg-black/[0.03] px-3 py-2 ring-1 ring-black/[0.05] dark:bg-white/[0.06] dark:ring-white/10">
-                    <p className="text-[12px] text-muted-foreground">④ 启动命令（启动时从你的 Supabase 下载助手脚本并运行）：</p>
-                    <div className="mt-1.5 flex items-center gap-2">
-                      <code className="min-w-0 flex-1 break-all font-mono text-[11px] text-foreground/80">
-                        {clawStartCmd || '（先完成上方 Supabase 连接 + 一键部署）'}
-                      </code>
-                      {clawStartCmd && <CloudCopyButton text={clawStartCmd} testId="cloud-claw-cmd-copy" />}
-                    </div>
-                  </div>
-                  {/* ⑤ 规格 */}
-                  <p className="text-[12px] leading-relaxed text-muted-foreground">⑤ 256M 内存即可，不需要端口（助手只出站连接）。</p>
+              <CloudFold title="平台说明" testid="cloud-qq-webhook-fold">
+                <div className="space-y-1.5 text-[11.5px] leading-relaxed text-muted-foreground">
+                  <p>Supabase 平台的回调地址就是你的函数 URL（上面已拼好）：微信轮询与 QQ 回调共用这一个函数。</p>
+                  <p>回调校验（Ed25519 签名）由云端助手自动完成，无需其它配置；群聊可选 GROUP_AT_MESSAGE_CREATE。</p>
                 </div>
               </CloudFold>
-
-              {/* 标记已部署 + 测试云端 */}
-              {!clawcloudAt ? (
-                <button
-                  type="button"
-                  onClick={() => {
-                    markClawcloud();
-                    showToast('已标记，记得完成上面的部署步骤');
-                  }}
-                  disabled={!clawReady}
-                  className={CLOUD_BTN_BLUE_CLS}
-                  data-testid="cloud-claw-mark"
-                >
-                  <CheckCircle2 className="h-4 w-4" />
-                  我已在 ClawCloud 部署
-                </button>
-              ) : (
-                <div className="rounded-[16px] bg-white/45 p-3.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.6)] ring-1 ring-black/[0.04] dark:bg-white/[0.05] dark:ring-white/[0.07]">
-                  <p className="text-[13px]">已在 ClawCloud 部署 · {new Date(clawcloudAt).toLocaleString()}</p>
-                  <button
-                    type="button"
-                    onClick={() => void runClawTest()}
-                    disabled={clawTestLoading}
-                    className={`${CLOUD_BTN_CLS} mt-2`}
-                    data-testid="cloud-claw-test"
-                  >
-                    {clawTestLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
-                    {clawTestLoading ? '测试中（最长约 130 秒）…' : '测试云端（跑一轮 100 秒收发窗口）'}
-                  </button>
-                  <CloudResultBox r={clawTestResult} mt />
-                  <p className="mt-1.5 text-[11px] leading-relaxed text-muted-foreground/80">
-                    ClawCloud 盒子跑微信轮询；「测试」走 Supabase 链路验证运行包正常（心跳写的是同一个桶），跑完会把云端代答的对话同步进手机聊天界面。QQ Webhook 地址 = 盒子对外地址 + /qq（见上方「QQ Webhook 配置」）。
-                  </p>
-                </div>
-              )}
             </div>
           </section>
         )}
@@ -9989,7 +9681,7 @@ function CloudPage({ onBack }: { onBack: () => void }) {
               清除云端配置？
             </AlertDialogTitle>
             <AlertDialogDescription className="text-center text-[13px] leading-snug">
-              将清除平台选择与 Supabase / HF 凭证（本机聊天数据不受影响）。已部署的云端服务不会自动删除，如需停用请先执行「停用定时轮询」。
+              将清除平台选择与 Supabase 凭证（本机聊天数据不受影响）。已部署的云端服务不会自动删除，如需停用请先执行「停用定时轮询」。
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter className="flex-row gap-0 border-t border-border sm:flex-row">

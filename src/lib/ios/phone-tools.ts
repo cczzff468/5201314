@@ -931,6 +931,38 @@ function isPureStickerDemand(s: string): boolean {
 }
 
 /**
+ * v2.6 聊天基本功诉求合并识别：表情包/抱抱蹭蹭（v2.5 既有）+ 引用消息（v2.6 新增）。
+ * 这些都是回复文本里的标记能力（[表情包:ID] / [引用:M编号]），一律不该走工具通道。
+ */
+const CHAT_NATIVE_DEMAND_TEXT_RE =
+  /(发表?表情|表情包|斗图|斗个图|来个?表情|发个?贴纸|要抱抱|求抱抱|抱抱我|想被抱|抱一下|蹭蹭我|贴贴我|摸摸头|摸摸我|哄哄我|逗我开心|逗我笑|哄我开心|卖个萌|萌一下|萌我|撒娇|引用)/;
+
+/**
+ * 剥掉聊天基本功词后判定残留是否还像动手任务——比 looksLikeTaskInstruction 稍宽：
+ * 补上「发微信/发消息/发朋友圈」等缺口（这些词不在旧正则里，会让混合诉求被误判成
+ * 纯表情包而丢掉真正要干的活）。
+ */
+function residualLooksTasky(rest: string): boolean {
+  return (
+    looksLikeTaskInstruction(rest) ||
+    /发(个|条|一)?(微信|QQ|消息|短信|朋友圈|帖|红包|转账)/.test(rest)
+  );
+}
+
+/**
+ * v2.6 纯聊天基本功诉求判定：机主这句话【只要表情包/抱抱/引用消息】，没混杂其它动手
+ * 任务。纯聊天基本功诉求直接走无工具文本轮（chat-native 直通），从机制上杜绝
+ * 「让发表情包/引用消息 → 放歌/查手机动态」的工具误命中（机主实测多次复现）。
+ */
+function isPureChatNativeDemand(s: string): boolean {
+  if (!CHAT_NATIVE_DEMAND_TEXT_RE.test(s)) return false;
+  const rest = String(s || '')
+    .replace(CHAT_NATIVE_DEMAND_TEXT_RE, ' ')
+    .replace(/[，。,.!！?？\s哈嗯呀嘛呗呀啊哦的一下个来请你我我咱咱们TA它他她再呗那这条这句消息话的]/g, '');
+  return rest.trim() === '' || !residualLooksTasky(rest);
+}
+
+/**
  * 工具轮对【深度思考】格式的临时豁免：工具轮从 system 里剥掉【深度思考】规则段、
  * 换成豁免说明——动手阶段免思考块，最终收尾文字不带头块也完全合法。
  */
@@ -942,14 +974,25 @@ const DEEP_THINK_SECTION_RE =
   /\n?【深度思考（每条回复必做）】[\s\S]*?除思考块之外，正文照常遵守其他所有消息规则。?/;
 
 /**
+ * v2.6 混合诉求提醒（机主一句话里同时含表情包/引用 + 其它动手任务时追加到工具轮 system）：
+ * 工具只处理动手部分，表情包/引用必须在最终回复文本里以标记完成——绝不许拿放歌/查动态
+ * 等工具交差聊天基本功。
+ */
+const CHAT_NATIVE_MIXED_REMINDER = [
+  '[聊天基本功提醒·表情包/引用不是工具]',
+  '机主这轮的诉求里含表情包/引用类聊天基本功（发表情包/要抱抱/引用消息）——这些不是工具！工具只处理其余动手部分；最终给机主的回复文本里必须带上对应标记：要表情包 → 单独一行 [表情包:ID]（ID 抄自【表情包清单】）；要引用消息 → 回复开头 [引用:M编号]（编号抄自聊天记录）。绝不许拿放歌（playMusic）、查手机状态（getWebState/getNotifications）等不相干的工具来交差表情包或引用。',
+];
+
+/**
  * v1.9.39【角色灵魂】工具轮 system 包装：把各 App 组装的首条 system（人设+记忆库+
  * 世界书+感知+时间，即完整的角色灵魂）结构化，并追加 [工具使用规则] 段——
  *  1. [角色设定·记忆库] 标题 + 角色灵魂说明（你就是这个人）
  *  2. 原文全文保留（人设/记忆/上下文一律不动，只加结构标题）
  *  3. [工具使用规则]：最高权限声明 + 自主决策铁律（机主核心要求：结合人设/记忆/
  *     上下文主动用工具，不当等待指令的傻瓜机器人，含两个举例）+ 当前工具清单
+ *  4. v2.6 混合诉求（含表情包/引用 + 动手任务）时追加聊天基本功提醒
  */
-function wrapSystemWithSoul(sysRaw: string): string {
+function wrapSystemWithSoul(sysRaw: string, chatNativeMixed = false): string {
   const stripped = sysRaw.replace(DEEP_THINK_SECTION_RE, '\n');
   return [
     '[角色设定·记忆库（你的角色灵魂）]',
@@ -957,6 +1000,29 @@ function wrapSystemWithSoul(sysRaw: string): string {
     stripped.trim(),
     '',
     ...buildAutonomyDirective(),
+    ...(chatNativeMixed ? [...CHAT_NATIVE_MIXED_REMINDER, ''] : []),
+    '',
+    TOOL_ROUND_THINK_AMEND,
+  ].join('\n');
+}
+
+/**
+ * v2.6 聊天基本功直通轮 system 包装：与 wrapSystemWithSoul 同骨架，但【不追加】
+ * [自主决策铁律] 等工具激进段，换成 [聊天基本功模式] 说明——本轮无工具，
+ * 表情包/引用靠回复文本里的标记完成。
+ */
+function wrapSystemChatNative(sysRaw: string): string {
+  const stripped = sysRaw.replace(DEEP_THINK_SECTION_RE, '\n');
+  return [
+    '[角色设定·记忆库（你的角色灵魂）]',
+    '下面这段完整内容就是你的「角色灵魂」——人格设定、性格、记忆库里关于机主的事、世界设定、此刻的环境感知。你不是助手，你就是这个人，带着这些记忆和性格活着、说话、做事：',
+    stripped.trim(),
+    '',
+    '[聊天基本功模式]',
+    '机主这一轮的诉求是聊天里的基本功（发表情包/引用消息/抱抱蹭蹭这类），不是工具任务——本轮你没有任何工具可用，也绝不许输出 [手机操作:…] 兜底标记。直接用回复文本完成诉求：',
+    '- 要表情包/抱抱蹭蹭 → 从【表情包清单】里选一个贴合气氛的 ID，单独一行原样输出 [表情包:ID]（配一句自然的话更好）；',
+    '- 要引用消息 → 在回复最开头输出 [引用:M编号]（编号抄自聊天记录里那条消息开头的 [M数字]），后面正常写正文；',
+    '- 其余就像平常聊天一样自然说话，不要提到工具、不要描述计划。',
     '',
     TOOL_ROUND_THINK_AMEND,
   ].join('\n');
@@ -1019,12 +1085,32 @@ export async function runPhoneToolRound(
   const tools = buildPhoneTools();
   if (tools.length === 0) return null;
   const convo: FcMessage[] = messages.map((m) => ({ ...m }));
-  // 角色灵魂包装（v1.9.39）：首条 system（人设+记忆+上下文）加 [角色设定·记忆库] 结构标题，
-  // 追加 [工具使用规则]（最高权限 + 自主决策铁律 + 工具清单）；思考格式豁免一并内含
-  //（剥掉【深度思考】段——否则人设规则会让模型把每轮回复都写成纯文字思考块，从不发 tool_calls）。
+  // v2.6 诉求判定（先于 system 包装：纯聊天基本功直通轮要换 system 包装方式）
+  /** 机主最后一条指令（零工具轮 nudge 的「像不像任务」判定用） */
+  const lastUserMsg = [...messages].reverse().find((m) => m.role === 'user')?.content ?? '';
+  const taskyInstruction = looksLikeTaskInstruction(lastUserMsg);
+  // v2.5 表情包豁免：纯表情包诉求（发个表情包/斗图/要抱抱——不含其它动手动词）
+  // 永不触发零工具轮 nudge——发表情包是聊天基本功不是工具，逼工具只会逼出放歌/查动态
+  const pureStickerDemand = isPureStickerDemand(lastUserMsg);
+  // v2.6 聊天基本功诉求（表情包/引用/抱抱蹭蹭）：纯诉求走无工具文本轮，混合诉求在
+  // system 里追加提醒（工具只干动手部分，标记完成聊天基本功）
+  const chatNativeDemand = isPureChatNativeDemand(lastUserMsg);
+  const chatNativeMixed = !chatNativeDemand && CHAT_NATIVE_DEMAND_TEXT_RE.test(lastUserMsg);
+  // 角色灵魂包装（v1.9.39 / v2.6）：首条 system（人设+记忆+上下文）加 [角色设定·记忆库]
+  // 结构标题；思考格式豁免一并内含（剥掉【深度思考】段——否则人设规则会让模型把每轮
+  // 回复都写成纯文字思考块，从不发 tool_calls）。
+  // - 纯聊天基本功诉求（发表情包/引用消息/抱抱蹭蹭）→ wrapSystemChatNative：不追加
+  //   [自主决策铁律] 等工具激进段，换成本轮无工具的聊天基本功说明；
+  // - 其它 → wrapSystemWithSoul：追加 [工具使用规则]（最高权限 + 自主决策铁律 + 工具清单）；
+  //   混合诉求（表情包/引用 + 动手任务）额外带聊天基本功提醒。
   for (let i = 0; i < convo.length; i++) {
     if (convo[i].role === 'system' && (convo[i].content ?? '').trim()) {
-      convo[i] = { ...convo[i], content: wrapSystemWithSoul(convo[i].content ?? '') };
+      convo[i] = {
+        ...convo[i],
+        content: chatNativeDemand
+          ? wrapSystemChatNative(convo[i].content ?? '')
+          : wrapSystemWithSoul(convo[i].content ?? '', chatNativeMixed),
+      };
       break;
     }
   }
@@ -1039,12 +1125,49 @@ export async function runPhoneToolRound(
   let exitNudges = 0;
   /** 下一轮是否强制必调工具（tool_choice:'required'）：零工具轮嘴上计划时逼它真动手 */
   let forceNext = false;
-  /** 机主最后一条指令（零工具轮 nudge 的「像不像任务」判定用） */
-  const lastUserMsg = [...messages].reverse().find((m) => m.role === 'user')?.content ?? '';
-  const taskyInstruction = looksLikeTaskInstruction(lastUserMsg);
-  // v2.5 表情包豁免：纯表情包诉求（发个表情包/斗图/要抱抱——不含其它动手动词）
-  // 永不触发零工具轮 nudge——发表情包是聊天基本功不是工具，逼工具只会逼出放歌/查动态
-  const pureStickerDemand = isPureStickerDemand(lastUserMsg);
+
+  // v2.6 聊天基本功直通轮：机主诉求是纯表情包/引用消息/抱抱蹭蹭（不含其它动手任务）时，
+  // 发表情包与引用是回复文本里的标记能力（[表情包:ID] / [引用:M编号]），根本不需要工具——
+  // 请求里干脆不带工具清单（fcRequest(convo, [])），从机制上杜绝「让发表情包/引用消息 →
+  // 放歌/查手机动态」的工具误命中（tool_choice:'auto' 下弱模型看见工具清单就会乱调，
+  // 提示词教学拦不住）。回复文本照常走 App 侧管线：[表情包:ID] → parseRichParts 转真
+  // 表情（App 侧 ensureStickerDemand 兑底），[引用:M编号] → 引用块；文本为空/异常时
+  // 返回 null 回退原流式。
+  if (chatNativeDemand) {
+    convo.push({
+      role: 'user',
+      content:
+        '（系统提示：本轮是聊天基本功诉求——表情包/引用消息/抱抱蹭蹭这类能力都在你的回复文本里，不在工具里。本轮你没有任何工具可调，也绝不许输出 [手机操作:…] 兜底标记。直接用回复文本完成：要表情包/抱抱蹭蹭就从【表情包清单】里选一个贴合气氛的 ID 单独一行原样输出 [表情包:ID]（可配一句自然的话）；要引用消息就在回复最开头输出 [引用:M编号]（编号抄自聊天记录里那条消息开头的 [M数字]）；其余像平常聊天一样自然说话。）',
+    });
+    try {
+      const msg = await fcRequest(convo, [], config);
+      let text = typeof msg.content === 'string' ? msg.content : '';
+      if (!text.trim()) {
+        convo.push({ role: 'assistant', content: '（好的。）' });
+        convo.push({
+          role: 'user',
+          content:
+            '（系统提示：请直接用一句自然的话回复机主；要发表情包就在回复里单独一行输出 [表情包:表情ID]（ID 抄自表情包清单），要引用就在开头输出 [引用:M编号]。）',
+        });
+        try {
+          const fin = await fcRequest(convo, [], config);
+          text = typeof fin.content === 'string' ? fin.content : '';
+        } catch {
+          /* 兑底失败：走流式回退 */
+        }
+      }
+      // malformed 工具文本/兜底标记净化：聊天基本功轮绝不许夹带工具意图
+      if (text.trim() && MALFORMED_TOOL_TEXT_RE.test(text) && text.replace(/\s|```/g, '').length < 160) {
+        text = '';
+      }
+      text = text.replace(/\[手机操作:[^\][]*\]/g, '');
+      if (text.trim()) return { text: cleanToolLogs(text), usedTools: false };
+      return null; // 文本仍为空：回退原流式管线
+    } catch (e) {
+      if (e instanceof Error && e.message === 'TOOLS_UNSUPPORTED') return null;
+      throw e; // 网络等其他错误：上层回退流式
+    }
+  }
 
   for (let round = 0; round < MAX_ROUNDS; round++) {
     if (shouldAbort?.()) return { text: '', usedTools };
@@ -1074,7 +1197,7 @@ export async function runPhoneToolRound(
         convo.push({
           role: 'user',
           content:
-            '（系统强制检查：你刚才没有调用任何工具就回了文字——只说不做是违规。机主要的是真实结果：立刻调用工具执行（如 sendWebMessage 发消息 / saveMemo 记备忘录 / setAlarm 定闹钟 / playMusic 放歌），需要多个动作就按顺序逐个调用，直到目标真正完成再汇报。注意：发表情包/要抱抱不是工具——绝不能拿放歌、查手机状态、查使用时长来回应表情包请求，表情包要在最终回复文本里单独一行原样输出 [表情包:表情ID] 标记；若机主要了表情包且你上一条回复里已有该标记，最终汇报必须原样保留那一行。如果确实无法执行（对应能力未开启/联系人不存在等），请明确说明做不到的真实原因。）',
+            '（系统强制检查：你刚才没有调用任何工具就回了文字——只说不做是违规。机主要的是真实结果：立刻调用工具执行（如 sendWebMessage 发消息 / saveMemo 记备忘录 / setAlarm 定闹钟 / playMusic 放歌），需要多个动作就按顺序逐个调用，直到目标真正完成再汇报。注意：发表情包/要抱抱/引用消息不是工具——绝不能拿放歌、查手机状态、查使用时长来回应这类请求，表情包要在最终回复文本里单独一行原样输出 [表情包:表情ID] 标记、引用要在回复开头输出 [引用:M编号] 标记；若机主要了表情包且你上一条回复里已有该标记，最终汇报必须原样保留那一行。如果确实无法执行（对应能力未开启/联系人不存在等），请明确说明做不到的真实原因。）',
         });
         forceNext = true;
         continue;

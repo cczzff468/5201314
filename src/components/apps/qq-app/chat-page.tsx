@@ -1700,6 +1700,9 @@ export function ChatPage({
   const quoteMapRef = useRef<Map<string, QQMsg> | null>(null);
   // v56 引用冷却：上次成功挂载引用卡的时刻（挂载即刷新——同轮后续标记全被冷却拦下，跨轮 5 分钟内不重复）
   const quoteLastAtRef = useRef(0);
+  /** v2.6 机主明确要求引用（本轮指令含「引用」）：冷却闸让路标记（回合开始重算）——限速是对
+   *  AI 自动挂引用的，机主点名要求的引用必须兑现，否则永远表现为「让他引用他不会」 */
+  const quoteDemandRef = useRef(false);
 
   /**
    * 消费照片任务（微信端同款管线移植）：配置完整时每条先生「正在拍照…」系统行，异步生成成功后落照片消息 +
@@ -1878,9 +1881,10 @@ export function ChatPage({
           }
           // Task 30 AI 引用（[引用:M编号]，v56 恢复）：编号暂存 ref，挂到紧随其后的第一条正文消息上
           //（见下方文字分支；标记与正文跨流式分段/切分边界时靠 ref 跨段接力）。
-          // v56 冷却闸：距上次成功挂载不足 AI_QUOTE_COOL_MS（挂载即刷新——同轮第二条引用也会被拦）→ 静默丢弃
+          // v56 冷却闸：距上次成功挂载不足 AI_QUOTE_COOL_MS（挂载即刷新——同轮第二条引用也会被拦）→ 静默丢弃；
+          // v2.6 豁免：机主明确要求引用时冷却闸让路。
           if (part.action.kind === 'quote') {
-            if (Date.now() - quoteLastAtRef.current >= AI_QUOTE_COOL_MS) {
+            if (quoteDemandRef.current || Date.now() - quoteLastAtRef.current >= AI_QUOTE_COOL_MS) {
               quotePendingRef.current = part.action.targetId.trim();
             }
             continue;
@@ -2274,6 +2278,11 @@ export function ChatPage({
     }
     quoteMapRef.current = quoteMap;
     quotePendingRef.current = null; // 回合开始清引用暂存：跨段残留只可能属于上一回合
+    // v2.6 引用冷却闸豁免标记：本轮最后一条我的消息含「引用」→ 机主点名要求，冷却闸让路
+    {
+      const lastMineForQuote = [...base].reverse().find((m) => m.role === 'me' && !m.recalled && typeof m.content === 'string' && m.content.trim());
+      quoteDemandRef.current = /引用/.test(String(lastMineForQuote?.content ?? ''));
+    }
     const history = base
       .filter(
         (m) =>
