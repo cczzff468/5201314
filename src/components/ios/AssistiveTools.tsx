@@ -338,23 +338,6 @@ function PromptViewerSheet({ onClose }: { onClose: () => void }) {
             {result.systemFull}
           </pre>
 
-          {/* Context 消息 */}
-          <p className="mt-3.5 mb-1.5 flex items-center gap-1.5 text-[11px] font-bold tracking-widest text-muted-foreground">
-            <span className="inline-block h-[7px] w-[7px] rounded-full bg-neutral-500 dark:bg-white/60" aria-hidden />
-            CONTEXT（最近对话）
-          </p>
-          <div className="flex flex-col gap-2">
-            {result.messages.slice(1).map((m, i) => (
-              <div key={i}>
-                <p className={`mb-1 ml-1 text-[10px] font-bold ${m.role === 'user' ? 'text-foreground/85' : 'text-foreground/55'}`}>
-                  {m.role === 'user' ? 'user（机主）' : 'assistant（TA）'}
-                </p>
-                <pre className={`thin-scrollbar max-h-40 overflow-y-auto overscroll-contain rounded-[16px] px-3.5 py-2.5 font-mono text-[10.5px] leading-[1.6] break-words whitespace-pre-wrap ${GLASS_CODE}`}>
-                  {m.content}
-                </pre>
-              </div>
-            ))}
-          </div>
           <p className="mt-3 rounded-[16px] px-3.5 py-2.5 text-[10.5px] leading-relaxed text-muted-foreground/80 dark:text-white/55" style={{ background: 'rgba(127,127,127,0.07)' }}>
             与真实发送同一套拼装函数（人设 → 记忆 → 世界书 → 动态块 → 历史）；App 自动跟随当前聊天（没打开聊天时取最近有消息的 App）。预览没有「本轮新消息」，记忆/世界书按最近历史扫描。待处理红包/转账动作规则按本轮卡片状态注入，预览中省略。
           </p>

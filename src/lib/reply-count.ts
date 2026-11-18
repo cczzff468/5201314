@@ -17,9 +17,9 @@ import { scopedConvKey } from './ios/accounts';
  *   说什么内容完全交给角色人设自由发挥；
  * - replyMinTarget：最低条数目标（v73：max(2, ceil(N×0.6))，夹在 [2, N]——机主定断：
  *   选 3 → 发 2~3 条、选 5 → 发 3~5 条、选 8 → 5~8 条、选 15 → 9~15 条、选 30 → 18~30 条；
- *   下限给弹性（有话可超 N 多发、没话可低于下限少发），但正常回复要落在区间内、目标靠 N；
- *   配套总线侧条数不足自动续发兑底（chat-stream-store），模型只发 1 条时客户端补齐下限。
- *   v2.2 的 max(5, floor(N×0.75)) 对 N=3/5 算出 3/5——区间退化成固定值没有弹性，弃用。
+ *   下限给弹性（有话可超 N 多发、没话可低于下限少发），但正常回复要落在区间内、目标靠 N。
+ *   v74：配套的总线侧「条数不足自动续发」兑底已按机主要求删除（补发内容容易重复/接不上），
+ *   条数完全由提示词驱动——生成端不听时按实际产出收尾，客户端不再补齐。
  * - 消息边界 = 「&&&」标记 或 换行 或 句末标点（。！？!? ～〜，不含省略号/半角~）：AI 守「一句一行」
  *   约定时按行切；把多句话写在同一行里时按句子切开（句末标点保留在气泡文本里）——
  *   一句就是一条消息，逐条连发。省略号/逗号这类句中停顿不是边界：切分稳定，不会把
@@ -45,7 +45,7 @@ import { scopedConvKey } from './ios/accounts';
 /** 可选回复条数（v1.9.15：默认 8 条——机主「每次回复 3~8 个消息」；7 与 8 档位几乎无感，替换） */
 export const REPLY_COUNT_OPTIONS: readonly number[] = [1, 3, 5, 8, 15, 20, 25, 30];
 /** 默认回复条数（v1.9.15：5 → 8——按机主要求 AI 每次回复发 3~8 条消息；v1.9.33 维持 8，
- *  下限由 replyMinTarget 抬到 4 + 总线侧自动续发兑底，见 chat-stream-store） */
+ *  条数完全由提示词驱动，客户端不再兑底——见 chat-stream-store v74） */
 export const DEFAULT_REPLY_COUNT = 8;
 
 const STORE_KEY = 'chat-reply-counts';
@@ -135,7 +135,8 @@ export function saveReplyCount(sessionKey: string, n: number): void {
  * 选 3 → 2~3 条、选 5 → 3~5 条、选 8 → 5~8 条、选 15 → 9~15 条、选 30 → 18~30 条。
  * N=1 是单条模式没有「多条」概念；其余 N 作为 min~N 连发区间提示的下限。
  * 有话可超 N 多发、没话可低于下限少发（提示词「话少豁免」），但正常回复要落在区间内、
- * 目标靠 N——配合总线侧条数不足自动续发（chat-stream-store）兑底：模型只发 1 条时补齐下限。
+ * 目标靠 N。v74：总线侧「条数不足自动续发」已删（补发内容容易重复/接不上），
+ * 该函数只用于拼提示词区间文案，客户端不再用它做补发判定。
  */
 export function replyMinTarget(n: number): number {
   const cap = Math.max(1, Math.floor(n) || 1);
@@ -304,9 +305,7 @@ export interface ReplySegmentScanner {
   finish: () => string;
   /**
    * 只读预览：finish() 即将交付的最后一段（不动任何状态，可反复调用）。
-   * v1.9.33 连发不足自动续发（chat-stream-store）判定用——补发前数「已投分段 +
-   * 待收尾尾段」够不够下限；peek 后流还会继续 push 新增内容，finish 仍在流真正
-   * 收尾时消费一次，两路互不影响。
+   * 通用调试/预览用途；v74 删除总线侧补发循环后聊天总线已不再使用（保留接口兼容）。
    */
   peek: () => string;
 }

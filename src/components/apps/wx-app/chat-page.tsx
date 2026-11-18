@@ -5128,11 +5128,11 @@ export function ChatPage({
               ) : (
                 /* v2.3 气泡比例修复：inline-flex 自适应（宽高严格随行数撑开，绝不写死）+
                     统一 padding 10px 14px + line-height 1.5 + border-box + 最大宽 76% + break-words；
-                    字号 15px（用户指定：16 仍偏大，收紧到 15 一档） */
+                    字号 16px（用户指定：气泡内文字大一号、只改文字不动 padding/比例） */
                 <div className={`flex min-w-0 max-w-[76%] flex-col ${m.role === 'me' ? 'items-end' : 'items-start'}`}>
                   <div
                     {...bubblePress}
-                    className={`relative inline-flex w-fit max-w-full shrink-0 select-none whitespace-pre-wrap break-words rounded-[5px] px-[14px] py-[10px] text-[15px] leading-[1.5] box-border ${
+                    className={`relative inline-flex w-fit max-w-full shrink-0 select-none whitespace-pre-wrap break-words rounded-[5px] px-[14px] py-[10px] text-[16px] leading-[1.5] box-border ${
                       bvis.override
                         ? bvis.className
                         : m.role === 'me'

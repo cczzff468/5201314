@@ -253,7 +253,6 @@ import {
   checkServiceKey,
   cronSql,
   deploySupabase,
-  FUNC_SLUG,
   listProjects,
   pingSupabase,
   saveSupabaseConn,
@@ -9123,11 +9122,6 @@ function CloudPage({ onBack }: { onBack: () => void }) {
   const supaUrl = supa?.projectUrl ?? '';
   const supaKey = supa?.serviceKey ?? '';
   const cronSqlText = supa?.ref ? cronSql() : '';
-  // QQ Webhook 回调地址：Supabase = 函数 URL
-  const qqWebhookUrl =
-    platform === 'supabase' && supaDeployed && supa
-      ? `${supa.projectUrl}/functions/v1/${FUNC_SLUG}`
-      : '';
 
   // Token 输入框与已保存值不一致时先回写快照（用户换 token 后免重选项目）
   const ensureTokenSynced = () => {
@@ -9624,33 +9618,6 @@ function CloudPage({ onBack }: { onBack: () => void }) {
                     选择项目并完成「一键部署」后，这里会生成带任务密钥的手动 SQL。
                   </p>
                 )}
-              </CloudFold>
-            </div>
-          </section>
-        )}
-
-        {/* 分组三：QQ Webhook 配置（Supabase 已部署显示函数 URL） */}
-        {qqWebhookUrl && (
-          <section>
-            <SectionLabel icon={MessageSquareText} tone={TONE_BLUE}>QQ Webhook 配置</SectionLabel>
-            <div className={CLOUD_CARD_CLS}>
-              <p className="text-[12px] leading-relaxed text-muted-foreground">
-                q.qq.com → 你的机器人 → 开发设置 / 事件回调：回调地址填下面这行，勾选「单聊消息（C2C_MESSAGE_CREATE）」。
-              </p>
-              <div className="flex items-center gap-2 rounded-[12px] bg-black/[0.03] px-3 py-2 ring-1 ring-black/[0.05] dark:bg-white/[0.06] dark:ring-white/10">
-                <code className="min-w-0 flex-1 break-all font-mono text-[11px] text-foreground/80">{qqWebhookUrl}</code>
-                <CloudCopyButton
-                  text={qqWebhookUrl}
-                  label="复制回调地址"
-                  testId="cloud-qq-webhook-url"
-                  onCopied={(ok) => showToast(ok ? '回调地址已复制' : '复制失败，请长按手动复制')}
-                />
-              </div>
-              <CloudFold title="平台说明" testid="cloud-qq-webhook-fold">
-                <div className="space-y-1.5 text-[11.5px] leading-relaxed text-muted-foreground">
-                  <p>Supabase 平台的回调地址就是你的函数 URL（上面已拼好）：微信轮询与 QQ 回调共用这一个函数。</p>
-                  <p>回调校验（Ed25519 签名）由云端助手自动完成，无需其它配置；群聊可选 GROUP_AT_MESSAGE_CREATE。</p>
-                </div>
               </CloudFold>
             </div>
           </section>

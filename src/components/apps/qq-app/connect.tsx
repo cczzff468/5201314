@@ -814,7 +814,7 @@ export function QqConnectPage({ contacts, onBack }: { contacts: ContactRecord[];
             <div className="mt-3">
               <Fold title="说明" testid="qq-bot-help-fold">
                 <div className="space-y-2 text-[12.5px] leading-[1.55] text-black/50 dark:text-white/50">
-                  <p>TA 就是你自己在 QQ 创建的那个 AI——打开 QQ 找到 TA 直接聊。QQ 官方机器人需在 q.qq.com 控制台配置回调地址（设置 → 云端助手 → QQ Webhook 配置 里有现成的可复制）；沙箱/未发布机器人可能需把自己加进沙箱测试名单。</p>
+                  <p>TA 就是你自己在 QQ 创建的那个 AI——打开 QQ 找到 TA 直接聊。QQ 官方机器人需在 q.qq.com 控制台配置回调地址（用云端助手部署成功卡片里的函数 URL）；沙箱/未发布机器人可能需把自己加进沙箱测试名单。</p>
                   <p>断开后凭证从本机删除；重新接入扫一次码（或填写凭证）即可。</p>
                   <p>两侧独立：你在本站聊天界面对话只在网站里显示（不会发到真机 QQ）；真机 QQ 上和 TA 的聊天由云端自动回复，点「拉取云端聊天记录」同步进来看。</p>
                 </div>
