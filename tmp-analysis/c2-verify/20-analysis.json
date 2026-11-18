@@ -1,0 +1,28 @@
+{
+  "choices": [
+    {
+      "finish_reason": "stop",
+      "index": 0,
+      "message": {
+        "content": "根据您提供的截图，分析如下：\n\n1.  **关于新弹出的家具动作按钮**：\n    *   **没有**。在画面的**底部或中部**，并没有出现类似「弹琴」、「坐下」等针对特定家具的互动动作按钮。\n    *   目前底部显示的是通用的社交互动选项，包括粉色的**「拥抱」**和蓝色的**「牵手」**按钮（位于输入框上方），以及底部的摇杆控制器。\n\n2.  **关于小人是否开始移动**：\n    *   **没有移动**。画面中的两个小人（一个黑发和一个棕发）都处于**静止站立**的状态。\n    *   虽然画面左下角有虚拟摇杆（方向键），但目前看起来并未被操作，小人也没有做出行走或跑动的姿势。\n\n**总结：** 截图中目前只有通用的社交按钮（拥抱/牵手），没有弹出家具互动动作；小人也处于静止状态，未开始移动。",
+        "role": "assistant"
+      }
+    }
+  ],
+  "created": 1793363196,
+  "id": "20261030202633c1d41c231bd6468a",
+  "model": "glm-5v-turbo",
+  "object": "chat.completion",
+  "request_id": "20261030202633c1d41c231bd6468a",
+  "usage": {
+    "completion_tokens": 205,
+    "completion_tokens_details": {
+      "reasoning_tokens": 0
+    },
+    "prompt_tokens": 425,
+    "prompt_tokens_details": {
+      "cached_tokens": 2
+    },
+    "total_tokens": 630
+  }
+}

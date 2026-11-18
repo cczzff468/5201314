@@ -1,0 +1,28 @@
+{
+  "choices": [
+    {
+      "finish_reason": "stop",
+      "index": 0,
+      "message": {
+        "content": "根据您提供的截图，**画面里没有白色立式钢琴（琴键朝外的那个）**。\n\n具体情况如下：\n1.  **关于钢琴：** 画面右侧中上部区域确实有一个白色的长方形物体（看起来像是一个白色的柜子或矮柜），但它并不是立式钢琴，也没有朝外的琴键。\n2.  **关于位置（假设您指的是那个白色柜子）：** 它位于屏幕的 **水平约 70%-85%**，**垂直约 28%-38%** 的位置。\n3.  **关于距离：** 您的小人（棕色头发）在屏幕的中下部。那个白色物体在小人的右上方，两者之间隔着一定的距离（中间还有其他家具），所以**小人离它并不近**。",
+        "role": "assistant"
+      }
+    }
+  ],
+  "created": 1793362637,
+  "id": "20261030201715d98c6ee353874839",
+  "model": "glm-5v-turbo",
+  "object": "chat.completion",
+  "request_id": "20261030201715d98c6ee353874839",
+  "usage": {
+    "completion_tokens": 159,
+    "completion_tokens_details": {
+      "reasoning_tokens": 0
+    },
+    "prompt_tokens": 433,
+    "prompt_tokens_details": {
+      "cached_tokens": 0
+    },
+    "total_tokens": 592
+  }
+}

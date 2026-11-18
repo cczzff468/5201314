@@ -1,0 +1,28 @@
+{
+  "choices": [
+    {
+      "finish_reason": "stop",
+      "index": 0,
+      "message": {
+        "content": "根据图片中的网格刻度（x1=10%宽..x9=90%宽，y1=10%高..y9=90%高），左侧靠墙立着的木吉他的网格范围是：\n- 左边缘：**x1**\n- 右边缘：**x2**\n- 上边缘：**y5**\n- 下边缘：**y6**\n\n即该木吉他位于左侧靠墙位置，横向占据x1到x2的区间，纵向占据y5到y6的区间。",
+        "role": "assistant"
+      }
+    }
+  ],
+  "created": 1793363175,
+  "id": "20261030202613a099ac347898468b",
+  "model": "glm-5v-turbo",
+  "object": "chat.completion",
+  "request_id": "20261030202613a099ac347898468b",
+  "usage": {
+    "completion_tokens": 111,
+    "completion_tokens_details": {
+      "reasoning_tokens": 0
+    },
+    "prompt_tokens": 453,
+    "prompt_tokens_details": {
+      "cached_tokens": 0
+    },
+    "total_tokens": 564
+  }
+}

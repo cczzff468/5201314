@@ -1,0 +1,51 @@
+{
+  "total": 7,
+  "passed": 7,
+  "failed": [],
+  "results": [
+    {
+      "step": "0",
+      "name": "解锁→恋人空间→留言板(空墙)",
+      "ok": true,
+      "evidence": "左滑 2 次找到图标; 空墙提示=True; 现有便签=[]"
+    },
+    {
+      "step": "1",
+      "name": "UI 建便签 2 张",
+      "ok": true,
+      "evidence": "DOM 顺序(最新在前)=['触屏测试B', '触屏测试A']"
+    },
+    {
+      "step": "T1",
+      "name": "触屏长按(600ms)→抬手→菜单弹出并保持打开(500ms 内无闪关)",
+      "ok": true,
+      "evidence": "按住 498ms 时菜单弹出; 抬手后 500ms 菜单计数时间线=[1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]; 按钮=['置顶', '多选', '删除', '取消']; 便签详情未误开=True"
+    },
+    {
+      "step": "T2",
+      "name": "点「取消」→ 菜单正常关闭(正常点击路径未被修复破坏)",
+      "ok": true,
+      "evidence": "菜单元素已移除=True; 便签仍在=['触屏测试B', '触屏测试A']"
+    },
+    {
+      "step": "T3",
+      "name": "长按另一张→菜单保持→「多选」进入→顶部「取消」退出",
+      "ok": true,
+      "evidence": "第二次长按菜单时间线=[1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]; 多选栏=取消  已选 1 张  全选; 已勾选=['触屏测试A']; 退出后工具栏消失=True; +按钮回归=True"
+    },
+    {
+      "step": "T4",
+      "name": "遮罩 350ms 守卫:刚开时合成 click 被忽略;>350ms 后点遮罩正常关",
+      "ok": true,
+      "evidence": "<350ms 点击后菜单仍在=True; >350ms 点击后菜单关闭=True"
+    },
+    {
+      "step": "T5",
+      "name": "控制台无 error/pageerror",
+      "ok": true,
+      "evidence": "console error/warning=0 条; pageerror=0 条"
+    }
+  ],
+  "console_msgs": [],
+  "page_errors": []
+}

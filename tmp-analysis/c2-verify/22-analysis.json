@@ -1,0 +1,28 @@
+{
+  "choices": [
+    {
+      "finish_reason": "stop",
+      "index": 0,
+      "message": {
+        "content": "根据您提供的手机截图，针对3D小屋场景的三个问题回答如下：\n\n1. **没有**。截图顶部虽然有用户头像和“装修小家”等按钮，但并没有出现“弹琴”、“坐下”这类用于控制家具动作的胶囊按钮。\n2. **没有移动**。黑发小人（角色）目前正静止地坐在房间中央的粉色圆形地毯/坐垫上。\n3. **没有出现**。界面底部显示的是聊天输入框（“跟小雨说点什么...”）以及摇杆、功能按钮等常规操作区，并未弹出吉他指板或钢琴键床等音乐演奏界面。",
+        "role": "assistant"
+      }
+    }
+  ],
+  "created": 1793363240,
+  "id": "202610302027170e959270411b4de2",
+  "model": "glm-5v-turbo",
+  "object": "chat.completion",
+  "request_id": "202610302027170e959270411b4de2",
+  "usage": {
+    "completion_tokens": 133,
+    "completion_tokens_details": {
+      "reasoning_tokens": 0
+    },
+    "prompt_tokens": 442,
+    "prompt_tokens_details": {
+      "cached_tokens": 0
+    },
+    "total_tokens": 575
+  }
+}

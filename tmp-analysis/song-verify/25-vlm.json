@@ -1,0 +1,28 @@
+{
+  "choices": [
+    {
+      "finish_reason": "stop",
+      "index": 0,
+      "message": {
+        "content": "根据您提供的“拾光小屋”3D应用截图，针对棕色双马尾女孩的情况分析如下：\n\n1.  **位置与朝向**：**否**。女孩并没有坐在钢琴前的琴凳上，也没有面向钢琴。从俯视角度看，她正站在房间中央的地板上（靠近一个圆形地毯），背对镜头。\n2.  **手臂姿势**：**否**。由于她只是站立或行走的姿态，双臂自然垂在身体两侧，并没有做出前伸弹奏琴键的姿势。\n3.  **特效**：**没有**。画面中女孩周围没有任何飘浮的音符符号或发光特效。\n\n**总结**：截图中的女孩目前处于**站立/行走状态**，并未进行弹琴互动。",
+        "role": "assistant"
+      }
+    }
+  ],
+  "created": 1793367556,
+  "id": "202610302139134b10fb11cd4c472b",
+  "model": "glm-5v-turbo",
+  "object": "chat.completion",
+  "request_id": "202610302139134b10fb11cd4c472b",
+  "usage": {
+    "completion_tokens": 160,
+    "completion_tokens_details": {
+      "reasoning_tokens": 0
+    },
+    "prompt_tokens": 453,
+    "prompt_tokens_details": {
+      "cached_tokens": 0
+    },
+    "total_tokens": 613
+  }
+}

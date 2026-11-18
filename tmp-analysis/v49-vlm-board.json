@@ -1,0 +1,28 @@
+{
+  "choices": [
+    {
+      "finish_reason": "stop",
+      "index": 0,
+      "message": {
+        "content": "根据截图回答：\n\n1. **顶部标题**：是「留言板」（不是“恋爱留言板”）。\n\n2. **便签卡片**：有一张粉色便签卡片，左上角显示发布者为「我」，内容是「**测试便签：今天也在想你呀**」，底部日期为「11-04」。\n\n3. **固定物**：便签顶部中央有一个**银色（金属色）的回形针**（曲别针），用来把便签“固定”在墙上。",
+        "role": "assistant"
+      }
+    }
+  ],
+  "created": 1793757184,
+  "id": "20261104095300f98bc3b8c71a4768",
+  "model": "glm-5.3-flash",
+  "object": "chat.completion",
+  "request_id": "20261104095300f98bc3b8c71a4768",
+  "usage": {
+    "completion_tokens": 111,
+    "completion_tokens_details": {
+      "reasoning_tokens": 0
+    },
+    "prompt_tokens": 1787,
+    "prompt_tokens_details": {
+      "cached_tokens": 0
+    },
+    "total_tokens": 1898
+  }
+}

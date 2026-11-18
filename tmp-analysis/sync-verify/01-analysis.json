@@ -1,0 +1,28 @@
+{
+  "choices": [
+    {
+      "finish_reason": "stop",
+      "index": 0,
+      "message": {
+        "content": "1) **锁屏还是主屏？**\n这是**锁屏界面**（Lock Screen）。判断依据是屏幕中央显示了大号时间，底部有“向上轻扫以解锁”的提示文字以及手电筒和相机快捷键。\n\n2) **可见的主要元素？**\n*   **状态栏（顶部）**：显示时间 11:42、信号强度、WiFi 图标、电量 100%。\n*   **日期与时间**：显示公历“10月30日周五”、农历“丙午年九月廿一”，以及巨大的白色数字时钟“11:42”。\n*   **小组件/信息栏**：\n    *   左侧：设备名称“iPhone”及电池进度条（100%）。\n    *   中间：天气图标及温度（13°）。\n    *   右侧：健康或日程相关数据（红色数字 30，下方标注“周五”）。\n*   **解锁提示**：“向上轻扫以解锁”。\n*   **快捷操作按钮（底部左右）**：左侧为手电筒图标，右侧为相机图标。\n*   **指示条（最底部）**：iPhone 标志性的 Home Indicator 横线。\n\n3) **是否正常渲染？**\n**是，渲染正常。**\n图像清晰，文字锐利，UI 元素（如圆角矩形、圆形图标、状态栏图标）的绘制均符合 iOS 系统的设计规范，没有出现明显的错位、乱码或图形撕裂等渲染错误。",
+        "role": "assistant"
+      }
+    }
+  ],
+  "created": 1793360577,
+  "id": "20261030194252041d0fbe921749ea",
+  "model": "glm-5v-turbo",
+  "object": "chat.completion",
+  "request_id": "20261030194252041d0fbe921749ea",
+  "usage": {
+    "completion_tokens": 320,
+    "completion_tokens_details": {
+      "reasoning_tokens": 0
+    },
+    "prompt_tokens": 423,
+    "prompt_tokens_details": {
+      "cached_tokens": 0
+    },
+    "total_tokens": 743
+  }
+}

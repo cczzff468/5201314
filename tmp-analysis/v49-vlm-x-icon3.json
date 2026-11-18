@@ -1,0 +1,28 @@
+{
+  "choices": [
+    {
+      "finish_reason": "stop",
+      "index": 0,
+      "message": {
+        "content": "这是一个 App 图标特写：\n\n- **背景**：黑色（纯黑或近黑色），形状是圆角矩形（App 图标常见的方形圆角样式）。\n- **中间符号**：一个白色的 \"X\" 字母，笔画带有斜切、分叉的设计风格，线条粗细有变化，看起来像官方的 X（原 Twitter）标志。\n- **文字标签**：图标下方写着白色的中文文字——**“X论坛”**。\n\n整体是深色模式下的屏幕截图，图标位于左上角，其余部分为黑色背景。",
+        "role": "assistant"
+      }
+    }
+  ],
+  "created": 1793757155,
+  "id": "2026110409523056a8c45f33d34656",
+  "model": "glm-5.3-flash",
+  "object": "chat.completion",
+  "request_id": "2026110409523056a8c45f33d34656",
+  "usage": {
+    "completion_tokens": 121,
+    "completion_tokens_details": {
+      "reasoning_tokens": 0
+    },
+    "prompt_tokens": 266,
+    "prompt_tokens_details": {
+      "cached_tokens": 0
+    },
+    "total_tokens": 387
+  }
+}

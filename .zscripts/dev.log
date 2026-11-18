@@ -1,0 +1,308 @@
+==========================================
+[2026-11-18 05:23:55] Starting: bun install
+==========================================
+[BUN] Installing dependencies...
+[0.03ms] ".env"
+bun install v1.3.14 (0d9b296a)
+
+Checked 1046 installs across 1150 packages (no changes) [41.00ms]
+==========================================
+[2026-11-18 05:23:55] Completed: bun install
+[LOG] Step: bun install | Duration: 0s
+==========================================
+
+==========================================
+[2026-11-18 05:23:55] Starting: bun run db:push
+==========================================
+[BUN] Setting up database...
+$ prisma db push --accept-data-loss
+Environment variables loaded from .env
+Prisma schema loaded from prisma/schema.prisma
+Datasource "db": SQLite database "custom.db" at "file:/home/z/my-project/db/custom.db"
+
+SQLite database custom.db created at file:/home/z/my-project/db/custom.db
+
+🚀  Your database is now in sync with your Prisma schema. Done in 23ms
+
+Running generate... (Use --skip-generate to skip the generators)
+[2K[1A[2K[GRunning generate... - Prisma Client
+[2K[1A[2K[G✔ Generated Prisma Client (v6.19.3) to ./node_modules/@prisma/client in 104ms
+
+==========================================
+[2026-11-18 05:24:06] Completed: bun run db:push
+[LOG] Step: bun run db:push | Duration: 11s
+==========================================
+
+==========================================
+[2026-11-18 05:24:06] Starting: Starting Next.js dev server
+==========================================
+[BUN] Starting development server...
+==========================================
+$ next dev -p 3000 2>&1 | tee dev.log
+[2026-11-18 05:24:06] Completed: Starting Next.js dev server
+[LOG] Step: Starting Next.js dev server | Duration: 0s
+==========================================
+
+==========================================
+[2026-11-18 05:24:06] Starting: Waiting for Next.js dev server
+==========================================
+Waiting for Next.js dev server to be ready on localhost:3000...
+Attempt 1/60: Next.js dev server not ready yet, waiting...
+▲ Next.js 16.4.6 (Turbopack)
+- Local:         http://localhost:3000
+- Network:       http://21.0.3.112:3000
+- Environments: .env
+✓ Ready in 541ms
+✓ Running next.config.ts took 38ms
+Warning: Custom Cache-Control headers detected for the following routes:
+  - /_next/image
+
+Setting a custom Cache-Control header can break Next.js development behavior.
+Attention: Next.js now collects completely anonymous telemetry regarding usage.
+This information is used to shape Next.js' roadmap and prioritize features.
+You can learn more, including how to opt-out if you'd not like to participate in this anonymous program, by visiting the following URL:
+https://nextjs.org/telemetry
+
+
+○ Compiling /_not-found/page ...
+Attempt 2/60: Next.js dev server not ready yet, waiting...
+ GET / 404 in 1981ms (next.js: 1893ms, application-code: 88ms)
+ GET / 404 in 4.5s (next.js: 4.3s, application-code: 242ms)
+ GET / 404 in 51ms (next.js: 9ms, application-code: 41ms)
+ GET / 404 in 23ms (next.js: 5ms, application-code: 18ms)
+Next.js dev server is ready!
+==========================================
+[2026-11-18 05:24:13] Completed: Waiting for Next.js dev server
+[LOG] Step: Waiting for Next.js dev server | Duration: 7s
+==========================================
+
+==========================================
+[2026-11-18 05:24:13] Starting: Health check
+==========================================
+[BUN] Performing health check...
+curl: (22) The requested URL returned error: 404
+ GET / 404 in 22ms (next.js: 4ms, application-code: 17ms)
+Stopping Next.js dev server (PID: 1290)...
+error: script "dev" was terminated by signal SIGTERM (Polite quit request)
+ GET / 404 in 56ms (next.js: 30ms, application-code: 26ms)
+✓ Compiled in 3.6s
+○ Compiling / ...
+ GET / 200 in 229ms (next.js: 8ms, application-code: 221ms)
+ GET / 200 in 37ms (next.js: 1.6ms, application-code: 35ms)
+ GET / 200 in 146ms (next.js: 1.6ms, application-code: 144ms)
+ POST /api/settings/prompt-state 200 in 140ms (next.js: 20ms, application-code: 120ms)
+prisma:query SELECT `main`.`Contact`.`id`, `main`.`Contact`.`kind`, `main`.`Contact`.`ownerId`, `main`.`Contact`.`name`, `main`.`Contact`.`gender`, `main`.`Contact`.`age`, `main`.`Contact`.`height`, `main`.`Contact`.`weight`, `main`.`Contact`.`persona`, `main`.`Contact`.`background`, `main`.`Contact`.`occupation`, `main`.`Contact`.`company`, `main`.`Contact`.`region`, `main`.`Contact`.`relation`, `main`.`Contact`.`phone`, `main`.`Contact`.`wechatId`, `main`.`Contact`.`wechatPassword`, `main`.`Contact`.`qqId`, `main`.`Contact`.`qqPassword`, `main`.`Contact`.`avatar`, `main`.`Contact`.`isFriend`, `main`.`Contact`.`workspaceId`, `main`.`Contact`.`createdAt`, `main`.`Contact`.`updatedAt` FROM `main`.`Contact` WHERE `main`.`Contact`.`workspaceId` = ? LIMIT ? OFFSET ?
+prisma:query SELECT `main`.`WxBackground`.`key`, `main`.`WxBackground`.`data`, `main`.`WxBackground`.`updatedAt` FROM `main`.`WxBackground` WHERE 1=1 LIMIT ? OFFSET ?
+ POST /api/contacts/migrate 200 in 266ms (next.js: 17ms, application-code: 249ms)
+ GET /api/chat/bg?peekAll=1&preview=1 200 in 33ms (next.js: 25ms, application-code: 8ms)
+ GET /api/chat/bg?peekAll=1&preview=1 200 in 6ms (next.js: 1.0ms, application-code: 5ms)
+ GET /api/chat/bg?peekAll=1&preview=1 200 in 6ms (next.js: 0.9ms, application-code: 5ms)
+ GET /api/weather?lat=39.9042&lon=116.4074&name=%E5%8C%97%E4%BA%AC 502 in 10.0s (next.js: 18ms, application-code: 10.0s)
+ GET /api/chat/bg?peekAll=1&preview=1 200 in 6ms (next.js: 1.0ms, application-code: 5ms)
+ GET /api/chat/bg?peekAll=1&preview=1 200 in 8ms (next.js: 2ms, application-code: 6ms)
+ GET /api/chat/bg?peekAll=1&preview=1 200 in 7ms (next.js: 1.0ms, application-code: 6ms)
+ POST /api/settings/prompt-state 200 in 8ms (next.js: 1.5ms, application-code: 7ms)
+ GET /api/chat/bg?peekAll=1&preview=1 200 in 7ms (next.js: 1.0ms, application-code: 6ms)
+ GET /api/app-version 200 in 24ms (next.js: 14ms, application-code: 11ms)
+ GET /api/chat/bg?peekAll=1&preview=1 200 in 5ms (next.js: 0.9ms, application-code: 4ms)
+ GET /api/chat/bg?peekAll=1&preview=1 200 in 4ms (next.js: 0.9ms, application-code: 3ms)
+ GET /api/chat/bg?peekAll=1&preview=1 200 in 5ms (next.js: 0.9ms, application-code: 4ms)
+ POST /api/settings/prompt-state 200 in 9ms (next.js: 0.9ms, application-code: 8ms)
+ GET /api/chat/bg?peekAll=1&preview=1 200 in 4ms (next.js: 0.8ms, application-code: 4ms)
+ GET /api/chat/bg?peekAll=1 200 in 13ms (next.js: 0.9ms, application-code: 12ms)
+ GET /api/chat/bg?peekAll=1&preview=1 200 in 5ms (next.js: 1.0ms, application-code: 4ms)
+ GET /api/chat/bg?peekAll=1&preview=1 200 in 11ms (next.js: 1.3ms, application-code: 9ms)
+ GET /api/chat/bg?peekAll=1&preview=1 200 in 6ms (next.js: 0.9ms, application-code: 6ms)
+ GET /api/chat/bg?peekAll=1&preview=1 200 in 5ms (next.js: 0.9ms, application-code: 4ms)
+ POST /api/settings/prompt-state 200 in 6ms (next.js: 0.8ms, application-code: 5ms)
+ GET /api/chat/bg?peekAll=1&preview=1 200 in 6ms (next.js: 0.8ms, application-code: 5ms)
+ GET / 200 in 66ms (next.js: 1.2ms, application-code: 65ms)
+ POST /api/settings/prompt-state 200 in 5ms (next.js: 0.8ms, application-code: 4ms)
+ GET /api/chat/bg?peekAll=1&preview=1 200 in 7ms (next.js: 1.3ms, application-code: 6ms)
+ GET /api/chat/bg?peekAll=1&preview=1 200 in 21ms (next.js: 1.4ms, application-code: 19ms)
+ GET /api/chat/bg?peekAll=1 200 in 5ms (next.js: 1.1ms, application-code: 3ms)
+ POST /api/moments/generate 200 in 2.1s (next.js: 25ms, application-code: 2.1s)
+ GET /api/app-version 200 in 7ms (next.js: 1.0ms, application-code: 6ms)
+ GET /api/chat/bg?peekAll=1&preview=1 200 in 6ms (next.js: 1.0ms, application-code: 5ms)
+ POST /api/moments/generate 200 in 1718ms (next.js: 1.1ms, application-code: 1717ms)
+ GET /api/weather?lat=39.9042&lon=116.4074&name=%E5%8C%97%E4%BA%AC 502 in 10.0s (next.js: 1.2ms, application-code: 10.0s)
+ GET /api/chat/bg?peekAll=1&preview=1 200 in 5ms (next.js: 1.1ms, application-code: 4ms)
+ POST /api/cloud-deploy/supabase 200 in 3.5s (next.js: 18ms, application-code: 3.5s)
+ POST /api/qq-bot 200 in 215ms (next.js: 18ms, application-code: 196ms)
+ POST /api/qq-bot 200 in 254ms (next.js: 0.9ms, application-code: 254ms)
+ GET /api/chat/bg?peekAll=1&preview=1 200 in 6ms (next.js: 1.0ms, application-code: 5ms)
+ GET /api/chat/bg?peekAll=1&preview=1 200 in 5ms (next.js: 0.8ms, application-code: 4ms)
+ POST /api/cloud-deploy/supabase 200 in 6.4s (next.js: 0.9ms, application-code: 6.4s)
+ POST /api/phone/proactive 200 in 1471ms (next.js: 48ms, application-code: 1423ms)
+ POST /api/settings/prompt-state 200 in 5ms (next.js: 0.9ms, application-code: 5ms)
+ GET /api/chat/bg?peekAll=1&preview=1 200 in 5ms (next.js: 0.9ms, application-code: 4ms)
+ GET /api/chat/bg?peekAll=1&preview=1 200 in 5ms (next.js: 0.9ms, application-code: 4ms)
+ POST /api/settings/test-connection 502 in 57ms (next.js: 47ms, application-code: 10ms)
+ GET /api/chat/bg?peekAll=1&preview=1 200 in 8ms (next.js: 1.0ms, application-code: 7ms)
+ GET /api/chat/bg?peekAll=1&preview=1 200 in 5ms (next.js: 0.9ms, application-code: 4ms)
+ POST /api/settings/prompt-state 200 in 6ms (next.js: 1.0ms, application-code: 5ms)
+ GET /api/chat/bg?peekAll=1&preview=1 200 in 5ms (next.js: 1.0ms, application-code: 4ms)
+ GET /api/chat/bg?peekAll=1&preview=1 200 in 6ms (next.js: 1.2ms, application-code: 5ms)
+ GET /api/chat/bg?peekAll=1&preview=1 200 in 5ms (next.js: 0.9ms, application-code: 4ms)
+ GET /api/chat/bg?peekAll=1&preview=1 200 in 4ms (next.js: 0.8ms, application-code: 4ms)
+ POST /api/qq-bot 200 in 141ms (next.js: 1.0ms, application-code: 140ms)
+ POST /api/qq-bot 200 in 230ms (next.js: 1.0ms, application-code: 229ms)
+ POST /api/cloud-deploy/supabase 200 in 1925ms (next.js: 1.1ms, application-code: 1924ms)
+ GET /api/chat/bg?peekAll=1&preview=1 200 in 6ms (next.js: 1.0ms, application-code: 5ms)
+ GET /api/chat/bg?peekAll=1&preview=1 200 in 5ms (next.js: 1.2ms, application-code: 4ms)
+ POST /api/cloud-deploy/supabase 200 in 5.4s (next.js: 0.9ms, application-code: 5.4s)
+ POST /api/qq-bind 200 in 341ms (next.js: 18ms, application-code: 323ms)
+ POST /api/cloud-deploy/supabase 200 in 3.4s (next.js: 1.1ms, application-code: 3.4s)
+ POST /api/qq-bind 200 in 174ms (next.js: 1.0ms, application-code: 173ms)
+ POST /api/qq-bind 200 in 174ms (next.js: 0.9ms, application-code: 173ms)
+ GET /api/chat/bg?peekAll=1&preview=1 200 in 9ms (next.js: 1.0ms, application-code: 8ms)
+ GET /api/chat/bg?peekAll=1&preview=1 200 in 10ms (next.js: 1.1ms, application-code: 9ms)
+ POST /api/qq-bind 200 in 219ms (next.js: 1.0ms, application-code: 218ms)
+ POST /api/qq-bind 200 in 176ms (next.js: 1.3ms, application-code: 174ms)
+ POST /api/settings/prompt-state 200 in 6ms (next.js: 1.0ms, application-code: 5ms)
+ POST /api/qq-bind 200 in 220ms (next.js: 0.9ms, application-code: 219ms)
+ POST /api/qq-bind 200 in 279ms (next.js: 0.9ms, application-code: 278ms)
+ GET /api/chat/bg?peekAll=1&preview=1 200 in 5ms (next.js: 1.2ms, application-code: 4ms)
+ GET /api/chat/bg?peekAll=1&preview=1 200 in 5ms (next.js: 1.0ms, application-code: 4ms)
+ POST /api/qq-bind 200 in 176ms (next.js: 1.0ms, application-code: 175ms)
+ POST /api/qq-bind 200 in 187ms (next.js: 0.9ms, application-code: 187ms)
+ POST /api/qq-bind 200 in 218ms (next.js: 1.8ms, application-code: 216ms)
+ POST /api/qq-bot 200 in 261ms (next.js: 1.0ms, application-code: 260ms)
+ POST /api/qq-bot 200 in 254ms (next.js: 0.9ms, application-code: 254ms)
+ POST /api/settings/prompt-state 200 in 5ms (next.js: 0.9ms, application-code: 4ms)
+ GET /api/chat/bg?peekAll=1&preview=1 200 in 6ms (next.js: 1.1ms, application-code: 5ms)
+ GET /api/chat/bg?peekAll=1&preview=1 200 in 5ms (next.js: 0.9ms, application-code: 4ms)
+ POST /api/cloud-deploy/supabase 200 in 5.9s (next.js: 1.0ms, application-code: 5.9s)
+ GET /api/chat/bg?peekAll=1&preview=1 200 in 6ms (next.js: 1.0ms, application-code: 5ms)
+ GET /api/chat/bg?peekAll=1&preview=1 200 in 9ms (next.js: 1.0ms, application-code: 8ms)
+ GET /api/chat/bg?peekAll=1 200 in 21ms (next.js: 6ms, application-code: 15ms)
+ GET /api/chat/bg?peekAll=1&preview=1 200 in 7ms (next.js: 0.9ms, application-code: 6ms)
+ GET /api/chat/bg?peekAll=1&preview=1 200 in 6ms (next.js: 1.0ms, application-code: 5ms)
+ GET /api/chat/bg?sessionKey=sms%3Aassistant 200 in 9ms (next.js: 0.9ms, application-code: 8ms)
+ GET /api/chat/bg?peekAll=1&preview=1 200 in 5ms (next.js: 1.1ms, application-code: 4ms)
+ GET /api/chat/bg?peekAll=1&preview=1 200 in 5ms (next.js: 0.9ms, application-code: 4ms)
+ POST /api/settings/prompt-state 200 in 7ms (next.js: 0.9ms, application-code: 6ms)
+ GET /api/chat/bg?peekAll=1&preview=1 200 in 7ms (next.js: 0.9ms, application-code: 6ms)
+ POST /api/chat/bg 200 in 16ms (next.js: 1.1ms, application-code: 15ms)
+ POST /api/chat 502 in 32ms (next.js: 23ms, application-code: 9ms)
+ GET /api/chat/bg?peekAll=1&preview=1 200 in 6ms (next.js: 1.4ms, application-code: 5ms)
+ POST /api/cloud-deploy/supabase 200 in 5.7s (next.js: 1.0ms, application-code: 5.7s)
+ GET /api/chat/bg?peekAll=1&preview=1 200 in 6ms (next.js: 1.1ms, application-code: 5ms)
+ GET /api/chat/bg?peekAll=1&preview=1 200 in 5ms (next.js: 1.0ms, application-code: 4ms)
+ POST /api/cloud-deploy/supabase 200 in 2.9s (next.js: 1.0ms, application-code: 2.9s)
+ GET /api/chat/bg?peekAll=1&preview=1 200 in 7ms (next.js: 1.0ms, application-code: 6ms)
+ GET /api/chat/bg?peekAll=1&preview=1 200 in 7ms (next.js: 1.2ms, application-code: 5ms)
+ POST /api/settings/prompt-state 200 in 6ms (next.js: 1.1ms, application-code: 5ms)
+ GET /api/chat/bg?peekAll=1&preview=1 200 in 5ms (next.js: 0.9ms, application-code: 4ms)
+ GET /api/chat/bg?peekAll=1&preview=1 200 in 6ms (next.js: 1.0ms, application-code: 5ms)
+ GET / 200 in 38ms (next.js: 1.2ms, application-code: 37ms)
+ GET / 200 in 34ms (next.js: 1.1ms, application-code: 33ms)
+ GET / 200 in 36ms (next.js: 1.0ms, application-code: 35ms)
+ GET / 200 in 25ms (next.js: 0.9ms, application-code: 25ms)
+ GET /api/notify/stream 200 in 1308ms (next.js: 1.1ms, application-code: 1307ms)
+ GET /api/chat/bg?peekAll=1&preview=1 200 in 6ms (next.js: 0.8ms, application-code: 5ms)
+ GET /api/chat/bg?peekAll=1&preview=1 200 in 5ms (next.js: 1.0ms, application-code: 4ms)
+ GET /api/chat/bg?peekAll=1&preview=1 200 in 6ms (next.js: 1.0ms, application-code: 5ms)
+ GET /api/chat/bg?peekAll=1&preview=1 200 in 6ms (next.js: 1.1ms, application-code: 4ms)
+ POST /api/settings/prompt-state 200 in 7ms (next.js: 1.0ms, application-code: 6ms)
+ GET /api/chat/bg?peekAll=1&preview=1 200 in 5ms (next.js: 1.0ms, application-code: 4ms)
+ GET /api/chat/bg?peekAll=1&preview=1 200 in 5ms (next.js: 1.0ms, application-code: 4ms)
+ GET /api/chat/bg?peekAll=1&preview=1 200 in 5ms (next.js: 1.0ms, application-code: 4ms)
+ GET /api/chat/bg?peekAll=1&preview=1 200 in 6ms (next.js: 1.9ms, application-code: 4ms)
+ POST /api/settings/prompt-state 200 in 6ms (next.js: 0.9ms, application-code: 6ms)
+ GET /api/chat/bg?peekAll=1&preview=1 200 in 7ms (next.js: 1.2ms, application-code: 6ms)
+ GET /api/chat/bg?peekAll=1&preview=1 200 in 4ms (next.js: 1.0ms, application-code: 3ms)
+ GET /api/chat/bg?peekAll=1&preview=1 200 in 5ms (next.js: 1.0ms, application-code: 4ms)
+ GET /api/chat/bg?peekAll=1&preview=1 200 in 5ms (next.js: 1.0ms, application-code: 4ms)
+ GET /api/chat/bg?peekAll=1&preview=1 200 in 8ms (next.js: 1.3ms, application-code: 6ms)
+ GET /api/chat/bg?peekAll=1&preview=1 200 in 6ms (next.js: 1.1ms, application-code: 5ms)
+ POST /api/settings/prompt-state 200 in 8ms (next.js: 0.9ms, application-code: 7ms)
+ GET /api/chat/bg?peekAll=1&preview=1 200 in 4ms (next.js: 0.9ms, application-code: 4ms)
+ GET /api/chat/bg?peekAll=1&preview=1 200 in 4ms (next.js: 0.9ms, application-code: 3ms)
+ GET /api/chat/bg?peekAll=1&preview=1 200 in 5ms (next.js: 0.9ms, application-code: 4ms)
+ GET /api/chat/bg?peekAll=1&preview=1 200 in 6ms (next.js: 1.0ms, application-code: 5ms)
+ POST /api/tts 501 in 31ms (next.js: 20ms, application-code: 11ms)
+ POST /api/settings/prompt-state 200 in 7ms (next.js: 1.2ms, application-code: 6ms)
+ GET /api/chat/bg?peekAll=1&preview=1 200 in 9ms (next.js: 0.9ms, application-code: 8ms)
+ GET /api/chat/bg?peekAll=1&preview=1 200 in 7ms (next.js: 1.0ms, application-code: 6ms)
+ GET /api/chat/bg?peekAll=1&preview=1 200 in 5ms (next.js: 0.9ms, application-code: 4ms)
+ GET /api/chat/bg?peekAll=1&preview=1 200 in 4ms (next.js: 0.9ms, application-code: 4ms)
+ GET /api/chat/bg?peekAll=1&preview=1 200 in 5ms (next.js: 1.1ms, application-code: 4ms)
+ GET /api/chat/bg?peekAll=1&preview=1 200 in 5ms (next.js: 1.0ms, application-code: 4ms)
+ POST /api/settings/prompt-state 200 in 6ms (next.js: 0.7ms, application-code: 5ms)
+ GET /api/chat/bg?peekAll=1&preview=1 200 in 37ms (next.js: 0.9ms, application-code: 36ms)
+ GET /api/chat/bg?peekAll=1&preview=1 200 in 7ms (next.js: 0.9ms, application-code: 6ms)
+  Turbopack has seen frequent file updates and is waiting for the filesystem to settle (0.5s elapsed so far; last modified: "/home/z/my-project/mini-services/kugou-api/node_modules/iconv-lite/encodings").
+  Turbopack has seen frequent file updates and is waiting for the filesystem to settle (1.5s elapsed so far; last modified: "/home/z/my-project/mini-services/netease-api/node_modules/safer-buffer/Readme.md").
+ GET /api/chat/bg?peekAll=1&preview=1 200 in 13ms (next.js: 1.1ms, application-code: 12ms)
+ GET /api/chat/bg?peekAll=1&preview=1 200 in 46ms (next.js: 1.3ms, application-code: 45ms)
+  Turbopack has seen frequent file updates and is waiting for the filesystem to settle (3.5s elapsed so far; last modified: "/home/z/my-project/mini-services/netease-api/node_modules/music-metadata/LICENSE.txt").
+ POST /api/settings/prompt-state 200 in 6ms (next.js: 0.9ms, application-code: 5ms)
+ GET /api/chat/bg?peekAll=1&preview=1 200 in 6ms (next.js: 0.9ms, application-code: 5ms)
+ GET /api/chat/bg?peekAll=1&preview=1 200 in 5ms (next.js: 1.0ms, application-code: 4ms)
+ GET /api/chat/bg?peekAll=1&preview=1 200 in 6ms (next.js: 1.0ms, application-code: 5ms)
+ POST /api/qq-bot 200 in 266ms (next.js: 1.1ms, application-code: 265ms)
+ POST /api/qq-bot 200 in 225ms (next.js: 0.8ms, application-code: 224ms)
+ POST /api/cloud-deploy/supabase 200 in 6.4s (next.js: 0.9ms, application-code: 6.4s)
+ GET /api/chat/bg?peekAll=1&preview=1 200 in 6ms (next.js: 0.9ms, application-code: 5ms)
+ GET /api/chat/bg?peekAll=1&preview=1 200 in 6ms (next.js: 1.0ms, application-code: 5ms)
+ GET /api/chat/bg?peekAll=1&preview=1 200 in 4ms (next.js: 0.9ms, application-code: 3ms)
+ GET /api/chat/bg?peekAll=1&preview=1 200 in 4ms (next.js: 0.8ms, application-code: 4ms)
+ GET / 200 in 36ms (next.js: 1.2ms, application-code: 35ms)
+  Turbopack has seen frequent file updates and is waiting for the filesystem to settle (0.5s elapsed so far; last modified: "/home/z/my-project/mini-services/qqmusic-api/node_modules/jest-resolve").
+ GET / 200 in 43ms (next.js: 1.0ms, application-code: 42ms)
+  Turbopack has seen frequent file updates and is waiting for the filesystem to settle (1.5s elapsed so far; last modified: "/home/z/my-project/mini-services/qqmusic-api/node_modules/supports-color").
+  Turbopack has seen frequent file updates and is waiting for the filesystem to settle (3.5s elapsed so far; last modified: "/home/z/my-project/mini-services/qqmusic-api/node_modules/imurmurhash").
+  Turbopack has seen frequent file updates and is waiting for the filesystem to settle (0.5s elapsed so far; last modified: "/home/z/my-project/mini-services/qqmusic-api/node_modules/hasown").
+ POST /api/settings/prompt-state 200 in 7ms (next.js: 1.2ms, application-code: 6ms)
+ GET /api/chat/bg?peekAll=1&preview=1 200 in 6ms (next.js: 1.4ms, application-code: 4ms)
+ GET /api/chat/bg?peekAll=1&preview=1 200 in 5ms (next.js: 1.1ms, application-code: 4ms)
+ GET / 200 in 31ms (next.js: 1.0ms, application-code: 30ms)
+ GET / 200 in 24ms (next.js: 0.9ms, application-code: 23ms)
+ GET /api/chat/bg?peekAll=1&preview=1 200 in 5ms (next.js: 0.9ms, application-code: 4ms)
+ GET /api/chat/bg?peekAll=1&preview=1 200 in 5ms (next.js: 1.0ms, application-code: 4ms)
+ POST /api/settings/prompt-state 200 in 6ms (next.js: 1.0ms, application-code: 5ms)
+ GET /api/chat/bg?peekAll=1&preview=1 200 in 5ms (next.js: 1.1ms, application-code: 4ms)
+ GET /api/chat/bg?peekAll=1&preview=1 200 in 5ms (next.js: 1.2ms, application-code: 4ms)
+ GET /api/chat/bg?peekAll=1&preview=1 200 in 9ms (next.js: 0.9ms, application-code: 9ms)
+ GET /api/chat/bg?peekAll=1&preview=1 200 in 5ms (next.js: 0.9ms, application-code: 4ms)
+ GET /api/chat/bg?peekAll=1&preview=1 200 in 4ms (next.js: 0.8ms, application-code: 4ms)
+ POST /api/settings/prompt-state 200 in 5ms (next.js: 0.8ms, application-code: 4ms)
+ GET /api/chat/bg?peekAll=1&preview=1 200 in 11ms (next.js: 1.1ms, application-code: 10ms)
+ GET /api/chat/bg?peekAll=1&preview=1 200 in 4ms (next.js: 0.9ms, application-code: 3ms)
+ GET /api/chat/bg?peekAll=1&preview=1 200 in 6ms (next.js: 0.9ms, application-code: 5ms)
+ GET /api/chat/bg?peekAll=1&preview=1 200 in 6ms (next.js: 0.9ms, application-code: 5ms)
+ POST /api/settings/prompt-state 200 in 8ms (next.js: 0.9ms, application-code: 7ms)
+ GET /api/chat/bg?peekAll=1&preview=1 200 in 6ms (next.js: 1.0ms, application-code: 5ms)
+ GET /api/chat/bg?peekAll=1&preview=1 200 in 6ms (next.js: 0.9ms, application-code: 5ms)
+ GET /api/chat/bg?peekAll=1&preview=1 200 in 5ms (next.js: 1.0ms, application-code: 4ms)
+ GET /api/chat/bg?peekAll=1&preview=1 200 in 7ms (next.js: 0.9ms, application-code: 6ms)
+ GET /api/chat/bg?peekAll=1&preview=1 200 in 5ms (next.js: 0.9ms, application-code: 5ms)
+ POST /api/settings/prompt-state 200 in 6ms (next.js: 0.9ms, application-code: 6ms)
+ GET /api/chat/bg?peekAll=1&preview=1 200 in 5ms (next.js: 0.9ms, application-code: 4ms)
+ GET /api/chat/bg?peekAll=1&preview=1 200 in 4ms (next.js: 0.8ms, application-code: 3ms)
+ GET /api/chat/bg?peekAll=1&preview=1 200 in 6ms (next.js: 0.8ms, application-code: 6ms)
+ GET /api/chat/bg?peekAll=1&preview=1 200 in 6ms (next.js: 0.9ms, application-code: 5ms)
+ POST /api/settings/prompt-state 200 in 5ms (next.js: 0.9ms, application-code: 4ms)
+ GET /api/chat/bg?peekAll=1&preview=1 200 in 4ms (next.js: 0.9ms, application-code: 4ms)
+ GET /api/chat/bg?peekAll=1&preview=1 200 in 6ms (next.js: 0.9ms, application-code: 5ms)
+ GET /api/chat/bg?peekAll=1&preview=1 200 in 6ms (next.js: 0.9ms, application-code: 5ms)
+ GET /api/chat/bg?peekAll=1&preview=1 200 in 6ms (next.js: 0.9ms, application-code: 5ms)
+ GET /api/chat/bg?peekAll=1&preview=1 200 in 6ms (next.js: 1.1ms, application-code: 5ms)
+ POST /api/settings/prompt-state 200 in 7ms (next.js: 1.1ms, application-code: 5ms)
+ GET /api/chat/bg?peekAll=1&preview=1 200 in 5ms (next.js: 1.1ms, application-code: 4ms)
+ GET /api/chat/bg?peekAll=1&preview=1 200 in 5ms (next.js: 0.8ms, application-code: 4ms)
+ GET /api/chat/bg?peekAll=1&preview=1 200 in 6ms (next.js: 0.8ms, application-code: 5ms)
+ GET /api/chat/bg?peekAll=1&preview=1 200 in 6ms (next.js: 0.9ms, application-code: 5ms)
+ POST /api/settings/prompt-state 200 in 5ms (next.js: 0.9ms, application-code: 4ms)
+ GET /api/chat/bg?peekAll=1&preview=1 200 in 6ms (next.js: 1.2ms, application-code: 5ms)
+ GET /api/chat/bg?peekAll=1&preview=1 200 in 5ms (next.js: 1.1ms, application-code: 4ms)
+ GET /api/chat/bg?peekAll=1&preview=1 200 in 8ms (next.js: 0.8ms, application-code: 7ms)
+ GET /api/chat/bg?peekAll=1&preview=1 200 in 6ms (next.js: 1.0ms, application-code: 5ms)
+ GET /api/chat/bg?peekAll=1&preview=1 200 in 6ms (next.js: 1.2ms, application-code: 4ms)
+ POST /api/settings/prompt-state 200 in 6ms (next.js: 1.0ms, application-code: 5ms)
+ GET /api/chat/bg?peekAll=1&preview=1 200 in 5ms (next.js: 1.0ms, application-code: 4ms)
+ GET /api/chat/bg?peekAll=1&preview=1 200 in 5ms (next.js: 0.8ms, application-code: 4ms)
+ GET /api/chat/bg?peekAll=1&preview=1 200 in 6ms (next.js: 0.7ms, application-code: 5ms)
+ GET /api/chat/bg?peekAll=1&preview=1 200 in 12ms (next.js: 1.1ms, application-code: 11ms)
+ GET / 200 in 38ms (next.js: 1.1ms, application-code: 37ms)

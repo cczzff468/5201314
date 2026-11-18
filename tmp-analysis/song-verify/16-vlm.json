@@ -1,0 +1,28 @@
+{
+  "choices": [
+    {
+      "finish_reason": "stop",
+      "index": 0,
+      "message": {
+        "content": "根据截图显示：\n\n**位置与姿势：**\n棕色双马尾女孩（TA）正站在房间中央的地板上，背对镜头（从后方视角可见她的双马尾和背影）。\n\n**附近家具：**\n她身旁（右侧）有一面**全身镜/穿衣镜**，身后不远处有一个白色的**抽屉柜/斗柜**。\n\n**具体状态：**\n她是**站着**的，既没有坐在钢琴前弹琴，也没有在走路。画面中可以看到她脚下有“换台”按钮，表明她目前处于站立待机或交互状态。",
+        "role": "assistant"
+      }
+    }
+  ],
+  "created": 1793366465,
+  "id": "20261030212102fef6a03c91aa47e7",
+  "model": "glm-5v-turbo",
+  "object": "chat.completion",
+  "request_id": "20261030212102fef6a03c91aa47e7",
+  "usage": {
+    "completion_tokens": 120,
+    "completion_tokens_details": {
+      "reasoning_tokens": 0
+    },
+    "prompt_tokens": 430,
+    "prompt_tokens_details": {
+      "cached_tokens": 2
+    },
+    "total_tokens": 550
+  }
+}

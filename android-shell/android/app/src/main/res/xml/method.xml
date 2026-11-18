@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Agent 中文输入引擎（v1.5 Mobile Agent）的输入法声明：
+     无 UI 的 IME，仅作文本注入通道；subtype 提供中文 locale 供系统切换列表展示 -->
+<input-method xmlns:android="http://schemas.android.com/apk/res/android"
+    android:supportsSwitchingToNextInputMethod="true">
+    <subtype
+        android:label="AI 输入"
+        android:imeSubtypeLocale="zh_CN"
+        android:imeSubtypeMode="keyboard" />
+</input-method>

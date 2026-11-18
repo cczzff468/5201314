@@ -1,0 +1,28 @@
+{
+  "choices": [
+    {
+      "finish_reason": "stop",
+      "index": 0,
+      "message": {
+        "content": "根据图像中的网格刻度（x轴为水平方向0-9，y轴为垂直方向0-9），三个目标的位置如下：\n\n1) **木吉他（靠墙立着的）的网格范围**：\n   - **X轴范围：0 - 1**\n   - **Y轴范围：5 - 6**\n\n2) **粉衣小人（小雨）所在位置**：\n   - **X轴：4 - 5**\n   - **Y轴：6**\n\n3) **黑发小人（我）所在位置**：\n   - **X轴：1 - 2**\n   - **Y轴：6**",
+        "role": "assistant"
+      }
+    }
+  ],
+  "created": 1793363212,
+  "id": "202610302026503711666503df455f",
+  "model": "glm-5v-turbo",
+  "object": "chat.completion",
+  "request_id": "202610302026503711666503df455f",
+  "usage": {
+    "completion_tokens": 135,
+    "completion_tokens_details": {
+      "reasoning_tokens": 0
+    },
+    "prompt_tokens": 448,
+    "prompt_tokens_details": {
+      "cached_tokens": 0
+    },
+    "total_tokens": 583
+  }
+}

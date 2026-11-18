@@ -1,0 +1,28 @@
+{
+  "choices": [
+    {
+      "finish_reason": "stop",
+      "index": 0,
+      "message": {
+        "content": "1) 卡通小人（棕发双马尾女孩）位于画面中间偏下的位置，正背对镜头站在地板上，**没有坐在钢琴前弹琴，手也不在琴键上，也没有在走路**（处于站立状态）。\n2) **画面里看不到钢琴**，自然也看不到琴凳上是否有人。\n3) **没有任何白色/黑色的提示浮层文字**。",
+        "role": "assistant"
+      }
+    }
+  ],
+  "created": 1793365803,
+  "id": "2026103021100100f05090282a4a67",
+  "model": "glm-5v-turbo",
+  "object": "chat.completion",
+  "request_id": "2026103021100100f05090282a4a67",
+  "usage": {
+    "completion_tokens": 84,
+    "completion_tokens_details": {
+      "reasoning_tokens": 0
+    },
+    "prompt_tokens": 473,
+    "prompt_tokens_details": {
+      "cached_tokens": 0
+    },
+    "total_tokens": 557
+  }
+}

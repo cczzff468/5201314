@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">AI Phone</string>
+    <string name="title_activity_main">AI Phone</string>
+    <string name="package_name">com.z.aiphone</string>
+    <string name="custom_url_scheme">com.z.aiphone</string>
+</resources>

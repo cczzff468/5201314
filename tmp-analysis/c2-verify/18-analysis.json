@@ -1,0 +1,28 @@
+{
+  "choices": [
+    {
+      "finish_reason": "stop",
+      "index": 0,
+      "message": {
+        "content": "根据您提供的3D小屋截图，以下是详细分析：\n\n1.  **我的黑发小人**：位于画面**中下部偏左**的位置（靠近前景的白色矮墙边）。TA目前是**坐着/蹲着**的姿势，背对着镜头，正看着前方的粉衣小人。TA**没有在弹琴或抱吉他**。\n2.  **粉衣小人（小雨）**：位于画面**中间偏下**的位置，就在黑发小人的正前方，两人面对面坐着/蹲着。\n3.  **乐器弹奏界面**：画面底部**没有**钢琴键床或吉他指板等乐器弹奏界面。底部显示的是聊天输入框、摇杆和功能按钮。\n4.  **曲名字幕或toast**：画面上**没有**显示正在播放的曲名字幕或相关的Toast提示信息。\n\n**总结场景**：这看起来是一个社交互动界面（类似“一起听歌”或语音聊天），两个小人正在面对面互动，而不是在进行音乐演奏游戏。",
+        "role": "assistant"
+      }
+    }
+  ],
+  "created": 1793363113,
+  "id": "20261030202510e956a7920ca04a6f",
+  "model": "glm-5v-turbo",
+  "object": "chat.completion",
+  "request_id": "20261030202510e956a7920ca04a6f",
+  "usage": {
+    "completion_tokens": 217,
+    "completion_tokens_details": {
+      "reasoning_tokens": 0
+    },
+    "prompt_tokens": 462,
+    "prompt_tokens_details": {
+      "cached_tokens": 2
+    },
+    "total_tokens": 679
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "choices": [
+    {
+      "finish_reason": "stop",
+      "index": 0,
+      "message": {
+        "content": "画面里**能看到黑色立式钢琴**（或类似深色立式乐器），它的位置大概在**水平55%、垂直40%**左右（屏幕中上偏右区域）。\n\n画面里**没有两个小人**，只有顶部用户信息栏里的一个卡通小猫头像（位置约水平50%、垂直8%），没有其他小人形象。",
+        "role": "assistant"
+      }
+    }
+  ],
+  "created": 1793367661,
+  "id": "202610302140590804d23ca0524bf5",
+  "model": "glm-5v-turbo",
+  "object": "chat.completion",
+  "request_id": "202610302140590804d23ca0524bf5",
+  "usage": {
+    "completion_tokens": 75,
+    "completion_tokens_details": {
+      "reasoning_tokens": 0
+    },
+    "prompt_tokens": 441,
+    "prompt_tokens_details": {
+      "cached_tokens": 0
+    },
+    "total_tokens": 516
+  }
+}

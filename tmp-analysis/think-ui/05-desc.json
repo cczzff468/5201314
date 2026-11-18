@@ -1,0 +1,28 @@
+{
+  "choices": [
+    {
+      "finish_reason": "stop",
+      "index": 0,
+      "message": {
+        "content": "当前显示第1屏（主屏幕）。页面顶部没有搜索栏或分页圆点。底部有手电筒和相机快捷按钮，以及“向上轻扫以解锁”的提示文字（或Home指示条）。",
+        "role": "assistant"
+      }
+    }
+  ],
+  "created": 1793406069,
+  "id": "202610310821073944be86ed9b492a",
+  "model": "glm-5v-turbo",
+  "object": "chat.completion",
+  "request_id": "202610310821073944be86ed9b492a",
+  "usage": {
+    "completion_tokens": 48,
+    "completion_tokens_details": {
+      "reasoning_tokens": 0
+    },
+    "prompt_tokens": 420,
+    "prompt_tokens_details": {
+      "cached_tokens": 3
+    },
+    "total_tokens": 468
+  }
+}

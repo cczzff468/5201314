@@ -1,0 +1,471 @@
+/* 由 scripts/gen-shop-dark-css.mjs 自动生成 —— 淘宝/美团深色模式覆盖层（第六十七轮）。
+ * 作用域：.shop-dark（AppWindow 在全局深色主题下挂给淘宝/美团两个 App）。
+ * 规则：中性白/灰面与黑字翻转成深色/白字；粉彩贴片翻深同调；品牌亮色 CTA（美团黄/淘宝橙等）
+ * 保持原样，其上的黑字/深褐字用保护规则恢复；改动两个 App 的颜色类后重跑生成器即可。
+ * 覆盖文件：taobao.tsx meituan.tsx goods-style-sheet.tsx taobao-channels.tsx taobao-msg-chat.tsx wechat-wallet.tsx qq.tsx tb-pull-refresh.tsx page-toast.tsx tb-img.tsx mt-food-img.tsx mt-merchant-center.tsx mt-merchant-edit.tsx mt-shop-manage.tsx meituan-travel.tsx meituan-shangou.tsx mt-scan.tsx mt-proxy-detail.tsx wx-icons.tsx wechat.tsx voice-call-screen.tsx mt-draft-card.tsx mt-share-card.tsx tb-share-cards.tsx tb-draft-card.tsx moments-shared.tsx moments-settings.tsx action-desc-line.tsx song-msg-bubble.tsx together-invite-sheet.tsx chat-settings.tsx proactive-msg-page.tsx bubble-menu.tsx forward-sheet.tsx qq-group.tsx album.tsx vision-log.tsx goods-emoji-tile.tsx mt-merchant-ui.tsx mt-dish-edit.tsx wx-group.tsx photo-stack.tsx default-avatar.tsx music-shared.tsx text-card-bubble.tsx */
+
+.shop-dark { color-scheme: dark; }
+
+.shop-dark .bg-\[\#9FD6FA\] { background-color: hsl(204 38% 16%); }
+.shop-dark .bg-\[\#B9D9F3\] { background-color: hsl(207 30% 16%); }
+.shop-dark .bg-\[\#BFD9EA\] { background-color: hsl(204 21% 16%); }
+.shop-dark .bg-\[\#C7C7C7\] { background-color: #2a2a2e; }
+.shop-dark .bg-\[\#C7C7CC\] { background-color: #2a2a2e; }
+.shop-dark .bg-\[\#C7DFF2\] { background-color: hsl(207 26% 16%); }
+.shop-dark .bg-\[\#C8E6C1\] { background-color: hsl(109 18% 16%); }
+.shop-dark .bg-\[\#C9B8F5\] { background-color: hsl(257 32% 16%); }
+.shop-dark .bg-\[\#C9C9CE\] { background-color: #2a2a2e; }
+.shop-dark .bg-\[\#C9D6E4\] { background-color: hsl(211 14% 16%); }
+.shop-dark .bg-\[\#CBD8FB\] { background-color: hsl(224 36% 16%); }
+.shop-dark .bg-\[\#CBE3F8\] { background-color: hsl(208 32% 16%); }
+.shop-dark .bg-\[\#CDE3C1\] { background-color: hsl(99 16% 16%); }
+.shop-dark .bg-\[\#D7E7C9\] { background-color: hsl(92 16% 16%); }
+.shop-dark .bg-\[\#D8DCE3\] { background-color: hsl(218 7% 16%); }
+.shop-dark .bg-\[\#D8EDD3\] { background-color: hsl(108 18% 16%); }
+.shop-dark .bg-\[\#DCDCDC\] { background-color: #232327; }
+.shop-dark .bg-\[\#DDD4C4\] { background-color: hsl(38 11% 16%); }
+.shop-dark .bg-\[\#DDEBD0\] { background-color: hsl(91 17% 16%); }
+.shop-dark .bg-\[\#E2F7EC\] { background-color: hsl(149 24% 16%); }
+.shop-dark .bg-\[\#E3E6EB\] { background-color: hsl(217 7% 16%); }
+.shop-dark .bg-\[\#E4CEA4\] { background-color: hsl(39 23% 16%); }
+.shop-dark .bg-\[\#E4E6EA\] { background-color: #141416; }
+.shop-dark .bg-\[\#E5F8EE\] { background-color: hsl(148 24% 16%); }
+.shop-dark .bg-\[\#E6E6E6\] { background-color: #141416; }
+.shop-dark .bg-\[\#E8EDF2\] { background-color: hsl(210 12% 16%); }
+.shop-dark .bg-\[\#E8F3FF\] { background-color: hsl(211 42% 16%); }
+.shop-dark .bg-\[\#E8F6FF\] { background-color: hsl(203 42% 16%); }
+.shop-dark .bg-\[\#E8F8EE\] { background-color: hsl(143 22% 16%); }
+.shop-dark .bg-\[\#E8F8EF\] { background-color: hsl(146 22% 16%); }
+.shop-dark .bg-\[\#E8F9EF\] { background-color: hsl(145 25% 16%); }
+.shop-dark .bg-\[\#E9E9E9\] { background-color: #141416; }
+.shop-dark .bg-\[\#E9EFF5\] { background-color: hsl(210 16% 16%); }
+.shop-dark .bg-\[\#E9F1E6\] { background-color: hsl(104 12% 16%); }
+.shop-dark .bg-\[\#E9F7F0\] { background-color: hsl(150 20% 16%); }
+.shop-dark .bg-\[\#EAE7DE\] { background-color: hsl(45 9% 16%); }
+.shop-dark .bg-\[\#EAF0E3\] { background-color: hsl(88 13% 16%); }
+.shop-dark .bg-\[\#EAF9E4\] { background-color: hsl(103 27% 16%); }
+.shop-dark .bg-\[\#EBEDF0\] { background-color: hsl(216 6% 16%); }
+.shop-dark .bg-\[\#EBEEF2\] { background-color: hsl(214 9% 16%); }
+.shop-dark .bg-\[\#ECECEC\] { background-color: #141416; }
+.shop-dark .bg-\[\#EDEDED\] { background-color: #141416; }
+.shop-dark .bg-\[\#EDEEF0\] { background-color: #141416; }
+.shop-dark .bg-\[\#EEEBFF\] { background-color: hsl(249 42% 16%); }
+.shop-dark .bg-\[\#EEF1F6\] { background-color: hsl(218 13% 16%); }
+.shop-dark .bg-\[\#EFEFF4\] { background-color: hsl(240 8% 16%); }
+.shop-dark .bg-\[\#EFF6EE\] { background-color: hsl(113 13% 16%); }
+.shop-dark .bg-\[\#F0F0F0\] { background-color: #141416; }
+.shop-dark .bg-\[\#F0F1F2\] { background-color: #141416; }
+.shop-dark .bg-\[\#F0F1F5\] { background-color: hsl(228 8% 16%); }
+.shop-dark .bg-\[\#F1F2F4\] { background-color: #141416; }
+.shop-dark .bg-\[\#F2F2F2\] { background-color: #141416; }
+.shop-dark .bg-\[\#F2F3F5\] { background-color: #141416; }
+.shop-dark .bg-\[\#F2F3F7\] { background-color: hsl(228 10% 16%); }
+.shop-dark .bg-\[\#F3B7CC\] { background-color: hsl(339 30% 16%); }
+.shop-dark .bg-\[\#F3F1EC\] { background-color: hsl(43 9% 16%); }
+.shop-dark .bg-\[\#F4F0FF\] { background-color: hsl(256 42% 16%); }
+.shop-dark .bg-\[\#f4f4f4\] { background-color: #141416; }
+.shop-dark .bg-\[\#F4F5F7\] { background-color: hsl(220 7% 16%); }
+.shop-dark .bg-\[\#F4F5F9\] { background-color: hsl(228 12% 16%); }
+.shop-dark .bg-\[\#F5C9A0\] { background-color: hsl(29 34% 16%); }
+.shop-dark .bg-\[\#F5D5EE\] { background-color: hsl(313 26% 16%); }
+.shop-dark .bg-\[\#f5f5f5\] { background-color: #141416; }
+.shop-dark .bg-\[\#F5F6F7\] { background-color: #141416; }
+.shop-dark .bg-\[\#F5F6F8\] { background-color: hsl(220 7% 16%); }
+.shop-dark .bg-\[\#F6CE93\] { background-color: hsl(36 36% 16%); }
+.shop-dark .bg-\[\#F6D98A\] { background-color: hsl(44 36% 16%); }
+.shop-dark .bg-\[\#F6EC9F\] { background-color: hsl(53 35% 16%); }
+.shop-dark .bg-\[\#F6F4EF\] { background-color: hsl(43 12% 16%); }
+.shop-dark .bg-\[\#F6F6F6\] { background-color: #141416; }
+.shop-dark .bg-\[\#F6F7F8\] { background-color: #141416; }
+.shop-dark .bg-\[\#F6F7F9\] { background-color: hsl(220 8% 16%); }
+.shop-dark .bg-\[\#F7E39A\] { background-color: hsl(47 36% 16%); }
+.shop-dark .bg-\[\#F7E6C3\] { background-color: hsl(40 32% 16%); }
+.shop-dark .bg-\[\#F7F7F5\] { background-color: #141416; }
+.shop-dark .bg-\[\#F7F7F7\] { background-color: #141416; }
+.shop-dark .bg-\[\#F7F8FA\] { background-color: hsl(220 10% 16%); }
+.shop-dark .bg-\[\#F8CDE9\] { background-color: hsl(321 32% 16%); }
+.shop-dark .bg-\[\#F8F0CB\] { background-color: hsl(49 32% 16%); }
+.shop-dark .bg-\[\#F8F8F8\] { background-color: #141416; }
+.shop-dark .bg-\[\#F9D08A\] { background-color: hsl(38 38% 16%); }
+.shop-dark .bg-\[\#FAFAF8\] { background-color: hsl(60 7% 16%); }
+.shop-dark .bg-\[\#FAFAFA\] { background-color: #141416; }
+.shop-dark .bg-\[\#FAFAFB\] { background-color: #141416; }
+.shop-dark .bg-\[\#FAFAFC\] { background-color: hsl(240 11% 16%); }
+.shop-dark .bg-\[\#FBD7A8\] { background-color: hsl(34 38% 16%); }
+.shop-dark .bg-\[\#FBE7B2\] { background-color: hsl(44 38% 16%); }
+.shop-dark .bg-\[\#FBF0C4\] { background-color: hsl(48 37% 16%); }
+.shop-dark .bg-\[\#FBF0E3\] { background-color: hsl(33 32% 16%); }
+.shop-dark .bg-\[\#FBF9F2\] { background-color: hsl(47 22% 16%); }
+.shop-dark .bg-\[\#FBF9F3\] { background-color: hsl(45 21% 16%); }
+.shop-dark .bg-\[\#FDEBEB\] { background-color: hsl(0 34% 16%); }
+.shop-dark .bg-\[\#FDECEC\] { background-color: hsl(0 34% 16%); }
+.shop-dark .bg-\[\#FDEEE2\] { background-color: hsl(27 37% 16%); }
+.shop-dark .bg-\[\#FDF2E6\] { background-color: hsl(31 36% 16%); }
+.shop-dark .bg-\[\#FFB4A6\] { background-color: hsl(9 42% 16%); }
+.shop-dark .bg-\[\#FFD5D0\] { background-color: hsl(6 42% 16%); }
+.shop-dark .bg-\[\#FFDCE4\] { background-color: hsl(346 42% 16%); }
+.shop-dark .bg-\[\#FFE2D2\] { background-color: hsl(21 42% 16%); }
+.shop-dark .bg-\[\#FFE3C6\] { background-color: hsl(31 42% 16%); }
+.shop-dark .bg-\[\#FFE3E0\] { background-color: hsl(6 42% 16%); }
+.shop-dark .bg-\[\#FFE8D9\] { background-color: hsl(24 42% 16%); }
+.shop-dark .bg-\[\#FFE8DA\] { background-color: hsl(23 42% 16%); }
+.shop-dark .bg-\[\#FFE8F1\] { background-color: hsl(337 42% 16%); }
+.shop-dark .bg-\[\#FFE9A8\] { background-color: hsl(45 42% 16%); }
+.shop-dark .bg-\[\#FFE9E2\] { background-color: hsl(14 42% 16%); }
+.shop-dark .bg-\[\#FFE9E4\] { background-color: hsl(11 42% 16%); }
+.shop-dark .bg-\[\#FFE9EC\] { background-color: hsl(352 42% 16%); }
+.shop-dark .bg-\[\#FFEBF3\] { background-color: hsl(336 42% 16%); }
+.shop-dark .bg-\[\#FFECE2\] { background-color: hsl(21 42% 16%); }
+.shop-dark .bg-\[\#FFECE6\] { background-color: hsl(14 42% 16%); }
+.shop-dark .bg-\[\#FFF0A8\] { background-color: hsl(50 42% 16%); }
+.shop-dark .bg-\[\#FFF0C2\] { background-color: hsl(45 42% 16%); }
+.shop-dark .bg-\[\#FFF0D6\] { background-color: hsl(38 42% 16%); }
+.shop-dark .bg-\[\#FFF0E6\] { background-color: hsl(24 42% 16%); }
+.shop-dark .bg-\[\#FFF0EB\] { background-color: hsl(15 42% 16%); }
+.shop-dark .bg-\[\#FFF0F0\] { background-color: hsl(0 42% 16%); }
+.shop-dark .bg-\[\#FFF0F1\] { background-color: hsl(356 42% 16%); }
+.shop-dark .bg-\[\#FFF0F4\] { background-color: hsl(344 42% 16%); }
+.shop-dark .bg-\[\#FFF0F5\] { background-color: hsl(340 42% 16%); }
+.shop-dark .bg-\[\#FFF0F6\] { background-color: hsl(336 42% 16%); }
+.shop-dark .bg-\[\#FFF1C0\] { background-color: hsl(47 42% 16%); }
+.shop-dark .bg-\[\#FFF1E4\] { background-color: hsl(29 42% 16%); }
+.shop-dark .bg-\[\#FFF1E6\] { background-color: hsl(26 42% 16%); }
+.shop-dark .bg-\[\#FFF1E8\] { background-color: hsl(23 42% 16%); }
+.shop-dark .bg-\[\#FFF1F1\] { background-color: hsl(0 42% 16%); }
+.shop-dark .bg-\[\#FFF3B8\] { background-color: hsl(50 42% 16%); }
+.shop-dark .bg-\[\#FFF3C2\] { background-color: hsl(48 42% 16%); }
+.shop-dark .bg-\[\#FFF3C4\] { background-color: hsl(48 42% 16%); }
+.shop-dark .bg-\[\#FFF3D1\] { background-color: hsl(44 42% 16%); }
+.shop-dark .bg-\[\#FFF3DC\] { background-color: hsl(39 42% 16%); }
+.shop-dark .bg-\[\#FFF3E0\] { background-color: hsl(37 42% 16%); }
+.shop-dark .bg-\[\#FFF3E8\] { background-color: hsl(29 42% 16%); }
+.shop-dark .bg-\[\#FFF3EC\] { background-color: hsl(22 42% 16%); }
+.shop-dark .bg-\[\#FFF3F0\] { background-color: hsl(12 42% 16%); }
+.shop-dark .bg-\[\#FFF3F8\] { background-color: hsl(335 42% 16%); }
+.shop-dark .bg-\[\#FFF4E0\] { background-color: hsl(39 42% 16%); }
+.shop-dark .bg-\[\#FFF4F0\] { background-color: hsl(16 42% 16%); }
+.shop-dark .bg-\[\#FFF6D6\] { background-color: hsl(47 42% 16%); }
+.shop-dark .bg-\[\#FFF6D8\] { background-color: hsl(46 42% 16%); }
+.shop-dark .bg-\[\#FFF6D9\] { background-color: hsl(46 42% 16%); }
+.shop-dark .bg-\[\#FFF7CC\] { background-color: hsl(51 42% 16%); }
+.shop-dark .bg-\[\#FFF7DB\] { background-color: hsl(47 42% 16%); }
+.shop-dark .bg-\[\#FFF7E0\] { background-color: hsl(45 42% 16%); }
+.shop-dark .bg-\[\#FFF7E6\] { background-color: hsl(41 42% 16%); }
+.shop-dark .bg-\[\#FFF7E8\] { background-color: hsl(39 42% 16%); }
+.shop-dark .bg-\[\#FFF7F2\] { background-color: hsl(23 42% 16%); }
+.shop-dark .bg-\[\#FFF7F3\] { background-color: hsl(20 42% 16%); }
+.shop-dark .bg-\[\#FFF8D9\] { background-color: hsl(49 42% 16%); }
+.shop-dark .bg-\[\#FFF8E1\] { background-color: hsl(46 42% 16%); }
+.shop-dark .bg-\[\#FFF8E9\] { background-color: hsl(41 42% 16%); }
+.shop-dark .bg-\[\#FFFBE0\] { background-color: hsl(52 42% 16%); }
+.shop-dark .bg-\[\#FFFBEA\] { background-color: hsl(49 42% 16%); }
+.shop-dark .bg-\[\#FFFBEB\] { background-color: hsl(48 42% 16%); }
+.shop-dark .bg-\[\#FFFDF4\] { background-color: hsl(49 42% 16%); }
+.shop-dark .bg-black\/\[0\.015\] { background-color: rgba(255,255,255,0.060); }
+.shop-dark .bg-black\/\[0\.02\] { background-color: rgba(255,255,255,0.060); }
+.shop-dark .bg-black\/\[0\.025\] { background-color: rgba(255,255,255,0.060); }
+.shop-dark .bg-black\/\[0\.03\] { background-color: rgba(255,255,255,0.060); }
+.shop-dark .bg-black\/\[0\.032\] { background-color: rgba(255,255,255,0.060); }
+.shop-dark .bg-black\/\[0\.035\] { background-color: rgba(255,255,255,0.060); }
+.shop-dark .bg-black\/\[0\.04\] { background-color: rgba(255,255,255,0.060); }
+.shop-dark .bg-black\/\[0\.045\] { background-color: rgba(255,255,255,0.060); }
+.shop-dark .bg-black\/\[0\.05\] { background-color: rgba(255,255,255,0.060); }
+.shop-dark .bg-black\/\[0\.055\] { background-color: rgba(255,255,255,0.061); }
+.shop-dark .bg-black\/\[0\.06\] { background-color: rgba(255,255,255,0.061); }
+.shop-dark .bg-black\/\[0\.07\] { background-color: rgba(255,255,255,0.061); }
+.shop-dark .bg-black\/\[0\.08\] { background-color: rgba(255,255,255,0.061); }
+.shop-dark .bg-black\/\[0\.09\] { background-color: rgba(255,255,255,0.061); }
+.shop-dark .bg-black\/\[0\.1\] { background-color: rgba(255,255,255,0.061); }
+.shop-dark .bg-black\/\[0\.12\] { background-color: rgba(255,255,255,0.061); }
+.shop-dark .bg-black\/\[0\.14\] { background-color: rgba(255,255,255,0.061); }
+.shop-dark .bg-black\/10 { background-color: rgba(255,255,255,0.160); }
+.shop-dark .bg-black\/12 { background-color: rgba(255,255,255,0.160); }
+.shop-dark .bg-black\/15 { background-color: rgba(255,255,255,0.160); }
+.shop-dark .bg-black\/5 { background-color: rgba(255,255,255,0.110); }
+.shop-dark .bg-white { background-color: #1d1d1f; }
+.shop-dark .bg-white\/40 { background-color: rgba(255,255,255,0.10); }
+.shop-dark .bg-white\/45 { background-color: rgba(255,255,255,0.10); }
+.shop-dark .bg-white\/50 { background-color: rgba(255,255,255,0.10); }
+.shop-dark .bg-white\/55 { background-color: rgba(255,255,255,0.10); }
+.shop-dark .bg-white\/58 { background-color: rgba(255,255,255,0.10); }
+.shop-dark .bg-white\/60 { background-color: rgba(255,255,255,0.10); }
+.shop-dark .bg-white\/62 { background-color: rgba(255,255,255,0.10); }
+.shop-dark .bg-white\/65 { background-color: rgba(255,255,255,0.10); }
+.shop-dark .bg-white\/68 { background-color: rgba(255,255,255,0.10); }
+.shop-dark .bg-white\/70 { background-color: rgba(255,255,255,0.10); }
+.shop-dark .bg-white\/75 { background-color: rgba(255,255,255,0.10); }
+.shop-dark .bg-white\/78 { background-color: rgba(255,255,255,0.10); }
+.shop-dark .bg-white\/80 { background-color: rgba(24,24,27,0.8); }
+.shop-dark .bg-white\/85 { background-color: rgba(24,24,27,0.85); }
+.shop-dark .bg-white\/90 { background-color: rgba(24,24,27,0.9); }
+.shop-dark .bg-white\/92 { background-color: rgba(24,24,27,0.92); }
+.shop-dark .bg-white\/95 { background-color: rgba(24,24,27,0.95); }
+.shop-dark .border-\[\#BFE9AC\] { border-color: #141416; }
+.shop-dark .border-\[\#F5F6F7\] { border-color: #141416; }
+.shop-dark .border-\[\#F6DFA2\] { border-color: #141416; }
+.shop-dark .border-\[\#F7F8FA\] { border-color: #141416; }
+.shop-dark .border-\[\#F9DCA8\] { border-color: #141416; }
+.shop-dark .border-black\/10 { border-color: rgba(255,255,255,0.10); }
+.shop-dark .border-black\/12 { border-color: rgba(255,255,255,0.10); }
+.shop-dark .border-black\/15 { border-color: rgba(255,255,255,0.13); }
+.shop-dark .border-black\/20 { border-color: rgba(255,255,255,0.17); }
+.shop-dark .border-black\/25 { border-color: rgba(255,255,255,0.21); }
+.shop-dark .border-black\/5 { border-color: rgba(255,255,255,0.10); }
+.shop-dark .border-black\/65 { border-color: rgba(255,255,255,0.55); }
+.shop-dark .border-black\/70 { border-color: rgba(255,255,255,0.59); }
+.shop-dark .border-black\/75 { border-color: rgba(255,255,255,0.64); }
+.shop-dark .border-black\/80 { border-color: rgba(255,255,255,0.68); }
+.shop-dark .border-black\/90 { border-color: rgba(255,255,255,0.77); }
+.shop-dark .divide-black\/\[0\.03\] { border-color: rgba(255,255,255,0.055); }
+.shop-dark .divide-black\/\[0\.04\] { border-color: rgba(255,255,255,0.055); }
+.shop-dark .divide-black\/\[0\.05\] { border-color: rgba(255,255,255,0.056); }
+.shop-dark .divide-black\/\[0\.06\] { border-color: rgba(255,255,255,0.056); }
+.shop-dark .divide-black\/\[0\.08\] { border-color: rgba(255,255,255,0.056); }
+.shop-dark .divide-black\/5 { border-color: rgba(255,255,255,0.105); }
+.shop-dark .from-\[\#7CB0FF\] { --tw-gradient-from: hsl(216 42% 16%); }
+.shop-dark .from-\[\#8EC9F0\] { --tw-gradient-from: hsl(204 32% 16%); }
+.shop-dark .from-\[\#9F7BFF\] { --tw-gradient-from: hsl(256 42% 16%); }
+.shop-dark .from-\[\#B5BCFF\] { --tw-gradient-from: hsl(234 42% 16%); }
+.shop-dark .from-\[\#C9CDFF\] { --tw-gradient-from: hsl(236 42% 16%); }
+.shop-dark .from-\[\#D8E4F8\] { --tw-gradient-from: hsl(217 29% 16%); }
+.shop-dark .from-\[\#D9F5E4\] { --tw-gradient-from: hsl(144 25% 16%); }
+.shop-dark .from-\[\#E8E0FF\] { --tw-gradient-from: hsl(255 42% 16%); }
+.shop-dark .from-\[\#E8FFE0\] { --tw-gradient-from: hsl(105 42% 16%); }
+.shop-dark .from-\[\#E9FBDF\] { --tw-gradient-from: hsl(99 33% 16%); }
+.shop-dark .from-\[\#EAE6F6\] { --tw-gradient-from: hsl(255 20% 16%); }
+.shop-dark .from-\[\#EAE6FB\] { --tw-gradient-from: hsl(251 30% 16%); }
+.shop-dark .from-\[\#ECEDEF\] { --tw-gradient-from: #141416; }
+.shop-dark .from-\[\#EDD8B9\] { --tw-gradient-from: hsl(36 25% 16%); }
+.shop-dark .from-\[\#F3D3A0\] { --tw-gradient-from: hsl(37 33% 16%); }
+.shop-dark .from-\[\#F3FBF3\] { --tw-gradient-from: hsl(120 21% 16%); }
+.shop-dark .from-\[\#FCDBC4\] { --tw-gradient-from: hsl(25 38% 16%); }
+.shop-dark .from-\[\#FF7EB3\] { --tw-gradient-from: hsl(335 42% 16%); }
+.shop-dark .from-\[\#FF8A8A\] { --tw-gradient-from: hsl(0 42% 16%); }
+.shop-dark .from-\[\#FF8A9E\] { --tw-gradient-from: hsl(350 42% 16%); }
+.shop-dark .from-\[\#FFE0D1\] { --tw-gradient-from: hsl(20 42% 16%); }
+.shop-dark .from-\[\#FFE1EC\] { --tw-gradient-from: hsl(338 42% 16%); }
+.shop-dark .from-\[\#FFE3E8\] { --tw-gradient-from: hsl(349 42% 16%); }
+.shop-dark .from-\[\#FFE7B8\] { --tw-gradient-from: hsl(40 42% 16%); }
+.shop-dark .from-\[\#FFE7D6\] { --tw-gradient-from: hsl(25 42% 16%); }
+.shop-dark .from-\[\#FFE9A0\] { --tw-gradient-from: hsl(46 42% 16%); }
+.shop-dark .from-\[\#FFE9A8\] { --tw-gradient-from: hsl(45 42% 16%); }
+.shop-dark .from-\[\#FFE9B8\] { --tw-gradient-from: hsl(41 42% 16%); }
+.shop-dark .from-\[\#FFE9EC\] { --tw-gradient-from: hsl(352 42% 16%); }
+.shop-dark .from-\[\#FFECE6\] { --tw-gradient-from: hsl(14 42% 16%); }
+.shop-dark .from-\[\#FFEF9E\] { --tw-gradient-from: hsl(50 42% 16%); }
+.shop-dark .from-\[\#FFEFE6\] { --tw-gradient-from: hsl(22 42% 16%); }
+.shop-dark .from-\[\#FFF0F3\] { --tw-gradient-from: hsl(348 42% 16%); }
+.shop-dark .from-\[\#FFF1C0\] { --tw-gradient-from: hsl(47 42% 16%); }
+.shop-dark .from-\[\#FFF1C3\] { --tw-gradient-from: hsl(46 42% 16%); }
+.shop-dark .from-\[\#FFF3C4\] { --tw-gradient-from: hsl(48 42% 16%); }
+.shop-dark .from-\[\#FFF3C9\] { --tw-gradient-from: hsl(47 42% 16%); }
+.shop-dark .from-\[\#FFF3D6\] { --tw-gradient-from: hsl(42 42% 16%); }
+.shop-dark .from-\[\#FFF4D9\] { --tw-gradient-from: hsl(43 42% 16%); }
+.shop-dark .from-\[\#FFF7DB\] { --tw-gradient-from: hsl(47 42% 16%); }
+.shop-dark .from-\[\#FFF7DC\] { --tw-gradient-from: hsl(46 42% 16%); }
+.shop-dark .from-\[\#FFF8CF\] { --tw-gradient-from: hsl(51 42% 16%); }
+.shop-dark .from-\[\#FFF9EC\] { --tw-gradient-from: hsl(41 42% 16%); }
+.shop-dark .from-\[\#FFFBEB\] { --tw-gradient-from: hsl(48 42% 16%); }
+.shop-dark .from-white { --tw-gradient-from: #1d1d1f; }
+.shop-dark .ring-black\/10 { --tw-ring-color: rgba(255,255,255,0.14); }
+.shop-dark .ring-black\/15 { --tw-ring-color: rgba(255,255,255,0.14); }
+.shop-dark .ring-black\/5 { --tw-ring-color: rgba(255,255,255,0.14); }
+.shop-dark .to-\[\#8E96FF\] { --tw-gradient-to: hsl(236 42% 16%); }
+.shop-dark .to-\[\#A7AEFF\] { --tw-gradient-to: hsl(235 42% 16%); }
+.shop-dark .to-\[\#B8F0A8\] { --tw-gradient-to: hsl(107 30% 16%); }
+.shop-dark .to-\[\#C9A8FF\] { --tw-gradient-to: hsl(263 42% 16%); }
+.shop-dark .to-\[\#CDB8FF\] { --tw-gradient-to: hsl(258 42% 16%); }
+.shop-dark .to-\[\#DCE3FB\] { --tw-gradient-to: hsl(226 33% 16%); }
+.shop-dark .to-\[\#DDF2E1\] { --tw-gradient-to: hsl(131 19% 16%); }
+.shop-dark .to-\[\#E7F0F9\] { --tw-gradient-to: hsl(210 25% 16%); }
+.shop-dark .to-\[\#EBCB96\] { --tw-gradient-to: hsl(37 29% 16%); }
+.shop-dark .to-\[\#F4F5F9\] { --tw-gradient-to: hsl(228 12% 16%); }
+.shop-dark .to-\[\#F5F6F8\] { --tw-gradient-to: hsl(220 7% 16%); }
+.shop-dark .to-\[\#F7F8FA\] { --tw-gradient-to: hsl(220 10% 16%); }
+.shop-dark .to-\[\#F8F0CB\] { --tw-gradient-to: hsl(49 32% 16%); }
+.shop-dark .to-\[\#F8F9FA\] { --tw-gradient-to: hsl(210 7% 16%); }
+.shop-dark .to-\[\#FAFAF8\] { --tw-gradient-to: hsl(60 7% 16%); }
+.shop-dark .to-\[\#FBEDE2\] { --tw-gradient-to: hsl(26 32% 16%); }
+.shop-dark .to-\[\#FFB08A\] { --tw-gradient-to: hsl(19 42% 16%); }
+.shop-dark .to-\[\#FFC9A3\] { --tw-gradient-to: hsl(25 42% 16%); }
+.shop-dark .to-\[\#FFD0E0\] { --tw-gradient-to: hsl(340 42% 16%); }
+.shop-dark .to-\[\#FFD3C4\] { --tw-gradient-to: hsl(15 42% 16%); }
+.shop-dark .to-\[\#FFD98A\] { --tw-gradient-to: hsl(41 42% 16%); }
+.shop-dark .to-\[\#FFDCE2\] { --tw-gradient-to: hsl(350 42% 16%); }
+.shop-dark .to-\[\#FFDF8A\] { --tw-gradient-to: hsl(44 42% 16%); }
+.shop-dark .to-\[\#FFDF9E\] { --tw-gradient-to: hsl(40 42% 16%); }
+.shop-dark .to-\[\#FFE29A\] { --tw-gradient-to: hsl(43 42% 16%); }
+.shop-dark .to-\[\#FFE68F\] { --tw-gradient-to: hsl(47 42% 16%); }
+.shop-dark .to-\[\#FFE6B3\] { --tw-gradient-to: hsl(40 42% 16%); }
+.shop-dark .to-\[\#FFE79A\] { --tw-gradient-to: hsl(46 42% 16%); }
+.shop-dark .to-\[\#FFE99A\] { --tw-gradient-to: hsl(47 42% 16%); }
+.shop-dark .to-\[\#FFE9E2\] { --tw-gradient-to: hsl(14 42% 16%); }
+.shop-dark .to-\[\#FFE9EC\] { --tw-gradient-to: hsl(352 42% 16%); }
+.shop-dark .to-\[\#FFEC9E\] { --tw-gradient-to: hsl(48 42% 16%); }
+.shop-dark .to-\[\#FFEDAD\] { --tw-gradient-to: hsl(47 42% 16%); }
+.shop-dark .to-\[\#FFF3B8\] { --tw-gradient-to: hsl(50 42% 16%); }
+.shop-dark .to-\[\#FFF3DC\] { --tw-gradient-to: hsl(39 42% 16%); }
+.shop-dark .to-\[\#FFF7DC\] { --tw-gradient-to: hsl(46 42% 16%); }
+.shop-dark .to-\[\#FFFDF4\] { --tw-gradient-to: hsl(49 42% 16%); }
+.shop-dark .to-white { --tw-gradient-to: #1d1d1f; }
+.shop-dark .via-\[\#9F7BFF\] { --tw-gradient-via: hsl(256 42% 16%); }
+.shop-dark .via-\[\#9FD4F8\] { --tw-gradient-via: hsl(204 36% 16%); }
+.shop-dark .via-\[\#E4EBF7\] { --tw-gradient-via: hsl(218 23% 16%); }
+.shop-dark .via-\[\#E9EEFA\] { --tw-gradient-via: hsl(222 26% 16%); }
+.shop-dark .via-\[\#EAF7EC\] { --tw-gradient-via: hsl(129 19% 16%); }
+.shop-dark .via-\[\#EBCB96\] { --tw-gradient-via: hsl(37 29% 16%); }
+.shop-dark .via-\[\#ECFBF1\] { --tw-gradient-via: hsl(140 27% 16%); }
+.shop-dark .via-\[\#F3E1F6\] { --tw-gradient-via: hsl(291 23% 16%); }
+.shop-dark .via-\[\#F4E8D5\] { --tw-gradient-via: hsl(37 25% 16%); }
+.shop-dark .via-\[\#F6CBD8\] { --tw-gradient-via: hsl(342 30% 16%); }
+.shop-dark .via-\[\#FDE3D2\] { --tw-gradient-via: hsl(24 38% 16%); }
+.shop-dark .via-\[\#FFDF9E\] { --tw-gradient-via: hsl(40 42% 16%); }
+.shop-dark .via-\[\#FFE59A\] { --tw-gradient-via: hsl(45 42% 16%); }
+.shop-dark .via-\[\#FFEBC2\] { --tw-gradient-via: hsl(40 42% 16%); }
+.shop-dark .via-\[\#FFEDC9\] { --tw-gradient-via: hsl(40 42% 16%); }
+.shop-dark .via-\[\#FFF2A6\] { --tw-gradient-via: hsl(51 42% 16%); }
+.shop-dark .via-\[\#FFF4C9\] { --tw-gradient-via: hsl(48 42% 16%); }
+
+.shop-dark .text-black { color: #f2f2f4; }
+.shop-dark .text-black\/10 { color: rgba(255,255,255,0.13); }
+.shop-dark .text-black\/15 { color: rgba(255,255,255,0.18); }
+.shop-dark .text-black\/20 { color: rgba(255,255,255,0.23); }
+.shop-dark .text-black\/22 { color: rgba(255,255,255,0.25); }
+.shop-dark .text-black\/25 { color: rgba(255,255,255,0.28); }
+.shop-dark .text-black\/30 { color: rgba(255,255,255,0.34); }
+.shop-dark .text-black\/35 { color: rgba(255,255,255,0.39); }
+.shop-dark .text-black\/40 { color: rgba(255,255,255,0.44); }
+.shop-dark .text-black\/45 { color: rgba(255,255,255,0.49); }
+.shop-dark .text-black\/50 { color: rgba(255,255,255,0.55); }
+.shop-dark .text-black\/55 { color: rgba(255,255,255,0.60); }
+.shop-dark .text-black\/60 { color: rgba(255,255,255,0.65); }
+.shop-dark .text-black\/65 { color: rgba(255,255,255,0.70); }
+.shop-dark .text-black\/70 { color: rgba(255,255,255,0.76); }
+.shop-dark .text-black\/75 { color: rgba(255,255,255,0.81); }
+.shop-dark .text-black\/80 { color: rgba(255,255,255,0.86); }
+.shop-dark .text-black\/85 { color: rgba(255,255,255,0.91); }
+.shop-dark .text-black\/90 { color: rgba(255,255,255,0.95); }
+.shop-dark .text-black\/92 { color: rgba(255,255,255,0.95); }
+.shop-dark .text-black\/95 { color: rgba(255,255,255,0.95); }
+
+.shop-dark .text-\[\#a04046\] { color: hsl(356 43% 75%); }
+.shop-dark .text-\[\#93392e\] { color: hsl(7 52% 75%); }
+.shop-dark .text-\[\#8a4d16\] { color: hsl(28 72% 75%); }
+.shop-dark .text-\[\#8a2a20\] { color: hsl(6 62% 75%); }
+.shop-dark .text-\[\#A5001F\] { color: hsl(349 85% 75%); }
+.shop-dark .text-\[\#5A3A10\] { color: hsl(34 70% 75%); }
+.shop-dark .text-\[\#5C3A18\] { color: hsl(30 59% 75%); }
+.shop-dark .text-\[\#8A6116\] { color: hsl(39 72% 75%); }
+.shop-dark .text-\[\#8A6A1F\] { color: hsl(42 63% 75%); }
+.shop-dark .text-\[\#0A6B47\] { color: hsl(158 83% 75%); }
+.shop-dark .text-\[\#5A4200\] { color: hsl(44 85% 75%); }
+.shop-dark .text-\[\#8A4B00\] { color: hsl(33 85% 75%); }
+.shop-dark .text-\[\#1D7A3C\] { color: hsl(140 62% 75%); }
+.shop-dark .text-\[\#C41820\] { color: hsl(357 78% 75%); }
+.shop-dark .text-\[\#42506380\] { color: hsl(215 20% 75%); }
+.shop-dark .text-\[\#8a6300\] { color: hsl(43 85% 75%); }
+.shop-dark .text-\[\#2B3A67\] { color: hsl(225 41% 75%); }
+.shop-dark .text-\[\#1F2329\] { color: hsl(216 14% 75%); }
+.shop-dark .text-\[\#23222B\] { color: hsl(247 12% 75%); }
+.shop-dark .text-\[\#7A5C30\] { color: hsl(36 44% 75%); }
+.shop-dark .text-\[\#8A6A00\] { color: hsl(46 85% 75%); }
+.shop-dark .text-\[\#1D5B2C\] { color: hsl(135 52% 75%); }
+.shop-dark .text-\[\#574423\] { color: hsl(38 43% 75%); }
+.shop-dark .text-\[\#B35400\] { color: hsl(28 85% 75%); }
+.shop-dark .text-\[\#C20C0C\] { color: hsl(0 85% 75%); }
+.shop-dark .text-\[\#6B6355\] { color: hsl(38 11% 75%); }
+
+.shop-dark :is(.bg-\[\#FF5000\],.bg-\[\#FF0036\],.bg-\[\#07C160\],.bg-\[\#12B7F5\],.bg-\[\#FFD100\],.bg-\[\#FFC300\],.bg-\[\#FF6000\],.bg-\[\#7C5CFF\],.bg-\[\#0099FF\],.bg-\[\#1B9FF0\],.bg-\[\#F6D554\],.bg-\[\#06AD56\],.bg-\[\#95EC69\],.bg-\[\#3EB575\],.bg-\[\#F7E36D\],.from-\[\#FF7A21\],.from-\[\#FFE14D\],.from-\[\#FFD100\],.from-\[\#FFC300\],.from-\[\#FFDC30\],.from-\[\#FFE63E\],.from-\[\#FFD900\],.via-\[\#FFA51E\],.to-\[\#FF4400\],.to-\[\#FFC300\],.to-\[\#FFD100\],.to-\[\#FF9500\],.to-\[\#FF8A00\],.to-\[\#FFC91E\]) :not([class*='bg-']) .text-black\/10,
+.shop-dark :is(.bg-\[\#FF5000\],.bg-\[\#FF0036\],.bg-\[\#07C160\],.bg-\[\#12B7F5\],.bg-\[\#FFD100\],.bg-\[\#FFC300\],.bg-\[\#FF6000\],.bg-\[\#7C5CFF\],.bg-\[\#0099FF\],.bg-\[\#1B9FF0\],.bg-\[\#F6D554\],.bg-\[\#06AD56\],.bg-\[\#95EC69\],.bg-\[\#3EB575\],.bg-\[\#F7E36D\],.from-\[\#FF7A21\],.from-\[\#FFE14D\],.from-\[\#FFD100\],.from-\[\#FFC300\],.from-\[\#FFDC30\],.from-\[\#FFE63E\],.from-\[\#FFD900\],.via-\[\#FFA51E\],.to-\[\#FF4400\],.to-\[\#FFC300\],.to-\[\#FFD100\],.to-\[\#FF9500\],.to-\[\#FF8A00\],.to-\[\#FFC91E\]).text-black\/10 { color: rgba(0,0,0,0.10); }
+.shop-dark :is(.bg-\[\#FF5000\],.bg-\[\#FF0036\],.bg-\[\#07C160\],.bg-\[\#12B7F5\],.bg-\[\#FFD100\],.bg-\[\#FFC300\],.bg-\[\#FF6000\],.bg-\[\#7C5CFF\],.bg-\[\#0099FF\],.bg-\[\#1B9FF0\],.bg-\[\#F6D554\],.bg-\[\#06AD56\],.bg-\[\#95EC69\],.bg-\[\#3EB575\],.bg-\[\#F7E36D\],.from-\[\#FF7A21\],.from-\[\#FFE14D\],.from-\[\#FFD100\],.from-\[\#FFC300\],.from-\[\#FFDC30\],.from-\[\#FFE63E\],.from-\[\#FFD900\],.via-\[\#FFA51E\],.to-\[\#FF4400\],.to-\[\#FFC300\],.to-\[\#FFD100\],.to-\[\#FF9500\],.to-\[\#FF8A00\],.to-\[\#FFC91E\]) :not([class*='bg-']) .text-black\/15,
+.shop-dark :is(.bg-\[\#FF5000\],.bg-\[\#FF0036\],.bg-\[\#07C160\],.bg-\[\#12B7F5\],.bg-\[\#FFD100\],.bg-\[\#FFC300\],.bg-\[\#FF6000\],.bg-\[\#7C5CFF\],.bg-\[\#0099FF\],.bg-\[\#1B9FF0\],.bg-\[\#F6D554\],.bg-\[\#06AD56\],.bg-\[\#95EC69\],.bg-\[\#3EB575\],.bg-\[\#F7E36D\],.from-\[\#FF7A21\],.from-\[\#FFE14D\],.from-\[\#FFD100\],.from-\[\#FFC300\],.from-\[\#FFDC30\],.from-\[\#FFE63E\],.from-\[\#FFD900\],.via-\[\#FFA51E\],.to-\[\#FF4400\],.to-\[\#FFC300\],.to-\[\#FFD100\],.to-\[\#FF9500\],.to-\[\#FF8A00\],.to-\[\#FFC91E\]).text-black\/15 { color: rgba(0,0,0,0.15); }
+.shop-dark :is(.bg-\[\#FF5000\],.bg-\[\#FF0036\],.bg-\[\#07C160\],.bg-\[\#12B7F5\],.bg-\[\#FFD100\],.bg-\[\#FFC300\],.bg-\[\#FF6000\],.bg-\[\#7C5CFF\],.bg-\[\#0099FF\],.bg-\[\#1B9FF0\],.bg-\[\#F6D554\],.bg-\[\#06AD56\],.bg-\[\#95EC69\],.bg-\[\#3EB575\],.bg-\[\#F7E36D\],.from-\[\#FF7A21\],.from-\[\#FFE14D\],.from-\[\#FFD100\],.from-\[\#FFC300\],.from-\[\#FFDC30\],.from-\[\#FFE63E\],.from-\[\#FFD900\],.via-\[\#FFA51E\],.to-\[\#FF4400\],.to-\[\#FFC300\],.to-\[\#FFD100\],.to-\[\#FF9500\],.to-\[\#FF8A00\],.to-\[\#FFC91E\]) :not([class*='bg-']) .text-black\/20,
+.shop-dark :is(.bg-\[\#FF5000\],.bg-\[\#FF0036\],.bg-\[\#07C160\],.bg-\[\#12B7F5\],.bg-\[\#FFD100\],.bg-\[\#FFC300\],.bg-\[\#FF6000\],.bg-\[\#7C5CFF\],.bg-\[\#0099FF\],.bg-\[\#1B9FF0\],.bg-\[\#F6D554\],.bg-\[\#06AD56\],.bg-\[\#95EC69\],.bg-\[\#3EB575\],.bg-\[\#F7E36D\],.from-\[\#FF7A21\],.from-\[\#FFE14D\],.from-\[\#FFD100\],.from-\[\#FFC300\],.from-\[\#FFDC30\],.from-\[\#FFE63E\],.from-\[\#FFD900\],.via-\[\#FFA51E\],.to-\[\#FF4400\],.to-\[\#FFC300\],.to-\[\#FFD100\],.to-\[\#FF9500\],.to-\[\#FF8A00\],.to-\[\#FFC91E\]).text-black\/20 { color: rgba(0,0,0,0.20); }
+.shop-dark :is(.bg-\[\#FF5000\],.bg-\[\#FF0036\],.bg-\[\#07C160\],.bg-\[\#12B7F5\],.bg-\[\#FFD100\],.bg-\[\#FFC300\],.bg-\[\#FF6000\],.bg-\[\#7C5CFF\],.bg-\[\#0099FF\],.bg-\[\#1B9FF0\],.bg-\[\#F6D554\],.bg-\[\#06AD56\],.bg-\[\#95EC69\],.bg-\[\#3EB575\],.bg-\[\#F7E36D\],.from-\[\#FF7A21\],.from-\[\#FFE14D\],.from-\[\#FFD100\],.from-\[\#FFC300\],.from-\[\#FFDC30\],.from-\[\#FFE63E\],.from-\[\#FFD900\],.via-\[\#FFA51E\],.to-\[\#FF4400\],.to-\[\#FFC300\],.to-\[\#FFD100\],.to-\[\#FF9500\],.to-\[\#FF8A00\],.to-\[\#FFC91E\]) :not([class*='bg-']) .text-black\/22,
+.shop-dark :is(.bg-\[\#FF5000\],.bg-\[\#FF0036\],.bg-\[\#07C160\],.bg-\[\#12B7F5\],.bg-\[\#FFD100\],.bg-\[\#FFC300\],.bg-\[\#FF6000\],.bg-\[\#7C5CFF\],.bg-\[\#0099FF\],.bg-\[\#1B9FF0\],.bg-\[\#F6D554\],.bg-\[\#06AD56\],.bg-\[\#95EC69\],.bg-\[\#3EB575\],.bg-\[\#F7E36D\],.from-\[\#FF7A21\],.from-\[\#FFE14D\],.from-\[\#FFD100\],.from-\[\#FFC300\],.from-\[\#FFDC30\],.from-\[\#FFE63E\],.from-\[\#FFD900\],.via-\[\#FFA51E\],.to-\[\#FF4400\],.to-\[\#FFC300\],.to-\[\#FFD100\],.to-\[\#FF9500\],.to-\[\#FF8A00\],.to-\[\#FFC91E\]).text-black\/22 { color: rgba(0,0,0,0.22); }
+.shop-dark :is(.bg-\[\#FF5000\],.bg-\[\#FF0036\],.bg-\[\#07C160\],.bg-\[\#12B7F5\],.bg-\[\#FFD100\],.bg-\[\#FFC300\],.bg-\[\#FF6000\],.bg-\[\#7C5CFF\],.bg-\[\#0099FF\],.bg-\[\#1B9FF0\],.bg-\[\#F6D554\],.bg-\[\#06AD56\],.bg-\[\#95EC69\],.bg-\[\#3EB575\],.bg-\[\#F7E36D\],.from-\[\#FF7A21\],.from-\[\#FFE14D\],.from-\[\#FFD100\],.from-\[\#FFC300\],.from-\[\#FFDC30\],.from-\[\#FFE63E\],.from-\[\#FFD900\],.via-\[\#FFA51E\],.to-\[\#FF4400\],.to-\[\#FFC300\],.to-\[\#FFD100\],.to-\[\#FF9500\],.to-\[\#FF8A00\],.to-\[\#FFC91E\]) :not([class*='bg-']) .text-black\/25,
+.shop-dark :is(.bg-\[\#FF5000\],.bg-\[\#FF0036\],.bg-\[\#07C160\],.bg-\[\#12B7F5\],.bg-\[\#FFD100\],.bg-\[\#FFC300\],.bg-\[\#FF6000\],.bg-\[\#7C5CFF\],.bg-\[\#0099FF\],.bg-\[\#1B9FF0\],.bg-\[\#F6D554\],.bg-\[\#06AD56\],.bg-\[\#95EC69\],.bg-\[\#3EB575\],.bg-\[\#F7E36D\],.from-\[\#FF7A21\],.from-\[\#FFE14D\],.from-\[\#FFD100\],.from-\[\#FFC300\],.from-\[\#FFDC30\],.from-\[\#FFE63E\],.from-\[\#FFD900\],.via-\[\#FFA51E\],.to-\[\#FF4400\],.to-\[\#FFC300\],.to-\[\#FFD100\],.to-\[\#FF9500\],.to-\[\#FF8A00\],.to-\[\#FFC91E\]).text-black\/25 { color: rgba(0,0,0,0.25); }
+.shop-dark :is(.bg-\[\#FF5000\],.bg-\[\#FF0036\],.bg-\[\#07C160\],.bg-\[\#12B7F5\],.bg-\[\#FFD100\],.bg-\[\#FFC300\],.bg-\[\#FF6000\],.bg-\[\#7C5CFF\],.bg-\[\#0099FF\],.bg-\[\#1B9FF0\],.bg-\[\#F6D554\],.bg-\[\#06AD56\],.bg-\[\#95EC69\],.bg-\[\#3EB575\],.bg-\[\#F7E36D\],.from-\[\#FF7A21\],.from-\[\#FFE14D\],.from-\[\#FFD100\],.from-\[\#FFC300\],.from-\[\#FFDC30\],.from-\[\#FFE63E\],.from-\[\#FFD900\],.via-\[\#FFA51E\],.to-\[\#FF4400\],.to-\[\#FFC300\],.to-\[\#FFD100\],.to-\[\#FF9500\],.to-\[\#FF8A00\],.to-\[\#FFC91E\]) :not([class*='bg-']) .text-black\/30,
+.shop-dark :is(.bg-\[\#FF5000\],.bg-\[\#FF0036\],.bg-\[\#07C160\],.bg-\[\#12B7F5\],.bg-\[\#FFD100\],.bg-\[\#FFC300\],.bg-\[\#FF6000\],.bg-\[\#7C5CFF\],.bg-\[\#0099FF\],.bg-\[\#1B9FF0\],.bg-\[\#F6D554\],.bg-\[\#06AD56\],.bg-\[\#95EC69\],.bg-\[\#3EB575\],.bg-\[\#F7E36D\],.from-\[\#FF7A21\],.from-\[\#FFE14D\],.from-\[\#FFD100\],.from-\[\#FFC300\],.from-\[\#FFDC30\],.from-\[\#FFE63E\],.from-\[\#FFD900\],.via-\[\#FFA51E\],.to-\[\#FF4400\],.to-\[\#FFC300\],.to-\[\#FFD100\],.to-\[\#FF9500\],.to-\[\#FF8A00\],.to-\[\#FFC91E\]).text-black\/30 { color: rgba(0,0,0,0.30); }
+.shop-dark :is(.bg-\[\#FF5000\],.bg-\[\#FF0036\],.bg-\[\#07C160\],.bg-\[\#12B7F5\],.bg-\[\#FFD100\],.bg-\[\#FFC300\],.bg-\[\#FF6000\],.bg-\[\#7C5CFF\],.bg-\[\#0099FF\],.bg-\[\#1B9FF0\],.bg-\[\#F6D554\],.bg-\[\#06AD56\],.bg-\[\#95EC69\],.bg-\[\#3EB575\],.bg-\[\#F7E36D\],.from-\[\#FF7A21\],.from-\[\#FFE14D\],.from-\[\#FFD100\],.from-\[\#FFC300\],.from-\[\#FFDC30\],.from-\[\#FFE63E\],.from-\[\#FFD900\],.via-\[\#FFA51E\],.to-\[\#FF4400\],.to-\[\#FFC300\],.to-\[\#FFD100\],.to-\[\#FF9500\],.to-\[\#FF8A00\],.to-\[\#FFC91E\]) :not([class*='bg-']) .text-black\/35,
+.shop-dark :is(.bg-\[\#FF5000\],.bg-\[\#FF0036\],.bg-\[\#07C160\],.bg-\[\#12B7F5\],.bg-\[\#FFD100\],.bg-\[\#FFC300\],.bg-\[\#FF6000\],.bg-\[\#7C5CFF\],.bg-\[\#0099FF\],.bg-\[\#1B9FF0\],.bg-\[\#F6D554\],.bg-\[\#06AD56\],.bg-\[\#95EC69\],.bg-\[\#3EB575\],.bg-\[\#F7E36D\],.from-\[\#FF7A21\],.from-\[\#FFE14D\],.from-\[\#FFD100\],.from-\[\#FFC300\],.from-\[\#FFDC30\],.from-\[\#FFE63E\],.from-\[\#FFD900\],.via-\[\#FFA51E\],.to-\[\#FF4400\],.to-\[\#FFC300\],.to-\[\#FFD100\],.to-\[\#FF9500\],.to-\[\#FF8A00\],.to-\[\#FFC91E\]).text-black\/35 { color: rgba(0,0,0,0.35); }
+.shop-dark :is(.bg-\[\#FF5000\],.bg-\[\#FF0036\],.bg-\[\#07C160\],.bg-\[\#12B7F5\],.bg-\[\#FFD100\],.bg-\[\#FFC300\],.bg-\[\#FF6000\],.bg-\[\#7C5CFF\],.bg-\[\#0099FF\],.bg-\[\#1B9FF0\],.bg-\[\#F6D554\],.bg-\[\#06AD56\],.bg-\[\#95EC69\],.bg-\[\#3EB575\],.bg-\[\#F7E36D\],.from-\[\#FF7A21\],.from-\[\#FFE14D\],.from-\[\#FFD100\],.from-\[\#FFC300\],.from-\[\#FFDC30\],.from-\[\#FFE63E\],.from-\[\#FFD900\],.via-\[\#FFA51E\],.to-\[\#FF4400\],.to-\[\#FFC300\],.to-\[\#FFD100\],.to-\[\#FF9500\],.to-\[\#FF8A00\],.to-\[\#FFC91E\]) :not([class*='bg-']) .text-black\/40,
+.shop-dark :is(.bg-\[\#FF5000\],.bg-\[\#FF0036\],.bg-\[\#07C160\],.bg-\[\#12B7F5\],.bg-\[\#FFD100\],.bg-\[\#FFC300\],.bg-\[\#FF6000\],.bg-\[\#7C5CFF\],.bg-\[\#0099FF\],.bg-\[\#1B9FF0\],.bg-\[\#F6D554\],.bg-\[\#06AD56\],.bg-\[\#95EC69\],.bg-\[\#3EB575\],.bg-\[\#F7E36D\],.from-\[\#FF7A21\],.from-\[\#FFE14D\],.from-\[\#FFD100\],.from-\[\#FFC300\],.from-\[\#FFDC30\],.from-\[\#FFE63E\],.from-\[\#FFD900\],.via-\[\#FFA51E\],.to-\[\#FF4400\],.to-\[\#FFC300\],.to-\[\#FFD100\],.to-\[\#FF9500\],.to-\[\#FF8A00\],.to-\[\#FFC91E\]).text-black\/40 { color: rgba(0,0,0,0.40); }
+.shop-dark :is(.bg-\[\#FF5000\],.bg-\[\#FF0036\],.bg-\[\#07C160\],.bg-\[\#12B7F5\],.bg-\[\#FFD100\],.bg-\[\#FFC300\],.bg-\[\#FF6000\],.bg-\[\#7C5CFF\],.bg-\[\#0099FF\],.bg-\[\#1B9FF0\],.bg-\[\#F6D554\],.bg-\[\#06AD56\],.bg-\[\#95EC69\],.bg-\[\#3EB575\],.bg-\[\#F7E36D\],.from-\[\#FF7A21\],.from-\[\#FFE14D\],.from-\[\#FFD100\],.from-\[\#FFC300\],.from-\[\#FFDC30\],.from-\[\#FFE63E\],.from-\[\#FFD900\],.via-\[\#FFA51E\],.to-\[\#FF4400\],.to-\[\#FFC300\],.to-\[\#FFD100\],.to-\[\#FF9500\],.to-\[\#FF8A00\],.to-\[\#FFC91E\]) :not([class*='bg-']) .text-black\/45,
+.shop-dark :is(.bg-\[\#FF5000\],.bg-\[\#FF0036\],.bg-\[\#07C160\],.bg-\[\#12B7F5\],.bg-\[\#FFD100\],.bg-\[\#FFC300\],.bg-\[\#FF6000\],.bg-\[\#7C5CFF\],.bg-\[\#0099FF\],.bg-\[\#1B9FF0\],.bg-\[\#F6D554\],.bg-\[\#06AD56\],.bg-\[\#95EC69\],.bg-\[\#3EB575\],.bg-\[\#F7E36D\],.from-\[\#FF7A21\],.from-\[\#FFE14D\],.from-\[\#FFD100\],.from-\[\#FFC300\],.from-\[\#FFDC30\],.from-\[\#FFE63E\],.from-\[\#FFD900\],.via-\[\#FFA51E\],.to-\[\#FF4400\],.to-\[\#FFC300\],.to-\[\#FFD100\],.to-\[\#FF9500\],.to-\[\#FF8A00\],.to-\[\#FFC91E\]).text-black\/45 { color: rgba(0,0,0,0.45); }
+.shop-dark :is(.bg-\[\#FF5000\],.bg-\[\#FF0036\],.bg-\[\#07C160\],.bg-\[\#12B7F5\],.bg-\[\#FFD100\],.bg-\[\#FFC300\],.bg-\[\#FF6000\],.bg-\[\#7C5CFF\],.bg-\[\#0099FF\],.bg-\[\#1B9FF0\],.bg-\[\#F6D554\],.bg-\[\#06AD56\],.bg-\[\#95EC69\],.bg-\[\#3EB575\],.bg-\[\#F7E36D\],.from-\[\#FF7A21\],.from-\[\#FFE14D\],.from-\[\#FFD100\],.from-\[\#FFC300\],.from-\[\#FFDC30\],.from-\[\#FFE63E\],.from-\[\#FFD900\],.via-\[\#FFA51E\],.to-\[\#FF4400\],.to-\[\#FFC300\],.to-\[\#FFD100\],.to-\[\#FF9500\],.to-\[\#FF8A00\],.to-\[\#FFC91E\]) :not([class*='bg-']) .text-black\/50,
+.shop-dark :is(.bg-\[\#FF5000\],.bg-\[\#FF0036\],.bg-\[\#07C160\],.bg-\[\#12B7F5\],.bg-\[\#FFD100\],.bg-\[\#FFC300\],.bg-\[\#FF6000\],.bg-\[\#7C5CFF\],.bg-\[\#0099FF\],.bg-\[\#1B9FF0\],.bg-\[\#F6D554\],.bg-\[\#06AD56\],.bg-\[\#95EC69\],.bg-\[\#3EB575\],.bg-\[\#F7E36D\],.from-\[\#FF7A21\],.from-\[\#FFE14D\],.from-\[\#FFD100\],.from-\[\#FFC300\],.from-\[\#FFDC30\],.from-\[\#FFE63E\],.from-\[\#FFD900\],.via-\[\#FFA51E\],.to-\[\#FF4400\],.to-\[\#FFC300\],.to-\[\#FFD100\],.to-\[\#FF9500\],.to-\[\#FF8A00\],.to-\[\#FFC91E\]).text-black\/50 { color: rgba(0,0,0,0.50); }
+.shop-dark :is(.bg-\[\#FF5000\],.bg-\[\#FF0036\],.bg-\[\#07C160\],.bg-\[\#12B7F5\],.bg-\[\#FFD100\],.bg-\[\#FFC300\],.bg-\[\#FF6000\],.bg-\[\#7C5CFF\],.bg-\[\#0099FF\],.bg-\[\#1B9FF0\],.bg-\[\#F6D554\],.bg-\[\#06AD56\],.bg-\[\#95EC69\],.bg-\[\#3EB575\],.bg-\[\#F7E36D\],.from-\[\#FF7A21\],.from-\[\#FFE14D\],.from-\[\#FFD100\],.from-\[\#FFC300\],.from-\[\#FFDC30\],.from-\[\#FFE63E\],.from-\[\#FFD900\],.via-\[\#FFA51E\],.to-\[\#FF4400\],.to-\[\#FFC300\],.to-\[\#FFD100\],.to-\[\#FF9500\],.to-\[\#FF8A00\],.to-\[\#FFC91E\]) :not([class*='bg-']) .text-black\/55,
+.shop-dark :is(.bg-\[\#FF5000\],.bg-\[\#FF0036\],.bg-\[\#07C160\],.bg-\[\#12B7F5\],.bg-\[\#FFD100\],.bg-\[\#FFC300\],.bg-\[\#FF6000\],.bg-\[\#7C5CFF\],.bg-\[\#0099FF\],.bg-\[\#1B9FF0\],.bg-\[\#F6D554\],.bg-\[\#06AD56\],.bg-\[\#95EC69\],.bg-\[\#3EB575\],.bg-\[\#F7E36D\],.from-\[\#FF7A21\],.from-\[\#FFE14D\],.from-\[\#FFD100\],.from-\[\#FFC300\],.from-\[\#FFDC30\],.from-\[\#FFE63E\],.from-\[\#FFD900\],.via-\[\#FFA51E\],.to-\[\#FF4400\],.to-\[\#FFC300\],.to-\[\#FFD100\],.to-\[\#FF9500\],.to-\[\#FF8A00\],.to-\[\#FFC91E\]).text-black\/55 { color: rgba(0,0,0,0.55); }
+.shop-dark :is(.bg-\[\#FF5000\],.bg-\[\#FF0036\],.bg-\[\#07C160\],.bg-\[\#12B7F5\],.bg-\[\#FFD100\],.bg-\[\#FFC300\],.bg-\[\#FF6000\],.bg-\[\#7C5CFF\],.bg-\[\#0099FF\],.bg-\[\#1B9FF0\],.bg-\[\#F6D554\],.bg-\[\#06AD56\],.bg-\[\#95EC69\],.bg-\[\#3EB575\],.bg-\[\#F7E36D\],.from-\[\#FF7A21\],.from-\[\#FFE14D\],.from-\[\#FFD100\],.from-\[\#FFC300\],.from-\[\#FFDC30\],.from-\[\#FFE63E\],.from-\[\#FFD900\],.via-\[\#FFA51E\],.to-\[\#FF4400\],.to-\[\#FFC300\],.to-\[\#FFD100\],.to-\[\#FF9500\],.to-\[\#FF8A00\],.to-\[\#FFC91E\]) :not([class*='bg-']) .text-black\/60,
+.shop-dark :is(.bg-\[\#FF5000\],.bg-\[\#FF0036\],.bg-\[\#07C160\],.bg-\[\#12B7F5\],.bg-\[\#FFD100\],.bg-\[\#FFC300\],.bg-\[\#FF6000\],.bg-\[\#7C5CFF\],.bg-\[\#0099FF\],.bg-\[\#1B9FF0\],.bg-\[\#F6D554\],.bg-\[\#06AD56\],.bg-\[\#95EC69\],.bg-\[\#3EB575\],.bg-\[\#F7E36D\],.from-\[\#FF7A21\],.from-\[\#FFE14D\],.from-\[\#FFD100\],.from-\[\#FFC300\],.from-\[\#FFDC30\],.from-\[\#FFE63E\],.from-\[\#FFD900\],.via-\[\#FFA51E\],.to-\[\#FF4400\],.to-\[\#FFC300\],.to-\[\#FFD100\],.to-\[\#FF9500\],.to-\[\#FF8A00\],.to-\[\#FFC91E\]).text-black\/60 { color: rgba(0,0,0,0.60); }
+.shop-dark :is(.bg-\[\#FF5000\],.bg-\[\#FF0036\],.bg-\[\#07C160\],.bg-\[\#12B7F5\],.bg-\[\#FFD100\],.bg-\[\#FFC300\],.bg-\[\#FF6000\],.bg-\[\#7C5CFF\],.bg-\[\#0099FF\],.bg-\[\#1B9FF0\],.bg-\[\#F6D554\],.bg-\[\#06AD56\],.bg-\[\#95EC69\],.bg-\[\#3EB575\],.bg-\[\#F7E36D\],.from-\[\#FF7A21\],.from-\[\#FFE14D\],.from-\[\#FFD100\],.from-\[\#FFC300\],.from-\[\#FFDC30\],.from-\[\#FFE63E\],.from-\[\#FFD900\],.via-\[\#FFA51E\],.to-\[\#FF4400\],.to-\[\#FFC300\],.to-\[\#FFD100\],.to-\[\#FF9500\],.to-\[\#FF8A00\],.to-\[\#FFC91E\]) :not([class*='bg-']) .text-black\/65,
+.shop-dark :is(.bg-\[\#FF5000\],.bg-\[\#FF0036\],.bg-\[\#07C160\],.bg-\[\#12B7F5\],.bg-\[\#FFD100\],.bg-\[\#FFC300\],.bg-\[\#FF6000\],.bg-\[\#7C5CFF\],.bg-\[\#0099FF\],.bg-\[\#1B9FF0\],.bg-\[\#F6D554\],.bg-\[\#06AD56\],.bg-\[\#95EC69\],.bg-\[\#3EB575\],.bg-\[\#F7E36D\],.from-\[\#FF7A21\],.from-\[\#FFE14D\],.from-\[\#FFD100\],.from-\[\#FFC300\],.from-\[\#FFDC30\],.from-\[\#FFE63E\],.from-\[\#FFD900\],.via-\[\#FFA51E\],.to-\[\#FF4400\],.to-\[\#FFC300\],.to-\[\#FFD100\],.to-\[\#FF9500\],.to-\[\#FF8A00\],.to-\[\#FFC91E\]).text-black\/65 { color: rgba(0,0,0,0.65); }
+.shop-dark :is(.bg-\[\#FF5000\],.bg-\[\#FF0036\],.bg-\[\#07C160\],.bg-\[\#12B7F5\],.bg-\[\#FFD100\],.bg-\[\#FFC300\],.bg-\[\#FF6000\],.bg-\[\#7C5CFF\],.bg-\[\#0099FF\],.bg-\[\#1B9FF0\],.bg-\[\#F6D554\],.bg-\[\#06AD56\],.bg-\[\#95EC69\],.bg-\[\#3EB575\],.bg-\[\#F7E36D\],.from-\[\#FF7A21\],.from-\[\#FFE14D\],.from-\[\#FFD100\],.from-\[\#FFC300\],.from-\[\#FFDC30\],.from-\[\#FFE63E\],.from-\[\#FFD900\],.via-\[\#FFA51E\],.to-\[\#FF4400\],.to-\[\#FFC300\],.to-\[\#FFD100\],.to-\[\#FF9500\],.to-\[\#FF8A00\],.to-\[\#FFC91E\]) :not([class*='bg-']) .text-black\/70,
+.shop-dark :is(.bg-\[\#FF5000\],.bg-\[\#FF0036\],.bg-\[\#07C160\],.bg-\[\#12B7F5\],.bg-\[\#FFD100\],.bg-\[\#FFC300\],.bg-\[\#FF6000\],.bg-\[\#7C5CFF\],.bg-\[\#0099FF\],.bg-\[\#1B9FF0\],.bg-\[\#F6D554\],.bg-\[\#06AD56\],.bg-\[\#95EC69\],.bg-\[\#3EB575\],.bg-\[\#F7E36D\],.from-\[\#FF7A21\],.from-\[\#FFE14D\],.from-\[\#FFD100\],.from-\[\#FFC300\],.from-\[\#FFDC30\],.from-\[\#FFE63E\],.from-\[\#FFD900\],.via-\[\#FFA51E\],.to-\[\#FF4400\],.to-\[\#FFC300\],.to-\[\#FFD100\],.to-\[\#FF9500\],.to-\[\#FF8A00\],.to-\[\#FFC91E\]).text-black\/70 { color: rgba(0,0,0,0.70); }
+.shop-dark :is(.bg-\[\#FF5000\],.bg-\[\#FF0036\],.bg-\[\#07C160\],.bg-\[\#12B7F5\],.bg-\[\#FFD100\],.bg-\[\#FFC300\],.bg-\[\#FF6000\],.bg-\[\#7C5CFF\],.bg-\[\#0099FF\],.bg-\[\#1B9FF0\],.bg-\[\#F6D554\],.bg-\[\#06AD56\],.bg-\[\#95EC69\],.bg-\[\#3EB575\],.bg-\[\#F7E36D\],.from-\[\#FF7A21\],.from-\[\#FFE14D\],.from-\[\#FFD100\],.from-\[\#FFC300\],.from-\[\#FFDC30\],.from-\[\#FFE63E\],.from-\[\#FFD900\],.via-\[\#FFA51E\],.to-\[\#FF4400\],.to-\[\#FFC300\],.to-\[\#FFD100\],.to-\[\#FF9500\],.to-\[\#FF8A00\],.to-\[\#FFC91E\]) :not([class*='bg-']) .text-black\/75,
+.shop-dark :is(.bg-\[\#FF5000\],.bg-\[\#FF0036\],.bg-\[\#07C160\],.bg-\[\#12B7F5\],.bg-\[\#FFD100\],.bg-\[\#FFC300\],.bg-\[\#FF6000\],.bg-\[\#7C5CFF\],.bg-\[\#0099FF\],.bg-\[\#1B9FF0\],.bg-\[\#F6D554\],.bg-\[\#06AD56\],.bg-\[\#95EC69\],.bg-\[\#3EB575\],.bg-\[\#F7E36D\],.from-\[\#FF7A21\],.from-\[\#FFE14D\],.from-\[\#FFD100\],.from-\[\#FFC300\],.from-\[\#FFDC30\],.from-\[\#FFE63E\],.from-\[\#FFD900\],.via-\[\#FFA51E\],.to-\[\#FF4400\],.to-\[\#FFC300\],.to-\[\#FFD100\],.to-\[\#FF9500\],.to-\[\#FF8A00\],.to-\[\#FFC91E\]).text-black\/75 { color: rgba(0,0,0,0.75); }
+.shop-dark :is(.bg-\[\#FF5000\],.bg-\[\#FF0036\],.bg-\[\#07C160\],.bg-\[\#12B7F5\],.bg-\[\#FFD100\],.bg-\[\#FFC300\],.bg-\[\#FF6000\],.bg-\[\#7C5CFF\],.bg-\[\#0099FF\],.bg-\[\#1B9FF0\],.bg-\[\#F6D554\],.bg-\[\#06AD56\],.bg-\[\#95EC69\],.bg-\[\#3EB575\],.bg-\[\#F7E36D\],.from-\[\#FF7A21\],.from-\[\#FFE14D\],.from-\[\#FFD100\],.from-\[\#FFC300\],.from-\[\#FFDC30\],.from-\[\#FFE63E\],.from-\[\#FFD900\],.via-\[\#FFA51E\],.to-\[\#FF4400\],.to-\[\#FFC300\],.to-\[\#FFD100\],.to-\[\#FF9500\],.to-\[\#FF8A00\],.to-\[\#FFC91E\]) :not([class*='bg-']) .text-black\/80,
+.shop-dark :is(.bg-\[\#FF5000\],.bg-\[\#FF0036\],.bg-\[\#07C160\],.bg-\[\#12B7F5\],.bg-\[\#FFD100\],.bg-\[\#FFC300\],.bg-\[\#FF6000\],.bg-\[\#7C5CFF\],.bg-\[\#0099FF\],.bg-\[\#1B9FF0\],.bg-\[\#F6D554\],.bg-\[\#06AD56\],.bg-\[\#95EC69\],.bg-\[\#3EB575\],.bg-\[\#F7E36D\],.from-\[\#FF7A21\],.from-\[\#FFE14D\],.from-\[\#FFD100\],.from-\[\#FFC300\],.from-\[\#FFDC30\],.from-\[\#FFE63E\],.from-\[\#FFD900\],.via-\[\#FFA51E\],.to-\[\#FF4400\],.to-\[\#FFC300\],.to-\[\#FFD100\],.to-\[\#FF9500\],.to-\[\#FF8A00\],.to-\[\#FFC91E\]).text-black\/80 { color: rgba(0,0,0,0.80); }
+.shop-dark :is(.bg-\[\#FF5000\],.bg-\[\#FF0036\],.bg-\[\#07C160\],.bg-\[\#12B7F5\],.bg-\[\#FFD100\],.bg-\[\#FFC300\],.bg-\[\#FF6000\],.bg-\[\#7C5CFF\],.bg-\[\#0099FF\],.bg-\[\#1B9FF0\],.bg-\[\#F6D554\],.bg-\[\#06AD56\],.bg-\[\#95EC69\],.bg-\[\#3EB575\],.bg-\[\#F7E36D\],.from-\[\#FF7A21\],.from-\[\#FFE14D\],.from-\[\#FFD100\],.from-\[\#FFC300\],.from-\[\#FFDC30\],.from-\[\#FFE63E\],.from-\[\#FFD900\],.via-\[\#FFA51E\],.to-\[\#FF4400\],.to-\[\#FFC300\],.to-\[\#FFD100\],.to-\[\#FF9500\],.to-\[\#FF8A00\],.to-\[\#FFC91E\]) :not([class*='bg-']) .text-black\/85,
+.shop-dark :is(.bg-\[\#FF5000\],.bg-\[\#FF0036\],.bg-\[\#07C160\],.bg-\[\#12B7F5\],.bg-\[\#FFD100\],.bg-\[\#FFC300\],.bg-\[\#FF6000\],.bg-\[\#7C5CFF\],.bg-\[\#0099FF\],.bg-\[\#1B9FF0\],.bg-\[\#F6D554\],.bg-\[\#06AD56\],.bg-\[\#95EC69\],.bg-\[\#3EB575\],.bg-\[\#F7E36D\],.from-\[\#FF7A21\],.from-\[\#FFE14D\],.from-\[\#FFD100\],.from-\[\#FFC300\],.from-\[\#FFDC30\],.from-\[\#FFE63E\],.from-\[\#FFD900\],.via-\[\#FFA51E\],.to-\[\#FF4400\],.to-\[\#FFC300\],.to-\[\#FFD100\],.to-\[\#FF9500\],.to-\[\#FF8A00\],.to-\[\#FFC91E\]).text-black\/85 { color: rgba(0,0,0,0.85); }
+.shop-dark :is(.bg-\[\#FF5000\],.bg-\[\#FF0036\],.bg-\[\#07C160\],.bg-\[\#12B7F5\],.bg-\[\#FFD100\],.bg-\[\#FFC300\],.bg-\[\#FF6000\],.bg-\[\#7C5CFF\],.bg-\[\#0099FF\],.bg-\[\#1B9FF0\],.bg-\[\#F6D554\],.bg-\[\#06AD56\],.bg-\[\#95EC69\],.bg-\[\#3EB575\],.bg-\[\#F7E36D\],.from-\[\#FF7A21\],.from-\[\#FFE14D\],.from-\[\#FFD100\],.from-\[\#FFC300\],.from-\[\#FFDC30\],.from-\[\#FFE63E\],.from-\[\#FFD900\],.via-\[\#FFA51E\],.to-\[\#FF4400\],.to-\[\#FFC300\],.to-\[\#FFD100\],.to-\[\#FF9500\],.to-\[\#FF8A00\],.to-\[\#FFC91E\]) :not([class*='bg-']) .text-black\/90,
+.shop-dark :is(.bg-\[\#FF5000\],.bg-\[\#FF0036\],.bg-\[\#07C160\],.bg-\[\#12B7F5\],.bg-\[\#FFD100\],.bg-\[\#FFC300\],.bg-\[\#FF6000\],.bg-\[\#7C5CFF\],.bg-\[\#0099FF\],.bg-\[\#1B9FF0\],.bg-\[\#F6D554\],.bg-\[\#06AD56\],.bg-\[\#95EC69\],.bg-\[\#3EB575\],.bg-\[\#F7E36D\],.from-\[\#FF7A21\],.from-\[\#FFE14D\],.from-\[\#FFD100\],.from-\[\#FFC300\],.from-\[\#FFDC30\],.from-\[\#FFE63E\],.from-\[\#FFD900\],.via-\[\#FFA51E\],.to-\[\#FF4400\],.to-\[\#FFC300\],.to-\[\#FFD100\],.to-\[\#FF9500\],.to-\[\#FF8A00\],.to-\[\#FFC91E\]).text-black\/90 { color: rgba(0,0,0,0.90); }
+.shop-dark :is(.bg-\[\#FF5000\],.bg-\[\#FF0036\],.bg-\[\#07C160\],.bg-\[\#12B7F5\],.bg-\[\#FFD100\],.bg-\[\#FFC300\],.bg-\[\#FF6000\],.bg-\[\#7C5CFF\],.bg-\[\#0099FF\],.bg-\[\#1B9FF0\],.bg-\[\#F6D554\],.bg-\[\#06AD56\],.bg-\[\#95EC69\],.bg-\[\#3EB575\],.bg-\[\#F7E36D\],.from-\[\#FF7A21\],.from-\[\#FFE14D\],.from-\[\#FFD100\],.from-\[\#FFC300\],.from-\[\#FFDC30\],.from-\[\#FFE63E\],.from-\[\#FFD900\],.via-\[\#FFA51E\],.to-\[\#FF4400\],.to-\[\#FFC300\],.to-\[\#FFD100\],.to-\[\#FF9500\],.to-\[\#FF8A00\],.to-\[\#FFC91E\]) :not([class*='bg-']) .text-black\/92,
+.shop-dark :is(.bg-\[\#FF5000\],.bg-\[\#FF0036\],.bg-\[\#07C160\],.bg-\[\#12B7F5\],.bg-\[\#FFD100\],.bg-\[\#FFC300\],.bg-\[\#FF6000\],.bg-\[\#7C5CFF\],.bg-\[\#0099FF\],.bg-\[\#1B9FF0\],.bg-\[\#F6D554\],.bg-\[\#06AD56\],.bg-\[\#95EC69\],.bg-\[\#3EB575\],.bg-\[\#F7E36D\],.from-\[\#FF7A21\],.from-\[\#FFE14D\],.from-\[\#FFD100\],.from-\[\#FFC300\],.from-\[\#FFDC30\],.from-\[\#FFE63E\],.from-\[\#FFD900\],.via-\[\#FFA51E\],.to-\[\#FF4400\],.to-\[\#FFC300\],.to-\[\#FFD100\],.to-\[\#FF9500\],.to-\[\#FF8A00\],.to-\[\#FFC91E\]).text-black\/92 { color: rgba(0,0,0,0.92); }
+.shop-dark :is(.bg-\[\#FF5000\],.bg-\[\#FF0036\],.bg-\[\#07C160\],.bg-\[\#12B7F5\],.bg-\[\#FFD100\],.bg-\[\#FFC300\],.bg-\[\#FF6000\],.bg-\[\#7C5CFF\],.bg-\[\#0099FF\],.bg-\[\#1B9FF0\],.bg-\[\#F6D554\],.bg-\[\#06AD56\],.bg-\[\#95EC69\],.bg-\[\#3EB575\],.bg-\[\#F7E36D\],.from-\[\#FF7A21\],.from-\[\#FFE14D\],.from-\[\#FFD100\],.from-\[\#FFC300\],.from-\[\#FFDC30\],.from-\[\#FFE63E\],.from-\[\#FFD900\],.via-\[\#FFA51E\],.to-\[\#FF4400\],.to-\[\#FFC300\],.to-\[\#FFD100\],.to-\[\#FF9500\],.to-\[\#FF8A00\],.to-\[\#FFC91E\]) :not([class*='bg-']) .text-black\/95,
+.shop-dark :is(.bg-\[\#FF5000\],.bg-\[\#FF0036\],.bg-\[\#07C160\],.bg-\[\#12B7F5\],.bg-\[\#FFD100\],.bg-\[\#FFC300\],.bg-\[\#FF6000\],.bg-\[\#7C5CFF\],.bg-\[\#0099FF\],.bg-\[\#1B9FF0\],.bg-\[\#F6D554\],.bg-\[\#06AD56\],.bg-\[\#95EC69\],.bg-\[\#3EB575\],.bg-\[\#F7E36D\],.from-\[\#FF7A21\],.from-\[\#FFE14D\],.from-\[\#FFD100\],.from-\[\#FFC300\],.from-\[\#FFDC30\],.from-\[\#FFE63E\],.from-\[\#FFD900\],.via-\[\#FFA51E\],.to-\[\#FF4400\],.to-\[\#FFC300\],.to-\[\#FFD100\],.to-\[\#FF9500\],.to-\[\#FF8A00\],.to-\[\#FFC91E\]).text-black\/95 { color: rgba(0,0,0,0.95); }
+.shop-dark :is(.bg-\[\#FF5000\],.bg-\[\#FF0036\],.bg-\[\#07C160\],.bg-\[\#12B7F5\],.bg-\[\#FFD100\],.bg-\[\#FFC300\],.bg-\[\#FF6000\],.bg-\[\#7C5CFF\],.bg-\[\#0099FF\],.bg-\[\#1B9FF0\],.bg-\[\#F6D554\],.bg-\[\#06AD56\],.bg-\[\#95EC69\],.bg-\[\#3EB575\],.bg-\[\#F7E36D\],.from-\[\#FF7A21\],.from-\[\#FFE14D\],.from-\[\#FFD100\],.from-\[\#FFC300\],.from-\[\#FFDC30\],.from-\[\#FFE63E\],.from-\[\#FFD900\],.via-\[\#FFA51E\],.to-\[\#FF4400\],.to-\[\#FFC300\],.to-\[\#FFD100\],.to-\[\#FF9500\],.to-\[\#FF8A00\],.to-\[\#FFC91E\]) :not([class*='bg-']) .text-black,
+.shop-dark :is(.bg-\[\#FF5000\],.bg-\[\#FF0036\],.bg-\[\#07C160\],.bg-\[\#12B7F5\],.bg-\[\#FFD100\],.bg-\[\#FFC300\],.bg-\[\#FF6000\],.bg-\[\#7C5CFF\],.bg-\[\#0099FF\],.bg-\[\#1B9FF0\],.bg-\[\#F6D554\],.bg-\[\#06AD56\],.bg-\[\#95EC69\],.bg-\[\#3EB575\],.bg-\[\#F7E36D\],.from-\[\#FF7A21\],.from-\[\#FFE14D\],.from-\[\#FFD100\],.from-\[\#FFC300\],.from-\[\#FFDC30\],.from-\[\#FFE63E\],.from-\[\#FFD900\],.via-\[\#FFA51E\],.to-\[\#FF4400\],.to-\[\#FFC300\],.to-\[\#FFD100\],.to-\[\#FF9500\],.to-\[\#FF8A00\],.to-\[\#FFC91E\]).text-black { color: #000; }
+.shop-dark :is(.bg-\[\#FF5000\],.bg-\[\#FF0036\],.bg-\[\#07C160\],.bg-\[\#12B7F5\],.bg-\[\#FFD100\],.bg-\[\#FFC300\],.bg-\[\#FF6000\],.bg-\[\#7C5CFF\],.bg-\[\#0099FF\],.bg-\[\#1B9FF0\],.bg-\[\#F6D554\],.bg-\[\#06AD56\],.bg-\[\#95EC69\],.bg-\[\#3EB575\],.bg-\[\#F7E36D\],.from-\[\#FF7A21\],.from-\[\#FFE14D\],.from-\[\#FFD100\],.from-\[\#FFC300\],.from-\[\#FFDC30\],.from-\[\#FFE63E\],.from-\[\#FFD900\],.via-\[\#FFA51E\],.to-\[\#FF4400\],.to-\[\#FFC300\],.to-\[\#FFD100\],.to-\[\#FF9500\],.to-\[\#FF8A00\],.to-\[\#FFC91E\]) :not([class*='bg-']) .text-\[\#a04046\],
+.shop-dark :is(.bg-\[\#FF5000\],.bg-\[\#FF0036\],.bg-\[\#07C160\],.bg-\[\#12B7F5\],.bg-\[\#FFD100\],.bg-\[\#FFC300\],.bg-\[\#FF6000\],.bg-\[\#7C5CFF\],.bg-\[\#0099FF\],.bg-\[\#1B9FF0\],.bg-\[\#F6D554\],.bg-\[\#06AD56\],.bg-\[\#95EC69\],.bg-\[\#3EB575\],.bg-\[\#F7E36D\],.from-\[\#FF7A21\],.from-\[\#FFE14D\],.from-\[\#FFD100\],.from-\[\#FFC300\],.from-\[\#FFDC30\],.from-\[\#FFE63E\],.from-\[\#FFD900\],.via-\[\#FFA51E\],.to-\[\#FF4400\],.to-\[\#FFC300\],.to-\[\#FFD100\],.to-\[\#FF9500\],.to-\[\#FF8A00\],.to-\[\#FFC91E\]).text-\[\#a04046\] { color: #a04046; }
+.shop-dark :is(.bg-\[\#FF5000\],.bg-\[\#FF0036\],.bg-\[\#07C160\],.bg-\[\#12B7F5\],.bg-\[\#FFD100\],.bg-\[\#FFC300\],.bg-\[\#FF6000\],.bg-\[\#7C5CFF\],.bg-\[\#0099FF\],.bg-\[\#1B9FF0\],.bg-\[\#F6D554\],.bg-\[\#06AD56\],.bg-\[\#95EC69\],.bg-\[\#3EB575\],.bg-\[\#F7E36D\],.from-\[\#FF7A21\],.from-\[\#FFE14D\],.from-\[\#FFD100\],.from-\[\#FFC300\],.from-\[\#FFDC30\],.from-\[\#FFE63E\],.from-\[\#FFD900\],.via-\[\#FFA51E\],.to-\[\#FF4400\],.to-\[\#FFC300\],.to-\[\#FFD100\],.to-\[\#FF9500\],.to-\[\#FF8A00\],.to-\[\#FFC91E\]) :not([class*='bg-']) .text-\[\#93392e\],
+.shop-dark :is(.bg-\[\#FF5000\],.bg-\[\#FF0036\],.bg-\[\#07C160\],.bg-\[\#12B7F5\],.bg-\[\#FFD100\],.bg-\[\#FFC300\],.bg-\[\#FF6000\],.bg-\[\#7C5CFF\],.bg-\[\#0099FF\],.bg-\[\#1B9FF0\],.bg-\[\#F6D554\],.bg-\[\#06AD56\],.bg-\[\#95EC69\],.bg-\[\#3EB575\],.bg-\[\#F7E36D\],.from-\[\#FF7A21\],.from-\[\#FFE14D\],.from-\[\#FFD100\],.from-\[\#FFC300\],.from-\[\#FFDC30\],.from-\[\#FFE63E\],.from-\[\#FFD900\],.via-\[\#FFA51E\],.to-\[\#FF4400\],.to-\[\#FFC300\],.to-\[\#FFD100\],.to-\[\#FF9500\],.to-\[\#FF8A00\],.to-\[\#FFC91E\]).text-\[\#93392e\] { color: #93392e; }
+.shop-dark :is(.bg-\[\#FF5000\],.bg-\[\#FF0036\],.bg-\[\#07C160\],.bg-\[\#12B7F5\],.bg-\[\#FFD100\],.bg-\[\#FFC300\],.bg-\[\#FF6000\],.bg-\[\#7C5CFF\],.bg-\[\#0099FF\],.bg-\[\#1B9FF0\],.bg-\[\#F6D554\],.bg-\[\#06AD56\],.bg-\[\#95EC69\],.bg-\[\#3EB575\],.bg-\[\#F7E36D\],.from-\[\#FF7A21\],.from-\[\#FFE14D\],.from-\[\#FFD100\],.from-\[\#FFC300\],.from-\[\#FFDC30\],.from-\[\#FFE63E\],.from-\[\#FFD900\],.via-\[\#FFA51E\],.to-\[\#FF4400\],.to-\[\#FFC300\],.to-\[\#FFD100\],.to-\[\#FF9500\],.to-\[\#FF8A00\],.to-\[\#FFC91E\]) :not([class*='bg-']) .text-\[\#8a4d16\],
+.shop-dark :is(.bg-\[\#FF5000\],.bg-\[\#FF0036\],.bg-\[\#07C160\],.bg-\[\#12B7F5\],.bg-\[\#FFD100\],.bg-\[\#FFC300\],.bg-\[\#FF6000\],.bg-\[\#7C5CFF\],.bg-\[\#0099FF\],.bg-\[\#1B9FF0\],.bg-\[\#F6D554\],.bg-\[\#06AD56\],.bg-\[\#95EC69\],.bg-\[\#3EB575\],.bg-\[\#F7E36D\],.from-\[\#FF7A21\],.from-\[\#FFE14D\],.from-\[\#FFD100\],.from-\[\#FFC300\],.from-\[\#FFDC30\],.from-\[\#FFE63E\],.from-\[\#FFD900\],.via-\[\#FFA51E\],.to-\[\#FF4400\],.to-\[\#FFC300\],.to-\[\#FFD100\],.to-\[\#FF9500\],.to-\[\#FF8A00\],.to-\[\#FFC91E\]).text-\[\#8a4d16\] { color: #8a4d16; }
+.shop-dark :is(.bg-\[\#FF5000\],.bg-\[\#FF0036\],.bg-\[\#07C160\],.bg-\[\#12B7F5\],.bg-\[\#FFD100\],.bg-\[\#FFC300\],.bg-\[\#FF6000\],.bg-\[\#7C5CFF\],.bg-\[\#0099FF\],.bg-\[\#1B9FF0\],.bg-\[\#F6D554\],.bg-\[\#06AD56\],.bg-\[\#95EC69\],.bg-\[\#3EB575\],.bg-\[\#F7E36D\],.from-\[\#FF7A21\],.from-\[\#FFE14D\],.from-\[\#FFD100\],.from-\[\#FFC300\],.from-\[\#FFDC30\],.from-\[\#FFE63E\],.from-\[\#FFD900\],.via-\[\#FFA51E\],.to-\[\#FF4400\],.to-\[\#FFC300\],.to-\[\#FFD100\],.to-\[\#FF9500\],.to-\[\#FF8A00\],.to-\[\#FFC91E\]) :not([class*='bg-']) .text-\[\#8a2a20\],
+.shop-dark :is(.bg-\[\#FF5000\],.bg-\[\#FF0036\],.bg-\[\#07C160\],.bg-\[\#12B7F5\],.bg-\[\#FFD100\],.bg-\[\#FFC300\],.bg-\[\#FF6000\],.bg-\[\#7C5CFF\],.bg-\[\#0099FF\],.bg-\[\#1B9FF0\],.bg-\[\#F6D554\],.bg-\[\#06AD56\],.bg-\[\#95EC69\],.bg-\[\#3EB575\],.bg-\[\#F7E36D\],.from-\[\#FF7A21\],.from-\[\#FFE14D\],.from-\[\#FFD100\],.from-\[\#FFC300\],.from-\[\#FFDC30\],.from-\[\#FFE63E\],.from-\[\#FFD900\],.via-\[\#FFA51E\],.to-\[\#FF4400\],.to-\[\#FFC300\],.to-\[\#FFD100\],.to-\[\#FF9500\],.to-\[\#FF8A00\],.to-\[\#FFC91E\]).text-\[\#8a2a20\] { color: #8a2a20; }
+.shop-dark :is(.bg-\[\#FF5000\],.bg-\[\#FF0036\],.bg-\[\#07C160\],.bg-\[\#12B7F5\],.bg-\[\#FFD100\],.bg-\[\#FFC300\],.bg-\[\#FF6000\],.bg-\[\#7C5CFF\],.bg-\[\#0099FF\],.bg-\[\#1B9FF0\],.bg-\[\#F6D554\],.bg-\[\#06AD56\],.bg-\[\#95EC69\],.bg-\[\#3EB575\],.bg-\[\#F7E36D\],.from-\[\#FF7A21\],.from-\[\#FFE14D\],.from-\[\#FFD100\],.from-\[\#FFC300\],.from-\[\#FFDC30\],.from-\[\#FFE63E\],.from-\[\#FFD900\],.via-\[\#FFA51E\],.to-\[\#FF4400\],.to-\[\#FFC300\],.to-\[\#FFD100\],.to-\[\#FF9500\],.to-\[\#FF8A00\],.to-\[\#FFC91E\]) :not([class*='bg-']) .text-\[\#A5001F\],
+.shop-dark :is(.bg-\[\#FF5000\],.bg-\[\#FF0036\],.bg-\[\#07C160\],.bg-\[\#12B7F5\],.bg-\[\#FFD100\],.bg-\[\#FFC300\],.bg-\[\#FF6000\],.bg-\[\#7C5CFF\],.bg-\[\#0099FF\],.bg-\[\#1B9FF0\],.bg-\[\#F6D554\],.bg-\[\#06AD56\],.bg-\[\#95EC69\],.bg-\[\#3EB575\],.bg-\[\#F7E36D\],.from-\[\#FF7A21\],.from-\[\#FFE14D\],.from-\[\#FFD100\],.from-\[\#FFC300\],.from-\[\#FFDC30\],.from-\[\#FFE63E\],.from-\[\#FFD900\],.via-\[\#FFA51E\],.to-\[\#FF4400\],.to-\[\#FFC300\],.to-\[\#FFD100\],.to-\[\#FF9500\],.to-\[\#FF8A00\],.to-\[\#FFC91E\]).text-\[\#A5001F\] { color: #A5001F; }
+.shop-dark :is(.bg-\[\#FF5000\],.bg-\[\#FF0036\],.bg-\[\#07C160\],.bg-\[\#12B7F5\],.bg-\[\#FFD100\],.bg-\[\#FFC300\],.bg-\[\#FF6000\],.bg-\[\#7C5CFF\],.bg-\[\#0099FF\],.bg-\[\#1B9FF0\],.bg-\[\#F6D554\],.bg-\[\#06AD56\],.bg-\[\#95EC69\],.bg-\[\#3EB575\],.bg-\[\#F7E36D\],.from-\[\#FF7A21\],.from-\[\#FFE14D\],.from-\[\#FFD100\],.from-\[\#FFC300\],.from-\[\#FFDC30\],.from-\[\#FFE63E\],.from-\[\#FFD900\],.via-\[\#FFA51E\],.to-\[\#FF4400\],.to-\[\#FFC300\],.to-\[\#FFD100\],.to-\[\#FF9500\],.to-\[\#FF8A00\],.to-\[\#FFC91E\]) :not([class*='bg-']) .text-\[\#5A3A10\],
+.shop-dark :is(.bg-\[\#FF5000\],.bg-\[\#FF0036\],.bg-\[\#07C160\],.bg-\[\#12B7F5\],.bg-\[\#FFD100\],.bg-\[\#FFC300\],.bg-\[\#FF6000\],.bg-\[\#7C5CFF\],.bg-\[\#0099FF\],.bg-\[\#1B9FF0\],.bg-\[\#F6D554\],.bg-\[\#06AD56\],.bg-\[\#95EC69\],.bg-\[\#3EB575\],.bg-\[\#F7E36D\],.from-\[\#FF7A21\],.from-\[\#FFE14D\],.from-\[\#FFD100\],.from-\[\#FFC300\],.from-\[\#FFDC30\],.from-\[\#FFE63E\],.from-\[\#FFD900\],.via-\[\#FFA51E\],.to-\[\#FF4400\],.to-\[\#FFC300\],.to-\[\#FFD100\],.to-\[\#FF9500\],.to-\[\#FF8A00\],.to-\[\#FFC91E\]).text-\[\#5A3A10\] { color: #5A3A10; }
+.shop-dark :is(.bg-\[\#FF5000\],.bg-\[\#FF0036\],.bg-\[\#07C160\],.bg-\[\#12B7F5\],.bg-\[\#FFD100\],.bg-\[\#FFC300\],.bg-\[\#FF6000\],.bg-\[\#7C5CFF\],.bg-\[\#0099FF\],.bg-\[\#1B9FF0\],.bg-\[\#F6D554\],.bg-\[\#06AD56\],.bg-\[\#95EC69\],.bg-\[\#3EB575\],.bg-\[\#F7E36D\],.from-\[\#FF7A21\],.from-\[\#FFE14D\],.from-\[\#FFD100\],.from-\[\#FFC300\],.from-\[\#FFDC30\],.from-\[\#FFE63E\],.from-\[\#FFD900\],.via-\[\#FFA51E\],.to-\[\#FF4400\],.to-\[\#FFC300\],.to-\[\#FFD100\],.to-\[\#FF9500\],.to-\[\#FF8A00\],.to-\[\#FFC91E\]) :not([class*='bg-']) .text-\[\#5C3A18\],
+.shop-dark :is(.bg-\[\#FF5000\],.bg-\[\#FF0036\],.bg-\[\#07C160\],.bg-\[\#12B7F5\],.bg-\[\#FFD100\],.bg-\[\#FFC300\],.bg-\[\#FF6000\],.bg-\[\#7C5CFF\],.bg-\[\#0099FF\],.bg-\[\#1B9FF0\],.bg-\[\#F6D554\],.bg-\[\#06AD56\],.bg-\[\#95EC69\],.bg-\[\#3EB575\],.bg-\[\#F7E36D\],.from-\[\#FF7A21\],.from-\[\#FFE14D\],.from-\[\#FFD100\],.from-\[\#FFC300\],.from-\[\#FFDC30\],.from-\[\#FFE63E\],.from-\[\#FFD900\],.via-\[\#FFA51E\],.to-\[\#FF4400\],.to-\[\#FFC300\],.to-\[\#FFD100\],.to-\[\#FF9500\],.to-\[\#FF8A00\],.to-\[\#FFC91E\]).text-\[\#5C3A18\] { color: #5C3A18; }
+.shop-dark :is(.bg-\[\#FF5000\],.bg-\[\#FF0036\],.bg-\[\#07C160\],.bg-\[\#12B7F5\],.bg-\[\#FFD100\],.bg-\[\#FFC300\],.bg-\[\#FF6000\],.bg-\[\#7C5CFF\],.bg-\[\#0099FF\],.bg-\[\#1B9FF0\],.bg-\[\#F6D554\],.bg-\[\#06AD56\],.bg-\[\#95EC69\],.bg-\[\#3EB575\],.bg-\[\#F7E36D\],.from-\[\#FF7A21\],.from-\[\#FFE14D\],.from-\[\#FFD100\],.from-\[\#FFC300\],.from-\[\#FFDC30\],.from-\[\#FFE63E\],.from-\[\#FFD900\],.via-\[\#FFA51E\],.to-\[\#FF4400\],.to-\[\#FFC300\],.to-\[\#FFD100\],.to-\[\#FF9500\],.to-\[\#FF8A00\],.to-\[\#FFC91E\]) :not([class*='bg-']) .text-\[\#8A6116\],
+.shop-dark :is(.bg-\[\#FF5000\],.bg-\[\#FF0036\],.bg-\[\#07C160\],.bg-\[\#12B7F5\],.bg-\[\#FFD100\],.bg-\[\#FFC300\],.bg-\[\#FF6000\],.bg-\[\#7C5CFF\],.bg-\[\#0099FF\],.bg-\[\#1B9FF0\],.bg-\[\#F6D554\],.bg-\[\#06AD56\],.bg-\[\#95EC69\],.bg-\[\#3EB575\],.bg-\[\#F7E36D\],.from-\[\#FF7A21\],.from-\[\#FFE14D\],.from-\[\#FFD100\],.from-\[\#FFC300\],.from-\[\#FFDC30\],.from-\[\#FFE63E\],.from-\[\#FFD900\],.via-\[\#FFA51E\],.to-\[\#FF4400\],.to-\[\#FFC300\],.to-\[\#FFD100\],.to-\[\#FF9500\],.to-\[\#FF8A00\],.to-\[\#FFC91E\]).text-\[\#8A6116\] { color: #8A6116; }
+.shop-dark :is(.bg-\[\#FF5000\],.bg-\[\#FF0036\],.bg-\[\#07C160\],.bg-\[\#12B7F5\],.bg-\[\#FFD100\],.bg-\[\#FFC300\],.bg-\[\#FF6000\],.bg-\[\#7C5CFF\],.bg-\[\#0099FF\],.bg-\[\#1B9FF0\],.bg-\[\#F6D554\],.bg-\[\#06AD56\],.bg-\[\#95EC69\],.bg-\[\#3EB575\],.bg-\[\#F7E36D\],.from-\[\#FF7A21\],.from-\[\#FFE14D\],.from-\[\#FFD100\],.from-\[\#FFC300\],.from-\[\#FFDC30\],.from-\[\#FFE63E\],.from-\[\#FFD900\],.via-\[\#FFA51E\],.to-\[\#FF4400\],.to-\[\#FFC300\],.to-\[\#FFD100\],.to-\[\#FF9500\],.to-\[\#FF8A00\],.to-\[\#FFC91E\]) :not([class*='bg-']) .text-\[\#8A6A1F\],
+.shop-dark :is(.bg-\[\#FF5000\],.bg-\[\#FF0036\],.bg-\[\#07C160\],.bg-\[\#12B7F5\],.bg-\[\#FFD100\],.bg-\[\#FFC300\],.bg-\[\#FF6000\],.bg-\[\#7C5CFF\],.bg-\[\#0099FF\],.bg-\[\#1B9FF0\],.bg-\[\#F6D554\],.bg-\[\#06AD56\],.bg-\[\#95EC69\],.bg-\[\#3EB575\],.bg-\[\#F7E36D\],.from-\[\#FF7A21\],.from-\[\#FFE14D\],.from-\[\#FFD100\],.from-\[\#FFC300\],.from-\[\#FFDC30\],.from-\[\#FFE63E\],.from-\[\#FFD900\],.via-\[\#FFA51E\],.to-\[\#FF4400\],.to-\[\#FFC300\],.to-\[\#FFD100\],.to-\[\#FF9500\],.to-\[\#FF8A00\],.to-\[\#FFC91E\]).text-\[\#8A6A1F\] { color: #8A6A1F; }
+.shop-dark :is(.bg-\[\#FF5000\],.bg-\[\#FF0036\],.bg-\[\#07C160\],.bg-\[\#12B7F5\],.bg-\[\#FFD100\],.bg-\[\#FFC300\],.bg-\[\#FF6000\],.bg-\[\#7C5CFF\],.bg-\[\#0099FF\],.bg-\[\#1B9FF0\],.bg-\[\#F6D554\],.bg-\[\#06AD56\],.bg-\[\#95EC69\],.bg-\[\#3EB575\],.bg-\[\#F7E36D\],.from-\[\#FF7A21\],.from-\[\#FFE14D\],.from-\[\#FFD100\],.from-\[\#FFC300\],.from-\[\#FFDC30\],.from-\[\#FFE63E\],.from-\[\#FFD900\],.via-\[\#FFA51E\],.to-\[\#FF4400\],.to-\[\#FFC300\],.to-\[\#FFD100\],.to-\[\#FF9500\],.to-\[\#FF8A00\],.to-\[\#FFC91E\]) :not([class*='bg-']) .text-\[\#0A6B47\],
+.shop-dark :is(.bg-\[\#FF5000\],.bg-\[\#FF0036\],.bg-\[\#07C160\],.bg-\[\#12B7F5\],.bg-\[\#FFD100\],.bg-\[\#FFC300\],.bg-\[\#FF6000\],.bg-\[\#7C5CFF\],.bg-\[\#0099FF\],.bg-\[\#1B9FF0\],.bg-\[\#F6D554\],.bg-\[\#06AD56\],.bg-\[\#95EC69\],.bg-\[\#3EB575\],.bg-\[\#F7E36D\],.from-\[\#FF7A21\],.from-\[\#FFE14D\],.from-\[\#FFD100\],.from-\[\#FFC300\],.from-\[\#FFDC30\],.from-\[\#FFE63E\],.from-\[\#FFD900\],.via-\[\#FFA51E\],.to-\[\#FF4400\],.to-\[\#FFC300\],.to-\[\#FFD100\],.to-\[\#FF9500\],.to-\[\#FF8A00\],.to-\[\#FFC91E\]).text-\[\#0A6B47\] { color: #0A6B47; }
+.shop-dark :is(.bg-\[\#FF5000\],.bg-\[\#FF0036\],.bg-\[\#07C160\],.bg-\[\#12B7F5\],.bg-\[\#FFD100\],.bg-\[\#FFC300\],.bg-\[\#FF6000\],.bg-\[\#7C5CFF\],.bg-\[\#0099FF\],.bg-\[\#1B9FF0\],.bg-\[\#F6D554\],.bg-\[\#06AD56\],.bg-\[\#95EC69\],.bg-\[\#3EB575\],.bg-\[\#F7E36D\],.from-\[\#FF7A21\],.from-\[\#FFE14D\],.from-\[\#FFD100\],.from-\[\#FFC300\],.from-\[\#FFDC30\],.from-\[\#FFE63E\],.from-\[\#FFD900\],.via-\[\#FFA51E\],.to-\[\#FF4400\],.to-\[\#FFC300\],.to-\[\#FFD100\],.to-\[\#FF9500\],.to-\[\#FF8A00\],.to-\[\#FFC91E\]) :not([class*='bg-']) .text-\[\#5A4200\],
+.shop-dark :is(.bg-\[\#FF5000\],.bg-\[\#FF0036\],.bg-\[\#07C160\],.bg-\[\#12B7F5\],.bg-\[\#FFD100\],.bg-\[\#FFC300\],.bg-\[\#FF6000\],.bg-\[\#7C5CFF\],.bg-\[\#0099FF\],.bg-\[\#1B9FF0\],.bg-\[\#F6D554\],.bg-\[\#06AD56\],.bg-\[\#95EC69\],.bg-\[\#3EB575\],.bg-\[\#F7E36D\],.from-\[\#FF7A21\],.from-\[\#FFE14D\],.from-\[\#FFD100\],.from-\[\#FFC300\],.from-\[\#FFDC30\],.from-\[\#FFE63E\],.from-\[\#FFD900\],.via-\[\#FFA51E\],.to-\[\#FF4400\],.to-\[\#FFC300\],.to-\[\#FFD100\],.to-\[\#FF9500\],.to-\[\#FF8A00\],.to-\[\#FFC91E\]).text-\[\#5A4200\] { color: #5A4200; }
+.shop-dark :is(.bg-\[\#FF5000\],.bg-\[\#FF0036\],.bg-\[\#07C160\],.bg-\[\#12B7F5\],.bg-\[\#FFD100\],.bg-\[\#FFC300\],.bg-\[\#FF6000\],.bg-\[\#7C5CFF\],.bg-\[\#0099FF\],.bg-\[\#1B9FF0\],.bg-\[\#F6D554\],.bg-\[\#06AD56\],.bg-\[\#95EC69\],.bg-\[\#3EB575\],.bg-\[\#F7E36D\],.from-\[\#FF7A21\],.from-\[\#FFE14D\],.from-\[\#FFD100\],.from-\[\#FFC300\],.from-\[\#FFDC30\],.from-\[\#FFE63E\],.from-\[\#FFD900\],.via-\[\#FFA51E\],.to-\[\#FF4400\],.to-\[\#FFC300\],.to-\[\#FFD100\],.to-\[\#FF9500\],.to-\[\#FF8A00\],.to-\[\#FFC91E\]) :not([class*='bg-']) .text-\[\#8A4B00\],
+.shop-dark :is(.bg-\[\#FF5000\],.bg-\[\#FF0036\],.bg-\[\#07C160\],.bg-\[\#12B7F5\],.bg-\[\#FFD100\],.bg-\[\#FFC300\],.bg-\[\#FF6000\],.bg-\[\#7C5CFF\],.bg-\[\#0099FF\],.bg-\[\#1B9FF0\],.bg-\[\#F6D554\],.bg-\[\#06AD56\],.bg-\[\#95EC69\],.bg-\[\#3EB575\],.bg-\[\#F7E36D\],.from-\[\#FF7A21\],.from-\[\#FFE14D\],.from-\[\#FFD100\],.from-\[\#FFC300\],.from-\[\#FFDC30\],.from-\[\#FFE63E\],.from-\[\#FFD900\],.via-\[\#FFA51E\],.to-\[\#FF4400\],.to-\[\#FFC300\],.to-\[\#FFD100\],.to-\[\#FF9500\],.to-\[\#FF8A00\],.to-\[\#FFC91E\]).text-\[\#8A4B00\] { color: #8A4B00; }
+.shop-dark :is(.bg-\[\#FF5000\],.bg-\[\#FF0036\],.bg-\[\#07C160\],.bg-\[\#12B7F5\],.bg-\[\#FFD100\],.bg-\[\#FFC300\],.bg-\[\#FF6000\],.bg-\[\#7C5CFF\],.bg-\[\#0099FF\],.bg-\[\#1B9FF0\],.bg-\[\#F6D554\],.bg-\[\#06AD56\],.bg-\[\#95EC69\],.bg-\[\#3EB575\],.bg-\[\#F7E36D\],.from-\[\#FF7A21\],.from-\[\#FFE14D\],.from-\[\#FFD100\],.from-\[\#FFC300\],.from-\[\#FFDC30\],.from-\[\#FFE63E\],.from-\[\#FFD900\],.via-\[\#FFA51E\],.to-\[\#FF4400\],.to-\[\#FFC300\],.to-\[\#FFD100\],.to-\[\#FF9500\],.to-\[\#FF8A00\],.to-\[\#FFC91E\]) :not([class*='bg-']) .text-\[\#1D7A3C\],
+.shop-dark :is(.bg-\[\#FF5000\],.bg-\[\#FF0036\],.bg-\[\#07C160\],.bg-\[\#12B7F5\],.bg-\[\#FFD100\],.bg-\[\#FFC300\],.bg-\[\#FF6000\],.bg-\[\#7C5CFF\],.bg-\[\#0099FF\],.bg-\[\#1B9FF0\],.bg-\[\#F6D554\],.bg-\[\#06AD56\],.bg-\[\#95EC69\],.bg-\[\#3EB575\],.bg-\[\#F7E36D\],.from-\[\#FF7A21\],.from-\[\#FFE14D\],.from-\[\#FFD100\],.from-\[\#FFC300\],.from-\[\#FFDC30\],.from-\[\#FFE63E\],.from-\[\#FFD900\],.via-\[\#FFA51E\],.to-\[\#FF4400\],.to-\[\#FFC300\],.to-\[\#FFD100\],.to-\[\#FF9500\],.to-\[\#FF8A00\],.to-\[\#FFC91E\]).text-\[\#1D7A3C\] { color: #1D7A3C; }
+.shop-dark :is(.bg-\[\#FF5000\],.bg-\[\#FF0036\],.bg-\[\#07C160\],.bg-\[\#12B7F5\],.bg-\[\#FFD100\],.bg-\[\#FFC300\],.bg-\[\#FF6000\],.bg-\[\#7C5CFF\],.bg-\[\#0099FF\],.bg-\[\#1B9FF0\],.bg-\[\#F6D554\],.bg-\[\#06AD56\],.bg-\[\#95EC69\],.bg-\[\#3EB575\],.bg-\[\#F7E36D\],.from-\[\#FF7A21\],.from-\[\#FFE14D\],.from-\[\#FFD100\],.from-\[\#FFC300\],.from-\[\#FFDC30\],.from-\[\#FFE63E\],.from-\[\#FFD900\],.via-\[\#FFA51E\],.to-\[\#FF4400\],.to-\[\#FFC300\],.to-\[\#FFD100\],.to-\[\#FF9500\],.to-\[\#FF8A00\],.to-\[\#FFC91E\]) :not([class*='bg-']) .text-\[\#C41820\],
+.shop-dark :is(.bg-\[\#FF5000\],.bg-\[\#FF0036\],.bg-\[\#07C160\],.bg-\[\#12B7F5\],.bg-\[\#FFD100\],.bg-\[\#FFC300\],.bg-\[\#FF6000\],.bg-\[\#7C5CFF\],.bg-\[\#0099FF\],.bg-\[\#1B9FF0\],.bg-\[\#F6D554\],.bg-\[\#06AD56\],.bg-\[\#95EC69\],.bg-\[\#3EB575\],.bg-\[\#F7E36D\],.from-\[\#FF7A21\],.from-\[\#FFE14D\],.from-\[\#FFD100\],.from-\[\#FFC300\],.from-\[\#FFDC30\],.from-\[\#FFE63E\],.from-\[\#FFD900\],.via-\[\#FFA51E\],.to-\[\#FF4400\],.to-\[\#FFC300\],.to-\[\#FFD100\],.to-\[\#FF9500\],.to-\[\#FF8A00\],.to-\[\#FFC91E\]).text-\[\#C41820\] { color: #C41820; }
+.shop-dark :is(.bg-\[\#FF5000\],.bg-\[\#FF0036\],.bg-\[\#07C160\],.bg-\[\#12B7F5\],.bg-\[\#FFD100\],.bg-\[\#FFC300\],.bg-\[\#FF6000\],.bg-\[\#7C5CFF\],.bg-\[\#0099FF\],.bg-\[\#1B9FF0\],.bg-\[\#F6D554\],.bg-\[\#06AD56\],.bg-\[\#95EC69\],.bg-\[\#3EB575\],.bg-\[\#F7E36D\],.from-\[\#FF7A21\],.from-\[\#FFE14D\],.from-\[\#FFD100\],.from-\[\#FFC300\],.from-\[\#FFDC30\],.from-\[\#FFE63E\],.from-\[\#FFD900\],.via-\[\#FFA51E\],.to-\[\#FF4400\],.to-\[\#FFC300\],.to-\[\#FFD100\],.to-\[\#FF9500\],.to-\[\#FF8A00\],.to-\[\#FFC91E\]) :not([class*='bg-']) .text-\[\#42506380\],
+.shop-dark :is(.bg-\[\#FF5000\],.bg-\[\#FF0036\],.bg-\[\#07C160\],.bg-\[\#12B7F5\],.bg-\[\#FFD100\],.bg-\[\#FFC300\],.bg-\[\#FF6000\],.bg-\[\#7C5CFF\],.bg-\[\#0099FF\],.bg-\[\#1B9FF0\],.bg-\[\#F6D554\],.bg-\[\#06AD56\],.bg-\[\#95EC69\],.bg-\[\#3EB575\],.bg-\[\#F7E36D\],.from-\[\#FF7A21\],.from-\[\#FFE14D\],.from-\[\#FFD100\],.from-\[\#FFC300\],.from-\[\#FFDC30\],.from-\[\#FFE63E\],.from-\[\#FFD900\],.via-\[\#FFA51E\],.to-\[\#FF4400\],.to-\[\#FFC300\],.to-\[\#FFD100\],.to-\[\#FF9500\],.to-\[\#FF8A00\],.to-\[\#FFC91E\]).text-\[\#42506380\] { color: #42506380; }
+.shop-dark :is(.bg-\[\#FF5000\],.bg-\[\#FF0036\],.bg-\[\#07C160\],.bg-\[\#12B7F5\],.bg-\[\#FFD100\],.bg-\[\#FFC300\],.bg-\[\#FF6000\],.bg-\[\#7C5CFF\],.bg-\[\#0099FF\],.bg-\[\#1B9FF0\],.bg-\[\#F6D554\],.bg-\[\#06AD56\],.bg-\[\#95EC69\],.bg-\[\#3EB575\],.bg-\[\#F7E36D\],.from-\[\#FF7A21\],.from-\[\#FFE14D\],.from-\[\#FFD100\],.from-\[\#FFC300\],.from-\[\#FFDC30\],.from-\[\#FFE63E\],.from-\[\#FFD900\],.via-\[\#FFA51E\],.to-\[\#FF4400\],.to-\[\#FFC300\],.to-\[\#FFD100\],.to-\[\#FF9500\],.to-\[\#FF8A00\],.to-\[\#FFC91E\]) :not([class*='bg-']) .text-\[\#8a6300\],
+.shop-dark :is(.bg-\[\#FF5000\],.bg-\[\#FF0036\],.bg-\[\#07C160\],.bg-\[\#12B7F5\],.bg-\[\#FFD100\],.bg-\[\#FFC300\],.bg-\[\#FF6000\],.bg-\[\#7C5CFF\],.bg-\[\#0099FF\],.bg-\[\#1B9FF0\],.bg-\[\#F6D554\],.bg-\[\#06AD56\],.bg-\[\#95EC69\],.bg-\[\#3EB575\],.bg-\[\#F7E36D\],.from-\[\#FF7A21\],.from-\[\#FFE14D\],.from-\[\#FFD100\],.from-\[\#FFC300\],.from-\[\#FFDC30\],.from-\[\#FFE63E\],.from-\[\#FFD900\],.via-\[\#FFA51E\],.to-\[\#FF4400\],.to-\[\#FFC300\],.to-\[\#FFD100\],.to-\[\#FF9500\],.to-\[\#FF8A00\],.to-\[\#FFC91E\]).text-\[\#8a6300\] { color: #8a6300; }
+.shop-dark :is(.bg-\[\#FF5000\],.bg-\[\#FF0036\],.bg-\[\#07C160\],.bg-\[\#12B7F5\],.bg-\[\#FFD100\],.bg-\[\#FFC300\],.bg-\[\#FF6000\],.bg-\[\#7C5CFF\],.bg-\[\#0099FF\],.bg-\[\#1B9FF0\],.bg-\[\#F6D554\],.bg-\[\#06AD56\],.bg-\[\#95EC69\],.bg-\[\#3EB575\],.bg-\[\#F7E36D\],.from-\[\#FF7A21\],.from-\[\#FFE14D\],.from-\[\#FFD100\],.from-\[\#FFC300\],.from-\[\#FFDC30\],.from-\[\#FFE63E\],.from-\[\#FFD900\],.via-\[\#FFA51E\],.to-\[\#FF4400\],.to-\[\#FFC300\],.to-\[\#FFD100\],.to-\[\#FF9500\],.to-\[\#FF8A00\],.to-\[\#FFC91E\]) :not([class*='bg-']) .text-\[\#2B3A67\],
+.shop-dark :is(.bg-\[\#FF5000\],.bg-\[\#FF0036\],.bg-\[\#07C160\],.bg-\[\#12B7F5\],.bg-\[\#FFD100\],.bg-\[\#FFC300\],.bg-\[\#FF6000\],.bg-\[\#7C5CFF\],.bg-\[\#0099FF\],.bg-\[\#1B9FF0\],.bg-\[\#F6D554\],.bg-\[\#06AD56\],.bg-\[\#95EC69\],.bg-\[\#3EB575\],.bg-\[\#F7E36D\],.from-\[\#FF7A21\],.from-\[\#FFE14D\],.from-\[\#FFD100\],.from-\[\#FFC300\],.from-\[\#FFDC30\],.from-\[\#FFE63E\],.from-\[\#FFD900\],.via-\[\#FFA51E\],.to-\[\#FF4400\],.to-\[\#FFC300\],.to-\[\#FFD100\],.to-\[\#FF9500\],.to-\[\#FF8A00\],.to-\[\#FFC91E\]).text-\[\#2B3A67\] { color: #2B3A67; }
+.shop-dark :is(.bg-\[\#FF5000\],.bg-\[\#FF0036\],.bg-\[\#07C160\],.bg-\[\#12B7F5\],.bg-\[\#FFD100\],.bg-\[\#FFC300\],.bg-\[\#FF6000\],.bg-\[\#7C5CFF\],.bg-\[\#0099FF\],.bg-\[\#1B9FF0\],.bg-\[\#F6D554\],.bg-\[\#06AD56\],.bg-\[\#95EC69\],.bg-\[\#3EB575\],.bg-\[\#F7E36D\],.from-\[\#FF7A21\],.from-\[\#FFE14D\],.from-\[\#FFD100\],.from-\[\#FFC300\],.from-\[\#FFDC30\],.from-\[\#FFE63E\],.from-\[\#FFD900\],.via-\[\#FFA51E\],.to-\[\#FF4400\],.to-\[\#FFC300\],.to-\[\#FFD100\],.to-\[\#FF9500\],.to-\[\#FF8A00\],.to-\[\#FFC91E\]) :not([class*='bg-']) .text-\[\#1F2329\],
+.shop-dark :is(.bg-\[\#FF5000\],.bg-\[\#FF0036\],.bg-\[\#07C160\],.bg-\[\#12B7F5\],.bg-\[\#FFD100\],.bg-\[\#FFC300\],.bg-\[\#FF6000\],.bg-\[\#7C5CFF\],.bg-\[\#0099FF\],.bg-\[\#1B9FF0\],.bg-\[\#F6D554\],.bg-\[\#06AD56\],.bg-\[\#95EC69\],.bg-\[\#3EB575\],.bg-\[\#F7E36D\],.from-\[\#FF7A21\],.from-\[\#FFE14D\],.from-\[\#FFD100\],.from-\[\#FFC300\],.from-\[\#FFDC30\],.from-\[\#FFE63E\],.from-\[\#FFD900\],.via-\[\#FFA51E\],.to-\[\#FF4400\],.to-\[\#FFC300\],.to-\[\#FFD100\],.to-\[\#FF9500\],.to-\[\#FF8A00\],.to-\[\#FFC91E\]).text-\[\#1F2329\] { color: #1F2329; }
+.shop-dark :is(.bg-\[\#FF5000\],.bg-\[\#FF0036\],.bg-\[\#07C160\],.bg-\[\#12B7F5\],.bg-\[\#FFD100\],.bg-\[\#FFC300\],.bg-\[\#FF6000\],.bg-\[\#7C5CFF\],.bg-\[\#0099FF\],.bg-\[\#1B9FF0\],.bg-\[\#F6D554\],.bg-\[\#06AD56\],.bg-\[\#95EC69\],.bg-\[\#3EB575\],.bg-\[\#F7E36D\],.from-\[\#FF7A21\],.from-\[\#FFE14D\],.from-\[\#FFD100\],.from-\[\#FFC300\],.from-\[\#FFDC30\],.from-\[\#FFE63E\],.from-\[\#FFD900\],.via-\[\#FFA51E\],.to-\[\#FF4400\],.to-\[\#FFC300\],.to-\[\#FFD100\],.to-\[\#FF9500\],.to-\[\#FF8A00\],.to-\[\#FFC91E\]) :not([class*='bg-']) .text-\[\#23222B\],
+.shop-dark :is(.bg-\[\#FF5000\],.bg-\[\#FF0036\],.bg-\[\#07C160\],.bg-\[\#12B7F5\],.bg-\[\#FFD100\],.bg-\[\#FFC300\],.bg-\[\#FF6000\],.bg-\[\#7C5CFF\],.bg-\[\#0099FF\],.bg-\[\#1B9FF0\],.bg-\[\#F6D554\],.bg-\[\#06AD56\],.bg-\[\#95EC69\],.bg-\[\#3EB575\],.bg-\[\#F7E36D\],.from-\[\#FF7A21\],.from-\[\#FFE14D\],.from-\[\#FFD100\],.from-\[\#FFC300\],.from-\[\#FFDC30\],.from-\[\#FFE63E\],.from-\[\#FFD900\],.via-\[\#FFA51E\],.to-\[\#FF4400\],.to-\[\#FFC300\],.to-\[\#FFD100\],.to-\[\#FF9500\],.to-\[\#FF8A00\],.to-\[\#FFC91E\]).text-\[\#23222B\] { color: #23222B; }
+.shop-dark :is(.bg-\[\#FF5000\],.bg-\[\#FF0036\],.bg-\[\#07C160\],.bg-\[\#12B7F5\],.bg-\[\#FFD100\],.bg-\[\#FFC300\],.bg-\[\#FF6000\],.bg-\[\#7C5CFF\],.bg-\[\#0099FF\],.bg-\[\#1B9FF0\],.bg-\[\#F6D554\],.bg-\[\#06AD56\],.bg-\[\#95EC69\],.bg-\[\#3EB575\],.bg-\[\#F7E36D\],.from-\[\#FF7A21\],.from-\[\#FFE14D\],.from-\[\#FFD100\],.from-\[\#FFC300\],.from-\[\#FFDC30\],.from-\[\#FFE63E\],.from-\[\#FFD900\],.via-\[\#FFA51E\],.to-\[\#FF4400\],.to-\[\#FFC300\],.to-\[\#FFD100\],.to-\[\#FF9500\],.to-\[\#FF8A00\],.to-\[\#FFC91E\]) :not([class*='bg-']) .text-\[\#7A5C30\],
+.shop-dark :is(.bg-\[\#FF5000\],.bg-\[\#FF0036\],.bg-\[\#07C160\],.bg-\[\#12B7F5\],.bg-\[\#FFD100\],.bg-\[\#FFC300\],.bg-\[\#FF6000\],.bg-\[\#7C5CFF\],.bg-\[\#0099FF\],.bg-\[\#1B9FF0\],.bg-\[\#F6D554\],.bg-\[\#06AD56\],.bg-\[\#95EC69\],.bg-\[\#3EB575\],.bg-\[\#F7E36D\],.from-\[\#FF7A21\],.from-\[\#FFE14D\],.from-\[\#FFD100\],.from-\[\#FFC300\],.from-\[\#FFDC30\],.from-\[\#FFE63E\],.from-\[\#FFD900\],.via-\[\#FFA51E\],.to-\[\#FF4400\],.to-\[\#FFC300\],.to-\[\#FFD100\],.to-\[\#FF9500\],.to-\[\#FF8A00\],.to-\[\#FFC91E\]).text-\[\#7A5C30\] { color: #7A5C30; }
+.shop-dark :is(.bg-\[\#FF5000\],.bg-\[\#FF0036\],.bg-\[\#07C160\],.bg-\[\#12B7F5\],.bg-\[\#FFD100\],.bg-\[\#FFC300\],.bg-\[\#FF6000\],.bg-\[\#7C5CFF\],.bg-\[\#0099FF\],.bg-\[\#1B9FF0\],.bg-\[\#F6D554\],.bg-\[\#06AD56\],.bg-\[\#95EC69\],.bg-\[\#3EB575\],.bg-\[\#F7E36D\],.from-\[\#FF7A21\],.from-\[\#FFE14D\],.from-\[\#FFD100\],.from-\[\#FFC300\],.from-\[\#FFDC30\],.from-\[\#FFE63E\],.from-\[\#FFD900\],.via-\[\#FFA51E\],.to-\[\#FF4400\],.to-\[\#FFC300\],.to-\[\#FFD100\],.to-\[\#FF9500\],.to-\[\#FF8A00\],.to-\[\#FFC91E\]) :not([class*='bg-']) .text-\[\#8A6A00\],
+.shop-dark :is(.bg-\[\#FF5000\],.bg-\[\#FF0036\],.bg-\[\#07C160\],.bg-\[\#12B7F5\],.bg-\[\#FFD100\],.bg-\[\#FFC300\],.bg-\[\#FF6000\],.bg-\[\#7C5CFF\],.bg-\[\#0099FF\],.bg-\[\#1B9FF0\],.bg-\[\#F6D554\],.bg-\[\#06AD56\],.bg-\[\#95EC69\],.bg-\[\#3EB575\],.bg-\[\#F7E36D\],.from-\[\#FF7A21\],.from-\[\#FFE14D\],.from-\[\#FFD100\],.from-\[\#FFC300\],.from-\[\#FFDC30\],.from-\[\#FFE63E\],.from-\[\#FFD900\],.via-\[\#FFA51E\],.to-\[\#FF4400\],.to-\[\#FFC300\],.to-\[\#FFD100\],.to-\[\#FF9500\],.to-\[\#FF8A00\],.to-\[\#FFC91E\]).text-\[\#8A6A00\] { color: #8A6A00; }
+.shop-dark :is(.bg-\[\#FF5000\],.bg-\[\#FF0036\],.bg-\[\#07C160\],.bg-\[\#12B7F5\],.bg-\[\#FFD100\],.bg-\[\#FFC300\],.bg-\[\#FF6000\],.bg-\[\#7C5CFF\],.bg-\[\#0099FF\],.bg-\[\#1B9FF0\],.bg-\[\#F6D554\],.bg-\[\#06AD56\],.bg-\[\#95EC69\],.bg-\[\#3EB575\],.bg-\[\#F7E36D\],.from-\[\#FF7A21\],.from-\[\#FFE14D\],.from-\[\#FFD100\],.from-\[\#FFC300\],.from-\[\#FFDC30\],.from-\[\#FFE63E\],.from-\[\#FFD900\],.via-\[\#FFA51E\],.to-\[\#FF4400\],.to-\[\#FFC300\],.to-\[\#FFD100\],.to-\[\#FF9500\],.to-\[\#FF8A00\],.to-\[\#FFC91E\]) :not([class*='bg-']) .text-\[\#1D5B2C\],
+.shop-dark :is(.bg-\[\#FF5000\],.bg-\[\#FF0036\],.bg-\[\#07C160\],.bg-\[\#12B7F5\],.bg-\[\#FFD100\],.bg-\[\#FFC300\],.bg-\[\#FF6000\],.bg-\[\#7C5CFF\],.bg-\[\#0099FF\],.bg-\[\#1B9FF0\],.bg-\[\#F6D554\],.bg-\[\#06AD56\],.bg-\[\#95EC69\],.bg-\[\#3EB575\],.bg-\[\#F7E36D\],.from-\[\#FF7A21\],.from-\[\#FFE14D\],.from-\[\#FFD100\],.from-\[\#FFC300\],.from-\[\#FFDC30\],.from-\[\#FFE63E\],.from-\[\#FFD900\],.via-\[\#FFA51E\],.to-\[\#FF4400\],.to-\[\#FFC300\],.to-\[\#FFD100\],.to-\[\#FF9500\],.to-\[\#FF8A00\],.to-\[\#FFC91E\]).text-\[\#1D5B2C\] { color: #1D5B2C; }
+.shop-dark :is(.bg-\[\#FF5000\],.bg-\[\#FF0036\],.bg-\[\#07C160\],.bg-\[\#12B7F5\],.bg-\[\#FFD100\],.bg-\[\#FFC300\],.bg-\[\#FF6000\],.bg-\[\#7C5CFF\],.bg-\[\#0099FF\],.bg-\[\#1B9FF0\],.bg-\[\#F6D554\],.bg-\[\#06AD56\],.bg-\[\#95EC69\],.bg-\[\#3EB575\],.bg-\[\#F7E36D\],.from-\[\#FF7A21\],.from-\[\#FFE14D\],.from-\[\#FFD100\],.from-\[\#FFC300\],.from-\[\#FFDC30\],.from-\[\#FFE63E\],.from-\[\#FFD900\],.via-\[\#FFA51E\],.to-\[\#FF4400\],.to-\[\#FFC300\],.to-\[\#FFD100\],.to-\[\#FF9500\],.to-\[\#FF8A00\],.to-\[\#FFC91E\]) :not([class*='bg-']) .text-\[\#574423\],
+.shop-dark :is(.bg-\[\#FF5000\],.bg-\[\#FF0036\],.bg-\[\#07C160\],.bg-\[\#12B7F5\],.bg-\[\#FFD100\],.bg-\[\#FFC300\],.bg-\[\#FF6000\],.bg-\[\#7C5CFF\],.bg-\[\#0099FF\],.bg-\[\#1B9FF0\],.bg-\[\#F6D554\],.bg-\[\#06AD56\],.bg-\[\#95EC69\],.bg-\[\#3EB575\],.bg-\[\#F7E36D\],.from-\[\#FF7A21\],.from-\[\#FFE14D\],.from-\[\#FFD100\],.from-\[\#FFC300\],.from-\[\#FFDC30\],.from-\[\#FFE63E\],.from-\[\#FFD900\],.via-\[\#FFA51E\],.to-\[\#FF4400\],.to-\[\#FFC300\],.to-\[\#FFD100\],.to-\[\#FF9500\],.to-\[\#FF8A00\],.to-\[\#FFC91E\]).text-\[\#574423\] { color: #574423; }
+.shop-dark :is(.bg-\[\#FF5000\],.bg-\[\#FF0036\],.bg-\[\#07C160\],.bg-\[\#12B7F5\],.bg-\[\#FFD100\],.bg-\[\#FFC300\],.bg-\[\#FF6000\],.bg-\[\#7C5CFF\],.bg-\[\#0099FF\],.bg-\[\#1B9FF0\],.bg-\[\#F6D554\],.bg-\[\#06AD56\],.bg-\[\#95EC69\],.bg-\[\#3EB575\],.bg-\[\#F7E36D\],.from-\[\#FF7A21\],.from-\[\#FFE14D\],.from-\[\#FFD100\],.from-\[\#FFC300\],.from-\[\#FFDC30\],.from-\[\#FFE63E\],.from-\[\#FFD900\],.via-\[\#FFA51E\],.to-\[\#FF4400\],.to-\[\#FFC300\],.to-\[\#FFD100\],.to-\[\#FF9500\],.to-\[\#FF8A00\],.to-\[\#FFC91E\]) :not([class*='bg-']) .text-\[\#B35400\],
+.shop-dark :is(.bg-\[\#FF5000\],.bg-\[\#FF0036\],.bg-\[\#07C160\],.bg-\[\#12B7F5\],.bg-\[\#FFD100\],.bg-\[\#FFC300\],.bg-\[\#FF6000\],.bg-\[\#7C5CFF\],.bg-\[\#0099FF\],.bg-\[\#1B9FF0\],.bg-\[\#F6D554\],.bg-\[\#06AD56\],.bg-\[\#95EC69\],.bg-\[\#3EB575\],.bg-\[\#F7E36D\],.from-\[\#FF7A21\],.from-\[\#FFE14D\],.from-\[\#FFD100\],.from-\[\#FFC300\],.from-\[\#FFDC30\],.from-\[\#FFE63E\],.from-\[\#FFD900\],.via-\[\#FFA51E\],.to-\[\#FF4400\],.to-\[\#FFC300\],.to-\[\#FFD100\],.to-\[\#FF9500\],.to-\[\#FF8A00\],.to-\[\#FFC91E\]).text-\[\#B35400\] { color: #B35400; }
+.shop-dark :is(.bg-\[\#FF5000\],.bg-\[\#FF0036\],.bg-\[\#07C160\],.bg-\[\#12B7F5\],.bg-\[\#FFD100\],.bg-\[\#FFC300\],.bg-\[\#FF6000\],.bg-\[\#7C5CFF\],.bg-\[\#0099FF\],.bg-\[\#1B9FF0\],.bg-\[\#F6D554\],.bg-\[\#06AD56\],.bg-\[\#95EC69\],.bg-\[\#3EB575\],.bg-\[\#F7E36D\],.from-\[\#FF7A21\],.from-\[\#FFE14D\],.from-\[\#FFD100\],.from-\[\#FFC300\],.from-\[\#FFDC30\],.from-\[\#FFE63E\],.from-\[\#FFD900\],.via-\[\#FFA51E\],.to-\[\#FF4400\],.to-\[\#FFC300\],.to-\[\#FFD100\],.to-\[\#FF9500\],.to-\[\#FF8A00\],.to-\[\#FFC91E\]) :not([class*='bg-']) .text-\[\#C20C0C\],
+.shop-dark :is(.bg-\[\#FF5000\],.bg-\[\#FF0036\],.bg-\[\#07C160\],.bg-\[\#12B7F5\],.bg-\[\#FFD100\],.bg-\[\#FFC300\],.bg-\[\#FF6000\],.bg-\[\#7C5CFF\],.bg-\[\#0099FF\],.bg-\[\#1B9FF0\],.bg-\[\#F6D554\],.bg-\[\#06AD56\],.bg-\[\#95EC69\],.bg-\[\#3EB575\],.bg-\[\#F7E36D\],.from-\[\#FF7A21\],.from-\[\#FFE14D\],.from-\[\#FFD100\],.from-\[\#FFC300\],.from-\[\#FFDC30\],.from-\[\#FFE63E\],.from-\[\#FFD900\],.via-\[\#FFA51E\],.to-\[\#FF4400\],.to-\[\#FFC300\],.to-\[\#FFD100\],.to-\[\#FF9500\],.to-\[\#FF8A00\],.to-\[\#FFC91E\]).text-\[\#C20C0C\] { color: #C20C0C; }
+.shop-dark :is(.bg-\[\#FF5000\],.bg-\[\#FF0036\],.bg-\[\#07C160\],.bg-\[\#12B7F5\],.bg-\[\#FFD100\],.bg-\[\#FFC300\],.bg-\[\#FF6000\],.bg-\[\#7C5CFF\],.bg-\[\#0099FF\],.bg-\[\#1B9FF0\],.bg-\[\#F6D554\],.bg-\[\#06AD56\],.bg-\[\#95EC69\],.bg-\[\#3EB575\],.bg-\[\#F7E36D\],.from-\[\#FF7A21\],.from-\[\#FFE14D\],.from-\[\#FFD100\],.from-\[\#FFC300\],.from-\[\#FFDC30\],.from-\[\#FFE63E\],.from-\[\#FFD900\],.via-\[\#FFA51E\],.to-\[\#FF4400\],.to-\[\#FFC300\],.to-\[\#FFD100\],.to-\[\#FF9500\],.to-\[\#FF8A00\],.to-\[\#FFC91E\]) :not([class*='bg-']) .text-\[\#6B6355\],
+.shop-dark :is(.bg-\[\#FF5000\],.bg-\[\#FF0036\],.bg-\[\#07C160\],.bg-\[\#12B7F5\],.bg-\[\#FFD100\],.bg-\[\#FFC300\],.bg-\[\#FF6000\],.bg-\[\#7C5CFF\],.bg-\[\#0099FF\],.bg-\[\#1B9FF0\],.bg-\[\#F6D554\],.bg-\[\#06AD56\],.bg-\[\#95EC69\],.bg-\[\#3EB575\],.bg-\[\#F7E36D\],.from-\[\#FF7A21\],.from-\[\#FFE14D\],.from-\[\#FFD100\],.from-\[\#FFC300\],.from-\[\#FFDC30\],.from-\[\#FFE63E\],.from-\[\#FFD900\],.via-\[\#FFA51E\],.to-\[\#FF4400\],.to-\[\#FFC300\],.to-\[\#FFD100\],.to-\[\#FF9500\],.to-\[\#FF8A00\],.to-\[\#FFC91E\]).text-\[\#6B6355\] { color: #6B6355; }

@@ -1,0 +1,28 @@
+{
+  "choices": [
+    {
+      "finish_reason": "stop",
+      "index": 0,
+      "message": {
+        "content": "画面里有2个卡通小人：\n\n1.  **棕色双马尾女孩（TA）**：在房间中间偏上的位置，背对镜头站着，头顶有“过来”的气泡提示。\n2.  **用户小人**：在画面最下方，只露出部分身体，正对着棕色双马尾女孩的方向。\n\n两人距离不算远，用户小人在下方，棕色双马尾女孩在上方中间区域，处于同一个房间的可视范围内。",
+        "role": "assistant"
+      }
+    }
+  ],
+  "created": 1793365934,
+  "id": "20261030211213483d23b6f1fd4a87",
+  "model": "glm-5v-turbo",
+  "object": "chat.completion",
+  "request_id": "20261030211213483d23b6f1fd4a87",
+  "usage": {
+    "completion_tokens": 94,
+    "completion_tokens_details": {
+      "reasoning_tokens": 0
+    },
+    "prompt_tokens": 434,
+    "prompt_tokens_details": {
+      "cached_tokens": 2
+    },
+    "total_tokens": 528
+  }
+}

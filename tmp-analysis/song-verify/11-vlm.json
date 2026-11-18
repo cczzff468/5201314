@@ -1,0 +1,28 @@
+{
+  "choices": [
+    {
+      "finish_reason": "stop",
+      "index": 0,
+      "message": {
+        "content": "根据截图分析，关于棕色双马尾女孩（TA）的情况如下：\n\n1.  **画面位置**：她位于**画面中下部（或中下偏左）**的位置，处于视角的中心区域。\n2.  **面朝方向**：她是**背对镜头**的。我们可以看到她的后脑勺和双马尾，说明她正面向画面的上方或前方。\n3.  **是否在移动**：从腿部姿势来看，她**似乎处于静止状态**（或者移动速度极慢）。她的双腿并拢站立，没有呈现出明显的迈步或奔跑姿态。\n4.  **与用户小人的距离**：**距离非常近**。画面底部并没有显示独立的“用户小人”形象（通常这类App的用户形象就是屏幕下方的操作视角本身），而TA紧挨着画面中下方的交互区域（“换台”按钮附近），处于玩家视线的正前方不远处。",
+        "role": "assistant"
+      }
+    }
+  ],
+  "created": 1793365951,
+  "id": "20261030211228143273ef8fee4e46",
+  "model": "glm-5v-turbo",
+  "object": "chat.completion",
+  "request_id": "20261030211228143273ef8fee4e46",
+  "usage": {
+    "completion_tokens": 194,
+    "completion_tokens_details": {
+      "reasoning_tokens": 0
+    },
+    "prompt_tokens": 439,
+    "prompt_tokens_details": {
+      "cached_tokens": 0
+    },
+    "total_tokens": 633
+  }
+}

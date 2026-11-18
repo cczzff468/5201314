@@ -1,0 +1,116 @@
+{
+  "pass": 16,
+  "fail": 1,
+  "results": [
+    {
+      "step": "0",
+      "name": "种子 couple-space 状态",
+      "ok": true,
+      "evidence": "IndexedDB 写入 accepted=true"
+    },
+    {
+      "step": "A1",
+      "name": "上滑解锁进入主屏",
+      "ok": true,
+      "evidence": ""
+    },
+    {
+      "step": "A2",
+      "name": "打开恋人空间",
+      "ok": true,
+      "evidence": "翻页 2 次后进入"
+    },
+    {
+      "step": "A3",
+      "name": "进入留言板",
+      "ok": true,
+      "evidence": ""
+    },
+    {
+      "step": "A4",
+      "name": "卡纸选择器含 5 张新卡",
+      "ok": true,
+      "evidence": "顺序=['素白', '样式一', '样式五', '便签纸', '手绘涂鸦', '水彩蝴蝶', '蕾丝乐谱', '枝头双兔', '朦胧少女']"
+    },
+    {
+      "step": "A5",
+      "name": "两张新卡便签上墙",
+      "ok": true,
+      "evidence": "DOM=['少女卡测试便签', '涂鸦卡测试便签']; bg=['url(\"/board-cards/card-22.png\")', 'url(\"/board-cards/card-18.png\")']"
+    },
+    {
+      "step": "A6",
+      "name": "涂鸦卡 padTop 避让生效",
+      "ok": true,
+      "evidence": "paddingTop=46px"
+    },
+    {
+      "step": "A7",
+      "name": "新卡图片 HTTP 200",
+      "ok": true,
+      "evidence": "{'card-18.png': 200, 'card-22.png': 200}"
+    },
+    {
+      "step": "A8",
+      "name": "便签详情弹层打开",
+      "ok": true,
+      "evidence": ""
+    },
+    {
+      "step": "B1",
+      "name": "重启回主屏",
+      "ok": true,
+      "evidence": ""
+    },
+    {
+      "step": "B2",
+      "name": "打开 X 论坛",
+      "ok": true,
+      "evidence": "翻页 2 次"
+    },
+    {
+      "step": "B3",
+      "name": "个人主页统计行可点",
+      "ok": true,
+      "evidence": "「查看我正在关注的人」按钮 count=1"
+    },
+    {
+      "step": "B4",
+      "name": "关注列表页两 tab（正在关注/关注者）",
+      "ok": true,
+      "evidence": "tabs=['', '', '', '正在关注']"
+    },
+    {
+      "step": "B5",
+      "name": "关注者 tab 可切换",
+      "ok": true,
+      "evidence": "空态提示=True"
+    },
+    {
+      "step": "C1",
+      "name": "评论 API 返回 200",
+      "ok": false,
+      "evidence": "status=500, 0 条评论"
+    },
+    {
+      "step": "C2",
+      "name": "善意帖评论无狗仔预告模板（拿错剧本过滤）",
+      "ok": true,
+      "evidence": "违规=[]"
+    },
+    {
+      "step": "C3",
+      "name": "善意帖评论无虚空索敌（防杠精过滤）",
+      "ok": true,
+      "evidence": "违规=[]"
+    }
+  ],
+  "console_errors": [
+    "Failed to load resource: the server responded with a status of 500 (Internal Server Error)",
+    "Failed to load resource: the server responded with a status of 500 (Internal Server Error)",
+    "Failed to load resource: the server responded with a status of 500 (Internal Server Error)",
+    "Failed to load resource: the server responded with a status of 500 (Internal Server Error)",
+    "Failed to load resource: the server responded with a status of 500 (Internal Server Error)"
+  ],
+  "page_errors": []
+}
