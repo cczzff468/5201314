@@ -4906,11 +4906,15 @@ export function ChatPage({
                   </div>
                 ) : (
                   /* v2.3 气泡比例修复：inline-flex 自适应（宽高严格随行数撑开）+ 统一 padding
-                      10px 14px + line-height 1.5 + border-box + 最大宽 76% + break-words */
+                      10px 14px + line-height 1.5 + border-box + 最大宽 76% + break-words
+                      v73 引用气泡修复：inline-flex 默认 row 会让引用卡 div 与正文 InlineEmojiText
+                      作为两个 flex 子项横向并排（机主截图实测：引用卡被挤窄、正文绕排到引用卡右侧、
+                      文字互相侵入）——加 flex-col 改为垂直堆叠：引用卡在上、正文在下（与 QQ 群聊
+                      同构、还原真机引用样式）。inline-flex 的收缩适配宽度特性保持不变。 */
                   <div className={`flex min-w-0 max-w-[76%] flex-col ${mine ? 'items-end' : 'items-start'}`}>
                     <div
                       {...bubblePress}
-                      className={`relative inline-flex w-fit max-w-full shrink-0 select-none whitespace-pre-wrap break-words rounded-[10px] px-[14px] py-[10px] text-[16px] leading-[1.5] box-border ${
+                      className={`relative inline-flex flex-col w-fit max-w-full shrink-0 select-none whitespace-pre-wrap break-words rounded-[10px] px-[14px] py-[10px] text-[16px] leading-[1.5] box-border ${
                         bvis.override
                           ? bvis.className
                           : mine

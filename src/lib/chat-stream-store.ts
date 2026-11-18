@@ -23,17 +23,19 @@
  *    以附加段落追加进首条 system 消息末尾（computeAltAccountsDigest → mergeAltDigestIntoMessages），
  *    覆盖经本总线发起的全部会话（wx/qq 私聊与群聊、信息联系人会话、信息小助手会话、社交/退圈后台流）；
  *    小号/匿名号侧与电话通话（服务端 persona 直调）不注入。
- * 7. 回复条数（v1.9.34 连发不足自动续发·强化）：条数指令（min~N 区间）由各 App 注入人设
- *    system 消息，但生成端不听指令是常态（机主反馈「AI 一直只发一两条」）——首轮流（含
- *    FC 工具轮）结束后由本模块数一数真正发出的分段数，低于下限时把已说内容以 assistant
- *    消息回填、注入「继续说完」指令再补轮流（复用同一分段器/投递管线，凑够下限才收尾）。
- *    v1.9.33 版机主实测「第一次发 4 条、第二次只发 1 条」：补发只在主渠道试一次，撞上限流/
- *    网络抖动即静默放弃。v1.9.34 四重强化：①补发与抢救都走全渠道链（主渠道失败换备用重试，
- *    半截产出不重发防重复）；②私聊补发轮次 2→3、文案逐轮加码（禁「好的/嗯」应答开头，防模型
- *    只回一句确认就停）；③首轮零产出（全部输出被包进未闭合思考块/FC 空文本）新增一轮「开口
- *    说话」抢救（换新思考剥离器后重发一轮，不再直接落解析失败）；④群聊不再一刀切跳过——
- *    单成员只发 1 条时补一轮「再补 1~2 条」（目标就低不就高 2 条封顶，防刷屏语义保留）。
- *    单条模式、换号中止不补；补发全渠道失败仍不升级错误（首轮已成功，保住已有产出收尾）。
+ * 7. 回复条数（v73 条数不足自动续发·恢复）：条数指令（min~N 弹性区间：选 3 发 2~3、
+ *    选 5 发 3~5，下限 replyMinTarget = max(2, ceil(N×0.6))）由各 App 注入人设 system
+ *    消息，但生成端不听指令是常态（机主反馈「AI 只发一条」）——首轮流（含 FC 工具轮）
+ *    结束后由本模块数一数真正发出的分段数（peek 只读折算待收尾尾段，不动游标防重复
+ *    投递），低于下限时把已说内容以 assistant 消息回填、注入「继续说完」指令再补轮流
+ *    （复用同一分段器/投递管线，新增内容继续经 onSegment 逐条上屏）。
+ *    v2.1 曾按机主要求删除补发（当时补发造成复读）；v73 按机主新定的区间逻辑恢复，
+ *    护栏学自删除时的教训：①指令明令不重复 + 分段器内置连续重复段去重；②补发轮零新
+ *    产出立即停（话少豁免，不硬凑）；③私聊最多 2 轮、群聊 1 轮且只补到 2 条封顶（防
+ *    刷屏）；④补发全渠道失败不升级错误（保住已有产出按原样收尾）；⑤补发轮新内容经
+ *    scanner.push 从原游标续扫（peek 语义保证尾段与新句拼接不重复投递）。
+ *    首轮零产出抢救（把「空回复」救回成真实连发）、群聊单成员只发 1 条补 1~2 条均保留。
+ *    单条模式、换号中止不补。
  *
  * 响应格式：/api/chat 返回 text/plain 纯文本增量流（服务端已把上游 SSE 解析为纯文本），
  * 客户端按「字节累积 = 已收内容」处理；上游不可达 / directOnly 时回退浏览器直连
@@ -989,13 +991,69 @@ async function runStream(rt: StreamRuntime, opts: BeginChatStreamOptions): Promi
         // scanner 的 held 里（没带句末标点 / ≤4 字碎句扣住），补发循环重建 scanner 时 held 丢失。
         // 修复：重建前先 finish 旧 scanner 放出 held 段（segSink 投递 + segEmitted++），
         // 放出后 segEmitted 可能已够下限，无需补发。
+        // v73 变更：补发循环恢复且不再重建 scanner（见下方），这段 finish 挪到补发之后执行——
+        // finish 不推进游标，若先 finish 再 push（补发轮新内容）会把已投尾段与新句拼接成
+        // 完整段二次投递；补发轮新内容经 scanner.push 从原游标自然续扫，peek 语义保证不重复。
+        // ---- v73 条数不足自动续发（机主定的弹性区间逻辑：选 3 发 2~3、选 5 发 3~5）----
+        // 生成端不听条数指令是常态（FC 工具轮整段一行到手、流式只吐一句就收）：首轮流结束后
+        // 数一数真正发出的分段数（peek 只读折算待收尾尾段，不动游标——补发轮新内容继续 push，
+        // 尾段与新句自然拼接成完整段不重复），低于下限（replyMinTarget）时把已产出正文以
+        // assistant 回填、注入「继续说完」指令再补一轮流，复用同一分段器/投递管线——新增内容
+        // 继续经 onSegment 逐条上屏。护栏（v2.1 删补发时学到的教训——当时补发造成复读）：
+        //   ① 指令明令「不要重复已说内容」+ 分段器内置连续重复段去重；
+        //   ② 补发轮零新产出立即停（模型真没话了 = 话少豁免，不硬凑）；
+        //     私聊最多 2 轮、群聊 1 轮且只补到 2 条封顶（群聊刷屏语义保留）；
+        //   ③ 补发全渠道失败不升级错误（首轮已成功，保住已有产出按原样收尾）；
+        //   ④ status 维持 streaming：本回合没结束，「正在输入」不闪断。
+        const maxRounds = isGroup ? 1 : 2;
+        for (let round = 0; round < maxRounds; round++) {
+          if (rt.aborted) break;
+          // 条数判定：已投分段 + 待收尾尾段折算（FC 路径 scanner 未喂过 → peek 空串不计）
+          const pendingTail = scanner ? scanner.peek() : '';
+          const gotNow = segEmitted + (pendingTail ? Math.max(1, splitReplySegments(pendingTail, true).length) : 0);
+          if (gotNow >= minTarget) break;
+          const remaining = Math.max(1, minTarget - gotNow);
+          const visibleText = extractThinkBlocks(raw).text;
+          const continueMessages: ChatPayloadMessage[] = [
+            ...workMessages,
+            // 已产出正文回填（剥思考块）：模型看到自己已发过什么，才不会复读
+            ...(visibleText.trim() ? [{ role: 'assistant' as const, content: visibleText }] : []),
+            {
+              role: 'user',
+              content:
+                `（系统内部提醒，这条只给你自己看、绝不向对方提起：你这次只发了 ${gotNow} 条消息，还没到正常下限 ${minTarget} 条。` +
+                `不要重复已经说过的内容，不要客套铺垫、不要发「好的/嗯」这类应答，按你刚才的语气继续连发 ${remaining} 条左右：` +
+                (isGroup
+                  ? `回应群里最新的话题 1~${remaining} 条，按群聊节奏来，说完就停。`
+                  : round === 0
+                    ? `展开前面的话题、补充细节、说说你自己的近况或心情、或者抛个新话题接着聊，说完就停。`
+                    : `这是最后一次提醒：从前面没展开的话里挑最值得说的，展开说完就收尾。`) +
+                `一句一条、口语化、每条单独一行；不要解释这条提醒，直接输出消息本身。）`,
+            },
+          ];
+          activePayloads.set(rt.state.sessionKey, { messages: continueMessages, config: effConfig });
+          const contChain = apiChainOf(effConfig, useSettings.getState().apiFallbacks);
+          const beforeRaw = raw;
+          for (let ci = 0; ci < contChain.length; ci++) {
+            if (rt.aborted) break;
+            try {
+              await streamOnce(continueMessages, contChain[ci]);
+              break;
+            } catch {
+              // 该渠道失败换下一个；已有半截产出（raw 增长）不再换渠道重发（v1.9.41 同款防重复）
+              if (rt.aborted || raw !== beforeRaw) break;
+              if (ci + 1 >= contChain.length) break;
+            }
+          }
+          // 补发轮零新产出：模型真没话了（话少豁免）——停止补发，不硬凑
+          if (rt.aborted || raw === beforeRaw) break;
+        }
+        // v2.4-fix：全部补发结束后放出 scanner 剩余段（held 里扣住的多句；finish 消费 held，
+        // 下方 finalize 前的第二次 finish 拿到空串——见收尾管线注释）
         if (scanner) {
           const tailSeg = scanner.finish();
           if (tailSeg && segSink) segSink(tailSeg);
         }
-        // 补发循环已删除（机主要求不要补发功能）——完全依赖首轮流式 + Few-shot 示例 + 提示词。
-        // held 段投递修复（上方 finish + 下方 finalize 前 finish）保留，确保分段器 held 里扣住的
-        // 第二句等正常上屏不丢失。首轮零产出仍由上方抢救兜底。
       }
       patchState(rt, { status: 'done' });
     }
