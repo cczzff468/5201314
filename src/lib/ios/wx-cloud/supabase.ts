@@ -204,8 +204,12 @@ export async function syncRunPackage(): Promise<DeployResult> {
 
   // v15 运行时升级链：同步不再只推配置——先探云端函数代际（action=ping 回 ver），旧于
   // 当前代就重部署最新函数代码。旧版「重新同步只推配置不推代码」= 真机一直跑旧函数
-  // （只回一两条/不会表情包/不会语音/不会引用的根因）。探测不到不阻断；部署失败只附注
-  // （配置仍同步，重试一键部署可补）。升级后的版本号写进 store（设置页版本行展示）。
+  // （只回一两条/不会表情包/不会语音/发裸标记的根因）。
+  // v17 收紧：探测不到 ver（旧函数 ping 无 ver 字段 / 网络失败返回 null）也不再跳过——
+  // 用户实测踩坑：部署过 v5/v6 代函数（ping 不回 ver）→ 升级链判 null 静默跳过 → 同步了
+  // 八代新配置但函数代码永远停在旧代，真机永远是旧行为。现在 ver ≠ 当前代（含 null）一律
+  // 重部署最新代码（部署接口幂等，重试安全）；部署失败只附注（配置仍同步，重试一键部署可补）。
+  // 升级后的版本号写进 store（设置页版本行展示）。
   let upgradeNote = '';
   let runtimeVer: number | null = null;
   try {
@@ -213,14 +217,14 @@ export async function syncRunPackage(): Promise<DeployResult> {
     const vr = pv.j && typeof pv.j.ver === 'number' ? pv.j.ver : null;
     if (vr !== null) runtimeVer = vr;
   } catch {
-    /* 探不到（旧版函数无 ping 动作/网络问题）：跳过升级，同步继续 */
+    /* 探不到（旧版函数无 ping 动作/网络问题）：v17 起不再跳过——按「未知代际」重部署 */
   }
-  if (runtimeVer !== null && runtimeVer < CLOUD_RUNTIME_VER) {
+  if (runtimeVer !== CLOUD_RUNTIME_VER) {
     try {
       const dep = await supaProxy({ op: 'deploy', token: supa.token, ref: supa.ref, code: EDGE_FUNCTION_TS, secret: supa.secret || ensureTaskSecret() }, 150_000);
       if (dep.status < 400) {
         runtimeVer = CLOUD_RUNTIME_VER;
-        upgradeNote = '；云端运行时代码已升级到最新（v' + CLOUD_RUNTIME_VER + '）';
+        upgradeNote = '；云端运行时代码已升级到最新（v' + CLOUD_RUNTIME_VER + '）——真机表情包/语音/连发全部对齐';
       } else {
         upgradeNote = `；注意：云端运行时升级失败（${dep.status}）——重新点一次「一键部署」可重试`;
       }

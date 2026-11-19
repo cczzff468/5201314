@@ -1227,13 +1227,19 @@ async function silkEncode(u8) {
   }
 }
 
-/** \u4E91\u7AEF TTS\uFF08OpenAI \u517C\u5BB9 /audio/speech\uFF0C\u53EA\u8981 wav\uFF09\u2192 silk \u2192 QQ \u539F\u751F\u8BED\u97F3\u6761\u3002\u5931\u8D25\u8FD4\u56DE null\uFF08\u964D\u7EA7\u6587\u5B57\uFF09 */
+/** \u4E91\u7AEF TTS\uFF08OpenAI \u517C\u5BB9 /audio/speech\uFF0C\u53EA\u8981 wav\uFF09\u2192 silk \u2192 QQ \u539F\u751F\u8BED\u97F3\u6761\u3002\u5931\u8D25\u8FD4\u56DE null\uFF08\u964D\u7EA7\u6587\u5B57\uFF09\u3002
+ *  v17 \u5F00\u7BB1\u5151\u5E95\uFF1A\u6CA1\u914D TTS \u4E14\u7F51\u5173\u4E0D\u5728\u7EBF\uFF08TTS_LOCAL_URL \u53EA\u5728 im-gateway \u6CE8\u5165\uFF09\u65F6\uFF0C\u7528\u804A\u5929
+ *  API\uFF08cfg.llm\uFF0COpenAI \u517C\u5BB9 /audio/speech\uFF09\u8BD5\u4E00\u6B21\u5408\u6210\u2014\u2014\u670D\u52A1\u5546\u4E0D\u652F\u6301\u8BE5\u7AEF\u70B9\u5C31 404/400
+ *  \u9759\u9ED8\u56DE\u9000\u6587\u5B57\uFF1B\u96F6\u914D\u7F6E\u7528\u6237\u5728\u4E91\u7AEF\u7684 QQ \u8BED\u97F3\u4ECE\u300C\u6C38\u8FDC\u53D1\u4E0D\u4E86\u300D\u53D8\u6210\u300CAPI \u652F\u6301 TTS \u5C31\u80FD\u53D1\u300D\u3002 */
 async function synthesizeQqVoice(cfg, text) {
   var tts = cfg.qq && cfg.qq.tts;
   // v13\uFF1A\u7F51\u5173\u672C\u5730\u5408\u6210\u7AEF\u70B9\uFF08im-gateway \u6CE8\u5165\uFF0Cz-ai SDK \u5408\u6210 wav\uFF09\u4F18\u5148\u4E8E\u7528\u6237\u81EA\u914D TTS\u2014\u2014
   // \u7F51\u5173\u5728\u7EBF\uFF08\u79D2\u56DE\u52A0\u901F\uFF09\u65F6 QQ \u8BED\u97F3\u6761\u96F6\u914D\u7F6E\u53EF\u7528\uFF1B\u4E91\u7AEF\uFF08Deno\uFF09\u6CA1\u6CE8\u5165\u5219\u8D70 cfg.qq.tts
   var localUrl = TTS_LOCAL_URL;
-  if (!localUrl && (!tts || !tts.baseUrl || !tts.apiKey)) return null;
+  // v17\uFF1A\u804A\u5929 API \u515C\u5E95\uFF08\u7528\u6237\u6CA1\u914D TTS \u65F6\u2014\u2014\u7EDD\u5927\u591A\u6570\u7528\u6237\u53EA\u6709\u4E00\u4EFD OpenAI \u517C\u5BB9\u804A\u5929 API\uFF09
+  var llm = cfg.llm || {};
+  var viaLlm = !localUrl && !(tts && tts.baseUrl && tts.apiKey) && !!(llm.baseUrl && llm.apiKey);
+  if (!localUrl && !(tts && tts.baseUrl && tts.apiKey) && !viaLlm) return null;
   try {
     var r = null;
     if (localUrl) {
@@ -1241,6 +1247,16 @@ async function synthesizeQqVoice(cfg, text) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ input: text.slice(0, 200), voice: (tts && tts.voice) || 'tongtong', speed: 1, response_format: 'wav' }),
+        signal: AbortSignal.timeout(30000),
+      });
+    } else if (viaLlm) {
+      // v17\uFF1A\u804A\u5929 API \u540C\u6B3E OpenAI \u517C\u5BB9 /audio/speech\uFF08\u8BED\u97F3\u5B57\u6BB5\u6CBF\u7528\u7528\u6237 TTS \u914D\u7F6E\uFF0C\u6CA1\u914D\u7528 tts-1/alloy\uFF09
+      var lb = String(llm.baseUrl).replace(/\/+$/, '');
+      var lurl = /\/audio\/speech$/.test(lb) ? lb : lb + '/audio/speech';
+      r = await fetch(lurl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + llm.apiKey },
+        body: JSON.stringify({ model: (tts && tts.model) || 'tts-1', voice: (tts && tts.voice) || 'alloy', input: text.slice(0, 200), response_format: 'wav', speed: 1 }),
         signal: AbortSignal.timeout(30000),
       });
     } else {
@@ -1595,8 +1611,9 @@ async function handleQqEvent(cfg, t, d) {
     hist = cfg.qq.history.slice(-20);
     HIST_QQ = hist;
   }
-  // v16 \u8BED\u97F3\u53EF\u7528\u6027\u5148\u7B97\uFF08\u80FD\u529B\u6559\u5B66 + \u8BED\u97F3\u5347\u7EA7\u5224\u5B9A\u5171\u7528\uFF09\uFF1A
-  var ttsOk = (cfg.qq && cfg.qq.tts && cfg.qq.tts.baseUrl && cfg.qq.tts.apiKey) || TTS_LOCAL_URL;
+  // v16 \u8BED\u97F3\u53EF\u7528\u6027\u5148\u7B97\uFF08\u80FD\u529B\u6559\u5B66 + \u8BED\u97F3\u5347\u7EA7\u5224\u5B9A\u5171\u7528\uFF1Bv17 \u52A0 LLM \u515C\u5E95\u2014\u2014\u6CA1\u914D TTS \u4F46\u804A\u5929
+  // API \u5728\u5C31\u662F\u300C\u80FD\u8BD5\u300D\uFF0C\u6559\u5B66\u7167\u6CE8\u3001\u5408\u6210\u5931\u8D25\u81EA\u52A8\u56DE\u9000\u6587\u5B57\uFF09\uFF1A
+  var ttsOk = (cfg.qq && cfg.qq.tts && cfg.qq.tts.baseUrl && cfg.qq.tts.apiKey) || TTS_LOCAL_URL || (cfg.llm && cfg.llm.baseUrl && cfg.llm.apiKey);
   var system = (cfg.qq.persona && cfg.qq.persona.system) || '\u4F60\u548C\u4E3B\u4EBA\u5728\u771F\u5B9EQQ\u4E0A\u804A\u5929\uFF0C\u56DE\u590D\u7B80\u77ED\u81EA\u7136\uFF0C\u7EDD\u4E0D\u900F\u9732\u81EA\u5DF1\u662FAI\u3002';
   // v16 \u8FDE\u53D1\u5151\u5E95\uFF1A\u65E7\u8FD0\u884C\u5305/\u672A\u7ED1\u5B9A\u4EBA\u8BBE\u91CC\u6CA1\u6709\u8FDE\u53D1\u6307\u4EE4\u5757\u65F6\u8FD0\u884C\u671F\u8865\u6CE8\u5165\uFF08\u771F\u673A\u300C\u53EA\u53D1\u4E00\u6761\u300D\u7684\u5151\u5E95\uFF09
   system = ensureBurstRule(system, cfg.qq.multi !== false);

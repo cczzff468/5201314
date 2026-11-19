@@ -62,6 +62,16 @@
  *   ⑦云端轮询 10 秒化：cron-cycle&fast=1（tickFast——9 秒短窗单轮 getupdates，跳轮询锁，
  *     认领表兑底）由 pg_cron 每 10 秒打一次；cron-cycle&qq=1 只做 QQ WS 会话保持（每分钟）；
  *   ⑧ping ver 16。
+ * - v17（机主实测三连反馈「表情包发颜文字或裸标记 [表情包:sunny-02] / QQ 语音还是说发不了 /
+ *   AI 经常只发一条」——根因：用户云端还在跑旧代函数，而重新同步只推配置不推代码：旧函数
+ *   ping 回包没有 ver 字段 → 升级链判 null 直接跳过重部署，真机永远跑旧行为）：
+ *   ①QQ 语音云端开箱兑底 synthesizeQqVoice——没配 TTS 且网关不在线（云端 Deno 无
+ *     TTS_LOCAL_URL）时用聊天 API（cfg.llm，OpenAI 兼容 /audio/speech）试合成，服务商
+ *     不支持该端点就静默回退文字（ttsOk 判定同步放宽——语音能力教学不再因「没配 TTS」
+ *     整个不注入，AI 也就不再只说「发不了语音」）；
+ *   ②站内 supabase.ts 升级链收紧：探测不到 ver（旧函数 ping 无 ver / 网络失败）也不再跳过——
+ *     ver ≠ 当代就重部署最新函数代码（部署接口幂等，重同步一次真机行为全量对齐）；
+ *   ③ping ver 17。
  *
  * 配置（用户 Supabase 私有桶 wx-cloud/config.json，v2 形状）：
  * { version:2, secret, wechat:{botToken,botId,persona,history,stickerMap,worldbook,multi},
@@ -75,9 +85,10 @@
 
 // ---------------- 微信 + QQ 共用核心（Node / Deno 通用，纯 fetch） ----------------
 
-/** v16：云端运行时代际号——站内「重新同步运行包」用它判断要不要重部署函数代码
- *  （ping 回的 ver < 它 = 真机上还在跑旧函数：只回一两条/不会表情包/不会语音）。 */
-export const CLOUD_RUNTIME_VER = 16;
+/** v17：云端运行时代际号——站内「重新同步运行包」用它判断要不要重部署函数代码
+ *  （ping 回的 ver ≠ 它（含 ping 不回 ver 的旧函数）= 真机上还在跑旧函数：只回一两条/
+ *  不会表情包/不会语音/发裸标记——重部署最新代码全量对齐）。 */
+export const CLOUD_RUNTIME_VER = 17;
 
 export const WX_CLOUD_CORE = String.raw`
 // ---- 微信云端助手核心（自动生成，勿手工编辑） ----
@@ -1301,13 +1312,19 @@ async function silkEncode(u8) {
   }
 }
 
-/** 云端 TTS（OpenAI 兼容 /audio/speech，只要 wav）→ silk → QQ 原生语音条。失败返回 null（降级文字） */
+/** 云端 TTS（OpenAI 兼容 /audio/speech，只要 wav）→ silk → QQ 原生语音条。失败返回 null（降级文字）。
+ *  v17 开箱兑底：没配 TTS 且网关不在线（TTS_LOCAL_URL 只在 im-gateway 注入）时，用聊天
+ *  API（cfg.llm，OpenAI 兼容 /audio/speech）试一次合成——服务商不支持该端点就 404/400
+ *  静默回退文字；零配置用户在云端的 QQ 语音从「永远发不了」变成「API 支持 TTS 就能发」。 */
 async function synthesizeQqVoice(cfg, text) {
   var tts = cfg.qq && cfg.qq.tts;
   // v13：网关本地合成端点（im-gateway 注入，z-ai SDK 合成 wav）优先于用户自配 TTS——
   // 网关在线（秒回加速）时 QQ 语音条零配置可用；云端（Deno）没注入则走 cfg.qq.tts
   var localUrl = TTS_LOCAL_URL;
-  if (!localUrl && (!tts || !tts.baseUrl || !tts.apiKey)) return null;
+  // v17：聊天 API 兜底（用户没配 TTS 时——绝大多数用户只有一份 OpenAI 兼容聊天 API）
+  var llm = cfg.llm || {};
+  var viaLlm = !localUrl && !(tts && tts.baseUrl && tts.apiKey) && !!(llm.baseUrl && llm.apiKey);
+  if (!localUrl && !(tts && tts.baseUrl && tts.apiKey) && !viaLlm) return null;
   try {
     var r = null;
     if (localUrl) {
@@ -1315,6 +1332,16 @@ async function synthesizeQqVoice(cfg, text) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ input: text.slice(0, 200), voice: (tts && tts.voice) || 'tongtong', speed: 1, response_format: 'wav' }),
+        signal: AbortSignal.timeout(30000),
+      });
+    } else if (viaLlm) {
+      // v17：聊天 API 同款 OpenAI 兼容 /audio/speech（语音字段沿用用户 TTS 配置，没配用 tts-1/alloy）
+      var lb = String(llm.baseUrl).replace(/\/+$/, '');
+      var lurl = /\/audio\/speech$/.test(lb) ? lb : lb + '/audio/speech';
+      r = await fetch(lurl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + llm.apiKey },
+        body: JSON.stringify({ model: (tts && tts.model) || 'tts-1', voice: (tts && tts.voice) || 'alloy', input: text.slice(0, 200), response_format: 'wav', speed: 1 }),
         signal: AbortSignal.timeout(30000),
       });
     } else {
@@ -1669,8 +1696,9 @@ async function handleQqEvent(cfg, t, d) {
     hist = cfg.qq.history.slice(-20);
     HIST_QQ = hist;
   }
-  // v16 语音可用性先算（能力教学 + 语音升级判定共用）：
-  var ttsOk = (cfg.qq && cfg.qq.tts && cfg.qq.tts.baseUrl && cfg.qq.tts.apiKey) || TTS_LOCAL_URL;
+  // v16 语音可用性先算（能力教学 + 语音升级判定共用；v17 加 LLM 兜底——没配 TTS 但聊天
+  // API 在就是「能试」，教学照注、合成失败自动回退文字）：
+  var ttsOk = (cfg.qq && cfg.qq.tts && cfg.qq.tts.baseUrl && cfg.qq.tts.apiKey) || TTS_LOCAL_URL || (cfg.llm && cfg.llm.baseUrl && cfg.llm.apiKey);
   var system = (cfg.qq.persona && cfg.qq.persona.system) || '你和主人在真实QQ上聊天，回复简短自然，绝不透露自己是AI。';
   // v16 连发兑底：旧运行包/未绑定人设里没有连发指令块时运行期补注入（真机「只发一条」的兑底）
   system = ensureBurstRule(system, cfg.qq.multi !== false);
@@ -2129,7 +2157,7 @@ main().catch(function (e) { console.error(e); process.exit(1); });
 
 // ---------------- Supabase Edge Function 版（Deno，被动 Webhook + 手动单轮） ----------------
 
-export const EDGE_FUNCTION_TS = `// 云端助手 · Supabase Edge Function（Deno）· v16 真机体验修复版（v13：连发分段/世界书运行时命中/[M编号]引用/深度思考剥除/富媒体标记净化/表情包ID直选/语音条首段化；v14：连发 3~30 条 + max_tokens 2400 + 微信真表情包（AES-128-ECB→CDN→image_item）+ QQ 超预算均匀分摊；v15：入站引用解析 + QQ 超长语音分段 + QQ 斗图模式 + 照片标记；v16：QQ 语音条标记强制发送 + QQ 经典表情代码剥离 + 微信引用下线 + 照片下线 + 主动消息改站内驱动（send-active）+ 云端轮询 10 秒分档（fast=1 / qq=1））
+export const EDGE_FUNCTION_TS = `// 云端助手 · Supabase Edge Function（Deno）· v17 真机体验修复版·二（v13：连发分段/世界书运行时命中/[M编号]引用/深度思考剥除/富媒体标记净化/表情包ID直选/语音条首段化；v14：连发 3~30 条 + max_tokens 2400 + 微信真表情包（AES-128-ECB→CDN→image_item）+ QQ 超预算均匀分摊；v15：入站引用解析 + QQ 超长语音分段 + QQ 斗图模式 + 照片标记；v16：QQ 语音条标记强制发送 + QQ 经典表情代码剥离 + 微信引用下线 + 照片下线 + 主动消息改站内驱动（send-active）+ 云端轮询 10 秒分档（fast=1 / qq=1）；v17：QQ 语音云端 LLM 兜底合成（没配 TTS 用聊天 API 试 /audio/speech）+ 同步升级链收紧（探测不到 ver 也重部署））
 // 函数 slug：wx-assistant（QQ 回调地址 / 云端测试 URL = https://<项目ref>.supabase.co/functions/v1/wx-assistant）。
 // 注意：本行的 wx-assistant 标记同时是部署接口（/api/cloud-deploy/supabase op=deploy）的产品
 // 校验标记——v5 移除函数内 pg_cron 路径时把它一并带走过一次，导致一键部署全线 400
@@ -2405,9 +2433,10 @@ Deno.serve(async (req) => {
       await writeHeartbeat({ ping: true });
       // ver：内置网关探测函数代际用（read-file 中继读写 = ver>=8；旧版函数 ping 无 ver 字段）；
       // 站内「重新同步运行包」拿它判断要不要重部署函数代码升级运行时（旧版不升 = 真机上
-      // 一直跑旧行为：只回一两条/不会表情包/不会语音——「重新同步只推配置不推代码」的坑）。
-      // v16：15 → 16（QQ 语音条标记 + 经典表情代码剥离 + 微信引用下线 + 照片下线 + 主动改站内驱动 + 10 秒轮询那代）
-      return jr({ ok: true, source: 'deno', ver: 16 });
+      // 一直跑旧行为：只回一两条/不会表情包/不会语音/发裸标记——「重新同步只推配置不推代码」
+      // 的坑；v17 起探测不到 ver 也重部署，旧函数不再永远升不了级）。
+      // v17：16 → 17（QQ 语音 LLM 兜底合成 + 同步升级链收紧那代）。
+      return jr({ ok: true, source: 'deno', ver: 17 });
     }
 
     // ---- v16 send-active（站内「主动发消息」引擎触发）：把站内已生成的主动消息内容发到

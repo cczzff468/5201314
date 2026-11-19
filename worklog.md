@@ -3127,3 +3127,26 @@ Stage Summary:
 - 云端运行时 v16 就绪：QQ 语音真发送（标记/口头请求双触发）、QQ 经典表情代码剥离、微信引用下线、生图下线、真机表情包只发用户收藏+大贴纸包、连发兜底、主动消息站内驱动（网关→云端双链）、云端轮询 10 秒档（fast=1/qq=1 双任务）。
 - 站内：QQ 接入页「定时主动消息」卡移除（斗图保留）、设置页云端轮询文案升级、主动消息引擎挂真机转发、清除云端配置连带停轮询。
 - 下一步：推送到 github.com/cczzff468/5201314.git（main）。
+
+---
+
+Task ID: v17（真机三连反馈根因根治：旧云端函数永不升级 + QQ 语音云端零配置）
+Agent: 主控 Agent（Z.ai Code）
+Task: 机主三连反馈——①AI 在真机微信/QQ发表情包只发颜文字或裸标记 [表情包:sunny-02]（参考 github.com/xiaolongbao0709/ai-virtual-phone 的做法）；②真机 QQ 发语音 AI 说发不了；③AI 在真机微信/QQ 经常只发一条消息。修完推送到 github.com/cczzff468/5201314 main。
+
+Work Log:
+- [调研·参考仓库] clone xiaolongbao0709/ai-virtual-phone 逐行核对 weixin-assistant Edge Function：其表情包方案 = [表情包:label] 标记 → resolveRuntimeStickerImage 解析成图 → sendIlinkImageMessage（AES-128-ECB 加密 → getuploadurl 预签名 → novac2c.cdn.weixin.qq.com CDN 密文上传 → image_item 真图发送）——与我方 v14 实现完全同构（WX_CLOUD_CORE 已有 wxUploadStickerImage/wxSendSticker + 纯 JS AES/MD5）；其语音方案 = TTS 合成 mp3 → file_item(type 4)。结论：我方站内代码能力与参考一致，问题不在能力层。
+- [根因定位] 三连症状（裸标记/发不了语音/只发一条）与 v13-v16 全部已修复功能完全重合 → 排查部署链路：syncRunPackage 的 v15 升级链只在「ping 探到 ver 且 ver < 当代」时重部署函数代码；用户云端部署的是 v5/v6 代函数（ping 无 ver 字段）→ runtimeVer=null → 升级链静默跳过 → 用户点了 N 次重新同步、配置升了八代，函数代码永远停在旧代，真机永远跑旧行为（旧核心：无标记扫描 → [表情包:sunny-02] 裸发；无语音机制 → AI 只能口头答应；无句界切分 → 整段一条）。网关侧亦实证 core.gen.3.mjs 残留 v13 旧代（已重启物化 v17）。
+- [RC1·升级链根治] supabase.ts：runtimeVer !== CLOUD_RUNTIME_VER（含 null——旧函数 ping 无 ver / 探测失败）一律重部署最新 EDGE_FUNCTION_TS（部署接口幂等，重试安全）；部署成功文案带「真机表情包/语音/连发全部对齐」——重新同步一次，云端函数代码全量对齐当前代。
+- [RC2·QQ 语音云端零配置] sources.ts synthesizeQqVoice：没配 TTS 且网关不在线（云端 Deno 无 TTS_LOCAL_URL）时用聊天 API（cfg.llm，OpenAI 兼容 /audio/speech）兜底合成——mock 服务实测请求正确抵达（Bearer + tts-1/alloy/wav body）；ttsOk 判定同步放宽（cfg.llm 在即「能试」）→【语音条能力】教学不再因「没配 TTS」整个不注入（AI 说「发不了语音」的另一半根因）；合成失败静默回退文字（服务商不支持该端点也不炸）。
+- [v17 代际] CLOUD_RUNTIME_VER 16→17 + ping ver 17 + 头部注释（核心/EDGE_FUNCTION_TS 双处）——存量 v16 部署也在下次同步时自动升级。
+- [网关物化] im-gateway 重启 → core.gen.1.mjs 重新物化（viaLlm 实证在文件里）→ QQ WS READY（session 96126107，心跳 OK）；/tts 端点实测 200 + RIFF wav 24kHz。
+- [验证] Bun Transpiler 双绿（EDGE_FUNCTION_TS TS loader / WX_CLOUD_CORE JS loader）；核心函数冒烟全过：collectVoiceMarkers（[语音:x] 切出双 clips）、isVoiceRequested、ensureBurstRule、cloudBurstSegments（一段长文 → 4 条句界切分——「只发一条」的正解）、qqStripClassicCodes（[偷笑][月亮] 剥除）、resolveCloudEmoticon ID 直选（sunny-02 → 喜欢你呀）、collectCloudStickers（标记切出 hits）；LLM 兜底合成 mock 端到端（请求抵达 + 静默回退）；eslint 两文件零问题；tsc 基线比对（HEAD worktree 同样报 supabase.ts:501 never 错——非本轮引入）；Agent Browser E2E：锁屏滑动解锁 → 设置 → 云端助手页渲染（Supabase 单选/Token 表单/清除配置，零页面错误零控制台报错）；dev.log 全程无编译错误。
+- [事故恢复] git stash 基线比对后 pop 冲突（网关持续再生 core.gen.1.mjs/gateway-state.json），sources.ts/supabase.ts 一度回退 HEAD——git checkout stash@{0} -- <files> 精确找回 + drop（与 v16 会话同款，教训固化：stash pop 前先停网关或避开生成物）。
+- [git 卫生] dev.log/tool-results 补入 .gitignore 并取消跟踪（v16 会话遗留意图，本次落实）。
+
+Stage Summary:
+- 根因一句话：云端函数代码停在旧代（重新同步只推配置不推代码，旧函数 ping 无 ver 升级链判 null 跳过）——表情包/语音/连发三大件在 v13-v16 都已写好，只是从未真正跑到用户的云端上。v17 升级链收紧后，任何一次「重新同步运行包」都会把函数代码全量拉到当前代。
+- QQ 语音云端开箱：没配 TTS 也能用聊天 API 兜底合成（OpenAI 兼容 /audio/speech），失败静默回退文字；网关在线时照旧走本地 z-ai 合成（零延迟）。
+- 关键文件：src/lib/ios/wx-cloud/supabase.ts（升级链）、src/lib/ios/wx-cloud/sources.ts（v17：LLM 兜底合成 + ttsOk 放宽 + ver 17）、mini-services/im-gateway/core.gen.1.mjs（重新物化）
+- 用户动作：设置 → 云端助手 → 点一次「重新同步运行包」（旧函数自动升级到 v17，真机表情包/语音/连发立刻对齐）；然后 GitHub 已推送 main。
