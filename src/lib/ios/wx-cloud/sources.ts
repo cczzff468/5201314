@@ -950,6 +950,9 @@ export const EDGE_FUNCTION_TS = `// 云端助手 · Supabase Edge Function（Den
 const CODE_SOURCE = 'deno';
 var SUPA_URL_INJECT = Deno.env.get('SUPABASE_URL') || '';
 var SUPA_KEY_INJECT = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || '';
+// v4：部署时 Management API secrets 注入的任务密钥——upload-file 动作用它鉴权（首次
+// 部署时桶里还没 config.json 可比对 secret，靠这个先立住信任链；与 config.secret 同值）
+var TASK_SECRET_ENV = Deno.env.get('WX_TASK_SECRET') || '';
 ${WX_CLOUD_CORE}
 ${ED25519_DENO}
 ${CRON_DENO}
@@ -979,8 +982,65 @@ Deno.serve(async (req) => {
 
     const action = url.searchParams.get('action') || req.headers.get('x-task-action') || '';
     const secret = req.headers.get('x-task-secret') || url.searchParams.get('secret') || '';
+
+    // ---- upload-file：手机 App 把运行包文件托云端代写 Storage（v4）----
+    // 必须放在 loadConfig 之前：首次部署时桶里还没有 config.json（loadConfig 会抛
+    // 「运行包缺失」）。鉴权优先用注入的 WX_TASK_SECRET；没注入成功时退回读一次桶里
+    // config.json 的 secret 校验（老函数没有这个动作，走不到这里）。写入用平台注入的
+    // SUPABASE_SERVICE_ROLE_KEY——用户的 Storage key 被项目全拒（JWT 轮换后的
+    // signature verification failed 等）也能照常部署。
+    if (action === 'upload-file') {
+      let cfgSecret = '';
+      try {
+        const c0 = await supaGetJson('config.json');
+        cfgSecret = c0 && c0.secret ? String(c0.secret) : '';
+      } catch (e) { /* 读取失败按没有处理 */ }
+      const authed = !!(secret && (TASK_SECRET_ENV === secret || (cfgSecret && cfgSecret === secret)));
+      if (!authed) return jr({ ok: false, error: 'bad secret' }, 401);
+      let body = { files: [] };
+      try { body = await req.json(); } catch (e) { /* 空 body */ }
+      const filesUp = Array.isArray(body.files) ? body.files.slice(0, 8) : [];
+      const uploaded = [];
+      let validCount = 0;
+      let lastUpErr = '';
+      // 先确保两个桶都在（幂等：已存在=成功）——SQL/REST 建桶路径都失败时这条能补上
+      for (const b of [{ id: 'wx-cloud', public: false }, { id: 'wx-cloud-public', public: true }]) {
+        try {
+          const br = await fetch(SUPA_URL + '/storage/v1/bucket', {
+            method: 'POST',
+            headers: Object.assign(supaHeaders(), { 'Content-Type': 'application/json' }),
+            body: JSON.stringify({ id: b.id, name: b.id, public: b.public }),
+          });
+          const bt = await br.text().catch(() => '');
+          if (!br.ok && !(br.status === 409 || /already exists|Duplicate|resource already exists/i.test(bt))) {
+            lastUpErr = '建桶失败 ' + b.id + ' ' + br.status + ' ' + String(bt).slice(0, 100);
+          }
+        } catch (e) { /* 建桶网络失败继续传文件试 */ }
+      }
+      for (const f of filesUp) {
+        const path = String((f && f.path) || '').replace(/[^a-zA-Z0-9._/-]/g, '');
+        const bucket = f && f.bucket === 'wx-cloud-public' ? 'wx-cloud-public' : 'wx-cloud';
+        const content = typeof (f && f.content) === 'string' ? f.content : '';
+        if (!path || path.length > 128 || !content || content.length > 800000) continue;
+        validCount += 1;
+        try {
+          const r = await fetch(SUPA_URL + '/storage/v1/object/' + bucket + '/' + path, {
+            method: 'POST',
+            headers: Object.assign(supaHeaders(), { 'x-upsert': 'true', 'Content-Type': (f && f.contentType) || 'text/plain' }),
+            body: content,
+          });
+          if (r.ok) uploaded.push(bucket + '/' + path);
+          else lastUpErr = String(await r.text().catch(() => '')).slice(0, 200);
+        } catch (e) {
+          lastUpErr = '网络错误';
+        }
+      }
+      return jr({ ok: validCount > 0 && uploaded.length === validCount, uploaded: uploaded, error: lastUpErr, via: 'edge-function' });
+    }
+
     const cfg = await loadConfig(false);
-    if (!cfg.secret || secret !== cfg.secret) {
+    // 任务密钥：桶里 config.secret 或部署时注入的 WX_TASK_SECRET 任一命中即可
+    if (!(secret && (secret === (cfg && cfg.secret) || (TASK_SECRET_ENV && secret === TASK_SECRET_ENV)))) {
       return jr({ ok: false, error: 'bad secret' }, 401);
     }
 

@@ -4,12 +4,13 @@
  * Supabase 一键部署管线（全部经 /api/cloud-deploy/supabase 代理，解决 CORS；
  * 用户凭证只在内存与用户自己的浏览器密文 kv 里，服务端不留存）。
  *
- * 流程：列项目 → 取 service_role key → 建桶+上传运行包（config.json / assistant.mjs /
- * history.json 种子）→ 部署 wx-assistant Edge Function → 给出 pg_cron 定时 SQL（复制到
- * SQL Editor 执行即 7x24 轮询）。更新配置只需重新同步（storage-setup），无需重部署。
+ * 流程（v4 新顺序）：列项目 → 部署 wx-assistant Edge Function（Management API，只依赖
+ * Access Token，这条链路最稳）→ 建桶+上传运行包（候选密钥×双头型直传 → 云端函数代写
+ * 多级兜底——用户 Storage key 被 JWT 轮换/新式 key 兼容性拒收时也能部署成功）→
+ * 自动开定时轮询。更新配置只需重新同步（storage-setup），无需重部署。
  */
 
-import { useWxCloud, wxCloudSnapshot, type WxCloudSupabase } from './store';
+import { useWxCloud, wxCloudSnapshot, ensureTaskSecret, type WxCloudSupabase } from './store';
 import { buildRunPackage, type RunPackageResult } from './run-package';
 import { ASSISTANT_MJS, EDGE_FUNCTION_TS } from './sources';
 
@@ -130,50 +131,68 @@ export function pickServiceKey(j: unknown): string {
   return '';
 }
 
-/** 同步运行包到用户 Supabase Storage（config.json 私有 + assistant.mjs 公开桶；不动云端聊天历史） */
+/** v4：收集项目 api-keys 响应里「所有」可用的 secret 类 key（多形状兼容同 pickServiceKey）。
+ *  顺序：sb_secret_ 新式在前（新项目主路径），legacy service_role（eyJ）在后（兑底）——
+ *  上传时逐个试，哪个通用哪个；全部被拒还有云端函数代写兑底。 */
+export function pickAllServiceKeys(j: unknown): string[] {
+  const out: string[] = [];
+  const push = (k: unknown) => {
+    if (typeof k === 'string' && k && !out.includes(k)) out.push(k);
+  };
+  const arr = Array.isArray(j)
+    ? j
+    : j && typeof j === 'object' && Array.isArray((j as { data?: unknown[] }).data)
+      ? ((j as { data?: unknown[] }).data as unknown[])
+      : null;
+  if (arr) {
+    for (const x of arr) {
+      if (!x || typeof x !== 'object') continue;
+      const k = (x as { api_key?: string; key?: string }).api_key ?? (x as { key?: string }).key;
+      if (typeof k === 'string' && k.startsWith('sb_secret_')) push(k);
+    }
+    for (const x of arr) {
+      if (!x || typeof x !== 'object') continue;
+      const name = (x as { name?: string }).name;
+      const k = (x as { api_key?: string; key?: string }).api_key ?? (x as { key?: string }).key;
+      if (typeof k === 'string' && k.startsWith('eyJ') && (name === 'service_role' || name === 'service_role_key')) push(k);
+    }
+  } else if (j && typeof j === 'object') {
+    const o = j as { service_role?: string; service_role_key?: string; secret?: string };
+    if (o.secret && o.secret.startsWith('sb_secret_')) push(o.secret);
+    if (o.service_role) push(o.service_role);
+    if (o.service_role_key) push(o.service_role_key);
+  }
+  return out;
+}
+
+/** 同步运行包到用户 Supabase Storage（config.json 私有 + assistant.mjs 公开桶；不动云端聊天历史）。
+ *  v4：上传三级兑底（服务端代理里实现）——候选密钥×双头型直传 → 云端函数代写（平台注入
+ *  凭证写入，不依赖用户 key）。所以「自动读取项目密钥失败」不再阻断同步：直传没成时代写
+ *  兑着；两端都不行才把每轮真实结果带回来。 */
 export async function syncRunPackage(): Promise<DeployResult> {
   const st = wxCloudSnapshot();
-  const supa = st.supabase;
+  let supa = st.supabase;
   if (!supa?.token || !supa.ref) return { ok: false, msg: '请先填写 Supabase Access Token 并选择项目' };
 
   // 存量坏 key 自愈（用户实测踩坑）：serviceKey 被填成了 Access Token（sbp_ 开头）或公开密钥
-  // （sb_publishable_）时 Storage 必拒——直接清掉并给出明确指引，下次部署重新自动获取/手动粘贴
+  // （sb_publishable_）时 Storage 必拒——直接清掉（候选列表里也剔掉，下次重新自动获取/手动粘贴）
   if (supa.serviceKey && /^(sbp_|sb_publishable_)/.test(supa.serviceKey)) {
-    const isToken = supa.serviceKey.startsWith('sbp_');
-    useWxCloud.getState().saveSupabase({ ...supa, serviceKey: '' });
-    return {
-      ok: false,
-      code: 'need_manual_key',
-      msg:
-        (isToken
-          ? '保存的密钥是 Access Token（sbp_ 开头，管理项目用的）——填错位置了，已自动清除。'
-          : '保存的密钥是公开密钥（sb_publishable_ 开头），没有写入权限，已自动清除。') +
-        '上传文件要用项目自己的密钥：到 Supabase 控制台 → Project Settings → API Keys，复制 sb_secret_ 开头的 secret key（或 Legacy API keys 里旧版 eyJ 开头的 service_role）粘贴到下方输入框，再重新点「一键部署」',
-    };
+    supa = { ...supa, serviceKey: '' };
+    useWxCloud.getState().saveSupabase(supa);
   }
 
   const pkg: RunPackageResult = await buildRunPackage();
   if (!pkg.ok) return { ok: false, msg: pkg.msg };
 
-  // service_key 缺失时先取一次（多形状兼容；拿不到回「手动粘贴」引导码）
-  let serviceKey = supa.serviceKey;
-  if (!serviceKey) {
-    const { j, text } = await supaProxy({ op: 'keys', token: supa.token, ref: supa.ref }, 25_000);
-    serviceKey = pickServiceKey(j);
-    if (!serviceKey) {
-      // 可能是 PAT 没项目权限 / 新式 secret key 不回明文——引导手动粘贴（Supabase 控制台
-      // Project Settings → API 里可直接复制 service_role / sb_secret_ 开头的 secret key）
-      const rec = (j ?? {}) as { message?: string; error?: string };
-      void text;
-      return {
-        ok: false,
-        code: 'need_manual_key',
-        msg:
-          `自动读取项目密钥失败${rec.message ? `（${String(rec.message).slice(0, 80)}）` : ''}。` +
-          '说明：Access Token 只能管理项目（列项目/部署函数），上传配置文件要用项目自己的密钥（service_role 或 sb_secret_ 开头的 secret key）。' +
-          '到 Supabase 控制台 → Project Settings → API Keys，复制 secret 类 key 粘贴到下方输入框（会先验证再保存），然后重新点「一键部署」',
-      };
-    }
+  // 候选密钥：已保存的 + 自动读取的全部 secret 类 key（尽力而为，读不到不阻断——
+  // 还有云端函数代写路径，它不需要项目密钥）
+  const candidates: string[] = [];
+  if (supa.serviceKey) candidates.push(supa.serviceKey);
+  try {
+    const { j } = await supaProxy({ op: 'keys', token: supa.token, ref: supa.ref }, 25_000);
+    for (const k of pickAllServiceKeys(j)) if (!candidates.includes(k)) candidates.push(k);
+  } catch {
+    /* 读取失败不阻断：代写路径不需要密钥 */
   }
 
   const { status, j } = await supaProxy(
@@ -181,25 +200,33 @@ export async function syncRunPackage(): Promise<DeployResult> {
       op: 'storage-setup',
       token: supa.token,
       ref: supa.ref,
-      serviceKey,
+      serviceKeys: candidates,
+      // 任务密钥：云端函数代写上传用它鉴权（没生成过就顺手生成并保存）
+      secret: supa.secret || ensureTaskSecret(),
       files: [
         { path: 'config.json', content: JSON.stringify(pkg.pkg, null, 2), bucket: BUCKET_PRIVATE, contentType: 'application/json' },
         { path: 'assistant.mjs', content: ASSISTANT_MJS, bucket: BUCKET_PUBLIC, contentType: 'text/javascript' },
       ],
     },
-    60_000,
+    150_000,
   );
   if (status !== 200) {
     const rec = (j ?? {}) as { message?: string; error?: string };
     return { ok: false, msg: rec.message || rec.error || `运行包上传失败（${status}）` };
   }
 
-  // 保存 serviceKey（密文 kv，后续同步免再取）
-  const next: WxCloudSupabase = { ...supa, serviceKey, projectUrl: `https://${supa.ref}.supabase.co` };
+  // 保存直传成功的那个 key（密文 kv，后续同步免再取）；代写成功时清掉存量坏 key
+  const rec = (j ?? {}) as { usedKey?: string; via?: string };
+  const next: WxCloudSupabase = {
+    ...supa,
+    serviceKey: typeof rec.usedKey === 'string' ? rec.usedKey : '',
+    projectUrl: `https://${supa.ref}.supabase.co`,
+  };
   useWxCloud.getState().saveSupabase(next);
+  const viaNote = rec.via === 'function' ? '（云端函数代写——项目密钥被 Storage 拒收，已走平台凭证通道）' : '';
   return {
     ok: true,
-    msg: pkg.note ? `运行包已同步到你的 Supabase${pkg.note}` : '运行包已同步到你的 Supabase',
+    msg: pkg.note ? `运行包已同步到你的 Supabase${viaNote}${pkg.note}` : `运行包已同步到你的 Supabase${viaNote}`,
     funcUrl: `${next.projectUrl}/functions/v1/${FUNC_SLUG}`,
     ...(pkg.note ? { note: pkg.note } : {}),
   };
@@ -226,19 +253,24 @@ export async function autoSyncRunPackageIfDeployed(reason: string, channel: 'qq'
   return r;
 }
 
-/** 一键部署：同步运行包 + 部署 Edge Function + 自动开定时轮询（无需用户复制 SQL） */
+/** 一键部署（v4 新顺序）：① 部署 Edge Function + 注入任务密钥 WX_TASK_SECRET（Management
+ *  API，只依赖 Access Token——这条链路最稳）→ ② 同步运行包（直传多级兑底 + 云端函数代写；
+ *  此时函数已在，用户 Storage key 被项目全拒也能传上去）→ ③ 自动开定时轮询。旧顺序
+ *  「先上传再部署」在 key 被拒收（signature verification failed 等）时卡死在第一步，
+ *  函数根本部署不出去。 */
 export async function deploySupabase(): Promise<DeployResult> {
-  const st = wxCloudSnapshot();
-  const supa = st.supabase;
+  const st0 = wxCloudSnapshot();
+  let supa = st0.supabase;
   if (!supa?.token || !supa.ref) return { ok: false, msg: '请先填写 Supabase Access Token 并选择项目' };
 
-  const sync = await syncRunPackage();
-  if (!sync.ok) return sync;
+  // 任务密钥先立住：部署时注入函数（WX_TASK_SECRET），同步运行包时云端代写鉴权都用它
+  const secret = ensureTaskSecret();
+  supa = wxCloudSnapshot().supabase ?? supa;
 
-  const { status, j } = await supaProxy({ op: 'deploy', token: supa.token, ref: supa.ref, code: EDGE_FUNCTION_TS }, 150_000);
-  if (status >= 400) {
-    const rec = (j ?? {}) as { message?: string; error?: string };
-    return { ok: false, msg: rec.message || rec.error || `函数部署失败（${status}）` };
+  const dep = await supaProxy({ op: 'deploy', token: supa.token, ref: supa.ref, code: EDGE_FUNCTION_TS, secret }, 150_000);
+  if (dep.status >= 400) {
+    const rec = (dep.j ?? {}) as { message?: string; error?: string };
+    return { ok: false, msg: rec.message || rec.error || `函数部署失败（${dep.status}）` };
   }
 
   const projectUrl = `https://${supa.ref}.supabase.co`;
@@ -249,13 +281,21 @@ export async function deploySupabase(): Promise<DeployResult> {
   });
   useWxCloud.getState().setPlatform('supabase');
 
+  // 运行包上传（函数已部署：候选密钥直传 → 云端函数代写多级兑底）
+  const sync = await syncRunPackage();
+  if (!sync.ok) {
+    return { ...sync, msg: `云端函数已部署成功，但运行包上传失败：${sync.msg}` };
+  }
+
   // 自动开启定时轮询（函数直连用户库执行 cron.schedule；失败时 UI 可用手动 SQL 兜底）
   // v3：走同源代理转发（旧版函数无 CORS 头，浏览器直连 funcUrl 必 Failed to fetch →
   // 定时开不了 → 微信云端接管后 AI 不回消息；代理转发无 CORS 问题，存量部署立即修复）
   let cronOk = false;
   let cronMsg = '';
   try {
-    const r = await funcViaProxy(supa.ref, supa.secret, 'setup-cron', {}, 60_000);
+    // v4：重读快照（ensureTaskSecret 刚写过库），避免用到部署前的旧 secret
+    const fresh = wxCloudSnapshot().supabase ?? supa;
+    const r = await funcViaProxy(fresh.ref, fresh.secret, 'setup-cron', {}, 60_000);
     const jr = r.j as { ok?: boolean; error?: string } | null;
     cronOk = r.ok && !!jr?.ok;
     cronMsg = cronOk
