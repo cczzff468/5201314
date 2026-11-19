@@ -1,0 +1,602 @@
+     1→     1→/**
+     2→     2→ * 云端助手运行时源码 v5（模板字符串，部署时下发）——被动 Webhook 版。
+     3→     3→ *
+     4→     4→ * 三种职责、两个运行时：
+     5→     5→ * - 微信收发（getupdates 长轮询 → 人设回复 → sendmessage）：Node 容器常驻跑；
+     6→     6→ *   Supabase Edge Function 改为「单轮收发」（手动「云端测试一次」触发，一次 getupdates
+     7→     7→ *   服务端挂起 ~35s，零 CPU 热转——旧版 100s 热循环轮询是 546 WORKER_RESOURCE_LIMIT
+     8→     8→ *   的根因）；云端不再自动定时轮询（v5 移除 pg_cron 路径与 npm:postgres 依赖）。
+     9→     9→ * - QQ Webhook（官方已停 WebSocket，走 HTTP 回调，被动接收）：两个运行时的对外 HTTP
+    10→    10→ *   入口都能接——Edge Function 的函数 URL（QQ 控制台回调地址直接填它，无需带自定义头）、
+    11→    11→ *   Node 容器的 POST /qq。处理：Ed25519 验签（Bot Secret 派生私钥）→ 校验请求签名
+    12→    12→ *   plain_token → C2C/群@消息 → 人设回复 → v2 被动回复接口。
+    13→    13→ * - 运行包历史种子（v5）：config.wechat.history / config.qq.history 是手机 App 同步时
+    14→    14→ *   打包的网站聊天最近 20 条——云端冷启动不再失忆，回复内容与网站聊天同源连续。
+    15→    15→ * - getupdates 游标持久化（v5）：state/wx-updates-buf.json + 已回复 message_id 去重
+    16→    16→ *   （state/wx-seen.json）——旧版每次调用从空游标重收整批积压 → 同一条消息被回
+    17→    17→ *   十几次的「回复风暴」根因。
+    18→    18→ *
+    19→    19→ * 配置（用户 Supabase 私有桶 wx-cloud/config.json，v2 形状）：
+    20→    20→ * { version:2, secret, wechat:{botToken,botId,persona,history}, qq:{appId,appSecret,persona,history},
+    21→    21→ *   llm:{baseUrl,apiKey,model}, promptTimeZone, syncedAt }
+    22→    22→ *
+    23→    23→ * 注意：模板里内层代码一律用单双引号，不用反引号，避免与外层模板字面量冲突。
+    24→    24→ */
+    25→    25→
+    26→    26→// ---------------- 微信 + QQ 共用核心（Node / Deno 通用，纯 fetch） ----------------
+    27→    27→
+    28→    28→export const WX_CLOUD_CORE = String.raw`
+    29→    29→// ---- 微信云端助手核心（自动生成，勿手工编辑） ----
+    30→    30→var ILINK = 'https://ilinkai.weixin.qq.com';
+    31→    31→// 可变：loadConfig 读到运行包 wechat.baseUrl（confirmed 回包）后切过去；其余场景回默认
+    32→    32→var ILINK_HOST = ILINK;
+    33→    33→var QQ_API = 'https://api.sgroup.qq.com';
+    34→    34→// QQ 取凭证双端点（官方现行版先行：海外出口可达；旧 /api/v1/* 网关层拦海外 503 作兑底）
+    35→    35→var QQ_TOKEN_URLS = ['https://api.bot.qq.com/app/getAppAccessToken', 'https://bots.qq.com/api/v1/getAppAccessToken'];
+    36→    36→var BASE_INFO = { channel_version: '2.4.10', bot_agent: 'OpenClaw' };
+    37→    37→var SUPA_URL = (typeof SUPA_URL_INJECT !== 'undefined' && SUPA_URL_INJECT) || '';
+    38→    38→var SUPA_KEY = (typeof SUPA_KEY_INJECT !== 'undefined' && SUPA_KEY_INJECT) || '';
+    39→    39→var BUCKET = 'wx-cloud';
+    40→    40→var UPDATES_BUF = '';
+    41→    41→var CFG = null;
+    42→    42→var CFG_AT = 0;
+    43→    43→var QQ_TOKEN = '';
+    44→    44→var QQ_TOKEN_AT = 0;
+    45→    45→var HIST_WX = null;
+    46→    46→var HIST_QQ = null;
+    47→    47→var HIST_AT = 0;
+    48→    48→
+    49→    49→function supaHeaders() {
+    50→    50→  // 按 key 类型区分（官方文档两套鉴权）：新式 key（sb_secret_/sb_publishable_ 开头）
+    51→    51→  // 不是 JWT，只能放 apikey 头——放 Authorization Bearer 会被网关/Storage 当 JWT 解析，
+    52→    52→  // 报 400 Invalid Compact JWS；legacy JWT（eyJ 开头）则 apikey + Bearer 双带
+    53→    53→  if (/^sb_(secret|publishable)_/.test(SUPA_KEY)) {
+    54→    54→    return { apikey: SUPA_KEY, 'Content-Type': 'application/json' };
+    55→    55→  }
+    56→    56→  return { apikey: SUPA_KEY, Authorization: 'Bearer ' + SUPA_KEY, 'Content-Type': 'application/json' };
+    57→    57→}
+    58→    58→
+    59→    59→async function supaGetJson(path) {
+    60→    60→  var r = await fetch(SUPA_URL + '/storage/v1/object/' + BUCKET + '/' + path, { headers: supaHeaders() });
+    61→    61→  if (!r.ok) return null;
+    62→    62→  try { return await r.json(); } catch (e) { return null; }
+    63→    63→}
+    64→    64→
+    65→    65→async function supaPutJson(path, obj) {
+    66→    66→  try {
+    67→    67→    await fetch(SUPA_URL + '/storage/v1/object/' + BUCKET + '/' + path, {
+    68→    68→      method: 'POST',
+    69→    69→      headers: Object.assign(supaHeaders(), { 'x-upsert': 'true', 'Content-Type': 'application/json' }),
+    70→    70→      body: JSON.stringify(obj),
+    71→    71→    });
+    72→    72→  } catch (e) { /* 心跳/历史写失败不致命 */ }
+    73→    73→}
+    74→    74→
+    75→    75→async function loadConfig(force) {
+    76→    76→  if (!force && CFG && Date.now() - CFG_AT < 60000) return CFG;
+    77→    77→  var c = await supaGetJson('config.json');
+    78→    78→  if (!c) throw new Error('运行包缺失：请回到手机 App「设置 → 云端助手」重新同步');
+    79→    79→  CFG = c;
+    80→    80→  CFG_AT = Date.now();
+    81→    81→  // confirmed 回包的 baseurl：云端 Bot API 跟着走（仅放行 *.weixin.qq.com / *.qq.com，防 SSRF）
+    82→    82→  var bu = c && c.wechat && typeof c.wechat.baseUrl === 'string' ? c.wechat.baseUrl.replace(/\/+$/, '') : '';
+    83→    83→  ILINK_HOST = /^https:\/\/[a-z0-9.-]+\.(weixin\.)?qq\.com$/i.test(bu) ? bu : ILINK;
+    84→    84→  return CFG;
+    85→    85→}
+    86→    86→
+    87→    87→/** X-WECHAT-UIN：随机 uint32 十进制串再 base64（协议约定形态，上游不校验具体值；Deno/Node 通用） */
+    88→    88→function wxUin() {
+    89→    89→  var s = String(Math.floor(Math.random() * 4294967295));
+    90→    90→  return (typeof btoa === 'function') ? btoa(s) : Buffer.from(s).toString('base64');
+    91→    91→}
+    92→    92→
+    93→    93→async function loadWxHistory(force) {
+    94→    94→  if (!force && HIST_WX && Date.now() - HIST_AT < 30000) return HIST_WX;
+    95→    95→  var h = await supaGetJson('history.json');
+    96→    96→  HIST_WX = h && Array.isArray(h.msgs) ? h.msgs : [];
+    97→    97→  HIST_AT = Date.now();
+    98→    98→  return HIST_WX;
+    99→    99→}
+   100→   100→
+   101→   101→async function saveWxHistory() {
+   102→   102→  await supaPutJson('history.json', { msgs: (HIST_WX || []).slice(-30), updatedAt: Date.now() });
+   103→   103→}
+   104→   104→
+   105→   105→/** v5 游标持久化：getupdates 游标存进桶（state/wx-updates-buf.json），新实例/冷启动不再
+   106→   106→ *  从空游标重收整批积压（旧版「一条消息被回十几次」的回复风暴根因）；已回复的
+   107→   107→ *  message_id 另存 state/wx-seen.json 去重兑底（游标回退时只补未回成功的那些）。 */
+   108→   108→var WX_SEEN = null;
+   109→   109→async function loadWxCursor() {
+   110→   110→  try {
+   111→   111→    var s = await supaGetJson('state/wx-updates-buf.json');
+   112→   112→    if (s && typeof s.buf === 'string' && s.buf) UPDATES_BUF = s.buf;
+   113→   113→    var sn = await supaGetJson('state/wx-seen.json');
+   114→   114→    WX_SEEN = sn && Array.isArray(sn.ids) ? sn.ids : [];
+   115→   115→  } catch (e) { /* 兑底：从空游标开始（首条会重收但 seen 兑底） */ }
+   116→   116→}
+   117→   117→async function saveWxCursor() {
+   118→   118→  if (!UPDATES_BUF) return;
+   119→   119→  await supaPutJson('state/wx-updates-buf.json', { buf: UPDATES_BUF, at: Date.now() });
+   120→   120→}
+   121→   121→async function markWxSeen(id) {
+   122→   122→  if (!id) return;
+   123→   123→  WX_SEEN = (WX_SEEN || []).concat([String(id)]).slice(-60);
+   124→   124→  await supaPutJson('state/wx-seen.json', { ids: WX_SEEN, updatedAt: Date.now() });
+   125→   125→}
+   126→   126→function wxSeenHas(id) {
+   127→   127→  if (!id || !WX_SEEN) return false;
+   128→   128→  return WX_SEEN.indexOf(String(id)) >= 0;
+   129→   129→}
+   130→   130→
+   131→   131→async function ilinkCall(path, botToken, body) {
+   132→   132→  var r = await fetch(ILINK_HOST + path, {
+   133→   133→    method: 'POST',
+   134→   134→    headers: {
+   135→   135→      'Content-Type': 'application/json',
+   136→   136→      Authorization: 'Bearer ' + botToken,
+   137→   137→      AuthorizationType: 'ilink_bot_token',
+   138→   138→      'X-WECHAT-UIN': wxUin(),
+   139→   139→      'iLink-App-Id': 'bot',
+   140→   140→      'iLink-App-ClientVersion': String(132106),
+   141→   141→    },
+   142→   142→    body: JSON.stringify(body || {}),
+   143→   143→  });
+   144→   144→  var j = null;
+   145→   145→  try { j = await r.json(); } catch (e) { /* 保留 null */ }
+   146→   146→  if (!r.ok || (j && typeof j.error_code === 'number' && j.error_code !== 0 && j.error_code !== -1 && path.indexOf('getupdates') < 0)) {
+   147→   147→    throw new Error('iLink ' + path + ' 失败 ' + r.status);
+   148→   148→  }
+   149→   149→  return j || {};
+   150→   150→}
+   151→   151→
+   152→   152→/** LLM：OpenAI 兼容 chat/completions（非流式），跟随手机 App「API 设置」 */
+   153→   153→function llmCandidates(baseUrl) {
+   154→   154→  var b = String(baseUrl || '').replace(/\/+$/, '');
+   155→   155→  if (!b) return [];
+   156→   156→  if (/\/chat\/completions$/.test(b)) return [b];
+   157→   157→  if (/\/v\d+$/.test(b)) return [b + '/chat/completions'];
+   158→   158→  return [b + '/v1/chat/completions', b + '/chat/completions'];
+   159→   159→}
+   160→   160→
+   161→   161→async function callLlm(cfg, messages) {
+   162→   162→  var llm = cfg.llm || {};
+   163→   163→  var cands = llmCandidates(llm.baseUrl);
+   164→   164→  var lastErr = '未配置模型 API（在手机 App 设置 → API 设置里填写后重新同步）';
+   165→   165→  for (var i = 0; i < cands.length; i++) {
+   166→   166→    try {
+   167→   167→      var r = await fetch(cands[i], {
+   168→   168→        method: 'POST',
+   169→   169→        headers: {
+   170→   170→          'Content-Type': 'application/json',
+   171→   171→          Authorization: llm.apiKey ? 'Bearer ' + llm.apiKey : '',
+   172→   172→        },
+   173→   173→        body: JSON.stringify({ model: llm.model || 'gpt-4o-mini', messages: messages, max_tokens: 500 }),
+   174→   174→      });
+   175→   175→      if (!r.ok) { lastErr = 'LLM ' + r.status; continue; }
+   176→   176→      var j = await r.json();
+   177→   177→      var text = j && j.choices && j.choices[0] && j.choices[0].message && j.choices[0].message.content;
+   178→   178→      if (typeof text === 'string' && text.trim()) return text.trim();
+   179→   179→      lastErr = 'LLM 空回复';
+   180→   180→    } catch (e) { lastErr = String(e); }
+   181→   181→  }
+   182→   182→  throw new Error(lastErr);
+   183→   183→}
+   184→   184→
+   185→   185→function extractText(msg) {
+   186→   186→  var list = (msg && msg.item_list) || [];
+   187→   187→  for (var i = 0; i < list.length; i++) {
+   188→   188→    if (list[i] && list[i].type === 1 && list[i].text_item && typeof list[i].text_item.text === 'string') {
+   189→   189→      return list[i].text_item.text.trim();
+   190→   190→    }
+   191→   191→  }
+   192→   192→  // 入站图片/表情包（type 2，AES 加密看不到内容）：占位让 AI 按语境回应（不整条丢弃）
+   193→   193→  for (var k = 0; k < list.length; k++) {
+   194→   194→    if (list[k] && list[k].type === 2) return '（对方发了一个表情包/图片，内容看不到）';
+   195→   195→  }
+   196→   196→  return '';
+   197→   197→}
+   198→   198→
+   199→   199→// ---- 真机微信出站净化（iLink 通道只能发文字；v4：大表情标记 → 经典表情代码） ----
+   200→   200→// 根因（用户实拍）：云端人设沿用了站内微信的 [表情包:ID] 习惯（历史/人设教学带进去的），
+   201→   201→// iLink 通道发不了图 → 标记以裸文字出现在真机微信上。提示词拦不住，发送边界确定性转换。
+   202→   202→// 转换规则：去 ID 前缀后名字在经典表情清单内 → [名字]（真机微信客户端把该文本渲染成真
+   203→   203→// 表情，AI 等于真会发表情）；不在清单 → 剩除；净空 → 颜文字兑底（不空消息）。
+   204→   204→var WX_CLASSIC = ('微笑,撇嘴,色,发呆,得意,流泪,害羞,闭嘴,睡,大哭,尴尬,发怒,调皮,呲牙,惊讶,难过,囧,抓狂,吐,偷笑,愉快,白眼,傲慢,困,惊恐,憨笑,悠闲,咒骂,疑问,嘘,晕,衰,骷髅,敲打,再见,擦汗,抠鼻,鼓掌,坏笑,右哼哼,鄙视,委屈,快哭了,阴险,亲亲,可怜,笑脸,生病,脸红,破涕为笑,恐惧,失望,无语,嘿哈,捂脸,奸笑,机智,皱眉,耶,吃瓜,加油,汗,天啊,Emm,社会社会,旺柴,好的,打脸,哇,翻白眼,666,让我看看,叹气,苦涩,裂开,嘴唇,爱心,心碎,拥抱,强,弱,握手,胜利,抱拳,勾引,拳头,OK,合十,猪头,便便,月亮,太阳,庆祝,红包,發,福,烟花,爆竹,礼物,跳跳,发抖,转圈,啤酒,咖啡,蛋糕,玫瑰,凋谢,菜刀,炸弹').split(',');
+   205→   205→var WX_CLASSIC_SET = {};
+   206→   206→for (var wci = 0; wci < WX_CLASSIC.length; wci++) WX_CLASSIC_SET[WX_CLASSIC[wci]] = 1;
+   207→   207→var WX_EMOJI_FALLBACKS = ['(¬‿¬)', '(๑•̀ㅂ•́)و✧', '٩(˃ᴗ˂)۶', '(っ˘ω˘ς)'];
+   208→   208→var WX_MSG_ERR = '';
+   209→   209→var WX_MSG_ERR_AT = 0;
+   210→   210→function sanitizeWxOutText(text) {
+   211→   211→  var tagRe = /[\[【]\s*(?:发送了|发出了)?\s*(?:表情包|表情|图片|照片|语音|贴纸|Sticker)\s*[:：]\s*([^\]】]{1,24})\s*[\]】]/g;
+   212→   212→  var out = String(text || '').replace(tagRe, function (_all, rawName) {
+   213→   213→    var name = String(rawName || '').trim().replace(/^(?:wwb|wxb|qqb|wx|qq|mt|wb)-/i, '').trim();
+   214→   214→    return WX_CLASSIC_SET[name] ? '[' + name + ']' : '';
+   215→   215→  });
+   216→   216→  out = out.replace(/\n{3,}/g, '\n\n').replace(/^[\s\n]+|[\s\n]+$/g, '').replace(/^[，,。.\s]+/, '');
+   217→   217→  if (out) return out;
+   218→   218→  return WX_EMOJI_FALLBACKS[Math.floor(Math.random() * WX_EMOJI_FALLBACKS.length)];
+   219→   219→}
+   220→   220→
+   221→   221→async function sendWxText(cfg, toUserId, contextToken, text) {
+   222→   222→  await ilinkCall('/ilink/bot/sendmessage', cfg.wechat.botToken, {
+   223→   223→    msg: {
+   224→   224→      from_user_id: '',
+   225→   225→      to_user_id: toUserId,
+   226→   226→      client_id: Date.now() + '-' + Math.random().toString(36).slice(2),
+   227→   227→      message_type: 2,
+   228→   228→      message_state: 2,
+   229→   229→      context_token: contextToken,
+   230→   230→      item_list: [{ type: 1, text_item: { text: text.slice(0, 2000) } }],
+   231→   231→    },
+   232→   232→    base_info: BASE_INFO,
+   233→   233→  });
+   234→   234→}
+   235→   235→
+   236→   236→/** 微信：处理一条来消息，返回是否成功回复。
+   237→   237→ *  v4：①LLM 失败重试一次（原来一次失败消息就被静默丢弃，主人看到「ai不回信息」）；
+   238→   238→ *  ②出站文本经 sanitizeWxOutText 净化（大表情标记→经典表情代码/剥除）；
+   239→   239→ *  ③失败原因记入 WX_MSG_ERR（心跳/ping 可见——原来逐条失败完全不可见，无法排查） */
+   240→   240→async function handleWxMsg(cfg, msg) {
+   241→   241→  var text = extractText(msg);
+   242→   242→  if (!text || !msg.from_user_id || !msg.context_token) return false;
+   243→   243→  if (msg.from_user_id === cfg.wechat.botId) return false;
+   244→   244→  try {
+   245→   245→    var c = await ilinkCall('/ilink/bot/getconfig', cfg.wechat.botToken, {
+   246→   246→      ilink_user_id: msg.from_user_id, context_token: msg.context_token, base_info: BASE_INFO,
+   247→   247→    });
+   248→   248→    if (c && c.typing_ticket) {
+   249→   249→      ilinkCall('/ilink/bot/sendtyping', cfg.wechat.botToken, {
+   250→   250→        ilink_user_id: msg.from_user_id, typing_ticket: c.typing_ticket, status: 2, base_info: BASE_INFO,
+   251→   251→      }).catch(function () {});
+   252→   252→    }
+   253→   253→  } catch (e) { /* 可选 */ }
+   254→   254→  try {
+   255→   255→    var hist = await loadWxHistory(false);
+   256→   256→    // v5 历史种子：云端还没存过历史时用运行包里打包的网站聊天最近 20 条（云端冷启动
+   257→   257→    // 不失忆——回复内容与手机 App 聊天同源连续，用户反馈「网站上怎么回复的微信就怎么回」）
+   258→   258→    if ((!hist || !hist.length) && cfg.wechat && Array.isArray(cfg.wechat.history) && cfg.wechat.history.length) {
+   259→   259→      hist = cfg.wechat.history.slice(-20);
+   260→   260→      HIST_WX = hist;
+   261→   261→    }
+   262→   262→    var system = (cfg.wechat.persona && cfg.wechat.persona.system) || '你和主人在真实微信上聊天，回复简短自然，绝不透露自己是AI。';
+   263→   263→    var msgs = [{ role: 'system', content: system }];
+   264→   264→    for (var i = Math.max(0, hist.length - 12); i < hist.length; i++) msgs.push(hist[i]);
+   265→   265→    msgs.push({ role: 'user', content: text.slice(0, 2000) });
+   266→   266→    var reply = '';
+   267→   267→    var lastLlmErr = null;
+   268→   268→    for (var att = 0; att < 2 && !reply; att++) {
+   269→   269→      try {
+   270→   270→        reply = sanitizeWxOutText(await callLlm(cfg, msgs));
+   271→   271→      } catch (le) { lastLlmErr = le; }
+   272→   272→    }
+   273→   273→    if (!reply) {
+   274→   274→      WX_MSG_ERR = ('LLM 回复失败：' + String((lastLlmErr && lastLlmErr.message) || lastLlmErr)).slice(0, 160);
+   275→   275→      WX_MSG_ERR_AT = Date.now();
+   276→   276→      throw new Error(WX_MSG_ERR);
+   277→   277→    }
+   278→   278→    await sendWxText(cfg, msg.from_user_id, msg.context_token, reply);
+   279→   279→    if (WX_MSG_ERR_AT && Date.now() - WX_MSG_ERR_AT > 600000) WX_MSG_ERR = '';
+   280→   280→    HIST_WX = (HIST_WX || []).concat([
+   281→   281→      { role: 'user', content: text.slice(0, 500), ts: Date.now() },
+   282→   282→      { role: 'assistant', content: reply.slice(0, 500), ts: Date.now() },
+   283→   283→    ]).slice(-30);
+   284→   284→    await saveWxHistory();
+   285→   285→    return true;
+   286→   286→  } catch (e) {
+   287→   287→    if (!WX_MSG_ERR) {
+   288→   288→      WX_MSG_ERR = ('微信回复失败：' + String(e && e.message)).slice(0, 160);
+   289→   289→      WX_MSG_ERR_AT = Date.now();
+   290→   290→    }
+   291→   291→    throw e;
+   292→   292→  }
+   293→   293→}
+   294→   294→
+   295→   295→/** 微信：轮询一轮，返回本轮处理了几条消息；TOKEN_EXPIRED 抛错。
+   296→   296→ *  v5：游标恢复 → 收一批 → 逐条回（已回过的 message_id 跳过）→ 全部成功才落游标
+   297→   297→ *  （中途失败保持旧游标：下轮重收整批，已回的靠 seen 跳过、只重试没回成功的）。 */
+   298→   298→async function tick() {
+   299→   299→  var cfg = await loadConfig(false);
+   300→   300→  if (!cfg.wechat || !cfg.wechat.botToken) return 0;
+   301→   301→  await loadWxCursor();
+   302→   302→  var d = await ilinkCall('/ilink/bot/getupdates', cfg.wechat.botToken, {
+   303→   303→    get_updates_buf: UPDATES_BUF, base_info: BASE_INFO,
+   304→   304→  });
+   305→   305→  if (d && d.error_code === -14) throw new Error('TOKEN_EXPIRED');
+   306→   306→  if (d && typeof d.get_updates_buf === 'string' && d.get_updates_buf) UPDATES_BUF = d.get_updates_buf;
+   307→   307→  var n = 0;
+   308→   308→  var pending = 0;
+   309→   309→  var msgs = (d && d.msgs) || [];
+   310→   310→  for (var i = 0; i < msgs.length; i++) {
+   311→   311→    var mid = msgs[i] && msgs[i].message_id != null ? String(msgs[i].message_id) : '';
+   312→   312→    if (wxSeenHas(mid)) continue;
+   313→   313→    pending++;
+   314→   314→    try {
+   315→   315→      if (await handleWxMsg(cfg, msgs[i])) {
+   316→   316→        n++;
+   317→   317→        if (mid) await markWxSeen(mid);
+   318→   318→      }
+   319→   319→    } catch (e) {
+   320→   320→      if (String(e && e.message).indexOf('TOKEN_EXPIRED') >= 0) throw e;
+   321→   321→      /* 单条失败继续下一条；原因已记入 WX_MSG_ERR（心跳/ping 可见） */
+   322→   322→    }
+   323→   323→  }
+   324→   324→  if (pending === 0 || n >= pending) await saveWxCursor();
+   325→   325→  return n;
+   326→   326→}
+   327→   327→
+   328→   328→// ---- QQ：access_token（2h 有效，110 分钟刷新缓存；双端点降级：新端点海外可达，旧端点网关拦 503） ----
+   329→   329→async function qqToken(cfg) {
+   330→   330→  if (QQ_TOKEN && Date.now() - QQ_TOKEN_AT < 110 * 60 * 1000) return QQ_TOKEN;
+   331→   331→  var qq = cfg.qq || {};
+   332→   332→  var lastErr = '';
+   333→   333→  var lastStatus = 0;
+   334→   334→  for (var ti = 0; ti < QQ_TOKEN_URLS.length; ti++) {
+   335→   335→    try {
+   336→   336→      var r = await fetch(QQ_TOKEN_URLS[ti], {
+   337→   337→        method: 'POST',
+   338→   338→        headers: { 'Content-Type': 'application/json' },
+   339→   339→        body: JSON.stringify({ appId: qq.appId, clientSecret: qq.appSecret }),
+   340→   340→      });
+   341→   341→      lastStatus = r.status;
+   342→   342→      var j = await r.json().catch(function () { return {}; });
+   343→   343→      if (j && j.access_token) {
+   344→   344→        QQ_TOKEN = j.access_token;
+   345→   345→        QQ_TOKEN_AT = Date.now();
+   346→   346→        return QQ_TOKEN;
+   347→   347→      }
+   348→   348→      // 业务错误（官方约定 HTTP 200 + code）：换端点无意义，直接报可读错（code 兼容数字/字符串）
+   349→   349→      var bizCode = Number(j && j.code) || 0;
+   350→   350→      if (bizCode) {
+   351→   351→        if (bizCode === 100016) throw new Error('QQ 凭证不正确（100016）：请核对 AppID/AppSecret');
+   352→   352→        if (bizCode === 100007) throw new Error('QQ AppID 无效或机器人状态异常（100007）');
+   353→   353→        if (bizCode === 10004) throw new Error('QQ 机器人不存在（10004）');
+   354→   354→        if (bizCode === 100001) throw new Error('QQ 平台频控（100001）：稍后再试');
+   355→   355→        throw new Error('QQ token 获取失败 code ' + bizCode);
+   356→   356→      }
+   357→   357→      lastErr = 'HTTP ' + r.status;
+   358→   358→    } catch (te) {
+   359→   359→      if (String(te && te.message).indexOf('QQ ') === 0) throw te; // 业务错不再降级
+   360→   360→      lastErr = String(te && te.message);
+   361→   361→    }
+   362→   362→  }
+   363→   363→  throw new Error('QQ token 获取失败 ' + (lastStatus || '') + ' ' + lastErr.slice(0, 80));
+   364→   364→}
+   365→   365→
+   366→   366→/** QQ：Ed25519 种子（Bot Secret 重复到 32 字节；官方文档算法） */
+   367→   367→function qqSeed(botSecret) {
+   368→   368→  var s = String(botSecret || '');
+   369→   369→  if (!s) return null;
+   370→   370→  while (s.length < 32) s += s;
+   371→   371→  return s.slice(0, 32);
+   372→   372→}
+   373→   373→
+   374→   374→async function loadQqHistory(force) {
+   375→   375→  if (!force && HIST_QQ && Date.now() - HIST_AT < 30000) return HIST_QQ;
+   376→   376→  var h = await supaGetJson('qq-history.json');
+   377→   377→  HIST_QQ = h && Array.isArray(h.msgs) ? h.msgs : [];
+   378→   378→  HIST_AT = Date.now();
+   379→   379→  return HIST_QQ;
+   380→   380→}
+   381→   381→
+   382→   382→async function appendQqHistory(item) {
+   383→   383→  HIST_QQ = (HIST_QQ || []).concat([item]).slice(-200);
+   384→   384→  await supaPutJson('qq-history.json', { msgs: HIST_QQ, updatedAt: Date.now() });
+   385→   385→}
+   386→   386→
+   387→   387→/** QQ：被动回复（v2 接口，60 分钟内有效、每条消息最多回 5 次；seq 递增防同 msg_id 撞号） */
+   388→   388→var QQ_SEQ = 1;
+   389→   389→async function qqReply(cfg, openid, msgId, content, isGroup, groupOpenid) {
+   390→   390→  var token = await qqToken(cfg);
+   391→   391→  var url = isGroup ? QQ_API + '/v2/groups/' + groupOpenid + '/messages' : QQ_API + '/v2/users/' + openid + '/messages';
+   392→   392→  var r = await fetch(url, {
+   393→   393→    method: 'POST',
+   394→   394→    headers: { 'Content-Type': 'application/json', Authorization: 'QQBot ' + token },
+   395→   395→    body: JSON.stringify({ msg_type: 0, content: content.slice(0, 1500), msg_id: msgId, msg_seq: QQ_SEQ++ }),
+   396→   396→  });
+   397→   397→  if (!r.ok) {
+   398→   398→    var t = await r.text().catch(function () { return ''; });
+   399→   399→    throw new Error('QQ 回复失败 ' + r.status + ' ' + t.slice(0, 100));
+   400→   400→  }
+   401→   401→}
+   402→   402→
+   403→   403→/** QQ：上传富媒体文件（file_type 1=图片 2=视频 3=语音 silk；file 为 base64，≤2MB），返回 file_info 句柄 */
+   404→   404→async function qqUploadMedia(cfg, openid, isGroup, groupOpenid, fileType, dataB64) {
+   405→   405→  var token = await qqToken(cfg);
+   406→   406→  var url = isGroup ? QQ_API + '/v2/groups/' + groupOpenid + '/files' : QQ_API + '/v2/users/' + openid + '/files';
+   407→   407→  var r = await fetch(url, {
+   408→   408→    method: 'POST',
+   409→   409→    headers: { 'Content-Type': 'application/json', Authorization: 'QQBot ' + token },
+   410→   410→    body: JSON.stringify({ file_type: fileType, file: dataB64, srv_send_msg: false }),
+   411→   411→  });
+   412→   412→  var t = await r.text().catch(function () { return ''; });
+   413→   413→  if (!r.ok) throw new Error('QQ 富媒体上传失败 ' + r.status + ' ' + t.slice(0, 100));
+   414→   414→  var j = null;
+   415→   415→  try { j = JSON.parse(t); } catch (e) { j = null; }
+   416→   416→  var fi = j && (j.file_info || (j.file_infos && j.file_infos[0] && j.file_infos[0].file_info)) || '';
+   417→   417→  if (!fi) throw new Error('QQ 富媒体上传失败：无 file_info');
+   418→   418→  return fi;
+   419→   419→}
+   420→   420→
+   421→   421→/** QQ：发富媒体消息（msg_type=2 media；用于表情图片 / 语音条） */
+   422→   422→async function qqReplyMedia(cfg, openid, msgId, fileInfo, isGroup, groupOpenid) {
+   423→   423→  var token = await qqToken(cfg);
+   424→   424→  var url = isGroup ? QQ_API + '/v2/groups/' + groupOpenid + '/messages' : QQ_API + '/v2/users/' + openid + '/messages';
+   425→   425→  var r = await fetch(url, {
+   426→   426→    method: 'POST',
+   427→   427→    headers: { 'Content-Type': 'application/json', Authorization: 'QQBot ' + token },
+   428→   428→    body: JSON.stringify({ msg_type: 2, media: { file_info: fileInfo }, msg_id: msgId, msg_seq: QQ_SEQ++ }),
+   429→   429→  });
+   430→   430→  if (!r.ok) {
+   431→   431→    var t = await r.text().catch(function () { return ''; });
+   432→   432→    throw new Error('QQ 富媒体发送失败 ' + r.status + ' ' + t.slice(0, 100));
+   433→   433→  }
+   434→   434→}
+   435→   435→
+   436→   436→/** silk 编码器（QQ 原生语音条）：Deno 用 npm:silk-wasm，Node 用运行包同目录 ./silk-wasm.mjs + silk.wasm。
+   437→   437→ *  加载失败缓存 10 分钟（文件没带上/网络问题时不每条消息都重试）；失败返回 null 降级文字 */
+   438→   438→var SILK_MOD = null;
+   439→   439→var SILK_FAIL_AT = 0;
+   440→   440→async function silkEncode(u8) {
+   441→   441→  if (SILK_FAIL_AT && Date.now() - SILK_FAIL_AT < 600000) return null;
+   442→   442→  try {
+   443→   443→    if (!SILK_MOD) {
+   444→   444→      SILK_MOD = (typeof Deno !== 'undefined')
+   445→   445→        ? await import('npm:silk-wasm@3')
+   446→   446→        : await import('./silk-wasm.mjs');
+   447→   447→    }
+   448→   448→    var r = await SILK_MOD.encode(u8, 0);
+   449→   449→    return r && r.data && r.data.length ? r.data : null;
+   450→   450→  } catch (e) {
+   451→   451→    SILK_MOD = null;
+   452→   452→    SILK_FAIL_AT = Date.now();
+   453→   453→    return null;
+   454→   454→  }
+   455→   455→}
+   456→   456→
+   457→   457→/** 云端 TTS（OpenAI 兼容 /audio/speech，只要 wav）→ silk → QQ 原生语音条。失败返回 null（降级文字） */
+   458→   458→async function synthesizeQqVoice(cfg, text) {
+   459→   459→  var tts = cfg.qq && cfg.qq.tts;
+   460→   460→  if (!tts || !tts.baseUrl || !tts.apiKey) return null;
+   461→   461→  var b = String(tts.baseUrl).replace(/\/+$/, '');
+   462→   462→  var url = /\/audio\/speech$/.test(b) ? b : b + '/audio/speech';
+   463→   463→  try {
+   464→   464→    var r = await fetch(url, {
+   465→   465→      method: 'POST',
+   466→   466→      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + tts.apiKey },
+   467→   467→      body: JSON.stringify({ model: tts.model || 'tts-1', voice: tts.voice || 'alloy', input: text.slice(0, 200), response_format: 'wav', speed: 1 }),
+   468→   468→      signal: AbortSignal.timeout(30000),
+   469→   469→    });
+   470→   470→    if (!r.ok) return null;
+   471→   471→    var buf = new Uint8Array(await r.arrayBuffer());
+   472→   472→    if (buf.length < 44 || String.fromCharCode(buf[0], buf[1], buf[2], buf[3]) !== 'RIFF') return null;
+   473→   473→    var silk = await silkEncode(buf);
+   474→   474→    if (!silk) return null;
+   475→   475→    var bin = '';
+   476→   476→    for (var i = 0; i < silk.length; i += 32768) bin += String.fromCharCode.apply(null, silk.subarray(i, i + 32768));
+   477→   477→    var b64 = (typeof btoa === 'function') ? btoa(bin) : Buffer.from(silk).toString('base64');
+   478→   478→    var dur = Math.max(1, Math.round(text.length / 4));
+   479→   479→    return { b64: b64, dur: dur };
+   480→   480→  } catch (e) { return null; }
+   481→   481→}
+   482→   482→
+   483→   483→/** 回复里的表情标记（[表情包:名字] / [表情:名字] / [发送了表情:名字]） */
+   484→   484→var QQ_STICKER_RE = /[【\[]\s*(?:表情包|表情|贴纸|发送了表情包|发送了表情|发送表情)\s*[:：]\s*([^】\]]{1,20})\s*[】\]]/g;
+   485→   485→
+   486→   486→/** 自然语句变体（[发送了一个"抱抱"表情包]：AI 不按标记写，而是写一句「发送了+词+表情包」） */
+   487→   487→var QQ_STICKER_NATURAL_RE =
+   488→   488→  /[【\[]\s*(?:发送|发)\s*(?:了|出)?\s*(?:一?个)?\s*["\u201c\u300c\u300e']?\s*([^"'\u201d\u2019\u300d\u300f【\[\]】\s:：，。！!]{1,16}?)\s*["'\u201d\u2019\u300d\u300f]?\s*(?:表情包|表情|贴纸)\s*[】\]]/g;
+   489→   489→
+   490→   490→/** 图片描述变体（[图片: 一只圆滚滚的柴犬…]：AI 把发表情包理解成发图片，用画面描述当标记） */
+   491→   491→var QQ_STICKER_IMAGE_RE = /[【\[]\s*图片\s*[:：]\s*([^】\]]{2,60})\s*[】\]]/g;
+   492→   492→
+   493→   493→/** [图片:描述] 变体匹配：描述含表情名 → 该名字；再按动作/动物情感词兑底（名字在清单里才返回，找不到 null） */
+   494→   494→function resolveQqEmoticonFromDesc(cfg, desc) {
+   495→   495→  var d = String(desc || '').trim();
+   496→   496→  if (!d) return null;
+   497→   497→  var list = (cfg.qq && cfg.qq.emoticons) || [];
+   498→   498→  for (var i = 0; i < list.length; i++) {
+   499→   499→    var n = list[i] && list[i].name;
+   500→   500→    if (n && n.length >= 2 && d.indexOf(n) >= 0) return n;
+   501→   501→  }
+   502→   502→  var FEEL = [
+   503→   503→    [/抱|搂/, '抱'], [/蹭|贴|粘/, '蹭'], [/摸|揉/, '摸'], [/亲|吻/, '亲'],
+   504→   504→    [/哭|流泪|呜/, '哭'], [/笑|开心|高兴/, '笑'], [/怒|气鼓|哼/, '怒'],
+   505→   505→    [/睡|晚安|困/, '睡'], [/得意|哼哼|骄傲/, '得意'],
+   506→   506→    [/柴犬|小狗|狗狗|汪/, '抱'], [/猫|喵/, '贴'],
+   507→   507→  ];
+   508→   508→  for (var f = 0; f < FEEL.length; f++) {
+   509→   509→    if (FEEL[f][0].test(d)) {
+   510→   510→      for (var j = 0; j < list.length; j++) {
+   511→   511→        var nj = list[j] && list[j].name;
+   512→   512→        if (nj && nj.indexOf(FEEL[f][1]) >= 0) return nj;
+   513→   513→      }
+   514→   514→    }
+   515→   515→  }
+   516→   516→  return null;
+   517→   517→}
+   518→   518→
+   519→   519→/** 运行包内置表情（cfg.qq.emoticons: [{name, dataUrl}]）匹配：名字精确 → 互相包含 */
+   520→   520→function resolveQqEmoticon(cfg, token) {
+   521→   521→  var t = String(token || '').trim();
+   522→   522→  if (!t) return null;
+   523→   523→  var list = (cfg.qq && cfg.qq.emoticons) || [];
+   524→   524→  for (var i = 0; i < list.length; i++) if (list[i] && list[i].name === t) return list[i];
+   525→   525→  for (var j = 0; j < list.length; j++) {
+   526→   526→    var n = list[j] && list[j].name;
+   527→   527→    if (n && (n.indexOf(t) >= 0 || t.indexOf(n) >= 0)) return list[j];
+   528→   528→  }
+   529→   529→  return null;
+   530→   530→}
+   531→   531→
+   532→   532→/** 云端验证 QQ 凭证（部署后从云端出口连 QQ 平台；新端点 api.bot.qq.com 海外出口可达，503 地域拦已成历史） */
+   533→   533→async function verifyQqCreds(appId, appSecret) {
+   534→   534→  var lastErr = '';
+   535→   535→  var lastStatus = 0;
+   536→   536→  for (var vi = 0; vi < QQ_TOKEN_URLS.length; vi++) {
+   537→   537→    try {
+   538→   538→      var r = await fetch(QQ_TOKEN_URLS[vi], {
+   539→   539→        method: 'POST',
+   540→   540→        headers: { 'Content-Type': 'application/json' },
+   541→   541→        body: JSON.stringify({ appId: String(appId || ''), clientSecret: String(appSecret || '') }),
+   542→   542→        signal: AbortSignal.timeout(15000),
+   543→   543→      });
+   544→   544→      lastStatus = r.status;
+   545→   545→      var j = null;
+   546→   546→      try { j = await r.json(); } catch (e) { j = null; }
+   547→   547→      if (j && j.access_token) {
+   548→   548→        var botName = '';
+   549→   549→        try {
+   550→   550→          var me = await fetch(QQ_API + '/users/@me', { headers: { Authorization: 'QQBot ' + j.access_token }, signal: AbortSignal.timeout(10000) });
+   551→   551→          var mj = null;
+   552→   552→          try { mj = await me.json(); } catch (e2) { mj = null; }
+   553→   553→          botName = (mj && (mj.username || mj.nickname)) || '';
+   554→   554→        } catch (e3) { /* 拿不到名字不算失败 */ }
+   555→   555→        return { ok: true, botName: botName };
+   556→   556→      }
+   557→   557→      // 业务错误（HTTP 200 + code）：换端点无意义，直接给可读提示（code 兼容数字/字符串）
+   558→   558→      var code = Number(j && j.code) || 0;
+   559→   559→      var why = code === 100016 ? 'AppID 或 AppSecret 不正确（100016）'
+   560→   560→        : code === 100007 ? 'AppID 无效或机器人状态异常（100007）'
+   561→   561→        : code === 10004 ? 'AppID 对应的机器人不存在（10004）'
+   562→   562→        : code === 100001 ? '请求过于频繁（100001），稍后再试'
+   563→   563→        : '请检查 AppID/AppSecret 是否正确';
+   564→   564→      if (code) return { ok: false, error: 'QQ 平台返回 code ' + code + '：' + why + (j && j.message ? '（' + j.message + '）' : '') };
+   565→   565→      lastErr = (j && j.message) || ('HTTP ' + r.status);
+   566→   566→    } catch (e) {
+   567→   567→      lastErr = String(e && e.message).slice(0, 120);
+   568→   568→    }
+   569→   569→  }
+   570→   570→  // 双端点都没拿到业务回包：典型是网络不通/被网关拦——QQ 收发消息走内置网关的
+   571→   571→  // WebSocket 长连接（设置 → 云端助手 →「自动在线」），不依赖这台云服务器的出口
+   572→   572→  var geo = lastStatus === 503 ? '（503：QQ 网关拒绝了这台云服务器的出口 IP）——QQ 收发消息走「自动在线」内置网关（WebSocket 长连接，不受此限制）' : '';
+   573→   573→  return { ok: false, error: '云端连不上 QQ 平台：' + (lastErr || 'HTTP ' + lastStatus).slice(0, 120) + geo };
+   574→   574→}
+   575→   575→
+   576→   576→/** QQ：入站富媒体 content 里的 markdown 图（![动画表情](…)/![图片](…)）转可读占位，不把裸链接堆给 LLM */
+   577→   577→function qqMediaToPlaceholder(t) {
+   578→   578→  return String(t || '').replace(/!\[([^\]]*)\]\([^)]*\)/g, function (_, alt) {
+   579→   579→    var a = String(alt || '').trim();
+   580→   580→    return a && a !== '图片' && a !== '动画表情'
+   581→   581→      ? '（对方发了一个表情包/图片：' + a + '）'
+   582→   582→      : '（对方发了一个表情包/图片，内容看不到）';
+   583→   583→  });
+   584→   584→}
+   585→   585→
+   586→   586→/** QQ：处理 C2C / 群@ 消息事件（d），返回是否回复成功。
+   587→   587→ *  回复分流：文字（msg_type 0）/ 语音条（TTS→silk，file_type 3）/ 表情包（运行包内置表情图，file_type 1）。
+   588→   588→ *  语音条频率：cfg.qq.voiceEvery（每 N 条 1 条，0=关），计数器存云端 state/qq-voice-counter.json。 */
+   589→   589→async function handleQqEvent(cfg, t, d) {
+   590→   590→  var content = qqMediaToPlaceholder(String((d && d.content) || '').trim());
+   591→   591→  var authorId = d && d.author && d.author.id ? String(d.author.id) : '';
+   592→   592→  var msgId = d && d.id ? String(d.id) : '';
+   593→   593→  if (!authorId || !msgId) return false;
+   594→   594→  // 空正文 + 带附件 = 富媒体消息（部分事件 content 为空只挂 attachments）：同样给占位
+   595→   595→  if (!content && d && d.attachments && d.attachments.length) {
+   596→   596→    var at = d.attachments[0] && d.attachments[0].content_type;
+   597→   597→    content = at && String(at).indexOf('image') >= 0 ? '（对方发了一个表情包/图片，内容看不到）' : '（对方发了一个媒体消息）';
+   598→   598→  }
+   599→   599→  if (!content) return false;
+   600→   600→  var isGroup = t === 'GROUP_AT_MESSAGE_CREATE';
+
+[showing lines 1-600 of 1167; use offset=601 with limit to continue reading]

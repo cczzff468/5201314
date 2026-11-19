@@ -1,0 +1,832 @@
+     1→/**
+     2→ * 内置 IM 网关（mini-service，端口 3100）—— QQ 官方 WebSocket 长连接 + 微信 iLink 7×24 自动回复。
+     3→ *
+     4→ * 为什么是它（v7 产品方向：免费 · 免部署 · 免配置）：
+     5→ * - QQ：q.qq.com 官方「事件订阅」两种模式之一是 WebSocket（不依赖公网服务器，出站长连接，
+     6→ *   连 api.bot.qq.com 网关）——彻底不需要在控制台配置任何回调地址（Webhook 模式才需要，
+     7→ *   且 Webhook 回调被 QQ 平台限制境内可达出口，Supabase 境外函数 URL 被拒是用户实测踩过的坑）。
+     8→ * - 微信：iLink Bot 通道是 getupdates 长轮询——网关 7×24 挂着循环，网页/浏览器关了 TA 也在线，
+     9→ *   聊天历史回写用户自己的 Supabase（手机 App「拉取云端聊天记录」原样可用）。
+    10→ * - 配置中心仍是用户自己的 Supabase 私有桶（wx-cloud/config.json 运行包）：手机 App 接入/
+    11→ *   换绑/改 API 设置后自动重推运行包，本网关 60 秒内跟上（loadConfig 缓存 60s）。
+    12→ *
+    13→ * 核心逻辑单一事实来源：src/lib/ios/wx-cloud/sources.ts 的 WX_CLOUD_CORE（与 Supabase Edge
+    14→ * Function / Node 容器共用同一份：LLM 人设回复、表情包/语音条、微信游标去重、QQ 历史回写）。
+    15→ * 启动时把 WX_CLOUD_CORE + 连接变量物化成 core.gen.N.mjs 动态 import（换连接 = 重新物化）。
+    16→ *
+    17→ * HTTP（经 Caddy 网关：浏览器 fetch /api/im-gateway?XTransformPort=3100）：
+    18→ * - POST {op:'start', supaUrl, supaKey, secret} → 启动（幂等：同 ref 已在跑则只刷新）
+    19→ * - POST {op:'stop'} → 停止（关 WS + 停微信循环）
+    20→ * - GET  → 状态 JSON（QQ WS 会话 / 微信循环 / 回复计数）
+    21→ */
+    22→
+    23→import { writeFileSync, readdirSync, unlinkSync, readFileSync } from 'node:fs';
+    24→import { fileURLToPath } from 'node:url';
+    25→import { WX_CLOUD_CORE } from '../../src/lib/ios/wx-cloud/sources';
+    26→
+    27→// ---------------- v13 本地 TTS（QQ 语音条零配置合成：z-ai SDK，wav） ----------------
+    28→
+    29→/** z-ai 可用音色（不认识的音色名一律回 tongtong——运行包里存的是 OpenAI 音色名时也不报错） */
+    30→const ZAI_VOICES = ['tongtong', 'chuichui', 'xiaochen', 'jam', 'kazi', 'douji', 'luodo'];
+    31→let zaiInstance: any | null = null;
+    32→
+    33→/** 本地合成语音（POST /tts，OpenAI 兼容形状 {input, voice, speed}）→ wav 二进制。
+    34→ *  z-ai-web-dev-sdk 仅后端使用（本 mini-service 是后端）；SDK 缺失/合成失败返回 5xx，
+    35→ *  云端核心拿到非 200 自动降级纯文字（不炸收发主流程）——QQ 语音条零配置可用。 */
+    36→async function handleLocalTts(req: Request): Promise<Response> {
+    37→  let body: Record<string, any> = {};
+    38→  try {
+    39→    body = (await req.json()) as Record<string, any>;
+    40→  } catch {
+    41→    return Response.json({ error: 'bad json' }, { status: 400 });
+    42→  }
+    43→  const text = String(body.input || body.text || '').trim().slice(0, 1000);
+    44→  if (!text) return Response.json({ error: 'empty text' }, { status: 400 });
+    45→  const voiceRaw = String(body.voice || '').trim();
+    46→  const voice = ZAI_VOICES.includes(voiceRaw) ? voiceRaw : 'tongtong';
+    47→  const speedRaw = Number(body.speed);
+    48→  const speed = Number.isFinite(speedRaw) ? Math.min(2, Math.max(0.5, speedRaw)) : 1;
+    49→  try {
+    50→    if (!zaiInstance) {
+    51→      const mod: any = await import('z-ai-web-dev-sdk');
+    52→      const ZAI = mod.default ?? mod;
+    53→      zaiInstance = await ZAI.create();
+    54→    }
+    55→    const res = await zaiInstance.audio.tts.create({
+    56→      input: text,
+    57→      voice,
+    58→      speed,
+    59→      response_format: 'wav',
+    60→      stream: false,
+    61→    });
+    62→    const buf = new Uint8Array(await res.arrayBuffer());
+    63→    if (!buf.length) return Response.json({ error: 'empty audio' }, { status: 502 });
+    64→    return new Response(buf, {
+    65→      headers: { 'Content-Type': 'audio/wav', 'Content-Length': String(buf.length) },
+    66→    });
+    67→  } catch (e) {
+    68→    zaiInstance = null; // 失败重置单例（下汰重试）
+    69→    return Response.json({ error: 'tts failed: ' + String((e as Error)?.message || e).slice(0, 80) }, { status: 503 });
+    70→  }
+    71→}
+    72→
+    73→// ---------------- 常量 ----------------
+    74→
+    75→const PORT = 3100;
+    76→const QQ_GATEWAY_API = 'https://api.sgroup.qq.com/gateway';
+    77→/** C2C 单聊 + 群@ 消息（GROUP_AND_C2C_EVENT = 1<<25；官方事件文档 C2C_MESSAGE_CREATE 同位） */
+    78→const QQ_INTENTS = 1 << 25;
+    79→/** 已处理事件去重上限（QQ 平台可能重推同一条消息，msg_id+场景去重） */
+    80→const QQ_SEEN_MAX = 400;
+    81→// ---------------- 类型 ----------------
+    82→
+    83→interface QqWsState {
+    84→  state: 'disabled' | 'connecting' | 'ready' | 'error';
+    85→  sessionId: string;
+    86→  botName: string;
+    87→  lastSeq: number;
+    88→  lastEventAt: number;
+    89→  events: number;
+    90→  reconnects: number;
+    91→  lastError: string;
+    92→  hbOk: boolean;
+    93→}
+    94→
+    95→interface WxLoopState {
+    96→  lastRunAt: number;
+    97→  lastError: string;
+    98→  replied: number;
+    99→}
+   100→
+   101→interface Runtime {
+   102→  gen: number;
+   103→  ref: string;
+   104→  startedAt: number;
+   105→  /** v8：配置读写通道（relay=云端函数中继 / direct=直连 Storage） */
+   106→  mode: 'relay' | 'direct';
+   107→  core: any;
+   108→  qq: QqWsState;
+   109→  wx: WxLoopState;
+   110→}
+   111→
+   112→let rt: Runtime | null = null;
+   113→
+   114→// ---------------- 核心物化（sources.ts 单一事实来源） ----------------
+   115→
+   116→let coreGen = 0;
+   117→const CORE_PREFIX = 'core.gen.';
+   118→
+   119→function pruneGenFiles(keep: number): void {
+   120→  try {
+   121→    const dir = fileURLToPath(new URL('./', import.meta.url));
+   122→    const files = readdirSync(dir)
+   123→      .filter((f) => f.startsWith(CORE_PREFIX) && f.endsWith('.mjs'))
+   124→      .sort()
+   125→      .slice(0, -keep);
+   126→    for (const f of files) {
+   127→      try {
+   128→        unlinkSync(fileURLToPath(new URL('./' + f, import.meta.url)));
+   129→      } catch {
+   130→        /* 并发删除忽略 */
+   131→      }
+   132→    }
+   133→  } catch {
+   134→    /* 目录读取失败忽略 */
+   135→  }
+   136→}
+   137→
+   138→/** 把 WX_CLOUD_CORE + 连接变量物化成可 import 的模块（换连接重新物化，文件名递增做缓存失效）。
+   139→ *  v8：注入中继参数（RELAY_URL/RELAY_SECRET）——无用户项目密钥时配置读写改经云端函数。
+   140→ *  v13：注入 TTS_LOCAL_URL——网关本进程的本地语音合成端点（z-ai SDK wav），云端核心的
+   141→ *  QQ 语音条优先用它（用户不配 OpenAI 兼容 TTS 也能发语音）。 */
+   142→async function materializeCore(supaUrl: string, supaKey: string, relayUrl: string, relaySecret: string): Promise<any> {
+   143→  const n = ++coreGen;
+   144→  const code = [
+   145→    '// [im-gateway 生成] 单一事实来源：src/lib/ios/wx-cloud/sources.ts 的 WX_CLOUD_CORE；勿手改本文件',
+   146→    'var CODE_SOURCE = "im-gateway";',
+   147→    `var SUPA_URL_INJECT = ${JSON.stringify(supaUrl)};`,
+   148→    `var SUPA_KEY_INJECT = ${JSON.stringify(supaKey)};`,
+   149→    `var RELAY_URL_INJECT = ${JSON.stringify(relayUrl)};`,
+   150→    `var RELAY_SECRET_INJECT = ${JSON.stringify(relaySecret)};`,
+   151→    `var TTS_LOCAL_URL_INJECT = ${JSON.stringify('http://127.0.0.1:' + PORT + '/tts')};`,
+   152→    WX_CLOUD_CORE,
+   153→    'export { loadConfig, tick, handleQqEvent, qqToken, writeHeartbeat, supaGetJson, supaPutJson, loadQqHistory, appendQqHistory, refreshQqWsLock };',
+   154→  ].join('\n');
+   155→  const path = fileURLToPath(new URL(`./${CORE_PREFIX}${n}.mjs`, import.meta.url));
+   156→  writeFileSync(path, code);
+   157→  pruneGenFiles(3);
+   158→  return import(path);
+   159→}
+   160→
+   161→function sleep(ms: number): Promise<void> {
+   162→  return new Promise((r) => setTimeout(r, ms));
+   163→}
+   164→
+   165→// ---------------- QQ WebSocket 客户端 ----------------
+   166→
+   167→let ws: WebSocket | null = null;
+   168→let hbTimer: ReturnType<typeof setInterval> | null = null;
+   169→let hbInterval = 41250;
+   170→let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+   171→let reconnectDelay = 2000;
+   172→let wantClose = false;
+   173→/** v9 QQ 连接锁续期器：QQ 在线期间每 15s 刷 state/qq-ws-lock.json——云端函数的
+   174→ *  cron-cycle 分支看到本锁新鲜就不另开第二条连接（同一账号两条连接会互踢会话） */
+   175→let qqLockTimer: ReturnType<typeof setInterval> | null = null;
+   176→/** v12 QQ 凭证看门狗：QQ 在线期间每 30s 重读运行包——手机 App 点了「断开连接」后
+   177→ *  运行包里 QQ 段被移除，但旧版长连接不拆（消息照收、照回/照崩），真机 QQ 上 TA
+   178→ *  一直「在线」。看门狗发现凭证没了就拆长连接（disableQqChannel），锁停刷、30s 后
+   179→ *  自动重查（网页重新接入 → 几十秒内自动点亮）。 */
+   180→let qqCfgTimer: ReturnType<typeof setInterval> | null = null;
+   181→/** 事件去重（t + msg id → 时间戳；QQ 平台对未确认事件可能重推） */
+   182→const qqSeen = new Map<string, number>();
+   183→/** v11 连接防抖：connectQq 全程在飞标记——网关启动 / refresh（凭证重推） / 30s 重试
+   184→ *  三路并发 connectQq 会同时开两条 WebSocket，QQ 平台互踢会话，杀成「永远正在连接」
+   185→ *  + 事件在两条连接间被重复投递（回复两三遍）。拿到凭证后几秒内点亮就靠它：只有
+   186→ *  一条连接在连，READY/心跳 ACK 一到立刻 ready。 */
+   187→let qqConnecting = false;
+   188→
+   189→function qqState(): QqWsState {
+   190→  return rt ? rt.qq : { state: 'disabled', sessionId: '', botName: '', lastSeq: 0, lastEventAt: 0, events: 0, reconnects: 0, lastError: '', hbOk: false };
+   191→}
+   192→
+   193→function stopHbTimer(): void {
+   194→  if (hbTimer) {
+   195→    clearInterval(hbTimer);
+   196→    hbTimer = null;
+   197→  }
+   198→}
+   199→
+   200→function wsSend(obj: unknown): void {
+   201→  try {
+   202→    ws?.send(JSON.stringify(obj));
+   203→  } catch {
+   204→    /* 连接已关忽略 */
+   205→  }
+   206→}
+   207→
+   208→function pruneSeen(): void {
+   209→  if (qqSeen.size > QQ_SEEN_MAX) {
+   210→    const entries = [...qqSeen.entries()].sort((a, b) => a[1] - b[1]);
+   211→    for (const [k] of entries.slice(0, qqSeen.size - QQ_SEEN_MAX)) qqSeen.delete(k);
+   212→  }
+   213→}
+   214→
+   215→function scheduleReconnect(gen: number): void {
+   216→  if (!rt || rt.gen !== gen || wantClose) return;
+   217→  rt.qq.state = 'connecting';
+   218→  rt.qq.reconnects += 1;
+   219→  reconnectDelay = Math.min(Math.round(reconnectDelay * 1.6), 30000);
+   220→  if (reconnectTimer) clearTimeout(reconnectTimer);
+   221→  reconnectTimer = setTimeout(() => {
+   222→    void connectQq(gen);
+   223→  }, reconnectDelay);
+   224→}
+   225→
+   226→async function connectQq(gen: number): Promise<void> {
+   227→  if (!rt || rt.gen !== gen || wantClose) return;
+   228→  // v11 并发防抖：一轮连接在飞（config→token→网关地址→WS 握手）就不再开第二条
+   229→  if (qqConnecting) return;
+   230→  // v11 僵尸连接防抖：上一条 socket 还活着/还在握手就不再开新的——旧版会直接把 ws 变量
+   231→  // 指到新 socket，旧 socket 依旧收事件但心跳发到死 socket 上，状态永远「connecting」
+   232→  if (ws && (ws.readyState === 0 || ws.readyState === 1)) return;
+   233→  qqConnecting = true;
+   234→  try {
+   235→  const q = rt.qq;
+   236→  try {
+   237→    // 凭证来自用户 Supabase 运行包（loadConfig 60s 缓存；换绑/改密钥 60s 内跟上）
+   238→    const cfg = await rt.core.loadConfig(true);
+   239→    if (!cfg.qq || !cfg.qq.appId) {
+   240→      q.state = 'disabled';
+   241→      q.lastError = '';
+   242→      // v10：没凭证不是终态——手机 App 接入 QQ / 自动同步运行包后这里要自己亮起来。
+   243→      // 30 秒后再查一次（fetch 一次 config.json，重活轻）；旧版直接 return，接入后
+   244→      // 网关永远不知道，QQ 通道永远「正在连接」，用户实测踩坑。
+   245→      if (reconnectTimer) clearTimeout(reconnectTimer);
+   246→      reconnectTimer = setTimeout(() => {
+   247→        void connectQq(gen);
+   248→      }, 30000);
+   249→      return;
+   250→    }
+   251→    q.state = 'connecting';
+   252→    const token = await rt.core.qqToken(cfg);
+   253→    // 取 WSS 网关地址（官方：GET /gateway，鉴权 QQBot <access_token>）；
+   254→    // v10 加超时：原来无超时，QQ 网关挂起时 connectQq 卡死 → QQ 通道永远 connecting
+   255→    const gwr = await fetch(QQ_GATEWAY_API, {
+   256→      headers: { Authorization: 'QQBot ' + token },
+   257→      signal: AbortSignal.timeout(20000),
+   258→    });
+   259→    if (!gwr.ok) {
+   260→      q.state = 'error';
+   261→      q.lastError = `QQ 网关地址获取失败 ${gwr.status}`;
+   262→      scheduleReconnect(gen);
+   263→      return;
+   264→    }
+   265→    const gwj = (await gwr.json().catch(() => null)) as { url?: string } | null;
+   266→    const wssUrl = gwj?.url;
+   267→    if (!wssUrl) {
+   268→      q.state = 'error';
+   269→      q.lastError = 'QQ 网关地址获取失败：回包无 url';
+   270→      scheduleReconnect(gen);
+   271→      return;
+   272→    }
+   273→    wantClose = false;
+   274→    ws = new WebSocket(wssUrl);
+   275→    // v14 握手看门狗：WS 握手挂在网络里（onopen/onclose 都不来）时旧版会永远停在
+   276→    // 「connecting」——状态卡死、不重试（onclose 也不会来）——「QQ 接入过一会断开」
+   277→    // 的根因之一。20s 内还没进入 ready 就强拆走重连（按 socket 打标，不误伤新一轮尝试）。
+   278→    const sock = ws;
+   279→    setTimeout(() => {
+   280→      if (!rt || rt.gen !== gen || wantClose) return;
+   281→      if (ws !== sock) return; // 已被新一轮尝试替换：不管旧连接
+   282→      if (rt.qq.state === 'connecting') {
+   283→        console.log('[im-gateway] QQ WS 握手看门狗触发（20s 未就绪）→ 强拆重连');
+   284→        try {
+   285→          ws?.close();
+   286→        } catch {
+   287→          /* 忽略 */
+   288→        }
+   289→        scheduleReconnect(gen);
+   290→      }
+   291→    }, 20000);
+   292→    ws.onmessage = (ev: MessageEvent) => {
+   293→      if (!rt || rt.gen !== gen || wantClose) return;
+   294→      try {
+   295→        void handleWsFrame(JSON.parse(String(ev.data)) as Record<string, any>, gen, token);
+   296→      } catch {
+   297→        /* 非 JSON 帧忽略 */
+   298→      }
+   299→    };
+   300→    ws.onclose = (ev: CloseEvent) => {
+   301→      stopHbTimer();
+   302→      console.log('[im-gateway] QQ WS close:', ev.code, ev.reason?.slice(0, 80), 'gen', gen);
+   303→      if (rt && rt.gen === gen && !wantClose) scheduleReconnect(gen);
+   304→    };
+   305→    ws.onerror = () => {
+   306→      /* onclose 兜底重连；这里只记状态 */
+   307→      if (rt && rt.gen === gen) rt.qq.state = rt.qq.sessionId ? 'connecting' : 'error';
+   308→    };
+   309→  } catch (e) {
+   310→    q.state = 'error';
+   311→    q.lastError = String((e as Error)?.message || e).slice(0, 160);
+   312→    scheduleReconnect(gen);
+   313→  }
+   314→  } finally {
+   315→    qqConnecting = false;
+   316→  }
+   317→}
+   318→
+   319→async function handleWsFrame(f: Record<string, any>, gen: number, token: string): Promise<void> {
+   320→  if (!rt || rt.gen !== gen) return;
+   321→  const q = rt.qq;
+   322→  const op = Number(f.op);
+   323→  if (typeof f.s === 'number' && f.s > 0) q.lastSeq = f.s;
+   324→
+   325→  if (op === 10) {
+   326→    // Hello：心跳周期 + 登录鉴权（有会话则 Resume 断点续传，官方补发遗漏事件）
+   327→    hbInterval = Number(f.d?.heartbeat_interval) || 41250;
+   328→    stopHbTimer();
+   329→    q.hbOk = true;
+   330→    hbTimer = setInterval(() => {
+   331→      if (!rt || rt.gen !== gen || wantClose || !ws || ws.readyState !== 1) {
+   332→        stopHbTimer();
+   333→        return;
+   334→      }
+   335→      // 上一轮心跳没收到 ACK → 连接僵死，断开走重连（Resume 续传）
+   336→      if (!q.hbOk) {
+   337→        try {
+   338→          ws.close();
+   339→        } catch {
+   340→          /* 忽略 */
+   341→        }
+   342→        return;
+   343→      }
+   344→      q.hbOk = false;
+   345→      wsSend({ op: 1, d: q.lastSeq || null });
+   346→    }, hbInterval);
+   347→    if (q.sessionId && q.lastSeq) {
+   348→      wsSend({ op: 6, d: { token: 'QQBot ' + token, session_id: q.sessionId, seq: q.lastSeq } });
+   349→    } else {
+   350→      wsSend({
+   351→        op: 2,
+   352→        d: {
+   353→          token: 'QQBot ' + token,
+   354→          intents: QQ_INTENTS,
+   355→          shard: [0, 1],
+   356→          properties: { $os: 'linux', $browser: 'im-gateway', $device: 'im-gateway' },
+   357→        },
+   358→      });
+   359→    }
+   360→    return;
+   361→  }
+   362→  if (op === 11) {
+   363→    q.hbOk = true;
+   364→    // 心跳 ACK 到达即代表会话已鉴权（Resume 后平台可能不发 RESUMED——心跳在线就是真在线）
+   365→    if (q.state === 'connecting') q.state = 'ready';
+   366→    return;
+   367→  }
+   368→  if (op === 7) {
+   369→    // 服务端要求重连：立即断开走 Resume
+   370→    console.log('[im-gateway] QQ WS op7 reconnect 指令');
+   371→    try {
+   372→      ws?.close();
+   373→    } catch {
+   374→      /* 忽略 */
+   375→    }
+   376→    return;
+   377→  }
+   378→  if (op === 9) {
+   379→    // Identify/Resume 参数错（会话失效等）：重置会话重新鉴权
+   380→    q.sessionId = '';
+   381→    q.state = 'connecting';
+   382→    q.lastError = 'QQ 平台返回会话无效（op9），重新鉴权中';
+   383→    console.log('[im-gateway] QQ WS op9 invalid session:', JSON.stringify(f.d || null).slice(0, 120));
+   384→    try {
+   385→      ws?.close();
+   386→    } catch {
+   387→      /* 忽略 */
+   388→    }
+   389→    return;
+   390→  }
+   391→  if (op === 0) {
+   392→    const t = String(f.t || '');
+   393→    if (t === 'READY') {
+   394→      q.state = 'ready';
+   395→      q.sessionId = String(f.d?.session_id || '');
+   396→      q.botName = String(f.d?.user?.username || f.d?.user?.nickname || '');
+   397→      q.lastError = '';
+   398→      reconnectDelay = 2000;
+   399→      console.log('[im-gateway] QQ WS READY:', q.botName, 'session', q.sessionId.slice(0, 8));
+   400→      return;
+   401→    }
+   402→    if (t === 'RESUMED') {
+   403→      q.state = 'ready';
+   404→      q.lastError = '';
+   405→      reconnectDelay = 2000;
+   406→      console.log('[im-gateway] QQ WS RESUMED: session', q.sessionId.slice(0, 8), 'seq', q.lastSeq);
+   407→      return;
+   408→    }
+   409→    if (t === 'C2C_MESSAGE_CREATE' || t === 'GROUP_AT_MESSAGE_CREATE') {
+   410→      q.lastEventAt = Date.now();
+   411→      q.events += 1;
+   412→      const d = f.d || {};
+   413→      console.log('[im-gateway] QQ event:', t, 'id=', String(d.id || '').slice(0, 18));
+   414→      const key = t + ':' + String(d.id || '');
+   415→      const seenAt = qqSeen.get(key);
+   416→      qqSeen.set(key, Date.now());
+   417→      pruneSeen();
+   418→      if (seenAt) return; // 平台重推的同一条消息：不重复回复
+   419→      // 消息代答复用云端核心（人设/表情包/语音条/历史回写 Supabase 全在内）；cfg 走 60s 缓存
+   420→      try {
+   421→        const cfg = await rt.core.loadConfig(false);
+   422→        const handled = await rt.core.handleQqEvent(cfg, t, d);
+   423→        console.log('[im-gateway] QQ 处理', handled ? '已回复' : '跳过（无内容）');
+   424→      } catch (e) {
+   425→        q.lastError = String((e as Error)?.message || e).slice(0, 160);
+   426→        console.log('[im-gateway] QQ 处理失败:', q.lastError);
+   427→      }
+   428→      return;
+   429→    }
+   430→    return; // 其它事件（好友添加等）忽略
+   431→  }
+   432→}
+   433→
+   434→function stopQq(): void {
+   435→  wantClose = true;
+   436→  stopHbTimer();
+   437→  qqConnecting = false;
+   438→  if (qqLockTimer) {
+   439→    clearInterval(qqLockTimer);
+   440→    qqLockTimer = null;
+   441→  }
+   442→  if (qqCfgTimer) {
+   443→    clearInterval(qqCfgTimer);
+   444→    qqCfgTimer = null;
+   445→  }
+   446→  if (reconnectTimer) {
+   447→    clearTimeout(reconnectTimer);
+   448→    reconnectTimer = null;
+   449→  }
+   450→  try {
+   451→    ws?.close();
+   452→  } catch {
+   453→    /* 忽略 */
+   454→  }
+   455→  ws = null;
+   456→}
+   457→
+   458→/** v12 拆除 QQ 通道（凭证被移除 ≠ 停网关）：关长连接、清会话、置 disabled、停刷锁；
+   459→ *  30s 后自动重查凭证（网页重新接入 → 自动点亮）。微信轮询与网关本身不受影响。 */
+   460→function disableQqChannel(gen: number): void {
+   461→  if (!rt || rt.gen !== gen) return;
+   462→  const q = rt.qq;
+   463→  stopHbTimer();
+   464→  if (reconnectTimer) {
+   465→    clearTimeout(reconnectTimer);
+   466→    reconnectTimer = null;
+   467→  }
+   468→  wantClose = true; // 停在飞帧/心跳；30s 后重查前复位
+   469→  try {
+   470→    ws?.close();
+   471→  } catch {
+   472→    /* 忽略 */
+   473→  }
+   474→  ws = null;
+   475→  q.sessionId = '';
+   476→  q.state = 'disabled';
+   477→  q.lastError = '';
+   478→  q.hbOk = false;
+   479→  reconnectDelay = 2000;
+   480→  console.log('[im-gateway] QQ 凭证已从运行包移除（网页断开）→ 长连接已拆除，TA 在真机 QQ 上下线');
+   481→  reconnectTimer = setTimeout(() => {
+   482→    if (!rt || rt.gen !== gen) return;
+   483→    wantClose = false;
+   484→    void connectQq(gen);
+   485→  }, 30000);
+   486→}
+   487→
+   488→// ---------------- 微信长轮询循环 ----------------
+   489→
+   490→async function wxLoop(gen: number): Promise<void> {
+   491→  let errs = 0;
+   492→  while (rt && rt.gen === gen) {
+   493→    const wx = rt.wx;
+   494→    try {
+   495→      const n = (await rt.core.tick()) as number;
+   496→      errs = 0;
+   497→      wx.lastRunAt = Date.now();
+   498→      wx.lastError = '';
+   499→      if (n > 0) wx.replied += n;
+   500→      await rt.core.writeHeartbeat({ source: 'im-gateway' });
+   501→    } catch (e) {
+   502→      const msg = String((e as Error)?.message || e);
+   503→      wx.lastError = msg.slice(0, 160);
+   504→      wx.lastRunAt = Date.now();
+   505→      if (msg.indexOf('TOKEN_EXPIRED') >= 0) {
+   506→        // 微信 Token 过期：等主人回手机 App 重新扫码（期间静默，5 分钟再探一次）
+   507→        await sleep(300000);
+   508→      } else if (msg.indexOf('未配置') >= 0 || msg.indexOf('运行包缺失') >= 0) {
+   509→        await sleep(60000);
+   510→      } else {
+   511→        errs++;
+   512→        await sleep(Math.min(5000 * errs, 30000));
+   513→      }
+   514→      continue;
+   515→    }
+   516→    // 正常周期：getupdates 服务端挂 ~35s；空闲（未接入微信）也 10s 一探，不热转
+   517→    await sleep(10000);
+   518→  }
+   519→}
+   520→
+   521→// ---------------- v14 僵尸自愈看门狗 ----------------
+   522→
+   523→/** 实测根因（用户反馈「QQ 接入过一会会断开 / AI 不回消息 / 断连」）：Bun 的 fetch 在
+   524→ *  中继长连接上偶发挂死——AbortSignal.timeout 不触发（Bun 已知坑），wxLoop 卡在 tick()
+   525→ *  里、connectQq 卡在取凭证/网关地址里：进程活着、HTTP 状态页活着，但收发全部停摆
+   526→ *  （状态页上 lastRunAt / reconnects 永远停在同一秒）。旧拉活机制全部失灵：keeper 只看
+   527→ *  端口、页面只看 running 标志、云端被连接锁挡住。
+   528→ *  看门狗：每 20s 检查一次活力——①微信循环 lastRunAt 冻结 >150s（正常 ≤60s 一轮；
+   529→ *  TOKEN_EXPIRED 的 5 分钟静默重探除外）；②QQ 长时间停在 connecting/error 且重试计数
+   530→ *  不再推进（健康重试每 ≤30s 必动）→ 判定僵尸 → process.exit(1)：im-keeper.sh 检测端口
+   531→ *  掉线秒级拉起 + gateway-state.json 启动自恢复 → 全量自愈（比永远僵尸强得多）。 */
+   532→let gwWatchTimer: ReturnType<typeof setInterval> | null = null;
+   533→let gwQqSig = '';
+   534→let gwQqSigAt = 0;
+   535→
+   536→function startGwWatchdog(gen: number): void {
+   537→  if (gwWatchTimer) clearInterval(gwWatchTimer);
+   538→  gwQqSig = '';
+   539→  gwQqSigAt = Date.now();
+   540→  gwWatchTimer = setInterval(() => {
+   541→    if (!rt || rt.gen !== gen) {
+   542→      if (gwWatchTimer) clearInterval(gwWatchTimer);
+   543→      return;
+   544→    }
+   545→    // ① 微信循环冻结（含启动宽限 30s：lastRunAt=0 时不判）
+   546→    const wxStaleMs = Date.now() - rt.wx.lastRunAt;
+   547→    const tokenWait = /TOKEN_EXPIRED|Token 已过期/.test(rt.wx.lastError);
+   548→    if (rt.wx.lastRunAt > 0 && wxStaleMs > (tokenWait ? 400_000 : 150_000)) {
+   549→      console.log('[im-gateway] 僵尸自愈：微信循环冻结 ' + Math.round(wxStaleMs / 1000) + 's → 重启进程（keeper 拉起 + 自恢复）');
+   550→      process.exit(1);
+   551→    }
+   552→    // ② QQ 卡在 connecting/error 且不再推进（健康重试每 ≤30s 必动 reconnects/lastError）
+   553→    const qqSig = [rt.qq.state, rt.qq.reconnects, rt.qq.events, rt.qq.lastError, rt.qq.lastSeq].join('|');
+   554→    if (qqSig !== gwQqSig) {
+   555→      gwQqSig = qqSig;
+   556→      gwQqSigAt = Date.now();
+   557→    } else if (
+   558→      (rt.qq.state === 'connecting' || rt.qq.state === 'error') &&
+   559→      Date.now() - gwQqSigAt > 150_000
+   560→    ) {
+   561→      console.log('[im-gateway] 僵尸自愈：QQ 连接停摆 ' + rt.qq.state + ' 超过 150s → 重启进程（keeper 拉起 + 自恢复）');
+   562→      process.exit(1);
+   563→    }
+   564→  }, 20_000);
+   565→}
+   566→
+   567→// ---------------- 生命周期 ----------------
+   568→
+   569→function statusJson(): Record<string, unknown> {
+   570→  if (!rt) {
+   571→    return { running: false, qq: { state: 'disabled' }, wx: { running: false } };
+   572→  }
+   573→  return {
+   574→    running: true,
+   575→    startedAt: rt.startedAt,
+   576→    ref: rt.ref,
+   577→    mode: rt.mode,
+   578→    qq: { ...rt.qq, hbInterval },
+   579→    wx: { running: true, ...rt.wx },
+   580→  };
+   581→}
+   582→
+   583→// ---------------- v8 自恢复：网关状态落盘（重启/热重载后自动拉起） ----------------
+   584→
+   585→/** 落盘文件（只存中继参数——不含用户项目密钥，密钥仍只在浏览器）：服务重启后读它自动恢复在线。
+   586→ *  用户反馈「有时候会断连」的根因之一：网关状态在内存里，mini-service 重启（热重载/进程重启）
+   587→ *  就丢，没人打开页面就再也没人拉起，TA 静默下线直到主人发现。落盘 + 启动自恢复后不再依赖有人开着页面。 */
+   588→const STATE_FILE = 'gateway-state.json';
+   589→
+   590→function stateFilePath(): string {
+   591→  return fileURLToPath(new URL('./' + STATE_FILE, import.meta.url));
+   592→}
+   593→
+   594→interface PersistedState {
+   595→  v: 1;
+   596→  supaUrl: string;
+   597→  ref: string;
+   598→  relayUrl: string;
+   599→  relaySecret: string;
+   600→  savedAt: number;
+   601→}
+   602→
+   603→function readPersistedState(): PersistedState | null {
+   604→  try {
+   605→    const raw = readFileSync(stateFilePath(), 'utf8');
+   606→    const j = JSON.parse(raw) as PersistedState;
+   607→    if (j && j.v === 1 && typeof j.relayUrl === 'string' && typeof j.relaySecret === 'string' && j.relaySecret) return j;
+   608→    return null;
+   609→  } catch {
+   610→    return null;
+   611→  }
+   612→}
+   613→
+   614→function writePersistedState(s: PersistedState): void {
+   615→  try {
+   616→    writeFileSync(stateFilePath(), JSON.stringify(s));
+   617→  } catch {
+   618→    /* 落盘失败不影响本次运行 */
+   619→  }
+   620→}
+   621→
+   622→function clearPersistedState(): void {
+   623→  try {
+   624→    unlinkSync(stateFilePath());
+   625→  } catch {
+   626→    /* 本就不存在 */
+   627→  }
+   628→}
+   629→
+   630→/** 探测云端函数代际：ping 动作（所有版本都无害）带 ver>=8 才支持 read-file 中继 */
+   631→async function probeRelayCapability(relayUrl: string, relaySecret: string): Promise<{ ok: boolean; msg: string }> {
+   632→  try {
+   633→    const r = await fetch(relayUrl + '?action=ping', {
+   634→      method: 'POST',
+   635→      headers: { 'Content-Type': 'application/json', 'X-Task-Secret': relaySecret },
+   636→      body: '{}',
+   637→      signal: AbortSignal.timeout(15_000),
+   638→    });
+   639→    const j = (await r.json().catch(() => null)) as { ok?: boolean; ver?: number } | null;
+   640→    if (r.status === 401) return { ok: false, msg: '任务密钥不匹配：请回手机 App 设置 → 云端助手 重新点「一键部署」升级函数' };
+   641→    if (!j || !j.ok) return { ok: false, msg: '云端函数不可达或未部署（HTTP ' + r.status + '）——请确认已完成一键部署' };
+   642→    if ((Number(j.ver) || 0) < 8) return { ok: false, msg: '云端函数是旧版（不带中继读能力）——请回手机 App 设置 → 云端助手 再点一次「一键部署」' };
+   643→    return { ok: true, msg: '' };
+   644→  } catch (e) {
+   645→    return { ok: false, msg: '连不上云端函数：' + String((e as Error)?.message || e).slice(0, 80) };
+   646→  }
+   647→}
+   648→
+   649→async function startGateway(supaUrl: string, supaKey: string, ref: string, relayUrl: string, relaySecret: string): Promise<{ ok: boolean; msg: string }> {
+   650→  const url = String(supaUrl || '').replace(/\/+$/, '');
+   651→  const key = String(supaKey || '');
+   652→  const relay = String(relayUrl || '').replace(/\/+$/, '');
+   653→  const rsecret = String(relaySecret || '');
+   654→  if (!/^https:\/\/[a-z0-9-]+\.supabase\.co$/i.test(url)) return { ok: false, msg: 'supaUrl 不是有效的 Supabase 项目地址' };
+   655→  if (rt && rt.ref === ref) return { ok: true, msg: '网关已在运行' };
+   656→
+   657→  // v8 通道决策：优先中继（任务密钥随部署注入，永远有效；用户 Storage key 可能被轮换全拒），
+   658→  // 中继不可用时兑底直连密钥；两样都没有才报错。
+   659→  let mode: 'relay' | 'direct' = 'relay';
+   660→  if (rsecret && relay) {
+   661→    const probe = await probeRelayCapability(relay, rsecret);
+   662→    if (!probe.ok) {
+   663→      if (key.length >= 20) {
+   664→        mode = 'direct'; // 有直连密钥：降级直连，网关仍能跑
+   665→        console.log('[im-gateway] 中继不可用，降级直连：', probe.msg);
+   666→      } else {
+   667→        return { ok: false, msg: '网关无法读云端配置：' + probe.msg };
+   668→      }
+   669→    }
+   670→  } else if (key.length >= 20) {
+   671→    mode = 'direct';
+   672→  } else {
+   673→    return { ok: false, msg: '缺少云端凭证（任务密钥/项目密钥都没有）：请回手机 App 重新一键部署' };
+   674→  }
+   675→
+   676→  // 换连接：先停旧会话再立新
+   677→  if (rt) await stopGateway();
+   678→
+   679→  // 中继模式落盘（自恢复用；直连模式不落盘——密钥不该进磁盘）
+   680→  if (mode === 'relay') {
+   681→    writePersistedState({ v: 1, supaUrl: url, ref: ref || url.replace(/^https:\/\//, '').split('.')[0], relayUrl: relay, relaySecret: rsecret, savedAt: Date.now() });
+   682→  } else {
+   683→    clearPersistedState();
+   684→  }
+   685→
+   686→  const core = await materializeCore(url, mode === 'relay' ? '' : key, mode === 'relay' ? relay : '', mode === 'relay' ? rsecret : '');
+   687→  // 启动自检：真实读一次运行包（密钥错/包缺失立刻报可读原因，不静默空转）
+   688→  try {
+   689→    await core.loadConfig(true);
+   690→  } catch (e) {
+   691→    const msg = String((e as Error)?.message || e);
+   692→    clearPersistedState();
+   693→    return { ok: false, msg: '读取云端运行包失败：' + msg.slice(0, 120) };
+   694→  }
+   695→  const gen = rt ? rt.gen + 1 : 1;
+   696→  rt = {
+   697→    gen,
+   698→    ref: ref || url.replace(/^https:\/\//, '').split('.')[0],
+   699→    startedAt: Date.now(),
+   700→    mode,
+   701→    core,
+   702→    qq: { state: 'connecting', sessionId: '', botName: '', lastSeq: 0, lastEventAt: 0, events: 0, reconnects: 0, lastError: '', hbOk: false },
+   703→    wx: { lastRunAt: 0, lastError: '', replied: 0 },
+   704→  };
+   705→  // qqSeen 跨连接保留无意义：清掉
+   706→  qqSeen.clear();
+   707→  wantClose = false;
+   708→  reconnectDelay = 2000;
+   709→  void wxLoop(gen);
+   710→  void connectQq(gen);
+   711→  // v14 僵尸自愈看门狗（fetch 挂死/循环停摆 → process.exit → keeper 拉起 + 自恢复）
+   712→  startGwWatchdog(gen);
+   713→  // v9：QQ 连接锁续期（每 15s）——QQ 在线期间云端函数 cron-cycle 看到新鲜锁就不另开
+   714→  // 第二条连接（本网关是“本站在线时”的 QQ 持有方；本网关不在线时锁自然过期，云端接手）。
+   715→  // v14：只有【真在线（ready）】才占锁——连接挂了（connecting/error）不再刷锁：旧版挂了
+   716→  // 也继续刷，40s 内云端骨干永远接不了手 → 网关进程活着但连接死了 = 真机 QQ 全员掉线
+   717→  // （「QQ 接入过一会会断开」的另一半根因）。现在连接一挂锁就过期，云端 cron-cycle
+   718→  // 接手收发，网关自愈重连成功后（拿回 ready）重新占锁、云端下一轮让位。
+   719→  if (qqLockTimer) clearInterval(qqLockTimer);
+   720→  qqLockTimer = setInterval(() => {
+   721→    if (!rt || rt.gen !== gen) {
+   722→      if (qqLockTimer) clearInterval(qqLockTimer);
+   723→      return;
+   724→    }
+   725→    if (rt.qq.state !== 'ready') return; // 没真在线不占锁（disabled 没人需要；connecting/error 让云端骨干接手）
+   726→    void rt.core.refreshQqWsLock('gw').catch(() => undefined);
+   727→  }, 15000);
+   728→  // v12 凭证看门狗（每 30s）：QQ 在线期间重读运行包——手机 App「断开连接」后凭证段
+   729→  // 被移除时拆长连接（真机 QQ 上 TA 下线）；网络读失败不打扰在线连接。
+   730→  if (qqCfgTimer) clearInterval(qqCfgTimer);
+   731→  qqCfgTimer = setInterval(() => {
+   732→    if (!rt || rt.gen !== gen) {
+   733→      if (qqCfgTimer) clearInterval(qqCfgTimer);
+   734→      return;
+   735→    }
+   736→    if (rt.qq.state === 'disabled') return; // disabled 分支自己的 30s 重查已覆盖
+   737→    void rt.core
+   738→      .loadConfig(true)
+   739→      .then((cfg: { qq?: { appId?: string } } | null) => {
+   740→        if (!rt || rt.gen !== gen) return;
+   741→        if (!cfg || !cfg.qq || !cfg.qq.appId) disableQqChannel(gen);
+   742→      })
+   743→      .catch(() => undefined);
+   744→  }, 30000);
+   745→  return { ok: true, msg: '网关已启动：QQ WebSocket 长连接 + 微信自动回复' + (mode === 'relay' ? '（云端函数中继通道）' : '') };
+   746→}
+   747→
+   748→async function stopGateway(): Promise<{ ok: boolean; msg: string }> {
+   749→  if (!rt) {
+   750→    clearPersistedState();
+   751→    return { ok: true, msg: '网关本就未在运行' };
+   752→  }
+   753→  const cur = rt;
+   754→  rt = null;
+   755→  stopQq();
+   756→  if (gwWatchTimer) {
+   757→    clearInterval(gwWatchTimer);
+   758→    gwWatchTimer = null;
+   759→  }
+   760→  clearPersistedState(); // v8：自恢复状态一并清掉（重启后不再自动拉起）
+   761→  cur.gen = -1; // 让微信循环自然退出（下一轮 while 判定失败）
+   762→  return { ok: true, msg: '网关已停止（QQ 长连接已断开、微信自动回复已停）' };
+   763→}
+   764→
+   765→// ---------------- HTTP 服务（Caddy 转发 /api/im-gateway?XTransformPort=3100） ----------------
+   766→
+   767→Bun.serve({
+   768→  port: PORT,
+   769→  async fetch(req) {
+   770→    const url = new URL(req.url);
+   771→    // v13 本地 TTS 合成端点（云端核心 QQ 语音条用；仅本机/本进程访问，不经 Caddy 对外）
+   772→    if (url.pathname === '/tts' && req.method === 'POST') {
+   773→      return handleLocalTts(req);
+   774→    }
+   775→    if (url.pathname !== '/api/im-gateway') {
+   776→      return Response.json({ ok: false, error: 'not found' }, { status: 404 });
+   777→    }
+   778→    if (req.method === 'GET') {
+   779→      return Response.json(statusJson());
+   780→    }
+   781→    if (req.method === 'POST') {
+   782→      let body: Record<string, any> = {};
+   783→      try {
+   784→        body = (await req.json()) as Record<string, any>;
+   785→      } catch {
+   786→        return Response.json({ ok: false, msg: '请求体不是 JSON' }, { status: 400 });
+   787→      }
+   788→      const op = String(body.op || '');
+   789→      if (op === 'start') {
+   790→        const r = await startGateway(
+   791→          String(body.supaUrl || ''),
+   792→          String(body.supaKey || ''),
+   793→          String(body.ref || ''),
+   794→          String(body.relayUrl || ''),
+   795→          String(body.relaySecret || ''),
+   796→        );
+   797→        return Response.json(r);
+   798→      }
+   799→      if (op === 'stop') {
+   800→        return Response.json(await stopGateway());
+   801→      }
+   802→      // v10 refresh：手机 App 周期性重推运行包后，通知网关立即重查 QQ 凭证（只对
+   803→      // disabled 生效——已连接/连接中不动，防双连接）。免去等待 30s 重试周期。
+   804→      // v12：先复位 wantClose——disableQqChannel 拆连接后留着 true，connectQq 会
+   805→      // 直接早退（重新接入后永远点亮不了的坑）。
+   806→      if (op === 'refresh') {
+   807→        if (rt && rt.qq.state === 'disabled') {
+   808→          wantClose = false;
+   809→          void connectQq(rt.gen);
+   810→          return Response.json({ ok: true, msg: 'QQ 凭证待重查：已发起重连' });
+   811→        }
+   812→        return Response.json({ ok: true, msg: rt && rt.qq.state !== 'disabled' ? 'QQ 已在线，无需重连' : '网关未在运行' });
+   813→      }
+   814→      return Response.json({ ok: false, msg: '未知 op：' + (op || '(空)') }, { status: 400 });
+   815→    }
+   816→    return Response.json({ ok: false, msg: 'method ' + req.method }, { status: 405 });
+   817→  },
+   818→});
+   819→
+   820→console.log('[im-gateway] listening on :3100 — QQ WebSocket + 微信 iLink 7x24');
+   821→
+   822→// v8 启动自恢复：落盘状态存在（上次是在线状态）→ 自动拉起网关（中继模式；服务重启/
+   823→// 热重载/进程崩溃后不再静默掉线——「有时候会断连」的根因修复）。失败只记日志，等页面拉起兑底。
+   824→{
+   825→  const ps = readPersistedState();
+   826→  if (ps) {
+   827→    void startGateway(ps.supaUrl, '', ps.ref, ps.relayUrl, ps.relaySecret)
+   828→      .then((r) => console.log('[im-gateway] 自恢复：', r.ok ? '已恢复在线' : '失败 ' + r.msg))
+   829→      .catch((e) => console.log('[im-gateway] 自恢复失败：', String((e as Error)?.message || e)));
+   830→  }
+   831→}
+   832→

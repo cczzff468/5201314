@@ -1,0 +1,620 @@
+     1→     1→import { NextRequest, NextResponse } from 'next/server';
+     2→     2→
+     3→     3→export const runtime = 'nodejs';
+     4→     4→
+     5→     5→/**
+     6→     6→ * Supabase 云端部署代理（浏览器 CORS 限制，api.supabase.com 与项目域名都不放行第三方站点）。
+     7→     7→ *
+     8→     8→ * 五个操作（用户的 Access Token / service_role key 每次请求透传，服务端不留存）：
+     9→     9→ * - projects：列出用户的项目（选择部署目标 ref）
+    10→    10→ * - keys：取项目 secret 类 key（直传上传用，可能拿到多个候选）
+    11→    11→ * - check-service-key：手动粘贴的 key 保存前验证（两种头型都试）
+    12→    12→ * - storage-setup：建桶（wx-cloud 私有 + wx-cloud-public 公开，v3 主路径 Management API
+    13→    13→ *   SQL 直插 storage.buckets，参照 ai-virtual-phone 仓库解法）并上传文件。v4 上传三级兜底：
+    14→    14→ *   ① 候选密钥（自动读取的全部 secret key + 已保存的）× 两种头型（新式 key 仅 apikey /
+    15→    15→ *   apikey+Bearer 双带，后者即 ai-virtual-phone 参考仓库写法）逐一试直传；② 直传全军覆没
+    16→    16→ *   （用户项目 JWT 签名密钥已轮换 → 旧 eyJ service_role 全部 signature verification failed；
+    17→    17→ *   或该项目 Storage 拒收新式 sb_secret_ key）时，走「云端函数代写」：POST 到已部署的
+    18→    18→ *   wx-assistant 函数 upload-file 动作（X-Task-Secret 鉴权），函数用平台注入的
+    19→    19→ *   SUPABASE_SERVICE_ROLE_KEY 写 Storage——平台注入的凭证永远有效，彻底不依赖用户 key；
+    20→    20→ *   ③ 都不行才报错（带每一轮的真实响应便于定位）。
+    21→    21→ * - deploy：把微信云端助手 Edge Function 部署进用户项目（Management API），部署成功后
+    22→    22→ *   顺手把任务密钥注入函数密钥 WX_TASK_SECRET（/v1/projects/{ref}/secrets）——upload-file
+    23→    23→ *   在运行包还没写进桶的首次部署期也能校验任务密钥。
+    24→    24→ * - func-call：同源转发调云端函数（verify-qq / ping 等动作；v5 已移除 setup-cron / stop-cron
+    25→    25→ *   ——被动 Webhook 模式不再需要定时轮询）。背景（v3 修复）：存量已部署的旧版函数没有
+    26→    26→ *   CORS 头，浏览器直连函数 URL 带 X-Task-Secret 等自定义头会先发 OPTIONS 预检→被拒→
+    27→    27→ *   TypeError: Failed to fetch；走本代理同源转发（服务端到服务端无 CORS）存量部署立即
+    28→    28→ *   修复，无需重新部署。
+    29→    29→ * - unschedule-cron（v5 新增）：清掉旧版每分钟定时轮询的 pg_cron 任务（wx-assistant /
+    30→    30→ *   assistant-polling），Management API SQL 直查——旧版函数里的 npm:postgres@3.5.4 路径
+    31→    31→ *   （该版本不存在，Edge 运行时报 Could not find constraint）彻底退役；任务本来不存在
+    32→    32→ *   也算成功（幂等）。
+    33→    33→ * - schedule-cron（v6 新增，「云端轮询」开关开启）：pg_cron + pg_net 建每分钟定时任务，
+    34→    34→ *   net.http_post 触发一次云端函数单轮收发（参照 ai-virtual-phone 的定时任务 SQL；
+    35→    35→ *   X-Task-Secret 鉴权），顺手挂每日 cron 日志清理任务；幂等（先 unschedule 同名再
+    36→    36→ *   schedule，重复点击安全重跑）。
+    37→    37→ *
+    38→    38→ * 防滥用：deploy 只接受本产品的函数代码（必须包含 Deno.serve 与 wx-assistant 标记）；
+    39→    39→ * func-call 只转发到 {ref}.supabase.co 的 wx-assistant 函数（固定域名白名单，无 SSRF 面）。
+    40→    40→ */
+    41→    41→
+    42→    42→type DeployRequest = {
+    43→    43→  op?: 'projects' | 'keys' | 'check-service-key' | 'storage-setup' | 'deploy' | 'func-call' | 'unschedule-cron' | 'schedule-cron';
+    44→    44→  /** Supabase Access Token（supabase.com → Account Settings → Access Tokens） */
+    45→    45→  token?: string;
+    46→    46→  /** 项目 ref */
+    47→    47→  ref?: string;
+    48→    48→  /** service_role key（storage-setup 直传兜底用） */
+    49→    49→  serviceKey?: string;
+    50→    50→  /** storage-setup：候选密钥列表（自动读取的全部 secret 类 key + 已保存 key，去重） */
+    51→    51→  serviceKeys?: string[];
+    52→    52→  /** 任务密钥：deploy 部署后注入函数的 WX_TASK_SECRET；storage-setup 云端函数代写上传、
+    53→    53→   *  func-call 转发鉴权、schedule-cron 定时任务鉴权都用它（X-Task-Secret） */
+    54→    54→  secret?: string;
+    55→    55→  /** storage-setup：要上传的文件 */
+    56→    56→  files?: Array<{ path?: string; content?: string; bucket?: 'wx-cloud' | 'wx-cloud-public'; contentType?: string }>;
+    57→    57→  /** deploy：函数源码 */
+    58→    58→  code?: string;
+    59→    59→  /** func-call：函数动作（verify-qq / ping；空 = 默认微信单轮收发。v5 起 setup-cron / stop-cron 已废弃） */
+    60→    60→  action?: string;
+    61→    61→  /** func-call：POST body（JSON 序列化后透传） */
+    62→    62→  body?: Record<string, unknown>;
+    63→    63→  /** func-call：超时毫秒（默认 70s，ping 默 100s 轮询窗口可到 150s） */
+    64→    64→  timeoutMs?: number;
+    65→    65→};
+    66→    66→
+    67→    67→const MGMT = 'https://api.supabase.com';
+    68→    68→
+    69→    69→function bad(status: number, error: string, message?: string) {
+    70→    70→  return NextResponse.json({ error, message: message ?? '' }, { status });
+    71→    71→}
+    72→    72→
+    73→    73→/** 从请求体提取项目 ref（check-service-key 在公共 ref 校验前就要用） */
+    74→    74→function ref0(p: DeployRequest): string {
+    75→    75→  return typeof p.ref === 'string' ? p.ref.trim() : '';
+    76→    76→}
+    77→    77→
+    78→    78→/**
+    79→    79→ * Storage 请求头（按 key 类型区分，官方文档两套鉴权）：
+    80→    80→ * - legacy JWT（eyJ 开头 anon/service_role）：apikey + Authorization Bearer 双带。
+    81→    81→ * - 新式 key（sb_secret_ 开头）不是 JWT：官方迁移指南写法是只放 apikey 头；但参考
+    82→    82→ *   ai-virtual-phone 仓库（lib/cloud-backup/storage-client.ts）的 apikey + Bearer 双带
+    83→    83→ *   写法在部分网关组合上才能过——两种都试，谁通用谁。
+    84→    84→ */
+    85→    85→function storageAuthVariants(key: string): Array<{ tag: string; headers: Record<string, string> }> {
+    86→    86→  if (/^sb_secret_/i.test(key)) {
+    87→    87→    return [
+    88→    88→      { tag: '仅apikey', headers: { apikey: key } },
+    89→    89→      { tag: 'apikey+Bearer', headers: { apikey: key, Authorization: `Bearer ${key}` } },
+    90→    90→    ];
+    91→    91→  }
+    92→    92→  if (/^sb_publishable_/i.test(key)) {
+    93→    93→    return [{ tag: '仅apikey', headers: { apikey: key } }];
+    94→    94→  }
+    95→    95→  return [{ tag: 'apikey+Bearer', headers: { apikey: key, Authorization: `Bearer ${key}` } }];
+    96→    96→}
+    97→    97→
+    98→    98→/** 响应体是否属于「key 被项目 Storage 拒收」（JWT 签名校验失败 / 被当 JWT 解析失败 / 无权限） */
+    99→    99→function isKeyRejected(body: string): boolean {
+   100→   100→  return /signature verification failed|invalid\s+(compact\s+)?jws|invalid\s+jwt|not\s+a\s+valid\s+jwt|unauthorized|access.?denied/i.test(
+   101→   101→    body,
+   102→   102→  );
+   103→   103→}
+   104→   104→
+   105→   105→/** 直传与代写全失败时给用户的指引（区分 sb_secret_ / 旧版 eyJ 两种形态） */
+   106→   106→function keyRejectHint(key: string): string {
+   107→   107→  if (key.startsWith('sb_secret_')) {
+   108→   108→    return '该项目 Storage 拒收新式 sb_secret_ key（两种头型都试过）——多为平台新旧密钥体系切换期的网关兼容问题。首选解法：重新点「一键部署」升级云端函数（v4 函数支持代写上传，不依赖项目密钥）；或到 Supabase 控制台 Project Settings → API Keys → Legacy API keys 创建旧版 service_role（eyJ 开头）后用「手动粘贴」再试';
+   109→   109→  }
+   110→   110→  if (key.startsWith('eyJ')) {
+   111→   111→    return '这个 eyJ 开头的旧版 service_role 签名校验失败——该项目的 JWT 签名密钥已轮换，旧 key 全部失效（Supabase 2025 起新项目/轮换后的项目普遍如此）。首选解法：重新点「一键部署」升级云端函数（v4 函数支持代写上传，不依赖项目密钥）；或换 sb_secret_ 开头的新式 secret key（Project Settings → API Keys）用「手动粘贴」再试';
+   112→   112→  }
+   113→   113→  return '请确认粘贴的是完整密钥（sb_secret_ 开头新式 key，或 eyJ 开头旧版 service_role）';
+   114→   114→}
+   115→   115→
+   116→   116→export async function POST(req: NextRequest) {
+   117→   117→  let p: DeployRequest;
+   118→   118→  try {
+   119→   119→    p = (await req.json()) as DeployRequest;
+   120→   120→  } catch {
+   121→   121→    return bad(400, 'invalid_json');
+   122→   122→  }
+   123→   123→  const token = typeof p.token === 'string' ? p.token.trim() : '';
+   124→   124→
+   125→   125→  // ---- 云端函数同源转发（存量旧版函数无 CORS 也能用；服务端到服务端无 CORS 限制） ----
+   126→   126→  // 不需要 Access Token：函数鉴权走 X-Task-Secret（部署时生成的任务密钥）
+   127→   127→  if (p.op === 'func-call') {
+   128→   128→    const ref = ref0(p);
+   129→   129→    if (!/^[a-z0-9]{12,40}$/.test(ref)) return bad(400, 'invalid_ref', '还没选择云端项目');
+   130→   130→    const action = typeof p.action === 'string' ? p.action.replace(/[^a-z0-9-]/gi, '').slice(0, 40) : '';
+   131→   131→    const secret = typeof p.secret === 'string' ? p.secret.slice(0, 200) : '';
+   132→   132→    if (!secret) return bad(400, 'missing_secret', '任务密钥缺失：请重新一键部署后再试');
+   133→   133→    const timeoutMs = Math.min(Math.max(Number(p.timeoutMs) || 70_000, 5_000), 150_000);
+   134→   134→    // 固定域名白名单：只允许 {ref}.supabase.co 的 wx-assistant 函数，无 SSRF 面
+   135→   135→    const url = `https://${ref}.supabase.co/functions/v1/wx-assistant`;
+   136→   136→    const r = await fetch(url, {
+   137→   137→      method: 'POST',
+   138→   138→      headers: {
+   139→   139→        'Content-Type': 'application/json',
+   140→   140→        'X-Task-Secret': secret,
+   141→   141→        ...(action ? { 'X-Task-Action': action } : {}),
+   142→   142→      },
+   143→   143→      body: JSON.stringify(p.body ?? {}),
+   144→   144→      signal: AbortSignal.timeout(timeoutMs),
+   145→   145→    }).catch(() => null);
+   146→   146→    if (!r) {
+   147→   147→      return bad(504, 'func_unreachable', `连不上你的云端助手（${url}）：请确认已完成「一键部署」；刚部署的函数冷启动需 10-30 秒，稍等再试`);
+   148→   148→    }
+   149→   149→    const text = await r.text();
+   150→   150→    return new NextResponse(text, {
+   151→   151→      status: r.status,
+   152→   152→      headers: { 'Content-Type': r.headers.get('content-type') ?? 'application/json' },
+   153→   153→    });
+   154→   154→  }
+   155→   155→
+   156→   156→  // ---- 验证 service_role / secret key（手动粘贴保存前先测：能不能写 Storage；只需项目 key，不需要 Access Token） ----
+   157→   157→  if (p.op === 'check-service-key') {
+   158→   158→    const serviceKey = typeof p.serviceKey === 'string' ? p.serviceKey.trim() : '';
+   159→   159→    if (!serviceKey || serviceKey.length > 400) return bad(400, 'missing_service_key');
+   160→   160→    const ref = ref0(p);
+   161→   161→    if (!/^[a-z0-9]{12,40}$/.test(ref)) return bad(400, 'invalid_ref', '还没选择项目：先在上方读取项目列表并选中一个项目，再粘贴密钥');
+   162→   162→    // v4：两种头型都试（新式 sb_secret_ 在不同项目上网关行为不一致——仅 apikey 与
+   163→   163→    // apikey+Bearer 双带各能通一部分项目），任一种通了就算有效
+   164→   164→    let lastStatus = 0;
+   165→   165→    let lastBody = '';
+   166→   166→    let networkFail = true;
+   167→   167→    for (const v of storageAuthVariants(serviceKey)) {
+   168→   168→      const r = await fetch(`https://${ref}.supabase.co/storage/v1/bucket`, {
+   169→   169→        headers: v.headers,
+   170→   170→        signal: AbortSignal.timeout(12_000),
+   171→   171→      }).catch(() => null);
+   172→   172→      if (!r) continue;
+   173→   173→      networkFail = false;
+   174→   174→      lastStatus = r.status;
+   175→   175→      if (r.ok) return NextResponse.json({ ok: true, via: v.tag });
+   176→   176→      lastBody = (await r.text().catch(() => '')).slice(0, 200);
+   177→   177→      // 400 + key 被拒（signature verification failed / Invalid Compact JWS）→ 换下一种头型再试
+   178→   178→      if (r.status === 400 && isKeyRejected(lastBody)) continue;
+   179→   179→      break;
+   180→   180→    }
+   181→   181→    if (networkFail) return bad(502, 'unreachable', '连不上你的 Supabase 项目：请确认项目在运行（免费项目闲置一周会自动暂停 Paused，到 Supabase 控制台点 Restore 恢复），网络恢复后再试');
+   182→   182→    const detail =
+   183→   183→      lastStatus === 401 || lastStatus === 403
+   184→   184→        ? '这个 key 没有项目写入权限：要用 secret 类 key（sb_secret_ 开头或 legacy service_role），publishable / anon key 不行'
+   185→   185→        : lastStatus === 400 && isKeyRejected(lastBody)
+   186→   186→          ? `密钥不被该项目 Storage 接受（${lastBody ? lastBody.slice(0, 120) : 'key 被拒'}）。${keyRejectHint(serviceKey)}`
+   187→   187→          : lastStatus === 404
+   188→   188→            ? '找不到项目（ref 不对？），请确认选择的是正确项目'
+   189→   189→            : `Supabase 返回 ${lastStatus}${lastBody ? `：${lastBody.slice(0, 120)}` : ''}`;
+   190→   190→    return bad(lastStatus === 401 || lastStatus === 403 ? 403 : 502, 'invalid_key', detail);
+   191→   191→  }
+   192→   192→
+   193→   193→  if (!token || token.length > 400) return bad(400, 'missing_token');
+   194→   194→  const auth = { Authorization: `Bearer ${token}` };
+   195→   195→
+   196→   196→  try {
+   197→   197→    // ---- 列项目 ----
+   198→   198→    if (p.op === 'projects') {
+   199→   199→      const r = await fetch(`${MGMT}/v1/projects`, { headers: auth, signal: AbortSignal.timeout(15_000) });
+   200→   200→      const text = await r.text();
+   201→   201→      return new NextResponse(text, {
+   202→   202→        status: r.status,
+   203→   203→        headers: { 'Content-Type': r.headers.get('content-type') ?? 'application/json' },
+   204→   204→      });
+   205→   205→    }
+   206→   206→
+   207→   207→    const ref = typeof p.ref === 'string' ? p.ref.trim() : '';
+   208→   208→    if (!/^[a-z0-9]{12,40}$/.test(ref)) return bad(400, 'invalid_ref');
+   209→   209→
+   210→   210→    // ---- 取项目 API keys（官方平台指南写法：?reveal=true 拿明文） ----
+   211→   211→    // 关键行为：无 reveal 时新项目常返回 200 但 api_key 全为 null（拿不到明文），
+   212→   212→    // 所以 reveal 版优先；reveal 403/失败（PAT 权限不含 secrets read）再退回无参数版；
+   213→   213→    // 两版都拿不到就透传最后错误（前端引导手动粘贴）。
+   214→   214→    if (p.op === 'keys') {
+   215→   215→      let lastStatus = 0;
+   216→   216→      let lastText = '';
+   217→   217→      for (const query of ['?reveal=true', '']) {
+   218→   218→        const r = await fetch(`${MGMT}/v1/projects/${ref}/api-keys${query}`, {
+   219→   219→          headers: auth,
+   220→   220→          signal: AbortSignal.timeout(15_000),
+   221→   221→        }).catch(() => null);
+   222→   222→        if (!r) continue;
+   223→   223→        lastStatus = r.status;
+   224→   224→        lastText = await r.text();
+   225→   225→        if (r.ok) {
+   226→   226→          // 200 且响应里确实带了明文 key → 直接用；200 但全 null（无 reveal 的行为）→ 继续试下一版
+   227→   227→          const hasPlainKey = /"(?:api_key|key)"\s*:\s*"(?:eyJ|sb_secret_)[^"]{20,}/.test(lastText);
+   228→   228→          if (hasPlainKey || query === '') {
+   229→   229→            return new NextResponse(lastText, {
+   230→   230→              status: r.status,
+   231→   231→              headers: { 'Content-Type': r.headers.get('content-type') ?? 'application/json' },
+   232→   232→            });
+   233→   233→          }
+   234→   234→          continue;
+   235→   235→        }
+   236→   236→      }
+   237→   237→      return new NextResponse(lastText || '{"error":"keys_unreachable"}', {
+   238→   238→        status: lastStatus || 502,
+   239→   239→        headers: { 'Content-Type': 'application/json' },
+   240→   240→      });
+   241→   241→    }
+   242→   242→
+   243→   243→    // ---- 建桶 + 上传文件 ----
+   244→   244→    if (p.op === 'storage-setup') {
+   245→   245→      // v4：候选密钥 = 前端自动读取的全部 secret 类 key + 已保存 key（去重；剔掉
+   246→   246→      // sbp_ Access Token / sb_publishable_ 公开密钥这类必错形态）。上传不再强依赖密钥：
+   247→   247→      // 直传全部被拒时走「云端函数代写」，所以这里可为空
+   248→   248→      const rawKeys: string[] = [
+   249→   249→        ...(Array.isArray(p.serviceKeys) ? p.serviceKeys : []),
+   250→   250→        ...(typeof p.serviceKey === 'string' ? [p.serviceKey] : []),
+   251→   251→      ];
+   252→   252→      const candidates = Array.from(
+   253→   253→        new Set(
+   254→   254→          rawKeys
+   255→   255→            .map((k) => k.trim())
+   256→   256→            .filter((k) => k && k.length <= 400 && !/^(sbp_|sb_publishable_)/.test(k)),
+   257→   257→        ),
+   258→   258→      );
+   259→   259→      const taskSecret = typeof p.secret === 'string' ? p.secret.trim().slice(0, 200) : '';
+   260→   260→      const base = `https://${ref}.supabase.co`;
+   261→   261→
+   262→   262→      // ① 项目状态预检：免费项目闲置一周自动暂停，Paused 时 Storage 一律失败——直接给 Restore 指引。
+   263→   263→      //    注意 Management API 的运行态是 ACTIVE_HEALTHY / ACTIVE_UNHEALTHY 等带后缀的形式，
+   264→   264→      //    一律以 ACTIVE 开头即视为运行中（用户实测曾被「ACTIVE_HEALTHY ≠ ACTIVE」误拦，项目明明健康）
+   265→   265→      const pr = await fetch(`${MGMT}/v1/projects/${ref}`, { headers: auth, signal: AbortSignal.timeout(12_000) }).catch(() => null);
+   266→   266→      if (pr && pr.ok) {
+   267→   267→        const pj = (await pr.json().catch(() => null)) as { status?: string } | null;
+   268→   268→        const pstatus = pj?.status ?? '';
+   269→   269→        if (pstatus && !pstatus.toUpperCase().startsWith('ACTIVE')) {
+   270→   270→          return bad(502, 'project_not_active', `你的项目当前状态是「${pstatus}」（免费项目闲置一周会自动暂停）——请到 Supabase 控制台打开该项目，点 Restore 恢复运行，再回来重新点「一键部署」`);
+   271→   271→        }
+   272→   272→      }
+   273→   273→
+   274→   274→      // ② （v4 已并入 ③）原「列桶预检」不再提前判死：密钥被拒的形态千奇百怪（JWT 轮换后的
+   275→   275→      //    signature verification failed / 新式 key 的 Invalid Compact JWS / 无写入权限），
+   276→   276→      //    且都有「云端函数代写」兜底——逐轮真实结果进 attempts，最后汇总呈现。
+   277→   277→
+   278→   278→      // ② 建桶（v3 主路径：Management API SQL 直插 storage.buckets——参照 ai-virtual-phone 仓库）。
+   279→   279→      //    新式 sb_secret_ key 在部分项目上被 Storage 管理端点拒收：GET 列桶能过，POST 建桶却
+   280→   280→      //    400 {"statusCode":"403","message":"Invalid Compact JWS","code":"AccessDenied"}（用户实测
+   281→   281→      //    踩坑）。SQL 路径用 Access Token 鉴权，与 Storage 密钥体系完全解耦，两类 key 都不再依赖；
+   282→   282→      //    on conflict do nothing 幂等（桶已存在 = 成功）。SQL 失败（PAT 无 database/query 权限等）
+   283→   283→      //    再退回原 REST 建桶路径兜底（serviceKey 那套，含「已存在」GET 确认）。
+   284→   284→      let bucketSqlErr = '';
+   285→   285→      let bucketNote = '';
+   286→   286→      let bucketDone = false;
+   287→   287→      try {
+   288→   288→        const qs = await fetch(`${MGMT}/v1/projects/${ref}/database/query`, {
+   289→   289→          method: 'POST',
+   290→   290→          headers: { ...auth, 'Content-Type': 'application/json' },
+   291→   291→          body: JSON.stringify({
+   292→   292→            query:
+   293→   293→              'insert into storage.buckets (id, name, public) values ' +
+   294→   294→              "('wx-cloud', 'wx-cloud', false), ('wx-cloud-public', 'wx-cloud-public', true) " +
+   295→   295→              'on conflict (id) do nothing;',
+   296→   296→            read_only: false,
+   297→   297→          }),
+   298→   298→          signal: AbortSignal.timeout(20_000),
+   299→   299→        });
+   300→   300→        if (qs.ok) {
+   301→   301→          bucketDone = true;
+   302→   302→        } else {
+   303→   303→          const qsBody = (await qs.text().catch(() => '')).slice(0, 140);
+   304→   304→          bucketSqlErr = `SQL 建桶失败（HTTP ${qs.status}${qsBody ? `：${qsBody}` : ''}）`;
+   305→   305→        }
+   306→   306→      } catch {
+   307→   307→        bucketSqlErr = 'SQL 建桶失败（Management API 连不上/超时）';
+   308→   308→      }
+   309→   309→
+   310→   310→      if (!bucketDone) {
+   311→   311→        // REST 兜底：候选密钥 × 头型逐一试（POST 失败含「已存在」后 GET 确认桶真的存在）。
+   312→   312→        // v4：REST 兜底失败不再直接判死——云端函数的 upload-file 动作自带建桶，仍有
+   313→   313→        // 机会；失败原因记进 bucketNote，最后汇总时一并呈现
+   314→   314→        let bucketErr = '';
+   315→   315→        bucketLoop: for (const key of candidates) {
+   316→   316→          for (const v of storageAuthVariants(key)) {
+   317→   317→            let roundOk = true;
+   318→   318→            for (const bucket of [
+   319→   319→              { name: 'wx-cloud', public: false },
+   320→   320→              { name: 'wx-cloud-public', public: true },
+   321→   321→            ]) {
+   322→   322→              const cr = await fetch(`${base}/storage/v1/bucket`, {
+   323→   323→                method: 'POST',
+   324→   324→                headers: { ...v.headers, 'Content-Type': 'application/json' },
+   325→   325→                body: JSON.stringify(bucket),
+   326→   326→                signal: AbortSignal.timeout(15_000),
+   327→   327→              }).catch(() => null);
+   328→   328→              if (cr?.ok) continue;
+   329→   329→              const exist = await fetch(`${base}/storage/v1/bucket/${bucket.name}`, {
+   330→   330→                headers: v.headers,
+   331→   331→                signal: AbortSignal.timeout(10_000),
+   332→   332→              }).catch(() => null);
+   333→   333→              if (!exist || !exist.ok) {
+   334→   334→                roundOk = false;
+   335→   335→                const t = cr ? await cr.text().catch(() => '') : '网络超时';
+   336→   336→                bucketErr = `建桶失败（${bucket.name}，${cr ? `Supabase 返回 ${cr.status}` : '连不上'}${t ? `：${t.slice(0, 100)}` : ''}）`;
+   337→   337→                break;
+   338→   338→              }
+   339→   339→            }
+   340→   340→            if (roundOk) {
+   341→   341→              bucketDone = true;
+   342→   342→              break bucketLoop;
+   343→   343→            }
+   344→   344→          }
+   345→   345→        }
+   346→   346→        if (!bucketDone) {
+   347→   347→          bucketNote = bucketErr || (candidates.length === 0 ? '没有可用的项目密钥，REST 建桶兜底未执行' : 'REST 建桶兜底全部失败');
+   348→   348→          if (bucketSqlErr) bucketNote += `；SQL 建桶路径也已失败：${bucketSqlErr}（请检查 Access Token 是否有数据库查询权限）`;
+   349→   349→        }
+   350→   350→      }
+   351→   351→
+   352→   352→      // ③ 上传（v4 三级兜底）：A. 候选密钥 × 头型逐一直传（x-upsert 幂等，跨轮次并集补齐）；
+   353→   353→      //    B. 直传没传齐 → 云端函数代写（wx-assistant 的 upload-file 动作：平台注入的
+   354→   354→      //    SUPABASE_SERVICE_ROLE_KEY 写 Storage——用户 key 被项目全拒也能过）；C. 还没
+   355→   355→      //    传齐才汇总报错（带每轮真实响应便于定位）
+   356→   356→      const files = (Array.isArray(p.files) ? p.files.slice(0, 8) : [])
+   357→   357→        .map((f) => ({
+   358→   358→          path: typeof f.path === 'string' ? f.path.replace(/[^a-zA-Z0-9._/-]/g, '') : '',
+   359→   359→          content: typeof f.content === 'string' ? f.content : '',
+   360→   360→          bucket: f.bucket === 'wx-cloud-public' ? 'wx-cloud-public' : 'wx-cloud',
+   361→   361→          contentType: typeof f.contentType === 'string' ? f.contentType : 'text/plain',
+   362→   362→        }))
+   363→   363→        .filter((f) => f.path && f.path.length <= 128 && f.content && f.content.length <= 800_000);
+   364→   364→      if (files.length === 0) return bad(400, 'missing_files', '没有可上传的文件（运行包为空？）');
+   365→   365→
+   366→   366→      const uploadedSet = new Set<string>();
+   367→   367→      const attempts: string[] = [];
+   368→   368→      let usedKey = '';
+   369→   369→      let via = 'direct';
+   370→   370→      let lastRejectedKey = '';
+   371→   371→      let lastRejectedBody = '';
+   372→   372→
+   373→   373→      directLoop: for (const key of candidates) {
+   374→   374→        for (const v of storageAuthVariants(key)) {
+   375→   375→          const remain = files.filter((f) => !uploadedSet.has(`${f.bucket}/${f.path}`));
+   376→   376→          if (remain.length === 0) break directLoop;
+   377→   377→          let okCount = 0;
+   378→   378→          let lastStatus = 0;
+   379→   379→          let lastBody = '';
+   380→   380→          for (const f of remain) {
+   381→   381→            const r = await fetch(`${base}/storage/v1/object/${f.bucket}/${f.path}`, {
+   382→   382→              method: 'POST',
+   383→   383→              headers: { ...v.headers, 'Content-Type': f.contentType, 'x-upsert': 'true' },
+   384→   384→              body: f.content,
+   385→   385→              signal: AbortSignal.timeout(20_000),
+   386→   386→            }).catch(() => null);
+   387→   387→            if (!r) {
+   388→   388→              lastStatus = 0;
+   389→   389→              lastBody = '网络错误';
+   390→   390→              continue;
+   391→   391→            }
+   392→   392→            lastStatus = r.status;
+   393→   393→            if (r.ok) {
+   394→   394→              okCount += 1;
+   395→   395→              uploadedSet.add(`${f.bucket}/${f.path}`);
+   396→   396→            } else {
+   397→   397→              lastBody = (await r.text().catch(() => '')).slice(0, 160);
+   398→   398→              if (isKeyRejected(lastBody)) {
+   399→   399→                lastRejectedKey = key;
+   400→   400→                lastRejectedBody = lastBody;
+   401→   401→              }
+   402→   402→            }
+   403→   403→          }
+   404→   404→          attempts.push(`直传·${key.slice(0, 10)}…·${v.tag}：${okCount}/${remain.length} 成功${lastBody ? `（${lastStatus || '网络错误'}：${lastBody.slice(0, 80)}）` : ''}`);
+   405→   405→          if (uploadedSet.size >= files.length) {
+   406→   406→            usedKey = key;
+   407→   407→            break directLoop;
+   408→   408→          }
+   409→   409→        }
+   410→   410→      }
+   411→   411→
+   412→   412→      // B. 云端函数代写（v4 主修复）：部署过的 wx-assistant 自带 upload-file 动作，用平台
+   413→   413→      // 注入的凭证写 Storage（还顺手建桶）——用户 Storage key 全部被拒（JWT 轮换后的
+   414→   414→      // signature verification failed 等）时这条路依然通，不依赖用户粘贴的任何 key
+   415→   415→      if (uploadedSet.size < files.length && taskSecret) {
+   416→   416→        const remain = files.filter((f) => !uploadedSet.has(`${f.bucket}/${f.path}`));
+   417→   417→        try {
+   418→   418→          const fr = await fetch(`${base}/functions/v1/wx-assistant`, {
+   419→   419→            method: 'POST',
+   420→   420→            headers: { 'Content-Type': 'application/json', 'X-Task-Secret': taskSecret, 'X-Task-Action': 'upload-file' },
+   421→   421→            body: JSON.stringify({ files: remain }),
+   422→   422→            signal: AbortSignal.timeout(40_000),
+   423→   423→          }).catch(() => null);
+   424→   424→          if (!fr) {
+   425→   425→            attempts.push('云端代写：超时（约 40 秒无响应——旧版函数会掉进默认轮询分支，或函数还没部署/冷启动中，重新「一键部署」可解决）');
+   426→   426→          } else {
+   427→   427→            const ftext = (await fr.text().catch(() => '')).slice(0, 300);
+   428→   428→            let fj: { ok?: boolean; uploaded?: string[]; error?: string; handled?: unknown } | null = null;
+   429→   429→            try {
+   430→   430→              fj = JSON.parse(ftext) as typeof fj;
+   431→   431→            } catch {
+   432→   432→              /* 非 JSON */
+   433→   433→            }
+   434→   434→            if (fr.ok && fj && Array.isArray(fj.uploaded)) {
+   435→   435→              for (const u of fj.uploaded) uploadedSet.add(String(u));
+   436→   436→              via = 'function';
+   437→   437→              attempts.push(`云端代写：${fj.uploaded.length}/${remain.length} 成功${fj.error ? `（部分失败：${String(fj.error).slice(0, 80)}）` : ''}`);
+   438→   438→            } else if (fr.status === 401) {
+   439→   439→              attempts.push('云端代写：任务密钥不匹配（401）——请重新点「一键部署」后再试');
+   440→   440→            } else if (fj && typeof fj.handled === 'number') {
+   441→   441→              attempts.push('云端代写：已部署的是旧版函数（没有代写动作）——请重新点「一键部署」升级函数');
+   442→   442→            } else {
+   443→   443→              attempts.push(`云端代写：函数返回 ${fr.status}${ftext ? `（${ftext.slice(0, 80)}）` : ''}——请确认已完成「一键部署」（v4 函数自带代写上传）`);
+   444→   444→            }
+   445→   445→          }
+   446→   446→        } catch {
+   447→   447→          attempts.push('云端代写：请求异常');
+   448→   448→        }
+   449→   449→      }
+   450→   450→
+   451→   451→      if (uploadedSet.size >= files.length) {
+   452→   452→        return NextResponse.json({
+   453→   453→          ok: true,
+   454→   454→          uploaded: [...uploadedSet],
+   455→   455→          publicUrl: `${base}/storage/v1/object/public/wx-cloud-public/assistant.mjs`,
+   456→   456→          ...(usedKey ? { usedKey } : {}),
+   457→   457→          via,
+   458→   458→        });
+   459→   459→      }
+   460→   460→
+   461→   461→      // C. 汇总报错：直传每轮 + 代写结果 + 定位指引
+   462→   462→      const rejectHint = lastRejectedBody ? keyRejectHint(lastRejectedKey) : '';
+   463→   463→      return bad(
+   464→   464→        502,
+   465→   465→        'storage_upload_failed',
+   466→   466→        `运行包上传失败（已试 ${attempts.length} 条路径）：${attempts.join('；')}。` +
+   467→   467→          (bucketNote ? `${bucketNote}。` : '') +
+   468→   468→          (rejectHint || '请确认项目在运行、网络正常；重新点「一键部署」可升级云端函数（v4 支持代写上传，不依赖项目密钥）'),
+   469→   469→      );
+   470→   470→    }
+   471→   471→
+   472→   472→    // ---- 开启云端 24 小时收发（v9：部署后自动建立，不再需要开关）—— pg_cron 每分钟
+   473→   473→    // net.http_post 打一次函数 cron-cycle：微信单轮收发 + QQ WebSocket 会话保持到预算
+   474→   474→    // （~135s，会话断点 Resume 续传）。这一切都在用户自己的 Supabase 项目里跑——不依赖
+   475→   475→    // 本站在线（离开本站后微信照收、QQ 断点续连）。Management API SQL 逐条执行（与建桶/
+   476→   476→    // 停轮询同一条链路，只依赖 Access Token）；先 unschedule 同名任务再 schedule（幂等，
+   477→   477→    // 重复点击安全重跑）；顺手挂每日日志清理。 ----
+   478→   478→    if (p.op === 'schedule-cron') {
+   479→   479→      const secret = typeof p.secret === 'string' ? p.secret.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 200) : '';
+   480→   480→      if (!secret) return bad(400, 'missing_secret', '任务密钥缺失：请重新一键部署后再试');
+   481→   481→      const funcUrl = `https://${ref}.supabase.co/functions/v1/wx-assistant?action=cron-cycle`;
+   482→   482→      // 逐条 SQL：建扩展（容忍已存在）→ 清同名旧任务（容忍不存在）→ 建主任务 + 日志清理任务
+   483→   483→      const steps: Array<{ label: string; sql: string; tolerant?: boolean }> = [
+   484→   484→        { label: '启用 pg_cron', sql: 'create extension if not exists pg_cron;', tolerant: true },
+   485→   485→        { label: '启用 pg_net', sql: 'create extension if not exists pg_net;', tolerant: true },
+   486→   486→        { label: '清理同名旧任务', sql: "select cron.unschedule('wx-assistant');", tolerant: true },
+   487→   487→        { label: '清理同名旧任务', sql: "select cron.unschedule('assistant-polling');", tolerant: true },
+   488→   488→        { label: '清理同名旧任务', sql: "select cron.unschedule('wx-assistant-cleanup');", tolerant: true },
+   489→   489→        {
+   490→   490→          label: '创建 24/7 收发任务（每分钟）',
+   491→   491→          sql:
+   492→   492→            `select cron.schedule('wx-assistant', '* * * * *', $CRON$\n` +
+   493→   493→            `  select net.http_post(\n` +
+   494→   494→            `    url     := '${funcUrl}',\n` +
+   495→   495→            `    headers := jsonb_build_object('Content-Type', 'application/json', 'X-Task-Secret', '${secret}'),\n` +
+   496→   496→            `    body    := jsonb_build_object(),\n` +
+   497→   497→            `    timeout_milliseconds := 150000\n` +
+   498→   498→            `  );\n` +
+   499→   499→            `$CRON$);`,
+   500→   500→        },
+   501→   501→        {
+   502→   502→          label: '创建日志清理任务',
+   503→   503→          sql:
+   504→   504→            `select cron.schedule('wx-assistant-cleanup', '0 3 * * *', $CRON$\n` +
+   505→   505→            `  delete from cron.job_run_details where end_time < now() - interval '3 days';\n` +
+   506→   506→            `$CRON$);`,
+   507→   507→        },
+   508→   508→      ];
+   509→   509→      const failures: string[] = [];
+   510→   510→      for (const s of steps) {
+   511→   511→        const r = await fetch(`${MGMT}/v1/projects/${ref}/database/query`, {
+   512→   512→          method: 'POST',
+   513→   513→          headers: { ...auth, 'Content-Type': 'application/json' },
+   514→   514→          body: JSON.stringify({ query: s.sql, read_only: false }),
+   515→   515→          signal: AbortSignal.timeout(20_000),
+   516→   516→        }).catch(() => null);
+   517→   517→        if (!r) {
+   518→   518→          if (!s.tolerant) failures.push(`${s.label}：网络超时`);
+   519→   519→          continue;
+   520→   520→        }
+   521→   521→        const text = await r.text().catch(() => '');
+   522→   522→        if (r.ok && !/"error"\s*:/.test(text.slice(0, 400))) continue;
+   523→   523→        // 建扩展 / 清同名旧任务：尽力而为，任何错误都不算失败——pg_cron 的 unschedule
+   524→   524→        // 对不存在的任务报「could not find valid entry for job」（用户实测踩坑：旧正则
+   525→   525→        // 只认 could not be found，匹配不上被误判成真失败）；真正的问题会在下方创建步骤
+   526→   526→        // 暴露（pg_cron 没建成 → cron.schedule 同样报错），这里宽容不影响定位。
+   527→   527→        if (s.tolerant) continue;
+   528→   528→        failures.push(`${s.label}：HTTP ${r.status}${text ? `（${text.slice(0, 100)}）` : '（无响应体）'}`);
+   529→   529→      }
+   530→   530→      if (failures.length === 0) {
+   531→   531→        return NextResponse.json({ ok: true, msg: '云端 24 小时收发已开启：每分钟自动收发（微信 ≤1 分钟内必收；QQ 长连接断点续传）——存在你自己的 Supabase 里，不依赖本站在线' });
+   532→   532→      }
+   533→   533→      // 指引只给一次（汇总在末尾）——走到这里只剩创建步骤的真实失败（Token 权限 / pg_cron 不可用等）
+   534→   534→      return bad(502, 'schedule_failed', `开启云端 24 小时收发失败：${failures.join('；')}。多为 Access Token 无效或无数据库查询权限；可到 Supabase → SQL Editor 手动执行 设置 → 云端助手 → 「轮询手动 SQL」里的开启段`);
+   535→   535→    }
+   536→   536→
+   537→   537→    // ---- 清掉旧版定时轮询的 pg_cron 任务（v5：被动 Webhook 模式，轮询彻底退役） ----
+   538→   538→    // Management API SQL 直查（与建桶同一条链路，只依赖 Access Token）；任务不存在 /
+   539→   539→    // pg_cron 未启用都算「已停」（幂等）——用户看到的就是「已停止，零配额消耗」
+   540→   540→    if (p.op === 'unschedule-cron') {
+   541→   541→      const results: string[] = [];
+   542→   542→      let stopped = 0;
+   543→   543→      for (const name of ['wx-assistant', 'assistant-polling', 'wx-assistant-cleanup']) {
+   544→   544→        const r = await fetch(`${MGMT}/v1/projects/${ref}/database/query`, {
+   545→   545→          method: 'POST',
+   546→   546→          headers: { ...auth, 'Content-Type': 'application/json' },
+   547→   547→          body: JSON.stringify({ query: `select cron.unschedule('${name}');`, read_only: false }),
+   548→   548→          signal: AbortSignal.timeout(20_000),
+   549→   549→        }).catch(() => null);
+   550→   550→        if (!r) {
+   551→   551→          results.push(`${name}：网络超时`);
+   552→   552→          continue;
+   553→   553→        }
+   554→   554→        const text = await r.text().catch(() => '');
+   555→   555→        if (r.ok && !/"error"\s*:/.test(text.slice(0, 400))) {
+   556→   556→          stopped++;
+   557→   557→          results.push(`${name}：已清除`);
+   558→   558→        } else if (/does not exist|could not be found|could not find|not exist|not found|找不到|未找到/i.test(text)) {
+   559→   559→          stopped++; // 任务本来就没有 / cron 扩展没启用 = 已经是停止状态（pg_cron 报 could not find valid entry for job 也在这类）
+   560→   560→          results.push(`${name}：本来就没有定时任务`);
+   561→   561→        } else {
+   562→   562→          results.push(`${name}：失败（HTTP ${r.status}${text ? `：${text.slice(0, 100)}` : ''}）——可到 Supabase SQL Editor 手动执行 select cron.unschedule('${name}');`);
+   563→   563→        }
+   564→   564→      }
+   565→   565→      if (stopped > 0) {
+   566→   566→        return NextResponse.json({ ok: true, msg: `云端轮询已停止（零配额消耗）：${results.join('；')}` });
+   567→   567→      }
+   568→   568→      return bad(502, 'unschedule_failed', `清除旧轮询任务失败：${results.join('；')}。可到 Supabase → SQL Editor 手动执行：select cron.unschedule('wx-assistant'); select cron.unschedule('assistant-polling');`);
+   569→   569→    }
+   570→   570→
+   571→   571→    // ---- 部署 Edge Function ----
+   572→   572→    if (p.op === 'deploy') {
+   573→   573→      const code = typeof p.code === 'string' ? p.code : '';
+   574→   574→      // 只接受本产品的云函数代码（防被当成任意部署接口滥用）
+   575→   575→      if (!code || code.length > 512_000 || !code.includes('Deno.serve') || !code.includes('wx-assistant')) {
+   576→   576→        return bad(400, 'invalid_code', '函数代码校验失败：只接受本产品的 wx-assistant 云函数（需含 Deno.serve 与 wx-assistant 标记）');
+   577→   577→      }
+   578→   578→      const form = new FormData();
+   579→   579→      form.append(
+   580→   580→        'metadata',
+   581→   581→        JSON.stringify({ name: 'wx-assistant', entrypoint_path: 'index.ts', verify_jwt: false }),
+   582→   582→      );
+   583→   583→      form.append('file', new Blob([code], { type: 'application/typescript' }), 'index.ts');
+   584→   584→      const r = await fetch(`${MGMT}/v1/projects/${ref}/functions/deploy?slug=wx-assistant`, {
+   585→   585→        method: 'POST',
+   586→   586→        headers: { Authorization: `Bearer ${token}` },
+   587→   587→        body: form,
+   588→   588→        signal: AbortSignal.timeout(120_000),
+   589→   589→      });
+   590→   590→      const text = await r.text();
+   591→   591→      // v4：部署成功后把任务密钥注入函数密钥 WX_TASK_SECRET（Management API secrets，
+   592→   592→      // CLI `supabase secrets set` 同款端点）。函数的 upload-file 动作用它鉴权——首次
+   593→   593→      // 部署时桶里还没有 config.json 可比对 secret，靠这个注入值先立住信任链。
+   594→   594→      // best-effort：注入失败不影响部署结果（非代写路径仍靠桶里 config.secret 校验）
+   595→   595→      const taskSecret = typeof p.secret === 'string' ? p.secret.trim().slice(0, 200) : '';
+   596→   596→      if (r.ok && taskSecret.length >= 16) {
+   597→   597→        try {
+   598→   598→          await fetch(`${MGMT}/v1/projects/${ref}/secrets`, {
+   599→   599→            method: 'POST',
+   600→   600→            headers: { ...auth, 'Content-Type': 'application/json' },
+   601→   601→            body: JSON.stringify([{ name: 'WX_TASK_SECRET', value: taskSecret }]),
+   602→   602→            signal: AbortSignal.timeout(15_000),
+   603→   603→          });
+   604→   604→        } catch {
+   605→   605→          /* best-effort：注入失败不挡部署 */
+   606→   606→        }
+   607→   607→      }
+   608→   608→      return new NextResponse(text, {
+   609→   609→        status: r.status,
+   610→   610→        headers: { 'Content-Type': r.headers.get('content-type') ?? 'application/json' },
+   611→   611→      });
+   612→   612→    }
+   613→   613→
+   614→   614→    return bad(400, 'unknown_op');
+   615→   615→  } catch (e) {
+   616→   616→    const message = e instanceof Error ? e.message : String(e);
+   617→   617→    return bad(502, 'upstream_unreachable', message);
+   618→   618→  }
+   619→   619→}
+   620→   620→

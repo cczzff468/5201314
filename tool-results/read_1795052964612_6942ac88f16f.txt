@@ -1,0 +1,706 @@
+     1→'use client';
+     2→
+     3→/**
+     4→ * QQ 官方机器人接入（q.qq.com 平台）——凭证存储 + 测试连接 + 角色绑定 + 官方扫码绑定 · v6。
+     5→ *
+     6→ * v6（官方扫码连接）：接入页「扫码连接」改为 q.qq.com 官方扫码绑定协议（与官方
+     7→ * @tencent-connect 系列插件同源）：本页生成二维码 → 用户手机 QQ 扫码 → 在 QQ 里选择
+     8→ * 自己创建的机器人确认绑定 → 凭证（AppID/AppSecret，AES-256-GCM 加密回传）自动到手并
+     9→ * 接入——全程不碰 bots.qq.com 的 token 验证口（海外 IP 被 503 拦的老问题彻底绕开）。
+    10→ * 手动「填写凭证」保留（q.qq.com 控制台复制 AppID/AppSecret 填入）。
+    11→ *
+    12→ * v5：双入口（扫凭证二维码 / 手动填写）——「扫凭证二维码」降级为填写页的辅助入口。
+    13→ * 接入前置条件：必须先部署云端助手（未部署时接入页阻断）——QQ 收发消息走云端 Webhook。
+    14→ *
+    15→ * 收发通道：QQ 官方已停止维护 WebSocket，走 Webhook——云端助手（部署到用户自己的
+    16→ * Supabase Edge Function / HF / ClawCloud 容器）接收 QQ 回调并代答（见 wx-cloud/sources）。
+    17→ * 手机 App 侧通过「拉取云端聊天记录」把 QQ 上的聊天同步进 QQ 聊天界面。
+    18→ *
+    19→ * 网络现实（v7 勘误）：官方现行取凭证端点 api.bot.qq.com/app/getAppAccessToken 对海外 IP 放行
+    20→ * （旧端点 bots.qq.com/api/v1/* 网关层拦海外 503，已降级为兜底）。测试连接双路兜底：先浏览器
+    21→ * 直连（新端点 → 旧端点），失败再走 /api/qq-bot 代理（同样双端点降级）；两路都不通时凭证仍可
+    22→ * 保存（网络不通 ≠ 凭证错误），部署云端后由云端验证（云端也走新端点）。
+    23→ *
+    24→ * 云端验证（v3 修复）：verifyViaCloud 改走 /api/cloud-deploy/supabase 的 func-call 同源
+    25→ * 代理——存量旧版函数没带 CORS 头，浏览器直连函数 URL（X-Task-Secret 自定义头）会先发
+    26→ * OPTIONS 预检被拒 → TypeError: Failed to fetch（「连不上云端助手」的根因）；服务端转发
+    27→ * 无 CORS，存量部署立即修复，新版函数自带 CORS 双保险。
+    28→ *
+    29→ * 持久化：kv 'qq-bot-login'（AES-GCM 密文，同 music-login-qq 模式）。
+    30→ *
+    31→ * 接入/换绑/断开后自动重推运行包到云端（cloudAutoSync，已部署过才推；动态 import 避免循环依赖）。
+    32→ */
+    33→
+    34→import { create } from 'zustand';
+    35→import { ensureKvReady, kvGet, kvSet, kvDel } from './idb-kv';
+    36→import { decryptSecret, encryptSecret, isEncrypted } from './secret-box';
+    37→import { loadMsgs, saveMsgs } from '@/components/apps/qq-app/core';
+    38→import { wxCloudSnapshot } from './wx-cloud/store';
+    39→
+    40→/** 接入/换绑/断开后自动重推运行包到云端（已部署过才推；动态 import 避免循环依赖） */
+    41→function cloudAutoSync(reason: string): void {
+    42→  void import('./wx-cloud/supabase')
+    43→    .then((m) => m.autoSyncRunPackageIfDeployed(reason, 'qq'))
+    44→    .catch(() => undefined);
+    45→}
+    46→
+    47→// ---------------- 类型 ----------------
+    48→
+    49→export interface QqBotLogin {
+    50→  appId: string;
+    51→  appSecret: string;
+    52→  /** 测试通过时拉到的机器人资料（可能没有） */
+    53→  botName?: string;
+    54→  botId?: string;
+    55→  /** 绑定的联系人（AI 角色）id：QQ 机器人在 QQ 里就是 TA */
+    56→  boundContactId?: string;
+    57→  boundContactName?: string;
+    58→  connectedAt: number;
+    59→}
+    60→
+    61→export interface QqBotTestResult {
+    62→  ok: boolean;
+    63→  msg: string;
+    64→}
+    65→
+    66→/** QQ 官方扫码绑定会话状态（v6：页面生成二维码 → 手机 QQ 扫码 → 选机器人确认即接入） */
+    67→export type QqQrPhase = 'idle' | 'starting' | 'waiting' | 'saving' | 'failed';
+    68→
+    69→export interface QqQrBindState {
+    70→  phase: QqQrPhase;
+    71→  /** 二维码内容（qrcode 库渲染成图） */
+    72→  qrUrl?: string;
+    73→  reason?: string;
+    74→  /** 绑定确认的用户 openid（展示用） */
+    75→  userOpenid?: string;
+    76→}
+    77→
+    78→// ---------------- 持久化 ----------------
+    79→
+    80→const LOGIN_KEY = 'qq-bot-login';
+    81→
+    82→let memQqBot: QqBotLogin | null = null;
+    83→let qqBotReady = false;
+    84→
+    85→/** 同步读凭证（boot 后有效） */
+    86→export function qqBotLoginSnapshot(): QqBotLogin | null {
+    87→  return memQqBot;
+    88→}
+    89→
+    90→async function persistLogin(v: QqBotLogin | null): Promise<void> {
+    91→  try {
+    92→    if (v) {
+    93→      const cipher = await encryptSecret(JSON.stringify(v));
+    94→      kvSet(LOGIN_KEY, cipher);
+    95→    } else {
+    96→      await kvDel(LOGIN_KEY);
+    97→    }
+    98→  } catch {
+    99→    /* secret-box 内部有降级 */
+   100→  }
+   101→}
+   102→
+   103→// ---------------- 扫码识别（jsQR：二维码图片 → AppID/AppSecret） ----------------
+   104→
+   105→/**
+   106→ * 解析二维码文本 → 凭证。三种支持格式：
+   107→ * ① AppID:AppSecret（自定义分隔符「:」「|」「空格」）
+   108→ * ② JSON（{"appId":…,"appSecret":…} / appid / clientSecret 等常见键名）
+   109→ * ③ 网址查询串（?appId=…&appSecret=… 任意顺序）
+   110→ */
+   111→export function parseQqQrText(raw: string): { appId: string; appSecret: string } | null {
+   112→  const t = raw.trim();
+   113→  if (!t) return null;
+   114→  // 形态一：AppID:AppSecret（自定义分隔符「:」「|」「空格」）
+   115→  const m = t.match(/^([a-zA-Z0-9]{4,64})[:|\s]+([a-zA-Z0-9!@#$%^&*_\-+=]{8,200})$/);
+   116→  if (m) return { appId: m[1], appSecret: m[2] };
+   117→  // 形态二：JSON
+   118→  if (t.startsWith('{')) {
+   119→    try {
+   120→      const j = JSON.parse(t) as Record<string, unknown>;
+   121→      const appId = typeof j.appId === 'string' ? j.appId : typeof j.appid === 'string' ? j.appid : '';
+   122→      const appSecret =
+   123→        typeof j.appSecret === 'string'
+   124→          ? j.appSecret
+   125→          : typeof j.appsecret === 'string'
+   126→          ? j.appsecret
+   127→          : typeof j.clientSecret === 'string'
+   128→          ? j.clientSecret
+   129→          : '';
+   130→      if (appId && appSecret) return { appId, appSecret };
+   131→    } catch {
+   132→      /* 继续 */
+   133→    }
+   134→  }
+   135→  // 形态三：URL 查询串
+   136→  const q = t.match(/[?&](appId|appid)=([^&]+)(?:&|.*?&)(appSecret|appsecret|clientSecret|client_secret|secret)=([^&]+)/);
+   137→  if (q) return { appId: q[2], appSecret: q[4] };
+   138→  const q2 = t.match(/[?&](appSecret|appsecret|clientSecret|client_secret|secret)=([^&]+)(?:&|.*?&)(appId|appid)=([^&]+)/);
+   139→  if (q2) return { appId: q2[4], appSecret: q2[2] };
+   140→  return null;
+   141→}
+   142→
+   143→/** 解析二维码图片 → 凭证（jsQR 解码后走 parseQqQrText）：拍照或选图均可 */
+   144→export async function parseQqQrImage(file: File): Promise<{ appId: string; appSecret: string } | null> {
+   145→  const { default: jsQR } = await import('jsqr');
+   146→  const bitmap = await createImageBitmap(file).catch(() => null);
+   147→  if (!bitmap) return null;
+   148→  const canvas = document.createElement('canvas');
+   149→  canvas.width = bitmap.width;
+   150→  canvas.height = bitmap.height;
+   151→  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+   152→  if (!ctx) return null;
+   153→  ctx.drawImage(bitmap, 0, 0);
+   154→  const data = ctx.getImageData(0, 0, canvas.width, canvas.height);
+   155→  const res = jsQR(data.data, canvas.width, canvas.height);
+   156→  bitmap.close?.();
+   157→  if (!res || !res.data) return null;
+   158→  return parseQqQrText(res.data);
+   159→}
+   160→
+   161→// ---------------- QQ 官方扫码绑定（q.qq.com/lite，v6） ----------------
+   162→
+   163→/**
+   164→ * QQ 官方「扫码连接」协议（与官方 @tencent-connect 系列插件同源）：
+   165→ * ① POST https://q.qq.com/lite/create_bind_task {key: <base64 AES-256 key>} → {retcode:0, data:{task_id}}
+   166→ * ② 二维码内容 = https://q.qq.com/qqbot/openclaw/connect.html?task_id=…&_wv=2
+   167→ *    （手机 QQ 扫码 → 打开连接页 → 选择你创建的机器人 → 确认绑定）
+   168→ * ③ POST https://q.qq.com/lite/poll_bind_result {task_id} →
+   169→ *    {status: 0 none / 1 pending / 2 completed / 3 expired； bot_appid； bot_encrypt_secret； user_openid}
+   170→ * ④ completed 时 bot_encrypt_secret = base64(AES-256-GCM(AppSecret， nonce=前12B， tag=后16B))，
+   171→ *    用 ① 生成的 key 解密即得 AppSecret——全程不碰 bots.qq.com 的 token 验证口
+   172→ *    （海外 IP 被 503 拦的老问题彻底绕开）。
+   173→ * 网络双路：浏览器直连（用户本机网络，国内 IP 直达 q.qq.com）→ 失败走 /api/qq-bind 代理兑底。
+   174→ */
+   175→
+   176→interface LiteBindResp {
+   177→  retcode: number;
+   178→  msg?: string;
+   179→  data?: { task_id?: string; status?: number; bot_appid?: string; bot_encrypt_secret?: string; user_openid?: string };
+   180→}
+   181→
+   182→async function qqLiteDirect(path: string, body: Record<string, unknown>): Promise<LiteBindResp | null> {
+   183→  try {
+   184→    const res = await fetch(`https://q.qq.com${path}`, {
+   185→      method: 'POST',
+   186→      headers: { 'Content-Type': 'application/json' },
+   187→      body: JSON.stringify(body),
+   188→      signal: AbortSignal.timeout(12_000),
+   189→    });
+   190→    if (!res.ok) return null;
+   191→    return (await res.json().catch(() => null)) as LiteBindResp | null;
+   192→  } catch {
+   193→    return null; // CORS 拦截 / 网络不通
+   194→  }
+   195→}
+   196→
+   197→async function qqLiteViaProxy(path: string, body: Record<string, unknown>): Promise<LiteBindResp | null> {
+   198→  try {
+   199→    const res = await fetch('/api/qq-bind', {
+   200→      method: 'POST',
+   201→      headers: { 'Content-Type': 'application/json' },
+   202→      body: JSON.stringify({ path, ...body }),
+   203→      signal: AbortSignal.timeout(12_000),
+   204→    });
+   205→    if (!res.ok) return null;
+   206→    return (await res.json().catch(() => null)) as LiteBindResp | null;
+   207→  } catch {
+   208→    return null;
+   209→  }
+   210→}
+   211→
+   212→async function qqLiteCall(path: string, body: Record<string, unknown>): Promise<LiteBindResp | null> {
+   213→  return (await qqLiteDirect(path, body)) ?? (await qqLiteViaProxy(path, body));
+   214→}
+   215→
+   216→function b64ToBytes(s: string): Uint8Array {
+   217→  const bin = atob(s);
+   218→  const out = new Uint8Array(bin.length);
+   219→  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+   220→  return out;
+   221→}
+   222→
+   223→function bytesToB64(b: Uint8Array): string {
+   224→  let s = '';
+   225→  for (let i = 0; i < b.length; i++) s += String.fromCharCode(b[i]);
+   226→  return btoa(s);
+   227→}
+   228→
+   229→/** 解密 bot_encrypt_secret（AES-256-GCM：nonce=前12B、tag=后16B）→ AppSecret */
+   230→async function decryptBotSecret(keyB64: string, encB64: string): Promise<string | null> {
+   231→  try {
+   232→    const rawKey = b64ToBytes(keyB64);
+   233→    const enc = b64ToBytes(encB64);
+   234→    if (rawKey.length !== 32 || enc.length < 29) return null;
+   235→    const nonce = enc.subarray(0, 12);
+   236→    const ctWithTag = enc.subarray(12);
+   237→    const key = await crypto.subtle.importKey('raw', rawKey, { name: 'AES-GCM' }, false, ['decrypt']);
+   238→    const out = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: nonce }, key, ctWithTag);
+   239→    return new TextDecoder().decode(out);
+   240→  } catch {
+   241→    return null;
+   242→  }
+   243→}
+   244→
+   245→/** 绑定二维码内容（手机 QQ 扫码 → 选择你创建的机器人 → 确认绑定） */
+   246→export function qqBindConnectUrl(taskId: string): string {
+   247→  return `https://q.qq.com/qqbot/openclaw/connect.html?task_id=${encodeURIComponent(taskId)}&_wv=2`;
+   248→}
+   249→
+   250→function sleep(ms: number): Promise<void> {
+   251→  return new Promise((r) => setTimeout(r, ms));
+   252→}
+   253→
+   254→/** 扫码绑定会话令牌：每次 start/stop 递增，旧轮询循环检测到令牌变化自动退出 */
+   255→let qrSession = 0;
+   256→
+   257→// ---------------- 测试连接（双路：浏览器直连 → 服务端代理） ----------------
+   258→
+   259→/** 官方现行取凭证端点（2026-09 文档：海外出口可达；旧端点 /api/v1/* 网关层拦海外 IP 503） */
+   260→const QQ_TOKEN_ENDPOINTS = ['https://api.bot.qq.com/app/getAppAccessToken', 'https://bots.qq.com/api/v1/getAppAccessToken'];
+   261→
+   262→async function qqTokenDirect(appId: string, appSecret: string): Promise<string | null> {
+   263→  for (const endpoint of QQ_TOKEN_ENDPOINTS) {
+   264→    try {
+   265→      const res = await fetch(endpoint, {
+   266→        method: 'POST',
+   267→        headers: { 'Content-Type': 'application/json' },
+   268→        body: JSON.stringify({ appId, clientSecret: appSecret }),
+   269→        signal: AbortSignal.timeout(12_000),
+   270→      });
+   271→      if (!res.ok) continue; // 旧端点网关 503 → 换下一端点
+   272→      const j = (await res.json().catch(() => null)) as { access_token?: string } | null;
+   273→      if (j?.access_token) return j.access_token;
+   274→      // 业务错误（HTTP 200 + code，如 100016 凭证不对）：继续下一端点无意义，直接返回 null
+   275→      return null;
+   276→    } catch {
+   277→      // CORS 拦截 / 网络不通 → 换下一端点
+   278→    }
+   279→  }
+   280→  return null;
+   281→}
+   282→
+   283→async function qqTokenViaProxy(appId: string, appSecret: string): Promise<string> {
+   284→  const res = await fetch('/api/qq-bot', {
+   285→    method: 'POST',
+   286→    headers: { 'Content-Type': 'application/json' },
+   287→    body: JSON.stringify({ action: 'token', appId, appSecret }),
+   288→    signal: AbortSignal.timeout(20_000),
+   289→  });
+   290→  const text = await res.text();
+   291→  let j: unknown;
+   292→  try {
+   293→    j = JSON.parse(text);
+   294→  } catch {
+   295→    throw new Error(`QQ 平台响应异常（${res.status}）`);
+   296→  }
+   297→  const rec = j as { access_token?: string; message?: string; error?: string; code?: number };
+   298→  if (!res.ok || !rec.access_token) {
+   299→    // 官方错误码表（业务错误 HTTP 仍 200 + code）：转成可读提示
+   300→    if (rec.code === 100016) throw new Error('AppID 或 AppSecret 不正确（QQ 平台错误码 100016）：请到 q.qq.com 控制台核对凭证');
+   301→    if (rec.code === 100007) throw new Error('AppID 无效或机器人状态异常（QQ 平台错误码 100007）');
+   302→    if (rec.code === 10004) throw new Error('AppID 对应的机器人不存在（QQ 平台错误码 10004）');
+   303→    if (rec.code === 100001) throw new Error('QQ 平台频控（100001）：请求过于频繁，稍后再试');
+   304→    if (res.status === 503) throw new Error('QQ 平台拒绝了服务器的出口 IP（503）：请稍后重试');
+   305→    throw new Error(rec.message || rec.error || `QQ 平台返回 ${res.status}`);
+   306→  }
+   307→  return rec.access_token;
+   308→}
+   309→
+   310→/** 用 access_token 拉机器人资料（直连失败走代理；拿不到不算失败） */
+   311→async function qqBotMe(accessToken: string): Promise<{ id?: string; username?: string; nickname?: string } | null> {
+   312→  const tryFetch = async (url: string, headers: Record<string, string>) => {
+   313→    const res = await fetch(url, { headers, signal: AbortSignal.timeout(12_000) });
+   314→    if (!res.ok) return null;
+   315→    return (await res.json().catch(() => null)) as { id?: string; username?: string; nickname?: string } | null;
+   316→  };
+   317→  const auth = { Authorization: `QQBot ${accessToken}` };
+   318→  const direct = await tryFetch('https://api.sgroup.qq.com/users/@me', auth).catch(() => null);
+   319→  if (direct) return direct;
+   320→  try {
+   321→    const res = await fetch('/api/qq-bot', {
+   322→      method: 'POST',
+   323→      headers: { 'Content-Type': 'application/json' },
+   324→      body: JSON.stringify({ action: 'me', accessToken }),
+   325→      signal: AbortSignal.timeout(20_000),
+   326→    });
+   327→    if (!res.ok) return null;
+   328→    return (await res.json().catch(() => null)) as { id?: string; username?: string; nickname?: string } | null;
+   329→  } catch {
+   330→    return null;
+   331→  }
+   332→}
+   333→
+   334→// ---------------- 云端 QQ 聊天记录拉取（合并进 QQ 聊天界面） ----------------
+   335→
+   336→/** 云端 qq-history.json 条目（wx-cloud/sources 的 QQ Webhook 处理器写入） */
+   337→export interface QqCloudMsg {
+   338→  id: string;
+   339→  role: 'me' | 'peer';
+   340→  content: string;
+   341→  ts: number;
+   342→}
+   343→
+   344→/**
+   345→ * 从用户自己的 Supabase 私有桶拉取 qq-history.json，合并进绑定联系人的 QQ 聊天线程。
+   346→ * 返回 {ok, msg, added?}。前提：设置 → 云端助手 已完成 Supabase 连接（serviceKey 可用）。
+   347→ */
+   348→export async function pullQqCloudHistory(): Promise<{ ok: boolean; msg: string; added?: number }> {
+   349→  const cloud = wxCloudSnapshot();
+   350→  const supa = cloud.supabase;
+   351→  const login = memQqBot;
+   352→  if (!login) return { ok: false, msg: '还没接入 QQ 机器人' };
+   353→  if (!login.boundContactId) return { ok: false, msg: '还没绑定角色：请先选择一个 AI 角色' };
+   354→  if (!supa?.ref || !supa.serviceKey) return { ok: false, msg: '云端未就绪：请先到 设置 → 云端助手 完成部署' };
+   355→  try {
+   356→    // 按类型区分（官方文档）：新式 sb_secret_/sb_publishable_ key 不是 JWT，只能放
+   357→    // apikey 头——放 Bearer 会被 Storage 当 JWT 解析报 400 Invalid Compact JWS；eyJ 双带
+   358→    const k = supa.serviceKey;
+   359→    const isNewStyle = k.startsWith('sb_secret_') || k.startsWith('sb_publishable_');
+   360→    const res = await fetch(`https://${supa.ref}.supabase.co/storage/v1/object/wx-cloud/qq-history.json`, {
+   361→      headers: isNewStyle ? { apikey: k } : { apikey: k, Authorization: `Bearer ${k}` },
+   362→      signal: AbortSignal.timeout(15_000),
+   363→    });
+   364→    if (!res.ok) return { ok: false, msg: '云端还没有 QQ 聊天记录（在 QQ 上和 TA 聊过之后才有）' };
+   365→    const j = (await res.json()) as { msgs?: QqCloudMsg[] };
+   366→    const list = Array.isArray(j.msgs) ? j.msgs : [];
+   367→    const cur = loadMsgs(login.boundContactId);
+   368→    const seen = new Set(cur.map((m) => m.id));
+   369→    const add = list
+   370→      .filter((m) => m && typeof m.id === 'string' && !seen.has(m.id))
+   371→      .map((m) => ({ id: m.id, role: m.role, content: String(m.content ?? '').slice(0, 2000), time: m.ts || Date.now() }));
+   372→    if (add.length) {
+   373→      saveMsgs(login.boundContactId, [...cur, ...add]);
+   374→      window.dispatchEvent(new CustomEvent('chat-stream-sysline', { detail: { sessionKey: `qq:${login.boundContactId}` } }));
+   375→    }
+   376→    return { ok: true, msg: add.length ? `已同步 ${add.length} 条 QQ 聊天记录` : '云端暂无新记录', added: add.length };
+   377→  } catch (e) {
+   378→    return { ok: false, msg: e instanceof Error ? e.message : String(e) };
+   379→  }
+   380→}
+   381→
+   382→// ---------------- Store ----------------
+   383→
+   384→interface QqConnectStore {
+   385→  ready: boolean;
+   386→  login: QqBotLogin | null;
+   387→  testing: boolean;
+   388→  lastTest: QqBotTestResult | null;
+   389→  /** 最近一次云端验证凭证的结果（会话内）：ok=false 时接入页顶部横幅降为琥珀警告——
+   390→ *  「已接入」徽标只代表本机凭证已保存，云端出口被 QQ 平台拒（如 503）时真机 QQ 上
+   391→ *  TA 实际不在线、也不会回复（用户实测反馈：网站显示已接入/QQ 里未接入的矛盾根源） */
+   392→  lastCloudVerify: { ok: boolean; msg: string; at: number } | null;
+   393→  /** 云端记录拉取状态 */
+   394→  pulling: boolean;
+   395→  /** 云端验证凭证进行中（verifyViaCloud 的防重入闸） */
+   396→  verifying: boolean;
+   397→  /** 官方扫码绑定会话（v6） */
+   398→  qr: QqQrBindState;
+   399→
+   400→  boot: () => Promise<void>;
+   401→  /** 云端验证结果落盘（localStorage 轻持久化） */
+   402→  persistCloudVerify: (v: { ok: boolean; msg: string; at: number } | null) => void;
+   403→  /** 测试连接（成功即保存凭证） */
+   404→  test: (appId: string, appSecret: string) => Promise<QqBotTestResult>;
+   405→  /** 云端验证凭证：走 func-call 同源代理（v3：存量无 CORS 旧函数也能用） */
+   406→  verifyViaCloud: () => Promise<QqBotTestResult>;
+   407→  /** 绑定角色（QQ 机器人在 QQ 里就是这个角色） */
+   408→  bindContact: (contactId: string, contactName: string) => Promise<void>;
+   409→  disconnect: () => Promise<void>;
+   410→  pullHistory: () => Promise<void>;
+   411→  /** 官方扫码绑定：生成二维码并轮询，用户手机 QQ 确认后自动接入 */
+   412→  startQrBind: () => Promise<void>;
+   413→  /** 停止扫码绑定轮询（切 tab / 离开页面 / 用户手动取消） */
+   414→  stopQrBind: () => void;
+   415→}
+   416→
+   417→export const useQqConnect = create<QqConnectStore>((set, get) => ({
+   418→  ready: false,
+   419→  login: null,
+   420→  testing: false,
+   421→  lastTest: null,
+   422→  lastCloudVerify: null,
+   423→  pulling: false,
+   424→  verifying: false,
+   425→  qr: { phase: 'idle' },
+   426→
+   427→  boot: async () => {
+   428→    if (qqBotReady) return;
+   429→    qqBotReady = true;
+   430→    try {
+   431→      await ensureKvReady();
+   432→      const raw = kvGet<string>(LOGIN_KEY);
+   433→      if (raw) {
+   434→        const plain = isEncrypted(raw) ? await decryptSecret(raw) : raw;
+   435→        const v = JSON.parse(plain) as QqBotLogin;
+   436→        memQqBot = v && v.appId ? v : null;
+   437→      }
+   438→      // 云端验证结果持久化（会话间不失忆：刷新后琥珀横幅仍在，不误报「云端已就绪」）
+   439→      let cloudVerify: QqConnectStore['lastCloudVerify'] = null;
+   440→      try {
+   441→        const cv = localStorage.getItem('qq-cloud-verify');
+   442→        if (cv) {
+   443→          const p = JSON.parse(cv) as { ok?: boolean; msg?: string; at?: number };
+   444→          if (p && typeof p.ok === 'boolean') cloudVerify = { ok: p.ok, msg: String(p.msg || '').slice(0, 200), at: Number(p.at) || 0 };
+   445→        }
+   446→      } catch { /* 形态异常忽略 */ }
+   447→      set({ login: memQqBot, ready: true, lastCloudVerify: cloudVerify });
+   448→    } catch {
+   449→      set({ ready: true });
+   450→    }
+   451→  },
+   452→
+   453→  /** 云端验证结果落盘（localStorage 轻持久化——状态说明无秘密，不值得上密文 kv） */
+   454→  persistCloudVerify(v: { ok: boolean; msg: string; at: number } | null): void {
+   455→    try {
+   456→      if (v) localStorage.setItem('qq-cloud-verify', JSON.stringify(v));
+   457→      else localStorage.removeItem('qq-cloud-verify');
+   458→    } catch { /* 隐私模式等忽略 */ }
+   459→  },
+   460→
+   461→  test: async (appId, appSecret) => {
+   462→    const id = appId.trim();
+   463→    const secret = appSecret.trim();
+   464→    if (!/^[a-zA-Z0-9]{4,64}$/.test(id)) {
+   465→      const r = { ok: false, msg: 'AppID 格式不对（应为数字/字母组合，在 q.qq.com 控制台获取）' };
+   466→      set({ lastTest: r });
+   467→      return r;
+   468→    }
+   469→    if (!secret || secret.length < 8) {
+   470→      const r = { ok: false, msg: 'AppSecret 不能为空（在 q.qq.com 控制台获取）' };
+   471→      set({ lastTest: r });
+   472→      return r;
+   473→    }
+   474→    set({ testing: true });
+   475→    try {
+   476→      let token = await qqTokenDirect(id, secret);
+   477→      if (!token) {
+   478→        try {
+   479→          token = await qqTokenViaProxy(id, secret);
+   480→        } catch (e) {
+   481→          const reason = e instanceof Error ? e.message : String(e);
+   482→          // 新端点（api.bot.qq.com）海外可达：两路都失败多半是业务错（凭证不对）或纯网络问题
+   483→          const isBiz = /100016|100007|10004|不正确|不存在|无效/.test(reason);
+   484→          const r: QqBotTestResult = isBiz
+   485→            ? { ok: false, msg: `连不上 QQ 平台（${reason.slice(0, 100)}）：请到 q.qq.com 控制台核对 AppID/AppSecret 后重试。` }
+   486→            : {
+   487→                ok: false,
+   488→                msg: `两路都连不上 QQ 机器人平台（${reason.slice(0, 80)}）。凭证已保存；部署云端助手后，到本页点「云端验证」也可确认凭证真伪。`,
+   489→              };
+   490→          // 网络不通 ≠ 凭证错误：保存凭证但不标记成功
+   491→          const saved: QqBotLogin = { ...(memQqBot ?? { connectedAt: Date.now() }), appId: id, appSecret: secret, connectedAt: Date.now() };
+   492→          memQqBot = saved;
+   493→          await persistLogin(saved);
+   494→          set({ testing: false, lastTest: r, login: saved });
+   495→          cloudAutoSync('QQ 凭证已保存');
+   496→          return r;
+   497→        }
+   498→      }
+   499→      const me = token ? await qqBotMe(token) : null;
+   500→      const saved: QqBotLogin = {
+   501→        ...(memQqBot ?? {}),
+   502→        appId: id,
+   503→        appSecret: secret,
+   504→        botName: me?.username || me?.nickname || memQqBot?.botName || undefined,
+   505→        botId: me?.id || memQqBot?.botId || undefined,
+   506→        connectedAt: Date.now(),
+   507→      };
+   508→      memQqBot = saved;
+   509→      await persistLogin(saved);
+   510→      const r: QqBotTestResult = {
+   511→        ok: true,
+   512→        msg: saved.botName ? `连接成功：机器人「${saved.botName}」凭证有效` : '连接成功，凭证有效',
+   513→      };
+   514→      set({ testing: false, lastTest: r, login: saved });
+   515→      cloudAutoSync('QQ 接入成功');
+   516→      return r;
+   517→    } catch (e) {
+   518→      const r: QqBotTestResult = { ok: false, msg: e instanceof Error ? e.message : String(e) };
+   519→      set({ testing: false, lastTest: r });
+   520→      return r;
+   521→    }
+   522→  },
+   523→
+   524→  /**
+   525→   * 云端验证凭证：bots.qq.com 的 token 验证口拦海外 IP（浏览器直连与 /api 代理都拿不到
+   526→   * 真伪），交给云端助手 verify-qq 动作代验。
+   527→   * v3：改走 /api/cloud-deploy/supabase 的 func-call 同源代理转发——存量已部署的旧版函数
+   528→   * 没有 CORS 头，此前浏览器直连函数 URL（带 X-Task-Secret 自定义头）会先发 OPTIONS 预检
+   529→   * 被拒 → TypeError: Failed to fetch（「连不上云端助手：请检查网络后重试」的根因）；
+   530→   * 服务端到服务端转发无 CORS 限制，存量部署立即修复，无需重新部署。
+   531→   * 回包 {ok, error, botName}：成功合并 botName 进凭证持久化（同 test 动作），失败用云端
+   532→   * 给出的 error（云端能拿到 QQ 平台的真实报错）截 120 字展示。
+   533→   */
+   534→  verifyViaCloud: async () => {
+   535→    const login = memQqBot;
+   536→    if (!login) {
+   537→      const r: QqBotTestResult = { ok: false, msg: '还没接入 QQ 机器人' };
+   538→      set({ lastTest: r });
+   539→      return r;
+   540→    }
+   541→    const supa = wxCloudSnapshot().supabase;
+   542→    if (!supa?.ref || !supa.deployedAt) {
+   543→      const r: QqBotTestResult = { ok: false, msg: '云端还没部署：先到 设置 → 云端助手 完成部署' };
+   544→      set({ lastTest: r });
+   545→      return r;
+   546→    }
+   547→    if (get().verifying) return { ok: false, msg: '正在验证中，请稍候' };
+   548→    set({ verifying: true });
+   549→    try {
+   550→      // 同源代理转发（服务端无 CORS 限制；旧版无 CORS 头的函数也能调）
+   551→      const res = await fetch('/api/cloud-deploy/supabase', {
+   552→        method: 'POST',
+   553→        headers: { 'Content-Type': 'application/json' },
+   554→        body: JSON.stringify({
+   555→          op: 'func-call',
+   556→          ref: supa.ref,
+   557→          secret: supa.secret,
+   558→          action: 'verify-qq',
+   559→          body: { appId: login.appId, appSecret: login.appSecret },
+   560→        }),
+   561→        signal: AbortSignal.timeout(80_000),
+   562→      });
+   563→      const text = await res.text();
+   564→      let j: { ok?: boolean; error?: string; message?: string; botName?: string } | null = null;
+   565→      try {
+   566→        j = JSON.parse(text);
+   567→      } catch {
+   568→        /* 非 JSON */
+   569→      }
+   570→      if (res.ok && j?.ok) {
+   571→        const next: QqBotLogin = { ...login, botName: j.botName || login.botName || undefined };
+   572→        memQqBot = next;
+   573→        await persistLogin(next);
+   574→        const r: QqBotTestResult = {
+   575→          ok: true,
+   576→          msg: `云端验证通过${j.botName ? `：机器人「${j.botName}」` : ''}，凭证有效`,
+   577→        };
+   578→        set({ lastTest: r, login: next, lastCloudVerify: { ok: true, msg: r.msg, at: Date.now() } });
+   579→        get().persistCloudVerify({ ok: true, msg: r.msg, at: Date.now() });
+   580→        cloudAutoSync('QQ 云端验证通过');
+   581→        return r;
+   582→      }
+   583→      if (res.status === 401) {
+   584→        const r: QqBotTestResult = { ok: false, msg: '任务密钥不匹配：到 设置 → 云端助手 重新点「一键部署」后再试' };
+   585→        set({ lastTest: r, lastCloudVerify: { ok: false, msg: r.msg, at: Date.now() } });
+   586→        get().persistCloudVerify({ ok: false, msg: r.msg, at: Date.now() });
+   587→        return r;
+   588→      }
+   589→      if (res.status === 504) {
+   590→        const r: QqBotTestResult = { ok: false, msg: '连不上云端函数：请确认已一键部署（刚部署需 10-30 秒冷启动，稍等再试）' };
+   591→        set({ lastTest: r, lastCloudVerify: { ok: false, msg: r.msg, at: Date.now() } });
+   592→        get().persistCloudVerify({ ok: false, msg: r.msg, at: Date.now() });
+   593→        return r;
+   594→      }
+   595→      const fallback = text ? `云端返回 ${res.status}：${text.slice(0, 60)}` : `云端返回 ${res.status}（云端助手可能还没更新到支持 verify-qq 的版本）`;
+   596→      const r: QqBotTestResult = { ok: false, msg: (j?.error || j?.message || fallback).slice(0, 120) };
+   597→      set({ lastTest: r, lastCloudVerify: { ok: false, msg: r.msg, at: Date.now() } });
+   598→      get().persistCloudVerify({ ok: false, msg: r.msg, at: Date.now() });
+   599→      return r;
+   600→    } catch (e) {
+   601→      const timedOut = e instanceof DOMException && e.name === 'TimeoutError';
+   602→      const detail = e instanceof Error ? e.message : String(e);
+   603→      const r: QqBotTestResult = timedOut
+   604→        ? { ok: false, msg: '云端验证超时（80 秒）：请重试；多次超时请到 设置 → 云端助手 重新部署最新版' }
+   605→        : { ok: false, msg: `连不上云端助手（${detail.slice(0, 80)}）：请稍后重试` };
+   606→      set({ lastTest: r, lastCloudVerify: { ok: false, msg: r.msg, at: Date.now() } });
+   607→      get().persistCloudVerify({ ok: false, msg: r.msg, at: Date.now() });
+   608→      return r;
+   609→    } finally {
+   610→      set({ verifying: false });
+   611→    }
+   612→  },
+   613→
+   614→  bindContact: async (contactId, contactName) => {
+   615→    const login = get().login;
+   616→    if (!login) return;
+   617→    const next: QqBotLogin = { ...login, boundContactId: contactId, boundContactName: contactName };
+   618→    memQqBot = next;
+   619→    await persistLogin(next);
+   620→    set({ login: next });
+   621→    // 换绑后云端人设同步更新
+   622→    cloudAutoSync('QQ 换绑角色');
+   623→  },
+   624→
+   625→  disconnect: async () => {
+   626→    memQqBot = null;
+   627→    await persistLogin(null);
+   628→    set({ login: null, lastTest: null });
+   629→    // 断开后自动重推（云端立即停用 QQ 通道）
+   630→    cloudAutoSync('QQ 已断开');
+   631→  },
+   632→
+   633→  pullHistory: async () => {
+   634→    if (get().pulling) return;
+   635→    set({ pulling: true });
+   636→    const r = await pullQqCloudHistory();
+   637→    set({ pulling: false, lastTest: r.ok ? { ok: true, msg: r.msg } : get().lastTest });
+   638→  },
+   639→
+   640→  /**
+   641→   * 官方扫码绑定：创建任务（二维码 URL）→ 2.5s 轮询 → 用户手机 QQ 确认后解密凭证 →
+   642→   * 自动 test() 接入（503 地域拦时 test 内部已兜底保存凭证，提示走云端验证）。
+   643→   * 二维码过期自动重建任务刷新；start/stop 用会话令牌互斥，旧循环自动退出。
+   644→   */
+   645→  startQrBind: async () => {
+   646→    const my = ++qrSession;
+   647→    set({ qr: { phase: 'starting' } });
+   648→    while (qrSession === my) {
+   649→      // ① 生成 AES-256 key 并创建绑定任务
+   650→      const keyBuf = new Uint8Array(32);
+   651→      crypto.getRandomValues(keyBuf);
+   652→      const keyB64 = bytesToB64(keyBuf);
+   653→      const create = await qqLiteCall('/lite/create_bind_task', { key: keyB64 });
+   654→      const taskId = create?.data?.task_id;
+   655→      if (qrSession !== my) return;
+   656→      if (!taskId || create?.retcode !== 0) {
+   657→        set({ qr: { phase: 'failed', reason: create?.msg || '连不上 q.qq.com（创建绑定任务失败）：请稍后重试' } });
+   658→        return;
+   659→      }
+   660→      // ② 显示二维码，等待手机 QQ 扫码确认
+   661→      set({ qr: { phase: 'waiting', qrUrl: qqBindConnectUrl(taskId) } });
+   662→      let expired = false;
+   663→      while (qrSession === my) {
+   664→        await sleep(2500);
+   665→        if (qrSession !== my) return;
+   666→        const r = await qqLiteCall('/lite/poll_bind_result', { task_id: taskId });
+   667→        if (!r) continue; // 单次网络失败继续轮询
+   668→        const st = r.data?.status ?? 0;
+   669→        if (st === 3) {
+   670→          expired = true;
+   671→          break; // 过期 → 外层重建任务自动刷新二维码
+   672→        }
+   673→        if (st === 2) {
+   674→          // ③ 确认绑定：解密凭证并接入
+   675→          set({ qr: { phase: 'saving' } });
+   676→          const appId = String(r.data?.bot_appid ?? '');
+   677→          const enc = r.data?.bot_encrypt_secret ?? '';
+   678→          const appSecret = await decryptBotSecret(keyB64, enc);
+   679→          if (qrSession !== my) return;
+   680→          if (!appId || !appSecret) {
+   681→            set({ qr: { phase: 'failed', reason: '凭证解密失败：请点「重新生成二维码」重试' } });
+   682→            return;
+   683→          }
+   684→          const t = await useQqConnect.getState().test(appId, appSecret);
+   685→          if (qrSession !== my) return;
+   686→          if (t.ok) {
+   687→            set({ qr: { phase: 'idle' }, lastTest: { ok: true, msg: '扫码接入成功：机器人凭证已保存并验证' } });
+   688→            cloudAutoSync('QQ 扫码接入成功');
+   689→            return;
+   690→          }
+   691→          // test 报 503（地域拦）：凭证其实已保存（test 内部兜底），引导云端验证
+   692→          set({ qr: { phase: 'idle' }, lastTest: { ok: false, msg: t.msg } });
+   693→          return;
+   694→        }
+   695→        // st 0/1：继续等待
+   696→      }
+   697→      if (expired) continue; // 过期 → 自动重新生成二维码
+   698→    }
+   699→  },
+   700→
+   701→  stopQrBind: () => {
+   702→    qrSession++;
+   703→    set({ qr: { phase: 'idle' } });
+   704→  },
+   705→}));
+   706→

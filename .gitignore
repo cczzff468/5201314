@@ -1,0 +1,6 @@
+skills/
+node_modules/
+
+.next/
+tsconfig.tsbuildinfo
+.gh-token

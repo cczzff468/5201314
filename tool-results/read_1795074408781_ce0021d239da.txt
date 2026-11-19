@@ -1,0 +1,702 @@
+     1→     1→/**
+     2→     2→ * 云端助手运行时源码 v9（模板字符串，部署时下发）——云端 7×24 骨干版。
+     3→     3→ *
+     4→     4→ * 架构（用户自己的 Supabase 项目 = 收发骨干，不依赖本站在线）：
+     5→     5→ * - 微信收发（getupdates 长轮询 → 人设回复 → sendmessage）：定时任务 pg_cron（存在用户
+     6→     6→ *   数据库里，v9 起部署后自动建立）每分钟打一次 Edge Function 的 cron-cycle；本站网关
+     7→     7→ *   （免费加速器）在线时以轮询锁让位互补——两边并发跑也不会双回（v9 认领表）。
+     8→     8→ * - QQ：官方 WebSocket 出站长连接（不需要境内回调出口，绕开平台对 Webhook 的地域限制）。
+     9→     9→ *   两条持有方互斥（qq-ws-lock）：本站网关在线时由网关长连接；本站不在时由 cron-cycle
+    10→    10→ *   分支在 Edge Function 里保持会话（预算 ~135s/轮，会话断点 state/qq-ws-session.json，
+    11→    11→ *   下一轮 Resume 续传，平台补发断线期间的事件）。QQ Webhook 回调也仍可用（控制台配函数
+    12→    12→ *   URL 即命中，无签名头 plain_token 校验可过）。
+    13→    13→ * - v9 双轮询器安全：微信轮询锁（state/wx-lock.json，50s TTL）+ 认领表
+    14→    14→ *   （state/wx-claims.json，回复前认领 3 分钟 TTL，失败即释）——网关/定时任务/手动测试
+    15→    15→ *   同跑一个桶不再双回；旧版「回复风暴」根因（游标重收）仍由 v5 游标持久化兜底。
+    16→    16→ * - 运行包历史种子（v5）：config.wechat.history / config.qq.history 是手机 App 同步时
+    17→    17→ *   打包的网站聊天最近 20 条——云端冷启动不再失忆，回复内容与网站聊天同源连续。
+    18→    18→ *
+    19→    19→ * 配置（用户 Supabase 私有桶 wx-cloud/config.json，v2 形状）：
+    20→    20→ * { version:2, secret, wechat:{botToken,botId,persona,history}, qq:{appId,appSecret,persona,history},
+    21→    21→ *   llm:{baseUrl,apiKey,model}, promptTimeZone, syncedAt }
+    22→    22→ *
+    23→    23→ * 注意：模板里内层代码一律用单双引号，不用反引号，避免与外层模板字面量冲突。
+    24→    24→ */
+    25→    25→
+    26→    26→// ---------------- 微信 + QQ 共用核心（Node / Deno 通用，纯 fetch） ----------------
+    27→    27→
+    28→    28→export const WX_CLOUD_CORE = String.raw`
+    29→    29→// ---- 微信云端助手核心（自动生成，勿手工编辑） ----
+    30→    30→var ILINK = 'https://ilinkai.weixin.qq.com';
+    31→    31→// 可变：loadConfig 读到运行包 wechat.baseUrl（confirmed 回包）后切过去；其余场景回默认
+    32→    32→var ILINK_HOST = ILINK;
+    33→    33→var QQ_API = 'https://api.sgroup.qq.com';
+    34→    34→// QQ 取凭证双端点（官方现行版先行：海外出口可达；旧 /api/v1/* 网关层拦海外 503 作兑底）
+    35→    35→var QQ_TOKEN_URLS = ['https://api.bot.qq.com/app/getAppAccessToken', 'https://bots.qq.com/api/v1/getAppAccessToken'];
+    36→    36→var BASE_INFO = { channel_version: '2.4.10', bot_agent: 'OpenClaw' };
+    37→    37→var SUPA_URL = (typeof SUPA_URL_INJECT !== 'undefined' && SUPA_URL_INJECT) || '';
+    38→    38→var SUPA_KEY = (typeof SUPA_KEY_INJECT !== 'undefined' && SUPA_KEY_INJECT) || '';
+    39→    39→// v8 中继模式（内置 IM 网关用）：用户 Supabase 项目密钥拿不到/被拒时（代写路径部署后 serviceKey 为空，
+    40→    40→// 或 JWT 轮换后旧 key 全拒），读写一律改经已部署的 wx-assistant 函数（read-file / upload-file 动作，
+    41→    41→// X-Task-Secret 鉴权，函数用平台注入凭证访问 Storage）——网关只需要项目地址 + 任务密钥即可工作。
+    42→    42→var RELAY_URL = (typeof RELAY_URL_INJECT !== 'undefined' && RELAY_URL_INJECT) || '';
+    43→    43→var RELAY_SECRET = (typeof RELAY_SECRET_INJECT !== 'undefined' && RELAY_SECRET_INJECT) || '';
+    44→    44→var BUCKET = 'wx-cloud';
+    45→    45→var UPDATES_BUF = '';
+    46→    46→var CFG = null;
+    47→    47→var CFG_AT = 0;
+    48→    48→var QQ_TOKEN = '';
+    49→    49→var QQ_TOKEN_AT = 0;
+    50→    50→var HIST_WX = null;
+    51→    51→var HIST_QQ = null;
+    52→    52→var HIST_AT = 0;
+    53→    53→
+    54→    54→function supaHeaders() {
+    55→    55→  // 按 key 类型区分（官方文档两套鉴权）：新式 key（sb_secret_/sb_publishable_ 开头）
+    56→    56→  // 不是 JWT，只能放 apikey 头——放 Authorization Bearer 会被网关/Storage 当 JWT 解析，
+    57→    57→  // 报 400 Invalid Compact JWS；legacy JWT（eyJ 开头）则 apikey + Bearer 双带
+    58→    58→  if (/^sb_(secret|publishable)_/.test(SUPA_KEY)) {
+    59→    59→    return { apikey: SUPA_KEY, 'Content-Type': 'application/json' };
+    60→    60→  }
+    61→    61→  return { apikey: SUPA_KEY, Authorization: 'Bearer ' + SUPA_KEY, 'Content-Type': 'application/json' };
+    62→    62→}
+    63→    63→
+    64→    64→async function supaGetJson(path) {
+    65→    65→  // v8 中继读：经云端函数（平台凭证读 Storage）；失败按「没有」处理，与直读语义一致
+    66→    66→  if (RELAY_URL && RELAY_SECRET) {
+    67→    67→    try {
+    68→    68→      var rr = await fetch(RELAY_URL, {
+    69→    69→        method: 'POST',
+    70→    70→        headers: { 'Content-Type': 'application/json', 'X-Task-Secret': RELAY_SECRET, 'X-Task-Action': 'read-file' },
+    71→    71→        body: JSON.stringify({ path: path }),
+    72→    72→        signal: AbortSignal.timeout(25000),
+    73→    73→      });
+    74→    74→      if (!rr.ok) return null;
+    75→    75→      var rj = await rr.json();
+    76→    76→      return rj && rj.ok && rj.data !== undefined ? rj.data : null;
+    77→    77→    } catch (e) { return null; }
+    78→    78→  }
+    79→    79→  var r = await fetch(SUPA_URL + '/storage/v1/object/' + BUCKET + '/' + path, { headers: supaHeaders() });
+    80→    80→  if (!r.ok) return null;
+    81→    81→  try { return await r.json(); } catch (e) { return null; }
+    82→    82→}
+    83→    83→
+    84→    84→async function supaPutJson(path, obj) {
+    85→    85→  // v8 中继写：经云端函数 upload-file 动作（平台凭证写 Storage）
+    86→    86→  if (RELAY_URL && RELAY_SECRET) {
+    87→    87→    try {
+    88→    88→      await fetch(RELAY_URL, {
+    89→    89→        method: 'POST',
+    90→    90→        headers: { 'Content-Type': 'application/json', 'X-Task-Secret': RELAY_SECRET, 'X-Task-Action': 'upload-file' },
+    91→    91→        body: JSON.stringify({ files: [{ path: path, content: JSON.stringify(obj), bucket: BUCKET, contentType: 'application/json' }] }),
+    92→    92→        signal: AbortSignal.timeout(30000),
+    93→    93→      });
+    94→    94→    } catch (e) { /* 心跳/历史写失败不致命 */ }
+    95→    95→    return;
+    96→    96→  }
+    97→    97→  try {
+    98→    98→    await fetch(SUPA_URL + '/storage/v1/object/' + BUCKET + '/' + path, {
+    99→    99→      method: 'POST',
+   100→   100→      headers: Object.assign(supaHeaders(), { 'x-upsert': 'true', 'Content-Type': 'application/json' }),
+   101→   101→      body: JSON.stringify(obj),
+   102→   102→    });
+   103→   103→  } catch (e) { /* 心跳/历史写失败不致命 */ }
+   104→   104→}
+   105→   105→
+   106→   106→async function loadConfig(force) {
+   107→   107→  if (!force && CFG && Date.now() - CFG_AT < 60000) return CFG;
+   108→   108→  var c = await supaGetJson('config.json');
+   109→   109→  if (!c) throw new Error('运行包缺失：请回到手机 App「设置 → 云端助手」重新同步');
+   110→   110→  CFG = c;
+   111→   111→  CFG_AT = Date.now();
+   112→   112→  // confirmed 回包的 baseurl：云端 Bot API 跟着走（仅放行 *.weixin.qq.com / *.qq.com，防 SSRF）
+   113→   113→  var bu = c && c.wechat && typeof c.wechat.baseUrl === 'string' ? c.wechat.baseUrl.replace(/\/+$/, '') : '';
+   114→   114→  ILINK_HOST = /^https:\/\/[a-z0-9.-]+\.(weixin\.)?qq\.com$/i.test(bu) ? bu : ILINK;
+   115→   115→  return CFG;
+   116→   116→}
+   117→   117→
+   118→   118→/** X-WECHAT-UIN：随机 uint32 十进制串再 base64（协议约定形态，上游不校验具体值；Deno/Node 通用） */
+   119→   119→function wxUin() {
+   120→   120→  var s = String(Math.floor(Math.random() * 4294967295));
+   121→   121→  return (typeof btoa === 'function') ? btoa(s) : Buffer.from(s).toString('base64');
+   122→   122→}
+   123→   123→
+   124→   124→async function loadWxHistory(force) {
+   125→   125→  if (!force && HIST_WX && Date.now() - HIST_AT < 30000) return HIST_WX;
+   126→   126→  var h = await supaGetJson('history.json');
+   127→   127→  HIST_WX = h && Array.isArray(h.msgs) ? h.msgs : [];
+   128→   128→  HIST_AT = Date.now();
+   129→   129→  return HIST_WX;
+   130→   130→}
+   131→   131→
+   132→   132→async function saveWxHistory() {
+   133→   133→  await supaPutJson('history.json', { msgs: (HIST_WX || []).slice(-30), updatedAt: Date.now() });
+   134→   134→}
+   135→   135→
+   136→   136→/** v5 游标持久化：getupdates 游标存进桶（state/wx-updates-buf.json），新实例/冷启动不再
+   137→   137→ *  从空游标重收整批积压（旧版「一条消息被回十几次」的回复风暴根因）；已回复的
+   138→   138→ *  message_id 另存 state/wx-seen.json 去重兑底（游标回退时只补未回成功的那些）。 */
+   139→   139→var WX_SEEN = null;
+   140→   140→async function loadWxCursor() {
+   141→   141→  try {
+   142→   142→    var s = await supaGetJson('state/wx-updates-buf.json');
+   143→   143→    if (s && typeof s.buf === 'string' && s.buf) UPDATES_BUF = s.buf;
+   144→   144→    var sn = await supaGetJson('state/wx-seen.json');
+   145→   145→    WX_SEEN = sn && Array.isArray(sn.ids) ? sn.ids : [];
+   146→   146→  } catch (e) { /* 兑底：从空游标开始（首条会重收但 seen 兑底） */ }
+   147→   147→}
+   148→   148→async function saveWxCursor() {
+   149→   149→  if (!UPDATES_BUF) return;
+   150→   150→  await supaPutJson('state/wx-updates-buf.json', { buf: UPDATES_BUF, at: Date.now() });
+   151→   151→}
+   152→   152→/** v9 双轮询器安全（本站网关 / 你的 Supabase 定时任务 / 手动「云端测试」同跑一个桶）：
+   153→   153→ *  ① 轮询锁 state/wx-lock.json：别的 owner 50 秒内活跃 → 本轮直接让位（省重复 getupdates；
+   154→   154→ *    owner 是进程级随机 id——同进程永不自堵，崩了靠 TTL 自然过期，接管 ≤50s + 下一轮触发）。
+   155→   155→ *  ② 认领表 state/wx-claims.json：回复前先认领（3 分钟 TTL）——并发拉到同一批消息也只会回
+   156→   156→ *    一次；回复失败立即释放（下一轮重试）；进程崩在半路由 TTL 过期兑底（最多延迟重试）。 */
+   157→   157→var POLL_OWNER = (typeof CODE_SOURCE !== 'undefined' ? CODE_SOURCE : 'p') + '-' + String(Math.floor(Math.random() * 1e9)) + '-' + String(Date.now() % 1e6);
+   158→   158→var WX_LOCK_TTL = 50000;
+   159→   159→var WX_CLAIM_TTL = 180000;
+   160→   160→var WX_CLAIMS = null;
+   161→   161→async function loadWxLock() {
+   162→   162→  var l = await supaGetJson('state/wx-lock.json');
+   163→   163→  return l && typeof l.at === 'number' && typeof l.owner === 'string' ? l : null;
+   164→   164→}
+   165→   165→async function writeWxLock() {
+   166→   166→  await supaPutJson('state/wx-lock.json', { at: Date.now(), owner: POLL_OWNER });
+   167→   167→}
+   168→   168→async function loadWxClaims() {
+   169→   169→  if (WX_CLAIMS) return WX_CLAIMS;
+   170→   170→  var c = await supaGetJson('state/wx-claims.json');
+   171→   171→  WX_CLAIMS = c && c.ids && typeof c.ids === 'object' ? c.ids : {};
+   172→   172→  return WX_CLAIMS;
+   173→   173→}
+   174→   174→async function writeWxClaim(id) {
+   175→   175→  var cl = await loadWxClaims();
+   176→   176→  cl[id] = Date.now();
+   177→   177→  var ids = {};
+   178→   178→  for (var k in cl) if (Date.now() - cl[k] < 1800000) ids[k] = cl[k];
+   179→   179→  WX_CLAIMS = ids;
+   180→   180→  await supaPutJson('state/wx-claims.json', { ids: ids });
+   181→   181→}
+   182→   182→async function clearWxClaim(id) {
+   183→   183→  var cl = await loadWxClaims();
+   184→   184→  if (!(id in cl)) return;
+   185→   185→  delete cl[id];
+   186→   186→  WX_CLAIMS = cl;
+   187→   187→  await supaPutJson('state/wx-claims.json', { ids: cl });
+   188→   188→}
+   189→   189→function wxClaimFresh(id) {
+   190→   190→  if (!WX_CLAIMS || !id) return false;
+   191→   191→  var t = WX_CLAIMS[id];
+   192→   192→  return typeof t === 'number' && Date.now() - t < WX_CLAIM_TTL;
+   193→   193→}
+   194→   194→
+   195→   195→async function markWxSeen(id) {
+   196→   196→  if (!id) return;
+   197→   197→  WX_SEEN = (WX_SEEN || []).concat([String(id)]).slice(-60);
+   198→   198→  await supaPutJson('state/wx-seen.json', { ids: WX_SEEN, updatedAt: Date.now() });
+   199→   199→}
+   200→   200→function wxSeenHas(id) {
+   201→   201→  if (!id || !WX_SEEN) return false;
+   202→   202→  return WX_SEEN.indexOf(String(id)) >= 0;
+   203→   203→}
+   204→   204→
+   205→   205→async function ilinkCall(path, botToken, body) {
+   206→   206→  var r = await fetch(ILINK_HOST + path, {
+   207→   207→    method: 'POST',
+   208→   208→    headers: {
+   209→   209→      'Content-Type': 'application/json',
+   210→   210→      Authorization: 'Bearer ' + botToken,
+   211→   211→      AuthorizationType: 'ilink_bot_token',
+   212→   212→      'X-WECHAT-UIN': wxUin(),
+   213→   213→      'iLink-App-Id': 'bot',
+   214→   214→      'iLink-App-ClientVersion': String(132106),
+   215→   215→    },
+   216→   216→    body: JSON.stringify(body || {}),
+   217→   217→    // v8：原来没有超时——上游挂起会把整条微信轮询循环卡死（后续消息全不回，「AI 不回信息」根因之一）。
+   218→   218→    // getupdates 服务端长轮询挂 ~35s，窗口留到 50s；其余短调用同窗不影响。
+   219→   219→    signal: AbortSignal.timeout(50000),
+   220→   220→  });
+   221→   221→  var j = null;
+   222→   222→  try { j = await r.json(); } catch (e) { /* 保留 null */ }
+   223→   223→  if (!r.ok || (j && typeof j.error_code === 'number' && j.error_code !== 0 && j.error_code !== -1 && path.indexOf('getupdates') < 0)) {
+   224→   224→    throw new Error('iLink ' + path + ' 失败 ' + r.status);
+   225→   225→  }
+   226→   226→  return j || {};
+   227→   227→}
+   228→   228→
+   229→   229→/** LLM：OpenAI 兼容 chat/completions（非流式），跟随手机 App「API 设置」 */
+   230→   230→function llmCandidates(baseUrl) {
+   231→   231→  var b = String(baseUrl || '').replace(/\/+$/, '');
+   232→   232→  if (!b) return [];
+   233→   233→  if (/\/chat\/completions$/.test(b)) return [b];
+   234→   234→  if (/\/v\d+$/.test(b)) return [b + '/chat/completions'];
+   235→   235→  return [b + '/v1/chat/completions', b + '/chat/completions'];
+   236→   236→}
+   237→   237→
+   238→   238→async function callLlm(cfg, messages) {
+   239→   239→  var llm = cfg.llm || {};
+   240→   240→  var cands = llmCandidates(llm.baseUrl);
+   241→   241→  var lastErr = '未配置模型 API（在手机 App 设置 → API 设置里填写后重新同步）';
+   242→   242→  for (var i = 0; i < cands.length; i++) {
+   243→   243→    try {
+   244→   244→      var r = await fetch(cands[i], {
+   245→   245→        method: 'POST',
+   246→   246→        headers: {
+   247→   247→          'Content-Type': 'application/json',
+   248→   248→          Authorization: llm.apiKey ? 'Bearer ' + llm.apiKey : '',
+   249→   249→        },
+   250→   250→        body: JSON.stringify({ model: llm.model || 'gpt-4o-mini', messages: messages, max_tokens: 500 }),
+   251→   251→        // v8：原来没有超时——模型 API 挂起时整条收发循环被拖死（消息永远不回）；75s 与
+   252→   252→        // /api/chat 的非流式窗口对齐，超时进 lastErr，外层 handleWxMsg 的重试链路接着兑
+   253→   253→        signal: AbortSignal.timeout(75000),
+   254→   254→      });
+   255→   255→      if (!r.ok) { lastErr = 'LLM ' + r.status; continue; }
+   256→   256→      var j = await r.json();
+   257→   257→      var text = j && j.choices && j.choices[0] && j.choices[0].message && j.choices[0].message.content;
+   258→   258→      if (typeof text === 'string' && text.trim()) return text.trim();
+   259→   259→      lastErr = 'LLM 空回复';
+   260→   260→    } catch (e) { lastErr = String(e); }
+   261→   261→  }
+   262→   262→  throw new Error(lastErr);
+   263→   263→}
+   264→   264→
+   265→   265→function extractText(msg) {
+   266→   266→  var list = (msg && msg.item_list) || [];
+   267→   267→  for (var i = 0; i < list.length; i++) {
+   268→   268→    if (list[i] && list[i].type === 1 && list[i].text_item && typeof list[i].text_item.text === 'string') {
+   269→   269→      return list[i].text_item.text.trim();
+   270→   270→    }
+   271→   271→  }
+   272→   272→  // 入站图片/表情包（type 2，AES 加密看不到内容）：占位让 AI 按语境回应（不整条丢弃）
+   273→   273→  for (var k = 0; k < list.length; k++) {
+   274→   274→    if (list[k] && list[k].type === 2) return '（对方发了一个表情包/图片，内容看不到）';
+   275→   275→  }
+   276→   276→  return '';
+   277→   277→}
+   278→   278→
+   279→   279→// ---- 真机微信出站净化（iLink 通道只能发文字；v4：大表情标记 → 经典表情代码） ----
+   280→   280→// 根因（用户实拍）：云端人设沿用了站内微信的 [表情包:ID] 习惯（历史/人设教学带进去的），
+   281→   281→// iLink 通道发不了图 → 标记以裸文字出现在真机微信上。提示词拦不住，发送边界确定性转换。
+   282→   282→// 转换规则：去 ID 前缀后名字在经典表情清单内 → [名字]（真机微信客户端把该文本渲染成真
+   283→   283→// 表情，AI 等于真会发表情）；不在清单 → 剩除；净空 → 颜文字兑底（不空消息）。
+   284→   284→var WX_CLASSIC = ('微笑,撇嘴,色,发呆,得意,流泪,害羞,闭嘴,睡,大哭,尴尬,发怒,调皮,呲牙,惊讶,难过,囧,抓狂,吐,偷笑,愉快,白眼,傲慢,困,惊恐,憨笑,悠闲,咒骂,疑问,嘘,晕,衰,骷髅,敲打,再见,擦汗,抠鼻,鼓掌,坏笑,右哼哼,鄙视,委屈,快哭了,阴险,亲亲,可怜,笑脸,生病,脸红,破涕为笑,恐惧,失望,无语,嘿哈,捂脸,奸笑,机智,皱眉,耶,吃瓜,加油,汗,天啊,Emm,社会社会,旺柴,好的,打脸,哇,翻白眼,666,让我看看,叹气,苦涩,裂开,嘴唇,爱心,心碎,拥抱,强,弱,握手,胜利,抱拳,勾引,拳头,OK,合十,猪头,便便,月亮,太阳,庆祝,红包,發,福,烟花,爆竹,礼物,跳跳,发抖,转圈,啤酒,咖啡,蛋糕,玫瑰,凋谢,菜刀,炸弹').split(',');
+   285→   285→var WX_CLASSIC_SET = {};
+   286→   286→for (var wci = 0; wci < WX_CLASSIC.length; wci++) WX_CLASSIC_SET[WX_CLASSIC[wci]] = 1;
+   287→   287→var WX_EMOJI_FALLBACKS = ['(¬‿¬)', '(๑•̀ㅂ•́)و✧', '٩(˃ᴗ˂)۶', '(っ˘ω˘ς)'];
+   288→   288→var WX_MSG_ERR = '';
+   289→   289→var WX_MSG_ERR_AT = 0;
+   290→   290→function sanitizeWxOutText(text) {
+   291→   291→  var tagRe = /[\[【]\s*(?:发送了|发出了)?\s*(?:表情包|表情|图片|照片|语音|贴纸|Sticker)\s*[:：]\s*([^\]】]{1,24})\s*[\]】]/g;
+   292→   292→  var out = String(text || '').replace(tagRe, function (_all, rawName) {
+   293→   293→    var name = String(rawName || '').trim().replace(/^(?:wwb|wxb|qqb|wx|qq|mt|wb)-/i, '').trim();
+   294→   294→    return WX_CLASSIC_SET[name] ? '[' + name + ']' : '';
+   295→   295→  });
+   296→   296→  out = out.replace(/\n{3,}/g, '\n\n').replace(/^[\s\n]+|[\s\n]+$/g, '').replace(/^[，,。.\s]+/, '');
+   297→   297→  if (out) return out;
+   298→   298→  return WX_EMOJI_FALLBACKS[Math.floor(Math.random() * WX_EMOJI_FALLBACKS.length)];
+   299→   299→}
+   300→   300→
+   301→   301→async function sendWxText(cfg, toUserId, contextToken, text) {
+   302→   302→  await ilinkCall('/ilink/bot/sendmessage', cfg.wechat.botToken, {
+   303→   303→    msg: {
+   304→   304→      from_user_id: '',
+   305→   305→      to_user_id: toUserId,
+   306→   306→      client_id: Date.now() + '-' + Math.random().toString(36).slice(2),
+   307→   307→      message_type: 2,
+   308→   308→      message_state: 2,
+   309→   309→      context_token: contextToken,
+   310→   310→      item_list: [{ type: 1, text_item: { text: text.slice(0, 2000) } }],
+   311→   311→    },
+   312→   312→    base_info: BASE_INFO,
+   313→   313→  });
+   314→   314→}
+   315→   315→
+   316→   316→/** 微信：处理一条来消息，返回是否成功回复。
+   317→   317→ *  v4：①LLM 失败重试一次（原来一次失败消息就被静默丢弃，主人看到「ai不回信息」）；
+   318→   318→ *  ②出站文本经 sanitizeWxOutText 净化（大表情标记→经典表情代码/剥除）；
+   319→   319→ *  ③失败原因记入 WX_MSG_ERR（心跳/ping 可见——原来逐条失败完全不可见，无法排查） */
+   320→   320→async function handleWxMsg(cfg, msg) {
+   321→   321→  var text = extractText(msg);
+   322→   322→  if (!text || !msg.from_user_id || !msg.context_token) return false;
+   323→   323→  if (msg.from_user_id === cfg.wechat.botId) return false;
+   324→   324→  try {
+   325→   325→    var c = await ilinkCall('/ilink/bot/getconfig', cfg.wechat.botToken, {
+   326→   326→      ilink_user_id: msg.from_user_id, context_token: msg.context_token, base_info: BASE_INFO,
+   327→   327→    });
+   328→   328→    if (c && c.typing_ticket) {
+   329→   329→      ilinkCall('/ilink/bot/sendtyping', cfg.wechat.botToken, {
+   330→   330→        ilink_user_id: msg.from_user_id, typing_ticket: c.typing_ticket, status: 2, base_info: BASE_INFO,
+   331→   331→      }).catch(function () {});
+   332→   332→    }
+   333→   333→  } catch (e) { /* 可选 */ }
+   334→   334→  try {
+   335→   335→    var hist = await loadWxHistory(false);
+   336→   336→    // v5 历史种子：云端还没存过历史时用运行包里打包的网站聊天最近 20 条（云端冷启动
+   337→   337→    // 不失忆——回复内容与手机 App 聊天同源连续，用户反馈「网站上怎么回复的微信就怎么回」）
+   338→   338→    if ((!hist || !hist.length) && cfg.wechat && Array.isArray(cfg.wechat.history) && cfg.wechat.history.length) {
+   339→   339→      hist = cfg.wechat.history.slice(-20);
+   340→   340→      HIST_WX = hist;
+   341→   341→    }
+   342→   342→    var system = (cfg.wechat.persona && cfg.wechat.persona.system) || '你和主人在真实微信上聊天，回复简短自然，绝不透露自己是AI。';
+   343→   343→    var msgs = [{ role: 'system', content: system }];
+   344→   344→    for (var i = Math.max(0, hist.length - 12); i < hist.length; i++) msgs.push(hist[i]);
+   345→   345→    msgs.push({ role: 'user', content: text.slice(0, 2000) });
+   346→   346→    var reply = '';
+   347→   347→    var lastLlmErr = null;
+   348→   348→    for (var att = 0; att < 2 && !reply; att++) {
+   349→   349→      try {
+   350→   350→        reply = sanitizeWxOutText(await callLlm(cfg, msgs));
+   351→   351→      } catch (le) { lastLlmErr = le; }
+   352→   352→    }
+   353→   353→    if (!reply) {
+   354→   354→      WX_MSG_ERR = ('LLM 回复失败：' + String((lastLlmErr && lastLlmErr.message) || lastLlmErr)).slice(0, 160);
+   355→   355→      WX_MSG_ERR_AT = Date.now();
+   356→   356→      throw new Error(WX_MSG_ERR);
+   357→   357→    }
+   358→   358→    await sendWxText(cfg, msg.from_user_id, msg.context_token, reply);
+   359→   359→    if (WX_MSG_ERR_AT && Date.now() - WX_MSG_ERR_AT > 600000) WX_MSG_ERR = '';
+   360→   360→    HIST_WX = (HIST_WX || []).concat([
+   361→   361→      { role: 'user', content: text.slice(0, 500), ts: Date.now() },
+   362→   362→      { role: 'assistant', content: reply.slice(0, 500), ts: Date.now() },
+   363→   363→    ]).slice(-30);
+   364→   364→    await saveWxHistory();
+   365→   365→    return true;
+   366→   366→  } catch (e) {
+   367→   367→    if (!WX_MSG_ERR) {
+   368→   368→      WX_MSG_ERR = ('微信回复失败：' + String(e && e.message)).slice(0, 160);
+   369→   369→      WX_MSG_ERR_AT = Date.now();
+   370→   370→    }
+   371→   371→    throw e;
+   372→   372→  }
+   373→   373→}
+   374→   374→
+   375→   375→/** 微信：轮询一轮，返回本轮处理了几条消息；TOKEN_EXPIRED 抛错。
+   376→   376→ *  v9：①开轮询锁（别的 owner 50s 内活跃 → 让位返回 0）；②游标恢复 → 收一批 →
+   377→   377→ *  逐条「认领→回→销认领→记已回」（别人已认领的跳过——并发双轮询器不再双回）；
+   378→   378→ *  全部成功才落游标（中途失败保持旧游标：下轮重收整批，已回的靠 seen 跳过、只重试没回成功的）。 */
+   379→   379→async function tick() {
+   380→   380→  var cfg = await loadConfig(false);
+   381→   381→  if (!cfg.wechat || !cfg.wechat.botToken) return 0;
+   382→   382→  // v9 轮询锁：让位不改正确性（认领表兑底），只是省一次重复 getupdates
+   383→   383→  try {
+   384→   384→    var lk = await loadWxLock();
+   385→   385→    if (lk && lk.owner !== POLL_OWNER && Date.now() - lk.at < WX_LOCK_TTL) return 0;
+   386→   386→    await writeWxLock();
+   387→   387→  } catch (e) { /* 锁读写失败照常轮询（认领表兑底并发安全） */ }
+   388→   388→  await loadWxCursor();
+   389→   389→  await loadWxClaims();
+   390→   390→  var d = await ilinkCall('/ilink/bot/getupdates', cfg.wechat.botToken, {
+   391→   391→    get_updates_buf: UPDATES_BUF, base_info: BASE_INFO,
+   392→   392→  });
+   393→   393→  if (d && d.error_code === -14) throw new Error('TOKEN_EXPIRED');
+   394→   394→  if (d && typeof d.get_updates_buf === 'string' && d.get_updates_buf) UPDATES_BUF = d.get_updates_buf;
+   395→   395→  var n = 0;
+   396→   396→  var pending = 0;
+   397→   397→  var msgs = (d && d.msgs) || [];
+   398→   398→  for (var i = 0; i < msgs.length; i++) {
+   399→   399→    var mid = msgs[i] && msgs[i].message_id != null ? String(msgs[i].message_id) : '';
+   400→   400→    if (wxSeenHas(mid)) continue;
+   401→   401→    pending++;
+   402→   402→    if (wxClaimFresh(mid)) continue; // 别的轮询器正在回这条：跳过（它回完会记 seen/落游标）
+   403→   403→    if (mid) await writeWxClaim(mid);
+   404→   404→    try {
+   405→   405→      if (await handleWxMsg(cfg, msgs[i])) {
+   406→   406→        n++;
+   407→   407→        if (mid) { await markWxSeen(mid); await clearWxClaim(mid); }
+   408→   408→      } else if (mid) {
+   409→   409→        await clearWxClaim(mid); // 空消息/自发消息等：销认领，不占重试位
+   410→   410→      }
+   411→   411→    } catch (e) {
+   412→   412→      if (mid) await clearWxClaim(mid); // 失败立即释放：下一轮重试
+   413→   413→      if (String(e && e.message).indexOf('TOKEN_EXPIRED') >= 0) throw e;
+   414→   414→      /* 单条失败继续下一条；原因已记入 WX_MSG_ERR（心跳/ping 可见） */
+   415→   415→    }
+   416→   416→  }
+   417→   417→  if (pending === 0 || n >= pending) await saveWxCursor();
+   418→   418→  return n;
+   419→   419→}
+   420→   420→
+   421→   421→// ---- QQ：access_token（2h 有效，110 分钟刷新缓存；双端点降级：新端点海外可达，旧端点网关拦 503） ----
+   422→   422→async function qqToken(cfg) {
+   423→   423→  if (QQ_TOKEN && Date.now() - QQ_TOKEN_AT < 110 * 60 * 1000) return QQ_TOKEN;
+   424→   424→  var qq = cfg.qq || {};
+   425→   425→  var lastErr = '';
+   426→   426→  var lastStatus = 0;
+   427→   427→  for (var ti = 0; ti < QQ_TOKEN_URLS.length; ti++) {
+   428→   428→    try {
+   429→   429→      var r = await fetch(QQ_TOKEN_URLS[ti], {
+   430→   430→        method: 'POST',
+   431→   431→        headers: { 'Content-Type': 'application/json' },
+   432→   432→        body: JSON.stringify({ appId: qq.appId, clientSecret: qq.appSecret }),
+   433→   433→        // v8：原来没有超时——QQ 取凭证挂起会卡住 WS 连接与消息回复
+   434→   434→        signal: AbortSignal.timeout(20000),
+   435→   435→      });
+   436→   436→      lastStatus = r.status;
+   437→   437→      var j = await r.json().catch(function () { return {}; });
+   438→   438→      if (j && j.access_token) {
+   439→   439→        QQ_TOKEN = j.access_token;
+   440→   440→        QQ_TOKEN_AT = Date.now();
+   441→   441→        return QQ_TOKEN;
+   442→   442→      }
+   443→   443→      // 业务错误（官方约定 HTTP 200 + code）：换端点无意义，直接报可读错（code 兼容数字/字符串）
+   444→   444→      var bizCode = Number(j && j.code) || 0;
+   445→   445→      if (bizCode) {
+   446→   446→        if (bizCode === 100016) throw new Error('QQ 凭证不正确（100016）：请核对 AppID/AppSecret');
+   447→   447→        if (bizCode === 100007) throw new Error('QQ AppID 无效或机器人状态异常（100007）');
+   448→   448→        if (bizCode === 10004) throw new Error('QQ 机器人不存在（10004）');
+   449→   449→        if (bizCode === 100001) throw new Error('QQ 平台频控（100001）：稍后再试');
+   450→   450→        throw new Error('QQ token 获取失败 code ' + bizCode);
+   451→   451→      }
+   452→   452→      lastErr = 'HTTP ' + r.status;
+   453→   453→    } catch (te) {
+   454→   454→      if (String(te && te.message).indexOf('QQ ') === 0) throw te; // 业务错不再降级
+   455→   455→      lastErr = String(te && te.message);
+   456→   456→    }
+   457→   457→  }
+   458→   458→  throw new Error('QQ token 获取失败 ' + (lastStatus || '') + ' ' + lastErr.slice(0, 80));
+   459→   459→}
+   460→   460→
+   461→   461→/** QQ：Ed25519 种子（Bot Secret 重复到 32 字节；官方文档算法） */
+   462→   462→function qqSeed(botSecret) {
+   463→   463→  var s = String(botSecret || '');
+   464→   464→  if (!s) return null;
+   465→   465→  while (s.length < 32) s += s;
+   466→   466→  return s.slice(0, 32);
+   467→   467→}
+   468→   468→
+   469→   469→async function loadQqHistory(force) {
+   470→   470→  if (!force && HIST_QQ && Date.now() - HIST_AT < 30000) return HIST_QQ;
+   471→   471→  var h = await supaGetJson('qq-history.json');
+   472→   472→  HIST_QQ = h && Array.isArray(h.msgs) ? h.msgs : [];
+   473→   473→  HIST_AT = Date.now();
+   474→   474→  return HIST_QQ;
+   475→   475→}
+   476→   476→
+   477→   477→async function appendQqHistory(item) {
+   478→   478→  HIST_QQ = (HIST_QQ || []).concat([item]).slice(-200);
+   479→   479→  await supaPutJson('qq-history.json', { msgs: HIST_QQ, updatedAt: Date.now() });
+   480→   480→}
+   481→   481→
+   482→   482→/** QQ：被动回复（v2 接口，60 分钟内有效、每条消息最多回 5 次；seq 递增防同 msg_id 撞号） */
+   483→   483→var QQ_SEQ = 1;
+   484→   484→async function qqReply(cfg, openid, msgId, content, isGroup, groupOpenid) {
+   485→   485→  var token = await qqToken(cfg);
+   486→   486→  var url = isGroup ? QQ_API + '/v2/groups/' + groupOpenid + '/messages' : QQ_API + '/v2/users/' + openid + '/messages';
+   487→   487→  var r = await fetch(url, {
+   488→   488→    method: 'POST',
+   489→   489→    headers: { 'Content-Type': 'application/json', Authorization: 'QQBot ' + token },
+   490→   490→    body: JSON.stringify({ msg_type: 0, content: content.slice(0, 1500), msg_id: msgId, msg_seq: QQ_SEQ++ }),
+   491→   491→    signal: AbortSignal.timeout(25000),
+   492→   492→  });
+   493→   493→  if (!r.ok) {
+   494→   494→    var t = await r.text().catch(function () { return ''; });
+   495→   495→    throw new Error('QQ 回复失败 ' + r.status + ' ' + t.slice(0, 100));
+   496→   496→  }
+   497→   497→}
+   498→   498→
+   499→   499→/** QQ：上传富媒体文件（file_type 1=图片 2=视频 3=语音 silk；file 为 base64，≤2MB），返回 file_info 句柄 */
+   500→   500→async function qqUploadMedia(cfg, openid, isGroup, groupOpenid, fileType, dataB64) {
+   501→   501→  var token = await qqToken(cfg);
+   502→   502→  var url = isGroup ? QQ_API + '/v2/groups/' + groupOpenid + '/files' : QQ_API + '/v2/users/' + openid + '/files';
+   503→   503→  var r = await fetch(url, {
+   504→   504→    method: 'POST',
+   505→   505→    headers: { 'Content-Type': 'application/json', Authorization: 'QQBot ' + token },
+   506→   506→    body: JSON.stringify({ file_type: fileType, file: dataB64, srv_send_msg: false }),
+   507→   507→    signal: AbortSignal.timeout(30000),
+   508→   508→  });
+   509→   509→  var t = await r.text().catch(function () { return ''; });
+   510→   510→  if (!r.ok) throw new Error('QQ 富媒体上传失败 ' + r.status + ' ' + t.slice(0, 100));
+   511→   511→  var j = null;
+   512→   512→  try { j = JSON.parse(t); } catch (e) { j = null; }
+   513→   513→  var fi = j && (j.file_info || (j.file_infos && j.file_infos[0] && j.file_infos[0].file_info)) || '';
+   514→   514→  if (!fi) throw new Error('QQ 富媒体上传失败：无 file_info');
+   515→   515→  return fi;
+   516→   516→}
+   517→   517→
+   518→   518→/** QQ：发富媒体消息（msg_type=2 media；用于表情图片 / 语音条） */
+   519→   519→async function qqReplyMedia(cfg, openid, msgId, fileInfo, isGroup, groupOpenid) {
+   520→   520→  var token = await qqToken(cfg);
+   521→   521→  var url = isGroup ? QQ_API + '/v2/groups/' + groupOpenid + '/messages' : QQ_API + '/v2/users/' + openid + '/messages';
+   522→   522→  var r = await fetch(url, {
+   523→   523→    method: 'POST',
+   524→   524→    headers: { 'Content-Type': 'application/json', Authorization: 'QQBot ' + token },
+   525→   525→    body: JSON.stringify({ msg_type: 2, media: { file_info: fileInfo }, msg_id: msgId, msg_seq: QQ_SEQ++ }),
+   526→   526→    signal: AbortSignal.timeout(25000),
+   527→   527→  });
+   528→   528→  if (!r.ok) {
+   529→   529→    var t = await r.text().catch(function () { return ''; });
+   530→   530→    throw new Error('QQ 富媒体发送失败 ' + r.status + ' ' + t.slice(0, 100));
+   531→   531→  }
+   532→   532→}
+   533→   533→
+   534→   534→/** silk 编码器（QQ 原生语音条）：Deno 用 npm:silk-wasm，Node 用运行包同目录 ./silk-wasm.mjs + silk.wasm。
+   535→   535→ *  加载失败缓存 10 分钟（文件没带上/网络问题时不每条消息都重试）；失败返回 null 降级文字 */
+   536→   536→var SILK_MOD = null;
+   537→   537→var SILK_FAIL_AT = 0;
+   538→   538→async function silkEncode(u8) {
+   539→   539→  if (SILK_FAIL_AT && Date.now() - SILK_FAIL_AT < 600000) return null;
+   540→   540→  try {
+   541→   541→    if (!SILK_MOD) {
+   542→   542→      SILK_MOD = (typeof Deno !== 'undefined')
+   543→   543→        ? await import('npm:silk-wasm@3')
+   544→   544→        : await import('./silk-wasm.mjs');
+   545→   545→    }
+   546→   546→    var r = await SILK_MOD.encode(u8, 0);
+   547→   547→    return r && r.data && r.data.length ? r.data : null;
+   548→   548→  } catch (e) {
+   549→   549→    SILK_MOD = null;
+   550→   550→    SILK_FAIL_AT = Date.now();
+   551→   551→    return null;
+   552→   552→  }
+   553→   553→}
+   554→   554→
+   555→   555→/** 云端 TTS（OpenAI 兼容 /audio/speech，只要 wav）→ silk → QQ 原生语音条。失败返回 null（降级文字） */
+   556→   556→async function synthesizeQqVoice(cfg, text) {
+   557→   557→  var tts = cfg.qq && cfg.qq.tts;
+   558→   558→  if (!tts || !tts.baseUrl || !tts.apiKey) return null;
+   559→   559→  var b = String(tts.baseUrl).replace(/\/+$/, '');
+   560→   560→  var url = /\/audio\/speech$/.test(b) ? b : b + '/audio/speech';
+   561→   561→  try {
+   562→   562→    var r = await fetch(url, {
+   563→   563→      method: 'POST',
+   564→   564→      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + tts.apiKey },
+   565→   565→      body: JSON.stringify({ model: tts.model || 'tts-1', voice: tts.voice || 'alloy', input: text.slice(0, 200), response_format: 'wav', speed: 1 }),
+   566→   566→      signal: AbortSignal.timeout(30000),
+   567→   567→    });
+   568→   568→    if (!r.ok) return null;
+   569→   569→    var buf = new Uint8Array(await r.arrayBuffer());
+   570→   570→    if (buf.length < 44 || String.fromCharCode(buf[0], buf[1], buf[2], buf[3]) !== 'RIFF') return null;
+   571→   571→    var silk = await silkEncode(buf);
+   572→   572→    if (!silk) return null;
+   573→   573→    var bin = '';
+   574→   574→    for (var i = 0; i < silk.length; i += 32768) bin += String.fromCharCode.apply(null, silk.subarray(i, i + 32768));
+   575→   575→    var b64 = (typeof btoa === 'function') ? btoa(bin) : Buffer.from(silk).toString('base64');
+   576→   576→    var dur = Math.max(1, Math.round(text.length / 4));
+   577→   577→    return { b64: b64, dur: dur };
+   578→   578→  } catch (e) { return null; }
+   579→   579→}
+   580→   580→
+   581→   581→/** 回复里的表情标记（[表情包:名字] / [表情:名字] / [发送了表情:名字]） */
+   582→   582→var QQ_STICKER_RE = /[【\[]\s*(?:表情包|表情|贴纸|发送了表情包|发送了表情|发送表情)\s*[:：]\s*([^】\]]{1,20})\s*[】\]]/g;
+   583→   583→
+   584→   584→/** 自然语句变体（[发送了一个"抱抱"表情包]：AI 不按标记写，而是写一句「发送了+词+表情包」） */
+   585→   585→var QQ_STICKER_NATURAL_RE =
+   586→   586→  /[【\[]\s*(?:发送|发)\s*(?:了|出)?\s*(?:一?个)?\s*["\u201c\u300c\u300e']?\s*([^"'\u201d\u2019\u300d\u300f【\[\]】\s:：，。！!]{1,16}?)\s*["'\u201d\u2019\u300d\u300f]?\s*(?:表情包|表情|贴纸)\s*[】\]]/g;
+   587→   587→
+   588→   588→/** 图片描述变体（[图片: 一只圆滚滚的柴犬…]：AI 把发表情包理解成发图片，用画面描述当标记） */
+   589→   589→var QQ_STICKER_IMAGE_RE = /[【\[]\s*图片\s*[:：]\s*([^】\]]{2,60})\s*[】\]]/g;
+   590→   590→
+   591→   591→/** [图片:描述] 变体匹配：描述含表情名 → 该名字；再按动作/动物情感词兑底（名字在清单里才返回，找不到 null） */
+   592→   592→function resolveQqEmoticonFromDesc(cfg, desc) {
+   593→   593→  var d = String(desc || '').trim();
+   594→   594→  if (!d) return null;
+   595→   595→  var list = (cfg.qq && cfg.qq.emoticons) || [];
+   596→   596→  for (var i = 0; i < list.length; i++) {
+   597→   597→    var n = list[i] && list[i].name;
+   598→   598→    if (n && n.length >= 2 && d.indexOf(n) >= 0) return n;
+   599→   599→  }
+   600→   600→  var FEEL = [
+   601→   601→    [/抱|搂/, '抱'], [/蹭|贴|粘/, '蹭'], [/摸|揉/, '摸'], [/亲|吻/, '亲'],
+   602→   602→    [/哭|流泪|呜/, '哭'], [/笑|开心|高兴/, '笑'], [/怒|气鼓|哼/, '怒'],
+   603→   603→    [/睡|晚安|困/, '睡'], [/得意|哼哼|骄傲/, '得意'],
+   604→   604→    [/柴犬|小狗|狗狗|汪/, '抱'], [/猫|喵/, '贴'],
+   605→   605→  ];
+   606→   606→  for (var f = 0; f < FEEL.length; f++) {
+   607→   607→    if (FEEL[f][0].test(d)) {
+   608→   608→      for (var j = 0; j < list.length; j++) {
+   609→   609→        var nj = list[j] && list[j].name;
+   610→   610→        if (nj && nj.indexOf(FEEL[f][1]) >= 0) return nj;
+   611→   611→      }
+   612→   612→    }
+   613→   613→  }
+   614→   614→  return null;
+   615→   615→}
+   616→   616→
+   617→   617→/** 运行包内置表情（cfg.qq.emoticons: [{name, dataUrl}]）匹配：名字精确 → 互相包含 */
+   618→   618→function resolveQqEmoticon(cfg, token) {
+   619→   619→  var t = String(token || '').trim();
+   620→   620→  if (!t) return null;
+   621→   621→  var list = (cfg.qq && cfg.qq.emoticons) || [];
+   622→   622→  for (var i = 0; i < list.length; i++) if (list[i] && list[i].name === t) return list[i];
+   623→   623→  for (var j = 0; j < list.length; j++) {
+   624→   624→    var n = list[j] && list[j].name;
+   625→   625→    if (n && (n.indexOf(t) >= 0 || t.indexOf(n) >= 0)) return list[j];
+   626→   626→  }
+   627→   627→  return null;
+   628→   628→}
+   629→   629→
+   630→   630→/** 云端验证 QQ 凭证（部署后从云端出口连 QQ 平台；新端点 api.bot.qq.com 海外出口可达，503 地域拦已成历史） */
+   631→   631→async function verifyQqCreds(appId, appSecret) {
+   632→   632→  var lastErr = '';
+   633→   633→  var lastStatus = 0;
+   634→   634→  for (var vi = 0; vi < QQ_TOKEN_URLS.length; vi++) {
+   635→   635→    try {
+   636→   636→      var r = await fetch(QQ_TOKEN_URLS[vi], {
+   637→   637→        method: 'POST',
+   638→   638→        headers: { 'Content-Type': 'application/json' },
+   639→   639→        body: JSON.stringify({ appId: String(appId || ''), clientSecret: String(appSecret || '') }),
+   640→   640→        signal: AbortSignal.timeout(15000),
+   641→   641→      });
+   642→   642→      lastStatus = r.status;
+   643→   643→      var j = null;
+   644→   644→      try { j = await r.json(); } catch (e) { j = null; }
+   645→   645→      if (j && j.access_token) {
+   646→   646→        var botName = '';
+   647→   647→        try {
+   648→   648→          var me = await fetch(QQ_API + '/users/@me', { headers: { Authorization: 'QQBot ' + j.access_token }, signal: AbortSignal.timeout(10000) });
+   649→   649→          var mj = null;
+   650→   650→          try { mj = await me.json(); } catch (e2) { mj = null; }
+   651→   651→          botName = (mj && (mj.username || mj.nickname)) || '';
+   652→   652→        } catch (e3) { /* 拿不到名字不算失败 */ }
+   653→   653→        return { ok: true, botName: botName };
+   654→   654→      }
+   655→   655→      // 业务错误（HTTP 200 + code）：换端点无意义，直接给可读提示（code 兼容数字/字符串）
+   656→   656→      var code = Number(j && j.code) || 0;
+   657→   657→      var why = code === 100016 ? 'AppID 或 AppSecret 不正确（100016）'
+   658→   658→        : code === 100007 ? 'AppID 无效或机器人状态异常（100007）'
+   659→   659→        : code === 10004 ? 'AppID 对应的机器人不存在（10004）'
+   660→   660→        : code === 100001 ? '请求过于频繁（100001），稍后再试'
+   661→   661→        : '请检查 AppID/AppSecret 是否正确';
+   662→   662→      if (code) return { ok: false, error: 'QQ 平台返回 code ' + code + '：' + why + (j && j.message ? '（' + j.message + '）' : '') };
+   663→   663→      lastErr = (j && j.message) || ('HTTP ' + r.status);
+   664→   664→    } catch (e) {
+   665→   665→      lastErr = String(e && e.message).slice(0, 120);
+   666→   666→    }
+   667→   667→  }
+   668→   668→  // 双端点都没拿到业务回包：典型是网络不通/被网关拦——QQ 收发消息走内置网关的
+   669→   669→  // WebSocket 长连接（设置 → 云端助手 →「自动在线」），不依赖这台云服务器的出口
+   670→   670→  var geo = lastStatus === 503 ? '（503：QQ 网关拒绝了这台云服务器的出口 IP）——QQ 收发消息走「自动在线」内置网关（WebSocket 长连接，不受此限制）' : '';
+   671→   671→  return { ok: false, error: '云端连不上 QQ 平台：' + (lastErr || 'HTTP ' + lastStatus).slice(0, 120) + geo };
+   672→   672→}
+   673→   673→
+   674→   674→/** QQ：入站富媒体 content 里的 markdown 图（![动画表情](…)/![图片](…)）转可读占位，不把裸链接堆给 LLM */
+   675→   675→function qqMediaToPlaceholder(t) {
+   676→   676→  return String(t || '').replace(/!\[([^\]]*)\]\([^)]*\)/g, function (_, alt) {
+   677→   677→    var a = String(alt || '').trim();
+   678→   678→    return a && a !== '图片' && a !== '动画表情'
+   679→   679→      ? '（对方发了一个表情包/图片：' + a + '）'
+   680→   680→      : '（对方发了一个表情包/图片，内容看不到）';
+   681→   681→  });
+   682→   682→}
+   683→   683→
+   684→   684→/** QQ：处理 C2C / 群@ 消息事件（d），返回是否回复成功。
+   685→   685→ *  回复分流：文字（msg_type 0）/ 语音条（TTS→silk，file_type 3）/ 表情包（运行包内置表情图，file_type 1）。
+   686→   686→ *  语音条频率：cfg.qq.voiceEvery（每 N 条 1 条，0=关），计数器存云端 state/qq-voice-counter.json。 */
+   687→   687→async function handleQqEvent(cfg, t, d) {
+   688→   688→  var content = qqMediaToPlaceholder(String((d && d.content) || '').trim());
+   689→   689→  var authorId = d && d.author && d.author.id ? String(d.author.id) : '';
+   690→   690→  var msgId = d && d.id ? String(d.id) : '';
+   691→   691→  if (!authorId || !msgId) return false;
+   692→   692→  // 空正文 + 带附件 = 富媒体消息（部分事件 content 为空只挂 attachments）：同样给占位
+   693→   693→  if (!content && d && d.attachments && d.attachments.length) {
+   694→   694→    var at = d.attachments[0] && d.attachments[0].content_type;
+   695→   695→    content = at && String(at).indexOf('image') >= 0 ? '（对方发了一个表情包/图片，内容看不到）' : '（对方发了一个媒体消息）';
+   696→   696→  }
+   697→   697→  if (!content) return false;
+   698→   698→  var isGroup = t === 'GROUP_AT_MESSAGE_CREATE';
+   699→   699→  if (isGroup) content = content.replace(/^<at[^>]*>[^<]*<\/at>\s*/, '').trim();
+   700→   700→  if (!content) return false;
+
+[showing lines 1-700 of 1438; use offset=701 with limit to continue reading]

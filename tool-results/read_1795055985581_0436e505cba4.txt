@@ -1,0 +1,822 @@
+     1→'use client';
+     2→
+     3→/**
+     4→ * 接入真机微信页（「我」› 接入真机微信）—— 微信官方 iLink Bot 通道（ilinkai.weixin.qq.com）UI · v4 简约版。
+     5→ *
+     6→ * v4（用户定调「提示词少一点、简约、要弹窗的弹窗、要收缩选择」）：
+     7→ *  - 长说明文字全部收进收缩区（Collapsible「接入说明」），页面主体只留操作；
+     8→ *  - 云端未部署警告压缩为一行，详情进弹窗（Dialog）；
+     9→ *  - 已连接的管理动作合并为一张 iOS 分组列表卡（测试连接 / 本机实时回复 / 拉取云端聊天记录 /
+    10→ *    更换角色（底部弹窗）/ 真机微信动态（收缩查看）/ 断开接入（AlertDialog 确认弹窗））；
+    11→ *  - 新增「拉取云端聊天记录」：云端代答的真机微信对话（测试云端/云端轮询跑过的）合进
+    12→ *    手机里与 TA 的微信聊天界面——打开本页时也会静默拉一次。
+    13→ * 通道调用、扫码轮询、长轮询收发与持久化全在 useWxConnect（weixin-connect.ts）；
+    14→ * 云端助手部署状态在 useWxCloud（wx-cloud/store）；本文件只做展示与动作接线。
+    15→ */
+    16→
+    17→import { useEffect, useMemo, useState } from 'react';
+    18→import {
+    19→  Bot,
+    20→  Check,
+    21→  ChevronDown,
+    22→  ChevronLeft,
+    23→  ChevronRight,
+    24→  Cloud,
+    25→  CloudOff,
+    26→  DownloadCloud,
+    27→  Info,
+    28→  Loader2,
+    29→  RefreshCw,
+    30→  X,
+    31→} from 'lucide-react';
+    32→import { useWxConnect, pullWxCloudHistory, type WxQrStatus } from '@/lib/ios/weixin-connect';
+    33→import { useWxCloud, PLATFORM_LABELS } from '@/lib/ios/wx-cloud/store';
+    34→import { getContact } from '@/lib/ios/contacts-store';
+    35→import { avatarFor, displayNameOf } from '@/lib/contacts';
+    36→import type { ContactRecord } from '@/lib/contacts';
+    37→import { Switch } from '@/components/ui/switch';
+    38→import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+    39→import {
+    40→  AlertDialog,
+    41→  AlertDialogAction,
+    42→  AlertDialogCancel,
+    43→  AlertDialogContent,
+    44→  AlertDialogDescription,
+    45→  AlertDialogFooter,
+    46→  AlertDialogHeader,
+    47→  AlertDialogTitle,
+    48→} from '@/components/ui/alert-dialog';
+    49→import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+    50→import { LocalToast, useLocalToast } from '../page-toast';
+    51→
+    52→import { WxAvatar } from './widgets';
+    53→
+    54→/** 扫码状态文案（v3：补 PIN / 换域 / 已绑别处三个新态；官方协议状态机见 weixin-connect.ts） */
+    55→const QR_STATUS_TEXT: Record<WxQrStatus, string> = {
+    56→  wait: '打开那个微信号 → 扫一扫',
+    57→  scaned: '已扫码，请在微信上点确认',
+    58→  confirmed: '扫码成功，正在接入…',
+    59→  expired: '二维码已过期，点重新获取',
+    60→  need_verifycode: '微信要求校验：看看手机微信上显示的数字，在下方输入',
+    61→  verify_code_blocked: '数字错太多次，正在自动换一张码…',
+    62→  binded_redirect: '这个微信号已连到其它环境，先在那边解绑',
+    63→};
+    64→
+    65→/** HH:MM（轮询检查时间 / 消息时间用） */
+    66→function fmtHm(t: number): string {
+    67→  const d = new Date(t);
+    68→  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+    69→}
+    70→
+    71→/** 角色选择列表（弹窗/底部弹层用）：头像左 + 名字右横排，选中行微信绿高亮——
+    72→ *  用户定调「不要头像名字上下，要头像名字左右的」 */
+    73→function RoleRowList({
+    74→  chars,
+    75→  selectedId,
+    76→  onPick,
+    77→  testidBase,
+    78→}: {
+    79→  chars: ContactRecord[];
+    80→  selectedId: string | null;
+    81→  onPick: (c: ContactRecord) => void;
+    82→  testidBase: string;
+    83→}) {
+    84→  if (chars.length === 0) {
+    85→    return <p className="py-4 text-center text-[13px] text-black/40 dark:text-white/40">还没有 AI 角色：先在「联系人」App 创建一个</p>;
+    86→  }
+    87→  return (
+    88→    <div className="mt-2 divide-y divide-black/[0.05] dark:divide-white/[0.06]">
+    89→      {chars.map((c) => {
+    90→        const name = displayNameOf(c) || c.name;
+    91→        const sel = selectedId === c.id;
+    92→        return (
+    93→          <button
+    94→            key={c.id}
+    95→            type="button"
+    96→            data-testid={`${testidBase}-${c.id}`}
+    97→            aria-label={`选择 ${name}`}
+    98→            onClick={() => onPick(c)}
+    99→            className={`flex w-full items-center gap-3 py-2.5 text-left transition-colors active:bg-black/[0.03] dark:active:bg-white/[0.06] ${sel ? 'bg-[#07C160]/[0.08]' : ''}`}
+   100→          >
+   101→            <WxAvatar src={avatarFor(c, 'wx')} alt={name} size={44} />
+   102→            <span className={`min-w-0 flex-1 truncate text-[15px] ${sel ? 'font-medium text-[#07C160]' : ''}`}>{name}</span>
+   103→            {sel ? <Check className="h-[18px] w-[18px] shrink-0 text-[#07C160]" strokeWidth={2.5} aria-hidden="true" /> : null}
+   104→          </button>
+   105→        );
+   106→      })}
+   107→    </div>
+   108→  );
+   109→}
+   110→
+   111→/** 收缩区块外壳（v4 简约版「收缩选择」）：一行触发头 + 展开内容 */
+   112→function Fold({
+   113→  title,
+   114→  hint,
+   115→  children,
+   116→  testid,
+   117→  defaultOpen = false,
+   118→}: {
+   119→  title: string;
+   120→  hint?: string;
+   121→  children: React.ReactNode;
+   122→  testid?: string;
+   123→  defaultOpen?: boolean;
+   124→}) {
+   125→  return (
+   126→    <Collapsible defaultOpen={defaultOpen} className="rounded-[10px] bg-white dark:bg-[#1A1A1A]">
+   127→      <CollapsibleTrigger
+   128→        data-testid={testid}
+   129→        className="group flex w-full items-center justify-between gap-3 px-4 py-3 text-left active:bg-black/[0.03] dark:active:bg-white/[0.05]"
+   130→      >
+   131→        <span className="min-w-0 flex-1 truncate text-[15px] font-medium">{title}</span>
+   132→        {hint ? <span className="shrink-0 truncate text-[12.5px] text-black/35 dark:text-white/35">{hint}</span> : null}
+   133→        <ChevronDown className="h-[18px] w-[18px] shrink-0 text-black/25 transition-transform duration-200 group-data-[state=open]:rotate-180 dark:text-white/25" strokeWidth={2} aria-hidden="true" />
+   134→      </CollapsibleTrigger>
+   135→      <CollapsibleContent className="px-4 pb-3.5">{children}</CollapsibleContent>
+   136→    </Collapsible>
+   137→  );
+   138→}
+   139→
+   140→export function WeixinConnectPage({ contacts, onBack }: { contacts: ContactRecord[]; onBack: () => void }) {
+   141→  // ---- store 逐项订阅（面板粒度刷新）----
+   142→  const ready = useWxConnect((s) => s.ready);
+   143→  const login = useWxConnect((s) => s.login);
+   144→  const qr = useWxConnect((s) => s.qr);
+   145→  const qrLoading = useWxConnect((s) => s.qrLoading);
+   146→  const testing = useWxConnect((s) => s.testing);
+   147→  const lastTest = useWxConnect((s) => s.lastTest);
+   148→  const autoReply = useWxConnect((s) => s.autoReply);
+   149→  const loopStatus = useWxConnect((s) => s.loopStatus);
+   150→  const loopError = useWxConnect((s) => s.loopError);
+   151→  const lastPollAt = useWxConnect((s) => s.lastPollAt);
+   152→  const msgs = useWxConnect((s) => s.msgs);
+   153→  const boot = useWxConnect((s) => s.boot);
+   154→  const startQr = useWxConnect((s) => s.startQr);
+   155→  const submitPin = useWxConnect((s) => s.submitPin);
+   156→  const cancelQr = useWxConnect((s) => s.cancelQr);
+   157→  const rebindContact = useWxConnect((s) => s.rebindContact);
+   158→  const disconnect = useWxConnect((s) => s.disconnect);
+   159→  const test = useWxConnect((s) => s.test);
+   160→  const setAutoReply = useWxConnect((s) => s.setAutoReply);
+   161→  const clearMsgs = useWxConnect((s) => s.clearMsgs);
+   162→
+   163→  // 云端助手部署状态（横幅用：none=未部署提示，其余平台绿色就绪小条；boot 前不渲染避免闪黄）
+   164→  const cloudReady = useWxCloud((s) => s.ready);
+   165→  const cloudPlatform = useWxCloud((s) => s.platform);
+   166→  // 接入/换绑/断开后的后台自动同步结果（非空 = 已部署过云端且刚自动重推过运行包）
+   167→  const lastAutoSync = useWxCloud((s) => s.lastAutoSync);
+   168→  // 「真部署过」证据：选了平台 ≠ 部署了（Supabase 要跑过一键部署、HF 要建过 Space、ClawCloud 要标过已部署）
+   169→  const cloudDeployed = useWxCloud((s) =>
+   170→    (s.platform === 'supabase' && !!s.supabase?.deployedAt) ||
+   171→    (s.platform === 'hf' && !!s.hf?.deployedAt) ||
+   172→    (s.platform === 'clawcloud' && !!s.clawcloudAt),
+   173→  );
+   174→
+   175→  // 页内 toast（本页在 App 根提前 return 的分支里，根部 toast 不渲染 → 自带）
+   176→  const [toast, showToast] = useLocalToast();
+   177→
+   178→  /** 角色候选（CHAR 联系人；头像/名字按微信槽位解析） */
+   179→  const chars = useMemo(() => contacts.filter((c) => c.kind === 'char'), [contacts]);
+   180→  /** 步骤一选中的角色（本地态；扫码确认后才写进 store） */
+   181→  const [picked, setPicked] = useState<ContactRecord | null>(null);
+   182→  /** 步骤一角色选择弹窗（点开底部弹层选人，弹窗里头像名字左右横排） */
+   183→  const [roleSheetOpen, setRoleSheetOpen] = useState(false);
+   184→  /** 获取二维码失败的错误文案（startQr 抛错时展示） */
+   185→  const [qrErr, setQrErr] = useState('');
+   186→  /** 换绑角色弹层 */
+   187→  const [rebindOpen, setRebindOpen] = useState(false);
+   188→  /** 断开确认弹窗（v4：AlertDialog 弹窗替代原内联二次确认卡） */
+   189→  const [offDialog, setOffDialog] = useState(false);
+   190→  const [offBusy, setOffBusy] = useState(false);
+   191→  /** PIN 输入框（need_verifycode 时显示；提交后清空） */
+   192→  const [pinInput, setPinInput] = useState('');
+   193→  /** 拉取云端聊天记录的结果行 */
+   194→  const [pullMsg, setPullMsg] = useState<{ ok: boolean; msg: string } | null>(null);
+   195→  const [pulling, setPulling] = useState(false);
+   196→
+   197→  // 打开页面即 boot：读密文凭证 / 消息日志 / 实时回复开关（已在别处 boot 过则幂等）；
+   198→  // 云端助手状态一并读取（横幅判断是否已部署，boot 幂等）
+   199→  useEffect(() => {
+   200→    void boot();
+   201→    void useWxCloud.getState().boot();
+   202→  }, [boot]);
+   203→
+   204→  // v4 已连接 + 云端已部署：打开本页静默拉一次云端聊天记录（云端代答的对话合进聊天界面）
+   205→  useEffect(() => {
+   206→    if (!ready || !login || !cloudDeployed) return;
+   207→    void pullWxCloudHistory().then(() => undefined);
+   208→  }, [ready, login, cloudDeployed]);
+   209→
+   210→  // binded_redirect（已绑其它环境）自动更新状态：解绑回来后页面自动换新码重试
+   211→  //（用户定调「让他可以自动更新状态」）；页面开着期间每 15 秒重取一次，手动「更新状态」按钮兑底
+   212→  useEffect(() => {
+   213→    if (qr?.status !== 'binded_redirect' || qrLoading || !picked) return;
+   214→    const t = window.setTimeout(() => {
+   215→      void startQr(picked.id, displayNameOf(picked) || picked.name);
+   216→    }, 15_000);
+   217→    return () => window.clearTimeout(t);
+   218→  }, [qr?.status, qr?.img, qrLoading, picked, startQr]);
+   219→
+   220→  // 绑定角色详情：异步取联系人（联系人被删时为 null；换绑/断开的过渡期派生值兜底为 null）
+   221→  const boundId = login?.boundContactId ?? null;
+   222→  const [bound, setBound] = useState<ContactRecord | null>(null);
+   223→  useEffect(() => {
+   224→    if (!boundId) return;
+   225→    let dead = false;
+   226→    void getContact(boundId)
+   227→      .then((c) => {
+   228→        if (!dead) setBound(c);
+   229→      })
+   230→      .catch(() => undefined);
+   231→    return () => {
+   232→      dead = true;
+   233→    };
+   234→  }, [boundId]);
+   235→  /** 当前绑定角色（异步取回前 / 已被删除时为 null，UI 用登录快照名兜底） */
+   236→  const boundRec = bound && bound.id === boundId ? bound : null;
+   237→  const boundName = boundRec ? displayNameOf(boundRec) || boundRec.name : login?.boundContactName ?? '';
+   238→  const boundAvatar = boundRec ? avatarFor(boundRec, 'wx') : null;
+   239→
+   240→  /** 获取 / 重新获取二维码（startQr 内部自动轮询扫码状态，confirmed 后切换到已连接视图） */
+   241→  const fetchQr = async () => {
+   242→    if (!picked || qrLoading) return;
+   243→    setQrErr('');
+   244→    try {
+   245→      await startQr(picked.id, displayNameOf(picked) || picked.name);
+   246→    } catch (e) {
+   247→      setQrErr(e instanceof Error ? e.message : String(e));
+   248→    }
+   249→  };
+   250→
+   251→  /** 换绑：选中即生效（不重新扫码，那个微信号即刻「变成」新角色），关弹层并 toast 反馈 */
+   252→  const onRebind = async (c: ContactRecord) => {
+   253→    setRebindOpen(false);
+   254→    const name = displayNameOf(c) || c.name;
+   255→    await rebindContact(c.id, name);
+   256→    showToast(`已切换为 ${name}`);
+   257→  };
+   258→
+   259→  const doDisconnect = async () => {
+   260→    setOffBusy(true);
+   261→    try {
+   262→      await disconnect();
+   263→    } finally {
+   264→      setOffBusy(false);
+   265→      setOffDialog(false);
+   266→      setPicked(null);
+   267→      setQrErr('');
+   268→      showToast('已断开真机微信接入');
+   269→    }
+   270→  };
+   271→
+   272→  /** 拉取云端聊天记录（精确文案版：复用函数返回的条数与失败原因） */
+   273→  const doPull = async () => {
+   274→    if (pulling) return;
+   275→    setPullMsg(null);
+   276→    setPulling(true);
+   277→    try {
+   278→      const r = await pullWxCloudHistory();
+   279→      setPullMsg({ ok: r.ok, msg: r.msg });
+   280→    } finally {
+   281→      setPulling(false);
+   282→    }
+   283→  };
+   284→
+   285→  /** 真机微信动态（倒序，最多 20 条） */
+   286→  const recent = useMemo(() => [...msgs].slice(-20).reverse(), [msgs]);
+   287→
+   288→  return (
+   289→    <div
+   290→      data-testid="wx-ilink-page"
+   291→      className="absolute inset-0 z-20 flex h-full w-full flex-col bg-[#EDEDED] text-black dark:bg-[#111111] dark:text-white"
+   292→    >
+   293→      {/* 顶栏（微信灰，同收藏/设置页） */}
+   294→      <div className="shrink-0 bg-[#EDEDED] pt-[54px] dark:bg-[#111111]">
+   295→        <div className="flex h-11 items-center px-2">
+   296→          <button type="button" aria-label="返回" data-testid="wx-ilink-back" onClick={onBack} className="flex items-center px-1 active:opacity-50">
+   297→            <ChevronLeft className="h-7 w-7" strokeWidth={2} />
+   298→          </button>
+   299→          <div className="flex flex-1 items-center justify-center pr-9">
+   300→            <span className="text-[17px] font-medium">接入真机微信</span>
+   301→          </div>
+   302→        </div>
+   303→      </div>
+   304→
+   305→      {!ready ? (
+   306→        /* boot 读取中（短暂）：居中转圈，避免已接入用户先看到未接入表单闪一下 */
+   307→        <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 text-black/35 dark:text-white/35">
+   308→          <Loader2 className="h-6 w-6 animate-spin" strokeWidth={2} />
+   309→          <p className="text-[13px]">正在读取接入状态…</p>
+   310→        </div>
+   311→      ) : login ? (
+   312→        /* ==================== 已连接 ==================== */
+   313→        <div className="min-h-0 flex-1 space-y-2 overflow-y-auto px-3 py-3 pb-10">
+   314→          {/* 云端未部署：一行提示 + 详情弹窗（v4 简约版；详情全在弹窗里） */}
+   315→          {cloudReady && !cloudDeployed ? (
+   316→            <div data-testid="wx-ilink-cloud-banner" className="flex items-center gap-2 rounded-[10px] bg-[#FFF6DC] px-3.5 py-2.5 dark:bg-[#40361A]">
+   317→              <CloudOff className="h-4 w-4 shrink-0 text-[#B77900] dark:text-[#EBC76A]" strokeWidth={2} />
+   318→              <p className="min-w-0 flex-1 text-[12.5px] leading-[1.4] text-[#8A6A00] dark:text-[#EBC76A]">
+   319→                云端未部署：TA 只在本机实时回复开着时回消息
+   320→              </p>
+   321→              <Dialog>
+   322→                <DialogTrigger asChild>
+   323→                  <button type="button" className="shrink-0 text-[12.5px] font-medium text-[#8A6A00] underline underline-offset-2 dark:text-[#EBC76A]">
+   324→                    详情
+   325→                  </button>
+   326→                </DialogTrigger>
+   327→                <DialogContent className="max-w-[300px] rounded-[16px]">
+   328→                  <DialogHeader>
+   329→                    <DialogTitle className="text-[16px]">云端未部署会怎样？</DialogTitle>
+   330→                  </DialogHeader>
+   331→                  <div className="space-y-2 text-[13px] leading-[1.6] text-black/70 dark:text-white/75">
+   332→                    <p>现在只有「本机实时回复」开着、页面开着时 TA 才回消息；页面一关就停。</p>
+   333→                    <p>
+   334→                      到 设置 → 云端助手 部署（Supabase 一键部署即可）后，TA 在真机微信上 7×24 在线自动回复。
+   335→                    </p>
+   336→                  </div>
+   337→                </DialogContent>
+   338→              </Dialog>
+   339→            </div>
+   340→          ) : null}
+   341→
+   342→          {/* 云端自动同步状态行：接入/换绑/断开后后台重推运行包的结果——只看微信渠道
+   343→              （QQ 渠道的同步提示只在 QQ 接入页展示，不再串页） */}
+   344→          {lastAutoSync?.channel === 'wx' ? (
+   345→            <p
+   346→              data-testid="wx-ilink-autosync"
+   347→              className={`flex items-start gap-1.5 rounded-[10px] px-3.5 py-2 text-[12px] leading-[1.5] ${
+   348→                lastAutoSync.ok ? 'bg-[#07C160]/[0.07] text-[#07C160]' : 'bg-[#FFF6DC] text-[#8A6A00] dark:bg-[#40361A] dark:text-[#EBC76A]'
+   349→              }`}
+   350→            >
+   351→              <Cloud className="mt-[2px] h-[13px] w-[13px] shrink-0" strokeWidth={2} aria-hidden="true" />
+   352→              <span className="min-w-0 break-words">
+   353→                {lastAutoSync.ok
+   354→                  ? `${lastAutoSync.msg}（${new Date(lastAutoSync.at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}）`
+   355→                  : lastAutoSync.msg}
+   356→              </span>
+   357→            </p>
+   358→          ) : null}
+   359→
+   360→          {/* 状态卡：绑定角色 + Bot ID + 连接时间（说明收进「说明」收缩区） */}
+   361→          <div className="rounded-[10px] bg-white px-4 py-4 dark:bg-[#1A1A1A]">
+   362→            <div className="flex items-center gap-3">
+   363→              <WxAvatar src={boundAvatar} alt={boundName} size={54} />
+   364→              <div className="min-w-0 flex-1">
+   365→                <div className="flex items-center gap-2">
+   366→                  <span className="truncate text-[17px] font-medium leading-tight">{boundName || '未知角色'}</span>
+   367→                  <span className="shrink-0 rounded-full bg-[#07C160]/12 px-2 py-[2px] text-[10.5px] font-medium text-[#07C160]">已接入</span>
+   368→                </div>
+   369→                <p className="mt-1 text-[12px] text-black/40 dark:text-white/40">
+   370→                  Bot ID：{login.botId.slice(0, 8)}
+   371→                  {login.botId.length > 8 ? '…' : ''}
+   372→                </p>
+   373→                <p className="mt-0.5 text-[12px] text-black/40 dark:text-white/40">连接于 {new Date(login.connectedAt).toLocaleString()}</p>
+   374→              </div>
+   375→            </div>
+   376→          </div>
+   377→
+   378→          {/* ===== 管理分组列表（v4 简约版：一张卡分行的 iOS 列表） ===== */}
+   379→          <div className="divide-y divide-black/[0.05] rounded-[10px] bg-white dark:divide-white/[0.08] dark:bg-[#1A1A1A]">
+   380→            {/* 测试连接 */}
+   381→            <div className="flex items-center justify-between gap-3 px-4 py-3">
+   382→              <span className="text-[15.5px] font-medium">测试连接</span>
+   383→              <button
+   384→                type="button"
+   385→                data-testid="wx-ilink-test"
+   386→                disabled={testing}
+   387→                onClick={() => void test()}
+   388→                className="flex h-[34px] shrink-0 items-center gap-1.5 rounded-full bg-[#07C160] px-4 text-[13px] font-medium text-white active:brightness-95 disabled:opacity-60"
+   389→              >
+   390→                {testing ? <Loader2 className="h-4 w-4 animate-spin" strokeWidth={2} /> : null}
+   391→                {testing ? '测试中…' : '测试'}
+   392→              </button>
+   393→            </div>
+   394→            {lastTest && (
+   395→              <p className={`px-4 pb-3 pt-0 text-[12.5px] leading-[1.45] ${lastTest.ok ? 'text-[#07C160]' : 'text-[#FA5151]'}`}>{lastTest.msg}</p>
+   396→            )}
+   397→
+   398→            {/* 本机实时回复开关 */}
+   399→            <div className="flex items-center justify-between gap-3 px-4 py-3">
+   400→              <div className="min-w-0">
+   401→                <span className="block text-[15.5px] font-medium">本机实时回复</span>
+   402→                <p className="mt-0.5 text-[12px] leading-[1.4] text-black/40 dark:text-white/40">页面开着时立即收发；关闭后云端接管</p>
+   403→              </div>
+   404→              <Switch checked={autoReply} onCheckedChange={setAutoReply} data-testid="wx-ilink-auto" aria-label="本机实时回复" />
+   405→            </div>
+   406→            {(loopStatus === 'running' || loopStatus === 'error') && (
+   407→              <p className={`px-4 pb-2.5 text-[12px] ${loopStatus === 'running' ? 'text-[#07C160]' : 'text-[#FA5151]'}`}>
+   408→                {loopStatus === 'running' ? (
+   409→                  <>
+   410→                    <span className="mr-1 inline-block h-[6px] w-[6px] animate-pulse rounded-full bg-[#07C160]" aria-hidden="true" />
+   411→                    轮询中{lastPollAt ? ` · 上次检查 ${fmtHm(lastPollAt)}` : ''}
+   412→                  </>
+   413→                ) : (
+   414→                  loopError || '轮询异常'
+   415→                )}
+   416→              </p>
+   417→            )}
+   418→
+   419→            {/* 拉取云端聊天记录（v4 新增：云端代答的对话合进手机聊天界面） */}
+   420→            <button
+   421→              type="button"
+   422→              data-testid="wx-ilink-pull"
+   423→              disabled={pulling}
+   424→              onClick={() => void doPull()}
+   425→              className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left active:bg-black/[0.03] disabled:opacity-60 dark:active:bg-white/[0.05]"
+   426→            >
+   427→              <span className="min-w-0 flex-1 text-[15.5px] font-medium">拉取云端聊天记录</span>
+   428→              {pulling ? (
+   429→                <Loader2 className="h-[17px] w-[17px] shrink-0 animate-spin text-[#07C160]" strokeWidth={2.2} aria-hidden="true" />
+   430→              ) : (
+   431→                <DownloadCloud className="h-[17px] w-[17px] shrink-0 text-black/25 dark:text-white/25" strokeWidth={2} aria-hidden="true" />
+   432→              )}
+   433→            </button>
+   434→            {pullMsg && (
+   435→              <p className={`px-4 pb-3 pt-0 text-[12.5px] leading-[1.45] ${pullMsg.ok ? 'text-[#07C160]' : 'text-[#FA5151]'}`} data-testid="wx-ilink-pull-result">
+   436→                {pullMsg.msg}
+   437→              </p>
+   438→            )}
+   439→
+   440→            {/* 更换角色：行入口 → 底部弹层选人（选中即 rebind，无需重新扫码） */}
+   441→            <button
+   442→              type="button"
+   443→              onClick={() => setRebindOpen(true)}
+   444→              className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left active:bg-black/[0.03] dark:active:bg-white/[0.05]"
+   445→            >
+   446→              <span className="text-[15.5px] font-medium">更换角色</span>
+   447→              <span className="flex min-w-0 items-center gap-1">
+   448→                <span className="max-w-[140px] truncate text-[13px] text-black/40 dark:text-white/40">{boundName}</span>
+   449→                <ChevronRight className="h-[18px] w-[18px] shrink-0 text-black/25 dark:text-white/25" strokeWidth={2} aria-hidden="true" />
+   450→              </span>
+   451→            </button>
+   452→
+   453→            {/* 断开接入 → AlertDialog 确认弹窗（v4 弹窗化） */}
+   454→            <button
+   455→              type="button"
+   456→              data-testid="wx-ilink-disconnect"
+   457→              onClick={() => setOffDialog(true)}
+   458→              className="flex w-full items-center justify-center gap-3 px-4 py-3 text-center text-[15.5px] font-medium text-[#FA5151] active:bg-black/[0.03] dark:active:bg-white/[0.05]"
+   459→            >
+   460→              断开接入
+   461→            </button>
+   462→          </div>
+   463→
+   464→          {/* 真机微信动态：收缩查看（v4 收缩选择） */}
+   465→          <Fold title="真机微信动态" hint={msgs.length ? `${msgs.length} 条` : '空'} testid="wx-ilink-msgs-fold">
+   466→            <div data-testid="wx-ilink-msgs">
+   467→              <div className="flex items-center justify-between">
+   468→                <p className="text-[11.5px] leading-[1.5] text-black/35 dark:text-white/35">运行日志；完整聊天记录在微信聊天界面里</p>
+   469→                {msgs.length > 0 && (
+   470→                  <button type="button" onClick={clearMsgs} className="text-[12.5px] text-[#576B95] active:opacity-60">
+   471→                    清空
+   472→                  </button>
+   473→                )}
+   474→              </div>
+   475→              {recent.length === 0 ? (
+   476→                <p className="py-5 text-center text-[13px] text-black/35 dark:text-white/35">还没有收到真机微信消息</p>
+   477→              ) : (
+   478→                <div className="mt-1 divide-y divide-black/[0.05] dark:divide-white/[0.08]">
+   479→                  {recent.map((m) => (
+   480→                    <div key={m.id} className="py-2.5">
+   481→                      <div className="flex items-baseline justify-between gap-2">
+   482→                        <span className="shrink-0 text-[12px] font-medium text-black/50 dark:text-white/50">{m.fromUserId.slice(0, 6)}…</span>
+   483→                        <span className="text-[11px] text-black/30 dark:text-white/30">{fmtHm(m.ts)}</span>
+   484→                      </div>
+   485→                      <p className="mt-1 whitespace-pre-wrap break-words text-[13.5px] leading-[1.45]">{m.text}</p>
+   486→                      {m.replyErr ? (
+   487→                        <p className="mt-1 whitespace-pre-wrap break-words text-[12.5px] leading-[1.45] text-[#FA5151]">回复失败：{m.replyErr}</p>
+   488→                      ) : m.reply ? (
+   489→                        <p className="mt-1 whitespace-pre-wrap break-words text-[12.5px] leading-[1.45] text-black/50 dark:text-white/50">已回复：{m.reply}</p>
+   490→                      ) : null}
+   491→                    </div>
+   492→                  ))}
+   493→                </div>
+   494→              )}
+   495→            </div>
+   496→          </Fold>
+   497→
+   498→          {/* 说明收缩区（v5 精简：提示收敛为两行） */}
+   499→          <Fold title="说明" testid="wx-ilink-help-fold">
+   500→            <div className="space-y-2 text-[12.5px] leading-[1.55] text-black/55 dark:text-white/55">
+   501→              <p>TA 的真机微信聊天会同步到手机里的微信聊天界面；官方 iLink 通道，合法、零封号风险。</p>
+   502→              <p>断开后 Token 即废弃，重新接入再扫一次码即可。</p>
+   503→            </div>
+   504→          </Fold>
+   505→        </div>
+   506→      ) : (
+   507→        /* ==================== 未连接 ==================== */
+   508→        <div className="min-h-0 flex-1 space-y-2 overflow-y-auto px-3 py-3 pb-10">
+   509→          {/* 云端就绪横幅：已部署绿色小条（未部署的阻断卡在说明卡之后，取代步骤一/二） */}
+   510→          {cloudReady && cloudDeployed ? (
+   511→            <div
+   512→              data-testid="wx-ilink-cloud-banner"
+   513→              className="flex items-center gap-2 rounded-[10px] bg-[#07C160]/[0.08] px-3.5 py-2.5 dark:bg-[#07C160]/[0.14]"
+   514→            >
+   515→              <Cloud className="h-[15px] w-[15px] shrink-0 text-[#07C160]" strokeWidth={2} />
+   516→              <p className="text-[12.5px] font-medium leading-[1.4] text-[#07C160]">
+   517→                云端已就绪（{PLATFORM_LABELS[cloudPlatform]}），TA 7×24 在线
+   518→              </p>
+   519→            </div>
+   520→          ) : null}
+   521→
+   522→          {/* 说明卡（v4 简约版：一句话 + 收缩展开完整接入说明） */}
+   523→          <div className="rounded-[10px] bg-white px-4 py-3.5 dark:bg-[#1A1A1A]">
+   524→            <div className="flex items-center gap-2">
+   525→              <Bot className="h-[18px] w-[18px] text-[#07C160]" strokeWidth={2} />
+   526→              <span className="text-[15px] font-semibold">把 TA 带到你的真机微信上</span>
+   527→            </div>
+   528→            <p className="mt-1.5 text-[13px] leading-[1.5] text-black/55 dark:text-white/55">
+   529→              用一个微信号扫下方二维码，TA 就「住进」那个号里——再用你常用的微信加 TA 为好友直接聊。
+   530→            </p>
+   531→            <div className="mt-2">
+   532→              <Collapsible defaultOpen={false}>
+   533→                <CollapsibleTrigger
+   534→                  data-testid="wx-ilink-help-fold"
+   535→                  className="group flex items-center gap-1 text-[12.5px] font-medium text-[#07C160] active:opacity-60"
+   536→                >
+   537→                  <Info className="h-[14px] w-[14px]" strokeWidth={2} aria-hidden="true" />
+   538→                  展开接入说明
+   539→                  <ChevronDown className="h-[14px] w-[14px] transition-transform duration-200 group-data-[state=open]:rotate-180" strokeWidth={2} aria-hidden="true" />
+   540→                </CollapsibleTrigger>
+   541→                <CollapsibleContent>
+   542→                  <div className="mt-2 space-y-2 text-[12px] leading-[1.55] text-black/45 dark:text-white/45">
+   543→                    <p>拿一个微信号（建议小号）扫二维码，这个微信号就会变成你选的角色；用你常用的微信加 TA 为好友直接聊。</p>
+   544→                    <p>官方 iLink 通道，合法、零封号风险；Token 过期后回本页重新扫码。</p>
+   545→                  </div>
+   546→                </CollapsibleContent>
+   547→              </Collapsible>
+   548→            </div>
+   549→          </div>
+   550→
+   551→          {cloudReady && !cloudDeployed ? (
+   552→            /* ===== 未部署云端 → 阻断接入（一行 + 详情弹窗） ===== */
+   553→            <div
+   554→              data-testid="wx-ilink-cloud-block"
+   555→              className="flex items-center gap-2 rounded-[10px] bg-[#FFF6DC] px-3.5 py-3 dark:bg-[#40361A]"
+   556→              role="alert"
+   557→            >
+   558→              <CloudOff className="h-[18px] w-[18px] shrink-0 text-[#B77900] dark:text-[#EBC76A]" strokeWidth={2} />
+   559→              <p className="min-w-0 flex-1 text-[13.5px] font-medium leading-snug text-[#8A6A00] dark:text-[#EBC76A]">
+   560→                先部署云端助手，才能接入真机微信
+   561→              </p>
+   562→              <Dialog>
+   563→                <DialogTrigger asChild>
+   564→                  <button type="button" className="shrink-0 text-[12.5px] font-medium text-[#8A6A00] underline underline-offset-2 dark:text-[#EBC76A]">
+   565→                    详情
+   566→                  </button>
+   567→                </DialogTrigger>
+   568→                <DialogContent className="max-w-[300px] rounded-[16px]">
+   569→                  <DialogHeader>
+   570→                    <DialogTitle className="text-[16px]">为什么要先部署云端？</DialogTitle>
+   571→                  </DialogHeader>
+   572→                  <div className="space-y-2 text-[13px] leading-[1.6] text-black/70 dark:text-white/75">
+   573→                    <p>TA 在真机微信上的消息收发由云端 7×24 接管，未部署云端时无法接入。</p>
+   574→                    <p>路径：设置 → 云端助手（Supabase 一键部署即可），部署完回来选角色、扫码接入。</p>
+   575→                  </div>
+   576→                </DialogContent>
+   577→              </Dialog>
+   578→            </div>
+   579→          ) : (
+   580→            <>
+   581→              {/* 步骤一：选择角色（点开底部弹层选人；弹窗里头像名字左右横排，扫码后那个微信号就「变成」TA） */}
+   582→              <button
+   583→                type="button"
+   584→                data-testid="wx-ilink-role-entry"
+   585→                onClick={() => setRoleSheetOpen(true)}
+   586→                className="flex w-full items-center justify-between gap-3 rounded-[10px] bg-white px-4 py-3.5 text-left active:bg-black/[0.03] dark:bg-[#1A1A1A] dark:active:bg-white/[0.05]"
+   587→              >
+   588→                <span className="min-w-0 flex-1">
+   589→                  <span className="block text-[15.5px] font-medium">步骤一 · 选择角色</span>
+   590→                  <span className="mt-0.5 block text-[12px] text-black/40 dark:text-white/40">
+   591→                    {picked ? `已选：${displayNameOf(picked) || picked.name}` : '选一个角色，扫码后那个微信号就「变成」TA'}
+   592→                  </span>
+   593→                </span>
+   594→                <ChevronRight className="h-[18px] w-[18px] shrink-0 text-black/25 dark:text-white/25" strokeWidth={2} aria-hidden="true" />
+   595→              </button>
+   596→
+   597→              {/* 步骤二：用微信号扫码接入 */}
+   598→              <div className="rounded-[10px] bg-white px-4 py-3.5 dark:bg-[#1A1A1A]">
+   599→                <p className="text-[12.5px] font-semibold text-black/40 dark:text-white/40">步骤二 · 用微信号扫码</p>
+   600→                {!picked ? (
+   601→                  <p className="mt-2 text-[13px] text-black/40 dark:text-white/40">先选一个角色，再获取二维码</p>
+   602→                ) : !qr ? (
+   603→                  <div className="mt-3">
+   604→                    <button
+   605→                      type="button"
+   606→                      data-testid="wx-ilink-qr-btn"
+   607→                      disabled={qrLoading}
+   608→                      onClick={() => void fetchQr()}
+   609→                      className="flex h-[42px] w-full items-center justify-center gap-2 rounded-[10px] bg-[#07C160] text-[15px] font-medium text-white active:brightness-95 disabled:opacity-60"
+   610→                    >
+   611→                      {qrLoading ? <Loader2 className="h-[18px] w-[18px] animate-spin" strokeWidth={2} /> : null}
+   612→                      {qrLoading ? '正在获取二维码…' : `获取二维码（${displayNameOf(picked) || picked.name}）`}
+   613→                    </button>
+   614→                    {qrErr && <p className="mt-2 text-[12.5px] leading-[1.45] text-[#FA5151]">{qrErr}</p>}
+   615→                  </div>
+   616→                ) : (
+   617→                  <div className="mt-3 flex flex-col items-center">
+   618→                    <img
+   619→                      data-testid="wx-ilink-qr-img"
+   620→                      src={qr.img}
+   621→                      alt="接入二维码"
+   622→                      className={`h-[200px] w-[200px] rounded-[10px] bg-white p-1.5 ${
+   623→                        qr.status === 'expired' || qr.status === 'binded_redirect' ? 'opacity-35' : ''
+   624→                      }`}
+   625→                    />
+   626→                    <p
+   627→                      data-testid="wx-ilink-qr-status"
+   628→                      className={`mt-3 text-[13.5px] ${
+   629→                        qr.status === 'expired' || qr.status === 'binded_redirect'
+   630→                          ? 'text-[#FA5151]'
+   631→                          : qr.status === 'need_verifycode'
+   632→                            ? 'text-[#B77900]'
+   633→                            : 'text-black/55 dark:text-white/55'
+   634→                      }`}
+   635→                    >
+   636→                      {QR_STATUS_TEXT[qr.status]}
+   637→                    </p>
+   638→                    {/* 已绑别处等终态的引导（qr.hint 由协议状态机带回） */}
+   639→                    {qr.hint ? (
+   640→                      <p className="mt-1.5 max-w-[300px] text-center text-[12px] leading-[1.5] text-black/45 dark:text-white/45">
+   641→                        {qr.hint}
+   642→                      </p>
+   643→                    ) : null}
+   644→                    {/* 微信 PIN 校验：手机上显示数字 → 本页输入 → 下一轮轮询带 verify_code */}
+   645→                    {qr.status === 'need_verifycode' ? (
+   646→                      <div className="mt-2.5 flex w-full items-center gap-2" data-testid="wx-ilink-pin">
+   647→                        <input
+   648→                          inputMode="numeric"
+   649→                          autoComplete="one-time-code"
+   650→                          maxLength={8}
+   651→                          value={pinInput}
+   652→                          onChange={(e) => setPinInput(e.target.value.replace(/\D/g, '').slice(0, 8))}
+   653→                          placeholder="输入微信上显示的数字"
+   654→                          aria-label="微信校验数字"
+   655→                          className="h-[40px] min-w-0 flex-1 rounded-[10px] bg-black/[0.04] px-3 text-center text-[16px] tracking-[0.2em] outline-none focus:bg-black/[0.06] dark:bg-white/[0.08] dark:focus:bg-white/[0.12]"
+   656→                        />
+   657→                        <button
+   658→                          type="button"
+   659→                          disabled={!pinInput.trim()}
+   660→                          onClick={() => {
+   661→                            submitPin(pinInput.trim());
+   662→                            setPinInput('');
+   663→                          }}
+   664→                          className="h-[40px] shrink-0 rounded-full bg-[#07C160] px-4 text-[13.5px] font-medium text-white active:brightness-95 disabled:opacity-50"
+   665→                        >
+   666→                          继续
+   667→                        </button>
+   668→                      </div>
+   669→                    ) : null}
+   670→                    {/* PIN 输错提示（输错码时协议状态机带回 pinErr） */}
+   671→                    {qr.pinErr ? (
+   672→                      <p className="mt-1.5 text-[12px] text-[#FA5151]" role="alert">
+   673→                        {qr.pinErr}
+   674→                      </p>
+   675→                    ) : null}
+   676→                    {/* 已绑别处：解绑后自动/手动更新状态（用户定调：自动更新 + 手动按钮兑底） */}
+   677→                    {qr.status === 'binded_redirect' && (
+   678→                      <div className="mt-3 flex w-full flex-col items-center" data-testid="wx-ilink-bind-redirect">
+   679→                        <p className="text-[12px] leading-relaxed text-black/45 dark:text-white/45">已在那边解绑？页面会自动更新，或点下方按钮立即更新</p>
+   680→                        <button
+   681→                          type="button"
+   682→                          data-testid="wx-ilink-status-refresh"
+   683→                          disabled={qrLoading}
+   684→                          onClick={() => void fetchQr()}
+   685→                          className="mt-2 flex h-[38px] items-center justify-center gap-1.5 rounded-full bg-[#07C160] px-5 text-[13.5px] font-medium text-white active:brightness-95 disabled:opacity-60"
+   686→                        >
+   687→                          {qrLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" strokeWidth={2} aria-hidden="true" /> : <RefreshCw className="h-3.5 w-3.5" strokeWidth={2} aria-hidden="true" />}
+   688→                          更新状态
+   689→                        </button>
+   690→                      </div>
+   691→                    )}
+   692→                    {/* 更新二维码：随时换一张新码（扫不出来 / 想重扫时用） */}
+   693→                    {(qr.status === 'wait' || qr.status === 'scaned' || qr.status === 'need_verifycode') && (
+   694→                      <button
+   695→                        type="button"
+   696→                        data-testid="wx-ilink-qr-refresh"
+   697→                        disabled={qrLoading}
+   698→                        onClick={() => void fetchQr()}
+   699→                        className="mt-2.5 flex h-[34px] items-center justify-center gap-1.5 rounded-full bg-black/[0.05] px-4 text-[12.5px] font-medium text-black/60 active:opacity-70 disabled:opacity-60 dark:bg-white/[0.08] dark:text-white/60"
+   700→                      >
+   701→                        <RefreshCw className="h-3.5 w-3.5" strokeWidth={2} aria-hidden="true" />
+   702→                        更新二维码
+   703→                      </button>
+   704→                    )}
+   705→                    {qr.status === 'expired' && (
+   706→                      <button
+   707→                        type="button"
+   708→                        disabled={qrLoading}
+   709→                        onClick={() => void fetchQr()}
+   710→                        className="mt-2.5 flex h-[34px] items-center gap-1.5 rounded-full bg-[#07C160] px-4 text-[13px] font-medium text-white active:brightness-95 disabled:opacity-60"
+   711→                      >
+   712→                        <RefreshCw className="h-3.5 w-3.5" strokeWidth={2} />
+   713→                        重新获取
+   714→                      </button>
+   715→                    )}
+   716→                    {(qr.status === 'wait' || qr.status === 'scaned' || qr.status === 'need_verifycode') && (
+   717→                      <button type="button" onClick={cancelQr} className="mt-2.5 text-[12.5px] text-black/40 active:opacity-60 dark:text-white/40">
+   718→                        取消
+   719→                      </button>
+   720→                    )}
+   721→                  </div>
+   722→                )}
+   723→              </div>
+   724→            </>
+   725→          )}
+   726→        </div>
+   727→      )}
+   728→
+   729→      {/* 步骤一 · 选择角色弹窗（底部半屏：头像+名字左右横排；点选即返回步骤二） */}
+   730→      {roleSheetOpen && !login && (
+   731→        <div
+   732→          role="dialog"
+   733→          aria-label="步骤一 · 选择角色"
+   734→          className="absolute inset-0 z-30 flex flex-col justify-end bg-black/40"
+   735→          onClick={() => setRoleSheetOpen(false)}
+   736→        >
+   737→          <div className="max-h-[72%] overflow-y-auto rounded-t-[14px] bg-[#F7F7F7] px-4 pb-8 pt-4 dark:bg-[#1A1A1A]" onClick={(e) => e.stopPropagation()}>
+   738→            <div className="flex items-center justify-between">
+   739→              <span className="text-[16px] font-medium">步骤一 · 选择角色</span>
+   740→              <button
+   741→                type="button"
+   742→                aria-label="关闭"
+   743→                onClick={() => setRoleSheetOpen(false)}
+   744→                className="rounded-full p-1 text-black/40 active:bg-black/5 dark:text-white/40 dark:active:bg-white/10"
+   745→              >
+   746→                <X className="h-5 w-5" strokeWidth={2} />
+   747→              </button>
+   748→            </div>
+   749→            <p className="mt-1 text-[12px] text-black/40 dark:text-white/40">选一个角色，扫码后那个微信号就「变成」TA</p>
+   750→            <RoleRowList
+   751→              chars={chars}
+   752→              selectedId={picked?.id ?? null}
+   753→              onPick={(c) => {
+   754→                setPicked(c);
+   755→                setRoleSheetOpen(false);
+   756→              }}
+   757→              testidBase="wx-ilink-contact"
+   758→            />
+   759→          </div>
+   760→        </div>
+   761→      )}
+   762→
+   763→      {/* 换绑角色弹层（底部半屏：同款左右横排列表，选中即生效） */}
+   764→      {rebindOpen && login && (
+   765→        <div
+   766→          role="dialog"
+   767→          aria-label="更换角色"
+   768→          className="absolute inset-0 z-30 flex flex-col justify-end bg-black/40"
+   769→          onClick={() => setRebindOpen(false)}
+   770→        >
+   771→          <div className="max-h-[72%] overflow-y-auto rounded-t-[14px] bg-[#F7F7F7] px-4 pb-8 pt-4 dark:bg-[#1A1A1A]" onClick={(e) => e.stopPropagation()}>
+   772→            <div className="flex items-center justify-between">
+   773→              <span className="text-[16px] font-medium">更换角色</span>
+   774→              <button
+   775→                type="button"
+   776→                aria-label="关闭"
+   777→                onClick={() => setRebindOpen(false)}
+   778→                className="text-black/40 active:opacity-60 dark:text-white/40"
+   779→              >
+   780→                <X className="h-5 w-5" strokeWidth={2} />
+   781→              </button>
+   782→            </div>
+   783→            <p className="mt-1 text-[12px] text-black/40 dark:text-white/40">选中即生效，无需重新扫码</p>
+   784→            <RoleRowList chars={chars} selectedId={login.boundContactId} onPick={(c) => void onRebind(c)} testidBase="wx-ilink-contact" />
+   785→          </div>
+   786→        </div>
+   787→      )}
+   788→
+   789→      {/* 断开确认弹窗（v4：AlertDialog 弹窗替代内联二次确认卡） */}
+   790→      <AlertDialog open={offDialog} onOpenChange={setOffDialog}>
+   791→        <AlertDialogContent className="max-w-[300px] rounded-[16px]">
+   792→          <AlertDialogHeader>
+   793→            <AlertDialogTitle className="text-[16px]">断开真机微信接入？</AlertDialogTitle>
+   794→            <AlertDialogDescription className="text-[13px] leading-[1.6]">
+   795→              断开后那个微信号不再是 TA，微信侧 Token 即废弃；重新接入再扫一次码即可。
+   796→            </AlertDialogDescription>
+   797→          </AlertDialogHeader>
+   798→          <AlertDialogFooter className="flex-row gap-2.5">
+   799→            <AlertDialogCancel className="mt-0 h-11 flex-1 rounded-[10px] bg-black/[0.05] text-[15px] dark:bg-white/[0.08]">
+   800→              取消
+   801→            </AlertDialogCancel>
+   802→            <AlertDialogAction
+   803→              data-testid="wx-ilink-disconnect-confirm"
+   804→              disabled={offBusy}
+   805→              onClick={(e) => {
+   806→                e.preventDefault();
+   807→                void doDisconnect();
+   808→              }}
+   809→              className="h-11 flex-1 rounded-[10px] bg-[#FA5151] text-[15px] font-medium text-white hover:bg-[#FA5151] disabled:opacity-60"
+   810→            >
+   811→              {offBusy ? '断开中…' : '确认断开'}
+   812→            </AlertDialogAction>
+   813→          </AlertDialogFooter>
+   814→        </AlertDialogContent>
+   815→      </AlertDialog>
+   816→
+   817→      {/* 页内 toast（换绑/断开等操作反馈） */}
+   818→      <LocalToast msg={toast} />
+   819→    </div>
+   820→  );
+   821→}
+   822→

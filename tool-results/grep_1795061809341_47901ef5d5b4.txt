@@ -1,0 +1,252 @@
+/home/z/my-project/src/components/ios/TogetherInviteLayer.tsx:8: *   歌名 +「邀请你一起听」、底部灰色 ✕（拒绝）与红色 ✓（接受）；
+/home/z/my-project/src/components/ios/TogetherInviteLayer.tsx:13: *   拒绝 → declineTogetherInvite（写记忆 + 冷却）；45s 无响应自动收回（同网易云超时语义）。
+/home/z/my-project/src/components/ios/TogetherInviteLayer.tsx:68:      {/* 半透明遮罩（可点 = 拒绝，同网易云点空白关卡片） */}
+/home/z/my-project/src/components/ios/TogetherInviteLayer.tsx:120:        {/* 接受 / 拒绝 */}
+/home/z/my-project/src/components/ios/TogetherInviteLayer.tsx:124:            aria-label="拒绝"
+/home/z/my-project/src/components/ios/NotifyPermissionCard.tsx:88:    // 授权结果短暂展示后收起（拒绝也不打断聊天：应用内灵动岛弹窗照常）
+/home/z/my-project/src/components/ios/NotifyPermissionCard.tsx:137:            // iframe 里授权必被浏览器静默拒绝：不给「开启通知」假按钮，只留「知道了」收起
+/home/z/my-project/src/components/ios/IncomingCallLayer.tsx:15: *   · 弹窗上的接听/拒绝/忽略按钮直接操作、不跳界面：电话走来电快照回调；微信经全局通话引擎
+/home/z/my-project/src/components/ios/IncomingCallLayer.tsx:20: *   头像/名字/「语音通话邀请…」+ 信息/提醒我 + 拒绝/接听大圆钮；
+/home/z/my-project/src/components/ios/IncomingCallLayer.tsx:116:  // 视频邀请（Task 23）大窗常驻——「底部按钮一直显示」，直至接听/拒绝/超时（对照用户截图要求）
+/home/z/my-project/src/components/ios/IncomingCallLayer.tsx:212:  /** 拒绝：电话走快照回调（落未接记录+留言）；微信/QQ 代理到页内引擎 reject
+/home/z/my-project/src/components/ios/IncomingCallLayer.tsx:213:   *  （QQ 拒接经引擎 onEnd 落「已拒绝」通话卡片，与响铃超时未接同口径）。
+/home/z/my-project/src/components/ios/IncomingCallLayer.tsx:280:                <CircleBtn tone="red" onClick={decline} label="拒绝" />
+/home/z/my-project/src/components/ios/IncomingCallLayer.tsx:293:              <CircleBtn tone="red" onClick={decline} label="拒绝" testId="incoming-pill-reject" />
+/home/z/my-project/src/components/ios/IncomingCallLayer.tsx:437:      {/* 底部操作区：信息/提醒我 + 拒绝/接听 */}
+/home/z/my-project/src/components/ios/IncomingCallLayer.tsx:454:            label="拒绝"
+/home/z/my-project/src/components/ios/IncomingCallLayer.tsx:474:/** 来电界面圆形操作钮（信息/提醒我 = 64px 半透明；拒绝/接听 = 76px 红/绿） */
+/home/z/my-project/src/components/apps/voice-input.tsx:423:          // 启动失败（权限拒绝 / 构造或启动录音器异常）：释放可能已取得的媒体流与录音器，避免麦克风占用泄漏
+/home/z/my-project/src/components/apps/voice-input.tsx:451:    // getUserMedia 在 Android 权限未授予时被静默拒绝（永不弹框），与语音唤起同款修复
+/home/z/my-project/src/components/ios/GlobalCallLayer.tsx:153:          // QQ 来电「消息回复」：通话页已先 call.reject()（拒接 +「已拒绝」卡片落盘），
+/home/z/my-project/src/components/apps/qq.tsx:309:  // 拒绝/先回复不改变好友标记，刷新无副作用
+/home/z/my-project/src/components/ios/HomeScreen.tsx:101: *   App 不落到页点/Dock 下方的可视区外），超员拒绝落入；
+/home/z/my-project/src/components/ios/PhoneShell.tsx:736:            {/* AI 邀请一起听全局卡（仿网易云邀请弹窗：双头像+耳机线+歌名，✕/✓ 接受拒绝；
+/home/z/my-project/src/components/apps/couple-rel-bubble.tsx:8: * - 邀请卡 pending 且对方发来 → 底部「拒绝 / 接受邀请」双按钮（仿群聊邀请卡交互）
+/home/z/my-project/src/components/apps/couple-rel-bubble.tsx:9: * - 我发的邀请卡 pending → 「等待对方接受」状态行；终态显示「已同意 / 已拒绝」
+/home/z/my-project/src/components/apps/couple-rel-bubble.tsx:61:    else if (declined) footer = '已拒绝';
+/home/z/my-project/src/components/apps/couple-rel-bubble.tsx:99:            拒绝
+/home/z/my-project/src/components/apps/qq-group.tsx:2590:      // 群社交动作（[邀请:名字] / [设管理员:名字]）：关系/冷却/拒绝表/权限在 group-social 执行器硬校验
+/home/z/my-project/src/components/apps/qq-group.tsx:2804:        // 是否使用、分寸如何完全由人设决定；普通成员注入「无权限」说明（被要求执行时如实拒绝不假装成功）
+/home/z/my-project/src/components/apps/qq-group.tsx:2811:        // 邀请能力（需求三）：群主/管理员可拉人进群（可拉名单=有关系 NPC/该 App 好友，冷却/拒绝表硬校验）；
+/home/z/my-project/src/components/apps/agent-voice-ball.tsx:29: *   喊唤醒名/点球都能唤起；真任务仍被原生闸拒绝并原样说明）+ 已解锁 +
+/home/z/my-project/src/components/apps/agent-voice-ball.tsx:415:   *  被能力闸/防重入拒绝（闸全部同步判定，promise 秒回）→ 重开会话把原因作为助手回复展示。
+/home/z/my-project/src/components/apps/agent-voice-ball.tsx:443:        // 闸拒绝会在同一微任务链里返回；250ms 内有结果即视为被拒（真任务不可能秒完成）
+/home/z/my-project/src/components/apps/agent-voice-ball.tsx:450:          // 任务真正跑起来了：标记「语音唤起来源」。（能力闸/防重入拒绝不会走到
+/home/z/my-project/src/components/apps/chat.tsx:235:  /** 申请解除拉黑卡片：40-a 起双向——from 缺省视为 'char'（角色发起，用户点同意/拒绝）；
+/home/z/my-project/src/components/apps/chat.tsx:236:   *  from='user'（用户发起，角色用 [同意/拒绝解除拉黑] 标记决策） */
+/home/z/my-project/src/components/apps/chat.tsx:246:/** 申请解除拉黑卡片：from='char' 角色发起（用户点同意/拒绝）；from='user' 用户发起（角色 AI 决策，仅展示状态） */
+/home/z/my-project/src/components/apps/chat.tsx:288:          {status === 'pending' ? '等待对方处理' : status === 'accepted' ? '对方已同意，拉黑已解除' : '对方已拒绝'}
+/home/z/my-project/src/components/apps/chat.tsx:295:            aria-label={`拒绝${name}的解除拉黑申请`}
+/home/z/my-project/src/components/apps/chat.tsx:299:            拒绝
+/home/z/my-project/src/components/apps/chat.tsx:312:        <p className="mt-2 text-[12px] text-black/35 dark:text-white/35">{status === 'accepted' ? '已同意，拉黑已解除' : '已拒绝'}</p>
+/home/z/my-project/src/components/apps/chat.tsx:419: *  event = 随回合注入的系统事件（拉黑申请同意/拒绝在回复中排队时保留事件，不丢语义） */
+/home/z/my-project/src/components/apps/chat.tsx:1756:          // 40-a：角色对「用户发来的解除拉黑申请」的决策（[同意解除拉黑]/[拒绝解除拉黑]）
+/home/z/my-project/src/components/apps/chat.tsx:1768:                sys: { text: uk === 'approve' ? `「${peerLabel}」同意了你的解除拉黑申请` : `「${peerLabel}」拒绝了你的解除拉黑申请` },
+/home/z/my-project/src/components/apps/chat.tsx:2418:                      // 拒绝 / 响铃 25 秒超时：落未接记录 + AI 语音留言
+/home/z/my-project/src/components/apps/chat.tsx:2640:  /** 处理「申请解除拉黑」卡片：同意 → 解除拉黑；拒绝 → 保持并记录拒绝（角色下一轮知道被拒绝）。
+/home/z/my-project/src/components/apps/chat.tsx:2648:      : `（系统事件：对方拒绝了你的解除拉黑申请，拉黑仍然生效。请用符合人设的一两句话自然回应这件事，不要假装已经解除。）`;
+/home/z/my-project/src/components/apps/chat.tsx:2654:      pushSysMsg(`你拒绝了「${peer.name ?? peer.title}」的解除拉黑申请`);
+/home/z/my-project/src/components/apps/chat.tsx:2666:   *（角色用 [同意解除拉黑]/[拒绝解除拉黑] 标记回复，见 buildReplyMsgs 的决策分支）。
+/home/z/my-project/src/components/apps/chat.tsx:2680:    const ev = `（系统事件：你之前把对方拉黑了，现在对方发来一条解除拉黑申请，理由：「${res.entry.userReqReason ?? ''}」。如果你愿意解除拉黑给对方一个机会，请在回复的最开头单独加上标记 [同意解除拉黑]；如果决定拒绝，请在回复的最开头单独加上标记 [拒绝解除拉黑]。先用你的方式自然回应这件事）`;
+/home/z/my-project/src/components/apps/chat.tsx:3265:   * 连发投递中也拒绝：旧回复尾巴还在队列里逐条落盘，此刻截断会把队列尾部拽进新轮上下文。
+/home/z/my-project/src/components/apps/chat.tsx:3719:                /* 申请解除拉黑卡片：40-a 双向——角色发起（左侧，用户点同意/拒绝）/
+/home/z/my-project/src/components/apps/chat.tsx:4225:      {/* 40-a：被角色拉黑提示条 + 用户发起「解除拉黑申请」入口（仅联系人会话；pending 或已达拒绝上限时隐藏，
+/home/z/my-project/src/components/apps/couple-home/games/ClawMachineGame.tsx:210:  // —— 落爪序列（rAF 状态机：寻位 → 降爪合拢 → 抓住升起送往出口 / 落空晃头回杆） ——
+/home/z/my-project/src/components/apps/couple-home/games/ClawMachineGame.tsx:256:        // 到达出口：结算
+/home/z/my-project/src/components/apps/couple-home/games/ClawMachineGame.tsx:345:          出口
+/home/z/my-project/src/components/apps/taobao.tsx:987:                拒绝
+/home/z/my-project/src/components/apps/couple-home/CoupleHome.tsx:2038:      // v9 拥抱不再因「坐着/躺着/在做事」而静默拒绝：TA 会走过来抱（坐着也抱得到）；只有抱着宠物时需要先放下
+/home/z/my-project/src/components/apps/couple-home/CoupleHome.tsx:2046:    // 牵手需要一起走路：站不起来就温和提示（不记拒绝）
+/home/z/my-project/src/components/apps/couple-home/CoupleHome.tsx:2054:  /** 拒绝 TA 的请求 → 记忆「有点失落」 + 头顶小情绪（A3：心情/社交也会受伤） */
+/home/z/my-project/src/components/apps/couple-home/CoupleHome.tsx:2063:      cabinEventMemory(companion.id, `${companion.name}想求个抱抱，但被${ownerNameRef.current || '主人'}拒绝了，有点失落。`, 'cabin-hug-reject', { dedupeSeconds: 600 });
+/home/z/my-project/src/components/apps/couple-home/CoupleHome.tsx:2066:      cabinEventMemory(companion.id, `${companion.name}想牵${ownerNameRef.current || '主人'}的手，但被拒绝了，有点小委屈。`, 'cabin-hold-reject', { dedupeSeconds: 600 });
+/home/z/my-project/src/components/apps/couple-home/CoupleHome.tsx:2093:  /** 请求弹窗 45s 自动消失（不表态 → 不记拒绝，TA 自己收回） */
+/home/z/my-project/src/components/apps/couple-home/CoupleHome.tsx:4902:        {/* ===== v8.0 AI 主动请求弹窗（「××想要拥抱你」：同意 / 拒绝）—— 已抽到 panels/PartnerOverlays.tsx ===== */}
+/home/z/my-project/src/components/apps/couple-home/companion-brain.ts:83:  '  · play：走到钢琴或吉他前弹奏一曲（家里没有乐器就不发这个动作）；可带 song 参数点歌，任何歌都能点：经典曲库（小星星、两只老虎、生日快乐、欢乐颂、小蜜蜂、茉莉花、铃儿响叮当、玛丽的小羊、致爱丽丝、卡农）直接命中秒弹；其他歌用户说了什么就原样传什么（如用户说「弹一首晴天」→ {"type":"play","song":"晴天"}），你现场记谱也能弹出主旋律——千万别因为不在曲库里就拒绝或擅自换成别的歌；不带 song 就是随性即兴；用户点名了乐器时带 inst 参数（"piano"/"guitar"，如「用吉他弹个晴天」→ {"type":"play","song":"晴天","inst":"guitar"}）；',
+/home/z/my-project/src/components/apps/settings.tsx:283:/** 内置预设：OpenAI + 国内可直连三家。海外厂商服务器出口有地区限制，但拉模型/测连接/聊天流式
+/home/z/my-project/src/components/apps/settings.tsx:2390:    // 'default'（可申请）或 'denied'：APK 原生壳在 13+ 未永久拒绝时仍能拉起系统授权框
+/home/z/my-project/src/components/apps/settings.tsx:2448:            : '通知已被浏览器拒绝，请在浏览器设置中恢复。'}
+/home/z/my-project/src/components/apps/settings.tsx:2485:            : '通知权限被浏览器拒绝：请先在浏览器站点设置中允许通知，再发送测试。'}
+/home/z/my-project/src/components/apps/settings.tsx:2857:      {/* ---------- v1.9.2 真 DND 总开关（横幅/声音/系统通知三出口全静，中心记录照常入账；
+/home/z/my-project/src/components/apps/tb-draft-card.tsx:136:      {/* 操作区：pending 确认/拒绝；confirmed 实时跟订单（AI 已付 → 状态时间线）；declined 已取消 */}
+/home/z/my-project/src/components/apps/wechat.tsx:137:  // 拒绝/先回复不改变好友标记，刷新无副作用
+/home/z/my-project/src/components/apps/couple-home/panels/PartnerOverlays.tsx:7: * - RequestDialog：v8.0 AI 主动请求弹窗（「××想要拥抱你」：同意 / 拒绝）
+/home/z/my-project/src/components/apps/couple-home/panels/PartnerOverlays.tsx:194:// ---------------- v8.0 AI 主动请求弹窗（「××想要拥抱你」：同意 / 拒绝） ----------------
+/home/z/my-project/src/components/apps/couple-home/panels/PartnerOverlays.tsx:255:                拒绝
+/home/z/my-project/src/components/apps/video-call-screen.tsx:14: *   摄像头开关随时可切；关闭/权限拒绝/无设备 → 降级为「用户头像」占位（Task 27，不再显示
+/home/z/my-project/src/components/apps/video-call-screen.tsx:22: *   （头像+邀请你视频通话+拒绝/视频接听）；
+/home/z/my-project/src/components/apps/video-call-screen.tsx:32: *   （拒绝=本通不再弹；同意=开摄像头）；语音通话不传回调零影响；
+/home/z/my-project/src/components/apps/video-call-screen.tsx:46: * 权限边界：摄像头只在「拨出即开 / 接听时开」首次使用时申请；拒绝后文字/语音聊天与其他功能不受影响。
+/home/z/my-project/src/components/apps/video-call-screen.tsx:108:  /** 用户（机主）自己的头像：关闭摄像头/权限拒绝时小窗与全屏自看页显示它（Task 27，
+/home/z/my-project/src/components/apps/video-call-screen.tsx:310: *  Task 27：删除「你」自看水印（用户要求）；无流（关摄像头/权限拒绝/拉流中）时不再显示
+/home/z/my-project/src/components/apps/video-call-screen.tsx:378:/** 我方小窗（用户摄像头 PIP；关/拒绝时显示用户头像占位——Task 27 不再显示「摄像头已关」文字）。
+/home/z/my-project/src/components/apps/video-call-screen.tsx:404:  /** 用户头像（关闭/拒绝时显示） */
+/home/z/my-project/src/components/apps/video-call-screen.tsx:801:/** 底部按钮上方确认面板：AI 请求看画面且摄像头关闭时出现；拒绝=本通不再弹；同意=开摄像头并消失。
+/home/z/my-project/src/components/apps/video-call-screen.tsx:826:          aria-label="拒绝打开摄像头"
+/home/z/my-project/src/components/apps/video-call-screen.tsx:830:          拒绝
+/home/z/my-project/src/components/apps/video-call-screen.tsx:881:  /** 确认条可见：AI 已请求 + 未处理 + 接通中 + 当前无实际画面（开关关 or 权限拒绝/无设备；
+/home/z/my-project/src/components/apps/video-call-screen.tsx:1104:          消息回复/语音接听 + 红拒绝/绿视频接听；底部按钮一直显示） */}
+/home/z/my-project/src/components/apps/video-call-screen.tsx:1154:                  aria-label="拒绝"
+/home/z/my-project/src/components/apps/video-call-screen.tsx:1160:                <span className="text-[13px] text-white/85">拒绝</span>
+/home/z/my-project/src/components/apps/video-call-screen.tsx:1182:          {/* C2（Task 28）：AI「想看看你」确认条（按钮上方；拒绝/同意后消失） */}
+/home/z/my-project/src/components/apps/video-call-screen.tsx:1263:  /** 确认条可见：AI 已请求 + 未处理 + 接通中 + 当前无实际画面（开关关 or 权限拒绝/无设备；
+/home/z/my-project/src/components/apps/video-call-screen.tsx:1434:          + 翻转/摄像头预开 + 消息回复 + 红拒绝/绿视频接听；底部按钮一直显示） */}
+/home/z/my-project/src/components/apps/video-call-screen.tsx:1492:              <button type="button" onClick={call.reject} aria-label="拒绝" data-testid="qq-video-reject" className={`${qqSquare} bg-[#F5455C] text-white`}>
+/home/z/my-project/src/components/apps/video-call-screen.tsx:1507:          {/* C2（Task 28）：AI「想看看你」确认条（按钮上方；拒绝/同意后消失） */}
+/home/z/my-project/src/components/apps/video-call-screen.tsx:1604:  /** 确认条可见：AI 已请求 + 未处理 + 接通中 + 当前无实际画面（开关关 or 权限拒绝/无设备；
+/home/z/my-project/src/components/apps/video-call-screen.tsx:1713:              <button type="button" onClick={call.reject} aria-label="拒绝" data-testid="phone-video-reject" className="flex h-[72px] w-[72px] items-center justify-center rounded-full bg-[#FF453A] text-white shadow-[0_10px_28px_rgba(255,69,58,0.35)] active:scale-95">
+/home/z/my-project/src/components/apps/video-call-screen.tsx:1716:              <span className="text-[13px] text-white/90">拒绝</span>
+/home/z/my-project/src/components/apps/video-call-screen.tsx:1736:          {/* C2（Task 28）：AI「想看看你」确认条（按钮上方；拒绝/同意后消失；iOS 绿按钮） */}
+/home/z/my-project/src/components/apps/video-call-screen.tsx:1798:// ---------------- 出口 ----------------
+/home/z/my-project/src/components/apps/mt-draft-card.tsx:138:      {/* 操作区：pending 确认/拒绝；confirmed 实时跟订单（待支付→去付款；已支付→状态时间线）；declined 已取消 */}
+/home/z/my-project/src/components/apps/voice-call-screen.tsx:8: *   来电页「邀请你语音通话」+ 红拒绝/绿接听圆形按钮 +
+/home/z/my-project/src/components/apps/voice-call-screen.tsx:26: *   电话图标 + 文案（已取消（点击重拨）/ 对方未接听 / 对方已拒绝 / 已拒绝 / 未接听 / 通话时长）；
+/home/z/my-project/src/components/apps/voice-call-screen.tsx:495:              <button type="button" onClick={call.reject} aria-label="拒绝" data-testid="wx-call-reject" className={`${wxRound} bg-[#FA5151] text-white`}>
+/home/z/my-project/src/components/apps/voice-call-screen.tsx:498:              <span className="text-[13px] text-white/85">拒绝</span>
+/home/z/my-project/src/components/apps/voice-call-screen.tsx:687:          {/* 消息回复（对照截图：左侧气泡图标 + 文案；挂断来电回到聊天，生成「已拒绝」卡片） */}
+/home/z/my-project/src/components/apps/voice-call-screen.tsx:703:            <button type="button" onClick={call.reject} aria-label="拒绝" data-testid="qq-call-reject" className={`${qqSquare} bg-[#F5455C] text-white`}>
+/home/z/my-project/src/components/apps/voice-call-screen.tsx:785: * - QQ：我方取消 = 「已取消，点击重拨」（整卡可点重拨）；对方拒接 = 「对方已拒绝」；
+/home/z/my-project/src/components/apps/voice-call-screen.tsx:786: * - 微信：我方取消 = 「已取消」；对方拒接 = 「对方已拒绝」、我方拒接来电 = 「已拒绝」；
+/home/z/my-project/src/components/apps/voice-call-screen.tsx:796:      return direction === 'out' ? '对方已拒绝' : '已拒绝';
+/home/z/my-project/src/components/apps/wx-app/core.tsx:169:  /** 申请解除拉黑卡片数据（kind = 'blockreq' 时有值）：status pending=待处理 accepted=已同意 rejected=已拒绝；
+/home/z/my-project/src/components/apps/wx-app/core.tsx:170:   *  40-a 起双向——from 缺省视为 'char'（角色发起，用户点同意/拒绝）；from='user'（用户发起，角色用标记决策） */
+/home/z/my-project/src/components/apps/wx-app/core.tsx:192:  /** 群聊邀请卡片（kind='groupcard'；AI 主动建群/拉人时发出，用户可接受/拒绝） */
+/home/z/my-project/src/components/apps/wx-app/core.tsx:194:  /** 亲密关系卡片（kind='relcard'；情侣空间邀请卡/成功卡，AI 邀我或我邀 AI 时由 couple-invite 落库，可接受/拒绝） */
+/home/z/my-project/src/components/apps/wx-app/core.tsx:311: *  37-a：队列项扩展 event 字段——回复中触发的系统事件（拉黑申请同意/拒绝、退卡）随补跑回合保留
+/home/z/my-project/src/components/apps/wx-app/main.tsx:757:   *    由 AI 按人设+大号关系+记忆+验证消息决定同意/拒绝/先回复；用户可在验证消息线程里继续回复，
+/home/z/my-project/src/components/apps/wx-app/main.tsx:815:        // AI 决策（fire-and-forget）：同意/拒绝/先回复；落盘后经 FRIEND_REQS_EVENT / FRIEND_STATE_APPLIED_EVENT 刷新
+/home/z/my-project/src/components/apps/wx-app/main.tsx:858:  /** 拒绝好友申请：AI 彻底停止申请（重新加回好友后重置） */
+/home/z/my-project/src/components/apps/wx-app/main.tsx:865:      showToast(`已拒绝「${r.name}」的申请`);
+/home/z/my-project/src/components/apps/phone.tsx:732:          //（信息端有完整申请卡闭环：submitUserBlockReq → AI [同意/拒绝解除拉黑] 决策）
+/home/z/my-project/src/components/apps/phone.tsx:1429:  // 挂载：白前景标记 + 回铃音；联系人 → AI 接听决策（接听·拒绝·不接）→ 接通问候；
+/home/z/my-project/src/components/apps/phone.tsx:1502:    // AI 接听决策：响铃开始就发（人设/关系/当前时间状态 → 接听/拒绝/不接），
+/home/z/my-project/src/components/apps/phone.tsx:1600:              // 对方拒绝：再响 0.8~1.6s 挂断（几声铃被挂断更真实），随后 AI 语音留言解释
+/home/z/my-project/src/components/apps/phone.tsx:1946:    if (peerEnded === 'reject') return '对方已拒绝';
+/home/z/my-project/src/components/apps/phone.tsx:2385:      // 未接来电 tab 按结局筛选（#27 三态）：未接听 + 已拒绝 算未接来电；
+/home/z/my-project/src/components/apps/phone.tsx:2452:              // 已取消/已拒绝用中性色非红（呼出未接通不算未接来电，拒接也不是「未接」）
+/home/z/my-project/src/components/apps/phone.tsx:2482:                              已拒绝/已取消用中性灰（非红非绿），接通绿 */}
+/home/z/my-project/src/components/apps/phone.tsx:2509:                            {/* 文案三态：接通=呼入/呼出·时长；未接听/已拒绝/已取消各显示专属文案（#27） */}
+/home/z/my-project/src/components/apps/phone.tsx:2513:                                ? '已拒绝'
+/home/z/my-project/src/components/apps/phone.tsx:3447:                    // 未接听保持红色（iOS 惯例）；已拒绝/已取消非红（对齐微信/QQ 通话卡片样式）
+/home/z/my-project/src/components/apps/phone.tsx:3455:                          ? '已拒绝'
+/home/z/my-project/src/components/apps/camera.tsx:191:            ? '相机权限被拒绝，请在浏览器中允许摄像头访问后重试'
+/home/z/my-project/src/components/apps/wx-app/chat-page.tsx:757:  /** 群聊卡片：接受/拒绝（状态随消息持久化；接受后宿主打开群聊）。
+/home/z/my-project/src/components/apps/wx-app/chat-page.tsx:770:        onToast('已拒绝邀请');
+/home/z/my-project/src/components/apps/wx-app/chat-page.tsx:776:  /** 亲密关系卡片：接受/拒绝（情侣空间邀请卡；状态变更/成功卡/sys 行均由 couple-invite 落库，
+/home/z/my-project/src/components/apps/wx-app/chat-page.tsx:782:        onToast(r.ok ? (accept ? '已同意，你们现在是情侣啦' : '已拒绝邀请') : r.error);
+/home/z/my-project/src/components/apps/wx-app/chat-page.tsx:1641:        // 只放行拉黑类（bk/uk：拉黑/解除拉黑/申请解除拉黑 + 同意/拒绝解除拉黑）——资金（领取红包/收款/
+/home/z/my-project/src/components/apps/wx-app/chat-page.tsx:1666:        // 40-a：角色对「用户发来的解除拉黑申请」的决策（[同意解除拉黑]/[拒绝解除拉黑]；uk 已在分支入口算好）
+/home/z/my-project/src/components/apps/wx-app/chat-page.tsx:1678:              sys: { text: uk === 'approve' ? `「${peer.name}」同意了你的解除拉黑申请` : `「${peer.name}」拒绝了你的解除拉黑申请` },
+/home/z/my-project/src/components/apps/wx-app/chat-page.tsx:1690:        // 群社交动作（[建群:群名:成员] 等）：建群 → 卡片消息随本回复落盘（权限/冷却/拒绝表在执行器硬校验）
+/home/z/my-project/src/components/apps/wx-app/chat-page.tsx:2408:                    ? `[群聊邀请卡片：${m.gcard.name}（${m.gcard.inviterName || '群友'}邀请${m.gcard.memberNames?.length ? `，成员：${m.gcard.memberNames.join('、')}` : ''}），${m.gcard.status === 'pending' ? '待处理' : m.gcard.status === 'accepted' ? '已接受' : '已拒绝'}]`
+/home/z/my-project/src/components/apps/wx-app/chat-page.tsx:2429:                                  ? `[亲密关系卡片：${m.relcard.stage === 'invite' ? `${m.relcard.fromName}邀请${m.relcard.toName}建立情侣关系` : `${m.relcard.fromName}已同意，双方成功建立情侣关系`}，${m.relcard.status === 'pending' ? '待处理' : m.relcard.status === 'accepted' ? '已接受' : '已拒绝'}]`
+/home/z/my-project/src/components/apps/wx-app/chat-page.tsx:2489:    // 拉回群/给权限标记说明（AI 按人设决定是否提起、是否拉回；每次退群最多一次，拒绝后不再提）
+/home/z/my-project/src/components/apps/wx-app/chat-page.tsx:2495:    // 建群能力（需求二/四）：关系到位、话题合适时可主动建群（冷却/拒绝表硬校验，提示词同步约束）
+/home/z/my-project/src/components/apps/wx-app/chat-page.tsx:3010:  // ---------------- 双向拉黑（用户开关 / 角色申请卡片的同意与拒绝） ----------------
+/home/z/my-project/src/components/apps/wx-app/chat-page.tsx:3026:  /** 处理「申请解除拉黑」卡片：同意 → 解除拉黑；拒绝 → 保持并记录拒绝（角色下一轮知道被拒绝）。
+/home/z/my-project/src/components/apps/wx-app/chat-page.tsx:3039:        : `（系统事件：${meReal}拒绝了你的解除拉黑申请，拉黑仍然生效。请用符合人设的一两句话自然回应这件事，不要假装已经解除。）`;
+/home/z/my-project/src/components/apps/wx-app/chat-page.tsx:3045:        pushSysMsg(`你拒绝了「${peer.name}」的解除拉黑申请`);
+/home/z/my-project/src/components/apps/wx-app/chat-page.tsx:3059:   *（角色用 [同意解除拉黑]/[拒绝解除拉黑] 标记回复，见 buildReplyMsgs 的决策分支）。
+/home/z/my-project/src/components/apps/wx-app/chat-page.tsx:3073:    const ev = `（系统事件：你之前把${meReal}拉黑了，现在${meReal}给你发来一条解除拉黑申请，理由：「${res.entry.userReqReason ?? ''}」。如果你愿意解除拉黑给对方一个机会，请在回复的最开头单独加上标记 [同意解除拉黑]；如果决定拒绝，请在回复的最开头单独加上标记 [拒绝解除拉黑]。先用你的方式自然回应这件事）`;
+/home/z/my-project/src/components/apps/wx-app/chat-page.tsx:3514:   *  连发投递中也拒绝：旧回复尾巴还在队列里逐条落盘，此刻截断会把队列尾部拽进新轮上下文 */
+/home/z/my-project/src/components/apps/wx-app/chat-page.tsx:3642:        // 审计 #37：投递进行中拒绝转文字（与删除/撤回同口径双查守卫）——投递 tick 的 loadMsgs 读旧存储，
+/home/z/my-project/src/components/apps/wx-app/chat-page.tsx:3734:        // A-4：投递进行中同样拒绝——投递 tick 的 loadMsgs 读旧存储会把被删消息合并回来落盘（消息复活）
+/home/z/my-project/src/components/apps/wx-app/chat-page.tsx:3763:        // A-4：投递进行中同样拒绝（同删除：避免投递 tick 把撤回前的内容合并回来）
+/home/z/my-project/src/components/apps/wx-app/chat-page.tsx:3872:    // A-4：投递进行中同样拒绝（编辑写入的内容会被投递 tick 用旧存储覆盖回去）
+/home/z/my-project/src/components/apps/wx-app/chat-page.tsx:3897:    // A-4：投递进行中同样拒绝（同删除：避免投递 tick 读旧存储把被删消息合并回来）
+/home/z/my-project/src/components/apps/wx-app/chat-page.tsx:4752:              /* 申请解除拉黑卡片：40-a 双向——角色发起（左侧，头像在左，用户点同意/拒绝）/
+/home/z/my-project/src/components/apps/wx-app/chat-page.tsx:4753:                 用户发起（右侧机主侧，角色用 [同意/拒绝解除拉黑] 标记决策，仅展示状态不可点） */
+/home/z/my-project/src/components/apps/wx-app/chat-page.tsx:5112:                /* 群聊邀请卡片（AI 主动建群/拉人）：pending 出接受/拒绝；点「接受邀请」才进群，卡片本体不可点 */
+/home/z/my-project/src/components/apps/wx-app/chat-page.tsx:5121:                /* 亲密关系卡片（情侣空间邀请卡/成功卡）：对方邀请 pending 出接受/拒绝；卡片本体不可点 */
+/home/z/my-project/src/components/apps/wx-app/chat-page.tsx:5366:        {/* 40-a：被角色拉黑提示条 + 用户发起「解除拉黑申请」入口（pending 或已达拒绝上限时隐藏，
+/home/z/my-project/src/components/apps/wx-app/cards.tsx:1221: * pending = 副文案 + 接受/拒绝按钮（点「接受邀请」才进群）；accepted/rejected = 状态行（卡片本体不可点，不进群）。
+/home/z/my-project/src/components/apps/wx-app/cards.tsx:1261:            拒绝
+/home/z/my-project/src/components/apps/wx-app/cards.tsx:1274:          {rejected ? '已拒绝' : '已加入群聊'}
+/home/z/my-project/src/components/apps/wx-app/cards.tsx:1718:/** 申请解除拉黑卡片（40-a 双向：from='char' 角色发起（用户点同意/拒绝）；from='user' 用户发起（角色 AI 决策，仅展示状态）；iOS 黑白灰风） */
+/home/z/my-project/src/components/apps/wx-app/cards.tsx:1756:          {status === 'pending' ? '等待对方处理' : status === 'accepted' ? '对方已同意，拉黑已解除' : '对方已拒绝'}
+/home/z/my-project/src/components/apps/wx-app/cards.tsx:1763:            aria-label={`拒绝${name}的解除拉黑申请`}
+/home/z/my-project/src/components/apps/wx-app/cards.tsx:1767:            拒绝
+/home/z/my-project/src/components/apps/wx-app/cards.tsx:1780:        <p className="mt-2 text-[12px] text-black/35 dark:text-white/35">{status === 'accepted' ? '已同意，拉黑已解除' : '已拒绝'}</p>
+/home/z/my-project/src/components/apps/wx-group.tsx:2886:      // 群社交动作（[邀请:名字] / [设管理员:名字]）：关系/冷却/拒绝表/权限在 group-social 执行器硬校验
+/home/z/my-project/src/components/apps/wx-group.tsx:3217:        // 是否使用、分寸如何完全由人设决定；普通成员注入「无权限」说明（被要求执行时如实拒绝不假装成功）
+/home/z/my-project/src/components/apps/wx-group.tsx:3224:        // 邀请能力（需求三）：群主/管理员可拉人进群（可拉名单=有关系 NPC/该 App 好友，冷却/拒绝表硬校验）；
+/home/z/my-project/src/components/apps/wx-app/pages.tsx:142:                          {status === 'rejected' ? '已拒绝' : '已添加'}
+/home/z/my-project/src/components/apps/wx-app/pages.tsx:179:  /** 拒绝申请：AI 停止再申请 */
+/home/z/my-project/src/components/apps/wx-app/pages.tsx:217:          // 小号发起的申请：每条回复都触发 AI 重新决策（同意/拒绝/先回复，按人设随时可以同意）
+/home/z/my-project/src/components/apps/wx-app/pages.tsx:354:        {/* 前往验证（同意）/ 拒绝 / 状态 */}
+/home/z/my-project/src/components/apps/wx-app/pages.tsx:382:                拒绝
+/home/z/my-project/src/components/apps/wx-app/pages.tsx:386:            // 小号发起、等待 AI 决策的申请：无同意/拒绝按钮（决策在对方手里），可继续回复验证消息
+/home/z/my-project/src/components/apps/wx-app/pages.tsx:396:            {status === 'rejected' ? '已拒绝该申请' : '已添加'}
+/home/z/my-project/src/components/apps/qq-app/core.tsx:120:  /** 申请解除拉黑卡片数据（kind = 'blockreq' 时有值）：status pending=待处理 accepted=已同意 rejected=已拒绝；
+/home/z/my-project/src/components/apps/qq-app/core.tsx:121:   *  40-a 起双向——from 缺省视为 'char'（角色发起，用户点同意/拒绝）；from='user'（用户发起，角色用标记决策） */
+/home/z/my-project/src/components/apps/qq-app/core.tsx:141:  /** 群聊邀请卡片（kind='groupcard'；AI 主动建群/拉人时发出，用户可接受/拒绝） */
+/home/z/my-project/src/components/apps/qq-app/core.tsx:143:  /** 亲密关系卡片（kind='relcard'；情侣空间邀请卡/成功卡，AI 邀我或我邀 AI 时由 couple-invite 落库，可接受/拒绝） */
+/home/z/my-project/src/components/apps/qq-app/core.tsx:794: *  37-a：队列项扩展 event 字段——回复中触发的系统事件（拉黑申请同意/拒绝、退卡）随补跑回合保留
+/home/z/my-project/src/components/apps/qq-app/connect.tsx:13: *  - 云端警告横幅压缩为一行 + 「详情」弹窗（Dialog）——503 出口被拒 / 未部署等完整解释在弹窗里；
+/home/z/my-project/src/components/apps/qq-app/connect.tsx:381:              text="QQ 平台拒绝了云端出口，真机 QQ 上 TA 暂时不在线"
+/home/z/my-project/src/components/apps/qq-app/connect.tsx:383:                title: '云端出口被 QQ 平台拒绝',
+/home/z/my-project/src/components/apps/qq-app/connect.tsx:385:                  '本机「测试连接」走你自己的网络，能通过只代表凭证正确；QQ 收发消息由云端 Webhook 代答，云端出口被腾讯拒绝（503）就收不到。',
+/home/z/my-project/src/components/apps/qq-app/connect.tsx:386:                  '可先把 q.qq.com 控制台的回调地址配成本页下方的 QQ 回调地址试试；仍不行就换一个部署平台（境内出口）到 设置 → 云端助手 重新部署，再点「云端验证凭证」。',
+/home/z/my-project/src/components/apps/qq-app/connect.tsx:391:              凭证本身可用——换部署平台（境内出口）后即可恢复
+/home/z/my-project/src/components/apps/qq-app/main.tsx:174:   *    由 AI 按人设+大号关系+记忆+验证消息决定同意/拒绝/先回复；用户可在验证消息线程里继续回复，
+/home/z/my-project/src/components/apps/qq-app/main.tsx:232:        // AI 决策（fire-and-forget）：同意/拒绝/先回复；落盘后经 FRIEND_REQS_EVENT / FRIEND_STATE_APPLIED_EVENT 刷新
+/home/z/my-project/src/components/apps/qq-app/main.tsx:273:  /** 拒绝好友申请：AI 彻底停止申请（重新加回好友后重置） */
+/home/z/my-project/src/components/apps/qq-app/main.tsx:278:      showToast(`已拒绝「${r.name}」的申请`);
+/home/z/my-project/src/components/apps/qq-app/chat-page.tsx:192:/** 申请解除拉黑卡片（40-a 双向：from='char' 角色发起（用户点同意/拒绝）；from='user' 用户发起（角色 AI 决策，仅展示状态）） */
+/home/z/my-project/src/components/apps/qq-app/chat-page.tsx:230:          {status === 'pending' ? '等待对方处理' : status === 'accepted' ? '对方已同意，拉黑已解除' : '对方已拒绝'}
+/home/z/my-project/src/components/apps/qq-app/chat-page.tsx:237:            aria-label={`拒绝${name}的解除拉黑申请`}
+/home/z/my-project/src/components/apps/qq-app/chat-page.tsx:241:            拒绝
+/home/z/my-project/src/components/apps/qq-app/chat-page.tsx:255:        <p className="mt-2 text-[12px] text-black/35 dark:text-white/35">{status === 'accepted' ? '已同意，拉黑已解除' : '已拒绝'}</p>
+/home/z/my-project/src/components/apps/qq-app/chat-page.tsx:875:  /** 群聊卡片：接受/拒绝（状态随消息持久化；接受后宿主打开群聊） */
+/home/z/my-project/src/components/apps/qq-app/chat-page.tsx:887:        onToast('已拒绝邀请');
+/home/z/my-project/src/components/apps/qq-app/chat-page.tsx:893:  /** 亲密关系卡片：接受/拒绝（情侣空间邀请卡；状态变更/成功卡/sys 行均由 couple-invite 落库，
+/home/z/my-project/src/components/apps/qq-app/chat-page.tsx:899:        onToast(r.ok ? (accept ? '已同意，你们现在是情侣啦' : '已拒绝邀请') : r.error);
+/home/z/my-project/src/components/apps/qq-app/chat-page.tsx:1450:              // 25s 幽灵铃声必未接），来电直接展开 QQ 全屏来电页（响铃/接听/拒绝/超时未接由通话引擎自理）。
+/home/z/my-project/src/components/apps/qq-app/chat-page.tsx:1844:          // 40-a：角色对「用户发来的解除拉黑申请」的决策（[同意解除拉黑]/[拒绝解除拉黑]）
+/home/z/my-project/src/components/apps/qq-app/chat-page.tsx:1857:                sys: { text: uk === 'approve' ? `「${peer.name}」同意了你的解除拉黑申请` : `「${peer.name}」拒绝了你的解除拉黑申请` },
+/home/z/my-project/src/components/apps/qq-app/chat-page.tsx:1874:          // 群社交动作（[建群:群名:成员] 等）：建群 → 卡片消息随本回复落盘（权限/冷却/拒绝表在执行器硬校验）
+/home/z/my-project/src/components/apps/qq-app/chat-page.tsx:2379:                    ? `[群聊邀请卡片：${m.gcard.name}（${m.gcard.inviterName || '群友'}邀请${m.gcard.memberNames?.length ? `，成员：${m.gcard.memberNames.join('、')}` : ''}），${m.gcard.status === 'pending' ? '待处理' : m.gcard.status === 'accepted' ? '已接受' : '已拒绝'}]`
+/home/z/my-project/src/components/apps/qq-app/chat-page.tsx:2398:                                  ? `[亲密关系卡片：${m.relcard.stage === 'invite' ? `${m.relcard.fromName}邀请${m.relcard.toName}建立情侣关系` : `${m.relcard.fromName}已同意，双方成功建立情侣关系`}，${m.relcard.status === 'pending' ? '待处理' : m.relcard.status === 'accepted' ? '已接受' : '已拒绝'}]`
+/home/z/my-project/src/components/apps/qq-app/chat-page.tsx:2441:    // 拉回群/给权限标记说明（AI 按人设决定是否提起、是否拉回；每次退群最多一次，拒绝后不再提）
+/home/z/my-project/src/components/apps/qq-app/chat-page.tsx:2447:    // 建群能力（需求二/四）：关系到位、话题合适时可主动建群（冷却/拒绝表硬校验，提示词同步约束）
+/home/z/my-project/src/components/apps/qq-app/chat-page.tsx:3073:  // ---------------- 双向拉黑（用户开关 / 角色申请卡片的同意与拒绝） ----------------
+/home/z/my-project/src/components/apps/qq-app/chat-page.tsx:3089:  /** 处理「申请解除拉黑」卡片：同意 → 解除拉黑；拒绝 → 保持并记录拒绝（角色下一轮知道被拒绝）。
+/home/z/my-project/src/components/apps/qq-app/chat-page.tsx:3102:        : `（系统事件：${meReal}拒绝了你的解除拉黑申请，拉黑仍然生效。请用符合人设的一两句话自然回应这件事，不要假装已经解除。）`;
+/home/z/my-project/src/components/apps/qq-app/chat-page.tsx:3108:        pushSysMsg(`你拒绝了「${peer.name}」的解除拉黑申请`);
+/home/z/my-project/src/components/apps/qq-app/chat-page.tsx:3122:   *（角色用 [同意解除拉黑]/[拒绝解除拉黑] 标记回复，见 buildReplyMsgs 的决策分支）。
+/home/z/my-project/src/components/apps/qq-app/chat-page.tsx:3136:    const ev = `（系统事件：你之前把${meReal}拉黑了，现在${meReal}给你发来一条解除拉黑申请，理由：「${res.entry.userReqReason ?? ''}」。如果你愿意解除拉黑给对方一个机会，请在回复的最开头单独加上标记 [同意解除拉黑]；如果决定拒绝，请在回复的最开头单独加上标记 [拒绝解除拉黑]。先用你的方式自然回应这件事）`;
+/home/z/my-project/src/components/apps/qq-app/chat-page.tsx:3608:   *  连发投递中也拒绝：旧回复尾巴还在队列里逐条落盘，此刻截断会把队列尾部拽进新轮上下文 */
+/home/z/my-project/src/components/apps/qq-app/chat-page.tsx:3823:        // A-4：投递进行中同样拒绝——投递 tick 的 loadMsgs 读旧存储会把被删消息合并回来落盘（消息复活）
+/home/z/my-project/src/components/apps/qq-app/chat-page.tsx:3852:        // A-4：投递进行中同样拒绝（同删除：避免投递 tick 把撤回前的内容合并回来）
+/home/z/my-project/src/components/apps/qq-app/chat-page.tsx:3962:    // A-4：投递进行中同样拒绝（编辑写入的内容会被投递 tick 用旧存储覆盖回去）
+/home/z/my-project/src/components/apps/qq-app/chat-page.tsx:3987:    // A-4：投递进行中同样拒绝（同删除：避免投递 tick 读旧存储把被删消息合并回来）
+/home/z/my-project/src/components/apps/qq-app/chat-page.tsx:4590:                /* 申请解除拉黑卡片：40-a 双向——角色发起（左侧，头像在左，用户点同意/拒绝）/
+/home/z/my-project/src/components/apps/qq-app/chat-page.tsx:4591:                   用户发起（右侧机主侧，角色用 [同意/拒绝解除拉黑] 标记决策，仅展示状态不可点） */
+/home/z/my-project/src/components/apps/qq-app/chat-page.tsx:4686:                  /* 通话卡片（语音/视频，Task 22 按 media 分叉图标与文案；通话结束后插入聊天记录）：整卡可点回拨（已取消（点击重拨）/ 对方未接听 / 已拒绝 / 未接听 / 通话时长）。
+/home/z/my-project/src/components/apps/qq-app/chat-page.tsx:4855:                  /* 群聊邀请卡片（AI 主动建群/拉人）：pending 出接受/拒绝；点「接受邀请」才进群，卡片本体不可点 */
+/home/z/my-project/src/components/apps/qq-app/chat-page.tsx:4864:                  /* 亲密关系卡片（情侣空间邀请卡/成功卡）：对方邀请 pending 出接受/拒绝；卡片本体不可点 */
+/home/z/my-project/src/components/apps/qq-app/chat-page.tsx:5227:        {/* 40-a：被角色拉黑提示条 + 用户发起「解除拉黑申请」入口（pending 或已达拒绝上限时隐藏，
+/home/z/my-project/src/components/apps/qq-app/cards.tsx:232: * pending = 副文案 + 接受/拒绝按钮（点「接受邀请」才进群）；accepted/rejected = 状态行（卡片本体不可点，不进群）。
+/home/z/my-project/src/components/apps/qq-app/cards.tsx:272:            拒绝
+/home/z/my-project/src/components/apps/qq-app/cards.tsx:285:          {rejected ? '已拒绝' : '已加入群聊'}
+/home/z/my-project/src/components/apps/qq-app/pages.tsx:3182:                      {status === 'rejected' ? '已拒绝' : '已同意'}
+/home/z/my-project/src/components/apps/qq-app/pages.tsx:3235:  /** 拒绝申请：AI 停止再申请 */
+/home/z/my-project/src/components/apps/qq-app/pages.tsx:3271:          // 小号发起的申请：每条回复都触发 AI 重新决策（同意/拒绝/先回复，按人设随时可以同意）
+/home/z/my-project/src/components/apps/qq-app/pages.tsx:3373:        {/* 同意 / 拒绝 / 前往验证 / 状态 */}
+/home/z/my-project/src/components/apps/qq-app/pages.tsx:3403:                拒绝
+/home/z/my-project/src/components/apps/qq-app/pages.tsx:3407:            // 小号发起、等待 AI 决策的申请：无同意/拒绝按钮（决策在对方手里），可继续回复验证消息
+/home/z/my-project/src/components/apps/qq-app/pages.tsx:3417:            {status === 'rejected' ? '已拒绝该申请' : '已同意'}
+/home/z/my-project/src/components/apps/couple-space.tsx:293:  aiPact: { title: string; preamble: string; clauses: string[]; at: number; signTa?: string | null; declined?: boolean } | null; // AI 拟的协议草稿（第十六轮起 TA 会先签上自己的名字再分享，等我签；declined=我拒绝了，第二十三轮）
+/home/z/my-project/src/components/apps/couple-space.tsx:555:      { q: '异性主动找你深夜聊天求助，你会？', opts: ['热情回复，耐心聊天', '隐瞒女友偷偷回复', '礼貌拒绝、保持距离，主动告知女友', '主动延伸话题闲聊'], best: 2 },
+/home/z/my-project/src/components/apps/couple-space.tsx:733:      { t: '不麻烦，我就是你的树洞，说说怎么了', d: [7, 6, 7, 7], v: '倾听比解决更重要，TA 需要的是出口。' },
+/home/z/my-project/src/components/apps/couple-space.tsx:8533:           *  第二十三轮：我拒绝后不再消失，卡片显示「已拒绝」，AI 通过记忆知道被拒） */}
+/home/z/my-project/src/components/apps/couple-space.tsx:8542:                <span className="absolute right-3 top-3 shrink-0 rounded-full bg-[#f0f0f3] dark:bg-zinc-900/80 px-2 py-0.5 text-[10.5px] font-bold text-[#8e8e96] dark:text-zinc-400" data-testid="ai-pact-declined-badge">已拒绝</span>
+/home/z/my-project/src/components/apps/couple-space.tsx:8557:                  <div className="mt-2.5 text-[12px] leading-relaxed text-[#9a9aa2] dark:text-zinc-400" data-testid="ai-pact-declined-tip">你拒绝了这份协议，{state.taName || 'TA'} 已经知道了</div>
+/home/z/my-project/src/components/apps/couple-space.tsx:8564:                        showToast('已删除这份被拒绝的协议');
+/home/z/my-project/src/components/apps/couple-space.tsx:8592:                      // 第二十三轮：让 AI 知道我拒绝了（写进恋人记忆）+ 聊天里的协议卡片同步「已拒绝」
+/home/z/my-project/src/components/apps/couple-space.tsx:8597:                          coupleRemember(cid, ch, `${state.meName || '我'}拒绝了${state.taName || 'TA'}拟的恋爱协议《${ap.title}》，没有签名（${state.taName || 'TA'} 已经知道被拒绝了）`);
+/home/z/my-project/src/components/apps/couple-space.tsx:8603:                      showToast('已拒绝，TA 会知道你的决定');
+/home/z/my-project/src/components/apps/couple-space.tsx:11464:        : [`多花点心思在「${low.d}」上，这是你们目前最需要滋养的部分`, '每周留一段只属于两个人的谈心时间', '把「想对方」说出口，别只放在心里'];
+/home/z/my-project/src/components/apps/meituan.tsx:717:              拒绝
+
+[Showing results with pagination = limit: 250]
