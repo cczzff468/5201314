@@ -9394,11 +9394,9 @@ function CloudPage({ onBack }: { onBack: () => void }) {
           {/* 关键信息 chips：平台 / 部署状态 / 最近测试（一排小胶囊，扫一眼全知道） */}
           <div className="mt-3 flex flex-wrap gap-1.5" aria-label="云端状态概览">
             {cloudOn && <CloudChip>{PLATFORM_LABELS[platform]}</CloudChip>}
-            <CloudChip tone={supaDeployed ? 'green' : 'gray'}>
-              {supaDeployed ? `已部署 · ${new Date(supa?.deployedAt ?? 0).toLocaleString()}` : '未部署'}
-            </CloudChip>
+            <CloudChip tone={supaDeployed ? 'green' : 'gray'}>{supaDeployed ? '已部署' : '未部署'}</CloudChip>
             <CloudChip tone={lastPing ? (lastPing.ok ? 'green' : 'red') : 'gray'}>
-              {lastPing ? `最近测试${lastPing.ok ? '正常' : '异常'} · ${new Date(lastPing.at).toLocaleString()}` : '未测试'}
+              {lastPing ? `最近测试${lastPing.ok ? '正常' : '异常'}` : '未测试'}
             </CloudChip>
           </div>
 
@@ -9581,14 +9579,16 @@ function CloudPage({ onBack }: { onBack: () => void }) {
                     {deployResult?.ok && deployResult.funcUrl && (
                       <code className="block break-all font-mono text-[11px] text-muted-foreground">{deployResult.funcUrl}</code>
                     )}
-                    {/* service_role key 手动兑底（v5 收缩化）：自动读取失败时自动展开；平时折叠入口。
-                        key 切换重挂载：need_manual_key 信号置 manualKeyOpen 后以 defaultOpen=true 重新挂载即自动展开 */}
+                    {/* service_role key 手动兑底（v7）：平时完全不显示；仅当自动读取真失败
+                        （need_manual_key）时自动出现并展开，不再常驻「自动读取失败？」提示行。
+                        信号置 manualKeyOpen 后以 defaultOpen=true 挂载即自动展开 */}
+                    {manualKeyOpen && (
                     <CloudFold
-                      key={manualKeyOpen ? 'mk-open' : 'mk'}
-                      title="自动读取失败？手动粘贴 service_role key"
+                      key="mk-open"
+                      title="自动读取失败，请手动粘贴 service_role key"
                       hint={manualKeySaved ? '已保存' : undefined}
                       testid="cloud-supa-key-fold"
-                      defaultOpen={manualKeyOpen}
+                      defaultOpen
                     >
                       <div className="rounded-[12px] bg-black/[0.03] p-3 dark:bg-white/[0.05]">
                         <p className="text-[11.5px] leading-relaxed text-muted-foreground">
@@ -9629,6 +9629,7 @@ function CloudPage({ onBack }: { onBack: () => void }) {
                         )}
                       </div>
                     </CloudFold>
+                    )}
                     {/* v6 简约版：云端轮询开关（开=自动回复；关=零配额消耗） */}
                     <div className="flex items-center justify-between gap-3 rounded-[14px] bg-white/60 px-4 py-3 ring-1 ring-black/[0.04] dark:bg-white/[0.06] dark:ring-white/[0.08]">
                       <span className="min-w-0 flex-1">
