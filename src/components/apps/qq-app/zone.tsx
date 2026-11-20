@@ -39,6 +39,12 @@ import { QqAvatar } from './widgets';
 
 // ---------------- QQ空间动态流（动态 tab - 空间动态） ----------------
 
+/** 空间动态渲染窗口（性能专项）：存储上限 200 条，但一屏只看得到几条——初始只渲染最近的
+ *  ZONE_FIRST_RENDER 条，滚到底部（或点「查看更早的动态」）按 ZONE_RENDER_STEP 向前补。
+ *  只截断渲染条数，落库/删改逻辑不动（数据完整性不受影响）。 */
+const ZONE_FIRST_RENDER = 40;
+const ZONE_RENDER_STEP = 40;
+
 /** #41c TA 的空间首访播种模板：新好友空间一条动态都没有时补 3 条通用模板说说（
  *  writeMemory=false 不入记忆；与角色人设无关的中性口吻、无 emoji，对照微信 openFriendMoments 的示例动态） */
 export const ZONE_OWNER_POST_TEMPLATES: ReadonlyArray<{ text: string; agoMs: number }> = [
@@ -151,6 +157,10 @@ export function ZonePage({
 }) {
   const apiConfig = useSettings((s) => s.apiConfig);
   const [userPosts, setUserPosts] = useState<ZonePost[]>(loadZonePosts);
+  /** 动态渲染窗口（性能专项）：存储上限 200 条，但一屏只看得到几条——初始只渲染最近的
+   *  ZONE_FIRST_RENDER 条，滚到底部（或点「查看更早的动态」）按 ZONE_RENDER_STEP 向前补。
+   *  只截断渲染条数，落库/删改逻辑不动（数据完整性不受影响）。 */
+  const [renderCount, setRenderCount] = useState(ZONE_FIRST_RENDER);
   const [seedLiked, setSeedLiked] = useState<Record<string, boolean>>(() => {
     try {
       const parsed: unknown = kvGet<Record<string, boolean>>(LS_ZONE_LIKES);
@@ -383,7 +393,17 @@ export function ZonePage({
   return (
     <div className="relative flex h-full flex-col bg-white dark:bg-[#111214]">
       {/* 全屏：整个页面（含顶部渐变区）在同一滚动容器里，头部随内容一起滚走 */}
-      <div className="flex-1 overflow-y-auto" data-testid="qq-zone-feed">
+      <div
+        className="flex-1 overflow-y-auto"
+        data-testid="qq-zone-feed"
+        onScroll={(e) => {
+          // 渲染窗口扩容：接近底部还有未渲染的更早动态 → 补一批（零额外监听，复用滚动容器）
+          const el = e.currentTarget;
+          if (renderCount < posts.length && el.scrollHeight - el.scrollTop - el.clientHeight < 600) {
+            setRenderCount((c) => Math.min(posts.length, c + ZONE_RENDER_STEP));
+          }
+        }}
+      >
       {/* 顶部渐变区：导航 + 个人卡 + 宫格 + 发布框（随页面滚动） */}
       <div className="bg-gradient-to-b from-[#D8E4F8] via-[#E9EEFA] to-white pb-3 pt-[54px] dark:from-[#242B3E] dark:via-[#1D2331] dark:to-[#111214]">
         <div className="flex items-center gap-2 px-3">
@@ -483,7 +503,7 @@ export function ZonePage({
       )}
 
       {/* 动态流（与头部同一滚动容器） */}
-        {posts.map((p) => {
+        {posts.slice(0, renderCount).map((p) => {
           const liked = likedOf(p);
           const names = namesOf(p);
           const rt = replyTarget[p.id];
@@ -723,6 +743,17 @@ export function ZonePage({
             </div>
           );
         })}
+        {renderCount < posts.length && (
+          /* 渲染窗口截断中：手动扩窗入口（滚动自动扩窗之外的兑底入口） */
+          <button
+            type="button"
+            aria-label="查看更早的动态"
+            onClick={() => setRenderCount((c) => Math.min(posts.length, c + ZONE_RENDER_STEP))}
+            className="w-full py-5 text-center text-[13px] text-black/40 active:opacity-60 dark:text-white/40"
+          >
+            查看更早的动态（还有 {posts.length - renderCount} 条）
+          </button>
+        )}
         {posts.length === 0 && <p className="mt-10 text-center text-[13px] text-black/30 dark:text-white/30">还没有动态</p>}
       </div>
 

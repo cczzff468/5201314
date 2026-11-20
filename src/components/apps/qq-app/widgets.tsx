@@ -2,7 +2,7 @@
 
 /** 通用小部件（头像/元信息/头部/打卡/搜索/资料徽章） —— v1.9.27 任务10 从 qq.tsx 按功能域拆分；顶层声明全部导出供兄弟模块与入口桶引用。 */
 
-import { useState } from 'react';
+import { memo, useState } from 'react';
 import { CalendarDays, ChevronRight, Flame, Search, SmilePlus } from 'lucide-react';
 // v1.9.12 聊天滚动重做（全端共享）：进入即到底/发送必到底/贴底跟随/看历史时「有新消息」轻提示
 // 美团×AI 联动：QQ 私聊与微信同构接入（规则注入+动作执行），历史里的代付/分享/代点卡片序列化为 AI 可读文本
@@ -33,8 +33,10 @@ import { LS_QQ_CHECKIN, QQMsg, QQUser, localDateKey } from './core';
 // ---------------- 通用小部件 ----------------
 
 /** QQ 头像：默认圆形（有图用图，无图蓝底「Q」字兜底）；shape='rounded' = 圆角方形
- *  （显示设置 › 头像样式，仅聊天页传入；其余调用点保持 QQ 原生圆形） */
-export function QqAvatar({
+ *  （显示设置 › 头像样式，仅聊天页传入；其余调用点保持 QQ 原生圆形）。
+ *  memo：props 全为原始值（src/alt/size/shape），会话列表/聊天页/空间动态每行每渲染都重建元素——
+ *  浅比较恒稳定即可命中，收敛大列表重渲染时的子树 reconcile 开销（行为零变化） */
+export const QqAvatar = memo(function QqAvatar({
   src,
   alt,
   size = 44,
@@ -60,7 +62,7 @@ export function QqAvatar({
       Q
     </div>
   );
-}
+});
 
 /** 显示设置元信息适用性：系统类胶囊（sys/notice/拉黑申请）与已撤回消息不参与已读/时间显示 */
 export const qqMetaOk = (m: QQMsg) => !m.recalled && m.kind !== 'sys' && m.kind !== 'notice' && m.kind !== 'blockreq';

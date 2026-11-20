@@ -22,6 +22,8 @@
 import { wxCloudSnapshot } from './store';
 import { wxIlinkLoginSnapshot } from '../weixin-connect';
 import { qqBotLoginSnapshot } from '../qq-connect';
+// v22 云端健康断路器：熔断冷却期云端兑底转发直接跳过（免烧注定失败的请求）
+import { cloudCooling } from './cloud-health';
 
 /** 网关 HTTP 入口（经 Caddy 反代：浏览器同源 fetch，端口走 XTransformPort 查询参数） */
 const GW_URL = '/api/im-gateway?XTransformPort=3100';
@@ -61,12 +63,14 @@ async function relayViaGateway(app: 'wx' | 'qq', texts: string[]): Promise<Relay
 }
 
 /** ② 云端函数转发：action=send-active（经 /api/cloud-deploy/supabase 同源代理）——
- *  仅云端轮询开着时兜底（停用=零配额语义） */
+ *  仅云端轮询开着时兜底（停用=零配额语义）；v22 熔断冷却期直接跳过（云端也正在受限，
+ *  烧请求注定失败——站内投递已保证，网关通道优先在上一步已试过） */
 async function relayViaCloud(app: 'wx' | 'qq', texts: string[]): Promise<RelayResult> {
   const st = wxCloudSnapshot();
   const supa = st.supabase;
   if (!supa?.token || !supa.ref || !supa.secret) return { ok: false, via: 'cloud', error: '云端凭证不完整' };
   if (!(supa.cronOn ?? false)) return { ok: false, via: 'none', error: '云端轮询已停用（零配额消耗）——真机主动转发跳过' };
+  if (cloudCooling()) return { ok: false, via: 'none', error: '云端写通道熔断中（15 分钟内不再尝试，网关优先）' };
   try {
     const res = await fetch('/api/cloud-deploy/supabase', {
       method: 'POST',

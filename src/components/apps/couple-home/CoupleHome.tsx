@@ -5060,32 +5060,32 @@ export default function CoupleHome({ close }: { close: () => void }) {
               animate={{ y: 0, opacity: 1 }}
               exit={{ y: 40, opacity: 0 }}
               transition={{ type: 'spring', damping: 28, stiffness: 340 }}
-              className="pointer-events-auto w-full max-w-[260px] overflow-hidden rounded-3xl bg-white/95 shadow-2xl backdrop-blur-xl"
+              className="pointer-events-auto w-full max-w-[260px] overflow-hidden rounded-3xl bg-white/95 shadow-2xl backdrop-blur-xl dark:bg-zinc-900/95"
               onClick={(e) => e.stopPropagation()}
             >
-              <p className="pt-3.5 text-center text-[12px] text-[#9a9a96]">立式相框</p>
+              <p className="pt-3.5 text-center text-[12px] text-[#9a9a96] dark:text-zinc-400">立式相框</p>
               <button
                 onClick={() => {
                   photoTargetRef.current = photoMenuFor;
                   fileInputRef.current?.click();
                   setPhotoMenuFor(null);
                 }}
-                className="flex w-full items-center justify-center gap-1.5 px-5 py-3 text-[13.5px] font-medium text-[#4a4a4e] transition active:bg-black/5"
+                className="flex w-full items-center justify-center gap-1.5 px-5 py-3 text-[13.5px] font-medium text-[#4a4a4e] transition active:bg-black/5 dark:text-zinc-200 dark:active:bg-white/5"
               >
                 <ImagePlus className="h-4 w-4 text-[#e8a3b3]" /> 换一张照片
               </button>
-              <div className="mx-5 h-px bg-[#f0eeea]" />
+              <div className="mx-5 h-px bg-[#f0eeea] dark:bg-white/10" />
               <button
                 onClick={() => {
                   const it = itemsRef.current.find((f) => f.id === photoMenuFor);
                   setPuzzleFor({ photo: it?.st?.photo });
                   setPhotoMenuFor(null);
                 }}
-                className="flex w-full items-center justify-center gap-1.5 px-5 py-3 text-[13.5px] font-medium text-[#4a4a4e] transition active:bg-black/5"
+                className="flex w-full items-center justify-center gap-1.5 px-5 py-3 text-[13.5px] font-medium text-[#4a4a4e] transition active:bg-black/5 dark:text-zinc-200 dark:active:bg-white/5"
               >
                 <Puzzle className="h-4 w-4 text-[#e8a3b3]" /> 用照片拼一拼
               </button>
-              <div className="mx-5 h-px bg-[#f0eeea]" />
+              <div className="mx-5 h-px bg-[#f0eeea] dark:bg-white/10" />
               <button
                 onClick={() => setPhotoMenuFor(null)}
                 className="w-full px-5 py-3 text-[13.5px] font-medium text-[#b8b4ae] transition active:bg-black/5"
@@ -5209,21 +5209,21 @@ export default function CoupleHome({ close }: { close: () => void }) {
             animate={{ y: 0 }}
             exit={{ y: '100%' }}
             transition={{ type: 'spring', damping: 30, stiffness: 300 }}
-            className="absolute inset-x-0 bottom-0 z-10 flex max-h-[52%] flex-col rounded-t-3xl bg-white/95 shadow-[0_-8px_30px_rgba(0,0,0,0.12)] backdrop-blur-xl"
+            className="absolute inset-x-0 bottom-0 z-10 flex max-h-[52%] flex-col rounded-t-3xl bg-white/95 shadow-[0_-8px_30px_rgba(0,0,0,0.12)] backdrop-blur-xl dark:bg-zinc-900/95"
           >
             <div className="flex items-center justify-between px-4 pb-1 pt-3">
-              <span className="text-[15px] font-semibold text-[#3a3a3e]">家具商店</span>
+              <span className="text-[15px] font-semibold text-[#3a3a3e] dark:text-zinc-100">家具商店</span>
               <div className="flex items-center gap-2">
                 <button
                   onClick={resetHome}
-                  className="rounded-full bg-[#f6eded] px-3 py-1 text-[11px] font-medium text-[#c26a6a] transition active:scale-95"
+                  className="rounded-full bg-[#f6eded] px-3 py-1 text-[11px] font-medium text-[#c26a6a] transition active:scale-95 dark:bg-zinc-800 dark:text-[#e39a9a]"
                 >
                   重置
                 </button>
                 <button
                   onClick={() => setShopOpen(false)}
                   aria-label="关闭商店"
-                  className="flex h-8 w-8 items-center justify-center rounded-full bg-[#f0eff1] text-[#8a8a90] transition active:scale-95"
+                  className="flex h-8 w-8 items-center justify-center rounded-full bg-[#f0eff1] text-[#8a8a90] transition active:scale-95 dark:bg-zinc-800 dark:text-zinc-400"
                 >
                   <X className="h-4 w-4" />
                 </button>
@@ -5285,7 +5285,7 @@ export default function CoupleHome({ close }: { close: () => void }) {
                           <line x1="8" y1="20" x2="40" y2="20" stroke={winCol ?? '#f0e7d4'} strokeWidth="2.5" />
                         </svg>
                       </div>
-                      <span className="w-full truncate text-[11.5px] font-medium leading-tight text-[#4a4a4e]">
+                      <span className="w-full truncate text-[11.5px] font-medium leading-tight text-[#4a4a4e] dark:text-zinc-200">
                         {WIN_NAMES[i] ?? `窗户 ${i + 1}`}
                       </span>
                       {here ? (
@@ -5330,14 +5330,14 @@ export default function CoupleHome({ close }: { close: () => void }) {
                         </span>
                       )}
                       <div className="mt-1.5 flex items-center justify-between gap-1.5">
-                        <span className="min-w-0 truncate text-[12.5px] font-semibold text-[#3a3a3e]">
+                        <span className="min-w-0 truncate text-[12.5px] font-semibold text-[#3a3a3e] dark:text-zinc-100">
                           {s.name}
                         </span>
-                        <span className="shrink-0 rounded-full bg-[#f1efe9] px-1.5 py-0.5 text-[9.5px] leading-none text-[#8a8a86]">
+                        <span className="shrink-0 rounded-full bg-[#f1efe9] px-1.5 py-0.5 text-[9.5px] leading-none text-[#8a8a86] dark:bg-zinc-800 dark:text-zinc-400">
                           {s.items.length} 件
                         </span>
                       </div>
-                      <p className="mt-1 text-[11px] leading-snug text-[#8a8a86]">{s.desc}</p>
+                      <p className="mt-1 text-[11px] leading-snug text-[#8a8a86] dark:text-zinc-400">{s.desc}</p>
                       <p className="mt-0.5 text-[10px] text-[#a8a8a4]">整组一步撤销</p>
                       <button
                         onClick={() => placeSet(s.id)}
@@ -5378,7 +5378,7 @@ export default function CoupleHome({ close }: { close: () => void }) {
                           style={{ background: `linear-gradient(135deg, ${catColor(e.cat)}, ${shade(e.cat)})` }}
                         />
                       )}
-                      <span className="w-full truncate text-[11.5px] font-medium leading-tight text-[#4a4a4e]">
+                      <span className="w-full truncate text-[11.5px] font-medium leading-tight text-[#4a4a4e] dark:text-zinc-200">
                         {e.name}
                       </span>
                     </button>

@@ -12,6 +12,8 @@
  *
  * 调度引擎：ProactiveMsgWatcher（PhoneShell 挂载）每 5s 调 runProactiveMsgTick()：
  * 守卫（来电/通话/闹钟互斥）→ 枚举索引（配置过的 app×联系人）→ 逐条判定四类触发 → 生成 → 投递。
+ * W1-B5 生活分享：tickInner 末尾追加 runLifeShareTick（TA 每天不定期把刚拍的照/刚吃的饭
+ * 这类生活分享发到信息主会话，1~3 条短消息 + 一张配图，照片同时进 TA 的相册；见 life-share.ts）。
  * v57：模板兑底文案全面移除——主动消息一律由 LLM 按人设/记忆/上下文生成；生成失败静默跳过
  * （触发器保持到期状态，下轮 tick 自然重试；once 提醒失败不消费任务）。
  *
@@ -61,6 +63,8 @@ import { safeLlmFetch } from './api-circuit-breaker';
 import { useIncomingCall } from './incoming-call';
 import { useGlobalCall } from './global-call';
 import type { ApiConfig } from './store';
+// W1-B5 生活分享引擎（tickInner 末尾挂载；双向引用均在运行期函数体内调用，ESM 循环安全）
+import { runLifeShareTick, purgeLifeShareForContact } from './life-share';
 
 // ---------------- 类型与常量 ----------------
 
@@ -656,7 +660,8 @@ export function getActiveProactiveChats(): { app: ProactiveApp; cid: string }[] 
 
 // ---------------- LLM 调用（两级兜底：用户配置 → 内置模型；与 friend-state 同款） ----------------
 
-async function callLlmTwoTier(system: string, userContent: string, apiConfig: ApiConfig): Promise<string> {
+/** 两级 LLM 调用（用户配置优先，失败兜底内置模型）；W1-B5 起导出给 life-share 复用（人设文案同一条链路） */
+export async function callLlmTwoTier(system: string, userContent: string, apiConfig: ApiConfig): Promise<string> {
   const call = async (extra: Record<string, unknown>): Promise<string> => {
     const res = await safeLlmFetch(
       '/api/chat',
@@ -686,8 +691,8 @@ async function callLlmTwoTier(system: string, userContent: string, apiConfig: Ap
   return raw;
 }
 
-/** 从 LLM 原文抠 JSON 对象（三级：整段 parse → 首个 {...} 块 → null） */
-function extractJsonObjectSafely(raw: string): Record<string, unknown> | null {
+/** 从 LLM 原文抠 JSON 对象（三级：整段 parse → 首个 {...} 块 → null）；W1-B5 起导出给 life-share 复用 */
+export function extractJsonObjectSafely(raw: string): Record<string, unknown> | null {
   const t = (raw ?? '').trim();
   if (!t) return null;
   try {
@@ -1515,6 +1520,14 @@ async function tickInner(): Promise<void> {
     // ② 无挂起任务且条件满足 → 动态插值排程：等待 = 最长 - (level-阈值)/(100-阈值) × (最长-最短)
     scheduleAnxietyFire(cid, anx.level, threshold, minWaitMs, maxWaitMs);
   }
+
+  // ⑦ 生活分享（W1-B5）：TA 每天不定期把刚拍的照/刚吃的饭这类生活日常发到与用户的信息主会话
+  // （随机时段计划 + 当日场景去重 + DND/静音守卫；生成/投递 fire-and-forget，绝不阻塞 tick 节拍）
+  try {
+    await runLifeShareTick(allContacts);
+  } catch {
+    /* 静默（后台增强能力） */
+  }
 }
 
 // ---------------- 统一触发入口（生成锁 + 去重 + 投递） ----------------
@@ -1624,7 +1637,8 @@ export function buildReminderSysMsg(app: ProactiveApp, label: string): Record<st
 
 // ---------------- 联系人删除清理 ----------------
 
-/** 删除联系人时清扫主动发消息的全部痕迹（配置/执行记录/提醒任务/历史/索引） */
+/** 删除联系人时清扫主动发消息的全部痕迹（配置/执行记录/提醒任务/历史/索引）
+ *  + 生活分享的配置/调度状态（W1-B5） */
 export function purgeProactiveForContact(cid: string): void {
   try {
     for (const app of ['wx', 'qq', 'sms'] as ProactiveApp[]) {
@@ -1639,6 +1653,7 @@ export function purgeProactiveForContact(cid: string): void {
     removeFromIndex('wx', cid);
     removeFromIndex('qq', cid);
     removeFromIndex('sms', cid);
+    purgeLifeShareForContact(cid);
   } catch {
     /* 清理失败静默 */
   }

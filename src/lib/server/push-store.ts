@@ -9,16 +9,14 @@
 
 /**
  * 数据文件候选目录（按序尝试）：项目 .data 优先（本地可持久化），/tmp 兜底（只读 FS）。
- * 用字符串动态拼接路径，避免顶层导入依赖（路由打包兼容）。
+ * 动态 import（node 内置模块在路由运行时按需加载，避免顶层依赖；同时避开 require() lint）。
  */
-function dataDirs(): string[] {
+async function dataDirs(): Promise<string[]> {
   const dirs: string[] = [];
   try {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const path = require('node:path') as typeof import('node:path');
+    const path = await import('node:path');
+    const os = await import('node:os');
     dirs.push(path.join(process.cwd(), '.data'));
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const os = require('node:os') as typeof import('node:os');
     // /tmp 下带项目标识目录，避免同机多实例互踩；Lambda 每实例独立 /tmp 天然隔离
     dirs.push(path.join(os.tmpdir(), 'ai-phone-push-data'));
   } catch {
@@ -32,7 +30,7 @@ export async function readPushJson<T>(file: string, fallback: T): Promise<T> {
   try {
     const { readFile } = await import('fs/promises');
     const path = await import('path');
-    for (const dir of dataDirs()) {
+    for (const dir of await dataDirs()) {
       try {
         const raw = await readFile(path.join(dir, file), 'utf8');
         return JSON.parse(raw) as T;
@@ -51,7 +49,7 @@ export async function writePushJson(file: string, value: unknown): Promise<void>
   try {
     const { writeFile, mkdir } = await import('fs/promises');
     const path = await import('path');
-    for (const dir of dataDirs()) {
+    for (const dir of await dataDirs()) {
       try {
         await mkdir(dir, { recursive: true });
         await writeFile(path.join(dir, file), JSON.stringify(value), 'utf8');

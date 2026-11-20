@@ -1,9 +1,9 @@
 'use client';
 
 /**
- * 小组件画廊（主屏全部 14 种小组件 1:1 预览，点击右上角 + 添加到主屏幕）：
+ * 小组件画廊（主屏全部 15 种小组件 1:1 预览，点击右上角 + 添加到主屏幕）：
  * - 编辑模式顶栏「+」：主屏内弹出画廊浮层（时钟/天气/信息卡片/气泡/日记/一起听/音乐/
- *   网易云/对话气泡/黑胶/日历/iCity/表盘时钟/拍立得，全部平铺不分组——用户要求不显示「第几页」），
+ *   网易云/对话气泡/黑胶/日历/iCity/表盘时钟/拍立得/快捷联系人，全部平铺不分组——用户要求不显示「第几页」），
  *   已添加的显示「已添加」角标不可重复添加；
  *   × 删除过的小组件从 hidden 找回（与「恢复默认」同一数据链路）；
  * - 主题 App「小组件」独立界面（ThemesWidgetsPage）：同一套 1:1 画廊放在
@@ -30,6 +30,7 @@ import { ProfileCardWidget, loadProfileCard, type ProfileCardData } from './Prof
 import { BubbleCardWidget, loadBubbleCard, type BubbleCardData } from './BubbleCard';
 import { ICityCardWidget, loadICityCard, type ICityCardData } from './ICityCard';
 import { PolaroidCardWidget, loadPolaroidCard, type PolaroidCardData } from './PolaroidCard';
+import { ContactWidget } from './ContactWidget';
 
 // 天气小组件懒加载（与主屏同一模块 chunk，首帧不拖慢）
 const WeatherWidget = dynamic(() => import('@/components/apps/weather').then((m) => m.WeatherWidget), {
@@ -39,7 +40,7 @@ const WeatherWidget = dynamic(() => import('@/components/apps/weather').then((m)
   ),
 });
 
-/** 画廊内可添加的小组件种类（主屏全部 14 种，与 HomeScreen 的 WidgetKind 一一对应） */
+/** 画廊内可添加的小组件种类（主屏全部 15 种，与 HomeScreen 的 WidgetKind 一一对应） */
 export type GalleryKind =
   | 'weather'
   | 'clock'
@@ -54,7 +55,8 @@ export type GalleryKind =
   | 'calendar'
   | 'icity'
   | 'tickclock'
-  | 'polaroid';
+  | 'polaroid'
+  | 'contact';
 export const GALLERY_KINDS: GalleryKind[] = [
   'weather',
   'clock',
@@ -70,6 +72,7 @@ export const GALLERY_KINDS: GalleryKind[] = [
   'icity',
   'tickclock',
   'polaroid',
+  'contact',
 ];
 
 /** 画廊项：跨度与主屏 WIDGET_SPAN 一致（1:1），全部平铺展示（不按页分组） */
@@ -84,10 +87,11 @@ const GALLERY_ITEMS: { kind: GalleryKind; span: string; label: string }[] = [
   { kind: 'netease', span: 'col-span-2 row-span-3', label: '网易云' },
   { kind: 'dialog', span: 'col-span-4 row-span-2', label: '对话气泡' },
   { kind: 'vinyl', span: 'col-span-2 row-span-3', label: '黑胶' },
-  { kind: 'calendar', span: 'col-span-4 row-span-2', label: '日历' },
+  { kind: 'calendar', span: 'col-span-2 row-span-2 self-center', label: '日历' },
   { kind: 'icity', span: 'col-span-2 row-span-2 self-center', label: 'iCity' },
   { kind: 'tickclock', span: 'col-span-2 row-span-2 self-center', label: '表盘时钟' },
   { kind: 'polaroid', span: 'col-span-4 row-span-2', label: '拍立得' },
+  { kind: 'contact', span: 'col-span-2 row-span-2 self-center', label: '快捷联系人' },
 ];
 
 /** IndexedDB 布局 key（与 HomeScreen 的 LAYOUT_KEY 保持一致） */
@@ -303,6 +307,8 @@ export function WidgetGalleryContent({
         return <DialogCardWidget data={dialogData} />;
       case 'calendar':
         return <CalendarCardWidget />;
+      case 'contact':
+        return <ContactWidget />;
       case 'icity':
         return <ICityCardWidget data={icityData} />;
       case 'tickclock':

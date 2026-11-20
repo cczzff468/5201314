@@ -15,6 +15,8 @@
 import { useWxCloud, wxCloudSnapshot, ensureTaskSecret, type WxCloudSupabase } from './store';
 import { buildRunPackage, type RunPackageResult } from './run-package';
 import { ASSISTANT_MJS, EDGE_FUNCTION_TS, CLOUD_RUNTIME_VER } from './sources';
+// v22 云端健康断路器：自动同步/云端读在 402/502 风控期间静默跳过云端、回落本地（本地直推照常）
+import { cloudCooling, cloudCoolingRemainMs, cloudHealthSnapshot, noteCloudIo } from './cloud-health';
 
 export const FUNC_SLUG = 'wx-assistant';
 export const BUCKET_PRIVATE = 'wx-cloud';
@@ -121,6 +123,9 @@ export async function readBucketJsonViaRelay<T>(ref: string, path: string): Prom
   if (!ref || !secret) return null;
   try {
     const { status, j } = await supaProxy({ op: 'func-call', ref, secret, action: 'read-file', body: { path } }, 30_000);
+    // v22 熔断证据采集：平台风控类失败（402/5xx…）计入站内熔断器；成功即重置（冷却到期后
+    // 的这一次调用自然就是半开探测）
+    noteCloudIo(status === 200, status);
     if (status !== 200) return null;
     const rec = j as { ok?: boolean; relay?: boolean; data?: unknown } | null;
     if (!rec || rec.ok !== true || rec.relay !== true || typeof rec.data === 'undefined') return null;
@@ -328,6 +333,9 @@ export async function syncRunPackage(): Promise<DeployResult> {
     },
     150_000,
   );
+  // v22 熔断证据采集：上传结果计入站内熔断器（成功即重置；402/502 连续 3 次 → 自动同步
+  // 在冷却期整体跳过云端上传，本地直推照常）
+  noteCloudIo(status === 200, status);
   if (status !== 200) {
     const rec = (j ?? {}) as { message?: string; error?: string };
     // v20：云端上传失败（402/502 受限）但本机直推已成功 → 网关通道照常最新——如实报告
@@ -384,6 +392,29 @@ export async function autoSyncRunPackageIfDeployed(reason: string, channel: 'qq'
     (st.platform === 'hf' && (st.hf?.deployedAt ?? 0) > 0) ||
     (st.platform === 'clawcloud' && !!st.clawcloudAt);
   if (!deployed || !supa?.token || !supa.ref) return null;
+  // v22 云端写熔断中：自动同步整体跳过云端上传链（免 402 重试风暴——接入/换绑/API 改动的
+  // 后台自动重推不再连环撞墙）；本地直推照做（网关人设/表情包/语音配置照常新鲜）；到点后
+  // 下一次自动同步即半开探测（成功即恢复）。手动「重新同步运行包」不受限（本身就是探测）。
+  if (cloudCooling()) {
+    let gwPushed = false;
+    try {
+      const pkg = await buildRunPackage();
+      if (pkg.ok) gwPushed = await pushRunPackageToGateway(pkg).catch(() => false);
+    } catch {
+      /* 本地直推失败静默（下次再试） */
+    }
+    const mm = Math.max(1, Math.round(cloudCoolingRemainMs() / 60_000));
+    useWxCloud
+      .getState()
+      .setLastAutoSync({
+        ok: false,
+        msg: `${reason}：云端写通道熔断中（${cloudHealthSnapshot().lastErr || '连续失败'}，约 ${mm} 分钟后自动恢复重试）${
+          gwPushed ? '——本机网关已直推最新配置（真机收发不受影响）' : ''
+        }`,
+        channel,
+      });
+    return null;
+  }
   let r: DeployResult;
   try {
     r = await syncRunPackage();
@@ -611,12 +642,20 @@ export interface CloudHeartbeat {
   wxMsgErrorAt?: number;
 }
 export async function fetchCloudHeartbeat(ref: string): Promise<CloudHeartbeat | null> {
+  // v22 云端读回落（不清空已知）：熔断冷却期不再打云端（免 402 报错风暴），返回最近一次
+  // 已知心跳（页面显示保持上次值而非清成 null）；正常期读失败也回落缓存值
+  if (cloudCooling()) return heartbeatCache;
   try {
-    return await readBucketJsonViaRelay<CloudHeartbeat>(ref, 'state/heartbeat.json');
+    const hb = await readBucketJsonViaRelay<CloudHeartbeat>(ref, 'state/heartbeat.json');
+    if (hb) heartbeatCache = hb;
+    return hb ?? heartbeatCache;
   } catch {
-    return null;
+    return heartbeatCache;
   }
 }
+
+/** v22 云端心跳本地缓存（模块级内存——冷却/读失败期间不清空已知值） */
+let heartbeatCache: CloudHeartbeat | null = null;
 
 /** 保存 Supabase 连接信息（token + ref；serviceKey 部署时自动补） */
 export function saveSupabaseConn(token: string, ref: string, projectName: string): void {

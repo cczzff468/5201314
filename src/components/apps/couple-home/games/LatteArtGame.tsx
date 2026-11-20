@@ -95,14 +95,14 @@ function LatteBoard({ onClose, onResult }: { onClose: () => void; onResult: (r: 
             <Coffee className="h-[18px] w-[18px] text-[#c98d5e]" />
           </span>
           <div>
-            <div className="text-[15px] font-semibold text-[#3a3a3e]">咖啡拉花</div>
-            <div className="text-[11px] text-[#9a9a96]">停针注奶，给 TA 画颗爱心</div>
+            <div className="text-[15px] font-semibold text-[#3a3a3e] dark:text-zinc-100">咖啡拉花</div>
+            <div className="text-[11px] text-[#9a9a96] dark:text-zinc-400">停针注奶，给 TA 画颗爱心</div>
           </div>
         </div>
         <button
           onClick={onClose}
           aria-label="关闭拉花"
-          className="flex h-8 w-8 items-center justify-center rounded-full bg-[#f0eff1] text-[#8a8a90] transition active:scale-95"
+          className="flex h-8 w-8 items-center justify-center rounded-full bg-[#f0eff1] text-[#8a8a90] transition active:scale-95 dark:bg-zinc-800 dark:text-zinc-400"
         >
           <X className="h-4 w-4" />
         </button>
@@ -186,7 +186,7 @@ function LatteBoard({ onClose, onResult }: { onClose: () => void; onResult: (r: 
       {/* 结果文案 / 提示 */}
       <div className="mb-3 text-center">
         {phase === 'pour' && result ? (
-          <motion.div key={result} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} className="text-[15px] font-semibold text-[#3a3a3e]">
+          <motion.div key={result} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} className="text-[15px] font-semibold text-[#3a3a3e] dark:text-zinc-100">
             {result === 'perfect' ? '完美拉花！' : result === 'ok' ? '不错的拉花' : '啊，奶泡倒多了…'}
           </motion.div>
         ) : (
@@ -224,7 +224,7 @@ export default function LatteArtGame({ open, onClose, onResult }: LatteArtGamePr
             animate={{ scale: 1, y: 0 }}
             exit={{ scale: 0.95, y: 10 }}
             transition={{ type: 'spring', damping: 26, stiffness: 320 }}
-            className="w-full max-w-[330px] rounded-3xl bg-white/96 p-5 shadow-2xl"
+            className="w-full max-w-[330px] rounded-3xl bg-white/96 p-5 shadow-2xl dark:bg-zinc-900/95"
           >
             <LatteBoard onClose={onClose} onResult={onResult} />
           </motion.div>

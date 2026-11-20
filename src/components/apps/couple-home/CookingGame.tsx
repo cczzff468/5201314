@@ -170,7 +170,7 @@ export default function CookingGame({
         animate={{ scale: 1, y: 0 }}
         exit={{ scale: 0.95, y: 10 }}
         transition={{ type: 'spring', damping: 26, stiffness: 320 }}
-        className="w-full max-w-[330px] rounded-3xl bg-white/96 p-5 shadow-2xl"
+        className="w-full max-w-[330px] rounded-3xl bg-white/96 p-5 shadow-2xl dark:bg-zinc-900/95"
       >
         {/* 头部 */}
         <div className="mb-4 flex items-center justify-between">
@@ -179,8 +179,8 @@ export default function CookingGame({
               <ChefHat className="h-[18px] w-[18px] text-[#d98d4e]" />
             </span>
             <div>
-              <div className="text-[15px] font-semibold text-[#3a3a3e]">今天开小灶</div>
-              <div className="text-[11px] text-[#9a9a96]">
+              <div className="text-[15px] font-semibold text-[#3a3a3e] dark:text-zinc-100">今天开小灶</div>
+              <div className="text-[11px] text-[#9a9a96] dark:text-zinc-400">
                 {dish ? `${dish.emoji} ${dish.name} · 完美 ×${perfect}` : '选一道想吃的菜吧'}
               </div>
             </div>
@@ -188,7 +188,7 @@ export default function CookingGame({
           <button
             onClick={onClose}
             aria-label="关闭做饭"
-            className="flex h-8 w-8 items-center justify-center rounded-full bg-[#f0eff1] text-[#8a8a90] transition active:scale-95"
+            className="flex h-8 w-8 items-center justify-center rounded-full bg-[#f0eff1] text-[#8a8a90] transition active:scale-95 dark:bg-zinc-800 dark:text-zinc-400"
           >
             <X className="h-4 w-4" />
           </button>
@@ -258,7 +258,7 @@ export default function CookingGame({
                   style={{ background: d.bg }}
                 >
                   <span className="text-[30px] leading-none">{d.emoji}</span>
-                  <span className="text-[12px] font-semibold text-[#4a4a4e]">{d.name}</span>
+                  <span className="text-[12px] font-semibold text-[#4a4a4e] dark:text-zinc-200">{d.name}</span>
                 </button>
               ))}
             </motion.div>
@@ -307,7 +307,7 @@ export default function CookingGame({
                   <Flame className="h-[18px] w-[18px]" />
                   颠勺！
                 </button>
-                <span className="text-[13px] font-semibold text-[#8a8a90]">{stirHit}/4</span>
+                <span className="text-[13px] font-semibold text-[#8a8a90] dark:text-zinc-400">{stirHit}/4</span>
               </div>
             </motion.div>
           )}
@@ -362,8 +362,8 @@ export default function CookingGame({
                 {dish.emoji}
               </motion.span>
               <div className="text-center">
-                <div className="text-[16px] font-semibold text-[#3a3a3e]">{dish.name}出锅啦！</div>
-                <div className="mt-1 text-[12px] text-[#9a9a96]">
+                <div className="text-[16px] font-semibold text-[#3a3a3e] dark:text-zinc-100">{dish.name}出锅啦！</div>
+                <div className="mt-1 text-[12px] text-[#9a9a96] dark:text-zinc-400">
                   评级：{grade}（完美 ×{perfect}）
                 </div>
               </div>

@@ -178,15 +178,15 @@ export function MtProxyDetailPage({
 
   if (!p) {
     return (
-      <div className="absolute inset-0 z-50 flex flex-col bg-[#F4F5F7]">
-        <div className="flex shrink-0 items-center bg-[#F4F5F7] px-2 pb-2 pt-[54px]">
-          <button type="button" aria-label="返回" onClick={onBack} className="grid h-9 w-9 place-items-center rounded-full active:bg-black/5">
-            <ChevronLeft className="h-6 w-6 text-black/75" />
+      <div className="absolute inset-0 z-50 flex flex-col bg-[#F4F5F7] dark:bg-[#111111]">
+        <div className="flex shrink-0 items-center bg-[#F4F5F7] px-2 pb-2 pt-[54px] dark:bg-[#111111]">
+          <button type="button" aria-label="返回" onClick={onBack} className="grid h-9 w-9 place-items-center rounded-full active:bg-black/5 dark:active:bg-white/5">
+            <ChevronLeft className="h-6 w-6 text-black/75 dark:text-white/75" />
           </button>
-          <p className="min-w-0 flex-1 text-center pr-9 text-[17px] font-semibold text-black/90">代付详情</p>
+          <p className="min-w-0 flex-1 text-center pr-9 text-[17px] font-semibold text-black/90 dark:text-white/90">代付详情</p>
         </div>
         <div className="grid flex-1 place-items-center">
-          <p className="text-[13px] text-black/40">代付请求不存在或已过期</p>
+          <p className="text-[13px] text-black/40 dark:text-white/40">代付请求不存在或已过期</p>
         </div>
       </div>
     );
@@ -217,14 +217,14 @@ export function MtProxyDetailPage({
   };
 
   return (
-    <div className="absolute inset-0 z-50 flex flex-col bg-[#F4F5F7]" data-testid="mt-proxy-detail">
+    <div className="absolute inset-0 z-50 flex flex-col bg-[#F4F5F7] dark:bg-[#111111]" data-testid="mt-proxy-detail">
       {/* 顶栏（背景与页身同色：状态栏区域不再出现白/灰分界） */}
-      <div className="shrink-0 bg-[#F4F5F7] pt-[54px]">
+      <div className="shrink-0 bg-[#F4F5F7] pt-[54px] dark:bg-[#111111]">
         <div className="relative grid h-[48px] place-items-center">
-          <button type="button" aria-label="返回" data-testid="mt-proxy-detail-back" onClick={onBack} className="absolute left-1 grid h-10 w-10 place-items-center rounded-full active:bg-black/5">
-            <ChevronLeft className="h-[24px] w-[24px] text-black/85" strokeWidth={2.2} />
+          <button type="button" aria-label="返回" data-testid="mt-proxy-detail-back" onClick={onBack} className="absolute left-1 grid h-10 w-10 place-items-center rounded-full active:bg-black/5 dark:active:bg-white/5">
+            <ChevronLeft className="h-[24px] w-[24px] text-black/85 dark:text-white/85" strokeWidth={2.2} />
           </button>
-          <p className="text-[17px] font-semibold text-black/90">代付详情</p>
+          <p className="text-[17px] font-semibold text-black/90 dark:text-white/90">代付详情</p>
         </div>
       </div>
 
@@ -235,16 +235,16 @@ export function MtProxyDetailPage({
             <>
               <AvatarImg src={p.contactAvatar} name={p.contactName} />
               <div className="min-w-0 flex-1">
-                <p className="truncate text-[17px] font-semibold text-black/90" data-testid="mt-proxy-payer-name">{p.contactName}</p>
-                <p className="mt-0.5 truncate text-[13px] text-black/45">我们友谊的小船更加稳固了～</p>
+                <p className="truncate text-[17px] font-semibold text-black/90 dark:text-white/90" data-testid="mt-proxy-payer-name">{p.contactName}</p>
+                <p className="mt-0.5 truncate text-[13px] text-black/45 dark:text-white/45">我们友谊的小船更加稳固了～</p>
               </div>
             </>
           ) : (
             <>
               <AvatarImg src={p.fromAvatar} name={p.fromName} />
               <div className="min-w-0 flex-1">
-                <p className="truncate text-[17px] font-semibold text-black/90">{p.fromName}</p>
-                <p className="mt-0.5 truncate text-[13px] text-black/45">
+                <p className="truncate text-[17px] font-semibold text-black/90 dark:text-white/90">{p.fromName}</p>
+                <p className="mt-0.5 truncate text-[13px] text-black/45 dark:text-white/45">
                   {declined ? 'TA看了订单，婉拒了这次代付' : expired ? `请求已失效（${p.closeReason ?? '订单未支付'}）` : meDir ? '拍了订单，想请你帮TA付一下～' : '拍下了订单，快来帮我付一下吧～'}
                 </p>
               </div>
@@ -253,9 +253,9 @@ export function MtProxyDetailPage({
         </div>
 
         {/* 状态卡 */}
-        <div className="rounded-2xl bg-white p-5">
+        <div className="rounded-2xl bg-white p-5 dark:bg-[#1A1A1A]">
           <div className="flex flex-col items-center">
-            <span className="flex items-center gap-2 text-[20px] font-bold text-black/90" data-testid="mt-proxy-state">
+            <span className="flex items-center gap-2 text-[20px] font-bold text-black/90 dark:text-white/90" data-testid="mt-proxy-state">
               {paid ? (
                 <>
                   <span className="grid h-7 w-7 place-items-center rounded-full bg-[#FFD100]">
@@ -286,11 +286,11 @@ export function MtProxyDetailPage({
                 </>
               )}
             </span>
-            <p className="mt-2.5 text-[42px] font-bold leading-tight tracking-tight text-black/90" data-testid="mt-proxy-amount">
+            <p className="mt-2.5 text-[42px] font-bold leading-tight tracking-tight text-black/90 dark:text-white/90" data-testid="mt-proxy-amount">
               <span className="text-[26px]">¥</span>
               {fmt2(p.amount)}
             </p>
-            <p className="mt-1 text-[13px] text-black/45" data-testid="mt-proxy-channel">
+            <p className="mt-1 text-[13px] text-black/45 dark:text-white/45" data-testid="mt-proxy-channel">
               {paid
                 ? channel
                 : declined
@@ -301,16 +301,16 @@ export function MtProxyDetailPage({
                       ? `等待你代付（${platform}）`
                       : `等待${p.contactName}代付（${platform}好友）`}
             </p>
-            {paid && p.paidAt && <p className="mt-0.5 text-[11px] text-black/30">支付时间 {fmtFull(p.paidAt)}</p>}
+            {paid && p.paidAt && <p className="mt-0.5 text-[11px] text-black/30 dark:text-white/30">支付时间 {fmtFull(p.paidAt)}</p>}
           </div>
 
-          {/* 付款须知（对齐截图黄底须知块） */}
-          <div className="mt-4 rounded-xl bg-[#FFF8D9] px-4 py-3">
-            <p className="text-[13px] font-semibold text-[#8F6B1E]">付款须知</p>
-            <p className="mt-1.5 text-[12px] leading-relaxed text-[#A98A3C]">
+          {/* 付款须知（对齐截图黄底须知块；深色下翻成深琥珀贴片，褐字提亮，与 shop-dark 生成器同口径） */}
+          <div className="mt-4 rounded-xl bg-[#FFF8D9] px-4 py-3 dark:bg-[#3A3318]">
+            <p className="text-[13px] font-semibold text-[#8F6B1E] dark:text-amber-200">付款须知</p>
+            <p className="mt-1.5 text-[12px] leading-relaxed text-[#A98A3C] dark:text-amber-200/75">
               1.代付订单创建成功后15分钟内未付款，订单会自动取消，你可以重新下单。
             </p>
-            <p className="mt-1 text-[12px] leading-relaxed text-[#A98A3C]">
+            <p className="mt-1 text-[12px] leading-relaxed text-[#A98A3C] dark:text-amber-200/75">
               2.当代付订单退款成功后，实付金额将原路退还代付人。
             </p>
           </div>
@@ -351,44 +351,44 @@ export function MtProxyDetailPage({
                 type="button"
                 disabled
                 data-testid="mt-proxy-wait-btn"
-                className="mt-4 flex h-[46px] w-full cursor-not-allowed items-center justify-center gap-2 rounded-full bg-[#F5F6F7] text-[15px] text-black/45"
+                className="mt-4 flex h-[46px] w-full cursor-not-allowed items-center justify-center gap-2 rounded-full bg-[#F5F6F7] text-[15px] text-black/45 dark:bg-[#1E1E1E] dark:text-white/45"
               >
-                <Loader2 className="h-4 w-4 animate-spin text-black/35" />
+                <Loader2 className="h-4 w-4 animate-spin text-black/35 dark:text-white/35" />
                 等待{p.contactName}代付…
               </button>
-              <p className="mt-2 text-center text-[11px] leading-relaxed text-black/35">
+              <p className="mt-2 text-center text-[11px] leading-relaxed text-black/35 dark:text-white/35">
                 TA会根据自己的意愿决定是否代付，可以去聊天里提醒TA
               </p>
             </div>
           ) : (
-            <button type="button" disabled className="mt-4 h-[46px] w-full cursor-not-allowed rounded-full bg-[#F5F6F7] text-[15px] text-black/35">
+            <button type="button" disabled className="mt-4 h-[46px] w-full cursor-not-allowed rounded-full bg-[#F5F6F7] text-[15px] text-black/35 dark:bg-[#1E1E1E] dark:text-white/35">
               等待好友代付…
             </button>
           )}
         </div>
 
         {/* 订单商品卡 */}
-        <div className="mt-3 rounded-2xl bg-white p-4">
-          <p className="truncate text-[15px] font-bold text-black/90" data-testid="mt-proxy-merchant">{p.merchantName}</p>
+        <div className="mt-3 rounded-2xl bg-white p-4 dark:bg-[#1A1A1A]">
+          <p className="truncate text-[15px] font-bold text-black/90 dark:text-white/90" data-testid="mt-proxy-merchant">{p.merchantName}</p>
           <div className="mt-3 space-y-3">
             {p.items.map((it, i) => (
               <div key={i} className="flex items-center gap-3">
                 <FoodImg src={it.img} emoji={it.emoji} className="h-12 w-12 shrink-0 rounded-lg" />
                 <div className="min-w-0 flex-1">
-                  <p className="truncate text-[14px] text-black/85">{stripDealQty(it.name)}</p>
-                  {it.spec && <p className="mt-0.5 truncate text-[11.5px] text-black/40">{stripDealQty(it.spec)}</p>}
-                  <p className="mt-0.5 text-[11.5px] text-black/40">×{it.qty}</p>
+                  <p className="truncate text-[14px] text-black/85 dark:text-white/85">{stripDealQty(it.name)}</p>
+                  {it.spec && <p className="mt-0.5 truncate text-[11.5px] text-black/40 dark:text-white/40">{stripDealQty(it.spec)}</p>}
+                  <p className="mt-0.5 text-[11.5px] text-black/40 dark:text-white/40">×{it.qty}</p>
                 </div>
-                <span className="shrink-0 text-[14px] font-semibold text-black/85">¥{fmt2(it.price * it.qty)}</span>
+                <span className="shrink-0 text-[14px] font-semibold text-black/85 dark:text-white/85">¥{fmt2(it.price * it.qty)}</span>
               </div>
             ))}
           </div>
           {p.note && (
-            <p className="mt-3 border-t border-black/[0.05] pt-2.5 text-[11.5px] text-black/40">备注：{p.note}</p>
+            <p className="mt-3 border-t border-black/[0.05] pt-2.5 text-[11.5px] text-black/40 dark:border-white/[0.08] dark:text-white/40">备注：{p.note}</p>
           )}
         </div>
 
-        <p className="mt-3 px-2 text-center text-[10.5px] leading-relaxed text-black/30">
+        <p className="mt-3 px-2 text-center text-[10.5px] leading-relaxed text-black/30 dark:text-white/30">
           代付金额与订单一致 · 资金由{platform}支付保障
         </p>
       </div>

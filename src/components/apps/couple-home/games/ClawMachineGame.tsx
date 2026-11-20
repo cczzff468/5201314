@@ -323,14 +323,14 @@ function ClawBoard({ onClose, onWin, disabled }: { onClose: () => void; onWin: (
             <Grab className="h-[18px] w-[18px] text-[#e8899a]" />
           </span>
           <div>
-            <div className="text-[15px] font-semibold text-[#3a3a3e]">娃娃机 · 一抓定情</div>
-            <div className="text-[11px] text-[#9a9a96]">爪子游到喜欢的毛绒上就落爪！</div>
+            <div className="text-[15px] font-semibold text-[#3a3a3e] dark:text-zinc-100">娃娃机 · 一抓定情</div>
+            <div className="text-[11px] text-[#9a9a96] dark:text-zinc-400">爪子游到喜欢的毛绒上就落爪！</div>
           </div>
         </div>
         <button
           onClick={onClose}
           aria-label="关闭娃娃机"
-          className="flex h-8 w-8 items-center justify-center rounded-full bg-[#f0eff1] text-[#8a8a90] transition active:scale-95"
+          className="flex h-8 w-8 items-center justify-center rounded-full bg-[#f0eff1] text-[#8a8a90] transition active:scale-95 dark:bg-zinc-800 dark:text-zinc-400"
         >
           <X className="h-4 w-4" />
         </button>
@@ -349,7 +349,7 @@ function ClawBoard({ onClose, onWin, disabled }: { onClose: () => void; onWin: (
           {PLUSHIES.map((pl, i) => {
             const taken = phase === 'run' && result?.cell === i;
             return (
-              <div key={pl.kind} className="flex items-center justify-center rounded-xl bg-white/55">
+              <div key={pl.kind} className="flex items-center justify-center rounded-xl bg-white/55 dark:bg-zinc-800/60">
                 <div
                   className="transition-opacity duration-300"
                   style={{ opacity: taken && result?.win ? 0 : 1, transform: i === 5 ? 'translate(-8px, 4px)' : undefined }}
@@ -420,7 +420,7 @@ function ClawBoard({ onClose, onWin, disabled }: { onClose: () => void; onWin: (
             <motion.div animate={{ y: [0, -6, 0], rotate: [0, -4, 4, 0] }} transition={{ repeat: Infinity, duration: 1.4 }}>
               <PlushHead kind={result.kind} size={62} />
             </motion.div>
-            <div className="text-[16px] font-semibold text-[#3a3a3e]">抓到{winName}啦！</div>
+            <div className="text-[16px] font-semibold text-[#3a3a3e] dark:text-zinc-100">抓到{winName}啦！</div>
             <button
               onClick={collect}
               className="flex h-11 items-center gap-2 rounded-full bg-[#f4b3c2] px-7 text-[14px] font-semibold text-white shadow-lg transition active:scale-95"
@@ -449,7 +449,7 @@ function ClawBoard({ onClose, onWin, disabled }: { onClose: () => void; onWin: (
               </button>
               <button
                 onClick={onClose}
-                className="flex h-11 items-center rounded-full bg-[#f0eff1] px-5 text-[13.5px] font-medium text-[#8a8a90] transition active:scale-95"
+                className="flex h-11 items-center rounded-full bg-[#f0eff1] px-5 text-[13.5px] font-medium text-[#8a8a90] transition active:scale-95 dark:bg-zinc-800 dark:text-zinc-400"
               >
                 先不玩了
               </button>
@@ -460,7 +460,7 @@ function ClawBoard({ onClose, onWin, disabled }: { onClose: () => void; onWin: (
 
       {/* 冷却遮罩（disabled = 刚抓中 30s 内） */}
       {disabled && (
-        <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-2 rounded-3xl bg-white/65 backdrop-blur-[3px]">
+        <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-2 rounded-3xl bg-white/65 backdrop-blur-[3px] dark:bg-zinc-900/70 dark:backdrop-blur-[3px]">
           <span className="flex h-11 w-11 items-center justify-center rounded-full bg-[#f4b3c2]/20">
             <Lock className="h-5 w-5 text-[#e8899a]" />
           </span>
@@ -487,7 +487,7 @@ export default function ClawMachineGame({ open, onClose, onWin, disabled }: Claw
             animate={{ scale: 1, y: 0 }}
             exit={{ scale: 0.95, y: 10 }}
             transition={{ type: 'spring', damping: 26, stiffness: 320 }}
-            className="relative w-full max-w-[330px] rounded-3xl bg-white/96 p-5 shadow-2xl"
+            className="relative w-full max-w-[330px] rounded-3xl bg-white/96 p-5 shadow-2xl dark:bg-zinc-900/95"
           >
             <ClawBoard onClose={onClose} onWin={onWin} disabled={disabled} />
           </motion.div>

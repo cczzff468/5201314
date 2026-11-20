@@ -73,6 +73,9 @@ import { addCharMomentPost, buildMomentsChatBlock, emitMomentsChanged, enqueuePo
 import { buildForumChatBlock } from '@/lib/forum/social';
 import { isPostMemoryOn } from '@/lib/forum/core';
 import { useChatDisplay } from '@/lib/ios/chat-display';
+// v25 真机输入中/已读同步：网关 typing 快照（轮询由本页 effect 驱动）+ 真机 QQ 绑定关系
+import { fetchImGatewayStatus, useGatewayTyping } from '@/lib/ios/wx-cloud/gateway';
+import { qqBotLoginSnapshot } from '@/lib/ios/qq-connect';
 import { bubbleVisual, isLiquidTheme, isRetroTheme, TAIL_CLIP_LEFT, TAIL_CLIP_RIGHT } from '@/lib/ios/bubble-style';
 import { chatContactKey, chatCssScopeSelector, scopeCss } from '@/lib/ios/custom-css';
 import { chatPlaceholder, resolveQuickKeys } from '@/lib/ios/chat-decor';
@@ -1132,6 +1135,39 @@ export function ChatPage({
     setDelivering(isAiDelivering(sessionKey));
     return subscribeAiDeliveryActive(() => setDelivering(isAiDelivering(sessionKey)));
   }, [sessionKey]);
+
+  // ---- v25 真机输入中/已读同步（网关通道） ----
+  /** 当前会话是否真机 QQ 绑定角色的会话（真机历史单线索，拉回来的记录都归这个会话） */
+  const isRealDeviceChat = useMemo(() => qqBotLoginSnapshot()?.boundContactId === peer.id, [peer.id]);
+  /** 网关正在生成真机回复（对方正在输入）——命中才渲染底部三点气泡；订阅模块级快照（本页轮询喂） */
+  const realDevTyping = useGatewayTyping('qq') && isRealDeviceChat;
+  /** 真机会话打开期间轻量轮询网关 GET 状态（4s；AbortSignal 防悬挂在 fetchImGatewayStatus 内），
+   *  拿到状态顺手更新 typing 快照；非绑定会话不轮询（空转浪费），页面卸载清定时器 */
+  useEffect(() => {
+    if (!isRealDeviceChat) return;
+    const poll = () => {
+      void fetchImGatewayStatus();
+    };
+    poll();
+    const timer = setInterval(poll, 4000);
+    return () => clearInterval(timer);
+  }, [isRealDeviceChat]);
+  /** 真机已读推导：真机历史拉回的「我」消息（q- 前缀——网关/云端 QQ 历史的确定性 id）其后存在
+   *  更新的 AI 回复（或已被网关处理——QQ 历史在认领后先落对方消息、回复逐段落库，回复未落时
+   *  不标）时，气泡角落标极小灰字「已读」。纯前端推导，不写历史；尾部倒扫 O(n) */
+  const realDevReadIds = useMemo(() => {
+    const ids = new Set<string>();
+    let hasPeerAfter = false;
+    for (let i = msgs.length - 1; i >= 0; i--) {
+      const m = msgs[i];
+      if (m.role === 'peer') {
+        hasPeerAfter = true;
+      } else if (m.role === 'me' && m.id.startsWith('q-') && hasPeerAfter) {
+        ids.add(m.id);
+      }
+    }
+    return ids;
+  }, [msgs]);
 
   /** 排队补跑：流进行中/连发投递中发来的消息（qqQueuedTurns）在「流收尾且投递队列清空」后自动触发回复。
    *  页面存活时监听流结束广播与投递状态变化；离开后流才收尾的，重进页面时补跑（消息已落盘不丢）。
@@ -4410,9 +4446,9 @@ export function ChatPage({
                     {peer.name}
                   </span>
                 </span>
-                {(streaming || delivering || liquidSkinQq.headerMiddleText.trim()) && (
+                {(streaming || delivering || realDevTyping || liquidSkinQq.headerMiddleText.trim()) && (
                   <span className="max-w-[86px] truncate text-[12px] font-semibold text-black/70 dark:text-white/75">
-                    {streaming || delivering ? '正在输入…' : liquidSkinQq.headerMiddleText.trim()}
+                    {streaming || delivering || realDevTyping ? '正在输入…' : liquidSkinQq.headerMiddleText.trim()}
                   </span>
                 )}
                 <span className="flex w-[52px] shrink-0 flex-col items-center gap-[2px]">
@@ -4450,7 +4486,7 @@ export function ChatPage({
                   </>
                 )}
                 {liquidSkinQq.headerMode === 'avatarName' && liquidSkinQq.headerShowName ? (
-                  <span className="truncate">{streaming || delivering ? '正在输入中…' : peer.name}</span>
+                  <span className="truncate">{streaming || delivering || realDevTyping ? '正在输入中…' : peer.name}</span>
                 ) : null}
               </span>
               <CoupleMark contactId={peer.id} size={20} testId="qq-chat-couple-mark" />
@@ -4467,10 +4503,10 @@ export function ChatPage({
             <span
               data-testid="qq-chat-title"
               className={`truncate text-[17px] font-semibold leading-tight ${
-                streaming || delivering ? (retro ? 'text-white/45' : 'text-black/45 dark:text-white/45') : ''
+                streaming || delivering || realDevTyping ? (retro ? 'text-white/45' : 'text-black/45 dark:text-white/45') : ''
               }`}
             >
-              {streaming || delivering ? '正在输入中…' : peer.name}
+              {streaming || delivering || realDevTyping ? '正在输入中…' : peer.name}
             </span>
             {/* 情侣空间标识（第九/十轮）：开通情侣空间后名字后的徽章+钥匙（用户素材图），解除后即时消失 */}
             <CoupleMark contactId={peer.id} size={20} testId="qq-chat-couple-mark" />
@@ -5085,6 +5121,16 @@ export function ChatPage({
                     {renderTranslations(m.id, m.content)}
                     {/* 显示设置 › 已读未读/时间（位置=气泡下面）：靠气泡末尾（远离头像的一侧），已读在上、时间在下 */}
                     <QqMetaUnderBubble m={m} cfg={chatDisplay} />
+                    {/* v25 真机已读：真机历史拉回的「我」消息已被网关处理（其后存在更新的 AI 回复）——
+                        气泡角落极小灰字；显示设置的已读回执开着时不重复标（那套元信息已含已读行） */}
+                    {!chatDisplay.readEnabled && mine && realDevReadIds.has(m.id) && (
+                      <span
+                        data-testid={`qq-realdev-read-${m.id}`}
+                        className="mt-[3px] self-stretch text-left whitespace-nowrap text-[10px] leading-[1.35] text-black/35 dark:text-white/40"
+                      >
+                        已读
+                      </span>
+                    )}
                   </div>
                 )}
                 {mine && (
@@ -5151,10 +5197,11 @@ export function ChatPage({
             </Fragment>
           );
         })}
-        {/* 正在输入指示（流式接收 + 逐条投递期间显示）：AI 回复为「边接收边逐条显示」——
+        {/* 正在输入指示（流式接收 + 逐条投递期间显示；v25 真机输入中同款——网关收到真机 QQ
+            用户消息、生成回复期间，站内绑定会话同步三点气泡）：AI 回复为「边接收边逐条显示」——
             完整分段直接作为真实消息逐条投递上屏（见 runAiTurn 的 onSegment/finalize），
             不再有先全文显示后消失的流式气泡；识图失败系统提示在此一并展示 */}
-        {(streaming || delivering) && (() => {
+        {(streaming || delivering || realDevTyping) && (() => {
           /* 正在输入指示：与 TA 的消息气泡同一装扮视觉（第四十二轮补齐：装扮后不再固定白底，
              序号取 msgs.length 接续七彩循环；第五十一轮 QQ 装扮尾巴改成信息 App 同款弯钩剪影——
              胶囊装扮无尾巴，纯色/七彩渲染信息式底部尾巴） */

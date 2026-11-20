@@ -378,7 +378,7 @@ export function ColorRow({
                 : 'conic-gradient(#f6cdd6,#f9e6a6,#c9e3cf,#dcd2ec,#f6cdd6)',
             }}
           />
-          <span className="text-[12px] font-medium text-[#4a4a4e]">自定义{label}色</span>
+          <span className="text-[12px] font-medium text-[#4a4a4e] dark:text-zinc-200">自定义{label}色</span>
           <input
             type="color"
             aria-label={`自定义${label}颜色`}

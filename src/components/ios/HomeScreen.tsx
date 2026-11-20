@@ -3,9 +3,11 @@
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { kvSet } from '@/lib/ios/idb-kv';
 import dynamic from 'next/dynamic';
-import { Plus, Search, X } from 'lucide-react';
+import { Plus, Search, X, Mic } from 'lucide-react';
 import { useUI, useSettings, useSystemDark, selectResolvedTheme, type AppId } from '@/lib/ios/store';
 import { shellScale } from '@/lib/ios/shell-scale';
+// D3 全局语音助手：主屏长按唤起信号 + 启用开关/唤起方式提示（独立小 store，localStorage 持久化）
+import { isAssistantHoldEnabled, markAssistantHintShown, requestAssistantHold, useAssistantHold } from '@/lib/ios/assistant-hold';
 import { useHomeWallpaperLight } from '@/lib/ios/foreground';
 import { localDB } from '@/lib/ios/db';
 // v1.9.21 吃醋锁网页降级：冻结 App 图标置灰 + 小锁角标 + 「由 XX 管理」标签
@@ -55,6 +57,7 @@ import {
 import { NeteaseCardWidget } from './NeteaseCard';
 import { VinylCardWidget } from './VinylCard';
 import { MusicWidget } from './MusicWidget';
+import { ContactWidget, useTaContact, taNameOf } from './ContactWidget';
 import { WidgetGalleryContent, GALLERY_KINDS, ClockGridWidget, type GalleryKind } from './WidgetGallery';
 import { CalendarCardWidget } from './CalendarCard';
 import { ICityCardWidget, ICityCardEditor, loadICityCard, type ICityCardData, DEFAULT_ICITY_CARD, ICITY_CARD_KEY } from './ICityCard';
@@ -78,14 +81,16 @@ const WeatherWidget = dynamic(() => import('@/components/apps/weather').then((m)
  *   吸附翻页——轻轻一甩即翻页；跟手期间吞掉 click，不会误开 App；
  *   编辑模式同样可以从空白处左右轻扫翻页（图标上起手=拖拽换位，空白处起手=翻页）；
  * - 默认三页（其余小组件默认收起）：第 1 页 = 时钟小组件（顶部通栏整行、无边框大数字浮在壁纸上）
- *   + 天气小组件（152×152，占 2×2 格）+ 天气/主题/浏览器/备忘录/相机/照片/文件/计算器
- *   （用户指定顺序）；
+ *   + 天气小组件（152×152，占 2×2 格）+ 快捷联系人小组件（TA 头像+发消息，占 2×2 格，
+ *   点击直达与 TA 的信息会话）+ 天气/主题/浏览器/备忘录/相机/照片/文件/计算器（用户指定顺序）；
  *   第 2 页 = 信息卡片小组件（顶部通栏大名片）+ 气泡小组件（双头像 + 各自头顶气泡，无边框浮在壁纸上）
+ *   + 日历小组件（周几+大字日期+最近一条日程，占 2×2 格，v11 起默认上屏）
  *   + 提醒事项/语音备忘录/日历/时钟（用户指定顺序）；
  *   第 3 页 = 网易云小组件（黑胶唱片播放器卡，点击开音乐 App）+ 音乐/微信/App Store/QQ/记忆/世界书
  *   （用户指定顺序，世界书自 v9 起纳入页尾）；
- *   日记/一起听/对话气泡/黑胶/iCity/日历/表盘时钟/拍立得八枚小组件默认收起（hidden 记录，不占页；
- *   v9 起 widgets-7 新加的四个不上屏——用户要求新添加的小组件不显示），
+ *   日记/一起听/对话气泡/黑胶/iCity/表盘时钟/拍立得七枚小组件默认收起（hidden 记录，不占页；
+ *   v9 起 widgets-7 新加的四个不上屏——用户要求新添加的小组件不显示；v11 起日历小组件
+ *   重做后默认上屏第 2 页），
  *   需要时从编辑模式「+」画廊或主题 App「小组件」界面一键找回（默认落到末尾装得下的页）；
  *   （v6 起：存量旧版本布局直接重置为新默认，保留 hidden 删除记录（网易云旧收起记录除外，
  *   迁移时放行上屏）；旧数据缺小组件时按默认位置补回：时钟补到第 1 页头、天气补到时钟旁、
@@ -118,7 +123,7 @@ const WeatherWidget = dynamic(() => import('@/components/apps/weather').then((m)
  *   文件夹结构持久化（layout.folders，App 实体存在夹内，从主网格移除）。
  * 编辑模式（长按任意图标/小组件或长按空白处进入）：
  * - 全部图标/小组件抖动，左上角出现深色「删除」× 角标；
- * - 左上角「+」→ 小组件画廊浮层（全部 14 种小组件 1:1 预览，点 + 添加回主屏，
+ * - 左上角「+」→ 小组件画廊浮层（全部 15 种小组件 1:1 预览，点 + 添加回主屏，
  *   × 删除过的项从 hidden 找回；与主题 App「小组件」界面同一套画廊）
  *   + 右上角「恢复默认」与白色「完成」胶囊按钮；
  * - 编辑中点按空白处直接退出编辑（用户要求）；
@@ -136,15 +141,16 @@ const WeatherWidget = dynamic(() => import('@/components/apps/weather').then((m)
  * - × 删除的项记入 hidden 持久化（刷新不复活），「恢复默认」可找回。
  */
 
-/** 桌面小组件种类：时钟（大数字卡）/ 天气 / 信息卡片（个人名片）/ 气泡（双头像+各自头顶气泡）/ 日记（日记卡）/ 一起听（双人气泡+迷你播放器）/ 音乐（封面+进度+控制键，真实播放状态）/ 网易云（黑胶播放器卡）/ 对话气泡（双头像+交错双气泡）/ 黑胶（大唱片+唱针）/ 日历（月历横版）/ iCity（名字+日期+头像胶囊）/ 表盘时钟（刻度表圈）/ 拍立得（三张胶片照） */
-export type WidgetKind = 'weather' | 'clock' | 'profile' | 'bubble' | 'diary' | 'listen' | 'music' | 'netease' | 'dialog' | 'vinyl' | 'calendar' | 'icity' | 'tickclock' | 'polaroid';
+/** 桌面小组件种类：时钟（大数字卡）/ 天气 / 信息卡片（个人名片）/ 气泡（双头像+各自头顶气泡）/ 日记（日记卡）/ 一起听（双人气泡+迷你播放器）/ 音乐（封面+进度+控制键，真实播放状态）/ 网易云（黑胶播放器卡）/ 对话气泡（双头像+交错双气泡）/ 黑胶（大唱片+唱针）/ 日历（周几+大字日期+最近一条日程）/ iCity（名字+日期+头像胶囊）/ 表盘时钟（刻度表圈）/ 拍立得（三张胶片照）/ 快捷联系人（TA 头像+发消息，直达信息会话） */
+export type WidgetKind = 'weather' | 'clock' | 'profile' | 'bubble' | 'diary' | 'listen' | 'music' | 'netease' | 'dialog' | 'vinyl' | 'calendar' | 'icity' | 'tickclock' | 'polaroid' | 'contact';
 /** 桌面文件夹：名称 + 内部 App 序列（App 从主网格移入；全部拖出或只剩 1 个时文件夹自动解体） */
 type FolderData = { id: string; name: string; apps: AppId[] };
 type Tile = { kind: 'widget'; widget: WidgetKind } | { kind: 'app'; id: AppId } | { kind: 'folder'; id: string } | { kind: 'empty' };
 type Zone = 'grid' | 'dock';
 
-const WIDGET_KINDS: WidgetKind[] = ['weather', 'clock', 'profile', 'bubble', 'diary', 'listen', 'music', 'netease', 'dialog', 'vinyl', 'calendar', 'icity', 'tickclock', 'polaroid'];
-/** 小组件元信息：× 删除角标文案 + 点击行为（openApp=null 的点击开对应编辑器） */
+const WIDGET_KINDS: WidgetKind[] = ['weather', 'clock', 'profile', 'bubble', 'diary', 'listen', 'music', 'netease', 'dialog', 'vinyl', 'calendar', 'icity', 'tickclock', 'polaroid', 'contact'];
+/** 小组件元信息：× 删除角标文案 + 点击行为（openApp=null 的点击开对应编辑器；
+ *  contact 特殊：点击经 setPendingChatContact 直达与 TA 的信息会话，见渲染处） */
 const WIDGET_META: Record<WidgetKind, { label: string; openApp: AppId | null }> = {
   weather: { label: '天气小组件', openApp: 'weather' },
   clock: { label: '时钟小组件', openApp: 'clock' },
@@ -160,8 +166,9 @@ const WIDGET_META: Record<WidgetKind, { label: string; openApp: AppId | null }> 
   icity: { label: 'iCity小组件', openApp: null },
   tickclock: { label: '表盘时钟小组件', openApp: 'clock' },
   polaroid: { label: '拍立得小组件', openApp: null },
+  contact: { label: '快捷联系人小组件', openApp: 'chat' },
 };
-/** 小组件网格跨度：时钟/日记/对话气泡（2 行）/信息卡片（3 行）= 顶部通栏整行，天气/气泡 = 2×2 方格，
+/** 小组件网格跨度：时钟/日记/对话气泡（2 行）/信息卡片（3 行）= 顶部通栏整行，天气/气泡/日历/快捷联系人 = 2×2 方格，
  *  一起听/网易云/黑胶 = 2×3 竖版方格（App 环绕） */
 const WIDGET_SPAN: Record<WidgetKind, string> = {
   clock: 'col-span-4 row-span-2',
@@ -174,10 +181,11 @@ const WIDGET_SPAN: Record<WidgetKind, string> = {
   netease: 'col-span-2 row-span-3',
   dialog: 'col-span-4 row-span-2',
   vinyl: 'col-span-2 row-span-3',
-  calendar: 'col-span-4 row-span-2',
+  calendar: 'col-span-2 row-span-2 self-center',
   icity: 'col-span-2 row-span-2 self-center',
   tickclock: 'col-span-2 row-span-2 self-center',
   polaroid: 'col-span-4 row-span-2',
+  contact: 'col-span-2 row-span-2 self-center',
 };
 
 /** 小组件网格跨度（数值版）：flow 模拟 / 空白位行列线拟合（槽宽反推单列宽、槽高反推行距）用 */
@@ -192,10 +200,11 @@ const WIDGET_SPAN_SIZE: Record<WidgetKind, { c: number; r: number }> = {
   netease: { c: 2, r: 3 },
   dialog: { c: 4, r: 2 },
   vinyl: { c: 2, r: 3 },
-  calendar: { c: 4, r: 2 },
+  calendar: { c: 2, r: 2 },
   icity: { c: 2, r: 2 },
   tickclock: { c: 2, r: 2 },
   polaroid: { c: 4, r: 2 },
+  contact: { c: 2, r: 2 },
 };
 
 /** 小组件稳定键（data-id / hidden / 拖拽 id 用）：带前缀避免与同名 App id（weather）冲突 */
@@ -292,6 +301,8 @@ const LAYOUT_KEY = 'homeLayout';
 const DOCK_CAPACITY = 4;
 const LONG_PRESS_MS = 420;
 const MOVE_CANCEL_PX = 10;
+/** D3 全局语音助手：主屏长按空白处唤起时长（略长于进编辑的 420ms，松手在两者之间仍进编辑） */
+const ASSISTANT_HOLD_MS = 600;
 /** 页容量：含小组件的页（小组件行 + 3 行 App）/ 普通页 20 App */
 const PAGE_WIDGET_CAP = 14;
 const PAGE_CAP = 20;
@@ -333,12 +344,16 @@ const DOTS_LINGER_MS = 1100;
 /** 页网格行间距（gap-y-[16px]，与渲染处保持一致；行距拟合用） */
 const GRID_GAP_Y = 16;
 
-/** 当前布局版本：v10 = 音乐小组件（封面+进度+控制键，真实播放状态）默认上屏第 3 页顶部
- *  （网易云小组件上方，与音乐 App 同页聚落）——存量旧版本布局直接重置为新默认（保留 hidden 删除记录）；
+/** 当前布局版本：v11 = D1 桌面小组件：第 1 页天气旁新增「快捷联系人」小组件（TA 头像+
+ *  发消息，点击直达信息会话）、日历小组件重做为周几+大字日期+最近一条日程（2×2）并
+ *  默认上屏第 2 页气泡旁（此前默认收起）——存量旧版本布局直接重置为新默认（保留 hidden
+ *  删除记录：删过日历小组件的老用户不会复活）；
+ *  v10 = 音乐小组件（封面+进度+控制键，真实播放状态）默认上屏第 3 页顶部
+ *  （网易云小组件上方，与音乐 App 同页聚落）；
  *  v9 = widgets-7 的四个新小组件（iCity/日历/表盘时钟/拍立得）改为默认收起不上屏
  *  （用户要求：新添加的小组件不显示；需要时从「+」画廊或主题 App「小组件」界面一键找回）；
- *  世界书 App 纳入第 3 页默认排布；日记/一起听/对话气泡/黑胶/iCity/日历/表盘时钟/拍立得均默认收起 */
-const LAYOUT_VERSION = 10;
+ *  世界书 App 纳入第 3 页默认排布；日记/一起听/对话气泡/黑胶/iCity/表盘时钟/拍立得均默认收起 */
+const LAYOUT_VERSION = 11;
 /** 第 1 页 App（用户指定顺序；时钟/天气小组件在其上方；App Store 已移至第 3 页——仍是已移除 App 的唯一恢复入口） */
 const PAGE1_APP_IDS: AppId[] = ['weather', 'themes', 'browser', 'notes', 'camera', 'photos', 'files', 'calculator'];
 /** 第 2 页 App（用户指定顺序；信息卡片/气泡小组件在其上方；音乐/微信移至第 3 页） */
@@ -351,8 +366,9 @@ const PAGE2_APP_IDS: AppId[] = ['reminders', 'recorder', 'calendar', 'clock'];
 const PAGE3_APP_IDS: AppId[] = ['music', 'wechat', 'appstore', 'qq', 'memory', 'worldbook', 'meituan', 'couple', 'cottage', 'forum'];
 /** 其余小组件（默认收起不显示：写入 hidden，需要时从「+」画廊/主题小组件页找回；
  *  网易云小组件自 v6 起默认上屏第 3 页，不再收起；
- *  v9 起 widgets-7 的四个新小组件 iCity/日历/表盘时钟/拍立得也默认收起——用户要求新添加的小组件不显示） */
-const DEFAULT_HIDDEN_WIDGETS: WidgetKind[] = ['diary', 'listen', 'dialog', 'vinyl', 'icity', 'calendar', 'tickclock', 'polaroid'];
+ *  v9 起 widgets-7 的四个新小组件 iCity/表盘时钟/拍立得也默认收起——用户要求新添加的小组件不显示；
+ *  v11 起日历小组件重做后默认上屏第 2 页（从收起名单移出） */
+const DEFAULT_HIDDEN_WIDGETS: WidgetKind[] = ['diary', 'listen', 'dialog', 'vinyl', 'icity', 'tickclock', 'polaroid'];
 
 function defaultLayout(): HomeLayout {
   return {
@@ -361,11 +377,13 @@ function defaultLayout(): HomeLayout {
       [
         { kind: 'widget', widget: 'clock' },
         { kind: 'widget', widget: 'weather' },
+        { kind: 'widget', widget: 'contact' },
         ...PAGE1_APP_IDS.map((id) => ({ kind: 'app' as const, id })),
       ],
       [
         { kind: 'widget', widget: 'profile' },
         { kind: 'widget', widget: 'bubble' },
+        { kind: 'widget', widget: 'calendar' },
         ...PAGE2_APP_IDS.map((id) => ({ kind: 'app' as const, id })),
       ],
       [
@@ -489,6 +507,7 @@ function sanitizeLayout(raw: unknown): HomeLayout {
     icity: hidden.has(widgetKey('icity')),
     tickclock: hidden.has(widgetKey('tickclock')),
     polaroid: hidden.has(widgetKey('polaroid')),
+    contact: hidden.has(widgetKey('contact')),
   };
   const placed = new Set<AppId>(dock);
   for (const list of rawPages) {
@@ -583,6 +602,12 @@ function sanitizeLayout(raw: unknown): HomeLayout {
     const at = pages[0].length > 0 && pages[0][0].kind === 'widget' && pages[0][0].widget === 'clock' ? 1 : 0;
     pages[0].splice(at, 0, { kind: 'widget', widget: 'weather' });
   }
+  // 快捷联系人缺失时补回第 1 页天气旁（v11 默认位；hidden 里的不补——被删的不自动复活）
+  if (!widgetSeen.contact) {
+    const p1 = pages[0];
+    const wi = p1.findIndex((t) => t.kind === 'widget' && t.widget === 'weather');
+    p1.splice(wi >= 0 ? wi + 1 : p1.length, 0, { kind: 'widget', widget: 'contact' });
+  }
   if (!widgetSeen.profile) {
     while (pages.length < 2) pages.push([]);
     pages[1].unshift({ kind: 'widget', widget: 'profile' });
@@ -630,8 +655,11 @@ function sanitizeLayout(raw: unknown): HomeLayout {
     p2.splice(bi >= 0 ? bi + 1 : p2.length, 0, { kind: 'widget', widget: 'icity' });
   }
   if (!widgetSeen.calendar) {
-    while (pages.length < 3) pages.push([]);
-    pages[2].unshift({ kind: 'widget', widget: 'calendar' });
+    // v11：日历小组件默认位改第 2 页气泡旁（重做为周几+大字日期+最近日程 2×2 后与气泡并排）
+    while (pages.length < 2) pages.push([]);
+    const p2 = pages[1];
+    const bi = p2.findIndex((t) => t.kind === 'widget' && t.widget === 'bubble');
+    p2.splice(bi >= 0 ? bi + 1 : p2.length, 0, { kind: 'widget', widget: 'calendar' });
   }
   if (!widgetSeen.tickclock) {
     while (pages.length < 4) pages.push([]);
@@ -1225,6 +1253,10 @@ function FolderPanel({
 export default function HomeScreen() {
   const openApp = useUI((s) => s.openApp);
   const activeApp = useUI((s) => s.activeApp);
+  // 快捷联系人小组件：TA（主联系人/恋人角色）共享快照（点击句柄与组件展示同源）
+  // + 跨 App 跳转通道 setPendingChatContact（打开信息 App 后直达与 TA 的会话）
+  const taSnapshot = useTaContact();
+  const setPendingChatContact = useUI((s) => s.setPendingChatContact);
   // v1.9.21：吃醋锁冻结态变化（锁定/解锁）时重渲染图标（网格/Dock/Spotlight 同源）
   useSyncExternalStore(subscribeWebLock, getWebLockVersion);
   // v72.4：closing 阶段主屏就开始淡入（App 缩小时身后露出的是完整主屏+图标，
@@ -1232,6 +1264,16 @@ export default function HomeScreen() {
   // 即刻图标才突然淡入——叠加 scale 跳变就是「退出闪烁」的观感
   const phase = useUI((s) => s.phase);
   const homeVisible = !activeApp || phase === 'closing';
+  const locked = useUI((s) => s.locked);
+  // D3 全局语音助手：唤起方式一次性提示（未展示过 + 助手启用时在主屏底部出现；
+  // 解锁进主屏起 6s 后或点按即标记已展示，localStorage 持久化不再打扰）
+  const holdHint = useAssistantHold((s) => s.enabled && !s.hintShown);
+  useEffect(() => {
+    // 停留在锁屏/主屏不可见期间不计时：解锁进主屏后才开始 6s 倒计时
+    if (!holdHint || !homeVisible || locked) return undefined;
+    const t = window.setTimeout(() => markAssistantHintShown(), 6000);
+    return () => window.clearTimeout(t);
+  }, [holdHint, homeVisible, locked]);
   // 主屏壁纸整体亮度：浅色壁纸（如白图）时图标标签/页点自动改深色，保证可读
   const wallpaperLight = useHomeWallpaperLight();
   // 深色模式（第六十七轮：文件夹 tile 适配深色——深色烟熏玻璃，与图标深色分支同源）
@@ -1305,6 +1347,7 @@ export default function HomeScreen() {
   const [polaroidEditorOpen, setPolaroidEditorOpen] = useState(false);
   // 挂载后读 localStorage（SSR 首帧先渲染默认内容，避免水合不一致）
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- 挂载对账：SSR 首帧必须先渲染默认内容再读 localStorage，否则水合不一致（与 settings.tsx 同款处理）
     setProfileCard(loadProfileCard());
     setBubbleCard(loadBubbleCard());
     setDiaryCard(loadDiaryCard());
@@ -1473,6 +1516,7 @@ export default function HomeScreen() {
   // 页数变少（删 App/恢复默认）时把当前页夹回有效范围
   useEffect(() => {
     const last = Math.max(0, layout.pages.length - 1);
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- 布局收敛：页数缩小时把当前页夹回有效范围（渲染期派生会连环 setState，effect 收口最稳）
     if (page > last) setPage(last);
   }, [layout.pages.length, page]);
 
@@ -2078,7 +2122,7 @@ export default function HomeScreen() {
     }
   };
 
-  /** 编辑模式「+」画廊：把全部 9 种小组件添加回主屏（× 删除后在此找回；已在屏上则忽略）。
+  /** 编辑模式「+」画廊：把全部 15 种小组件添加回主屏（× 删除后在此找回；已在屏上则忽略）。
    *  落点 = 当前编辑页起第一张装得下的页（格数按 14、行数按 6 行封顶——小组件按跨行占位
    *  校验，装不下会顺延到后面的页/新建页接住） */
   const addWidgetFromGallery = (kind: WidgetKind) => {
@@ -2895,7 +2939,9 @@ export default function HomeScreen() {
   };
 
   /** 空白处（非图标/小组件/按钮）按下：
-   *  - 未编辑：按住 420ms → 进入编辑模式；
+   *  - 未编辑 + 语音助手启用：按住 600ms → 唤起全屏语音助手（D3）；
+    期间 420~600ms 松手 → 松手时进入编辑（保留原有「长按进编辑」手感）；
+   *  - 未编辑 + 语音助手关闭：按住 420ms → 进入编辑模式（原有行为不变）；
    *  - 编辑中：快速点按（≤350ms 且未移动）→ 退出编辑模式（用户要求点击空白取消编辑）；
    *  - 轻扫翻页：非编辑模式任意位置起手；编辑模式仅空白处起手（图标上起手 = 拖拽换位），
    *    保证编辑模式下也能左右滑动切换页面 */
@@ -2921,9 +2967,22 @@ export default function HomeScreen() {
     blankStart.current = { x: e.clientX, y: e.clientY };
     blankDownAt.current = performance.now();
     if (edit) return;
+    // D3 语音助手启用：空白长按阈值抬到 600ms（唤起助手）；420~600ms 的松手仍进编辑（见 rootPointerUp）。
+    // 期间移动手指超阈值取消（rootPointerMove 的 MOVE_CANCEL_PX 判定，防误触）
+    const holdOn = isAssistantHoldEnabled();
     blankTimer.current = window.setTimeout(() => {
       blankTimer.current = null;
       blankStart.current = null;
+      if (holdOn) {
+        // 唤起全局语音助手：其它 UI 由全屏会话浮层冻结（不卸载）；麦克风不可用时浮层内自动回退文字输入
+        requestAssistantHold();
+        try {
+          navigator.vibrate?.(18);
+        } catch {
+          /* 震动不可用 */
+        }
+        return;
+      }
       compactPages();
       setEdit(true);
       try {
@@ -2931,7 +2990,7 @@ export default function HomeScreen() {
       } catch {
         /* 震动不可用 */
       }
-    }, LONG_PRESS_MS);
+    }, holdOn ? ASSISTANT_HOLD_MS : LONG_PRESS_MS);
   };
 
   const rootPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
@@ -2974,6 +3033,23 @@ export default function HomeScreen() {
     const start = blankStart.current;
     const downAt = blankDownAt.current;
     clearBlankPress();
+    // D3：语音助手启用时空白长按 600ms 已让位给唤起；420~600ms 之间的松手仍按旧手势进编辑
+    //（保留「长按主屏空白进编辑」能力，只是从「按到 420ms 即进」变成「按到 420ms 后松手即进」）
+    if (!edit && start && isAssistantHoldEnabled()) {
+      const dx = e.clientX - start.x;
+      const dy = e.clientY - start.y;
+      const held = performance.now() - downAt;
+      if (dx * dx + dy * dy <= MOVE_CANCEL_PX * MOVE_CANCEL_PX && held >= LONG_PRESS_MS && held < ASSISTANT_HOLD_MS) {
+        compactPages();
+        setEdit(true);
+        try {
+          navigator.vibrate?.(10);
+        } catch {
+          /* 震动不可用 */
+        }
+        return;
+      }
+    }
     if (!edit || !start) return;
     const dx = e.clientX - start.x;
     const dy = e.clientY - start.y;
@@ -3116,6 +3192,8 @@ export default function HomeScreen() {
             <ICityCardWidget data={icityCard} />
           ) : tile.widget === 'tickclock' ? (
             <TickClockCardWidget />
+          ) : tile.widget === 'contact' ? (
+            <ContactWidget testId="contact-widget" />
           ) : tile.widget === 'polaroid' ? (
             <PolaroidCardWidget data={polaroidCard} />
           ) : (
@@ -3289,6 +3367,13 @@ export default function HomeScreen() {
     }
     if (tile.kind === 'widget') {
       const meta = WIDGET_META[tile.widget];
+      // 快捷联系人：点击直达与 TA 的信息会话（无 TA 时回退打开联系人 App 去创建）
+      const contactAria =
+        tile.widget === 'contact'
+          ? taSnapshot.contact
+            ? `给${taNameOf(taSnapshot.contact)}发消息`
+            : '打开联系人添加 TA'
+          : null;
       return (
         <div
           key={id}
@@ -3301,10 +3386,17 @@ export default function HomeScreen() {
           className={`relative ${WIDGET_SPAN[tile.widget]} select-none ${edit ? 'touch-none' : '[touch-action:pan-y]'}`}
           role="button"
           tabIndex={0}
-          aria-label={meta.openApp ? `打开${APP_MAP[meta.openApp].name}应用` : `编辑${meta.label}`}
+          aria-label={
+            contactAria ??
+            (meta.openApp ? `打开${APP_MAP[meta.openApp].name}应用` : `编辑${meta.label}`)
+          }
           onClick={() => {
             if (!edit) {
-              if (meta.openApp) openWith(meta.openApp);
+              if (tile.widget === 'contact') {
+                // 跨 App 跳转通道（与电话 App「信息」按钮同链路）：先挂起目标联系人再打开信息 App
+                if (taSnapshot.contact) setPendingChatContact(taSnapshot.contact.id);
+                openWith(taSnapshot.contact ? 'chat' : 'contacts');
+              } else if (meta.openApp) openWith(meta.openApp);
               else if (tile.widget === 'profile') setProfileEditorOpen(true);
               else if (tile.widget === 'diary') setDiaryEditorOpen(true);
               else if (tile.widget === 'listen') setListenEditorOpen(true);
@@ -3446,6 +3538,7 @@ export default function HomeScreen() {
           className="flex h-full w-full transition-transform duration-300"
           style={{ transform: `translateX(-${page * 100}%)`, transitionTimingFunction: 'cubic-bezier(0.32, 0.72, 0, 1)' }}
         >
+          {/* eslint-disable-next-line react-hooks/refs -- 页内 tile 渲染读 dragGeo 拖拽几何（拖拽开始时捕获的静态快照），占位槽需真实槽位尺寸防跳动 */}
           {layout.pages.map((tiles, p) => (
             <div
               key={p}
@@ -3468,6 +3561,21 @@ export default function HomeScreen() {
           ))}
         </div>
       </div>
+      {/* D3 全局语音助手 · 唤起方式一次性提示（解锁进主屏首次出现，6s 自动或点按即标记已展示；
+          触控目标 ≥44px；不参与翻页/编辑交互（仅提示层） */}
+      {holdHint && homeVisible && !locked && !edit && !spotlight ? (
+        <button
+          type="button"
+          data-testid="assistant-hold-hint"
+          aria-label="知道了：长按主屏空白处可唤起语音助手"
+          onClick={() => markAssistantHintShown()}
+          className="absolute inset-x-0 bottom-[148px] z-[30] mx-auto flex h-11 w-fit max-w-[86%] items-center gap-2 rounded-full bg-black/55 px-[16px] text-[13px] font-medium text-white/90 backdrop-blur-xl ring-1 ring-white/15 transition-transform active:scale-95"
+        >
+          <Mic className="h-[15px] w-[15px] shrink-0" strokeWidth={2} aria-hidden="true" />
+          <span className="truncate">长按主屏空白处，唤起语音助手</span>
+        </button>
+      ) : null}
+
       {/* 弹性占位：分页视口改为绝对定位后，由它把页点/Dock 撑回屏幕底部 */}
       <div className="flex-1" />
 
@@ -3539,6 +3647,7 @@ export default function HomeScreen() {
           edit ? 'touch-none select-none' : ''
         }`}
       >
+          {/* eslint-disable-next-line react-hooks/refs -- Dock 槽位渲染读 dragGeo 拖拽几何（拖拽开始时捕获的静态快照），跨区拖拽时占位槽需真实槽位尺寸防跳动 */}
           {layout.dock.map((id, i) => {
             const app = APP_MAP[id];
             if (!app) return null;
@@ -3598,6 +3707,7 @@ export default function HomeScreen() {
           包含块 = 手机壳；壳被等比缩小时用壳本地坐标渲染，见 floatingCopy 开头的换算）。
           之前渲染在 Dock 容器内，Dock 的 backdrop-blur-2xl 使其成为 fixed 后代的包含块，
           坐标被解释为相对 Dock → 副本飞出手机壳被裁掉，从 Dock 拖 App 时图标“消失”。 */}
+      {/* eslint-disable-next-line react-hooks/refs -- 浮动副本渲染读 dragRootRect/scaleRef（拖拽期间保持稳定的壳几何快照），坐标换算需在渲染期读取 */}
       {floatingCopy(floatingTile)}
 
       {/* 入夹飞入动画层：合并落手后 App 图标从松手点缩小飞进文件夹（纯视觉，挂在根层级） */}

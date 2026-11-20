@@ -170,6 +170,253 @@ const QQ_GATEWAY_API = 'https://api.sgroup.qq.com/gateway';
 const QQ_INTENTS = 1 << 25;
 /** 已处理事件去重上限（QQ 平台可能重推同一条消息，msg_id+场景去重） */
 const QQ_SEEN_MAX = 400;
+
+// ---------------- v25 真机「正在输入」状态（站内同步指示器） ----------------
+
+/** typing 状态条目：contactKey=真机会话对端标识（QQ：单聊 openid / 群 group_openid；微信：对端
+ *  username——fetch 观察器从 /ilink/bot/getconfig 请求体里拿 from_user_id。真机历史（history.json /
+ *  qq-history.json + 本地镜像）都是单线索扁平列表、不分联系人，站内按「当前会话 = 该通道绑定
+ *  角色的会话」做通道级命中，contactKey 仅参考） */
+interface TypingEntry {
+  contactKey: string;
+  since: number;
+}
+
+/** 内存态 typing：channel → { contactKey, since }。QQ 在 handleQqEvent 的 await 前置位；微信由
+ *  fetch 观察器精确置位（见下方 installGwTypingFetchObserver——core.gen 生成文件不可编辑，
+ *  index.ts 的调用边界即挂点），回复发送完成（或 catch）后清除。 */
+const gwTyping: { wx?: TypingEntry; qq?: TypingEntry } = {};
+
+/** typing 陈旧兜底：进程挂起/循环异常导致 finally 没跑到时，120 秒后 statusJson 不再输出（防悬挂） */
+const TYPING_STALE_MS = 120_000;
+
+/** 标记某通道开始生成回复（收到真机用户消息 → 调 core 生成） */
+function gwTypingSet(channel: 'wx' | 'qq', contactKey: string): void {
+  gwTyping[channel] = { contactKey: String(contactKey || '').slice(0, 64), since: Date.now() };
+}
+
+/** 回复发送完成 / 异常收尾：清除该通道 typing */
+function gwTypingClear(channel: 'wx' | 'qq'): void {
+  delete gwTyping[channel];
+}
+
+/** 读某通道 typing（过期视为没有——顺带清掉陈旧项，不污染长期内存） */
+function gwTypingOf(channel: 'wx' | 'qq'): TypingEntry | null {
+  const t = gwTyping[channel];
+  if (!t) return null;
+  if (Date.now() - t.since > TYPING_STALE_MS) {
+    delete gwTyping[channel];
+    return null;
+  }
+  return t;
+}
+
+// ---------------- v25b 微信 typing 精确化（fetch 观察器） ----------------
+
+/** wxLoop 唯一的 await 边界是 core.tick()，而 tick 内部先跑 getupdates 长轮（空闲时服务端挂
+ *  ~35s）再生成回复——直接在 tick 前置位会让「正在输入」在空闲长轮期间也亮着（约 8 成时间
+ *  假亮，站内会话常驻「对方正在输入」）。core.gen 是生成文件不可编辑，但它对 iLink 的所有
+ *  调用都走本进程全局 fetch，观察即可精确：handleWxMsg 处理一条真机消息必先调
+ *  /ilink/bot/getconfig（取 typing ticket；空消息/自发消息在此之前已早退，空闲长轮也不经过它）
+ *  → 收到即置位；/ilink/bot/sendtyping status=1（开始/每 5s 保活）续置位、status=2（回复
+ *  收尾）清除。没拿到 typing ticket 的轮次收不到 sendtyping → 靠 wxLoop 的 finally 兑底
+ *  清除 + 120s 陈旧兑底。包装器透传不改动任何请求（观察失败也不影响请求本身）。 */
+type GwTypingNote = (contactKey: string, on: boolean) => void;
+const GW_TYPING_NOTE_SLOT = '__gwTypingNote';
+const GW_TYPING_FETCH_WRAPPED = '__gwTypingFetchWrapped';
+
+/** 每次模块（热重）加载都刷新当前代处理函数槽位：bun --hot 重载后旧包装器仍在 globalThis.fetch
+ *  上，闭包指向旧模块作用域——经全局槽位间接调到「本代」的 gwTyping，防重载后 typing 静默失效 */
+(globalThis as Record<string, unknown>)[GW_TYPING_NOTE_SLOT] = ((contactKey: string, on: boolean) => {
+  if (on) gwTypingSet('wx', contactKey);
+  else gwTypingClear('wx');
+}) as GwTypingNote;
+
+/** 安装 fetch 观察器（进程内只装一次；透传调用原 fetch，只多看一眼 URL/请求体） */
+function installGwTypingFetchObserver(): void {
+  const g = globalThis as Record<string, unknown>;
+  if (g[GW_TYPING_FETCH_WRAPPED]) return;
+  g[GW_TYPING_FETCH_WRAPPED] = true;
+  const orig = globalThis.fetch.bind(globalThis);
+  globalThis.fetch = (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+    try {
+      const url =
+        typeof input === 'string' ? input : input instanceof URL ? input.href : String((input as Request)?.url || '');
+      const i = url.indexOf('/ilink/bot/');
+      if (i >= 0 && init && typeof init.body === 'string') {
+        const path = url.slice(i);
+        let body: Record<string, any> | null = null;
+        try {
+          body = JSON.parse(init.body) as Record<string, any>;
+        } catch {
+          body = null; // 非法 JSON：不是 iLink 的常规请求体，不观察
+        }
+        const note = g[GW_TYPING_NOTE_SLOT] as GwTypingNote | undefined;
+        if (note) {
+          if (path === '/ilink/bot/getconfig' && body && body.ilink_user_id) {
+            note(String(body.ilink_user_id), true); // 消息处理起点（真机对端 username）
+          } else if (path === '/ilink/bot/sendtyping' && body) {
+            if (Number(body.status) === 2) note('', false); // 回复收尾
+            else if (body.ilink_user_id) note(String(body.ilink_user_id), true); // 开始输入/保活续期
+          }
+        }
+      }
+    } catch {
+      /* 观察失败不影响请求本身 */
+    }
+    return orig(input, init);
+  };
+}
+
+installGwTypingFetchObserver();
+
+// ---------------- v22 Supabase 写侧断路器（402/502 免费层风控根治） ----------------
+
+/** 语义：core.gen 里所有对云端的写（心跳/历史/认领/游标/锁/运行包上传/媒体托管）都走
+ *  本进程全局 fetch——这里在 fetch 层拦 *.supabase.co 域的写请求：连续 N 次失败
+ *  （402/429/401/403/5xx/网络错）→ 冷却 15 分钟：期间对云端的写直接短路成伪造 503
+ *  （core 既有降级路径全吞错——本地文件/内存照写，真机收发零影响，402 报错风暴同步消
+ *  失）；冷却到期半开放行一次探测（成功→闭合恢复云端镜像；失败→再冷却一轮）。状态跃
+ *  迁各只打一次日志。读请求不拦（读侧另有本地回落：loadConfig 本地直推优先/历史保内存
+ *  +本地文件兑底，见 sources.ts v22）。
+ *  实现参考同文件 typing 观察器：状态存 globalThis 槽位（bun --hot 热重载后旧包装器
+ *  继续生效、熔断状态不丢），包装器进程内只装一次。 */
+interface GwSupaBreaker {
+  state: 'ok' | 'cooling' | 'halfopen';
+  fails: number;
+  lastErr: string;
+  until: number;
+}
+/** v22 熔断参数：连续失败阈值 / 冷却时长（站内 cloud-health.ts 同参数，两端一致） */
+const GW_SUPA_FAIL_N = 3;
+const GW_SUPA_COOLDOWN_MS = 15 * 60_000;
+const GW_SUPA_BREAKER_SLOT = '__gwSupaBreaker';
+const GW_SUPA_FETCH_WRAPPED = '__gwSupaFetchWrapped';
+
+function gwSupaBreaker(): GwSupaBreaker {
+  const g = globalThis as Record<string, unknown>;
+  if (!g[GW_SUPA_BREAKER_SLOT]) {
+    g[GW_SUPA_BREAKER_SLOT] = { state: 'ok', fails: 0, lastErr: '', until: 0 } as GwSupaBreaker;
+  }
+  return g[GW_SUPA_BREAKER_SLOT] as GwSupaBreaker;
+}
+
+/** 从 init.headers / Request.headers 取指定头（大小写不敏感；对象/数组/Headers 三形态兼容） */
+function gwReqHeader(input: RequestInfo | URL, init: RequestInit | undefined, name: string): string {
+  const lower = name.toLowerCase();
+  const fromReq = input && typeof input === 'object' && 'headers' in (input as Request) ? (input as Request).headers : undefined;
+  const src: unknown = fromReq ?? init?.headers;
+  if (!src) return '';
+  if (typeof Headers !== 'undefined' && src instanceof Headers) return src.get(name) || '';
+  if (Array.isArray(src)) {
+    for (const pair of src as Array<[string, string]>) {
+      if (String(pair[0]).toLowerCase() === lower) return String(pair[1]);
+    }
+    return '';
+  }
+  if (typeof src === 'object') {
+    const rec = src as Record<string, string>;
+    const hit = Object.keys(rec).find((k) => k.toLowerCase() === lower);
+    return hit ? String(rec[hit]) : '';
+  }
+  return '';
+}
+
+/** 判定一次请求是否「对 Supabase 的写」（*.supabase.co 域）：
+ *  ① 中继写：函数 URL 带 X-Task-Action=upload-file 头（read-file/ping 是读/探测，不拦）；
+ *  ② 直连 Storage 写：/storage/v1/object|bucket 路径 + 非 GET/HEAD（supaPutJson 的
+ *    x-upsert POST、qqHostMediaCloud 的公桶 POST 都在内）。 */
+function gwIsSupaWrite(url: string, method: string, input: RequestInfo | URL, init?: RequestInit): boolean {
+  if (!/^https?:\/\/[a-z0-9.-]+\.supabase\.co(?::\d+)?(?:\/|$)/i.test(url)) return false;
+  if (gwReqHeader(input, init, 'X-Task-Action').toLowerCase() === 'upload-file') return true;
+  let path = '';
+  try {
+    path = new URL(url).pathname;
+  } catch {
+    return false;
+  }
+  if (/^\/storage\/v1\/(object|bucket)\b/.test(path) && method !== 'GET' && method !== 'HEAD') return true;
+  return false;
+}
+
+/** 计入熔断的失败码：平台风控/鉴权/限流/不可达（404/400 是业务态，core 自吞不影响） */
+function gwSupaFailStatus(status: number): boolean {
+  return status === 401 || status === 402 || status === 403 || status === 429 || status >= 500;
+}
+
+/** 记一次云端写结果，驱动熔断状态机；跃迁只打一次日志 */
+function gwSupaNoteWrite(ok: boolean, statusText: string): void {
+  const b = gwSupaBreaker();
+  if (ok) {
+    if (b.state !== 'ok') {
+      b.state = 'ok';
+      b.until = 0;
+      console.log('[im-gateway] Supabase 写熔断已恢复（探测成功，云端镜像续写）');
+    }
+    b.fails = 0;
+    b.lastErr = '';
+    return;
+  }
+  b.fails += 1;
+  b.lastErr = statusText.slice(0, 120);
+  if (b.state === 'ok' && b.fails >= GW_SUPA_FAIL_N) {
+    b.state = 'cooling';
+    b.until = Date.now() + GW_SUPA_COOLDOWN_MS;
+    console.log('[im-gateway] Supabase 写熔断开启：连续 ' + b.fails + ' 次失败（' + b.lastErr + '）——15 分钟内云端写全走本地（历史/配置本地照落，收发不受影响）');
+  } else if (b.state === 'halfopen') {
+    b.state = 'cooling';
+    b.until = Date.now() + GW_SUPA_COOLDOWN_MS;
+    console.log('[im-gateway] Supabase 写熔断半开探测仍失败（' + b.lastErr + '）——再冷却 15 分钟');
+  }
+}
+
+/** 安装 Supabase 写断路器 fetch 包装（进程内只装一次；热重载后旧包装器经全局槽位继续生效） */
+function installGwSupaBreakerFetch(): void {
+  const g = globalThis as Record<string, unknown>;
+  if (g[GW_SUPA_FETCH_WRAPPED]) return;
+  g[GW_SUPA_FETCH_WRAPPED] = true;
+  const orig = globalThis.fetch.bind(globalThis);
+  globalThis.fetch = (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+    let url = ''
+    let method = ''
+    try {
+      url = typeof input === 'string' ? input : input instanceof URL ? input.href : String((input as Request)?.url || '');
+      method = String(init?.method || (input as Request)?.method || 'GET').toUpperCase();
+    } catch {
+      url = ''
+    }
+    if (url && gwIsSupaWrite(url, method, input, init)) {
+      const b = gwSupaBreaker();
+      if (b.state === 'cooling') {
+        if (Date.now() < b.until) {
+          // 冷却期短路：请求根本不出门，返回伪造 503（core 既有降级路径全吞错）
+          return Promise.resolve(
+            new Response(JSON.stringify({ error: 'supabase-write-breaker-open' }), {
+              status: 503,
+              headers: { 'Content-Type': 'application/json' },
+            }),
+          );
+        }
+        b.state = 'halfopen'; // 冷却到期：半开放行这一条做探测
+        console.log('[im-gateway] Supabase 写熔断半开探测：放行一次云端写实测');
+      }
+      return orig(input, init).then(
+        (res) => {
+          if (res.ok) gwSupaNoteWrite(true, '');
+          else if (gwSupaFailStatus(res.status)) gwSupaNoteWrite(false, 'HTTP ' + res.status);
+          return res;
+        },
+        (e) => {
+          gwSupaNoteWrite(false, '网络错 ' + String((e as Error)?.message || e).slice(0, 80));
+          throw e;
+        },
+      );
+    }
+    return orig(input, init);
+  };
+}
+
+installGwSupaBreakerFetch();
 // ---------------- 类型 ----------------
 
 interface QqWsState {
@@ -656,6 +903,11 @@ async function handleWsFrame(f: Record<string, any>, gen: number, token: string)
       qqSeen.set(key, Date.now());
       pruneSeen();
       if (seenAt) return; // 平台重推的同一条消息：不重复回复
+      // v25 真机「正在输入」：收到真机用户消息、core 生成回复期间置位（仅对有内容的消息事件——
+      // 空正文事件 handleQqEvent 会秒退「跳过（无内容）」，置位只会闪一下假指示）；contactKey=
+      // 单聊对端 openid / 群 group_openid（站内历史不分会话，仅作通道内标识）。回复完成/失败 finally 清除。
+      const hasContent = String(d.content || '').trim() !== '' || (Array.isArray(d.attachments) && d.attachments.length > 0);
+      if (hasContent) gwTypingSet('qq', t === 'GROUP_AT_MESSAGE_CREATE' ? String(d.group_openid || '') : String(d.author?.id || ''));
       // 消息代答复用云端核心（人设/表情包/语音条/历史回写 Supabase 全在内）；cfg 走 60s 缓存
       try {
         const cfg = await rt.core.loadConfig(false);
@@ -664,6 +916,8 @@ async function handleWsFrame(f: Record<string, any>, gen: number, token: string)
       } catch (e) {
         q.lastError = String((e as Error)?.message || e).slice(0, 160);
         console.log('[im-gateway] QQ 处理失败:', q.lastError);
+      } finally {
+        gwTypingClear('qq');
       }
       return;
     }
@@ -737,6 +991,10 @@ async function wxLoop(gen: number): Promise<void> {
   // 引擎驱动（deliverProactiveMsg → 网关 op=send-active → cloudSendActive），本循环只管收发
   while (rt && rt.gen === gen) {
     const wx = rt.wx;
+    // v25 真机「正在输入」：置位不在这里——tick 内部先跑 getupdates 空闲长轮（服务端挂 ~35s），
+    // 在 tick 前置位会让 typing 在空闲期也亮着（站内会话常驻「对方正在输入」）；改由上方 fetch
+    // 观察器精确置位（handleWxMsg 起点的 /ilink/bot/getconfig + sendtyping 状态）。这里只留
+    // finally 兑底：tick 返回/抛错即本轮收发结束，没等到 sendtyping 收尾也把 typing 清掉。
     try {
       const n = (await rt.core.tick()) as number;
       errs = 0;
@@ -745,7 +1003,9 @@ async function wxLoop(gen: number): Promise<void> {
       if (n > 0) wx.replied += n;
       if (Date.now() - lastHbAt > 60_000) {
         lastHbAt = Date.now();
-        await rt.core.writeHeartbeat({ source: 'im-gateway' }).catch(() => undefined);
+        // v22 心跳写彻底 fire-and-forget（不再 await——云端写经 fetch 断路器短路/超时都不
+        // 再拖慢轮询节奏；心跳只表达在线语义，失败不影响收发）
+        void rt.core.writeHeartbeat({ source: 'im-gateway' }).catch(() => undefined);
       }
     } catch (e) {
       const msg = String((e as Error)?.message || e);
@@ -761,6 +1021,8 @@ async function wxLoop(gen: number): Promise<void> {
         await sleep(Math.min(5000 * errs, 30000));
       }
       continue;
+    } finally {
+      gwTypingClear('wx');
     }
     // 正常周期：getupdates 服务端挂 ~35s；空闲（未接入微信）也 10s 一探，不热转
     await sleep(10000);
@@ -816,8 +1078,15 @@ function startGwWatchdog(gen: number): void {
 // ---------------- 生命周期 ----------------
 
 function statusJson(): Record<string, unknown> {
+  // v25 真机「正在输入」：每通道 { contactKey, since }（120 秒陈旧兜底——过期项不输出，
+  // 站内 GET 轮询拿它把「对方正在输入…」同步到对应会话）；网关没跑时输出空对象保持结构稳定
+  const typingOut: { wx?: TypingEntry; qq?: TypingEntry } = {};
+  const tw = gwTypingOf('wx');
+  if (tw) typingOut.wx = tw;
+  const tq = gwTypingOf('qq');
+  if (tq) typingOut.qq = tq;
   if (!rt) {
-    return { running: false, qq: { state: 'disabled' }, wx: { running: false } };
+    return { running: false, qq: { state: 'disabled' }, wx: { running: false }, typing: typingOut, supaWrite: gwSupaBreakerOut() };
   }
   return {
     running: true,
@@ -826,7 +1095,17 @@ function statusJson(): Record<string, unknown> {
     mode: rt.mode,
     qq: { ...rt.qq, hbInterval },
     wx: { running: true, ...rt.wx },
+    typing: typingOut,
+    // v22 Supabase 写通道熔断状态（站内 ClawBox 通道状态源同字段消费）
+    supaWrite: gwSupaBreakerOut(),
   };
+}
+
+/** v22 云端写熔断观测字段：{ state, fails, lastErr, until }——ok=云端镜像正常写；
+ *  cooling=冷却中（云端写全走本地）；halfopen=冷却到期的探测瞬间（对外同按受限理解） */
+function gwSupaBreakerOut(): { state: GwSupaBreaker['state']; fails: number; lastErr: string; until: number } {
+  const b = gwSupaBreaker();
+  return { state: b.state, fails: b.fails, lastErr: b.lastErr, until: b.until };
 }
 
 // ---------------- v8 自恢复：网关状态落盘（重启/热重载后自动拉起） ----------------
@@ -968,6 +1247,8 @@ async function startGateway(supaUrl: string, supaKey: string, ref: string, relay
   // 也继续刷，40s 内云端骨干永远接不了手 → 网关进程活着但连接死了 = 真机 QQ 全员掉线
   // （「QQ 接入过一会会断开」的另一半根因）。现在连接一挂锁就过期，云端 cron-cycle
   // 接手收发，网关自愈重连成功后（拿回 ready）重新占锁、云端下一轮让位。
+  // v22 写放大收敛：15s → 30s（锁 TTL 40s，30s 续期最坏陈旧 30s 仍在窗内——云端让位
+  // 判定不受影响）；QQ 在线期间的云端锁写从 5760 次/天降到 2880 次/天（免费层写配额减负）
   if (qqLockTimer) clearInterval(qqLockTimer);
   qqLockTimer = setInterval(() => {
     if (!rt || rt.gen !== gen) {
@@ -976,7 +1257,7 @@ async function startGateway(supaUrl: string, supaKey: string, ref: string, relay
     }
     if (rt.qq.state !== 'ready') return; // 没真在线不占锁（disabled 没人需要；connecting/error 让云端骨干接手）
     void rt.core.refreshQqWsLock('gw').catch(() => undefined);
-  }, 15000);
+  }, 30000);
   // v12 凭证看门狗（每 30s）：QQ 在线期间重读运行包——手机 App「断开连接」后凭证段
   // 被移除时拆长连接（真机 QQ 上 TA 下线）；网络读失败不打扰在线连接。
   if (qqCfgTimer) clearInterval(qqCfgTimer);
@@ -1041,6 +1322,13 @@ Bun.serve({
     // v21 本地历史端点（核心 appendQqHistory / saveWxHistory 镜像落盘；仅本机访问）
     if (url.pathname === '/hist' && req.method === 'POST') {
       return handleLocalHist(req);
+    }
+    // v22 本地历史兜底读（GET /hist?channel=qq|wx）：核心云端历史读失败且内存为空时
+    // 回落读本机镜像文件（sources.ts v22 的 localHistFetch 调这里）；仅本机访问（不经 Caddy 对外）
+    if (url.pathname === '/hist' && req.method === 'GET') {
+      const ch = url.searchParams.get('channel') === 'qq' ? 'qq' : 'wx';
+      const msgs = readLocalHist(ch === 'qq' ? LOCAL_QQ_HIST_FILE : LOCAL_WX_HIST_FILE);
+      return Response.json({ ok: true, msgs, n: msgs.length });
     }
     if (url.pathname !== '/api/im-gateway') {
       return Response.json({ ok: false, error: 'not found' }, { status: 404 });

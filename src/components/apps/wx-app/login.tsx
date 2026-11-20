@@ -186,7 +186,7 @@ export function LoginScreen({ onLogin, slot, onBack }: { onLogin: (u: WxUser) =>
             setMode(mode === 'phone' ? 'account' : 'phone');
             setError('');
           }}
-          className="mt-3 text-[15px] font-medium text-[#576B95] active:opacity-60"
+          className="mt-3 text-[15px] font-medium text-[#576B95] active:opacity-60 dark:text-[#8FA5C9]"
         >
           {mode === 'phone' ? '用微信号/QQ号/邮箱登录' : '用手机号登录'}
         </button>
@@ -212,7 +212,7 @@ export function LoginScreen({ onLogin, slot, onBack }: { onLogin: (u: WxUser) =>
         </button>
       </div>
 
-      <div className="flex items-center justify-center gap-4 pb-8 pt-4 text-[15px] text-[#576B95]">
+      <div className="flex items-center justify-center gap-4 pb-8 pt-4 text-[15px] text-[#576B95] dark:text-[#8FA5C9]">
         <button type="button" className="active:opacity-60" onClick={() => setError('密码找回暂未开放，请到「联系人」App 查看账号密码')}>
           找回密码
         </button>

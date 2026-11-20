@@ -268,8 +268,8 @@ function PuzzleBoard({ onClose, photo }: { onClose: () => void; photo?: string }
             style={{ backgroundImage: img ? `url(${img})` : undefined }}
           />
           <div>
-            <div className="text-[15px] font-semibold text-[#3a3a3e]">照片拼图</div>
-            <div className="text-[11px] text-[#9a9a96]">点两块交换位置，还原照片</div>
+            <div className="text-[15px] font-semibold text-[#3a3a3e] dark:text-zinc-100">照片拼图</div>
+            <div className="text-[11px] text-[#9a9a96] dark:text-zinc-400">点两块交换位置，还原照片</div>
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -284,7 +284,7 @@ function PuzzleBoard({ onClose, photo }: { onClose: () => void; photo?: string }
           <button
             onClick={onClose}
             aria-label="关闭拼图"
-            className="flex h-8 w-8 items-center justify-center rounded-full bg-[#f0eff1] text-[#8a8a90] transition active:scale-95"
+            className="flex h-8 w-8 items-center justify-center rounded-full bg-[#f0eff1] text-[#8a8a90] transition active:scale-95 dark:bg-zinc-800 dark:text-zinc-400"
           >
             <X className="h-4 w-4" />
           </button>
@@ -342,11 +342,11 @@ function PuzzleBoard({ onClose, photo }: { onClose: () => void; photo?: string }
             exit={{ opacity: 0 }}
             className="mt-3 flex flex-col items-center gap-1.5"
           >
-            <div className="flex items-center gap-2 text-[16px] font-semibold text-[#3a3a3e]">
+            <div className="flex items-center gap-2 text-[16px] font-semibold text-[#3a3a3e] dark:text-zinc-100">
               <PartyPopper className="h-5 w-5 text-[#e8899a]" />
               拼好啦！
             </div>
-            <div className="text-[12px] text-[#9a9a96]">
+            <div className="text-[12px] text-[#9a9a96] dark:text-zinc-400">
               用时 {fmt(secs)} · {moves} 步
             </div>
             <button
@@ -378,7 +378,7 @@ export default function PuzzleGame({ open, onClose, photo }: PuzzleGameProps) {
             animate={{ scale: 1, y: 0 }}
             exit={{ scale: 0.95, y: 10 }}
             transition={{ type: 'spring', damping: 26, stiffness: 320 }}
-            className="w-full max-w-[330px] rounded-3xl bg-white/96 p-5 shadow-2xl"
+            className="w-full max-w-[330px] rounded-3xl bg-white/96 p-5 shadow-2xl dark:bg-zinc-900/95"
           >
             <PuzzleBoard onClose={onClose} photo={photo} />
           </motion.div>

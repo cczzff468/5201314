@@ -108,7 +108,7 @@ function HistorySheetInner({ onClose, charId, charName }: Omit<CabinHistorySheet
         animate={{ y: 0 }}
         transition={{ type: 'spring', damping: 30, stiffness: 320 }}
       >
-        <div className="flex flex-col overflow-hidden rounded-t-[26px] border border-white/60 bg-white/55 shadow-[0_-8px_40px_rgba(120,70,80,0.22)] backdrop-blur-2xl">
+        <div className="flex flex-col overflow-hidden rounded-t-[26px] border border-white/60 bg-white/55 shadow-[0_-8px_40px_rgba(120,70,80,0.22)] backdrop-blur-2xl dark:border-white/15 dark:bg-zinc-900/80">
           {/* 把手 */}
           <div className="flex items-center justify-center pt-2.5">
             <div className="h-1.5 w-10 rounded-full bg-[#e8d5cd]" />
@@ -121,7 +121,7 @@ function HistorySheetInner({ onClose, charId, charName }: Omit<CabinHistorySheet
               type="button"
               aria-label="关闭"
               onClick={onClose}
-              className="flex h-8 w-8 items-center justify-center rounded-full bg-white/70 text-[#9c838c] shadow-sm ring-1 ring-white/70 transition active:scale-95"
+              className="flex h-8 w-8 items-center justify-center rounded-full bg-white/70 text-[#9c838c] shadow-sm ring-1 ring-white/70 transition active:scale-95 dark:bg-zinc-800/80 dark:text-zinc-300 dark:ring-white/15"
             >
               <X size={16} />
             </button>
@@ -151,7 +151,7 @@ function HistorySheetInner({ onClose, charId, charName }: Omit<CabinHistorySheet
                         className={`max-w-[78%] whitespace-pre-wrap break-words rounded-2xl px-3.5 py-2 text-[13px] leading-relaxed shadow-sm ${
                           isMe
                             ? 'rounded-br-md bg-[#fbdce6]/90 text-[#7c4a58] ring-1 ring-white/50'
-                            : 'rounded-bl-md bg-white/75 text-[#5c4a52] ring-1 ring-white/60'
+                            : 'rounded-bl-md bg-white/75 text-[#5c4a52] ring-1 ring-white/60 dark:bg-zinc-800/75 dark:text-zinc-200 dark:ring-white/15'
                         }`}
                       >
                         {t.text}

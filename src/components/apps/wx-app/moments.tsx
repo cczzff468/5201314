@@ -27,6 +27,12 @@ import { WxAvatar } from './widgets';
 
 // ---------------- 朋友圈页 ----------------
 
+/** 朋友圈渲染窗口（性能专项）：存储上限 200 条，但一屏只看得到几条——初始只渲染最近的
+ *  MOMENTS_FIRST_RENDER 条，滚到底部（或点「查看更早的动态」）按 MOMENTS_RENDER_STEP 向前补。
+ *  只截断渲染条数，落库/删改逻辑不动（消息完整性不受影响）。 */
+const MOMENTS_FIRST_RENDER = 40;
+const MOMENTS_RENDER_STEP = 40;
+
 /** A1/A2 朋友圈「生成图片」弹层（iOS 风格底部小弹层，样式对齐 WxTextCardSheet/ImageRegenSheet）：
  *  文字图片卡片升级真图（A1）与升级图重新生成（A2）共用——描述预填可改（无硬限，提交时 trim + 截 400）、
  *  主按钮 busy 时「生成中…」禁用、错误信息显示在弹层内（失败留在弹层可重试）、取消关闭（busy 时不可关） */
@@ -554,6 +560,9 @@ export function MomentsPage({
   };
   const [menuId, setMenuId] = useState<string | null>(null);
   const [scrolled, setScrolled] = useState(false);
+  /** 动态渲染窗口（性能专项）：初始只渲染最近 MOMENTS_FIRST_RENDER 条，滚到底部自动扩窗；
+   *  posts 变短（删除/切作用域）时 slice 天然收敛，无需额外同步 */
+  const [renderCount, setRenderCount] = useState(MOMENTS_FIRST_RENDER);
   /** 封面（本地 IndexedDB settings 存 data URL；迁移时从服务端一次性搬入） */
   const [cover, setCover] = useState<string | null>(null);
   const [coverBusy, setCoverBusy] = useState(false);
@@ -642,7 +651,14 @@ export function MomentsPage({
       <div
         className="min-h-0 flex-1 overflow-y-auto"
         data-testid="wx-moments-list"
-        onScroll={(e) => setScrolled(e.currentTarget.scrollTop > 230)}
+        onScroll={(e) => {
+          const el = e.currentTarget;
+          setScrolled(el.scrollTop > 230);
+          // 渲染窗口扩容：接近底部还有未渲染的更早动态 → 补一批（与 setScrolled 同一回调，零额外监听）
+          if (renderCount < posts.length && el.scrollHeight - el.scrollTop - el.clientHeight < 600) {
+            setRenderCount((c) => Math.min(posts.length, c + MOMENTS_RENDER_STEP));
+          }
+        }}
       >
         {/* 封面：自定义上传图（无则默认风景照）+ 底部渐晕；点击封面图直接换（从手机上传，永久保存）。
          *  47-b：!isMine（进他朋友圈）也支持点击封面图上传换封面（新需求，替代 chat-settings 的「恢复默认朋友圈封面」入口） */}
@@ -728,7 +744,7 @@ export function MomentsPage({
           </div>
         ) : (
           <div className="pt-[40px]">
-            {posts.map((p) => (
+            {posts.slice(0, renderCount).map((p) => (
               <MomentRow
                 key={p.id}
                 post={p}
@@ -756,7 +772,19 @@ export function MomentsPage({
                 cardBusy={upgradingCardId === p.id}
               />
             ))}
-            <p className="py-6 text-center text-[12px] text-black/25 dark:text-white/25">没有更多了</p>
+            {renderCount < posts.length ? (
+              /* 渲染窗口截断中：手动扩窗入口（滚动自动扩窗之外的兑底入口，微信同款「加载更早」语义） */
+              <button
+                type="button"
+                aria-label="查看更早的动态"
+                onClick={() => setRenderCount((c) => Math.min(posts.length, c + MOMENTS_RENDER_STEP))}
+                className="w-full py-5 text-center text-[13px] text-black/40 active:opacity-60 dark:text-white/40"
+              >
+                查看更早的动态（还有 {posts.length - renderCount} 条）
+              </button>
+            ) : (
+              <p className="py-6 text-center text-[12px] text-black/25 dark:text-white/25">没有更多了</p>
+            )}
           </div>
         )}
         {isMine && (

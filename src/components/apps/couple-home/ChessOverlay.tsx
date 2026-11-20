@@ -167,25 +167,25 @@ export default function ChessOverlay({ onClose }: { onClose: () => void }) {
         animate={{ scale: 1, y: 0 }}
         exit={{ scale: 0.95, y: 10 }}
         transition={{ type: 'spring', damping: 26, stiffness: 320 }}
-        className="w-full max-w-[340px] rounded-3xl bg-white/96 p-4 shadow-2xl"
+        className="w-full max-w-[340px] rounded-3xl bg-white/96 p-4 shadow-2xl dark:bg-zinc-900/95"
       >
         <div className="mb-3 flex items-center justify-between">
           <div>
-            <div className="text-[15px] font-semibold text-[#3a3a3e]">五子棋对弈</div>
+            <div className="text-[15px] font-semibold text-[#3a3a3e] dark:text-zinc-100">五子棋对弈</div>
             <div className="text-[11.5px] text-[#9a9a96]">{statusText}</div>
           </div>
           <div className="flex items-center gap-1.5">
             <button
               onClick={reset}
               aria-label="再来一局"
-              className="flex h-8 w-8 items-center justify-center rounded-full bg-[#f0eff1] text-[#8a8a90] transition active:scale-95"
+              className="flex h-8 w-8 items-center justify-center rounded-full bg-[#f0eff1] text-[#8a8a90] transition active:scale-95 dark:bg-zinc-800 dark:text-zinc-400"
             >
               <RotateCcw className="h-4 w-4" />
             </button>
             <button
               onClick={close}
               aria-label="收起棋盘"
-              className="flex h-8 w-8 items-center justify-center rounded-full bg-[#f0eff1] text-[#8a8a90] transition active:scale-95"
+              className="flex h-8 w-8 items-center justify-center rounded-full bg-[#f0eff1] text-[#8a8a90] transition active:scale-95 dark:bg-zinc-800 dark:text-zinc-400"
             >
               <X className="h-4 w-4" />
             </button>

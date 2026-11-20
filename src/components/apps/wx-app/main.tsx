@@ -52,6 +52,9 @@ import { contactByRef, displayNameOf, isFriendIn, liveAvatarOf } from '@/lib/con
 import type { ContactRecord } from '@/lib/contacts';
 import { addFriendReq, isFriendDeleted, rejectFriendReq, removeFriendByUser, restoreFriendship, setFriendReqStatus, SOURCE_SEARCH_WX, subscribeFriendReqs, charWelcomeReplyToApply, processAltFriendReq, clearFriendDelState, FRIEND_STATE_APPLIED_EVENT, type FriendReqExtras } from '@/lib/ios/friend-state';
 import { useUnreadMap } from '@/lib/unread-store';
+// v25 真机输入中：会话列表副标题临时显示（网关 typing 快照，本页零额外轮询）
+import { useGatewayTyping } from '@/lib/ios/wx-cloud/gateway';
+import { wxIlinkLoginSnapshot } from '@/lib/ios/weixin-connect';
 // v73 AI 聊天悬浮小窗：顶栏「小窗模式」按钮入口（打开全局小窗并退出全屏聊天）
 import { peekBgBadgeCounts } from '@/lib/ios/bg-turn';
 import { useChatFlags, wxChatFlags as wxChatFlagsStore } from '@/lib/chat-flags';
@@ -119,6 +122,8 @@ export function MainScreen({
 }) {
   const [tab, setTab] = useState<Tab>('chats');
   const [chatPeer, setChatPeer] = useState<ContactRecord | null>(null);
+  // v25 真机输入中：会话列表副标题临时显示（typing 快照由既有网关轮询喂，本页零额外请求）
+  const realDevTyping = useGatewayTyping('wx');
   /** 群聊：群列表缓存 / 正在聊的群 / 群子页（create=发起群聊、list=通讯录群聊列表）/ 群聊信息页 */
   const [wxGroups, setWxGroups] = useState<ChatGroup[]>(() => listGroups('wx'));
   const [groupPeer, setGroupPeer] = useState<ChatGroup | null>(null);
@@ -1526,7 +1531,8 @@ export function MainScreen({
             </span>
           </div>
           <p className="mt-0.5 truncate text-[13px] text-black/40 dark:text-white/40">
-            {row.preview || '开始聊天吧'}
+            {/* v25 真机输入中：绑定角色的会话副标题临时盖过最后一条预览（克制：只影响真机绑定那一行） */}
+            {realDevTyping && contact.id === wxIlinkLoginSnapshot()?.boundContactId ? '对方正在输入…' : row.preview || '开始聊天吧'}
           </p>
         </div>
       </button>
@@ -1675,7 +1681,7 @@ export function MainScreen({
               ))}
             </div>
           ) : (
-          <div className={`absolute right-3 top-[94px] z-40 w-[152px] overflow-hidden rounded-[6px] shadow-[0_4px_16px_rgba(0,0,0,0.25)] ${retro ? 'border border-[#9A9CA6] bg-white text-[#2E2E33]' : 'rounded-[8px] bg-[#4C4C4C] text-white shadow-xl dark:bg-[#383838]'}`}>
+          <div className={`absolute right-3 top-[94px] z-40 w-[152px] overflow-hidden rounded-[6px] shadow-[0_4px_16px_rgba(0,0,0,0.25)] ${retro ? 'border border-[#9A9CA6] bg-white text-[#2E2E33] dark:bg-[#383838] dark:text-white' : 'rounded-[8px] bg-[#4C4C4C] text-white shadow-xl dark:bg-[#383838]'}`}>
             <button
               type="button"
               data-testid="wx-menu-addfriend"
@@ -1807,7 +1813,7 @@ export function MainScreen({
             {/* 古早（第五十九轮，用户指定「白色面板太长，弄到联系人那里」）：去掉 min-h-full——
                 白色分组卡高度贴合会话行数（iOS 6 分组表格同款），底部露出淡青灰纸感底；
                 默认主题保持 min-h-full 整幅白底不变 */}
-            <div className={liquid ? 'px-2.5 pb-2' : retro ? 'mx-2 rounded-[8px] bg-white shadow-[inset_0_0_0_1px_#C3C5CC]' : 'min-h-full bg-white dark:bg-[#1A1A1A]'}>
+            <div className={liquid ? 'px-2.5 pb-2' : retro ? 'mx-2 rounded-[8px] bg-white shadow-[inset_0_0_0_1px_#C3C5CC] dark:bg-[#1A1A1A]' : 'min-h-full bg-white dark:bg-[#1A1A1A]'}>
               {(liquid ? visibleSessions : sessions).length === 0 && (
                 <div className="py-16 text-center">
                   <p className="text-[14px] text-black/35 dark:text-white/35">{liquid && cat !== 'all' ? '该分类下暂无会话' : '还没有会话'}</p>

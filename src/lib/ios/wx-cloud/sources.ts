@@ -277,7 +277,13 @@ async function loadConfig(force) {
     return CFG;
   }
   var c = await supaGetJson('config.json');
-  if (!c) throw new Error('运行包缺失：请回到手机 App「设置 → 云端助手」重新同步');
+  // v22 云端读失败（402/502/网络抖动）不清空内存里已有的运行包（真机收发继续用上一份
+  // 人设跑——402 期间网关不再报「运行包缺失」掉线）；本地直推（LOCAL_CONFIG）与内存缓存
+  // 都没有才如实报缺（首次接入/换绑场景）。云端直推包的优先级不变（本地优先）。
+  if (!c) {
+    if (CFG) { CFG_AT = Date.now(); return CFG; }
+    throw new Error('运行包缺失：请回到手机 App「设置 → 云端助手」重新同步');
+  }
   CFG = c;
   CFG_AT = Date.now();
   // confirmed 回包的 baseurl：云端 Bot API 跟着走（仅放行 *.weixin.qq.com / *.qq.com，防 SSRF）
@@ -295,7 +301,17 @@ function wxUin() {
 async function loadWxHistory(force) {
   if (!force && HIST_WX && Date.now() - HIST_AT < 30000) return HIST_WX;
   var h = await supaGetJson('history.json');
-  HIST_WX = h && Array.isArray(h.msgs) ? h.msgs : [];
+  if (h && Array.isArray(h.msgs)) {
+    HIST_WX = h.msgs;
+    HIST_AT = Date.now();
+    return HIST_WX;
+  }
+  // v22 云端读失败不清空：①内存已有（含本轮新消息）→ 原样返回（上下文连续，旧版直接清成
+  // 空表是真机回复「失忆」的直接推手）；②内存也没有 → 回落网关本地镜像文件（402/502
+  // 受限期间真机收发历史照常进 LLM 上下文）。
+  if (HIST_WX && HIST_WX.length) { HIST_AT = Date.now(); return HIST_WX; }
+  var lh = await localHistFetch('wx');
+  HIST_WX = lh || [];
   HIST_AT = Date.now();
   return HIST_WX;
 }
@@ -303,6 +319,24 @@ async function loadWxHistory(force) {
 async function saveWxHistory() {
   // v15：30 → 60——与 v14 内存窗口同步（一轮连发就能占二三十条，旧 30 条只剩半轮）
   await supaPutJson('history.json', { msgs: (HIST_WX || []).slice(-60), updatedAt: Date.now() });
+}
+
+// v22 历史云端镜像 60s 聚合器（微信）：本地文件（网关 /hist 镜像）与内存已先落全量，
+// 云端只是镜像——一轮回复后不再立即写 Storage，攒到 60s 尾沿一次批量写（活跃聊天时
+// 写放大从每轮 1 次降到每分钟 1 次；断路器冷却期 supaPutJson 秒回 503 自吞，零成本）。
+// 崩溃/断电最多丢 60s 的云端镜像（本地照全量，网站拉取本地优先——不丢真数据）。
+var HIST_FLUSH_MS = 60000;
+var WX_HIST_DIRTY = false;
+var WX_HIST_FLUSH_TIMER = null;
+function scheduleWxHistFlush() {
+  WX_HIST_DIRTY = true;
+  if (WX_HIST_FLUSH_TIMER) return; // 已有定时器：到点自然批量写
+  WX_HIST_FLUSH_TIMER = setTimeout(function () {
+    WX_HIST_FLUSH_TIMER = null;
+    if (!WX_HIST_DIRTY) return;
+    WX_HIST_DIRTY = false;
+    try { void saveWxHistory(); } catch (e) { /* 云端镜像失败：本地已有全量 */ }
+  }, HIST_FLUSH_MS);
 }
 
 /** v5 游标持久化：getupdates 游标存进桶（state/wx-updates-buf.json），新实例/冷启动不再
@@ -338,14 +372,27 @@ async function loadWxLock() {
   return l && typeof l.at === 'number' && typeof l.owner === 'string' ? l : null;
 }
 async function writeWxLock() {
+  // v22 写放大收敛：锁写 ≥40s 一刷（TTL 50s 窗内最坏陈旧 40s——云端让位判定不受影响；
+  // 活跃聊天轮 ~10s 一转时锁写从每轮一次降到 ~1/4 轮一次，免费层写配额直接减负）
+  if (Date.now() - WX_LOCK_WRITE_AT < 40000) return;
+  WX_LOCK_WRITE_AT = Date.now();
   await supaPutJson('state/wx-lock.json', { at: Date.now(), owner: POLL_OWNER });
 }
+var WX_LOCK_WRITE_AT = 0;
 async function loadWxClaims(force) {
   // v12 缓存 TTL 3s：长驻进程（内置网关）旧版一次加载后永不重读——云端定时任务/
   // 手动测试并发认领同一批消息时互相看不见，双回根因之一。3s 内复用，过期重读。
   if (!force && WX_CLAIMS && Date.now() - WX_CLAIMS_AT < 3000) return WX_CLAIMS;
   var c = await supaGetJson('state/wx-claims.json');
-  WX_CLAIMS = c && c.ids && typeof c.ids === 'object' ? c.ids : {};
+  // v22 云端读失败不清空内存认领表（读失败与文件不存在同形 null）：保留上一份已知
+  // 认领（TTL 自老化）——受限期间游标写同样失败 → 下轮重收整批时认领不丢，本进程
+  // 不双回；首读（还没缓存）才从空表开始。
+  if (!(c && c.ids && typeof c.ids === 'object')) {
+    if (WX_CLAIMS) { WX_CLAIMS_AT = Date.now(); return WX_CLAIMS; }
+    WX_CLAIMS = {};
+  } else {
+    WX_CLAIMS = c.ids;
+  }
   WX_CLAIMS_AT = Date.now();
   return WX_CLAIMS;
 }
@@ -392,7 +439,13 @@ async function loadQqClaims(force) {
   // 认领表必须近实时互通——旧版永不重读，网关与云端各认各的 → 同一条消息两边都回。
   if (!force && QQ_CLAIMS && Date.now() - QQ_CLAIMS_AT < 3000) return QQ_CLAIMS;
   var c = await supaGetJson('state/qq-claims.json');
-  QQ_CLAIMS = c && c.ids && typeof c.ids === 'object' ? c.ids : {};
+  // v22 云端读失败不清空内存认领表（同 loadWxClaims：保留上一份已知，TTL 自老化）
+  if (!(c && c.ids && typeof c.ids === 'object')) {
+    if (QQ_CLAIMS) { QQ_CLAIMS_AT = Date.now(); return QQ_CLAIMS; }
+    QQ_CLAIMS = {};
+  } else {
+    QQ_CLAIMS = c.ids;
+  }
   QQ_CLAIMS_AT = Date.now();
   return QQ_CLAIMS;
 }
@@ -1418,7 +1471,9 @@ async function handleWxMsg(cfg, msg) {
     HIST_WX = (HIST_WX || []).concat(histAdd).slice(-60);
     // v21 本地镜像（网关 /hist 落本机文件——Storage 402/502 受限期间网站拉取走网关本地通道）
     localHistPost('wx', histAdd);
-    await saveWxHistory();
+    // v22 云端镜像写改 60s 聚合（不再每轮立即写——本地文件/内存已先落，云端只是镜像；
+    // 写侧另有 fetch 断路器短路，成不成都不影响收发节奏）
+    scheduleWxHistFlush();
     return true;
   } catch (e) {
     if (!WX_MSG_ERR) {
@@ -1590,7 +1645,15 @@ function qqSeed(botSecret) {
 async function loadQqHistory(force) {
   if (!force && HIST_QQ && Date.now() - HIST_AT < 30000) return HIST_QQ;
   var h = await supaGetJson('qq-history.json');
-  HIST_QQ = h && Array.isArray(h.msgs) ? h.msgs : [];
+  if (h && Array.isArray(h.msgs)) {
+    HIST_QQ = h.msgs;
+    HIST_AT = Date.now();
+    return HIST_QQ;
+  }
+  // v22 云端读失败不清空（同 loadWxHistory：内存保持 + 网关本地镜像文件兑底）
+  if (HIST_QQ && HIST_QQ.length) { HIST_AT = Date.now(); return HIST_QQ; }
+  var lh = await localHistFetch('qq');
+  HIST_QQ = lh || [];
   HIST_AT = Date.now();
   return HIST_QQ;
 }
@@ -1622,6 +1685,18 @@ function localHistPost(channel, items) {
   } catch (e) { /* 本地写失败不影响收发主流程 */ }
 }
 
+/** v22 本地历史兑底读（网关 /hist 端点 GET，仅网关注入）：云端历史读失败且内存为空时
+ *  回落读本机镜像文件（与 Storage 无关）。云端（Deno）不注入 HIST_LOCAL_URL → null。 */
+async function localHistFetch(channel) {
+  if (!HIST_LOCAL_URL) return null;
+  try {
+    var r = await fetch(HIST_LOCAL_URL + '/hist?channel=' + channel, { signal: AbortSignal.timeout(4000) });
+    if (!r.ok) return null;
+    var j = await r.json();
+    return j && Array.isArray(j.msgs) ? j.msgs : null;
+  } catch (e) { return null; }
+}
+
 /** v21 云端批量落库：一轮回复全部 append 完后一次写（旧版每条 append 都整文件重写
  *  Storage——一轮 3~7 次、叠加高频心跳/认领写正是触发 Supabase 免费层风控 402 的写放大
  *  主源之一）。写失败静默（supaPutJson 自吞错；本地文件已有完整记录，网站拉取走网关
@@ -1631,6 +1706,19 @@ async function flushQqHistory() {
   if (!QQ_HIST_DIRTY) return;
   QQ_HIST_DIRTY = false;
   await supaPutJson('qq-history.json', { msgs: HIST_QQ, updatedAt: Date.now() });
+}
+
+// v22 QQ 历史云端镜像 60s 聚合器（与微信侧同构）：v21 已把逐条整文件重写收敛为轮末
+// 一次；再攒到 60s 尾沿批量写（活跃聊天时云端写从每轮 1 次降到每分钟 1 次）。本地
+// 文件/内存全量先行，云端只是镜像——崩溃最多延后 60s 镜像，不丢真数据。
+var QQ_HIST_FLUSH_TIMER = null;
+function scheduleQqHistFlush() {
+  QQ_HIST_DIRTY = true;
+  if (QQ_HIST_FLUSH_TIMER) return; // 已有定时器：到点自然批量写
+  QQ_HIST_FLUSH_TIMER = setTimeout(function () {
+    QQ_HIST_FLUSH_TIMER = null;
+    void flushQqHistory().catch(function () { /* 云端镜像失败：本地已有全量 */ });
+  }, HIST_FLUSH_MS);
 }
 
 /** QQ：被动回复（v2 接口，60 分钟内有效、每条消息最多回 5 次；seq 递增防同 msg_id 撞号） */
@@ -2565,17 +2653,19 @@ async function handleQqEvent(cfg, t, d) {
   var emoLog = [];
   for (var lei = 0; lei < sentEmo; lei++) emoLog.push('[表情:' + (images[lei] && images[lei].name ? images[lei].name : '') + ']');
   if (emoLog.length) await appendQqHistory({ id: 'qe-' + msgId, role: 'assistant', content: emoLog.join(' ').slice(0, 500), ts: Date.now() });
-  // v21 轮末批量上云（一次写代替旧版逐条整文件重写）
-  await flushQqHistory();
-  // v20 被动回复余量记账（网站回复同步真机用）：记下本轮回了几条（语音+文字+表情图），
+  // v22 轮末批量上云再收敛为 60s 一档（一次写代替旧版逐条整文件重写；本地文件/内存
+  // 已先落全量，云端镜像成不成不影响收发节奏）
+  scheduleQqHistFlush();
+  // v22 被动回复余量记账（网站回复同步真机用）：记下本轮回了几条（语音+文字+表情图），
   // 站内镜像优先吃被动回窗（免每月 4 条主动配额）。v22 起连发条数放开，used 只作参考记账。
   try {
     var usedQ = segs.length + sentEmo;
     for (var vui = 0; vui < voiceClips.length; vui++) if (voiceClips[vui] && voiceClips[vui].sent) usedQ++;
-    await supaPutJson('state/qq-lastmsg.json', {
+    // v22 fire-and-forget（不再 await 拖慢回复轮；断路器冷却期秒回 503 自吞）
+    void supaPutJson('state/qq-lastmsg.json', {
       msgid: msgId, openid: authorId, isGroup: isGroup ? 1 : 0,
       groupOpenid: (d && d.group_openid) || '', at: Date.now(), used: usedQ,
-    });
+    }).catch(function () { /* 记账失败不影响本轮回复 */ });
   } catch (le) { /* 记账失败不影响本轮回复 */ }
   return true;
   } catch (e) {

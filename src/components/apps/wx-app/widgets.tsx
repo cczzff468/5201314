@@ -2,7 +2,7 @@
 
 /** 通用小部件（头像/元信息/菜单行/伪二维码/液态玻璃小组件） —— v1.9.27 任务10 从 wechat.tsx 按功能域拆分；顶层声明全部导出供兄弟模块与入口桶引用。 */
 
-import { useMemo, useState } from 'react';
+import { memo, useMemo, useState } from 'react';
 import { AudioLines, ChevronRight, Pause, Play, SkipBack, SkipForward } from 'lucide-react';
 import { useSettings, useUI } from '@/lib/ios/store';
 // v1.9.12 聊天滚动重做（全端共享）：进入即到底/发送必到底/贴底跟随/看历史时「有新消息」轻提示
@@ -38,8 +38,10 @@ export function WxTileIcon({ bg, children }: { bg: string; children: React.React
 }
 
 /** 头像：默认微信风格「正方形圆角」（有图用图，无图用灰底剪影）；shape='circle' = 圆形
- *  （显示设置 › 头像样式，仅聊天页传入；其余调用点保持微信原生圆角方形） */
-export function WxAvatar({
+ *  （显示设置 › 头像样式，仅聊天页传入；其余调用点保持微信原生圆角方形）。
+ *  memo：props 全为原始值（src/alt/size/shape），会话列表/聊天页/朋友圈每行每渲染都重建元素——
+ *  浅比较恒稳定即可命中，收敛大列表重渲染时的子树 reconcile 开销（行为零变化） */
+export const WxAvatar = memo(function WxAvatar({
   src,
   alt,
   size = 44,
@@ -67,7 +69,7 @@ export function WxAvatar({
       </svg>
     </div>
   );
-}
+});
 
 /** 显示设置元信息适用性：系统类胶囊（sys/notice/拉黑申请）与已撤回消息不参与已读/时间显示 */
 export const wxMetaOk = (m: WxMsg) => !m.recalled && m.kind !== 'sys' && m.kind !== 'notice' && m.kind !== 'blockreq';

@@ -49,6 +49,9 @@ import { LocalToast, useLocalToast } from '../page-toast';
 import { QqGroupAvatar, qqGroupRowId } from '../qq-group';
 import { CoupleMark } from '../couple-mark';
 import { groupPreview, listGroups as listChatGroups, loadGroupMsgs, type ChatGroup } from '@/lib/ios/groups';
+// v25 真机输入中：会话列表副标题临时显示（网关 typing 快照，本页零额外轮询）
+import { useGatewayTyping } from '@/lib/ios/wx-cloud/gateway';
+import { qqBotLoginSnapshot } from '@/lib/ios/qq-connect';
 
 import { LS_FRIEND_LIKE, LS_SESSION, QQMsg, QQUser, QQ_BLUE, TAB_ACTIVE, bondDays, compressImageFile, fmtChatTime, fmtListTime, loadBondStat, loadMsgs, lsMsgsKey, maskPhone, msgPreview, qqQueueDelete, readQqClapText, saveMsgs, writeQqClapText } from './core';
 import { LoginScreen } from './login';
@@ -1209,6 +1212,8 @@ export function MessagesPage({
 }) {
   // 右上角加号菜单（对照真 QQ：创建群聊/创建频道/加好友/群/扫一扫/传文件/收付款）
   const [plusMenu, setPlusMenu] = useState(false);
+  // v25 真机输入中：会话列表副标题临时显示（网关 typing 快照，本页零额外轮询）
+  const realDevTyping = useGatewayTyping('qq');
   // 右滑手势：页面任意位置（输入控件除外）水平右滑 → 个人中心抽屉
   const swipe = useRef<{ x: number; y: number; fired: boolean } | null>(null);
   // 会话管理：置顶 / 免打扰（chat-flags 总线）/ 未读 / 已删除（长按菜单操作，localStorage 持久化）
@@ -1608,7 +1613,10 @@ export function MessagesPage({
                     <BellOff className="h-3.5 w-3.5 shrink-0 text-black/30 dark:text-white/30" strokeWidth={2} aria-label="消息免打扰" />
                   )}
                 </div>
-                <div className="truncate text-[13px] text-black/35 dark:text-white/35">{row.text}</div>
+                {/* v25 真机输入中：绑定角色的会话副标题临时盖过最后一条预览（克制：只影响真机绑定那一行） */}
+                <div className="truncate text-[13px] text-black/35 dark:text-white/35">
+                  {realDevTyping && row.contact && row.contact.id === qqBotLoginSnapshot()?.boundContactId ? '对方正在输入…' : row.text}
+                </div>
               </div>
               <span className="shrink-0 text-[12px] text-black/30 dark:text-white/30">{fmtListTime(row.time)}</span>
             </button>

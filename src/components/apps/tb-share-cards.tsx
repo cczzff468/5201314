@@ -261,14 +261,14 @@ export function TbProxyDetailPage({
   };
 
   return (
-    <div className="absolute inset-0 z-50 flex flex-col bg-[#F4F5F9]" data-testid="tb-proxy-detail">
+    <div className="absolute inset-0 z-50 flex flex-col bg-[#F4F5F9] dark:bg-[#111111]" data-testid="tb-proxy-detail">
       {/* 顶栏（背景与页身同色） */}
-      <div className="shrink-0 bg-[#F4F5F9] pt-[54px]">
+      <div className="shrink-0 bg-[#F4F5F9] pt-[54px] dark:bg-[#111111]">
         <div className="relative grid h-[48px] place-items-center">
-          <button type="button" aria-label="返回" data-testid="tb-proxy-detail-back" onClick={onBack} className="absolute left-1 grid h-10 w-10 place-items-center rounded-full active:bg-black/5">
-            <ChevronLeft className="h-[24px] w-[24px] text-black/85" strokeWidth={2.2} />
+          <button type="button" aria-label="返回" data-testid="tb-proxy-detail-back" onClick={onBack} className="absolute left-1 grid h-10 w-10 place-items-center rounded-full active:bg-black/5 dark:active:bg-white/5">
+            <ChevronLeft className="h-[24px] w-[24px] text-black/85 dark:text-white/85" strokeWidth={2.2} />
           </button>
-          <p className="text-[17px] font-semibold text-black/90">代付详情</p>
+          <p className="text-[17px] font-semibold text-black/90 dark:text-white/90">代付详情</p>
         </div>
       </div>
 
@@ -279,16 +279,16 @@ export function TbProxyDetailPage({
             <>
               <AvatarImg src={p.contactAvatar} name={p.contactName} />
               <div className="min-w-0 flex-1">
-                <p className="truncate text-[17px] font-semibold text-black/90" data-testid="tb-proxy-payer-name">{p.contactName}</p>
-                <p className="mt-0.5 truncate text-[13px] text-black/45">我们友谊的小船更加稳固了～</p>
+                <p className="truncate text-[17px] font-semibold text-black/90 dark:text-white/90" data-testid="tb-proxy-payer-name">{p.contactName}</p>
+                <p className="mt-0.5 truncate text-[13px] text-black/45 dark:text-white/45">我们友谊的小船更加稳固了～</p>
               </div>
             </>
           ) : (
             <>
               <AvatarImg src={p.fromAvatar} name={p.fromName} />
               <div className="min-w-0 flex-1">
-                <p className="truncate text-[17px] font-semibold text-black/90">{p.fromName}</p>
-                <p className="mt-0.5 truncate text-[13px] text-black/45">
+                <p className="truncate text-[17px] font-semibold text-black/90 dark:text-white/90">{p.fromName}</p>
+                <p className="mt-0.5 truncate text-[13px] text-black/45 dark:text-white/45">
                   {declined ? 'TA看了订单，婉拒了这次代付' : expired ? `请求已失效（${p.closeReason ?? '订单未支付'}）` : '拍下了订单，快来帮我付一下吧～'}
                 </p>
               </div>
@@ -297,9 +297,9 @@ export function TbProxyDetailPage({
         </div>
 
         {/* 状态卡 */}
-        <div className="rounded-2xl bg-white p-5">
+        <div className="rounded-2xl bg-white p-5 dark:bg-[#1A1A1A]">
           <div className="flex flex-col items-center">
-            <span className="flex items-center gap-2 text-[20px] font-bold text-black/90" data-testid="tb-proxy-state">
+            <span className="flex items-center gap-2 text-[20px] font-bold text-black/90 dark:text-white/90" data-testid="tb-proxy-state">
               {paid ? (
                 <>
                   <span className="grid h-7 w-7 place-items-center rounded-full bg-[#FF5000]">
@@ -330,11 +330,11 @@ export function TbProxyDetailPage({
                 </>
               )}
             </span>
-            <p className="mt-2.5 text-[42px] font-bold leading-tight tracking-tight text-black/90" data-testid="tb-proxy-amount">
+            <p className="mt-2.5 text-[42px] font-bold leading-tight tracking-tight text-black/90 dark:text-white/90" data-testid="tb-proxy-amount">
               <span className="text-[26px]">¥</span>
               {fmt2(p.amount)}
             </p>
-            <p className="mt-1 text-[13px] text-black/45" data-testid="tb-proxy-channel">
+            <p className="mt-1 text-[13px] text-black/45 dark:text-white/45" data-testid="tb-proxy-channel">
               {paid
                 ? channel
                 : declined
@@ -343,16 +343,16 @@ export function TbProxyDetailPage({
                     ? p.closeReason ?? '订单未支付，请求已关闭'
                     : `等待${p.contactName}代付（${platform}好友）`}
             </p>
-            {paid && p.paidAt && <p className="mt-0.5 text-[11px] text-black/30">支付时间 {fmtFull(p.paidAt)}</p>}
+            {paid && p.paidAt && <p className="mt-0.5 text-[11px] text-black/30 dark:text-white/30">支付时间 {fmtFull(p.paidAt)}</p>}
           </div>
 
-          {/* 付款须知 */}
-          <div className="mt-4 rounded-xl bg-[#FFF1E6] px-4 py-3">
-            <p className="text-[13px] font-semibold text-[#B35400]">付款须知</p>
-            <p className="mt-1.5 text-[12px] leading-relaxed text-[#C97A3D]">
+          {/* 付款须知（深色翻深橙贴片，褐字提亮，与 shop-dark 生成器同口径） */}
+          <div className="mt-4 rounded-xl bg-[#FFF1E6] px-4 py-3 dark:bg-[#3A2C18]">
+            <p className="text-[13px] font-semibold text-[#B35400] dark:text-orange-200">付款须知</p>
+            <p className="mt-1.5 text-[12px] leading-relaxed text-[#C97A3D] dark:text-orange-200/70">
               1.代付订单创建成功后30分钟内未付款，订单会自动取消，你可以重新下单。
             </p>
-            <p className="mt-1 text-[12px] leading-relaxed text-[#C97A3D]">
+            <p className="mt-1 text-[12px] leading-relaxed text-[#C97A3D] dark:text-orange-200/70">
               2.当代付订单退款成功后，实付金额将原路退还代付人。
             </p>
           </div>
@@ -386,7 +386,7 @@ export function TbProxyDetailPage({
               >
                 {paying ? '支付中…' : `立即代付 ¥${fmt2(p.amount)}`}
               </button>
-              <p className="mt-2 text-center text-[11px] leading-relaxed text-black/35">
+              <p className="mt-2 text-center text-[11px] leading-relaxed text-black/35 dark:text-white/35">
                 {p.fromName}在等你帮忙付款（演示语义，不扣真实余额）
               </p>
             </div>
@@ -396,12 +396,12 @@ export function TbProxyDetailPage({
                 type="button"
                 disabled
                 data-testid="tb-proxy-wait-btn"
-                className="mt-4 flex h-[46px] w-full cursor-not-allowed items-center justify-center gap-2 rounded-full bg-[#F5F6F7] text-[15px] text-black/45"
+                className="mt-4 flex h-[46px] w-full cursor-not-allowed items-center justify-center gap-2 rounded-full bg-[#F5F6F7] text-[15px] text-black/45 dark:bg-[#1E1E1E] dark:text-white/45"
               >
-                <Loader2 className="h-4 w-4 animate-spin text-black/35" />
+                <Loader2 className="h-4 w-4 animate-spin text-black/35 dark:text-white/35" />
                 等待{p.contactName}代付…
               </button>
-              <p className="mt-2 text-center text-[11px] leading-relaxed text-black/35">
+              <p className="mt-2 text-center text-[11px] leading-relaxed text-black/35 dark:text-white/35">
                 TA会根据自己的意愿决定是否代付，可以去聊天里提醒TA
               </p>
               {p.direction === 'friend' && (
@@ -413,7 +413,7 @@ export function TbProxyDetailPage({
                     setReshareContact(null);
                     setReshareStep('plat');
                   }}
-                  className="mt-2.5 flex h-[44px] w-full items-center justify-center gap-1.5 rounded-full border border-[#FF5000]/40 bg-[#FFF6F0] text-[15px] font-semibold text-[#FF5000] active:opacity-85"
+                  className="mt-2.5 flex h-[44px] w-full items-center justify-center gap-1.5 rounded-full border border-[#FF5000]/40 bg-[#FFF6F0] text-[15px] font-semibold text-[#FF5000] active:opacity-85 dark:bg-[#3A2C18]"
                 >
                   <Share2 className="h-4 w-4" strokeWidth={2.2} />
                   再次分享给其他好友
@@ -424,23 +424,23 @@ export function TbProxyDetailPage({
         </div>
 
         {/* 订单商品卡 */}
-        <div className="mt-3 rounded-2xl bg-white p-4">
-          <p className="truncate text-[15px] font-bold text-black/90" data-testid="tb-proxy-shop">{p.shopName}</p>
+        <div className="mt-3 rounded-2xl bg-white p-4 dark:bg-[#1A1A1A]">
+          <p className="truncate text-[15px] font-bold text-black/90 dark:text-white/90" data-testid="tb-proxy-shop">{p.shopName}</p>
           <div className="mt-3 space-y-3">
             {p.items.map((it, i) => (
               <div key={i} className="flex items-center gap-3">
                 <TbImg src={it.img} alt={it.name} cap={it.name} className="h-12 w-12 shrink-0 rounded-lg" />
                 <div className="min-w-0 flex-1">
-                  <p className="truncate text-[14px] text-black/85">{it.name}</p>
-                  <p className="mt-0.5 text-[11.5px] text-black/40">×{it.qty}</p>
+                  <p className="truncate text-[14px] text-black/85 dark:text-white/85">{it.name}</p>
+                  <p className="mt-0.5 text-[11.5px] text-black/40 dark:text-white/40">×{it.qty}</p>
                 </div>
-                <span className="shrink-0 text-[14px] font-semibold text-black/85">¥{fmt2(it.price * it.qty)}</span>
+                <span className="shrink-0 text-[14px] font-semibold text-black/85 dark:text-white/85">¥{fmt2(it.price * it.qty)}</span>
               </div>
             ))}
           </div>
         </div>
 
-        <p className="mt-3 px-2 text-center text-[10.5px] leading-relaxed text-black/30">
+        <p className="mt-3 px-2 text-center text-[10.5px] leading-relaxed text-black/30 dark:text-white/30">
           代付金额与订单一致 · 资金由微信支付/QQ钱包保障
         </p>
       </div>
@@ -511,22 +511,22 @@ function TbResharePickSheet({
   return (
     <div className="absolute inset-0 z-[70] flex flex-col justify-end bg-black/60" onClick={onClose} data-testid={step === 'plat' ? 'tb-reshare-plat-sheet' : undefined}>
       <div
-        className="max-h-[82%] overflow-hidden rounded-t-2xl bg-white pb-[max(14px,env(safe-area-inset-bottom))] [animation:quick-in-up_.24s_cubic-bezier(0.32,0.72,0,1)_both]"
+        className="max-h-[82%] overflow-hidden rounded-t-2xl bg-white pb-[max(14px,env(safe-area-inset-bottom))] [animation:quick-in-up_.24s_cubic-bezier(0.32,0.72,0,1)_both] dark:bg-[#1C1C1C]"
         onClick={(e) => e.stopPropagation()}
       >
         {/* 标题栏 */}
         <div className="relative grid h-[54px] shrink-0 place-items-center">
           {step === 'contact' && (
-            <button type="button" aria-label="返回" onClick={onBack} className="absolute left-2 grid h-9 w-9 place-items-center rounded-full active:bg-black/5">
-              <ChevronLeft className="h-[22px] w-[22px] text-black/80" />
+            <button type="button" aria-label="返回" onClick={onBack} className="absolute left-2 grid h-9 w-9 place-items-center rounded-full active:bg-black/5 dark:active:bg-white/5">
+              <ChevronLeft className="h-[22px] w-[22px] text-black/80 dark:text-white/80" />
             </button>
           )}
-          <p className="text-[16px] font-bold text-black/90">{step === 'plat' ? '再次分享代付请求' : `选择${platName}好友`}</p>
-          <button type="button" aria-label="关闭" onClick={onClose} className="absolute right-2 grid h-9 w-9 place-items-center rounded-full active:bg-black/5">
-            <X className="h-[20px] w-[20px] text-black/55" />
+          <p className="text-[16px] font-bold text-black/90 dark:text-white/90">{step === 'plat' ? '再次分享代付请求' : `选择${platName}好友`}</p>
+          <button type="button" aria-label="关闭" onClick={onClose} className="absolute right-2 grid h-9 w-9 place-items-center rounded-full active:bg-black/5 dark:active:bg-white/5">
+            <X className="h-[20px] w-[20px] text-black/55 dark:text-white/55" />
           </button>
         </div>
-        <p className="px-5 pb-2.5 text-[11.5px] leading-relaxed text-black/40">
+        <p className="px-5 pb-2.5 text-[11.5px] leading-relaxed text-black/40 dark:text-white/40">
           {step === 'plat' ? '把代付请求再发给一位好友：TA付款后订单自动完成；发给同一位好友就是催一催' : `从${platName}好友里选一位，把代付请求发给TA`}
         </p>
 
@@ -541,25 +541,25 @@ function TbResharePickSheet({
                 type="button"
                 data-testid={`tb-reshare-plat-${v}`}
                 onClick={() => onPickPlat(v)}
-                className="flex w-full items-center gap-3 border-t border-black/[0.05] py-3.5 text-left first:border-t-0 active:opacity-80"
+                className="flex w-full items-center gap-3 border-t border-black/[0.05] py-3.5 text-left first:border-t-0 active:opacity-80 dark:border-white/[0.08]"
               >
                 <img src={img} alt="" className="h-[38px] w-[38px] shrink-0 rounded-[9px]" />
                 <span className="min-w-0 flex-1">
-                  <span className="block text-[15px] font-medium text-black/85">{name}</span>
-                  <span className="block text-[11px] text-black/40">{sub}</span>
+                  <span className="block text-[15px] font-medium text-black/85 dark:text-white/85">{name}</span>
+                  <span className="block text-[11px] text-black/40 dark:text-white/40">{sub}</span>
                 </span>
-                <ChevronRight className="h-4 w-4 shrink-0 text-black/25" />
+                <ChevronRight className="h-4 w-4 shrink-0 text-black/25 dark:text-white/25" />
               </button>
             ))}
           </div>
         ) : (
           <div className="max-h-[48vh] overflow-y-auto px-4 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             {friends === null ? (
-              <p className="py-8 text-center text-[12px] text-black/35">正在获取好友列表…</p>
+              <p className="py-8 text-center text-[12px] text-black/35 dark:text-white/35">正在获取好友列表…</p>
             ) : friends.length === 0 ? (
               <div className="py-8 text-center">
-                <p className="text-[13px] text-black/45">暂无{platName}好友</p>
-                <p className="mt-1 text-[11px] text-black/30">先去{platName}App添加好友，再回来发送</p>
+                <p className="text-[13px] text-black/45 dark:text-white/45">暂无{platName}好友</p>
+                <p className="mt-1 text-[11px] text-black/30 dark:text-white/30">先去{platName}App添加好友，再回来发送</p>
               </div>
             ) : (
               friends.map((c) => (
@@ -568,20 +568,20 @@ function TbResharePickSheet({
                   type="button"
                   data-testid={`tb-reshare-contact-${c.id}`}
                   onClick={() => onPickContact(c)}
-                  className="flex w-full items-center gap-3 border-t border-black/[0.05] py-3 text-left first:border-t-0 active:opacity-80"
+                  className="flex w-full items-center gap-3 border-t border-black/[0.05] py-3 text-left first:border-t-0 active:opacity-80 dark:border-white/[0.08]"
                 >
                   {avatarFor(c, plat ?? 'wx') ? (
                     <img src={avatarFor(c, plat ?? 'wx') ?? ''} alt="" className="h-10 w-10 shrink-0 rounded-full object-cover" />
                   ) : (
-                    <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-[#FFF1E6] text-[15px] font-semibold text-black/60">
+                    <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-[#FFF1E6] text-[15px] font-semibold text-black/60 dark:bg-[#3A2C18] dark:text-orange-200/80">
                       {displayNameOf(c).slice(0, 1)}
                     </span>
                   )}
                   <span className="min-w-0 flex-1">
-                    <span className="block truncate text-[15px] text-black/85">{displayNameOf(c)}</span>
-                    {c.relation && <span className="block text-[11px] text-black/40">{c.relation}</span>}
+                    <span className="block truncate text-[15px] text-black/85 dark:text-white/85">{displayNameOf(c)}</span>
+                    {c.relation && <span className="block text-[11px] text-black/40 dark:text-white/40">{c.relation}</span>}
                   </span>
-                  <span className={`grid h-[19px] w-[19px] shrink-0 place-items-center rounded-full border-2 ${contactId === c.id ? 'border-[#FF5000] bg-[#FF5000]' : 'border-black/20'}`}>
+                  <span className={`grid h-[19px] w-[19px] shrink-0 place-items-center rounded-full border-2 ${contactId === c.id ? 'border-[#FF5000] bg-[#FF5000]' : 'border-black/20 dark:border-white/20'}`}>
                     {contactId === c.id ? <Check className="h-3 w-3 text-white" strokeWidth={3.4} /> : null}
                   </span>
                 </button>
@@ -597,7 +597,7 @@ function TbResharePickSheet({
               type="button"
               disabled={!plat}
               onClick={() => plat && onPickPlat(plat)}
-              className={`h-[48px] w-full rounded-xl text-[16px] font-semibold ${plat ? 'bg-gradient-to-r from-[#FF7A21] to-[#FF4400] text-white active:opacity-85' : 'bg-[#FFE2D2] text-black/40'}`}
+              className={`h-[48px] w-full rounded-xl text-[16px] font-semibold ${plat ? 'bg-gradient-to-r from-[#FF7A21] to-[#FF4400] text-white active:opacity-85' : 'bg-[#FFE2D2] text-black/40 dark:bg-[#3A2C18] dark:text-[#FF5000]/60'}`}
             >
               下一步
             </button>
@@ -607,7 +607,7 @@ function TbResharePickSheet({
               data-testid="tb-reshare-send"
               disabled={!contactId || sending}
               onClick={onSend}
-              className={`h-[48px] w-full rounded-xl text-[16px] font-semibold ${contactId && !sending ? 'bg-gradient-to-r from-[#FF7A21] to-[#FF4400] text-white active:opacity-85' : 'bg-[#FFE2D2] text-black/40'}`}
+              className={`h-[48px] w-full rounded-xl text-[16px] font-semibold ${contactId && !sending ? 'bg-gradient-to-r from-[#FF7A21] to-[#FF4400] text-white active:opacity-85' : 'bg-[#FFE2D2] text-black/40 dark:bg-[#3A2C18] dark:text-[#FF5000]/60'}`}
             >
               {sending ? '正在发送…' : '再次分享'}
             </button>

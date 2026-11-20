@@ -155,19 +155,19 @@ export function SongSheet({
             animate={{ y: 0, opacity: 1 }}
             exit={{ y: 50, opacity: 0 }}
             transition={{ type: 'spring', damping: 28, stiffness: 320 }}
-            className="pointer-events-auto flex max-h-[76vh] w-full max-w-[320px] flex-col rounded-3xl bg-white/96 p-5 shadow-2xl"
+            className="pointer-events-auto flex max-h-[76vh] w-full max-w-[320px] flex-col rounded-3xl bg-white/96 p-5 shadow-2xl dark:bg-zinc-900/95"
             onClick={(e) => e.stopPropagation()}
           >
             {/* 标题（无图标） */}
             <div className="mb-3 flex items-center justify-between">
               <div>
-                <span className="text-[15px] font-semibold text-[#3a3a3e]">小屋点歌</span>
-                <p className="mt-0.5 text-[11px] text-[#9a9a96]">搜歌 · 我的歌单 · 播放队列</p>
+                <span className="text-[15px] font-semibold text-[#3a3a3e] dark:text-zinc-100">小屋点歌</span>
+                <p className="mt-0.5 text-[11px] text-[#9a9a96] dark:text-zinc-400">搜歌 · 我的歌单 · 播放队列</p>
               </div>
               <button
                 onClick={onClose}
                 aria-label="关闭点歌面板"
-                className="flex h-8 w-8 items-center justify-center rounded-full bg-[#f0eff1] text-[#8a8a90] transition active:scale-95"
+                className="flex h-8 w-8 items-center justify-center rounded-full bg-[#f0eff1] text-[#8a8a90] transition active:scale-95 dark:bg-zinc-800 dark:text-zinc-400"
               >
                 <X className="h-4 w-4" />
               </button>
@@ -175,7 +175,7 @@ export function SongSheet({
 
             {/* 当前播放卡 */}
             {current && (
-              <div className="mb-3 flex items-center gap-3 rounded-2xl bg-gradient-to-r from-[#fdf3e4] to-[#fbe9e2] p-3">
+              <div className="mb-3 flex items-center gap-3 rounded-2xl bg-gradient-to-r from-[#fdf3e4] to-[#fbe9e2] p-3 dark:from-zinc-800/60 dark:to-zinc-900/60">
                 <span className="relative shrink-0">
                   <img src={songCover(current)} alt="" className="h-11 w-11 rounded-xl object-cover shadow-sm" />
                   {playing && (
@@ -189,15 +189,15 @@ export function SongSheet({
                   )}
                 </span>
                 <button onClick={() => void useMusic.getState().toggle()} className="min-w-0 flex-1 text-left">
-                  <span className="block truncate text-[13px] font-semibold text-[#3a3a3e]">{current.name}</span>
-                  <span className="block truncate text-[11px] text-[#9a9a96]">
+                  <span className="block truncate text-[13px] font-semibold text-[#3a3a3e] dark:text-zinc-100">{current.name}</span>
+                  <span className="block truncate text-[11px] text-[#9a9a96] dark:text-zinc-400">
                     {current.artists?.map((a) => a.name).join('/') ?? ''}
                   </span>
                 </button>
                 <button
                   onClick={() => void useMusic.getState().toggle()}
                   aria-label={playing ? '暂停' : '播放'}
-                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white text-[#e08a9a] shadow-sm transition active:scale-90"
+                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white text-[#e08a9a] shadow-sm transition active:scale-90 dark:bg-zinc-800"
                 >
                   {playing ? <Pause className="h-4 w-4" /> : <Play className="ml-0.5 h-4 w-4" />}
                 </button>
@@ -205,7 +205,7 @@ export function SongSheet({
             )}
 
             {/* 页签 */}
-            <div className="mb-2 flex gap-1.5 rounded-full bg-[#f5f3ef] p-1">
+            <div className="mb-2 flex gap-1.5 rounded-full bg-[#f5f3ef] p-1 dark:bg-zinc-800/60">
               {(
                 [
                   ['search', '搜歌'],
@@ -217,7 +217,7 @@ export function SongSheet({
                   key={k}
                   onClick={() => setTab(k)}
                   className={`flex h-8 flex-1 items-center justify-center gap-1 rounded-full text-[12px] font-semibold transition active:scale-95 ${
-                    tab === k ? 'bg-white text-[#e08a9a] shadow-sm' : 'text-[#9a9a96]'
+                    tab === k ? 'bg-white text-[#e08a9a] shadow-sm dark:bg-zinc-700/70' : 'text-[#9a9a96] dark:text-zinc-400'
                   }`}
                 >
                   {k === 'queue' && <ListMusic className="h-3.5 w-3.5" />}
@@ -229,32 +229,32 @@ export function SongSheet({
             {/* —— 搜歌 —— */}
             {tab === 'search' && (
               <div className="flex min-h-0 flex-col">
-                <div className="mb-1.5 flex h-10 items-center gap-2 rounded-full bg-[#f5f3ef] px-4">
-                  <Search className="h-4 w-4 shrink-0 text-[#b0aea8]" />
+                <div className="mb-1.5 flex h-10 items-center gap-2 rounded-full bg-[#f5f3ef] px-4 dark:bg-zinc-800/60">
+                  <Search className="h-4 w-4 shrink-0 text-[#b0aea8] dark:text-zinc-500" />
                   <input
                     value={kw}
                     onChange={(e) => setKw(e.target.value)}
                     placeholder="搜首歌，全屋一起听"
                     aria-label="搜索歌曲"
-                    className="h-full min-w-0 flex-1 bg-transparent text-[13px] text-[#3a3a3e] outline-none placeholder:text-[#c0beb8]"
+                    className="h-full min-w-0 flex-1 bg-transparent text-[13px] text-[#3a3a3e] outline-none placeholder:text-[#c0beb8] dark:text-zinc-100 dark:placeholder:text-zinc-500"
                   />
                   {kw && (
-                    <button onClick={() => setKw('')} aria-label="清空搜索" className="shrink-0 text-[#b0aea8]">
+                    <button onClick={() => setKw('')} aria-label="清空搜索" className="shrink-0 text-[#b0aea8] dark:text-zinc-500">
                       <X className="h-3.5 w-3.5" />
                     </button>
                   )}
                 </div>
                 {searching ? (
-                  <div className="flex items-center justify-center gap-2 py-8 text-[12px] text-[#a8a8a4]">
+                  <div className="flex items-center justify-center gap-2 py-8 text-[12px] text-[#a8a8a4] dark:text-zinc-400">
                     <Loader2 className="h-4 w-4 animate-spin" /> 搜着呢…
                   </div>
                 ) : list.length === 0 ? (
-                  <p className="py-8 text-center text-[12px] text-[#a8a8a4]">
+                  <p className="py-8 text-center text-[12px] text-[#a8a8a4] dark:text-zinc-400">
                     {kw.trim() ? '没找到这首歌，换个关键词试试' : '去音乐 App 听几首歌，这里就能点播啦'}
                   </p>
                 ) : (
                   <>
-                    <p className="mb-1 px-1 text-[10.5px] text-[#c0beb8]">{listLabel}</p>
+                    <p className="mb-1 px-1 text-[10.5px] text-[#c0beb8] dark:text-zinc-500">{listLabel}</p>
                     <div className="scrollbar-none max-h-[34vh] overflow-y-auto">
                       {list.map((song) => (
                         <SongRow
@@ -281,7 +281,7 @@ export function SongSheet({
                     就能选你添加的歌单啦
                   </p>
                 ) : plLoading ? (
-                  <div className="flex items-center justify-center gap-2 py-8 text-[12px] text-[#a8a8a4]">
+                  <div className="flex items-center justify-center gap-2 py-8 text-[12px] text-[#a8a8a4] dark:text-zinc-400">
                     <Loader2 className="h-4 w-4 animate-spin" /> 歌单装订中…
                   </div>
                 ) : openPl ? (
@@ -292,7 +292,7 @@ export function SongSheet({
                     >
                       ‹ 全部歌单
                     </button>
-                    <p className="mb-1 px-1 truncate text-[10.5px] text-[#c0beb8]">
+                    <p className="mb-1 px-1 truncate text-[10.5px] text-[#c0beb8] dark:text-zinc-500">
                       {openPl.name} · {openPl.songs.length} 首 · 点一首连播整张歌单
                     </p>
                     <div className="scrollbar-none max-h-[36vh] overflow-y-auto">
@@ -306,23 +306,23 @@ export function SongSheet({
                         />
                       ))}
                       {openPl.songs.length === 0 && (
-                        <p className="py-6 text-center text-[12px] text-[#a8a8a4]">这张歌单还没有歌</p>
+                        <p className="py-6 text-center text-[12px] text-[#a8a8a4] dark:text-zinc-400">这张歌单还没有歌</p>
                       )}
                     </div>
                   </>
                 ) : plsBusy ? (
-                  <div className="flex items-center justify-center gap-2 py-8 text-[12px] text-[#a8a8a4]">
+                  <div className="flex items-center justify-center gap-2 py-8 text-[12px] text-[#a8a8a4] dark:text-zinc-400">
                     <Loader2 className="h-4 w-4 animate-spin" /> 歌单架取表中…
                   </div>
                 ) : pls.length === 0 ? (
-                  <p className="py-8 text-center text-[12px] text-[#a8a8a4]">还没有歌单，去音乐 App 创建一个吧</p>
+                  <p className="py-8 text-center text-[12px] text-[#a8a8a4] dark:text-zinc-400">还没有歌单，去音乐 App 创建一个吧</p>
                 ) : (
                   <div className="scrollbar-none max-h-[42vh] overflow-y-auto">
                     {pls.map((p) => (
                       <button
                         key={p.id}
                         onClick={() => void loadPl(p)}
-                        className="flex w-full items-center gap-3 rounded-2xl px-1.5 py-2 text-left transition active:scale-[0.98] active:bg-[#f6f4ef]"
+                        className="flex w-full items-center gap-3 rounded-2xl px-1.5 py-2 text-left transition active:scale-[0.98] active:bg-[#f6f4ef] dark:active:bg-zinc-800"
                       >
                         <img
                           src={(p.coverImgUrl ?? '').replace(/^http:/, 'https:')}
@@ -331,8 +331,8 @@ export function SongSheet({
                           loading="lazy"
                         />
                         <span className="min-w-0 flex-1">
-                          <span className="block truncate text-[13px] font-medium text-[#3a3a3e]">{p.name}</span>
-                          <span className="block text-[10.5px] text-[#9a9a96]">{p.trackCount ?? 0} 首</span>
+                          <span className="block truncate text-[13px] font-medium text-[#3a3a3e] dark:text-zinc-100">{p.name}</span>
+                          <span className="block text-[10.5px] text-[#9a9a96] dark:text-zinc-400">{p.trackCount ?? 0} 首</span>
                         </span>
                         <Play className="h-4 w-4 shrink-0 text-[#d9a0ac]" />
                       </button>
@@ -346,7 +346,7 @@ export function SongSheet({
             {tab === 'queue' && (
               <div className="flex min-h-0 flex-col">
                 {queue.length === 0 ? (
-                  <p className="py-8 text-center text-[12px] text-[#a8a8a4]">
+                  <p className="py-8 text-center text-[12px] text-[#a8a8a4] dark:text-zinc-400">
                     队列空空的
                     <br />
                     去搜歌或歌单里「+队列」排几首吧
@@ -354,7 +354,7 @@ export function SongSheet({
                 ) : (
                   <>
                     <div className="mb-1 flex items-center justify-between px-1">
-                      <p className="text-[10.5px] text-[#c0beb8]">正在排队 · 点一首马上唱</p>
+                      <p className="text-[10.5px] text-[#c0beb8] dark:text-zinc-500">正在排队 · 点一首马上唱</p>
                       <button
                         onClick={() => {
                           useMusic.getState().clearQueue();
@@ -373,7 +373,7 @@ export function SongSheet({
                             key={`${song.id}-${i}`}
                             onClick={() => jump(i)}
                             className={`flex w-full items-center gap-2.5 rounded-xl px-2 py-2 text-left transition active:scale-[0.98] ${
-                              cur ? 'bg-[#fdf3e4]' : 'active:bg-[#f6f4ef]'
+                              cur ? 'bg-[#fdf3e4] dark:bg-zinc-800/80' : 'active:bg-[#f6f4ef] dark:active:bg-zinc-800'
                             }`}
                           >
                             <span className="w-5 shrink-0 text-center">
@@ -410,7 +410,7 @@ export function SongSheet({
                                   useMusic.getState().removeFromQueue(i);
                                 }
                               }}
-                              className="shrink-0 rounded-full p-1 text-[#c5c3bd] transition hover:bg-[#f0eff1] active:scale-90"
+                              className={`shrink-0 rounded-full p-1 text-[#c5c3bd] transition hover:bg-[#f0eff1] active:scale-90 dark:text-zinc-500 dark:hover:bg-zinc-800`}
                             >
                               <X className="h-3.5 w-3.5" />
                             </span>
@@ -443,7 +443,7 @@ function SongRow({
 }) {
   return (
     <div
-      className={`flex w-full items-center gap-2.5 rounded-xl px-1.5 py-1.5 transition ${active ? 'bg-[#fdf3e4]' : ''}`}
+      className={`flex w-full items-center gap-2.5 rounded-xl px-1.5 py-1.5 transition ${active ? 'bg-[#fdf3e4] dark:bg-zinc-800/80' : ''}`}
     >
       <button onClick={onPlay} className="relative shrink-0" aria-label={`播放${song.name}`}>
         <img src={songCover(song)} alt="" className="h-9 w-9 rounded-lg object-cover" loading="lazy" />
@@ -452,17 +452,17 @@ function SongRow({
         </span>
       </button>
       <button onClick={onPlay} className="min-w-0 flex-1 text-left">
-        <span className={`block truncate text-[12.5px] font-medium ${active ? 'text-[#e08a9a]' : 'text-[#3a3a3e]'}`}>
+        <span className={`block truncate text-[12.5px] font-medium ${active ? 'text-[#e08a9a]' : 'text-[#3a3a3e] dark:text-zinc-100'}`}>
           {song.name}
         </span>
-        <span className="block truncate text-[10.5px] text-[#9a9a96]">
+        <span className="block truncate text-[10.5px] text-[#9a9a96] dark:text-zinc-400">
           {song.artists?.map((a) => a.name).join('/') ?? ''}
         </span>
       </button>
       <button
         onClick={onEnqueue}
         aria-label={`把${song.name}加入队列`}
-        className="flex h-7 shrink-0 items-center gap-1 rounded-full bg-[#f5f3ef] px-2.5 text-[10.5px] font-semibold text-[#8a8a90] transition active:scale-90"
+        className="flex h-7 shrink-0 items-center gap-1 rounded-full bg-[#f5f3ef] px-2.5 text-[10.5px] font-semibold text-[#8a8a90] transition active:scale-90 dark:bg-zinc-800 dark:text-zinc-400"
       >
         <ListPlus className="h-3 w-3" /> 排队
       </button>

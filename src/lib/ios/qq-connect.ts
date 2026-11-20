@@ -34,6 +34,8 @@ import { ensureKvReady, kvGet, kvSet, kvDel } from './idb-kv';
 import { decryptSecret, encryptSecret, isEncrypted } from './secret-box';
 import { loadMsgs, saveMsgs } from '@/components/apps/qq-app/core';
 import { wxCloudSnapshot } from './wx-cloud/store';
+// v22 云端健康断路器：云端历史读在熔断冷却期静默跳过（网关本地通道优先，云端只是镜像）
+import { cloudCooling, noteCloudIo } from './wx-cloud/cloud-health';
 
 /** 接入/换绑/断开后自动重推运行包到云端（已部署过才推；动态 import 避免循环依赖） */
 function cloudAutoSync(reason: string): void {
@@ -383,9 +385,11 @@ async function doPullQqCloudHistory(): Promise<{ ok: boolean; msg: string; added
   // 云端双通道（v8 原逻辑）：有 serviceKey 直连 Storage；没有经云端函数 read-file 中继。
   // v21：云端失败不再拦截本地通道的合并——两路都取到时按 id 去重（网关条目与云端条目
   // 同 id，先到的进列、后到的跳过），云端只是镜像。
+  // v22 熔断冷却期：云端段整体跳过（免 402 报错风暴）——网关本地通道已取到的照常合并，
+  // 受限期间真机 QQ 收发记录仍照常显示（本地权威，云端只是镜像）
   let cloudMsg = '';
   let cloudList: QqCloudMsg[] = [];
-  if (supa?.ref && (supa.serviceKey || supa.secret)) {
+  if (supa?.ref && (supa.serviceKey || supa.secret) && !cloudCooling()) {
     try {
       let j: { msgs?: QqCloudMsg[] } | null = null;
       if (supa.serviceKey) {
@@ -397,6 +401,8 @@ async function doPullQqCloudHistory(): Promise<{ ok: boolean; msg: string; added
           headers: isNewStyle ? { apikey: k } : { apikey: k, Authorization: `Bearer ${k}` },
           signal: AbortSignal.timeout(15_000),
         });
+        // v22 熔断证据采集：直读 Storage 的成败计入站内熔断器（402/5xx 连续 3 次 → 冷却）
+        noteCloudIo(res.ok, res.status);
         if (!res.ok) cloudMsg = '云端还没有 QQ 聊天记录（在 QQ 上和 TA 聊过之后才有）';
         else j = (await res.json()) as { msgs?: QqCloudMsg[] };
       } else {

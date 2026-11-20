@@ -19,10 +19,17 @@
  */
 
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
-import { BellOff, BellRing, CalendarClock, Check, ChevronLeft, HeartPulse, Plus, Send, Sparkles, Timer, Trash2, Zap } from 'lucide-react';
+import { BellOff, BellRing, CalendarClock, Camera, Check, ChevronLeft, HeartPulse, Plus, Send, Sparkles, Timer, Trash2, Zap } from 'lucide-react';
 import { ChatToggle } from './chat-settings';
 import { useChatSkin } from '@/lib/ios/chat-skin';
 import { loadBlock } from '@/lib/ios/block-state';
+import {
+  getLifeShareCfg,
+  setLifeShareCfg,
+  manuallyShareLife,
+  LIFE_FREQ_LABEL,
+  type LifeShareConfig,
+} from '@/lib/ios/life-share';
 import {
   getProactiveCfg,
   setProactiveCfg,
@@ -334,6 +341,36 @@ export function ProactiveMsgPage({
   };
   const [blockedDir, setBlockedDir] = useState<'byUser' | 'byChar' | null>(readBlockHint);
 
+  // W1-B5 生活分享配置（设备级，与三端设置页共用一份；投递固定进与 TA 的信息主会话）
+  const [lifeCfg, setLifeCfg] = useState<LifeShareConfig | null>(() => {
+    try {
+      return getLifeShareCfg(contactId);
+    } catch {
+      return null;
+    }
+  });
+  // 「立即分享一条」手动测试按钮的反馈态（生成约需 10~60 秒，期间按钮禁用防重复触发）
+  const [lifeTest, setLifeTest] = useState<'idle' | 'busy' | 'ok' | 'fail'>('idle');
+  const lifeTestTimer = useRef<number | null>(null);
+  useEffect(() => {
+    return () => {
+      if (lifeTestTimer.current !== null) window.clearTimeout(lifeTestTimer.current);
+    };
+  }, []);
+  /** 立即生成并投递一条生活分享（生成文案 + 配图，落到与 TA 的信息会话 + TA 的相册） */
+  const fireLifeShare = (): void => {
+    if (lifeTest === 'busy') return;
+    setLifeTest('busy');
+    void manuallyShareLife(contactId)
+      .then((ok) => setLifeTest(ok ? 'ok' : 'fail'))
+      .catch(() => setLifeTest('fail'))
+      .finally(() => {
+        // 反馈 8 秒后回落，不长期滞留在按钮上
+        if (lifeTestTimer.current !== null) window.clearTimeout(lifeTestTimer.current);
+        lifeTestTimer.current = window.setTimeout(() => setLifeTest('idle'), 8_000);
+      });
+  };
+
   /** 提醒清单/总开关轻轮询（NL 解析可能在本页打开时于聊天里创建任务；4s 刷新足够）。
  *  v57：「最近主动消息」区块已删（历史仍由引擎落库供生成去重用），不再轮询 hist */
   useEffect(() => {
@@ -393,11 +430,12 @@ export function ProactiveMsgPage({
     if (cfg.timerOn) parts.push(cfg.timerMode === 'daily' && cfg.timerDailyTime ? `每天 ${cfg.timerDailyTime}` : '定时');
     if (cfg.events.some((e) => e.enabled)) parts.push('事件');
     if (cfg.autoOn) parts.push('自主');
+    if (lifeCfg?.on) parts.push('生活分享');
     if (reminders.length > 0) parts.push(`提醒 ${reminders.length}`);
     return parts.join(' · ');
-  }, [cfg, reminders.length]);
+  }, [cfg, lifeCfg, reminders.length]);
 
-  const isActive = cfg ? cfgHasActiveTrigger(cfg) || reminders.length > 0 : false;
+  const isActive = cfg ? cfgHasActiveTrigger(cfg) || reminders.length > 0 || (lifeCfg?.on ?? false) : false;
   /** 呼吸灯亮起条件（总开关关闭 = 整体暂停，灯不亮） */
   const live = isActive && !masterOff;
 
@@ -1013,6 +1051,78 @@ export function ProactiveMsgPage({
               <p className="mt-2.5 text-[12px] leading-relaxed text-black/35 dark:text-white/35">
                 焦虑随未回复上涨；达到阈值后按最长等待 → 最短等待动态追发，越焦虑追越紧。你一回复立刻打断，不会一哄就清零。
               </p>
+            </div>
+          )}
+        </div>
+
+        {/* ⑥ 生活分享（W1-B5）：TA 每天不定期把刚拍的照/刚吃的饭这类生活日常发到与 TA 的
+            信息主会话——1~3 条短消息 + 一张随手拍配图；照片同源进 TA 的相册（相册 App 可见）。
+            设备级配置（三端设置页共用一份），投递固定进信息端，与页面所在端无关 */}
+        <div className={`${glassCard} mt-3 overflow-hidden`}>
+          <div className={rowCls}>
+            <span className="flex items-center gap-2.5">
+              <IconTile color="#5AC8FA">
+                <Camera className="h-[15px] w-[15px]" strokeWidth={2.4} />
+              </IconTile>
+              <span>
+                <span className="block text-[15.5px] leading-tight">生活分享</span>
+                <span className="mt-0.5 block text-[11.5px] leading-tight text-black/40 dark:text-white/40">每天不定期发来刚拍的照/刚吃的饭，照片进 TA 的相册</span>
+              </span>
+            </span>
+            <ChatToggle
+              on={lifeCfg?.on ?? false}
+              onChange={(v) => {
+                const next = { ...(lifeCfg ?? getLifeShareCfg(contactId)), on: v };
+                setLifeShareCfg(contactId, next);
+                setLifeCfg(next);
+              }}
+              accent={accent}
+              testId={`${testPrefix}-proactive-life`}
+              label="生活分享"
+            />
+          </div>
+          {(lifeCfg?.on ?? false) && (
+            <div className="border-t px-4 py-3.5" style={{ borderColor: 'inherit' }} data-testid={`${testPrefix}-proactive-life-config`}>
+              <p className="mb-2 text-[12px] text-black/40 dark:text-white/40">每天分享次数</p>
+              <div className="flex flex-wrap gap-2">
+                {LIFE_FREQ_LABEL.map((f) => (
+                  <button
+                    key={f.v}
+                    type="button"
+                    data-testid={`${testPrefix}-proactive-life-freq-${f.v}`}
+                    onClick={() => {
+                      const next = { ...(lifeCfg ?? getLifeShareCfg(contactId)), freq: f.v };
+                      setLifeShareCfg(contactId, next);
+                      setLifeCfg(next);
+                    }}
+                    className={`${chipCls} ${(lifeCfg?.freq ?? 'mid') === f.v ? '' : chipIdle}`}
+                    style={(lifeCfg?.freq ?? 'mid') === f.v ? { background: accent, color: '#fff' } : undefined}
+                  >
+                    {f.label}
+                  </button>
+                ))}
+              </div>
+              <p className="mt-2.5 text-[12px] leading-relaxed text-black/35 dark:text-white/35">
+                随机时段（白天到晚上，避开深夜）发到与 TA 的信息会话；同一场景当天不重复；未配置生图时配图由内置服务端生成。
+              </p>
+              {/* 立即分享一条：手动测试链路（生成文案 + 配图，落到信息会话与相册；约 10~60 秒） */}
+              <button
+                type="button"
+                data-testid={`${testPrefix}-proactive-life-fire`}
+                disabled={lifeTest === 'busy'}
+                onClick={fireLifeShare}
+                className="mt-3 flex w-full items-center justify-center gap-1.5 rounded-full px-3.5 py-2.5 text-[13.5px] font-medium transition-all active:scale-[0.99] disabled:opacity-60"
+                style={{ background: lifeTest === 'ok' ? '#34C759' : lifeTest === 'fail' ? '#FF3B30' : `${accent}1a`, color: lifeTest === 'ok' || lifeTest === 'fail' ? '#fff' : accent }}
+              >
+                <Camera className="h-3.5 w-3.5" strokeWidth={2.2} aria-hidden="true" />
+                {lifeTest === 'busy'
+                  ? '生成中，稍等几秒…'
+                  : lifeTest === 'ok'
+                    ? '已发送，去信息里看看'
+                    : lifeTest === 'fail'
+                      ? '生成失败，稍后再试'
+                      : '立即分享一条'}
+              </button>
             </div>
           )}
         </div>

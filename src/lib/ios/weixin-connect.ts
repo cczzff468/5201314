@@ -62,6 +62,8 @@ import { useSettings } from './store';
 import { loadMsgs, saveMsgs, type WxMsg } from '@/components/apps/wx-app/core';
 import { wxCloudSnapshot } from './wx-cloud/store';
 import { fetchImGatewayStatus } from './wx-cloud/gateway';
+// v22 云端健康断路器：云端历史读在熔断冷却期静默跳过（网关本地通道优先，云端只是镜像）
+import { cloudCooling, noteCloudIo } from './wx-cloud/cloud-health';
 import type { ContactRecord } from '@/lib/contacts';
 import { BUILTIN_WX_STICKERS } from './builtin-stickers';
 
@@ -1047,10 +1049,12 @@ async function doPullWxCloudHistory(): Promise<{ ok: boolean; msg: string; added
   } catch {
     /* 网关通道失败：回退云端 */
   }
-  // 云端双通道（v21：失败不再拦截本地通道合并——两路按确定性 id 去重，云端只是镜像）
+  // 云端双通道（v21：失败不再拦截本地通道合并——两路按确定性 id 去重，云端只是镜像）；
+  // v22 熔断冷却期：云端段整体跳过（免 402 报错风暴）——网关本地通道已取到的照常合并，
+  // 受限期间真机收发记录仍照常显示（本地权威，云端只是镜像）
   let cloudMsg = '';
   let cloudList: WxCloudHistItem[] = [];
-  if (supa?.ref && (supa.serviceKey || supa.secret)) {
+  if (supa?.ref && (supa.serviceKey || supa.secret) && !cloudCooling()) {
     try {
       let j: { msgs?: WxCloudHistItem[] } | null = null;
       if (supa.serviceKey) {
@@ -1061,6 +1065,8 @@ async function doPullWxCloudHistory(): Promise<{ ok: boolean; msg: string; added
           headers: isNewStyle ? { apikey: k } : { apikey: k, Authorization: `Bearer ${k}` },
           signal: AbortSignal.timeout(15_000),
         });
+        // v22 熔断证据采集：直读 Storage 的成败计入站内熔断器（402/5xx 连续 3 次 → 冷却）
+        noteCloudIo(res.ok, res.status);
         if (!res.ok) cloudMsg = '云端还没有微信聊天记录（真机微信上和 TA 聊过之后才有）';
         else j = (await res.json()) as { msgs?: WxCloudHistItem[] };
       } else {

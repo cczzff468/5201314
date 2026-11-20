@@ -16,6 +16,8 @@
  * mini-services/im-gateway，端口 3100）。
  */
 
+import { useSyncExternalStore } from 'react';
+
 import { wxCloudSnapshot, ensureTaskSecret } from './store';
 
 // ---------------- 类型 ----------------
@@ -38,6 +40,21 @@ export interface ImGatewayStatus {
     lastError?: string;
   };
   wx?: { running?: boolean; lastRunAt?: number; lastError?: string; replied?: number };
+  /** v25：真机「正在输入」——网关收到真机用户消息、调 core 生成回复期间置位（通道级条目；
+   *  网关侧 120 秒陈旧兜底后自动不再输出） */
+  typing?: { wx?: ImGatewayTypingEntry; qq?: ImGatewayTypingEntry };
+  /** v22：Supabase 写通道熔断状态（网关侧断路器真源——fetch 层拦 *.supabase.co 写请求：
+   *  连续 3 次失败（402/429/5xx/网络错）→冷却 15 分钟，期间云端写全走本地、真机收发不受影响；
+   *  halfopen=冷却到期的半开探测瞬间）。站内 ClawBox 通道状态行消费它 */
+  supaWrite?: { state: 'ok' | 'cooling' | 'halfopen'; fails?: number; lastErr?: string; until?: number };
+}
+
+/** v25 真机「正在输入」条目：contactKey=网关侧对端标识（QQ：单聊 openid/群 id；微信：对端
+ *  username——网关的 fetch 观察器从 iLink getconfig 请求体里取的 from_user_id）。真机历史是
+ *  单线索扁平列表，站内按「绑定角色会话」做通道级命中，contactKey 仅参考（不参与站内匹配） */
+export interface ImGatewayTypingEntry {
+  contactKey: string;
+  since: number;
 }
 
 export interface ImGatewayOpResult {
@@ -71,15 +88,50 @@ function setGwUserOff(v: boolean): void {
 
 // ---------------- API ----------------
 
-/** 查询网关状态（不抛错：连不上/未部署一律返回 null，由 UI 决定怎么展示） */
+/** 查询网关状态（不抛错：连不上/未部署一律返回 null，由 UI 决定怎么展示）。
+ *  v25：拿到状态顺手更新真机 typing 快照（noteTypingFromStatus）——订阅方零额外请求。 */
 export async function fetchImGatewayStatus(): Promise<ImGatewayStatus | null> {
   try {
     const res = await fetch(GATEWAY_URL, { signal: AbortSignal.timeout(8000) });
     if (!res.ok) return null;
-    return (await res.json()) as ImGatewayStatus;
+    const j = (await res.json()) as ImGatewayStatus;
+    noteTypingFromStatus(j);
+    return j;
   } catch {
     return null;
   }
+}
+
+// ---------------- v25 真机 typing 快照（聊天页 / 会话列表共用，零额外轮询） ----------------
+
+/** 模块级快照：true=该通道网关正在生成回复（「对方正在输入」）。喂它的只有既有的
+ *  fetchImGatewayStatus 调用方——12s 的 cloud-history-sync 全局循环 + 聊天页打开真机
+ *  会话期间的 4s 轮询；订阅方（聊天页指示器/会话列表副标题）自己不发请求。 */
+let typingSnapshot: { wx: boolean; qq: boolean } = { wx: false, qq: false };
+const typingListeners = new Set<() => void>();
+
+/** 从网关状态更新快照（有变化才广播——轮询空转不打扰订阅方重渲染） */
+function noteTypingFromStatus(st: ImGatewayStatus): void {
+  const next = { wx: Boolean(st?.typing?.wx), qq: Boolean(st?.typing?.qq) };
+  if (next.wx === typingSnapshot.wx && next.qq === typingSnapshot.qq) return;
+  typingSnapshot = next;
+  for (const fn of typingListeners) fn();
+}
+
+/** 某通道真机「正在输入」是否命中（网关收到真机用户消息、生成回复期间） */
+export function gatewayTypingActive(channel: 'wx' | 'qq'): boolean {
+  return typingSnapshot[channel];
+}
+
+/** 订阅 typing 快照变化（useSyncExternalStore 订阅源） */
+export function subscribeGatewayTyping(cb: () => void): () => void {
+  typingListeners.add(cb);
+  return () => typingListeners.delete(cb);
+}
+
+/** 聊天页 / 会话列表共用 hook：真机某通道「对方正在输入…」（订阅快照，不发请求） */
+export function useGatewayTyping(channel: 'wx' | 'qq'): boolean {
+  return useSyncExternalStore(subscribeGatewayTyping, () => gatewayTypingActive(channel), () => false);
 }
 
 /**

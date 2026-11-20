@@ -69,24 +69,24 @@ export default function NotesOverlay({
         animate={{ scale: 1, y: 0 }}
         exit={{ scale: 0.95, y: 8 }}
         transition={{ type: 'spring', damping: 26, stiffness: 320 }}
-        className="pointer-events-auto flex w-full max-w-[320px] flex-col overflow-hidden rounded-3xl bg-white/95 shadow-2xl backdrop-blur-xl"
+        className="pointer-events-auto flex w-full max-w-[320px] flex-col overflow-hidden rounded-3xl bg-white/95 shadow-2xl backdrop-blur-xl dark:bg-zinc-900/95"
         onClick={(e) => e.stopPropagation()}
       >
         {/* 标题 */}
         <div className="flex items-center justify-between px-5 pt-4">
           <div className="flex items-center gap-1.5">
             <Pin className="h-4 w-4 text-[#e8a3b3]" />
-            <span className="text-[15px] font-semibold text-[#3a3a3e]">软木留言板</span>
+            <span className="text-[15px] font-semibold text-[#3a3a3e] dark:text-zinc-100">软木留言板</span>
           </div>
           <button
             onClick={onClose}
             aria-label="关闭留言板"
-            className="flex h-8 w-8 items-center justify-center rounded-full bg-[#f0eff1] text-[#8a8a90] transition active:scale-95"
+            className="flex h-8 w-8 items-center justify-center rounded-full bg-[#f0eff1] text-[#8a8a90] transition active:scale-95 dark:bg-zinc-800 dark:text-zinc-400"
           >
             <X className="h-4 w-4" />
           </button>
         </div>
-        <p className="px-5 pt-0.5 text-[11px] text-[#9a9a96]">写给 TA 的便签，进门就会看到～</p>
+        <p className="px-5 pt-0.5 text-[11px] text-[#9a9a96] dark:text-zinc-400">写给 TA 的便签，进门就会看到～</p>
 
         {/* 便签墙 */}
         <div className="scrollbar-none mt-3 max-h-[46vh] min-h-[120px] overflow-y-auto px-4 pb-2">
@@ -111,7 +111,7 @@ export default function NotesOverlay({
                   >
                     {/* 图钉 */}
                     <span className="absolute left-1/2 top-1 h-2 w-2 -translate-x-1/2 rounded-full bg-[#d96a6a] shadow" />
-                    <p className="break-all pt-1.5 text-[11.5px] leading-snug text-[#5a5248]">{n.text}</p>
+                    <p className="break-all pt-1.5 text-[11.5px] leading-snug text-[#5a5248] dark:text-zinc-300">{n.text}</p>
                     <div className="mt-1.5 flex items-center justify-between">
                       <span className="text-[9.5px] text-[#a89880]">
                         {n.by === 'me' ? '我' : 'TA'} · {fmtTs(n.ts)}
@@ -143,14 +143,14 @@ export default function NotesOverlay({
                 if (e.key === 'Enter') post();
               }}
               placeholder="写点想对 TA 说的…"
-              className="h-9 min-w-0 flex-1 rounded-full bg-[#f4f2ee] px-3.5 text-[12.5px] text-[#4a4a4e] outline-none placeholder:text-[#b8b4ae]"
+              className="h-9 min-w-0 flex-1 rounded-full bg-[#f4f2ee] px-3.5 text-[12.5px] text-[#4a4a4e] outline-none placeholder:text-[#b8b4ae] dark:bg-zinc-800 dark:text-zinc-100 dark:placeholder:text-zinc-500"
             />
             <button
               onClick={post}
               disabled={!text.trim()}
               aria-label="贴上便签"
               className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-white shadow-sm transition active:scale-90 ${
-                text.trim() ? 'bg-[#f4b3c2]' : 'bg-[#e5dede]'
+                text.trim() ? 'bg-[#f4b3c2] dark:bg-[#b06377]' : 'bg-[#e5dede] dark:bg-zinc-700'
               }`}
             >
               <Send className="h-4 w-4" />

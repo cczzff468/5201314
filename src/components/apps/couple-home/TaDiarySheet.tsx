@@ -69,7 +69,7 @@ function TaDiarySheetInner({ onClose, charId, charName }: Omit<TaDiarySheetProps
         animate={{ y: 0 }}
         transition={{ type: 'spring', damping: 30, stiffness: 320 }}
       >
-        <div className="flex flex-col overflow-hidden rounded-t-[26px] border border-white/60 bg-white/55 shadow-[0_-8px_40px_rgba(120,70,80,0.22)] backdrop-blur-2xl">
+        <div className="flex flex-col overflow-hidden rounded-t-[26px] border border-white/60 bg-white/55 shadow-[0_-8px_40px_rgba(120,70,80,0.22)] backdrop-blur-2xl dark:border-white/15 dark:bg-zinc-900/80">
           {/* 把手 */}
           <div className="flex items-center justify-center pt-2.5">
             <div className="h-1.5 w-10 rounded-full bg-[#e8d5cd]" />
@@ -85,7 +85,7 @@ function TaDiarySheetInner({ onClose, charId, charName }: Omit<TaDiarySheetProps
               type="button"
               aria-label="关闭"
               onClick={onClose}
-              className="flex h-8 w-8 items-center justify-center rounded-full bg-white/70 text-[#9c838c] shadow-sm ring-1 ring-white/70 transition active:scale-95"
+              className="flex h-8 w-8 items-center justify-center rounded-full bg-white/70 text-[#9c838c] shadow-sm ring-1 ring-white/70 transition active:scale-95 dark:bg-zinc-800/80 dark:text-zinc-300 dark:ring-white/15"
             >
               <X size={16} />
             </button>
@@ -105,14 +105,14 @@ function TaDiarySheetInner({ onClose, charId, charName }: Omit<TaDiarySheetProps
             ) : (
               <div className="flex flex-col gap-2.5 px-4 pb-3">
                 {entries.map((e) => (
-                  <div key={e.date} className="rounded-2xl bg-white/75 px-3.5 py-2.5 shadow-sm ring-1 ring-white/60">
+                  <div key={e.date} className="rounded-2xl bg-white/75 px-3.5 py-2.5 shadow-sm ring-1 ring-white/60 dark:bg-zinc-800/75 dark:ring-white/15">
                     <div className="mb-1 flex items-center gap-2">
                       <span className="text-[12px] font-semibold text-[#8a6f7a]">{e.date}</span>
                       <span className="rounded-full bg-[#f7e8ef] px-1.5 py-0.5 text-[9.5px] font-medium text-[#c07a90]">
                         {MOOD_LABEL[e.mood] ?? '平静'}
                       </span>
                     </div>
-                    <p className="whitespace-pre-wrap break-words text-[13px] leading-relaxed text-[#5c4a52]">{e.text}</p>
+                    <p className="whitespace-pre-wrap break-words text-[13px] leading-relaxed text-[#5c4a52] dark:text-zinc-200">{e.text}</p>
                   </div>
                 ))}
               </div>

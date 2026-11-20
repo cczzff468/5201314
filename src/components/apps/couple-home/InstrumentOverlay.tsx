@@ -133,8 +133,8 @@ function TimbrePicker({
                 }}
                 className={`flex w-full items-center justify-between gap-3 rounded-xl px-3 py-2 text-left text-[12.5px] transition active:scale-[0.97] ${
                   active
-                    ? 'bg-[#f4b3c2]/30 font-semibold text-[#453e39]'
-                    : 'text-[#453e39]/85 hover:bg-black/5'
+                    ? 'bg-[#f4b3c2]/30 font-semibold text-[#453e39] dark:bg-[#b06377]/40 dark:text-zinc-100'
+                    : 'text-[#453e39]/85 hover:bg-black/5 dark:text-zinc-200/85 dark:hover:bg-white/5'
                 }`}
               >
                 {o.label}
@@ -783,7 +783,7 @@ export default function InstrumentOverlay({
             <div
               className={`flex h-11 shrink-0 items-center justify-between gap-2 rounded-full pl-4 pr-1.5 ${GLASS}`}
             >
-              <div className="flex min-w-0 items-center gap-1.5 text-[13px] font-semibold text-[#453e39]">
+              <div className="flex min-w-0 items-center gap-1.5 text-[13px] font-semibold text-[#453e39] dark:text-zinc-100">
                 <Music className={`h-4 w-4 shrink-0 text-[#d97f95] ${aiSong ? 'animate-pulse' : ''}`} />
                 <span className="truncate">
                   {aiSong?.kind === 'guitar' ? (

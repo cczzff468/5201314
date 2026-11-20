@@ -29,6 +29,17 @@
  *   喊唤醒名/点球都能唤起；真任务仍被原生闸拒绝并原样说明）+ 已解锁 +
  *   悬浮球开关 + 无 Agent 任务运行 + 无通话/来电
  *
+ * D3 全局语音助手（长按唤起）在本组件上补齐（不重复造轮子）：
+ * - 唤起：主屏长按空白 600ms → assistant-hold.requestAssistantHold()（openSeq 自增）→
+ *   本组件订阅后打开会话直接开录（Siri 手势语义）；麦克风不可用/拒绝授权自动回退
+ *   聚焦浮层内文字输入框；ESC/关闭按钮退出；会话打开期间其它 UI 冻结但不卸载
+ *   （全屏暗化层挡住底层滚动/点击）
+ * - 视觉：会话底部上浮入场 + 光球四态（呼吸/监听/思考/说话，克制暖色板无蓝紫主色）+
+ *   转写流单行流式（Web Speech 实时增量）+ 指令结果卡片淡入
+ * - 指令路由（assistant-commands 本地正则零 LLM 延迟，置于天气/打开 App 直达之后、
+ *   LLM 兜底之前）：给TA/联系人发消息（setPendingChatContact + 信息 App 草稿箱预填）、
+ *   定闹钟（alarms 表）、建提醒（reminders 表）、放首歌（音乐 store 播放通道）、报时
+ *
  * 逻辑在 lib/ios/agent-voice.ts（识别/唤醒/播报）与 lib/ios/agent-chat.ts（聊天大脑），
  * 本组件只做状态编排与渲染。
  */
@@ -41,6 +52,23 @@ import { useUI } from '@/lib/ios/store';
 import { useIncomingCall } from '@/lib/ios/incoming-call';
 import { useOfflineAsr } from '@/lib/ios/offline-asr';
 import { isNativePerception, requestMicPermission } from '@/lib/ios/native-perception';
+// D3 全局语音助手：主屏长按唤起信号（assistant-hold 独立小 store，启用默认开）
+import { useAssistantHold } from '@/lib/ios/assistant-hold';
+// D3 全局语音助手：指令路由层（发消息/闹钟/提醒/音乐/报时，本地正则零 LLM 延迟）
+import {
+  matchSendMessageIntent,
+  matchAlarmIntent,
+  matchReminderIntent,
+  matchMusicIntent,
+  matchTimeIntent,
+  runSendMessage,
+  runAlarm,
+  runReminder,
+  runMusic,
+  runTimeReport,
+  type CommandCard,
+  type CommandOutcome,
+} from '@/lib/ios/assistant-commands';
 import {
   useAgentVoice,
   useAgentRecorder,
@@ -96,9 +124,18 @@ const BARGE_RMS = 0.045;
 /** barge-in 起振保护：TTS 开始后前 600ms 忽略能量（扬声器起振/首包延迟期防误触发） */
 const BARGE_ONSET_IGNORE_MS = 600;
 
-/** Siri 彩虹渐变（悬浮球环 + 会话光球共用色板：青→紫→粉→橙→黄→绿） */
-const SIRI_CONIC =
-  'conic-gradient(from 0deg, #6EE7F9, #A78BFA, #F472B6, #FB923C, #FDE047, #86EFAC, #22D3EE, #6EE7F9)';
+/** Siri 式光球渐变（D3 视觉定调：克制的中性暖色——琥珀/橙/玫瑰，无蓝无紫；
+ *  光球呼吸/监听/思考/说话四态共用这一套色板，只用亮度/节奏区分状态） */
+const ORB_CONIC =
+  'conic-gradient(from 0deg, #FDE68A, #FDBA74, #FCA5A5, #FDBA74, #FDE68A)';
+/** 光球四态的呼吸节奏与亮度（监听更快更亮；思考慢旋；说话强脉冲；待机慢呼吸） */
+const ORB_STATES = {
+  breath: { glowOpacity: 0.16, breathSec: 4.2, spinSec: 26 },
+  listening: { glowOpacity: 0.34, breathSec: 1.6, spinSec: 12 },
+  thinking: { glowOpacity: 0.24, breathSec: 2.4, spinSec: 8 },
+  speaking: { glowOpacity: 0.4, breathSec: 1.05, spinSec: 10 },
+} as const;
+type OrbState = keyof typeof ORB_STATES;
 
 /** 浏览器调试开关：localStorage agent-voice-debug=1 时在网页预览里也显示球/会话（仅聊天链路可用） */
 function isVoiceDebug(): boolean {
@@ -130,6 +167,8 @@ interface SessionTurn {
   id: number;
   role: 'user' | 'agent';
   text: string;
+  /** D3 指令结果卡片（agent 回复附带时渲染，如「已打开 天气」；淡入出现） */
+  card?: CommandCard;
 }
 
 export default function AgentVoiceBall() {
@@ -172,10 +211,14 @@ export default function AgentVoiceBall() {
   }, [native]);
 
   // 挂载级开关：APP 原生壳看 autonomy 总闸；网页端只看悬浮球开关（v90.1 起网页也出球，
-  // 喊唤醒名/点球都能唤起——修复「叫名字没反应」：此前网页整层不挂载）
-  const layerOn = cfg.ball && (native ? autoOn : true);
-  // 瞬时隐藏（保持挂载：唤醒循环/探针不停，只是看不见）
-  const visible = layerOn && !locked && !screenOff && !switcherOpen && !agentRunning && !callActive && !incomingCall;
+  // 喊唤醒名/点球都能唤起——修复「叫名字没反应」：此前网页整层不挂载）。
+  // D3：语音助手启用（assistant-hold，默认开）时本层也常驻——关掉悬浮球仍保留长按唤起的
+  // 全屏会话（悬浮球本体仍只随 ballLayerOn 显示，不因助手启用而冒出来）
+  const ballLayerOn = cfg.ball && (native ? autoOn : true);
+  const holdEnabled = useAssistantHold((s) => s.enabled);
+  const layerOn = ballLayerOn || holdEnabled;
+  // 瞬时隐藏（保持挂载：唤醒循环/探针不停，只是看不见）；会话打开时层保持可见（渲染处用 layerVisible）
+  const visible = ballLayerOn && !locked && !screenOff && !switcherOpen && !agentRunning && !callActive && !incomingCall;
 
   // ---- 会话状态 ----
   const [sessionOpen, setSessionOpen] = useState(false);
@@ -199,11 +242,11 @@ export default function AgentVoiceBall() {
   /** 连续对话：当前是否处于自动续听（UI 状态行用「聆听中…」，逻辑用 autoListenRef） */
   const [autoListenUi, setAutoListenUi] = useState(false);
 
-  const appendTurn = useCallback((role: 'user' | 'agent', text: string): void => {
+  const appendTurn = useCallback((role: 'user' | 'agent', text: string, card?: CommandCard): void => {
     const t = text.trim();
-    if (!t) return;
+    if (!t && !card) return;
     turnIdRef.current += 1;
-    const turn: SessionTurn = { id: turnIdRef.current, role, text: t };
+    const turn: SessionTurn = { id: turnIdRef.current, role, text: t, card: card ?? undefined };
     setTurns((prev) => [...prev, turn]);
   }, []);
 
@@ -266,6 +309,18 @@ export default function AgentVoiceBall() {
   const noHearStreakRef = useRef(0);
   /** 续听累计次数（window.__ballDebug 调试口观测用） */
   const resumeCountRef = useRef(0);
+  /** D3 无麦自动回退：录音启动失败（无麦克风/权限拒绝）时聚焦浮层内文字输入框 */
+  const assistantInputRef = useRef<HTMLInputElement | null>(null);
+  const focusAssistantInput = useCallback((): void => {
+    // 微任务后聚焦：避开当前 pointer 事件栈，防止部分浏览器把 focus 抢回按压目标
+    window.setTimeout(() => {
+      try {
+        assistantInputRef.current?.focus({ preventScroll: true });
+      } catch {
+        /* 聚焦失败不影响提示文案 */
+      }
+    }, 60);
+  }, []);
   const rec = useAgentRecorder({
     onResult: (r) => {
       if (r === null) {
@@ -298,7 +353,11 @@ export default function AgentVoiceBall() {
         setSessionMsg(r.error);
       }
     },
-    onStartError: (msg) => setSessionMsg(msg),
+    onStartError: (msg) => {
+      setSessionMsg(msg);
+      // D3：浏览器无麦克风/拒绝授权 → 自动回退到浮层内文字输入框（无麦环境可验证）
+      if (sessionOpenRef.current) focusAssistantInput();
+    },
   });
   const recRef = useRef(rec);
   useEffect(() => {
@@ -410,6 +469,36 @@ export default function AgentVoiceBall() {
     return undefined;
   }, [sessionOpen]);
 
+  // ---- D3 主屏长按唤起（assistant-hold.openSeq 自增 → 打开会话直接开录）----
+  // 门槛与点悬浮球一致：锁屏/熄屏/多任务/通话/来电/Agent 任务运行中不唤起；
+  // 已开着视为「确认」，不重复打开（对话保留）。序号哨兵防 openSession 身份变化时误重开。
+  const holdSeq = useAssistantHold((s) => s.openSeq);
+  const lastHoldSeqRef = useRef(0);
+  useEffect(() => {
+    if (holdSeq <= lastHoldSeqRef.current) return;
+    lastHoldSeqRef.current = holdSeq;
+    const ui = useUI.getState();
+    if (ui.locked || ui.screenOff || ui.switcherOpen || ui.callActive || ui.alarmRinging) return;
+    if (useIncomingCall.getState().call) return;
+    if (agentRunningRef.current || sessionOpenRef.current) return;
+    clearFollowup();
+    vibrateSafely(18);
+    openSession({}); // 不问候直接开录（Siri 手势语义）；无麦环境 onStartError → 自动聚焦文字输入框
+  }, [holdSeq, openSession, clearFollowup]);
+
+  // ---- D3 ESC 退出会话（键盘路径；捕获阶段优先于底层 Escape 处理并阻断冒泡）----
+  useEffect(() => {
+    if (!sessionOpen) return undefined;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      e.preventDefault();
+      e.stopPropagation();
+      closeSession();
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [sessionOpen, closeSession]);
+
   // ---- 任务执行（Siri → Agent 交接）----
   /** 执行任务：收起会话 → dynamic import 拉起 runAgentTask → 全局进度条接管；
    *  被能力闸/防重入拒绝（闸全部同步判定，promise 秒回）→ 重开会话把原因作为助手回复展示。
@@ -463,6 +552,21 @@ export default function AgentVoiceBall() {
     [clearFollowup],
   );
 
+  // ---- D3 指令路由收尾：回复 + 结果卡片进会话流 → 需要切 App 的先停留再收会话切页 → TTS 播报 ----
+  // （与天气/打开 App 直达同款节奏；TTS 失败静默，文字与卡片已在浮层里）
+  const finishDirect = useCallback(
+    async (out: CommandOutcome): Promise<void> => {
+      appendTurnRef.current('agent', out.reply, out.card);
+      if (out.ok && out.nav) {
+        await sleepBrief(); // 会话可见停留（用户看到自己说的话+应答+结果卡片）
+        closeSession(); // App 窗口 z-40 在会话层下：先收会话再切页
+        openAppPage(out.nav);
+      }
+      await speakInSession(out.reply);
+    },
+    [closeSession, speakInSession],
+  );
+
   // ---- 语音回合路由（聊天/任务一体，见 agent-chat.ts）----
   const routeUtterance = useCallback(
     async (raw: string): Promise<void> => {
@@ -483,7 +587,7 @@ export default function AgentVoiceBall() {
         setThinking(true);
         const rep = await runWeatherReport(wIntent.location);
         setThinking(false);
-        appendTurnRef.current('agent', rep.reply);
+        appendTurnRef.current('agent', rep.reply, rep.ok ? { title: '已打开 天气', detail: rep.city || undefined } : undefined);
         if (rep.ok) {
           await sleepBrief(); // 会话可见停留（修喊名直达闪退）
           closeSession(); // App 窗口 z-40 在会话层下：先收会话再切页
@@ -499,10 +603,45 @@ export default function AgentVoiceBall() {
       if (nav) {
         const ok = openAppPage(nav.appId);
         const reply = ok ? `好嘞，${nav.label}打开啦~` : `现在不方便打开${nav.label}哦~`;
-        appendTurnRef.current('agent', reply);
+        appendTurnRef.current('agent', reply, ok ? { title: `已打开 ${nav.label}` } : undefined);
         if (ok) await sleepBrief();
         closeSession();
         await speakInSession(reply);
+        return;
+      }
+      // ---- 直达 ③：D3 指令路由（assistant-commands，本地关键词/正则零 LLM 延迟）----
+      //      发消息 → 闹钟 → 提醒 → 播放音乐 → 报时（顺序即优先级）；全部复用既有通道
+      //      （setPendingChatContact/信息草稿箱、时钟/提醒事项 IndexedDB、音乐 store 播放）；
+      //      匹配不上落 LLM 兜底
+      const msgIntent = matchSendMessageIntent(text);
+      if (msgIntent) {
+        setThinking(true);
+        const out = await runSendMessage(msgIntent);
+        setThinking(false);
+        await finishDirect(out);
+        return;
+      }
+      const alarmIntent = matchAlarmIntent(text);
+      if (alarmIntent) {
+        const out = await runAlarm(alarmIntent);
+        await finishDirect(out);
+        return;
+      }
+      const remIntent = matchReminderIntent(text);
+      if (remIntent) {
+        const out = await runReminder(remIntent);
+        await finishDirect(out);
+        return;
+      }
+      if (matchMusicIntent(text)) {
+        setThinking(true);
+        const out = await runMusic();
+        setThinking(false);
+        await finishDirect(out);
+        return;
+      }
+      if (matchTimeIntent(text)) {
+        await finishDirect(runTimeReport());
         return;
       }
       setThinking(true);
@@ -521,7 +660,7 @@ export default function AgentVoiceBall() {
             const ok = openAppPage(nav2.appId);
             const reply = ok ? `好嘞，${nav2.label}打开啦~` : `现在不方便打开${nav2.label}哦~`;
             setThinking(false);
-            appendTurnRef.current('agent', reply);
+            appendTurnRef.current('agent', reply, ok ? { title: `已打开 ${nav2.label}` } : undefined);
             if (ok) await sleepBrief();
             closeSession();
             await speakInSession(reply);
@@ -540,7 +679,7 @@ export default function AgentVoiceBall() {
         resumeListening();
       }
     },
-    [execute, speakInSession, closeSession, resumeListening],
+    [execute, speakInSession, closeSession, resumeListening, finishDirect],
   );
   // 识别结果落地 → 最新路由闭包（recorder 的 onResult 经 routeRef 透传）
   useEffect(() => {
@@ -728,7 +867,9 @@ export default function AgentVoiceBall() {
   // 此处只判「至少一条通道可用」（组件 dynamic ssr:false，惰性初始化时 window 必可用）
   const [wsWakeOk] = useState(() => isWebSpeechSupported());
   const [vadOk] = useState(() => canWakeVad());
-  const wakeOn = layerOn && cfg.listen && !wakeBlocked && (asrReady || wsWakeOk || vadOk);
+  // 唤醒循环门槛保持原有口径（cfg.ball 悬浮球层）：D3 语音助手启用只保证「长按唤起的会话」可用，
+  // 不因此把喊名监听（麦克风常驻）也拉起来——关悬浮球的老用户不应凭空开始耗麦克风流
+  const wakeOn = ballLayerOn && cfg.listen && !wakeBlocked && (asrReady || wsWakeOk || vadOk);
   // 重试信号：设置页「重试」按钮 bump → 唤醒循环立即重建（清熔断/换通道）
   const retrySeq = useWakeDiag((s) => s.retrySeq);
   const onWake = useCallback(
@@ -832,12 +973,17 @@ export default function AgentVoiceBall() {
 
   const recBusy = rec.phase === 'starting' || rec.phase === 'recording';
   const showWave = recBusy && rec.levels.length > 0;
+  // 光球四态：说话 > 思考 > 监听 > 待机呼吸（同套暖色板，只换亮度/节奏）
+  const orbState: OrbState = speaking ? 'speaking' : thinking ? 'thinking' : recBusy ? 'listening' : 'breath';
+  const orb = ORB_STATES[orbState];
+  /** 转写流单行：录音/识别中显示 Web Speech 实时增量文本（无麦环境为空，不打扰） */
+  const liveText = (recBusy || rec.phase === 'recognizing') && rec.partial ? rec.partial : '';
 
   return (
     <div
       ref={layerRef}
       className="pointer-events-none absolute inset-0 z-[57]"
-      style={{ visibility: visible ? 'visible' : 'hidden' }}
+      style={{ visibility: visible || sessionOpen ? 'visible' : 'hidden' }}
       data-testid="agent-voice-layer"
       data-agent-voice-layer=""
       data-suppress-edge-gesture
@@ -848,15 +994,15 @@ export default function AgentVoiceBall() {
       {/* Agent 运行状态探针（dynamic 拉起 agent-ui → web-agent；纯副作用不渲染内容） */}
       <AgentRunningProbe onChange={onRunningChange} />
 
-      {/* ================= 全屏语音会话（Siri 式） ================= */}
+      {/* ================= 全屏语音会话（Siri 式；D3：底部上浮入场 + 四态光球 + 转写流 + 结果卡片） ================= */}
       <AnimatePresence>
         {sessionOpen ? (
           <motion.div
             key="agent-voice-session"
-            initial={{ opacity: 0, scale: 0.985 }}
-            animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0, scale: 0.985 }}
-            transition={{ duration: 0.22, ease: 'easeOut' }}
+            initial={{ opacity: 0, y: 56 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 32 }}
+            transition={{ duration: 0.26, ease: [0.32, 0.72, 0, 1] }}
             role="dialog"
             aria-label="语音助手会话"
             data-testid="agent-voice-session"
@@ -874,18 +1020,23 @@ export default function AgentVoiceBall() {
               <X className="h-5 w-5" />
             </button>
 
-            {/* Siri 光球（极简版：环境柔光 + 慢旋柔化极光盘 + 白芯，无硬边；状态越忙呼吸越亮） */}
+            {/* Siri 光球（D3 四态：呼吸/监听/思考/说话——同套暖色板，亮度/节奏随状态变化；
+                环境柔光呼吸 + 盘内慢旋柔化极光盘 + 白芯，无硬边） */}
             <div className="pointer-events-none absolute left-1/2 top-[108px] h-[92px] w-[92px] -translate-x-1/2" aria-hidden="true">
-              {/* 环境柔光（忙碌时呼吸） */}
+              {/* 环境柔光（随状态呼吸；监听/说话更亮更快） */}
               <div
-                className="absolute -inset-4 rounded-full opacity-25 blur-xl"
-                style={{ background: SIRI_CONIC, animation: recBusy || thinking || speaking ? 'agentVoiceBreath 1.8s ease-in-out infinite' : undefined }}
+                className="absolute -inset-4 rounded-full blur-xl"
+                style={{
+                  background: ORB_CONIC,
+                  opacity: orb.glowOpacity,
+                  animation: `agentVoiceBreath ${orb.breathSec}s ease-in-out infinite`,
+                }}
               />
-              {/* 主体：圆盘内慢旋 aurora（blur 柔化，无硬边） */}
+              {/* 主体：圆盘内慢旋 aurora（blur 柔化，无硬边；思考时旋得最快） */}
               <div className="absolute inset-0 overflow-hidden rounded-full ring-1 ring-white/10">
                 <div
                   className="absolute -inset-[30%]"
-                  style={{ background: SIRI_CONIC, filter: 'blur(16px)', opacity: 0.8, animation: 'agentVoiceSpin 16s linear infinite' }}
+                  style={{ background: ORB_CONIC, filter: 'blur(16px)', opacity: 0.8, animation: `agentVoiceSpin ${orb.spinSec}s linear infinite` }}
                 />
                 {/* 中心白芯（通透感） */}
                 <div
@@ -904,10 +1055,19 @@ export default function AgentVoiceBall() {
               </span>
             </div>
 
-            {/* 对话流（用户右侧气泡 / 助手左侧纯文本，Siri 式） */}
+            {/* 转写流（单行流式：录音/识别中实时显示 Web Speech 增量文本；识别完成落对话流） */}
+            <div className="pointer-events-none absolute inset-x-6 top-[236px] flex h-[22px] items-center justify-center" aria-live="polite">
+              {liveText ? (
+                <span className="max-w-full truncate text-[13.5px] leading-[22px] text-white/70" data-testid="agent-voice-live-text">
+                  {liveText}
+                </span>
+              ) : null}
+            </div>
+
+            {/* 对话流（用户右侧气泡 / 助手左侧文本 + 指令结果卡片，Siri 式） */}
             <div
               ref={transcriptRef}
-              className="ph-voice-scroll absolute inset-x-5 bottom-[118px] top-[248px] flex flex-col gap-3.5 overflow-y-auto"
+              className="ph-voice-scroll absolute inset-x-5 bottom-[118px] top-[262px] flex flex-col gap-3.5 overflow-y-auto"
               data-testid="agent-voice-transcript"
             >
               {turns.length === 0 && !sessionMsg ? (
@@ -924,8 +1084,24 @@ export default function AgentVoiceBall() {
                     {t.text}
                   </div>
                 ) : (
-                  <div key={t.id} className="mr-auto max-w-[88%] whitespace-pre-wrap text-[15.5px] leading-[1.7] text-white/95">
-                    {t.text}
+                  <div key={t.id} className="mr-auto max-w-[88%]">
+                    {/* D3 指令结果卡片（如「已打开 天气」；淡入出现） */}
+                    {t.card ? (
+                      <motion.div
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ duration: 0.28, ease: 'easeOut' }}
+                        role="status"
+                        data-testid="agent-voice-card"
+                        className="mb-2 rounded-[18px] bg-white/[0.08] px-4 py-3 ring-1 ring-white/12 backdrop-blur-md"
+                      >
+                        <p className="text-[13px] font-semibold tracking-wide text-white/90">{t.card.title}</p>
+                        {t.card.detail ? <p className="mt-1 truncate text-[12px] leading-[16px] text-white/60">{t.card.detail}</p> : null}
+                      </motion.div>
+                    ) : null}
+                    {t.text ? (
+                      <p className="whitespace-pre-wrap text-[15.5px] leading-[1.7] text-white/95">{t.text}</p>
+                    ) : null}
                   </div>
                 ),
               )}
@@ -993,10 +1169,11 @@ export default function AgentVoiceBall() {
                 <Plus className="h-5 w-5" />
               </button>
               <input
+                ref={assistantInputRef}
                 value={inputDraft}
                 onChange={(e) => setInputDraft(e.target.value)}
                 placeholder={cfg.name ? `问${cfg.name}点什么，或直接下达任务` : '问点什么，或直接下达任务'}
-                aria-label="问点什么，或直接下达任务"
+                aria-label="问点什么，或直接下达任务（麦克风不可用时的文字输入）"
                 data-testid="agent-voice-input"
                 className="h-11 min-w-0 flex-1 rounded-full bg-white/10 px-4 text-[15px] text-white outline-none ring-1 ring-white/10 backdrop-blur-md placeholder:text-white/40 focus:ring-white/25"
               />
@@ -1041,7 +1218,7 @@ export default function AgentVoiceBall() {
         onDragEnd={(_e, info) => onDragEnd(info)}
         animate={pos ? { x: pos.x, y: pos.y } : undefined}
         transition={{ duration: 0.16 }}
-        style={{ visibility: sessionOpen ? 'hidden' : 'visible' }}
+        style={{ visibility: ballLayerOn && !sessionOpen ? 'visible' : 'hidden' }}
         className="pointer-events-auto absolute bottom-[140px] right-0 flex h-[44px] w-[44px] touch-none select-none items-center justify-center rounded-full"
         data-testid="agent-voice-ball"
       >

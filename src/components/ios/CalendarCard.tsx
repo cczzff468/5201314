@@ -1,90 +1,134 @@
 'use client';
 
 /**
- * 日历小组件（主屏第 3 页顶部，col-span-4 整行 2 行高 ≈342×168）：
- * 左侧 = 月名（灰）/ 星期（粗体）/ 大号日期；右侧 = 整月网格（周一起始、今天黑圆反白、
- * 周末列淡灰）——参考 iOS 日历中号组件的横排版式（用户参考图）。
- * 纯展示（主屏点击打开日历 App）；SSR/首帧不渲染日期避免水合不一致，挂载后立即填充。
+ * 日历小组件（主屏 2×2 方格 ≈159×168，iOS 原生日历小组件样式）：
+ * - 上半：周几（珊瑚红，与日历 App 主色同源）+ 「X月X日」大字（数字大、月/日小）；
+ * - 下半：最近的下一条日程——彩色竖条（日程颜色，colorHex 口径）+ 标题 + 相对时间
+ *   （今天/明天/周X + HH:mm 或「全天」）；无日程时优雅空态「近期没有安排」；
+ * - 数据源：localDB 'events'（日历 App 同一份本地 IndexedDB），读取后经日历 App 的
+ *   normalizeEvent/occursOn/sortEvents 归一化与重复展开（与 App 内完全同一套口径）；
+ *   挂载读一次 + 每 30s 与时钟同频对账（App 里改完日程回到主屏自动跟上）；
+ * - 纯展示（主屏点击打开日历 App，WIDGET_META 通道）；SSR/首帧不渲染日期避免水合不一致，
+ *   挂载后立即填充；now 与 events 收敛在同一个快照 state 里原子更新（不闪空态）。
  */
 import { useEffect, useState } from 'react';
+import { localDB, type CalendarEventRecord } from '@/lib/ios/db';
+import {
+  colorHex,
+  dateToKey,
+  normalizeEvent,
+  occursOn,
+  pad2,
+  sortEvents,
+  weekdayCN,
+  type NormalizedEvent,
+} from '@/components/apps/calendar/shared';
 
-/** 周表头（周一起始，与日期网格列对齐；六/日两列淡显） */
-const WEEKDAY_HEADER = ['一', '二', '三', '四', '五', '六', '日'] as const;
+/** 向后查找最近日程的天数窗口 */
+const LOOKAHEAD_DAYS = 7;
+
+/** 最近一条日程（dayOff = 距今天几天：0=今天、1=明天……） */
+interface NextEvent {
+  ev: NormalizedEvent;
+  dayOff: number;
+}
+
+/**
+ * 最近的下一条日程：今天起向后 LOOKAHEAD_DAYS 天逐日展开（occursOn 含重复/跨天），
+ * 当日按 sortEvents 排序（全天在前、其余按开始时间）；今天的日程只取尚未开始
+ * （HH:mm ≥ 当前时刻；全天事件整日有效），取不到再顺延到明天及以后。
+ */
+function nextEventOf(events: CalendarEventRecord[], now: Date): NextEvent | null {
+  const list = events.map(normalizeEvent);
+  const nowHM = `${pad2(now.getHours())}:${pad2(now.getMinutes())}`;
+  for (let off = 0; off <= LOOKAHEAD_DAYS; off++) {
+    const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() + off);
+    const key = dateToKey(d);
+    const day = sortEvents(list.filter((ev) => occursOn(ev, key)));
+    for (const ev of day) {
+      if (off === 0 && ev.startTime && ev.startTime < nowHM) continue; // 今日已开始的跳过
+      return { ev, dayOff: off };
+    }
+  }
+  return null;
+}
+
+/** 日程时间文案：今天/明天/周X + HH:mm（全天日程标「全天」） */
+function timeTextOf(n: NextEvent, now: Date): string {
+  const day =
+    n.dayOff === 0 ? '今天' : n.dayOff === 1 ? '明天' : weekdayCN(dateToKey(new Date(now.getFullYear(), now.getMonth(), now.getDate() + n.dayOff)));
+  return `${day} ${n.ev.startTime || '全天'}`;
+}
 
 export function CalendarCardWidget({ testId }: { testId?: string }) {
-  const [now, setNow] = useState<Date | null>(null);
+  /** now + events 原子快照：null = SSR/首帧（日期留空不闪空态文案） */
+  const [snap, setSnap] = useState<{ now: Date; events: CalendarEventRecord[] } | null>(null);
+
   useEffect(() => {
-    const tick = () => setNow(new Date());
+    let alive = true;
+    const tick = () => {
+      const now = new Date();
+      localDB
+        .getAll('events')
+        .then((events) => {
+          if (alive) setSnap({ now, events });
+        })
+        .catch(() => {
+          /* IndexedDB 不可用时按空日程处理（优雅空态，不报错不白块） */
+          if (alive) setSnap({ now, events: [] });
+        });
+    };
     tick();
     const iv = window.setInterval(tick, 30_000);
-    return () => window.clearInterval(iv);
+    return () => {
+      alive = false;
+      window.clearInterval(iv);
+    };
   }, []);
 
-  const month = now ? now.getMonth() : 0;
-  const today = now?.getDate() ?? 0;
-  const daysInMonth = now ? new Date(now.getFullYear(), month + 1, 0).getDate() : 30;
-  /** 1 号前面的空格数（周一起始：周日 getDay()=0 → 偏移 6） */
-  const firstOffset = now ? (new Date(now.getFullYear(), month, 1).getDay() + 6) % 7 : 0;
-  const cells: (number | null)[] = [
-    ...Array<null>(firstOffset),
-    ...Array.from({ length: daysInMonth }, (_, i) => i + 1),
-  ];
-  while (cells.length % 7 !== 0) cells.push(null);
-
-  const monthText = now ? `${month + 1}月` : '';
+  const now = snap?.now ?? null;
+  const next = snap ? nextEventOf(snap.events, snap.now) : null;
   const weekText = now ? `星期${'日一二三四五六'[now.getDay()]}` : '';
-
+  const monthText = now ? String(now.getMonth() + 1) : '';
+  const dateText = now ? String(now.getDate()) : '';
   return (
     <div
-      {...(testId ? { 'data-testid': testId } : {})}
-      className="flex h-[168px] w-full select-none overflow-hidden rounded-[24px] bg-white/95 ring-1 ring-black/10 dark:bg-[#1c1c1e]/95 dark:ring-white/10"
+      {...(testId ? { 'data-testid': testId } : { 'data-testid': 'calendar-widget' })}
+      className="flex h-[168px] w-full select-none flex-col overflow-hidden rounded-[24px] bg-white/95 px-[13px] pb-[12px] pt-[13px] ring-1 ring-black/10 dark:bg-[#1c1c1e]/95 dark:ring-white/10"
     >
-      {/* 左侧：月 / 星期 / 大号日期 */}
-      <div className="flex w-[108px] shrink-0 flex-col justify-center pl-6">
-        <p className="text-[15px] leading-none text-black/35 dark:text-white/35">{monthText}</p>
-        <p className="mt-[6px] text-[19px] font-bold leading-none text-[#161618] dark:text-white">{weekText}</p>
-        <p className="mt-[2px] text-[54px] font-bold leading-[1.08] tracking-tight text-[#161618] tabular-nums dark:text-white">
-          {now ? today : ''}
+      {/* 周几（珊瑚红，与日历 App 主色同源） */}
+      <p className="text-[15px] font-bold leading-[15px] text-[#E5493C] dark:text-[#FF6B5E]">{weekText}</p>
+      {/* X月X日大字（数字大、月/日小字骑基线） */}
+      <p className="mt-[5px] flex items-baseline gap-[2px] leading-none text-[#161618] dark:text-white">
+        <span className="text-[30px] font-bold leading-[1.05] tracking-tight tabular-nums">{monthText}</span>
+        <span className="text-[13px] font-medium leading-none text-black/45 dark:text-white/50">月</span>
+        <span className="text-[30px] font-bold leading-[1.05] tracking-tight tabular-nums">{dateText}</span>
+        <span className="text-[13px] font-medium leading-none text-black/45 dark:text-white/50">日</span>
+      </p>
+      {/* 分隔细线 */}
+      <span aria-hidden="true" className="mt-[10px] block h-px w-full bg-black/[0.08] dark:bg-white/[0.10]" />
+      {/* 最近的下一条日程（无日程 = 优雅空态；snap 非空才会出现） */}
+      {next && snap ? (
+        <div className="mt-auto flex min-w-0 items-start gap-[7px]">
+          <span
+            aria-hidden="true"
+            className="mt-[2px] h-[34px] w-[3.5px] shrink-0 rounded-full"
+            style={{ backgroundColor: colorHex(next.ev.nColor) }}
+          />
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-[13px] font-semibold leading-[15px] text-[#161618] dark:text-white">
+              {next.ev.title || '（无标题）'}
+            </p>
+            <p className="mt-[2px] truncate text-[11.5px] font-medium leading-[13px] text-black/40 dark:text-white/45">
+              {timeTextOf(next, snap.now)}
+            </p>
+          </div>
+        </div>
+      ) : (
+        <p className="mt-auto truncate text-[12px] font-medium leading-[13px] text-black/30 dark:text-white/35">
+          {now ? '近期没有安排' : ''}
         </p>
-      </div>
-      {/* 右侧：整月网格（周表头 + 日期，行高自适应压缩，最多 6 行也在 168px 内） */}
-      <div className="flex min-w-0 flex-1 flex-col justify-center gap-[4px] pr-4">
-        <div className="grid grid-cols-7">
-          {WEEKDAY_HEADER.map((w, i) => (
-            <span
-              key={`h-${w}`}
-              className={`text-center text-[11px] font-semibold leading-none ${
-                i >= 5 ? 'text-black/30 dark:text-white/30' : 'text-black/65 dark:text-white/65'
-              }`}
-            >
-              {w}
-            </span>
-          ))}
-        </div>
-        <div className="grid grid-cols-7" style={{ gridAutoRows: '19px' }}>
-          {cells.map((d, i) => {
-            const isToday = d === today;
-            const weekend = i % 7 >= 5;
-            return (
-              <span key={`c-${i}-${d ?? 'x'}`} className="grid place-items-center">
-                {d === null ? null : (
-                  <span
-                    className={`grid h-[19px] w-[19px] place-items-center rounded-full text-[11.5px] leading-none tabular-nums ${
-                      isToday
-                        ? 'bg-[#161618] font-semibold text-white dark:bg-white dark:text-black'
-                        : weekend
-                          ? 'text-black/30 dark:text-white/30'
-                          : 'text-black/75 dark:text-white/75'
-                    }`}
-                  >
-                    {d}
-                  </span>
-                )}
-              </span>
-            );
-          })}
-        </div>
-      </div>
+      )}
     </div>
   );
 }

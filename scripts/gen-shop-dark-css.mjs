@@ -19,30 +19,48 @@
  *
  * 运行：bun scripts/gen-shop-dark-css.mjs（改颜色类后重跑再重启 dev 即可）
  */
-import { readFileSync, writeFileSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { dirname, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const APPS_DIR = resolve(__dirname, '../src/components/apps');
 const OUT = resolve(__dirname, '../src/app/shop-dark.css');
-const ROOT_FILES = ['taobao.tsx', 'meituan.tsx'];
+const COMPONENTS_DIR = resolve(__dirname, '../src/components');
+const ROOT_FILES = [resolve(APPS_DIR, 'taobao.tsx'), resolve(APPS_DIR, 'meituan.tsx')];
 
-/** 递归收集 from './x' 本地依赖（渲染进淘宝/美团子树的全部组件） */
+/** 递归收集本地相对导入（'./x'、'./sub/y'、'../ios/z'、双引号同）——渲染进淘宝/美团
+ *  子树的全部组件。深色核查（W3-D4）修复：旧版只认单段 './x'，子目录导入
+ *  （./wx-app/main 等）被静默丢弃——后加的订单/商品管理页与聊天共享件未进闭包，
+ *  生成的 shop-dark.css 缺它们的类规则，深色下整页白块；改为按路径解析并去重。 */
 function collectFiles() {
   const seen = new Set();
   const queue = [...ROOT_FILES];
+  const importRe = /from\s+["'](\.{1,2}\/[^"']+)["']/g;
   while (queue.length) {
     const f = queue.shift();
     if (seen.has(f)) continue;
     seen.add(f);
     let src = '';
     try {
-      src = readFileSync(resolve(APPS_DIR, f), 'utf8');
+      src = readFileSync(f, 'utf8');
     } catch {
       continue;
     }
-    for (const m of src.matchAll(/from '\.\/([\w-]+)'/g)) queue.push(`${m[1]}.tsx`);
+    const dir = dirname(f);
+    for (const m of src.matchAll(importRe)) {
+      for (const cand of [`${m[1]}.tsx`, `${m[1]}.ts`]) {
+        const p = resolve(dir, cand);
+        // 仅收集 components/apps 与 components/ios（ui 库自带 dark: 变体，无需接管）
+        if (
+          (p.startsWith(`${COMPONENTS_DIR}/apps/`) || p.startsWith(`${COMPONENTS_DIR}/ios/`)) &&
+          existsSync(p)
+        ) {
+          queue.push(p);
+          break;
+        }
+      }
+    }
   }
   return [...seen];
 }
@@ -80,7 +98,7 @@ function hslCss(h, s, l) {
 const esc = (cls) => cls.replace(/([#:[\]/%.])/g, '\\$1');
 
 const files = collectFiles();
-const src = files.map((f) => { try { return readFileSync(resolve(APPS_DIR, f), 'utf8'); } catch { return ''; } }).join('\n');
+const src = files.map((f) => readFileSync(f, 'utf8')).join('\n');
 
 // ---------- 收集类目 ----------
 const solidBgs = new Set();          // bg-[#hex]
@@ -217,7 +235,7 @@ lines.push(`/* 由 scripts/gen-shop-dark-css.mjs 自动生成 —— 淘宝/美�
  * 作用域：.shop-dark（AppWindow 在全局深色主题下挂给淘宝/美团两个 App）。
  * 规则：中性白/灰面与黑字翻转成深色/白字；粉彩贴片翻深同调；品牌亮色 CTA（美团黄/淘宝橙等）
  * 保持原样，其上的黑字/深褐字用保护规则恢复；改动两个 App 的颜色类后重跑生成器即可。
- * 覆盖文件：${files.join(' ')} */`);
+ * 覆盖文件：${files.map((f) => relative(COMPONENTS_DIR, f)).join(' ')} */`);
 lines.push('');
 lines.push('.shop-dark { color-scheme: dark; }');
 lines.push('');
