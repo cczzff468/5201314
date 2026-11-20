@@ -19,6 +19,14 @@
  * - POST {op:'start', supaUrl, supaKey, secret} → 启动（幂等：同 ref 已在跑则只刷新）
  * - POST {op:'stop'} → 停止（关 WS + 停微信循环）
  * - GET  → 状态 JSON（QQ WS 会话 / 微信循环 / 回复计数）
+ *
+ * v26 重复回复风暴根修（用户实测：真机一条消息被回五六遍）：bun --hot 热重载重新执行
+ * 本模块（启动自恢复 → 新 wxLoop + 新 QQ WS），但旧代循环/旧 socket 因闭包引用旧模块的
+ * rt（gen 还是 1）永远不退出——每改一次 sources.ts / index.ts 就泄漏一代，进程内同时
+ * 活着 6~8 条 QQ WS 会话 + 多路微信 getupdates 轮询（实测 ss 可见 7 条同网关 IP 连接），
+ * 每路都独立收同一条消息、各自调 LLM、各自发送 → 「一条消息回五六遍」。根治：模块加载
+ * 时先拆上一代（全局槽位登记本代拆除函数：旧 rt.gen=-1 让旧 wxLoop 退出、旧帧处理/
+ * 重连用 wantClose 停掉、旧 socket 全关）+ WebSocket 全局注册表兜底。
  */
 
 import { writeFileSync, readdirSync, unlinkSync, readFileSync } from 'node:fs';
@@ -429,6 +437,10 @@ interface QqWsState {
   reconnects: number;
   lastError: string;
   hbOk: boolean;
+  /** v27 心跳新鲜度：最近一次心跳 ACK（op11）/ READY / RESUMED 的时刻。20s 看门狗用
+   *  它判定「状态 ready 但心跳已死」（定时器被杀 / socket 半开但 Bun 仍报 OPEN 的僵尸
+   *  组合——不依赖任何事件回调的自愈兼底）。 */
+  hbAt: number;
 }
 
 interface WxLoopState {
@@ -458,33 +470,13 @@ let rt: Runtime | null = null;
 
 // ---------------- 核心物化（sources.ts 单一事实来源） ----------------
 
-let coreGen = 0;
+// v28：物化已改内存化（new Function 求值，不再落盘 core.gen.N.mjs——详见 materializeCore
+// 的 v28 注释）。CORE_PREFIX 仅留启动清场用：进程启动时把旧版本留下的物化 .mjs 清掉
+//（它们不在本进程的模块监视图里，删除不会触发热重载）。
 const CORE_PREFIX = 'core.gen.';
 
-function pruneGenFiles(keep: number): void {
-  try {
-    const dir = fileURLToPath(new URL('./', import.meta.url));
-    // v19：数字序（旧版字典序——gen ≥10 时 'gen.10' < 'gen.9' 排在前面被误删；且上一进程
-    // 留下的高序号文件会把本进程刚写的低序号新文件挤进「删除区」→ import 时
-    // "Cannot find module core.gen.x.mjs"——网关启动失败的实测根因）
-    const files = readdirSync(dir)
-      .filter((f) => f.startsWith(CORE_PREFIX) && f.endsWith('.mjs'))
-      .map((f) => ({ f, n: Number(f.slice(CORE_PREFIX.length, -4)) || 0 }))
-      .sort((a, b) => a.n - b.n);
-    for (const { f } of files.slice(0, Math.max(0, files.length - keep))) {
-      try {
-        unlinkSync(fileURLToPath(new URL('./' + f, import.meta.url)));
-      } catch {
-        /* 并发删除忽略 */
-      }
-    }
-  } catch {
-    /* 目录读取失败忽略 */
-  }
-}
-
-// v19 启动清场：上一进程留下的物化文件全部清掉（gen 计数每进程从 1 重来——不清场时旧
-// 文件的高序号会把新文件挤进 prune 的删除区，import 必炸 "Cannot find module"）。
+// v28 启动清场：上一进程/旧版本留下的物化文件全部清掉（v28 起新代码不再写这些文件，
+// 这里只为清过渡期的残留）。
 try {
   const bootDir = fileURLToPath(new URL('./', import.meta.url));
   for (const f of readdirSync(bootDir)) {
@@ -534,7 +526,8 @@ function readLocalEmoticonsFile(): Array<Record<string, any>> {
   return [];
 }
 
-/** 把 WX_CLOUD_CORE + 连接变量物化成可 import 的模块（换连接重新物化，文件名递增做缓存失效）。
+/** 把 WX_CLOUD_CORE + 连接变量物化成核心对象（换连接重新物化——每次 new Function 全新闭包，
+ *  语义与旧版「文件名递增做缓存失效」一致）。
  *  v8：注入中继参数（RELAY_URL/RELAY_SECRET）——无用户项目密钥时配置读写改经云端函数。
  *  v13：注入 TTS_LOCAL_URL——网关本进程的本地语音合成端点（z-ai SDK wav），云端核心的
  *  QQ 语音条优先用它（用户不配 OpenAI 兼容 TTS 也能发语音）。
@@ -542,11 +535,15 @@ function readLocalEmoticonsFile(): Array<Record<string, any>> {
  *  云端核心的 [照片:描述] 标记优先用它（AI 发照片能力；网关在线时真机微信/QQ 都能收图）。
  *  v20：注入 VLM_LOCAL_URL（本地识图端点——QQ 入站图片转描述进 LLM 上下文）+
  *  LOCAL_CONFIG / LOCAL_EMOTICONS_FILE（直推运行包——loadConfig 本地优先、直推表情包
- *  并入清单，Storage 402 期间网关配置不再陈旧）。 */
-async function materializeCore(supaUrl: string, supaKey: string, relayUrl: string, relaySecret: string): Promise<any> {
-  const n = ++coreGen;
+ *  并入清单，Storage 402 期间网关配置不再陈旧）。
+ *  v28 内存物化（new Function 求值，不再落盘 core.gen.N.mjs）：旧版「写 .mjs + 动态 import」
+ *  把物化文件挂进 bun --hot 的模块监视图——物化文件自身的写入/删除又触发再重载 → 级联
+ *  重载风暴（rt 归属代与拆除槽位持有代错位 → QQ 连接冻结在 connecting 永不重试；日志里
+ *  294 条 listening / 「Cannot find module core.gen.1.mjs」全源于此）。WX_CLOUD_CORE 是
+ *  纯脚本形态（无顶层 await / 无 import / 无 export——export 行在包装层），Function 体求值
+ *  语义等价；零文件系统 = 零监听反馈环、零「写-导入」竞态。 */
+function materializeCore(supaUrl: string, supaKey: string, relayUrl: string, relaySecret: string): any {
   const code = [
-    '// [im-gateway 生成] 单一事实来源：src/lib/ios/wx-cloud/sources.ts 的 WX_CLOUD_CORE；勿手改本文件',
     'var CODE_SOURCE = "im-gateway";',
     `var SUPA_URL_INJECT = ${JSON.stringify(supaUrl)};`,
     `var SUPA_KEY_INJECT = ${JSON.stringify(supaKey)};`,
@@ -568,12 +565,9 @@ async function materializeCore(supaUrl: string, supaKey: string, relayUrl: strin
     `var LOCAL_CONFIG_INJECT = ${JSON.stringify(readLocalConfig())};`,
     `var LOCAL_EMOTICONS_FILE_INJECT = ${JSON.stringify(readLocalEmoticonsFile())};`,
     WX_CLOUD_CORE,
-    'export { loadConfig, tick, tickFast, handleQqEvent, qqToken, qqTokenReset, writeHeartbeat, supaGetJson, supaPutJson, loadQqHistory, appendQqHistory, refreshQqWsLock, cloudSendActive };',
+    'return { loadConfig: loadConfig, tick: tick, tickFast: tickFast, handleQqEvent: handleQqEvent, qqToken: qqToken, qqTokenReset: qqTokenReset, writeHeartbeat: writeHeartbeat, supaGetJson: supaGetJson, supaPutJson: supaPutJson, loadQqHistory: loadQqHistory, appendQqHistory: appendQqHistory, refreshQqWsLock: refreshQqWsLock, cloudSendActive: cloudSendActive };',
   ].join('\n');
-  const path = fileURLToPath(new URL(`./${CORE_PREFIX}${n}.mjs`, import.meta.url));
-  writeFileSync(path, code);
-  pruneGenFiles(3);
-  return import(path);
+  return new Function(code)();
 }
 
 function sleep(ms: number): Promise<void> {
@@ -588,6 +582,10 @@ function sleep(ms: number): Promise<void> {
  *  界面照常显示（「真机 QQ 上发的消息网站里看不到」的根修）。 */
 const LOCAL_QQ_HIST_FILE = 'local-qq-history.json';
 const LOCAL_WX_HIST_FILE = 'local-wx-history.json';
+/** v26 本地微信轮询态文件（游标 buf + 已回清单 seen）：核心 saveWxCursor / markWxSeen
+ *  双写本机（sources.ts 的 localWxStatePost）——Supabase 402 受限期间重启/热重载不再
+ *  从陈旧云端游标重收整批（「一条消息被回五六遍」的放大源根修）。 */
+const LOCAL_WX_STATE_FILE = 'local-wx-state.json';
 
 function readLocalHist(file: string): Array<Record<string, any>> {
   try {
@@ -640,6 +638,56 @@ async function handleLocalHist(req: Request): Promise<Response> {
   return Response.json({ ok: true, added });
 }
 
+// ---------------- v26 WebSocket 全局注册表（热重载泄漏兜底） ----------------
+
+/** 进程级 socket 注册表（globalThis 槽位——热重载后新模块也能看到旧代留下的 socket）。
+ *  连接泄漏是「真机一条消息被回五六遍」的直接推手：旧代 socket 各自收事件、各自回复。
+ *  新代模块加载时把注册表里活着的 socket 全部关掉（正常只有本代一条）。 */
+const GW_WS_REGISTRY_SLOT = '__gwWsRegistry';
+
+function gwWsRegistry(): Set<WebSocket> {
+  const g = globalThis as Record<string, unknown>;
+  if (!(g[GW_WS_REGISTRY_SLOT] instanceof Set)) g[GW_WS_REGISTRY_SLOT] = new Set<WebSocket>();
+  return g[GW_WS_REGISTRY_SLOT] as Set<WebSocket>;
+}
+
+/** 新建 QQ WS 一律入注册表（close 不自动出表——逐 socket 挂 addEventListener 在 Bun 下有干扰
+ *  onclose 事件派发的嫌疑：v26 实测一次远端断开 onclose 竟未派发（连接僵死在 ready）；
+ *  改为扫描时按 readyState 清理，零事件依赖） */
+function gwWsTrack(s: WebSocket): WebSocket {
+  gwWsRegistry().add(s);
+  return s;
+}
+
+/** v27b 本代拆除函数引用（installGwLeakTeardown 登记时留存）：拆除槽位还归本代管 =
+ *  本模块仍是最新一代。热重载竞态防泄漏的核心判定——startGateway / connectQq / wxLoop
+ *  / handleWsFrame / scheduleReconnect / 各定时器在 async 边界后用它自检：已被新一代
+ *  替代就立刻作废自己（旧版拆除函数只拆「上一代已存在的资源」，对本代「迟到创建」的
+ *  资源（启动 async 窗口期间又重载）鞭长莫及——实测连发几次编辑后又叠出 5 条 QQ WS）。 */
+let CUR_TEARDOWN: (() => void) | null = null;
+
+function gwTeardownIsCurrent(): boolean {
+  const g = globalThis as Record<string, unknown>;
+  return !!(CUR_TEARDOWN && g[GW_TEARDOWN_SLOT] === CUR_TEARDOWN);
+}
+
+/** 关掉注册表里所有活着的 socket（readyState 0 CONNECTING / 1 OPEN） */
+function gwWsCloseAll(): void {
+  const reg = gwWsRegistry();
+  for (const s of [...reg]) {
+    const st = s.readyState;
+    if (st === 0 || st === 1) {
+      try {
+        s.close();
+      } catch {
+        /* 忽略 */
+      }
+    } else {
+      reg.delete(s);
+    }
+  }
+}
+
 // ---------------- QQ WebSocket 客户端 ----------------
 
 let ws: WebSocket | null = null;
@@ -665,7 +713,7 @@ const qqSeen = new Map<string, number>();
 let qqConnecting = false;
 
 function qqState(): QqWsState {
-  return rt ? rt.qq : { state: 'disabled', sessionId: '', botName: '', lastSeq: 0, lastEventAt: 0, events: 0, reconnects: 0, lastError: '', hbOk: false };
+  return rt ? rt.qq : { state: 'disabled', sessionId: '', botName: '', lastSeq: 0, lastEventAt: 0, events: 0, reconnects: 0, lastError: '', hbOk: false, hbAt: 0 };
 }
 
 function stopHbTimer(): void {
@@ -691,7 +739,7 @@ function pruneSeen(): void {
 }
 
 function scheduleReconnect(gen: number): void {
-  if (!rt || rt.gen !== gen || wantClose) return;
+  if (!rt || rt.gen !== gen || wantClose || !gwTeardownIsCurrent()) return;
   rt.qq.state = 'connecting';
   rt.qq.reconnects += 1;
   reconnectDelay = Math.min(Math.round(reconnectDelay * 1.6), 30000);
@@ -701,14 +749,33 @@ function scheduleReconnect(gen: number): void {
   }, reconnectDelay);
 }
 
+/** v30 连接尝试序号：挂死的旧尝试作废后，其 finally 不再回写 qqConnecting（防双飞） */
+let qqAttemptSeq = 0;
+
 async function connectQq(gen: number): Promise<void> {
-  if (!rt || rt.gen !== gen || wantClose) return;
+  if (!rt || rt.gen !== gen || wantClose || !gwTeardownIsCurrent()) return;
   // v11 并发防抖：一轮连接在飞（config→token→网关地址→WS 握手）就不再开第二条
   if (qqConnecting) return;
   // v11 僵尸连接防抖：上一条 socket 还活着/还在握手就不再开新的——旧版会直接把 ws 变量
   // 指到新 socket，旧 socket 依旧收事件但心跳发到死 socket 上，状态永远「connecting」
   if (ws && (ws.readyState === 0 || ws.readyState === 1)) return;
   qqConnecting = true;
+  const myAttempt = ++qqAttemptSeq;
+  // v30 连接尝试看门狗：Bun 的 fetch 在 token/网关地址上偶发挂死（AbortSignal.timeout
+  // 不触发——v14 已知坑），qqConnecting 永卡 true → 后续重试全部 no-op（「连接冻结在
+  // connecting、reconnects 不再增长」的实测形态）。60s 仍在飞就作废本轮（换序号使旧
+  // 尝试的 finally 不再回写标志）+ 走重连。
+  const attemptWatch = setTimeout(() => {
+    if (!qqConnecting || myAttempt !== qqAttemptSeq) return;
+    if (!rt || rt.gen !== gen || wantClose || !gwTeardownIsCurrent()) {
+      qqConnecting = false;
+      return;
+    }
+    console.log('[im-gateway] QQ 连接尝试 60s 未返回（fetch 挂死）→ 作废本轮、走重连');
+    qqAttemptSeq++;
+    qqConnecting = false;
+    scheduleReconnect(gen);
+  }, 60_000);
   try {
   const q = rt.qq;
   try {
@@ -758,7 +825,10 @@ async function connectQq(gen: number): Promise<void> {
       return;
     }
     wantClose = false;
-    ws = new WebSocket(wssUrl);
+    // v27b 热重载竞态防泄漏：取 token / 网关地址是 async 窗口——期间模块又被重载则本
+    // 轮连接作废（新一代已接管），不再创建 WebSocket
+    if (!gwTeardownIsCurrent()) return;
+    ws = gwWsTrack(new WebSocket(wssUrl));
     // v14 握手看门狗：WS 握手挂在网络里（onopen/onclose 都不来）时旧版会永远停在
     // 「connecting」——状态卡死、不重试（onclose 也不会来）——「QQ 接入过一会断开」
     // 的根因之一。20s 内还没进入 ready 就强拆走重连（按 socket 打标，不误伤新一轮尝试）。
@@ -799,12 +869,14 @@ async function connectQq(gen: number): Promise<void> {
     scheduleReconnect(gen);
   }
   } finally {
-    qqConnecting = false;
+    clearTimeout(attemptWatch);
+    // v30：只有「未被作废」的尝试才回写复位（挂死旧尝试迟到返回时不再碰新尝试的标志）
+    if (myAttempt === qqAttemptSeq) qqConnecting = false;
   }
 }
 
 async function handleWsFrame(f: Record<string, any>, gen: number, token: string): Promise<void> {
-  if (!rt || rt.gen !== gen) return;
+  if (!rt || rt.gen !== gen || !gwTeardownIsCurrent()) return;
   const q = rt.qq;
   const op = Number(f.op);
   if (typeof f.s === 'number' && f.s > 0) q.lastSeq = f.s;
@@ -815,11 +887,23 @@ async function handleWsFrame(f: Record<string, any>, gen: number, token: string)
     stopHbTimer();
     q.hbOk = true;
     hbTimer = setInterval(() => {
-      if (!rt || rt.gen !== gen || wantClose || !ws || ws.readyState !== 1) {
+      if (!rt || rt.gen !== gen || wantClose) {
         stopHbTimer();
         return;
       }
-      // 上一轮心跳没收到 ACK → 连接僵死，断开走重连（Resume 续传）
+      // v27 僵尸连接自愈①：socket 已关（Bun 偶发不派发 close 事件——v26 实测远端断开后
+      // onclose 不来、readyState 已 3，旧版这里静默 stopHbTimer 后永远卡「ready」，真机
+      // QQ 静默下线）：不再依赖 onclose——直接走重连（Resume 续传）。
+      if (!ws || ws.readyState !== 1) {
+        stopHbTimer();
+        if (!wantClose) {
+          console.log('[im-gateway] QQ WS 心跳发现连接已死（onclose 未派发）→ 主动重连');
+          scheduleReconnect(gen);
+        }
+        return;
+      }
+      // 上一轮心跳没收到 ACK → 连接僵死，断开走重连（Resume 续传）；close 事件不来时
+      // 下一轮上面的 readyState 分支兑底自愈
       if (!q.hbOk) {
         try {
           ws.close();
@@ -848,6 +932,7 @@ async function handleWsFrame(f: Record<string, any>, gen: number, token: string)
   }
   if (op === 11) {
     q.hbOk = true;
+    q.hbAt = Date.now(); // v27 心跳新鲜度标记（看门狗僵尸兼底用）
     // 心跳 ACK 到达即代表会话已鉴权（Resume 后平台可能不发 RESUMED——心跳在线就是真在线）
     if (q.state === 'connecting') q.state = 'ready';
     return;
@@ -882,6 +967,7 @@ async function handleWsFrame(f: Record<string, any>, gen: number, token: string)
       q.sessionId = String(f.d?.session_id || '');
       q.botName = String(f.d?.user?.username || f.d?.user?.nickname || '');
       q.lastError = '';
+      q.hbAt = Date.now(); // v27 新鲜度起点
       reconnectDelay = 2000;
       console.log('[im-gateway] QQ WS READY:', q.botName, 'session', q.sessionId.slice(0, 8));
       return;
@@ -889,6 +975,7 @@ async function handleWsFrame(f: Record<string, any>, gen: number, token: string)
     if (t === 'RESUMED') {
       q.state = 'ready';
       q.lastError = '';
+      q.hbAt = Date.now(); // v27 新鲜度起点
       reconnectDelay = 2000;
       console.log('[im-gateway] QQ WS RESUMED: session', q.sessionId.slice(0, 8), 'seq', q.lastSeq);
       return;
@@ -989,7 +1076,7 @@ async function wxLoop(gen: number): Promise<void> {
   let lastHbAt = 0;
   // v16：v15 的定时主动消息（早安/晚安）已按机主定调删除——主动消息改由站内「主动发消息」
   // 引擎驱动（deliverProactiveMsg → 网关 op=send-active → cloudSendActive），本循环只管收发
-  while (rt && rt.gen === gen) {
+  while (rt && rt.gen === gen && gwTeardownIsCurrent()) {
     const wx = rt.wx;
     // v25 真机「正在输入」：置位不在这里——tick 内部先跑 getupdates 空闲长轮（服务端挂 ~35s），
     // 在 tick 前置位会让 typing 在空闲期也亮着（站内会话常驻「对方正在输入」）；改由上方 fetch
@@ -1049,7 +1136,7 @@ function startGwWatchdog(gen: number): void {
   gwQqSig = '';
   gwQqSigAt = Date.now();
   gwWatchTimer = setInterval(() => {
-    if (!rt || rt.gen !== gen) {
+    if (!rt || rt.gen !== gen || !gwTeardownIsCurrent()) {
       if (gwWatchTimer) clearInterval(gwWatchTimer);
       return;
     }
@@ -1072,6 +1159,19 @@ function startGwWatchdog(gen: number): void {
       console.log('[im-gateway] 僵尸自愈：QQ 连接停摆 ' + rt.qq.state + ' 超过 150s → 重启进程（keeper 拉起 + 自恢复）');
       process.exit(1);
     }
+    // ③ v27 僵尸连接自愈②（20s 独立看门狗——不依赖心跳定时器存活）：QQ 状态是 ready 但
+    // socket 已死（远端断开 onclose 不派发）或心跳新鲜度超 150s（心跳定时器被杀 / socket
+    // 半开但 Bun 仍报 OPEN——不依赖任何事件回调的组合兜底）→ 主动走重连（Resume 续传）。
+    // 旧版只覆盖 connecting/error 停摆，ready+死 socket 卡死（真机 QQ 静默下线）不在其列。
+    const hbStale = Date.now() - rt.qq.hbAt > 150_000;
+    if (rt.qq.state === 'ready' && (hbStale || !ws || ws.readyState === 2 || ws.readyState === 3)) {
+      console.log(
+        '[im-gateway] 僵尸自愈：QQ 状态 ready 但' +
+          (hbStale ? '心跳已 ' + Math.round((Date.now() - rt.qq.hbAt) / 1000) + 's 无 ACK' : '连接已死（onclose 未派发）') +
+          ' → 主动重连（Resume 续传）',
+      );
+      scheduleReconnect(gen);
+    }
   }, 20_000);
 }
 
@@ -1093,7 +1193,9 @@ function statusJson(): Record<string, unknown> {
     startedAt: rt.startedAt,
     ref: rt.ref,
     mode: rt.mode,
-    qq: { ...rt.qq, hbInterval },
+    // v27b 泄漏可观测性：wsAlive=本代 WS 连接健康；wsTracked=全进程注册表里活着的 WS
+    // 总数（跨代累计——健康网关稳态恒为 1；>1 即存在泄漏代，重载风暴的自检指标）
+    qq: { ...rt.qq, hbInterval, wsAlive: ws && ws.readyState === 1 ? 1 : 0, wsTracked: [...gwWsRegistry()].filter((s) => s.readyState === 0 || s.readyState === 1).length },
     wx: { running: true, ...rt.wx },
     typing: typingOut,
     // v22 Supabase 写通道熔断状态（站内 ClawBox 通道状态源同字段消费）
@@ -1200,7 +1302,15 @@ async function startGateway(supaUrl: string, supaKey: string, ref: string, relay
       const probe = await probeRelayCapability(relay, rsecret);
       if (!probe.ok) console.log('[im-gateway] 中继探测不通过（继续真实试读兜底）：', probe.msg);
     }
-    const core = await materializeCore(url, mode === 'relay' ? '' : key, mode === 'relay' ? relay : '', mode === 'relay' ? rsecret : '');
+    const core = materializeCore(url, mode === 'relay' ? '' : key, mode === 'relay' ? relay : '', mode === 'relay' ? rsecret : '');
+    // v27b 热重载竞态防泄漏：物化/读包是 async 窗口（中继 25s 超时最坏）——期间模块又被
+    // bun --hot 重载（连续编辑场景）则本轮启动作废（新一代已在启动）；旧版照样组装 rt
+    // + 起 wxLoop/connectQq——拆除函数只拆「上一代已存在的资源」，对本代「迟到创建」的
+    // 资源鞭长莫及（实测连发几次编辑后进程内又叠出 5 条 QQ WS——泄漏以新形态复发）。
+    if (!gwTeardownIsCurrent()) {
+      console.log('[im-gateway] 热重载竞态：启动窗口内模块已重载 → 本轮启动作废（新一代已接管）');
+      return { ok: false, msg: '模块已热重载：本轮启动作废（新一代已接管）' };
+    }
     // 启动自检：真实读一次运行包（密钥错/包缺失立刻换下一候选，不静默空转）
     try {
       await core.loadConfig(true);
@@ -1209,8 +1319,17 @@ async function startGateway(supaUrl: string, supaKey: string, ref: string, relay
       console.log('[im-gateway] ' + mode + '通道读运行包失败：', lastFail);
       continue;
     }
+    // v27b 同上：读包又是一个 async 窗口——重读一次代际（stopGateway 的 await 同理）
+    if (!gwTeardownIsCurrent()) {
+      console.log('[im-gateway] 热重载竞态：读包窗口内模块已重载 → 本轮启动作废（新一代已接管）');
+      return { ok: false, msg: '模块已热重载：本轮启动作废（新一代已接管）' };
+    }
     // 新通道就绪：此刻才停旧换新（级联根修——旧网关一直在线到这一步）
     if (rt) await stopGateway();
+    if (!gwTeardownIsCurrent()) {
+      console.log('[im-gateway] 热重载竞态：停旧窗口内模块已重载 → 本轮启动作废（新一代已接管）');
+      return { ok: false, msg: '模块已热重载：本轮启动作废（新一代已接管）' };
+    }
     // 中继模式落盘（自恢复用；直连模式不落盘——密钥不该进磁盘）
     if (mode === 'relay') {
       writePersistedState({ v: 1, supaUrl: url, ref: ref || url.replace(/^https:\/\//, '').split('.')[0], relayUrl: relay, relaySecret: rsecret, savedAt: Date.now() });
@@ -1230,7 +1349,7 @@ async function startGateway(supaUrl: string, supaKey: string, ref: string, relay
       relayUrl: mode === 'relay' ? relay : '',
       relaySecret: mode === 'relay' ? rsecret : '',
       core,
-      qq: { state: 'connecting', sessionId: '', botName: '', lastSeq: 0, lastEventAt: 0, events: 0, reconnects: 0, lastError: '', hbOk: false },
+      qq: { state: 'connecting', sessionId: '', botName: '', lastSeq: 0, lastEventAt: 0, events: 0, reconnects: 0, lastError: '', hbOk: false, hbAt: Date.now() },
       wx: { lastRunAt: 0, lastError: '', replied: 0 },
     };
   // qqSeen 跨连接保留无意义：清掉
@@ -1251,7 +1370,7 @@ async function startGateway(supaUrl: string, supaKey: string, ref: string, relay
   // 判定不受影响）；QQ 在线期间的云端锁写从 5760 次/天降到 2880 次/天（免费层写配额减负）
   if (qqLockTimer) clearInterval(qqLockTimer);
   qqLockTimer = setInterval(() => {
-    if (!rt || rt.gen !== gen) {
+    if (!rt || rt.gen !== gen || !gwTeardownIsCurrent()) {
       if (qqLockTimer) clearInterval(qqLockTimer);
       return;
     }
@@ -1262,7 +1381,7 @@ async function startGateway(supaUrl: string, supaKey: string, ref: string, relay
   // 被移除时拆长连接（真机 QQ 上 TA 下线）；网络读失败不打扰在线连接。
   if (qqCfgTimer) clearInterval(qqCfgTimer);
   qqCfgTimer = setInterval(() => {
-    if (!rt || rt.gen !== gen) {
+    if (!rt || rt.gen !== gen || !gwTeardownIsCurrent()) {
       if (qqCfgTimer) clearInterval(qqCfgTimer);
       return;
     }
@@ -1305,6 +1424,67 @@ async function stopGateway(): Promise<{ ok: boolean; msg: string }> {
   return { ok: true, msg: '网关已停止（QQ 长连接已断开、微信自动回复已停）' };
 }
 
+// ---------------- v26 热重载泄漏根治（重复回复风暴根修） ----------------
+
+/** 模块每被 bun --hot 重新求值一次就登记一代拆除函数（globalThis 槽位）。新代加载时：
+ *  ①调上一代拆除函数（旧 rt.gen=-1 → 旧 wxLoop 下一轮 while 退出；wantClose=true →
+ *    旧帧处理/心跳/重连全停；stopQq 关旧 socket + 停全部 QQ 定时器；看门狗停）；
+ *  ②WebSocket 注册表兜底再关一遍（更早代没拆干净的、拆函数丢失的）；
+ *  ③登记本代的拆除函数供下代调用。此后进程内任意时刻只有一代循环 + 一条 QQ WS 在跑。
+ *  实测（v26 之前）：ss 可见同进程 7 条连到 QQ 网关 IP 的 socket、8 个活跃 session_id
+ *  交错 RESUMED——每条都在独立收同一条消息并回复 → 真机「一条消息被回五六遍」。 */
+const GW_TEARDOWN_SLOT = '__gwLeakTeardown';
+
+function installGwLeakTeardown(): void {
+  const g = globalThis as Record<string, unknown>;
+  const prev = g[GW_TEARDOWN_SLOT] as (() => void) | undefined;
+  if (typeof prev === 'function') {
+    try {
+      prev();
+      console.log('[im-gateway] 热重载：上一代循环/连接已拆除（防泄漏重复回复）');
+    } catch {
+      /* 旧代拆不干净不阻塞新代启动（注册表兜底会再关） */
+    }
+  }
+  gwWsCloseAll(); // 兜底：注册表里还活着的 socket 全关（旧代码没登记拆除函数时的保险）
+  const myTeardown = () => {
+    wantClose = true; // 旧代帧处理/心跳/重连判定全停
+    if (rt && rt.gen !== -1) rt.gen = -1; // 旧 wxLoop 下一轮 while 退出（stopGateway 同款手法）
+    stopQq(); // 关旧 socket + 停 hb/lock/cfg/reconnect 全部定时器
+    if (gwWatchTimer) {
+      clearInterval(gwWatchTimer);
+      gwWatchTimer = null;
+    }
+    gwWsCloseAll(); // 注册表兜底：拆函数覆盖不到的早期 socket 一并关闭
+  };
+  g[GW_TEARDOWN_SLOT] = myTeardown;
+  CUR_TEARDOWN = myTeardown; // v27b 本代标识（async 边界后的代际自检用）
+  // v29 槽位持有者兜底（根治「拆了旧的、新的没起来」）：模块评估风暴里，领取槽位的那代
+  // 可能中途崩掉/启动竞态作废/自恢复失败——上一代已被它拆光、它自己又没跑起来 → 网关静默
+  // 下线或连接冻结在 connecting（实测 rt 归属代 ≠ 槽位持有代时全部定时器/重连守卫失活）。
+  // 槽位持有代在评估早期（任何可能崩的代码之前）挂一个 20s 自愈定时器：届时若没有健康的
+  // rt（rt 为 null 或已被拆成 gen=-1），用落盘参数自行拉起——保证「最后一个槽位持有代」
+  // 永远有一个在跑的网关。新一代接槽后本定时器的代际自检自然失活。
+  try {
+    setTimeout(() => {
+      if (!gwTeardownIsCurrent()) return; // 已被更新一代接槽：不是本代的事
+      if (rt && rt.gen !== -1) return; // 已有健康 rt（本代正常启动/别代启动且未被拆）
+      const ps = readPersistedState();
+      if (!ps) return; // 没有可恢复参数（网关从未启动过）：不硬造
+      console.log('[im-gateway] 槽位兜底：20s 内未见健康网关 → 用落盘参数自行拉起（评估风暴自愈）');
+      void startGateway(ps.supaUrl, '', ps.ref, ps.relayUrl, ps.relaySecret)
+        .then((r) => {
+          if (r.ok) console.log('[im-gateway] 槽位兜底：网关已自愈恢复在线');
+        })
+        .catch(() => undefined);
+    }, 20_000);
+  } catch {
+    /* 定时器挂不上（极端环境）不影响主流程 */
+  }
+}
+
+installGwLeakTeardown();
+
 // ---------------- HTTP 服务（Caddy 转发 /api/im-gateway?XTransformPort=3100） ----------------
 
 Bun.serve({
@@ -1329,6 +1509,37 @@ Bun.serve({
       const ch = url.searchParams.get('channel') === 'qq' ? 'qq' : 'wx';
       const msgs = readLocalHist(ch === 'qq' ? LOCAL_QQ_HIST_FILE : LOCAL_WX_HIST_FILE);
       return Response.json({ ok: true, msgs, n: msgs.length });
+    }
+    // v26 本地微信轮询态（POST /state {buf, seen, at} → local-wx-state.json；GET /state 读回）：
+    // 游标/已回清单双写本地——Supabase 402 受限期间（断路器把云端写全短路）重启/热重载
+    // 不再从陈旧云端游标重收整批积压重回复（「一条消息被回五六遍」的放大源）。
+    // 仅本机访问（不经 Caddy 对外）；写失败不影响收发主流程。
+    if (url.pathname === '/state' && req.method === 'POST') {
+      let body: Record<string, any> = {};
+      try {
+        body = (await req.json()) as Record<string, any>;
+      } catch {
+        return Response.json({ ok: false, error: 'bad json' }, { status: 400 });
+      }
+      const buf = typeof body.buf === 'string' ? body.buf.slice(0, 4096) : '';
+      if (!buf) return Response.json({ ok: false, error: 'empty buf' }, { status: 400 });
+      const seen = Array.isArray(body.seen) ? (body.seen as unknown[]).map((x) => String(x)).slice(0, 200) : [];
+      try {
+        writeFileSync(localFilePath(LOCAL_WX_STATE_FILE), JSON.stringify({ buf, seen, at: Number(body.at) || Date.now() }));
+        return Response.json({ ok: true });
+      } catch (e) {
+        return Response.json({ ok: false, error: String((e as Error)?.message || e).slice(0, 80) }, { status: 503 });
+      }
+    }
+    if (url.pathname === '/state' && req.method === 'GET') {
+      let data: { buf: string; seen: string[]; at: number } | null = null;
+      try {
+        const j = JSON.parse(readFileSync(localFilePath(LOCAL_WX_STATE_FILE), 'utf8')) as { buf?: string; seen?: string[]; at?: number };
+        if (j && typeof j.buf === 'string' && j.buf) data = { buf: j.buf, seen: Array.isArray(j.seen) ? j.seen : [], at: Number(j.at) || 0 };
+      } catch {
+        /* 没写过 → null */
+      }
+      return Response.json({ ok: true, data });
     }
     if (url.pathname !== '/api/im-gateway') {
       return Response.json({ ok: false, error: 'not found' }, { status: 404 });
@@ -1380,7 +1591,7 @@ Bun.serve({
             }
           }
           if (rt) {
-            const core = await materializeCore(rt.supaUrl, rt.supaKey, rt.relayUrl, rt.relaySecret);
+            const core = materializeCore(rt.supaUrl, rt.supaKey, rt.relayUrl, rt.relaySecret);
             rt.core = core; // 热生效：本轮在飞的旧核心跑完，下一轮 tick/handleQqEvent 自然换新
             console.log('[im-gateway] 运行包直推已热生效（loadConfig 本地优先 + 直推表情包并入）');
           }
@@ -1443,3 +1654,12 @@ console.log('[im-gateway] listening on :3100 — QQ WebSocket + 微信 iLink 7x2
       .catch((e) => console.log('[im-gateway] 自恢复失败：', String((e as Error)?.message || e)));
   }
 }
+
+// stress 1
+// stress 2
+// stress 3
+// stress 4
+// stress 5
+// stress 6
+// stress 7
+// stress 8

@@ -120,7 +120,11 @@
 // 每月 4 条主动配额）+ 入站图片占位统一（attachments 无 url 也有可读提示）。
 // v24：真机连发改版（至少 3 条、上限彻底解除：multi 常开 + 30 条并入末条删除 + 上下文
 // 窗口 16）+ 表情克制（微信经典表情每条最多一个 + 提示词按消息意思带）。
-export const CLOUD_RUNTIME_VER = 24;
+// v25：重复回复风暴双根修——①微信游标只升不降（旧版每轮拿云端旧 buf 盖掉内存新 buf，
+// 云端写失败时游标永远停在旧值、同批每轮重收）；②游标+已回清单双写网关本机
+// （local-wx-state.json / /state 端点——Supabase 402 受限期间重启/热重载不再重收整批）。
+// 配套 im-gateway v26 热重载泄漏根治（旧循环/旧 socket 不再泄漏叠加重复回复）。
+export const CLOUD_RUNTIME_VER = 25;
 
 export const WX_CLOUD_CORE = String.raw`
 // ---- 微信云端助手核心（自动生成，勿手工编辑） ----
@@ -341,18 +345,90 @@ function scheduleWxHistFlush() {
 
 /** v5 游标持久化：getupdates 游标存进桶（state/wx-updates-buf.json），新实例/冷启动不再
  *  从空游标重收整批积压（旧版「一条消息被回十几次」的回复风暴根因）；已回复的
- *  message_id 另存 state/wx-seen.json 去重兑底（游标回退时只补未回成功的那些）。 */
+ *  message_id 另存 state/wx-seen.json 去重兑底（游标回退时只补未回成功的那些）。
+ *  v26 双根修（实测「真机一条消息被回五六遍」）：
+ *  ①游标只升不降——旧版每轮 loadWxCursor 都拿云端旧 buf 盖掉内存新 buf：云端写失败
+ *    （402 受限）时游标永远停在旧值，同批消息每轮重收，靠 seen 耗着；改为内存已有就
+ *    不回写（冷启动才从存储恢复），云端/本地两路按 at 挑断的。
+ *  ②游标+已回清单双写网关本机（local-wx-state.json，经 /state 端点）——Supabase 402
+ *    受限期间（断路器把云端写全短路）重启/热重载不再从陈旧云端游标重收整批重回复。 */
 var WX_SEEN = null;
-async function loadWxCursor() {
+/** v26 本地轮询态双写（仅网关注入 HIST_LOCAL_URL 时生效；云端 Deno 全部 no-op） */
+var WX_LOCAL_STATE_SAVING = 0;
+function localWxStatePost() {
+  if (!HIST_LOCAL_URL || !UPDATES_BUF) return;
+  // 节流 500ms：markWxSeen 逐条 + saveWxCursor 轮末都会调，本地 localhost 写便宜但没必要
+  // 每条一次（一条消息回复完 markWxSeen + 轮末 saveWxCursor 两次连发）。
+  if (Date.now() - WX_LOCAL_STATE_SAVING < 500) {
+    // 延后一刷：500ms 后补一次带最新 seen/buf（setTimeout 网关 Node 环境存在）
+    try {
+      setTimeout(function () { localWxStatePost(); }, 600);
+    } catch (e) { /* 云端 Deno 无 setTimeout？不存在——有；防御性吞错 */ }
+    return;
+  }
+  WX_LOCAL_STATE_SAVING = Date.now();
   try {
-    var s = await supaGetJson('state/wx-updates-buf.json');
-    if (s && typeof s.buf === 'string' && s.buf) UPDATES_BUF = s.buf;
+    fetch(HIST_LOCAL_URL + '/state', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ buf: UPDATES_BUF, seen: WX_SEEN || [], at: Date.now() }),
+      signal: AbortSignal.timeout(4000),
+    }).catch(function () { /* 尽力而为 */ });
+  } catch (e) { /* 本地写失败不影响收发主流程 */ }
+}
+async function localWxStateLoad() {
+  if (!HIST_LOCAL_URL) return null;
+  try {
+    var r = await fetch(HIST_LOCAL_URL + '/state', { signal: AbortSignal.timeout(4000) });
+    if (!r.ok) return null;
+    var j = await r.json();
+    return j && j.data && typeof j.data.buf === 'string' && j.data.buf
+      ? { buf: j.data.buf, seen: Array.isArray(j.data.seen) ? j.data.seen : [], at: Number(j.data.at) || 0 }
+      : null;
+  } catch (e) { return null; }
+}
+async function loadWxCursor() {
+  var cloudBuf = null;
+  var cloudSeen = null;
+  try {
+    cloudBuf = await supaGetJson('state/wx-updates-buf.json');
     var sn = await supaGetJson('state/wx-seen.json');
-    WX_SEEN = sn && Array.isArray(sn.ids) ? sn.ids : [];
+    cloudSeen = sn && Array.isArray(sn.ids) ? sn.ids : null;
   } catch (e) { /* 兑底：从空游标开始（首条会重收但 seen 兑底） */ }
+  var localSt = await localWxStateLoad();
+  // ①游标：内存已有（本进程收到过的最新 buf）不回写——只升不降；冷启动才恢复，
+  // 云端/本地两路挑 at 更新的（受限期间云端写失败时本地最新）。
+  if (!UPDATES_BUF) {
+    var cloudAt = cloudBuf && typeof cloudBuf.at === 'number' ? cloudBuf.at : 0;
+    var localAt = localSt ? localSt.at : 0;
+    var pick = null;
+    if (cloudBuf && typeof cloudBuf.buf === 'string' && cloudBuf.buf && localSt && localSt.buf) {
+      pick = localAt >= cloudAt ? localSt : { buf: cloudBuf.buf, seen: [], at: cloudAt };
+    } else if (cloudBuf && typeof cloudBuf.buf === 'string' && cloudBuf.buf) {
+      pick = { buf: cloudBuf.buf, seen: [], at: cloudAt };
+    } else if (localSt && localSt.buf) {
+      pick = localSt;
+    }
+    if (pick) UPDATES_BUF = pick.buf;
+  }
+  // ②已回清单：云端 / 本地 / 内存三路并集（去重保序，各留最近 60）——游标回退
+  // （换轮询器/换连接）时已回过的靠它兑底跳过。
+  var merged = [];
+  function wxSeenPush(list) {
+    if (!list || !list.length) return;
+    for (var i = 0; i < list.length; i++) {
+      var id = String(list[i]);
+      if (merged.indexOf(id) < 0) merged.push(id);
+    }
+  }
+  wxSeenPush(cloudSeen);
+  wxSeenPush(WX_SEEN);
+  if (localSt) wxSeenPush(localSt.seen);
+  if (merged.length) WX_SEEN = merged.slice(-60);
 }
 async function saveWxCursor() {
   if (!UPDATES_BUF) return;
+  localWxStatePost(); // v26 本地先落（402 期间重启不回退）
   await supaPutJson('state/wx-updates-buf.json', { buf: UPDATES_BUF, at: Date.now() });
 }
 /** v9 双轮询器安全（本站网关 / 你的 Supabase 定时任务 / 手动「云端测试」同跑一个桶）：
@@ -420,6 +496,7 @@ function wxClaimFresh(id) {
 async function markWxSeen(id) {
   if (!id) return;
   WX_SEEN = (WX_SEEN || []).concat([String(id)]).slice(-60);
+  localWxStatePost(); // v26 seen 同步落本机（热重载/重启后新代直接兑底跳过）
   await supaPutJson('state/wx-seen.json', { ids: WX_SEEN, updatedAt: Date.now() });
 }
 function wxSeenHas(id) {

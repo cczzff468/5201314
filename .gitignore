@@ -13,3 +13,9 @@ mini-services/im-gateway/core.gen.*.mjs
 # v20：网关本地直推运行包（含用户真实凭证 botToken/QQ secret/LLM key——只存在本机磁盘，不进仓库）
 mini-services/im-gateway/local-config.json
 mini-services/im-gateway/local-emoticons.json
+
+# v26：网关本地状态/历史（含 relaySecret 凭证与用户私密聊天记录——只存在本机磁盘，不进仓库）
+mini-services/im-gateway/gateway-state.json
+mini-services/im-gateway/local-qq-history.json
+mini-services/im-gateway/local-wx-history.json
+mini-services/im-gateway/local-wx-state.json
