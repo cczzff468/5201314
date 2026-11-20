@@ -3,18 +3,15 @@
 /**
  * 接入真机微信页（「我」› 接入真机微信）—— 微信官方 iLink Bot 通道（ilinkai.weixin.qq.com）UI · v4 简约版。
  *
- * v4（用户定调「提示词少一点、简约、要弹窗的弹窗、要收缩选择」）：
- *  - 长说明文字全部收进收缩区（Collapsible「接入说明」），页面主体只留操作；
- *  - 云端未部署警告压缩为一行，详情进弹窗（Dialog）；
- *  - 已连接的管理动作合并为一张 iOS 分组列表卡（测试连接 / 本机实时回复 / 拉取云端聊天记录 /
- *    更换角色（底部弹窗）/ 真机微信动态（收缩查看）/ 断开接入（AlertDialog 确认弹窗））；
- *  - 新增「拉取云端聊天记录」：云端代答的真机微信对话（测试云端/云端轮询跑过的）合进
- *    手机里与 TA 的微信聊天界面——打开本页时也会静默拉一次。
+ * v21 精简（用户定调「删无用功能」）：已连接视图只留 测试连接 / 更换角色 / 断开接入 ——
+ *  秒回加速、本机实时回复、拉取云端聊天记录、真机微信动态均已下线（真机收发由云端
+ *  Supabase 定时任务 7×24 承担；聊天记录由 cloud-history-sync 常驻自动同步；网关加速
+ *  由 设置 → 云端助手 统一管理）。
  * 通道调用、扫码轮询、长轮询收发与持久化全在 useWxConnect（weixin-connect.ts）；
  * 云端助手部署状态在 useWxCloud（wx-cloud/store）；本文件只做展示与动作接线。
  */
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   Bot,
   Check,
@@ -23,28 +20,18 @@ import {
   ChevronRight,
   Cloud,
   CloudOff,
-  DownloadCloud,
   Info,
   Loader2,
   RefreshCw,
   X,
 } from 'lucide-react';
-import { useWxConnect, pullWxCloudHistory, type WxQrStatus } from '@/lib/ios/weixin-connect';
+import { useWxConnect, type WxQrStatus } from '@/lib/ios/weixin-connect';
 import { useWxCloud, PLATFORM_LABELS } from '@/lib/ios/wx-cloud/store';
 // v18 全局错误中心：同步失败态极简指示器（详情进弹窗）
 import { InlineErrorChip } from '../error-center';
-// 内置 IM 网关（v5：微信长轮询 7×24 自动回复——接入后自动开启，网页关了也在线）
-import {
-  ensureImGatewayRunning,
-  fetchImGatewayStatus,
-  startImGateway,
-  stopImGateway,
-  type ImGatewayStatus,
-} from '@/lib/ios/wx-cloud/gateway';
 import { getContact } from '@/lib/ios/contacts-store';
 import { avatarFor, displayNameOf } from '@/lib/contacts';
 import type { ContactRecord } from '@/lib/contacts';
-import { Switch } from '@/components/ui/switch';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import {
   AlertDialog,
@@ -71,12 +58,6 @@ const QR_STATUS_TEXT: Record<WxQrStatus, string> = {
   verify_code_blocked: '数字错太多次，正在自动换一张码…',
   binded_redirect: '这个微信号已连到其它环境，先在那边解绑',
 };
-
-/** HH:MM（轮询检查时间 / 消息时间用） */
-function fmtHm(t: number): string {
-  const d = new Date(t);
-  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
-}
 
 /** 角色选择列表（弹窗/底部弹层用）：头像左 + 名字右横排，选中行微信绿高亮——
  *  用户定调「不要头像名字上下，要头像名字左右的」 */
@@ -155,11 +136,6 @@ export function WeixinConnectPage({ contacts, onBack }: { contacts: ContactRecor
   const qrLoading = useWxConnect((s) => s.qrLoading);
   const testing = useWxConnect((s) => s.testing);
   const lastTest = useWxConnect((s) => s.lastTest);
-  const autoReply = useWxConnect((s) => s.autoReply);
-  const loopStatus = useWxConnect((s) => s.loopStatus);
-  const loopError = useWxConnect((s) => s.loopError);
-  const lastPollAt = useWxConnect((s) => s.lastPollAt);
-  const msgs = useWxConnect((s) => s.msgs);
   const boot = useWxConnect((s) => s.boot);
   const startQr = useWxConnect((s) => s.startQr);
   const submitPin = useWxConnect((s) => s.submitPin);
@@ -167,7 +143,6 @@ export function WeixinConnectPage({ contacts, onBack }: { contacts: ContactRecor
   const rebindContact = useWxConnect((s) => s.rebindContact);
   const disconnect = useWxConnect((s) => s.disconnect);
   const test = useWxConnect((s) => s.test);
-  const clearMsgs = useWxConnect((s) => s.clearMsgs);
 
   // 云端助手部署状态（横幅用：none=未部署提示，其余平台绿色就绪小条；boot 前不渲染避免闪黄）
   const cloudReady = useWxCloud((s) => s.ready);
@@ -199,104 +174,6 @@ export function WeixinConnectPage({ contacts, onBack }: { contacts: ContactRecor
   const [offBusy, setOffBusy] = useState(false);
   /** PIN 输入框（need_verifycode 时显示；提交后清空） */
   const [pinInput, setPinInput] = useState('');
-  /** 拉取云端聊天记录的结果行 */
-  const [pullMsg, setPullMsg] = useState<{ ok: boolean; msg: string } | null>(null);
-  const [pulling, setPulling] = useState(false);
-
-  // —— 自动在线（v5）：内置网关的微信长轮询——接入后自动开启；本页 8 秒一轮拉状态。
-  // 双收双回防抖：网关在跑时本机实时回复让位（两个收发器同时收同一条消息会重复回复），
-  // 反过来手动开本机回复时先停网关。
-  const [gw, setGw] = useState<ImGatewayStatus | null>(null);
-  const [gwBusy, setGwBusy] = useState(false);
-  const [gwNote, setGwNote] = useState('');
-  const gwManuallyStoppedRef = useRef(false);
-  const gwLastEnsureRef = useRef(0);
-  const gwRunning = !!gw?.running;
-
-  // 状态轮询 + 看门狗：已接入 + 已部署才拉；页面开着期间 8s 一轮；掉线且非手动停止
-  // 时自动拉起（网关服务重启/掉线自愈，限 60s 一次）
-  useEffect(() => {
-    if (!ready || !login || !cloudDeployed) return;
-    let dead = false;
-    let timer = 0;
-    const tick = async () => {
-      const s = await fetchImGatewayStatus();
-      if (dead) return;
-      setGw(s);
-      if (!s?.running && !gwManuallyStoppedRef.current && Date.now() - gwLastEnsureRef.current > 60000) {
-        gwLastEnsureRef.current = Date.now();
-        void ensureImGatewayRunning('检测到掉线自动恢复');
-      }
-      timer = window.setTimeout(tick, 8000);
-    };
-    void tick();
-    return () => {
-      dead = true;
-      window.clearTimeout(timer);
-    };
-  }, [ready, login, cloudDeployed]);
-
-  // 接入即自动在线：已接入 + 已部署且网关没在跑 → 静默开启（幂等；失败只写状态行）。
-  // 手动停过（本会话）不再追着重开
-  useEffect(() => {
-    if (!ready || !login || !cloudDeployed || gwManuallyStoppedRef.current) return;
-    let dead = false;
-    (async () => {
-      const cur = await fetchImGatewayStatus();
-      if (dead) return;
-      if (!cur?.running) {
-        const r = await ensureImGatewayRunning('微信接入后自动在线');
-        if (r && !r.ok) setGwNote(r.msg);
-      }
-      setGw(await fetchImGatewayStatus());
-    })().catch(() => undefined);
-    return () => {
-      dead = true;
-    };
-  }, [ready, login, cloudDeployed]);
-
-  // 双收双回防抖：网关在跑时本机实时回复让位（同一 botToken 两个轮询器会同收同回）。
-  // store 写 + 提示都推迟到宏任务（effect 体内同步 setState 会触发级联渲染告警）
-  useEffect(() => {
-    if (!gwRunning || !autoReply) return;
-    const t = window.setTimeout(() => {
-      useWxConnect.getState().setAutoReply(false);
-      setGwNote('云端通道在线：本机实时回复已自动让位（避免重复回复）');
-    }, 0);
-    return () => window.clearTimeout(t);
-  }, [gwRunning, autoReply]);
-
-  /** 本机实时回复手动开关：开时若网关在跑先停它（两个模式二选一）；关时纯关 */
-  const onToggleAutoReply = async (v: boolean) => {
-    if (v && gwRunning) {
-      setGwBusy(true);
-      try {
-        const r = await stopImGateway();
-        gwManuallyStoppedRef.current = true;
-        setGwNote(r.ok ? r.msg : r.msg);
-        setGw(await fetchImGatewayStatus());
-      } finally {
-        setGwBusy(false);
-      }
-    }
-    useWxConnect.getState().setAutoReply(v);
-  };
-
-  /** 自动在线手动开关兑底（未拉起时开启 / 想停时停） */
-  const onToggleGateway = async (on: boolean) => {
-    if (gwBusy) return;
-    setGwBusy(true);
-    if (!on) gwManuallyStoppedRef.current = true;
-    try {
-      const r = on ? await startImGateway('微信接入页手动开启') : await stopImGateway();
-      setGwNote(r.msg + (r.note ? `（${r.note}）` : ''));
-      setGw(await fetchImGatewayStatus());
-    } catch (e) {
-      setGwNote(e instanceof Error ? e.message : String(e));
-    } finally {
-      setGwBusy(false);
-    }
-  };
 
   // 打开页面即 boot：读密文凭证 / 消息日志 / 实时回复开关（已在别处 boot 过则幂等）；
   // 云端助手状态一并读取（横幅判断是否已部署，boot 幂等）
@@ -305,11 +182,11 @@ export function WeixinConnectPage({ contacts, onBack }: { contacts: ContactRecor
     void useWxCloud.getState().boot();
   }, [boot]);
 
-  // v4 已连接 + 云端已部署：打开本页静默拉一次云端聊天记录（云端代答的对话合进聊天界面）
+  // v21 本机实时回复已下线：清掉历史遗留的开关位（避免本机轮询与云端通道双收双回）
   useEffect(() => {
-    if (!ready || !login || !cloudDeployed) return;
-    void pullWxCloudHistory().then(() => undefined);
-  }, [ready, login, cloudDeployed]);
+    if (!ready || !login) return;
+    if (useWxConnect.getState().autoReply) useWxConnect.getState().setAutoReply(false);
+  }, [ready, login]);
 
   // binded_redirect（已绑其它环境）自动更新状态：解绑回来后页面自动换新码重试
   //（用户定调「让他可以自动更新状态」）；页面开着期间每 15 秒重取一次，手动「更新状态」按钮兑底
@@ -373,22 +250,6 @@ export function WeixinConnectPage({ contacts, onBack }: { contacts: ContactRecor
     }
   };
 
-  /** 拉取云端聊天记录（精确文案版：复用函数返回的条数与失败原因） */
-  const doPull = async () => {
-    if (pulling) return;
-    setPullMsg(null);
-    setPulling(true);
-    try {
-      const r = await pullWxCloudHistory();
-      setPullMsg({ ok: r.ok, msg: r.msg });
-    } finally {
-      setPulling(false);
-    }
-  };
-
-  /** 真机微信动态（倒序，最多 20 条） */
-  const recent = useMemo(() => [...msgs].slice(-20).reverse(), [msgs]);
-
   return (
     <div
       data-testid="wx-ilink-page"
@@ -420,7 +281,7 @@ export function WeixinConnectPage({ contacts, onBack }: { contacts: ContactRecor
             <div data-testid="wx-ilink-cloud-banner" className="flex items-center gap-2 rounded-[10px] bg-[#FFF6DC] px-3.5 py-2.5 dark:bg-[#40361A]">
               <CloudOff className="h-4 w-4 shrink-0 text-[#B77900] dark:text-[#EBC76A]" strokeWidth={2} />
               <p className="min-w-0 flex-1 text-[12.5px] leading-[1.4] text-[#8A6A00] dark:text-[#EBC76A]">
-                云端未部署：TA 只在本机实时回复开着时回消息
+                云端未部署：TA 暂不会在真机微信上回复
               </p>
               <Dialog>
                 <DialogTrigger asChild>
@@ -433,10 +294,8 @@ export function WeixinConnectPage({ contacts, onBack }: { contacts: ContactRecor
                     <DialogTitle className="text-[16px]">云端未部署会怎样？</DialogTitle>
                   </DialogHeader>
                   <div className="space-y-2 text-[13px] leading-[1.6] text-black/70 dark:text-white/75">
-                    <p>现在只有「本机实时回复」开着、页面开着时 TA 才回消息；页面一关就停。</p>
-                    <p>
-                      到 设置 → 云端助手 部署（Supabase 一键部署即可）后，TA 在真机微信上 7×24 在线自动回复。
-                    </p>
+                    <p>部署云端后，TA 才会在真机微信上自动回复。</p>
+                    <p>路径：设置 → 云端助手，一键部署（免费）即可。</p>
                   </div>
                 </DialogContent>
               </Dialog>
@@ -500,85 +359,6 @@ export function WeixinConnectPage({ contacts, onBack }: { contacts: ContactRecor
               <p className={`px-4 pb-3 pt-0 text-[12.5px] leading-[1.45] ${lastTest.ok ? 'text-[#07C160]' : 'text-[#FA5151]'}`}>{lastTest.msg}</p>
             )}
 
-            {/* 秒回加速（v5 新增→v9 改名）：内置网关的微信长轮询加速器——接入后自动开启；
-                云端 24 小时收发骨干由用户 Supabase 定时任务独立承担，本开关只影响本站在线时
-                的回复速度。聊天历史照旧写 Supabase（可拉取） */}
-            {cloudDeployed && (
-              <div className="flex items-center justify-between gap-3 px-4 py-3">
-                <div className="min-w-0">
-                  <span className="flex items-center gap-1.5 text-[15.5px] font-medium">
-                    秒回加速（本站在线时）
-                    {gwRunning && (
-                      <span className={`inline-flex shrink-0 items-center gap-0.5 rounded-full px-1.5 py-[1px] text-[10.5px] font-medium ${
-                        gw?.wx?.lastError ? 'bg-[#FA5151]/10 text-[#FA5151]' : 'bg-[#07C160]/10 text-[#07C160]'
-                      }`}>
-                        {gw?.wx?.lastError ? '异常' : '在线'}
-                      </span>
-                    )}
-                  </span>
-                  <p className="mt-0.5 text-[12px] leading-[1.4] text-black/40 dark:text-white/40">
-                    {gwRunning
-                      ? gw?.wx?.lastError
-                        ? `异常：${gw.wx.lastError}`
-                        : '加速中：本站即时收发，回复接近秒回；聊天历史写云端（可拉取）'
-                      : '未开启不影响云端 24 小时自动回复（你的 Supabase 定时任务，回复按分钟级）；聊天历史照旧写云端'}
-                  </p>
-                  {gwNote && !gwRunning && (
-                    <p className="mt-0.5 text-[11.5px] leading-[1.4] text-black/35 dark:text-white/35">{gwNote}</p>
-                  )}
-                </div>
-                {gwBusy ? (
-                  <Loader2 className="h-[20px] w-[20px] shrink-0 animate-spin text-black/25 dark:text-white/25" aria-hidden="true" />
-                ) : (
-                  <Switch checked={gwRunning} onCheckedChange={(v) => void onToggleGateway(v)} data-testid="wx-ilink-gateway" aria-label="秒回加速" />
-                )}
-              </div>
-            )}
-
-            {/* 本机实时回复开关（网关在跑时自动让位；手动开时先停网关——两个模式二选一） */}
-            <div className="flex items-center justify-between gap-3 px-4 py-3">
-              <div className="min-w-0">
-                <span className="block text-[15.5px] font-medium">本机实时回复</span>
-                <p className="mt-0.5 text-[12px] leading-[1.4] text-black/40 dark:text-white/40">
-                  {gwRunning ? '页面开着时立即收发（云端通道在线中已让位）' : '页面开着时立即收发；关闭后云端接管'}
-                </p>
-              </div>
-              <Switch checked={autoReply} onCheckedChange={(v) => void onToggleAutoReply(v)} data-testid="wx-ilink-auto" aria-label="本机实时回复" />
-            </div>
-            {(loopStatus === 'running' || loopStatus === 'error') && (
-              <p className={`px-4 pb-2.5 text-[12px] ${loopStatus === 'running' ? 'text-[#07C160]' : 'text-[#FA5151]'}`}>
-                {loopStatus === 'running' ? (
-                  <>
-                    <span className="mr-1 inline-block h-[6px] w-[6px] animate-pulse rounded-full bg-[#07C160]" aria-hidden="true" />
-                    轮询中{lastPollAt ? ` · 上次检查 ${fmtHm(lastPollAt)}` : ''}
-                  </>
-                ) : (
-                  loopError || '轮询异常'
-                )}
-              </p>
-            )}
-
-            {/* 拉取云端聊天记录（v4 新增：云端代答的对话合进手机聊天界面） */}
-            <button
-              type="button"
-              data-testid="wx-ilink-pull"
-              disabled={pulling}
-              onClick={() => void doPull()}
-              className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left active:bg-black/[0.03] disabled:opacity-60 dark:active:bg-white/[0.05]"
-            >
-              <span className="min-w-0 flex-1 text-[15.5px] font-medium">拉取云端聊天记录</span>
-              {pulling ? (
-                <Loader2 className="h-[17px] w-[17px] shrink-0 animate-spin text-[#07C160]" strokeWidth={2.2} aria-hidden="true" />
-              ) : (
-                <DownloadCloud className="h-[17px] w-[17px] shrink-0 text-black/25 dark:text-white/25" strokeWidth={2} aria-hidden="true" />
-              )}
-            </button>
-            {pullMsg && (
-              <p className={`px-4 pb-3 pt-0 text-[12.5px] leading-[1.45] ${pullMsg.ok ? 'text-[#07C160]' : 'text-[#FA5151]'}`} data-testid="wx-ilink-pull-result">
-                {pullMsg.msg}
-              </p>
-            )}
-
             {/* 更换角色：行入口 → 底部弹层选人（选中即 rebind，无需重新扫码） */}
             <button
               type="button"
@@ -603,40 +383,6 @@ export function WeixinConnectPage({ contacts, onBack }: { contacts: ContactRecor
             </button>
           </div>
 
-          {/* 真机微信动态：收缩查看（v4 收缩选择） */}
-          <Fold title="真机微信动态" hint={msgs.length ? `${msgs.length} 条` : '空'} testid="wx-ilink-msgs-fold">
-            <div data-testid="wx-ilink-msgs">
-              <div className="flex items-center justify-between">
-                <p className="text-[11.5px] leading-[1.5] text-black/35 dark:text-white/35">运行日志；完整聊天记录在微信聊天界面里</p>
-                {msgs.length > 0 && (
-                  <button type="button" onClick={clearMsgs} className="text-[12.5px] text-[#576B95] active:opacity-60">
-                    清空
-                  </button>
-                )}
-              </div>
-              {recent.length === 0 ? (
-                <p className="py-5 text-center text-[13px] text-black/35 dark:text-white/35">还没有收到真机微信消息</p>
-              ) : (
-                <div className="mt-1 divide-y divide-black/[0.05] dark:divide-white/[0.08]">
-                  {recent.map((m) => (
-                    <div key={m.id} className="py-2.5">
-                      <div className="flex items-baseline justify-between gap-2">
-                        <span className="shrink-0 text-[12px] font-medium text-black/50 dark:text-white/50">{m.fromUserId.slice(0, 6)}…</span>
-                        <span className="text-[11px] text-black/30 dark:text-white/30">{fmtHm(m.ts)}</span>
-                      </div>
-                      <p className="mt-1 whitespace-pre-wrap break-words text-[13.5px] leading-[1.45]">{m.text}</p>
-                      {m.replyErr ? (
-                        <p className="mt-1 whitespace-pre-wrap break-words text-[12.5px] leading-[1.45] text-[#FA5151]">回复失败：{m.replyErr}</p>
-                      ) : m.reply ? (
-                        <p className="mt-1 whitespace-pre-wrap break-words text-[12.5px] leading-[1.45] text-black/50 dark:text-white/50">已回复：{m.reply}</p>
-                      ) : null}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </Fold>
-
           {/* 说明收缩区（v5 精简：提示收敛为两行） */}
           <Fold title="说明" testid="wx-ilink-help-fold">
             <div className="space-y-2 text-[12.5px] leading-[1.55] text-black/55 dark:text-white/55">
@@ -656,7 +402,7 @@ export function WeixinConnectPage({ contacts, onBack }: { contacts: ContactRecor
             >
               <Cloud className="h-[15px] w-[15px] shrink-0 text-[#07C160]" strokeWidth={2} />
               <p className="text-[12.5px] font-medium leading-[1.4] text-[#07C160]">
-                云端已就绪（{PLATFORM_LABELS[cloudPlatform]}）{gwRunning ? '，秒回加速运行中' : ''}
+                云端已就绪（{PLATFORM_LABELS[cloudPlatform]}）
               </p>
             </div>
           ) : null}

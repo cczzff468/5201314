@@ -1767,14 +1767,15 @@ async function cloudSendActive(cfg, channel, texts) {
     }
     var sent2 = 0;
     // v20 被动回复优先：5 分钟内对方刚在真机 QQ 发过消息（state/qq-lastmsg.json 记的
-    // msg_id + 已用名额）且名额没耗尽（QQ 同 msg_id 被动回复上限 5 次）→ 先用被动接口
-    // 发（不吃 QQ 平台每月 4 条主动消息限额）；用完/没有才走主动接口。网站回复同步真机
-    //（站内镜像）在对方手机上刚发过消息的窗口里零配额送达。
+    // msg_id + 已用名额）且名额没耗尽（v22：QQ 被动回复无硬性 5 次限制——余量上限放宽到 30，
+    // 保守防止单轮刷爆接口）→ 先用被动接口发（不吃 QQ 平台每月 4 条主动消息限额）；
+    // 用完/没有才走主动接口。网站回复同步真机（站内镜像）在对方手机上刚发过消息的
+    // 窗口里零配额送达。
     var lm = null;
     try { lm = await supaGetJson('state/qq-lastmsg.json'); } catch (le2) {}
     var lmOk = lm && lm.msgid && String(lm.openid) === String(qa.openid) && !lm.isGroup &&
       typeof lm.used === 'number' && Date.now() - Number(lm.at || 0) < 300000;
-    var lmRoom = lmOk ? Math.max(0, 5 - Number(lm.used)) : 0;
+    var lmRoom = lmOk ? Math.max(0, 30 - Number(lm.used)) : 0;
     if (lmRoom > 0) {
       var lmPass = Math.min(lmRoom, list.length);
       for (var pi = 0; pi < lmPass; pi++) {
@@ -2190,25 +2191,20 @@ async function handleQqEvent(cfg, t, d) {
       }
     }
   }
-  // 发送预算：QQ 被动回复同一 msg_id 最多 5 次（语音/文字/表情图共用）——超出部分
-  // 均匀分摊不丢内容；v15 斗图模式（cfg.qq.stickerBattle）表情上限 3→5，但富媒体总量
-  // （语音+表情）仍 ≤4：留 ≥1 个名额给文字，整轮不超 5 次平台限额
-  var imgAllow = Math.max(0, 4 - voiceClips.length);
-  var maxImgs = Math.min(cfg.qq && cfg.qq.stickerBattle ? 5 : 3, imgAllow);
+  // v22 发送预算放开（机主定调：QQ 被动回复没有「一共只能发五条」的平台限制——旧版按
+  // 5 次/轮预算把连发 3~30 条压成几条文字墙，是「真机 AI 只发一条」的直接根因）：
+  // 文字条数不再设预算，超出 30 条并入末条（与微信侧同口径，不丢内容）；语音条合成上限
+  // 3 条照旧（TTS 成本）；表情图平时 3 张 / 斗图 5 张（防刷屏），不挤占文字名额。
+  var maxImgs = cfg.qq && cfg.qq.stickerBattle ? 5 : 3;
   var images = [];
   for (var si2 = 0; si2 < emoHits.length && images.length < maxImgs; si2++) {
     var st = emoHits[si2];
     if (st && st.dataUrl && String(st.dataUrl).split(',')[1]) images.push(st);
   }
-  var room = 5 - voiceClips.length - images.length;
-  if (room < 1) { room = 1; images = images.slice(0, Math.max(0, 4 - voiceClips.length)); }
-  if (segs.length > room) {
-    // v14 均匀分摊：超预算的条数平均并进 room 条（旧版全塞末条——连发 3~30 条后末条
-    // 会变成几十行的文字墙；每条气泡均分几行，观感与真人长消息一致）
-    var even = [];
-    var per = Math.ceil(segs.length / room);
-    for (var eq = 0; eq < segs.length; eq += per) even.push(segs.slice(eq, eq + per).join('\n'));
-    segs = even;
+  if (segs.length > 30) {
+    var qqHead = segs.slice(0, 29);
+    qqHead.push(segs.slice(29).join('\n'));
+    segs = qqHead;
   }
   // v16 QQ 出站净化：经典表情文字代码（[流泪][裂开]…）在机器人通道不渲染——剥掉再发
   for (var csi = 0; csi < segs.length; csi++) segs[csi] = qqStripClassicCodes(segs[csi]);
@@ -2252,8 +2248,8 @@ async function handleQqEvent(cfg, t, d) {
   if (emoLog.length) await appendQqHistory({ id: 'qe-' + msgId, role: 'assistant', content: emoLog.join(' ').slice(0, 500), ts: Date.now() });
   // v21 轮末批量上云（一次写代替旧版逐条整文件重写）
   await flushQqHistory();
-  // v20 被动回复余量记账（网站回复同步真机用）：QQ 被动回复同 msg_id 最多 5 次——记下
-  // 本轮回了几条（语音+文字+表情图），站内镜像优先吃剩余名额（免每月 4 条主动配额）。
+  // v20 被动回复余量记账（网站回复同步真机用）：记下本轮回了几条（语音+文字+表情图），
+  // 站内镜像优先吃被动回窗（免每月 4 条主动配额）。v22 起连发条数放开，used 只作参考记账。
   try {
     var usedQ = segs.length + sentEmo;
     for (var vui = 0; vui < voiceClips.length; vui++) if (voiceClips[vui] && voiceClips[vui].sent) usedQ++;

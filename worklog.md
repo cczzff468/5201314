@@ -3172,3 +3172,16 @@ Stage Summary:
 - 上传链路加固：逐文件代写+重试+读回验证+超限点名+402 诚实报错（网关不受影响的明示）；部署升级链 ping 实测防假成功
 - 全站错误弹窗化落地：集中错误中心（极简徽章+列表+详情弹窗带重试/复制）覆盖聊天五端、云端设置页、微信/QQ 接入页、全局未捕获异常——界面不再铺错误长文
 - 关键文件：sources.ts（v18 核心）、im-gateway/index.ts（本地表情注入）、im-gateway/silk-wasm.mjs（纯 JS）、cloud-deploy/supabase/route.ts、wx-cloud/supabase.ts、error-center.ts、error-center.tsx、chat-error-line.tsx、settings.tsx、wx-app/qq-app connect.tsx、PhoneShell.tsx
+
+## 2026-11-20 · 三页精简（删无用功能）+ QQ 连发五条截断根除 + 平台收敛
+
+Task: 用户定调「删无用功能，只留有用的」——微信/QQ 接入页与云端助手页一批 UI 下线；真机 QQ「AI 只发一条/一共只能发五条」的截断逻辑根除。
+
+Work Log:
+- [微信接入页精简] wx-app/connect.tsx：已连接视图只留 测试连接 / 更换角色 / 断开接入——删 秒回加速开关、本机实时回复开关（+轮询状态行）、拉取云端聊天记录按钮（+结果行）、真机微信动态收缩区；连带清掉 gw 状态轮询/看门狗/让位 effect、onToggleGateway/onToggleAutoReply/doPull/pulling、msgs/clearMsgs/autoReply/loopStatus 订阅与 DownloadCloud/Switch/网关五导入；新增挂载兜底 effect 清历史遗留 autoReply 开关位（防双收双回）；云端未部署横幅与弹窗文案改中性（不再提本机实时回复）
+- [QQ 接入页精简] qq-app/connect.tsx：删 QQ 秒回加速整卡（状态行/开关按钮/排查收缩区）、真机 QQ 能力卡（斗图模式开关）、拉取云端聊天记录按钮行；连带清 battle/toggleBattle+qq-cloud-features 导入、pullMsg/doPull/pulling、gw 状态五件套与两个自动在线 effect、Radio/Sparkles/DownloadCloud/Switch/autoSyncRunPackageIfDeployed 导入；顶部横幅重做为两分支（已部署绿条（区分已接入/未接入文案）/已接入未部署警示）；说明收缩区三行重写（自动同步聊天记录的新口径）
+- [云端助手页精简] settings.tsx CloudPage：运行平台删「不使用云端（仅本机）」选项（只留 Supabase radio；存量 none/hf/clawcloud 打开页面自动迁移到 supabase——legacyPlatformMigrated 扩展）；删 platform==='none' 琥珀警示块；statusTitle/statusSub 去仅本机分支并精简停用文案；云端轮询 label 去「（7×24 自动回复）」后缀（aria 同步）、心跳读取中/hbFresh/已停用三段副文案全面瘦身（已停用压成「已停用（零配额）：云端不再自动回复；可随时再开启」）、toast 同款瘦身；删「同步到真机微信/同步到真机 QQ」整块（+replySyncWx/replySyncQq state 与 website-reply-sync 导入）；删「云端运行时版本」行（+runtimeVer selector）；「重新同步运行包」按钮瘦身为一行标题（图标在右），提示挪到按钮下方一行小字
+- [使用说明] CloudPage 顶部状态卡的说明收缩区重写为「使用说明」四步（填 Token→部署 / 扫码接入 / 之后自动收发 / 数据全在自己 Supabase）
+- [QQ 五条截断根除] wx-cloud/sources.ts WX_CLOUD_CORE：删「被动回复同 msg_id 最多 5 次」发送预算（room=5-voice-images 的均匀分摊——连发 3~30 条被压成最多 5 条文字墙，即用户抱怨的「一共只能发五条」）；文字条不设预算、超 30 条并入末条（与微信侧同口径）；表情图平时 3 张/斗图 5 张独立计数不挤占文字；网站镜像被动窗口余量 5→30（lmRoom）；记账注释同步更新（used 只作参考）——单一事实源改动同时惠及 im-gateway（热重物化已推送生效：push-config 原样回推 local-config.json 触发 materializeCore）与 Supabase Edge Function 部署模板（EDGE_FUNCTION_TS 内嵌同一 WX_CLOUD_CORE，下次「重新同步运行包/一键部署」即上云）
+- [error-center 复核] InlineErrorChip 的 report() 已在 useEffect 中调用（上轮 v19 修复确认在位）——本轮零改动
+- [验证] eslint 五改动文件零问题；Agent Browser E2E：锁屏（eval Pointer 序列解锁受挫后走 DOM click 通道）→ 设置 → 云端助手：使用说明折叠区四步文案、运行平台仅 Supabase 且全新浏览器 session（platform 默认 none）自动迁移选中、无 同步到真机/运行时版本/7×24 字样残留；微信/QQ App 打开渲染正常（登录页——接入页已连接视图需登录态，本环境无法 UI 到达，以 grep 零残留 + eslint + Turbopack 无错误 overlay 复核）；console/page errors 全零；dev.log 全 200；网关 :3100 热重物化返回「已热生效」

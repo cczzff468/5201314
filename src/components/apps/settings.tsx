@@ -281,7 +281,6 @@ import {
   type ImGatewayStatus,
 } from '@/lib/ios/wx-cloud/gateway';
 // v20 网站回复同步真机（每通道独立开关，默认开启）
-import { getWebsiteReplySync, saveWebsiteReplySync } from '@/lib/ios/website-reply-sync';
 
 // ---------------- 常量与类型 ----------------
 
@@ -9005,10 +9004,9 @@ function PromptEntriesPage({ onBack }: { onBack: () => void }) {
 // ---------------- 云端助手（部署用户自己的 Supabase） ----------------
 
 /** 运行平台选择的行定义（radio 式，选中即 setPlatform；云端含义见 wx-cloud/store）
- *  v5.1 收敛：Hugging Face Spaces（国内需代理）与 ClawCloud Run（官方 2026-05-11 停服）已下架，
- *  平台只留 Supabase 一键部署——存量选中已下架平台的在页面打开时自动切回「仅本机」 */
+ *  v21 收敛：「不使用云端（仅本机）」已下线，平台只留 Supabase 一键部署——存量选中已
+ *  下架平台或「仅本机」的在页面打开时自动切到 Supabase */
 const CLOUD_PLATFORM_OPTIONS: { id: CloudPlatform; label: string; desc: string; icon: LucideIcon; tone: string }[] = [
-  { id: 'none', label: '不使用云端（仅本机）', desc: '页面开着时 TA 才回复；关页面就停', icon: Smartphone, tone: TONE_GRAY },
   { id: 'supabase', label: 'Supabase', desc: '推荐 · 全免费 · 一键部署', icon: Database, tone: TONE_GREEN },
 ];
 
@@ -9180,8 +9178,7 @@ function CloudPage({ onBack }: { onBack: () => void }) {
   const platform = useWxCloud((s) => s.platform);
   const supa = useWxCloud((s) => s.supabase);
   const lastPing = useWxCloud((s) => s.lastPing);
-  // v15 云端运行时代际（syncRunPackage 探测 ping ver 后写入）：旧代 = 真机还在跑旧函数行为
-  const runtimeVer = useWxCloud((s) => s.lastRuntimeVer);
+  // v15 云端运行时代际已下线展示（v21 精简：版本行删除；运行时升级随「重新同步运行包」自动带）
   const boot = useWxCloud((s) => s.boot);
   const setPlatform = useWxCloud((s) => s.setPlatform);
   const clearPlatform = useWxCloud((s) => s.clearPlatform);
@@ -9217,10 +9214,6 @@ function CloudPage({ onBack }: { onBack: () => void }) {
   const [gatewayStatus, setGatewayStatus] = useState<ImGatewayStatus | null>(null);
   const [gatewayBusy, setGatewayBusy] = useState(false);
 
-  // —— v20 网站回复同步真机（微信/QQ 各自开关，默认开启）——
-  const [replySyncWx, setReplySyncWx] = useState(() => getWebsiteReplySync('wx'));
-  const [replySyncQq, setReplySyncQq] = useState(() => getWebsiteReplySync('qq'));
-
   // —— 云端轮询开关（v10：开 = 自动回复，关 = 零配额消耗）——真源是用户 Supabase 里的
   // pg_cron 定时任务（schedule-cron / unschedule-cron 走 Management API SQL）；本地
   // cronOn 只是缓存档位，云端心跳（state/heartbeat.json）拿来验证它真的在跑——用户
@@ -9252,15 +9245,18 @@ function CloudPage({ onBack }: { onBack: () => void }) {
     if (st.supabase?.token) setSupaToken(st.supabase.token);
   }, [ready]);
 
-  // v5.1 平台收敛迁移：存量选中已下架平台（HF Spaces / ClawCloud Run）的自动切回「仅本机」
-  //（Supabase 凭证保留，随时可重新一键部署）；一次性提示，不打扰正常用户
+  // v21 平台收敛迁移：「不使用云端（仅本机）」已下线——存量选中已下架平台（HF/ClawCloud）
+  // 或「仅本机」的在页面打开时自动切到 Supabase（云端唯一路径；一次性，不打扰正常用户）
   const legacyPlatformMigrated = useRef(false);
   useEffect(() => {
     if (!ready || legacyPlatformMigrated.current) return;
     if (platform === 'hf' || platform === 'clawcloud') {
       legacyPlatformMigrated.current = true;
-      setPlatform('none');
-      showToast('Hugging Face Spaces / ClawCloud Run 已下架：已切回仅本机，可改用 Supabase 一键部署');
+      setPlatform('supabase');
+      showToast('Hugging Face Spaces / ClawCloud Run 已下架：已切换为 Supabase');
+    } else if (platform === 'none') {
+      legacyPlatformMigrated.current = true;
+      setPlatform('supabase');
     }
   }, [ready, platform, setPlatform, showToast]);
 
@@ -9281,26 +9277,22 @@ function CloudPage({ onBack }: { onBack: () => void }) {
   const gwOn = !!gatewayStatus?.running;
   /** QQ 通道文案（网关状态卡/开关副文案共用）：ready=已连平台，error=带原因，connecting=连接中 */
   const qqCh = gatewayStatus?.qq;
-  const statusTitle = !cloudOn
-    ? '未使用云端（仅本机）'
-    : pingBad
-      ? '云端异常'
-      : !supaDeployed
-        ? '已选云端 · 待部署'
-        : cronOn
-          ? '云端已部署 · 24 小时收发中'
-          : '云端已部署 · 自动收发已停';
-  const statusSub = !cloudOn
-    ? '页面开着时 TA 才回复，关掉就停'
+  const statusTitle = pingBad
+    ? '云端异常'
     : !supaDeployed
-      ? '填 Token → 选项目 → 一键部署（自动开 24 小时收发）'
-      : !cronOn
-        ? '云端轮询已关（零配额消耗）：只有页面开着时 TA 才回复'
-        : gwOn
-          ? qqCh?.state === 'ready'
-            ? '云端 24 小时收发中 · 本站加速在线（TA 秒回）'
-            : '云端 24 小时收发中 · 本站加速连接中'
-          : '云端 24 小时自动收发（跑在你的 Supabase 里，本站关了也在线）';
+      ? '已选云端 · 待部署'
+      : cronOn
+        ? '云端已部署 · 24 小时收发中'
+        : '云端已部署 · 自动收发已停';
+  const statusSub = !supaDeployed
+    ? '填 Token → 选项目 → 一键部署（自动开 24 小时收发）'
+    : !cronOn
+      ? '云端轮询已关（零配额）；可随时再开启'
+      : gwOn
+        ? qqCh?.state === 'ready'
+          ? '云端 24 小时收发中 · 本站加速在线（TA 秒回）'
+          : '云端 24 小时收发中 · 本站加速连接中'
+        : '云端 24 小时自动收发（跑在你的 Supabase 里，本站关了也在线）';
 
   // Token 输入框与已保存值不一致时先回写快照（用户换 token 后免重选项目）
   const ensureTokenSynced = () => {
@@ -9548,8 +9540,8 @@ function CloudPage({ onBack }: { onBack: () => void }) {
         if (!on) setCronHb(null);
         showToast(
           on
-            ? '云端轮询已开启：每 10 秒自动轮询回复（跑在你的 Supabase 里，免费）'
-            : '云端轮询已停用（立刻生效、零配额消耗）：只有页面开着时 TA 才回复，随时可再开启',
+            ? '云端轮询已开启：每 10 秒自动轮询回复（免费）'
+            : '云端轮询已停用（零配额）；可随时再开启',
         );
       }
     } catch (e) {
@@ -9663,12 +9655,12 @@ function CloudPage({ onBack }: { onBack: () => void }) {
           )}
 
           <div className="mt-3">
-            <CloudFold title="说明（作用 / 使用顺序 / 模式）" testid="cloud-help-fold">
+            <CloudFold title="使用说明" testid="cloud-help-fold">
               <div className="space-y-2 text-[12px] leading-relaxed text-muted-foreground">
-                <p>收发模式：一键部署后自动建立「云端轮询」定时任务（存在你自己的 Supabase 项目里，免费）——微信每 10 秒自动轮询必检必回，QQ 走官方 WebSocket 长连接（免回调地址、不受 QQ 平台对海外出口的限制）。「云端轮询」开关关掉 = 清除定时任务（停用立刻生效、零配额消耗），云端不再自动回复；「秒回加速」开关打开时，本站服务器上的加速器让回复接近秒回，与本站是否开轮询互不影响。</p>
-                <p>顺序：① 这里一键部署（部署完自动开启云端轮询 + 秒回加速）→ ② 到微信「我」页 / QQ「动态」页接入真机。接入 / 换绑 / 断开、改「API 设置」都会自动同步运行包，云端 60 秒内跟上。凭证只存你自己的浏览器。</p>
-                <p>心跳：云端轮询开着时每轮自记一次心跳（开关副文案里能看到「最近一轮 X 秒前」）；超过 3 分钟没心跳会提示点「修复」重建定时任务——正常运转中无需手动点「云端测试」（它只是兜底验证通道）。</p>
-                <p>离开本站：云端函数、定时任务、配置与聊天记录全在你自己的 Supabase 项目里——本站关了 TA 照样 24 小时收发（微信 10 秒一档必检必回；QQ 断线自动续传重连）；只有「秒回加速」依赖本站在线。</p>
+                <p>① 填 Access Token → 读取项目 → 一键部署（自动开 24 小时收发）。</p>
+                <p>② 到 微信「我」页 / QQ「动态」页扫码接入真机。</p>
+                <p>③ 之后云端 24 小时自动收发；换角色 / 改「API 设置」会自动同步，60 秒内生效。</p>
+                <p>④ 云端函数、定时任务、聊天记录全在你的 Supabase 里——本站关了 TA 照样在线。</p>
               </div>
             </CloudFold>
           </div>
@@ -9678,7 +9670,7 @@ function CloudPage({ onBack }: { onBack: () => void }) {
             （幂等：已在跑则什么都不做） */}
         <AutoEnsureGatewayEffect dep={ready && supaDeployed} />
 
-        {/* 分组一：运行平台（radio 四选一，选中即切换） */}
+        {/* 分组一：运行平台（Supabase 一键部署，选中即切换） */}
         <section>
           <SectionLabel icon={CloudUpload} tone={TONE_BLUE}>运行平台</SectionLabel>
           <div role="radiogroup" aria-label="运行平台">
@@ -9715,12 +9707,6 @@ function CloudPage({ onBack }: { onBack: () => void }) {
               })}
             </GroupCard>
           </div>
-          {platform === 'none' && (
-            <div className="mt-2 flex flex-col gap-1.5 rounded-[16px] border border-amber-500/30 bg-amber-300/15 px-3.5 py-3 text-[12px] leading-relaxed text-amber-700 backdrop-blur-xl dark:border-amber-400/25 dark:bg-amber-300/[0.08] dark:text-amber-200/90">
-              <p className="font-medium">仅本机模式——页面开着 TA 才回复，关掉就停。</p>
-              <p>两步开启 7x24：① 选上面的「Supabase」并一键部署（免费）→ ② 到微信「我」页 / QQ「动态」页接入真机。</p>
-            </div>
-          )}
         </section>
 
         {/* 分组二：Supabase 连接（云端配置都存用户自己的 Supabase） */}
@@ -9900,18 +9886,18 @@ function CloudPage({ onBack }: { onBack: () => void }) {
                         data-testid="cloud-cron-row"
                       >
                         <span className="min-w-0 flex-1">
-                          <span className="block text-[14.5px] font-medium">云端轮询（7×24 自动回复）</span>
+                          <span className="block text-[14.5px] font-medium">云端轮询</span>
                           <span
                             className={`mt-0.5 block text-[11px] leading-relaxed ${hbStale ? 'text-[#C77700] dark:text-amber-300' : 'text-muted-foreground'}`}
                             data-testid="cloud-cron-sub"
                           >
                             {cronOn
                               ? cronHb === null
-                                ? '开启后云端每 10 秒自动轮询回复（微信 10 秒内必检必回、QQ 断线自动续连）——心跳读取中（刚开启稍等片刻）'
+                                ? '云端每 10 秒自动轮询回复——心跳读取中…'
                                 : hbFresh
-                                  ? `自动收发运行中：最近一轮 ${Math.max(1, Math.round(hbAgeMs / 1000))} 秒前${typeof cronHb.handled === 'number' && cronHb.handled > 0 ? ` · 本轮回复 ${cronHb.handled} 条` : ''}${cronHb.wxMsgError ? ` · 注意：${String(cronHb.wxMsgError).slice(0, 60)}` : ''}`
-                                  : `已开启，但超过 ${Math.max(1, Math.round(hbAgeMs / 60000))} 分钟没有云端心跳——定时任务可能没建成，点「修复」重建`
-                              : '已停用（立刻生效、零配额消耗）：云端不再自动回复（删站/关站也不会再回），只有页面开着时 TA 才回复；随时可再开启'}
+                                  ? `自动收发运行中：最近一轮 ${Math.max(1, Math.round(hbAgeMs / 1000))} 秒前${typeof cronHb.handled === 'number' && cronHb.handled > 0 ? ` · 本轮回复 ${cronHb.handled} 条` : ''}`
+                                  : `已开启，但超过 ${Math.max(1, Math.round(hbAgeMs / 60000))} 分钟没有心跳——点「修复」重建`
+                              : '已停用（零配额）：云端不再自动回复；可随时再开启'}
                           </span>
                         </span>
                         {cronBusy ? (
@@ -9921,7 +9907,7 @@ function CloudPage({ onBack }: { onBack: () => void }) {
                             checked={cronOn}
                             onCheckedChange={(v) => void setCron(v)}
                             data-testid="cloud-cron-switch"
-                            aria-label="云端轮询（7×24 自动回复）"
+                            aria-label="云端轮询"
                           />
                         )}
                       </div>
@@ -10035,65 +10021,6 @@ function CloudPage({ onBack }: { onBack: () => void }) {
                         </p>
                       </div>
                     )}
-                    {/* v20 网站回复同步真机（每通道独立开关，默认开启）：网站聊天页的 AI
-                        文字分段同步转发到真机微信/QQ——只对真机接入的绑定联系人生效 */}
-                    {supaDeployed && (
-                      <div className="flex flex-col gap-2 rounded-[14px] bg-white/60 px-4 py-3 ring-1 ring-black/[0.04] dark:bg-white/[0.06] dark:ring-white/[0.08]" data-testid="cloud-reply-sync">
-                        <p className="text-[11px] leading-relaxed text-muted-foreground">
-                          网站回复同步真机：在本站和 TA 聊天后，TA 的回复会同步发到真机微信/QQ 上（只对已接入的绑定角色生效）。
-                        </p>
-                        <div className="flex items-center justify-between gap-3">
-                          <span className="min-w-0 flex-1">
-                            <span className="block text-[14px] font-medium">同步到真机微信</span>
-                            <span className="mt-0.5 block text-[11px] leading-relaxed text-muted-foreground">
-                              {replySyncWx ? '开启：网站里 TA 的回复会出现在真机微信（需 24 小时内和 TA 说过话）' : '已关闭：网站里聊天不再同步真机微信'}
-                            </span>
-                          </span>
-                          <Switch
-                            checked={replySyncWx}
-                            onCheckedChange={(v) => {
-                              saveWebsiteReplySync('wx', v);
-                              setReplySyncWx(v);
-                              showToast(v ? '已开启：网站回复将同步到真机微信' : '已关闭：网站回复不再同步真机微信');
-                            }}
-                            data-testid="cloud-reply-sync-wx"
-                            aria-label="同步到真机微信"
-                          />
-                        </div>
-                        <div className="flex items-center justify-between gap-3">
-                          <span className="min-w-0 flex-1">
-                            <span className="block text-[14px] font-medium">同步到真机 QQ</span>
-                            <span className="mt-0.5 block text-[11px] leading-relaxed text-muted-foreground">
-                              {replySyncQq ? '开启：网站里 TA 的回复会出现在真机 QQ（对方 5 分钟内发过消息时免配额；QQ 平台主动消息每月限 4 条）' : '已关闭：网站里聊天不再同步真机 QQ'}
-                            </span>
-                          </span>
-                          <Switch
-                            checked={replySyncQq}
-                            onCheckedChange={(v) => {
-                              saveWebsiteReplySync('qq', v);
-                              setReplySyncQq(v);
-                              showToast(v ? '已开启：网站回复将同步到真机 QQ（QQ 主动消息每月限 4 条）' : '已关闭：网站回复不再同步真机 QQ');
-                            }}
-                            data-testid="cloud-reply-sync-qq"
-                            aria-label="同步到真机 QQ"
-                          />
-                        </div>
-                      </div>
-                    )}
-                    {/* v15 运行时版本行：旧代 = 真机上还在跑旧函数（只回一两条/不会表情包/不会语音）
-                        ——重新同步/一键部署即升级；版本号由重新同步自动探测写入 */}
-                    {supaDeployed && (
-                      <div className="flex items-center justify-between gap-3 rounded-[14px] bg-black/[0.03] px-4 py-2.5 text-[12px] dark:bg-white/[0.04]" data-testid="cloud-runtime-ver">
-                        <span className="shrink-0 text-muted-foreground">云端运行时版本</span>
-                        <span className={`min-w-0 flex-1 text-right ${runtimeVer != null && runtimeVer < 15 ? 'text-[#C77700] dark:text-[#F0C24B]' : ''}`}>
-                          {runtimeVer == null
-                            ? '未知（点下方「重新同步运行包」探测）'
-                            : runtimeVer < 15
-                              ? `v${runtimeVer}（旧版——真机还是旧行为，点下方「重新同步运行包」升级）`
-                              : `v${runtimeVer}（最新）`}
-                        </span>
-                      </div>
-                    )}
                     {/* 云端测试一次：用户自己动手跑一轮（结果弹「云端测试」弹窗） */}
                     <button
                       type="button"
@@ -10105,8 +10032,7 @@ function CloudPage({ onBack }: { onBack: () => void }) {
                       {pingLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
                       {pingLoading ? '正在测试（单轮收发，约 40 秒）…' : '云端测试一次'}
                     </button>
-                    {/* 重新同步运行包：接入 / 换绑 / 断开微信 QQ、改「API 设置」都会自动同步——
-                        此按钮仅作手动兑底（结果异常时补推） */}
+                    {/* 重新同步运行包：改动会自动同步——此按钮仅作手动兑底（异常时补推 + 升级运行时） */}
                     <button
                       type="button"
                       onClick={() => void runSync()}
@@ -10114,16 +10040,14 @@ function CloudPage({ onBack }: { onBack: () => void }) {
                       className="flex w-full items-center justify-between gap-2 rounded-[14px] bg-white/60 px-4 py-3 text-left transition-colors active:bg-muted/50 disabled:opacity-50 ring-1 ring-black/[0.04] dark:bg-white/[0.06] dark:ring-white/[0.08]"
                       data-testid="cloud-supa-sync"
                     >
-                      <span className="min-w-0 flex-1">
-                        <span className="block text-[14.5px] font-medium">重新同步运行包</span>
-                        <span className="mt-0.5 block text-[11px] text-muted-foreground">接入 / 换绑 / 断开微信 QQ、改 API 设置都会自动同步；本按钮兑底用，并会把云端运行时代码升级到最新（新能力上线后点一次即可）</span>
-                      </span>
+                      <span className="min-w-0 flex-1 text-[14.5px] font-medium">重新同步运行包</span>
                       {syncLoading ? (
                         <Loader2 className="h-4 w-4 shrink-0 animate-spin text-muted-foreground" />
                       ) : (
                         <RefreshCw className="h-4 w-4 shrink-0 text-muted-foreground/70" />
                       )}
                     </button>
+                    <p className="text-[11px] leading-relaxed text-muted-foreground/80">换角色 / 改 API 设置会自动同步；点它可手动兑底并升级云端运行时。</p>
                     <CloudResultBox r={syncResult} />
                   </div>
                 </div>

@@ -1,13 +1,11 @@
 'use client';
 
 /**
- * 「接入QQ」页（动态页入口）—— QQ 官方机器人平台（q.qq.com）接入 UI · v9 流程重排版。
+ * 「接入QQ」页（动态页入口）—— QQ 官方机器人平台（q.qq.com）接入 UI · v21 精简版。
  *
- * v9（自动在线，替代 v8 的回调配置卡片）：QQ 收发彻底零配置——接入后自动开启内置
- * IM 网关，走 QQ 官方 WebSocket 长连接（「事件订阅」默认支持，出站连接；无需去
- * q.qq.com 控制台配置任何回调地址，也不受 QQ 平台对 Webhook 回调出口的限制——
- * 旧版「境外出口被拒 503」的坑整条绕开）。网关 7×24 在线收发，本页轮询状态卡展示
- * 连接态/最近消息/异常原因；聊天历史照旧写 Supabase，「拉取云端聊天记录」不变。
+ * v21 精简（用户定调「删无用功能」）：QQ 秒回加速、真机 QQ 能力（斗图模式）、拉取云端
+ * 聊天记录均已下线——真机收发由云端 Supabase 定时任务 7×24 承担（QQ 官方 WebSocket
+ * 长连接）；聊天记录由 cloud-history-sync 常驻自动同步；网关加速由 设置 → 云端助手 统一管理。
  * v8（用户定调「先选角色 AI，再填写 AppID/AppSecret/扫码接入」）：步骤一选角色（弹窗选人）
  *   → 步骤二扫码连接 / 填写凭证（扫完/测完自动绑定步骤一选好的角色）。
  * v7（用户定调「提示词少一点、简约、要弹窗的弹窗、要收缩选择」）：长说明收进收缩区，
@@ -27,33 +25,18 @@ import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
-  CloudOff,
-  DownloadCloud,
   Eye,
   EyeOff,
   Info,
   Loader2,
-  Radio,
   RefreshCw,
   ShieldCheck,
-  Sparkles,
   X,
 } from 'lucide-react';
-import { pullQqCloudHistory, useQqConnect } from '@/lib/ios/qq-connect';
+import { useQqConnect } from '@/lib/ios/qq-connect';
 import { useWxCloud } from '@/lib/ios/wx-cloud/store';
-import { autoSyncRunPackageIfDeployed } from '@/lib/ios/wx-cloud/supabase';
-import { getQqStickerBattle, saveQqStickerBattle } from '@/lib/ios/qq-cloud-features';
 // v18 全局错误中心：同步失败态极简指示器（详情进弹窗）
 import { InlineErrorChip } from '../error-center';
-import { Switch } from '@/components/ui/switch';
-// 内置 IM 网关（v9：QQ WebSocket 长连接，免回调配置）
-import {
-  ensureImGatewayRunning,
-  fetchImGatewayStatus,
-  startImGateway,
-  stopImGateway,
-  type ImGatewayStatus,
-} from '@/lib/ios/wx-cloud/gateway';
 import { getContact } from '@/lib/ios/contacts-store';
 import { avatarFor, displayNameOf } from '@/lib/contacts';
 import type { ContactRecord } from '@/lib/contacts';
@@ -203,7 +186,7 @@ function BannerLine({
 export function QqConnectPage({ contacts, onBack }: { contacts: ContactRecord[]; onBack: () => void }) {
   // store：boot 读本地凭证；test 成功（或网络不通兜底）即保存；bindContact 绑定角色；disconnect 清除；
   // qr/startQrBind/stopQrBind：官方扫码绑定会话（页面生成二维码 → 手机 QQ 扫码确认即接入）
-  const { ready, login, testing, verifying, lastTest, pulling, boot, test, verifyViaCloud, bindContact, disconnect, qr, startQrBind, stopQrBind } = useQqConnect();
+  const { ready, login, testing, verifying, lastTest, boot, test, verifyViaCloud, bindContact, disconnect, qr, startQrBind, stopQrBind } = useQqConnect();
   // 本地 UI 状态：凭证草稿 / Secret 明文开关
   const [appId, setAppId] = useState('');
   const [appSecret, setAppSecret] = useState('');
@@ -218,96 +201,22 @@ export function QqConnectPage({ contacts, onBack }: { contacts: ContactRecord[];
   const [rebindOpen, setRebindOpen] = useState(false);
   const [offDialog, setOffDialog] = useState(false);
   const [bindNote, setBindNote] = useState('');
-  const [pullMsg, setPullMsg] = useState<{ ok: boolean; msg: string } | null>(null);
 
   // 云端助手状态：QQ 收发靠内置网关（配置中心在 Supabase），顶部横幅依据它提示
   const cloudReady = useWxCloud((s) => s.ready);
   // 接入/换绑/断开后的后台自动同步结果（只看 QQ 渠道；微信渠道的同步结果只在微信接入页展示）
   const lastAutoSync = useWxCloud((s) => s.lastAutoSync);
 
-  // —— v15 真机 QQ 能力开关（斗图模式）：随运行包上云，改动即自动同步 ——
-  // （v16：定时主动消息已下线——主动发消息跟随网站各角色的「主动发消息」设置）
-  const [battle, setBattle] = useState(getQqStickerBattle());
-  const toggleBattle = (on: boolean) => {
-    saveQqStickerBattle(on);
-    setBattle(on);
-    void autoSyncRunPackageIfDeployed(on ? '斗图模式已开启' : '斗图模式已关闭', 'qq');
-  };
+  // —— QQ 自动在线（v9）：内置网关的 QQ WebSocket 长连接——接入后自动开启（幂等）；
+  // 手动兑底开关已下线（v21）——加速由 设置 → 云端助手 统一管理，自动拉起由
+  // cloud-history-sync 常驻模块承担，本页不再重复接线。
+
   // 「真部署过」证据：选了平台 ≠ 部署了；QQ 必须真部署（配置中心 + 历史回写都在这）
   const cloudDeployed = useWxCloud((s) =>
     (s.platform === 'supabase' && !!s.supabase?.deployedAt) ||
     (s.platform === 'hf' && !!s.hf?.deployedAt) ||
     (s.platform === 'clawcloud' && !!s.clawcloudAt),
   );
-
-  // —— QQ 自动在线（v9）：内置网关的 QQ WebSocket 长连接——接入后自动开启（幂等）；
-  // 本页 5 秒一轮拉状态：连接态 / 最近消息 / 异常原因；手动兑底开关一枚。
-  // 用户手动停过（本会话内不再自动拉起）不追着重开。
-  const [gw, setGw] = useState<ImGatewayStatus | null>(null);
-  const [gwBusy, setGwBusy] = useState(false);
-  const [gwNote, setGwNote] = useState('');
-  const gwManuallyStopped = useRef(false);
-  const gwLastEnsureRef = useRef(0);
-  const qqCh = gw?.qq;
-  const gwRunning = !!gw?.running;
-
-  // 状态轮询 + 看门狗：已接入 + 已部署才拉（页面开着期间 5s 一轮）；发现掉线且非手动停止
-  // 时自动拉起（网关服务重启/掉线自愈，限 60s 一次）
-  useEffect(() => {
-    if (!login || !cloudDeployed) return;
-    let dead = false;
-    let timer = 0;
-    const tick = async () => {
-      const s = await fetchImGatewayStatus();
-      if (dead) return;
-      setGw(s);
-      if (!s?.running && !gwManuallyStopped.current && Date.now() - gwLastEnsureRef.current > 60000) {
-        gwLastEnsureRef.current = Date.now();
-        void ensureImGatewayRunning('检测到掉线自动恢复');
-      }
-      timer = window.setTimeout(tick, 5000);
-    };
-    void tick();
-    return () => {
-      dead = true;
-      window.clearTimeout(timer);
-    };
-  }, [login, cloudDeployed]);
-
-  // 接入即自动在线：已接入 + 已部署且网关没在跑 → 静默开启（幂等；仅进入页面时试一次，
-  // 失败在状态卡里可见，不弹窗打扰）。
-  useEffect(() => {
-    if (!login || !cloudDeployed || gwManuallyStopped.current) return;
-    let dead = false;
-    (async () => {
-      const cur = await fetchImGatewayStatus();
-      if (dead) return;
-      if (!cur?.running) {
-        const r = await ensureImGatewayRunning('QQ 接入后自动在线');
-        if (r && !r.ok) setGwNote(r.msg);
-      }
-      setGw(await fetchImGatewayStatus());
-    })().catch(() => undefined);
-    return () => {
-      dead = true;
-    };
-  }, [login, cloudDeployed]);
-
-  /** 手动开关兑底：开启（连接失败/没拉起来时）/ 停止（想回到页面开着才回复的本机模式） */
-  const toggleGateway = async (on: boolean) => {
-    if (gwBusy) return;
-    setGwBusy(true);
-    if (!on) gwManuallyStopped.current = true;
-    try {
-      const r = on ? await startImGateway('QQ 接入页手动开启') : await stopImGateway();
-      setGwNote(r.ok ? r.msg + (r.note ? `（${r.note}）` : '') : r.msg);
-      setGw(await fetchImGatewayStatus());
-    } catch (e) {
-      setGwNote(e instanceof Error ? e.message : String(e));
-    } finally {
-      setGwBusy(false);
-    }
-  };
 
   // 挂载时读一次本地凭证（已接入过则直接进已连接态）+ 云端助手状态（幂等）
   useEffect(() => {
@@ -420,23 +329,6 @@ export function QqConnectPage({ contacts, onBack }: { contacts: ContactRecord[];
     setBindNote(`已切换为「${name}」，云端人设已自动同步`);
   };
 
-  /**
-   * 拉取云端 QQ 聊天记录：复用 store 的 pulling 状态位转圈（与 pullHistory 动作同一状态、
-   * 同一防重入闸），但直接调函数版 pullQqCloudHistory——store 动作版不回传条数与失败原因，
-   * 本页要渲染「已同步 N 条到 QQ 聊天界面」的精确文案和失败提示。
-   */
-  const doPull = async () => {
-    if (pulling) return;
-    setPullMsg(null);
-    useQqConnect.setState({ pulling: true });
-    try {
-      const r = await pullQqCloudHistory();
-      setPullMsg(r.ok ? { ok: true, msg: r.added ? `已同步 ${r.added} 条到 QQ 聊天界面` : '云端暂无新记录' } : { ok: false, msg: r.msg });
-    } finally {
-      useQqConnect.setState({ pulling: false });
-    }
-  };
-
   return (
     <div data-testid="qq-bot-page" className="relative flex h-full flex-col bg-[#F6F7F9] pt-[54px] dark:bg-[#111214]">
       {/* 顶部导航（QQ 子页风格：返回 + 居中标题） */}
@@ -448,31 +340,9 @@ export function QqConnectPage({ contacts, onBack }: { contacts: ContactRecord[];
       </div>
 
       <div className="flex-1 overflow-y-auto px-4 pb-[44px] pt-2">
-        {/* ===== 云端状态横幅（v9）：网关运行态优先——就绪/长连接异常/未开；未部署其次 ===== */}
-        {cloudReady && cloudDeployed && login && gwRunning && qqCh?.state === 'ready' ? (
-          <BannerLine tone="ok" text="秒回加速 · QQ 长连接已建立，TA 在真机 QQ 上在线" />
-        ) : cloudReady && cloudDeployed && login && gwRunning && qqCh?.state === 'error' ? (
-          <div data-testid="qq-bot-cloud-reject">
-            <BannerLine
-              tone="warn"
-              text="QQ 长连接异常，真机 QQ 上 TA 暂时不在线"
-              detail={{
-                title: 'QQ 长连接异常',
-                paras: [
-                  'QQ 收发走官方 WebSocket 长连接（免回调配置）；异常常见原因：凭证不对（到 q.qq.com 控制台核对 AppID/AppSecret）、机器人被下架/封禁、或网络波动。',
-                  `最近错误：${qqCh?.lastError || '未知'}。网关会自动重连；持续失败到「云端验证凭证」验真，或重新接入。`,
-                ],
-              }}
-            />
-          </div>
-        ) : cloudReady && cloudDeployed && login && !gwRunning ? (
-          <BannerLine
-            tone="warn"
-            text="秒回加速未开启：QQ 消息改由云端定时任务自动收发（回复按分钟级）"
-            detail={{ title: '秒回加速未开启', paras: ['云端 24 小时收发由你 Supabase 里的定时任务承担（部署最新版云端函数即可），TA 仍会自动回复，只是分钟级。', '到下方「QQ 秒回加速」卡片点「开启」，本站在线时回复接近秒回。'] }}
-          />
-        ) : cloudReady && cloudDeployed ? (
-          <BannerLine tone="ok" text="云端已就绪，接入后 TA 24 小时自动收发" />
+        {/* ===== 云端状态横幅（v21 精简）：已部署绿条 / 已接入但未部署警示 ===== */}
+        {cloudReady && cloudDeployed ? (
+          <BannerLine tone="ok" text={login ? '云端在线，TA 在真机 QQ 上 24 小时自动收发' : '云端已就绪，接入后 TA 24 小时自动收发'} />
         ) : cloudReady && !cloudDeployed && login ? (
           <BannerLine
             tone="warn"
@@ -774,128 +644,6 @@ export function QqConnectPage({ contacts, onBack }: { contacts: ContactRecord[];
               )
             ) : null}
 
-            {/* QQ 秒回加速（v9）：内置网关的 QQ 官方 WebSocket 长连接——接入后自动开启，
-                免费免配置（无需 q.qq.com 回调地址，不受平台对 Webhook 出口的限制）；
-                云端 24 小时收发骨干由用户 Supabase 定时任务独立承担，本卡只是本站在线时的
-                加速器。本卡展示连接态/最近消息/异常原因 + 手动开关兑底。 */}
-            {cloudDeployed && login && (
-              <div className="mt-3 rounded-[14px] bg-white px-4 py-3.5 dark:bg-[#1B1C1F]" data-testid="qq-bot-gateway-card">
-                <div className="flex items-center gap-2">
-                  <Radio className="h-4 w-4 shrink-0 text-[#0099FF]" strokeWidth={2} aria-hidden="true" />
-                  <p className="text-[14.5px] font-medium">QQ 秒回加速（本站在线时）</p>
-                  <span
-                    className={`shrink-0 rounded-full px-2 py-0.5 text-[10.5px] font-medium ${
-                      gwRunning && qqCh?.state === 'ready'
-                        ? 'bg-[#34C759]/10 text-[#34C759]'
-                        : gwRunning && qqCh?.state === 'error'
-                          ? 'bg-[#FF453A]/10 text-[#FF453A]'
-                          : 'bg-black/[0.05] text-black/40 dark:bg-white/10 dark:text-white/40'
-                    }`}
-                  >
-                    {gwRunning
-                      ? qqCh?.state === 'ready'
-                        ? '在线'
-                        : qqCh?.state === 'error'
-                          ? '异常'
-                          : qqCh?.state === 'disabled'
-                            ? '未接入'
-                            : '连接中'
-                      : '未开启'}
-                  </span>
-                </div>
-                <p className="mt-1 text-[11.5px] leading-relaxed text-black/40 dark:text-white/40">
-                  {gwRunning
-                    ? '走 QQ 官方 WebSocket 长连接收发（免费 · 免配置 · 无需回调地址），回复接近秒回'
-                    : '未开启不影响云端 24 小时收发（回复按分钟级）；开启后本站在线时接近秒回'}
-                </p>
-                {/* 状态行：就绪（绿，带最近消息时间）/ 连接中（转圈）/ 异常（红，带原因）/ 未开启 */}
-                {(gwRunning || gwNote) && (
-                  <p
-                    className={`mt-2 text-[12px] leading-relaxed ${
-                      gwRunning && qqCh?.state === 'ready' ? 'text-[#34C759]' : qqCh?.state === 'error' ? 'text-[#F5455C]' : 'text-[#C77700] dark:text-[#F0C24B]'
-                    }`}
-                    data-testid="qq-bot-gateway-status"
-                  >
-                    {gwRunning ? (
-                      qqCh?.state === 'ready' ? (
-                        <>
-                          长连接已建立{qqCh?.botName ? `（机器人「${qqCh.botName}」）` : ''}
-                          {qqCh?.lastEventAt ? ` · 最近消息 ${new Date(qqCh.lastEventAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}` : ''}
-                          ——在 QQ 里发条消息试试（历史用下方「拉取云端聊天记录」同步）
-                        </>
-                      ) : qqCh?.state === 'error' ? (
-                        <>连接异常：{qqCh?.lastError || '未知原因'}（网关自动重连中）</>
-                      ) : qqCh?.state === 'disabled' ? (
-                        <>云端运行包里还没有 QQ 凭证——正在自动补同步（接入后约半分钟内点亮）；若长时间不亮，到 设置 → 云端助手 点「重新同步运行包」</>
-                      ) : (
-                        <>
-                          <Loader2 className="mr-1 inline h-3 w-3 animate-spin align-[-1px]" aria-hidden="true" />
-                          正在连接 QQ 平台（拿到凭证后几秒内点亮）…
-                        </>
-                      )
-                    ) : (
-                      gwNote || '未开启（点下方按钮开启，或重新进入本页自动开启）'
-                    )}
-                  </p>
-                )}
-                {/* 手动开关兑底：未开启→开启；开启→停止 */}
-                <button
-                  type="button"
-                  data-testid="qq-bot-gateway-toggle"
-                  disabled={gwBusy}
-                  onClick={() => void toggleGateway(!gwRunning)}
-                  className={`mt-2 flex h-[38px] w-full items-center justify-center gap-1.5 rounded-[12px] text-[13.5px] font-medium active:opacity-80 disabled:opacity-50 ${
-                    gwRunning
-                      ? 'bg-black/[0.05] text-black/70 dark:bg-white/10 dark:text-white/70'
-                      : 'bg-[#0099FF] text-white shadow-[0_4px_12px_rgba(0,153,255,0.25)]'
-                  }`}
-                >
-                  {gwBusy ? (
-                    <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-                  ) : (
-                    <Radio className="h-4 w-4" aria-hidden="true" />
-                  )}
-                  {gwBusy ? '处理中…' : gwRunning ? '停止（回到云端分钟级）' : '开启秒回加速'}
-                </button>
-                <div className="mt-1.5">
-                  <Fold title="收不到回复时排查" testid="qq-bot-gateway-fold">
-                    <div className="space-y-1.5 text-[12px] leading-[1.55] text-black/50 dark:text-white/50">
-                      <p>① 确认本卡状态是「在线」；异常原因会直接写在状态行里（凭证不对时到 q.qq.com 控制台核对 AppID/AppSecret）。</p>
-                      <p>② 到 q.qq.com 控制台确认「事件订阅」连接方式是 WebSocket（默认即是；若曾被切成 Webhook 请切回——Webhook 模式事件不会推给长连接）。</p>
-                      <p>③ 聊天记录用下方「拉取云端聊天记录」同步进手机 QQ 聊天界面。</p>
-                    </div>
-                  </Fold>
-                </div>
-              </div>
-            )}
-
-            {/* ===== v15 真机 QQ 能力（随运行包上云）：斗图模式（v16：定时主动消息已下线——
-               主动发消息改为跟随网站聊天设置里的「主动发消息」，真机随站内引擎一起发） ===== */}
-            {login && (
-              <div className="mt-3 rounded-[14px] bg-white px-4 py-3.5 dark:bg-[#1B1C1F]" data-testid="qq-bot-features-card">
-                <div className="flex items-center gap-2">
-                  <Sparkles className="h-4 w-4 shrink-0 text-[#0099FF]" strokeWidth={2} aria-hidden="true" />
-                  <p className="text-[14.5px] font-medium">真机 QQ 能力</p>
-                </div>
-                <p className="mt-1 text-[11.5px] leading-relaxed text-black/40 dark:text-white/40">
-                  开关立即生效并自动同步云端；主动发消息跟随网站里各角色的「主动发消息」设置（QQ 平台限每月 4 条）
-                </p>
-                {/* 斗图模式 */}
-                <div className="mt-2.5 flex items-center justify-between gap-3">
-                  <span className="min-w-0 flex-1">
-                    <span className="block text-[14px] font-medium">斗图模式</span>
-                    <span className="mt-0.5 block text-[11px] text-black/40 dark:text-white/40">对方发表情包/挑衅斗图时，TA 连发 3~5 张表情包反击</span>
-                  </span>
-                  <Switch
-                    checked={battle}
-                    onCheckedChange={(v) => toggleBattle(v)}
-                    aria-label="斗图模式"
-                    data-testid="qq-battle-switch"
-                  />
-                </div>
-              </div>
-            )}
-
             {!login.boundContactId ? (
               /* ===== 补选角色入口卡（存量未绑定时展示；v8 新流程接入时已自动绑定不会走到这） ===== */
               <button
@@ -914,27 +662,6 @@ export function QqConnectPage({ contacts, onBack }: { contacts: ContactRecord[];
               <>
                 {/* ===== 管理分组列表（v7 简约版：一张卡分行的 iOS 列表） ===== */}
                 <div className="mt-3 divide-y divide-black/[0.05] overflow-hidden rounded-[14px] bg-white dark:divide-white/[0.08] dark:bg-[#1B1C1F]">
-                  {/* 拉取云端聊天记录：自动在线期间收发的 QQ 聊天合进手机 QQ 聊天界面 */}
-                  <button
-                    type="button"
-                    data-testid="qq-bot-pull"
-                    disabled={pulling}
-                    onClick={() => void doPull()}
-                    className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left active:bg-black/[0.03] disabled:opacity-60 dark:active:bg-white/[0.06]"
-                  >
-                    <span className="min-w-0 flex-1 text-[15px] font-medium">拉取云端聊天记录</span>
-                    {pulling ? (
-                      <Loader2 className="h-[17px] w-[17px] shrink-0 animate-spin text-[#0099FF]" strokeWidth={2.2} aria-hidden="true" />
-                    ) : (
-                      <DownloadCloud className="h-[17px] w-[17px] shrink-0 text-black/25 dark:text-white/25" strokeWidth={2} aria-hidden="true" />
-                    )}
-                  </button>
-                  {pullMsg && (
-                    <p className={`px-4 pb-3 pt-0 text-[13px] leading-relaxed ${pullMsg.ok ? 'text-[#34C759]' : 'text-[#F5455C]'}`} data-testid="qq-bot-pull-result">
-                      {pullMsg.msg}
-                    </p>
-                  )}
-
                   {/* 云端验证凭证：新取凭证端点海外可达，本地两路都不通时由云端助手 verify-qq 代验 */}
                   {cloudDeployed ? (
                     <button
@@ -1000,13 +727,13 @@ export function QqConnectPage({ contacts, onBack }: { contacts: ContactRecord[];
               </>
             )}
 
-            {/* 说明收缩区（v9 精简：云端 24 小时收发 + 本站秒回加速模型） */}
+            {/* 说明收缩区（v21 精简） */}
             <div className="mt-3">
               <Fold title="说明" testid="qq-bot-help-fold">
                 <div className="space-y-2 text-[12.5px] leading-[1.55] text-black/50 dark:text-white/50">
-                  <p>接入后云端 24 小时自动收发：QQ 走官方 WebSocket 出站长连接（免费 · 免配置，不用去 q.qq.com 控制台配回调地址；若控制台「事件订阅」被切成 Webhook 模式，切回 WebSocket 才能收到消息）——定时任务存在你自己的 Supabase 里，本站关了也照常收发。</p>
-                  <p>真机收不到回复：看「QQ 秒回加速」卡片的状态行（异常原因写在那里）；凭证存疑点「云端验证凭证」验真。</p>
-                  <p>聊天记录用「拉取云端聊天记录」同步进手机 QQ 聊天界面；断开后凭证从本机删除，重新扫一次码即可再接入。</p>
+                  <p>接入后云端 24 小时自动收发（QQ 官方 WebSocket 长连接，免费免配置）；聊天记录自动同步进手机 QQ 聊天界面。</p>
+                  <p>真机收不到回复时：点「云端验证凭证」验真，或到 q.qq.com 控制台核对 AppID/AppSecret。</p>
+                  <p>断开后凭证从本机删除，重新扫一次码即可再接入。</p>
                 </div>
               </Fold>
             </div>
