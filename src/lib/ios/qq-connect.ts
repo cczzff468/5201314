@@ -360,34 +360,63 @@ async function doPullQqCloudHistory(): Promise<{ ok: boolean; msg: string; added
   const login = memQqBot;
   if (!login) return { ok: false, msg: '还没接入 QQ 机器人' };
   if (!login.boundContactId) return { ok: false, msg: '还没绑定角色：请先选择一个 AI 角色' };
-  // v8：读历史双通道（同微信 pullWxCloudHistory）——有 serviceKey 直连 Storage；没有
-  // （代写路径部署后为空）经云端函数 read-file 中继。
-  if (!supa?.ref || (!supa.serviceKey && !supa.secret)) return { ok: false, msg: '云端未就绪：请先到 设置 → 云端助手 完成部署' };
+  // v21 网关本地通道优先：网关在线期间真机 QQ 收发的每条记录都在本机文件里（核心
+  // appendQqHistory 逐条镜像落盘，与 Supabase Storage 无关）——Storage 被 402/502
+  // 限制/项目暂停期间网站 QQ 聊天界面照常显示（「真机 QQ 上发的消息网站里看不到」的
+  // 根修）。网关不在线/连不上时本通道为空，走下方云端双通道（原逻辑不变）。
+  let gwList: QqCloudMsg[] = [];
   try {
-    let j: { msgs?: QqCloudMsg[] } | null = null;
-    if (supa.serviceKey) {
-      // 按类型区分（官方文档）：新式 sb_secret_/sb_publishable_ key 不是 JWT，只能放
-      // apikey 头——放 Bearer 会被 Storage 当 JWT 解析报 400 Invalid Compact JWS；eyJ 双带
-      const k = supa.serviceKey;
-      const isNewStyle = k.startsWith('sb_secret_') || k.startsWith('sb_publishable_');
-      const res = await fetch(`https://${supa.ref}.supabase.co/storage/v1/object/wx-cloud/qq-history.json`, {
-        headers: isNewStyle ? { apikey: k } : { apikey: k, Authorization: `Bearer ${k}` },
-        signal: AbortSignal.timeout(15_000),
+    const { fetchGatewayLocalHistory } = await import('./wx-cloud/gateway');
+    const gw = await fetchGatewayLocalHistory('qq');
+    for (const m of gw || []) {
+      if (!m || typeof m.id !== 'string' || !m.id || typeof m.content !== 'string' || !m.content) continue;
+      gwList.push({
+        id: m.id,
+        role: m.role === 'user' || m.role === 'me' ? 'me' : 'peer',
+        content: m.content,
+        ts: Number(m.ts) || Date.now(),
       });
-      if (!res.ok) return { ok: false, msg: '云端还没有 QQ 聊天记录（在 QQ 上和 TA 聊过之后才有）' };
-      j = (await res.json()) as { msgs?: QqCloudMsg[] };
-    } else {
-      // 动态 import 防模块环（supabase.ts → run-package.ts → qq-app/core 链）
-      const { readBucketJsonViaRelay } = await import('./wx-cloud/supabase');
-      j = await readBucketJsonViaRelay<{ msgs?: QqCloudMsg[] }>(supa.ref, 'qq-history.json');
-      if (!j) {
-        return {
-          ok: false,
-          msg: '云端还没有 QQ 聊天记录（在 QQ 上和 TA 聊过之后才有）。若 TA 在真机 QQ 上一直不回：回 设置 → 云端助手 重新点一次「一键部署」（升级云端函数）再看',
-        };
-      }
     }
-    const list = Array.isArray(j.msgs) ? j.msgs : [];
+  } catch {
+    /* 网关通道失败：回退云端 */
+  }
+  // 云端双通道（v8 原逻辑）：有 serviceKey 直连 Storage；没有经云端函数 read-file 中继。
+  // v21：云端失败不再拦截本地通道的合并——两路都取到时按 id 去重（网关条目与云端条目
+  // 同 id，先到的进列、后到的跳过），云端只是镜像。
+  let cloudMsg = '';
+  let cloudList: QqCloudMsg[] = [];
+  if (supa?.ref && (supa.serviceKey || supa.secret)) {
+    try {
+      let j: { msgs?: QqCloudMsg[] } | null = null;
+      if (supa.serviceKey) {
+        // 按类型区分（官方文档）：新式 sb_secret_/sb_publishable_ key 不是 JWT，只能放
+        // apikey 头——放 Bearer 会被 Storage 当 JWT 解析报 400 Invalid Compact JWS；eyJ 双带
+        const k = supa.serviceKey;
+        const isNewStyle = k.startsWith('sb_secret_') || k.startsWith('sb_publishable_');
+        const res = await fetch(`https://${supa.ref}.supabase.co/storage/v1/object/wx-cloud/qq-history.json`, {
+          headers: isNewStyle ? { apikey: k } : { apikey: k, Authorization: `Bearer ${k}` },
+          signal: AbortSignal.timeout(15_000),
+        });
+        if (!res.ok) cloudMsg = '云端还没有 QQ 聊天记录（在 QQ 上和 TA 聊过之后才有）';
+        else j = (await res.json()) as { msgs?: QqCloudMsg[] };
+      } else {
+        // 动态 import 防模块环（supabase.ts → run-package.ts → qq-app/core 链）
+        const { readBucketJsonViaRelay } = await import('./wx-cloud/supabase');
+        j = await readBucketJsonViaRelay<{ msgs?: QqCloudMsg[] }>(supa.ref, 'qq-history.json');
+        if (!j) {
+          cloudMsg =
+            '云端还没有 QQ 聊天记录（在 QQ 上和 TA 聊过之后才有）。若 TA 在真机 QQ 上一直不回：回 设置 → 云端助手 重新点一次「一键部署」（升级云端函数）再看';
+        }
+      }
+      if (j && Array.isArray(j.msgs)) cloudList = j.msgs;
+    } catch (e) {
+      cloudMsg = e instanceof Error ? e.message : String(e);
+    }
+  } else {
+    cloudMsg = '云端未就绪：请先到 设置 → 云端助手 完成部署';
+  }
+  const list = [...gwList, ...cloudList];
+  if (!list.length) return { ok: false, msg: cloudMsg || '云端还没有 QQ 聊天记录（在 QQ 上和 TA 聊过之后才有）' };
     // v11 合并去重：① 对本地已有 id 去重；② 云端列表内部自身去重（旧版云端同一条被
     // 双写过、qq-history.json 里同 id 两份——都进 add 的话本地会出现两个同 key，QQ 聊天
     // 界面同一条消息渲染两遍 + React「duplicate key」报错的直接根因）；③ 主人的消息
@@ -417,9 +446,6 @@ async function doPullQqCloudHistory(): Promise<{ ok: boolean; msg: string; added
       window.dispatchEvent(new CustomEvent('chat-stream-sysline', { detail: { sessionKey: `qq:${login.boundContactId}` } }));
     }
     return { ok: true, msg: add.length ? `已同步 ${add.length} 条 QQ 聊天记录` : '云端暂无新记录', added: add.length };
-  } catch (e) {
-    return { ok: false, msg: e instanceof Error ? e.message : String(e) };
-  }
 }
 
 // ---------------- Store ----------------

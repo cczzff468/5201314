@@ -173,3 +173,36 @@ export async function refreshImGateway(): Promise<void> {
     /* 静默：网关没跑/连不上都不影响主流程 */
   }
 }
+
+// ---------------- v21 网关本地聊天历史 ----------------
+
+/** 网关本地历史条目（核心 appendQqHistory / saveWxHistory 逐条镜像落盘的形状） */
+export interface GatewayLocalHistMsg {
+  id?: string;
+  role?: string;
+  content?: string;
+  ts?: number;
+}
+
+/**
+ * v21 拉网关本地聊天历史（op=qq-history / wx-history）：网关在线期间真机微信/QQ 收发的
+ * 每条记录都在本机文件里（核心逐条镜像落盘，与 Supabase Storage 无关）——Storage 被
+ * 402/502 限制/项目暂停期间网站聊天界面照常显示；云端 Storage 只是镜像。
+ * 连不上/网关没跑/没数据返回 null（调用方自己回退云端直读/中继）。
+ */
+export async function fetchGatewayLocalHistory(channel: 'qq' | 'wx'): Promise<GatewayLocalHistMsg[] | null> {
+  try {
+    const res = await fetch(GATEWAY_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ op: channel + '-history' }),
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!res.ok) return null;
+    const j = (await res.json()) as { ok?: boolean; msgs?: GatewayLocalHistMsg[] } | null;
+    if (!j?.ok || !Array.isArray(j.msgs)) return null;
+    return j.msgs;
+  } catch {
+    return null;
+  }
+}

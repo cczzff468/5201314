@@ -302,6 +302,9 @@ async function materializeCore(supaUrl: string, supaKey: string, relayUrl: strin
     `var TTS_LOCAL_URL_INJECT = ${JSON.stringify('http://127.0.0.1:' + PORT + '/tts')};`,
     // v20 本地识图端点：QQ 入站图片（markdown/attachments URL）→ VLM 描述进 LLM 上下文
     `var VLM_LOCAL_URL_INJECT = ${JSON.stringify('http://127.0.0.1:' + PORT + '/vlm')};`,
+    // v21 本地历史端点：聊天历史双写（本机磁盘先落，Storage 上传收敛为轮末批量——写放大
+    // 从每轮 N 次降为 1 次；网站拉取走网关本地通道，云端只是镜像）
+    `var HIST_LOCAL_URL_INJECT = ${JSON.stringify('http://127.0.0.1:' + PORT)};`,
     // v18：本地表情包全量注入（与站内人设清单同源；Storage 受限/旧包时真机照发真图）
     `var LOCAL_EMOTICONS_INJECT = ${JSON.stringify(buildLocalEmoticons())};`,
     // v19：QQ 富媒体 url 制——内置包 CDN URL 表（jsdelivr 直发零托管；语音/用户表情的动态字节
@@ -322,6 +325,66 @@ async function materializeCore(supaUrl: string, supaKey: string, relayUrl: strin
 
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
+}
+
+// ---------------- v21 本地聊天历史（Storage 402/502 双向免疫） ----------------
+
+/** 网关本地历史文件：核心 appendQqHistory / saveWxHistory 镜像逐条 POST /hist 落到本机
+ *  磁盘（与 Supabase Storage 无关）；网站拉取（op=qq-history / wx-history）优先读这里。
+ *  云端 Storage 只是镜像——受限期间真机收发的每条记录都还在本机，网站 QQ/微信聊天
+ *  界面照常显示（「真机 QQ 上发的消息网站里看不到」的根修）。 */
+const LOCAL_QQ_HIST_FILE = 'local-qq-history.json';
+const LOCAL_WX_HIST_FILE = 'local-wx-history.json';
+
+function readLocalHist(file: string): Array<Record<string, any>> {
+  try {
+    const j = JSON.parse(readFileSync(localFilePath(file), 'utf8')) as { msgs?: Array<Record<string, any>> } | null;
+    return (j && Array.isArray(j.msgs)) ? j.msgs : [];
+  } catch {
+    return []; // 还没写过/写坏 → 空表
+  }
+}
+
+function writeLocalHist(file: string, msgs: Array<Record<string, any>>): void {
+  try {
+    writeFileSync(localFilePath(file), JSON.stringify({ msgs, updatedAt: Date.now() }));
+  } catch {
+    /* 磁盘写失败不影响收发主流程 */
+  }
+}
+
+/** POST /hist {channel:'qq'|'wx', msgs:[items]} → 逐条并入本地文件（按 id 幂等；无 id
+ *  条目按 role+ts+content 摘要去重），窗口与云端同口径（QQ 200 / WX 60）。
+ *  仅本机访问（不经 Caddy 对外）。 */
+async function handleLocalHist(req: Request): Promise<Response> {
+  let body: Record<string, any> = {};
+  try {
+    body = (await req.json()) as Record<string, any>;
+  } catch {
+    return Response.json({ ok: false, error: 'bad json' }, { status: 400 });
+  }
+  const channel = String(body.channel || '');
+  const msgs = Array.isArray(body.msgs) ? (body.msgs as Array<Record<string, any>>) : [];
+  if (channel !== 'qq' && channel !== 'wx') {
+    return Response.json({ ok: false, error: 'bad channel' }, { status: 400 });
+  }
+  const file = channel === 'qq' ? LOCAL_QQ_HIST_FILE : LOCAL_WX_HIST_FILE;
+  const cap = channel === 'qq' ? 200 : 60;
+  const cur = readLocalHist(file);
+  const keyOf = (m: Record<string, any>) =>
+    m.id !== undefined ? String(m.id) : JSON.stringify([m.role, m.ts, m.content]);
+  const seen = new Set(cur.map(keyOf));
+  let added = 0;
+  for (const m of msgs) {
+    if (!m || typeof m.content !== 'string' || !m.content) continue;
+    const key = keyOf(m);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    cur.push({ id: m.id, role: m.role, content: String(m.content).slice(0, 500), ts: Number(m.ts) || Date.now() });
+    added++;
+  }
+  writeLocalHist(file, cur.slice(-cap));
+  return Response.json({ ok: true, added });
 }
 
 // ---------------- QQ WebSocket 客户端 ----------------
@@ -651,6 +714,10 @@ function disableQqChannel(gen: number): void {
 
 async function wxLoop(gen: number): Promise<void> {
   let errs = 0;
+  // v21 心跳写节流：旧版每个 10s 轮询轮都写一次 Storage 心跳（一天 8640 次——高频程序化
+  // 直写正是触发 Supabase 免费层风控 402 的写放大主源之一）；60s 一次足够表达在线语义
+  //（读侧窗口都是分钟级）。
+  let lastHbAt = 0;
   // v16：v15 的定时主动消息（早安/晚安）已按机主定调删除——主动消息改由站内「主动发消息」
   // 引擎驱动（deliverProactiveMsg → 网关 op=send-active → cloudSendActive），本循环只管收发
   while (rt && rt.gen === gen) {
@@ -661,7 +728,10 @@ async function wxLoop(gen: number): Promise<void> {
       wx.lastRunAt = Date.now();
       wx.lastError = '';
       if (n > 0) wx.replied += n;
-      await rt.core.writeHeartbeat({ source: 'im-gateway' });
+      if (Date.now() - lastHbAt > 60_000) {
+        lastHbAt = Date.now();
+        await rt.core.writeHeartbeat({ source: 'im-gateway' }).catch(() => undefined);
+      }
     } catch (e) {
       const msg = String((e as Error)?.message || e);
       wx.lastError = msg.slice(0, 160);
@@ -953,6 +1023,10 @@ Bun.serve({
     if (url.pathname === '/vlm' && req.method === 'POST') {
       return handleLocalVlm(req);
     }
+    // v21 本地历史端点（核心 appendQqHistory / saveWxHistory 镜像落盘；仅本机访问）
+    if (url.pathname === '/hist' && req.method === 'POST') {
+      return handleLocalHist(req);
+    }
     if (url.pathname !== '/api/im-gateway') {
       return Response.json({ ok: false, error: 'not found' }, { status: 404 });
     }
@@ -1016,6 +1090,13 @@ Bun.serve({
         } catch (e) {
           return Response.json({ ok: false, msg: '直推落盘失败：' + String((e as Error)?.message || e).slice(0, 100) }, { status: 200 });
         }
+      }
+      // v21 聊天历史本地通道（网站拉取优先读网关本机文件——Storage 402/502 受限期间
+      // 真机收发记录照常显示；网关不在线时网站自己回退云端 Storage 直读/中继）
+      if (op === 'qq-history' || op === 'wx-history') {
+        const file = op === 'qq-history' ? LOCAL_QQ_HIST_FILE : LOCAL_WX_HIST_FILE;
+        const msgs = readLocalHist(file);
+        return Response.json({ ok: true, msgs, n: msgs.length });
       }
       // v16 send-active（站内「主动发消息」引擎触发）：把站内已生成的主动内容发到真机
       // 微信/QQ（cloudSendActive：微信用最近会话上下文、QQ 用活跃消息接口——QQ 每月限 4 条）

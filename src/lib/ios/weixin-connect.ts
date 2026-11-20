@@ -1029,34 +1029,56 @@ async function doPullWxCloudHistory(): Promise<{ ok: boolean; msg: string; added
   const login = memLogin;
   if (!login) return { ok: false, msg: '还没接入真机微信' };
   if (!login.boundContactId) return { ok: false, msg: '还没绑定角色：请先选择一个 AI 角色' };
-  // v8：读历史双通道——有 serviceKey 直连 Storage；没有（代写路径部署后为空、或 key 被项目
-  // 拒收）经云端函数 read-file 中继（与内置网关同一条通道）。原来 serviceKey 为空直接拦
-  // 「云端未就绪」——部署明明成功了却永远拉不到记录，用户实测就是这里。
-  if (!supa?.ref || (!supa.serviceKey && !supa.secret)) return { ok: false, msg: '云端未就绪：请先到 设置 → 云端助手 完成部署' };
+  // v21 网关本地通道优先：网关在线期间真机微信收发的每条记录都在本机文件里（核心
+  // saveWxHistory 镜像落盘，与 Supabase Storage 无关）——Storage 被 402/502 限制/项目
+  // 暂停期间网站微信聊天界面照常显示。网关不在线/连不上时本通道为空，走下方云端双
+  // 通道（v8 原逻辑：serviceKey 直连 / 云端函数 read-file 中继）。
+  const gwList: WxCloudHistItem[] = [];
   try {
-    let j: { msgs?: WxCloudHistItem[] } | null = null;
-    if (supa.serviceKey) {
-      // 新式 sb_secret_ key 只能放 apikey 头（Bearer 会被当 JWT 报 400 Invalid Compact JWS）
-      const k = supa.serviceKey;
-      const isNewStyle = k.startsWith('sb_secret_') || k.startsWith('sb_publishable_');
-      const res = await fetch(`https://${supa.ref}.supabase.co/storage/v1/object/wx-cloud/history.json`, {
-        headers: isNewStyle ? { apikey: k } : { apikey: k, Authorization: `Bearer ${k}` },
-        signal: AbortSignal.timeout(15_000),
-      });
-      if (!res.ok) return { ok: false, msg: '云端还没有微信聊天记录（真机微信上和 TA 聊过之后才有）' };
-      j = (await res.json()) as { msgs?: WxCloudHistItem[] };
-    } else {
-      // 动态 import 防模块环（supabase.ts → run-package.ts → 本文件）
-      const { readBucketJsonViaRelay } = await import('./wx-cloud/supabase');
-      j = await readBucketJsonViaRelay<{ msgs?: WxCloudHistItem[] }>(supa.ref, 'history.json');
-      if (!j) {
-        return {
-          ok: false,
-          msg: '云端还没有微信聊天记录（真机微信上和 TA 聊过之后才有）。若 TA 在真机上一直不回：回 设置 → 云端助手 重新点一次「一键部署」（升级云端函数）再看',
-        };
+    const { fetchGatewayLocalHistory } = await import('./wx-cloud/gateway');
+    const gw = await fetchGatewayLocalHistory('wx');
+    for (const m of gw || []) {
+      if (m && typeof m.content === 'string' && m.content.trim()) {
+        gwList.push({ role: m.role, content: m.content, ts: Number(m.ts) || Date.now() });
       }
     }
-    const list = Array.isArray(j.msgs) ? j.msgs : [];
+  } catch {
+    /* 网关通道失败：回退云端 */
+  }
+  // 云端双通道（v21：失败不再拦截本地通道合并——两路按确定性 id 去重，云端只是镜像）
+  let cloudMsg = '';
+  let cloudList: WxCloudHistItem[] = [];
+  if (supa?.ref && (supa.serviceKey || supa.secret)) {
+    try {
+      let j: { msgs?: WxCloudHistItem[] } | null = null;
+      if (supa.serviceKey) {
+        // 新式 sb_secret_ key 只能放 apikey 头（Bearer 会被当 JWT 报 400 Invalid Compact JWS）
+        const k = supa.serviceKey;
+        const isNewStyle = k.startsWith('sb_secret_') || k.startsWith('sb_publishable_');
+        const res = await fetch(`https://${supa.ref}.supabase.co/storage/v1/object/wx-cloud/history.json`, {
+          headers: isNewStyle ? { apikey: k } : { apikey: k, Authorization: `Bearer ${k}` },
+          signal: AbortSignal.timeout(15_000),
+        });
+        if (!res.ok) cloudMsg = '云端还没有微信聊天记录（真机微信上和 TA 聊过之后才有）';
+        else j = (await res.json()) as { msgs?: WxCloudHistItem[] };
+      } else {
+        // 动态 import 防模块环（supabase.ts → run-package.ts → 本文件）
+        const { readBucketJsonViaRelay } = await import('./wx-cloud/supabase');
+        j = await readBucketJsonViaRelay<{ msgs?: WxCloudHistItem[] }>(supa.ref, 'history.json');
+        if (!j) {
+          cloudMsg =
+            '云端还没有微信聊天记录（真机微信上和 TA 聊过之后才有）。若 TA 在真机上一直不回：回 设置 → 云端助手 重新点一次「一键部署」（升级云端函数）再看';
+        }
+      }
+      if (j && Array.isArray(j.msgs)) cloudList = j.msgs;
+    } catch (e) {
+      cloudMsg = e instanceof Error ? e.message : String(e);
+    }
+  } else {
+    cloudMsg = '云端未就绪：请先到 设置 → 云端助手 完成部署';
+  }
+  const list = [...gwList, ...cloudList];
+  if (!list.length) return { ok: false, msg: cloudMsg || '云端还没有微信聊天记录（真机微信上和 TA 聊过之后才有）' };
     const cur = loadMsgs(login.boundContactId);
     const seen = new Set(cur.map((m) => m.id));
     const add: WxMsg[] = [];
@@ -1086,7 +1108,4 @@ async function doPullWxCloudHistory(): Promise<{ ok: boolean; msg: string; added
       window.dispatchEvent(new CustomEvent('chat-stream-sysline', { detail: { sessionKey: `wx:${login.boundContactId}` } }));
     }
     return { ok: true, msg: add.length ? `已同步 ${add.length} 条到微信聊天界面` : '云端暂无新记录', added: add.length };
-  } catch (e) {
-    return { ok: false, msg: e instanceof Error ? e.message : String(e) };
-  }
 }

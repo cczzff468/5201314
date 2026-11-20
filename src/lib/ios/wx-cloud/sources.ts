@@ -118,7 +118,7 @@
 // 运行包（push-config 落盘热生效，loadConfig 本地优先——Storage 402/502 受限期间网关人设/
 // 连发/表情包/语音配置照样新鲜）+ QQ 被动回复余量记账（网站回复镜像优先吃被动名额，省
 // 每月 4 条主动配额）+ 入站图片占位统一（attachments 无 url 也有可读提示）。
-export const CLOUD_RUNTIME_VER = 20;
+export const CLOUD_RUNTIME_VER = 21;
 
 export const WX_CLOUD_CORE = String.raw`
 // ---- 微信云端助手核心（自动生成，勿手工编辑） ----
@@ -154,6 +154,12 @@ var LOCAL_STICKER_URLS = (typeof LOCAL_STICKER_URLS_INJECT !== 'undefined' && LO
 // markdown 图 / attachments）先经它转成文字描述进 LLM 上下文——真机 QQ 上「AI 会识图」。
 // 云端（Deno）不注入为空 → 退回占位文案旧路径（描述不可用不炸收发主流程）。
 var VLM_LOCAL_URL = (typeof VLM_LOCAL_URL_INJECT !== 'undefined' && VLM_LOCAL_URL_INJECT) || '';
+// v21 网关本地历史端点（im-gateway 注入 /hist）：聊天历史双写——本机磁盘先落（本机写
+// 不受 Supabase 402/502 影响），Storage 上传收敛为轮末单次批量（写放大从每轮 N 次降为
+// 1 次——逐条整文件重写正是触发免费层风控的写放大主源）；网站拉取新增网关本地通道
+// （op=qq-history / wx-history），云端 Storage 只是镜像而非唯一事实源。云端（Deno）不
+// 注入为空 → 行为与旧版一致（仅 Storage，同样享受批量写降频）。
+var HIST_LOCAL_URL = (typeof HIST_LOCAL_URL_INJECT !== 'undefined' && HIST_LOCAL_URL_INJECT) || '';
 // v20 网关本地运行包直推（push-config op 落盘 local-config.json / local-emoticons.json）：
 // 网站每次同步运行包时同源直推本机网关——绕开 Supabase Storage 402/502 拒收：网关通道
 // 永远用最新人设/连发指令/表情包清单/语音配置，不依赖云端文件上传成败（Storage 受限期间
@@ -1190,6 +1196,8 @@ async function handleWxMsg(cfg, msg) {
     }
     // v14 落库窗口 30 → 60（一轮连发就能占二三十条，旧 30 条只剩半轮，上下文断得快）
     HIST_WX = (HIST_WX || []).concat(histAdd).slice(-60);
+    // v21 本地镜像（网关 /hist 落本机文件——Storage 402/502 受限期间网站拉取走网关本地通道）
+    localHistPost('wx', histAdd);
     await saveWxHistory();
     return true;
   } catch (e) {
@@ -1366,6 +1374,33 @@ async function appendQqHistory(item) {
     if (HIST_QQ[ai] && HIST_QQ[ai].id === item.id) return;
   }
   HIST_QQ = (HIST_QQ || []).concat([item]).slice(-200);
+  QQ_HIST_DIRTY = true;
+  // v21 本地先落（不依赖 Storage，402/502 受限期间记录不丢）；云端攒到轮末一次批量写
+  localHistPost('qq', [item]);
+}
+
+/** v21 本地历史落盘（网关 /hist 端点，仅网关注入）：QQ/微信历史逐条即时写本机文件。
+ *  本地失败不影响收发主流程。 */
+function localHistPost(channel, items) {
+  if (!(HIST_LOCAL_URL && items && items.length)) return;
+  try {
+    fetch(HIST_LOCAL_URL + '/hist', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ channel: channel, msgs: items }),
+      signal: AbortSignal.timeout(4000),
+    }).catch(function () { /* 尽力而为 */ });
+  } catch (e) { /* 本地写失败不影响收发主流程 */ }
+}
+
+/** v21 云端批量落库：一轮回复全部 append 完后一次写（旧版每条 append 都整文件重写
+ *  Storage——一轮 3~7 次、叠加高频心跳/认领写正是触发 Supabase 免费层风控 402 的写放大
+ *  主源之一）。写失败静默（supaPutJson 自吞错；本地文件已有完整记录，网站拉取走网关
+ *  本地通道）。 */
+var QQ_HIST_DIRTY = false;
+async function flushQqHistory() {
+  if (!QQ_HIST_DIRTY) return;
+  QQ_HIST_DIRTY = false;
   await supaPutJson('qq-history.json', { msgs: HIST_QQ, updatedAt: Date.now() });
 }
 
@@ -1766,9 +1801,10 @@ async function cloudSendActive(cfg, channel, texts) {
         break;
       }
     }
-    // 主动消息入云端历史（站内拉取时同看）
+    // 主动消息入云端历史（站内拉取时同看；v21 本地先落 + 轮末批量上云）
     if (sent2 > 0) {
       await appendQqHistory({ id: 'qa-' + Date.now(), role: 'assistant', content: ('[主动] ' + list.join(' ')).slice(0, 500), ts: Date.now() }).catch(function () {});
+      await flushQqHistory().catch(function () {});
     }
     return { ok: true, sent: sent2 };
   }
@@ -2013,6 +2049,10 @@ async function handleQqEvent(cfg, t, d) {
     }
   }
   if (!content) content = '（对方发了一个媒体消息）';
+  // v21 对方这条先入历史（内存 + 本地文件；轮末批量上云）：旧版只在整轮回完后落库，
+  // 中途 LLM 失败/接口失败时这条消息就凭空消失（网站 QQ 聊天界面看不到对方在真机上发的
+  // 消息的直接推手）。幂等 id（q-msgid）——重推/重试不会重复入列。
+  await appendQqHistory({ id: 'q-' + msgId, role: 'user', content: content.slice(0, 500), ts: Date.now() });
   // v16 主动消息收件人：记住最近和机器人说过话的 C2C openid（站内「主动发消息」引擎用；14 天内有效）
   if (!isGroup) noteQqActiveOpenid(authorId);
   var hist = await loadQqHistory(false);
@@ -2054,6 +2094,9 @@ async function handleQqEvent(cfg, t, d) {
   for (var ri = 0; ri < hist.length; ri++) {
     var rm = hist[ri];
     if (!rm || typeof rm.content !== 'string' || !rm.content) continue;
+    // v21 早入列的当前消息不进上下文（本轮消息由 cloudNumbered 以 user 位包裹追加——
+    // 不排除的话当前消息在上下文里出现两遍：历史一遍 + user 位一遍）
+    if (rm.id === 'q-' + msgId) continue;
     var rrole = (rm.role === 'user' || rm.role === 'me') ? 'user' : (rm.role === 'assistant' || rm.role === 'peer') ? 'assistant' : '';
     if (!rrole) continue;
     recent.push({ role: rrole, content: rm.content });
@@ -2192,6 +2235,10 @@ async function handleQqEvent(cfg, t, d) {
   // 历史回写（网站拉取展示）：v13 逐条连发落库（= 站内多条气泡）；语音条 [语音] 摘要；
   // v10 角色格式 user/assistant（与微信 history.json 同构，被本文件自己的 LLM 上下文消费）。
   // 手机 App 拉取端（pullQqCloudHistory）已做双向兼容（me/peer 旧条目照常合入）。
+  // v21：对方消息已在认领后先入列（上方 appendQqHistory）——这里只落 TA 的回复；
+  // 逐条 append 只写内存+本地，轮末一次批量上云（写放大 N→1）。
+  // v21 兜底：loadQqHistory 冷读可能整表重置（Storage 读失败时 HIST_QQ 被清空）——
+  // 轮末再补一次对方这条（幂等：还在就跳过），云端批量写与内存不缺这条。
   await appendQqHistory({ id: 'q-' + msgId, role: 'user', content: content.slice(0, 500), ts: Date.now() });
   for (var vhi = 0; vhi < voiceClips.length; vhi++) {
     if (!voiceClips[vhi].sent) continue;
@@ -2203,6 +2250,8 @@ async function handleQqEvent(cfg, t, d) {
   var emoLog = [];
   for (var lei = 0; lei < sentEmo; lei++) emoLog.push('[表情:' + (images[lei] && images[lei].name ? images[lei].name : '') + ']');
   if (emoLog.length) await appendQqHistory({ id: 'qe-' + msgId, role: 'assistant', content: emoLog.join(' ').slice(0, 500), ts: Date.now() });
+  // v21 轮末批量上云（一次写代替旧版逐条整文件重写）
+  await flushQqHistory();
   // v20 被动回复余量记账（网站回复同步真机用）：QQ 被动回复同 msg_id 最多 5 次——记下
   // 本轮回了几条（语音+文字+表情图），站内镜像优先吃剩余名额（免每月 4 条主动配额）。
   try {
