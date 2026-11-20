@@ -38,7 +38,8 @@
  *   常发的大眼微笑脸」：站内面板把经典表情也教给了 AI，云端把它的图当表情包发成了大图）；
  *   只发用户收藏 + 内置大贴纸包（太阳小狗/小狗豹/小凑狗/古早企鹅）——与机主要求
  *   「网站里用户添加的表情包、内置的表情包可以发到真机」对齐；
- * - 未绑定角色的兑底人设补默认连发指令（站内 DEFAULT_REPLY_COUNT 同源）。
+ * - 未绑定角色的兑底人设也带连发指令（v24 设备专用版：至少 3 条、无上限——真机
+ *   通道不再看会话档位，站内回复条数选 1 也不会让真机只回一条）。
  */
 
 import { buildDynamicStateBlocks } from '../ai-mood';
@@ -56,7 +57,7 @@ import { buildPersonaPrompt as buildQqPersonaPrompt, type QQUser } from '@/compo
 import { buildNpcPromptExtra } from '../npc-bond';
 import { getDeepThinkOn, DEEP_THINK_RULE } from '@/lib/deep-think';
 import { promptRule } from '@/lib/prompt-entries';
-import { buildReplyCountPrompt, getReplyCount, DEFAULT_REPLY_COUNT } from '@/lib/reply-count';
+import { buildDeviceBurstPrompt } from '@/lib/reply-count';
 import { getStickersOn } from '@/lib/sticker-toggle';
 import { getActionDescOn } from '@/lib/action-desc';
 import { getAiVoiceFreq } from '../ai-voice';
@@ -176,12 +177,14 @@ const EXTRA_RULES_BASE = [
 
 /** 云端微信：v16 只保留通道能力约束（人设/清单/条数等全走站内组装器）——
  * 微信通道能发【真表情包图片】（[表情包:ID] 经官方媒体协议出图）+ 经典表情代码混排，
- * 发不出的标记自动降级经典表情代码（再不行剥除）。 */
+ * 发不出的标记自动降级经典表情代码（再不行剥除）。
+ * v24 表情克制（机主定调「少带点，根据他发的信息的意思带」）：经典表情从「尽量用」改
+ * 「克制用」——绝大多数消息不带，只在真正贴合消息意思时带一个；明确要表情包才放开。 */
 const EXTRA_RULES_WX = [
   ...EXTRA_RULES_BASE,
-  '【微信表情】你在这条通道上能发两类表情：①微信经典表情代码（如 [调皮] [偷笑] [捂脸] [呲牙] [破涕为笑] [发怒] [惊讶]），可与文字混排（如「哈哈[偷笑]」「晚安[月亮]」）；②真正的表情包图片——按表情包清单输出 [表情包:ID] 标记（单独占一行），系统会把那张表情包图片真的发给对方（发不出时自动转成对应经典表情代码，再不行才剥掉）。对方要表情包、斗图、要抱抱蹭蹭逗TA开心时优先发 [表情包:ID] 真图；明确点名要表情包的那条回复里一定要带标记，不许只回文字、不许装傻；平时正常聊天不必每次都发。',
+  '【微信表情·克制使用】你在这条通道上能发两类表情：①微信经典表情代码（如 [偷笑] [捂脸] [裂开] [月亮]）；②真正的表情包图片——按表情包清单输出 [表情包:ID] 标记（单独占一行），系统会把那张表情包图片真的发给对方（发不出时自动转成对应经典表情代码）。但表情要像真人一样克制：绝大多数消息不带任何表情，只在表情真正贴合这条消息意思的瞬间才带一个——真的被逗笑了才 [偷笑]、真的无奈才 [捂脸]、道晚安才带 [月亮]，按消息的意思选、不要习惯性点缀；禁止每条消息都带表情、禁止一条里堆多个代码（最多一个）、禁止连续几条都挂表情。只有对方明确要表情包/斗图/求哄逗TA开心时才放开：点名要表情包的那条回复里一定要带 [表情包:ID] 标记（不许只回文字、不许装傻），其余时候不必发。',
   '（本通道没有引用回复功能——不要输出 [引用:编号] 标记，直接用文字回复就好；聊天记录里若出现 [M数字] 编号，那是系统的门牌号不是聊天内容。）',
-  '对方给你发表情包或图片时你会收到「（对方发了一个表情包/图片，内容看不到）」这样的提示——照常理解TA的心情、用文字+表情自然回应即可，但绝不要假装已经发了图。',
+  '对方给你发表情包或图片时你会收到「（对方发了一个表情包/图片，内容看不到）」这样的提示——照常理解TA的心情、用文字自然回应即可，但绝不要假装已经发了图。',
 ];
 
 /** 云端 QQ：富媒体能力（表情包/语音条）保留；v16 增「文字表情代码不可用」负规则（真机 QQ
@@ -378,9 +381,9 @@ async function buildPersona(
   // v6 兑底人设：还没绑定角色时也有一套说得过去的基础人设（凭证照上云、网关照连接——
   // 旧版直接要求 boundContactId 才把 QQ 段打进包，没绑角色时云端永远看不到 QQ 凭证，
   // 网关 QQ 通道永远「正在连接」，用户实测踩坑）。绑好角色后 autoSync 自动重推完整人设。
-  // v16：兑底人设也带站内同款默认连发指令（DEFAULT_REPLY_COUNT=30 同源——未绑定不再只回一条）。
+  // v24：兑底人设也带设备专用连发指令（至少 3 条、无上限、没话可少发）——真机不再只回一条。
   const fallbackSystem = `你和主人在真实${channel}上聊天，回复简短自然、口语化，严格保持角色，绝不透露自己是AI${fallbackName ? `；你在${channel}上的昵称是「${fallbackName}」` : ''}。`;
-  let system = [fallbackSystem, buildReplyCountPrompt(DEFAULT_REPLY_COUNT), ...extraRules].filter(Boolean).join('\n\n');
+  let system = [fallbackSystem, buildDeviceBurstPrompt(), ...extraRules].filter(Boolean).join('\n\n');
   let contactName = fallbackName;
   const contact = loginBoundId ? await getContact(loginBoundId).catch(() => null) : null;
   if (contact) {
@@ -396,9 +399,9 @@ async function buildPersona(
     const stickers = cloudRealStickers(loadStickers(app));
     const stickersOn = getStickersOn(sessionKey);
     const actionDescOn = getActionDescOn(sessionKey);
-    const replyCount = getReplyCount(sessionKey);
-    // v78 机主定的顺序：连发信息（回复条数指令）拼在人设块正下方——与站内 chat-page 同参
-    const replyCountBlock = replyCount > 1 ? buildReplyCountPrompt(replyCount) : '';
+    // v24 连发条数块（机主定调「最少发三条，最多没有上限，实在没话可说了可以少发」）：
+    // 真机通道固定注入设备专用连发指令，不看会话档位（选 1 也不能让真机只回一条）
+    const replyCountBlock = buildDeviceBurstPrompt();
     // QQ 通道有语音条能力（云端 TTS / 网关本地合成）→ 文字升级语音条告知一并带上；微信通道发不了语音
     const aiVoiceOn = app === 'qq' ? getAiVoiceFreq(sessionKey) !== 'off' : false;
     // 机主身份最小化桩（组装器只取称呼名 addressNameOf：真名 > 显示名）
@@ -533,7 +536,8 @@ export async function buildRunPackage(): Promise<RunPackageResult> {
           ? {
               stickerMap: buildStickerMap('wx'),
               worldbook: buildWorldbookPack(wxLogin.boundContactId),
-              multi: getReplyCount(`wx:${wxLogin.boundContactId}`) > 1,
+              // v24：真机连发恒开（至少 3 条、无上限），不再随会话回复条数档位
+              multi: true,
             }
           : {}),
       }
@@ -564,7 +568,8 @@ export async function buildRunPackage(): Promise<RunPackageResult> {
         ...(qqLogin.boundContactId
           ? {
               worldbook: buildWorldbookPack(qqLogin.boundContactId),
-              multi: getReplyCount(`qq:${qqLogin.boundContactId}`) > 1,
+              // v24：真机连发恒开（至少 3 条、无上限），不再随会话回复条数档位
+              multi: true,
             }
           : {}),
         ...(cloudTts ? { tts: cloudTts } : {}),

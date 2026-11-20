@@ -3185,3 +3185,21 @@ Work Log:
 - [QQ 五条截断根除] wx-cloud/sources.ts WX_CLOUD_CORE：删「被动回复同 msg_id 最多 5 次」发送预算（room=5-voice-images 的均匀分摊——连发 3~30 条被压成最多 5 条文字墙，即用户抱怨的「一共只能发五条」）；文字条不设预算、超 30 条并入末条（与微信侧同口径）；表情图平时 3 张/斗图 5 张独立计数不挤占文字；网站镜像被动窗口余量 5→30（lmRoom）；记账注释同步更新（used 只作参考）——单一事实源改动同时惠及 im-gateway（热重物化已推送生效：push-config 原样回推 local-config.json 触发 materializeCore）与 Supabase Edge Function 部署模板（EDGE_FUNCTION_TS 内嵌同一 WX_CLOUD_CORE，下次「重新同步运行包/一键部署」即上云）
 - [error-center 复核] InlineErrorChip 的 report() 已在 useEffect 中调用（上轮 v19 修复确认在位）——本轮零改动
 - [验证] eslint 五改动文件零问题；Agent Browser E2E：锁屏（eval Pointer 序列解锁受挫后走 DOM click 通道）→ 设置 → 云端助手：使用说明折叠区四步文案、运行平台仅 Supabase 且全新浏览器 session（platform 默认 none）自动迁移选中、无 同步到真机/运行时版本/7×24 字样残留；微信/QQ App 打开渲染正常（登录页——接入页已连接视图需登录态，本环境无法 UI 到达，以 grep 零残留 + eslint + Turbopack 无错误 overlay 复核）；console/page errors 全零；dev.log 全 200；网关 :3100 热重物化返回「已热生效」
+
+## 2026-11-20 · v24 ClawBox 统一界面（两页签）+ 真机连发下限 3 上限解除 + 表情克制
+
+Task: 机主五点定调——①云端助手/真机不再两个界面：合成一个页面、两个 tab；②「云端助手」「真机接入」标签统一更名 ClawBox，入口行下移到「语音 API」下面；③顺带删两条通道空转文案（QQ「正在连接 QQ 平台…」/微信「运行中」）；④真机微信/QQ 上 AI 只发一条 → 最少发 3 条、最多没有上限（实在没话可说可以少发）；⑤真机微信 AI 总带系统表情 → 少带点、按消息意思带。
+
+Work Log:
+- [ClawBox 统一界面 settings.tsx] CloudPage → ClawBoxPage（title="ClawBox"）：顶部毛玻璃胶囊分段控件（role=tablist：云端助手 / 真机接入，active 白底内高光 + 按下微缩）；真机接入不再是整页切换——sub 状态机删除，页签内「微信/QQ」平台胶囊（cloud-device-wx/qq testid 保留）+ h-[560px] 定高容器内嵌 embedded 接入页（各自内部滚动）；平台胶囊带登录态徽章（已接入·角色名/未接入）；未部署时页签内一条琥珀提示（指向云端助手页签）。入口行更名 ClawBox（CloudUpload→Box 橙色图标 + 副标「云端助手 · 真机接入 · 7×24 自动回复」），从 API 配置下方移到语音 API 与存储之间；使用说明折叠区②同步改「切到上方真机接入页签」。
+- [通道文案收敛] 网关通道详情：删「正在连接 QQ 平台…」与「微信通道：运行中」两条空转文案——QQ 连接中/微信无回复量时整行不渲染（有实质信息才出：已连接/异常/未接入/累计回复 N 条），两行都静默时整块不渲染（testid 保留）。
+- [connect 页文案适配] wx-app/qq-app connect.tsx 的 embedded 分支指引改「切到上方云端助手页签完成一键部署」；非 embedded 路径改「设置 → ClawBox（云端助手页签）」。
+- [真机连发下限 3 上限解除] 四处同口径改版：①reply-count.ts 新增 buildDeviceBurstPrompt()（至少 3 条起步 + 条数没有上限 + 没话说可少发 + 递进/不重复，独立于全局预设管理器）；②weixin-connect.ts（站内在线路径）：system 固定注入设备连发指令（不再看会话档位），splitReplySegments 恒 multi=true，删 8 条并入末条上限；③run-package.ts：运行包 multi 恒 true（wx/qq，站内回复条数选 1 也不影响真机），绑定/兑底人设统一注入 buildDeviceBurstPrompt；④sources.ts WX_CLOUD_CORE：ensureBurstRule 改单参常开（multi 标志不再作门槛，旧包 multi=false 也照常连发）、注入文案同步「至少 3 条/无上限/没话可少发」；wx/qq 两侧 cloudReplySegments 恒 multi=true；删两处 30 条并入末条截断（切多少条发多少条）。CLOUD_RUNTIME_VER 21→24、函数 ping ver 对齐 24（旧 20/21 drift 顺修——升级链判等恢复）。
+- [表情克制] 提示词 + 出站确定性兜底双层：①EXTRA_RULES_WX（run-package）与 weixin-connect extraRules 的【微信表情】改「克制使用」——绝大多数消息不带、只在真正贴合消息意思的瞬间带一个（真的被逗笑才 [偷笑]、晚安才 [月亮]）、禁止每条带/堆多个/连挂，明确要表情才放开；②sources.ts wx/qq 兑底表情包清单同改克制口径（删「【必须发】」旧措辞）；③出站兜底：weixin-connect sanitizeWxOutText 与 sources.ts 云端 sanitizeWxOutText 均加「每条最多保留一个经典表情代码（留首个剥其余）」确定性兑底。
+- [网关热生效] sources.ts 改动经 bun --hot + keeper 重启后 materializeCore 已重物化（core.gen.1.mjs @06:23：keptEmoji 兜底/无 multi 门槛/无 30 截断均实测在位；QQ WS READY）；本地 local-config.json 存量人设仍是旧 3~30 措辞——下次打开 ClawBox 页 AutoEnsureGatewayEffect/接入页 pingAndSync 自动重推最新运行包（buildDeviceBurstPrompt + multi:true + 克制表情规则）即全量对齐；云端侧点一次「重新同步运行包」升 v24 函数代码（ping ver 24 升级链已对齐）。
+- [验证] eslint 七改动文件零问题；tsc 零新增（16 处均为既有基线，stash 对照确认）；Agent Browser E2E：解锁→设置：开发者组行序 API 配置/识图模型/图像生成/语音 API/ClawBox/存储 ✓→开 ClawBox：两页签（云端助手默认选中，Supabase 连接 + 危险操作区在）✓→切真机接入页签：微信/QQ 平台胶囊（未接入徽章）+ 微信接入页内嵌渲染（扫码引导文案）✓→切 QQ 胶囊：QQ 接入页换入、微信页卸载 ✓→切回云端助手页签内容完整、整页无「正在连接 QQ 平台」「运行中（还没收到消息）」字样 ✓→reload 无 hydration/控制台/页面错误，dev.log 全 200；网关 :3100 运行中并实测收到真实 QQ 消息事件（LLM 500 为用户自配 API 侧故障，非本改动）。
+
+Stage Summary:
+- ClawBox = 云端助手 + 真机接入一个界面两个毛玻璃页签，真机接入彻底不再是单独界面（微信/QQ 胶囊内嵌同屏）；入口在语音 API 下方，全站再无「只发一条」的多重根因链（档位门槛/multi 开关/8·30 条截断全拆）
+- 真机连发口径：最少 3 条、上限不设（提示词 + 切分 + 发送三层一致，站内回复条数选 1 也不再影响真机）；表情双层克制：提示词按消息意思带 + 出站每条最多一个经典代码
+- 关键文件：settings.tsx（ClawBoxPage/入口）、reply-count.ts（buildDeviceBurstPrompt）、weixin-connect.ts、run-package.ts、sources.ts（v24 核心 + CLOUD_RUNTIME_VER 24）

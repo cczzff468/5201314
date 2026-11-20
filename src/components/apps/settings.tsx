@@ -15,6 +15,7 @@ import {
   BellOff,
   Bluetooth,
   Bot,
+  Box,
   Camera,
   Check,
   CheckCircle2,
@@ -950,14 +951,6 @@ function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
             value={apiKey.trim() ? `已配置 · ${apiModel}` : '未配置'}
             onClick={() => onOpen('api')}
           />
-          {/* 云端助手：微信/QQ 接入凭证 + 人设打包成运行包，部署到用户自己的免费账号 7x24 自动回复（模型 API 跟随上方「API 配置」，不单独配置） */}
-          <MainRow
-            icon={CloudUpload}
-            tone={TONE_GRAY}
-            label="云端助手"
-            onClick={() => onOpen('cloud')}
-            testId="settings-cloud-entry"
-          />
           <MainRow
             icon={Eye}
             tone={TONE_PURPLE}
@@ -1000,6 +993,22 @@ function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
             }
             onClick={() => onOpen('voice')}
           />
+          {/* ClawBox（v24）：放在语音 API 下面（机主定调）——云端助手 + 真机接入两个页签 */}
+          <button
+            type="button"
+            data-testid="settings-cloud-entry"
+            onClick={() => onOpen('cloud')}
+            className="flex min-h-[52px] w-full items-center gap-3 px-4 py-2 text-left transition-colors active:bg-muted/50"
+          >
+            <RowIcon icon={Box} tone={TONE_ORANGE} />
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-[16px]">ClawBox</span>
+              <span className="mt-0.5 block truncate text-[12px] text-muted-foreground">
+                云端助手 · 真机接入 · 7×24 自动回复
+              </span>
+            </span>
+            <ChevronRight className="h-5 w-5 shrink-0 text-muted-foreground/60" />
+          </button>
           <MainRow icon={Database} tone={TONE_GREEN} label="存储" onClick={() => onOpen('storage')} />
         </div>
 
@@ -9234,10 +9243,12 @@ function AutoEnsureGatewayEffect({ dep }: { dep: boolean }) {
  * v9 轮询锁 + 认领表）。凭证只在用户浏览器密文保存（wx-cloud/store）。接入/换绑/断开、
  * 改「API 设置」都会自动同步运行包（配置中心仍是 Supabase，云端 60 秒内跟上）。
  * v22 真机接入收拢：原 微信「我」页 / QQ「动态」页的两个接入界面迁到本页「真机接入」
- * 分组（sub 整页切换 + embedded 内嵌，两页动态加载）；使用顺序（强制）：先在这里部署云端，
- * 再到「真机接入」扫码接入真机。
+ * 分组；使用顺序（强制）：先在这里部署云端，再到「真机接入」扫码接入真机。
+ * v24 ClawBox 统一界面：真机接入不再是单独子页——本页顶部「云端助手 / 真机接入」两个
+ * 毛玻璃胶囊页签（tab）切换，真机接入页签里微信/QQ 胶囊切换 + 接入页内嵌（embedded）
+ * 同屏完成；入口行更名 ClawBox、下移到语音 API 下方。
  */
-function CloudPage({ onBack }: { onBack: () => void }) {
+function ClawBoxPage({ onBack }: { onBack: () => void }) {
   // —— 部署状态中心（挂载时 boot 拉取密文持久化状态） ——
   const ready = useWxCloud((s) => s.ready);
   const platform = useWxCloud((s) => s.platform);
@@ -9250,12 +9261,14 @@ function CloudPage({ onBack }: { onBack: () => void }) {
 
   const [toastMsg, showToast] = useLocalToast();
 
-  // —— v22 真机接入子页：'main' 主视图；'wx'/'qq' 整页切到对应接入页（宿主导航 + embedded）——
-  const [sub, setSub] = useState<'main' | 'wx' | 'qq'>('main');
-  /** 主视图两行副文案用的登录态（null=未接入，''=已接入未绑角色，其余=角色名） */
+  // —— v24 两个页签：'cloud' 云端助手（部署/开关/测试）；'device' 真机接入（微信/QQ 内嵌）——
+  const [tab, setTab] = useState<'cloud' | 'device'>('cloud');
+  /** 真机接入页签内的平台胶囊：'wx' / 'qq'（切换即内嵌对应接入页，不再整页跳转） */
+  const [device, setDevice] = useState<'wx' | 'qq'>('wx');
+  /** 页签两行副文案用的登录态（null=未接入，''=已接入未绑角色，其余=角色名） */
   const deviceLogin = useRealDeviceLogin();
-  /** 子页角色候选（打开子页才拉取） */
-  const subContacts = useConnectContacts(sub === 'qq' ? 'qq' : 'wx', sub !== 'main');
+  /** 接入页角色候选（真机接入页签打开才拉取） */
+  const subContacts = useConnectContacts(device, tab === 'device');
 
   useEffect(() => {
     void boot();
@@ -9670,35 +9683,49 @@ function CloudPage({ onBack }: { onBack: () => void }) {
     showToast('已清除全部云端配置');
   };
 
-  // —— 真机接入子页（v22）：整页切换——宿主导航 + 接入页铺满内容区（embedded 不渲染
-  //    自带顶栏；v23 毛玻璃统一：宿主底色与 CloudPage 同一浅灰，子页玻璃卡折射同源） ——
-  if (sub !== 'main') {
-    const isWx = sub === 'wx';
-    return (
-      <div
-        data-testid={isWx ? 'cloud-device-wx-page' : 'cloud-device-qq-page'}
-        className="relative flex h-full w-full flex-col bg-[#F2F2F7] dark:bg-[#111113]"
-      >
-        <IOSNavBar
-          title={isWx ? '真机微信' : '真机 QQ'}
-          large={false}
-          left={<IOSBackButton onClick={() => setSub('main')} label="云端助手" />}
-          className="bg-transparent! backdrop-blur-none!"
-        />
-        <div className="relative min-h-0 flex-1">
-          {isWx ? (
-            <WeixinConnectPage contacts={subContacts} onBack={() => setSub('main')} embedded />
-          ) : (
-            <QqConnectPage contacts={subContacts} onBack={() => setSub('main')} embedded />
-          )}
-        </div>
-      </div>
-    );
-  }
+  // —— v24 真机接入不再整页切换：作为本页第二个页签内嵌（cloud-device-wx-page / -qq-page
+  //    testid 保留在接入页自身根节点上，E2E 口径不变）——
 
   return (
-    <DetailShell title="云端助手" onBack={onBack} gray>
+    <DetailShell title="ClawBox" onBack={onBack} gray>
       <div className="flex flex-col gap-5">
+        {/* v24 两个页签（毛玻璃胶囊分段控件）：云端助手 / 真机接入——同一界面切换，
+            真机接入不再是单独的界面；active 胶囊内高光白底 + 按下微缩，动效 200ms */}
+        <div
+          role="tablist"
+          aria-label="ClawBox 功能页签"
+          className="flex w-full rounded-full bg-white/50 p-[3px] shadow-[inset_0_1px_0_rgba(255,255,255,0.7),0_4px_16px_rgba(17,24,39,0.05)] ring-1 ring-white/60 backdrop-blur-2xl dark:bg-white/[0.07] dark:ring-white/[0.1]"
+        >
+          {(
+            [
+              { id: 'cloud', icon: Cloud, label: '云端助手' },
+              { id: 'device', icon: Smartphone, label: '真机接入' },
+            ] as const
+          ).map((t) => {
+            const active = tab === t.id;
+            return (
+              <button
+                key={t.id}
+                type="button"
+                role="tab"
+                aria-selected={active}
+                data-testid={`clawbox-tab-${t.id}`}
+                onClick={() => setTab(t.id)}
+                className={`flex h-10 flex-1 items-center justify-center gap-1.5 rounded-full text-[14px] font-medium transition-all active:scale-[0.98] ${
+                  active
+                    ? 'bg-white text-foreground shadow-[0_2px_10px_rgba(17,24,39,0.1)] ring-1 ring-black/[0.04] dark:bg-white/[0.16] dark:ring-white/[0.1]'
+                    : 'text-muted-foreground active:bg-black/[0.03] dark:active:bg-white/[0.05]'
+                }`}
+              >
+                <t.icon className={`h-4 w-4 ${active ? 'opacity-90' : 'opacity-60'}`} strokeWidth={2.1} aria-hidden="true" />
+                {t.label}
+              </button>
+            );
+          })}
+        </div>
+
+        {tab === 'cloud' && (
+        <>
         {/* 顶部状态卡（v19 简约重做）：状态点 + 一行标题 + 一行副标 + 极简指标行（label·值
             文本对，无胶囊描边）+ 异常只留「查看」入口（错误详情进弹窗——全站错误提示统一弹窗化）。
             长说明全收「说明」收缩区——页面主体一眼看清当前状态。 */}
@@ -9756,7 +9783,7 @@ function CloudPage({ onBack }: { onBack: () => void }) {
             <CloudFold title="使用说明" testid="cloud-help-fold">
               <div className="space-y-2 text-[12px] leading-relaxed text-muted-foreground">
                 <p>① 填 Access Token → 读取项目 → 一键部署（自动开 24 小时收发）。</p>
-                <p>② 在下方「真机接入」里给微信 / QQ 扫码带上 TA。</p>
+                <p>② 切到上方「真机接入」页签，给微信 / QQ 扫码带上 TA。</p>
                 <p>③ 之后云端 24 小时自动收发；换角色 / 改「API 设置」会自动同步，60 秒内生效。</p>
                 <p>④ 云端函数、定时任务、聊天记录全在你的 Supabase 里——本站关了 TA 照样在线。</p>
               </div>
@@ -10047,10 +10074,12 @@ function CloudPage({ onBack }: { onBack: () => void }) {
                     )}
                     {/* 网关通道详情（开关开着时展示）：QQ 通道状态 / 微信循环健康——
                         服务端真源，异常（凭证错/网络断）第一时间在这里可见。
-                        v23：QQ 状态修复——报错后状态机翻回 connecting 的重试窗口里也如实展示
-                        lastError（不再永远「正在连接 QQ 平台…」）；凭证错用户能直接看到核对指引 */}
-                    {supaDeployed && gwOn && (
+                        v24 文案收敛（机主定调删两条噪音）：QQ 连接中不再显示「正在连接 QQ 平台…」
+                        空转文案——连接中/无消息静默就安静（有实质信息才出一行：已连接/异常/未接入）；
+                        微信同理删「运行中」空转行——只在异常或有回复量时报数。两行都静默时整块不渲染 */}
+                    {supaDeployed && gwOn && (qqCh?.state === 'ready' || qqCh?.state === 'disabled' || qqCh?.lastError || gatewayStatus?.wx?.lastError || gatewayStatus?.wx?.replied) && (
                       <div className="flex flex-col gap-1.5 rounded-[16px] bg-black/[0.03] px-3.5 py-3 text-[11.5px] leading-relaxed text-muted-foreground ring-1 ring-white/40 backdrop-blur-xl dark:bg-white/[0.04] dark:ring-white/[0.06]" data-testid="cloud-gateway-detail">
+                        {(qqCh?.state === 'ready' || qqCh?.state === 'disabled' || qqCh?.lastError) && (
                         <p className="flex items-center gap-1.5">
                           {(qqCh?.state === 'ready' && !qqCh.lastError) || qqCh?.state === 'disabled' ? (
                             qqCh?.state === 'ready' ? (
@@ -10066,10 +10095,10 @@ function CloudPage({ onBack }: { onBack: () => void }) {
                             ? '未接入（接入 QQ 后凭证自动同步，约半分钟内点亮）'
                             : qqCh?.state === 'ready' && !qqCh.lastError
                               ? `已连接${qqCh.botName ? `「${qqCh.botName}」` : ''}${qqCh.lastEventAt ? ` · 最近消息 ${new Date(qqCh.lastEventAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}` : ''}`
-                              : qqCh?.lastError
-                                ? `${qqCh.state === 'error' ? '连接异常' : '重试中'}：${qqCh.lastError}`
-                                : '正在连接 QQ 平台…'}
+                              : `${qqCh.state === 'error' ? '连接异常' : '重试中'}：${qqCh.lastError}`}
                         </p>
+                        )}
+                        {(gatewayStatus?.wx?.lastError || gatewayStatus?.wx?.replied) && (
                         <p className="flex items-center gap-1.5">
                           {gatewayStatus?.wx?.lastError ? (
                             <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-[#C77700]" aria-hidden="true" />
@@ -10079,10 +10108,9 @@ function CloudPage({ onBack }: { onBack: () => void }) {
                           微信通道：
                           {gatewayStatus?.wx?.lastError
                             ? `异常：${gatewayStatus.wx.lastError}`
-                            : gatewayStatus?.wx?.replied
-                              ? `自动回复中（累计 ${gatewayStatus.wx.replied} 条）`
-                              : '运行中'}
+                            : `自动回复中（累计 ${gatewayStatus.wx.replied} 条）`}
                         </p>
+                        )}
                       </div>
                     )}
                     {/* 云端测试一次：用户自己动手跑一轮（结果弹「云端测试」弹窗） */}
@@ -10121,51 +10149,6 @@ function CloudPage({ onBack }: { onBack: () => void }) {
           </section>
         )}
 
-        {/* 分组二：真机接入（v22 收拢，v23 毛玻璃胶囊统一）：原 微信「我」页 / QQ「动态」页的
-            两个接入界面迁到这里统一管理——行状态直读对应接入 store（登录态 + 绑定角色名），
-            点开整页切换；状态文案收成小胶囊（与整体毛玻璃语言同构） */}
-        <section>
-          <SectionLabel icon={Smartphone} tone={TONE_BLUE}>真机接入</SectionLabel>
-          <div role="menu" aria-label="真机接入">
-            <GroupCard>
-              {(
-                [
-                  { id: 'wx', icon: MessageCircle, tone: '#07C160', label: '微信', name: deviceLogin.wx },
-                  { id: 'qq', icon: Bot, tone: '#0099FF', label: 'QQ', name: deviceLogin.qq },
-                ] as const
-              ).map((o) => {
-                const connected = o.name !== null;
-                return (
-                  <button
-                    key={o.id}
-                    type="button"
-                    role="menuitem"
-                    aria-label={`真机${o.label}接入`}
-                    data-testid={`cloud-device-${o.id}`}
-                    onClick={() => setSub(o.id)}
-                    className="flex min-h-[60px] w-full items-center gap-3 px-4 py-2.5 text-left transition-colors active:bg-muted/50"
-                  >
-                    <RowIcon icon={o.icon} tone={o.tone} />
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate text-[16px]">{o.label}</span>
-                      <span
-                        className={`mt-1 inline-flex max-w-full items-center truncate rounded-full px-2.5 py-[3px] text-[11px] font-medium backdrop-blur-xl ${
-                          connected
-                            ? 'bg-emerald-500/[0.1] text-emerald-600 ring-1 ring-emerald-500/20 dark:text-emerald-400'
-                            : 'bg-black/[0.04] text-muted-foreground/85 ring-1 ring-black/[0.03] dark:bg-white/[0.06] dark:ring-white/[0.08]'
-                        }`}
-                      >
-                        {connected ? (o.name === '' ? '已接入 · 未绑角色' : `已接入 · ${o.name}`) : supaDeployed ? '未接入 · 点开扫码带上 TA' : '部署云端后扫码接入'}
-                      </span>
-                    </span>
-                    <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground/60" aria-hidden="true" />
-                  </button>
-                );
-              })}
-            </GroupCard>
-          </div>
-        </section>
-
         {/* 底部危险区：清除云端配置（二次确认） */}
         <section>
           <SectionLabel icon={AlertCircle} tone={TONE_RED}>危险操作</SectionLabel>
@@ -10181,6 +10164,86 @@ function CloudPage({ onBack }: { onBack: () => void }) {
             </button>
           </div>
         </section>
+        </>
+        )}
+
+        {/* ==================== 真机接入页签（v24：不再是单独的界面——微信/QQ 胶囊切换，
+             接入页内嵌同屏完成；行状态直读对应接入 store（登录态 + 绑定角色名）） ==================== */}
+        {tab === 'device' && (
+        <section>
+          <SectionLabel icon={Smartphone} tone={TONE_BLUE}>真机接入</SectionLabel>
+
+          {/* 平台胶囊切换（微信 / QQ）：选中高光白底，副状态徽章直读登录态 */}
+          <div
+            role="tablist"
+            aria-label="真机接入平台"
+            className="flex w-full rounded-full bg-white/50 p-[3px] shadow-[inset_0_1px_0_rgba(255,255,255,0.7),0_4px_16px_rgba(17,24,39,0.05)] ring-1 ring-white/60 backdrop-blur-2xl dark:bg-white/[0.07] dark:ring-white/[0.1]"
+          >
+            {(
+              [
+                { id: 'wx', icon: MessageCircle, tone: '#07C160', label: '微信', name: deviceLogin.wx },
+                { id: 'qq', icon: Bot, tone: '#0099FF', label: 'QQ', name: deviceLogin.qq },
+              ] as const
+            ).map((o) => {
+              const active = device === o.id;
+              const connected = o.name !== null;
+              return (
+                <button
+                  key={o.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={active}
+                  aria-label={`真机${o.label}接入`}
+                  data-testid={`cloud-device-${o.id}`}
+                  onClick={() => setDevice(o.id)}
+                  className={`flex h-11 flex-1 items-center justify-center gap-1.5 rounded-full text-[14px] font-medium transition-all active:scale-[0.98] ${
+                    active
+                      ? 'bg-white text-foreground shadow-[0_2px_10px_rgba(17,24,39,0.1)] ring-1 ring-black/[0.04] dark:bg-white/[0.16] dark:ring-white/[0.1]'
+                      : 'text-muted-foreground active:bg-black/[0.03] dark:active:bg-white/[0.05]'
+                  }`}
+                >
+                  <span
+                    aria-hidden="true"
+                    className="flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-[5px]"
+                    style={{ backgroundColor: `${o.tone}1F` }}
+                  >
+                    <o.icon className="h-[12px] w-[12px]" style={{ color: o.tone }} strokeWidth={2.4} />
+                  </span>
+                  {o.label}
+                  <span
+                    className={`ml-0.5 inline-flex max-w-[86px] items-center truncate rounded-full px-2 py-[2px] text-[10.5px] font-medium backdrop-blur-xl ${
+                      connected
+                        ? 'bg-emerald-500/[0.1] text-emerald-600 ring-1 ring-emerald-500/20 dark:text-emerald-400'
+                        : 'bg-black/[0.04] text-muted-foreground/85 ring-1 ring-black/[0.03] dark:bg-white/[0.06] dark:ring-white/[0.08]'
+                    }`}
+                  >
+                    {connected ? (o.name === '' ? '已接入' : o.name) : '未接入'}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+
+          {/* 内嵌接入页（不再整页切换）：微信/QQ 接入界面直接铺在本页签里（embedded 隐藏
+              自带顶栏，各自内部滚动）；容器定高 + 圆角裁切，接入完成前未部署提示见页面内横幅 */}
+          <div
+            className="relative mt-4 h-[560px] overflow-hidden rounded-[22px] ring-1 ring-black/[0.05] dark:ring-white/[0.08]"
+            data-testid={device === 'wx' ? 'cloud-device-wx-page' : 'cloud-device-qq-page'}
+          >
+            {device === 'wx' ? (
+              <WeixinConnectPage contacts={subContacts} onBack={() => undefined} embedded />
+            ) : (
+              <QqConnectPage contacts={subContacts} onBack={() => undefined} embedded />
+            )}
+          </div>
+
+          {!supaDeployed && (
+            <p className="mt-3 rounded-[14px] bg-[#C77700]/[0.07] px-4 py-2.5 text-[12px] leading-relaxed text-[#8a5b00] ring-1 ring-[#C77700]/20 backdrop-blur-xl dark:bg-amber-300/[0.08] dark:text-amber-200/90 dark:ring-amber-300/15">
+              云端还没部署：先切到上方「云端助手」页签完成一键部署（免费），再回来扫码接入——否则 TA 不会在真机上回复。
+            </p>
+          )}
+        </section>
+        )}
       </div>
 
       {/* 结果弹窗（部署失败 / 云端测试结果 / 开关失败：标题 + 问题 + 知道了） */}
@@ -10265,7 +10328,7 @@ export default function SettingsApp() {
       {page === 'storage' && <StoragePage onBack={() => setPage('root')} />}
       {page === 'wallpaper' && <WallpaperPage onBack={() => setPage('root')} />}
       {page === 'api' && <ApiPage onBack={() => setPage('root')} />}
-      {page === 'cloud' && <CloudPage onBack={() => setPage('root')} />}
+      {page === 'cloud' && <ClawBoxPage onBack={() => setPage('root')} />}
       {page === 'vision' && <VisionPage onBack={() => setPage('root')} />}
       {page === 'imggen' && <ImageGenPage onBack={() => setPage('root')} />}
       {page === 'voice' && <VoicePage onBack={() => setPage('root')} />}

@@ -118,7 +118,9 @@
 // 运行包（push-config 落盘热生效，loadConfig 本地优先——Storage 402/502 受限期间网关人设/
 // 连发/表情包/语音配置照样新鲜）+ QQ 被动回复余量记账（网站回复镜像优先吃被动名额，省
 // 每月 4 条主动配额）+ 入站图片占位统一（attachments 无 url 也有可读提示）。
-export const CLOUD_RUNTIME_VER = 21;
+// v24：真机连发改版（至少 3 条、上限彻底解除：multi 常开 + 30 条并入末条删除 + 上下文
+// 窗口 16）+ 表情克制（微信经典表情每条最多一个 + 提示词按消息意思带）。
+export const CLOUD_RUNTIME_VER = 24;
 
 export const WX_CLOUD_CORE = String.raw`
 // ---- 微信云端助手核心（自动生成，勿手工编辑） ----
@@ -544,6 +546,15 @@ function wxStickerToClassic(cfg, rawName) {
 function sanitizeWxOutText(cfg, text) {
   var tagRe = /[\[【]\s*(?:发送了|发出了)?\s*(?:表情包|表情|图片|照片|语音|贴纸|Sticker)\s*[:：]\s*([^\]】]{1,24})\s*[\]】]/g;
   var out = String(text || '').replace(tagRe, function (_all, rawName) { return wxStickerToClassic(cfg, rawName); });
+  // v24 表情克制（机主定调「少带点，根据他发的信息的意思带」）：每条消息最多保留一个
+  // 经典表情代码（留首个、其余剥除）——提示词端已同步收敛，这里是确定性兑底防模型堆叠
+  var keptEmoji = false;
+  out = out.replace(/\[([^\[\]【】\n]{1,12})\]/g, function (all, name) {
+    if (!WX_CLASSIC_SET[String(name).trim()]) return all;
+    if (keptEmoji) return '';
+    keptEmoji = true;
+    return all;
+  });
   out = stripRichMarkers(out);
   out = out.replace(/\n{3,}/g, '\n\n').replace(/^[\s\n]+|[\s\n]+$/g, '').replace(/^[，,。.\s]+/, '');
   if (out) return out;
@@ -1012,12 +1023,13 @@ function isVoiceRequested(text) {
   return CLOUD_VOICE_ASK_RE.test(String(text || '').slice(0, 400));
 }
 
-/** v16 连发兜底：运行包人设里没有连发指令块（旧包 / 未绑定角色的兑底人设）时，运行期补注入
- *  站内同款默认连发指令（机主定调 3~30 尽量多发）——真机「AI 只发一条」的兜底修复。 */
-function ensureBurstRule(system, multi) {
-  if (!multi) return system;
+/** v16 连发兜底 → v24 常开改版：运行包人设里没有连发指令块（旧包 / 未绑定角色的兑底人设）
+ *  时，运行期补注入设备专用连发指令（机主定调「最少发三条，最多没有上限，实在没话可说了
+ *  可以少发」）。不再看运行包 multi 标志——旧包 multi=false 也不放行「只发一条」；新包
+ *  multi 恒为 true（run-package v24），这里同步硬开（两口径一致，真机不再只回一条）。 */
+function ensureBurstRule(system) {
   if (String(system || '').indexOf('连发') >= 0) return system;
-  return system + '\n【连发短消息】把你这次想说的话拆成一条一条的短消息连发，像真人一样一句一条：本次发 3~30 条（正常至少 3 条起步、目标尽量往多了发，只发一两条就停是不合格的），话少时可以少发但不要硬凑；每条只写一句口语化的短话，消息之间要有递进（回应→补充→追问），不要原地重复。';
+  return system + '\n【连发短消息】把你这次想说的话拆成一条一条的短消息连发，像真人抱着手机聊天一样一句一条：本次至少发 3 条起步（先回应TA刚说的 → 再补充你的想法或近况 → 再追问或抛个新话题），条数没有上限、想说的多就尽管一条接一条多发；实在没话说了（话题聊尽、只剩简单回应）可以少发几条自然收尾，不要硬凑。每条只写一句口语化的短话，消息之间要有递进，不要原地重复、不要车轱辘话。';
 }
 
 
@@ -1270,18 +1282,20 @@ async function handleWxMsg(cfg, msg) {
       if (hist[wsi] && hist[wsi].content) scanParts.push(hist[wsi].content);
     }
     var wb = collectCloudWb(cfg.wechat.worldbook, scanParts.join('\n'));
-    // v16 连发兑底：旧运行包/未绑定人设里没有连发指令块时运行期补注入（真机「只发一条」的兑底）
-    var system = buildCloudSystem(ensureBurstRule((cfg.wechat.persona && cfg.wechat.persona.system) || '你和主人在真实微信上聊天，回复简短自然，绝不透露自己是AI。', cfg.wechat.multi !== false), wb);
+    // v24 连发兑底：旧运行包/未绑定人设里没有连发指令块时运行期补注入（真机「只发一条」的兑底；
+    // multi 标志不再作门槛——旧包 multi=false 也照常连发，新包 multi 恒为 true）
+    var system = buildCloudSystem(ensureBurstRule((cfg.wechat.persona && cfg.wechat.persona.system) || '你和主人在真实微信上聊天，回复简短自然，绝不透露自己是AI。'), wb);
     // v14 兑底表情包清单：站内组装器人设自带【表情包清单】时不再重复注入——只有兑底人设
-    // （没绑角色/旧运行包）才给这份精简清单教学（现在微信也能发真图，与 QQ 同款「必须发」约束）
+    // （没绑角色/旧运行包）才给这份精简清单教学；v24 表情克制改版（机主定调「少带点，
+    // 根据他发的信息的意思带」）：兑底清单也按克制口径教——绝大多数消息不带，明确要才发
     var wxEmoList = await loadWxEmoticons();
     if (wxEmoList.length && system.indexOf('表情包清单') < 0) {
       var wxNames = [];
       for (var wei = 0; wei < wxEmoList.length; wei++) if (wxEmoList[wei] && wxEmoList[wei].name) wxNames.push(wxEmoList[wei].name);
       if (wxNames.length) {
-        system += '\n【表情包】你可以发表情包：在回复里单独一行输出 [表情包:名字]。可用名字：' +
+        system += '\n【表情包·克制使用】你可以发表情包：在回复里单独一行输出 [表情包:名字]。可用名字：' +
           wxNames.join('、') +
-          '。主人让你发表情包、要抱抱蹭蹭逗TA开心时【必须发】——明确点名要表情包的那条回复里一定要带 [表情包:名字] 标记（可以先回一句文字再跟标记），不许只回文字、不许装傻；平时正常聊天不必每次都发。';
+          '。但要像真人一样克制：绝大多数消息不带任何表情包，只在对方明确要表情包、求哄逗TA开心、斗图时才发——按TA消息的意思选最贴合的一张，不要习惯性每轮都发、不要一次发好几张；明确点名要表情包的那条回复里一定要带 [表情包:名字] 标记（可以先回一句文字再跟标记），不许只回文字、不许装傻。';
       }
     }
     // v23 微信语音条能力（机主定调「AI 回复直接合成语音条发到真机微信」）：合成可用
@@ -1323,7 +1337,7 @@ async function handleWxMsg(cfg, msg) {
     //（无标记时）首段直接升级；合成失败的段文字补回（保底不丢）
     var wxVoiceScan = collectVoiceMarkers(wxEmoScan.text);
     var cleaned = stripRichMarkers(wxVoiceScan.text);
-    var segs = cloudReplySegments(cleaned, cfg.wechat.multi !== false);
+    var segs = cloudReplySegments(cleaned, true);
     if (!segs.length && !wxEmoScan.hits.length && !wxVoiceScan.clips.length) segs = [WX_EMOJI_FALLBACKS[Math.floor(Math.random() * WX_EMOJI_FALLBACKS.length)]];
     // v23 微信语音条合成（≤2 条；TTS→wav→silk，成功后经 iLink type 3 voice_item 发真语音）
     var wxVoiceClips = [];
@@ -1348,13 +1362,8 @@ async function handleWxMsg(cfg, msg) {
       else segs.unshift(wSeg);
     }
     for (var ssi = 0; ssi < segs.length; ssi++) segs[ssi] = sanitizeWxOutText(cfg, segs[ssi]);
-    // v14 条数上限 8 → 30（机主定调「3~30 尽量多发」）：超出并入末条（不丢内容）；
-    // 逐条连发 + 真人节奏间隔（正在输入保活持续到发完）
-    if (segs.length > 30) {
-      var head = segs.slice(0, 29);
-      head.push(segs.slice(29).join('\n'));
-      segs = head;
-    }
+    // v24 上限解除（机主定调「最多没有上限」）：不再把超出 30 条的段落并入末条——
+    // 切出多少条就逐条发多少条（连发节奏间隔照旧，真人节奏）；提示词端已有至少 3 条/无上限指令
     // v23 发送顺序：语音条先行（失败该条文字补回）→ 文字连发 → 表情图（与 QQ 同构）
     for (var wsi2 = 0; wsi2 < wxVoiceClips.length; wsi2++) {
       try {
@@ -2379,19 +2388,21 @@ async function handleQqEvent(cfg, t, d) {
   // 托管成公网 URL 才发得出去——网关媒体端点或 SUPA 凭证（云端函数/直连）至少有一个）：
   var ttsOk = ((cfg.qq && cfg.qq.tts && cfg.qq.tts.baseUrl && cfg.qq.tts.apiKey) || TTS_LOCAL_URL || (cfg.llm && cfg.llm.baseUrl && cfg.llm.apiKey)) && !!((RELAY_URL && RELAY_SECRET && SUPA_URL) || (SUPA_URL && SUPA_KEY));
   var system = (cfg.qq.persona && cfg.qq.persona.system) || '你和主人在真实QQ上聊天，回复简短自然，绝不透露自己是AI。';
-  // v16 连发兑底：旧运行包/未绑定人设里没有连发指令块时运行期补注入（真机「只发一条」的兑底）
-  system = ensureBurstRule(system, cfg.qq.multi !== false);
+  // v24 连发兑底（multi 常开）：旧运行包/未绑定人设没有连发指令块时运行期补注入；
+  // multi 标志不再作门槛（旧包 multi=false 也照常连发——真机不再只回一条）
+  system = ensureBurstRule(system);
   // 表情包指令：v13 运行包人设（站内组装器产出）自带【表情包清单】时不再重复注入——
   // 只有兑底人设（没绑角色/旧运行包）才给这份精简清单教学（ID/名字都可解析）。
   // v18：本地全量注入与云端 qq.emoticons 合并（网关运行时不再受 Storage 受限/旧包影响）
+  // v24 表情克制（机主定调「少带点，根据他发的信息的意思带」）：兑底清单同改克制口径。
   var emo = mergeEmoticons(LOCAL_EMOTICONS, (cfg.qq && cfg.qq.emoticons) || []);
   if (emo.length && system.indexOf('表情包清单') < 0) {
     var names = [];
     for (var ei = 0; ei < emo.length; ei++) if (emo[ei] && emo[ei].name) names.push(emo[ei].name);
     system +=
-      '\n【表情包】你可以发表情包：在回复里单独一行输出 [表情包:名字或ID]。可用名字：' +
+      '\n【表情包·克制使用】你可以发表情包：在回复里单独一行输出 [表情包:名字或ID]。可用名字：' +
       names.join('、') +
-      '。主人让你发表情包、要抱抱蹭蹭逗TA开心时【必须发】——明确点名要表情包的那条回复里一定要带 [表情包:名字] 标记（可以先回一句文字再跟标记），不许只回文字、不许装傻；平时正常聊天不必每次都发。';
+      '。但要像真人一样克制：绝大多数消息不带任何表情包，只在对方明确要表情包、求哄逗TA开心、斗图时才发——按TA消息的意思选最贴合的一张，不要习惯性每轮都发、不要一次发好几张；明确点名要表情包的那条回复里一定要带 [表情包:名字] 标记（可以先回一句文字再跟标记），不许只回文字、不许装傻。';
   }
   // v16 QQ 语音条能力教学（ttsOk 时动态注入——旧版 AI 只能口头答应「发语音」却没有任何
   // 机制可触发，用户实测「AI 说发不了/卡在发送那一步」的根因）+ 文字表情代码负规则
@@ -2399,7 +2410,7 @@ async function handleQqEvent(cfg, t, d) {
   if (ttsOk) {
     system += '\n【语音条能力】你可以发语音：对方让你发语音/说给TA听/用语音回复时，把要说的话写进标记 [语音:想说的话]（单独占一行，可以多条多个标记），系统会把它们合成真正的语音条发给对方——想发语音就带标记，不要只口头答应「我给你发条语音」却什么都不做，更不要说「发不了语音」；普通文字消息偶尔也会自动以语音条送达，属正常送达方式。';
   }
-  system += '\n（本通道不支持 [微笑] 这类文字表情代码——想发表情就按表情包清单输出 [表情包:ID/名字] 标记，其余情况用文字自然聊。）';
+  system += '\n（本通道不支持 [微笑] 这类文字表情代码——想发表情就按表情包清单输出 [表情包:ID/名字] 标记，但也要克制：绝大多数消息用文字自然聊，只在对方明确要表情时才发。）';
   // v10 QQ 历史角色归一：qq-history.json 里新旧两种格式并存（旧 me/peer、新 user/assistant）——
   // 归一成 LLM 的 user/assistant（旧版写 me/peer 但过滤只认 user/assistant，云端 QQ 上下文
   // 一直是空的——回复不连贯的根因之一）。me=真机 QQ 上发消息的人（主人）→ user，peer=TA → assistant。
@@ -2444,7 +2455,7 @@ async function handleQqEvent(cfg, t, d) {
   // v13 连发切分（站内回复条数 > 1：句界一条条发）+ 站内动作标记净化 + 引用行；
   // v16：照片标记已下线（stripRichMarkers 静默剥除），语音标记已先行切走
   var cleaned = stripRichMarkers(voiceScan.text);
-  var segs = cloudReplySegments(cleaned, cfg.qq.multi !== false);
+  var segs = cloudReplySegments(cleaned, true);
   // v18 裸标记泄漏兑底：整条回复只剩解析不到的表情标记时，旧版把【未切前的原文】
   // （含裸 [表情包:sunny-02]）当正文发出（实测裸标记泄漏的根因）——改为：清单可用时挑
   // 一张默认表情图发出（AI 想发表情没发成时的兜底，不空轮）；清单也为空才用颜文字兑底。
@@ -2505,18 +2516,14 @@ async function handleQqEvent(cfg, t, d) {
   }
   // v22 发送预算放开（机主定调：QQ 被动回复没有「一共只能发五条」的平台限制——旧版按
   // 5 次/轮预算把连发 3~30 条压成几条文字墙，是「真机 AI 只发一条」的直接根因）：
-  // 文字条数不再设预算，超出 30 条并入末条（与微信侧同口径，不丢内容）；语音条合成上限
-  // 3 条照旧（TTS 成本）；表情图平时 3 张 / 斗图 5 张（防刷屏），不挤占文字名额。
+  // 文字条数不设预算；v24 上限彻底解除（机主定调「最多没有上限」）——不再并入末条，
+  // 切出多少条发多少条；语音条合成上限 3 条照旧（TTS 成本）；表情图平时 3 张 / 斗图 5 张
+  //（防刷屏），不挤占文字名额。
   var maxImgs = cfg.qq && cfg.qq.stickerBattle ? 5 : 3;
   var images = [];
   for (var si2 = 0; si2 < emoHits.length && images.length < maxImgs; si2++) {
     var st = emoHits[si2];
     if (st && st.dataUrl && String(st.dataUrl).split(',')[1]) images.push(st);
-  }
-  if (segs.length > 30) {
-    var qqHead = segs.slice(0, 29);
-    qqHead.push(segs.slice(29).join('\n'));
-    segs = qqHead;
   }
   // v16 QQ 出站净化：经典表情文字代码（[流泪][裂开]…）在机器人通道不渲染——剥掉再发
   for (var csi = 0; csi < segs.length; csi++) segs[csi] = qqStripClassicCodes(segs[csi]);
@@ -3144,7 +3151,9 @@ Deno.serve(async (req) => {
       // + upload-file 二进制——真机微信/QQ 表情包、QQ 语音的全量可用代际。
       // v20：QQ 入站图片 URL 提取占位统一 + send-active QQ 被动回复余量优先（网站回复镜像
       // 零配额送达窗口）+ 载入本地直推表情清单兑底（网关通道同款合并口径）。
-      return jr({ ok: true, source: 'deno', ver: 20 });
+      // v24：真机连发改版（至少 3 条、上限彻底解除）+ 表情克制（经典表情每条最多一个 +
+      // 提示词按消息意思带）——与 CLOUD_RUNTIME_VER 同步（旧 20/21 两代 drifted，这里对齐）。
+      return jr({ ok: true, source: 'deno', ver: 24 });
     }
 
     // ---- v16 send-active（站内「主动发消息」引擎触发）：把站内已生成的主动消息内容发到
