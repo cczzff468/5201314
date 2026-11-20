@@ -1,0 +1,74 @@
+[
+  {
+    "url": "https://bot.q.qq.com/wiki/develop/api-v2/autogen/api/v2_users_user_openid_messages.post.html",
+    "name": "发送单聊消息| QQ 机器人官方文档",
+    "snippet": "2026年10月28日 — 回复消息的序号，与 msg_id 联合使用，避免相同消息id 回复重复发送，不填默认是1。相同的 msg_id + msg_seq 重复发送会失败。 media , MediaInfo, 否, 富 ...",
+    "host_name": "bot.q.qq.com",
+    "rank": 0,
+    "date": "2026年10月28日",
+    "favicon": ""
+  },
+  {
+    "url": "https://github.com/shaojingzhi/remote-control-codex-and-opencode/blob/main/docs/api/qq-bot.md",
+    "name": "QQ Bot API v2 参考- remote-control-codex-and-opencode",
+    "snippet": "... ('POST', `/ v2 / users /${ openid }/ messages `, { msg_type : 7, media : { file_info : upload. file_info }, msg_id : replyMsgId, // 被动回复 });. 注意： 单聊上传的 file_info ...",
+    "host_name": "github.com",
+    "rank": 1,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://bot.q.qq.com/wiki/develop/api-v2/autogen/api/v2_groups_group_openid_messages.post.html",
+    "name": "发送群聊消息| QQ 机器人官方文档 - QQ开放平台",
+    "snippet": "2026年10月28日 — 回复消息的序号，与 msg_id 联合使用，避免相同消息id 回复重复发送，不填默认是1。相同的 msg_id + msg_seq 重复发送会失败。 media , MediaInfo, 否, 富 ...",
+    "host_name": "bot.q.qq.com",
+    "rank": 2,
+    "date": "2026年10月28日",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.google.com/goto?url=CAEScgHEIkXX8_5hU2cLSShPO07SL-6rMzbztTzj_KZECY10lAD4Os-ZnZspvjl01TPZzUP3YuB-M_Bi_0goC5aO2Ndlkha2VUzQ9c9itO7-ldhndpt1JFXja6pW5BunYkliw75-UQgyDA6V4BptWubKWH1qYQ&gsessionid=Xab4Vs8s60tVVwndm4EMZ_HEPBeOnUhr7ye0a5_YE8W8A2xnNfOowg",
+    "name": "goqqbot package - github.com/libsilverwolf/go-qq-bot",
+    "snippet": "2026年11月3日 — 富媒体 ： msg_type =7 需要先上传文件拿 file_info （分片上传 / 整文件上传接口），本库暂未实现； 已实现的是 Markdown 图片素材（ UploadImage ）。",
+    "host_name": "www.google.com",
+    "rank": 3,
+    "date": "2026年11月3日",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.google.com/goto?url=CAEScgHEIkXXjG2V183fFsKGT-dbJ_ltLUoM05Nbn4M_3DKcE01Eax54r--bu5YIiFkPOg0uAetLzXrykEsIRelMd5Zpdypndz5fMgQbgXQi3c3Jtb6FYTA6xTi4qiNQ56hEbcHnxh_hYbfL7cKgTAFhGPzeWQ&gsessionid=Xab4Vs8s60tVVwndm4EMZ_HEPBeOnUhr7ye0a5_YE8W8A2xnNfOowg",
+    "name": "QQ 机器人仅发送msg_type=0 导致图片与图文消息不可用",
+    "snippet": "2026年2月24日 — 影响： - 机器人 无法发送图片，图文混发能力受限。 - 用户在手机端已观察到图文能力不可用；跨端表现可能不一致，需要补充矩阵验证。 建议验收标准： 1) ...",
+    "host_name": "www.google.com",
+    "rank": 4,
+    "date": "2026年2月24日",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.google.com/goto?url=CAESawHEIkXX54j1Hb-jbqeww5mvgGMzgUqMdue8SeFdKHYwcx55pspHy_Umr0P2HOAVKAggkuYxcxKCEy-onZvHbpqcQWfbOCUgnDybS9kd3CAa3Ja7J3vnmu4om7ESrqLPB_BUWvdBYcVZ0thn&gsessionid=Xab4Vs8s60tVVwndm4EMZ_HEPBeOnUhr7ye0a5_YE8W8A2xnNfOowg",
+    "name": "@xsqm/pi-qqbot · Packages · Pi",
+    "snippet": "2026年7月18日 — pi-qqbot 是一个Pi 扩展，用官方 QQ 机器人 WebSocket 网关把QQ 私聊/群聊消息接入本地Pi coding agent。 QQ 用户发送文本或平台实际推送的附件 ...",
+    "host_name": "www.google.com",
+    "rank": 5,
+    "date": "2026年7月18日",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.google.com/goto?url=CAESbwHEIkXXHI1W4FkFXVUNKksH6rrNR7K2Q_2LOxxql4j5_egoPP7uebFKPQsADL4U3aa6HWfxuH6_4qQKSkWltDHxavzvsRXI2fkZSyoGU3myEEwAZt7J4WCXLdHfYdvWtwY4wf-CIrUg999C8ZWoPA&gsessionid=Xab4Vs8s60tVVwndm4EMZ_HEPBeOnUhr7ye0a5_YE8W8A2xnNfOowg",
+    "name": "[Bug]QQ官方机器人在定时任务/连续多次回复时产生msg_id",
+    "snippet": "2026年3月25日 — Bug简述. 在定时任务/连续多次回复的场景下，在 机器人 会连续多次调用 send_message_to_user 尝试向用户发送消息。此时工具会在第二次及以后调用 ...",
+    "host_name": "www.google.com",
+    "rank": 6,
+    "date": "2026年3月25日",
+    "favicon": ""
+  },
+  {
+    "url": "https://www.google.com/goto?url=CAESsAEBxCJF1yKmassf7qYh9mQy4ieSyBpvKUHdYE53ErxAphU7lxdbTqE1zvnPVW4mcMDHzxuuXLCYEbc-4xe9G7wAY1kffOqEXFEvkpQIOueIAwF9h5yXWWHYymm1tZBW3ZoRn1iIl7Q8e5KxPIrb8YsN8qN6BA5JVS4HBkYLL_58QvBx1uM_vVLec0moRKMLbhMQUjCfM5fgfs3u--sdfTpzpv1Y_ZQohS1dFMIHCyo97w&gsessionid=Xab4Vs8s60tVVwndm4EMZ_HEPBeOnUhr7ye0a5_YE8W8A2xnNfOowg",
+    "name": "插件开发规范.md - tdcq9594/qq-bot-roost",
+    "snippet": "2026年11月7日 — 富媒体 走「先上传拿 file_info ，再以 msg_type =7 发送」，失败只记日志 ... 官方没有开放「查询 机器人 所在群列表」和「用户 QQ 号」。这些不要向 ...",
+    "host_name": "www.google.com",
+    "rank": 7,
+    "date": "2026年11月7日",
+    "favicon": ""
+  }
+]
