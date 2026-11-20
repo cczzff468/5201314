@@ -20,6 +20,44 @@ export const FUNC_SLUG = 'wx-assistant';
 export const BUCKET_PRIVATE = 'wx-cloud';
 export const BUCKET_PUBLIC = 'wx-cloud-public';
 
+/** v20 本机网关直推（push-config op）：运行包构建成功即直推同机内置 IM 网关（落盘 +
+ *  热生效）——Storage 被 402/502 拒收时网关通道的人设/连发指令/表情包清单/语音配置照样
+ *  最新（真机「AI 只发一条」「表情包停在旧包」在受限场景下的根修）。fire-and-forget：
+ *  云端上传成败不依赖它；网关没跑/连不上静默（下次同步再推）。 */
+const GW_PUSH_URL = '/api/im-gateway?XTransformPort=3100';
+async function pushRunPackageToGateway(pkg: RunPackageResult): Promise<boolean> {
+  try {
+    const emoticons = (pkg.emoticonsFile && Array.isArray(pkg.emoticonsFile.wechat)) ? pkg.emoticonsFile.wechat : [];
+    const res = await fetch(GW_PUSH_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ op: 'push-config', pkg: pkg.pkg, emoticons }),
+      signal: AbortSignal.timeout(25_000),
+    });
+    const j = (await res.json().catch(() => null)) as { ok?: boolean } | null;
+    if (j && j.ok) {
+      console.log('[wx-cloud] 运行包已直推本机网关（Storage 受限也新鲜）');
+      return true;
+    }
+    return false;
+  } catch {
+    return false; /* 网关没跑/连不上：静默 */
+  }
+}
+
+/** v20 本机网关自愈（云端助手页挂载时）：网关没跑（多为 Storage 402 受限读不到云端运行包）
+ *  → 本地构建最新运行包直推网关（local-config.json 落盘 + 热生效）→ 拉起网关时本地配置即可
+ *  起线。静默 best-effort：构建/推送任一步失败不打扰页面（下次同步/挂载会再试）。 */
+export async function ensureLocalGatewayConfig(): Promise<boolean> {
+  try {
+    const pkg = await buildRunPackage();
+    if (!pkg.ok) return false;
+    return await pushRunPackageToGateway(pkg);
+  } catch {
+    return false;
+  }
+}
+
 export interface SupaProject {
   id: string;
   name: string;
@@ -255,6 +293,9 @@ export async function syncRunPackage(): Promise<DeployResult> {
 
   const pkg: RunPackageResult = await buildRunPackage();
   if (!pkg.ok) return { ok: false, msg: pkg.msg };
+  // v20 本机直推先行：云端上传（402/502 受限/超时）之前就把最新运行包交到同机网关——
+  // 网关通道的人设/连发/表情包/语音配置此刻即最新（不依赖 Storage 写入成败）
+  const gwPushed = await pushRunPackageToGateway(pkg).catch(() => false);
 
   // 候选密钥：已保存的 + 自动读取的全部 secret 类 key（尽力而为，读不到不阻断——
   // 还有云端函数代写路径，它不需要项目密钥）
@@ -289,6 +330,15 @@ export async function syncRunPackage(): Promise<DeployResult> {
   );
   if (status !== 200) {
     const rec = (j ?? {}) as { message?: string; error?: string };
+    // v20：云端上传失败（402/502 受限）但本机直推已成功 → 网关通道照常最新——如实报告
+    // 两条通道的状态（网关在线时真机能力全量可用，云端 Storage 文件待平台解除限制后重试）
+    if (gwPushed) {
+      const why = rec.message || rec.error || `HTTP ${status}`;
+      return {
+        ok: false,
+        msg: `运行包上传云端失败（${why}）——多为 Supabase 项目被平台限制（402/502）；但已直推本机网关（网站开着时真机微信/QQ 的连发/表情包/语音/识图全量可用）。到 Supabase 控制台查看项目状态/申诉解除后重试上传。`,
+      };
+    }
     return { ok: false, msg: rec.message || rec.error || `运行包上传失败（${status}）` };
   }
 
@@ -314,9 +364,10 @@ export async function syncRunPackage(): Promise<DeployResult> {
     }
   }
   const viaNote = rec.via === 'function' ? '（云端函数代写——项目密钥被 Storage 拒收，已走平台凭证通道）' : '';
+  const gwNote = gwPushed ? '；本机网关已同步直推（真机能力此刻即最新）' : '';
   return {
     ok: true,
-    msg: pkg.note ? `运行包已同步到你的 Supabase${viaNote}${upgradeNote}${pkg.note}` : `运行包已同步到你的 Supabase${viaNote}${upgradeNote}`,
+    msg: pkg.note ? `运行包已同步到你的 Supabase${viaNote}${gwNote}${upgradeNote}${pkg.note}` : `运行包已同步到你的 Supabase${viaNote}${gwNote}${upgradeNote}`,
     funcUrl: `${next.projectUrl}/functions/v1/${FUNC_SLUG}`,
     ...(pkg.note ? { note: pkg.note } : {}),
   };

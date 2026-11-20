@@ -72,7 +72,6 @@ function buildLocalStickerUrls(): Record<string, string> {
 /** z-ai 可用音色（不认识的音色名一律回 tongtong——运行包里存的是 OpenAI 音色名时也不报错） */
 const ZAI_VOICES = ['tongtong', 'chuichui', 'xiaochen', 'jam', 'kazi', 'douji', 'luodo'];
 let zaiInstance: any | null = null;
-
 /** 本地合成语音（POST /tts，OpenAI 兼容形状 {input, voice, speed}）→ wav 二进制。
  *  z-ai-web-dev-sdk 仅后端使用（本 mini-service 是后端）；SDK 缺失/合成失败返回 5xx，
  *  云端核心拿到非 200 自动降级纯文字（不炸收发主流程）——QQ 语音条零配置可用。
@@ -114,6 +113,49 @@ async function handleLocalTts(req: Request): Promise<Response> {
   }
 }
 
+// ---------------- v20 本地识图（QQ 入站图片 → VLM 描述：z-ai SDK createVision） ----------------
+
+/** 本地识图端点（POST /vlm {url, prompt} → {desc}）：真机 QQ 上对方发图 → 云端核心
+ *  （sources.ts describeQqImage）调它把图转成文字描述进 LLM 上下文——AI 会识图。
+ *  同 TTS 端点一样仅本机访问（不经 Caddy 对外）；SDK 缺失/识别失败返回 5xx，
+ *  调用方（云端核心）拿到非 200 自动退占位文案——不炸收发主流程。 */
+async function handleLocalVlm(req: Request): Promise<Response> {
+  let body: Record<string, any> = {};
+  try {
+    body = (await req.json()) as Record<string, any>;
+  } catch {
+    return Response.json({ error: 'bad json' }, { status: 400 });
+  }
+  const url = String(body.url || '').trim();
+  const prompt = String(body.prompt || '').trim().slice(0, 500) || '描述这张图片的内容';
+  if (!/^https?:\/\//i.test(url)) return Response.json({ error: 'bad url' }, { status: 400 });
+  try {
+    if (!zaiInstance) {
+      const mod: any = await import('z-ai-web-dev-sdk');
+      const ZAI = mod.default ?? mod;
+      zaiInstance = await ZAI.create();
+    }
+    const res = await zaiInstance.chat.completions.createVision({
+      messages: [
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: prompt },
+            { type: 'image_url', image_url: { url } },
+          ],
+        },
+      ],
+      thinking: { type: 'disabled' },
+    });
+    const desc = res?.choices?.[0]?.message?.content;
+    if (!desc || !String(desc).trim()) return Response.json({ error: 'empty desc' }, { status: 502 });
+    return Response.json({ desc: String(desc).trim().slice(0, 1000) });
+  } catch (e) {
+    zaiInstance = null; // 失败重置单例（下汰重试）
+    return Response.json({ error: 'vlm failed: ' + String((e as Error)?.message || e).slice(0, 80) }, { status: 503 });
+  }
+}
+
 // ---------------- 常量 ----------------
 
 const PORT = 3100;
@@ -148,6 +190,12 @@ interface Runtime {
   startedAt: number;
   /** v8：配置读写通道（relay=云端函数中继 / direct=直连 Storage） */
   mode: 'relay' | 'direct';
+  /** v20：连接参数快照（push-config 热重物化用——网关运行中网站直推运行包后，用同一套
+   *  连接参数重新物化核心，本地注入更新，QQ/微信循环不断线） */
+  supaUrl: string;
+  supaKey: string;
+  relayUrl: string;
+  relaySecret: string;
   core: any;
   qq: QqWsState;
   wx: WxLoopState;
@@ -199,12 +247,49 @@ try {
   /* 目录读取失败忽略 */
 }
 
+/** v20 本地直推文件：网站同步运行包时同源直推（op=push-config 落盘）——绕开 Supabase
+ *  Storage 402/502 拒收，网关通道的人设/连发指令/表情包清单/语音配置永远新鲜（直推包
+ *  落盘持久：网关重启照样读到，不依赖云端文件上传成败）。文件内容与云端 config.json /
+ *  emoticons.json 完全同构（网站同一份构建产物）。 */
+const LOCAL_CONFIG_FILE = 'local-config.json';
+const LOCAL_EMOTICONS_FILE = 'local-emoticons.json';
+
+function localFilePath(name: string): string {
+  return fileURLToPath(new URL('./' + name, import.meta.url));
+}
+
+/** 读直推的运行包（null = 没直推过/读坏 → 核心退回云端 Storage 读） */
+function readLocalConfig(): Record<string, any> | null {
+  try {
+    const j = JSON.parse(readFileSync(localFilePath(LOCAL_CONFIG_FILE), 'utf8')) as Record<string, any>;
+    if (j && typeof j === 'object') return j;
+  } catch {
+    /* 没直推过/写坏 → null */
+  }
+  return null;
+}
+
+/** 读直推的微信表情包文件（emoticons.json 的 wechat 段；空表 = 没直推过） */
+function readLocalEmoticonsFile(): Array<Record<string, any>> {
+  try {
+    const j = JSON.parse(readFileSync(localFilePath(LOCAL_EMOTICONS_FILE), 'utf8')) as { wechat?: Array<Record<string, any>> } | Array<Record<string, any>>;
+    if (Array.isArray(j)) return j;
+    if (j && Array.isArray(j.wechat)) return j.wechat;
+  } catch {
+    /* 没直推过 → 空表 */
+  }
+  return [];
+}
+
 /** 把 WX_CLOUD_CORE + 连接变量物化成可 import 的模块（换连接重新物化，文件名递增做缓存失效）。
  *  v8：注入中继参数（RELAY_URL/RELAY_SECRET）——无用户项目密钥时配置读写改经云端函数。
  *  v13：注入 TTS_LOCAL_URL——网关本进程的本地语音合成端点（z-ai SDK wav），云端核心的
  *  QQ 语音条优先用它（用户不配 OpenAI 兼容 TTS 也能发语音）。
  *  v15：注入 IMG_LOCAL_URL——网关本进程的本地生图端点（z-ai 生图 + sharp 压 JPEG），
- *  云端核心的 [照片:描述] 标记优先用它（AI 发照片能力；网关在线时真机微信/QQ 都能收图）。 */
+ *  云端核心的 [照片:描述] 标记优先用它（AI 发照片能力；网关在线时真机微信/QQ 都能收图）。
+ *  v20：注入 VLM_LOCAL_URL（本地识图端点——QQ 入站图片转描述进 LLM 上下文）+
+ *  LOCAL_CONFIG / LOCAL_EMOTICONS_FILE（直推运行包——loadConfig 本地优先、直推表情包
+ *  并入清单，Storage 402 期间网关配置不再陈旧）。 */
 async function materializeCore(supaUrl: string, supaKey: string, relayUrl: string, relaySecret: string): Promise<any> {
   const n = ++coreGen;
   const code = [
@@ -215,11 +300,17 @@ async function materializeCore(supaUrl: string, supaKey: string, relayUrl: strin
     `var RELAY_URL_INJECT = ${JSON.stringify(relayUrl)};`,
     `var RELAY_SECRET_INJECT = ${JSON.stringify(relaySecret)};`,
     `var TTS_LOCAL_URL_INJECT = ${JSON.stringify('http://127.0.0.1:' + PORT + '/tts')};`,
+    // v20 本地识图端点：QQ 入站图片（markdown/attachments URL）→ VLM 描述进 LLM 上下文
+    `var VLM_LOCAL_URL_INJECT = ${JSON.stringify('http://127.0.0.1:' + PORT + '/vlm')};`,
     // v18：本地表情包全量注入（与站内人设清单同源；Storage 受限/旧包时真机照发真图）
     `var LOCAL_EMOTICONS_INJECT = ${JSON.stringify(buildLocalEmoticons())};`,
     // v19：QQ 富媒体 url 制——内置包 CDN URL 表（jsdelivr 直发零托管；语音/用户表情的动态字节
     // 由核心 qqHostMedia 托管到用户 Supabase 公桶——经云端函数 upload-file v19 代写）
     `var LOCAL_STICKER_URLS_INJECT = ${JSON.stringify(buildLocalStickerUrls())};`,
+    // v20：直推运行包（local-config.json / local-emoticons.json）——loadConfig 本地优先，
+    // 直推表情包并入微信清单（内置包优先、云端旧文件兖底）
+    `var LOCAL_CONFIG_INJECT = ${JSON.stringify(readLocalConfig())};`,
+    `var LOCAL_EMOTICONS_FILE_INJECT = ${JSON.stringify(readLocalEmoticonsFile())};`,
     WX_CLOUD_CORE,
     'export { loadConfig, tick, tickFast, handleQqEvent, qqToken, writeHeartbeat, supaGetJson, supaPutJson, loadQqHistory, appendQqHistory, refreshQqWsLock, cloudSendActive };',
   ].join('\n');
@@ -769,6 +860,11 @@ async function startGateway(supaUrl: string, supaKey: string, ref: string, relay
       ref: ref || url.replace(/^https:\/\//, '').split('.')[0],
       startedAt: Date.now(),
       mode,
+      // v20 连接参数快照：push-config 热重物化用（同一套参数 + 新本地注入）
+      supaUrl: url,
+      supaKey: mode === 'relay' ? '' : key,
+      relayUrl: mode === 'relay' ? relay : '',
+      relaySecret: mode === 'relay' ? rsecret : '',
       core,
       qq: { state: 'connecting', sessionId: '', botName: '', lastSeq: 0, lastEventAt: 0, events: 0, reconnects: 0, lastError: '', hbOk: false },
       wx: { lastRunAt: 0, lastError: '', replied: 0 },
@@ -853,6 +949,10 @@ Bun.serve({
     if (url.pathname === '/tts' && req.method === 'POST') {
       return handleLocalTts(req);
     }
+    // v20 本地识图端点（云端核心 QQ 入站图片转描述用；同 TTS 仅本机访问）
+    if (url.pathname === '/vlm' && req.method === 'POST') {
+      return handleLocalVlm(req);
+    }
     if (url.pathname !== '/api/im-gateway') {
       return Response.json({ ok: false, error: 'not found' }, { status: 404 });
     }
@@ -879,6 +979,43 @@ Bun.serve({
       }
       if (op === 'stop') {
         return Response.json(await stopGateway());
+      }
+      // v20 push-config：网站同步运行包时同源直推（绕开 Storage 402/502 拒收）：落盘
+      // local-config.json / local-emoticons.json；网关运行中即时热重物化（loadConfig 本地
+      // 优先 + 直推表情包并入清单，QQ/微信循环不断线——Storage 受限期间网关人设/连发/
+      // 表情包/语音配置照样最新）。云端上传成败与此无关（两路并行互不阻断）。
+      // pkg=null = 清除本地直推（回退云端 Storage 为配置源——测试清理/排查用）。
+      if (op === 'push-config') {
+        const pkg = body.pkg && typeof body.pkg === 'object' ? (body.pkg as Record<string, unknown>) : null;
+        if (!body.hasOwnProperty?.('pkg') || body.pkg === undefined) {
+          return Response.json({ ok: false, msg: '运行包格式不对（缺 pkg 对象）' }, { status: 200 });
+        }
+        try {
+          if (pkg === null) {
+            try { unlinkSync(localFilePath(LOCAL_CONFIG_FILE)); } catch { /* 本就不存在 */ }
+            try { unlinkSync(localFilePath(LOCAL_EMOTICONS_FILE)); } catch { /* 本就不存在 */ }
+          } else {
+            writeFileSync(localFilePath(LOCAL_CONFIG_FILE), JSON.stringify(pkg));
+            if (Array.isArray(body.emoticons)) {
+              writeFileSync(localFilePath(LOCAL_EMOTICONS_FILE), JSON.stringify(body.emoticons));
+            } else {
+              try { unlinkSync(localFilePath(LOCAL_EMOTICONS_FILE)); } catch { /* 本就不存在 */ }
+            }
+          }
+          if (rt) {
+            const core = await materializeCore(rt.supaUrl, rt.supaKey, rt.relayUrl, rt.relaySecret);
+            rt.core = core; // 热生效：本轮在飞的旧核心跑完，下一轮 tick/handleQqEvent 自然换新
+            console.log('[im-gateway] 运行包直推已热生效（loadConfig 本地优先 + 直推表情包并入）');
+          }
+          return Response.json({
+            ok: true,
+            msg: pkg === null
+              ? '本地直推已清除（网关回退云端 Storage 配置源）'
+              : '运行包已直推本机网关' + (rt ? '（已热生效）' : '（网关未运行：已存盘，启动时自动读取）'),
+          });
+        } catch (e) {
+          return Response.json({ ok: false, msg: '直推落盘失败：' + String((e as Error)?.message || e).slice(0, 100) }, { status: 200 });
+        }
       }
       // v16 send-active（站内「主动发消息」引擎触发）：把站内已生成的主动内容发到真机
       // 微信/QQ（cloudSendActive：微信用最近会话上下文、QQ 用活跃消息接口——QQ 每月限 4 条）

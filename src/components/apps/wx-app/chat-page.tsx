@@ -11,6 +11,8 @@ import { ChatNewMsgPill, useChatAutoScroll } from '@/hooks/use-chat-autoscroll';
 import { pushChatNotification, notifyPreviewText } from '@/lib/ios/island-notify';
 import { playNotifySound } from '@/lib/ios/notify-sound';
 import { appendWithBoundary, markDeliverBoundary, peekPendingMsgs, sortMsgsByTime, scheduleAiDelivery, subscribeAiDelivery, subscribeAiDeliveryActive, isAiDelivering, typingDelayOf } from '@/lib/ios/ai-delivery';
+// v20 网站回复同步真机（开关读取）
+import { getWebsiteReplySync } from '@/lib/ios/website-reply-sync';
 import { cleanTextForTts, stopSpeaking } from '@/lib/ios/tts-client';
 import { decideAiVoiceMessage, synthesizeAiVoice, getAiVoiceFreq, saveAiVoiceFreq, undoLastAiVoiceDecision } from '@/lib/ios/ai-voice';
 import { describeVoiceId, useMyVoices } from '@/lib/ios/my-voices';
@@ -211,6 +213,9 @@ export interface WxTurnCtx {
   turnQuoted?: boolean;
   /** v2.6 机主明确要求引用（「引用那条消息」等）→ 豁免 AI_QUOTE_COOL_MS 冷却闸（限速是对「AI 自动挂引用」的，不是对机主点名要求的） */
   userQuoteDemand?: boolean;
+  /** v20 网站回复同步真机：本轮 AI 文字分段收集（投递完成后经 relayProactiveToRealDevice
+ *  镜像到真机微信——只收纯文字消息，卡片/照片/系统行不进镜像） */
+  relayTexts?: string[];
 }
 
 /** v56 引用冷却窗口：距上次成功挂载引用不足该时长的轮次一律丢弃引用标记——用户要「学会引用」
@@ -1399,10 +1404,25 @@ export function ChatPage({
     if (wxActiveChatId !== peer.id) wxUnreads.bump(peer.id, 1);
   };
 
+  /** v20 网站回复同步真机：把本轮收集的文字分段镜像到真机微信（开关开着且该联系人是
+   *  真机绑定角色时；relayProactiveToRealDevice 内部自鉴权/静默 best-effort，失败不碰站内） */
+  const relayTurnToRealDevice = (ctx: WxTurnCtx) => {
+    if (!getWebsiteReplySync('wx')) return;
+    const texts = (ctx.relayTexts || []).filter(Boolean).slice(0, 10);
+    if (!texts.length) return;
+    void import('@/lib/ios/wx-cloud/proactive-relay').then((m) => m.relayProactiveToRealDevice('wx', peer.id, texts)).catch(() => undefined);
+  };
+
   /** 排队投递一批：首批立即上屏（边接收边显示），后续批先按打字节奏停顿（逐条冒出来）；
    *  batchStarted 记在轮次上下文 ctx 里（runAiTurn 每轮新建、接力投递单独建，互不影响） */
   const enqueueBatch = (built: WxMsg[], ctx: WxTurnCtx) => {
     if (built.length === 0) return;
+    // v20 网站回复同步真机：本轮文字分段收集（投递完成后统一镜像，卡片/照片/系统行不收）
+    for (const b of built) {
+      if (b.role === 'peer' && (!b.kind || b.kind === 'text') && b.content && !b.error && !b.recalled) {
+        (ctx.relayTexts ||= []).push(b.content.slice(0, 800));
+      }
+    }
     void scheduleAiDelivery<WxMsg>(
       sessionKey,
       built,
@@ -2202,6 +2222,9 @@ export function ChatPage({
     if (ctx.wantCallSeen) triggerAiVoiceCall();
     // Task 22 AI 主动视频通话（[视频通话] 标记）：同冷却与守卫口径，弹视频来电邀请
     if (ctx.wantVideoCallSeen) triggerAiVideoCall();
+    // v20 网站回复同步真机：接力投递（页面关着时完成的回复）同样镜像到真机微信
+    //——enqueueBatch 里已收集，这里统一触发（站内打字节奏继续走，镜像不等它）
+    relayTurnToRealDevice(ctx);
   };
   /** 稳定引用（同 runAiTurnRef 模式）：挂载拉取 effect 经此调用最新闭包的投递函数 */
   const deliverBgRef = useRef<((items: BgPendingItem[]) => void) | null>(null);
@@ -2852,6 +2875,12 @@ export function ChatPage({
         // 模拟打字节奏；空批仅作占位，记忆库等「一轮结束」动作挂在全部消息投递完之后；
         // 调度器在模块层运行，与聊天页是否存活无关（退出页面后继续接收/投递）
         flushPhotoJobs(ctx); // 生图（锁脸）：finalize 剩余段剥出的照片标签统一异步生成投递
+        // v20 网站回复同步真机：末批文字分段同样入收集（流中分段已在 enqueueBatch 收过）
+        for (const b of finalBatch) {
+          if (b.role === 'peer' && (!b.kind || b.kind === 'text') && b.content && !b.error && !b.recalled) {
+            (ctx.relayTexts ||= []).push(b.content.slice(0, 800));
+          }
+        }
         void scheduleAiDelivery<WxMsg>(
           sessionKey,
           finalBatch,
@@ -2894,6 +2923,9 @@ export function ChatPage({
           void wxExpireStalePeerCards().then((changed) => {
             if (mountedRef.current && changed.includes(peer.id)) mergeExpiredSweep();
           });
+          // v20 网站回复同步真机：本轮回复全部投递完成 → 文字分段镜像到真机微信
+          //（开关开着 + 绑定角色；云端拒收/网关没跑静默不影响站内）
+          relayTurnToRealDevice(ctx);
         });
         // AI 主动发起语音通话（标记可能出现在流中任一分段）：剥除后按 5 分钟冷却弹出来电浮层
         //（与接力拉取投递共用 triggerAiVoiceCall，见组件层）

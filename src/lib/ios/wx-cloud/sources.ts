@@ -114,7 +114,11 @@
 /** v17：云端运行时代际号——站内「重新同步运行包」用它判断要不要重部署函数代码
  *  （ping 回的 ver ≠ 它（含 ping 不回 ver 的旧函数）= 真机上还在跑旧函数：只回一两条/
  *  不会表情包/不会语音/发裸标记——重部署最新代码全量对齐）。 */
-export const CLOUD_RUNTIME_VER = 19;
+// v20：识图（QQ 入站图 markdown/附件 URL → VLM 描述进 LLM 上下文，网关本地端点）+ 本地直推
+// 运行包（push-config 落盘热生效，loadConfig 本地优先——Storage 402/502 受限期间网关人设/
+// 连发/表情包/语音配置照样新鲜）+ QQ 被动回复余量记账（网站回复镜像优先吃被动名额，省
+// 每月 4 条主动配额）+ 入站图片占位统一（attachments 无 url 也有可读提示）。
+export const CLOUD_RUNTIME_VER = 20;
 
 export const WX_CLOUD_CORE = String.raw`
 // ---- 微信云端助手核心（自动生成，勿手工编辑） ----
@@ -146,6 +150,18 @@ var LOCAL_EMOTICONS = (typeof LOCAL_EMOTICONS_INJECT !== 'undefined' && LOCAL_EM
 //   （公桶 QQ 实测可拉取）：网关中继模式经云端函数 upload-file（encoding:'base64'，v19 函数
 //   支持，读回验证防旧函数写坏），直连/云端函数模式用 SUPA 凭证直写（qqHostMediaCloud）。
 var LOCAL_STICKER_URLS = (typeof LOCAL_STICKER_URLS_INJECT !== 'undefined' && LOCAL_STICKER_URLS_INJECT) || {};
+// v20 网关本地识图端点（im-gateway 注入，z-ai SDK createVision）：QQ 入站图片（content 的
+// markdown 图 / attachments）先经它转成文字描述进 LLM 上下文——真机 QQ 上「AI 会识图」。
+// 云端（Deno）不注入为空 → 退回占位文案旧路径（描述不可用不炸收发主流程）。
+var VLM_LOCAL_URL = (typeof VLM_LOCAL_URL_INJECT !== 'undefined' && VLM_LOCAL_URL_INJECT) || '';
+// v20 网关本地运行包直推（push-config op 落盘 local-config.json / local-emoticons.json）：
+// 网站每次同步运行包时同源直推本机网关——绕开 Supabase Storage 402/502 拒收：网关通道
+// 永远用最新人设/连发指令/表情包清单/语音配置，不依赖云端文件上传成败（Storage 受限期间
+// 真机「AI 只发一条」「表情包停在旧包」的根修）。云端（Deno）不注入为 null → 云端照旧读 Storage。
+var LOCAL_CONFIG = (typeof LOCAL_CONFIG_INJECT !== 'undefined' && LOCAL_CONFIG_INJECT) || null;
+// v20 直推的微信表情包文件（emoticons.json 的 wechat 段：用户收藏 + 站内面板全量）：
+// 与 LOCAL_EMOTICONS（内置包）合并——本地直推优先于云端旧文件、内置包优先于两者。
+var LOCAL_EMOTICONS_FILE = (typeof LOCAL_EMOTICONS_FILE_INJECT !== 'undefined' && LOCAL_EMOTICONS_FILE_INJECT) || [];
 /** v18 表情清单合并：本地注入优先（站内当前资产、永远新鲜），云端文件补充（去重 by id/name）。
  *  两路共用：微信 emoticons.json 的 wechat 段 / QQ config 的 qq.emoticons。
  *  v18 过滤：远端旧包里的 wxb- 与 qqb- 前缀官方经典小表情不并入——v16 政策是经典小表情
@@ -242,6 +258,16 @@ async function supaPutJson(path, obj) {
 
 async function loadConfig(force) {
   if (!force && CFG && Date.now() - CFG_AT < 60000) return CFG;
+  // v20 本地直推优先：网关物化时注入的 local-config.json（网站每次同步直推——永远比
+  // Storage 里的新）。本地有就用本地（Storage 被 402/502 拒收时网关配置不再陈旧）；
+  // 没有（云端 Deno 函数 / 未直推过）才读云端 Storage。直推包落盘持久，网关重启照样新鲜。
+  if (LOCAL_CONFIG) {
+    CFG = LOCAL_CONFIG;
+    CFG_AT = Date.now();
+    var buL = CFG.wechat && typeof CFG.wechat.baseUrl === 'string' ? CFG.wechat.baseUrl.replace(/\/+$/, '') : '';
+    ILINK_HOST = /^https:\/\/[a-z0-9.-]+\.(weixin\.)?qq\.com$/i.test(buL) ? buL : ILINK;
+    return CFG;
+  }
   var c = await supaGetJson('config.json');
   if (!c) throw new Error('运行包缺失：请回到手机 App「设置 → 云端助手」重新同步');
   CFG = c;
@@ -514,8 +540,11 @@ async function loadWxEmoticons() {
   var j = null;
   try { j = await supaGetJson('emoticons.json'); } catch (e) { j = null; }
   var remote = (j && Array.isArray(j.wechat)) ? j.wechat : [];
-  WX_EMOTI = mergeEmoticons(LOCAL_EMOTICONS, remote);
-  if (!WX_EMOTI.length && !remote.length) WX_EMOTI = [];
+  // v20：本地直推的表情包文件（用户收藏 + 站内面板全量）并入云端远端源——内置包
+  // （LOCAL_EMOTICONS，带 CDN url）优先，直推文件补用户收藏，云端旧文件兖底。
+  var remoteAll = (LOCAL_EMOTICONS_FILE || []).concat(remote);
+  WX_EMOTI = mergeEmoticons(LOCAL_EMOTICONS, remoteAll);
+  if (!WX_EMOTI.length && !remoteAll.length) WX_EMOTI = [];
   WX_EMOTI_AT = Date.now();
   return WX_EMOTI;
 }
@@ -1702,7 +1731,32 @@ async function cloudSendActive(cfg, channel, texts) {
       return { ok: false, sent: 0, error: 'QQ 主动发送需要最近 14 天内和 TA 说过话——先在真机 QQ 上给 TA 发一条消息再试' };
     }
     var sent2 = 0;
-    for (var qi = 0; qi < list.length; qi++) {
+    // v20 被动回复优先：5 分钟内对方刚在真机 QQ 发过消息（state/qq-lastmsg.json 记的
+    // msg_id + 已用名额）且名额没耗尽（QQ 同 msg_id 被动回复上限 5 次）→ 先用被动接口
+    // 发（不吃 QQ 平台每月 4 条主动消息限额）；用完/没有才走主动接口。网站回复同步真机
+    //（站内镜像）在对方手机上刚发过消息的窗口里零配额送达。
+    var lm = null;
+    try { lm = await supaGetJson('state/qq-lastmsg.json'); } catch (le2) {}
+    var lmOk = lm && lm.msgid && String(lm.openid) === String(qa.openid) && !lm.isGroup &&
+      typeof lm.used === 'number' && Date.now() - Number(lm.at || 0) < 300000;
+    var lmRoom = lmOk ? Math.max(0, 5 - Number(lm.used)) : 0;
+    if (lmRoom > 0) {
+      var lmPass = Math.min(lmRoom, list.length);
+      for (var pi = 0; pi < lmPass; pi++) {
+        try {
+          await qqReply(cfg, qa.openid, String(lm.msgid), qqStripClassicCodes(list[pi]), false, '');
+          sent2++;
+          if (pi < lmPass - 1) await coreSleep(400);
+        } catch (pe) { break; }
+      }
+      try {
+        await supaPutJson('state/qq-lastmsg.json', {
+          msgid: lm.msgid, openid: lm.openid, isGroup: lm.isGroup || 0, groupOpenid: lm.groupOpenid || '',
+          at: lm.at, used: Number(lm.used) + sent2,
+        });
+      } catch (le3) { /* 记账失败不阻断 */ }
+    }
+    for (var qi = sent2; qi < list.length; qi++) {
       try {
         await qqReplyActive(cfg, qa.openid, qqStripClassicCodes(list[qi]));
         sent2++;
@@ -1861,6 +1915,49 @@ function qqMediaToPlaceholder(t) {
   });
 }
 
+/** v20 QQ 入站图片 URL 提取：content 的 markdown 图（![…](url)）+ attachments（url 字段，
+ *  兼容 image_url/宽高字段名）——QQ 官方把用户发的图以 markdown 或附件形式下发给机器人，
+ *  URL 是 QQ 服务器直链（临时有效），拿到就能拿去识图。返回去重后的 URL 数组（≤3 张）。 */
+function qqExtractImageUrls(d) {
+  var urls = [];
+  var seen = {};
+  var raw = String((d && d.content) || '') || '';
+  var re = /!\[[^\]]*\]\((https?:\/\/[^\s)]+)\)/g;
+  var m = null;
+  while ((m = re.exec(raw)) !== null) {
+    if (!seen[m[1]]) { seen[m[1]] = 1; urls.push(m[1]); }
+  }
+  var atts = (d && d.attachments) || [];
+  for (var i = 0; i < atts.length; i++) {
+    var a = atts[i] || {};
+    var u = String(a.url || a.image_url || '');
+    if (u && /^https?:\/\//.test(u) && !seen[u]) { seen[u] = 1; urls.push(u); }
+  }
+  return urls.slice(0, 3);
+}
+
+/** v20 QQ 入站图片识图：URL → 网关本地 VLM 端点（z-ai SDK createVision）转文字描述。
+ *  端点未注入（云端 Deno） / 网关不在线 / 合成失败 → null（调用方退回占位文案，不影响收发）。 */
+async function describeQqImage(url) {
+  if (!VLM_LOCAL_URL || !url) return null;
+  try {
+    var r = await fetch(VLM_LOCAL_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        url: String(url),
+        prompt: '用一到两句中文描述这张图片：有什么人/物/动作/场景/情绪，图里若有文字也读出来。给聊天对方看懂用，不要客套。',
+      }),
+      signal: AbortSignal.timeout(45000),
+    });
+    if (!r.ok) return null;
+    var j = null;
+    try { j = await r.json(); } catch (e) { j = null; }
+    var desc = j && typeof j.desc === 'string' ? j.desc.trim() : '';
+    return desc ? desc.slice(0, 300) : null;
+  } catch (e) { return null; }
+}
+
 /** QQ：处理 C2C / 群@ 消息事件（d），返回是否回复成功。
  *  回复分流：文字（msg_type 0）/ 语音条（TTS→silk，file_type 3）/ 表情包（运行包内置表情图，file_type 1）。
  *  语音条频率：cfg.qq.voiceEvery（每 N 条 1 条，0=关），计数器存云端 state/qq-voice-counter.json。 */
@@ -1874,12 +1971,15 @@ async function handleQqEvent(cfg, t, d) {
   var authorId = d && d.author && d.author.id ? String(d.author.id) : '';
   var msgId = d && d.id ? String(d.id) : '';
   if (!authorId || !msgId) return false;
+  // v20 入站图片 URL 先提取（识图用）：markdown 图 + attachments 链接（认领门之后才真调 VLM——
+  // 平台重推的同一条事件不浪费识图调用）
+  var imgUrls = qqExtractImageUrls(d);
   // 空正文 + 带附件 = 富媒体消息（部分事件 content 为空只挂 attachments）：同样给占位
   if (!content && d && d.attachments && d.attachments.length) {
     var at = d.attachments[0] && d.attachments[0].content_type;
     content = at && String(at).indexOf('image') >= 0 ? '（对方发了一个表情包/图片，内容看不到）' : '（对方发了一个媒体消息）';
   }
-  if (!content) return false;
+  if (!content && !imgUrls.length) return false;
   var isGroup = t === 'GROUP_AT_MESSAGE_CREATE';
   if (isGroup) content = content.replace(/^<at[^>]*>[^<]*<\/at>\s*/, '').trim();
   if (!content) return false;
@@ -1895,6 +1995,24 @@ async function handleQqEvent(cfg, t, d) {
   await coreSleep(600);
   var recheck = await loadQqClaims(true);
   if (recheck && typeof recheck[msgId] === 'number' && recheck[msgId] !== myClaimTs) return false;
+  // v20 入站图片识图：有图 URL 且本地 VLM 端点可用 → 逐张转描述，占位盲区替换成真内容
+  //（AI 真正看得到图——真机 QQ 上「会识图」；描述失败/端点不在退占位不影响收发主流程）
+  if (imgUrls.length && VLM_LOCAL_URL) {
+    var imgDescs = [];
+    for (var idi = 0; idi < imgUrls.length && imgDescs.length < 2; idi++) {
+      var dd = await describeQqImage(imgUrls[idi]);
+      if (dd) imgDescs.push(dd);
+    }
+    if (imgDescs.length) {
+      var imgNote = '（对方发的图片内容：' + imgDescs.join('；另一张是：') + '）';
+      if (content.indexOf('（对方发了一个表情包/图片，内容看不到）') >= 0) {
+        content = content.replace('（对方发了一个表情包/图片，内容看不到）', imgNote);
+      } else {
+        content = (content ? content + '\n' : '') + imgNote;
+      }
+    }
+  }
+  if (!content) content = '（对方发了一个媒体消息）';
   // v16 主动消息收件人：记住最近和机器人说过话的 C2C openid（站内「主动发消息」引擎用；14 天内有效）
   if (!isGroup) noteQqActiveOpenid(authorId);
   var hist = await loadQqHistory(false);
@@ -2085,6 +2203,16 @@ async function handleQqEvent(cfg, t, d) {
   var emoLog = [];
   for (var lei = 0; lei < sentEmo; lei++) emoLog.push('[表情:' + (images[lei] && images[lei].name ? images[lei].name : '') + ']');
   if (emoLog.length) await appendQqHistory({ id: 'qe-' + msgId, role: 'assistant', content: emoLog.join(' ').slice(0, 500), ts: Date.now() });
+  // v20 被动回复余量记账（网站回复同步真机用）：QQ 被动回复同 msg_id 最多 5 次——记下
+  // 本轮回了几条（语音+文字+表情图），站内镜像优先吃剩余名额（免每月 4 条主动配额）。
+  try {
+    var usedQ = segs.length + sentEmo;
+    for (var vui = 0; vui < voiceClips.length; vui++) if (voiceClips[vui] && voiceClips[vui].sent) usedQ++;
+    await supaPutJson('state/qq-lastmsg.json', {
+      msgid: msgId, openid: authorId, isGroup: isGroup ? 1 : 0,
+      groupOpenid: (d && d.group_openid) || '', at: Date.now(), used: usedQ,
+    });
+  } catch (le) { /* 记账失败不影响本轮回复 */ }
   return true;
   } catch (e) {
     // 失败即释：回复没发出去（LLM 失败 / QQ 接口失败）时释放认领，下一轮可重试；
@@ -2657,7 +2785,9 @@ Deno.serve(async (req) => {
       // 的坑；v17 起探测不到 ver 也重部署，旧函数不再永远升不了级）。
       // v19：微信表情包 aes_key 根修 + QQ 富媒体 url 制（内置包 CDN 直发 + 语音/表情公桶托管）
       // + upload-file 二进制——真机微信/QQ 表情包、QQ 语音的全量可用代际。
-      return jr({ ok: true, source: 'deno', ver: 19 });
+      // v20：QQ 入站图片 URL 提取占位统一 + send-active QQ 被动回复余量优先（网站回复镜像
+      // 零配额送达窗口）+ 载入本地直推表情清单兑底（网关通道同款合并口径）。
+      return jr({ ok: true, source: 'deno', ver: 20 });
     }
 
     // ---- v16 send-active（站内「主动发消息」引擎触发）：把站内已生成的主动消息内容发到

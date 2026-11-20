@@ -259,6 +259,7 @@ import {
   cronStartSql,
   cronStopSql,
   deploySupabase,
+  ensureLocalGatewayConfig,
   fetchCloudHeartbeat,
   listProjects,
   pingSupabase,
@@ -279,6 +280,8 @@ import {
   stopImGateway,
   type ImGatewayStatus,
 } from '@/lib/ios/wx-cloud/gateway';
+// v20 网站回复同步真机（每通道独立开关，默认开启）
+import { getWebsiteReplySync, saveWebsiteReplySync } from '@/lib/ios/website-reply-sync';
 
 // ---------------- 常量与类型 ----------------
 
@@ -9139,13 +9142,23 @@ function CloudFold({
 
 /** 云端助手页挂载时自动恢复「自动在线」（v7）：服务重启/重连后网关掉线、又没人在接入页
  *  打开过时，进云端助手页即补开（幂等：已在跑则服务端直接返回，不产生副作用）。
- *  dep 变为 true 时执行一次；失败静默（开关/接入页会给出可见反馈）。 */
+ *  dep 变为 true 时执行一次；失败静默（开关/接入页会给出可见反馈）。
+ *  v20 402 自愈：网关没跑时先本地直推一次最新运行包（local-config.json 落盘——Storage
+ *  受限读不到云端运行包时网关用本地配置即起线），再拉起网关。构建/推送/拉起全静默。 */
 function AutoEnsureGatewayEffect({ dep }: { dep: boolean }) {
   const fired = useRef(false);
   useEffect(() => {
     if (!dep || fired.current) return;
     fired.current = true;
-    void ensureImGatewayRunning('自动恢复在线').catch(() => undefined);
+    void (async () => {
+      try {
+        const st = await fetchImGatewayStatus();
+        if (!st?.running) await ensureLocalGatewayConfig();
+      } catch {
+        /* 直推静默：不影响下方拉起 */
+      }
+      void ensureImGatewayRunning('自动恢复在线').catch(() => undefined);
+    })();
   }, [dep]);
   return null;
 }
@@ -9203,6 +9216,10 @@ function CloudPage({ onBack }: { onBack: () => void }) {
   // 网关 /api/im-gateway 拿（服务端是真源）；开关切换中防重入
   const [gatewayStatus, setGatewayStatus] = useState<ImGatewayStatus | null>(null);
   const [gatewayBusy, setGatewayBusy] = useState(false);
+
+  // —— v20 网站回复同步真机（微信/QQ 各自开关，默认开启）——
+  const [replySyncWx, setReplySyncWx] = useState(() => getWebsiteReplySync('wx'));
+  const [replySyncQq, setReplySyncQq] = useState(() => getWebsiteReplySync('qq'));
 
   // —— 云端轮询开关（v10：开 = 自动回复，关 = 零配额消耗）——真源是用户 Supabase 里的
   // pg_cron 定时任务（schedule-cron / unschedule-cron 走 Management API SQL）；本地
@@ -9464,6 +9481,8 @@ function CloudPage({ onBack }: { onBack: () => void }) {
   // 网关状态轮询 + 看门狗（v7）：部署过的用户 6 秒一拉 /api/im-gateway——开关态、QQ 通道连接
   // 状态、微信循环健康都在这（服务端是真源；挂载即拉一次）。发现掉线自动拉起（限 60s 一次，
   // 服务重启/进程崩溃后自愈——用户打开任一相关页面即恢复在线）
+  // v20 402 自愈：拉起前先本地直推一次最新运行包（Storage 受限读不到云端配置时，网关用
+  // local-config.json 即可起线——「拉起必失败」的死循环解除）
   const gwLastEnsureRef = useRef(0);
   useEffect(() => {
     if (!ready || !supaDeployed) return;
@@ -9475,7 +9494,10 @@ function CloudPage({ onBack }: { onBack: () => void }) {
       setGatewayStatus(s);
       if (!s?.running && Date.now() - gwLastEnsureRef.current > 60000) {
         gwLastEnsureRef.current = Date.now();
-        void ensureImGatewayRunning('检测到掉线自动恢复');
+        void ensureLocalGatewayConfig().then(() => {
+          if (dead) return;
+          void ensureImGatewayRunning('检测到掉线自动恢复');
+        });
       }
       timer = window.setTimeout(tick, 6000);
     };
@@ -10011,6 +10033,51 @@ function CloudPage({ onBack }: { onBack: () => void }) {
                               ? `自动回复中（累计 ${gatewayStatus.wx.replied} 条）`
                               : '运行中（还没收到消息）'}
                         </p>
+                      </div>
+                    )}
+                    {/* v20 网站回复同步真机（每通道独立开关，默认开启）：网站聊天页的 AI
+                        文字分段同步转发到真机微信/QQ——只对真机接入的绑定联系人生效 */}
+                    {supaDeployed && (
+                      <div className="flex flex-col gap-2 rounded-[14px] bg-white/60 px-4 py-3 ring-1 ring-black/[0.04] dark:bg-white/[0.06] dark:ring-white/[0.08]" data-testid="cloud-reply-sync">
+                        <p className="text-[11px] leading-relaxed text-muted-foreground">
+                          网站回复同步真机：在本站和 TA 聊天后，TA 的回复会同步发到真机微信/QQ 上（只对已接入的绑定角色生效）。
+                        </p>
+                        <div className="flex items-center justify-between gap-3">
+                          <span className="min-w-0 flex-1">
+                            <span className="block text-[14px] font-medium">同步到真机微信</span>
+                            <span className="mt-0.5 block text-[11px] leading-relaxed text-muted-foreground">
+                              {replySyncWx ? '开启：网站里 TA 的回复会出现在真机微信（需 24 小时内和 TA 说过话）' : '已关闭：网站里聊天不再同步真机微信'}
+                            </span>
+                          </span>
+                          <Switch
+                            checked={replySyncWx}
+                            onCheckedChange={(v) => {
+                              saveWebsiteReplySync('wx', v);
+                              setReplySyncWx(v);
+                              showToast(v ? '已开启：网站回复将同步到真机微信' : '已关闭：网站回复不再同步真机微信');
+                            }}
+                            data-testid="cloud-reply-sync-wx"
+                            aria-label="同步到真机微信"
+                          />
+                        </div>
+                        <div className="flex items-center justify-between gap-3">
+                          <span className="min-w-0 flex-1">
+                            <span className="block text-[14px] font-medium">同步到真机 QQ</span>
+                            <span className="mt-0.5 block text-[11px] leading-relaxed text-muted-foreground">
+                              {replySyncQq ? '开启：网站里 TA 的回复会出现在真机 QQ（对方 5 分钟内发过消息时免配额；QQ 平台主动消息每月限 4 条）' : '已关闭：网站里聊天不再同步真机 QQ'}
+                            </span>
+                          </span>
+                          <Switch
+                            checked={replySyncQq}
+                            onCheckedChange={(v) => {
+                              saveWebsiteReplySync('qq', v);
+                              setReplySyncQq(v);
+                              showToast(v ? '已开启：网站回复将同步到真机 QQ（QQ 主动消息每月限 4 条）' : '已关闭：网站回复不再同步真机 QQ');
+                            }}
+                            data-testid="cloud-reply-sync-qq"
+                            aria-label="同步到真机 QQ"
+                          />
+                        </div>
                       </div>
                     )}
                     {/* v15 运行时版本行：旧代 = 真机上还在跑旧函数（只回一两条/不会表情包/不会语音）

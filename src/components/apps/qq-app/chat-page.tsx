@@ -10,6 +10,8 @@ import { ChatNewMsgPill, useChatAutoScroll } from '@/hooks/use-chat-autoscroll';
 import { pushChatNotification, notifyPreviewText } from '@/lib/ios/island-notify';
 import { playNotifySound } from '@/lib/ios/notify-sound';
 import { appendWithBoundary, markDeliverBoundary, peekPendingMsgs, sortMsgsByTime, scheduleAiDelivery, subscribeAiDelivery, subscribeAiDeliveryActive, isAiDelivering, typingDelayOf } from '@/lib/ios/ai-delivery';
+// v20 网站回复同步真机（开关读取）
+import { getWebsiteReplySync } from '@/lib/ios/website-reply-sync';
 import { consumeBgPending, onBgPageVisible, pullBgPending, registerBgSession, unregisterBgSession, type BgPendingItem } from '@/lib/ios/bg-turn';
 import { cleanTextForTts, stopSpeaking } from '@/lib/ios/tts-client';
 import { VoiceMsgBubble, type VoiceMsgData } from '@/components/apps/voice-bubble';
@@ -2213,6 +2215,19 @@ export function ChatPage({
     [peer, sessionKey, settleUserBlockReq, refreshContacts, me],
   );
 
+  /** v20 网站回复同步真机：把本轮收集的文字分段镜像到真机 QQ（开关开着且该联系人是
+   *  真机绑定角色时；relayProactiveToRealDevice 内部自鉴权/静默 best-effort，失败不碰站内）。
+   *  QQ 侧优先吃被动回复余量（对方 5 分钟内在真机发过消息时零配额），耗尽才用每月 4 条主动消息。 */
+  const relayTurnToRealDeviceQQ = useCallback(
+    (texts: string[]) => {
+      if (!getWebsiteReplySync('qq')) return;
+      const list = texts.filter(Boolean).slice(0, 10);
+      if (!list.length) return;
+      void import('@/lib/ios/wx-cloud/proactive-relay').then((m) => m.relayProactiveToRealDevice('qq', peer.id, list)).catch(() => undefined);
+    },
+    [peer.id],
+  );
+
   const runAiTurn = useCallback(
     async (userMsg: QQMsg | null, extra?: QQMsg[], sysEvent?: string, baseMsgs?: QQMsg[]) => {
     // 40-a 拉黑拦截（第一层）：用户拉黑角色（byUser）后，本 App 内 AI 不能发任何消息——回合静默取消。
@@ -2705,6 +2720,8 @@ export function ChatPage({
     let deliveredAny = false; // 本轮是否已有分段消息排队投递（决定兜底文案）
     let batchStarted = false; // 是否已排过批（首批立即上屏，后续批按打字节奏先停顿）
     let msgIdx = 0; // 本轮已构建消息数（延续 aiMsgId 与 -N 后缀的 id 序列）
+    // v20 网站回复同步真机：本轮文字分段收集（投递完成后统一镜像到真机 QQ；卡片/照片/系统行不收）
+    const relayTexts: string[] = [];
     // [语音通话] 标记本轮是否出现过（组件级 ref，开回合时重置；buildReplyMsgs 解析到标记时置位）
     wantCallSeenRef.current = false;
     // Task 22 视频通话：[视频通话] 标记同款开回合重置（buildReplyMsgs 解析到标记时置位）
@@ -2718,6 +2735,12 @@ export function ChatPage({
     /** 排队投递一批：首批立即上屏（边接收边显示），后续批先按打字节奏停顿（逐条冒出来） */
     const enqueueBatch = (built: QQMsg[]) => {
       if (built.length === 0) return;
+      // v20 网站回复同步真机：本轮文字分段收集（流中/末批统一走这里）
+      for (const b of built) {
+        if (b.role === 'peer' && (!b.kind || b.kind === 'text') && b.content && !b.error && !b.recalled) {
+          relayTexts.push(b.content.slice(0, 800));
+        }
+      }
       void scheduleAiDelivery<QQMsg>(
         sessionKey,
         built,
@@ -2859,6 +2882,12 @@ export function ChatPage({
         // 模拟打字节奏；空批仅作占位，密友值/记忆库等「一轮结束」动作挂在全部消息投递完之后；
         // 调度器在模块层运行，与聊天页是否存活无关（退出页面后继续接收/投递）
         flushPhotoJobs(enqueueBatch); // 生图（锁脸）：finalize 剩余段剥出的照片标签统一异步生成投递
+        // v20 网站回复同步真机：末批文字分段同样入收集（流中分段已在 enqueueBatch 收过）
+        for (const b of finalBatch) {
+          if (b.role === 'peer' && (!b.kind || b.kind === 'text') && b.content && !b.error && !b.recalled) {
+            relayTexts.push(b.content.slice(0, 800));
+          }
+        }
         void scheduleAiDelivery<QQMsg>(
           sessionKey,
           finalBatch,
@@ -2914,6 +2943,9 @@ export function ChatPage({
                 { user: owner || me.realName || me.name, peer: peerReal || displayNameOf(peer) || peer.name }
               )
             );
+          // v20 网站回复同步真机：本轮回复全部投递完成 → 文字分段镜像到真机 QQ
+          //（开关开着 + 绑定角色；云端拒收/网关没跑静默不影响站内）
+          relayTurnToRealDeviceQQ(relayTexts);
         });
         // AI 主动发起语音通话（标记可能出现在流中任一分段）：剥除后按 5 分钟冷却弹出来电浮层。
         // #34 触发块已抽为 maybeTriggerAiCall 共用（bg 接力投递完成同款触发，不再静默吞掉 [语音通话] 标记）
@@ -2925,7 +2957,7 @@ export function ChatPage({
       if (userMsg) setMsgs((prev) => prev.filter((m) => m.id !== userMsg.id));
     }
     },
-    [msgs, peer, me, apiConfig, ownerName, contacts, sessionKey, maybeTriggerAiCall, openVoiceCall, deliverAiMsg, buildReplyMsgs, flushPhotoJobs]
+    [msgs, peer, me, apiConfig, ownerName, contacts, sessionKey, maybeTriggerAiCall, openVoiceCall, deliverAiMsg, buildReplyMsgs, flushPhotoJobs, relayTurnToRealDeviceQQ]
   );
   // 发红包/转账时通过 ref 触发（runAiTurn 定义在 sendRedPacket 之后，见 runAiTurnRef 注释）
   runAiTurnRef.current = runAiTurn;
@@ -3011,11 +3043,21 @@ export function ChatPage({
       // 表情包需求兑底（enforcer）：接力回合拿不到原始 userMsg，用存储里最后一条我的消息近似
       const lastUserText = [...loadMsgs(peer.id)].reverse().find((m) => m.role === 'me' && !m.recalled)?.content ?? '';
       const bgStickers = stickersOn ? loadStickers('qq') : [];
+      // v20 网站回复同步真机：接力投递（页面关着时完成的回复）同样收集镜像
+      const bgRelayTexts: string[] = [];
+      const collectRelay = (built: QQMsg[]) => {
+        for (const b of built) {
+          if (b.role === 'peer' && (!b.kind || b.kind === 'text') && b.content && !b.error && !b.recalled) {
+            bgRelayTexts.push(b.content.slice(0, 800));
+          }
+        }
+      };
       for (const item of items) {
         if (item.single) {
           const rawSingle = item.texts.join('');
           const r = buildReplyMsgs(ensureStickerDemand(lastUserText, rawSingle, rawSingle, bgStickers), bgAsSingle, Date.now(), uid(), 0);
           if (r.dirty) saveMsgs(peer.id, r.cur);
+          collectRelay(r.msgs);
           bgEnqueueBatch(r.msgs);
           flushPhotoJobs(bgEnqueueBatch); // 生图（锁脸）：接力回复里的照片标签同样异步生成投递
         } else {
@@ -3023,6 +3065,7 @@ export function ChatPage({
           for (const t of item.texts) {
             const r = buildReplyMsgs(ensureStickerDemand(lastUserText, fullMulti, t, bgStickers), false, Date.now(), uid(), 0);
             if (r.dirty) saveMsgs(peer.id, r.cur);
+            collectRelay(r.msgs);
             bgEnqueueBatch(r.msgs);
             flushPhotoJobs(bgEnqueueBatch); // 生图（锁脸）：接力回复里的照片标签同样异步生成投递
           }
@@ -3032,8 +3075,10 @@ export function ChatPage({
       // 旧实现只读不消费 → 标记被静默吞掉。投递完成后按 finalize 同款冷却触发来电
       //（bg 回复非仅申请卡模式，requestOnly=false；冷却/通话中/拉黑防御在 maybeTriggerAiCall 内）
       maybeTriggerAiCall(false);
+      // v20 网站回复同步真机：接力回复镜像到真机 QQ（收集完毕统一触发，站内打字节奏继续走）
+      relayTurnToRealDeviceQQ(bgRelayTexts);
     },
-    [bgEnqueueBatch, buildReplyMsgs, maybeTriggerAiCall, peer.id, sessionKey, flushPhotoJobs, stickersOn],
+    [bgEnqueueBatch, buildReplyMsgs, maybeTriggerAiCall, peer.id, sessionKey, flushPhotoJobs, stickersOn, relayTurnToRealDeviceQQ],
   );
 
   const bgDeliverRef = useRef<(items: BgPendingItem[]) => void>(() => undefined);

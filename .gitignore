@@ -9,3 +9,7 @@ tool-results/
 
 # v18：网关物化核心是生成物（每次重启重物化，现含 ~3MB 本地表情包 base64 注入）
 mini-services/im-gateway/core.gen.*.mjs
+
+# v20：网关本地直推运行包（含用户真实凭证 botToken/QQ secret/LLM key——只存在本机磁盘，不进仓库）
+mini-services/im-gateway/local-config.json
+mini-services/im-gateway/local-emoticons.json
