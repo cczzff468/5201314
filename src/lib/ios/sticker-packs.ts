@@ -20,6 +20,25 @@ export const BUILTIN_PACKS: BuiltinPackDef[] = [
   { id: 'pk-peng', name: '古早企鹅' },
 ];
 
+/** v19 真机 QQ 富媒体公网源：本站贴纸资产随 GitHub 仓库发布，jsdelivr CDN 可直接拉取
+ *  （QQ 官方 v2 files 接口是 url 制——QQ 服务器来拉 URL，base64 file 字段并不被支持，
+ *  必报 40093007「富媒体文件下载失败」——内置大贴纸包走这张 CDN 表零托管直发）。 */
+export const STICKER_GH_REPO = 'cczzff468/5201314@main';
+
+/** 贴纸相对路径（/stickers/sunny/01.webp）→ 仓库 jsdelivr CDN URL */
+export function stickerPackCdnUrl(relUrl: string): string {
+  const rel = String(relUrl || '');
+  if (!rel.startsWith('/')) return '';
+  return 'https://cdn.jsdelivr.net/gh/' + STICKER_GH_REPO + '/public' + rel;
+}
+
+/** 备用 CDN（jsdelivr 偶发拉取超时时候选重试用） */
+export function stickerPackCdnUrlAlt(relUrl: string): string {
+  const rel = String(relUrl || '');
+  if (!rel.startsWith('/')) return '';
+  return 'https://fastly.jsdelivr.net/gh/' + STICKER_GH_REPO + '/public' + rel;
+}
+
 /** 全部内置包分组 ID 集合（面板判定「内置分组」用：隐藏管理/添加按钮） */
 export const BUILTIN_PACK_GROUP_IDS = new Set<string>(BUILTIN_PACKS.map((p) => p.id));
 

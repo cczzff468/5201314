@@ -52,8 +52,8 @@ type DeployRequest = {
   /** 任务密钥：deploy 部署后注入函数的 WX_TASK_SECRET；storage-setup 云端函数代写上传、
    *  func-call 转发鉴权、schedule-cron 定时任务鉴权都用它（X-Task-Secret） */
   secret?: string;
-  /** storage-setup：要上传的文件 */
-  files?: Array<{ path?: string; content?: string; bucket?: 'wx-cloud' | 'wx-cloud-public'; contentType?: string }>;
+  /** storage-setup：要上传的文件（v19：encoding='base64' 的二进制——用户收藏表情/语音 silk 上公桶，QQ 富媒体 url 制用） */
+  files?: Array<{ path?: string; content?: string; bucket?: 'wx-cloud' | 'wx-cloud-public'; contentType?: string; encoding?: string }>;
   /** deploy：函数源码 */
   code?: string;
   /** func-call：函数动作（verify-qq / ping；空 = 默认微信单轮收发。v5 起 setup-cron / stop-cron 已废弃） */
@@ -360,15 +360,18 @@ export async function POST(req: NextRequest) {
           content: typeof f.content === 'string' ? f.content : '',
           bucket: f.bucket === 'wx-cloud-public' ? 'wx-cloud-public' : 'wx-cloud',
           contentType: typeof f.contentType === 'string' ? f.contentType : 'text/plain',
+          // v19 二进制：encoding='base64'（用户收藏表情上公桶做 QQ 富媒体直发 URL）
+          encoding: typeof f.encoding === 'string' && /^base64$/i.test(f.encoding) ? 'base64' : '',
         }))
-        .filter((f) => f.path && f.path.length <= 128 && f.content && f.content.length <= 800_000);
+        .filter((f) => f.path && f.path.length <= 128 && f.content && f.content.length <= (f.encoding === 'base64' ? 1_300_000 : 800_000));
       // v18：超 800KB 被过滤的文件如实点名（旧版静默丢——配置大文件被丢时上传「成功」
       // 但云端拿不到该文件，属假成功；点名后用户能定位「哪个文件太大」）
       const droppedBySize = filesRaw
         .filter((f) => {
           const path = typeof f?.path === 'string' ? f.path : '';
           const content = typeof f?.content === 'string' ? f.content : '';
-          return path && content.length > 800_000;
+          const isB64 = typeof f?.encoding === 'string' && /^base64$/i.test(f.encoding);
+          return path && content.length > (isB64 ? 1_300_000 : 800_000);
         })
         .map((f) => String(f.path));
       if (files.length === 0) return bad(400, 'missing_files', '没有可上传的文件（运行包为空？）');
@@ -393,10 +396,12 @@ export async function POST(req: NextRequest) {
           let lastStatus = 0;
           let lastBody = '';
           for (const f of remain) {
+            // v19：base64 文件先解码成字节再直传（HTTP 请求体传二进制）
+            const fileBody = f.encoding === 'base64' ? Buffer.from(f.content, 'base64') : f.content;
             const r = await fetch(`${base}/storage/v1/object/${f.bucket}/${f.path}`, {
               method: 'POST',
-              headers: { ...v.headers, 'Content-Type': f.contentType, 'x-upsert': 'true' },
-              body: f.content,
+              headers: { ...v.headers, 'Content-Type': f.encoding === 'base64' ? 'application/octet-stream' : f.contentType, 'x-upsert': 'true' },
+              body: fileBody,
               signal: AbortSignal.timeout(20_000),
             }).catch(() => null);
             if (!r) {
@@ -442,7 +447,7 @@ export async function POST(req: NextRequest) {
               const fr = await fetch(relayBase, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'X-Task-Secret': taskSecret, 'X-Task-Action': 'upload-file' },
-                body: JSON.stringify({ files: [f] }), // v18 ①逐文件：单请求单文件，请求体小
+                body: JSON.stringify({ files: [f] }), // v18 ①逐文件：单请求单文件，请求体小（v19 files 项带 encoding 透传）
                 signal: AbortSignal.timeout(90_000),
               }).catch(() => null);
               if (fr && fr.ok) {

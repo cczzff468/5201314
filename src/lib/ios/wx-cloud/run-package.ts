@@ -71,12 +71,17 @@ export interface WxRunPersona {
 }
 
 /** 云端 QQ 表情包（打包进运行包：AI 输出 [表情包:ID/名字]，云端转图片经官方富媒体接口发出）
- *  v13：带 id——站内表情清单教的是 [表情包:ID]，云端按 ID 直选；name 仍是意思首词（自然语句变体解析用） */
+ *  v13：带 id——站内表情清单教的是 [表情包:ID]，云端按 ID 直选；name 仍是意思首词（自然语句变体解析用）
+ *  v19：带 url（公网 CDN URL）——QQ 官方 v2 files 接口是 url 制（QQ 服务器来拉取 URL），
+ *  内置大贴纸包随 GitHub 仓库发布，jsdelivr CDN 直发零托管；用户收藏的没有稳定公网源，
+ *  云端用 dataUrl 字节托管（网关媒体端点/云端函数公桶直写）后发。 */
 export interface QqEmoticon {
   name: string;
   id: string;
   /** data URL（体积小：微信官方面 PNG + 包表情 webp） */
   dataUrl: string;
+  /** v19 公网 CDN URL（QQ 富媒体上传直选用；内置大贴纸包才有） */
+  url?: string;
 }
 
 /** 云端 QQ 语音条 TTS（OpenAI 兼容 /audio/speech，wav → silk → 官方富媒体 file_type=3） */
@@ -229,6 +234,13 @@ async function toEmoticonDataUrl(src: string): Promise<string> {
   });
 }
 
+/** v19 内置大贴纸包的公网 CDN URL（QQ 富媒体 url 制直发零托管；用户收藏的没有稳定公网源
+ *  → 云端用 dataUrl 字节托管后发）。仅 builtin 且属于四大内置包（pk- 前缀）的贴纸有。 */
+function emoticonCdnUrl(s: Sticker): string {
+  if (!(s.builtin && (s.groupId || '').startsWith('pk-'))) return '';
+  return stickerPackCdnUrl(s.url);
+}
+
 /** v16 真机可发表情筛选：剔除「官方经典小表情」（builtin 且不属于大贴纸包）——
  *  即用户截图里「没内置过却常发」的大眼微笑脸：站内面板把它们教给了 AI（ID 可选），
  *  云端把它的图当表情包发成了大图。真机只发【用户收藏 + 内置大贴纸包】；
@@ -260,11 +272,11 @@ async function buildCloudEmoticons(app: 'wx' | 'qq'): Promise<QqEmoticon[]> {
   const out: QqEmoticon[] = [];
   const seen = new Set<string>();
   let total = 0;
-  const push = (name: string, id: string, dataUrl: string): boolean => {
+  const push = (name: string, id: string, dataUrl: string, url?: string): boolean => {
     if (!dataUrl || !name || seen.has(id || name)) return false;
     if (total + dataUrl.length > EMOTICON_TOTAL_BUDGET) return false;
     seen.add(id || name);
-    out.push({ name, id, dataUrl });
+    out.push({ name, id, dataUrl, ...(url ? { url } : {}) });
     total += dataUrl.length;
     return true;
   };
@@ -276,7 +288,7 @@ async function buildCloudEmoticons(app: 'wx' | 'qq'): Promise<QqEmoticon[]> {
       const name = (s.meaning || '').trim().split(/[，,。.、\s]/)[0].slice(0, 12);
       if (!name) continue; // 没意思没法点名，跳过
       const dataUrl = await toEmoticonDataUrl(s.url);
-      push(name, s.id, dataUrl);
+      push(name, s.id, dataUrl, emoticonCdnUrl(s) || undefined);
     }
   } catch {
     /* 读取失败：走兜底清单 */
@@ -287,7 +299,7 @@ async function buildCloudEmoticons(app: 'wx' | 'qq'): Promise<QqEmoticon[]> {
       if (total > EMOTICON_TOTAL_BUDGET) break;
       try {
         const dataUrl = await toEmoticonDataUrl(src.url);
-        push(src.name, '', dataUrl);
+        push(src.name, '', dataUrl, stickerPackCdnUrl(src.url) || undefined);
       } catch {
         /* 单张失败跳过 */
       }

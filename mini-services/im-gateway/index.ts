@@ -25,7 +25,7 @@ import { writeFileSync, readdirSync, unlinkSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { join, dirname } from 'node:path';
 import { WX_CLOUD_CORE } from '../../src/lib/ios/wx-cloud/sources';
-import { BUILTIN_PACK_STICKERS } from '../../src/lib/ios/sticker-packs';
+import { BUILTIN_PACK_STICKERS, stickerPackCdnUrl } from '../../src/lib/ios/sticker-packs';
 
 // ---------------- v18 本地表情包全量注入（真机表情包根修） ----------------
 // 用户 Supabase Storage 被 402 受限 / emoticons.json 停在旧版时，网关通道的表情解析
@@ -33,11 +33,11 @@ import { BUILTIN_PACK_STICKERS } from '../../src/lib/ios/sticker-packs';
 // （LOCAL_EMOTICONS_INJECT），核心 loadWxEmoticons / QQ emo 清单与它合并——本地优先。
 // BUILTIN_PACK_STICKERS 是纯静态注册表（id + 意思 + 相对路径），与站内人设清单同源。
 
-let localEmoticonsCache: Array<{ name: string; id: string; dataUrl: string }> | null = null;
+let localEmoticonsCache: Array<{ name: string; id: string; dataUrl: string; url: string }> | null = null;
 
-function buildLocalEmoticons(): Array<{ name: string; id: string; dataUrl: string }> {
+function buildLocalEmoticons(): Array<{ name: string; id: string; dataUrl: string; url: string }> {
   if (localEmoticonsCache) return localEmoticonsCache;
-  const out: Array<{ name: string; id: string; dataUrl: string }> = [];
+  const out: Array<{ name: string; id: string; dataUrl: string; url: string }> = [];
   const publicRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'public');
   for (const s of BUILTIN_PACK_STICKERS) {
     try {
@@ -46,13 +46,24 @@ function buildLocalEmoticons(): Array<{ name: string; id: string; dataUrl: strin
       const buf = readFileSync(join(publicRoot, rel));
       const mime = /\.gif$/i.test(rel) ? 'image/gif' : /\.png$/i.test(rel) ? 'image/png' : 'image/webp';
       const name = (s.meaning || '').trim().split(/[，,。.、\s]/)[0].slice(0, 12) || s.id;
-      out.push({ name, id: s.id, dataUrl: 'data:' + mime + ';base64,' + buf.toString('base64') });
+      // v19：附带公网 CDN URL（jsdelivr——QQ 官方 v2 files 接口 url 制，内置包直发零托管）
+      out.push({ name, id: s.id, dataUrl: 'data:' + mime + ';base64,' + buf.toString('base64'), url: stickerPackCdnUrl(s.url) });
     } catch {
       /* 单张读不到跳过（资产变动/清理中）：剩余的照常注入 */
     }
   }
   localEmoticonsCache = out;
-  console.log('[im-gateway] 本地表情包注入：', out.length, '张（网关通道真机表情不依赖云端 Storage）');
+  console.log('[im-gateway] 本地表情包注入：', out.length, '张（含 CDN URL，网关通道真机表情不依赖云端 Storage）');
+  return out;
+}
+
+/** v19 内置大贴纸包 id → 公网 CDN URL 表（物化注入 LOCAL_STICKER_URLS：QQ 富媒体 url 制） */
+function buildLocalStickerUrls(): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const s of BUILTIN_PACK_STICKERS) {
+    const u = stickerPackCdnUrl(String(s.url || ''));
+    if (s.id && u) out[s.id] = u;
+  }
   return out;
 }
 
@@ -152,11 +163,14 @@ const CORE_PREFIX = 'core.gen.';
 function pruneGenFiles(keep: number): void {
   try {
     const dir = fileURLToPath(new URL('./', import.meta.url));
+    // v19：数字序（旧版字典序——gen ≥10 时 'gen.10' < 'gen.9' 排在前面被误删；且上一进程
+    // 留下的高序号文件会把本进程刚写的低序号新文件挤进「删除区」→ import 时
+    // "Cannot find module core.gen.x.mjs"——网关启动失败的实测根因）
     const files = readdirSync(dir)
       .filter((f) => f.startsWith(CORE_PREFIX) && f.endsWith('.mjs'))
-      .sort()
-      .slice(0, -keep);
-    for (const f of files) {
+      .map((f) => ({ f, n: Number(f.slice(CORE_PREFIX.length, -4)) || 0 }))
+      .sort((a, b) => a.n - b.n);
+    for (const { f } of files.slice(0, Math.max(0, files.length - keep))) {
       try {
         unlinkSync(fileURLToPath(new URL('./' + f, import.meta.url)));
       } catch {
@@ -166,6 +180,23 @@ function pruneGenFiles(keep: number): void {
   } catch {
     /* 目录读取失败忽略 */
   }
+}
+
+// v19 启动清场：上一进程留下的物化文件全部清掉（gen 计数每进程从 1 重来——不清场时旧
+// 文件的高序号会把新文件挤进 prune 的删除区，import 必炸 "Cannot find module"）。
+try {
+  const bootDir = fileURLToPath(new URL('./', import.meta.url));
+  for (const f of readdirSync(bootDir)) {
+    if (f.startsWith(CORE_PREFIX) && f.endsWith('.mjs')) {
+      try {
+        unlinkSync(join(bootDir, f));
+      } catch {
+        /* 忽略 */
+      }
+    }
+  }
+} catch {
+  /* 目录读取失败忽略 */
 }
 
 /** 把 WX_CLOUD_CORE + 连接变量物化成可 import 的模块（换连接重新物化，文件名递增做缓存失效）。
@@ -186,6 +217,9 @@ async function materializeCore(supaUrl: string, supaKey: string, relayUrl: strin
     `var TTS_LOCAL_URL_INJECT = ${JSON.stringify('http://127.0.0.1:' + PORT + '/tts')};`,
     // v18：本地表情包全量注入（与站内人设清单同源；Storage 受限/旧包时真机照发真图）
     `var LOCAL_EMOTICONS_INJECT = ${JSON.stringify(buildLocalEmoticons())};`,
+    // v19：QQ 富媒体 url 制——内置包 CDN URL 表（jsdelivr 直发零托管；语音/用户表情的动态字节
+    // 由核心 qqHostMedia 托管到用户 Supabase 公桶——经云端函数 upload-file v19 代写）
+    `var LOCAL_STICKER_URLS_INJECT = ${JSON.stringify(buildLocalStickerUrls())};`,
     WX_CLOUD_CORE,
     'export { loadConfig, tick, tickFast, handleQqEvent, qqToken, writeHeartbeat, supaGetJson, supaPutJson, loadQqHistory, appendQqHistory, refreshQqWsLock, cloudSendActive };',
   ].join('\n');
@@ -693,54 +727,52 @@ async function startGateway(supaUrl: string, supaKey: string, ref: string, relay
   if (!/^https:\/\/[a-z0-9-]+\.supabase\.co$/i.test(url)) return { ok: false, msg: 'supaUrl 不是有效的 Supabase 项目地址' };
   if (rt && rt.ref === ref) return { ok: true, msg: '网关已在运行' };
 
-  // v8 通道决策：优先中继（任务密钥随部署注入，永远有效；用户 Storage key 可能被轮换全拒），
-  // 中继不可用时兑底直连密钥；两样都没有才报错。
-  let mode: 'relay' | 'direct' = 'relay';
-  if (rsecret && relay) {
-    const probe = await probeRelayCapability(relay, rsecret);
-    if (!probe.ok) {
-      if (key.length >= 20) {
-        mode = 'direct'; // 有直连密钥：降级直连，网关仍能跑
-        console.log('[im-gateway] 中继不可用，降级直连：', probe.msg);
-      } else {
-        return { ok: false, msg: '网关无法读云端配置：' + probe.msg };
-      }
-    }
-  } else if (key.length >= 20) {
-    mode = 'direct';
-  } else {
+  // v19 级联根修：不再「先探测后停旧」——按候选通道逐个【物化 + 真读一次运行包】，全通过
+  // 才停旧换新。旧版流程（探测中继 402 → 降级直连 → 先停旧网关 → 直连 Storage 也 402 →
+  // 新网关起不来）会把唯一还在线的网关弄死（用户实测：项目被平台限制（402 restricted）时
+  // 网关静默全灭，微信/QQ 全部下线）。现在：中继优先（任务密钥部署时注入、不随 JWT 轮换），
+  // 读不成再试直连；两条都读不成 → 报错返回，【不动现有 rt】（秒回加速照常跑，页面看门狗
+  // 每 6 秒会再来试——限制解除即自动恢复）。探测（probeRelayCapability）只作日志参考。
+  const candidates: Array<'relay' | 'direct'> = [];
+  if (relay && rsecret) candidates.push('relay');
+  if (key.length >= 20) candidates.push('direct');
+  if (!candidates.length) {
     return { ok: false, msg: '缺少云端凭证（任务密钥/项目密钥都没有）：请回手机 App 重新一键部署' };
   }
-
-  // 换连接：先停旧会话再立新
-  if (rt) await stopGateway();
-
-  // 中继模式落盘（自恢复用；直连模式不落盘——密钥不该进磁盘）
-  if (mode === 'relay') {
-    writePersistedState({ v: 1, supaUrl: url, ref: ref || url.replace(/^https:\/\//, '').split('.')[0], relayUrl: relay, relaySecret: rsecret, savedAt: Date.now() });
-  } else {
-    clearPersistedState();
-  }
-
-  const core = await materializeCore(url, mode === 'relay' ? '' : key, mode === 'relay' ? relay : '', mode === 'relay' ? rsecret : '');
-  // 启动自检：真实读一次运行包（密钥错/包缺失立刻报可读原因，不静默空转）
-  try {
-    await core.loadConfig(true);
-  } catch (e) {
-    const msg = String((e as Error)?.message || e);
-    clearPersistedState();
-    return { ok: false, msg: '读取云端运行包失败：' + msg.slice(0, 120) };
-  }
-  const gen = rt ? rt.gen + 1 : 1;
-  rt = {
-    gen,
-    ref: ref || url.replace(/^https:\/\//, '').split('.')[0],
-    startedAt: Date.now(),
-    mode,
-    core,
-    qq: { state: 'connecting', sessionId: '', botName: '', lastSeq: 0, lastEventAt: 0, events: 0, reconnects: 0, lastError: '', hbOk: false },
-    wx: { lastRunAt: 0, lastError: '', replied: 0 },
-  };
+  let lastFail = '';
+  for (const mode of candidates) {
+    if (mode === 'relay') {
+      const probe = await probeRelayCapability(relay, rsecret);
+      if (!probe.ok) console.log('[im-gateway] 中继探测不通过（继续真实试读兜底）：', probe.msg);
+    }
+    const core = await materializeCore(url, mode === 'relay' ? '' : key, mode === 'relay' ? relay : '', mode === 'relay' ? rsecret : '');
+    // 启动自检：真实读一次运行包（密钥错/包缺失立刻换下一候选，不静默空转）
+    try {
+      await core.loadConfig(true);
+    } catch (e) {
+      lastFail = lastFail || String((e as Error)?.message || e).slice(0, 120);
+      console.log('[im-gateway] ' + mode + '通道读运行包失败：', lastFail);
+      continue;
+    }
+    // 新通道就绪：此刻才停旧换新（级联根修——旧网关一直在线到这一步）
+    if (rt) await stopGateway();
+    // 中继模式落盘（自恢复用；直连模式不落盘——密钥不该进磁盘）
+    if (mode === 'relay') {
+      writePersistedState({ v: 1, supaUrl: url, ref: ref || url.replace(/^https:\/\//, '').split('.')[0], relayUrl: relay, relaySecret: rsecret, savedAt: Date.now() });
+    } else {
+      clearPersistedState();
+    }
+    // 上面 loadConfig 已通过：组装 rt 并启动全部循环
+    const gen = 1;
+    rt = {
+      gen,
+      ref: ref || url.replace(/^https:\/\//, '').split('.')[0],
+      startedAt: Date.now(),
+      mode,
+      core,
+      qq: { state: 'connecting', sessionId: '', botName: '', lastSeq: 0, lastEventAt: 0, events: 0, reconnects: 0, lastError: '', hbOk: false },
+      wx: { lastRunAt: 0, lastError: '', replied: 0 },
+    };
   // qqSeen 跨连接保留无意义：清掉
   qqSeen.clear();
   wantClose = false;
@@ -781,7 +813,17 @@ async function startGateway(supaUrl: string, supaKey: string, ref: string, relay
       })
       .catch(() => undefined);
   }, 30000);
-  return { ok: true, msg: '网关已启动：QQ WebSocket 长连接 + 微信自动回复' + (mode === 'relay' ? '（云端函数中继通道）' : '') };
+    return { ok: true, msg: '网关已启动：QQ WebSocket 长连接 + 微信自动回复' + (mode === 'relay' ? '（云端函数中继通道）' : '') };
+  }
+  // 两条通道都读不成运行包：不动现有 rt（若有——秒回加速照常在线），如实报因；
+  // 页面看门狗每 6 秒会再试（Supabase 平台限制解除即自动恢复）。
+  return {
+    ok: false,
+    msg:
+      '网关读取云端运行包失败（中继/直连两条通道都试过）：' +
+      (lastFail || '未知原因') +
+      '——多为 Supabase 项目被平台限制（402）或运行包未同步；网站开着时网关会自动重试恢复',
+  };
 }
 
 async function stopGateway(): Promise<{ ok: boolean; msg: string }> {

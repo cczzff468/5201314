@@ -83,6 +83,21 @@
  *   ③QQ 语音根修（配套 mini-services/im-gateway/silk-wasm.mjs 改纯 JS）：旧适配层带
  *     TS 注解但 .mjs 扩展名 → Bun 拒绝解析 → silk 编码必失败 → 语音全部降级文字；
  *   ④ping ver 18。
+ * - v19（机主实测「微信表情包点开『已过期或已被清理』+ QQ 表情包『说发了却什么都没收到』+
+ *   QQ 语音仍只回文字」——沙箱实测定位三个独立根因，全部根修）：
+ *   ①微信表情包 aes_key 编码：官方 SDK（@tencent-weixin/openclaw-weixin 的
+ *     sendImageMessageWeixin）发 base64(hex 字符串)（UploadedFileInfo.aeskey 是 hex 文本，
+ *     Buffer.from(hex文本).toString('base64')）——旧版发 base64(原始 16 字节)，上传与消息
+ *     全部成功、唯独接收端解不开密文 → 气泡灰块 + 点开「图片已过期或已被清理」。
+ *     对齐官方：aes_key = base64(aeskey 的 hex 文本)；
+ *   ②QQ 富媒体 url 制根修：官方 v2 files 接口只收 url（QQ 服务器来拉取）——旧版把 base64
+ *     塞进 file 字段官方并不支持，必报 40093007「富媒体文件下载失败」→ 表情包/语音
+ *     全部静默降级（真机「AI 说发了却什么都没有」的根因）。现在：内置大贴纸包走仓库
+ *     jsdelivr CDN URL 直发（LOCAL_STICKER_URLS 注入/运行包 emoticons 带 url）、语音 silk
+ *     与用户收藏表情托管成公网 URL（用户 Supabase 公桶——中继经云端函数代写/直连直写
+ *     qqHostMedia(qqHostMediaCloud)）逐候选重试；
+ *   ③ping ver 19（部署代理的 storage-setup 同步支持 encoding:'base64' 二进制文件——
+ *     用户收藏表情上公桶做 QQ 直发 URL）。
  *
  * 配置（用户 Supabase 私有桶 wx-cloud/config.json，v2 形状）：
  * { version:2, secret, wechat:{botToken,botId,persona,history,stickerMap,worldbook,multi},
@@ -99,7 +114,7 @@
 /** v17：云端运行时代际号——站内「重新同步运行包」用它判断要不要重部署函数代码
  *  （ping 回的 ver ≠ 它（含 ping 不回 ver 的旧函数）= 真机上还在跑旧函数：只回一两条/
  *  不会表情包/不会语音/发裸标记——重部署最新代码全量对齐）。 */
-export const CLOUD_RUNTIME_VER = 18;
+export const CLOUD_RUNTIME_VER = 19;
 
 export const WX_CLOUD_CORE = String.raw`
 // ---- 微信云端助手核心（自动生成，勿手工编辑） ----
@@ -124,6 +139,13 @@ var TTS_LOCAL_URL = (typeof TTS_LOCAL_URL_INJECT !== 'undefined' && TTS_LOCAL_UR
 // dataUrl 随物化注入）：用户 Supabase Storage 被 402 受限 / emoticons.json 停在旧版时，
 // 网关通道的表情解析不再依赖云端文件——标记本地直接解析成真图。云端（Deno）不注入为空数组。
 var LOCAL_EMOTICONS = (typeof LOCAL_EMOTICONS_INJECT !== 'undefined' && LOCAL_EMOTICONS_INJECT) || [];
+// v19 QQ 富媒体 url 制（QQ 官方 v2 files 接口只收 url——QQ 服务器来拉取；旧版把 base64 塞
+// file 字段官方并不支持，必报 40093007「富媒体文件下载失败」，表情包/语音从未真正发出过）：
+// - LOCAL_STICKER_URLS：内置大贴纸包 id → 仓库 CDN URL（jsdelivr，QQ 实测可拉取）——内置包零托管直发。
+// - 语音 silk / 用户收藏表情的动态字节 → qqHostMedia 托管成用户 Supabase 公桶里的公网 URL
+//   （公桶 QQ 实测可拉取）：网关中继模式经云端函数 upload-file（encoding:'base64'，v19 函数
+//   支持，读回验证防旧函数写坏），直连/云端函数模式用 SUPA 凭证直写（qqHostMediaCloud）。
+var LOCAL_STICKER_URLS = (typeof LOCAL_STICKER_URLS_INJECT !== 'undefined' && LOCAL_STICKER_URLS_INJECT) || {};
 /** v18 表情清单合并：本地注入优先（站内当前资产、永远新鲜），云端文件补充（去重 by id/name）。
  *  两路共用：微信 emoticons.json 的 wechat 段 / QQ config 的 qq.emoticons。
  *  v18 过滤：远端旧包里的 wxb- 与 qqb- 前缀官方经典小表情不并入——v16 政策是经典小表情
@@ -713,7 +735,13 @@ async function wxUploadStickerImage(cfg, toUserId, dataUrl) {
     if (!r.ok) return null;
     var dl = r.headers.get('x-encrypted-param');
     if (!dl) return null;
-    return { dl: dl, midSize: ciphertext.length, aesB64: cloudBytesToB64(aesKey) };
+    // v19 aes_key 编码根修：官方 SDK（@tencent-weixin/openclaw-weixin sendImageMessageWeixin）
+    // 发的是 base64(hex 字符串)（UploadedFileInfo.aeskey 是 hex 文本，Buffer.from(hex文本)
+    // .toString('base64')）——旧版发 base64(原始 16 字节)，上传与消息全部成功、唯独接收端解
+    // 不开密文 → 气泡灰块 + 点开「图片已过期或已被清理」（用户实测根因）。对齐官方。
+    var hexKey = cloudBytesToHex(aesKey);
+    var aesB64 = (typeof btoa === 'function') ? btoa(hexKey) : Buffer.from(hexKey).toString('base64');
+    return { dl: dl, midSize: ciphertext.length, aesB64: aesB64 };
   } catch (e) { return null; }
 }
 
@@ -1263,6 +1291,28 @@ async function qqToken(cfg) {
   throw new Error('QQ token 获取失败 ' + (lastStatus || '') + ' ' + lastErr.slice(0, 80));
 }
 
+/** v19 QQ token 失效自愈：多个持有方（本网关 / 云端函数 / 手动测试脚本）各自调
+ *  getAppAccessToken，平台侧 token 滚动会把先取的挤过期——110 分钟缓存里挂着死 token
+ *  时发送/上传全部 401（11244/40011027），表现为「TA 突然一条都不回了」。遇到 401/403
+ *  且带 AccessToken 过期标记 → 清缓存重取一次再试。 */
+async function qqTokenCall(cfg, doCall) {
+  var token = await qqToken(cfg);
+  var r = await doCall(token);
+  if (r.status === 401 || r.status === 403) {
+    var tb = await r.text().catch(function () { return ''; });
+    if (/AccessToken|11244|40011027/i.test(tb)) {
+      QQ_TOKEN = '';
+      QQ_TOKEN_AT = 0;
+      token = await qqToken(cfg);
+      r = await doCall(token);
+      if (r.status === 401 || r.status === 403) {
+        tb = await r.text().catch(function () { return ''; });
+      }
+    }
+  }
+  return r;
+}
+
 /** QQ：Ed25519 种子（Bot Secret 重复到 32 字节；官方文档算法） */
 function qqSeed(botSecret) {
   var s = String(botSecret || '');
@@ -1293,13 +1343,14 @@ async function appendQqHistory(item) {
 /** QQ：被动回复（v2 接口，60 分钟内有效、每条消息最多回 5 次；seq 递增防同 msg_id 撞号） */
 var QQ_SEQ = 1;
 async function qqReply(cfg, openid, msgId, content, isGroup, groupOpenid) {
-  var token = await qqToken(cfg);
   var url = isGroup ? QQ_API + '/v2/groups/' + groupOpenid + '/messages' : QQ_API + '/v2/users/' + openid + '/messages';
-  var r = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: 'QQBot ' + token },
-    body: JSON.stringify({ msg_type: 0, content: content.slice(0, 1500), msg_id: msgId, msg_seq: QQ_SEQ++ }),
-    signal: AbortSignal.timeout(25000),
+  var r = await qqTokenCall(cfg, function (token) {
+    return fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: 'QQBot ' + token },
+      body: JSON.stringify({ msg_type: 0, content: content.slice(0, 1500), msg_id: msgId, msg_seq: QQ_SEQ++ }),
+      signal: AbortSignal.timeout(25000),
+    });
   });
   if (!r.ok) {
     var t = await r.text().catch(function () { return ''; });
@@ -1307,34 +1358,131 @@ async function qqReply(cfg, openid, msgId, content, isGroup, groupOpenid) {
   }
 }
 
-/** QQ：上传富媒体文件（file_type 1=图片 2=视频 3=语音 silk；file 为 base64，≤2MB），返回 file_info 句柄 */
-async function qqUploadMedia(cfg, openid, isGroup, groupOpenid, fileType, dataB64) {
-  var token = await qqToken(cfg);
+/** QQ：上传富媒体文件（file_type 1=图片 2=视频 3=语音 silk；≤2MB），返回 file_info 句柄。
+ *  v19 url 制根修：官方 v2 接口只收 url（QQ 服务器来拉取该 URL）——旧版把 base64 塞进
+ *  file 字段官方并不支持，必报 40093007「富媒体文件下载失败」→ 表情包/语音全部静默降级
+ *  （真机「AI 说发了却什么都没收到」的根因）。现在收 mediaUrl：内置包走仓库 CDN URL、
+ *  语音 silk/用户收藏表情走网关媒体托管或云端函数公桶直写。 */
+async function qqUploadMedia(cfg, openid, isGroup, groupOpenid, fileType, mediaUrl) {
   var url = isGroup ? QQ_API + '/v2/groups/' + groupOpenid + '/files' : QQ_API + '/v2/users/' + openid + '/files';
-  var r = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: 'QQBot ' + token },
-    body: JSON.stringify({ file_type: fileType, file: dataB64, srv_send_msg: false }),
-    signal: AbortSignal.timeout(30000),
+  var r = await qqTokenCall(cfg, function (token) {
+    return fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: 'QQBot ' + token },
+      body: JSON.stringify({ file_type: fileType, url: String(mediaUrl || ''), srv_send_msg: false }),
+      signal: AbortSignal.timeout(30000),
+    });
   });
   var t = await r.text().catch(function () { return ''; });
   if (!r.ok) throw new Error('QQ 富媒体上传失败 ' + r.status + ' ' + t.slice(0, 100));
   var j = null;
   try { j = JSON.parse(t); } catch (e) { j = null; }
   var fi = j && (j.file_info || (j.file_infos && j.file_infos[0] && j.file_infos[0].file_info)) || '';
-  if (!fi) throw new Error('QQ 富媒体上传失败：无 file_info');
+  if (!fi) throw new Error('QQ 富媒体上传失败：无 file_info' + (t ? '（' + t.slice(0, 80) + '）' : ''));
   return fi;
 }
 
-/** QQ：发富媒体消息（msg_type=2 media；用于表情图片 / 语音条） */
+/** v19 QQ 媒体托管（网关中继模式）：媒体字节（base64）经云端函数 upload-file（encoding:
+ *  'base64'，v19 函数解码回字节写入；旧版函数会把 base64 当文本写坏——读回验证字节长度
+ *  对得上才认）→ 用户 Supabase 公桶公网 URL（QQ 实测可拉取）。函数旧/写失败返回 ''。 */
+async function qqHostMedia(dataB64, ext) {
+  try {
+    if (!(RELAY_URL && RELAY_SECRET && SUPA_URL)) return '';
+    var safeExt = String(ext || 'bin').replace(/[^a-z0-9]/gi, '') || 'bin';
+    var path = 'media/' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8) + '.' + safeExt;
+    var r = await fetch(RELAY_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Task-Secret': RELAY_SECRET, 'X-Task-Action': 'upload-file' },
+      body: JSON.stringify({ files: [{ path: path, content: String(dataB64 || ''), encoding: 'base64', bucket: 'wx-cloud-public', contentType: 'application/octet-stream' }] }),
+      signal: AbortSignal.timeout(30000),
+    });
+    if (!r.ok) return '';
+    var j = null;
+    try { j = await r.json(); } catch (e) { j = null; }
+    if (!(j && j.ok && Array.isArray(j.uploaded) && j.uploaded.length)) return '';
+    var pubUrl = SUPA_URL + '/storage/v1/object/public/wx-cloud-public/' + path;
+    // 读回验证：旧版函数把 base64 当文本写入 → 文件长度 ≈ 4/3 倍——长度对不上就当没写上
+    // （不把坏 URL 交给 QQ 拉取）；公桶对象公网可读，直读即可。
+    var rawLen = Math.floor((String(dataB64 || '').replace(/[^A-Za-z0-9+/]/g, '').length * 3) / 4);
+    var back = await fetch(pubUrl, { signal: AbortSignal.timeout(15000) }).catch(function () { return null; });
+    if (!(back && back.ok)) return '';
+    var gotLen = Number(back.headers.get('content-length')) || 0;
+    if (rawLen > 0 && Math.abs(gotLen - rawLen) > 2) return '';
+    return pubUrl;
+  } catch (e) { return ''; }
+}
+
+/** v19 QQ 媒体托管（云端函数/直连模式）：字节直写用户 Supabase 公桶（Deno 平台注入凭证，
+ *  或网关直连模式的用户 serviceKey）→ 公网 URL（QQ 实测可拉取）。网关中继模式（SUPA_KEY
+ *  空）返回 ''——中继走 qqHostMedia（云端函数代写）。 */
+async function qqHostMediaCloud(dataB64, ext) {
+  try {
+    if (!SUPA_URL || !SUPA_KEY) return '';
+    var bytes = cloudB64ToBytes(String(dataB64 || ''));
+    if (!bytes.length || bytes.length > 2 * 1024 * 1024) return '';
+    var path = 'media/' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8) + '.' + String(ext || 'bin').replace(/[^a-z0-9]/gi, '');
+    var r = await fetch(SUPA_URL + '/storage/v1/object/wx-cloud-public/' + path, {
+      method: 'POST',
+      headers: Object.assign(supaHeaders(), { 'x-upsert': 'true', 'Content-Type': 'application/octet-stream' }),
+      body: bytes,
+      signal: AbortSignal.timeout(30000),
+    });
+    if (!r.ok) return '';
+    return SUPA_URL + '/storage/v1/object/public/wx-cloud-public/' + path;
+  } catch (e) { return ''; }
+}
+
+/** v19 dataUrl 后缀（QQ 托管上传时决定扩展名） */
+function cloudDataUrlExt(dataUrl) {
+  var m = /^data:image\/(webp|png|gif|jpeg)/i.exec(String(dataUrl || ''));
+  return m ? m[1].toLowerCase() : 'png';
+}
+
+/** v19 表情包图片发送（url 候选逐个试）：① 内置包 CDN URL（jsdelivr——QQ 实测可拉取，
+ *  偶发超时自动换候选重试；st.url 来自运行包/网关注入，附 fastly 备用）② 网关托管
+ *  （用户收藏的 dataUrl 字节）③ 云端函数公桶直写（SUPA 凭证模式）。全失败返回 false
+ *  （调用方跳过该张，主流程不炸）。 */
+async function qqSendStickerImage(cfg, openid, msgId, isGroup, groupOpenid, st) {
+  var b64 = String((st && st.dataUrl) || '').split(',')[1] || '';
+  var ext = cloudDataUrlExt(st && st.dataUrl);
+  var candidates = [];
+  if (st && st.url) candidates.push(String(st.url));
+  if (st && st.id && LOCAL_STICKER_URLS && LOCAL_STICKER_URLS[String(st.id)]) {
+    var cdn = String(LOCAL_STICKER_URLS[String(st.id)]);
+    candidates.push(cdn);
+    if (/\.webp$/i.test(cdn)) candidates.push(cdn.replace('https://cdn.jsdelivr.net', 'https://fastly.jsdelivr.net'));
+  }
+  if (b64) {
+    var hosted = await qqHostMedia(b64, ext);
+    if (hosted) candidates.push(hosted);
+    var cloud = await qqHostMediaCloud(b64, ext);
+    if (cloud) candidates.push(cloud);
+  }
+  var uniq = [];
+  for (var ci = 0; ci < candidates.length; ci++) if (candidates[ci] && uniq.indexOf(candidates[ci]) < 0) uniq.push(candidates[ci]);
+  for (var ui = 0; ui < uniq.length; ui++) {
+    try {
+      var fi = await qqUploadMedia(cfg, openid, isGroup, groupOpenid, 1, uniq[ui]);
+      await qqReplyMedia(cfg, openid, msgId, fi, isGroup, groupOpenid);
+      return true;
+    } catch (e) { /* 该候选失败：换下一个（CDN 波动/托管不可用） */ }
+  }
+  return false;
+}
+
+/** QQ：发富媒体消息（v2 官方接口 msg_type=7 富媒体——旧版写 2 是 markdown 的编号，
+ *  服务器把 media 消息当 markdown 解析报「无效 markdown content」40034011，表情包/语音条
+ *  从未真正发出过——真机「AI 说发了却什么都没有」的另一半根因；实测 msg_type=7 + media
+ *  {file_info} 被动回复 200 成功送达） */
 async function qqReplyMedia(cfg, openid, msgId, fileInfo, isGroup, groupOpenid) {
-  var token = await qqToken(cfg);
   var url = isGroup ? QQ_API + '/v2/groups/' + groupOpenid + '/messages' : QQ_API + '/v2/users/' + openid + '/messages';
-  var r = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: 'QQBot ' + token },
-    body: JSON.stringify({ msg_type: 2, media: { file_info: fileInfo }, msg_id: msgId, msg_seq: QQ_SEQ++ }),
-    signal: AbortSignal.timeout(25000),
+  var r = await qqTokenCall(cfg, function (token) {
+    return fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: 'QQBot ' + token },
+      body: JSON.stringify({ msg_type: 7, media: { file_info: fileInfo }, msg_id: msgId, msg_seq: QQ_SEQ++ }),
+      signal: AbortSignal.timeout(25000),
+    });
   });
   if (!r.ok) {
     var t = await r.text().catch(function () { return ''; });
@@ -1366,7 +1514,9 @@ async function silkEncode(u8) {
 /** 云端 TTS（OpenAI 兼容 /audio/speech，只要 wav）→ silk → QQ 原生语音条。失败返回 null（降级文字）。
  *  v17 开箱兑底：没配 TTS 且网关不在线（TTS_LOCAL_URL 只在 im-gateway 注入）时，用聊天
  *  API（cfg.llm，OpenAI 兼容 /audio/speech）试一次合成——服务商不支持该端点就 404/400
- *  静默回退文字；零配置用户在云端的 QQ 语音从「永远发不了」变成「API 支持 TTS 就能发」。 */
+ *  静默回退文字；零配置用户在云端的 QQ 语音从「永远发不了」变成「API 支持 TTS 就能发」。
+ *  v19 url 制：silk 字节不再塞 base64（官方接口必拒）——托管成公网 URL（网关媒体端点 /
+ *  云端函数公桶直写）后交给 QQ 拉取；托管不可用返回 null（降级文字，行为与旧版一致）。 */
 async function synthesizeQqVoice(cfg, text) {
   var tts = cfg.qq && cfg.qq.tts;
   // v13：网关本地合成端点（im-gateway 注入，z-ai SDK 合成 wav）优先于用户自配 TTS——
@@ -1410,11 +1560,16 @@ async function synthesizeQqVoice(cfg, text) {
     if (buf.length < 44 || String.fromCharCode(buf[0], buf[1], buf[2], buf[3]) !== 'RIFF') return null;
     var silk = await silkEncode(buf);
     if (!silk) return null;
+    // v19 url 制：silk 字节托管成 QQ 可拉取的公网 URL（网关媒体端点 / 云端公桶直写）。
+    // 任一路都托管不了（网关不在线且无 SUPA 凭证）→ null 降级文字，行为与旧版一致。
     var bin = '';
     for (var i = 0; i < silk.length; i += 32768) bin += String.fromCharCode.apply(null, silk.subarray(i, i + 32768));
     var b64 = (typeof btoa === 'function') ? btoa(bin) : Buffer.from(silk).toString('base64');
+    var mediaUrl = await qqHostMedia(b64, 'silk');
+    if (!mediaUrl) mediaUrl = await qqHostMediaCloud(b64, 'silk');
+    if (!mediaUrl) return null;
     var dur = Math.max(1, Math.round(text.length / 4));
-    return { b64: b64, dur: dur };
+    return { url: mediaUrl, dur: dur };
   } catch (e) { return null; }
 }
 
@@ -1472,12 +1627,13 @@ function splitVoicePieces(t) {
  *  旧版 v15 的「早安/晚安定时器」（maybeQqProactive）已按机主定调删除——主动消息现在完全
  *  由站内「主动发消息」设置驱动（deliverProactiveMsg → send-active 动作 → 本函数）。 */
 async function qqReplyActive(cfg, openid, content) {
-  var token = await qqToken(cfg);
-  var r = await fetch(QQ_API + '/v2/users/' + openid + '/messages', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: 'QQBot ' + token },
-    body: JSON.stringify({ msg_type: 0, content: content.slice(0, 1500), msg_seq: QQ_SEQ++ }),
-    signal: AbortSignal.timeout(25000),
+  var r = await qqTokenCall(cfg, function (token) {
+    return fetch(QQ_API + '/v2/users/' + openid + '/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: 'QQBot ' + token },
+      body: JSON.stringify({ msg_type: 0, content: content.slice(0, 1500), msg_seq: QQ_SEQ++ }),
+      signal: AbortSignal.timeout(25000),
+    });
   });
   if (!r.ok) {
     var t = await r.text().catch(function () { return ''; });
@@ -1748,8 +1904,9 @@ async function handleQqEvent(cfg, t, d) {
     HIST_QQ = hist;
   }
   // v16 语音可用性先算（能力教学 + 语音升级判定共用；v17 加 LLM 兜底——没配 TTS 但聊天
-  // API 在就是「能试」，教学照注、合成失败自动回退文字）：
-  var ttsOk = (cfg.qq && cfg.qq.tts && cfg.qq.tts.baseUrl && cfg.qq.tts.apiKey) || TTS_LOCAL_URL || (cfg.llm && cfg.llm.baseUrl && cfg.llm.apiKey);
+  // API 在就是「能试」，教学照注、合成失败自动回退文字；v19 url 制再加托管门槛：语音要
+  // 托管成公网 URL 才发得出去——网关媒体端点或 SUPA 凭证（云端函数/直连）至少有一个）：
+  var ttsOk = ((cfg.qq && cfg.qq.tts && cfg.qq.tts.baseUrl && cfg.qq.tts.apiKey) || TTS_LOCAL_URL || (cfg.llm && cfg.llm.baseUrl && cfg.llm.apiKey)) && !!((RELAY_URL && RELAY_SECRET && SUPA_URL) || (SUPA_URL && SUPA_KEY));
   var system = (cfg.qq.persona && cfg.qq.persona.system) || '你和主人在真实QQ上聊天，回复简短自然，绝不透露自己是AI。';
   // v16 连发兑底：旧运行包/未绑定人设里没有连发指令块时运行期补注入（真机「只发一条」的兑底）
   system = ensureBurstRule(system, cfg.qq.multi !== false);
@@ -1894,10 +2051,10 @@ async function handleQqEvent(cfg, t, d) {
   }
   // v16 QQ 出站净化：经典表情文字代码（[流泪][裂开]…）在机器人通道不渲染——剥掉再发
   for (var csi = 0; csi < segs.length; csi++) segs[csi] = qqStripClassicCodes(segs[csi]);
-  // 发送：语音条逐条（失败降级文字）→ 文字连发 → 表情图片（逐张，单张失败跳过）
+  // 发送：语音条逐条（失败降级文字）→ 文字连发 → 表情图片（逐张：URL 候选直选 → 托管兜底；单张失败跳过）
   for (var vSendI = 0; vSendI < voiceClips.length; vSendI++) {
     try {
-      var vfi = await qqUploadMedia(cfg, authorId, isGroup, d.group_openid, 3, voiceClips[vSendI].clip.b64);
+      var vfi = await qqUploadMedia(cfg, authorId, isGroup, d.group_openid, 3, voiceClips[vSendI].clip.url);
       await qqReplyMedia(cfg, authorId, msgId, vfi, isGroup, d.group_openid);
       voiceClips[vSendI].sent = true;
     } catch (ve) {
@@ -1909,13 +2066,10 @@ async function handleQqEvent(cfg, t, d) {
   }
   var sentEmo = 0;
   for (var sji = 0; sji < images.length; sji++) {
-    var sb64 = String(images[sji].dataUrl).split(',')[1] || '';
-    if (!sb64) continue;
-    try {
-      var sfi = await qqUploadMedia(cfg, authorId, isGroup, d.group_openid, 1, sb64);
-      await qqReplyMedia(cfg, authorId, msgId, sfi, isGroup, d.group_openid);
-      sentEmo++;
-    } catch (se) { /* 单张失败跳过 */ }
+    if (!images[sji] || (!images[sji].dataUrl && !images[sji].url)) continue;
+    // v19 url 制发送（候选逐个试）：CDN 直选 → 网关托管 → 云端公桶；全失败跳过该张
+    var sentOne = await qqSendStickerImage(cfg, authorId, msgId, isGroup, d.group_openid, images[sji]);
+    if (sentOne) sentEmo++;
   }
   // 历史回写（网站拉取展示）：v13 逐条连发落库（= 站内多条气泡）；语音条 [语音] 摘要；
   // v10 角色格式 user/assistant（与微信 history.json 同构，被本文件自己的 LLM 上下文消费）。
@@ -2218,7 +2372,7 @@ main().catch(function (e) { console.error(e); process.exit(1); });
 
 // ---------------- Supabase Edge Function 版（Deno，被动 Webhook + 手动单轮） ----------------
 
-export const EDGE_FUNCTION_TS = `// 云端助手 · Supabase Edge Function（Deno）· v17 真机体验修复版·二（v13：连发分段/世界书运行时命中/[M编号]引用/深度思考剥除/富媒体标记净化/表情包ID直选/语音条首段化；v14：连发 3~30 条 + max_tokens 2400 + 微信真表情包（AES-128-ECB→CDN→image_item）+ QQ 超预算均匀分摊；v15：入站引用解析 + QQ 超长语音分段 + QQ 斗图模式 + 照片标记；v16：QQ 语音条标记强制发送 + QQ 经典表情代码剥离 + 微信引用下线 + 照片下线 + 主动消息改站内驱动（send-active）+ 云端轮询 10 秒分档（fast=1 / qq=1）；v17：QQ 语音云端 LLM 兜底合成（没配 TTS 用聊天 API 试 /audio/speech）+ 同步升级链收紧（探测不到 ver 也重部署））
+export const EDGE_FUNCTION_TS = `// 云端助手 · Supabase Edge Function（Deno）· v19 真机富媒体根修版（v13：连发分段/世界书运行时命中/[M编号]引用/深度思考剥除/富媒体标记净化/表情包ID直选/语音条首段化；v14：连发 3~30 条 + max_tokens 2400 + 微信真表情包（AES-128-ECB→CDN→image_item）+ QQ 超预算均匀分摊；v15：入站引用解析 + QQ 超长语音分段 + QQ 斗图模式 + 照片标记；v16：QQ 语音条标记强制发送 + QQ 经典表情代码剥离 + 微信引用下线 + 照片下线 + 主动消息改站内驱动（send-active）+ 云端轮询 10 秒分档（fast=1 / qq=1）；v17：QQ 语音云端 LLM 兜底合成（没配 TTS 用聊天 API 试 /audio/speech）+ 同步升级链收紧（探测不到 ver 也重部署）；v19：微信表情包 aes_key 对齐官方 SDK（base64(hex 文本)——旧版发 base64(原始 16 字节)接收端解不开 →「图片已过期或已被清理」）+ QQ 富媒体 url 制（官方 v2 files 接口只收 url：内置包 CDN URL 直发 + 语音 silk/用户表情托管公桶 qqHostMediaCloud）+ upload-file 支持 encoding:'base64' 二进制）
 // 函数 slug：wx-assistant（QQ 回调地址 / 云端测试 URL = https://<项目ref>.supabase.co/functions/v1/wx-assistant）。
 // 注意：本行的 wx-assistant 标记同时是部署接口（/api/cloud-deploy/supabase op=deploy）的产品
 // 校验标记——v5 移除函数内 pg_cron 路径时把它一并带走过一次，导致一键部署全线 400
@@ -2433,13 +2587,18 @@ Deno.serve(async (req) => {
         const path = String((f && f.path) || '').replace(/[^a-zA-Z0-9._/-]/g, '');
         const bucket = f && f.bucket === 'wx-cloud-public' ? 'wx-cloud-public' : 'wx-cloud';
         const content = typeof (f && f.content) === 'string' ? f.content : '';
-        if (!path || path.length > 128 || !content || content.length > 800000) continue;
+        // v19 二进制支持：encoding:'base64'（用户收藏表情/语音 silk 上公桶——QQ 富媒体
+        // url 制需要公网 URL，字节数据经部署代理转 base64 传上来，这里解码回字节写入）
+        const isB64 = !!(f && typeof f.encoding === 'string' && /^base64$/i.test(f.encoding) && content);
+        const rawLen = isB64 ? Math.floor((content.length * 3) / 4) : content.length;
+        if (!path || path.length > 128 || !content || rawLen <= 0 || rawLen > 900000) continue;
         validCount += 1;
         try {
+          const body = isB64 ? cloudB64ToBytes(content) : content;
           const r = await fetch(SUPA_URL + '/storage/v1/object/' + bucket + '/' + path, {
             method: 'POST',
-            headers: Object.assign(supaHeaders(), { 'x-upsert': 'true', 'Content-Type': (f && f.contentType) || 'text/plain' }),
-            body: content,
+            headers: Object.assign(supaHeaders(), { 'x-upsert': 'true', 'Content-Type': (f && f.contentType) || (isB64 ? 'application/octet-stream' : 'text/plain') }),
+            body: body,
           });
           if (r.ok) uploaded.push(bucket + '/' + path);
           else lastUpErr = String(await r.text().catch(() => '')).slice(0, 200);
@@ -2496,8 +2655,9 @@ Deno.serve(async (req) => {
       // 站内「重新同步运行包」拿它判断要不要重部署函数代码升级运行时（旧版不升 = 真机上
       // 一直跑旧行为：只回一两条/不会表情包/不会语音/发裸标记——「重新同步只推配置不推代码」
       // 的坑；v17 起探测不到 ver 也重部署，旧函数不再永远升不了级）。
-      // v17：16 → 17（QQ 语音 LLM 兜底合成 + 同步升级链收紧那代）。
-      return jr({ ok: true, source: 'deno', ver: 18 });
+      // v19：微信表情包 aes_key 根修 + QQ 富媒体 url 制（内置包 CDN 直发 + 语音/表情公桶托管）
+      // + upload-file 二进制——真机微信/QQ 表情包、QQ 语音的全量可用代际。
+      return jr({ ok: true, source: 'deno', ver: 19 });
     }
 
     // ---- v16 send-active（站内「主动发消息」引擎触发）：把站内已生成的主动消息内容发到

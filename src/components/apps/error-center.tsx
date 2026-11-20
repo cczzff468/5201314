@@ -1,19 +1,15 @@
 'use client';
 
-/**
- * 全局错误中心 UI（v18 机主定调「全部错误提示弹窗化」）：
- * - 界面上不铺错误长文——只有一个极简「错误」指示器（有错才出现，右上角胶囊，带条数）；
- * - 点击 → 弹窗：标题（错误分类）+ 详细（原始错误全文，可滚动/可复制/可选中）；
- * - 多条错误时弹窗为列表模式：逐条点开看详情，支持一键清除；
- * - 单点场景（如聊天发送失败行）可 openError(id) 直达该条的详情弹窗。
- * 挂载于 PhoneShell（z-[90]：App 窗口/通知中心之上、来电层之下——错误不盖来电）。
- */
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useErrorCenter, type ErrorRec } from '@/lib/error-center';
 
 /** 通用内联错误指示器（v18 机主定调「界面不铺错误长文」）：极简「label · 点击查看详情」
  *  小胶囊——挂载时把错误上报进中心，点击直达该条的详情弹窗（标题+详细+复制）。
- *  用法：原「红/琥珀横幅铺全文」的失败态换成本组件（成功态照旧短句展示）。 */
+ *  用法：原「红/琥珀横幅铺全文」的失败态换成本组件（成功态照旧短句展示）。
+ *  v19 渲染期 setState 修复：上报改在 effect 里做（旧版 useMemo 里调 report——渲染另一
+ *  组件（ErrorCenter）期间 set store，React 报「Cannot update a component while
+ *  rendering a different component」）。errId 只存 ref（点击时读，effect 早于用户点击；
+ *  尚未上报的窗口期兜底打开错误列表）。 */
 export function InlineErrorChip({
   label,
   msg,
@@ -26,15 +22,20 @@ export function InlineErrorChip({
   className?: string;
 }) {
   const openError = useErrorCenter((s) => s.openError);
-  const errId = useMemo(
-    () => useErrorCenter.getState().report(label, msg, scope),
-    [label, msg, scope],
-  );
+  const openList = useErrorCenter((s) => s.openList);
+  const errIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    errIdRef.current = useErrorCenter.getState().report(label, msg, scope);
+  }, [label, msg, scope]);
   return (
     <button
       type="button"
       aria-label={`${label}，点击查看错误详情`}
-      onClick={() => openError(errId)}
+      onClick={() => {
+        const id = errIdRef.current;
+        if (id) openError(id);
+        else openList();
+      }}
       className={`flex w-full items-center gap-1.5 rounded-[10px] bg-[#FF453A]/[0.08] px-3.5 py-2 text-left text-[12px] leading-[1.5] text-[#FF453A] active:opacity-70 dark:bg-[#FF453A]/[0.14] ${className}`}
     >
       <span className="mt-[1px] inline-block h-[7px] w-[7px] shrink-0 rounded-full bg-[#FF453A]" aria-hidden />
@@ -48,6 +49,10 @@ function fmtTime(at: number): string {
   const pad = (n: number) => String(n).padStart(2, '0');
   return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
+
+/** 全局错误中心 UI（v18 机主定调「全部错误提示弹窗化」）：界面上不铺错误长文——只有右上角
+ *  极简「错误」指示器（有错才出现）；点击 → 弹窗：标题（错误分类）+ 详细（原始错误全文，
+ *  可滚动/复制）；多条错误时弹窗为列表模式逐条点开。挂载于 PhoneShell（z-[90]，错误不盖来电）。 */
 
 function CopyButton({ rec }: { rec: ErrorRec }) {
   const [copied, setCopied] = useState(false);

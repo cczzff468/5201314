@@ -75,7 +75,6 @@ import {
   WifiOff,
   Wrench,
   X,
-  XCircle,
   ShieldCheck,
   MapPin,
   Terminal,
@@ -9084,30 +9083,6 @@ function CloudCopyButton({
   );
 }
 
-/** 云端助手 · 状态小胶囊（v80 状态卡 chips）：平台 / 部署 / 最近测试 一排小标签，
- *  tone=green/red 时带彩色文字（成功/异常一眼可辨） */
-function CloudChip({
-  children,
-  tone = 'gray',
-}: {
-  children: ReactNode;
-  tone?: 'gray' | 'green' | 'red';
-}) {
-  const toneCls =
-    tone === 'green'
-      ? 'text-emerald-600 ring-emerald-500/25 dark:text-emerald-300'
-      : tone === 'red'
-        ? 'text-[#FF453A] ring-[#FF453A]/25'
-        : 'text-foreground/70 ring-black/[0.05] dark:text-muted-foreground dark:ring-white/[0.08]';
-  return (
-    <span
-      className={`inline-flex max-w-full items-center gap-1 truncate rounded-full bg-black/[0.035] px-2.5 py-[5px] text-[11px] font-medium ring-1 backdrop-blur-xl dark:bg-white/[0.06] ${toneCls}`}
-    >
-      {children}
-    </span>
-  );
-}
-
 /** 云端助手 · 简单结果提示（一键部署/HF 成功框内容多单独写；这里只包「绿/红一行消息」的结果。
  *  v18：失败态改极简指示器——机主定调「界面不铺错误长文」：失败只留可点击小胶囊，
  *  详情（原始错误全文）进全局错误中心弹窗看） */
@@ -9612,63 +9587,65 @@ function CloudPage({ onBack }: { onBack: () => void }) {
   return (
     <DetailShell title="云端助手" onBack={onBack} gray>
       <div className="flex flex-col gap-5">
-        {/* 顶部状态卡（v80 重做）：大状态图标 + 一句话状态 + 关键信息 chips（平台/部署/最近测试）；
-            长说明全收「说明」收缩区——页面主体一眼看清当前状态 */}
+        {/* 顶部状态卡（v19 简约重做）：状态点 + 一行标题 + 一行副标 + 极简指标行（label·值
+            文本对，无胶囊描边）+ 异常只留「查看」入口（错误详情进弹窗——全站错误提示统一弹窗化）。
+            长说明全收「说明」收缩区——页面主体一眼看清当前状态。 */}
         <GrayCard>
-          <div className="flex items-center gap-3.5">
-            <span
-              aria-hidden="true"
-              className={`flex h-[46px] w-[46px] shrink-0 items-center justify-center rounded-full ${
-                pingBad ? 'bg-[#FF453A]/[0.12]' : cloudOn ? 'bg-[#34C759]/[0.12]' : 'bg-black/[0.05] dark:bg-white/[0.08]'
-              }`}
-            >
-              {pingBad ? (
-                <XCircle className="h-6 w-6 text-[#FF453A]" strokeWidth={2} />
-              ) : cloudOn ? (
-                <CloudUpload className="h-6 w-6 text-[#34C759]" strokeWidth={2} />
-              ) : (
-                <CloudOff className="h-6 w-6 text-muted-foreground/80" strokeWidth={2} />
-              )}
-            </span>
-            <div className="min-w-0 flex-1">
-              <p className="text-[17px] font-semibold leading-snug">{statusTitle}</p>
-              <p className="mt-0.5 text-[12.5px] leading-snug text-muted-foreground">{statusSub}</p>
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex min-w-0 items-center gap-2">
+              <span
+                aria-hidden="true"
+                className={`inline-block h-[9px] w-[9px] shrink-0 rounded-full ${
+                  pingBad ? 'bg-[#FF453A]' : cloudOn ? 'bg-[#34C759]' : 'bg-black/25 dark:bg-white/30'
+                }`}
+              />
+              <p className="truncate text-[15.5px] font-semibold leading-tight">{statusTitle}</p>
             </div>
+            {cloudOn && (
+              <span className="shrink-0 text-[11px] font-medium text-muted-foreground/75">{PLATFORM_LABELS[platform]}</span>
+            )}
           </div>
+          <p className="mt-1.5 text-[12px] leading-relaxed text-muted-foreground">{statusSub}</p>
 
-          {/* 关键信息 chips：平台 / 部署 / 轮询 / 加速 / 最近测试（一排小胶囊，扫一眼全知道） */}
-          <div className="mt-3 flex flex-wrap gap-1.5" aria-label="云端状态概览">
-            {cloudOn && <CloudChip>{PLATFORM_LABELS[platform]}</CloudChip>}
-            <CloudChip tone={supaDeployed ? 'green' : 'gray'}>{supaDeployed ? '已部署' : '未部署'}</CloudChip>
+          {/* 关键指标（极简文本对：部署 / 轮询 / 加速 / 测试——一行扫完，无多余视觉噪音） */}
+          <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[11.5px]" aria-label="云端状态概览">
+            <span className={supaDeployed ? 'text-emerald-600 dark:text-emerald-400' : 'text-muted-foreground/70'}>
+              部署{supaDeployed ? ' · 已完成' : ' · 未部署'}
+            </span>
             {supaDeployed && (
-              <CloudChip tone={cronOn ? (hbStale ? 'red' : 'green') : 'gray'}>
-                {cronOn ? (hbStale ? '轮询无心跳' : '轮询中') : '轮询已停（零消耗）'}
-              </CloudChip>
+              <span className={cronOn ? (hbStale ? 'text-[#FF453A]' : 'text-emerald-600 dark:text-emerald-400') : 'text-muted-foreground/70'}>
+                轮询{cronOn ? (hbStale ? ' · 无心跳' : ' · 运行中') : ' · 已停'}
+              </span>
             )}
             {supaDeployed && (
-              <CloudChip tone={gwOn ? (qqCh?.state === 'error' ? 'red' : 'green') : 'gray'}>
-                {gwOn ? `秒回加速${qqCh?.state === 'error' ? '异常' : '中'}` : '加速未开启'}
-              </CloudChip>
+              <span className={gwOn ? (qqCh?.state === 'error' ? 'text-[#FF453A]' : 'text-emerald-600 dark:text-emerald-400') : 'text-muted-foreground/70'}>
+                加速{gwOn ? (qqCh?.state === 'error' ? ' · 异常' : ' · 在线') : ' · 未开'}
+              </span>
             )}
-            <CloudChip tone={lastPing ? (lastPing.ok ? 'green' : 'red') : 'gray'}>
-              {lastPing ? `最近测试${lastPing.ok ? '正常' : '异常'}` : '未测试'}
-            </CloudChip>
+            {lastPing && (
+              <span className={lastPing.ok ? 'text-emerald-600 dark:text-emerald-400' : 'text-[#FF453A]'}>
+                测试 · {lastPing.ok ? '正常' : '异常'}
+              </span>
+            )}
           </div>
 
-          {lastPing && lastPing.msg && (
-            <p
-              className={`mt-2.5 text-[12.5px] leading-relaxed ${pingBad ? 'text-[#FF453A]' : 'text-emerald-600 dark:text-emerald-300'}`}
+          {pingBad && (
+            <button
+              type="button"
+              onClick={() => lastPing && setResultDialog({ title: '云端测试', body: lastPing.msg })}
+              className="mt-2.5 flex w-full items-center gap-1.5 rounded-[10px] bg-[#FF453A]/[0.07] px-3 py-1.5 text-left text-[12px] text-[#FF453A] active:opacity-70 dark:bg-[#FF453A]/[0.13]"
             >
-              {lastPing.msg}
-            </p>
+              <span className="inline-block h-[6px] w-[6px] shrink-0 rounded-full bg-[#FF453A]" aria-hidden />
+              <span className="min-w-0 shrink">最近一次云端测试异常 · 点击查看详情</span>
+            </button>
           )}
 
-          <div className="mt-2.5">
+          <div className="mt-3">
             <CloudFold title="说明（作用 / 使用顺序 / 模式）" testid="cloud-help-fold">
               <div className="space-y-2 text-[12px] leading-relaxed text-muted-foreground">
                 <p>收发模式：一键部署后自动建立「云端轮询」定时任务（存在你自己的 Supabase 项目里，免费）——微信每 10 秒自动轮询必检必回，QQ 走官方 WebSocket 长连接（免回调地址、不受 QQ 平台对海外出口的限制）。「云端轮询」开关关掉 = 清除定时任务（停用立刻生效、零配额消耗），云端不再自动回复；「秒回加速」开关打开时，本站服务器上的加速器让回复接近秒回，与本站是否开轮询互不影响。</p>
                 <p>顺序：① 这里一键部署（部署完自动开启云端轮询 + 秒回加速）→ ② 到微信「我」页 / QQ「动态」页接入真机。接入 / 换绑 / 断开、改「API 设置」都会自动同步运行包，云端 60 秒内跟上。凭证只存你自己的浏览器。</p>
-                <p>心跳：云端轮询开着时每轮自记一次心跳（开关副文案里能看到「最近一轮 X 秒前」）；超过 3 分钟没心跳会提示点「修复」重建定时任务——正常运转中无需手动点「云端测试」（它只是兑底验证通道）。</p>
+                <p>心跳：云端轮询开着时每轮自记一次心跳（开关副文案里能看到「最近一轮 X 秒前」）；超过 3 分钟没心跳会提示点「修复」重建定时任务——正常运转中无需手动点「云端测试」（它只是兜底验证通道）。</p>
                 <p>离开本站：云端函数、定时任务、配置与聊天记录全在你自己的 Supabase 项目里——本站关了 TA 照样 24 小时收发（微信 10 秒一档必检必回；QQ 断线自动续传重连）；只有「秒回加速」依赖本站在线。</p>
               </div>
             </CloudFold>
