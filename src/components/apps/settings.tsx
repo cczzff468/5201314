@@ -9072,21 +9072,22 @@ function useConnectContacts(app: 'wx' | 'qq', enabled: boolean): ContactRecord[]
   return list;
 }
 
-/** 云端助手 · 输入框样式（API 设置页同款观感） */
+/** 云端助手 · 输入框样式（毛玻璃胶囊统一配方 v23：圆角胶囊化 + 内高光） */
 const CLOUD_INPUT_CLS =
-  'h-11 rounded-[14px] border-black/[0.05] bg-white/55 text-[14px] shadow-[inset_0_1px_0_rgba(255,255,255,0.7),0_3px_10px_rgba(17,24,39,0.05)] backdrop-blur-2xl dark:border-white/[0.09] dark:bg-white/[0.07] dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.05),0_3px_10px_rgba(0,0,0,0.2)]';
+  'h-11 rounded-[16px] border-black/[0.05] bg-white/55 text-[14px] shadow-[inset_0_1px_0_rgba(255,255,255,0.7),0_3px_10px_rgba(17,24,39,0.05)] backdrop-blur-2xl dark:border-white/[0.09] dark:bg-white/[0.07] dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.05),0_3px_10px_rgba(0,0,0,0.2)]';
 
-/** 云端助手 · 白底整宽按钮（次级动作：读取列表 / 重新同步 / 测试 / 停用定时） */
+/** 云端助手 · 白底胶囊按钮（次级动作：读取列表 / 重新同步 / 测试 / 停用定时）——v23 毛玻璃胶囊化
+ *  （与真机接入子页按钮同一套配方：圆角胶囊 + 半透明 + 内高光 + 按下微缩） */
 const CLOUD_BTN_CLS =
-  'flex h-11 w-full items-center justify-center gap-2 rounded-[14px] bg-white/60 text-[15px] font-medium text-foreground shadow-[0_6px_20px_rgba(17,24,39,0.08)] ring-1 ring-white/70 backdrop-blur-2xl transition-all active:scale-[0.98] active:bg-white/85 disabled:opacity-50 dark:bg-white/[0.1] dark:ring-white/[0.12] dark:active:bg-white/[0.16]';
+  'flex h-11 w-full items-center justify-center gap-2 rounded-full bg-white/60 text-[15px] font-medium text-foreground shadow-[0_6px_20px_rgba(17,24,39,0.08)] ring-1 ring-white/70 backdrop-blur-2xl transition-all active:scale-[0.98] active:bg-white/85 disabled:opacity-50 dark:bg-white/[0.1] dark:ring-white/[0.12] dark:active:bg-white/[0.16]';
 
-/** 云端助手 · 蓝底整宽按钮（关键动作：一键部署） */
+/** 云端助手 · 蓝底胶囊按钮（关键动作：一键部署）——v23 胶囊化（与次级按钮同形） */
 const CLOUD_BTN_BLUE_CLS =
-  'flex h-11 w-full items-center justify-center gap-2 rounded-[14px] bg-[#007AFF] text-[15px] font-medium text-white shadow-[0_6px_20px_rgba(0,122,255,0.28)] transition-all active:scale-[0.98] active:bg-[#0066D6] disabled:opacity-50';
+  'flex h-11 w-full items-center justify-center gap-2 rounded-full bg-[#007AFF] text-[15px] font-medium text-white shadow-[0_6px_20px_rgba(0,122,255,0.28)] transition-all active:scale-[0.98] active:bg-[#0066D6] disabled:opacity-50';
 
-/** 云端助手 · 表单分组卡（API 设置页「连接配置」同款配方） */
+/** 云端助手 · 表单分组卡（v23 毛玻璃胶囊统一：与 GrayCard 同配方 + 独立行距） */
 const CLOUD_CARD_CLS =
-  'flex flex-col gap-4 rounded-[22px] bg-white/55 p-4 shadow-[0_8px_28px_rgba(17,24,39,0.06)] ring-1 ring-white/70 backdrop-blur-2xl dark:bg-white/[0.06] dark:ring-white/[0.09]';
+  'flex flex-col gap-4 rounded-[24px] bg-white/55 p-4 shadow-[0_8px_28px_rgba(17,24,39,0.06)] ring-1 ring-white/70 backdrop-blur-2xl dark:bg-white/[0.06] dark:ring-white/[0.09]';
 
 /** 云端助手 · 结果提示框（绿=成功 / 红=失败） */
 const CLOUD_OK_BOX_CLS =
@@ -9182,7 +9183,7 @@ function CloudFold({
   defaultOpen?: boolean;
 }) {
   return (
-    <Collapsible defaultOpen={defaultOpen} className="rounded-[14px] bg-white/45 ring-1 ring-black/[0.04] dark:bg-white/[0.05] dark:ring-white/[0.07]">
+    <Collapsible defaultOpen={defaultOpen} className="rounded-[16px] bg-white/45 ring-1 ring-white/60 backdrop-blur-xl dark:bg-white/[0.05] dark:ring-white/[0.07]">
       <CollapsibleTrigger
         data-testid={testid}
         className="group flex w-full items-center justify-between gap-2 px-3.5 py-2.5 text-left transition-colors active:bg-black/[0.03] dark:active:bg-white/[0.06]"
@@ -9670,13 +9671,13 @@ function CloudPage({ onBack }: { onBack: () => void }) {
   };
 
   // —— 真机接入子页（v22）：整页切换——宿主导航 + 接入页铺满内容区（embedded 不渲染
-  //    自带顶栏；两页自带浅灰底色，导航透传同色无缝衔接） ——
+  //    自带顶栏；v23 毛玻璃统一：宿主底色与 CloudPage 同一浅灰，子页玻璃卡折射同源） ——
   if (sub !== 'main') {
     const isWx = sub === 'wx';
     return (
       <div
         data-testid={isWx ? 'cloud-device-wx-page' : 'cloud-device-qq-page'}
-        className={`relative flex h-full w-full flex-col ${isWx ? 'bg-[#EDEDED] dark:bg-[#111111]' : 'bg-[#F6F7F9] dark:bg-[#111214]'}`}
+        className="relative flex h-full w-full flex-col bg-[#F2F2F7] dark:bg-[#111113]"
       >
         <IOSNavBar
           title={isWx ? '真机微信' : '真机 QQ'}
@@ -9941,7 +9942,7 @@ function CloudPage({ onBack }: { onBack: () => void }) {
                         最直接证据，用户无需手动点「云端测试」验证 */}
                     {supaDeployed && (
                       <div
-                        className="flex items-center justify-between gap-3 rounded-[14px] bg-white/60 px-4 py-3 ring-1 ring-black/[0.04] dark:bg-white/[0.06] dark:ring-white/[0.08]"
+                        className="flex items-center justify-between gap-3 rounded-[16px] bg-white/60 px-4 py-3 ring-1 ring-white/60 backdrop-blur-xl dark:bg-white/[0.06] dark:ring-white/[0.08]"
                         data-testid="cloud-cron-row"
                       >
                         <span className="min-w-0 flex-1">
@@ -10019,7 +10020,7 @@ function CloudPage({ onBack }: { onBack: () => void }) {
                         轮询，回复接近秒回；云端 24 小时收发由用户 Supabase 定时任务独立承担
                         （真源：服务端网关状态，本页 6 秒一轮拉取） */}
                     {supaDeployed && (
-                      <div className="flex items-center justify-between gap-3 rounded-[14px] bg-white/60 px-4 py-3 ring-1 ring-black/[0.04] dark:bg-white/[0.06] dark:ring-white/[0.08]">
+                      <div className="flex items-center justify-between gap-3 rounded-[16px] bg-white/60 px-4 py-3 ring-1 ring-white/60 backdrop-blur-xl dark:bg-white/[0.06] dark:ring-white/[0.08]">
                         <span className="min-w-0 flex-1">
                           <span className="block text-[14.5px] font-medium">秒回加速（本站在线时）</span>
                           <span className="mt-0.5 block text-[11px] leading-relaxed text-muted-foreground">
@@ -10045,24 +10046,28 @@ function CloudPage({ onBack }: { onBack: () => void }) {
                       </div>
                     )}
                     {/* 网关通道详情（开关开着时展示）：QQ 通道状态 / 微信循环健康——
-                        服务端真源，异常（凭证错/网络断）第一时间在这里可见 */}
+                        服务端真源，异常（凭证错/网络断）第一时间在这里可见。
+                        v23：QQ 状态修复——报错后状态机翻回 connecting 的重试窗口里也如实展示
+                        lastError（不再永远「正在连接 QQ 平台…」）；凭证错用户能直接看到核对指引 */}
                     {supaDeployed && gwOn && (
-                      <div className="flex flex-col gap-1.5 rounded-[14px] bg-black/[0.03] px-3.5 py-3 text-[11.5px] leading-relaxed text-muted-foreground dark:bg-white/[0.04]" data-testid="cloud-gateway-detail">
+                      <div className="flex flex-col gap-1.5 rounded-[16px] bg-black/[0.03] px-3.5 py-3 text-[11.5px] leading-relaxed text-muted-foreground ring-1 ring-white/40 backdrop-blur-xl dark:bg-white/[0.04] dark:ring-white/[0.06]" data-testid="cloud-gateway-detail">
                         <p className="flex items-center gap-1.5">
-                          {qqCh?.state === 'ready' ? (
-                            <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-[#34C759]" aria-hidden="true" />
-                          ) : qqCh?.state === 'disabled' ? (
-                            <CloudOff className="h-3.5 w-3.5 shrink-0 text-muted-foreground/60" aria-hidden="true" />
+                          {(qqCh?.state === 'ready' && !qqCh.lastError) || qqCh?.state === 'disabled' ? (
+                            qqCh?.state === 'ready' ? (
+                              <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-[#34C759]" aria-hidden="true" />
+                            ) : (
+                              <CloudOff className="h-3.5 w-3.5 shrink-0 text-muted-foreground/60" aria-hidden="true" />
+                            )
                           ) : (
-                            <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" aria-hidden="true" />
+                            <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-[#C77700]" aria-hidden="true" />
                           )}
                           QQ 通道：
                           {qqCh?.state === 'disabled'
                             ? '未接入（接入 QQ 后凭证自动同步，约半分钟内点亮）'
-                            : qqCh?.state === 'ready'
+                            : qqCh?.state === 'ready' && !qqCh.lastError
                               ? `已连接${qqCh.botName ? `「${qqCh.botName}」` : ''}${qqCh.lastEventAt ? ` · 最近消息 ${new Date(qqCh.lastEventAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}` : ''}`
-                              : qqCh?.state === 'error'
-                                ? `连接异常：${qqCh.lastError || '未知原因'}`
+                              : qqCh?.lastError
+                                ? `${qqCh.state === 'error' ? '连接异常' : '重试中'}：${qqCh.lastError}`
                                 : '正在连接 QQ 平台…'}
                         </p>
                         <p className="flex items-center gap-1.5">
@@ -10076,7 +10081,7 @@ function CloudPage({ onBack }: { onBack: () => void }) {
                             ? `异常：${gatewayStatus.wx.lastError}`
                             : gatewayStatus?.wx?.replied
                               ? `自动回复中（累计 ${gatewayStatus.wx.replied} 条）`
-                              : '运行中（还没收到消息）'}
+                              : '运行中'}
                         </p>
                       </div>
                     )}
@@ -10096,7 +10101,7 @@ function CloudPage({ onBack }: { onBack: () => void }) {
                       type="button"
                       onClick={() => void runSync()}
                       disabled={syncLoading}
-                      className="flex w-full items-center justify-between gap-2 rounded-[14px] bg-white/60 px-4 py-3 text-left transition-colors active:bg-muted/50 disabled:opacity-50 ring-1 ring-black/[0.04] dark:bg-white/[0.06] dark:ring-white/[0.08]"
+                      className="flex w-full items-center justify-between gap-2 rounded-[16px] bg-white/60 px-4 py-3 text-left transition-colors active:bg-muted/50 disabled:opacity-50 ring-1 ring-white/60 backdrop-blur-xl dark:bg-white/[0.06] dark:ring-white/[0.08]"
                       data-testid="cloud-supa-sync"
                     >
                       <span className="min-w-0 flex-1 text-[14.5px] font-medium">重新同步运行包</span>
@@ -10116,8 +10121,9 @@ function CloudPage({ onBack }: { onBack: () => void }) {
           </section>
         )}
 
-        {/* 分组二：真机接入（v22 收拢）：原 微信「我」页 / QQ「动态」页的两个接入界面迁到
-            这里统一管理——行状态直读对应接入 store（登录态 + 绑定角色名），点开整页切换 */}
+        {/* 分组二：真机接入（v22 收拢，v23 毛玻璃胶囊统一）：原 微信「我」页 / QQ「动态」页的
+            两个接入界面迁到这里统一管理——行状态直读对应接入 store（登录态 + 绑定角色名），
+            点开整页切换；状态文案收成小胶囊（与整体毛玻璃语言同构） */}
         <section>
           <SectionLabel icon={Smartphone} tone={TONE_BLUE}>真机接入</SectionLabel>
           <div role="menu" aria-label="真机接入">
@@ -10137,17 +10143,19 @@ function CloudPage({ onBack }: { onBack: () => void }) {
                     aria-label={`真机${o.label}接入`}
                     data-testid={`cloud-device-${o.id}`}
                     onClick={() => setSub(o.id)}
-                    className="flex min-h-[56px] w-full items-center gap-3 px-4 py-2 text-left transition-colors active:bg-muted/50"
+                    className="flex min-h-[60px] w-full items-center gap-3 px-4 py-2.5 text-left transition-colors active:bg-muted/50"
                   >
                     <RowIcon icon={o.icon} tone={o.tone} />
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-[16px]">{o.label}</span>
                       <span
-                        className={`mt-0.5 block truncate text-[11.5px] ${
-                          connected ? 'text-emerald-600 dark:text-emerald-400' : 'text-muted-foreground/80'
+                        className={`mt-1 inline-flex max-w-full items-center truncate rounded-full px-2.5 py-[3px] text-[11px] font-medium backdrop-blur-xl ${
+                          connected
+                            ? 'bg-emerald-500/[0.1] text-emerald-600 ring-1 ring-emerald-500/20 dark:text-emerald-400'
+                            : 'bg-black/[0.04] text-muted-foreground/85 ring-1 ring-black/[0.03] dark:bg-white/[0.06] dark:ring-white/[0.08]'
                         }`}
                       >
-                        {connected ? (o.name === '' ? '已接入 · 未绑定角色' : `已接入 · ${o.name}`) : supaDeployed ? '未接入 · 点开扫码带上 TA' : '部署云端后扫码接入'}
+                        {connected ? (o.name === '' ? '已接入 · 未绑角色' : `已接入 · ${o.name}`) : supaDeployed ? '未接入 · 点开扫码带上 TA' : '部署云端后扫码接入'}
                       </span>
                     </span>
                     <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground/60" aria-hidden="true" />

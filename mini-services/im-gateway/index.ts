@@ -115,9 +115,10 @@ async function handleLocalTts(req: Request): Promise<Response> {
 
 // ---------------- v20 本地识图（QQ 入站图片 → VLM 描述：z-ai SDK createVision） ----------------
 
-/** 本地识图端点（POST /vlm {url, prompt} → {desc}）：真机 QQ 上对方发图 → 云端核心
- *  （sources.ts describeQqImage）调它把图转成文字描述进 LLM 上下文——AI 会识图。
- *  同 TTS 端点一样仅本机访问（不经 Caddy 对外）；SDK 缺失/识别失败返回 5xx，
+/** 本地识图端点（POST /vlm {url | b64, prompt} → {desc}）：真机上对方发图（QQ 入站 URL /
+ *  微信入站 CDN 密文图解密后的 base64）→ 云端核心调它把图转成文字描述进 LLM 上下文——AI 会识图。
+ *  v23：b64 参数新增（微信识图：core describeWxImage 把解密后的图片以 dataURL 传入）；
+ *  url / b64 二选一。仅本机访问（不经 Caddy 对外）；SDK 缺失/识别失败返回 5xx，
  *  调用方（云端核心）拿到非 200 自动退占位文案——不炸收发主流程。 */
 async function handleLocalVlm(req: Request): Promise<Response> {
   let body: Record<string, any> = {};
@@ -127,8 +128,13 @@ async function handleLocalVlm(req: Request): Promise<Response> {
     return Response.json({ error: 'bad json' }, { status: 400 });
   }
   const url = String(body.url || '').trim();
+  // v23 微信入站图：base64 dataURL（data:image/...;base64,...）或裸 base64（按 jpeg 兑底）
+  let b64 = String(body.b64 || '').trim();
+  if (b64 && !b64.startsWith('data:')) b64 = 'data:image/jpeg;base64,' + b64.replace(/^data:[^,]*,/, '');
   const prompt = String(body.prompt || '').trim().slice(0, 500) || '描述这张图片的内容';
-  if (!/^https?:\/\//i.test(url)) return Response.json({ error: 'bad url' }, { status: 400 });
+  const src = url || b64;
+  if (!src) return Response.json({ error: 'bad url' }, { status: 400 });
+  if (!/^https?:\/\//i.test(src) && !/^data:image\//i.test(src)) return Response.json({ error: 'bad url' }, { status: 400 });
   try {
     if (!zaiInstance) {
       const mod: any = await import('z-ai-web-dev-sdk');
@@ -141,7 +147,7 @@ async function handleLocalVlm(req: Request): Promise<Response> {
           role: 'user',
           content: [
             { type: 'text', text: prompt },
-            { type: 'image_url', image_url: { url } },
+            { type: 'image_url', image_url: { url: src } },
           ],
         },
       ],
@@ -315,7 +321,7 @@ async function materializeCore(supaUrl: string, supaKey: string, relayUrl: strin
     `var LOCAL_CONFIG_INJECT = ${JSON.stringify(readLocalConfig())};`,
     `var LOCAL_EMOTICONS_FILE_INJECT = ${JSON.stringify(readLocalEmoticonsFile())};`,
     WX_CLOUD_CORE,
-    'export { loadConfig, tick, tickFast, handleQqEvent, qqToken, writeHeartbeat, supaGetJson, supaPutJson, loadQqHistory, appendQqHistory, refreshQqWsLock, cloudSendActive };',
+    'export { loadConfig, tick, tickFast, handleQqEvent, qqToken, qqTokenReset, writeHeartbeat, supaGetJson, supaPutJson, loadQqHistory, appendQqHistory, refreshQqWsLock, cloudSendActive };',
   ].join('\n');
   const path = fileURLToPath(new URL(`./${CORE_PREFIX}${n}.mjs`, import.meta.url));
   writeFileSync(path, code);
@@ -483,7 +489,16 @@ async function connectQq(gen: number): Promise<void> {
     });
     if (!gwr.ok) {
       q.state = 'error';
-      q.lastError = `QQ 网关地址获取失败 ${gwr.status}`;
+      // v23 token 自愈：400/401/403 多半是平台侧把 token 挤过期（或凭证真失效）——清缓存
+      // 重取，下一轮 connectQq 拿新 token；凭证真错时 100016 直接浮出成 lastError（用户在
+      // 云端助手页看到「请核对 AppID/AppSecret」，不再永远「正在连接 QQ 平台…」）
+      const authish = gwr.status === 400 || gwr.status === 401 || gwr.status === 403;
+      if (authish) {
+        try { await rt.core.qqTokenReset(); } catch { /* 老核心没导出时忽略 */ }
+        q.lastError = `QQ 网关地址获取失败 ${gwr.status}（token 已重置待重试；若持续出现请核对 AppID/AppSecret）`;
+      } else {
+        q.lastError = `QQ 网关地址获取失败 ${gwr.status}`;
+      }
       scheduleReconnect(gen);
       return;
     }

@@ -102,7 +102,7 @@ function RoleRowList({
   );
 }
 
-/** 收缩区块外壳（v4 简约版「收缩选择」）：一行触发头 + 展开内容 */
+/** 收缩区块外壳（v4 简约版「收缩选择」；v23 毛玻璃胶囊统一）：一行触发头 + 展开内容 */
 function Fold({
   title,
   hint,
@@ -117,7 +117,7 @@ function Fold({
   defaultOpen?: boolean;
 }) {
   return (
-    <Collapsible defaultOpen={defaultOpen} className="rounded-[10px] bg-white dark:bg-[#1A1A1A]">
+    <Collapsible defaultOpen={defaultOpen} className="rounded-[16px] bg-white/60 ring-1 ring-white/60 backdrop-blur-2xl dark:bg-white/[0.07] dark:ring-white/[0.08]">
       <CollapsibleTrigger
         data-testid={testid}
         className="group flex w-full items-center justify-between gap-3 px-4 py-3 text-left active:bg-black/[0.03] dark:active:bg-white/[0.05]"
@@ -265,11 +265,11 @@ export function WeixinConnectPage({
   return (
     <div
       data-testid="wx-ilink-page"
-      className="absolute inset-0 z-20 flex h-full w-full flex-col bg-[#EDEDED] text-black dark:bg-[#111111] dark:text-white"
+      className="absolute inset-0 z-20 flex h-full w-full flex-col bg-[#F2F2F7] text-black dark:bg-[#111113] dark:text-white"
     >
-      {/* 顶栏（微信灰，同收藏/设置页；云端助手内嵌时省略——宿主导航已在） */}
+      {/* 顶栏（v23 毛玻璃统一底色；云端助手内嵌时省略——宿主导航已在） */}
       {!embedded && (
-        <div className="shrink-0 bg-[#EDEDED] pt-[54px] dark:bg-[#111111]">
+        <div className="shrink-0 bg-[#F2F2F7] pt-[54px] dark:bg-[#111113]">
           <div className="flex h-11 items-center px-2">
             <button type="button" aria-label="返回" data-testid="wx-ilink-back" onClick={onBack} className="flex items-center px-1 active:opacity-50">
               <ChevronLeft className="h-7 w-7" strokeWidth={2} />
@@ -292,7 +292,7 @@ export function WeixinConnectPage({
         <div className="min-h-0 flex-1 space-y-2 overflow-y-auto px-3 py-3 pb-10">
           {/* 云端未部署：一行提示 + 详情弹窗（v4 简约版；详情全在弹窗里） */}
           {cloudReady && !cloudDeployed ? (
-            <div data-testid="wx-ilink-cloud-banner" className="flex items-center gap-2 rounded-[10px] bg-[#FFF6DC] px-3.5 py-2.5 dark:bg-[#40361A]">
+            <div data-testid="wx-ilink-cloud-banner" className="flex items-center gap-2 rounded-[14px] bg-[#FFF3CD]/80 px-3.5 py-2.5 ring-1 ring-[#B77900]/15 backdrop-blur-xl dark:bg-[#40361A]/70 dark:ring-[#EBC76A]/15">
               <CloudOff className="h-4 w-4 shrink-0 text-[#B77900] dark:text-[#EBC76A]" strokeWidth={2} />
               <p className="min-w-0 flex-1 text-[12.5px] leading-[1.4] text-[#8A6A00] dark:text-[#EBC76A]">
                 云端未部署：TA 暂不会在真机微信上回复
@@ -335,8 +335,8 @@ export function WeixinConnectPage({
             )
           ) : null}
 
-          {/* 状态卡：绑定角色 + Bot ID + 连接时间（说明收进「说明」收缩区） */}
-          <div className="rounded-[10px] bg-white px-4 py-4 dark:bg-[#1A1A1A]">
+          {/* 状态卡：绑定角色 + Bot ID + 连接时间（说明收进「说明」收缩区；v23 毛玻璃胶囊卡） */}
+          <div className="rounded-[20px] bg-white/60 px-4 py-4 shadow-[0_8px_24px_rgba(17,24,39,0.06)] ring-1 ring-white/60 backdrop-blur-2xl dark:bg-white/[0.07] dark:ring-white/[0.08]">
             <div className="flex items-center gap-3">
               <WxAvatar src={boundAvatar} alt={boundName} size={54} />
               <div className="min-w-0 flex-1">
@@ -353,8 +353,8 @@ export function WeixinConnectPage({
             </div>
           </div>
 
-          {/* ===== 管理分组列表（v4 简约版：一张卡分行的 iOS 列表） ===== */}
-          <div className="divide-y divide-black/[0.05] rounded-[10px] bg-white dark:divide-white/[0.08] dark:bg-[#1A1A1A]">
+          {/* ===== 管理分组列表（v4 简约版一张卡分行；v23 毛玻璃胶囊卡） ===== */}
+          <div className="divide-y divide-black/[0.05] rounded-[20px] bg-white/60 shadow-[0_8px_24px_rgba(17,24,39,0.06)] ring-1 ring-white/60 backdrop-blur-2xl dark:divide-white/[0.08] dark:bg-white/[0.07] dark:ring-white/[0.08]">
             {/* 测试连接 */}
             <div className="flex items-center justify-between gap-3 px-4 py-3">
               <span className="text-[15.5px] font-medium">测试连接</span>
@@ -412,7 +412,7 @@ export function WeixinConnectPage({
           {cloudReady && cloudDeployed ? (
             <div
               data-testid="wx-ilink-cloud-banner"
-              className="flex items-center gap-2 rounded-[10px] bg-[#07C160]/[0.08] px-3.5 py-2.5 dark:bg-[#07C160]/[0.14]"
+              className="flex items-center gap-2 rounded-[14px] bg-[#07C160]/[0.08] px-3.5 py-2.5 ring-1 ring-[#07C160]/15 backdrop-blur-xl dark:bg-[#07C160]/[0.14]"
             >
               <Cloud className="h-[15px] w-[15px] shrink-0 text-[#07C160]" strokeWidth={2} />
               <p className="text-[12.5px] font-medium leading-[1.4] text-[#07C160]">
@@ -421,8 +421,8 @@ export function WeixinConnectPage({
             </div>
           ) : null}
 
-          {/* 说明卡（v4 简约版：一句话 + 收缩展开完整接入说明） */}
-          <div className="rounded-[10px] bg-white px-4 py-3.5 dark:bg-[#1A1A1A]">
+          {/* 说明卡（v4 简约版：一句话 + 收缩展开完整接入说明；v23 毛玻璃胶囊卡） */}
+          <div className="rounded-[20px] bg-white/60 px-4 py-3.5 shadow-[0_8px_24px_rgba(17,24,39,0.06)] ring-1 ring-white/60 backdrop-blur-2xl dark:bg-white/[0.07] dark:ring-white/[0.08]">
             <div className="flex items-center gap-2">
               <Bot className="h-[18px] w-[18px] text-[#07C160]" strokeWidth={2} />
               <span className="text-[15px] font-semibold">把 TA 带到你的真机微信上</span>
@@ -454,7 +454,7 @@ export function WeixinConnectPage({
             /* ===== 未部署云端 → 阻断接入（一行 + 详情弹窗） ===== */
             <div
               data-testid="wx-ilink-cloud-block"
-              className="flex items-center gap-2 rounded-[10px] bg-[#FFF6DC] px-3.5 py-3 dark:bg-[#40361A]"
+              className="flex items-center gap-2 rounded-[14px] bg-[#FFF3CD]/80 px-3.5 py-3 ring-1 ring-[#B77900]/15 backdrop-blur-xl dark:bg-[#40361A]/70 dark:ring-[#EBC76A]/15"
               role="alert"
             >
               <CloudOff className="h-[18px] w-[18px] shrink-0 text-[#B77900] dark:text-[#EBC76A]" strokeWidth={2} />
@@ -485,7 +485,7 @@ export function WeixinConnectPage({
                 type="button"
                 data-testid="wx-ilink-role-entry"
                 onClick={() => setRoleSheetOpen(true)}
-                className="flex w-full items-center justify-between gap-3 rounded-[10px] bg-white px-4 py-3.5 text-left active:bg-black/[0.03] dark:bg-[#1A1A1A] dark:active:bg-white/[0.05]"
+                className="flex w-full items-center justify-between gap-3 rounded-[20px] bg-white/60 px-4 py-3.5 text-left shadow-[0_8px_24px_rgba(17,24,39,0.06)] ring-1 ring-white/60 backdrop-blur-2xl active:bg-white/80 dark:bg-white/[0.07] dark:ring-white/[0.08] dark:active:bg-white/[0.1]"
               >
                 <span className="min-w-0 flex-1">
                   <span className="block text-[15.5px] font-medium">步骤一 · 选择角色</span>
@@ -497,7 +497,7 @@ export function WeixinConnectPage({
               </button>
 
               {/* 步骤二：用微信号扫码接入 */}
-              <div className="rounded-[10px] bg-white px-4 py-3.5 dark:bg-[#1A1A1A]">
+              <div className="rounded-[20px] bg-white/60 px-4 py-3.5 shadow-[0_8px_24px_rgba(17,24,39,0.06)] ring-1 ring-white/60 backdrop-blur-2xl dark:bg-white/[0.07] dark:ring-white/[0.08]">
                 <p className="text-[12.5px] font-semibold text-black/40 dark:text-white/40">步骤二 · 用微信号扫码</p>
                 {!picked ? (
                   <p className="mt-2 text-[13px] text-black/40 dark:text-white/40">先选一个角色，再获取二维码</p>
@@ -508,7 +508,7 @@ export function WeixinConnectPage({
                       data-testid="wx-ilink-qr-btn"
                       disabled={qrLoading}
                       onClick={() => void fetchQr()}
-                      className="flex h-[42px] w-full items-center justify-center gap-2 rounded-[10px] bg-[#07C160] text-[15px] font-medium text-white active:brightness-95 disabled:opacity-60"
+                      className="flex h-[42px] w-full items-center justify-center gap-2 rounded-full bg-[#07C160] text-[15px] font-medium text-white shadow-[0_6px_16px_rgba(7,193,96,0.3)] transition-all active:scale-[0.98] active:brightness-95 disabled:opacity-60"
                     >
                       {qrLoading ? <Loader2 className="h-[18px] w-[18px] animate-spin" strokeWidth={2} /> : null}
                       {qrLoading ? '正在获取二维码…' : `获取二维码（${displayNameOf(picked) || picked.name}）`}
@@ -554,7 +554,7 @@ export function WeixinConnectPage({
                           onChange={(e) => setPinInput(e.target.value.replace(/\D/g, '').slice(0, 8))}
                           placeholder="输入微信上显示的数字"
                           aria-label="微信校验数字"
-                          className="h-[40px] min-w-0 flex-1 rounded-[10px] bg-black/[0.04] px-3 text-center text-[16px] tracking-[0.2em] outline-none focus:bg-black/[0.06] dark:bg-white/[0.08] dark:focus:bg-white/[0.12]"
+                          className="h-[40px] min-w-0 flex-1 rounded-[14px] bg-white/50 px-3 text-center text-[16px] tracking-[0.2em] outline-none ring-1 ring-white/50 backdrop-blur-xl focus:bg-white/70 dark:bg-white/[0.08] dark:ring-white/[0.08] dark:focus:bg-white/[0.12]"
                         />
                         <button
                           type="button"
@@ -636,7 +636,7 @@ export function WeixinConnectPage({
           className="absolute inset-0 z-30 flex flex-col justify-end bg-black/40"
           onClick={() => setRoleSheetOpen(false)}
         >
-          <div className="max-h-[72%] overflow-y-auto rounded-t-[14px] bg-[#F7F7F7] px-4 pb-8 pt-4 dark:bg-[#1A1A1A]" onClick={(e) => e.stopPropagation()}>
+          <div className="max-h-[72%] overflow-y-auto rounded-t-[20px] bg-[#F2F2F7]/95 px-4 pb-8 pt-4 backdrop-blur-2xl dark:bg-[#1C1C1E]/95" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between">
               <span className="text-[16px] font-medium">步骤一 · 选择角色</span>
               <button
@@ -670,7 +670,7 @@ export function WeixinConnectPage({
           className="absolute inset-0 z-30 flex flex-col justify-end bg-black/40"
           onClick={() => setRebindOpen(false)}
         >
-          <div className="max-h-[72%] overflow-y-auto rounded-t-[14px] bg-[#F7F7F7] px-4 pb-8 pt-4 dark:bg-[#1A1A1A]" onClick={(e) => e.stopPropagation()}>
+          <div className="max-h-[72%] overflow-y-auto rounded-t-[20px] bg-[#F2F2F7]/95 px-4 pb-8 pt-4 backdrop-blur-2xl dark:bg-[#1C1C1E]/95" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between">
               <span className="text-[16px] font-medium">更换角色</span>
               <button

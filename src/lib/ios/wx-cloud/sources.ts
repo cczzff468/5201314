@@ -488,11 +488,33 @@ function extractText(msg) {
       return list[i].text_item.text.trim();
     }
   }
-  // 入站图片/表情包（type 2，AES 加密看不到内容）：占位让 AI 按语境回应（不整条丢弃）
+  // v23 入站语音：iLink 语音消息自带官方转写文本（voice_item.text）——直接当正文用，
+  // AI 真正听懂真机语音；没带转写的退占位（与图片占位同口径）。
+  for (var v3 = 0; v3 < list.length; v3++) {
+    if (list[v3] && list[v3].type === 3 && list[v3].voice_item) {
+      var vt = String(list[v3].voice_item.text || '').trim();
+      if (vt) return vt;
+      return '（对方发了一条语音，没有转写文本）';
+    }
+  }
+  // 入站图片/表情包（type 2，CDN 加密）：v23 起网关在线时会真下载解密识图（见 handleWxMsg），
+  // 拿不到描述时退占位让 AI 按语境回应（不整条丢弃）
   for (var k = 0; k < list.length; k++) {
     if (list[k] && list[k].type === 2) return '（对方发了一个表情包/图片，内容看不到）';
   }
   return '';
+}
+
+/** v23 入站图片项提取（item_list type 2 → image_item；微信一条消息一个 item）。
+ *  返回 image_item（含 media/aeskey/url 等）或 null。 */
+function extractWxImage(msg) {
+  try {
+    var list = (msg && msg.item_list) || [];
+    for (var i = 0; i < list.length; i++) {
+      if (list[i] && list[i].type === 2 && list[i].image_item) return list[i].image_item;
+    }
+  } catch (e) { /* 防御式 */ }
+  return null;
 }
 
 // ---- 真机微信出站净化（iLink 通道只能发文字；v4：大表情标记 → 经典表情代码） ----
@@ -708,6 +730,66 @@ function aesEcbEncrypt(u8, key) {
   }
   return out;
 }
+
+/** v23 AES-128-ECB 解密（入站图片：CDN 下载的密文 → 明文；PKCS7 剥除）。
+ *  逆变换与上方加密器同字节序（index = row + 4*col）：AddRoundKey(10) → [InvShiftRows →
+ *  InvSubBytes → AddRoundKey(rnd) → InvMixColumns]×rnd9..1 → InvShiftRows → InvSubBytes → AddRoundKey(0) */
+var AES_INV_SBOX = (function () {
+  var t = new Uint8Array(256);
+  for (var i = 0; i < 256; i++) t[AES_SBOX[i]] = i;
+  return t;
+})();
+function aes128DecryptBlock(block, rk) {
+  var s = new Uint8Array(16);
+  for (var i0 = 0; i0 < 16; i0++) s[i0] = block[i0] ^ rk[160 + i0];
+  for (var rnd = 9; rnd >= 1; rnd--) {
+    // InvShiftRows：行 r 右移 r（逆于加密的左移）
+    var t = new Uint8Array(16);
+    for (var r = 0; r < 4; r++) {
+      for (var c = 0; c < 4; c++) t[r + 4 * c] = s[r + 4 * ((c - r + 4) % 4)];
+    }
+    s = t;
+    // InvSubBytes
+    for (var j = 0; j < 16; j++) s[j] = AES_INV_SBOX[s[j]];
+    // AddRoundKey(rnd)
+    for (var k = 0; k < 16; k++) s[k] ^= rk[rnd * 16 + k];
+    // InvMixColumns（矩阵 [14,11,13,9; 9,14,11,13; 13,9,14,11; 11,13,9,14]）
+    var u = new Uint8Array(16);
+    for (var c2 = 0; c2 < 4; c2++) {
+      var a0 = s[4 * c2], a1 = s[4 * c2 + 1], a2 = s[4 * c2 + 2], a3 = s[4 * c2 + 3];
+      u[4 * c2] = gfMul2(a0, 14) ^ gfMul2(a1, 11) ^ gfMul2(a2, 13) ^ gfMul2(a3, 9);
+      u[4 * c2 + 1] = gfMul2(a0, 9) ^ gfMul2(a1, 14) ^ gfMul2(a2, 11) ^ gfMul2(a3, 13);
+      u[4 * c2 + 2] = gfMul2(a0, 13) ^ gfMul2(a1, 9) ^ gfMul2(a2, 14) ^ gfMul2(a3, 11);
+      u[4 * c2 + 3] = gfMul2(a0, 11) ^ gfMul2(a1, 13) ^ gfMul2(a2, 9) ^ gfMul2(a3, 14);
+    }
+    s = u;
+  }
+  var t2 = new Uint8Array(16);
+  for (var r2 = 0; r2 < 4; r2++) {
+    for (var c3 = 0; c3 < 4; c3++) t2[r2 + 4 * c3] = s[r2 + 4 * ((c3 - r2 + 4) % 4)];
+  }
+  s = t2;
+  for (var j2 = 0; j2 < 16; j2++) s[j2] = AES_INV_SBOX[s[j2]];
+  for (var k2 = 0; k2 < 16; k2++) s[k2] ^= rk[k2];
+  return s;
+}
+function aesEcbDecrypt(u8, key) {
+  if (!u8 || !u8.length || u8.length % 16 !== 0 || u8.length > 16 * 1024 * 1024) return null;
+  try {
+    var rk = aes128ExpandKey(key);
+    var out = new Uint8Array(u8.length);
+    for (var off = 0; off < u8.length; off += 16) {
+      out.set(aes128DecryptBlock(u8.subarray(off, off + 16), rk), off);
+    }
+    var pad = out[out.length - 1];
+    if (pad > 0 && pad <= 16 && out.length >= pad) {
+      var ok = true;
+      for (var p = out.length - pad; p < out.length; p++) if (out[p] !== pad) { ok = false; break; }
+      if (ok) return out.subarray(0, out.length - pad);
+    }
+    return out;
+  } catch (e) { return null; }
+}
 function cloudRandomBytes(n) {
   var u8 = new Uint8Array(n);
   if (typeof crypto !== 'undefined' && crypto.getRandomValues) crypto.getRandomValues(u8);
@@ -794,6 +876,74 @@ async function wxSendSticker(cfg, toUserId, contextToken, dataUrl) {
       message_state: 2,
       context_token: contextToken,
       item_list: [{ type: 2, image_item: { media: { encrypt_query_param: up.dl, aes_key: up.aesB64, encrypt_type: 1 }, mid_size: up.midSize } }],
+    },
+    base_info: BASE_INFO,
+  });
+  return true;
+}
+
+/** v23 上传一个语音文件（silk 字节；getuploadurl media_type=4=VOICE，同图片加密链）。
+ *  返回 { dl, midSize, aesB64 } 或 null（任一步失败调用方降级文字）。 */
+async function wxUploadVoiceFile(cfg, toUserId, silkBytes) {
+  try {
+    if (!silkBytes || !silkBytes.length || silkBytes.length > 2 * 1024 * 1024) return null;
+    var rawfilemd5 = md5Hex(silkBytes);
+    var filekey = cloudBytesToHex(cloudRandomBytes(16));
+    var aesKey = cloudRandomBytes(16);
+    var ciphertext = aesEcbEncrypt(silkBytes, aesKey);
+    var up = await ilinkCall('/ilink/bot/getuploadurl', cfg.wechat.botToken, {
+      filekey: filekey,
+      media_type: 4,
+      to_user_id: toUserId,
+      rawsize: silkBytes.length,
+      rawfilemd5: rawfilemd5,
+      filesize: ciphertext.length,
+      no_need_thumb: true,
+      aeskey: cloudBytesToHex(aesKey),
+      base_info: BASE_INFO,
+    });
+    var full = String((up && up.upload_full_url) || '').trim();
+    var param = String((up && up.upload_param) || '').trim();
+    if (!full && !param) return null;
+    var cdnUrl = full || (WX_CDN_BASE + '/upload?encrypted_query_param=' + encodeURIComponent(param) + '&filekey=' + encodeURIComponent(filekey));
+    var r = await fetch(cdnUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/octet-stream' },
+      body: ciphertext,
+      signal: AbortSignal.timeout(30000),
+    });
+    if (!r.ok) return null;
+    var dl = r.headers.get('x-encrypted-param');
+    if (!dl) return null;
+    var hexKey = cloudBytesToHex(aesKey);
+    var aesB64 = (typeof btoa === 'function') ? btoa(hexKey) : Buffer.from(hexKey).toString('base64');
+    return { dl: dl, midSize: ciphertext.length, aesB64: aesB64 };
+  } catch (e) { return null; }
+}
+
+/** v23 发一条语音消息（item_list type 3 voice_item：encode_type 6=silk + playtime +
+ *  sample_rate；media 同图片加密链）。失败返回 false（调用方降级文字）。 */
+async function wxSendVoice(cfg, toUserId, contextToken, silk, playtimeMs, sampleRate) {
+  var up = await wxUploadVoiceFile(cfg, toUserId, silk);
+  if (!up) return false;
+  await ilinkCall('/ilink/bot/sendmessage', cfg.wechat.botToken, {
+    msg: {
+      from_user_id: '',
+      to_user_id: toUserId,
+      client_id: Date.now() + '-' + Math.random().toString(36).slice(2),
+      message_type: 2,
+      message_state: 2,
+      context_token: contextToken,
+      item_list: [{
+        type: 3,
+        voice_item: {
+          media: { encrypt_query_param: up.dl, aes_key: up.aesB64, encrypt_type: 1 },
+          encode_type: 6,
+          playtime: Math.max(500, Math.round(playtimeMs || 1000)),
+          sample_rate: Number(sampleRate) || 24000,
+          bits_per_sample: 16,
+        },
+      }],
     },
     base_info: BASE_INFO,
   });
@@ -1065,6 +1215,16 @@ async function handleWxMsg(cfg, msg) {
   var text = extractText(msg);
   if (!text || !msg.from_user_id || !msg.context_token) return false;
   if (msg.from_user_id === cfg.wechat.botId) return false;
+  // v23 入站图片识图（机主定调「真机收图 → base64 → vision 多模态 → 带图理解回复」）：
+  // 网关在线（VLM_LOCAL_URL）时把 CDN 密文图下载解密 → base64 → z-ai 多模态转描述，
+  // 占位盲区换成真内容（AI 真正看得到图）；失败/纯云端模式退占位（收发不受影响）
+  if (text === '（对方发了一个表情包/图片，内容看不到）') {
+    var wimg = extractWxImage(msg);
+    if (wimg) {
+      var wdesc = await describeWxImage(wimg);
+      if (wdesc) text = '（对方发的图片内容：' + wdesc + '）';
+    }
+  }
   // v16 主动消息收件凭据：记住最近一次会话的 from_user_id + context_token（站内「主动发消息」
   // 引擎触发 send-active 时用；iLink 主动发送没有独立接口，只能复用会话上下文——新鲜度自管）
   noteWxLastCtx(msg.from_user_id, msg.context_token);
@@ -1124,6 +1284,13 @@ async function handleWxMsg(cfg, msg) {
           '。主人让你发表情包、要抱抱蹭蹭逗TA开心时【必须发】——明确点名要表情包的那条回复里一定要带 [表情包:名字] 标记（可以先回一句文字再跟标记），不许只回文字、不许装傻；平时正常聊天不必每次都发。';
       }
     }
+    // v23 微信语音条能力（机主定调「AI 回复直接合成语音条发到真机微信」）：合成可用
+    //（网关本地 TTS 零配置 / 用户自配 TTS / 聊天 API 兑底任一路）时教学 [语音:] 标记
+    //（与 QQ 同款）；对方明确要语音时该轮也会直接升级语音条（见下方发送段）。
+    var wxTtsOk = !!(TTS_LOCAL_URL || (cfg.wechat && cfg.wechat.tts && cfg.wechat.tts.baseUrl && cfg.wechat.tts.apiKey) || (cfg.llm && cfg.llm.baseUrl && cfg.llm.apiKey));
+    if (wxTtsOk) {
+      system += '\n【语音条能力】你可以发语音：对方让你发语音/说给TA听/用语音回复时，把要说的话写进标记 [语音:想说的话]（单独占一行，可以多条多个标记），系统会把它们合成真正的语音条发给对方——想发语音就带标记，不要只口头答应「我给你发条语音」却什么都不做，更不要说「发不了语音」。';
+    }
     // v16 微信引用功能下线（机主定调）：历史不再加 [M数字] 门牌号、[引用:编号] 标记直接剥除不转引用行；
     // 上下文用纯 user/assistant 消息（QQ 通道保留引用，未受影响）。世界书 user 位仍包裹本轮消息
     // （v15：用带被引内容的 llmText——对方引用着旧消息提问时 AI 看得到被引的那句）
@@ -1152,9 +1319,34 @@ async function handleWxMsg(cfg, msg) {
     // v16：引用功能下线——[引用:编号] 裸正剥除不转引用行；[照片:描述] 等标记照旧静默剥除。
     var wxNoQuote = String(stripThinkBlocks(reply)).replace(/[\[【]\s*引用\s*[:：]\s*M?\s*\d{1,5}\s*[\]】]/g, '');
     var wxEmoScan = collectCloudStickers(wxNoQuote, wxEmoList, false);
-    var cleaned = stripRichMarkers(wxEmoScan.text);
+    // v23 语音标记先行切走（同 QQ：[语音:内容] → 合成真语音条强制发）；对方明确要语音
+    //（无标记时）首段直接升级；合成失败的段文字补回（保底不丢）
+    var wxVoiceScan = collectVoiceMarkers(wxEmoScan.text);
+    var cleaned = stripRichMarkers(wxVoiceScan.text);
     var segs = cloudReplySegments(cleaned, cfg.wechat.multi !== false);
-    if (!segs.length && !wxEmoScan.hits.length) segs = [WX_EMOJI_FALLBACKS[Math.floor(Math.random() * WX_EMOJI_FALLBACKS.length)]];
+    if (!segs.length && !wxEmoScan.hits.length && !wxVoiceScan.clips.length) segs = [WX_EMOJI_FALLBACKS[Math.floor(Math.random() * WX_EMOJI_FALLBACKS.length)]];
+    // v23 微信语音条合成（≤2 条；TTS→wav→silk，成功后经 iLink type 3 voice_item 发真语音）
+    var wxVoiceClips = [];
+    if (wxTtsOk && wxVoiceScan.clips.length > 0) {
+      for (var wvi = 0; wvi < wxVoiceScan.clips.length && wxVoiceClips.length < 2; wvi++) {
+        var wvp = splitVoicePieces(wxVoiceScan.clips[wvi]);
+        if (wvp.rest) segs.push(wvp.rest);
+        for (var wvj = 0; wvj < wvp.pieces.length && wxVoiceClips.length < 2; wvj++) {
+          var wPiece = wvp.pieces[wvj];
+          if (!wPiece) continue;
+          var wvs = await synthesizeVoiceSilk(cfg, wPiece, cfg.wechat && cfg.wechat.tts);
+          if (wvs) wxVoiceClips.push({ silk: wvs.silk, durMs: wvs.durMs, rate: wvs.rate, text: wPiece, sent: false });
+          else segs.push(wPiece); // 合成失败：文字补回（保底不丢）
+        }
+      }
+    } else if (wxTtsOk && wxVoiceScan.clips.length === 0 && isVoiceRequested(text) && segs.length) {
+      // 对方明确要语音（无标记）：首段直接升级语音条（合成失败维持文字）
+      var wSeg = segs[0];
+      segs = segs.slice(1);
+      var wvs2 = await synthesizeVoiceSilk(cfg, wSeg, cfg.wechat && cfg.wechat.tts);
+      if (wvs2) wxVoiceClips.push({ silk: wvs2.silk, durMs: wvs2.durMs, rate: wvs2.rate, text: wSeg, sent: false });
+      else segs.unshift(wSeg);
+    }
     for (var ssi = 0; ssi < segs.length; ssi++) segs[ssi] = sanitizeWxOutText(cfg, segs[ssi]);
     // v14 条数上限 8 → 30（机主定调「3~30 尽量多发」）：超出并入末条（不丢内容）；
     // 逐条连发 + 真人节奏间隔（正在输入保活持续到发完）
@@ -1162,6 +1354,20 @@ async function handleWxMsg(cfg, msg) {
       var head = segs.slice(0, 29);
       head.push(segs.slice(29).join('\n'));
       segs = head;
+    }
+    // v23 发送顺序：语音条先行（失败该条文字补回）→ 文字连发 → 表情图（与 QQ 同构）
+    for (var wsi2 = 0; wsi2 < wxVoiceClips.length; wsi2++) {
+      try {
+        var wSent = await wxSendVoice(cfg, msg.from_user_id, msg.context_token, wxVoiceClips[wsi2].silk, wxVoiceClips[wsi2].durMs, wxVoiceClips[wsi2].rate);
+        if (wSent) {
+          wxVoiceClips[wsi2].sent = true;
+          await coreSleep(400 + Math.floor(Math.random() * 300));
+        } else {
+          segs.push(wxVoiceClips[wsi2].text); // 发送失败：文字补回
+        }
+      } catch (wve) {
+        segs.push(wxVoiceClips[wsi2].text);
+      }
     }
     for (var gi = 0; gi < segs.length; gi++) {
       await sendWxText(cfg, msg.from_user_id, msg.context_token, segs[gi]);
@@ -1186,8 +1392,13 @@ async function handleWxMsg(cfg, msg) {
       }
     }
     if (WX_MSG_ERR_AT && Date.now() - WX_MSG_ERR_AT > 600000) WX_MSG_ERR = '';
-    // v13 历史逐段落库（网站拉取展示 = 连发多条气泡，与站内聊天页一致）；v14 表情包存档行
+    // v13 历史逐段落库（网站拉取展示 = 连发多条气泡，与站内聊天页一致）；v14 表情包存档行；
+    // v23 语音条 [语音] 摘要行（与 QQ 同构）
     var histAdd = [{ role: 'user', content: text.slice(0, 500), ts: Date.now() }];
+    for (var wvx = 0; wvx < wxVoiceClips.length; wvx++) {
+      if (!wxVoiceClips[wvx].sent) continue;
+      histAdd.push({ role: 'assistant', content: ('[语音] ' + wxVoiceClips[wvx].text).slice(0, 500), ts: Date.now() });
+    }
     for (var hi = 0; hi < segs.length; hi++) {
       histAdd.push({ role: 'assistant', content: segs[hi].slice(0, 500), ts: Date.now() });
     }
@@ -1326,6 +1537,15 @@ async function qqToken(cfg) {
     }
   }
   throw new Error('QQ token 获取失败 ' + (lastStatus || '') + ' ' + lastErr.slice(0, 80));
+}
+
+/** v23 QQ token 缓存强制失效（网关导出）：网关取 QQ 网关地址收到 400/401/403（多半是
+ *  平台侧把 token 滚动挤过期）时清缓存重取——下一轮 connectQq 拿到新 token（凭证真失效
+ *  时 100016 会如实浮出成 lastError，用户在云端助手页直接看到「请核对 AppID/AppSecret」，
+ *  不再永远「正在连接 QQ 平台」）。 */
+function qqTokenReset() {
+  QQ_TOKEN = '';
+  QQ_TOKEN_AT = 0;
 }
 
 /** v19 QQ token 失效自愈：多个持有方（本网关 / 云端函数 / 手动测试脚本）各自调
@@ -1575,18 +1795,11 @@ async function silkEncode(u8) {
   }
 }
 
-/** 云端 TTS（OpenAI 兼容 /audio/speech，只要 wav）→ silk → QQ 原生语音条。失败返回 null（降级文字）。
- *  v17 开箱兑底：没配 TTS 且网关不在线（TTS_LOCAL_URL 只在 im-gateway 注入）时，用聊天
- *  API（cfg.llm，OpenAI 兼容 /audio/speech）试一次合成——服务商不支持该端点就 404/400
- *  静默回退文字；零配置用户在云端的 QQ 语音从「永远发不了」变成「API 支持 TTS 就能发」。
- *  v19 url 制：silk 字节不再塞 base64（官方接口必拒）——托管成公网 URL（网关媒体端点 /
- *  云端函数公桶直写）后交给 QQ 拉取；托管不可用返回 null（降级文字，行为与旧版一致）。 */
-async function synthesizeQqVoice(cfg, text) {
-  var tts = cfg.qq && cfg.qq.tts;
-  // v13：网关本地合成端点（im-gateway 注入，z-ai SDK 合成 wav）优先于用户自配 TTS——
-  // 网关在线（秒回加速）时 QQ 语音条零配置可用；云端（Deno）没注入则走 cfg.qq.tts
+/** v23 TTS → wav → silk（微信/QQ 共用核心）：三路合成源——网关本地端点（TTS_LOCAL_URL，
+ *  z-ai SDK 零配置）→ 用户自配 TTS（OpenAI 兼容 /audio/speech）→ 聊天 API 兜底（v17）。
+ *  返回 { silk, rate, durMs } 或 null（任一步失败调用方降级文字）。 */
+async function synthesizeVoiceSilk(cfg, text, tts) {
   var localUrl = TTS_LOCAL_URL;
-  // v17：聊天 API 兜底（用户没配 TTS 时——绝大多数用户只有一份 OpenAI 兼容聊天 API）
   var llm = cfg.llm || {};
   var viaLlm = !localUrl && !(tts && tts.baseUrl && tts.apiKey) && !!(llm.baseUrl && llm.apiKey);
   if (!localUrl && !(tts && tts.baseUrl && tts.apiKey) && !viaLlm) return null;
@@ -1600,7 +1813,6 @@ async function synthesizeQqVoice(cfg, text) {
         signal: AbortSignal.timeout(30000),
       });
     } else if (viaLlm) {
-      // v17：聊天 API 同款 OpenAI 兼容 /audio/speech（语音字段沿用用户 TTS 配置，没配用 tts-1/alloy）
       var lb = String(llm.baseUrl).replace(/\/+$/, '');
       var lurl = /\/audio\/speech$/.test(lb) ? lb : lb + '/audio/speech';
       r = await fetch(lurl, {
@@ -1622,19 +1834,39 @@ async function synthesizeQqVoice(cfg, text) {
     if (!r.ok) return null;
     var buf = new Uint8Array(await r.arrayBuffer());
     if (buf.length < 44 || String.fromCharCode(buf[0], buf[1], buf[2], buf[3]) !== 'RIFF') return null;
+    // WAV 头解析真实采样率（voice_item.sample_rate 要声明真实值——报错率会变速变调）
+    var rate = 24000;
+    try {
+      if (buf.length > 44) {
+        var wv = buf[24] | (buf[25] << 8) | (buf[26] << 16) | (buf[27] << 24);
+        if (wv > 4000 && wv < 100000) rate = wv;
+      }
+    } catch (e2) { /* 头解析失败按默认 */ }
     var silk = await silkEncode(buf);
     if (!silk) return null;
-    // v19 url 制：silk 字节托管成 QQ 可拉取的公网 URL（网关媒体端点 / 云端公桶直写）。
-    // 任一路都托管不了（网关不在线且无 SUPA 凭证）→ null 降级文字，行为与旧版一致。
-    var bin = '';
-    for (var i = 0; i < silk.length; i += 32768) bin += String.fromCharCode.apply(null, silk.subarray(i, i + 32768));
-    var b64 = (typeof btoa === 'function') ? btoa(bin) : Buffer.from(silk).toString('base64');
-    var mediaUrl = await qqHostMedia(b64, 'silk');
-    if (!mediaUrl) mediaUrl = await qqHostMediaCloud(b64, 'silk');
-    if (!mediaUrl) return null;
-    var dur = Math.max(1, Math.round(text.length / 4));
-    return { url: mediaUrl, dur: dur };
+    var durMs = Math.max(800, text.length * 250);
+    return { silk: silk, rate: rate, durMs: durMs };
   } catch (e) { return null; }
+}
+
+/** 云端 TTS（OpenAI 兼容 /audio/speech，只要 wav）→ silk → QQ 原生语音条。失败返回 null（降级文字）。
+ *  v17 开箱兑底：没配 TTS 且网关不在线（TTS_LOCAL_URL 只在 im-gateway 注入）时，用聊天
+ *  API（cfg.llm，OpenAI 兼容 /audio/speech）试一次合成——服务商不支持该端点就 404/400
+ *  静默回退文字；零配置用户在云端的 QQ 语音从「永远发不了」变成「API 支持 TTS 就能发」。
+ *  v19 url 制：silk 字节不再塞 base64（官方接口必拒）——托管成公网 URL（网关媒体端点 /
+ *  云端函数公桶直写）后交给 QQ 拉取；托管不可用返回 null（降级文字，行为与旧版一致）。
+ *  v23：合成核心拆到 synthesizeVoiceSilk（与微信语音共用），本函数只做 QQ 的 url 托管。 */
+async function synthesizeQqVoice(cfg, text) {
+  var s = await synthesizeVoiceSilk(cfg, text, cfg.qq && cfg.qq.tts);
+  if (!s) return null;
+  var bin = '';
+  for (var i = 0; i < s.silk.length; i += 32768) bin += String.fromCharCode.apply(null, s.silk.subarray(i, i + 32768));
+  var b64 = (typeof btoa === 'function') ? btoa(bin) : Buffer.from(s.silk).toString('base64');
+  var mediaUrl = await qqHostMedia(b64, 'silk');
+  if (!mediaUrl) mediaUrl = await qqHostMediaCloud(b64, 'silk');
+  if (!mediaUrl) return null;
+  var dur = Math.max(1, Math.round(text.length / 4));
+  return { url: mediaUrl, dur: dur };
 }
 
 // ---- v15 真机同源增强：入站引用 / 语音分段 / 照片生成 / QQ 定时主动消息 ----
@@ -1990,6 +2222,86 @@ async function describeQqImage(url) {
     if (!r.ok) return null;
     var j = null;
     try { j = await r.json(); } catch (e) { j = null; }
+    var desc = j && typeof j.desc === 'string' ? j.desc.trim() : '';
+    return desc ? desc.slice(0, 300) : null;
+  } catch (e) { return null; }
+}
+
+/** v23 入站图片媒体密钥解析（两种编码都可能出现，官方文档口径）：
+ *  - image_item.aeskey：32 个 hex 字符（入站解密优先用它）→ hex 解码 16 字节
+ *  - media.aes_key：base64 —— 解出 16 字节直接用；解出 32 个 hex 字符再 hex 解码（官方 SDK
+ *    对齐编码：base64(hex 文本)） */
+function wxParseAesKey(imageItem) {
+  try {
+    var it = imageItem || {};
+    var hexRe = /^[0-9a-fA-F]{32}$/;
+    if (it.aeskey && hexRe.test(String(it.aeskey))) {
+      var hx = String(it.aeskey);
+      var out = new Uint8Array(16);
+      for (var i = 0; i < 16; i++) out[i] = parseInt(hx.substr(i * 2, 2), 16);
+      return out;
+    }
+    var media = it.media || {};
+    if (media.aes_key) {
+      var raw = cloudB64ToBytes(String(media.aes_key));
+      if (raw.length === 16) return raw;
+      if (raw.length === 32) {
+        var s = '';
+        for (var b = 0; b < 32; b++) s += (raw[b] < 16 ? '0' : '') + raw[b].toString(16);
+        if (hexRe.test(s)) {
+          var out2 = new Uint8Array(16);
+          for (var i2 = 0; i2 < 16; i2++) out2[i2] = parseInt(s.substr(i2 * 2, 2), 16);
+          return out2;
+        }
+      }
+    }
+  } catch (e) { /* 密钥解析失败 → 无密钥路径 */ }
+  return null;
+}
+
+/** v23 入站图片识图（微信）：image_item → CDN 下载（full_url 优先 / download 拼 URL）→
+ *  AES-128-ECB 解密（无密钥按协议直接下明文）→ base64 → 网关本地 VLM（z-ai 多模态）转描述。
+ *  任一步失败返回 null（调用方退占位文案，不影响收发主流程）。 */
+async function describeWxImage(imageItem) {
+  if (!VLM_LOCAL_URL || !imageItem) return null;
+  try {
+    var media = imageItem.media || {};
+    var param = String(media.encrypt_query_param || imageItem.encrypt_query_param || '');
+    var full = String(media.full_url || imageItem.full_url || imageItem.url || '');
+    if (!param && !full) return null;
+    var dl = (/^https?:\/\//i.test(full) && !full.match(/\/download\?/))
+      ? full
+      : (WX_CDN_BASE + '/download?encrypted_query_param=' + encodeURIComponent(param));
+    var r = await fetch(dl, { signal: AbortSignal.timeout(30000) });
+    if (!r.ok) return null;
+    var buf = new Uint8Array(await r.arrayBuffer());
+    if (!buf.length || buf.length > 8 * 1024 * 1024) return null;
+    var key = wxParseAesKey(imageItem);
+    var plain = key ? (aesEcbDecrypt(buf, key) || buf) : buf;
+    // 图片魔数嗅探（jpg/png/gif/webp）：解密结果不是图（密钥/格式不符）时换原始字节再试一次
+    function isImg(u8) {
+      if (u8.length < 12) return false;
+      if (u8[0] === 0xff && u8[1] === 0xd8) return true; // jpg
+      if (u8[0] === 0x89 && u8[1] === 0x50) return true; // png
+      if (u8[0] === 0x47 && u8[1] === 0x49) return true; // gif
+      if (u8[8] === 0x57 && u8[9] === 0x45) return true; // webp（RIFF....WEBP）
+      return false;
+    }
+    if (!isImg(plain) && isImg(buf)) plain = buf;
+    if (!isImg(plain)) return null;
+    var b64 = cloudBytesToB64(plain);
+    var rr = await fetch(VLM_LOCAL_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        b64: 'data:image/jpeg;base64,' + b64,
+        prompt: '用一到两句中文描述这张图片：有什么人/物/动作/场景/情绪，图里若有文字也读出来。给聊天对方看懂用，不要客套。',
+      }),
+      signal: AbortSignal.timeout(45000),
+    });
+    if (!rr.ok) return null;
+    var j = null;
+    try { j = await rr.json(); } catch (e) { j = null; }
     var desc = j && typeof j.desc === 'string' ? j.desc.trim() : '';
     return desc ? desc.slice(0, 300) : null;
   } catch (e) { return null; }

@@ -117,7 +117,7 @@ function Fold({
   testid?: string;
 }) {
   return (
-    <Collapsible className="rounded-[14px] bg-white dark:bg-[#1B1C1F]">
+    <Collapsible className="rounded-[16px] bg-white/60 ring-1 ring-white/60 backdrop-blur-2xl dark:bg-white/[0.07] dark:ring-white/[0.08]">
       <CollapsibleTrigger
         data-testid={testid}
         className="group flex w-full items-center justify-between gap-3 px-4 py-3 text-left active:bg-black/[0.03] dark:active:bg-white/[0.05]"
@@ -150,8 +150,8 @@ function BannerLine({
   return (
     <div
       data-testid={testid}
-      className={`flex items-center gap-2 rounded-[14px] px-3.5 py-2.5 ${
-        warn ? 'bg-[#FFF4D6] dark:bg-[#3B3113]' : 'bg-[#34C759]/10'
+      className={`flex items-center gap-2 rounded-[14px] px-3.5 py-2.5 ring-1 backdrop-blur-xl ${
+        warn ? 'bg-[#FFF3CD]/80 ring-[#C77700]/15 dark:bg-[#3B3113]/70 dark:ring-[#F0C24B]/15' : 'bg-[#34C759]/10 ring-[#34C759]/15'
       }`}
     >
       {warn ? (
@@ -344,11 +344,11 @@ export function QqConnectPage({
   return (
     <div
       data-testid="qq-bot-page"
-      className={`relative flex h-full flex-col bg-[#F6F7F9] dark:bg-[#111214]${embedded ? '' : ' pt-[54px]'}`}
+      className={`relative flex h-full flex-col bg-[#F2F2F7] dark:bg-[#111113]${embedded ? '' : ' pt-[54px]'}`}
     >
-      {/* 顶部导航（QQ 子页风格：返回 + 居中标题；云端助手内嵌时省略——宿主导航已在） */}
+      {/* 顶部导航（v23 毛玻璃统一底色；云端助手内嵌时省略——宿主导航已在） */}
       {!embedded && (
-        <div className="relative flex h-12 shrink-0 items-center bg-[#F6F7F9] px-3 dark:bg-[#111214]">
+        <div className="relative flex h-12 shrink-0 items-center bg-[#F2F2F7] px-3 dark:bg-[#111113]">
           <button type="button" aria-label="返回" onClick={onBack} className="-ml-1 rounded-full p-1.5 active:bg-black/5 dark:active:bg-white/10">
             <ChevronLeft className="h-6 w-6" strokeWidth={2.2} />
           </button>
@@ -386,7 +386,7 @@ export function QqConnectPage({
                 type="button"
                 data-testid="qq-bot-role-entry"
                 onClick={() => setRoleSheetOpen(true)}
-                className="mt-1 flex w-full items-center justify-between gap-3 rounded-[14px] bg-white px-4 py-3.5 text-left active:bg-black/[0.03] dark:bg-[#1B1C1F] dark:active:bg-white/[0.06]"
+                className="mt-1 flex w-full items-center justify-between gap-3 rounded-[20px] bg-white/60 px-4 py-3.5 text-left shadow-[0_8px_24px_rgba(17,24,39,0.06)] ring-1 ring-white/60 backdrop-blur-2xl active:bg-white/80 dark:bg-white/[0.07] dark:ring-white/[0.08] dark:active:bg-white/[0.1]"
               >
                 <span className="min-w-0 flex-1">
                   <span className="block text-[15px] font-medium">步骤一 · 选择角色</span>
@@ -396,7 +396,7 @@ export function QqConnectPage({
               </button>
             ) : (
               /* 已选角色行（步骤二期间常驻展示，点击可换） */
-              <div className="mt-1 flex items-center gap-3 rounded-[14px] bg-white px-4 py-3 dark:bg-[#1B1C1F]">
+              <div className="mt-1 flex items-center gap-3 rounded-[20px] bg-white/60 px-4 py-3 shadow-[0_8px_24px_rgba(17,24,39,0.06)] ring-1 ring-white/60 backdrop-blur-2xl dark:bg-white/[0.07] dark:ring-white/[0.08]">
                 <QqAvatar src={avatarFor(picked, 'qq')} alt={displayNameOf(picked) || picked.name} size={40} />
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-[15px] font-medium leading-tight">{displayNameOf(picked) || picked.name}</p>
@@ -413,7 +413,7 @@ export function QqConnectPage({
             )}
 
             {/* ===== 段一 · 接入介绍卡（v15：按机主反馈顺序下移——步骤一在上，介绍在下） ===== */}
-            <div className="mt-1 rounded-[14px] bg-white px-4 py-3.5 dark:bg-[#1B1C1F]">
+            <div className="mt-1 rounded-[20px] bg-white/60 px-4 py-3.5 shadow-[0_8px_24px_rgba(17,24,39,0.06)] ring-1 ring-white/60 backdrop-blur-2xl dark:bg-white/[0.07] dark:ring-white/[0.08]">
               <div className="flex items-center gap-3">
                 <span className="grid h-10 w-10 shrink-0 place-items-center rounded-[10px] bg-[#0099FF]/10 text-[#0099FF]" aria-hidden="true">
                   <Bot className="h-[22px] w-[22px]" strokeWidth={2} />
@@ -461,8 +461,10 @@ export function QqConnectPage({
                 aria-selected={addTab === 'scan'}
                 data-testid="qq-bot-tab-scan"
                 onClick={() => setAddTab('scan')}
-                className={`flex h-9 flex-1 items-center justify-center rounded-full text-[13.5px] font-medium active:opacity-70 ${
-                  addTab === 'scan' ? 'bg-[#0099FF] text-white' : 'bg-black/[0.04] text-black/50 dark:bg-white/[0.06] dark:text-white/50'
+                className={`flex h-9 flex-1 items-center justify-center rounded-full text-[13.5px] font-medium ring-1 backdrop-blur-xl transition-all active:scale-[0.98] active:opacity-70 ${
+                  addTab === 'scan'
+                    ? 'bg-[#0099FF] text-white shadow-[0_4px_14px_rgba(0,153,255,0.3)] ring-[#0099FF]/30'
+                    : 'bg-white/60 text-black/50 ring-white/60 dark:bg-white/[0.08] dark:text-white/50 dark:ring-white/[0.08]'
                 }`}
               >
                 扫码连接
@@ -473,8 +475,10 @@ export function QqConnectPage({
                 aria-selected={addTab === 'manual'}
                 data-testid="qq-bot-tab-cred"
                 onClick={() => setAddTab('manual')}
-                className={`flex h-9 flex-1 items-center justify-center rounded-full text-[13.5px] font-medium active:opacity-70 ${
-                  addTab === 'manual' ? 'bg-[#0099FF] text-white' : 'bg-black/[0.04] text-black/50 dark:bg-white/[0.06] dark:text-white/50'
+                className={`flex h-9 flex-1 items-center justify-center rounded-full text-[13.5px] font-medium ring-1 backdrop-blur-xl transition-all active:scale-[0.98] active:opacity-70 ${
+                  addTab === 'manual'
+                    ? 'bg-[#0099FF] text-white shadow-[0_4px_14px_rgba(0,153,255,0.3)] ring-[#0099FF]/30'
+                    : 'bg-white/60 text-black/50 ring-white/60 dark:bg-white/[0.08] dark:text-white/50 dark:ring-white/[0.08]'
                 }`}
               >
                 填写凭证
@@ -483,7 +487,7 @@ export function QqConnectPage({
 
             {addTab === 'scan' ? (
               /* 扫码连接 tab（v6 官方协议）：二维码 + 状态行 + 刷新 */
-              <div className="mt-2.5 rounded-[14px] bg-white px-4 py-4 dark:bg-[#1B1C1F]" data-testid="qq-bot-qr-card">
+              <div className="mt-2.5 rounded-[20px] bg-white/60 px-4 py-4 shadow-[0_8px_24px_rgba(17,24,39,0.06)] ring-1 ring-white/60 backdrop-blur-2xl dark:bg-white/[0.07] dark:ring-white/[0.08]" data-testid="qq-bot-qr-card">
                 <p className="text-center text-[15px] font-medium text-black/85 dark:text-white/90">QQ 扫码连接</p>
                 {/* 二维码（白底码牌）：starting 无码转圈 / saving 盖半透明蒙层转圈 */}
                 <div
@@ -551,13 +555,13 @@ export function QqConnectPage({
               </div>
             ) : (
               /* 填写凭证 tab：一行去哪找 + AppID/AppSecret 输入 + 测试并接入（扫码 tab 下不显示凭证输入） */
-              <div className="mt-2.5 rounded-[14px] bg-white px-4 py-4 dark:bg-[#1B1C1F]">
+              <div className="mt-2.5 rounded-[20px] bg-white/60 px-4 py-4 shadow-[0_8px_24px_rgba(17,24,39,0.06)] ring-1 ring-white/60 backdrop-blur-2xl dark:bg-white/[0.07] dark:ring-white/[0.08]">
                 <p className="text-[12px] leading-relaxed text-black/40 dark:text-white/40">
                   q.qq.com 控制台「开发设置」可查看 AppID 与 AppSecret（Secret 忘了可随时重置）
                 </p>
 
                 {/* 凭证输入（手动填写；官方扫码绑定不经此输入） */}
-                <div className="mt-3 overflow-hidden rounded-[14px] bg-black/[0.02] dark:bg-white/[0.04]">
+                <div className="mt-3 overflow-hidden rounded-[16px] bg-white/45 ring-1 ring-white/50 backdrop-blur-xl dark:bg-white/[0.06] dark:ring-white/[0.07]">
                   <div className="flex h-[56px] items-center gap-3 px-4">
                     <span className="w-[72px] shrink-0 text-[14px] text-black/45 dark:text-white/45">AppID</span>
                     <input
@@ -604,7 +608,7 @@ export function QqConnectPage({
                   data-testid="qq-bot-test"
                   disabled={testing}
                   onClick={() => runTest(appId, appSecret)}
-                  className="mt-4 flex h-[50px] w-full items-center justify-center gap-2 rounded-[13px] bg-[#0099FF] text-[16px] font-medium text-white shadow-[0_4px_12px_rgba(0,153,255,0.25)] active:opacity-80 disabled:opacity-60"
+                  className="mt-4 flex h-[50px] w-full items-center justify-center gap-2 rounded-full bg-[#0099FF] text-[16px] font-medium text-white shadow-[0_6px_18px_rgba(0,153,255,0.32)] transition-all active:scale-[0.98] active:opacity-80 disabled:opacity-60"
                 >
                   {testing && <Loader2 className="h-[18px] w-[18px] animate-spin" strokeWidth={2.4} aria-hidden="true" />}
                   {testing ? '正在测试连接…' : '测试并接入'}
@@ -618,7 +622,7 @@ export function QqConnectPage({
         ) : (
           <>
             {/* ===== 已连接状态卡：绑定角色（头像+名字）+ 机器人名 + 接入时间 + 已接入徽标 ===== */}
-            <div className="mt-1 flex items-center gap-3 rounded-[14px] bg-white px-4 py-4 dark:bg-[#1B1C1F]">
+            <div className="mt-1 flex items-center gap-3 rounded-[20px] bg-white/60 px-4 py-4 shadow-[0_8px_24px_rgba(17,24,39,0.06)] ring-1 ring-white/60 backdrop-blur-2xl dark:bg-white/[0.07] dark:ring-white/[0.08]">
               {login.boundContactId ? (
                 <QqAvatar src={boundAvatar} alt={boundName || '已绑定的角色'} size={52} />
               ) : (
@@ -667,7 +671,7 @@ export function QqConnectPage({
                 type="button"
                 data-testid="qq-bot-role-entry"
                 onClick={() => setRoleSheetOpen(true)}
-                className="mt-3 flex w-full items-center justify-between gap-3 rounded-[14px] bg-white px-4 py-3.5 text-left active:bg-black/[0.03] dark:bg-[#1B1C1F] dark:active:bg-white/[0.06]"
+                className="mt-3 flex w-full items-center justify-between gap-3 rounded-[20px] bg-white/60 px-4 py-3.5 text-left shadow-[0_8px_24px_rgba(17,24,39,0.06)] ring-1 ring-white/60 backdrop-blur-2xl dark:bg-white/[0.07] dark:ring-white/[0.08] active:bg-white/80 dark:active:bg-white/[0.1]"
               >
                 <span className="min-w-0 flex-1">
                   <span className="block text-[15px] font-medium">步骤二 · 选择角色</span>
@@ -678,7 +682,7 @@ export function QqConnectPage({
             ) : (
               <>
                 {/* ===== 管理分组列表（v7 简约版：一张卡分行的 iOS 列表） ===== */}
-                <div className="mt-3 divide-y divide-black/[0.05] overflow-hidden rounded-[14px] bg-white dark:divide-white/[0.08] dark:bg-[#1B1C1F]">
+                <div className="mt-3 divide-y divide-black/[0.05] overflow-hidden rounded-[20px] bg-white/60 shadow-[0_8px_24px_rgba(17,24,39,0.06)] ring-1 ring-white/60 backdrop-blur-2xl dark:bg-white/[0.07] dark:ring-white/[0.08] dark:divide-white/[0.08]">
                   {/* 云端验证凭证：新取凭证端点海外可达，本地两路都不通时由云端助手 verify-qq 代验 */}
                   {cloudDeployed ? (
                     <button
@@ -777,7 +781,7 @@ export function QqConnectPage({
           className="absolute inset-0 z-30 flex flex-col justify-end bg-black/40"
           onClick={() => setRoleSheetOpen(false)}
         >
-          <div className="max-h-[72%] overflow-y-auto rounded-t-[14px] bg-[#F6F7F9] px-4 pb-8 pt-4 dark:bg-[#1B1C1F]" onClick={(e) => e.stopPropagation()}>
+          <div className="max-h-[72%] overflow-y-auto rounded-t-[20px] bg-[#F2F2F7]/95 px-4 pb-8 pt-4 backdrop-blur-2xl dark:bg-[#1C1C1E]/95" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between">
               <span className="text-[16px] font-medium">{!login ? '步骤一 · 选择 AI 角色' : '选择角色'}</span>
               <button
@@ -797,7 +801,7 @@ export function QqConnectPage({
                 data-testid="qq-bot-pick-role"
                 disabled={!picked}
                 onClick={() => picked && setRoleSheetOpen(false)}
-                className="mt-4 flex h-[46px] w-full items-center justify-center rounded-[12px] bg-[#0099FF] text-[15px] font-medium text-white shadow-[0_4px_12px_rgba(0,153,255,0.25)] active:opacity-80 disabled:opacity-50"
+                className="mt-4 flex h-[46px] w-full items-center justify-center rounded-full bg-[#0099FF] text-[15px] font-medium text-white shadow-[0_6px_18px_rgba(0,153,255,0.32)] transition-all active:scale-[0.98] active:opacity-80 disabled:opacity-50"
               >
                 {picked ? `就用「${displayNameOf(picked) || picked.name}」` : '先选一个角色'}
               </button>
@@ -807,7 +811,7 @@ export function QqConnectPage({
                 data-testid="qq-bot-bind"
                 disabled={!picked}
                 onClick={() => picked && void doBind(picked)}
-                className="mt-4 flex h-[46px] w-full items-center justify-center rounded-[12px] bg-[#0099FF] text-[15px] font-medium text-white shadow-[0_4px_12px_rgba(0,153,255,0.25)] active:opacity-80 disabled:opacity-50"
+                className="mt-4 flex h-[46px] w-full items-center justify-center rounded-full bg-[#0099FF] text-[15px] font-medium text-white shadow-[0_6px_18px_rgba(0,153,255,0.32)] transition-all active:scale-[0.98] active:opacity-80 disabled:opacity-50"
               >
                 {picked ? `确认绑定「${displayNameOf(picked) || picked.name}」` : '先选一个角色'}
               </button>
@@ -824,7 +828,7 @@ export function QqConnectPage({
           className="absolute inset-0 z-30 flex flex-col justify-end bg-black/40"
           onClick={() => setRebindOpen(false)}
         >
-          <div className="max-h-[72%] overflow-y-auto rounded-t-[14px] bg-[#F6F7F9] px-4 pb-8 pt-4 dark:bg-[#1B1C1F]" onClick={(e) => e.stopPropagation()}>
+          <div className="max-h-[72%] overflow-y-auto rounded-t-[20px] bg-[#F2F2F7]/95 px-4 pb-8 pt-4 backdrop-blur-2xl dark:bg-[#1C1C1E]/95" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center justify-between">
               <span className="text-[16px] font-medium">更换角色</span>
               <button
