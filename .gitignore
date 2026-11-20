@@ -6,3 +6,6 @@ tsconfig.tsbuildinfo
 .gh-token
 dev.log
 tool-results/
+
+# v18：网关物化核心是生成物（每次重启重物化，现含 ~3MB 本地表情包 base64 注入）
+mini-services/im-gateway/core.gen.*.mjs

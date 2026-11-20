@@ -43,6 +43,8 @@ import { pullQqCloudHistory, useQqConnect } from '@/lib/ios/qq-connect';
 import { useWxCloud } from '@/lib/ios/wx-cloud/store';
 import { autoSyncRunPackageIfDeployed } from '@/lib/ios/wx-cloud/supabase';
 import { getQqStickerBattle, saveQqStickerBattle } from '@/lib/ios/qq-cloud-features';
+// v18 全局错误中心：同步失败态极简指示器（详情进弹窗）
+import { InlineErrorChip } from '../error-center';
 import { Switch } from '@/components/ui/switch';
 // 内置 IM 网关（v9：QQ WebSocket 长连接，免回调配置）
 import {
@@ -757,18 +759,19 @@ export function QqConnectPage({ contacts, onBack }: { contacts: ContactRecord[];
             {bindNote && <p className="mt-2 px-1 text-[12.5px] leading-relaxed text-[#34C759]">{bindNote}</p>}
 
             {/* 云端自动同步状态行：接入/换绑/断开后后台重推运行包的结果（只看 QQ 渠道，
-                微信渠道的同步提示只在微信接入页展示） */}
+                微信渠道的同步提示只在微信接入页展示）。
+                v18：失败态不铺长文（机主定调「界面不铺错误长文”）——极简指示器，详情进错误中心弹窗 */}
             {lastAutoSync?.channel === 'qq' ? (
-              <p
-                data-testid="qq-bot-autosync"
-                className={`mt-2 rounded-[10px] px-3.5 py-2 text-[12px] leading-[1.5] ${
-                  lastAutoSync.ok ? 'bg-[#34C759]/[0.08] text-[#2E9E4F]' : 'bg-[#FFF4D6] text-[#8A5A00] dark:bg-[#3B3113] dark:text-[#F0C24B]'
-                }`}
-              >
-                {lastAutoSync.ok
-                  ? `${lastAutoSync.msg}（${new Date(lastAutoSync.at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}）`
-                  : lastAutoSync.msg}
-              </p>
+              lastAutoSync.ok ? (
+                <p
+                  data-testid="qq-bot-autosync"
+                  className="mt-2 rounded-[10px] bg-[#34C759]/[0.08] px-3.5 py-2 text-[12px] leading-[1.5] text-[#2E9E4F]"
+                >
+                  {lastAutoSync.msg}（{new Date(lastAutoSync.at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}）
+                </p>
+              ) : (
+                <InlineErrorChip label="云端同步失败" msg={lastAutoSync.msg} scope="sync-qq" className="mt-2" />
+              )
             ) : null}
 
             {/* QQ 秒回加速（v9）：内置网关的 QQ 官方 WebSocket 长连接——接入后自动开启，

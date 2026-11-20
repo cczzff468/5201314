@@ -23,7 +23,38 @@
 
 import { writeFileSync, readdirSync, unlinkSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { join, dirname } from 'node:path';
 import { WX_CLOUD_CORE } from '../../src/lib/ios/wx-cloud/sources';
+import { BUILTIN_PACK_STICKERS } from '../../src/lib/ios/sticker-packs';
+
+// ---------------- v18 本地表情包全量注入（真机表情包根修） ----------------
+// 用户 Supabase Storage 被 402 受限 / emoticons.json 停在旧版时，网关通道的表情解析
+// 不再依赖云端文件：启动时把站内 public/stickers 四套大贴纸包读成 dataUrl 随物化注入
+// （LOCAL_EMOTICONS_INJECT），核心 loadWxEmoticons / QQ emo 清单与它合并——本地优先。
+// BUILTIN_PACK_STICKERS 是纯静态注册表（id + 意思 + 相对路径），与站内人设清单同源。
+
+let localEmoticonsCache: Array<{ name: string; id: string; dataUrl: string }> | null = null;
+
+function buildLocalEmoticons(): Array<{ name: string; id: string; dataUrl: string }> {
+  if (localEmoticonsCache) return localEmoticonsCache;
+  const out: Array<{ name: string; id: string; dataUrl: string }> = [];
+  const publicRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'public');
+  for (const s of BUILTIN_PACK_STICKERS) {
+    try {
+      const rel = String(s.url || '').replace(/^\/+/, '');
+      if (!rel) continue;
+      const buf = readFileSync(join(publicRoot, rel));
+      const mime = /\.gif$/i.test(rel) ? 'image/gif' : /\.png$/i.test(rel) ? 'image/png' : 'image/webp';
+      const name = (s.meaning || '').trim().split(/[，,。.、\s]/)[0].slice(0, 12) || s.id;
+      out.push({ name, id: s.id, dataUrl: 'data:' + mime + ';base64,' + buf.toString('base64') });
+    } catch {
+      /* 单张读不到跳过（资产变动/清理中）：剩余的照常注入 */
+    }
+  }
+  localEmoticonsCache = out;
+  console.log('[im-gateway] 本地表情包注入：', out.length, '张（网关通道真机表情不依赖云端 Storage）');
+  return out;
+}
 
 // ---------------- v13 本地 TTS（QQ 语音条零配置合成：z-ai SDK，wav） ----------------
 
@@ -153,6 +184,8 @@ async function materializeCore(supaUrl: string, supaKey: string, relayUrl: strin
     `var RELAY_URL_INJECT = ${JSON.stringify(relayUrl)};`,
     `var RELAY_SECRET_INJECT = ${JSON.stringify(relaySecret)};`,
     `var TTS_LOCAL_URL_INJECT = ${JSON.stringify('http://127.0.0.1:' + PORT + '/tts')};`,
+    // v18：本地表情包全量注入（与站内人设清单同源；Storage 受限/旧包时真机照发真图）
+    `var LOCAL_EMOTICONS_INJECT = ${JSON.stringify(buildLocalEmoticons())};`,
     WX_CLOUD_CORE,
     'export { loadConfig, tick, tickFast, handleQqEvent, qqToken, writeHeartbeat, supaGetJson, supaPutJson, loadQqHistory, appendQqHistory, refreshQqWsLock, cloudSendActive };',
   ].join('\n');

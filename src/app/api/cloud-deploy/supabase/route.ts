@@ -353,7 +353,8 @@ export async function POST(req: NextRequest) {
       //    B. 直传没传齐 → 云端函数代写（wx-assistant 的 upload-file 动作：平台注入的
       //    SUPABASE_SERVICE_ROLE_KEY 写 Storage——用户 key 被项目全拒也能过）；C. 还没
       //    传齐才汇总报错（带每轮真实响应便于定位）
-      const files = (Array.isArray(p.files) ? p.files.slice(0, 8) : [])
+      const filesRaw = Array.isArray(p.files) ? p.files.slice(0, 8) : [];
+      const files = filesRaw
         .map((f) => ({
           path: typeof f.path === 'string' ? f.path.replace(/[^a-zA-Z0-9._/-]/g, '') : '',
           content: typeof f.content === 'string' ? f.content : '',
@@ -361,10 +362,24 @@ export async function POST(req: NextRequest) {
           contentType: typeof f.contentType === 'string' ? f.contentType : 'text/plain',
         }))
         .filter((f) => f.path && f.path.length <= 128 && f.content && f.content.length <= 800_000);
+      // v18：超 800KB 被过滤的文件如实点名（旧版静默丢——配置大文件被丢时上传「成功」
+      // 但云端拿不到该文件，属假成功；点名后用户能定位「哪个文件太大」）
+      const droppedBySize = filesRaw
+        .filter((f) => {
+          const path = typeof f?.path === 'string' ? f.path : '';
+          const content = typeof f?.content === 'string' ? f.content : '';
+          return path && content.length > 800_000;
+        })
+        .map((f) => String(f.path));
       if (files.length === 0) return bad(400, 'missing_files', '没有可上传的文件（运行包为空？）');
 
       const uploadedSet = new Set<string>();
       const attempts: string[] = [];
+      // v18：超 800KB 被过滤的文件如实点名（旧版静默丢——配置大文件被丢时上传「成功」
+      // 但云端拿不到该文件，属假成功；点名后用户能定位「哪个文件太大」）
+      if (droppedBySize.length) {
+        attempts.push(`超大文件被跳过（>800KB 上限，未上传）：${droppedBySize.join('、')}——请精简后重试`);
+      }
       let usedKey = '';
       let via = 'direct';
       let lastRejectedKey = '';
@@ -409,46 +424,79 @@ export async function POST(req: NextRequest) {
         }
       }
 
-      // B. 云端函数代写（v4 主修复）：部署过的 wx-assistant 自带 upload-file 动作，用平台
-      // 注入的凭证写 Storage（还顺手建桶）——用户 Storage key 全部被拒（JWT 轮换后的
-      // signature verification failed 等）时这条路依然通，不依赖用户粘贴的任何 key
+      // B. 云端函数代写（v4 主修复 → v18 加固）：部署过的 wx-assistant 自带 upload-file 动作，
+      //    用平台注入的凭证写 Storage（还顺手建桶）——用户 Storage key 全部被拒（JWT 轮换后的
+      //    signature verification failed / 项目 Storage 被 402 restricted）时这条路依然通。
+      //    v18 三个加固（机主实测「运行包上传失败 402」的复盘）：
+      //    ① 逐文件单独请求（旧版一次请求打包全部文件 ≈1.1MB 请求体，触云端偶发拒绝/超时）；
+      //    ② 每文件最多 3 次重试 + 90 秒超时（实测同密钥同端点偶发 401 bad secret——重试即过）；
+      //    ③ 写入后读回验证（受限项目 Storage 行为不可全信，读不回 = 没写上）。
       if (uploadedSet.size < files.length && taskSecret) {
         const remain = files.filter((f) => !uploadedSet.has(`${f.bucket}/${f.path}`));
-        try {
-          const fr = await fetch(`${base}/functions/v1/wx-assistant`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'X-Task-Secret': taskSecret, 'X-Task-Action': 'upload-file' },
-            body: JSON.stringify({ files: remain }),
-            signal: AbortSignal.timeout(40_000),
-          }).catch(() => null);
-          if (!fr) {
-            attempts.push('云端代写：超时（约 40 秒无响应——旧版函数会掉进默认轮询分支，或函数还没部署/冷启动中，重新「一键部署」可解决）');
-          } else {
-            const ftext = (await fr.text().catch(() => '')).slice(0, 300);
-            let fj: { ok?: boolean; uploaded?: string[]; error?: string; handled?: unknown } | null = null;
+        const relayBase = `${base}/functions/v1/wx-assistant`;
+        for (const f of remain) {
+          let okFile = false;
+          let fileErr = '';
+          for (let attempt = 1; attempt <= 3 && !okFile; attempt++) {
             try {
-              fj = JSON.parse(ftext) as typeof fj;
+              const fr = await fetch(relayBase, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-Task-Secret': taskSecret, 'X-Task-Action': 'upload-file' },
+                body: JSON.stringify({ files: [f] }), // v18 ①逐文件：单请求单文件，请求体小
+                signal: AbortSignal.timeout(90_000),
+              }).catch(() => null);
+              if (fr && fr.ok) {
+                const fj = (await fr.json().catch(() => null)) as { ok?: boolean; uploaded?: string[]; error?: string } | null;
+                if (fj && Array.isArray(fj.uploaded) && fj.uploaded.length > 0) {
+                  // v18 ③读回验证：JSON 文件读得回才算真写上（assistant.mjs 非纯 JSON，跳过验证信 uploaded）
+                  if (f.path.endsWith('.json')) {
+                    const rb = await fetch(relayBase, {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json', 'X-Task-Secret': taskSecret, 'X-Task-Action': 'read-file' },
+                      body: JSON.stringify({ path: f.path }),
+                      signal: AbortSignal.timeout(30_000),
+                    }).catch(() => null);
+                    const rj = rb && rb.ok ? ((await rb.json().catch(() => null)) as { ok?: boolean; data?: unknown } | null) : null;
+                    if (rj && rj.ok === true && typeof rj.data !== 'undefined') {
+                      okFile = true;
+                    } else {
+                      fileErr = '写入后读回验证失败（函数报成功但 Storage 里读不回该文件）';
+                    }
+                  } else {
+                    okFile = true;
+                  }
+                } else {
+                  fileErr = fj && typeof fj.error === 'string' && fj.error ? fj.error.slice(0, 90) : '函数回包无 uploaded（旧版函数？重新「一键部署」升级）';
+                }
+              } else if (fr && fr.status === 401) {
+                fileErr = '任务密钥不匹配（401）——重新点「一键部署」重注密钥后再试';
+                break; // 密钥不对重试无意义
+              } else {
+                // 函数非 200（含旧版函数掉进默认轮询分支返回的 200/其它）：如实记录状态码与片段
+                let stext = '';
+                if (fr) {
+                  try { stext = (await fr.text().catch(() => '')).slice(0, 90); } catch { stext = ''; }
+                }
+                fileErr = fr ? `函数返回 ${fr.status}${stext ? `：${stext}` : ''}` : '超时（约 90 秒无响应——函数未部署/冷启动/网络波动）';
+              }
             } catch {
-              /* 非 JSON */
+              fileErr = '请求异常（网络波动）';
             }
-            if (fr.ok && fj && Array.isArray(fj.uploaded)) {
-              for (const u of fj.uploaded) uploadedSet.add(String(u));
-              via = 'function';
-              attempts.push(`云端代写：${fj.uploaded.length}/${remain.length} 成功${fj.error ? `（部分失败：${String(fj.error).slice(0, 80)}）` : ''}`);
-            } else if (fr.status === 401) {
-              attempts.push('云端代写：任务密钥不匹配（401）——请重新点「一键部署」后再试');
-            } else if (fj && typeof fj.handled === 'number') {
-              attempts.push('云端代写：已部署的是旧版函数（没有代写动作）——请重新点「一键部署」升级函数');
-            } else {
-              attempts.push(`云端代写：函数返回 ${fr.status}${ftext ? `（${ftext.slice(0, 80)}）` : ''}——请确认已完成「一键部署」（v4 函数自带代写上传）`);
-            }
+            if (!okFile && attempt < 3) await new Promise((r) => setTimeout(r, 1500));
           }
-        } catch {
-          attempts.push('云端代写：请求异常');
+          if (okFile) {
+            uploadedSet.add(`${f.bucket}/${f.path}`);
+            via = 'function';
+          }
+          attempts.push(
+            okFile
+              ? `云端代写·${f.path}：成功`
+              : `云端代写·${f.path}：失败（${fileErr || '未知错误'}）`,
+          );
         }
       }
 
-      if (uploadedSet.size >= files.length) {
+      if (uploadedSet.size >= files.length && droppedBySize.length === 0) {
         return NextResponse.json({
           ok: true,
           uploaded: [...uploadedSet],
@@ -458,14 +506,25 @@ export async function POST(req: NextRequest) {
         });
       }
 
-      // C. 汇总报错：直传每轮 + 代写结果 + 定位指引
+      // C. 汇总报错：直传每轮 + 代写结果 + 定位指引。
+      //    v18：Storage 402 restricted（平台违规限制）单独识别——这是 Supabase 平台侧对
+      //    项目的 Storage 直写限制（用户实测：直传全 402，云端函数平台凭证读写照常可用）。
+      //    直传 402 + 代写成功时根本不会走到这里（上面已 ok 返回）；走到这里且带 402 =
+      //    直传 402 且代写也失败——如实说明两条路各自的状态与可行出路。
       const rejectHint = lastRejectedBody ? keyRejectHint(lastRejectedKey) : '';
+      const restricted = /restricted|violation/i.test(lastRejectedBody) || attempts.some((a) => /402/.test(a));
+      const restrictedNote = restricted
+        ? '你的 Supabase 项目 Storage 直写被平台限制（402 restricted——多为平台风控判定违规，需到 Supabase 控制台查看项目状态/申诉解除）。'
+        : '';
+      const gatewayNote =
+        '本站网关不受影响：网站开着时真机微信/QQ 照常自动收发回复（表情包/语音全量可用）；云端函数兜底路径才依赖 Supabase。';
       return bad(
         502,
         'storage_upload_failed',
         `运行包上传失败（已试 ${attempts.length} 条路径）：${attempts.join('；')}。` +
           (bucketNote ? `${bucketNote}。` : '') +
-          (rejectHint || '请确认项目在运行、网络正常；重新点「一键部署」可升级云端函数（v4 支持代写上传，不依赖项目密钥）'),
+          (restrictedNote ? `${restrictedNote}` : rejectHint || '请确认项目在运行、网络正常；重新点「一键部署」可升级云端函数（v4 支持代写上传，不依赖项目密钥）') +
+          `${gatewayNote}`,
       );
     }
 

@@ -72,6 +72,17 @@
  *   ②站内 supabase.ts 升级链收紧：探测不到 ver（旧函数 ping 无 ver / 网络失败）也不再跳过——
  *     ver ≠ 当代就重部署最新函数代码（部署接口幂等，重同步一次真机行为全量对齐）；
  *   ③ping ver 17。
+ * - v18（机主实测「真机微信/QQ 还是不会发表情包 / QQ 不会发语音 / 运行包上传 402 受限」
+ *   三连反馈——本轮沙箱实测定位三个独立根因）：
+ *   ①网关本地表情包注入 LOCAL_EMOTICONS_INJECT——站内 public/stickers 四套大贴纸包
+ *     全量随网关物化注入（不依赖 Supabase Storage 的 emoticons.json）：用户项目 Storage
+ *     被 402 受限/旧包未同步时，旧运行包的 emoticons 清单解析不到 sunny-02 这类标记 →
+ *     标记裸发/被剥。本地注入后网关通道永远有全量表情可解析（本地优先，云端文件补充）；
+ *   ②QQ 裸标记泄漏兑底：整条回复只剩解析不到的表情标记时旧版兑底把【未切前的原文】
+ *     （含裸 [表情包:sunny-02]）当正文发出——改为发切后干净文本，净空用颜文字兑底；
+ *   ③QQ 语音根修（配套 mini-services/im-gateway/silk-wasm.mjs 改纯 JS）：旧适配层带
+ *     TS 注解但 .mjs 扩展名 → Bun 拒绝解析 → silk 编码必失败 → 语音全部降级文字；
+ *   ④ping ver 18。
  *
  * 配置（用户 Supabase 私有桶 wx-cloud/config.json，v2 形状）：
  * { version:2, secret, wechat:{botToken,botId,persona,history,stickerMap,worldbook,multi},
@@ -88,7 +99,7 @@
 /** v17：云端运行时代际号——站内「重新同步运行包」用它判断要不要重部署函数代码
  *  （ping 回的 ver ≠ 它（含 ping 不回 ver 的旧函数）= 真机上还在跑旧函数：只回一两条/
  *  不会表情包/不会语音/发裸标记——重部署最新代码全量对齐）。 */
-export const CLOUD_RUNTIME_VER = 17;
+export const CLOUD_RUNTIME_VER = 18;
 
 export const WX_CLOUD_CORE = String.raw`
 // ---- 微信云端助手核心（自动生成，勿手工编辑） ----
@@ -109,6 +120,42 @@ var RELAY_SECRET = (typeof RELAY_SECRET_INJECT !== 'undefined' && RELAY_SECRET_I
 // v13 网关本地语音合成端点（im-gateway 注入，z-ai SDK 合成 wav）：配了它时 QQ 语音条
 // 不需要用户自配 OpenAI 兼容 TTS；云端（Deno）不注入则用 cfg.qq.tts（用户自配）
 var TTS_LOCAL_URL = (typeof TTS_LOCAL_URL_INJECT !== 'undefined' && TTS_LOCAL_URL_INJECT) || '';
+// v18 网关本地表情包全量注入（im-gateway 启动时把站内 public/stickers 四套大贴纸包读成
+// dataUrl 随物化注入）：用户 Supabase Storage 被 402 受限 / emoticons.json 停在旧版时，
+// 网关通道的表情解析不再依赖云端文件——标记本地直接解析成真图。云端（Deno）不注入为空数组。
+var LOCAL_EMOTICONS = (typeof LOCAL_EMOTICONS_INJECT !== 'undefined' && LOCAL_EMOTICONS_INJECT) || [];
+/** v18 表情清单合并：本地注入优先（站内当前资产、永远新鲜），云端文件补充（去重 by id/name）。
+ *  两路共用：微信 emoticons.json 的 wechat 段 / QQ config 的 qq.emoticons。
+ *  v18 过滤：远端旧包里的 wxb- 与 qqb- 前缀官方经典小表情不并入——v16 政策是经典小表情
+ *  在微信走 [微笑] 文字代码（stickerMap→经典转换）、QQ 不发；并回来会把小表情当
+ *  大图表情包真发（旧版 emoticons.json 停在 v16 前的「大眼微笑脸之谜」形态）。 */
+function mergeEmoticons(local, remote) {
+  if (!local || !local.length) {
+    var r0 = remote || [];
+    var out0 = [];
+    for (var z = 0; z < r0.length; z++) if (r0[z] && r0[z].dataUrl && !/^(?:wxb|qqb)-/.test(String(r0[z].id || ''))) out0.push(r0[z]);
+    return out0;
+  }
+  var out = local.slice();
+  var seen = {};
+  for (var i = 0; i < out.length; i++) {
+    var k = String((out[i] && (out[i].id || out[i].name)) || i);
+    if (seen[k]) { out.splice(i, 1); i--; continue; }
+    seen[k] = 1;
+  }
+  var r = remote || [];
+  for (var j = 0; j < r.length; j++) {
+    var e = r[j];
+    if (!e || !e.dataUrl) continue;
+    if (/^(?:wxb|qqb)-/.test(String(e.id || ''))) continue; // v18：官方经典小表情不并入（见上）
+    var rk = String(e.id || e.name || '');
+    if (rk && seen[rk]) continue;
+    var dup = false;
+    for (var q = 0; q < out.length; q++) if (out[q] && out[q].name === e.name && out[q].dataUrl === e.dataUrl) { dup = true; break; }
+    if (!dup) out.push(e);
+  }
+  return out;
+}
 var BUCKET = 'wx-cloud';
 var UPDATES_BUF = '';
 var CFG = null;
@@ -435,14 +482,18 @@ function sanitizeWxOutText(cfg, text) {
 
 /** 微信表情包运行包（emoticons.json：{ wechat: [{name, id, dataUrl}] }，站内微信面板全量）。
  *  与 config.json 分文件存：config.json 有 800KB 上传单文件上限，表情图单独一份不挤占；
- *  旧运行包没有这个文件 → 空表（[表情包:ID] 走 stickerMap→经典表情的旧降级路径）。 */
+ *  旧运行包没有这个文件 → 空表（[表情包:ID] 走 stickerMap→经典表情的旧降级路径）。
+ *  v18：网关运行时本地全量注入（LOCAL_EMOTICONS）与云端文件合并——本地优先、云端补充，
+ *  Storage 受限/旧包时网关通道不再受影响。 */
 var WX_EMOTI = null;
 var WX_EMOTI_AT = 0;
 async function loadWxEmoticons() {
   if (WX_EMOTI && Date.now() - WX_EMOTI_AT < 60000) return WX_EMOTI;
   var j = null;
   try { j = await supaGetJson('emoticons.json'); } catch (e) { j = null; }
-  WX_EMOTI = (j && Array.isArray(j.wechat)) ? j.wechat : [];
+  var remote = (j && Array.isArray(j.wechat)) ? j.wechat : [];
+  WX_EMOTI = mergeEmoticons(LOCAL_EMOTICONS, remote);
+  if (!WX_EMOTI.length && !remote.length) WX_EMOTI = [];
   WX_EMOTI_AT = Date.now();
   return WX_EMOTI;
 }
@@ -1703,8 +1754,9 @@ async function handleQqEvent(cfg, t, d) {
   // v16 连发兑底：旧运行包/未绑定人设里没有连发指令块时运行期补注入（真机「只发一条」的兑底）
   system = ensureBurstRule(system, cfg.qq.multi !== false);
   // 表情包指令：v13 运行包人设（站内组装器产出）自带【表情包清单】时不再重复注入——
-  // 只有兑底人设（没绑角色/旧运行包）才给这份精简清单教学（ID/名字都可解析）
-  var emo = (cfg.qq && cfg.qq.emoticons) || [];
+  // 只有兑底人设（没绑角色/旧运行包）才给这份精简清单教学（ID/名字都可解析）。
+  // v18：本地全量注入与云端 qq.emoticons 合并（网关运行时不再受 Storage 受限/旧包影响）
+  var emo = mergeEmoticons(LOCAL_EMOTICONS, (cfg.qq && cfg.qq.emoticons) || []);
   if (emo.length && system.indexOf('表情包清单') < 0) {
     var names = [];
     for (var ei = 0; ei < emo.length; ei++) if (emo[ei] && emo[ei].name) names.push(emo[ei].name);
@@ -1762,7 +1814,16 @@ async function handleQqEvent(cfg, t, d) {
   // v16：照片标记已下线（stripRichMarkers 静默剥除），语音标记已先行切走
   var cleaned = stripRichMarkers(voiceScan.text);
   var segs = cloudReplySegments(cleaned, cfg.qq.multi !== false);
-  if (!segs.length && emoHits.length === 0 && voiceScan.clips.length === 0) segs = [q.text.slice(0, 500)];
+  // v18 裸标记泄漏兑底：整条回复只剩解析不到的表情标记时，旧版把【未切前的原文】
+  // （含裸 [表情包:sunny-02]）当正文发出（实测裸标记泄漏的根因）——改为：清单可用时挑
+  // 一张默认表情图发出（AI 想发表情没发成时的兜底，不空轮）；清单也为空才用颜文字兑底。
+  if (!segs.length && emoHits.length === 0 && voiceScan.clips.length === 0) {
+    if (emo.length) {
+      emoHits.push(emo[Math.floor(Math.random() * emo.length)]);
+    } else {
+      segs = [WX_EMOJI_FALLBACKS[Math.floor(Math.random() * WX_EMOJI_FALLBACKS.length)]];
+    }
+  }
   if (q.quote && segs.length) segs[0] = '「' + q.quote + '」\n' + segs[0];
   // v16 语音条三分法（QQ「AI 说发不了语音」的修复主体）：
   // ① AI 明确输出 [语音:内容] 标记 → 逐条合成强制发（标记即指令）；
@@ -2436,7 +2497,7 @@ Deno.serve(async (req) => {
       // 一直跑旧行为：只回一两条/不会表情包/不会语音/发裸标记——「重新同步只推配置不推代码」
       // 的坑；v17 起探测不到 ver 也重部署，旧函数不再永远升不了级）。
       // v17：16 → 17（QQ 语音 LLM 兜底合成 + 同步升级链收紧那代）。
-      return jr({ ok: true, source: 'deno', ver: 17 });
+      return jr({ ok: true, source: 'deno', ver: 18 });
     }
 
     // ---- v16 send-active（站内「主动发消息」引擎触发）：把站内已生成的主动消息内容发到

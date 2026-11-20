@@ -3150,3 +3150,25 @@ Stage Summary:
 - QQ 语音云端开箱：没配 TTS 也能用聊天 API 兜底合成（OpenAI 兼容 /audio/speech），失败静默回退文字；网关在线时照旧走本地 z-ai 合成（零延迟）。
 - 关键文件：src/lib/ios/wx-cloud/supabase.ts（升级链）、src/lib/ios/wx-cloud/sources.ts（v17：LLM 兜底合成 + ttsOk 放宽 + ver 17）、mini-services/im-gateway/core.gen.1.mjs（重新物化）
 - 用户动作：设置 → 云端助手 → 点一次「重新同步运行包」（旧函数自动升级到 v17，真机表情包/语音/连发立刻对齐）；然后 GitHub 已推送 main。
+
+---
+
+Task ID: v18（真机表情包/语音根因三连修 + 上传 402 加固 + 全站错误弹窗化）
+Agent: 主控 Agent（Z.ai Code）
+Task: 机主四连反馈——①真机微信/QQ AI 还不会发表情包；②部署失败「云端函数已部署成功，但运行包上传失败（9 条路径全 402 restricted）」；③接入真机 QQ 上 AI 不会发语音；④全站错误提示弹窗化（标题+详细，界面不铺错误长文，只留极简「错误/异常」入口点击弹窗）。修完推送 github.com/cczzff468/5201314 main。
+
+Work Log:
+- [诊断·实锤] 沙箱直连用户真实 Supabase 逐项实测：①云端函数 ping ver=15（落后两代——v16/v17 修复从未到达用户云端：部署接口收 2xx 但函数代码没换=「已部署成功」假象）；②Storage 直写全 402 restricted（平台风控限制）但云端函数平台凭证读写【完全可用】（中继 read-file/upload-file 实测通，580KB 大负载也过——旧版一次性打包 3 文件 ≈1.1MB 请求体偶发被拒是用户代写失败的根因）；③读回 config.json/emoticons.json：emoticons 停在 v16 前旧版（qq 表 21 张里 20 张 qqb-* + sunny-37，persona 清单教的 sunny-02 等解析不到→裸标记泄漏的根因；微信侧 69 张全是 wxb-* 小表情——大贴纸包从来没传上去过）；④QQ 历史 23:53 实录：「发个表情包」→ AI 回裸标记 [表情包:sunny-02]、「发个语音」→ 文字答应没动作。
+- [根因三连修] ①silk-wasm.mjs 是 TypeScript 语法 + .mjs 扩展名 → Bun 拒绝解析 → silk 编码 10 分钟缓存失败 → QQ 语音条永远降级文字（网关本地 TTS 其实一直是好的）——改纯 ESM JS，实测 64KB wav→4.9KB silk 113ms；②网关本地表情包全量注入（materializeCore 注入 LOCAL_EMOTICONS_INJECT=public/stickers 四套包 226 张 base64；核心 mergeEmoticons 本地优先∪远端补充，wxb-/qqb- 官方经典小表情不并入防「大图之谜」复现）——Storage 受限/旧包时真机照发真图；③QQ 裸标记泄漏兑底：整条回复只剩解析不到的标记时旧版把未切前原文（含裸标记）当正文发出——改为清单可用时挑默认表情图发出，空清单才颜文字。
+- [上传 402 加固 route.ts] 云端函数代写改逐文件单独请求（单请求单文件 ≤600KB）+ 每文件 3 次重试 + 90s 超时（实测同密钥偶发 401 bad secret 重试即过）+ 写入后读回验证（JSON 文件读得回才算真写上）；>800KB 被过滤的文件如实点名不再静默丢（防假成功）；最终报错单列 402 restricted 诚实说明（平台风控限制→控制台申诉）+ 明示本站网关不受影响。
+- [部署假成功根修 supabase.ts] 同步升级链在部署接口 2xx 后【再 ping 实测 ver】：真升上去才报成功；没升上去如实说「部署接口已受理但实测代码未更新（ping 仍 v15 应 v18）——多为平台限制拒绝函数更新」+ 网关不受影响说明。CLOUD_RUNTIME_VER 17→18。
+- [全站错误弹窗化] 新建 src/lib/error-center.ts（zustand 集中 store：report/openList/openError/dismiss/clearAll；同标题+详情永久合并防堆积，dismiss 后同错误复发重新入列；全局兜底 window.onerror+unhandledrejection→中心）+ src/components/apps/error-center.tsx（InlineErrorChip 通用内联指示器 + 全局徽章 z-[90] + 详情弹窗 z-[97]：上半标题下半详细滚动区，重试/复制详情/知道了/清除全部；挂载 PhoneShell）；ChatErrorLine 重做（五端聊天共用：长文文案不再上屏，只留「发送失败·点击查看」小胶囊→弹窗带重试；长按菜单移除）；设置页 CloudResultBox 失败分支、微信/QQ 接入页 lastAutoSync 失败横幅全部换 InlineErrorChip。
+- [事故修复] 物化核心曾在注释里写「wxb-*/qqb-*」——块注释里的 */ 提前终止注释 → 物化 core.gen 语法错误 → 网关自恢复失败（QQ/微信双通道掉线）——改措辞 wxb- 与 qqb- 前缀后重启全恢复。
+- [验证] ①网关实测：本地注入 226 张、loadWxEmoticons 合并 295→226（wxb 过滤生效）、collectCloudStickers 解析 [表情包:sunny-02]/[表情包:喜欢你呀] 命中、解析不到的标记被切不泄漏、synthesizeQqVoice 全链通（b64=11KB silk）、QQ WS READY + 心跳 OK + 微信 wxLoop running；②Agent Browser E2E：解锁→信息→小助手→发消息（无 API 配置触发失败）→极简「发送失败·点击查看」胶囊 + 右上角「错误 1」徽章双指示 ✓→点胶囊弹窗（标题「消息发送失败：…」+ 详细 + 时间/scope + 重试/复制详情/知道了/清除全部）✓→徽章→列表→条目→详情→清除全部全链 ✓→dismiss 后同错误复发徽章重现（去重边界修复验证）✓→设置→云端助手页渲染无错无长文铺屏 ✓；控制台零错误、dev.log 零编译错误；tsc 改动文件零新增（11 处均为既有基线）；eslint 改动文件零问题。
+- [git] core.gen.*.mjs 补 .gitignore 并取消跟踪（生成物，现含 3MB 表情注入）；推送 main。
+
+Stage Summary:
+- 真机表情包/语音三重根因一次根治：silk 编码器 TS-in-mjs 解析失败（语音）、旧运行包 emoticons 与 persona 清单错位（裸标记/发不出）、Storage 402 受限把新包挡在门外（上传）——网关本地全量表情注入让真机能力不再依赖用户 Supabase 状态
+- 上传链路加固：逐文件代写+重试+读回验证+超限点名+402 诚实报错（网关不受影响的明示）；部署升级链 ping 实测防假成功
+- 全站错误弹窗化落地：集中错误中心（极简徽章+列表+详情弹窗带重试/复制）覆盖聊天五端、云端设置页、微信/QQ 接入页、全局未捕获异常——界面不再铺错误长文
+- 关键文件：sources.ts（v18 核心）、im-gateway/index.ts（本地表情注入）、im-gateway/silk-wasm.mjs（纯 JS）、cloud-deploy/supabase/route.ts、wx-cloud/supabase.ts、error-center.ts、error-center.tsx、chat-error-line.tsx、settings.tsx、wx-app/qq-app connect.tsx、PhoneShell.tsx

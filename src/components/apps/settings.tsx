@@ -253,6 +253,8 @@ import {
 // 云端助手（微信 7x24 自动回复）：部署到用户自己的 Supabase。
 // 状态中心 + 部署管线都在 src/lib/ios/wx-cloud/，凭证只在用户浏览器密文保存。
 import { PLATFORM_LABELS, useWxCloud, wipeWxCloud, type CloudPlatform } from '@/lib/ios/wx-cloud/store';
+// v18 全局错误中心：云端失败态极简指示器（详情进弹窗）
+import { InlineErrorChip } from './error-center';
 import {
   checkServiceKey,
   cronStartSql,
@@ -9106,20 +9108,18 @@ function CloudChip({
   );
 }
 
-/** 云端助手 · 简单结果提示（一键部署/HF 成功框内容多单独写；这里只包「绿/红一行消息」的结果） */
+/** 云端助手 · 简单结果提示（一键部署/HF 成功框内容多单独写；这里只包「绿/红一行消息」的结果。
+ *  v18：失败态改极简指示器——机主定调「界面不铺错误长文」：失败只留可点击小胶囊，
+ *  详情（原始错误全文）进全局错误中心弹窗看） */
 function CloudResultBox({ r, mt = false }: { r: { ok: boolean; msg: string } | null; mt?: boolean }) {
   if (!r) return null;
-  return r.ok ? (
+  if (!r.ok) {
+    return <InlineErrorChip label="云端操作失败" msg={r.msg} scope="cloud" className={mt ? 'mt-2' : ''} />;
+  }
+  return (
     <div className={`${CLOUD_OK_BOX_CLS}${mt ? ' mt-2' : ''}`}>
       <span className="flex items-start gap-1.5">
         <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
-        {r.msg}
-      </span>
-    </div>
-  ) : (
-    <div className={`${CLOUD_ERR_BOX_CLS}${mt ? ' mt-2' : ''}`} role="alert">
-      <span className="flex items-start gap-1.5">
-        <XCircle className="mt-0.5 h-4 w-4 shrink-0" />
         {r.msg}
       </span>
     </div>

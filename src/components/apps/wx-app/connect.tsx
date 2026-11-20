@@ -31,6 +31,8 @@ import {
 } from 'lucide-react';
 import { useWxConnect, pullWxCloudHistory, type WxQrStatus } from '@/lib/ios/weixin-connect';
 import { useWxCloud, PLATFORM_LABELS } from '@/lib/ios/wx-cloud/store';
+// v18 全局错误中心：同步失败态极简指示器（详情进弹窗）
+import { InlineErrorChip } from '../error-center';
 // 内置 IM 网关（v5：微信长轮询 7×24 自动回复——接入后自动开启，网页关了也在线）
 import {
   ensureImGatewayRunning,
@@ -442,21 +444,22 @@ export function WeixinConnectPage({ contacts, onBack }: { contacts: ContactRecor
           ) : null}
 
           {/* 云端自动同步状态行：接入/换绑/断开后后台重推运行包的结果——只看微信渠道
-              （QQ 渠道的同步提示只在 QQ 接入页展示，不再串页） */}
+              （QQ 渠道的同步提示只在 QQ 接入页展示，不再串页）。
+              v18：失败态不铺长文（机主定调「界面不铺错误长文”）——极简指示器，详情进错误中心弹窗 */}
           {lastAutoSync?.channel === 'wx' ? (
-            <p
-              data-testid="wx-ilink-autosync"
-              className={`flex items-start gap-1.5 rounded-[10px] px-3.5 py-2 text-[12px] leading-[1.5] ${
-                lastAutoSync.ok ? 'bg-[#07C160]/[0.07] text-[#07C160]' : 'bg-[#FFF6DC] text-[#8A6A00] dark:bg-[#40361A] dark:text-[#EBC76A]'
-              }`}
-            >
-              <Cloud className="mt-[2px] h-[13px] w-[13px] shrink-0" strokeWidth={2} aria-hidden="true" />
-              <span className="min-w-0 break-words">
-                {lastAutoSync.ok
-                  ? `${lastAutoSync.msg}（${new Date(lastAutoSync.at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}）`
-                  : lastAutoSync.msg}
-              </span>
-            </p>
+            lastAutoSync.ok ? (
+              <p
+                data-testid="wx-ilink-autosync"
+                className="flex items-start gap-1.5 rounded-[10px] bg-[#07C160]/[0.07] px-3.5 py-2 text-[12px] leading-[1.5] text-[#07C160]"
+              >
+                <Cloud className="mt-[2px] h-[13px] w-[13px] shrink-0" strokeWidth={2} aria-hidden="true" />
+                <span className="min-w-0 break-words">
+                  {lastAutoSync.msg}（{new Date(lastAutoSync.at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}）
+                </span>
+              </p>
+            ) : (
+              <InlineErrorChip label="云端同步失败" msg={lastAutoSync.msg} scope="sync-wx" />
+            )
           ) : null}
 
           {/* 状态卡：绑定角色 + Bot ID + 连接时间（说明收进「说明」收缩区） */}

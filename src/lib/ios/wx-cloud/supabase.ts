@@ -223,8 +223,27 @@ export async function syncRunPackage(): Promise<DeployResult> {
     try {
       const dep = await supaProxy({ op: 'deploy', token: supa.token, ref: supa.ref, code: EDGE_FUNCTION_TS, secret: supa.secret || ensureTaskSecret() }, 150_000);
       if (dep.status < 400) {
-        runtimeVer = CLOUD_RUNTIME_VER;
-        upgradeNote = '；云端运行时代码已升级到最新（v' + CLOUD_RUNTIME_VER + '）——真机表情包/语音/连发全部对齐';
+        // v18：Management API 2xx ≠ 函数代码真更新了（机主实测：项目被平台受限时部署接口
+        // 收 2xx 但函数没换代码，ping 仍回旧代 ver——「云端函数已部署成功」假成功的根因）。
+        // 部署后再 ping 一次实测：真升上去了才报成功；没升上去如实说明 + 网关不受影响。
+        let verified = false;
+        try {
+          const pv2 = await funcViaProxy(supa.ref, supa.secret || ensureTaskSecret(), 'ping', {}, 20_000);
+          const vr2 = pv2.j && typeof pv2.j.ver === 'number' ? pv2.j.ver : null;
+          verified = vr2 === CLOUD_RUNTIME_VER;
+          runtimeVer = vr2;
+        } catch {
+          runtimeVer = null;
+        }
+        if (verified) {
+          upgradeNote = '；云端运行时代码已升级到最新（v' + CLOUD_RUNTIME_VER + '）——真机表情包/语音/连发全部对齐';
+        } else {
+          upgradeNote =
+            '；注意：云端函数部署接口已受理，但实测代码未更新（ping 仍为 v' +
+            (runtimeVer === null ? '未知' : String(runtimeVer)) +
+            '，应到 v' + CLOUD_RUNTIME_VER +
+            '）——多为项目被 Supabase 平台限制拒绝函数更新。本站网关不受影响：网站开着时真机微信/QQ 的表情包/语音/连发全量可用；云端函数路径需到 Supabase 控制台解除项目限制后再点「重新同步运行包」';
+        }
       } else {
         upgradeNote = `；注意：云端运行时升级失败（${dep.status}）——重新点一次「一键部署」可重试`;
       }

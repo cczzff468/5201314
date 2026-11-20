@@ -102,6 +102,8 @@ const IncomingCallLayer = dynamic(() => import('./IncomingCallLayer'), { ssr: fa
 // C6 应用内通知中心（下拉面板 + 顶部手势/点按入口）：层级 z-[61]（App 窗口上、锁屏下），
 // 入口 gate 在组件内部（仅解锁后可用）；懒加载与其它全局层同套路
 const NotificationCenter = dynamic(() => import('./NotificationCenter'), { ssr: false });
+// v18 全局错误中心（极简「错误」指示器 + 点击弹窗看详情）：App 窗口/通知中心之上
+const ErrorCenter = dynamic(() => import('@/components/apps/error-center'), { ssr: false });
 
 // v1.5 Mobile Agent 全局层（运行进度条含紧急停止 + 敏感操作确认卡）：懒加载，
 // 仅在 Agent 运行中/刚结束/待确认时渲染内容，闲置零开销
@@ -630,6 +632,10 @@ export default function PhoneShell() {
         {/* C6 应用内通知中心：z-[61]（App 窗口之上、锁屏/来电层之下）；入口手势/点按热区由组件
             自带 window 捕获阶段监听实现（gate：仅解锁后可用），不侵入状态栏/灵动岛既有交互 */}
         <NotificationCenter />
+
+        {/* v18 全局错误中心：极简指示器 z-[90]（有错才出现）+ 详情弹窗 z-[97]（机主定调
+            「全部错误提示弹窗化」：界面不铺错误长文，点击弹窗看标题+详细） */}
+        <ErrorCenter />
 
         {/* Home 指示条：所有界面常显，颜色由 useLightForeground 随身后背景明暗选黑/白
             （白底黑杠、黑底白杠；饱和色背景按明暗取色，不像 mix-blend-difference 那样变互补色）。
