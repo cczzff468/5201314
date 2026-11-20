@@ -1,8 +1,11 @@
 'use client';
 
 /**
- * 接入真机微信页（「我」› 接入真机微信）—— 微信官方 iLink Bot 通道（ilinkai.weixin.qq.com）UI · v4 简约版。
+ * 真机微信接入页 —— 微信官方 iLink Bot 通道（ilinkai.weixin.qq.com）UI · v22 云端助手内嵌版。
  *
+ * v22（用户定调「移进云端助手、换名、简约」）：本页从微信「我」页迁到 设置 → 云端助手 →
+ *  真机接入（embedded=true 时不再渲染自带顶栏/状态栏占位，宿主 CloudPage 提供导航与
+ *  页面容器；根容器仍是 absolute inset-0，只需宿主给一个 relative 的内容区）。
  * v21 精简（用户定调「删无用功能」）：已连接视图只留 测试连接 / 更换角色 / 断开接入 ——
  *  秒回加速、本机实时回复、拉取云端聊天记录、真机微信动态均已下线（真机收发由云端
  *  Supabase 定时任务 7×24 承担；聊天记录由 cloud-history-sync 常驻自动同步；网关加速
@@ -128,7 +131,16 @@ function Fold({
   );
 }
 
-export function WeixinConnectPage({ contacts, onBack }: { contacts: ContactRecord[]; onBack: () => void }) {
+export function WeixinConnectPage({
+  contacts,
+  onBack,
+  embedded = false,
+}: {
+  contacts: ContactRecord[];
+  onBack: () => void;
+  /** 云端助手内嵌模式：不渲染自带顶栏（宿主提供导航），页面铺满宿主内容区 */
+  embedded?: boolean;
+}) {
   // ---- store 逐项订阅（面板粒度刷新）----
   const ready = useWxConnect((s) => s.ready);
   const login = useWxConnect((s) => s.login);
@@ -255,17 +267,19 @@ export function WeixinConnectPage({ contacts, onBack }: { contacts: ContactRecor
       data-testid="wx-ilink-page"
       className="absolute inset-0 z-20 flex h-full w-full flex-col bg-[#EDEDED] text-black dark:bg-[#111111] dark:text-white"
     >
-      {/* 顶栏（微信灰，同收藏/设置页） */}
-      <div className="shrink-0 bg-[#EDEDED] pt-[54px] dark:bg-[#111111]">
-        <div className="flex h-11 items-center px-2">
-          <button type="button" aria-label="返回" data-testid="wx-ilink-back" onClick={onBack} className="flex items-center px-1 active:opacity-50">
-            <ChevronLeft className="h-7 w-7" strokeWidth={2} />
-          </button>
-          <div className="flex flex-1 items-center justify-center pr-9">
-            <span className="text-[17px] font-medium">接入真机微信</span>
+      {/* 顶栏（微信灰，同收藏/设置页；云端助手内嵌时省略——宿主导航已在） */}
+      {!embedded && (
+        <div className="shrink-0 bg-[#EDEDED] pt-[54px] dark:bg-[#111111]">
+          <div className="flex h-11 items-center px-2">
+            <button type="button" aria-label="返回" data-testid="wx-ilink-back" onClick={onBack} className="flex items-center px-1 active:opacity-50">
+              <ChevronLeft className="h-7 w-7" strokeWidth={2} />
+            </button>
+            <div className="flex flex-1 items-center justify-center pr-9">
+              <span className="text-[17px] font-medium">接入真机微信</span>
+            </div>
           </div>
         </div>
-      </div>
+      )}
 
       {!ready ? (
         /* boot 读取中（短暂）：居中转圈，避免已接入用户先看到未接入表单闪一下 */
@@ -295,7 +309,7 @@ export function WeixinConnectPage({ contacts, onBack }: { contacts: ContactRecor
                   </DialogHeader>
                   <div className="space-y-2 text-[13px] leading-[1.6] text-black/70 dark:text-white/75">
                     <p>部署云端后，TA 才会在真机微信上自动回复。</p>
-                    <p>路径：设置 → 云端助手，一键部署（免费）即可。</p>
+                    <p>{embedded ? '回到本页上方「Supabase 连接」完成一键部署（免费）即可。' : '路径：设置 → 云端助手，一键部署（免费）即可。'}</p>
                   </div>
                 </DialogContent>
               </Dialog>
@@ -459,7 +473,7 @@ export function WeixinConnectPage({ contacts, onBack }: { contacts: ContactRecor
                   </DialogHeader>
                   <div className="space-y-2 text-[13px] leading-[1.6] text-black/70 dark:text-white/75">
                     <p>TA 在真机微信上的消息收发由云端 7×24 接管，未部署云端时无法接入。</p>
-                    <p>路径：设置 → 云端助手（Supabase 一键部署即可），部署完回来选角色、扫码接入。</p>
+                    <p>{embedded ? '在本页上方「Supabase 连接」完成一键部署后，回来选角色、扫码接入。' : '路径：设置 → 云端助手（Supabase 一键部署即可），部署完回来选角色、扫码接入。'}</p>
                   </div>
                 </DialogContent>
               </Dialog>

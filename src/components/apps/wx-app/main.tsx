@@ -3,7 +3,7 @@
 /** 主界面 MainScreen（四 tab 路由） —— v1.9.27 任务10 从 wechat.tsx 按功能域拆分；顶层声明全部导出供兄弟模块与入口桶引用。 */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Banknote, BellOff, Bot, CheckCheck, AppWindow, EyeOff, MailOpen, MessageCircle, Newspaper, Pin, PinOff, Plus, QrCode, ScanLine, Search, Tag, Trash2, User, UserPlus, Users, Wallet, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Banknote, BellOff, CheckCheck, AppWindow, EyeOff, MailOpen, MessageCircle, Newspaper, Pin, PinOff, Plus, QrCode, ScanLine, Search, Tag, Trash2, User, UserPlus, Users, Wallet, ChevronLeft, ChevronRight } from 'lucide-react';
 import { useSettings } from '@/lib/ios/store';
 // v1.9.12 聊天滚动重做（全端共享）：进入即到底/发送必到底/贴底跟随/看历史时「有新消息」轻提示
 import { openScan } from '../mt-scan';
@@ -64,8 +64,7 @@ import { ChatPage } from './chat-page';
 import { FRIEND_POST_TEMPLATES, LS_CHAT_HIDDEN, WxFriendReq, WxMoment, WxMsg, WxUser, fmtListTime, initialOf, loadMoments, loadMsgs, loadReqs, loadStrList, meAsContact, readPreview, saveMsgs, saveStrList, uid, wxUnreads } from './core';
 import { ComposeMomentsPage, MomentsPage } from './moments';
 import { AddFriendPage, ApplyFriendPage, FriendDetailPage, FriendReqDetailPage, NewFriendsPage, ProfilePage, WxAccountSwitchPage, WxFavoritesPage, WxLookPage, WxSearchPage, WxSettingsPage } from './pages';
-// 接入真机微信（「我」页入口）：官方 iLink 通道扫码接入 + 本机自动回复管理页
-import { WeixinConnectPage } from './connect';
+// v22 接入真机微信迁到 设置 → 云端助手 → 真机接入（wx-app/connect 不再由本文件引用）
 import { WxStickersPage } from './stickers';
 import { WxAvatar, WxLiquidWidgets, WxMenuRow, WxTileIcon } from './widgets';
 
@@ -93,8 +92,7 @@ export type Page =
   | 'momentsSettings'
   | 'accountSwitch'
   | 'look'
-  | 'dress'
-  | 'weixinConnect';
+  | 'dress';
 
 
 export function MainScreen({
@@ -1348,9 +1346,7 @@ export function MainScreen({
     return <ProfilePage me={me} record={meRecord} onBack={() => setPage('main')} onToast={showToast} />;
   if (page === 'settings')
     return <WxSettingsPage onBack={() => setPage('main')} onLogout={onLogout} onOpenAccountSwitch={() => setPage('accountSwitch')} />;
-  // 接入真机微信（官方 iLink 通道）：扫码接入 / 测试连接 / 本机自动回复 / 换绑角色 / 断开
-  if (page === 'weixinConnect')
-    return <WeixinConnectPage contacts={contacts} onBack={() => setPage('main')} />;
+  // v22 接入真机微信已迁到 设置 → 云端助手 → 真机接入（不再由微信「我」页进入）
   // 切换账号子页（Task 40-D）：注册表账号卡 + 添加 + 管理；登录/切换成功后自动跳回主界面
   if (page === 'accountSwitch')
     return (
@@ -2088,28 +2084,6 @@ export function MainScreen({
                 testId="wx-services-entry"
                 onClick={() => setPage('services')}
                 icon={retro ? <RetroIc tone={RETRO_ICON_TONES.wallet}><RtWWallet /></RetroIc> : <WxIcServices />}
-              />
-            </div>
-
-            {/* 接入真机微信（官方 iLink 通道）：独立面板入口，进接入页扫码/管理代答 */}
-            <div className={liquid ? 'mx-2.5 lg-panel' : retro ? 'mx-2 rt-panel' : 'wx-panel bg-white dark:bg-[#1A1A1A]'}>
-              <WxMenuRow
-                first
-                label="接入真机微信"
-                testId="wx-ilink-entry"
-                onClick={() => setPage('weixinConnect')}
-                icon={
-                  retro ? (
-                    <RetroIc tone={RETRO_ICON_TONES.wallet}>
-                      <Bot className="h-[19px] w-[19px] text-white" strokeWidth={2} />
-                    </RetroIc>
-                  ) : (
-                    /* 微信绿 Bot（与 WxIcServices 同尺寸槽位，风格对齐 wx-icons） */
-                    <span className="flex h-[38px] w-[38px] shrink-0 items-center justify-center" aria-hidden="true">
-                      <Bot className="h-[28px] w-[28px] text-[#07C160]" strokeWidth={2} />
-                    </span>
-                  )
-                }
               />
             </div>
 

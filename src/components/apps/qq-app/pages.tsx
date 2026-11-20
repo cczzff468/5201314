@@ -3,7 +3,7 @@
 /** 好友标识/资料/搜索/消息/联系人/动态/个人/抽屉/加好友/新朋友/申请/设置/收藏等页面 —— v1.9.27 任务10 从 qq.tsx 按功能域拆分；顶层声明全部导出供兄弟模块与入口桶引用。 */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Bell, BellOff, BookOpen, Bot, Check, ChevronLeft, ChevronRight, Compass, CloudSun, FileText, Gamepad2, Image as ImageIcon, Info, KeyRound, LayoutGrid, Link2, LockKeyhole, LogOut, MailOpen, MapPin, Menu, MessageSquarePlus, MonitorSmartphone, Moon, Phone, Pin, PinOff, Plus, FolderOutput, Hash, JapaneseYen, QrCode, Radio, ScanLine, Search, Settings, ShieldCheck, Shirt, SlidersHorizontal, Smartphone, Smile, SmilePlus, Sparkles, SquarePen, Star, ThumbsUp, Trash2, User, UserPlus, Users, Video, Wallet, X } from 'lucide-react';
+import { Bell, BellOff, BookOpen, Check, ChevronLeft, ChevronRight, Compass, CloudSun, FileText, Gamepad2, Image as ImageIcon, Info, KeyRound, LayoutGrid, Link2, LockKeyhole, LogOut, MailOpen, MapPin, Menu, MessageSquarePlus, MonitorSmartphone, Moon, Phone, Pin, PinOff, Plus, FolderOutput, Hash, JapaneseYen, QrCode, Radio, ScanLine, Search, Settings, ShieldCheck, Shirt, SlidersHorizontal, Smartphone, Smile, SmilePlus, Sparkles, SquarePen, Star, ThumbsUp, Trash2, User, UserPlus, Users, Video, Wallet, X } from 'lucide-react';
 import { useUI } from '@/lib/ios/store';
 // v1.9.12 聊天滚动重做（全端共享）：进入即到底/发送必到底/贴底跟随/看历史时「有新消息」轻提示
 import { openScan } from '../mt-scan';
@@ -1972,18 +1972,17 @@ export const DISCOVER_ITEMS: { key: string; label: string; icon: React.ReactNode
   { key: 'zone', label: '空间动态', icon: <Star className="h-[22px] w-[22px]" strokeWidth={2} />, color: '#FFC300' },
   { key: 'game', label: '游戏中心', icon: <Gamepad2 className="h-[22px] w-[22px]" strokeWidth={2} />, color: '#1E6FFF' },
   { key: 'moments-settings', label: '空间动态设置', icon: <Settings className="h-[22px] w-[22px]" strokeWidth={2} />, color: '#1E6FFF' },
-  { key: 'bot', label: '接入QQ', icon: <Bot className="h-[22px] w-[22px]" strokeWidth={2} />, color: '#0099FF' },
   { key: 'nearby', label: '结伴与附近', icon: <Users className="h-[22px] w-[22px]" strokeWidth={2} />, color: '#7D5FFF' },
   { key: 'novel', label: '小说与动漫', icon: <BookOpen className="h-[22px] w-[22px]" strokeWidth={2} />, color: '#FF9F0A' },
   { key: 'feedback', label: '意见反馈', icon: <MessageSquarePlus className="h-[22px] w-[22px]" strokeWidth={2} />, color: '#1E6FFF' },
 ];
 
-/** 古早主题动态页图标配色（DISCOVER_ITEMS.key → RetroIc tone；任务指定：zone/game/settings 对应 + bot 沿用农场绿 + 其余 search/zone 兑底） */
+/** 古早主题动态页图标配色（DISCOVER_ITEMS.key → RetroIc tone；任务指定：zone/game/settings 对应 + 其余 search/zone 兑底；
+ *  v22 接入QQ 已迁 设置 → 云端助手 → 真机接入，bot 项下线） */
 export const RETRO_DISCOVER_TONES: Record<string, string> = {
   zone: RETRO_ICON_TONES.zone,
   game: RETRO_ICON_TONES.games,
   'moments-settings': RETRO_ICON_TONES.settings,
-  bot: RETRO_ICON_TONES.farm,
   nearby: RETRO_ICON_TONES.search,
   novel: RETRO_ICON_TONES.zone,
   feedback: RETRO_ICON_TONES.search,
@@ -1996,7 +1995,6 @@ export function DiscoverPage({
   onAvatar,
   onZone,
   onOpenMomentsSettings,
-  onOpenConnect,
   zoneBadge = 0,
   onToast,
 }: {
@@ -2008,8 +2006,6 @@ export function DiscoverPage({
   onAvatar: () => void;
   onZone: () => void;
   onOpenMomentsSettings: () => void;
-  /** 打开「接入QQ」页（QQ 官方机器人平台凭证接入） */
-  onOpenConnect: () => void;
   /** 空间动态未读互动消息数（红色数字角标，同真机「空间动态 1」样式） */
   zoneBadge?: number;
   onToast: (m: string) => void;
@@ -2045,7 +2041,6 @@ export function DiscoverPage({
               onClick={() => {
                 if (it.key === 'zone') onZone();
                 else if (it.key === 'moments-settings') onOpenMomentsSettings();
-                else if (it.key === 'bot') onOpenConnect();
                 else onToast(`${it.label}暂未开放`);
               }}
               className="flex w-full items-center gap-4 bg-transparent px-4 py-3.5 text-left active:bg-black/[0.04] dark:active:bg-white/[0.05]"

@@ -14,6 +14,7 @@ import {
   Bell,
   BellOff,
   Bluetooth,
+  Bot,
   Camera,
   Check,
   CheckCircle2,
@@ -39,6 +40,7 @@ import {
   Layers,
   Loader2,
   Lock,
+  MessageCircle,
   MessageSquare,
   MessageSquareText,
   MessagesSquare,
@@ -82,6 +84,7 @@ import {
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { IOSBackButton, IOSNavBar, IOSScreen } from '@/components/ios/IOSNavBar';
+import nextDynamic from 'next/dynamic';
 import { useToast } from '@/hooks/use-toast';
 import PasscodePad from '@/components/ios/PasscodePad';
 import { APPS, AppIconTile } from './registry';
@@ -130,7 +133,7 @@ import {
   setFaceRef,
   type ImgGenFaceRef,
 } from '@/lib/imggen';
-import { listContacts, mainOwnerContact, ownerRealName } from '@/lib/ios/contacts-store';
+import { listContacts, listContactsFor, mainOwnerContact, ownerRealName } from '@/lib/ios/contacts-store';
 import {
   accountDisplayName,
   accountUsedBy,
@@ -141,7 +144,7 @@ import {
   type AccountApp,
   type PhoneAccount,
 } from '@/lib/ios/accounts';
-import { displayNameOf, type ContactRecord } from '@/lib/contacts';
+import { displayNameOf, withDisplayNames, type ContactRecord } from '@/lib/contacts';
 import { isWebSpeechSupported } from '@/lib/ios/web-speech';
 // v1.3 AI 动手（Shizuku 自主权）+ APP 更新：设置页新入口；v1.9.36 重命名为「权限给予」；
 // v1.9.38 AI 动手能力恒开（开关全部下线）：这里只保留动手范围的读写
@@ -251,7 +254,7 @@ import {
 } from '@/lib/ios/fonts';
 // 云端助手（微信 7x24 自动回复）：部署到用户自己的 Supabase。
 // 状态中心 + 部署管线都在 src/lib/ios/wx-cloud/，凭证只在用户浏览器密文保存。
-import { PLATFORM_LABELS, useWxCloud, wipeWxCloud, type CloudPlatform } from '@/lib/ios/wx-cloud/store';
+import { PLATFORM_LABELS, useWxCloud, wipeWxCloud } from '@/lib/ios/wx-cloud/store';
 // v18 全局错误中心：云端失败态极简指示器（详情进弹窗）
 import { InlineErrorChip } from './error-center';
 import {
@@ -9003,12 +9006,71 @@ function PromptEntriesPage({ onBack }: { onBack: () => void }) {
 
 // ---------------- 云端助手（部署用户自己的 Supabase） ----------------
 
-/** 运行平台选择的行定义（radio 式，选中即 setPlatform；云端含义见 wx-cloud/store）
- *  v21 收敛：「不使用云端（仅本机）」已下线，平台只留 Supabase 一键部署——存量选中已
- *  下架平台或「仅本机」的在页面打开时自动切到 Supabase */
-const CLOUD_PLATFORM_OPTIONS: { id: CloudPlatform; label: string; desc: string; icon: LucideIcon; tone: string }[] = [
-  { id: 'supabase', label: 'Supabase', desc: '推荐 · 全免费 · 一键部署', icon: Database, tone: TONE_GREEN },
-];
+// v22 真机接入子页（微信/QQ 两个接入界面收拢进云端助手）：动态加载——独立 chunk 不拖重
+// 设置页首包，也避开与 weixin-connect / qq-connect 的静态模块环（同 pingAndSync 动态 import 口径）
+const WeixinConnectPage = nextDynamic(() => import('./wx-app/connect').then((m) => m.WeixinConnectPage), {
+  ssr: false,
+  loading: () => (
+    <div className="flex h-full w-full flex-col items-center justify-center gap-2 text-[13px] text-muted-foreground">
+      <Loader2 className="h-5 w-5 animate-spin" aria-hidden="true" />
+      正在打开真机微信接入…
+    </div>
+  ),
+});
+const QqConnectPage = nextDynamic(() => import('./qq-app/connect').then((m) => m.QqConnectPage), {
+  ssr: false,
+  loading: () => (
+    <div className="flex h-full w-full flex-col items-center justify-center gap-2 text-[13px] text-muted-foreground">
+      <Loader2 className="h-5 w-5 animate-spin" aria-hidden="true" />
+      正在打开真机 QQ 接入…
+    </div>
+  ),
+});
+
+/** 真机接入登录态（主视图两行的副文案）：null=未接入，''=已接入未绑角色，其余=绑定角色名。
+ *  store 动态 import + boot（幂等，接入页挂载会再 boot 无碍）；订阅在卸载时统一退订。 */
+function useRealDeviceLogin(): { wx: string | null; qq: string | null } {
+  const [wx, setWx] = useState<string | null>(null);
+  const [qq, setQq] = useState<string | null>(null);
+  useEffect(() => {
+    const unsubs: Array<() => void> = [];
+    let dead = false;
+    void import('@/lib/ios/weixin-connect').then((m) => {
+      if (dead) return;
+      void m.useWxConnect.getState().boot();
+      unsubs.push(m.useWxConnect.subscribe((s) => setWx(s.login ? s.login.boundContactName || '' : null)));
+    });
+    void import('@/lib/ios/qq-connect').then((m) => {
+      if (dead) return;
+      void m.useQqConnect.getState().boot();
+      unsubs.push(m.useQqConnect.subscribe((s) => setQq(s.login ? s.login.boundContactName || '' : null)));
+    });
+    return () => {
+      dead = true;
+      while (unsubs.length) unsubs.pop()?.();
+    };
+  }, []);
+  return { wx, qq };
+}
+
+/** 真机接入子页的角色候选（kind==='char' 联系人，App 投影 + 展示名口径同微信/QQ App 内）。
+ *  enabled=false（主视图）不拉取——打开子页才读 IndexedDB。 */
+function useConnectContacts(app: 'wx' | 'qq', enabled: boolean): ContactRecord[] {
+  const [list, setList] = useState<ContactRecord[]>([]);
+  useEffect(() => {
+    if (!enabled) return;
+    let dead = false;
+    void listContactsFor(app)
+      .then((raw) => {
+        if (!dead) setList(withDisplayNames(raw, { social: true, app }));
+      })
+      .catch(() => undefined);
+    return () => {
+      dead = true;
+    };
+  }, [app, enabled]);
+  return list;
+}
 
 /** 云端助手 · 输入框样式（API 设置页同款观感） */
 const CLOUD_INPUT_CLS =
@@ -9170,7 +9232,9 @@ function AutoEnsureGatewayEffect({ dep }: { dep: boolean }) {
  * 官方 WebSocket 长连接 + 微信即时轮询，回复接近秒回；与云端定时任务并发跑安全——
  * v9 轮询锁 + 认领表）。凭证只在用户浏览器密文保存（wx-cloud/store）。接入/换绑/断开、
  * 改「API 设置」都会自动同步运行包（配置中心仍是 Supabase，云端 60 秒内跟上）。
- * 使用顺序（强制）：必须先在这里部署云端，才能到微信「我」页 / QQ「动态」页接入真机。
+ * v22 真机接入收拢：原 微信「我」页 / QQ「动态」页的两个接入界面迁到本页「真机接入」
+ * 分组（sub 整页切换 + embedded 内嵌，两页动态加载）；使用顺序（强制）：先在这里部署云端，
+ * 再到「真机接入」扫码接入真机。
  */
 function CloudPage({ onBack }: { onBack: () => void }) {
   // —— 部署状态中心（挂载时 boot 拉取密文持久化状态） ——
@@ -9184,6 +9248,13 @@ function CloudPage({ onBack }: { onBack: () => void }) {
   const clearPlatform = useWxCloud((s) => s.clearPlatform);
 
   const [toastMsg, showToast] = useLocalToast();
+
+  // —— v22 真机接入子页：'main' 主视图；'wx'/'qq' 整页切到对应接入页（宿主导航 + embedded）——
+  const [sub, setSub] = useState<'main' | 'wx' | 'qq'>('main');
+  /** 主视图两行副文案用的登录态（null=未接入，''=已接入未绑角色，其余=角色名） */
+  const deviceLogin = useRealDeviceLogin();
+  /** 子页角色候选（打开子页才拉取） */
+  const subContacts = useConnectContacts(sub === 'qq' ? 'qq' : 'wx', sub !== 'main');
 
   useEffect(() => {
     void boot();
@@ -9598,6 +9669,32 @@ function CloudPage({ onBack }: { onBack: () => void }) {
     showToast('已清除全部云端配置');
   };
 
+  // —— 真机接入子页（v22）：整页切换——宿主导航 + 接入页铺满内容区（embedded 不渲染
+  //    自带顶栏；两页自带浅灰底色，导航透传同色无缝衔接） ——
+  if (sub !== 'main') {
+    const isWx = sub === 'wx';
+    return (
+      <div
+        data-testid={isWx ? 'cloud-device-wx-page' : 'cloud-device-qq-page'}
+        className={`relative flex h-full w-full flex-col ${isWx ? 'bg-[#EDEDED] dark:bg-[#111111]' : 'bg-[#F6F7F9] dark:bg-[#111214]'}`}
+      >
+        <IOSNavBar
+          title={isWx ? '真机微信' : '真机 QQ'}
+          large={false}
+          left={<IOSBackButton onClick={() => setSub('main')} label="云端助手" />}
+          className="bg-transparent! backdrop-blur-none!"
+        />
+        <div className="relative min-h-0 flex-1">
+          {isWx ? (
+            <WeixinConnectPage contacts={subContacts} onBack={() => setSub('main')} embedded />
+          ) : (
+            <QqConnectPage contacts={subContacts} onBack={() => setSub('main')} embedded />
+          )}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <DetailShell title="云端助手" onBack={onBack} gray>
       <div className="flex flex-col gap-5">
@@ -9658,7 +9755,7 @@ function CloudPage({ onBack }: { onBack: () => void }) {
             <CloudFold title="使用说明" testid="cloud-help-fold">
               <div className="space-y-2 text-[12px] leading-relaxed text-muted-foreground">
                 <p>① 填 Access Token → 读取项目 → 一键部署（自动开 24 小时收发）。</p>
-                <p>② 到 微信「我」页 / QQ「动态」页扫码接入真机。</p>
+                <p>② 在下方「真机接入」里给微信 / QQ 扫码带上 TA。</p>
                 <p>③ 之后云端 24 小时自动收发；换角色 / 改「API 设置」会自动同步，60 秒内生效。</p>
                 <p>④ 云端函数、定时任务、聊天记录全在你的 Supabase 里——本站关了 TA 照样在线。</p>
               </div>
@@ -9670,46 +9767,8 @@ function CloudPage({ onBack }: { onBack: () => void }) {
             （幂等：已在跑则什么都不做） */}
         <AutoEnsureGatewayEffect dep={ready && supaDeployed} />
 
-        {/* 分组一：运行平台（Supabase 一键部署，选中即切换） */}
-        <section>
-          <SectionLabel icon={CloudUpload} tone={TONE_BLUE}>运行平台</SectionLabel>
-          <div role="radiogroup" aria-label="运行平台">
-            <GroupCard>
-              {CLOUD_PLATFORM_OPTIONS.map((o) => {
-                const active = platform === o.id;
-                return (
-                  <button
-                    key={o.id}
-                    type="button"
-                    role="radio"
-                    aria-checked={active}
-                    data-testid={`cloud-platform-${o.id}`}
-                    onClick={() => setPlatform(o.id)}
-                    className={`flex min-h-[56px] w-full items-center gap-3 px-4 py-2 text-left transition-colors active:bg-muted/50 ${
-                      active ? 'bg-[#34C759]/[0.05]' : ''
-                    }`}
-                  >
-                    <RowIcon icon={o.icon} tone={o.tone} />
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate text-[16px]">{o.label}</span>
-                      <span className="mt-0.5 block truncate text-[11.5px] text-muted-foreground">{o.desc}</span>
-                    </span>
-                    <span
-                      aria-hidden="true"
-                      className={`flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-full border-[1.5px] transition-colors ${
-                        active ? 'border-[#34C759] bg-[#34C759]' : 'border-black/20 dark:border-white/30'
-                      }`}
-                    >
-                      {active ? <Check className="h-3.5 w-3.5 text-white" strokeWidth={3} /> : null}
-                    </span>
-                  </button>
-                );
-              })}
-            </GroupCard>
-          </div>
-        </section>
-
-        {/* 分组二：Supabase 连接（云端配置都存用户自己的 Supabase） */}
+        {/* 分组一：Supabase 连接（云端配置都存用户自己的 Supabase；v22 平台只此一条路，
+            单选项的「运行平台」单选组已删——平台值恒为 supabase，存量迁移在挂载 effect 里） */}
         {cloudOn && (
           <section>
             <SectionLabel icon={Database} tone={TONE_GREEN}>Supabase 连接</SectionLabel>
@@ -10056,6 +10115,48 @@ function CloudPage({ onBack }: { onBack: () => void }) {
             </div>
           </section>
         )}
+
+        {/* 分组二：真机接入（v22 收拢）：原 微信「我」页 / QQ「动态」页的两个接入界面迁到
+            这里统一管理——行状态直读对应接入 store（登录态 + 绑定角色名），点开整页切换 */}
+        <section>
+          <SectionLabel icon={Smartphone} tone={TONE_BLUE}>真机接入</SectionLabel>
+          <div role="menu" aria-label="真机接入">
+            <GroupCard>
+              {(
+                [
+                  { id: 'wx', icon: MessageCircle, tone: '#07C160', label: '微信', name: deviceLogin.wx },
+                  { id: 'qq', icon: Bot, tone: '#0099FF', label: 'QQ', name: deviceLogin.qq },
+                ] as const
+              ).map((o) => {
+                const connected = o.name !== null;
+                return (
+                  <button
+                    key={o.id}
+                    type="button"
+                    role="menuitem"
+                    aria-label={`真机${o.label}接入`}
+                    data-testid={`cloud-device-${o.id}`}
+                    onClick={() => setSub(o.id)}
+                    className="flex min-h-[56px] w-full items-center gap-3 px-4 py-2 text-left transition-colors active:bg-muted/50"
+                  >
+                    <RowIcon icon={o.icon} tone={o.tone} />
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-[16px]">{o.label}</span>
+                      <span
+                        className={`mt-0.5 block truncate text-[11.5px] ${
+                          connected ? 'text-emerald-600 dark:text-emerald-400' : 'text-muted-foreground/80'
+                        }`}
+                      >
+                        {connected ? (o.name === '' ? '已接入 · 未绑定角色' : `已接入 · ${o.name}`) : supaDeployed ? '未接入 · 点开扫码带上 TA' : '部署云端后扫码接入'}
+                      </span>
+                    </span>
+                    <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground/60" aria-hidden="true" />
+                  </button>
+                );
+              })}
+            </GroupCard>
+          </div>
+        </section>
 
         {/* 底部危险区：清除云端配置（二次确认） */}
         <section>

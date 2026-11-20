@@ -1,8 +1,11 @@
 'use client';
 
 /**
- * 「接入QQ」页（动态页入口）—— QQ 官方机器人平台（q.qq.com）接入 UI · v21 精简版。
+ * 「真机 QQ 接入」页 —— QQ 官方机器人平台（q.qq.com）接入 UI · v22 云端助手内嵌版。
  *
+ * v22（用户定调「移进云端助手、换名、简约」）：本页从 QQ「动态」页迁到 设置 → 云端助手
+ *  → 真机接入（embedded=true 时不再渲染自带顶部导航与状态栏占位，宿主 CloudPage 提供
+ *  导航与页面容器；根容器仍占满宿主内容区）。
  * v21 精简（用户定调「删无用功能」）：QQ 秒回加速、真机 QQ 能力（斗图模式）、拉取云端
  * 聊天记录均已下线——真机收发由云端 Supabase 定时任务 7×24 承担（QQ 官方 WebSocket
  * 长连接）；聊天记录由 cloud-history-sync 常驻自动同步；网关加速由 设置 → 云端助手 统一管理。
@@ -183,7 +186,16 @@ function BannerLine({
   );
 }
 
-export function QqConnectPage({ contacts, onBack }: { contacts: ContactRecord[]; onBack: () => void }) {
+export function QqConnectPage({
+  contacts,
+  onBack,
+  embedded = false,
+}: {
+  contacts: ContactRecord[];
+  onBack: () => void;
+  /** 云端助手内嵌模式：不渲染自带顶部导航（宿主提供），页面铺满宿主内容区 */
+  embedded?: boolean;
+}) {
   // store：boot 读本地凭证；test 成功（或网络不通兜底）即保存；bindContact 绑定角色；disconnect 清除；
   // qr/startQrBind/stopQrBind：官方扫码绑定会话（页面生成二维码 → 手机 QQ 扫码确认即接入）
   const { ready, login, testing, verifying, lastTest, boot, test, verifyViaCloud, bindContact, disconnect, qr, startQrBind, stopQrBind } = useQqConnect();
@@ -330,14 +342,19 @@ export function QqConnectPage({ contacts, onBack }: { contacts: ContactRecord[];
   };
 
   return (
-    <div data-testid="qq-bot-page" className="relative flex h-full flex-col bg-[#F6F7F9] pt-[54px] dark:bg-[#111214]">
-      {/* 顶部导航（QQ 子页风格：返回 + 居中标题） */}
-      <div className="relative flex h-12 shrink-0 items-center bg-[#F6F7F9] px-3 dark:bg-[#111214]">
-        <button type="button" aria-label="返回" onClick={onBack} className="-ml-1 rounded-full p-1.5 active:bg-black/5 dark:active:bg-white/10">
-          <ChevronLeft className="h-6 w-6" strokeWidth={2.2} />
-        </button>
-        <span className="absolute left-1/2 -translate-x-1/2 text-[17px] font-medium">接入QQ</span>
-      </div>
+    <div
+      data-testid="qq-bot-page"
+      className={`relative flex h-full flex-col bg-[#F6F7F9] dark:bg-[#111214]${embedded ? '' : ' pt-[54px]'}`}
+    >
+      {/* 顶部导航（QQ 子页风格：返回 + 居中标题；云端助手内嵌时省略——宿主导航已在） */}
+      {!embedded && (
+        <div className="relative flex h-12 shrink-0 items-center bg-[#F6F7F9] px-3 dark:bg-[#111214]">
+          <button type="button" aria-label="返回" onClick={onBack} className="-ml-1 rounded-full p-1.5 active:bg-black/5 dark:active:bg-white/10">
+            <ChevronLeft className="h-6 w-6" strokeWidth={2.2} />
+          </button>
+          <span className="absolute left-1/2 -translate-x-1/2 text-[17px] font-medium">接入QQ</span>
+        </div>
+      )}
 
       <div className="flex-1 overflow-y-auto px-4 pb-[44px] pt-2">
         {/* ===== 云端状态横幅（v21 精简）：已部署绿条 / 已接入但未部署警示 ===== */}
@@ -347,7 +364,7 @@ export function QqConnectPage({ contacts, onBack }: { contacts: ContactRecord[];
           <BannerLine
             tone="warn"
             text="云端未部署：QQ 收发消息已停摆"
-            detail={{ title: '云端未部署会怎样？', paras: ['QQ 收发的配置中心/聊天历史存云端——不部署云端就无法收发。', '路径：设置 → 云端助手（Supabase 一键部署即可），部署完自动恢复。'] }}
+            detail={{ title: '云端未部署会怎样？', paras: ['QQ 收发的配置中心/聊天历史存云端——不部署云端就无法收发。', embedded ? '在本页上方「Supabase 连接」完成一键部署，部署完自动恢复。' : '路径：设置 → 云端助手（Supabase 一键部署即可），部署完自动恢复。'] }}
           />
         ) : null}
 
@@ -358,7 +375,7 @@ export function QqConnectPage({ contacts, onBack }: { contacts: ContactRecord[];
               <BannerLine
                 tone="warn"
                 text="先部署云端助手，才能接入 QQ"
-                detail={{ title: '为什么要先部署云端？', paras: ['QQ 收发消息走云端 Webhook——不部署云端就无法接入。', '路径：设置 → 云端助手（Supabase 一键部署即可），部署完回来扫码或填凭证。'] }}
+                detail={{ title: '为什么要先部署云端？', paras: ['QQ 收发消息走云端 Webhook——不部署云端就无法接入。', embedded ? '在本页上方「Supabase 连接」完成一键部署，再回来扫码或填凭证。' : '路径：设置 → 云端助手（Supabase 一键部署即可），部署完回来扫码或填凭证。'] }}
               />
             </div>
           ) : (

@@ -52,7 +52,7 @@ import { ChatPage } from './chat-page';
 import { LS_QQ_CHECKIN, LS_WALLET, LS_WALLET_BILLS, LS_WALLET_CARDS, LS_ZONE_COMMENTS, LS_ZONE_LIKES, LS_ZONE_POSTS, QQUser, RtTabIconOf, TAB_ACTIVE, bumpQqSessionEpoch, consumedQqAiEvents, expireStaleSingleCards, loadMsgs, qqQueuedTurns, queuedTurnsKey, saveMsgs } from './core';
 import { AddFriendPage, ApplyFriendPage, ContactsPage, DiscoverPage, FriendBondPage, FriendProfilePage, FriendReqDetailPage, LS_CHAT_HIDDEN, MeDrawer, MessagesPage, NewFriendsPage, ProfilePage, QqFavoritesPage, QqSearchPage, SecurityPage, SettingsPage, qqUnreads } from './pages';
 import { QqStickersPage } from './stickers';
-import { QqConnectPage } from './connect';
+// v22 接入QQ 迁到 设置 → 云端助手 → 真机接入（qq-app/connect 不再由本文件引用）
 import { LS_VAULT_EARN, QQ_LS_PAY_PWD_LOCK } from './wallet';
 import { WalletPage } from './wallet-pages';
 import { QqAvatar, QqToast } from './widgets';
@@ -78,7 +78,6 @@ export type MainRoute =
   | { page: 'zone-compose'; /** 与 zone 同源（写说说返回时保留「我的空间」语境） */ scope?: 'mine'; from?: 'profile' }
   | { page: 'zone-notices' }
   | { page: 'momentsSettings' }
-  | { page: 'botConnect' }
   | { page: 'dress' }
   | { page: 'settings' }
   | { page: 'security' }
@@ -729,9 +728,6 @@ export function MainScreen({
             setRoute({ page: 'zone' });
           }}
         />
-      ) : route.page === 'botConnect' ? (
-        // 接入QQ（动态页入口）：QQ 官方机器人平台凭证接入 + 角色绑定 + 出码添加（contacts 供段二选择角色网格）
-        <QqConnectPage contacts={contacts} onBack={() => openTabs('动态')} />
       ) : route.page === 'wallet' ? (
         <WalletPage me={me} onBack={() => openTabs('消息')} onToast={showToast} />
       ) : route.page === 'stickers' ? (
@@ -852,7 +848,6 @@ export function MainScreen({
                 onAvatar={() => setDrawerOpen(true)}
                 onZone={() => setRoute({ page: 'zone' })}
                 onOpenMomentsSettings={() => setRoute({ page: 'momentsSettings' })}
-                onOpenConnect={() => setRoute({ page: 'botConnect' })}
                 zoneBadge={qqNoticeBadge.count}
                 onToast={showToast}
               />
