@@ -228,6 +228,12 @@ model ReadingSetting {
   profileAvatar String?
   /// 书架自定义分组名列表（JSON 数组字符串）
   customGroups  String   @default("[]")
+  /// 阅读页脚：显示时间
+  showTime      Boolean  @default(true)
+  /// 阅读页脚：显示电量
+  showBattery   Boolean  @default(true)
+  /// 排版预设列表（JSON 数组字符串 [{id,name,data:{...}}]）
+  presets       String   @default("[]")
   updatedAt     DateTime @updatedAt
 }
 

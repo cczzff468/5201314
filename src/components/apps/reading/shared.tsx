@@ -37,6 +37,12 @@ export interface ReaderSettings {
   justify: boolean;
   bottomAlign: boolean;
   underline: boolean;
+  /** 阅读页脚：显示时间 */
+  showTime: boolean;
+  /** 阅读页脚：显示电量 */
+  showBattery: boolean;
+  /** 排版预设（保存的排版方案） */
+  presets: ReaderPreset[];
   /** 我的资料：昵称 / 自定义 ID / 头像 */
   profileName: string | null;
   profileId: string | null;
@@ -45,8 +51,30 @@ export interface ReaderSettings {
   customGroups: string[];
 }
 
+/** 排版预设（「保存排版」一键回切） */
+export interface ReaderPreset {
+  id: string;
+  name: string;
+  data: Pick<
+    ReaderSettings,
+    | 'fontSize'
+    | 'fontFamily'
+    | 'fontWeight'
+    | 'letterSpacing'
+    | 'lineSpacing'
+    | 'paraSpacing'
+    | 'marginLeft'
+    | 'marginRight'
+    | 'marginTop'
+    | 'marginBottom'
+    | 'titlePosition'
+    | 'justify'
+    | 'underline'
+  >;
+}
+
 export const DEFAULT_SETTINGS: ReaderSettings = {
-  fontSize: 19,
+  fontSize: 20,
   fontFamily: 'system',
   fontWeight: 'normal',
   bgTheme: 'paper',
@@ -64,6 +92,9 @@ export const DEFAULT_SETTINGS: ReaderSettings = {
   justify: true,
   bottomAlign: false,
   underline: false,
+  showTime: true,
+  showBattery: true,
+  presets: [],
   profileName: null,
   profileId: null,
   profileAvatar: null,

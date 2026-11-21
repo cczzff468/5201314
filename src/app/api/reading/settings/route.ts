@@ -6,7 +6,7 @@ export const dynamic = 'force-dynamic';
 
 /** 排版设置默认值（与 Prisma 默认一致，客户端首屏兜底也用同一份结构） */
 export const DEFAULT_READING_SETTINGS = {
-  fontSize: 19,
+  fontSize: 20,
   fontFamily: 'system',
   fontWeight: 'normal',
   bgTheme: 'paper',
@@ -24,6 +24,9 @@ export const DEFAULT_READING_SETTINGS = {
   justify: true,
   bottomAlign: false,
   underline: false,
+  showTime: true,
+  showBattery: true,
+  presets: [] as unknown[],
   profileName: null as string | null,
   profileId: null as string | null,
   profileAvatar: null as string | null,
@@ -66,6 +69,8 @@ function coerce(raw: Partial<Record<keyof SettingsPatch, unknown>>): Partial<Set
   if (typeof raw.justify === 'boolean') out.justify = raw.justify;
   if (typeof raw.bottomAlign === 'boolean') out.bottomAlign = raw.bottomAlign;
   if (typeof raw.underline === 'boolean') out.underline = raw.underline;
+  if (typeof raw.showTime === 'boolean') out.showTime = raw.showTime;
+  if (typeof raw.showBattery === 'boolean') out.showBattery = raw.showBattery;
   // 我的资料：昵称 / 自定义 ID / 头像（dataURL，限制 1.5MB）
   for (const k of ['profileName', 'profileId'] as const) {
     const v = raw[k];
@@ -91,6 +96,35 @@ function coerce(raw: Partial<Record<keyof SettingsPatch, unknown>>): Partial<Set
     }
     out.customGroups = [...new Set(groups.map((g) => g.trim().slice(0, 20)).filter(Boolean))].slice(0, 30);
   }
+  // 排版预设列表（限 12 个；data 只保留白名单键，防脏数据入库）
+  if (raw.presets !== undefined) {
+    let arr: unknown[] = [];
+    if (typeof raw.presets === 'string') {
+      try {
+        arr = JSON.parse(raw.presets) as unknown[];
+      } catch {
+        arr = [];
+      }
+    } else if (Array.isArray(raw.presets)) arr = raw.presets;
+    const PRESET_KEYS = new Set([
+      'fontSize', 'fontFamily', 'fontWeight', 'letterSpacing', 'lineSpacing', 'paraSpacing',
+      'marginLeft', 'marginRight', 'marginTop', 'marginBottom', 'titlePosition', 'justify', 'underline',
+    ]);
+    const cleaned = arr
+      .filter((x): x is Record<string, unknown> => !!x && typeof x === 'object' && typeof (x as Record<string, unknown>).name === 'string')
+      .slice(0, 12)
+      .map((x, i) => ({
+        id: typeof x.id === 'string' ? x.id.slice(0, 40) : `p${Date.now()}_${i}`,
+        name: String(x.name).trim().slice(0, 16) || `预设${i + 1}`,
+        data: (() => {
+          const d = (x.data && typeof x.data === 'object' ? x.data : {}) as Record<string, unknown>;
+          const o: Record<string, unknown> = {};
+          for (const k of PRESET_KEYS) if (k in d) o[k] = d[k];
+          return o;
+        })(),
+      }));
+    (out as Record<string, unknown>).presets = cleaned;
+  }
   // 自定义背景/字体为 dataURL（限制 3MB，防止超大文件入库）
   for (const k of ['bgCustom', 'fontCustom'] as const) {
     const v = raw[k];
@@ -110,10 +144,24 @@ export async function GET() {
   } catch {
     groups = [];
   }
+  let presets: unknown[] = [];
+  try {
+    presets = JSON.parse(row.presets || '[]') as unknown[];
+  } catch {
+    presets = [];
+  }
+  // 一次性迁移：旧默认字号 19 → 新默认 20（用户手动改过的其他值不动）
+  let fontSize = row.fontSize;
+  if (fontSize === 19) {
+    fontSize = 20;
+    void db.readingSetting
+      .update({ where: { id: 'singleton' }, data: { fontSize: 20 } })
+      .catch(() => null);
+  }
   return NextResponse.json({
     settings: {
       ...DEFAULT_READING_SETTINGS,
-      fontSize: row.fontSize,
+      fontSize,
       fontFamily: row.fontFamily,
       fontWeight: row.fontWeight,
       bgTheme: row.bgTheme,
@@ -131,11 +179,14 @@ export async function GET() {
       justify: row.justify,
       bottomAlign: row.bottomAlign,
       underline: row.underline,
+      showTime: row.showTime,
+      showBattery: row.showBattery,
+      presets,
       profileName: row.profileName,
       profileId: row.profileId,
       profileAvatar: row.profileAvatar,
       customGroups: groups,
-    } satisfies Settings,
+    },
   });
 }
 
@@ -143,10 +194,11 @@ export async function GET() {
 export async function PUT(req: NextRequest) {
   const raw = (await req.json().catch(() => ({}))) as Record<string, unknown>;
   const patch = coerce(raw as Partial<Record<keyof SettingsPatch, unknown>>);
-  // customGroups 单独序列化（Prisma 存 JSON 字符串）
-  const { customGroups, ...rest } = patch;
+  // customGroups / presets 单独序列化（Prisma 存 JSON 字符串）
+  const { customGroups, presets, ...rest } = patch as Record<string, unknown>;
   const data: Record<string, unknown> = { ...rest };
   if (customGroups !== undefined) data.customGroups = JSON.stringify(customGroups);
+  if (presets !== undefined) data.presets = JSON.stringify(presets);
   await db.readingSetting.upsert({
     where: { id: 'singleton' },
     update: { ...data },

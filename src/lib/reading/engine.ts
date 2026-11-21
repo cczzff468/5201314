@@ -513,7 +513,16 @@ function applyChain(ctx: Extract<Ctx, { kind: 'html' }>, segs: Seg[], asList: bo
     } else if (seg.type === 'id') sel = `#${seg.value}`;
     else if (seg.type === 'tag') sel = seg.value;
     else sel = seg.value; // css
-    let found = scoped || el ? scopeSel($, el && !scoped ? el : undefined, sel).toArray() : $(sel).toArray();
+    // 链式作用域：首段在 ctx.el 范围（或全局），后续段都在「上一步结果」内查找
+    // （Legado 语义：class.a@tag.b@text 的 tag.b 是 class.a 命中元素里的 b，不是全页的 b）
+    let found: AnyNode[];
+    if (scoped) {
+      found = nodes.flatMap((n) => $(n).find(sel).addBack(sel).toArray());
+    } else if (el) {
+      found = scopeSel($, el, sel).toArray();
+    } else {
+      found = $(sel).toArray();
+    }
     if (seg.type === 'id') found = found.slice(0, 1);
     if (seg.index !== undefined) {
       found = seg.index < 0 ? found.slice(seg.index) : found.slice(seg.index, seg.index + 1);
@@ -806,11 +815,14 @@ export function parseUrlTpl(
 
 async function fetchCtx(source: LegadoSource, p: ParsedUrl): Promise<{ ctx: Ctx; finalUrl: string }> {
   const headers = { ...sourceHeaders(source, p.url), ...(p.headers || {}) };
+  // 书源可自定义超时（慢站如 52书库 10-15s；默认 12s）
+  const srcTimeout = typeof source.timeoutMs === 'number' && source.timeoutMs > 0 ? source.timeoutMs : undefined;
   const res = await proxyFetch(p.url, {
     method: p.method,
     headers,
     body: p.body,
     charset: p.charset,
+    ...(srcTimeout ? { timeoutMs: srcTimeout } : {}),
   });
   const trimmed = res.text.trimStart();
   let ctx: Ctx;

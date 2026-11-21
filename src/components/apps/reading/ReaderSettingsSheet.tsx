@@ -1,12 +1,13 @@
 'use client';
 
 /**
- * 排版设置面板（底部抽屉，实时预览——滑块拖动底层正文立即变化）
- * 分组：字号/字体（含上传）/字重/行段字距（滑块）/页边距四向（滑块）/
- * 标题位置/对齐开关组/阅读背景（含上传）
+ * 排版设置面板（底部抽屉，实时预览——调整底层正文立即变化 + 分页实时重算）
+ * 分组：字号（加减步进器）/ 字重 / 字体（含上传）/ 排版预设（保存·应用·删除）/
+ * 行段字距（蓝色圆点滑块）/ 页边距四向 / 标题位置 / 开关组（两端对齐·下划线·时间·电量）/
+ * 阅读背景（含上传）
  */
 import { useRef, useState } from 'react';
-import { X, Upload, Check } from 'lucide-react';
+import { X, Upload, Check, Minus, Plus, BookmarkPlus, Trash2 } from 'lucide-react';
 import { useReading } from '@/lib/reading/store';
 import {
   BUILTIN_FONTS,
@@ -14,9 +15,13 @@ import {
   FONT_WEIGHTS,
   READ_BGS,
   themeOf,
+  type ReaderPreset,
 } from './shared';
 
 type RdTheme = ReturnType<typeof themeOf>;
+
+/** iOS 蓝（用户指定：滑块圆圈蓝色） */
+const BLUE = '#0A84FF';
 
 function Row({ label, children, theme }: { label: string; children: React.ReactNode; theme: RdTheme }) {
   return (
@@ -27,6 +32,7 @@ function Row({ label, children, theme }: { label: string; children: React.ReactN
   );
 }
 
+/** 蓝色圆点滑块 */
 function Slider({
   value,
   min,
@@ -53,8 +59,9 @@ function Slider({
         step={step}
         value={value}
         onChange={(e) => onChange(parseFloat(e.target.value))}
-        className="h-1.5 min-w-0 flex-1 cursor-pointer appearance-none rounded-full bg-black/10 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:border-2 [&::-webkit-slider-thumb]:border-white"
-        style={{ accentColor: theme.accent, ['--tw-shadow' as string]: theme.accent }}
+        aria-label="滑块"
+        className="h-1.5 min-w-0 flex-1 cursor-pointer appearance-none rounded-full bg-black/10 [&::-moz-range-thumb]:h-4 [&::-moz-range-thumb]:w-4 [&::-moz-range-thumb]:appearance-none [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-2 [&::-moz-range-thumb]:border-white [&::-moz-range-thumb]:bg-[#0A84FF] [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:border-2 [&::-webkit-slider-thumb]:border-white [&::-webkit-slider-thumb]:bg-[#0A84FF] [&::-webkit-slider-thumb]:shadow-[0_1px_4px_rgba(10,132,255,0.45)]"
+        style={{ accentColor: BLUE, ['--tw-shadow' as string]: theme.accent }}
       />
       <span className="w-[44px] shrink-0 text-right text-[11px] tabular-nums" style={{ color: theme.textSub }}>
         {format ? format(value) : value}
@@ -76,6 +83,25 @@ function Chip({ active, onClick, children, theme }: { active: boolean; onClick: 
   );
 }
 
+/** 开关行 */
+function Toggle({ label, on, onChange, theme }: { label: string; on: boolean; onChange: (v: boolean) => void; theme: RdTheme }) {
+  return (
+    <button
+      type="button"
+      onClick={() => onChange(!on)}
+      className="flex w-full items-center justify-between rounded-xl px-1 py-2.5 active:scale-[0.99]"
+    >
+      <span className="text-[14px]" style={{ color: theme.textMain }}>{label}</span>
+      <span
+        className={`flex h-[26px] w-[44px] items-center rounded-full px-0.5 transition-colors ${on ? 'justify-end' : 'justify-start bg-black/[0.12]'}`}
+        style={on ? { background: `linear-gradient(135deg, ${theme.gradFrom}, ${theme.gradTo})` } : undefined}
+      >
+        <span className="h-[22px] w-[22px] rounded-full bg-white shadow transition-transform" />
+      </span>
+    </button>
+  );
+}
+
 export function ReaderSettingsSheet({ onClose }: { onClose: () => void }) {
   const settings = useReading((s) => s.settings);
   const patch = useReading((s) => s.patchSettings);
@@ -84,6 +110,10 @@ export function ReaderSettingsSheet({ onClose }: { onClose: () => void }) {
   const bgInputRef = useRef<HTMLInputElement>(null);
   const fontInputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState('');
+  /** 预设命名（保存排版） */
+  const [naming, setNaming] = useState(false);
+  const [presetName, setPresetName] = useState('');
+  const [justSaved, setJustSaved] = useState(false);
 
   const onUploadBg = async (f: File | undefined) => {
     if (!f) return;
@@ -115,6 +145,41 @@ export function ReaderSettingsSheet({ onClose }: { onClose: () => void }) {
     setUploading('');
   };
 
+  /** 保存当前排版为预设 */
+  const savePreset = () => {
+    const name = presetName.trim().slice(0, 16);
+    if (!name) return;
+    const p: ReaderPreset = {
+      id: `p${Date.now()}`,
+      name,
+      data: {
+        fontSize: settings.fontSize,
+        fontFamily: settings.fontFamily,
+        fontWeight: settings.fontWeight,
+        letterSpacing: settings.letterSpacing,
+        lineSpacing: settings.lineSpacing,
+        paraSpacing: settings.paraSpacing,
+        marginLeft: settings.marginLeft,
+        marginRight: settings.marginRight,
+        marginTop: settings.marginTop,
+        marginBottom: settings.marginBottom,
+        titlePosition: settings.titlePosition,
+        justify: settings.justify,
+        underline: settings.underline,
+      },
+    };
+    patch({ presets: [...settings.presets, p].slice(-12) });
+    setPresetName('');
+    setNaming(false);
+    setJustSaved(true);
+    setTimeout(() => setJustSaved(false), 1800);
+  };
+
+  const applyPreset = (p: ReaderPreset) => patch(p.data);
+  const deletePreset = (id: string) => patch({ presets: settings.presets.filter((x) => x.id !== id) });
+
+  const groupBg = dark ? 'rgba(255,255,255,0.05)' : 'rgba(120,128,140,0.07)';
+
   return (
     <div className="absolute inset-0 z-40" role="dialog" aria-label="排版设置">
       <button type="button" aria-label="关闭设置" className="absolute inset-0 bg-black/30 backdrop-blur-[2px]" onClick={onClose} />
@@ -141,9 +206,42 @@ export function ReaderSettingsSheet({ onClose }: { onClose: () => void }) {
         </p>
 
         <div className="px-5 pb-[max(20px,env(safe-area-inset-bottom))]">
-          {/* 字号 */}
+          {/* 字号：加减步进器 */}
           <Row theme={theme} label="字号">
-            <Slider theme={theme} value={settings.fontSize} min={12} max={32} step={1} onChange={(v) => patch({ fontSize: v })} format={(v) => `${v}px`} />
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                aria-label="减小字号"
+                disabled={settings.fontSize <= 12}
+                onClick={() => patch({ fontSize: Math.max(12, settings.fontSize - 1) })}
+                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full active:scale-90 disabled:opacity-30"
+                style={{ background: groupBg, color: theme.textMain }}
+              >
+                <Minus className="h-4 w-4" strokeWidth={2.6} />
+              </button>
+              <div className="flex min-w-0 flex-1 flex-col items-center">
+                <span
+                  className="text-[17px] font-bold leading-none tabular-nums"
+                  style={{ color: theme.textMain }}
+                  aria-live="polite"
+                >
+                  {settings.fontSize}
+                </span>
+                <span className="mt-1 text-[10px]" style={{ color: theme.textSub }}>
+                  px · 长按加减可连续调
+                </span>
+              </div>
+              <button
+                type="button"
+                aria-label="增大字号"
+                disabled={settings.fontSize >= 32}
+                onClick={() => patch({ fontSize: Math.min(32, settings.fontSize + 1) })}
+                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full active:scale-90 disabled:opacity-30"
+                style={{ background: `linear-gradient(135deg, ${theme.gradFrom}, ${theme.gradTo})`, color: '#fff', boxShadow: `0 3px 10px ${theme.accent}33` }}
+              >
+                <Plus className="h-4 w-4" strokeWidth={2.6} />
+              </button>
+            </div>
           </Row>
           {/* 字重 */}
           <Row theme={theme} label="字重">
@@ -172,9 +270,79 @@ export function ReaderSettingsSheet({ onClose }: { onClose: () => void }) {
           {uploading === 'font' && <p className="pl-[76px] text-[11px]" style={{ color: theme.accent }}>字体上传中…</p>}
           {uploading === 'fontErr' && <p className="pl-[76px] text-[11px] text-[#E05252]">仅支持 ttf/otf/woff/woff2 字体文件</p>}
 
-          {/* 间距滑块组 */}
-          <div className="mt-2 rounded-2xl p-3.5"
-          style={{ background: dark ? 'rgba(255,255,255,0.05)' : 'rgba(120,128,140,0.07)' }}>
+          {/* 排版预设 */}
+          <div className="mt-2 rounded-2xl p-3.5" style={{ background: groupBg }}>
+            <div className="flex items-center justify-between">
+              <p className="text-[12px] font-semibold" style={{ color: theme.textMain }}>
+                排版预设
+              </p>
+              <button
+                type="button"
+                onClick={() => setNaming((v) => !v)}
+                className="flex items-center gap-1 rounded-full px-3 py-1.5 text-[11px] font-semibold active:scale-95"
+                style={{ background: `linear-gradient(135deg, ${theme.gradFrom}, ${theme.gradTo})`, color: '#fff', boxShadow: `0 3px 10px ${theme.accent}33` }}
+              >
+                <BookmarkPlus className="h-3.5 w-3.5" /> 保存当前排版
+              </button>
+            </div>
+            {naming && (
+              <div className="mt-2.5 flex items-center gap-2">
+                <input
+                  value={presetName}
+                  onChange={(e) => setPresetName(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') savePreset();
+                  }}
+                  placeholder="给这套排版起个名字（如：夜间大字）"
+                  maxLength={16}
+                  className="h-9 min-w-0 flex-1 rounded-xl bg-black/[0.06] px-3 text-[13px] outline-none"
+                  style={{ color: theme.textMain }}
+                  autoFocus
+                />
+                <button
+                  type="button"
+                  onClick={savePreset}
+                  disabled={!presetName.trim()}
+                  className="h-9 shrink-0 rounded-xl px-4 text-[12px] font-semibold text-white disabled:opacity-40"
+                  style={{ background: BLUE }}
+                >
+                  保存
+                </button>
+              </div>
+            )}
+            {justSaved && <p className="mt-1.5 text-[11px]" style={{ color: theme.accent }}>已保存 ✓ 可随时点击预设一键切换</p>}
+            {settings.presets.length === 0 ? (
+              <p className="mt-2 text-[11px] leading-relaxed" style={{ color: theme.textSub }}>
+                还没有预设。调好字号、行距、边距后点「保存当前排版」，下次一键恢复。
+              </p>
+            ) : (
+              <div className="mt-2.5 flex flex-wrap gap-2">
+                {settings.presets.map((p) => (
+                  <span
+                    key={p.id}
+                    className="group flex items-center gap-1 rounded-full py-1 pl-3 pr-1 text-[12px] font-medium"
+                    style={{ background: 'rgba(120,128,140,0.14)', color: theme.textMain }}
+                  >
+                    <button type="button" onClick={() => applyPreset(p)} className="active:scale-95" aria-label={`应用预设 ${p.name}`}>
+                      {p.name}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => deletePreset(p.id)}
+                      className="flex h-5 w-5 items-center justify-center rounded-full active:scale-90"
+                      style={{ color: theme.textSub }}
+                      aria-label={`删除预设 ${p.name}`}
+                    >
+                      <Trash2 className="h-3 w-3" />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* 间距滑块组（蓝色圆点） */}
+          <div className="mt-2 rounded-2xl p-3.5" style={{ background: groupBg }}>
             <Row theme={theme} label="行间距">
               <Slider theme={theme} value={settings.lineSpacing} min={1.2} max={3} step={0.05} onChange={(v) => patch({ lineSpacing: v })} format={(v) => v.toFixed(2)} />
             </Row>
@@ -187,8 +355,7 @@ export function ReaderSettingsSheet({ onClose }: { onClose: () => void }) {
           </div>
 
           {/* 页边距 */}
-          <div className="mt-2 rounded-2xl p-3.5"
-          style={{ background: dark ? 'rgba(255,255,255,0.05)' : 'rgba(120,128,140,0.07)' }}>
+          <div className="mt-2 rounded-2xl p-3.5" style={{ background: groupBg }}>
             <Row theme={theme} label="左边距">
               <Slider theme={theme} value={settings.marginLeft} min={0} max={16} step={0.5} onChange={(v) => patch({ marginLeft: v })} format={(v) => `${v}vw`} />
             </Row>
@@ -212,28 +379,16 @@ export function ReaderSettingsSheet({ onClose }: { onClose: () => void }) {
             </div>
           </Row>
 
-          {/* 开关组（分页模式下无「底部对齐」） */}
+          {/* 开关组 */}
           <div className="mt-1 space-y-1">
-            {([
-              ['justify', '两端对齐'],
-              ['underline', '正文下划线'],
-            ] as const).map(([key, label]) => (
-              <button
-                key={key}
-                type="button"
-                onClick={() => patch({ [key]: !settings[key] } as Partial<typeof settings>)}
-                className="flex w-full items-center justify-between rounded-xl px-1 py-2.5 active:scale-[0.99]"
-              >
-                <span className="text-[14px]" style={{ color: theme.textMain }}>{label}</span>
-                <span
-                  className={`flex h-[26px] w-[44px] items-center rounded-full px-0.5 transition-colors ${settings[key] ? 'justify-end' : 'justify-start bg-black/[0.12]'}`}
-                style={settings[key] ? { background: `linear-gradient(135deg, ${theme.gradFrom}, ${theme.gradTo})` } : undefined}
-                >
-                  <span className={`h-[22px] w-[22px] rounded-full bg-white shadow transition-transform ${settings[key] ? '' : ''}`} />
-                </span>
-              </button>
-            ))}
+            <Toggle theme={theme} label="两端对齐" on={settings.justify} onChange={(v) => patch({ justify: v })} />
+            <Toggle theme={theme} label="正文下划线" on={settings.underline} onChange={(v) => patch({ underline: v })} />
+            <Toggle theme={theme} label="显示时间" on={settings.showTime} onChange={(v) => patch({ showTime: v })} />
+            <Toggle theme={theme} label="显示电量" on={settings.showBattery} onChange={(v) => patch({ showBattery: v })} />
           </div>
+          <p className="px-1 text-[10px] leading-relaxed" style={{ color: theme.textSub }}>
+            开启时间/电量后：页脚右下角显示时间与电量，章节号移到左下角与页码同排；关闭则章节号在右下角。
+          </p>
 
           {/* 阅读背景 */}
           <div className="mt-3">
