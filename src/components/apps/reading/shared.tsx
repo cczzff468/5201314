@@ -41,10 +41,28 @@ export interface ReaderSettings {
   showTime: boolean;
   /** 阅读页脚：显示电量 */
   showBattery: boolean;
-  /** 翻页动画：slide 平移 | cover 覆盖 | none 无动画 */
-  pageAnim: 'slide' | 'cover' | 'none';
-  /** 音量键/键盘方向键翻页 */
+  /** 翻页动画：slide 平移 | cover 覆盖 | none 无动画 | fade 淡入 | curl 仿真 | scroll 滚动 */
+  pageAnim: 'slide' | 'cover' | 'none' | 'fade' | 'curl' | 'scroll';
+  /** 音量键翻页（APK 原生壳生效；预览里等价方向键/PageUp/Down） */
   keyTurn: boolean;
+  /** 全屏点击翻页（左右1/3翻页·中丨1/3菜单；关闭后点屏幕只弹菜单） */
+  clickTurn: boolean;
+  /** 段首缩进（字数：0~4；默认 2） */
+  textIndent: number;
+  /** 中文排版优化（两端对齐时标点挤压更整齐） */
+  cjkOptimize: boolean;
+  /** 适配特殊样式（识别正文里 [newpage] 等特殊标记并优化排版） */
+  specialTags: boolean;
+  /** 繁简转换：off 关闭 | s2t 简转繁 | t2s 繁转简 */
+  s2t: 'off' | 's2t' | 't2s';
+  /** 屏幕亮度 0-100（100=最亮不遮罩；跟随系统亮度时不生效） */
+  brightness: number;
+  /** 亮度跟随系统（关闭后应用自定义亮度遮罩） */
+  brightnessAuto: boolean;
+  /** 屏幕常亮（阅读时保持亮屏） */
+  keepScreenOn: boolean;
+  /** 自动阅读：每 N 秒自动翻一页（0=关；建议 10-30） */
+  autoReadSec: number;
   /** 排版预设（保存的排版方案） */
   presets: ReaderPreset[];
   /** 我的资料：昵称 / 自定义 ID / 头像 */
@@ -74,6 +92,8 @@ export interface ReaderPreset {
     | 'titlePosition'
     | 'justify'
     | 'underline'
+    | 'textIndent'
+    | 'cjkOptimize'
   >;
 }
 
@@ -100,6 +120,15 @@ export const DEFAULT_SETTINGS: ReaderSettings = {
   showBattery: true,
   pageAnim: 'slide',
   keyTurn: false,
+  clickTurn: true,
+  textIndent: 2,
+  cjkOptimize: false,
+  specialTags: true,
+  s2t: 'off',
+  brightness: 100,
+  brightnessAuto: true,
+  keepScreenOn: false,
+  autoReadSec: 0,
   presets: [],
   profileName: null,
   profileId: null,

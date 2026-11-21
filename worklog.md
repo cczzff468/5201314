@@ -3282,3 +3282,19 @@ Work Log:
 
 Stage Summary:
 - 阅读 App v3：真机级分页阅读器（页级手势+章边界翻章+页码记忆）、沉浸式全屏（状态栏/灵动岛/语音球隐藏）、书架自定义分组+多选批量管理、独立历史Tab续读、图4风格详情页、我的头像/名字/ID、主题不再被覆盖、书源导入本地秒级
+
+## 2026-11-21 · 阅读 App v4：书源大内置（396合订本）+ 书源管理重设计 + 逐字选择 + 设置弹窗双层重构 + 音量键原生直通
+
+Task: 用户六图反馈（书源管理界面焕新/内置396书源/翻页边缘空白/长按逐字选择/音量键翻页无效/设置弹窗同款）
+
+- [书源大内置] builtin-sources.ts 重写：11 个双验证核心源 + user-sources.json（用户提供的396源精选合订本，2MB 字段裁剪后1.8MB）合并去重=407内置；老版仅单关键词通过的16个源全部除名；sources route ensureSeeded 三态化：新增补种（checkStatus 仅验证源标 ok）/已存在同URL只标 isBuiltin=true（保留ID与用户启停状态，书架历史引用零破坏）/已除名内置源自动删除+healSourceRefs 自愈——实测库：1112 源中 407 内置、110 启用（396合订本此前经筛活 101可用/295失效，尊重用户筛选结果，多选批量可一键启用）
+- [书源管理重设计·截图1同款] SourcesManager 全量重写：浅灰页底+白圆角卡片列表（彩色首字图标/名称+内置徽标/绿可用·灰停用·红失效胶囊+分组·网址/⋮菜单/iOS蓝开关）；顶栏 分组折叠+多选+校验（一键筛活进度）+蓝色+圆形；全圆角搜索框（名称/分组/网址三域模糊）；全部/已启用/已停用 + 分组chips 横滚 + 「共N个·N启用」统计；⋮菜单=校验此源/置顶/复制链接/删除（内置源改启停）；多选模式=标题已选N+底部批量启用/停用/删除；长按非内置源删除确认保留；恢复内置入口收进添加抽屉
+- [翻页边缘空白根修] 两根因：①页边距基座 18px 硬编码（滑块拉0仍有22px空白，翻页接缝两侧各叠出44px像被切割）→ 降为 3px，边距完全交给滑块（0即真0），实测文字边缘距屏缘从17px降到6px、页缘文字零空白；②覆盖动画前沿阴影太散 → 1px 描边 + 「-1px 2px/10% + -8px 22px/20%」双层锐利阴影（像真实书页边），像素级验证：前沿阴影带从无到有（亮度229→190→231清晰三段）
+- [长按逐字选择·截图2同款] 长按（touch 500ms / 桌面右键）→ caretRangeFromPoint 定位字符进入选区模式：灰底高亮单字 + 蓝色实心圆手柄（选区两端）+ 白色工具条（复制/划线/查询/搜索·蓝色图标+竖分隔线，与截图同款）；拖手柄经 window pointermove → caret 定位逐字扩缩（同段内，start<=end-1 钳制）；renderParaSegments 增加选区分段（与划线重叠时灰色盖划线）；划线动作带区间（startOff/endOff 精确到字），样式弹窗/笔记/从本段听/删除全部按区间工作，点已有划线直接回填其区间；翻页/换章自动清选区；实测：长按选中单字→拖手柄扩到5字→波浪划线落库成功
+- [设置弹窗双层重构·截图3/4同款] ReaderSettingsSheet 全量重写：第一层「阅读设置」= 拖动条+渐变圆图标标题+字号步进（−/17/+）+Aa字体入口（弹出字体横滚）+亮度滑块（跟随系统胶囊）+背景圆形色卡（置于字号下方，纸张/米黄/白/护眼/浅灰/夜间/自定义带文样字+蓝环选中）+翻页方式 2×3 胶囊（覆盖/滑动/仿真/滚动/淡入/无动画）+底部「▶自动阅读」「⚙更多设置›」；第二层「更多设置」= 搜索框（按设置项关键词过滤分组）+ 排版/翻页/屏幕/其它 四Tab：排版（排版方案N套徽标·间距组带春江花月夜实时预览·页边距四滑块·字体粗细·标题位置·段首缩进无1-4字·版式开关两端对齐/底部对齐/下划线/中文排版优化/适配特殊样式·繁简转换）翻页（音量键翻页【已改名、提示文案已删】/点击翻页/自动阅读10-30秒）屏幕（亮度/屏幕常亮/显示时间/显示电量）其它（字体+上传/排版方案管理/恢复默认排版）
+- [音量键翻页真直通·根因修复] 用户"开了没反应"根因：浏览器/WebView 里音量键被系统消费、keydown(24/25) 根本不派发到页面。原生层 MainActivity 增音量键拦截（volumeKeyTurn 静态开关 + onKeyDown/Up 消费 + evaluateJavascript 派发 window.__nativeVolTurn(±1)），NativePerception 插件增 setVolumeKeyTurn({enabled}) 桥方法；网页 ReaderView 进/出阅读器与开关联动同步状态 + __nativeVolTurn 回调翻页（音量上=上一页）；预览环境保留方向键/PageUp/Down/空格等价通道；版本 1.9.45→1.9.46（versionCode 21→62 对齐）、发版说明 5 条；旧 APK 静默降级不受影响
+- [新动画/新设置落地] pageAnim 扩6种：fade=淡入覆盖（opacity 0→1 无位移、取消直接消失）、curl=仿真（perspective+rotateY 88° 绕左/右缘3D翻入+阴影）、scroll=滚动阅读（页面纵向堆叠原生滚动，tap分区滚动92%屏高，滚动↔curPage双向同步翻页记忆保留、进度条页脚照常）；新增 settings：clickTurn 点击翻页、textIndent 段首缩进0-4字（测量/渲染同步）、cjkOptimize 中文排版优化（text-justify inter-character）、specialTags [newpage] 强制分页、s2t 繁简转换（lang-convert.ts 855组单字映射实测往返无损）、brightness/brightnessAuto 亮度遮罩（0.55系数盖层z15）、keepScreenOn WakeLock、autoReadSec 自动阅读（菜单打开自动暂停）；Prisma ReadingSetting 增9列 + settings route coerce/GET 全量适配 + 预设白名单加 textIndent/cjkOptimize
+- [E2E·Agent Browser] 书源管理：搜索框/chips统计「共1112·271启用」/卡片绿可用红失效/⋮菜单四项/多选「已选2项」+底部三键 ✓；设置双层弹窗结构/背景7圆/6动画/四Tab分组与预览诗句/音量键翻页无提示文案 ✓；长按逐字：touch长按选中单字+双蓝柄+工具条、拖柄扩选、波浪划线按区间落库 ✓；覆盖翻页：touch拖动-200前沿阴影带可见、松手越阈提交2/2 ✓；滚动模式：scrollHeight 1422 拖动+tap下一页滚动654页脚2/2同步 ✓；边缘：文字距屏缘6px（原17px）页缘零空白 ✓；tsc 0错、eslint reading 模块 0错0警
+- [构建] gradle 腾讯镜像被反爬拦截（返回989字节JS挑战页）→ 切华为云镜像重打 APK v1.9.46 成功部署 public/AI-Phone.apk，APP 内自动弹更新
+
+关键文件：src/lib/reading/builtin-sources.ts + user-sources.json（新增2MB）、SourcesManager.tsx（全量重写）、ReaderSettingsSheet.tsx（全量重写）、ReaderView.tsx（逐字选择+新动画+新设置+边缘修复+音量键桥）、lang-convert.ts（新增）、MainActivity.java + NativePerceptionPlugin.java（音量键直通）、app-version.ts（1.9.46/62）

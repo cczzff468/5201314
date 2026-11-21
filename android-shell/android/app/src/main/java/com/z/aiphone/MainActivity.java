@@ -8,6 +8,7 @@ import android.content.IntentFilter;
 import android.net.Uri;
 import android.os.Bundle;
 import android.os.Environment;
+import android.view.KeyEvent;
 import android.webkit.CookieManager;
 import android.webkit.DownloadListener;
 import android.widget.Toast;
@@ -21,8 +22,46 @@ public class MainActivity extends BridgeActivity {
     /** 公共下载目录里的目标文件名（与 getUriForFile / FileProvider 路径对应） */
     private static final String APK_FILE_NAME = "AI-Phone.apk";
 
+    /** 音量键翻页直通开关（阅读 App 通过 NativePerception.setVolumeKeyTurn 同步；
+     *  开启时音量上/下键不再调系统音量，改为向 WebView 派发 window.__nativeVolTurn(dir)） */
+    public static boolean volumeKeyTurn = false;
+
     /** 返回键/返回手势：上一次按下时间（双击退出的窗口判定） */
     private long lastBackAt = 0;
+
+    /** 音量键拦截：阅读器开启「音量键翻页」时消费音量键（不调系统音量），
+     *  转发给 WebView 的 window.__nativeVolTurn(±1)；关闭时保持系统默认行为。
+     *  纯浏览器/旧 APK 里音量键永远到不了网页层，这正是用户反馈"开了没反应"的根因。 */
+    @Override
+    public boolean onKeyDown(int keyCode, KeyEvent event) {
+        if (volumeKeyTurn
+                && (keyCode == KeyEvent.KEYCODE_VOLUME_UP || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN)) {
+            dispatchVolumeTurn(keyCode == KeyEvent.KEYCODE_VOLUME_UP ? -1 : 1);
+            return true; // 消费：不再调系统音量
+        }
+        return super.onKeyDown(keyCode, event);
+    }
+
+    @Override
+    public boolean onKeyUp(int keyCode, KeyEvent event) {
+        if (volumeKeyTurn
+                && (keyCode == KeyEvent.KEYCODE_VOLUME_UP || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN)) {
+            return true; // 同步消费，防止音量 UI 窗口弹出
+        }
+        return super.onKeyUp(keyCode, event);
+    }
+
+    /** 向 WebView 派发音量键翻页回调（音量上=-1 上一页；音量下=+1 下一页） */
+    private void dispatchVolumeTurn(final int dir) {
+        if (this.bridge == null || this.bridge.getWebView() == null) return;
+        this.bridge.getWebView().post(() -> {
+            try {
+                MainActivity.this.bridge.getWebView().evaluateJavascript(
+                        "(window.__nativeVolTurn && window.__nativeVolTurn(" + dir + "))", null);
+            } catch (Exception ignored) {
+            }
+        });
+    }
 
     /** 返回键/返回手势处理（v1.9.42 修复「点击悬浮球退出 APP」）：
      *  语音助手悬浮球吸附在屏幕右缘，轻触时的微小位移会被 Android 手势导航

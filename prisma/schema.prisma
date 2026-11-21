@@ -232,10 +232,28 @@ model ReadingSetting {
   showTime      Boolean  @default(true)
   /// 阅读页脚：显示电量
   showBattery   Boolean  @default(true)
-  /// 翻页动画：slide 平移 | cover 覆盖 | none 无动画
+  /// 翻页动画：slide 平移 | cover 覆盖 | none 无动画 | fade 淡入 | curl 仿真 | scroll 滚动
   pageAnim      String   @default("slide")
-  /// 音量键/键盘方向键翻页
+  /// 音量键翻页
   keyTurn       Boolean  @default(false)
+  /// 全屏点击翻页（左右1/3翻页·中间1/3菜单）
+  clickTurn     Boolean  @default(true)
+  /// 段首缩进（字数 0~4）
+  textIndent    Int      @default(2)
+  /// 中文排版优化（justify 时字符间挤压更整齐）
+  cjkOptimize   Boolean  @default(false)
+  /// 适配正文特殊标记（[newpage] 等）
+  specialTags   Boolean  @default(true)
+  /// 繁简转换 off | s2t | t2s
+  s2t           String   @default("off")
+  /// 屏幕亮度 0-100（自定义遮罩；brightnessAuto=true 时不生效）
+  brightness    Int      @default(100)
+  /// 亮度跟随系统
+  brightnessAuto Boolean @default(true)
+  /// 阅读时屏幕常亮
+  keepScreenOn  Boolean  @default(false)
+  /// 自动阅读：每 N 秒翻一页（0=关）
+  autoReadSec   Int      @default(0)
   /// 排版预设列表（JSON 数组字符串 [{id,name,data:{...}}]）
   presets       String   @default("[]")
   updatedAt     DateTime @updatedAt

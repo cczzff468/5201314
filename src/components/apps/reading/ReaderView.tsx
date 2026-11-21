@@ -9,12 +9,12 @@
  *   · 段落跨页续片无首行缩进，避免底部大片空白
  *   · 页宽取整（floor）——页/轨道/测量容器全部整数像素，翻页无亚像素缝隙
  *     （修复：翻页时左右边缘出现「被切开」的空白）
- * - 翻页动画（排版设置可选）：平移 slide（整排跟手移动）/ 覆盖 cover
- *   （新页带阴影盖过旧页）/ 无动画 none（瞬时切换）
- * - 翻页方式：跟手横滑 + 点按分区（左1/3上一页·中间菜单·右1/3下一页）
- *   + 音量键/键盘方向键翻页（排版设置开关；音量上=上一页，下=下一页）
- * - 划线笔记：长按文字自动选中整段 → 弹出菜单（从本段听/复制/查询/
- *   划线样式：直线·波浪·框选/写笔记）；点已有划线可查看笔记·改样式·删除
+ * - 翻页动画（阅读设置可选）：平移 slide（整排跟手移动）/ 覆盖 cover（新页带阴影盖过
+ *   旧页）/ 仿真 curl（3D 翻页）/ 淡入 fade / 滚动 scroll（纵向连续阅读）/ 无动画 none
+ * - 翻页方式：跟手横滑 + 点按分区（左1/3上一页·中间菜单·右1/3下一页，可在更多设置关闭）
+ *   + 音量键翻页（APK 原生壳直通；预览环境等价方向键/PageUp/Down）
+ * - 逐字选选：长按文字进入逐字选择模式（蓝色拖拽手柄 + 复制/划线/查询/搜索工具条，
+ *   拖手柄一个字一个字地扩选）；点已有划线可查看笔记·改样式·删除
  * - 书签：上滑手势快速加书签；顶部工具栏书签图标打开书签/划线列表
  * - 自动换源：章节/目录加载失败时自动搜索其他书源并切换（进度按章节映射）
  * - 页脚：页码左下角；章节号默认右下角（开时间/电量后移左下，时间电量占右下）
@@ -46,9 +46,13 @@ import {
   Copy,
   Trash2,
   StickyNote,
+  Underline,
+  Search as SearchIcon,
+  Globe,
 } from 'lucide-react';
 import { useReading } from '@/lib/reading/store';
 import { setImmersive } from '@/lib/ios/immersive-store';
+import { convertLang } from '@/lib/reading/lang-convert';
 import {
   api,
   bgOf,
@@ -89,12 +93,13 @@ interface PageSlice {
   off: number;
 }
 
-/** 覆盖动画状态：page=即将进来的页，x=当前位移，settle=松手动画中 */
+/** 覆盖动画状态：page=即将进来的页，x=当前位移，settle=松手动画中，mode=动画类型 */
 interface CoverState {
   page: number;
   x: number;
   settle: boolean;
   commit: boolean;
+  mode: 'cover' | 'fade' | 'curl';
 }
 
 /** 划线样式 → CSS */
@@ -125,6 +130,32 @@ function hlStyleOf(style: string | null | undefined, accent: string): React.CSSP
 // ---------------------------------------------------------------------------
 // 小工具：时钟 / 电量
 // ---------------------------------------------------------------------------
+/** 文本节点内偏移 → 元素内偏移（跨高亮 span 累计） */
+function offsetInElement(el: Element, node: Node, off: number): number {
+  if (node.nodeType !== 3) return -1;
+  const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+  let cum = 0;
+  let cur = walker.nextNode();
+  while (cur) {
+    if (cur === node) return cum + off;
+    cum += cur.textContent?.length || 0;
+    cur = walker.nextNode();
+  }
+  return -1;
+}
+
+/** 元素内全部文本长度 */
+function textLenOf(el: Element): number {
+  const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+  let cum = 0;
+  let cur = walker.nextNode();
+  while (cur) {
+    cum += cur.textContent?.length || 0;
+    cur = walker.nextNode();
+  }
+  return cum;
+}
+
 function useClock30s(): Date | null {
   const [now, setNow] = useState<Date | null>(null);
   useEffect(() => {
@@ -273,8 +304,9 @@ export function ReaderView({ page, onBack }: { page: ReaderPage; onBack: () => v
     () => (FONT_WEIGHTS.find((w) => w.key === settings.fontWeight) || FONT_WEIGHTS[1]).css,
     [settings.fontWeight],
   );
-  /** 翻页动画（默认平移） */
-  const animMode: 'slide' | 'cover' | 'none' = settings.pageAnim || 'slide';
+  /** 翻页动画（scroll=纵向连续阅读；fade/curl 走覆盖动画机制） */
+  const animMode: 'slide' | 'cover' | 'none' | 'fade' | 'curl' | 'scroll' = settings.pageAnim || 'slide';
+  const coverLike = animMode === 'cover' || animMode === 'fade' || animMode === 'curl';
 
   // 当前书源/地址（换源时在本地切换，不动导航栈）
   const [src, setSrc] = useState({
@@ -319,8 +351,24 @@ export function ReaderView({ page, onBack }: { page: ReaderPage; onBack: () => v
   const [notes, setNotes] = useState<ReaderNoteItem[]>([]);
   const [notesVer, setNotesVer] = useState(0);
   /** 长按选中的段落（-1=无；与 notePopup 同生命周期，派生展示） */
+  /** 逐字选择状态（pi=段落下标，start/end=段内字符区间 [start,end)，chIdx=归属章） */
+  const [sel, setSel] = useState<{ pi: number; start: number; end: number; chIdx: number } | null>(null);
+  /** 选择手柄位置（root 内相对坐标；null=隐藏） */
+  const [selRects, setSelRects] = useState<{ startX: number; startY: number; endX: number; endY: number; rootW: number } | null>(null);
+  /** 滚动模式容器 */
+  const scrollRef = useRef<HTMLDivElement>(null);
+  /** curPage 镜像（滚动模式恢复位置用；effect 见 curPage 声明之后） */
+  const curPageRef = useRef(0);
   /** 划线操作弹窗（含定位；chIdx 归属章——换章自动失效不渲染） */
-  const [notePopup, setNotePopup] = useState<{ pi: number; x: number; y: number; rootW: number; rootH: number; chIdx: number } | null>(null);
+  const [notePopup, setNotePopup] = useState<{
+    pi: number;
+    x: number;
+    y: number;
+    rootW: number;
+    rootH: number;
+    chIdx: number;
+    range?: { start: number; end: number } | null;
+  } | null>(null);
   /** 笔记输入框内容（null=未编辑） */
   const [noteInput, setNoteInput] = useState<string | null>(null);
   /** 书签/划线列表抽屉 */
@@ -365,6 +413,10 @@ export function ReaderView({ page, onBack }: { page: ReaderPage; onBack: () => v
   const [curPage, setCurPage] = useState(page.startPage || 0);
   /** 翻到上一章时回退到最后一页（等分页算好后落位） */
   const pendingLastRef = useRef(false);
+  /** curPage 镜像（滚动模式恢复位置用） */
+  useEffect(() => {
+    curPageRef.current = curPage;
+  }, [curPage]);
   /** 字体异步就绪 → 重算分页 */
   const [fontsTick, setFontsTick] = useState(0);
   /** 行切分缓存（key 含字体参数与段落内容指纹） */
@@ -387,8 +439,8 @@ export function ReaderView({ page, onBack }: { page: ReaderPage; onBack: () => v
   const uiBlockedRef = useRef(false);
   useEffect(() => {
     uiBlockedRef.current =
-      barsOn || settingsOpen || chatOpen || tocOpen || chSearchOpen || srcOpen || bmOpen || !!notePopup;
-  }, [barsOn, settingsOpen, chatOpen, tocOpen, chSearchOpen, srcOpen, bmOpen, notePopup]);
+      barsOn || settingsOpen || chatOpen || tocOpen || chSearchOpen || srcOpen || bmOpen || !!notePopup || !!sel;
+  }, [barsOn, settingsOpen, chatOpen, tocOpen, chSearchOpen, srcOpen, bmOpen, notePopup, sel]);
 
   // 沉浸模式：打开阅读器隐藏状态栏 + 灵动岛，退出恢复
   useEffect(() => {
@@ -647,7 +699,30 @@ export function ReaderView({ page, onBack }: { page: ReaderPage; onBack: () => v
     return () => ro.disconnect();
   }, []);
 
-  const paragraphs = useMemo(() => content.split('\n').filter((p) => p.trim()), [content]);
+  /** 正文预处理：繁简转换（用户设置）→ 按行拆段；specialTags 时识别 [newpage] 强制分页标记 */
+  const content2 = useMemo(() => convertLang(content, settings.s2t), [content, settings.s2t]);
+  const paragraphs = useMemo(() => {
+    const raw = content2.split('\n').map((p) => p.trim()).filter(Boolean);
+    if (!settings.specialTags) return raw.map((t) => ({ text: t, brk: false }));
+    const out: { text: string; brk: boolean }[] = [];
+    for (const line of raw) {
+      if (/\[newpage\]/i.test(line)) {
+        const parts = line.split(/\[newpage\]/i);
+        let pushed = false;
+        parts.forEach((p, i) => {
+          const t = p.trim();
+          if (t) {
+            out.push({ text: t, brk: i > 0 });
+            pushed = true;
+          }
+        });
+        if (!pushed) out.push({ text: '　', brk: out.length > 0 });
+      } else {
+        out.push({ text: line, brk: false });
+      }
+    }
+    return out;
+  }, [content2, settings.specialTags]);
   const titleVisible = settings.titlePosition !== 'hidden';
   const remain = Math.max(0, chapters.length - idx - 1);
 
@@ -660,12 +735,13 @@ export function ReaderView({ page, onBack }: { page: ReaderPage; onBack: () => v
       lineHeight: settings.lineSpacing,
       letterSpacing: `${settings.letterSpacing}px`,
       textAlign: settings.justify ? 'justify' : 'start',
+      textJustify: settings.cjkOptimize ? 'inter-character' : undefined,
       textDecoration: settings.underline ? 'underline' : 'none',
       textDecorationThickness: settings.underline ? '1px' : undefined,
       textUnderlineOffset: settings.underline ? '0.25em' : undefined,
       margin: 0,
     }),
-    [fontCssVal, weightCss, settings.fontSize, settings.lineSpacing, settings.letterSpacing, settings.justify, settings.underline],
+    [fontCssVal, weightCss, settings.fontSize, settings.lineSpacing, settings.letterSpacing, settings.justify, settings.cjkOptimize, settings.underline],
   );
 
   /**
@@ -680,7 +756,7 @@ export function ReaderView({ page, onBack }: { page: ReaderPage; onBack: () => v
       const k = `${cacheKey}|${indent ? 1 : 0}`;
       const hit = cache.map.get(k);
       if (hit) return hit;
-      el.style.textIndent = indent ? '2em' : '0';
+      el.style.textIndent = indent ? `${settings.textIndent}em` : '0';
       el.textContent = text;
       const range = document.createRange();
       const node = el.firstChild;
@@ -753,7 +829,9 @@ export function ReaderView({ page, onBack }: { page: ReaderPage; onBack: () => v
       fontCssVal,
       weightCss,
       settings.letterSpacing,
-      content.length,
+      settings.cjkOptimize ? 'cjkon' : 'cjkoff',
+      settings.textIndent,
+      content2.length,
       idx,
     ].join('|');
     if (segCacheRef.current.key !== segKey) {
@@ -776,8 +854,10 @@ export function ReaderView({ page, onBack }: { page: ReaderPage; onBack: () => v
       used += titleH;
     }
 
-    // 段落（整行装页；跨页续片无缩进）
-    paragraphs.forEach((text, bi) => {
+    // 段落（整行装页；跨页续片无缩进；[newpage] 标记段落强制开新页）
+    paragraphs.forEach((para, bi) => {
+      const text = para.text;
+      if (para.brk && cur.length) flush();
       let off = 0;
       let indent = true;
       let guard = 0;
@@ -835,7 +915,7 @@ export function ReaderView({ page, onBack }: { page: ReaderPage; onBack: () => v
     flush();
     if (!pages.length) pages.push([{ kind: 'end', text: '', indent: false, justifyLast: false, pi: -1, off: 0 }]);
     return pages;
-  }, [content, loading, err, autoSwitching, vp.w, vp.h, paragraphs, titleVisible, settings.fontSize, settings.lineSpacing, settings.paraSpacing, settings.letterSpacing, settings.justify, fontCssVal, weightCss, ch, idx, segmentLines]);
+  }, [content2, loading, err, autoSwitching, vp.w, vp.h, paragraphs, titleVisible, settings.fontSize, settings.lineSpacing, settings.paraSpacing, settings.letterSpacing, settings.justify, settings.cjkOptimize, settings.textIndent, settings.specialTags, fontCssVal, weightCss, ch, idx, segmentLines]);
 
   useLayoutEffect(() => {
     // 测量驱动分页：布局后同步算页（React 标准测量模式，规则误报需局部豁免）
@@ -898,16 +978,28 @@ export function ReaderView({ page, onBack }: { page: ReaderPage; onBack: () => v
     return true;
   }, []);
 
-  /** 翻页：dir=+1 下一页（前进：左滑/点右区），dir=-1 上一页（后退：右滑/点左区） */
+  /** 翻页：dir=+1 下一页（前进：左滑/点右区），dir=-1 上一页（后退：右滑/点左区）
+   *  滚动模式：整屏滚动；fade/curl 走覆盖机制（淡入/3D 翻页） */
   const turnPage = useCallback(
     (dir: 1 | -1) => {
       const s = navRef.current;
+      if (animMode === 'scroll') {
+        const el = scrollRef.current;
+        if (el) {
+          const step = Math.max(200, Math.round((vp.h || 400) * 0.92));
+          const near = Math.round(el.scrollTop / step);
+          const target = Math.max(0, (near + dir) * step);
+          el.scrollTo({ top: Math.min(target, el.scrollHeight - el.clientHeight), behavior: 'smooth' });
+          return true;
+        }
+        return goChapter(dir, dir < 0 ? 'last' : 'first');
+      }
       const np = s.page + dir;
       if (np >= 0 && np < s.pages) {
-        if (animMode === 'cover') {
+        if (coverLike) {
           if (coverRef.current) return true; // 动画进行中忽略
           const start = dir * (vp.w || 1);
-          setCoverState({ page: np, x: start, settle: false, commit: true });
+          setCoverState({ page: np, x: animMode === 'fade' ? 0 : start, settle: false, commit: true, mode: animMode as CoverState['mode'] });
           // 双 rAF 确保初始位置先提交，再启用过渡滑入
           requestAnimationFrame(() =>
             requestAnimationFrame(() => {
@@ -922,7 +1014,7 @@ export function ReaderView({ page, onBack }: { page: ReaderPage; onBack: () => v
       }
       return goChapter(dir, dir < 0 ? 'last' : 'first');
     },
-    [animMode, vp.w, goChapter],
+    [animMode, coverLike, vp.w, vp.h, goChapter],
   );
 
   /** 覆盖动画落位：settle 结束后提交页码（或取消回弹） */
@@ -935,13 +1027,47 @@ export function ReaderView({ page, onBack }: { page: ReaderPage; onBack: () => v
         setCurPage(cs.page);
       }
       setCoverState(null);
-    }, 280);
+    }, 300);
     return () => clearTimeout(t);
   }, [coverState]);
 
   // ------------------------------------------------------------------
-  // 音量键/键盘方向键翻页（排版设置开关）
+  // 音量键翻页：APK 原生壳直通（VolumeUp=上一页，VolumeDown=下一页）
+  // + 键盘方向键/PageUp/Down（预览环境等价物；音量键在纯浏览器里被系统拦截，
+  //   APK 内经 MainActivity 拦截后派发 __nativeVolTurn）
   // ------------------------------------------------------------------
+  // 原生壳：通知开关状态（阅读器挂载/开关变化/退出时同步）
+  useEffect(() => {
+    const w = window as unknown as {
+      Capacitor?: { Plugins?: { NativePerception?: { setVolumeKeyTurn?: (o: { enabled: boolean }) => void } } };
+    };
+    const plug = w.Capacitor?.Plugins?.NativePerception;
+    if (!plug?.setVolumeKeyTurn) return;
+    try {
+      plug.setVolumeKeyTurn({ enabled: settings.keyTurn });
+    } catch {
+      /* 旧 APK 无此方法，静默降级 */
+    }
+    return () => {
+      try {
+        plug.setVolumeKeyTurn?.({ enabled: false });
+      } catch {
+        /* 忽略 */
+      }
+    };
+  }, [settings.keyTurn]);
+
+  // 原生音量键回调（MainActivity 派发）
+  useEffect(() => {
+    const w = window as unknown as Record<string, ((dir: number) => void) | undefined>;
+    w.__nativeVolTurn = (dir: number) => {
+      if (settings.keyTurn && !uiBlockedRef.current) turnPage(dir > 0 ? 1 : -1);
+    };
+    return () => {
+      w.__nativeVolTurn = undefined;
+    };
+  }, [settings.keyTurn, turnPage]);
+
   useEffect(() => {
     if (!settings.keyTurn) return;
     const onKey = (e: KeyboardEvent) => {
@@ -968,7 +1094,63 @@ export function ReaderView({ page, onBack }: { page: ReaderPage; onBack: () => v
   }, [settings.keyTurn, turnPage]);
 
   // ------------------------------------------------------------------
-  // 长按划线：caretRangeFromPoint 定位段落
+  // 自动阅读：每 N 秒自动翻一页（菜单/设置打开时暂停）
+  // ------------------------------------------------------------------
+  useEffect(() => {
+    if (!settings.autoReadSec) return;
+    const t = setInterval(() => {
+      if (!uiBlockedRef.current) turnPage(1);
+    }, settings.autoReadSec * 1000);
+    return () => clearInterval(t);
+  }, [settings.autoReadSec, turnPage]);
+
+  // ------------------------------------------------------------------
+  // 屏幕常亮（Wake Lock；不支持的环境静默降级）
+  // ------------------------------------------------------------------
+  useEffect(() => {
+    if (!settings.keepScreenOn) return;
+    type WakeLock = { release: () => Promise<void> };
+    const nav = navigator as Navigator & { wakeLock?: { request: (t: 'screen') => Promise<WakeLock> } };
+    let lock: WakeLock | null = null;
+    let alive = true;
+    nav.wakeLock
+      ?.request('screen')
+      .then((l) => {
+        if (alive) lock = l;
+        else void l.release().catch(() => null);
+      })
+      .catch(() => null);
+    return () => {
+      alive = false;
+      lock?.release().catch(() => null);
+    };
+  }, [settings.keepScreenOn]);
+
+  // ------------------------------------------------------------------
+  // 滚动模式：滚动位置 ↔ curPage 同步（分页重算后恢复位置）
+  // ------------------------------------------------------------------
+  useEffect(() => {
+    if (animMode !== 'scroll') return;
+    const el = scrollRef.current;
+    if (!el || !vp.h || !pageList.length) return;
+    el.scrollTop = Math.max(0, Math.min(curPageRef.current, pageList.length - 1)) * vp.h;
+  }, [animMode, pageList, vp.h]);
+
+  const onScrollModeScroll = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el || !vp.h) return;
+    const p = Math.round(el.scrollTop / vp.h);
+    setCurPage((c) => (c === p ? c : Math.max(0, p)));
+  }, [vp.h]);
+
+  // 翻页后清逐字选择（选区不跨页保留；导航重置属合法 setState 场景）
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- 翻页/换章后必须清选区，防止手柄错位
+    setSel(null);
+  }, [curPage, idx]);
+
+  // ------------------------------------------------------------------
+  // 长按逐字选择：caretRangeFromPoint 定位字符 → 进入选区模式
   // ------------------------------------------------------------------
   const clearLongPress = useCallback(() => {
     if (lpTimerRef.current) {
@@ -985,36 +1167,43 @@ export function ReaderView({ page, onBack }: { page: ReaderPage; onBack: () => v
         caretPositionFromPoint?: (x: number, y: number) => { offsetNode: Node; offset: number } | null;
       };
       let node: Node | null = null;
+      let caret = 0;
       try {
         if (doc.caretRangeFromPoint) {
           const r = doc.caretRangeFromPoint(clientX, clientY);
           node = r?.startContainer || null;
+          caret = r?.startOffset || 0;
         } else if (doc.caretPositionFromPoint) {
           const p = doc.caretPositionFromPoint(clientX, clientY);
           node = p?.offsetNode || null;
+          caret = p?.offset || 0;
         }
       } catch {
         node = null;
       }
-      let el: HTMLElement | null = node
-        ? node.nodeType === 1
-          ? (node as HTMLElement)
-          : node.parentElement
-        : null;
-      let pi = -1;
+      if (!node) return;
+      let el: HTMLElement | null = node.nodeType === 1 ? (node as HTMLElement) : node.parentElement;
+      let pEl: HTMLElement | null = null;
       while (el && el !== wrapRef.current) {
-        if (el instanceof HTMLParagraphElement && el.dataset.pi !== undefined) {
-          pi = Number(el.dataset.pi);
+        if (el instanceof HTMLParagraphElement && el.dataset.pi !== undefined && el.dataset.off !== undefined) {
+          pEl = el;
           break;
         }
         el = el.parentElement;
       }
+      if (!pEl) return;
+      const pi = Number(pEl.dataset.pi);
       if (pi < 0 || pi >= paragraphs.length) return;
-      const root = rootRef.current?.getBoundingClientRect();
-      if (!root) return;
+      const sOff = Number(pEl.dataset.off);
+      const textLen = textLenOf(pEl);
+      let local = offsetInElement(pEl, node, caret);
+      if (local < 0 || local >= textLen) local = Math.max(0, textLen - 1);
+      const abs = sOff + local;
       suppressClickRef.current = true;
       setNoteInput(null);
-      setNotePopup({ pi, x: clientX - root.left, y: clientY - root.top, rootW: root.width, rootH: root.height, chIdx: idx });
+      setNotePopup(null);
+      setSel({ pi, start: abs, end: Math.min(abs + 1, paragraphs[pi].text.length), chIdx: idx });
+      if ('vibrate' in navigator) navigator.vibrate?.(12);
     },
     [loading, err, paragraphs, idx],
   );
@@ -1043,7 +1232,7 @@ export function ReaderView({ page, onBack }: { page: ReaderPage; onBack: () => v
     const dx = e.touches[0].clientX - t.x;
     const dy = e.touches[0].clientY - t.y;
     t.lastY = e.touches[0].clientY;
-    // 未定向：横滑 → 进入翻页；位移超阈值 → 取消长按
+    // 未定向：横滑 → 进入翻页；位移超阈值 → 取消长按（滚动模式下纵向交给原生滚动）
     if (!t.horiz) {
       if (Math.abs(dx) > 14 && Math.abs(dx) > Math.abs(dy) * 1.4) {
         t.horiz = true;
@@ -1051,21 +1240,27 @@ export function ReaderView({ page, onBack }: { page: ReaderPage; onBack: () => v
         if (notePopup) {
           setNotePopup(null);
         }
+        if (sel) {
+          setSel(null);
+        }
       } else if (Math.abs(dx) > 12 || Math.abs(dy) > 12) {
         clearLongPress();
       }
     }
     if (t.horiz) {
+      if (animMode === 'scroll') return;
       // 阻尼跟手：越界最多拖出一页
       const clamp = (v: number) => Math.max(-vp.w, Math.min(vp.w, v));
       swipeDxRef.current = clamp(dx);
       setSwipeDx(clamp(dx));
-      if (animMode === 'cover') {
+      if (coverLike) {
         const dir = dx < 0 ? 1 : -1;
         const s = navRef.current;
         const np = s.page + dir;
         if (np >= 0 && np < s.pages) {
-          setCoverState({ page: np, x: dir * (vp.w || 1) + clamp(dx), settle: false, commit: false });
+          // 淡入模式跟手无位移（松手超过阈值才淡入）；覆盖/仿真跟手拖动
+          const x = animMode === 'fade' ? 0 : dir * (vp.w || 1) + clamp(dx);
+          setCoverState({ page: np, x, settle: false, commit: false, mode: animMode as CoverState['mode'] });
         } else if (coverRef.current) {
           setCoverState(null);
         }
@@ -1088,12 +1283,13 @@ export function ReaderView({ page, onBack }: { page: ReaderPage; onBack: () => v
         return;
       }
     }
-    if (animMode === 'cover') {
+    if (coverLike) {
       const cs = coverRef.current;
       if (cs && !cs.settle) {
         const dir = cs.page > navRef.current.page ? 1 : -1;
         const commit = Math.abs(dx) > 58;
         if (commit) setCoverState({ ...cs, x: 0, settle: true, commit: true });
+        else if (cs.mode === 'fade') setCoverState(null); // 淡入模式取消：直接消失
         else setCoverState({ ...cs, x: dir * (vp.w || 1), settle: true, commit: false });
         return;
       }
@@ -1109,13 +1305,19 @@ export function ReaderView({ page, onBack }: { page: ReaderPage; onBack: () => v
       suppressClickRef.current = false;
       return;
     }
+    if (sel) {
+      setSel(null);
+      return;
+    }
     if (notePopup) {
       setNotePopup(null);
       setNoteInput(null);
       return;
     }
-    if (zone === 'menu') setBarsOn((v) => !v);
-    else if (zone === 'next') turnPage(1);
+    // 点击翻页关闭后：点屏幕任意处只弹菜单
+    const zone2 = settings.clickTurn ? zone : 'menu';
+    if (zone2 === 'menu') setBarsOn((v) => !v);
+    else if (zone2 === 'next') turnPage(1);
     else turnPage(-1);
   };
   /** 段落点击（段落可命中后接管分区逻辑：左1/3上一页·中菜单·右1/3下一页） */
@@ -1124,9 +1326,17 @@ export function ReaderView({ page, onBack }: { page: ReaderPage; onBack: () => v
       suppressClickRef.current = false;
       return;
     }
+    if (sel) {
+      setSel(null);
+      return;
+    }
     if (notePopup) {
       setNotePopup(null);
       setNoteInput(null);
+      return;
+    }
+    if (!settings.clickTurn) {
+      setBarsOn((v) => !v);
       return;
     }
     const r = wrapRef.current?.getBoundingClientRect();
@@ -1176,12 +1386,12 @@ export function ReaderView({ page, onBack }: { page: ReaderPage; onBack: () => v
   // ------------------------------------------------------------------
   // 批注动作
   // ------------------------------------------------------------------
-  /** 该段落已有的划线 */
-  const paraHighlight = useCallback(
-    (pi: number) => chHighlights.find((h) => h.paraIndex === pi),
+  /** 弹窗目标区间内的已有划线（点已有划线/划线选区时用） */
+  const rangeHighlight = useCallback(
+    (pi: number, start: number, end: number) =>
+      chHighlights.find((h) => h.paraIndex === pi && h.startOff < end && h.endOff > start),
     [chHighlights],
   );
-
   const addBookmark = useCallback(async () => {
     try {
       await api.notesAction({
@@ -1203,11 +1413,14 @@ export function ReaderView({ page, onBack }: { page: ReaderPage; onBack: () => v
     }
   }, [src.bookUrl, src.name, idx, ch, curPage, bumpNotes, notify]);
 
+  /** 划线（按弹窗目标区间；点已有划线则改样式） */
   const highlightPara = useCallback(
-    async (pi: number, style: 'line' | 'wavy' | 'box') => {
-      const text = paragraphs[pi] || '';
+    async (pi: number, style: 'line' | 'wavy' | 'box', range?: { start: number; end: number } | null) => {
+      const text = paragraphs[pi]?.text || '';
       if (!text) return;
-      const existing = paraHighlight(pi);
+      const startOff = Math.max(0, Math.min(range?.start ?? 0, text.length - 1));
+      const endOff = Math.max(startOff + 1, Math.min(range?.end ?? text.length, text.length));
+      const existing = rangeHighlight(pi, startOff, endOff);
       try {
         if (existing) {
           await api.notesAction({ action: 'updateNote', id: existing.id, style });
@@ -1221,40 +1434,47 @@ export function ReaderView({ page, onBack }: { page: ReaderPage; onBack: () => v
               chapterIndex: idx,
               chapterTitle: ch?.title || null,
               paraIndex: pi,
-              startOff: 0,
-              endOff: text.length,
-              text: text.slice(0, 600),
+              startOff,
+              endOff,
+              text: text.slice(startOff, endOff).slice(0, 600),
               style,
             },
           });
         }
         bumpNotes();
+        setSel(null);
+        setNotePopup(null);
         notify(existing ? '划线样式已更新' : '已划线');
       } catch {
         notify('保存失败，请重试');
       }
     },
-    [paragraphs, paraHighlight, src.bookUrl, src.name, idx, ch, bumpNotes, notify],
+    [paragraphs, rangeHighlight, src.bookUrl, src.name, idx, ch, bumpNotes, notify],
   );
 
   const removeHighlightsOf = useCallback(
-    async (pi: number) => {
-      const targets = chHighlights.filter((h) => h.paraIndex === pi);
+    async (pi: number, range?: { start: number; end: number } | null) => {
+      const targets = chHighlights.filter(
+        (h) => h.paraIndex === pi && (!range || (h.startOff < range.end && h.endOff > range.start)),
+      );
       for (const h of targets) {
         await api.notesAction({ action: 'remove', id: h.id }).catch(() => null);
       }
       bumpNotes();
       setNotePopup(null);
+      setSel(null);
       notify('已删除划线');
     },
     [chHighlights, bumpNotes, notify],
   );
 
   const saveNote = useCallback(
-    async (pi: number, note: string) => {
-      const text = paragraphs[pi] || '';
+    async (pi: number, note: string, range?: { start: number; end: number } | null) => {
+      const text = paragraphs[pi]?.text || '';
       if (!text) return;
-      const existing = paraHighlight(pi);
+      const startOff = Math.max(0, Math.min(range?.start ?? 0, text.length - 1));
+      const endOff = Math.max(startOff + 1, Math.min(range?.end ?? text.length, text.length));
+      const existing = rangeHighlight(pi, startOff, endOff);
       try {
         if (existing) {
           await api.notesAction({ action: 'updateNote', id: existing.id, note });
@@ -1268,9 +1488,9 @@ export function ReaderView({ page, onBack }: { page: ReaderPage; onBack: () => v
               chapterIndex: idx,
               chapterTitle: ch?.title || null,
               paraIndex: pi,
-              startOff: 0,
-              endOff: text.length,
-              text: text.slice(0, 600),
+              startOff,
+              endOff,
+              text: text.slice(startOff, endOff).slice(0, 600),
               style: 'wavy',
               note,
             },
@@ -1279,12 +1499,13 @@ export function ReaderView({ page, onBack }: { page: ReaderPage; onBack: () => v
         bumpNotes();
         setNotePopup(null);
         setNoteInput(null);
+        setSel(null);
         notify('笔记已保存');
       } catch {
         notify('保存失败，请重试');
       }
     },
-    [paragraphs, paraHighlight, src.bookUrl, src.name, idx, ch, bumpNotes, notify],
+    [paragraphs, rangeHighlight, src.bookUrl, src.name, idx, ch, bumpNotes, notify],
   );
 
   /** 从本段听：从第 pi 段朗读到本章末 */
@@ -1295,7 +1516,7 @@ export function ReaderView({ page, onBack }: { page: ReaderPage; onBack: () => v
         return;
       }
       window.speechSynthesis.cancel();
-      const text = paragraphs.slice(pi).join('\n');
+      const text = paragraphs.slice(pi).map((p) => p.text).join('\n');
       if (!text) return;
       const u = new SpeechSynthesisUtterance(text);
       u.lang = 'zh-CN';
@@ -1311,11 +1532,12 @@ export function ReaderView({ page, onBack }: { page: ReaderPage; onBack: () => v
   );
 
   const copyPara = useCallback(
-    async (pi: number) => {
-      const text = paragraphs[pi] || '';
+    async (pi: number, range?: { start: number; end: number } | null) => {
+      const para = paragraphs[pi]?.text || '';
+      const text = range ? para.slice(range.start, range.end) : para;
       try {
         await navigator.clipboard.writeText(text);
-        notify('已复制本段文字');
+        notify(text ? '已复制选中文字' : '没有可复制的文字');
       } catch {
         notify('复制失败，请重试');
       }
@@ -1325,14 +1547,66 @@ export function ReaderView({ page, onBack }: { page: ReaderPage; onBack: () => v
   );
 
   const lookupPara = useCallback(
-    (pi: number) => {
-      const text = (paragraphs[pi] || '').slice(0, 140);
+    (pi: number, range?: { start: number; end: number } | null) => {
+      const para = paragraphs[pi]?.text || '';
+      const text = (range ? para.slice(range.start, range.end) : para).slice(0, 140);
       setChatAsk(`请帮我解读这段内容：「${text}」`);
       setNotePopup(null);
+      setSel(null);
       setChatOpen(true);
     },
     [paragraphs],
   );
+
+  /** 选中文字 → 逐字选择工具条动作 */
+  const selText = useCallback(
+    () => {
+      if (!sel) return '';
+      return (paragraphs[sel.pi]?.text || '').slice(sel.start, sel.end);
+    },
+    [sel, paragraphs],
+  );
+
+  const selCopy = useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(selText());
+      notify('已复制选中文字');
+    } catch {
+      notify('复制失败');
+    }
+    setSel(null);
+  }, [selText, notify]);
+
+  const selLookup = useCallback(() => {
+    if (!sel) return;
+    lookupPara(sel.pi, { start: sel.start, end: sel.end });
+  }, [sel, lookupPara]);
+
+  const selSearch = useCallback(() => {
+    const t = selText().slice(0, 120);
+    if (!t) return;
+    setChatAsk(`帮我联网搜索一下：「${t}」的出处与背景`);
+    setSel(null);
+    setChatOpen(true);
+  }, [selText]);
+
+  /** 划线选区 → 打开样式/笔记弹窗（定位到选区下方） */
+  const selHighlightPopup = useCallback(() => {
+    if (!sel || !selRects) return;
+    const root = rootRef.current?.getBoundingClientRect();
+    if (!root) return;
+    setSel(null);
+    setNoteInput(null);
+    setNotePopup({
+      pi: sel.pi,
+      x: (selRects.startX + selRects.endX) / 2,
+      y: selRects.startY,
+      rootW: root.width,
+      rootH: root.height,
+      chIdx: idx,
+      range: { start: sel.start, end: sel.end },
+    });
+  }, [sel, selRects, idx]);
 
   // ------------------------------------------------------------------
   // 顶部工具：换源 / 缓存 / 章节搜索 / 书签 / 刷新
@@ -1519,28 +1793,81 @@ export function ReaderView({ page, onBack }: { page: ReaderPage; onBack: () => v
   const barSub = bg.dark ? 'rgba(232,234,242,0.55)' : 'rgba(26,29,38,0.55)';
   const pillBg = bg.dark ? 'rgba(255,255,255,0.10)' : 'rgba(0,0,0,0.055)';
 
-  /** 段内划线分段渲染（重叠划线按最先一条样式） */
+  /** 段内划线分段渲染（重叠划线按最先一条样式）+ 逐字选区灰色高亮 */
   const renderParaSegments = useCallback(
     (s: PageSlice) => {
       const hits = chHighlights
         .filter((h) => h.paraIndex === s.pi && h.endOff > s.off && h.startOff < s.off + s.text.length)
         .sort((a, b) => a.startOff - b.startOff);
-      if (!hits.length) return s.text;
-      const segs: { t: string; h?: ReaderNoteItem }[] = [];
+      const activeSel = sel && sel.chIdx === idx && sel.pi === s.pi
+        ? {
+            hs: Math.max(sel.start - s.off, 0),
+            he: Math.min(sel.end - s.off, s.text.length),
+          }
+        : null;
+      const hasSel = !!activeSel && activeSel.hs < activeSel.he;
+      if (!hits.length && !hasSel) return s.text;
+      const segs: { t: string; h?: ReaderNoteItem; isSel?: boolean }[] = [];
       let cursor = 0;
-      for (const h of hits) {
-        const hs = Math.max(h.startOff - s.off, 0);
-        const he = Math.min(h.endOff - s.off, s.text.length);
-        if (hs > cursor) segs.push({ t: s.text.slice(cursor, hs) });
-        if (he > hs) segs.push({ t: s.text.slice(hs, he), h });
-        cursor = Math.max(cursor, he);
+      const pushSel = (from: number, to: number) => {
+        if (from > cursor) segs.push({ t: s.text.slice(cursor, from) });
+        if (to > from) segs.push({ t: s.text.slice(from, to), isSel: true });
+        cursor = Math.max(cursor, to);
+      };
+      if (hasSel && activeSel) {
+        // 选区与划线重叠时：先划线区间，再灰色选区盖在其上（简化为分段拼接）
+        for (const h of hits) {
+          const hs = Math.max(h.startOff - s.off, 0);
+          const he = Math.min(h.endOff - s.off, s.text.length);
+          if (he <= hs) continue;
+          // 选区与该划线相交 → 交叠段同时标划线+选区
+          if (he <= activeSel.hs || hs >= activeSel.he) {
+            if (hs > cursor) segs.push({ t: s.text.slice(cursor, hs) });
+            if (he > hs) segs.push({ t: s.text.slice(hs, he), h });
+            cursor = Math.max(cursor, he);
+          } else {
+            const a = Math.max(hs, cursor);
+            const b = Math.min(he, activeSel.hs);
+            if (b > a) {
+              if (a > cursor) segs.push({ t: s.text.slice(cursor, a) });
+              segs.push({ t: s.text.slice(a, b), h });
+              cursor = Math.max(cursor, b);
+            }
+            const c = Math.max(activeSel.hs, cursor);
+            const d = Math.min(activeSel.he, he);
+            if (d > c) {
+              if (c > cursor) segs.push({ t: s.text.slice(cursor, c) });
+              segs.push({ t: s.text.slice(c, d), h, isSel: true });
+              cursor = Math.max(cursor, d);
+            }
+            const e = Math.max(he, cursor);
+            const f = activeSel.he;
+            if (f > e) {
+              pushSel(e, f);
+            } else if (he > cursor) {
+              segs.push({ t: s.text.slice(cursor, he), h });
+              cursor = he;
+            }
+          }
+        }
+        // 选区剩余部分
+        const a = Math.max(activeSel.hs, cursor);
+        if (activeSel.he > a) pushSel(a, activeSel.he);
+      } else {
+        for (const h of hits) {
+          const hs = Math.max(h.startOff - s.off, 0);
+          const he = Math.min(h.endOff - s.off, s.text.length);
+          if (hs > cursor) segs.push({ t: s.text.slice(cursor, hs) });
+          if (he > hs) segs.push({ t: s.text.slice(hs, he), h });
+          cursor = Math.max(cursor, he);
+        }
       }
       if (cursor < s.text.length) segs.push({ t: s.text.slice(cursor) });
       return segs.map((seg, i) =>
         seg.h ? (
           <span
             key={i}
-            style={{ ...hlStyleOf(seg.h.style, theme.accent), cursor: 'pointer' }}
+            style={{ ...hlStyleOf(seg.h.style, theme.accent), cursor: 'pointer', ...(seg.isSel ? { background: 'rgba(90,110,150,0.35)', borderRadius: 2 } : {}) }}
             onClick={(e) => {
               e.stopPropagation();
               const root = rootRef.current?.getBoundingClientRect();
@@ -1554,27 +1881,30 @@ export function ReaderView({ page, onBack }: { page: ReaderPage; onBack: () => v
                 rootW: root.width,
                 rootH: root.height,
                 chIdx: idx,
+                range: { start: seg.h!.startOff, end: seg.h!.endOff },
               });
             }}
           >
             {seg.t}
           </span>
         ) : (
-          <span key={i}>{seg.t}</span>
+          <span key={i} style={seg.isSel ? { background: 'rgba(90,110,150,0.35)', borderRadius: 2 } : undefined}>
+            {seg.t}
+          </span>
         ),
       );
     },
-    [chHighlights, theme.accent],
+    [chHighlights, theme.accent, sel, idx],
   );
 
-  /** 渲染一页 */
+  /** 渲染一页（forScroll=滚动模式：固定像素高度） */
   const renderPage = useCallback(
-    (slices: PageSlice[], pageNum: number) => (
+    (slices: PageSlice[], pageNum: number, forScroll = false) => (
       <div
         key={pageNum}
         style={{
           width: vp.w || '100%',
-          height: '100%',
+          height: forScroll ? vp.h || '100%' : '100%',
           flex: '0 0 auto',
           overflow: 'hidden',
           ...paraTypo,
@@ -1607,10 +1937,11 @@ export function ReaderView({ page, onBack }: { page: ReaderPage; onBack: () => v
             <p
               key={si}
               data-pi={s.pi}
+              data-off={s.off}
               onClick={onParaClick}
               style={{
                 marginBottom: `${settings.paraSpacing}em`,
-                textIndent: s.indent ? '2em' : 0,
+                textIndent: s.indent ? `${settings.textIndent}em` : 0,
                 textAlignLast: s.justifyLast ? 'justify' : undefined,
                 minHeight: '1em',
                 pointerEvents: 'auto',
@@ -1624,11 +1955,132 @@ export function ReaderView({ page, onBack }: { page: ReaderPage; onBack: () => v
         })}
       </div>
     ),
-    [vp.w, paraTypo, settings.letterSpacing, settings.titlePosition, settings.paraSpacing, remain, theme.accent, bg.text, bg.sub, idx, chapters.length, goChapter, selParaActive, onParaClick, renderParaSegments],
+    [vp.w, vp.h, paraTypo, settings.letterSpacing, settings.titlePosition, settings.paraSpacing, settings.textIndent, remain, theme.accent, bg.text, bg.sub, idx, chapters.length, goChapter, selParaActive, onParaClick, renderParaSegments],
   );
 
+  /** 逐字选区手柄位置测量（选区/页码/排版变化后重算；拖手柄时实时刷新） */
+  useLayoutEffect(() => {
+    if (!sel || sel.chIdx !== idx) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- 测量驱动，同 repaginate 模式
+      setSelRects(null);
+      return;
+    }
+    const root = rootRef.current;
+    if (!root) {
+      setSelRects(null);
+      return;
+    }
+    const rootR = root.getBoundingClientRect();
+    const measureAt = (absOff: number): { x: number; y: number } | null => {
+      const pEls = root.querySelectorAll('p[data-pi][data-off]');
+      for (let i = 0; i < pEls.length; i++) {
+        const pEl = pEls[i] as HTMLElement;
+        if (Number(pEl.dataset.pi) !== sel.pi) continue;
+        const sOff = Number(pEl.dataset.off);
+        const textLen = textLenOf(pEl);
+        const local = absOff - sOff;
+        if (local < 0 || local > textLen) continue;
+        // 找到包含 local 的文本节点
+        const walker = document.createTreeWalker(pEl, NodeFilter.SHOW_TEXT);
+        let cum = 0;
+        let node = walker.nextNode();
+        let target: Node | null = null;
+        let tOff = 0;
+        while (node) {
+          const len = node.textContent?.length || 0;
+          if (local <= cum + len) {
+            target = node;
+            tOff = local - cum;
+            break;
+          }
+          cum += len;
+          node = walker.nextNode();
+        }
+        if (!target || target.nodeType !== 3) return null;
+        const range = document.createRange();
+        const len = target.textContent?.length || 0;
+        range.setStart(target, Math.min(tOff, len));
+        range.setEnd(target, Math.min(tOff + 1, len));
+        const rects = range.getClientRects();
+        if (!rects.length) return null;
+        const r = rects[0];
+        return { x: r.left - rootR.left + r.width / 2, y: r.bottom - rootR.top };
+      }
+      return null;
+    };
+    const s = measureAt(Math.min(sel.start, sel.end - 1));
+    const e = measureAt(Math.max(sel.end - 1, sel.start));
+    if (s && e) setSelRects({ startX: s.x, startY: s.y, endX: e.x, endY: e.y, rootW: rootR.width });
+    else setSelRects(null);
+  }, [sel, idx, pageList, vp.w, vp.h, curPage]);
+
+  /** 拖手柄：一个字一个字地扩选（同段内） */
+  const updateSelFromPoint = useCallback(
+    (clientX: number, clientY: number, which: 'start' | 'end') => {
+      setSel((prev) => {
+        if (!prev) return prev;
+        const doc = document as Document & {
+          caretRangeFromPoint?: (x: number, y: number) => Range | null;
+          caretPositionFromPoint?: (x: number, y: number) => { offsetNode: Node; offset: number } | null;
+        };
+        let node: Node | null = null;
+        let caret = 0;
+        try {
+          if (doc.caretRangeFromPoint) {
+            const r = doc.caretRangeFromPoint(clientX, clientY);
+            node = r?.startContainer || null;
+            caret = r?.startOffset || 0;
+          } else if (doc.caretPositionFromPoint) {
+            const p = doc.caretPositionFromPoint(clientX, clientY);
+            node = p?.offsetNode || null;
+            caret = p?.offset || 0;
+          }
+        } catch {
+          return prev;
+        }
+        if (!node) return prev;
+        let el: HTMLElement | null = node.nodeType === 1 ? (node as HTMLElement) : node.parentElement;
+        let pEl: HTMLElement | null = null;
+        while (el && el !== wrapRef.current) {
+          if (el instanceof HTMLParagraphElement && el.dataset.pi !== undefined && el.dataset.off !== undefined) {
+            pEl = el;
+            break;
+          }
+          el = el.parentElement;
+        }
+        if (!pEl || Number(pEl.dataset.pi) !== prev.pi) return prev;
+        const sOff = Number(pEl.dataset.off);
+        const local = offsetInElement(pEl, node, caret);
+        if (local < 0) return prev;
+        const abs = sOff + local;
+        if (which === 'start') {
+          const start = Math.max(0, Math.min(abs, prev.end - 1));
+          return start === prev.start ? prev : { ...prev, start };
+        }
+        const end = Math.min((paragraphs[prev.pi]?.text.length) || abs + 1, Math.max(abs + 1, prev.start + 1));
+        return end === prev.end ? prev : { ...prev, end };
+      });
+    },
+    [paragraphs],
+  );
+
+  const onHandlePointerDown = (e: React.PointerEvent, which: 'start' | 'end') => {
+    e.stopPropagation();
+    e.preventDefault();
+    const move = (ev: PointerEvent) => updateSelFromPoint(ev.clientX, ev.clientY, which);
+    const up = () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+  };
+
   // 划线弹窗定位（固定宽 288；下方优先，底部空间不足放上方）
-  const existingNote = activePopup ? paraHighlight(activePopup.pi) : undefined;
+  const existingNote = activePopup
+    ? rangeHighlight(activePopup.pi, activePopup.range?.start ?? 0, activePopup.range?.end ?? Number.MAX_SAFE_INTEGER)
+    : undefined;
+  const popupRange = activePopup?.range ?? null;
   const popup = (() => {
     if (!notePopup) return null;
     const W = 288;
@@ -1663,7 +2115,9 @@ export function ReaderView({ page, onBack }: { page: ReaderPage; onBack: () => v
       <style>{`@keyframes rd-flip-l{from{opacity:.35;transform:translateX(26px)}to{opacity:1;transform:none}}
       @keyframes rd-flip-r{from{opacity:.35;transform:translateX(-26px)}to{opacity:1;transform:none}}`}</style>
 
-      {/* 正文视口（padding 定页边距；点按分区在最底层，正文容器不拦截点击） */}
+      {/* 正文视口（padding 定页边距；点按分区在最底层，正文容器不拦截点击）
+          注：横向基础边距从 18px 降到 3px——边距滑块完全由用户掌控（0 即真 0），
+          翻页时页面接缝两侧不再有大片“被切割”的空白 */}
       <div
         ref={wrapRef}
         className="relative min-h-0 flex-1"
@@ -1672,8 +2126,8 @@ export function ReaderView({ page, onBack }: { page: ReaderPage; onBack: () => v
         onTouchEnd={onTouchEnd}
         onTouchCancel={onTouchEnd}
         style={{
-          paddingLeft: `calc(18px + ${settings.marginLeft}vw)`,
-          paddingRight: `calc(18px + ${settings.marginRight}vw)`,
+          paddingLeft: `calc(3px + ${settings.marginLeft}vw)`,
+          paddingRight: `calc(3px + ${settings.marginRight}vw)`,
           paddingTop: `calc(22px + ${settings.marginTop}vh)`,
           paddingBottom: `calc(64px + ${settings.marginBottom}vh)`,
         }}
@@ -1685,10 +2139,10 @@ export function ReaderView({ page, onBack }: { page: ReaderPage; onBack: () => v
           <button type="button" aria-label="下一页" className="h-full w-1/3" onClick={() => onZoneClick('next')} />
         </div>
 
-        {/* 裁切层：宽 = 整数页宽（只露出当前页；pointer-events 不拦截） */}
+        {/* 裁切层：宽 = 整数页宽（只露出当前页；分页模式 pointer-events 不拦截；滚动模式接管触摸） */}
         <div
           ref={clipRef}
-          className="relative z-10 h-full overflow-hidden pointer-events-none"
+          className={`relative z-10 h-full overflow-hidden ${animMode === 'scroll' ? '' : 'pointer-events-none'}`}
           style={{ width: vp.w ? `${vp.w}px` : '100%' }}
         >
           {/* 隐藏测量容器（与页面同宽同排版；分页引擎用） */}
@@ -1773,6 +2227,19 @@ export function ReaderView({ page, onBack }: { page: ReaderPage; onBack: () => v
                 </div>
               )}
             </div>
+          ) : animMode === 'scroll' ? (
+            /* 滚动模式：页面纵向堆叠，原生滚动；tap 分区由段落点击接管 */
+            <div
+              ref={scrollRef}
+              className="h-full w-full overflow-y-auto overscroll-contain"
+              onScroll={onScrollModeScroll}
+              style={{ scrollbarWidth: 'none' }}
+            >
+              <div className="flex flex-col" style={{ width: vp.w || '100%' }}>
+                {/* eslint-disable-next-line react-hooks/refs -- 回调期访问 */}
+                {pageList.map((slices, n) => renderPage(slices, n, true))}
+              </div>
+            </div>
           ) : (
             <>
               {/* 分页轨道：所有页常驻（前后页预渲染）；cover 模式下固定当前页作底 */}
@@ -1791,22 +2258,45 @@ export function ReaderView({ page, onBack }: { page: ReaderPage; onBack: () => v
                 {/* eslint-disable-next-line react-hooks/refs -- 误报：回调中的 navRef/suppressClickRef 仅事件期访问 */}
                 {pageList.map(renderPage)}
               </div>
-              {/* 覆盖动画层：新页带阴影从边缘滑入盖住旧页 */}
-              {animMode === 'cover' && coverState && pageList[coverState.page] && (
+              {/* 覆盖/仿真/淡入动画层：新页从边缘滑入盖住旧页（边缘锐利阴影+1px 描边，
+                  翻页前沿像真实书页而不是“被切割”） */}
+              {coverLike && coverState && pageList[coverState.page] && (
                 <div
                   className="absolute inset-y-0 left-0 z-20 overflow-hidden"
                   style={{
                     width: vp.w || '100%',
                     background: bg.bg,
-                    transform: `translateX(${coverState.x}px)`,
+                    transform:
+                      coverState.mode === 'fade'
+                        ? 'none'
+                        : coverState.mode === 'curl'
+                          ? `perspective(1200px) rotateY(${(
+                              (coverState.page > curPage ? -1 : 1) *
+                              ((Math.abs(coverState.x) / (vp.w || 1)) * 88)
+                            ).toFixed(2)}deg)`
+                          : `translateX(${coverState.x}px)`,
+                    transformOrigin:
+                      coverState.mode === 'curl' ? (coverState.page > curPage ? 'left center' : 'right center') : undefined,
+                    opacity: coverState.mode === 'fade' ? (coverState.settle ? 1 : 0) : 1,
                     transition: coverState.settle
-                      ? 'transform 0.26s cubic-bezier(0.22, 0.61, 0.36, 1)'
+                      ? coverState.mode === 'fade'
+                        ? 'opacity 0.26s ease'
+                        : 'transform 0.26s cubic-bezier(0.22, 0.61, 0.36, 1)'
                       : 'none',
-                    willChange: 'transform',
+                    willChange: 'transform, opacity',
                     boxShadow:
-                      coverState.page > curPage
-                        ? '-12px 0 28px rgba(0,0,0,0.22)'
-                        : '12px 0 28px rgba(0,0,0,0.22)',
+                      coverState.mode === 'fade'
+                        ? 'none'
+                        : coverState.mode === 'curl'
+                          ? '-2px 0 6px rgba(0,0,0,0.14), -10px 0 28px rgba(0,0,0,0.18)'
+                          : coverState.page > curPage
+                            ? '-1px 0 2px rgba(0,0,0,0.10), -8px 0 22px rgba(0,0,0,0.20)'
+                            : '1px 0 2px rgba(0,0,0,0.10), 8px 0 22px rgba(0,0,0,0.20)',
+                    ...(coverState.mode === 'cover'
+                      ? coverState.page > curPage
+                        ? { borderLeft: '1px solid rgba(0,0,0,0.07)' }
+                        : { borderRight: '1px solid rgba(0,0,0,0.07)' }
+                      : {}),
                   }}
                 >
                   {/* eslint-disable-next-line react-hooks/refs -- 误报：同上，回调期访问 */}
@@ -1817,6 +2307,17 @@ export function ReaderView({ page, onBack }: { page: ReaderPage; onBack: () => v
           )}
         </div>
       </div>
+
+      {/* 自定义亮度遮罩（跟随系统亮度关闭时生效；盖住正文但不拦点击） */}
+      {!settings.brightnessAuto && settings.brightness < 100 && (
+        <div
+          className="pointer-events-none absolute inset-0 z-[15]"
+          style={{ background: '#000', opacity: ((100 - settings.brightness) / 100) * 0.55 }}
+          aria-hidden="true"
+        />
+      )}
+
+      {/* 亮度遮罩结束 */}
 
       {/* 滑动提示胶囊（跟手） */}
       {swipeHint && (
@@ -1853,8 +2354,8 @@ export function ReaderView({ page, onBack }: { page: ReaderPage; onBack: () => v
           className="pointer-events-none absolute inset-x-0 bottom-[max(16px,calc(env(safe-area-inset-bottom)+8px))] z-10 flex items-center justify-between text-[10px] tabular-nums"
           style={{
             color: bg.sub,
-            paddingLeft: `calc(18px + ${settings.marginLeft}vw)`,
-            paddingRight: `calc(18px + ${settings.marginRight}vw)`,
+            paddingLeft: `calc(3px + ${settings.marginLeft}vw)`,
+            paddingRight: `calc(3px + ${settings.marginRight}vw)`,
           }}
           aria-hidden="true"
         >
@@ -1880,6 +2381,91 @@ export function ReaderView({ page, onBack }: { page: ReaderPage; onBack: () => v
             <span className="shrink-0">{chapterLabel}</span>
           )}
         </div>
+      )}
+
+      {/* ============ 逐字选择：灰色高亮 + 蓝色拖拽手柄 + 工具条（复制/划线/查询/搜索） ============ */}
+      {sel && sel.chIdx === idx && !loading && !err && !notePopup && (
+        <>
+          {/* 两个拖拽手柄（起始蓝圆点；pointer 拖拽逐字扩选） */}
+          {selRects && (
+            <>
+              <button
+                type="button"
+                aria-label="起始手柄"
+                onPointerDown={(e) => onHandlePointerDown(e, 'start')}
+                className="absolute z-[62] h-[22px] w-[22px] rounded-full shadow-lg"
+                style={{
+                  left: selRects.startX - 11,
+                  top: selRects.startY - 20,
+                  background: '#1E6FFF',
+                  border: '2.5px solid #fff',
+                  touchAction: 'none',
+                }}
+              />
+              <button
+                type="button"
+                aria-label="结束手柄"
+                onPointerDown={(e) => onHandlePointerDown(e, 'end')}
+                className="absolute z-[62] h-[22px] w-[22px] rounded-full shadow-lg"
+                style={{
+                  left: selRects.endX - 11,
+                  top: selRects.endY - 20,
+                  background: '#1E6FFF',
+                  border: '2.5px solid #fff',
+                  touchAction: 'none',
+                }}
+              />
+            </>
+          )}
+          {/* 浮动工具条（白色胶囊；位于选区上方） */}
+          <div
+            className="absolute z-[61] flex items-center rounded-[10px] py-1.5 shadow-2xl"
+            style={{
+              left: Math.max(10, Math.min((selRects?.startX ?? 195) - 132, (selRects?.rootW ?? 390) - 276)),
+              top: Math.max(10, (selRects?.startY ?? 300) - 56),
+              background: '#FFFFFF',
+              boxShadow: '0 6px 24px rgba(0,0,0,0.25), inset 0 0 0 1px rgba(0,0,0,0.05)',
+            }}
+            role="toolbar"
+            aria-label="选中文字操作"
+          >
+            <button
+              type="button"
+              onClick={() => void selCopy()}
+              className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[13px] font-medium active:bg-black/5"
+              style={{ color: '#1A1D26' }}
+            >
+              <Copy className="h-[17px] w-[17px]" style={{ color: '#1E6FFF' }} /> 复制
+            </button>
+            <span className="mx-0.5 h-5 w-px" style={{ background: 'rgba(0,0,0,0.10)' }} aria-hidden="true" />
+            <button
+              type="button"
+              onClick={selHighlightPopup}
+              className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[13px] font-medium active:bg-black/5"
+              style={{ color: '#1A1D26' }}
+            >
+              <Underline className="h-[17px] w-[17px]" style={{ color: '#1E6FFF' }} /> 划线
+            </button>
+            <span className="mx-0.5 h-5 w-px" style={{ background: 'rgba(0,0,0,0.10)' }} aria-hidden="true" />
+            <button
+              type="button"
+              onClick={selLookup}
+              className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[13px] font-medium active:bg-black/5"
+              style={{ color: '#1A1D26' }}
+            >
+              <SearchIcon className="h-[17px] w-[17px]" style={{ color: '#1E6FFF' }} /> 查询
+            </button>
+            <span className="mx-0.5 h-5 w-px" style={{ background: 'rgba(0,0,0,0.10)' }} aria-hidden="true" />
+            <button
+              type="button"
+              onClick={selSearch}
+              className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[13px] font-medium active:bg-black/5"
+              style={{ color: '#1A1D26' }}
+            >
+              <Globe className="h-[17px] w-[17px]" style={{ color: '#1E6FFF' }} /> 搜索
+            </button>
+          </div>
+        </>
       )}
 
       {/* ============ 划线长按菜单 ============ */}
@@ -1912,10 +2498,10 @@ export function ReaderView({ page, onBack }: { page: ReaderPage; onBack: () => v
             <div className="flex items-center gap-1">
               {[
                 { key: 'listen', label: '从本段听', icon: <Headphones className="h-[17px] w-[17px]" />, onClick: () => speakFromPara(activePopup.pi) },
-                { key: 'copy', label: '复制', icon: <Copy className="h-[16px] w-[16px]" />, onClick: () => void copyPara(activePopup.pi) },
-                { key: 'lookup', label: '查询', icon: <Search className="h-[16px] w-[16px]" />, onClick: () => lookupPara(activePopup.pi) },
+                { key: 'copy', label: '复制', icon: <Copy className="h-[16px] w-[16px]" />, onClick: () => void copyPara(activePopup.pi, popupRange) },
+                { key: 'lookup', label: '查询', icon: <Search className="h-[16px] w-[16px]" />, onClick: () => lookupPara(activePopup.pi, popupRange) },
                 ...(existingNote
-                  ? [{ key: 'del', label: '删除划线', icon: <Trash2 className="h-[16px] w-[16px]" />, onClick: () => void removeHighlightsOf(activePopup.pi) }]
+                  ? [{ key: 'del', label: '删除划线', icon: <Trash2 className="h-[16px] w-[16px]" />, onClick: () => void removeHighlightsOf(activePopup.pi, popupRange) }]
                   : []),
               ].map((b) => (
                 <button
@@ -1943,7 +2529,7 @@ export function ReaderView({ page, onBack }: { page: ReaderPage; onBack: () => v
                 <button
                   key={s.key}
                   type="button"
-                  onClick={() => void highlightPara(activePopup.pi, s.key)}
+                  onClick={() => void highlightPara(activePopup.pi, s.key, popupRange)}
                   aria-label={`划线样式：${s.label}`}
                   className="flex h-9 w-11 items-center justify-center rounded-xl text-[15px] font-semibold active:scale-90"
                   style={{
@@ -1970,7 +2556,7 @@ export function ReaderView({ page, onBack }: { page: ReaderPage; onBack: () => v
                   value={noteInput}
                   onChange={(e) => setNoteInput(e.target.value)}
                   onKeyDown={(e) => {
-                    if (e.key === 'Enter' && noteInput.trim()) void saveNote(activePopup.pi, noteInput.trim());
+                    if (e.key === 'Enter' && noteInput.trim()) void saveNote(activePopup.pi, noteInput.trim(), popupRange);
                   }}
                   placeholder="写下这一段的想法…"
                   maxLength={200}
@@ -1982,7 +2568,7 @@ export function ReaderView({ page, onBack }: { page: ReaderPage; onBack: () => v
                 <button
                   type="button"
                   disabled={!noteInput.trim()}
-                  onClick={() => void saveNote(activePopup.pi, noteInput.trim())}
+                  onClick={() => void saveNote(activePopup.pi, noteInput.trim(), popupRange)}
                   className="h-9 shrink-0 rounded-xl px-4 text-[12px] font-semibold text-white disabled:opacity-40"
                   style={{ background: theme.accent }}
                 >

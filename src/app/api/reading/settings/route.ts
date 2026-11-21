@@ -28,6 +28,15 @@ export const DEFAULT_READING_SETTINGS = {
   showBattery: true,
   pageAnim: 'slide',
   keyTurn: false,
+  clickTurn: true,
+  textIndent: 2,
+  cjkOptimize: false,
+  specialTags: true,
+  s2t: 'off',
+  brightness: 100,
+  brightnessAuto: true,
+  keepScreenOn: false,
+  autoReadSec: 0,
   presets: [] as unknown[],
   profileName: null as string | null,
   profileId: null as string | null,
@@ -73,9 +82,27 @@ function coerce(raw: Partial<Record<keyof SettingsPatch, unknown>>): Partial<Set
   if (typeof raw.underline === 'boolean') out.underline = raw.underline;
   if (typeof raw.showTime === 'boolean') out.showTime = raw.showTime;
   if (typeof raw.showBattery === 'boolean') out.showBattery = raw.showBattery;
-  if (typeof raw.pageAnim === 'string' && ['slide', 'cover', 'none'].includes(raw.pageAnim))
+  if (typeof raw.pageAnim === 'string' && ['slide', 'cover', 'none', 'fade', 'curl', 'scroll'].includes(raw.pageAnim))
     out.pageAnim = raw.pageAnim;
   if (typeof raw.keyTurn === 'boolean') out.keyTurn = raw.keyTurn;
+  if (typeof raw.clickTurn === 'boolean') out.clickTurn = raw.clickTurn;
+  {
+    const n = num(raw.textIndent, 0, 4);
+    if (n !== undefined) out.textIndent = Math.round(n);
+  }
+  if (typeof raw.cjkOptimize === 'boolean') out.cjkOptimize = raw.cjkOptimize;
+  if (typeof raw.specialTags === 'boolean') out.specialTags = raw.specialTags;
+  if (typeof raw.s2t === 'string' && ['off', 's2t', 't2s'].includes(raw.s2t)) out.s2t = raw.s2t;
+  {
+    const n = num(raw.brightness, 10, 100);
+    if (n !== undefined) out.brightness = Math.round(n);
+  }
+  if (typeof raw.brightnessAuto === 'boolean') out.brightnessAuto = raw.brightnessAuto;
+  if (typeof raw.keepScreenOn === 'boolean') out.keepScreenOn = raw.keepScreenOn;
+  {
+    const n = num(raw.autoReadSec, 0, 120);
+    if (n !== undefined) out.autoReadSec = Math.round(n);
+  }
   // 我的资料：昵称 / 自定义 ID / 头像（dataURL，限制 1.5MB）
   for (const k of ['profileName', 'profileId'] as const) {
     const v = raw[k];
@@ -114,6 +141,7 @@ function coerce(raw: Partial<Record<keyof SettingsPatch, unknown>>): Partial<Set
     const PRESET_KEYS = new Set([
       'fontSize', 'fontFamily', 'fontWeight', 'letterSpacing', 'lineSpacing', 'paraSpacing',
       'marginLeft', 'marginRight', 'marginTop', 'marginBottom', 'titlePosition', 'justify', 'underline',
+      'textIndent', 'cjkOptimize',
     ]);
     const cleaned = arr
       .filter((x): x is Record<string, unknown> => !!x && typeof x === 'object' && typeof (x as Record<string, unknown>).name === 'string')
@@ -188,6 +216,15 @@ export async function GET() {
       showBattery: row.showBattery,
       pageAnim: row.pageAnim,
       keyTurn: row.keyTurn,
+      clickTurn: row.clickTurn,
+      textIndent: row.textIndent,
+      cjkOptimize: row.cjkOptimize,
+      specialTags: row.specialTags,
+      s2t: row.s2t,
+      brightness: row.brightness,
+      brightnessAuto: row.brightnessAuto,
+      keepScreenOn: row.keepScreenOn,
+      autoReadSec: row.autoReadSec,
       presets,
       profileName: row.profileName,
       profileId: row.profileId,

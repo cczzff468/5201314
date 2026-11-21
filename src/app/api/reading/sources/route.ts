@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { BUILTIN_BOOK_SOURCES } from '@/lib/reading/builtin-sources';
+import { BUILTIN_BOOK_SOURCES, VERIFIED_SOURCES, normSourceUrl } from '@/lib/reading/builtin-sources';
 import { checkSource, proxyFetch, type LegadoSource } from '@/lib/reading/engine';
 
 export const runtime = 'nodejs';
@@ -21,26 +21,49 @@ function validateSource(raw: unknown): { ok: true; source: LegadoSource } | { ok
   return { ok: true, source: raw as LegadoSource };
 }
 
-/** 播种内置源（幂等：增量补种——已有同 URL 跳过；新增内置源也能补进老库） */
+/** 播种内置源（幂等；2026-11-21 重构：
+ *  ① 新内置源补种入库；
+ *  ② 库里已存在的同 URL 源（如用户曾手动导入过 396 合集）——保留原 ID（不破坏书架/历史引用），
+ *     仅标记 isBuiltin=true，启停状态尊重用户自己的操作（如筛活停用的失效源不强行拉起）；
+ *  ③ 已除名的旧内置源（实测没用的）自动从库里删除，书架/历史引用按 healSourceRefs 自愈 */
 async function ensureSeeded() {
-  const existUrls = new Set((await db.bookSource.findMany({ select: { url: true } })).map((x) => x.url));
-  const missing = BUILTIN_BOOK_SOURCES.filter((b) => !existUrls.has(b.bookSourceUrl));
-  if (!missing.length) return;
-  let order = await db.bookSource.count();
-  for (const b of missing) {
-    await db.bookSource.create({
-      data: {
-        name: b.bookSourceName,
-        url: b.bookSourceUrl,
-        group: b.bookSourceGroup || '小说',
-        enabled: b.enabled !== false,
-        config: JSON.stringify(b),
-        isBuiltin: true,
-        sortOrder: order++,
-        checkStatus: b.enabled !== false ? 'ok' : null,
-      },
-    }).catch(() => null);
+  const rows = await db.bookSource.findMany({ select: { id: true, url: true, isBuiltin: true } });
+  const byUrl = new Map(rows.map((x) => [normSourceUrl(x.url), x]));
+  const builtinUrls = new Set(BUILTIN_BOOK_SOURCES.map((b) => normSourceUrl(b.bookSourceUrl)));
+  let changed = false;
+  let order = rows.length;
+  for (const b of BUILTIN_BOOK_SOURCES) {
+    const exist = byUrl.get(normSourceUrl(b.bookSourceUrl));
+    if (exist) {
+      if (!exist.isBuiltin) {
+        await db.bookSource.update({ where: { id: exist.id }, data: { isBuiltin: true } }).catch(() => null);
+        changed = true;
+      }
+      continue;
+    }
+    await db.bookSource
+      .create({
+        data: {
+          name: (b.bookSourceName || '未命名').slice(0, 40),
+          url: b.bookSourceUrl,
+          group: (b.bookSourceGroup || '小说').toString().slice(0, 30),
+          enabled: b.enabled !== false,
+          config: JSON.stringify(b),
+          isBuiltin: true,
+          sortOrder: order++,
+          checkStatus: b.enabled !== false && VERIFIED_SOURCES.some((v) => normSourceUrl(v.bookSourceUrl) === normSourceUrl(b.bookSourceUrl)) ? 'ok' : null,
+        },
+      })
+      .catch(() => null);
+    changed = true;
   }
+  // 清理已除名旧内置源（保留 ID 的合集源不在此列——它们的 URL 都在新清单里）
+  const stale = rows.filter((r) => r.isBuiltin && !builtinUrls.has(normSourceUrl(r.url)));
+  for (const s of stale) {
+    await db.bookSource.delete({ where: { id: s.id } }).catch(() => null);
+    changed = true;
+  }
+  if (changed) await healSourceRefs().catch(() => null);
 }
 
 export function toLegado(row: { name: string; url: string; config: string }): LegadoSource {

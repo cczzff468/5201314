@@ -11,9 +11,9 @@
  */
 
 /** 当前最新版本（与 android-shell versionName 保持一致） */
-export const APP_VERSION = '1.9.45';
+export const APP_VERSION = '1.9.46';
 /** 版本号数字（与 android-shell versionCode 保持一致；覆盖安装要求只增不减） */
-export const APP_VERSION_CODE = 61;
+export const APP_VERSION_CODE = 62;
 
 export interface AppReleaseNote {
   version: string;
@@ -24,6 +24,17 @@ export interface AppReleaseNote {
 
 /** 版本历史（新→旧；设置 › APP 更新 页渲染，最新一条即当前版本） */
 export const APP_RELEASE_NOTES: AppReleaseNote[] = [
+  {
+    version: '1.9.46',
+    date: '2026-11-21',
+    items: [
+      '音量键翻页真正生效（需更新 APK）：阅读器里音量上键=上一页、音量下键=下一页，不再只是调音量——原生层拦截音量键转发给阅读器；设置里同步改名为「音量键翻页」',
+      '阅读 App 大改版：书源管理焕新（搜索/分组筛选/多选批量/置顶/复制链接，内置用户提供的 396 个精选书源，实测没用的旧内置源全部除名）',
+      '阅读器长按文字逐字选择：拖蓝色手柄一个字一个字地扩选，工具条支持复制/划线/查询/搜索',
+      '阅读设置弹窗焕新：字号→亮度→背景→翻页方式 + 更多设置四页（排版/翻页/屏幕/其它），新增仿真/淡入/滚动翻页、自动阅读、屏幕常亮、段首缩进、繁简转换',
+      '翻页边缘优化：左右边距完全由边距滑块掌控（0 即真 0），覆盖翻页边缘锐利阴影更像真实书页',
+    ],
+  },
   {
     version: '1.9.45',
     date: '2026-11-18',

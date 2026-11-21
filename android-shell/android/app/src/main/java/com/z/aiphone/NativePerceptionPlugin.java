@@ -2180,6 +2180,19 @@ public class NativePerceptionPlugin extends Plugin {
         call.resolve();
     }
 
+    /** 音量键翻页直通开关（阅读 App 进/出阅读器与开关联动时同步）：
+     *  enabled=true 期间 MainActivity 拦截音量键转发 WebView（__nativeVolTurn），
+     *  不再调系统音量；关闭/退出阅读器时必须传 false 恢复系统默认。 */
+    @PluginMethod
+    public void setVolumeKeyTurn(PluginCall call) {
+        boolean enabled = Boolean.TRUE.equals(call.getBoolean("enabled"));
+        MainActivity.volumeKeyTurn = enabled;
+        JSObject ret = new JSObject();
+        ret.put("ok", true);
+        ret.put("enabled", enabled);
+        call.resolve(ret);
+    }
+
     @Override
     protected void handleOnActivityResult(int requestCode, int resultCode, Intent data) {
         super.handleOnActivityResult(requestCode, resultCode, data);
