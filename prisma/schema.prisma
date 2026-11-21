@@ -1,0 +1,103 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  name      String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Post {
+  id        String   @id @default(cuid())
+  title     String
+  content   String?
+  published Boolean  @default(false)
+  authorId  String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+/// 微信 App 背景图（key：'moments'=朋友圈封面 / 'me'=「我」页背景），data 为压缩后的 data URL，永久保存在数据库
+model WxBackground {
+  key       String   @id
+  data      String
+  updatedAt DateTime @updatedAt
+}
+
+/// 网上表情包搜索缓存（关键词 → 结果 JSON；24h 过期，命中免出站爬取）
+model StickerSearchCache {
+  keyword   String   @id
+  /// 结果条目 JSON 数组（[{thumb, image, source}]）
+  items     String
+  /// 命中的数据源（fabiaoqing / bing / both）
+  source    String   @default("")
+  updatedAt DateTime @updatedAt
+}
+
+/// 联系人 App：CHAR（AI 角色）/ USER（用户自己的人设）/ NPC（配角，归属某个 CHAR 或 USER）
+model Contact {
+  id             String   @id @default(cuid())
+  /// 'char' | 'user' | 'npc'
+  kind           String
+  /// NPC 归属的 CHAR/USER 的 id；非 NPC 为空
+  ownerId        String?
+  name           String
+  gender         String?
+  age            String?
+  height         String?
+  weight         String?
+  /// 人设
+  persona        String?
+  /// 背景
+  background     String?
+  /// 职业
+  occupation     String?
+  /// 公司（电话 App「新建联系人」界面用）
+  company        String?
+  /// 地区
+  region         String?
+  /// 关系（NPC=与归属对象的关系；CHAR/USER=与用户的关系）
+  relation       String?
+  phone          String?
+  wechatId       String?
+  wechatPassword String?
+  qqId           String?
+  qqPassword     String?
+  /// 头像（客户端压缩后的 data URL；空 = 用首字母占位）
+  avatar         String?
+  /// 是否已添加为好友（CHAR/NPC 创建后默认 false，添加好友后才进联系人列表与信息 App；USER 恒为 true）
+  isFriend       Boolean  @default(false)
+  /// 浏览器工作区 ID（每个浏览器 localStorage 各持有一个 UUID；同浏览器多 App 共享、跨浏览器互相隔离；'default' = 历史存量）
+  workspaceId    String   @default("default")
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([kind])
+  @@index([workspaceId])
+}
+/// 情侣小家：每个浏览器工作区一行的完整家快照（家具实例/小人/昼夜，JSON），金币单独存列
+model CoupleHome {
+  /// 浏览器工作区 ID（X-Workspace-Id 请求头）
+  workspaceId String   @id
+  /// 家数据 JSON（HomeState：furniture 数组 + chars 位置 + night）
+  data        String
+  /// 装修金币（交互赚币 + 买家具扣币）
+  coins       Int      @default(0)
+  /// 服务端版本号（乐观并发：客户端带上匹配的 rev 才允许覆盖，防旧数据回写）
+  rev         Int      @default(0)
+  updatedAt   DateTime @updatedAt
+}

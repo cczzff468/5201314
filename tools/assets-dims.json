@@ -1,0 +1,154 @@
+{
+  "nightstand.webp": {
+    "w": 640,
+    "h": 529
+  },
+  "wallClock.webp": {
+    "w": 561,
+    "h": 560
+  },
+  "boxOpen.webp": {
+    "w": 640,
+    "h": 426
+  },
+  "sideTable.webp": {
+    "w": 640,
+    "h": 498
+  },
+  "books.webp": {
+    "w": 640,
+    "h": 513
+  },
+  "speaker.webp": {
+    "w": 640,
+    "h": 473
+  },
+  "trashcan.webp": {
+    "w": 640,
+    "h": 526
+  },
+  "lampTable.webp": {
+    "w": 640,
+    "h": 513
+  },
+  "fridge.webp": {
+    "w": 640,
+    "h": 545
+  },
+  "cat.webp": {
+    "w": 640,
+    "h": 420
+  },
+  "tv.webp": {
+    "w": 640,
+    "h": 382
+  },
+  "sofaLong.webp": {
+    "w": 640,
+    "h": 413
+  },
+  "lampFloor.webp": {
+    "w": 608,
+    "h": 560
+  },
+  "wardrobe.webp": {
+    "w": 628,
+    "h": 560
+  },
+  "recordPlayer.webp": {
+    "w": 626,
+    "h": 560
+  },
+  "pillow.webp": {
+    "w": 640,
+    "h": 482
+  },
+  "washer.webp": {
+    "w": 640,
+    "h": 537
+  },
+  "stove.webp": {
+    "w": 640,
+    "h": 503
+  },
+  "box.webp": {
+    "w": 640,
+    "h": 460
+  },
+  "chair.webp": {
+    "w": 640,
+    "h": 505
+  },
+  "rug.webp": {
+    "w": 640,
+    "h": 383
+  },
+  "photoFrame.webp": {
+    "w": 622,
+    "h": 560
+  },
+  "plantSmall.webp": {
+    "w": 640,
+    "h": 535
+  },
+  "bed.webp": {
+    "w": 640,
+    "h": 448
+  },
+  "sofa.webp": {
+    "w": 640,
+    "h": 332
+  },
+  "coffeeTable.webp": {
+    "w": 640,
+    "h": 389
+  },
+  "plantMonstera.webp": {
+    "w": 574,
+    "h": 560
+  },
+  "wardrobeOpen.webp": {
+    "w": 640,
+    "h": 502
+  },
+  "fridgeOpen.webp": {
+    "w": 640,
+    "h": 486
+  },
+  "tableDining.webp": {
+    "w": 640,
+    "h": 411
+  },
+  "wallShelf.webp": {
+    "w": 640,
+    "h": 384
+  },
+  "tvStand.webp": {
+    "w": 640,
+    "h": 344
+  },
+  "me_side.webp": {
+    "w": 324,
+    "h": 620
+  },
+  "ta_side.webp": {
+    "w": 369,
+    "h": 620
+  },
+  "me_back.webp": {
+    "w": 337,
+    "h": 620
+  },
+  "ta_front.webp": {
+    "w": 414,
+    "h": 620
+  },
+  "ta_back.webp": {
+    "w": 413,
+    "h": 620
+  },
+  "me_front.webp": {
+    "w": 339,
+    "h": 620
+  }
+}

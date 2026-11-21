@@ -1,0 +1,1 @@
+{"name":"mock-openai","scripts":{"dev":"bun --hot index.ts"}}
