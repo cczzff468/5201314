@@ -418,6 +418,26 @@ function parseChain(part: string): Seg[] {
       segs.push({ type: 'index', value: r, index: parseInt(r, 10) });
       continue;
     }
+    // Legado 简写：.name / .name.N → class（如 ".l.0@href"）
+    const dotCls = /^\.([A-Za-z_][\w-]*)(?:\.(-?\d+))?$/.exec(r);
+    if (dotCls) {
+      segs.push({
+        type: 'class',
+        value: dotCls[1],
+        index: dotCls[2] !== undefined ? parseInt(dotCls[2], 10) : undefined,
+      });
+      continue;
+    }
+    // Legado 简写：裸标签名带下标（如 "span.1@text"、"dd.0"）→ tag + index
+    const bareTag = /^([A-Za-z][\w-]*)(?:\.(-?\d+))?$/.exec(r);
+    if (bareTag) {
+      segs.push({
+        type: 'tag',
+        value: bareTag[1],
+        index: bareTag[2] !== undefined ? parseInt(bareTag[2], 10) : undefined,
+      });
+      continue;
+    }
     segs.push({ type: 'css', value: r });
   }
   return segs;
@@ -561,14 +581,14 @@ function resolveUrl(u: string, base: string): string {
   }
 }
 
-/** 求值单条字符串规则（自动识别 html/json 上下文） */
-export function evalRule(ctx: Ctx, rule: string | undefined): string {
+/** 求值单条字符串规则（自动识别 html/json 上下文；joinAll=true 时多元素命中拼接为多行） */
+export function evalRule(ctx: Ctx, rule: string | undefined, joinAll = false): string {
   if (!rule) return '';
   const raw = stripJs(rule);
   const parts = splitOr(raw);
   for (const p of parts) {
     const [main, regex, replacement] = splitRegex(p);
-    let val = evalSingle(ctx, main);
+    let val = evalSingle(ctx, main, joinAll);
     if (val) {
       val = applyRegex(val, regex, replacement);
       if (val.trim()) return val.trim();
@@ -577,14 +597,14 @@ export function evalRule(ctx: Ctx, rule: string | undefined): string {
   return '';
 }
 
-function evalSingle(ctx: Ctx, rule: string): string {
+function evalSingle(ctx: Ctx, rule: string, joinAll = false): string {
   if (!rule) return '';
   const r = rule.trim();
   // && 顺序拼接
   if (r.includes('&&') && !r.startsWith('@css:')) {
     return r
       .split('&&')
-      .map((x) => evalSingle(ctx, x))
+      .map((x) => evalSingle(ctx, x, joinAll))
       .filter(Boolean)
       .join(' ');
   }
@@ -602,11 +622,13 @@ function evalSingle(ctx: Ctx, rule: string): string {
   if (r.startsWith('{{')) return '';
   if (r.startsWith('@css:')) {
     const segs = parseChain(r.slice(5));
-    return applyChain(ctx, segs, false)[0] || '';
+    const parts = applyChain(ctx, segs, false);
+    return joinAll ? parts.filter(Boolean).join('\n') : parts[0] || '';
   }
   if (r.startsWith('//')) return evalXPathLite(ctx, r);
   const segs = parseChain(r);
-  return applyChain(ctx, segs, false)[0] || '';
+  const parts = applyChain(ctx, segs, false);
+  return joinAll ? parts.filter(Boolean).join('\n') : parts[0] || '';
 }
 
 /** 轻量 XPath：//meta[@property='og:xxx']/@content 与 //tag/@attr 两种形态 */
@@ -870,7 +892,8 @@ export async function getBookInfo(
   const name = evalRule(ctx, rb.name) || '';
   const author = cleanAuthor(evalRule(ctx, rb.author));
   const coverUrl = resolveUrl(evalRule(ctx, rb.coverUrl), bookUrl);
-  const intro = evalRule(ctx, rb.intro);
+  // 简介常为多个 <p> → 拼接
+  const intro = evalRule(ctx, rb.intro, true).slice(0, 600);
   const lastChapter = evalRule(ctx, rb.lastChapter);
   let tocUrl = resolveUrl(evalRule(ctx, rb.tocUrl), bookUrl) || bookUrl;
   // 目录页可能就是详情页（常见笔趣阁：bookUrl 即目录页）
@@ -979,7 +1002,8 @@ export async function getChapter(
 ): Promise<{ title: string; content: string; nextUrl?: string }> {
   const { ctx, finalUrl } = await fetchCtx(source, { url: chapterUrl, method: 'GET' });
   const rc = source.ruleContent || {};
-  const raw = evalRule(ctx, rc.content);
+  // 正文规则常匹配多个元素（如 #text>p@textNodes）→ 全部拼接为段落
+  const raw = evalRule(ctx, rc.content, true);
   let text = htmlToText(raw)
     .replace(/\*{1,3}/g, '')
     .replace(/[ \t]{2,}/g, ' ');

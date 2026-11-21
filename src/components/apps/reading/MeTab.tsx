@@ -1,11 +1,11 @@
 'use client';
 
 /**
- * 「我」Tab：我的资料头卡（头像/昵称/自定义ID，可编辑）+ 阅读统计胶囊 + 分组玻璃卡设置项
- * 分组：书源与内容 / 阅读与数据（阅读记录与 AI 记忆）/ 外观与通用（主题/排版）
+ * 「我」Tab：我的资料头卡（头像/昵称/自定义ID，可编辑）+ 阅读时间 + 分组玻璃卡设置项
+ * 分组：书源与内容（含本地导入）/ 阅读与数据（阅读记录与 AI 记忆）/ 外观与通用（主题/排版）
  * 主题选择与排版设置为底部玻璃抽屉；资料编辑为居中玻璃卡弹窗。
  */
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Database,
   Upload,
@@ -15,13 +15,13 @@ import {
   ChevronRight,
   CircleCheck,
   Layers,
-  Pencil,
   Camera,
   UserRound,
-  Hash,
+  FolderUp,
+  Loader2,
 } from 'lucide-react';
 import { useReading } from '@/lib/reading/store';
-import { APP_THEMES, fileToDataUrl, themeOf } from './shared';
+import { APP_THEMES, api, fileToDataUrl, formatReadTime, themeOf } from './shared';
 import { ReaderSettingsSheet } from './ReaderSettingsSheet';
 
 function GroupTitle({ text, theme }: { text: string; theme: ReturnType<typeof themeOf> }) {
@@ -100,6 +100,38 @@ export function MeTab({
   const okCount = sources.filter((s) => s.enabled).length;
   const readChapters = shelf.reduce((n, b) => n + b.lastReadChapter + 1, 0);
 
+  /** 阅读时长（累计秒） */
+  const [readSeconds, setReadSeconds] = useState(0);
+  useEffect(() => {
+    api
+      .readTimeGet()
+      .then((d) => setReadSeconds(d.seconds))
+      .catch(() => null);
+  }, []);
+
+  /** 本地导入（txt / epub） */
+  const localFileRef = useRef<HTMLInputElement>(null);
+  const [importing, setImporting] = useState(false);
+  const [toast, setToast] = useState('');
+  const notify = (t: string) => {
+    setToast(t);
+    setTimeout(() => setToast(''), 2400);
+  };
+  const loadShelf = useReading((s) => s.loadShelf);
+  const onLocalFile = async (f: File | undefined) => {
+    if (!f) return;
+    setImporting(true);
+    notify(`正在导入《${f.name.replace(/\.[^.]+$/, '')}》…`);
+    try {
+      const r = await api.localUpload(f);
+      notify(`导入成功：《${r.name}》共 ${r.chapters} 章，已加入书架`);
+      await loadShelf();
+    } catch (e) {
+      notify(e instanceof Error ? e.message : '导入失败');
+    }
+    setImporting(false);
+  };
+
   const card = {
     background: theme.cardBg,
     boxShadow: 'inset 0 0 0 1px ' + theme.cardRing,
@@ -145,19 +177,14 @@ export function MeTab({
           </span>
         )}
         <span className="min-w-0 flex-1">
-          <span className="flex items-center gap-2">
-            <span className="truncate text-[19px] font-bold" style={{ color: theme.textMain }}>
-              {settings.profileName || '书友'}
-            </span>
-            <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full" style={{ background: theme.accentSoft, color: theme.accent }}>
-              <Pencil className="h-3 w-3" />
-            </span>
+          <span className="block truncate text-[19px] font-bold" style={{ color: theme.textMain }}>
+            {settings.profileName || '书友'}
           </span>
-          <span className="mt-1 flex items-center gap-1 text-[12px]" style={{ color: theme.textSub }}>
-            <Hash className="h-3 w-3" /> ID：{settings.profileId || '未设置'}
+          <span className="mt-1 block truncate text-[12px]" style={{ color: theme.textSub }}>
+            ID：{settings.profileId || '未设置'}
           </span>
-          <span className="mt-0.5 block text-[12px]" style={{ color: theme.textSub }}>
-            书架 {shelf.length} 本 · 已读 {readChapters} 章
+          <span className="mt-0.5 flex items-center gap-1 text-[12px]" style={{ color: theme.textSub }}>
+            阅读时间 {formatReadTime(readSeconds)}
           </span>
         </span>
       </button>
@@ -167,10 +194,10 @@ export function MeTab({
         {[
           { n: shelf.length, label: '在读书籍' },
           { n: readChapters, label: '已读章节' },
-          { n: okCount, label: '可用书源' },
+          { n: formatReadTime(readSeconds), label: '阅读时间', text: true },
         ].map((s) => (
           <div key={s.label} className="rounded-2xl p-3 text-center backdrop-blur-xl" style={card}>
-            <p className="text-[20px] font-bold tabular-nums" style={{ color: theme.accent }}>
+            <p className={`text-[18px] font-bold ${s.text ? '' : 'tabular-nums'}`} style={{ color: theme.accent }}>
               {s.n}
             </p>
             <p className="mt-0.5 text-[11px]" style={{ color: theme.textSub }}>
@@ -200,6 +227,26 @@ export function MeTab({
           title="导入 / 上传书源"
           desc="粘贴 JSON、输入链接或从手机上传"
           onClick={onOpenSources}
+        />
+        <div className="mx-[86px] h-px" style={{ background: theme.cardRing }} />
+        <Item
+          theme={theme}
+          icon={importing ? <Loader2 className="h-[22px] w-[22px] animate-spin" strokeWidth={2} /> : <FolderUp className="h-[22px] w-[22px]" strokeWidth={2} />}
+          iconBg="#FFF3E0"
+          iconColor="#F59E0B"
+          title="从本地导入书籍"
+          desc="txt / epub 从手机导入，自动加入书架"
+          onClick={() => !importing && localFileRef.current?.click()}
+        />
+        <input
+          ref={localFileRef}
+          type="file"
+          accept=".txt,.epub,text/plain,application/epub+zip"
+          className="hidden"
+          onChange={(e) => {
+            void onLocalFile(e.target.files?.[0]);
+            e.target.value = '';
+          }}
         />
       </div>
 
@@ -257,6 +304,13 @@ export function MeTab({
           onClick={() => setTypoOpen(true)}
         />
       </div>
+
+      {/* 轻提示 */}
+      {toast && (
+        <div className="pointer-events-none absolute inset-x-0 top-16 z-[60] flex justify-center px-6">
+          <span className="rounded-full bg-black/75 px-4 py-2 text-center text-[13px] text-white backdrop-blur">{toast}</span>
+        </div>
+      )}
 
       {/* 资料编辑弹窗（头像 / 名字 / ID） */}
       {profileOpen && (

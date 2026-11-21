@@ -9,7 +9,9 @@ export const dynamic = 'force-dynamic';
 
 /**
  * 章节正文（服务端代理抓取 + 双缓存）：
- * GET ?sourceId=&chapterUrl=&bookUrl=&index=&title=
+ * GET ?sourceId=&chapterUrl=&bookUrl=&index=&title=&refresh=1
+ * - 本地书（sourceId=local / chapterUrl=local:...）：LocalChapter 秒回
+ * - refresh=1：跳过缓存强制重抓（阅读器「刷新」按钮），抓完更新缓存
  * - ChapterCache（chapterUrl 唯一键）命中直接回
  * - 未命中抓取正文入库；若该章还没有 AI 摘要 → 后台静默生成（不阻塞本次响应，
  *   下次打开或聊天时已就绪——Token 危机解法：聊天只注入 100 字摘要）
@@ -21,19 +23,33 @@ export async function GET(req: NextRequest) {
   const bookUrl = sp.get('bookUrl') || '';
   const index = parseInt(sp.get('index') || '0', 10) || 0;
   const title = sp.get('title') || '';
+  const refresh = sp.get('refresh') === '1';
   if (!sourceId || !chapterUrl) return NextResponse.json({ error: '参数缺失' }, { status: 400 });
 
-  const cached = await db.chapterCache.findUnique({ where: { chapterUrl } });
-  if (cached && cached.content.length > 200) {
-    if (cached.bookUrl === bookUrl && !cached.summary) {
-      void genChapterSummary({ bookUrl, chapterUrl, index, title, content: cached.content }).catch(() => null);
-    }
-    return NextResponse.json({
-      title: cached.title || title,
-      content: cached.content,
-      summary: cached.summary || '',
-      cached: true,
+  // ① 本地书：chapterUrl = local:{bookId}:{idx}
+  if (sourceId === 'local' || chapterUrl.startsWith('local:')) {
+    const m = /^local:([^:]+):(\d+)$/.exec(chapterUrl);
+    if (!m) return NextResponse.json({ error: '本地章节地址不合法' }, { status: 400 });
+    const lc = await db.localChapter.findUnique({
+      where: { bookId_idx: { bookId: m[1], idx: parseInt(m[2], 10) } },
     });
+    if (!lc) return NextResponse.json({ error: '章节不存在' }, { status: 404 });
+    return NextResponse.json({ title: lc.title, content: lc.content, summary: '', cached: true });
+  }
+
+  if (!refresh) {
+    const cached = await db.chapterCache.findUnique({ where: { chapterUrl } });
+    if (cached && cached.content.length > 200) {
+      if (cached.bookUrl === bookUrl && !cached.summary) {
+        void genChapterSummary({ bookUrl, chapterUrl, index, title, content: cached.content }).catch(() => null);
+      }
+      return NextResponse.json({
+        title: cached.title || title,
+        content: cached.content,
+        summary: cached.summary || '',
+        cached: true,
+      });
+    }
   }
 
   let row = await db.bookSource.findUnique({ where: { id: sourceId } });

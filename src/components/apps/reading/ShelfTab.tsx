@@ -3,9 +3,10 @@
 /**
  * 书架 Tab（全功能版）：
  * - 顶栏：大标题「书架」 + 搜索按钮（书架内过滤） + 三点按钮（多选管理模式）
- * - 自定义分组：胶囊行（全部 / 自定义分组 / +新建；长按分组可重命名/删除，删除后书归未分组）
+ * - 自定义分组：胶囊行（全部 / 自定义分组 / +新建 / 本地导入；长按分组可重命名/删除）
  * - 书籍网格：真实封面 / 进度角标 / 长按弹出操作单（转移分组 · 移出书架）
  * - 多选模式：点选多本 → 底部玻璃操作条（全选 · 转移分组 · 移出书架）
+ * - 本地导入：txt / epub 从手机上传，解析后自动入书架
  */
 import { useMemo, useRef, useState } from 'react';
 import {
@@ -21,9 +22,11 @@ import {
   FolderPlus,
   Pencil,
   FolderX,
+  FolderUp,
+  Loader2,
 } from 'lucide-react';
 import { useReading } from '@/lib/reading/store';
-import { coverSrc, CoverPlaceholder, themeOf, type ShelfBookItem } from './shared';
+import { api, coverSrc, CoverPlaceholder, themeOf, type ShelfBookItem } from './shared';
 
 type Sheet =
   | { kind: 'none' }
@@ -49,6 +52,7 @@ export function ShelfTab({
   const shelf = useReading((s) => s.shelf);
   const removeFromShelfBatch = useReading((s) => s.removeFromShelfBatch);
   const setGroupBatch = useReading((s) => s.setGroupBatch);
+  const loadShelf = useReading((s) => s.loadShelf);
   const patch = useReading((s) => s.patchSettings);
   const theme = useMemo(() => themeOf(settings.appTheme), [settings.appTheme]);
 
@@ -64,6 +68,29 @@ export function ShelfTab({
   /** 长按计时器 */
   const pressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [pressBook, setPressBook] = useState<ShelfBookItem | null>(null);
+  /** 本地导入 */
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [importing, setImporting] = useState(false);
+  const [toast, setToast] = useState('');
+
+  const notify = (t: string) => {
+    setToast(t);
+    setTimeout(() => setToast(''), 2400);
+  };
+
+  const onLocalFile = async (f: File | undefined) => {
+    if (!f) return;
+    setImporting(true);
+    notify(`正在导入《${f.name.replace(/\.[^.]+$/, '')}》…`);
+    try {
+      const r = await api.localUpload(f);
+      notify(`导入成功：《${r.name}》共 ${r.chapters} 章`);
+      await loadShelf();
+    } catch (e) {
+      notify(e instanceof Error ? e.message : '导入失败');
+    }
+    setImporting(false);
+  };
 
   const groups = settings.customGroups || [];
   const hasUngrouped = shelf.some((b) => !b.customGroup) && groups.length > 0;
@@ -253,6 +280,27 @@ export function ShelfTab({
         >
           <FolderPlus className="h-3.5 w-3.5" /> 分组
         </button>
+        {/* 本地导入（txt / epub） */}
+        <button
+          type="button"
+          disabled={importing}
+          onClick={() => fileRef.current?.click()}
+          aria-label="从本地导入书籍"
+          className="flex h-8 shrink-0 items-center gap-1 rounded-full px-3 text-[13px] font-medium backdrop-blur-xl active:scale-95 disabled:opacity-50"
+          style={{ ...glass, color: theme.accent }}
+        >
+          {importing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <FolderUp className="h-3.5 w-3.5" />} 本地导入
+        </button>
+        <input
+          ref={fileRef}
+          type="file"
+          accept=".txt,.epub,text/plain,application/epub+zip"
+          className="hidden"
+          onChange={(e) => {
+            void onLocalFile(e.target.files?.[0]);
+            e.target.value = '';
+          }}
+        />
       </div>
 
       {/* 空状态 */}
@@ -265,14 +313,25 @@ export function ShelfTab({
             {kw ? '书架里没有匹配的书' : '书架空空的，去找几本书吧'}
           </p>
           {!kw && (
-            <button
-              type="button"
-              onClick={onSearchGlobal}
-              className="rounded-full px-6 py-2.5 text-[14px] font-semibold text-white active:scale-95"
-              style={{ background: `linear-gradient(135deg, ${theme.gradFrom}, ${theme.gradTo})`, boxShadow: `0 6px 20px ${theme.accent}55` }}
-            >
-              去找书
-            </button>
+            <div className="flex gap-2.5">
+              <button
+                type="button"
+                onClick={onSearchGlobal}
+                className="rounded-full px-6 py-2.5 text-[14px] font-semibold text-white active:scale-95"
+                style={{ background: `linear-gradient(135deg, ${theme.gradFrom}, ${theme.gradTo})`, boxShadow: `0 6px 20px ${theme.accent}55` }}
+              >
+                去找书
+              </button>
+              <button
+                type="button"
+                disabled={importing}
+                onClick={() => fileRef.current?.click()}
+                className="flex items-center gap-1.5 rounded-full px-5 py-2.5 text-[14px] font-semibold backdrop-blur-xl active:scale-95 disabled:opacity-50"
+                style={{ ...glass, color: theme.accent }}
+              >
+                {importing ? <Loader2 className="h-4 w-4 animate-spin" /> : <FolderUp className="h-4 w-4" />} 本地导入
+              </button>
+            </div>
           )}
         </div>
       ) : (
@@ -568,6 +627,12 @@ export function ShelfTab({
               </div>
             </div>
           )}
+        </div>
+      )}
+      {/* 轻提示 */}
+      {toast && (
+        <div className="pointer-events-none absolute inset-x-0 top-16 z-[60] flex justify-center px-6">
+          <span className="rounded-full bg-black/75 px-4 py-2 text-center text-[13px] text-white backdrop-blur">{toast}</span>
         </div>
       )}
     </div>

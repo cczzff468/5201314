@@ -169,6 +169,8 @@ model ReadHistory {
   lastPage        Int      @default(0)
   lastChapterTitle String?
   lastReadAt      DateTime @default(now())
+  /// 目录缓存 JSON（"[{title,url}]"，再点秒开）
+  chapters        String   @default("[]")
 
   @@unique([bookUrl])
 }
@@ -227,6 +229,38 @@ model ReadingSetting {
   /// 书架自定义分组名列表（JSON 数组字符串）
   customGroups  String   @default("[]")
   updatedAt     DateTime @updatedAt
+}
+
+/// 本地导入书籍（txt / epub，从手机上传）
+model LocalBook {
+  id             String   @id @default(cuid())
+  name           String
+  author         String?
+  coverUrl       String?
+  intro          String?
+  totalChapters  Int      @default(0)
+  /// 书籍来源文件名（导入时留档）
+  fileName       String?
+  lastReadAt     DateTime @default(now())
+  createdAt      DateTime @default(now())
+}
+
+/// 本地书籍章节正文（bookId+idx 唯一；章节 URL 形如 local:{bookId}:{idx}）
+model LocalChapter {
+  id      String @id
+  bookId  String
+  idx     Int
+  title   String
+  content String
+
+  @@unique([bookId, idx])
+}
+
+/// 阅读时长统计（单行单例，秒）
+model ReadStat {
+  id          String   @id @default("singleton")
+  readSeconds Int      @default(0)
+  updatedAt   DateTime @updatedAt
 }
 
 /// AI 陪读记忆：章节摘要 / 聊天记录 / 读书里程碑

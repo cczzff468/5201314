@@ -1,8 +1,9 @@
 'use client';
 
 /**
- * 首页 Tab：胶囊搜索条 + 分类胶囊标签 + 精选书单横滑卡（真实封面，懒加载+缓存）
- * + 继续阅读卡。玻璃毛玻璃风格：磨砂卡片 + 主题光斑透出 + 全圆角胶囊。
+ * 首页 Tab：胶囊搜索条 + 分类胶囊标签（点击进入分类浏览页，不再直接搜索）
+ * + 分类精选横滑卡（真实封面，懒加载+缓存）+ 继续阅读卡。
+ * 玻璃毛玻璃风格：磨砂卡片 + 主题光斑透出 + 全圆角胶囊。
  */
 import { useEffect, useMemo, useState } from 'react';
 import { Search, Clock3, ChevronRight, Flame } from 'lucide-react';
@@ -22,9 +23,11 @@ const CATEGORIES = Object.keys(FEATURED);
 
 export function HomeTab({
   onSearch,
+  onOpenCategory,
   onOpenShelfBook,
 }: {
   onSearch: (kw?: string) => void;
+  onOpenCategory: (category: string) => void;
   onOpenShelfBook: (b: ReadHistoryItem) => void;
 }) {
   const settings = useReading((s) => s.settings);
@@ -152,13 +155,13 @@ export function HomeTab({
         </button>
       )}
 
-      {/* 分类胶囊 */}
+      {/* 分类胶囊（点击进入分类浏览页） */}
       <div className="-mx-4 mt-5 flex gap-2 overflow-x-auto px-4 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         {CATEGORIES.map((c) => (
           <button
             key={c}
             type="button"
-            onClick={() => onSearch(FEATURED[c][0]?.name)}
+            onClick={() => onOpenCategory(c)}
             className={`h-8 shrink-0 rounded-full px-4 text-[13px] font-medium backdrop-blur-xl active:scale-95 ${c === '热门' ? 'text-white' : ''}`}
             style={
               c === '热门'
@@ -171,7 +174,7 @@ export function HomeTab({
         ))}
       </div>
 
-      {/* 精选书单（真实封面） */}
+      {/* 分类精选（真实封面；「更多」进分类页） */}
       {CATEGORIES.slice(1).map((cat) => (
         <section key={cat} className="mt-5">
           <div className="mb-2.5 flex items-center justify-between">
@@ -180,15 +183,15 @@ export function HomeTab({
             </h2>
             <button
               type="button"
-              onClick={() => onSearch(FEATURED[cat][0]?.name)}
+              onClick={() => onOpenCategory(cat)}
               className="text-[12px] font-medium"
               style={{ color: theme.accent }}
             >
-              换一批 ›
+              全部 ›
             </button>
           </div>
           <div className="-mx-4 flex gap-3 overflow-x-auto px-4 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-            {FEATURED[cat].map((b) => (
+            {FEATURED[cat].slice(0, 6).map((b) => (
               <button
                 key={b.name}
                 type="button"

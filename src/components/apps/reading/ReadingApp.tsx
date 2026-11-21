@@ -30,6 +30,7 @@ import { BookDetail } from './BookDetail';
 import { ReaderView } from './ReaderView';
 import { SourcesManager } from './SourcesManager';
 import { ReadingHistory } from './ReadingHistory';
+import { CategoryPage } from './CategoryPage';
 
 export type TabKey = 'home' | 'shelf' | 'history' | 'me';
 
@@ -49,6 +50,7 @@ export type SubPage =
       /** 章内页码（续读记忆） */
       startPage?: number;
     }
+  | { kind: 'category'; category: string }
   | { kind: 'sources' }
   | { kind: 'history' };
 
@@ -129,9 +131,18 @@ export default function ReadingApp() {
         )}
         {page.kind === 'sources' && <SourcesManager onBack={back} />}
         {page.kind === 'history' && <ReadingHistory onBack={back} onOpenBook={(b) => openShelfBook(b, push)} />}
+        {page.kind === 'category' && (
+          <CategoryPage
+            key={page.category}
+            category={page.category}
+            onBack={back}
+            onOpenBook={(name) => push({ kind: 'search', keyword: name, autoRun: true })}
+            onSearchMore={(kw) => push({ kind: 'search', keyword: kw, autoRun: true })}
+          />
+        )}
         {page.kind === 'none' && (
           <div className="h-full overflow-y-auto overscroll-contain pb-[120px] pt-[54px]">
-            {tab === 'home' && <HomeTab onSearch={(kw) => push({ kind: 'search', keyword: kw, autoRun: true })} onOpenShelfBook={(b) => openHistoryBook(b, push)} />}
+            {tab === 'home' && <HomeTab onSearch={(kw) => push({ kind: 'search', keyword: kw, autoRun: true })} onOpenCategory={(c) => push({ kind: 'category', category: c })} onOpenShelfBook={(b) => openHistoryBook(b, push)} />}
             {tab === 'shelf' && <ShelfTab onOpen={(b) => openShelfBook(b, push)} onSearchGlobal={() => push({ kind: 'search', autoRun: true })} />}
             {tab === 'history' && <HistoryTab onOpen={(b) => openHistoryBook(b, push)} />}
             {tab === 'me' && <MeTab onOpenSources={() => push({ kind: 'sources' })} onOpenHistory={() => push({ kind: 'history' })} />}
@@ -254,7 +265,7 @@ function TabMeIcon() {
   return <CircleUserRound className="h-[22px] w-[22px]" strokeWidth={2} />;
 }
 
-/** 子页通用顶栏（毛玻璃；iOS 规范：标题绝对居中、返回键独立居左、右槽居右） */
+/** 子页通用顶栏（透明悬浮在 App 渐变背景上，与页面颜色统一；iOS 规范：标题绝对居中、返回键独立居左、右槽居右） */
 export function SubNavBar({
   title,
   onBack,
@@ -270,11 +281,10 @@ export function SubNavBar({
 }) {
   return (
     <div
-      className="sticky top-0 z-20 shrink-0 backdrop-blur-2xl"
+      className="sticky top-0 z-20 shrink-0 backdrop-blur-xl"
       style={{
-        background: transparent ? 'transparent' : theme.barBg,
+        background: 'transparent',
         paddingTop: SB_H,
-        boxShadow: transparent ? undefined : `inset 0 -1px 0 ${theme.cardRing}`,
       }}
     >
       <div className="relative flex h-[52px] items-center px-3">

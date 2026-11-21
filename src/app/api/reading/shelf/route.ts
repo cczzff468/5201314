@@ -97,6 +97,15 @@ export async function POST(req: NextRequest) {
       const bookUrl = String(b.bookUrl || '');
       if (!bookUrl) return NextResponse.json({ error: '缺少 bookUrl' }, { status: 400 });
       const chapters = Array.isArray(b.chapters) ? (b.chapters as TocChapter[]) : [];
+      const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? Math.floor(v) : undefined);
+      // 可选进度/统计字段（从历史「加入书架」时带上，保留阅读进度）
+      const progress = {
+        ...(num(b.lastReadChapter) !== undefined ? { lastReadChapter: num(b.lastReadChapter) as number } : {}),
+        ...(num(b.lastPage) !== undefined ? { lastPage: num(b.lastPage) as number } : {}),
+        ...(b.lastChapterTitle ? { lastChapterTitle: String(b.lastChapterTitle) } : {}),
+        ...(num(b.totalChapters) !== undefined ? { totalChapters: num(b.totalChapters) as number } : {}),
+        ...(b.customGroup ? { customGroup: String(b.customGroup).slice(0, 20) } : {}),
+      };
       const row = await db.shelfBook.upsert({
         where: { bookUrl },
         update: {
@@ -106,9 +115,9 @@ export async function POST(req: NextRequest) {
           intro: b.intro ? String(b.intro) : null,
           sourceId: String(b.sourceId || ''),
           sourceName: b.sourceName ? String(b.sourceName) : null,
-          chapters: JSON.stringify(chapters),
-          totalChapters: chapters.length,
-          lastChapterTitle: chapters.length ? chapters[chapters.length - 1].title : null,
+          ...(chapters.length ? { chapters: JSON.stringify(chapters), totalChapters: chapters.length } : {}),
+          ...(chapters.length ? { lastChapterTitle: chapters[chapters.length - 1].title } : {}),
+          ...progress,
           lastReadAt: new Date(),
         },
         create: {
@@ -123,6 +132,7 @@ export async function POST(req: NextRequest) {
           chapters: JSON.stringify(chapters),
           totalChapters: chapters.length,
           lastChapterTitle: chapters.length ? chapters[chapters.length - 1].title : null,
+          ...progress,
         },
       });
       return NextResponse.json({ id: row.id, ok: true });
@@ -188,6 +198,14 @@ export async function POST(req: NextRequest) {
           ? [String(body.bookUrl)]
           : [];
       if (urls.length) await db.shelfBook.deleteMany({ where: { bookUrl: { in: urls } } });
+      // 本地书：顺带删本地数据（LocalBook/LocalChapter）
+      for (const u of urls) {
+        if (u.startsWith('local:')) {
+          const localId = u.slice('local:'.length);
+          await db.localChapter.deleteMany({ where: { bookId: localId } }).catch(() => null);
+          await db.localBook.deleteMany({ where: { id: localId } }).catch(() => null);
+        }
+      }
       return NextResponse.json({ ok: true });
     }
     if (action === 'setGroup') {

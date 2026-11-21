@@ -9,11 +9,29 @@
  *         章内页翻尽后继续滑 → 翻章（提示胶囊显示「下一章 / 上一章」），不再跳章
  * - 点按分区：左 1/3 上一页 · 中间唤出工具 · 右 1/3 下一页
  * - 沉浸模式：打开期间状态栏与灵动岛整体隐藏（PhoneShell 层），退出自动恢复
- * - 工具：顶部/底部悬浮毛玻璃胶囊 Dock（返回+书名+目录 / 进度滑杆+AI伴读+排版）
+ * - 工具（参照主流阅读器设计）：
+ *   顶部浮动卡片：返回 + 书名/章节 + 换源 · 缓存 · 章节搜索 · 刷新
+ *   底部浮动面板：上一章 | 章节进度条 | 下一章 ／ 目录 · 夜间 · AI伴读 · 排版 · 朗读
+ *   夜间一键切换阅读背景；朗读为 Web Speech 全章 TTS；换源在架时自动迁移书架记录
  * - 进度记忆：翻页防抖、翻章立即保存（章节 + 章内页码），从书架/历史/详情打开时续读
+ * - 阅读时长：每 15s 上报一次（页面可见时），「我」页展示累计时间
  */
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { ChevronLeft, ChevronRight, Sparkles, Type, Loader2, List } from 'lucide-react';
+import {
+  ChevronLeft,
+  ChevronRight,
+  Sparkles,
+  SlidersHorizontal,
+  Loader2,
+  List,
+  Moon,
+  Sun,
+  Volume2,
+  ArrowDownUp,
+  Download,
+  Search,
+  RotateCw,
+} from 'lucide-react';
 import { useReading } from '@/lib/reading/store';
 import { setImmersive } from '@/lib/ios/immersive-store';
 import {
@@ -22,6 +40,7 @@ import {
   fontCss,
   FONT_WEIGHTS,
   themeOf,
+  matchChapterIndex,
   type TocItem,
 } from './shared';
 import { ReaderSettingsSheet } from './ReaderSettingsSheet';
@@ -33,6 +52,15 @@ type ReaderPage = Extract<SubPage, { kind: 'reader' }>;
 /** 页间距（跟手滑动时可见下一页边缘，增强翻页手感） */
 const PAGE_GAP = 28;
 
+/** 换源候选 */
+interface SwitchCand {
+  sourceId: string;
+  sourceName: string;
+  name: string;
+  author: string;
+  bookUrl: string;
+}
+
 export function ReaderView({
   page,
   onBack,
@@ -41,8 +69,10 @@ export function ReaderView({
   onBack: () => void;
 }) {
   const settings = useReading((s) => s.settings);
+  const patch = useReading((s) => s.patchSettings);
   const loadShelf = useReading((s) => s.loadShelf);
   const sourcesList = useReading((s) => s.sources);
+  const shelf = useReading((s) => s.shelf);
   const theme = useMemo(() => themeOf(settings.appTheme), [settings.appTheme]);
   const bg = useMemo(() => bgOf(settings), [settings]);
   const fontCssVal = useMemo(() => fontCss(settings), [settings]);
@@ -50,6 +80,17 @@ export function ReaderView({
     () => (FONT_WEIGHTS.find((w) => w.key === settings.fontWeight) || FONT_WEIGHTS[1]).css,
     [settings.fontWeight],
   );
+
+  // 当前书源/地址（换源时在本地切换，不动导航栈）
+  const [src, setSrc] = useState({
+    sourceId: page.sourceId,
+    bookUrl: page.bookUrl,
+    name: page.name,
+    author: page.author,
+    coverUrl: page.coverUrl || '',
+  });
+  /** 本地导入书（无在线源操作） */
+  const isLocal = src.sourceId === 'local' || src.bookUrl.startsWith('local:');
 
   const [chapters, setChapters] = useState<TocItem[]>([]);
   const [idx, setIdx] = useState(page.startIndex || 0);
@@ -65,6 +106,22 @@ export function ReaderView({
   const [flipDir, setFlipDir] = useState(1);
   /** 重试当前章：临时切走 loadedIdx 再触发 effect 重跑 */
   const [retryFlip, setRetryFlip] = useState(false);
+  /** 本次抓取是否强制刷新（跳过缓存） */
+  const refreshReqRef = useRef(false);
+
+  // 换源 / 章节搜索 / 朗读 / 轻提示
+  const [srcOpen, setSrcOpen] = useState(false);
+  const [srcCands, setSrcCands] = useState<SwitchCand[]>([]);
+  const [srcBusy, setSrcBusy] = useState(false);
+  const [chSearchOpen, setChSearchOpen] = useState(false);
+  const [chSearchKw, setChSearchKw] = useState('');
+  const [ttsOn, setTtsOn] = useState(false);
+  const [toast, setToast] = useState('');
+
+  const notify = useCallback((t: string) => {
+    setToast(t);
+    setTimeout(() => setToast((cur) => (cur === t ? '' : cur)), 2200);
+  }, []);
 
   // ---- 分页状态 ----
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -90,6 +147,16 @@ export function ReaderView({
     return () => setImmersive(false);
   }, []);
 
+  // 阅读时长：每 15s 上报一次（页面不可见时不计）
+  useEffect(() => {
+    const t = setInterval(() => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
+        void api.readTimeAdd(15).catch(() => null);
+      }
+    }, 15_000);
+    return () => clearInterval(t);
+  }, []);
+
   // 自定义字体注入（@font-face dataURL）
   useEffect(() => {
     if (!settings.fontCustom) return;
@@ -105,26 +172,26 @@ export function ReaderView({
     };
   }, [settings.fontCustom]);
 
-  // 拉目录（书架已缓存则秒开）
+  // 拉目录（书架已缓存则秒开；换源后 src 变化重拉）
   useEffect(() => {
     let alive = true;
     api
-      .bookDetail(page.sourceId, page.bookUrl, page.name, page.author)
+      .bookDetail(src.sourceId, src.bookUrl, src.name, src.author)
       .then((d) => {
         if (!alive) return;
-        setChapters(d.chapters);
+        setChapters((prev) => (prev.length === d.chapters.length ? prev : d.chapters));
       })
       .catch(() => null);
     return () => {
       alive = false;
     };
-  }, [page.sourceId, page.bookUrl, page.name, page.author]);
+  }, [src.sourceId, src.bookUrl, src.name, src.author]);
 
   const ch = chapters[idx];
   const loading = loadedIdx !== idx;
   const sourceName = useMemo(
-    () => sourcesList.find((s) => s.id === page.sourceId)?.name || '',
-    [sourcesList, page.sourceId],
+    () => sourcesList.find((s) => s.id === src.sourceId)?.name || (isLocal ? '本地导入' : ''),
+    [sourcesList, src.sourceId, isLocal],
   );
 
   // ------------------------------------------------------------------
@@ -138,15 +205,15 @@ export function ReaderView({
         void api
           .shelfAction({
             action: 'progress',
-            bookUrl: page.bookUrl,
+            bookUrl: src.bookUrl,
             chapter: chapterIdx,
             page: pageNum,
             chapterTitle,
             book: {
-              name: page.name,
-              author: page.author,
-              coverUrl: page.coverUrl,
-              sourceId: page.sourceId,
+              name: src.name,
+              author: src.author,
+              coverUrl: src.coverUrl,
+              sourceId: src.sourceId,
               sourceName,
               totalChapters: chapters.length,
             },
@@ -157,7 +224,7 @@ export function ReaderView({
       if (immediate) doSave();
       else saveRef.current = setTimeout(doSave, 900);
     },
-    [page.bookUrl, page.name, page.author, page.coverUrl, page.sourceId, sourceName, chapters.length, loadShelf],
+    [src.bookUrl, src.name, src.author, src.coverUrl, src.sourceId, sourceName, chapters.length, loadShelf],
   );
 
   // 拉正文（idx/章节变化自动触发；loading 由 loadedIdx!==idx 推导）
@@ -165,8 +232,10 @@ export function ReaderView({
     const chapter = chapters[idx];
     if (!chapter) return;
     let alive = true;
+    const isRefresh = refreshReqRef.current;
+    refreshReqRef.current = false;
     api
-      .chapter(page.sourceId, chapter.url, page.bookUrl, idx, chapter.title)
+      .chapter(src.sourceId, chapter.url, src.bookUrl, idx, chapter.title, isRefresh)
       .then((d) => {
         if (!alive) return;
         setContent(d.content);
@@ -184,8 +253,7 @@ export function ReaderView({
     return () => {
       alive = false;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [idx, chapters, page.sourceId, page.bookUrl, retryFlip]);
+  }, [idx, chapters, src.sourceId, src.bookUrl, retryFlip]);
 
   // ------------------------------------------------------------------
   // 视口尺寸（ResizeObserver；旋转/窗口变化时重算分页）
@@ -242,14 +310,12 @@ export function ReaderView({
         requestAnimationFrame(recompute);
       });
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [content, vp.w, vp.h, settings.fontSize, settings.lineSpacing, settings.paraSpacing, settings.letterSpacing, settings.marginLeft, settings.marginRight, settings.marginTop, settings.marginBottom, settings.fontFamily, settings.fontCustom, settings.fontWeight, settings.titlePosition, settings.justify, settings.underline]);
 
   /** 翻页后延迟保存进度 */
   useEffect(() => {
     if (loading) return;
     saveProgress(idx, curPage, ch?.title || '', false);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [idx, curPage]);
 
   // ------------------------------------------------------------------
@@ -354,6 +420,187 @@ export function ReaderView({
             : '继续左滑'
           : '';
 
+  // ------------------------------------------------------------------
+  // 顶部工具：换源 / 缓存 / 章节搜索 / 刷新
+  // ------------------------------------------------------------------
+  const norm = (x: string) => x.replace(/\s+/g, '');
+  const openSwitch = async () => {
+    if (isLocal) {
+      notify('本地书籍不支持换源');
+      return;
+    }
+    setSrcOpen(true);
+    setSrcBusy(true);
+    setSrcCands([]);
+    const pool = sourcesList
+      .filter((s) => s.enabled && s.id !== src.sourceId)
+      .sort((a, b) => (a.checkStatus === 'ok' ? -1 : 0) - (b.checkStatus === 'ok' ? -1 : 0))
+      .slice(0, 8);
+    if (!pool.length) {
+      setSrcBusy(false);
+      return;
+    }
+    await Promise.all(
+      pool.map(async (s) => {
+        try {
+          const r = await api.searchOne(src.name, s.id);
+          const books = r.books || [];
+          const hit =
+            books.find((b) => norm(b.name) === norm(src.name)) ||
+            books.find((b) => norm(b.name).includes(norm(src.name)) || norm(src.name).includes(norm(b.name)));
+          if (hit) {
+            setSrcCands((prev) => [
+              ...prev,
+              { sourceId: s.id, sourceName: s.name, name: hit.name, author: hit.author, bookUrl: hit.bookUrl },
+            ]);
+          }
+        } catch {
+          /* 单源失败忽略 */
+        }
+      }),
+    );
+    setSrcBusy(false);
+  };
+
+  const switchTo = async (c: SwitchCand) => {
+    if (srcBusy) return;
+    setSrcBusy(true);
+    try {
+      const d = await api.bookDetail(c.sourceId, c.bookUrl, src.name, src.author);
+      if (!d.chapters.length) throw new Error('该源目录为空');
+      const oldTitle = ch?.title || null;
+      const newIdx = matchChapterIndex(d.chapters, oldTitle, idx);
+      // 在架才迁移书架记录（保留进度）；历史随阅读进度自动更新
+      const inShelf = shelf.some((b) => b.bookUrl === src.bookUrl);
+      if (inShelf) {
+        await api
+          .shelfAction({
+            action: 'switchSource',
+            name: src.name,
+            author: src.author,
+            book: {
+              sourceId: c.sourceId,
+              sourceName: c.sourceName,
+              bookUrl: c.bookUrl,
+              coverUrl: src.coverUrl,
+              intro: d.intro,
+              chapters: d.chapters,
+            },
+          })
+          .catch(() => null);
+      }
+      setChapters(d.chapters);
+      setFlipDir(newIdx >= idx ? 1 : -1);
+      setIdx(newIdx);
+      setCurPage(0);
+      setLoadedIdx(-1);
+      setContent('');
+      setSrc((s) => ({
+        ...s,
+        sourceId: c.sourceId,
+        bookUrl: c.bookUrl,
+        name: d.name || s.name,
+        author: d.author || s.author,
+      }));
+      setSrcOpen(false);
+      notify(`已换源：${c.sourceName}`);
+      void loadShelf();
+    } catch {
+      notify('换源失败，换一个试试');
+    }
+    setSrcBusy(false);
+  };
+
+  /** 缓存：预取当前章之后 20 章正文（ChapterCache 落库，离线可读） */
+  const cacheNext = async () => {
+    if (isLocal) {
+      notify('本地书籍无需缓存');
+      return;
+    }
+    notify('正在后台缓存之后 20 章…');
+    let ok = 0;
+    for (let i = idx + 1; i < Math.min(chapters.length, idx + 21); i++) {
+      const c = chapters[i];
+      if (!c) break;
+      try {
+        await api.chapter(src.sourceId, c.url, src.bookUrl, i, c.title);
+        ok++;
+      } catch {
+        /* 单章失败继续 */
+      }
+    }
+    notify(`缓存完成：${ok} 章（离线可读）`);
+  };
+
+  /** 刷新：跳过缓存重抓当前章 */
+  const refreshChapter = () => {
+    refreshReqRef.current = true;
+    setLoadedIdx(-1);
+    setRetryFlip((f) => !f);
+  };
+
+  /** 夜间切换（记住之前的日间背景，切回时恢复） */
+  const [prevDayBg, setPrevDayBg] = useState('paper');
+  const isNight = settings.bgTheme === 'night';
+  const toggleNight = () => {
+    if (isNight) {
+      patch({ bgTheme: prevDayBg !== 'night' ? prevDayBg : 'paper' });
+    } else {
+      setPrevDayBg(settings.bgTheme);
+      patch({ bgTheme: 'night' });
+    }
+  };
+
+  /** 朗读：Web Speech 全章 TTS（切章/退出自动停） */
+  const speakChapter = () => {
+    if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
+      notify('当前浏览器不支持朗读');
+      return;
+    }
+    window.speechSynthesis.cancel();
+    if (ttsOn) {
+      setTtsOn(false);
+      return;
+    }
+    if (!content) return;
+    const u = new SpeechSynthesisUtterance(`${ch?.title || ''}。${content}`);
+    u.lang = 'zh-CN';
+    u.rate = 1;
+    u.onend = () => setTtsOn(false);
+    u.onerror = () => setTtsOn(false);
+    window.speechSynthesis.speak(u);
+    setTtsOn(true);
+  };
+  // 切章/卸载停止朗读（cancel 会触发 onend/onerror 回调异步复位 ttsOn）
+  useEffect(() => {
+    return () => {
+      if (typeof window !== 'undefined' && 'speechSynthesis' in window) window.speechSynthesis.cancel();
+    };
+  }, []);
+  useEffect(() => {
+    if (typeof window !== 'undefined' && 'speechSynthesis' in window) window.speechSynthesis.cancel();
+  }, [idx]);
+
+  /** 章节搜索结果（标题匹配） */
+  const chSearchHits = useMemo(() => {
+    const k = chSearchKw.trim();
+    if (!k) return [];
+    const hits: { i: number; title: string }[] = [];
+    for (let i = 0; i < chapters.length; i++) {
+      if (chapters[i].title.includes(k)) hits.push({ i, title: chapters[i].title });
+      if (hits.length >= 80) break;
+    }
+    return hits;
+  }, [chSearchKw, chapters]);
+
+  // 工具栏配色（日/夜阅读背景自适应）
+  const barCard = bg.dark
+    ? { background: 'rgba(30,32,40,0.94)', color: '#E8EAF2', ring: 'rgba(255,255,255,0.08)' }
+    : { background: 'rgba(255,255,255,0.94)', color: '#1A1D26', ring: 'rgba(0,0,0,0.05)' };
+  const barSub = bg.dark ? 'rgba(232,234,242,0.55)' : 'rgba(26,29,38,0.55)';
+  const pillBg = bg.dark ? 'rgba(255,255,255,0.10)' : 'rgba(0,0,0,0.055)';
+  const pillDis = bg.dark ? 'rgba(255,255,255,0.28)' : 'rgba(0,0,0,0.22)';
+
   return (
     <div className="relative flex h-full w-full flex-col overflow-hidden" style={{ background: bg.bg, color: bg.text }}>
       {/* 翻章动画 keyframes */}
@@ -412,10 +659,7 @@ export function ReaderView({
               <div className="flex gap-3">
                 <button
                   type="button"
-                  onClick={() => {
-                    setLoadedIdx(-1);
-                    setRetryFlip((f) => !f);
-                  }}
+                  onClick={refreshChapter}
                   className="rounded-full px-4 py-1.5 text-[13px] font-semibold text-white shadow-md"
                   style={{ background: theme.accent }}
                 >
@@ -507,6 +751,25 @@ export function ReaderView({
         </div>
       )}
 
+      {/* 轻提示 */}
+      {toast && (
+        <div className="pointer-events-none absolute inset-x-0 top-24 z-[70] flex justify-center px-8">
+          <span className="rounded-full bg-black/75 px-4 py-2 text-center text-[13px] text-white backdrop-blur">{toast}</span>
+        </div>
+      )}
+
+      {/* 朗读中指示 */}
+      {ttsOn && (
+        <div className="pointer-events-none absolute inset-x-0 top-[max(10px,env(safe-area-inset-top))] z-10 flex justify-center">
+          <span
+            className="flex items-center gap-1.5 rounded-full px-3 py-1 text-[11px] font-medium backdrop-blur-xl"
+            style={{ background: 'rgba(0,0,0,0.35)', color: '#fff' }}
+          >
+            <Volume2 className="h-3 w-3" /> 朗读中 · 再次点击朗读可停止
+          </span>
+        </div>
+      )}
+
       {/* 页码指示（沉浸小字，底部居中；避开 Home 横杆） */}
       {!loading && !err && (
         <div
@@ -519,80 +782,248 @@ export function ReaderView({
         </div>
       )}
 
-      {/* 顶部悬浮毛玻璃胶囊（沉浸模式下贴近屏幕顶） */}
+      {/* ============ 顶部浮动工具卡（返回 + 书名/章节 + 换源/缓存/搜索/刷新） ============ */}
       {barsOn && (
         <div
-          className="absolute inset-x-3 z-20 flex h-[52px] items-center gap-1 rounded-full px-2 backdrop-blur-2xl"
+          className="absolute inset-x-3 z-20 flex items-center gap-1 rounded-[22px] px-2.5 py-2 backdrop-blur-2xl"
           style={{
             top: 'max(10px, env(safe-area-inset-top))',
-            background: 'rgba(255,255,255,0.78)',
-            color: '#1A1D26',
-            boxShadow: 'inset 0 0 0 1px rgba(0,0,0,0.05), 0 10px 30px rgba(0,0,0,0.12)',
+            background: barCard.background,
+            color: barCard.color,
+            boxShadow: `inset 0 0 0 1px ${barCard.ring}, 0 10px 30px rgba(0,0,0,0.14)`,
           }}
+          role="toolbar"
+          aria-label="阅读工具栏"
         >
-          <button type="button" onClick={onBack} aria-label="返回" className="flex h-10 w-10 items-center justify-center rounded-full active:scale-90">
-            <ChevronLeft className="h-6 w-6" strokeWidth={2.2} />
-          </button>
-          <div className="min-w-0 flex-1 text-center">
-            <p className="truncate text-[14px] font-semibold">{page.name}</p>
-            <p className="truncate text-[11px] opacity-60">{ch?.title}</p>
-          </div>
           <button
             type="button"
-            onClick={() => setTocOpen(true)}
-            aria-label="目录"
-            className="flex h-10 w-10 items-center justify-center rounded-full active:scale-90"
+            onClick={onBack}
+            aria-label="返回"
+            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full active:scale-90"
           >
-            <List className="h-5 w-5" />
+            <ChevronLeft className="h-6 w-6" strokeWidth={2.2} />
           </button>
+          <div className="min-w-0 flex-1 px-0.5">
+            <p className="truncate text-[14px] font-semibold leading-tight">{src.name}</p>
+            <p className="truncate text-[11px] leading-tight" style={{ color: barSub }}>
+              {ch?.title || '加载中…'}
+            </p>
+          </div>
+          {/* 换源 */}
+          {!isLocal && (
+            <button type="button" onClick={() => void openSwitch()} aria-label="换源" className="flex h-10 w-9 shrink-0 items-center justify-center rounded-full active:scale-90">
+              <ArrowDownUp className="h-[19px] w-[19px]" strokeWidth={2.1} />
+            </button>
+          )}
+          {/* 缓存 */}
+          {!isLocal && (
+            <button type="button" onClick={() => void cacheNext()} aria-label="缓存后续章节" className="flex h-10 w-9 shrink-0 items-center justify-center rounded-full active:scale-90">
+              <Download className="h-[19px] w-[19px]" strokeWidth={2.1} />
+            </button>
+          )}
+          {/* 章节搜索 */}
+          <button type="button" onClick={() => setChSearchOpen(true)} aria-label="搜索章节" className="flex h-10 w-9 shrink-0 items-center justify-center rounded-full active:scale-90">
+            <Search className="h-[19px] w-[19px]" strokeWidth={2.1} />
+          </button>
+          {/* 刷新 */}
+          {!isLocal && (
+            <button type="button" onClick={refreshChapter} aria-label="刷新本章" className="flex h-10 w-9 shrink-0 items-center justify-center rounded-full active:scale-90">
+              <RotateCw className="h-[18px] w-[18px]" strokeWidth={2.1} />
+            </button>
+          )}
         </div>
       )}
 
-      {/* 底部悬浮毛玻璃胶囊 Dock */}
+      {/* ============ 底部浮动工具面板（章节切换条 + 功能按钮排） ============ */}
       {barsOn && (
         <div
-          className="absolute inset-x-3 bottom-[max(12px,env(safe-area-inset-bottom))] z-20 rounded-[26px] px-4 pb-2 pt-3 backdrop-blur-2xl"
+          className="absolute inset-x-3 bottom-[max(12px,env(safe-area-inset-bottom))] z-20 rounded-[24px] px-4 pb-2.5 pt-3 backdrop-blur-2xl"
           style={{
-            background: 'rgba(255,255,255,0.80)',
-            boxShadow: 'inset 0 0 0 1px rgba(0,0,0,0.05), 0 12px 36px rgba(0,0,0,0.14)',
+            background: barCard.background,
+            color: barCard.color,
+            boxShadow: `inset 0 0 0 1px ${barCard.ring}, 0 12px 36px rgba(0,0,0,0.16)`,
           }}
         >
-          <div className="flex items-center gap-2 text-[#1A1D26]">
-            <span className="w-[52px] shrink-0 text-[11px] tabular-nums opacity-70">
-              {idx + 1}/{chapters.length}
-            </span>
+          {/* 行1：上一章 | 章节进度 | 下一章 */}
+          <div className="flex items-center gap-2.5">
+            <button
+              type="button"
+              onClick={() => goChapter(-1)}
+              disabled={idx <= 0}
+              className="h-9 shrink-0 rounded-full px-3.5 text-[12px] font-medium active:scale-95 disabled:opacity-35"
+              style={{ background: pillBg, color: barCard.color }}
+            >
+              上一章
+            </button>
             <input
               type="range"
               min={0}
               max={Math.max(0, chapters.length - 1)}
               value={idx}
               onChange={(e) => {
-                setFlipDir(parseInt(e.target.value, 10) > idx ? 1 : -1);
-                setIdx(parseInt(e.target.value, 10));
+                const v = parseInt(e.target.value, 10);
+                setFlipDir(v > idx ? 1 : -1);
+                setIdx(v);
                 setCurPage(0);
               }}
               aria-label="章节进度"
-              className="h-1.5 min-w-0 flex-1 cursor-pointer appearance-none rounded-full bg-black/10 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-[#2274F0]"
-              style={{ accentColor: theme.accent }}
+              className="h-1.5 min-w-0 flex-1 cursor-pointer appearance-none rounded-full disabled:opacity-40"
+              style={{ background: pillBg, accentColor: theme.accent }}
             />
             <button
               type="button"
-              onClick={() => setChatOpen(true)}
-              aria-label="AI 伴读"
-              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full active:scale-90"
-              style={{ color: theme.accent }}
+              onClick={() => goChapter(1)}
+              disabled={idx >= chapters.length - 1}
+              className="h-9 shrink-0 rounded-full px-3.5 text-[12px] font-medium active:scale-95 disabled:opacity-35"
+              style={{ background: pillBg, color: barCard.color }}
             >
-              <Sparkles className="h-5 w-5" />
+              下一章
             </button>
-            <button
-              type="button"
-              onClick={() => setSettingsOpen(true)}
-              aria-label="排版设置"
-              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full active:scale-90"
-              style={{ color: theme.accent }}
-            >
-              <Type className="h-5 w-5" />
-            </button>
+          </div>
+          {/* 分隔线 */}
+          <div className="my-2 h-px w-full" style={{ background: bg.dark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.06)' }} />
+          {/* 行2：目录 · 夜间 · AI伴读 · 排版 · 朗读 */}
+          <div className="flex items-stretch justify-between gap-1">
+            {[
+              {
+                key: 'toc',
+                label: '目录',
+                icon: <List className="h-[21px] w-[21px]" strokeWidth={2} />,
+                onClick: () => setTocOpen(true),
+              },
+              {
+                key: 'night',
+                label: isNight ? '日间' : '夜间',
+                icon: isNight ? <Sun className="h-[21px] w-[21px]" strokeWidth={2} /> : <Moon className="h-[21px] w-[21px]" strokeWidth={2} />,
+                onClick: toggleNight,
+              },
+              {
+                key: 'ai',
+                label: '伴读',
+                icon: <Sparkles className="h-[21px] w-[21px]" strokeWidth={2} />,
+                onClick: () => setChatOpen(true),
+                accent: true,
+              },
+              {
+                key: 'type',
+                label: '排版',
+                icon: <SlidersHorizontal className="h-[21px] w-[21px]" strokeWidth={2} />,
+                onClick: () => setSettingsOpen(true),
+              },
+              {
+                key: 'tts',
+                label: ttsOn ? '停止' : '朗读',
+                icon: <Volume2 className="h-[21px] w-[21px]" strokeWidth={2} />,
+                onClick: speakChapter,
+                accent: ttsOn,
+              },
+            ].map((b) => (
+              <button
+                key={b.key}
+                type="button"
+                onClick={b.onClick}
+                className="flex flex-1 flex-col items-center gap-1 rounded-2xl py-1.5 active:scale-90"
+                style={{ color: b.accent ? theme.accent : barCard.color }}
+              >
+                {b.icon}
+                <span className="text-[10px] font-medium" style={{ color: b.accent ? theme.accent : barSub }}>
+                  {b.label}
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* 换源抽屉（底部玻璃列表） */}
+      {srcOpen && (
+        <div className="absolute inset-0 z-40" role="dialog" aria-label="换源">
+          <button type="button" aria-label="关闭" className="absolute inset-0 bg-black/35 backdrop-blur-[2px]" onClick={() => setSrcOpen(false)} />
+          <div
+            className="absolute inset-x-3 bottom-[max(12px,env(safe-area-inset-bottom))] max-h-[60%] overflow-y-auto rounded-3xl p-2 shadow-2xl backdrop-blur-2xl"
+            style={{ background: theme.pageBg, boxShadow: `inset 0 0 0 1px ${theme.cardRing}, 0 -8px 40px rgba(0,0,0,0.16)` }}
+          >
+            <p className="flex items-center gap-2 px-3 pb-1 pt-2 text-[13px] font-semibold" style={{ color: theme.textSub }}>
+              {srcBusy ? '正在搜索其他书源…' : `《${src.name}》的其他书源`}
+              {srcBusy && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+            </p>
+            {!srcBusy && srcCands.length === 0 && (
+              <p className="px-3 py-6 text-center text-[13px]" style={{ color: theme.textSub }}>
+                没有找到其他可用书源
+              </p>
+            )}
+            {srcCands.map((c) => (
+              <button
+                key={c.sourceId + c.bookUrl}
+                type="button"
+                disabled={srcBusy}
+                onClick={() => void switchTo(c)}
+                className="flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left active:bg-black/[0.03] disabled:opacity-50"
+              >
+                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-[13px] font-bold" style={{ background: theme.accentSoft, color: theme.accent }}>
+                  {c.sourceName.slice(0, 1)}
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-[14px] font-medium" style={{ color: theme.textMain }}>
+                    {c.sourceName}
+                  </span>
+                  <span className="block truncate text-[11px]" style={{ color: theme.textSub }}>
+                    {c.name} · {c.author || '佚名'}
+                  </span>
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* 章节搜索抽屉 */}
+      {chSearchOpen && (
+        <div className="absolute inset-0 z-40" role="dialog" aria-label="搜索章节">
+          <button type="button" aria-label="关闭" className="absolute inset-0 bg-black/35 backdrop-blur-[2px]" onClick={() => setChSearchOpen(false)} />
+          <div
+            className="absolute inset-x-3 bottom-[max(12px,env(safe-area-inset-bottom))] max-h-[68%] rounded-3xl p-4 shadow-2xl backdrop-blur-2xl"
+            style={{ background: theme.pageBg, boxShadow: `inset 0 0 0 1px ${theme.cardRing}, 0 -8px 40px rgba(0,0,0,0.16)` }}
+          >
+            <p className="mb-2 text-[14px] font-bold" style={{ color: theme.textMain }}>
+              搜索章节
+            </p>
+            <input
+              value={chSearchKw}
+              onChange={(e) => setChSearchKw(e.target.value)}
+              placeholder="输入章节名关键词，如「决战」"
+              className="h-11 w-full rounded-xl bg-black/[0.05] px-3 text-[14px] outline-none"
+              style={{ color: theme.textMain }}
+              autoFocus
+            />
+            <div className="mt-3 max-h-[46vh] space-y-1 overflow-y-auto">
+              {chSearchKw.trim() && chSearchHits.length === 0 && (
+                <p className="py-4 text-center text-[13px]" style={{ color: theme.textSub }}>
+                  没有匹配的章节
+                </p>
+              )}
+              {chSearchHits.map((h) => (
+                <button
+                  key={h.i}
+                  type="button"
+                  onClick={() => {
+                    setChSearchOpen(false);
+                    setFlipDir(h.i > idx ? 1 : -1);
+                    setIdx(h.i);
+                    setCurPage(0);
+                  }}
+                  className="flex w-full items-center gap-2 rounded-xl px-3 py-2.5 text-left"
+                  style={{ background: h.i === idx ? theme.accentSoft : 'transparent' }}
+                >
+                  <span className="shrink-0 text-[11px] tabular-nums" style={{ color: theme.textSub }}>
+                    {h.i + 1}
+                  </span>
+                  <span className="truncate text-[14px]" style={{ color: h.i === idx ? theme.accent : theme.textMain }}>
+                    {h.title}
+                  </span>
+                </button>
+              ))}
+            </div>
           </div>
         </div>
       )}
@@ -609,7 +1040,7 @@ export function ReaderView({
             }}
           >
             <p className="px-5 pb-2 pt-[max(20px,calc(env(safe-area-inset-top)+24px))] text-[16px] font-bold" style={{ color: theme.textMain }}>
-              {page.name} · {chapters.length} 章
+              {src.name} · {chapters.length} 章
             </p>
             <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-6">
               {chapters.map((c, i) => (
@@ -641,9 +1072,9 @@ export function ReaderView({
       {/* AI 伴读（先选联系人再陪读） */}
       {chatOpen && (
         <AIChatSheet
-          bookUrl={page.bookUrl}
-          name={page.name}
-          author={page.author}
+          bookUrl={src.bookUrl}
+          name={src.name}
+          author={src.author}
           totalChapters={chapters.length}
           currentChapter={idx}
           currentChapterTitle={ch?.title || ''}

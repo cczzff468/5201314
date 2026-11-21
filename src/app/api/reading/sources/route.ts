@@ -21,19 +21,17 @@ function validateSource(raw: unknown): { ok: true; source: LegadoSource } | { ok
   return { ok: true, source: raw as LegadoSource };
 }
 
-/** 首次调用播种内置源（幂等：按 url 去重） */
+/** 播种内置源（幂等：增量补种——已有同 URL 跳过；新增内置源也能补进老库） */
 async function ensureSeeded() {
-  const count = await db.bookSource.count({ where: { isBuiltin: true } });
-  if (count > 0) return;
   const existUrls = new Set((await db.bookSource.findMany({ select: { url: true } })).map((x) => x.url));
-  let order = 0;
-  for (const b of BUILTIN_BOOK_SOURCES) {
-    const url = b.bookSourceUrl;
-    if (existUrls.has(url)) continue;
+  const missing = BUILTIN_BOOK_SOURCES.filter((b) => !existUrls.has(b.bookSourceUrl));
+  if (!missing.length) return;
+  let order = await db.bookSource.count();
+  for (const b of missing) {
     await db.bookSource.create({
       data: {
         name: b.bookSourceName,
-        url,
+        url: b.bookSourceUrl,
         group: b.bookSourceGroup || '小说',
         enabled: b.enabled !== false,
         config: JSON.stringify(b),
@@ -41,7 +39,7 @@ async function ensureSeeded() {
         sortOrder: order++,
         checkStatus: b.enabled !== false ? 'ok' : null,
       },
-    });
+    }).catch(() => null);
   }
 }
 
@@ -75,7 +73,8 @@ export async function GET(req: NextRequest) {
   });
 }
 
-/** 统一导入（single / array / {sources:[...]} 包装均支持；批量插入提速，几千源秒级完成） */
+/** 统一导入（single / array / {sources:[...]} 包装均支持；批量插入提速，几千源秒级完成）
+ *  超大合集（>100 源）默认停用导入——避免几百个死源拖慢搜索，导入后用「一键筛活」自动启用可用源 */
 async function importArray(
   list: unknown[],
   enabled: boolean,
@@ -84,6 +83,8 @@ async function importArray(
   const errors: string[] = [];
   let imported = 0;
   let skipped = 0;
+  // 超大合集（>100 源）强制默认停用：几百个死源会拖慢聚合搜索
+  const effectiveEnabled = list.length > 100 ? false : enabled;
   const existUrls = new Set((await db.bookSource.findMany({ select: { url: true } })).map((x) => x.url));
   let order = await db.bookSource.count();
   const rows: {
@@ -113,7 +114,7 @@ async function importArray(
       name: (s.bookSourceName || '').trim().slice(0, 40),
       url,
       group: (s.bookSourceGroup || '导入').toString().slice(0, 30),
-      enabled,
+      enabled: effectiveEnabled,
       config: JSON.stringify(s),
       isBuiltin: markBuiltin,
       sortOrder: order++,
@@ -292,6 +293,54 @@ export async function POST(req: NextRequest) {
       };
       await Promise.all(Array.from({ length: 4 }, worker));
       return NextResponse.json({ results });
+    }
+    if (action === 'checkBatch') {
+      // 分批实测（客户端逐批调，避免长请求超时）：autoDisable=true 时失败的源自动停用
+      const ids = Array.isArray(body.ids) ? (body.ids as string[]).map(String) : [];
+      const autoDisable = body.autoDisable !== false;
+      const rows = await db.bookSource.findMany({ where: { id: { in: ids } } });
+      const results: { id: string; name: string; ok: boolean }[] = [];
+      const queue = [...rows];
+      const worker = async () => {
+        while (queue.length) {
+          const row = queue.shift()!;
+          const ok = await checkSource(toLegado(row));
+          await db.bookSource
+            .update({
+              where: { id: row.id },
+              data: {
+                checkStatus: ok ? 'ok' : 'fail',
+                lastCheckAt: new Date(),
+                ...(ok ? { enabled: true } : autoDisable ? { enabled: false } : {}),
+              },
+            })
+            .catch(() => null);
+          results.push({ id: row.id, name: row.name, ok });
+        }
+      };
+      await Promise.all(Array.from({ length: 6 }, worker));
+      return NextResponse.json({ results });
+    }
+    if (action === 'sortUsable') {
+      // 可用源排前（搜索优先命中）；返回统计
+      const all = await db.bookSource.findMany();
+      const ok = all.filter((s) => s.checkStatus === 'ok');
+      const rest = all.filter((s) => s.checkStatus !== 'ok');
+      let i = 0;
+      for (const s of ok) {
+        await db.bookSource.update({ where: { id: s.id }, data: { sortOrder: i++ } }).catch(() => null);
+      }
+      for (const s of rest) {
+        await db.bookSource.update({ where: { id: s.id }, data: { sortOrder: i++ } }).catch(() => null);
+      }
+      return NextResponse.json({ ok: true, okCount: ok.length, total: all.length });
+    }
+    if (action === 'deleteFailed') {
+      // 一键清理：删除全部实测失败且已停用的源（内置源不删）
+      const del = await db.bookSource.deleteMany({
+        where: { checkStatus: 'fail', enabled: false, isBuiltin: false },
+      });
+      return NextResponse.json({ ok: true, deleted: del.count });
     }
     if (action === 'resetBuiltin') {
       // 按URL upsert（保留已有行ID，不破坏书架/历史里的 sourceId 引用）：

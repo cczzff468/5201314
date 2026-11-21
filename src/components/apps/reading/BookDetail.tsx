@@ -317,7 +317,7 @@ export function BookDetail({
   }, [data, readIdx]);
 
   return (
-    <div className="relative flex h-full flex-col" style={{ background: theme.pageBg }}>
+    <div className="relative flex h-full flex-col" style={{ background: 'transparent' }}>
       {/* 顶部封面模糊放大背景（渐变淡出到页面底色） */}
       <div className="pointer-events-none absolute inset-x-0 top-0 h-[42%] overflow-hidden" aria-hidden="true">
         {cover ? (
@@ -327,7 +327,7 @@ export function BookDetail({
         )}
         <div
           className="absolute inset-0"
-          style={{ background: `linear-gradient(180deg, rgba(0,0,0,0.18) 0%, rgba(0,0,0,0.05) 42%, ${theme.pageBg}ec 88%, ${theme.pageBg} 100%)` }}
+          style={{ background: `linear-gradient(180deg, rgba(0,0,0,0.18) 0%, rgba(0,0,0,0.05) 42%, ${theme.pageBg}ec 88%, ${theme.pageBg}00 100%)` }}
         />
       </div>
 

@@ -233,7 +233,7 @@ export const FONT_WEIGHTS: { key: ReaderSettings['fontWeight']; name: string; cs
 ];
 
 // ---------------------------------------------------------------------------
-// 精选书单（首页推荐：点击直达聚合搜索）
+// 精选书单（首页/分类页推荐：点击直达聚合搜索）
 // ---------------------------------------------------------------------------
 export interface FeaturedBook {
   name: string;
@@ -246,36 +246,74 @@ export const FEATURED: Record<string, FeaturedBook[]> = {
     { name: '斗破苍穹', author: '天蚕土豆', tag: '玄幻' },
     { name: '凡人修仙传', author: '忘语', tag: '仙侠' },
     { name: '庆余年', author: '猫腻', tag: '古装' },
+    { name: '盗墓笔记', author: '南派三叔', tag: '悬疑' },
+    { name: '三体', author: '刘慈欣', tag: '科幻' },
+    { name: '赘婿', author: '愤怒的香蕉', tag: '都市' },
+    { name: '全职高手', author: '蝴蝶蓝', tag: '都市' },
   ],
   玄幻: [
     { name: '斗破苍穹', author: '天蚕土豆', tag: '玄幻' },
     { name: '遮天', author: '辰东', tag: '玄幻' },
     { name: '完美世界', author: '辰东', tag: '玄幻' },
     { name: '一念永恒', author: '耳根', tag: '仙侠' },
+    { name: '斗罗大陆', author: '唐家三少', tag: '玄幻' },
+    { name: '雪中悍刀行', author: '烽火戏诸侯', tag: '武侠' },
+    { name: '大奉打更人', author: '卖报小郎君', tag: '玄幻' },
+    { name: '万相之王', author: '天蚕土豆', tag: '玄幻' },
   ],
   都市: [
     { name: '赘婿', author: '愤怒的香蕉', tag: '都市' },
     { name: '大医凌然', author: '志鸟村', tag: '都市' },
     { name: '全职高手', author: '蝴蝶蓝', tag: '都市' },
     { name: '校花的贴身高手', author: '鱼人二代', tag: '都市' },
+    { name: '都市极品医神', author: '风会笑', tag: '都市' },
+    { name: '警察荣誉', author: '.dis', tag: '都市' },
+    { name: '大江东去', author: '阿耐', tag: '都市' },
+    { name: '欢乐颂', author: '阿耐', tag: '都市' },
   ],
   悬疑: [
     { name: '盗墓笔记', author: '南派三叔', tag: '悬疑' },
     { name: '鬼吹灯', author: '天下霸唱', tag: '悬疑' },
     { name: '法医秦明', author: '秦明', tag: '悬疑' },
     { name: '十宗罪', author: '蜘蛛', tag: '悬疑' },
+    { name: '白夜追凶', author: '指纹', tag: '悬疑' },
+    { name: '坏小孩', author: '紫金陈', tag: '悬疑' },
+    { name: '无证之罪', author: '紫金陈', tag: '悬疑' },
+    { name: '长夜难明', author: '紫金陈', tag: '悬疑' },
   ],
   科幻: [
     { name: '三体', author: '刘慈欣', tag: '科幻' },
     { name: '球状闪电', author: '刘慈欣', tag: '科幻' },
     { name: '超新星纪元', author: '刘慈欣', tag: '科幻' },
     { name: '流浪地球', author: '刘慈欣', tag: '科幻' },
+    { name: '北京折叠', author: '郝景芳', tag: '科幻' },
+    { name: '银河帝国', author: '艾萨克·阿西莫夫', tag: '科幻' },
+    { name: '沙丘', author: '弗兰克·赫伯特', tag: '科幻' },
+    { name: '安德的游戏', author: '奥森·斯科特·卡德', tag: '科幻' },
+  ],
+  耽美: [
+    { name: '天官赐福', author: '墨香铜臭', tag: '耽美' },
+    { name: '魔道祖师', author: '墨香铜臭', tag: '耽美' },
+    { name: '人渣反派自救系统', author: '墨香铜臭', tag: '耽美' },
+    { name: '二哈和他的白猫师尊', author: '肉包不吃肉', tag: '耽美' },
+    { name: '默读', author: 'priest', tag: '耽美' },
+    { name: '杀破狼', author: 'priest', tag: '耽美' },
+    { name: '残次品', author: 'priest', tag: '耽美' },
+    { name: '撒野', author: '巫哲', tag: '耽美' },
+    { name: '伪装学渣', author: '木瓜黄', tag: '耽美' },
+    { name: '某某', author: '木苏里', tag: '耽美' },
+    { name: '全球高考', author: '木苏里', tag: '耽美' },
+    { name: '小蘑菇', author: '一十四洲', tag: '耽美' },
   ],
   轻小说: [
     { name: '刀剑神域', author: '川原砾', tag: '轻小说' },
     { name: '无职转生', author: '理不尽な孙の手', tag: '轻小说' },
     { name: '为美好的世界献上祝福', author: '晓夏目', tag: '轻小说' },
     { name: '关于我转生变成史莱姆这件事', author: '伏濑', tag: '轻小说' },
+    { name: 'overload不死者之王', author: '丸山くがね', tag: '轻小说' },
+    { name: '幼女战记', author: 'カルロ・ゼン', tag: '轻小说' },
+    { name: 'Re:从零开始的异世界生活', author: '長月達平', tag: '轻小说' },
+    { name: '漆黑的子弹', author: '神崎紫电', tag: '轻小说' },
   ],
 };
 
@@ -390,9 +428,9 @@ export const api = {
     fetch(
       `/api/reading/book?${new URLSearchParams({ sourceId, bookUrl, name, author })}`,
     ).then((r) => j<BookDetailData>(r)),
-  chapter: (sourceId: string, chapterUrl: string, bookUrl: string, index: number, title: string) =>
+  chapter: (sourceId: string, chapterUrl: string, bookUrl: string, index: number, title: string, refresh = false) =>
     fetch(
-      `/api/reading/chapter?${new URLSearchParams({ sourceId, chapterUrl, bookUrl, index: String(index), title })}`,
+      `/api/reading/chapter?${new URLSearchParams({ sourceId, chapterUrl, bookUrl, index: String(index), title, ...(refresh ? { refresh: '1' } : {}) })}`,
     ).then((r) => j<{ title: string; content: string; summary: string; cached: boolean }>(r)),
   shelfList: () => fetch('/api/reading/shelf').then((r) => j<{ books: ShelfBookItem[] }>(r)),
   shelfAction: (body: Record<string, unknown>) =>
@@ -432,7 +470,33 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     }).then((r) => j<Record<string, unknown>>(r)),
+  /** 阅读时长（秒）：获取累计 / 阅读中每 15s 上报 */
+  readTimeGet: () => fetch('/api/reading/readtime').then((r) => j<{ seconds: number }>(r)),
+  readTimeAdd: (seconds: number) =>
+    fetch('/api/reading/readtime', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ seconds }),
+    }).then((r) => j<{ ok: boolean; seconds: number }>(r)),
+  /** 本地导入（txt / epub）：上传解析入库并自动入书架 */
+  localUpload: (file: File) => {
+    const fd = new FormData();
+    fd.append('file', file);
+    return fetch('/api/reading/local', { method: 'POST', body: fd }).then((r) =>
+      j<{ ok: boolean; id: string; name: string; chapters: number }>(r),
+    );
+  },
 };
+
+/** 秒数 → 「x小时y分钟 / y分钟」展示 */
+export function formatReadTime(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds <= 0) return '0分钟';
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  if (h <= 0) return `${m}分钟`;
+  if (m <= 0) return `${h}小时`;
+  return `${h}小时${m}分钟`;
+}
 
 /** 封面代理：防盗链/跨域封面统一走服务端抓取（/api/reading/cover），带书源头 Referer */
 export function coverSrc(url?: string | null, sid?: string): string | undefined {
