@@ -1,14 +1,15 @@
 'use client';
 
 /**
- * 聚合搜索页（参照截图4）：多书源并行搜索、可暂停/继续、结果按书名+作者
- * 聚合显示「N 个源」徽标；单源失败静默跳过。
- * 实现：客户端逐源调 POST /api/reading/search（并发4），AbortController 暂停。
+ * 聚合搜索页：多书源并行搜索、可暂停/继续、结果按书名+作者聚合「N 个源」徽标。
+ * - 空态：搜索历史（localStorage，最多 12 条，单条可删/一键清空）+ 热门搜索（精选书单）
+ * - 实现：客户端逐源调 POST /api/reading/search（并发4），AbortController 暂停。
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Search, X, Pause, Play, Loader2 } from 'lucide-react';
+import { Search, X, Pause, Play, Loader2, Clock3, Flame, Trash2 } from 'lucide-react';
 import { useReading } from '@/lib/reading/store';
 import {
+  HOT_SEARCHES,
   api,
   coverSrc,
   CoverPlaceholder,
@@ -28,6 +29,29 @@ interface Group {
 
 function groupKey(b: SearchBookItem) {
   return `${b.name}::${b.author}`.toLowerCase();
+}
+
+// ---------------------------------------------------------------------------
+// 搜索历史（localStorage，最多 12 条）
+// ---------------------------------------------------------------------------
+const HISTORY_KEY = 'rd-search-history-v1';
+const HISTORY_MAX = 12;
+
+function loadHistory(): string[] {
+  try {
+    const raw = JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]') as unknown;
+    if (Array.isArray(raw)) return raw.filter((x): x is string => typeof x === 'string').slice(0, HISTORY_MAX);
+  } catch {
+    /* 忽略 */
+  }
+  return [];
+}
+function saveHistory(list: string[]) {
+  try {
+    localStorage.setItem(HISTORY_KEY, JSON.stringify(list.slice(0, HISTORY_MAX)));
+  } catch {
+    /* 忽略 */
+  }
 }
 
 export function SearchPage({
@@ -52,13 +76,38 @@ export function SearchPage({
   const abortRef = useRef<AbortController | null>(null);
   const queueRef = useRef<SourceItem[]>([]);
   const startedRef = useRef(false);
+  /** 搜索历史（惰性初始化：该页仅在客户端导航后渲染，localStorage 可直接读） */
+  const [history, setHistory] = useState<string[]>(() => (typeof window === 'undefined' ? [] : loadHistory()));
 
   const enabledSources = useMemo(() => sources.filter((s) => s.enabled), [sources]);
+
+  const recordHistory = useCallback((k: string) => {
+    const key = k.trim();
+    if (!key) return;
+    setHistory((prev) => {
+      const next = [key, ...prev.filter((x) => x !== key)].slice(0, HISTORY_MAX);
+      saveHistory(next);
+      return next;
+    });
+  }, []);
+
+  const removeHistory = (k: string) => {
+    setHistory((prev) => {
+      const next = prev.filter((x) => x !== k);
+      saveHistory(next);
+      return next;
+    });
+  };
+  const clearHistory = () => {
+    setHistory([]);
+    saveHistory([]);
+  };
 
   const runSearch = useCallback(
     async (keyword: string) => {
       const k = keyword.trim();
       if (!k || enabledSources.length === 0) return;
+      recordHistory(k);
       abortRef.current?.abort();
       const ctrl = new AbortController();
       abortRef.current = ctrl;
@@ -97,7 +146,7 @@ export function SearchPage({
         if (!ctrl.signal.aborted) setRunning(false);
       });
     },
-    [enabledSources],
+    [enabledSources, recordHistory],
   );
 
   useEffect(() => {
@@ -116,8 +165,7 @@ export function SearchPage({
     if (kw.trim()) void runSearch(kw);
   };
 
-  /** 分区排序：搜索结果（书名精确匹配，按书名→源数排序）在前，相关书籍（按书源排序）在后；
-   *  每组内按书源名排序，来源数多的组优先（更可靠） */
+  /** 分区排序：精确匹配在前（按书名→源数），相关书籍在后（按源数） */
   const { exactList, relatedList } = useMemo(() => {
     const k = kw.trim().replace(/\s+/g, '');
     const groups = [...new Map([...groupsMap.values()].map((g) => [g.key, { ...g, books: [...g.books] }])).values()];
@@ -127,15 +175,13 @@ export function SearchPage({
     for (const g of groups) {
       (g.name.replace(/\s+/g, '') === k ? exact : related).push(g);
     }
-    // 精确匹配：按书名（zh 排序）→ 源数降序
     exact.sort((a, b) => a.name.localeCompare(b.name, 'zh') || b.books.length - a.books.length);
-    // 相关书籍：按源数降序（多源更可靠）→ 书名
     related.sort((a, b) => b.books.length - a.books.length || a.name.localeCompare(b.name, 'zh'));
     return { exactList: exact, relatedList: related };
   }, [groupsMap, kw]);
   const glass = { background: theme.cardBg, boxShadow: 'inset 0 0 0 1px ' + theme.cardRing } as const;
 
-  /** 单个书籍组卡片（搜索结果/相关书籍共用；组内已按书源名排序） */
+  /** 单个书籍组卡片 */
   const renderGroup = (g: Group) => {
     const b0 = g.books[0];
     return (
@@ -183,6 +229,8 @@ export function SearchPage({
     );
   };
 
+  const hasResults = exactList.length > 0 || relatedList.length > 0;
+
   return (
     <div className="flex h-full flex-col">
       <SubNavBar title="聚合搜索" onBack={onBack} theme={theme} />
@@ -220,18 +268,101 @@ export function SearchPage({
         </button>
       </div>
 
-      {/* 结果列表：搜索结果（精确匹配）在上，相关书籍在下 */}
+      {/* 结果列表 / 空态（搜索历史 + 热门搜索） */}
       <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-24">
-        {exactList.length === 0 && relatedList.length === 0 && !running && (
-          <div className="mt-28 flex flex-col items-center gap-3 text-center">
-            <div className="flex h-16 w-16 items-center justify-center rounded-3xl" style={{ background: theme.accentSoft, color: theme.accent }}>
-              <Search className="h-7 w-7" strokeWidth={2} />
+        {/* 搜索历史 */}
+        {!running && !hasResults && history.length > 0 && (
+          <section className="mt-1">
+            <div className="mb-2 flex items-center justify-between">
+              <p className="flex items-center gap-1.5 text-[13px] font-semibold" style={{ color: theme.textMain }}>
+                <Clock3 className="h-3.5 w-3.5" style={{ color: theme.textSub }} /> 搜索历史
+              </p>
+              <button type="button" onClick={clearHistory} className="flex items-center gap-1 text-[11px] active:scale-95" style={{ color: theme.textSub }} aria-label="清空搜索历史">
+                <Trash2 className="h-3 w-3" /> 清空
+              </button>
             </div>
-            <p className="text-[14px]" style={{ color: theme.textSub }}>
-              {searched > 0 ? '没有找到相关书籍，换个关键词试试' : `输入书名，同时搜索 ${enabledSources.length} 个免费书源`}
+            <div className="flex flex-wrap gap-2">
+              {history.map((h) => (
+                <span
+                  key={h}
+                  className="flex items-center gap-1 rounded-full py-1.5 pl-3.5 pr-2 text-[13px] backdrop-blur-xl"
+                  style={glass}
+                >
+                  <button type="button" className="max-w-[180px] truncate active:scale-95" onClick={() => void runSearch(h)} style={{ color: theme.textMain }}>
+                    {h}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => removeHistory(h)}
+                    aria-label={`删除历史 ${h}`}
+                    className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full active:scale-90"
+                    style={{ color: theme.textSub }}
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </span>
+              ))}
+            </div>
+          </section>
+        )}
+
+        {/* 热门搜索 */}
+        {!running && !hasResults && (
+          <section className="mt-5">
+            <p className="mb-2 flex items-center gap-1.5 text-[13px] font-semibold" style={{ color: theme.textMain }}>
+              <Flame className="h-3.5 w-3.5" style={{ color: '#F0713A' }} /> 热门搜索
             </p>
+            <div className="flex flex-wrap gap-2">
+              {HOT_SEARCHES.map((h, i) => (
+                <button
+                  key={h}
+                  type="button"
+                  onClick={() => void runSearch(h)}
+                  className="flex items-center gap-1.5 rounded-full py-1.5 pl-2.5 pr-3.5 text-[13px] backdrop-blur-xl active:scale-95"
+                  style={glass}
+                >
+                  <span
+                    className="flex items-center justify-center rounded-[5px] text-[10px] font-bold"
+                    style={{
+                      minWidth: 18,
+                      height: 18,
+                      background: i < 3 ? `linear-gradient(135deg, ${theme.gradFrom}, ${theme.gradTo})` : theme.accentSoft,
+                      color: i < 3 ? '#fff' : theme.textSub,
+                    }}
+                    aria-hidden="true"
+                  >
+                    {i + 1}
+                  </span>
+                  <span style={{ color: theme.textMain }}>{h}</span>
+                </button>
+              ))}
+            </div>
+          </section>
+        )}
+
+        {/* 搜完无结果提示 */}
+        {!running && !hasResults && searched > 0 && (
+          <p className="mt-8 text-center text-[13px]" style={{ color: theme.textSub }}>
+            没有找到相关书籍，换个关键词试试
+          </p>
+        )}
+
+        {/* 搜索中骨架 */}
+        {running && !hasResults && (
+          <div className="mt-2 space-y-2.5" aria-hidden="true">
+            {[0, 1, 2, 3].map((i) => (
+              <div key={i} className="flex items-center gap-3 rounded-3xl p-3" style={glass}>
+                <div className="h-[68px] w-[50px] shrink-0 animate-pulse rounded-lg" style={{ background: theme.accentSoft }} />
+                <div className="min-w-0 flex-1 space-y-2">
+                  <div className="h-4 w-2/5 animate-pulse rounded-full" style={{ background: theme.accentSoft }} />
+                  <div className="h-3 w-3/5 animate-pulse rounded-full" style={{ background: theme.accentSoft }} />
+                  <div className="h-3 w-4/5 animate-pulse rounded-full" style={{ background: theme.accentSoft }} />
+                </div>
+              </div>
+            ))}
           </div>
         )}
+
         {exactList.length > 0 && (
           <p className="pb-1.5 pt-1 text-[12px] font-semibold" style={{ color: theme.accent }}>
             搜索结果 · {exactList.length}

@@ -318,6 +318,16 @@ model ReadStat {
   updatedAt   DateTime @updatedAt
 }
 
+/// 精选书封面缓存（服务端解析、永久缓存：书名 → 封面 URL + 来源 id）
+model FeaturedCover {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  coverUrl  String
+  sourceId  String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
 /// AI 陪读记忆：章节摘要 / 聊天记录 / 读书里程碑
 model ReadingMemory {
   id           String   @id @default(cuid())

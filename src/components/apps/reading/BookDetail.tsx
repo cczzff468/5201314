@@ -26,6 +26,7 @@ import {
   Square,
 } from 'lucide-react';
 import {
+  SB_H,
   api,
   CoverPlaceholder,
   coverSrc,
@@ -420,26 +421,28 @@ export function BookDetail({
         />
       </div>
 
-      {/* 顶栏：半透明圆形返回按钮 + 刷新（毛玻璃胶囊；下移离状态栏更远） */}
-      <div className="relative z-20 flex h-[52px] shrink-0 items-center justify-between px-4" style={{ paddingTop: 68 }}>
-        <button
-          type="button"
-          onClick={onBack}
-          aria-label="返回"
-          className="-ml-1 flex h-10 w-10 items-center justify-center rounded-full backdrop-blur-xl active:scale-90"
-          style={{ background: 'rgba(0,0,0,0.28)', color: '#fff', boxShadow: 'inset 0 0 0 1px rgba(255,255,255,0.18)' }}
-        >
-          <ChevronLeft className="h-6 w-6" strokeWidth={2.4} />
-        </button>
-        <button
-          type="button"
-          onClick={() => setReloadKey((k) => k + 1)}
-          aria-label="刷新"
-          className="flex h-10 w-10 items-center justify-center rounded-full backdrop-blur-xl active:scale-90"
-          style={{ background: 'rgba(0,0,0,0.28)', color: '#fff', boxShadow: 'inset 0 0 0 1px rgba(255,255,255,0.18)' }}
-        >
-          <RefreshCw className="h-[17px] w-[17px]" />
-        </button>
+      {/* 顶栏：半透明圆形返回按钮 + 刷新（毛玻璃胶囊；状态栏下方标准高度，不再与内容重叠） */}
+      <div className="relative z-20 shrink-0" style={{ paddingTop: SB_H }}>
+        <div className="flex h-[52px] items-center justify-between px-4">
+          <button
+            type="button"
+            onClick={onBack}
+            aria-label="返回"
+            className="-ml-1 flex h-10 w-10 items-center justify-center rounded-full backdrop-blur-xl active:scale-90"
+            style={{ background: 'rgba(0,0,0,0.28)', color: '#fff', boxShadow: 'inset 0 0 0 1px rgba(255,255,255,0.18)' }}
+          >
+            <ChevronLeft className="h-6 w-6" strokeWidth={2.4} />
+          </button>
+          <button
+            type="button"
+            onClick={() => setReloadKey((k) => k + 1)}
+            aria-label="刷新"
+            className="flex h-10 w-10 items-center justify-center rounded-full backdrop-blur-xl active:scale-90"
+            style={{ background: 'rgba(0,0,0,0.28)', color: '#fff', boxShadow: 'inset 0 0 0 1px rgba(255,255,255,0.18)' }}
+          >
+            <RefreshCw className="h-[17px] w-[17px]" />
+          </button>
+        </div>
       </div>
 
       {!data && !err && !autoTrying && (

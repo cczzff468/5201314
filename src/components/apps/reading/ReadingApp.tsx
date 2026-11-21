@@ -137,16 +137,24 @@ export default function ReadingApp() {
             category={page.category}
             onBack={back}
             onOpenBook={(name) => push({ kind: 'search', keyword: name, autoRun: true })}
-            onSearchMore={(kw) => push({ kind: 'search', keyword: kw, autoRun: true })}
           />
         )}
         {page.kind === 'none' && (
-          <div className="h-full overflow-y-auto overscroll-contain pb-[120px] pt-[54px]">
-            {tab === 'home' && <HomeTab onSearch={(kw) => push({ kind: 'search', keyword: kw, autoRun: true })} onOpenCategory={(c) => push({ kind: 'category', category: c })} onOpenShelfBook={(b) => openHistoryBook(b, push)} />}
-            {tab === 'shelf' && <ShelfTab onOpen={(b) => openShelfBook(b, push)} onSearchGlobal={() => push({ kind: 'search', autoRun: true })} />}
-            {tab === 'history' && <HistoryTab onOpen={(b) => openHistoryBook(b, push)} />}
-            {tab === 'me' && <MeTab onOpenSources={() => push({ kind: 'sources' })} onOpenHistory={() => push({ kind: 'history' })} />}
-          </div>
+          <>
+            {/* 首页自带滚动容器（支持下拉刷新 + 无限加载），其余 Tab 共用外层滚动 */}
+            {tab === 'home' && (
+              <HomeTab
+                onSearch={(kw) => push({ kind: 'search', keyword: kw, autoRun: true })}
+                onOpenCategory={(c) => push({ kind: 'category', category: c })}
+                onOpenShelfBook={(b) => openHistoryBook(b, push)}
+              />
+            )}
+            <div className={tab === 'home' ? 'hidden' : 'h-full overflow-y-auto overscroll-contain pb-[120px] pt-[54px]'}>
+              {tab === 'shelf' && <ShelfTab onOpen={(b) => openShelfBook(b, push)} onSearchGlobal={() => push({ kind: 'search', autoRun: true })} />}
+              {tab === 'history' && <HistoryTab onOpen={(b) => openHistoryBook(b, push)} />}
+              {tab === 'me' && <MeTab onOpenSources={() => push({ kind: 'sources' })} onOpenHistory={() => push({ kind: 'history' })} />}
+            </div>
+          </>
         )}
       </div>
 

@@ -52,6 +52,7 @@ import {
 } from 'lucide-react';
 import { useReading } from '@/lib/reading/store';
 import { setImmersive } from '@/lib/ios/immersive-store';
+import { localSizeOf, viewportToLocal } from '@/lib/ios/shell-scale';
 import { convertLang } from '@/lib/reading/lang-convert';
 import {
   api,
@@ -435,6 +436,25 @@ export function ReaderView({ page, onBack }: { page: ReaderPage; onBack: () => v
   }, [coverState]);
   /** 长按定时器 */
   const lpTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** 本次触摸是否已触发长按（触发后拖动=扩选选区而不是翻页） */
+  const lpFiredRef = useRef(false);
+  /** suppressClick 自动复位定时器（长按后的释放 click 吞掉一次即可，之后正常响应） */
+  const suppressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** 短暂吞掉下一次点击（400ms 内或被吞后自动复位），避免长按释放误触翻页/菜单 */
+  const armSuppress = useCallback(() => {
+    suppressClickRef.current = true;
+    if (suppressTimerRef.current) clearTimeout(suppressTimerRef.current);
+    suppressTimerRef.current = setTimeout(() => {
+      suppressClickRef.current = false;
+      suppressTimerRef.current = null;
+    }, 400);
+  }, []);
+  useEffect(
+    () => () => {
+      if (suppressTimerRef.current) clearTimeout(suppressTimerRef.current);
+    },
+    [],
+  );
   /** 弹层全开时禁用翻页键/长按 */
   const uiBlockedRef = useRef(false);
   useEffect(() => {
@@ -1199,13 +1219,14 @@ export function ReaderView({ page, onBack }: { page: ReaderPage; onBack: () => v
       let local = offsetInElement(pEl, node, caret);
       if (local < 0 || local >= textLen) local = Math.max(0, textLen - 1);
       const abs = sOff + local;
-      suppressClickRef.current = true;
+      armSuppress();
+      lpFiredRef.current = true;
       setNoteInput(null);
       setNotePopup(null);
       setSel({ pi, start: abs, end: Math.min(abs + 1, paragraphs[pi].text.length), chIdx: idx });
       if ('vibrate' in navigator) navigator.vibrate?.(12);
     },
-    [loading, err, paragraphs, idx],
+    [loading, err, paragraphs, idx, armSuppress],
   );
 
   // ------------------------------------------------------------------
@@ -1219,6 +1240,7 @@ export function ReaderView({ page, onBack }: { page: ReaderPage; onBack: () => v
     const x = e.touches[0].clientX;
     const y = e.touches[0].clientY;
     touchRef.current = { x, y, t: Date.now(), horiz: false, lastY: y };
+    lpFiredRef.current = false;
     // 长按检测（500ms 内移动超阈值会取消）
     clearLongPress();
     lpTimerRef.current = setTimeout(() => {
@@ -1229,9 +1251,18 @@ export function ReaderView({ page, onBack }: { page: ReaderPage; onBack: () => v
   const onTouchMove = (e: React.TouchEvent) => {
     const t = touchRef.current;
     if (!t || e.touches.length !== 1) return;
-    const dx = e.touches[0].clientX - t.x;
-    const dy = e.touches[0].clientY - t.y;
-    t.lastY = e.touches[0].clientY;
+    const x = e.touches[0].clientX;
+    const y = e.touches[0].clientY;
+    // 长按已触发：拖动 = 逐字扩选选区（原生阅读器体验），不再进入翻页滑动。
+    // 注：不能检查 uiBlockedRef——它含「sel 激活」，会把扩选手势一起拦掉
+    if (lpFiredRef.current) {
+      updateSelFromPoint(x, y, 'end');
+      t.lastY = y;
+      return;
+    }
+    const dx = x - t.x;
+    const dy = y - t.y;
+    t.lastY = y;
     // 未定向：横滑 → 进入翻页；位移超阈值 → 取消长按（滚动模式下纵向交给原生滚动）
     if (!t.horiz) {
       if (Math.abs(dx) > 14 && Math.abs(dx) > Math.abs(dy) * 1.4) {
@@ -1259,8 +1290,8 @@ export function ReaderView({ page, onBack }: { page: ReaderPage; onBack: () => v
         const np = s.page + dir;
         if (np >= 0 && np < s.pages) {
           // 淡入模式跟手无位移（松手超过阈值才淡入）；覆盖/仿真跟手拖动
-          const x = animMode === 'fade' ? 0 : dir * (vp.w || 1) + clamp(dx);
-          setCoverState({ page: np, x, settle: false, commit: false, mode: animMode as CoverState['mode'] });
+          const cx = animMode === 'fade' ? 0 : dir * (vp.w || 1) + clamp(dx);
+          setCoverState({ page: np, x: cx, settle: false, commit: false, mode: animMode as CoverState['mode'] });
         } else if (coverRef.current) {
           setCoverState(null);
         }
@@ -1271,6 +1302,13 @@ export function ReaderView({ page, onBack }: { page: ReaderPage; onBack: () => v
     const t = touchRef.current;
     touchRef.current = null;
     clearLongPress();
+    // 长按后释放：不进入翻页判定（释放 click 已由 armSuppress 吞掉）
+    if (lpFiredRef.current) {
+      lpFiredRef.current = false;
+      setSwipeDx(0);
+      swipeDxRef.current = 0;
+      return;
+    }
     const dx = swipeDxRef.current;
     swipeDxRef.current = 0;
     setSwipeDx(0);
@@ -1595,14 +1633,15 @@ export function ReaderView({ page, onBack }: { page: ReaderPage; onBack: () => v
     if (!sel || !selRects) return;
     const root = rootRef.current?.getBoundingClientRect();
     if (!root) return;
+    const sz = localSizeOf(root);
     setSel(null);
     setNoteInput(null);
     setNotePopup({
       pi: sel.pi,
       x: (selRects.startX + selRects.endX) / 2,
       y: selRects.startY,
-      rootW: root.width,
-      rootH: root.height,
+      rootW: sz.w,
+      rootH: sz.h,
       chIdx: idx,
       range: { start: sel.start, end: sel.end },
     });
@@ -1872,14 +1911,17 @@ export function ReaderView({ page, onBack }: { page: ReaderPage; onBack: () => v
               e.stopPropagation();
               const root = rootRef.current?.getBoundingClientRect();
               if (!root) return;
-              suppressClickRef.current = true;
+              armSuppress();
+              // 视口坐标 → 阅读器内部坐标（横屏旋转/缩放兼容）
+              const p = viewportToLocal(e.clientX, e.clientY, root);
+              const sz = localSizeOf(root);
               setNoteInput(null);
               setNotePopup({
                 pi: seg.h!.paraIndex,
-                x: e.clientX - root.left,
-                y: e.clientY - root.top,
-                rootW: root.width,
-                rootH: root.height,
+                x: p.x,
+                y: p.y,
+                rootW: sz.w,
+                rootH: sz.h,
                 chIdx: idx,
                 range: { start: seg.h!.startOff, end: seg.h!.endOff },
               });
@@ -1894,7 +1936,7 @@ export function ReaderView({ page, onBack }: { page: ReaderPage; onBack: () => v
         ),
       );
     },
-    [chHighlights, theme.accent, sel, idx],
+    [chHighlights, theme.accent, sel, idx, armSuppress],
   );
 
   /** 渲染一页（forScroll=滚动模式：固定像素高度） */
@@ -2004,14 +2046,18 @@ export function ReaderView({ page, onBack }: { page: ReaderPage; onBack: () => v
         const rects = range.getClientRects();
         if (!rects.length) return null;
         const r = rects[0];
-        return { x: r.left - rootR.left + r.width / 2, y: r.bottom - rootR.top };
+        // 视口坐标 → 阅读器内部坐标（横屏旋转/缩放兼容）
+        const p = viewportToLocal(r.left + r.width / 2, r.bottom, rootR);
+        return { x: p.x, y: p.y };
       }
       return null;
     };
     const s = measureAt(Math.min(sel.start, sel.end - 1));
     const e = measureAt(Math.max(sel.end - 1, sel.start));
-    if (s && e) setSelRects({ startX: s.x, startY: s.y, endX: e.x, endY: e.y, rootW: rootR.width });
-    else setSelRects(null);
+    if (s && e) {
+      const sz = localSizeOf(rootR);
+      setSelRects({ startX: s.x, startY: s.y, endX: e.x, endY: e.y, rootW: sz.w });
+    } else setSelRects(null);
   }, [sel, idx, pageList, vp.w, vp.h, curPage]);
 
   /** 拖手柄：一个字一个字地扩选（同段内） */

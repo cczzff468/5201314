@@ -189,18 +189,21 @@ export function MeTab({
         </span>
       </button>
 
-      {/* 阅读统计胶囊 */}
+      {/* 阅读统计胶囊（长文本不换行：自动缩小字号单行展示） */}
       <div className="mt-3 grid grid-cols-3 gap-2.5">
         {[
-          { n: shelf.length, label: '在读书籍' },
-          { n: readChapters, label: '已读章节' },
+          { n: String(shelf.length), label: '在读书籍' },
+          { n: String(readChapters), label: '已读章节' },
           { n: formatReadTime(readSeconds), label: '阅读时间', text: true },
         ].map((s) => (
-          <div key={s.label} className="rounded-2xl p-3 text-center backdrop-blur-xl" style={card}>
-            <p className={`text-[18px] font-bold ${s.text ? '' : 'tabular-nums'}`} style={{ color: theme.accent }}>
+          <div key={s.label} className="flex min-w-0 flex-col justify-center rounded-2xl p-3 text-center backdrop-blur-xl" style={card}>
+            <p
+              className={`overflow-hidden text-ellipsis whitespace-nowrap font-bold ${s.text ? 'text-[13px]' : 'text-[18px] tabular-nums'}`}
+              style={{ color: theme.accent }}
+            >
               {s.n}
             </p>
-            <p className="mt-0.5 text-[11px]" style={{ color: theme.textSub }}>
+            <p className="mt-0.5 whitespace-nowrap text-[11px]" style={{ color: theme.textSub }}>
               {s.label}
             </p>
           </div>

@@ -231,7 +231,7 @@ function MoreSettingsSheet({ onClose }: { onClose: () => void }) {
 
   return (
     <div className="absolute inset-0 z-[52]" role="dialog" aria-label="更多设置">
-      <button type="button" aria-label="关闭更多设置" className="absolute inset-0 bg-black/40 backdrop-blur-[2px]" onClick={onClose} />
+      <button type="button" aria-label="关闭更多设置" className="absolute inset-0 bg-black/40" onClick={onClose} />
       <div
         className="absolute inset-x-0 bottom-0 max-h-[92%] overflow-y-auto overscroll-contain rounded-t-[22px] shadow-2xl"
         style={{ background: dark ? '#16181F' : '#FFFFFF', boxShadow: '0 -14px 48px rgba(0,0,0,0.28)' }}
@@ -799,24 +799,27 @@ export function ReaderSettingsSheet({ onClose }: { onClose: () => void }) {
 
   const autoOn = settings.autoReadSec > 0;
 
+  /** 点击「更多设置」后：主弹窗消失，仅展示更多设置层；关闭即整体关闭（放在全部 hooks 之后） */
+  if (moreOpen) return <MoreSettingsSheet onClose={onClose} />;
+
   return (
     <div className="absolute inset-0 z-50" role="dialog" aria-label="阅读设置">
-      <button type="button" aria-label="关闭设置" className="absolute inset-0 bg-black/40 backdrop-blur-[2px]" onClick={onClose} />
+      <button type="button" aria-label="关闭设置" className="absolute inset-0 bg-black/40" onClick={onClose} />
       <div
         className="absolute inset-x-0 bottom-0 max-h-[88%] overflow-y-auto overscroll-contain rounded-t-[22px] shadow-2xl"
         style={{ background: dark ? '#16181F' : '#FFFFFF', boxShadow: '0 -14px 48px rgba(0,0,0,0.28)' }}
       >
-        {/* 拖动条 */}
-        <div className="flex justify-center pt-2.5 pb-1">
+        {/* 拖动条（紧凑） */}
+        <div className="flex justify-center pb-0.5 pt-2">
           <span className="h-1.5 w-10 rounded-full" style={{ background: dark ? 'rgba(255,255,255,0.18)' : 'rgba(0,0,0,0.12)' }} />
         </div>
 
-        <div className="px-5 pb-[max(16px,env(safe-area-inset-bottom))]">
-          {/* 标题 */}
-          <div className="flex items-center justify-between pb-3">
-            <p className="flex items-center gap-2 text-[17px] font-bold" style={{ color: dark ? '#F2F3F7' : '#1A1D26' }}>
+        <div className="px-5 pb-[max(12px,env(safe-area-inset-bottom))]">
+          {/* 标题（紧凑） */}
+          <div className="flex items-center justify-between pb-2.5">
+            <p className="flex items-center gap-2 text-[16px] font-bold" style={{ color: dark ? '#F2F3F7' : '#1A1D26' }}>
               <HeadIcon>
-                <SlidersHorizontal className="h-[15px] w-[15px]" />
+                <SlidersHorizontal className="h-[14px] w-[14px]" />
               </HeadIcon>
               阅读设置
             </p>
@@ -831,7 +834,7 @@ export function ReaderSettingsSheet({ onClose }: { onClose: () => void }) {
             </button>
           </div>
 
-          {/* 字号：加减步进 + 字体入口 */}
+          {/* 字号：加减步进 + 字体入口（紧凑） */}
           <div className="flex items-center gap-3">
             <div className="flex flex-1 items-center justify-center gap-4">
               <button
@@ -839,12 +842,12 @@ export function ReaderSettingsSheet({ onClose }: { onClose: () => void }) {
                 aria-label="减小字号"
                 disabled={settings.fontSize <= 12}
                 onClick={() => patch({ fontSize: Math.max(12, settings.fontSize - 1) })}
-                className="flex h-10 w-10 items-center justify-center rounded-full active:scale-90 disabled:opacity-30"
+                className="flex h-9 w-9 items-center justify-center rounded-full active:scale-90 disabled:opacity-30"
                 style={{ border: `1.5px solid ${dark ? 'rgba(255,255,255,0.18)' : 'rgba(0,0,0,0.10)'}` }}
               >
-                <Minus className="h-[18px] w-[18px]" strokeWidth={2.6} style={{ color: dark ? '#E8EAF2' : '#1A1D26' }} />
+                <Minus className="h-4 w-4" strokeWidth={2.6} style={{ color: dark ? '#E8EAF2' : '#1A1D26' }} />
               </button>
-              <span className="min-w-[44px] text-center text-[26px] font-bold leading-none tabular-nums" style={{ color: dark ? '#F2F3F7' : '#1A1D26' }} aria-live="polite">
+              <span className="min-w-[40px] text-center text-[22px] font-bold leading-none tabular-nums" style={{ color: dark ? '#F2F3F7' : '#1A1D26' }} aria-live="polite">
                 {settings.fontSize}
               </span>
               <button
@@ -852,16 +855,16 @@ export function ReaderSettingsSheet({ onClose }: { onClose: () => void }) {
                 aria-label="增大字号"
                 disabled={settings.fontSize >= 32}
                 onClick={() => patch({ fontSize: Math.min(32, settings.fontSize + 1) })}
-                className="flex h-10 w-10 items-center justify-center rounded-full active:scale-90 disabled:opacity-30"
+                className="flex h-9 w-9 items-center justify-center rounded-full active:scale-90 disabled:opacity-30"
                 style={{ border: `1.5px solid ${dark ? 'rgba(255,255,255,0.18)' : 'rgba(0,0,0,0.10)'}` }}
               >
-                <Plus className="h-[18px] w-[18px]" strokeWidth={2.6} style={{ color: dark ? '#E8EAF2' : '#1A1D26' }} />
+                <Plus className="h-4 w-4" strokeWidth={2.6} style={{ color: dark ? '#E8EAF2' : '#1A1D26' }} />
               </button>
             </div>
             <button
               type="button"
               onClick={() => setFontPop((v) => !v)}
-              className="flex h-9 shrink-0 items-center gap-1.5 rounded-full px-3 text-[12px] font-medium active:scale-95"
+              className="flex h-8 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full px-3 text-[12px] font-medium active:scale-95"
               style={{ background: softBg(dark), color: dark ? '#E8EAF2' : '#333' }}
             >
               <span className="font-serif" style={{ fontSize: 14 }}>Aa</span> {fontName} ›
@@ -903,9 +906,9 @@ export function ReaderSettingsSheet({ onClose }: { onClose: () => void }) {
             </div>
           )}
 
-          {/* 亮度 */}
-          <div className="mt-3 rounded-2xl p-3.5" style={{ background: softBg(dark) }}>
-            <div className="mb-2 flex items-center justify-between">
+          {/* 亮度（紧凑） */}
+          <div className="mt-2.5 rounded-2xl p-3" style={{ background: softBg(dark) }}>
+            <div className="mb-1.5 flex items-center justify-between">
               <p className="flex items-center gap-1.5 text-[13px] font-semibold" style={{ color: dark ? '#E8EAF2' : '#1A1D26' }}>
                 <Sun className="h-4 w-4" style={{ color: dark ? 'rgba(232,234,242,0.5)' : '#999' }} /> 亮度
               </p>
@@ -933,12 +936,12 @@ export function ReaderSettingsSheet({ onClose }: { onClose: () => void }) {
             </div>
           </div>
 
-          {/* 阅读背景（字号下方） */}
-          <div className="mt-3 rounded-2xl p-3.5" style={{ background: softBg(dark) }}>
-            <p className="mb-2.5 flex items-center gap-1.5 text-[13px] font-semibold" style={{ color: dark ? '#E8EAF2' : '#1A1D26' }}>
+          {/* 阅读背景（字号下方；紧凑圆形色卡） */}
+          <div className="mt-2.5 rounded-2xl p-3" style={{ background: softBg(dark) }}>
+            <p className="mb-2 flex items-center gap-1.5 text-[13px] font-semibold" style={{ color: dark ? '#E8EAF2' : '#1A1D26' }}>
               <Palette className="h-4 w-4" style={{ color: dark ? 'rgba(232,234,242,0.5)' : '#999' }} /> 背景
             </p>
-            <div className="flex flex-wrap gap-2.5">
+            <div className="flex flex-wrap gap-2">
               {READ_BGS.map((b) => {
                 const active = settings.bgTheme === b.key;
                 return (
@@ -946,14 +949,14 @@ export function ReaderSettingsSheet({ onClose }: { onClose: () => void }) {
                     <button
                       type="button"
                       onClick={() => patch({ bgTheme: b.key, bgCustom: b.key === 'custom' ? settings.bgCustom : null })}
-                      className="relative flex h-[52px] w-[52px] items-center justify-center overflow-hidden rounded-full transition-transform active:scale-90"
+                      className="relative flex h-[44px] w-[44px] items-center justify-center overflow-hidden rounded-full transition-transform active:scale-90"
                       style={{
                         background: b.bg,
                         boxShadow: active ? `0 0 0 2.5px ${BLUE}` : `0 0 0 1.5px ${dark ? 'rgba(255,255,255,0.10)' : 'rgba(0,0,0,0.08)'}`,
                       }}
                       aria-label={`背景：${b.name}`}
                     >
-                      <span className="text-[17px]" style={{ color: b.text, fontWeight: 500 }}>文</span>
+                      <span className="text-[15px]" style={{ color: b.text, fontWeight: 500 }}>文</span>
                       {active && (
                         <Check className="absolute right-0.5 top-0.5 h-3.5 w-3.5 rounded-full p-0.5 text-white" style={{ background: BLUE }} />
                       )}
@@ -972,7 +975,7 @@ export function ReaderSettingsSheet({ onClose }: { onClose: () => void }) {
                     if (settings.bgCustom) patch({ bgTheme: 'custom' });
                     else bgInputRef.current?.click();
                   }}
-                  className="relative flex h-[52px] w-[52px] items-center justify-center overflow-hidden rounded-full transition-transform active:scale-90"
+                  className="relative flex h-[44px] w-[44px] items-center justify-center overflow-hidden rounded-full transition-transform active:scale-90"
                   style={{
                     background: settings.bgCustom && settings.bgTheme === 'custom' ? `center/cover url(${settings.bgCustom})` : dark ? 'rgba(255,255,255,0.08)' : '#F2F3F5',
                     boxShadow: settings.bgTheme === 'custom' ? `0 0 0 2.5px ${BLUE}` : `0 0 0 1.5px ${dark ? 'rgba(255,255,255,0.10)' : 'rgba(0,0,0,0.08)'}`,
@@ -980,7 +983,7 @@ export function ReaderSettingsSheet({ onClose }: { onClose: () => void }) {
                   aria-label="自定义背景"
                 >
                   {!settings.bgCustom && (
-                    <Plus className="h-[18px] w-[18px]" style={{ color: dark ? 'rgba(232,234,242,0.6)' : '#999' }} />
+                    <Plus className="h-4 w-4" style={{ color: dark ? 'rgba(232,234,242,0.6)' : '#999' }} />
                   )}
                   {settings.bgTheme === 'custom' && settings.bgCustom && (
                     <Check className="absolute right-0.5 top-0.5 h-3.5 w-3.5 rounded-full p-0.5 text-white" style={{ background: BLUE }} />
@@ -1007,9 +1010,9 @@ export function ReaderSettingsSheet({ onClose }: { onClose: () => void }) {
             {uploadState === '背景上传中…' && <p className="mt-1.5 text-[11px]" style={{ color: BLUE }}>{uploadState}</p>}
           </div>
 
-          {/* 翻页方式 */}
-          <div className="mt-3 rounded-2xl p-3.5" style={{ background: softBg(dark) }}>
-            <p className="mb-2.5 flex items-center gap-1.5 text-[13px] font-semibold" style={{ color: dark ? '#E8EAF2' : '#1A1D26' }}>
+          {/* 翻页方式（紧凑） */}
+          <div className="mt-2.5 rounded-2xl p-3" style={{ background: softBg(dark) }}>
+            <p className="mb-2 flex items-center gap-1.5 text-[13px] font-semibold" style={{ color: dark ? '#E8EAF2' : '#1A1D26' }}>
               <BookOpen className="h-4 w-4" style={{ color: dark ? 'rgba(232,234,242,0.5)' : '#999' }} /> 翻页方式
             </p>
             <div className="grid grid-cols-3 gap-2">
@@ -1027,7 +1030,7 @@ export function ReaderSettingsSheet({ onClose }: { onClose: () => void }) {
                   key={a.key}
                   type="button"
                   onClick={() => patch({ pageAnim: a.key as typeof settings.pageAnim })}
-                  className="h-10 rounded-[11px] text-[13px] font-medium transition-all active:scale-95"
+                  className="h-9 whitespace-nowrap rounded-[11px] text-[13px] font-medium transition-all active:scale-95"
                   style={
                     settings.pageAnim === a.key
                       ? { background: blueSoft(dark), color: BLUE, fontWeight: 600 }
@@ -1040,12 +1043,12 @@ export function ReaderSettingsSheet({ onClose }: { onClose: () => void }) {
             </div>
           </div>
 
-          {/* 底部操作 */}
-          <div className="mt-3 flex gap-2.5">
+          {/* 底部操作（紧凑） */}
+          <div className="mt-2.5 flex gap-2.5">
             <button
               type="button"
               onClick={() => patch({ autoReadSec: autoOn ? 0 : 15 })}
-              className="flex h-11 flex-1 items-center justify-center gap-1.5 rounded-full text-[13px] font-medium active:scale-95"
+              className="flex h-10 flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-full text-[13px] font-medium active:scale-95"
               style={autoOn ? { background: BLUE, color: '#fff' } : { background: softBg(dark), color: dark ? '#E8EAF2' : '#1A1D26' }}
             >
               <Play className="h-4 w-4" /> {autoOn ? `自动阅读 ${settings.autoReadSec}s` : '自动阅读'}
@@ -1053,7 +1056,7 @@ export function ReaderSettingsSheet({ onClose }: { onClose: () => void }) {
             <button
               type="button"
               onClick={() => setMoreOpen(true)}
-              className="flex h-11 flex-1 items-center justify-center gap-1.5 rounded-full text-[13px] font-medium active:scale-95"
+              className="flex h-10 flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-full text-[13px] font-medium active:scale-95"
               style={{ background: softBg(dark), color: dark ? '#E8EAF2' : '#1A1D26' }}
             >
               <Settings2 className="h-4 w-4" /> 更多设置 ›
@@ -1061,8 +1064,6 @@ export function ReaderSettingsSheet({ onClose }: { onClose: () => void }) {
           </div>
         </div>
       </div>
-
-      {moreOpen && <MoreSettingsSheet onClose={() => setMoreOpen(false)} />}
     </div>
   );
 }

@@ -30,6 +30,7 @@ import {
   CircleCheck,
 } from 'lucide-react';
 import { useReading } from '@/lib/reading/store';
+import { localSizeOf, viewportToLocal } from '@/lib/ios/shell-scale';
 import { api, themeOf, type SourceItem } from './shared';
 import { SubNavBar } from './ReadingApp';
 
@@ -69,6 +70,8 @@ export function SourcesManager({ onBack }: { onBack: () => void }) {
   const loadSources = useReading((s) => s.loadSources);
   const theme = useMemo(() => themeOf(settings.appTheme), [settings.appTheme]);
   const dark = settings.appTheme === 'midnight';
+  /** 页面容器（⋮ 菜单定位坐标系） */
+  const rootRef = useRef<HTMLDivElement>(null);
 
   const [addOpen, setAddOpen] = useState(false);
   const [toast, setToast] = useState('');
@@ -86,8 +89,8 @@ export function SourcesManager({ onBack }: { onBack: () => void }) {
   const [multiMode, setMultiMode] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
 
-  /** ⋮ 菜单（单例浮层） */
-  const [menuFor, setMenuFor] = useState<{ src: SourceItem; top: number; right: number } | null>(null);
+  /** ⋮ 菜单（单例浮层：按钮位置 + 容器相对坐标，边界内钳制不溢出屏幕） */
+  const [menuFor, setMenuFor] = useState<{ src: SourceItem; left: number; top: number; rootW: number; rootH: number } | null>(null);
 
   /** 校验进行态 */
   const [smartRun, setSmartRun] = useState(false);
@@ -109,6 +112,8 @@ export function SourcesManager({ onBack }: { onBack: () => void }) {
   }, [loadSources]);
 
   const enabledCount = sources.filter((s) => s.enabled).length;
+  /** 实测失败且已停用的非内置源（「清理失效」目标） */
+  const failedCount = sources.filter((s) => s.checkStatus === 'fail' && !s.enabled && !s.isBuiltin).length;
   const groups = useMemo(() => {
     const m = new Map<string, number>();
     for (const s of sources) {
@@ -247,6 +252,21 @@ export function SourcesManager({ onBack }: { onBack: () => void }) {
     await loadSources();
   };
 
+  /** 一键清理失效源（实测失败 + 已停用 + 非内置；用户内置源不受影响） */
+  const [cleaning, setCleaning] = useState(false);
+  const cleanFailed = async () => {
+    if (cleaning) return;
+    setCleaning(true);
+    try {
+      const r = (await api.sourceAction({ action: 'deleteFailed' })) as { deleted?: number };
+      await loadSources();
+      notify(`已清理 ${r.deleted || 0} 个失效书源`);
+    } catch {
+      notify('清理失败，请重试');
+    }
+    setCleaning(false);
+  };
+
   // ------------------------------------------------------------------
   // 皮肤（截图1为浅色：浅灰页面底 + 白卡片；深色主题用等价深色）
   // ------------------------------------------------------------------
@@ -260,11 +280,11 @@ export function SourcesManager({ onBack }: { onBack: () => void }) {
 
   const renderRight = () =>
     multiMode ? (
-      <div className="flex items-center gap-2">
+      <div className="flex shrink-0 items-center gap-2">
         <button
           type="button"
           onClick={() => setSelected(list.length === selected.size ? new Set() : new Set(list.map((s) => s.id)))}
-          className="text-[13px] font-medium"
+          className="whitespace-nowrap text-[13px] font-medium"
           style={{ color: BLUE }}
         >
           {list.length && list.length === selected.size ? '取消全选' : '全选'}
@@ -275,29 +295,18 @@ export function SourcesManager({ onBack }: { onBack: () => void }) {
             setMultiMode(false);
             setSelected(new Set());
           }}
-          className="text-[13px] font-medium"
+          className="whitespace-nowrap text-[13px] font-medium"
           style={{ color: theme.textSub }}
         >
           取消
         </button>
       </div>
     ) : (
-      <div className="flex items-center gap-1.5">
-        <button
-          type="button"
-          onClick={() => {
-            setShowGroups((v) => !v);
-            if (!showGroups) setGroupFilter(null);
-          }}
-          className="text-[13px] font-medium active:scale-95"
-          style={{ color: BLUE }}
-        >
-          {showGroups ? '收起分组' : '分组'}
-        </button>
+      <div className="flex shrink-0 items-center gap-1.5">
         <button
           type="button"
           onClick={() => setMultiMode(true)}
-          className="text-[13px] font-medium active:scale-95"
+          className="whitespace-nowrap text-[13px] font-medium active:scale-95"
           style={{ color: BLUE }}
         >
           多选
@@ -306,7 +315,7 @@ export function SourcesManager({ onBack }: { onBack: () => void }) {
           type="button"
           onClick={() => void smartCheck()}
           disabled={smartRun}
-          className="flex h-8 items-center rounded-full px-3 text-[12px] font-semibold active:scale-95 disabled:opacity-60"
+          className="flex h-8 shrink-0 items-center whitespace-nowrap rounded-full px-3 text-[12px] font-semibold active:scale-95 disabled:opacity-60"
           style={{ background: blueSoft, color: BLUE }}
         >
           {smartRun ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Zap className="h-3.5 w-3.5" />}
@@ -316,7 +325,7 @@ export function SourcesManager({ onBack }: { onBack: () => void }) {
           type="button"
           onClick={() => setAddOpen(true)}
           aria-label="添加书源"
-          className="flex h-8 w-8 items-center justify-center rounded-full text-white shadow-md active:scale-90"
+          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-white shadow-md active:scale-90"
           style={{ background: BLUE, boxShadow: `0 4px 10px ${BLUE}55` }}
         >
           <Plus className="h-[18px] w-[18px]" strokeWidth={2.4} />
@@ -325,7 +334,7 @@ export function SourcesManager({ onBack }: { onBack: () => void }) {
     );
 
   return (
-    <div className="flex h-full flex-col" style={{ background: pageBg }}>
+    <div ref={rootRef} className="relative flex h-full flex-col overflow-hidden" style={{ background: pageBg }}>
       <SubNavBar
         title={multiMode ? `已选 ${selected.size} 项` : '书源管理'}
         onBack={() => {
@@ -385,7 +394,7 @@ export function SourcesManager({ onBack }: { onBack: () => void }) {
           )}
         </div>
 
-        {/* 筛选 chips */}
+        {/* 筛选 chips（含分组开关 + 清理失效入口；全部单行不换行） */}
         <div className="mt-3 flex items-center gap-2 overflow-x-auto pb-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           {(
             [
@@ -398,7 +407,7 @@ export function SourcesManager({ onBack }: { onBack: () => void }) {
               key={f.k}
               type="button"
               onClick={() => setFilter(f.k)}
-              className="h-8 shrink-0 rounded-full px-3.5 text-[12.5px] font-medium transition-all active:scale-95"
+              className="h-8 shrink-0 whitespace-nowrap rounded-full px-3.5 text-[12.5px] font-medium transition-all active:scale-95"
               style={
                 filter === f.k
                   ? { background: BLUE, color: '#fff' }
@@ -408,14 +417,40 @@ export function SourcesManager({ onBack }: { onBack: () => void }) {
               {f.label}
             </button>
           ))}
-          <span className="mx-0.5 shrink-0" style={{ color: theme.textSub }}>
-            ·
-          </span>
+          {/* 分组开关（从顶栏移到筛选行，解决顶栏拥挤） */}
+          <button
+            type="button"
+            onClick={() => {
+              setShowGroups((v) => !v);
+              if (!showGroups) setGroupFilter(null);
+            }}
+            className="h-8 shrink-0 whitespace-nowrap rounded-full px-3.5 text-[12.5px] font-medium transition-all active:scale-95"
+            style={
+              showGroups
+                ? { background: blueSoft, color: BLUE, fontWeight: 600 }
+                : { background: chipBg, color: theme.textMain, boxShadow: `inset 0 0 0 1px ${chipRing}` }
+            }
+          >
+            分组 {showGroups ? '▴' : '▾'}
+          </button>
+          {/* 清理失效源（实测失败 + 已停用才计数；一键删除非内置死源） */}
+          {failedCount > 0 && !multiMode && (
+            <button
+              type="button"
+              onClick={() => void cleanFailed()}
+              disabled={cleaning}
+              className="h-8 shrink-0 whitespace-nowrap rounded-full px-3.5 text-[12.5px] font-semibold transition-all active:scale-95 disabled:opacity-60"
+              style={{ background: '#FDEBEB', color: '#E05252' }}
+            >
+              {cleaning ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+              清理失效 {failedCount}
+            </button>
+          )}
           {showGroups && (
             <button
               type="button"
               onClick={() => setGroupFilter(null)}
-              className="h-8 shrink-0 rounded-full px-3.5 text-[12.5px] font-medium transition-all active:scale-95"
+              className="h-8 shrink-0 whitespace-nowrap rounded-full px-3.5 text-[12.5px] font-medium transition-all active:scale-95"
               style={
                 !groupFilter
                   ? { background: BLUE, color: '#fff' }
@@ -431,7 +466,7 @@ export function SourcesManager({ onBack }: { onBack: () => void }) {
                 key={g}
                 type="button"
                 onClick={() => setGroupFilter(groupFilter === g ? null : g)}
-                className="h-8 shrink-0 rounded-full px-3.5 text-[12.5px] font-medium transition-all active:scale-95"
+                className="h-8 shrink-0 whitespace-nowrap rounded-full px-3.5 text-[12.5px] font-medium transition-all active:scale-95"
                 style={
                   groupFilter === g
                     ? { background: BLUE, color: '#fff' }
@@ -544,17 +579,17 @@ export function SourcesManager({ onBack }: { onBack: () => void }) {
                       </span>
                     )}
                   </p>
-                  <p className="mt-1 flex items-center gap-1.5">
+                  <p className="mt-1 flex min-w-0 items-center gap-1.5">
                     {s.checkStatus === 'fail' ? (
                       <span
-                        className="flex shrink-0 items-center gap-1 rounded-full px-1.5 py-px text-[10px] font-medium"
+                        className="flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full px-1.5 py-px text-[10px] font-medium"
                         style={{ background: '#FDEBEB', color: '#E05252' }}
                       >
                         失效
                       </span>
                     ) : s.enabled ? (
                       <span
-                        className="flex shrink-0 items-center gap-1 rounded-full px-1.5 py-px text-[10px] font-medium"
+                        className="flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full px-1.5 py-px text-[10px] font-medium"
                         style={{ background: '#E9F7EF', color: '#0FA958' }}
                       >
                         <span className="h-1 w-1 rounded-full" style={{ background: '#0FA958' }} />
@@ -562,13 +597,13 @@ export function SourcesManager({ onBack }: { onBack: () => void }) {
                       </span>
                     ) : (
                       <span
-                        className="flex shrink-0 items-center gap-1 rounded-full px-1.5 py-px text-[10px] font-medium"
+                        className="flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full px-1.5 py-px text-[10px] font-medium"
                         style={{ background: dark ? 'rgba(255,255,255,0.08)' : '#F1F2F4', color: theme.textSub }}
                       >
                         停用
                       </span>
                     )}
-                    <span className="truncate text-[11px]" style={{ color: theme.textSub }}>
+                    <span className="min-w-0 truncate text-[11px]" style={{ color: theme.textSub }}>
                       {g} · {hostOf(s.url)}
                     </span>
                   </p>
@@ -583,7 +618,12 @@ export function SourcesManager({ onBack }: { onBack: () => void }) {
                       style={{ color: theme.textSub }}
                       onClick={(e) => {
                         const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
-                        setMenuFor({ src: s, top: r.bottom, right: r.right });
+                        const root = rootRef.current?.getBoundingClientRect();
+                        if (!root) return;
+                        // 视口坐标 → 页面内部坐标（横屏旋转/缩放兼容）
+                        const p = viewportToLocal(r.right, r.bottom, root);
+                        const sz = localSizeOf(root);
+                        setMenuFor({ src: s, left: p.x, top: p.y, rootW: sz.w, rootH: sz.h });
                       }}
                     >
                       <MoreVertical className="h-[18px] w-[18px]" />
@@ -650,19 +690,27 @@ export function SourcesManager({ onBack }: { onBack: () => void }) {
         </div>
       )}
 
-      {/* ⋮ 菜单浮层 */}
+      {/* ⋮ 菜单浮层（容器相对坐标 + 边界钩制：右对齐按钮、底部不够放时改向上弹出；轻遮罩突出层次） */}
       {menuFor && (
-        <div className="absolute inset-0 z-40" role="menu" aria-label="书源操作" onClick={() => setMenuFor(null)}>
-          <div
-            className="absolute w-40 overflow-hidden rounded-2xl py-1 shadow-2xl"
-            style={{
-              top: Math.min(menuFor.top, (menuFor.top > 600 ? 460 : menuFor.top)),
-              right: Math.max(50, 390 - menuFor.right + 40),
-              background: cardBg,
-              boxShadow: `inset 0 0 0 1px ${cardRing}, 0 12px 36px rgba(0,0,0,0.22)`,
-            }}
-            onClick={(e) => e.stopPropagation()}
-          >
+        <div className="absolute inset-0 z-40 bg-black/15" role="menu" aria-label="书源操作" onClick={() => setMenuFor(null)}>
+          {(() => {
+            const W = 152;
+            const estH = 186;
+            const left = Math.max(8, Math.min(menuFor.left - W + 24, menuFor.rootW - W - 8));
+            const below = menuFor.top + estH + 8 < menuFor.rootH;
+            const top = below ? menuFor.top + 6 : Math.max(8, menuFor.top - estH - 24);
+            return (
+              <div
+                className="absolute w-38 overflow-hidden rounded-2xl py-1 shadow-2xl"
+                style={{
+                  left,
+                  top,
+                  width: W,
+                  background: cardBg,
+                  boxShadow: `inset 0 0 0 1px ${cardRing}, 0 12px 36px rgba(0,0,0,0.22)`,
+                }}
+                onClick={(e) => e.stopPropagation()}
+              >
             {[
               {
                 key: 'check',
@@ -708,7 +756,7 @@ export function SourcesManager({ onBack }: { onBack: () => void }) {
               <button
                 key={it.key}
                 type="button"
-                className="flex w-full items-center gap-2.5 px-3.5 py-2.5 text-left text-[13.5px] font-medium active:opacity-60"
+                className="flex w-full items-center gap-2.5 whitespace-nowrap px-3.5 py-2.5 text-left text-[13.5px] font-medium active:opacity-60"
                 style={{ color: it.key === 'del' ? '#E05252' : theme.textMain }}
                 onClick={() => {
                   setMenuFor(null);
@@ -719,7 +767,9 @@ export function SourcesManager({ onBack }: { onBack: () => void }) {
                 {it.label}
               </button>
             ))}
-          </div>
+              </div>
+            );
+          })()}
         </div>
       )}
 
