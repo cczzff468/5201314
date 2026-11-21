@@ -3,15 +3,17 @@
 /**
  * 阅读 App · 主壳
  * ---------------------------------------------------------------------------
- * 三 Tab（首页 / 书架 / 我）+ 毛玻璃悬浮胶囊 TabBar（参考截图：白色磨砂胶囊、
- * 选中项为蓝色实心胶囊包图标+文字）。搜索页 / 书籍详情 / 阅读器为全屏子页
+ * 三 Tab（首页 / 书架 / 我）+ 毛玻璃悬浮胶囊 TabBar（白色磨砂胶囊、选中项为
+ * 主题色实心渐变胶囊包图标+文字）。搜索页 / 书籍详情 / 阅读器为全屏子页
  * （push 栈式导航，返回键逐级退出）。
- * 风格：蓝色玻璃毛玻璃（App 主题可切换，默认海洋蓝）。
+ * 风格：蓝色玻璃毛玻璃（App 主题可切换，默认海洋蓝）；底层装饰性渐变光斑
+ * 让所有毛玻璃卡片有真实的「透出感」；所有子页顶栏预留状态栏高度（SB_H）。
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ChevronLeft } from 'lucide-react';
 import { useReading } from '@/lib/reading/store';
 import {
+  SB_H,
   api,
   themeOf,
   type SearchBookItem,
@@ -71,26 +73,35 @@ export default function ReadingApp() {
 
   // 子页全屏覆盖（阅读器自己管顶栏，其他子页带返回键）
   if (page.kind === 'reader') {
-    return (
-      <ReaderView
-        page={page}
-        onBack={back}
-        onOpenBook={(p) => setPage({ ...p })}
-      />
-    );
+    return <ReaderView page={page} onBack={back} />;
   }
 
   return (
     <div
-      className="flex h-full w-full flex-col overflow-hidden"
+      className="relative flex h-full w-full flex-col overflow-hidden"
       style={{
-        background: theme.pageBg,
-        // 玻璃卡片通用变量
+        background: `linear-gradient(165deg, ${theme.gradFrom}30 0%, ${theme.pageBg} 42%, ${theme.pageBg} 70%, ${theme.gradTo}26 100%), ${theme.pageBg}`,
         ['--rd-accent' as string]: theme.accent,
         ['--rd-accent-soft' as string]: theme.accentSoft,
         color: theme.textMain,
       }}
     >
+      {/* 底层装饰光斑（毛玻璃透出感的来源；随主题换色） */}
+      <div className="pointer-events-none absolute inset-0 overflow-hidden" aria-hidden="true">
+        <span
+          className="absolute -top-24 -right-20 h-80 w-80 rounded-full opacity-80 blur-3xl"
+          style={{ background: `radial-gradient(circle, ${theme.gradFrom}88, transparent 68%)` }}
+        />
+        <span
+          className="absolute top-1/4 -left-28 h-72 w-72 rounded-full opacity-70 blur-3xl"
+          style={{ background: `radial-gradient(circle, ${theme.gradTo}77, transparent 68%)` }}
+        />
+        <span
+          className="absolute -bottom-28 right-1/4 h-80 w-80 rounded-full opacity-65 blur-3xl"
+          style={{ background: `radial-gradient(circle, ${theme.gradFrom}55, transparent 70%)` }}
+        />
+      </div>
+
       <div className="relative min-h-0 flex-1 overflow-hidden">
         {page.kind === 'search' && <SearchPage page={page} onBack={back} onOpenBook={(book, sourceId) => push({ kind: 'detail', sourceId, book })} />}
         {page.kind === 'detail' && (
@@ -100,7 +111,7 @@ export default function ReadingApp() {
               back();
               void loadShelf();
             }}
-            onRead={(p) => push({ kind: 'reader', ...p })}
+            onRead={(p) => push({ kind: 'reader', sourceId: p.sourceId, bookUrl: p.bookUrl, name: p.name, author: p.author, coverUrl: p.coverUrl, startIndex: p.startIndex })}
             onSwitchSource={(book) => push({ kind: 'search', keyword: book.name, autoRun: true })}
           />
         )}
@@ -119,8 +130,11 @@ export default function ReadingApp() {
       {page.kind === 'none' && (
         <div className="pointer-events-none absolute inset-x-0 bottom-0 z-30 flex justify-center pb-[max(14px,env(safe-area-inset-bottom))]">
           <div
-            className="pointer-events-auto flex items-center gap-1 rounded-full p-1.5 shadow-[0_8px_30px_rgba(0,0,0,0.10)] ring-1 backdrop-blur-2xl"
-            style={{ background: theme.barBg, ringColor: theme.cardRing }}
+            className="pointer-events-auto flex items-center gap-1 rounded-full p-1.5 backdrop-blur-2xl"
+            style={{
+              background: theme.barBg,
+              boxShadow: `inset 0 0 0 1px ${theme.cardRing}, 0 8px 30px rgba(0,0,0,0.10)`,
+            }}
           >
             <TabBtn tab="home" cur={tab} setTab={setTab} theme={theme} icon="home" label="首页" />
             <TabBtn tab="shelf" cur={tab} setTab={setTab} theme={theme} icon="shelf" label="书架" />
@@ -176,7 +190,7 @@ function TabBtn({
       className="flex h-[52px] min-w-[76px] items-center justify-center gap-1 rounded-full transition-all active:scale-95"
       style={
         active
-          ? { background: theme.accent, color: '#fff', boxShadow: `0 4px 14px ${theme.accent}55` }
+          ? { background: `linear-gradient(135deg, ${theme.gradFrom}, ${theme.gradTo})`, color: '#fff', boxShadow: `0 4px 16px ${theme.accent}55` }
           : { color: theme.textSub }
       }
     >
@@ -197,7 +211,7 @@ function TabMeIcon() {
   return <CircleUserRound className="h-[22px] w-[22px]" strokeWidth={2} />;
 }
 
-/** 子页通用顶栏（毛玻璃 + 返回键） */
+/** 子页通用顶栏（毛玻璃 + 返回键；预留状态栏高度，不再被遮挡） */
 export function SubNavBar({
   title,
   onBack,
@@ -213,22 +227,28 @@ export function SubNavBar({
 }) {
   return (
     <div
-      className="sticky top-0 z-20 flex h-[54px] shrink-0 items-center px-3 backdrop-blur-2xl"
-      style={{ background: transparent ? 'transparent' : theme.barBg }}
+      className="sticky top-0 z-20 shrink-0 backdrop-blur-2xl"
+      style={{
+        background: transparent ? 'transparent' : theme.barBg,
+        paddingTop: SB_H,
+        boxShadow: transparent ? undefined : `inset 0 -1px 0 ${theme.cardRing}`,
+      }}
     >
-      <button
-        type="button"
-        onClick={onBack}
-        aria-label="返回"
-        className="-ml-1 flex h-10 w-10 items-center justify-center rounded-full active:scale-90"
-        style={{ color: theme.textMain }}
-      >
-        <ChevronLeft className="h-6 w-6" strokeWidth={2.2} />
-      </button>
-      <span className="ml-1 min-w-0 flex-1 truncate text-[17px] font-semibold" style={{ color: theme.textMain }}>
-        {title}
-      </span>
-      {right}
+      <div className="flex h-[52px] items-center px-3">
+        <button
+          type="button"
+          onClick={onBack}
+          aria-label="返回"
+          className="-ml-1 flex h-10 w-10 items-center justify-center rounded-full active:scale-90"
+          style={{ color: theme.textMain }}
+        >
+          <ChevronLeft className="h-6 w-6" strokeWidth={2.2} />
+        </button>
+        <span className="ml-1 min-w-0 flex-1 truncate text-[17px] font-semibold" style={{ color: theme.textMain }}>
+          {title}
+        </span>
+        {right}
+      </div>
     </div>
   );
 }

@@ -5,7 +5,10 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 /**
- * AI 陪读聊天：POST { bookUrl, book:{name,author,currentChapter,currentChapterTitle,totalChapters}, message, persona? }
+ * AI 陪读聊天：POST { bookUrl, book:{name,author,currentChapter,currentChapterTitle,totalChapters},
+ * message, persona?, memoryBlock?, companionName? }
+ * - persona：所选联系人的角色人设（客户端从联系人档案组装）——AI 以该联系人身份陪读
+ * - memoryBlock：记忆 APP 召回块（memChatRecallBlock），陪读 AI 共享该联系人的跨 App 记忆
  * 上下文注入策略见 src/lib/reading/ai.ts 头注释（只进摘要不进正文，Token 省流）。
  */
 export async function POST(req: NextRequest) {
@@ -26,6 +29,7 @@ export async function POST(req: NextRequest) {
       },
       message,
       persona: body.persona ? String(body.persona) : undefined,
+      memoryBlock: body.memoryBlock ? String(body.memoryBlock) : undefined,
     });
     return NextResponse.json({ reply });
   } catch (e) {

@@ -1,8 +1,9 @@
 'use client';
 
 /**
- * 「我」Tab（参照截图1：iOS 设置风分组白卡 + pastel 图标容器 + 大圆角）
- * 分组：书源与内容 / 阅读与数据 / 外观与通用
+ * 「我」Tab：我的信息头卡（阅读统计）+ 分组玻璃卡设置项
+ * 分组：书源与内容 / 阅读与数据（阅读记录与 AI 记忆）/ 外观与通用（主题/排版）
+ * 主题选择与排版设置为底部玻璃抽屉。
  */
 import { useMemo, useState } from 'react';
 import {
@@ -11,14 +12,13 @@ import {
   History,
   Palette,
   Type,
-  Trash2,
   ChevronRight,
   Sparkles,
   CircleCheck,
-  CircleX,
+  Layers,
 } from 'lucide-react';
 import { useReading } from '@/lib/reading/store';
-import { APP_THEMES, api, themeOf } from './shared';
+import { APP_THEMES, themeOf } from './shared';
 import { ReaderSettingsSheet } from './ReaderSettingsSheet';
 
 function GroupTitle({ text, theme }: { text: string; theme: ReturnType<typeof themeOf> }) {
@@ -52,7 +52,7 @@ function Item({
     <button
       type="button"
       onClick={onClick}
-      className="flex w-full items-center gap-3.5 px-4 py-3 text-left first:rounded-t-2xl last:rounded-b-2xl active:bg-black/[0.02]"
+      className="flex w-full items-center gap-3.5 px-4 py-3 text-left first:rounded-t-3xl last:rounded-b-3xl active:bg-black/[0.02]"
     >
       <span className="flex h-[46px] w-[46px] shrink-0 items-center justify-center rounded-2xl" style={{ background: iconBg, color: iconColor }}>
         {icon}
@@ -87,17 +87,9 @@ export function MeTab({
   const theme = useMemo(() => themeOf(settings.appTheme), [settings.appTheme]);
   const [typoOpen, setTypoOpen] = useState(false);
   const [themeOpen, setThemeOpen] = useState(false);
-  const [toast, setToast] = useState('');
 
   const okCount = sources.filter((s) => s.enabled).length;
   const readChapters = shelf.reduce((n, b) => n + b.lastReadChapter + 1, 0);
-
-  const clearAI = async () => {
-    await api.historyAction({ action: 'clear', kind: 'chat' }).catch(() => null);
-    await api.historyAction({ action: 'clear', kind: 'summary' }).catch(() => null);
-    setToast('AI 陪读记忆已清空');
-    setTimeout(() => setToast(''), 2000);
-  };
 
   const card = {
     background: theme.cardBg,
@@ -106,14 +98,17 @@ export function MeTab({
 
   return (
     <div className="px-4 pb-6">
-      {/* 头卡（玻璃） */}
-      <div className="flex items-center gap-4 rounded-3xl p-5" style={card}>
-        <div className="flex h-16 w-16 items-center justify-center rounded-full" style={{ background: theme.accentSoft, color: theme.accent }}>
+      {/* 我的信息头卡（玻璃） */}
+      <div className="flex items-center gap-4 rounded-3xl p-5 backdrop-blur-xl" style={card}>
+        <div
+          className="flex h-16 w-16 items-center justify-center rounded-full text-white"
+          style={{ background: `linear-gradient(135deg, ${theme.gradFrom}, ${theme.gradTo})`, boxShadow: `0 8px 20px ${theme.accent}44` }}
+        >
           <Sparkles className="h-8 w-8" strokeWidth={1.8} />
         </div>
         <div className="min-w-0 flex-1">
           <p className="text-[19px] font-bold" style={{ color: theme.textMain }}>
-            我的书屋
+            我的信息
           </p>
           <p className="mt-1 text-[12px]" style={{ color: theme.textSub }}>
             书架 {shelf.length} 本 · 已读 {readChapters} 章 · 启用书源 {okCount} 个
@@ -121,8 +116,26 @@ export function MeTab({
         </div>
       </div>
 
+      {/* 阅读统计胶囊 */}
+      <div className="mt-3 grid grid-cols-3 gap-2.5">
+        {[
+          { n: shelf.length, label: '在读书籍' },
+          { n: readChapters, label: '已读章节' },
+          { n: okCount, label: '可用书源' },
+        ].map((s) => (
+          <div key={s.label} className="rounded-2xl p-3 text-center backdrop-blur-xl" style={card}>
+            <p className="text-[20px] font-bold tabular-nums" style={{ color: theme.accent }}>
+              {s.n}
+            </p>
+            <p className="mt-0.5 text-[11px]" style={{ color: theme.textSub }}>
+              {s.label}
+            </p>
+          </div>
+        ))}
+      </div>
+
       <GroupTitle text="书源与内容" theme={theme} />
-      <div className="overflow-hidden rounded-3xl" style={card}>
+      <div className="overflow-hidden rounded-3xl backdrop-blur-xl" style={card}>
         <Item
           theme={theme}
           icon={<Database className="h-[22px] w-[22px]" strokeWidth={2} />}
@@ -145,7 +158,7 @@ export function MeTab({
       </div>
 
       <GroupTitle text="阅读与数据" theme={theme} />
-      <div className="overflow-hidden rounded-3xl" style={card}>
+      <div className="overflow-hidden rounded-3xl backdrop-blur-xl" style={card}>
         <Item
           theme={theme}
           icon={<History className="h-[22px] w-[22px]" strokeWidth={2} />}
@@ -155,32 +168,24 @@ export function MeTab({
           desc="看过的书 · 聊过的天 · 剧情摘要"
           onClick={onOpenHistory}
         />
-        <div className="mx-[86px] h-px" style={{ background: theme.cardRing }} />
-        <Item
-          theme={theme}
-          icon={<Trash2 className="h-[22px] w-[22px]" strokeWidth={2} />}
-          iconBg="#FFF3D6"
-          iconColor="#F5A623"
-          title="清空 AI 陪读记忆"
-          desc="删除所有聊天记录与章节摘要"
-          onClick={() => void clearAI()}
-          right={<span className="text-[12px]" style={{ color: theme.textSub }}>点击清空</span>}
-        />
       </div>
 
       <GroupTitle text="外观与通用" theme={theme} />
-      <div className="overflow-hidden rounded-3xl" style={card}>
+      <div className="overflow-hidden rounded-3xl backdrop-blur-xl" style={card}>
         <Item
           theme={theme}
           icon={<Palette className="h-[22px] w-[22px]" strokeWidth={2} />}
           iconBg="#FCE7F3"
           iconColor="#EC4899"
           title="主题风格"
-          desc={`${APP_THEMES[settings.appTheme]?.name || '海洋蓝'} · 蓝色玻璃毛玻璃`}
+          desc={`${APP_THEMES[settings.appTheme]?.name || '海洋蓝'} · 玻璃毛玻璃`}
           onClick={() => setThemeOpen(true)}
           right={
             <span className="flex items-center gap-2">
-              <span className="h-4 w-4 rounded-full" style={{ background: theme.accent }} />
+              <span
+                className="h-4 w-4 rounded-full ring-1 ring-black/10"
+                style={{ background: `linear-gradient(135deg, ${theme.gradFrom}, ${theme.gradTo})` }}
+              />
               <ChevronRight className="h-[18px] w-[18px]" style={{ color: theme.textSub }} />
             </span>
           }
@@ -195,14 +200,29 @@ export function MeTab({
           desc="字号/字体/间距/边距/对齐（含预览）"
           onClick={() => setTypoOpen(true)}
         />
+        <div className="mx-[86px] h-px" style={{ background: theme.cardRing }} />
+        <Item
+          theme={theme}
+          icon={<Layers className="h-[22px] w-[22px]" strokeWidth={2} />}
+          iconBg="#E8F8F0"
+          iconColor="#12A06A"
+          title="阅读背景"
+          desc={`${settings.bgTheme === 'custom' ? '自定义图片' : '内置 6 款'} · 排版面板里可换`}
+          onClick={() => setTypoOpen(true)}
+        />
       </div>
 
-      {/* 主题选择抽屉 */}
+      {/* 主题选择抽屉（玻璃） */}
       {themeOpen && (
         <div className="absolute inset-0 z-40" role="dialog" aria-label="主题风格">
-          <button type="button" aria-label="关闭" className="absolute inset-0 bg-black/30" onClick={() => setThemeOpen(false)} />
-          <div className="absolute inset-x-0 bottom-0 rounded-t-3xl bg-white p-5 pb-[max(20px,env(safe-area-inset-bottom))] shadow-2xl">
-            <p className="mb-4 text-[16px] font-bold text-[#1A1D26]">主题风格</p>
+          <button type="button" aria-label="关闭" className="absolute inset-0 bg-black/30 backdrop-blur-[2px]" onClick={() => setThemeOpen(false)} />
+          <div
+            className="absolute inset-x-0 bottom-0 rounded-t-3xl p-5 pb-[max(20px,env(safe-area-inset-bottom))] shadow-2xl backdrop-blur-2xl"
+            style={{ background: theme.pageBg, boxShadow: `inset 0 0 0 1px ${theme.cardRing}, 0 -12px 48px rgba(0,0,0,0.18)` }}
+          >
+            <p className="mb-4 text-[16px] font-bold" style={{ color: theme.textMain }}>
+              主题风格
+            </p>
             <div className="grid grid-cols-3 gap-3">
               {Object.values(APP_THEMES).map((t) => (
                 <button
@@ -213,14 +233,17 @@ export function MeTab({
                     setThemeOpen(false);
                     void loadSources(true);
                   }}
-                  className="flex flex-col items-center gap-2 rounded-2xl p-3 active:scale-95"
-                  style={{ background: settings.appTheme === t.key ? t.accentSoft : 'rgba(0,0,0,0.03)' }}
+                  className="flex flex-col items-center gap-2 rounded-2xl p-3 backdrop-blur-xl active:scale-95"
+                  style={{
+                    background: settings.appTheme === t.key ? t.accentSoft : 'rgba(0,0,0,0.03)',
+                    boxShadow: `inset 0 0 0 1px ${settings.appTheme === t.key ? t.accent + '44' : 'transparent'}`,
+                  }}
                 >
                   <span
                     className="h-10 w-10 rounded-full shadow-inner"
                     style={{ background: `linear-gradient(135deg, ${t.gradFrom}, ${t.gradTo})` }}
                   />
-                  <span className="flex items-center gap-1 text-[12px] font-medium text-[#1A1D26]">
+                  <span className="flex items-center gap-1 text-[12px] font-medium" style={{ color: theme.textMain }}>
                     {t.name}
                     {settings.appTheme === t.key && <CircleCheck className="h-3.5 w-3.5" style={{ color: t.accent }} />}
                   </span>
@@ -239,12 +262,6 @@ export function MeTab({
             <PreviewText />
           </div>
           <ReaderSettingsSheet onClose={() => setTypoOpen(false)} />
-        </div>
-      )}
-
-      {toast && (
-        <div className="pointer-events-none absolute inset-x-0 top-16 z-[60] flex justify-center">
-          <span className="rounded-full bg-black/75 px-4 py-2 text-[13px] text-white backdrop-blur">{toast}</span>
         </div>
       )}
     </div>

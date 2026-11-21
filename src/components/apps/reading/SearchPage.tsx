@@ -10,6 +10,7 @@ import { Search, X, Pause, Play, Loader2 } from 'lucide-react';
 import { useReading } from '@/lib/reading/store';
 import {
   api,
+  coverSrc,
   CoverPlaceholder,
   themeOf,
   type SearchBookItem,
@@ -114,6 +115,7 @@ export function SearchPage({
   };
 
   const list = useMemo(() => [...groups.values()].sort((a, b) => b.books.length - a.books.length), [groups]);
+  const glass = { background: theme.cardBg, boxShadow: 'inset 0 0 0 1px ' + theme.cardRing } as const;
 
   return (
     <div className="flex h-full flex-col">
@@ -121,8 +123,8 @@ export function SearchPage({
       {/* 搜索条 */}
       <div className="flex gap-2 px-4 pb-3">
         <div
-          className="flex h-11 min-w-0 flex-1 items-center gap-2 rounded-full px-4 ring-1 backdrop-blur-xl"
-          style={{ background: theme.cardBg, ['--tw-ring-color' as string]: theme.cardRing }}
+          className="flex h-11 min-w-0 flex-1 items-center gap-2 rounded-full px-4 backdrop-blur-xl"
+          style={glass}
         >
           <Search className="h-[18px] w-[18px] shrink-0" style={{ color: theme.textSub }} strokeWidth={2.2} />
           <input
@@ -146,7 +148,7 @@ export function SearchPage({
           type="button"
           onClick={() => void runSearch(kw)}
           className="h-11 shrink-0 rounded-full px-5 text-[14px] font-semibold text-white shadow-md active:scale-95"
-          style={{ background: `linear-gradient(135deg, ${theme.gradFrom}, ${theme.gradTo})` }}
+          style={{ background: `linear-gradient(135deg, ${theme.gradFrom}, ${theme.gradTo})`, boxShadow: `0 6px 18px ${theme.accent}44` }}
         >
           搜索
         </button>
@@ -171,13 +173,13 @@ export function SearchPage({
               key={g.key}
               type="button"
               onClick={() => onOpenBook(b0, b0.sourceId || '')}
-              className="mb-2.5 flex w-full items-center gap-3 rounded-2xl p-3 text-left ring-1 backdrop-blur-xl active:scale-[0.99]"
-              style={{ background: theme.cardBg, ['--tw-ring-color' as string]: theme.cardRing }}
+              className="mb-2.5 flex w-full items-center gap-3 rounded-3xl p-3 text-left backdrop-blur-xl active:scale-[0.99]"
+              style={glass}
             >
               {b0.coverUrl ? (
-                <img src={b0.coverUrl} alt="" className="h-[68px] w-[50px] shrink-0 rounded-lg object-cover ring-1 ring-black/5" loading="lazy" referrerPolicy="no-referrer" />
+                <img src={coverSrc(b0.coverUrl, b0.sourceId)} alt="" className="h-[68px] w-[50px] shrink-0 rounded-lg object-cover shadow-sm ring-1 ring-black/5" loading="lazy" referrerPolicy="no-referrer" />
               ) : (
-                <CoverPlaceholder name={g.name} className="h-[68px] w-[50px] shrink-0" radius="rounded-lg" />
+                <CoverPlaceholder name={g.name} author={g.author} className="h-[68px] w-[50px] shrink-0 shadow-sm" radius="rounded-lg" />
               )}
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2">
@@ -216,8 +218,8 @@ export function SearchPage({
       {(running || searched > 0) && (
         <div className="pointer-events-none absolute inset-x-0 bottom-3 z-20 flex justify-center px-6">
           <div
-            className="pointer-events-auto flex h-11 items-center gap-3 rounded-full px-5 shadow-[0_8px_24px_rgba(0,0,0,0.12)] ring-1 backdrop-blur-2xl"
-            style={{ background: theme.barBg, ['--tw-ring-color' as string]: theme.cardRing }}
+            className="pointer-events-auto flex h-11 items-center gap-3 rounded-full px-5 backdrop-blur-2xl"
+            style={{ background: theme.barBg, boxShadow: `inset 0 0 0 1px ${theme.cardRing}, 0 8px 24px rgba(0,0,0,0.12)` }}
           >
             {running ? (
               <>

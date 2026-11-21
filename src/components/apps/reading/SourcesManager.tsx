@@ -114,6 +114,7 @@ export function SourcesManager({ onBack }: { onBack: () => void }) {
   };
 
   const card = { background: theme.cardBg, boxShadow: 'inset 0 0 0 1px ' + theme.cardRing } as const;
+  const sheetStyle = { background: theme.pageBg, boxShadow: `inset 0 0 0 1px ${theme.cardRing}, 0 -12px 48px rgba(0,0,0,0.18)` } as const;
   const enabledCount = sources.filter((s) => s.enabled).length;
 
   return (
@@ -141,8 +142,8 @@ export function SourcesManager({ onBack }: { onBack: () => void }) {
           <button
             type="button"
             onClick={() => setAddOpen(true)}
-            className="flex h-11 flex-1 items-center justify-center gap-2 rounded-2xl text-[14px] font-semibold text-white shadow-lg active:scale-95"
-            style={{ background: `linear-gradient(135deg, ${theme.gradFrom}, ${theme.gradTo})` }}
+            className="flex h-11 flex-1 items-center justify-center gap-2 rounded-full text-[14px] font-semibold text-white shadow-lg active:scale-95"
+            style={{ background: `linear-gradient(135deg, ${theme.gradFrom}, ${theme.gradTo})`, boxShadow: `0 6px 18px ${theme.accent}44` }}
           >
             <Plus className="h-[18px] w-[18px]" /> 添加书源
           </button>
@@ -150,17 +151,30 @@ export function SourcesManager({ onBack }: { onBack: () => void }) {
             type="button"
             onClick={() => void resetBuiltin()}
             aria-label="恢复内置"
-            className="flex h-11 w-11 items-center justify-center rounded-2xl ring-1 backdrop-blur-xl active:scale-90"
+            className="flex h-11 w-11 items-center justify-center rounded-full backdrop-blur-xl active:scale-90"
             style={{ ...card, color: theme.textMain }}
           >
             <RotateCcw className="h-[18px] w-[18px]" />
           </button>
         </div>
 
-        {/* 统计行 */}
-        <p className="mb-2 mt-4 px-1 text-[13px]" style={{ color: theme.textSub }}>
-          共 {sources.length} 个书源 · 启用 {enabledCount} 个
-        </p>
+        {/* 统计胶囊 */}
+        <div className="mt-4 flex gap-2.5">
+          {[
+            { n: sources.length, label: '书源总数' },
+            { n: enabledCount, label: '已启用' },
+            { n: sources.filter((x) => x.checkStatus === 'ok').length, label: '实测可用' },
+          ].map((s2) => (
+            <div key={s2.label} className="flex-1 rounded-2xl py-2.5 text-center backdrop-blur-xl" style={card}>
+              <p className="text-[19px] font-bold tabular-nums" style={{ color: theme.accent }}>
+                {s2.n}
+              </p>
+              <p className="mt-0.5 text-[11px]" style={{ color: theme.textSub }}>
+                {s2.label}
+              </p>
+            </div>
+          ))}
+        </div>
 
         {/* 书源列表 */}
         <div className="overflow-hidden rounded-3xl" style={card}>
@@ -232,7 +246,7 @@ export function SourcesManager({ onBack }: { onBack: () => void }) {
       {addOpen && (
         <div className="absolute inset-0 z-40" role="dialog" aria-label="添加书源">
           <button type="button" aria-label="关闭" className="absolute inset-0 bg-black/35" onClick={() => setAddOpen(false)} />
-          <div className="absolute inset-x-0 bottom-0 max-h-[85%] overflow-y-auto rounded-t-3xl p-5 pb-[max(20px,env(safe-area-inset-bottom))] shadow-2xl" style={{ background: theme.pageBg }}>
+          <div className="absolute inset-x-0 bottom-0 max-h-[85%] overflow-y-auto overscroll-contain rounded-t-3xl p-5 pb-[max(20px,env(safe-area-inset-bottom))] shadow-2xl backdrop-blur-2xl" style={sheetStyle}>
             <div className="mb-4 flex items-center justify-between">
               <p className="text-[16px] font-bold" style={{ color: theme.textMain }}>
                 添加书源
@@ -258,8 +272,8 @@ export function SourcesManager({ onBack }: { onBack: () => void }) {
                 type="button"
                 disabled={!jsonText.trim() || importing}
                 onClick={() => void doImport({ action: 'importJson', json: jsonText })}
-                className="mt-2 h-10 w-full rounded-xl text-[14px] font-semibold text-white disabled:opacity-40"
-                style={{ background: theme.accent }}
+                className="mt-2 h-10 w-full rounded-full text-[14px] font-semibold text-white disabled:opacity-40"
+                style={{ background: `linear-gradient(135deg, ${theme.gradFrom}, ${theme.gradTo})` }}
               >
                 {importing ? '导入中…' : '导入'}
               </button>
@@ -281,8 +295,8 @@ export function SourcesManager({ onBack }: { onBack: () => void }) {
                 type="button"
                 disabled={!urlText.trim() || importing}
                 onClick={() => void doImport({ action: 'importUrl', url: urlText })}
-                className="mt-2 h-10 w-full rounded-xl text-[14px] font-semibold text-white disabled:opacity-40"
-                style={{ background: theme.accent }}
+                className="mt-2 h-10 w-full rounded-full text-[14px] font-semibold text-white disabled:opacity-40"
+                style={{ background: `linear-gradient(135deg, ${theme.gradFrom}, ${theme.gradTo})` }}
               >
                 {importing ? '拉取中…' : '导入'}
               </button>

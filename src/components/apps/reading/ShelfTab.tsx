@@ -1,12 +1,13 @@
 'use client';
 
 /**
- * 书架 Tab：大标题 + 圆形操作钮 + 分组胶囊 + 3列网格书籍卡（封面/未读角标/进度）
+ * 书架 Tab：大标题 + 圆形操作钮 + 分组胶囊 + 3列网格书籍卡
+ * （真实封面走代理防防盗链 / 未读角标 / 进度 / 长按管理删除）
  */
 import { useMemo, useState } from 'react';
-import { Search, EllipsisVertical, Plus, Trash2 } from 'lucide-react';
+import { Search, EllipsisVertical, Plus, Trash2, BookOpen } from 'lucide-react';
 import { useReading } from '@/lib/reading/store';
-import { CoverPlaceholder, themeOf, type ShelfBookItem } from './shared';
+import { coverSrc, CoverPlaceholder, themeOf, type ShelfBookItem } from './shared';
 
 export function ShelfTab({
   onOpen,
@@ -24,6 +25,7 @@ export function ShelfTab({
 
   const groups = useMemo(() => ['全部', ...new Set(shelf.map((b) => b.sourceName || '未知'))], [shelf]);
   const list = group === '全部' ? shelf : shelf.filter((b) => (b.sourceName || '未知') === group);
+  const glass = { background: theme.cardBg, boxShadow: 'inset 0 0 0 1px ' + theme.cardRing } as const;
 
   return (
     <div className="px-4">
@@ -36,19 +38,23 @@ export function ShelfTab({
             type="button"
             onClick={onSearch}
             aria-label="搜索"
-            className="flex h-11 w-11 items-center justify-center rounded-full ring-1 backdrop-blur-xl active:scale-90"
-            style={{ background: theme.cardBg, color: theme.textMain, ['--tw-ring-color' as string]: theme.cardRing }}
+            className="flex h-11 w-11 items-center justify-center rounded-full backdrop-blur-xl active:scale-90"
+            style={{ ...glass, color: theme.textMain }}
           >
             <Search className="h-5 w-5" strokeWidth={2.2} />
           </button>
           <button
             type="button"
             onClick={() => setManage((m) => !m)}
-            aria-label="管理"
-            className="flex h-11 w-11 items-center justify-center rounded-full ring-1 backdrop-blur-xl active:scale-90"
-            style={{ background: theme.cardBg, color: theme.textMain, ['--tw-ring-color' as string]: theme.cardRing }}
+            aria-label={manage ? '完成' : '管理'}
+            className={`flex h-11 items-center justify-center rounded-full px-4 text-[13px] font-semibold backdrop-blur-xl active:scale-95 ${manage ? 'text-white' : ''}`}
+            style={
+              manage
+                ? { background: `linear-gradient(135deg, ${theme.gradFrom}, ${theme.gradTo})` }
+                : { ...glass, color: theme.textMain }
+            }
           >
-            <EllipsisVertical className="h-5 w-5" strokeWidth={2.2} />
+            {manage ? '完成' : <EllipsisVertical className="h-5 w-5" strokeWidth={2.2} />}
           </button>
         </div>
       </div>
@@ -60,12 +66,12 @@ export function ShelfTab({
             key={g}
             type="button"
             onClick={() => setGroup(g)}
-            className="h-8 shrink-0 rounded-full px-4 text-[13px] font-medium ring-1 backdrop-blur-xl active:scale-95"
-            style={{
-              background: g === group ? theme.accent : theme.cardBg,
-              color: g === group ? '#fff' : theme.textMain,
-              ['--tw-ring-color' as string]: theme.cardRing,
-            }}
+            className={`h-8 shrink-0 rounded-full px-4 text-[13px] font-medium backdrop-blur-xl active:scale-95 ${g === group ? 'text-white' : ''}`}
+            style={
+              g === group
+                ? { background: `linear-gradient(135deg, ${theme.gradFrom}, ${theme.gradTo})`, boxShadow: `0 4px 14px ${theme.accent}44` }
+                : { ...glass, color: theme.textMain }
+            }
           >
             {g}
           </button>
@@ -75,7 +81,7 @@ export function ShelfTab({
       {list.length === 0 ? (
         <div className="mt-24 flex flex-col items-center gap-4">
           <div
-            className="flex h-20 w-20 items-center justify-center rounded-3xl"
+            className="flex h-20 w-20 items-center justify-center rounded-full"
             style={{ background: theme.accentSoft, color: theme.accent }}
           >
             <Plus className="h-9 w-9" strokeWidth={2} />
@@ -86,8 +92,8 @@ export function ShelfTab({
           <button
             type="button"
             onClick={onSearch}
-            className="rounded-full px-6 py-2.5 text-[14px] font-semibold text-white shadow-lg active:scale-95"
-            style={{ background: theme.accent, boxShadow: `0 6px 20px ${theme.accent}55` }}
+            className="rounded-full px-6 py-2.5 text-[14px] font-semibold text-white active:scale-95"
+            style={{ background: `linear-gradient(135deg, ${theme.gradFrom}, ${theme.gradTo})`, boxShadow: `0 6px 20px ${theme.accent}55` }}
           >
             去找书
           </button>
@@ -96,15 +102,23 @@ export function ShelfTab({
         <div className="mt-4 grid grid-cols-3 gap-x-3 gap-y-5">
           {list.map((b) => {
             const unread = Math.max(0, b.totalChapters - b.lastReadChapter - 1);
+            const cover = coverSrc(b.coverUrl, b.sourceId);
             return (
               <div key={b.bookUrl} className="relative">
                 <button type="button" onClick={() => onOpen(b)} className="w-full text-left active:scale-95">
-                  <div className="relative aspect-[3/4.2] w-full overflow-hidden rounded-xl shadow-[0_4px_14px_rgba(0,0,0,0.10)] ring-1 ring-black/5">
-                    {b.coverUrl ? (
-                          <img src={b.coverUrl} alt={b.name} className="h-full w-full object-cover" loading="lazy" referrerPolicy="no-referrer" />
+                  <div className="relative aspect-[3/4.2] w-full overflow-hidden rounded-xl shadow-[0_6px_18px_rgba(0,0,0,0.12)] ring-1 ring-black/5">
+                    {cover ? (
+                      <img src={cover} alt={`${b.name} 封面`} className="h-full w-full object-cover" loading="lazy" referrerPolicy="no-referrer" />
                     ) : (
-                      <CoverPlaceholder name={b.name} className="h-full w-full" radius="rounded-none" />
+                      <CoverPlaceholder name={b.name} author={b.author} className="h-full w-full" radius="rounded-none" />
                     )}
+                    {/* 阅读进度玻璃胶囊 */}
+                    <span
+                      className="absolute left-1 top-1 rounded-full px-1.5 py-0.5 text-[9px] font-semibold text-white backdrop-blur-md"
+                      style={{ background: 'rgba(0,0,0,0.38)' }}
+                    >
+                      {b.lastReadChapter + 1}/{b.totalChapters}
+                    </span>
                     {unread > 0 && (
                       <span className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/70 to-transparent px-1.5 pb-1 pt-4 text-[10px] font-medium text-white">
                         {unread}章未读
@@ -129,8 +143,9 @@ export function ShelfTab({
                   <p className="mt-1.5 truncate text-[13px] font-semibold" style={{ color: theme.textMain }}>
                     {b.name}
                   </p>
-                  <p className="truncate text-[11px]" style={{ color: theme.textSub }}>
-                    {b.lastReadChapter + 1}/{b.totalChapters}章
+                  <p className="flex items-center gap-0.5 truncate text-[11px]" style={{ color: theme.textSub }}>
+                    <BookOpen className="h-3 w-3 shrink-0" />
+                    {b.sourceName || '未知源'}
                   </p>
                 </button>
               </div>

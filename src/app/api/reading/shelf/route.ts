@@ -11,6 +11,8 @@ export const dynamic = 'force-dynamic';
  *     { action:'progress', bookUrl, chapter, chapterTitle }  更新阅读进度
  *     { action:'remove', bookUrl }   移出书架
  *     { action:'updateToc', bookUrl, chapters, lastChapter }  刷新目录缓存（检查更新用）
+ *     { action:'switchSource', name, author, book }  换源：按书名+作者找到书架记录，
+ *         迁移到新书源（sourceId/sourceName/bookUrl/目录），保留阅读进度
  */
 export async function GET() {
   const books = await db.shelfBook.findMany({
@@ -135,6 +137,66 @@ export async function POST(req: NextRequest) {
             totalChapters: chapters.length,
             lastChapterTitle: chapters[chapters.length - 1].title,
           },
+        });
+      }
+      return NextResponse.json({ ok: true });
+    }
+    if (action === 'switchSource') {
+      // 书籍详情页「换源」：按书名+作者找到书架中的书，整体迁到新源（进度章节下标保留，
+      // 阅读器打开时按章节标题映射回新目录；不在书架则普通入库）
+      const name = String(body.name || '').trim();
+      const author = body.author ? String(body.author).trim() : '';
+      const b = (body.book || {}) as Record<string, unknown>;
+      const newBookUrl = String(b.bookUrl || '');
+      if (!name || !newBookUrl) return NextResponse.json({ error: '参数缺失' }, { status: 400 });
+      const chapters = Array.isArray(b.chapters) ? (b.chapters as { title: string; url: string }[]) : [];
+      const all = await db.shelfBook.findMany({ where: { name } });
+      const target =
+        all.find((x) => (x.author || '').trim() === author && x.bookUrl !== newBookUrl) || null;
+      if (target) {
+        // 旧记录换到新源；同名新源已存在记录则删除旧的避免重复
+        await db.shelfBook.update({
+          where: { id: target.id },
+          data: {
+            sourceId: String(b.sourceId || ''),
+            sourceName: b.sourceName ? String(b.sourceName) : null,
+            bookUrl: newBookUrl,
+            coverUrl: b.coverUrl ? String(b.coverUrl) : target.coverUrl,
+            chapters: JSON.stringify(chapters),
+            totalChapters: chapters.length,
+            lastChapterTitle: chapters.length ? chapters[chapters.length - 1].title : null,
+            lastReadAt: new Date(),
+          },
+        });
+      } else {
+        await db.shelfBook.upsert({
+          where: { bookUrl: newBookUrl },
+          update: {
+            sourceId: String(b.sourceId || ''),
+            sourceName: b.sourceName ? String(b.sourceName) : null,
+            chapters: JSON.stringify(chapters),
+            totalChapters: chapters.length,
+          },
+          create: {
+            name,
+            author: author || null,
+            coverUrl: b.coverUrl ? String(b.coverUrl) : null,
+            intro: b.intro ? String(b.intro) : null,
+            sourceId: String(b.sourceId || ''),
+            sourceName: b.sourceName ? String(b.sourceName) : null,
+            bookUrl: newBookUrl,
+            chapters: JSON.stringify(chapters),
+            totalChapters: chapters.length,
+            lastChapterTitle: chapters.length ? chapters[chapters.length - 1].title : null,
+          },
+        });
+      }
+      // 清理可能残留的同名旧记录（不同 bookUrl）
+      const dups = await db.shelfBook.findMany({ where: { name } });
+      const keep = dups.find((x) => x.bookUrl === newBookUrl);
+      if (keep && dups.length > 1) {
+        await db.shelfBook.deleteMany({
+          where: { name, id: { not: keep.id } },
         });
       }
       return NextResponse.json({ ok: true });

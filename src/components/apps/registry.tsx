@@ -674,6 +674,7 @@ const APP_IMPORTERS: Record<AppId, () => Promise<unknown>> = {
   couple: () => import('./couple-space'),
   cottage: () => import('./cottage'),
   forum: () => import('./forum/forum'),
+  reading: () => import('./reading/ReadingApp'),
 };
 
 /** 预载指定 App 的 chunk（幂等、失败静默）：图标按下/悬停时调用 */

@@ -22,7 +22,8 @@
  * - 超时 12s、最多 3 次重定向、失败抛中文错误
  */
 import * as cheerio from 'cheerio';
-import type { CheerioAPI, AnyNode } from 'cheerio';
+import type { CheerioAPI } from 'cheerio';
+import type { AnyNode } from 'domhandler';
 import iconv from 'iconv-lite';
 
 
@@ -144,6 +145,7 @@ export interface RuleSearch {
   lastChapter?: string;
   checkKeyWord?: string;
   wordCount?: string;
+  [k: string]: unknown;
 }
 export interface RuleBookInfo {
   name?: string;
@@ -155,6 +157,7 @@ export interface RuleBookInfo {
   tocUrl?: string;
   wordCount?: string;
   canReName?: string;
+  [k: string]: unknown;
 }
 export interface RuleToc {
   chapterList?: string;
@@ -163,6 +166,7 @@ export interface RuleToc {
   isVip?: string;
   isVolume?: string;
   nextTocUrl?: string;
+  [k: string]: unknown;
 }
 export interface RuleContent {
   content?: string;
@@ -170,6 +174,7 @@ export interface RuleContent {
   replaceRegex?: string;
   webJs?: string;
   sourceRegex?: string;
+  [k: string]: unknown;
 }
 export interface LegadoSource {
   bookSourceName: string;
@@ -663,7 +668,7 @@ export function evalList(ctx: Ctx, rule: string | undefined): Ctx[] {
       if (m) {
         const [, tag, an, av] = m;
         const sel = an ? `${tag}[${an}="${av}"]` : tag;
-        const els = (ctx.el ? ctx.$.find(sel) : ctx.$(sel)).toArray();
+        const els = (ctx.el ? ctx.$(ctx.el).find(sel) : ctx.$(sel)).toArray();
         if (els.length) return pick(els.map((e) => ({ kind: 'html', $: ctx.$, el: e, pageUrl: ctx.pageUrl }) as Ctx));
       }
       continue;

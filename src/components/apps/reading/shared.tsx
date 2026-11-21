@@ -11,6 +11,11 @@
 import { clsx } from 'clsx';
 
 // ---------------------------------------------------------------------------
+// 全局常量：手机状态栏高度（StatusBar 覆盖层高 54px，页面顶部需预留）
+// ---------------------------------------------------------------------------
+export const SB_H = 54;
+
+// ---------------------------------------------------------------------------
 // 排版设置类型（与 /api/reading/settings 对齐）
 // ---------------------------------------------------------------------------
 export interface ReaderSettings {
@@ -91,9 +96,9 @@ export const APP_THEMES: Record<string, AppTheme> = {
     gradFrom: '#7EC3FF',
     gradTo: '#2274F0',
     pageBg: '#F2F5FA',
-    cardBg: 'rgba(255,255,255,0.72)',
+    cardBg: 'rgba(255,255,255,0.58)',
     cardRing: 'rgba(34,116,240,0.10)',
-    barBg: 'rgba(255,255,255,0.72)',
+    barBg: 'rgba(255,255,255,0.62)',
     textMain: '#1A1D26',
     textSub: '#8A909C',
   },
@@ -105,9 +110,9 @@ export const APP_THEMES: Record<string, AppTheme> = {
     gradFrom: '#B9A4FF',
     gradTo: '#7C5CFC',
     pageBg: '#F4F2FB',
-    cardBg: 'rgba(255,255,255,0.72)',
+    cardBg: 'rgba(255,255,255,0.58)',
     cardRing: 'rgba(124,92,252,0.10)',
-    barBg: 'rgba(255,255,255,0.72)',
+    barBg: 'rgba(255,255,255,0.62)',
     textMain: '#1B1A26',
     textSub: '#8B889C',
   },
@@ -119,9 +124,9 @@ export const APP_THEMES: Record<string, AppTheme> = {
     gradFrom: '#3A4A6B',
     gradTo: '#1E2740',
     pageBg: '#12141C',
-    cardBg: 'rgba(30,33,46,0.72)',
+    cardBg: 'rgba(30,33,46,0.66)',
     cardRing: 'rgba(255,255,255,0.07)',
-    barBg: 'rgba(22,24,34,0.78)',
+    barBg: 'rgba(22,24,34,0.72)',
     textMain: '#E8EAF2',
     textSub: '#7A7F90',
   },
@@ -133,9 +138,9 @@ export const APP_THEMES: Record<string, AppTheme> = {
     gradFrom: '#FFB6D2',
     gradTo: '#EC5E9C',
     pageBg: '#FBF3F7',
-    cardBg: 'rgba(255,255,255,0.72)',
+    cardBg: 'rgba(255,255,255,0.58)',
     cardRing: 'rgba(236,94,156,0.10)',
-    barBg: 'rgba(255,255,255,0.72)',
+    barBg: 'rgba(255,255,255,0.62)',
     textMain: '#261A22',
     textSub: '#9C8894',
   },
@@ -147,9 +152,9 @@ export const APP_THEMES: Record<string, AppTheme> = {
     gradFrom: '#7DDFC0',
     gradTo: '#10A37F',
     pageBg: '#F1F8F5',
-    cardBg: 'rgba(255,255,255,0.72)',
+    cardBg: 'rgba(255,255,255,0.58)',
     cardRing: 'rgba(16,163,127,0.10)',
-    barBg: 'rgba(255,255,255,0.72)',
+    barBg: 'rgba(255,255,255,0.62)',
     textMain: '#182521',
     textSub: '#87968F',
   },
@@ -383,17 +388,32 @@ export const api = {
     }).then((r) => j<Record<string, unknown>>(r)),
 };
 
-/** 封面占位（渐变+书名首字） */
-export function CoverPlaceholder({ name, className, radius = 'rounded-[10px]' }: { name: string; className?: string; radius?: string }) {
+/** 封面代理：防盗链/跨域封面统一走服务端抓取（/api/reading/cover），带书源头 Referer */
+export function coverSrc(url?: string | null, sid?: string): string | undefined {
+  if (!url) return undefined;
+  if (url.startsWith('data:') || url.startsWith('/')) return url;
+  const q = new URLSearchParams({ u: url });
+  if (sid) q.set('sid', sid);
+  return `/api/reading/cover?${q.toString()}`;
+}
+
+/** 封面占位（书脊风：渐变底 + 书脊高光 + 书名竖排区） */
+export function CoverPlaceholder({ name, author, className, radius = 'rounded-[10px]' }: { name: string; author?: string | null; className?: string; radius?: string }) {
   return (
     <div
-      className={clsx('relative flex items-center justify-center overflow-hidden bg-gradient-to-br from-[#B9D4FF] to-[#5D8DEE]', radius, className)}
+      className={clsx('relative flex overflow-hidden bg-gradient-to-br from-[#9CC3F8] via-[#6E9BEE] to-[#3E6FD9]', radius, className)}
       aria-hidden="true"
     >
-      <span className="select-none px-1 text-center text-[13px] font-bold leading-tight text-white drop-shadow-[0_1px_2px_rgba(0,0,0,0.25)] line-clamp-3">
-        {name.slice(0, 6)}
-      </span>
-      <span className="absolute inset-x-0 bottom-0 h-1/3 bg-gradient-to-t from-black/20 to-transparent" />
+      {/* 书脊高光 */}
+      <span className="absolute inset-y-0 left-0 w-[14%] bg-gradient-to-r from-black/25 to-transparent" />
+      <span className="absolute inset-y-0 left-[14%] w-px bg-white/30" />
+      <div className="relative flex h-full w-full flex-col items-center justify-center gap-1.5 px-2 py-2">
+        <span className="line-clamp-3 text-center text-[13px] font-bold leading-tight text-white drop-shadow-[0_1px_3px_rgba(0,0,0,0.35)]">
+          {name}
+        </span>
+        {author && <span className="line-clamp-1 text-center text-[10px] font-medium text-white/80">{author}</span>}
+      </div>
+      <span className="absolute inset-x-0 bottom-0 h-1/3 bg-gradient-to-t from-black/25 to-transparent" />
     </div>
   );
 }
@@ -405,6 +425,124 @@ export function findStartIndex(chapters: TocItem[]): number {
     if (re.test(chapters[i].title.trim())) return i;
   }
   return 0;
+}
+
+/** 章节标题归一化（去空格/全角符号，用于换源后的进度映射） */
+function normTitle(t: string): string {
+  return t.replace(/[\s·、，。：:，·\-—_=+*/\\|.,!?！？"'“”‘’()（）\[\]【】<>《》~～#@%^&$]/g, '').toLowerCase();
+}
+
+/** 换源后进度映射：旧章节标题 → 新目录下标（精确 → 包含 → 原下标截断） */
+export function matchChapterIndex(newChapters: TocItem[], oldTitle: string | null | undefined, oldIdx: number): number {
+  if (!newChapters.length) return 0;
+  if (!oldTitle) return Math.min(oldIdx, newChapters.length - 1);
+  const nt = normTitle(oldTitle);
+  let hit = newChapters.findIndex((c) => normTitle(c.title) === nt);
+  if (hit < 0) hit = newChapters.findIndex((c) => normTitle(c.title).includes(nt) || nt.includes(normTitle(c.title)));
+  return hit >= 0 ? hit : Math.min(oldIdx, newChapters.length - 1);
+}
+
+// ---------------------------------------------------------------------------
+// 首页精选书单 · 真实封面（搜索书源取封面图，localStorage 缓存 7 天）
+// ---------------------------------------------------------------------------
+const FEATURED_COVER_KEY = 'rd-featured-cover-v1';
+const FEATURED_COVER_TTL = 7 * 24 * 3600_000;
+
+interface CoverEntry {
+  url: string;
+  sid: string;
+  t: number;
+}
+type CoverCache = Record<string, CoverEntry>;
+
+function readCoverCache(): CoverCache {
+  try {
+    return JSON.parse(localStorage.getItem(FEATURED_COVER_KEY) || '{}') as CoverCache;
+  } catch {
+    return {};
+  }
+}
+function writeCoverEntry(name: string, e: CoverEntry) {
+  try {
+    const c = readCoverCache();
+    c[name] = e;
+    localStorage.setItem(FEATURED_COVER_KEY, JSON.stringify(c));
+  } catch {
+    /* 忽略 */
+  }
+}
+
+/** 最近成功供图的源（优先再试，避开死源反复超时） */
+let goodCoverSourceId = '';
+/** 已确认无结果的源（本轮会话内不再首发尝试） */
+const deadCoverSources = new Set<string>();
+
+/** 为一本书取真实封面：并发试前几个启用书源，谁先返回带封面的结果用谁 */
+export async function fetchBookCover(
+  name: string,
+  author: string,
+  sources: SourceItem[],
+  timeoutMs = 6000,
+): Promise<{ url: string; sid: string } | null> {
+  const ranked = [
+    ...sources.filter((s) => s.id === goodCoverSourceId),
+    ...sources.filter((s) => s.id !== goodCoverSourceId && !deadCoverSources.has(s.id)),
+  ];
+  const cands = ranked.slice(0, 5);
+  if (!cands.length) return null;
+  return new Promise((resolve) => {
+    let settled = false;
+    let pending = cands.length;
+    const timer = setTimeout(() => {
+      if (!settled) {
+        settled = true;
+        resolve(null);
+      }
+    }, timeoutMs);
+    for (const src of cands) {
+      api
+        .searchOne(name, src.id)
+        .then((r) => {
+          if (settled) return;
+          const books = r.books || [];
+          const norm = (s: string) => s.replace(/\s+/g, '');
+          const hit =
+            books.find((b) => norm(b.name) === norm(name) && b.coverUrl) ||
+            books.find((b) => norm(b.name).includes(norm(name)) && b.coverUrl) ||
+            books.find((b) => b.coverUrl);
+          if (hit?.coverUrl) {
+            settled = true;
+            clearTimeout(timer);
+            goodCoverSourceId = hit.sourceId || src.id;
+            writeCoverEntry(name, { url: hit.coverUrl, sid: hit.sourceId || src.id, t: Date.now() });
+            resolve({ url: hit.coverUrl, sid: hit.sourceId || src.id });
+          } else {
+            deadCoverSources.add(src.id);
+            if (--pending <= 0) {
+              settled = true;
+              clearTimeout(timer);
+              resolve(null);
+            }
+          }
+        })
+        .catch(() => {
+          deadCoverSources.add(src.id);
+          if (!settled && --pending <= 0) {
+            settled = true;
+            clearTimeout(timer);
+            resolve(null);
+          }
+        });
+    }
+    void author;
+  });
+}
+
+/** 读缓存的有效封面（无网络场景秒开） */
+export function cachedCover(name: string): { url: string; sid: string } | null {
+  const e = readCoverCache()[name];
+  if (e && Date.now() - e.t < FEATURED_COVER_TTL) return { url: e.url, sid: e.sid };
+  return null;
 }
 
 /** 压缩图片为 dataURL（自定义背景上传用） */

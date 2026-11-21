@@ -1,14 +1,21 @@
 'use client';
 
 /**
- * 首页 Tab：胶囊搜索条 + 分类胶囊标签 + 精选书单横滑卡 + 继续阅读卡
- * 风格参照截图：白/浅底大留白、全圆角胶囊、蓝色主色点缀
+ * 首页 Tab：胶囊搜索条 + 分类胶囊标签 + 精选书单横滑卡（真实封面，懒加载+缓存）
+ * + 继续阅读卡。玻璃毛玻璃风格：磨砂卡片 + 主题光斑透出 + 全圆角胶囊。
  */
-import { useMemo } from 'react';
-import { Search, Clock3, ChevronRight } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { Search, Clock3, ChevronRight, Flame } from 'lucide-react';
 import { useReading } from '@/lib/reading/store';
-import { FEATURED, themeOf, type ShelfBookItem } from './shared';
-import type { SubPage } from './ReadingApp';
+import {
+  FEATURED,
+  cachedCover,
+  coverSrc,
+  fetchBookCover,
+  themeOf,
+  type ShelfBookItem,
+  type SourceItem,
+} from './shared';
 
 const CATEGORIES = Object.keys(FEATURED);
 
@@ -21,8 +28,43 @@ export function HomeTab({
 }) {
   const settings = useReading((s) => s.settings);
   const shelf = useReading((s) => s.shelf);
+  const sources = useReading((s) => s.sources);
   const theme = useMemo(() => themeOf(settings.appTheme), [settings.appTheme]);
   const recent = shelf[0];
+
+  // 精选书真实封面（缓存秒显 + 后台逐本补齐；并发 2，避免压垮书源）
+  const [covers, setCovers] = useState<Record<string, string>>(() => {
+    const init: Record<string, string> = {};
+    for (const cat of CATEGORIES) for (const b of FEATURED[cat]) {
+      const c = cachedCover(b.name);
+      if (c) init[b.name] = coverSrc(c.url, c.sid) as string;
+    }
+    return init;
+  });
+
+  useEffect(() => {
+    let alive = true;
+    const enabled = sources.filter((s) => s.enabled);
+    if (!enabled.length) return;
+    const all = CATEGORIES.flatMap((cat) => FEATURED[cat]);
+    const missing = all.filter((b) => !cachedCover(b.name));
+    if (!missing.length) return;
+    let i = 0;
+    const worker = async () => {
+      while (i < missing.length && alive) {
+        const b = missing[i++];
+        const got = cachedCover(b.name) || (await fetchBookCover(b.name, b.author, enabled));
+        if (got && alive) setCovers((prev) => ({ ...prev, [b.name]: coverSrc(got.url, got.sid) as string }));
+      }
+    };
+    void worker();
+    void worker();
+    return () => {
+      alive = false;
+    };
+  }, [sources]);
+
+  const glass = { background: theme.cardBg, boxShadow: 'inset 0 0 0 1px ' + theme.cardRing } as const;
 
   return (
     <div className="px-4 pb-8">
@@ -30,30 +72,35 @@ export function HomeTab({
       <button
         type="button"
         onClick={() => onSearch()}
-        className="flex h-11 w-full items-center gap-2 rounded-full px-4 text-left backdrop-blur-xl ring-1 transition-transform active:scale-[0.98]"
-        style={{ background: theme.cardBg, color: theme.textSub, boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.4)', ['--tw-ring-color' as string]: theme.cardRing }}
+        className="flex h-11 w-full items-center gap-2 rounded-full px-4 text-left backdrop-blur-xl transition-transform active:scale-[0.98]"
+        style={glass}
       >
-        <Search className="h-[18px] w-[18px]" strokeWidth={2.2} />
-        <span className="text-[15px]">搜索书名、作者…</span>
+        <Search className="h-[18px] w-[18px]" strokeWidth={2.2} style={{ color: theme.textSub }} />
+        <span className="text-[15px]" style={{ color: theme.textSub }}>
+          搜索书名、作者…
+        </span>
       </button>
 
       {/* Banner：渐变玻璃横幅 */}
       <div
-        className="relative mt-4 overflow-hidden rounded-3xl p-5 shadow-[0_10px_30px_rgba(34,116,240,0.18)]"
-        style={{ background: `linear-gradient(135deg, ${theme.gradFrom}, ${theme.gradTo})` }}
+        className="relative mt-4 overflow-hidden rounded-3xl p-5"
+        style={{
+          background: `linear-gradient(135deg, ${theme.gradFrom}, ${theme.gradTo})`,
+          boxShadow: `0 12px 32px ${theme.accent}33`,
+        }}
       >
         <div className="absolute -right-6 -top-8 h-32 w-32 rounded-full bg-white/25 blur-2xl" aria-hidden="true" />
         <div className="absolute -bottom-10 left-10 h-24 w-24 rounded-full bg-white/20 blur-xl" aria-hidden="true" />
         <div className="relative">
-          <p className="text-[13px] font-medium tracking-wide text-white/85">免费书源聚合阅读</p>
-          <p className="mt-1 text-[22px] font-bold leading-snug text-white">
-            全网好书 一搜即得
+          <p className="flex items-center gap-1.5 text-[13px] font-medium tracking-wide text-white/85">
+            <Flame className="h-3.5 w-3.5" /> 免费书源聚合阅读
           </p>
+          <p className="mt-1 text-[22px] font-bold leading-snug text-white">全网好书 一搜即得</p>
           <p className="mt-1 text-[12px] text-white/75">AI 伴读 · 换源追更 · 排版随心</p>
           <button
             type="button"
             onClick={() => onSearch()}
-            className="mt-3 rounded-full bg-white/90 px-4 py-1.5 text-[13px] font-semibold shadow-sm active:scale-95"
+            className="mt-3 rounded-full bg-white/90 px-4 py-1.5 text-[13px] font-semibold shadow-sm backdrop-blur active:scale-95"
             style={{ color: theme.accent }}
           >
             开始找书
@@ -66,11 +113,11 @@ export function HomeTab({
         <button
           type="button"
           onClick={() => onOpenShelfBook(recent)}
-          className="mt-4 flex w-full items-center gap-3 rounded-2xl p-3.5 text-left ring-1 backdrop-blur-xl active:scale-[0.99]"
-          style={{ background: theme.cardBg, ['--tw-ring-color' as string]: theme.cardRing }}
+          className="mt-4 flex w-full items-center gap-3 rounded-3xl p-3.5 text-left backdrop-blur-xl active:scale-[0.99]"
+          style={glass}
         >
           <div
-            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl"
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full"
             style={{ background: theme.accentSoft, color: theme.accent }}
           >
             <Clock3 className="h-5 w-5" strokeWidth={2.2} />
@@ -94,15 +141,19 @@ export function HomeTab({
             key={c}
             type="button"
             onClick={() => onSearch(FEATURED[c][0]?.name)}
-            className="h-8 shrink-0 rounded-full px-4 text-[13px] font-medium ring-1 backdrop-blur-xl active:scale-95"
-            style={{ background: c === '热门' ? theme.accent : theme.cardBg, color: c === '热门' ? '#fff' : theme.textMain, ['--tw-ring-color' as string]: theme.cardRing }}
+            className={`h-8 shrink-0 rounded-full px-4 text-[13px] font-medium backdrop-blur-xl active:scale-95 ${c === '热门' ? 'text-white' : ''}`}
+            style={
+              c === '热门'
+                ? { background: `linear-gradient(135deg, ${theme.gradFrom}, ${theme.gradTo})`, boxShadow: `0 4px 14px ${theme.accent}44` }
+                : { ...glass, color: theme.textMain }
+            }
           >
             {c}
           </button>
         ))}
       </div>
 
-      {/* 精选书单 */}
+      {/* 精选书单（真实封面） */}
       {CATEGORIES.slice(1).map((cat) => (
         <section key={cat} className="mt-5">
           <div className="mb-2.5 flex items-center justify-between">
@@ -126,16 +177,23 @@ export function HomeTab({
                 onClick={() => onSearch(b.name)}
                 className="w-[86px] shrink-0 text-left active:scale-95"
               >
-                <div
-                  className="flex h-[122px] w-[86px] flex-col items-center justify-center gap-1.5 rounded-xl bg-gradient-to-br p-2 ring-1 ring-black/5"
-                  style={{ backgroundImage: `linear-gradient(140deg, ${theme.gradFrom}44, ${theme.gradTo}88)` }}
-                >
-                  <span className="line-clamp-3 text-center text-[13px] font-bold leading-tight" style={{ color: theme.textMain }}>
-                    {b.name}
-                  </span>
-                  <span className="rounded-full bg-white/60 px-2 py-0.5 text-[10px] font-medium" style={{ color: theme.accent }}>
-                    {b.tag}
-                  </span>
+                <div className="relative aspect-[3/4.2] w-full overflow-hidden rounded-xl shadow-[0_6px_18px_rgba(0,0,0,0.14)] ring-1 ring-black/5">
+                  {covers[b.name] ? (
+                    <img src={covers[b.name]} alt={`${b.name} 封面`} className="h-full w-full object-cover" loading="lazy" referrerPolicy="no-referrer" />
+                  ) : (
+                    <div
+                      className="flex h-full w-full flex-col items-center justify-center gap-1.5 p-2"
+                      style={{ backgroundImage: `linear-gradient(150deg, ${theme.gradFrom}55, ${theme.gradTo}99)` }}
+                    >
+                      <span className="line-clamp-3 text-center text-[13px] font-bold leading-tight" style={{ color: '#fff' }}>
+                        {b.name}
+                      </span>
+                      <span className="rounded-full bg-white/60 px-2 py-0.5 text-[10px] font-medium" style={{ color: theme.accent }}>
+                        {b.tag}
+                      </span>
+                    </div>
+                  )}
+                  <span className="absolute inset-x-0 bottom-0 h-1/4 bg-gradient-to-t from-black/25 to-transparent" aria-hidden="true" />
                 </div>
                 <p className="mt-1.5 truncate text-[13px] font-semibold" style={{ color: theme.textMain }}>
                   {b.name}

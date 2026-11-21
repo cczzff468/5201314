@@ -94,8 +94,13 @@ export interface ChatBookCtx {
   totalChapters: number;
 }
 
-/** 拼装陪读上下文（全部走摘要，不塞正文） */
-async function buildChatContext(bookUrl: string, book: ChatBookCtx, persona?: string): Promise<LLMMessage[]> {
+/** 拼装陪读上下文（全部走摘要，不塞正文；persona=联系人人设、memoryBlock=记忆APP召回块） */
+async function buildChatContext(
+  bookUrl: string,
+  book: ChatBookCtx,
+  persona?: string,
+  memoryBlock?: string,
+): Promise<LLMMessage[]> {
   const remain = Math.max(0, book.totalChapters - book.currentChapter - 1);
   // 最近 3 章摘要（当前章 + 前两章）
   const summaries = await db.readingMemory.findMany({
@@ -135,7 +140,7 @@ async function buildChatContext(bookUrl: string, book: ChatBookCtx, persona?: st
   ].join('\n');
 
   const personaBlock = persona?.trim()
-    ? `你的角色人设（与手机里的 AI 助手同一人设，保持一致口吻）：\n${persona.trim().slice(0, 600)}`
+    ? `你的角色人设（你此刻以这个身份陪用户读书，全程保持一致口吻，不要跳出角色）：\n${persona.trim().slice(0, 900)}`
     : '你是「伴读书童」：博学温和、说话自然口语化，像一位一起追书的老友。';
 
   const sys: LLMMessage = {
@@ -143,6 +148,9 @@ async function buildChatContext(bookUrl: string, book: ChatBookCtx, persona?: st
     content: [
       '你是在手机「阅读App」里陪用户读小说的 AI 伴读。',
       personaBlock,
+      memoryBlock?.trim()
+        ? `【你对这段关系的长期记忆（来自记忆库，都是真实发生过的事）】\n${memoryBlock.trim().slice(0, 2200)}`
+        : '',
       '【读书上下文】',
       bookCard,
       otherBooks.length ? `【用户的其他在读书记录】\n${otherBooks.map((x) => `- ${x}`).join('\n')}` : '',
@@ -172,12 +180,13 @@ export async function companionChat(p: {
   book: ChatBookCtx;
   message: string;
   persona?: string;
+  memoryBlock?: string;
 }): Promise<string> {
   // 记住用户这条
   await db.readingMemory.create({
     data: { bookUrl: p.bookUrl, kind: 'chat', role: 'user', content: p.message.slice(0, 2000) },
   });
-  const messages = await buildChatContext(p.bookUrl, p.book, p.persona);
+  const messages = await buildChatContext(p.bookUrl, p.book, p.persona, p.memoryBlock);
   messages.push({ role: 'user', content: p.message.slice(0, 2000) });
   const reply = (await lightChat(messages, 700)) || '（伴读书童走神了，再说一次嘛）';
   await db.readingMemory.create({

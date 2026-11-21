@@ -3238,3 +3238,24 @@ Work Log:
 Stage Summary:
 - 阅读 App 完整上线：免费书源聚合阅读器 + AI 陪读 + 全套排版自定义，全部核心链路浏览器实测通过
 - 技术要点：后端代理抓取解决防盗链/CORS；AI摘要省Token；排版滑块实时预览（zustand本地即时+防抖落库）
+
+---
+Task ID: 5
+Agent: 主控 Agent（Z.ai Code）
+Task: 阅读 App 全面美化 + 换源/真实封面/滑动翻章/AI陪读选联系人/记忆App打通
+
+Work Log:
+- [状态栏修复] SB_H=54 常量；SubNavBar 顶栏加 paddingTop 预留（全部子页不再被状态栏遮挡）；阅读器顶部胶囊定位 top:SB_H+8、正文 paddingTop 含 SB_H
+- [AI陪读·先选联系人] AIChatSheet 重写为两阶段：①玻璃卡联系人选择器（内置「伴读书童」兜底 + 联系人列表带人设摘要 + 「上次陪读TA」一键继续卡）→ ②以该联系人身份陪读聊天；客户端组装人设（名字/性别/年龄/职业/地区/关系/性格/表达风格/背景/定制规则）随请求注入
+- [AI陪读·记忆App打通] MemApp/AccountApp 新增 'reading'（标签「阅读」，accounts 三处 Record 补键）；聊天前 memChatRecallBlock 召回该联系人跨App记忆注入、每轮回复后 memAddEventFragment 写记忆碎片（来源=阅读，互通开启时微信/QQ共享）；chat 路由/ai.ts 支持 persona+memoryBlock 参数
+- [阅读器] 左右滑动翻章（ref 跟手位移 + 64px 阈值 + 松手方向翻章动画 rd-flip-l/r + 跟手提示胶囊「上一章/下一章」；修复 onTouchEnd 闭包读到旧 state 的 bug——改 swipeDxRef 实时读）；顶部/底部悬浮毛玻璃胶囊工具栏（非通栏）；章节标题下加进度装饰线；章末「本章完·还剩N章」+ 胶囊按钮
+- [换源] 书籍详情新增「切换书源」卡：打开抽屉后台并行搜同名书（并发4、取10源）、当前源高亮、点按切换（matchChapterIndex 章节标题归一化映射进度，精确→包含→下标兜底）；shelf 新增 switchSource 动作（书架记录按书名+作者整体迁移到新源，进度保留，自动清理重复记录）
+- [真实封面] 新增 /api/reading/cover 服务端封面代理（伪装 Referer/UA 抓图二进制透传，长缓存）——搜索/书架/详情/AI聊天头卡全部走代理，防盗链封面不再 403；首页精选书单后台逐本抓真实封面（fetchBookCover 并发竞速 + 成功源偏好 + 失败源记忆 + localStorage 7天缓存），CoverPlaceholder 升级书脊风占位
+- [我Tab] 头卡「我的书屋」→「我的信息」；删除「清空AI陪读记忆」项；新增阅读统计胶囊三宫格；主题/排版抽屉玻璃化
+- [全局玻璃美化] 页面底加主题色径向光斑（三层）+ 对角渐变底、卡片透明度调优（浅色主题0.58）、全部卡片统一 inset ring + backdrop-blur、按钮全胶囊化（渐变实心主按钮）、抽屉全部圆角玻璃 + 顶部抓手条；排版设置面板主题感知（暗夜黑深色态）
+- [类型修复] 顺带修复预存类型错误：cheerio 1.x AnyNode 改从 domhandler 导入、XPath 分支 ctx.$(el).find 正确调用、Legado 规则接口加索引签名、appstore/registry 补 reading 键
+- [运维] dev server 期间 git stash 引发 SQLite 只读句柄（attempt to write a readonly database），重启 dev server 解决
+- [验证] Agent Browser 端到端：解锁→阅读App→书架3书真实封面→遮天阅读（正文+翻章动画）→左滑/右滑翻章双向 OK→AI伴读（选联系人苏晴→以人设回复、知道书名/章数/进度/摘要）→记忆App苏晴名下1条碎片（内容含陪读对话全文、来源徽章「阅读」）→聚合搜索4源分组→详情切换书源（夜天连→穿越小说 1861→1860章，书架迁移进度保留）→排版字号滑块实时预览 20→26px；VLM 截图评审：毛玻璃明显✓ 状态栏无遮挡✓ 美观度7.5/10；ESLint 0错误；tsc 阅读/记忆/账号模块 0错误
+
+Stage Summary:
+- 阅读 App v2：全界面毛玻璃胶囊玻璃风、真实封面代理、详情页换源保进度、阅读器滑动翻章、AI陪读先选联系人且记忆入「记忆」App（跨App互通）

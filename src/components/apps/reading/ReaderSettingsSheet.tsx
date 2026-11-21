@@ -16,10 +16,12 @@ import {
   themeOf,
 } from './shared';
 
-function Row({ label, children }: { label: string; children: React.ReactNode }) {
+type RdTheme = ReturnType<typeof themeOf>;
+
+function Row({ label, children, theme }: { label: string; children: React.ReactNode; theme: RdTheme }) {
   return (
     <div className="flex items-center gap-3 py-2">
-      <span className="w-[64px] shrink-0 text-[12px] text-[#6B7280]">{label}</span>
+      <span className="w-[64px] shrink-0 text-[12px]" style={{ color: theme.textSub }}>{label}</span>
       <div className="min-w-0 flex-1">{children}</div>
     </div>
   );
@@ -32,6 +34,7 @@ function Slider({
   step,
   onChange,
   format,
+  theme,
 }: {
   value: number;
   min: number;
@@ -39,6 +42,7 @@ function Slider({
   step: number;
   onChange: (v: number) => void;
   format?: (v: number) => string;
+  theme: RdTheme;
 }) {
   return (
     <div className="flex items-center gap-2">
@@ -49,23 +53,23 @@ function Slider({
         step={step}
         value={value}
         onChange={(e) => onChange(parseFloat(e.target.value))}
-        className="h-1.5 min-w-0 flex-1 cursor-pointer appearance-none rounded-full bg-black/10 accent-[#2274F0] [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-[#2274F0]"
+        className="h-1.5 min-w-0 flex-1 cursor-pointer appearance-none rounded-full bg-black/10 [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:border-2 [&::-webkit-slider-thumb]:border-white"
+        style={{ accentColor: theme.accent, ['--tw-shadow' as string]: theme.accent }}
       />
-      <span className="w-[44px] shrink-0 text-right text-[11px] tabular-nums text-[#8A909C]">
+      <span className="w-[44px] shrink-0 text-right text-[11px] tabular-nums" style={{ color: theme.textSub }}>
         {format ? format(value) : value}
       </span>
     </div>
   );
 }
 
-function Chip({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
+function Chip({ active, onClick, children, theme }: { active: boolean; onClick: () => void; children: React.ReactNode; theme: RdTheme }) {
   return (
     <button
       type="button"
       onClick={onClick}
-      className={`h-8 shrink-0 rounded-full px-3.5 text-[12px] font-medium transition-all active:scale-95 ${
-        active ? 'bg-[#2274F0] text-white shadow-[0_3px_10px_rgba(34,116,240,0.35)]' : 'bg-black/[0.05] text-[#3A3F4B]'
-      }`}
+      className="h-8 shrink-0 rounded-full px-3.5 text-[12px] font-medium transition-all active:scale-95"
+      style={active ? { background: `linear-gradient(135deg, ${theme.gradFrom}, ${theme.gradTo})`, color: '#fff', boxShadow: `0 3px 10px ${theme.accent}44` } : { background: 'rgba(120,128,140,0.12)', color: theme.textMain }}
     >
       {children}
     </button>
@@ -76,6 +80,7 @@ export function ReaderSettingsSheet({ onClose }: { onClose: () => void }) {
   const settings = useReading((s) => s.settings);
   const patch = useReading((s) => s.patchSettings);
   const theme = themeOf(settings.appTheme);
+  const dark = settings.appTheme === 'midnight';
   const bgInputRef = useRef<HTMLInputElement>(null);
   const fontInputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState('');
@@ -112,83 +117,98 @@ export function ReaderSettingsSheet({ onClose }: { onClose: () => void }) {
 
   return (
     <div className="absolute inset-0 z-40" role="dialog" aria-label="排版设置">
-      <button type="button" aria-label="关闭设置" className="absolute inset-0 bg-black/30" onClick={onClose} />
-      <div className="absolute inset-x-0 bottom-0 max-h-[86%] overflow-y-auto overscroll-contain rounded-t-3xl bg-[#FFFFFF] shadow-2xl">
-        <div className="sticky top-0 z-10 flex items-center justify-between rounded-t-3xl bg-white/90 px-5 pb-2 pt-4 backdrop-blur-xl">
-          <p className="text-[16px] font-bold text-[#1A1D26]">排版设置</p>
+      <button type="button" aria-label="关闭设置" className="absolute inset-0 bg-black/30 backdrop-blur-[2px]" onClick={onClose} />
+      <div
+        className="absolute inset-x-0 bottom-0 max-h-[86%] overflow-y-auto overscroll-contain rounded-t-3xl shadow-2xl backdrop-blur-2xl"
+        style={{
+          background: dark ? 'rgba(18,20,28,0.96)' : 'rgba(255,255,255,0.94)',
+          boxShadow: `inset 0 0 0 1px ${theme.cardRing}, 0 -12px 48px rgba(0,0,0,0.2)`,
+        }}
+      >
+        <div
+          className="sticky top-0 z-10 flex items-center justify-between rounded-t-3xl px-5 pb-2 pt-4 backdrop-blur-xl"
+          style={{ background: dark ? 'rgba(18,20,28,0.85)' : 'rgba(255,255,255,0.85)' }}
+        >
+          <p className="text-[16px] font-bold" style={{ color: theme.textMain }}>
+            排版设置
+          </p>
           <button type="button" onClick={onClose} aria-label="关闭" className="flex h-8 w-8 items-center justify-center rounded-full bg-black/[0.05] active:scale-90">
-            <X className="h-4 w-4 text-[#3A3F4B]" />
+            <X className="h-4 w-4" style={{ color: theme.textMain }} />
           </button>
         </div>
-        <p className="px-5 pb-1 text-[11px] text-[#9CA3AF]">所有调整实时生效 · 自动保存</p>
+        <p className="px-5 pb-1 text-[11px]" style={{ color: theme.textSub }}>
+          所有调整实时生效 · 自动保存
+        </p>
 
         <div className="px-5 pb-[max(20px,env(safe-area-inset-bottom))]">
           {/* 字号 */}
-          <Row label="字号">
-            <Slider value={settings.fontSize} min={12} max={32} step={1} onChange={(v) => patch({ fontSize: v })} format={(v) => `${v}px`} />
+          <Row theme={theme} label="字号">
+            <Slider theme={theme} value={settings.fontSize} min={12} max={32} step={1} onChange={(v) => patch({ fontSize: v })} format={(v) => `${v}px`} />
           </Row>
           {/* 字重 */}
-          <Row label="字重">
+          <Row theme={theme} label="字重">
             <div className="flex gap-2">
               {FONT_WEIGHTS.map((w) => (
-                <Chip key={w.key} active={settings.fontWeight === w.key} onClick={() => patch({ fontWeight: w.key })}>
+                <Chip theme={theme} key={w.key} active={settings.fontWeight === w.key} onClick={() => patch({ fontWeight: w.key })}>
                   <span style={{ fontWeight: w.css }}>{w.name}</span>
                 </Chip>
               ))}
             </div>
           </Row>
           {/* 字体 */}
-          <Row label="字体">
+          <Row theme={theme} label="字体">
             <div className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
               {BUILTIN_FONTS.map((f) => (
-                <Chip key={f.key} active={settings.fontFamily === f.key} onClick={() => patch({ fontFamily: f.key })}>
+                <Chip theme={theme} key={f.key} active={settings.fontFamily === f.key} onClick={() => patch({ fontFamily: f.key })}>
                   <span style={{ fontFamily: f.css }}>{f.name}</span>
                 </Chip>
               ))}
-              <Chip active={settings.fontFamily === 'custom'} onClick={() => fontInputRef.current?.click()}>
+              <Chip theme={theme} active={settings.fontFamily === 'custom'} onClick={() => fontInputRef.current?.click()}>
                 {settings.fontCustom ? '我的字体✓' : '上传字体'}
               </Chip>
             </div>
             <input ref={fontInputRef} type="file" accept=".ttf,.otf,.woff,.woff2" className="hidden" onChange={(e) => void onUploadFont(e.target.files?.[0])} />
           </Row>
-          {uploading === 'font' && <p className="pl-[76px] text-[11px] text-[#2274F0]">字体上传中…</p>}
+          {uploading === 'font' && <p className="pl-[76px] text-[11px]" style={{ color: theme.accent }}>字体上传中…</p>}
           {uploading === 'fontErr' && <p className="pl-[76px] text-[11px] text-[#E05252]">仅支持 ttf/otf/woff/woff2 字体文件</p>}
 
           {/* 间距滑块组 */}
-          <div className="mt-2 rounded-2xl bg-[#F6F7F9] p-3.5">
-            <Row label="行间距">
-              <Slider value={settings.lineSpacing} min={1.2} max={3} step={0.05} onChange={(v) => patch({ lineSpacing: v })} format={(v) => v.toFixed(2)} />
+          <div className="mt-2 rounded-2xl p-3.5"
+          style={{ background: dark ? 'rgba(255,255,255,0.05)' : 'rgba(120,128,140,0.07)' }}>
+            <Row theme={theme} label="行间距">
+              <Slider theme={theme} value={settings.lineSpacing} min={1.2} max={3} step={0.05} onChange={(v) => patch({ lineSpacing: v })} format={(v) => v.toFixed(2)} />
             </Row>
-            <Row label="段间距">
-              <Slider value={settings.paraSpacing} min={0} max={2.5} step={0.05} onChange={(v) => patch({ paraSpacing: v })} format={(v) => v.toFixed(2)} />
+            <Row theme={theme} label="段间距">
+              <Slider theme={theme} value={settings.paraSpacing} min={0} max={2.5} step={0.05} onChange={(v) => patch({ paraSpacing: v })} format={(v) => v.toFixed(2)} />
             </Row>
-            <Row label="字间距">
-              <Slider value={settings.letterSpacing} min={-0.5} max={4} step={0.1} onChange={(v) => patch({ letterSpacing: v })} format={(v) => `${v.toFixed(1)}px`} />
+            <Row theme={theme} label="字间距">
+              <Slider theme={theme} value={settings.letterSpacing} min={-0.5} max={4} step={0.1} onChange={(v) => patch({ letterSpacing: v })} format={(v) => `${v.toFixed(1)}px`} />
             </Row>
           </div>
 
           {/* 页边距 */}
-          <div className="mt-2 rounded-2xl bg-[#F6F7F9] p-3.5">
-            <Row label="左边距">
-              <Slider value={settings.marginLeft} min={0} max={16} step={0.5} onChange={(v) => patch({ marginLeft: v })} format={(v) => `${v}vw`} />
+          <div className="mt-2 rounded-2xl p-3.5"
+          style={{ background: dark ? 'rgba(255,255,255,0.05)' : 'rgba(120,128,140,0.07)' }}>
+            <Row theme={theme} label="左边距">
+              <Slider theme={theme} value={settings.marginLeft} min={0} max={16} step={0.5} onChange={(v) => patch({ marginLeft: v })} format={(v) => `${v}vw`} />
             </Row>
-            <Row label="右边距">
-              <Slider value={settings.marginRight} min={0} max={16} step={0.5} onChange={(v) => patch({ marginRight: v })} format={(v) => `${v}vw`} />
+            <Row theme={theme} label="右边距">
+              <Slider theme={theme} value={settings.marginRight} min={0} max={16} step={0.5} onChange={(v) => patch({ marginRight: v })} format={(v) => `${v}vw`} />
             </Row>
-            <Row label="上边距">
-              <Slider value={settings.marginTop} min={0} max={14} step={0.5} onChange={(v) => patch({ marginTop: v })} format={(v) => `${v}vh`} />
+            <Row theme={theme} label="上边距">
+              <Slider theme={theme} value={settings.marginTop} min={0} max={14} step={0.5} onChange={(v) => patch({ marginTop: v })} format={(v) => `${v}vh`} />
             </Row>
-            <Row label="下边距">
-              <Slider value={settings.marginBottom} min={0} max={14} step={0.5} onChange={(v) => patch({ marginBottom: v })} format={(v) => `${v}vh`} />
+            <Row theme={theme} label="下边距">
+              <Slider theme={theme} value={settings.marginBottom} min={0} max={14} step={0.5} onChange={(v) => patch({ marginBottom: v })} format={(v) => `${v}vh`} />
             </Row>
           </div>
 
           {/* 标题位置 */}
-          <Row label="标题">
+          <Row theme={theme} label="标题">
             <div className="flex gap-2">
-              <Chip active={settings.titlePosition === 'left'} onClick={() => patch({ titlePosition: 'left' })}>居左</Chip>
-              <Chip active={settings.titlePosition === 'center'} onClick={() => patch({ titlePosition: 'center' })}>居中</Chip>
-              <Chip active={settings.titlePosition === 'hidden'} onClick={() => patch({ titlePosition: 'hidden' })}>隐藏</Chip>
+              <Chip theme={theme} active={settings.titlePosition === 'left'} onClick={() => patch({ titlePosition: 'left' })}>居左</Chip>
+              <Chip theme={theme} active={settings.titlePosition === 'center'} onClick={() => patch({ titlePosition: 'center' })}>居中</Chip>
+              <Chip theme={theme} active={settings.titlePosition === 'hidden'} onClick={() => patch({ titlePosition: 'hidden' })}>隐藏</Chip>
             </div>
           </Row>
 
@@ -205,9 +225,10 @@ export function ReaderSettingsSheet({ onClose }: { onClose: () => void }) {
                 onClick={() => patch({ [key]: !settings[key] } as Partial<typeof settings>)}
                 className="flex w-full items-center justify-between rounded-xl px-1 py-2.5 active:scale-[0.99]"
               >
-                <span className="text-[14px] text-[#1A1D26]">{label}</span>
+                <span className="text-[14px]" style={{ color: theme.textMain }}>{label}</span>
                 <span
-                  className={`flex h-[26px] w-[44px] items-center rounded-full px-0.5 transition-colors ${settings[key] ? 'justify-end bg-[#2274F0]' : 'justify-start bg-black/[0.12]'}`}
+                  className={`flex h-[26px] w-[44px] items-center rounded-full px-0.5 transition-colors ${settings[key] ? 'justify-end' : 'justify-start bg-black/[0.12]'}`}
+                style={settings[key] ? { background: `linear-gradient(135deg, ${theme.gradFrom}, ${theme.gradTo})` } : undefined}
                 >
                   <span className={`h-[22px] w-[22px] rounded-full bg-white shadow transition-transform ${settings[key] ? '' : ''}`} />
                 </span>
@@ -217,7 +238,7 @@ export function ReaderSettingsSheet({ onClose }: { onClose: () => void }) {
 
           {/* 阅读背景 */}
           <div className="mt-3">
-            <p className="mb-2 text-[12px] text-[#6B7280]">阅读背景</p>
+            <p className="mb-2 text-[12px]" style={{ color: theme.textSub }}>阅读背景</p>
             <div className="flex flex-wrap gap-2.5">
               {READ_BGS.map((b) => (
                 <button
@@ -243,8 +264,9 @@ export function ReaderSettingsSheet({ onClose }: { onClose: () => void }) {
               <button
                 type="button"
                 onClick={() => bgInputRef.current?.click()}
-                className="relative h-11 w-16 overflow-hidden rounded-xl bg-[#F2F3F5] ring-2 transition-transform active:scale-95"
+                className="relative h-11 w-16 overflow-hidden rounded-xl ring-2 transition-transform active:scale-95"
                 style={{
+                  background: dark ? 'rgba(255,255,255,0.08)' : '#F2F3F5',
                   ['--tw-ring-color' as string]: settings.bgTheme === 'custom' ? theme.accent : 'rgba(0,0,0,0.06)',
                   ...(settings.bgCustom && settings.bgTheme === 'custom'
                     ? { background: `center/cover url(${settings.bgCustom})` }
@@ -253,7 +275,7 @@ export function ReaderSettingsSheet({ onClose }: { onClose: () => void }) {
                 aria-label="自定义背景"
               >
                 {!settings.bgCustom && (
-                  <span className="flex h-full w-full flex-col items-center justify-center gap-0.5 text-[#8A909C]">
+                  <span className="flex h-full w-full flex-col items-center justify-center gap-0.5" style={{ color: theme.textSub }}>
                     <Upload className="h-3.5 w-3.5" />
                     <span className="text-[9px]">上传</span>
                   </span>
@@ -264,7 +286,7 @@ export function ReaderSettingsSheet({ onClose }: { onClose: () => void }) {
               </button>
               <input ref={bgInputRef} type="file" accept="image/*" className="hidden" onChange={(e) => void onUploadBg(e.target.files?.[0])} />
             </div>
-            {uploading === 'bg' && <p className="mt-1.5 text-[11px] text-[#2274F0]">背景上传中…</p>}
+            {uploading === 'bg' && <p className="mt-1.5 text-[11px]" style={{ color: theme.accent }}>背景上传中…</p>}
           </div>
         </div>
       </div>
