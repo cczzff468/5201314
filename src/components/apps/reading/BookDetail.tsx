@@ -1,12 +1,30 @@
 'use client';
 
 /**
- * 书籍详情页：封面+信息+简介+操作按钮（开始阅读/加入书架）+ 目录抽屉
- * + 【换源】同书多源切换：后台并行搜出本书在各书源的结果，底部玻璃抽屉列出，
- *   点按即切换（进度按章节标题映射保留；书架记录同步迁移到新源，不丢进度）
+ * 书籍详情页（iOS 现代阅读 App 风格，参照用户设计图）：
+ * - 顶部：封面模糊放大背景 + 渐变淡出到页面底色；半透明圆形返回按钮
+ * - 头区：封面（大圆角）+ 书名/作者/分类胶囊（共N章 · 读到第x章/未开始 · 换源）
+ * - 功能卡：缓存（预取后 20 章正文）/ 换源 / 听书（Web Speech 朗读）/ 分享
+ * - 目录卡：最新章节（「最新」胶囊）+ 最近章节 + 查看完整目录
+ * - 简介卡（可展开收起）
+ * - 底部固定操作栏：加入书架（点击才入架）+ 开始阅读/继续阅读（续读到章节+页码）
+ * - 【换源】同书多源切换：并行搜出各书源结果，底部玻璃抽屉点按切换（进度按章节标题映射）
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { BookOpen, Plus, Check, ArrowDownUp, RefreshCw, Loader2, Repeat2, Wifi } from 'lucide-react';
+import {
+  BookOpen,
+  Plus,
+  Check,
+  ArrowDownUp,
+  RefreshCw,
+  Loader2,
+  Repeat2,
+  ChevronLeft,
+  Download,
+  Headphones,
+  Share2,
+  Square,
+} from 'lucide-react';
 import {
   api,
   CoverPlaceholder,
@@ -17,7 +35,7 @@ import {
   type BookDetailData,
   type SearchBookItem,
 } from './shared';
-import { SubNavBar, type SubPage } from './ReadingApp';
+import type { SubPage } from './ReadingApp';
 import { useReading } from '@/lib/reading/store';
 
 type ReaderPage = Extract<SubPage, { kind: 'reader' }>;
@@ -56,12 +74,17 @@ export function BookDetail({
   const [tocReverse, setTocReverse] = useState(false);
   const [inShelf, setInShelf] = useState(false);
   const [switching, setSwitching] = useState(false);
+  const [introOpen, setIntroOpen] = useState(false);
+  const [toast, setToast] = useState('');
 
   // 换源抽屉
   const [srcOpen, setSrcOpen] = useState(false);
   const [candidates, setCandidates] = useState<SourceCandidate[]>([]);
   const [srcSearching, setSrcSearching] = useState(false);
   const srcSearchedRef = useRef(false);
+
+  // 听书（Web Speech）
+  const [speaking, setSpeaking] = useState(false);
 
   const name = data?.name || curBook.name;
   const author = data?.author || curBook.author || '';
@@ -87,6 +110,13 @@ export function BookDetail({
 
   const shelfEntry = shelf.find((b) => b.bookUrl === curBook.bookUrl);
   const readIdx = data?.lastReadChapter ?? shelfEntry?.lastReadChapter ?? 0;
+  const readPage = data?.lastPage ?? shelfEntry?.lastPage ?? 0;
+  const started = readIdx > 0 || readPage > 0;
+
+  const notify = (t: string) => {
+    setToast(t);
+    setTimeout(() => setToast(''), 2200);
+  };
 
   // ------------------------------------------------------------------
   // 换源候选发现：打开换源抽屉时后台并行搜（书名+作者），仅收同名结果
@@ -177,6 +207,7 @@ export function BookDetail({
       author: data.author || author,
       coverUrl: curBook.coverUrl,
       startIndex: idx,
+      startPage: idx === readIdx ? readPage : 0,
     });
   };
 
@@ -185,6 +216,7 @@ export function BookDetail({
     if (inShelf) {
       await api.shelfAction({ action: 'remove', bookUrl: curBook.bookUrl }).catch(() => null);
       setInShelf(false);
+      notify('已移出书架');
     } else {
       await api
         .shelfAction({
@@ -202,6 +234,66 @@ export function BookDetail({
         })
         .catch(() => null);
       setInShelf(true);
+      notify('已加入书架');
+    }
+    void loadShelf();
+  };
+
+  /** 缓存：预取当前章之后 20 章正文（后台静默，ChapterCache 落库） */
+  const cacheChapters = async () => {
+    if (!data) return;
+    notify('正在后台缓存后续 20 章…');
+    const from = readIdx > 0 ? readIdx : findStartIndex(data.chapters);
+    const to = Math.min(data.total, from + 20);
+    let ok = 0;
+    for (let i = from; i < to; i++) {
+      const c = data.chapters[i];
+      if (!c) break;
+      try {
+        await api.chapter(curSourceId, c.url, curBook.bookUrl, i, c.title);
+        ok++;
+      } catch {
+        /* 单章失败继续 */
+      }
+    }
+    notify(`缓存完成：${ok} 章（离线可读）`);
+  };
+
+  /** 听书：Web Speech 朗读简介 + 前两段（简单可用；再点停止） */
+  const toggleSpeech = () => {
+    if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
+      notify('当前浏览器不支持听书');
+      return;
+    }
+    if (speaking) {
+      window.speechSynthesis.cancel();
+      setSpeaking(false);
+      return;
+    }
+    const paras = (data?.intro || `${name}，${author} 著。`).split(/\s+/).slice(0, 6).join('。');
+    const u = new SpeechSynthesisUtterance(`${name}。${paras}`);
+    u.lang = 'zh-CN';
+    u.rate = 1;
+    u.onend = () => setSpeaking(false);
+    u.onerror = () => setSpeaking(false);
+    window.speechSynthesis.cancel();
+    window.speechSynthesis.speak(u);
+    setSpeaking(true);
+    notify('开始朗读简介（进正文后可继续用）');
+  };
+
+  /** 分享：优先系统分享，降级剪贴板 */
+  const shareBook = async () => {
+    const text = `《${name}》${author ? ` - ${author}` : ''} · 来自阅读App（书源：${curBook.sourceName}）`;
+    try {
+      if (navigator.share) {
+        await navigator.share({ title: name, text });
+        return;
+      }
+      await navigator.clipboard.writeText(text);
+      notify('书摘已复制到剪贴板');
+    } catch {
+      notify('分享取消');
     }
   };
 
@@ -212,25 +304,55 @@ export function BookDetail({
 
   const cover = coverSrc(data?.coverUrl || curBook.coverUrl, curSourceId);
   const glass = { background: theme.cardBg, boxShadow: 'inset 0 0 0 1px ' + theme.cardRing } as const;
+  /** 最近 3 章（倒序显示） */
+  const recentChapters = useMemo(() => {
+    if (!data) return [];
+    const start = findStartIndex(data.chapters);
+    const arr: { c: (typeof data.chapters)[number]; i: number }[] = [];
+    for (let i = Math.min(data.total - 1, start + Math.max(readIdx, 0) + 2); i >= start && arr.length < 3; i--) {
+      const c = data.chapters[i];
+      if (c) arr.push({ c, i });
+    }
+    return arr.reverse();
+  }, [data, readIdx]);
 
   return (
-    <div className="flex h-full flex-col">
-      <SubNavBar
-        title={name}
-        onBack={onBack}
-        theme={theme}
-        right={
-          <button
-            type="button"
-            onClick={() => setReloadKey((k) => k + 1)}
-            aria-label="刷新"
-            className="flex h-10 w-10 items-center justify-center rounded-full active:scale-90"
-            style={{ color: theme.textMain }}
-          >
-            <RefreshCw className="h-[18px] w-[18px]" />
-          </button>
-        }
-      />
+    <div className="relative flex h-full flex-col" style={{ background: theme.pageBg }}>
+      {/* 顶部封面模糊放大背景（渐变淡出到页面底色） */}
+      <div className="pointer-events-none absolute inset-x-0 top-0 h-[42%] overflow-hidden" aria-hidden="true">
+        {cover ? (
+          <img src={cover} alt="" className="h-full w-full scale-125 object-cover blur-2xl" referrerPolicy="no-referrer" />
+        ) : (
+          <div className="h-full w-full" style={{ background: `linear-gradient(150deg, ${theme.gradFrom}, ${theme.gradTo})` }} />
+        )}
+        <div
+          className="absolute inset-0"
+          style={{ background: `linear-gradient(180deg, rgba(0,0,0,0.18) 0%, rgba(0,0,0,0.05) 42%, ${theme.pageBg}ec 88%, ${theme.pageBg} 100%)` }}
+        />
+      </div>
+
+      {/* 顶栏：半透明圆形返回按钮 + 刷新（毛玻璃胶囊） */}
+      <div className="relative z-20 flex h-[52px] shrink-0 items-center justify-between px-4" style={{ paddingTop: 54 }}>
+        <button
+          type="button"
+          onClick={onBack}
+          aria-label="返回"
+          className="-ml-1 flex h-10 w-10 items-center justify-center rounded-full backdrop-blur-xl active:scale-90"
+          style={{ background: 'rgba(0,0,0,0.28)', color: '#fff', boxShadow: 'inset 0 0 0 1px rgba(255,255,255,0.18)' }}
+        >
+          <ChevronLeft className="h-6 w-6" strokeWidth={2.4} />
+        </button>
+        <button
+          type="button"
+          onClick={() => setReloadKey((k) => k + 1)}
+          aria-label="刷新"
+          className="flex h-10 w-10 items-center justify-center rounded-full backdrop-blur-xl active:scale-90"
+          style={{ background: 'rgba(0,0,0,0.28)', color: '#fff', boxShadow: 'inset 0 0 0 1px rgba(255,255,255,0.18)' }}
+        >
+          <RefreshCw className="h-[17px] w-[17px]" />
+        </button>
+      </div>
+
       {!data && !err && (
         <div className="flex flex-1 items-center justify-center">
           <Loader2 className="h-7 w-7 animate-spin" style={{ color: theme.accent }} />
@@ -252,134 +374,212 @@ export function BookDetail({
         </div>
       )}
       {data && (
-        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-8">
-          {/* 信息头卡 */}
-          <div className="flex gap-4 rounded-3xl p-4 ring-1 backdrop-blur-xl" style={glass}>
+        <div className="relative z-10 min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-[118px]">
+          {/* 头区：封面 + 书籍信息（压在模糊背景上） */}
+          <div className="flex gap-4 pt-2">
             {cover ? (
               <img
                 src={cover}
                 alt={`${name} 封面`}
-                className="h-[136px] w-[100px] shrink-0 rounded-xl object-cover shadow-lg ring-1 ring-black/5"
+                className="h-[150px] w-[110px] shrink-0 rounded-2xl object-cover shadow-[0_14px_36px_rgba(0,0,0,0.28)] ring-1 ring-white/25"
                 referrerPolicy="no-referrer"
               />
             ) : (
-              <CoverPlaceholder name={name} author={author} className="h-[136px] w-[100px] shrink-0 shadow-lg" />
+              <CoverPlaceholder name={name} author={author} className="h-[150px] w-[110px] shrink-0 shadow-[0_14px_36px_rgba(0,0,0,0.28)]" radius="rounded-2xl" />
             )}
             <div className="min-w-0 flex-1 pt-1">
-              <h1 className="text-[20px] font-bold leading-snug" style={{ color: theme.textMain }}>
+              <h1 className="text-[21px] font-bold leading-snug text-white drop-shadow-[0_1px_6px_rgba(0,0,0,0.35)]">
                 {name}
               </h1>
-              <p className="mt-1 text-[13px]" style={{ color: theme.textSub }}>
+              <p className="mt-1 text-[13px] font-medium text-white/90 drop-shadow-[0_1px_4px_rgba(0,0,0,0.3)]">
                 {author || '佚名'}
               </p>
-              <p className="mt-2 text-[12px]" style={{ color: theme.textSub }}>
-                共 {data.total} 章{data.lastChapter ? ` · 最新：${data.lastChapter.slice(0, 14)}` : ''}
+              <p className="mt-1 text-[12px] text-white/75 drop-shadow-[0_1px_4px_rgba(0,0,0,0.3)]">
+                {curBook.kind ? curBook.kind.replace('分类：', '') : '小说'}
               </p>
-              <span
-                className="mt-2 inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-medium"
-                style={{ background: theme.accentSoft, color: theme.accent }}
+              <div className="mt-2.5 flex flex-wrap gap-1.5">
+                <span className="rounded-full bg-white/25 px-2.5 py-1 text-[11px] font-medium text-white backdrop-blur-md">共 {data.total} 章</span>
+                <span className="rounded-full bg-white/25 px-2.5 py-1 text-[11px] font-medium text-white backdrop-blur-md">
+                  {started ? `读到第 ${readIdx + 1} 章` : '未开始'}
+                </span>
+              </div>
+              {/* 换源胶囊（同书多源） */}
+              <button
+                type="button"
+                onClick={() => setSrcOpen(true)}
+                className="mt-2 flex items-center gap-1.5 rounded-full bg-white/25 px-3 py-1.5 text-[12px] font-semibold text-white backdrop-blur-md active:scale-95"
               >
-                <Wifi className="h-3 w-3" /> {curBook.sourceName}
-              </span>
+                <Repeat2 className="h-3.5 w-3.5" /> {curBook.sourceName} · 换源
+              </button>
             </div>
           </div>
 
-          {/* 操作按钮 */}
-          <div className="mt-4 flex gap-2.5">
-            <button
-              type="button"
-              onClick={startReading}
-              className="flex h-12 flex-1 items-center justify-center gap-2 rounded-full text-[15px] font-semibold text-white shadow-lg active:scale-95"
-              style={{ background: `linear-gradient(135deg, ${theme.gradFrom}, ${theme.gradTo})`, boxShadow: `0 8px 24px ${theme.accent}44` }}
-            >
-              <BookOpen className="h-[18px] w-[18px]" />
-              {readIdx > 0 ? `继续读 · 第${readIdx + 1}章` : '开始阅读'}
-            </button>
-            <button
-              type="button"
-              onClick={() => void toggleShelf()}
-              aria-label={inShelf ? '移出书架' : '加入书架'}
-              className="flex h-12 w-12 items-center justify-center rounded-full ring-1 backdrop-blur-xl active:scale-90"
-              style={{ ...glass, color: inShelf ? theme.accent : theme.textMain }}
-            >
-              {inShelf ? <Check className="h-5 w-5" /> : <Plus className="h-5 w-5" />}
-            </button>
+          {/* 功能卡：缓存 / 换源 / 听书 / 分享 */}
+          <div className="mt-5 rounded-3xl p-4 backdrop-blur-xl" style={glass}>
+            <div className="grid grid-cols-4 gap-1">
+              {[
+                { icon: <Download className="h-[21px] w-[21px]" />, label: '缓存', onClick: () => void cacheChapters() },
+                { icon: <Repeat2 className="h-[21px] w-[21px]" />, label: '换源', onClick: () => setSrcOpen(true) },
+                {
+                  icon: speaking ? <Square className="h-[19px] w-[19px]" /> : <Headphones className="h-[21px] w-[21px]" />,
+                  label: speaking ? '停止' : '听书',
+                  onClick: toggleSpeech,
+                },
+                { icon: <Share2 className="h-[21px] w-[21px]" />, label: '分享', onClick: () => void shareBook() },
+              ].map((a) => (
+                <button
+                  key={a.label}
+                  type="button"
+                  onClick={a.onClick}
+                  className="flex flex-col items-center gap-1.5 rounded-2xl py-1.5 active:scale-95"
+                >
+                  <span className="flex h-11 w-11 items-center justify-center rounded-full" style={{ background: 'rgba(120,128,140,0.10)', color: theme.textMain }}>
+                    {a.icon}
+                  </span>
+                  <span className="text-[12px] font-medium" style={{ color: theme.textSub }}>
+                    {a.label}
+                  </span>
+                </button>
+              ))}
+            </div>
           </div>
 
-          {/* 简介卡 */}
-          {data.intro && (
-            <div className="mt-3 rounded-3xl p-4 ring-1 backdrop-blur-xl" style={glass}>
-              <p className="text-[13px] leading-relaxed" style={{ color: theme.textSub }}>
-                {data.intro.length > 160 ? `${data.intro.slice(0, 160)}…` : data.intro}
+          {/* 目录卡：最新 + 最近章节 + 查看完整目录（外层 div 避免嵌套 button） */}
+          <div
+            role="button"
+            tabIndex={0}
+            onClick={() => setTocOpen(true)}
+            onKeyDown={(e) => e.key === 'Enter' && setTocOpen(true)}
+            className="mt-3.5 block w-full cursor-pointer rounded-3xl p-4 text-left backdrop-blur-xl active:scale-[0.99]"
+            style={glass}
+          >
+            <div className="flex items-center justify-between">
+              <p className="text-[16px] font-bold" style={{ color: theme.textMain }}>
+                目录
+                <span className="ml-2 rounded-full px-2 py-0.5 align-middle text-[11px] font-semibold" style={{ background: theme.accentSoft, color: theme.accent }}>
+                  共 {data.total} 章
+                </span>
               </p>
+              <span className="flex items-center gap-0.5 text-[13px] font-medium" style={{ color: theme.accent }}>
+                完整目录 <ArrowDownUp className="h-4 w-4" />
+              </span>
+            </div>
+            <div className="mt-3 space-y-2">
+              {/* 最新章 */}
+              {data.chapters[data.total - 1] && (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setTocOpen(false);
+                    onRead({
+                      kind: 'reader',
+                      sourceId: curSourceId,
+                      bookUrl: curBook.bookUrl,
+                      name: data.name || name,
+                      author: data.author || author,
+                      coverUrl: curBook.coverUrl,
+                      startIndex: data.total - 1,
+                    });
+                  }}
+                  className="flex w-full items-center gap-2 text-left"
+                >
+                  <span className="shrink-0 rounded-full px-1.5 py-px text-[10px] font-semibold" style={{ background: theme.accentSoft, color: theme.accent }}>
+                    最新
+                  </span>
+                  <span className="truncate text-[14px] font-semibold" style={{ color: theme.textMain }}>
+                    {data.chapters[data.total - 1].title}
+                  </span>
+                </button>
+              )}
+              {recentChapters.map(({ c, i }) => (
+                <button
+                  key={c.url + i}
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setTocOpen(false);
+                    onRead({
+                      kind: 'reader',
+                      sourceId: curSourceId,
+                      bookUrl: curBook.bookUrl,
+                      name: data.name || name,
+                      author: data.author || author,
+                      coverUrl: curBook.coverUrl,
+                      startIndex: i,
+                    });
+                  }}
+                  className="flex w-full items-center gap-2 text-left"
+                >
+                  <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: theme.textSub, opacity: 0.5 }} />
+                  <span className="truncate text-[13px]" style={{ color: theme.textSub }}>
+                    {c.title}
+                  </span>
+                  {i === readIdx && (
+                    <span className="shrink-0 rounded-full px-1.5 py-px text-[9px] font-medium" style={{ background: theme.accentSoft, color: theme.accent }}>
+                      当前
+                    </span>
+                  )}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* 简介卡（可展开；详情页简介为空时用搜索结果简介兜底） */}
+          {(data.intro || curBook.intro) && (
+            <div className="mt-3.5 rounded-3xl p-4 backdrop-blur-xl" style={glass}>
+              <p className="text-[16px] font-bold" style={{ color: theme.textMain }}>
+                简介
+              </p>
+              <p
+                className={`mt-2 text-[14px] leading-[1.75] ${introOpen ? '' : 'line-clamp-3'}`}
+                style={{ color: theme.textSub }}
+                onClick={() => setIntroOpen((v) => !v)}
+              >
+                {(data.intro || curBook.intro || '').trim()}
+              </p>
+              {(data.intro || curBook.intro || '').length > 84 && (
+                <button type="button" onClick={() => setIntroOpen((v) => !v)} className="mt-1 text-[13px] font-semibold" style={{ color: theme.accent }}>
+                  {introOpen ? '收起' : '展开全部'}
+                </button>
+              )}
             </div>
           )}
+        </div>
+      )}
 
-          {/* 换源卡（同书切换书源，进度保留） */}
+      {/* 底部固定操作栏：加入书架 + 开始阅读 */}
+      {data && (
+        <div
+          className="absolute inset-x-0 bottom-0 z-20 flex items-center gap-3 px-4 pb-[max(14px,env(safe-area-inset-bottom))] pt-3 backdrop-blur-2xl"
+          style={{ background: `${theme.pageBg}E6`, boxShadow: `inset 0 1px 0 ${theme.cardRing}` }}
+        >
           <button
             type="button"
-            onClick={() => setSrcOpen(true)}
-            className="mt-3 flex w-full items-center gap-3 rounded-3xl p-4 text-left ring-1 backdrop-blur-xl active:scale-[0.99]"
-            style={glass}
+            onClick={() => void toggleShelf()}
+            aria-label={inShelf ? '移出书架' : '加入书架'}
+            className="flex h-[62px] w-[74px] shrink-0 flex-col items-center justify-center gap-1 rounded-2xl active:scale-95"
+            style={{ background: 'rgba(120,128,140,0.12)', color: inShelf ? theme.accent : theme.textSub }}
           >
-            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full" style={{ background: theme.accentSoft, color: theme.accent }}>
-              <Repeat2 className="h-5 w-5" />
-            </span>
-            <span className="min-w-0 flex-1">
-              <span className="block text-[15px] font-semibold" style={{ color: theme.textMain }}>
-                切换书源
-              </span>
-              <span className="mt-0.5 block truncate text-[12px]" style={{ color: theme.textSub }}>
-                当前「{curBook.sourceName}」· 换个源速度更快，进度不丢
-              </span>
-            </span>
-            <ArrowDownUp className="h-4 w-4 shrink-0" style={{ color: theme.textSub }} />
+            {inShelf ? <Check className="h-5 w-5" /> : <Plus className="h-5 w-5" />}
+            <span className="text-[11px] font-medium">{inShelf ? '已在架' : '加入书架'}</span>
           </button>
-
-          {/* 目录卡 */}
           <button
             type="button"
-            onClick={() => setTocOpen(true)}
-            className="mt-3 flex w-full items-center justify-between rounded-3xl p-4 ring-1 backdrop-blur-xl active:scale-[0.99]"
-            style={glass}
+            onClick={startReading}
+            className="flex h-[62px] min-w-0 flex-1 items-center justify-center gap-2 rounded-full text-[16px] font-bold text-white shadow-lg active:scale-[0.98]"
+            style={{ background: `linear-gradient(135deg, ${theme.gradFrom}, ${theme.gradTo})`, boxShadow: `0 10px 28px ${theme.accent}55` }}
           >
-            <div className="text-left">
-              <p className="text-[15px] font-semibold" style={{ color: theme.textMain }}>
-                目录
-              </p>
-              <p className="mt-0.5 text-[12px]" style={{ color: theme.textSub }}>
-                共 {data.total} 章 · 点击查看全部
-              </p>
-            </div>
-            <ArrowDownUp className="h-5 w-5" style={{ color: theme.textSub }} />
+            <BookOpen className="h-5 w-5" />
+            {started ? `继续读 · 第${readIdx + 1}章` : '开始阅读'}
           </button>
+        </div>
+      )}
 
-          {/* 前6章预览 */}
-          <div className="mt-3 space-y-1 rounded-3xl p-2 ring-1 backdrop-blur-xl" style={glass}>
-            {data.chapters.slice(findStartIndex(data.chapters), findStartIndex(data.chapters) + 6).map((c, i) => (
-              <button
-                key={c.url + i}
-                type="button"
-                onClick={() =>
-                  onRead({
-                    kind: 'reader',
-                    sourceId: curSourceId,
-                    bookUrl: curBook.bookUrl,
-                    name: data.name || name,
-                    author: data.author || author,
-                    coverUrl: curBook.coverUrl,
-                    startIndex: findStartIndex(data.chapters) + i,
-                  })
-                }
-                className="flex w-full items-center justify-between rounded-2xl px-4 py-2.5 text-left active:scale-[0.99]"
-                style={{ background: i === readIdx ? theme.accentSoft : 'transparent' }}
-              >
-                <span className="truncate text-[14px]" style={{ color: theme.textMain }}>
-                  {c.title}
-                </span>
-              </button>
-            ))}
-          </div>
+      {/* 轻提示 */}
+      {toast && (
+        <div className="pointer-events-none absolute inset-x-0 top-20 z-[60] flex justify-center px-6">
+          <span className="rounded-full bg-black/75 px-4 py-2 text-center text-[13px] text-white backdrop-blur">{toast}</span>
         </div>
       )}
 

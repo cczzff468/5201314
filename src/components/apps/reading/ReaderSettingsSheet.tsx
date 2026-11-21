@@ -212,11 +212,10 @@ export function ReaderSettingsSheet({ onClose }: { onClose: () => void }) {
             </div>
           </Row>
 
-          {/* 开关组 */}
+          {/* 开关组（分页模式下无「底部对齐」） */}
           <div className="mt-1 space-y-1">
             {([
               ['justify', '两端对齐'],
-              ['bottomAlign', '底部对齐'],
               ['underline', '正文下划线'],
             ] as const).map(([key, label]) => (
               <button

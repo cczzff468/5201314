@@ -24,27 +24,22 @@ import { useReading } from '@/lib/reading/store';
 import { api, themeOf } from './shared';
 import { SubNavBar } from './ReadingApp';
 
-/** 预置书源合集（一键导入；均为公开免费仓库直链） */
-const PRESETS: { name: string; url: string; desc: string }[] = [
+/** 预置书源合集：本地文件（public/reading-sources/，随代码分发，秒导入不受外网波动影响） */
+const PRESETS: { name: string; file: string; desc: string }[] = [
+  {
+    name: 'XIU2 精选书源（22 源）',
+    file: 'xiu2.json',
+    desc: '起点/番茄/69书吧 等精选，导入快',
+  },
   {
     name: '破冰书源（128 源）',
-    url: 'https://legado.aoaostar.com/sources/4dc410d1.json',
+    file: 'pobing.json',
     desc: '精品/API/正版/有声',
   },
   {
     name: 'Yiove 书源合集（714 源）',
-    url: 'https://legado.aoaostar.com/sources/e29e19ee.json',
-    desc: '酷安开源阅读聚合',
-  },
-  {
-    name: '酷安三舞313（1554 源）',
-    url: 'https://legado.aoaostar.com/sources/2a1f129b.json',
-    desc: '大型聚合，导入后建议先全检',
-  },
-  {
-    name: '全量书源（3907 源）',
-    url: 'https://legado.aoaostar.com/sources/b778fe6b.json',
-    desc: '全网大合集，文件较大',
+    file: 'yiove.json',
+    desc: '酷安开源阅读聚合，量大管饱',
   },
 ];
 
@@ -203,20 +198,7 @@ export function SourcesManager({ onBack }: { onBack: () => void }) {
                     {s.url.replace(/^https?:\/\//, '')}
                   </p>
                 </div>
-                {/* 删除 */}
-                <button
-                  type="button"
-                  aria-label={`删除 ${s.name}`}
-                  onClick={async () => {
-                    await api.sourceAction({ action: 'delete', id: s.id }).catch(() => null);
-                    await loadSources();
-                  }}
-                  className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full active:scale-90"
-                  style={{ color: '#E05252' }}
-                >
-                  <X className="h-4 w-4" />
-                </button>
-                {/* 启停 */}
+                {/* 启停开关（书源不提供删除，只可启停/恢复内置） */}
                 <button
                   type="button"
                   role="switch"
@@ -300,17 +282,17 @@ export function SourcesManager({ onBack }: { onBack: () => void }) {
               >
                 {importing ? '拉取中…' : '导入'}
               </button>
-              {/* 预置合集 */}
+              {/* 预置合集（本地文件，秒导入） */}
               <p className="mb-1.5 mt-3 text-[11px]" style={{ color: theme.textSub }}>
-                热门免费书源合集（点击一键导入）
+                热门免费书源合集（本地秒导入）
               </p>
               <div className="space-y-1.5">
                 {PRESETS.map((p) => (
                   <button
-                    key={p.url}
+                    key={p.file}
                     type="button"
                     disabled={importing}
-                    onClick={() => void doImport({ action: 'importUrl', url: p.url })}
+                    onClick={() => void doImport({ action: 'importLocal', file: p.file })}
                     className="flex w-full items-center justify-between rounded-xl bg-black/[0.04] px-3 py-2.5 text-left active:scale-[0.99] disabled:opacity-50"
                   >
                     <span>

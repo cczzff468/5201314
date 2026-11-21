@@ -3,11 +3,11 @@
 /**
  * 阅读 App · 主壳
  * ---------------------------------------------------------------------------
- * 三 Tab（首页 / 书架 / 我）+ 毛玻璃悬浮胶囊 TabBar（白色磨砂胶囊、选中项为
- * 主题色实心渐变胶囊包图标+文字）。搜索页 / 书籍详情 / 阅读器为全屏子页
- * （push 栈式导航，返回键逐级退出）。
- * 风格：蓝色玻璃毛玻璃（App 主题可切换，默认海洋蓝）；底层装饰性渐变光斑
- * 让所有毛玻璃卡片有真实的「透出感」；所有子页顶栏预留状态栏高度（SB_H）。
+ * 四 Tab（首页 / 书架 / 历史 / 我）+ 毛玻璃悬浮胶囊 TabBar（白色磨砂胶囊、选中项为
+ * 主题色实心渐变胶囊包图标+文字）。搜索页 / 书籍详情 / 阅读器 / 书源管理为全屏子页
+ * （push 栈式导航，返回键逐级退出）。阅读器独立接管全屏（沉浸模式，状态栏隐藏）。
+ * 风格：玻璃毛玻璃（App 主题可切换，默认海洋蓝）；底层装饰性渐变光斑让所有
+ * 毛玻璃卡片有真实的「透出感」；子页顶栏 iOS 规范：标题居中、返回键独立居左。
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ChevronLeft } from 'lucide-react';
@@ -16,12 +16,14 @@ import {
   SB_H,
   api,
   themeOf,
+  type ReadHistoryItem,
   type SearchBookItem,
   type ShelfBookItem,
   type TocItem,
 } from '@/components/apps/reading/shared';
 import { HomeTab } from './HomeTab';
 import { ShelfTab } from './ShelfTab';
+import { HistoryTab } from './HistoryTab';
 import { MeTab } from './MeTab';
 import { SearchPage } from './SearchPage';
 import { BookDetail } from './BookDetail';
@@ -29,14 +31,24 @@ import { ReaderView } from './ReaderView';
 import { SourcesManager } from './SourcesManager';
 import { ReadingHistory } from './ReadingHistory';
 
-export type TabKey = 'home' | 'shelf' | 'me';
+export type TabKey = 'home' | 'shelf' | 'history' | 'me';
 
 /** 子页面（栈式导航） */
 export type SubPage =
   | { kind: 'none' }
   | { kind: 'search'; keyword?: string; autoRun?: boolean }
   | { kind: 'detail'; sourceId: string; book: SearchBookItem }
-  | { kind: 'reader'; sourceId: string; bookUrl: string; name: string; author: string; coverUrl?: string; startIndex?: number }
+  | {
+      kind: 'reader';
+      sourceId: string;
+      bookUrl: string;
+      name: string;
+      author: string;
+      coverUrl?: string;
+      startIndex?: number;
+      /** 章内页码（续读记忆） */
+      startPage?: number;
+    }
   | { kind: 'sources' }
   | { kind: 'history' };
 
@@ -71,7 +83,7 @@ export default function ReadingApp() {
     });
   }, []);
 
-  // 子页全屏覆盖（阅读器自己管顶栏，其他子页带返回键）
+  // 阅读器全屏接管（沉浸模式：状态栏/灵动岛隐藏）
   if (page.kind === 'reader') {
     return <ReaderView page={page} onBack={back} />;
   }
@@ -111,7 +123,7 @@ export default function ReadingApp() {
               back();
               void loadShelf();
             }}
-            onRead={(p) => push({ kind: 'reader', sourceId: p.sourceId, bookUrl: p.bookUrl, name: p.name, author: p.author, coverUrl: p.coverUrl, startIndex: p.startIndex })}
+            onRead={(p) => push({ kind: 'reader', sourceId: p.sourceId, bookUrl: p.bookUrl, name: p.name, author: p.author, coverUrl: p.coverUrl, startIndex: p.startIndex, startPage: p.startPage })}
             onSwitchSource={(book) => push({ kind: 'search', keyword: book.name, autoRun: true })}
           />
         )}
@@ -119,14 +131,15 @@ export default function ReadingApp() {
         {page.kind === 'history' && <ReadingHistory onBack={back} onOpenBook={(b) => openShelfBook(b, push)} />}
         {page.kind === 'none' && (
           <div className="h-full overflow-y-auto overscroll-contain pb-[120px] pt-[54px]">
-            {tab === 'home' && <HomeTab onSearch={(kw) => push({ kind: 'search', keyword: kw, autoRun: true })} onOpenShelfBook={(b) => openShelfBook(b, push)} />}
-            {tab === 'shelf' && <ShelfTab onOpen={(b) => openShelfBook(b, push)} onSearch={() => push({ kind: 'search', autoRun: true })} />}
+            {tab === 'home' && <HomeTab onSearch={(kw) => push({ kind: 'search', keyword: kw, autoRun: true })} onOpenShelfBook={(b) => openHistoryBook(b, push)} />}
+            {tab === 'shelf' && <ShelfTab onOpen={(b) => openShelfBook(b, push)} onSearchGlobal={() => push({ kind: 'search', autoRun: true })} />}
+            {tab === 'history' && <HistoryTab onOpen={(b) => openHistoryBook(b, push)} />}
             {tab === 'me' && <MeTab onOpenSources={() => push({ kind: 'sources' })} onOpenHistory={() => push({ kind: 'history' })} />}
           </div>
         )}
       </div>
 
-      {/* 毛玻璃悬浮胶囊 TabBar（仅主页面显示） */}
+      {/* 毛玻璃悬浮胶囊 TabBar（仅主页面显示；四 Tab：首页/书架/历史/我） */}
       {page.kind === 'none' && (
         <div className="pointer-events-none absolute inset-x-0 bottom-0 z-30 flex justify-center pb-[max(14px,env(safe-area-inset-bottom))]">
           <div
@@ -138,6 +151,7 @@ export default function ReadingApp() {
           >
             <TabBtn tab="home" cur={tab} setTab={setTab} theme={theme} icon="home" label="首页" />
             <TabBtn tab="shelf" cur={tab} setTab={setTab} theme={theme} icon="shelf" label="书架" />
+            <TabBtn tab="history" cur={tab} setTab={setTab} theme={theme} icon="history" label="历史" />
             <TabBtn tab="me" cur={tab} setTab={setTab} theme={theme} icon="me" label="我" />
           </div>
         </div>
@@ -146,7 +160,7 @@ export default function ReadingApp() {
   );
 }
 
-/** 从书架记录打开阅读器 */
+/** 从书架记录打开阅读器（续读到上次章节+页码） */
 function openShelfBook(b: ShelfBookItem, push: (p: SubPage) => void) {
   void api
     .bookDetail(b.sourceId, b.bookUrl, b.name, b.author || '')
@@ -158,10 +172,36 @@ function openShelfBook(b: ShelfBookItem, push: (p: SubPage) => void) {
         name: b.name,
         author: b.author || '',
         coverUrl: b.coverUrl || undefined,
-        startIndex: d.lastReadChapter || 0,
+        startIndex: b.lastReadChapter || d.lastReadChapter || 0,
+        startPage: b.lastPage || 0,
       });
     })
-    .catch(() => null);
+    .catch(() =>
+      push({
+        kind: 'reader',
+        sourceId: b.sourceId,
+        bookUrl: b.bookUrl,
+        name: b.name,
+        author: b.author || '',
+        coverUrl: b.coverUrl || undefined,
+        startIndex: b.lastReadChapter || 0,
+        startPage: b.lastPage || 0,
+      }),
+    );
+}
+
+/** 从历史记录打开阅读器（续读到上次章节+页码） */
+function openHistoryBook(b: ReadHistoryItem, push: (p: SubPage) => void) {
+  push({
+    kind: 'reader',
+    sourceId: b.sourceId,
+    bookUrl: b.bookUrl,
+    name: b.name,
+    author: b.author || '',
+    coverUrl: b.coverUrl || undefined,
+    startIndex: b.lastReadChapter || 0,
+    startPage: b.lastPage || 0,
+  });
 }
 
 function TabBtn({
@@ -176,12 +216,12 @@ function TabBtn({
   cur: TabKey;
   setTab: (t: TabKey) => void;
   theme: ReturnType<typeof themeOf>;
-  icon: 'home' | 'shelf' | 'me';
+  icon: 'home' | 'shelf' | 'history' | 'me';
   label: string;
 }) {
   const active = tab === cur;
   const Ico =
-    icon === 'home' ? TabHomeIcon : icon === 'shelf' ? TabShelfIcon : TabMeIcon;
+    icon === 'home' ? TabHomeIcon : icon === 'shelf' ? TabShelfIcon : icon === 'history' ? TabHistoryIcon : TabMeIcon;
   return (
     <button
       type="button"
@@ -200,18 +240,21 @@ function TabBtn({
   );
 }
 
-import { House, BookMarked, CircleUserRound } from 'lucide-react';
+import { House, BookMarked, History as HistoryIcon, CircleUserRound } from 'lucide-react';
 function TabHomeIcon() {
   return <House className="h-[22px] w-[22px]" strokeWidth={2} />;
 }
 function TabShelfIcon() {
   return <BookMarked className="h-[22px] w-[22px]" strokeWidth={2} />;
 }
+function TabHistoryIcon() {
+  return <HistoryIcon className="h-[22px] w-[22px]" strokeWidth={2} />;
+}
 function TabMeIcon() {
   return <CircleUserRound className="h-[22px] w-[22px]" strokeWidth={2} />;
 }
 
-/** 子页通用顶栏（毛玻璃 + 返回键；预留状态栏高度，不再被遮挡） */
+/** 子页通用顶栏（毛玻璃；iOS 规范：标题绝对居中、返回键独立居左、右槽居右） */
 export function SubNavBar({
   title,
   onBack,
@@ -234,20 +277,24 @@ export function SubNavBar({
         boxShadow: transparent ? undefined : `inset 0 -1px 0 ${theme.cardRing}`,
       }}
     >
-      <div className="flex h-[52px] items-center px-3">
+      <div className="relative flex h-[52px] items-center px-3">
         <button
           type="button"
           onClick={onBack}
           aria-label="返回"
-          className="-ml-1 flex h-10 w-10 items-center justify-center rounded-full active:scale-90"
+          className="-ml-1 flex h-10 w-10 shrink-0 items-center justify-center rounded-full active:scale-90"
           style={{ color: theme.textMain }}
         >
           <ChevronLeft className="h-6 w-6" strokeWidth={2.2} />
         </button>
-        <span className="ml-1 min-w-0 flex-1 truncate text-[17px] font-semibold" style={{ color: theme.textMain }}>
-          {title}
+        {/* 标题绝对居中（不受左右按钮影响，iOS 导航栏规范） */}
+        <span
+          className="pointer-events-none absolute inset-x-14 text-center text-[17px] font-semibold"
+          style={{ color: theme.textMain }}
+        >
+          <span className="inline-block max-w-full truncate align-middle">{title}</span>
         </span>
-        {right}
+        <div className="ml-auto flex shrink-0 items-center">{right}</div>
       </div>
     </div>
   );

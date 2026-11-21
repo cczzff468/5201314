@@ -5,6 +5,7 @@ import dynamic from 'next/dynamic';
 import { AnimatePresence } from 'framer-motion';
 import { selectResolvedTheme, useSettings, useSystemDark, useUI, useWallpaperStyle, type AppId } from '@/lib/ios/store';
 import { useIslandNotify } from '@/lib/ios/island-notify';
+import { useImmersive } from '@/lib/ios/immersive-store';
 import { useIncomingCall } from '@/lib/ios/incoming-call';
 import { GLOBAL_CSS_SCOPE, scopeCss } from '@/lib/ios/custom-css';
 import { isVoiceHoldActive } from '@/lib/ios/voice-hold-flag';
@@ -148,6 +149,8 @@ export default function PhoneShell() {
   const barLight = useLightForeground('bottom');
   // 状态栏显示开关（Task 36）：设置页可关闭顶部时间/信号/电量状态栏
   const statusBarVisible = useSettings((s) => s.statusBarVisible);
+  // 沉浸式全屏（阅读器打开期间）：状态栏与静态灵动岛一起隐藏，退出阅读器自动恢复
+  const immersive = useImmersive();
   // 灵动岛常驻开关（用户需求）：关闭后隐藏顶部黑色胶囊基础灵动岛，
   // 只显示 APP 灵动岛（音乐岛大/小窗、美团/淘宝配送岛、灵动岛通知卡、来电胶囊等均不受影响）
   const islandPersistent = useSettings((s) => s.islandPersistent);
@@ -617,8 +620,9 @@ export default function PhoneShell() {
         {/* v1.5 Mobile Agent：运行进度条（含紧急停止，z-60）+ 敏感操作确认弹层（z-95，Agent 运行中全局可见） */}
         {layersReady && <AgentGlobalLayers />}
 
-        {/* C1 语音唤起智能体：悬浮球（z-57，右侧可拖动吸边）+ 语音面板，门槛见组件内注释 */}
-        {layersReady && <AgentVoiceBall />}
+        {/* C1 语音唤起智能体：悬浮球（z-57，右侧可拖动吸边）+ 语音面板，门槛见组件内注释。
+            阅读器沉浸模式下隐藏（避免悬浮球压住正文文字，退出阅读自动恢复） */}
+        {layersReady && !immersive && <AgentVoiceBall />}
 
         {/* 全局来电层：AI 来电弹窗（电话横幅/微信大窗 5s→胶囊，z-94，灵动岛原位弹出/收回、弹出期间盖住灵动岛）+
             iOS 全屏来电界面（z-84，仅电话来电自动显示、左上可退出，界面可见时不叠加弹窗；
@@ -677,8 +681,8 @@ export default function PhoneShell() {
             灵动岛通知卡/来电胶囊/闹钟横幅等仍照常从原位弹出（IslandNotificationLayer 等独立于本开关）。
             灵动岛常驻开关（用户需求）：关闭后顶部黑色胶囊基础灵动岛不显示，但 APP 灵动岛
             （音乐岛大/小窗、美团/淘宝配送岛、灵动岛通知卡、来电胶囊）全部照常显示 */}
-        {statusBarVisible && <StatusBar />}
-        {statusBarVisible && islandPersistent && !islandCovered && (
+        {statusBarVisible && !immersive && <StatusBar />}
+        {statusBarVisible && !immersive && islandPersistent && !islandCovered && (
           <div
             className="ph-island pointer-events-none absolute left-1/2 top-[11px] z-[80] h-[33px] w-[118px] -translate-x-1/2 rounded-full bg-black"
             aria-hidden="true"

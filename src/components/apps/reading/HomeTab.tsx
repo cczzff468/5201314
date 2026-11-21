@@ -9,11 +9,12 @@ import { Search, Clock3, ChevronRight, Flame } from 'lucide-react';
 import { useReading } from '@/lib/reading/store';
 import {
   FEATURED,
+  api,
   cachedCover,
   coverSrc,
   fetchBookCover,
   themeOf,
-  type ShelfBookItem,
+  type ReadHistoryItem,
   type SourceItem,
 } from './shared';
 
@@ -24,13 +25,20 @@ export function HomeTab({
   onOpenShelfBook,
 }: {
   onSearch: (kw?: string) => void;
-  onOpenShelfBook: (b: ShelfBookItem) => void;
+  onOpenShelfBook: (b: ReadHistoryItem) => void;
 }) {
   const settings = useReading((s) => s.settings);
   const shelf = useReading((s) => s.shelf);
   const sources = useReading((s) => s.sources);
   const theme = useMemo(() => themeOf(settings.appTheme), [settings.appTheme]);
-  const recent = shelf[0];
+  /** 继续阅读：优先阅读历史（看过的书都往这进）；历史空则兑底书架 */
+  const [recent, setRecent] = useState<ReadHistoryItem | null>(null);
+  useEffect(() => {
+    api
+      .readlogList()
+      .then((d) => setRecent(d.reads[0] || null))
+      .catch(() => setRecent(null));
+  }, []);
 
   // 精选书真实封面（缓存秒显 + 后台逐本补齐；并发 2，避免压垮书源）
   const [covers, setCovers] = useState<Record<string, string>>(() => {
@@ -41,6 +49,16 @@ export function HomeTab({
     }
     return init;
   });
+  /** 加载失败的书名（回退到占位卡） */
+  const [coverFails, setCoverFails] = useState<Set<string>>(new Set());
+  const onCoverError = (name: string) => {
+    setCoverFails((s) => new Set(s).add(name));
+    setCovers((c) => {
+      const n = { ...c };
+      delete n[name];
+      return n;
+    });
+  };
 
   useEffect(() => {
     let alive = true;
@@ -178,8 +196,8 @@ export function HomeTab({
                 className="w-[86px] shrink-0 text-left active:scale-95"
               >
                 <div className="relative aspect-[3/4.2] w-full overflow-hidden rounded-xl shadow-[0_6px_18px_rgba(0,0,0,0.14)] ring-1 ring-black/5">
-                  {covers[b.name] ? (
-                    <img src={covers[b.name]} alt={`${b.name} 封面`} className="h-full w-full object-cover" loading="lazy" referrerPolicy="no-referrer" />
+                  {covers[b.name] && !coverFails.has(b.name) ? (
+                    <img src={covers[b.name]} alt={`${b.name} 封面`} className="h-full w-full object-cover" loading="lazy" referrerPolicy="no-referrer" onError={() => onCoverError(b.name)} />
                   ) : (
                     <div
                       className="flex h-full w-full flex-col items-center justify-center gap-1.5 p-2"

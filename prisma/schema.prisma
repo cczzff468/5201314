@@ -126,7 +126,7 @@ model BookSource {
   @@index([enabled])
 }
 
-/// 书架书籍：加入书架的书（记录进度 + 缓存目录）
+/// 书架书籍：加入书架的书（记录进度 + 缓存目录）；按书源区分（bookUrl 为源内唯一键）
 model ShelfBook {
   id              String   @id @default(cuid())
   name            String
@@ -138,15 +138,37 @@ model ShelfBook {
   sourceName      String?
   /// 书籍详情/目录页 URL（同书多源时作为换源匹配键）
   bookUrl         String
+  /// 自定义分组名（空 = 未分组）
+  customGroup     String?
   /// 目录（缓存 JSON：[{title,url}]）
   chapters        String   @default("[]")
   totalChapters   Int      @default(0)
   lastChapterTitle String?
   /// 阅读进度：章节下标（0-based）
   lastReadChapter Int      @default(0)
+  /// 阅读进度：章内页码（0-based，分页模式记忆）
+  lastPage        Int      @default(0)
   lastReadAt      DateTime @default(now())
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
+
+  @@unique([bookUrl])
+}
+
+/// 阅读历史：所有打开读过的书自动进历史（与书架独立；按书源区分）
+model ReadHistory {
+  id              String   @id @default(cuid())
+  name            String
+  author          String?
+  coverUrl        String?
+  sourceId        String
+  sourceName      String?
+  bookUrl         String
+  totalChapters   Int      @default(0)
+  lastReadChapter Int      @default(0)
+  lastPage        Int      @default(0)
+  lastChapterTitle String?
+  lastReadAt      DateTime @default(now())
 
   @@unique([bookUrl])
 }
@@ -198,6 +220,12 @@ model ReadingSetting {
   justify       Boolean  @default(true)
   bottomAlign   Boolean  @default(false)
   underline     Boolean  @default(false)
+  /// 我的资料：昵称 / 自定义ID / 头像（dataURL）
+  profileName   String?
+  profileId     String?
+  profileAvatar String?
+  /// 书架自定义分组名列表（JSON 数组字符串）
+  customGroups  String   @default("[]")
   updatedAt     DateTime @updatedAt
 }
 

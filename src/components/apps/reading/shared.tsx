@@ -37,6 +37,12 @@ export interface ReaderSettings {
   justify: boolean;
   bottomAlign: boolean;
   underline: boolean;
+  /** 我的资料：昵称 / 自定义 ID / 头像 */
+  profileName: string | null;
+  profileId: string | null;
+  profileAvatar: string | null;
+  /** 书架自定义分组名列表 */
+  customGroups: string[];
 }
 
 export const DEFAULT_SETTINGS: ReaderSettings = {
@@ -58,6 +64,10 @@ export const DEFAULT_SETTINGS: ReaderSettings = {
   justify: true,
   bottomAlign: false,
   underline: false,
+  profileName: null,
+  profileId: null,
+  profileAvatar: null,
+  customGroups: [],
 };
 
 // ---------------------------------------------------------------------------
@@ -302,9 +312,28 @@ export interface ShelfBookItem {
   sourceId: string;
   sourceName: string | null;
   bookUrl: string;
+  /** 自定义分组（空 = 未分组） */
+  customGroup: string | null;
   totalChapters: number;
   lastChapterTitle: string | null;
   lastReadChapter: number;
+  /** 章内页码（分页模式记忆） */
+  lastPage: number;
+  lastReadAt: string;
+}
+/** 阅读历史条目（历史 Tab） */
+export interface ReadHistoryItem {
+  id: string;
+  name: string;
+  author: string | null;
+  coverUrl: string | null;
+  sourceId: string;
+  sourceName: string | null;
+  bookUrl: string;
+  totalChapters: number;
+  lastReadChapter: number;
+  lastPage: number;
+  lastChapterTitle: string | null;
   lastReadAt: string;
 }
 export interface TocItem {
@@ -321,15 +350,24 @@ export interface BookDetailData {
   total: number;
   inShelf: boolean;
   lastReadChapter: number;
+  /** 章内页码（分页模式续读） */
+  lastPage: number;
 }
 
 // ---------------------------------------------------------------------------
-// API 薄封装
+// API 薄封装（非 JSON 响应——如网关超时 HTML——给出友好报错而不是裸解析错误）
 // ---------------------------------------------------------------------------
 async function j<T>(res: Response): Promise<T> {
-  const d = (await res.json()) as T & { error?: string };
+  const text = await res.text();
+  let d: (T & { error?: string }) | null = null;
+  try {
+    d = JSON.parse(text) as T & { error?: string };
+  } catch {
+    // 拿到 HTML/空响应（常见：网关超时 / 服务异常），给出可读错误
+    throw new Error('网络超时或服务异常，请稍后重试');
+  }
   if (!res.ok && d && typeof d === 'object' && 'error' in d && d.error) throw new Error(String(d.error));
-  return d;
+  return d as T;
 }
 
 export const api = {
@@ -382,6 +420,14 @@ export const api = {
     ),
   historyAction: (body: Record<string, unknown>) =>
     fetch('/api/reading/history', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }).then((r) => j<Record<string, unknown>>(r)),
+  /** 阅读历史（历史 Tab）：读过书的列表 / 移除 / 清空 */
+  readlogList: () => fetch('/api/reading/readlog').then((r) => j<{ reads: ReadHistoryItem[] }>(r)),
+  readlogAction: (body: Record<string, unknown>) =>
+    fetch('/api/reading/readlog', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),

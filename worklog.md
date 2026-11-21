@@ -3259,3 +3259,26 @@ Work Log:
 
 Stage Summary:
 - 阅读 App v2：全界面毛玻璃胶囊玻璃风、真实封面代理、详情页换源保进度、阅读器滑动翻章、AI陪读先选联系人且记忆入「记忆」App（跨App互通）
+
+---
+Task ID: 6
+Agent: 主控 Agent（Z.ai Code）
+Task: 阅读 App v3 大改版：分页阅读器（页级翻页）+ 沉浸模式 + 书架分组/多选 + 历史Tab + 详情页重设计 + 我的资料 + 主题竞态修复 + 书源导入提速
+
+Work Log:
+- [主题竞态修复] store.ts loadSettings 加 localRev 版本守卫：fetch 期间用户改过设置（如切主题）则服务器旧值不回灌——修复「选了海洋蓝过一会自动变极光紫」
+- [阅读器·分页模式] ReaderView 重写：CSS 多列布局分页（columnWidth=内容区宽 + columnFill:auto，溢出列横向排布；translateX 翻页+跟手动画）；手指左滑=下一页/右滑=上一页（跟手提示胶囊「下一页/上一页/下一章/上一章」），章内页翻尽继续滑→翻章（回退章自动落位末页 pendingLastRef）；点按分区 左1/3上一页/中间菜单/右1/3下一页；底部沉浸页码「x/y页 · 第n/m章」；navRef 镜像导航状态防快速连滑 stale state 竞态（曾出负页码）；内层 clipper 严格按内容区裁切（修复相邻页文字从 padding 区漏出成「双栏」）；列宽=wrap内容区宽（修复列宽含 padding 导致的翻页错位）
+- [沉浸模式] 新建 lib/ios/immersive-store.ts（仿 music-island-flag 微 store）；PhoneShell StatusBar+静态灵动岛渲染加 !immersive；通知中心顶部热区（z-71 左右条）沉浸期禁用（曾挡阅读器返回键）；AgentVoiceBall 沉浸期隐藏（用户截图1里的麦克风球压字）；退出阅读自动全部恢复
+- [进度记忆] 章节+章内页码双进度：翻页900ms防抖/翻章立即存；ShelfBook/ReadHistory 加 lastPage；book 路由返回 lastReadChapter+lastPage（历史同名兜底）；从书架/历史/详情打开精确续读到上次页码
+- [书架·分组] ShelfBook 加 customGroup；自定义分组全功能：胶囊行（全部+自定义+未分组+新建分组按钮）、长按分组重命名/删除（删组书归未分组）、转移分组（单本长按/多选批量/新建并转入，pendingMoveUrls 修复丢书）；分组名列表存 settings.customGroups
+- [书架·多选+搜索] 三点按钮进多选模式（复选圈+底部玻璃操作条：全选/转移分组/批量移出，absolute 定位脱离滚动悬于TabBar上）；搜索按钮切换书架内过滤（跨全部分组搜书）；书架/历史长按书籍（520ms 计时器+contextMenu）弹操作单
+- [历史Tab] 新增 ReadHistory 表+readlog 路由（列表/移除deleteMany幂等/清空）；progress 不再自动入架——只更新在架书+总是写历史（用户要求：点击加入书架才入架、按书源区分）；HistoryTab：真实封面+进度条+「在架」徽标+相对时间+点击续读+长按移除+清空确认弹窗；TabBar 4Tab（首页/书架/历史/我）；首页「继续阅读」改读历史
+- [详情页重设计·图4] BookDetail 重写：封面模糊放大背景渐变淡出+半透明圆形返回键；头区封面/书名/作者/分类/胶囊（共N章·读到第N章/换源）；功能卡四项（缓存=预取后20章/换源/听书=WebSpeech/分享=share/剪贴板）；目录卡（最新胶囊+近3章+查看完整目录，外层div防嵌套button hydration错）；简介卡（可展开+搜索简介兜底）；底部固定栏 加入书架+开始阅读/继续读（带页码续读）
+- [我的资料] MeTab 头卡改头像+昵称+自定义ID（ReadingSetting 加 profileName/profileId/profileAvatar；编辑弹窗：头像上传480px压缩/名字/ID/保存）；用户实测已用（名字「饭饭」ID「20060620」）
+- [书源管理] 删除每行叉号（用户要求）；导入提速：importArray 改 createMany 分批200（原逐条 insert，3907源从分钟级到秒级）；预置合集改本地文件 public/reading-sources/{xiu2 22源, pobing 128源, yiove 714源}.json + importLocal action（外网镜像实测 30-90s 超时是「Unexpected token '<'」根因，本地秒导）；importUrl 超时 30s→90s；前端 j() 对 HTML 响应给友好报错「网络超时或服务异常」
+- [书源自愈] resetBuiltin 重写：按 URL upsert 保留行 ID（原 deleteMany+重建会让书架/历史 sourceId 全部失效）；healSourceRefs 自愈（sourceName 精确同名优先→bookUrl 站点前缀兜底，镜像域名不同也救得回）；book/chapter 路由 sourceId 404 时自动按 URL 前缀找同站源；修复了一次用户点「恢复内置」造成的引用断裂
+- [SubNavBar] 标题绝对居中（iOS 规范，inset-x-14+truncate），返回键独立居左——修复用户截图2/3「标题紧贴返回键」别扭问题
+- [验证] Agent Browser 全链路：解锁→阅读App→书架多选2本→新建分组「我的收藏」转入✓→分组过滤2本✓→书架搜索跨分组✓→历史Tab实时进度✓→从历史续读（第2章第4页）✓→右滑上一页2→1✓→章首右滑回退第499章落末页14/14✓→章末左滑前进第500章1/15✓→8连滑无竞态✓→翻章进度落库（第3章页1）✓→沉浸模式状态栏/灵动岛/语音球消失VLM确认✓→分页无相邻页漏字VLM确认✓→页码与Home横条分离✓→搜索→详情（模糊背景/功能卡/目录卡/简介兜底）✓→加入书架→已在架✓→主题海洋蓝切换+服务端持久化✓→XIU2本地导入秒级✓→书源自愈修复后书可正常打开✓；ESLint 0错误；tsc 阅读相关 0错误
+
+Stage Summary:
+- 阅读 App v3：真机级分页阅读器（页级手势+章边界翻章+页码记忆）、沉浸式全屏（状态栏/灵动岛/语音球隐藏）、书架自定义分组+多选批量管理、独立历史Tab续读、图4风格详情页、我的头像/名字/ID、主题不再被覆盖、书源导入本地秒级

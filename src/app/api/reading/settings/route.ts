@@ -24,11 +24,16 @@ export const DEFAULT_READING_SETTINGS = {
   justify: true,
   bottomAlign: false,
   underline: false,
+  profileName: null as string | null,
+  profileId: null as string | null,
+  profileAvatar: null as string | null,
+  customGroups: [] as string[],
 };
 
 type Settings = typeof DEFAULT_READING_SETTINGS;
+type SettingsPatch = Omit<Partial<Settings>, 'customGroups'> & { customGroups?: string[] | string };
 
-function coerce(raw: Partial<Record<keyof Settings, unknown>>): Partial<Settings> {
+function coerce(raw: Partial<Record<keyof SettingsPatch, unknown>>): Partial<Settings> {
   const out: Partial<Settings> = {};
   const num = (v: unknown, lo: number, hi: number) => {
     const n = typeof v === 'number' ? v : parseFloat(String(v));
@@ -61,6 +66,31 @@ function coerce(raw: Partial<Record<keyof Settings, unknown>>): Partial<Settings
   if (typeof raw.justify === 'boolean') out.justify = raw.justify;
   if (typeof raw.bottomAlign === 'boolean') out.bottomAlign = raw.bottomAlign;
   if (typeof raw.underline === 'boolean') out.underline = raw.underline;
+  // 我的资料：昵称 / 自定义 ID / 头像（dataURL，限制 1.5MB）
+  for (const k of ['profileName', 'profileId'] as const) {
+    const v = raw[k];
+    if (typeof v === 'string') out[k] = v.trim().slice(0, 24) || null;
+    if (v === null) out[k] = null;
+  }
+  {
+    const v = raw.profileAvatar;
+    if (typeof v === 'string') out.profileAvatar = v.startsWith('data:') && v.length < 1_500_000 ? v : null;
+    if (v === null) out.profileAvatar = null;
+  }
+  // 书架自定义分组名列表（限制 30 个、单个长度 ≤20）
+  if (raw.customGroups !== undefined) {
+    let groups: string[] = [];
+    if (typeof raw.customGroups === 'string') {
+      try {
+        groups = JSON.parse(raw.customGroups) as string[];
+      } catch {
+        groups = [];
+      }
+    } else if (Array.isArray(raw.customGroups)) {
+      groups = raw.customGroups.map(String);
+    }
+    out.customGroups = [...new Set(groups.map((g) => g.trim().slice(0, 20)).filter(Boolean))].slice(0, 30);
+  }
   // 自定义背景/字体为 dataURL（限制 3MB，防止超大文件入库）
   for (const k of ['bgCustom', 'fontCustom'] as const) {
     const v = raw[k];
@@ -74,6 +104,12 @@ function coerce(raw: Partial<Record<keyof Settings, unknown>>): Partial<Settings
 export async function GET() {
   const row = await db.readingSetting.findUnique({ where: { id: 'singleton' } });
   if (!row) return NextResponse.json({ settings: DEFAULT_READING_SETTINGS });
+  let groups: string[] = [];
+  try {
+    groups = JSON.parse(row.customGroups || '[]') as string[];
+  } catch {
+    groups = [];
+  }
   return NextResponse.json({
     settings: {
       ...DEFAULT_READING_SETTINGS,
@@ -95,6 +131,10 @@ export async function GET() {
       justify: row.justify,
       bottomAlign: row.bottomAlign,
       underline: row.underline,
+      profileName: row.profileName,
+      profileId: row.profileId,
+      profileAvatar: row.profileAvatar,
+      customGroups: groups,
     } satisfies Settings,
   });
 }
@@ -102,11 +142,15 @@ export async function GET() {
 /** PUT 局部更新（滑块实时预览 → 前端本地即时应用，这里 300ms 防抖后落库） */
 export async function PUT(req: NextRequest) {
   const raw = (await req.json().catch(() => ({}))) as Record<string, unknown>;
-  const patch = coerce(raw as Partial<Record<keyof Settings, unknown>>);
+  const patch = coerce(raw as Partial<Record<keyof SettingsPatch, unknown>>);
+  // customGroups 单独序列化（Prisma 存 JSON 字符串）
+  const { customGroups, ...rest } = patch;
+  const data: Record<string, unknown> = { ...rest };
+  if (customGroups !== undefined) data.customGroups = JSON.stringify(customGroups);
   await db.readingSetting.upsert({
     where: { id: 'singleton' },
-    update: { ...patch },
-    create: { id: 'singleton', ...patch },
+    update: { ...data },
+    create: { id: 'singleton', ...data },
   });
   return NextResponse.json({ ok: true });
 }

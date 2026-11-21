@@ -36,8 +36,17 @@ export async function GET(req: NextRequest) {
     });
   }
 
-  const row = await db.bookSource.findUnique({ where: { id: sourceId } });
-  if (!row) return NextResponse.json({ error: '书源不存在' }, { status: 404 });
+  let row = await db.bookSource.findUnique({ where: { id: sourceId } });
+  if (!row) {
+    // 自愈：sourceId 失效 → 按 chapterUrl 前缀找同站点书源兜底
+    const all = await db.bookSource.findMany();
+    row =
+      all
+        .map((s) => ({ s, u: s.url.replace(/\/+$/, '/') }))
+        .sort((a, b) => b.u.length - a.u.length)
+        .find((x) => x.u !== 'http://' && x.u !== 'https://' && chapterUrl.startsWith(x.u))?.s || null;
+    if (!row) return NextResponse.json({ error: '书源不存在' }, { status: 404 });
+  }
   try {
     const ch = await getChapter(toLegado(row), chapterUrl);
     if (!ch.content || ch.content.length < 50) {

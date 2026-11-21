@@ -31,6 +31,7 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useImmersive } from '@/lib/ios/immersive-store';
 import { animate, motion, useMotionValue, useTransform } from 'framer-motion';
 import { Sparkles } from 'lucide-react';
 import { useUI, type AppId } from '@/lib/ios/store';
@@ -267,8 +268,10 @@ export default function NotificationCenter() {
   // 每条通知自带 APP 图标/标题/时间，分组头属重复信息；条目本身 ts 倒序直达
   const flatItems = useMemo(() => [...items].sort((a, b) => b.ts - a.ts), [items]);
 
-  // 入口 gate：仅解锁后可拉出；切换器/响铃/通话/来电层显示时禁用（它们的交互优先）
-  const entryEnabled = !locked && !screenOff && !switcherOpen && !alarmRinging && !callActive && !incomingCall;
+  // 入口 gate：仅解锁后可拉出；切换器/响铃/通话/来电层显示时禁用（它们的交互优先）；
+  // 阅读器沉浸模式下也禁用（状态栏已隐藏，顶部热区不能挡阅读器自己的返回/工具条）
+  const immersive = useImmersive();
+  const entryEnabled = !locked && !screenOff && !switcherOpen && !alarmRinging && !callActive && !incomingCall && !immersive;
 
   // 面板开合动画（store.open 是唯一真相：点按入口/原生回传收面板/外部钩子都汇到这里）
   useEffect(() => {

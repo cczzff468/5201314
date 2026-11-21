@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { BUILTIN_BOOK_SOURCES } from '@/lib/reading/builtin-sources';
@@ -73,7 +75,7 @@ export async function GET(req: NextRequest) {
   });
 }
 
-/** 统一导入（single / array / {sources:[...]} 包装均支持） */
+/** 统一导入（single / array / {sources:[...]} 包装均支持；批量插入提速，几千源秒级完成） */
 async function importArray(
   list: unknown[],
   enabled: boolean,
@@ -84,6 +86,15 @@ async function importArray(
   let skipped = 0;
   const existUrls = new Set((await db.bookSource.findMany({ select: { url: true } })).map((x) => x.url));
   let order = await db.bookSource.count();
+  const rows: {
+    name: string;
+    url: string;
+    group: string;
+    enabled: boolean;
+    config: string;
+    isBuiltin: boolean;
+    sortOrder: number;
+  }[] = [];
   for (const raw of list) {
     const v = validateSource(raw);
     if (!v.ok) {
@@ -98,24 +109,65 @@ async function importArray(
       continue;
     }
     existUrls.add(url);
-    try {
-      await db.bookSource.create({
-        data: {
-          name: (s.bookSourceName || '').trim().slice(0, 40),
-          url,
-          group: (s.bookSourceGroup || '导入').toString().slice(0, 30),
-          enabled,
-          config: JSON.stringify(s),
-          isBuiltin: markBuiltin,
-          sortOrder: order++,
-        },
-      });
-      imported++;
-    } catch {
-      skipped++;
-    }
+    rows.push({
+      name: (s.bookSourceName || '').trim().slice(0, 40),
+      url,
+      group: (s.bookSourceGroup || '导入').toString().slice(0, 30),
+      enabled,
+      config: JSON.stringify(s),
+      isBuiltin: markBuiltin,
+      sortOrder: order++,
+    });
+  }
+  // 分批 createMany（SQLite 单语句变量上限，按 200/批安全；URL 已在上层去重）
+  for (let i = 0; i < rows.length; i += 200) {
+    const batch = rows.slice(i, i + 200);
+    const r = await db.bookSource.createMany({ data: batch });
+    imported += r.count;
   }
   return { imported, skipped, errors: errors.slice(0, 5) };
+}
+
+/**
+ * 自愈失效的书源引用：书架/历史里 sourceId 已不存在的记录，
+ * ① 按记录里留存的 sourceName 精确同名匹配（书源重建场景，最常见）
+ * ② 按 bookUrl 站点前缀匹配（镜像域名不同也能靠名字兜住）
+ */
+async function healSourceRefs() {
+  const sources = await db.bookSource.findMany({ select: { id: true, url: true, name: true } });
+  const idSet = new Set(sources.map((s) => s.id));
+  const byName = new Map(sources.map((s) => [s.name, s.id]));
+  const prefixList = sources
+    .map((s) => ({ id: s.id, url: s.url.replace(/\/+$/, '/') }))
+    .filter((s) => s.url.length > 12)
+    .sort((a, b) => b.url.length - a.url.length);
+
+  const resolve = (sourceName: string | null, bookUrl: string): string | null => {
+    if (sourceName && byName.has(sourceName)) return byName.get(sourceName) as string;
+    return prefixList.find((s) => bookUrl.startsWith(s.url))?.id || null;
+  };
+
+  const healRows = async (
+    rows: { id: string; sourceId: string; sourceName: string | null; bookUrl: string }[],
+    table: 'shelf' | 'history',
+  ) => {
+    for (const r of rows) {
+      if (idSet.has(r.sourceId)) continue; // 引用仍有效
+      const hit = resolve(r.sourceName, r.bookUrl);
+      if (hit) {
+        const data = { sourceId: hit };
+        if (table === 'shelf') {
+          await db.shelfBook.update({ where: { id: r.id }, data }).catch(() => null);
+        } else {
+          await db.readHistory.update({ where: { id: r.id }, data }).catch(() => null);
+        }
+      }
+    }
+  };
+  const shelfRows = await db.shelfBook.findMany({ select: { id: true, sourceId: true, sourceName: true, bookUrl: true } });
+  await healRows(shelfRows, 'shelf');
+  const histRows = await db.readHistory.findMany({ select: { id: true, sourceId: true, sourceName: true, bookUrl: true } });
+  await healRows(histRows, 'history');
 }
 
 /**
@@ -156,12 +208,27 @@ export async function POST(req: NextRequest) {
     if (action === 'importUrl') {
       const url = String(body.url || '').trim();
       if (!/^https?:\/\//i.test(url)) return NextResponse.json({ error: 'URL 非法' }, { status: 400 });
-      const res = await proxyFetch(url, { timeoutMs: 30_000 });
+      const res = await proxyFetch(url, { timeoutMs: 90_000 });
       let parsed: unknown;
       try {
         parsed = JSON.parse(res.text) as unknown;
       } catch {
         return NextResponse.json({ error: '该 URL 返回的不是合法 JSON 书源文件' }, { status: 400 });
+      }
+      const list = Array.isArray(parsed) ? parsed : [parsed];
+      return NextResponse.json(await importArray(list, body.enabled !== false));
+    }
+    if (action === 'importLocal') {
+      // 预置书源合集（public/reading-sources/*.json，随代码分发，秒导入不受外网波动影响）
+      const ALLOWED = new Set(['xiu2.json', 'pobing.json', 'yiove.json']);
+      const file = String(body.file || '');
+      if (!ALLOWED.has(file)) return NextResponse.json({ error: '未知预置书源' }, { status: 400 });
+      const path = join(process.cwd(), 'public', 'reading-sources', file);
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(readFileSync(path, 'utf-8')) as unknown;
+      } catch {
+        return NextResponse.json({ error: '预置书源文件读取失败' }, { status: 500 });
       }
       const list = Array.isArray(parsed) ? parsed : [parsed];
       return NextResponse.json(await importArray(list, body.enabled !== false));
@@ -227,9 +294,45 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ results });
     }
     if (action === 'resetBuiltin') {
-      await db.bookSource.deleteMany({ where: { isBuiltin: true } });
-      await ensureSeeded();
-      return NextResponse.json({ ok: true });
+      // 按URL upsert（保留已有行ID，不破坏书架/历史里的 sourceId 引用）：
+      // 已存在 → 更新配置并重新启用；不存在 → 新建
+      const all = await db.bookSource.findMany({ select: { id: true, url: true } });
+      const byUrl = new Map(all.map((x) => [x.url, x.id]));
+      let restored = 0;
+      let order = all.length;
+      for (const b of BUILTIN_BOOK_SOURCES) {
+      const url = b.bookSourceUrl;
+        const existId = byUrl.get(url);
+        if (existId) {
+          await db.bookSource.update({
+            where: { id: existId },
+            data: {
+              name: b.bookSourceName,
+              config: JSON.stringify(b),
+              enabled: true,
+              isBuiltin: true,
+              checkStatus: b.enabled !== false ? 'ok' : null,
+            },
+          });
+        } else {
+          await db.bookSource.create({
+            data: {
+              name: b.bookSourceName,
+              url,
+              group: b.bookSourceGroup || '小说',
+              enabled: b.enabled !== false,
+              config: JSON.stringify(b),
+              isBuiltin: true,
+              sortOrder: order++,
+              checkStatus: b.enabled !== false ? 'ok' : null,
+            },
+          });
+        }
+        restored++;
+      }
+      // 自愈：书架/历史里引用已失效书源的记录，按 bookUrl 前缀匹配回新源
+      await healSourceRefs().catch(() => null);
+      return NextResponse.json({ ok: true, restored });
     }
     if (action === 'sort') {
       const ids = Array.isArray(body.ids) ? (body.ids as string[]) : [];
