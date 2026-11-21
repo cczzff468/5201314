@@ -101,3 +101,117 @@ model CoupleHome {
   rev         Int      @default(0)
   updatedAt   DateTime @updatedAt
 }
+
+/// ===== 阅读 App（书源聚合阅读器 + AI 陪读） =====
+/// 书源：内置源（isBuiltin=true，随代码分发）与用户源（自定义/URL导入/文件上传）同表
+model BookSource {
+  id          String   @id @default(cuid())
+  /// 书源名（如「笔趣阁①」）
+  name        String
+  /// bookSourceUrl（站点根，含 http(s)://）
+  url         String
+  /// 分组名（小说/正版/轻小说/API…）
+  group       String   @default("小说")
+  enabled     Boolean  @default(true)
+  /// Legado 3.0 书源完整 JSON（searchUrl/ruleSearch/ruleToc/ruleContent 等）
+  config      String
+  isBuiltin   Boolean  @default(false)
+  sortOrder   Int      @default(0)
+  /// 最近一次健康检查：ok / fail / 空=未检查
+  checkStatus String?
+  lastCheckAt DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([enabled])
+}
+
+/// 书架书籍：加入书架的书（记录进度 + 缓存目录）
+model ShelfBook {
+  id              String   @id @default(cuid())
+  name            String
+  author          String?
+  coverUrl        String?
+  intro           String?
+  /// 当前使用的书源 id
+  sourceId        String
+  sourceName      String?
+  /// 书籍详情/目录页 URL（同书多源时作为换源匹配键）
+  bookUrl         String
+  /// 目录（缓存 JSON：[{title,url}]）
+  chapters        String   @default("[]")
+  totalChapters   Int      @default(0)
+  lastChapterTitle String?
+  /// 阅读进度：章节下标（0-based）
+  lastReadChapter Int      @default(0)
+  lastReadAt      DateTime @default(now())
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([bookUrl])
+}
+
+/// 章节正文缓存（含 AI 摘要；同 URL 去重）
+model ChapterCache {
+  id           String   @id @default(cuid())
+  bookUrl      String
+  chapterIndex Int
+  chapterUrl   String
+  title        String
+  /// 净化后的正文（纯文本，\n 分段）
+  content      String
+  /// AI 章节摘要（~100字，翻章时后台静默生成）
+  summary      String?
+  fetchedAt    DateTime @default(now())
+
+  @@unique([chapterUrl])
+  @@index([bookUrl])
+}
+
+/// 阅读器排版设置（单行单例）
+model ReadingSetting {
+  id            String   @id @default("singleton")
+  fontSize      Int      @default(19)
+  /// 字体：system/songti/kaiti/heiti/fangsong/custom
+  fontFamily    String   @default("system")
+  /// normal | bold | light
+  fontWeight    String   @default("normal")
+  /// 阅读背景主题：paper/green/night/cream/.../custom
+  bgTheme       String   @default("paper")
+  /// 自定义背景 dataURL（bgTheme=custom 时用）
+  bgCustom      String?
+  /// 自定义字体 dataURL（fontFamily=custom 时用）
+  fontCustom    String?
+  /// App 主题风格（海洋蓝玻璃/极光紫/暗夜黑/少女粉/翡翠绿）
+  appTheme      String   @default("ocean")
+  letterSpacing Float    @default(0)
+  /// 行间距（倍数 1.2-3.0）
+  lineSpacing   Float    @default(1.9)
+  /// 段间距（em 0-2）
+  paraSpacing   Float    @default(0.9)
+  marginLeft    Float    @default(5)
+  marginRight   Float    @default(5)
+  marginTop     Float    @default(4)
+  marginBottom  Float    @default(4)
+  /// 标题位置 left|center|hidden
+  titlePosition String   @default("left")
+  justify       Boolean  @default(true)
+  bottomAlign   Boolean  @default(false)
+  underline     Boolean  @default(false)
+  updatedAt     DateTime @updatedAt
+}
+
+/// AI 陪读记忆：章节摘要 / 聊天记录 / 读书里程碑
+model ReadingMemory {
+  id           String   @id @default(cuid())
+  bookUrl      String
+  /// book：读完一本书 | summary：章节摘要 | chat：聊天 | milestone：进度里程碑
+  kind         String
+  chapterIndex Int?
+  /// user | assistant | system
+  role         String?
+  content      String
+  createdAt    DateTime @default(now())
+
+  @@index([bookUrl, kind])
+}

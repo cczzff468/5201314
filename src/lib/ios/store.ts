@@ -1637,7 +1637,8 @@ export type AppId =
   | 'meituan'
   | 'couple'
   | 'cottage'
-  | 'forum';
+  | 'forum'
+  | 'reading';
 
 export type AppPhase = 'closed' | 'opening' | 'open' | 'closing';
 

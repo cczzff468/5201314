@@ -11,9 +11,9 @@
 
 // ---------------- 基础类型 ----------------
 
-export type MemApp = 'wx' | 'qq' | 'sms' | 'phone' | 'cabin' | 'forum';
+export type MemApp = 'wx' | 'qq' | 'sms' | 'phone' | 'cabin' | 'forum' | 'reading';
 
-export const MEM_APP_LABEL: Record<MemApp, string> = { wx: '微信', qq: 'QQ', sms: '信息', phone: '电话', cabin: '拾光小屋', forum: 'X论坛' };
+export const MEM_APP_LABEL: Record<MemApp, string> = { wx: '微信', qq: 'QQ', sms: '信息', phone: '电话', cabin: '拾光小屋', forum: 'X论坛', reading: '阅读' };
 
 /** 记忆权重：高（身份/关系/承诺/禁忌）/ 普通 / 低（临时安排、近期状态，最先淡化） */
 export type MemWeight = 'high' | 'normal' | 'low';

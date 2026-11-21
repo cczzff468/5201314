@@ -3203,3 +3203,59 @@ Stage Summary:
 - ClawBox = 云端助手 + 真机接入一个界面两个毛玻璃页签，真机接入彻底不再是单独界面（微信/QQ 胶囊内嵌同屏）；入口在语音 API 下方，全站再无「只发一条」的多重根因链（档位门槛/multi 开关/8·30 条截断全拆）
 - 真机连发口径：最少 3 条、上限不设（提示词 + 切分 + 发送三层一致，站内回复条数选 1 也不再影响真机）；表情双层克制：提示词按消息意思带 + 出站每条最多一个经典代码
 - 关键文件：settings.tsx（ClawBoxPage/入口）、reply-count.ts（buildDeviceBurstPrompt）、weixin-connect.ts、run-package.ts、sources.ts（v24 核心 + CLOUD_RUNTIME_VER 24）
+
+---
+Task ID: 3
+Agent: 主控 Agent（Z.ai Code）
+Task: 拉取 cczzff468/5201314 最新版（main 分支）重新部署 + GitHub 免费书源调研
+
+Work Log:
+- 环境已重置，my-project 为空白模板；git clone（带 PAT）5201314 main 分支至 /home/z/repo-5201314
+- rsync 同步至 /home/z/my-project（保留 .env/Caddyfile；排除 .git/.next/node_modules/download）
+- bun install（509 包）+ prisma generate + db:push（复用仓库 custom.db，schema 已同步）
+- 启动 dev server（3000 端口），instrumentation 拉起 ncm/qq/kg keeper
+- Agent Browser 验证：锁屏渲染 → pointer 手势上滑解锁 → 主屏（时钟/天气/应用图标/dock/语音助手球）→ 计算器 App 打开成功；dev.log 无错误（天气 API 502 为沙箱外网限制，App 自动重试）
+- 书源调研：验证 8 个 GitHub 书源仓库（XIU2/aoaostar/tickmao/liufuyou/entr0pia/Wenmoux/shidahuilang 等），下载 12 个书源 JSON 文件验证结构有效性 + 204 个书源站点 HTTP 存活探测，结果存 /home/z/booksrc-work/probe_result.json
+
+Stage Summary:
+- 项目已完整重新部署并运行在 3000 端口（5201314 main，v28 微信/QQ重复回复修复版）
+- 免费书源可用清单已产出（详见对话汇报），可支撑后续「阅读 App」功能开发
+
+---
+Task ID: 4
+Agent: 主控 Agent（Z.ai Code）
+Task: 阅读 App 完整开发（免费书源聚合 + AI 陪读 + 全套排版）
+
+Work Log:
+- [书源引擎] src/lib/reading/engine.ts：Legado 3.0 规则子集（class/id/tag链、@css:、$.JSONPath、{{$.x}}模板、##正则##替换、||回退、XPath-lite og:meta、GBK/GB18030编码、POST表单GBK百分号编码）；服务端代理抓取（UA/Referer防盗链/CORS全解决）；目录修复三件套：fixReversedToc（四分位趋势倒序检测+第一章守卫）、extractMainToc（容差最长非递增run剥离最新块/推荐块，「第X部总结」小序号跳过）、正文自动翻页（nextContentUrl<1500字跟随）+句内广告清洗（URL/域名/首发域名宣传）
+- [内置源] 全链路实测 1168 候选（搜索→目录→正文），双关键词（斗破苍穹+诡秘之主）验证通过 24 站入内置（src/lib/reading/builtin-sources.ts），默认启用 7 个精品源；内置源可删除可恢复（resetBuiltin）
+- [数据层] Prisma 新增 BookSource/ShelfBook/ChapterCache/ReadingSetting/ReadingMemory 五模型
+- [API] /api/reading/{sources,search,book,chapter,shelf,settings,chat,summary,history}：书源播种/导入四途径（JSON粘贴/URL/文件上传/预置合集直链）/健康检查/排序；聚合搜索单源接口（客户端并发4+AbortController暂停继续）；章节双缓存+翻章后台静默AI摘要（Token危机解法：聊天只注入100字摘要+最近10条对话，正文永不进上下文）；书架进度/自动入架兜底/百章里程碑记忆
+- [前端] src/components/apps/reading/ 11 组件：3Tab主壳（蓝色玻璃毛玻璃悬浮胶囊TabBar，5主题可切换：海洋蓝/极光紫/暗夜黑/樱花粉/翡翠绿）、首页（胶囊搜索+渐变Banner+分类胶囊+精选书单+继续阅读卡）、书架（3列网格+未读角标+分组胶囊+管理模式）、聚合搜索（多源并行+暂停继续胶囊+按书名作者分组「N个源」徽标）、书籍详情（目录抽屉正倒序+换源+智能定位第一章）、阅读器（点按分区翻章/上下毛玻璃工具栏/进度滑杆/侧滑目录）、排版设置面板（字号/字重/字体5内置+上传/行段字距/四向边距全滑块/标题三态/两端对齐/底部对齐/下划线开关/背景6内置+上传，全部实时预览+300ms防抖落库）、AI伴读聊天（书籍上下文卡+快捷提问+记忆）、书源管理（启停/删除/一键检查/恢复内置/四途径导入）、阅读记录（统计卡+进度条+里程碑时间线）
+- [注册] AppId 'reading' + registry（真实PNG图标public/icons/reading.png，AI生成蓝色玻璃书籍）+ HomeScreen 第3页尾（存量布局走缺失App补位自动上屏）
+- [验证] Agent Browser 端到端：解锁→打开阅读→搜索「诡秘之主」→5源聚合分组→详情1454章→开始阅读→正文69段渲染（净化后无广告）→工具栏→排版实时预览（字号28px/下划线/夜间背景即时生效）→AI伴读（准确知道书名/13/1454章进度/第一章绯红剧情，聊天与摘要入ReadingMemory）→继续阅读卡（自动入架读到13章）→书架/我/书源管理全页OK；ESLint 0错误；dev.log 当前零错误
+
+Stage Summary:
+- 阅读 App 完整上线：免费书源聚合阅读器 + AI 陪读 + 全套排版自定义，全部核心链路浏览器实测通过
+- 技术要点：后端代理抓取解决防盗链/CORS；AI摘要省Token；排版滑块实时预览（zustand本地即时+防抖落库）
+
+---
+Task ID: 5
+Agent: 主控 Agent（Z.ai Code）
+Task: 阅读 App 全面美化 + 换源/真实封面/滑动翻章/AI陪读选联系人/记忆App打通
+
+Work Log:
+- [状态栏修复] SB_H=54 常量；SubNavBar 顶栏加 paddingTop 预留（全部子页不再被状态栏遮挡）；阅读器顶部胶囊定位 top:SB_H+8、正文 paddingTop 含 SB_H
+- [AI陪读·先选联系人] AIChatSheet 重写为两阶段：①玻璃卡联系人选择器（内置「伴读书童」兜底 + 联系人列表带人设摘要 + 「上次陪读TA」一键继续卡）→ ②以该联系人身份陪读聊天；客户端组装人设（名字/性别/年龄/职业/地区/关系/性格/表达风格/背景/定制规则）随请求注入
+- [AI陪读·记忆App打通] MemApp/AccountApp 新增 'reading'（标签「阅读」，accounts 三处 Record 补键）；聊天前 memChatRecallBlock 召回该联系人跨App记忆注入、每轮回复后 memAddEventFragment 写记忆碎片（来源=阅读，互通开启时微信/QQ共享）；chat 路由/ai.ts 支持 persona+memoryBlock 参数
+- [阅读器] 左右滑动翻章（ref 跟手位移 + 64px 阈值 + 松手方向翻章动画 rd-flip-l/r + 跟手提示胶囊「上一章/下一章」；修复 onTouchEnd 闭包读到旧 state 的 bug——改 swipeDxRef 实时读）；顶部/底部悬浮毛玻璃胶囊工具栏（非通栏）；章节标题下加进度装饰线；章末「本章完·还剩N章」+ 胶囊按钮
+- [换源] 书籍详情新增「切换书源」卡：打开抽屉后台并行搜同名书（并发4、取10源）、当前源高亮、点按切换（matchChapterIndex 章节标题归一化映射进度，精确→包含→下标兜底）；shelf 新增 switchSource 动作（书架记录按书名+作者整体迁移到新源，进度保留，自动清理重复记录）
+- [真实封面] 新增 /api/reading/cover 服务端封面代理（伪装 Referer/UA 抓图二进制透传，长缓存）——搜索/书架/详情/AI聊天头卡全部走代理，防盗链封面不再 403；首页精选书单后台逐本抓真实封面（fetchBookCover 并发竞速 + 成功源偏好 + 失败源记忆 + localStorage 7天缓存），CoverPlaceholder 升级书脊风占位
+- [我Tab] 头卡「我的书屋」→「我的信息」；删除「清空AI陪读记忆」项；新增阅读统计胶囊三宫格；主题/排版抽屉玻璃化
+- [全局玻璃美化] 页面底加主题色径向光斑（三层）+ 对角渐变底、卡片透明度调优（浅色主题0.58）、全部卡片统一 inset ring + backdrop-blur、按钮全胶囊化（渐变实心主按钮）、抽屉全部圆角玻璃 + 顶部抓手条；排版设置面板主题感知（暗夜黑深色态）
+- [类型修复] 顺带修复预存类型错误：cheerio 1.x AnyNode 改从 domhandler 导入、XPath 分支 ctx.$(el).find 正确调用、Legado 规则接口加索引签名、appstore/registry 补 reading 键
+- [运维] dev server 期间 git stash 引发 SQLite 只读句柄（attempt to write a readonly database），重启 dev server 解决
+- [验证] Agent Browser 端到端：解锁→阅读App→书架3书真实封面→遮天阅读（正文+翻章动画）→左滑/右滑翻章双向 OK→AI伴读（选联系人苏晴→以人设回复、知道书名/章数/进度/摘要）→记忆App苏晴名下1条碎片（内容含陪读对话全文、来源徽章「阅读」）→聚合搜索4源分组→详情切换书源（夜天连→穿越小说 1861→1860章，书架迁移进度保留）→排版字号滑块实时预览 20→26px；VLM 截图评审：毛玻璃明显✓ 状态栏无遮挡✓ 美观度7.5/10；ESLint 0错误；tsc 阅读/记忆/账号模块 0错误
+
+Stage Summary:
+- 阅读 App v2：全界面毛玻璃胶囊玻璃风、真实封面代理、详情页换源保进度、阅读器滑动翻章、AI陪读先选联系人且记忆入「记忆」App（跨App互通）

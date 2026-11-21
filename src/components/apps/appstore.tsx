@@ -71,6 +71,7 @@ const TAGLINES: Record<AppId, string> = {
   couple: '情侣空间，两个人的小天地',
   cottage: '拾光小屋，把日常装进小家',
   forum: 'X论坛，大家都在聊什么',
+  reading: '免费书源聚合阅读 · AI 伴读',
 };
 
 /** 分类（排行榜副标题 & 搜索关键字） */
@@ -102,6 +103,7 @@ const CATEGORY: Record<AppId, string> = {
   couple: '社交',
   cottage: '生活',
   forum: '社交',
+  reading: '图书',
 };
 
 /** App 标签页分组 */
