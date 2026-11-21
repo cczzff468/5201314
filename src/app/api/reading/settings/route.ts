@@ -26,6 +26,8 @@ export const DEFAULT_READING_SETTINGS = {
   underline: false,
   showTime: true,
   showBattery: true,
+  pageAnim: 'slide',
+  keyTurn: false,
   presets: [] as unknown[],
   profileName: null as string | null,
   profileId: null as string | null,
@@ -71,6 +73,9 @@ function coerce(raw: Partial<Record<keyof SettingsPatch, unknown>>): Partial<Set
   if (typeof raw.underline === 'boolean') out.underline = raw.underline;
   if (typeof raw.showTime === 'boolean') out.showTime = raw.showTime;
   if (typeof raw.showBattery === 'boolean') out.showBattery = raw.showBattery;
+  if (typeof raw.pageAnim === 'string' && ['slide', 'cover', 'none'].includes(raw.pageAnim))
+    out.pageAnim = raw.pageAnim;
+  if (typeof raw.keyTurn === 'boolean') out.keyTurn = raw.keyTurn;
   // 我的资料：昵称 / 自定义 ID / 头像（dataURL，限制 1.5MB）
   for (const k of ['profileName', 'profileId'] as const) {
     const v = raw[k];
@@ -181,6 +186,8 @@ export async function GET() {
       underline: row.underline,
       showTime: row.showTime,
       showBattery: row.showBattery,
+      pageAnim: row.pageAnim,
+      keyTurn: row.keyTurn,
       presets,
       profileName: row.profileName,
       profileId: row.profileId,

@@ -41,6 +41,10 @@ export interface ReaderSettings {
   showTime: boolean;
   /** 阅读页脚：显示电量 */
   showBattery: boolean;
+  /** 翻页动画：slide 平移 | cover 覆盖 | none 无动画 */
+  pageAnim: 'slide' | 'cover' | 'none';
+  /** 音量键/键盘方向键翻页 */
+  keyTurn: boolean;
   /** 排版预设（保存的排版方案） */
   presets: ReaderPreset[];
   /** 我的资料：昵称 / 自定义 ID / 头像 */
@@ -94,6 +98,8 @@ export const DEFAULT_SETTINGS: ReaderSettings = {
   underline: false,
   showTime: true,
   showBattery: true,
+  pageAnim: 'slide',
+  keyTurn: false,
   presets: [],
   profileName: null,
   profileId: null,
@@ -409,6 +415,23 @@ export interface TocItem {
   title: string;
   url: string;
 }
+/** 阅读批注：书签 / 划线笔记（与 ReaderNote 表对齐） */
+export interface ReaderNoteItem {
+  id: string;
+  bookUrl: string;
+  name: string;
+  kind: 'bookmark' | 'highlight' | string;
+  chapterIndex: number;
+  chapterTitle: string | null;
+  pageIndex: number;
+  paraIndex: number;
+  startOff: number;
+  endOff: number;
+  text: string;
+  style: 'line' | 'wavy' | 'box' | string | null;
+  note: string | null;
+  createdAt: string;
+}
 export interface BookDetailData {
   name: string;
   author: string;
@@ -517,6 +540,17 @@ export const api = {
       j<{ ok: boolean; id: string; name: string; chapters: number }>(r),
     );
   },
+  /** 批注：某本书的书签 + 划线列表 */
+  notesList: (bookUrl: string) =>
+    fetch(`/api/reading/notes?bookUrl=${encodeURIComponent(bookUrl)}`).then((r) =>
+      j<{ notes: ReaderNoteItem[] }>(r),
+    ),
+  notesAction: (body: Record<string, unknown>) =>
+    fetch('/api/reading/notes', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }).then((r) => j<Record<string, unknown>>(r)),
 };
 
 /** 秒数 → 「x小时y分钟 / y分钟」展示 */
@@ -581,6 +615,107 @@ export function matchChapterIndex(newChapters: TocItem[], oldTitle: string | nul
   let hit = newChapters.findIndex((c) => normTitle(c.title) === nt);
   if (hit < 0) hit = newChapters.findIndex((c) => normTitle(c.title).includes(nt) || nt.includes(normTitle(c.title)));
   return hit >= 0 ? hit : Math.min(oldIdx, newChapters.length - 1);
+}
+
+// ---------------------------------------------------------------------------
+// 相似书推荐（基于书架 / 当前书：同作者 > 书名相似 > 同分类）
+// ---------------------------------------------------------------------------
+
+/** 归一化书名（去书名号/空格/标点） */
+function normBookName(n: string): string {
+  return n.replace(/[\s《》“”"'·、,，.。！!？?：:（）()\[\]【】]/g, '').toLowerCase();
+}
+
+/** 两书名相似度：最长公共子串长度 / 较短串长度（粗粒度够用） */
+function nameSimilarity(a: string, b: string): number {
+  const s = normBookName(a);
+  const t = normBookName(b);
+  if (!s || !t) return 0;
+  if (s === t) return 1;
+  let best = 0;
+  const m = s.length;
+  const n = t.length;
+  let prev = new Array<number>(n + 1).fill(0);
+  for (let i = 1; i <= m; i++) {
+    const cur = new Array<number>(n + 1).fill(0);
+    for (let j = 1; j <= n; j++) {
+      if (s[i - 1] === t[j - 1]) {
+        cur[j] = prev[j - 1] + 1;
+        if (cur[j] > best) best = cur[j];
+      }
+    }
+    prev = cur;
+  }
+  return best / Math.min(m, n);
+}
+
+/** 书名 → 精选书单里的分类（找不到返回 null） */
+export function featuredCategoryOf(name: string): string | null {
+  const n = normBookName(name);
+  for (const [cat, list] of Object.entries(FEATURED)) {
+    if (list.some((b) => normBookName(b.name) === n)) return cat;
+  }
+  return null;
+}
+
+/** 某分类下的精选书（排除指定书名） */
+export function featuredOfCategory(cat: string, exclude: string[] = [], limit = 8) {
+  const ex = new Set(exclude.map(normBookName));
+  return (FEATURED[cat] || [])
+    .filter((b) => !ex.has(normBookName(b.name)))
+    .slice(0, limit)
+    .map((b) => ({ name: b.name, author: b.author, tag: b.tag, reason: `同分类 ${b.tag}` }));
+}
+
+/**
+ * 相似书推荐：基于一组「种子书」（书架在架书 / 当前书），
+ * 从内置精选书单里打分排序（同作者 > 书名相似 > 同分类），排除种子与黑名单。
+ */
+export function recommendBooks(
+  seeds: { name: string; author?: string | null; tag?: string | null }[],
+  exclude: string[] = [],
+  limit = 8,
+): { name: string; author: string; tag: string; reason: string }[] {
+  const excluded = new Set([...exclude, ...seeds.map((s) => s.name)].map(normBookName));
+  const score = new Map<
+    string,
+    { name: string; author: string; tag: string; score: number; reason: string }
+  >();
+  const seedAuthors = new Set(
+    seeds.map((s) => (s.author || '').replace(/\s+/g, '')).filter(Boolean),
+  );
+  const seedTags = new Set(seeds.map((s) => s.tag).filter(Boolean) as string[]);
+  for (const [cat, list] of Object.entries(FEATURED)) {
+    for (const b of list) {
+      const k = normBookName(b.name);
+      if (excluded.has(k)) continue;
+      let sc = 0;
+      let reason = '';
+      if (b.author && seedAuthors.has(b.author.replace(/\s+/g, ''))) {
+        sc += 5;
+        reason = `同作者 ${b.author}`;
+      }
+      for (const s of seeds) {
+        const sim = nameSimilarity(s.name, b.name);
+        if (sim > 0.34 && sim < 1) {
+          sc += 3;
+          if (!reason) reason = `与《${s.name}》相似`;
+        }
+      }
+      if (seedTags.has(cat) || seedTags.has(b.tag)) {
+        sc += 2;
+        if (!reason) reason = `同分类 ${b.tag}`;
+      }
+      if (sc <= 0) continue;
+      const prev = score.get(k);
+      if (!prev || prev.score < sc)
+        score.set(k, { name: b.name, author: b.author, tag: b.tag, score: sc, reason });
+    }
+  }
+  return [...score.values()]
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limit)
+    .map(({ name, author, tag, reason }) => ({ name, author, tag, reason }));
 }
 
 // ---------------------------------------------------------------------------

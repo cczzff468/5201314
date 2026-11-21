@@ -29,8 +29,11 @@ import {
   api,
   CoverPlaceholder,
   coverSrc,
+  featuredCategoryOf,
+  featuredOfCategory,
   findStartIndex,
   matchChapterIndex,
+  recommendBooks,
   themeOf,
   type BookDetailData,
   type SearchBookItem,
@@ -83,6 +86,10 @@ export function BookDetail({
   const [srcSearching, setSrcSearching] = useState(false);
   const srcSearchedRef = useRef(false);
 
+  // 自动换源（详情加载失败时）
+  const [autoTrying, setAutoTrying] = useState(false);
+  const autoRef = useRef(false);
+
   // 听书（Web Speech）
   const [speaking, setSpeaking] = useState(false);
 
@@ -90,18 +97,34 @@ export function BookDetail({
   const author = data?.author || curBook.author || '';
 
   const [reloadKey, setReloadKey] = useState(0);
+  /** 自动换源回调（定义在下方；effect 里经 ref 调用避免前置引用） */
+  const tryAutoRef = useRef<() => Promise<boolean>>(async () => false);
   useEffect(() => {
     let alive = true;
     api
       .bookDetail(curSourceId, curBook.bookUrl, curBook.name, curBook.author || '')
       .then((d) => {
         if (!alive) return;
+        if (!d.chapters.length) {
+          // 目录为空视为该源不可用 → 自动换源
+          setData(null);
+          setErr('该源目录为空');
+          void tryAutoRef.current().then((ok) => {
+            if (!ok && alive) setErr((cur) => cur || '该源目录为空，请换个书源试试');
+          });
+          return;
+        }
         setData(d);
         setInShelf(d.inShelf);
         setErr('');
       })
       .catch((e: Error) => {
-        if (alive) setErr(e.message || '加载失败');
+        if (!alive) return;
+        setErr(e.message || '加载失败');
+        // 自动换源：失败后依次试其他源，第一个能拉到目录的自动切过去
+        void tryAutoRef.current().then((ok) => {
+          if (!ok && alive) setErr((cur) => cur || '加载失败，请换个书源试试');
+        });
       });
     return () => {
       alive = false;
@@ -158,6 +181,62 @@ export function BookDetail({
     }
   }, [srcOpen, findCandidates]);
 
+  /** 详情加载失败 → 自动换源：依次试其他源，能拉到目录的自动切过去 */
+  const tryAutoSwitchDetail = useCallback(async (): Promise<boolean> => {
+    if (autoRef.current) return false;
+    autoRef.current = true;
+    setAutoTrying(true);
+    try {
+      const enabled = sources.filter((s) => s.enabled && s.id !== curSourceId).slice(0, 12);
+      const nm = (s: string) => s.replace(/\s+/g, '');
+      for (const src of enabled) {
+        try {
+          const r = await api.searchOne(curBook.name, src.id);
+          const hit = (r.books || []).find((b) => nm(b.name) === nm(curBook.name));
+          if (!hit) continue;
+          const d = await api.bookDetail(src.id, hit.bookUrl, curBook.name, curBook.author || '');
+          // 目录过少视为残缺源（百章书只有几条目录的直接跳过）
+          if (d.chapters.length < 10) continue;
+          if (inShelf || shelfEntry) {
+            await api
+              .shelfAction({
+                action: 'switchSource',
+                name,
+                author,
+                book: {
+                  sourceId: src.id,
+                  sourceName: src.name,
+                  bookUrl: hit.bookUrl,
+                  coverUrl: hit.coverUrl || curBook.coverUrl,
+                  intro: d.intro,
+                  chapters: d.chapters,
+                },
+              })
+              .catch(() => null);
+            await loadShelf().catch(() => null);
+          }
+          await api.notesAction({ action: 'migrate', from: curBook.bookUrl, to: hit.bookUrl }).catch(() => null);
+          setCurSourceId(src.id);
+          setCurBook({ ...hit, name: d.name || name, author: d.author || author });
+          setData({ ...d, lastReadChapter: 0 });
+          setInShelf(d.inShelf);
+          setErr('');
+          notify(`已自动切换书源：${src.name}`);
+          return true;
+        } catch {
+          /* 试下一个源 */
+        }
+      }
+      return false;
+    } finally {
+      autoRef.current = false;
+      setAutoTrying(false);
+    }
+  }, [sources, curSourceId, curBook, name, author, inShelf, shelfEntry, loadShelf]);
+  useEffect(() => {
+    tryAutoRef.current = tryAutoSwitchDetail;
+  }, [tryAutoSwitchDetail]);
+
   /** 切换到候选源：重拉详情 + 进度按章节标题映射 + 书架记录迁移 */
   const switchTo = async (c: SourceCandidate) => {
     if (switching) return;
@@ -186,6 +265,8 @@ export function BookDetail({
           .catch(() => null);
         await loadShelf().catch(() => null);
       }
+      // 批注（书签/划线）随书迁移到新 bookUrl
+      await api.notesAction({ action: 'migrate', from: curBook.bookUrl, to: c.book.bookUrl }).catch(() => null);
       setCurSourceId(c.sourceId);
       setCurBook({ ...c.book, name: d.name || name, author: d.author || author });
       setData({ ...d, lastReadChapter: newIdx });
@@ -302,6 +383,14 @@ export function BookDetail({
     return tocReverse ? [...data.chapters].reverse() : data.chapters;
   }, [data, tocReverse]);
 
+  /** 相似书推荐（同作者 > 书名相似 > 同分类；无命中时回退到同分类精选） */
+  const similar = useMemo(() => {
+    const scored = recommendBooks([{ name, author, tag: (curBook.kind || '').replace('分类：', '') }], [name], 8);
+    if (scored.length) return scored;
+    const cat = featuredCategoryOf(name);
+    return cat ? featuredOfCategory(cat, [name], 8) : [];
+  }, [name, author, curBook.kind]);
+
   const cover = coverSrc(data?.coverUrl || curBook.coverUrl, curSourceId);
   const glass = { background: theme.cardBg, boxShadow: 'inset 0 0 0 1px ' + theme.cardRing } as const;
   /** 最近 3 章（倒序显示） */
@@ -331,8 +420,8 @@ export function BookDetail({
         />
       </div>
 
-      {/* 顶栏：半透明圆形返回按钮 + 刷新（毛玻璃胶囊） */}
-      <div className="relative z-20 flex h-[52px] shrink-0 items-center justify-between px-4" style={{ paddingTop: 54 }}>
+      {/* 顶栏：半透明圆形返回按钮 + 刷新（毛玻璃胶囊；下移离状态栏更远） */}
+      <div className="relative z-20 flex h-[52px] shrink-0 items-center justify-between px-4" style={{ paddingTop: 68 }}>
         <button
           type="button"
           onClick={onBack}
@@ -353,24 +442,42 @@ export function BookDetail({
         </button>
       </div>
 
-      {!data && !err && (
+      {!data && !err && !autoTrying && (
         <div className="flex flex-1 items-center justify-center">
           <Loader2 className="h-7 w-7 animate-spin" style={{ color: theme.accent }} />
         </div>
       )}
-      {err && (
+      {!data && autoTrying && (
+        <div className="flex flex-1 flex-col items-center justify-center gap-3 px-8 text-center">
+          <Loader2 className="h-7 w-7 animate-spin" style={{ color: theme.accent }} />
+          <p className="text-[13px]" style={{ color: theme.textSub }}>
+            当前源加载失败，正在自动尝试其他书源…
+          </p>
+        </div>
+      )}
+      {err && !autoTrying && (
         <div className="flex flex-1 flex-col items-center justify-center gap-3 px-8 text-center">
           <p className="text-[14px]" style={{ color: theme.textSub }}>
             {err}
           </p>
-          <button
-            type="button"
-            onClick={() => onSwitchSource(curBook)}
-            className="rounded-full px-5 py-2 text-[13px] font-semibold text-white shadow-md"
-            style={{ background: `linear-gradient(135deg, ${theme.gradFrom}, ${theme.gradTo})` }}
-          >
-            换个书源试试
-          </button>
+          <div className="flex gap-3">
+            <button
+              type="button"
+              onClick={() => setReloadKey((k) => k + 1)}
+              className="rounded-full px-5 py-2 text-[13px] font-medium backdrop-blur-xl"
+              style={{ background: 'rgba(120,128,140,0.14)', color: theme.textMain }}
+            >
+              重试
+            </button>
+            <button
+              type="button"
+              onClick={() => onSwitchSource(curBook)}
+              className="rounded-full px-5 py-2 text-[13px] font-semibold text-white shadow-md"
+              style={{ background: `linear-gradient(135deg, ${theme.gradFrom}, ${theme.gradTo})` }}
+            >
+              换个书源试试
+            </button>
+          </div>
         </div>
       )}
       {data && (
@@ -543,6 +650,40 @@ export function BookDetail({
                   {introOpen ? '收起' : '展开全部'}
                 </button>
               )}
+            </div>
+          )}
+
+          {/* 相似书推荐（同作者/同分类） */}
+          {similar.length > 0 && (
+            <div className="mt-3.5 rounded-3xl p-4 backdrop-blur-xl" style={glass}>
+              <p className="text-[16px] font-bold" style={{ color: theme.textMain }}>
+                看了本书的还在看
+              </p>
+              <div className="-mx-1 mt-2.5 flex gap-3 overflow-x-auto px-1 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                {similar.map((b) => (
+                  <button
+                    key={b.name}
+                    type="button"
+                    onClick={() => onSwitchSource({ name: b.name, author: b.author, bookUrl: '', sourceName: '', sourceUrl: '' })}
+                    className="w-[86px] shrink-0 text-left active:scale-95"
+                  >
+                    <div
+                      className="flex aspect-[3/4.2] w-full flex-col items-center justify-center gap-1.5 overflow-hidden rounded-xl p-2"
+                      style={{ backgroundImage: `linear-gradient(150deg, ${theme.gradFrom}55, ${theme.gradTo}99)` }}
+                    >
+                      <span className="line-clamp-3 text-center text-[12px] font-bold leading-tight text-white">
+                        {b.name}
+                      </span>
+                    </div>
+                    <p className="mt-1.5 truncate text-[12px] font-semibold" style={{ color: theme.textMain }}>
+                      {b.name}
+                    </p>
+                    <p className="truncate text-[10px]" style={{ color: theme.textSub }}>
+                      {b.reason}
+                    </p>
+                  </button>
+                ))}
+              </div>
             </div>
           )}
         </div>

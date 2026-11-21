@@ -7,16 +7,18 @@
  *   用 Range.getClientRects 二分找每行行首边界；按「整行」贪心装页：
  *   · 每页首尾一定是完整的字/行，绝不出现半行截断的「虚线」假象
  *   · 段落跨页续片无首行缩进，避免底部大片空白
- *   · 全部页面的 DOM 常驻（上一页/下一页预渲染），跟手滑动零闪烁
- *   · 翻页步长 = 页宽（无列间距），不会出现左右边缘空白
- *   · 字号/行距/边距变化实时重算（行切分按字体参数缓存，拖滑块不卡）
- * - 翻页手势：跟手位移 + 松手动画；章内翻尽继续滑 → 翻章（胶囊提示）
- * - 点按分区：左 1/3 上一页 · 中间唤出工具 · 右 1/3 下一页
- * - 页脚：页码在左下角；章节号默认右下角；开启时间/电量显示后章节号
- *   移到左下角与页码同排，时间+电量占据右下角（排版设置里可开关）
+ *   · 页宽取整（floor）——页/轨道/测量容器全部整数像素，翻页无亚像素缝隙
+ *     （修复：翻页时左右边缘出现「被切开」的空白）
+ * - 翻页动画（排版设置可选）：平移 slide（整排跟手移动）/ 覆盖 cover
+ *   （新页带阴影盖过旧页）/ 无动画 none（瞬时切换）
+ * - 翻页方式：跟手横滑 + 点按分区（左1/3上一页·中间菜单·右1/3下一页）
+ *   + 音量键/键盘方向键翻页（排版设置开关；音量上=上一页，下=下一页）
+ * - 划线笔记：长按文字自动选中整段 → 弹出菜单（从本段听/复制/查询/
+ *   划线样式：直线·波浪·框选/写笔记）；点已有划线可查看笔记·改样式·删除
+ * - 书签：上滑手势快速加书签；顶部工具栏书签图标打开书签/划线列表
+ * - 自动换源：章节/目录加载失败时自动搜索其他书源并切换（进度按章节映射）
+ * - 页脚：页码左下角；章节号默认右下角（开时间/电量后移左下，时间电量占右下）
  * - 沉浸模式：状态栏与灵动岛整体隐藏，退出恢复
- * - 工具：顶部返回/书名/换源/缓存/章节搜索/刷新；底部章节条+目录·夜间·
- *   AI伴读·排版·朗读；夜间一键切换；Web Speech 全章 TTS
  * - 进度记忆：翻页防抖、翻章立即保存（章节 + 章内页码）
  * - 阅读时长：每 15s 上报一次，「我」页展示累计时间
  */
@@ -39,6 +41,11 @@ import {
   BatteryFull,
   BatteryMedium,
   BatteryLow,
+  Bookmark,
+  Headphones,
+  Copy,
+  Trash2,
+  StickyNote,
 } from 'lucide-react';
 import { useReading } from '@/lib/reading/store';
 import { setImmersive } from '@/lib/ios/immersive-store';
@@ -49,6 +56,7 @@ import {
   FONT_WEIGHTS,
   themeOf,
   matchChapterIndex,
+  type ReaderNoteItem,
   type ReaderSettings,
   type TocItem,
 } from './shared';
@@ -75,6 +83,43 @@ interface PageSlice {
   indent: boolean;
   /** 跨页切断的行 → 末行两端对齐（和真书一致） */
   justifyLast: boolean;
+  /** 段落下标（title/end 为 -1；划线定位用） */
+  pi: number;
+  /** 切片在原段落中的起始字符偏移（划线定位用） */
+  off: number;
+}
+
+/** 覆盖动画状态：page=即将进来的页，x=当前位移，settle=松手动画中 */
+interface CoverState {
+  page: number;
+  x: number;
+  settle: boolean;
+  commit: boolean;
+}
+
+/** 划线样式 → CSS */
+function hlStyleOf(style: string | null | undefined, accent: string): React.CSSProperties {
+  if (style === 'box')
+    return {
+      background: `${accent}30`,
+      borderRadius: '3px',
+      padding: '1px 1px',
+      boxDecorationBreak: 'clone',
+      WebkitBoxDecorationBreak: 'clone',
+    };
+  if (style === 'wavy')
+    return {
+      textDecoration: 'underline wavy',
+      textDecorationColor: accent,
+      textDecorationThickness: '1.5px',
+      textUnderlineOffset: '4px',
+    };
+  return {
+    textDecoration: 'underline',
+    textDecorationColor: accent,
+    textDecorationThickness: '2px',
+    textUnderlineOffset: '4px',
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -228,6 +273,8 @@ export function ReaderView({ page, onBack }: { page: ReaderPage; onBack: () => v
     () => (FONT_WEIGHTS.find((w) => w.key === settings.fontWeight) || FONT_WEIGHTS[1]).css,
     [settings.fontWeight],
   );
+  /** 翻页动画（默认平移） */
+  const animMode: 'slide' | 'cover' | 'none' = settings.pageAnim || 'slide';
 
   // 当前书源/地址（换源时在本地切换，不动导航栈）
   const [src, setSrc] = useState({
@@ -268,12 +315,41 @@ export function ReaderView({ page, onBack }: { page: ReaderPage; onBack: () => v
   const [ttsOn, setTtsOn] = useState(false);
   const [toast, setToast] = useState('');
 
+  // ---- 批注（书签 + 划线笔记） ----
+  const [notes, setNotes] = useState<ReaderNoteItem[]>([]);
+  const [notesVer, setNotesVer] = useState(0);
+  /** 长按选中的段落（-1=无；与 notePopup 同生命周期，派生展示） */
+  /** 划线操作弹窗（含定位；chIdx 归属章——换章自动失效不渲染） */
+  const [notePopup, setNotePopup] = useState<{ pi: number; x: number; y: number; rootW: number; rootH: number; chIdx: number } | null>(null);
+  /** 笔记输入框内容（null=未编辑） */
+  const [noteInput, setNoteInput] = useState<string | null>(null);
+  /** 书签/划线列表抽屉 */
+  const [bmOpen, setBmOpen] = useState(false);
+  /** 查询（AI 伴读）预置问题 */
+  const [chatAsk, setChatAsk] = useState<string | undefined>(undefined);
+
+  /** 当前章的划线 */
+  const chHighlights = useMemo(
+    () => notes.filter((n) => n.kind === 'highlight' && n.chapterIndex === idx),
+    [notes, idx],
+  );
+  /** 当前书的书签 */
+  const bookmarks = useMemo(() => notes.filter((n) => n.kind === 'bookmark'), [notes]);
+  const bumpNotes = useCallback(() => setNotesVer((v) => v + 1), []);
+
+  // ---- 自动换源 ----
+  const [autoSwitching, setAutoSwitching] = useState(false);
+  const autoBusyRef = useRef(false);
+  /** 已试过失败的源（防循环；手动刷新/换源时清空） */
+  const triedSourcesRef = useRef<Set<string>>(new Set());
+
   const notify = useCallback((t: string) => {
     setToast(t);
     setTimeout(() => setToast((cur) => (cur === t ? '' : cur)), 2200);
   }, []);
 
   // ---- 分页状态 ----
+  const rootRef = useRef<HTMLDivElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
   const clipRef = useRef<HTMLDivElement>(null);
   /** 隐藏测量容器（与正文同宽同排版） */
@@ -281,7 +357,7 @@ export function ReaderView({ page, onBack }: { page: ReaderPage; onBack: () => v
   const mParaRef = useRef<HTMLParagraphElement>(null);
   const mTitleRef = useRef<HTMLDivElement>(null);
   const mEndRef = useRef<HTMLDivElement>(null);
-  /** 视口尺寸（内容区宽/高，getBoundingClientRect 精确小数） */
+  /** 视口尺寸（宽度取整 → 页/轨道全整数像素，无亚像素缝隙） */
   const [vp, setVp] = useState({ w: 0, h: 0 });
   /** 分页结果（pages[i] = 第 i 页的切片数组） */
   const [pageList, setPageList] = useState<PageSlice[][]>([]);
@@ -296,9 +372,23 @@ export function ReaderView({ page, onBack }: { page: ReaderPage; onBack: () => v
   /** 滑动跟手位移（px；ref 供事件闭包读实时值，state 供渲染） */
   const [swipeDx, setSwipeDx] = useState(0);
   const swipeDxRef = useRef(0);
-  const touchRef = useRef<{ x: number; y: number; t: number; horiz: boolean } | null>(null);
+  const touchRef = useRef<{ x: number; y: number; t: number; horiz: boolean; lastY: number } | null>(null);
   /** 滑动后抑制点按（防松手误触翻页分区） */
   const suppressClickRef = useRef(false);
+  /** 覆盖动画状态 */
+  const [coverState, setCoverState] = useState<CoverState | null>(null);
+  const coverRef = useRef<CoverState | null>(null);
+  useEffect(() => {
+    coverRef.current = coverState;
+  }, [coverState]);
+  /** 长按定时器 */
+  const lpTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** 弹层全开时禁用翻页键/长按 */
+  const uiBlockedRef = useRef(false);
+  useEffect(() => {
+    uiBlockedRef.current =
+      barsOn || settingsOpen || chatOpen || tocOpen || chSearchOpen || srcOpen || bmOpen || !!notePopup;
+  }, [barsOn, settingsOpen, chatOpen, tocOpen, chSearchOpen, srcOpen, bmOpen, notePopup]);
 
   // 沉浸模式：打开阅读器隐藏状态栏 + 灵动岛，退出恢复
   useEffect(() => {
@@ -331,6 +421,104 @@ export function ReaderView({ page, onBack }: { page: ReaderPage; onBack: () => v
     };
   }, [settings.fontCustom]);
 
+  // 批注：随书拉取（换源 migrate 后 bookUrl 变化自动重拉）
+  useEffect(() => {
+    let alive = true;
+    api
+      .notesList(src.bookUrl)
+      .then((d) => {
+        if (alive) setNotes(d.notes || []);
+      })
+      .catch(() => {
+        if (alive) setNotes([]);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [src.bookUrl, notesVer]);
+
+  // ------------------------------------------------------------------
+  // 自动换源：当前源目录/正文失败 → 依序试其他源（同名书 + 章节可读）
+  // ------------------------------------------------------------------
+  const tryAutoSwitch = useCallback(async (): Promise<boolean> => {
+    if (isLocal || autoBusyRef.current) return false;
+    autoBusyRef.current = true;
+    setAutoSwitching(true);
+    try {
+      const norm = (x: string) => x.replace(/\s+/g, '');
+      const pool = sourcesList
+        .filter((s) => s.enabled && !triedSourcesRef.current.has(s.id))
+        .sort((a, b) => (a.checkStatus === 'ok' ? 0 : 1) - (b.checkStatus === 'ok' ? 0 : 1))
+        .slice(0, 10);
+      for (const s of pool) {
+        try {
+          const r = await api.searchOne(src.name, s.id);
+          const hit = (r.books || []).find((b) => norm(b.name) === norm(src.name));
+          if (!hit) continue;
+          const d = await api.bookDetail(s.id, hit.bookUrl, src.name, src.author);
+          // 目录需覆盖当前进度（残缺目录的源直接跳过）
+          if (d.chapters.length < Math.max(10, idx + 2)) continue;
+          const oldTitle = chapters[idx]?.title || null;
+          const newIdx = matchChapterIndex(d.chapters, oldTitle, idx);
+          const chap = d.chapters[newIdx];
+          if (!chap) continue;
+          const cd = await api
+            .chapter(s.id, chap.url, hit.bookUrl, newIdx, chap.title)
+            .catch(() => null);
+          if (!cd || !cd.content || cd.content.trim().length < 50) continue;
+          // 提交换源（在架迁移书架记录；批注迁移到新 bookUrl）
+          const inShelf = shelf.some((b) => b.bookUrl === src.bookUrl);
+          if (inShelf) {
+            await api
+              .shelfAction({
+                action: 'switchSource',
+                name: src.name,
+                author: src.author,
+                book: {
+                  sourceId: s.id,
+                  sourceName: s.name,
+                  bookUrl: hit.bookUrl,
+                  coverUrl: src.coverUrl,
+                  intro: d.intro,
+                  chapters: d.chapters,
+                },
+              })
+              .catch(() => null);
+          }
+          await api.notesAction({ action: 'migrate', from: src.bookUrl, to: hit.bookUrl }).catch(() => null);
+          triedSourcesRef.current.add(s.id);
+          setChapters(d.chapters);
+          setFlipDir(newIdx >= idx ? 1 : -1);
+          setIdx(newIdx);
+          setCurPage(0);
+          setLoadedIdx(-1);
+          setContent('');
+          setErr('');
+          setSrc((old) => ({
+            ...old,
+            sourceId: s.id,
+            bookUrl: hit.bookUrl,
+            name: d.name || old.name,
+            author: d.author || old.author,
+          }));
+          notify(`当前源失败，已自动换源：${s.name}`);
+          void loadShelf();
+          return true;
+        } catch {
+          /* 试下一个源 */
+        }
+      }
+      return false;
+    } finally {
+      autoBusyRef.current = false;
+      setAutoSwitching(false);
+    }
+  }, [isLocal, sourcesList, src.name, src.author, src.bookUrl, src.coverUrl, chapters, idx, shelf, loadShelf, notify]);
+  const tryAutoSwitchRef = useRef(tryAutoSwitch);
+  useEffect(() => {
+    tryAutoSwitchRef.current = tryAutoSwitch;
+  }, [tryAutoSwitch]);
+
   // 拉目录（书架已缓存则秒开；换源后 src 变化重拉；tocTick 重试）
   useEffect(() => {
     let alive = true;
@@ -339,22 +527,29 @@ export function ReaderView({ page, onBack }: { page: ReaderPage; onBack: () => v
       .then((d) => {
         if (!alive) return;
         if (!d.chapters.length) {
-          setErr('该源目录为空，试试刷新或换源');
+          setErr('该源目录为空，正在尝试其他书源…');
           setLoadedIdx(idx);
+          triedSourcesRef.current.add(src.sourceId);
+          void tryAutoSwitchRef.current().then((ok) => {
+            if (!ok && alive) setErr('该源目录为空，试试刷新或换源');
+          });
           return;
         }
         setChapters((prev) => (prev.length === d.chapters.length ? prev : d.chapters));
       })
       .catch(() => {
         if (!alive) return;
-        setErr('目录加载失败，请检查网络后重试');
+        setErr('目录加载失败，正在尝试其他书源…');
         setLoadedIdx(idx);
+        triedSourcesRef.current.add(src.sourceId);
+        void tryAutoSwitchRef.current().then((ok) => {
+          if (!ok && alive) setErr('目录加载失败，请检查网络后重试');
+        });
       });
     return () => {
       alive = false;
     };
-     
-  }, [src.sourceId, src.bookUrl, src.name, src.author, tocTick]);
+  }, [src.sourceId, src.bookUrl, src.name, src.author, tocTick, idx]);
 
   const ch = chapters[idx];
   const loading = loadedIdx !== idx;
@@ -413,11 +608,16 @@ export function ReaderView({ page, onBack }: { page: ReaderPage; onBack: () => v
         setLoadedIdx(idx);
         saveProgress(idx, curPage, chapter.title, false);
       })
-      .catch((e: Error) => {
+      .catch(() => {
         if (!alive) return;
-        setErr(e.message || '章节加载失败');
-        setContent('');
+        // 自动换源：先试其他源，全失败再报错
+        triedSourcesRef.current.add(src.sourceId);
         setLoadedIdx(idx);
+        setContent('');
+        setErr('章节加载失败，正在尝试其他书源…');
+        void tryAutoSwitchRef.current().then((ok) => {
+          if (!ok && alive) setErr('章节加载失败，请检查网络或换个书源');
+        });
       });
     return () => {
       alive = false;
@@ -425,15 +625,20 @@ export function ReaderView({ page, onBack }: { page: ReaderPage; onBack: () => v
   }, [idx, chapters, src.sourceId, src.bookUrl, retryFlip]);
 
   // ------------------------------------------------------------------
-  // 视口尺寸（ResizeObserver；旋转/窗口变化时重算分页）
+  // 视口尺寸（ResizeObserver；宽度取整——所有页/轨道均为整数像素，
+  // 消除翻页时左右边缘的亚像素空白「切割线」）。
+  // 注意用 clientWidth/clientHeight（布局尺寸）：预览面板是横屏时机身整体
+  // rotate(90°) 缩放，getBoundingClientRect 会返回变换后的宽高互换值，
+  // 导致分页用错维度、正文排版溢出可视区（白屏正文）。
   // ------------------------------------------------------------------
   useEffect(() => {
     const el = clipRef.current;
     if (!el) return;
     const measure = () => {
-      const r = el.getBoundingClientRect();
+      const w = Math.max(0, Math.floor(el.clientWidth || 0));
+      const h = Math.max(0, el.clientHeight || 0);
       setVp((v) =>
-        Math.abs(v.w - r.width) < 0.5 && Math.abs(v.h - r.height) < 0.5 ? v : { w: r.width, h: r.height },
+        Math.abs(v.w - w) < 0.5 && Math.abs(v.h - h) < 0.5 ? v : { w, h },
       );
     };
     measure();
@@ -504,15 +709,12 @@ export function ReaderView({ page, onBack }: { page: ReaderPage; onBack: () => v
         }
         // 关键：range [0, mid) 不含下标 mid 的字符 ——
         // 最小的 mid 使 [0, mid) 跨 li+1 行 ⟹ 字符 mid-1 是第 li 行首字符。
-        // 行首下标 = ans - 1（旧实现漏了 -1，每个切片会多带 1 个字符，
-        // 恰好把下一行首字挤成额外一行被页底裁掉）
         let start = ans - 1;
         // 防御：行首必须严格大于上一行首（每行至少 1 个字符）
         if (start <= bounds[li - 1]) start = Math.min(text.length, bounds[li - 1] + 1);
         bounds.push(start);
       }
       bounds.push(text.length);
-      // bounds[i] = 第 i 行首字符下标；slice(0, bounds[n]) 恰为前 n 行
       cache.map.set(k, bounds);
       return bounds;
     },
@@ -523,7 +725,7 @@ export function ReaderView({ page, onBack }: { page: ReaderPage; onBack: () => v
   // 分页计算：内容/排版/视口变化 → 逐行贪心装页（useLayoutEffect 同步布局后执行）
   // ------------------------------------------------------------------
   const repaginate = useCallback(() => {
-    if (!content || loading || err || !vp.w || !vp.h || !mParaRef.current || !measureRef.current) {
+    if (!content || loading || err || autoSwitching || !vp.w || !vp.h || !mParaRef.current || !measureRef.current) {
       return null;
     }
     // 测量参数
@@ -570,7 +772,7 @@ export function ReaderView({ page, onBack }: { page: ReaderPage; onBack: () => v
     // 标题（只在第一页）
     if (titleVisible) {
       if (used + titleH > availH + 0.5 && cur.length) flush();
-      cur.push({ kind: 'title', text: ch?.title || `第${idx + 1}章`, indent: false, justifyLast: false });
+      cur.push({ kind: 'title', text: ch?.title || `第${idx + 1}章`, indent: false, justifyLast: false, pi: -1, off: 0 });
       used += titleH;
     }
 
@@ -585,7 +787,7 @@ export function ReaderView({ page, onBack }: { page: ReaderPage; onBack: () => v
         const lines = Math.max(1, bounds.length - 1);
         // 整段放得下（含段后距）
         if (used + lines * lineH + paraMb <= availH + 0.5) {
-          cur.push({ kind: 'para', text: rest, indent, justifyLast: false });
+          cur.push({ kind: 'para', text: rest, indent, justifyLast: false, pi: bi, off });
           used += lines * lineH + paraMb;
           off = text.length;
         } else {
@@ -597,6 +799,8 @@ export function ReaderView({ page, onBack }: { page: ReaderPage; onBack: () => v
               kind: 'para',
               text: rest.slice(0, cut),
               indent,
+              pi: bi,
+              off,
               // 仅当段落被真正截断（还有剩余）才让末行两端对齐
               justifyLast: settings.justify && cut < rest.length,
             });
@@ -613,6 +817,8 @@ export function ReaderView({ page, onBack }: { page: ReaderPage; onBack: () => v
               kind: 'para',
               text: rest.slice(0, take),
               indent,
+              pi: bi,
+              off,
               justifyLast: settings.justify && take < rest.length,
             });
             off += take;
@@ -625,29 +831,25 @@ export function ReaderView({ page, onBack }: { page: ReaderPage; onBack: () => v
 
     // 章末块
     if (used + endH > availH + 0.5 && cur.length) flush();
-    cur.push({ kind: 'end', text: '', indent: false, justifyLast: false });
+    cur.push({ kind: 'end', text: '', indent: false, justifyLast: false, pi: -1, off: 0 });
     flush();
-    if (!pages.length) pages.push([{ kind: 'end', text: '', indent: false, justifyLast: false }]);
+    if (!pages.length) pages.push([{ kind: 'end', text: '', indent: false, justifyLast: false, pi: -1, off: 0 }]);
     return pages;
-  }, [content, loading, err, vp.w, vp.h, paragraphs, titleVisible, settings.fontSize, settings.lineSpacing, settings.paraSpacing, settings.letterSpacing, settings.justify, fontCssVal, weightCss, ch, idx, segmentLines]);
+  }, [content, loading, err, autoSwitching, vp.w, vp.h, paragraphs, titleVisible, settings.fontSize, settings.lineSpacing, settings.paraSpacing, settings.letterSpacing, settings.justify, fontCssVal, weightCss, ch, idx, segmentLines]);
 
   useLayoutEffect(() => {
     // 测量驱动分页：布局后同步算页（React 标准测量模式，规则误报需局部豁免）
-     
     const pages = repaginate();
     if (!pages) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setPageList((old) => (old.length ? [] : old));
       return;
     }
-     
     setPageList(pages);
     if (pendingLastRef.current) {
       pendingLastRef.current = false;
-       
       setCurPage(Math.max(0, pages.length - 1));
     } else {
-       
       setCurPage((p) => Math.min(p, pages.length - 1));
     }
   }, [repaginate, fontsTick]);
@@ -670,6 +872,10 @@ export function ReaderView({ page, onBack }: { page: ReaderPage; onBack: () => v
     saveProgress(idx, curPage, ch?.title || '', false);
   }, [idx, curPage]);
 
+  // 换章弹窗失效：notePopup 带 chIdx，渲染时派生（不在 effect 里 setState）
+  const activePopup = notePopup && notePopup.chIdx === idx && !loading && !err ? notePopup : null;
+  const selParaActive = activePopup ? activePopup.pi : -1;
+
   // ------------------------------------------------------------------
   // 导航：页/章（ref 镜像当前值，快速连滑不踩 stale state 竞态）
   // ------------------------------------------------------------------
@@ -686,6 +892,7 @@ export function ReaderView({ page, onBack }: { page: ReaderPage; onBack: () => v
     navRef.current = { ...s, idx: next, page: 0 };
     setFlipDir(delta);
     setIdx(next);
+    setCoverState(null);
     if (atPage === 'last') pendingLastRef.current = true;
     setCurPage(0);
     return true;
@@ -697,42 +904,202 @@ export function ReaderView({ page, onBack }: { page: ReaderPage; onBack: () => v
       const s = navRef.current;
       const np = s.page + dir;
       if (np >= 0 && np < s.pages) {
-        navRef.current = { ...s, page: np };
-        setCurPage(np);
+        if (animMode === 'cover') {
+          if (coverRef.current) return true; // 动画进行中忽略
+          const start = dir * (vp.w || 1);
+          setCoverState({ page: np, x: start, settle: false, commit: true });
+          // 双 rAF 确保初始位置先提交，再启用过渡滑入
+          requestAnimationFrame(() =>
+            requestAnimationFrame(() => {
+              setCoverState((cs) => (cs && cs.page === np && !cs.settle ? { ...cs, x: 0, settle: true } : cs));
+            }),
+          );
+        } else {
+          navRef.current = { ...s, page: np };
+          setCurPage(np);
+        }
         return true;
       }
       return goChapter(dir, dir < 0 ? 'last' : 'first');
     },
-    [goChapter],
+    [animMode, vp.w, goChapter],
+  );
+
+  /** 覆盖动画落位：settle 结束后提交页码（或取消回弹） */
+  useEffect(() => {
+    const cs = coverState;
+    if (!cs || !cs.settle) return;
+    const t = setTimeout(() => {
+      if (cs.commit && cs.x === 0) {
+        navRef.current = { ...navRef.current, page: cs.page };
+        setCurPage(cs.page);
+      }
+      setCoverState(null);
+    }, 280);
+    return () => clearTimeout(t);
+  }, [coverState]);
+
+  // ------------------------------------------------------------------
+  // 音量键/键盘方向键翻页（排版设置开关）
+  // ------------------------------------------------------------------
+  useEffect(() => {
+    if (!settings.keyTurn) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (uiBlockedRef.current) return;
+      const el = e.target as HTMLElement | null;
+      if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) return;
+      const c = e.keyCode;
+      // 音量键（部分安卓 WebView 派发 24/25；蓝牙耳机 174/175）
+      if (c === 24 || c === 25 || c === 174 || c === 175) {
+        e.preventDefault();
+        turnPage(c === 24 || c === 175 ? -1 : 1);
+        return;
+      }
+      if (e.key === 'ArrowLeft' || e.key === 'PageUp') {
+        e.preventDefault();
+        turnPage(-1);
+      } else if (e.key === 'ArrowRight' || e.key === 'PageDown' || e.key === ' ') {
+        e.preventDefault();
+        turnPage(1);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [settings.keyTurn, turnPage]);
+
+  // ------------------------------------------------------------------
+  // 长按划线：caretRangeFromPoint 定位段落
+  // ------------------------------------------------------------------
+  const clearLongPress = useCallback(() => {
+    if (lpTimerRef.current) {
+      clearTimeout(lpTimerRef.current);
+      lpTimerRef.current = null;
+    }
+  }, []);
+
+  const handleLongPress = useCallback(
+    (clientX: number, clientY: number) => {
+      if (uiBlockedRef.current || loading || err || !paragraphs.length) return;
+      const doc = document as Document & {
+        caretRangeFromPoint?: (x: number, y: number) => Range | null;
+        caretPositionFromPoint?: (x: number, y: number) => { offsetNode: Node; offset: number } | null;
+      };
+      let node: Node | null = null;
+      try {
+        if (doc.caretRangeFromPoint) {
+          const r = doc.caretRangeFromPoint(clientX, clientY);
+          node = r?.startContainer || null;
+        } else if (doc.caretPositionFromPoint) {
+          const p = doc.caretPositionFromPoint(clientX, clientY);
+          node = p?.offsetNode || null;
+        }
+      } catch {
+        node = null;
+      }
+      let el: HTMLElement | null = node
+        ? node.nodeType === 1
+          ? (node as HTMLElement)
+          : node.parentElement
+        : null;
+      let pi = -1;
+      while (el && el !== wrapRef.current) {
+        if (el instanceof HTMLParagraphElement && el.dataset.pi !== undefined) {
+          pi = Number(el.dataset.pi);
+          break;
+        }
+        el = el.parentElement;
+      }
+      if (pi < 0 || pi >= paragraphs.length) return;
+      const root = rootRef.current?.getBoundingClientRect();
+      if (!root) return;
+      suppressClickRef.current = true;
+      setNoteInput(null);
+      setNotePopup({ pi, x: clientX - root.left, y: clientY - root.top, rootW: root.width, rootH: root.height, chIdx: idx });
+    },
+    [loading, err, paragraphs, idx],
   );
 
   // ------------------------------------------------------------------
-  // 触摸：跟手横滑 + 点按分区
+  // 触摸：跟手横滑 + 点按分区 + 长按划线 + 上滑加书签
   // ------------------------------------------------------------------
   const onTouchStart = (e: React.TouchEvent) => {
-    if (e.touches.length !== 1) return;
-    touchRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY, t: Date.now(), horiz: false };
+    if (e.touches.length !== 1) {
+      clearLongPress();
+      return;
+    }
+    const x = e.touches[0].clientX;
+    const y = e.touches[0].clientY;
+    touchRef.current = { x, y, t: Date.now(), horiz: false, lastY: y };
+    // 长按检测（500ms 内移动超阈值会取消）
+    clearLongPress();
+    lpTimerRef.current = setTimeout(() => {
+      lpTimerRef.current = null;
+      handleLongPress(x, y);
+    }, 500);
   };
   const onTouchMove = (e: React.TouchEvent) => {
     const t = touchRef.current;
     if (!t || e.touches.length !== 1) return;
     const dx = e.touches[0].clientX - t.x;
     const dy = e.touches[0].clientY - t.y;
-    if (!t.horiz && Math.abs(dx) > 14 && Math.abs(dx) > Math.abs(dy) * 1.4) t.horiz = true;
+    t.lastY = e.touches[0].clientY;
+    // 未定向：横滑 → 进入翻页；位移超阈值 → 取消长按
+    if (!t.horiz) {
+      if (Math.abs(dx) > 14 && Math.abs(dx) > Math.abs(dy) * 1.4) {
+        t.horiz = true;
+        clearLongPress();
+        if (notePopup) {
+          setNotePopup(null);
+        }
+      } else if (Math.abs(dx) > 12 || Math.abs(dy) > 12) {
+        clearLongPress();
+      }
+    }
     if (t.horiz) {
       // 阻尼跟手：越界最多拖出一页
       const clamp = (v: number) => Math.max(-vp.w, Math.min(vp.w, v));
       swipeDxRef.current = clamp(dx);
       setSwipeDx(clamp(dx));
+      if (animMode === 'cover') {
+        const dir = dx < 0 ? 1 : -1;
+        const s = navRef.current;
+        const np = s.page + dir;
+        if (np >= 0 && np < s.pages) {
+          setCoverState({ page: np, x: dir * (vp.w || 1) + clamp(dx), settle: false, commit: false });
+        } else if (coverRef.current) {
+          setCoverState(null);
+        }
+      }
     }
   };
   const onTouchEnd = () => {
     const t = touchRef.current;
     touchRef.current = null;
+    clearLongPress();
     const dx = swipeDxRef.current;
     swipeDxRef.current = 0;
     setSwipeDx(0);
     if (t?.horiz && Math.abs(dx) > 8) suppressClickRef.current = true;
+    // 上滑手势 → 快速加书签（非横向、快速、明显上滑）
+    if (t && !t.horiz) {
+      const dy = t.lastY - t.y;
+      if (dy < -70 && Math.abs(dy) > Math.abs(dx) * 1.5 && Date.now() - t.t < 700) {
+        void addBookmark();
+        return;
+      }
+    }
+    if (animMode === 'cover') {
+      const cs = coverRef.current;
+      if (cs && !cs.settle) {
+        const dir = cs.page > navRef.current.page ? 1 : -1;
+        const commit = Math.abs(dx) > 58;
+        if (commit) setCoverState({ ...cs, x: 0, settle: true, commit: true });
+        else setCoverState({ ...cs, x: dir * (vp.w || 1), settle: true, commit: false });
+        return;
+      }
+      if (t?.horiz && Math.abs(dx) > 58) turnPage(dx < 0 ? 1 : -1);
+      return;
+    }
     if (t?.horiz && Math.abs(dx) > 58) {
       turnPage(dx < 0 ? 1 : -1);
     }
@@ -742,18 +1109,47 @@ export function ReaderView({ page, onBack }: { page: ReaderPage; onBack: () => v
       suppressClickRef.current = false;
       return;
     }
+    if (notePopup) {
+      setNotePopup(null);
+      setNoteInput(null);
+      return;
+    }
     if (zone === 'menu') setBarsOn((v) => !v);
     else if (zone === 'next') turnPage(1);
     else turnPage(-1);
   };
+  /** 段落点击（段落可命中后接管分区逻辑：左1/3上一页·中菜单·右1/3下一页） */
+  const onParaClick = (e: React.MouseEvent) => {
+    if (suppressClickRef.current) {
+      suppressClickRef.current = false;
+      return;
+    }
+    if (notePopup) {
+      setNotePopup(null);
+      setNoteInput(null);
+      return;
+    }
+    const r = wrapRef.current?.getBoundingClientRect();
+    if (!r) return;
+    const x = e.clientX - r.left;
+    if (x < r.width / 3) turnPage(-1);
+    else if (x > (r.width * 2) / 3) turnPage(1);
+    else setBarsOn((v) => !v);
+  };
 
   const pages = Math.max(1, pageList.length);
   const colW = vp.w || 1;
-  /** 当前位移：基准页位 + 跟手偏移（步长=页宽，无间隙） */
-  const translateX = -(curPage * colW) + swipeDx;
-  const swiping = swipeDx !== 0;
+  const dragging = swipeDx !== 0 || (!!coverState && !coverState.settle);
+  /** 基础轨道位移：cover 模式固定当前页；slide 跟手 */
+  const translateX = animMode === 'cover' ? -(curPage * colW) : -(curPage * colW) + swipeDx;
+  const trackTransition =
+    animMode === 'cover' || animMode === 'none'
+      ? 'none'
+      : swipeDx !== 0
+        ? 'none'
+        : 'transform 0.30s cubic-bezier(0.22, 0.61, 0.36, 1)';
   /** 滑动提示（章边界显示翻章） */
-  const swipeHint = !swiping
+  const swipeHint = !dragging
     ? ''
     : swipeDx < -58
       ? curPage >= pages - 1
@@ -778,7 +1174,168 @@ export function ReaderView({ page, onBack }: { page: ReaderPage; onBack: () => v
   const chapterLabel = `第 ${idx + 1}/${chapters.length || '?'} 章`;
 
   // ------------------------------------------------------------------
-  // 顶部工具：换源 / 缓存 / 章节搜索 / 刷新
+  // 批注动作
+  // ------------------------------------------------------------------
+  /** 该段落已有的划线 */
+  const paraHighlight = useCallback(
+    (pi: number) => chHighlights.find((h) => h.paraIndex === pi),
+    [chHighlights],
+  );
+
+  const addBookmark = useCallback(async () => {
+    try {
+      await api.notesAction({
+        action: 'add',
+        note: {
+          bookUrl: src.bookUrl,
+          name: src.name,
+          kind: 'bookmark',
+          chapterIndex: idx,
+          chapterTitle: ch?.title || `第${idx + 1}章`,
+          pageIndex: curPage,
+          text: ch?.title || `第${idx + 1}章`,
+        },
+      });
+      bumpNotes();
+      notify(`已加书签：${ch?.title || `第${idx + 1}章`} · 第${curPage + 1}页`);
+    } catch {
+      notify('书签保存失败');
+    }
+  }, [src.bookUrl, src.name, idx, ch, curPage, bumpNotes, notify]);
+
+  const highlightPara = useCallback(
+    async (pi: number, style: 'line' | 'wavy' | 'box') => {
+      const text = paragraphs[pi] || '';
+      if (!text) return;
+      const existing = paraHighlight(pi);
+      try {
+        if (existing) {
+          await api.notesAction({ action: 'updateNote', id: existing.id, style });
+        } else {
+          await api.notesAction({
+            action: 'add',
+            note: {
+              bookUrl: src.bookUrl,
+              name: src.name,
+              kind: 'highlight',
+              chapterIndex: idx,
+              chapterTitle: ch?.title || null,
+              paraIndex: pi,
+              startOff: 0,
+              endOff: text.length,
+              text: text.slice(0, 600),
+              style,
+            },
+          });
+        }
+        bumpNotes();
+        notify(existing ? '划线样式已更新' : '已划线');
+      } catch {
+        notify('保存失败，请重试');
+      }
+    },
+    [paragraphs, paraHighlight, src.bookUrl, src.name, idx, ch, bumpNotes, notify],
+  );
+
+  const removeHighlightsOf = useCallback(
+    async (pi: number) => {
+      const targets = chHighlights.filter((h) => h.paraIndex === pi);
+      for (const h of targets) {
+        await api.notesAction({ action: 'remove', id: h.id }).catch(() => null);
+      }
+      bumpNotes();
+      setNotePopup(null);
+      notify('已删除划线');
+    },
+    [chHighlights, bumpNotes, notify],
+  );
+
+  const saveNote = useCallback(
+    async (pi: number, note: string) => {
+      const text = paragraphs[pi] || '';
+      if (!text) return;
+      const existing = paraHighlight(pi);
+      try {
+        if (existing) {
+          await api.notesAction({ action: 'updateNote', id: existing.id, note });
+        } else {
+          await api.notesAction({
+            action: 'add',
+            note: {
+              bookUrl: src.bookUrl,
+              name: src.name,
+              kind: 'highlight',
+              chapterIndex: idx,
+              chapterTitle: ch?.title || null,
+              paraIndex: pi,
+              startOff: 0,
+              endOff: text.length,
+              text: text.slice(0, 600),
+              style: 'wavy',
+              note,
+            },
+          });
+        }
+        bumpNotes();
+        setNotePopup(null);
+        setNoteInput(null);
+        notify('笔记已保存');
+      } catch {
+        notify('保存失败，请重试');
+      }
+    },
+    [paragraphs, paraHighlight, src.bookUrl, src.name, idx, ch, bumpNotes, notify],
+  );
+
+  /** 从本段听：从第 pi 段朗读到本章末 */
+  const speakFromPara = useCallback(
+    (pi: number) => {
+      if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
+        notify('当前浏览器不支持朗读');
+        return;
+      }
+      window.speechSynthesis.cancel();
+      const text = paragraphs.slice(pi).join('\n');
+      if (!text) return;
+      const u = new SpeechSynthesisUtterance(text);
+      u.lang = 'zh-CN';
+      u.rate = 1;
+      u.onend = () => setTtsOn(false);
+      u.onerror = () => setTtsOn(false);
+      window.speechSynthesis.speak(u);
+      setTtsOn(true);
+      setNotePopup(null);
+      notify(`从第 ${pi + 1} 段开始朗读`);
+    },
+    [paragraphs, notify],
+  );
+
+  const copyPara = useCallback(
+    async (pi: number) => {
+      const text = paragraphs[pi] || '';
+      try {
+        await navigator.clipboard.writeText(text);
+        notify('已复制本段文字');
+      } catch {
+        notify('复制失败，请重试');
+      }
+      setNotePopup(null);
+    },
+    [paragraphs, notify],
+  );
+
+  const lookupPara = useCallback(
+    (pi: number) => {
+      const text = (paragraphs[pi] || '').slice(0, 140);
+      setChatAsk(`请帮我解读这段内容：「${text}」`);
+      setNotePopup(null);
+      setChatOpen(true);
+    },
+    [paragraphs],
+  );
+
+  // ------------------------------------------------------------------
+  // 顶部工具：换源 / 缓存 / 章节搜索 / 书签 / 刷新
   // ------------------------------------------------------------------
   const norm = (x: string) => x.replace(/\s+/g, '');
   const openSwitch = async () => {
@@ -790,7 +1347,7 @@ export function ReaderView({ page, onBack }: { page: ReaderPage; onBack: () => v
     setSrcBusy(true);
     setSrcCands([]);
     const pool = sourcesList
-      .filter((s) => s.enabled && s.id !== src.sourceId)
+      .filter((s) => s.enabled && s.id !== src.sourceId && !triedSourcesRef.current.has(s.id))
       .sort((a, b) => (a.checkStatus === 'ok' ? -1 : 0) - (b.checkStatus === 'ok' ? -1 : 0))
       .slice(0, 8);
     if (!pool.length) {
@@ -846,6 +1403,9 @@ export function ReaderView({ page, onBack }: { page: ReaderPage; onBack: () => v
           })
           .catch(() => null);
       }
+      // 批注（书签/划线）随书迁移到新 bookUrl
+      await api.notesAction({ action: 'migrate', from: src.bookUrl, to: c.bookUrl }).catch(() => null);
+      triedSourcesRef.current.clear();
       setChapters(d.chapters);
       setFlipDir(newIdx >= idx ? 1 : -1);
       setIdx(newIdx);
@@ -891,6 +1451,7 @@ export function ReaderView({ page, onBack }: { page: ReaderPage; onBack: () => v
 
   /** 刷新：跳过缓存重抓当前章（顺带重拉目录） */
   const refreshChapter = () => {
+    triedSourcesRef.current.clear();
     refreshReqRef.current = true;
     setLoadedIdx(-1);
     setChapters([]);
@@ -958,60 +1519,146 @@ export function ReaderView({ page, onBack }: { page: ReaderPage; onBack: () => v
   const barSub = bg.dark ? 'rgba(232,234,242,0.55)' : 'rgba(26,29,38,0.55)';
   const pillBg = bg.dark ? 'rgba(255,255,255,0.10)' : 'rgba(0,0,0,0.055)';
 
-  /** 渲染一页 */
-  const renderPage = (slices: PageSlice[], pi: number) => (
-    <div
-      key={pi}
-      style={{
-        width: vp.w || '100%',
-        height: '100%',
-        flex: '0 0 auto',
-        overflow: 'hidden',
-        ...paraTypo,
-      }}
-    >
-      {slices.map((s, si) => {
-        if (s.kind === 'title') {
-          return (
-            <div key={si} style={{ letterSpacing: `${settings.letterSpacing * 0.6}px` }}>
-              <TitleBlock text={s.text} center={settings.titlePosition === 'center'} />
-            </div>
-          );
-        }
-        if (s.kind === 'end') {
-          return (
-            <EndBlock
-              key={si}
-              remain={remain}
-              accent={theme.accent}
-              bgText={bg.text}
-              subColor={bg.sub}
-              onPrev={() => goChapter(-1)}
-              onNext={() => goChapter(1)}
-              hasPrev={idx > 0}
-              hasNext={idx < chapters.length - 1}
-            />
-          );
-        }
-        return (
-          <p
-            key={si}
-            style={{
-              marginBottom: `${settings.paraSpacing}em`,
-              textIndent: s.indent ? '2em' : 0,
-              textAlignLast: s.justifyLast ? 'justify' : undefined,
-              minHeight: '1em',
+  /** 段内划线分段渲染（重叠划线按最先一条样式） */
+  const renderParaSegments = useCallback(
+    (s: PageSlice) => {
+      const hits = chHighlights
+        .filter((h) => h.paraIndex === s.pi && h.endOff > s.off && h.startOff < s.off + s.text.length)
+        .sort((a, b) => a.startOff - b.startOff);
+      if (!hits.length) return s.text;
+      const segs: { t: string; h?: ReaderNoteItem }[] = [];
+      let cursor = 0;
+      for (const h of hits) {
+        const hs = Math.max(h.startOff - s.off, 0);
+        const he = Math.min(h.endOff - s.off, s.text.length);
+        if (hs > cursor) segs.push({ t: s.text.slice(cursor, hs) });
+        if (he > hs) segs.push({ t: s.text.slice(hs, he), h });
+        cursor = Math.max(cursor, he);
+      }
+      if (cursor < s.text.length) segs.push({ t: s.text.slice(cursor) });
+      return segs.map((seg, i) =>
+        seg.h ? (
+          <span
+            key={i}
+            style={{ ...hlStyleOf(seg.h.style, theme.accent), cursor: 'pointer' }}
+            onClick={(e) => {
+              e.stopPropagation();
+              const root = rootRef.current?.getBoundingClientRect();
+              if (!root) return;
+              suppressClickRef.current = true;
+              setNoteInput(null);
+              setNotePopup({
+                pi: seg.h!.paraIndex,
+                x: e.clientX - root.left,
+                y: e.clientY - root.top,
+                rootW: root.width,
+                rootH: root.height,
+                chIdx: idx,
+              });
             }}
           >
-            {s.text}
-          </p>
-        );
-      })}
-    </div>
+            {seg.t}
+          </span>
+        ) : (
+          <span key={i}>{seg.t}</span>
+        ),
+      );
+    },
+    [chHighlights, theme.accent],
   );
 
+  /** 渲染一页 */
+  const renderPage = useCallback(
+    (slices: PageSlice[], pageNum: number) => (
+      <div
+        key={pageNum}
+        style={{
+          width: vp.w || '100%',
+          height: '100%',
+          flex: '0 0 auto',
+          overflow: 'hidden',
+          ...paraTypo,
+        }}
+      >
+        {slices.map((s, si) => {
+          if (s.kind === 'title') {
+            return (
+              <div key={si} style={{ letterSpacing: `${settings.letterSpacing * 0.6}px` }}>
+                <TitleBlock text={s.text} center={settings.titlePosition === 'center'} />
+              </div>
+            );
+          }
+          if (s.kind === 'end') {
+            return (
+              <EndBlock
+                key={si}
+                remain={remain}
+                accent={theme.accent}
+                bgText={bg.text}
+                subColor={bg.sub}
+                onPrev={() => goChapter(-1)}
+                onNext={() => goChapter(1)}
+                hasPrev={idx > 0}
+                hasNext={idx < chapters.length - 1}
+              />
+            );
+          }
+          return (
+            <p
+              key={si}
+              data-pi={s.pi}
+              onClick={onParaClick}
+              style={{
+                marginBottom: `${settings.paraSpacing}em`,
+                textIndent: s.indent ? '2em' : 0,
+                textAlignLast: s.justifyLast ? 'justify' : undefined,
+                minHeight: '1em',
+                pointerEvents: 'auto',
+                transition: 'background 0.15s',
+                ...(s.pi === selParaActive ? { background: `${theme.accent}1E`, borderRadius: '4px' } : {}),
+              }}
+            >
+              {renderParaSegments(s)}
+            </p>
+          );
+        })}
+      </div>
+    ),
+    [vp.w, paraTypo, settings.letterSpacing, settings.titlePosition, settings.paraSpacing, remain, theme.accent, bg.text, bg.sub, idx, chapters.length, goChapter, selParaActive, onParaClick, renderParaSegments],
+  );
+
+  // 划线弹窗定位（固定宽 288；下方优先，底部空间不足放上方）
+  const existingNote = activePopup ? paraHighlight(activePopup.pi) : undefined;
+  const popup = (() => {
+    if (!notePopup) return null;
+    const W = 288;
+    const estH = noteInput !== null ? 168 : existingNote?.note ? 148 : 116;
+    const left = Math.max(10, Math.min(notePopup.x - W / 2, notePopup.rootW - W - 10));
+    const below = notePopup.y + estH + 24 < notePopup.rootH;
+    const top = below ? notePopup.y + 18 : Math.max(10, notePopup.y - estH - 14);
+    const arrowLeft = Math.max(14, Math.min(notePopup.x - left - 7, W - 28));
+    return { left, top, below, arrowLeft, W };
+  })();
+
   return (
-    <div className="relative flex h-full w-full flex-col overflow-hidden" style={{ background: bg.bg, color: bg.text }}>
+    <div
+      ref={rootRef}
+      className="relative flex h-full w-full flex-col overflow-hidden"
+      style={{
+        background: bg.bg,
+        color: bg.text,
+        userSelect: 'none',
+        WebkitUserSelect: 'none',
+        WebkitTouchCallout: 'none',
+      }}
+      onContextMenu={(e) => {
+        // 桌面右键 = 长按（划线菜单）
+        if (!uiBlockedRef.current && !loading && !err) {
+          e.preventDefault();
+          handleLongPress(e.clientX, e.clientY);
+        }
+      }}
+    >
       {/* 翻章动画 keyframes */}
       <style>{`@keyframes rd-flip-l{from{opacity:.35;transform:translateX(26px)}to{opacity:1;transform:none}}
       @keyframes rd-flip-r{from{opacity:.35;transform:translateX(-26px)}to{opacity:1;transform:none}}`}</style>
@@ -1032,14 +1679,18 @@ export function ReaderView({ page, onBack }: { page: ReaderPage; onBack: () => v
         }}
       >
         {/* 点按分区层（透明；位于正文之下，正文里的章末按钮可点击） */}
-        <div className={`absolute inset-0 z-0 flex ${swiping ? 'pointer-events-none' : ''}`} aria-hidden="false">
+        <div className={`absolute inset-0 z-0 flex ${dragging ? 'pointer-events-none' : ''}`} aria-hidden="false">
           <button type="button" aria-label="上一页" className="h-full w-1/3" onClick={() => onZoneClick('prev')} />
           <button type="button" aria-label="菜单" className="h-full w-1/3" onClick={() => onZoneClick('menu')} />
           <button type="button" aria-label="下一页" className="h-full w-1/3" onClick={() => onZoneClick('next')} />
         </div>
 
-        {/* 裁切层：宽高 = wrap 内容区（只露出当前页；pointer-events 不拦截） */}
-        <div ref={clipRef} className="relative z-10 h-full w-full overflow-hidden pointer-events-none">
+        {/* 裁切层：宽 = 整数页宽（只露出当前页；pointer-events 不拦截） */}
+        <div
+          ref={clipRef}
+          className="relative z-10 h-full overflow-hidden pointer-events-none"
+          style={{ width: vp.w ? `${vp.w}px` : '100%' }}
+        >
           {/* 隐藏测量容器（与页面同宽同排版；分页引擎用） */}
           <div
             ref={measureRef}
@@ -1075,16 +1726,18 @@ export function ReaderView({ page, onBack }: { page: ReaderPage; onBack: () => v
             </div>
           </div>
 
-          {/* 分页轨道：所有页常驻（前后页预渲染），translateX 步长=页宽 */}
-          {loading || err ? (
+          {/* 正文/加载/错误 */}
+          {loading || autoSwitching || err ? (
             <div className="pointer-events-none flex h-full w-full items-start justify-center">
-              {loading && (
+              {(loading || autoSwitching) && (
                 <div className="flex items-center justify-center gap-2 py-16" style={{ color: bg.sub }}>
                   <Loader2 className="h-5 w-5 animate-spin" />
-                  <span className="text-[13px]">正在抓取正文…</span>
+                  <span className="text-[13px]">
+                    {autoSwitching ? '当前源失败，正在自动尝试其他书源…' : '正在抓取正文…'}
+                  </span>
                 </div>
               )}
-              {err && !loading && (
+              {err && !loading && !autoSwitching && (
                 <div className="flex w-full flex-col items-center gap-3 py-14 text-center">
                   <p className="px-6 text-[14px]" style={{ color: bg.sub }}>
                     {err}
@@ -1098,6 +1751,16 @@ export function ReaderView({ page, onBack }: { page: ReaderPage; onBack: () => v
                     >
                       重试
                     </button>
+                    {!isLocal && (
+                      <button
+                        type="button"
+                        onClick={() => void openSwitch()}
+                        className="pointer-events-auto rounded-full px-4 py-1.5 text-[13px] font-medium backdrop-blur-xl"
+                        style={{ background: 'rgba(128,128,128,0.16)', color: bg.text }}
+                      >
+                        换源
+                      </button>
+                    )}
                     <button
                       type="button"
                       onClick={() => goChapter(1)}
@@ -1111,19 +1774,46 @@ export function ReaderView({ page, onBack }: { page: ReaderPage; onBack: () => v
               )}
             </div>
           ) : (
-            <div
-              key={idx}
-              className={`h-full ${flipDir > 0 ? '[animation:rd-flip-l_.28s_ease]' : '[animation:rd-flip-r_.28s_ease]'}`}
-              style={{
-                display: 'flex',
-                width: pageList.length * (vp.w || 1),
-                transform: `translateX(${translateX}px)`,
-                transition: swiping ? 'none' : 'transform 0.30s cubic-bezier(0.22, 0.61, 0.36, 1)',
-                willChange: 'transform',
-              }}
-            >
-              {pageList.map(renderPage)}
-            </div>
+            <>
+              {/* 分页轨道：所有页常驻（前后页预渲染）；cover 模式下固定当前页作底 */}
+              <div
+                key={idx}
+                className={`h-full ${flipDir > 0 ? '[animation:rd-flip-l_.28s_ease]' : '[animation:rd-flip-r_.28s_ease]'}`}
+                style={{
+                  display: 'flex',
+                  width: pageList.length * (vp.w || 1),
+                  transform: `translateX(${translateX}px)`,
+                  transition: trackTransition,
+                  willChange: 'transform',
+                }}
+              >
+                {/* renderPage 内的 ref 读取全部位于点击回调里（事件期执行，非渲染期） */}
+                {/* eslint-disable-next-line react-hooks/refs -- 误报：回调中的 navRef/suppressClickRef 仅事件期访问 */}
+                {pageList.map(renderPage)}
+              </div>
+              {/* 覆盖动画层：新页带阴影从边缘滑入盖住旧页 */}
+              {animMode === 'cover' && coverState && pageList[coverState.page] && (
+                <div
+                  className="absolute inset-y-0 left-0 z-20 overflow-hidden"
+                  style={{
+                    width: vp.w || '100%',
+                    background: bg.bg,
+                    transform: `translateX(${coverState.x}px)`,
+                    transition: coverState.settle
+                      ? 'transform 0.26s cubic-bezier(0.22, 0.61, 0.36, 1)'
+                      : 'none',
+                    willChange: 'transform',
+                    boxShadow:
+                      coverState.page > curPage
+                        ? '-12px 0 28px rgba(0,0,0,0.22)'
+                        : '12px 0 28px rgba(0,0,0,0.22)',
+                  }}
+                >
+                  {/* eslint-disable-next-line react-hooks/refs -- 误报：同上，回调期访问 */}
+                  {renderPage(pageList[coverState.page], coverState.page)}
+                </div>
+              )}
+            </>
           )}
         </div>
       </div>
@@ -1158,7 +1848,7 @@ export function ReaderView({ page, onBack }: { page: ReaderPage; onBack: () => v
       )}
 
       {/* 页脚指示：页码左下 · 章节号右下（开时间/电量后章节号移左下，时间电量占右下） */}
-      {!loading && !err && (
+      {!loading && !err && !autoSwitching && (
         <div
           className="pointer-events-none absolute inset-x-0 bottom-[max(16px,calc(env(safe-area-inset-bottom)+8px))] z-10 flex items-center justify-between text-[10px] tabular-nums"
           style={{
@@ -1192,7 +1882,130 @@ export function ReaderView({ page, onBack }: { page: ReaderPage; onBack: () => v
         </div>
       )}
 
-      {/* ============ 顶部浮动工具卡（返回 + 书名/章节 + 换源/缓存/搜索/刷新） ============ */}
+      {/* ============ 划线长按菜单 ============ */}
+      {activePopup && popup && paragraphs[activePopup.pi] && (
+        <div
+          className="absolute z-[60]"
+          style={{ left: popup.left, top: popup.top, width: popup.W }}
+          role="menu"
+          aria-label="划线菜单"
+        >
+          <div
+            className="relative rounded-2xl p-2.5 shadow-2xl backdrop-blur-2xl"
+            style={{
+              background: barCard.background,
+              color: barCard.color,
+              boxShadow: `inset 0 0 0 1px ${barCard.ring}, 0 14px 44px rgba(0,0,0,0.30)`,
+            }}
+          >
+            {/* 已有笔记 */}
+            {existingNote?.note && (
+              <div
+                className="mb-2 flex items-start gap-1.5 rounded-xl px-2.5 py-2 text-[12px] leading-relaxed"
+                style={{ background: pillBg }}
+              >
+                <StickyNote className="mt-0.5 h-3.5 w-3.5 shrink-0" style={{ color: theme.accent }} />
+                <span className="min-w-0 break-all">{existingNote?.note}</span>
+              </div>
+            )}
+            {/* 行1：从本段听 · 复制 · 查询 · 删除划线 */}
+            <div className="flex items-center gap-1">
+              {[
+                { key: 'listen', label: '从本段听', icon: <Headphones className="h-[17px] w-[17px]" />, onClick: () => speakFromPara(activePopup.pi) },
+                { key: 'copy', label: '复制', icon: <Copy className="h-[16px] w-[16px]" />, onClick: () => void copyPara(activePopup.pi) },
+                { key: 'lookup', label: '查询', icon: <Search className="h-[16px] w-[16px]" />, onClick: () => lookupPara(activePopup.pi) },
+                ...(existingNote
+                  ? [{ key: 'del', label: '删除划线', icon: <Trash2 className="h-[16px] w-[16px]" />, onClick: () => void removeHighlightsOf(activePopup.pi) }]
+                  : []),
+              ].map((b) => (
+                <button
+                  key={b.key}
+                  type="button"
+                  onClick={b.onClick}
+                  className="flex flex-1 flex-col items-center gap-1 rounded-xl py-1.5 active:scale-95"
+                  style={{ background: pillBg }}
+                >
+                  {b.icon}
+                  <span className="text-[10px] font-medium">{b.label}</span>
+                </button>
+              ))}
+            </div>
+            {/* 行2：划线样式（直线/波浪/框选）+ 写笔记 */}
+            <div
+              className="mt-1.5 flex items-center gap-1.5 border-t pt-1.5"
+              style={{ borderColor: bg.dark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)' }}
+            >
+              {([
+                { key: 'line', label: '直线', a: <span style={{ textDecoration: 'underline', textDecorationThickness: '2px', textDecorationColor: theme.accent }}>A</span> },
+                { key: 'wavy', label: '波浪', a: <span style={{ textDecoration: 'underline wavy', textDecorationColor: theme.accent, textDecorationThickness: '1.5px' }}>A</span> },
+                { key: 'box', label: '框选', a: <span style={{ background: `${theme.accent}30`, borderRadius: 3, padding: '0 3px' }}>A</span> },
+              ] as const).map((s) => (
+                <button
+                  key={s.key}
+                  type="button"
+                  onClick={() => void highlightPara(activePopup.pi, s.key)}
+                  aria-label={`划线样式：${s.label}`}
+                  className="flex h-9 w-11 items-center justify-center rounded-xl text-[15px] font-semibold active:scale-90"
+                  style={{
+                    background: existingNote?.style === s.key ? theme.accent : pillBg,
+                    color: existingNote?.style === s.key ? '#fff' : barCard.color,
+                  }}
+                >
+                  {s.a}
+                </button>
+              ))}
+              <button
+                type="button"
+                onClick={() => setNoteInput(existingNote?.note || '')}
+                className="ml-auto flex h-9 items-center gap-1 rounded-xl px-3 text-[12px] font-semibold active:scale-95"
+                style={{ background: pillBg, color: theme.accent }}
+              >
+                <StickyNote className="h-[15px] w-[15px]" /> {existingNote?.note ? '改笔记' : '写笔记'}
+              </button>
+            </div>
+            {/* 笔记输入 */}
+            {noteInput !== null && (
+              <div className="mt-2 flex items-center gap-2">
+                <input
+                  value={noteInput}
+                  onChange={(e) => setNoteInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && noteInput.trim()) void saveNote(activePopup.pi, noteInput.trim());
+                  }}
+                  placeholder="写下这一段的想法…"
+                  maxLength={200}
+                  autoFocus
+                  className="h-9 min-w-0 flex-1 rounded-xl px-3 text-[13px] outline-none"
+                  style={{ background: pillBg, color: barCard.color }}
+                  aria-label="笔记内容"
+                />
+                <button
+                  type="button"
+                  disabled={!noteInput.trim()}
+                  onClick={() => void saveNote(activePopup.pi, noteInput.trim())}
+                  className="h-9 shrink-0 rounded-xl px-4 text-[12px] font-semibold text-white disabled:opacity-40"
+                  style={{ background: theme.accent }}
+                >
+                  保存
+                </button>
+              </div>
+            )}
+            {/* 小箭头（指向按压点） */}
+            <span
+              className="absolute h-2.5 w-2.5 rotate-45"
+              style={{
+                left: popup.arrowLeft,
+                ...(popup.below
+                  ? { top: -5, background: barCard.background }
+                  : { bottom: -5, background: barCard.background }),
+              }}
+              aria-hidden="true"
+            />
+          </div>
+        </div>
+      )}
+
+      {/* ============ 顶部浮动工具卡（返回 + 书名/章节 + 书签/换源/缓存/搜索/刷新） ============ */}
       {barsOn && (
         <div
           className="absolute inset-x-3 z-20 flex items-center gap-1 rounded-[22px] px-2.5 py-2 backdrop-blur-2xl"
@@ -1219,6 +2032,10 @@ export function ReaderView({ page, onBack }: { page: ReaderPage; onBack: () => v
               {ch?.title || '加载中…'}
             </p>
           </div>
+          {/* 书签 */}
+          <button type="button" onClick={() => setBmOpen(true)} aria-label="书签与划线" className="flex h-10 w-9 shrink-0 items-center justify-center rounded-full active:scale-90">
+            <Bookmark className="h-[19px] w-[19px]" strokeWidth={2.1} />
+          </button>
           {/* 换源 */}
           {!isLocal && (
             <button type="button" onClick={() => void openSwitch()} aria-label="换源" className="flex h-10 w-9 shrink-0 items-center justify-center rounded-full active:scale-90">
@@ -1311,7 +2128,10 @@ export function ReaderView({ page, onBack }: { page: ReaderPage; onBack: () => v
                 key: 'ai',
                 label: '伴读',
                 icon: <Sparkles className="h-[21px] w-[21px]" strokeWidth={2} />,
-                onClick: () => setChatOpen(true),
+                onClick: () => {
+                  setChatAsk(undefined);
+                  setChatOpen(true);
+                },
                 accent: true,
               },
               {
@@ -1383,6 +2203,123 @@ export function ReaderView({ page, onBack }: { page: ReaderPage; onBack: () => v
                 </span>
               </button>
             ))}
+          </div>
+        </div>
+      )}
+
+      {/* 书签 / 划线列表抽屉 */}
+      {bmOpen && (
+        <div className="absolute inset-0 z-40" role="dialog" aria-label="书签与划线">
+          <button type="button" aria-label="关闭" className="absolute inset-0 bg-black/35 backdrop-blur-[2px]" onClick={() => setBmOpen(false)} />
+          <div
+            className="absolute inset-x-3 bottom-[max(12px,env(safe-area-inset-bottom))] max-h-[68%] overflow-y-auto rounded-3xl p-4 shadow-2xl backdrop-blur-2xl"
+            style={{ background: theme.pageBg, boxShadow: `inset 0 0 0 1px ${theme.cardRing}, 0 -8px 40px rgba(0,0,0,0.16)` }}
+          >
+            <div className="mb-2 flex items-center justify-between">
+              <p className="text-[14px] font-bold" style={{ color: theme.textMain }}>
+                书签 · {bookmarks.length}
+              </p>
+              <button
+                type="button"
+                onClick={() => void addBookmark()}
+                className="flex items-center gap-1 rounded-full px-3 py-1.5 text-[12px] font-semibold text-white active:scale-95"
+                style={{ background: `linear-gradient(135deg, ${theme.gradFrom}, ${theme.gradTo})` }}
+              >
+                <Bookmark className="h-3.5 w-3.5" /> 加当前页书签
+              </button>
+            </div>
+            {bookmarks.length === 0 ? (
+              <p className="pb-2 text-center text-[12px]" style={{ color: theme.textSub }}>
+                还没有书签 · 阅读时上滑可快速加书签
+              </p>
+            ) : (
+              <div className="space-y-1 pb-2">
+                {bookmarks.map((b) => (
+                  <div
+                    key={b.id}
+                    className="flex items-center gap-2 rounded-xl px-3 py-2.5"
+                    style={{ background: b.chapterIndex === idx ? theme.accentSoft : 'transparent' }}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setBmOpen(false);
+                        setFlipDir(b.chapterIndex > idx ? 1 : -1);
+                        setIdx(b.chapterIndex);
+                        setCurPage(b.pageIndex);
+                      }}
+                      className="min-w-0 flex-1 text-left"
+                    >
+                      <span className="block truncate text-[14px]" style={{ color: b.chapterIndex === idx ? theme.accent : theme.textMain }}>
+                        {b.chapterTitle || `第${b.chapterIndex + 1}章`}
+                      </span>
+                      <span className="block text-[11px]" style={{ color: theme.textSub }}>
+                        第{b.pageIndex + 1}页 · {new Date(b.createdAt).toLocaleDateString('zh-CN')}
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      aria-label="删除书签"
+                      onClick={() => {
+                        void api.notesAction({ action: 'remove', id: b.id }).then(() => bumpNotes());
+                      }}
+                      className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full active:scale-90"
+                      style={{ color: theme.textSub }}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div className="my-2 h-px w-full" style={{ background: theme.cardRing }} />
+            <p className="mb-1 text-[14px] font-bold" style={{ color: theme.textMain }}>
+              划线笔记 · {notes.filter((n) => n.kind === 'highlight').length}
+            </p>
+            {notes.filter((n) => n.kind === 'highlight').length === 0 ? (
+              <p className="pb-3 text-center text-[12px]" style={{ color: theme.textSub }}>
+                长按正文可划线、写笔记
+              </p>
+            ) : (
+              <div className="max-h-64 space-y-1 overflow-y-auto pb-3">
+                {notes
+                  .filter((n) => n.kind === 'highlight')
+                  .map((h) => (
+                    <div key={h.id} className="flex items-start gap-2 rounded-xl px-3 py-2.5">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setBmOpen(false);
+                          if (h.chapterIndex !== idx) {
+                            setFlipDir(h.chapterIndex > idx ? 1 : -1);
+                            setIdx(h.chapterIndex);
+                            setCurPage(0);
+                          }
+                        }}
+                        className="min-w-0 flex-1 text-left"
+                      >
+                        <span className="line-clamp-2 text-[13px] leading-snug" style={{ color: theme.textMain, ...hlStyleOf(h.style, theme.accent) }}>
+                          {h.text}
+                        </span>
+                        <span className="mt-0.5 block text-[11px]" style={{ color: theme.textSub }}>
+                          第{h.chapterIndex + 1}章{h.note ? ` · 笔记：${h.note.slice(0, 30)}` : ''}
+                        </span>
+                      </button>
+                      <button
+                        type="button"
+                        aria-label="删除划线"
+                        onClick={() => {
+                          void api.notesAction({ action: 'remove', id: h.id }).then(() => bumpNotes());
+                        }}
+                        className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full active:scale-90"
+                        style={{ color: theme.textSub }}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </div>
+                  ))}
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -1479,7 +2416,7 @@ export function ReaderView({ page, onBack }: { page: ReaderPage; onBack: () => v
       {/* 排版设置（实时预览；分页实时重算） */}
       {settingsOpen && <ReaderSettingsSheet onClose={() => setSettingsOpen(false)} />}
 
-      {/* AI 伴读（先选联系人再陪读） */}
+      {/* AI 伴读（先选联系人再陪读；「查询」带预置问题） */}
       {chatOpen && (
         <AIChatSheet
           bookUrl={src.bookUrl}
@@ -1489,7 +2426,11 @@ export function ReaderView({ page, onBack }: { page: ReaderPage; onBack: () => v
           currentChapter={idx}
           currentChapterTitle={ch?.title || ''}
           summary={summary}
-          onClose={() => setChatOpen(false)}
+          initialAsk={chatAsk}
+          onClose={() => {
+            setChatOpen(false);
+            setChatAsk(undefined);
+          }}
         />
       )}
     </div>

@@ -51,6 +51,8 @@ export function AIChatSheet(props: {
   currentChapterTitle: string;
   summary: string;
   onClose: () => void;
+  /** 打开即问（阅读器「查询」入口）：跳过选人直接发问 */
+  initialAsk?: string;
 }) {
   const settings = useReading((s) => s.settings);
   const sources = useReading((s) => s.sources);
@@ -126,6 +128,14 @@ export function AIChatSheet(props: {
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
   }, [msgs, sending, companion]);
+
+  // 打开即问（阅读器「查询」）：跳过选人阶段，直接以伴读书童身份发问
+  useEffect(() => {
+    if (!props.initialAsk) return;
+    setPhase('chat');
+    const t = setTimeout(() => void send(props.initialAsk), 80);
+    return () => clearTimeout(t);
+  }, []);
 
   const companionName = phase === 'chat' && companion ? displayNameOf(companion) : '伴读书童';
 

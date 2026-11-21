@@ -379,6 +379,26 @@ export function ReaderSettingsSheet({ onClose }: { onClose: () => void }) {
             </div>
           </Row>
 
+          {/* 翻页设置 */}
+          <div className="mt-2 rounded-2xl p-3.5" style={{ background: groupBg }}>
+            <Row theme={theme} label="翻页动画">
+              <div className="flex gap-2">
+                <Chip theme={theme} active={(settings.pageAnim || 'slide') === 'slide'} onClick={() => patch({ pageAnim: 'slide' })}>平移</Chip>
+                <Chip theme={theme} active={settings.pageAnim === 'cover'} onClick={() => patch({ pageAnim: 'cover' })}>覆盖</Chip>
+                <Chip theme={theme} active={settings.pageAnim === 'none'} onClick={() => patch({ pageAnim: 'none' })}>无动画</Chip>
+              </div>
+            </Row>
+            <Toggle
+              theme={theme}
+              label="音量键 / 方向键翻页"
+              on={!!settings.keyTurn}
+              onChange={(v) => patch({ keyTurn: v })}
+            />
+            <p className="px-1 text-[10px] leading-relaxed" style={{ color: theme.textSub }}>
+              开启后：音量上键/← 上一页，音量下键/→ 下一页（部分浏览器不支持音量键）；关闭则仅手动滑动/点按翻页。
+            </p>
+          </div>
+
           {/* 开关组 */}
           <div className="mt-1 space-y-1">
             <Toggle theme={theme} label="两端对齐" on={settings.justify} onChange={(v) => patch({ justify: v })} />

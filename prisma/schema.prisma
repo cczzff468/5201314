@@ -232,9 +232,40 @@ model ReadingSetting {
   showTime      Boolean  @default(true)
   /// 阅读页脚：显示电量
   showBattery   Boolean  @default(true)
+  /// 翻页动画：slide 平移 | cover 覆盖 | none 无动画
+  pageAnim      String   @default("slide")
+  /// 音量键/键盘方向键翻页
+  keyTurn       Boolean  @default(false)
   /// 排版预设列表（JSON 数组字符串 [{id,name,data:{...}}]）
   presets       String   @default("[]")
   updatedAt     DateTime @updatedAt
+}
+
+/// 阅读批注：书签（bookmark）+ 划线笔记（highlight，含样式与笔记）
+model ReaderNote {
+  id           String   @id @default(cuid())
+  /// 归属书（bookUrl 为键；换源时由 API 迁移）
+  bookUrl      String
+  name         String
+  kind         String
+  chapterIndex Int
+  chapterTitle String?
+  /// 章内页码（书签跳转用；划线不依赖）
+  pageIndex    Int      @default(0)
+  /// 划线：段落下标（content.split('\n') 过滤后的数组下标）
+  paraIndex    Int      @default(-1)
+  /// 划线：段内字符区间 [startOff, endOff)
+  startOff     Int      @default(0)
+  endOff       Int      @default(0)
+  /// 书签标签 / 划线文本
+  text         String   @default("")
+  /// 划线样式：line 直线 | wavy 波浪 | box 框选
+  style        String?
+  note         String?
+  createdAt    DateTime @default(now())
+
+  @@index([bookUrl])
+  @@index([bookUrl, kind])
 }
 
 /// 本地导入书籍（txt / epub，从手机上传）

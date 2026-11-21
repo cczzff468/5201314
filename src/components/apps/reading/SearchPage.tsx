@@ -47,6 +47,8 @@ export function SearchPage({
   const [found, setFound] = useState(0);
   const [searched, setSearched] = useState(0);
   const [groups, setGroups] = useState<Map<string, Group>>(new Map());
+  /** 兼容重命名：groupsMap 即 groups（分区排序时统一读它） */
+  const groupsMap = groups;
   const abortRef = useRef<AbortController | null>(null);
   const queueRef = useRef<SourceItem[]>([]);
   const startedRef = useRef(false);
@@ -114,8 +116,72 @@ export function SearchPage({
     if (kw.trim()) void runSearch(kw);
   };
 
-  const list = useMemo(() => [...groups.values()].sort((a, b) => b.books.length - a.books.length), [groups]);
+  /** 分区排序：搜索结果（书名精确匹配，按书名→源数排序）在前，相关书籍（按书源排序）在后；
+   *  每组内按书源名排序，来源数多的组优先（更可靠） */
+  const { exactList, relatedList } = useMemo(() => {
+    const k = kw.trim().replace(/\s+/g, '');
+    const groups = [...new Map([...groupsMap.values()].map((g) => [g.key, { ...g, books: [...g.books] }])).values()];
+    for (const g of groups) g.books.sort((a, b) => a.sourceName.localeCompare(b.sourceName, 'zh'));
+    const exact: typeof groups = [];
+    const related: typeof groups = [];
+    for (const g of groups) {
+      (g.name.replace(/\s+/g, '') === k ? exact : related).push(g);
+    }
+    // 精确匹配：按书名（zh 排序）→ 源数降序
+    exact.sort((a, b) => a.name.localeCompare(b.name, 'zh') || b.books.length - a.books.length);
+    // 相关书籍：按源数降序（多源更可靠）→ 书名
+    related.sort((a, b) => b.books.length - a.books.length || a.name.localeCompare(b.name, 'zh'));
+    return { exactList: exact, relatedList: related };
+  }, [groupsMap, kw]);
   const glass = { background: theme.cardBg, boxShadow: 'inset 0 0 0 1px ' + theme.cardRing } as const;
+
+  /** 单个书籍组卡片（搜索结果/相关书籍共用；组内已按书源名排序） */
+  const renderGroup = (g: Group) => {
+    const b0 = g.books[0];
+    return (
+      <button
+        key={g.key}
+        type="button"
+        onClick={() => onOpenBook(b0, b0.sourceId || '')}
+        className="mb-2.5 flex w-full items-center gap-3 rounded-3xl p-3 text-left backdrop-blur-xl active:scale-[0.99]"
+        style={glass}
+      >
+        {b0.coverUrl ? (
+          <img src={coverSrc(b0.coverUrl, b0.sourceId)} alt="" className="h-[68px] w-[50px] shrink-0 rounded-lg object-cover shadow-sm ring-1 ring-black/5" loading="lazy" referrerPolicy="no-referrer" />
+        ) : (
+          <CoverPlaceholder name={g.name} author={g.author} className="h-[68px] w-[50px] shrink-0 shadow-sm" radius="rounded-lg" />
+        )}
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            <span className="truncate text-[15px] font-bold" style={{ color: theme.textMain }}>
+              {g.name}
+            </span>
+            {g.books.length > 1 && (
+              <span
+                className="shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-semibold"
+                style={{ background: theme.accentSoft, color: theme.accent }}
+              >
+                {g.books.length} 个源
+              </span>
+            )}
+          </div>
+          <p className="mt-0.5 truncate text-[12px]" style={{ color: theme.textSub }}>
+            {g.author || '佚名'}
+            {b0.kind ? ` · ${b0.kind.replace('分类：', '')}` : ''}
+          </p>
+          {b0.intro && (
+            <p className="mt-1 line-clamp-2 text-[12px] leading-snug" style={{ color: theme.textSub }}>
+              {b0.intro}
+            </p>
+          )}
+          <p className="mt-1 truncate text-[11px]" style={{ color: theme.textSub }}>
+            来源：{g.books.map((x) => x.sourceName).slice(0, 3).join(' / ')}
+            {g.books.length > 3 ? ' 等' : ''}
+          </p>
+        </div>
+      </button>
+    );
+  };
 
   return (
     <div className="flex h-full flex-col">
@@ -154,9 +220,9 @@ export function SearchPage({
         </button>
       </div>
 
-      {/* 结果列表 */}
+      {/* 结果列表：搜索结果（精确匹配）在上，相关书籍在下 */}
       <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-24">
-        {list.length === 0 && !running && (
+        {exactList.length === 0 && relatedList.length === 0 && !running && (
           <div className="mt-28 flex flex-col items-center gap-3 text-center">
             <div className="flex h-16 w-16 items-center justify-center rounded-3xl" style={{ background: theme.accentSoft, color: theme.accent }}>
               <Search className="h-7 w-7" strokeWidth={2} />
@@ -166,52 +232,18 @@ export function SearchPage({
             </p>
           </div>
         )}
-        {list.map((g) => {
-          const b0 = g.books[0];
-          return (
-            <button
-              key={g.key}
-              type="button"
-              onClick={() => onOpenBook(b0, b0.sourceId || '')}
-              className="mb-2.5 flex w-full items-center gap-3 rounded-3xl p-3 text-left backdrop-blur-xl active:scale-[0.99]"
-              style={glass}
-            >
-              {b0.coverUrl ? (
-                <img src={coverSrc(b0.coverUrl, b0.sourceId)} alt="" className="h-[68px] w-[50px] shrink-0 rounded-lg object-cover shadow-sm ring-1 ring-black/5" loading="lazy" referrerPolicy="no-referrer" />
-              ) : (
-                <CoverPlaceholder name={g.name} author={g.author} className="h-[68px] w-[50px] shrink-0 shadow-sm" radius="rounded-lg" />
-              )}
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-2">
-                  <span className="truncate text-[15px] font-bold" style={{ color: theme.textMain }}>
-                    {g.name}
-                  </span>
-                  {g.books.length > 1 && (
-                    <span
-                      className="shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-semibold"
-                      style={{ background: theme.accentSoft, color: theme.accent }}
-                    >
-                      {g.books.length} 个源
-                    </span>
-                  )}
-                </div>
-                <p className="mt-0.5 truncate text-[12px]" style={{ color: theme.textSub }}>
-                  {g.author || '佚名'}
-                  {b0.kind ? ` · ${b0.kind.replace('分类：', '')}` : ''}
-                </p>
-                {b0.intro && (
-                  <p className="mt-1 line-clamp-2 text-[12px] leading-snug" style={{ color: theme.textSub }}>
-                    {b0.intro}
-                  </p>
-                )}
-                <p className="mt-1 truncate text-[11px]" style={{ color: theme.textSub }}>
-                  来源：{g.books.map((x) => x.sourceName).slice(0, 3).join(' / ')}
-                  {g.books.length > 3 ? ' 等' : ''}
-                </p>
-              </div>
-            </button>
-          );
-        })}
+        {exactList.length > 0 && (
+          <p className="pb-1.5 pt-1 text-[12px] font-semibold" style={{ color: theme.accent }}>
+            搜索结果 · {exactList.length}
+          </p>
+        )}
+        {exactList.map((g) => renderGroup(g))}
+        {relatedList.length > 0 && (
+          <p className="pb-1.5 pt-3 text-[12px] font-semibold" style={{ color: theme.textSub }}>
+            相关书籍 · {relatedList.length}
+          </p>
+        )}
+        {relatedList.map((g) => renderGroup(g))}
       </div>
 
       {/* 底部状态胶囊（搜索中/暂停后显示） */}

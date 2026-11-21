@@ -14,6 +14,7 @@ import {
   cachedCover,
   coverSrc,
   fetchBookCover,
+  recommendBooks,
   themeOf,
   type ReadHistoryItem,
   type SourceItem,
@@ -86,6 +87,19 @@ export function HomeTab({
   }, [sources]);
 
   const glass = { background: theme.cardBg, boxShadow: 'inset 0 0 0 1px ' + theme.cardRing } as const;
+
+  /** 基于书架的相似书推荐（同作者 > 书名相似 > 同分类；空书架不显示） */
+  const recForYou = useMemo(
+    () =>
+      shelf.length
+        ? recommendBooks(
+            shelf.slice(0, 12).map((b) => ({ name: b.name, author: b.author })),
+            shelf.map((b) => b.name),
+            8,
+          )
+        : [],
+    [shelf],
+  );
 
   return (
     <div className="px-4 pb-8">
@@ -173,6 +187,49 @@ export function HomeTab({
           </button>
         ))}
       </div>
+
+      {/* 基于书架的相似书推荐 */}
+      {recForYou.length > 0 && (
+        <section className="mt-5">
+          <div className="mb-2.5 flex items-center justify-between">
+            <h2 className="text-[17px] font-bold" style={{ color: theme.textMain }}>
+              根据书架推荐
+            </h2>
+          </div>
+          <div className="-mx-4 flex gap-3 overflow-x-auto px-4 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+            {recForYou.map((b) => (
+              <button
+                key={b.name}
+                type="button"
+                onClick={() => onSearch(b.name)}
+                className="w-[86px] shrink-0 text-left active:scale-95"
+              >
+                <div className="relative aspect-[3/4.2] w-full overflow-hidden rounded-xl shadow-[0_6px_18px_rgba(0,0,0,0.14)] ring-1 ring-black/5">
+                  {covers[b.name] && !coverFails.has(b.name) ? (
+                    <img src={covers[b.name]} alt={`${b.name} 封面`} className="h-full w-full object-cover" loading="lazy" referrerPolicy="no-referrer" onError={() => onCoverError(b.name)} />
+                  ) : (
+                    <div
+                      className="flex h-full w-full flex-col items-center justify-center gap-1.5 p-2"
+                      style={{ backgroundImage: `linear-gradient(150deg, ${theme.gradFrom}55, ${theme.gradTo}99)` }}
+                    >
+                      <span className="line-clamp-3 text-center text-[13px] font-bold leading-tight" style={{ color: '#fff' }}>
+                        {b.name}
+                      </span>
+                    </div>
+                  )}
+                  <span className="absolute inset-x-0 bottom-0 h-1/4 bg-gradient-to-t from-black/25 to-transparent" aria-hidden="true" />
+                </div>
+                <p className="mt-1.5 truncate text-[13px] font-semibold" style={{ color: theme.textMain }}>
+                  {b.name}
+                </p>
+                <p className="truncate text-[11px]" style={{ color: theme.textSub }}>
+                  {b.reason}
+                </p>
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
 
       {/* 分类精选（真实封面；「更多」进分类页） */}
       {CATEGORIES.slice(1).map((cat) => (
