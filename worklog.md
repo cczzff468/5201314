@@ -3220,3 +3220,21 @@ Work Log:
 Stage Summary:
 - 项目已完整重新部署并运行在 3000 端口（5201314 main，v28 微信/QQ重复回复修复版）
 - 免费书源可用清单已产出（详见对话汇报），可支撑后续「阅读 App」功能开发
+
+---
+Task ID: 4
+Agent: 主控 Agent（Z.ai Code）
+Task: 阅读 App 完整开发（免费书源聚合 + AI 陪读 + 全套排版）
+
+Work Log:
+- [书源引擎] src/lib/reading/engine.ts：Legado 3.0 规则子集（class/id/tag链、@css:、$.JSONPath、{{$.x}}模板、##正则##替换、||回退、XPath-lite og:meta、GBK/GB18030编码、POST表单GBK百分号编码）；服务端代理抓取（UA/Referer防盗链/CORS全解决）；目录修复三件套：fixReversedToc（四分位趋势倒序检测+第一章守卫）、extractMainToc（容差最长非递增run剥离最新块/推荐块，「第X部总结」小序号跳过）、正文自动翻页（nextContentUrl<1500字跟随）+句内广告清洗（URL/域名/首发域名宣传）
+- [内置源] 全链路实测 1168 候选（搜索→目录→正文），双关键词（斗破苍穹+诡秘之主）验证通过 24 站入内置（src/lib/reading/builtin-sources.ts），默认启用 7 个精品源；内置源可删除可恢复（resetBuiltin）
+- [数据层] Prisma 新增 BookSource/ShelfBook/ChapterCache/ReadingSetting/ReadingMemory 五模型
+- [API] /api/reading/{sources,search,book,chapter,shelf,settings,chat,summary,history}：书源播种/导入四途径（JSON粘贴/URL/文件上传/预置合集直链）/健康检查/排序；聚合搜索单源接口（客户端并发4+AbortController暂停继续）；章节双缓存+翻章后台静默AI摘要（Token危机解法：聊天只注入100字摘要+最近10条对话，正文永不进上下文）；书架进度/自动入架兜底/百章里程碑记忆
+- [前端] src/components/apps/reading/ 11 组件：3Tab主壳（蓝色玻璃毛玻璃悬浮胶囊TabBar，5主题可切换：海洋蓝/极光紫/暗夜黑/樱花粉/翡翠绿）、首页（胶囊搜索+渐变Banner+分类胶囊+精选书单+继续阅读卡）、书架（3列网格+未读角标+分组胶囊+管理模式）、聚合搜索（多源并行+暂停继续胶囊+按书名作者分组「N个源」徽标）、书籍详情（目录抽屉正倒序+换源+智能定位第一章）、阅读器（点按分区翻章/上下毛玻璃工具栏/进度滑杆/侧滑目录）、排版设置面板（字号/字重/字体5内置+上传/行段字距/四向边距全滑块/标题三态/两端对齐/底部对齐/下划线开关/背景6内置+上传，全部实时预览+300ms防抖落库）、AI伴读聊天（书籍上下文卡+快捷提问+记忆）、书源管理（启停/删除/一键检查/恢复内置/四途径导入）、阅读记录（统计卡+进度条+里程碑时间线）
+- [注册] AppId 'reading' + registry（真实PNG图标public/icons/reading.png，AI生成蓝色玻璃书籍）+ HomeScreen 第3页尾（存量布局走缺失App补位自动上屏）
+- [验证] Agent Browser 端到端：解锁→打开阅读→搜索「诡秘之主」→5源聚合分组→详情1454章→开始阅读→正文69段渲染（净化后无广告）→工具栏→排版实时预览（字号28px/下划线/夜间背景即时生效）→AI伴读（准确知道书名/13/1454章进度/第一章绯红剧情，聊天与摘要入ReadingMemory）→继续阅读卡（自动入架读到13章）→书架/我/书源管理全页OK；ESLint 0错误；dev.log 当前零错误
+
+Stage Summary:
+- 阅读 App 完整上线：免费书源聚合阅读器 + AI 陪读 + 全套排版自定义，全部核心链路浏览器实测通过
+- 技术要点：后端代理抓取解决防盗链/CORS；AI摘要省Token；排版滑块实时预览（zustand本地即时+防抖落库）

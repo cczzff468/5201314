@@ -4,31 +4,33 @@ import { cloneElement, isValidElement, useId, type ComponentType, type ReactElem
 import dynamic from 'next/dynamic';
 import {
   AudioLines,
-  BookMarked,
-  BrainCircuit,
-  Calculator as CalculatorIcon,
-  CalendarDays,
-  Camera,
-  CircleCheck,
-  Clock as ClockIcon,
-  CloudSun,
-  Compass,
-  FileText,
-  Folder,
-  Ghost,
-  Heart as HeartIcon,
-  House as HouseIcon,
-  Image as ImageIcon,
-  MessageCircle,
-  Music2,
-  Palette,
-  Phone as PhoneGlyph,
-  Settings as SettingsIcon,
-  ShoppingBag,
-  Store,
-  UtensilsCrossed,
-  Users as UsersIcon,
-} from 'lucide-react';
+    BookMarked,
+    BrainCircuit,
+    Calculator as CalculatorIcon,
+    CalendarDays,
+    Camera,
+    CircleCheck,
+    Clock as ClockIcon,
+    CloudSun,
+    Compass,
+    FileText,
+    Folder,
+    Ghost,
+    Heart as HeartIcon,
+    House as HouseIcon,
+    Image as ImageIcon,
+    MessageCircle,
+    Music2,
+    Palette,
+    Phone as PhoneGlyph,
+    Settings as SettingsIcon,
+    ShoppingBag,
+    Store,
+    UtensilsCrossed,
+    Users as UsersIcon,
+ 
+    BookOpen,
+  } from 'lucide-react';
 import type { AppId, IconStyle } from '@/lib/ios/store';
 import { selectResolvedTheme, useSettings, useSystemDark } from '@/lib/ios/store';
 import { useHomeWallpaperLight } from '@/lib/ios/foreground';
@@ -107,6 +109,10 @@ const CottageApp = dynamic(() => import('./cottage'), {
   loading: () => <AppSplash appId="cottage" />,
 });
 const ForumApp = dynamic(() => import('./forum/forum'), { ssr: false, loading: () => <AppSplash appId="forum" /> });
+const ReadingApp = dynamic(() => import('./reading/ReadingApp'), {
+  ssr: false,
+  loading: () => <AppSplash appId="reading" />,
+});
 
 export interface AppMeta {
   id: AppId;
@@ -493,6 +499,13 @@ const APP_DEFS: AppDef[] = [
     // 备用线条图（毛玻璃/液态样式时展示）：小屋轮廓
     glyph: <HouseIcon className={GLYPH_CLASS} strokeWidth={GLYPH_STROKE} />,
     component: CottageApp,
+  },
+  {
+    id: 'reading',
+    name: '阅读',
+    image: '/icons/reading.png',
+    glyph: <BookOpen className={GLYPH_CLASS} strokeWidth={GLYPH_STROKE} />,
+    component: ReadingApp,
   },
   {
     id: 'forum',
