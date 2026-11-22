@@ -1,10 +1,10 @@
 /**
- * 阅读 App 内置书源（2026-11-22 失效清理版）。
+ * 阅读 App 内置书源（2026-11-22 396 合集内置版）。
  *
  * 组成：
  * ① VERIFIED_SOURCES —— 沙箱全链路实测通过的核心源（搜索→目录→正文验证）。
- * ② user-sources.json —— 用户提供的精选书源合集（Legado 3.0；已按实测结果裁剪，
- *    仅保留校验可用的源，失效源已按需求删除）。
+ * ② user-sources.json —— 用户提供的 396 书源合集（Legado 3.0，1121 版；
+ *    已按 URL 去重共 388 源全部内置；书源管理里可「一键筛活」校验启停）。
  *
  * 书源管理支持随时校验：失效源自动停用，「清理失效」一键删除；
  * 书架/历史里对失效源的书按名称/URL 前缀自动自愈。
@@ -186,7 +186,7 @@ export const VERIFIED_SOURCES: LegadoSource[] = [
   },
 ];
 
-/** ② 用户提供的精选源（Legado 3.0 合集；已按实测裁剪只保留可用源） */
+/** ② 用户提供的 396 书源合集（Legado 3.0，按 URL 去重后 388 源） */
 const USER_SOURCES = USER_SOURCES_JSON as unknown as LegadoSource[];
 
 /**

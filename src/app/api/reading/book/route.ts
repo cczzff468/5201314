@@ -61,9 +61,23 @@ export async function GET(req: NextRequest) {
 
   const shelf = await db.shelfBook.findUnique({ where: { bookUrl } });
   const hist = await db.readHistory.findUnique({ where: { bookUrl } });
+  /** 封面回填：缓存记录没有封面时后台从书源拉一次（书源有封面就用那个封面） */
+  const backfillCover = async (coverUrl: string | null | undefined) => {
+    if (coverUrl) return;
+    try {
+      const info = await getBookInfo(toLegado(row), bookUrl);
+      if (info.coverUrl) {
+        await db.shelfBook.update({ where: { bookUrl }, data: { coverUrl: info.coverUrl } }).catch(() => null);
+        await db.readHistory.update({ where: { bookUrl }, data: { coverUrl: info.coverUrl } }).catch(() => null);
+      }
+    } catch {
+      /* 拉不到就算了，客户端还有跨源封面兜底 */
+    }
+  };
   try {
     // ② 书架缓存目录（秒开）
     if (shelf && shelf.chapters !== '[]' && shelf.totalChapters > 0) {
+      void backfillCover(shelf.coverUrl);
       return NextResponse.json({
         name: shelf.name,
         author: shelf.author,
@@ -82,6 +96,7 @@ export async function GET(req: NextRequest) {
     const fbAuthor = sp.get('author') || '';
     // ③ 历史缓存目录（不在书架但读过的书，秒开）
     if (hist && hist.chapters && hist.chapters !== '[]' && hist.totalChapters > 0) {
+      void backfillCover(hist.coverUrl);
       return NextResponse.json({
         name: hist.name || fbName,
         author: hist.author || fbAuthor,
@@ -98,7 +113,8 @@ export async function GET(req: NextRequest) {
     const info = await getBookInfo(toLegado(row), bookUrl);
     // 书名/作者兜底：详情页规则可能取不到（txtshuku 系），用搜索结果带来的名字补
     const tocJson = JSON.stringify(info.chapters);
-    // 回写缓存：书架目录为空 → 补进书架；历史 → 补目录（下次秒开）
+    // 回写缓存：书架目录为空 → 补进书架；历史 → 补目录（下次秒开）；
+    // 记录里没有封面而书源有 → 一并回填（书源有封面就用那个封面）
     if (shelf && info.chapters.length) {
       await db.shelfBook
         .update({
@@ -107,6 +123,7 @@ export async function GET(req: NextRequest) {
             chapters: tocJson,
             totalChapters: info.chapters.length,
             lastChapterTitle: info.chapters[info.chapters.length - 1].title,
+            ...(info.coverUrl && !shelf.coverUrl ? { coverUrl: info.coverUrl } : {}),
           },
         })
         .catch(() => null);
@@ -119,6 +136,7 @@ export async function GET(req: NextRequest) {
             chapters: tocJson,
             totalChapters: info.chapters.length,
             lastChapterTitle: info.chapters[info.chapters.length - 1].title,
+            ...(info.coverUrl && !hist.coverUrl ? { coverUrl: info.coverUrl } : {}),
           },
         })
         .catch(() => null);

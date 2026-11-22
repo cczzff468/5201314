@@ -36,6 +36,7 @@ import {
   matchChapterIndex,
   recommendBooks,
   themeOf,
+  useFeaturedCovers,
   type BookDetailData,
   type SearchBookItem,
 } from './shared';
@@ -326,7 +327,7 @@ export function BookDetail({
           book: {
             name: data.name || name,
             author: data.author || author,
-            coverUrl: curBook.coverUrl,
+            coverUrl: data.coverUrl || curBook.coverUrl || '',
             intro: data.intro,
             sourceId: curSourceId,
             sourceName: curBook.sourceName,
@@ -412,9 +413,22 @@ export function BookDetail({
     return cat ? featuredOfCategory(cat, [name], 8) : [];
   }, [name, author, curBook.kind]);
 
-  const cover = coverSrc(data?.coverUrl || curBook.coverUrl, curSourceId);
-  /** 封面加载失败地址（死链/防盗链）→ 回退书脊风占位图（按地址记，换源自动重置） */
+  /** 封面加载失败地址（死链/防盗链）→ 依次回退（按地址记，换源自动重置） */
   const [coverFailUrls, setCoverFailUrls] = useState<Set<string>>(new Set());
+  /** 封面：书源封面优先（详情 > 搜索结果）；都没有或加载失败时跨源封面缓存兜底（书源有封面就用那个封面） */
+  const { covers: hookedCovers, retry: retryCover } = useFeaturedCovers(!data?.coverUrl && !curBook.coverUrl ? [name] : []);
+  const sourceCover = coverSrc(data?.coverUrl || curBook.coverUrl, curSourceId);
+  const hookedCover = hookedCovers[name];
+  const cover =
+    sourceCover && !coverFailUrls.has(sourceCover)
+      ? sourceCover
+      : hookedCover && !coverFailUrls.has(hookedCover)
+        ? hookedCover
+        : undefined;
+  const onCoverError = (url: string) => {
+    setCoverFailUrls((s) => new Set(s).add(url));
+    if (url === hookedCover) retryCover(name); // 跨源封面也挂了 → 服务端换地址重搜一次
+  };
   const glass = { background: theme.cardBg, boxShadow: 'inset 0 0 0 1px ' + theme.cardRing } as const;
   /** 最近 3 章（倒序显示） */
   const recentChapters = useMemo(() => {
@@ -515,13 +529,13 @@ export function BookDetail({
           {/* 头区：封面 + 书籍信息（压在模糊背景上） */}
           <div className="flex gap-4 pt-2">
             {(() => {
-              return cover && !coverFailUrls.has(cover) ? (
+              return cover ? (
                 <img
                   src={cover}
                   alt={`${name} 封面`}
                   className="h-[150px] w-[110px] shrink-0 rounded-2xl object-cover shadow-[0_14px_36px_rgba(0,0,0,0.28)] ring-1 ring-white/25"
                   referrerPolicy="no-referrer"
-                  onError={() => setCoverFailUrls((s) => new Set(s).add(cover))}
+                  onError={() => onCoverError(cover)}
                 />
               ) : (
                 <CoverPlaceholder name={name} author={author} className="h-[150px] w-[110px] shrink-0 shadow-[0_14px_36px_rgba(0,0,0,0.28)]" radius="rounded-2xl" />

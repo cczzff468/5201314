@@ -80,7 +80,14 @@ export function SearchPage({
   /** 搜索历史（惰性初始化：该页仅在客户端导航后渲染，localStorage 可直接读） */
   const [history, setHistory] = useState<string[]>(() => (typeof window === 'undefined' ? [] : loadHistory()));
 
-  const enabledSources = useMemo(() => sources.filter((s) => s.enabled), [sources]);
+  /** 启用源：实测可用（checkStatus=ok）的排最前——几百源时好源先出结果，死源垫底 */
+  const enabledSources = useMemo(
+    () =>
+      sources
+        .filter((s) => s.enabled)
+        .sort((a, b) => (a.checkStatus === 'ok' ? 0 : 1) - (b.checkStatus === 'ok' ? 0 : 1)),
+    [sources],
+  );
 
   const recordHistory = useCallback((k: string) => {
     const key = k.trim();
@@ -197,8 +204,8 @@ export function SearchPage({
 
   /** 单个书籍组卡片 */
   const renderGroup = (g: Group) => {
-    const b0 = g.books[0];
-    // 封面优先级：搜索结果自带封面 > 跨源封面缓存 > 占位图
+    // 封面优先级：组内第一个带封面的源（书源有封面就用那个封面）> 跨源封面缓存 > 占位图
+    const b0 = g.books.find((b) => b.coverUrl) || g.books[0];
     const hooked = hookedCovers[g.name];
     const cover = b0.coverUrl ? coverSrc(b0.coverUrl, b0.sourceId) : hooked && !coverFails.has(hooked) ? hooked : undefined;
     const coverFromHook = !b0.coverUrl && !!hooked;

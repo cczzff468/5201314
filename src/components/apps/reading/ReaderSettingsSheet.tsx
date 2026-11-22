@@ -472,7 +472,7 @@ function MoreSettingsSheet({ onClose }: { onClose: () => void }) {
                           max={16}
                           step={0.5}
                           onChange={(v) => patch({ [k]: v })}
-                          format={(v) => `${v}vw`}
+                          format={(v) => `${v}%`}
                         />
                       </div>
                     ))}

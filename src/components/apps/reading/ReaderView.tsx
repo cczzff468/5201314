@@ -17,7 +17,9 @@
  *   拖手柄一个字一个字地扩选）；点已有划线可查看笔记·改样式·删除
  * - 书签：上滑手势快速加书签；顶部工具栏书签图标打开书签/划线列表
  * - 自动换源：章节/目录加载失败时自动搜索其他书源并切换（进度按章节映射）
- * - 页脚：页码左下角；章节号默认右下角（开时间/电量后移左下，时间电量占右下）
+ * - 页面结构：每页 = 全屏纸张（含背景）+ 页边距内边距 —— 翻页时整个界面一起翻动；
+ *   页边距按阅读器自身宽高换算成 px（vw/vh 在桌面预览会错位）
+ * - 页脚：页码左下角；时间/电量右下角；顶部右上角「第N章 • 章节名」（第10轮需求）
  * - 沉浸模式：状态栏与灵动岛整体隐藏，退出恢复
  * - 进度记忆：翻页防抖、翻章立即保存（章节 + 章内页码）
  * - 阅读时长：每 15s 上报一次，「我」页展示累计时间
@@ -78,6 +80,8 @@ interface SwitchCand {
   name: string;
   author: string;
   bookUrl: string;
+  /** 新源搜索结果自带的封面（书源有封面就用那个封面） */
+  coverUrl?: string;
 }
 
 /** 一页里的一块内容（标题 / 段落切片 / 章末块） */
@@ -704,6 +708,8 @@ export function ReaderView({ page, onBack }: { page: ReaderPage; onBack: () => v
   // 注意用 clientWidth/clientHeight（布局尺寸）：预览面板是横屏时机身整体
   // rotate(90°) 缩放，getBoundingClientRect 会返回变换后的宽高互换值，
   // 导致分页用错维度、正文排版溢出可视区（白屏正文）。
+  // vp 现在是「整个阅读器全屏尺寸」——页边距改由每页自身内边距承担
+  // （翻页时整张页面全屏翻动，而不再只是中间文字区平移）。
   // ------------------------------------------------------------------
   useEffect(() => {
     const el = clipRef.current;
@@ -720,6 +726,30 @@ export function ReaderView({ page, onBack }: { page: ReaderPage; onBack: () => v
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
+
+  // ------------------------------------------------------------------
+  // 页边距（px）：以阅读器全尺寸为基准 JS 换算。
+  // 旧版用 vw/vh 单位——在桌面预览面板里 vw 是浏览器视口宽（≠手机屏宽），
+  // 边距会被放大好几倍出现「大片边缘空白」；统一按阅读器自身宽高换算。
+  // ------------------------------------------------------------------
+  /** 安全区底部（HOME 条/手势条；探针元素 computed padding 读出 env() 值） */
+  const safeProbeRef = useRef<HTMLDivElement>(null);
+  const [safeB, setSafeB] = useState(0);
+  useLayoutEffect(() => {
+    const el = safeProbeRef.current;
+    if (!el) return;
+    const v = parseFloat(getComputedStyle(el).paddingBottom);
+    setSafeB(Number.isFinite(v) && v > 0 ? Math.min(v, 44) : 0);
+  }, []);
+  const padL = 3 + (settings.marginLeft / 100) * (vp.w || 0);
+  const padR = 3 + (settings.marginRight / 100) * (vp.w || 0);
+  const padT = 20 + (settings.marginTop / 100) * (vp.h || 0);
+  /** 页脚指示行高度（底部 16px + 文字 15px + 3px 间隙）：下边距调 0 时正文紧贴页脚上方 */
+  const footZone = Math.max(16, safeB + 8) + 18;
+  const padB = footZone + (settings.marginBottom / 100) * (vp.h || 0);
+  /** 正文区宽/高（分页与测量容器都用这两个值） */
+  const textW = Math.max(0, (vp.w || 0) - padL - padR);
+  const availH = Math.max(0, (vp.h || 0) - padT - padB);
 
   /** 正文预处理：繁简转换（用户设置）→ 按行拆段；specialTags 时识别 [newpage] 强制分页标记 */
   const content2 = useMemo(() => convertLang(content, settings.s2t), [content, settings.s2t]);
@@ -823,9 +853,10 @@ export function ReaderView({ page, onBack }: { page: ReaderPage; onBack: () => v
 
   // ------------------------------------------------------------------
   // 分页计算：内容/排版/视口变化 → 逐行贪心装页（useLayoutEffect 同步布局后执行）
+  // availH = 全屏高 - 上下页边距（每页自身带内边距，正文装在页内可用区）
   // ------------------------------------------------------------------
   const repaginate = useCallback(() => {
-    if (!content || loading || err || autoSwitching || !vp.w || !vp.h || !mParaRef.current || !measureRef.current) {
+    if (!content || loading || err || autoSwitching || !textW || !availH || !mParaRef.current || !measureRef.current) {
       return null;
     }
     // 测量参数
@@ -834,7 +865,6 @@ export function ReaderView({ page, onBack }: { page: ReaderPage; onBack: () => v
     let lineH = parseFloat(cs.lineHeight);
     if (!Number.isFinite(lineH) || lineH <= 0) lineH = settings.fontSize * settings.lineSpacing;
     const paraMb = settings.paraSpacing * settings.fontSize;
-    const availH = vp.h;
     // 标题块高度（含 mb-5=20px）
     let titleH = 0;
     if (titleVisible && mTitleRef.current) {
@@ -846,9 +876,9 @@ export function ReaderView({ page, onBack }: { page: ReaderPage; onBack: () => v
     let endH = 90;
     if (mEndRef.current) endH = mEndRef.current.getBoundingClientRect().height;
 
-    // 行切分缓存 key（影响断行的全部因素）
+    // 行切分缓存 key（影响断行的全部因素；textW 变（边距调）必须失效重建）
     const segKey = [
-      vp.w.toFixed(2),
+      textW.toFixed(2),
       settings.fontSize,
       fontCssVal,
       weightCss,
@@ -939,7 +969,7 @@ export function ReaderView({ page, onBack }: { page: ReaderPage; onBack: () => v
     flush();
     if (!pages.length) pages.push([{ kind: 'end', text: '', indent: false, justifyLast: false, pi: -1, off: 0 }]);
     return pages;
-  }, [content2, loading, err, autoSwitching, vp.w, vp.h, paragraphs, titleVisible, settings.fontSize, settings.lineSpacing, settings.paraSpacing, settings.letterSpacing, settings.justify, settings.cjkOptimize, settings.textIndent, settings.specialTags, fontCssVal, weightCss, ch, idx, segmentLines]);
+  }, [content2, loading, err, autoSwitching, textW, availH, paragraphs, titleVisible, settings.fontSize, settings.lineSpacing, settings.paraSpacing, settings.letterSpacing, settings.justify, settings.cjkOptimize, settings.textIndent, settings.specialTags, fontCssVal, weightCss, ch, idx, segmentLines]);
 
   useLayoutEffect(() => {
     // 测量驱动分页：布局后同步算页（React 标准测量模式，规则误报需局部豁免）
@@ -1418,12 +1448,22 @@ export function ReaderView({ page, onBack }: { page: ReaderPage; onBack: () => v
           : '';
 
   // ------------------------------------------------------------------
-  // 页脚：页码（左下）· 章节号（右下；开时间/电量后移左下）· 时间+电量（右下）
+  // 指示行：页脚页码（左下）· 时间+电量（右下）· 顶部「第N章 • 章节名」（右上）
   // ------------------------------------------------------------------
   const now = useClock30s();
   const battery = useBattery();
   const showStatus = settings.showTime || settings.showBattery;
-  const chapterLabel = `第 ${idx + 1}/${chapters.length || '?'} 章`;
+  /** 右上角章节指示：去掉标题里重复的「第N章」前缀，格式「第1章 • 红杏出墙」 */
+  const chapTitleShort = useMemo(() => {
+    const t = (ch?.title || '').trim();
+    const stripped = t.replace(/^第\s*[0-9零一二三四五六七八九十百千两]+\s*[章节卷回话]\s*[:：、.。\-\s]*/, '').trim();
+    return stripped || t;
+  }, [ch?.title]);
+  const chapterIndicator = chapTitleShort && chapTitleShort !== (ch?.title || '').trim()
+    ? `第${idx + 1}章 • ${chapTitleShort}`
+    : ch?.title
+      ? `第${idx + 1}章 • ${ch.title.trim()}`
+      : `第${idx + 1}章`;
 
   // ------------------------------------------------------------------
   // 批注动作
@@ -1686,7 +1726,7 @@ export function ReaderView({ page, onBack }: { page: ReaderPage; onBack: () => v
           if (hit) {
             setSrcCands((prev) => [
               ...prev,
-              { sourceId: s.id, sourceName: s.name, name: hit.name, author: hit.author, bookUrl: hit.bookUrl },
+              { sourceId: s.id, sourceName: s.name, name: hit.name, author: hit.author, bookUrl: hit.bookUrl, coverUrl: hit.coverUrl || undefined },
             ]);
           }
         } catch {
@@ -1706,6 +1746,7 @@ export function ReaderView({ page, onBack }: { page: ReaderPage; onBack: () => v
       const oldTitle = ch?.title || null;
       const newIdx = matchChapterIndex(d.chapters, oldTitle, idx);
       // 在架才迁移书架记录（保留进度）；历史随阅读进度自动更新
+      // 封面：新源详情有封面用新源的（书源有封面就用那个封面）
       const inShelf = shelf.some((b) => b.bookUrl === src.bookUrl);
       if (inShelf) {
         await api
@@ -1717,7 +1758,7 @@ export function ReaderView({ page, onBack }: { page: ReaderPage; onBack: () => v
               sourceId: c.sourceId,
               sourceName: c.sourceName,
               bookUrl: c.bookUrl,
-              coverUrl: src.coverUrl,
+              coverUrl: d.coverUrl || src.coverUrl,
               intro: d.intro,
               chapters: d.chapters,
             },
@@ -1739,6 +1780,7 @@ export function ReaderView({ page, onBack }: { page: ReaderPage; onBack: () => v
         bookUrl: c.bookUrl,
         name: d.name || s.name,
         author: d.author || s.author,
+        coverUrl: d.coverUrl || c.coverUrl || s.coverUrl,
       }));
       setSrcOpen(false);
       notify(`已换源：${c.sourceName}`);
@@ -1947,7 +1989,8 @@ export function ReaderView({ page, onBack }: { page: ReaderPage; onBack: () => v
     [chHighlights, theme.accent, sel, idx, armSuppress],
   );
 
-  /** 渲染一页（forScroll=滚动模式：固定像素高度） */
+  /** 渲染一页（forScroll=滚动模式：固定像素高度）
+   *  每页 = 全屏纸张（背景随主题/自定义图片）+ 页边距内边距 —— 翻页时整张页面全屏翻动 */
   const renderPage = useCallback(
     (slices: PageSlice[], pageNum: number, forScroll = false) => (
       <div
@@ -1957,6 +2000,8 @@ export function ReaderView({ page, onBack }: { page: ReaderPage; onBack: () => v
           height: forScroll ? vp.h || '100%' : '100%',
           flex: '0 0 auto',
           overflow: 'hidden',
+          background: bg.bg,
+          padding: `${padT.toFixed(2)}px ${padR.toFixed(2)}px ${padB.toFixed(2)}px ${padL.toFixed(2)}px`,
           ...paraTypo,
         }}
       >
@@ -2005,7 +2050,7 @@ export function ReaderView({ page, onBack }: { page: ReaderPage; onBack: () => v
         })}
       </div>
     ),
-    [vp.w, vp.h, paraTypo, settings.letterSpacing, settings.titlePosition, settings.paraSpacing, settings.textIndent, remain, theme.accent, bg.text, bg.sub, idx, chapters.length, goChapter, selParaActive, onParaClick, renderParaSegments],
+    [vp.w, vp.h, paraTypo, bg.bg, padT, padR, padB, padL, settings.letterSpacing, settings.titlePosition, settings.paraSpacing, settings.textIndent, remain, theme.accent, bg.text, bg.sub, idx, chapters.length, goChapter, selParaActive, onParaClick, renderParaSegments],
   );
 
   /** 逐字选区手柄位置测量（选区/页码/排版变化后重算；拖手柄时实时刷新） */
@@ -2188,9 +2233,15 @@ export function ReaderView({ page, onBack }: { page: ReaderPage; onBack: () => v
       <style>{`@keyframes rd-flip-l{from{opacity:.35;transform:translateX(26px)}to{opacity:1;transform:none}}
       @keyframes rd-flip-r{from{opacity:.35;transform:translateX(-26px)}to{opacity:1;transform:none}}`}</style>
 
-      {/* 正文视口（padding 定页边距；点按分区在最底层，正文容器不拦截点击）
-          注：横向基础边距从 18px 降到 3px——边距滑块完全由用户掌控（0 即真 0），
-          翻页时页面接缝两侧不再有大片“被切割”的空白 */}
+      {/* 安全区探针（读 env(safe-area-inset-bottom) 的实际 px 值给分页计算用） */}
+      <div
+        ref={safeProbeRef}
+        aria-hidden="true"
+        style={{ position: 'absolute', bottom: 0, left: 0, width: 0, height: 0, paddingBottom: 'env(safe-area-inset-bottom)', pointerEvents: 'none' }}
+      />
+
+      {/* 正文视口（全屏；页边距由每页自身内边距承担——翻页时整张页面全屏翻动）。
+          点按分区在最底层，正文容器不拦截点击 */}
       <div
         ref={wrapRef}
         className="relative min-h-0 flex-1"
@@ -2236,12 +2287,6 @@ export function ReaderView({ page, onBack }: { page: ReaderPage; onBack: () => v
           if (m?.timer) clearTimeout(m.timer);
           mouseLpRef.current = null;
         }}
-        style={{
-          paddingLeft: `calc(3px + ${settings.marginLeft}vw)`,
-          paddingRight: `calc(3px + ${settings.marginRight}vw)`,
-          paddingTop: `calc(22px + ${settings.marginTop}vh)`,
-          paddingBottom: `calc(64px + ${settings.marginBottom}vh)`,
-        }}
       >
         {/* 点按分区层（透明；位于正文之下，正文里的章末按钮可点击） */}
         <div className={`absolute inset-0 z-0 flex ${dragging ? 'pointer-events-none' : ''}`} aria-hidden="false">
@@ -2258,17 +2303,17 @@ export function ReaderView({ page, onBack }: { page: ReaderPage; onBack: () => v
           className={`relative z-10 h-full pan-none ${animMode === 'scroll' ? '' : 'pointer-events-none'}`}
           style={{ width: vp.w ? `${vp.w}px` : '100%' }}
         >
-          {/* 隐藏测量容器（与页面同宽同排版；分页引擎用） */}
+          {/* 隐藏测量容器（与页面正文区同宽同排版；分页引擎用。位置对齐正文区左上） */}
           <div
             ref={measureRef}
             aria-hidden="true"
             style={{
               position: 'absolute',
-              left: 0,
-              top: 0,
+              left: padL,
+              top: padT,
               visibility: 'hidden',
               pointerEvents: 'none',
-              width: vp.w || '100%',
+              width: textW || '100%',
               ...paraTypo,
             }}
           >
@@ -2397,19 +2442,15 @@ export function ReaderView({ page, onBack }: { page: ReaderPage; onBack: () => v
                         : 'transform 0.26s cubic-bezier(0.22, 0.61, 0.36, 1)'
                       : 'none',
                     willChange: 'transform, opacity',
+                    // 边缘描边用 inset 阴影实现（border 会挤掉 1px 内容导致动画中文字抖动）
                     boxShadow:
                       coverState.mode === 'fade'
                         ? 'none'
                         : coverState.mode === 'curl'
                           ? '-2px 0 6px rgba(0,0,0,0.14), -10px 0 28px rgba(0,0,0,0.18)'
                           : coverState.page > curPage
-                            ? '-1px 0 2px rgba(0,0,0,0.10), -8px 0 22px rgba(0,0,0,0.20)'
-                            : '1px 0 2px rgba(0,0,0,0.10), 8px 0 22px rgba(0,0,0,0.20)',
-                    ...(coverState.mode === 'cover'
-                      ? coverState.page > curPage
-                        ? { borderLeft: '1px solid rgba(0,0,0,0.07)' }
-                        : { borderRight: '1px solid rgba(0,0,0,0.07)' }
-                      : {}),
+                            ? '-1px 0 2px rgba(0,0,0,0.10), -8px 0 22px rgba(0,0,0,0.20), inset 1px 0 0 rgba(0,0,0,0.07)'
+                            : '1px 0 2px rgba(0,0,0,0.10), 8px 0 22px rgba(0,0,0,0.20), inset -1px 0 0 rgba(0,0,0,0.07)',
                   }}
                 >
                   {/* eslint-disable-next-line react-hooks/refs -- 误报：同上，回调期访问 */}
@@ -2449,9 +2490,9 @@ export function ReaderView({ page, onBack }: { page: ReaderPage; onBack: () => v
         </div>
       )}
 
-      {/* 朗读中指示 */}
+      {/* 朗读中指示（让出顶部书名/章节行，下移到正文区上缘） */}
       {ttsOn && (
-        <div className="pointer-events-none absolute inset-x-0 top-[max(10px,env(safe-area-inset-top))] z-10 flex justify-center">
+        <div className="pointer-events-none absolute inset-x-0 top-[36px] z-10 flex justify-center">
           <span
             className="flex items-center gap-1.5 rounded-full px-3 py-1 text-[11px] font-medium backdrop-blur-xl"
             style={{ background: 'rgba(0,0,0,0.35)', color: '#fff' }}
@@ -2461,22 +2502,39 @@ export function ReaderView({ page, onBack }: { page: ReaderPage; onBack: () => v
         </div>
       )}
 
-      {/* 页脚指示：页码左下 · 章节号右下（开时间/电量后章节号移左下，时间电量占右下） */}
+      {/* 顶部指示行：书名左上 · 「第N章 • 章节名」右上（用户需求：右上角显示当前章节）。
+          工具栏打开时隐藏（工具栏自身已有书名+章节，避免文字从工具栏上缘露出半截） */}
+      {!loading && !err && !autoSwitching && !barsOn && (
+        <div
+          className="pointer-events-none absolute inset-x-0 top-0 z-10 flex items-center justify-between gap-4 text-[10px] leading-[14px]"
+          style={{
+            color: bg.sub,
+            paddingLeft: padL,
+            paddingRight: padR,
+            paddingTop: Math.max(3, (padT - 14) / 2),
+          }}
+          aria-hidden="true"
+        >
+          <span className="min-w-0 truncate">{src.name}</span>
+          <span className="min-w-0 max-w-[62%] shrink-0 truncate font-medium">{chapterIndicator}</span>
+        </div>
+      )}
+
+      {/* 页脚指示：页码左下 · 时间/电量右下（章节信息已移到右上角） */}
       {!loading && !err && !autoSwitching && (
         <div
           className="pointer-events-none absolute inset-x-0 bottom-[max(16px,calc(env(safe-area-inset-bottom)+8px))] z-10 flex items-center justify-between text-[10px] tabular-nums"
           style={{
             color: bg.sub,
-            paddingLeft: `calc(3px + ${settings.marginLeft}vw)`,
-            paddingRight: `calc(3px + ${settings.marginRight}vw)`,
+            paddingLeft: padL,
+            paddingRight: padR,
           }}
           aria-hidden="true"
         >
           <span className="min-w-0 truncate">
             {curPage + 1}/{pages}
-            {showStatus ? ` · ${chapterLabel}` : ''}
           </span>
-          {showStatus ? (
+          {showStatus && (
             <span className="flex shrink-0 items-center gap-2.5">
               {settings.showTime && now && (
                 <span>
@@ -2490,8 +2548,6 @@ export function ReaderView({ page, onBack }: { page: ReaderPage; onBack: () => v
                 </span>
               )}
             </span>
-          ) : (
-            <span className="shrink-0">{chapterLabel}</span>
           )}
         </div>
       )}

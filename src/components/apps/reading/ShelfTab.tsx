@@ -26,7 +26,7 @@ import {
   Loader2,
 } from 'lucide-react';
 import { useReading } from '@/lib/reading/store';
-import { api, coverSrc, CoverPlaceholder, themeOf, type ShelfBookItem } from './shared';
+import { api, coverSrc, CoverPlaceholder, themeOf, useFeaturedCovers, type ShelfBookItem } from './shared';
 
 type Sheet =
   | { kind: 'none' }
@@ -70,7 +70,14 @@ export function ShelfTab({
   const [pressBook, setPressBook] = useState<ShelfBookItem | null>(null);
   /** 封面加载失败地址（死链/防盗链）→ 回退书脊风占位图，不显示破图 */
   const [coverFails, setCoverFails] = useState<Set<string>>(new Set());
-  const onCoverError = (url: string) => setCoverFails((s) => new Set(s).add(url));
+  /** 没有封面记录的书 → 跨源封面缓存兜底（书源有封面就用那个封面） */
+  const coverlessNames = useMemo(() => shelf.filter((b) => !b.coverUrl).map((b) => b.name), [shelf]);
+  const { covers: hookedCovers, retry: retryCover } = useFeaturedCovers(coverlessNames);
+  const onCoverError = (url: string) => {
+    setCoverFails((s) => new Set(s).add(url));
+    const name = coverlessNames.find((n) => hookedCovers[n] === url);
+    if (name) retryCover(name); // 跨源封面也挂了 → 服务端换地址重搜一次
+  };
   /** 本地导入 */
   const fileRef = useRef<HTMLInputElement>(null);
   const [importing, setImporting] = useState(false);
@@ -347,7 +354,8 @@ export function ShelfTab({
       <div className="mt-2 grid grid-cols-3 gap-x-3 gap-y-5">
         {list.map((b) => {
           const unread = Math.max(0, b.totalChapters - b.lastReadChapter - 1);
-          const cover = coverSrc(b.coverUrl, b.sourceId);
+          const hooked = hookedCovers[b.name];
+          const cover = coverSrc(b.coverUrl, b.sourceId) || (hooked && !coverFails.has(hooked) ? hooked : undefined);
           const checked = selected.has(b.bookUrl);
           return (
             <div key={b.bookUrl} className="relative">
