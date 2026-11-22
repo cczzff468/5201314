@@ -3332,3 +3332,22 @@ Task: 机主六项规格——①权限中心 11 项权限全部原生 Intent �
 - [验证] tsc 全项目 0 错误；eslint 全部 24 改动文件 0 error 0 warning；Agent Browser：解锁→设置→权限给予 11 项全渲染（无障碍行描述「模拟点击、静默截屏、切回界面」）→点击弹确认卡→去开启→浏览器账本回退「已授权」+toast；APP 更新页 v2.0.0 有新版+六条说明+立即更新链接；无 console/page 错误；dev.log 全 200；rg 全仓无功能性 Shizuku 残留（仅历史注释/版本历史）
 
 Stage Summary: 真机能力栈完成 Shizuku→原生+无障碍的整体替换：无障碍服务（静默截屏/点按/滑动/输入/前台追踪）+ 遮罩锁引擎（3s 轮询+全屏拦截+事件闭环）+ 11 项权限中心 + Agent 六件套工具 + 吃醋查岗全闭环（截图发聊天质问）；APK v2.0.0(63) 构建部署，覆盖安装即用
+
+## 2026-11-22 · 第二十轮：防杀后台三件套（开机自启动 + 前台常驻守护 + WRITE_SETTINGS）+ 工具链审查修复（v2.1.0/64）
+
+Task: 机主双需求——①审查 AI 工具/吃醋流程/提示词有无问题并修复 ②新增核心权限与能力：开机自启动（RECEIVE_BOOT_COMPLETED，重启后监控/查岗服务自动拉起）、前台服务防杀后台（状态栏常驻「AI Phone 正在守候」，Android 14+ 需声明服务类型 dataSync/specialUse）、WRITE_SETTINGS（AI 调亮度/静音/强制调高音量）；commit + push
+
+- [审查·三处问题修复] ①sanitizeTools 上限 40：真机模式 22 网页+18 真机恰好贴顶，新增工具会被服务端静默裁剪 → 提到 48（phone-tools slice 同步）②吃醋锁重启即丢：LockOverlayService 锁状态只存静态字段 → 持久化到 jealousy_guard（active_pkg/unlock_at/char/msg），BootReceiver 开机重梳（已到期只清记录）③jealousy-lock.ts 12 处过期 Shizuku 注释清理（断连→原生通道失联等口径统一）；其余审查：工具注册表 22+18 结构完整、吃醋决策链（触发→全维感知+sweep→LLM JSON→锁/消息/拉回→截图进聊天质问）闭环无断点、权限中心 11 项桥契约与插件方法一一对应
+- [Android·Manifest] +RECEIVE_BOOT_COMPLETED（普通权限安装即授予）+WRITE_SETTINGS（ProtectedPermissions）权限声明；+KeepAliveService（specialUse+PROPERTY_SPECIAL_USE_FGS_SUBTYPE=companion_keepalive_guard，Android 14+ 合规）+BootReceiver（exported+BOOT_COMPLETED intent-filter）组件声明
+- [Android·KeepAliveService 新建] 常驻守护前台服务：IMPORTANCE_LOW 静默通知「AI Phone 正在守候/TA 的吃醋锁与查岗感知随时待命」（presence_online 图标+setOngoing）；START_STICKY；静态 start/stop/isRunning/isEnabled（开关持久化 keepalive/enabled——BootReceiver 据此决定自启）+startFromBoot（开机静默拉起，ROM 拦截不崩）
+- [Android·BootReceiver 新建] BOOT_COMPLETED → ①KeepAliveService.startFromBoot（用户开启过才拉）②LockOverlayService.rearmFromPrefs（重启前没到期/锁到哄好的锁重新武装遮罩）；全 try/catch 静默（开机场景无 UI 承载）
+- [Android·LockOverlayService 持久化] syncLock 建锁时写 active_* 四键、解锁/到期清空；clearPersistedLock 显式传 ctx（服务未运行的解锁路径 appCtx 为 null 的边界）；rearmFromPrefs：包名校验+到期判定（到期只清不重梳，JS drain 对账自然收敛）
+- [Android·NativePerceptionPlugin +9 方法] writeSettingsPermission（Settings.System.canWrite）/openWriteSettings（ACTION_MANAGE_WRITE_SETTINGS 包名深链）/getBrightness（SCREEN_BRIGHTNESS 0-255→percent+auto 模式）/setBrightness（先切手动亮度模式再写亮度，2-255 钳制防全黑）/setRingerMode（setRingerMode 优先+校验生效，silent/normal 未生效降级 setStreamVolume(STREAM_RING 0/六成)，vibrate 无音量等价物）/keepAliveStart/keepAliveStop/keepAliveStatus（running+enabled+bootPerm 三态）/bootAutoStartStatus（checkPermission 口径+enabled）
+- [Android·构建] cap sync + gradle assembleDebug（JDK21+SDK36 工具链复用）→ APK 4.0MB；aapt 验证：versionCode 64/versionName 2.1.0、RECEIVE_BOOT_COMPLETED+WRITE_SETTINGS 在包、LockOverlayService/KeepAliveService/BootReceiver 三组件在 Manifest；部署 public/AI-Phone.apk
+- [Web·桥契约] native-perception.ts：CapPlugin 类型+bridgePlugin 自建协议代理+导出封装（writeSettingsPermission/openNativeWriteSettings/nativeGetBrightness/nativeSetBrightness/nativeSetRingerMode/keepAliveStart/keepAliveStop/keepAliveStatus/bootAutoStartStatus，权限类 nativeOrTimeout 短超时探测旧 APK 降级）
+- [Web·device-ops] +labGetBrightness/labSetBrightness（1-100 钳制）/labSetRingerMode（via=ring-volume 标注降级方式）；a11yGateText +no-write-settings（引导去权限中心开开关）+no-audio-manager 文案
+- [Web·phone-tools] 真机组 +setBrightness（percent 1-100，深夜护眼/撒娇调暗场景提示）/getBrightness/setRingerMode（silent/vibrate/normal，TA 睡着贴心静音场景提示）三工具全量注册+TOOL_CAPS+toolActionText（调亮度/查亮度/设铃声模式）+执行器三 case（参数校验+runDeviceTool）；工具上限注释 40→48
+- [Web·device-autonomy] 工具清单文档补三件（含「需修改系统设置权限」提示与使用场景）；真机工具 18→21
+- [Web·permission.tsx] 权限中心 11→14 项：修改系统设置（canWrite 查询+深链跳开关页）/开机自启动（granted=权限&&守护开关，点击拉起常驻守护+提示国产 ROM 需系统设置允许）/常驻守护（running 实时查询+开关语义：PermDef+actionLabelOff，已开启时弹窗标题变「管理X？」按钮变「停止常驻守护」）；E2E 发现并修复两处浏览器兜底 bug：①keepAliveStatus 为 null 时停止分支不可达（runningNow=st?st.running:账本兜底）②boot 行授权后 keepalive 账本未联动（fallback 同时记两项，真机实际状态仍以原生查询为准）；root-page/页头注释 11 项→14 项
+- [Web·版本] app-version 2.1.0/64 四条发版说明；sw.js 缓存 v83→v84
+- [验证] tsc 全项目 0 错误；eslint 9 个改动文件 0 error 0 warning；Agent Browser 实测：解锁→设置→权限给予 16 行（14 项+麦克风+通知）全渲染→常驻守护弹窗「开启常驻守护（前台服务）？」→开启→已授权→再点变「管理…？/停止常驻守护」→停止→未授权（修复生效）→开机自启动授权→keepalive+boot 双已授权联动→修改系统设置授权→已授权；console/dev.log 零错误

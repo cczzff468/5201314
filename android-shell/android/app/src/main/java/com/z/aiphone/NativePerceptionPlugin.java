@@ -2001,6 +2001,232 @@ public class NativePerceptionPlugin extends Plugin {
         call.resolve(ret);
     }
 
+    // ================= v2.1.0 修改系统设置（WRITE_SETTINGS：亮度/铃声）+ 常驻守护 + 开机自启 =================
+
+    /** 修改系统设置权限状态（Settings.System.canWrite；WRITE_SETTINGS 特殊权限经系统开关页授予） */
+    @PluginMethod
+    public void writeSettingsPermission(PluginCall call) {
+        boolean granted = Settings.System.canWrite(getContext());
+        JSObject ret = new JSObject();
+        ret.put("granted", granted);
+        ret.put("canAsk", true); // 特殊权限：随时可跳系统开关页
+        call.resolve(ret);
+    }
+
+    /** 跳系统「可修改系统设置」开关页（本 APP 条目深链直达） */
+    @PluginMethod
+    public void openWriteSettings(PluginCall call) {
+        try {
+            Context ctx = getContext();
+            Intent i = new Intent(Settings.ACTION_MANAGE_WRITE_SETTINGS,
+                    Uri.parse("package:" + ctx.getPackageName()));
+            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            ctx.startActivity(i);
+            call.resolve();
+        } catch (Exception e) {
+            call.reject("无法打开系统设置：" + e.getMessage());
+        }
+    }
+
+    /**
+     * 读当前屏幕亮度 getBrightness() → {ok, percent(1-100), auto(自动亮度开)}。
+     * 统一按「修改系统设置」权限门控（权限没开时给一致的降级口径引导开启）。
+     */
+    @PluginMethod
+    public void getBrightness(PluginCall call) {
+        try {
+            if (!Settings.System.canWrite(getContext())) {
+                JSObject ret = new JSObject();
+                ret.put("ok", false);
+                ret.put("reason", "no-write-settings");
+                call.resolve(ret);
+                return;
+            }
+            int mode = Settings.System.getInt(getContext().getContentResolver(),
+                    Settings.System.SCREEN_BRIGHTNESS_MODE, 0);
+            int raw = Settings.System.getInt(getContext().getContentResolver(),
+                    Settings.System.SCREEN_BRIGHTNESS, 128);
+            int percent = Math.max(1, Math.min(100, Math.round(raw * 100f / 255f)));
+            JSObject ret = new JSObject();
+            ret.put("ok", true);
+            ret.put("percent", percent);
+            ret.put("auto", mode == Settings.System.SCREEN_BRIGHTNESS_MODE_AUTOMATIC);
+            call.resolve(ret);
+        } catch (Throwable t) {
+            JSObject ret = new JSObject();
+            ret.put("ok", false);
+            ret.put("reason", t.getMessage() == null ? "read-failed" : t.getMessage());
+            call.resolve(ret);
+        }
+    }
+
+    /**
+     * 调屏幕亮度 setBrightness({percent:1-100})：先切手动亮度模式（自动模式下系统会盖掉
+     * 手动值）再写 SCREEN_BRIGHTNESS（2-255 钳制，防全黑）。需「修改系统设置」权限。
+     */
+    @PluginMethod
+    public void setBrightness(PluginCall call) {
+        try {
+            if (!Settings.System.canWrite(getContext())) {
+                JSObject ret = new JSObject();
+                ret.put("ok", false);
+                ret.put("reason", "no-write-settings");
+                call.resolve(ret);
+                return;
+            }
+            int percent = 50;
+            try {
+                percent = call.getInt("percent", 50);
+            } catch (Throwable ignored) {
+            }
+            percent = Math.max(1, Math.min(100, percent));
+            int raw = Math.max(2, Math.min(255, Math.round(percent * 255f / 100f)));
+            // 自动亮度 → 手动（个别 ROM 拒绝时仍尝试直接写亮度值）
+            try {
+                Settings.System.putInt(getContext().getContentResolver(),
+                        Settings.System.SCREEN_BRIGHTNESS_MODE,
+                        Settings.System.SCREEN_BRIGHTNESS_MODE_MANUAL);
+            } catch (Throwable ignored) {
+            }
+            boolean ok = Settings.System.putInt(getContext().getContentResolver(),
+                    Settings.System.SCREEN_BRIGHTNESS, raw);
+            JSObject ret = new JSObject();
+            ret.put("ok", ok);
+            if (ok) ret.put("percent", percent);
+            else ret.put("reason", "write-failed");
+            call.resolve(ret);
+        } catch (Throwable t) {
+            JSObject ret = new JSObject();
+            ret.put("ok", false);
+            ret.put("reason", t.getMessage() == null ? "write-failed" : t.getMessage());
+            call.resolve(ret);
+        }
+    }
+
+    /**
+     * 设置铃声模式 setRingerMode({mode: silent|vibrate|normal})：
+     * 优先 AudioManager.setRingerMode（Android 24+ 静音需「勿扰/通知策略访问」，部分 ROM 才放开）；
+     * 校验未生效 → 降级 setStreamVolume(STREAM_RING)（静音=零铃声量、正常=六成音量恢复；
+     * vibrate 无音量等价物只能走 ringerMode）。
+     */
+    @PluginMethod
+    public void setRingerMode(PluginCall call) {
+        String mode = "normal";
+        try {
+            mode = call.getString("mode", "normal");
+        } catch (Throwable ignored) {
+        }
+        if (mode == null) mode = "normal";
+        mode = mode.trim().toLowerCase(Locale.ROOT);
+        if (!mode.equals("silent") && !mode.equals("vibrate") && !mode.equals("normal")) {
+            JSObject ret = new JSObject();
+            ret.put("ok", false);
+            ret.put("reason", "bad-mode");
+            call.resolve(ret);
+            return;
+        }
+        try {
+            AudioManager am = (AudioManager) getContext().getSystemService(Context.AUDIO_SERVICE);
+            if (am == null) {
+                JSObject ret = new JSObject();
+                ret.put("ok", false);
+                ret.put("reason", "no-audio-manager");
+                call.resolve(ret);
+                return;
+            }
+            int target = mode.equals("silent") ? AudioManager.RINGER_MODE_SILENT
+                    : mode.equals("vibrate") ? AudioManager.RINGER_MODE_VIBRATE
+                    : AudioManager.RINGER_MODE_NORMAL;
+            String via = "ringer-mode";
+            boolean ok = false;
+            try {
+                am.setRingerMode(target);
+                ok = am.getRingerMode() == target;
+            } catch (Throwable ignored) {
+                ok = false;
+            }
+            if (!ok && !mode.equals("vibrate")) {
+                int max = am.getStreamMaxVolume(AudioManager.STREAM_RING);
+                int v = mode.equals("silent") ? 0 : Math.max(1, Math.round(max * 0.6f));
+                try {
+                    am.setStreamVolume(AudioManager.STREAM_RING, v, 0);
+                    via = "ring-volume";
+                    ok = true;
+                } catch (Throwable ignored) {
+                    ok = false;
+                }
+            }
+            JSObject ret = new JSObject();
+            ret.put("ok", ok);
+            if (ok) {
+                ret.put("mode", mode);
+                ret.put("via", via);
+            } else {
+                ret.put("reason", "set-failed");
+            }
+            call.resolve(ret);
+        } catch (Throwable t) {
+            JSObject ret = new JSObject();
+            ret.put("ok", false);
+            ret.put("reason", t.getMessage() == null ? "set-failed" : t.getMessage());
+            call.resolve(ret);
+        }
+    }
+
+    // ---------------- 常驻守护（前台服务）+ 开机自启动 ----------------
+
+    /** 开启常驻守护（拉起 KeepAliveService「AI Phone 正在守候」前台服务 + 记自启开关） */
+    @PluginMethod
+    public void keepAliveStart(PluginCall call) {
+        String fail = KeepAliveService.start(getContext());
+        JSObject ret = new JSObject();
+        ret.put("ok", fail == null);
+        if (fail != null) ret.put("reason", fail);
+        call.resolve(ret);
+    }
+
+    /** 关闭常驻守护（停服务 + 清自启开关，BootReceiver 不再自启） */
+    @PluginMethod
+    public void keepAliveStop(PluginCall call) {
+        KeepAliveService.stop(getContext());
+        JSObject ret = new JSObject();
+        ret.put("ok", true);
+        call.resolve(ret);
+    }
+
+    /** 守护状态快照：{running(服务存活), enabled(开机自启开关), bootPerm(RECEIVE_BOOT_COMPLETED 已授予)} */
+    @PluginMethod
+    public void keepAliveStatus(PluginCall call) {
+        Context ctx = getContext();
+        JSObject ret = new JSObject();
+        ret.put("running", KeepAliveService.isRunning());
+        ret.put("enabled", KeepAliveService.isEnabled(ctx));
+        ret.put("bootPerm", bootPermGranted(ctx));
+        call.resolve(ret);
+    }
+
+    /** 开机自启动权限状态：granted=RECEIVE_BOOT_COMPLETED（普通权限安装即授予）；
+     *  enabled=常驻守护开关（BootReceiver 只在 enabled 时拉起服务）。
+     *  国产 ROM 的自启动管理在 ROM 侧，需用户在系统设置里手动允许。 */
+    @PluginMethod
+    public void bootAutoStartStatus(PluginCall call) {
+        JSObject ret = new JSObject();
+        ret.put("granted", bootPermGranted(getContext()));
+        ret.put("enabled", KeepAliveService.isEnabled(getContext()));
+        ret.put("canAsk", true);
+        call.resolve(ret);
+    }
+
+    private boolean bootPermGranted(Context ctx) {
+        try {
+            return ctx.getPackageManager().checkPermission(
+                    "android.permission.RECEIVE_BOOT_COMPLETED", ctx.getPackageName())
+                    == PackageManager.PERMISSION_GRANTED;
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
     // ================= 屏幕抓帧（MediaProjection 备选通道） =================
 
     @PluginMethod

@@ -11,8 +11,8 @@ android {
         applicationId "com.z.aiphone"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 63          // v2.0.0 去 Shizuku 化大重构（AiAccessibilityService 无障碍底座 + LockOverlayService 悬浮窗遮罩锁 + 11 项权限中心 + 短信/通知/电量/音量原生读取）
-        versionName "2.0.0"     // v2.0.0：真机吃醋与工具全面改用安卓原生 API 与无障碍服务
+        versionCode 64          // v2.1.0 防杀后台三件套（BootReceiver 开机自启 + KeepAliveService 常驻守护前台服务 + WRITE_SETTINGS 亮度/铃声）
+        versionName "2.1.0"     // v2.1.0：开机自启动 + 前台常驻守护 + AI 调亮度/静音（含吃醋锁重启重梳）
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.

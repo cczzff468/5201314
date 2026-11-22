@@ -28,6 +28,7 @@ import {
   nativeA11yTap,
   nativeBringToFront,
   nativeGetBatteryStatus,
+  nativeGetBrightness,
   nativeGetForegroundApp,
   nativeGetRecentNotifications,
   nativeGetRecentSMS,
@@ -36,6 +37,8 @@ import {
   nativeListInstalledApps,
   nativeLockApp,
   nativeOpenApp,
+  nativeSetBrightness,
+  nativeSetRingerMode,
   nativeSetVolume,
   nativeUnlockApp,
 } from './native-perception';
@@ -62,6 +65,8 @@ function a11yGateText(reason?: string): string {
   if (reason === 'not-supported') return '此功能需要 Android 11（API 30）及以上，静默截屏在更低版本不可用';
   if (reason === 'no-permission') return '缺少对应系统权限：去 设置 › 权限给予 逐项开启';
   if (reason === 'no-overlay-permission') return '悬浮窗权限未开启：去 设置 › 权限给予 › 悬浮窗权限 开启后才能全屏拦截';
+  if (reason === 'no-write-settings') return '「修改系统设置」权限未开启：去 设置 › 权限给予 › 修改系统设置 打开开关后才能调亮度/设静音';
+  if (reason === 'no-audio-manager') return '读不到音频服务（系统异常，稍后重试）';
   if (reason === 'no-focus') return '当前没有焦点输入框（先点一下要输入的输入框）';
   if (reason === 'not-editable') return '焦点处不是可编辑输入框';
   if (reason === 'not-found') return '应用未安装（找不到启动入口）';
@@ -246,6 +251,32 @@ export async function labSetVolume(index: number): Promise<DeviceOpResult> {
   if (r === null) return { ok: false, text: '桥无响应（原生调用超时）' };
   if (!r.ok) return { ok: false, text: `音量调节失败：${a11yGateText(r.reason)}` };
   return { ok: true, text: `媒体音量已调到 ${r.volume ?? v}` };
+}
+
+/** 查屏幕亮度（Settings.System；percent 1-100 + 自动/手动模式） */
+export async function labGetBrightness(): Promise<DeviceOpResult> {
+  const r = await nativeGetBrightness();
+  if (r === null) return { ok: false, text: '桥无响应（原生调用超时）' };
+  if (!r.ok) return { ok: false, text: `亮度查询失败：${a11yGateText(r.reason)}` };
+  return { ok: true, text: `屏幕亮度：${r.percent}%（${r.auto ? '自动亮度开' : '手动'}）` };
+}
+
+/** 调屏幕亮度（percent 1-100；原生先切手动亮度模式再写 SCREEN_BRIGHTNESS，防全黑钳 2-255） */
+export async function labSetBrightness(percent: number): Promise<DeviceOpResult> {
+  const v = Math.max(1, Math.min(100, Math.round(percent)));
+  const r = await nativeSetBrightness(v);
+  if (r === null) return { ok: false, text: '桥无响应（原生调用超时）' };
+  if (!r.ok) return { ok: false, text: `亮度调节失败：${a11yGateText(r.reason)}` };
+  return { ok: true, text: `屏幕亮度已调到 ${r.percent ?? v}%` };
+}
+
+/** 设置铃声模式（silent/vibrate/normal；ringerMode 优先，静音降级零铃声量） */
+export async function labSetRingerMode(mode: 'silent' | 'vibrate' | 'normal'): Promise<DeviceOpResult> {
+  const label = mode === 'silent' ? '静音' : mode === 'vibrate' ? '振动' : '正常响铃';
+  const r = await nativeSetRingerMode(mode);
+  if (r === null) return { ok: false, text: '桥无响应（原生调用超时）' };
+  if (!r.ok) return { ok: false, text: `铃声模式设置失败：${a11yGateText(r.reason)}` };
+  return { ok: true, text: `铃声模式已设为${label}${r.via === 'ring-volume' ? '（铃声量方式）' : ''}` };
 }
 
 /** 最近通知（通知环形缓冲，需「通知使用权」） */

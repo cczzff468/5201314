@@ -3,7 +3,7 @@
 /**
  * 吃醋锁（v1.9.19，v1.9.35 Web 化）——「AI 真实吃醋并锁应用」核心库。
  *
- * v1.9.35 按机主重构令：真机 Shizuku（pm suspend/dumpsys/截图）路径全面退役，
+ * v1.9.35 按机主重构令：旧 Shizuku（pm suspend/dumpsys/截图）路径全面退役（v2.0.0 原生化），
  * 锁定/巡检/拉回全部走 Web 网页生态（虚拟手机）：
  * - 守望者（JealousyWatcher）周期探测虚拟手机当前打开的 App（web-usage-ledger）；
  * - 三类触发：A 连续刷娱乐 App 超时且期间没回 AI 消息 / B 聊天里说了「去看剧/刷视频」
@@ -200,7 +200,7 @@ function defaultCfg(): JealousyConfig {
     patrolEnabled: true,
     patrolMin: 3,
     pullbackEnabled: true,
-    // v2.0：默认网页模式（安全沙箱/浏览器预览可用；真机模式需 APK+Shizuku）
+    // v2.0：默认网页模式（安全沙箱/浏览器预览可用；真机模式需 APK+原生权限）
     senseMode: 'web',
     watchMin: 15,
     autoWatch: true,
@@ -305,7 +305,7 @@ export interface JealousyLock {
   /** 全屏弹窗已展示过的时间（0=未展示；去哄哄/强制解锁后不再自动弹） */
   overlayShownAt: number;
   triggerKind: LockTriggerKind;
-  /** v1.9.21：锁在网页内（Shizuku 未连接降级）——弹窗/聊天上下文文案适配用 */
+  /** v1.9.21：锁在网页内（原生通道不可用时降级）——弹窗/聊天上下文文案适配用 */
   web: boolean;
   /** v2.0：本锁由哪次决策产生（watch=暗中观察 / trigger=硬触发；聊天上下文叙事用） */
   bornFrom: 'watch' | 'trigger';
@@ -364,7 +364,7 @@ export interface JealousyRuntime {
   lastDecisionAt: number;
   /** 上次解锁（通道留痕；breach=强制解锁感知发现的强行突破） */
   lastUnlock: { at: number; kind: 'coaxed' | 'timeout' | 'forced' | 'breach'; pkg: string } | null;
-  /** 解锁指令失败待重试的包名（Shizuku 断连兜底；成功即清、4h 过期） */
+  /** 解锁指令失败待重试的包名（原生通道失联兜底；成功即清、4h 过期） */
   pendingUnfreeze: { pkg: string; since: number } | null;
   /** 最近一次 tick（调试/观测用） */
   lastTickAt: number;
@@ -491,7 +491,7 @@ function isNeverLockPkgForMode(pkg: string, cfg: JealousyConfig): boolean {
 
 function isEntertainPkg(pkg: string, cfg: JealousyConfig): boolean {
   if (isNeverLockPkg(pkg)) return false;
-  // v1.9.21 网页降级：Shizuku 未连接时前台=虚拟手机里的 App，可锁的网页 App
+  // v1.9.21 网页降级：原生通道不可用时前台=虚拟手机里的 App，可锁的网页 App
   // （音乐/浏览器/淘宝/美团/照片/X论坛）全算「娱乐」——网页手机里娱乐面窄，逛淘宝
   // 点外卖不理 AI 同样是吃醋叙事，且最终锁不锁仍由 AI 按人设决策，不会误伤
   // v1.9.35：真机清单退役——娱乐判定=网页内应用即娱乐面（音乐/浏览器/淘宝/美团/照片/X论坛）
@@ -580,7 +580,7 @@ function isEntertainPkgInMode(pkg: string, cfg: JealousyConfig): boolean {
   return webAppOfPkg(pkg) !== null;
 }
 
-/** 模式隔离的前台探测：网页=虚拟手机 activeApp 映射；真机=Shizuku dumpsys（失败 null） */
+/** 模式隔离的前台探测：网页=虚拟手机 activeApp 映射；真机=无障碍事件流/UsageStats（失败 null） */
 async function senseForegroundPkg(cfg: JealousyConfig): Promise<string | null> {
   if (cfg.senseMode === 'device') {
     const intel = await collectSenseIntel('device');
@@ -636,7 +636,7 @@ function syncJealousyGuard(pkg: string | null, unlockAt: number, charName: strin
  *   走 timeout 通道记忆（AI 下轮聊天能自然提起）；JS 活着时 tick 已先行解锁 → 事件幂等忽略；
  * - breach：原生服务检测到强解 → 若 JS 轮询还没发现（WebView 刚醒）→ 走 detectForcedBreach
  *   同款链路（内部再查一次 dumpsys 双保险防误报，之后 AI 阴阳怪气）；
- * - degrade：守护降级（Shizuku 断连/厂商限制）→ 记进 watch.lastIntel（AI 下轮可见）。
+ * - degrade：守护降级（原生通道失联/权限丢失）→ 记进 watch.lastIntel（AI 下轮可见）。
  * 事件取后即清（原生侧环形 50 条上限，不担心膨胀）。
  */
 async function drainJealousyGuardEvents(): Promise<void> {
@@ -711,7 +711,7 @@ async function tickInner(): Promise<void> {
   // 网页模式 / 旧 APK / 非原生环境 → drain 返回 null，零开销跳过。
   await drainJealousyGuardEvents();
 
-  // v2.0：真机锁的 unsuspend 补刀重试（Shizuku 断连时 unlockJealousy 落 pendingUnfreeze；
+  // v2.0：真机锁的解锁补刀重试（原生通道失联时 unlockJealousy 落 pendingUnfreeze；
   // 这里每 tick 重试 pm unsuspend，成功即清；4h 过期放弃——网页锁解冻恒成功不受影响）
   const rt0 = readJealousyRuntime();
   if (rt0.pendingUnfreeze && now - rt0.pendingUnfreeze.since < 4 * 3600_000) {
@@ -787,7 +787,7 @@ async function tickInner(): Promise<void> {
   const rt2 = readJealousyRuntime();
   if (rt2.lastDecisionAt && now - rt2.lastDecisionAt < DECISION_COOLDOWN_MS) return;
 
-  // 前台探测（v2.0 模式隔离）：网页=虚拟手机当前 App / 真机=Shizuku dumpsys（主屏/锁屏/不可锁 App/桥断 → null）
+  // 前台探测（v2.0 模式隔离）：网页=虚拟手机当前 App / 真机=无障碍事件流+UsageStats（主屏/锁屏/不可锁 App/桥断 → null）
   const pkg: string | null = await senseForegroundPkg(cfg);
 
   // 维护连续娱乐状态
@@ -1233,7 +1233,7 @@ interface PatrolIntel {
   text: string;
   /** 当前前台包名（null=主屏/不可知） */
   fgPkg: string | null;
-  /** 采集是否成功（真机模式 Shizuku 断连 → false：本轮巡检降级为「不可见」） */
+  /** 采集是否成功（真机模式原生通道失联 → false：本轮巡检降级为「不可见」） */
   ok: boolean;
 }
 
@@ -1439,7 +1439,7 @@ async function runJealousyWatch(): Promise<void> {
   const w0 = readWatch(rt);
   writeRt({ watch: { ...w0, lastAt: Date.now(), count: w0.count + 1, day: dayKey() } });
 
-  // 模式隔离采集（真机模式在 Shizuku 断连时 → ok=false + degrade；本轮静默跳过）
+  // 模式隔离采集（真机模式在原生通道失联时 → ok=false + degrade；本轮静默跳过）
   // v2.1 观察者锚点：最近私聊的角色自身——感知层据此自我过滤 TA 自己发的通知
   const intel = await collectSenseIntel(cfg.senseMode, { observer: { contactId: chat.contactId, app: chat.app } });
   if (!intel.ok) {
@@ -2101,7 +2101,7 @@ export function jealousyRemainSec(): number | null {
   return Math.max(0, Math.ceil((rt.lock.unlockAt - Date.now()) / 1000));
 }
 
-/** 开发/E2E 钩子：模拟一次决策（网页端无 Shizuku 时验证剧情链路） */
+/** 开发/E2E 钩子：模拟一次决策（网页端无原生通道时验证剧情链路） */
 export async function __jealousyTestTrigger(kind: LockTriggerKind, pkg: string): Promise<void> {
   const cfg = getJealousyConfig();
   const rt = readJealousyRuntime();

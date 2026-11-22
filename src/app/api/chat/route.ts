@@ -79,12 +79,13 @@ function isValidToolRoundMessages(value: unknown): value is ToolRoundMessage[] {
   });
 }
 
-/** v1.9.23 工具定义收窄：只放行 type:function 且函数名/描述/参数形状合法的项（最多 40 个） */
+/** v1.9.23 工具定义收窄：只放行 type:function 且函数名/描述/参数形状合法的项
+ *  （v2.1.0 上限 40→48：真机模式 22 网页 + 21 真机（新增亮度/铃声三件）= 43，留 5 余量） */
 function sanitizeTools(value: unknown): ToolDef[] {
   if (!Array.isArray(value)) return [];
   const out: ToolDef[] = [];
   for (const item of value) {
-    if (out.length >= 40) break;
+    if (out.length >= 48) break;
     if (typeof item !== 'object' || item === null) continue;
     const rec = item as Record<string, unknown>;
     const fn = rec.function;

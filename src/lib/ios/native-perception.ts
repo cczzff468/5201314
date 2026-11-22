@@ -165,6 +165,17 @@ type CapPlugin = {
   requestBatteryPermission(): Promise<{ ok?: boolean; reason?: string }>;
   locationPermission(): Promise<RuntimePermResult & { fine?: boolean; coarse?: boolean }>;
   requestLocationPermission(): Promise<RuntimePermResult & { fine?: boolean; coarse?: boolean }>;
+  /** v2.1.0 修改系统设置组（WRITE_SETTINGS：亮度/铃声） */
+  writeSettingsPermission(): Promise<RuntimePermResult>;
+  openWriteSettings(): Promise<void>;
+  getBrightness(): Promise<{ ok?: boolean; percent?: number; auto?: boolean; reason?: string }>;
+  setBrightness(options: { percent: number }): Promise<{ ok?: boolean; percent?: number; reason?: string }>;
+  setRingerMode(options: { mode: string }): Promise<{ ok?: boolean; mode?: string; via?: string; reason?: string }>;
+  /** v2.1.0 常驻守护（前台服务）+ 开机自启动组 */
+  keepAliveStatus(): Promise<{ running?: boolean; enabled?: boolean; bootPerm?: boolean }>;
+  keepAliveStart(): Promise<{ ok?: boolean; reason?: string }>;
+  keepAliveStop(): Promise<{ ok?: boolean }>;
+  bootAutoStartStatus(): Promise<RuntimePermResult & { enabled?: boolean }>;
 };
 
 type CapacitorCore = {
@@ -393,6 +404,17 @@ function bridgePlugin(): CapPlugin {
     requestBatteryPermission: () => nativeCall<{ ok?: boolean; reason?: string }>('requestBatteryPermission'),
     locationPermission: () => nativeCall<RuntimePermResult & { fine?: boolean; coarse?: boolean }>('locationPermission'),
     requestLocationPermission: () => nativeCall<RuntimePermResult & { fine?: boolean; coarse?: boolean }>('requestLocationPermission', {}, 60_000),
+    // v2.1.0 修改系统设置组（WRITE_SETTINGS：亮度/铃声）
+    writeSettingsPermission: () => nativeCall<RuntimePermResult>('writeSettingsPermission'),
+    openWriteSettings: () => nativeCall<void>('openWriteSettings'),
+    getBrightness: () => nativeCall<{ ok?: boolean; percent?: number; auto?: boolean; reason?: string }>('getBrightness'),
+    setBrightness: (options) => nativeCall<{ ok?: boolean; percent?: number; reason?: string }>('setBrightness', options ?? {}, 8000),
+    setRingerMode: (options) => nativeCall<{ ok?: boolean; mode?: string; via?: string; reason?: string }>('setRingerMode', options ?? {}, 8000),
+    // v2.1.0 常驻守护（前台服务）+ 开机自启组
+    keepAliveStatus: () => nativeCall<{ running?: boolean; enabled?: boolean; bootPerm?: boolean }>('keepAliveStatus'),
+    keepAliveStart: () => nativeCall<{ ok?: boolean; reason?: string }>('keepAliveStart', {}, 8000),
+    keepAliveStop: () => nativeCall<{ ok?: boolean }>('keepAliveStop', {}, 8000),
+    bootAutoStartStatus: () => nativeCall<RuntimePermResult & { enabled?: boolean }>('bootAutoStartStatus'),
   };
 }
 
@@ -709,6 +731,110 @@ export async function openNativeAppDetailSettings(): Promise<boolean> {
     return true;
   } catch {
     return false;
+  }
+}
+
+// ---------------- v2.1.0 修改系统设置（WRITE_SETTINGS：亮度/铃声）/ 常驻守护 / 开机自启 ----------------
+
+/** 修改系统设置权限状态（Settings.System.canWrite；浏览器 null） */
+export async function writeSettingsPermission(): Promise<RuntimePermResult | null> {
+  const p = await nativePlugin();
+  if (!p) return null;
+  try {
+    return await nativeOrTimeout(p.writeSettingsPermission());
+  } catch {
+    return null;
+  }
+}
+
+/** 跳系统「可修改系统设置」开关页（本 APP 条目深链直达） */
+export async function openNativeWriteSettings(): Promise<boolean> {
+  const p = await nativePlugin();
+  if (!p) return false;
+  try {
+    await nativeOrTimeout(p.openWriteSettings(), 5000);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** 读当前屏幕亮度（percent 1-100 + auto 自动亮度；未授权 reason='no-write-settings'） */
+export async function nativeGetBrightness(): Promise<{ ok?: boolean; percent?: number; auto?: boolean; reason?: string } | null> {
+  const p = await nativePlugin();
+  if (!p) return null;
+  try {
+    return await nativeOrTimeout(p.getBrightness(), 6000);
+  } catch {
+    return null;
+  }
+}
+
+/** 调屏幕亮度（percent 1-100；原生先切手动亮度模式再写 SCREEN_BRIGHTNESS） */
+export async function nativeSetBrightness(percent: number): Promise<{ ok?: boolean; percent?: number; reason?: string } | null> {
+  const p = await nativePlugin();
+  if (!p) return null;
+  try {
+    return await nativeOrTimeout(p.setBrightness({ percent }), 8000);
+  } catch {
+    return null;
+  }
+}
+
+/** 设置铃声模式（silent/vibrate/normal；ringerMode 优先、静音降级零铃声量） */
+export async function nativeSetRingerMode(mode: 'silent' | 'vibrate' | 'normal'): Promise<{ ok?: boolean; mode?: string; via?: string; reason?: string } | null> {
+  const p = await nativePlugin();
+  if (!p) return null;
+  try {
+    return await nativeOrTimeout(p.setRingerMode({ mode }), 8000);
+  } catch {
+    return null;
+  }
+}
+
+/** 常驻守护状态（running 服务存活 / enabled 开机自启开关 / bootPerm 自启权限） */
+export async function keepAliveStatus(): Promise<{ running?: boolean; enabled?: boolean; bootPerm?: boolean } | null> {
+  const p = await nativePlugin();
+  if (!p) return null;
+  try {
+    return await nativeOrTimeout(p.keepAliveStatus());
+  } catch {
+    return null;
+  }
+}
+
+/** 开启常驻守护（前台服务「AI Phone 正在守候」+ 记开机自启开关） */
+export async function keepAliveStart(): Promise<{ ok: boolean; reason?: string }> {
+  const p = await nativePlugin();
+  if (!p) return { ok: false, reason: 'not-native' };
+  try {
+    const r = await nativeOrTimeout(p.keepAliveStart(), 8000);
+    return { ok: r?.ok === true, reason: r?.reason };
+  } catch {
+    return { ok: false, reason: '桥无响应' };
+  }
+}
+
+/** 关闭常驻守护（停服务 + 清自启开关，BootReceiver 不再自启） */
+export async function keepAliveStop(): Promise<{ ok: boolean }> {
+  const p = await nativePlugin();
+  if (!p) return { ok: false };
+  try {
+    const r = await nativeOrTimeout(p.keepAliveStop(), 8000);
+    return { ok: r?.ok !== false };
+  } catch {
+    return { ok: false };
+  }
+}
+
+/** 开机自启动状态（granted=RECEIVE_BOOT_COMPLETED 已授予；enabled=守护开关开着开机才会拉起） */
+export async function bootAutoStartStatus(): Promise<{ granted?: boolean; enabled?: boolean } | null> {
+  const p = await nativePlugin();
+  if (!p) return null;
+  try {
+    return await nativeOrTimeout(p.bootAutoStartStatus());
+  } catch {
+    return null;
   }
 }
 

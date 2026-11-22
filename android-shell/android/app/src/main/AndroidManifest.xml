@@ -70,6 +70,28 @@
                 android:value="companion_app_lock_guard" />
         </service>
 
+        <!-- v2.1.0 常驻守护前台服务（防杀后台）：状态栏常驻「AI Phone 正在守候」，
+             监控/查岗/吃醋锁后台进程不被系统轻易回收；Android 14+ 强制 specialUse 类型声明 -->
+        <service
+            android:name=".KeepAliveService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="companion_keepalive_guard" />
+        </service>
+
+        <!-- v2.1.0 开机自启动：手机重启后自动拉起常驻守护 + 重梳重启前还活跃的吃醋锁
+             （需 RECEIVE_BOOT_COMPLETED 权限；国产 ROM 需在系统设置里允许自启动） -->
+        <receiver
+            android:name=".BootReceiver"
+            android:enabled="true"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
+
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"
@@ -118,6 +140,14 @@
     <uses-permission android:name="android.permission.WRITE_CALENDAR" />
     <!-- v2.0.0 闹钟与计时器（精确闹钟；API 31+ 默认拒绝需引导到系统授权页） -->
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+    <!-- v2.1.0 开机自启动：重启后 BootReceiver 自动拉起守护服务（普通权限，安装即授予；
+         国产 ROM 的自启动管理需用户在系统设置里另行允许） -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- v2.1.0 修改系统设置：AI 调节屏幕亮度（SCREEN_BRIGHTNESS）/ 切手动亮度模式；
+         铃声静音经 AudioManager（设置静音在部分 ROM 需勿扰访问，失败自动降级零铃声量） -->
+    <uses-permission
+        android:name="android.permission.WRITE_SETTINGS"
+        tools:ignore="ProtectedPermissions" />
     <!-- v2.0.0 文件读写与媒体访问（33+ 细分媒体权限组；32- 旧存储权限） -->
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
     <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />

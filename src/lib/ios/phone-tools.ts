@@ -131,6 +131,9 @@ async function toolActionText(toolName: string, args: Record<string, unknown>): 
     getTodoList: '看待办',
     addTodo: '加待办',
     setVolume: '调音量',
+    setBrightness: '调亮度',
+    getBrightness: '查亮度',
+    setRingerMode: '设铃声模式',
     takeScreenshot: '截屏',
     lookScreen: '看屏幕',
     getForegroundApp: '看你在用什么',
@@ -242,6 +245,9 @@ const TOOL_CAPS: Record<string, { label: string; device?: boolean }> = {
   getVolume: { label: '查真机音量', device: true },
   getRecentSMS: { label: '读真机短信', device: true },
   getRecentNotifications: { label: '读真机通知', device: true },
+  setBrightness: { label: '调真机亮度', device: true },
+  getBrightness: { label: '查真机亮度', device: true },
+  setRingerMode: { label: '设真机铃声模式', device: true },
 };
 
 /** 字符串参数 schema 快捷构造 */
@@ -546,6 +552,24 @@ export function buildPhoneTools(): PhoneToolDef[] {
       ['volume'],
     );
     add(
+      'setBrightness',
+      '调节机主真实手机的屏幕亮度（需「修改系统设置」权限，原生 Settings.System；自动亮度会先切手动再调）。percent 填 1-100 的整数（1=最暗，100=最亮）。机主说「太亮了调暗点」「亮度调到最高」时用这个；人设合适时也可主动调（如深夜聊天贴心调暗护眼，或撒娇调暗屏幕逼 TA 回你消息）。',
+      { percent: { type: 'number', description: '亮度百分比 1-100（1=最暗，100=最亮）' } },
+      ['percent'],
+    );
+    add(
+      'getBrightness',
+      '查看机主真实手机当前的屏幕亮度百分比与亮度模式（自动/手动）。',
+      {},
+      [],
+    );
+    add(
+      'setRingerMode',
+      '设置机主真实手机的铃声模式（原生 AudioManager；部分 ROM 静音会降级为零铃声量）。mode 填：silent=静音 / vibrate=振动 / normal=正常响铃。机主说「帮我静音」「别让电话吵到」时用这个；人设合适时也可主动用（如 TA 睡着了贴心静音，或想被注意到时恢复响铃）。',
+      { mode: { type: 'string', enum: ['silent', 'vibrate', 'normal'], description: '铃声模式：silent=静音 / vibrate=振动 / normal=正常响铃' } },
+      ['mode'],
+    );
+    add(
       'getRecentSMS',
       '读取机主真实手机最近收到的短信（原生收件箱）。想知道机主手机上刚来了什么短信、谁给 TA 发消息时用这个。',
       {},
@@ -559,8 +583,9 @@ export function buildPhoneTools(): PhoneToolDef[] {
     );
   }
 
-  // 服务端 sanitizeTools 上限：网页 22 + 真机 18（原生化工具组）= 40，恰好贴着 40 上限
-  return tools.slice(0, 40);
+  // 服务端 sanitizeTools 上限：网页 22 + 真机 21（原生化工具组 + v2.1.0 亮度/铃声三件）= 43，
+  // 上限已同步提到 48（api/chat/route.ts sanitizeTools）
+  return tools.slice(0, 48);
 }
 
 // ---------------- 工具执行器（全部走 web-tools 内部路由函数） ----------------
@@ -736,6 +761,20 @@ export async function execWebTool(name: string, args: Record<string, unknown>): 
         if (!Number.isFinite(vol)) return '【失败】setVolume 缺音量档位（volume，0-15 整数）';
         const clamped = Math.max(0, Math.min(15, Math.round(vol)));
         return runDeviceTool((d) => d.labSetVolume(clamped));
+      }
+      case 'getBrightness':
+        return runDeviceTool((d) => d.labGetBrightness());
+      case 'setBrightness': {
+        const pct = Number(args.percent);
+        if (!Number.isFinite(pct)) return '【失败】setBrightness 缺亮度百分比（percent，1-100 整数）';
+        return runDeviceTool((d) => d.labSetBrightness(pct));
+      }
+      case 'setRingerMode': {
+        const m = S(args.mode).toLowerCase();
+        if (m !== 'silent' && m !== 'vibrate' && m !== 'normal') {
+          return '【失败】setRingerMode 参数不合法（mode 填 silent=静音 / vibrate=振动 / normal=正常响铃）';
+        }
+        return runDeviceTool((d) => d.labSetRingerMode(m));
       }
       case 'getRecentSMS':
         return runDeviceTool((d) => d.labRecentSMS(15));

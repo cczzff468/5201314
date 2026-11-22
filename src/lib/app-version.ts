@@ -11,9 +11,9 @@
  */
 
 /** 当前最新版本（与 android-shell versionName 保持一致） */
-export const APP_VERSION = '2.0.0';
+export const APP_VERSION = '2.1.0';
 /** 版本号数字（与 android-shell versionCode 保持一致；覆盖安装要求只增不减） */
-export const APP_VERSION_CODE = 63;
+export const APP_VERSION_CODE = 64;
 
 export interface AppReleaseNote {
   version: string;
@@ -24,6 +24,16 @@ export interface AppReleaseNote {
 
 /** 版本历史（新→旧；设置 › APP 更新 页渲染，最新一条即当前版本） */
 export const APP_RELEASE_NOTES: AppReleaseNote[] = [
+  {
+    version: '2.1.0',
+    date: '2026-11-22',
+    items: [
+      '【需更新 APK】防杀后台三件套：开机自启动（手机重启后守护服务自动拉回，不用手动点开 App）+ 常驻守护前台服务（状态栏常驻「AI Phone 正在守候」，系统不轻易杀后台）+ 开机重梳吃醋锁（重启前没到期的锁重新武装，重启手机也逃不掉）',
+      '新增 AI 系统级操作（需开启「修改系统设置」权限）：调屏幕亮度（自动亮度自动切手动、深夜聊天贴心调暗护眼、撒娇调暗逼你回消息）+ 设铃声模式（静音/振动/响铃，你睡着了贴心静音）；权限中心新增「修改系统设置/开机自启动/常驻守护」三项，点击直达系统授权页',
+      'Agent 新工具三件：setBrightness 调亮度 / getBrightness 查亮度 / setRingerMode 设铃声模式——工具总量上限 40→48，全部真实作用于真机',
+      'Android 14+ 合规：常驻守护前台服务声明 specialUse 类型（companion_keepalive_guard），不会因前台服务类型限制被拒安装；国产 ROM 开机自启需在系统设置里允许（权限页有提示）',
+    ],
+  },
   {
     version: '2.0.0',
     date: '2026-11-22',

@@ -82,6 +82,13 @@ public class LockOverlayService extends Service {
     private static final String EVENTS_KEY = "events";
     private static final int EVENT_RING_MAX = 50;
 
+    /** v2.1.0 锁状态持久化（重启重梳用）：syncLock 建锁时写入、解锁时清空；
+     * BootReceiver 开机后据此把重启前还活跃的吃醋锁重新武装 */
+    private static final String KEY_ACTIVE_PKG = "active_pkg";
+    private static final String KEY_ACTIVE_UNLOCK_AT = "active_unlock_at";
+    private static final String KEY_ACTIVE_CHAR = "active_char";
+    private static final String KEY_ACTIVE_MSG = "active_msg";
+
     /** 常驻前台通知（IMPORTANCE_LOW 静默） */
     private static final String CHANNEL_ID = "lock_guard";
     private static final int NOTIFY_ID = 7791;
@@ -224,15 +231,28 @@ public class LockOverlayService extends Service {
         scheduleTick(POLL_MS);
     }
 
-    /** 内部解锁：收遮罩 + 清锁状态 + 停服务（reason 只用于日志口径，不落盘） */
+    /** 内部解锁：收遮罩 + 清锁状态（含持久化）+ 停服务（reason 只用于日志口径，不落盘） */
     private void internalUnlock(String reason) {
         removeOverlay();
         lockPkg = null;
         unlockAt = 0L;
         message = "";
         openAttempts = 0;
+        clearPersistedLock(getApplicationContext());
         stopForeground(STOP_FOREGROUND_REMOVE);
         stopSelf();
+    }
+
+    /** v2.1.0 清掉持久化的活跃锁（解锁链路共用；ctx 显式传入——服务未运行的解锁路径 appCtx 可能还没建） */
+    private static void clearPersistedLock(Context ctx) {
+        try {
+            Context app = ctx != null ? ctx : appCtx;
+            if (app == null) return;
+            app.getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+                    .edit().remove(KEY_ACTIVE_PKG).remove(KEY_ACTIVE_UNLOCK_AT)
+                    .remove(KEY_ACTIVE_CHAR).remove(KEY_ACTIVE_MSG).apply();
+        } catch (Throwable ignored) {
+        }
     }
 
     /** 权限失效 degrade 事件（节流） */
@@ -498,10 +518,21 @@ public class LockOverlayService extends Service {
                     lockPkg = null;
                     unlockAt = 0L;
                 }
+                clearPersistedLock(ctx); // v2.1.0 同步清掉持久化锁
                 return null;
             }
             if (!pkg.matches("^[\\w.]+$")) return "bad-pkg";
             if (!Settings.canDrawOverlays(ctx)) return "no-overlay-permission";
+            // v2.1.0 锁状态持久化：重启后 BootReceiver 据此重梳还活跃的吃醋锁
+            try {
+                ctx.getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+                        .edit().putString(KEY_ACTIVE_PKG, pkg)
+                        .putLong(KEY_ACTIVE_UNLOCK_AT, ua)
+                        .putString(KEY_ACTIVE_CHAR, charName == null ? "" : charName)
+                        .putString(KEY_ACTIVE_MSG, message == null ? "" : message)
+                        .apply();
+            } catch (Throwable ignored) {
+            }
             Intent i = new Intent(ctx, LockOverlayService.class);
             i.putExtra(EXTRA_PKG, pkg);
             i.putExtra(EXTRA_UNLOCK_AT, ua);
@@ -568,5 +599,34 @@ public class LockOverlayService extends Service {
             // 脏数据 → 当空处理（已清掉）
         }
         return out;
+    }
+
+    // ================= v2.1.0 开机重梳（BootReceiver 调用） =================
+
+    /**
+     * 重启后重梳持久化的活跃吃醋锁：重启前没到期（或锁到哄好 unlockAt=0）的锁
+     * 重新武装遮罩锁；已过期/无锁则只清持久化记录。权限缺失（悬浮窗被系统回收）
+     * 时 syncLock 会返回失败原因——静默保留持久化，用户重开 App 后 JS 侧自愈重锁。
+     */
+    public static void rearmFromPrefs(Context ctx) {
+        try {
+            SharedPreferences sp = ctx.getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+            String pkg = sp.getString(KEY_ACTIVE_PKG, null);
+            if (pkg == null || pkg.trim().isEmpty() || !pkg.matches("^[\\w.]+$")) {
+                clearPersistedLock(ctx);
+                return;
+            }
+            long ua = sp.getLong(KEY_ACTIVE_UNLOCK_AT, 0L);
+            // 已到期：不重梳，清记录（JS 醒来后 drain 事件对账自然收敛）
+            if (ua != 0 && System.currentTimeMillis() >= ua) {
+                clearPersistedLock(ctx);
+                return;
+            }
+            String ch = sp.getString(KEY_ACTIVE_CHAR, "");
+            String msg = sp.getString(KEY_ACTIVE_MSG, "");
+            syncLock(ctx, pkg, ua, ch, msg);
+        } catch (Throwable ignored) {
+            // 开机重梳绝不 crash
+        }
     }
 }

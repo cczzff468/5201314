@@ -1,6 +1,6 @@
 'use client';
 
-// 权限给予页（v2.0.0 去 Shizuku 化：系统权限 11 项 + 通知/麦克风 / 时长数据源 / AI 动手范围）。
+// 权限给予页（v2.1.0：系统权限 14 项（新增修改系统设置/开机自启动/常驻守护）+ 通知/麦克风 / 时长数据源 / AI 动手范围）。
 
 import {
   useCallback,
@@ -21,14 +21,17 @@ import {
   CheckCircle2,
   ChevronRight,
   FolderOpen,
+  HeartHandshake,
   Loader2,
   MapPin,
   MessageSquareText,
   Mic,
   MousePointerClick,
   PanelTop,
+  Power,
   RefreshCw,
   ShieldCheck,
+  SunMedium,
   AppWindow,
   Smartphone,
   Cpu,
@@ -54,15 +57,19 @@ import {
   type AiActionTarget,
 } from '@/lib/ios/device-autonomy';
 
-// v2.0.0 权限中心 11 项：全部经原生系统 API / 无障碍服务（AiAccessibilityService），
+// v2.1.0 权限中心 14 项：全部经原生系统 API / 无障碍服务（AiAccessibilityService），
 // Shizuku 通道整体退役
 import {
   accessibilityPermission,
   alarmPermission,
   batteryPermission,
+  bootAutoStartStatus,
   calendarPermission,
   contactsPermission,
   isNativePerception,
+  keepAliveStart,
+  keepAliveStatus,
+  keepAliveStop,
   locationPermission,
   mediaFilesPermission,
   micPermission,
@@ -72,6 +79,7 @@ import {
   openNativeAppDetailSettings,
   openNativeMediaSettings,
   openNativeUsageSettings,
+  openNativeWriteSettings,
   overlayPermission,
   requestAlarmPermission,
   requestBatteryPermission,
@@ -83,6 +91,7 @@ import {
   requestOverlayPermission,
   requestSmsPermission,
   smsPermission,
+  writeSettingsPermission,
 } from '@/lib/ios/native-perception';
 
 import {
@@ -102,7 +111,7 @@ import {
 } from './shared';
 
 
-// ---------------- 权限给予（v2.0.0：机主 11 项系统权限 + 通知/麦克风；Shizuku 全下线；v1.9.40 弹窗去长文·看门狗防卡「申请中」仍生效） ----------------
+// ---------------- 权限给予（v2.1.0：机主 14 项系统权限 + 通知/麦克风；v1.9.40 弹窗去长文·看门狗防卡「申请中」仍生效） ----------------
 
 /** 单个权限的运行时状态（v1.9.38：网页里也能授权，无「需真机」态） */
 export type PermState = 'checking' | 'granted' | 'denied' | 'web-denied';
@@ -137,6 +146,8 @@ export interface PermDef {
   icon: LucideIcon;
   /** 申请按钮文案 */
   actionLabel: string;
+  /** v2.1.0：已开启态的按钮文案（常驻守护等可开关项：已开启时点击=关闭） */
+  actionLabelOff?: string;
   /**
    * 运行时权限被系统持久拒绝（canAsk=false，弹窗被「不再询问」关掉）时的兜底：
    * 弹窗按钮变「去系统设置手动开启」，点击经原生 Intent 跳系统应用详情页手动开启。
@@ -150,8 +161,8 @@ export interface PermDef {
 
 /**
  * 权限给予页的权限清单。
- * v2.0.0 机主 11 项排前（无障碍/使用情况/悬浮窗/通知使用/短信/通讯录/日历/闹钟/位置/
- * 媒体文件/电池优化），通知/麦克风并列其后；全部走原生系统 API + 无障碍服务，无 Shizuku。
+ * v2.1.0 机主 14 项排前（无障碍/使用情况/悬浮窗/通知使用/短信/通讯录/日历/闹钟/位置/
+ * 媒体文件/电池优化/修改系统设置/开机自启动/常驻守护），通知/麦克风并列其后；全部走原生系统 API + 无障碍服务，无 Shizuku。
  * v1.9.38 基础权限全部无需真机：通知/麦克风/位置走浏览器授权框，
  * 其余在网页里点「去开启」即完成授权（网页授权账本记账）；
  * 原生壳里仍优先真实通道（系统授权框/设置页/原生 Intent 跳转），账本只在真实通道
@@ -183,7 +194,7 @@ export function writeWebPermGrant(key: string, on: boolean): void {
 }
 
 export const PERM_DEFS: PermDef[] = [
-  // ---- 机主 11 项（v2.0.0 权限中心；检测 + 原生 Intent 直跳系统授权页） ----
+  // ---- 机主 14 项（v2.0.0 权限中心 11 项 + v2.1.0 防杀后台三件套；检测 + 原生 Intent 直跳系统授权页） ----
   {
     key: 'accessibility',
     label: '无障碍服务',
@@ -422,7 +433,92 @@ export const PERM_DEFS: PermDef[] = [
       return { ok: true, note: '电池优化豁免已开启' };
     },
   },
-  // ---- 既有权限（与 11 项并列展示） ----
+  // ---- v2.1.0 防杀后台三件套（修改系统设置 / 开机自启动 / 常驻守护） ----
+  {
+    key: 'writesettings',
+    label: '修改系统设置',
+    desc: 'AI 调屏幕亮度、设静音等系统级操作',
+    icon: SunMedium,
+    actionLabel: '去开启修改系统设置',
+    query: async () => {
+      if (readWebPermGrants().writesettings === true) return { granted: true };
+      const r = await writeSettingsPermission();
+      if (r) return r;
+      return { granted: false, canAsk: true };
+    },
+    request: async () => {
+      const ok = await openNativeWriteSettings();
+      if (ok) return { ok: true, note: '已跳转系统开关页，打开开关后返回' };
+      writeWebPermGrant('writesettings', true); // 网页/旧 APK：账本记账
+      return { ok: true, note: '修改系统设置已开启' };
+    },
+  },
+  {
+    key: 'boot',
+    label: '开机自启动',
+    desc: '手机重启后自动拉起守护服务（需开启常驻守护）',
+    icon: Power,
+    actionLabel: '开启开机自启动',
+    query: async () => {
+      const r = await bootAutoStartStatus();
+      if (r?.granted && r.enabled) return { granted: true };
+      if (readWebPermGrants().boot === true && readWebPermGrants().keepalive === true) return { granted: true };
+      return { granted: false, canAsk: true };
+    },
+    request: async () => {
+      // 权限本身安装即授予；这里拉起常驻守护（开关持久化，BootReceiver 据此自启）
+      const r = await keepAliveStart();
+      if (r.ok) {
+        writeWebPermGrant('keepalive', true);
+        writeWebPermGrant('boot', true);
+        return { ok: true, note: '已就绪：重启后自动拉起守护（国产 ROM 需在系统设置允许本应用自启动）' };
+      }
+      // 网页/旧 APK/极少数拉起失败：账本同时记两项（真机上实际状态以原生查询为准）
+      writeWebPermGrant('keepalive', true);
+      writeWebPermGrant('boot', true);
+      return { ok: true, note: '开机自启动已就绪' };
+    },
+  },
+  {
+    key: 'keepalive',
+    label: '常驻守护（前台服务）',
+    desc: '状态栏常驻「AI Phone 正在守候」防杀后台',
+    icon: HeartHandshake,
+    actionLabel: '开启常驻守护',
+    actionLabelOff: '停止常驻守护',
+    query: async () => {
+      if (readWebPermGrants().keepalive === true) {
+        // 账本说开着：真机再核对一次（用户可能从系统里杀过）
+        const r = await keepAliveStatus();
+        if (r === null || r.running) return { granted: true };
+        return { granted: false, canAsk: true };
+      }
+      const r = await keepAliveStatus();
+      if (r?.running) return { granted: true };
+      return { granted: false, canAsk: true };
+    },
+    request: async () => {
+      // 已开启 → 停止；未开启 → 拉起前台服务（v2.1.0 开关语义）
+      // 运行判定：真机看服务实例（keepAliveStatus.running）；浏览器/旧 APK 桥为 null
+      // 时落网页账本（账本记着开启就视为在守护——真机账本与实例不一致时 query 已如实降级）
+      const st = await keepAliveStatus();
+      const runningNow = st ? st.running === true : readWebPermGrants().keepalive === true;
+      if (runningNow) {
+        await keepAliveStop();
+        writeWebPermGrant('keepalive', false);
+        writeWebPermGrant('boot', false);
+        return { ok: true, note: '已停止常驻守护（开机不再自启）' };
+      }
+      const r = await keepAliveStart();
+      if (r.ok) {
+        writeWebPermGrant('keepalive', true);
+        return { ok: true, note: '常驻守护已开启（状态栏显示「AI Phone 正在守候」）' };
+      }
+      writeWebPermGrant('keepalive', true); // 网页/旧 APK：账本记账
+      return { ok: true, note: '常驻守护已开启' };
+    },
+  },
+  // ---- 既有权限（与 14 项并列展示） ----
   {
     key: 'mic',
     label: '麦克风权限',
@@ -578,6 +674,11 @@ export function PermissionHubPage({ onBack }: { onBack: () => void }) {
    */
   const dialogPersistDenied =
     !!dialogPerm && dialogPerm.persistDeniedFallback === true && permStates[dialogPerm.key] === 'web-denied';
+  /** v2.1.0 开关语义（常驻守护等）：已开启时按钮变 actionLabelOff、点击=关闭 */
+  const dialogActionOn =
+    !!dialogPerm && !(dialogPerm.actionLabelOff !== undefined && permStates[dialogPerm.key] === 'granted');
+  const dialogActionLabel =
+    dialogPerm && !dialogActionOn ? dialogPerm.actionLabelOff : (dialogPerm?.actionLabel ?? '去开启');
   /** 从系统设置页返回（无障碍/使用情况/悬浮窗等）后重新核对 */
   useEffect(() => {
     if (dialogPerm) return;
@@ -645,7 +746,7 @@ export function PermissionHubPage({ onBack }: { onBack: () => void }) {
           </p>
         </div>
 
-        {/* ===== 基础权限（机主 11 项 + 通知/麦克风） ===== */}
+        {/* ===== 基础权限（机主 14 项 + 通知/麦克风） ===== */}
         <SectionLabel icon={ShieldCheck} tone="#34C759" right={
           <button
             type="button"
@@ -710,7 +811,7 @@ export function PermissionHubPage({ onBack }: { onBack: () => void }) {
         <AlertDialogContent className="w-[270px] gap-0 rounded-[14px] p-0 sm:w-[270px] sm:max-w-[270px]">
           <AlertDialogHeader className="px-5 pb-5 pt-6 sm:text-center">
             <AlertDialogTitle className="text-center text-[17px] font-semibold leading-snug">
-              {dialogPerm ? `开启${dialogPerm.label}？` : ''}
+              {dialogPerm ? `${dialogActionOn ? '开启' : '管理'}${dialogPerm.label}？` : ''}
             </AlertDialogTitle>
           </AlertDialogHeader>
           <AlertDialogFooter className="flex-row border-t border-black/[0.08] dark:border-white/[0.12]">
@@ -726,7 +827,7 @@ export function PermissionHubPage({ onBack }: { onBack: () => void }) {
               className="mt-0 flex-1 border-0 bg-transparent py-3 text-[16px] font-semibold text-[#007AFF] hover:bg-transparent disabled:opacity-50"
               data-testid="perm-grant-confirm"
             >
-              {grantBusy ? '申请中…' : dialogPersistDenied ? '去系统设置手动开启' : (dialogPerm?.actionLabel ?? '去开启')}
+              {grantBusy ? '申请中…' : dialogPersistDenied ? '去系统设置手动开启' : dialogActionLabel}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
