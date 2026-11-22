@@ -1,2 +1,9 @@
 skills/
 node_modules/
+.next/
+dev.log
+tool-results/
+agent-ctx/
+upload/
+*.log
+.DS_Store

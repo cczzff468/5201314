@@ -1,0 +1,14 @@
+{
+  "name": "im-gateway",
+  "version": "1.1.0",
+  "private": true,
+  "description": "内置 IM 网关：QQ 官方 WebSocket 长连接 + 微信 iLink 7x24 自动回复（免回调、免配置、免费）+ 本地 TTS 语音合成（v13）",
+  "scripts": {
+    "dev": "bun --hot index.ts"
+  },
+  "dependencies": {
+    "sharp": "^0.35.5",
+    "silk-wasm": "^3.6.1",
+    "z-ai-web-dev-sdk": "^0.0.18"
+  }
+}

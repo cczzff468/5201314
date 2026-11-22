@@ -1,0 +1,344 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  name      String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Post {
+  id        String   @id @default(cuid())
+  title     String
+  content   String?
+  published Boolean  @default(false)
+  authorId  String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+/// 微信 App 背景图（key：'moments'=朋友圈封面 / 'me'=「我」页背景），data 为压缩后的 data URL，永久保存在数据库
+model WxBackground {
+  key       String   @id
+  data      String
+  updatedAt DateTime @updatedAt
+}
+
+/// 网上表情包搜索缓存（关键词 → 结果 JSON；24h 过期，命中免出站爬取）
+model StickerSearchCache {
+  keyword   String   @id
+  /// 结果条目 JSON 数组（[{thumb, image, source}]）
+  items     String
+  /// 命中的数据源（fabiaoqing / bing / both）
+  source    String   @default("")
+  updatedAt DateTime @updatedAt
+}
+
+/// 联系人 App：CHAR（AI 角色）/ USER（用户自己的人设）/ NPC（配角，归属某个 CHAR 或 USER）
+model Contact {
+  id             String   @id @default(cuid())
+  /// 'char' | 'user' | 'npc'
+  kind           String
+  /// NPC 归属的 CHAR/USER 的 id；非 NPC 为空
+  ownerId        String?
+  name           String
+  gender         String?
+  age            String?
+  height         String?
+  weight         String?
+  /// 人设
+  persona        String?
+  /// 背景
+  background     String?
+  /// 职业
+  occupation     String?
+  /// 公司（电话 App「新建联系人」界面用）
+  company        String?
+  /// 地区
+  region         String?
+  /// 关系（NPC=与归属对象的关系；CHAR/USER=与用户的关系）
+  relation       String?
+  phone          String?
+  wechatId       String?
+  wechatPassword String?
+  qqId           String?
+  qqPassword     String?
+  /// 头像（客户端压缩后的 data URL；空 = 用首字母占位）
+  avatar         String?
+  /// 是否已添加为好友（CHAR/NPC 创建后默认 false，添加好友后才进联系人列表与信息 App；USER 恒为 true）
+  isFriend       Boolean  @default(false)
+  /// 浏览器工作区 ID（每个浏览器 localStorage 各持有一个 UUID；同浏览器多 App 共享、跨浏览器互相隔离；'default' = 历史存量）
+  workspaceId    String   @default("default")
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([kind])
+  @@index([workspaceId])
+}
+/// 情侣小家：每个浏览器工作区一行的完整家快照（家具实例/小人/昼夜，JSON），金币单独存列
+model CoupleHome {
+  /// 浏览器工作区 ID（X-Workspace-Id 请求头）
+  workspaceId String   @id
+  /// 家数据 JSON（HomeState：furniture 数组 + chars 位置 + night）
+  data        String
+  /// 装修金币（交互赚币 + 买家具扣币）
+  coins       Int      @default(0)
+  /// 服务端版本号（乐观并发：客户端带上匹配的 rev 才允许覆盖，防旧数据回写）
+  rev         Int      @default(0)
+  updatedAt   DateTime @updatedAt
+}
+
+/// ===== 阅读 App（书源聚合阅读器 + AI 陪读） =====
+/// 书源：内置源（isBuiltin=true，随代码分发）与用户源（自定义/URL导入/文件上传）同表
+model BookSource {
+  id          String   @id @default(cuid())
+  /// 书源名（如「笔趣阁①」）
+  name        String
+  /// bookSourceUrl（站点根，含 http(s)://）
+  url         String
+  /// 分组名（小说/正版/轻小说/API…）
+  group       String   @default("小说")
+  enabled     Boolean  @default(true)
+  /// Legado 3.0 书源完整 JSON（searchUrl/ruleSearch/ruleToc/ruleContent 等）
+  config      String
+  isBuiltin   Boolean  @default(false)
+  sortOrder   Int      @default(0)
+  /// 最近一次健康检查：ok / fail / 空=未检查
+  checkStatus String?
+  lastCheckAt DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([enabled])
+}
+
+/// 书架书籍：加入书架的书（记录进度 + 缓存目录）；按书源区分（bookUrl 为源内唯一键）
+model ShelfBook {
+  id              String   @id @default(cuid())
+  name            String
+  author          String?
+  coverUrl        String?
+  intro           String?
+  /// 当前使用的书源 id
+  sourceId        String
+  sourceName      String?
+  /// 书籍详情/目录页 URL（同书多源时作为换源匹配键）
+  bookUrl         String
+  /// 自定义分组名（空 = 未分组）
+  customGroup     String?
+  /// 目录（缓存 JSON：[{title,url}]）
+  chapters        String   @default("[]")
+  totalChapters   Int      @default(0)
+  lastChapterTitle String?
+  /// 阅读进度：章节下标（0-based）
+  lastReadChapter Int      @default(0)
+  /// 阅读进度：章内页码（0-based，分页模式记忆）
+  lastPage        Int      @default(0)
+  lastReadAt      DateTime @default(now())
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([bookUrl])
+}
+
+/// 阅读历史：所有打开读过的书自动进历史（与书架独立；按书源区分）
+model ReadHistory {
+  id              String   @id @default(cuid())
+  name            String
+  author          String?
+  coverUrl        String?
+  sourceId        String
+  sourceName      String?
+  bookUrl         String
+  totalChapters   Int      @default(0)
+  lastReadChapter Int      @default(0)
+  lastPage        Int      @default(0)
+  lastChapterTitle String?
+  lastReadAt      DateTime @default(now())
+  /// 目录缓存 JSON（"[{title,url}]"，再点秒开）
+  chapters        String   @default("[]")
+
+  @@unique([bookUrl])
+}
+
+/// 章节正文缓存（含 AI 摘要；同 URL 去重）
+model ChapterCache {
+  id           String   @id @default(cuid())
+  bookUrl      String
+  chapterIndex Int
+  chapterUrl   String
+  title        String
+  /// 净化后的正文（纯文本，\n 分段）
+  content      String
+  /// AI 章节摘要（~100字，翻章时后台静默生成）
+  summary      String?
+  fetchedAt    DateTime @default(now())
+
+  @@unique([chapterUrl])
+  @@index([bookUrl])
+}
+
+/// 阅读器排版设置（单行单例）
+model ReadingSetting {
+  id            String   @id @default("singleton")
+  fontSize      Int      @default(19)
+  /// 字体：system/songti/kaiti/heiti/fangsong/custom
+  fontFamily    String   @default("system")
+  /// normal | bold | light
+  fontWeight    String   @default("normal")
+  /// 阅读背景主题：paper/green/night/cream/.../custom
+  bgTheme       String   @default("paper")
+  /// 自定义背景 dataURL（bgTheme=custom 时用）
+  bgCustom      String?
+  /// 自定义字体 dataURL（fontFamily=custom 时用）
+  fontCustom    String?
+  /// App 主题风格（海洋蓝玻璃/极光紫/暗夜黑/少女粉/翡翠绿）
+  appTheme      String   @default("ocean")
+  letterSpacing Float    @default(0)
+  /// 行间距（倍数 1.2-3.0）
+  lineSpacing   Float    @default(1.9)
+  /// 段间距（em 0-2）
+  paraSpacing   Float    @default(0.9)
+  marginLeft    Float    @default(5)
+  marginRight   Float    @default(5)
+  marginTop     Float    @default(4)
+  marginBottom  Float    @default(4)
+  /// 标题位置 left|center|hidden
+  titlePosition String   @default("left")
+  justify       Boolean  @default(true)
+  bottomAlign   Boolean  @default(false)
+  underline     Boolean  @default(false)
+  /// 我的资料：昵称 / 自定义ID / 头像（dataURL）
+  profileName   String?
+  profileId     String?
+  profileAvatar String?
+  /// 书架自定义分组名列表（JSON 数组字符串）
+  customGroups  String   @default("[]")
+  /// 阅读页脚：显示时间
+  showTime      Boolean  @default(true)
+  /// 阅读页脚：显示电量
+  showBattery   Boolean  @default(true)
+  /// 翻页动画：slide 平移 | cover 覆盖 | none 无动画 | fade 淡入 | curl 仿真 | scroll 滚动
+  pageAnim      String   @default("slide")
+  /// 音量键翻页
+  keyTurn       Boolean  @default(false)
+  /// 全屏点击翻页（左右1/3翻页·中间1/3菜单）
+  clickTurn     Boolean  @default(true)
+  /// 段首缩进（字数 0~4）
+  textIndent    Int      @default(2)
+  /// 中文排版优化（justify 时字符间挤压更整齐）
+  cjkOptimize   Boolean  @default(false)
+  /// 适配正文特殊标记（[newpage] 等）
+  specialTags   Boolean  @default(true)
+  /// 繁简转换 off | s2t | t2s
+  s2t           String   @default("off")
+  /// 屏幕亮度 0-100（自定义遮罩；brightnessAuto=true 时不生效）
+  brightness    Int      @default(100)
+  /// 亮度跟随系统
+  brightnessAuto Boolean @default(true)
+  /// 阅读时屏幕常亮
+  keepScreenOn  Boolean  @default(false)
+  /// 自动阅读：每 N 秒翻一页（0=关）
+  autoReadSec   Int      @default(0)
+  /// 排版预设列表（JSON 数组字符串 [{id,name,data:{...}}]）
+  presets       String   @default("[]")
+  updatedAt     DateTime @updatedAt
+}
+
+/// 阅读批注：书签（bookmark）+ 划线笔记（highlight，含样式与笔记）
+model ReaderNote {
+  id           String   @id @default(cuid())
+  /// 归属书（bookUrl 为键；换源时由 API 迁移）
+  bookUrl      String
+  name         String
+  kind         String
+  chapterIndex Int
+  chapterTitle String?
+  /// 章内页码（书签跳转用；划线不依赖）
+  pageIndex    Int      @default(0)
+  /// 划线：段落下标（content.split('\n') 过滤后的数组下标）
+  paraIndex    Int      @default(-1)
+  /// 划线：段内字符区间 [startOff, endOff)
+  startOff     Int      @default(0)
+  endOff       Int      @default(0)
+  /// 书签标签 / 划线文本
+  text         String   @default("")
+  /// 划线样式：line 直线 | wavy 波浪 | box 框选
+  style        String?
+  note         String?
+  createdAt    DateTime @default(now())
+
+  @@index([bookUrl])
+  @@index([bookUrl, kind])
+}
+
+/// 本地导入书籍（txt / epub，从手机上传）
+model LocalBook {
+  id             String   @id @default(cuid())
+  name           String
+  author         String?
+  coverUrl       String?
+  intro          String?
+  totalChapters  Int      @default(0)
+  /// 书籍来源文件名（导入时留档）
+  fileName       String?
+  lastReadAt     DateTime @default(now())
+  createdAt      DateTime @default(now())
+}
+
+/// 本地书籍章节正文（bookId+idx 唯一；章节 URL 形如 local:{bookId}:{idx}）
+model LocalChapter {
+  id      String @id
+  bookId  String
+  idx     Int
+  title   String
+  content String
+
+  @@unique([bookId, idx])
+}
+
+/// 阅读时长统计（单行单例，秒）
+model ReadStat {
+  id          String   @id @default("singleton")
+  readSeconds Int      @default(0)
+  updatedAt   DateTime @updatedAt
+}
+
+/// 精选书封面缓存（服务端解析、永久缓存：书名 → 封面 URL + 来源 id）
+model FeaturedCover {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  coverUrl  String
+  sourceId  String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+/// AI 陪读记忆：章节摘要 / 聊天记录 / 读书里程碑
+model ReadingMemory {
+  id           String   @id @default(cuid())
+  bookUrl      String
+  /// book：读完一本书 | summary：章节摘要 | chat：聊天 | milestone：进度里程碑
+  kind         String
+  chapterIndex Int?
+  /// user | assistant | system
+  role         String?
+  content      String
+  createdAt    DateTime @default(now())
+
+  @@index([bookUrl, kind])
+}
