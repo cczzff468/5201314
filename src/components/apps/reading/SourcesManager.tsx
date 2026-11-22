@@ -394,8 +394,11 @@ export function SourcesManager({ onBack }: { onBack: () => void }) {
           )}
         </div>
 
-        {/* 筛选 chips（含分组开关 + 清理失效入口；全部单行不换行） */}
-        <div className="mt-3 flex items-center gap-2 overflow-x-auto pb-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        {/* 筛选 chips（含分组开关 + 清理失效入口；全部单行不换行）
+            -mx-3 + px-3 与首页分类胶囊同款「全宽破出」：横滑容器破开父级 px-3
+            占满整屏宽，胶囊静止位置不变，滑动时一直滑到屏幕物理边缘才裁切，
+            不再在距边缘 12px 处截断留白（刀切边病根） */}
+        <div className="-mx-3 mt-3 flex items-center gap-2 overflow-x-auto px-3 pb-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           {(
             [
               { k: 'all' as FilterKey, label: `全部 ${sources.length}` },

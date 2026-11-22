@@ -680,7 +680,7 @@ export function BookDetail({
               <p className="text-[16px] font-bold" style={{ color: theme.textMain }}>
                 看了本书的还在看
               </p>
-              <div className="-mx-1 mt-2.5 flex gap-3 overflow-x-auto px-1 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+              <div className="-mx-4 mt-2.5 flex gap-3 overflow-x-auto px-4 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
                 {similar.map((b) => (
                   <button
                     key={b.name}

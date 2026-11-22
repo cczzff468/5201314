@@ -648,7 +648,7 @@ function MoreSettingsSheet({ onClose }: { onClose: () => void }) {
             <div className="space-y-3">
               <div className="rounded-2xl p-3.5" style={{ background: softBg(dark) }}>
                 <GroupTitle dark={dark} icon={<CaseSensitive className="h-4 w-4" />} title="字体" />
-                <div className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                <div className="-mx-3.5 flex gap-2 overflow-x-auto px-3.5 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
                   {BUILTIN_FONTS.map((f) => (
                     <button
                       key={f.key}
@@ -872,7 +872,7 @@ export function ReaderSettingsSheet({ onClose }: { onClose: () => void }) {
           </div>
           {fontPop && (
             <div className="mt-2.5 rounded-2xl p-3" style={{ background: softBg(dark) }}>
-              <div className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+              <div className="-mx-3 flex gap-2 overflow-x-auto px-3 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
                 {BUILTIN_FONTS.map((f) => (
                   <button
                     key={f.key}
