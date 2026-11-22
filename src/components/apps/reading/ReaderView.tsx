@@ -768,8 +768,8 @@ export function ReaderView({ page, onBack }: { page: ReaderPage; onBack: () => v
   const padL = 3 + (settings.marginLeft / 100) * (vp.w || 0);
   const padR = 3 + (settings.marginRight / 100) * (vp.w || 0);
   const padT = 20 + (settings.marginTop / 100) * (vp.h || 0);
-  /** 页脚指示行高度（底部 16px + 文字 15px + 3px 间隙）：下边距调 0 时正文紧贴页脚上方 */
-  const footZone = Math.max(16, safeB + 8) + 18;
+  /** 页脚指示行高度：下边距压缩一点让正文更往下（文字更贴近页脚，多排一两行） */
+  const footZone = Math.max(12, safeB + 5) + 10;
   const padB = footZone + (settings.marginBottom / 100) * (vp.h || 0);
   /** 正文区宽/高（分页与测量容器都用这两个值） */
   const textW = Math.max(0, (vp.w || 0) - padL - padR);
@@ -2899,33 +2899,8 @@ export function ReaderView({ page, onBack }: { page: ReaderPage; onBack: () => v
                 <span className="min-w-0 break-all">{existingNote?.note}</span>
               </div>
             )}
-            {/* 行1：从本段听 · 复制 · 查询 · 删除划线 */}
-            <div className="flex items-center gap-1">
-              {[
-                { key: 'listen', label: '从本段听', icon: <Headphones className="h-[17px] w-[17px]" />, onClick: () => speakFromPara(activePopup.pi) },
-                { key: 'copy', label: '复制', icon: <Copy className="h-[16px] w-[16px]" />, onClick: () => void copyPara(activePopup.pi, popupRange) },
-                { key: 'lookup', label: '查询', icon: <Search className="h-[16px] w-[16px]" />, onClick: () => lookupPara(activePopup.pi, popupRange) },
-                ...(existingNote
-                  ? [{ key: 'del', label: '删除划线', icon: <Trash2 className="h-[16px] w-[16px]" />, onClick: () => void removeHighlightsOf(activePopup.pi, popupRange) }]
-                  : []),
-              ].map((b) => (
-                <button
-                  key={b.key}
-                  type="button"
-                  onClick={b.onClick}
-                  className="flex flex-1 flex-col items-center gap-1 rounded-xl py-1.5 active:scale-95"
-                  style={{ background: pillBg }}
-                >
-                  {b.icon}
-                  <span className="text-[10px] font-medium">{b.label}</span>
-                </button>
-              ))}
-            </div>
-            {/* 行2：划线样式（直线/波浪/框选）+ 写笔记 */}
-            <div
-              className="mt-1.5 flex items-center gap-1.5 border-t pt-1.5"
-              style={{ borderColor: bg.dark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)' }}
-            >
+            {/* 行1：划线样式（直线/波浪/框选）+ 写笔记 */}
+            <div className="flex items-center gap-1.5">
               {([
                 { key: 'line', label: '直线', a: <span style={{ textDecoration: 'underline', textDecorationThickness: '2px', textDecorationColor: theme.accent }}>A</span> },
                 { key: 'wavy', label: '波浪', a: <span style={{ textDecoration: 'underline wavy', textDecorationColor: theme.accent, textDecorationThickness: '1.5px' }}>A</span> },
@@ -2953,6 +2928,29 @@ export function ReaderView({ page, onBack }: { page: ReaderPage; onBack: () => v
               >
                 <StickyNote className="h-[15px] w-[15px]" /> {existingNote?.note ? '改笔记' : '写笔记'}
               </button>
+            </div>
+            {/* 行2：从本段听 · 删除划线（划线后面） */}
+            <div
+              className="mt-1.5 flex items-center gap-1 border-t pt-1.5"
+              style={{ borderColor: bg.dark ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)' }}
+            >
+              {[
+                { key: 'listen', label: '从本段听', icon: <Headphones className="h-[17px] w-[17px]" />, onClick: () => speakFromPara(activePopup.pi) },
+                ...(existingNote
+                  ? [{ key: 'del', label: '删除划线', icon: <Trash2 className="h-[16px] w-[16px]" />, onClick: () => void removeHighlightsOf(activePopup.pi, popupRange) }]
+                  : []),
+              ].map((b) => (
+                <button
+                  key={b.key}
+                  type="button"
+                  onClick={b.onClick}
+                  className="flex flex-1 flex-col items-center gap-1 rounded-xl py-1.5 active:scale-95"
+                  style={{ background: pillBg }}
+                >
+                  {b.icon}
+                  <span className="text-[10px] font-medium">{b.label}</span>
+                </button>
+              ))}
             </div>
             {/* 笔记输入 */}
             {noteInput !== null && (

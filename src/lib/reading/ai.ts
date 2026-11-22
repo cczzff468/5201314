@@ -94,24 +94,59 @@ export interface ChatBookCtx {
   totalChapters: number;
 }
 
-/** 拼装陪读上下文（全部走摘要，不塞正文；persona=联系人人设、memoryBlock=记忆APP召回块） */
+/** 拼装陪读上下文：当前章原文节选 + 已读全部章节摘要 + 最近对话 + 记忆
+ *  （用户明确要求：AI 要知道这本书的全部内容与当前内容；摘要来自翻章时静默生成） */
 async function buildChatContext(
   bookUrl: string,
   book: ChatBookCtx,
+  chapterUrl: string | undefined,
   persona?: string,
   memoryBlock?: string,
 ): Promise<LLMMessage[]> {
   const remain = Math.max(0, book.totalChapters - book.currentChapter - 1);
-  // 最近 3 章摘要（当前章 + 前两章）
-  const summaries = await db.readingMemory.findMany({
-    where: { bookUrl, kind: 'summary' },
-    orderBy: { chapterIndex: 'desc' },
-    take: 8,
-  });
-  const recentSum = summaries
-    .filter((s) => s.chapterIndex !== null && s.chapterIndex <= book.currentChapter)
-    .slice(0, 3)
-    .reverse();
+  // —— 当前章原文（客户端传 chapterUrl；缓存命中直接取，未命中拉最近读过的一章） ——
+  let curText = '';
+  let curTitle = book.currentChapterTitle;
+  if (chapterUrl) {
+    const cur = await db.chapterCache.findUnique({ where: { chapterUrl } }).catch(() => null);
+    if (cur?.content) {
+      curText = cur.content;
+      curTitle = cur.title || curTitle;
+    }
+  }
+  if (!curText) {
+    const near = await db.chapterCache.findFirst({
+      where: { bookUrl, chapterIndex: book.currentChapter },
+      orderBy: { fetchedAt: 'desc' },
+    }).catch(() => null);
+    if (near?.content) {
+      curText = near.content;
+      curTitle = near.title || curTitle;
+    }
+  }
+  // 当前章原文节选：头部 2400 字 + 尾部 1000 字（首尾最有信息量）
+  const curExcerpt =
+    curText.length > 3600 ? `${curText.slice(0, 2400)}\n……（中略）……\n${curText.slice(-1000)}` : curText;
+  // —— 已读全部章节摘要（chapterCache 逐章缓存；只取 ≤ 当前进度，不剧透） ——
+  const summaryRows = await db.chapterCache
+    .findMany({
+      where: { bookUrl, summary: { not: null } },
+      orderBy: { chapterIndex: 'asc' },
+      take: 200,
+    })
+    .catch(() => [] as { chapterIndex: number; title: string; summary: string | null }[]);
+  const sumLines: string[] = [];
+  let sumChars = 0;
+  for (const s of summaryRows) {
+    if (s.chapterIndex > book.currentChapter) break; // 未读章节不进上下文（防剧透）
+    const line = `第${s.chapterIndex + 1}章：${s.summary || ''}`;
+    if (sumChars + line.length > 10000) {
+      sumLines.push(`……（更早章节摘要过长已省略，共 ${summaryRows.length} 章有摘要）`);
+      break;
+    }
+    sumLines.push(line);
+    sumChars += line.length;
+  }
   // 最近 10 条聊天
   const chats = await db.readingMemory.findMany({
     where: { bookUrl, kind: 'chat' },
@@ -134,10 +169,13 @@ async function buildChatContext(
   const bookCard = [
     `当前在读：《${book.name}》${book.author ? ` 作者：${book.author}` : ''}`,
     `进度：第 ${book.currentChapter + 1} 章（${book.currentChapterTitle}），全书共 ${book.totalChapters} 章，还剩 ${remain} 章看完`,
-    recentSum.length
-      ? `最近剧情（摘要，按时间序）：\n${recentSum.map((s) => `- 第${(s.chapterIndex ?? 0) + 1}章：${s.content}`).join('\n')}`
-      : '最近剧情摘要：暂无',
   ].join('\n');
+  const plotBlock = sumLines.length
+    ? `【全书剧情脉络（用户已读各章摘要，你已完整掌握）】\n${sumLines.join('\n')}`
+    : '';
+  const curBlock = curExcerpt
+    ? `【当前章原文（第 ${book.currentChapter + 1} 章「${curTitle}」，节选）】\n${curExcerpt}`
+    : '';
 
   const personaBlock = persona?.trim()
     ? `你的角色人设（你此刻以这个身份陪用户读书，全程保持一致口吻，不要跳出角色）：\n${persona.trim().slice(0, 900)}`
@@ -153,16 +191,18 @@ async function buildChatContext(
         : '',
       '【读书上下文】',
       bookCard,
+      plotBlock,
+      curBlock,
       otherBooks.length ? `【用户的其他在读书记录】\n${otherBooks.map((x) => `- ${x}`).join('\n')}` : '',
       milestones.length
         ? `【读书里程碑记忆】\n${milestones.map((m) => `- ${m.content}`).join('\n')}`
         : '',
       '【行为准则】',
-      '- 聊天围绕当前这本书的剧情、人物、猜测展开，也可以闲聊，但记得把话题往阅读上带。',
-      '- 严禁剧透用户还没读到的章节（只基于「最近剧情摘要」及更早内容回答）。',
+      '- 你掌握当前章的完整原文和用户已读章节的全部摘要，聊剧情、人物、细节时优先依据这些内容回答。',
+      '- 严禁剧透用户还没读到的章节（摘要与原文只包含已读部分）。',
       '- 回答简短自然（通常 2~4 句），像微信聊天，不要长篇大论，不要输出 markdown 标题。',
       '- 用户问「讲到哪了/看到哪了」时，用进度信息回答。',
-      '- 涉及章节原文细节且摘要没有时，如实说记不清细节，不要编造。',
+      '- 涉及未读章节或摘要之外的细节时，如实说记不清，不要编造。',
     ]
       .filter(Boolean)
       .join('\n'),
@@ -179,6 +219,7 @@ export async function companionChat(p: {
   bookUrl: string;
   book: ChatBookCtx;
   message: string;
+  chapterUrl?: string;
   persona?: string;
   memoryBlock?: string;
 }): Promise<string> {
@@ -186,7 +227,7 @@ export async function companionChat(p: {
   await db.readingMemory.create({
     data: { bookUrl: p.bookUrl, kind: 'chat', role: 'user', content: p.message.slice(0, 2000) },
   });
-  const messages = await buildChatContext(p.bookUrl, p.book, p.persona, p.memoryBlock);
+  const messages = await buildChatContext(p.bookUrl, p.book, p.chapterUrl, p.persona, p.memoryBlock);
   messages.push({ role: 'user', content: p.message.slice(0, 2000) });
   const reply = (await lightChat(messages, 700)) || '（伴读书童走神了，再说一次嘛）';
   await db.readingMemory.create({

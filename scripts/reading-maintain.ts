@@ -1,3 +1,4 @@
+declare const Bun: { file(path: string): { text(): Promise<string> } };
 /**
  * 一次性维护脚本（第五轮）：
  * 1. 删除失效书源（checkStatus='fail' 且非内置——用户导入的好源全保留）

@@ -28,6 +28,7 @@ export async function POST(req: NextRequest) {
         totalChapters: parseInt(String(book.totalChapters ?? '0'), 10) || 0,
       },
       message,
+      chapterUrl: body.chapterUrl ? String(body.chapterUrl) : undefined,
       persona: body.persona ? String(body.persona) : undefined,
       memoryBlock: body.memoryBlock ? String(body.memoryBlock) : undefined,
     });

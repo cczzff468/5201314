@@ -8,8 +8,9 @@
  * - 全部书籍显示真实封面（服务端 FeaturedCover 永久缓存，后台自动补齐）
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Search, Clock3, ChevronRight, RefreshCw, Loader2, Sparkles, Trophy } from 'lucide-react';
+import { Search, Clock3, ChevronRight, RefreshCw, Loader2, Sparkles, Trophy, ChevronLeft } from 'lucide-react';
 import { useReading } from '@/lib/reading/store';
+import { useUI } from '@/lib/ios/store';
 import {
   FEATURED,
   coverPaletteOf,
@@ -52,6 +53,7 @@ export function HomeTab({
 }) {
   const settings = useReading((s) => s.settings);
   const shelf = useReading((s) => s.shelf);
+  const closeApp = useUI((s) => s.closeApp);
   const theme = useMemo(() => themeOf(settings.appTheme), [settings.appTheme]);
 
   /** 继续阅读：优先阅读历史；历史空则兜底书架（全部历史留存供偏好分析） */
@@ -315,18 +317,30 @@ export function HomeTab({
       </div>
 
       <div className="px-4">
-        {/* 搜索胶囊（顶部第一行，分类行上方；点击进搜索页） */}
-        <button
-          type="button"
-          onClick={() => onSearch()}
-          className="flex h-11 w-full items-center gap-2 rounded-full px-4 text-left backdrop-blur-xl transition-transform active:scale-[0.98]"
-          style={glass}
-        >
-          <Search className="h-[18px] w-[18px]" strokeWidth={2.2} style={{ color: theme.textSub }} />
-          <span className="truncate text-[15px]" style={{ color: theme.textSub }}>
-            搜索书名、作者…
-          </span>
-        </button>
+        {/* 顶部行：返回键（回手机主界面）+ 搜索胶囊（点击进搜索页） */}
+        <div className="flex items-center gap-2.5">
+          <button
+            type="button"
+            onClick={closeApp}
+            aria-label="返回主界面"
+            title="返回主界面"
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full backdrop-blur-xl transition-transform active:scale-90"
+            style={glass}
+          >
+            <ChevronLeft className="h-[22px] w-[22px]" strokeWidth={2.2} style={{ color: theme.textMain }} />
+          </button>
+          <button
+            type="button"
+            onClick={() => onSearch()}
+            className="flex h-11 min-w-0 flex-1 items-center gap-2 rounded-full px-4 text-left backdrop-blur-xl transition-transform active:scale-[0.98]"
+            style={glass}
+          >
+            <Search className="h-[18px] w-[18px]" strokeWidth={2.2} style={{ color: theme.textSub }} />
+            <span className="truncate text-[15px]" style={{ color: theme.textSub }}>
+              搜索书名、作者…
+            </span>
+          </button>
+        </div>
 
         {/* 分类胶囊 + 排行榜入口（搜索框下方；点击进入分类浏览页；iOS 式单行横滑，无滚动条） */}
         <div className="-mx-4 mt-3 flex gap-2 overflow-x-auto px-4 pb-1 no-scrollbar">

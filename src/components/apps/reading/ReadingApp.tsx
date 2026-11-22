@@ -190,11 +190,11 @@ export default function ReadingApp() {
         </div>
       </div>
 
-      {/* 毛玻璃悬浮胶囊 TabBar（仅主页面显示；四 Tab：首页/书架/历史/我） */}
+      {/* 毛玻璃悬浮胶囊 TabBar（仅主页面显示；四 Tab：首页/书架/历史/我；紧凑高度） */}
       {page.kind === 'none' && (
-        <div className="pointer-events-none absolute inset-x-0 bottom-0 z-30 flex justify-center pb-[max(14px,env(safe-area-inset-bottom))]">
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 z-30 flex justify-center pb-[max(12px,env(safe-area-inset-bottom))]">
           <div
-            className="pointer-events-auto flex items-center gap-1 rounded-full p-1.5 backdrop-blur-2xl"
+            className="pointer-events-auto flex items-center gap-1 rounded-full p-1 backdrop-blur-2xl"
             style={{
               background: theme.barBg,
               boxShadow: `inset 0 0 0 1px ${theme.cardRing}, 0 8px 30px rgba(0,0,0,0.10)`,
@@ -278,7 +278,7 @@ function TabBtn({
       type="button"
       onClick={() => setTab(tab)}
       aria-label={label}
-      className="flex h-[52px] min-w-[76px] items-center justify-center gap-1 rounded-full transition-all active:scale-95"
+      className="flex h-[46px] min-w-[72px] items-center justify-center gap-1 rounded-full transition-all active:scale-95"
       style={
         active
           ? { background: `linear-gradient(135deg, ${theme.gradFrom}, ${theme.gradTo})`, color: '#fff', boxShadow: `0 4px 16px ${theme.accent}55` }
@@ -286,23 +286,23 @@ function TabBtn({
       }
     >
       <Ico />
-      {active && <span className="text-[13px] font-semibold">{label}</span>}
+      {active && <span className="text-[12px] font-semibold">{label}</span>}
     </button>
   );
 }
 
 import { House, BookMarked, History as HistoryIcon, CircleUserRound } from 'lucide-react';
 function TabHomeIcon() {
-  return <House className="h-[22px] w-[22px]" strokeWidth={2} />;
+  return <House className="h-[20px] w-[20px]" strokeWidth={2} />;
 }
 function TabShelfIcon() {
-  return <BookMarked className="h-[22px] w-[22px]" strokeWidth={2} />;
+  return <BookMarked className="h-[20px] w-[20px]" strokeWidth={2} />;
 }
 function TabHistoryIcon() {
-  return <HistoryIcon className="h-[22px] w-[22px]" strokeWidth={2} />;
+  return <HistoryIcon className="h-[20px] w-[20px]" strokeWidth={2} />;
 }
 function TabMeIcon() {
-  return <CircleUserRound className="h-[22px] w-[22px]" strokeWidth={2} />;
+  return <CircleUserRound className="h-[20px] w-[20px]" strokeWidth={2} />;
 }
 
 /** 子页通用顶栏（透明悬浮在 App 渐变背景上，与页面颜色统一；默认 iOS 规范：标题绝对居中、返回键独立居左、右槽居右；

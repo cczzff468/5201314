@@ -33,6 +33,7 @@ import type { AnyNode } from 'domhandler';
 import iconv from 'iconv-lite';
 import dns from 'node:dns';
 import { Agent as UndiciAgent } from 'undici';
+import { runLegadoJs, runLegadoJsSync, type HttpReq, type HttpResp } from './js-sandbox';
 
 // 容器/沙箱网络常无 IPv6 出口，而不少笔趣阁站解析出 AAAA 记录——
 // fetch（undici）会优先尝试 IPv6 → ENETUNREACH/ETIMEDOUT。全局 IPv4 优先。
@@ -320,6 +321,10 @@ export interface FetchResult {
   contentType: string;
   /** 本次响应实际使用的解码字符集（GBK 自动重试判断用） */
   charset: string;
+  /** 响应头（小写键） */
+  headers: Record<string, string>;
+  /** HTTP 状态码（网络层失败时为 0） */
+  status: number;
 }
 
 /** JS 挑战页检测（飞卢等站反爬）：极短页面 + window.open(_self) + cookie 赋值
@@ -348,6 +353,18 @@ function challengeCookie(t: string): string {
  *  - 反爬重定向循环（检测到浏览器 UA/Referer 就无限 302）：剥掉全部
  *    请求头裸请求重试一次（服务器对非浏览器客户端放行，Legado 的 okhttp UA 同理） */
 export async function proxyFetch(url: string, opts: FetchOpts = {}): Promise<FetchResult> {
+  // URL 里的非 ASCII 字符（JS 脚本拼出的中文搜索词等）→ 百分号编码
+  // （阅读App 的 okhttp 自动做这件事；Bun/Node fetch 遇到裸中文直接报 Invalid URL）
+  if (/[^\x00-\x7F]/.test(url)) {
+    try {
+      const u = new URL(url);
+      u.pathname = u.pathname.replace(/[^\x00-\x7F]+/g, (s) => encodeURIComponent(s));
+      u.search = u.search.replace(/[^\x00-\x7F]+/g, (s) => encodeURIComponent(s));
+      url = u.toString();
+    } catch {
+      url = url.replace(/[^\x00-\x7F]+/g, (s) => encodeURIComponent(s));
+    }
+  }
   const attempt = async (bare = false): Promise<FetchResult> => {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), opts.timeoutMs ?? 12_000);
@@ -368,8 +385,11 @@ export async function proxyFetch(url: string, opts: FetchOpts = {}): Promise<Fet
           redirect: 'follow',
           signal: ctrl.signal,
           cache: 'no-store',
-          // 宽松证书（过期/自签一律放行，与阅读App一致）
+          // 宽松证书（过期/自签一律放行，与阅读App一致）：
+          // - Node 运行时：undici dispatcher 生效
+          // - Bun 运行时（本站 dev/prod 均为 Bun）：fetch 原生支持 tls 选项
           dispatcher: INSECURE_AGENT,
+          tls: { rejectUnauthorized: false },
         } as RequestInit);
       let res = await doFetch();
       let contentType = res.headers.get('content-type') || '';
@@ -398,7 +418,15 @@ export async function proxyFetch(url: string, opts: FetchOpts = {}): Promise<Fet
         // 403/412 等反爬页面也可能带可用内容，不直接抛错；仅 >=500 视为失败
         if (res.status >= 500) throw new Error(`站点返回 ${res.status}`);
       }
-      return { text, finalUrl: res.url || url, contentType, charset: usedCharset };
+      const respHeaders: Record<string, string> = {};
+      try {
+        for (const [k, v] of (res.headers as unknown as Iterable<[string, string]>)) {
+          respHeaders[k.toLowerCase()] = v;
+        }
+      } catch {
+        /* headers 遍历失败不影响主流程 */
+      }
+      return { text, finalUrl: res.url || url, contentType, charset: usedCharset, headers: respHeaders, status: res.status };
     } finally {
       clearTimeout(timer);
     }
@@ -421,7 +449,7 @@ export async function proxyFetch(url: string, opts: FetchOpts = {}): Promise<Fet
       e instanceof Error &&
       (e.message === 'fetch failed' ||
         e.message.includes('aborted') ||
-        /ETIMEDOUT|ECONNRESET|ECONNREFUSED|EHOSTUNREACH|ENETUNREACH|EAI_AGAIN|EPIPE|socket hang up/i.test(
+        /ETIMEDOUT|ECONNRESET|ECONNREFUSED|EHOSTUNREACH|ENETUNREACH|EAI_AGAIN|EPIPE|socket hang up|socket connection was closed|connection closed/i.test(
           `${e.message} ${(e as Error & { cause?: { code?: string } }).cause?.code || ''} ${(e as Error & { cause?: { message?: string } }).cause?.message || ''}`,
         ));
     if (!transient) throw e;
@@ -435,12 +463,13 @@ export async function proxyFetch(url: string, opts: FetchOpts = {}): Promise<Fet
 // ---------------------------------------------------------------------------
 
 type Ctx =
-  | { kind: 'html'; $: CheerioAPI; el?: AnyNode; pageUrl: string }
-  | { kind: 'json'; data: unknown; pageUrl: string };
+  | { kind: 'html'; $: CheerioAPI; el?: AnyNode; pageUrl: string; source?: LegadoSource }
+  | { kind: 'json'; data: unknown; pageUrl: string; source?: LegadoSource }
+  | { kind: 'regex'; groups: string[]; full: string; pageUrl: string; source?: LegadoSource };
 
-function newHtmlCtx(html: string, pageUrl: string): Ctx {
+function newHtmlCtx(html: string, pageUrl: string, source?: LegadoSource): Ctx {
   const $ = cheerio.load(html);
-  return { kind: 'html', $, pageUrl };
+  return { kind: 'html', $, pageUrl, source };
 }
 
 // —— JSONPath 轻量实现：$.a.b / $..name / [n] / [*] ——
@@ -551,6 +580,17 @@ function parsePosition(p: string): SegPos | null {
   return null; // 不是位置语法（可能只是名字的一部分）
 }
 
+/** 尾部方括号位置语法：li[0:19] / a[2] / div[-1] / li[!0]（CSS 属性选择器 [href] 不受影响）
+ *  Legado 与 .N 下标语法等价的另一种写法 */
+function splitBracket(name: string): { name: string; pos: SegPos | null } {
+  const m = /^(.*?)\[\s*(-?[\d!:.]+)\s*\]\s*$/.exec(name);
+  if (!m || !m[1] || !m[2]) return { name, pos: null };
+  const pos = parsePosition(m[2]);
+  if (!pos) return { name, pos: null };
+  if (pos.index === undefined && !pos.range && !pos.exclude?.length) return { name, pos: null };
+  return { name: m[1], pos };
+}
+
 /** Legado 区间取元素：[start:end:step] 含两端；负数倒着数；start>end 反向取（[-1:0] 列表反向） */
 function pickRange<T>(arr: T[], r: [number | undefined, number | undefined, number | undefined]): T[] {
   const L = arr.length;
@@ -619,6 +659,14 @@ function parseChain(part: string): Seg[] {
         }
       }
       if (!pos) {
+        // 方括号位置：tag.li[0:19] / class.x[2]
+        const br = splitBracket(name);
+        if (br.pos) {
+          pos = br.pos;
+          name = br.name;
+        }
+      }
+      if (!pos) {
         // 排除直接跟在名字后：tag.li!0 / class.x!0:2
         const bang = m[2].indexOf('!');
         if (bang >= 0) {
@@ -640,7 +688,7 @@ function parseChain(part: string): Seg[] {
       segs.push({ type: 'index', value: r, index: parseInt(r, 10) });
       continue;
     }
-    // Legado 简写：.name / .name.N / .name.0:2 / .name!0
+    // Legado 简写：.name / .name.N / .name.0:2 / .name!0 / .name[0:19]
     if (r.startsWith('.') && r.length > 1) {
       const rest = r.slice(1);
       let name = rest;
@@ -651,6 +699,13 @@ function parseChain(part: string): Seg[] {
         if (p2) {
           pos = p2;
           name = rest.slice(0, lastDot);
+        }
+      }
+      if (!pos) {
+        const br = splitBracket(name);
+        if (br.pos) {
+          pos = br.pos;
+          name = br.name;
         }
       }
       if (!pos) {
@@ -671,12 +726,20 @@ function parseChain(part: string): Seg[] {
     }
     // Legado 简写：裸标签 + 可选位置（td / td.0 / td.0:5:3 / td!0）；
     // 位置不合法时整段按 CSS 处理（如 div.panel > a）
-    const bt = /^([A-Za-z][\w-]*?)([.!].+)?$/.exec(r);
+    const bt = /^([A-Za-z][\w-]*?)(?:[.!](.+))?$/.exec(r);
     if (bt && bt[1]) {
-      const posRaw = bt[2] ? (bt[2][0] === '.' ? bt[2].slice(1) : bt[2]) : '';
+      const posRaw = bt[2] || '';
       const pos = posRaw ? parsePosition(posRaw) : {};
       if (pos) {
         segs.push({ type: 'tag', value: bt[1], ...pos });
+        continue;
+      }
+    }
+    // 裸标签方括号位置：td[0:19] / li[-1]（CSS 属性选择器 [href] 不命中位置语法 → 走 CSS）
+    if (/\[[\d!:.]+\]\s*$/.test(r)) {
+      const br = splitBracket(r);
+      if (br.pos) {
+        segs.push({ type: 'tag', value: br.name, ...br.pos });
         continue;
       }
     }
@@ -867,25 +930,107 @@ function resolveUrl(u: string, base: string): string {
   }
 }
 
+/** 拆出规则里的 JS 部分：<js>...</js> / @js:尾巴（返回静态主段 + JS 代码） */
+function extractJs(rule: string): { main: string; js: string } {
+  const jsTag = rule.indexOf('<js>');
+  const atJs = rule.search(/@js:/i);
+  let cut = -1;
+  if (jsTag >= 0 && (atJs < 0 || jsTag <= atJs)) cut = jsTag;
+  else if (atJs >= 0) cut = atJs;
+  if (cut < 0) return { main: rule, js: '' };
+  const main = rule.slice(0, cut).trim();
+  let js = rule.slice(cut);
+  if (js.startsWith('<js>')) {
+    const end = js.indexOf('</js>');
+    js = end >= 0 ? js.slice(5, end) : js.slice(4);
+  } else {
+    js = js.replace(/^@js:/i, '');
+  }
+  return { main, js };
+}
+
+/** 规则 JS 执行（同步沙箱；result=静态部分求值结果，src=当前页源码）
+ *  java.getString('$.gid') 等规则求值 API 通过 ruleEval 回调对当前 ctx 求值 */
+function runRuleJs(ctx: Ctx, code: string, result: string): string {
+  const source = ctx.source;
+  if (!source || !code.trim()) return result;
+  const src =
+    ctx.kind === 'html' ? ctx.$.html() : ctx.kind === 'json' ? JSON.stringify(ctx.data ?? null) : ctx.full;
+  try {
+    return runLegadoJsSync(code, {
+      sourceUrl: source.bookSourceUrl || '',
+      sourceDef: source as unknown as Record<string, unknown>,
+      jsLib: typeof (source as { jsLib?: unknown }).jsLib === 'string' ? (source as { jsLib?: string }).jsLib : undefined,
+      html: src,
+      baseUrl: ctx.pageUrl,
+      globals: { result, src, baseUrl: ctx.pageUrl, url: ctx.pageUrl, title: '' },
+      ruleEval: (rule: string): string => {
+        try {
+          return evalRule(ctx, rule);
+        } catch {
+          return '';
+        }
+      },
+      timeoutMs: 2500,
+    });
+  } catch {
+    return '';
+  }
+}
+
 /** 求值单条字符串规则（自动识别 html/json 上下文；joinAll=true 时多元素命中拼接为多行） */
 export function evalRule(ctx: Ctx, rule: string | undefined, joinAll = false): string {
   if (!rule) return '';
-  const raw = stripJs(rule);
+  const { main: raw, js } = extractJs(rule);
   const parts = splitOr(raw);
+  let out = '';
   for (const p of parts) {
     const [main, regex, replacement] = splitRegex(p);
     let val = evalSingle(ctx, main, joinAll);
     if (val) {
       val = applyRegex(val, regex, replacement);
-      if (val.trim()) return val.trim();
+      if (val.trim()) {
+        out = val.trim();
+        break;
+      }
     }
   }
-  return '';
+  // 规则尾部 JS：以静态结果为输入变换（Legado 语义）；纯 JS 规则直接求值
+  if (js) {
+    let jsOut = runRuleJs(ctx, js, out);
+    // JS 拼出的 URL 里可能残留 {{$._id}} 类模板（淘小说/猪猪小说 API 源）→ 对当前 JSON 数据求值
+    if (jsOut.includes('{{') && ctx.kind === 'json') {
+      jsOut = evalTemplateJson(ctx.data, jsOut);
+    }
+    if (jsOut.trim()) return jsOut.trim();
+    if (!out) return '';
+  }
+  return out;
 }
 
 function evalSingle(ctx: Ctx, rule: string, joinAll = false): string {
   if (!rule) return '';
-  const r = rule.trim();
+  let r = rule.trim();
+  // 正则组上下文：$2$3 / https://x/$1 —— 捕获组替换（若夏网 :正则 列表项）
+  if (ctx.kind === 'regex') {
+    if (/\$\d/.test(r)) {
+      return r.replace(/\$(\d+)/g, (_m, n: string) => ctx.groups[Number(n)] ?? '');
+    }
+    return ctx.full;
+  }
+  // @json: 前缀（大小写不敏感）：JSONPath 规则（若夏网等）
+  if (/^@json:/i.test(r)) {
+    r = r.slice(6).trim();
+    if (ctx.kind === 'json') return jsonScalar(jsonPathAll(ctx.data, r.startsWith('$') ? r : '$.' + r)[0]);
+    return '';
+  }
+  // {{@@rule}} / {{@rule}} 子规则模板（奇异网 intro 等）：内层规则对当前 ctx 求值后回填
+  if (r.includes('{{@')) {
+    const expanded = r.replace(/\{\{(@+)([^{}]+)\}\}/g, (_m, _ats: string, inner: string) =>
+      evalRule(ctx, inner.trim(), joinAll),
+    );
+    if (expanded !== r) return evalSingle(ctx, expanded, joinAll);
+  }
   // %% 依次取数（多列表交替合并：列表1首项、列表2首项、列表1次项…）
   if (r.includes('%%')) {
     const lists = r.split('%%').map((x) => evalSingle(ctx, x, true));
@@ -931,6 +1076,10 @@ function evalSingle(ctx: Ctx, rule: string, joinAll = false): string {
     // HTML 页面但规则是 JSONPath（少见）：正文 JSON 直接全局解析
     return '';
   }
+  if (r.startsWith('{{') && r.endsWith('}}') && ctx.source) {
+    // 纯 {{js}} 表达式规则：沙箱同步求值
+    return runRuleJs(ctx, r.slice(2, -2), '');
+  }
   if (r.startsWith('{{')) return '';
   if (r.startsWith('@css:')) {
     const segs = parseChain(r.slice(5));
@@ -943,7 +1092,7 @@ function evalSingle(ctx: Ctx, rule: string, joinAll = false): string {
   return joinAll ? parts.filter(Boolean).join('\n') : parts[0] || '';
 }
 
-/** 轻量 XPath：//meta[@property='og:xxx']/@content 与 //tag/@attr 两种形态 */
+/** 轻量 XPath：//meta/@content、//tag/@attr 与 //a//b/@attr 链式 */
 function evalXPathLite(ctx: Extract<Ctx, { kind: 'html' }>, xp: string): string {
   const { $, el } = ctx;
   const meta = /\/\/meta\[@(property|name)='([^']+)'(?:\s+and\s+@(property|name)='([^']+)')?\]\/@(\w+)/.exec(xp);
@@ -967,6 +1116,15 @@ function evalXPathLite(ctx: Extract<Ctx, { kind: 'html' }>, xp: string): string 
     const n = (el ? $(el).find(sel) : $(sel)).first();
     return n.attr(target) || n.text().trim();
   }
+  // //a//b/@attr 链式（//div[@id="x"]//a/@href）
+  const chain = /^\/\/(.+?)\/@(\w+)$/.exec(xp);
+  if (chain && chain[1].includes('//')) {
+    const sel = xpathChainCss(chain[1]);
+    if (sel) {
+      const n = (el ? $(el).find(sel).addBack(sel) : $(sel)).first();
+      return n.attr(chain[2]) || n.text().trim();
+    }
+  }
   return '';
 }
 
@@ -977,36 +1135,95 @@ function evalTemplateJson(data: unknown, tpl: string): string {
   });
 }
 
-/** 列表规则：返回一组子上下文（html=元素 / json=对象） */
+/** XPath 链 → CSS：//*[@id="x"]//tr → [id="x"] tr（支持 //a//b//c 多级、单双引号） */
+function xpathChainCss(xp: string): string | null {
+  const segs = xp.split('//').map((s) => s.trim()).filter(Boolean);
+  if (!segs.length) return null;
+  const css: string[] = [];
+  for (const s of segs) {
+    const m = /^([A-Za-z][\w-]*|\*)?(?:\[@([\w-]+)(?:=['"]([^'"]*)['"])?\])?$/.exec(s);
+    if (!m) return null;
+    const tag = m[1] || '*';
+    const attrName = m[2];
+    const attrVal = m[3];
+    let sel = tag === '*' ? '' : tag;
+    if (attrName) sel += attrVal !== undefined ? `[${attrName}="${attrVal}"]` : `[${attrName}]`;
+    if (!sel) return null;
+    css.push(sel);
+  }
+  return css.join(' ');
+}
+
+/** 列表规则：返回一组子上下文（html=元素 / json=对象 / regex=捕获组）。
+ *  前缀：`-` 倒序（阳光中文网等目录倒序站）；`+` 追加（按正常处理）；
+ *  `:regex` 正则列表（若夏网：每个匹配 → 捕获组上下文，子规则用 $N 引用） */
 export function evalList(ctx: Ctx, rule: string | undefined): Ctx[] {
   if (!rule) return [];
-  const raw = stripJs(rule);
-  const [main, regex, replacement] = splitRegex(raw);
+  let raw = stripJs(rule);
+  // 列表前缀：- 倒序 / + 追加（均剥离后正常求值）
+  let reverse = false;
+  while (/^[-+]/.test(raw.trim())) {
+    if (raw.trim().startsWith('-')) reverse = !reverse;
+    raw = raw.trim().slice(1).trim();
+  }
+  const [main0, regex, replacement] = splitRegex(raw);
+  // @json: 前缀：JSONPath 列表规则
+  const main = main0.replace(/^@json:/i, '').trim() || main0;
+  // :regex 正则列表规则：(?s) 等内联旗标 → JS flags；每个匹配 → groups 上下文
+  if (main.startsWith(':')) {
+    let pat = main.slice(1);
+    let flags = 'g';
+    const inline = /^\(\?([simu]+)\)/.exec(pat);
+    if (inline) {
+      pat = pat.slice(inline[0].length);
+      flags += inline[1].replace('u', '');
+    }
+    try {
+      const re = new RegExp(pat, flags);
+      const text = ctx.kind === 'html' ? ctx.$.html() : ctx.kind === 'json' ? JSON.stringify(ctx.data) : ctx.full;
+      const items: Ctx[] = [];
+      let m: RegExpExecArray | null;
+      let guard = 0;
+      while ((m = re.exec(text)) !== null && guard < 4000) {
+        items.push({ kind: 'regex', groups: m.slice() as string[], full: m[0], pageUrl: ctx.pageUrl, source: ctx.source });
+        if (m.index === re.lastIndex) re.lastIndex++;
+        guard++;
+      }
+      return reverse ? items.reverse() : items;
+    } catch {
+      return [];
+    }
+  }
   const pick = (list: Ctx[]): Ctx[] => {
     if (!regex) return list;
-    return list.filter((c) => evalRule(c, `text##${regex}##${replacement}`) !== '' || c.kind === 'json');
+    return list.filter((c) => evalRule(c, `text##${regex}##${replacement}`) !== '' || c.kind === 'json' || c.kind === 'regex');
   };
+  const post = (list: Ctx[]): Ctx[] => (reverse ? list.reverse() : list);
   if (ctx.kind === 'json') {
     // Legado 语义：JSON 规则可省略 $. 前缀（data.datas.list 等同 $.data.datas.list）
     let vals = main.startsWith('$') ? jsonPathAll(ctx.data, main) : jsonPathAll(ctx.data, '$.' + main);
     // Legado $.data 语义：结果为单个数组 → 展开其元素为列表项（晋江 API 源）
     if (vals.length === 1 && Array.isArray(vals[0])) vals = vals[0] as unknown[];
-    return pick(vals.map((v) => ({ kind: 'json', data: v, pageUrl: ctx.pageUrl }) as Ctx));
+    return post(pick(vals.map((v) => ({ kind: 'json', data: v, pageUrl: ctx.pageUrl, source: ctx.source }) as Ctx)));
   }
-  // html：先按 || 逐路尝试
+  // html：先按 || 逐路尝试（regex 上下文没有页面 DOM，仅支持 : 子规则，已在上面返回）
+  if (ctx.kind === 'regex') return [];
   for (const part of splitOr(main)) {
     const [p, ,] = splitRegex(part);
     let segs: Seg[];
     if (p.startsWith('@css:')) segs = parseChain(p.slice(5));
     else segs = parseChain(p);
     if (p.startsWith('//')) {
-      // XPath 列表：仅支持 //tag[@class='x'] 收集元素
-      const m = /^\/\/([\w-]+)(?:\[@([\w-]+)='([^']+)'\])?$/.exec(p);
-      if (m) {
-        const [, tag, an, av] = m;
-        const sel = an ? `${tag}[${an}="${av}"]` : tag;
-        const els = (ctx.el ? ctx.$(ctx.el).find(sel) : ctx.$(sel)).toArray();
-        if (els.length) return pick(els.map((e) => ({ kind: 'html', $: ctx.$, el: e, pageUrl: ctx.pageUrl }) as Ctx));
+      // XPath 列表：//tag[@class='x'] / //*[@id="x"]//tr 多级链
+      const sel = xpathChainCss(p);
+      if (sel) {
+        let els: AnyNode[];
+        try {
+          els = (ctx.el ? ctx.$(ctx.el).find(sel).addBack(sel) : ctx.$(sel)).toArray();
+        } catch {
+          els = [];
+        }
+        if (els.length) return post(pick(els.map((e) => ({ kind: 'html', $: ctx.$, el: e, pageUrl: ctx.pageUrl, source: ctx.source }) as Ctx)));
       }
       continue;
     }
@@ -1020,34 +1237,40 @@ export function evalList(ctx: Ctx, rule: string | undefined): Ctx[] {
     } else if (last && last.type === 'final') {
       listSel = '';
     } else listSel = '';
-    // 先逐段下钻到倒数第二段
-    let scopeEl: AnyNode | undefined = ctx.el;
+    // 逐段下钻：中间段命中「全部元素」都作为后续搜索范围（Legado 语义：flatMap），
+    // 不是只取第一个（酷书阁 .col-md-6@dl：17 个 dl 分布在 18 个 .col-md-6 里）
+    let scopeEls: AnyNode[] | null = ctx.el ? [ctx.el] : null;
     for (const seg of segs) {
       if (seg.type === 'final') break;
       const sel =
         seg.type === 'class' ? `.${seg.value}` : seg.type === 'id' ? `#${seg.value}` : seg.type === 'tag' ? seg.value : seg.value;
       let found: AnyNode[];
       try {
-        found = scopeSel(ctx.$, scopeEl, sel).toArray();
+        if (scopeEls === null) found = ctx.$(sel).toArray();
+        else found = scopeEls.flatMap((n) => ctx.$(n).find(sel).addBack(sel).toArray());
       } catch {
         found = []; // 非法选择器：取空不抛错（与 Legado 一致）
       }
       found = applyPosition(found, seg);
-      scopeEl = found[0];
-      if (!scopeEl) break;
+      if (!found.length) {
+        scopeEls = [];
+        break;
+      }
+      scopeEls = found;
     }
     if (listSel) {
       let els: AnyNode[];
       try {
-        els = scopeSel(ctx.$, scopeEl, listSel).toArray();
+        if (scopeEls === null) els = ctx.$(listSel).toArray();
+        else els = scopeEls.flatMap((n) => ctx.$(n).find(listSel).addBack(listSel).toArray());
       } catch {
         els = []; // 非法选择器：取空不抛错（与 Legado 一致）
       }
       // 末段位置应用（tr!0 = 全部 tr 去掉表头行；tr.0:10:2 = 区间取）
       els = applyPosition(els, last);
-      if (els.length) return pick(els.map((e) => ({ kind: 'html', $: ctx.$, el: e, pageUrl: ctx.pageUrl }) as Ctx));
-    } else if (scopeEl) {
-      return pick([{ kind: 'html', $: ctx.$, el: scopeEl, pageUrl: ctx.pageUrl }]);
+      if (els.length) return post(pick(els.map((e) => ({ kind: 'html', $: ctx.$, el: e, pageUrl: ctx.pageUrl, source: ctx.source }) as Ctx)));
+    } else if (scopeEls && scopeEls.length) {
+      return post(pick(scopeEls.map((e) => ({ kind: 'html', $: ctx.$, el: e, pageUrl: ctx.pageUrl, source: ctx.source }) as Ctx)));
     }
   }
   return [];
@@ -1218,6 +1441,15 @@ export function parseUrlTpl(
       const v = evalUrlExpr(expr, sourceUrl, vars, keyCharset);
       return v == null ? m : v;
     });
+    // 声明了非 UTF-8 编码的源：body 里残留的非 ASCII 字面字符（如爱看源硬编码的
+    // checkKeyWord）也按站点编码百分号转码——与阅读App okhttp 的 body.toByteArray(charset) 等价
+    if (keyCharset && !/utf-?8/i.test(keyCharset)) {
+      opts.body = opts.body.replace(/[^\x00-\x7F]+/g, (s) => gbkUrlEncode(s, keyCharset));
+    }
+  }
+  // URL 同理：非 UTF-8 源的查询串里残留中文按站点编码转码
+  if (keyCharset && !/utf-?8/i.test(keyCharset) && /[^\x00-\x7F]/.test(urlPart)) {
+    urlPart = urlPart.replace(/[^\x00-\x7F]+/g, (s) => gbkUrlEncode(s, keyCharset));
   }
   return {
     url: resolveUrl(urlPart, sourceUrl),
@@ -1228,27 +1460,102 @@ export function parseUrlTpl(
   };
 }
 
+/** 宽松 JSON 解析：{'webView': true} / {webView:true} / {"a"="b"} → 标准化后解析
+ *  Legado 的选项尾经常写得不规范（单引号/未引号键/等号），严格 JSON.parse 会失败 */
+function lenientJsonParse(s: string): Record<string, unknown> | null {
+  let t = s.trim().replace(/^[,{\s]+/, '{').trim();
+  if (!t.startsWith('{')) return null;
+  t = t
+    .replace(/[\u2018\u2019]/g, "'")
+    .replace(/[\u201c\u201d]/g, '"')
+    .replace(/'/g, '"');
+  // 未引号键：{webView: → {"webView":（含 = 当 : 用）
+  t = t.replace(/([{,]\s*)([A-Za-z_][\w-]*)\s*[:=]/g, '$1"$2":');
+  // 未引号字符串值：: true / : no-wrap → :"true"（真常量除外——JSON 本来就支持）
+  t = t.replace(/:\s*([A-Za-z_][\w.+-]*)\s*([,}\]])/g, (_m, v: string, tail: string) =>
+    /^(true|false|null|\d+)$/i.test(v) ? `:${v}${tail}` : `:"${v}"${tail}`,
+  );
+  try {
+    const o = JSON.parse(t) as Record<string, unknown>;
+    if (o && typeof o === 'object' && !Array.isArray(o)) return o;
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/** 拆掉 URL 尾部 Legado 选项（可能 URL 编码 %7B%7D / 单引号 / 未引号键）。
+ *  返回干净 URL + 选项（解析失败但尾巴形如 ,{...} 时也剥掉——Legado 同样先拆再解析） */
+export function splitUrlOptions(raw: string): { url: string; opts: Record<string, unknown> | null } {
+  let u = raw.trim();
+  if (!u) return { url: u, opts: null };
+  const trySplit = (s: string): { url: string; opts: Record<string, unknown> } | null => {
+    let at = Math.max(s.lastIndexOf(',{'), s.toUpperCase().lastIndexOf(',%7B'));
+    if (at < 0) return null;
+    const head = s.slice(0, at).trim();
+    let tail = s.slice(at + 1);
+    if (/^%7B/i.test(tail)) {
+      try {
+        tail = decodeURIComponent(tail);
+      } catch {
+        /* 保留原样 */
+      }
+    }
+    if (!head || !tail.trim().startsWith('{')) return null;
+    const o = lenientJsonParse(tail);
+    if (!o) return null;
+    return { url: head, opts: o };
+  };
+  // 直接拆（明文 ,{ 或编码 ,%7B）
+  const r1 = trySplit(u);
+  if (r1) return r1;
+  // 整体 URL 解码后重试（%2C 逗号等全编码形态）
+  try {
+    const dec = decodeURIComponent(u);
+    if (dec !== u) {
+      const r2 = trySplit(dec);
+      if (r2) return r2;
+    }
+  } catch {
+    /* ignore */
+  }
+  // 尾巴像 ,{...} 但 JSON 解析失败 → 仍剥掉（平衡花括号检查，防误伤正常 URL）
+  const m = /,\s*(?:%7B|\{)[\s\S]*$/.exec(u);
+  if (m && m.index > 0) {
+    const tail = u.slice(m.index + 1).trim();
+    const dec = /^%7B/i.test(tail) ? ((): string => { try { return decodeURIComponent(tail); } catch { return tail; } })() : tail;
+    const open = (dec.match(/\{/g) || []).length;
+    const close = (dec.match(/\}/g) || []).length;
+    const sq = (dec.match(/"/g) || []).length;
+    if (open === 1 && close === 1 && sq % 2 === 0) {
+      return { url: u.slice(0, m.index).trim(), opts: null };
+    }
+  }
+  return { url: u, opts: null };
+}
+
 async function fetchCtx(
   source: LegadoSource,
   p: ParsedUrl,
 ): Promise<{ ctx: Ctx; finalUrl: string; charset: string }> {
-  // 规则里带出的 URL 可能自带尾部 ,{"method":"POST",...} 选项（如纵横 bookUrl 直指 POST API）
+  // 规则里带出的 URL 可能自带尾部 ,{"method":"POST",...} 选项（如纵横 bookUrl 直指 POST API）；
+  // 宽松解析（单引号/未引号键/URL 编码 %7B%7D 都支持——猫九小说 chapterUrl 带 webView 选项）
   let { url, method, body, charset } = p;
   const headers = { ...sourceHeaders(source, url), ...(p.headers || {}) };
-  const braceAt = url.lastIndexOf(',{');
-  if (braceAt >= 0 && url.trimEnd().endsWith('}')) {
-    try {
-      const o = JSON.parse(url.slice(braceAt + 1)) as Record<string, unknown>;
-      if (o && typeof o === 'object' && (o.method || o.body || o.headers || o.charset)) {
-        if (typeof o.method === 'string') method = o.method.toUpperCase();
-        if (typeof o.body === 'string') body = o.body;
-        if (typeof o.charset === 'string') charset = o.charset;
-        if (o.headers && typeof o.headers === 'object') Object.assign(headers, o.headers);
-        url = normalizeUrl(url.slice(0, braceAt));
+  const split = splitUrlOptions(url);
+  if (split.opts && (split.opts.method || split.opts.body || split.opts.headers || split.opts.charset)) {
+    const o = split.opts;
+    if (typeof o.method === 'string') method = o.method.toUpperCase();
+    if (typeof o.body === 'string') body = o.body;
+    if (typeof o.charset === 'string') charset = o.charset;
+    if (o.headers && typeof o.headers === 'object') {
+      for (const [k, v] of Object.entries(o.headers as Record<string, unknown>)) {
+        if (typeof v === 'string') headers[k] = v;
       }
-    } catch {
-      /* 非 JSON 选项，当作普通 URL */
     }
+    url = normalizeUrl(split.url);
+  } else if (split.url !== url) {
+    url = normalizeUrl(split.url);
   }
   // 书源可自定义超时（慢站如 52书库 10-15s；默认 12s）
   const srcTimeout = typeof source.timeoutMs === 'number' && source.timeoutMs > 0 ? source.timeoutMs : undefined;
@@ -1272,12 +1579,12 @@ async function fetchCtx(
   let ctx: Ctx;
   if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
     try {
-      ctx = { kind: 'json', data: JSON.parse(trimmed), pageUrl: res.finalUrl };
+      ctx = { kind: 'json', data: JSON.parse(trimmed), pageUrl: res.finalUrl, source };
     } catch {
-      ctx = newHtmlCtx(res.text, res.finalUrl);
+      ctx = newHtmlCtx(res.text, res.finalUrl, source);
     }
   } else {
-    ctx = newHtmlCtx(res.text, res.finalUrl);
+    ctx = newHtmlCtx(res.text, res.finalUrl, source);
   }
   return { ctx, finalUrl: res.finalUrl, charset: res.charset };
 }
@@ -1286,10 +1593,88 @@ async function fetchCtx(
 // 业务流程：搜索 / 详情 / 目录 / 正文
 // ---------------------------------------------------------------------------
 
+/** 沙箱 HTTP 执行器：脚本里的 java.ajax/connect 等最终走这里（服务端代理 + 宽松证书） */
+function sandboxHttp(source: LegadoSource) {
+  return async (req: HttpReq): Promise<HttpResp> => {
+    const headers = { ...sourceHeaders(source, req.url), ...(req.headers || {}) };
+    const res = await proxyFetch(req.url, { method: req.method, headers, body: req.body, charset: req.charset });
+    return { body: res.text, finalUrl: res.finalUrl, headers: res.headers, status: res.status };
+  };
+}
+
+/** URL 模板异步展开：@js: 纯脚本 / 内嵌 <js> / 未识别 {{expr}} → JS 沙箱求值后回退同步解析 */
+async function resolveUrlTplAsync(
+  source: LegadoSource,
+  tpl: string,
+  vars: Record<string, string>,
+  forceCharset?: string,
+): Promise<ParsedUrl> {
+  const t = String(tpl || '');
+  const sourceDef = source as unknown as Record<string, unknown>;
+  const jsLib = typeof sourceDef.jsLib === 'string' ? sourceDef.jsLib : undefined;
+  const jsOpts = () => ({
+    sourceUrl: source.bookSourceUrl,
+    sourceDef,
+    jsLib,
+    baseUrl: source.bookSourceUrl,
+    globals: { ...vars } as Record<string, unknown>,
+    http: sandboxHttp(source),
+    timeoutMs: 9000,
+    maxReruns: 12,
+  });
+  try {
+    // ① 纯 @js: 脚本：返回值即 URL（可带 ,{...} 选项）——雨鹿/七猫/书城网包等
+    if (/^\s*@js:/i.test(t)) {
+      const out = await runLegadoJs(t.replace(/^\s*@js:/i, ''), jsOpts());
+      if (out.trim()) return parseUrlTpl(out, source.bookSourceUrl, vars, forceCharset);
+      return { url: '', method: 'GET' };
+    }
+    // ② 内嵌 <js>...</js>：求值后回填模板
+    let expanded = t;
+    if (t.includes('<js>')) {
+      const blocks = [...t.matchAll(/<js>([\s\S]*?)<\/js>/g)];
+      for (const b of blocks) {
+        try {
+          const val = await runLegadoJs(b[1], jsOpts());
+          expanded = expanded.replace(b[0], val);
+        } catch {
+          expanded = expanded.replace(b[0], '');
+        }
+      }
+    }
+    // ③ 同步解析；残留未识别 {{expr}}（同步模式匹配不到）→ 沙箱逐个求值后重解析
+    const pre = parseUrlTpl(expanded, source.bookSourceUrl, vars, forceCharset);
+    if (/\{\{[^{}]+\}\}/.test(pre.url)) {
+      const parts: string[] = [];
+      let lastIdx = 0;
+      for (const m of expanded.matchAll(/\{\{([^{}]+)\}\}/g)) {
+        parts.push(expanded.slice(lastIdx, m.index));
+        const known = evalUrlExpr(m[1], source.bookSourceUrl, vars, pre.charset);
+        if (known != null) {
+          parts.push(known);
+        } else {
+          try {
+            parts.push(await runLegadoJs(`return (${m[1]});`, jsOpts()));
+          } catch {
+            parts.push(m[0]);
+          }
+        }
+        lastIdx = (m.index || 0) + m[0].length;
+      }
+      parts.push(expanded.slice(lastIdx));
+      return parseUrlTpl(parts.join(''), source.bookSourceUrl, vars, forceCharset);
+    }
+    return pre;
+  } catch {
+    // JS 求值失败 → 回退同步解析（静态部分仍然可用）
+    return parseUrlTpl(t, source.bookSourceUrl, vars, forceCharset);
+  }
+}
+
 export async function searchBooks(source: LegadoSource, key: string): Promise<SearchBook[]> {
   if (!source.searchUrl) return [];
   const rs = source.ruleSearch || {};
-  const p = parseUrlTpl(source.searchUrl, source.bookSourceUrl, { key, page: '1' });
+  const p = await resolveUrlTplAsync(source, source.searchUrl, { key, page: '1' });
   let r = await fetchCtx(source, p);
   let list = evalList(r.ctx, rs.bookList);
   // —— GBK 自动重试：站点实际是 GBK 编码但源没声明 charset → 搜索词按 UTF-8 发出
@@ -1302,7 +1687,7 @@ export async function searchBooks(source: LegadoSource, key: string): Promise<Se
     /[\u4e00-\u9fff]/.test(key)
   ) {
     try {
-      const p2 = parseUrlTpl(source.searchUrl, source.bookSourceUrl, { key, page: '1' }, 'gbk');
+      const p2 = await resolveUrlTplAsync(source, source.searchUrl, { key, page: '1' }, 'gbk');
       const r2 = await fetchCtx(source, p2);
       const list2 = evalList(r2.ctx, rs.bookList);
       if (list2.length) {

@@ -196,6 +196,7 @@ export function AIChatSheet(props: {
           totalChapters: props.totalChapters,
         },
         message: msg,
+        chapterUrl: props.chapterUrl || '',
         persona,
         memoryBlock,
       });
