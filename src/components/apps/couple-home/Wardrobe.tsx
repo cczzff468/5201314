@@ -660,7 +660,7 @@ function PetSwatches({
   onPick: (c: string) => void;
 }) {
   return (
-    <div className="flex items-center gap-1.5 overflow-x-auto py-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+    <div className="-mr-4 flex items-center gap-1.5 overflow-x-auto pr-4 py-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
       {PET_SWATCHES.map((c) => (
         <button
           key={c}
@@ -1103,7 +1103,7 @@ export default function Wardrobe({
             {char !== 'pet' && (
               <div className="flex items-center gap-2 px-4 pb-0.5">
                 <span className="shrink-0 text-[11px] font-semibold text-[#b09a92]">调色盘</span>
-                <div className="flex items-center gap-1.5 overflow-x-auto py-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                <div className="-mr-4 flex items-center gap-1.5 overflow-x-auto pr-4 py-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
                   <button
                     onClick={() => setTint(null)}
                     aria-label="默认色"

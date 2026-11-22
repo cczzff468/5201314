@@ -443,7 +443,7 @@ export function StickerGroupBar({
           </button>
         </div>
       ) : (
-        <div className="flex items-center gap-1.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        <div className="-mx-3 flex items-center gap-1.5 overflow-x-auto px-3 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           {orderedGroups(groups).map((g) => {
             const on = g.id === activeId;
             const builtin = g.id === BUILTIN_STICKER_GROUP_ID;

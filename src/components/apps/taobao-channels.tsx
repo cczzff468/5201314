@@ -534,7 +534,7 @@ export function SubsidyPage({
             </button>
           </div>
           {packetsOpen ? (
-            <div className="mt-2.5 flex gap-2 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+            <div className="mt-2.5 -mx-3 flex gap-2 overflow-x-auto px-3 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
               {TB_SUBSIDY.redpackets.map((p) => {
                 const claimed = coupons.some((x) => x.name === p.name && !x.usedAt);
                 return (
@@ -1865,7 +1865,7 @@ export function MoviePage({
               ))}
             </div>
             {sel.size > 0 ? (
-              <div className="mt-2.5 flex gap-2 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+              <div className="mt-2.5 -mx-3 flex gap-2 overflow-x-auto px-3 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
                 {[...sel].map((key) => {
                   const [r, k] = key.split('-').map(Number);
                   return (
@@ -2181,7 +2181,7 @@ export function MoviePage({
               ))}
             </div>
             {sel.size > 0 ? (
-              <div className="mt-2.5 flex gap-2 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+              <div className="mt-2.5 -mx-3 flex gap-2 overflow-x-auto px-3 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
                 {[...sel].map((key) => {
                   const [r, k] = key.split('-').map(Number);
                   return (
@@ -2344,7 +2344,7 @@ export function MoviePage({
           </div>
         </div>
         {/* 四大频道 tab */}
-        <div className="mt-1.5 flex items-center gap-5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        <div className="mt-1.5 -mx-3 flex items-center gap-5 overflow-x-auto px-3 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           {TP_TABS.map((t) => (
             <button
               key={t.id}
@@ -3209,7 +3209,7 @@ export function FliggyPage({ uid, onBack, onToast }: { uid: string; onBack: () =
       <div className="flex h-full flex-col bg-[#F4F5F9]">
         {/* 顶部频道 tab（酒店紫色胶囊选中）+ 返回 */}
         <div className="shrink-0 bg-white px-2 pb-2.5 pt-[56px]">
-          <div className="flex items-center gap-1.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          <div className="-mx-2 flex items-center gap-1.5 overflow-x-auto px-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             <button type="button" aria-label="返回" onClick={() => setView('home')} className="grid h-8 w-8 shrink-0 place-items-center rounded-full active:opacity-60">
               <ArrowLeft className="h-[20px] w-[20px] text-black/80" strokeWidth={2.2} />
             </button>
@@ -3409,7 +3409,7 @@ export function FliggyPage({ uid, onBack, onToast }: { uid: string; onBack: () =
         </div>
         {/* 酒店搜索卡 */}
         <div className="mx-2 mt-3 rounded-2xl bg-white p-3.5">
-          <div className="flex items-center gap-4 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          <div className="-mx-3.5 flex items-center gap-4 overflow-x-auto px-3.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             {['国内', '国际', '酒店套餐', '民宿', '短租房'].map((t) => (
               <button key={t} type="button" onClick={() => setTab(t)} className={`relative shrink-0 whitespace-nowrap pb-1.5 text-[17px] ${tab === t ? 'font-bold text-black/90' : 'text-black/50'}`}>
                 {t}
@@ -3451,7 +3451,7 @@ export function FliggyPage({ uid, onBack, onToast }: { uid: string; onBack: () =
             <ChevronDown className="ml-1 h-4 w-4 shrink-0 text-black/50" />
             <span className="ml-7 shrink-0 whitespace-nowrap text-[15px] text-black/30">价格/星级</span>
           </div>
-          <div className="mt-3 flex gap-2 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          <div className="mt-3 -mx-3.5 flex gap-2 overflow-x-auto px-3.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             {['首住特惠', '张挥公园', '濮阳县人民医院', '东环小区', '咸城遗址'].map((c, i) => (
               <button
                 key={c}

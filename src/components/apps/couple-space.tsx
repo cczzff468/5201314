@@ -10512,7 +10512,7 @@ function ChroniclePage({ state, patch, showToast, close }: { state: CoupleState;
             <span aria-hidden="true">↔</span> 左右滑动查看完整年份
           </div>
         </div>
-        <div className="mt-4 overflow-x-auto pb-2" data-testid="chronicle-showcase-table">
+        <div className="-mx-3.5 mt-4 overflow-x-auto px-3.5 pb-2" data-testid="chronicle-showcase-table">
           {chronTable}
         </div>
         <div className="mt-5 flex gap-3">
@@ -10582,7 +10582,7 @@ function ChroniclePage({ state, patch, showToast, close }: { state: CoupleState;
               </button>
             )}
           </div>
-          <div className="mt-3 overflow-x-auto pb-1" data-testid="chronicle-table">
+          <div className="-mx-4 mt-3 overflow-x-auto px-4 pb-1" data-testid="chronicle-table">
             {chronTable}
           </div>
           {months.length === 0 && <div className="mt-2 text-center text-[12px] text-[#c9aeb6] dark:text-rose-200/55">还没有关键月份，点下方「开始制作」记录第一段感情线吧</div>}

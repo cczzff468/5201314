@@ -33,6 +33,7 @@ export function ChatQuickBar({
   liquid,
   retro,
   testPrefix,
+  className,
 }: {
   items: QuickBarItem[];
   /** 液态玻璃主题：玻璃胶囊 */
@@ -41,11 +42,13 @@ export function ChatQuickBar({
   retro?: boolean;
   /** data-testid 前缀（wx / wxg / qq / qqg） */
   testPrefix: string;
+  /** 追加到根元素的类（宿主做全宽破出 -mx-N px-N：滚动裁切线推到屏幕物理边缘，修复距边缘 N px 处的刀切空白） */
+  className?: string;
 }) {
   if (items.length === 0) return null;
   return (
     <div
-      className="no-scrollbar flex items-center gap-x-3.5 overflow-x-auto py-[3px]"
+      className={`no-scrollbar flex items-center gap-x-3.5 overflow-x-auto py-[3px] ${className ?? ''}`}
       data-testid={`${testPrefix}-quick-bar`}
       role="toolbar"
       aria-label="输入框上方功能"

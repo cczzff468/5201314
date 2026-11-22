@@ -5524,7 +5524,13 @@ export function ChatPage({
               点一下与点面板里那一项等效；未添加 = 不显示；「+」面板本身不受影响 */}
           {quickItems.length > 0 && (
             <div className="mb-1.5">
-              <ChatQuickBar items={quickItems} liquid={liquid} retro={retro} testPrefix="wx" />
+              <ChatQuickBar
+                items={quickItems}
+                liquid={liquid}
+                retro={retro}
+                testPrefix="wx"
+                className={liquid ? '-mx-2.5 px-2.5' : '-ml-2 -mr-0.5 pl-2 pr-0.5'}
+              />
             </div>
           )}
           {/* 液态输入栏（第四十四轮，用户指定）：删除大椭圆包裹——语音钮 = 玻璃圆圈内嵌黑圈、
@@ -5746,7 +5752,7 @@ export function ChatPage({
           {/* 待发送图片预览条（需求2：选图后先显示在输入框下面，点主发送按钮才真正发出；面板展开时隐藏避免遮挡） */}
           {pendingImgs.length > 0 && !plusOpen && !stickerOpen && (
             <div
-              className={liquid ? 'mt-2 flex items-center gap-2 overflow-x-auto px-2.5 pb-0.5' : 'mt-2 flex items-center gap-2 overflow-x-auto pb-0.5'}
+              className={liquid ? 'mt-2 -mx-2.5 flex items-center gap-2 overflow-x-auto px-5 pb-0.5' : 'mt-2 -ml-2 -mr-0.5 flex items-center gap-2 overflow-x-auto pl-2 pr-0.5 pb-0.5'}
               data-testid="wx-img-preview-bar"
             >
               {pendingImgs.map((p, k) => (

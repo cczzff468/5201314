@@ -5700,7 +5700,7 @@ export function WxGroupChatPage({
           {/* 输入框上方快捷功能条（输入框自定义 › 输入框上方功能；群聊只含群内可用的功能） */}
           {quickItems.length > 0 && (
             <div className="mb-1.5">
-              <ChatQuickBar items={quickItems} testPrefix="wxg" />
+              <ChatQuickBar items={quickItems} testPrefix="wxg" className="-mx-2.5 px-2.5" />
             </div>
           )}
           <div className="flex items-end gap-2.5">
@@ -5849,7 +5849,7 @@ export function WxGroupChatPage({
               （可与输入框文字一起发送，见 send）；加号/表情面板打开时隐藏（面板优先展示） */}
           {pendingImgs.length > 0 && !plusOpen && !stickerOpen && (
             <div className="mt-2 flex items-center gap-2.5" data-testid="wxg-img-preview-bar">
-              <div className="no-scrollbar flex min-w-0 flex-1 gap-2 overflow-x-auto py-1">
+              <div className="no-scrollbar -mx-2.5 flex min-w-0 flex-1 gap-2 overflow-x-auto px-2.5 py-1">
                 {pendingImgs.map((p, k) => (
                   <div key={p.id} className="relative shrink-0">
                     <img src={p.src} alt={`待发送图片 ${k + 1}`} className="block h-[62px] w-[62px] rounded-[6px] object-cover" />

@@ -865,7 +865,7 @@ export default function WeatherApp() {
 
               {/* 24 小时预报（横向滚动） */}
               <section aria-label="24小时预报" className="rounded-[20px] bg-white/[0.10] p-4 ring-1 ring-white/[0.14] backdrop-blur-2xl">
-                <div className="no-scrollbar flex gap-[18px] overflow-x-auto">
+                <div className="no-scrollbar -mx-4 flex gap-[18px] overflow-x-auto px-4">
                   {data.hourly.map((h, i) => {
                     const HourIcon = weatherCodeInfo(h.code).Icon;
                     return (

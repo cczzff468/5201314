@@ -1977,7 +1977,7 @@ function MerchantPage({ merchant, onBack, onCheckout, onOpenOrder, onToast }: { 
           </div>
           {/* 商家入驻：店铺券（可领，进「红包卡券」结算自动可用） */}
           {shopCoupons.length > 0 && (
-            <div className="mt-2.5 flex gap-1.5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" data-testid="mt-shop-coupons">
+            <div className="mt-2.5 -mx-4 flex gap-1.5 overflow-x-auto px-4 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" data-testid="mt-shop-coupons">
               {shopCoupons.map((c) => {
                 const got = claimedCouponIds.includes(c.id);
                 return (
@@ -3746,7 +3746,7 @@ function OrdersPage({
           </button>
         </div>
         {/* 页签 */}
-        <div className="mt-2.5 flex gap-5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        <div className="mt-2.5 -mx-3 flex gap-5 overflow-x-auto px-3 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           {ORDER_TABS.map((t) => (
             <button key={t.key} type="button" onClick={() => setTab(t.key)} className={`relative shrink-0 pb-2.5 text-[16px] ${tab === t.key ? 'font-bold text-black/90' : 'text-black/55'}`}>
               {t.key}
@@ -4763,7 +4763,7 @@ function OrderDetailPage({
         {/* 遇到问题需要帮助（灰底白卡 + 胶囊 + 待支付地址反馈行） */}
         <div className="mx-3 mb-4 mt-2.5 rounded-xl bg-white px-4 py-4">
           <p className="text-[15px] font-bold text-black/85">遇到问题需要帮助?</p>
-          <div className="mt-3 flex gap-2 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          <div className="mt-3 -mx-4 flex gap-2 overflow-x-auto px-4 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             {helpPills.map((p) => (
               <button key={p.t} type="button" onClick={p.a} className="shrink-0 whitespace-nowrap rounded-full bg-[#F5F6F7] px-3.5 py-2 text-[12px] text-black/65 active:bg-black/10">
                 {p.t}
@@ -6145,7 +6145,7 @@ function CouponsPage({
         <>
           {/* 分类页签 */}
           <div className="shrink-0 bg-white px-4">
-            <div className="flex gap-6 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+            <div className="-mx-4 flex gap-6 overflow-x-auto px-4 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
               {COUPON_CATS.map((t) => (
                 <button key={t.key} type="button" onClick={() => setCat(t.key)} className={`relative shrink-0 py-3 text-[16px] ${cat === t.key ? 'font-bold text-black/90' : 'text-black/55'}`}>
                   {t.label}
@@ -6157,7 +6157,7 @@ function CouponsPage({
 
           {/* 快捷筛选 chips */}
           <div className="shrink-0 border-b border-black/[0.04] bg-white px-3 pb-2.5">
-            <div className="flex gap-2 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+            <div className="-mx-3 flex gap-2 overflow-x-auto px-3 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
               {([
                 ['god', '神券', true],
                 ['recent', '最近获得', false],
@@ -10908,7 +10908,7 @@ function HotelChannelPage({ onBack, onOpenPay, onToast }: { onBack: () => void; 
           </div>
         </div>
         {/* 主题页签 */}
-        <div className="mt-2.5 flex items-center gap-5 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        <div className="mt-2.5 -mx-3 flex items-center gap-5 overflow-x-auto px-3 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           {HOTEL_TABS.map((t) => (
             <button
               key={t}
@@ -11299,7 +11299,7 @@ function FunChannelPage({ onBack, onOpenPay, onToast }: { onBack: () => void; on
           </span>
         </div>
         {/* 品类筛选 */}
-        <div className="mt-2.5 flex items-center gap-2 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        <div className="mt-2.5 -mx-3 flex items-center gap-2 overflow-x-auto px-3 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           {FUN_CATS.map((t) => (
             <button
               key={t}

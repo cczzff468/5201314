@@ -5393,8 +5393,8 @@ export function ChatPage({
         {/* 输入框上方快捷功能条（输入框自定义 › 输入框上方功能）：把加号面板里的功能放到输入框上面；
             点一下与点面板里那一项等效；未添加 = 不显示；「+」面板本身不受影响 */}
         {quickItems.length > 0 && (
-          <div className="px-3 pt-2">
-            <ChatQuickBar items={quickItems} liquid={liquid} retro={retro} testPrefix="qq" />
+          <div className="pt-2">
+            <ChatQuickBar items={quickItems} liquid={liquid} retro={retro} testPrefix="qq" className="px-3" />
           </div>
         )}
         {/* 液态玻璃（用户指定）：删除输入行后面的大椭圆胶囊——行本身无包裹，输入框改毛玻璃椭圆（lg-input rounded-full），

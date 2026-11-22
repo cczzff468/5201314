@@ -5300,8 +5300,8 @@ export function QqGroupChatPage({
         {/* 输入框上方快捷功能条（输入框自定义 › 输入框上方功能）：把加号面板里的功能放到输入框上面；
             点一下与点面板里那一项等效；未添加 = 不显示；「+」面板本身不受影响 */}
         {quickItems.length > 0 && (
-          <div className="px-3 pt-2">
-            <ChatQuickBar items={quickItems} testPrefix="qqg" />
+          <div className="pt-2">
+            <ChatQuickBar items={quickItems} testPrefix="qqg" className="px-3" />
           </div>
         )}
         <div className="flex items-end gap-2 px-3 pb-1 pt-3">
@@ -5378,7 +5378,7 @@ export function QqGroupChatPage({
             data-testid="qqg-img-preview-bar"
             className="flex items-center gap-2.5 border-t border-black/[0.05] px-3 py-2 dark:border-white/[0.06]"
           >
-            <div className="flex min-w-0 flex-1 gap-2 overflow-x-auto py-1">
+            <div className="-mx-3 flex min-w-0 flex-1 gap-2 overflow-x-auto px-3 py-1">
               {pendingImgs.map((p, k) => (
                 <div key={p.id} className="relative h-[62px] w-[62px] shrink-0">
                   <img
