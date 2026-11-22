@@ -200,13 +200,26 @@ export function AIChatSheet(props: {
         persona,
         memoryBlock,
       });
-      setMsgs((m) => [...m, { role: 'assistant', content: r.reply }]);
+      // 多条消息回复（3~10 条）：优先 replies 数组；旧链路/异常退回 reply 按行拆
+      let list: string[] = Array.isArray(r?.replies)
+        ? r.replies.filter((x): x is string => typeof x === 'string' && !!x.trim())
+        : [];
+      if (!list.length) list = String(r?.reply || '').split(/\n+/).map((s) => s.trim()).filter(Boolean);
+      if (!list.length) list.push('（伴读书童走神了，再说一次嘛）');
+      // 像真人连发：逐条渐显，条间「正在输入」间隔（上一条越长等得越久 + 随机抖动）
+      for (let i = 0; i < list.length; i++) {
+        if (i > 0) {
+          const wait = Math.min(2200, 480 + list[i - 1].length * 18 + Math.random() * 560);
+          await new Promise((res) => setTimeout(res, wait));
+        }
+        setMsgs((m) => [...m, { role: 'assistant', content: list[i] }]);
+      }
       // 写入记忆 App（来源=阅读；互通开启时微信/QQ 的 TA 也记得）
       if (companion) {
         memAddEventFragment(
           companion.id,
           'reading',
-          `${companionName}在阅读App陪${ownerName}读《${props.name}》第${props.currentChapter + 1}章：${ownerName}说「${msg.slice(0, 60)}」，${companionName}回应：${r.reply.slice(0, 90)}`,
+          `${companionName}在阅读App陪${ownerName}读《${props.name}》第${props.currentChapter + 1}章：${ownerName}说「${msg.slice(0, 60)}」，${companionName}连发${list.length}条消息回应：${list.join(' / ').slice(0, 120)}`,
           { eventTime: Date.now(), sourceTag: 'reading-companion' },
         );
       }

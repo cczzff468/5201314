@@ -10,6 +10,7 @@ export const dynamic = 'force-dynamic';
  * - persona：所选联系人的角色人设（客户端从联系人档案组装）——AI 以该联系人身份陪读
  * - memoryBlock：记忆 APP 召回块（memChatRecallBlock），陪读 AI 共享该联系人的跨 App 记忆
  * 上下文注入策略见 src/lib/reading/ai.ts 头注释（只进摘要不进正文，Token 省流）。
+ * 返回 { replies: string[]（3~10 条，真人连发式）， reply: string（兼容字段，全文拼接） }。
  */
 export async function POST(req: NextRequest) {
   const body = (await req.json().catch(() => ({}))) as Record<string, unknown>;
@@ -18,7 +19,7 @@ export async function POST(req: NextRequest) {
   const book = (body.book || {}) as Record<string, unknown>;
   if (!bookUrl || !message) return NextResponse.json({ error: '参数缺失' }, { status: 400 });
   try {
-    const reply = await companionChat({
+    const replies = await companionChat({
       bookUrl,
       book: {
         name: String(book.name || '当前的书'),
@@ -32,7 +33,7 @@ export async function POST(req: NextRequest) {
       persona: body.persona ? String(body.persona) : undefined,
       memoryBlock: body.memoryBlock ? String(body.memoryBlock) : undefined,
     });
-    return NextResponse.json({ reply });
+    return NextResponse.json({ replies, reply: replies.join('\n') });
   } catch (e) {
     return NextResponse.json(
       { error: e instanceof Error ? e.message.slice(0, 90) : 'AI 伴读暂时不在，稍后再试' },

@@ -858,7 +858,7 @@ export function MainScreen({
     [reloadContacts, showToast, reqDetail]
   );
 
-  /** 拒绝好友申请：AI 彻底停止申请（重新加回好友后重置） */
+  /** 拒绝好友申请：AI 不再永久放弃——按退避节奏由人设决定下一步（再次申请 / 只回验证消息） */
   const rejectFriendReqAction = useCallback(
     (r: WxFriendReq) => {
       rejectFriendReq('wx', r.id);

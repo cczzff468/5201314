@@ -176,7 +176,7 @@ export function FriendReqDetailPage({
   onBack: () => void;
   /** 同意申请（前往验证，pending AI 申请）：宿主恢复好友关系 + 状态流转 + 刷新 */
   onAccept: (r: WxFriendReq) => void;
-  /** 拒绝申请：AI 停止再申请 */
+  /** 拒绝申请：AI 会按人设决定下一步（再次申请 / 在验证消息里回复） */
   onReject: (r: WxFriendReq) => void;
   /** 加入黑名单 */
   onBlock: (r: WxFriendReq | ContactRecord) => void;

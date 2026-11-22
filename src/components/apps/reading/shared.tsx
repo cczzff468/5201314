@@ -945,7 +945,7 @@ export const api = {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
-    }).then((r) => j<{ reply: string }>(r)),
+    }).then((r) => j<{ reply: string; replies?: string[]; error?: string }>(r)),
   history: (bookUrl?: string) =>
     fetch(`/api/reading/history${bookUrl ? `?bookUrl=${encodeURIComponent(bookUrl)}` : ''}`).then((r) =>
       j<Record<string, unknown>>(r),

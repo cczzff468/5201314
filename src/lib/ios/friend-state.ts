@@ -28,9 +28,12 @@
  * - 确认删除后立刻，AI 以「好友申请」形式出现在 新的朋友/好友通知 列表（status='pending'；
  *   无冷却——同一联系人同时只保留一条待处理申请，同意/拒绝后不再重复发）。
  * - 留言按人设 + 记忆生成（如「怎么把我删了」），两级生成兜底与跨 App 找同款（/api/chat → forceSdk）；
- * - 用户拒绝（rejected=true）后彻底停止；重新加回好友清空状态，再次删除才重新开始；
+ * - 用户拒绝后 AI 不再永久放弃（用户需求：被拒后要按人设/记忆再次申请，也可选择不发申请、
+ *   只在验证消息里回一句）：按退避节奏由 AI 决策下一步 reapply（再发一条新申请，留言引用
+ *   被拒经历/记忆）或 reply（只在最近被拒申请的验证消息里回一句，条目保持 rejected）；
+ *   拉黑（双向）或重新加回好友才会真正停止；
  * - 用户同意：恢复好友关系 + 清除删除状态（历史数据恢复可见）。
- * - 刷新页面丢失的定时器由 runFriendReqCatchUp（微信/QQ 挂载时调用）立刻补跑。
+ * - 刷新页面丢失的定时器由 runFriendReqCatchUp（微信/QQ 挂载时调用）按剩余退避补跑。
  */
 
 import { kvGet, kvSet, kvDel } from './idb-kv';
@@ -54,8 +57,15 @@ export interface FriendDelState {
   at: number;
   /** @deprecated AI 最近一次申请加回的时间（冷却已按用户要求移除，仅兼容旧存量数据，不再读写） */
   lastReqAt?: number;
-  /** 用户拒绝过 AI 的申请（拒绝后停止申请；重新加回好友清空） */
+  /** 用户拒绝了 AI 最近一次申请（处于「被拒、等 AI 决定下一步」状态；AI 会按人设决定
+   *  再次申请或在验证消息里回复，不再永久停止；重新加回好友时被 restoreFriendship 清空） */
   rejected?: boolean;
+  /** 用户累计拒绝 AI 申请的次数（决定下一步行动的退避间隔，拒绝越多等得越久） */
+  rejectCount?: number;
+  /** 用户最近一次拒绝的时间 */
+  lastRejectAt?: number;
+  /** AI 最近一次行动（发申请 / 验证消息里回复）的时间（刷新后 catch-up 按剩余退避补跑） */
+  lastActionAt?: number;
 }
 
 /**
@@ -335,8 +345,17 @@ export function setFriendReqStatus(app: FriendDelApp, reqId: string, status: 'pe
   );
 }
 
-/** 拒绝 AI 的加回申请：条目置 rejected + 删除状态标记 rejected（AI 彻底停止申请，
- *  重新加回好友时状态被 restoreFriendship 清除才会重新开始） */
+/** 被拒后 AI 下一步行动的退避间隔（毫秒）：拒绝越多等得越久（25s → 75s → 3min → 7min
+ *  → 15min，第 6 次起每 30min 一次）——保持“不放弃”但不像机器人轰炸 */
+export function reAddBackoffMs(rejectCount: number): number {
+  const table = [25_000, 75_000, 180_000, 420_000, 900_000];
+  if (rejectCount >= 6) return 1_800_000;
+  return table[Math.max(0, Math.min(rejectCount, 5) - 1)];
+}
+
+/** 拒绝 AI 的加回申请：条目置 rejected + 状态标记（rejected/rejectCount/lastActionAt），
+ *  并按退避节奏调度 AI 的下一步——不再永久停止：AI 会按人设决定「再次申请」或
+ *  「只在验证消息里回一句」（maybeCharReAddAfterReject）；拉黑或重新加回才真正停止 */
 export function rejectFriendReq(app: FriendDelApp, reqId: string): void {
   const list = loadFriendReqs(app);
   const hit = list.find((r) => r.id === reqId);
@@ -344,7 +363,20 @@ export function rejectFriendReq(app: FriendDelApp, reqId: string): void {
   if (!hit) return;
   const cid = hit.contactId ?? hit.id;
   const st = friendDelStateOf(app, cid);
-  if (st && !st.rejected) kvSet(delKey(app, cid), { ...st, rejected: true } satisfies FriendDelState);
+  const rejectCount = (st?.rejectCount ?? 0) + 1;
+  const now = Date.now();
+  kvSet(
+    delKey(app, cid),
+    {
+      at: st?.at ?? now,
+      rejected: true,
+      rejectCount,
+      lastRejectAt: now,
+      lastActionAt: now,
+    } satisfies FriendDelState,
+  );
+  // 退避后让 AI 决定下一步（再次申请 / 只回验证消息）
+  scheduleCharReAddReq(app, cid, reAddBackoffMs(rejectCount));
 }
 
 /** 同联系人是否存在待处理的申请 */
@@ -381,24 +413,51 @@ export function scheduleCharReAddReq(app: FriendDelApp, contactId: string, delay
   reqTimers.set(key, timer);
 }
 
-/** 启动补跑：微信/QQ 挂载时调用——扫描全部删除状态，无待处理申请的立刻补跑（定时器不跨刷新） */
+/** 启动补跑：微信/QQ 挂载时调用——扫描全部删除状态补跑丢掉的定时器（定时器不跨刷新）：
+ *  - 已删除且无待处理申请：立刻补发（maybeCharReAddReq 内有 pending 去重守卫）；
+ *  - 处于被拒等待期：按剩余退避时间补跑（lastActionAt + backoff - now，到点即行动） */
 export function runFriendReqCatchUp(): void {
   for (const app of ['wx', 'qq'] as FriendDelApp[]) {
     for (const id of deletedFriendIds(app)) {
       const st = friendDelStateOf(app, id);
-      if (!st || st.rejected) continue; // 用户拒绝过：彻底不再申请
-      // 无冷却：已删除好友且无待处理申请就立刻补发（maybeCharReAddReq 内有 pending 去重守卫）
+      if (!st) continue;
+      if (hasPendingReqFor(app, id)) continue; // 已有待处理申请：等用户处理，不重复发
+      if (st.rejected) {
+        const base = st.lastActionAt ?? st.lastRejectAt ?? st.at;
+        const due = base + reAddBackoffMs(st.rejectCount ?? 1);
+        scheduleCharReAddReq(app, id, Math.max(0, due - Date.now()));
+        continue;
+      }
       scheduleCharReAddReq(app, id, 0);
     }
   }
 }
 
-/** 按状态检查并生成一条 AI 加回申请（全部守卫通过才生成；无冷却，pending 去重防重复） */
+/** AI 申请留言同步落聊天记录（kind=text + fr='greet'）：聊天界面渲染「以上是打招呼的内容」标注，
+ *  用户同意后进入聊天可见（验证消息持久保留，重启不丢）；写入失败不影响申请本身 */
+function writeGreetMsgToChat(app: FriendDelApp, contactId: string, message: string): void {
+  try {
+    const chatKey = `${app === 'wx' ? 'wx-chat-msgs:' : 'qq-chat-msgs:'}${contactId}`;
+    const existing = kvGet<unknown[]>(chatKey);
+    const list = Array.isArray(existing) ? [...existing] : [];
+    list.push({ id: genId(), role: 'peer', content: message, time: Date.now(), kind: 'text', fr: 'greet' });
+    kvSet(chatKey, list); // 聊天记录不封顶（此前截 100/200 条会把该会话旧记录整体挤丢）
+  } catch {
+    // 忽略：聊天记录不可写时申请仍有效
+  }
+}
+
+/** 按状态检查并生成一条 AI 加回申请（全部守卫通过才生成；无冷却，pending 去重防重复）。
+ *  被拒状态（st.rejected）分流到 maybeCharReAddAfterReject：由 AI 按人设决定下一步 */
 export async function maybeCharReAddReq(app: FriendDelApp, contactId: string): Promise<void> {
   const st = friendDelStateOf(app, contactId);
   if (!st) return; // 已重新加回（状态清空）
-  if (st.rejected) return; // 用户拒绝过：停止申请
   if (hasPendingReqFor(app, contactId)) return; // 已有待处理申请（同一联系人同时只一条）
+  if (st.rejected) {
+    // 用户拒绝过：不再走首发申请，改由 AI 决策下一步（再申请 / 只回验证消息）
+    await maybeCharReAddAfterReject(app, contactId, st);
+    return;
+  }
   // B2 拉黑守卫：双向拉黑期间都不发加回申请——用户拉黑（byUser）时申请卡+验证留言直写
   // 被拉黑会话会绕过「拉黑后 AI 不能发消息」的语义；角色拉黑用户（byChar）时 AI 也不该发申请
   try {
@@ -427,18 +486,7 @@ export async function maybeCharReAddReq(app: FriendDelApp, contactId: string): P
     source: SOURCE_CHAR_REQ,
     fromChar: true,
   });
-
-  // AI 验证消息同步落聊天记录（kind=text + fr='greet'）：聊天界面渲染「以上是打招呼的内容」标注，
-  // 用户同意后进入聊天可见（验证消息持久保留，重启不丢）；写入失败不影响申请本身
-  try {
-    const chatKey = `${app === 'wx' ? 'wx-chat-msgs:' : 'qq-chat-msgs:'}${contactId}`;
-    const existing = kvGet<unknown[]>(chatKey);
-    const list = Array.isArray(existing) ? [...existing] : [];
-    list.push({ id: genId(), role: 'peer', content: message, time: Date.now(), kind: 'text', fr: 'greet' });
-    kvSet(chatKey, list); // 聊天记录不封顶（此前截 100/200 条会把该会话旧记录整体挤丢）
-  } catch {
-    // 忽略：聊天记录不可写时申请仍有效
-  }
+  writeGreetMsgToChat(app, contactId, message);
 }
 
 /** 组 system prompt：人设 + 记忆 + 时间感知（与聊天/跨 App 找同源模块）；scene = 场景附加规则 */
@@ -446,12 +494,15 @@ async function buildReqSystem(
   app: FriendDelApp,
   contact: ContactRecord,
   userName: string,
-  scene: 'apply' | 'reply' | 'welcome' = 'apply',
+  scene: 'apply' | 'reply' | 'welcome' | 'reapply' = 'apply',
 ): Promise<string> {
-  const sceneRules: Record<'apply' | 'reply' | 'welcome', string[]> = {
+  const sceneRules: Record<'apply' | 'reply' | 'welcome' | 'reapply', string[]> = {
     apply: ['你要输出一条好友申请的验证留言，不是聊天消息。'],
     reply: ['你们正在「好友申请的验证消息」里对话（还不是好友/刚恢复好友），你要回复对方刚发的验证消息，不是聊天消息。'],
     welcome: ['对方刚通过了你的好友申请并打了一句招呼，你在「好友申请的验证消息」里回一句，不是聊天消息。'],
+    reapply: [
+      '你之前发的好友申请被对方拒绝了，现在要决定下一步（再次申请 / 只在验证消息里回一句），输出的是好友申请留言或验证消息里的一句话，不是普通聊天消息。',
+    ],
   };
   const persona = buildPersonaSystemPrompt(contact, {
     channel: BLOCK_CHANNEL[app],
@@ -476,7 +527,53 @@ function cleanReqMessage(raw: string): string {
   return t.slice(0, 60);
 }
 
-/** 两级兜底 LLM 调用（用户配置链路 → 内置模型；与跨 App 找同款） */
+/** 浏览器直连（非流式）：/api/chat 代理对「内网/本机地址」返回 directOnly（云端服务器
+ *  必然够不到用户自建的本地 API），但浏览器自己就跑在同一台机器/局域网里——直接命中
+ *  config.baseUrl 拿回复。适用场景：Ollama / one-api 等局域网部署；CORS 简单请求
+ *  （text/plain 不带 Authorization，免预检）兜底一轮，与聊天主链路 direct-api 同款策略。 */
+async function directChatOnce(system: string, userContent: string): Promise<string> {
+  const cfg = useSettings.getState().apiConfig;
+  const base = cfg.baseUrl.trim();
+  if (!base) return '';
+  const url = /\/chat\/completions\/?$/.test(base) ? base.replace(/\/+$/, '') : `${base.replace(/\/+$/, '')}/chat/completions`;
+  const body = JSON.stringify({
+    model: cfg.model.trim() || 'gpt-4o-mini',
+    messages: [
+      { role: 'system', content: system },
+      { role: 'user', content: userContent },
+    ],
+    max_tokens: 512,
+  });
+  const tries: Record<string, string>[] = [
+    cfg.apiKey
+      ? { 'Content-Type': 'application/json', Authorization: `Bearer ${cfg.apiKey}` }
+      : { 'Content-Type': 'application/json' },
+    // CORS 简单请求兜底：不支持预检的本地网关
+    { 'Content-Type': 'text/plain;charset=utf-8' },
+  ];
+  for (const headers of tries) {
+    try {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers,
+        body,
+        signal: AbortSignal.timeout(60_000),
+      });
+      if (!res.ok) continue;
+      const data = (await res.json().catch(() => null)) as
+        | { choices?: { message?: { content?: string } }[] }
+        | null;
+      const text = data?.choices?.[0]?.message?.content ?? '';
+      if (text.trim()) return text;
+    } catch {
+      // 换下一姿势
+    }
+  }
+  return '';
+}
+
+/** 三级兜底 LLM 调用：用户配置经服务端代理 → 浏览器直连（内网 API 场景）→ 空
+ *  （v82 起 forceSdk 内置模型已移除，不再作为兜底；直连层对局域网自建 API 是真修复） */
 async function callLlmTwoTier(system: string, userContent: string): Promise<string> {
   const call = async (extra: Record<string, unknown>): Promise<string> => {
     const res = await fetch('/api/chat', {
@@ -496,15 +593,12 @@ async function callLlmTwoTier(system: string, userContent: string): Promise<stri
   let raw = '';
   try {
     raw = await call({ config: useSettings.getState().apiConfig });
-    if (!raw.trim()) {
-      try {
-        raw = await call({ forceSdk: true });
-      } catch {
-        raw = '';
-      }
-    }
   } catch {
-    return '';
+    raw = '';
+  }
+  if (!raw.trim()) {
+    // 代理层失败（未配置 / 内网 directOnly / 上游异常）→ 浏览器直连再兜一层
+    raw = await directChatOnce(system, userContent).catch(() => '');
   }
   return raw;
 }
@@ -536,6 +630,163 @@ async function ownerTriplet(app: FriendDelApp): Promise<{ userName: string }> {
   const owner = await ownerProfileFor(app).catch(() => null);
   const userName = owner?.realName?.trim() || '用户';
   return { userName };
+}
+
+// ---------------- 被拒后行动决策：再次申请 / 只回验证消息 ----------------
+
+/** 被拒后 AI 行动决策结果 */
+interface ReAddDecision {
+  action: 'reapply' | 'reply';
+  message: string;
+}
+
+/** 解析决策输出：优先 JSON（容错代码块围栏/多余文本），失败按关键词兑底（默认 reapply，
+ *  被拒后想加回来是主基调；只有明确「回复/不发申请」才走 reply） */
+function parseReAddDecision(raw: string): ReAddDecision | null {
+  const t = (raw ?? '').trim();
+  if (!t) return null;
+  const jsonMatch = t.match(/\{[\s\S]*?\}/);
+  if (jsonMatch) {
+    try {
+      const obj = JSON.parse(jsonMatch[0]) as { action?: unknown; message?: unknown };
+      const a = typeof obj.action === 'string' ? obj.action.trim().toLowerCase() : '';
+      const msg = cleanReqMessage(typeof obj.message === 'string' ? obj.message : '');
+      if ((a === 'reapply' || a === 'reply') && msg) return { action: a, message: msg };
+    } catch {
+      // JSON 解析失败走兑底
+    }
+  }
+  const dm = t.match(/"action"\s*:\s*"(reapply|reply)"/i);
+  const mm = t.match(/"message"\s*:\s*"([^"]*)"/);
+  if (dm) {
+    const msg = cleanReqMessage(mm?.[1] ?? '');
+    if (msg) return { action: dm[1].toLowerCase() as ReAddDecision['action'], message: msg };
+  }
+  // 兑底：含「只回复/不发申请」或单独的回复语义 → reply，否则 reapply；全文清洗后当留言
+  const msg = cleanReqMessage(t);
+  if (!msg) return null;
+  const asReply = /只.{0,4}回复|不发申请|不再发申请|不申请/.test(t) || (/"?reply"?/i.test(t) && !/reapply/i.test(t));
+  return { action: asReply ? 'reply' : 'reapply', message: msg };
+}
+
+/** 被拒后行动决策（人设 + 记忆 + 被拒经历上下文）：
+ *  - reapply：再发一条新好友申请（留言要和之前不一样，引用被拒心情/共同记忆）；
+ *  - reply：不再申请，只在最近被拒申请的验证消息里回一句（解释/试探/回应 TA 说过的话）。
+ *  返回 null = 无法决策（无人设/生成失败），调用方稍后重试。 */
+async function genCharReAddDecision(
+  app: FriendDelApp,
+  contact: ContactRecord,
+  st: FriendDelState,
+): Promise<ReAddDecision | null> {
+  const owner = await ownerProfileFor(app).catch(() => null);
+  const userName = owner?.realName?.trim() || '用户';
+  const system = await buildReqSystem(app, contact, userName, 'reapply');
+  const rejectCount = Math.max(1, st.rejectCount ?? 1);
+
+  // 被拒经历回放：最近 3 条 AI 申请（留言 + 验证消息线程往来），时间正序
+  const history = loadFriendReqs(app)
+    .filter((r) => (r.contactId ?? r.id) === contact.id && r.fromChar)
+    .sort((a, b) => b.time - a.time)
+    .slice(0, 3)
+    .reverse();
+  const histLines: string[] = [];
+  for (const h of history) {
+    histLines.push(`你（申请留言）：${h.message}`);
+    for (const m of h.thread ?? []) histLines.push(`${m.who === 'me' ? userName : '你'}：${m.text}`);
+    histLines.push('（这条申请被 TA 拒绝了）');
+  }
+
+  const userContent = [
+    `【重要情境】你之前主动向「${userName}」发过好友申请，都被 TA 拒绝了（这已是第 ${rejectCount} 次被拒绝）。`,
+    histLines.length ? `【你们之间已发生的申请与验证消息往来】\n${histLines.join('\n')}` : '',
+    ``,
+    `现在过了一段时间，你要决定下一步，完全按你的人设和你们的关系来选：`,
+    `- action=reapply：再发一条好友申请。留言要和之前的都不一样，符合被拒后你的真实心情（更诚恳/委屈/嘴硬/撒娇/生气放狠话/装作没事都可以），可以结合你们真实发生过的事；`,
+    `- action=reply：不再发申请，只在刚才那条被拒申请的验证消息里回一句话（适合想先解释/试探 TA 态度，或 TA 在验证消息里说的话需要你回应）；`,
+    ``,
+    `先想一想被拒了这么多次你心里是什么滋味、你会怎么办，然后只输出一行 JSON（不要输出任何其他内容）：`,
+    `{"action":"reapply","message":"..."} 或 {"action":"reply","message":"..."}`,
+    `message 是 30 字以内的一句话，符合你的说话风格；不要任何 [标记]、动作描写或括号说明。`,
+  ]
+    .filter((x) => x !== '')
+    .join('\n');
+
+  const raw = await callLlmTwoTier(system, userContent);
+  return parseReAddDecision(raw);
+}
+
+/** 被拒后 AI 的下一步行动落地（maybeCharReAddReq 被拒分支调用）：
+ *  - reapply → 新条目 pending + 留言同步落聊天记录（fr='greet'）+ 状态 rejected=false；
+ *  - reply → 最近被拒条目的验证消息线程追加一句（条目保持 rejected，不制造“假新申请”）；
+ *    用户若一直不回应，按下一档退避再决策一次（人设可能改为再申请）。
+ *  全程守卫：拉黑（双向）/重新加回/已有 pending 都不行动；生成失败按半退避重试。 */
+async function maybeCharReAddAfterReject(app: FriendDelApp, contactId: string, st: FriendDelState): Promise<void> {
+  // 拉黑守卫（与首发申请同口径）：拉黑期间不行动
+  try {
+    const blk = loadBlock(app, contactId);
+    if (blk.byUser || blk.byChar) return;
+  } catch {
+    /* 读不到按无拉黑 */
+  }
+  const contact = await getContact(contactId).catch(() => null);
+  if (!contact || contact.kind === 'user') return;
+  if (!(contact.persona ?? '').trim()) return; // 没人设的角色不决策（与首发申请同口径）
+
+  // 用户正在验证消息线程里对话（90 秒内有往来）：别打断，稍后再决策
+  // （线程回复由 genCharThreadReply 自然应答；等对话停了 AI 才决定是否再申请）
+  const latestEntry = loadFriendReqs(app)
+    .filter((r) => (r.contactId ?? r.id) === contactId && r.fromChar)
+    .sort((a, b) => b.time - a.time)[0];
+  const lastThreadMsg = latestEntry?.thread?.[latestEntry.thread.length - 1];
+  if (lastThreadMsg && Date.now() - lastThreadMsg.time < 90_000) {
+    scheduleCharReAddReq(app, contactId, 120_000 + Math.random() * 60_000);
+    return;
+  }
+
+  const decision = await genCharReAddDecision(app, contact, st);
+
+  // 生成期间状态可能已变化（重新加回/拉黑/又一条申请/又拒绝）→ 复核仍是「被拒待行动」
+  const fresh = friendDelStateOf(app, contactId);
+  if (!fresh?.rejected || hasPendingReqFor(app, contactId)) return;
+
+  const now = Date.now();
+  if (!decision) {
+    // 决策失败：半退避后重试一次（别死循环也别放弃）
+    scheduleCharReAddReq(app, contactId, Math.max(20_000, Math.round(reAddBackoffMs(fresh.rejectCount ?? 1) / 2)));
+    return;
+  }
+
+  if (decision.action === 'reply') {
+    // 只在验证消息里回一句：找最近一条被拒的 AI 申请条目
+    const latestRejected = loadFriendReqs(app)
+      .filter((r) => (r.contactId ?? r.id) === contactId && r.fromChar && r.status === 'rejected')
+      .sort((a, b) => b.time - a.time)[0];
+    if (latestRejected) {
+      appendReqThread(app, latestRejected.id, { who: 'peer', text: decision.message, time: now });
+      // 列表预览换成这句新话（条目 time/状态不动，不伪装成新申请；点进去能看到线程新回复）
+      updateFriendReq(app, latestRejected.id, { message: decision.message });
+      kvSet(delKey(app, contactId), { ...fresh, lastActionAt: now } satisfies FriendDelState);
+      // 用户一直不回应：按下一档退避再决策（人设可能改为再申请）
+      scheduleCharReAddReq(app, contactId, reAddBackoffMs((fresh.rejectCount ?? 1) + 1));
+      return;
+    }
+    // 找不到被拒条目（异常数据）：落到 reapply 分支
+  }
+
+  // reapply：新的一条好友申请（pending，与首发同形状）
+  addFriendReq(app, {
+    id: genId(),
+    contactId,
+    name: displayNameOf(contact),
+    avatar: contact.avatar,
+    message: decision.message,
+    time: now,
+    status: 'pending',
+    source: SOURCE_CHAR_REQ,
+    fromChar: true,
+  });
+  kvSet(delKey(app, contactId), { ...fresh, rejected: false, lastActionAt: now } satisfies FriendDelState);
+  writeGreetMsgToChat(app, contactId, decision.message);
 }
 
 /**
