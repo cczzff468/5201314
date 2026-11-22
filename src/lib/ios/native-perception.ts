@@ -9,15 +9,18 @@
  *
  * 关键补丁：Capacitor 8 的注入脚本只覆盖壳自身的源，跨域页面拿不到
  * window.Capacitor.Plugins —— 因此这里自建一份 Capacitor 消息协议客户端，
- * 直接经 androidBridge.postMessage 调原生插件（pluginId 可路由到任意已注册
- * 插件：NativePerception / CapacitorUsageStatsManager）。
+ * 直接经 androidBridge.postMessage 调原生插件。
  *
- * v1.2 时长数据源双引擎（用户在感知设置自选，localStorage 全局键）：
- *  - standard（默认）：Cap-go 插件（CapacitorUsageStatsManager）queryEvents
- *    事件级 JS 聚合（回看+今日裁剪+桌面排除）；Cap-go 不可用（旧 APK/失败）
- *    自动回落内置原生 getUsageSnapshot（v1.2 同口径）；
- *  - shizuku：原生侧经 Shizuku 以 shell 权限 dumpsys usagestats 读系统账本；
- *    Shizuku 未运行/未授权由原生内部自动降级标准（engineNote 标注）。
+ * 【v2.0.0 去 Shizuku 化大重构】真机能力全部改由安卓原生系统 API + 无障碍服务
+ * （AiAccessibilityService）实现，本文件同步替换桥契约：
+ *  - 移除：shizukuStatus / requestShizukuPermission / shizukuExec / shizukuScreencap /
+ *    executeShell / getScreenResolution(wm) / dumpUi(uiautomator) / inputChinese(ime)
+ *  - 新增：无障碍组（accessibilityPermission / a11yScreenshot / a11yTap / a11ySwipe /
+ *    a11yKey / a11yInput / getScreenSize / getForegroundApp）、锁定组（lockApp /
+ *    unlockApp，jealousyGuard* 三方法保留为同内核别名）、拉起组（bringToFront /
+ *    openApp / listInstalledApps）、消息组（getRecentSMS / getRecentNotifications）、
+ *    原生信息组（getBatteryStatus / getVolume / setVolume）、权限中心 11 项
+ *    （无障碍/使用情况/悬浮窗/通知使用/短信/通讯录/日历/闹钟/位置/媒体文件/电池优化）
  */
 
 import type { AwSnapshot } from './activitywatch';
@@ -25,10 +28,8 @@ import type { AwSnapshot } from './activitywatch';
 type UsageSnapshotResult = {
   ok: boolean;
   needPermission?: boolean;
-  /** 本轮数据实际由哪个引擎产出（standard/shizuku；旧壳无此字段 → native） */
+  /** 本轮数据实际由哪个引擎产出（native=原生 UsageStats；旧壳无此字段 → native） */
   engine?: string;
-  /** 降级原因（如 shizuku-not-running / shizuku-no-permission / shizuku-empty） */
-  engineNote?: string;
   current?: { app: string; name: string; ongoingMs: number; at?: number; closed?: boolean };
   todayApps?: { app: string; name: string; ms: number; opens?: number; lastOpenTs?: number }[];
   todayTotalMs?: number;
@@ -37,25 +38,63 @@ type UsageSnapshotResult = {
   history?: { hhmm: string; app: string; name: string }[];
   recentApps?: { app: string; name: string; hhmm: string; opens: number; ms: number }[];
 };
-
-type ShizukuStatusResult = { supported?: boolean; running?: boolean; granted?: boolean; version?: number };
-type ShizukuPermissionResult = { ok?: boolean; granted?: boolean; reason?: string };
-type ShizukuExecOptions = {
-  /** 行过滤 token（全部命中的行才保留；控制回传体积） */
-  mustContain?: string[];
-  /** 回传行数上限（默认 1000，硬顶 20000） */
-  maxLines?: number;
-  /** 看门狗超时毫秒（默认 8000，硬顶 30000） */
-  timeoutMs?: number;
-};
-type ShizukuExecResult = { ok?: boolean; out?: string; reason?: string };
-/** 麦克风 / 系统通知运行时权限查询与申请结果（v1.6.1 真机语音三问题修复） */
+/** 麦克风 / 系统通知运行时权限查询与申请结果 */
 type RuntimePermResult = { granted?: boolean; canAsk?: boolean };
+
+/** 无障碍服务权限状态 */
+export interface A11yPermResult {
+  granted?: boolean;
+  /** 服务实例是否已连接（开启即连，个别 ROM 有延迟） */
+  connected?: boolean;
+  canAsk?: boolean;
+}
+
+/** 无障碍截屏结果（frame 为 dataURL；reason: no-a11y/not-supported/empty/failed） */
+export interface A11yShotResult {
+  ok?: boolean;
+  frame?: string;
+  reason?: string;
+}
+
+/** 前台应用查询结果 */
+export interface ForegroundAppResult {
+  ok?: boolean;
+  /** 前台应用包名 */
+  app?: string;
+  /** 应用中文名 */
+  name?: string;
+  /** 采集通道：a11y=无障碍事件流（实时） / usage=UsageStats 兜底（~3s 粒度） */
+  via?: 'a11y' | 'usage';
+  at?: number;
+  reason?: string;
+}
+
+/** 最近短信（getRecentSMS） */
+export interface RecentSmsItem {
+  ts: number;
+  address: string;
+  body: string;
+}
+
+/** 最近通知（getRecentNotifications） */
+export interface RecentNotificationItem {
+  ts: number;
+  pkg: string;
+  app: string;
+  title: string;
+  text: string;
+}
+
+/** 原生动作通用结果（点按/滑动/按键/输入/打开应用等） */
+export interface NativeActionResult {
+  ok?: boolean;
+  reason?: string;
+}
 
 type CapPlugin = {
   hasUsagePermission(): Promise<{ granted: boolean }>;
   openUsagePermissionSettings(): Promise<void>;
-  getUsageSnapshot(options?: { source?: 'standard' | 'shizuku' }): Promise<UsageSnapshotResult>;
+  getUsageSnapshot(options?: { source?: string }): Promise<UsageSnapshotResult>;
   hasMediaPermission(): Promise<{ granted: boolean }>;
   openMediaPermissionSettings(): Promise<void>;
   getNowPlaying(): Promise<{
@@ -75,15 +114,47 @@ type CapPlugin = {
   requestScreenCapture(): Promise<{ ok: boolean; canceled?: boolean }>;
   grabScreenFrame(): Promise<{ ok: boolean; needSession?: boolean; frame?: string }>;
   stopScreenCapture(): Promise<void>;
-  shizukuStatus(): Promise<ShizukuStatusResult>;
-  requestShizukuPermission(): Promise<ShizukuPermissionResult>;
-  shizukuExec(options?: { cmd?: string[] } & ShizukuExecOptions): Promise<ShizukuExecResult>;
-  shizukuScreencap(): Promise<{ ok?: boolean; frame?: string; reason?: string }>;
-  /** v2.2 需求一：原生 PackageManager 取应用中文名（未安装/失败 → ok:false，网页侧兕底包名） */
-  getAppLabel(options?: { pkg?: string }): Promise<{ ok?: boolean; label?: string; reason?: string }>;
-  jealousyGuardSyncLock(options?: { pkg?: string; unlockAt?: number; charName?: string }): Promise<{ ok?: boolean; reason?: string }>;
+  /** v2.0.0 无障碍组 */
+  accessibilityPermission(): Promise<A11yPermResult>;
+  openAccessibilitySettings(): Promise<void>;
+  a11yScreenshot(): Promise<A11yShotResult>;
+  a11yTap(options: { x: number; y: number }): Promise<NativeActionResult>;
+  a11ySwipe(options: { x1: number; y1: number; x2: number; y2: number; duration?: number }): Promise<NativeActionResult>;
+  a11yKey(options: { key: string }): Promise<NativeActionResult>;
+  a11yInput(options: { text: string }): Promise<NativeActionResult>;
+  getScreenSize(): Promise<{ ok?: boolean; width?: number; height?: number; reason?: string }>;
+  getForegroundApp(): Promise<ForegroundAppResult>;
+  /** v2.0.0 拉起组 */
+  bringToFront(): Promise<NativeActionResult>;
+  openApp(options: { pkg: string }): Promise<NativeActionResult>;
+  listInstalledApps(options?: { limit?: number }): Promise<{ ok?: boolean; apps?: { pkg: string; name: string }[] }>;
+  /** v2.0.0 锁定组（LockOverlayService：UsageStats 轮询 + 全屏遮罩） */
+  lockApp(options: { pkg?: string; unlockAt?: number; charName?: string; message?: string }): Promise<{ ok?: boolean; reason?: string }>;
+  unlockApp(): Promise<{ ok?: boolean; reason?: string }>;
+  jealousyGuardSyncLock(options: { pkg?: string; unlockAt?: number; charName?: string; message?: string }): Promise<{ ok?: boolean; reason?: string }>;
   jealousyGuardStatus(): Promise<JealousyGuardStatusResult>;
   jealousyGuardDrainEvents(): Promise<{ events?: JealousyGuardEvent[] }>;
+  /** v2.0.0 消息读取组 */
+  getRecentSMS(options?: { limit?: number }): Promise<{ ok?: boolean; items?: RecentSmsItem[]; reason?: string; connecting?: boolean }>;
+  getRecentNotifications(options?: { limit?: number }): Promise<{ ok?: boolean; items?: RecentNotificationItem[]; reason?: string; connecting?: boolean }>;
+  /** v2.0.0 原生信息组 */
+  getBatteryStatus(): Promise<{ ok?: boolean; level?: number; charging?: boolean; reason?: string }>;
+  getVolume(): Promise<{ ok?: boolean; volume?: number; max?: number; reason?: string }>;
+  setVolume(options: { volume: number }): Promise<{ ok?: boolean; volume?: number; reason?: string }>;
+  /** v2.0.0 权限中心组 */
+  smsPermission(): Promise<RuntimePermResult>;
+  requestSmsPermission(): Promise<RuntimePermResult>;
+  contactsPermission(): Promise<RuntimePermResult>;
+  requestContactsPermission(): Promise<RuntimePermResult>;
+  calendarPermission(): Promise<RuntimePermResult>;
+  requestCalendarPermission(): Promise<RuntimePermResult>;
+  alarmPermission(): Promise<RuntimePermResult>;
+  requestAlarmPermission(): Promise<{ ok?: boolean; reason?: string }>;
+  mediaFilesPermission(): Promise<RuntimePermResult>;
+  requestMediaFilesPermission(): Promise<RuntimePermResult>;
+  openAppDetailSettings(): Promise<void>;
+  /** 应用名解析 */
+  getAppLabel(options?: { pkg?: string }): Promise<{ ok?: boolean; label?: string; reason?: string }>;
   micPermission(): Promise<RuntimePermResult>;
   requestMicPermission(): Promise<RuntimePermResult>;
   notificationPermission(): Promise<RuntimePermResult & { sdk?: number }>;
@@ -205,8 +276,6 @@ function bridgeCall<T>(
       return;
     }
     const callbackId = String(++bridgeCallbackId);
-    // 原生侧异常（插件未注册/回传路由失效）时 promise 会永远挂起且无任何报错——
-    // 数据静默消失比报错更难排查，这里加超时兜底
     const timer = window.setTimeout(() => {
       pendingCalls.delete(callbackId);
       reject(new Error(`原生调用超时（${pluginId}.${methodName}，桥无响应）`));
@@ -241,9 +310,6 @@ function nativeCall<T>(methodName: string, options: Record<string, unknown> = {}
 type NowPlayingResult = Awaited<ReturnType<CapPlugin['getNowPlaying']>>;
 
 // ---------------- 媒体桥新旧壳探测 ----------------
-// 旧 APK（v1.0）没有 hasMediaPermission/getNowPlaying 方法，且 Capacitor 对未知方法
-// 只记日志不回包 —— 直接调用会挂到超时。这里用短超时探测一次并缓存：
-// 新壳 → 立即响应；旧壳 → 超时后本页面会话内不再尝试（零后续成本）。
 let mediaBridgeState: boolean | null = null; // null = 未探测
 
 async function mediaBridgeAlive(): Promise<boolean> {
@@ -254,7 +320,6 @@ async function mediaBridgeAlive(): Promise<boolean> {
     return false;
   }
   try {
-    // 2s 探测超时（正常响应在几十毫秒内；旧壳永不回包）
     const r = await Promise.race([
       p.hasMediaPermission(),
       new Promise<never>((_, rej) => window.setTimeout(() => rej(new Error('probe-timeout')), 2000)),
@@ -278,17 +343,47 @@ function bridgePlugin(): CapPlugin {
     requestScreenCapture: () => nativeCall<{ ok: boolean; canceled?: boolean }>('requestScreenCapture'),
     grabScreenFrame: () => nativeCall<{ ok: boolean; needSession?: boolean; frame?: string }>('grabScreenFrame'),
     stopScreenCapture: () => nativeCall<void>('stopScreenCapture'),
-    shizukuStatus: () => nativeCall<ShizukuStatusResult>('shizukuStatus'),
-    requestShizukuPermission: () => nativeCall<ShizukuPermissionResult>('requestShizukuPermission', {}, 35_000),
-    shizukuExec: (options) => nativeCall<ShizukuExecResult>('shizukuExec', options ?? {}, (options?.timeoutMs ?? 8000) + 16_000),
-    shizukuScreencap: () => nativeCall<{ ok?: boolean; frame?: string; reason?: string }>('shizukuScreencap', {}, 30_000),
-    getAppLabel: (options) => nativeCall<{ ok?: boolean; label?: string; reason?: string }>('getAppLabel', options ?? {}, 8000),
-    jealousyGuardSyncLock: (options) =>
-      nativeCall<{ ok?: boolean; reason?: string }>('jealousyGuardSyncLock', options ?? {}, 8000),
+    // v2.0.0 无障碍组
+    accessibilityPermission: () => nativeCall<A11yPermResult>('accessibilityPermission'),
+    openAccessibilitySettings: () => nativeCall<void>('openAccessibilitySettings'),
+    a11yScreenshot: () => nativeCall<A11yShotResult>('a11yScreenshot', {}, 16_000),
+    a11yTap: (options) => nativeCall<NativeActionResult>('a11yTap', options ?? {}),
+    a11ySwipe: (options) => nativeCall<NativeActionResult>('a11ySwipe', options ?? {}),
+    a11yKey: (options) => nativeCall<NativeActionResult>('a11yKey', options ?? {}),
+    a11yInput: (options) => nativeCall<NativeActionResult>('a11yInput', options ?? {}, 12_000),
+    getScreenSize: () => nativeCall<{ ok?: boolean; width?: number; height?: number; reason?: string }>('getScreenSize'),
+    getForegroundApp: () => nativeCall<ForegroundAppResult>('getForegroundApp'),
+    // v2.0.0 拉起组
+    bringToFront: () => nativeCall<NativeActionResult>('bringToFront'),
+    openApp: (options) => nativeCall<NativeActionResult>('openApp', options ?? {}),
+    listInstalledApps: (options) => nativeCall<{ ok?: boolean; apps?: { pkg: string; name: string }[] }>('listInstalledApps', options ?? {}, 15_000),
+    // v2.0.0 锁定组
+    lockApp: (options) => nativeCall<{ ok?: boolean; reason?: string }>('lockApp', options ?? {}, 10_000),
+    unlockApp: () => nativeCall<{ ok?: boolean; reason?: string }>('unlockApp', {}, 10_000),
+    jealousyGuardSyncLock: (options) => nativeCall<{ ok?: boolean; reason?: string }>('jealousyGuardSyncLock', options ?? {}, 10_000),
     jealousyGuardStatus: () => nativeCall<JealousyGuardStatusResult>('jealousyGuardStatus'),
     jealousyGuardDrainEvents: () => nativeCall<{ events?: JealousyGuardEvent[] }>('jealousyGuardDrainEvents'),
+    // v2.0.0 消息读取组
+    getRecentSMS: (options) => nativeCall<{ ok?: boolean; items?: RecentSmsItem[]; reason?: string }>('getRecentSMS', options ?? {}),
+    getRecentNotifications: (options) => nativeCall<{ ok?: boolean; items?: RecentNotificationItem[]; reason?: string }>('getRecentNotifications', options ?? {}),
+    // v2.0.0 原生信息组
+    getBatteryStatus: () => nativeCall<{ ok?: boolean; level?: number; charging?: boolean; reason?: string }>('getBatteryStatus'),
+    getVolume: () => nativeCall<{ ok?: boolean; volume?: number; max?: number; reason?: string }>('getVolume'),
+    setVolume: (options) => nativeCall<{ ok?: boolean; volume?: number; reason?: string }>('setVolume', options ?? {}),
+    // v2.0.0 权限中心组
+    smsPermission: () => nativeCall<RuntimePermResult>('smsPermission'),
+    requestSmsPermission: () => nativeCall<RuntimePermResult>('requestSmsPermission', {}, 60_000),
+    contactsPermission: () => nativeCall<RuntimePermResult>('contactsPermission'),
+    requestContactsPermission: () => nativeCall<RuntimePermResult>('requestContactsPermission', {}, 60_000),
+    calendarPermission: () => nativeCall<RuntimePermResult>('calendarPermission'),
+    requestCalendarPermission: () => nativeCall<RuntimePermResult>('requestCalendarPermission', {}, 60_000),
+    alarmPermission: () => nativeCall<RuntimePermResult>('alarmPermission'),
+    requestAlarmPermission: () => nativeCall<{ ok?: boolean; reason?: string }>('requestAlarmPermission'),
+    mediaFilesPermission: () => nativeCall<RuntimePermResult>('mediaFilesPermission'),
+    requestMediaFilesPermission: () => nativeCall<RuntimePermResult>('requestMediaFilesPermission', {}, 60_000),
+    openAppDetailSettings: () => nativeCall<void>('openAppDetailSettings'),
+    getAppLabel: (options) => nativeCall<{ ok?: boolean; label?: string; reason?: string }>('getAppLabel', options ?? {}, 8000),
     micPermission: () => nativeCall<RuntimePermResult>('micPermission'),
-    // 首次弹系统授权框：用户可能犹豫许久，看门狗放宽到 60s（已授予时毫秒级直通）
     requestMicPermission: () => nativeCall<RuntimePermResult>('requestMicPermission', {}, 60_000),
     notificationPermission: () => nativeCall<RuntimePermResult & { sdk?: number }>('notificationPermission'),
     requestNotificationPermission: () => nativeCall<RuntimePermResult>('requestNotificationPermission', {}, 60_000),
@@ -297,8 +392,7 @@ function bridgePlugin(): CapPlugin {
     batteryPermission: () => nativeCall<RuntimePermResult>('batteryPermission'),
     requestBatteryPermission: () => nativeCall<{ ok?: boolean; reason?: string }>('requestBatteryPermission'),
     locationPermission: () => nativeCall<RuntimePermResult & { fine?: boolean; coarse?: boolean }>('locationPermission'),
-    requestLocationPermission: () =>
-      nativeCall<RuntimePermResult & { fine?: boolean; coarse?: boolean }>('requestLocationPermission', {}, 60_000),
+    requestLocationPermission: () => nativeCall<RuntimePermResult & { fine?: boolean; coarse?: boolean }>('requestLocationPermission', {}, 60_000),
   };
 }
 
@@ -309,16 +403,7 @@ export function isNativePerception(): boolean {
   return !!bridge && typeof (bridge as AndroidBridgeLike).postMessage === 'function';
 }
 
-// ---------------- v1.6.1 麦克风 / 通知运行时权限（真机语音三问题修复） ----------------
-// 背景：WebView 里 Web API 的权限面与 Android 运行时权限不互通 ——
-// ① getUserMedia 录音：Manifest 未声明 RECORD_AUDIO 时被系统静默拒绝（永不弹框）；
-// ② Notification.permission：WebView 恒为 'denied'（Web API 不映射 Android 权限），
-//    设置页读它必然误报「已在设置中关闭系统通知」。
-// 因此原生壳内一律经本插件查询/申请（弹系统授权框）。
-//
-// v1.9.37 浏览器授权回退：麦克风/位置在浏览器里也有对应的 Web 权限面
-// （getUserMedia / Geolocation，点「允许」弹浏览器授权框）——非原生壳不再返回
-// null（不再标「需真机」），而是真实查询/申请浏览器授权状态。
+// ---------------- 麦克风 / 通知运行时权限（含浏览器 Web 权限面回退） ----------------
 
 /** 浏览器 Permissions API 查询（权限名不支持/无此 API 时回 undefined） */
 async function webPermState(name: 'microphone' | 'geolocation'): Promise<PermissionState | undefined> {
@@ -331,25 +416,22 @@ async function webPermState(name: 'microphone' | 'geolocation'): Promise<Permiss
   }
 }
 
-/** 查询麦克风权限（原生壳读 Android 运行时权限；浏览器读 Web 权限面，非真机也能授权） */
+/** 查询麦克风权限（原生壳读 Android 运行时权限；浏览器读 Web 权限面） */
 export async function micPermission(): Promise<RuntimePermResult | null> {
   const p = await nativePlugin();
   if (p) return p.micPermission();
   const s = await webPermState('microphone');
   if (s === 'granted') return { granted: true };
-  if (s === 'denied') return { granted: false, canAsk: false }; // 浏览器站点设置里已阻止
-  return { granted: false, canAsk: true }; // prompt / 查不到（Safari 等）：未授权但可申请
+  if (s === 'denied') return { granted: false, canAsk: false };
+  return { granted: false, canAsk: true };
 }
 
-/**
- * 申请麦克风权限（原生壳弹系统授权框；浏览器经 getUserMedia 弹浏览器授权框，
- * 拿到结果立即释放录音流不占麦克风）。
- */
+/** 申请麦克风权限（原生壳弹系统授权框；浏览器经 getUserMedia 弹浏览器授权框） */
 export async function requestMicPermission(): Promise<RuntimePermResult | null> {
   const p = await nativePlugin();
   if (p) return p.requestMicPermission();
   if (typeof navigator === 'undefined' || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-    return null; // 非安全上下文等：浏览器确实申请不了
+    return null;
   }
   try {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -359,13 +441,13 @@ export async function requestMicPermission(): Promise<RuntimePermResult | null> 
     const refused = e instanceof DOMException && (e.name === 'NotAllowedError' || e.name === 'SecurityError');
     if (refused) {
       const s = await webPermState('microphone');
-      return { granted: false, canAsk: s !== 'denied' }; // 站点被阻止 → 需去浏览器设置
+      return { granted: false, canAsk: s !== 'denied' };
     }
-    return { granted: false, canAsk: true }; // 无麦克风设备等：不算被系统关闭
+    return { granted: false, canAsk: true };
   }
 }
 
-/** 查询系统通知权限真实状态（areNotificationsEnabled，含 13+ 运行时权限与应用内总闸；非原生壳返回 null） */
+/** 查询系统通知权限真实状态（areNotificationsEnabled；非原生壳返回 null） */
 export async function notificationPermission(): Promise<(RuntimePermResult & { sdk?: number }) | null> {
   const p = await nativePlugin();
   return p ? p.notificationPermission() : null;
@@ -377,163 +459,126 @@ export async function requestNotificationPermission(): Promise<RuntimePermResult
   return p ? p.requestNotificationPermission() : null;
 }
 
-// ---------------- v1.9.36 权限给予页：悬浮窗 / 电池优化豁免 / 位置（三通道级联） ----------------
-// 级联策略（每个权限状态查询/申请都一样）：
-//  ① 新 APK（v1.9.36+ 原生方法）：nativeCall 直查/直弹系统框（毫秒级）；
-//  ② 旧 APK + Shizuku 已授权：经 shizukuExec（shell 权限）查 appops/dumpsys/pm
-//     真实状态，或直接 appops set / dumpsys deviceidle whitelist / pm grant 授予；
-//  ③ 都不可用 → null / 'unavailable'（设置页展示「需真机/旧 APK 提示升级」）。
-
-/** 本 APP 包名（Shizuku shell 命令的权限主体） */
-const APP_PKG = 'com.z.aiphone';
+// ---------------- v2.0.0 权限中心：无障碍 / 悬浮窗 / 电池 / 位置 / 短信 / 通讯录 / 日历 / 闹钟 / 媒体文件 ----------------
+// 级联策略（原生方法短超时探测，旧 APK 对未知方法不回包 → 3s 判定足够）：
+//  ① 新 APK（v2.0.0+ 原生方法）：nativeCall 直查/直跳系统授权页（毫秒级）；
+//  ② 旧 APK / 浏览器 → null（设置页展示「需真机/升级 APP」）。
 
 /** 原生方法短超时探测（旧 APK 对未知方法不回包，卡满超时才回落；3s 判定足够） */
 async function nativeOrTimeout<T>(p: Promise<T>, ms = 3000): Promise<T> {
   return Promise.race([p, new Promise<never>((_, rej) => window.setTimeout(() => rej(new Error('probe-timeout')), ms))]);
 }
 
-/** Shizuku 是否已连接且授权（沿能力实验室探测口径） */
-async function shizukuReady(): Promise<boolean> {
-  const st = await nativeShizukuStatus();
-  return Boolean(st?.running && st?.granted);
+/** 无障碍服务权限状态（原生壳真实状态；浏览器 null） */
+export async function accessibilityPermission(): Promise<A11yPermResult | null> {
+  const p = await nativePlugin();
+  if (!p) return null;
+  try {
+    return await nativeOrTimeout(p.accessibilityPermission());
+  } catch {
+    return null; // 旧 APK 无此方法
+  }
 }
 
-/** 悬浮窗权限状态（①新 APK 原生 ②Shizuku appops 查询；都不可用 null） */
+/** 跳系统「无障碍」设置页（找到 AI Phone 开启服务，一次开启终身有效） */
+export async function openNativeAccessibilitySettings(): Promise<boolean> {
+  const p = await nativePlugin();
+  if (!p) return false;
+  try {
+    await nativeOrTimeout(p.openAccessibilitySettings(), 5000);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** 悬浮窗权限状态（Settings.canDrawOverlays；浏览器 null） */
 export async function overlayPermission(): Promise<RuntimePermResult | null> {
   const p = await nativePlugin();
-  if (p) {
-    try {
-      return await nativeOrTimeout(p.overlayPermission());
-    } catch {
-      /* 旧 APK 无此方法 → Shizuku 回退 */
-    }
+  if (!p) return null;
+  try {
+    return await nativeOrTimeout(p.overlayPermission());
+  } catch {
+    return null;
   }
-  if (await shizukuReady()) {
-    const r = await nativeShizukuExec(['cmd', 'appops', 'get', APP_PKG, 'SYSTEM_ALERT_WINDOW'], { maxLines: 4, timeoutMs: 4000 });
-    if (r?.ok && r.out) {
-      const granted = /allow/i.test(r.out);
-      return { granted, canAsk: true };
-    }
-  }
-  return null;
 }
 
-/** 申请悬浮窗权限（①新 APK 跳系统开关页 ②Shizuku appops set 直授；返回执行通道说明） */
-export async function requestOverlayPermission(): Promise<{ ok: boolean; via: 'native' | 'shizuku' | 'unavailable' }> {
+/** 申请悬浮窗权限：跳系统「在其他应用上层显示」开关页（本 APP 条目深链直达） */
+export async function requestOverlayPermission(): Promise<{ ok: boolean; via: 'native' | 'unavailable' }> {
   const p = await nativePlugin();
   if (p) {
     try {
-      const r = await nativeOrTimeout(p.requestOverlayPermission());
+      const r = await nativeOrTimeout(p.requestOverlayPermission(), 5000);
       if (r?.ok) return { ok: true, via: 'native' };
     } catch {
-      /* 旧 APK → Shizuku 回退 */
+      /* 旧 APK → 不可用 */
     }
-  }
-  if (await shizukuReady()) {
-    const r = await nativeShizukuExec(['cmd', 'appops', 'set', APP_PKG, 'SYSTEM_ALERT_WINDOW', 'allow'], { maxLines: 4, timeoutMs: 5000 });
-    if (r?.ok) return { ok: true, via: 'shizuku' };
   }
   return { ok: false, via: 'unavailable' };
 }
 
-/** 电池优化豁免状态（①新 APK 原生 ②Shizuku dumpsys deviceidle 白名单查询） */
+/** 电池优化豁免状态（是否在 Doze 白名单里；浏览器 null） */
 export async function batteryPermission(): Promise<RuntimePermResult | null> {
   const p = await nativePlugin();
-  if (p) {
-    try {
-      return await nativeOrTimeout(p.batteryPermission());
-    } catch {
-      /* 旧 APK → Shizuku 回退 */
-    }
+  if (!p) return null;
+  try {
+    return await nativeOrTimeout(p.batteryPermission());
+  } catch {
+    return null;
   }
-  if (await shizukuReady()) {
-    const r = await nativeShizukuExec(['dumpsys', 'deviceidle', 'whitelist'], { maxLines: 80, timeoutMs: 4000 });
-    if (r?.ok && r.out) {
-      const granted = r.out.split('\n').some((l) => l.includes(APP_PKG));
-      return { granted, canAsk: true };
-    }
-  }
-  return null;
 }
 
-/** 申请电池优化豁免（①新 APK 弹系统确认框 ②Shizuku dumpsys 白名单直加） */
-export async function requestBatteryPermission(): Promise<{ ok: boolean; via: 'native' | 'shizuku' | 'unavailable' }> {
+/** 申请电池优化豁免：系统确认弹窗（ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS） */
+export async function requestBatteryPermission(): Promise<{ ok: boolean; via: 'native' | 'unavailable' }> {
   const p = await nativePlugin();
   if (p) {
     try {
-      const r = await nativeOrTimeout(p.requestBatteryPermission());
+      const r = await nativeOrTimeout(p.requestBatteryPermission(), 5000);
       if (r?.ok) return { ok: true, via: 'native' };
     } catch {
-      /* 旧 APK → Shizuku 回退 */
+      /* 旧 APK → 不可用 */
     }
-  }
-  if (await shizukuReady()) {
-    const r = await nativeShizukuExec(['dumpsys', 'deviceidle', 'whitelist', `+${APP_PKG}`], { maxLines: 4, timeoutMs: 5000 });
-    if (r?.ok) return { ok: true, via: 'shizuku' };
   }
   return { ok: false, via: 'unavailable' };
 }
 
-/** 位置权限状态（①新 APK 原生 ②Shizuku pm check-permission ③浏览器 Geolocation 权限面） */
+/** 位置权限状态（精确/粗略任一授予即 granted；浏览器读 Web 权限面） */
 export async function locationPermission(): Promise<(RuntimePermResult & { fine?: boolean; coarse?: boolean }) | null> {
   const p = await nativePlugin();
   if (p) {
     try {
       return await nativeOrTimeout(p.locationPermission());
     } catch {
-      /* 旧 APK → Shizuku 回退 */
+      /* 旧 APK → 浏览器回退 */
     }
   }
-  if (await shizukuReady()) {
-    const r = await nativeShizukuExec(
-      ['pm', 'check-permission', 'android.permission.ACCESS_FINE_LOCATION', APP_PKG],
-      { maxLines: 4, timeoutMs: 4000 },
-    );
-    if (r?.ok && r.out) {
-      const granted = /granted\s*=\s*true/i.test(r.out);
-      return { granted, fine: granted, coarse: granted, canAsk: !granted };
-    }
-  }
-  // 浏览器：Geolocation 授权状态（v1.9.37 非真机也能授权，不再标「需真机」）
+  // 浏览器：Geolocation 授权状态
   if (!isNativePerception()) {
     const s = await webPermState('geolocation');
     if (s === 'granted') return { granted: true, fine: true, coarse: true };
-    if (s === 'denied') return { granted: false, canAsk: false }; // 浏览器站点设置里已阻止
+    if (s === 'denied') return { granted: false, canAsk: false };
     return { granted: false, canAsk: true };
   }
   return null;
 }
 
-/**
- * 申请位置权限（①新 APK 弹系统授权框 ②Shizuku pm grant 直授——需 Manifest 已声明
- * ③浏览器经 Geolocation 弹浏览器授权框，拿到一次定位即视为已授权）。
- */
-export async function requestLocationPermission(): Promise<{ ok: boolean; via: 'native' | 'shizuku' | 'web' | 'unavailable' }> {
+/** 申请位置权限（原生弹系统授权框；浏览器经 Geolocation 弹浏览器授权框） */
+export async function requestLocationPermission(): Promise<{ ok: boolean; via: 'native' | 'web' | 'unavailable' }> {
   const p = await nativePlugin();
   if (p) {
     try {
       const r = await nativeOrTimeout(p.requestLocationPermission(), 60_000);
       if (r?.granted) return { ok: true, via: 'native' };
-      if (r && !r.granted && r.canAsk === false) return { ok: false, via: 'native' }; // 用户拒绝：如实回传
+      if (r && !r.granted && r.canAsk === false) return { ok: false, via: 'native' };
     } catch {
-      /* 旧 APK → Shizuku 回退 */
+      /* 旧 APK → 浏览器回退 */
     }
   }
-  if (await shizukuReady()) {
-    const r = await nativeShizukuExec(
-      ['pm', 'grant', APP_PKG, 'android.permission.ACCESS_FINE_LOCATION'],
-      { maxLines: 4, timeoutMs: 5000 },
-    );
-    if (r?.ok) return { ok: true, via: 'shizuku' };
-  }
-  // 浏览器：弹浏览器定位授权框（用户点了「允许」拿到一次定位 = 已授权）
   if (!isNativePerception() && typeof navigator !== 'undefined' && navigator.geolocation) {
     const r = await new Promise<GeolocationPosition | number | null>((res) => {
       navigator.geolocation.getCurrentPosition(
         (pos) => res(pos),
-        (err) => res(err.code), // 1=用户拒绝/站点被阻止 2=位置不可用 3=超时
-        // v1.9.40：15s→8s——授权框不弹/不响应的环境（内嵌 WebView、iframe 策略拦截）里别让弹窗干等太久；
-        // 设置页 doGrant 还有 9s 看门狗兜底，两层保障「申请中」绝不永卡
+        (err) => res(err.code),
         { timeout: 8_000, maximumAge: 600_000 },
       );
     });
@@ -542,23 +587,311 @@ export async function requestLocationPermission(): Promise<{ ok: boolean; via: '
   return { ok: false, via: 'unavailable' };
 }
 
+/** 短信权限状态（READ_SMS 运行时权限；浏览器 null） */
+export async function smsPermission(): Promise<RuntimePermResult | null> {
+  const p = await nativePlugin();
+  if (!p) return null;
+  try {
+    return await nativeOrTimeout(p.smsPermission());
+  } catch {
+    return null;
+  }
+}
+
+/** 申请短信权限（弹系统授权框；被持久拒绝时 canAsk=false 由设置页引导应用详情页） */
+export async function requestSmsPermission(): Promise<RuntimePermResult | null> {
+  const p = await nativePlugin();
+  if (!p) return null;
+  try {
+    return await nativeOrTimeout(p.requestSmsPermission(), 62_000);
+  } catch {
+    return null;
+  }
+}
+
+/** 通讯录读写权限状态 */
+export async function contactsPermission(): Promise<RuntimePermResult | null> {
+  const p = await nativePlugin();
+  if (!p) return null;
+  try {
+    return await nativeOrTimeout(p.contactsPermission());
+  } catch {
+    return null;
+  }
+}
+
+/** 申请通讯录权限（弹系统授权框） */
+export async function requestContactsPermission(): Promise<RuntimePermResult | null> {
+  const p = await nativePlugin();
+  if (!p) return null;
+  try {
+    return await nativeOrTimeout(p.requestContactsPermission(), 62_000);
+  } catch {
+    return null;
+  }
+}
+
+/** 日历读写权限状态 */
+export async function calendarPermission(): Promise<RuntimePermResult | null> {
+  const p = await nativePlugin();
+  if (!p) return null;
+  try {
+    return await nativeOrTimeout(p.calendarPermission());
+  } catch {
+    return null;
+  }
+}
+
+/** 申请日历权限（弹系统授权框） */
+export async function requestCalendarPermission(): Promise<RuntimePermResult | null> {
+  const p = await nativePlugin();
+  if (!p) return null;
+  try {
+    return await nativeOrTimeout(p.requestCalendarPermission(), 62_000);
+  } catch {
+    return null;
+  }
+}
+
+/** 闹钟与计时器权限状态（API 31+ canScheduleExactAlarms；31 以下恒 granted） */
+export async function alarmPermission(): Promise<RuntimePermResult | null> {
+  const p = await nativePlugin();
+  if (!p) return null;
+  try {
+    return await nativeOrTimeout(p.alarmPermission());
+  } catch {
+    return null;
+  }
+}
+
+/** 申请闹钟权限（API 31+ 跳系统「闹钟和提醒」授权页） */
+export async function requestAlarmPermission(): Promise<{ ok: boolean; via: 'native' | 'unavailable' }> {
+  const p = await nativePlugin();
+  if (p) {
+    try {
+      const r = await nativeOrTimeout(p.requestAlarmPermission(), 5000);
+      if (r?.ok) return { ok: true, via: 'native' };
+    } catch {
+      /* 旧 APK → 不可用 */
+    }
+  }
+  return { ok: false, via: 'unavailable' };
+}
+
+/** 文件读写与媒体访问权限状态（33+ 细分媒体权限组；≤32 旧存储权限） */
+export async function mediaFilesPermission(): Promise<RuntimePermResult | null> {
+  const p = await nativePlugin();
+  if (!p) return null;
+  try {
+    return await nativeOrTimeout(p.mediaFilesPermission());
+  } catch {
+    return null;
+  }
+}
+
+/** 申请媒体文件权限（33+ 弹细分媒体权限框；≤32 弹旧存储权限框） */
+export async function requestMediaFilesPermission(): Promise<RuntimePermResult | null> {
+  const p = await nativePlugin();
+  if (!p) return null;
+  try {
+    return await nativeOrTimeout(p.requestMediaFilesPermission(), 62_000);
+  } catch {
+    return null;
+  }
+}
+
+/** 跳本应用系统详情页（运行时权限被持久拒绝后的手动开启兜底） */
+export async function openNativeAppDetailSettings(): Promise<boolean> {
+  const p = await nativePlugin();
+  if (!p) return false;
+  try {
+    await nativeOrTimeout(p.openAppDetailSettings(), 5000);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// ---------------- v2.0.0 无障碍能力组 ----------------
+
 /**
- * 弹一条 Android 系统通知栏通知（v1.9.1，设置 › 通知「发送测试通知」及 showSystemNotification 原生通道共用）：
- *
- * - 非原生壳 → null（调用方回落 Web 通道）；
- * - v1.5.0+ 壳有 localNotify @PluginMethod → nativeCall 拿真实回执，返回 true=已交给系统通知栏
- *   （Android 13+ 通知未授权时原生侧静默忽略并回 ok——语义与真实通知一致，权限状态由
- *   notificationPermission/querySystemNotifyPermission 单独反映）；
- * - 旧壳（< v1.5.0）无该方法 → 原生 Bridge 报错或超时 → false（调用方给「升级 APP」引导，
- *   不再误报浏览器策略问题）。
+ * 无障碍静默截屏（API 30+）：AiAccessibilityService.takeScreenshot，免授权弹窗。
+ * 返回 dataURL；非原生/未开无障碍/失败 → {ok:false, reason}。
+ */
+export async function nativeA11yScreenshot(): Promise<A11yShotResult | null> {
+  if (!isNativePerception()) return null;
+  try {
+    return await nativeCall<A11yShotResult>('a11yScreenshot', {}, 16_000);
+  } catch {
+    return null;
+  }
+}
+
+/** 无障碍模拟点击（绝对像素坐标） */
+export async function nativeA11yTap(x: number, y: number): Promise<NativeActionResult | null> {
+  if (!isNativePerception()) return null;
+  try {
+    return await nativeCall<NativeActionResult>('a11yTap', { x: Math.round(x), y: Math.round(y) });
+  } catch {
+    return null;
+  }
+}
+
+/** 无障碍模拟滑动（绝对像素坐标 + 时长 ms） */
+export async function nativeA11ySwipe(x1: number, y1: number, x2: number, y2: number, duration?: number): Promise<NativeActionResult | null> {
+  if (!isNativePerception()) return null;
+  try {
+    return await nativeCall<NativeActionResult>('a11ySwipe', {
+      x1: Math.round(x1), y1: Math.round(y1), x2: Math.round(x2), y2: Math.round(y2), duration,
+    });
+  } catch {
+    return null;
+  }
+}
+
+/** 无障碍全局按键（back/home/recents/notifications/lock） */
+export async function nativeA11yKey(key: string): Promise<NativeActionResult | null> {
+  if (!isNativePerception()) return null;
+  try {
+    return await nativeCall<NativeActionResult>('a11yKey', { key });
+  } catch {
+    return null;
+  }
+}
+
+/** 无障碍文本注入（向当前焦点输入框整体 SET_TEXT；无需切输入法） */
+export async function nativeA11yInput(text: string): Promise<NativeActionResult | null> {
+  if (!isNativePerception()) return null;
+  try {
+    return await nativeCall<NativeActionResult>('a11yInput', { text }, 12_000);
+  } catch {
+    return null;
+  }
+}
+
+/** 屏幕像素尺寸（滑动坐标换算用） */
+export async function nativeGetScreenSize(): Promise<{ ok?: boolean; width?: number; height?: number; reason?: string } | null> {
+  if (!isNativePerception()) return null;
+  try {
+    return await nativeCall<{ ok?: boolean; width?: number; height?: number; reason?: string }>('getScreenSize', {}, 8000);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 当前前台应用（无障碍事件流优先（实时）；未开无障碍 → UsageStats 近 20s 兜底）。
+ * 非原生环境返回 null。
+ */
+export async function nativeGetForegroundApp(): Promise<ForegroundAppResult | null> {
+  if (!isNativePerception()) return null;
+  try {
+    return await nativeCall<ForegroundAppResult>('getForegroundApp', {}, 8000);
+  } catch {
+    return null;
+  }
+}
+
+// ---------------- v2.0.0 拉起组 ----------------
+
+/** 把本 App 强行拉到前台（吃醋拉回/切回聊天；FLAG_ACTIVITY_NEW_TASK） */
+export async function nativeBringToFront(): Promise<NativeActionResult | null> {
+  if (!isNativePerception()) return null;
+  try {
+    return await nativeCall<NativeActionResult>('bringToFront', {}, 8000);
+  } catch {
+    return null;
+  }
+}
+
+/** 打开任意应用（包名 → LaunchIntent；未安装 not-found） */
+export async function nativeOpenApp(pkg: string): Promise<NativeActionResult | null> {
+  if (!isNativePerception()) return null;
+  try {
+    return await nativeCall<NativeActionResult>('openApp', { pkg }, 8000);
+  } catch {
+    return null;
+  }
+}
+
+/** 已安装第三方应用清单（pkg+中文名；搜索/锁定名单解析用） */
+export async function nativeListInstalledApps(): Promise<{ pkg: string; name: string }[] | null> {
+  if (!isNativePerception()) return null;
+  try {
+    const r = await nativeCall<{ ok?: boolean; apps?: { pkg: string; name: string }[] }>('listInstalledApps', {}, 15_000);
+    return Array.isArray(r?.apps) ? r.apps : null;
+  } catch {
+    return null;
+  }
+}
+
+// ---------------- v2.0.0 消息读取组 ----------------
+
+/** 最近短信（需 READ_SMS；收件箱新→旧） */
+export async function nativeGetRecentSMS(limit = 20): Promise<RecentSmsItem[] | { error: string } | null> {
+  if (!isNativePerception()) return null;
+  try {
+    const r = await nativeCall<{ ok?: boolean; items?: RecentSmsItem[]; reason?: string }>('getRecentSMS', { limit }, 10_000);
+    if (r?.ok) return r.items ?? [];
+    return { error: r?.reason ?? 'failed' };
+  } catch {
+    return null;
+  }
+}
+
+/** 最近通知（需「通知使用权」；通知环形缓冲） */
+export async function nativeGetRecentNotifications(limit = 20): Promise<RecentNotificationItem[] | { error: string } | null> {
+  if (!isNativePerception()) return null;
+  try {
+    const r = await nativeCall<{ ok?: boolean; items?: RecentNotificationItem[]; reason?: string }>('getRecentNotifications', { limit }, 10_000);
+    if (r?.ok) return r.items ?? [];
+    return { error: r?.reason ?? 'failed' };
+  } catch {
+    return null;
+  }
+}
+
+// ---------------- v2.0.0 原生信息组 ----------------
+
+/** 电量状态（BatteryManager；level 0-100） */
+export async function nativeGetBatteryStatus(): Promise<{ ok?: boolean; level?: number; charging?: boolean; reason?: string } | null> {
+  if (!isNativePerception()) return null;
+  try {
+    return await nativeCall<{ ok?: boolean; level?: number; charging?: boolean; reason?: string }>('getBatteryStatus', {}, 6000);
+  } catch {
+    return null;
+  }
+}
+
+/** 媒体音量（AudioManager STREAM_MUSIC） */
+export async function nativeGetVolume(): Promise<{ ok?: boolean; volume?: number; max?: number; reason?: string } | null> {
+  if (!isNativePerception()) return null;
+  try {
+    return await nativeCall<{ ok?: boolean; volume?: number; max?: number; reason?: string }>('getVolume', {}, 6000);
+  } catch {
+    return null;
+  }
+}
+
+/** 设置媒体音量（0~max 自动钳制） */
+export async function nativeSetVolume(volume: number): Promise<{ ok?: boolean; volume?: number; reason?: string } | null> {
+  if (!isNativePerception()) return null;
+  try {
+    return await nativeCall<{ ok?: boolean; volume?: number; reason?: string }>('setVolume', { volume }, 6000);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 弹一条 Android 系统通知栏通知（localNotify 原生通道）：
+ * 非原生壳 → null；旧壳无该方法 → false。
  */
 export async function localNotify(opts: {
   title: string;
   body?: string;
   tag?: string;
-  /** 点击通知落地的站内路径（原生 contentIntent 打开 APP 后经 'local-notify-open' 事件回传） */
   url?: string;
-  /** 点击直达目标（island-notify NotifyTarget 同构纯对象，随事件回传给导航总线） */
   target?: unknown;
 }): Promise<boolean | null> {
   const p = await nativePlugin();
@@ -567,50 +900,40 @@ export async function localNotify(opts: {
     await nativeCall('localNotify', { title: opts.title, body: opts.body, tag: opts.tag, url: opts.url, target: opts.target }, 5000);
     return true;
   } catch {
-    return false; // 旧壳无该方法 / 桥异常
+    return false;
   }
 }
 
 /** 原生感知插件：优先官方注入的代理（同源页面），否则自建协议直连（跨域页面） */
 async function nativePlugin(): Promise<CapPlugin | null> {
   if (!isNativePerception()) return null;
-  // 路径 A：Capacitor 注入脚本覆盖的页面（壳本地源）——Plugins 上已有插件代理
   const cap = await loadCapacitor();
   const plugin = cap?.Plugins?.['NativePerception'];
   if (plugin) return plugin;
-  // 路径 B：跨域页面（注入脚本不覆盖外域）——自建消息协议直连 androidBridge
   if (ensureBridgeHook()) return bridgePlugin();
   return null;
 }
 
-// ---------------- 时长数据源（v1.2 双引擎，全局设置） ----------------
-
-export type UsageEngine = 'standard' | 'shizuku';
+// ---------------- 时长数据源（v2.0.0 仅原生引擎；键保留兼容旧值） ----------------
 
 const ENGINE_KEY = 'aiphone-usage-engine-v1';
 
-/** 当前选中的时长数据源（默认 standard；全局键，对全部会话生效） */
-export function getUsageEngine(): UsageEngine {
-  try {
-    return window.localStorage.getItem(ENGINE_KEY) === 'shizuku' ? 'shizuku' : 'standard';
-  } catch {
-    return 'standard';
-  }
+/** 兼容读取：旧 'shizuku' 值一律按 'standard' 处理（原生 UsageStats 引擎） */
+export function getUsageEngine(): 'standard' {
+  return 'standard';
 }
 
-/** 切换时长数据源（立即生效；下一次取样现场读取） */
-export function setUsageEngine(engine: UsageEngine): void {
+/** 兼容写入：v2.0.0 起恒为 standard（保留函数签名防调用方报错） */
+export function setUsageEngine(_engine: 'standard'): void {
   try {
-    window.localStorage.setItem(ENGINE_KEY, engine);
+    window.localStorage.setItem(ENGINE_KEY, 'standard');
   } catch {
-    /* 持久化失败忽略（本会话内存态仍由调用方维护） */
+    /* 忽略 */
   }
 }
 
 // ---------------- Cap-go 引擎（标准模式 · 事件级 JS 聚合） ----------------
 
-// v1.2 新壳才装了 @capgo/capacitor-android-usagestatsmanager（插件注册名
-// CapacitorUsageStatsManager）；旧壳不响应 → 短超时探测一次并缓存。
 let capgoState: boolean | null = null;
 
 async function capgoBridgeAlive(): Promise<boolean> {
@@ -626,7 +949,7 @@ async function capgoBridgeAlive(): Promise<boolean> {
     ]);
     capgoState = !!r && typeof r.granted === 'boolean';
   } catch {
-    capgoState = false; // 旧壳无此插件
+    capgoState = false;
   }
   return capgoState;
 }
@@ -720,9 +1043,6 @@ async function capgoUsageSnapshot(): Promise<AwSnapshot | null> {
     return !!l && (l.includes('launcher') || l.includes('桌面'));
   };
 
-  /* 事件类型归一（与原生 v1.2.1 同口径）：
-   *   1 前台 / 2 失焦 / 3 息屏(16) / 4 亮屏(15) / 5 锁屏(17) / 6 解锁(18) / 7 关机(26) / 8 开机(27)
-   * 门控事件（3~8）无归属包，packageName 可能为空。 */
   type Ev = { ts: number; type: number; pkg: string | null };
   type RawEv = { packageName?: string; timeStamp?: number; eventType?: number };
   const evs: Ev[] = (evRes?.events ?? [])
@@ -730,7 +1050,7 @@ async function capgoUsageSnapshot(): Promise<AwSnapshot | null> {
       if (typeof e.timeStamp !== 'number') return false;
       const t = e.eventType;
       if (t === 1 || t === 2 || t === 23) return true;
-      if (t === 15 || t === 16 || t === 17 || t === 18 || t === 26 || t === 27) return true; // 门控事件可无包名
+      if (t === 15 || t === 16 || t === 17 || t === 18 || t === 26 || t === 27) return true;
       return false;
     })
     .map((e) => {
@@ -748,10 +1068,6 @@ async function capgoUsageSnapshot(): Promise<AwSnapshot | null> {
     })
     .sort((a, b) => a.ts - b.ts);
 
-  // 与原生 buildSnapshot 同口径（v1.2.1）：RESUMED→PAUSED 配对 + 今日裁剪 + 桌面排除
-  // + 3s 内同 App 页面切换不重复计打开 + 息屏/锁屏/关机即停 + 解锁后自动续计原 App
-  // （安卓账本里前台 App 息屏后一直「挂着 RESUMED」且解锁不补发 RESUMED，不处理会把
-  //   整段睡眠时间算成使用时长）
   const durationByApp = new Map<string, number>();
   const opensByApp = new Map<string, number>();
   const lastOpenByApp = new Map<string, number>();
@@ -762,7 +1078,7 @@ async function capgoUsageSnapshot(): Promise<AwSnapshot | null> {
   let lastAppStart = 0;
   let lastClosedPkg: string | null = null;
   let lastClosedTs = 0;
-  let autoResumePkg: string | null = null; // 锁屏前在用的 App（解锁后续计）
+  let autoResumePkg: string | null = null;
   let keyguardArmed = false;
   let longestApp: string | null = null;
   let longestMs = 0;
@@ -786,9 +1102,9 @@ async function capgoUsageSnapshot(): Promise<AwSnapshot | null> {
   };
 
   for (const ev of evs) {
-    if (ev.ts > now + 60_000) continue; // 时钟跳变产生的未来事件
+    if (ev.ts > now + 60_000) continue;
     if (ev.type === 1) {
-      autoResumePkg = null; // 显式前台事件接管自动续计
+      autoResumePkg = null;
       if (openApp && ev.ts > openStart) {
         const dur = settle(openApp, openStart, ev.ts);
         if (dur > longestMs) { longestMs = dur; longestApp = openApp; }
@@ -796,7 +1112,7 @@ async function capgoUsageSnapshot(): Promise<AwSnapshot | null> {
         lastClosedTs = ev.ts;
       }
       if (ev.pkg == null || isLauncher(ev.pkg)) {
-        openApp = null; // 桌面停留不计入任何 App
+        openApp = null;
         continue;
       }
       const inToday = ev.ts >= startOfDay;
@@ -822,7 +1138,6 @@ async function capgoUsageSnapshot(): Promise<AwSnapshot | null> {
         openApp = null;
       }
     } else if (ev.type === 3 || ev.type === 5 || ev.type === 7) {
-      // 息屏/锁屏/关机：立即结算当前会话
       if (ev.type === 5) keyguardArmed = true;
       if (openApp && ev.ts > openStart) {
         const dur = settle(openApp, openStart, ev.ts);
@@ -834,14 +1149,11 @@ async function capgoUsageSnapshot(): Promise<AwSnapshot | null> {
       }
       if (ev.type === 7) { autoResumePkg = null; keyguardArmed = false; }
     } else if (ev.type === 6) {
-      // 解锁：自动续计锁屏前的 App（系统不会为同一 Activity 补发 RESUMED）
       keyguardArmed = false;
       autoResume(ev.ts);
     } else if (ev.type === 4) {
-      // 亮屏：无锁屏（未拉起 keyguard）才续计；有锁屏等解锁事件
       if (!keyguardArmed) autoResume(ev.ts);
     } else {
-      // 开机：状态清零
       openApp = null;
       autoResumePkg = null;
       keyguardArmed = false;
@@ -851,7 +1163,6 @@ async function capgoUsageSnapshot(): Promise<AwSnapshot | null> {
   const sortedApps = [...durationByApp.entries()].sort((a, b) => b[1] - a[1]);
   const totalMs = sortedApps.reduce((s, [, ms]) => s + ms, 0);
 
-  // 媒体会话一并取（与内置路径同源）
   const media = await attachMedia();
 
   return {
@@ -886,109 +1197,14 @@ async function capgoUsageSnapshot(): Promise<AwSnapshot | null> {
   } satisfies AwSnapshot;
 }
 
-// ---------------- Shizuku 状态/授权 ----------------
-
-// v1.2 新壳才有 shizukuStatus；旧壳不回包 → 短超时探测缓存（同 mediaBridgeAlive 范式）
-let shizukuBridgeState: boolean | null = null;
-
-async function shizukuBridgeAlive(): Promise<boolean> {
-  if (shizukuBridgeState !== null) return shizukuBridgeState;
-  if (!isNativePerception()) {
-    shizukuBridgeState = false;
-    return false;
-  }
-  try {
-    const r = await Promise.race([
-      nativeCall<ShizukuStatusResult>('shizukuStatus', {}, 2500),
-      new Promise<never>((_, rej) => window.setTimeout(() => rej(new Error('probe-timeout')), 2600)),
-    ]);
-    shizukuBridgeState = !!r && typeof r.running === 'boolean';
-  } catch {
-    shizukuBridgeState = false;
-  }
-  return shizukuBridgeState;
-}
-
-/** Shizuku 状态（null = 非原生环境或旧版 APP 不支持双引擎） */
-export async function nativeShizukuStatus(): Promise<ShizukuStatusResult | null> {
-  if (!isNativePerception()) return null;
-  if (!(await shizukuBridgeAlive())) return null;
-  try {
-    return await nativeCall<ShizukuStatusResult>('shizukuStatus');
-  } catch {
-    return null;
-  }
-}
-
-/** 拉起 Shizuku 授权（会打开 Shizuku APP 的授权弹窗；结果回传或 30s 超时） */
-export async function nativeRequestShizukuPermission(): Promise<ShizukuPermissionResult | null> {
-  if (!isNativePerception()) return null;
-  if (!(await shizukuBridgeAlive())) return null;
-  try {
-    return await nativeCall<ShizukuPermissionResult>('requestShizukuPermission', {}, 35_000);
-  } catch {
-    return null;
-  }
-}
-
-// ---------------- Shizuku 能力实验室（v1.3：通用 shell 执行 + 静默截屏） ----------------
-// 原生侧只提供带白名单的 shizukuExec / shizukuScreencap 两个底座方法，
-// 全部具体能力（已随 v1.9.35 真机操控退役下线）原在 @/lib/ios/shizuku-lab
-// 里拼 argv + 解析 —— 加能力只改网页、不用重新打包 APK。
-
-export type { ShizukuExecOptions, ShizukuExecResult };
-
-let shizukuLabState: boolean | null = null; // null = 未探测；false = 旧版 APP（v1.2.1 及更早）
-
-/** 能力实验室桥能力探测（新 APK 立即响应；旧 APK 对未知方法不回包 → 超时即 false） */
-export async function nativeShizukuLabSupported(): Promise<boolean | null> {
-  if (!isNativePerception()) return null;
-  if (shizukuLabState !== null) return shizukuLabState;
-  try {
-    // 用最轻的只读命令探测：旧壳无 shizukuExec 方法 → 3s 无响应判 false
-    const r = await Promise.race([
-      nativeCall<ShizukuExecResult>('shizukuExec', { cmd: ['wm', 'size'], maxLines: 8 }, 2500),
-      new Promise<never>((_, rej) => window.setTimeout(() => rej(new Error('probe-timeout')), 2600)),
-    ]);
-    shizukuLabState = typeof r?.ok === 'boolean' || typeof r?.reason === 'string';
-  } catch {
-    shizukuLabState = false;
-  }
-  return shizukuLabState;
-}
-
-/** 通用 Shizuku shell 执行（白名单见原生 SHIZUKU_ALLOWED_BINARIES；null = 非原生环境/桥断） */
-export async function nativeShizukuExec(
-  cmd: string[],
-  opts: ShizukuExecOptions = {},
-): Promise<ShizukuExecResult | null> {
-  if (!isNativePerception()) return null;
-  try {
-    return await nativeCall<ShizukuExecResult>('shizukuExec', { cmd, ...opts }, (opts.timeoutMs ?? 8000) + 16_000);
-  } catch {
-    return null;
-  }
-}
-
-/** 静默截屏（免 MediaProjection 授权弹窗；dataURL 或 null） */
-export async function nativeShizukuScreencap(): Promise<{ ok?: boolean; frame?: string; reason?: string } | null> {
-  if (!isNativePerception()) return null;
-  try {
-    return await nativeCall<{ ok?: boolean; frame?: string; reason?: string }>('shizukuScreencap', {}, 30_000);
-  } catch {
-    return null;
-  }
-}
-
-// ---------------- 应用中文名解析（v2.2 需求一：锁定界面不显示英文包名） ----------------
+// ---------------- 应用中文名解析 ----------------
 
 /** 应用名缓存（pkg → 中文名；命中后零桥开销） */
 const appLabelCache = new Map<string, string>();
 
 /**
  * 原生 PackageManager 取应用中文名（com.android.notes → 备忘录）。
- * 返回中文名；非原生环境 / 未安装 / 解析失败 / 旧 APK 无此方法（超时）→ null，
- * 调用方按需求一.2 兜底显示原包名。
+ * 返回中文名；非原生环境 / 未安装 / 解析失败 / 旧 APK 无此方法（超时）→ null。
  */
 export async function nativeGetAppLabel(pkg: string): Promise<string | null> {
   const p = (pkg ?? '').trim();
@@ -1011,11 +1227,11 @@ export async function nativeGetAppLabel(pkg: string): Promise<string | null> {
   return null;
 }
 
-// ---------------- 吃醋守护前台服务（v1.9.43：真机模式后台调度兜底） ----------------
-// 原生 JealousyGuardService（specialUse 前台服务）独立于 WebView 存活：
-// - 锁到期自动 pm unsuspend（WebView 被杀/冻结也到点解锁）；
-// - 每 2 分钟轮询 dumpsys package 检测强制解锁（高优通知 + 事件落盘，AI 醒来取走）；
-// - Shizuku 断连/厂商限制 → degrade 事件如实记录，绝不硬锁。
+// ---------------- 应用锁定遮罩服务（v2.0.0：LockOverlayService） ----------------
+// 原生 LockOverlayService（specialUse 前台服务）独立于 WebView 存活：
+// - UsageStats 3s 轮询前台应用，检测到锁定名单应用 → SYSTEM_ALERT_WINDOW 全屏遮罩拦截；
+// - 锁到期自动解锁（WebView 被杀/冻结也到点解锁）；
+// - lock-shown / lock-attempt 事件落盘（用户想开锁定 App 的每次尝试），AI 醒来取走。
 // 事件经 jealousyGuardDrainEvents 取走（取后即清）；旧 APK（无此三方法）超时探测 → false。
 
 /** 原生守护事件（WebView 醒来后 drain 进吃醋决策链） */
@@ -1024,11 +1240,13 @@ export interface JealousyGuardEvent {
   ts: number;
   /**
    * 事件类型：
-   * - 'native-unlock'：锁到期由原生服务解开（pm unsuspend 成功执行）
-   * - 'breach'：锁仍活跃但 suspend 已被强行打破（用户从系统设置/其他软件解锁）
-   * - 'degrade'：原生守护遇到容错降级（Shizuku 断连/厂商 ROM 限制等）
+   * - 'native-unlock'：锁到期由原生服务解开
+   * - 'lock-shown'：用户打开了锁定名单应用，全屏遮罩已弹出（AI 可据此发消息质问）
+   * - 'lock-attempt'：遮罩期间用户仍停留/反复想打开锁定应用
+   * - 'breach'：旧协议兼容（锁被强行打破）
+   * - 'degrade'：原生守护遇到容错降级（权限丢失等）
    */
-  type: 'native-unlock' | 'breach' | 'degrade';
+  type: 'native-unlock' | 'lock-shown' | 'lock-attempt' | 'breach' | 'degrade';
   /** 涉事应用包名 */
   pkg: string;
   /** 人话说明（进 AI 决策与通知链路） */
@@ -1045,11 +1263,15 @@ export interface JealousyGuardStatusResult {
   unlockAt?: number;
   /** 未取走的事件条数 */
   eventCount?: number;
-  /** Shizuku 通道是否可用（守护的命令底座） */
-  shizuku?: boolean;
+  /** 全屏遮罩当前是否盖着（用户正停留在锁定应用上） */
+  overlayShown?: boolean;
+  /** 「使用情况访问」权限实时状态 */
+  usageAccess?: boolean;
+  /** 悬浮窗权限实时状态 */
+  overlayPerm?: boolean;
 }
 
-let guardBridgeState: boolean | null = null; // null=未探测；false=旧 APK（v1.9.42 及更早）
+let guardBridgeState: boolean | null = null; // null=未探测；false=旧 APK
 
 /** 守护桥能力探测（新 APK 立即响应；旧 APK 对未知方法不回包 → 超时即 false） */
 export async function nativeJealousyGuardSupported(): Promise<boolean> {
@@ -1068,20 +1290,53 @@ export async function nativeJealousyGuardSupported(): Promise<boolean> {
 }
 
 /**
- * 同步锁状态给原生守护服务（jealousy-lock 锁定/解锁/更新时调用）：
- * - 传 pkg → 启动/更新前台服务守护（unlockAt 倒计时 + 强解检测）；
- * - 不传 pkg → 停止守护。
- * 返回 ok（false=旧 APK/桥断/启动失败，reason 给人话）。
+ * 锁定应用（v2.0.0 lockApp：UsageStats 轮询 + 全屏遮罩拦截，无需 Shizuku）：
+ * - pkg + unlockAt（0=直到哄好）+ charName + message（遮罩上的 AI 质问文案）；
+ * - 不传 pkg → 解锁（停遮罩停守护）。
+ * 返回 ok（false=旧 APK/桥断/无悬浮窗权限等，reason 给人话）。
+ */
+export async function nativeLockApp(opts: {
+  pkg?: string;
+  unlockAt?: number;
+  charName?: string;
+  message?: string;
+}): Promise<{ ok: boolean; reason?: string }> {
+  if (!isNativePerception()) return { ok: false, reason: 'not-native' };
+  if (!(await nativeJealousyGuardSupported())) return { ok: false, reason: 'old-apk' };
+  try {
+    const r = await nativeCall<{ ok?: boolean; reason?: string }>('lockApp', opts, 10_000);
+    return { ok: r?.ok === true, reason: r?.reason };
+  } catch {
+    return { ok: false, reason: '桥无响应' };
+  }
+}
+
+/** 解锁应用（停遮罩停守护；哄好/手动解锁共用） */
+export async function nativeUnlockApp(): Promise<{ ok: boolean; reason?: string }> {
+  if (!isNativePerception()) return { ok: false, reason: 'not-native' };
+  if (!(await nativeJealousyGuardSupported())) return { ok: false, reason: 'old-apk' };
+  try {
+    const r = await nativeCall<{ ok?: boolean; reason?: string }>('unlockApp', {}, 10_000);
+    return { ok: r?.ok === true, reason: r?.reason };
+  } catch {
+    return { ok: false, reason: '桥无响应' };
+  }
+}
+
+/**
+ * 同步锁状态给原生守护服务（jealousy-lock 锁定/解锁/更新时调用；与 lockApp 同内核，
+ * 方法名保留：旧调用方零改动兼容）。
  */
 export async function nativeJealousyGuardSyncLock(opts: {
   pkg?: string;
   unlockAt?: number;
   charName?: string;
+  message?: string;
 }): Promise<{ ok: boolean; reason?: string }> {
   if (!isNativePerception()) return { ok: false, reason: 'not-native' };
   if (!(await nativeJealousyGuardSupported())) return { ok: false, reason: 'old-apk' };
   try {
-    const r = await nativeCall<{ ok?: boolean; reason?: string }>('jealousyGuardSyncLock', opts, 8000);
+    const r = await nativeCall<{ ok?: boolean; reason?: string }>('jealousyGuardSyncLock', opts, 10_000);
     return { ok: r?.ok === true, reason: r?.reason };
   } catch {
     return { ok: false, reason: '桥无响应' };
@@ -1145,7 +1400,7 @@ export async function nativeMediaSupported(): Promise<boolean | null> {
   return mediaBridgeAlive();
 }
 
-/** 原生「通知使用权」状态（读歌名/歌手需要；null = 非原生环境或旧版 APP 不支持） */
+/** 原生「通知使用权」状态（读歌名/歌手/最近通知需要；null = 非原生环境或旧版 APP） */
 export async function nativeMediaPermission(): Promise<boolean | null> {
   const p = await nativePlugin();
   if (!p) return null;
@@ -1192,7 +1447,7 @@ async function attachMedia(): Promise<AwSnapshot['media']> {
   return undefined;
 }
 
-/** 原生快照 → AwSnapshot（下游感知块/设置页零改动兼容；engine 字段供设置页展示） */
+/** 原生快照 → AwSnapshot（下游感知块/设置页零改动兼容） */
 function mapNativeSnapshot(r: UsageSnapshotResult): AwSnapshot {
   const now = Date.now();
   return {
@@ -1217,55 +1472,29 @@ function mapNativeSnapshot(r: UsageSnapshotResult): AwSnapshot {
       opens: x.opens,
       ms: x.ms,
     })),
-    // UsageStats 拿不到解锁/网页事件：省略（AwSnapshot 全字段可选）
     unlocks: undefined,
     media: undefined,
     web: undefined,
-    engine: r.engine === 'shizuku' ? 'shizuku' : r.engine === 'standard' ? 'native' : r.engine,
-    engineNote: r.engineNote,
+    engine: 'native',
   } satisfies AwSnapshot;
 }
 
-/** 原生 UsageStats 快照 → AwSnapshot（v1.2 双引擎路由 + 自动降级）
- *
- *  - shizuku 模式：原生内部读 dumpsys（未激活/未授权自动降级标准并带 engineNote）；
- *  - standard 模式：Cap-go 插件（新 APK）事件级 JS 聚合优先，旧壳/失败回落内置原生；
- *  - 媒体会话（歌名/歌手，需「通知使用权」）所有路径一并附带。 */
+/** 原生 UsageStats 快照 → AwSnapshot（Cap-go 优先，内置原生兜底；媒体会话附带） */
 export async function nativeUsageSnapshot(): Promise<AwSnapshot | null> {
   const p = await nativePlugin();
   if (!p) return null;
-  const engine = getUsageEngine();
-
-  if (engine === 'shizuku') {
+  // Cap-go 引擎优先（新 APK；事件级聚合口径与原生一致）
+  if (await capgoBridgeAlive()) {
     try {
-      const r = await p.getUsageSnapshot({ source: 'shizuku' });
-      if (r && r.ok) {
-        const snap = mapNativeSnapshot(r);
-        snap.media = await attachMedia();
-        return snap;
-      }
-      if (r && r.needPermission) {
-        // Shizuku 失效降级 + 「使用情况」也没授权：确实无数据
-        return null;
-      }
+      const snap = await capgoUsageSnapshot();
+      if (snap) return { ...snap, engine: 'capgo' } satisfies AwSnapshot;
     } catch {
-      /* 桥异常 → 走内置兜底 */
-    }
-  } else {
-    // 标准引擎：Cap-go 优先（v1.2 新壳；事件级聚合口径与原生一致）
-    if (await capgoBridgeAlive()) {
-      try {
-        const snap = await capgoUsageSnapshot();
-        if (snap) return { ...snap, engine: 'capgo' } satisfies AwSnapshot;
-      } catch {
-        /* 回落内置原生 */
-      }
+      /* 回落内置原生 */
     }
   }
-
-  // 内置原生兜底（v1.2 口径；shizuku 模式桥异常时也走这里）
+  // 内置原生引擎（UsageStatsManager 事件流配对聚合）
   try {
-    const r = await p.getUsageSnapshot(engine === 'shizuku' ? { source: 'shizuku' } : {});
+    const r = await p.getUsageSnapshot({});
     if (!r || !r.ok) return null;
     const snap = mapNativeSnapshot(r);
     snap.media = await attachMedia();
@@ -1275,7 +1504,7 @@ export async function nativeUsageSnapshot(): Promise<AwSnapshot | null> {
   }
 }
 
-// ---------------- 屏幕抓帧（TA 看到我的屏幕） ----------------
+// ---------------- 屏幕抓帧（MediaProjection 备选通道） ----------------
 
 /** 发起 MediaProjection 授权并启动捕获会话（系统弹窗一次；成功 true） */
 export async function requestNativeScreenCapture(): Promise<'ok' | 'canceled' | 'unavailable'> {
@@ -1314,88 +1543,9 @@ export async function nativeGrabScreenFrame(): Promise<string | null> {
   }
 }
 
-// ---------------- v1.5 Mobile Agent：智能体专用桥方法 ----------------
-// 全部照抄 nativeShizukuExec 的防御模式：非原生环境/null、调用异常/null ——
-// 调用方拿到 null 就按「桥无响应（非原生环境或原生调用超时）」处理，绝不抛错
-// 打断 Agent 主循环（runAgentTask 里任何异常都会终止任务，这里必须兜死）。
-
-export interface AgentShellResult {
-  ok?: boolean;
-  /** 命令标准输出+标准错误混合文本 */
-  out?: string;
-  reason?: string;
-}
-
-/** 通用 shell 执行（Agent 用：resolve-activity/am start 等；白名单见原生侧 executeShell） */
-export async function nativeAgentExecuteShell(cmd: string[], timeoutMs = 15000): Promise<AgentShellResult | null> {
-  if (!isNativePerception()) return null;
-  try {
-    return await nativeCall<AgentShellResult>('executeShell', { cmd, timeoutMs }, timeoutMs + 16000);
-  } catch {
-    return null;
-  }
-}
-
-/** 屏幕分辨率（Agent 滑动坐标换算用；width/height 或 raw 原始输出） */
-export async function nativeGetScreenResolution(): Promise<{
-  ok?: boolean;
-  width?: number;
-  height?: number;
-  raw?: string;
-  reason?: string;
-} | null> {
-  if (!isNativePerception()) return null;
-  try {
-    return await nativeCall<{ ok?: boolean; width?: number; height?: number; raw?: string; reason?: string }>(
-      'getScreenResolution',
-      {},
-      12000,
-    );
-  } catch {
-    return null;
-  }
-}
-
-/** uiautomator dump UI 树（Agent 看屏核心；游戏/视频全屏等场景可能失败） */
-export async function nativeDumpUi(): Promise<{ ok?: boolean; xml?: string; reason?: string } | null> {
-  if (!isNativePerception()) return null;
-  try {
-    return await nativeCall<{ ok?: boolean; xml?: string; reason?: string }>('dumpUi', {}, 30000);
-  } catch {
-    return null;
-  }
-}
-
-export interface ChineseInputResult {
-  ok?: boolean;
-  /** 实际输入通道：ascii = input text 直输；ime = 原生输入法通道（必要时临时切中文 IME） */
-  via?: 'ascii' | 'ime';
-  /** 是否发生了 IME 临时切换（true 时 currentIme 带切换前的原输入法，任务结束要还原） */
-  switched?: boolean;
-  /** 切换前的原输入法 id（restoreIme 用） */
-  currentIme?: string;
-  reason?: string;
-}
-
-/** 中文/非 ASCII 输入（input text 只支持 ASCII；原生侧经输入法通道注入） */
-export async function nativeInputChinese(text: string): Promise<ChineseInputResult | null> {
-  if (!isNativePerception()) return null;
-  try {
-    return await nativeCall<ChineseInputResult>('inputChinese', { text }, 25000);
-  } catch {
-    return null;
-  }
-}
-
-/** 还原机主原输入法（Agent 中文输入临时切换后的收尾） */
-export async function nativeRestoreIme(imeId: string): Promise<{ ok?: boolean; reason?: string } | null> {
-  if (!isNativePerception()) return null;
-  try {
-    return await nativeCall<{ ok?: boolean; reason?: string }>('restoreIme', { imeId }, 10000);
-  } catch {
-    return null;
-  }
-}
+// ---------------- v2.0.0 Agent 底座（急停 / 常驻通知；与 Shizuku 无关，保留） ----------------
+// 全部防御模式：非原生环境/null、调用异常/null —— 调用方拿到 null 就按「桥无响应」处理，
+// 绝不打断 Agent 主循环。
 
 /** 原生急停旗标查询（通知栏「急停」按钮置位；Agent 主循环每步前轮询） */
 export async function nativeAgentShouldStop(): Promise<{ stop?: boolean } | null> {

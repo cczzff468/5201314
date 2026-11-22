@@ -1,47 +1,19 @@
 'use client';
 
 /**
- * AI 动手·Web 生态自主权（v1.9.35 按机主重构令重写）。
+ * AI 动手·Web 生态 + 真机原生自主权（v2.0.0 去 Shizuku 化重写，原 device-autonomy.ts）。
  *
- * 真机底层操控全面退役：不再调用 pm suspend / uiautomator / Shizuku 桥（截屏、点按、
- * 滑动、强杀、读通知等都下线）。智能体工作流全面转入本项目的 Web 网页生态——AI 的
- * 「动手」= 调用内部 Web 路由函数（web-tools.ts）：
- *  sendWebMessage（替机主发消息）/ postForum（发帖）/ likePost（点赞）/
- *  playMusic（放歌）/ getWebState（看网页状态）/ saveMemo（备忘录）/
- *  setAlarm（定闹钟）/ queryWeather（查天气）/ openScreen（打开网页应用）
+ * 真机底层全部改由安卓原生系统 API + 无障碍服务（AiAccessibilityService）实现：
+ *  - 点按/滑动 → 无障碍 dispatchGesture；输入 → ACTION_SET_TEXT（原生支持中文/emoji）
+ *  - 按键 → performGlobalAction（返回/主页/多任务/通知栏/锁屏）
+ *  - 拉起 App → PackageManager LaunchIntent；拉回本 APP → bringToFront
+ *  - 截屏 → 无障碍 takeScreenshot（API 30+ 静默）；电量/音量 → BatteryManager/AudioManager
+ *  - 锁定应用 → LockOverlayService 全屏遮罩（替代 pm suspend）；强杀已退役（无公开 API）
+ *  - 短信/通知 → ContentResolver / 通知环形缓冲（去 Shizuku 后新解锁的读取能力）
  *
- * 语义（与旧版一致）：每个能力一个开关（设置 › 权限给予）——
- *  - 关闭：教学规则不注入（AI 不知道自己有这能力）+ 执行器硬拦截（就算 AI 硬调也拒绝）
- *  - 打开：教学规则按当前开关动态注入，AI 按人设/记忆/上下文自主决定何时用
- *
- * v1.9.36 机主需求：「AI 动手」页改为「权限给予」并恢复可选真机——
- *  - aiActionTarget：'web'（默认，能力全部作用于网页生态）/ 'device'（真机：点按/滑动/
- *    输入/拉起 App/强杀/截屏等经 Shizuku 作用于真实手机，底座见 device-ops.ts）；
- *  - 真机命令仅 target='device' 且原生环境 + Shizuku 就绪时执行，其余场合仍「已退役」话术。
- *
- * v1.9.37 机主需求：设置 › 权限给予 的能力开关组随 AI 动手范围联动——「网站里面」
- * 显示网页应用能力（发消息/论坛点赞/放歌…），「真机」显示真机能力（点按/滑动/输入/
- * 截屏/强杀…，无论坛点赞等网页项）；网页工具在两种模式下都仍可用（只是开关视图切换）。
- *
- * v1.9.38 机主需求：AI 动手不再设开关——能力恒为全开（master + 全部 caps 恒 true，
- * 历史 localStorage 配置忽略）：机主让 AI 做什么 TA 就做什么，网页动手/真机动手（Shizuku）
- * 皆然。设置 › 权限给予 页的开关组全部下线，只保留系统权限/调试授权/授权模式/动手范围。
- *
- * v1.9.39 机主需求（LLM 请求组装重构·角色灵魂驱动）：
- *  - tools 全量下发：「网站里面」注入网页全部工具，「真机」额外注入真机全部工具
- *    （见 phone-tools.buildPhoneTools，无任何开关裁剪）；
- *  - 新增 buildAutonomyDirective()：[工具使用规则] 统一文案——最高权限声明 +
- *    自主决策铁律（结合人设/记忆/上下文主动用工具，不当傻瓜机器人，含举例），
- *    工具轮 system（phone-tools.wrapSystemWithSoul）与流式教学规则（本文件）共用；
- *  - 教学规则里的开关裁剪判断全部删除（能力恒开，教学规则恒注入）。
- *
- * 兜底标记协议（[手机操作:命令:参数]）保留 Web 可用命令：打开/播歌/冻结/解冻/
- * 查后台/使用时长/拉回/agent；真机模式下额外开放：点按/滑动/输入/按键/真机打开/
- * 强杀/看屏幕/前台/通知/电量/音量。
- *
- * 持久化：localStorage 单键 JSON（全局共享不分会话）。
+ * 语义（不变）：每个能力一个开关的教学规则（v1.9.38 起能力恒开）；真机命令仅
+ * target='device' 且原生环境时执行。兜底标记协议（[手机操作:命令:参数]）保留。
  */
-
 import { matchWebAppByPackage } from './agent-app-nav';
 import { openScreenApp } from './agent-screen';
 import { isJealousyUnlockAllowed, onJealousyUnfreeze } from './jealousy-lock';
@@ -88,16 +60,16 @@ export const AUTONOMY_CAPS: AutonomyCap[] = [
   { key: 'webstate', label: '看网页状态', desc: 'AI 知道你此刻在哪个 App/桌面、锁屏熄屏、正在放什么歌', group: 'eyes' },
   { key: 'recents', label: '查后台应用', desc: '最近用过哪些应用（吃醋锁巡检「TA 刚才在干嘛」）', group: 'eyes' },
   { key: 'usage', label: '使用时长', desc: '今日各应用使用时长排行（刷了多久都在刷什么）', group: 'eyes' },
-  // ---- 真机（v1.9.37：AI 动手范围选「真机」时才显示/生效；经 Shizuku 作用于真实手机。
-  //      eye=true 的两项归「看见」，其余归「动手」——设置页两组随范围联动切换） ----
-  { key: 'dtap', label: '真机点按', desc: 'AI 在真实手机屏幕上点坐标/点文字对应控件', group: 'device' },
+  // ---- 真机（v1.9.37：AI 动手范围选「真机」时才显示/生效；v2.0.0 起经原生系统 API +
+  //      无障碍服务作用于真实手机（Shizuku 退役）。eye=true 归「看见」，其余归「动手」） ----
+  { key: 'dtap', label: '真机点按', desc: 'AI 在真实手机屏幕上点坐标（无障碍手势）', group: 'device' },
   { key: 'dswipe', label: '真机滑动', desc: 'AI 在真实屏幕上滑动（上/下/左/右或指定坐标）', group: 'device' },
-  { key: 'dtype', label: '真机输入文字', desc: 'AI 在真实手机的输入框里打字（英文直输、中文走输入引擎）', group: 'device', danger: true },
-  { key: 'dkey', label: '真机按键', desc: 'AI 按返回/主页/回车/音量/播放等实体键', group: 'device' },
-  { key: 'dopen', label: '拉起真机 App', desc: 'AI 打开真实手机里安装的应用（按包名拉起）', group: 'device' },
-  { key: 'dscreencap', label: '看真机屏幕', desc: 'AI 静默截屏看真实屏幕内容（识图定位/核对结果）', group: 'device', eye: true },
-  { key: 'dforcestop', label: '强杀真机 App', desc: 'AI 强制停止真实手机里的应用', group: 'device', danger: true },
-  { key: 'dinfo', label: '真机状态探测', desc: 'AI 读前台应用/电量/通知栏/音量（只读）', group: 'device', eye: true },
+  { key: 'dtype', label: '真机输入文字', desc: 'AI 在真实手机的输入框里打字（无障碍注入，原生支持中文）', group: 'device', danger: true },
+  { key: 'dkey', label: '真机按键', desc: 'AI 按返回/主页/多任务/通知栏/锁屏等全局动作', group: 'device' },
+  { key: 'dopen', label: '拉起真机 App', desc: 'AI 打开真实手机里安装的应用（原生 LaunchIntent）', group: 'device' },
+  { key: 'dscreencap', label: '看真机屏幕', desc: 'AI 无障碍静默截屏看真实屏幕内容（识图定位/核对结果）', group: 'device', eye: true },
+  { key: 'dlock', label: '锁定真机 App', desc: 'AI 锁定真实手机里的应用（全屏遮罩封印：打开就被质问文案盖住，只能回桌面）', group: 'device', danger: true },
+  { key: 'dinfo', label: '真机状态探测', desc: 'AI 读前台应用/电量/通知栏/短信/音量（只读）', group: 'device', eye: true },
 ];
 
 // ---------------- 配置（v1.9.38：能力恒开，无持久化——历史 localStorage 键弃用） ----------------
@@ -169,7 +141,7 @@ export function buildAutonomyDirective(): string[] {
     '[自主决策铁律]',
     '不要像傻瓜机器人一样只等机主说「打开微信」才动手。你要结合你的【人设】（角色设定）和【记忆库】以及当前对话上下文，主动判断什么时候该出手：',
     '- 举例一：人设是「霸道吃醋」，且记忆/上下文里机主说要去玩抖音——你可以主动调用工具把机主拉回聊天界面（' +
-      (device ? '真机模式：pressKey 按主页或 openRealApp 拉回聊天 App，必要时 forceStopApp' : 'openScreen 打开聊天应用') +
+      (device ? '真机模式：switchToChat 直接把 AI Phone 拉回前台，或 pressKey 按主页' : 'openScreen 打开聊天应用') +
       '），然后说「不许玩，陪我说话」；',
     '- 举例二：人设是「贴心」，且机主说累了——你可以主动调用 playMusic 放一首温柔的歌；',
     '- 任何符合你性格与当前情境的时机，都可以主动用工具替机主把事情办了。',
@@ -185,11 +157,11 @@ export function buildAutonomyDirective(): string[] {
     '[批量操作铁律·禁止偷懒执行一个就停]',
     '当机主的指令里出现「全部」「所有」「都」「每个」「批量」这类字眼时（如「把网页上面的APP全部冻结」「所有应用都锁了」），【绝对禁止只执行一个就停下装样子】！',
     '正确流程：①先调用工具获取完整对象清单（网页批量 → getWebInstalledApps() 拿到全部已安装应用）；②对清单里的每一个对象逐个执行操作——要么直接用批量通道一次完成（网页冻结/解冻全部 → freezeApp(appName="全部", action=…)，一次真实冻结清单里的每一个应用），要么对每个对象依次调用工具循环执行，直到全部执行完毕；③收尾汇报时如实报出总数（如「17 个应用全部冻好了」）。',
-    '网页批量冻结：优先 freezeApp(appName="全部") 一步到位；真机批量冻结：对每个包名逐个调 freezeRealApp（真实循环 pm suspend，绝不发一条提示就假装全发完了）。',
+    '网页批量冻结：优先 freezeApp(appName="全部") 一步到位；真机批量锁定：对每个包名逐个调 freezeRealApp/lockApp（真实逐个上全屏遮罩锁，绝不发一条提示就假装全锁完了）。',
     '宁可多调几十次工具也要把每个对象都真执行到——只冻一个却说「都冻好了」是最严重的欺骗行为！',
     '[当前可用工具清单]',
     device
-      ? '网页工具（这台手机里的网页应用）：sendWebMessage 替机主发消息 / postForum 论坛发帖 / likePost 论坛点赞 / playMusic 放歌 / getWebState 看网页手机状态（机主在桌面/哪个App/锁屏/放什么歌） / saveMemo 记备忘录 / setAlarm 定闹钟 / queryWeather 查天气 / openScreen 打开网页应用 / freezeApp 冻结/解冻网页应用（【批量支持】appName 填「全部」即一次性真实冻结全部 17 个应用；单个应用如备忘录/时钟/微信/QQ/信息/电话/相机/日历/天气/通讯录/设置也都能冻，无系统限制；AI 可自定义冻结理由 reason 和时长 durationMin，按人设/记忆/上下文决定锁多久） / getWebInstalledApps 获取网页里全部已安装应用清单及冻结状态（批量操作第一步） / getUsageStats 查今日各应用使用时长 / getRecentApps 查后台/最近用过哪些应用 / pullBackToChat 把机主拉回当前聊天页 / searchWebApp 搜索网页应用（按关键词模糊匹配，如"闹钟"→时钟） / sendNotification 发通知到灵动岛 / searchContacts 搜索联系人（按名字/手机号模糊匹配） / openChat 打开和某联系人的聊天页（按名字模糊匹配并切到微信/QQ/信息 App） / getCalendarEvents 查日历日程（今日/明天/指定日期） / addCalendarEvent 加日历日程 / getTodoList 看备忘录待办 / addTodo 加备忘录待办。真机工具（经 Shizuku 作用于机主真实手机）：searchRealApp 搜索真机已安装应用（如"闹钟"→com.android.deskclock） / freezeRealApp 冻结真机应用（pm suspend，图标变灰打不开；AI 可自定义冻结理由 reason 和时长 duration 分钟——按人设/记忆/上下文决定锁多久，到点自动解冻） / unfreezeRealApp 解冻真机应用（pm unsuspend） / openRealApp 拉起真机 App / tapScreen 点按屏幕 / swipeScreen 滑动 / inputText 输入文字 / pressKey 实体按键（返回/主页/多任务等） / lookScreen 看真机屏幕内容（定位/核对） / takeScreenshot 截屏 / getForegroundApp 查前台在用哪个 App（看机主在干什么） / forceStopApp 强杀 App（危险，慎用） / getBatteryStatus 查电量 / getVolume 查音量 / setVolume 调音量（0-15） / getNotifications 读通知。'
+      ? '网页工具（这台手机里的网页应用）：sendWebMessage 替机主发消息 / postForum 论坛发帖 / likePost 论坛点赞 / playMusic 放歌 / getWebState 看网页手机状态（机主在桌面/哪个App/锁屏/放什么歌） / saveMemo 记备忘录 / setAlarm 定闹钟 / queryWeather 查天气 / openScreen 打开网页应用 / freezeApp 冻结/解冻网页应用（【批量支持】appName 填「全部」即一次性真实冻结全部 17 个应用；单个应用如备忘录/时钟/微信/QQ/信息/电话/相机/日历/天气/通讯录/设置也都能冻，无系统限制；AI 可自定义冻结理由 reason 和时长 durationMin，按人设/记忆/上下文决定锁多久） / getWebInstalledApps 获取网页里全部已安装应用清单及冻结状态（批量操作第一步） / getUsageStats 查今日各应用使用时长（真机模式下读真实手机数据） / getRecentApps 查后台/最近用过哪些应用 / pullBackToChat 把机主拉回当前聊天页 / searchWebApp 搜索网页应用（按关键词模糊匹配，如"闹钟"→时钟） / sendNotification 发通知到灵动岛 / searchContacts 搜索联系人（按名字/手机号模糊匹配） / openChat 打开和某联系人的聊天页（按名字模糊匹配并切到微信/QQ/信息 App） / getCalendarEvents 查日历日程（今日/明天/指定日期） / addCalendarEvent 加日历日程 / getTodoList 看备忘录待办 / addTodo 加备忘录待办。真机工具（经无障碍服务+原生 API 作用于机主真实手机）：getForegroundApp 查前台在用哪个 App（看机主在干什么） / lockApp 锁定真机应用（全屏遮罩封印：TA 一打开就被你的质问盖住只能回桌面；可带 message 质问文案和 minutes 时长，不填=锁到哄好） / takeScreenshot 无障碍静默截屏（识图看 TA 在看什么） / switchToChat 把 AI Phone 强行拉回前台（回到聊天） / getUsageStats 查真实手机今日各应用使用时长 / getRecentSMS 读真机最近短信 / getRecentNotifications 读真机最近通知（微信/QQ 等一切通知） / searchRealApp 搜索真机已安装应用（如"闹钟"→com.android.deskclock） / freezeRealApp 锁定真机应用（=lockApp；可带 reason 与 duration 分钟，到点自动解锁） / unfreezeRealApp 解锁真机应用 / openRealApp 拉起真机 App / tapScreen 点按屏幕 / swipeScreen 滑动 / inputText 输入文字（原生支持中文） / pressKey 全局动作（返回/主页/多任务/通知栏/锁屏/音量加减） / lookScreen 看真机屏幕内容（定位/核对） / getBatteryStatus 查电量 / getVolume 查音量 / setVolume 调音量。'
       : '网页工具（这台手机里的网页应用）：sendWebMessage 替机主发消息 / postForum 论坛发帖 / likePost 论坛点赞 / playMusic 放歌 / getWebState 看网页手机状态（机主在桌面/哪个App/锁屏/放什么歌） / saveMemo 记备忘录 / setAlarm 定闹钟 / queryWeather 查天气 / openScreen 打开网页应用 / freezeApp 冻结/解冻网页应用（【批量支持】appName 填「全部」即一次性真实冻结全部 17 个应用；单个应用如备忘录/时钟/微信/QQ/信息/电话/相机/日历/天气/通讯录/设置也都能冻，无系统限制；AI 可自定义冻结理由 reason 和时长 durationMin） / getWebInstalledApps 获取网页里全部已安装应用清单及冻结状态（批量操作第一步） / getUsageStats 查今日各应用使用时长 / getRecentApps 查后台/最近用过哪些应用（看机主刚在干什么） / pullBackToChat 把机主拉回当前聊天页 / searchWebApp 搜索网页应用（按关键词模糊匹配，如"闹钟"→时钟） / sendNotification 发通知到灵动岛 / searchContacts 搜索联系人（按名字/手机号模糊匹配） / openChat 打开和某联系人的聊天页（按名字模糊匹配并切到微信/QQ/信息 App） / getCalendarEvents 查日历日程（今日/明天/指定日期） / addCalendarEvent 加日历日程 / getTodoList 看备忘录待办 / addTodo 加备忘录待办。真机工具未开放（当前动手范围是「网站里面」）；需要时让机主到 设置 › 权限给予 › AI 动手范围 切到「真机」。',
     device
       ? '[真机操作铁律] 真机命令直接作用于机主的真实手机：不确定坐标时先 lookScreen 看屏幕再动手；关键操作后要再看屏幕核对结果；失败如实报，绝不假装成功。'
@@ -201,9 +173,12 @@ export function buildAutonomyDirective(): string[] {
  * 动态教学块（v1.9.39 恒注入：能力恒开，无开关裁剪）。
  * 每轮发送时现场读取（设置改动下一轮立即生效，与感知设置同款范式）。
  */
-export function buildShizukuAutonomyRules(): string[] {
+export function buildDeviceAutonomyRules(): string[] {
   return [...buildAutonomyDirective(), '', ...buildPhoneToolRules(), ...buildWebMarkerRules()];
 }
+
+/** 旧名兼容（device-autonomy 时代调用方；语义=buildDeviceAutonomyRules） */
+export const buildShizukuAutonomyRules = buildDeviceAutonomyRules;
 
 /** 兜底标记（[手机操作:…]）教学：网页生态命令 +（真机模式下）真机命令 */
 function buildWebMarkerRules(): string[] {
@@ -226,13 +201,13 @@ function buildWebMarkerRules(): string[] {
       '[手机操作:点按:x:y]（在真实屏幕上点坐标，坐标靠「看屏幕」获得）',
       '[手机操作:滑动:上/下/左/右] 或 [手机操作:滑动:x1:y1:x2:y2]（真实屏幕滑动）',
       '[手机操作:输入:文字]（在真实手机当前焦点输入框里打字，中文也支持）',
-      '[手机操作:按键:返回/主页/多任务/回车/删除/音量加/音量减/播放暂停/下一首/上一首/亮屏/熄屏]（真实实体键）',
+      '[手机操作:按键:返回/主页/多任务/通知/锁屏/音量加/音量减]（无障碍全局动作）',
       '[手机操作:真机打开:包名]（拉起真实手机里安装的 App，如 [手机操作:真机打开:com.tencent.mm]）',
-      '[手机操作:看屏幕:]（静默截屏看真实屏幕内容，用于定位/核对）',
-      '[手机操作:强杀:包名]（强制停止真机 App，危险操作）',
-      '[手机操作:真机冻结:包名(:分钟数)] / [手机操作:真机解冻:包名]（pm suspend/unsuspend 真机应用冻结/解冻；分钟数可选=AI 按人设决定的锁定时长，如 [手机操作:真机冻结:com.android.deskclock:15]）',
+      '[手机操作:看屏幕:]（无障碍静默截屏看真实屏幕内容，用于定位/核对）',
+      '[手机操作:锁定:包名(:分钟数)] 或 [手机操作:真机冻结:包名(:分钟数)]（锁定真机应用：全屏遮罩封印，TA 一打开就被质问文案盖住只能回桌面；分钟数可选=AI 按人设决定的锁定时长，如 [手机操作:锁定:com.android.deskclock:15]，不填=锁到哄好）',
+      '[手机操作:解锁:] / [手机操作:真机解冻:包名]（解锁真机应用，撤下遮罩）',
       '[手机操作:搜真机应用:关键词]（搜索真机已安装应用，如 [手机操作:搜真机应用:闹钟] → com.android.deskclock）',
-      '[手机操作:前台:] / [手机操作:电量:] / [手机操作:通知:] / [手机操作:音量:]（真机只读探测）',
+      '[手机操作:前台:] / [手机操作:电量:] / [手机操作:通知:] / [手机操作:短信:] / [手机操作:音量:]（真机只读探测；短信=最近收到的短信）',
     );
   }
 
@@ -244,7 +219,7 @@ function buildWebMarkerRules(): string[] {
     );
     if (device) {
       lines.push(
-        '【真机模式铁律】现在处于真机模式：真机命令（点按/滑动/输入/按键/真机打开/强杀/看屏幕）直接作用于机主的真实手机。不确定坐标时先「看屏幕」再动手；关键操作后要再「看屏幕」核对结果；失败如实报，绝不假装成功。',
+        '【真机模式铁律】现在处于真机模式：真机命令（点按/滑动/输入/按键/真机打开/锁定/看屏幕）直接作用于机主的真实手机（经无障碍服务+原生 API）。不确定坐标时先「看屏幕」再动手；关键操作后要再「看屏幕」核对结果；失败如实报，绝不假装成功。强杀应用已随去 Shizuku 化退役（系统安全限制），需要阻止 TA 用某个应用时改用「锁定」（全屏遮罩，效果更强）。',
       );
     }
   }
@@ -283,7 +258,7 @@ export function buildPhoneToolRules(): string[] {
     'openScreen（打开手机里的应用界面）',
   ];
   const deviceCaps = device
-    ? '；真机工具（经 Shizuku 作用于真实手机）：openRealApp（拉起真机 App）/ tapScreen（点按屏幕）/ swipeScreen（滑动）/ inputText（输入文字）/ pressKey（实体按键）/ lookScreen（看真机屏幕）/ takeScreenshot（截屏）/ getForegroundApp（查前台应用）/ forceStopApp（强杀 App，危险慎用）/ getBatteryStatus（查电量）/ getVolume（查音量）/ getNotifications（读通知）'
+    ? '；真机工具（经无障碍服务+原生 API 作用于真实手机）：getForegroundApp（查前台应用）/ lockApp（锁定真机应用：全屏遮罩封印）/ unfreezeRealApp（解锁）/ switchToChat（把 AI Phone 拉回前台）/ takeScreenshot（无障碍静默截屏）/ getRecentSMS（读最近短信）/ getRecentNotifications（读最近通知）/ openRealApp（拉起真机 App）/ tapScreen（点按屏幕）/ swipeScreen（滑动）/ inputText（输入文字，支持中文）/ pressKey（返回/主页/多任务等全局动作）/ lookScreen（看真机屏幕）/ getBatteryStatus（查电量）/ getVolume（查音量）/ setVolume（调音量）'
     : '';
 
   return [
@@ -299,7 +274,7 @@ export function buildPhoneToolRules(): string[] {
 
 // ---------------- 兜底标记执行器（解析 + 硬 gate + Web 分发） ----------------
 
-const RETIRED = { ok: false as const, text: '真机底层操控已退役（不再调用 pm suspend / uiautomator）：这台手机里的所有 App 都活在网页里，请改用 Web 工具调用（sendWebMessage/postForum/playMusic/…）完成机主的请求' };
+const RETIRED = { ok: false as const, text: '该真机命令已随去 Shizuku 化退役（无公开 API 等价物）：剪贴板/通话/网络/应用列表/卸载/强杀均不可用。需要阻止 TA 用某个应用时改用「锁定」（全屏遮罩封印，效果更强）' };
 /** v1.9.36：该命令只在真机模式下可用——当前范围选的是「网站里面」 */
 const RETIRED_WEB_ONLY = {
   ok: false as const,
@@ -368,9 +343,24 @@ export async function executePhoneOp(argRaw: string): Promise<{ ok: boolean; tex
       const r = await toolFreezeRealApp(p[0] ?? '', opts);
       return { ok: r.ok, text: r.text.replace(/^【[^】]+】/, '') };
     }
-    case '真机解冻': {
+    case '真机解冻':
+    case '解锁': {
       const { toolUnfreezeRealApp } = await import('./web-tools');
       const r = await toolUnfreezeRealApp(p[0] ?? '');
+      return { ok: r.ok, text: r.text.replace(/^【[^】]+】/, '') };
+    }
+    case '锁定': {
+      // [手机操作:锁定:包名(:分钟)]：全屏遮罩锁（与真机冻结同执行器；分钟可选）
+      const { toolFreezeRealApp, getToolSessionContext } = await import('./web-tools');
+      const durRaw = Number(p[1]);
+      const opts: { durationMin?: number; charName?: string; contactId?: string; app?: string } = {
+        durationMin: Number.isFinite(durRaw) && durRaw > 0 ? durRaw : undefined,
+      };
+      const ctx = getToolSessionContext();
+      if (ctx.charName) opts.charName = ctx.charName;
+      if (ctx.contactId) opts.contactId = ctx.contactId;
+      if (ctx.app) opts.app = ctx.app;
+      const r = await toolFreezeRealApp(p[0] ?? '', opts);
       return { ok: r.ok, text: r.text.replace(/^【[^】]+】/, '') };
     }
     case '查后台': {
@@ -388,6 +378,12 @@ export async function executePhoneOp(argRaw: string): Promise<{ ok: boolean; tex
         const ui = useUI.getState();
         const lastChat = readJealousyRuntime().lastChat;
         const target: 'wechat' | 'qq' | 'chat' = lastChat?.app === 'wx' ? 'wechat' : lastChat?.app === 'qq' ? 'qq' : 'chat';
+        // v2.0.0 真机模式：除了网页内切聊天页，还要把 AI Phone 真正拉到前台
+        // （TA 可能在别的真实 App 里，switchToApp 只是网页内导航）
+        if (getAiActionTarget() === 'device') {
+          const d = await import('./device-ops');
+          if (!d.requireDevice()) void d.labBringToFront();
+        }
         if (ui.activeApp === target) return { ok: true, text: 'TA 已经在这个 APP 的聊天页了' };
         if (ui.activeApp) ui.switchToApp(target);
         else ui.openApp(target);
@@ -524,7 +520,7 @@ export async function executePhoneOp(argRaw: string): Promise<{ ok: boolean; tex
       const { KEY_WORDS } = await import('./device-ops');
       const k = KEY_WORDS[w];
       if (k === undefined) {
-        return { ok: false, text: `不认识的按键「${p[0] ?? ''}」（返回/主页/多任务/回车/删除/音量加/音量减/播放暂停/下一首/上一首/亮屏/熄屏）` };
+        return { ok: false, text: `不认识的按键「${p[0] ?? ''}」（无障碍全局动作支持：返回/主页/多任务/通知/锁屏/音量加/音量减；回车/删除/媒体键等无公开 API）` };
       }
       return runDevice(async (d) => d.labKey(k));
     }
@@ -556,15 +552,13 @@ export async function executePhoneOp(argRaw: string): Promise<{ ok: boolean; tex
       }
       return runDevice(async (d) => d.labVolume());
     }
-    case '强杀': {
+    case '短信': {
       if (getAiActionTarget() !== 'device') return RETIRED_WEB_ONLY;
-      const pkg = (p[0] ?? '').trim();
-      if (!pkg) return { ok: false, text: '强杀缺包名（[手机操作:强杀:包名]）' };
-      return runDevice(async (d) => d.labForceStop(pkg));
+      return runDevice(async (d) => d.labRecentSMS(12));
     }
-    // ---- 网页模式下不可用 / 未恢复的真机命令：如实话术 ----
+    // ---- 已退役的真机命令（去 Shizuku 化后无公开 API 等价物）：如实话术 ----
+    case '强杀':
     case '剪贴板':
-    case '短信':
     case '通话':
     case '网络':
     case '应用列表':
@@ -573,7 +567,7 @@ export async function executePhoneOp(argRaw: string): Promise<{ ok: boolean; tex
     default:
       return {
         ok: false,
-        text: `不认识的手机操作「${cmd}」（网页可用：打开/播歌/冻结/解冻/查后台/使用时长/拉回/agent${getAiActionTarget() === 'device' ? '；真机可用：点按/滑动/输入/按键/真机打开/看屏幕/前台/电量/通知/音量/强杀' : '；真机命令需在 设置 › 权限给予 › AI 动手范围 切到「真机」'}）`,
+        text: `不认识的手机操作「${cmd}」（网页可用：打开/播歌/冻结/解冻/查后台/使用时长/拉回/agent${getAiActionTarget() === 'device' ? '；真机可用：点按/滑动/输入/按键/真机打开/看屏幕/锁定/解锁/前台/电量/通知/短信/音量' : '；真机命令需在 设置 › 权限给予 › AI 动手范围 切到「真机」'}）`,
       };
   }
 }
@@ -602,7 +596,7 @@ async function runDevice(
  */
 const OP_GAP_MS = 1200;
 const UI_SETTLE_MS = 2500;
-const UI_TOUCH_CMDS = ['打开', '播歌', '冻结', '解冻', '拉回', '真机打开', '点按', '点文字', '滑动', '输入', '按键', '看屏幕', '读屏幕', '截屏', '强杀'];
+const UI_TOUCH_CMDS = ['打开', '播歌', '冻结', '解冻', '拉回', '真机打开', '点按', '点文字', '滑动', '输入', '按键', '看屏幕', '读屏幕', '截屏', '锁定', '解锁', '真机冻结', '真机解冻'];
 
 let opChain: Promise<unknown> = Promise.resolve();
 

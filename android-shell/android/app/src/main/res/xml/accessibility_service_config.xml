@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  AI 无障碍服务配置（v2.0.0 去 Shizuku 化核心）：
+  - typeWindowStateChanged：前台应用事件流追踪（getForegroundApp / 应用锁定联动）
+  - canPerformGestures：模拟点击/滑动（dispatchGesture）
+  - canRetrieveWindowContent：文本注入（findFocus + ACTION_SET_TEXT）
+  - canTakeScreenshot：静默截屏（API 30+，AccessibilityService.takeScreenshot）
+-->
+<accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:accessibilityEventTypes="typeWindowStateChanged"
+    android:accessibilityFeedbackType="feedbackGeneric"
+    android:accessibilityFlags="flagDefault|flagIncludeNotImportantViews"
+    android:canPerformGestures="true"
+    android:canRetrieveWindowContent="true"
+    android:canTakeScreenshot="true"
+    android:description="@string/a11y_service_desc"
+    android:notificationTimeout="100" />

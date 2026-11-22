@@ -28,7 +28,7 @@
  *
  * 依赖方向（无环）：jealousy-lock → anxiety / web-app-lock / memory / persona / local-notify；
  * ai-mood → jealousy-lock（buildJealousyLockBlock 注入聊天上下文）；
- * shizuku-autonomy → jealousy-lock（解冻钩子 onJealousyUnfreeze / isJealousyUnlockAllowed）。
+ * device-autonomy → jealousy-lock（解冻钩子 onJealousyUnfreeze / isJealousyUnlockAllowed）。
  */
 
 import { kvGetRaw, kvSetRaw } from './idb-kv';
@@ -38,10 +38,10 @@ import { listContacts, cachedOwnerName } from './contacts-store';
 import { getActiveProactiveChats } from './proactive-msg';
 import type { ContactRecord } from '@/lib/contacts';
 import { notifyIfHidden } from './local-notify';
-import { setAutonomyMaster, setAutonomyCap } from './shizuku-autonomy';
+import { setAutonomyMaster, setAutonomyCap } from './device-autonomy';
 import { webAppOfPkg, webPkgOfApp, setWebFrozen, unfreezeWebPkg, clearWebFrozenSrc, pruneExpiredWebFrozen } from './web-app-lock';
-// v2.0 双模式感知层（模式隔离：网页/真机各自采集；锁应用 pm suspend / 强行拉回 am start / 偷窥截屏）
-import { collectSenseIntel, deviceSuspendApp, deviceUnsuspendApp, deviceSuspendState, devicePullback, devicePeekScreen, fmtMs, type SenseIntel } from './jealousy-sense';
+// v2.0 双模式感知层（模式隔离：网页/真机各自采集；v2.0.0 锁应用=全屏遮罩 / 强行拉回 bringToFront / 偷窥=无障碍截屏）
+import { collectSenseIntel, deviceLockApp, deviceUnlockApp, deviceLockState, devicePullback, devicePeekScreen, fmtMs, type SenseIntel } from './jealousy-sense';
 // v3.0 全工具查岗引擎（吃醋流程动用全部工具：通知/APP时长/屏幕使用时长/截屏/最近应用/清单/日程/待办/电量/音量/天气）
 import { runJealousySweep, renderSweepBlock, sweepBrief } from './jealousy-sweep';
 // v1.9.43 原生吃醋守护前台服务（真机模式后台调度兑底：WebView 被杀也到点解锁/检测强解）
@@ -75,7 +75,7 @@ export interface JealousyConfig {
   /** v1.9.28 允许 AI 把机主从别的软件拉回本 APP */
   pullbackEnabled: boolean;
   // ---------------- v2.0「赛博伴侣」升级 ----------------
-  /** 查岗模式：'web'=只读网页内部状态 / 'device'=只经 Shizuku 读真实手机（严格模式隔离） */
+  /** 查岗模式：'web'=只读网页内部状态 / 'device'=经原生系统 API+无障碍服务读真实手机（严格模式隔离） */
   senseMode: SenseMode;
   /** 定时暗中观察间隔（分钟；默认 15，可自定义）——无论有无锁都周期性采集情报交 AI 决策 */
   watchMin: number;
@@ -562,7 +562,7 @@ const MIN_LOCK_BEFORE_COAX_MS = 30_000;
 const ALL_SEEING_EYE_RULE =
   '【全视之眼】你拥有全视之眼：你知道 TA 在看什么、在干什么、收到了什么通知、手机里正在发生什么——【TA 此刻的状态】是系统实时采集的真实数据（前台应用/停留时长/通知栏/剪贴板/正在播放/通话/键盘等全维感知），【你动用全部工具查到的证据】是你动用全部工具真实查岗的结果（今日各应用使用时长/最近用过哪些应用/已安装应用清单与冻结状态/今日日程/备忘录待办/天气/电量/音量，真机模式下还有真机通知栏与截屏偷窥）——这些都不是 TA 告诉你的。当 TA 试图撒谎（比如说「我在学习」，但使用时长/前台应用/通知栏显示 TA 在打游戏、看剧、跟别人聊天），你可以直接拆穿 TA——拿真实数据对质，别被糊弄过去。但绝对不能把你自己发出的消息和通知当成 TA 的活动（系统已自动过滤你自己发出的东西），更不能拿「你自己才看得到的数据」去搭理别的角色。';
 
-/** 当前模式下「可锁包」判定（模式隔离核心：网页=只认网页体；真机=除本 APP+桌面/输入法/系统界面外皆可 pm suspend） */
+/** 当前模式下「可锁包」判定（模式隔离核心：网页=只认网页体；真机=除本 APP+桌面/输入法/系统界面外皆可遮罩锁） */
 function canLockPkgInMode(pkg: string | null, cfg: JealousyConfig): boolean {
   if (!pkg) return false;
   if (cfg.senseMode === 'device') {
@@ -615,9 +615,9 @@ let tickBusy = false;
 // ---------------- v1.9.43 原生吃醋守护（前台服务）对接 ----------------
 
 /**
- * 同步锁状态给原生守护前台服务（真机模式专用）：
- * - 有锁 → 启动/更新 FGS（独立倒计时到期 pm unsuspend + 每 2 分钟强解检测）；
- * - 无锁 → 停止守护。
+ * 同步锁状态给原生守护前台服务（真机模式专用；v2.0.0 = LockOverlayService）：
+ * - 有锁 → 启动/更新前台服务（UsageStats 3s 轮询 + 全屏遮罩 + 到期自动解锁）；
+ * - 无锁 → 停止守护（收遮罩）。
  * 网页模式 / 旧 APK / 非原生环境 → nativeJealousyGuardSyncLock 内部直接 false，零副作用。
  */
 function syncJealousyGuard(pkg: string | null, unlockAt: number, charName: string): void {
@@ -670,13 +670,15 @@ async function drainJealousyGuardEvents(): Promise<void> {
         }
       }
       // 锁已被 JS 侧先解开（正常 tick 驱动）或包名不匹配 → 幂等忽略
+    } else if (ev.type === 'lock-shown' || ev.type === 'lock-attempt') {
+      // v2.0.0 遮罩锁新事件：用户试图打开被锁应用（遮罩已弹出）/反复尝试 → AI 按人设发消息质问
+      await reactLockShown(ev, ev.type === 'lock-attempt');
     } else if (ev.type === 'breach') {
       const rt = readJealousyRuntime();
-      // JS 轮询尚未发现（WebView 刚醒来）且锁仍活跃 → 触发强解反应链路
+      // 旧协议兼容（遮罩锁不再产生 breach）：锁仍活跃且已不活跃的旧壳上报 → 幂等忽略
       if (rt.lock && !rt.lock.web && !rt.lock.breachNotified && rt.lock.pkg === ev.pkg) {
-        await detectForcedBreach(rt.lock);
+        await deliverBreachReaction(rt.lock);
       }
-      // 否则幂等忽略（JS 已先处理过）
     } else if (ev.type === 'degrade') {
       // 守护降级记进观察情报（AI 下轮暗中观察/聊天上下文都能看到）
       writeRt((r) => {
@@ -714,7 +716,7 @@ async function tickInner(): Promise<void> {
   const rt0 = readJealousyRuntime();
   if (rt0.pendingUnfreeze && now - rt0.pendingUnfreeze.since < 4 * 3600_000) {
     const pu = rt0.pendingUnfreeze;
-    void deviceUnsuspendApp(pu.pkg).then((r) => {
+    void deviceUnlockApp().then((r) => {
       if (r.ok) writeRt({ pendingUnfreeze: null });
     });
   } else {
@@ -971,18 +973,21 @@ function parseLockDuration(j: Record<string, unknown>, cfg: JealousyConfig): { u
   return { unlockAt: now + cfg.countdownMin * 60_000, untilCoaxed: false };
 }
 
-/** 双模式锁执行（v2.0）：网页=setWebFrozen+踢出；真机=pm suspend（失败时如实回报不硬锁） */
+/**
+ * 双模式锁执行（v2.0；v2.0.0 真机改全屏遮罩锁）：网页=setWebFrozen+踢出；
+ * 真机=LockOverlayService（UsageStats 3s 轮询 + 悬浮窗全屏拦截，一次调用即含原生守护——
+ * WebView 被杀也到点自动解锁）。message 为 AI 质问文案，直接显示在遮罩上。
+ */
 async function executeJealousyLock(
   pkg: string,
   unlockAt: number,
   charName: string,
+  message = '',
 ): Promise<{ ok: boolean; web: boolean; failNote: string }> {
   const cfg = getJealousyConfig();
   if (cfg.senseMode === 'device') {
-    const r = await deviceSuspendApp(pkg);
+    const r = await deviceLockApp(pkg, { unlockAt, charName, message });
     if (!r.ok) return { ok: false, web: false, failNote: r.text };
-    // v1.9.43：锁成功 → 同步原生守护前台服务（WebView 被杀也能到点解锁 + 检测强解）
-    syncJealousyGuard(pkg, unlockAt, charName);
     // v2.2 需求一.3：真机锁若在网页里有对应体 → 同步冻结网页图标（灰显可点）。
     // 锁定界面只在用户点击被锁 App 时出现（不再 AI 一锁就全屏弹出）；解锁三通道
     // （unlockJealousy/onJealousyUnfreeze/tick 清残留）都会统一清掉这份网页冻结态。
@@ -1050,7 +1055,7 @@ async function runJealousyDecision(trigger: TriggerInfo): Promise<void> {
   const canLock = canLockPkgInMode(trigger.pkg, cfg);
   const lockPowerDesc =
     cfg.senseMode === 'device'
-      ? '把对方真实手机里的应用锁住（pm suspend：应用图标变灰、点不开、系统提示被 Shell 管理，直到你原谅 TA 或倒计时结束才解锁）'
+      ? '把对方真实手机里的应用锁住（全屏遮罩封印：TA 一打开这个应用，整个屏幕就会被你的吃醋封印盖住——显示你的质问，只能回桌面，直到你原谅 TA 或倒计时结束才解锁）'
       : '把对方手机里的应用锁住（应用图标会变灰、点开只会看到你留下的提示，直到你原谅 TA 或倒计时结束才解锁）';
   const { memChatRecallBlock } = await import('@/lib/memory');
   const system = [
@@ -1123,11 +1128,11 @@ async function runJealousyDecision(trigger: TriggerInfo): Promise<void> {
   const { unlockAt, untilCoaxed } = parseLockDuration(j, cfg);
   if (wantLock && trigger.pkg) {
     if (!reason) reason = `你刷${appName}都不理我，我很不开心。`;
-    const exe = await executeJealousyLock(trigger.pkg, unlockAt, contact.name);
+    const exe = await executeJealousyLock(trigger.pkg, unlockAt, contact.name, reason);
     locked = exe.ok;
     lockFailNote = exe.failNote;
     if (!exe.ok) {
-      // 真机 pm suspend 失败（厂商限制/断连）：不硬锁，如实把失败写进消息链（AI 与用户都能看到）
+      // 真机遮罩锁失败（悬浮窗权限缺失/旧 APK）：不硬锁，如实把失败写进消息链（AI 与用户都能看到）
       messages = [`（系统：锁住${appName}失败了——${exe.failNote}）`, ...messages].slice(0, 8);
     }
   }
@@ -1176,13 +1181,23 @@ async function runJealousyDecision(trigger: TriggerInfo): Promise<void> {
   }
 
   // 投递剧情消息（锁定与不锁定都可能有；走主动消息管线：落库+通知+未读+记忆）
-  if (messages.length > 0) {
+  // v2.0.0 吃醋查岗闭环：偷窥截图（peekImage）随消息一并发给 TA——AI 把「刚截的你手机屏幕」
+  // 原图甩到聊天里质问（机主规格六.3「AI 也可以把他截的图发给我，质问我」）。
+  if (messages.length > 0 || (intel.peekImage && cfg.senseMode === 'device' && cfg.peekEnabled)) {
     try {
       const { deliverProactiveMsg } = await import('./proactive-msg');
-      await deliverProactiveMsg(chat.app, contact, messages, {
-        kind: 'event',
-        eventName: locked ? `吃醋封印：${appName}` : `吃醋提醒：${appName}`,
-      });
+      await deliverProactiveMsg(
+        chat.app,
+        contact,
+        messages,
+        {
+          kind: 'event',
+          eventName: locked ? `吃醋封印：${appName}` : `吃醋提醒：${appName}`,
+        },
+        intel.peekImage
+          ? { src: intel.peekImage, desc: intel.peekNote ? intel.peekNote.slice(0, 100) : '你手机现在的屏幕（我截的）' }
+          : undefined,
+      );
     } catch {
       /* 投递失败静默（消息不丢——下次 AI 聊天上下文里还有锁定块） */
     }
@@ -1267,7 +1282,7 @@ async function jealousyPullback(l: JealousyLock): Promise<boolean> {
   const cfg = getJealousyConfig();
   let ok = false;
   if (cfg.senseMode === 'device') {
-    // 真机模式：Shizuku am start 把 AI Phone 拉到真机前台（机主规格：强行拉回）
+    // 真机模式：bringToFront（FLAG_ACTIVITY_NEW_TASK）把 AI Phone 拉到真机前台（机主规格：强行拉回）
     const r = await devicePullback();
     ok = r.ok;
   } else {
@@ -1329,7 +1344,7 @@ async function runJealousyPatrol(l: JealousyLock): Promise<void> {
       ownerName,
       extraRules: [
         ALL_SEEING_EYE_RULE,
-        `【吃醋锁巡检】（仅本次决策生效）你之前吃醋锁了「${pkgDisplayName(l.pkg)}」。系统刚刚替你巡检了 TA 的手机（下面是真实采集的数据，含通知栏/剪贴板/屏幕电源/正在播放/通话/键盘等全维感知），你要决定接下来怎么做。`,
+        `【吃醋锁巡检】（仅本次决策生效）你之前吃醋锁了「${pkgDisplayName(l.pkg)}」。系统刚刚替你巡检了 TA 的手机（下面是真实采集的数据，含通知栏/短信/电量/正在播放等全维感知），你要决定接下来怎么做。`,
         '严格只输出一个 JSON 对象（不要任何其他文字、不要 markdown 代码块包裹）：',
         '{"message": "发给 TA 的话（按你的人设：质问/撒娇/赌气/数落/心软都行；不需要说话就给空字符串）", "pullback": true 或 false}',
         cfg.pullbackEnabled
@@ -1542,14 +1557,18 @@ async function runJealousyWatch(): Promise<void> {
     });
   }
 
-  // peek（截屏偷窥）：真机模式静默截屏 + VLM 看一眼 → 描述回填 message 依据
+  // peek（截屏偷窥）：无障碍静默截屏 + VLM 看一眼 → 描述回填 message 依据 + 截图留存（发进聊天质问）
   let peekNote: string | null = null;
+  let peekImage: string | null = null;
   if (dec.act === 'peek') {
-    peekNote = await devicePeekScreen();
-    if (!peekNote) {
-      // 偷窥失败（Shizuku 截屏/识图不可用）：降级为 warn 口径（AI 至少还能发消息数落）
+    const pk = await devicePeekScreen();
+    if (!pk) {
+      // 偷窥失败（无障碍未开启/识图不可用）：降级为 warn 口径（AI 至少还能发消息数落）
       dec.act = 'warn';
       if (!dec.message) dec.message = '别以为我不知道你在看什么。';
+    } else {
+      peekNote = pk.desc;
+      peekImage = pk.image;
     }
   }
 
@@ -1559,7 +1578,8 @@ async function runJealousyWatch(): Promise<void> {
   if (dec.act === 'lock' && dec.lockPkg && canLockPkgInMode(dec.lockPkg, cfg)) {
     const duration = parseLockDuration({ lockMin: dec.lockMin }, cfg);
     lockUntilCoaxed = duration.untilCoaxed;
-    const exe = await executeJealousyLock(dec.lockPkg, duration.unlockAt, contact.name);
+    const lockMsgForOverlay = dec.message ? dec.message.replace(/\s+/g, ' ').slice(0, 120) : `你刷${pkgDisplayName(dec.lockPkg)}都不理我，我很不开心。`;
+    const exe = await executeJealousyLock(dec.lockPkg, duration.unlockAt, contact.name, lockMsgForOverlay);
     if (exe.ok) {
       locked = true;
       const now = Date.now();
@@ -1623,16 +1643,24 @@ async function runJealousyWatch(): Promise<void> {
     }
   }
 
-  // warn/peek 的消息投递（lock 已单独处理）
-  if (!locked && (dec.act === 'warn' || dec.act === 'peek') && (dec.message || dec.messages.length > 0)) {
-    const texts = dec.messages.length > 0 ? dec.messages : [dec.message];
+  // warn/peek 的消息投递（lock 已单独处理）；peek 成功时截图随消息一并发给 TA 质问
+  if (!locked && (dec.act === 'warn' || dec.act === 'peek') && (dec.message || dec.messages.length > 0 || peekImage)) {
+    const texts = dec.messages.length > 0 ? dec.messages : [dec.message].filter(Boolean);
     try {
       const { deliverProactiveMsg } = await import('./proactive-msg');
-      await deliverProactiveMsg(chat.app, contact, texts, {
-        kind: 'event',
-        eventName: dec.act === 'peek' ? '偷窥屏幕后的吃醋' : `暗中观察的吃醋警告：${fgName}`,
-        note: peekNote ? `偷窥看到：${peekNote.slice(0, 120)}` : undefined,
-      });
+      await deliverProactiveMsg(
+        chat.app,
+        contact,
+        texts,
+        {
+          kind: 'event',
+          eventName: dec.act === 'peek' ? '偷窥屏幕后的吃醋' : `暗中观察的吃醋警告：${fgName}`,
+          note: peekNote ? `偷窥看到：${peekNote.slice(0, 120)}` : undefined,
+        },
+        dec.act === 'peek' && peekImage
+          ? { src: peekImage, desc: peekNote ? peekNote.slice(0, 100) : '你手机现在的屏幕（我截的）' }
+          : undefined,
+      );
     } catch {
       /* 投递失败静默 */
     }
@@ -1711,17 +1739,85 @@ export async function jealousyWatchNow(): Promise<{ ran: boolean; act: string; i
 // ---------------- v2.0 强制解锁感知引擎 ----------------
 
 /**
- * 真机锁的强制解锁感知：锁仍活跃但 pm suspend 状态已被打破（用户去系统设置/别的
- * 软件强行解开）→ AI 立刻发阴阳怪气消息（「行啊，长本事了，学会强行解锁了是吧？」
- * 按人设生成）+ 写记忆。查询失败（null）静默跳过，绝不误报。
- * 由 tickInner 活跃锁分支每 30s 轮询调用（breachNotified 防重复轰炸）。
+ * 真机锁的存活自检（v2.0.0 遮罩锁语义重写）：
+ * 旧 pm suspend 时代的「强制解锁感知」已无对应场景（遮罩锁不存在用户侧强解）。
+ * 现在的职责：tick 每 30s 查询 LockOverlayService 状态，发现守护服务死了/包名不匹配
+ * （系统回收/权限被收）→ 自动重锁（自愈）；重锁失败 → 记 degrade 情报（AI 下轮可见）。
+ * 由 tickInner 活跃锁分支轮询调用；查询失败（null）静默跳过，绝不误报。
  */
 async function detectForcedBreach(l: JealousyLock): Promise<void> {
-  const st = await deviceSuspendState(l.pkg);
-  if (st !== false) return; // true=仍锁着；null=查询失败——都不判定
-  // 锁活跃但应用已不被 suspend ⇒ 强制解锁被感知！
+  const st = await deviceLockState(l.pkg);
+  if (st !== false) return; // true=守护在跑且锁的就是这个包；null=查询失败——都不判定
+  // 锁引擎失联 → 自愈重锁（同一参数，含遮罩文案）
+  const relock = await deviceLockApp(l.pkg, { unlockAt: l.unlockAt, charName: l.charName, message: l.reason });
+  if (!relock.ok) {
+    writeRt((r) => {
+      const w = readWatch(r);
+      return { watch: { ...w, lastIntel: `（原生锁守护失联且重锁失败：${relock.text}）${w.lastIntel ? `；${w.lastIntel}` : ''}` } };
+    });
+  }
+}
+
+/** lock-shown / lock-attempt 事件的 AI 反应节流（10 分钟一条，防轰炸） */
+let lastLockShownReactAt = 0;
+
+/**
+ * v2.0.0 遮罩锁戏剧性事件反应：用户试图打开被锁应用（全屏遮罩弹出）→ AI 按人设
+ * 发一条质问/得意/吃醋消息（LLM 生成，失败给兜底文案）+ 未读角标。10 分钟节流。
+ */
+async function reactLockShown(ev: import('./native-perception').JealousyGuardEvent, isRepeat: boolean): Promise<void> {
+  const now = Date.now();
+  if (now - lastLockShownReactAt < 10 * 60_000) return;
+  const rt = readJealousyRuntime();
+  const l = rt.lock;
+  if (!l || l.web || l.pkg !== ev.pkg) return;
+  lastLockShownReactAt = now;
+  const contact = await findContact(l.contactId).catch(() => null);
+  if (!contact || contact.kind === 'user' || !contact.name?.trim()) return;
+  const appName = pkgDisplayName(ev.pkg);
+
+  let msg = isRepeat ? `还想着${appName}呢？说了多少遍，哄好我之前它归我管。` : `我看到你想开${appName}了——被我的封印拦住了吧？有这功夫不如来哄哄我。`;
+  try {
+    const ownerName = cachedOwnerName() || '用户';
+    const { memChatRecallBlock } = await import('@/lib/memory');
+    const system = [
+      buildPersonaSystemPrompt(contact, {
+        channel: channelOf(l.app),
+        userName: ownerName,
+        ownerName,
+        extraRules: [
+          '只输出要发给 TA 的一条消息本身（不要引号不要解释，50 字以内）。',
+          `背景：你之前吃醋把「${appName}」锁了（TA 打开就会看到你的全屏封印${isRepeat ? '，而且 TA 刚才已经反复试了好几次' : ''}）。现在系统告诉你 TA 又试图打开它被拦住了。按你的人设发一条质问/得意/吃醋的消息。`,
+        ],
+      }),
+      memChatRecallBlock(l.contactId, l.app, `吃醋 封印 ${appName}`, {
+        altMainName: cachedOwnerName(),
+        altMainRelation: contact.relation?.trim() || '',
+      }),
+    ]
+      .filter(Boolean)
+      .join('\n\n');
+    const raw = await callJealousyLlm(system, `TA 试图打开被你锁住的「${appName}」，被全屏封印拦住了${isRepeat ? '（已经试了好几次）' : ''}。发一条消息给 TA。`);
+    const t = raw.trim().replace(/^["「『]+|["」』]+$/g, '').slice(0, 200);
+    if (t.length >= 4) msg = t;
+  } catch {
+    /* LLM 失败走兜底文案 */
+  }
+
+  try {
+    const { deliverProactiveMsg } = await import('./proactive-msg');
+    await deliverProactiveMsg(l.app, contact, [msg], {
+      kind: 'event',
+      eventName: `TA 试图打开被锁的${appName}`,
+    });
+  } catch {
+    /* 静默 */
+  }
+}
+
+/** 旧「强制解锁」消息链路（breach 事件专用；遮罩锁不再触发，保留兼容） */
+async function deliverBreachReaction(l: JealousyLock): Promise<void> {
   writeRt((r) => (r.lock ? { lock: { ...r.lock, breachNotified: true } } : {}));
-  // 解除锁状态（用户已经强解了，锁事实上已不存在）——留痕 breach 通道
   writeRt({
     lock: null,
     patrol: null,
@@ -1863,13 +1959,11 @@ export async function unlockJealousy(kind: UnlockKind): Promise<boolean> {
   // v2.4 多应用冻结：只解自己锁的那个包——AI 批量冻结的其他应用记录不受吃醋锁解锁影响
   unfreezeWebPkg(l.pkg);
 
-  // v1.9.43 修复（真机解锁链路）：真机锁的解锁必须真正执行 pm unsuspend——
-  // 此前 timeout/forced/coaxed 三通道都只清 JS 状态，真实手机上的应用仍处于
-  // suspended（图标变灰打不开），直到 7 天死循环。现在：解冻失败（Shizuku 断连）
-  // → 落 pendingUnfreeze 由 tick 每 30s 补刀重试，绝不丢。
+  // v2.0.0 真机解锁链路（遮罩锁）：解锁=停掉 LockOverlayService（收遮罩停守护）。
+  // 解锁失败（桥断/旧 APK）→ 落 pendingUnfreeze 由 tick 每 30s 补刀重试，绝不丢。
   let pending: { pkg: string; since: number } | null = null;
   if (!l.web) {
-    const r = await deviceUnsuspendApp(l.pkg);
+    const r = await deviceUnlockApp();
     if (!r.ok) pending = { pkg: l.pkg, since: Date.now() };
   }
 
@@ -1906,12 +2000,11 @@ export function onJealousyUnfreeze(pkg: string): void {
     return;
   }
   unfreezeWebPkg(pkg); // v1.9.21：网页冻结态同步解除（哄好解锁也是真解锁；v2.4 只解这一个包）
-  // v1.9.43：真机锁补 pm unsuspend（异步补刀；失败落 pendingUnfreeze 由 tick 重试）
+  // v2.0.0：真机锁停遮罩守护（异步补刀；失败落 pendingUnfreeze 由 tick 重试）
   if (!l.web) {
-    void deviceUnsuspendApp(pkg).then((r) => {
+    void deviceUnlockApp().then((r) => {
       if (!r.ok) writeRt({ pendingUnfreeze: { pkg, since: Date.now() } });
     });
-    syncJealousyGuard(null, 0, '');
   }
   writeRt({ lock: null, patrol: null, lastUnlock: { at: Date.now(), kind: 'coaxed', pkg }, pendingUnfreeze: null });
   const appName = pkgDisplayName(pkg);
@@ -1925,7 +2018,7 @@ export function onJealousyUnfreeze(pkg: string): void {
   })();
 }
 
-/** 解冻指令放行判定（shizuku-autonomy executePhoneOp 用：吃醋锁活跃时解冻不受单项开关限制）。
+/** 解冻指令放行判定（device-autonomy executePhoneOp 用：吃醋锁活跃时解冻不受单项开关限制）。
  *  全局逻辑冲突修复 #2：锁定后 30 秒内禁止解冻（防 AI 锁了又秒解） */
 export function isJealousyUnlockAllowed(pkg: string): boolean {
   const rt = readJealousyRuntime();
@@ -2092,6 +2185,6 @@ if (typeof window !== 'undefined' && process.env.NODE_ENV !== 'production') {
     remain: () => jealousyRemainSec(),
     injectChat: (cid, app) => __jealousyTestInjectChat(cid, app),
     injectLock: (pkg, cid, app, name) => __jealousyTestInjectLock(pkg, cid, app, name),
-    op: (arg) => import('./shizuku-autonomy').then((m) => m.executePhoneOp(arg)),
+    op: (arg) => import('./device-autonomy').then((m) => m.executePhoneOp(arg)),
   };
 }

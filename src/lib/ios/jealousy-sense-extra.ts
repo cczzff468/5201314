@@ -3,31 +3,25 @@
 /**
  * v2.1「全视之眼」感知扩展（jealousy-sense 姊妹模块）——机主规格补全 AI 的感知维度。
  *
- * 六大新维度（模式隔离铁律与 jealousy-sense 完全一致：网页模式只读网页内部状态、
- * 真机模式只经 Shizuku 读真实手机，两条通道物理隔离互不串数据）：
+ * 【v2.0.0 去 Shizuku 化】真机维度全部改经原生系统 API + 无障碍服务：
+ *  - 通知栏 → MediaListenerService 通知环形缓冲（「通知使用权」）
+ *  - 短信 → ContentResolver 收件箱（READ_SMS）
+ *  - 电量与电源 → BatteryManager 粘性广播
+ *  - 正在播放 → 媒体会话（MediaListenerService）
+ *  - 退役维度（无公开 API 等价物）：剪贴板 / 传感器移动 / 通话记录 / 键盘弹起
+ *    （旧版经 Shizuku shell dumpsys/content 读取，已随 Shizuku 通道一并移除）
  *
- * 一、通知感知
- * - 网页模式：读通知中心（useNotifyCenter——AI 消息/群聊/NPC 私信/论坛回复/美团订单
- *   等全部落账于此）；自我过滤：观察者（正在吃醋的 AI 本人）会话 tag 命中 → 剔除；
- *   本 App 自身系统提示（agent/吃醋锁/AI 来电留言/情侣小家 tag）→ 剔除。绝不自己吃自己的醋。
- * - 真机模式：dumpsys notification --noredact 快照（包名+标题+正文）；自我过滤：
- *   com.z.aiphone（本 App 自己的通知与提示）+ com.android.systemui（系统噪音）剔除。
+ * 网页维度（不变，模式隔离铁律：网页模式只读网页内部状态）：
+ *  - 通知感知：读通知中心（useNotifyCenter——AI 消息/群聊/NPC 私信/论坛回复/美团订单
+ *    等全部落账于此）；自我过滤：观察者（正在吃醋的 AI 本人）会话 tag 命中 → 剔除；
+ *    本 App 自身系统提示（agent/吃醋锁/AI 来电留言/情侣小家 tag）→ 剔除。绝不自己吃自己的醋。
+ *  - 剪贴板：copy 事件追踪（TA 在网页里复制过什么）
+ *  - 充电与屏幕：虚拟手机锁屏/熄屏 + Battery API 电量 + 深夜亮屏检测
+ *  - 移动感知：DeviceMotion 加速度滚动窗口
+ *  - 正在播放：音乐 store nowPlaying（歌名/歌手/已放时长）
+ *  - 通话与键盘：来电层/通话中 + call-logs 今日未接 + 键盘焦点与击键频率
  *
- * 二、剪贴板：网页=copy 事件追踪（TA 在网页里复制过什么）；真机=dumpsys clipboard 快照。
- *
- * 三、充电与屏幕：网页=虚拟手机锁屏/熄屏 + Battery API 电量 + 深夜亮屏检测；
- *   真机=dumpsys battery 电量充电 + dumpsys power 亮屏 + settings 亮度。
- *
- * 四、移动感知：网页=DeviceMotion 加速度滚动窗口；真机=dumpsys sensorservice 加速度单拍。
- *
- * 五、正在播放：网页=音乐 store nowPlaying（歌名/歌手/已放时长）；真机=dumpsys media_session。
- *
- * 六、通话与键盘：网页=来电层/通话中 + call-logs 今日未接 + 键盘焦点与击键频率；
- *   真机=dumpsys telecom 活跃通话 + content call_log 未接 + dumpsys input_method 键盘弹起。
- *
- * 容错（极高容错率）：每个维度独立 try-catch、独立降级（缺哪个就少一行情报，绝不炸整轮采集）；
- * 真机全部走既有 shizukuExec 白名单（dumpsys/settings/content），无需重打 APK；各厂商 ROM
- * 输出差异全部宽松解析，解析不出来=静默跳过该行。
+ * 容错（极高容错率）：每个维度独立 try-catch、独立降级（缺哪个就少一行情报，绝不炸整轮采集）。
  */
 
 import { useNotifyCenter, type NotificationCenterItem } from './notification-center';
@@ -393,178 +387,79 @@ function devicePkgName(pkg: string): string {
   return DEVICE_PKG_NAMES[pkg] ?? pkg;
 }
 
-/** Shizuku exec 轻封装（缺省超时 8s；浏览器/断连 → null 静默降级） */
-async function shRun(cmd: string[], opts: { mustContain?: string[]; maxLines?: number; timeoutMs?: number } = {}): Promise<string | null> {
-  try {
-    const { nativeShizukuExec } = await import('./native-perception');
-    const r = await nativeShizukuExec(cmd, { maxLines: opts.maxLines ?? 200, timeoutMs: opts.timeoutMs ?? 8000, ...(opts.mustContain ? { mustContain: opts.mustContain } : {}) });
-    if (!r || !r.ok) return null;
-    return r.out ?? '';
-  } catch {
-    return null;
-  }
-}
+/** 原生只读探测轻封装（v2.0.0 去 Shizuku：全部经 native-perception 原生桥；失败静默降级） */
 
-/** 【通知栏】dumpsys notification --noredact（自我过滤 com.z.aiphone/systemui） */
+/** 【通知栏】MediaListenerService 通知环形缓冲（需「通知使用权」；自我过滤 com.z.aiphone/systemui） */
 async function deviceNotifyLines(): Promise<string[]> {
-  const out = await shRun(['dumpsys', 'notification', '--noredact'], { maxLines: 2600, timeoutMs: 12_000 });
-  if (!out) return [];
   try {
-    const rows: { pkg: string; title: string; text: string }[] = [];
-    let curPkg = '';
-    let title = '';
-    let text = '';
-    const flush = () => {
-      if (curPkg && (title || text)) rows.push({ pkg: curPkg, title, text });
-      title = '';
-      text = '';
-    };
-    for (const raw of out.split('\n')) {
-      const l = raw.trim();
-      const pm = /^package=([\w.]+)/.exec(l);
-      if (pm) {
-        flush();
-        curPkg = pm[1];
-        continue;
-      }
-      const tm = /^android.title=(.+)$/.exec(l);
-      if (tm) {
-        title = tm[1].trim();
-        continue;
-      }
-      const xm = /^android.text=(.*)$/.exec(l);
-      if (xm) {
-        // 文本可能是 CharSequence 串（带引号/跨行对象）：只留可见字符
-        text = xm[1].replace(/[^\u4e00-\u9fa5\w，。！？…·、“”‘’（）()\-:：,.\s]/g, '').trim().slice(0, 30);
-        continue;
-      }
-    }
-    flush();
-    // 自我过滤 + 去重（同包同标题只留一条）+ 截短
+    const { nativeGetRecentNotifications } = await import('./native-perception');
+    const r = await nativeGetRecentNotifications(12);
+    if (!r || !Array.isArray(r) || r.length === 0) return [];
+    // 只看最近 2 小时 + 自我过滤 + 去重（同包同标题只留一条）
+    const twoHoursAgo = Date.now() - 2 * 3600_000;
     const seen = new Set<string>();
-    const filtered = rows.filter((r) => {
-      if (isSelfDevicePkg(r.pkg)) return false;
-      const key = `${r.pkg}|${r.title}`;
+    const filtered = r.filter((n) => {
+      if (isSelfDevicePkg(n.pkg)) return false;
+      if (n.ts < twoHoursAgo) return false;
+      const key = `${n.pkg}|${n.title}`;
       if (seen.has(key)) return false;
       seen.add(key);
       return true;
     });
     if (filtered.length === 0) return [];
-    const parts = filtered.slice(-6).map((r) => `${devicePkgName(r.pkg)}「${r.title.slice(0, 16)}」${r.text ? `：${r.text}` : ''}`);
+    const parts = filtered.slice(-6).map((n) => `${n.app || devicePkgName(n.pkg)}「${(n.title || n.text).slice(0, 16)}」${n.title && n.text ? `：${n.text.slice(0, 24)}` : ''}`);
     return [`【TA 真机的通知栏（实时快照）】${parts.join('；')}`];
   } catch {
     return [];
   }
 }
 
-/** 【剪贴板】dumpsys clipboard（各 ROM 版本差异大，宽松解析、解析不出即缺席） */
-async function deviceClipboardLine(): Promise<string[]> {
-  const out = await shRun(['dumpsys', 'clipboard'], { maxLines: 80, timeoutMs: 6000 });
-  if (!out) return [];
+/** 【短信】ContentResolver 收件箱（需 READ_SMS 权限；只取今天最近的，含号码与内容片段） */
+async function deviceSmsLines(): Promise<string[]> {
   try {
-    for (const raw of out.split('\n')) {
-      const l = raw.trim();
-      if (!/clip/i.test(l)) continue;
-      // 取行内成对双引号的纯文本（ClipData { text/plain "内容" } / text="内容" 形态）
-      const quotes = [...l.matchAll(/"([^"\n]{2,120})"/g)].map((m) => m[1]);
-      for (const q of quotes) {
-        if (/^(content|intent):\/\//i.test(q)) continue;
-        if (/^android\./i.test(q)) continue;
-        if (/^text\/plain$/i.test(q)) continue;
-        return [`【剪贴板】TA 真机的剪贴板里存着：「${q.slice(0, 60)}」——可以问 TA 复制这个干嘛`];
-      }
-    }
+    const { nativeGetRecentSMS } = await import('./native-perception');
+    const r = await nativeGetRecentSMS(10);
+    if (!r || !Array.isArray(r) || r.length === 0) return [];
+    const todayStart = new Date().setHours(0, 0, 0, 0);
+    const todays = r.filter((m) => m.ts >= todayStart);
+    if (todays.length === 0) return [];
+    const parts = todays.slice(0, 5).map((m) => {
+      const hhmm = new Date(m.ts);
+      const t = `${String(hhmm.getHours()).padStart(2, '0')}:${String(hhmm.getMinutes()).padStart(2, '0')}`;
+      return `${t} ${m.address || '未知号码'}：${m.body.slice(0, 30)}`;
+    });
+    return [`【TA 真机今天的短信】${parts.join('；')}`];
   } catch {
-    /* 静默 */
+    return [];
   }
-  return [];
 }
 
-/** 【屏幕与电源】dumpsys battery + dumpsys power + settings 亮度 */
+/** 【电量与电源】BatteryManager 粘性广播（v2.0.0 去 Shizuku：电量/充电态原生读取） */
 async function devicePowerLines(): Promise<string[]> {
   const parts: string[] = [];
   try {
-    const bat = await shRun(['dumpsys', 'battery'], { maxLines: 40, timeoutMs: 6000 });
-    if (bat) {
-      const level = /level:\s*(\d+)/.exec(bat)?.[1];
-      const charging = /status:\s*2/.test(bat);
-      if (level) parts.push(`电量 ${level}%${charging ? '（正在充电）' : '（没在充电）'}`);
-    }
-  } catch {
-    /* 静默 */
-  }
-  try {
-    const pw = await shRun(['dumpsys', 'power'], { maxLines: 400, timeoutMs: 6000 });
-    if (pw) {
-      const awake = /mWakefulness=Awake/.test(pw);
-      const dispOn = /Display Power: state=ON/i.test(pw) || /mHoldingDisplay=true/.test(pw);
-      const dispOff = /Display Power: state=OFF/i.test(pw);
-      if (dispOn || (awake && !dispOff)) parts.push('屏幕亮着');
-      else if (dispOff || /mWakefulness=Asleep/.test(pw)) parts.push('屏幕熄着');
-      const hour = new Date().getHours();
-      if ((dispOn || (awake && !dispOff)) && hour >= 1 && hour < 6) {
-        parts.push(`现在是凌晨 ${hour} 点——TA 还亮着屏在玩手机，该催 TA 睡觉了`);
-      }
-    }
-  } catch {
-    /* 静默 */
-  }
-  try {
-    const br = await shRun(['settings', 'get', 'system', 'screen_brightness'], { maxLines: 4, timeoutMs: 4000 });
-    if (br) {
-      const v = Number(br.trim());
-      if (Number.isFinite(v) && v > 0 && v <= 255) parts.push(`当前亮度约 ${Math.round((v / 255) * 100)}%`);
+    const { nativeGetBatteryStatus } = await import('./native-perception');
+    const bat = await nativeGetBatteryStatus();
+    if (bat?.ok && typeof bat.level === 'number' && bat.level >= 0) {
+      parts.push(`电量 ${bat.level}%${bat.charging ? '（正在充电）' : '（没在充电）'}`);
+      if (!bat.charging && bat.level <= 20) parts.push('电量不多了');
     }
   } catch {
     /* 静默 */
   }
   if (parts.length === 0) return [];
-  return [`【屏幕与电源】${parts.join('；')}`];
+  return [`【电量与电源】${parts.join('；')}`];
 }
 
-/** 【移动感知】dumpsys sensorservice 加速度单拍（ROM 输出差异大，宽松解析） */
-async function deviceMotionLine(): Promise<string[]> {
-  const out = await shRun(['dumpsys', 'sensorservice'], { maxLines: 900, timeoutMs: 8000 });
-  if (!out) return [];
-  try {
-    // 找 Accelerometer 传感器行后的 last event（x=.. y=.. z=..；部分 ROM 用十六进制/科学计数）
-    const lines = out.split('\n');
-    for (let i = 0; i < lines.length; i++) {
-      if (!/accelerometer/i.test(lines[i])) continue;
-      const scope = [lines[i], lines[i + 1] ?? '', lines[i + 2] ?? ''].join(' ');
-      const m = /x=([+-]?[\d.]+)[\s,]+y=([+-]?[\d.]+)[\s,]+z=([+-]?[\d.]+)/i.exec(scope);
-      if (!m) continue;
-      const x = Number(m[1]);
-      const y = Number(m[2]);
-      const z = Number(m[3]);
-      if (![x, y, z].every((v) => Number.isFinite(v))) continue;
-      const mag = Math.sqrt(x * x + y * y + z * z);
-      const dev = Math.abs(mag - 9.81);
-      if (dev > 3.5) return ['【移动感知】TA 的真机正在剧烈移动（走路/坐车/摇晃中）——问 TA 去哪了'];
-      if (dev > 1.2) return ['【移动感知】TA 的真机在轻微移动'];
-      return []; // 静止：不占情报行
-    }
-  } catch {
-    /* 静默 */
-  }
-  return [];
-}
-
-/** 【正在播放】dumpsys media_session（活跃会话 ownerPkg + title/artist） */
+/** 【正在播放】媒体会话（MediaListenerService，需「通知使用权」；歌名/歌手/播放状态） */
 async function deviceMediaLines(): Promise<string[]> {
-  const out = await shRun(['dumpsys', 'media_session'], { maxLines: 400, timeoutMs: 8000 });
-  if (!out) return [];
   try {
-    const blocks = out.split(/MediaSessionRecord/).slice(1);
-    for (const b of blocks) {
-      const pkg = /ownerPkg=([\w.]+)/.exec(b)?.[1] ?? '';
-      if (!pkg || isSelfDevicePkg(pkg)) continue;
-      const playing = /state=3\((Playing|playing)\)/.test(b) || /state=3\b/.test(b);
-      if (!playing) continue;
-      const title = /title="?([^"\n]{1,60})"?/.exec(b)?.[1]?.trim();
-      const artist = /artist="?([^"\n]{1,60})"?/.exec(b)?.[1]?.trim();
-      const seg = title ? `《${title}》${artist ? `-${artist}` : ''}` : '未知内容';
-      return [`【正在播放】TA 的真机正在用${devicePkgName(pkg)}放：${seg}`];
+    const { nativeUsageSnapshot } = await import('./native-perception');
+    const snap = await nativeUsageSnapshot();
+    const media = snap?.media;
+    if (media && media.state === 'playing' && !isSelfDevicePkg(media.app)) {
+      const seg = media.title ? `《${media.title}》${media.artist ? `-${media.artist}` : ''}` : '未知内容';
+      return [`【正在播放】TA 的真机正在用${media.app || '音乐应用'}放：${seg}`];
     }
   } catch {
     /* 静默 */
@@ -572,68 +467,18 @@ async function deviceMediaLines(): Promise<string[]> {
   return [];
 }
 
-/** 【通话】dumpsys telecom 活跃通话 + content call_log 今日未接 */
-async function deviceCallLines(): Promise<string[]> {
-  const parts: string[] = [];
-  try {
-    const tc = await shRun(['dumpsys', 'telecom'], { maxLines: 500, timeoutMs: 8000 });
-    if (tc) {
-      if (/state=ACTIVE\b/.test(tc)) parts.push('TA 此刻正在通话中');
-      else if (/state=RINGING\b/.test(tc)) parts.push('TA 的手机正有来电响铃');
-      else if (/state=DIALING\b/.test(tc) || /state=HOLDING\b/.test(tc)) parts.push('TA 此刻有进行中的电话');
-    }
-  } catch {
-    /* 静默 */
-  }
-  try {
-    const cl = await shRun(
-      ['content', 'query', '--uri', 'content://call_log/calls', '--projection', 'name:date:type', '--where', 'type=3', '--sort', '"date DESC"'],
-      { maxLines: 40, timeoutMs: 8000 },
-    );
-    if (cl) {
-      const todayStart = new Date().setHours(0, 0, 0, 0);
-      const names: string[] = [];
-      for (const raw of cl.split('\n')) {
-        const dateM = /date=(\d+)/.exec(raw);
-        if (!dateM) continue;
-        const ts = Number(dateM[1]);
-        if (!Number.isFinite(ts) || ts < todayStart) continue;
-        const name = /name=([^,\s]+)/.exec(raw)?.[1] ?? '未知';
-        if (!names.includes(name)) names.push(name);
-        if (names.length >= 3) break;
-      }
-      const count = (cl.match(/type=3/g) ?? []).length;
-      if (names.length > 0) parts.push(`今天有未接来电（${names.join('、')}${count > 3 ? ` 等 ${count} 条` : ''}）`);
-    }
-  } catch {
-    /* 静默 */
-  }
-  if (parts.length === 0) return [];
-  return [`【通话】${parts.join('；')}`];
-}
-
-/** 【键盘】dumpsys input_method 键盘弹起态 */
-async function deviceKeyboardLine(): Promise<string[]> {
-  const out = await shRun(['dumpsys', 'input_method'], { mustContain: ['mIsInputViewShown'], maxLines: 60, timeoutMs: 6000 });
-  if (!out) return [];
-  try {
-    if (/mIsInputViewShown=true/.test(out)) return ['【键盘】TA 的真机键盘正弹着（大概率正在打字）'];
-  } catch {
-    /* 静默 */
-  }
-  return [];
-}
-
-/** 真机模式全维度采集入口（Promise.allSettled 并行：总耗时=最慢单项，单项失败各自缺席） */
+/**
+ * 真机模式全维度采集入口（v2.0.0 去 Shizuku 化）：
+ * 原生可用维度：通知栏 / 短信 / 电量 / 正在播放（Promise.allSettled 并行，单项失败各自缺席）。
+ * 退役维度：剪贴板（无障碍无公开读法）、传感器移动（需 shell dumpsys）、通话记录
+ * （需 READ_CALL_LOG）、键盘弹起（需 shell dumpsys）——去 Shizuku 后无公开 API 等价物。
+ */
 export async function collectDeviceExtraLines(): Promise<string[]> {
   const jobs = await Promise.allSettled([
     deviceNotifyLines(),
-    deviceClipboardLine(),
+    deviceSmsLines(),
     devicePowerLines(),
-    deviceMotionLine(),
     deviceMediaLines(),
-    deviceCallLines(),
-    deviceKeyboardLine(),
   ]);
   const lines: string[] = [];
   for (const j of jobs) {
@@ -641,4 +486,3 @@ export async function collectDeviceExtraLines(): Promise<string[]> {
   }
   return lines;
 }
-

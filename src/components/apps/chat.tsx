@@ -110,7 +110,7 @@ import {
 // 全局回忆触发引擎：用户消息 → 语义匹配记忆 → [回忆提示] 块注入 system
 import { recallHintBlock, consumePurchaseKeywords, hasPendingPurchaseKeywords } from '@/lib/ios/memory-recall-engine';
 // v1.3 Shizuku 自主权：[手机操作:命令] 标记的执行器 + 按开关动态注入的教学规则（设置 APP → AI 动手）
-import { buildShizukuAutonomyRules, enqueuePhoneOp } from '@/lib/ios/shizuku-autonomy';
+import { buildShizukuAutonomyRules, enqueuePhoneOp } from '@/lib/ios/device-autonomy';
 // 表情包（用户定调：聊天基本功不是工具）：信息端 AI 直接输出 [表情包:ID] 标记发真表情；
 // 标记解析/图片匹配复用微信同款管线（chat-rich parseRichParts + stickers 数据层）
 import { parseRichParts } from '@/lib/chat-rich';

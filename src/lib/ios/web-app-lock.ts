@@ -3,7 +3,7 @@
 /**
  * 网页内 App 冻结桥（v1.9.21 → v2.4 多应用批量冻结）——「Shizuku 没打开，就锁网页里的 App」。
  *
- * 吃醋锁（jealousy-lock）在真机原生环境经 Shizuku 执行 pm suspend 真锁应用；
+ * 吃醋锁（jealousy-lock）在真机原生环境经 LockOverlayService 全屏遮罩真锁应用（v2.0.0）；
  * Shizuku 未连接（浏览器网页预览 / 原生桥不可用）时降级为**锁定本虚拟手机里的 App**：
  * - jealousy-lock 决策出 lock 且目标包名在网页内有对应体 → setWebFrozen 记冻结态；
  * - useUI.openApp / switchToApp 撞上冻结 App → blockWebAppOpen 拦截 + 请求弹
@@ -22,7 +22,7 @@
  *   全屏锁定界面按该 App 的记录展示（多层冻结互不干扰）。
  *
  * 为什么独立小模块：store.ts 不能静态依赖 jealousy-lock（jealousy-lock 经
- * shizuku-autonomy → agent-app-nav 静态依赖 store，再进就是环），而 openApp 拦截
+ * device-autonomy → agent-app-nav 静态依赖 store，再进就是环），而 openApp 拦截
  * 又必须落在 store 里——本模块零运行时依赖（仅 type import AppId），两侧都安全。
  *
  * 冻结态持久化：localStorage（与 jealousy-lock 的锁状态 IndexedDB 持久化同刻
@@ -301,7 +301,7 @@ export function pruneExpiredWebFrozen(): void {
 
 /**
  * openApp/switchToApp 拦截：被冻结返回 true（调用方中止打开），同时请求弹全屏锁定提示。
- * 与真机体验对齐：pm suspend 后点灰图标 → 系统提示「由 Shell 所管理」→ 这里弹 TA 的留言。
+ * 与真机体验对齐：遮罩锁后点灰图标 → TA 的吃醋封印遮罩 → 这里弹 TA 的留言。
  */
 export function blockWebAppOpen(appId: AppId): boolean {
   if (!isWebAppFrozen(appId)) return false;

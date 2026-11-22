@@ -1,0 +1,9 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">AI Phone</string>
+    <string name="title_activity_main">AI Phone</string>
+    <string name="package_name">com.z.aiphone</string>
+    <string name="custom_url_scheme">com.z.aiphone</string>
+    <!-- v2.0.0 AI 无障碍服务：系统设置 › 无障碍 里展示的用途说明 -->
+    <string name="a11y_service_desc">为 AI 助手提供真机操控与感知能力：静默截屏（视觉识别）、模拟点击与滑动、文本输入、识别当前前台应用。开启后 AI 才能执行「看屏幕 / 操作手机 / 应用锁定联动」等真机功能。</string>
+</resources>

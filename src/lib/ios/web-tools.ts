@@ -3,8 +3,8 @@
 /**
  * Web 生态内部工具层（v1.9.35 机主重构令：「智能体工作流全面转入 Web 网页生态」）。
  *
- * 真机底层多步自动化（pm suspend / uiautomator / Shizuku 截屏点按）全面退役——
- * 所有 App 都活在本项目的虚拟手机网页里，AI 只需要调用这里的内部 Web 路由函数：
+ * 真机底层已全面原生化（v2.0.0：无障碍服务 + 原生 API，经 device-ops 作用于真实手机）；
+ * 网页生态的所有 App 都活在本项目的虚拟手机网页里，AI 调用这里的内部 Web 路由函数：
  *
  *  - sendWebMessage(appName, contactName, content)：在网页微信/QQ/信息里替机主发消息
  *  - postForum(topic, content)：在网页 X 论坛里发帖子
@@ -805,25 +805,25 @@ export async function toolSearchWebApp(keyword: string): Promise<WebToolResult> 
 }
 
 // ============================================================
-// 十一、真机模式：搜索已安装应用 + 冻结/解冻真机应用
+// 十一、真机模式：搜索已安装应用 + 锁定/解锁真机应用（v2.0.0 原生化）
 // ============================================================
 
-/** 真机模式：搜索已安装的应用（pm list packages → 模糊匹配包名/关键词）。
- *  返回匹配到的包名列表，供 AI 接着调 freezeRealApp 锁定。 */
+/** 真机模式：搜索已安装的应用（原生应用清单 labInstalledApps → 按应用名/包名模糊匹配）。
+ *  返回带中文名的匹配列表，供 AI 接着调 lockApp/freezeRealApp 锁定。 */
 export async function toolSearchRealApp(keyword: string): Promise<WebToolResult> {
-  const { labListPackages } = await import('./device-ops');
+  const { labInstalledApps } = await import('./device-ops');
   const kw = (keyword ?? '').trim().toLowerCase();
   if (!kw) {
     return { ok: false, text: '请填搜索关键词（如：闹钟、clock、抖音、aweme）' };
   }
-  const pkgs = await labListPackages(false);
-  if (pkgs.length === 0) {
+  const apps = await labInstalledApps();
+  if (apps.length === 0) {
     return {
       ok: false,
-      text: '无法读取真机已安装应用列表（需要真机模式 + Shizuku 已授权；或机主手机系统不支持 pm list packages）。',
+      text: '无法读取真机已安装应用列表（需要真机模式 + 原生桥可用；请确认已用 APP 打开且无障碍服务已开启）。',
     };
   }
-  // 模糊匹配：包名含关键词、或关键词的常见中文→英文映射命中
+  // 模糊匹配：应用名包含关键词、包名包含关键词，或中文→英文包名片段兑底命中
   const cnEnMap: Record<string, string[]> = {
     '闹钟': ['clock', 'alarm', 'deskclock'],
     '时钟': ['clock', 'deskclock'],
@@ -844,28 +844,35 @@ export async function toolSearchRealApp(keyword: string): Promise<WebToolResult>
     '论坛': ['forum'],
   };
   const extraKws = cnEnMap[kw] ?? [];
-  const matched = pkgs.filter((p) => {
-    const pl = p.toLowerCase();
-    if (pl.includes(kw)) return true;
-    return extraKws.some((ek) => pl.includes(ek));
+  const matched = apps.filter((a) => {
+    const name = (a.name ?? '').toLowerCase();
+    const pkg = (a.pkg ?? '').toLowerCase();
+    if (name.includes(kw) || pkg.includes(kw)) return true;
+    return extraKws.some((ek) => name.includes(ek) || pkg.includes(ek));
   });
   if (matched.length === 0) {
+    const sample = apps
+      .slice(0, 30)
+      .map((a) => a.name || a.pkg)
+      .filter(Boolean)
+      .join('、');
     return {
       ok: false,
-      text: `在真机上没有找到匹配「${keyword}」的应用。可尝试换关键词（如 clock、闹钟、music、taobao），或用 getInstalledApps 列出全部已安装应用。`,
+      text: `在真机上没有找到匹配「${keyword}」的应用。可尝试换关键词；真机上的应用有（部分）：${sample}`,
     };
   }
-  const list = matched.slice(0, 20).map((p) => `- ${p}`).join('\n');
+  const list = matched.slice(0, 20).map((a) => `- ${a.name || a.pkg}（包名 ${a.pkg}）`).join('\n');
   return {
     ok: true,
-    text: `在真机上找到 ${matched.length} 个匹配「${keyword}」的应用：\n${list}${matched.length > 20 ? '\n（仅显示前 20 个，可换更精确的关键词缩小范围）' : ''}\n可用 freezeRealApp(packageName=匹配到的包名) 冻结，或 unfreezeRealApp 解冻。`,
+    text: `在真机上找到 ${matched.length} 个匹配「${keyword}」的应用：\n${list}${matched.length > 20 ? '\n（仅显示前 20 个，可换更精确的关键词缩小范围）' : ''}\n可用 lockApp/freezeRealApp(packageName=包名) 锁定，或 unfreezeRealApp 解锁。`,
   };
 }
 
 /**
- * 真机模式：冻结真实手机上的应用（pm suspend，桌面图标变灰打不开）。
+ * 真机模式：锁定真实手机上的应用（v2.0.0 语义升级：pm suspend 退役 → labLockApp
+ * 全屏遮罩锁——打开该应用会被遮罩拦住，显示 AI 质问文案，直到到时/手动解锁）。
  * v2.2 需求四：AI 自定义锁定时长——durationMin 由大模型按【人设+记忆+上下文】动态输出
- * （默认 30 分钟），落 real-app-freeze 记录，RealFreezeWatcher 到点自动 pm unsuspend。
+ * （默认 30 分钟），落 real-app-freeze 记录（解锁清账/锁定界面信息源）。
  * v2.2 需求一/二：同步冻结网页对应体（有对应体时，桌面图标变灰、点击弹锁定界面）；
  * contactId/app 供锁定界面动态头像与【去哄哄 TA】精准跳聊天；应用名走中文名解析。
  */
@@ -873,23 +880,24 @@ export async function toolFreezeRealApp(
   packageName: string,
   opts?: { reason?: string; durationMin?: number; charName?: string; contactId?: string; app?: string },
 ): Promise<WebToolResult> {
-  const { labSuspendApp } = await import('./device-ops');
+  const { labLockApp } = await import('./device-ops');
   const pkg = (packageName ?? '').trim();
-  if (!pkg) return { ok: false, text: '请填要冻结的真机应用包名（如 com.android.deskclock）' };
-  const r = await labSuspendApp(pkg);
-  if (!r.ok) {
-    island('chat', '冻结真机应用', brief(r.text, 80));
-    return r;
-  }
+  if (!pkg) return { ok: false, text: '请填要锁定的真机应用包名（如 com.android.deskclock）' };
   // AI 自定义时长（默认 30 分钟；宽限 1 分钟 ~ 7 天防呆）
   const rawDur = opts?.durationMin && opts.durationMin > 0 ? opts.durationMin : 30;
   const durationMin = Math.max(1, Math.min(10_080, rawDur));
   const unlockAt = Date.now() + durationMin * 60_000;
   const charName = opts?.charName?.trim() || 'TA';
-  // 落真机冻结记录（到期自动解冻 + 锁定界面信息源）
+  const reason = opts?.reason?.trim() || undefined;
+  const r = await labLockApp(pkg, { unlockAt, charName, message: reason });
+  if (!r.ok) {
+    island('chat', '锁定真机应用', brief(r.text, 80));
+    return r;
+  }
+  // 落真机锁定记录（解锁清账/锁定界面信息源；到期由原生遮罩锁自动解锁）
   const { setRealFrozen } = await import('./real-app-freeze');
-  setRealFrozen({ pkg, unlockAt, charName, reason: opts?.reason?.trim() || undefined, contactId: opts?.contactId, app: opts?.app });
-  // 网页有对应体 → 同步冻结网页图标（点击弹锁定界面；强制解锁时一并解冻真机）
+  setRealFrozen({ pkg, unlockAt, charName, reason, contactId: opts?.contactId, app: opts?.app });
+  // 网页有对应体 → 同步冻结网页图标（点击弹锁定界面；强制解锁时一并解真机锁）
   let displayName = pkg;
   try {
     const { resolvePkgDisplayName } = await import('./jealousy-lock');
@@ -900,46 +908,50 @@ export async function toolFreezeRealApp(
   const { webAppOfPkg, setWebFrozen } = await import('./web-app-lock');
   const web = webAppOfPkg(pkg);
   if (web) {
-    // v2.3：无条件同步网页冻结态（同包已冻结时也刷新 unlockAt——重新冻结续时，
+    // v2.3：无条件同步网页冻结态（同包已冻结时也刷新 unlockAt——重新锁定续时，
     // 网页图标灰态与真机锁同一时刻到期；setWebFrozen 自带同值去重不白 bump）
     setWebFrozen(pkg, unlockAt, charName, 'ai', {
-      reason: opts?.reason?.trim() || undefined,
+      reason,
       contactId: opts?.contactId,
       app: opts?.app,
     });
   }
-  island('chat', '冻结真机应用', `已冻结${displayName}（${durationMin} 分钟后自动解冻）`);
+  island('chat', '锁定真机应用', `已锁定${displayName}（${durationMin} 分钟后自动解锁）`);
   return {
     ok: true,
-    text: `已在真实手机上冻结${displayName}（${pkg}，图标变灰打不开；${durationMin} 分钟后自动解冻，也可让 TA 撒娇哄你解开或调 unfreezeRealApp 解开）`,
+    text: `已在真实手机上锁定${displayName}（${pkg}，打开会被全屏遮罩拦住；${durationMin} 分钟后自动解锁，也可让 TA 撒娇哄你解开或调 unfreezeRealApp 解开）`,
   };
 }
 
-/** 真机模式：解冻真实手机里的应用（pm unsuspend）。
- *  v2.2：同步清 JS 侧冻结记录 + 同包名的 AI 网页冻结态（网页图标恢复）。 */
-export async function toolUnfreezeRealApp(packageName: string): Promise<WebToolResult> {
-  const { labUnsuspendApp } = await import('./device-ops');
+/** 真机模式：解锁真实手机里的应用（v2.0.0：撤下全屏遮罩锁；解锁是全局的，
+ *  不再按 pkg unsuspend）。同步清 JS 侧锁定记录 + AI 网页冻结态（网页图标恢复）。 */
+export async function toolUnfreezeRealApp(packageName?: string): Promise<WebToolResult> {
+  const { labUnlockApp } = await import('./device-ops');
   const pkg = (packageName ?? '').trim();
-  if (!pkg) return { ok: false, text: '请填要解冻的真机应用包名（如 com.android.deskclock）' };
-  const r = await labUnsuspendApp(pkg);
+  const r = await labUnlockApp();
   if (r.ok) {
-    // 清真机冻结记录（停掉到期自动解冻的守望）
+    // 解锁是全局的：real-frozen 记录一并清（不再按 pkg 匹配——遮罩已全部撤下，留着只会误导）
+    let recPkg = '';
     try {
       const { getRealFrozen, setRealFrozen } = await import('./real-app-freeze');
-      if (getRealFrozen()?.pkg === pkg) setRealFrozen(null);
+      const rec = getRealFrozen();
+      recPkg = rec?.pkg ?? '';
+      if (rec) setRealFrozen(null);
     } catch {
-      /* 清记录失败不影响解冻主流程 */
+      /* 清记录失败不影响解锁主流程 */
     }
-    // 清同包名的 AI 网页冻结态（图标恢复彩色可打开；v2.4：只解这一个，不动其他冻结记录）
+    // 清 AI 网页冻结态（图标恢复彩色可打开）：传入的 pkg 与记录里的 pkg 都解
     try {
       const { getWebFrozen, unfreezeWebPkg } = await import('./web-app-lock');
-      const wf = getWebFrozen(pkg);
-      if (wf && wf.src === 'ai') unfreezeWebPkg(pkg);
+      for (const p of new Set([pkg, recPkg].filter(Boolean))) {
+        const wf = getWebFrozen(p);
+        if (wf && wf.src === 'ai') unfreezeWebPkg(p);
+      }
     } catch {
       /* 同上 */
     }
   }
-  island('chat', '解冻真机应用', brief(r.text, 80));
+  island('chat', '解锁真机应用', brief(r.text, 80));
   return r;
 }
 

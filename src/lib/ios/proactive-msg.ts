@@ -1097,9 +1097,17 @@ async function decideAutonomous(app: ProactiveApp, contact: ContactRecord, npcEx
 // ---------------- 投递（落库 + 通知 + 角标 + 记忆） ----------------
 
 /** 主动消息投递：写三端消息记录 + pushChatNotification + wx/qq 未读角标（正在看不计数）。
- *  v53 五类触发都可传多条——经 scheduleAiDelivery 按真人打字节奏逐条连发上屏；单条可为一大段长文。 */
-export async function deliverProactiveMsg(app: ProactiveApp, contact: ContactRecord, texts: string[], trigger: FireTrigger): Promise<void> {
-  if (texts.length === 0) return;
+ *  v53 五类触发都可传多条——经 scheduleAiDelivery 按真人打字节奏逐条连发上屏；单条可为一大段长文。
+ *  v2.0.0 新增 image 可选参数：吃醋截屏质问（AI 把无障碍截屏的 TA 手机屏幕原图发进聊天），
+ *  追加一条 kind='image' 图片消息（img.src=截屏 dataURL，img.desc=质问文案/识图描述）。 */
+export async function deliverProactiveMsg(
+  app: ProactiveApp,
+  contact: ContactRecord,
+  texts: string[],
+  trigger: FireTrigger,
+  image?: { src: string; desc?: string },
+): Promise<void> {
+  if (texts.length === 0 && !image) return;
   const cid = contact.id;
   const sessionKey = app === 'wx' ? `wx:${cid}` : app === 'qq' ? `qq:${cid}` : `sms:c:${cid}`;
   const notifyApp = app === 'wx' ? ('wechat' as const) : app === 'qq' ? ('qq' as const) : ('chat' as const);
@@ -1109,7 +1117,19 @@ export async function deliverProactiveMsg(app: ProactiveApp, contact: ContactRec
     app === 'sms'
       ? { id: genId(), role: 'assistant' as const, content: t, time: now + i * 50, kind: 'text' as const }
       : { id: genId(), role: 'peer' as const, content: t, time: now + i * 50, kind: 'text' as const };
-  const msgs = texts.map(mkMsg);
+  const baseMsgs = texts.map(mkMsg);
+  const msgs: Array<(typeof baseMsgs)[number] | { id: string; role: 'assistant' | 'peer'; content: string; time: number; kind: 'image'; img: { src: string; desc: string } }> = [...baseMsgs];
+  if (image && image.src.startsWith('data:image/')) {
+    const imgMsg = {
+      id: genId(),
+      role: (app === 'sms' ? 'assistant' : 'peer') as 'assistant' | 'peer',
+      content: '',
+      time: now + baseMsgs.length * 50 + 200,
+      kind: 'image' as const,
+      img: { src: image.src, desc: image.desc ?? '' },
+    };
+    msgs.push(imgMsg);
+  }
 
   const saveOne = (m: (typeof msgs)[number]): void => {
     try {
@@ -1127,12 +1147,15 @@ export async function deliverProactiveMsg(app: ProactiveApp, contact: ContactRec
     msgs,
     (m) => {
       saveOne(m);
+      // v2.0.0 图片消息（吃醋截屏质问）：通知正文用描述，空则「发来一张截图」
+      const isImg = (m as { kind?: string }).kind === 'image';
+      const imgDesc = ((m as { img?: { desc?: string } }).img?.desc ?? '').trim();
       pushChatNotification({
         sessionKey,
         app: notifyApp,
         title: contact.name,
         avatar: avatarFor(contact, avatarApp as ContactAvatarApp),
-        body: m.content,
+        body: isImg ? (imgDesc ? `[截图] ${imgDesc.slice(0, 60)}` : '[截图] TA 把你手机屏幕的截图发过来了') : m.content,
         target: { app: notifyApp, contactId: cid },
       });
       if (!isActiveChat(app, cid)) {

@@ -51,9 +51,9 @@ import { imgGenConfigReady } from '@/lib/imggen';
 
 import { ownerRealName } from '@/lib/ios/contacts-store';
 
-// v1.3 AI 动手（Shizuku 自主权）+ APP 更新：设置页新入口；v1.9.36 重命名为「权限给予」；
+// v1.3 AI 动手（真机自主权）+ APP 更新：设置页新入口；v1.9.36 重命名为「权限给予」；
 // v1.9.38 AI 动手能力恒开（开关全部下线）：这里只保留动手范围的读写
-import { getAiActionTarget } from '@/lib/ios/shizuku-autonomy';
+import { getAiActionTarget } from '@/lib/ios/device-autonomy';
 
 // C1 语音唤起智能体（v1.9.3 独立设置页：唤醒名 / 悬浮球 / 连续监听）
 import {
@@ -443,8 +443,8 @@ export function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
           </div>
         </div>
 
-        {/* AI 感知与操控：v1.9.36「AI 动手」入口改为「权限给予」——系统权限/调试授权/
-            授权模式（CAP-go vs Shizuku）/AI 动手范围（真机 vs 网站）一页全管；
+        {/* AI 感知与操控：v1.9.36「AI 动手」入口改为「权限给予」——系统权限（v2.0.0 权限中心 11 项，
+            原生系统 API + 无障碍服务，无 Shizuku）/时长数据源/AI 动手范围（真机 vs 网站）一页全管；
             v1.9.38 AI 动手能力恒开（能力开关组下线）；
             v1.9.3 语音唤起智能体拆出为独立设置页（同分组独立入口） */}
         <div className="mb-2 mt-6 px-8 text-[13px] text-muted-foreground">AI 感知与操控</div>
@@ -458,7 +458,7 @@ export function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
             <RowIcon icon={ShieldCheck} tone={TONE_GREEN} />
             <span className="min-w-0 flex-1">
               <span className="block truncate text-[16px]">权限给予</span>
-              <span className="mt-0.5 block truncate text-[12px] text-muted-foreground">通知/悬浮窗/位置/电池…系统权限 · CAP-go/Shizuku · AI 动手范围</span>
+              <span className="mt-0.5 block truncate text-[12px] text-muted-foreground">无障碍/使用情况/悬浮窗/短信/位置…系统权限 · AI 动手范围</span>
             </span>
             <span className="max-w-[50%] shrink-0 truncate text-[15px] text-muted-foreground">
               AI 已开启 · {autonomyTarget}

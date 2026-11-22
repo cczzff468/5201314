@@ -30,7 +30,7 @@ import { getToolSessionContext, setToolSessionContext } from './web-tools';
 
 /** sweep 单项超时：普通本地查询（秒级）给 12s 截足 */
 const SWEEP_ITEM_TIMEOUT_MS = 12_000;
-/** 截屏/看屏幕（Shizuku + VLM 识图，最慢的一项）单独给 35s */
+/** 截屏/看屏幕（无障碍静默截屏 + VLM 识图，最慢的一项）单独给 35s */
 const SWEEP_SCREENSHOT_TIMEOUT_MS = 35_000;
 /** 证据行总长度上限（防 token 膨胀：全部证据拼进决策 user 段） */
 const SWEEP_LINE_MAX = 320;
@@ -86,9 +86,9 @@ const SWEEP_ITEMS: SweepItem[] = [
   { name: 'getCalendarEvents', label: '今日日程', timeoutMs: SWEEP_ITEM_TIMEOUT_MS },
   { name: 'getTodoList', label: '备忘录待办', timeoutMs: SWEEP_ITEM_TIMEOUT_MS },
   { name: 'queryWeather', label: '天气', timeoutMs: SWEEP_ITEM_TIMEOUT_MS },
-  // ---- 真机工具（仅 senseMode='device'；经 Shizuku 读真实手机） ----
+  // ---- 真机工具（仅 senseMode='device'；经无障碍服务/原生 API 读真实手机） ----
   { name: 'getForegroundApp', label: '真实手机前台应用', timeoutMs: SWEEP_ITEM_TIMEOUT_MS, device: true },
-  { name: 'getNotifications', label: '真实手机通知栏', timeoutMs: SWEEP_ITEM_TIMEOUT_MS, device: true },
+  { name: 'getRecentNotifications', label: '真实手机通知栏', timeoutMs: SWEEP_ITEM_TIMEOUT_MS, device: true },
   { name: 'getBatteryStatus', label: '真实手机电量', timeoutMs: SWEEP_ITEM_TIMEOUT_MS, device: true },
   { name: 'getVolume', label: '真实手机音量', timeoutMs: SWEEP_ITEM_TIMEOUT_MS, device: true },
   { name: 'takeScreenshot', label: '真实手机截屏偷窥', timeoutMs: SWEEP_SCREENSHOT_TIMEOUT_MS, device: true },

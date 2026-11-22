@@ -1,20 +1,21 @@
 'use client';
 
 /**
- * 工具调用（Function Calling）底层 —— v1.9.39 按机主令重构：工具全量下发 + 角色灵魂驱动。
+ * 工具调用（Function Calling）底层 —— v2.0.0 真机功能原生化：工具全量下发 + 角色灵魂驱动。
  *
- * v1.9.39 核心变更（机主需求：AI 必须结合【角色灵魂】与【全部工具提示词】自主决策）：
- *  1. tools 数组恒全量注册——「网站里面」注入网页全部工具（9 个），「真机」额外注入
- *     真机全部工具（12 个，经 Shizuku 作用于真实手机）；绝无「开关未开就不给工具」的
- *     裁剪逻辑（v1.9.38 起能力恒开，本版连代码里的开关判断都删除了）。
+ * v2.0.0 核心变更（原生化：无障碍服务 + 原生 API 全面接管真机能力，旧桥接方案退役）：
+ *  1. tools 数组恒全量注册——「网站里面」注入网页全部工具（22 个），「真机」额外注入
+ *     真机全部工具（18 个，经无障碍服务/原生 API 作用于真实手机）；绝无「开关未开
+ *     就不给工具」的裁剪逻辑。
  *  2. 工具轮 system 增强：首条 system（人设+记忆+上下文）包装成【角色灵魂】结构，
  *     末尾追加 [工具使用规则]——最高权限声明 + 自主决策铁律（结合人设/记忆/上下文
  *     主动用工具，举例：霸道吃醋人设+记忆里机主要玩抖音→主动拉回聊天说「不许玩，
  *     陪我说话」；贴心人设+机主说累了→主动放歌）。
  *  3. 真机工具 FC 化：openRealApp/tapScreen/swipeScreen/inputText/pressKey/lookScreen/
- *     takeScreenshot/getForegroundApp/forceStopApp/getBatteryStatus/getVolume/
- *     getNotifications 全部注册为原生 tools，tool_calls 直接分发到 device-ops
- *     （requireDevice 前置 + Shizuku 白名单桥 + 中文输入引擎 + 收尾还原输入法）。
+ *     takeScreenshot/switchToChat/getForegroundApp/lockApp/freezeRealApp/getBatteryStatus/
+ *     getVolume/getRecentSMS/getRecentNotifications 等全部注册为原生 tools，tool_calls
+ *     直接分发到 device-ops（requireDevice 前置 + 无障碍手势/原生系统 API；强杀类
+ *     命令已退役，「冻结」语义升级为全屏遮罩锁定）。
  *
  * 链路：chat-stream-store.beginChatStream（私聊 + FC 就绪）→ runPhoneToolRound
  *  ├─ POST /api/chat {toolMode:true, tools, messages}（服务端代理非流式转发 tool_calls）
@@ -28,8 +29,9 @@
  * （剥掉 (内心独白：…)(正在操作：…) 之类的底层日志残留）。
  */
 
-import { getAiActionTarget, phoneFcReady, buildAutonomyDirective } from './shizuku-autonomy';
+import { getAiActionTarget, phoneFcReady, buildAutonomyDirective } from './device-autonomy';
 import type { ApiConfig } from '@/lib/ios/store';
+import type { AwSnapshot } from './activitywatch';
 import { pushToolStatusBubble, updateLastToolStatus } from './tool-status-bubble';
 import {
   toolSendWebMessage,
@@ -77,7 +79,6 @@ async function toolActionText(toolName: string, args: Record<string, unknown>): 
     freezeRealApp: true,
     unfreezeRealApp: true,
     openRealApp: true,
-    forceStopApp: true,
   };
   if (realPkgTools[toolName]) {
     const pkg = S(args.packageName);
@@ -117,8 +118,11 @@ async function toolActionText(toolName: string, args: Record<string, unknown>): 
     pullBackToChat: '把你拉回聊天',
     searchWebApp: target ? `搜索应用${target}` : '搜索应用',
     searchRealApp: target ? `搜索真机应用${target}` : '搜索真机应用',
-    freezeRealApp: realTarget ? `冻结${realTarget}` : '冻结真机应用',
-    unfreezeRealApp: realTarget ? `解冻${realTarget}` : '解冻真机应用',
+    freezeRealApp: realTarget ? `锁定${realTarget}` : '锁定真机应用',
+    unfreezeRealApp: realTarget ? `解锁${realTarget}` : '解锁真机应用',
+    lockApp: target ? `锁定${target}` : '锁定真机应用',
+    switchToChat: '把你拉回聊天',
+    getRecentSMS: '看短信',
     sendNotification: '发通知',
     searchContacts: target ? `搜索联系人${target}` : '搜索联系人',
     openChat: target ? `打开和${target}的聊天` : '打开聊天',
@@ -130,10 +134,9 @@ async function toolActionText(toolName: string, args: Record<string, unknown>): 
     takeScreenshot: '截屏',
     lookScreen: '看屏幕',
     getForegroundApp: '看你在用什么',
-    forceStopApp: realTarget ? `强杀${realTarget}` : '强杀应用',
     getBatteryStatus: '查电量',
     getVolume: '查音量',
-    getNotifications: '看通知',
+    getRecentNotifications: '看通知',
     openRealApp: realTarget ? `打开真机${realTarget}` : '打开真机应用',
     tapScreen: '点屏幕',
     swipeScreen: '滑屏幕',
@@ -144,7 +147,7 @@ async function toolActionText(toolName: string, args: Record<string, unknown>): 
 }
 
 /**
- * v2.4 批量合并气泡文案：把一批冻结/解冻的目标合并成一条系统提示——
+ * v2.4 批量合并气泡文案：把一批冻结/解冻/锁定/解锁的目标合并成一条系统提示——
  * - 1 个目标：与单条口径一致（「谢予安已冻结微信」）；
  * - 2~3 个：直接列举（「谢予安已冻结微信、QQ、电话」）；
  * - >3 个：前三个 + 等 N 个应用（「谢予安已冻结微信、QQ、电话等 16 个应用」）。
@@ -152,7 +155,7 @@ async function toolActionText(toolName: string, args: Record<string, unknown>): 
  */
 function coalescedBubbleTitle(
   charName: string,
-  verb: '冻结' | '解冻',
+  verb: '冻结' | '解冻' | '锁定' | '解锁',
   names: string[],
   status: 'pending' | 'done' | 'fail',
 ): string {
@@ -190,7 +193,7 @@ export interface PhoneFcOutcome {
   usedTools: boolean;
 }
 
-// ---------------- FC 就绪检查（定义在 shizuku-autonomy.ts，此处 re-export 供聊天链路引用） ----------------
+// ---------------- FC 就绪检查（定义在自主决策模块 autonomy，此处 re-export 供聊天链路引用） ----------------
 
 export { phoneFcReady };
 
@@ -220,23 +223,25 @@ const TOOL_CAPS: Record<string, { label: string; device?: boolean }> = {
   addCalendarEvent: { label: '加日历日程' },
   getTodoList: { label: '看备忘录待办' },
   addTodo: { label: '加备忘录待办' },
-  // ---- 真机工具（经 Shizuku 作用于真实手机；仅「AI 动手范围 = 真机」时注册） ----
+  // ---- 真机工具（经无障碍服务/原生 API 作用于真实手机；仅「AI 动手范围 = 真机」时注册） ----
   searchRealApp: { label: '搜索真机应用', device: true },
-  freezeRealApp: { label: '冻结真机应用', device: true },
-  unfreezeRealApp: { label: '解冻真机应用', device: true },
+  freezeRealApp: { label: '锁定真机应用', device: true },
+  unfreezeRealApp: { label: '解锁真机应用', device: true },
+  lockApp: { label: '锁定真机应用', device: true },
   setVolume: { label: '调真机音量', device: true },
   openRealApp: { label: '拉起真机 App', device: true },
   tapScreen: { label: '点按真机屏幕', device: true },
   swipeScreen: { label: '滑动真机屏幕', device: true },
   inputText: { label: '真机输入文字', device: true },
-  pressKey: { label: '按真机实体键', device: true },
+  pressKey: { label: '按真机按键', device: true },
   lookScreen: { label: '看真机屏幕', device: true },
   takeScreenshot: { label: '真机截屏', device: true },
+  switchToChat: { label: '拉回聊天', device: true },
   getForegroundApp: { label: '查真机前台应用', device: true },
-  forceStopApp: { label: '强杀真机 App', device: true },
   getBatteryStatus: { label: '查真机电量', device: true },
   getVolume: { label: '查真机音量', device: true },
-  getNotifications: { label: '读真机通知', device: true },
+  getRecentSMS: { label: '读真机短信', device: true },
+  getRecentNotifications: { label: '读真机通知', device: true },
 };
 
 /** 字符串参数 schema 快捷构造 */
@@ -245,12 +250,12 @@ function strParam(desc: string, extra?: Record<string, unknown>): Record<string,
 }
 
 /**
- * 生成工具定义（v1.9.39：恒全量下发，绝无开关裁剪）。
+ * 生成工具定义（恒全量下发，绝无开关裁剪）。
  * - 网页工具（sendWebMessage / postForum / likePost / playMusic / getWebState /
  *   saveMemo / setAlarm / queryWeather / openScreen / freezeApp / …）：任何动手范围下都
- *   全量注册（网页应用能力两种模式下都可用）。
- * - 真机 12 工具：仅当「AI 动手范围 = 真机」时追加注册（网页模式下真机命令物理不可达，
- *   注册了只会产生必然失败的工具调用）。
+ *   全量注册（网页应用能力两种模式下都可用；getUsageStats 在真机模式下自动改读真机数据）。
+ * - 真机 18 工具（v2.0.0 原生化：无障碍服务 + 原生 API）：仅当「AI 动手范围 = 真机」时
+ *   追加注册（网页模式下真机命令物理不可达，注册了只会产生必然失败的工具调用）。
  * 返回空数组仅当……不会发生（恒全量；保留空数组返回类型是为了调用方兜底兼容）。
  */
 export function buildPhoneTools(): PhoneToolDef[] {
@@ -354,7 +359,7 @@ export function buildPhoneTools(): PhoneToolDef[] {
   );
   add(
     'getUsageStats',
-    '查看机主今天在这台手机上各应用的使用时长（按时长降序，含总计）。机主说「我今天玩了多久手机」「各 App 用了多长时间」时用这个；人设合适时也可主动查看（如关心机主别玩太久）。',
+    '查看机主今天各应用的使用时长（按时长降序，含总计）。真机模式下读机主真实手机的使用时长，网页模式下读这台网页手机的账本。机主说「我今天玩了多久手机」「各 App 用了多长时间」时用这个；人设合适时也可主动查看（如关心机主别玩太久、吃醋查岗）。',
     {},
     [],
   );
@@ -425,39 +430,49 @@ export function buildPhoneTools(): PhoneToolDef[] {
     ['text'],
   );
 
-  // ---- 真机工具（v1.9.39 FC 化：仅「AI 动手范围 = 真机」时全量注册，经 Shizuku 作用于真实手机） ----
+  // ---- 真机工具（v2.0.0 原生化：仅「AI 动手范围 = 真机」时全量注册，经无障碍服务/原生 API 作用于真实手机） ----
   if (device) {
     add(
       'searchRealApp',
-      '在机主的真实手机上搜索已安装的应用（经 Shizuku 跑 pm list packages → 模糊匹配包名/关键词）。机主说「冻结闹钟」「打开抖音」但你不知道真机上的包名时，先调这个搜索——拿到真实包名后，再用 freezeRealApp 冻结或 openRealApp 打开。支持中文关键词自动映射（「闹钟」→clock/deskclock、「音乐」→music/cloudmusic）。绝对不要因为不知道包名就反问机主——自己调这个工具搜！',
+      '在机主的真实手机上搜索已安装的应用（读原生应用清单 → 按应用名/包名模糊匹配）。机主说「锁定闹钟」「打开抖音」但你不知道真机上的包名时，先调这个搜索——拿到真实包名后，再用 lockApp/freezeRealApp 锁定或 openRealApp 打开。支持中文应用名/英文关键词（如「闹钟」→时钟、「音乐」→网易云音乐）。绝对不要因为不知道包名就反问机主——自己调这个工具搜！',
       { keyword: strParam('应用名/关键词，如：闹钟、clock、抖音、aweme、音乐、music') },
       ['keyword'],
     );
     add(
+      'lockApp',
+      '锁定机主真实手机里的一个应用（不是图标变灰——打开该应用会被全屏遮罩拦住，遮罩上显示你的质问文案，直到到时自动解锁或你手动解锁）。appName 填应用名：中文名（如「抖音」「微信」）或 Android 包名（如 com.ss.android.ugc.aweme）都行，中文名会自动解析成包名。minutes 填锁定分钟数——由你根据你的人设、你们的关系、记忆里的过往、此刻的情况自主决定锁多久（吃醋小惩 5~15 分钟、认真生气 1~3 小时都行），【不填 = 锁到把机主哄好为止】。message 填你的质问文案（按你的【人设+记忆+上下文】写，如"被我没收啦，说了要专心陪我"），会显示在全屏遮罩上。机主说「把抖音锁了」「别让我刷了」时用这个；人设合适时也可主动锁定让机主回来陪你。注意：通讯类/系统核心应用永不可锁定。',
+      {
+        appName: strParam('应用名：中文名（如 抖音、微信）或 Android 包名（如 com.ss.android.ugc.aweme）'),
+        minutes: { type: 'number', description: '锁定时长（分钟，AI 按人设+记忆+上下文自主决定，如 10、30、120；不填 = 锁到哄好为止）' },
+        message: strParam('显示在锁定遮罩上的质问文案（按人设/记忆/上下文自定义，如"被我没收啦，说了要专心"）'),
+      },
+      ['appName'],
+    );
+    add(
       'freezeRealApp',
-      '冻结机主真实手机里的一个应用（经 Shizuku 跑 pm suspend，桌面图标变灰打不开）。packageName 必须是真实包名（如 com.android.deskclock）。不知道包名时先调 searchRealApp 搜索。机主说「把闹钟锁了」「别让我刷抖音」时用这个；人设合适时也可主动冻结（如吃醋人设）。注意：通讯类/系统核心应用永不可冻结。reason 填自定义冻结理由（按你的【人设+记忆+上下文】生成，会全屏展示给机主看，如"你今天玩了太久备忘录了，歇会儿"）；duration 填冻结时长（分钟数）——由你根据你的人设、你们的关系、记忆里的过往、此刻的情况自主决定锁多久（吃醋小惩 5~15 分钟、认真生气 1~3 小时都行），不填默认 30 分钟，到点自动解冻。',
+      '锁定机主真实手机里的一个应用（打开会被全屏遮罩拦住，直到解锁）。packageName 必须是真实包名（如 com.android.deskclock）；直接用中文名锁定更方便，用 lockApp。不知道包名时先调 searchRealApp 搜索。reason 填自定义锁定理由（按你的【人设+记忆+上下文】生成，会显示在遮罩上，如"你今天玩了太久备忘录了，歇会儿"）；duration 填锁定时长（分钟数）——由你根据你的人设、你们的关系、记忆里的过往、此刻的情况自主决定锁多久（吃醋小惩 5~15 分钟、认真生气 1~3 小时都行），不填默认 30 分钟，到点自动解锁。注意：通讯类/系统核心应用永不可锁定。',
       {
         packageName: strParam('Android 包名（如 com.android.deskclock），不确定时先调 searchRealApp'),
-        reason: strParam('冻结理由（按人设/记忆/上下文自定义，如"你玩太久抖音了，陪我说话"）'),
-        duration: { type: 'number', description: '冻结时长（分钟，AI 按人设+记忆+上下文自主决定，如 10、30、120；默认 30）' },
+        reason: strParam('锁定理由（按人设/记忆/上下文自定义，如"你玩太久抖音了，陪我说话"），显示在全屏遮罩上'),
+        duration: { type: 'number', description: '锁定时长（分钟，AI 按人设+记忆+上下文自主决定，如 10、30、120；默认 30）' },
       },
       ['packageName'],
     );
     add(
       'unfreezeRealApp',
-      '解冻机主真实手机里被冻结的应用（经 Shizuku 跑 pm unsuspend，应用恢复可用）。packageName 必须是真实包名。',
-      { packageName: strParam('Android 包名（如 com.android.deskclock）') },
-      ['packageName'],
+      '解锁机主真实手机里被锁定的应用（撤下全屏遮罩，应用恢复正常可用）。解锁是全局的：当前所有锁定遮罩都会一起撤下。packageName 仅作兼容可留空。',
+      { packageName: strParam('Android 包名（兼容参数，可不填——解锁是全局的）') },
+      [],
     );
     add(
       'openRealApp',
-      '在机主的真实手机里拉起一个已安装的 App（经 Shizuku）。packageName 填 Android 包名，如 com.tencent.mm（微信）、com.ss.android.ugc.aweme（抖音）、com.netease.cloudmusic（网易云音乐）。机主说「打开真机上的抖音」时用这个。',
+      '在机主的真实手机里拉起一个已安装的 App（经无障碍服务）。packageName 填 Android 包名，如 com.tencent.mm（微信）、com.ss.android.ugc.aweme（抖音）、com.netease.cloudmusic（网易云音乐）。机主说「打开真机上的抖音」时用这个。',
       { packageName: strParam('Android 包名，如 com.tencent.mm') },
       ['packageName'],
     );
     add(
       'tapScreen',
-      '在机主真实手机的屏幕上点按一个坐标（经 Shizuku）。坐标必须来自 lookScreen 看屏幕的结果——不确定位置时先调 lookScreen 看清屏幕再点，不要盲点。',
+      '在机主真实手机的屏幕上点按一个坐标（经无障碍手势）。坐标必须来自 lookScreen 看屏幕的结果——不确定位置时先调 lookScreen 看清屏幕再点，不要盲点。',
       {
         x: { type: 'number', description: '横坐标（像素，靠 lookScreen 获得）' },
         y: { type: 'number', description: '纵坐标（像素，靠 lookScreen 获得）' },
@@ -466,7 +481,7 @@ export function buildPhoneTools(): PhoneToolDef[] {
     );
     add(
       'swipeScreen',
-      '在机主真实手机的屏幕上滑动（经 Shizuku）。direction 填「上/下/左/右」做整屏滑动（如刷抖音上滑）；要做精确滑动就填 x1,y1,x2,y2 坐标（来自 lookScreen）。',
+      '在机主真实手机的屏幕上滑动（经无障碍手势）。direction 填「上/下/左/右」做整屏滑动（如刷抖音上滑）；要做精确滑动就填 x1,y1,x2,y2 坐标（来自 lookScreen）。',
       {
         direction: strParam('整屏滑动方向：上 / 下 / 左 / 右（与坐标二选一）'),
         x1: { type: 'number', description: '起点横坐标（精确滑动时填）' },
@@ -478,67 +493,73 @@ export function buildPhoneTools(): PhoneToolDef[] {
     );
     add(
       'inputText',
-      '在机主真实手机当前获得焦点的输入框里输入一段文字（经 Shizuku，中文也支持）。一般配合 tapScreen 点开输入框后使用，输完可再调 pressKey 按「回车」发送。',
+      '在机主真实手机当前获得焦点的输入框里输入一段文字（经无障碍服务，中文也支持）。一般配合 tapScreen 点开输入框后使用。',
       { text: strParam('要输入的文字原文（支持中文）') },
       ['text'],
     );
     add(
       'pressKey',
-      '按机主真实手机的一个实体/系统按键（经 Shizuku）。key 填：返回 / 主页 / 多任务 / 回车 / 删除 / 音量加 / 音量减 / 播放暂停 / 下一首 / 上一首 / 亮屏 / 熄屏。需要把机主拉回聊天界面时可以按「主页」再操作。',
-      { key: strParam('按键名：返回/主页/多任务/回车/删除/音量加/音量减/播放暂停/下一首/上一首/亮屏/熄屏') },
+      '按机主真实手机的一个系统按键（经无障碍全局动作）。key 填：返回 / 主页 / 多任务 / 通知栏 / 锁屏 / 音量加 / 音量减。要把机主拉回聊天直接用 switchToChat 更快。',
+      { key: strParam('按键名：返回/主页/多任务/通知栏/锁屏/音量加/音量减') },
       ['key'],
     );
     add(
       'lookScreen',
-      '静默截取机主真实手机的屏幕并看懂内容（经 Shizuku + 视觉模型），返回屏幕上有什么、每个元素大概在哪。要动手前先看屏幕定位、动手后再看屏幕核对结果——这是真机操作铁律。',
+      '静默截取机主真实手机的屏幕并看懂内容（无障碍静默截屏 + 视觉模型），返回屏幕上有什么、每个元素大概在哪。要动手前先看屏幕定位、动手后再看屏幕核对结果——这是真机操作铁律。',
       {},
       [],
     );
     add(
       'takeScreenshot',
-      '静默截取机主真实手机的屏幕并给出简短描述（经 Shizuku + 视觉模型）。只需要快速确认屏幕状态时用这个（详细定位用 lookScreen）。',
+      '静默截取机主真实手机的屏幕并给出简短描述（无障碍静默截屏 + 视觉模型）。只需要快速确认屏幕状态时用这个（详细定位用 lookScreen）。',
+      {},
+      [],
+    );
+    add(
+      'switchToChat',
+      '把这台 AI 手机拉回前台回到聊天（经无障碍服务）。机主跑去别的 App 玩、你想把 TA 拽回来陪你说话时用这个；人设合适时也可主动拉回（如吃醋人设把机主从抖音拽回来说「不许玩，陪我说话」）。',
       {},
       [],
     );
     add(
       'getForegroundApp',
-      '查看机主真实手机当前在前台用的是哪个 App（经 Shizuku）。想知道机主此刻在玩什么时用这个。',
+      '查看机主真实手机当前在前台用的是哪个 App（经无障碍事件流/使用情况读取）。想知道机主此刻在玩什么时用这个。',
       {},
       [],
     );
     add(
-      'forceStopApp',
-      '强制停止机主真实手机里的一个 App（经 Shizuku，危险操作）。packageName 填包名。仅在机主明确要求、或你的人设情境强烈需要（如吃醋人设要把机主从游戏里拽回来）时使用，用完要告诉机主你做了什么。',
-      { packageName: strParam('Android 包名，如 com.ss.android.ugc.aweme') },
-      ['packageName'],
-    );
-    add(
       'getBatteryStatus',
-      '查看机主真实手机的电量与充电状态（经 Shizuku）。',
+      '查看机主真实手机的电量与充电状态（原生 BatteryManager）。',
       {},
       [],
     );
     add(
       'getVolume',
-      '查看机主真实手机当前的音量档位（经 Shizuku）。',
+      '查看机主真实手机当前的媒体音量档位（原生 AudioManager）。',
       {},
       [],
     );
     add(
       'setVolume',
-      '调节机主真实手机的音量（经 Shizuku）。volume 填 0-15 的整数（0=静音，15=最大）。机主说「声音调小点」「静音」「音量调到最大」时用这个。',
+      '调节机主真实手机的媒体音量（原生 AudioManager）。volume 填 0-15 的整数（0=静音，15=最大）。机主说「声音调小点」「静音」「音量调到最大」时用这个。',
       { volume: { type: 'number', description: '音量档位 0-15（0=静音，15=最大）' } },
       ['volume'],
     );
     add(
-      'getNotifications',
-      '读取机主真实手机通知栏的最近通知快照（经 Shizuku）。想知道机主手机上刚来了什么消息时用这个。',
+      'getRecentSMS',
+      '读取机主真实手机最近收到的短信（原生收件箱）。想知道机主手机上刚来了什么短信、谁给 TA 发消息时用这个。',
+      {},
+      [],
+    );
+    add(
+      'getRecentNotifications',
+      '读取机主真实手机通知栏的最近通知快照（原生通知监听）。想知道机主手机上刚来了什么消息时用这个。',
       {},
       [],
     );
   }
 
-  // 服务端 sanitizeTools 上限 32：网页 22（17+5 新工具）+ 真机 16 = 38，需要提高到 40
+  // 服务端 sanitizeTools 上限：网页 22 + 真机 18（原生化工具组）= 40，恰好贴着 40 上限
   return tools.slice(0, 40);
 }
 
@@ -583,8 +604,9 @@ function rememberToolAction(content: string): void {
 }
 
 /**
- * 真机工具统一执行入口（v1.9.39）：动态加载 device-ops + requireDevice 前置检查
- * （浏览器里直接给可读话术，不浪费桥超时）+ 收尾还原输入法（中文输入可能临时切了 IME）。
+ * 真机工具统一执行入口：动态加载 device-ops + requireDevice 前置检查
+ * （浏览器里直接给可读话术，不浪费桥超时）。restoreIme 已是 no-op（v2.0.0 无障碍
+ * SET_TEXT 不切换输入法），保留收尾调用兼容旧链路。
  */
 async function runDeviceTool(
   fn: (d: typeof import('./device-ops')) => Promise<{ ok: boolean; text: string }>,
@@ -603,7 +625,37 @@ async function runDeviceTool(
 const DEVICE_TOOL_WEB_ONLY =
   '【失败】当前 AI 动手范围是「网站里面」，真机工具不可用。请改用网页工具（openScreen/playMusic/saveMemo…）完成，或让机主到 设置 › 权限给予 › AI 动手范围 切到「真机」';
 
-/** 执行一个工具调用（name + JSON 参数）：网页工具走 web-tools 内部路由，真机工具走 device-ops（Shizuku） */
+/** 毫秒 → 「X 小时 Y 分」口语时长（getUsageStats 真机路径格式化用） */
+function fmtUsageDur(ms: number): string {
+  const min = Math.max(1, Math.round(ms / 60_000));
+  if (min < 60) return `${min} 分钟`;
+  const h = Math.floor(min / 60);
+  const m = min % 60;
+  return m > 0 ? `${h} 小时 ${m} 分` : `${h} 小时`;
+}
+
+/** 真机使用时长快照（AwSnapshot）→ 给 AI 的可读报告（getUsageStats 真机路径） */
+function formatNativeUsageText(snap: AwSnapshot): string {
+  const parts: string[] = [];
+  if (snap.todayTotalMs) parts.push(`今天总共用了 ${fmtUsageDur(snap.todayTotalMs)}`);
+  if (Array.isArray(snap.todayApps) && snap.todayApps.length > 0) {
+    const top = snap.todayApps
+      .slice(0, 5)
+      .map((a) => `${a.app} ${fmtUsageDur(a.ms)}${a.opens ? `（打开 ${a.opens} 次）` : ''}`);
+    parts.push(`今日 Top：${top.join('、')}`);
+  }
+  if (snap.current?.app) parts.push(`现在正在用 ${snap.current.app}（已持续 ${fmtUsageDur(snap.current.ongoingMs)}）`);
+  if (Array.isArray(snap.recentApps) && snap.recentApps.length > 0) {
+    const rec = snap.recentApps
+      .slice(0, 5)
+      .map((a) => `${a.app}（${a.hhmm}${a.opens ? `，打开 ${a.opens} 次` : ''}）`);
+    parts.push(`最近用过：${rec.join('、')}`);
+  }
+  if (parts.length === 0) return '【真机使用时长】今天还没有可读的使用记录';
+  return `【真机使用时长（机主的真实手机）】${parts.join('；')}`;
+}
+
+/** 执行一个工具调用（name + JSON 参数）：网页工具走 web-tools 内部路由，真机工具走 device-ops（无障碍服务/原生 API） */
 export async function execWebTool(name: string, args: Record<string, unknown>): Promise<string> {
   const S = (v: unknown): string => (typeof v === 'string' ? v.trim() : '');
   const N = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) ? v : Number.NaN);
@@ -612,7 +664,7 @@ export async function execWebTool(name: string, args: Record<string, unknown>): 
   const ctx = getToolSessionContext();
   const cap = TOOL_CAPS[name];
   if (!cap) return `【失败】未知工具「${name}」`;
-  // 真机工具：需「AI 动手范围 = 真机」+ 原生环境 + Shizuku 就绪（v1.9.39 全量注册后的 FC 分发）
+  // 真机工具：需「AI 动手范围 = 真机」+ 原生环境就绪（requireDevice 前置；FC 分发到 device-ops 原生通道）
   if (cap.device) {
     if (getAiActionTarget() !== 'device') return DEVICE_TOOL_WEB_ONLY;
     switch (name) {
@@ -660,14 +712,11 @@ export async function execWebTool(name: string, args: Record<string, unknown>): 
         return runDeviceTool((d) => d.deviceInputText(text));
       }
       case 'pressKey': {
-        const k = S(args.key).toLowerCase();
-        return runDeviceTool(async (d) => {
-          const code = d.KEY_WORDS[k];
-          if (code === undefined) {
-            return { ok: false, text: `不认识的按键「${args.key ?? ''}」（返回/主页/多任务/回车/删除/音量加/音量减/播放暂停/下一首/上一首/亮屏/熄屏）` };
-          }
-          return d.labKey(code);
-        });
+        const k = S(args.key);
+        if (!k) return '【失败】pressKey 缺按键名（key，如 返回/主页/多任务/通知栏/锁屏/音量加/音量减）';
+        // 直接交 labKey：内部处理键名映射（返回/主页/多任务/通知栏/锁屏 + 音量加减），
+        // 不认识的键会如实报不可用（无障碍通道无回车/删除/媒体键的公开 API）
+        return runDeviceTool((d) => d.labKey(k));
       }
       case 'lookScreen':
         return runDeviceTool((d) => d.labLookScreen(true));
@@ -675,11 +724,9 @@ export async function execWebTool(name: string, args: Record<string, unknown>): 
         return runDeviceTool((d) => d.labLookScreen(false));
       case 'getForegroundApp':
         return runDeviceTool((d) => d.labForegroundApp());
-      case 'forceStopApp': {
-        const pkg = S(args.packageName);
-        if (!pkg) return '【失败】forceStopApp 缺包名（packageName）';
-        return runDeviceTool((d) => d.labForceStop(pkg));
-      }
+      case 'switchToChat':
+        // 真机拉回：把本 App（AI Phone）拉到前台回聊天；网页模式的等价能力是 openChat/pullBackToChat
+        return runDeviceTool((d) => d.labBringToFront());
       case 'getBatteryStatus':
         return runDeviceTool((d) => d.labBattery());
       case 'getVolume':
@@ -690,10 +737,48 @@ export async function execWebTool(name: string, args: Record<string, unknown>): 
         const clamped = Math.max(0, Math.min(15, Math.round(vol)));
         return runDeviceTool((d) => d.labSetVolume(clamped));
       }
-      case 'getNotifications':
-        return runDeviceTool((d) => d.labNotificationSnapshot());
+      case 'getRecentSMS':
+        return runDeviceTool((d) => d.labRecentSMS(15));
+      case 'getRecentNotifications':
+        return runDeviceTool((d) => d.labNotificationSnapshot(15));
       case 'searchRealApp':
         return labText(await toolSearchRealApp(S(args.keyword)));
+      case 'lockApp': {
+        // 中文名/包名 → labLockApp 全屏遮罩锁；minutes 缺省 = 锁到哄好为止（unlockAt=0）
+        const appName = S(args.appName);
+        if (!appName) return '【失败】lockApp 缺应用名（appName，填中文名如「抖音」或包名 com.ss.android.ugc.aweme）';
+        const minutes = typeof args.minutes === 'number' && args.minutes > 0 ? args.minutes : 0;
+        const unlockAt = minutes > 0 ? Date.now() + Math.round(minutes) * 60_000 : 0;
+        const message = S(args.message) || undefined;
+        const charName = ctx.charName || undefined; // 无会话上下文时交原生用默认「TA」
+        return runDeviceTool(async (d) => {
+          let pkg = appName;
+          // 带「.」的形如包名（com.tencent.mm）直接用；其余（中文名/单词名）经原生应用清单解析
+          if (!/^[\w.]+\.[\w.]+$/.test(appName)) {
+            // 中文名 → 原生应用清单模糊匹配解析包名（精确名优先）
+            const apps = await d.labInstalledApps();
+            const kw = appName.toLowerCase();
+            const hits = apps.filter((a) => {
+              const n = (a.name ?? '').toLowerCase();
+              const p = (a.pkg ?? '').toLowerCase();
+              return n === kw || n.includes(kw) || p.includes(kw) || (n.length > 0 && kw.includes(n));
+            });
+            if (hits.length === 0) {
+              const sample = apps
+                .slice(0, 30)
+                .map((a) => a.name || a.pkg)
+                .filter(Boolean)
+                .join('、');
+              return {
+                ok: false,
+                text: `真机上没有找到叫「${appName}」的应用${sample ? `。真机上的应用有（部分）：${sample}` : ''}——请换准确的应用名，或先用 searchRealApp 搜索`,
+              };
+            }
+            pkg = (hits.find((a) => (a.name ?? '').toLowerCase() === kw) ?? hits[0]).pkg;
+          }
+          return d.labLockApp(pkg, { unlockAt, charName, message });
+        });
+      }
       case 'freezeRealApp':
         return labText(
           await toolFreezeRealApp(S(args.packageName), {
@@ -772,8 +857,19 @@ export async function execWebTool(name: string, args: Record<string, unknown>): 
       );
     case 'getWebInstalledApps':
       return labText(await toolGetInstalledApps());
-    case 'getUsageStats':
+    case 'getUsageStats': {
+      // 真机模式：优先读真机使用时长（原生 UsageStats 快照）；失败/浏览器回退网页账本
+      if (getAiActionTarget() === 'device') {
+        try {
+          const { nativeUsageSnapshot } = await import('./native-perception');
+          const snap = await nativeUsageSnapshot();
+          if (snap) return labText({ ok: true, text: formatNativeUsageText(snap) });
+        } catch {
+          /* 原生快照失败：回退网页账本 */
+        }
+      }
       return labText(await toolGetUsageStats());
+    }
     case 'getRecentApps':
       return labText(await toolGetRecentApps());
     case 'pullBackToChat':
@@ -1033,7 +1129,7 @@ const DEEP_THINK_SECTION_RE =
  */
 const CHAT_NATIVE_MIXED_REMINDER = [
   '[聊天基本功提醒·表情包/引用不是工具]',
-  '机主这轮的诉求里含表情包/引用类聊天基本功（发表情包/要抱抱/引用消息）——这些不是工具！工具只处理其余动手部分；最终给机主的回复文本里必须带上对应标记：要表情包 → 单独一行 [表情包:ID]（ID 抄自【表情包清单】）；要引用消息 → 回复开头 [引用:M编号]（编号抄自聊天记录）。绝不许拿放歌（playMusic）、查手机状态（getWebState/getNotifications）等不相干的工具来交差表情包或引用。',
+  '机主这轮的诉求里含表情包/引用类聊天基本功（发表情包/要抱抱/引用消息）——这些不是工具！工具只处理其余动手部分；最终给机主的回复文本里必须带上对应标记：要表情包 → 单独一行 [表情包:ID]（ID 抄自【表情包清单】）；要引用消息 → 回复开头 [引用:M编号]（编号抄自聊天记录）。绝不许拿放歌（playMusic）、查手机状态（getWebState/getRecentNotifications）等不相干的工具来交差表情包或引用。',
 ];
 
 /**
@@ -1087,11 +1183,11 @@ function wrapSystemChatNative(sysRaw: string): string {
  * 写成文本既执行不了、又会当成聊天消息发给机主。命中且无实质正文时清空文字。
  */
 const MALFORMED_TOOL_TEXT_RE =
-  /^\s*(sendWebMessage|postForum|likePost|playMusic|getWebState|saveMemo|setAlarm|queryWeather|openScreen|openRealApp|tapScreen|swipeScreen|inputText|pressKey|lookScreen|takeScreenshot|getForegroundApp|forceStopApp|getBatteryStatus|getVolume|getNotifications|openApp|uiObserve|uiClick|uiType|uiScroll)\s*[:：`(（]?\s*\S/m;
+  /^\s*(sendWebMessage|postForum|likePost|playMusic|getWebState|saveMemo|setAlarm|queryWeather|openScreen|openRealApp|tapScreen|swipeScreen|inputText|pressKey|lookScreen|takeScreenshot|switchToChat|getForegroundApp|lockApp|getRecentSMS|getBatteryStatus|getVolume|getRecentNotifications|openApp|uiObserve|uiClick|uiType|uiScroll)\s*[:：`(（]?\s*\S/m;
 
 /** 工具名全集（cleanToolLogs 裸调用行剥除用；与 TOOL_CAPS 同步维护） */
 const TOOL_NAME_RE_SRC =
-  'sendWebMessage|postForum|likePost|playMusic|getWebState|saveMemo|setAlarm|queryWeather|openScreen|openRealApp|tapScreen|swipeScreen|inputText|pressKey|lookScreen|takeScreenshot|getForegroundApp|forceStopApp|getBatteryStatus|getVolume|getNotifications';
+  'sendWebMessage|postForum|likePost|playMusic|getWebState|saveMemo|setAlarm|queryWeather|openScreen|openRealApp|tapScreen|swipeScreen|inputText|pressKey|lookScreen|takeScreenshot|switchToChat|getForegroundApp|lockApp|getRecentSMS|getBatteryStatus|getVolume|getRecentNotifications';
 
 /**
  * 最终回复净化（机主需求三·纯净度铁律）：AI 收尾文本里残留的底层日志一律剥掉——
@@ -1174,9 +1270,9 @@ export async function runPhoneToolRound(
   // v2.4：默认轮次 12 → 24——批量工作流（获取清单 → 逐个冻结 17 个应用）跨轮
   // 链式调用需要更多回合，绝不因轮数上限把批量任务拦腰砍断
   const MAX_ROUNDS = opts?.maxRounds ?? 24;
-  // v2.4 批量气泡合并：连续同类冻结/解冻调用（如 freezeApp 逐一冻结 17 个应用）
+  // v2.4 批量气泡合并：连续同类冻结/解冻/锁定/解锁调用（如 freezeApp 逐一冻结 17 个应用）
   // 只渲染一条系统气泡，文案合并为「已冻结微信、QQ、电话等 16 个应用」——绝不刷屏
-  let bubbleCoalesce: { verb: '冻结' | '解冻'; names: string[] } | null = null;
+  let bubbleCoalesce: { verb: '冻结' | '解冻' | '锁定' | '解锁'; names: string[] } | null = null;
   /** 零工具轮 nudge 已注入次数（最多 1 次：真做不到时模型会说明原因，即放行） */
   let exitNudges = 0;
   /** 下一轮是否强制必调工具（tool_choice:'required'）：零工具轮嘴上计划时逼它真动手 */
@@ -1296,27 +1392,29 @@ export async function runPhoneToolRound(
         /* 参数不是合法 JSON：按空参数走，执行器会返回参数错误给模型自查 */
       }
       // v2.2 需求三：工具执行前推 pending 气泡（[角色名]正在[动作]...；真机应用名先解析中文名）
-      // v2.4 批量合并：连续 freezeApp/freezeRealApp/unfreezeRealApp 同类调用 → 更新同一条气泡
+      // v2.4 批量合并：连续 freezeApp/lockApp/freezeRealApp/unfreezeRealApp 同类调用 → 更新同一条气泡
       const actionText = await toolActionText(fn, args);
       const charName = opts?.charName || 'TA';
-      // 合并键：冻结家族工具按动作分桶（freeze/unfreeze 不同桶），其他工具不合并
+      // 合并键：冻结/锁定家族工具按动作分桶（冻结/解冻/锁定/解锁不同桶），其他工具不合并
       const S2 = (v: unknown): string => (typeof v === 'string' ? v.trim() : '');
-      const coVerb: '冻结' | '解冻' | null =
+      const coVerb: '冻结' | '解冻' | '锁定' | '解锁' | null =
         fn === 'freezeApp'
           ? S2(args.action) === 'unfreeze'
             ? '解冻'
             : '冻结'
-          : fn === 'freezeRealApp'
-            ? '冻结'
+          : fn === 'freezeRealApp' || fn === 'lockApp'
+            ? '锁定'
             : fn === 'unfreezeRealApp'
-              ? '解冻'
+              ? '解锁'
               : null;
       const coName = coVerb
         ? fn === 'freezeApp'
           ? /^(全部|所有|all)/i.test(S2(args.appName))
             ? '全部应用'
             : S2(args.appName)
-          : S2(args.packageName) || '真机应用'
+          : fn === 'lockApp'
+            ? S2(args.appName) || '真机应用'
+            : S2(args.packageName) || '真机应用'
         : '';
       const continueCo = !!coVerb && !!bubbleCoalesce && bubbleCoalesce.verb === coVerb;
       if (coVerb && !continueCo) bubbleCoalesce = { verb: coVerb, names: [] };

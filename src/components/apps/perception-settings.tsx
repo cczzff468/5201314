@@ -3,7 +3,7 @@
 /**
  * 感知设置页（聊天设置二级页，微信/QQ/信息三端共用）—— v1.9.35 按机主重构令精简：
  *
- * 真机感知（APP 原生 UsageStats / ActivityWatch / Shizuku 能力实验室）整卡下线
+ * 真机感知（APP 原生 UsageStats / ActivityWatch / 无障碍能力实验室）整卡下线
  * （机主决定放弃对真实手机的操控与感知，智能体工作流全面转入 Web 网页生态）。
  * 保留的感知开关组（按会话独立，@/lib/perception localStorage 持久化，默认全关）：
  *  - 基础感知：打字思考耗时 / 设备电量 / 日历·节假日（农历+倒计时）

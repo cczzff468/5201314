@@ -1,54 +1,73 @@
 'use client';
 
 /**
- * 真机操作底座（v1.9.36：设置 › 权限给予 › AI 动手范围 选「真机」时启用）。
+ * 真机操作底座（v2.0.0 去 Shizuku 化重写）：
  *
- * v1.9.35 曾把真机操控全面退役（删了 shizuku-agent/shizuku-lab 两层）；
- * 机主 v1.9.36 需求恢复「AI 动手真机」可选——但多步 ReAct 规划层不再回来，
- * 这里只恢复「[手机操作:…] 标记」单步命令的执行底座（点按/滑动/输入/按键/
- * 拉起 App/强杀/截屏/只读探测），全部经 native-perception 仍保留的原生桥：
- *  - nativeShizukuExec（白名单 input/am/pm/monkey/dumpsys/media/wm…）
- *  - nativeShizukuScreencap / nativeInputChinese（中文输入引擎）
+ * 全部能力改经 native-perception 的原生桥实现（安卓系统 API + 无障碍服务）：
+ *  - 点按/滑动/输入/按键 → AiAccessibilityService（dispatchGesture / ACTION_SET_TEXT /
+ *    performGlobalAction）
+ *  - 静默截屏 → AiAccessibilityService.takeScreenshot（API 30+，免授权弹窗）
+ *  - 前台应用 → 无障碍事件流（实时）/ UsageStats 兜底
+ *  - 应用锁定 → LockOverlayService（UsageStats 3s 轮询 + 悬浮窗全屏遮罩）
+ *  - 拉起应用/拉回本 App → PackageManager LaunchIntent / FLAG_ACTIVITY_NEW_TASK
+ *  - 电量/音量 → BatteryManager / AudioManager；通知/短信 → 通知环形缓冲 / ContentResolver
  *
- * Web 模式（默认）完全不经过本模块——shizuku-autonomy.executePhoneOp 里
- * 按 aiActionTarget 分流；本文件的每个函数都要求原生环境 + Shizuku 就绪。
+ * 旧 Shizuku shell 通道（input/am/pm/monkey/dumpsys/media/wm 白名单执行）全部退役；
+ * 「强杀应用」无公开 API 等价物（需 shell 权限），如实报不可用并建议用「锁定」替代。
+ *
+ * Web 模式（默认）完全不经过本模块——device-autonomy.executePhoneOp 里按
+ * aiActionTarget 分流；本文件的 UI 类函数要求原生环境 + 无障碍服务已开启。
  */
 
 import {
   isNativePerception,
-  nativeShizukuExec,
-  nativeShizukuScreencap,
-  nativeInputChinese,
-  nativeRestoreIme,
-  type ShizukuExecResult,
+  nativeA11yInput,
+  nativeA11yKey,
+  nativeA11yScreenshot,
+  nativeA11ySwipe,
+  nativeA11yTap,
+  nativeBringToFront,
+  nativeGetBatteryStatus,
+  nativeGetForegroundApp,
+  nativeGetRecentNotifications,
+  nativeGetRecentSMS,
+  nativeGetScreenSize,
+  nativeGetVolume,
+  nativeListInstalledApps,
+  nativeLockApp,
+  nativeOpenApp,
+  nativeSetVolume,
+  nativeUnlockApp,
 } from './native-perception';
 import { useSettings } from './store';
 
 export type DeviceOpResult = { ok: boolean; text: string };
 
-/** 本 APP 包名（Shizuku shell 命令的权限主体） */
+/** 本 APP 包名（锁定名单禁锁主体） */
 export const OWN_PKG = 'com.z.aiphone';
 
-/** Shizuku 未就绪的统一文案（reason → 人话） */
-function gateText(r: ShizukuExecResult | null): string {
-  if (r === null) return '桥无响应（非原生环境或原生调用超时）';
-  if (r.reason === 'shizuku-not-running') return 'Shizuku 未运行：先去 设置 › 权限给予 › 调试权限 激活 Shizuku（重启手机后需重新激活）';
-  if (r.reason === 'shizuku-no-permission') return 'Shizuku 未授权：去 设置 › 权限给予 › 调试权限 点「去授权」';
-  if (r.reason) return `Shizuku 通道失败：${r.reason}`;
-  return 'Shizuku 通道失败';
-}
+/** 永不锁定/强杀名单（锁屏界面/系统 UI/自身/拨号：盖住锁屏 = 变砖） */
+export const NEVER_LOCK_PKGS = [
+  'com.z.aiphone',
+  'com.android.systemui',
+  'com.android.phone',
+  'com.android.dialer',
+  'com.android.incallui',
+  'com.android.settings',
+];
 
-/** 底座执行 → DeviceOpResult（空输出的动作命令报「已执行」） */
-async function run(
-  cmd: string[],
-  opts: { mustContain?: string[]; maxLines?: number; timeoutMs?: number; doneText?: string; trim?: (out: string) => DeviceOpResult } = {},
-): Promise<DeviceOpResult> {
-  const r = await nativeShizukuExec(cmd, opts);
-  if (r === null) return { ok: false, text: '桥无响应（原生调用超时；确认在 APP 里且 Shizuku 已运行）' };
-  if (!r.ok) return { ok: false, text: gateText(r) };
-  if (opts.trim) return opts.trim(r.out ?? '');
-  const out = (r.out ?? '').trim();
-  return out ? { ok: true, text: out } : { ok: true, text: opts.doneText ?? '已执行（无输出）' };
+/** 无障碍/原生通道失败的统一文案（reason → 人话） */
+function a11yGateText(reason?: string): string {
+  if (reason === 'no-a11y') return '无障碍服务未开启：去 设置 › 权限给予 › 无障碍服务 开启「AI 手机操控与感知」（一次开启终身有效）';
+  if (reason === 'not-supported') return '此功能需要 Android 11（API 30）及以上，静默截屏在更低版本不可用';
+  if (reason === 'no-permission') return '缺少对应系统权限：去 设置 › 权限给予 逐项开启';
+  if (reason === 'no-overlay-permission') return '悬浮窗权限未开启：去 设置 › 权限给予 › 悬浮窗权限 开启后才能全屏拦截';
+  if (reason === 'no-focus') return '当前没有焦点输入框（先点一下要输入的输入框）';
+  if (reason === 'not-editable') return '焦点处不是可编辑输入框';
+  if (reason === 'not-found') return '应用未安装（找不到启动入口）';
+  if (reason === 'old-apk') return 'APP 版本过旧：去 设置 › APP 更新 升级到 v2.0.0 及以上';
+  if (reason) return `原生通道失败：${reason}`;
+  return '原生通道失败';
 }
 
 /** 前置检查：必须原生环境（浏览器里直接给可读话术，不浪费桥超时） */
@@ -59,202 +78,203 @@ export function requireDevice(): DeviceOpResult | null {
   return null;
 }
 
-// ================= 动手（UI 级操作） =================
+// ================= 动手（UI 级操作：无障碍 dispatchGesture） =================
 
-/** 点按坐标 */
+/** 点按坐标（无障碍手势） */
 export async function labTap(x: number, y: number): Promise<DeviceOpResult> {
   if (!Number.isFinite(x) || !Number.isFinite(y)) return { ok: false, text: '坐标不合法' };
-  return run(['input', 'tap', String(Math.round(x)), String(Math.round(y))], { doneText: `已点按 (${Math.round(x)}, ${Math.round(y)})` });
+  const r = await nativeA11yTap(x, y);
+  if (r === null) return { ok: false, text: '桥无响应（原生调用超时）' };
+  if (!r.ok) return { ok: false, text: `点按失败：${a11yGateText(r.reason)}` };
+  return { ok: true, text: `已点按 (${Math.round(x)}, ${Math.round(y)})` };
 }
 
-/** 滑动 (x1,y1) → (x2,y2)，duration 毫秒 */
+/** 滑动 (x1,y1) → (x2,y2)，duration 毫秒（无障碍手势） */
 export async function labSwipe(x1: number, y1: number, x2: number, y2: number, duration = 300): Promise<DeviceOpResult> {
-  return run(
-    ['input', 'swipe', String(Math.round(x1)), String(Math.round(y1)), String(Math.round(x2)), String(Math.round(y2)), String(Math.max(100, duration))],
-    { doneText: `已滑动 (${x1},${y1})→(${x2},${y2})` },
-  );
+  const r = await nativeA11ySwipe(x1, y1, x2, y2, duration);
+  if (r === null) return { ok: false, text: '桥无响应（原生调用超时）' };
+  if (!r.ok) return { ok: false, text: `滑动失败：${a11yGateText(r.reason)}` };
+  return { ok: true, text: `已滑动 (${Math.round(x1)},${Math.round(y1)})→(${Math.round(x2)},${Math.round(y2)})` };
 }
 
-/** 按键（keycode 数字或名称） */
-export async function labKey(keycode: number | string): Promise<DeviceOpResult> {
-  return run(['input', 'keyevent', String(keycode)], { doneText: `已按按键 ${keycode}` });
-}
-
-/** 常用按键码（标记命令「按键:返回/主页/…」映射用） */
-export const KEY_WORDS: Record<string, number> = {
-  返回: 4,
-  back: 4,
-  主页: 3,
-  home: 3,
-  多任务: 187,
-  切换: 187,
-  appswitch: 187,
-  回车: 66,
-  enter: 66,
-  删除: 67,
-  del: 67,
-  音量加: 24,
-  volumeup: 24,
-  音量减: 25,
-  volumedown: 25,
-  播放暂停: 85,
-  playpause: 85,
-  下一首: 87,
-  next: 87,
-  上一首: 88,
-  previous: 88,
-  亮屏: 224,
-  wake: 224,
-  熄屏: 26,
-  sleep: 26,
+/** 常用按键 → 无障碍全局动作名（标记命令「按键:返回/主页/…」映射用） */
+export const KEY_WORDS: Record<string, string> = {
+  返回: 'back',
+  back: 'back',
+  主页: 'home',
+  home: 'home',
+  桌面: 'home',
+  多任务: 'recents',
+  切换: 'recents',
+  appswitch: 'recents',
+  recents: 'recents',
+  通知: 'notifications',
+  notifications: 'notifications',
+  通知栏: 'notifications',
+  锁屏: 'lock',
+  lock: 'lock',
 };
 
 /**
- * 输入文字：ASCII 走 input text（空格转义 %s）；中文走输入引擎
- * （nativeInputChinese：临时切 AdbImeService → 广播 commitText → 还原）。
+ * 按键（无障碍 performGlobalAction）：
+ * 支持返回/主页/多任务/通知栏/锁屏；音量类经 AudioManager 处理；
+ * 其余按键（回车/删除/媒体键）无公开 API 等价物 → 如实报不可用。
  */
-let originalIme: string | null = null;
+export async function labKey(keycode: number | string): Promise<DeviceOpResult> {
+  const raw = String(keycode).trim().toLowerCase();
+  const action = KEY_WORDS[raw] ?? KEY_WORDS[String(keycode)] ?? raw;
+  if (action === '音量加' || action === 'volumeup' || action === '24') return volumeStep(1);
+  if (action === '音量减' || action === 'volumedown' || action === '25') return volumeStep(-1);
+  const r = await nativeA11yKey(action);
+  if (r === null) return { ok: false, text: '桥无响应（原生调用超时）' };
+  if (!r.ok) {
+    if (['back', 'home', 'recents', 'notifications', 'lock', 'power_dialog', 'quick_settings'].includes(action)) {
+      return { ok: false, text: `按键失败：${a11yGateText(r.reason)}` };
+    }
+    return { ok: false, text: `按键「${keycode}」不支持：无障碍通道只支持 返回/主页/多任务/通知栏/锁屏（回车/删除/媒体键等无公开 API）` };
+  }
+  return { ok: true, text: `已按按键 ${keycode}` };
+}
 
+/** 音量步进（AudioManager；±1 档） */
+async function volumeStep(dir: 1 | -1): Promise<DeviceOpResult> {
+  const cur = await nativeGetVolume();
+  if (cur?.ok && typeof cur.volume === 'number') {
+    return labSetVolume(cur.volume + dir);
+  }
+  return { ok: false, text: '音量调节失败（原生通道不可用）' };
+}
+
+/** 输入文字（无障碍 ACTION_SET_TEXT：向当前焦点输入框整体注入，原生支持中文/emoji） */
 export async function deviceInputText(text: string): Promise<DeviceOpResult> {
   const s = text.trim();
   if (!s) return { ok: false, text: '要输入的内容为空' };
-  if (!/[^\x20-\x7E]/.test(s)) {
-    const escaped = s.replace(/ /g, '%s');
-    return run(['input', 'text', escaped], { doneText: `已输入：${s}` });
-  }
-  const r = await nativeInputChinese(s);
-  if (r === null) return { ok: false, text: '输入失败：原生输入桥无响应（中文无法用 input text 直输，且 APP 壳可能过旧）' };
-  if (r.ok === false) return { ok: false, text: `输入失败：${r.reason ?? 'inputChinese 未成功'}` };
-  if (r.via === 'ime' && r.switched && r.currentIme) originalIme = r.currentIme;
-  const viaText = r.via === 'ime' ? `输入法${r.switched ? '，已临时切换' : ''}` : 'input text';
-  return { ok: true, text: `已输入（${viaText}）：${s}` };
+  const r = await nativeA11yInput(s);
+  if (r === null) return { ok: false, text: '输入失败：原生桥无响应' };
+  if (!r.ok) return { ok: false, text: `输入失败：${a11yGateText(r.reason)}` };
+  return { ok: true, text: `已输入：${s}` };
 }
 
-/** 还原输入法（任务收尾时调用；多次调用幂等） */
+/** 还原输入法（v2.0.0 起 no-op：无障碍 SET_TEXT 不切换输入法，保留函数兼容旧调用方） */
 export async function restoreIme(): Promise<void> {
-  if (originalIme) {
-    const ime = originalIme;
-    originalIme = null;
-    await nativeRestoreIme(ime);
-  }
+  /* no-op */
 }
 
-/** 拉起真机 App（monkey 按包名，免查 Activity 名） */
+/** 拉起真机 App（PackageManager LaunchIntent） */
 export async function labOpenApp(pkg: string): Promise<DeviceOpResult> {
   if (!/^[\w.]+$/.test(pkg)) return { ok: false, text: `包名不合法（收到「${pkg}」，需要形如 com.tencent.mm）` };
-  return run(['monkey', '-p', pkg, '-c', 'android.intent.category.LAUNCHER', '1'], {
-    doneText: `已拉起 ${pkg}`,
-    trim: (out) => ({
-      ok: !/aborted|Error/i.test(out),
-      text: /aborted|Error/i.test(out) ? `拉起失败（未安装？）：${out.trim().slice(0, 200)}` : `已拉起 ${pkg}`,
-    }),
-  });
-}
-
-/** 强杀真机 App。
- *  全局逻辑冲突修复 #2：禁止强杀宿主 App 自身与系统核心（systemui/phone），避免 AI 把自己杀掉形成死循环 */
-export async function labForceStop(pkg: string): Promise<DeviceOpResult> {
-  if (!/^[\w.]+$/.test(pkg)) return { ok: false, text: '包名不合法' };
-  // 禁杀宿主 App 与系统核心
-  if (pkg === OWN_PKG || pkg === 'com.android.systemui' || pkg === 'com.android.phone') {
-    return { ok: false, text: `禁止强杀核心应用（${pkg}）` };
-  }
-  return run(['am', 'force-stop', pkg], { doneText: `已强杀 ${pkg}` });
-}
-
-// ================= 看见（只读探测） =================
-
-/** 静默截屏：ok 时 text 为 dataURL（VLM 识屏/用户预览直接 <img>） */
-export async function labScreencap(): Promise<DeviceOpResult & { image?: string }> {
-  const r = await nativeShizukuScreencap();
+  const r = await nativeOpenApp(pkg);
   if (r === null) return { ok: false, text: '桥无响应（原生调用超时）' };
-  if (r.ok && r.frame) return { ok: true, text: '截屏成功（免授权弹窗）', image: r.frame };
-  if (r.reason === 'shizuku-not-running' || r.reason === 'shizuku-no-permission') {
-    return { ok: false, text: gateText(r as ShizukuExecResult) };
-  }
-  return { ok: false, text: '截屏失败（可能命中 FLAG_SECURE 防截屏页面，或 Shizuku 服务异常）' };
+  if (!r.ok) return { ok: false, text: `拉起失败：${a11yGateText(r.reason)}` };
+  return { ok: true, text: `已拉起 ${pkg}` };
 }
 
-/** 屏幕分辨率（wm size；滑动/识屏坐标换算用） */
+/** 把本 App 强行拉到前台（吃醋拉回/切回聊天） */
+export async function labBringToFront(): Promise<DeviceOpResult> {
+  const r = await nativeBringToFront();
+  if (r === null) return { ok: false, text: '桥无响应（原生调用超时）' };
+  if (!r.ok) return { ok: false, text: `拉回失败：${a11yGateText(r.reason)}` };
+  return { ok: true, text: '已把 AI Phone 拉到前台' };
+}
+
+/**
+ * 强杀真机 App —— v2.0.0 去 Shizuku 化后不可用（am force-stop 需要 shell 权限，
+ * 普通应用无公开 API 等价物）。如实报不可用，建议用「锁定」替代。
+ */
+export async function labForceStop(_pkg: string): Promise<DeviceOpResult> {
+  return {
+    ok: false,
+    text: '去 Shizuku 化后普通应用无法强杀其他应用（系统安全限制）——可改用「锁定应用」：全屏遮罩拦截，效果更强',
+  };
+}
+
+// ================= 看见（只读探测：原生系统 API） =================
+
+/** 静默截屏（无障碍 takeScreenshot API 30+）：ok 时 text 为说明、image 为 dataURL */
+export async function labScreencap(): Promise<DeviceOpResult & { image?: string }> {
+  const r = await nativeA11yScreenshot();
+  if (r === null) return { ok: false, text: '桥无响应（原生调用超时）' };
+  if (r.ok && r.frame) return { ok: true, text: '截屏成功（无障碍静默截屏）', image: r.frame };
+  return { ok: false, text: `截屏失败：${a11yGateText(r.reason)}` };
+}
+
+/** 屏幕分辨率（原生 DisplayMetrics；滑动/识屏坐标换算用） */
 export async function labScreenSize(): Promise<{ w: number; h: number } | null> {
-  const r = await run(['wm', 'size']);
-  const out = r.ok ? r.text : '';
-  const ovr = /Override size:\s*(\d{3,4})\s*[x×]\s*(\d{3,4})/i.exec(out);
-  const phys = /Physical size:\s*(\d{3,4})\s*[x×]\s*(\d{3,4})/i.exec(out);
-  const m = ovr ?? phys;
-  return m ? { w: Number(m[1]), h: Number(m[2]) } : null;
+  const r = await nativeGetScreenSize();
+  if (r?.ok && r.width && r.height) return { w: r.width, h: r.height };
+  return null;
 }
 
-/** 实时前台应用（dumpsys window 焦点行） */
+/** 实时前台应用（无障碍事件流优先，UsageStats 兜底） */
 export async function labForegroundApp(): Promise<DeviceOpResult> {
-  return run(['dumpsys', 'window'], {
-    mustContain: ['mCurrentFocus'],
-    maxLines: 30,
-    trim: (out) => {
-      const line = out.split('\n').map((l) => l.trim()).find((l) => l.startsWith('mCurrentFocus')) ?? '';
-      const m = /mCurrentFocus=Window\{[^ ]+ [^ ]+ ([\w.$]+)\/([^\s}]+)/.exec(line);
-      if (m) return { ok: true, text: `前台应用：${m[1]}\n界面：${m[2]}` };
-      return { ok: true, text: line || out.slice(0, 400) || '未取到焦点信息' };
-    },
-  });
+  const r = await nativeGetForegroundApp();
+  if (r === null) return { ok: false, text: '桥无响应（原生调用超时）' };
+  if (r.ok && r.app) {
+    const via = r.via === 'a11y' ? '（无障碍实时）' : '（使用情况兜底）';
+    return { ok: true, text: `前台应用：${r.app}${r.name && r.name !== r.app ? `（${r.name}）` : ''}${via}` };
+  }
+  if (r.reason === 'no-permission') {
+    return { ok: false, text: '查不到前台应用：需要开启「使用情况访问」或「无障碍服务」任一项（设置 › 权限给予）' };
+  }
+  return { ok: false, text: `前台应用查询失败：${a11yGateText(r.reason)}` };
 }
 
-/** 电量状态（dumpsys battery：电量/充电中/健康） */
+/** 电量状态（BatteryManager 粘性广播） */
 export async function labBattery(): Promise<DeviceOpResult> {
-  return run(['dumpsys', 'battery'], {
-    maxLines: 40,
-    trim: (out) => {
-      const level = /level:\s*(\d+)/.exec(out)?.[1];
-      const charging = /status:\s*2/.test(out);
-      if (level === undefined) return { ok: true, text: out.slice(0, 300) };
-      return { ok: true, text: `电量 ${level}%${charging ? '（充电中）' : ''}` };
-    },
-  });
+  const r = await nativeGetBatteryStatus();
+  if (r === null) return { ok: false, text: '桥无响应（原生调用超时）' };
+  if (r.ok && typeof r.level === 'number' && r.level >= 0) {
+    return { ok: true, text: `电量 ${r.level}%${r.charging ? '（充电中）' : ''}` };
+  }
+  return { ok: false, text: `电量查询失败：${a11yGateText(r.reason)}` };
 }
 
-/** 音量档位（media volume → streamMusic 档位） */
+/** 音量档位（AudioManager STREAM_MUSIC） */
 export async function labVolume(): Promise<DeviceOpResult> {
-  return run(['media', 'volume', '--stream', '3', '--get'], {
-    maxLines: 10,
-    trim: (out) => {
-      const m = /volume is\s*(\d+)/i.exec(out);
-      return { ok: true, text: m ? `媒体音量档位：${m[1]}` : out.slice(0, 200) || '已查询' };
-    },
-  });
+  const r = await nativeGetVolume();
+  if (r === null) return { ok: false, text: '桥无响应（原生调用超时）' };
+  if (r.ok && typeof r.volume === 'number') {
+    return { ok: true, text: `媒体音量档位：${r.volume}/${r.max ?? '?'}` };
+  }
+  return { ok: false, text: `音量查询失败：${a11yGateText(r.reason)}` };
 }
 
-/** 调媒体音量（--set 档位） */
+/** 调媒体音量（AudioManager，0~max 自动钳制） */
 export async function labSetVolume(index: number): Promise<DeviceOpResult> {
   const v = Math.max(0, Math.min(15, Math.round(index)));
-  return run(['media', 'volume', '--stream', '3', '--set', String(v)], { doneText: `媒体音量已调到 ${v}` });
+  const r = await nativeSetVolume(v);
+  if (r === null) return { ok: false, text: '桥无响应（原生调用超时）' };
+  if (!r.ok) return { ok: false, text: `音量调节失败：${a11yGateText(r.reason)}` };
+  return { ok: true, text: `媒体音量已调到 ${r.volume ?? v}` };
 }
 
-/** 通知栏快照（最近通知的 App + 标题，noredact 需 shell 权限） */
-export async function labNotificationSnapshot(): Promise<DeviceOpResult> {
-  return run(['dumpsys', 'notification', '--noredact'], {
-    maxLines: 2600,
-    timeoutMs: 12_000,
-    trim: (out) => {
-      const rows: string[] = [];
-      let curPkg = '';
-      let title = '';
-      for (const raw of out.split('\n')) {
-        const l = raw.trim();
-        const pm = /^package=([\w.]+)/.exec(l);
-        if (pm) {
-          if (curPkg && title) rows.push(`${curPkg}：${title}`);
-          curPkg = pm[1];
-          title = '';
-          continue;
-        }
-        const tm = /^android.title=(.+)$/.exec(l);
-        if (tm) title = tm[1].trim();
-      }
-      if (curPkg && title) rows.push(`${curPkg}：${title}`);
-      if (rows.length === 0) return { ok: true, text: '通知栏没有可见通知' };
-      return { ok: true, text: `最近通知：\n${rows.slice(-10).join('\n')}` };
-    },
+/** 最近通知（通知环形缓冲，需「通知使用权」） */
+export async function labNotificationSnapshot(limit = 10): Promise<DeviceOpResult> {
+  const r = await nativeGetRecentNotifications(limit);
+  if (r === null) return { ok: false, text: '桥无响应（原生调用超时）' };
+  if (!Array.isArray(r)) return { ok: false, text: `通知读取失败：${a11yGateText(r.error)}` };
+  if (r.length === 0) return { ok: true, text: '通知栏没有可见通知' };
+  const rows = r.map((n) => {
+    const t = new Date(n.ts);
+    const hhmm = `${String(t.getHours()).padStart(2, '0')}:${String(t.getMinutes()).padStart(2, '0')}`;
+    const title = n.title || n.text;
+    return `${hhmm} ${n.app}：${title}${n.text && n.title ? `（${n.text.slice(0, 60)}）` : ''}`;
   });
+  return { ok: true, text: `最近通知：\n${rows.join('\n')}` };
+}
+
+/** 最近短信（ContentResolver 收件箱，需 READ_SMS） */
+export async function labRecentSMS(limit = 10): Promise<DeviceOpResult> {
+  const r = await nativeGetRecentSMS(limit);
+  if (r === null) return { ok: false, text: '桥无响应（原生调用超时）' };
+  if (!Array.isArray(r)) return { ok: false, text: `短信读取失败：${a11yGateText(r.error)}` };
+  if (r.length === 0) return { ok: true, text: '收件箱没有短信' };
+  const rows = r.map((m) => {
+    const t = new Date(m.ts);
+    const hhmm = `${String(t.getHours()).padStart(2, '0')}:${String(t.getMinutes()).padStart(2, '0')}`;
+    return `${hhmm} ${m.address || '未知号码'}：${m.body.slice(0, 80)}`;
+  });
+  return { ok: true, text: `最近短信：\n${rows.join('\n')}` };
 }
 
 // ================= 识屏（截屏 + VLM 视觉理解） =================
@@ -277,7 +297,7 @@ export async function visionAsk(image: string, ask: string, timeoutMs = 90_000):
   throw new Error(msg);
 }
 
-/** 「看屏幕」完整链：静默截屏 → VLM 描述（识图失败时只报截屏成功） */
+/** 「看屏幕」完整链：无障碍静默截屏 → VLM 描述（识图失败时只报截屏成功） */
 export async function labLookScreen(detailed: boolean): Promise<DeviceOpResult & { image?: string }> {
   const shot = await labScreencap();
   if (!shot.ok) return shot;
@@ -296,59 +316,66 @@ export async function labLookScreen(detailed: boolean): Promise<DeviceOpResult &
   }
 }
 
-// ================= 应用搜索与冻结（真机模式） =================
+// ================= 应用搜索与锁定（真机模式） =================
 
-/** 列出真机已安装的全部第三方 + 系统应用包名（pm list packages）。
+/** 列出真机已安装的第三方应用（PackageManager）。
  *  返回包名数组；失败返回空数组。供 searchRealApp 模糊匹配用。 */
-export async function labListPackages(includeSystem = false): Promise<string[]> {
+export async function labListPackages(_includeSystem = false): Promise<string[]> {
   try {
-    const cmd = includeSystem
-      ? ['pm', 'list', 'packages']
-      : ['pm', 'list', 'packages', '-3']; // -3 只列第三方应用（更聚焦用户装的 App）
-    let r = await nativeShizukuExec(cmd, { maxLines: 800, timeoutMs: 12_000 });
-    // 第三方列表为空时（部分 ROM），回退全量
-    if (r && r.ok && (r.out ?? '').trim().length === 0) {
-      r = await nativeShizukuExec(['pm', 'list', 'packages'], { maxLines: 1200, timeoutMs: 12_000 });
-    }
-    if (!r || !r.ok) return [];
-    const out = (r.out ?? '').trim();
-    const pkgs: string[] = [];
-    for (const line of out.split('\n')) {
-      const m = /^package:([\w.]+)\s*$/.exec(line.trim());
-      if (m) pkgs.push(m[1]);
-    }
-    return pkgs;
+    const apps = await nativeListInstalledApps();
+    if (!apps) return [];
+    return apps.map((a) => a.pkg);
   } catch {
     return [];
   }
 }
 
-/** 真机冻结应用（pm suspend）。
- *  全局逻辑冲突修复 #2：禁止冻结宿主 App 自身与系统核心，防 AI 把当前运行 App 锁了形成死循环。 */
-export async function labSuspendApp(pkg: string): Promise<DeviceOpResult> {
-  if (!/^[\w.]+$/.test(pkg)) return { ok: false, text: `包名不合法（${pkg}）` };
-  if (pkg === OWN_PKG || pkg === 'com.android.systemui' || pkg === 'com.android.phone') {
-    return { ok: false, text: `禁止冻结核心应用（${pkg}）——锁了会导致手机无法操作` };
+/** 已安装应用清单（pkg + 中文名；供锁定名单/搜索按名字解析包名） */
+export async function labInstalledApps(): Promise<{ pkg: string; name: string }[]> {
+  try {
+    return (await nativeListInstalledApps()) ?? [];
+  } catch {
+    return [];
   }
-  const r = await nativeShizukuExec(['pm', 'suspend', pkg], { maxLines: 12, timeoutMs: 10_000 });
-  if (r === null) return { ok: false, text: '桥无响应（非原生环境或 Shizuku 断连）' };
-  if (!r.ok) return { ok: false, text: `冻结失败：${gateText(r)}` };
-  const out = (r.out ?? '').trim();
-  if (/Error|Exception|denied|not found|Unknown/i.test(out)) {
-    return { ok: false, text: `冻结失败（厂商 ROM 可能限制 pm suspend）：${out.slice(0, 150)}` };
-  }
-  return { ok: true, text: `已在真实手机上冻结 ${pkg}（pm suspend，桌面图标变灰打不开）` };
 }
 
-/** 真机解冻应用（pm unsuspend）。 */
-export async function labUnsuspendApp(pkg: string): Promise<DeviceOpResult> {
+/** 锁定名单禁锁校验（自身/系统核心：锁了会导致手机无法操作） */
+export function isNeverLockPkg(pkg: string): boolean {
+  return NEVER_LOCK_PKGS.includes(pkg);
+}
+
+/**
+ * 锁定应用（v2.0.0：LockOverlayService 全屏遮罩锁，替代 pm suspend）：
+ * UsageStats 3s 轮询前台 → 检测到锁定应用 → 悬浮窗全屏拦截（AI 质问文案 +
+ * 回到桌面按钮）；unlockAt=0 锁到哄好为止。
+ */
+export async function labLockApp(
+  pkg: string,
+  opts: { unlockAt?: number; charName?: string; message?: string } = {},
+): Promise<DeviceOpResult> {
   if (!/^[\w.]+$/.test(pkg)) return { ok: false, text: `包名不合法（${pkg}）` };
-  const r = await nativeShizukuExec(['pm', 'unsuspend', pkg], { maxLines: 12, timeoutMs: 10_000 });
-  if (r === null) return { ok: false, text: '桥无响应（非原生环境或 Shizuku 断连）' };
-  if (!r.ok) return { ok: false, text: `解冻失败：${gateText(r)}` };
-  const out = (r.out ?? '').trim();
-  if (/Error|Exception|not found|Unknown/i.test(out)) {
-    return { ok: false, text: `解冻失败：${out.slice(0, 150)}` };
+  if (isNeverLockPkg(pkg)) {
+    return { ok: false, text: `禁止锁定核心应用（${pkg}）——锁了会导致手机无法操作` };
   }
-  return { ok: true, text: `已解冻 ${pkg}（应用恢复正常可用）` };
+  const r = await nativeLockApp({ pkg, ...opts });
+  if (!r.ok) return { ok: false, text: `锁定失败：${a11yGateText(r.reason)}` };
+  const dur = opts.unlockAt ? `，${Math.max(1, Math.round((opts.unlockAt - Date.now()) / 60_000))} 分钟后自动解锁` : '（直到哄好才解锁）';
+  return { ok: true, text: `已在真实手机上锁定 ${pkg}${dur}：打开就会被全屏遮罩拦住` };
+}
+
+/** 解锁应用（停遮罩停守护） */
+export async function labUnlockApp(): Promise<DeviceOpResult> {
+  const r = await nativeUnlockApp();
+  if (!r.ok && r.reason !== undefined) return { ok: false, text: `解锁失败：${a11yGateText(r.reason)}` };
+  return { ok: true, text: '已解锁（应用恢复正常可用）' };
+}
+
+/** 真机「冻结」应用（v2.0.0 语义变更：pm suspend 退役 → 全屏遮罩锁；函数名保留兼容） */
+export async function labSuspendApp(pkg: string): Promise<DeviceOpResult> {
+  return labLockApp(pkg);
+}
+
+/** 真机「解冻」应用（v2.0.0 语义变更：解锁遮罩锁；函数名保留兼容） */
+export async function labUnsuspendApp(_pkg: string): Promise<DeviceOpResult> {
+  return labUnlockApp();
 }

@@ -67,7 +67,7 @@ import {
   type BubbleMenuItem,
 } from '@/components/apps/bubble-menu';
 import { addressNameOf, displayNameOf, isFriendIn, meTileLabel, nameVariantHit, contactNameVariants, type ContactRecord } from '@/lib/contacts';
-import { buildShizukuAutonomyRules, enqueuePhoneOp } from '@/lib/ios/shizuku-autonomy';
+import { buildShizukuAutonomyRules, enqueuePhoneOp } from '@/lib/ios/device-autonomy';
 import { useOpPill, SkillUsePill } from './skill-use-pill';
 import { aiVoiceFreqLabel, decideAiVoiceMessage, getAiVoiceFreq, saveAiVoiceFreq, synthesizeAiVoice } from '@/lib/ios/ai-voice';
 import { buildNpcPromptExtra } from '@/lib/ios/npc-bond';

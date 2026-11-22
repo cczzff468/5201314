@@ -11,9 +11,9 @@
  */
 
 /** 当前最新版本（与 android-shell versionName 保持一致） */
-export const APP_VERSION = '1.9.46';
+export const APP_VERSION = '2.0.0';
 /** 版本号数字（与 android-shell versionCode 保持一致；覆盖安装要求只增不减） */
-export const APP_VERSION_CODE = 62;
+export const APP_VERSION_CODE = 63;
 
 export interface AppReleaseNote {
   version: string;
@@ -24,6 +24,18 @@ export interface AppReleaseNote {
 
 /** 版本历史（新→旧；设置 › APP 更新 页渲染，最新一条即当前版本） */
 export const APP_RELEASE_NOTES: AppReleaseNote[] = [
+  {
+    version: '2.0.0',
+    date: '2026-11-22',
+    items: [
+      '【需更新 APK·大重构】真机吃醋与工具全面「去 Shizuku 化」：不再需要另装 Shizuku，全部能力改由安卓原生系统 API + 无障碍服务实现（AiAccessibilityService）',
+      '权限给予页全新 11 项权限清单：无障碍服务/使用情况访问/悬浮窗/通知使用/短信/通讯录/日历/闹钟/位置/媒体文件/电池优化——每一项点击直接跳到系统对应授权页',
+      '应用锁定新引擎（替代 pm suspend）：经「使用情况访问」每 3 秒监测前台应用，被锁应用一打开就弹出全屏遮罩（AI 质问文案+回到桌面按钮），锁到期原生自动解锁',
+      'AI 无障碍静默截屏（Android 11+）：免授权弹窗，截屏交识图模型分析后 AI 按人设质问你，还能把截图原图发到聊天里质问（吃醋查岗全闭环）',
+      'Agent 新工具六件套：getForegroundApp 查前台应用 / lockApp 锁定应用 / takeScreenshot 截屏 / switchToChat 拉回聊天 / getUsageStats 真机使用时长 / getRecentSMS+getRecentNotifications 读短信与通知；强杀已退役（系统限制），改用锁定',
+      '新增真机读取能力：最近短信（收件箱）、最近通知（微信/QQ 等一切通知）、电量、音量、应用清单全部原生读取；点按/滑动/输入改无障碍注入（原生支持中文）',
+    ],
+  },
   {
     version: '1.9.46',
     date: '2026-11-21',

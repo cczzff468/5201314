@@ -117,7 +117,7 @@ import {
 } from '@/lib/perception';
 import { useEnterSend, setEnterSend, guardEnterToSend } from '@/lib/enter-send';
 // v1.3 Shizuku 自主权：[手机操作:命令] 标记的执行器 + 按开关动态注入的教学规则（设置 APP → AI 动手）
-import { buildShizukuAutonomyRules, enqueuePhoneOp } from '@/lib/ios/shizuku-autonomy';
+import { buildShizukuAutonomyRules, enqueuePhoneOp } from '@/lib/ios/device-autonomy';
 import { useOpPill, SkillUsePill } from '../skill-use-pill';
 import { kvGet, kvSet, kvDel } from '@/lib/ios/idb-kv';
 import { getMemSettings, memAfterAiTurn, memChatRecallBlock, memConvoFromRaw, memPurgeMessageSources, setMemScopeForApp } from '@/lib/memory';

@@ -14,7 +14,7 @@
  */
 
 import { useSyncExternalStore } from 'react';
-import { getAiActionTarget, buildAutonomyDirective } from './shizuku-autonomy';
+import { getAiActionTarget, buildAutonomyDirective } from './device-autonomy';
 import { buildPhoneTools, execWebTool, fcRequest, cleanToolLogs, type FcMessage } from './phone-tools';
 import { useSettings } from './store';
 
@@ -200,7 +200,7 @@ function webAgentSystemPrompt(recentChat?: string): string {
   const device = getAiActionTarget() === 'device';
   return [
     '你是这台「AI Phone」虚拟手机里的智能助手（像 Siri / 小爱同学），机主刚给你下达了一个任务。这台手机里的所有 App（微信/QQ/信息/X论坛/音乐/备忘录/时钟/天气/淘宝/美团…）都活在同一个网页生态里，你已经接入内部工具，可以真实完成任务。' +
-      (device ? '当前 AI 动手范围是「真机」：除网页工具外，你还能经 Shizuku 操控机主的真实手机（点按/滑动/输入/按键/拉起 App/看屏幕/强杀）。' : ''),
+      (device ? '当前 AI 动手范围是「真机」：除网页工具外，你还能经无障碍服务+原生 API 操控机主的真实手机（点按/滑动/输入/按键/拉起 App/看屏幕/锁定应用）。' : ''),
     '',
     ...buildAutonomyDirective(),
     '',

@@ -4,15 +4,15 @@ android {
     namespace = "com.z.aiphone"
     compileSdk = rootProject.ext.compileSdkVersion
     buildFeatures {
-        // Shizuku UserService 需要 AIDL（IPerceptionShellService）
-        aidl true
+        // v2.0.0：Shizuku UserService（IPerceptionShellService AIDL）整体移除，
+        // 真机能力全部改由原生系统 API + 无障碍服务实现，不再需要 AIDL
     }
     defaultConfig {
         applicationId "com.z.aiphone"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 62          // v1.9.46 音量键翻页原生直通（MainActivity 拦截音量键转发 WebView __nativeVolTurn + NativePerception.setVolumeKeyTurn 桥方法）
-        versionName "1.9.46"    // v1.9.46：音量键翻页直通（阅读器里音量上=上一页·音量下=下一页，不再只改音量）
+        versionCode 63          // v2.0.0 去 Shizuku 化大重构（AiAccessibilityService 无障碍底座 + LockOverlayService 悬浮窗遮罩锁 + 11 项权限中心 + 短信/通知/电量/音量原生读取）
+        versionName "2.0.0"     // v2.0.0：真机吃醋与工具全面改用安卓原生 API 与无障碍服务
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -40,9 +40,6 @@ dependencies {
     implementation "androidx.coordinatorlayout:coordinatorlayout:$androidxCoordinatorLayoutVersion"
     implementation "androidx.core:core-splashscreen:$coreSplashScreenVersion"
     implementation project(':capacitor-android')
-    // Shizuku（时长数据源「Shizuku 模式」）：shell 权限 dumpsys usagestats 读系统原始账本
-    implementation "dev.rikka.shizuku:api:13.1.5"
-    implementation "dev.rikka.shizuku:provider:13.1.5"
     testImplementation "junit:junit:$junitVersion"
     androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
     androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"

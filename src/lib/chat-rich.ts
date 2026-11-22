@@ -201,7 +201,7 @@ export type RichActionKind =
   // 执行器产出「「角色名」拍了拍你+文案」系统提示行
   | 'pat'
   // Shizuku 真实手机操作（v1.3）：[手机操作:命令:参数]——AI 动手/看见能力；
-  // targetId = 冒号后的完整参数段（如「点按:540:1200」），由 shizuku-autonomy.executePhoneOp
+  // targetId = 冒号后的完整参数段（如「点按:540:1200」），由 device-autonomy.executePhoneOp
   // 解析分发；逐项开关 gate 在该模块（设置 APP → AI 动手），关闭时教学不注入+执行硬拦
   | 'phone-op';
 
@@ -482,7 +482,7 @@ export function extractRichActionParts(text: string): RichActionPart[] {
       parts.push({ type: 'action', action: { kind, targetId: raw } });
     } else if (kind === 'phone-op') {
       // [手机操作:命令:参数…]（v1.3 Shizuku 自主权）：参数整段保留（命令与参数由
-      // shizuku-autonomy.executePhoneOp 再解析；参数里可能出现冒号/坐标/包名，不能截断）；
+      // device-autonomy.executePhoneOp 再解析；参数里可能出现冒号/坐标/包名，不能截断）；
       // 空 body 丢弃（[手机操作] 没写命令等于没写标记）
       if (raw) parts.push({ type: 'action', action: { kind, targetId: raw } });
     } else {

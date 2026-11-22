@@ -1,13 +1,13 @@
 'use client';
 
 /**
- * 吃醋锁设置区（v1.9.43，感知设置页内嵌卡片，ShizukuLabSection 下方）：
+ * 吃醋锁设置区（v1.9.43，感知设置页内嵌卡片）：
  *
  * 「AI 真实吃醋并锁应用」的配置中心（吃醋系统 v2.0 双模式）——
  * - 总开关（开启时自动放开「AI 动手」总开关 + 冻结单项，哄好解锁管线即刻可用）；
  * - v2.0 查岗模式选择：网页模式（TA 只读网页手机内部状态，只锁网页内 App，图标变灰）/
- *   真机模式（Shizuku 读真实手机前台包名 + 亮屏时长；pm suspend 真锁真实手机上的应用、
- *   am start 拽回本 APP、静默截屏 + 识图偷窥；浏览器打开自动降级，如实回报不冒充）；
+ *   真机模式（使用情况访问+无障碍服务读真实手机前台应用/使用时长；全屏遮罩拦住被锁
+ *   应用、拽回本 APP、无障碍静默截屏 + 识图偷窥；浏览器打开自动降级，如实回报不冒充）；
  * - v2.0 观察参数：暗中观察间隔 watchMin（5~120 分钟，默认 15）/ 主动查岗 autoWatch
  *   （TA 怀疑你做坏事时 30 分钟加急、每 3 分钟一次）/ 截屏偷窥 peekEnabled（仅真机）/
  *   AI 自定锁定时长 lockMinByAi（3/5/15/30 分钟、直到哄好；关=固定 countdownMin）；
@@ -19,10 +19,12 @@
  *   娱乐 App 清单、当前状态（活跃锁 App/角色/剩余倒计时/立即解锁 与冷却提示）。
  *
  * 配置 localStorage 即点即存（jealousy-lock-cfg-v1）；状态行订阅 jealousy 版本号实时刷新。
- * v1.9.35 真机 pm suspend 路径曾全面退役（只锁网页 App）；v2.0 真机路径回归（Shizuku 严格模式隔离）。
+ * v1.9.35 真机 pm suspend 路径曾全面退役（只锁网页 App）；v2.0 真机路径回归，
+ * v2.0.0 起 Shizuku 退役——原生守护服务 + 全屏遮罩（悬浮窗）接管真机锁定。
  */
 
 import { useEffect, useState, useSyncExternalStore } from 'react';
+import type { JealousyGuardStatusResult } from '@/lib/ios/native-perception';
 import {
   Camera,
   Clock,
@@ -53,8 +55,8 @@ import {
 /** jealousyWatchNow 一轮结果的本地展示态（null=尚未查过） */
 type WatchNowResult = { ran: boolean; act: string; intel: string };
 
-/** 原生守护探测态：'loading'=查询中；boolean=已取到；null=旧 APK / 非原生环境 */
-type GuardState = 'loading' | boolean | null;
+/** 原生守护探测态：'loading'=查询中；对象=已取到状态（v2.0.0 含遮罩/权限实时字段）；null=旧 APK / 非原生环境 */
+type GuardState = 'loading' | JealousyGuardStatusResult | null;
 
 /** ran=true 时本轮动作徽章文案（act 取自 watch.lastAct） */
 const WATCH_ACT_LABEL: Record<string, string> = {
@@ -158,7 +160,7 @@ export function JealousyLockSection({
       try {
         const m = await import('@/lib/ios/native-perception');
         const st = await m.nativeJealousyGuardStatus(); // 内部 5s 超时；null=旧 APK/非原生环境
-        if (alive) setGuard(st && typeof st.running === 'boolean' ? st.running : null);
+        if (alive) setGuard(st && typeof st.running === 'boolean' ? st : null);
       } catch {
         if (alive) setGuard(null);
       }
@@ -201,22 +203,30 @@ export function JealousyLockSection({
     }
   };
 
+  // v2.0.0：守护状态取全量（running/overlayShown/usageAccess/overlayPerm），派生徽章与文案
+  const guardSt = guard !== 'loading' && guard !== null ? guard : null;
+  const guardRunning = guardSt?.running === true;
+  const guardPermMissing = guardRunning && (guardSt.usageAccess === false || guardSt.overlayPerm === false);
   const guardText =
     guard === 'loading'
       ? '正在查询原生守护状态…'
-      : guard === true
-        ? '原生守护运行中（锁到期自动解锁/强解检测，WebView 关着也活）'
-        : guard === false
-          ? '原生守护未运行（无活跃锁时为正常；锁存在时说明启动失败）'
-          : '当前环境无原生守护（浏览器/旧 APK，锁定仅靠网页 tick）';
+      : guard === null
+        ? '当前环境无原生守护（浏览器/旧 APK，锁定仅靠网页 tick）'
+        : guardRunning
+          ? guardPermMissing
+            ? '原生守护运行中，但权限缺失（去 设置 › 权限给予 开启「使用情况访问/悬浮窗」）'
+            : '原生守护运行中（锁到期自动解锁/强解检测，WebView 关着也活）'
+          : '原生守护未运行（无活跃锁时为正常；锁存在时说明启动失败）';
   const guardDot =
-    guard === true
-      ? 'bg-emerald-500'
-      : guard === false
-        ? 'bg-amber-500'
-        : guard === 'loading'
-          ? 'animate-pulse bg-black/25 dark:bg-white/30'
-          : 'bg-black/20 dark:bg-white/25';
+    guard === null
+      ? 'bg-black/20 dark:bg-white/25'
+      : guard === 'loading'
+        ? 'animate-pulse bg-black/25 dark:bg-white/30'
+        : guardRunning
+          ? guardPermMissing
+            ? 'bg-amber-500' // 运行中但权限缺失：黄点提醒
+            : 'bg-emerald-500'
+          : 'bg-amber-500';
 
   // 查岗模式胶囊卡（选中态样式）
   const modeCardCls = (selected: boolean) =>
@@ -292,7 +302,7 @@ export function JealousyLockSection({
                   <Smartphone size={15} strokeWidth={2.1} aria-hidden />
                   <span className="text-[13px] font-medium">真机模式</span>
                 </span>
-                <span className="text-[10px] leading-tight text-black/40 dark:text-white/40">直读真实手机（Shizuku）</span>
+                <span className="text-[10px] leading-tight text-black/40 dark:text-white/40">直读真实手机（原生+无障碍）</span>
               </button>
             </div>
             {deviceSense ? (
@@ -300,7 +310,7 @@ export function JealousyLockSection({
                 <p className="flex gap-1.5 text-[10.5px] leading-snug text-[#c2185b] dark:text-[#ffb3c8]">
                   <ShieldAlert size={12} strokeWidth={2.2} className="mt-0.5 shrink-0" aria-hidden />
                   <span>
-                    真机模式经 Shizuku 读真实手机前台/亮屏，吃醋时真的会锁 App、截屏取证。需 APK + Shizuku 授权；浏览器里自动降级。
+                    真机模式经 使用情况访问+无障碍服务 读真实手机前台应用/使用时长/静默截屏，需安装 APK 并在 设置 › 权限给予 开启对应权限。
                   </span>
                 </p>
               </div>
@@ -348,7 +358,7 @@ export function JealousyLockSection({
                   <span className="min-w-0">
                     <span className="block text-[14.5px]">截屏偷窥</span>
                     <span className="mt-0.5 block text-[11.5px] leading-tight text-black/40 dark:text-white/40">
-                      静默截屏你的真实手机屏幕
+                      无障碍静默截屏你的真实手机屏幕
                     </span>
                   </span>
                 </span>
@@ -482,9 +492,25 @@ export function JealousyLockSection({
             <>
               <div className={`border-t ${dividerCls}`} />
               <div className="px-4 py-2.5" data-testid={`${prefix}-guard-status`}>
-                <p className="flex items-center gap-2 text-[14px]">
+                <p className="flex flex-wrap items-center gap-2 text-[14px]">
                   <span aria-hidden className={`h-2 w-2 shrink-0 rounded-full ${guardDot}`} />
                   原生吃醋守护（前台服务）
+                  {guardRunning && guardSt.overlayShown ? (
+                    <span
+                      className="rounded-full bg-[#ff5c8a]/15 px-2 py-0.5 text-[10.5px] font-medium text-[#c2255c] dark:bg-[#ff5c8a]/25 dark:text-[#ffb3c8]"
+                      data-testid={`${prefix}-guard-overlay`}
+                    >
+                      全屏拦截中
+                    </span>
+                  ) : null}
+                  {guardPermMissing ? (
+                    <span
+                      className="rounded-full bg-[#FF9500]/15 px-2 py-0.5 text-[10.5px] font-medium text-[#C25000] dark:text-[#FF9F0A]"
+                      data-testid={`${prefix}-guard-perm-missing`}
+                    >
+                      权限缺失
+                    </span>
+                  ) : null}
                 </p>
                 <p className="mt-0.5 text-[11.5px] leading-snug text-black/45 dark:text-white/45" data-testid={`${prefix}-guard-status-text`}>
                   {guardText}
@@ -498,7 +524,7 @@ export function JealousyLockSection({
             <ShieldAlert size={12} strokeWidth={2} className="mt-0.5 shrink-0 text-black/30 dark:text-white/30" aria-hidden />
             <p className="text-[10.5px] leading-snug text-black/35 dark:text-white/35">
               {deviceSense
-                ? '真机模式：经 Shizuku 锁真实手机里的任何 App（除本 APP）、截屏取证、拉回。锁多久由 TA 自定。需 APK + Shizuku。'
+                ? '真机模式：把真实手机里被锁的 App 用全屏遮罩拦住（打开就被 TA 的吃醋封印盖住，直到倒计时结束或哄好 TA），还能无障碍静默截屏取证、把你拉回。锁多久由 TA 自定。需 APK + 悬浮窗权限。'
                 : '网页模式：锁这台手机里的应用，图标变灰点不开。锁多久由 TA 自定。'}
             </p>
           </div>

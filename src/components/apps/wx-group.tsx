@@ -88,7 +88,7 @@ import { blobToDataUrl } from '@/lib/ios/audio-utils';
 import { stopVoicePlayback, VOICE_PLAY_ERROR_EVENT } from '@/lib/ios/voice-player';
 import { aiVoiceFreqLabel, decideAiVoiceMessage, getAiVoiceFreq, saveAiVoiceFreq, synthesizeAiVoice } from '@/lib/ios/ai-voice';
 import { addressNameOf, displayNameOf, isFriendIn, meTileLabel, nameVariantHit, contactNameVariants, type ContactRecord } from '@/lib/contacts';
-import { buildShizukuAutonomyRules, enqueuePhoneOp } from '@/lib/ios/shizuku-autonomy';
+import { buildShizukuAutonomyRules, enqueuePhoneOp } from '@/lib/ios/device-autonomy';
 import { useOpPill, SkillUsePill } from './skill-use-pill';
 import { buildNpcPromptExtra } from '@/lib/ios/npc-bond';
 import { buildPersonaSystemPrompt } from '@/lib/ios/persona';

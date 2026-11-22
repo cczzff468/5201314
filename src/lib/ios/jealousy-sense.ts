@@ -1,30 +1,28 @@
 'use client';
 
 /**
- * 吃醋/查岗·双模式感知层（v2.0「赛博伴侣」重构核心）。
+ * 吃醋/查岗·双模式感知层（v2.0「赛博伴侣」重构核心；v2.0.0 去 Shizuku 化）。
  *
  * 模式隔离铁律（机主规格）：
  * - 网页模式（senseMode='web'）：严格只读**网页内部**状态——虚拟手机当前 App、
  *   停留时长、今日使用账本（web-usage-ledger）。绝不触碰任何真机桥。
- * - 真机模式（senseMode='device'）：严格只读**真实手机**状态（经 Shizuku）——
- *   前台应用包名（dumpsys window）、当前应用使用时长、今日屏幕总亮屏时间
- *   （UsageStats 快照）、静默截屏（可选，识图模型看一眼）。绝不读网页虚拟状态。
- *   两条通道物理隔离（互不 import 对方数据源），杜绝跨模式数据错乱。
+ * - 真机模式（senseMode='device'）：严格只读**真实手机**状态（经原生系统 API +
+ *   无障碍服务）——前台应用包名（无障碍事件流/UsageStats）、当前应用使用时长、
+ *   今日亮屏时长（UsageStats 快照）、无障碍静默截屏（可选，识图模型看一眼）。
+ *   绝不读网页虚拟状态。两条通道物理隔离，杜绝跨模式数据错乱。
  *
- * 真机命令底座（全部走既有 APK 的 shizukuExec 白名单，无需重打 APK）：
- * - pm suspend / pm unsuspend     —— 锁应用 / 解锁（白名单含 pm）
- * - am start -n com.z.aiphone/.MainActivity —— 强行拉回本 APP（白名单含 am）
- * - dumpsys package <pkg>          —— 强制解锁感知（suspended 状态轮询）
- * - dumpsys window / usagestats    —— 前台包名 / 今日亮屏时长
- * - shizukuScreencap               —— 静默截屏（免授权弹窗）
+ * 真机能力底座（v2.0.0 全部原生，Shizuku 通道退役）：
+ * - 前台包名 → AiAccessibilityService 事件流（实时）/ UsageStats 近 20s 兜底
+ * - 锁应用/解锁 → LockOverlayService（UsageStats 3s 轮询 + 悬浮窗全屏遮罩）
+ * - 强行拉回 → bringToFront（FLAG_ACTIVITY_NEW_TASK）
+ * - 静默截屏 → AiAccessibilityService.takeScreenshot（API 30+，免授权弹窗）
  *
- * v2.1「全视之眼」升级：感知维度从「前台+时长」扩到七维——新增通知栏（含自我过滤）、
- * 剪贴板、充电与屏幕（含深夜亮屏）、移动感知、正在播放、通话与未接、键盘与击键频率
- * （全部在 jealousy-sense-extra 姊妹模块；observer=观察者锚点，自我过滤 AI 自己的通知）。
+ * v2.1「全视之眼」升级：感知维度从「前台+时长」扩到七维（通知/剪贴板/充电屏幕/移动/
+ * 正在播放/通话/键盘；真机侧 v2.0.0 起原生可用维度见 jealousy-sense-extra）。
  *
- * 容错（多品牌兜底）：所有真机调用失败（Shizuku 未运行/未授权/绑定失败/
- * 厂商 ROM 对 pm suspend 的额外限制）都返回结构化降级原因（degrade），
- * 上层据此静默跳过本轮或改发消息，绝不把异常炸进决策链。
+ * 容错（多品牌兜底）：所有真机调用失败（无障碍未开启/使用情况未授权/悬浮窗权限
+ * 缺失/旧 APK）都返回结构化降级原因（degrade），上层据此静默跳过本轮或改发消息，
+ * 绝不把异常炸进决策链。
  */
 
 import type { SenseMode } from './jealousy-sense-types';
@@ -36,7 +34,7 @@ export type { SenseObserver };
 // ---------------- 情报结构 ----------------
 
 export interface SenseIntel {
-  /** 采集是否成功（真机模式 Shizuku 全链路失败 → false，上层静默跳过本轮） */
+  /** 采集是否成功（真机模式原生全链路失败 → false，上层静默跳过本轮） */
   ok: boolean;
   /** 本次采集所用模式（回显进决策上下文，防跨模式串数据） */
   mode: SenseMode;
@@ -50,7 +48,9 @@ export interface SenseIntel {
   todayTotalMs: number;
   /** 截屏偷窥结果（peek=true 且成功时的 VLM 屏幕描述） */
   peekNote: string | null;
-  /** 降级原因（Shizuku 各失败形态的人话；ok=true 时为 null） */
+  /** 截屏偷窥原图（peek=true 且无障碍截屏成功时的 dataURL；可发进聊天质问用户） */
+  peekImage: string | null;
+  /** 降级原因（原生通道各失败形态的人话；ok=true 时为 null） */
   degrade: string | null;
 }
 
@@ -136,71 +136,68 @@ async function collectWebIntel(observer: SenseObserver | null): Promise<SenseInt
     /* 扩展感知降级跳过 */
   }
 
-  return { ok: true, mode: 'web', lines, fgPkg, stayMs, todayTotalMs, peekNote: null, degrade: null };
+  return { ok: true, mode: 'web', lines, fgPkg, stayMs, todayTotalMs, peekNote: null, peekImage: null, degrade: null };
 }
 
 // ---------------- 真机模式采集（绝不读网页虚拟状态） ----------------
 
-/** 真机前台包名（dumpsys window 焦点行；失败 null） */
+/** 真机前台包名（无障碍事件流优先/UsageStats 兜底；失败 null） */
 async function deviceForegroundPkg(): Promise<string | null> {
   try {
-    const { nativeShizukuExec } = await import('./native-perception');
-    const r = await nativeShizukuExec(['dumpsys', 'window'], { mustContain: ['mCurrentFocus'], maxLines: 30, timeoutMs: 8000 });
-    if (!r || !r.ok) return null;
-    const line = (r.out ?? '').split('\n').map((l) => l.trim()).find((l) => l.startsWith('mCurrentFocus')) ?? '';
-    const m = /mCurrentFocus=Window\{[^ ]+ [^ ]+ ([\w.$]+)\//.exec(line);
-    return m ? m[1] : null;
+    const { nativeGetForegroundApp } = await import('./native-perception');
+    const r = await nativeGetForegroundApp();
+    if (r && r.ok && r.app) return r.app;
+    return null;
   } catch {
     return null;
   }
 }
 
-/** Shizuku 失败 reason → 人话降级文案（设置页/决策上下文共用） */
-export function shizukuDegradeText(reason: string | undefined | null): string {
+/** 原生通道失败 reason → 人话降级文案（设置页/决策上下文共用） */
+export function nativeDegradeText(reason: string | undefined | null): string {
   switch (reason ?? '') {
-    case 'shizuku-not-running':
-      return 'Shizuku 未运行（重启手机后需重新激活）';
-    case 'shizuku-no-permission':
-      return 'Shizuku 未授权（设置 › 权限给予 › 调试权限 里去授权）';
-    case 'bind-timeout':
-    case 'bind-binder':
-      return 'Shizuku 服务连接失败';
-    case 'exec-error':
-      return '真机命令执行失败（可能是厂商 ROM 限制）';
     case 'not-native':
-      return '当前在浏览器里（真机查岗需要 APK 打开 + Shizuku 激活）';
+      return '当前在浏览器里（真机查岗需要 APK 打开 + 开启对应系统权限）';
+    case 'no-permission':
+      return '缺少「使用情况访问」或「无障碍服务」权限（设置 › 权限给予 里开启）';
+    case 'no-a11y':
+      return '无障碍服务未开启（设置 › 权限给予 › 无障碍服务）';
+    case 'no-overlay-permission':
+      return '悬浮窗权限未开启（设置 › 权限给予 › 悬浮窗权限，锁定拦截需要）';
+    case 'not-supported':
+      return '此功能需要 Android 11（API 30）及以上';
+    case 'old-apk':
+      return 'APP 版本过旧（设置 › APP 更新 升级到 v2.0.0+）';
     default:
-      return reason ? `Shizuku 通道异常：${reason}` : 'Shizuku 通道异常';
+      return reason ? `原生通道异常：${reason}` : '原生通道异常';
   }
 }
 
-/** 真机模式情报采集：前台包名 + 当前应用时长 + 今日亮屏 + （可选）截屏偷窥 + 全视之眼七维（v2.1） */
+/** Shizuku 时代旧名兼容（内部已改原生通道；防外部 import 断裂） */
+export const shizukuDegradeText = nativeDegradeText;
+
+/** 真机模式情报采集：前台包名 + 当前应用时长 + 今日亮屏 + （可选）无障碍截屏偷窥 + 全视之眼（v2.1） */
 async function collectDeviceIntel(peek: boolean): Promise<SenseIntel> {
   const lines: string[] = [];
   let fgPkg: string | null = null;
   let stayMs = 0;
   let todayTotalMs = 0;
   let peekNote: string | null = null;
+  let peekImage: string | null = null;
 
-  // 前台包名（唯一权威数据源：dumpsys window）
+  if (!isNativeEnv()) {
+    return { ok: false, mode: 'device', lines: [], fgPkg: null, stayMs: 0, todayTotalMs: 0, peekNote: null, peekImage: null, degrade: nativeDegradeText('not-native') };
+  }
+
+  // 前台包名（无障碍事件流/UsageStats）
   fgPkg = await deviceForegroundPkg();
   if (!fgPkg) {
-    // dumpsys 失败可能是 Shizuku 整体断连——用 shizukuStatus 判降级原因
-    let reason = 'exec-error';
-    try {
-      const { nativeShizukuStatus } = await import('./native-perception');
-      const st = await nativeShizukuStatus();
-      if (!st || !st.running) reason = 'shizuku-not-running';
-      else if (!st.granted) reason = 'shizuku-no-permission';
-    } catch {
-      /* 探测失败保持 exec-error */
-    }
-    if (!isNativeEnv()) reason = 'not-native';
-    return { ok: false, mode: 'device', lines: [], fgPkg: null, stayMs: 0, todayTotalMs: 0, peekNote: null, degrade: shizukuDegradeText(reason) };
+    // 查不到前台：大概率「使用情况」与「无障碍」都没开
+    return { ok: false, mode: 'device', lines: [], fgPkg: null, stayMs: 0, todayTotalMs: 0, peekNote: null, peekImage: null, degrade: nativeDegradeText('no-permission') };
   }
   lines.push(`TA 的真实手机此刻前台应用：${fgPkg}`);
 
-  // 当前应用使用时长 + 今日总亮屏（UsageStats 双引擎快照；失败只降级该行）
+  // 当前应用使用时长 + 今日总亮屏（UsageStats 快照；失败只降级该行）
   try {
     const { nativeUsageSnapshot } = await import('./native-perception');
     const snap = await nativeUsageSnapshot();
@@ -219,22 +216,26 @@ async function collectDeviceIntel(peek: boolean): Promise<SenseIntel> {
     /* UsageStats 未授权/失败：跳过时长行（前台包名已有） */
   }
 
-  // 截屏偷窥（可选；Shizuku 静默截屏 + 识图模型）
+  // 截屏偷窥（可选；无障碍静默截屏 + 识图模型）
   if (peek) {
-    peekNote = await devicePeekScreen();
-    if (peekNote) lines.push(`【你刚刚偷看的屏幕（截屏+识图）】${peekNote}`);
-    else lines.push('（截屏偷窥失败：Shizuku 截屏通道或识图模型不可用）');
+    const pk = await devicePeekScreen();
+    if (pk) {
+      peekNote = pk.desc;
+      peekImage = pk.image;
+      if (pk.desc) lines.push(`【你刚刚偷看的屏幕（无障碍截屏+识图）】${pk.desc}`);
+    } else {
+      lines.push('（截屏偷窥失败：无障碍服务未开启/识图模型不可用）');
+    }
   }
 
-  // v2.1 全视之眼七维（真机）：dumpsys 通知/剪贴板/电量亮屏亮度/传感器移动/媒体会话/通话未接/键盘
-  // 全部 Promise.allSettled 并行、单项失败各自缺席（jealousy-sense-extra 容错口径）
+  // v2.1 全视之眼（真机原生维度：通知/电量/正在播放等；各维独立降级）
   try {
     lines.push(...(await collectDeviceExtraLines()));
   } catch {
     /* 扩展感知降级跳过：主情报（前台+时长）不受影响 */
   }
 
-  return { ok: true, mode: 'device', lines, fgPkg, stayMs, todayTotalMs, peekNote, degrade: null };
+  return { ok: true, mode: 'device', lines, fgPkg, stayMs, todayTotalMs, peekNote, peekImage, degrade: null };
 }
 
 /** 浏览器/原生环境判定（轻量；详版在 native-perception.isNativePerception） */
@@ -263,7 +264,7 @@ export async function collectSenseIntel(
   return collectWebIntel(opts.observer ?? null);
 }
 
-// ---------------- 真机操控原语（锁/解锁/拉回/偷窥） ----------------
+// ---------------- 真机操控原语（v2.0.0：锁定遮罩/解锁/拉回/偷窥，全部原生） ----------------
 
 export interface DeviceOpOutcome {
   ok: boolean;
@@ -271,103 +272,98 @@ export interface DeviceOpOutcome {
   text: string;
 }
 
-/** 锁真机应用：pm suspend（部分厂商 ROM 限制 shell 执行会失败，如实回传） */
-export async function deviceSuspendApp(pkg: string): Promise<DeviceOpOutcome> {
+/**
+ * 锁真机应用（v2.0.0：LockOverlayService 全屏遮罩锁，替代 pm suspend）。
+ * UsageStats 3s 轮询前台 → 检测到锁定应用 → 悬浮窗全屏拦截（质问文案 + 回到桌面按钮）。
+ */
+export async function deviceLockApp(
+  pkg: string,
+  opts: { unlockAt?: number; charName?: string; message?: string } = {},
+): Promise<DeviceOpOutcome> {
   if (!/^[\w.]+$/.test(pkg)) return { ok: false, text: `包名不合法（${pkg}）` };
   try {
-    const { nativeShizukuExec } = await import('./native-perception');
-    const r = await nativeShizukuExec(['pm', 'suspend', pkg], { maxLines: 12, timeoutMs: 10_000 });
-    if (!r) return { ok: false, text: '锁应用失败：桥无响应（非原生环境或 Shizuku 断连）' };
-    if (!r.ok) return { ok: false, text: `锁应用失败：${shizukuDegradeText(r.reason)}` };
-    const out = (r.out ?? '').trim();
-    if (/Error|error|Exception|denied|not found|Unknown/i.test(out)) {
-      return { ok: false, text: `锁应用失败（厂商 ROM 可能限制 pm suspend）：${out.slice(0, 120)}` };
-    }
-    return { ok: true, text: `已在真实手机上锁住 ${pkg}（pm suspend，桌面图标变灰打不开）` };
+    const { nativeLockApp } = await import('./native-perception');
+    const r = await nativeLockApp({ pkg, unlockAt: opts.unlockAt ?? 0, charName: opts.charName, message: opts.message });
+    if (!r.ok) return { ok: false, text: `锁应用失败：${nativeDegradeText(r.reason)}` };
+    return { ok: true, text: `已在真实手机上锁住 ${pkg}（打开就会被全屏遮罩拦住，直到倒计时结束或哄好）` };
   } catch {
     return { ok: false, text: '锁应用异常' };
   }
 }
 
-/** 解锁真机应用：pm unsuspend */
-export async function deviceUnsuspendApp(pkg: string): Promise<DeviceOpOutcome> {
-  if (!/^[\w.]+$/.test(pkg)) return { ok: false, text: `包名不合法（${pkg}）` };
+/** 解锁真机应用（停遮罩停守护；哄好/手动解锁共用） */
+export async function deviceUnlockApp(): Promise<DeviceOpOutcome> {
   try {
-    const { nativeShizukuExec } = await import('./native-perception');
-    const r = await nativeShizukuExec(['pm', 'unsuspend', pkg], { maxLines: 12, timeoutMs: 10_000 });
-    if (!r) return { ok: false, text: '解锁失败：桥无响应' };
-    if (!r.ok) return { ok: false, text: `解锁失败：${shizukuDegradeText(r.reason)}` };
-    return { ok: true, text: `已解锁 ${pkg}` };
+    const { nativeUnlockApp } = await import('./native-perception');
+    const r = await nativeUnlockApp();
+    if (!r.ok && r.reason) return { ok: false, text: `解锁失败：${nativeDegradeText(r.reason)}` };
+    return { ok: true, text: '已解锁（应用恢复正常可用）' };
   } catch {
     return { ok: false, text: '解锁异常' };
   }
 }
 
+/** Shizuku 时代旧名兼容（内部改锁定遮罩；防外部 import 断裂） */
+export const deviceSuspendApp = (pkg: string): Promise<DeviceOpOutcome> => deviceLockApp(pkg);
+export const deviceUnsuspendApp = (): Promise<DeviceOpOutcome> => deviceUnlockApp();
+
 /**
- * 查询真机应用的 suspended 状态（强制解锁感知的数据源）。
- * 返回：true=仍被锁 / false=未被锁（锁活跃却 false ⇒ 用户强行打破）/ null=查询失败（不判定）。
- * 兼容多品牌输出差异：suspended=true|false、pkgFlags 里的 SUSPENDED 标志。
+ * 查询真机锁定状态（v2.0.0：LockOverlayService 快照，替代 dumpsys package suspended 轮询）。
+ * 返回：true=锁仍活跃 / false=锁已不在（到期/已解锁） / null=查询失败（不判定）。
  */
-export async function deviceSuspendState(pkg: string): Promise<boolean | null> {
+export async function deviceLockState(pkg: string): Promise<boolean | null> {
   if (!/^[\w.]+$/.test(pkg)) return null;
   try {
-    const { nativeShizukuExec } = await import('./native-perception');
-    const r = await nativeShizukuExec(['dumpsys', 'package', pkg], { mustContain: ['suspended', 'SUSPENDED', 'pkgFlags'], maxLines: 60, timeoutMs: 12_000 });
-    if (!r || !r.ok) return null;
-    const out = r.out ?? '';
-    // 形态一：suspended=true / suspended=false（多数 ROM）
-    const m = /suspended=(true|false)/i.exec(out);
-    if (m) return m[1].toLowerCase() === 'true';
-    // 形态二：pkgFlags=[ ... SCHEDULED_... SUSPENDED ... ]（部分 Android 13+）
-    if (/pkgFlags=\[[^\]]*SUSPENDED/i.test(out)) return true;
-    if (/pkgFlags=\[/i.test(out)) return false; // 有 flags 行但无 SUSPENDED
-    return null; // 都没匹配到（dumpsys 输出变化）：不判定，绝不误报
+    const { nativeJealousyGuardStatus } = await import('./native-perception');
+    const st = await nativeJealousyGuardStatus();
+    if (!st || typeof st.running !== 'boolean') return null;
+    if (!st.running) return false;
+    return st.pkg === pkg;
   } catch {
     return null;
   }
 }
 
-/** 强行拉回：am start 把本 APP（AI Phone）切到真机前台（monkey 兜底） */
+/** 强行拉回：bringToFront 把本 APP（AI Phone）切到真机前台（FLAG_ACTIVITY_NEW_TASK） */
 export async function devicePullback(): Promise<DeviceOpOutcome> {
   try {
-    const { nativeShizukuExec } = await import('./native-perception');
-    // am start 优先（机主规格点名）；失败（Activity 名不匹配等）回退 monkey
-    const r = await nativeShizukuExec(['am', 'start', '-n', 'com.z.aiphone/.MainActivity'], { maxLines: 20, timeoutMs: 8000 });
-    if (r && r.ok && !/Error|Exception|does not exist/i.test(r.out ?? '')) {
-      return { ok: true, text: '已把 TA 的真实手机强切回本 APP（am start）' };
+    const { nativeBringToFront } = await import('./native-perception');
+    const r = await nativeBringToFront();
+    if (!r || r.ok === false) {
+      return { ok: false, text: `强行拉回失败：${r ? nativeDegradeText(r.reason) : '桥无响应'}` };
     }
-    const r2 = await nativeShizukuExec(['monkey', '-p', 'com.z.aiphone', '-c', 'android.intent.category.LAUNCHER', '1'], { maxLines: 20, timeoutMs: 8000 });
-    if (r2 && r2.ok && !/aborted|Error/i.test(r2.out ?? '')) {
-      return { ok: true, text: '已把 TA 的真实手机强切回本 APP（monkey 拉起）' };
-    }
-    const reason = !r ? '桥无响应' : !r.ok ? shizukuDegradeText(r.reason) : 'am/monkey 均失败';
-    return { ok: false, text: `强行拉回失败：${reason}` };
+    return { ok: true, text: '已把 TA 的真实手机强切回本 APP' };
   } catch {
     return { ok: false, text: '强行拉回异常' };
   }
 }
 
-/** 截屏偷窥：Shizuku 静默截屏 → 识图模型（VLM）看一眼 → 屏幕描述文本 */
-export async function devicePeekScreen(): Promise<string | null> {
+/**
+ * 截屏偷窥（v2.0.0：无障碍静默截屏 → 识图模型看一眼）。
+ * 返回 {desc, image}（image 为 dataURL 原图，可发进聊天质问用户）；
+ * 无障碍未开启/失败返回 null（desc 可为 null=识图不可用但截屏成功）。
+ */
+export async function devicePeekScreen(): Promise<{ desc: string | null; image: string | null } | null> {
   try {
-    const { nativeShizukuScreencap } = await import('./native-perception');
-    const r = await nativeShizukuScreencap();
+    const { nativeA11yScreenshot } = await import('./native-perception');
+    const r = await nativeA11yScreenshot();
     if (!r || !r.ok || !r.frame) return null;
-    // VLM 分析（复用能力实验室链路：/api/phone-vision + 用户识图模型配置）
+    const image = r.frame;
+    // VLM 分析（/api/phone-vision + 用户识图模型配置）
     const { useSettings } = await import('./store');
     const res = await fetch('/api/phone-vision', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        image: r.frame,
+        image,
         ask: '这是 TA 的真实手机屏幕截图。TA 正在看什么 App、屏幕上有什么内容（视频/聊天/购物/游戏/文章标题等，具体描述）？紧凑输出，不要坐标不要解释。',
         config: useSettings.getState().visionConfig,
       }),
       signal: AbortSignal.timeout(30_000),
     });
     const data = (await res.json().catch(() => null)) as { desc?: unknown } | null;
-    if (res.ok && data && typeof data.desc === 'string' && data.desc.trim()) return data.desc.trim();
-    return null;
+    const desc = res.ok && data && typeof data.desc === 'string' && data.desc.trim() ? data.desc.trim() : null;
+    return { desc, image };
   } catch {
     return null;
   }

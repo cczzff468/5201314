@@ -1,6 +1,6 @@
 'use client';
 
-// 权限给予页（v1.9.36：系统权限 / 调试授权 / 授权模式 / AI 动手范围）。
+// 权限给予页（v2.0.0 去 Shizuku 化：系统权限 11 项 + 通知/麦克风 / 时长数据源 / AI 动手范围）。
 
 import {
   useCallback,
@@ -9,23 +9,28 @@ import {
 } from 'react';
 
 import {
-  AppWindow,
+  Accessibility,
+  AlarmClock,
+  BarChart3,
   BatteryCharging,
   Bell,
+  BellRing,
+  BookUser,
+  CalendarDays,
   Check,
   CheckCircle2,
   ChevronRight,
-  Database,
+  FolderOpen,
   Loader2,
+  MapPin,
+  MessageSquareText,
   Mic,
   MousePointerClick,
   PanelTop,
   RefreshCw,
-  Smartphone,
-  BarChart3,
   ShieldCheck,
-  MapPin,
-  Terminal,
+  AppWindow,
+  Smartphone,
   Cpu,
 } from 'lucide-react';
 
@@ -41,33 +46,43 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 
-// v1.3 AI 动手（Shizuku 自主权）+ APP 更新：设置页新入口；v1.9.36 重命名为「权限给予」；
+// v1.3 AI 动手 + APP 更新：设置页新入口；v1.9.36 重命名为「权限给予」；
 // v1.9.38 AI 动手能力恒开（开关全部下线）：这里只保留动手范围的读写
 import {
   getAiActionTarget,
   setAiActionTarget,
   type AiActionTarget,
-} from '@/lib/ios/shizuku-autonomy';
+} from '@/lib/ios/device-autonomy';
 
+// v2.0.0 权限中心 11 项：全部经原生系统 API / 无障碍服务（AiAccessibilityService），
+// Shizuku 通道整体退役
 import {
+  accessibilityPermission,
+  alarmPermission,
   batteryPermission,
-  getUsageEngine,
+  calendarPermission,
+  contactsPermission,
   isNativePerception,
   locationPermission,
+  mediaFilesPermission,
   micPermission,
   nativeMediaPermission,
-  nativeRequestShizukuPermission,
-  nativeShizukuStatus,
   nativeUsagePermission,
+  openNativeAccessibilitySettings,
+  openNativeAppDetailSettings,
   openNativeMediaSettings,
   openNativeUsageSettings,
   overlayPermission,
+  requestAlarmPermission,
   requestBatteryPermission,
+  requestCalendarPermission,
+  requestContactsPermission,
   requestLocationPermission,
+  requestMediaFilesPermission,
   requestMicPermission,
   requestOverlayPermission,
-  setUsageEngine,
-  type UsageEngine,
+  requestSmsPermission,
+  smsPermission,
 } from '@/lib/ios/native-perception';
 
 import {
@@ -87,7 +102,7 @@ import {
 } from './shared';
 
 
-// ---------------- 权限给予（v1.9.36：系统权限/调试授权/授权模式/AI 动手范围；v1.9.38 能力开关下线·恒开；v1.9.40 弹窗去长文·提示精简·看门狗防卡「申请中」） ----------------
+// ---------------- 权限给予（v2.0.0：机主 11 项系统权限 + 通知/麦克风；Shizuku 全下线；v1.9.40 弹窗去长文·看门狗防卡「申请中」仍生效） ----------------
 
 /** 单个权限的运行时状态（v1.9.38：网页里也能授权，无「需真机」态） */
 export type PermState = 'checking' | 'granted' | 'denied' | 'web-denied';
@@ -122,17 +137,24 @@ export interface PermDef {
   icon: LucideIcon;
   /** 申请按钮文案 */
   actionLabel: string;
+  /**
+   * 运行时权限被系统持久拒绝（canAsk=false，弹窗被「不再询问」关掉）时的兜底：
+   * 弹窗按钮变「去系统设置手动开启」，点击经原生 Intent 跳系统应用详情页手动开启。
+   */
+  persistDeniedFallback?: boolean;
   /** 状态查询（返回 null = 非原生环境；granted 可选——桥异常时只有 canAsk） */
   query: () => Promise<{ granted?: boolean; canAsk?: boolean } | null>;
-  /** 申请动作（弹系统授权框 / 跳系统设置页 / Shizuku 直授）；返回操作结果文案 */
+  /** 申请动作（弹系统授权框 / 原生 Intent 跳系统设置页）；返回操作结果文案 */
   request: () => Promise<{ ok: boolean; note?: string }>;
 }
 
 /**
  * 权限给予页的权限清单。
+ * v2.0.0 机主 11 项排前（无障碍/使用情况/悬浮窗/通知使用/短信/通讯录/日历/闹钟/位置/
+ * 媒体文件/电池优化），通知/麦克风并列其后；全部走原生系统 API + 无障碍服务，无 Shizuku。
  * v1.9.38 基础权限全部无需真机：通知/麦克风/位置走浏览器授权框，
- * 悬浮窗/电池优化/存储/使用情况在网页里点「去开启」即完成授权（网页授权账本记账）；
- * 原生壳里仍优先真实通道（系统授权框/设置页/Shizuku 直授），账本只在真实通道
+ * 其余在网页里点「去开启」即完成授权（网页授权账本记账）；
+ * 原生壳里仍优先真实通道（系统授权框/设置页/原生 Intent 跳转），账本只在真实通道
  * 不可用时兜底——两套环境都能授权成功，不再有「需真机」状态。
  */
 
@@ -161,26 +183,246 @@ export function writeWebPermGrant(key: string, on: boolean): void {
 }
 
 export const PERM_DEFS: PermDef[] = [
+  // ---- 机主 11 项（v2.0.0 权限中心；检测 + 原生 Intent 直跳系统授权页） ----
   {
-    key: 'notify',
-    label: '通知权限',
-    desc: '系统通知栏弹消息、后台离线推送',
-    icon: Bell,
-    actionLabel: '允许通知',
+    key: 'accessibility',
+    label: '无障碍服务',
+    desc: '模拟点击、静默截屏、切回界面',
+    icon: Accessibility,
+    actionLabel: '去开启无障碍',
     query: async () => {
-      const p = await querySystemNotifyPermission();
-      if (p === 'granted') return { granted: true };
-      if (readWebPermGrants().notify === true) return { granted: true };
-      if (p === 'denied') return { granted: false, canAsk: isNativePerception() };
+      // 账本优先（旧 APK 桥异常误报未授权的兜底，同悬浮窗）
+      if (readWebPermGrants().accessibility === true) return { granted: true };
+      const r = await accessibilityPermission();
+      if (r) return { granted: r.granted === true, canAsk: r.canAsk };
       return { granted: false, canAsk: true };
     },
     request: async () => {
-      const r = await requestSystemNotifyPermission();
-      if (r === 'granted') return { ok: true };
-      writeWebPermGrant('notify', true); // 浏览器不支持/被阻止：网页账本直接记为已授权
-      return { ok: true, note: '通知已开启' };
+      const ok = await openNativeAccessibilitySettings();
+      if (ok) return { ok: true, note: '已跳转系统设置页，开启 AI Phone 服务后返回' };
+      writeWebPermGrant('accessibility', true); // 网页/旧 APK：账本直接记为已授权
+      return { ok: true, note: '无障碍服务已开启' };
     },
   },
+  {
+    key: 'usage',
+    label: '使用情况访问',
+    desc: '前台 App 与使用时长感知',
+    icon: BarChart3,
+    actionLabel: '去开启',
+    query: async () => {
+      // v1.9.41 账本优先：修复「使用情况权限明明授权了却显示未授权」——旧 APK 无
+      // hasUsagePermission 方法时桥异常被 catch 成 false（非 null），查询直接信了
+      // 原生回的 false、永远不看网页账本。账本在申请成功时写入，先查它再探原生。
+      if (readWebPermGrants().usage === true) return { granted: true };
+      const r = await nativeUsagePermission();
+      if (r !== null) return { granted: r };
+      return { granted: false, canAsk: true };
+    },
+    request: async () => {
+      const ok = await openNativeUsageSettings();
+      if (ok) return { ok: true, note: '已跳转系统设置页，开启后返回刷新' };
+      writeWebPermGrant('usage', true); // 网页：直接记为已授权
+      return { ok: true, note: '使用情况访问已开启' };
+    },
+  },
+  {
+    key: 'overlay',
+    label: '悬浮窗权限',
+    desc: '全屏遮挡拦截、悬浮球与悬浮窗',
+    icon: PanelTop,
+    actionLabel: '去开启悬浮窗',
+    query: async () => {
+      // v1.9.41 账本优先：真实通道不可用时点「去开启」落的是网页账本，查询先看账本
+      // 再探原生（旧 APK 桥异常会把 overlayPermission 拉到 false，不看账本就误报未授权）
+      if (readWebPermGrants().overlay === true) return { granted: true };
+      const r = await overlayPermission();
+      if (r) return r;
+      return { granted: false, canAsk: true };
+    },
+    request: async () => {
+      const r = await requestOverlayPermission();
+      if (r.ok) return { ok: true, note: '已跳转系统设置页，打开开关后返回' };
+      writeWebPermGrant('overlay', true); // 网页：直接记为已授权
+      return { ok: true, note: '悬浮窗权限已开启' };
+    },
+  },
+  {
+    // 通知使用权（沿用 storage 账本键：老的网页授权记录不丢）
+    key: 'storage',
+    label: '通知使用权',
+    desc: '读微信/QQ 通知、正在听的歌',
+    icon: BellRing,
+    actionLabel: '去开启',
+    query: async () => {
+      // v1.9.41 账本优先（同悬浮窗：旧 APK 桥异常误报未授权的兜底）
+      if (readWebPermGrants().storage === true) return { granted: true };
+      const r = await nativeMediaPermission();
+      if (r !== null) return { granted: r };
+      return { granted: false, canAsk: true };
+    },
+    request: async () => {
+      const ok = await openNativeMediaSettings();
+      if (ok) return { ok: true, note: '已跳转系统设置页，开启后返回刷新' };
+      writeWebPermGrant('storage', true); // 网页：直接记为已授权
+      return { ok: true, note: '通知使用权已开启' };
+    },
+  },
+  {
+    key: 'sms',
+    label: '读取短信',
+    desc: '读取最近短信（通知提醒场景）',
+    icon: MessageSquareText,
+    actionLabel: '允许读取短信',
+    persistDeniedFallback: true,
+    query: async () => {
+      if (readWebPermGrants().sms === true) return { granted: true };
+      const r = await smsPermission();
+      if (r) return r;
+      return { granted: false, canAsk: true };
+    },
+    request: async () => {
+      const r = await requestSmsPermission();
+      if (r === null) {
+        writeWebPermGrant('sms', true); // 网页/旧 APK：账本记账
+        return { ok: true, note: '短信权限已开启' };
+      }
+      if (r.granted) return { ok: true };
+      if (r.canAsk === false) return { ok: false, note: '系统已停用授权弹窗：请去系统设置手动开启' };
+      return { ok: false };
+    },
+  },
+  {
+    key: 'contacts',
+    label: '通讯录读写',
+    desc: '读写在意的联系人',
+    icon: BookUser,
+    actionLabel: '允许访问通讯录',
+    persistDeniedFallback: true,
+    query: async () => {
+      if (readWebPermGrants().contacts === true) return { granted: true };
+      const r = await contactsPermission();
+      if (r) return r;
+      return { granted: false, canAsk: true };
+    },
+    request: async () => {
+      const r = await requestContactsPermission();
+      if (r === null) {
+        writeWebPermGrant('contacts', true); // 网页/旧 APK：账本记账
+        return { ok: true, note: '通讯录权限已开启' };
+      }
+      if (r.granted) return { ok: true };
+      if (r.canAsk === false) return { ok: false, note: '系统已停用授权弹窗：请去系统设置手动开启' };
+      return { ok: false };
+    },
+  },
+  {
+    key: 'calendar',
+    label: '日历读写',
+    desc: '读写日程与纪念日',
+    icon: CalendarDays,
+    actionLabel: '允许访问日历',
+    persistDeniedFallback: true,
+    query: async () => {
+      if (readWebPermGrants().calendar === true) return { granted: true };
+      const r = await calendarPermission();
+      if (r) return r;
+      return { granted: false, canAsk: true };
+    },
+    request: async () => {
+      const r = await requestCalendarPermission();
+      if (r === null) {
+        writeWebPermGrant('calendar', true); // 网页/旧 APK：账本记账
+        return { ok: true, note: '日历权限已开启' };
+      }
+      if (r.granted) return { ok: true };
+      if (r.canAsk === false) return { ok: false, note: '系统已停用授权弹窗：请去系统设置手动开启' };
+      return { ok: false };
+    },
+  },
+  {
+    key: 'alarm',
+    label: '闹钟与计时器',
+    desc: '精确闹钟与倒计时提醒',
+    icon: AlarmClock,
+    actionLabel: '允许精确闹钟',
+    query: async () => {
+      if (readWebPermGrants().alarm === true) return { granted: true };
+      const r = await alarmPermission();
+      if (r) return r;
+      return { granted: false, canAsk: true };
+    },
+    request: async () => {
+      const r = await requestAlarmPermission();
+      if (r.ok) return { ok: true, note: '已跳转系统「闹钟和提醒」授权页' };
+      writeWebPermGrant('alarm', true); // 网页/旧 APK：账本记账
+      return { ok: true, note: '闹钟权限已开启' };
+    },
+  },
+  {
+    key: 'location',
+    label: '位置信息',
+    desc: '天气定位、地图、外卖/打车场景',
+    icon: MapPin,
+    actionLabel: '允许定位',
+    query: async () => {
+      const r = await locationPermission();
+      if (r?.granted || readWebPermGrants().location === true) return { granted: true };
+      if (!r) return { granted: false, canAsk: true };
+      return r;
+    },
+    request: async () => {
+      const r = await requestLocationPermission();
+      if (r.ok) return { ok: true, note: r.via === 'web' ? '已经浏览器授权' : undefined };
+      writeWebPermGrant('location', true); // 浏览器定位不可用/被阻止：网页账本直接记为已授权
+      return { ok: true, note: '定位已开启' };
+    },
+  },
+  {
+    key: 'mediafiles',
+    label: '文件读写与媒体访问',
+    desc: '媒体库与文件读写（相册等）',
+    icon: FolderOpen,
+    actionLabel: '允许访问文件与媒体',
+    persistDeniedFallback: true,
+    query: async () => {
+      if (readWebPermGrants().mediafiles === true) return { granted: true };
+      const r = await mediaFilesPermission();
+      if (r) return r;
+      return { granted: false, canAsk: true };
+    },
+    request: async () => {
+      const r = await requestMediaFilesPermission();
+      if (r === null) {
+        writeWebPermGrant('mediafiles', true); // 网页/旧 APK：账本记账
+        return { ok: true, note: '文件与媒体权限已开启' };
+      }
+      if (r.granted) return { ok: true };
+      if (r.canAsk === false) return { ok: false, note: '系统已停用授权弹窗：请去系统设置手动开启' };
+      return { ok: false };
+    },
+  },
+  {
+    key: 'battery',
+    label: '忽略电池优化',
+    desc: '息屏后保持监听/常驻通知不被系统限制',
+    icon: BatteryCharging,
+    actionLabel: '允许忽略电池优化',
+    query: async () => {
+      // v1.9.41 账本优先（同悬浮窗：旧 APK 桥异常误报未授权的兜底）
+      if (readWebPermGrants().battery === true) return { granted: true };
+      const r = await batteryPermission();
+      if (r) return r;
+      return { granted: false, canAsk: true };
+    },
+    request: async () => {
+      const r = await requestBatteryPermission();
+      if (r.ok) return { ok: true, note: '已弹出系统确认框' };
+      writeWebPermGrant('battery', true); // 网页：直接记为已授权
+      return { ok: true, note: '电池优化豁免已开启' };
+    },
+  },
+  // ---- 既有权限（与 11 项并列展示） ----
   {
     key: 'mic',
     label: '麦克风权限',
@@ -201,105 +443,23 @@ export const PERM_DEFS: PermDef[] = [
     },
   },
   {
-    key: 'location',
-    label: '位置权限',
-    desc: '天气定位、地图、外卖/打车场景',
-    icon: MapPin,
-    actionLabel: '允许定位',
+    key: 'notify',
+    label: '通知权限',
+    desc: '系统通知栏弹消息、后台离线推送',
+    icon: Bell,
+    actionLabel: '允许通知',
     query: async () => {
-      const r = await locationPermission();
-      if (r?.granted || readWebPermGrants().location === true) return { granted: true };
-      if (!r) return { granted: false, canAsk: true };
-      return r;
-    },
-    request: async () => {
-      const r = await requestLocationPermission();
-      if (r.ok) return { ok: true, note: r.via === 'web' ? '已经浏览器授权' : r.via === 'shizuku' ? '已经 Shizuku 直授' : undefined };
-      writeWebPermGrant('location', true); // 浏览器定位不可用/被阻止：网页账本直接记为已授权
-      return { ok: true, note: '定位已开启' };
-    },
-  },
-  {
-    key: 'overlay',
-    label: '悬浮窗权限',
-    desc: '聊天悬浮窗、悬浮球在其他应用上层显示',
-    icon: PanelTop,
-    actionLabel: '去开启悬浮窗',
-    query: async () => {
-      // v1.9.41 账本优先：真实通道不可用时点「去开启」落的是网页账本，查询先看账本
-      // 再探原生（旧 APK 桥异常会把 overlayPermission 拉到 false，不看账本就误报未授权）
-      if (readWebPermGrants().overlay === true) return { granted: true };
-      const r = await overlayPermission();
-      if (r) return r;
+      const p = await querySystemNotifyPermission();
+      if (p === 'granted') return { granted: true };
+      if (readWebPermGrants().notify === true) return { granted: true };
+      if (p === 'denied') return { granted: false, canAsk: isNativePerception() };
       return { granted: false, canAsk: true };
     },
     request: async () => {
-      const r = await requestOverlayPermission();
-      if (r.ok) return { ok: true, note: r.via === 'shizuku' ? '已经 Shizuku 直授' : '已跳转系统设置页，打开开关后返回' };
-      writeWebPermGrant('overlay', true); // 网页：直接记为已授权
-      return { ok: true, note: '悬浮窗权限已开启' };
-    },
-  },
-  {
-    key: 'battery',
-    label: '电池优化豁免',
-    desc: '息屏后保持监听/常驻通知不被系统限制',
-    icon: BatteryCharging,
-    actionLabel: '允许忽略电池优化',
-    query: async () => {
-      // v1.9.41 账本优先（同悬浮窗：旧 APK 桥异常误报未授权的兜底）
-      if (readWebPermGrants().battery === true) return { granted: true };
-      const r = await batteryPermission();
-      if (r) return r;
-      return { granted: false, canAsk: true };
-    },
-    request: async () => {
-      const r = await requestBatteryPermission();
-      if (r.ok) return { ok: true, note: r.via === 'shizuku' ? '已经 Shizuku 直授' : '已弹出系统确认框' };
-      writeWebPermGrant('battery', true); // 网页：直接记为已授权
-      return { ok: true, note: '电池优化豁免已开启' };
-    },
-  },
-  {
-    key: 'storage',
-    label: '存储权限',
-    desc: '媒体库读取（正在听什么歌的识别）',
-    icon: Database,
-    actionLabel: '去开启',
-    query: async () => {
-      // v1.9.41 账本优先（同悬浮窗：旧 APK 桥异常误报未授权的兜底）
-      if (readWebPermGrants().storage === true) return { granted: true };
-      const r = await nativeMediaPermission();
-      if (r !== null) return { granted: r };
-      return { granted: false, canAsk: true };
-    },
-    request: async () => {
-      const ok = await openNativeMediaSettings();
-      if (ok) return { ok: true, note: '已跳转系统设置页，开启后返回刷新' };
-      writeWebPermGrant('storage', true); // 网页：直接记为已授权
-      return { ok: true, note: '存储权限已开启' };
-    },
-  },
-  {
-    key: 'usage',
-    label: '使用情况权限',
-    desc: 'App 使用时长感知（Cap-go 标准引擎）',
-    icon: BarChart3,
-    actionLabel: '去开启',
-    query: async () => {
-      // v1.9.41 账本优先：修复「使用情况权限明明授权了却显示未授权」——旧 APK 无
-      // hasUsagePermission 方法时桥异常被 catch 成 false（非 null），查询直接信了
-      // 原生回的 false、永远不看网页账本。账本在申请成功时写入，先查它再探原生。
-      if (readWebPermGrants().usage === true) return { granted: true };
-      const r = await nativeUsagePermission();
-      if (r !== null) return { granted: r };
-      return { granted: false, canAsk: true };
-    },
-    request: async () => {
-      const ok = await openNativeUsageSettings();
-      if (ok) return { ok: true, note: '已跳转系统设置页，开启后返回刷新' };
-      writeWebPermGrant('usage', true); // 网页：直接记为已授权
-      return { ok: true, note: '使用情况权限已开启' };
+      const r = await requestSystemNotifyPermission();
+      if (r === 'granted') return { ok: true };
+      writeWebPermGrant('notify', true); // 浏览器不支持/被阻止：网页账本直接记为已授权
+      return { ok: true, note: '通知已开启' };
     },
   },
 ];
@@ -332,7 +492,7 @@ export function PermissionRow({
   );
 }
 
-/** 模式单选行（CAP-go/Shizuku、网站/真机 两组选择器共用） */
+/** 模式单选行（AI 动手范围选择器用） */
 export function ModeRadioRow({
   icon: Icon,
   label,
@@ -377,7 +537,6 @@ export function ModeRadioRow({
 export function PermissionHubPage({ onBack }: { onBack: () => void }) {
   // 惰性初始化（页面仅在用户交互后挂载 = 纯客户端，可安全读 localStorage）
   const [target, setTarget] = useState<AiActionTarget>(() => getAiActionTarget());
-  const [engine, setEngine] = useState<UsageEngine>(() => getUsageEngine());
   const [toastMsg, showToast] = useLocalToast();
 
   const native = isNativePerception();
@@ -410,38 +569,24 @@ export function PermissionHubPage({ onBack }: { onBack: () => void }) {
     return () => window.clearTimeout(t);
   }, [refreshAllPerms]);
 
-  // ---- 调试权限：Shizuku 状态（v1.9.38 网页里也可一键开启：账本记账，真机仍走真实授权） ----
-  const [shizuku, setShizuku] = useState<'checking' | 'running' | 'stopped'>('checking');
-  const refreshShizuku = useCallback(async () => {
-    try {
-      const r = await nativeShizukuStatus();
-      if (r) {
-        setShizuku(r.running && r.granted ? 'running' : 'stopped');
-        return;
-      }
-    } catch {
-      /* 桥异常 → 网页账本口径 */
-    }
-    setShizuku(readWebPermGrants().shizuku === true ? 'running' : 'stopped');
-  }, []);
-  useEffect(() => {
-    const t = window.setTimeout(() => void refreshShizuku(), 0);
-    return () => window.clearTimeout(t);
-  }, [refreshShizuku]);
-
   // ---- 授权弹窗（当前选中的权限） ----
   const [dialogPerm, setDialogPerm] = useState<PermDef | null>(null);
   const [grantBusy, setGrantBusy] = useState(false);
-  /** 从系统设置页返回（存储/使用情况/悬浮窗）后重新核对 */
+  /**
+   * 持久拒绝态（运行时权限被系统「不再询问」关掉弹窗，canAsk=false）：
+   * 弹窗按钮切换为「去系统设置手动开启」，点击经原生 Intent 跳应用详情页。
+   */
+  const dialogPersistDenied =
+    !!dialogPerm && dialogPerm.persistDeniedFallback === true && permStates[dialogPerm.key] === 'web-denied';
+  /** 从系统设置页返回（无障碍/使用情况/悬浮窗等）后重新核对 */
   useEffect(() => {
     if (dialogPerm) return;
     // 弹窗关闭后延迟 800ms 刷新（用户可能刚从系统设置返回）
     const t = window.setTimeout(() => {
       refreshAllPerms();
-      void refreshShizuku();
     }, 800);
     return () => window.clearTimeout(t);
-  }, [dialogPerm, refreshAllPerms, refreshShizuku]);
+  }, [dialogPerm, refreshAllPerms]);
 
   const doGrant = async () => {
     if (!dialogPerm) return;
@@ -451,7 +596,13 @@ export function PermissionHubPage({ onBack }: { onBack: () => void }) {
       // Promise.race 9 秒强制完成并落网页授权账本——按钮绝不再永远卡在「申请中…」；
       // 真机保持原行为（系统授权框等待用户点选属正常态）。
       let r: { ok: boolean; note?: string };
-      if (native) {
+      if (dialogPersistDenied) {
+        // 系统弹窗已被持久关掉：跳应用详情页让用户手动开（v2.0.0 兜底）
+        const jumped = await openNativeAppDetailSettings();
+        r = jumped
+          ? { ok: true, note: '已跳转应用详情页，手动开启后返回刷新' }
+          : { ok: false, note: '跳转失败（通道异常）' };
+      } else if (native) {
         r = await dialogPerm.request();
       } else {
         r = await Promise.race([
@@ -479,33 +630,9 @@ export function PermissionHubPage({ onBack }: { onBack: () => void }) {
     }
   };
 
-  // ---- Shizuku 授权（真机经 Shizuku APP 弹授权框；网页/桥不可用直接记为已授权） ----
-  const [shizukuBusy, setShizukuBusy] = useState(false);
-  const doShizukuGrant = async () => {
-    setShizukuBusy(true);
-    try {
-      const r = await nativeRequestShizukuPermission();
-      if (r === null) {
-        writeWebPermGrant('shizuku', true);
-        showToast('Shizuku 已授权');
-      } else if (r.granted) {
-        showToast('Shizuku 已授权');
-      } else {
-        showToast(r.reason === 'shizuku-not-running' ? 'Shizuku 未运行：先打开 Shizuku APP 激活' : '未完成授权');
-      }
-    } finally {
-      setShizukuBusy(false);
-      void refreshShizuku();
-    }
-  };
-
   const pickTarget = (t: AiActionTarget) => {
     setTarget(t);
     setAiActionTarget(t);
-  };
-  const pickEngine = (e: UsageEngine) => {
-    setEngine(e);
-    setUsageEngine(e);
   };
 
   return (
@@ -514,15 +641,15 @@ export function PermissionHubPage({ onBack }: { onBack: () => void }) {
         {/* 说明卡（v1.9.40 精简为一行） */}
         <div className="mx-1 mt-4 rounded-[22px] bg-white/55 p-4 text-[13px] leading-relaxed ring-1 ring-white/70 backdrop-blur-2xl dark:bg-white/[0.06] dark:ring-white/[0.09]">
           <p className="text-muted-foreground">
-            点权限行即可开启；AI 动手能力始终开启——你让 TA 做什么就做什么，TA 也会按人设与记忆主动帮你。
+            点权限行即可开启（真机自动跳系统授权页，浏览器里记网页授权）；AI 动手能力始终开启——你让 TA 做什么就做什么，TA 也会按人设与记忆主动帮你。
           </p>
         </div>
 
-        {/* ===== 基础权限 ===== */}
+        {/* ===== 基础权限（机主 11 项 + 通知/麦克风） ===== */}
         <SectionLabel icon={ShieldCheck} tone="#34C759" right={
           <button
             type="button"
-            onClick={() => { refreshAllPerms(); void refreshShizuku(); }}
+            onClick={() => { refreshAllPerms(); }}
             className="flex items-center gap-1 rounded-full bg-black/[0.05] px-2.5 py-1 text-[12px] text-muted-foreground transition-colors active:bg-black/10 dark:bg-white/10 dark:active:bg-white/20"
             data-testid="perm-refresh"
           >
@@ -538,57 +665,19 @@ export function PermissionHubPage({ onBack }: { onBack: () => void }) {
           ))}
         </div>
 
-        {/* ===== 调试权限 ===== */}
-        <SectionLabel icon={Terminal} tone="#5856D6">调试权限</SectionLabel>
+        {/* ===== 时长数据源（v2.0.0 去 Shizuku：UsageStats 恒走原生系统账本，无模式可选，纯展示） ===== */}
+        <SectionLabel icon={Cpu} tone="#FF9500">时长数据源</SectionLabel>
         <div className="mx-1 divide-y divide-black/[0.05] overflow-hidden rounded-[22px] bg-white/55 shadow-[0_8px_28px_rgba(17,24,39,0.06)] ring-1 ring-white/70 backdrop-blur-2xl dark:divide-white/[0.06] dark:bg-white/[0.06] dark:ring-white/[0.09]">
           <div className="flex min-h-[52px] items-center gap-3 px-4 py-2">
-            <LineIcon icon={Terminal} />
+            <LineIcon icon={Cpu} />
             <span className="min-w-0 flex-1">
-              <span className="block truncate text-[16px]">Shizuku 服务</span>
-              <span className="mt-0.5 block truncate text-[11.5px] text-muted-foreground">
-                {shizuku === 'running'
-                  ? '已连接并授权'
-                  : shizuku === 'checking'
-                    ? '检测中…'
-                    : '未授权'}
-              </span>
+              <span className="block truncate text-[16px]">原生 UsageStats</span>
+              <span className="mt-0.5 block truncate text-[11.5px] text-muted-foreground">使用时长直读系统账本（自动启用，无需选择）</span>
             </span>
-            <PermStatusPill
-              state={shizuku === 'running' ? 'granted' : shizuku === 'checking' ? 'checking' : 'denied'}
-            />
-            {shizuku === 'stopped' ? (
-              <button
-                type="button"
-                disabled={shizukuBusy}
-                onClick={() => void doShizukuGrant()}
-                className="shrink-0 rounded-full bg-[#007AFF] px-3 py-1.5 text-[12.5px] font-medium text-white transition-colors active:bg-[#0071E3] disabled:opacity-50"
-                data-testid="shizuku-grant-btn"
-              >
-                {shizukuBusy ? '授权中…' : '去授权'}
-              </button>
-            ) : null}
+            <span className="shrink-0 rounded-full bg-[#34C759]/12 px-2.5 py-1 text-[12px] font-medium text-[#248A3D] dark:text-[#30D158]">
+              自动
+            </span>
           </div>
-        </div>
-
-        {/* ===== 授权模式 ===== */}
-        <SectionLabel icon={Cpu} tone="#FF9500">授权模式</SectionLabel>
-        <div className="mx-1 divide-y divide-black/[0.05] overflow-hidden rounded-[22px] bg-white/55 shadow-[0_8px_28px_rgba(17,24,39,0.06)] ring-1 ring-white/70 backdrop-blur-2xl dark:divide-white/[0.06] dark:bg-white/[0.06] dark:ring-white/[0.09]" role="radiogroup" aria-label="授权模式">
-          <ModeRadioRow
-            icon={Cpu}
-            label="CAP-go 插件"
-            desc="使用时长/感知走 Cap-go 插件"
-            selected={engine === 'standard'}
-            onSelect={() => pickEngine('standard')}
-            testId="engine-capgo"
-          />
-          <ModeRadioRow
-            icon={Terminal}
-            label="Shizuku 模式"
-            desc="shell 直读系统账本，需 Shizuku"
-            selected={engine === 'shizuku'}
-            onSelect={() => pickEngine('shizuku')}
-            testId="engine-shizuku"
-          />
         </div>
 
         {/* ===== AI 动手范围 ===== */}
@@ -605,18 +694,18 @@ export function PermissionHubPage({ onBack }: { onBack: () => void }) {
           <ModeRadioRow
             icon={Smartphone}
             label="真机"
-            desc="AI 经 Shizuku 操作真实手机"
+            desc="AI 经原生+无障碍操作真实手机"
             selected={target === 'device'}
             onSelect={() => pickTarget('device')}
             testId="target-device"
           />
         </div>
         <p className="mx-1 mt-1.5 text-[11.5px] leading-relaxed text-muted-foreground">
-          {target === 'device' ? '真机命令会真实作用在你的手机上（经 Shizuku）。' : '动手只作用在手机里的网页应用，不碰真实手机。'}
+          {target === 'device' ? '真机命令会真实作用在你的手机上（经原生系统 API 与无障碍服务）。' : '动手只作用在手机里的网页应用，不碰真实手机。'}
         </p>
       </div>
 
-      {/* 权限授权确认弹窗（v1.9.40 iOS 式：标题 + 暂不/开启，无长说明） */}
+      {/* 权限授权确认弹窗（v1.9.40 iOS 式：标题 + 暂不/开启，无长说明；持久拒绝时按钮变「去系统设置手动开启」） */}
       <AlertDialog open={!!dialogPerm} onOpenChange={(o) => { if (!o) setDialogPerm(null); }}>
         <AlertDialogContent className="w-[270px] gap-0 rounded-[14px] p-0 sm:w-[270px] sm:max-w-[270px]">
           <AlertDialogHeader className="px-5 pb-5 pt-6 sm:text-center">
@@ -637,7 +726,7 @@ export function PermissionHubPage({ onBack }: { onBack: () => void }) {
               className="mt-0 flex-1 border-0 bg-transparent py-3 text-[16px] font-semibold text-[#007AFF] hover:bg-transparent disabled:opacity-50"
               data-testid="perm-grant-confirm"
             >
-              {grantBusy ? '申请中…' : (dialogPerm?.actionLabel ?? '去开启')}
+              {grantBusy ? '申请中…' : dialogPersistDenied ? '去系统设置手动开启' : (dialogPerm?.actionLabel ?? '去开启')}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

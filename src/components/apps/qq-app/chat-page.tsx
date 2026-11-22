@@ -136,7 +136,7 @@ import { addressNameOf, avatarFor, displayNameOf, isFriendIn, withDisplayNames, 
 import type { ContactRecord } from '@/lib/contacts';
 import { DEFAULT_STICKER_GROUP_ID, loadStickers, newStickerId, saveStickers } from '@/lib/ios/stickers';
 import type { Sticker } from '@/lib/ios/stickers';
-import { buildShizukuAutonomyRules, enqueuePhoneOp } from '@/lib/ios/shizuku-autonomy';
+import { buildShizukuAutonomyRules, enqueuePhoneOp } from '@/lib/ios/device-autonomy';
 import { useOpPill, SkillUsePill } from '../skill-use-pill';
 import { buildActionRules, buildMomentPostRule, buildVisionRules, cleanBubbleText, stripMsgHandleText, extractRichActionParts, mergeRichSegments, parseRichParts, splitImageIdRefs, isQuitWinbackAction, isGroupSocialAction, ensureStickerDemand } from '@/lib/chat-rich';
 import SongMsgBubble from '../song-msg-bubble';
