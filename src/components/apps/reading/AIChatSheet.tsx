@@ -416,13 +416,13 @@ export function AIChatSheet(props: {
 
       {/* 快捷提问 */}
       {msgs.length === 0 && (
-        <div className="flex gap-2 overflow-x-auto px-4 pb-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        <div className="flex flex-wrap gap-2 px-4 pb-2">
           {quickAsks.map((q) => (
             <button
               key={q}
               type="button"
               onClick={() => void send(q)}
-              className="h-8 shrink-0 rounded-full px-3.5 text-[12px] font-medium ring-1 backdrop-blur-xl active:scale-95"
+              className="h-8 shrink-0 whitespace-nowrap rounded-full px-3.5 text-[12px] font-medium ring-1 backdrop-blur-xl active:scale-95"
               style={{ background: theme.cardBg, color: theme.accent, boxShadow: 'inset 0 0 0 1px ' + theme.cardRing }}
             >
               {q}

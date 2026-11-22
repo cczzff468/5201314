@@ -231,9 +231,9 @@ function MoreSettingsSheet({ onClose }: { onClose: () => void }) {
 
   return (
     <div className="absolute inset-0 z-[52]" role="dialog" aria-label="更多设置">
-      <button type="button" aria-label="关闭更多设置" className="absolute inset-0 bg-black/40" onClick={onClose} />
+      <button type="button" aria-label="关闭更多设置" className="absolute inset-0" onClick={onClose} />
       <div
-        className="absolute inset-x-0 bottom-0 max-h-[92%] overflow-y-auto overscroll-contain rounded-t-[22px] shadow-2xl"
+        className="absolute inset-x-0 bottom-0 max-h-[86%] overflow-y-auto overscroll-contain rounded-t-[22px] shadow-2xl"
         style={{ background: dark ? '#16181F' : '#FFFFFF', boxShadow: '0 -14px 48px rgba(0,0,0,0.28)' }}
       >
         {/* 拖动条 */}
@@ -648,13 +648,13 @@ function MoreSettingsSheet({ onClose }: { onClose: () => void }) {
             <div className="space-y-3">
               <div className="rounded-2xl p-3.5" style={{ background: softBg(dark) }}>
                 <GroupTitle dark={dark} icon={<CaseSensitive className="h-4 w-4" />} title="字体" />
-                <div className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                <div className="flex flex-wrap gap-2">
                   {BUILTIN_FONTS.map((f) => (
                     <button
                       key={f.key}
                       type="button"
                       onClick={() => patch({ fontFamily: f.key })}
-                      className="h-9 shrink-0 rounded-[10px] px-3.5 text-[13px] font-medium active:scale-95"
+                      className="h-9 shrink-0 whitespace-nowrap rounded-[10px] px-3.5 text-[13px] font-medium active:scale-95"
                       style={
                         settings.fontFamily === f.key
                           ? { background: blueSoft(dark), color: BLUE, fontWeight: 600 }
@@ -804,9 +804,9 @@ export function ReaderSettingsSheet({ onClose }: { onClose: () => void }) {
 
   return (
     <div className="absolute inset-0 z-50" role="dialog" aria-label="阅读设置">
-      <button type="button" aria-label="关闭设置" className="absolute inset-0 bg-black/40" onClick={onClose} />
+      <button type="button" aria-label="关闭设置" className="absolute inset-0" onClick={onClose} />
       <div
-        className="absolute inset-x-0 bottom-0 max-h-[88%] overflow-y-auto overscroll-contain rounded-t-[22px] shadow-2xl"
+        className="absolute inset-x-0 bottom-0 max-h-[82%] overflow-y-auto overscroll-contain rounded-t-[22px] shadow-2xl"
         style={{ background: dark ? '#16181F' : '#FFFFFF', boxShadow: '0 -14px 48px rgba(0,0,0,0.28)' }}
       >
         {/* 拖动条（紧凑） */}
@@ -872,13 +872,13 @@ export function ReaderSettingsSheet({ onClose }: { onClose: () => void }) {
           </div>
           {fontPop && (
             <div className="mt-2.5 rounded-2xl p-3" style={{ background: softBg(dark) }}>
-              <div className="-mx-1 flex gap-2 overflow-x-auto px-1 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+              <div className="flex flex-wrap gap-2">
                 {BUILTIN_FONTS.map((f) => (
                   <button
                     key={f.key}
                     type="button"
                     onClick={() => patch({ fontFamily: f.key })}
-                    className="h-9 shrink-0 rounded-[10px] px-3.5 text-[13px] font-medium active:scale-95"
+                    className="h-9 shrink-0 whitespace-nowrap rounded-[10px] px-3.5 text-[13px] font-medium active:scale-95"
                     style={
                       settings.fontFamily === f.key
                         ? { background: blueSoft(dark), color: BLUE, fontWeight: 600 }

@@ -14,6 +14,19 @@ export const dynamic = 'force-dynamic';
 const UA =
   'Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Mobile Safari/537.36';
 
+/** 图片魔数嗅探（无 content-type 时判真图，拒绝 HTML 防盗链页） */
+function isImageBytes(buf: ArrayBuffer): boolean {
+  if (buf.byteLength < 12) return false;
+  const b = new Uint8Array(buf.slice(0, 12));
+  if (b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) return true; // JPEG
+  if (b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47) return true; // PNG
+  if (b[0] === 0x47 && b[1] === 0x49 && b[2] === 0x46) return true; // GIF
+  if (b[0] === 0x42 && b[1] === 0x4d) return true; // BMP
+  if (b[0] === 0x52 && b[1] === 0x49 && b[2] === 0x46 && b[3] === 0x46 && b[8] === 0x57 && b[9] === 0x45 && b[10] === 0x42 && b[11] === 0x50) return true; // WEBP
+  if (b[4] === 0x66 && b[5] === 0x74 && b[6] === 0x79 && b[7] === 0x70) return true; // AVIF/HEIC
+  return false;
+}
+
 export async function GET(req: NextRequest) {
   const sp = req.nextUrl.searchParams;
   const u = sp.get('u') || '';
@@ -55,9 +68,16 @@ export async function GET(req: NextRequest) {
       cache: 'no-store',
     });
     if (!res.ok) return NextResponse.json({ error: `upstream ${res.status}` }, { status: 502 });
-    const type = res.headers.get('content-type') || 'image/jpeg';
-    if (!type.startsWith('image/')) return NextResponse.json({ error: 'not image' }, { status: 415 });
+    let type = res.headers.get('content-type') || '';
     const buf = await res.arrayBuffer();
+    // 明确文本/HTML → 拒；无 content-type → 魔数嗅探（HTML 页伪装不了图片头）
+    if (type.startsWith('text/') || type.includes('html') || type.includes('json')) {
+      return NextResponse.json({ error: 'not image' }, { status: 415 });
+    }
+    if (!type.startsWith('image/')) {
+      if (!isImageBytes(buf)) return NextResponse.json({ error: 'not image' }, { status: 415 });
+      type = 'image/jpeg';
+    }
     return new NextResponse(buf, {
       status: 200,
       headers: {

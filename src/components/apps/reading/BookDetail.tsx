@@ -430,7 +430,7 @@ export function BookDetail({
             type="button"
             onClick={onBack}
             aria-label="返回"
-            className="-ml-1 flex h-10 w-10 items-center justify-center rounded-full backdrop-blur-xl active:scale-90"
+            className="-ml-1.5 flex h-11 w-11 items-center justify-center rounded-full backdrop-blur-xl active:scale-90"
             style={{ background: 'rgba(0,0,0,0.28)', color: '#fff', boxShadow: 'inset 0 0 0 1px rgba(255,255,255,0.18)' }}
           >
             <ChevronLeft className="h-6 w-6" strokeWidth={2.4} />
@@ -439,7 +439,7 @@ export function BookDetail({
             type="button"
             onClick={() => setReloadKey((k) => k + 1)}
             aria-label="刷新"
-            className="flex h-10 w-10 items-center justify-center rounded-full backdrop-blur-xl active:scale-90"
+            className="flex h-11 w-11 items-center justify-center rounded-full backdrop-blur-xl active:scale-90"
             style={{ background: 'rgba(0,0,0,0.28)', color: '#fff', boxShadow: 'inset 0 0 0 1px rgba(255,255,255,0.18)' }}
           >
             <RefreshCw className="h-[17px] w-[17px]" />
@@ -667,13 +667,14 @@ export function BookDetail({
               <p className="text-[16px] font-bold" style={{ color: theme.textMain }}>
                 看了本书的还在看
               </p>
-              <div className="-mx-1 mt-2.5 flex gap-3 overflow-x-auto px-1 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+              {/* 4 列网格：全部可见、无裁切（替代旧横滑行） */}
+              <div className="mt-2.5 grid grid-cols-4 gap-3">
                 {similar.map((b) => (
                   <button
                     key={b.name}
                     type="button"
                     onClick={() => onSwitchSource({ name: b.name, author: b.author, bookUrl: '', sourceName: '', sourceUrl: '' })}
-                    className="w-[86px] shrink-0 text-left active:scale-95"
+                    className="w-full text-left active:scale-95"
                   >
                     <div
                       className="flex aspect-[3/4.2] w-full flex-col items-center justify-center gap-1.5 overflow-hidden rounded-xl p-2"

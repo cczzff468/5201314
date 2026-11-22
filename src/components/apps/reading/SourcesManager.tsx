@@ -394,8 +394,8 @@ export function SourcesManager({ onBack }: { onBack: () => void }) {
           )}
         </div>
 
-        {/* 筛选 chips（含分组开关 + 清理失效入口；全部单行不换行） */}
-        <div className="mt-3 flex items-center gap-2 overflow-x-auto pb-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        {/* 筛选 chips（flex-wrap 自动换行：内容再多也不会被屏幕两侧裁切） */}
+        <div className="mt-3 flex flex-wrap items-center gap-2">
           {(
             [
               { k: 'all' as FilterKey, label: `全部 ${sources.length}` },
@@ -447,35 +447,36 @@ export function SourcesManager({ onBack }: { onBack: () => void }) {
             </button>
           )}
           {showGroups && (
-            <button
-              type="button"
-              onClick={() => setGroupFilter(null)}
-              className="h-8 shrink-0 whitespace-nowrap rounded-full px-3.5 text-[12.5px] font-medium transition-all active:scale-95"
-              style={
-                !groupFilter
-                  ? { background: BLUE, color: '#fff' }
-                  : { background: chipBg, color: theme.textMain, boxShadow: `inset 0 0 0 1px ${chipRing}` }
-              }
-            >
-              全部分组
-            </button>
-          )}
-          {showGroups &&
-            groups.map(([g, n]) => (
+            <div className="mt-2 flex w-full flex-wrap items-center gap-2">
               <button
-                key={g}
                 type="button"
-                onClick={() => setGroupFilter(groupFilter === g ? null : g)}
+                onClick={() => setGroupFilter(null)}
                 className="h-8 shrink-0 whitespace-nowrap rounded-full px-3.5 text-[12.5px] font-medium transition-all active:scale-95"
                 style={
-                  groupFilter === g
+                  !groupFilter
                     ? { background: BLUE, color: '#fff' }
                     : { background: chipBg, color: theme.textMain, boxShadow: `inset 0 0 0 1px ${chipRing}` }
                 }
               >
-                {g} {n}
+                全部分组
               </button>
-            ))}
+              {groups.map(([g, n]) => (
+                <button
+                  key={g}
+                  type="button"
+                  onClick={() => setGroupFilter(groupFilter === g ? null : g)}
+                  className="h-8 shrink-0 whitespace-nowrap rounded-full px-3.5 text-[12.5px] font-medium transition-all active:scale-95"
+                  style={
+                    groupFilter === g
+                      ? { background: BLUE, color: '#fff' }
+                      : { background: chipBg, color: theme.textMain, boxShadow: `inset 0 0 0 1px ${chipRing}` }
+                  }
+                >
+                  {g} {n}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* 统计行 */}

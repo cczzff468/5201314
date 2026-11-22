@@ -438,6 +438,8 @@ export function ReaderView({ page, onBack }: { page: ReaderPage; onBack: () => v
   const lpTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** 本次触摸是否已触发长按（触发后拖动=扩选选区而不是翻页） */
   const lpFiredRef = useRef(false);
+  /** 鼠标长按（桌面端左键按住 500ms = 触屏长按；触发后拖动=扩选） */
+  const mouseLpRef = useRef<{ x: number; y: number; timer: ReturnType<typeof setTimeout> | null; fired: boolean } | null>(null);
   /** suppressClick 自动复位定时器（长按后的释放 click 吞掉一次即可，之后正常响应） */
   const suppressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** 短暂吞掉下一次点击（400ms 内或被吞后自动复位），避免长按释放误触翻页/菜单 */
@@ -746,7 +748,7 @@ export function ReaderView({ page, onBack }: { page: ReaderPage; onBack: () => v
   const titleVisible = settings.titlePosition !== 'hidden';
   const remain = Math.max(0, chapters.length - idx - 1);
 
-  /** 段落排版（测量与渲染共用同一份 → 行切分必然一致） */
+  /** 段落排版（测量与渲染共用同一份 → 行切分必然一致）；防溢出：任何超长词/URL 强制折行，绝不横向裁切 */
   const paraTypo = useMemo<React.CSSProperties>(
     () => ({
       fontFamily: fontCssVal,
@@ -756,6 +758,8 @@ export function ReaderView({ page, onBack }: { page: ReaderPage; onBack: () => v
       letterSpacing: `${settings.letterSpacing}px`,
       textAlign: settings.justify ? 'justify' : 'start',
       textJustify: settings.cjkOptimize ? 'inter-character' : undefined,
+      overflowWrap: 'anywhere',
+      wordBreak: 'break-word',
       textDecoration: settings.underline ? 'underline' : 'none',
       textDecorationThickness: settings.underline ? '1px' : undefined,
       textUnderlineOffset: settings.underline ? '0.25em' : undefined,
@@ -2190,6 +2194,44 @@ export function ReaderView({ page, onBack }: { page: ReaderPage; onBack: () => v
         onTouchMove={onTouchMove}
         onTouchEnd={onTouchEnd}
         onTouchCancel={onTouchEnd}
+        onPointerDown={(e) => {
+          // 鼠标左键按住 500ms = 长按划线（触屏走 onTouchStart，不重复触发）
+          if (e.pointerType !== 'mouse' || e.button !== 0) return;
+          const x = e.clientX;
+          const y = e.clientY;
+          const timer = setTimeout(() => {
+            if (mouseLpRef.current) {
+              mouseLpRef.current.fired = true;
+              mouseLpRef.current.timer = null;
+            }
+            handleLongPress(x, y);
+          }, 500);
+          mouseLpRef.current = { x, y, timer, fired: false };
+        }}
+        onPointerMove={(e) => {
+          const m = mouseLpRef.current;
+          if (!m) return;
+          // 已触发：拖动 = 逐字扩选（与触屏一致）
+          if (m.fired) {
+            updateSelFromPoint(e.clientX, e.clientY, 'end');
+            return;
+          }
+          // 未触发：位移超阈值取消（区分点击与拖动）
+          if (Math.hypot(e.clientX - m.x, e.clientY - m.y) > 9) {
+            if (m.timer) clearTimeout(m.timer);
+            mouseLpRef.current = null;
+          }
+        }}
+        onPointerUp={() => {
+          const m = mouseLpRef.current;
+          if (m?.timer) clearTimeout(m.timer);
+          mouseLpRef.current = null;
+        }}
+        onPointerLeave={() => {
+          const m = mouseLpRef.current;
+          if (m?.timer) clearTimeout(m.timer);
+          mouseLpRef.current = null;
+        }}
         style={{
           paddingLeft: `calc(3px + ${settings.marginLeft}vw)`,
           paddingRight: `calc(3px + ${settings.marginRight}vw)`,

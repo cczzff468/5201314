@@ -233,8 +233,8 @@ export function ShelfTab({
         </div>
       )}
 
-      {/* 分组胶囊行 */}
-      <div className="-mx-4 mt-3 flex items-center gap-2 overflow-x-auto px-4 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+      {/* 分组胶囊行（flex-wrap 换行：不横向滚动、永不裁切） */}
+      <div className="mt-3 flex flex-wrap items-center gap-2">
         {['全部', ...groups, ...(hasUngrouped ? [UNGROUPED] : [])].map((g) => {
           const label = g === UNGROUPED ? '未分组' : g;
           const active = g === group;
