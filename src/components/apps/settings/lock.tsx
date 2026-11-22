@@ -178,7 +178,7 @@ export function FaceLockSection() {
         </GrayCard>
       ) : (
         <>
-          <div className="no-scrollbar -mx-1 flex gap-3.5 overflow-x-auto px-1 py-0.5" role="listbox" aria-label="选择角色">
+          <div className="no-scrollbar flex flex-wrap gap-3.5 py-0.5" role="listbox" aria-label="选择角色">
             {contacts.map((c) => {
               const active = c.id === selId;
               const hasRef = hasRefOf(c.id);
@@ -191,7 +191,7 @@ export function FaceLockSection() {
                   aria-selected={active}
                   data-testid={`imggen-face-chip-${c.id}`}
                   onClick={() => setSelId(c.id)}
-                  className="flex w-[60px] shrink-0 flex-col items-center gap-1.5 rounded-[14px] py-1 transition-all active:scale-95"
+                  className="flex w-[60px] flex-col items-center gap-1.5 rounded-[14px] py-1 transition-all active:scale-95"
                 >
                   <span className="relative">
                     {c.avatar ? (

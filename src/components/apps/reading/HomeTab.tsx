@@ -310,17 +310,17 @@ export function HomeTab({
           </button>
         )}
 
-        {/* 分类胶囊（点击进入分类浏览页） */}
-        <div className="-mx-4 mt-4 flex gap-2 overflow-x-auto px-4 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        {/* 分类胶囊（点击进入分类浏览页；自适应换行，不做横向滚动） */}
+        <div className="mt-4 flex flex-wrap gap-2">
           {CATEGORIES.map((c) => (
             <button
               key={c}
               type="button"
               onClick={() => onOpenCategory(c)}
-              className={`h-8 shrink-0 whitespace-nowrap rounded-full px-4 text-[13px] font-medium backdrop-blur-xl active:scale-95 ${c === '热门' ? 'text-white' : ''}`}
+              className="h-8 whitespace-nowrap rounded-full px-4 text-[13px] font-medium backdrop-blur-xl active:scale-95"
               style={
                 c === '热门'
-                  ? { background: `linear-gradient(135deg, ${theme.gradFrom}, ${theme.gradTo})`, boxShadow: `0 4px 14px ${theme.accent}44` }
+                  ? { background: `linear-gradient(135deg, ${theme.gradFrom}, ${theme.gradTo})`, boxShadow: `0 4px 14px ${theme.accent}44`, color: '#fff' }
                   : { ...glass, color: theme.textMain }
               }
             >
@@ -337,13 +337,14 @@ export function HomeTab({
                 根据书架推荐
               </h2>
             </div>
-            <div className="-mx-4 flex gap-3 overflow-x-auto px-4 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+            {/* 自适应网格（每行 3 本，与「为你推荐」一致，无横向滚动） */}
+            <div className="grid grid-cols-3 gap-x-3 gap-y-4">
               {recForYou.map((b) => (
                 <button
                   key={b.name}
                   type="button"
                   onClick={() => onSearch(b.name)}
-                  className="w-[86px] shrink-0 text-left active:scale-95"
+                  className="w-full text-left active:scale-95"
                 >
                   <CoverCard b={{ name: b.name, author: b.author, tag: b.tag }} subtitle={b.reason} />
                 </button>
@@ -368,13 +369,14 @@ export function HomeTab({
                 全部 ›
               </button>
             </div>
-            <div className="-mx-4 flex gap-3 overflow-x-auto px-4 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+            {/* 自适应网格（每行 3 本，与「为你推荐」一致，无横向滚动） */}
+            <div className="grid grid-cols-3 gap-x-3 gap-y-4">
               {FEATURED[cat].slice(0, 6).map((b) => (
                 <button
                   key={b.name}
                   type="button"
                   onClick={() => onSearch(b.name)}
-                  className="w-[86px] shrink-0 text-left active:scale-95"
+                  className="w-full text-left active:scale-95"
                 >
                   <CoverCard b={b} />
                 </button>

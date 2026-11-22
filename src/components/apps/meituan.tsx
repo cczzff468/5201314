@@ -1977,7 +1977,7 @@ function MerchantPage({ merchant, onBack, onCheckout, onOpenOrder, onToast }: { 
           </div>
           {/* 商家入驻：店铺券（可领，进「红包卡券」结算自动可用） */}
           {shopCoupons.length > 0 && (
-            <div className="mt-2.5 -mx-4 flex gap-1.5 overflow-x-auto px-4 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" data-testid="mt-shop-coupons">
+            <div className="mt-2.5 flex flex-wrap gap-1.5" data-testid="mt-shop-coupons">
               {shopCoupons.map((c) => {
                 const got = claimedCouponIds.includes(c.id);
                 return (
@@ -3745,10 +3745,10 @@ function OrdersPage({
             <span className="text-[10px]">发票</span>
           </button>
         </div>
-        {/* 页签 */}
-        <div className="mt-2.5 -mx-3 flex gap-5 overflow-x-auto px-3 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        {/* 页签（自适应换行，无横向滚动） */}
+        <div className="mt-2.5 flex flex-wrap gap-x-5 gap-y-1">
           {ORDER_TABS.map((t) => (
-            <button key={t.key} type="button" onClick={() => setTab(t.key)} className={`relative shrink-0 pb-2.5 text-[16px] ${tab === t.key ? 'font-bold text-black/90' : 'text-black/55'}`}>
+            <button key={t.key} type="button" onClick={() => setTab(t.key)} className={`relative pb-2.5 text-[16px] ${tab === t.key ? 'font-bold text-black/90' : 'text-black/55'}`}>
               {t.key}
               {tab === t.key && <span className="absolute inset-x-0 bottom-[6px] mx-auto h-[3px] w-7 rounded-full bg-[#FF6000]" />}
             </button>
@@ -4763,9 +4763,9 @@ function OrderDetailPage({
         {/* 遇到问题需要帮助（灰底白卡 + 胶囊 + 待支付地址反馈行） */}
         <div className="mx-3 mb-4 mt-2.5 rounded-xl bg-white px-4 py-4">
           <p className="text-[15px] font-bold text-black/85">遇到问题需要帮助?</p>
-          <div className="mt-3 -mx-4 flex gap-2 overflow-x-auto px-4 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          <div className="mt-3 flex flex-wrap gap-2">
             {helpPills.map((p) => (
-              <button key={p.t} type="button" onClick={p.a} className="shrink-0 whitespace-nowrap rounded-full bg-[#F5F6F7] px-3.5 py-2 text-[12px] text-black/65 active:bg-black/10">
+              <button key={p.t} type="button" onClick={p.a} className="whitespace-nowrap rounded-full bg-[#F5F6F7] px-3.5 py-2 text-[12px] text-black/65 active:bg-black/10">
                 {p.t}
               </button>
             ))}
@@ -6145,9 +6145,9 @@ function CouponsPage({
         <>
           {/* 分类页签 */}
           <div className="shrink-0 bg-white px-4">
-            <div className="-mx-4 flex gap-6 overflow-x-auto px-4 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+            <div className="flex flex-wrap gap-x-6 gap-y-1">
               {COUPON_CATS.map((t) => (
-                <button key={t.key} type="button" onClick={() => setCat(t.key)} className={`relative shrink-0 py-3 text-[16px] ${cat === t.key ? 'font-bold text-black/90' : 'text-black/55'}`}>
+                <button key={t.key} type="button" onClick={() => setCat(t.key)} className={`relative py-3 text-[16px] ${cat === t.key ? 'font-bold text-black/90' : 'text-black/55'}`}>
                   {t.label}
                   {cat === t.key && <span className="absolute inset-x-0 bottom-[4px] mx-auto h-[3px] w-6 rounded-full bg-[#FFC300]" />}
                 </button>
@@ -6157,7 +6157,7 @@ function CouponsPage({
 
           {/* 快捷筛选 chips */}
           <div className="shrink-0 border-b border-black/[0.04] bg-white px-3 pb-2.5">
-            <div className="-mx-3 flex gap-2 overflow-x-auto px-3 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+            <div className="flex flex-wrap gap-2">
               {([
                 ['god', '神券', true],
                 ['recent', '最近获得', false],
@@ -6169,7 +6169,7 @@ function CouponsPage({
                   key={k}
                   type="button"
                   onClick={() => setQuick((q) => (q === k ? null : k))}
-                  className={`shrink-0 rounded-lg px-3.5 py-2 text-[13px] transition-colors ${quick === k ? 'bg-[#FFF3B8] font-semibold text-[#B77900]' : hot ? 'bg-[#F5F6F7] font-bold text-[#FF3B30]' : 'bg-[#F5F6F7] text-black/70'}`}
+                  className={`whitespace-nowrap rounded-lg px-3.5 py-2 text-[13px] transition-colors ${quick === k ? 'bg-[#FFF3B8] font-semibold text-[#B77900]' : hot ? 'bg-[#F5F6F7] font-bold text-[#FF3B30]' : 'bg-[#F5F6F7] text-black/70'}`}
                 >
                   {label}
                 </button>
@@ -10907,8 +10907,8 @@ function HotelChannelPage({ onBack, onOpenPay, onToast }: { onBack: () => void; 
             <Ticket className="h-4 w-4 text-[#7A4AE0]" strokeWidth={2.1} />
           </div>
         </div>
-        {/* 主题页签 */}
-        <div className="mt-2.5 -mx-3 flex items-center gap-5 overflow-x-auto px-3 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        {/* 主题页签（自适应换行，无横向滚动） */}
+        <div className="mt-2.5 flex flex-wrap items-center gap-x-5 gap-y-1">
           {HOTEL_TABS.map((t) => (
             <button
               key={t}
@@ -10917,7 +10917,7 @@ function HotelChannelPage({ onBack, onOpenPay, onToast }: { onBack: () => void; 
                 setTab(t);
                 setSel(null);
               }}
-              className={`shrink-0 pb-1.5 text-[15px] ${tab === t ? 'font-bold text-black/90' : 'text-black/55'}`}
+              className={`pb-1.5 text-[15px] ${tab === t ? 'font-bold text-black/90' : 'text-black/55'}`}
             >
               {t}
               <span className={`mx-auto mt-1 block h-[3px] w-6 rounded-full ${tab === t ? 'bg-[#FFC300]' : 'bg-transparent'}`} />
@@ -11298,14 +11298,14 @@ function FunChannelPage({ onBack, onOpenPay, onToast }: { onBack: () => void; on
             <span className="min-w-0 flex-1 truncate text-[13px] text-black/40">搜索玩乐 · 电玩/KTV/密室/洗浴</span>
           </span>
         </div>
-        {/* 品类筛选 */}
-        <div className="mt-2.5 -mx-3 flex items-center gap-2 overflow-x-auto px-3 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        {/* 品类筛选（自适应换行，无横向滚动） */}
+        <div className="mt-2.5 flex flex-wrap items-center gap-2">
           {FUN_CATS.map((t) => (
             <button
               key={t}
               type="button"
               onClick={() => setCat(t)}
-              className={`shrink-0 rounded-full px-3 py-1.5 text-[12px] ${cat === t ? 'bg-black/85 font-semibold text-white' : 'bg-white/70 text-black/65'}`}
+              className={`whitespace-nowrap rounded-full px-3 py-1.5 text-[12px] ${cat === t ? 'bg-black/85 font-semibold text-white' : 'bg-white/70 text-black/65'}`}
             >
               {t}
             </button>

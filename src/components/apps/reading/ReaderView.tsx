@@ -1671,19 +1671,18 @@ export function ReaderView({ page, onBack }: { page: ReaderPage; onBack: () => v
       setSrcBusy(false);
       return;
     }
-    // 换源 = 同一本书换不同源：书名必须完全一致（归一化空白后），
-    // 作者双方都有值时也必须一致——杜绝「包含匹配」把续作/同名不同书塞进列表
+    // 换源 = 同一本书换不同源：只收「书名完全一致（归一化空白后）且
+    // （作者一致 或 任一方作者未知）」的结果；同名不同作者直接排除，
+    // 杜绝「换源变换书」
     const nm = (x: string) => norm(x);
     const au = (x?: string | null) => norm(x || '');
     await Promise.all(
       pool.map(async (s) => {
         try {
           const r = await api.searchOne(src.name, s.id);
-          const books = r.books || [];
-          const hit =
-            books.find(
-              (b) => nm(b.name) === nm(src.name) && (!au(src.author) || !au(b.author) || au(b.author) === au(src.author)),
-            ) || books.find((b) => nm(b.name) === nm(src.name));
+          const hit = (r.books || []).find(
+            (b) => nm(b.name) === nm(src.name) && (!au(src.author) || !au(b.author) || au(b.author) === au(src.author)),
+          );
           if (hit) {
             setSrcCands((prev) => [
               ...prev,

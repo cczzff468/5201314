@@ -534,11 +534,11 @@ export function SubsidyPage({
             </button>
           </div>
           {packetsOpen ? (
-            <div className="mt-2.5 -mx-3 flex gap-2 overflow-x-auto px-3 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+            <div className="mt-2.5 flex flex-wrap gap-2">
               {TB_SUBSIDY.redpackets.map((p) => {
                 const claimed = coupons.some((x) => x.name === p.name && !x.usedAt);
                 return (
-                  <div key={p.name} className={`w-[128px] shrink-0 rounded-xl bg-gradient-to-b from-[#FF4A38] to-[#F01E1E] p-2.5 ${claimed ? 'opacity-60' : ''}`}>
+                  <div key={p.name} className={`w-[128px] rounded-xl bg-gradient-to-b from-[#FF4A38] to-[#F01E1E] p-2.5 ${claimed ? 'opacity-60' : ''}`}>
                     <div className="flex items-baseline gap-0.5 text-white">
                       <span className="text-[26px] font-black leading-none">
                         {p.amount}
@@ -560,14 +560,14 @@ export function SubsidyPage({
             </div>
           ) : null}
         </div>
-        {/* 频道 tab（吸顶：滚动时固定，商品流跟随滚动） */}
-        <div className="sticky top-0 z-20 -mx-2 flex items-center gap-5 overflow-x-auto bg-[#E42323] px-3 py-3 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        {/* 频道 tab（吸顶：滚动时固定，商品流跟随滚动；自适应换行无横向滚动） */}
+        <div className="sticky top-0 z-20 flex flex-wrap items-center gap-x-5 gap-y-1.5 bg-[#E42323] px-3 py-3">
           {TB_SUBSIDY.tabs.map((t) => (
             <button
               key={t}
               type="button"
               onClick={() => setTab(t)}
-              className={`shrink-0 whitespace-nowrap text-[17px] font-bold transition-colors ${tab === t ? 'text-white' : t === '补上加补' ? 'text-[#F5C86B]' : t === '苹果专区' ? 'text-[#FFB3B3]' : 'text-white/75'}`}
+              className={`whitespace-nowrap text-[17px] font-bold transition-colors ${tab === t ? 'text-white' : t === '补上加补' ? 'text-[#F5C86B]' : t === '苹果专区' ? 'text-[#FFB3B3]' : 'text-white/75'}`}
             >
               {t}
             </button>
@@ -790,10 +790,10 @@ export function SeckillPage({
             <button type="button" onClick={() => onToast('后天20点场（演示）')} className="text-[14px] font-semibold text-black/60 active:opacity-70">后天20点抢</button>
           </div>
         </div>
-        {/* 场次 tab（吸顶：滚动时固定，商品流跟随滚动） */}
-        <div className="sticky top-0 z-20 -mx-2 flex items-center gap-5 overflow-x-auto bg-white px-5 pb-2.5 pt-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        {/* 场次 tab（吸顶：滚动时固定；自适应换行无横向滚动） */}
+        <div className="sticky top-0 z-20 flex flex-wrap items-center gap-x-5 gap-y-1.5 bg-white px-5 pb-2.5 pt-1">
           {TB_SECKILL.tabs.map((t) => (
-            <button key={t} type="button" onClick={() => setTab(t)} className={`shrink-0 whitespace-nowrap text-[16.5px] font-bold transition-colors ${tab === t ? 'text-[#FF0036]' : 'text-black/65'}`}>
+            <button key={t} type="button" onClick={() => setTab(t)} className={`whitespace-nowrap text-[16.5px] font-bold transition-colors ${tab === t ? 'text-[#FF0036]' : 'text-black/65'}`}>
               {t}
             </button>
           ))}
@@ -1865,11 +1865,11 @@ export function MoviePage({
               ))}
             </div>
             {sel.size > 0 ? (
-              <div className="mt-2.5 -mx-3 flex gap-2 overflow-x-auto px-3 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+              <div className="mt-2.5 flex flex-wrap gap-2">
                 {[...sel].map((key) => {
                   const [r, k] = key.split('-').map(Number);
                   return (
-                    <span key={key} className="relative shrink-0 rounded-lg bg-white px-3 py-1.5 text-center shadow-sm">
+                    <span key={key} className="relative rounded-lg bg-white px-3 py-1.5 text-center shadow-sm">
                       <button type="button" aria-label="移除座位" onClick={() => toggleSeat(r, k)} className="absolute right-0.5 top-0.5 grid h-3.5 w-3.5 place-items-center">
                         <X className="h-2.5 w-2.5 text-black/30" strokeWidth={3} />
                       </button>
@@ -2181,11 +2181,11 @@ export function MoviePage({
               ))}
             </div>
             {sel.size > 0 ? (
-              <div className="mt-2.5 -mx-3 flex gap-2 overflow-x-auto px-3 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+              <div className="mt-2.5 flex flex-wrap gap-2">
                 {[...sel].map((key) => {
                   const [r, k] = key.split('-').map(Number);
                   return (
-                    <span key={key} className="relative shrink-0 rounded-lg bg-white px-3 py-1.5 text-center shadow-sm">
+                    <span key={key} className="relative rounded-lg bg-white px-3 py-1.5 text-center shadow-sm">
                       <button type="button" aria-label="移除座位" onClick={() => toggleSeat(r, k)} className="absolute right-0.5 top-0.5 grid h-3.5 w-3.5 place-items-center">
                         <X className="h-2.5 w-2.5 text-black/30" strokeWidth={3} />
                       </button>
@@ -2343,8 +2343,8 @@ export function MoviePage({
             </HeadBtn>
           </div>
         </div>
-        {/* 四大频道 tab */}
-        <div className="mt-1.5 -mx-3 flex items-center gap-5 overflow-x-auto px-3 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        {/* 四大频道 tab（自适应换行，无横向滚动） */}
+        <div className="mt-1.5 flex flex-wrap items-center gap-x-5 gap-y-1">
           {TP_TABS.map((t) => (
             <button
               key={t.id}
@@ -2353,7 +2353,7 @@ export function MoviePage({
                 setTab(t.id);
                 pull.scrollRef.current?.scrollTo({ top: 0 });
               }}
-              className={`relative shrink-0 pb-2 text-[16px] ${tab === t.id ? 'font-bold text-white' : 'text-white/70'}`}
+              className={`relative pb-2 text-[16px] ${tab === t.id ? 'font-bold text-white' : 'text-white/70'}`}
             >
               {t.label}
               {tab === t.id ? <span className="absolute inset-x-1 bottom-0 h-[3px] rounded-full bg-white" /> : null}
@@ -3209,7 +3209,7 @@ export function FliggyPage({ uid, onBack, onToast }: { uid: string; onBack: () =
       <div className="flex h-full flex-col bg-[#F4F5F9]">
         {/* 顶部频道 tab（酒店紫色胶囊选中）+ 返回 */}
         <div className="shrink-0 bg-white px-2 pb-2.5 pt-[56px]">
-          <div className="-mx-2 flex items-center gap-1.5 overflow-x-auto px-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          <div className="flex flex-wrap items-center gap-1.5">
             <button type="button" aria-label="返回" onClick={() => setView('home')} className="grid h-8 w-8 shrink-0 place-items-center rounded-full active:opacity-60">
               <ArrowLeft className="h-[20px] w-[20px] text-black/80" strokeWidth={2.2} />
             </button>
@@ -3218,7 +3218,7 @@ export function FliggyPage({ uid, onBack, onToast }: { uid: string; onBack: () =
                 key={it.label}
                 type="button"
                 onClick={() => onToast(`${it.label}频道（演示）`)}
-                className={`shrink-0 whitespace-nowrap rounded-full px-3.5 py-1.5 text-[14px] ${it.label === '酒店' ? 'bg-[#7C5CFF] font-semibold text-white' : 'text-black/70'}`}
+                className={`whitespace-nowrap rounded-full px-3.5 py-1.5 text-[14px] ${it.label === '酒店' ? 'bg-[#7C5CFF] font-semibold text-white' : 'text-black/70'}`}
               >
                 {it.label}
               </button>
@@ -3409,9 +3409,9 @@ export function FliggyPage({ uid, onBack, onToast }: { uid: string; onBack: () =
         </div>
         {/* 酒店搜索卡 */}
         <div className="mx-2 mt-3 rounded-2xl bg-white p-3.5">
-          <div className="-mx-3.5 flex items-center gap-4 overflow-x-auto px-3.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
             {['国内', '国际', '酒店套餐', '民宿', '短租房'].map((t) => (
-              <button key={t} type="button" onClick={() => setTab(t)} className={`relative shrink-0 whitespace-nowrap pb-1.5 text-[17px] ${tab === t ? 'font-bold text-black/90' : 'text-black/50'}`}>
+              <button key={t} type="button" onClick={() => setTab(t)} className={`relative whitespace-nowrap pb-1.5 text-[17px] ${tab === t ? 'font-bold text-black/90' : 'text-black/50'}`}>
                 {t}
                 {tab === t ? <span className="absolute bottom-0 left-1/2 h-[3px] w-[22px] -translate-x-1/2 rounded-full bg-black/85" /> : null}
               </button>
@@ -3451,13 +3451,13 @@ export function FliggyPage({ uid, onBack, onToast }: { uid: string; onBack: () =
             <ChevronDown className="ml-1 h-4 w-4 shrink-0 text-black/50" />
             <span className="ml-7 shrink-0 whitespace-nowrap text-[15px] text-black/30">价格/星级</span>
           </div>
-          <div className="mt-3 -mx-3.5 flex gap-2 overflow-x-auto px-3.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          <div className="mt-3 flex flex-wrap gap-2">
             {['首住特惠', '张挥公园', '濮阳县人民医院', '东环小区', '咸城遗址'].map((c, i) => (
               <button
                 key={c}
                 type="button"
                 onClick={() => onToast(`${c}附近酒店（演示）`)}
-                className={`shrink-0 whitespace-nowrap rounded-md px-2.5 py-1 text-[12.5px] ${i === 0 ? 'border border-[#FF3B30]/40 text-[#FF3B30]' : 'bg-black/[0.045] text-black/65'}`}
+                className={`whitespace-nowrap rounded-md px-2.5 py-1 text-[12.5px] ${i === 0 ? 'border border-[#FF3B30]/40 text-[#FF3B30]' : 'bg-black/[0.045] text-black/65'}`}
               >
                 {c}
               </button>

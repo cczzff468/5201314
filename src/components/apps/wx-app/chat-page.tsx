@@ -5752,7 +5752,7 @@ export function ChatPage({
           {/* 待发送图片预览条（需求2：选图后先显示在输入框下面，点主发送按钮才真正发出；面板展开时隐藏避免遮挡） */}
           {pendingImgs.length > 0 && !plusOpen && !stickerOpen && (
             <div
-              className={liquid ? 'mt-2 -mx-2.5 flex items-center gap-2 overflow-x-auto px-5 pb-0.5' : 'mt-2 -ml-2 -mr-0.5 flex items-center gap-2 overflow-x-auto pl-2 pr-0.5 pb-0.5'}
+              className="mt-2 flex flex-wrap items-center gap-2 pb-0.5"
               data-testid="wx-img-preview-bar"
             >
               {pendingImgs.map((p, k) => (

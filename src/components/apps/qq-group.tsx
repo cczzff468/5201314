@@ -5378,7 +5378,7 @@ export function QqGroupChatPage({
             data-testid="qqg-img-preview-bar"
             className="flex items-center gap-2.5 border-t border-black/[0.05] px-3 py-2 dark:border-white/[0.06]"
           >
-            <div className="-mx-3 flex min-w-0 flex-1 gap-2 overflow-x-auto px-3 py-1">
+            <div className="flex min-w-0 flex-1 flex-wrap gap-2 py-1">
               {pendingImgs.map((p, k) => (
                 <div key={p.id} className="relative h-[62px] w-[62px] shrink-0">
                   <img

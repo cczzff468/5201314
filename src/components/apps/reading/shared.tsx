@@ -120,7 +120,8 @@ export const DEFAULT_SETTINGS: ReaderSettings = {
   showTime: true,
   showBattery: true,
   pageAnim: 'slide',
-  keyTurn: false,
+  // 音量键翻页默认开启（阅读类 App 惯例；设置里可关）
+  keyTurn: true,
   clickTurn: true,
   textIndent: 2,
   cjkOptimize: false,
@@ -1144,10 +1145,41 @@ export function fetchFeaturedCovers(names: string[], fill = true, signal?: Abort
   );
 }
 
+// ---------------------------------------------------------------------------
+// 封面本地缓存（localStorage）：重复访问秒出封面，不等网络。
+// 只存「书名 → 代理地址」字符串对，极小；超量按写入顺序淘汰最旧的。
+// ---------------------------------------------------------------------------
+const COVER_LS_KEY = 'rd-feat-covers-v1';
+const COVER_LS_CAP = 900;
+
+function lsLoadCovers(): Record<string, string> {
+  try {
+    const raw = typeof localStorage !== 'undefined' ? localStorage.getItem(COVER_LS_KEY) : null;
+    const obj = raw ? (JSON.parse(raw) as Record<string, string>) : {};
+    return obj && typeof obj === 'object' ? obj : {};
+  } catch {
+    return {};
+  }
+}
+
+function lsMergeCovers(patch: Record<string, string>) {
+  try {
+    const map = lsLoadCovers();
+    Object.assign(map, patch);
+    const keys = Object.keys(map);
+    if (keys.length > COVER_LS_CAP) {
+      for (const k of keys.slice(0, keys.length - COVER_LS_CAP)) delete map[k];
+    }
+    localStorage.setItem(COVER_LS_KEY, JSON.stringify(map));
+  } catch {
+    /* 容量满 / 隐私模式：静默放弃 */
+  }
+}
+
 /**
  * 精选封面 Hook：给一组书名，返回「书名 → 代理后的封面地址」映射 + 单本重试。
- * 服务端有缓存的部分立即返回；缺失的书后台轮询补齐（pending>0 时每 3s 再拉），
- * 全部到位或组件卸载后停止。
+ * 首屏先用 localStorage 缓存秒出（重复访问零等待），再请求服务端
+ * （已缓存的部分立即返回；缺失的书后台轮询补齐，pending>0 时每 1.2s 再拉）。
  * retry(name)：图片加载失败时调用一次（服务端删旧缓存换一个封面地址）；
  * 同一本书只重试一次，仍失败由组件兜底渐变占位卡。
  */
@@ -1162,13 +1194,27 @@ export function useFeaturedCovers(names: string[]): { covers: Record<string, str
     if (!list.length) return;
     const run = async (fill: boolean, round: number) => {
       try {
+        // 首屏秒出：第一轮先用 localStorage 缓存垫上（重复访问零等待），
+        // 再走网络请求校准 / 补齐（服务端可能有更新的地址）
+        if (round === 0) {
+          const cached = lsLoadCovers();
+          const seeded: Record<string, string> = {};
+          for (const n of list) {
+            const u = cached[n];
+            if (u) seeded[n] = u;
+          }
+          if (Object.keys(seeded).length) setCovers((prev) => ({ ...prev, ...seeded }));
+        }
         const d = await fetchFeaturedCovers(list, fill);
         if (!alive) return;
         const next: Record<string, string> = {};
         for (const [n, c] of Object.entries(d.covers)) next[n] = coverSrc(c.url, c.sid) as string;
-        setCovers((prev) => ({ ...prev, ...next }));
+        if (Object.keys(next).length) {
+          setCovers((prev) => ({ ...prev, ...next }));
+          lsMergeCovers(next); // 落地本地缓存，下次秒出
+        }
         // 还有缺口 → 1.2s 后再补一轮（服务端后台搜源落库后下一轮秒回拿到；
-        // 最多 24 轮 ≈ 30s，比原来 3s 轮询快一倍多，封面更快现身）
+        // 最多 24 轮 ≈ 30s；本地已秒出的不算缺口，轮询只等真正缺失的）
         if (d.pending > 0 && round < 24) {
           timer = setTimeout(() => void run(true, round + 1), 1200);
         }
@@ -1190,7 +1236,11 @@ export function useFeaturedCovers(names: string[]): { covers: Record<string, str
     fetchFeaturedCovers([name], true, undefined, [name])
       .then((d) => {
         const c = d.covers?.[name];
-        if (c) setCovers((prev) => ({ ...prev, [name]: coverSrc(c.url, c.sid) as string }));
+        if (c) {
+          const u = coverSrc(c.url, c.sid) as string;
+          setCovers((prev) => ({ ...prev, [name]: u }));
+          lsMergeCovers({ [name]: u });
+        }
       })
       .catch(() => null);
   }, []);

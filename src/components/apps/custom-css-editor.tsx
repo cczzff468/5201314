@@ -164,10 +164,10 @@ export function CustomCssEditor({ scope, templates, accent, onToast, variant = '
         className="mt-2.5 block min-h-[260px] w-full resize-y rounded-[14px] border border-black/[0.08] bg-black/[0.025] px-3.5 py-3 font-mono text-[12.5px] leading-[1.75] text-black/85 outline-none transition-colors placeholder:text-black/25 focus:border-black/[0.22] dark:border-white/[0.10] dark:bg-white/[0.05] dark:text-white/85 dark:placeholder:text-white/25 dark:focus:border-white/[0.28]"
       />
 
-      {/* 示例模板 chips：一行横向滚动，点按填入编辑框（无弹窗） */}
+      {/* 示例模板 chips：自适应换行（无横向滚动），点按填入编辑框（无弹窗） */}
       {templates.length > 0 && (
         <div
-          className="no-scrollbar -mx-1 mt-2.5 flex gap-2 overflow-x-auto px-1 pb-0.5"
+          className="no-scrollbar mt-2.5 flex flex-wrap gap-2"
           role="group"
           aria-label="示例模板"
         >
@@ -181,7 +181,7 @@ export function CustomCssEditor({ scope, templates, accent, onToast, variant = '
                 setDraft(t.css);
                 onToast(`已填入「${t.name}」，改好点「应用」`);
               }}
-              className="flex shrink-0 items-center gap-1.5 rounded-full bg-black/[0.05] px-3.5 py-[7px] text-[12.5px] font-medium text-black/70 ring-1 ring-black/[0.04] transition-colors active:bg-black/[0.11] dark:bg-white/[0.08] dark:text-white/75 dark:ring-white/[0.06] dark:active:bg-white/[0.14]"
+              className="flex items-center gap-1.5 rounded-full bg-black/[0.05] px-3.5 py-[7px] text-[12.5px] font-medium text-black/70 ring-1 ring-black/[0.04] transition-colors active:bg-black/[0.11] dark:bg-white/[0.08] dark:text-white/75 dark:ring-white/[0.06] dark:active:bg-white/[0.14]"
             >
               <LayoutTemplate className="h-[13px] w-[13px] shrink-0" style={{ color: accent }} aria-hidden="true" />
               {t.name}

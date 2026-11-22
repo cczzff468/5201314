@@ -160,11 +160,16 @@ export function BookDetail({
         const src = queue.shift()!;
         try {
           const r = await api.searchOne(curBook.name, src.id);
-          for (const b of r.books || []) {
-            if (norm(b.name) === norm(curBook.name)) {
-              found.push({ sourceId: b.sourceId || src.id, sourceName: b.sourceName, book: b });
-              break;
-            }
+          // 换源永远是同一本书：只收「书名一致 且（作者一致 或 作者未知）」的结果；
+          // 同名不同作者直接排除 —— 宁缺毋滥，杜绝「换源变换书」
+          const sames = (r.books || []).filter((b) => {
+            if (norm(b.name) !== norm(curBook.name)) return false;
+            const ba = norm(b.author || '');
+            return !curAuthor || !ba || ba === curAuthor;
+          });
+          const hit = sames[0];
+          if (hit) {
+            found.push({ sourceId: hit.sourceId || src.id, sourceName: hit.sourceName, book: hit });
           }
           // 作者一致的候选排前（同名续作/仿写靠后，避免换到另一本书）
           found.sort((a, b) => {
@@ -198,10 +203,17 @@ export function BookDetail({
     try {
       const enabled = sources.filter((s) => s.enabled && s.id !== curSourceId).slice(0, 12);
       const nm = (s: string) => s.replace(/\s+/g, '');
+      const curAu = nm(curBook.author || '');
       for (const src of enabled) {
         try {
           const r = await api.searchOne(curBook.name, src.id);
-          const hit = (r.books || []).find((b) => nm(b.name) === nm(curBook.name));
+          // 同源同名书里只取作者一致/未知的（同名不同书直接跳过，绝不自动换到另一本书）
+          const sames = (r.books || []).filter((b) => {
+            if (nm(b.name) !== nm(curBook.name)) return false;
+            const ba = nm(b.author || '');
+            return !curAu || !ba || ba === curAu;
+          });
+          const hit = sames[0];
           if (!hit) continue;
           const d = await api.bookDetail(src.id, hit.bookUrl, curBook.name, curBook.author || '');
           // 目录过少视为残缺源（百章书只有几条目录的直接跳过）
@@ -680,13 +692,14 @@ export function BookDetail({
               <p className="text-[16px] font-bold" style={{ color: theme.textMain }}>
                 看了本书的还在看
               </p>
-              <div className="-mx-4 mt-2.5 flex gap-3 overflow-x-auto px-4 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+              {/* 自适应网格（每行 3 本，无横向滚动，不再破出卡片内边距） */}
+              <div className="mt-2.5 grid grid-cols-3 gap-x-3 gap-y-3">
                 {similar.map((b) => (
                   <button
                     key={b.name}
                     type="button"
                     onClick={() => onSwitchSource({ name: b.name, author: b.author, bookUrl: '', sourceName: '', sourceUrl: '' })}
-                    className="w-[86px] shrink-0 text-left active:scale-95"
+                    className="w-full text-left active:scale-95"
                   >
                     <div
                       className="flex aspect-[3/4.2] w-full flex-col items-center justify-center gap-1.5 overflow-hidden rounded-xl p-2"

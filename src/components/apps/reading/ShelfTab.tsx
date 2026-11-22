@@ -233,8 +233,8 @@ export function ShelfTab({
         </div>
       )}
 
-      {/* 分组胶囊行 */}
-      <div className="-mx-4 mt-3 flex items-center gap-2 overflow-x-auto px-4 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+      {/* 分组胶囊行（自适应换行，无横向滚动） */}
+      <div className="mt-3 flex flex-wrap items-center gap-2">
         {['全部', ...groups, ...(hasUngrouped ? [UNGROUPED] : [])].map((g) => {
           const label = g === UNGROUPED ? '未分组' : g;
           const active = g === group;
@@ -259,7 +259,7 @@ export function ShelfTab({
               }}
               onTouchEnd={cancelPress}
               onTouchMove={cancelPress}
-              className={`h-8 shrink-0 rounded-full px-4 text-[13px] font-medium backdrop-blur-xl active:scale-95 ${active ? 'text-white' : ''}`}
+              className={`h-8 max-w-full truncate rounded-full px-4 text-[13px] font-medium backdrop-blur-xl active:scale-95 ${active ? 'text-white' : ''}`}
               style={
                 active
                   ? { background: `linear-gradient(135deg, ${theme.gradFrom}, ${theme.gradTo})`, boxShadow: `0 4px 14px ${theme.accent}44` }

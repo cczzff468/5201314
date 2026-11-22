@@ -443,7 +443,7 @@ export function StickerGroupBar({
           </button>
         </div>
       ) : (
-        <div className="-mx-3 flex items-center gap-1.5 overflow-x-auto px-3 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        <div className="flex flex-wrap items-center gap-1.5">
           {orderedGroups(groups).map((g) => {
             const on = g.id === activeId;
             const builtin = g.id === BUILTIN_STICKER_GROUP_ID;
@@ -455,7 +455,7 @@ export function StickerGroupBar({
                 title={builtin ? g.name : undefined}
                 data-testid={`${t('pill')}-${g.id === DEFAULT_STICKER_GROUP_ID ? 'my' : g.id}`}
                 onClick={() => onSelect(g.id)}
-                className={`h-7 shrink-0 whitespace-nowrap rounded-full border backdrop-blur-md transition-colors active:opacity-80 ${
+                className={`h-7 whitespace-nowrap rounded-full border backdrop-blur-md transition-colors active:opacity-80 ${
                   builtin ? 'flex w-9 items-center justify-center px-0' : 'px-3 text-[12.5px]'
                 } ${
                   on

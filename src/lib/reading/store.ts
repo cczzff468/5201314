@@ -14,6 +14,22 @@ import { api, DEFAULT_SETTINGS, type ReaderSettings, type ShelfBookItem, type So
 
 /** localStorage 镜像键（排版永久保存的本地副本） */
 const LS_SETTINGS_KEY = 'rd-settings-mirror-v1';
+/** 音量键翻页一次性迁移标记（早期默认关闭，老镜像/服务端存了 false → 迁移为开） */
+const LS_KEYTURN_MIG = 'rd-keyturn-mig-v1';
+
+/** 音量键翻页一次性迁移：早期版本 keyTurn 默认 false，老用户镜像/服务端里存的是
+ *  「从未主动选择」的 false —— 用户明确要求音量键翻页可用，首次加载迁移为开启；
+ *  迁移只做一次，之后手动关掉的不再打扰。 */
+function migrateKeyTurnOnce(s: ReaderSettings): ReaderSettings {
+  if (typeof window === 'undefined' || s.keyTurn !== false) return s;
+  try {
+    if (localStorage.getItem(LS_KEYTURN_MIG)) return s;
+    localStorage.setItem(LS_KEYTURN_MIG, '1');
+    return { ...s, keyTurn: true };
+  } catch {
+    return s;
+  }
+}
 
 /** 读取本地镜像（异常/缺字段兜底为默认值） */
 function readMirror(): ReaderSettings {
@@ -22,7 +38,7 @@ function readMirror(): ReaderSettings {
     const raw = localStorage.getItem(LS_SETTINGS_KEY);
     if (!raw) return { ...DEFAULT_SETTINGS };
     const parsed = JSON.parse(raw) as Partial<ReaderSettings>;
-    return { ...DEFAULT_SETTINGS, ...parsed };
+    return migrateKeyTurnOnce({ ...DEFAULT_SETTINGS, ...parsed });
   } catch {
     return { ...DEFAULT_SETTINGS };
   }
@@ -129,9 +145,10 @@ export const useReading = create<ReadingStore>((set, get) => ({
         if (diff && localRev === revAtStart) void saveToServer(local);
         return;
       }
-      // 无镜像（首次/清缓存）：采用服务端保存的值
-      set({ settings: server, settingsLoaded: true });
-      writeMirror(server);
+      // 无镜像（首次/清缓存）：采用服务端保存的值（含音量键翻页一次性迁移）
+      const serverMigrated = migrateKeyTurnOnce({ ...DEFAULT_SETTINGS, ...settings });
+      set({ settings: serverMigrated, settingsLoaded: true });
+      writeMirror(serverMigrated);
     } catch {
       set({ settingsLoaded: true });
     }
