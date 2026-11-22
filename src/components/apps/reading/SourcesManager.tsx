@@ -26,6 +26,8 @@ import {
   MoreVertical,
   Check,
   ArrowUpToLine,
+  ArrowDownToLine,
+  Pin,
   Copy,
   CircleCheck,
 } from 'lucide-react';
@@ -212,11 +214,12 @@ export function SourcesManager({ onBack }: { onBack: () => void }) {
     notify(smartCancelRef.current ? '已中止校验' : `校验完成：可用 ${ok} 个，已自动停用 ${fail} 个失效源`);
   };
 
-  const pinTop = async (s: SourceItem) => {
-    const ids = [s.id, ...sources.filter((x) => x.id !== s.id).map((x) => x.id)];
-    await api.sourceAction({ action: 'sort', ids }).catch(() => null);
+  /** 置顶/取消置顶（toggle）：置顶 = 置顶区最前；取消 = 回到原位置 */
+  const togglePin = async (s: SourceItem) => {
+    const toPin = !s.pinned;
+    await api.sourceAction({ action: 'pin', id: s.id, pinned: toPin }).catch(() => null);
     await loadSources();
-    notify(`「${s.name}」已置顶`);
+    notify(toPin ? `「${s.name}」已置顶` : `「${s.name}」已取消置顶`);
   };
 
   const copyLink = async (s: SourceItem) => {
@@ -571,8 +574,11 @@ export function SourcesManager({ onBack }: { onBack: () => void }) {
                     }
                   }}
                 >
-                  <p className="flex items-center gap-1.5 truncate text-[15px] font-semibold" style={{ color: theme.textMain }}>
-                    {s.name}
+                  <p className="flex min-w-0 items-center gap-1.5 truncate text-[15px] font-semibold" style={{ color: theme.textMain }}>
+                    {s.pinned && (
+                      <Pin className="h-3.5 w-3.5 shrink-0 -rotate-45" strokeWidth={2.6} style={{ color: BLUE }} aria-label="已置顶" />
+                    )}
+                    <span className="min-w-0 truncate">{s.name}</span>
                   </p>
                   <p className="mt-1 flex min-w-0 items-center gap-1.5">
                     {s.checkStatus === 'fail' ? (
@@ -720,9 +726,13 @@ export function SourcesManager({ onBack }: { onBack: () => void }) {
               },
               {
                 key: 'pin',
-                label: '置顶',
-                icon: <ArrowUpToLine className="h-[17px] w-[17px]" style={{ color: BLUE }} />,
-                run: () => void pinTop(menuFor.src),
+                label: menuFor.src.pinned ? '取消置顶' : '置顶',
+                icon: menuFor.src.pinned ? (
+                  <ArrowDownToLine className="h-[17px] w-[17px]" style={{ color: BLUE }} />
+                ) : (
+                  <ArrowUpToLine className="h-[17px] w-[17px]" style={{ color: BLUE }} />
+                ),
+                run: () => void togglePin(menuFor.src),
               },
               {
                 key: 'copy',

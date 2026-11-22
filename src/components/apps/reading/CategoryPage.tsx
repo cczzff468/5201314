@@ -6,15 +6,15 @@
  *   排序筛选胶囊（最热/好评/字数最多/连载中/已完结，横向滚动）→ 搜索框（点击进搜索页）
  * - 单列排行榜列表：左侧大排名数字（1-3 主题色实心、4-9 浅主题色、10+ 灰）+ 封面 +
  *   书名粗体 + 完结/连载小标 + 「作者 · 分类」+ 字数信息行（确定性生成，同书恒定）
- * - 无限更新：本分类书池刷完后接「为你推荐」分隔线，全分类轮转洗牌无限追加
+ * - 无限更新：本分类书池刷完后无缝接全分类轮转洗牌无限追加（不显示「为你推荐」分隔标签）
  * - 已按需求移除「N 本」数量标签
  * - 点击书籍直达该书聚合搜索（onOpenBook）
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronLeft, Search, Loader2, Sparkles } from 'lucide-react';
+import { ChevronLeft, Search, Loader2 } from 'lucide-react';
 import { useReading } from '@/lib/reading/store';
 import { SB_H } from './shared';
-import { FEATURED, coverPaletteOf, useFeaturedCovers, themeOf, type FeaturedBook } from './shared';
+import { FEATURED, CoverPlaceholder, useFeaturedCovers, themeOf, type FeaturedBook } from './shared';
 
 /** 排序选项（数组顺序即展示顺序；「最热」= 精选编辑顺序） */
 const SORTS = [
@@ -188,7 +188,6 @@ export function CategoryPage({
   const renderRow = (r: Row, i: number) => {
     const raw = covers[r.b.name];
     const url = raw && !coverFails.has(raw) ? raw : null;
-    const pal = coverPaletteOf(r.b.name);
     const top3 = i < 3;
     const mid = i >= 3 && i < 10;
     return (
@@ -223,12 +222,7 @@ export function CategoryPage({
               onError={() => onCoverError(r.b.name, url)}
             />
           ) : (
-            <div
-              className="flex h-full w-full flex-col items-center justify-center gap-1.5 p-2"
-              style={{ backgroundImage: `linear-gradient(150deg, ${pal[0]}, ${pal[1]})` }}
-            >
-              <span className="line-clamp-3 text-center text-[12px] font-bold leading-tight text-white">{r.b.name}</span>
-            </div>
+            <CoverPlaceholder name={r.b.name} radius="rounded-xl" className="h-full w-full" />
           )}
         </div>
         {/* 文字区：书名 + 作者·分类 + 字数/评分 */}
@@ -257,9 +251,6 @@ export function CategoryPage({
       </button>
     );
   };
-
-  /** 首个推荐条目位置（分隔线插在本分类最后一行之后） */
-  const recStart = rows.findIndex((r) => r.rec);
 
   return (
     <div className="flex h-full flex-col">
@@ -322,16 +313,6 @@ export function CategoryPage({
           <>
             {rows.map((r, i) => (
               <div key={`${r.b.name}-${i}`}>
-                {/* 本分类刷完 → 推荐区分隔线（一次） */}
-                {r.rec && i === recStart && (
-                  <div className="mb-1 mt-2 flex items-center gap-2" aria-hidden="true">
-                    <Sparkles className="h-3.5 w-3.5 shrink-0" style={{ color: theme.accent }} />
-                    <span className="shrink-0 text-[13px] font-semibold" style={{ color: theme.textMain }}>
-                      为你推荐
-                    </span>
-                    <span className="h-px flex-1" style={{ background: theme.cardRing }} />
-                  </div>
-                )}
                 {renderRow(r, i)}
               </div>
             ))}

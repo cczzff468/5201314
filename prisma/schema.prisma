@@ -117,6 +117,10 @@ model BookSource {
   config      String
   isBuiltin   Boolean  @default(false)
   sortOrder   Int      @default(0)
+  /// 用户置顶（列表固定最前；置顶区内部按置顶时间倒序）
+  pinned      Boolean  @default(false)
+  /// 置顶时间（置顶区排序用；取消置顶清空 → 精确回到原位置）
+  pinnedAt    DateTime?
   /// 最近一次健康检查：ok / fail / 空=未检查
   checkStatus String?
   lastCheckAt DateTime?

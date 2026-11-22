@@ -13,7 +13,8 @@ import { useReading } from '@/lib/reading/store';
 import { useUI } from '@/lib/ios/store';
 import {
   FEATURED,
-  coverPaletteOf,
+  CoverPlaceholder,
+  SB_H,
   featuredCategoryOf,
   useFeaturedCovers,
   recommendBooks,
@@ -249,11 +250,10 @@ export function HomeTab({
 
   const glass = { background: theme.cardBg, boxShadow: 'inset 0 0 0 1px ' + theme.cardRing } as const;
 
-  /** 封面卡片（真实封面 / 按书名配色的占位；feed 与横滑通用；加载失败自动换地址重试） */
+  /** 封面卡片（真实封面 / 「暂无封面」灰底占位；feed 与横滑通用；加载失败自动换地址重试） */
   const CoverCard = ({ b, subtitle }: { b: FeaturedBook; subtitle?: string }) => {
     const raw = covers[b.name];
     const url = raw && !coverFails.has(raw) ? raw : null;
-    const pal = coverPaletteOf(b.name);
     return (
       <>
         <div className="relative aspect-[3/4.2] w-full overflow-hidden rounded-xl shadow-[0_6px_18px_rgba(0,0,0,0.14)] ring-1 ring-black/5">
@@ -268,13 +268,7 @@ export function HomeTab({
               onError={() => onCoverError(b.name, url)}
             />
           ) : (
-            <div
-              className="flex h-full w-full flex-col items-center justify-center gap-1.5 p-2"
-              style={{ backgroundImage: `linear-gradient(150deg, ${pal[0]}, ${pal[1]})` }}
-            >
-              <span className="line-clamp-3 text-center text-[13px] font-bold leading-tight text-white">{b.name}</span>
-              <span className="rounded-full bg-white/25 px-2 py-0.5 text-[10px] font-medium text-white">{b.tag}</span>
-            </div>
+            <CoverPlaceholder name={b.name} radius="rounded-xl" className="h-full w-full" />
           )}
           <span className="absolute inset-x-0 bottom-0 h-1/4 bg-gradient-to-t from-black/25 to-transparent" aria-hidden="true" />
         </div>
@@ -289,212 +283,219 @@ export function HomeTab({
   };
 
   return (
-    <div
-      ref={scrollRef}
-      className="relative h-full overflow-y-auto overscroll-contain pb-[130px] pt-[54px]"
-      onScroll={onScroll}
-      onTouchStart={onTouchStart}
-      onTouchMove={onTouchMove}
-      onTouchEnd={onTouchEnd}
-      onTouchCancel={onTouchEnd}
-    >
-      {/* 下拉刷新指示器（顶部居中；跟随拉动位移 / 刷新时旋转） */}
-      <div
-        className="pointer-events-none absolute inset-x-0 top-[58px] z-20 flex justify-center"
-        style={{ transform: `translateY(${pull}px)`, opacity: pull > 4 || refreshing ? 1 : 0, transition: pull ? 'none' : 'transform 0.25s ease, opacity 0.25s ease' }}
-        aria-hidden="true"
-      >
-        <span
-          className="flex h-8 w-8 items-center justify-center rounded-full backdrop-blur-xl"
-          style={{ background: theme.barBg, boxShadow: `inset 0 0 0 1px ${theme.cardRing}, 0 4px 14px rgba(0,0,0,0.08)` }}
-        >
-          {refreshing ? (
-            <Loader2 className="h-4 w-4 animate-spin" style={{ color: theme.accent }} />
-          ) : (
-            <RefreshCw className="h-4 w-4" style={{ color: pull >= 56 ? theme.accent : theme.textSub, transform: `rotate(${Math.min(180, pull * 2.4)}deg)` }} />
-          )}
-        </span>
+    <div className="flex h-full flex-col">
+      {/* ============ 顶部固定区（不跟随滚动）：返回键 + 搜索胶囊 + 分类胶囊行 ============ */}
+      <div className="shrink-0" style={{ paddingTop: SB_H }}>
+        <div className="px-4">
+          {/* 顶部行：返回键（回手机主界面）+ 搜索胶囊（点击进搜索页） */}
+          <div className="flex items-center gap-2.5">
+            <button
+              type="button"
+              onClick={closeApp}
+              aria-label="返回主界面"
+              title="返回主界面"
+              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full backdrop-blur-xl transition-transform active:scale-90"
+              style={glass}
+            >
+              <ChevronLeft className="h-[22px] w-[22px]" strokeWidth={2.2} style={{ color: theme.textMain }} />
+            </button>
+            <button
+              type="button"
+              onClick={() => onSearch()}
+              className="flex h-11 min-w-0 flex-1 items-center gap-2 rounded-full px-4 text-left backdrop-blur-xl transition-transform active:scale-[0.98]"
+              style={glass}
+            >
+              <Search className="h-[18px] w-[18px]" strokeWidth={2.2} style={{ color: theme.textSub }} />
+              <span className="truncate text-[15px]" style={{ color: theme.textSub }}>
+                搜索书名、作者…
+              </span>
+            </button>
+          </div>
+          {/* 分类胶囊 + 排行榜入口（搜索框下方；点击进入分类浏览页；iOS 式单行横滑，无滚动条） */}
+          <div className="-mx-4 mt-3 flex gap-2 overflow-x-auto px-4 pb-1 no-scrollbar">
+            <button
+              type="button"
+              onClick={onOpenRank}
+              className="flex h-8 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full px-4 text-[13px] font-medium backdrop-blur-xl active:scale-95"
+              style={{ ...glass, color: '#E0A13A', boxShadow: `inset 0 0 0 1px rgba(224,161,58,0.35)` }}
+            >
+              <Trophy className="h-3.5 w-3.5" strokeWidth={2.4} /> 排行榜
+            </button>
+            {CATEGORIES.map((c) => (
+              <button
+                key={c}
+                type="button"
+                onClick={() => onOpenCategory(c)}
+                className="h-8 shrink-0 whitespace-nowrap rounded-full px-4 text-[13px] font-medium backdrop-blur-xl active:scale-95"
+                style={
+                  c === '热门'
+                    ? { background: `linear-gradient(135deg, ${theme.gradFrom}, ${theme.gradTo})`, boxShadow: `0 4px 14px ${theme.accent}44`, color: '#fff' }
+                    : { ...glass, color: theme.textMain }
+                }
+              >
+                {c}
+              </button>
+            ))}
+          </div>
+        </div>
       </div>
 
-      <div className="px-4">
-        {/* 顶部行：返回键（回手机主界面）+ 搜索胶囊（点击进搜索页） */}
-        <div className="flex items-center gap-2.5">
-          <button
-            type="button"
-            onClick={closeApp}
-            aria-label="返回主界面"
-            title="返回主界面"
-            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full backdrop-blur-xl transition-transform active:scale-90"
-            style={glass}
+      {/* ============ 滚动区（下拉刷新 + 无限加载） ============ */}
+      <div
+        ref={scrollRef}
+        className="relative min-h-0 flex-1 overflow-y-auto overscroll-contain pb-[130px]"
+        onScroll={onScroll}
+        onTouchStart={onTouchStart}
+        onTouchMove={onTouchMove}
+        onTouchEnd={onTouchEnd}
+        onTouchCancel={onTouchEnd}
+      >
+        {/* 下拉刷新指示器（滚动区顶部居中；跟随拉动位移 / 刷新时旋转） */}
+        <div
+          className="pointer-events-none absolute inset-x-0 top-1 z-20 flex justify-center"
+          style={{ transform: `translateY(${pull}px)`, opacity: pull > 4 || refreshing ? 1 : 0, transition: pull ? 'none' : 'transform 0.25s ease, opacity 0.25s ease' }}
+          aria-hidden="true"
+        >
+          <span
+            className="flex h-8 w-8 items-center justify-center rounded-full backdrop-blur-xl"
+            style={{ background: theme.barBg, boxShadow: `inset 0 0 0 1px ${theme.cardRing}, 0 4px 14px rgba(0,0,0,0.08)` }}
           >
-            <ChevronLeft className="h-[22px] w-[22px]" strokeWidth={2.2} style={{ color: theme.textMain }} />
-          </button>
-          <button
-            type="button"
-            onClick={() => onSearch()}
-            className="flex h-11 min-w-0 flex-1 items-center gap-2 rounded-full px-4 text-left backdrop-blur-xl transition-transform active:scale-[0.98]"
-            style={glass}
-          >
-            <Search className="h-[18px] w-[18px]" strokeWidth={2.2} style={{ color: theme.textSub }} />
-            <span className="truncate text-[15px]" style={{ color: theme.textSub }}>
-              搜索书名、作者…
-            </span>
-          </button>
+            {refreshing ? (
+              <Loader2 className="h-4 w-4 animate-spin" style={{ color: theme.accent }} />
+            ) : (
+              <RefreshCw className="h-4 w-4" style={{ color: pull >= 56 ? theme.accent : theme.textSub, transform: `rotate(${Math.min(180, pull * 2.4)}deg)` }} />
+            )}
+          </span>
         </div>
 
-        {/* 分类胶囊 + 排行榜入口（搜索框下方；点击进入分类浏览页；iOS 式单行横滑，无滚动条） */}
-        <div className="-mx-4 mt-3 flex gap-2 overflow-x-auto px-4 pb-1 no-scrollbar">
-          <button
-            type="button"
-            onClick={onOpenRank}
-            className="flex h-8 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full px-4 text-[13px] font-medium backdrop-blur-xl active:scale-95"
-            style={{ ...glass, color: '#E0A13A', boxShadow: `inset 0 0 0 1px rgba(224,161,58,0.35)` }}
-          >
-            <Trophy className="h-3.5 w-3.5" strokeWidth={2.4} /> 排行榜
-          </button>
-          {CATEGORIES.map((c) => (
+        <div className="px-4">
+          {/* 继续阅读 */}
+          {recent && (
             <button
-              key={c}
               type="button"
-              onClick={() => onOpenCategory(c)}
-              className="h-8 shrink-0 whitespace-nowrap rounded-full px-4 text-[13px] font-medium backdrop-blur-xl active:scale-95"
-              style={
-                c === '热门'
-                  ? { background: `linear-gradient(135deg, ${theme.gradFrom}, ${theme.gradTo})`, boxShadow: `0 4px 14px ${theme.accent}44`, color: '#fff' }
-                  : { ...glass, color: theme.textMain }
-              }
+              onClick={() => onOpenShelfBook(recent)}
+              className="mt-4 flex w-full items-center gap-3 rounded-3xl p-3.5 text-left backdrop-blur-xl active:scale-[0.99]"
+              style={glass}
             >
-              {c}
-            </button>
-          ))}
-        </div>
-
-        {/* 继续阅读 */}
-        {recent && (
-          <button
-            type="button"
-            onClick={() => onOpenShelfBook(recent)}
-            className="mt-4 flex w-full items-center gap-3 rounded-3xl p-3.5 text-left backdrop-blur-xl active:scale-[0.99]"
-            style={glass}
-          >
-            <div
-              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full"
-              style={{ background: theme.accentSoft, color: theme.accent }}
-            >
-              <Clock3 className="h-5 w-5" strokeWidth={2.2} />
-            </div>
-            <div className="min-w-0 flex-1">
-              <p className="truncate text-[15px] font-semibold" style={{ color: theme.textMain }}>
-                {recent.name}
-              </p>
-              <p className="mt-0.5 truncate text-[12px]" style={{ color: theme.textSub }}>
-                读到 {recent.lastReadChapter + 1}/{recent.totalChapters} 章 · {recent.lastChapterTitle || ''}
-              </p>
-            </div>
-            <ChevronRight className="h-5 w-5 shrink-0" style={{ color: theme.textSub }} />
-          </button>
-        )}
-
-        {/* 基于书架的相似书推荐 */}
-        {recForYou.length > 0 && (
-          <section className="mt-5">
-            <div className="mb-2.5 flex items-center justify-between">
-              <h2 className="text-[17px] font-bold" style={{ color: theme.textMain }}>
-                根据书架推荐
-              </h2>
-            </div>
-            {/* 横向滚动封面卡（原来的横向滚动；no-scrollbar 无滚动条） */}
-            <div className="-mx-4 flex gap-3 overflow-x-auto px-4 pb-1 no-scrollbar">
-              {recForYou.map((b) => (
-                <button
-                  key={b.name}
-                  type="button"
-                  onClick={() => onSearch(b.name)}
-                  className="w-[86px] shrink-0 text-left active:scale-95"
-                >
-                  <CoverCard b={{ name: b.name, author: b.author, tag: b.tag }} subtitle={b.reason} />
-                </button>
-              ))}
-            </div>
-          </section>
-        )}
-
-        {/* 分类精选（真实封面；「全部」进分类页） */}
-        {CATEGORIES.slice(1).map((cat) => (
-          <section key={cat} className="mt-5">
-            <div className="mb-2.5 flex items-center justify-between">
-              <h2 className="text-[17px] font-bold" style={{ color: theme.textMain }}>
-                {cat}精选
-              </h2>
-              <button
-                type="button"
-                onClick={() => onOpenCategory(cat)}
-                className="text-[12px] font-medium"
-                style={{ color: theme.accent }}
+              <div
+                className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full"
+                style={{ background: theme.accentSoft, color: theme.accent }}
               >
-                全部 ›
-              </button>
-            </div>
-            {/* 横向滚动封面卡（原来的横向滚动；no-scrollbar 无滚动条） */}
-            <div className="-mx-4 flex gap-3 overflow-x-auto px-4 pb-1 no-scrollbar">
-              {FEATURED[cat].slice(0, 6).map((b) => (
+                <Clock3 className="h-5 w-5" strokeWidth={2.2} />
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-[15px] font-semibold" style={{ color: theme.textMain }}>
+                  {recent.name}
+                </p>
+                <p className="mt-0.5 truncate text-[12px]" style={{ color: theme.textSub }}>
+                  读到 {recent.lastReadChapter + 1}/{recent.totalChapters} 章 · {recent.lastChapterTitle || ''}
+                </p>
+              </div>
+              <ChevronRight className="h-5 w-5 shrink-0" style={{ color: theme.textSub }} />
+            </button>
+          )}
+
+          {/* 基于书架的相似书推荐 */}
+          {recForYou.length > 0 && (
+            <section className="mt-5">
+              <div className="mb-2.5 flex items-center justify-between">
+                <h2 className="text-[17px] font-bold" style={{ color: theme.textMain }}>
+                  根据书架推荐
+                </h2>
+              </div>
+              {/* 横向滚动封面卡（原来的横向滚动；no-scrollbar 无滚动条） */}
+              <div className="-mx-4 flex gap-3 overflow-x-auto px-4 pb-1 no-scrollbar">
+                {recForYou.map((b) => (
+                  <button
+                    key={b.name}
+                    type="button"
+                    onClick={() => onSearch(b.name)}
+                    className="w-[86px] shrink-0 text-left active:scale-95"
+                  >
+                    <CoverCard b={{ name: b.name, author: b.author, tag: b.tag }} subtitle={b.reason} />
+                  </button>
+                ))}
+              </div>
+            </section>
+          )}
+
+          {/* 分类精选（真实封面；「全部」进分类页） */}
+          {CATEGORIES.slice(1).map((cat) => (
+            <section key={cat} className="mt-5">
+              <div className="mb-2.5 flex items-center justify-between">
+                <h2 className="text-[17px] font-bold" style={{ color: theme.textMain }}>
+                  {cat}精选
+                </h2>
                 <button
-                  key={b.name}
+                  type="button"
+                  onClick={() => onOpenCategory(cat)}
+                  className="text-[12px] font-medium"
+                  style={{ color: theme.accent }}
+                >
+                  全部 ›
+                </button>
+              </div>
+              {/* 横向滚动封面卡（原来的横向滚动；no-scrollbar 无滚动条） */}
+              <div className="-mx-4 flex gap-3 overflow-x-auto px-4 pb-1 no-scrollbar">
+                {FEATURED[cat].slice(0, 6).map((b) => (
+                  <button
+                    key={b.name}
+                    type="button"
+                    onClick={() => onSearch(b.name)}
+                    className="w-[86px] shrink-0 text-left active:scale-95"
+                  >
+                    <CoverCard b={b} />
+                  </button>
+                ))}
+              </div>
+            </section>
+          ))}
+
+          {/* 为你推荐 · 无限信息流（滚动到底自动加载；有阅读历史时按偏好加权排序） */}
+          <section className="mt-6">
+            <div className="mb-2.5 flex items-center gap-1.5">
+              <Sparkles className="h-4 w-4" style={{ color: theme.accent }} />
+              <h2 className="text-[17px] font-bold" style={{ color: theme.textMain }}>
+                为你推荐
+              </h2>
+              {catAffinity.size > 0 && (
+                <span
+                  className="ml-1 shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium"
+                  style={{ background: theme.accentSoft, color: theme.accent }}
+                >
+                  已按阅读偏好排序
+                </span>
+              )}
+            </div>
+            <div className="grid grid-cols-3 gap-x-3 gap-y-4">
+              {feed.map((b, i) => (
+                <button
+                  key={`${b.name}-${i}`}
                   type="button"
                   onClick={() => onSearch(b.name)}
-                  className="w-[86px] shrink-0 text-left active:scale-95"
+                  className="text-left transition-transform active:scale-95"
                 >
                   <CoverCard b={b} />
                 </button>
               ))}
             </div>
-          </section>
-        ))}
-
-        {/* 为你推荐 · 无限信息流（滚动到底自动加载；有阅读历史时按偏好加权排序） */}
-        <section className="mt-6">
-          <div className="mb-2.5 flex items-center gap-1.5">
-            <Sparkles className="h-4 w-4" style={{ color: theme.accent }} />
-            <h2 className="text-[17px] font-bold" style={{ color: theme.textMain }}>
-              为你推荐
-            </h2>
-            {catAffinity.size > 0 && (
-              <span
-                className="ml-1 shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium"
-                style={{ background: theme.accentSoft, color: theme.accent }}
-              >
-                已按阅读偏好排序
-              </span>
-            )}
-          </div>
-          <div className="grid grid-cols-3 gap-x-3 gap-y-4">
-            {feed.map((b, i) => (
-              <button
-                key={`${b.name}-${i}`}
-                type="button"
-                onClick={() => onSearch(b.name)}
-                className="text-left transition-transform active:scale-95"
-              >
-                <CoverCard b={b} />
-              </button>
-            ))}
-          </div>
-          {/* 底部加载提示 */}
-          <div className="flex items-center justify-center gap-2 py-4">
-            {loadingMore ? (
-              <>
-                <Loader2 className="h-4 w-4 animate-spin" style={{ color: theme.accent }} />
-                <span className="text-[12px]" style={{ color: theme.textSub }}>
-                  正在加载更多…
+            {/* 底部加载提示 */}
+            <div className="flex items-center justify-center gap-2 py-4">
+              {loadingMore ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" style={{ color: theme.accent }} />
+                  <span className="text-[12px]" style={{ color: theme.textSub }}>
+                    正在加载更多…
+                  </span>
+                </>
+              ) : (
+                <span className="text-[11px]" style={{ color: theme.textSub }}>
+                  下滑加载更多好书
                 </span>
-              </>
-            ) : (
-              <span className="text-[11px]" style={{ color: theme.textSub }}>
-                下滑加载更多好书
-              </span>
-            )}
-          </div>
-        </section>
+              )}
+            </div>
+          </section>
+        </div>
       </div>
     </div>
   );

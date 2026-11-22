@@ -797,6 +797,8 @@ export interface SourceItem {
   group: string;
   enabled: boolean;
   isBuiltin: boolean;
+  /** 用户置顶（列表固定最前） */
+  pinned?: boolean;
   checkStatus: string | null;
 }
 export interface SearchBookItem {
@@ -915,6 +917,11 @@ export const api = {
     fetch(
       `/api/reading/book?${new URLSearchParams({ sourceId, bookUrl, name, author })}`,
     ).then((r) => j<BookDetailData>(r)),
+  /** 轻量简介（搜索结果列表补简介用：单次详情页请求，不抓目录） */
+  bookIntro: (sourceId: string, bookUrl: string) =>
+    fetch(`/api/reading/book?intro=1&${new URLSearchParams({ sourceId, bookUrl })}`).then(
+      (r) => j<{ intro: string }>(r),
+    ),
   chapter: (sourceId: string, chapterUrl: string, bookUrl: string, index: number, title: string, refresh = false) =>
     fetch(
       `/api/reading/chapter?${new URLSearchParams({ sourceId, chapterUrl, bookUrl, index: String(index), title, ...(refresh ? { refresh: '1' } : {}) })}`,
@@ -1005,44 +1012,38 @@ export function coverSrc(url?: string | null, sid?: string): string | undefined 
   return `/api/reading/cover?${q.toString()}`;
 }
 
-/** 封面占位配色盘（按书名哈希取一对渐变色：书架五颜六色而不是清一色蓝） */
-const COVER_PALETTES: [string, string][] = [
-  ['#7FA8F0', '#3E6FD9'], // 海洋蓝
-  ['#F5A46B', '#D8622E'], // 落日橙
-  ['#6BC5A8', '#27917A'], // 翡翠绿
-  ['#B48CF2', '#7A5BD6'], // 紫罗兰
-  ['#F08BAE', '#D44E86'], // 玫瑰粉
-  ['#5FBFC9', '#268896'], // 青碧
-  ['#C9A24B', '#8F6A1F'], // 鎏金
-  ['#8E9BAE', '#525E70'], // 岩灰
-];
-
-/** 书名 → 稳定配色对 */
-export function coverPaletteOf(name: string): [string, string] {
-  let h = 0;
-  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
-  return COVER_PALETTES[h % COVER_PALETTES.length];
-}
-
-/** 封面占位（书脊风：按书名配色的渐变底 + 书脊高光 + 书名竖排区） */
-export function CoverPlaceholder({ name, author, className, radius = 'rounded-[10px]' }: { name: string; author?: string | null; className?: string; radius?: string }) {
-  const [c1, c2] = coverPaletteOf(name);
+/** 封面占位（全 App 统一「暂无封面」灰底块：浅灰底 + 白字两行居中，与搜索页设计图同款）
+ *  封面图缺失/加载失败时展示；name/author 仅留 API 兼容不渲染 */
+export function CoverPlaceholder({
+  name: _name,
+  author: _author,
+  className,
+  radius = 'rounded-[10px]',
+}: {
+  name?: string;
+  author?: string | null;
+  className?: string;
+  radius?: string;
+}) {
   return (
     <div
-      className={clsx('relative flex overflow-hidden', radius, className)}
-      style={{ backgroundImage: `linear-gradient(150deg, ${c1}, ${c2})` }}
-      aria-hidden="true"
+      className={clsx('flex h-full w-full flex-col items-center justify-center gap-0.5 overflow-hidden', radius, className)}
+      style={{ background: '#DDE0E7' }}
+      role="img"
+      aria-label="暂无封面"
     >
-      {/* 书脊高光 */}
-      <span className="absolute inset-y-0 left-0 w-[14%] bg-gradient-to-r from-black/25 to-transparent" />
-      <span className="absolute inset-y-0 left-[14%] w-px bg-white/30" />
-      <div className="relative flex h-full w-full flex-col items-center justify-center gap-1.5 px-2 py-2">
-        <span className="line-clamp-3 text-center text-[13px] font-bold leading-tight text-white drop-shadow-[0_1px_3px_rgba(0,0,0,0.35)]">
-          {name}
-        </span>
-        {author && <span className="line-clamp-1 text-center text-[10px] font-medium text-white/80">{author}</span>}
-      </div>
-      <span className="absolute inset-x-0 bottom-0 h-1/3 bg-gradient-to-t from-black/25 to-transparent" />
+      <span
+        className="text-[12px] font-bold leading-[1.2] text-white"
+        style={{ textShadow: '0 1px 4px rgba(0,0,0,0.6), 0 0 2px rgba(0,0,0,0.55)' }}
+      >
+        暂无
+      </span>
+      <span
+        className="text-[12px] font-bold leading-[1.2] text-white"
+        style={{ textShadow: '0 1px 4px rgba(0,0,0,0.6), 0 0 2px rgba(0,0,0,0.55)' }}
+      >
+        封面
+      </span>
     </div>
   );
 }

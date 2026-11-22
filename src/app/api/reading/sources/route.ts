@@ -88,12 +88,15 @@ export function toLegado(row: { name: string; url: string; config: string }): Le
   return { bookSourceName: row.name, bookSourceUrl: row.url, ...cfg } as LegadoSource;
 }
 
-/** GET：书源列表（?enabled=1 仅启用） */
+/** GET：书源列表（?enabled=1 仅启用；置顶源最前，置顶区内部后置顶的更靠前） */
 export async function GET(req: NextRequest) {
   await ensureSeeded();
   const sp = req.nextUrl.searchParams;
   const where = sp.get('enabled') === '1' ? { enabled: true } : {};
-  const rows = await db.bookSource.findMany({ where, orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }] });
+  const rows = await db.bookSource.findMany({
+    where,
+    orderBy: [{ pinned: 'desc' }, { pinnedAt: 'desc' }, { sortOrder: 'asc' }, { createdAt: 'asc' }],
+  });
   return NextResponse.json({
     sources: rows.map((r) => ({
       id: r.id,
@@ -102,6 +105,7 @@ export async function GET(req: NextRequest) {
       group: r.group,
       enabled: r.enabled,
       isBuiltin: r.isBuiltin,
+      pinned: r.pinned,
       checkStatus: r.checkStatus,
       lastCheckAt: r.lastCheckAt,
     })),
@@ -217,6 +221,7 @@ async function healSourceRefs() {
  * - { action:'checkAll' }                     批量检查（并发）
  * - { action:'resetBuiltin' }                 恢复全部内置源
  * - { action:'sort', ids }                    排序
+ * - { action:'pin', id, pinned }              置顶 / 取消置顶（pinned=true 排到置顶区最前）
  */
 export async function POST(req: NextRequest) {
   await ensureSeeded();
@@ -357,10 +362,10 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ results });
     }
     if (action === 'sortUsable') {
-      // 可用源排前（搜索优先命中）；返回统计
+      // 可用源排前（搜索优先命中）；返回统计。置顶源不动（保持置顶区内部顺序）
       const all = await db.bookSource.findMany();
-      const ok = all.filter((s) => s.checkStatus === 'ok');
-      const rest = all.filter((s) => s.checkStatus !== 'ok');
+      const ok = all.filter((s) => s.checkStatus === 'ok' && !s.pinned);
+      const rest = all.filter((s) => s.checkStatus !== 'ok' && !s.pinned);
       let i = 0;
       for (const s of ok) {
         await db.bookSource.update({ where: { id: s.id }, data: { sortOrder: i++ } }).catch(() => null);
@@ -425,6 +430,19 @@ export async function POST(req: NextRequest) {
         await db.bookSource.update({ where: { id }, data: { sortOrder: i++ } }).catch(() => null);
       }
       return NextResponse.json({ ok: true });
+    }
+    if (action === 'pin') {
+      // 置顶：pinned=true + 记置顶时间（后置顶的更靠前）；
+      // 取消置顶：pinned=false + 清空时间戳，sortOrder 全程不动 → 精确回到原位置
+      const id = String(body.id || '');
+      const row = await db.bookSource.findUnique({ where: { id } });
+      if (!row) return NextResponse.json({ error: '书源不存在' }, { status: 404 });
+      const pinned = body.pinned !== false;
+      await db.bookSource.update({
+        where: { id },
+        data: pinned ? { pinned: true, pinnedAt: new Date() } : { pinned: false, pinnedAt: null },
+      });
+      return NextResponse.json({ ok: true, pinned });
     }
     return NextResponse.json({ error: '未知操作' }, { status: 400 });
   } catch (e) {

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { getBookInfo } from '@/lib/reading/engine';
+import { getBookInfo, getBookIntro } from '@/lib/reading/engine';
 import { toLegado } from '../sources/route';
 
 export const runtime = 'nodejs';
@@ -20,6 +20,30 @@ export async function GET(req: NextRequest) {
   const sourceId = sp.get('sourceId') || '';
   const bookUrl = sp.get('bookUrl') || '';
   if (!sourceId || !bookUrl) return NextResponse.json({ error: '参数缺失' }, { status: 400 });
+
+  // ⓪ 轻量模式（?intro=1）：只抓详情页解析简介（搜索结果列表补简介用，不抓目录）
+  if (sp.get('intro') === '1') {
+    if (sourceId === 'local' || bookUrl.startsWith('local:')) {
+      const localId = bookUrl.startsWith('local:') ? bookUrl.slice('local:'.length) : bookUrl;
+      const lb = await db.localBook.findUnique({ where: { id: localId } });
+      return NextResponse.json({ intro: lb?.intro || '' });
+    }
+    let row = await db.bookSource.findUnique({ where: { id: sourceId } });
+    if (!row) {
+      const all = await db.bookSource.findMany();
+      row =
+        all
+          .map((s) => ({ s, u: s.url.replace(/\/+$/, '/') }))
+          .sort((a, b) => b.u.length - a.u.length)
+          .find((x) => x.u !== 'http://' && x.u !== 'https://' && bookUrl.startsWith(x.u))?.s || null;
+      if (!row) return NextResponse.json({ intro: '' });
+    }
+    try {
+      return NextResponse.json({ intro: await getBookIntro(toLegado(row), bookUrl) });
+    } catch {
+      return NextResponse.json({ intro: '' });
+    }
+  }
 
   // ① 本地导入书：直接查本地表
   if (sourceId === 'local' || bookUrl.startsWith('local:')) {

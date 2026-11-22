@@ -9,7 +9,7 @@
 import { useMemo, useState } from 'react';
 import { Crown, Flame, Trophy } from 'lucide-react';
 import { useReading } from '@/lib/reading/store';
-import { FEATURED, coverPaletteOf, themeOf, useFeaturedCovers, type FeaturedBook } from './shared';
+import { FEATURED, CoverPlaceholder, themeOf, useFeaturedCovers, type FeaturedBook } from './shared';
 import { SubNavBar } from './ReadingApp';
 
 /** 完结榜：全分类完结书确定性交错排序（同分类不连排，榜单更均衡） */
@@ -110,7 +110,6 @@ export function RankingPage({
           list.map((b, i) => {
             const raw = covers[b.name];
             const url = raw && !coverFails.has(raw) ? raw : null;
-            const pal = coverPaletteOf(b.name);
             const top3 = i < 3;
             return (
               <button
@@ -144,12 +143,7 @@ export function RankingPage({
                       onError={() => onCoverError(b.name, url)}
                     />
                   ) : (
-                    <div
-                      className="flex h-full w-full flex-col items-center justify-center gap-1 p-1.5"
-                      style={{ backgroundImage: `linear-gradient(150deg, ${pal[0]}, ${pal[1]})` }}
-                    >
-                      <span className="line-clamp-3 text-center text-[10px] font-bold leading-tight text-white">{b.name}</span>
-                    </div>
+                    <CoverPlaceholder name={b.name} radius="rounded-lg" className="h-full w-full" />
                   )}
                 </div>
                 {/* 信息 */}

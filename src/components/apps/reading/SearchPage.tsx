@@ -4,8 +4,9 @@
  * 聚合搜索页（多书源共同搜索）：
  * - 顶栏一体化：返回 + 搜索框 + 蓝色「搜索」按钮 + 筛选（搜索范围）图标（无「聚合搜索」标题）
  * - 点击搜索历史 / 热门搜索 → 关键词同步写入搜索框再发起搜索（搜索框始终显示当前书名）
- * - 结果行：封面（72×96 圆角描边）｜书名 + 作者 + 右侧「N 个源」浅蓝徽章
- *   ｜分类小徽章 + 最新章节信息｜简介两行截断（纯数字时间戳标签已过滤）
+ * - 结果行：封面（72×96 圆角描边；无封面统一「暂无封面」灰底占位）｜书名 + 作者 + 右侧「N 个源」浅蓝徽章
+ *   ｜分类小徽章 + 最新章节信息｜简介两行截断（组内任一源自带简介优先；
+ *   都没有的组后台调轻量 intro 接口单次详情页补抓，新简介流入即展示）
  * - 多源共同搜索：所有启用源 8 路并发（Promise.allSettled 语义：单源失败静默跳过），
  *   哪个源先返回就先渲染（流式渐进）；顶部状态行「正在搜索中 (已找到 N 个结果)…」
  * - 防卡死：结果分组分批渲染（首屏 20 组，滚动到底追加），数百源返回海量数据不卡 UI
@@ -20,6 +21,7 @@ import {
   SB_H,
   api,
   coverSrc,
+  CoverPlaceholder,
   themeOf,
   useFeaturedCovers,
   type SearchBookItem,
@@ -78,28 +80,11 @@ function saveHistory(list: string[]) {
   }
 }
 
-/** 无封面占位（设计图同款）：浅灰圆角块 + 白字「暂无/封面」两行居中 */
-function NoCoverBlock({ radius = 'rounded-xl' }: { radius?: string }) {
-  return (
-    <div
-      className={`flex h-full w-full flex-col items-center justify-center gap-0.5 ${radius}`}
-      style={{ background: '#DDE0E7' }}
-      aria-label="暂无封面"
-    >
-      <span
-        className="text-[15px] font-bold leading-tight text-white"
-        style={{ textShadow: '0 1px 3px rgba(0,0,0,0.38), 0 0 1px rgba(0,0,0,0.4)' }}
-      >
-        暂无
-      </span>
-      <span
-        className="text-[15px] font-bold leading-tight text-white"
-        style={{ textShadow: '0 1px 3px rgba(0,0,0,0.38), 0 0 1px rgba(0,0,0,0.4)' }}
-      >
-        封面
-      </span>
-    </div>
-  );
+/** 简介有效性：非空、长度 ≥5、非纯数字（时间戳泄漏如 1597757169 不算简介） */
+function validIntro(s?: string | null): s is string {
+  if (!s) return false;
+  const t = s.trim();
+  return t.length >= 5 && !/^\d+$/.test(t);
 }
 
 /** 分类徽章（kind 常为「都市:言情」冒号分隔，取前 2 段；时间戳/日期段过滤，如 1597757169、19-04-02） */
@@ -228,6 +213,11 @@ export function SearchPage({
   /** 分批渲染状态（提前声明：runSearch 重置用）：首屏 20 组，滚动到底追加 */
   const [shownCount, setShownCount] = useState(INITIAL_BATCH);
 
+  /** 组级简介补抓：搜索结果都没带简介的组，后台调轻量 intro 接口（单次详情页请求）
+   *  逐组顺序补，新搜索重置；请求过的组（无论成败）记入 ref 不再重试 */
+  const [intros, setIntros] = useState<Map<string, string>>(new Map());
+  const introFetchedRef = useRef<Set<string>>(new Set());
+
   const runSearch = useCallback(
     async (keyword: string) => {
       const k = keyword.trim();
@@ -243,6 +233,8 @@ export function SearchPage({
       setSearched(0);
       setGroups(new Map());
       setShownCount(INITIAL_BATCH);
+      setIntros(new Map());
+      introFetchedRef.current = new Set();
       const queue = queueRef.current;
       const worker = async () => {
         while (queue.length && !ctrl.signal.aborted) {
@@ -319,6 +311,33 @@ export function SearchPage({
     }
   };
 
+  /** 简介后台补抓：可见组里没有任何源自带简介的，逐组调轻量 intro 接口（最多补前 15 组/轮） */
+  useEffect(() => {
+    const pending = visibleList
+      .filter((g) => !g.books.some((b) => validIntro(b.intro)) && !introFetchedRef.current.has(g.key))
+      .slice(0, 15);
+    if (!pending.length) return;
+    let stop = false;
+    const fill = async () => {
+      for (const g of pending) {
+        if (stop) return;
+        introFetchedRef.current.add(g.key);
+        const b = g.books[0];
+        if (!b?.sourceId || !b.bookUrl) continue;
+        try {
+          const r = await api.bookIntro(b.sourceId, b.bookUrl);
+          if (!stop && validIntro(r.intro)) setIntros((prev) => new Map(prev).set(g.key, r.intro));
+        } catch {
+          /* 单组失败静默 */
+        }
+      }
+    };
+    void fill();
+    return () => {
+      stop = true;
+    };
+  }, [visibleList]);
+
   /* 搜索结果封面：多数书源搜索不返回封面——接入精选封面服务端缓存（按书名跨源找封面） */
   const coverNames = useMemo(() => resultList.slice(0, 30).map((g) => g.name), [resultList]);
   const { covers: hookedCovers, retry: retryCover } = useFeaturedCovers(coverNames);
@@ -360,7 +379,7 @@ export function SearchPage({
               onError={() => onCoverError(cover, coverFromHook ? g.name : undefined)}
             />
           ) : (
-            <NoCoverBlock />
+            <CoverPlaceholder radius="rounded-xl" className="h-full w-full" />
           )}
         </div>
         <div className="min-w-0 flex-1 pt-0.5">
@@ -396,10 +415,10 @@ export function SearchPage({
               </span>
             )}
           </div>
-          {/* 第三行：简介两行截断 */}
-          {b0.intro && (
+          {/* 第三行：简介两行截断（组内任一源自带简介优先，都没有时后台补抓） */}
+          {(g.books.map((b) => b.intro).find(validIntro) || intros.get(g.key) || '').trim() && (
             <p className="mt-1.5 line-clamp-2 text-[12px] leading-snug" style={{ color: theme.textSub }}>
-              {b0.intro}
+              {(g.books.map((b) => b.intro).find(validIntro) || intros.get(g.key) || '').trim()}
             </p>
           )}
         </div>

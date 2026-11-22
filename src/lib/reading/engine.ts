@@ -1786,6 +1786,12 @@ export async function getBookInfo(
   };
 }
 
+/** 轻量简介抓取（搜索结果列表补简介用：单次详情页请求，不抓目录） */
+export async function getBookIntro(source: LegadoSource, bookUrl: string): Promise<string> {
+  const { ctx } = await fetchCtx(source, { url: bookUrl, method: 'GET' });
+  return evalRule(ctx, source.ruleBookInfo?.intro, true).slice(0, 300);
+}
+
 async function getTocFrom(source: LegadoSource, tocUrl: string, infoCtx?: Ctx) {
   const rt = source.ruleToc || {};
   let ctx = infoCtx;
