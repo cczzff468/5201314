@@ -100,8 +100,8 @@ export default function ReadingApp() {
         color: theme.textMain,
       }}
     >
-      {/* 底层装饰光斑（毛玻璃透出感的来源；随主题换色） */}
-      <div className="pointer-events-none absolute inset-0 overflow-hidden" aria-hidden="true">
+      {/* 底层装饰光斑（毛玻璃透出感的来源；随主题换色；pan-none：光斑负偏移探出也不可被拖动） */}
+      <div className="pointer-events-none absolute inset-0 pan-none" aria-hidden="true">
         <span
           className="absolute -top-24 -right-20 h-80 w-80 rounded-full opacity-80 blur-3xl"
           style={{ background: `radial-gradient(circle, ${theme.gradFrom}88, transparent 68%)` }}

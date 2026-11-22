@@ -43,7 +43,9 @@ export default function AppWindow() {
       // ② will-change 只在动画进行中（opening/closing）挂，open 后立即摘掉——
       //    常驻 will-change 会把整个 App 子树（数千 DOM 节点）钉在独立合成层，
       //    显存常驻 + App 内任何更新的重绘都要走大合成层，是「打开后界面反而卡」的元凶之一。
-      className={`absolute inset-0 z-40 overflow-hidden bg-background transition-[transform,scale,opacity,border-radius] duration-[380ms] ease-[cubic-bezier(0.32,0.72,0,1)] ${
+      // pan-none（第七轮）：overflow:hidden 的窗口仍可被触摸惯性/对角滑动横向滚出
+      // （任意 App 内容超宽即触发，两侧露出「刀切」空白）；overflow:clip 彻底滚不动。
+      className={`absolute inset-0 z-40 pan-none bg-background transition-[transform,scale,opacity,border-radius] duration-[380ms] ease-[cubic-bezier(0.32,0.72,0,1)] ${
         phase === 'open' ? 'scale-100 rounded-none opacity-100' : 'scale-[0.18] rounded-[48px] opacity-0 will-change-[transform,scale,opacity]'
       } ${shopDark ? 'shop-dark' : ''}`}
     >

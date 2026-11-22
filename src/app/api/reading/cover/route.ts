@@ -14,6 +14,39 @@ export const dynamic = 'force-dynamic';
 const UA =
   'Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Mobile Safari/537.36';
 
+/* ---------------------------------------------------------------------------
+ * 进程内封面字节缓存（第七轮「封面太慢」）：
+ * 同一封面地址的多组件/多设备重复请求直接内存回拷（毫秒级），不再重复回源。
+ * 上限 300 张 / 单张 6 小时（防盗链封面地址基本不变，过期重拉即可）。
+ * ------------------------------------------------------------------------- */
+const MEM_CACHE_MAX = 300;
+const MEM_CACHE_TTL = 6 * 60 * 60 * 1000;
+const memCache = new Map<string, { buf: ArrayBuffer; type: string; at: number }>();
+
+function cacheGet(key: string): { buf: ArrayBuffer; type: string } | null {
+  const hit = memCache.get(key);
+  if (!hit) return null;
+  if (Date.now() - hit.at > MEM_CACHE_TTL) {
+    memCache.delete(key);
+    return null;
+  }
+  return { buf: hit.buf, type: hit.type };
+}
+
+function cacheSet(key: string, buf: ArrayBuffer, type: string) {
+  if (buf.byteLength > 2 * 1024 * 1024) return; // 超大图不缓存（省内存）
+  memCache.set(key, { buf, type, at: Date.now() });
+  if (memCache.size > MEM_CACHE_MAX) {
+    // 淘汰最旧的一半（插入序即最旧在前）
+    const drop = memCache.size - Math.floor(MEM_CACHE_MAX / 2);
+    let i = 0;
+    for (const k of memCache.keys()) {
+      if (i++ >= drop) break;
+      memCache.delete(k);
+    }
+  }
+}
+
 /** 图片魔数嗅探（无 content-type 时判真图，拒绝 HTML 防盗链页） */
 function isImageBytes(buf: ArrayBuffer): boolean {
   if (buf.byteLength < 12) return false;
@@ -57,6 +90,17 @@ export async function GET(req: NextRequest) {
   }
 
   try {
+    // 进程内缓存命中：毫秒级回拷，不回源（第七轮封面提速）
+    const cached = cacheGet(u);
+    if (cached) {
+      return new NextResponse(cached.buf, {
+        status: 200,
+        headers: {
+          'Content-Type': cached.type,
+          'Cache-Control': 'public, max-age=86400, stale-while-revalidate=604800',
+        },
+      });
+    }
     const res = await fetch(u, {
       headers: {
         'User-Agent': UA,
@@ -64,7 +108,7 @@ export async function GET(req: NextRequest) {
         Accept: 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
       },
       redirect: 'follow',
-      signal: AbortSignal.timeout(9000),
+      signal: AbortSignal.timeout(7000),
       cache: 'no-store',
     });
     if (!res.ok) return NextResponse.json({ error: `upstream ${res.status}` }, { status: 502 });
@@ -78,6 +122,7 @@ export async function GET(req: NextRequest) {
       if (!isImageBytes(buf)) return NextResponse.json({ error: 'not image' }, { status: 415 });
       type = 'image/jpeg';
     }
+    cacheSet(u, buf, type);
     return new NextResponse(buf, {
       status: 200,
       headers: {

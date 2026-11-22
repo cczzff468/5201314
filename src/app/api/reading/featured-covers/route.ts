@@ -175,7 +175,7 @@ export async function GET(req: NextRequest) {
 
   // 后台补齐（不 await：响应立即送达，补齐落库后客户端下轮轮询秒回拿到）
   void (async () => {
-    const deadline = Date.now() + 9000;
+    const deadline = Date.now() + 12000;
     let cursor = 0;
     const worker = async () => {
       while (Date.now() < deadline) {
@@ -195,7 +195,7 @@ export async function GET(req: NextRequest) {
         fillingNow.delete(name);
       }
     };
-    await Promise.all([worker(), worker(), worker(), worker(), worker(), worker()]);
+    await Promise.all([worker(), worker(), worker(), worker(), worker(), worker(), worker(), worker()]);
     // 兜底：超时未处理到的书也清出 inflight（否则客户端会一直空轮询等它们）
     for (const n of todo) fillingNow.delete(n);
   })();

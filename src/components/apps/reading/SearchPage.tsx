@@ -14,6 +14,7 @@ import {
   coverSrc,
   CoverPlaceholder,
   themeOf,
+  useFeaturedCovers,
   type SearchBookItem,
   type SourceItem,
 } from './shared';
@@ -179,16 +180,28 @@ export function SearchPage({
     related.sort((a, b) => b.books.length - a.books.length || a.name.localeCompare(b.name, 'zh'));
     return [...exact, ...related];
   }, [groupsMap, kw]);
+
+  /* 搜索结果封面（第七轮）：多数书源的搜索接口不返回封面地址——接入精选封面
+     服务端缓存（按书名跨源找封面 + 落库永久缓存），结果列表不再只有占位图。
+     只拉前 30 组（服务端有补齐退避，名单再多也只会压慢首批） */
+  const coverNames = useMemo(() => resultList.slice(0, 30).map((g) => g.name), [resultList]);
+  const { covers: hookedCovers, retry: retryCover } = useFeaturedCovers(coverNames);
   const glass = { background: theme.cardBg, boxShadow: 'inset 0 0 0 1px ' + theme.cardRing } as const;
 
   /** 搜索结果封面加载失败（死链/防盗链）→ 回退书脊风占位图，不显示破图图标 */
   const [coverFails, setCoverFails] = useState<Set<string>>(new Set());
-  const onCoverError = (url: string) => setCoverFails((s) => new Set(s).add(url));
+  const onCoverError = (url: string, name?: string) => {
+    setCoverFails((s) => new Set(s).add(url));
+    if (name) retryCover(name); // 挂钩封面失败 → 服务端换地址重搜一次（每本仅一次）
+  };
 
   /** 单个书籍组卡片 */
   const renderGroup = (g: Group) => {
     const b0 = g.books[0];
-    const cover = b0.coverUrl ? coverSrc(b0.coverUrl, b0.sourceId) : undefined;
+    // 封面优先级：搜索结果自带封面 > 跨源封面缓存 > 占位图
+    const hooked = hookedCovers[g.name];
+    const cover = b0.coverUrl ? coverSrc(b0.coverUrl, b0.sourceId) : hooked && !coverFails.has(hooked) ? hooked : undefined;
+    const coverFromHook = !b0.coverUrl && !!hooked;
     return (
       <button
         key={g.key}
@@ -204,7 +217,7 @@ export function SearchPage({
             className="h-[68px] w-[50px] shrink-0 rounded-lg object-cover shadow-sm ring-1 ring-black/5"
             loading="lazy"
             referrerPolicy="no-referrer"
-            onError={() => onCoverError(cover)}
+            onError={() => onCoverError(cover, coverFromHook ? g.name : undefined)}
           />
         ) : (
           <CoverPlaceholder name={g.name} author={g.author} className="h-[68px] w-[50px] shrink-0 shadow-sm" radius="rounded-lg" />

@@ -554,7 +554,7 @@ export default function PhoneShell() {
             >
               <div
                 data-phone-shell=""
-                className="relative h-[844px] w-[390px] overflow-hidden rounded-[56px] border-[12px] border-[#151517] bg-black"
+                className="relative h-[844px] w-[390px] pan-none rounded-[56px] border-[12px] border-[#151517] bg-black"
                 style={{ width: FRAME_W, height: FRAME_H }}
               >
                 {/* 灵动岛（开机阶段仅保留硬件开孔） */}
@@ -568,7 +568,7 @@ export default function PhoneShell() {
             <div
               data-phone-shell=""
               data-pwa-portrait-shell=""
-              className={`relative h-[100svh] w-full overflow-hidden bg-black sm:h-[844px] sm:w-[390px] sm:rounded-[56px] sm:border-[12px] sm:border-[#151517] sm:shadow-[0_40px_90px_-20px_rgba(0,0,0,0.55),0_0_0_1px_rgba(255,255,255,0.08)] ${
+              className={`relative h-[100svh] w-full pan-none bg-black sm:h-[844px] sm:w-[390px] sm:rounded-[56px] sm:border-[12px] sm:border-[#151517] sm:shadow-[0_40px_90px_-20px_rgba(0,0,0,0.55),0_0_0_1px_rgba(255,255,255,0.08)] ${
                 dark ? 'dark' : ''
               }`}
               style={{ transform: `scale(${fit.scale})`, transformOrigin: 'top left' }}
@@ -788,8 +788,8 @@ export default function PhoneShell() {
       data-pwa-portrait-shell={fit.landscape ? undefined : ''}
       className={
         fit.landscape
-          ? `relative overflow-hidden rounded-[56px] border-[12px] border-[#151517] bg-black text-foreground shadow-[0_40px_90px_-20px_rgba(0,0,0,0.55),0_0_0_1px_rgba(255,255,255,0.08)] ${dark ? 'dark' : ''}`
-          : `relative h-[100svh] w-full overflow-hidden bg-black text-foreground sm:h-[844px] sm:w-[390px] sm:rounded-[56px] sm:border-[12px] sm:border-[#151517] sm:shadow-[0_40px_90px_-20px_rgba(0,0,0,0.55),0_0_0_1px_rgba(255,255,255,0.08)] ${dark ? 'dark' : ''}`
+          ? `relative pan-none rounded-[56px] border-[12px] border-[#151517] bg-black text-foreground shadow-[0_40px_90px_-20px_rgba(0,0,0,0.55),0_0_0_1px_rgba(255,255,255,0.08)] ${dark ? 'dark' : ''}`
+          : `relative h-[100svh] w-full pan-none bg-black text-foreground sm:h-[844px] sm:w-[390px] sm:rounded-[56px] sm:border-[12px] sm:border-[#151517] sm:shadow-[0_40px_90px_-20px_rgba(0,0,0,0.55),0_0_0_1px_rgba(255,255,255,0.08)] ${dark ? 'dark' : ''}`
       }
       style={
         fit.landscape

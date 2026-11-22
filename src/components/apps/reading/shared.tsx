@@ -1167,9 +1167,10 @@ export function useFeaturedCovers(names: string[]): { covers: Record<string, str
         const next: Record<string, string> = {};
         for (const [n, c] of Object.entries(d.covers)) next[n] = coverSrc(c.url, c.sid) as string;
         setCovers((prev) => ({ ...prev, ...next }));
-        // 还有缺口 → 3s 后再补一轮（最多 14 轮 ≈ 40s，避免无限轮询）
-        if (d.pending > 0 && round < 14) {
-          timer = setTimeout(() => void run(true, round + 1), 3000);
+        // 还有缺口 → 1.2s 后再补一轮（服务端后台搜源落库后下一轮秒回拿到；
+        // 最多 24 轮 ≈ 30s，比原来 3s 轮询快一倍多，封面更快现身）
+        if (d.pending > 0 && round < 24) {
+          timer = setTimeout(() => void run(true, round + 1), 1200);
         }
       } catch {
         /* 网络错误：静默（下轮刷新重试） */

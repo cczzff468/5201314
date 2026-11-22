@@ -1671,14 +1671,19 @@ export function ReaderView({ page, onBack }: { page: ReaderPage; onBack: () => v
       setSrcBusy(false);
       return;
     }
+    // 换源 = 同一本书换不同源：书名必须完全一致（归一化空白后），
+    // 作者双方都有值时也必须一致——杜绝「包含匹配」把续作/同名不同书塞进列表
+    const nm = (x: string) => norm(x);
+    const au = (x?: string | null) => norm(x || '');
     await Promise.all(
       pool.map(async (s) => {
         try {
           const r = await api.searchOne(src.name, s.id);
           const books = r.books || [];
           const hit =
-            books.find((b) => norm(b.name) === norm(src.name)) ||
-            books.find((b) => norm(b.name).includes(norm(src.name)) || norm(src.name).includes(norm(b.name)));
+            books.find(
+              (b) => nm(b.name) === nm(src.name) && (!au(src.author) || !au(b.author) || au(b.author) === au(src.author)),
+            ) || books.find((b) => nm(b.name) === nm(src.name));
           if (hit) {
             setSrcCands((prev) => [
               ...prev,
@@ -2246,10 +2251,12 @@ export function ReaderView({ page, onBack }: { page: ReaderPage; onBack: () => v
           <button type="button" aria-label="下一页" className="h-full w-1/3" onClick={() => onZoneClick('next')} />
         </div>
 
-        {/* 裁切层：宽 = 整数页宽（只露出当前页；分页模式 pointer-events 不拦截；滚动模式接管触摸） */}
+        {/* 裁切层：宽 = 整数页宽（只露出当前页；分页模式 pointer-events 不拦截；滚动模式接管触摸）
+            pan-none（第七轮）：分页轨道 N 页并排宽，overflow:hidden 时触摸惯性/对角滑动
+            仍能把整层横向滚出——正文两侧露出「刀切」空白；overflow:clip 彻底滚不动 */}
         <div
           ref={clipRef}
-          className={`relative z-10 h-full overflow-hidden ${animMode === 'scroll' ? '' : 'pointer-events-none'}`}
+          className={`relative z-10 h-full pan-none ${animMode === 'scroll' ? '' : 'pointer-events-none'}`}
           style={{ width: vp.w ? `${vp.w}px` : '100%' }}
         >
           {/* 隐藏测量容器（与页面同宽同排版；分页引擎用） */}
@@ -2369,7 +2376,7 @@ export function ReaderView({ page, onBack }: { page: ReaderPage; onBack: () => v
                   翻页前沿像真实书页而不是“被切割”） */}
               {coverLike && coverState && pageList[coverState.page] && (
                 <div
-                  className="absolute inset-y-0 left-0 z-20 overflow-hidden"
+                  className="absolute inset-y-0 left-0 z-20 pan-none"
                   style={{
                     width: vp.w || '100%',
                     background: bg.bg,

@@ -143,7 +143,8 @@ export function BookDetail({
   };
 
   // ------------------------------------------------------------------
-  // 换源候选发现：打开换源抽屉时后台并行搜（书名+作者），仅收同名结果
+  // 换源候选发现：打开换源抽屉时后台并行搜（书名精确匹配），仅收同名结果；
+  // 作者一致的排前面（同名不同书一眼可辨，点开不会「换源变换书」）
   // ------------------------------------------------------------------
   const findCandidates = useCallback(async () => {
     if (srcSearching) return;
@@ -151,6 +152,7 @@ export function BookDetail({
     setCandidates([]);
     const enabled = sources.filter((s) => s.enabled && s.id !== curSourceId).slice(0, 14);
     const norm = (s: string) => s.replace(/\s+/g, '');
+    const curAuthor = norm(curBook.author || '');
     const found: SourceCandidate[] = [];
     const queue = [...enabled];
     const worker = async () => {
@@ -164,6 +166,12 @@ export function BookDetail({
               break;
             }
           }
+          // 作者一致的候选排前（同名续作/仿写靠后，避免换到另一本书）
+          found.sort((a, b) => {
+            const ma = norm(a.book.author || '') === curAuthor ? 0 : 1;
+            const mb = norm(b.book.author || '') === curAuthor ? 0 : 1;
+            return ma - mb;
+          });
           setCandidates([...found]);
         } catch {
           /* 单源失败静默 */
@@ -173,7 +181,7 @@ export function BookDetail({
     void Promise.all(Array.from({ length: Math.min(4, enabled.length) }, worker)).then(() => {
       setSrcSearching(false);
     });
-  }, [sources, curSourceId, curBook.name, srcSearching]);
+  }, [sources, curSourceId, curBook.name, curBook.author, srcSearching]);
 
   useEffect(() => {
     if (srcOpen && !srcSearchedRef.current) {
@@ -476,7 +484,12 @@ export function BookDetail({
             </button>
             <button
               type="button"
-              onClick={() => onSwitchSource(curBook)}
+              onClick={() => {
+                // 换源 = 同一本书换别的源：打开本页的同书换源抽屉（不再跳搜索页——
+                // 搜索页列的是各源的不同书，「换个书源」跳过去就成了换一本书）
+                srcSearchedRef.current = false;
+                setSrcOpen(true);
+              }}
               className="rounded-full px-5 py-2 text-[13px] font-semibold text-white shadow-md"
               style={{ background: `linear-gradient(135deg, ${theme.gradFrom}, ${theme.gradTo})` }}
             >
@@ -667,14 +680,13 @@ export function BookDetail({
               <p className="text-[16px] font-bold" style={{ color: theme.textMain }}>
                 看了本书的还在看
               </p>
-              {/* 4 列网格：全部可见、无裁切（替代旧横滑行） */}
-              <div className="mt-2.5 grid grid-cols-4 gap-3">
+              <div className="-mx-1 mt-2.5 flex gap-3 overflow-x-auto px-1 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
                 {similar.map((b) => (
                   <button
                     key={b.name}
                     type="button"
                     onClick={() => onSwitchSource({ name: b.name, author: b.author, bookUrl: '', sourceName: '', sourceUrl: '' })}
-                    className="w-full text-left active:scale-95"
+                    className="w-[86px] shrink-0 text-left active:scale-95"
                   >
                     <div
                       className="flex aspect-[3/4.2] w-full flex-col items-center justify-center gap-1.5 overflow-hidden rounded-xl p-2"
@@ -698,7 +710,7 @@ export function BookDetail({
         </div>
       )}
 
-      {/* 底部固定操作栏：加入书架 + 开始阅读 */}
+      {/* 底部固定操作栏：加入书架 + 开始阅读（两钮文字均不换行：窄屏/大字号自动截断） */}
       {data && (
         <div
           className="absolute inset-x-0 bottom-0 z-20 flex items-center gap-3 px-4 pb-[max(14px,env(safe-area-inset-bottom))] pt-3 backdrop-blur-2xl"
@@ -708,11 +720,11 @@ export function BookDetail({
             type="button"
             onClick={() => void toggleShelf()}
             aria-label={inShelf ? '移出书架' : '加入书架'}
-            className="flex h-[62px] w-[74px] shrink-0 flex-col items-center justify-center gap-1 rounded-2xl active:scale-95"
+            className="flex h-[62px] shrink-0 flex-col items-center justify-center gap-1 rounded-2xl px-4 active:scale-95"
             style={{ background: 'rgba(120,128,140,0.12)', color: inShelf ? theme.accent : theme.textSub }}
           >
             {inShelf ? <Check className="h-5 w-5" /> : <Plus className="h-5 w-5" />}
-            <span className="text-[11px] font-medium">{inShelf ? '已在架' : '加入书架'}</span>
+            <span className="whitespace-nowrap text-[11px] font-medium">{inShelf ? '已在架' : '加入书架'}</span>
           </button>
           <button
             type="button"
@@ -720,8 +732,10 @@ export function BookDetail({
             className="flex h-[62px] min-w-0 flex-1 items-center justify-center gap-2 rounded-full text-[16px] font-bold text-white shadow-lg active:scale-[0.98]"
             style={{ background: `linear-gradient(135deg, ${theme.gradFrom}, ${theme.gradTo})`, boxShadow: `0 10px 28px ${theme.accent}55` }}
           >
-            <BookOpen className="h-5 w-5" />
-            {started ? `继续读 · 第${readIdx + 1}章` : '开始阅读'}
+            <BookOpen className="h-5 w-5 shrink-0" />
+            <span className="min-w-0 truncate whitespace-nowrap">
+              {started ? `继续读 · 第${readIdx + 1}章` : '开始阅读'}
+            </span>
           </button>
         </div>
       )}
@@ -797,8 +811,8 @@ export function BookDetail({
                       {c.sourceName}
                     </span>
                     <span className="block truncate text-[11px]" style={{ color: theme.textSub }}>
-                      {c.book.kind ? `${c.book.kind} · ` : ''}
-                      {c.book.lastChapter ? `最新：${c.book.lastChapter.slice(0, 14)}` : c.book.bookUrl.replace(/^https?:\/\//, '').slice(0, 22)}
+                      {(c.book.author || '佚名') + (c.book.kind ? ` · ${c.book.kind}` : '')}
+                      {c.book.lastChapter ? ` · 最新：${c.book.lastChapter.slice(0, 14)}` : ''}
                     </span>
                   </span>
                   {switching ? <Loader2 className="h-4 w-4 shrink-0 animate-spin" style={{ color: theme.accent }} /> : <span className="shrink-0 text-[12px] font-medium" style={{ color: theme.accent }}>切换</span>}

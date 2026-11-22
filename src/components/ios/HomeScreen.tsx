@@ -1196,8 +1196,8 @@ function FolderPanel({
             </button>
           )}
         </div>
-        {/* 分页轨道：每页 3 列 × 4 行 = 12 个 App */}
-        <div className="w-full overflow-hidden" data-testid="folder-pages">
+        {/* 分页轨道：每页 3 列 × 4 行 = 12 个 App（pan-none：多页轨道探出也不可被拖动） */}
+        <div className="w-full pan-none" data-testid="folder-pages">
           <div
             ref={trackRef}
             className="flex transition-transform duration-300"
@@ -3531,10 +3531,9 @@ export default function HomeScreen() {
           overflow-hidden 永不上下滚动（用户要求：APP 放到下面时主屏会跟着竖向滑动，已废）——
           页内容按行封顶（GRID_ROW_CAP：满高壳 6 行，矮视口实测收敛 3~6 行），全部落在页点上方可视区内，存量超行布局加载时
           由 sanitizeLayout 摘出重排到后续页；页点与 Dock（relative z-10）悬浮在页面之上。
-          overflow-hidden（第五轮关键修复）：分页轨道 4 页宽会撑出壳的可滚动溢出——
-          触摸横滑/惯性会把整个壳（连 App 窗口一起）横向滚出屏幕，界面出现「刀切边」
-          空白且永不回位；在此裁切掉，壳永不可滚 */}
-      <div className="absolute inset-0 overflow-hidden">
+          pan-none（第七轮根治）：overflow:hidden 仍是滚动容器——4 页宽的轨道会被
+          触摸惯性/对角滑动横向滚出，主屏两侧露出「刀切」空白；overflow:clip 彻底滚不动 */}
+      <div className="absolute inset-0 pan-none">
         <div
           ref={trackRef}
           data-testid="pages-track"
