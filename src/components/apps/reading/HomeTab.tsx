@@ -2,7 +2,7 @@
 
 /**
  * 首页 Tab（下拉刷新 + 无限加载）：
- * - 胶囊搜索条 + 继续阅读卡 + 分类胶囊 + 书架推荐横滑 + 各分类精选横滑
+ * - 搜索胶囊 + 分类胶囊（搜索框下方）+ 继续阅读卡 + 书架推荐横滑 + 各分类精选横滑
  * - 「为你推荐」无限信息流：滚动到底自动追加（精选书池轮转洗牌，永远刷不完）
  * - 下拉刷新：顶部 iOS 风格指示器；重拉继续阅读 + 重洗信息流 + 补齐封面
  * - 全部书籍显示真实封面（服务端 FeaturedCover 永久缓存，后台自动补齐）
@@ -315,8 +315,21 @@ export function HomeTab({
       </div>
 
       <div className="px-4">
-        {/* 分类胶囊 + 排行榜入口（顶部第一行，搜索框上方；点击进入分类浏览页；iOS 式单行横滑，无滚动条） */}
-        <div className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-1 no-scrollbar">
+        {/* 搜索胶囊（顶部第一行，分类行上方；点击进搜索页） */}
+        <button
+          type="button"
+          onClick={() => onSearch()}
+          className="flex h-11 w-full items-center gap-2 rounded-full px-4 text-left backdrop-blur-xl transition-transform active:scale-[0.98]"
+          style={glass}
+        >
+          <Search className="h-[18px] w-[18px]" strokeWidth={2.2} style={{ color: theme.textSub }} />
+          <span className="truncate text-[15px]" style={{ color: theme.textSub }}>
+            搜索书名、作者…
+          </span>
+        </button>
+
+        {/* 分类胶囊 + 排行榜入口（搜索框下方；点击进入分类浏览页；iOS 式单行横滑，无滚动条） */}
+        <div className="-mx-4 mt-3 flex gap-2 overflow-x-auto px-4 pb-1 no-scrollbar">
           <button
             type="button"
             onClick={onOpenRank}
@@ -341,19 +354,6 @@ export function HomeTab({
             </button>
           ))}
         </div>
-
-        {/* 搜索胶囊（分类行下方） */}
-        <button
-          type="button"
-          onClick={() => onSearch()}
-          className="mt-3 flex h-11 w-full items-center gap-2 rounded-full px-4 text-left backdrop-blur-xl transition-transform active:scale-[0.98]"
-          style={glass}
-        >
-          <Search className="h-[18px] w-[18px]" strokeWidth={2.2} style={{ color: theme.textSub }} />
-          <span className="truncate text-[15px]" style={{ color: theme.textSub }}>
-            搜索书名、作者…
-          </span>
-        </button>
 
         {/* 继续阅读 */}
         {recent && (

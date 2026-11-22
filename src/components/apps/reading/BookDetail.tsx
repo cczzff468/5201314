@@ -248,7 +248,8 @@ export function BookDetail({
     }
   }, [srcOpen, findCandidates]);
 
-  /** 详情加载失败 → 自动换源：依次试其他源，能拉到目录的自动切过去 */
+  /** 详情加载失败 → 自动换源：4 路并发试其他源，第一个能拉到目录的自动切过去
+   *  （旧版逐个串行，慢源 12s 超时会拖成半分钟白屏） */
   const tryAutoSwitchDetail = useCallback(async (): Promise<boolean> => {
     if (autoRef.current) return false;
     autoRef.current = true;
@@ -257,51 +258,60 @@ export function BookDetail({
       const enabled = sources.filter((s) => s.enabled && s.id !== curSourceId).slice(0, 12);
       const nm = (s: string) => s.replace(/\s+/g, '');
       const curAu = nm(curBook.author || '');
-      for (const src of enabled) {
-        try {
-          const r = await api.searchOne(curBook.name, src.id);
-          // 同源同名书里只取作者一致/未知的（同名不同书直接跳过，绝不自动换到另一本书）
-          const sames = (r.books || []).filter((b) => {
-            if (nm(b.name) !== nm(curBook.name)) return false;
-            const ba = nm(b.author || '');
-            return !curAu || !ba || ba === curAu;
-          });
-          const hit = sames[0];
-          if (!hit) continue;
-          const d = await api.bookDetail(src.id, hit.bookUrl, curBook.name, curBook.author || '');
-          // 目录过少视为残缺源（百章书只有几条目录的直接跳过）
-          if (d.chapters.length < 10) continue;
-          if (inShelf || shelfEntry) {
-            await api
-              .shelfAction({
-                action: 'switchSource',
-                name,
-                author,
-                book: {
-                  sourceId: src.id,
-                  sourceName: src.name,
-                  bookUrl: hit.bookUrl,
-                  coverUrl: hit.coverUrl || curBook.coverUrl,
-                  intro: d.intro,
-                  chapters: d.chapters,
-                },
-              })
-              .catch(() => null);
-            await loadShelf().catch(() => null);
+      let won = false;
+      const queue = [...enabled];
+      const worker = async () => {
+        while (queue.length && !won) {
+          const src = queue.shift()!;
+          try {
+            const r = await api.searchOne(curBook.name, src.id);
+            if (won) return;
+            // 同源同名书里只取作者一致/未知的（同名不同书直接跳过，绝不自动换到另一本书）
+            const sames = (r.books || []).filter((b) => {
+              if (nm(b.name) !== nm(curBook.name)) return false;
+              const ba = nm(b.author || '');
+              return !curAu || !ba || ba === curAu;
+            });
+            const hit = sames[0];
+            if (!hit) continue;
+            const d = await api.bookDetail(src.id, hit.bookUrl, curBook.name, curBook.author || '');
+            if (won) return;
+            // 目录过少视为残缺源（百章书只有几条目录的直接跳过）
+            if (d.chapters.length < 10) continue;
+            won = true;
+            if (inShelf || shelfEntry) {
+              await api
+                .shelfAction({
+                  action: 'switchSource',
+                  name,
+                  author,
+                  book: {
+                    sourceId: src.id,
+                    sourceName: src.name,
+                    bookUrl: hit.bookUrl,
+                    coverUrl: hit.coverUrl || curBook.coverUrl,
+                    intro: d.intro,
+                    chapters: d.chapters,
+                  },
+                })
+                .catch(() => null);
+              await loadShelf().catch(() => null);
+            }
+            await api.notesAction({ action: 'migrate', from: curBook.bookUrl, to: hit.bookUrl }).catch(() => null);
+            setCurSourceId(src.id);
+            setCurBook({ ...hit, name: d.name || name, author: d.author || author });
+            setData({ ...d, lastReadChapter: 0 });
+            setInShelf(d.inShelf);
+            setErr('');
+            notify(`已自动切换书源：${src.name}`);
+            return;
+          } catch {
+            /* 试下一个源 */
           }
-          await api.notesAction({ action: 'migrate', from: curBook.bookUrl, to: hit.bookUrl }).catch(() => null);
-          setCurSourceId(src.id);
-          setCurBook({ ...hit, name: d.name || name, author: d.author || author });
-          setData({ ...d, lastReadChapter: 0 });
-          setInShelf(d.inShelf);
-          setErr('');
-          notify(`已自动切换书源：${src.name}`);
-          return true;
-        } catch {
-          /* 试下一个源 */
         }
-      }
-      return false;
+      };
+      await Promise.all(Array.from({ length: Math.min(4, enabled.length) }, worker));
+      return won;
     } finally {
       autoRef.current = false;
       setAutoTrying(false);

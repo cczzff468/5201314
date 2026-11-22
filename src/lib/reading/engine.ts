@@ -13,10 +13,16 @@
  * - {{$.field}} / {{field}} 模板（JSON 上下文取值拼接）
  * - || 多路回退（先到先得）、&& 顺序拼接
  * - ##正则##替换 后处理（##a|b = 删除匹配；不写替换=删除）
+ * - .N:M:S 区间下标（含两端，负数倒着数，start>end 反向取；td.0:5:3 = 第0/3个）
+ * - !N:M 排除下标（tr!0 = 全部 tr 去掉表头行）
+ * - text.关键字 内容选择器（text.下一页@href：找含「下一页」的最深层元素取链接）
+ * - %% 依次取数（多列表交替合并）
  * - <js>...</js> / @js: 段直接跳过（沙箱不执行 JS；多数纯 CSS 源不受影响）
  *
  * 网络层：
  * - 全部服务端代理抓取（防 CORS / 防盗链：按站点补 Referer + 移动 UA）
+ * - 与 Legado(okhttp) 同款宽松证书策略：书源站点证书普遍过期/自签，一律信任
+ *  （阅读App默认信任所有证书——这是「源在阅读App可用、在我们站无效」的主因之一）
  * - 自动编码探测（charset 参数 > Content-Type > meta 探测 > GB18030 兜底）
  * - GBK 搜索词百分号编码（iconv-lite），POST body 同样按站点编码
  * - 超时 12s、最多 3 次重定向、失败抛中文错误
@@ -26,6 +32,7 @@ import type { CheerioAPI } from 'cheerio';
 import type { AnyNode } from 'domhandler';
 import iconv from 'iconv-lite';
 import dns from 'node:dns';
+import { Agent as UndiciAgent } from 'undici';
 
 // 容器/沙箱网络常无 IPv6 出口，而不少笔趣阁站解析出 AAAA 记录——
 // fetch（undici）会优先尝试 IPv6 → ENETUNREACH/ETIMEDOUT。全局 IPv4 优先。
@@ -34,6 +41,10 @@ try {
 } catch {
   /* 老版本 Node 无此 API，忽略 */
 }
+
+/** 宽松证书 dispatcher：笔趣阁类小站证书普遍过期/自签（阅读App/okhttp 默认信任所有
+ *  证书，Node 严格校验会抛 certificate has expired → 源全部失效）。仅书源抓取使用。 */
+const INSECURE_AGENT = new UndiciAgent({ connect: { rejectUnauthorized: false } });
 
 /** 作者名清洗：去掉「作者：/著」等前后缀 */
 function cleanAuthor(a: string): string {
@@ -272,7 +283,7 @@ function sourceHeaders(source: LegadoSource, pageUrl?: string): Record<string, s
   return h;
 }
 
-function decodeBody(buf: ArrayBuffer, charset?: string, contentType?: string): string {
+function decodeBody(buf: ArrayBuffer, charset?: string, contentType?: string): { text: string; charset: string } {
   const bytes = Buffer.from(buf);
   let cs = (charset || '').trim().toLowerCase();
   if (!cs && contentType) {
@@ -290,9 +301,9 @@ function decodeBody(buf: ArrayBuffer, charset?: string, contentType?: string): s
   if (!['utf-8', 'gbk', 'gb2312', 'gb18030', 'big5', 'utf-16'].includes(cs)) cs = 'utf-8';
   if (cs === 'gb2312') cs = 'gb18030'; // gb2312 字库太小，生僻字会抛错
   try {
-    return iconv.decode(bytes, cs as 'utf-8');
+    return { text: iconv.decode(bytes, cs as 'utf-8'), charset: cs };
   } catch {
-    return Buffer.from(buf).toString('utf-8');
+    return { text: Buffer.from(buf).toString('utf-8'), charset: 'utf-8' };
   }
 }
 
@@ -307,6 +318,8 @@ export interface FetchResult {
   text: string;
   finalUrl: string;
   contentType: string;
+  /** 本次响应实际使用的解码字符集（GBK 自动重试判断用） */
+  charset: string;
 }
 
 /** JS 挑战页检测（飞卢等站反爬）：极短页面 + window.open(_self) + cookie 赋值
@@ -355,20 +368,25 @@ export async function proxyFetch(url: string, opts: FetchOpts = {}): Promise<Fet
           redirect: 'follow',
           signal: ctrl.signal,
           cache: 'no-store',
-        });
+          // 宽松证书（过期/自签一律放行，与阅读App一致）
+          dispatcher: INSECURE_AGENT,
+        } as RequestInit);
       let res = await doFetch();
       let contentType = res.headers.get('content-type') || '';
-      let text = decodeBody(await res.arrayBuffer(), opts.charset, contentType);
+      let d = decodeBody(await res.arrayBuffer(), opts.charset, contentType);
+      let text = d.text;
+      let usedCharset = d.charset;
       // JS 挑战页 → 提取 cookie 应答重试一次（浏览器执行 JS 的等效行为）
       if (isJsChallenge(text)) {
         const ck = challengeCookie(text);
         if (ck) {
           try {
             const res2 = await doFetch({ Cookie: ck });
-            const t2 = decodeBody(await res2.arrayBuffer(), opts.charset, res2.headers.get('content-type') || contentType);
-            if (t2.length > text.length) {
+            const d2 = decodeBody(await res2.arrayBuffer(), opts.charset, res2.headers.get('content-type') || contentType);
+            if (d2.text.length > text.length) {
               res = res2;
-              text = t2;
+              text = d2.text;
+              usedCharset = d2.charset;
               contentType = res2.headers.get('content-type') || contentType;
             }
           } catch {
@@ -380,7 +398,7 @@ export async function proxyFetch(url: string, opts: FetchOpts = {}): Promise<Fet
         // 403/412 等反爬页面也可能带可用内容，不直接抛错；仅 >=500 视为失败
         if (res.status >= 500) throw new Error(`站点返回 ${res.status}`);
       }
-      return { text, finalUrl: res.url || url, contentType };
+      return { text, finalUrl: res.url || url, contentType, charset: usedCharset };
     } finally {
       clearTimeout(timer);
     }
@@ -487,26 +505,131 @@ const FINAL_OPS = new Set([
 ]);
 
 interface Seg {
-  type: 'class' | 'id' | 'tag' | 'final' | 'index' | 'children' | 'css';
+  type: 'class' | 'id' | 'tag' | 'text' | 'final' | 'index' | 'children' | 'css';
   value: string;
   index?: number;
+  /** Legado 区间下标 [start:end:step]（含两端；负数倒着数；start>end 反向取） */
+  range?: [number | undefined, number | undefined, number | undefined];
+  /** Legado 排除下标（tr!0 = 去掉第0个；可多个冒号分隔） */
+  exclude?: number[];
+}
+
+type SegPos = Pick<Seg, 'index' | 'range' | 'exclude'>;
+
+/** Legado 位置段解析：`N`（单下标）| `N:M[:S]`（区间）| `!E1:E2`（排除）| 组合 `N!E`
+ *  返回 null = 不是位置语法（是名字的一部分，如 CSS 类名） */
+function parsePosition(p: string): SegPos | null {
+  if (!p) return {};
+  let rest = p;
+  let exclude: number[] | undefined;
+  const bang = rest.indexOf('!');
+  if (bang >= 0) {
+    exclude = rest
+      .slice(bang + 1)
+      .split(':')
+      .map((x) => parseInt(x, 10))
+      .filter((n) => Number.isFinite(n));
+    rest = rest.slice(0, bang);
+  }
+  const pos: SegPos = {};
+  if (exclude?.length) pos.exclude = exclude;
+  if (!rest) return pos;
+  if (/^-?\d+$/.test(rest)) {
+    pos.index = parseInt(rest, 10);
+    return pos;
+  }
+  // 区间 start:end:step（start 可省略=0；end 可省略=-1 即末尾）
+  const m = /^(-?\d+)?:(-?\d+)?(?::(-?\d+)?)?$/.exec(rest);
+  if (m) {
+    pos.range = [
+      m[1] !== undefined ? parseInt(m[1], 10) : 0,
+      m[2] !== undefined ? parseInt(m[2], 10) : -1,
+      m[3] !== undefined ? parseInt(m[3], 10) : 1,
+    ];
+    return pos;
+  }
+  return null; // 不是位置语法（可能只是名字的一部分）
+}
+
+/** Legado 区间取元素：[start:end:step] 含两端；负数倒着数；start>end 反向取（[-1:0] 列表反向） */
+function pickRange<T>(arr: T[], r: [number | undefined, number | undefined, number | undefined]): T[] {
+  const L = arr.length;
+  if (!L) return [];
+  const s0 = r[0] ?? 0;
+  const e0 = r[1] ?? -1;
+  const s = s0 < 0 ? Math.max(0, s0 + L) : s0;
+  const e = e0 < 0 ? e0 + L : Math.min(e0, L - 1);
+  const step = Math.abs(r[2] ?? 1) || 1;
+  const out: T[] = [];
+  if (s <= e) {
+    for (let i = s; i <= Math.min(e, L - 1); i += step) out.push(arr[i]);
+  } else {
+    for (let i = Math.min(s, L - 1); i >= Math.max(0, e); i -= step) out.push(arr[i]);
+  }
+  return out;
+}
+
+/** 元素集应用位置：先排除（!）→ 区间（:）→ 单下标（.N） */
+function applyPosition<T>(list: T[], seg: SegPos): T[] {
+  let out = list;
+  if (seg.exclude?.length) {
+    const L = list.length;
+    const skip = new Set<number>();
+    for (const e of seg.exclude) skip.add(e < 0 ? e + L : e);
+    out = out.filter((_, i) => !skip.has(i));
+  }
+  if (seg.range) {
+    out = pickRange(out, seg.range);
+  } else if (seg.index !== undefined) {
+    const i = seg.index;
+    out = i < 0 ? (i === -1 ? out.slice(-1) : out.slice(i)) : out.slice(i, i + 1);
+  }
+  return out;
 }
 
 function parseChain(part: string): Seg[] {
   const raw = part.split('@').filter(Boolean);
   const segs: Seg[] = [];
   for (const r of raw) {
+    // text.关键字：按文本内容选元素（text.下一页@href）
+    if (r.startsWith('text.')) {
+      const tm = /^text\.(.+?)(?:\.(-?\d+))?$/.exec(r);
+      if (tm && tm[1]) {
+        segs.push({ type: 'text', value: tm[1], index: tm[2] !== undefined ? parseInt(tm[2], 10) : undefined });
+        continue;
+      }
+    }
     const m = /^(class|id|tag|children)\.(.+)$/.exec(r);
     if (m) {
-      let name = m[2];
-      let index: number | undefined;
-      // 末尾 .N / .-1 视为下标
-      const im = /^(.*)\.(-?\d+)$/.exec(name);
-      if (im && !FINAL_OPS.has(name)) {
-        name = im[1];
-        index = parseInt(im[2], 10);
+      if (m[1] === 'children') {
+        // children 可带位置：children.0 / children.0:2
+        const pos = parsePosition(m[2]);
+        segs.push({ type: 'children', value: '', ...(pos || {}) });
+        continue;
       }
-      segs.push({ type: m[1] as Seg['type'], value: name, index });
+      // 名字与位置拆分：最后一个 . 段若能被位置语法解析 → 位置；否则并入名字（类名含点）
+      let name = m[2];
+      let pos: SegPos | null = null;
+      const lastDot = m[2].lastIndexOf('.');
+      if (lastDot >= 0) {
+        const p2 = parsePosition(m[2].slice(lastDot + 1));
+        if (p2) {
+          pos = p2;
+          name = m[2].slice(0, lastDot);
+        }
+      }
+      if (!pos) {
+        // 排除直接跟在名字后：tag.li!0 / class.x!0:2
+        const bang = m[2].indexOf('!');
+        if (bang >= 0) {
+          const p3 = parsePosition(m[2].slice(bang));
+          if (p3) {
+            pos = p3;
+            name = m[2].slice(0, bang);
+          }
+        }
+      }
+      segs.push({ type: m[1] as Seg['type'], value: name, ...(pos || {}) });
       continue;
     }
     if (FINAL_OPS.has(r)) {
@@ -517,25 +640,45 @@ function parseChain(part: string): Seg[] {
       segs.push({ type: 'index', value: r, index: parseInt(r, 10) });
       continue;
     }
-    // Legado 简写：.name / .name.N → class（如 ".l.0@href"）
-    const dotCls = /^\.([A-Za-z_][\w-]*)(?:\.(-?\d+))?$/.exec(r);
-    if (dotCls) {
-      segs.push({
-        type: 'class',
-        value: dotCls[1],
-        index: dotCls[2] !== undefined ? parseInt(dotCls[2], 10) : undefined,
-      });
-      continue;
+    // Legado 简写：.name / .name.N / .name.0:2 / .name!0
+    if (r.startsWith('.') && r.length > 1) {
+      const rest = r.slice(1);
+      let name = rest;
+      let pos: SegPos | null = null;
+      const lastDot = rest.lastIndexOf('.');
+      if (lastDot >= 0) {
+        const p2 = parsePosition(rest.slice(lastDot + 1));
+        if (p2) {
+          pos = p2;
+          name = rest.slice(0, lastDot);
+        }
+      }
+      if (!pos) {
+        const bang = rest.indexOf('!');
+        if (bang >= 0) {
+          const p3 = parsePosition(rest.slice(bang));
+          if (p3) {
+            pos = p3;
+            name = rest.slice(0, bang);
+          }
+        }
+      }
+      if (pos && name) {
+        segs.push({ type: 'class', value: name, ...pos });
+        continue;
+      }
+      // 位置不合法 → 整段按 CSS 处理（如 .panel-body > div）
     }
-    // Legado 简写：裸标签名带下标（如 "span.1@text"、"dd.0"）→ tag + index
-    const bareTag = /^([A-Za-z][\w-]*)(?:\.(-?\d+))?$/.exec(r);
-    if (bareTag) {
-      segs.push({
-        type: 'tag',
-        value: bareTag[1],
-        index: bareTag[2] !== undefined ? parseInt(bareTag[2], 10) : undefined,
-      });
-      continue;
+    // Legado 简写：裸标签 + 可选位置（td / td.0 / td.0:5:3 / td!0）；
+    // 位置不合法时整段按 CSS 处理（如 div.panel > a）
+    const bt = /^([A-Za-z][\w-]*?)([.!].+)?$/.exec(r);
+    if (bt && bt[1]) {
+      const posRaw = bt[2] ? (bt[2][0] === '.' ? bt[2].slice(1) : bt[2]) : '';
+      const pos = posRaw ? parsePosition(posRaw) : {};
+      if (pos) {
+        segs.push({ type: 'tag', value: bt[1], ...pos });
+        continue;
+      }
     }
     segs.push({ type: 'css', value: r });
   }
@@ -551,6 +694,8 @@ function applyChain(ctx: Extract<Ctx, { kind: 'html' }>, segs: Seg[], asList: bo
   let nodes: AnyNode[] = el ? [el] : [];
   let scoped = false;
   const out: string[] = [];
+  // 区间/排除语法显式选择了多个元素 → 终结操作把多个值拼接（td.0:5:3@text = 两个 td 的文本合并）
+  const multiSel = segs.some((s) => s.range !== undefined || (s.exclude?.length ?? 0) > 0);
   for (const seg of segs) {
     if (seg.type === 'final') {
       for (const n of nodes) {
@@ -602,7 +747,24 @@ function applyChain(ctx: Extract<Ctx, { kind: 'html' }>, segs: Seg[], asList: bo
       continue;
     }
     if (seg.type === 'children') {
-      nodes = nodes.flatMap((n) => $(n).children().toArray());
+      let kids = nodes.flatMap((n) => $(n).children().toArray());
+      if (seg.index !== undefined || seg.range || seg.exclude?.length) kids = applyPosition(kids, seg);
+      nodes = kids;
+      scoped = true;
+      continue;
+    }
+    if (seg.type === 'text') {
+      // 按文本内容选择：找包含文本的最深层元素（text.下一页@href：下一页链接）
+      const pool = nodes.length
+        ? nodes.flatMap((n) => $(n).find('*').addBack().toArray())
+        : $('*').toArray();
+      const hits = pool.filter((n) => $(n).text().includes(seg.value));
+      // 只留最深层命中（父容器包含文本但真正载体是子元素）
+      const deepest =
+        hits.length > 1 ? hits.filter((n) => !hits.some((h) => h !== n && isDescendant(n, h))) : hits;
+      nodes = applyPosition(deepest, seg);
+      scoped = true;
+      if (!nodes.length && !asList) return [];
       continue;
     }
     let sel: string;
@@ -616,17 +778,21 @@ function applyChain(ctx: Extract<Ctx, { kind: 'html' }>, segs: Seg[], asList: bo
     // 链式作用域：首段在 ctx.el 范围（或全局），后续段都在「上一步结果」内查找
     // （Legado 语义：class.a@tag.b@text 的 tag.b 是 class.a 命中元素里的 b，不是全页的 b）
     let found: AnyNode[];
-    if (scoped) {
-      found = nodes.flatMap((n) => $(n).find(sel).addBack(sel).toArray());
-    } else if (el) {
-      found = scopeSel($, el, sel).toArray();
-    } else {
-      found = $(sel).toArray();
+    try {
+      if (scoped) {
+        found = nodes.flatMap((n) => $(n).find(sel).addBack(sel).toArray());
+      } else if (el) {
+        found = scopeSel($, el, sel).toArray();
+      } else {
+        found = $(sel).toArray();
+      }
+    } catch {
+      // 非法 CSS 选择器（源里混入正则式规则等）：Legado 行为是取空不抛错，单条规则
+      // 失效不该把整个源的搜索结果拖死
+      found = [];
     }
     if (seg.type === 'id') found = found.slice(0, 1);
-    if (seg.index !== undefined) {
-      found = seg.index < 0 ? found.slice(seg.index) : found.slice(seg.index, seg.index + 1);
-    }
+    found = applyPosition(found, seg);
     nodes = found;
     scoped = true;
     if (!nodes.length && !asList) return [];
@@ -635,7 +801,18 @@ function applyChain(ctx: Extract<Ctx, { kind: 'html' }>, segs: Seg[], asList: bo
     // 链没写终结操作：默认取 text
     for (const n of nodes) out.push($(n).text().trim());
   }
+  if (multiSel && !asList && out.length > 1) return [out.filter(Boolean).join(' ')];
   return out;
+}
+
+/** domhandler 祖孙判断（text. 选择器最深层过滤用） */
+function isDescendant(anc: AnyNode, node: AnyNode): boolean {
+  let cur: AnyNode | null = node;
+  while (cur) {
+    if (cur === anc) return true;
+    cur = (cur as unknown as { parent?: AnyNode | null }).parent ?? null;
+  }
+  return false;
 }
 
 /** 拆掉规则里的 <js>...</js> 与 @js: 尾巴（不执行，取其前的静态部分） */
@@ -709,6 +886,23 @@ export function evalRule(ctx: Ctx, rule: string | undefined, joinAll = false): s
 function evalSingle(ctx: Ctx, rule: string, joinAll = false): string {
   if (!rule) return '';
   const r = rule.trim();
+  // %% 依次取数（多列表交替合并：列表1首项、列表2首项、列表1次项…）
+  if (r.includes('%%')) {
+    const lists = r.split('%%').map((x) => evalSingle(ctx, x, true));
+    const rows = lists.map((l) => l.split('\n'));
+    const out: string[] = [];
+    for (let i = 0; ; i++) {
+      let added = false;
+      for (const row of rows) {
+        if (row[i]) {
+          out.push(row[i]);
+          added = true;
+        }
+      }
+      if (!added) break;
+    }
+    return out.join('\n');
+  }
   // && 顺序拼接
   if (r.includes('&&') && !r.startsWith('@css:')) {
     return r
@@ -832,15 +1026,25 @@ export function evalList(ctx: Ctx, rule: string | undefined): Ctx[] {
       if (seg.type === 'final') break;
       const sel =
         seg.type === 'class' ? `.${seg.value}` : seg.type === 'id' ? `#${seg.value}` : seg.type === 'tag' ? seg.value : seg.value;
-      const found = scopeSel(ctx.$, scopeEl, sel).toArray();
-      if (seg.index !== undefined) {
-        const f2 = seg.index < 0 ? found.slice(seg.index) : found.slice(seg.index, seg.index + 1);
-        scopeEl = f2[0];
-      } else scopeEl = found[0];
+      let found: AnyNode[];
+      try {
+        found = scopeSel(ctx.$, scopeEl, sel).toArray();
+      } catch {
+        found = []; // 非法选择器：取空不抛错（与 Legado 一致）
+      }
+      found = applyPosition(found, seg);
+      scopeEl = found[0];
       if (!scopeEl) break;
     }
     if (listSel) {
-      const els = scopeSel(ctx.$, scopeEl, listSel).toArray();
+      let els: AnyNode[];
+      try {
+        els = scopeSel(ctx.$, scopeEl, listSel).toArray();
+      } catch {
+        els = []; // 非法选择器：取空不抛错（与 Legado 一致）
+      }
+      // 末段位置应用（tr!0 = 全部 tr 去掉表头行；tr.0:10:2 = 区间取）
+      els = applyPosition(els, last);
       if (els.length) return pick(els.map((e) => ({ kind: 'html', $: ctx.$, el: e, pageUrl: ctx.pageUrl }) as Ctx));
     } else if (scopeEl) {
       return pick([{ kind: 'html', $: ctx.$, el: scopeEl, pageUrl: ctx.pageUrl }]);
@@ -947,6 +1151,8 @@ export function parseUrlTpl(
   tpl: string,
   sourceUrl: string,
   vars: Record<string, string>,
+  /** GBK 自动重试：无 charset 声明的源强制按此编码发送关键词 */
+  forceCharset?: string,
 ): ParsedUrl {
   let urlPart = stripJs(tpl).trim();
   const opts: { method?: string; body?: string; charset?: string; headers?: Record<string, string> } = {};
@@ -985,11 +1191,12 @@ export function parseUrlTpl(
       }
     }
   }
-  // 变量替换（key 按 charset 百分号编码）
+  // 变量替换（key 按 charset 百分号编码；未声明编码的源可用 forceCharset 强制 GBK）
+  const keyCharset = opts.charset || forceCharset;
   urlPart = urlPart.replace(/\{\{(\w+)\}\}/g, (m, k: string) => {
     if (k === 'key' || k === 'page' || vars[k] !== undefined) {
       const v = vars[k] ?? '';
-      if (k === 'key') return gbkUrlEncode(v, opts.charset);
+      if (k === 'key') return gbkUrlEncode(v, keyCharset);
       return encodeURIComponent(v);
     }
     return m;
@@ -1004,11 +1211,11 @@ export function parseUrlTpl(
   if (opts.body) {
     opts.body = opts.body.replace(/\{\{(\w+)\}\}/g, (m, k: string) => {
       const v = vars[k] ?? '';
-      if (k === 'key') return gbkUrlEncode(v, opts.charset);
+      if (k === 'key') return gbkUrlEncode(v, keyCharset);
       return encodeURIComponent(v);
     });
     opts.body = opts.body.replace(/\{\{([^{}]+)\}\}/g, (m, expr: string) => {
-      const v = evalUrlExpr(expr, sourceUrl, vars, opts.charset);
+      const v = evalUrlExpr(expr, sourceUrl, vars, keyCharset);
       return v == null ? m : v;
     });
   }
@@ -1016,12 +1223,15 @@ export function parseUrlTpl(
     url: resolveUrl(urlPart, sourceUrl),
     method: opts.method || (opts.body ? 'POST' : 'GET'),
     body: opts.body,
-    charset: opts.charset,
+    charset: opts.charset || forceCharset,
     headers: opts.headers,
   };
 }
 
-async function fetchCtx(source: LegadoSource, p: ParsedUrl): Promise<{ ctx: Ctx; finalUrl: string }> {
+async function fetchCtx(
+  source: LegadoSource,
+  p: ParsedUrl,
+): Promise<{ ctx: Ctx; finalUrl: string; charset: string }> {
   // 规则里带出的 URL 可能自带尾部 ,{"method":"POST",...} 选项（如纵横 bookUrl 直指 POST API）
   let { url, method, body, charset } = p;
   const headers = { ...sourceHeaders(source, url), ...(p.headers || {}) };
@@ -1069,7 +1279,7 @@ async function fetchCtx(source: LegadoSource, p: ParsedUrl): Promise<{ ctx: Ctx;
   } else {
     ctx = newHtmlCtx(res.text, res.finalUrl);
   }
-  return { ctx, finalUrl: res.finalUrl };
+  return { ctx, finalUrl: res.finalUrl, charset: res.charset };
 }
 
 // ---------------------------------------------------------------------------
@@ -1078,10 +1288,32 @@ async function fetchCtx(source: LegadoSource, p: ParsedUrl): Promise<{ ctx: Ctx;
 
 export async function searchBooks(source: LegadoSource, key: string): Promise<SearchBook[]> {
   if (!source.searchUrl) return [];
-  const p = parseUrlTpl(source.searchUrl, source.bookSourceUrl, { key, page: '1' });
-  const { ctx } = await fetchCtx(source, p);
   const rs = source.ruleSearch || {};
-  const list = evalList(ctx, rs.bookList);
+  const p = parseUrlTpl(source.searchUrl, source.bookSourceUrl, { key, page: '1' });
+  let r = await fetchCtx(source, p);
+  let list = evalList(r.ctx, rs.bookList);
+  // —— GBK 自动重试：站点实际是 GBK 编码但源没声明 charset → 搜索词按 UTF-8 发出
+  //    去搜不到（空结果）。阅读App有站点字符集缓存所以天然正确；这里在「0 结果且
+  //    响应为 GBK 系」时换 GBK 编码重搜一次（77读书网/中华典藏等老站）。 ——
+  if (
+    !list.length &&
+    !p.charset &&
+    /gb/i.test(r.charset) &&
+    /[\u4e00-\u9fff]/.test(key)
+  ) {
+    try {
+      const p2 = parseUrlTpl(source.searchUrl, source.bookSourceUrl, { key, page: '1' }, 'gbk');
+      const r2 = await fetchCtx(source, p2);
+      const list2 = evalList(r2.ctx, rs.bookList);
+      if (list2.length) {
+        r = r2;
+        list = list2;
+      }
+    } catch {
+      /* GBK 重试失败保留原空结果 */
+    }
+  }
+  const ctx = r.ctx;
   const out: SearchBook[] = [];
   const cleanName = (n: string) =>
     n
