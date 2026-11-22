@@ -159,6 +159,7 @@ export default function ReadingApp() {
             category={page.category}
             onBack={back}
             onOpenBook={(name) => push({ kind: 'search', keyword: name, autoRun: true })}
+            onSearch={() => push({ kind: 'search' })}
           />
         )}
         {page.kind === 'rank' && <RankingPage onBack={back} onOpenBook={(name) => push({ kind: 'search', keyword: name, autoRun: true })} />}
@@ -304,19 +305,23 @@ function TabMeIcon() {
   return <CircleUserRound className="h-[22px] w-[22px]" strokeWidth={2} />;
 }
 
-/** 子页通用顶栏（透明悬浮在 App 渐变背景上，与页面颜色统一；iOS 规范：标题绝对居中、返回键独立居左、右槽居右） */
+/** 子页通用顶栏（透明悬浮在 App 渐变背景上，与页面颜色统一；默认 iOS 规范：标题绝对居中、返回键独立居左、右槽居右；
+ *  titleAlign="left" 时标题紧跟返回键（左上角，用户指定的榜单/管理页风格） */
 export function SubNavBar({
   title,
   onBack,
   right,
   theme,
   transparent,
+  titleAlign = 'center',
 }: {
   title: string;
   onBack: () => void;
   right?: React.ReactNode;
   theme: ReturnType<typeof themeOf>;
   transparent?: boolean;
+  /** 标题对齐：center = iOS 居中（默认）；left = 返回键旁左对齐（左上角） */
+  titleAlign?: 'center' | 'left';
 }) {
   return (
     <div
@@ -336,13 +341,20 @@ export function SubNavBar({
         >
           <ChevronLeft className="h-6 w-6" strokeWidth={2.2} />
         </button>
-        {/* 标题绝对居中（不受左右按钮影响，iOS 导航栏规范） */}
-        <span
-          className="pointer-events-none absolute inset-x-14 text-center text-[17px] font-semibold"
-          style={{ color: theme.textMain }}
-        >
-          <span className="inline-block max-w-full truncate align-middle">{title}</span>
-        </span>
+        {titleAlign === 'left' ? (
+          /* 标题紧跟返回键（左上角） */
+          <span className="min-w-0 shrink truncate pl-0.5 text-[20px] font-bold leading-none" style={{ color: theme.textMain }}>
+            {title}
+          </span>
+        ) : (
+          /* 标题绝对居中（不受左右按钮影响，iOS 导航栏规范） */
+          <span
+            className="pointer-events-none absolute inset-x-14 text-center text-[17px] font-semibold"
+            style={{ color: theme.textMain }}
+          >
+            <span className="inline-block max-w-full truncate align-middle">{title}</span>
+          </span>
+        )}
         <div className="ml-auto flex shrink-0 items-center">{right}</div>
       </div>
     </div>

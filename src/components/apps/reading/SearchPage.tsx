@@ -1,13 +1,15 @@
 'use client';
 
 /**
- * 聚合搜索页（用户设计图同款）：
+ * 聚合搜索页（多书源共同搜索）：
  * - 顶栏一体化：返回 + 搜索框 + 蓝色「搜索」按钮 + 筛选（搜索范围）图标（无「聚合搜索」标题）
+ * - 点击搜索历史 / 热门搜索 → 关键词同步写入搜索框再发起搜索（搜索框始终显示当前书名）
  * - 结果行：封面（72×96 圆角描边）｜书名 + 作者 + 右侧「N 个源」浅蓝徽章
- *   ｜分类小徽章 + 最新章节信息｜简介两行截断
- * - 无封面 → 浅灰圆角块 + 白字「暂无/封面」占位（设计图同款，不再用书脊风）
+ *   ｜分类小徽章 + 最新章节信息｜简介两行截断（纯数字时间戳标签已过滤）
+ * - 多源共同搜索：所有启用源 8 路并发（Promise.allSettled 语义：单源失败静默跳过），
+ *   哪个源先返回就先渲染（流式渐进）；顶部状态行「正在搜索中 (已找到 N 个结果)…」
+ * - 防卡死：结果分组分批渲染（首屏 20 组，滚动到底追加），数百源返回海量数据不卡 UI
  * - 空态：搜索历史（localStorage，最多 12 条）+ 热门搜索（精选书单）
- * - 实现：客户端逐源调 POST /api/reading/search（并发 6，可用源优先），AbortController 暂停
  * - 筛选：全部启用源 / 仅实测可用源（可用源优先出结果，几百源不用等太久）
  */
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
@@ -100,15 +102,22 @@ function NoCoverBlock({ radius = 'rounded-xl' }: { radius?: string }) {
   );
 }
 
-/** 分类徽章（kind 常为「都市:言情」冒号分隔，取前 2 段） */
+/** 分类徽章（kind 常为「都市:言情」冒号分隔，取前 2 段；时间戳/日期段过滤，如 1597757169、19-04-02） */
 function kindTags(kind?: string): string[] {
   if (!kind) return [];
   return kind
-    .split(/[:：/、|]/)
+    .split(/[:：/、|,，]/)
     .map((x) => x.trim())
-    .filter(Boolean)
+    .filter((x) => x && !/^\d+$/.test(x) && !/^\d{1,4}[-/.]\d{1,2}[-/.]\d{1,2}$/.test(x))
     .slice(0, 2);
 }
+
+// ---------------------------------------------------------------------------
+// 结果分批渲染（防卡死）：数百源并发返回可能带来几百个分组，一次性渲染会卡 UI；
+// 首屏只渲染前 20 组，滚动到底部自动追加下一批。
+// ---------------------------------------------------------------------------
+const INITIAL_BATCH = 20;
+const BATCH_STEP = 20;
 
 export function SearchPage({
   page,
@@ -216,10 +225,14 @@ export function SearchPage({
     saveHistory([]);
   };
 
+  /** 分批渲染状态（提前声明：runSearch 重置用）：首屏 20 组，滚动到底追加 */
+  const [shownCount, setShownCount] = useState(INITIAL_BATCH);
+
   const runSearch = useCallback(
     async (keyword: string) => {
       const k = keyword.trim();
       if (!k || enabledSources.length === 0) return;
+      setKw(k); // 关键词同步写入搜索框（点历史/热门/书名卡片时也能看到当前书名）
       recordHistory(k);
       abortRef.current?.abort();
       const ctrl = new AbortController();
@@ -229,6 +242,7 @@ export function SearchPage({
       setFound(0);
       setSearched(0);
       setGroups(new Map());
+      setShownCount(INITIAL_BATCH);
       const queue = queueRef.current;
       const worker = async () => {
         while (queue.length && !ctrl.signal.aborted) {
@@ -250,12 +264,12 @@ export function SearchPage({
               setFound((n) => n + books.length);
             }
           } catch {
-            /* 单源失败/中止静默 */
+            /* 单源失败/中止静默（Promise.allSettled 语义：不崩溃不影响其他源） */
           }
           setSearched((n) => n + 1);
         }
       };
-      void Promise.all(Array.from({ length: Math.min(6, enabledSources.length) }, worker)).then(() => {
+      void Promise.all(Array.from({ length: Math.min(8, enabledSources.length) }, worker)).then(() => {
         if (!ctrl.signal.aborted) setRunning(false);
       });
     },
@@ -293,6 +307,17 @@ export function SearchPage({
     related.sort((a, b) => b.books.length - a.books.length || a.name.localeCompare(b.name, 'zh'));
     return [...exact, ...related];
   }, [groups, kw]);
+
+  /** 分批渲染：当前可见分组数（滚动到底追加 BATCH_STEP；结果更新时自动扩容保证新结果可见） */
+  const visibleList = useMemo(() => resultList.slice(0, shownCount), [resultList, shownCount]);
+  const hasMore = resultList.length > shownCount;
+  const onListScroll = (e: React.UIEvent<HTMLDivElement>) => {
+    const el = e.currentTarget;
+    scrollTopRef.current = el.scrollTop;
+    if (hasMore && el.scrollTop + el.clientHeight >= el.scrollHeight - 300) {
+      setShownCount((n) => n + BATCH_STEP);
+    }
+  };
 
   /* 搜索结果封面：多数书源搜索不返回封面——接入精选封面服务端缓存（按书名跨源找封面） */
   const coverNames = useMemo(() => resultList.slice(0, 30).map((g) => g.name), [resultList]);
@@ -446,12 +471,28 @@ export function SearchPage({
         </div>
       </div>
 
+      {/* 顶部搜索状态行（多源共同搜索进度：哪个源先返回就先展示；不遮挡结果） */}
+      {(running || (searched > 0 && found > 0)) && (
+        <div className="z-10 flex shrink-0 items-center gap-2 px-4 pb-2 pt-0.5">
+          {running ? (
+            <>
+              <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" style={{ color: theme.accent }} />
+              <span className="min-w-0 truncate text-[12px] tabular-nums" style={{ color: theme.textSub }}>
+                正在搜索中 (已找到 {found} 个结果) · {searched}/{enabledSources.length} 源
+              </span>
+            </>
+          ) : (
+            <span className="min-w-0 truncate text-[12px] tabular-nums" style={{ color: theme.textSub }}>
+              搜索完成 · 共 {found} 个结果 · {resultList.length} 本书（{resultList.length > 0 ? `平均 ${Math.max(1, Math.round(found / resultList.length))} 个源` : '0 源'}）
+            </span>
+          )}
+        </div>
+      )}
+
       {/* 结果列表 / 空态（搜索历史 + 热门搜索）；底部状态胶囊显示时预留空间不遮挡 */}
       <div
         ref={scrollRef}
-        onScroll={(e) => {
-          scrollTopRef.current = e.currentTarget.scrollTop;
-        }}
+        onScroll={onListScroll}
         className={`min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 ${running || searched > 0 ? 'pb-24' : 'pb-10'}`}
       >
         {/* 搜索历史 */}
@@ -547,7 +588,30 @@ export function SearchPage({
           </div>
         )}
 
-        {resultList.map((g) => renderGroup(g))}
+        {visibleList.map((g) => renderGroup(g))}
+
+        {/* 分批渲染：滚动到底自动追加下一批（防海量数据卡死）；搜索中实时提示已展示数量 */}
+        {hasResults && hasMore && (
+          <button
+            type="button"
+            onClick={() => setShownCount((n) => n + BATCH_STEP)}
+            className="mx-auto mb-2 mt-1 flex h-9 items-center gap-1.5 rounded-full px-5 text-[12px] font-medium backdrop-blur-xl active:scale-95"
+            style={{ ...glass, color: theme.accent }}
+          >
+            {running ? (
+              <>
+                <Loader2 className="h-3.5 w-3.5 animate-spin" /> 已展示 {visibleList.length}/{resultList.length} 本，正在接收更多…
+              </>
+            ) : (
+              <>展开更多 · 还有 {resultList.length - visibleList.length} 本</>
+            )}
+          </button>
+        )}
+        {hasResults && !hasMore && resultList.length > INITIAL_BATCH && (
+          <p className="pb-1 pt-2 text-center text-[11px]" style={{ color: theme.textSub }}>
+            已展示全部 {resultList.length} 本书
+          </p>
+        )}
       </div>
 
       {/* 搜索范围筛选抽屉（底部玻璃） */}

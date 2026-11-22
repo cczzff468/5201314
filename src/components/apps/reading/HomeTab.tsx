@@ -315,11 +315,38 @@ export function HomeTab({
       </div>
 
       <div className="px-4">
-        {/* 搜索胶囊 */}
+        {/* 分类胶囊 + 排行榜入口（顶部第一行，搜索框上方；点击进入分类浏览页；iOS 式单行横滑，无滚动条） */}
+        <div className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-1 no-scrollbar">
+          <button
+            type="button"
+            onClick={onOpenRank}
+            className="flex h-8 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full px-4 text-[13px] font-medium backdrop-blur-xl active:scale-95"
+            style={{ ...glass, color: '#E0A13A', boxShadow: `inset 0 0 0 1px rgba(224,161,58,0.35)` }}
+          >
+            <Trophy className="h-3.5 w-3.5" strokeWidth={2.4} /> 排行榜
+          </button>
+          {CATEGORIES.map((c) => (
+            <button
+              key={c}
+              type="button"
+              onClick={() => onOpenCategory(c)}
+              className="h-8 shrink-0 whitespace-nowrap rounded-full px-4 text-[13px] font-medium backdrop-blur-xl active:scale-95"
+              style={
+                c === '热门'
+                  ? { background: `linear-gradient(135deg, ${theme.gradFrom}, ${theme.gradTo})`, boxShadow: `0 4px 14px ${theme.accent}44`, color: '#fff' }
+                  : { ...glass, color: theme.textMain }
+              }
+            >
+              {c}
+            </button>
+          ))}
+        </div>
+
+        {/* 搜索胶囊（分类行下方） */}
         <button
           type="button"
           onClick={() => onSearch()}
-          className="flex h-11 w-full items-center gap-2 rounded-full px-4 text-left backdrop-blur-xl transition-transform active:scale-[0.98]"
+          className="mt-3 flex h-11 w-full items-center gap-2 rounded-full px-4 text-left backdrop-blur-xl transition-transform active:scale-[0.98]"
           style={glass}
         >
           <Search className="h-[18px] w-[18px]" strokeWidth={2.2} style={{ color: theme.textSub }} />
@@ -353,33 +380,6 @@ export function HomeTab({
             <ChevronRight className="h-5 w-5 shrink-0" style={{ color: theme.textSub }} />
           </button>
         )}
-
-        {/* 分类胶囊 + 排行榜入口（点击进入分类浏览页；iOS 式单行横滑，无滚动条） */}
-        <div className="-mx-4 mt-4 flex gap-2 overflow-x-auto px-4 pb-1 no-scrollbar">
-          <button
-            type="button"
-            onClick={onOpenRank}
-            className="flex h-8 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full px-4 text-[13px] font-medium backdrop-blur-xl active:scale-95"
-            style={{ ...glass, color: '#E0A13A', boxShadow: `inset 0 0 0 1px rgba(224,161,58,0.35)` }}
-          >
-            <Trophy className="h-3.5 w-3.5" strokeWidth={2.4} /> 排行榜
-          </button>
-          {CATEGORIES.map((c) => (
-            <button
-              key={c}
-              type="button"
-              onClick={() => onOpenCategory(c)}
-              className="h-8 shrink-0 whitespace-nowrap rounded-full px-4 text-[13px] font-medium backdrop-blur-xl active:scale-95"
-              style={
-                c === '热门'
-                  ? { background: `linear-gradient(135deg, ${theme.gradFrom}, ${theme.gradTo})`, boxShadow: `0 4px 14px ${theme.accent}44`, color: '#fff' }
-                  : { ...glass, color: theme.textMain }
-              }
-            >
-              {c}
-            </button>
-          ))}
-        </div>
 
         {/* 基于书架的相似书推荐 */}
         {recForYou.length > 0 && (

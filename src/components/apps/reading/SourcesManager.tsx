@@ -337,6 +337,7 @@ export function SourcesManager({ onBack }: { onBack: () => void }) {
     <div ref={rootRef} className="relative flex h-full flex-col overflow-hidden" style={{ background: pageBg }}>
       <SubNavBar
         title={multiMode ? `已选 ${selected.size} 项` : '书源管理'}
+        titleAlign="left"
         onBack={() => {
           if (multiMode) {
             setMultiMode(false);

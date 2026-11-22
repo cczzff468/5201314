@@ -309,31 +309,73 @@ export interface FetchResult {
   contentType: string;
 }
 
+/** JS 挑战页检测（飞卢等站反爬）：极短页面 + window.open(_self) + cookie 赋值
+ *  （cookie 赋值可能是混淆形式：window[_$x[0]].cookie="..."，document 藏在变量里） */
+function isJsChallenge(t: string): boolean {
+  return (
+    t.length < 1400 &&
+    /window\.open\([^)]*,\s*['"]_self['"]\)/.test(t) &&
+    /\.cookie\s*=\s*["'][^"']+["']/.test(t)
+  );
+}
+/** 从挑战页提取 cookie 值（「C3VK=xxx; path=/; max-age=300」→「C3VK=xxx」，路径/时效属性剔除） */
+function challengeCookie(t: string): string {
+  const raw = t.match(/\.cookie\s*=\s*["']([^"']+)["']/)?.[1] || '';
+  return raw
+    .split(';')
+    .map((s) => s.trim())
+    .find((s) => s && !/^(path|max-age|expires|domain|secure|samesite|httponly)/i.test(s)) || '';
+}
+
 /** 服务端代理抓取（阅读 App 全部出站都走这里：解决 CORS + 防盗链 Referer）
- *  瞬时网络错误（ETIMEDOUT/ECONNRESET/DNS 抖动等）自动重试 1 次——
- *  笔趣阁类小站出口不稳定，单次失败率不低，重试能把可用源明显拉起来 */
+ *  - 瞬时网络错误（ETIMEDOUT/ECONNRESET/DNS 抖动等）自动重试 1 次——
+ *    笔趣阁类小站出口不稳定，单次失败率不低，重试能把可用源明显拉起来
+ *  - JS 挑战页（window.open(_self)+document.cookie）：自动提取挑战 cookie 应答重试
+ *    （飞卢等站的标准反爬，浏览器执行 JS 后放行；服务端模拟该应答）
+ *  - 反爬重定向循环（检测到浏览器 UA/Referer 就无限 302）：剥掉全部
+ *    请求头裸请求重试一次（服务器对非浏览器客户端放行，Legado 的 okhttp UA 同理） */
 export async function proxyFetch(url: string, opts: FetchOpts = {}): Promise<FetchResult> {
-  const attempt = async (): Promise<FetchResult> => {
+  const attempt = async (bare = false): Promise<FetchResult> => {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), opts.timeoutMs ?? 12_000);
     try {
       // 头值消毒：书源自定义 header 可能带非 ASCII（emoji 锚点等）——HTTP 头只允许可见 ASCII
       const headers: Record<string, string> = {};
-      for (const [k, v] of Object.entries(opts.headers || {})) {
-        const val = String(v).split('#')[0].replace(/[^\x20-\x7E]/g, '');
-        if (val) headers[k] = val;
+      if (!bare) {
+        for (const [k, v] of Object.entries(opts.headers || {})) {
+          const val = String(v).split('#')[0].replace(/[^\x20-\x7E]/g, '');
+          if (val) headers[k] = val;
+        }
       }
-      const res = await fetch(url, {
-        method: opts.method || 'GET',
-        headers,
-        body: opts.body,
-        redirect: 'follow',
-        signal: ctrl.signal,
-        cache: 'no-store',
-      });
-      const contentType = res.headers.get('content-type') || '';
-      // html/json 以外的类型（图片等）原样二进制读（封面探测用不到，防卡死）
-      const text = decodeBody(await res.arrayBuffer(), opts.charset, contentType);
+      const doFetch = (extra?: Record<string, string>) =>
+        fetch(url, {
+          method: opts.method || 'GET',
+          headers: { ...headers, ...(extra || {}) },
+          body: opts.body,
+          redirect: 'follow',
+          signal: ctrl.signal,
+          cache: 'no-store',
+        });
+      let res = await doFetch();
+      let contentType = res.headers.get('content-type') || '';
+      let text = decodeBody(await res.arrayBuffer(), opts.charset, contentType);
+      // JS 挑战页 → 提取 cookie 应答重试一次（浏览器执行 JS 的等效行为）
+      if (isJsChallenge(text)) {
+        const ck = challengeCookie(text);
+        if (ck) {
+          try {
+            const res2 = await doFetch({ Cookie: ck });
+            const t2 = decodeBody(await res2.arrayBuffer(), opts.charset, res2.headers.get('content-type') || contentType);
+            if (t2.length > text.length) {
+              res = res2;
+              text = t2;
+              contentType = res2.headers.get('content-type') || contentType;
+            }
+          } catch {
+            /* 应答失败保留原响应 */
+          }
+        }
+      }
       if (!res.ok && res.status >= 400) {
         // 403/412 等反爬页面也可能带可用内容，不直接抛错；仅 >=500 视为失败
         if (res.status >= 500) throw new Error(`站点返回 ${res.status}`);
@@ -346,6 +388,17 @@ export async function proxyFetch(url: string, opts: FetchOpts = {}): Promise<Fet
   try {
     return await attempt();
   } catch (e) {
+    // 反爬重定向循环 → 裸头重试（无 UA/Referer/Accept，服务器放行非浏览器客户端）
+    const redirectLoop =
+      e instanceof Error &&
+      /redirect count exceeded/i.test(`${e.message} ${(e as Error & { cause?: { message?: string } }).cause?.message || ''}`);
+    if (redirectLoop) {
+      try {
+        return await attempt(true);
+      } catch {
+        /* 裸重试也失败 → 走常规重试/抛错 */
+      }
+    }
     const transient =
       e instanceof Error &&
       (e.message === 'fetch failed' ||
@@ -555,7 +608,8 @@ function applyChain(ctx: Extract<Ctx, { kind: 'html' }>, segs: Seg[], asList: bo
     let sel: string;
     if (seg.type === 'class') {
       // class 名可能含点号（.s2.3 之类罕见）：先按整名查，查不到再按最后一段当下标
-      sel = `.${seg.value}`;
+      // 类名含空格（Legado "class.c wrap" = 同时匹配 c 和 wrap 两个类）→ CSS AND 选择器 .c.wrap
+      sel = /\s/.test(seg.value) ? '.' + seg.value.trim().split(/\s+/).join('.') : `.${seg.value}`;
     } else if (seg.type === 'id') sel = `#${seg.value}`;
     else if (seg.type === 'tag') sel = seg.value;
     else sel = seg.value; // css
@@ -896,7 +950,7 @@ export function parseUrlTpl(
 ): ParsedUrl {
   let urlPart = stripJs(tpl).trim();
   const opts: { method?: string; body?: string; charset?: string; headers?: Record<string, string> } = {};
-  // 尾部 ,{...} 选项
+  // 尾部 ,{...} 选项（Legado 标准带逗号格式）
   const braceAt = urlPart.lastIndexOf(',{');
   if (braceAt >= 0) {
     try {
@@ -910,6 +964,25 @@ export function parseUrlTpl(
       }
     } catch {
       /* 选项解析失败当作普通 URL */
+    }
+  }
+  // 尾部 {...} 选项（无逗号格式：`url{"charset":"UTF-8"}`，Legado 同样支持；
+  // 天下书盟等源用这种写法。只匹配「{ 后是白字符+引号」的完整 JSON 块，避免误伤 URL 参数）
+  if (!opts.method && !opts.body && !opts.charset && !opts.headers) {
+    const m = /\{\s*[\r\n]*\s*"[\s\S]*\}\s*$/.exec(urlPart);
+    if (m && m.index > 0) {
+      try {
+        const o = JSON.parse(m[0]) as Record<string, unknown>;
+        if (o && typeof o === 'object' && (o.method || o.body || o.charset || o.headers)) {
+          if (typeof o.method === 'string') opts.method = o.method.toUpperCase();
+          if (typeof o.body === 'string') opts.body = o.body;
+          if (typeof o.charset === 'string') opts.charset = o.charset;
+          if (o.headers && typeof o.headers === 'object') opts.headers = o.headers as Record<string, string>;
+          urlPart = urlPart.slice(0, m.index).trim();
+        }
+      } catch {
+        /* 非 JSON 选项，当作普通 URL */
+      }
     }
   }
   // 变量替换（key 按 charset 百分号编码）
@@ -1021,6 +1094,16 @@ export async function searchBooks(source: LegadoSource, key: string): Promise<Se
     let bookUrl = evalRule(item, rs.bookUrl);
     if (!name || !bookUrl) continue;
     bookUrl = resolveUrl(bookUrl, item.pageUrl || p.url);
+    // kind 清洗：时间戳/日期段（如「1597757169,连载」「19-04-02,连载」）不进标签
+    const rawKind = evalRule(item, rs.kind);
+    const kind =
+      rawKind && !/^\d+$/.test(rawKind.trim())
+        ? rawKind
+            .split(/[,，、;；\s]+/)
+            .filter((x) => x && !/^\d{4,}$/.test(x) && !/^\d{1,4}[-/.]\d{1,2}[-/.]\d{1,2}$/.test(x))
+            .slice(0, 4)
+            .join(',') || undefined
+        : undefined;
     // name 里可能带作者（"书名：作者"）常见于笔趣阁搜索页
     let author = cleanAuthor(evalRule(item, rs.author));
     let intro = evalRule(item, rs.intro);
@@ -1033,7 +1116,7 @@ export async function searchBooks(source: LegadoSource, key: string): Promise<Se
           bookUrl,
           coverUrl: resolveUrl(evalRule(item, rs.coverUrl), item.pageUrl || p.url) || undefined,
           intro: intro || undefined,
-          kind: evalRule(item, rs.kind) || undefined,
+          kind,
           lastChapter: evalRule(item, rs.lastChapter) || undefined,
           sourceName: source.bookSourceName,
           sourceUrl: source.bookSourceUrl,
@@ -1047,7 +1130,7 @@ export async function searchBooks(source: LegadoSource, key: string): Promise<Se
       bookUrl,
       coverUrl: resolveUrl(evalRule(item, rs.coverUrl), item.pageUrl || p.url) || undefined,
       intro: intro || undefined,
-      kind: evalRule(item, rs.kind) || undefined,
+      kind,
       lastChapter: evalRule(item, rs.lastChapter) || undefined,
       sourceName: source.bookSourceName,
       sourceUrl: source.bookSourceUrl,
