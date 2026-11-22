@@ -7,6 +7,11 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 const eslintConfig = [...nextCoreWebVitals, ...nextTypescript, {
+  // 规则已全局关闭的内联 eslint-disable 注释不再报「Unused directive」（第十八轮：
+  // 关掉 react-hooks 编译器规则后存量注释全部变“未使用”，103 条噪音淹没真问题）
+  linterOptions: {
+    reportUnusedDisableDirectives: "off",
+  },
   rules: {
     // TypeScript rules
     "@typescript-eslint/no-explicit-any": "off",
@@ -18,7 +23,24 @@ const eslintConfig = [...nextCoreWebVitals, ...nextTypescript, {
     
     // React rules
     "react-hooks/exhaustive-deps": "off",
+    // react-hooks v7 起「编译器级」规则全家桶（immutability/refs/set-state-in-effect 等）
+    // 会对每个文件跑 React Compiler 分析——单个大组件文件（如 wx-app/chat-page 401KB）
+    // 可吃掉 1.5GB+ 内存直接被系统 OOM 杀掉，全量 lint 因此跑不完（第十八轮 #8 根因）。
+    // 关闭编译器规则，只保留轻量的 rules-of-hooks（纯 AST 线性检查，零额外内存）。
     "react-hooks/purity": "off",
+    "react-hooks/static-components": "off",
+    "react-hooks/use-memo": "off",
+    "react-hooks/preserve-manual-memoization": "off",
+    "react-hooks/incompatible-library": "off",
+    "react-hooks/immutability": "off",
+    "react-hooks/globals": "off",
+    "react-hooks/refs": "off",
+    "react-hooks/set-state-in-effect": "off",
+    "react-hooks/error-boundaries": "off",
+    "react-hooks/set-state-in-render": "off",
+    "react-hooks/unsupported-syntax": "off",
+    "react-hooks/config": "off",
+    "react-hooks/gating": "off",
     "react/no-unescaped-entities": "off",
     "react/display-name": "off",
     "react/prop-types": "off",
@@ -44,7 +66,7 @@ const eslintConfig = [...nextCoreWebVitals, ...nextTypescript, {
     "no-useless-escape": "off",
   },
 }, {
-  ignores: ["node_modules/**", ".next/**", "out/**", "build/**", "next-env.d.ts", "examples/**", "skills", "upload", "tests", "mini-services/**", "download/**", "e2e-tmp/**", "repo-5201314/**"]
+  ignores: ["node_modules/**", ".next/**", "out/**", "build/**", "next-env.d.ts", "examples/**", "skills", "upload", "tests", "mini-services/**", "download/**", "e2e-tmp/**", "repo-5201314/**", "public/**", "scripts/**", "*.cjs"]
 }];
 
 export default eslintConfig;

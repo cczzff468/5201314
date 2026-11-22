@@ -25,7 +25,7 @@ import { fileToAvatarDataUrl } from '@/lib/ios/avatar-upload';
 import { noteAvatarChanged } from '@/lib/ios/avatar-ai';
 import { avatarFor, displayNameOf, isFriendIn, socialNameOf } from '@/lib/contacts';
 import type { ContactRecord } from '@/lib/contacts';
-import { SOURCE_SEARCH_WX, appendReqThread, genCharThreadReply, processAltFriendReq, shouldUseAltDecisionFlow, type FriendReqExtras, type FriendReqThreadMsg } from '@/lib/ios/friend-state';
+import { SOURCE_SEARCH_WX, appendReqThread, clearReqUnread, genCharThreadReply, processAltFriendReq, shouldUseAltDecisionFlow, type FriendReqExtras, type FriendReqThreadMsg } from '@/lib/ios/friend-state';
 // v73 AI 聊天悬浮小窗：顶栏「小窗模式」按钮入口（打开全局小窗并退出全屏聊天）
 import { ChatToggle, type ChatSearchItem } from '../chat-settings';
 import { formatBranchDate } from '@/lib/ios/branch';
@@ -125,7 +125,15 @@ export function NewFriendsPage({
                       onClick={() => onOpenReq(r)}
                       className="flex w-full items-center gap-3 border-b border-black/[0.05] px-4 py-2.5 text-left last:border-b-0 active:bg-black/[0.03] dark:border-white/[0.08] dark:active:bg-white/[0.05]"
                     >
-                      <WxAvatar src={r.avatar} alt={r.name} size={42} />
+                      <span className="relative shrink-0">
+                        <WxAvatar src={r.avatar} alt={r.name} size={42} />
+                        {r.unread && (
+                          <span
+                            className="absolute -right-0.5 -top-0.5 h-[10px] w-[10px] rounded-full bg-[#FA5151] ring-2 ring-white dark:ring-[#1A1A1A]"
+                            aria-label="有新消息"
+                          />
+                        )}
+                      </span>
                       <div className="min-w-0 flex-1">
                         <p className="truncate text-[16px]">{r.name}</p>
                         <p className="mt-0.5 truncate text-[13px] text-black/40 dark:text-white/40">{r.message}</p>
@@ -201,6 +209,11 @@ export function FriendReqDetailPage({
   const [replyOpen, setReplyOpen] = useState(false);
   const [replyText, setReplyText] = useState('');
   const [replyBusy, setReplyBusy] = useState(false);
+
+  // 第十八轮 #1：点进详情页即清未读（详情页打开期间 AI 又回了话 → 线程变长也会即时清）
+  useEffect(() => {
+    if (req?.id) clearReqUnread('wx', req.id);
+  }, [req?.id, req?.thread?.length, req?.unread]);
 
   const canReply = req != null && contact != null;
   const sendReply = async () => {

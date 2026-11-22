@@ -2564,6 +2564,36 @@ function queueNetizenReactionsToCharPost(post: ForumPost): void {
   runPending();
 }
 
+/** 好友被拒放弃后的「转移阵地」直发帖（第十八轮 #3，friend-state 好友申请状态机调用）：
+ *  绕过 charPost 的 LLM 生成与排程（内容由好友决策链路已按人设生成好），直接落一条
+ *  角色帖 + 网友互动排队 + 写自己的发帖记忆。论坛从未播种过 / 角色未入论坛作者池时
+ *  返回 false（调用方换别的阵地）。 */
+export function insertCharDirectPost(contactId: string, content: string): boolean {
+  try {
+    const text = content.trim();
+    if (!text) return false;
+    const d = forumData();
+    if (!d.seeded) return false; // 论坛从未打开过：不强制播种（与 tickForumSocial 同口径）
+    const brief = forumCharBriefs().find((b) => b.contactId === contactId);
+    if (!brief) return false;
+    const next = { ...d };
+    // organic=false：情绪帖从零热度起步（不预支百万热度），网友反应陆续带来真实点赞
+    const post = basePost(brief.key, text.slice(0, POST_MAX), null, Date.now(), undefined, undefined, false);
+    next.posts.push(post);
+    const soc = { ...(next.charSocial ?? {}) };
+    soc[contactId] = { ...(soc[contactId] ?? {}), lastPostAt: post.createdAt };
+    next.charSocial = soc;
+    saveForum(next);
+    // 发帖后：网友按真实网友规则来互动（点赞陆续 + 0~2 条评论）
+    queueNetizenReactionsToCharPost(post);
+    // 记忆写入：「我今天在X论坛发了帖子……」（下次私聊能自然提起）
+    writeCharOwnPostMemory(contactId, post);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** 用户给角色的帖子点赞后（forum.tsx likeToggle 调用）：低概率角色来评论区回一句
  *  （「看到你给我点赞啦」式轻互动，可能返回空 = 选择不打扰）。
  *  v41（B3）：持久致谢标记——同帖只致谢一次（快速赞↔取消↔再赞不叠加双份）；

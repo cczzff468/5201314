@@ -39,7 +39,7 @@ import { noteAvatarChanged } from '@/lib/ios/avatar-ai';
 // 流式把 [图片:xxx] 标签切成两段时跨段拼接还原 + 尾部半截标签兜底剥除（与微信/信息端同口径）
 import { avatarFor, displayNameOf, isFriendIn, socialNameOf } from '@/lib/contacts';
 import type { ContactRecord } from '@/lib/contacts';
-import { SOURCE_SEARCH_QQ, appendReqThread, genCharThreadReply, processAltFriendReq, shouldUseAltDecisionFlow, type FriendReqEntry, type FriendReqExtras, type FriendReqThreadMsg } from '@/lib/ios/friend-state';
+import { SOURCE_SEARCH_QQ, appendReqThread, clearReqUnread, genCharThreadReply, processAltFriendReq, shouldUseAltDecisionFlow, type FriendReqEntry, type FriendReqExtras, type FriendReqThreadMsg } from '@/lib/ios/friend-state';
 import { useWeatherSnapshot, weatherCodeInfo } from '../weather-core';
 import { useUnreadMap, qqUnreads as qqUnreadStore } from '@/lib/unread-store';
 import { useChatFlags, qqChatFlags as qqChatFlagsStore } from '@/lib/chat-flags';
@@ -1719,6 +1719,7 @@ export function ContactsPage({
   onAvatar,
   onAddFriend,
   onOpenNewFriends,
+  newFriendsUnread = 0,
   onOpenGroup,
   onToast,
 }: {
@@ -1733,6 +1734,8 @@ export function ContactsPage({
   onAvatar: () => void;
   onAddFriend: () => void;
   onOpenNewFriends: () => void;
+  /** 新朋友未读数（第十八轮 #1：AI 申请/验证消息回复未读红点） */
+  newFriendsUnread?: number;
   /** 打开某个 QQ 群聊 */
   onOpenGroup: (g: ChatGroup) => void;
   onToast: (m: string) => void;
@@ -1789,7 +1792,17 @@ export function ContactsPage({
           className="flex w-full items-center justify-between border-b border-black/[0.05] px-4 py-3.5 text-left active:bg-black/[0.04] dark:border-white/[0.06] dark:active:bg-white/[0.05]"
           onClick={onOpenNewFriends}
         >
-          <span className="text-[16px]">新朋友</span>
+          <span className="flex items-center gap-2 text-[16px]">
+            新朋友
+            {newFriendsUnread > 0 && (
+              <span
+                className="flex h-[17px] min-w-[17px] items-center justify-center rounded-full bg-[#FA5151] px-[5px] text-[10px] font-semibold leading-none text-white"
+                aria-label={`${newFriendsUnread} 条新消息`}
+              >
+                {newFriendsUnread > 99 ? '99+' : newFriendsUnread}
+              </span>
+            )}
+          </span>
           <ChevronRight className="h-5 w-5 text-black/25 dark:text-white/25" aria-hidden="true" />
         </button>
         <button
@@ -3145,7 +3158,15 @@ export function NewFriendsPage({
                   onClick={() => onOpenReq(r)}
                   className="flex w-full items-center gap-3 border-b border-black/[0.05] px-4 py-3 text-left active:bg-black/[0.03] dark:border-white/[0.06] dark:active:bg-white/[0.05]"
                 >
-                  <QqAvatar src={r.avatar} alt={r.name} size={48} />
+                  <span className="relative shrink-0">
+                    <QqAvatar src={r.avatar} alt={r.name} size={48} />
+                    {r.unread && (
+                      <span
+                        className="absolute -right-0.5 -top-0.5 h-[10px] w-[10px] rounded-full bg-[#FA5151] ring-2 ring-white dark:ring-[#111214]"
+                        aria-label="有新消息"
+                      />
+                    )}
+                  </span>
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-[16px] font-medium">{r.name}</p>
                     <p className="mt-0.5 truncate text-[13.5px] text-black/60 dark:text-white/60">{r.message}</p>
@@ -3258,6 +3279,11 @@ export function FriendReqDetailPage({
   const [replyOpen, setReplyOpen] = useState(false);
   const [replyText, setReplyText] = useState('');
   const [replyBusy, setReplyBusy] = useState(false);
+
+  // 第十八轮 #1：点进详情页即清未读（详情页打开期间 AI 又回了话 → 线程变长也会即时清）
+  useEffect(() => {
+    if (req?.id) clearReqUnread('qq', req.id);
+  }, [req?.id, req?.thread?.length, req?.unread]);
 
   const canReply = req != null && contact != null;
   const sendReply = async () => {

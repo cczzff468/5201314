@@ -5,8 +5,8 @@
  *
  * 入口（两条，互不打架）：
  * ① 顶部边缘下拖手势：window 捕获阶段 Pointer 监听（与 PhoneShell 底部边缘手势同一套套路），
- *    按下点在「手机顶部 44px 内」（横屏时手机顶=屏幕右缘）且明确下拉意图才认领——
- *    跟手拖动实时驱动 motion value，松手按位移/速度判定展开或回弹；
+ *    按下点在「手机顶部 44px 内」且明确下拉意图才认领——跟手拖动实时驱动 motion value，
+ *    松手按位移/速度判定展开或回弹；横屏去壳全屏后顶部=屏幕顶，天然轴向；
  * ② 状态栏空闲区点按：左右两条透明热区（左侧时间带 / 右侧电量带，各 118px 宽），
  *    中间留空给灵动岛/音乐岛/通知卡等既有交互；StatusBar 本身 pointer-events-none 且无点击
  *    处理，热区不破坏任何既有交互。
@@ -36,7 +36,6 @@ import { animate, motion, useMotionValue, useTransform } from 'framer-motion';
 import { Sparkles } from 'lucide-react';
 import { useUI, type AppId } from '@/lib/ios/store';
 import { useIncomingCall } from '@/lib/ios/incoming-call';
-import { shellScale } from '@/lib/ios/shell-scale';
 import { appImage } from '@/components/apps/registry';
 import {
   activateCenterItem,
@@ -330,10 +329,8 @@ export default function NotificationCenter() {
     const onMove = (e: PointerEvent) => {
       const g = drag.current;
       if (!g) return;
-      // 横屏（壳旋转 90°）：手机顶部在屏幕右缘，「下拉」方向 = 向左
-      const rotated = shellScale.rotated;
-      const d = rotated ? g.startX - e.clientX : e.clientY - g.startY;
-      const lat = rotated ? Math.abs(e.clientY - g.startY) : Math.abs(e.clientX - g.startX);
+      const d = e.clientY - g.startY;
+      const lat = Math.abs(e.clientX - g.startX);
       if (!g.claimed) {
         if (d > 6 && d > lat * 0.85) {
           g.claimed = true; // 明确下拉意图：认领手势
@@ -368,13 +365,10 @@ export default function NotificationCenter() {
       const shell = shellEl();
       if (!shell) return;
       const rect = shell.getBoundingClientRect();
-      const rotated = shellScale.rotated;
-      // 按下点须在壳内（另一轴）且距「手机顶部边缘」≤ TOP_ZONE（横屏时手机顶=屏幕右缘）
-      const inCrossAxis = rotated
-        ? e.clientY >= rect.top && e.clientY <= rect.bottom
-        : e.clientX >= rect.left && e.clientX <= rect.right;
+      // 按下点须在壳内（横向）且距手机顶部边缘 ≤ TOP_ZONE（横屏全屏后顶部=屏幕顶，天然轴向）
+      const inCrossAxis = e.clientX >= rect.left && e.clientX <= rect.right;
       if (!inCrossAxis) return;
-      const depth = rotated ? rect.right - e.clientX : e.clientY - rect.top;
+      const depth = e.clientY - rect.top;
       if (depth < 0 || depth > TOP_ZONE) return;
       drag.current = {
         startX: e.clientX,
@@ -397,9 +391,8 @@ export default function NotificationCenter() {
       if (!g || !g.claimed) return;
       const t = e.touches[0];
       if (!t) return;
-      const rotated = shellScale.rotated;
-      const d = rotated ? g.startX - t.clientX : t.clientY - g.startY;
-      const lat = rotated ? Math.abs(t.clientY - g.startY) : Math.abs(t.clientX - g.startX);
+      const d = t.clientY - g.startY;
+      const lat = Math.abs(t.clientX - g.startX);
       if (d > 0 && d > lat) e.preventDefault();
     };
 
@@ -448,10 +441,10 @@ export default function NotificationCenter() {
         className="absolute inset-0 bg-black/50 backdrop-blur-xl"
       />
 
-      {/* 内容层（跟手/动画共用 contentY） */}
+      {/* 内容层（跟手/动画共用 contentY；横屏全屏时限宽居中，竖屏 390 宽内 max-w 不生效零变化） */}
       <motion.div
-        style={{ y: contentY, pointerEvents: open ? 'auto' : 'none' }}
-        className="absolute inset-x-0 top-0 flex h-[82%] flex-col px-3 pt-[56px]"
+        style={{ y: contentY, x: '-50%', pointerEvents: open ? 'auto' : 'none' }}
+        className="absolute left-1/2 top-0 flex h-[82%] w-full max-w-[640px] flex-col px-3 pt-[56px]"
       >
         {/* 顶部操作行（v1.9.10 用户需求：原底部「全部已读/清空全部」上移到右上角；
             免打扰快捷开关删除——设置 › 通知页开关保留生效） */}

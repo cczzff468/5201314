@@ -1576,9 +1576,7 @@ export default function HomeScreen() {
     const track = trackRef.current;
     if (track) {
       track.style.transition = 'none';
-      // 横屏旋转后 getBoundingClientRect 返回旋转后 bbox：前进轴对应屏募高度而非宽度
-      const rect = track.getBoundingClientRect();
-      s.w = (shellScale.rotated ? rect.height : rect.width) || 1;
+      s.w = track.getBoundingClientRect().width || 1;
     }
     holdDots();
     clearBlankPress();
@@ -1629,11 +1627,10 @@ export default function HomeScreen() {
     showDots();
   };
 
-  /** 横屏旋转时壳本地系相对视口转了 90°：翻页手势的「前进轴」从视口 x 换到视口 y
-   *  （clientX↔clientY 互换后，用户在屏幕上沿页面平铺方向滑动才能翻页） */
-  const swipeX = (e: { clientX: number; clientY: number }) => (shellScale.rotated ? e.clientY : e.clientX);
-  /** 副轴（判定斜向手势用）：横屏时与前进轴互换 */
-  const swipeY = (e: { clientX: number; clientY: number }) => (shellScale.rotated ? e.clientX : e.clientY);
+  /** 翻页手势的「前进轴」（横屏去壳全屏后与视口同向，无需换轴） */
+  const swipeX = (e: { clientX: number; clientY: number }) => e.clientX;
+  /** 副轴（判定斜向手势用） */
+  const swipeY = (e: { clientX: number; clientY: number }) => e.clientY;
 
   // ---------------- 矮视口网格行数收敛 ----------------
   // 用户实测（手机分屏/自由小窗，壳高仅 ~500px）：①编辑模式下底部行 App 按住拖不动——
@@ -1644,15 +1641,18 @@ export default function HomeScreen() {
   // 移动端 scale 恒 1，root 实测高即壳本地高（100svh，URL 栏显隐不影响）。
   const [rowCap, setRowCap] = useState(MAX_PAGE_ROWS);
   const dockCount = layout.dock.length;
+  /** 横屏去壳全屏（视口宽>高）：网格限宽居中 + 行数按真实壳高收敛（翻页手势天然轴向） */
+  const [landscape, setLandscape] = useState(false);
   useLayoutEffect(() => {
     const measure = () => {
+      const isLandscape = window.innerWidth > window.innerHeight;
+      setLandscape((prev) => (prev === isLandscape ? prev : isLandscape));
       let shellH = 844;
-      if (!window.matchMedia('(min-width: 640px)').matches) {
+      // 横屏全屏 = 真实视口高度；竖屏移动端（<640px）= 100svh 实测高；竖屏桌面壳逻辑高恒 844
+      if (isLandscape || !window.matchMedia('(min-width: 640px)').matches) {
         const root = rootRef.current;
         if (!root) return;
-        // 横屏旋转后壳 bbox 宽高互换：本地高 = 旋转后 bbox 宽 ÷ 缩放
-        const r = root.getBoundingClientRect();
-        shellH = (shellScale.rotated ? r.width : r.height) / (shellScale.value || 1);
+        shellH = root.getBoundingClientRect().height / (shellScale.value || 1);
       }
       // 页点带顶边 = 壳高 − 根容器 pb-38 − Dock 高（有 App 84 / 空 26）− 页点带 34（与渲染处常量一致）
       const dockH = layoutRef.current.dock.length > 0 ? 84 : 26;
@@ -3551,8 +3551,8 @@ export default function HomeScreen() {
             >
               <div
                 className={`grid h-fit w-full grid-cols-4 items-start gap-x-2 gap-y-[16px] px-5 pb-[164px] transition-[padding-top] duration-300 ${
-                  edit ? 'pt-[120px]' : 'pt-[72px]'
-                }`}
+                  landscape ? 'mx-auto max-w-[520px]' : ''
+                } ${edit ? 'pt-[120px]' : 'pt-[72px]'}`}
               >
                 {tiles.map((tile, i) => renderGridTile(tile, i, p))}
                 {tiles.length === 0 && (

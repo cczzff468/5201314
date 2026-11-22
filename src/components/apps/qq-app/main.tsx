@@ -836,6 +836,7 @@ export function MainScreen({
                 onAvatar={() => setDrawerOpen(true)}
                 onAddFriend={() => setRoute({ page: 'addfriend' })}
                 onOpenNewFriends={() => setRoute({ page: 'newfriends' })}
+                newFriendsUnread={qqReqs.filter((r) => r.unread).length}
                 onOpenGroup={openGroupOf}
                 onToast={showToast}
               />

@@ -1843,6 +1843,7 @@ export function MainScreen({
                 label="新的朋友"
                 testId="wx-newfriends-entry"
                 onClick={() => setPage('newFriends')}
+                badge={reqs.filter((r) => r.unread).length}
                 icon={
                   <WxTileIcon bg="#F5A623">
                     <UserPlus className="h-[21px] w-[21px]" strokeWidth={2} />

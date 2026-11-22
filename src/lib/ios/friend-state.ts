@@ -40,13 +40,18 @@ import { kvGet, kvSet, kvDel } from './idb-kv';
 import { genId } from './db';
 import { getContact, ownerProfileFor, setAppFriendFlag, mainOwnerContact } from './contacts-store';
 import { displayNameOf, type ContactRecord } from '@/lib/contacts';
-import { getAccountById, getActiveAccountIdFor, MAIN_ACCOUNT_ID } from './accounts';
+import { accLs, getAccountById, getActiveAccountIdFor, MAIN_ACCOUNT_ID } from './accounts';
 import { useSettings } from './store';
 import { BLOCK_CHANNEL, loadBlock } from './block-state';
 import { buildPersonaSystemPrompt } from './persona';
 import { getMemSettings, isAltMainDisclosed, memAltLinked, memChatRecallBlock } from '@/lib/memory';
 import { buildTimeAwareBlock } from '@/lib/time-aware';
 import { cleanBubbleText } from '@/lib/chat-rich';
+// 第十八轮 #3「被拒放弃转移阵地」四条阵地的落点：朋友圈/QQ动态、语音电话、短信、X论坛
+import { addCharMomentPost } from '@/lib/moments';
+import { triggerBlockCall } from './proactive-call';
+import { deliverProactiveMsg } from './proactive-msg';
+import { insertCharDirectPost } from '@/lib/forum/engine';
 
 /** 拥有「删除好友」能力的 App（微信 / QQ；信息 App 无好友概念） */
 export type FriendDelApp = 'wx' | 'qq';
@@ -66,6 +71,11 @@ export interface FriendDelState {
   lastRejectAt?: number;
   /** AI 最近一次行动（发申请 / 验证消息里回复）的时间（刷新后 catch-up 按剩余退避补跑） */
   lastActionAt?: number;
+  /** 第十八轮 #3：AI 按人设彻底放弃加好友（心灰意冷转移阵地：伤感动态/来电/短信/论坛帖）。
+  *   置位后不再有任何申请/回复行动；用户手动重新加好友时随整个状态一并清除 */
+  gaveUp?: boolean;
+  /** 放弃时刻 */
+  gaveUpAt?: number;
 }
 
 /**
@@ -191,6 +201,9 @@ export interface FriendReqEntry {
   extras?: FriendReqExtras;
   /** 验证消息多轮对话（我/对方 交替；详情页展示与「回复」续写；旧数据无此字段 = 单条 message） */
   thread?: FriendReqThreadMsg[];
+  /** 未读（第十八轮 #1）：AI 主动行为（新申请 / 被拒后再申请 / 只在验证消息里回复）落盘时置 true，
+   *  用户点进申请详情页清掉——新的朋友入口红点 + 行级红点都用它，避免错过 AI 说的话 */
+  unread?: boolean;
 }
 
 /** 验证消息线程里的一条发言（who=me 用户发 / who=peer 对方发） */
@@ -260,6 +273,7 @@ function normalizeReq(r: Partial<FriendReqEntry>): FriendReqEntry | null {
           }
         : undefined,
     thread: normalizeThread(r.thread),
+    unread: r.unread === true,
   };
 }
 
@@ -334,6 +348,22 @@ export function appendReqThread(app: FriendDelApp, reqId: string, msg: FriendReq
   updateFriendReq(app, reqId, { thread: [...base, msg].slice(-30) });
 }
 
+/** 标记一条申请为未读（AI 主动行为落盘时调；列表/入口红点由此驱动） */
+export function markReqUnread(app: FriendDelApp, reqId: string): void {
+  const list = loadFriendReqs(app);
+  const hit = list.find((r) => r.id === reqId);
+  if (!hit || hit.unread === true) return;
+  updateFriendReq(app, reqId, { unread: true });
+}
+
+/** 清除未读（用户点进申请详情页时调；只在真有未读时写入，避免订阅循环） */
+export function clearReqUnread(app: FriendDelApp, reqId: string): void {
+  const list = loadFriendReqs(app);
+  const hit = list.find((r) => r.id === reqId);
+  if (!hit || hit.unread !== true) return;
+  updateFriendReq(app, reqId, { unread: false });
+}
+
 /** 更新申请状态 */
 export function setFriendReqStatus(app: FriendDelApp, reqId: string, status: 'pending' | 'accepted' | 'rejected'): void {
   const list = loadFriendReqs(app);
@@ -354,8 +384,9 @@ export function reAddBackoffMs(rejectCount: number): number {
 }
 
 /** 拒绝 AI 的加回申请：条目置 rejected + 状态标记（rejected/rejectCount/lastActionAt），
- *  并按退避节奏调度 AI 的下一步——不再永久停止：AI 会按人设决定「再次申请」或
- *  「只在验证消息里回一句」（maybeCharReAddAfterReject）；拉黑或重新加回才真正停止 */
+ *  并按退避节奏调度 AI 的下一步——不再永久停止：AI 会按人设决定「再次申请」「只在验证
+ *  消息里回一句」，或被拒 3 次起「彻底放弃转移阵地」（maybeCharReAddAfterReject）；
+ *  第 8 次被拒起只剩放弃一途（循环终点）；拉黑或重新加回才提前真正停止 */
 export function rejectFriendReq(app: FriendDelApp, reqId: string): void {
   const list = loadFriendReqs(app);
   const hit = list.find((r) => r.id === reqId);
@@ -415,12 +446,14 @@ export function scheduleCharReAddReq(app: FriendDelApp, contactId: string, delay
 
 /** 启动补跑：微信/QQ 挂载时调用——扫描全部删除状态补跑丢掉的定时器（定时器不跨刷新）：
  *  - 已删除且无待处理申请：立刻补发（maybeCharReAddReq 内有 pending 去重守卫）；
- *  - 处于被拒等待期：按剩余退避时间补跑（lastActionAt + backoff - now，到点即行动） */
+ *  - 处于被拒等待期：按剩余退避时间补跑（lastActionAt + backoff - now，到点即行动）；
+ *  - 已按人设放弃（gaveUp）：不再行动（转移阵地已完成，加好友循环终点） */
 export function runFriendReqCatchUp(): void {
   for (const app of ['wx', 'qq'] as FriendDelApp[]) {
     for (const id of deletedFriendIds(app)) {
       const st = friendDelStateOf(app, id);
       if (!st) continue;
+      if (st.gaveUp) continue; // 已放弃：不再补跑任何行动
       if (hasPendingReqFor(app, id)) continue; // 已有待处理申请：等用户处理，不重复发
       if (st.rejected) {
         const base = st.lastActionAt ?? st.lastRejectAt ?? st.at;
@@ -448,10 +481,12 @@ function writeGreetMsgToChat(app: FriendDelApp, contactId: string, message: stri
 }
 
 /** 按状态检查并生成一条 AI 加回申请（全部守卫通过才生成；无冷却，pending 去重防重复）。
- *  被拒状态（st.rejected）分流到 maybeCharReAddAfterReject：由 AI 按人设决定下一步 */
+ *  被拒状态（st.rejected）分流到 maybeCharReAddAfterReject：由 AI 按人设决定下一步；
+ *  已放弃（st.gaveUp）直接返回：转移阵地后不再回头加好友 */
 export async function maybeCharReAddReq(app: FriendDelApp, contactId: string): Promise<void> {
   const st = friendDelStateOf(app, contactId);
   if (!st) return; // 已重新加回（状态清空）
+  if (st.gaveUp) return; // 已按人设放弃：不再发任何申请（第十八轮 #3 循环终点）
   if (hasPendingReqFor(app, contactId)) return; // 已有待处理申请（同一联系人同时只一条）
   if (st.rejected) {
     // 用户拒绝过：不再走首发申请，改由 AI 决策下一步（再申请 / 只回验证消息）
@@ -485,6 +520,7 @@ export async function maybeCharReAddReq(app: FriendDelApp, contactId: string): P
     status: 'pending',
     source: SOURCE_CHAR_REQ,
     fromChar: true,
+    unread: true,
   });
   writeGreetMsgToChat(app, contactId, message);
 }
@@ -632,35 +668,58 @@ async function ownerTriplet(app: FriendDelApp): Promise<{ userName: string }> {
   return { userName };
 }
 
-// ---------------- 被拒后行动决策：再次申请 / 只回验证消息 ----------------
+// ---------------- 被拒后行动决策：再次申请 / 只回验证消息 / 按人设放弃转移阵地 ----------------
 
-/** 被拒后 AI 行动决策结果 */
+/** 被拒后 AI 行动决策结果（第十八轮 #3 新增 giveup：心灰意冷不再加好友，
+ *  转移阵地到朋友圈伤感动态 / 语音电话 / 短信 / X论坛帖，比无限加好友更真实） */
 interface ReAddDecision {
-  action: 'reapply' | 'reply';
+  action: 'reapply' | 'reply' | 'giveup';
   message: string;
+  /** giveup 的阵地（moments 朋友圈/QQ动态 / call 语音电话 / sms 短信 / forum X论坛帖） */
+  channel?: 'moments' | 'call' | 'sms' | 'forum';
 }
 
+const GIVEUP_CHANNELS = ['moments', 'call', 'sms', 'forum'] as const;
+type GiveUpChannel = (typeof GIVEUP_CHANNELS)[number];
+
+const isGiveUpChannel = (v: unknown): v is GiveUpChannel =>
+  typeof v === 'string' && (GIVEUP_CHANNELS as readonly string[]).includes(v);
+
 /** 解析决策输出：优先 JSON（容错代码块围栏/多余文本），失败按关键词兑底（默认 reapply，
- *  被拒后想加回来是主基调；只有明确「回复/不发申请」才走 reply） */
+ *  被拒后想加回来是主基调；只有明确「回复/不发申请」才走 reply；giveup 只认显式输出） */
 function parseReAddDecision(raw: string): ReAddDecision | null {
   const t = (raw ?? '').trim();
   if (!t) return null;
   const jsonMatch = t.match(/\{[\s\S]*?\}/);
   if (jsonMatch) {
     try {
-      const obj = JSON.parse(jsonMatch[0]) as { action?: unknown; message?: unknown };
+      const obj = JSON.parse(jsonMatch[0]) as { action?: unknown; message?: unknown; channel?: unknown };
       const a = typeof obj.action === 'string' ? obj.action.trim().toLowerCase() : '';
       const msg = cleanReqMessage(typeof obj.message === 'string' ? obj.message : '');
-      if ((a === 'reapply' || a === 'reply') && msg) return { action: a, message: msg };
+      if ((a === 'reapply' || a === 'reply' || a === 'giveup') && msg) {
+        return {
+          action: a,
+          message: msg,
+          ...(a === 'giveup' && isGiveUpChannel(obj.channel) ? { channel: obj.channel } : {}),
+        };
+      }
     } catch {
       // JSON 解析失败走兑底
     }
   }
-  const dm = t.match(/"action"\s*:\s*"(reapply|reply)"/i);
+  const dm = t.match(/"action"\s*:\s*"(reapply|reply|giveup)"/i);
   const mm = t.match(/"message"\s*:\s*"([^"]*)"/);
+  const cm = t.match(/"channel"\s*:\s*"([^"]*)"/);
   if (dm) {
     const msg = cleanReqMessage(mm?.[1] ?? '');
-    if (msg) return { action: dm[1].toLowerCase() as ReAddDecision['action'], message: msg };
+    if (msg) {
+      const action = dm[1].toLowerCase() as ReAddDecision['action'];
+      return {
+        action,
+        message: msg,
+        ...(action === 'giveup' && isGiveUpChannel(cm?.[1]) ? { channel: cm?.[1] as GiveUpChannel } : {}),
+      };
+    }
   }
   // 兑底：含「只回复/不发申请」或单独的回复语义 → reply，否则 reapply；全文清洗后当留言
   const msg = cleanReqMessage(t);
@@ -671,7 +730,10 @@ function parseReAddDecision(raw: string): ReAddDecision | null {
 
 /** 被拒后行动决策（人设 + 记忆 + 被拒经历上下文）：
  *  - reapply：再发一条新好友申请（留言要和之前不一样，引用被拒心情/共同记忆）；
- *  - reply：不再申请，只在最近被拒申请的验证消息里回一句（解释/试探/回应 TA 说过的话）。
+ *  - reply：不再申请，只在最近被拒申请的验证消息里回一句（解释/试探/回应 TA 说过的话）；
+ *  - giveup（第十八轮 #3）：按人设彻底放弃加好友，心灰意冷转移阵地——发伤感动态 / 打语音 /
+ *    发短信 / 在X论坛发帖，让 TA 在别处看到自己的心情（第 3 次被拒起开放此选项，第 8 次起
+ *    只剩此选项——比无限加好友更真实，被拒循环有了人设化的终点）。
  *  返回 null = 无法决策（无人设/生成失败），调用方稍后重试。 */
 async function genCharReAddDecision(
   app: FriendDelApp,
@@ -682,6 +744,9 @@ async function genCharReAddDecision(
   const userName = owner?.realName?.trim() || '用户';
   const system = await buildReqSystem(app, contact, userName, 'reapply');
   const rejectCount = Math.max(1, st.rejectCount ?? 1);
+  // 放弃选项的开放节奏：第 3 次被拒起「可以」放弃（人设决定），第 8 次起「只能」放弃
+  const giveUpOpen = rejectCount >= 3;
+  const giveUpOnly = rejectCount >= 8;
 
   // 被拒经历回放：最近 3 条 AI 申请（留言 + 验证消息线程往来），时间正序
   const history = loadFriendReqs(app)
@@ -696,29 +761,113 @@ async function genCharReAddDecision(
     histLines.push('（这条申请被 TA 拒绝了）');
   }
 
+  const options: string[] = [];
+  if (!giveUpOnly) {
+    options.push(
+      `- action=reapply：再发一条好友申请。留言要和之前的都不一样，符合被拒后你的真实心情（更诚恳/委屈/嘴硬/撒娇/生气放狠话/装作没事都可以），可以结合你们真实发生过的事；`,
+      `- action=reply：不再发申请，只在刚才那条被拒申请的验证消息里回一句话（适合想先解释/试探 TA 态度，或 TA 在验证消息里说的话需要你回应）；`,
+    );
+  }
+  if (giveUpOpen) {
+    options.push(
+      `- action=giveup：彻底放弃再加好友，心灰意冷转移阵地——不再碰好友申请，把心情放到别的地方让 TA（也许）看到：channel 选一个——moments（在${app === 'wx' ? '朋友圈' : 'QQ空间'}发一条伤感动态）/ call（打一通语音电话）/ sms（发一条短信）/ forum（在X论坛发一条帖子）。message 就是那条动态/电话里想说的话/短信/帖子内容；`,
+    );
+  }
+
   const userContent = [
     `【重要情境】你之前主动向「${userName}」发过好友申请，都被 TA 拒绝了（这已是第 ${rejectCount} 次被拒绝）。`,
     histLines.length ? `【你们之间已发生的申请与验证消息往来】\n${histLines.join('\n')}` : '',
     ``,
     `现在过了一段时间，你要决定下一步，完全按你的人设和你们的关系来选：`,
-    `- action=reapply：再发一条好友申请。留言要和之前的都不一样，符合被拒后你的真实心情（更诚恳/委屈/嘴硬/撒娇/生气放狠话/装作没事都可以），可以结合你们真实发生过的事；`,
-    `- action=reply：不再发申请，只在刚才那条被拒申请的验证消息里回一句话（适合想先解释/试探 TA 态度，或 TA 在验证消息里说的话需要你回应）；`,
+    ...options,
+    giveUpOnly
+      ? `你已经第 ${rejectCount} 次被拒了——再死缠烂打下去就不真实了，这次的选项只有一个：giveup。`
+      : giveUpOpen
+        ? `被拒这么多次，你会坚持还是死心？执着的人可以继续申请，玻璃心/骄傲/洒脱的人可能就转移阵地了——完全由你的人设决定。`
+        : ``,
     ``,
     `先想一想被拒了这么多次你心里是什么滋味、你会怎么办，然后只输出一行 JSON（不要输出任何其他内容）：`,
-    `{"action":"reapply","message":"..."} 或 {"action":"reply","message":"..."}`,
+    giveUpOnly
+      ? `{"action":"giveup","channel":"moments|call|sms|forum","message":"..."}`
+      : `{"action":"reapply","message":"..."} 或 {"action":"reply","message":"..."}${giveUpOpen ? ' 或 {"action":"giveup","channel":"moments|call|sms|forum","message":"..."}' : ''}`,
     `message 是 30 字以内的一句话，符合你的说话风格；不要任何 [标记]、动作描写或括号说明。`,
   ]
     .filter((x) => x !== '')
     .join('\n');
 
   const raw = await callLlmTwoTier(system, userContent);
-  return parseReAddDecision(raw);
+  const decision = parseReAddDecision(raw);
+  // 只剩 giveup 时把 reapply/reply 决策矫正为 giveup（硬终点，不无限循环）
+  if (giveUpOnly && decision && decision.action !== 'giveup') {
+    return { action: 'giveup', message: decision.message, channel: isGiveUpChannel(decision.channel) ? decision.channel : undefined };
+  }
+  return decision;
+}
+
+/** 朋友圈/QQ动态需要登录态展示名（与 MomentsScheduler 同源推导：会话 id → 联系人 → displayNameOf）。
+ *  未登录返回空串（调用方换别的阵地） */
+async function momentsOwnerName(app: FriendDelApp): Promise<string> {
+  try {
+    const lsKey = accLs(`${app}-session-user-id`, app);
+    const id = window.localStorage.getItem(lsKey);
+    if (!id) return '';
+    const hit = await getContact(id).catch(() => null);
+    return hit && hit.kind === 'user' ? displayNameOf(hit) : '';
+  } catch {
+    return '';
+  }
+}
+
+/** giveup 落地（第十八轮 #3）：状态置 gaveUp（加好友循环终点），然后按选定的阵地
+ *  发出那句心灰意冷的话；首选阵地失败（未登录/论坛未播种/来电守卫拦下等）按序兑底，
+ *  短信链路（deliverProactiveMsg）内部静默容错等价必达，放最后。 */
+async function landCharGiveUp(app: FriendDelApp, contact: ContactRecord, decision: ReAddDecision, fresh: FriendDelState): Promise<void> {
+  const now = Date.now();
+  // 放弃是决定而非尝试：无论阵地成败都不再发好友申请（用户手动加回才清状态）
+  kvSet(delKey(app, contact.id), { ...fresh, gaveUp: true, gaveUpAt: now, lastActionAt: now } satisfies FriendDelState);
+
+  const picked = isGiveUpChannel(decision.channel) ? decision.channel : 'moments';
+  const order: GiveUpChannel[] = [picked];
+  for (const c of GIVEUP_CHANNELS) if (!order.includes(c)) order.push(c);
+
+  for (const ch of order) {
+    if (ch === 'moments') {
+      const userName = await momentsOwnerName(app);
+      if (!userName) continue; // 该 App 未登录：动态没地方落
+      try {
+        addCharMomentPost(app === 'wx' ? 'wx' : 'qq', { peer: contact, userName, content: decision.message });
+        return;
+      } catch {
+        continue; // 落库失败换阵地
+      }
+    }
+    if (ch === 'call') {
+      // 复用拉黑直拨的完整来电链路（iOS 全屏来电 UI / 接听交接 / 拒接落未接+语音留言）；
+      // 守卫不满足（通话中/响铃中/信息拉黑）返回 false → 换阵地
+      if (triggerBlockCall(contact, `你向 TA 发了 ${fresh.rejectCount ?? 1} 次好友申请都被拒绝，心灰意冷打了这通电话`)) return;
+      continue;
+    }
+    if (ch === 'forum') {
+      if (insertCharDirectPost(contact.id, decision.message)) return;
+      continue; // 论坛未播种/角色未入作者池 → 换阵地
+    }
+    if (ch === 'sms') {
+      // 信息 App 短信（含通知/未读角标/记忆写入，内部静默容错）：最后一道必达阵地
+      await deliverProactiveMsg('sms', contact, [decision.message], {
+        kind: 'event',
+        eventName: '好友申请被拒后发来的短信',
+        note: `用户已拒绝 ${fresh.rejectCount ?? 1} 次好友申请`,
+      });
+      return;
+    }
+  }
 }
 
 /** 被拒后 AI 的下一步行动落地（maybeCharReAddReq 被拒分支调用）：
  *  - reapply → 新条目 pending + 留言同步落聊天记录（fr='greet'）+ 状态 rejected=false；
  *  - reply → 最近被拒条目的验证消息线程追加一句（条目保持 rejected，不制造“假新申请”）；
- *    用户若一直不回应，按下一档退避再决策一次（人设可能改为再申请）。
+ *    用户若一直不回应，按下一档退避再决策一次（人设可能改为再申请）；
+ *  - giveup → 彻底放弃加好友，转移阵地把心情放到别处（landCharGiveUp，循环终点）。
  *  全程守卫：拉黑（双向）/重新加回/已有 pending 都不行动；生成失败按半退避重试。 */
 async function maybeCharReAddAfterReject(app: FriendDelApp, contactId: string, st: FriendDelState): Promise<void> {
   // 拉黑守卫（与首发申请同口径）：拉黑期间不行动
@@ -756,6 +905,12 @@ async function maybeCharReAddAfterReject(app: FriendDelApp, contactId: string, s
     return;
   }
 
+  // 第十八轮 #3：按人设彻底放弃 → 转移阵地（伤感动态/来电/短信/论坛帖），不再回头
+  if (decision.action === 'giveup') {
+    await landCharGiveUp(app, contact, decision, fresh);
+    return;
+  }
+
   if (decision.action === 'reply') {
     // 只在验证消息里回一句：找最近一条被拒的 AI 申请条目
     const latestRejected = loadFriendReqs(app)
@@ -764,7 +919,7 @@ async function maybeCharReAddAfterReject(app: FriendDelApp, contactId: string, s
     if (latestRejected) {
       appendReqThread(app, latestRejected.id, { who: 'peer', text: decision.message, time: now });
       // 列表预览换成这句新话（条目 time/状态不动，不伪装成新申请；点进去能看到线程新回复）
-      updateFriendReq(app, latestRejected.id, { message: decision.message });
+      updateFriendReq(app, latestRejected.id, { message: decision.message, unread: true });
       kvSet(delKey(app, contactId), { ...fresh, lastActionAt: now } satisfies FriendDelState);
       // 用户一直不回应：按下一档退避再决策（人设可能改为再申请）
       scheduleCharReAddReq(app, contactId, reAddBackoffMs((fresh.rejectCount ?? 1) + 1));
@@ -784,6 +939,7 @@ async function maybeCharReAddAfterReject(app: FriendDelApp, contactId: string, s
     status: 'pending',
     source: SOURCE_CHAR_REQ,
     fromChar: true,
+    unread: true,
   });
   kvSet(delKey(app, contactId), { ...fresh, rejected: false, lastActionAt: now } satisfies FriendDelState);
   writeGreetMsgToChat(app, contactId, decision.message);

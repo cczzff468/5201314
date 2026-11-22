@@ -167,8 +167,9 @@ export default function PhoneShell() {
    *  Dock 看不见也摸不着，App 就「不能往下放了」；缩放后整个机身始终完整可见可达。
    *  壳 transform 后成为 fixed 后代的包含块，HomeScreen 渲染拖拽副本/飞入动画时用
    *  shellScale.value 把视口坐标换算回壳本地坐标（见 shell-scale.ts）。
-   *  landscape（横屏全屏）：视口宽>高时机身旋转 90° 铺满视口（占位盒宽高互换），
-   *  scale 按旋转后尺寸（844×390）适配；竖屏行为与原来完全一致。 */
+   *  landscape（横屏全屏，第十八轮用户定调）：视口宽>高时不再旋转机身——直接去掉手机壳
+   *  （无圆角/边框/阴影/transform）铺满整个视口，手势与命中检测全部走天然轴向（此前的
+   *  旋转 90° 方案翻页/下拉/点击都要换轴映射，实测横屏滑动不跟手）；scale 恒 1。 */
   const [fit, setFit] = useState<{ desktop: boolean; scale: number; landscape: boolean }>({
     desktop: false,
     scale: 1,
@@ -177,19 +178,13 @@ export default function PhoneShell() {
   useEffect(() => {
     const compute = () => {
       const landscape = window.innerWidth > window.innerHeight;
-      const isDesktop = window.matchMedia('(min-width: 640px)').matches;
       if (landscape) {
-        // 横屏全屏：机身横放（旋转 90° 后占位 844 宽 × 390 高），按可用空间等比缩放铺满
-        const pad = isDesktop ? SHELL_PAD : 0;
-        const availW = window.innerWidth - pad * 2;
-        const availH = window.innerHeight - pad * 2;
-        const s = Math.max(MIN_SCALE, Math.min(1, availW / FRAME_H, availH / FRAME_W));
-        setFit({ desktop: isDesktop, scale: s, landscape: true });
-        shellScale.value = s;
-        shellScale.rotated = true;
+        // 横屏全屏：去壳铺满视口，无缩放无旋转
+        setFit({ desktop: false, scale: 1, landscape: true });
+        shellScale.value = 1;
         return;
       }
-      shellScale.rotated = false;
+      const isDesktop = window.matchMedia('(min-width: 640px)').matches;
       if (!isDesktop) {
         setFit({ desktop: false, scale: 1, landscape: false });
         shellScale.value = 1;
@@ -371,10 +366,8 @@ export default function PhoneShell() {
         finish();
         return;
       }
-      // 横屏旋转（壳底边=屏左边）：前进方向为向右滑；竖屏为向上滑
-      const rotated = shellScale.rotated;
-      const forward = rotated ? e.clientX - g.x : g.y - e.clientY;
-      const lateral = rotated ? Math.abs(e.clientY - g.y) : Math.abs(e.clientX - g.x);
+      const forward = g.y - e.clientY;
+      const lateral = Math.abs(e.clientX - g.x);
       if (forward > OPEN_DELTA && forward > lateral * 0.85) {
         g.fired = true;
         const ui = useUI.getState();
@@ -399,8 +392,8 @@ export default function PhoneShell() {
       if (isVoiceHoldActive()) return;
       const t = e.touches[0];
       if (!t) return;
-      const forward = shellScale.rotated ? t.clientX - g.x : g.y - t.clientY;
-      const lateral = shellScale.rotated ? Math.abs(t.clientY - g.y) : Math.abs(t.clientX - g.x);
+      const forward = g.y - t.clientY;
+      const lateral = Math.abs(t.clientX - g.x);
       if (forward > 6 && forward > lateral) e.preventDefault();
     };
     const finish = () => {
@@ -426,8 +419,8 @@ export default function PhoneShell() {
       if (!rect) return;
       if (e.clientX < rect.left || e.clientX > rect.right) return;
       if (e.clientY < rect.top || e.clientY > rect.bottom) return;
-      // 横屏旋转后壳底边在屏幕左侧：起手带 = 屏左边缘；竖屏仍为屏底边缘
-      const inEdgeZone = shellScale.rotated ? e.clientX - rect.left <= EDGE_ZONE : rect.bottom - e.clientY <= EDGE_ZONE;
+      // 起手带 = 屏底边缘（横屏去壳全屏后壳底边就是屏幕底边，天然轴向）
+      const inEdgeZone = rect.bottom - e.clientY <= EDGE_ZONE;
       if (!inEdgeZone) return; // 按下点不在底部边缘带内
       edgeGesture.current = { x: e.clientX, y: e.clientY, fired: false };
       window.addEventListener('pointermove', onMove);
@@ -531,66 +524,46 @@ export default function PhoneShell() {
   // 若用户关闭了锁屏，locked 会在 load() 内同步纠正为 false——
   // 先等 loaded 再渲染锁屏/主屏，锁屏就不会“闪现一下再消失”。
   if (!loaded) {
-    // 横屏全屏：占位盒宽高互换，机身由旋转层铺满；竖屏保持原布局
-    const placeholderStyle = fit.landscape
-      ? { width: FRAME_H * fit.scale, height: FRAME_W * fit.scale }
-      : fit.desktop
-        ? { width: FRAME_W * fit.scale, height: FRAME_H * fit.scale }
-        : undefined;
+    // 横屏全屏：纯黑铺满；竖屏桌面带壳占位，移动全屏随视口
     return (
-      <div
-        data-pwa-wrap=""
-        className="flex min-h-[100svh] w-full items-center justify-center bg-[#dcdce1] dark:bg-black sm:p-8"
-      >
+      <div data-pwa-wrap="" className="flex min-h-[100svh] w-full items-center justify-center bg-[#dcdce1] dark:bg-black sm:p-8">
         {/* 外层按缩放后尺寸占位（transform 不改变布局，需显式给包裹盒防溢出/滚动条） */}
         <div
           className="relative h-[100svh] w-full shrink-0 sm:h-auto sm:w-auto"
-          style={placeholderStyle}
+          style={
+            fit.landscape
+              ? undefined
+              : fit.desktop
+                ? { width: FRAME_W * fit.scale, height: FRAME_H * fit.scale }
+                : undefined
+          }
         >
-          {fit.landscape ? (
+          <div
+            data-phone-shell=""
+            data-pwa-portrait-shell={fit.landscape ? undefined : ''}
+            className={
+              fit.landscape
+                ? `relative h-[100svh] w-full pan-none bg-black ${dark ? 'dark' : ''}`
+                : `relative h-[100svh] w-full pan-none bg-black sm:h-[844px] sm:w-[390px] sm:rounded-[56px] sm:border-[12px] sm:border-[#151517] sm:shadow-[0_40px_90px_-20px_rgba(0,0,0,0.55),0_0_0_1px_rgba(255,255,255,0.08)] ${dark ? 'dark' : ''}`
+            }
+            style={fit.landscape ? undefined : { transform: `scale(${fit.scale})`, transformOrigin: 'top left' }}
+          >
+            {/* 灵动岛（开机阶段仅保留硬件开孔） */}
             <div
-              className="absolute left-1/2 top-1/2 h-[844px] w-[390px]"
-              style={{ transform: `translate(-50%, -50%) rotate(90deg) scale(${fit.scale})` }}
-            >
-              <div
-                data-phone-shell=""
-                className="relative h-[844px] w-[390px] pan-none rounded-[56px] border-[12px] border-[#151517] bg-black"
-                style={{ width: FRAME_W, height: FRAME_H }}
-              >
-                {/* 灵动岛（开机阶段仅保留硬件开孔） */}
-                <div
-                  className="pointer-events-none absolute left-1/2 top-[11px] h-[33px] w-[118px] -translate-x-1/2 rounded-full bg-black"
-                  aria-hidden="true"
-                />
-              </div>
-            </div>
-          ) : (
-            <div
-              data-phone-shell=""
-              data-pwa-portrait-shell=""
-              className={`relative h-[100svh] w-full pan-none bg-black sm:h-[844px] sm:w-[390px] sm:rounded-[56px] sm:border-[12px] sm:border-[#151517] sm:shadow-[0_40px_90px_-20px_rgba(0,0,0,0.55),0_0_0_1px_rgba(255,255,255,0.08)] ${
-                dark ? 'dark' : ''
-              }`}
-              style={{ transform: `scale(${fit.scale})`, transformOrigin: 'top left' }}
-            >
-              {/* 灵动岛（开机阶段仅保留硬件开孔） */}
-              <div
-                className="pointer-events-none absolute left-1/2 top-[11px] h-[33px] w-[118px] -translate-x-1/2 rounded-full bg-black"
-                aria-hidden="true"
-              />
-            </div>
-          )}
+              className="pointer-events-none absolute left-1/2 top-[11px] h-[33px] w-[118px] -translate-x-1/2 rounded-full bg-black"
+              aria-hidden="true"
+            />
+          </div>
         </div>
       </div>
     );
   }
 
-  // 横屏全屏：占位盒宽高互换（旋转后机身 844 宽 × 390 高）；竖屏保持原布局
-  const placeholderStyle = fit.landscape
-    ? { width: FRAME_H * fit.scale, height: FRAME_W * fit.scale }
-    : fit.desktop
-      ? { width: FRAME_W * fit.scale, height: FRAME_H * fit.scale }
-      : undefined;
+  // 竖屏桌面按缩放后尺寸占位（transform 不改变布局，需显式给包裹盒防溢出/滚动条）；
+  // 横屏全屏无占位盒（壳直接铺满视口）；移动端不缩放保持全屏
+  const placeholderStyle = fit.desktop
+    ? { width: FRAME_W * fit.scale, height: FRAME_H * fit.scale }
+    : undefined;
 
   // 壳内内容（壁纸 → 主屏 → App → 全局层）：横竖屏共用同一份，只换外壳几何
   const shellInner = (
@@ -780,7 +753,7 @@ export default function PhoneShell() {
     </>
   );
 
-  // 手机壳：竖屏沿用原布局（移动全屏/桌面带边框缩放）；横屏铺满视口（旋转 90° 由外层旋转层承担）
+  // 手机壳：竖屏沿用原布局（移动全屏/桌面带边框缩放）；横屏去壳直接铺满视口（无旋转）
   const shell = (
     <div
       ref={shellRef}
@@ -788,12 +761,12 @@ export default function PhoneShell() {
       data-pwa-portrait-shell={fit.landscape ? undefined : ''}
       className={
         fit.landscape
-          ? `relative pan-none rounded-[56px] border-[12px] border-[#151517] bg-black text-foreground shadow-[0_40px_90px_-20px_rgba(0,0,0,0.55),0_0_0_1px_rgba(255,255,255,0.08)] ${dark ? 'dark' : ''}`
+          ? `relative h-[100svh] w-full pan-none bg-black text-foreground ${dark ? 'dark' : ''}`
           : `relative h-[100svh] w-full pan-none bg-black text-foreground sm:h-[844px] sm:w-[390px] sm:rounded-[56px] sm:border-[12px] sm:border-[#151517] sm:shadow-[0_40px_90px_-20px_rgba(0,0,0,0.55),0_0_0_1px_rgba(255,255,255,0.08)] ${dark ? 'dark' : ''}`
       }
       style={
         fit.landscape
-          ? { width: FRAME_W, height: FRAME_H }
+          ? undefined
           : { transform: `scale(${fit.scale})`, transformOrigin: 'top left' }
       }
     >
@@ -804,26 +777,21 @@ export default function PhoneShell() {
   return (
     <div
       data-pwa-wrap=""
-      className="flex min-h-[100svh] w-full items-center justify-center bg-[#dcdce1] dark:bg-black sm:p-8"
+      className={
+        fit.landscape
+          ? 'min-h-[100svh] w-full bg-black'
+          : 'flex min-h-[100svh] w-full items-center justify-center bg-[#dcdce1] dark:bg-black sm:p-8'
+      }
     >
       {/* 外层按缩放后尺寸占位（transform 不改变布局，需显式给包裹盒防溢出/滚动条）；
-          移动端不缩放，保持全屏 */}
-      <div
-        className="relative h-[100svh] w-full shrink-0 sm:h-auto sm:w-auto"
-        style={placeholderStyle}
-      >
-        {fit.landscape ? (
-          /* 横屏：旋转层把竖屏机身转 90° 铺满视口（translate 居中 → rotate → scale，全部绕自身中心，天然居中） */
-          <div
-            className="absolute left-1/2 top-1/2 h-[844px] w-[390px]"
-            style={{ transform: `translate(-50%, -50%) rotate(90deg) scale(${fit.scale})` }}
-          >
-            {shell}
-          </div>
-        ) : (
-          shell
-        )}
-      </div>
+          移动端不缩放，保持全屏；横屏全屏无占位盒 */}
+      {fit.landscape ? (
+        shell
+      ) : (
+        <div className="relative h-[100svh] w-full shrink-0 sm:h-auto sm:w-auto" style={placeholderStyle}>
+          {shell}
+        </div>
+      )}
     </div>
   );
 }
