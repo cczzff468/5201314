@@ -347,7 +347,7 @@ export function SourcesManager({ onBack }: { onBack: () => void }) {
         right={renderRight()}
       />
 
-      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 pb-28 [scrollbar-width:thin]">
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 pb-28">
         {/* 校验进度条 */}
         {smartRun && (
           <div className="mt-2 rounded-2xl p-3.5" style={{ background: cardBg, boxShadow: `inset 0 0 0 1px ${cardRing}` }}>
@@ -395,9 +395,9 @@ export function SourcesManager({ onBack }: { onBack: () => void }) {
         </div>
 
         {/* 筛选 chips（含分组开关 + 清理失效入口）
-            自适应换行：所有胶囊完整显示，超出一行自动折行，
-            不做横向滚动 —— 无负边距、无裁切、无边缘空白 */}
-        <div className="mt-3 flex flex-wrap items-center gap-2">
+            iOS 式单行横滑（原来的横向滚动）：全部/已启用/已停用/分组/分组项一横排，
+            超出部分左右滑动查看；no-scrollbar 隐藏滚动条，无裁切无边缘空白 */}
+        <div className="-mx-3 mt-3 flex items-center gap-2 overflow-x-auto px-3 pb-1 no-scrollbar">
           {(
             [
               { k: 'all' as FilterKey, label: `全部 ${sources.length}` },
@@ -409,7 +409,7 @@ export function SourcesManager({ onBack }: { onBack: () => void }) {
               key={f.k}
               type="button"
               onClick={() => setFilter(f.k)}
-              className="h-8 whitespace-nowrap rounded-full px-3.5 text-[12.5px] font-medium transition-all active:scale-95"
+              className="h-8 shrink-0 whitespace-nowrap rounded-full px-3.5 text-[12.5px] font-medium transition-all active:scale-95"
               style={
                 filter === f.k
                   ? { background: BLUE, color: '#fff' }
@@ -426,7 +426,7 @@ export function SourcesManager({ onBack }: { onBack: () => void }) {
               setShowGroups((v) => !v);
               if (!showGroups) setGroupFilter(null);
             }}
-            className="h-8 whitespace-nowrap rounded-full px-3.5 text-[12.5px] font-medium transition-all active:scale-95"
+            className="h-8 shrink-0 whitespace-nowrap rounded-full px-3.5 text-[12.5px] font-medium transition-all active:scale-95"
             style={
               showGroups
                 ? { background: blueSoft, color: BLUE, fontWeight: 600 }
@@ -441,7 +441,7 @@ export function SourcesManager({ onBack }: { onBack: () => void }) {
               type="button"
               onClick={() => void cleanFailed()}
               disabled={cleaning}
-              className="h-8 whitespace-nowrap rounded-full px-3.5 text-[12.5px] font-semibold transition-all active:scale-95 disabled:opacity-60"
+              className="h-8 shrink-0 whitespace-nowrap rounded-full px-3.5 text-[12.5px] font-semibold transition-all active:scale-95 disabled:opacity-60"
               style={{ background: '#FDEBEB', color: '#E05252' }}
             >
               {cleaning ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
@@ -452,7 +452,7 @@ export function SourcesManager({ onBack }: { onBack: () => void }) {
             <button
               type="button"
               onClick={() => setGroupFilter(null)}
-              className="h-8 whitespace-nowrap rounded-full px-3.5 text-[12.5px] font-medium transition-all active:scale-95"
+              className="h-8 shrink-0 whitespace-nowrap rounded-full px-3.5 text-[12.5px] font-medium transition-all active:scale-95"
               style={
                 !groupFilter
                   ? { background: BLUE, color: '#fff' }
@@ -468,7 +468,7 @@ export function SourcesManager({ onBack }: { onBack: () => void }) {
                 key={g}
                 type="button"
                 onClick={() => setGroupFilter(groupFilter === g ? null : g)}
-                className="h-8 whitespace-nowrap rounded-full px-3.5 text-[12.5px] font-medium transition-all active:scale-95"
+                className="h-8 shrink-0 whitespace-nowrap rounded-full px-3.5 text-[12.5px] font-medium transition-all active:scale-95"
                 style={
                   groupFilter === g
                     ? { background: BLUE, color: '#fff' }

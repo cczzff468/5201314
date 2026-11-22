@@ -648,14 +648,14 @@ function MoreSettingsSheet({ onClose }: { onClose: () => void }) {
             <div className="space-y-3">
               <div className="rounded-2xl p-3.5" style={{ background: softBg(dark) }}>
                 <GroupTitle dark={dark} icon={<CaseSensitive className="h-4 w-4" />} title="字体" />
-                {/* 字体选择：自适应换行，无横向滚动 */}
-                <div className="mt-1 flex flex-wrap gap-2">
+                {/* 字体选择：iOS 式单行横滑（原来的横向滚动），无滚动条 */}
+                <div className="-mx-3.5 mt-1 flex gap-2 overflow-x-auto px-3.5 pb-1 no-scrollbar">
                   {BUILTIN_FONTS.map((f) => (
                     <button
                       key={f.key}
                       type="button"
                       onClick={() => patch({ fontFamily: f.key })}
-                      className="h-9 whitespace-nowrap rounded-[10px] px-3.5 text-[13px] font-medium active:scale-95"
+                      className="h-9 shrink-0 whitespace-nowrap rounded-[10px] px-3.5 text-[13px] font-medium active:scale-95"
                       style={
                         settings.fontFamily === f.key
                           ? { background: blueSoft(dark), color: BLUE, fontWeight: 600 }
@@ -668,7 +668,7 @@ function MoreSettingsSheet({ onClose }: { onClose: () => void }) {
                   <button
                     type="button"
                     onClick={() => fontInputRef.current?.click()}
-                    className="h-9 whitespace-nowrap rounded-[10px] px-3.5 text-[13px] font-medium active:scale-95"
+                    className="h-9 shrink-0 whitespace-nowrap rounded-[10px] px-3.5 text-[13px] font-medium active:scale-95"
                     style={
                       settings.fontFamily === 'custom'
                         ? { background: blueSoft(dark), color: BLUE, fontWeight: 600 }
@@ -693,14 +693,14 @@ function MoreSettingsSheet({ onClose }: { onClose: () => void }) {
                     </button>
                   }
                 />
-                <div className="flex flex-wrap gap-2">
+                <div className="-mx-3.5 flex gap-2 overflow-x-auto px-3.5 pb-1 no-scrollbar">
                   {settings.presets.length ? (
                     settings.presets.map((p) => (
                       <button
                         key={p.id}
                         type="button"
                         onClick={() => patch(p.data)}
-                        className="rounded-full px-3 py-1.5 text-[12px] active:scale-95"
+                        className="shrink-0 whitespace-nowrap rounded-full px-3 py-1.5 text-[12px] active:scale-95"
                         style={{ background: dark ? 'rgba(255,255,255,0.10)' : '#fff', color: dark ? '#E8EAF2' : '#1A1D26' }}
                       >
                         {p.name}
@@ -880,7 +880,7 @@ export function ReaderSettingsSheet({ onClose }: { onClose: () => void }) {
                     key={f.key}
                     type="button"
                     onClick={() => patch({ fontFamily: f.key })}
-                    className="h-9 whitespace-nowrap rounded-[10px] px-3.5 text-[13px] font-medium active:scale-95"
+                    className="h-9 shrink-0 whitespace-nowrap rounded-[10px] px-3.5 text-[13px] font-medium active:scale-95"
                     style={
                       settings.fontFamily === f.key
                         ? { background: blueSoft(dark), color: BLUE, fontWeight: 600 }
@@ -893,7 +893,7 @@ export function ReaderSettingsSheet({ onClose }: { onClose: () => void }) {
                 <button
                   type="button"
                   onClick={() => fontInputRef.current?.click()}
-                  className="h-9 whitespace-nowrap rounded-[10px] px-3.5 text-[13px] font-medium active:scale-95"
+                  className="h-9 shrink-0 whitespace-nowrap rounded-[10px] px-3.5 text-[13px] font-medium active:scale-95"
                   style={
                     settings.fontFamily === 'custom'
                       ? { background: blueSoft(dark), color: BLUE, fontWeight: 600 }

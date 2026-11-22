@@ -25,7 +25,15 @@ import * as cheerio from 'cheerio';
 import type { CheerioAPI } from 'cheerio';
 import type { AnyNode } from 'domhandler';
 import iconv from 'iconv-lite';
+import dns from 'node:dns';
 
+// 容器/沙箱网络常无 IPv6 出口，而不少笔趣阁站解析出 AAAA 记录——
+// fetch（undici）会优先尝试 IPv6 → ENETUNREACH/ETIMEDOUT。全局 IPv4 优先。
+try {
+  dns.setDefaultResultOrder('ipv4first');
+} catch {
+  /* 老版本 Node 无此 API，忽略 */
+}
 
 /** 作者名清洗：去掉「作者：/著」等前后缀 */
 function cleanAuthor(a: string): string {
@@ -255,6 +263,12 @@ function sourceHeaders(source: LegadoSource, pageUrl?: string): Record<string, s
       /* ignore */
     }
   }
+  // 头值消毒：书源 URL 常带 #表情锚点（如 https://x.cc#🎃）——非 ASCII 头值会让
+  // Node fetch 直接抛 ByteString 异常。去掉 # 之后的部分 + 非可见 ASCII 字符。
+  for (const k of Object.keys(h)) {
+    h[k] = h[k].split('#')[0].replace(/[^\x20-\x7E]/g, '');
+    if (!h[k]) delete h[k];
+  }
   return h;
 }
 
@@ -295,29 +309,53 @@ export interface FetchResult {
   contentType: string;
 }
 
-/** 服务端代理抓取（阅读 App 全部出站都走这里：解决 CORS + 防盗链 Referer） */
+/** 服务端代理抓取（阅读 App 全部出站都走这里：解决 CORS + 防盗链 Referer）
+ *  瞬时网络错误（ETIMEDOUT/ECONNRESET/DNS 抖动等）自动重试 1 次——
+ *  笔趣阁类小站出口不稳定，单次失败率不低，重试能把可用源明显拉起来 */
 export async function proxyFetch(url: string, opts: FetchOpts = {}): Promise<FetchResult> {
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), opts.timeoutMs ?? 12_000);
-  try {
-    const res = await fetch(url, {
-      method: opts.method || 'GET',
-      headers: opts.headers,
-      body: opts.body,
-      redirect: 'follow',
-      signal: ctrl.signal,
-      cache: 'no-store',
-    });
-    const contentType = res.headers.get('content-type') || '';
-    // html/json 以外的类型（图片等）原样二进制读（封面探测用不到，防卡死）
-    const text = decodeBody(await res.arrayBuffer(), opts.charset, contentType);
-    if (!res.ok && res.status >= 400) {
-      // 403/412 等反爬页面也可能带可用内容，不直接抛错；仅 >=500 视为失败
-      if (res.status >= 500) throw new Error(`站点返回 ${res.status}`);
+  const attempt = async (): Promise<FetchResult> => {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), opts.timeoutMs ?? 12_000);
+    try {
+      // 头值消毒：书源自定义 header 可能带非 ASCII（emoji 锚点等）——HTTP 头只允许可见 ASCII
+      const headers: Record<string, string> = {};
+      for (const [k, v] of Object.entries(opts.headers || {})) {
+        const val = String(v).split('#')[0].replace(/[^\x20-\x7E]/g, '');
+        if (val) headers[k] = val;
+      }
+      const res = await fetch(url, {
+        method: opts.method || 'GET',
+        headers,
+        body: opts.body,
+        redirect: 'follow',
+        signal: ctrl.signal,
+        cache: 'no-store',
+      });
+      const contentType = res.headers.get('content-type') || '';
+      // html/json 以外的类型（图片等）原样二进制读（封面探测用不到，防卡死）
+      const text = decodeBody(await res.arrayBuffer(), opts.charset, contentType);
+      if (!res.ok && res.status >= 400) {
+        // 403/412 等反爬页面也可能带可用内容，不直接抛错；仅 >=500 视为失败
+        if (res.status >= 500) throw new Error(`站点返回 ${res.status}`);
+      }
+      return { text, finalUrl: res.url || url, contentType };
+    } finally {
+      clearTimeout(timer);
     }
-    return { text, finalUrl: res.url || url, contentType };
-  } finally {
-    clearTimeout(timer);
+  };
+  try {
+    return await attempt();
+  } catch (e) {
+    const transient =
+      e instanceof Error &&
+      (e.message === 'fetch failed' ||
+        e.message.includes('aborted') ||
+        /ETIMEDOUT|ECONNRESET|ECONNREFUSED|EHOSTUNREACH|ENETUNREACH|EAI_AGAIN|EPIPE|socket hang up/i.test(
+          `${e.message} ${(e as Error & { cause?: { code?: string } }).cause?.code || ''} ${(e as Error & { cause?: { message?: string } }).cause?.message || ''}`,
+        ));
+    if (!transient) throw e;
+    await new Promise((r) => setTimeout(r, 900));
+    return attempt();
   }
 }
 
@@ -628,9 +666,17 @@ function evalSingle(ctx: Ctx, rule: string, joinAll = false): string {
   // JSON 上下文
   if (ctx.kind === 'json') {
     if (r.startsWith('$')) return jsonScalar(jsonPathAll(ctx.data, r)[0]);
-    // 整串模板（如 https://xx.com/onebook.php?novelid={{$.novelid}}）——晋江 API 源
+    // 整串模板（如 https://xx.com/onebook.php?novelid={{$.novelid}}）——晋江 API 源；
+    // 部分源 URL 选项里写单括号 {$.field}（纵横 bookUrl）→ 归一成双括号再求值
     if (r.includes('{{')) return evalTemplateJson(ctx.data, r);
-    return jsonScalar((ctx.data as Record<string, unknown>)?.[r]);
+    if (/^https?:\/\//.test(r) && /\{\$/.test(r)) {
+      return evalTemplateJson(ctx.data, r.replace(/\{(\$[\w.[\]]*)\}/g, '{{$1}}'));
+    }
+    // 无前缀路径（authorName 直取；data.books 嵌套路径补 $. 再试）
+    const direct = jsonScalar((ctx.data as Record<string, unknown>)?.[r]);
+    if (direct) return direct;
+    if (r.includes('.')) return jsonScalar(jsonPathAll(ctx.data, '$.' + r)[0]);
+    return '';
   }
   // HTML 上下文
   if (r.startsWith('$')) {
@@ -693,7 +739,8 @@ export function evalList(ctx: Ctx, rule: string | undefined): Ctx[] {
     return list.filter((c) => evalRule(c, `text##${regex}##${replacement}`) !== '' || c.kind === 'json');
   };
   if (ctx.kind === 'json') {
-    let vals = main.startsWith('$') ? jsonPathAll(ctx.data, main) : [];
+    // Legado 语义：JSON 规则可省略 $. 前缀（data.datas.list 等同 $.data.datas.list）
+    let vals = main.startsWith('$') ? jsonPathAll(ctx.data, main) : jsonPathAll(ctx.data, '$.' + main);
     // Legado $.data 语义：结果为单个数组 → 展开其元素为列表项（晋江 API 源）
     if (vals.length === 1 && Array.isArray(vals[0])) vals = vals[0] as unknown[];
     return pick(vals.map((v) => ({ kind: 'json', data: v, pageUrl: ctx.pageUrl }) as Ctx));
@@ -776,6 +823,72 @@ function gbkUrlEncode(s: string, charset?: string): string {
   }
 }
 
+/**
+ * 求值 URL 模板里的 {{...}} 内置 JS 表达式（不执行任意 JS，只识别 Legado 常见模式）。
+ * 真实阅读 App 里这些表达式几乎都「返回站点根 URL」：
+ * - cookie.removeCookie(source.getKey()) / source.key / baseUrl / host
+ * - java.connect(source.getKey()).raw().request().url()（跟随重定向后的根地址）
+ * - source.getVariable() ? ... : source.getKey()（变量未设时回退根地址）
+ * 其余数值/编码类：page-1 / Date.now() / encodeURI(key) / java.put('x',key)。
+ * 返回 null = 无法识别（保留原样）。
+ */
+function evalUrlExpr(
+  expr: string,
+  sourceUrl: string,
+  vars: Record<string, string>,
+  charset?: string,
+): string | null {
+  const e = expr.trim();
+  // —— 站点根 URL 类（返回 bookSourceUrl 去掉 # 锚点；拼接后统一去重斜杠） ——
+  if (
+    /cookie\.removeCookie|source\.getVariable|source\.getKey|source\.key\b|baseUrl|host\b|java\.connect|getKey\(\)/.test(e) ||
+    /^url\s*=/.test(e) ||
+    /^String\(/.test(e)
+  ) {
+    return sourceUrl.split('#')[0];
+  }
+  // —— page 算术：page-1 / page+2 / (page-1)*12 ——
+  if (/^[-+*/()\d\s]*\bpage\b[-+*/()\d\s]*$/.test(e) || /^(\([^)]*\))?page\s*([+-])\s*(\d+)$/.test(e)) {
+    const page = parseInt(vars.page || '1', 10) || 1;
+    const arith = e.replace(/\bpage\b/g, String(page));
+    if (/^[-+*/()\d\s]+$/.test(arith)) {
+      try {
+        // 白名单校验后的纯算术表达式（仅数字与四则运算符），安全求值
+         
+        const val = Function(`"use strict"; return (${arith});`)() as number;
+        if (Number.isFinite(val)) return String(Math.max(0, Math.round(val)));
+      } catch {
+        /* 非法算式回退 */
+      }
+    }
+    const pm = /^page\s*([+-])\s*(\d+)$/.exec(e);
+    if (pm) {
+      const n = parseInt(pm[2], 10);
+      return String(pm[1] === '-' ? Math.max(0, page - n) : page + n);
+    }
+  }
+  // —— 时间戳 ——
+  if (/Date\.now|new Date|getTime/.test(e)) return String(Date.now());
+  // —— 搜索词编码类 ——
+  if (/encodeURI|encodeURIComponent|java\.encodeUri|base64/i.test(e)) {
+    return gbkUrlEncode(vars.key || '', charset);
+  }
+  // —— java.put('x', key)：存值并返回 key 本身 ——
+  if (/java\.put/.test(e)) return gbkUrlEncode(vars.key || '', charset);
+  return null;
+}
+
+/** URL 规范化：去空白、拼接后的双斜杠去重（保留协议 //；查询串里的 // 不动） */
+function normalizeUrl(u: string): string {
+  let s = u.replace(/\s+/g, '');
+  // 表达式拼接后可能内嵌第二个绝对地址（{{baseUrl}} http://xxx/...）→ 取最后一个绝对 URL
+  const urls = s.match(/https?:\/\/[^\s,]+/g);
+  if (urls && urls.length > 1) s = urls[urls.length - 1];
+  const m = /^(https?:\/\/)([^?]*)(\?.*)?$/.exec(s);
+  if (m) s = m[1] + m[2].replace(/([^/])\/+\//g, '$1/').replace(/\/\/+/g, '/') + (m[3] || '');
+  return s;
+}
+
 export function parseUrlTpl(
   tpl: string,
   sourceUrl: string,
@@ -808,11 +921,22 @@ export function parseUrlTpl(
     }
     return m;
   });
+  // Legado {{...}} JS 表达式（cookie.removeCookie(source.getKey()) 等常见模式 → 求值）
+  urlPart = urlPart.replace(/\{\{([^{}]+)\}\}/g, (m, expr: string) => {
+    const v = evalUrlExpr(expr, sourceUrl, vars, opts.charset);
+    return v == null ? m : v;
+  });
+  // 拼接后规范化：去空白、双斜杠去重（{{baseUrl}}/search/ → .../search/）
+  urlPart = normalizeUrl(urlPart);
   if (opts.body) {
     opts.body = opts.body.replace(/\{\{(\w+)\}\}/g, (m, k: string) => {
       const v = vars[k] ?? '';
       if (k === 'key') return gbkUrlEncode(v, opts.charset);
       return encodeURIComponent(v);
+    });
+    opts.body = opts.body.replace(/\{\{([^{}]+)\}\}/g, (m, expr: string) => {
+      const v = evalUrlExpr(expr, sourceUrl, vars, opts.charset);
+      return v == null ? m : v;
     });
   }
   return {
@@ -825,14 +949,40 @@ export function parseUrlTpl(
 }
 
 async function fetchCtx(source: LegadoSource, p: ParsedUrl): Promise<{ ctx: Ctx; finalUrl: string }> {
-  const headers = { ...sourceHeaders(source, p.url), ...(p.headers || {}) };
+  // 规则里带出的 URL 可能自带尾部 ,{"method":"POST",...} 选项（如纵横 bookUrl 直指 POST API）
+  let { url, method, body, charset } = p;
+  const headers = { ...sourceHeaders(source, url), ...(p.headers || {}) };
+  const braceAt = url.lastIndexOf(',{');
+  if (braceAt >= 0 && url.trimEnd().endsWith('}')) {
+    try {
+      const o = JSON.parse(url.slice(braceAt + 1)) as Record<string, unknown>;
+      if (o && typeof o === 'object' && (o.method || o.body || o.headers || o.charset)) {
+        if (typeof o.method === 'string') method = o.method.toUpperCase();
+        if (typeof o.body === 'string') body = o.body;
+        if (typeof o.charset === 'string') charset = o.charset;
+        if (o.headers && typeof o.headers === 'object') Object.assign(headers, o.headers);
+        url = normalizeUrl(url.slice(0, braceAt));
+      }
+    } catch {
+      /* 非 JSON 选项，当作普通 URL */
+    }
+  }
   // 书源可自定义超时（慢站如 52书库 10-15s；默认 12s）
   const srcTimeout = typeof source.timeoutMs === 'number' && source.timeoutMs > 0 ? source.timeoutMs : undefined;
-  const res = await proxyFetch(p.url, {
-    method: p.method,
+  // POST body 默认表单编码（Node fetch 不设 Content-Type 时会发 text/plain，
+  // 多数笔趣阁的 PHP 搜索接口解析不出参数 → 空结果页）
+  if (
+    (method === 'POST' || method === 'PUT') &&
+    body &&
+    !Object.keys(headers).some((h) => h.toLowerCase() === 'content-type')
+  ) {
+    headers['Content-Type'] = 'application/x-www-form-urlencoded';
+  }
+  const res = await proxyFetch(url, {
+    method,
     headers,
-    body: p.body,
-    charset: p.charset,
+    body,
+    charset,
     ...(srcTimeout ? { timeoutMs: srcTimeout } : {}),
   });
   const trimmed = res.text.trimStart();

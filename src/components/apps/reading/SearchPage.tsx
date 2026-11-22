@@ -10,7 +10,7 @@
  * - 实现：客户端逐源调 POST /api/reading/search（并发 6，可用源优先），AbortController 暂停
  * - 筛选：全部启用源 / 仅实测可用源（可用源优先出结果，几百源不用等太久）
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Search, X, Pause, Play, Loader2, Clock3, Flame, Trash2, ChevronLeft, SlidersHorizontal, Check } from 'lucide-react';
 import { useReading } from '@/lib/reading/store';
 import {
@@ -34,6 +34,22 @@ interface Group {
 function groupKey(b: SearchBookItem) {
   return `${b.name}::${b.author}`.toLowerCase();
 }
+
+// ---------------------------------------------------------------------------
+// 搜索状态快照（返回不丢结果）：模块级缓存，跨组件卸载/重挂保留。
+// 进入详情页再返回时（SubPage restore 标记）从快照整体恢复，
+// 关键词/结果列表/进度/滚动位置都与离开时一模一样。
+// ---------------------------------------------------------------------------
+interface SearchSnapshot {
+  keyword: string;
+  groups: [string, Group][];
+  found: number;
+  searched: number;
+  scope: 'all' | 'ok';
+  scrollTop: number;
+  at: number;
+}
+let lastSnapshot: SearchSnapshot | null = null;
 
 // ---------------------------------------------------------------------------
 // 搜索历史（localStorage，最多 12 条）
@@ -99,28 +115,68 @@ export function SearchPage({
   onBack,
   onOpenBook,
 }: {
-  page: { kind: 'search'; keyword?: string; autoRun?: boolean };
+  page: { kind: 'search'; keyword?: string; autoRun?: boolean; restore?: boolean };
   onBack: () => void;
   onOpenBook: (book: SearchBookItem, sourceId: string) => void;
 }) {
   const settings = useReading((s) => s.settings);
   const sources = useReading((s) => s.sources);
   const theme = useMemo(() => themeOf(settings.appTheme), [settings.appTheme]);
-  const [kw, setKw] = useState(page.keyword || '');
+  /** 返回恢复：优先用快照初始化（关键词/结果/进度/滚动位置）；新搜索从 page.keyword 开始 */
+  const restored =
+    page.restore && lastSnapshot && lastSnapshot.groups.length > 0 && Date.now() - lastSnapshot.at < 10 * 60_000
+      ? lastSnapshot
+      : null;
+  const [kw, setKw] = useState(restored ? restored.keyword : page.keyword || '');
   const [running, setRunning] = useState(false);
-  const [found, setFound] = useState(0);
-  const [searched, setSearched] = useState(0);
-  const [groups, setGroups] = useState<Map<string, Group>>(new Map());
+  const [found, setFound] = useState(restored ? restored.found : 0);
+  const [searched, setSearched] = useState(restored ? restored.searched : 0);
+  const [groups, setGroups] = useState<Map<string, Group>>(
+    () => (restored ? new Map(restored.groups) : new Map()),
+  );
   const abortRef = useRef<AbortController | null>(null);
   const queueRef = useRef<SourceItem[]>([]);
   const startedRef = useRef(false);
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  /** 滚动位置实时记录（onScroll 写 ref，不触发重渲染；卸载时 ref 已脱挂，从这里取值） */
+  const scrollTopRef = useRef(0);
   /** 搜索历史（惰性初始化：该页仅在客户端导航后渲染，localStorage 可直接读） */
   const [history, setHistory] = useState<string[]>(() => (typeof window === 'undefined' ? [] : loadHistory()));
-  /** 搜索范围（持久化） */
-  const [scope, setScope] = useState<'all' | 'ok'>(() =>
-    typeof window === 'undefined' ? 'all' : localStorage.getItem(SCOPE_KEY) === 'ok' ? 'ok' : 'all',
+  /** 搜索范围（持久化；返回恢复时用快照值） */
+  const [scope, setScope] = useState<'all' | 'ok'>(
+    restored
+      ? restored.scope
+      : typeof window === 'undefined'
+        ? 'all'
+        : localStorage.getItem(SCOPE_KEY) === 'ok'
+          ? 'ok'
+          : 'all',
   );
   const [scopeOpen, setScopeOpen] = useState(false);
+
+  /** 返回恢复：滚动位置回到离开时的地方 */
+  useLayoutEffect(() => {
+    if (restored && scrollRef.current) scrollRef.current.scrollTop = restored.scrollTop;
+     
+  }, []);
+
+  /** 状态变化持续写快照；卸载时（进详情页/离开）补写——拿到离开瞬间的滚动位置 */
+  useEffect(() => {
+    const save = () => {
+      if (!kw.trim() && groups.size === 0) return;
+      lastSnapshot = {
+        keyword: kw,
+        groups: [...groups.entries()],
+        found,
+        searched,
+        scope,
+        scrollTop: scrollTopRef.current,
+        at: Date.now(),
+      };
+    };
+    save();
+    return save;
+  }, [kw, groups, found, searched, scope]);
 
   /** 参与搜索的源：范围筛选（全部启用 / 仅实测可用）+ 可用源排前（好源先出结果） */
   const enabledSources = useMemo(() => {
@@ -207,10 +263,11 @@ export function SearchPage({
   );
 
   useEffect(() => {
-    if (page.autoRun && page.keyword && !startedRef.current) {
+    if (page.autoRun && page.keyword && !startedRef.current && !restored) {
       startedRef.current = true;
       void runSearch(page.keyword);
     }
+     
   }, [page.autoRun, page.keyword, runSearch]);
 
   const pause = () => {
@@ -390,7 +447,13 @@ export function SearchPage({
       </div>
 
       {/* 结果列表 / 空态（搜索历史 + 热门搜索）；底部状态胶囊显示时预留空间不遮挡 */}
-      <div className={`min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 ${running || searched > 0 ? 'pb-24' : 'pb-10'}`}>
+      <div
+        ref={scrollRef}
+        onScroll={(e) => {
+          scrollTopRef.current = e.currentTarget.scrollTop;
+        }}
+        className={`min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 ${running || searched > 0 ? 'pb-24' : 'pb-10'}`}
+      >
         {/* 搜索历史 */}
         {!running && !hasResults && history.length > 0 && (
           <section className="mt-1">

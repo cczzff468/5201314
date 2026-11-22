@@ -76,8 +76,8 @@ export function RankingPage({
   return (
     <div className="flex h-full flex-col">
       <SubNavBar title="排行榜" onBack={onBack} theme={theme} />
-      {/* 榜单切换胶囊行 */}
-      <div className="flex flex-wrap gap-2 px-4 pb-3">
+      {/* 榜单切换胶囊行（iOS 式单行横滑，无滚动条） */}
+      <div className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-3 no-scrollbar">
         {boards.map((b) => {
           const on = board === b.key;
           return (
@@ -86,7 +86,7 @@ export function RankingPage({
               type="button"
               onClick={() => setBoard(b.key)}
               aria-pressed={on}
-              className="flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-[13px] font-medium backdrop-blur-xl transition-all active:scale-95"
+              className="flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full px-3.5 py-1.5 text-[13px] font-medium backdrop-blur-xl transition-all active:scale-95"
               style={
                 on
                   ? { background: `linear-gradient(135deg, ${theme.gradFrom}, ${theme.gradTo})`, color: '#fff', boxShadow: `0 4px 14px ${theme.accent}44` }

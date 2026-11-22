@@ -354,12 +354,12 @@ export function HomeTab({
           </button>
         )}
 
-        {/* 分类胶囊 + 排行榜入口（点击进入分类浏览页；自适应换行，不做横向滚动） */}
-        <div className="mt-4 flex flex-wrap gap-2">
+        {/* 分类胶囊 + 排行榜入口（点击进入分类浏览页；iOS 式单行横滑，无滚动条） */}
+        <div className="-mx-4 mt-4 flex gap-2 overflow-x-auto px-4 pb-1 no-scrollbar">
           <button
             type="button"
             onClick={onOpenRank}
-            className="flex h-8 items-center gap-1.5 whitespace-nowrap rounded-full px-4 text-[13px] font-medium backdrop-blur-xl active:scale-95"
+            className="flex h-8 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full px-4 text-[13px] font-medium backdrop-blur-xl active:scale-95"
             style={{ ...glass, color: '#E0A13A', boxShadow: `inset 0 0 0 1px rgba(224,161,58,0.35)` }}
           >
             <Trophy className="h-3.5 w-3.5" strokeWidth={2.4} /> 排行榜
@@ -369,7 +369,7 @@ export function HomeTab({
               key={c}
               type="button"
               onClick={() => onOpenCategory(c)}
-              className="h-8 whitespace-nowrap rounded-full px-4 text-[13px] font-medium backdrop-blur-xl active:scale-95"
+              className="h-8 shrink-0 whitespace-nowrap rounded-full px-4 text-[13px] font-medium backdrop-blur-xl active:scale-95"
               style={
                 c === '热门'
                   ? { background: `linear-gradient(135deg, ${theme.gradFrom}, ${theme.gradTo})`, boxShadow: `0 4px 14px ${theme.accent}44`, color: '#fff' }
@@ -389,14 +389,14 @@ export function HomeTab({
                 根据书架推荐
               </h2>
             </div>
-            {/* 自适应网格（每行 3 本，与「为你推荐」一致，无横向滚动） */}
-            <div className="grid grid-cols-3 gap-x-3 gap-y-4">
+            {/* 横向滚动封面卡（原来的横向滚动；no-scrollbar 无滚动条） */}
+            <div className="-mx-4 flex gap-3 overflow-x-auto px-4 pb-1 no-scrollbar">
               {recForYou.map((b) => (
                 <button
                   key={b.name}
                   type="button"
                   onClick={() => onSearch(b.name)}
-                  className="w-full text-left active:scale-95"
+                  className="w-[86px] shrink-0 text-left active:scale-95"
                 >
                   <CoverCard b={{ name: b.name, author: b.author, tag: b.tag }} subtitle={b.reason} />
                 </button>
@@ -421,14 +421,14 @@ export function HomeTab({
                 全部 ›
               </button>
             </div>
-            {/* 自适应网格（每行 3 本，与「为你推荐」一致，无横向滚动） */}
-            <div className="grid grid-cols-3 gap-x-3 gap-y-4">
+            {/* 横向滚动封面卡（原来的横向滚动；no-scrollbar 无滚动条） */}
+            <div className="-mx-4 flex gap-3 overflow-x-auto px-4 pb-1 no-scrollbar">
               {FEATURED[cat].slice(0, 6).map((b) => (
                 <button
                   key={b.name}
                   type="button"
                   onClick={() => onSearch(b.name)}
-                  className="w-full text-left active:scale-95"
+                  className="w-[86px] shrink-0 text-left active:scale-95"
                 >
                   <CoverCard b={b} />
                 </button>

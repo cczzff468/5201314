@@ -849,14 +849,14 @@ export function BookDetail({
               <p className="text-[16px] font-bold" style={{ color: theme.textMain }}>
                 看了本书的还在看
               </p>
-              {/* 自适应网格（每行 3 本，无横向滚动，不再破出卡片内边距） */}
-              <div className="mt-2.5 grid grid-cols-3 gap-x-3 gap-y-3">
+              {/* 横向滚动封面卡（原来的横向滚动；no-scrollbar 无滚动条） */}
+              <div className="-mx-4 mt-2.5 flex gap-3 overflow-x-auto px-4 pb-1 no-scrollbar">
                 {similar.map((b) => (
                   <button
                     key={b.name}
                     type="button"
                     onClick={() => onSwitchSource({ name: b.name, author: b.author, bookUrl: '', sourceName: '', sourceUrl: '' })}
-                    className="w-full text-left active:scale-95"
+                    className="w-[86px] shrink-0 text-left active:scale-95"
                   >
                     <div
                       className="flex aspect-[3/4.2] w-full flex-col items-center justify-center gap-1.5 overflow-hidden rounded-xl p-2"

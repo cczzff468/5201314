@@ -38,7 +38,7 @@ export type TabKey = 'home' | 'shelf' | 'history' | 'me';
 /** 子页面（栈式导航） */
 export type SubPage =
   | { kind: 'none' }
-  | { kind: 'search'; keyword?: string; autoRun?: boolean }
+  | { kind: 'search'; keyword?: string; autoRun?: boolean; restore?: boolean }
   | { kind: 'detail'; sourceId: string; book: SearchBookItem }
   | {
       kind: 'reader';
@@ -86,7 +86,10 @@ export default function ReadingApp() {
     setNavDir('pop');
     setHistory((h) => {
       const prev = h[h.length - 1];
-      setPage(prev ?? { kind: 'none' });
+      // 返回搜索页：标记 restore —— 搜索结果/关键词/滚动位置从快照恢复，不重新搜
+      const target =
+        prev && prev.kind === 'search' && !prev.restore ? ({ ...prev, restore: true } as SubPage) : prev;
+      setPage(target ?? { kind: 'none' });
       return h.slice(0, -1);
     });
   }, []);
