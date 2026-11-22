@@ -13,6 +13,11 @@ async function start() {
   await generateConfig()
   require('./server').serveNcmApi({
     checkVersion: true,
+    // 固定 3010：与 Next 代理链（/api/music/ncm → localhost:3010）约定一致。
+    // 必须硬编码——沙箱里若经 `bun run dev`（nodemon）裸启动，serveNcmApi 会退回
+    // process.env.PORT||3000，抢先占住 3000 导致 Next 主服务 EADDRINUSE，
+    // 预览页就会渲染成「网易云音乐API」落地页。
+    port: 3010,
   })
 }
 start()
