@@ -2,7 +2,8 @@
 
 /**
  * 书架 Tab（全功能版）：
- * - 顶栏：大标题「书架」 + 搜索按钮（书架内过滤） + 三点按钮（多选管理模式）
+ * - 顶栏：大标题「书架」 + 布局切换（网格/列表） + 排序 + 搜索（书架内过滤） + 三点按钮（多选管理模式）
+ * - 布局 / 排序偏好 localStorage 持久化（rd-shelf-layout / rd-shelf-sort）
  * - 自定义分组：胶囊行（全部 / 自定义分组 / +新建 / 本地导入；长按分组可重命名/删除）
  * - 书籍网格：真实封面 / 进度角标 / 长按弹出操作单（转移分组 · 移出书架）
  * - 多选模式：点选多本 → 底部玻璃操作条（全选 · 转移分组 · 移出书架）
@@ -24,6 +25,12 @@ import {
   FolderX,
   FolderUp,
   Loader2,
+  LayoutGrid,
+  List,
+  ArrowUpDown,
+  Clock,
+  CalendarPlus,
+  CaseSensitive,
 } from 'lucide-react';
 import { useReading } from '@/lib/reading/store';
 import { api, coverSrc, CoverPlaceholder, themeOf, useFeaturedCovers, type ShelfBookItem } from './shared';
@@ -40,6 +47,51 @@ type Sheet =
   | { kind: 'groupInput'; rename?: string };
 
 const UNGROUPED = '__ungrouped__';
+
+/** 书架布局偏好（localStorage 持久化键 rd-shelf-layout） */
+type ShelfLayout = 'grid' | 'list';
+/** 书架排序偏好（localStorage 持久化键 rd-shelf-sort） */
+type ShelfSort = 'recent' | 'added' | 'name';
+const LS_LAYOUT_KEY = 'rd-shelf-layout';
+const LS_SORT_KEY = 'rd-shelf-sort';
+
+/** 读 localStorage 枚举偏好：非法值/读不到（隐私模式等）→ 回退默认值 */
+function lsPref<T extends string>(key: string, valid: readonly T[], fallback: T): T {
+  try {
+    const v = window.localStorage.getItem(key);
+    return v !== null && (valid as readonly string[]).includes(v) ? (v as T) : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+/** 排序选项（label 同时用于书架计数行的提示文案） */
+const SORT_OPTIONS: { key: ShelfSort; label: string; desc: string; icon: React.ReactNode }[] = [
+  { key: 'recent', label: '最近阅读', desc: '按最后阅读时间从新到旧', icon: <Clock className="h-[18px] w-[18px]" /> },
+  { key: 'added', label: '加入时间', desc: '最新加入的排在前面', icon: <CalendarPlus className="h-[18px] w-[18px]" /> },
+  { key: 'name', label: '书名', desc: '按书名拼音 A → Z', icon: <CaseSensitive className="h-[18px] w-[18px]" /> },
+];
+
+/** 当前列表排序（只调顺序，不动分组）：
+ *  - recent：lastReadAt 降序，无阅读时间的排到最后
+ *  - added：ShelfBook 没有加入时间字段，id 是 cuid（内嵌时间戳、字典序≈创建先后），
+ *    用 id 降序近似「最近加入的在前」
+ *  - name：zh-Hans-CN 拼音升序 */
+function sortShelf(books: ShelfBookItem[], key: ShelfSort): ShelfBookItem[] {
+  const arr = [...books]; // 排序前拷贝，绝不改动 store 里的原数组
+  if (key === 'added') {
+    arr.sort((a, b) => (a.id > b.id ? -1 : a.id < b.id ? 1 : 0));
+  } else if (key === 'name') {
+    arr.sort((a, b) => a.name.localeCompare(b.name, 'zh-Hans-CN'));
+  } else {
+    const ts = (b: ShelfBookItem) => {
+      const ms = Date.parse(b.lastReadAt || '');
+      return Number.isFinite(ms) ? ms : 0; // 无/非法阅读时间 → 0，自然排到最后
+    };
+    arr.sort((a, b) => ts(b) - ts(a));
+  }
+  return arr;
+}
 
 export function ShelfTab({
   onOpen,
@@ -78,10 +130,37 @@ export function ShelfTab({
     const name = coverlessNames.find((n) => hookedCovers[n] === url);
     if (name) retryCover(name); // 跨源封面也挂了 → 服务端换地址重搜一次
   };
+  /** 取可用封面地址（coverSrc 优先 → 跨源封面兜底；是否回退占位图由渲染处的 coverFails 决定） */
+  const coverOf = (b: ShelfBookItem) => {
+    const hooked = hookedCovers[b.name];
+    return coverSrc(b.coverUrl, b.sourceId) || (hooked && !coverFails.has(hooked) ? hooked : undefined);
+  };
   /** 本地导入 */
   const fileRef = useRef<HTMLInputElement>(null);
   const [importing, setImporting] = useState(false);
   const [toast, setToast] = useState('');
+
+  /** 布局 / 排序偏好（localStorage 持久化；本 App 经 dynamic(ssr:false) 挂载，初始化可直接读 localStorage，无水合不一致问题） */
+  const [layout, setLayout] = useState<ShelfLayout>(() => lsPref(LS_LAYOUT_KEY, ['grid', 'list'], 'grid'));
+  const [sortKey, setSortKey] = useState<ShelfSort>(() => lsPref(LS_SORT_KEY, ['recent', 'added', 'name'], 'recent'));
+  const [sortOpen, setSortOpen] = useState(false);
+  const applyLayout = (l: ShelfLayout) => {
+    setLayout(l);
+    try {
+      window.localStorage.setItem(LS_LAYOUT_KEY, l);
+    } catch {
+      /* 写不进也不影响本次会话内生效 */
+    }
+  };
+  const applySort = (k: ShelfSort) => {
+    setSortKey(k);
+    setSortOpen(false);
+    try {
+      window.localStorage.setItem(LS_SORT_KEY, k);
+    } catch {
+      /* 写不进也不影响本次会话内生效 */
+    }
+  };
 
   const notify = (t: string) => {
     setToast(t);
@@ -108,12 +187,14 @@ export function ShelfTab({
   const list = useMemo(() => {
     const k = kw.trim().toLowerCase();
     // 搜索时跨全部分组找书（用户预期：搜书架 = 搜整个书架）
-    if (k) return shelf.filter((b) => b.name.toLowerCase().includes(k) || (b.author || '').toLowerCase().includes(k));
-    let l = shelf;
-    if (group === UNGROUPED) l = l.filter((b) => !b.customGroup);
-    else if (group !== '全部') l = l.filter((b) => b.customGroup === group);
-    return l;
-  }, [shelf, group, kw]);
+    let l: ShelfBookItem[];
+    if (k) l = shelf.filter((b) => b.name.toLowerCase().includes(k) || (b.author || '').toLowerCase().includes(k));
+    else if (group === UNGROUPED) l = shelf.filter((b) => !b.customGroup);
+    else if (group !== '全部') l = shelf.filter((b) => b.customGroup === group);
+    else l = shelf;
+    // 排序只调整当前列表的显示顺序，不改变分组归属
+    return sortShelf(l, sortKey);
+  }, [shelf, group, kw, sortKey]);
 
   const glass = { background: theme.cardBg, boxShadow: 'inset 0 0 0 1px ' + theme.cardRing } as const;
   const selectedCount = selected.size;
@@ -191,6 +272,26 @@ export function ShelfTab({
           书架
         </h1>
         <div className="flex gap-2.5">
+          {/* 布局切换（网格 ⇄ 列表，图标显示将要切到的布局） */}
+          <button
+            type="button"
+            onClick={() => applyLayout(layout === 'grid' ? 'list' : 'grid')}
+            aria-label={layout === 'grid' ? '切换为列表布局' : '切换为网格布局'}
+            className="flex h-11 w-11 items-center justify-center rounded-full backdrop-blur-xl active:scale-90"
+            style={{ ...glass, color: theme.textMain }}
+          >
+            {layout === 'grid' ? <List className="h-5 w-5" strokeWidth={2.2} /> : <LayoutGrid className="h-5 w-5" strokeWidth={2.2} />}
+          </button>
+          {/* 排序（非默认排序时用主题色高亮） */}
+          <button
+            type="button"
+            onClick={() => setSortOpen(true)}
+            aria-label="书架排序"
+            className="flex h-11 w-11 items-center justify-center rounded-full backdrop-blur-xl active:scale-90"
+            style={{ ...glass, color: sortKey === 'recent' ? theme.textMain : theme.accent }}
+          >
+            <ArrowUpDown className="h-5 w-5" strokeWidth={2.2} />
+          </button>
           <button
             type="button"
             onClick={() => {
@@ -346,80 +447,149 @@ export function ShelfTab({
         </div>
       ) : (
         <p className="mt-2 px-1 text-[11px]" style={{ color: theme.textSub }}>
-          {selectMode ? `点选书籍（已选 ${selectedCount} 本）` : `${list.length} 本书${group !== '全部' ? ` · ${group === UNGROUPED ? '未分组' : group}` : ''}`}
+          {selectMode
+            ? `点选书籍（已选 ${selectedCount} 本）`
+            : `${list.length} 本书${group !== '全部' ? ` · ${group === UNGROUPED ? '未分组' : group}` : ''} · 排序：${SORT_OPTIONS.find((s) => s.key === sortKey)?.label ?? '最近阅读'}`}
         </p>
       )}
 
-      {/* 书籍网格 */}
-      <div className="mt-2 grid grid-cols-3 gap-x-3 gap-y-5">
-        {list.map((b) => {
-          const unread = Math.max(0, b.totalChapters - b.lastReadChapter - 1);
-          const hooked = hookedCovers[b.name];
-          const cover = coverSrc(b.coverUrl, b.sourceId) || (hooked && !coverFails.has(hooked) ? hooked : undefined);
-          const checked = selected.has(b.bookUrl);
-          return (
-            <div key={b.bookUrl} className="relative">
-              <button
-                type="button"
-                onClick={() => (selectMode ? toggleSelect(b.bookUrl) : onOpen(b))}
-                onTouchStart={() => {
-                  if (!selectMode) startPress(b);
-                }}
-                onTouchEnd={cancelPress}
-                onTouchMove={cancelPress}
-                onContextMenu={(e) => {
-                  if (!selectMode) {
-                    e.preventDefault();
-                    setSheet({ kind: 'book', book: b });
-                  }
-                }}
-                className="w-full text-left active:scale-95"
-              >
-                <div
-                  className={`relative aspect-[3/4.2] w-full overflow-hidden rounded-xl shadow-[0_6px_18px_rgba(0,0,0,0.12)] ring-1 ring-black/5 transition-transform ${pressBook?.bookUrl === b.bookUrl ? 'scale-95' : ''}`}
+      {/* 书籍网格（默认布局，样式保持不变） */}
+      {layout === 'grid' && (
+        <div className="mt-2 grid grid-cols-3 gap-x-3 gap-y-5">
+          {list.map((b) => {
+            const unread = Math.max(0, b.totalChapters - b.lastReadChapter - 1);
+            const cover = coverOf(b);
+            const checked = selected.has(b.bookUrl);
+            return (
+              <div key={b.bookUrl} className="relative">
+                <button
+                  type="button"
+                  onClick={() => (selectMode ? toggleSelect(b.bookUrl) : onOpen(b))}
+                  onTouchStart={() => {
+                    if (!selectMode) startPress(b);
+                  }}
+                  onTouchEnd={cancelPress}
+                  onTouchMove={cancelPress}
+                  onContextMenu={(e) => {
+                    if (!selectMode) {
+                      e.preventDefault();
+                      setSheet({ kind: 'book', book: b });
+                    }
+                  }}
+                  className="w-full text-left active:scale-95"
                 >
-                  {cover && !coverFails.has(cover) ? (
-                    <img src={cover} alt={`${b.name} 封面`} className="h-full w-full object-cover" loading="lazy" referrerPolicy="no-referrer" onError={() => onCoverError(cover)} />
-                  ) : (
-                    <CoverPlaceholder name={b.name} author={b.author} className="h-full w-full" radius="rounded-none" />
-                  )}
-                  {/* 阅读进度玻璃胶囊 */}
-                  <span className="absolute left-1 top-1 rounded-full px-1.5 py-0.5 text-[9px] font-semibold text-white backdrop-blur-md" style={{ background: 'rgba(0,0,0,0.38)' }}>
-                    {b.lastReadChapter + 1}/{b.totalChapters}
+                  <div
+                    className={`relative aspect-[3/4.2] w-full overflow-hidden rounded-xl shadow-[0_6px_18px_rgba(0,0,0,0.12)] ring-1 ring-black/5 transition-transform ${pressBook?.bookUrl === b.bookUrl ? 'scale-95' : ''}`}
+                  >
+                    {cover && !coverFails.has(cover) ? (
+                      <img src={cover} alt={`${b.name} 封面`} className="h-full w-full object-cover" loading="lazy" referrerPolicy="no-referrer" onError={() => onCoverError(cover)} />
+                    ) : (
+                      <CoverPlaceholder name={b.name} author={b.author} className="h-full w-full" radius="rounded-none" />
+                    )}
+                    {/* 阅读进度玻璃胶囊 */}
+                    <span className="absolute left-1 top-1 rounded-full px-1.5 py-0.5 text-[9px] font-semibold text-white backdrop-blur-md" style={{ background: 'rgba(0,0,0,0.38)' }}>
+                      {b.lastReadChapter + 1}/{b.totalChapters}
+                    </span>
+                    {unread > 0 && !selectMode && (
+                      <span className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/70 to-transparent px-1.5 pb-1 pt-4 text-[10px] font-medium text-white">
+                        {unread}章未读
+                      </span>
+                    )}
+                    {/* 分组角标 */}
+                    {!selectMode && b.customGroup && (
+                      <span className="absolute right-1 top-1 max-w-[70%] truncate rounded-full px-1.5 py-0.5 text-[9px] font-medium text-white backdrop-blur-md" style={{ background: 'rgba(0,0,0,0.38)' }}>
+                        {b.customGroup}
+                      </span>
+                    )}
+                    {/* 多选圈 */}
+                    {selectMode && (
+                      <span
+                        className={`absolute right-1.5 top-1.5 flex h-6 w-6 items-center justify-center rounded-full border-2 backdrop-blur-md ${checked ? 'border-white' : 'border-white/70'}`}
+                        style={checked ? { background: theme.accent } : { background: 'rgba(0,0,0,0.30)' }}
+                      >
+                        {checked && <Check className="h-3.5 w-3.5 text-white" strokeWidth={3} />}
+                      </span>
+                    )}
+                  </div>
+                  <p className="mt-1.5 truncate text-[13px] font-semibold" style={{ color: theme.textMain }}>
+                    {b.name}
+                  </p>
+                  <p className="flex items-center gap-0.5 truncate text-[11px]" style={{ color: theme.textSub }}>
+                    <BookOpen className="h-3 w-3 shrink-0" />
+                    {b.sourceName || '未知源'}
+                  </p>
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* 书籍列表（横向卡片：封面 + 书名/作者/进度 + 细进度条） */}
+      {layout === 'list' && (
+        <div className="mt-2 flex flex-col gap-2">
+          {list.map((b) => {
+            const cover = coverOf(b);
+            const checked = selected.has(b.bookUrl);
+            // 已读章节占总章节的比例 → 底部细进度条宽度
+            const pct = b.totalChapters > 0 ? Math.min(100, Math.round(((b.lastReadChapter + 1) / b.totalChapters) * 100)) : 0;
+            return (
+              <div key={b.bookUrl} className="relative">
+                <button
+                  type="button"
+                  onClick={() => (selectMode ? toggleSelect(b.bookUrl) : onOpen(b))}
+                  onTouchStart={() => {
+                    if (!selectMode) startPress(b);
+                  }}
+                  onTouchEnd={cancelPress}
+                  onTouchMove={cancelPress}
+                  onContextMenu={(e) => {
+                    if (!selectMode) {
+                      e.preventDefault();
+                      setSheet({ kind: 'book', book: b });
+                    }
+                  }}
+                  className={`flex w-full items-center gap-3 rounded-2xl p-2.5 text-left backdrop-blur-xl transition-transform active:scale-95 ${pressBook?.bookUrl === b.bookUrl ? 'scale-95' : ''}`}
+                  style={glass}
+                >
+                  {/* 封面（52x70 圆角） */}
+                  <span className="relative block h-[70px] w-[52px] shrink-0 overflow-hidden rounded-lg shadow-[0_4px_12px_rgba(0,0,0,0.12)] ring-1 ring-black/5">
+                    {cover && !coverFails.has(cover) ? (
+                      <img src={cover} alt={`${b.name} 封面`} className="h-full w-full object-cover" loading="lazy" referrerPolicy="no-referrer" onError={() => onCoverError(cover)} />
+                    ) : (
+                      <CoverPlaceholder name={b.name} author={b.author} className="h-full w-full" radius="rounded-none" />
+                    )}
                   </span>
-                  {unread > 0 && !selectMode && (
-                    <span className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/70 to-transparent px-1.5 pb-1 pt-4 text-[10px] font-medium text-white">
-                      {unread}章未读
+                  {/* 书名 / 作者 / 进度 + 细进度条 */}
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-[15px] font-bold" style={{ color: theme.textMain }}>
+                      {b.name}
                     </span>
-                  )}
-                  {/* 分组角标 */}
-                  {!selectMode && b.customGroup && (
-                    <span className="absolute right-1 top-1 max-w-[70%] truncate rounded-full px-1.5 py-0.5 text-[9px] font-medium text-white backdrop-blur-md" style={{ background: 'rgba(0,0,0,0.38)' }}>
-                      {b.customGroup}
+                    <span className="mt-0.5 block truncate text-[12px]" style={{ color: theme.textSub }}>
+                      {b.author || '佚名'} · {b.sourceName || '未知源'}
                     </span>
-                  )}
-                  {/* 多选圈 */}
-                  {selectMode && (
-                    <span
-                      className={`absolute right-1.5 top-1.5 flex h-6 w-6 items-center justify-center rounded-full border-2 backdrop-blur-md ${checked ? 'border-white' : 'border-white/70'}`}
-                      style={checked ? { background: theme.accent } : { background: 'rgba(0,0,0,0.30)' }}
-                    >
-                      {checked && <Check className="h-3.5 w-3.5 text-white" strokeWidth={3} />}
+                    <span className="mt-1 block truncate text-[12px] tabular-nums" style={{ color: theme.textSub }}>
+                      第 {b.lastReadChapter + 1}/{b.totalChapters} 章
                     </span>
-                  )}
-                </div>
-                <p className="mt-1.5 truncate text-[13px] font-semibold" style={{ color: theme.textMain }}>
-                  {b.name}
-                </p>
-                <p className="flex items-center gap-0.5 truncate text-[11px]" style={{ color: theme.textSub }}>
-                  <BookOpen className="h-3 w-3 shrink-0" />
-                  {b.sourceName || '未知源'}
-                </p>
-              </button>
-            </div>
-          );
-        })}
-      </div>
+                    <span className="mt-1.5 block h-1 w-full overflow-hidden rounded-full" style={{ background: theme.accentSoft }}>
+                      <span className="block h-full rounded-full" style={{ width: `${pct}%`, background: theme.accent }} />
+                    </span>
+                  </span>
+                </button>
+                {/* 多选勾选角标（列表行左侧，压在封面左上角） */}
+                {selectMode && (
+                  <span
+                    className={`pointer-events-none absolute left-1 top-1 flex h-6 w-6 items-center justify-center rounded-full border-2 backdrop-blur-md ${checked ? 'border-white' : 'border-white/70'}`}
+                    style={checked ? { background: theme.accent } : { background: 'rgba(0,0,0,0.30)' }}
+                  >
+                    {checked && <Check className="h-3.5 w-3.5 text-white" strokeWidth={3} />}
+                  </span>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
 
       {/* 多选底部操作条（脱离滚动的玻璃条，悬于 TabBar 之上） */}
       {selectMode && (
@@ -640,6 +810,52 @@ export function ShelfTab({
           )}
         </div>
       )}
+
+      {/* 排序抽屉（底部玻璃 sheet） */}
+      {sortOpen && (
+        <div className="absolute inset-0 z-40" role="dialog" aria-label="书架排序">
+          <button type="button" aria-label="关闭排序" className="absolute inset-0 bg-black/30 backdrop-blur-[2px]" onClick={() => setSortOpen(false)} />
+          <div
+            className="absolute inset-x-0 bottom-0 rounded-t-3xl p-3 pb-[max(16px,env(safe-area-inset-bottom))] shadow-2xl backdrop-blur-2xl"
+            style={{ background: theme.pageBg, boxShadow: `inset 0 0 0 1px ${theme.cardRing}, 0 -12px 48px rgba(0,0,0,0.18)` }}
+          >
+            <p className="px-3 pb-0.5 pt-2 text-[15px] font-bold" style={{ color: theme.textMain }}>
+              排序方式
+            </p>
+            <p className="px-3 pb-1 text-[11px]" style={{ color: theme.textSub }}>
+              只调整当前列表的顺序，不影响分组
+            </p>
+            {SORT_OPTIONS.map((o) => {
+              const active = o.key === sortKey;
+              return (
+                <button
+                  key={o.key}
+                  type="button"
+                  onClick={() => applySort(o.key)}
+                  className="flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-left active:bg-black/[0.03]"
+                >
+                  <span
+                    className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full"
+                    style={active ? { background: theme.accent, color: '#fff' } : { background: theme.accentSoft, color: theme.accent }}
+                  >
+                    {o.icon}
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-[14px] font-medium" style={{ color: active ? theme.accent : theme.textMain }}>
+                      {o.label}
+                    </span>
+                    <span className="block truncate text-[11px]" style={{ color: theme.textSub }}>
+                      {o.desc}
+                    </span>
+                  </span>
+                  {active && <Check className="h-[18px] w-[18px] shrink-0" strokeWidth={2.5} style={{ color: theme.accent }} />}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {/* 轻提示 */}
       {toast && (
         <div className="pointer-events-none absolute inset-x-0 top-16 z-[60] flex justify-center px-6">

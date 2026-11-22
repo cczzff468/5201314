@@ -1,30 +1,33 @@
 'use client';
 
 /**
- * 聚合搜索页：多书源并行搜索、可暂停/继续、结果按书名+作者聚合「N 个源」徽标。
- * - 空态：搜索历史（localStorage，最多 12 条，单条可删/一键清空）+ 热门搜索（精选书单）
- * - 实现：客户端逐源调 POST /api/reading/search（并发4），AbortController 暂停。
+ * 聚合搜索页（用户设计图同款）：
+ * - 顶栏一体化：返回 + 搜索框 + 蓝色「搜索」按钮 + 筛选（搜索范围）图标（无「聚合搜索」标题）
+ * - 结果行：封面（72×96 圆角描边）｜书名 + 作者 + 右侧「N 个源」浅蓝徽章
+ *   ｜分类小徽章 + 最新章节信息｜简介两行截断
+ * - 无封面 → 浅灰圆角块 + 白字「暂无/封面」占位（设计图同款，不再用书脊风）
+ * - 空态：搜索历史（localStorage，最多 12 条）+ 热门搜索（精选书单）
+ * - 实现：客户端逐源调 POST /api/reading/search（并发 6，可用源优先），AbortController 暂停
+ * - 筛选：全部启用源 / 仅实测可用源（可用源优先出结果，几百源不用等太久）
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Search, X, Pause, Play, Loader2, Clock3, Flame, Trash2 } from 'lucide-react';
+import { Search, X, Pause, Play, Loader2, Clock3, Flame, Trash2, ChevronLeft, SlidersHorizontal, Check } from 'lucide-react';
 import { useReading } from '@/lib/reading/store';
 import {
   HOT_SEARCHES,
+  SB_H,
   api,
   coverSrc,
-  CoverPlaceholder,
   themeOf,
   useFeaturedCovers,
   type SearchBookItem,
   type SourceItem,
 } from './shared';
-import { SubNavBar } from './ReadingApp';
 
 interface Group {
   key: string;
   name: string;
   author: string;
-  covers: (SearchBookItem | undefined)[];
   books: SearchBookItem[];
 }
 
@@ -37,6 +40,8 @@ function groupKey(b: SearchBookItem) {
 // ---------------------------------------------------------------------------
 const HISTORY_KEY = 'rd-search-history-v1';
 const HISTORY_MAX = 12;
+/** 搜索范围偏好：all=全部启用源 ok=仅实测可用源 */
+const SCOPE_KEY = 'rd-search-scope-v1';
 
 function loadHistory(): string[] {
   try {
@@ -53,6 +58,40 @@ function saveHistory(list: string[]) {
   } catch {
     /* 忽略 */
   }
+}
+
+/** 无封面占位（设计图同款）：浅灰圆角块 + 白字「暂无/封面」两行居中 */
+function NoCoverBlock({ radius = 'rounded-xl' }: { radius?: string }) {
+  return (
+    <div
+      className={`flex h-full w-full flex-col items-center justify-center gap-0.5 ${radius}`}
+      style={{ background: '#DDE0E7' }}
+      aria-label="暂无封面"
+    >
+      <span
+        className="text-[15px] font-bold leading-tight text-white"
+        style={{ textShadow: '0 1px 3px rgba(0,0,0,0.38), 0 0 1px rgba(0,0,0,0.4)' }}
+      >
+        暂无
+      </span>
+      <span
+        className="text-[15px] font-bold leading-tight text-white"
+        style={{ textShadow: '0 1px 3px rgba(0,0,0,0.38), 0 0 1px rgba(0,0,0,0.4)' }}
+      >
+        封面
+      </span>
+    </div>
+  );
+}
+
+/** 分类徽章（kind 常为「都市:言情」冒号分隔，取前 2 段） */
+function kindTags(kind?: string): string[] {
+  if (!kind) return [];
+  return kind
+    .split(/[:：/、|]/)
+    .map((x) => x.trim())
+    .filter(Boolean)
+    .slice(0, 2);
 }
 
 export function SearchPage({
@@ -72,22 +111,32 @@ export function SearchPage({
   const [found, setFound] = useState(0);
   const [searched, setSearched] = useState(0);
   const [groups, setGroups] = useState<Map<string, Group>>(new Map());
-  /** 兼容重命名：groupsMap 即 groups（分区排序时统一读它） */
-  const groupsMap = groups;
   const abortRef = useRef<AbortController | null>(null);
   const queueRef = useRef<SourceItem[]>([]);
   const startedRef = useRef(false);
   /** 搜索历史（惰性初始化：该页仅在客户端导航后渲染，localStorage 可直接读） */
   const [history, setHistory] = useState<string[]>(() => (typeof window === 'undefined' ? [] : loadHistory()));
-
-  /** 启用源：实测可用（checkStatus=ok）的排最前——几百源时好源先出结果，死源垫底 */
-  const enabledSources = useMemo(
-    () =>
-      sources
-        .filter((s) => s.enabled)
-        .sort((a, b) => (a.checkStatus === 'ok' ? 0 : 1) - (b.checkStatus === 'ok' ? 0 : 1)),
-    [sources],
+  /** 搜索范围（持久化） */
+  const [scope, setScope] = useState<'all' | 'ok'>(() =>
+    typeof window === 'undefined' ? 'all' : localStorage.getItem(SCOPE_KEY) === 'ok' ? 'ok' : 'all',
   );
+  const [scopeOpen, setScopeOpen] = useState(false);
+
+  /** 参与搜索的源：范围筛选（全部启用 / 仅实测可用）+ 可用源排前（好源先出结果） */
+  const enabledSources = useMemo(() => {
+    const list = scope === 'ok' ? sources.filter((s) => s.enabled && s.checkStatus === 'ok') : sources.filter((s) => s.enabled);
+    return [...list].sort((a, b) => (a.checkStatus === 'ok' ? 0 : 1) - (b.checkStatus === 'ok' ? 0 : 1));
+  }, [sources, scope]);
+
+  const applyScope = (v: 'all' | 'ok') => {
+    setScope(v);
+    try {
+      localStorage.setItem(SCOPE_KEY, v);
+    } catch {
+      /* 忽略 */
+    }
+    setScopeOpen(false);
+  };
 
   const recordHistory = useCallback((k: string) => {
     const key = k.trim();
@@ -136,7 +185,7 @@ export function SearchPage({
                 const next = new Map(prev);
                 for (const b of books) {
                   const gk = groupKey(b);
-                  const g = next.get(gk) || { key: gk, name: b.name, author: b.author, covers: [], books: [] };
+                  const g = next.get(gk) || { key: gk, name: b.name, author: b.author, books: [] };
                   if (!g.books.some((x) => x.sourceName === b.sourceName)) g.books.push(b);
                   next.set(gk, g);
                 }
@@ -150,7 +199,7 @@ export function SearchPage({
           setSearched((n) => n + 1);
         }
       };
-      void Promise.all(Array.from({ length: Math.min(4, enabledSources.length) }, worker)).then(() => {
+      void Promise.all(Array.from({ length: Math.min(6, enabledSources.length) }, worker)).then(() => {
         if (!ctrl.signal.aborted) setRunning(false);
       });
     },
@@ -173,81 +222,101 @@ export function SearchPage({
     if (kw.trim()) void runSearch(kw);
   };
 
-  /** 结果排序：精确匹配在前（按书名→源数），相关书籍在后（按源数）——合并为一个列表不再分区标注 */
+  /** 结果排序：精确匹配在前（按书名→源数），相关书籍在后（按源数） */
   const resultList = useMemo(() => {
     const k = kw.trim().replace(/\s+/g, '');
-    const groups = [...new Map([...groupsMap.values()].map((g) => [g.key, { ...g, books: [...g.books] }])).values()];
-    for (const g of groups) g.books.sort((a, b) => a.sourceName.localeCompare(b.sourceName, 'zh'));
-    const exact: typeof groups = [];
-    const related: typeof groups = [];
-    for (const g of groups) {
+    const list = [...new Map([...groups.values()].map((g) => [g.key, { ...g, books: [...g.books] }])).values()];
+    for (const g of list) g.books.sort((a, b) => a.sourceName.localeCompare(b.sourceName, 'zh'));
+    const exact: typeof list = [];
+    const related: typeof list = [];
+    for (const g of list) {
       (g.name.replace(/\s+/g, '') === k ? exact : related).push(g);
     }
     exact.sort((a, b) => a.name.localeCompare(b.name, 'zh') || b.books.length - a.books.length);
     related.sort((a, b) => b.books.length - a.books.length || a.name.localeCompare(b.name, 'zh'));
     return [...exact, ...related];
-  }, [groupsMap, kw]);
+  }, [groups, kw]);
 
-  /* 搜索结果封面（第七轮）：多数书源的搜索接口不返回封面地址——接入精选封面
-     服务端缓存（按书名跨源找封面 + 落库永久缓存），结果列表不再只有占位图。
-     只拉前 30 组（服务端有补齐退避，名单再多也只会压慢首批） */
+  /* 搜索结果封面：多数书源搜索不返回封面——接入精选封面服务端缓存（按书名跨源找封面） */
   const coverNames = useMemo(() => resultList.slice(0, 30).map((g) => g.name), [resultList]);
   const { covers: hookedCovers, retry: retryCover } = useFeaturedCovers(coverNames);
   const glass = { background: theme.cardBg, boxShadow: 'inset 0 0 0 1px ' + theme.cardRing } as const;
 
-  /** 搜索结果封面加载失败（死链/防盗链）→ 回退书脊风占位图，不显示破图图标 */
+  /** 封面加载失败（死链/防盗链）→ 记地址；挂钩封面失败 → 服务端换地址重试一次 */
   const [coverFails, setCoverFails] = useState<Set<string>>(new Set());
   const onCoverError = (url: string, name?: string) => {
     setCoverFails((s) => new Set(s).add(url));
-    if (name) retryCover(name); // 挂钩封面失败 → 服务端换地址重搜一次（每本仅一次）
+    if (name) retryCover(name);
   };
 
-  /** 单个书籍组卡片 */
+  /** 单个书籍组卡片（设计图样式） */
   const renderGroup = (g: Group) => {
-    // 封面优先级：组内第一个带封面的源（书源有封面就用那个封面）> 跨源封面缓存 > 占位图
+    // 封面优先级：组内第一个带封面的源 > 跨源封面缓存 > 「暂无封面」占位块
     const b0 = g.books.find((b) => b.coverUrl) || g.books[0];
     const hooked = hookedCovers[g.name];
     const cover = b0.coverUrl ? coverSrc(b0.coverUrl, b0.sourceId) : hooked && !coverFails.has(hooked) ? hooked : undefined;
     const coverFromHook = !b0.coverUrl && !!hooked;
+    const tags = kindTags(b0.kind);
+    const latest = b0.lastChapter || '';
     return (
       <button
         key={g.key}
         type="button"
         onClick={() => onOpenBook(b0, b0.sourceId || '')}
-        className="mb-2.5 flex w-full items-center gap-3 rounded-3xl p-3 text-left backdrop-blur-xl active:scale-[0.99]"
+        className="mb-2.5 flex w-full items-start gap-3 rounded-2xl p-3 text-left backdrop-blur-xl active:scale-[0.99]"
         style={glass}
       >
-        {cover && !coverFails.has(cover) ? (
-          <img
-            src={cover}
-            alt=""
-            className="h-[68px] w-[50px] shrink-0 rounded-lg object-cover shadow-sm ring-1 ring-black/5"
-            loading="lazy"
-            referrerPolicy="no-referrer"
-            onError={() => onCoverError(cover, coverFromHook ? g.name : undefined)}
-          />
-        ) : (
-          <CoverPlaceholder name={g.name} author={g.author} className="h-[68px] w-[50px] shrink-0 shadow-sm" radius="rounded-lg" />
-        )}
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
-            <span className="min-w-0 truncate text-[15px] font-bold" style={{ color: theme.textMain }}>
+        {/* 封面：72×96 圆角 + 细描边阴影 */}
+        <div className="h-[96px] w-[72px] shrink-0 overflow-hidden rounded-xl shadow-[0_4px_14px_rgba(0,0,0,0.13)] ring-1 ring-black/5">
+          {cover && !coverFails.has(cover) ? (
+            <img
+              src={cover}
+              alt={`${g.name} 封面`}
+              className="h-full w-full object-cover"
+              loading="lazy"
+              referrerPolicy="no-referrer"
+              onError={() => onCoverError(cover, coverFromHook ? g.name : undefined)}
+            />
+          ) : (
+            <NoCoverBlock />
+          )}
+        </div>
+        <div className="min-w-0 flex-1 pt-0.5">
+          {/* 第一行：书名 + 作者 + 「N 个源」徽章 */}
+          <div className="flex items-baseline gap-2">
+            <span className="min-w-0 shrink truncate text-[16px] font-bold leading-tight" style={{ color: theme.textMain }}>
               {g.name}
             </span>
-            {g.books.length > 1 && (
+            <span className="min-w-0 shrink truncate text-[12px]" style={{ color: theme.textSub }}>
+              {g.author || '佚名'}
+            </span>
+            <span
+              className="ml-auto shrink-0 whitespace-nowrap rounded-full px-2 py-0.5 text-[10px] font-semibold"
+              style={{ background: theme.accentSoft, color: theme.accent }}
+            >
+              {g.books.length} 个源
+            </span>
+          </div>
+          {/* 第二行：分类徽章 + 最新章节 */}
+          <div className="mt-1.5 flex min-w-0 items-center gap-1.5">
+            {tags.map((t) => (
               <span
-                className="shrink-0 whitespace-nowrap rounded-full px-1.5 py-0.5 text-[10px] font-semibold"
+                key={t}
+                className="shrink-0 whitespace-nowrap rounded-[6px] px-1.5 py-0.5 text-[10px] font-medium"
                 style={{ background: theme.accentSoft, color: theme.accent }}
               >
-                {g.books.length} 个源
+                {t}
+              </span>
+            ))}
+            {(latest || b0.sourceName) && (
+              <span className="min-w-0 flex-1 truncate text-[11px]" style={{ color: theme.textSub }}>
+                {latest ? `最新 ${latest}` : b0.sourceName}
               </span>
             )}
           </div>
-          <p className="mt-0.5 truncate text-[12px]" style={{ color: theme.textSub }}>
-            {g.author || '佚名'}
-          </p>
+          {/* 第三行：简介两行截断 */}
           {b0.intro && (
-            <p className="mt-1 line-clamp-2 text-[12px] leading-snug" style={{ color: theme.textSub }}>
+            <p className="mt-1.5 line-clamp-2 text-[12px] leading-snug" style={{ color: theme.textSub }}>
               {b0.intro}
             </p>
           )}
@@ -260,39 +329,64 @@ export function SearchPage({
 
   return (
     <div className="flex h-full flex-col">
-      <SubNavBar title="聚合搜索" onBack={onBack} theme={theme} />
-      {/* 搜索条 */}
-      <div className="flex gap-2 px-4 pb-3">
-        <div
-          className="flex h-11 min-w-0 flex-1 items-center gap-2 rounded-full px-4 backdrop-blur-xl"
-          style={glass}
-        >
-          <Search className="h-[18px] w-[18px] shrink-0" style={{ color: theme.textSub }} strokeWidth={2.2} />
-          <input
-            value={kw}
-            onChange={(e) => setKw(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') void runSearch(kw);
-            }}
-            placeholder="书名 / 作者"
-            className="min-w-0 flex-1 bg-transparent text-[15px] outline-none"
+      {/* 顶栏一体化：返回 + 搜索框 + 搜索按钮 + 筛选（无「聚合搜索」标题） */}
+      <div className="sticky top-0 z-20 shrink-0 backdrop-blur-xl" style={{ paddingTop: SB_H, background: 'transparent' }}>
+        <div className="flex items-center gap-2 px-3 pb-3">
+          <button
+            type="button"
+            onClick={onBack}
+            aria-label="返回"
+            className="-ml-1 flex h-10 w-10 shrink-0 items-center justify-center rounded-full active:scale-90"
             style={{ color: theme.textMain }}
-            aria-label="搜索关键词"
-          />
-          {kw && (
-            <button type="button" onClick={() => setKw('')} aria-label="清空" className="shrink-0" style={{ color: theme.textSub }}>
-              <X className="h-4 w-4" />
-            </button>
-          )}
+          >
+            <ChevronLeft className="h-6 w-6" strokeWidth={2.2} />
+          </button>
+          <div
+            className="flex h-10 min-w-0 flex-1 items-center gap-2 rounded-full px-3.5 backdrop-blur-xl"
+            style={glass}
+          >
+            <Search className="h-[17px] w-[17px] shrink-0" style={{ color: theme.textSub }} strokeWidth={2.2} />
+            <input
+              value={kw}
+              onChange={(e) => setKw(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') void runSearch(kw);
+              }}
+              placeholder="书名 / 作者"
+              className="min-w-0 flex-1 bg-transparent text-[14px] outline-none"
+              style={{ color: theme.textMain }}
+              aria-label="搜索关键词"
+            />
+            {kw && (
+              <button
+                type="button"
+                onClick={() => setKw('')}
+                aria-label="清空"
+                className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full active:scale-90"
+                style={{ background: 'rgba(0,0,0,0.08)', color: theme.textSub }}
+              >
+                <X className="h-3 w-3" strokeWidth={3} />
+              </button>
+            )}
+          </div>
+          <button
+            type="button"
+            onClick={() => void runSearch(kw)}
+            className="h-10 shrink-0 rounded-full px-4 text-[14px] font-semibold text-white active:scale-95"
+            style={{ background: `linear-gradient(135deg, ${theme.gradFrom}, ${theme.gradTo})`, boxShadow: `0 4px 14px ${theme.accent}40` }}
+          >
+            搜索
+          </button>
+          <button
+            type="button"
+            onClick={() => setScopeOpen(true)}
+            aria-label="筛选书源范围"
+            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full active:scale-90"
+            style={{ color: scope === 'ok' ? theme.accent : theme.textMain, ...(scope === 'ok' ? { background: theme.accentSoft } : {}) }}
+          >
+            <SlidersHorizontal className="h-[19px] w-[19px]" strokeWidth={2.2} />
+          </button>
         </div>
-        <button
-          type="button"
-          onClick={() => void runSearch(kw)}
-          className="h-11 shrink-0 rounded-full px-5 text-[14px] font-semibold text-white shadow-md active:scale-95"
-          style={{ background: `linear-gradient(135deg, ${theme.gradFrom}, ${theme.gradTo})`, boxShadow: `0 6px 18px ${theme.accent}44` }}
-        >
-          搜索
-        </button>
       </div>
 
       {/* 结果列表 / 空态（搜索历史 + 热门搜索）；底部状态胶囊显示时预留空间不遮挡 */}
@@ -378,9 +472,9 @@ export function SearchPage({
         {running && !hasResults && (
           <div className="mt-2 space-y-2.5" aria-hidden="true">
             {[0, 1, 2, 3].map((i) => (
-              <div key={i} className="flex items-center gap-3 rounded-3xl p-3" style={glass}>
-                <div className="h-[68px] w-[50px] shrink-0 animate-pulse rounded-lg" style={{ background: theme.accentSoft }} />
-                <div className="min-w-0 flex-1 space-y-2">
+              <div key={i} className="flex items-start gap-3 rounded-2xl p-3" style={glass}>
+                <div className="h-[96px] w-[72px] shrink-0 animate-pulse rounded-xl" style={{ background: theme.accentSoft }} />
+                <div className="min-w-0 flex-1 space-y-2 pt-1">
                   <div className="h-4 w-2/5 animate-pulse rounded-full" style={{ background: theme.accentSoft }} />
                   <div className="h-3 w-3/5 animate-pulse rounded-full" style={{ background: theme.accentSoft }} />
                   <div className="h-3 w-4/5 animate-pulse rounded-full" style={{ background: theme.accentSoft }} />
@@ -393,7 +487,49 @@ export function SearchPage({
         {resultList.map((g) => renderGroup(g))}
       </div>
 
-      {/* 底部状态胶囊（搜索中/暂停后显示；文字不换行：窄屏自动缩短文案） */}
+      {/* 搜索范围筛选抽屉（底部玻璃） */}
+      {scopeOpen && (
+        <div className="absolute inset-0 z-40" role="dialog" aria-label="搜索范围">
+          <button type="button" aria-label="关闭" className="absolute inset-0 bg-black/30 backdrop-blur-[2px]" onClick={() => setScopeOpen(false)} />
+          <div
+            className="absolute inset-x-0 bottom-0 rounded-t-3xl p-5 pb-[max(20px,env(safe-area-inset-bottom))] shadow-2xl backdrop-blur-2xl"
+            style={{ background: theme.pageBg, boxShadow: `inset 0 0 0 1px ${theme.cardRing}, 0 -12px 48px rgba(0,0,0,0.18)` }}
+          >
+            <p className="mb-3 text-[16px] font-bold" style={{ color: theme.textMain }}>
+              搜索范围
+            </p>
+            {(
+              [
+                { key: 'all', title: '全部启用源', desc: `${sources.filter((s) => s.enabled).length} 个 · 覆盖最全，耗时较长` },
+                { key: 'ok', title: '仅实测可用源', desc: `${sources.filter((s) => s.enabled && s.checkStatus === 'ok').length} 个 · 速度快，好源优先` },
+              ] as const
+            ).map((o) => (
+              <button
+                key={o.key}
+                type="button"
+                onClick={() => applyScope(o.key)}
+                className="mb-1.5 flex w-full items-center gap-3 rounded-2xl p-3.5 text-left backdrop-blur-xl active:scale-[0.98]"
+                style={{
+                  background: scope === o.key ? theme.accentSoft : 'rgba(0,0,0,0.03)',
+                  boxShadow: `inset 0 0 0 1px ${scope === o.key ? theme.accent + '44' : 'transparent'}`,
+                }}
+              >
+                <div className="min-w-0 flex-1">
+                  <p className="text-[14px] font-semibold" style={{ color: theme.textMain }}>
+                    {o.title}
+                  </p>
+                  <p className="mt-0.5 text-[11px]" style={{ color: theme.textSub }}>
+                    {o.desc}
+                  </p>
+                </div>
+                {scope === o.key && <Check className="h-4 w-4 shrink-0" style={{ color: theme.accent }} />}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* 底部状态胶囊（搜索中/暂停后显示；白色磨砂 + 暂停按钮，设计图同款） */}
       {(running || searched > 0) && (
         <div className="pointer-events-none absolute inset-x-0 bottom-3 z-20 flex justify-center px-4">
           <div
@@ -403,8 +539,8 @@ export function SearchPage({
             {running ? (
               <>
                 <Loader2 className="h-4 w-4 shrink-0 animate-spin" style={{ color: theme.accent }} />
-                <span className='shrink-0 text-[13px] tabular-nums' style={{ color: theme.textMain }}>
-                  {searched}/{enabledSources.length} 源 · {found} 条
+                <span className="shrink-0 text-[13px] tabular-nums" style={{ color: theme.textMain }}>
+                  搜索中 {searched}/{enabledSources.length} · {found} 条
                 </span>
                 <button type="button" onClick={pause} className="flex shrink-0 items-center gap-1 text-[13px] font-semibold" style={{ color: theme.accent }}>
                   <Pause className="h-4 w-4" /> 暂停
@@ -412,7 +548,7 @@ export function SearchPage({
               </>
             ) : (
               <>
-                <span className='shrink-0 text-[13px] tabular-nums' style={{ color: theme.textMain }}>
+                <span className="shrink-0 text-[13px] tabular-nums" style={{ color: theme.textMain }}>
                   已停止 · {found} 条
                 </span>
                 {searched < enabledSources.length && (

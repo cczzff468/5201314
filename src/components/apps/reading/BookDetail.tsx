@@ -4,13 +4,14 @@
  * 书籍详情页（iOS 现代阅读 App 风格，参照用户设计图）：
  * - 顶部：封面模糊放大背景 + 渐变淡出到页面底色；半透明圆形返回按钮
  * - 头区：封面（大圆角）+ 书名/作者/分类胶囊（共N章 · 读到第x章/未开始 · 换源）
- * - 功能卡：缓存（预取后 20 章正文）/ 换源 / 听书（Web Speech 朗读）/ 分享
+ * - 功能卡：缓存（抽屉选「后 20 章」或「全书」一键离线缓存，全书带进度浮层、可后台/取消、显示已缓存徽标）
+ *   / 换源 / 听书（Web Speech 朗读）/ 分享
  * - 目录卡：最新章节（「最新」胶囊）+ 最近章节 + 查看完整目录
  * - 简介卡（可展开收起）
  * - 底部固定操作栏：加入书架（点击才入架）+ 开始阅读/继续阅读（续读到章节+页码）
  * - 【换源】同书多源切换：并行搜出各书源结果，底部玻璃抽屉点按切换（进度按章节标题映射）
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   BookOpen,
   Plus,
@@ -21,6 +22,7 @@ import {
   Repeat2,
   ChevronLeft,
   Download,
+  BookDown,
   Headphones,
   Share2,
   Square,
@@ -50,6 +52,22 @@ interface SourceCandidate {
   sourceId: string;
   sourceName: string;
   book: SearchBookItem;
+}
+
+/** 功能卡动作（「缓存」卡可带已缓存徽标） */
+interface FeatureAction {
+  icon: ReactNode;
+  label: string;
+  onClick: () => void;
+  badge?: string;
+}
+
+/** 全书缓存进度（null = 当前没有在缓存） */
+interface DownloadState {
+  done: number;
+  total: number;
+  ok: number;
+  fail: number;
 }
 
 export function BookDetail({
@@ -91,6 +109,40 @@ export function BookDetail({
   // 自动换源（详情加载失败时）
   const [autoTrying, setAutoTrying] = useState(false);
   const autoRef = useRef(false);
+
+  // 缓存菜单抽屉 + 全书缓存（进度浮层 / 后台胶囊 / 取消标记 / 已缓存徽标）
+  const [cacheMenuOpen, setCacheMenuOpen] = useState(false);
+  const [dl, setDl] = useState<DownloadState | null>(null);
+  const [dlVisible, setDlVisible] = useState(false);
+  /** 取消标记（AbortController 式：循环取章前检查，点取消/换源/卸载时置 true） */
+  const dlCancelRef = useRef(false);
+  /** 全书缓存进行中标记（防重复启动；再次点「缓存全书」= 重新展开进度浮层） */
+  const dlRunningRef = useRef(false);
+  /** 本会话已缓存章索引（按「源+书」分桶，换源后惰性重建，避免跨源计数污染） */
+  const cachedRef = useRef<{ key: string; set: Set<number> }>({ key: '', set: new Set() });
+  /** 已缓存章数（key 跟「源+书」走：换源/换书后渲染期派生归零，不用 effect 重置） */
+  const [cachedStat, setCachedStat] = useState<{ key: string; count: number }>({ key: '', count: 0 });
+  const cacheKey = `${curSourceId}|${curBook.bookUrl}`;
+  const cachedCount = cachedStat.key === cacheKey ? cachedStat.count : 0;
+
+  /** 取当前源的已缓存集合（首次/换源后新建；返回 entry 供完成时校验是否已被新源替换） */
+  const takeCachedSet = () => {
+    if (cachedRef.current.key !== cacheKey) {
+      cachedRef.current = { key: cacheKey, set: new Set<number>() };
+    }
+    return cachedRef.current;
+  };
+
+  // 换源/换书：停掉进行中的全书缓存（缓存按「源+书」落库，旧源的下载不再有意义）
+  useEffect(() => {
+    dlCancelRef.current = true;
+  }, [curSourceId, curBook.bookUrl]);
+  // 组件卸载：停止全书缓存循环
+  useEffect(() => {
+    return () => {
+      dlCancelRef.current = true;
+    };
+  }, []);
 
   // 听书（Web Speech）
   const [speaking, setSpeaking] = useState(false);
@@ -342,24 +394,101 @@ export function BookDetail({
     void loadShelf();
   };
 
-  /** 缓存：预取当前章之后 20 章正文（后台静默，ChapterCache 落库） */
+  /** 缓存：预取当前章之后 20 章正文（后台静默，ChapterCache 落库；顺带累计已缓存徽标） */
   const cacheChapters = async () => {
     if (!data) return;
     notify('正在后台缓存后续 20 章…');
     const from = readIdx > 0 ? readIdx : findStartIndex(data.chapters);
     const to = Math.min(data.total, from + 20);
+    const entry = takeCachedSet(); // 集合快照：换源重建后不再回写旧源的计数
+    const mark = entry.set;
     let ok = 0;
     for (let i = from; i < to; i++) {
       const c = data.chapters[i];
       if (!c) break;
       try {
         await api.chapter(curSourceId, c.url, curBook.bookUrl, i, c.title);
+        mark.add(i);
         ok++;
       } catch {
         /* 单章失败继续 */
       }
     }
+    if (cachedRef.current === entry) setCachedStat({ key: entry.key, count: mark.size });
     notify(`缓存完成：${ok} 章（离线可读）`);
+  };
+
+  /** 取消全书缓存：只置标记，worker 取下一章前检查（在途的至多 2 章跑完即停） */
+  const cancelWholeBook = () => {
+    dlCancelRef.current = true;
+  };
+
+  /**
+   * 缓存全书：第 1 章到最后一章全部落库（已缓存章节 api.chapter 秒回，重复点很快跳过）。
+   * - 并发 2：两个 worker 从共享队列取章，单章失败计数继续
+   * - 进度 setState 节流（每 3 章或 500ms 一次），2000 章的大书不至于每章重渲染
+   * - 「后台」收起浮层为胶囊通知条，「取消」置标记中止；完成/取消后浮层自动关闭
+   */
+  const cacheWholeBook = async () => {
+    if (!data) return;
+    if (dlRunningRef.current) {
+      setDlVisible(true); // 已在缓存 → 重新展开进度浮层
+      return;
+    }
+    const list = data.chapters;
+    const total = list.length;
+    if (!total) {
+      notify('目录为空，无法缓存');
+      return;
+    }
+    dlRunningRef.current = true;
+    dlCancelRef.current = false;
+    setDl({ done: 0, total, ok: 0, fail: 0 });
+    setDlVisible(true);
+    const entry = takeCachedSet(); // 集合快照：换源重建后不再回写旧源的计数
+    const mark = entry.set;
+    const sid = curSourceId;
+    const bookUrl = curBook.bookUrl;
+    let done = 0;
+    let ok = 0;
+    let fail = 0;
+    let cursor = 0;
+    let lastPaint = 0;
+    const worker = async () => {
+      while (!dlCancelRef.current) {
+        const i = cursor++;
+        if (i >= total) return;
+        const c = list[i];
+        if (!c) {
+          done++;
+          continue;
+        }
+        try {
+          await api.chapter(sid, c.url, bookUrl, i, c.title);
+          ok++;
+          mark.add(i);
+        } catch {
+          fail++; /* 单章失败继续 */
+        }
+        done++;
+        // 节流刷新进度（收尾章必刷，保证最终数字准确）
+        const now = Date.now();
+        if (done % 3 === 0 || done === total || now - lastPaint >= 500) {
+          lastPaint = now;
+          setDl({ done, total, ok, fail });
+        }
+      }
+    };
+    await Promise.all([worker(), worker()]);
+    dlRunningRef.current = false;
+    setDl(null);
+    setDlVisible(false);
+    if (cachedRef.current === entry) setCachedStat({ key: entry.key, count: mark.size });
+    if (dlCancelRef.current) {
+      notify(`已取消全书缓存（已完成 ${ok} 章）`);
+    } else {
+      notify(`全书缓存完成：${ok} 章${fail ? `，失败 ${fail} 章` : ''}（离线可读）`);
+    }
   };
 
   /** 听书：Web Speech 朗读简介 + 前两段（简单可用；再点停止） */
@@ -568,11 +697,17 @@ export function BookDetail({
             </div>
           </div>
 
-          {/* 功能卡：缓存 / 换源 / 听书 / 分享 */}
+          {/* 功能卡：缓存（抽屉选后 20 章/全书）/ 换源 / 听书 / 分享 */}
           <div className="mt-5 rounded-3xl p-4 backdrop-blur-xl" style={glass}>
             <div className="grid grid-cols-4 gap-1">
-              {[
-                { icon: <Download className="h-[21px] w-[21px]" />, label: '缓存', onClick: () => void cacheChapters() },
+              {([
+                {
+                  icon: <Download className="h-[21px] w-[21px]" />,
+                  label: '缓存',
+                  onClick: () => setCacheMenuOpen(true),
+                  // 已缓存徽标：缓存过才显示（全本缓存完显示「全本」）
+                  badge: cachedCount > 0 ? (cachedCount >= data.total ? '全本' : String(cachedCount)) : undefined,
+                },
                 { icon: <Repeat2 className="h-[21px] w-[21px]" />, label: '换源', onClick: () => setSrcOpen(true) },
                 {
                   icon: speaking ? <Square className="h-[19px] w-[19px]" /> : <Headphones className="h-[21px] w-[21px]" />,
@@ -580,15 +715,23 @@ export function BookDetail({
                   onClick: toggleSpeech,
                 },
                 { icon: <Share2 className="h-[21px] w-[21px]" />, label: '分享', onClick: () => void shareBook() },
-              ].map((a) => (
+              ] as FeatureAction[]).map((a) => (
                 <button
                   key={a.label}
                   type="button"
                   onClick={a.onClick}
                   className="flex flex-col items-center gap-1.5 rounded-2xl py-1.5 active:scale-95"
                 >
-                  <span className="flex h-11 w-11 items-center justify-center rounded-full" style={{ background: 'rgba(120,128,140,0.10)', color: theme.textMain }}>
+                  <span className="relative flex h-11 w-11 items-center justify-center rounded-full" style={{ background: 'rgba(120,128,140,0.10)', color: theme.textMain }}>
                     {a.icon}
+                    {a.badge && (
+                      <span
+                        className="absolute -right-2 -top-1 whitespace-nowrap rounded-full px-1.5 py-px text-[9px] font-bold leading-[1.35] text-white shadow-md"
+                        style={{ background: theme.accent }}
+                      >
+                        {a.badge}
+                      </span>
+                    )}
                   </span>
                   <span className="text-[12px] font-medium" style={{ color: theme.textSub }}>
                     {a.label}
@@ -774,6 +917,83 @@ export function BookDetail({
         </div>
       )}
 
+      {/* 全书缓存进度浮层（居中玻璃卡片；「后台」收起为胶囊，「取消」中止循环） */}
+      {dl && dlVisible && (
+        <div className="absolute inset-0 z-50 flex items-center justify-center px-8" role="dialog" aria-label="全书缓存进度">
+          <button type="button" aria-label="转为后台缓存" className="absolute inset-0 bg-black/35 backdrop-blur-[2px]" onClick={() => setDlVisible(false)} />
+          <div
+            className="relative w-full max-w-[320px] rounded-3xl p-5 shadow-2xl backdrop-blur-2xl"
+            style={{ background: theme.pageBg, boxShadow: `inset 0 0 0 1px ${theme.cardRing}, 0 24px 64px rgba(0,0,0,0.28)` }}
+          >
+            <div className="flex items-center gap-3">
+              <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full" style={{ background: theme.accentSoft, color: theme.accent }}>
+                <BookDown className="h-5 w-5" />
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className="text-[15px] font-bold" style={{ color: theme.textMain }}>
+                  正在缓存全书
+                </p>
+                <p className="truncate text-[12px]" style={{ color: theme.textSub }}>
+                  《{name}》 · 共 {dl.total} 章
+                </p>
+              </div>
+            </div>
+            {/* 进度条（主题色渐变填充，按 已缓存/总数 百分比） */}
+            <div className="mt-4 h-2 w-full overflow-hidden rounded-full" style={{ background: theme.barBg }}>
+              <div
+                className="h-full rounded-full"
+                style={{
+                  width: `${dl.total ? Math.min(100, Math.round((dl.done / dl.total) * 100)) : 0}%`,
+                  background: `linear-gradient(90deg, ${theme.gradFrom}, ${theme.gradTo})`,
+                }}
+              />
+            </div>
+            <div className="mt-2 flex items-baseline justify-between gap-3">
+              <p className="whitespace-nowrap text-[13px] font-medium" style={{ color: theme.textMain }}>
+                正在缓存 · {dl.done}/{dl.total} 章
+              </p>
+              <p className="shrink-0 text-[12px]" style={{ color: theme.textSub }}>
+                {dl.fail > 0 ? `失败 ${dl.fail} 章` : `${dl.total ? Math.min(100, Math.round((dl.done / dl.total) * 100)) : 0}%`}
+              </p>
+            </div>
+            <div className="mt-4 flex gap-3">
+              <button
+                type="button"
+                onClick={() => setDlVisible(false)}
+                className="h-10 flex-1 rounded-full text-[14px] font-semibold active:scale-95"
+                style={{ background: theme.accentSoft, color: theme.accent }}
+              >
+                后台
+              </button>
+              <button
+                type="button"
+                onClick={cancelWholeBook}
+                className="h-10 flex-1 rounded-full text-[14px] font-semibold active:scale-95"
+                style={{ background: 'rgba(120,128,140,0.14)', color: theme.textMain }}
+              >
+                取消
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 后台缓存胶囊（进度浮层收起后显示，点击重新展开；缓存继续跑） */}
+      {dl && !dlVisible && (
+        <div className="pointer-events-none absolute inset-x-0 bottom-[104px] z-30 flex justify-center px-6">
+          <button
+            type="button"
+            onClick={() => setDlVisible(true)}
+            className="pointer-events-auto flex items-center gap-2 whitespace-nowrap rounded-full px-4 py-2 text-[12px] font-medium backdrop-blur-xl active:scale-95"
+            style={{ background: theme.barBg, color: theme.textMain, boxShadow: `inset 0 0 0 1px ${theme.cardRing}, 0 10px 30px rgba(0,0,0,0.18)` }}
+          >
+            <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" style={{ color: theme.accent }} />
+            全书缓存 {dl.done}/{dl.total}
+            {dl.fail > 0 && <span style={{ color: theme.textSub }}>· 失败 {dl.fail}</span>}
+          </button>
+        </div>
+      )}
+
       {/* 换源抽屉（毛玻璃） */}
       {srcOpen && (
         <div className="absolute inset-0 z-40" role="dialog" aria-label="切换书源">
@@ -860,6 +1080,75 @@ export function BookDetail({
                 style={{ ...glass, color: theme.accent }}
               >
                 <RefreshCw className="h-4 w-4" /> 去聚合搜索找更多源
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 缓存菜单抽屉（毛玻璃）：缓存后 20 章 / 缓存全书 */}
+      {cacheMenuOpen && data && (
+        <div className="absolute inset-0 z-40" role="dialog" aria-label="离线缓存">
+          <button type="button" aria-label="关闭缓存菜单" className="absolute inset-0 bg-black/35 backdrop-blur-[2px]" onClick={() => setCacheMenuOpen(false)} />
+          <div
+            className="absolute inset-x-0 bottom-0 flex max-h-[60%] flex-col rounded-t-3xl shadow-2xl backdrop-blur-2xl"
+            style={{ background: theme.pageBg, boxShadow: `inset 0 0 0 1px ${theme.cardRing}, 0 -12px 48px rgba(0,0,0,0.18)` }}
+          >
+            <div className="flex shrink-0 justify-center pb-1 pt-2.5">
+              <span className="h-1 w-10 rounded-full bg-black/10" />
+            </div>
+            <div className="flex items-center justify-between px-5 pb-2 pt-1">
+              <p className="text-[16px] font-bold" style={{ color: theme.textMain }}>
+                离线缓存 · 《{name}》
+              </p>
+              <button type="button" onClick={() => setCacheMenuOpen(false)} className="text-[13px]" style={{ color: theme.textSub }}>
+                收起
+              </button>
+            </div>
+            <div className="px-4 pb-[max(16px,env(safe-area-inset-bottom))]">
+              {/* 后 20 章（沿用原有后台静默逻辑） */}
+              <button
+                type="button"
+                onClick={() => {
+                  setCacheMenuOpen(false);
+                  void cacheChapters();
+                }}
+                className="mb-2 flex w-full items-center gap-3 rounded-2xl p-3 text-left ring-1 backdrop-blur-xl active:scale-[0.98]"
+                style={glass}
+              >
+                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full" style={{ background: theme.accentSoft, color: theme.accent }}>
+                  <Download className="h-[18px] w-[18px]" />
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block text-[14px] font-semibold" style={{ color: theme.textMain }}>
+                    缓存后 20 章
+                  </span>
+                  <span className="block truncate text-[11px]" style={{ color: theme.textSub }}>
+                    从第 {(readIdx > 0 ? readIdx : findStartIndex(data.chapters)) + 1} 章起 · 后台静默下载
+                  </span>
+                </span>
+              </button>
+              {/* 全书（进度浮层，可后台/取消） */}
+              <button
+                type="button"
+                onClick={() => {
+                  setCacheMenuOpen(false);
+                  void cacheWholeBook();
+                }}
+                className="flex w-full items-center gap-3 rounded-2xl p-3 text-left ring-1 backdrop-blur-xl active:scale-[0.98]"
+                style={glass}
+              >
+                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full" style={{ background: theme.accentSoft, color: theme.accent }}>
+                  <BookDown className="h-[18px] w-[18px]" />
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block text-[14px] font-semibold" style={{ color: theme.textMain }}>
+                    缓存全书
+                  </span>
+                  <span className="block truncate text-[11px]" style={{ color: theme.textSub }}>
+                    第 1-{data.total} 章{cachedCount > 0 ? ` · 已缓存 ${cachedCount} 章` : ''}
+                  </span>
+                </span>
               </button>
             </div>
           </div>

@@ -31,6 +31,7 @@ import { ReaderView } from './ReaderView';
 import { SourcesManager } from './SourcesManager';
 import { ReadingHistory } from './ReadingHistory';
 import { CategoryPage } from './CategoryPage';
+import { RankingPage } from './RankingPage';
 
 export type TabKey = 'home' | 'shelf' | 'history' | 'me';
 
@@ -51,6 +52,7 @@ export type SubPage =
       startPage?: number;
     }
   | { kind: 'category'; category: string }
+  | { kind: 'rank' }
   | { kind: 'sources' }
   | { kind: 'history' };
 
@@ -62,6 +64,8 @@ export default function ReadingApp() {
   const [tab, setTab] = useState<TabKey>('home');
   const [page, setPage] = useState<SubPage>({ kind: 'none' });
   const [history, setHistory] = useState<SubPage[]>([]);
+  /** 导航方向（子页转场动画：push 右进 / pop 左回） */
+  const [navDir, setNavDir] = useState<'push' | 'pop'>('push');
   const theme = useMemo(() => themeOf(settings.appTheme), [settings.appTheme]);
 
   useEffect(() => {
@@ -72,12 +76,14 @@ export default function ReadingApp() {
 
   const push = useCallback(
     (p: SubPage) => {
+      setNavDir('push');
       setHistory((h) => [...h, page]);
       setPage(p);
     },
     [page],
   );
   const back = useCallback(() => {
+    setNavDir('pop');
     setHistory((h) => {
       const prev = h[h.length - 1];
       setPage(prev ?? { kind: 'none' });
@@ -100,6 +106,14 @@ export default function ReadingApp() {
         color: theme.textMain,
       }}
     >
+      {/* 子页转场动画（iOS push/pop：进=从右滑入带投影，退=从左回位） */}
+      <style>{`
+        @keyframes rd-push-in { from { transform: translateX(100%); } to { transform: translateX(0); } }
+        @keyframes rd-pop-in { from { transform: translateX(-26%); opacity: .55; } to { transform: translateX(0); opacity: 1; } }
+        .rd-push-in { animation: rd-push-in .26s cubic-bezier(.32,.72,.34,1) both; will-change: transform; }
+        .rd-pop-in { animation: rd-pop-in .24s cubic-bezier(.32,.72,.34,1) both; will-change: transform; }
+        @media (prefers-reduced-motion: reduce) { .rd-push-in, .rd-pop-in { animation: none; } }
+      `}</style>
       {/* 底层装饰光斑（毛玻璃透出感的来源；随主题换色；pan-none：光斑负偏移探出也不可被拖动） */}
       <div className="pointer-events-none absolute inset-0 pan-none" aria-hidden="true">
         <span
@@ -117,6 +131,11 @@ export default function ReadingApp() {
       </div>
 
       <div className="relative min-h-0 flex-1 overflow-hidden">
+        {/* 子页/Tab 内容：push 左滑入 / pop 右滑回（iOS 转场；key 变化重播动画） */}
+        <div
+          key={`${page.kind}:${history.length}`}
+          className={`h-full ${navDir === 'push' ? 'rd-push-in' : 'rd-pop-in'}`}
+        >
         {page.kind === 'search' && <SearchPage page={page} onBack={back} onOpenBook={(book, sourceId) => push({ kind: 'detail', sourceId, book })} />}
         {page.kind === 'detail' && (
           <BookDetail
@@ -139,6 +158,7 @@ export default function ReadingApp() {
             onOpenBook={(name) => push({ kind: 'search', keyword: name, autoRun: true })}
           />
         )}
+        {page.kind === 'rank' && <RankingPage onBack={back} onOpenBook={(name) => push({ kind: 'search', keyword: name, autoRun: true })} />}
         {page.kind === 'none' && (
           <>
             {/* 首页自带滚动容器（支持下拉刷新 + 无限加载），其余 Tab 共用外层滚动 */}
@@ -147,15 +167,23 @@ export default function ReadingApp() {
                 onSearch={(kw) => push({ kind: 'search', keyword: kw, autoRun: true })}
                 onOpenCategory={(c) => push({ kind: 'category', category: c })}
                 onOpenShelfBook={(b) => openHistoryBook(b, push)}
+                onOpenRank={() => push({ kind: 'rank' })}
               />
             )}
             <div className={tab === 'home' ? 'hidden' : 'h-full overflow-y-auto overscroll-contain pb-[120px] pt-[54px]'}>
               {tab === 'shelf' && <ShelfTab onOpen={(b) => openShelfBook(b, push)} onSearchGlobal={() => push({ kind: 'search', autoRun: true })} />}
               {tab === 'history' && <HistoryTab onOpen={(b) => openHistoryBook(b, push)} />}
-              {tab === 'me' && <MeTab onOpenSources={() => push({ kind: 'sources' })} onOpenHistory={() => push({ kind: 'history' })} />}
+              {tab === 'me' && (
+                <MeTab
+                  onOpenSources={() => push({ kind: 'sources' })}
+                  onOpenHistory={() => push({ kind: 'history' })}
+                  onSearchBook={(name) => push({ kind: 'search', keyword: name, autoRun: true })}
+                />
+              )}
             </div>
           </>
         )}
+        </div>
       </div>
 
       {/* 毛玻璃悬浮胶囊 TabBar（仅主页面显示；四 Tab：首页/书架/历史/我） */}

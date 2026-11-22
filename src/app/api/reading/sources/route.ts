@@ -27,16 +27,28 @@ function validateSource(raw: unknown): { ok: true; source: LegadoSource } | { ok
  *     仅标记 isBuiltin=true，启停状态尊重用户自己的操作（如筛活停用的失效源不强行拉起）；
  *  ③ 已除名的旧内置源（实测没用的）自动从库里删除，书架/历史引用按 healSourceRefs 自愈 */
 async function ensureSeeded() {
-  const rows = await db.bookSource.findMany({ select: { id: true, url: true, isBuiltin: true } });
+  const rows = await db.bookSource.findMany({ select: { id: true, url: true, isBuiltin: true, sortOrder: true } });
   const byUrl = new Map(rows.map((x) => [normSourceUrl(x.url), x]));
   const builtinUrls = new Set(BUILTIN_BOOK_SOURCES.map((b) => normSourceUrl(b.bookSourceUrl)));
+  /** 实测核心源（VERIFIED）固定占据 sortOrder 0..N-1：聚合搜索时最先出结果 */
+  const verifiedUrls = new Map(VERIFIED_SOURCES.map((v, i) => [normSourceUrl(v.bookSourceUrl), i] as const));
+  const N_VERIFIED = VERIFIED_SOURCES.length;
   let changed = false;
-  let order = rows.length;
+  let order = rows.length + N_VERIFIED;
   for (const b of BUILTIN_BOOK_SOURCES) {
+    const vIdx = verifiedUrls.get(normSourceUrl(b.bookSourceUrl));
+    const targetOrder = vIdx !== undefined ? vIdx : order++;
     const exist = byUrl.get(normSourceUrl(b.bookSourceUrl));
     if (exist) {
-      if (!exist.isBuiltin) {
-        await db.bookSource.update({ where: { id: exist.id }, data: { isBuiltin: true } }).catch(() => null);
+      // 核心源 sortOrder 被挤到后面（如晚入库）→ 拉回前排，搜索优先命中
+      const needFix = vIdx !== undefined && (exist.sortOrder === null || exist.sortOrder >= N_VERIFIED);
+      if (!exist.isBuiltin || needFix) {
+        await db.bookSource
+          .update({
+            where: { id: exist.id },
+            data: { isBuiltin: true, ...(needFix ? { sortOrder: targetOrder } : {}) },
+          })
+          .catch(() => null);
         changed = true;
       }
       continue;
@@ -50,7 +62,7 @@ async function ensureSeeded() {
           enabled: b.enabled !== false,
           config: JSON.stringify(b),
           isBuiltin: true,
-          sortOrder: order++,
+          sortOrder: targetOrder,
           checkStatus: b.enabled !== false && VERIFIED_SOURCES.some((v) => normSourceUrl(v.bookSourceUrl) === normSourceUrl(b.bookSourceUrl)) ? 'ok' : null,
         },
       })

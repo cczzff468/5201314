@@ -265,8 +265,16 @@ function decodeBody(buf: ArrayBuffer, charset?: string, contentType?: string): s
     const m = /charset=([\w-]+)/i.exec(contentType);
     if (m) cs = m[1].toLowerCase();
   }
+  // 无任何声明时嗅探 <meta charset=gb2312">（晋江等老站 Content-Type 不带 charset，
+  // 直接按 UTF-8 解会整页乱码）
+  if (!cs) {
+    const head = bytes.subarray(0, 1024).toString('latin1');
+    const m = /charset\s*=\s*["']?\s*(gb2312|gbk|gb18030|big5|utf-8)/i.exec(head);
+    if (m) cs = m[1].toLowerCase();
+  }
   if (!cs || cs === 'utf8') cs = 'utf-8';
   if (!['utf-8', 'gbk', 'gb2312', 'gb18030', 'big5', 'utf-16'].includes(cs)) cs = 'utf-8';
+  if (cs === 'gb2312') cs = 'gb18030'; // gb2312 字库太小，生僻字会抛错
   try {
     return iconv.decode(bytes, cs as 'utf-8');
   } catch {
@@ -620,7 +628,8 @@ function evalSingle(ctx: Ctx, rule: string, joinAll = false): string {
   // JSON 上下文
   if (ctx.kind === 'json') {
     if (r.startsWith('$')) return jsonScalar(jsonPathAll(ctx.data, r)[0]);
-    if (r.startsWith('{{')) return evalTemplateJson(ctx.data, r);
+    // 整串模板（如 https://xx.com/onebook.php?novelid={{$.novelid}}）——晋江 API 源
+    if (r.includes('{{')) return evalTemplateJson(ctx.data, r);
     return jsonScalar((ctx.data as Record<string, unknown>)?.[r]);
   }
   // HTML 上下文
@@ -684,7 +693,9 @@ export function evalList(ctx: Ctx, rule: string | undefined): Ctx[] {
     return list.filter((c) => evalRule(c, `text##${regex}##${replacement}`) !== '' || c.kind === 'json');
   };
   if (ctx.kind === 'json') {
-    const vals = main.startsWith('$') ? jsonPathAll(ctx.data, main) : [];
+    let vals = main.startsWith('$') ? jsonPathAll(ctx.data, main) : [];
+    // Legado $.data 语义：结果为单个数组 → 展开其元素为列表项（晋江 API 源）
+    if (vals.length === 1 && Array.isArray(vals[0])) vals = vals[0] as unknown[];
     return pick(vals.map((v) => ({ kind: 'json', data: v, pageUrl: ctx.pageUrl }) as Ctx));
   }
   // html：先按 || 逐路尝试
@@ -1004,6 +1015,14 @@ export function htmlToText(html: string): string {
   return text;
 }
 
+/** 整行恰好等于这些 UI 词 → 噪声（晋江等站的正文容器里混着收藏/投诉面板文字；
+ *  只删「整行就是这个词」的行，绝不影响正文里出现的同词） */
+const NOISE_LINE_EXACT = new Set([
+  '其他', '新增', '取消', '投诉', '请稍候', '插入书签', '作者有话说', '显示所有文的作话',
+  '文章收藏', '为收藏文章分类', '定制收藏类别', '查看收藏列表', '投诉色情有害',
+  '投诉涉未成年有害', '投诉数据造假', '添加书签', '推荐给朋友', '书评', '展开更多回复',
+]);
+
 /** 常见反防盗/广告行（内置兜底，书源 replaceRegex 之外再过一道） */
 const NOISE_RE =
   /(笔趣阁|全本小说网|飘天文学|起点中文|棉花糖|顶点小说|八一中文|言情后花园|书客吧|最快更新|最新章节|首发域名|请记住|一秒记住|章节错误|举报|加入书签|求收藏|求推荐票|求月票|百度搜索|谷歌搜索|【?看书领红包?】|关注.{0,12}(公众号|现金红包)|更多精彩|手打吧|人工推荐|client\.qq\.com|m\.qq\.com.{0,20}(read|book)|\(本章完\))/;
@@ -1043,8 +1062,8 @@ export async function getChapter(
       if (cleaned.length && cleaned[cleaned.length - 1] !== '') cleaned.push('');
       continue;
     }
-    // 整行都是噪声（很短且命中词库）
-    if (t.length <= 60 && NOISE_RE.test(t)) continue;
+    // 整行都是噪声（很短且命中词库，或恰好是 UI 词）
+    if (NOISE_LINE_EXACT.has(t) || (t.length <= 60 && NOISE_RE.test(t))) continue;
     cleaned.push(t);
   }
   text = cleaned.join('\n').replace(/\n{3,}/g, '\n\n').trim();

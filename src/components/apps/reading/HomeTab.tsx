@@ -8,11 +8,12 @@
  * - 全部书籍显示真实封面（服务端 FeaturedCover 永久缓存，后台自动补齐）
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Search, Clock3, ChevronRight, RefreshCw, Loader2, Sparkles } from 'lucide-react';
+import { Search, Clock3, ChevronRight, RefreshCw, Loader2, Sparkles, Trophy } from 'lucide-react';
 import { useReading } from '@/lib/reading/store';
 import {
   FEATURED,
   coverPaletteOf,
+  featuredCategoryOf,
   useFeaturedCovers,
   recommendBooks,
   themeOf,
@@ -41,21 +42,31 @@ export function HomeTab({
   onSearch,
   onOpenCategory,
   onOpenShelfBook,
+  onOpenRank,
 }: {
   onSearch: (kw?: string) => void;
   onOpenCategory: (category: string) => void;
   onOpenShelfBook: (b: ReadHistoryItem) => void;
+  /** 排行榜入口 */
+  onOpenRank: () => void;
 }) {
   const settings = useReading((s) => s.settings);
   const shelf = useReading((s) => s.shelf);
   const theme = useMemo(() => themeOf(settings.appTheme), [settings.appTheme]);
 
-  /** 继续阅读：优先阅读历史；历史空则兜底书架 */
+  /** 继续阅读：优先阅读历史；历史空则兜底书架（全部历史留存供偏好分析） */
   const [recent, setRecent] = useState<ReadHistoryItem | null>(null);
+  const [reads, setReads] = useState<ReadHistoryItem[]>([]);
   const loadRecent = useCallback(() => {
     api_readlog()
-      .then((d) => setRecent(d.reads[0] || null))
-      .catch(() => setRecent(null));
+      .then((d) => {
+        setReads(d.reads || []);
+        setRecent(d.reads[0] || null);
+      })
+      .catch(() => {
+        setReads([]);
+        setRecent(null);
+      });
   }, []);
   useEffect(() => {
     loadRecent();
@@ -77,7 +88,40 @@ export function HomeTab({
     return arr;
   }, []);
 
+  /** 无限流刷新 tick（下拉刷新 +1 → 重洗信息流） */
   const [feedTick, setFeedTick] = useState(0);
+
+  /** 阅读偏好：书架（在架×2）+ 历史读过（×1）→ 分类权重（读玄幻多就多推玄幻） */
+  const catAffinity = useMemo(() => {
+    const w = new Map<string, number>();
+    const add = (name: string, weight: number) => {
+      const cat = featuredCategoryOf(name);
+      if (cat) w.set(cat, (w.get(cat) || 0) + weight);
+    };
+    for (const b of shelf) add(b.name, 2);
+    for (const r of reads) add(r.name, 1);
+    return w;
+  }, [shelf, reads]);
+
+  /** 个性化推荐池：有偏好时各分类独立洗牌 → 组内序号 / 分类权重 → 加权交错排序
+   *  （偏好分类密度更高但与其它分类交错，不会整段同分类刷屏）；无偏好纯洗牌 */
+  const poolOrdered = useMemo(() => {
+    if (!catAffinity.size) return seededShuffle(pool, feedTick + 1);
+    const seen = new Set<string>();
+    const flat: { b: FeaturedBook; key: number }[] = [];
+    CATEGORIES.forEach((cat, ci) => {
+      const w = catAffinity.get(cat) || 0;
+      seededShuffle(FEATURED[cat] || [], feedTick + ci + 1).forEach((b, i) => {
+        if (seen.has(b.name)) return;
+        seen.add(b.name);
+        flat.push({ b, key: i / (1 + w * 0.8) + ((i % 7) * 0.001) });
+      });
+    });
+    flat.sort((x, y) => x.key - y.key);
+    return flat.map((x) => x.b);
+    // catAffinity 变化时重排（读书行为变化 → 推荐跟着变）
+  }, [pool, catAffinity, feedTick]);
+
   const orderRef = useRef<FeaturedBook[]>([]);
   const cursorRef = useRef(0);
   const roundRef = useRef(0);
@@ -85,11 +129,11 @@ export function HomeTab({
   const [loadingMore, setLoadingMore] = useState(false);
 
   const rebuildFeed = useCallback(() => {
-    orderRef.current = seededShuffle(pool, feedTick + 1);
+    orderRef.current = [...poolOrdered];
     roundRef.current = 1;
     cursorRef.current = 12;
     setFeed(orderRef.current.slice(0, 12));
-  }, [pool, feedTick]);
+  }, [poolOrdered]);
   // 初始 + 刷新 tick 变化时重建
   useEffect(() => {
     rebuildFeed();
@@ -102,14 +146,14 @@ export function HomeTab({
       if (cursorRef.current >= order.length) {
         // 一轮刷完 → 换 seed 再洗一轮接着刷（真·无限）
         roundRef.current += 1;
-        orderRef.current = [...order, ...seededShuffle(pool, feedTick + roundRef.current * 97)];
+        orderRef.current = [...order, ...seededShuffle(poolOrdered, feedTick + roundRef.current * 97)];
       }
       const next = cursorRef.current + 12;
       setFeed(orderRef.current.slice(0, next));
       cursorRef.current = next;
       setLoadingMore(false);
     }, 120);
-  }, [pool, feedTick]);
+  }, [poolOrdered, feedTick]);
 
   // ------------------------------------------------------------------
   // 封面（服务端缓存；feed / 推荐增量补齐；图片加载失败自动换地址重试一次）
@@ -310,8 +354,16 @@ export function HomeTab({
           </button>
         )}
 
-        {/* 分类胶囊（点击进入分类浏览页；自适应换行，不做横向滚动） */}
+        {/* 分类胶囊 + 排行榜入口（点击进入分类浏览页；自适应换行，不做横向滚动） */}
         <div className="mt-4 flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={onOpenRank}
+            className="flex h-8 items-center gap-1.5 whitespace-nowrap rounded-full px-4 text-[13px] font-medium backdrop-blur-xl active:scale-95"
+            style={{ ...glass, color: '#E0A13A', boxShadow: `inset 0 0 0 1px rgba(224,161,58,0.35)` }}
+          >
+            <Trophy className="h-3.5 w-3.5" strokeWidth={2.4} /> 排行榜
+          </button>
           {CATEGORIES.map((c) => (
             <button
               key={c}
@@ -385,13 +437,21 @@ export function HomeTab({
           </section>
         ))}
 
-        {/* 为你推荐 · 无限信息流（滚动到底自动加载） */}
+        {/* 为你推荐 · 无限信息流（滚动到底自动加载；有阅读历史时按偏好加权排序） */}
         <section className="mt-6">
           <div className="mb-2.5 flex items-center gap-1.5">
             <Sparkles className="h-4 w-4" style={{ color: theme.accent }} />
             <h2 className="text-[17px] font-bold" style={{ color: theme.textMain }}>
               为你推荐
             </h2>
+            {catAffinity.size > 0 && (
+              <span
+                className="ml-1 shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium"
+                style={{ background: theme.accentSoft, color: theme.accent }}
+              >
+                已按阅读偏好排序
+              </span>
+            )}
           </div>
           <div className="grid grid-cols-3 gap-x-3 gap-y-4">
             {feed.map((b, i) => (

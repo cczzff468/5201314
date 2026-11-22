@@ -22,6 +22,43 @@ export function normSourceUrl(u: string): string {
 /** ① 实测可用核心源（全链路双验证，enabled=true） */
 export const VERIFIED_SOURCES: LegadoSource[] = [
   {
+    // 晋江文学城官方（GB2312 页面 + AJAX JSON 搜索；女频/纯爱/原创站）
+    // 搜索走 search_ajax.php（UTF-8 JSON）；详情/目录/正文页为 GBK（引擎 charset 嗅探兜底）
+    bookSourceName: '晋江文学城',
+    bookSourceUrl: 'https://www.jjwxc.net/',
+    bookSourceGroup: '女频',
+    enabled: true,
+    bookSourceType: 0,
+    searchUrl: 'https://www.jjwxc.net/search/search_ajax.php?action=search&keywords={{key}}&type=1&version=1&getfull=1',
+    header: '{"User-Agent": "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"}',
+    ruleSearch: {
+      bookList: '$.data',
+      name: '$.novelname',
+      author: '$.authorname',
+      bookUrl: 'https://www.jjwxc.net/onebook.php?novelid={{$.novelid}}',
+      checkKeyWord: '落不下',
+    },
+    ruleBookInfo: {
+      name: 'tag.h1@text',
+      author: 'tag.h2@tag.a@text',
+      intro: '[itemprop=description]@text',
+      kind: '',
+      lastChapter: '',
+      coverUrl: '',
+    },
+    ruleToc: {
+      chapterList: '@css:tr[itemprop^=chapter]',
+      chapterName: 'tag.a@text',
+      chapterUrl: 'tag.a@href',
+    },
+    ruleContent: {
+      content: 'class.noveltext@html',
+      nextContentUrl: '',
+      replaceRegex:
+        '##\\[添加书签\\]|\\[推荐给朋友\\]|\\[投诉\\]|投诉色情有害|投诉涉未成年有害|投诉数据造假|文章收藏|为收藏文章分类|\\+新增收藏类别|定制收藏类别|查看收藏列表|插入书签|作者有话说|显示所有文的作话|请稍候|displayyrt\\([^\\)]*\\)',
+    },
+  },
+  {
     bookSourceName: '夜天连小说',
     bookSourceUrl: 'http://www.yetianlian.info/',
     bookSourceGroup: '小说',

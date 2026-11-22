@@ -19,6 +19,9 @@ import {
   UserRound,
   FolderUp,
   Loader2,
+  Sparkles,
+  RefreshCw,
+  X,
 } from 'lucide-react';
 import { useReading } from '@/lib/reading/store';
 import { APP_THEMES, api, fileToDataUrl, formatReadTime, themeOf } from './shared';
@@ -78,9 +81,12 @@ function Item({
 export function MeTab({
   onOpenSources,
   onOpenHistory,
+  onSearchBook,
 }: {
   onOpenSources: () => void;
   onOpenHistory: () => void;
+  /** AI 推荐书单里点一本书 → 聚合搜索 */
+  onSearchBook: (name: string) => void;
 }) {
   const settings = useReading((s) => s.settings);
   const patch = useReading((s) => s.patchSettings);
@@ -90,6 +96,31 @@ export function MeTab({
   const [typoOpen, setTypoOpen] = useState(false);
   const [themeOpen, setThemeOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
+  // ---- AI 推荐书单 ----
+  const [blOpen, setBlOpen] = useState(false);
+  const [blBusy, setBlBusy] = useState(false);
+  const [blList, setBlList] = useState<{ name: string; author?: string; reason?: string; tag?: string }[]>([]);
+  const [blEmpty, setBlEmpty] = useState(false);
+
+  const genBooklist = async () => {
+    if (blBusy) return;
+    setBlBusy(true);
+    setBlEmpty(false);
+    try {
+      const r = await fetch('/api/reading/ai', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'booklist' }),
+      }).then((x) => x.json());
+      if (r.error) throw new Error(r.error);
+      setBlList(r.list || []);
+      setBlEmpty(!r.list || !r.list.length);
+    } catch {
+      setBlList([]);
+      setBlEmpty(true);
+    }
+    setBlBusy(false);
+  };
   // 资料编辑草稿
   const [draftName, setDraftName] = useState('');
   const [draftId, setDraftId] = useState('');
@@ -255,6 +286,19 @@ export function MeTab({
 
       <GroupTitle text="阅读与数据" theme={theme} />
       <div className="overflow-hidden rounded-3xl backdrop-blur-xl" style={card}>
+        <Item
+          theme={theme}
+          icon={<Sparkles className="h-[22px] w-[22px]" strokeWidth={2} />}
+          iconBg={theme.accentSoft}
+          iconColor={theme.accent}
+          title="AI 推荐书单"
+          desc="根据书架和阅读历史生成专属书单"
+          onClick={() => {
+            setBlOpen(true);
+            if (!blList.length && !blEmpty) void genBooklist();
+          }}
+        />
+        <div className="mx-[86px] h-px" style={{ background: theme.cardRing }} />
         <Item
           theme={theme}
           icon={<History className="h-[22px] w-[22px]" strokeWidth={2} />}
@@ -469,6 +513,94 @@ export function MeTab({
             <PreviewText />
           </div>
           <ReaderSettingsSheet onClose={() => setTypoOpen(false)} />
+        </div>
+      )}
+
+      {/* AI 推荐书单抽屉（根据书架+阅读历史生成；点书直达聚合搜索） */}
+      {blOpen && (
+        <div className="absolute inset-0 z-50" role="dialog" aria-label="AI 推荐书单">
+          <button type="button" aria-label="关闭" className="absolute inset-0 bg-black/30 backdrop-blur-[2px]" onClick={() => setBlOpen(false)} />
+          <div
+            className="absolute inset-x-0 bottom-0 flex max-h-[76%] flex-col rounded-t-3xl shadow-2xl backdrop-blur-2xl"
+            style={{ background: theme.pageBg, boxShadow: `inset 0 0 0 1px ${theme.cardRing}, 0 -12px 48px rgba(0,0,0,0.18)` }}
+          >
+            <div className="flex shrink-0 items-center gap-2 px-5 pb-2 pt-4">
+              <Sparkles className="h-[18px] w-[18px]" style={{ color: theme.accent }} />
+              <p className="text-[16px] font-bold" style={{ color: theme.textMain }}>
+                AI 推荐书单
+              </p>
+              <span className="min-w-0 flex-1 truncate text-[11px]" style={{ color: theme.textSub }}>
+                {blBusy ? '正在根据你的口味挑书…' : `${shelf.length} 本在架 · 专属推荐`}
+              </span>
+              <button
+                type="button"
+                onClick={() => void genBooklist()}
+                disabled={blBusy}
+                aria-label="重新生成"
+                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-black/[0.05] active:scale-90 disabled:opacity-50"
+              >
+                {blBusy ? <Loader2 className="h-4 w-4 animate-spin" style={{ color: theme.accent }} /> : <RefreshCw className="h-4 w-4" style={{ color: theme.textMain }} />}
+              </button>
+              <button type="button" onClick={() => setBlOpen(false)} aria-label="关闭" className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-black/[0.05] active:scale-90">
+                <X className="h-4 w-4" style={{ color: theme.textMain }} />
+              </button>
+            </div>
+            <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-[max(16px,env(safe-area-inset-bottom))]">
+              {blBusy && !blList.length && (
+                <div className="space-y-2 py-2" aria-hidden="true">
+                  {[0, 1, 2, 3].map((i) => (
+                    <div key={i} className="flex items-center gap-3 rounded-2xl p-3.5" style={{ background: 'rgba(0,0,0,0.03)' }}>
+                      <div className="h-10 w-10 shrink-0 animate-pulse rounded-xl" style={{ background: theme.accentSoft }} />
+                      <div className="min-w-0 flex-1 space-y-1.5">
+                        <div className="h-3.5 w-2/5 animate-pulse rounded-full" style={{ background: theme.accentSoft }} />
+                        <div className="h-3 w-4/5 animate-pulse rounded-full" style={{ background: theme.accentSoft }} />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {!blBusy && blEmpty && (
+                <p className="py-8 text-center text-[13px]" style={{ color: theme.textSub }}>
+                  {shelf.length ? '生成失败，点右上角刷新重试' : '书架还是空的，先加几本书再来让 AI 挑吧'}
+                </p>
+              )}
+              {blList.map((b, i) => (
+                <button
+                  key={`${b.name}:${i}`}
+                  type="button"
+                  onClick={() => {
+                    setBlOpen(false);
+                    onSearchBook(b.name);
+                  }}
+                  className="mb-2 flex w-full items-center gap-3 rounded-2xl p-3.5 text-left backdrop-blur-xl active:scale-[0.98]"
+                  style={{ background: theme.cardBg, boxShadow: 'inset 0 0 0 1px ' + theme.cardRing }}
+                >
+                  <span
+                    className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-[13px] font-bold tabular-nums"
+                    style={{ background: theme.accentSoft, color: theme.accent }}
+                  >
+                    {i + 1}
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="flex items-baseline gap-2">
+                      <span className="min-w-0 shrink truncate text-[15px] font-semibold" style={{ color: theme.textMain }}>
+                        {b.name}
+                      </span>
+                      {b.tag && (
+                        <span className="shrink-0 whitespace-nowrap rounded-[6px] px-1.5 py-0.5 text-[10px] font-medium" style={{ background: theme.accentSoft, color: theme.accent }}>
+                          {b.tag}
+                        </span>
+                      )}
+                    </span>
+                    <span className="mt-0.5 block truncate text-[12px]" style={{ color: theme.textSub }}>
+                      {b.author}
+                      {b.reason ? ` · ${b.reason}` : ''}
+                    </span>
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
       )}
     </div>

@@ -12,7 +12,7 @@
  * Token 省流：只注入章节摘要 + 最近对话 + 记忆召回块，正文永不进上下文。
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { X, Send, Sparkles, Loader2, BookOpen, Users, RefreshCw, BrainCircuit } from 'lucide-react';
+import { X, Send, Sparkles, Loader2, BookOpen, Users, RefreshCw, BrainCircuit, History, Zap, ChevronLeft } from 'lucide-react';
 import { api, themeOf, type SourceItem } from './shared';
 import { useReading } from '@/lib/reading/store';
 import { listContacts, cachedOwnerName } from '@/lib/ios/contacts-store';
@@ -53,6 +53,8 @@ export function AIChatSheet(props: {
   onClose: () => void;
   /** 打开即问（阅读器「查询」入口）：跳过选人直接发问 */
   initialAsk?: string;
+  /** 当前章 URL（本章速读用） */
+  chapterUrl?: string;
 }) {
   const settings = useReading((s) => s.settings);
   const sources = useReading((s) => s.sources);
@@ -149,6 +151,31 @@ export function AIChatSheet(props: {
     }
   };
 
+  // ---- AI 助读快捷：前情回顾 / 本章速读 ----
+  const [aiBusy, setAiBusy] = useState<'recap' | 'digest' | null>(null);
+  const [aiResult, setAiResult] = useState<{ kind: 'recap' | 'digest'; text: string } | null>(null);
+  const runAi = async (kind: 'recap' | 'digest') => {
+    if (aiBusy) return;
+    setAiBusy(kind);
+    try {
+      const r = await fetch('/api/reading/ai', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(
+          kind === 'recap'
+            ? { action: 'recap', bookUrl: props.bookUrl, currentChapter: props.currentChapter, name: props.name }
+            : { action: 'digest', chapterUrl: props.chapterUrl || '' },
+        ),
+      }).then((x) => x.json());
+      if (r.error) throw new Error(r.error);
+      const text = kind === 'recap' ? r.recap : r.digest;
+      setAiResult({ kind, text: text || (r.empty ? '' : '（生成失败，再试一次）') });
+    } catch (e) {
+      setAiResult({ kind, text: `（${e instanceof Error ? e.message : '生成失败，稍后再试'}）` });
+    }
+    setAiBusy(null);
+  };
+
   const send = async (text?: string) => {
     const msg = (text || input).trim();
     if (!msg || sending) return;
@@ -192,9 +219,52 @@ export function AIChatSheet(props: {
   const glass = { background: theme.cardBg, boxShadow: 'inset 0 0 0 1px ' + theme.cardRing } as const;
 
   // ------------------------------------------------------------------
-  // 阶段①：选择陪读联系人（玻璃卡列表）
+  // 阶段①：选择陪读联系人（AI 助读快捷 + 玻璃卡列表）
   // ------------------------------------------------------------------
-  const body = phase === 'pick' ? (
+  const body = aiResult ? (
+    /* AI 助读结果面板（前情回顾 / 本章速读） */
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="shrink-0 px-5 pb-3 pt-4">
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setAiResult(null)}
+            aria-label="返回"
+            className="flex h-8 w-8 items-center justify-center rounded-full bg-black/[0.05] active:scale-90"
+          >
+            <ChevronLeft className="h-4 w-4" style={{ color: theme.textMain }} />
+          </button>
+          <p className="flex items-center gap-1.5 text-[16px] font-bold" style={{ color: theme.textMain }}>
+            {aiResult.kind === 'recap' ? <History className="h-[17px] w-[17px]" style={{ color: theme.accent }} /> : <Zap className="h-[17px] w-[17px]" style={{ color: theme.accent }} />}
+            {aiResult.kind === 'recap' ? '前情回顾' : '本章速读'}
+          </p>
+          <button type="button" onClick={props.onClose} aria-label="关闭" className="ml-auto flex h-8 w-8 items-center justify-center rounded-full bg-black/[0.05] active:scale-90">
+            <X className="h-4 w-4" style={{ color: theme.textMain }} />
+          </button>
+        </div>
+      </div>
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 pb-6">
+        <div className="rounded-2xl p-4 leading-relaxed ring-1 backdrop-blur-xl" style={glass}>
+          <p className="whitespace-pre-wrap text-[14px]" style={{ color: theme.textMain }}>
+            {aiResult.text ||
+              (aiResult.kind === 'recap'
+                ? '刚开书不久，还没有积累前情可回顾。先读几章，回头再来就能快速接上剧情啦。'
+                : '本章还没缓存，先正常读一次本章后再来速读。')}
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => void runAi(aiResult.kind)}
+          disabled={!!aiBusy}
+          className="mt-3 flex h-10 w-full items-center justify-center gap-2 rounded-full text-[14px] font-semibold text-white active:scale-95 disabled:opacity-50"
+          style={{ background: `linear-gradient(135deg, ${theme.gradFrom}, ${theme.gradTo})` }}
+        >
+          {aiBusy === aiResult.kind ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+          重新生成
+        </button>
+      </div>
+    </div>
+  ) : phase === 'pick' ? (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="shrink-0 px-5 pb-3 pt-4">
         <div className="flex items-center justify-between">
@@ -230,6 +300,43 @@ export function AIChatSheet(props: {
           <BrainCircuit className="h-3.5 w-3.5" />
           TA 会以自己的人设陪你读这本书，聊天记入「记忆」App
         </p>
+        {/* AI 助读快捷：前情回顾 / 本章速读（一键生成，无需选人） */}
+        <div className="mt-3 grid grid-cols-2 gap-2.5">
+          <button
+            type="button"
+            onClick={() => void runAi('recap')}
+            disabled={!!aiBusy}
+            className="flex flex-col items-start gap-1.5 rounded-2xl p-3 text-left ring-1 backdrop-blur-xl active:scale-[0.97] disabled:opacity-60"
+            style={glass}
+          >
+            <span className="flex h-8 w-8 items-center justify-center rounded-xl" style={{ background: theme.accentSoft, color: theme.accent }}>
+              {aiBusy === 'recap' ? <Loader2 className="h-4 w-4 animate-spin" /> : <History className="h-[17px] w-[17px]" />}
+            </span>
+            <span className="text-[13px] font-semibold" style={{ color: theme.textMain }}>
+              前情回顾
+            </span>
+            <span className="text-[10px] leading-tight" style={{ color: theme.textSub }}>
+              上次看到哪了，快速接上剧情
+            </span>
+          </button>
+          <button
+            type="button"
+            onClick={() => void runAi('digest')}
+            disabled={!!aiBusy || !props.chapterUrl}
+            className="flex flex-col items-start gap-1.5 rounded-2xl p-3 text-left ring-1 backdrop-blur-xl active:scale-[0.97] disabled:opacity-60"
+            style={glass}
+          >
+            <span className="flex h-8 w-8 items-center justify-center rounded-xl" style={{ background: theme.accentSoft, color: theme.accent }}>
+              {aiBusy === 'digest' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Zap className="h-[17px] w-[17px]" />}
+            </span>
+            <span className="text-[13px] font-semibold" style={{ color: theme.textMain }}>
+              本章速读
+            </span>
+            <span className="text-[10px] leading-tight" style={{ color: theme.textSub }}>
+              3~5 条要点，一分钟看完本章
+            </span>
+          </button>
+        </div>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-4">
         {/* 上次陪读伙伴：一键继续 */}

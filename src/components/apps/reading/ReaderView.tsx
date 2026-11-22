@@ -352,6 +352,30 @@ export function ReaderView({ page, onBack }: { page: ReaderPage; onBack: () => v
   const [ttsOn, setTtsOn] = useState(false);
   const [toast, setToast] = useState('');
 
+  // ---- 听书增强：倍速 / 定时关闭 / 自动连播 / 控制面板 ----
+  /** 倍速（0.5x~2x，localStorage 持久化） */
+  const [ttsRate, setTtsRate] = useState<number>(() =>
+    typeof window === 'undefined' ? 1 : Number(localStorage.getItem('rd-tts-rate')) || 1,
+  );
+  /** 定时关闭：null=不限 · 'chapter'=读完本章停 · 15/30=分钟后停 */
+  const [ttsTimer, setTtsTimer] = useState<null | 'chapter' | 15 | 30>(null);
+  /** 自动连播下一章 */
+  const [ttsAutoNext, setTtsAutoNext] = useState(true);
+  /** 听书控制面板（点朗读中胶囊展开） */
+  const [ttsPanel, setTtsPanel] = useState(false);
+  /** 当前朗读到的段落（倍速切换后从当前段续读） */
+  const ttsPosRef = useRef(0);
+  /** 朗读代际令牌：cancel 后旧队列的 onend 不再续播（Chrome 取消也会派发 onend 的竞态） */
+  const ttsGenRef = useRef(0);
+  /** 跨章续读标记：翻章动画期间挂起，正文加载完成后继续朗读 */
+  const ttsResumeRef = useRef(false);
+  /** 定时关闭计时器 */
+  const ttsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** 状态镜像（朗读回调里读 ref，热切换倍速/定时/连播不踩 stale closure） */
+  const ttsRateRef = useRef(ttsRate);
+  const ttsTimerStateRef = useRef<null | 'chapter' | 15 | 30>(null);
+  const ttsAutoNextRef = useRef(true);
+
   // ---- 批注（书签 + 划线笔记） ----
   const [notes, setNotes] = useState<ReaderNoteItem[]>([]);
   const [notesVer, setNotesVer] = useState(0);
@@ -1018,11 +1042,13 @@ export function ReaderView({ page, onBack }: { page: ReaderPage; onBack: () => v
     navRef.current = { page: curPage, pages: Math.max(1, pageList.length), idx, total: chapters.length };
   }, [curPage, pageList.length, idx, chapters.length]);
 
-  /** 翻章：atPage='last' 时回退到上一章最后一页（等分页算好落位） */
-  const goChapter = useCallback((delta: number, atPage: 'first' | 'last' = 'first') => {
+  /** 翻章：atPage='last' 时回退到上一章最后一页（等分页算好落位）。
+   *  fromTTS=true 表示听书自动连播触发（不清除续读标记）；用户手动翻章会中断自动连播 */
+  const goChapter = useCallback((delta: number, atPage: 'first' | 'last' = 'first', fromTTS = false) => {
     const s = navRef.current;
     const next = s.idx + delta;
     if (next < 0 || next >= s.total) return false;
+    if (!fromTTS) ttsResumeRef.current = false; // 手动翻章：中断听书跨章续读
     navRef.current = { ...s, idx: next, page: 0 };
     setFlipDir(delta);
     setIdx(next);
@@ -1590,27 +1616,130 @@ export function ReaderView({ page, onBack }: { page: ReaderPage; onBack: () => v
     [paragraphs, rangeHighlight, src.bookUrl, src.name, idx, ch, bumpNotes, notify],
   );
 
-  /** 从本段听：从第 pi 段朗读到本章末 */
-  const speakFromPara = useCallback(
-    (pi: number) => {
+  /** 段落队列式朗读：从第 startIdx 段读到本章末。
+   *  每段一个 Utterance（长文本不截断；倍速切换/跨章续读都能从当前段恢复） */
+  const ttsSpeakFrom = useCallback(
+    (startIdx: number) => {
       if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
         notify('当前浏览器不支持朗读');
         return;
       }
       window.speechSynthesis.cancel();
-      const text = paragraphs.slice(pi).map((p) => p.text).join('\n');
-      if (!text) return;
-      const u = new SpeechSynthesisUtterance(text);
-      u.lang = 'zh-CN';
-      u.rate = 1;
-      u.onend = () => setTtsOn(false);
-      u.onerror = () => setTtsOn(false);
-      window.speechSynthesis.speak(u);
+      const list = paragraphs.slice(startIdx).map((p) => p.text).filter(Boolean);
+      if (!list.length) return;
+      ttsPosRef.current = startIdx;
+      const gen = ++ttsGenRef.current;
+      // 定时关闭（分钟）
+      if (ttsTimerRef.current) clearTimeout(ttsTimerRef.current);
+      ttsTimerRef.current = null;
+      const minutes = typeof ttsTimerStateRef.current === 'number' ? ttsTimerStateRef.current : null;
+      if (minutes) {
+        ttsTimerRef.current = setTimeout(() => {
+          window.speechSynthesis.cancel();
+          setTtsOn(false);
+          setTtsPanel(false);
+          ttsResumeRef.current = false;
+          notify('听书定时结束');
+        }, minutes * 60_000);
+      }
+      let k = 0;
+      const speakNext = () => {
+        if (gen !== ttsGenRef.current) return; // 旧代际队列：已被取消，停止续播
+        if (k >= list.length) {
+          // 本章读完：读完本章停 > 自动连播 > 普通结束
+          if (ttsTimerStateRef.current === 'chapter') {
+            setTtsOn(false);
+            ttsResumeRef.current = false;
+            notify('本章已读完，听书已停止');
+            return;
+          }
+          if (ttsAutoNextRef.current && goChapter(1, 'first', true)) {
+            ttsResumeRef.current = true; // 正文加载完成后由 effect 续读
+            return;
+          }
+          setTtsOn(false);
+          ttsResumeRef.current = false;
+          return;
+        }
+        const text = list[k];
+        ttsPosRef.current = startIdx + k;
+        const u = new SpeechSynthesisUtterance(text);
+        u.lang = 'zh-CN';
+        u.rate = ttsRateRef.current;
+        u.onend = () => {
+          if (gen !== ttsGenRef.current) return; // 取消后派发的 onend：不续播
+          k++;
+          speakNext();
+        };
+        u.onerror = () => {
+          if (gen !== ttsGenRef.current) return; // 主动取消：静默退出
+          // 异常中断（引擎占用等）：同步状态
+          if (!window.speechSynthesis.speaking && !window.speechSynthesis.pending) setTtsOn(false);
+        };
+        window.speechSynthesis.speak(u);
+      };
+      speakNext();
       setTtsOn(true);
+    },
+    [paragraphs, notify, goChapter],
+  );
+
+  /** 停止朗读（清定时器/跨章续读标记） */
+  const ttsStop = useCallback(() => {
+    if (typeof window !== 'undefined' && 'speechSynthesis' in window) window.speechSynthesis.cancel();
+    ttsGenRef.current++;
+    if (ttsTimerRef.current) clearTimeout(ttsTimerRef.current);
+    ttsTimerRef.current = null;
+    ttsResumeRef.current = false;
+    setTtsOn(false);
+    setTtsPanel(false);
+  }, []);
+
+  /** 倍速热切换：从当前段落用新倍速续读（Web Speech 不支持播放中改速，重排队列实现） */
+  const ttsChangeRate = (v: number) => {
+    ttsRateRef.current = v;
+    setTtsRate(v);
+    try {
+      localStorage.setItem('rd-tts-rate', String(v));
+    } catch {
+      /* 忽略 */
+    }
+    if (ttsOn) ttsSpeakFrom(Math.max(0, ttsPosRef.current));
+  };
+
+  /** 定时关闭热切换（不限/读完本章/15分钟/30分钟，分钟档从现在起算） */
+  const ttsChangeTimer = (v: null | 'chapter' | 15 | 30) => {
+    ttsTimerStateRef.current = v;
+    setTtsTimer(v);
+    if (ttsTimerRef.current) clearTimeout(ttsTimerRef.current);
+    ttsTimerRef.current = null;
+    if (typeof v === 'number') {
+      ttsTimerRef.current = setTimeout(() => {
+        if (typeof window !== 'undefined' && 'speechSynthesis' in window) window.speechSynthesis.cancel();
+        ttsGenRef.current++;
+        ttsResumeRef.current = false;
+        setTtsOn(false);
+        setTtsPanel(false);
+        notify('听书定时结束');
+      }, v * 60_000);
+    }
+  };
+
+  /** 自动连播开关（热切换，无需重启队列） */
+  const ttsToggleAutoNext = () => {
+    ttsAutoNextRef.current = !ttsAutoNextRef.current;
+    setTtsAutoNext(ttsAutoNextRef.current);
+  };
+
+  /** 从本段听：朗读工具条入口 */
+  const speakFromPara = useCallback(
+    (pi: number) => {
+      ttsResumeRef.current = false;
+      ttsSpeakFrom(pi);
       setNotePopup(null);
       notify(`从第 ${pi + 1} 段开始朗读`);
     },
-    [paragraphs, notify],
+    [ttsSpeakFrom],
   );
 
   const copyPara = useCallback(
@@ -1834,33 +1963,43 @@ export function ReaderView({ page, onBack }: { page: ReaderPage; onBack: () => v
     }
   };
 
-  /** 朗读：Web Speech 全章 TTS（切章/退出自动停） */
+  /** 朗读入口（工具栏按钮）：切停 / 从头读全章（含标题段） */
   const speakChapter = () => {
-    if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
-      notify('当前浏览器不支持朗读');
-      return;
-    }
-    window.speechSynthesis.cancel();
     if (ttsOn) {
-      setTtsOn(false);
+      ttsStop();
       return;
     }
     if (!content) return;
-    const u = new SpeechSynthesisUtterance(`${ch?.title || ''}。${content}`);
-    u.lang = 'zh-CN';
-    u.rate = 1;
-    u.onend = () => setTtsOn(false);
-    u.onerror = () => setTtsOn(false);
-    window.speechSynthesis.speak(u);
-    setTtsOn(true);
+    ttsResumeRef.current = false;
+    ttsSpeakFrom(0);
   };
+
+  /** 跨章续读：自动连播翻章 → 正文加载完成后接着读（从新章第 0 段） */
+  useEffect(() => {
+    if (!ttsResumeRef.current || loading || !content) return;
+    const t = setTimeout(() => {
+      if (ttsResumeRef.current) {
+        ttsResumeRef.current = false;
+        ttsSpeakFrom(0);
+      }
+    }, 350); // 等分页/标题稳定后再开口
+    return () => clearTimeout(t);
+  }, [loading, content, paragraphs, ttsSpeakFrom]);
+
+  /** 退出/切章清理（翻章取消朗读；手动翻章由 goChapter 清续读标记） */
   useEffect(() => {
     return () => {
-      if (typeof window !== 'undefined' && 'speechSynthesis' in window) window.speechSynthesis.cancel();
+      if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+        ttsGenRef.current++;
+        window.speechSynthesis.cancel();
+      }
     };
   }, []);
   useEffect(() => {
-    if (typeof window !== 'undefined' && 'speechSynthesis' in window) window.speechSynthesis.cancel();
+    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+      ttsGenRef.current++;
+      window.speechSynthesis.cancel();
+    }
   }, [idx]);
 
   /** 章节搜索结果（标题匹配） */
@@ -2414,7 +2553,7 @@ export function ReaderView({ page, onBack }: { page: ReaderPage; onBack: () => v
               >
                 {/* renderPage 内的 ref 读取全部位于点击回调里（事件期执行，非渲染期） */}
                 {/* eslint-disable-next-line react-hooks/refs -- 误报：回调中的 navRef/suppressClickRef 仅事件期访问 */}
-                {pageList.map(renderPage)}
+                {pageList.map((pg, pi) => renderPage(pg, pi))}
               </div>
               {/* 覆盖/仿真/淡入动画层：新页从边缘滑入盖住旧页（边缘锐利阴影+1px 描边，
                   翻页前沿像真实书页而不是“被切割”） */}
@@ -2490,15 +2629,104 @@ export function ReaderView({ page, onBack }: { page: ReaderPage; onBack: () => v
         </div>
       )}
 
-      {/* 朗读中指示（让出顶部书名/章节行，下移到正文区上缘） */}
+      {/* 朗读中指示（点击展开听书控制面板：倍速/定时/连播） */}
       {ttsOn && (
-        <div className="pointer-events-none absolute inset-x-0 top-[36px] z-10 flex justify-center">
-          <span
-            className="flex items-center gap-1.5 rounded-full px-3 py-1 text-[11px] font-medium backdrop-blur-xl"
-            style={{ background: 'rgba(0,0,0,0.35)', color: '#fff' }}
+        <div className="absolute inset-x-0 top-[36px] z-10 flex flex-col items-center gap-2 px-4">
+          <button
+            type="button"
+            onClick={() => setTtsPanel((v) => !v)}
+            className="flex max-w-full shrink-0 items-center gap-1.5 rounded-full px-3 py-1 text-[11px] font-medium backdrop-blur-xl active:scale-95"
+            style={{ background: 'rgba(0,0,0,0.42)', color: '#fff' }}
+            aria-expanded={ttsPanel}
           >
-            <Volume2 className="h-3 w-3" /> 朗读中 · 再次点击朗读可停止
-          </span>
+            <Volume2 className="h-3 w-3 shrink-0" />
+            <span className="whitespace-nowrap">
+              朗读中 {ttsRate}x{ttsTimer ? ` · ${ttsTimer === 'chapter' ? '读完本章停' : `${ttsTimer}分钟`}` : ''}{ttsAutoNext ? ' · 连播' : ''}
+            </span>
+            <span className="shrink-0 opacity-80">{ttsPanel ? '收起 ▲' : '控制 ▼'}</span>
+          </button>
+          {ttsPanel && (
+            <div
+              className="w-full max-w-[340px] rounded-2xl p-3.5 backdrop-blur-2xl"
+              style={{ background: barCard.background, color: barCard.color, boxShadow: `inset 0 0 0 1px ${barCard.ring}, 0 10px 32px rgba(0,0,0,0.18)` }}
+              role="dialog"
+              aria-label="听书控制"
+            >
+              {/* 倍速 */}
+              <div className="flex items-center justify-between">
+                <span className="text-[12px] font-semibold" style={{ color: barSub }}>
+                  朗读倍速
+                </span>
+                <button type="button" onClick={ttsStop} className="rounded-full px-3 py-1 text-[12px] font-semibold active:scale-95" style={{ background: 'rgba(224,82,82,0.14)', color: '#E05252' }}>
+                  停止朗读
+                </button>
+              </div>
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {[0.5, 0.75, 1, 1.25, 1.5, 2].map((r) => (
+                  <button
+                    key={r}
+                    type="button"
+                    onClick={() => ttsChangeRate(r)}
+                    className="min-w-[46px] rounded-full px-2 py-1.5 text-[12px] font-semibold tabular-nums active:scale-95"
+                    style={{
+                      background: ttsRate === r ? theme.accent : pillBg,
+                      color: ttsRate === r ? '#fff' : barCard.color,
+                    }}
+                    aria-pressed={ttsRate === r}
+                  >
+                    {r}x
+                  </button>
+                ))}
+              </div>
+              {/* 定时关闭 */}
+              <p className="mt-3 text-[12px] font-semibold" style={{ color: barSub }}>
+                定时关闭
+              </p>
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {(
+                  [
+                    { v: null, label: '不限' },
+                    { v: 'chapter' as const, label: '读完本章' },
+                    { v: 15 as const, label: '15分钟' },
+                    { v: 30 as const, label: '30分钟' },
+                  ]
+                ).map((o) => (
+                  <button
+                    key={String(o.v)}
+                    type="button"
+                    onClick={() => ttsChangeTimer(o.v)}
+                    className="rounded-full px-3 py-1.5 text-[12px] font-semibold active:scale-95"
+                    style={{
+                      background: ttsTimer === o.v ? theme.accent : pillBg,
+                      color: ttsTimer === o.v ? '#fff' : barCard.color,
+                    }}
+                    aria-pressed={ttsTimer === o.v}
+                  >
+                    {o.label}
+                  </button>
+                ))}
+              </div>
+              {/* 自动连播 */}
+              <div className="mt-3 flex items-center justify-between">
+                <span className="text-[12px] font-semibold" style={{ color: barSub }}>
+                  自动连播下一章
+                </span>
+                <button
+                  type="button"
+                  onClick={ttsToggleAutoNext}
+                  role="switch"
+                  aria-checked={ttsAutoNext}
+                  className="flex h-[26px] w-[46px] items-center rounded-full px-0.5 transition-colors"
+                  style={{ background: ttsAutoNext ? theme.accent : 'rgba(120,120,128,0.32)' }}
+                >
+                  <span
+                    className="h-[22px] w-[22px] rounded-full bg-white shadow transition-transform"
+                    style={{ transform: ttsAutoNext ? 'translateX(20px)' : 'translateX(0)' }}
+                  />
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -2872,7 +3100,8 @@ export function ReaderView({ page, onBack }: { page: ReaderPage; onBack: () => v
           </div>
           {/* 分隔线 */}
           <div className="my-2 h-px w-full" style={{ background: bg.dark ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.06)' }} />
-          {/* 行2：目录 · 夜间 · AI伴读 · 排版 · 朗读 */}
+          {/* 行2：目录 · 夜间 · AI伴读 · 排版 · 朗读（朗读按钮单独渲染：事件处理器直绑，
+              避免数组间接传递导致 lint 误判 ref 访问） */}
           <div className="flex items-stretch justify-between gap-1">
             {[
               {
@@ -2903,13 +3132,6 @@ export function ReaderView({ page, onBack }: { page: ReaderPage; onBack: () => v
                 icon: <SlidersHorizontal className="h-[21px] w-[21px]" strokeWidth={2} />,
                 onClick: () => setSettingsOpen(true),
               },
-              {
-                key: 'tts',
-                label: ttsOn ? '停止' : '朗读',
-                icon: <Volume2 className="h-[21px] w-[21px]" strokeWidth={2} />,
-                onClick: speakChapter,
-                accent: ttsOn,
-              },
             ].map((b) => (
               <button
                 key={b.key}
@@ -2924,6 +3146,17 @@ export function ReaderView({ page, onBack }: { page: ReaderPage; onBack: () => v
                 </span>
               </button>
             ))}
+            <button
+              type="button"
+              onClick={speakChapter}
+              className="flex flex-1 flex-col items-center gap-1 rounded-2xl py-1.5 active:scale-90"
+              style={{ color: ttsOn ? theme.accent : barCard.color }}
+            >
+              <Volume2 className="h-[21px] w-[21px]" strokeWidth={2} />
+              <span className="text-[10px] font-medium" style={{ color: ttsOn ? theme.accent : barSub }}>
+                {ttsOn ? '停止' : '朗读'}
+              </span>
+            </button>
           </div>
         </div>
       )}
@@ -3190,6 +3423,7 @@ export function ReaderView({ page, onBack }: { page: ReaderPage; onBack: () => v
           currentChapterTitle={ch?.title || ''}
           summary={summary}
           initialAsk={chatAsk}
+          chapterUrl={chapters[idx]?.url}
           onClose={() => {
             setChatOpen(false);
             setChatAsk(undefined);

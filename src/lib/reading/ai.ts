@@ -32,8 +32,8 @@ async function getZai(): Promise<ZAIClient> {
   return zaiCache;
 }
 
-/** 轻量补全（禁思考链，省 Token） */
-async function lightChat(messages: LLMMessage[], maxTokens = 512): Promise<string> {
+/** 轻量补全（禁思考链，省 Token；AI 助读三件套也复用） */
+export async function lightChat(messages: LLMMessage[], maxTokens = 512): Promise<string> {
   const zai = await getZai();
   const res = await zai.chat.completions.create({
     messages,
