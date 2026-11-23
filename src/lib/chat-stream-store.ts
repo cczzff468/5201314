@@ -46,7 +46,7 @@ import { safeLlmFetch } from '@/lib/ios/api-circuit-breaker';
 import { directChatStream, isPrivateApiUrl } from '@/lib/ios/direct-api';
 import { createReplySegmentScanner, replyMinTarget } from '@/lib/reply-count';
 // v2.3.0 F-11：裸 JSON 工具调用提取/剥除（segSink 投递关口拦截 + finalize 代执行）
-import { extractJsonToolCalls, stripJsonToolCalls } from '@/lib/ios/json-tool-calls';
+import { extractJsonToolCalls, stripJsonToolCalls, looksLikePartialToolJson, stripTrailingPartialToolJson } from '@/lib/ios/json-tool-calls';
 // 深度思考：流式统一剥离 [思考]…[/思考] 块（正文/分段器只见纯正文，思考内容单独收集交 finalize）
 import { createThinkFilter } from '@/lib/deep-think';
 import { describeImagesAuto } from '@/lib/vision-client';
@@ -592,22 +592,44 @@ async function runStream(rt: StreamRuntime, opts: BeginChatStreamOptions): Promi
   // segSink 投递关口先过 extractJsonToolCalls：整段就是 JSON 调用 → 扣下存 pendingJsonCalls
   // （finalize 前统一代执行，工具气泡照常）；混合段（正文里夹 JSON）→ 投递剥净后的正文。
   const pendingJsonCalls: Array<{ name: string; args: Record<string, unknown> }> = [];
+  // v2.3.1 残缺 JSON 扣留缓冲：模型把工具调用 pretty-print 多行展开时，分段器会按
+  // 换行把它撕成多条（`{` 一条 / `"name": "setRealAlarm",` 一条…），单条都不是完整
+  // JSON → 提取不到 → 半截 JSON 逐条上屏（机主实测第二种裸 JSON 泄漏形态）。扣留
+  // 判定：括号没配平 + 开头是 '{' 或含 "name"/"function" 键 → 先扣住拼下一段；
+  // 拼到配平或流结束（finalize 冲刷：是工具调用就吃掉代执行，不是才放行上屏）。
+  let jsonHold = '';
+  // v2.3.1 流中是否已有分段上屏（finalize 防重复重推的判据：混合回复的正文已上屏，
+  // 剩余裸 JSON 代执行后绝不能再把净化全文重进分段器发一遍）
+  let deliveredAnyText = false;
   const segSink = opts.onSegment
     ? (seg: string): void => {
-        const calls = extractJsonToolCalls(seg);
+        let piece = seg;
+        if (jsonHold) {
+          piece = jsonHold + seg;
+          jsonHold = '';
+        }
+        if (looksLikePartialToolJson(piece)) {
+          jsonHold = piece; // 半截工具 JSON：扣住不上屏，等下一段拼齐
+          return;
+        }
+        const calls = extractJsonToolCalls(piece);
         if (calls.length > 0) {
-          const clean = stripJsonToolCalls(seg);
+          const clean = stripJsonToolCalls(piece);
           if (calls.length > 0 && clean === null) {
             // 整段就是裸 JSON 工具调用：不上屏，转交 finalize 代执行
             for (const c of calls) pendingJsonCalls.push(c);
             return;
           }
-          // 混合段：剥净后投递（极少见——JSON 通常独立成段）
-          if (clean) opts.onSegment?.(clean);
+          // 混合段：剥净后投递（v2.3.1 span 式剥除：内联拼在正文同行也能剥干净）
+          if (clean) {
+            deliveredAnyText = true;
+            opts.onSegment?.(clean);
+          }
           for (const c of calls) pendingJsonCalls.push(c);
           return;
         }
-        opts.onSegment?.(seg);
+        deliveredAnyText = true;
+        opts.onSegment?.(piece);
       }
     : null;
   let scanner = multi && segSink ? createReplySegmentScanner(segSink) : null;
@@ -948,6 +970,7 @@ async function runStream(rt: StreamRuntime, opts: BeginChatStreamOptions): Promi
               thinkText = '';
               liveThinkShown = false;
               thinkDonePatched = false;
+              jsonHold = ''; // v2.3.1 换渠道重发同口径清扣留缓冲
               if (rt.state.liveThink !== undefined) patchState(rt, { liveThink: undefined, thinkDone: undefined });
               if (multi && segSink) {
                 scanner = createReplySegmentScanner(segSink);
@@ -1036,6 +1059,7 @@ async function runStream(rt: StreamRuntime, opts: BeginChatStreamOptions): Promi
     thinkText = '';
     liveThinkShown = false;
     thinkDonePatched = false;
+    jsonHold = ''; // v2.3.1 错误重置同步清扣留缓冲（防下一段被拼上陈旧半截）
     if (rt.state.liveThink !== undefined) patchState(rt, { liveThink: undefined, thinkDone: undefined });
     if (multi && segSink) {
       scanner = createReplySegmentScanner(segSink);
@@ -1069,6 +1093,9 @@ async function runStream(rt: StreamRuntime, opts: BeginChatStreamOptions): Promi
         // segSink 关口已拦截整段 JSON（pendingJsonCalls）；这里统一代执行（工具气泡照常）
         // + 正文剥掉残余 JSON + 重置分段器（held 里扣住的 JSON 段作废）。
         try {
+          // v2.3.1 文尾残缺工具 JSON 清理：流被掐断在半个 JSON 上（`…定好闹钟哦{"name": "setRe`）
+          // —— 先切掉残缺尾巴再提取/剥除，半截乱码绝不进正文/分段器
+          raw = stripTrailingPartialToolJson(raw);
           const rawCalls = extractJsonToolCalls(raw);
           const merged = [...pendingJsonCalls];
           const seenKeys = new Set(pendingJsonCalls.map((c) => `${c.name}:${JSON.stringify(c.args)}`));
@@ -1082,8 +1109,12 @@ async function runStream(rt: StreamRuntime, opts: BeginChatStreamOptions): Promi
           if (merged.length > 0) {
             const clean = stripJsonToolCalls(raw) ?? '';
             const { execWebTool, toolActionText } = await import('@/lib/ios/phone-tools');
+            const { setToolSessionContext } = await import('@/lib/ios/web-tools');
             const { pushToolStatusBubble, updateLastToolStatus } = await import('@/lib/ios/tool-status-bubble');
             const charName = opts.charName || 'TA';
+            // v2.3.1：流式兜底代执行也登记工具会话上下文（记忆碎片/冻结记录带上联系人身份，
+            // 与 runPhoneToolRound 主循环同口径——旧版这里漏登记，代执行的动作不进记忆）
+            if (opts.sessionKey) setToolSessionContext(opts.sessionKey, charName);
             const detResults: Array<{ label: string; text: string }> = [];
             for (const jc of merged) {
               try {
@@ -1117,13 +1148,21 @@ async function runStream(rt: StreamRuntime, opts: BeginChatStreamOptions): Promi
               }
               raw = parts.join('；') || '（已经办好了）';
             }
-            // 重置分段器：held 里扣住的裸 JSON 段一并作废，按净化/兜底文本重新分段
-            if (multi && segSink) {
+            // v2.3.1 防重复上屏：流中已有分段上屏（deliveredAnyText）时绝不重推——
+            // 旧版无条件把净化后的整段 raw 重进分段器，混合回复（正文+裸 JSON）里已上屏
+            // 的正文会被再发一遍；只有整条回复全是裸 JSON（流中零上屏）才按兜底/净化文本
+            // 重新分段投递
+            if (multi && segSink && !deliveredAnyText) {
               scanner = createReplySegmentScanner(segSink);
               if (raw) scanner.push(raw);
             }
           }
-        } catch {
+          // v2.3.1 残缺 JSON 扣留冲刷：流结束仍扣着的半截（pretty JSON 被分段器撕开且流
+          // 中途断）已被上面的文尾清理从 raw 切掉。这里清空扣留缓冲——扣留条件（括号没
+          // 配平 + 开头是 '{' 或含 "name"/"function" 键）保证它只可能是残缺工具 JSON 或
+          // 截断垃圾，绝不放半截乱码上屏；正常正文从不过扣留路径，不存在误吞
+          jsonHold = '';
+        } catch (e) {
           /* 兜底层异常不影响正常收尾 */
         }
         // v2.4-fix2：finalize 前先放出 scanner 全部剩余段（held 里扣住的多句）。

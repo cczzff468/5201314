@@ -3418,3 +3418,21 @@ Task: 机主实测九项反馈——①拉取模型面板不能滑动 ②拦截�
 - [备注] 小助手会话（sms:assistant）按设计不走 FC 工具轮（chat-stream-store 显式排除）——工具轮 E2E 需联系人会话，F-7 三层修正如上单点验证（名字归一映射实测 + 编译 + 代码审读）；真机原生行为（豁免窗拉回/拦截窗提速/强解事件）待机主更新 APK v2.2.5 实测
 
 Stage Summary: 九项反馈一次清账——模型面板双根因（补滚露出 + 条件 contain 滚动链）四页同修；拦截窗「先弹窗再回桌面」顺序根修（BAL 可见窗口豁免）+ 美化重做 + 返回主屏幕/去哄哄/强制解锁三钮齐全；强制解锁原生事件→AI 立刻知道（气泡+记忆+人设主动消息三件套）；switchToChat/openApp 后台拉起垫透明豁免窗真放行；重复锁定执行层去重+气泡归一化；错误中心全列表合并幂等（不再越攒越多）；语音页 TDZ 白屏顺修。关键文件：LockOverlayService.java（重做）、NativePerceptionPlugin.java（BAL 豁免）、settings/{api,vision,imagegen,voice}.tsx（F-1）、error-center.ts（F-9）、web-tools.ts/phone-tools.ts（F-7）、real-app-freeze.ts/jealousy-lock.ts（F-6 感知）、app-version.ts（v2.2.5/66）
+
+## 2026-11-23 · 第二十七轮：定闹钟显示裸 JSON 根修——span 式内联剥除 + 流式分段扣留（v2.3.1 网页热更）
+
+Task: 机主实测「让 AI 帮忙定闹钟（真机），一直显示 {"name": "setRealAlarm", "arguments": {"hour": 16, "minute": 23}}」——v2.3.0 的裸 JSON 提取代执行已生效（工具确实执行了），但显示层还有两种泄漏形态让 JSON 照样进气泡。根修 + commit + push GitHub。
+
+- [诊断·两种泄漏形态] ①内联拼接：模型把工具调用 JSON 直接拼在正文同一行（`好的我帮你定闹钟哦{"name":…}`）或在收尾汇报里回显工具调用——旧版 stripJsonToolCalls 只删「整行恰是 JSON」的行（line.trim().startsWith('{') && endsWith('}')），内联拼接一个字都剥不掉；②pretty 多行：模型把 JSON 多行展开（`{`↵`"name":…`↵…），流式分段器按换行把它撕成多条半截（`{` 一条、`"name": "setRealAlarm",` 一条…），单条都不是完整 JSON 提取不到 → 半截逐条上屏
+- [根修·json-tool-calls.ts 重写] ①stripJsonToolCalls 改 span 式剥除：字符串感知大括号配对扫出全部完整 {...} 片段，是工具调用的无论在行首/行中/行尾/代码块里从后往前整体切除（内联/多行/散布全杀）；②extractJsonToolCalls 与 strip 共用 scanBraceSpans/parseToolCallShape（同口径零漂移）；③parseToolCallShape 补扁平形状字符串 arguments（OpenAI 流式增量形状 "arguments": "{\"k\":1}"——旧版只认 function 形状的字符串参数）；④新增 looksLikePartialToolJson（括号没配平 + 开头是 '{' 或含 "name"/"function" 键 → 是半个工具 JSON）与 stripTrailingPartialToolJson（文尾残缺清理：最外层未闭合 '{' 起若像工具 JSON 整段切除保正文）
+- [诊断·执行侧真根因（E2E 插桩实锤）] v2.3.0 的流式兜底代执行从未真正跑通过：finalize 块 `const { execWebTool, toolActionText } = await import('@/lib/ios/phone-tools')` —— toolActionText 是模块私有函数【未 export】，解构出 undefined → `toolActionText(...)` 抛 TypeError → 被 `catch { /* 单个工具失败不影响其余提取 */ }` 静默吞掉 → 提取出的裸 JSON 工具调用【既不执行也没气泡】。机主「定闹钟只显示 JSON 没反应」= 显示泄漏（strip 内联失效）+ 执行静默死亡（import 解构 undefined）两病叠加
+- [根修·phone-tools.ts] toolActionText 补 export（加注释锁死「必须 export」防再犯）；流式兜底代执行补 setToolSessionContext 登记（从 web-tools 正确引入——phone-tools 未透传该导出，同一陷阱预先排掉；代执行的动作从此进记忆碎片/冻结记录带联系人身份）
+- [根修·chat-stream-store.ts] ①segSink 加 jsonHold 扣留缓冲：分段疑似半截工具 JSON 先扣住拼下一段（pretty 多行被换行撕开也能拼齐），配平后走正常提取；②deliveredAnyText 上屏记账 + finalize 代执行后只在「流中零上屏」时重推净化文本——旧版无条件重推把混合回复的已上屏正文再发一遍（重复上屏顺修）；③finalize 前对 raw 过 stripTrailingPartialToolJson（流掐断在半个 JSON 上时残缺尾巴不进正文/分段器）+ jsonHold 冲刷清空（扣留条件保证残缺 JSON/截断垃圾绝不放半截乱码上屏，正常正文从不过扣留路径零误吞）；④错误重置/换渠道重发同口径清 jsonHold。已知无害边界：分段器尾段去重（tail===lastEmitted）会吞掉「JSON 结尾的最后一个 } 行」→ 扣留缓冲停在 62/63 字符——finalize 的 raw 全文提取照常拿到完整调用代执行，零功能损失（E2E 实证）
+- [根修·phone-tools.ts] runPhoneToolRound 两处漏网 return 补 stripJsonToolCalls：chatNativeDemand 聊天基本功直通轮（1970）与 detReady 确定性兜底汇报轮（2060）——其余路径 v2.3.0 已接
+- [测试] tools/tests/test-json-calls.ts 45 用例全过：纯 JSON/内联混合（机主症状原句）/换行混合/汇报回显/前中后散布/pretty 多行/代码块/两处散布 + 误伤防护（配平花括号 {爱心}/非工具 JSON/未知工具名/纯文本）+ 残缺尾巴清理 + segSink 分段扣留管线模拟 6 场景（pretty 逐行喂/紧凑/内联/断流半截/普通聊天/表情红包不误扣）
+- [mock] mock-openai 新增两 E2E 场景：「内联JSON」→ 正文+JSON 同行（机主症状复刻）、「多行JSON」→ pretty 展开（分段撕裂复刻）；bun --hot 热载生效
+- [版本] v2.3.1（纯网页热更免重装 APK，versionCode 67 不动）：app-version 三条发版说明；sw.js v86→v87
+- [E2E·Agent Browser 全链路] 造联系人（IndexedDB 种子 char 小桃）+ mock API 配置 → ①「内联JSON」：segSink 收到混合段提取 1 调用 → 上屏只有「好的～（语音）+我这就帮你定闹钟哦」净文本，JSON 零上屏，工具气泡「小桃正在定16点23的闹钟...→尝试...失败了（AI 动手范围是网站里面——浏览器环境诚实回话，真机=真定闹钟）」全链路 ✓ ②「多行JSON」：正文段上屏、6 条半截全扣留、finalize raw 提取代执行 ✓ ③「裸JSON」回归：代执行 + 兜底汇报「把你拉回聊天没成功：…」✓ ④普通聊天「你好呀」零误触发 ✓；全程屏幕无任何 {"name":…} 乱码
+- [验证] bun run lint 0 error；dev.log 无编译错误；git push 经 gh-proxy 镜像成功
+
+Stage Summary: 裸 JSON 工具调用的显示泄漏两形态一次根治——span 式剥除杀内联/多行/散布，segSink 扣留缓冲杀分段撕裂，文尾清理杀断流残缺，防重复重推顺修；工具执行链路（提取→执行→气泡）三层全部对齐同一套 span 判定。关键文件：json-tool-calls.ts（重写）、chat-stream-store.ts（扣留+冲刷+防重推）、phone-tools.ts（两 return 补剥除）、app-version.ts（v2.3.1）

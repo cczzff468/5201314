@@ -64,6 +64,17 @@ function decide(messages: Array<{ role: string; content: unknown }>): { text?: s
     // 只回 text：验证系统提取裸 JSON 真执行而不是把 JSON 发进聊天
     return { text: '{"name": "switchToChat", "arguments": {}}' };
   }
+  if (prompt.includes('内联JSON')) {
+    // v2.3.1 E2E：模型把工具调用 JSON 内联拼在正文同一行（机主实测「让 AI 定闹钟，
+    // 一直显示 {"name": "setRealAlarm", ...}」）——旧版 span 剥除只删整行 JSON，
+    // 内联拼接一个字都剥不掉；验证现在正文上屏干净 + JSON 提取真执行
+    return { text: '好的～我这就帮你定闹钟哦{"name": "setRealAlarm", "arguments": {"hour": 16, "minute": 23}}' };
+  }
+  if (prompt.includes('多行JSON')) {
+    // v2.3.1 E2E：模型把工具调用 pretty-print 多行展开——流式分段器按换行把 JSON
+    // 撕成多条半截上屏（第二种泄漏形态）；验证扣留缓冲拼齐提取、零半截上屏
+    return { text: '马上帮你定\n{\n  "name": "setRealAlarm",\n  "arguments": {\n    "hour": 16,\n    "minute": 23\n  }\n}' };
+  }
   if (prompt.includes('定个闹钟') || prompt.includes('明早七点叫我')) {
     // v2.3.0 新工具 E2E：setRealAlarm 系统闹钟
     return {

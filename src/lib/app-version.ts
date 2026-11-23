@@ -10,9 +10,9 @@
  * 客户端指纹（version+APK mtime+size）变化 → 进 APP 自动弹「发现新版本」。
  */
 
-/** 当前最新版本（与 android-shell versionName 保持一致） */
-export const APP_VERSION = '2.3.0';
-/** 版本号数字（与 android-shell versionCode 保持一致；覆盖安装要求只增不减） */
+/** 当前最新版本（纯网页热更时与 APK versionName 可短暂不同步，下次重打 APK 对齐） */
+export const APP_VERSION = '2.3.1';
+/** 版本号数字（与 android-shell versionCode 保持一致；覆盖安装要求只增不减；纯网页热更不动） */
 export const APP_VERSION_CODE = 67;
 
 export interface AppReleaseNote {
@@ -24,6 +24,15 @@ export interface AppReleaseNote {
 
 /** 版本历史（新→旧；设置 › APP 更新 页渲染，最新一条即当前版本） */
 export const APP_RELEASE_NOTES: AppReleaseNote[] = [
+  {
+    version: '2.3.1',
+    date: '2026-11-23',
+    items: [
+      '【网页热更·免重装】定闹钟显示乱码 JSON 根修：AI 把工具调用 JSON 内联拼在正文里（如「好的我帮你定{"name": "setRealAlarm", …}」）或多行展开时，旧版一个字都剥不掉照样进气泡——现在无论 JSON 出现在行首/行中/行尾/多行/代码块里一律剥干净，工具照常真执行，气泡里只剩人话',
+      '【网页热更·免重装】流式分段防撕裂：多行展开的工具调用 JSON 不再被「边接收边显示」管线按换行拆成半截逐条上屏（半截乱码彻底绝迹）；流被掐断在半个 JSON 上时自动清理残缺尾巴',
+      '【网页热更·免重装】混合回复防重复：正文+裸 JSON 混合的回复在代执行后不再把已上屏正文重发一遍',
+    ],
+  },
   {
     version: '2.3.0',
     date: '2026-11-23',

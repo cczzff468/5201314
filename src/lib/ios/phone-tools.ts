@@ -72,8 +72,11 @@ import {
  *  如 freezeApp(appName="备忘录") → "冻结备忘录"；openScreen(app="微信") → "打开微信"
  *  动作词不带「了/过」等时态助词——由外层拼「正在…」/「已…」（谢予安正在冻结备忘录… / 谢予安已冻结备忘录）
  *  真机应用工具（需求一）：packageName 先解析中文应用名（内置映射 > 原生 PackageManager > 包名兜底），
- *  气泡绝不显示 com.android.notes 这类英文包名 */
-async function toolActionText(toolName: string, args: Record<string, unknown>): Promise<string> {
+ *  气泡绝不显示 com.android.notes 这类英文包名。
+ *  v2.3.1 根修·必须 export：chat-stream-store 流式兜底代执行 `import { toolActionText }`——
+ *  旧版未 export，解构出 undefined → TypeError 被静默 catch → 提取出的裸 JSON 工具调用
+ *  【从未真正执行】也没有气泡（机主「定闹钟只显示 JSON 没反应」的执行侧根因） */
+export async function toolActionText(toolName: string, args: Record<string, unknown>): Promise<string> {
   const S = (v: unknown): string => (typeof v === 'string' ? v.trim() : '');
   // 真机应用类工具：包名 → 中文应用名（异步过桥，结果有缓存秒回）
   let realTarget = '';
@@ -1967,7 +1970,7 @@ export async function runPhoneToolRound(
         text = '';
       }
       text = text.replace(/\[手机操作:[^\][]*\]/g, '');
-      if (text.trim()) return { text: cleanToolLogs(text), usedTools: false };
+      if (text.trim()) return { text: stripJsonToolCalls(cleanToolLogs(text)) ?? cleanToolLogs(text), usedTools: false };
       return null; // 文本仍为空：回退原流式管线
     } catch (e) {
       if (e instanceof Error && e.message === 'TOOLS_UNSUPPORTED') return null;
@@ -2057,7 +2060,8 @@ export async function runPhoneToolRound(
         try {
           const fin = await fcRequest(convo, [], config);
           const finText = typeof fin.content === 'string' ? fin.content : '';
-          if (finText.trim()) return { text: cleanToolLogs(finText), usedTools: true };
+          // v2.3.1 汇报文本同步剥裸 JSON（模型在汇报里回显工具调用 JSON 的算病）
+          if (finText.trim()) return { text: stripJsonToolCalls(cleanToolLogs(finText)) ?? cleanToolLogs(finText), usedTools: true };
         } catch {
           /* 汇报轮失败：用直白兜底文案 */
         }
