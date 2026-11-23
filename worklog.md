@@ -3436,3 +3436,23 @@ Task: 机主实测「让 AI 帮忙定闹钟（真机），一直显示 {"name": 
 - [验证] bun run lint 0 error；dev.log 无编译错误；git push 经 gh-proxy 镜像成功
 
 Stage Summary: 裸 JSON 工具调用的显示泄漏两形态一次根治——span 式剥除杀内联/多行/散布，segSink 扣留缓冲杀分段撕裂，文尾清理杀断流残缺，防重复重推顺修；工具执行链路（提取→执行→气泡）三层全部对齐同一套 span 判定。关键文件：json-tool-calls.ts（重写）、chat-stream-store.ts（扣留+冲刷+防重推）、phone-tools.ts（两 return 补剥除）、app-version.ts（v2.3.1）
+
+## 2026-11-23 · 第二十八轮：定闹钟裸格式二根修 + 拉黑微信真实语义重构 + 跨 App 求和好（v2.4.0 网页热更）
+
+Task: 机主实测「AI 定闹钟显示 setRealAlarm{"hour":17,"minute":52}，切回界面/锁应用全是这样」——v2.3.1 只修了 {"name":…} 包裹形状，模型还有第三种写法：函数名直接拼参数对象。同时按机主要求重构拉黑语义：AI 拉黑我后 AI 不能给我发消息、我可以发但 AI 收不到（气泡红感叹号+拒收行）、被微信拉黑去 QQ 求和好由 AI 按人设记忆决定拉不拉回来、我把 AI 拉黑后它跨 App 找我改多条连发。
+
+- [诊断·裸格式二] 模型输出 `setRealAlarm{"hour":17,"minute":52}`——函数名紧贴参数 JSON 对象，无 {"name":…,"arguments":…} 包裹。旧版 extractJsonToolCalls 对 {...} 片段做 parseToolCallShape 判定：{"hour":17} 无 name 键 → 不是工具调用 → 提取不到、剥不掉 → 裸文本进气泡 + MALFORMED_TOOL_TEXT_RE 清空文字后既不执行也不显示（机主「只显示 setRealAlarm{...} 没反应」）
+- [根修·json-tool-calls.ts v2.3.2] ①新增 toolNamePrefixOf（span 前紧贴工具名，允许隔一个 '('）：findCallSpans 统一 span 定位（形状一 {"name":…} 与形状二「工具名{参数}」共用，提取/剥除同口径）；②形状二剥除连前缀工具名与可选 '(' 一起切，配对 ')' 一并吞（马上setRealAlarm({...})就好 → 马上就好）；③parseToolCallShape 补扁平形状 {"name":"setRealAlarm","hour":17}（arguments 缺省时其余键整体作参数，模型忘嵌套层不丢参）；④looksLikePartialToolJson/stripTrailingPartialToolJson 认形状二半截（setRealAlarm{"hour":17, 扣留/文尾切除连工具名）；⑤代码块正则块首放宽「工具名{」开头
+- [根修·chat-stream-store.ts] segSink 三元分支箭头函数加括号 `? ((seg: string): void => {…})`——SWC 对「三元分支中带返回类型标注的箭头函数」解析歧义（tsc 通过但浏览器编译 605:20 报 Expected '=>'）
+- [重构·byChar 微信真实语义] 旧口径：AI 拉黑用户后用户消息全拦（toast 无法发送）、AI 照常发消息——与微信相反。新口径：①AI 普通消息全拦（回合入口守卫 + buildReplyMsgs 正文丢弃 + chat-stream-store beginChatStream 兜底 + 主动消息/来电/通话产物/留言全停），唯一放行=用户 pending 解除申请的决策回合（charReqDecisionOnlyOf，只留 [同意/拒绝/解除拉黑] 标记与系统行）；②用户文字/语音/图片消息照常落库显示（气泡红 ! 图标 + 「消息已发出，但被对方拒收了。」提示行，微信同款），但不触发 AI 回合（AI 收不到）；③红包/转账/位置/表情/文字卡片保持拦截（资金安全+微信同语义）
+- [新增·跨 App 求和好] ①block-state.ts 新增 parseUnblockTargets（[解除拉黑:微信/QQ/短信/全部] 参数解析容错）/applyCharUnblockApps（跨 App 解除 byChar，幂等）/otherAppsCharBlocked（其它 App 拉黑感知）；②chat-rich.ts unblock-user 标记携带 targetId 参数（[解除拉黑:微信] → '微信'）；③三端 buildReplyMsgs 的 unblock 分支支持跨 App：每解除一端落系统行「TA解除了你在XX上被拉黑的状态」；④buildBlockPromptBlock 双向跨 App 感知注入：无拉黑状态时若其它 App 有 byChar → 注入「你在微信把 TA 拉黑了，TA 来这里很可能求和好——[解除拉黑:微信] 精准解除 / 不解除按态度回应，完全由你决定不要无脑顺从」；byChar 时也提示可用 [解除拉黑:全部]
+- [新增·跨 App 找人多条连发] cross-app-reach.ts：prompt 改「连发 2~4 条短消息（先叫 TA/再质问/再说好话），用 ||| 分隔」；splitReachTexts 拆分（|||/换行皆可切，最多 4 条防刷屏，多条时每条截 200 字）+ 逐条落库 + 逐条灵动岛通知 + 0.8~2.2s 随机条间隔（真人连发节奏）+ 逐条落库前复核拉黑态防穿帮；byUser/byChar 两方向同享
+- [顺修·申请防死锁] byChar 拦回合后 AI 若在决策轮没输出任何标记（正文被丢弃、pending 悬挂）用户通道死锁——applyUserBlockReq 允许 pending 期间重新申请（覆盖刷新=再给 AI 一次决策机会），三端入口条件放宽（userReqStatus!=='pending' 移除），拒绝 3 次上限防骚扰口径不变
+- [对齐·主动消息/来电闸门] proactive-msg.ts 五处 byUser 单查 → byUser||byChar 双查（tickInner/焦虑追发/事件触发/习惯兜底/手动触发）：拉黑期间本 App 内主动消息全停（绝不穿帮「聊天不回但主动消息照发」），跨 App 找人走目标 App 照旧；跨 App 近况标注文案对齐（cross-app-context byChar 注释改双向断联）
+- [测试] test-json-calls.ts 扩至 67 用例全过：形状二纯调用/正文内联（含中文正文夹缝）/括号包裹/pretty 多行参数/空参/两处混发/扁平形状/误伤防护（非工具标识符 foo{...}、工具名与 { 隔空格）/形状二半截扣留/文尾残缺连工具名切除/流式分段 G/H 场景
+- [版本] v2.4.0（纯网页热更免重装）：app-version 五条发版说明
+- [E2E·Agent Browser 全链路] 造联系人小桃（UI 真实流程：添加CHAR→填资料→生成手机号）+ mock API 配置（localhost:3021 浏览器直连）→ ①【裸格式二】发「帮我定17点52的闹钟」→ mock 回 `好的马上定setRealAlarm{"hour":17,"minute":52}等你哦` → 工具气泡「小桃尝试定17点52的闹钟失败了」（网页环境诚实失败，真机=真定）+ 气泡零裸 JSON（全页扫描 setRealAlarm{ 无匹配）✓ ②【byChar 全链】发「你把我拉黑吧」→ mock 回 [拉黑] → 系统行「你已被「小桃」拉黑」+ AI 正文正确丢弃（拉黑即失声）→ 再发「在吗？理理我」→ 消息落库+已送达+「消息已发出，但被对方拒收了。」+ 红叹号图标（aria「我被拉黑」）+ AI 零回复 ✓ ③【申请解除全链】byChar 输入区「发送解除申请」面板（理由「我知错了，别生气了好不好」）→ 申请卡「等待对方处理」→ mock 回 [解除拉黑:全部] → 申请卡终态「对方已同意，拉黑已解除」+ 系统行「「小桃」解除了对你的拉黑」+ 正文恢复显示「下次不许再惹我生气了！」→ 再发「嘿嘿，那和好啦」→ AI 正常回复「收到：嘿嘿，那和好啦」✓ ④跨 App 找人触发链验证：byChar 跃迁后 reach 对目标 App 发 POST /api/chat（沙盒 localhost 云端不可达 502 属预期拓扑限制，生产公网 API 正常）
+- [E2E·顺修发现] 申请理由含「拉回来」误触发工具轮 tasky 检测（switchToChat 意图代执行）——mock 补「系统代执行」收尾分支带 [解除拉黑:全部] 防标记丢失；期间实证 pending 死锁场景并修复（见上）
+- [验证] bun run lint 0 error（11 warning 为 android 构建产物基线）；tsc --noEmit 0 错误；67/67 回归；dev.log 无编译错误；页面重载/锁屏解锁/聊天/设置全链交互正常
+
+Stage Summary: 机主三件反馈一次清账——①定闹钟裸格式二（函数名直接拼参数）根修：四大函数全支持形状二+扁平形状，67 用例回归+E2E 全页零裸 JSON；②拉黑重构为微信真实语义（AI 拉黑=AI 失声+用户消息拒收红叹号+决策回合唯一例外），三端六层守卫全对齐（回合入口/正文丢弃/流式兜底/主动消息/来电/通话产物）；③跨 App 求和好闭环（[解除拉黑:App名] 精准解除+双向状态注入+AI 自主决策不无脑顺从）+ 跨 App 找人多条连发 + 申请防死锁。关键文件：json-tool-calls.ts（形状二）、block-state.ts（语义重构+跨App解除）、chat-rich.ts（标记参数）、wx/qq/chat 三端 chat-page（守卫+放行+跨App处理）、chat-stream-store.ts（SWC 兼容+兜底）、cross-app-reach.ts（多条连发）、proactive-msg.ts（双查闸门）、mock-openai（E2E 夹具）、app-version.ts（v2.4.0）
