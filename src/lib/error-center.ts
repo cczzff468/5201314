@@ -100,6 +100,11 @@ export function installGlobalErrorListeners(): () => void {
   const onErr = (ev: ErrorEvent) => {
     // Next HMR 的脚本注入错误忽略（dev 噪音）
     if (/import.meta|HotModule|Module \"\.\/.*\" not found/i.test(String(ev.message))) return;
+    // 跨域脚本错误（浏览器脱敏为「Script error.」且不带文件名/行号，如 @ :0:0）：
+    // 零诊断信息、无法定位也无法处理，属于纯噪音（跨源 iframe/WebView/三方脚本常见），
+    // 不再进错误中心——否则会以「未捕获异常」常驻列表赶不走
+    const msg = String(ev.message || '').trim();
+    if (/^script error\.?$/i.test(msg) && (!ev.filename || !ev.lineno)) return;
     reportError('未捕获异常', `${String(ev.message || '').slice(0, 800)}\n@ ${String(ev.filename || '')}:${ev.lineno || 0}:${ev.colno || 0}`, 'global');
   };
   const onRej = (ev: PromiseRejectionEvent) => {

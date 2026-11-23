@@ -17,8 +17,8 @@ import {
   Loader2,
   Plus,
   Repeat,
+  Save,
   Trash2,
-  Type,
   Wrench,
   X,
 } from 'lucide-react';
@@ -26,7 +26,6 @@ import {
 import { genId } from '@/lib/ios/db';
 
 import {
-  DEFAULT_API_CONFIG,
   useSettings,
   type ApiFallback,
   type ApiPreset,
@@ -76,7 +75,9 @@ export function ApiPage({ onBack }: { onBack: () => void }) {
   const setApiFallbacks = useSettings((s) => s.setApiFallbacks);
 
   const [showKey, setShowKey] = useState(false);
-  const [saveOpen, setSaveOpen] = useState(false);
+  // v2.2.3：「保存预设」双入口锚点——预设区顶部「添加预设」chip 与连接配置区「保存预设」
+  // 按钮共用同一份名称输入状态，锚点决定输入行渲染在哪个入口下方（同一时间只开一处）
+  const [saveAnchor, setSaveAnchor] = useState<'preset' | 'config' | null>(null);
   const [presetName, setPresetName] = useState('');
 
   const [models, setModels] = useState<string[]>([]);
@@ -163,7 +164,7 @@ export function ApiPage({ onBack }: { onBack: () => void }) {
     if (!name) return;
     setApiPresets([...apiPresets, { id: genId(), name, config: { ...apiConfig } }]);
     setPresetName('');
-    setSaveOpen(false);
+    setSaveAnchor(null);
   };
 
   /** 修改第 i 个备用渠道的单个字段（未填完的空行保留在编辑中，发送时由渠道链自动跳过） */
@@ -188,15 +189,10 @@ export function ApiPage({ onBack }: { onBack: () => void }) {
         setModels(out.models);
         setModelQuery('');
         setModelPanelOpen(true);
-        if (out.fromCacheOnly) {
-          setModelsHint(out.hint ?? '');
-        } else if (out.viaDirect > 0 && out.viaServer > 0) {
-          setModelsHint(
-            `双通道合并拉取到 ${out.models.length} 个模型（服务器 ${out.viaServer} + 浏览器直连补充）`,
-          );
-        } else if (out.viaDirect > 0 && out.viaServer === 0) {
-          setModelsHint(`浏览器直连拉取到 ${out.models.length} 个模型（服务器通道不可用）`);
-        }
+        // v2.2.3：通道计数提示全删（「浏览器直连拉取到 N 个（服务器通道不可用）」等）——
+        // 模型总数改由面板底部计数行展示，单一数据源不再出现「说 7 个只见 6 个」的错觉；
+        // 仅保留「本次实时拉取失败、展示的是上次缓存」这一条有行动价值的提示
+        if (out.fromCacheOnly) setModelsHint(out.hint ?? '');
         return;
       }
       if (out.hint) {
@@ -382,14 +378,14 @@ export function ApiPage({ onBack }: { onBack: () => void }) {
             })}
             <button
               type="button"
-              onClick={() => setSaveOpen((v) => !v)}
+              onClick={() => setSaveAnchor((v) => (v === 'preset' ? null : 'preset'))}
               className="flex items-center gap-1 rounded-full bg-white/55 px-3.5 py-1.5 text-[13px] text-muted-foreground ring-1 ring-black/[0.06] backdrop-blur-xl transition-all hover:bg-white/80 active:scale-[0.97] dark:bg-white/[0.07] dark:ring-white/[0.1] dark:hover:bg-white/[0.14]"
             >
               <Plus className="h-3.5 w-3.5" />
-              存为预设
+              添加预设
             </button>
           </div>
-          {saveOpen && (
+          {saveAnchor === 'preset' && (
             <div className="mt-3 flex gap-2">
               <Input
                 value={presetName}
@@ -429,7 +425,7 @@ export function ApiPage({ onBack }: { onBack: () => void }) {
               <Input
                 value={apiConfig.baseUrl}
                 onChange={(e) => updateApiConfig({ baseUrl: e.target.value })}
-                placeholder={DEFAULT_API_CONFIG.baseUrl}
+                placeholder="填写 API 地址（OpenAI 兼容）"
                 className="h-11 rounded-[14px] border-black/[0.05] bg-white/55 text-[14px] shadow-[inset_0_1px_0_rgba(255,255,255,0.7),0_3px_10px_rgba(17,24,39,0.05)] backdrop-blur-2xl dark:border-white/[0.09] dark:bg-white/[0.07] dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.05),0_3px_10px_rgba(0,0,0,0.2)]"
               />
             </div>
@@ -480,7 +476,7 @@ export function ApiPage({ onBack }: { onBack: () => void }) {
                 <Input
                   value={apiConfig.model}
                   onChange={(e) => updateApiConfig({ model: e.target.value })}
-                  placeholder={DEFAULT_API_CONFIG.model}
+                  placeholder="如 gpt-4o-mini / deepseek-chat"
                   className="h-11 flex-1 rounded-[14px] border-black/[0.05] bg-white/55 text-[14px] shadow-[inset_0_1px_0_rgba(255,255,255,0.7),0_3px_10px_rgba(17,24,39,0.05)] backdrop-blur-2xl dark:border-white/[0.09] dark:bg-white/[0.07] dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.05),0_3px_10px_rgba(0,0,0,0.2)]"
                 />
                 <button
@@ -521,7 +517,7 @@ export function ApiPage({ onBack }: { onBack: () => void }) {
                         className="h-10 rounded-[12px] border-black/[0.05] bg-white/70 text-[13px] shadow-sm backdrop-blur-xl dark:border-white/[0.09] dark:bg-white/[0.09]"
                       />
                     </div>
-                    <div className="thin-scrollbar max-h-64 overflow-y-auto">
+                    <div className="thin-scrollbar max-h-[min(420px,60vh)] overflow-y-auto">
                       {filteredModels.length === 0 ? (
                         <div className="px-4 py-6 text-center text-[13px] text-muted-foreground">
                           没有匹配的模型
@@ -548,12 +544,107 @@ export function ApiPage({ onBack }: { onBack: () => void }) {
                         ))
                       )}
                     </div>
+                    {/* v2.2.3：底部计数行——面板高度从 256px 抬到 420px（小屏 60vh）后仍可能有
+                        模型在折叠线以下，计数行让总数永远可见，不再出现「拉到 7 个只见 6 个」的错觉 */}
+                    <div className="border-t border-black/[0.05] px-4 py-2 text-center text-[11px] tabular-nums text-muted-foreground dark:border-white/[0.06]">
+                      {q ? `匹配 ${filteredModels.length}，共 ${models.length} 个模型` : `共 ${models.length} 个模型`}
+                    </div>
                   </div>
                 </>
               )}
             </div>
 
-            {/* 温度 */}
+            {/* 测试连接 + 保存预设（v2.2.3 机主要求：测试按钮移到模型下方，保存预设与测试按钮对齐） */}
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => void runTest()}
+                disabled={testLoading}
+                className="flex h-11 flex-1 items-center justify-center gap-2 rounded-[14px] bg-white/60 text-[14px] font-medium text-foreground shadow-[0_6px_20px_rgba(17,24,39,0.08)] ring-1 ring-white/70 backdrop-blur-2xl transition-all active:scale-[0.98] active:bg-white/85 disabled:opacity-50 dark:bg-white/[0.1] dark:ring-white/[0.12] dark:active:bg-white/[0.16]"
+              >
+                {testLoading && <Loader2 className="h-4 w-4 animate-spin" />}
+                测试连接
+              </button>
+              <button
+                type="button"
+                onClick={() => setSaveAnchor((v) => (v === 'config' ? null : 'config'))}
+                className={`flex h-11 flex-1 items-center justify-center gap-2 rounded-[14px] text-[14px] font-medium shadow-[0_6px_20px_rgba(17,24,39,0.08)] ring-1 backdrop-blur-2xl transition-all active:scale-[0.98] disabled:opacity-40 dark:active:bg-white/[0.16] ${
+                  saveAnchor === 'config'
+                    ? 'bg-foreground text-background ring-transparent dark:bg-white dark:text-black'
+                    : 'bg-white/60 text-foreground ring-white/70 active:bg-white/85 dark:bg-white/[0.1] dark:ring-white/[0.12]'
+                }`}
+              >
+                <Save className="h-4 w-4" />
+                保存预设
+              </button>
+            </div>
+            {saveAnchor === 'config' && (
+              <div className="flex gap-2">
+                <Input
+                  value={presetName}
+                  onChange={(e) => setPresetName(e.target.value)}
+                  placeholder="预设名称，如 我的GPT"
+                  autoFocus
+                  className="h-10 flex-1 rounded-[14px] border-black/[0.05] bg-white/55 text-[14px] shadow-[inset_0_1px_0_rgba(255,255,255,0.7),0_3px_10px_rgba(17,24,39,0.05)] backdrop-blur-2xl dark:border-white/[0.09] dark:bg-white/[0.07] dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.05),0_3px_10px_rgba(0,0,0,0.2)]"
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') savePreset();
+                  }}
+                />
+                <button
+                  type="button"
+                  onClick={savePreset}
+                  disabled={!presetName.trim()}
+                  className="h-10 shrink-0 rounded-[14px] bg-white/60 px-5 text-[13px] font-medium text-foreground shadow-[0_4px_14px_rgba(17,24,39,0.07)] ring-1 ring-white/70 backdrop-blur-2xl transition-all active:scale-[0.97] active:bg-white/85 disabled:opacity-40 dark:bg-white/[0.1] dark:ring-white/[0.12] dark:active:bg-white/[0.16]"
+                >
+                  保存
+                </button>
+              </div>
+            )}
+            {testOk && (
+              <div className="rounded-[16px] border border-emerald-500/30 bg-emerald-400/15 px-4 py-3 text-[13px] leading-relaxed text-emerald-700 backdrop-blur-xl dark:bg-emerald-300/[0.08] dark:text-emerald-300">
+                ✅ 连接成功{testOk.viaDirect ? '（浏览器直连）' : ''} · 延迟 {testOk.latencyMs}ms · 模型 {testOk.model}
+              </div>
+            )}
+            {testPartial && (
+              <div
+                data-testid="test-partial"
+                className="rounded-[16px] border border-amber-500/30 bg-amber-400/15 px-4 py-3 text-[13px] font-medium leading-relaxed text-amber-700 backdrop-blur-xl dark:bg-amber-300/[0.08] dark:text-amber-200/90"
+              >
+                ⚠️ 连接基本可用：API 地址与密钥有效（模型列表验证通过，共 {testPartial.modelCount} 个模型）
+                <span className="mt-1 block text-[12px] font-normal opacity-80">
+                  chat/completions 测试请求从当前网络未能完成；实际聊天会在「服务器代理 / 浏览器直连」双通道间自动切换，能正常收发消息即无需处理。
+                </span>
+              </div>
+            )}
+            {testError && (
+              <div
+                className="rounded-[12px] border px-4 py-3 text-[13px] leading-relaxed"
+                style={
+                  testConnected
+                    ? {
+                        borderColor: 'rgba(245,158,11,0.35)',
+                        backgroundColor: 'rgba(245,158,11,0.1)',
+                        color: '#B45309',
+                      }
+                    : { borderColor: 'rgba(255,69,58,0.3)', backgroundColor: 'rgba(255,69,58,0.1)', color: IOS_RED }
+                }
+              >
+                {testConnected ? '⚠️ ' : '❌ '}
+                {testError}
+                {testConnected && (
+                  <span className="mt-1 block text-[12px] opacity-80">
+                    接口本身可达，问题出在配置而不是连接；按提示修正后即可聊天。
+                  </span>
+                )}
+              </div>
+            )}
+            {testUrl && (
+              <div className="break-all px-1 text-[11px] leading-relaxed text-muted-foreground/80">
+                实际请求：{testUrl}
+              </div>
+            )}
+
+            {/* 温度（v2.2.3：随测试按钮上移后下排在测试结果之后） */}
             <div>
               <div className="mb-2.5 text-[13px] font-medium text-muted-foreground">温度</div>
               <div className="flex items-center gap-3">
@@ -639,7 +730,7 @@ export function ApiPage({ onBack }: { onBack: () => void }) {
                 <Input
                   value={f.baseUrl}
                   onChange={(e) => patchFallback(i, { baseUrl: e.target.value })}
-                  placeholder="API 地址（如 https://api.deepseek.com/v1）"
+                  placeholder="备用 API 地址（OpenAI 兼容）"
                   className="h-10 rounded-[12px] border-black/[0.05] bg-white/55 text-[13px] shadow-sm backdrop-blur-xl dark:border-white/[0.09] dark:bg-white/[0.07]"
                 />
                 <Input
@@ -671,60 +762,8 @@ export function ApiPage({ onBack }: { onBack: () => void }) {
           </div>
         </section>
 
-        {/* 测试连接 */}
+        {/* 云端自动同步状态行 + 说明（测试按钮已上移到模型下方） */}
         <section className="flex flex-col gap-3">
-          <button
-            type="button"
-            onClick={() => void runTest()}
-            disabled={testLoading}
-            className="flex h-11 w-full items-center justify-center gap-2 rounded-[14px] bg-white/60 text-[15px] font-medium text-foreground shadow-[0_6px_20px_rgba(17,24,39,0.08)] ring-1 ring-white/70 backdrop-blur-2xl transition-all active:scale-[0.98] active:bg-white/85 disabled:opacity-50 dark:bg-white/[0.1] dark:ring-white/[0.12] dark:active:bg-white/[0.16]"
-          >
-            {testLoading && <Loader2 className="h-4 w-4 animate-spin" />}
-            测试连接
-          </button>
-          {testOk && (
-            <div className="rounded-[16px] border border-emerald-500/30 bg-emerald-400/15 px-4 py-3 text-[13px] leading-relaxed text-emerald-700 backdrop-blur-xl dark:bg-emerald-300/[0.08] dark:text-emerald-300">
-              ✅ 连接成功{testOk.viaDirect ? '（浏览器直连）' : ''} · 延迟 {testOk.latencyMs}ms · 模型 {testOk.model}
-            </div>
-          )}
-          {testPartial && (
-            <div
-              data-testid="test-partial"
-              className="rounded-[16px] border border-amber-500/30 bg-amber-400/15 px-4 py-3 text-[13px] font-medium leading-relaxed text-amber-700 backdrop-blur-xl dark:bg-amber-300/[0.08] dark:text-amber-200/90"
-            >
-              ⚠️ 连接基本可用：API 地址与密钥有效（模型列表验证通过，共 {testPartial.modelCount} 个模型）
-              <span className="mt-1 block text-[12px] font-normal opacity-80">
-                chat/completions 测试请求从当前网络未能完成；实际聊天会在「服务器代理 / 浏览器直连」双通道间自动切换，能正常收发消息即无需处理。
-              </span>
-            </div>
-          )}
-          {testError && (
-            <div
-              className="rounded-[12px] border px-4 py-3 text-[13px] leading-relaxed"
-              style={
-                testConnected
-                  ? {
-                      borderColor: 'rgba(245,158,11,0.35)',
-                      backgroundColor: 'rgba(245,158,11,0.1)',
-                      color: '#B45309',
-                    }
-                  : { borderColor: 'rgba(255,69,58,0.3)', backgroundColor: 'rgba(255,69,58,0.1)', color: IOS_RED }
-              }
-            >
-              {testConnected ? '⚠️ ' : '❌ '}
-              {testError}
-              {testConnected && (
-                <span className="mt-1 block text-[12px] opacity-80">
-                  接口本身可达，问题出在配置而不是连接；按提示修正后即可聊天。
-                </span>
-              )}
-            </div>
-          )}
-          {testUrl && (
-            <div className="break-all px-1 text-[11px] leading-relaxed text-muted-foreground/80">
-              实际请求：{testUrl}
-            </div>
-          )}
           {/* 云端自动同步状态行：改「API 设置」后运行包自动重推到已部署云端的结果
               （只显示 api 渠道的同步；未部署云端时不触发不显示） */}
           {apiAutoSync?.channel === 'api' && (

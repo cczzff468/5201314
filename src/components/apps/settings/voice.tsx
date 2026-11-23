@@ -580,7 +580,7 @@ export function VoicePage({ onBack }: { onBack: () => void }) {
               <Input
                 value={ttsConfig.baseUrl}
                 onChange={(e) => updateTtsConfig({ baseUrl: e.target.value })}
-                placeholder={preset.baseUrl}
+                placeholder="填写语音 API 地址（OpenAI 兼容）"
                 className="h-11 rounded-[14px] border-black/[0.05] bg-white/55 text-[14px] shadow-[inset_0_1px_0_rgba(255,255,255,0.7),0_3px_10px_rgba(17,24,39,0.05)] backdrop-blur-2xl dark:border-white/[0.09] dark:bg-white/[0.07] dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.05),0_3px_10px_rgba(0,0,0,0.2)]"
               />
             </div>
@@ -681,7 +681,7 @@ export function VoicePage({ onBack }: { onBack: () => void }) {
                         className="h-10 rounded-[12px] border-black/[0.05] bg-white/70 text-[13px] shadow-sm backdrop-blur-xl dark:border-white/[0.09] dark:bg-white/[0.09]"
                       />
                     </div>
-                    <div className="thin-scrollbar max-h-64 overflow-y-auto">
+                    <div className="thin-scrollbar max-h-[min(420px,60vh)] overflow-y-auto">
                       {filteredTtsModels.length === 0 ? (
                         <div className="px-4 py-6 text-center text-[13px] text-muted-foreground">没有匹配的模型</div>
                       ) : (
@@ -712,6 +712,10 @@ export function VoicePage({ onBack }: { onBack: () => void }) {
                           );
                         })
                       )}
+                    </div>
+                    {/* v2.2.3：底部计数行（总数永远可见，不再出现「拉到 7 个只见 6 个」的错觉） */}
+                    <div className="border-t border-black/[0.05] px-4 py-2 text-center text-[11px] tabular-nums text-muted-foreground dark:border-white/[0.06]">
+                      {mq ? `匹配 ${filteredTtsModels.length}，共 ${ttsModels.length} 个模型` : `共 ${ttsModels.length} 个模型`}
                     </div>
                   </div>
                 </>
@@ -961,7 +965,7 @@ export function VoicePage({ onBack }: { onBack: () => void }) {
                   <Input
                     value={sttConfig.baseUrl}
                     onChange={(e) => updateSttConfig({ provider: 'openai', baseUrl: e.target.value })}
-                    placeholder="如 https://api.openai.com/v1"
+                    placeholder="填写转写 API 地址（OpenAI 兼容）"
                     className="h-11 rounded-[14px] border-black/[0.05] bg-white/55 text-[14px] shadow-[inset_0_1px_0_rgba(255,255,255,0.7),0_3px_10px_rgba(17,24,39,0.05)] backdrop-blur-2xl dark:border-white/[0.09] dark:bg-white/[0.07] dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.05),0_3px_10px_rgba(0,0,0,0.2)]"
                   />
                 </div>

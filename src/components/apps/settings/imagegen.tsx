@@ -19,6 +19,7 @@ import {
   Loader2,
   Plus,
   RefreshCw,
+  Save,
   Type,
   Wrench,
   X,
@@ -97,7 +98,8 @@ export function ImageGenPage({ onBack }: { onBack: () => void }) {
   const [imgTab, setImgTab] = useState<'conn' | 'face'>('conn');
 
   const [showKey, setShowKey] = useState(false);
-  const [saveOpen, setSaveOpen] = useState(false);
+  // v2.2.3：「保存预设」双入口锚点（预设区「添加预设」chip / 测试按钮旁「保存预设」按钮）
+  const [saveAnchor, setSaveAnchor] = useState<'preset' | 'config' | null>(null);
   const [presetName, setPresetName] = useState('');
 
   const [models, setModels] = useState<string[]>([]);
@@ -155,7 +157,7 @@ export function ImageGenPage({ onBack }: { onBack: () => void }) {
     if (!name) return;
     setImgGenPresets([...imgGenPresets, { id: genId(), name, config: { ...imgGenConfig } }]);
     setPresetName('');
-    setSaveOpen(false);
+    setSaveAnchor(null);
   };
 
   /** 把当前配置写回指定预设 */
@@ -367,14 +369,14 @@ export function ImageGenPage({ onBack }: { onBack: () => void }) {
                 <button
                   type="button"
                   data-testid="imggen-preset-save"
-                  onClick={() => setSaveOpen((v) => !v)}
+                  onClick={() => setSaveAnchor((v) => (v === 'preset' ? null : 'preset'))}
                   className="flex items-center gap-1 rounded-full bg-white/55 px-3.5 py-1.5 text-[13px] text-muted-foreground ring-1 ring-black/[0.06] backdrop-blur-xl transition-all hover:bg-white/80 active:scale-[0.97] dark:bg-white/[0.07] dark:ring-white/[0.1] dark:hover:bg-white/[0.14]"
                 >
                   <Plus className="h-3.5 w-3.5" />
-                  存为预设
+                  添加预设
                 </button>
               </div>
-              {saveOpen && (
+              {saveAnchor === 'preset' && (
                 <div className="mt-3 flex gap-2">
                   <Input
                     value={presetName}
@@ -487,7 +489,7 @@ export function ImageGenPage({ onBack }: { onBack: () => void }) {
                   <Input
                     value={imgGenConfig.baseUrl}
                     onChange={(e) => patchImgGenConfig({ baseUrl: e.target.value })}
-                    placeholder="https://api.openai.com/v1"
+                    placeholder="填写生图 API 地址（OpenAI 兼容）"
                     className="h-11 rounded-[14px] border-black/[0.05] bg-white/55 text-[14px] shadow-[inset_0_1px_0_rgba(255,255,255,0.7),0_3px_10px_rgba(17,24,39,0.05)] backdrop-blur-2xl dark:border-white/[0.09] dark:bg-white/[0.07] dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.05),0_3px_10px_rgba(0,0,0,0.2)]"
                     data-testid="imggen-baseurl"
                   />
@@ -579,7 +581,7 @@ export function ImageGenPage({ onBack }: { onBack: () => void }) {
                             className="h-10 rounded-[12px] border-black/[0.05] bg-white/70 text-[13px] shadow-sm backdrop-blur-xl dark:border-white/[0.09] dark:bg-white/[0.09]"
                           />
                         </div>
-                        <div className="thin-scrollbar max-h-64 overflow-y-auto">
+                        <div className="thin-scrollbar max-h-[min(420px,60vh)] overflow-y-auto">
                           {filteredModels.length === 0 ? (
                             <div className="px-4 py-6 text-center text-[13px] text-muted-foreground">
                               没有匹配的模型
@@ -603,8 +605,99 @@ export function ImageGenPage({ onBack }: { onBack: () => void }) {
                             ))
                           )}
                         </div>
+                        {/* v2.2.3：底部计数行（总数永远可见，不再出现「拉到 7 个只见 6 个」的错觉） */}
+                        <div className="border-t border-black/[0.05] px-4 py-2 text-center text-[11px] tabular-nums text-muted-foreground dark:border-white/[0.06]">
+                          {q ? `匹配 ${filteredModels.length}，共 ${models.length} 个模型` : `共 ${models.length} 个模型`}
+                        </div>
                       </div>
                     </>
+                  )}
+                </div>
+
+                {/* 测试生图 + 保存预设（v2.2.3：测试按钮移到模型下方，保存预设与测试按钮对齐） */}
+                <div>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      data-testid="imggen-test"
+                      onClick={() => void runImgGenTest()}
+                      disabled={testing}
+                      className="flex h-11 flex-1 items-center justify-center gap-1.5 rounded-[14px] bg-white/60 text-[13px] font-medium text-foreground shadow-[0_6px_20px_rgba(17,24,39,0.08)] ring-1 ring-white/70 backdrop-blur-2xl transition-all active:scale-[0.98] active:bg-white/85 disabled:opacity-50 dark:bg-white/[0.1] dark:ring-white/[0.12] dark:active:bg-white/[0.16]"
+                    >
+                      {testing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ImagePlus className="h-3.5 w-3.5" />}
+                      {testing ? '正在生图…' : '测试生图'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setSaveAnchor((v) => (v === 'config' ? null : 'config'))}
+                      className={`flex h-11 flex-1 items-center justify-center gap-2 rounded-[14px] text-[13px] font-medium shadow-[0_6px_20px_rgba(17,24,39,0.08)] ring-1 backdrop-blur-2xl transition-all active:scale-[0.98] dark:active:bg-white/[0.16] ${
+                        saveAnchor === 'config'
+                          ? 'bg-foreground text-background ring-transparent dark:bg-white dark:text-black'
+                          : 'bg-white/60 text-foreground ring-white/70 active:bg-white/85 dark:bg-white/[0.1] dark:ring-white/[0.12]'
+                      }`}
+                    >
+                      <Save className="h-3.5 w-3.5" />
+                      保存预设
+                    </button>
+                  </div>
+                  <p className="mt-1.5 text-center text-[11px] leading-snug text-muted-foreground/70">
+                    按当前配置真实生成一张（约 10-60 秒），验证接口连通与生图效果
+                  </p>
+                  {saveAnchor === 'config' && (
+                    <div className="mt-2 flex gap-2">
+                      <Input
+                        value={presetName}
+                        onChange={(e) => setPresetName(e.target.value)}
+                        placeholder="预设名称，如 本地生图模型"
+                        autoFocus
+                        className="h-10 flex-1 rounded-[14px] border-black/[0.05] bg-white/55 text-[14px] shadow-[inset_0_1px_0_rgba(255,255,255,0.7),0_3px_10px_rgba(17,24,39,0.05)] backdrop-blur-2xl dark:border-white/[0.09] dark:bg-white/[0.07] dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.05),0_3px_10px_rgba(0,0,0,0.2)]"
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') savePreset();
+                        }}
+                      />
+                      <button
+                        type="button"
+                        onClick={savePreset}
+                        disabled={!presetName.trim()}
+                        className="h-10 shrink-0 rounded-[14px] bg-white/60 px-5 text-[13px] font-medium text-foreground shadow-[0_4px_14px_rgba(17,24,39,0.07)] ring-1 ring-white/70 backdrop-blur-2xl transition-all active:scale-[0.97] active:bg-white/85 disabled:opacity-40 dark:bg-white/[0.1] dark:ring-white/[0.12] dark:active:bg-white/[0.16]"
+                      >
+                        保存
+                      </button>
+                    </div>
+                  )}
+                  {testError && (
+                    <div
+                      data-testid="imggen-test-error"
+                      className="mt-2 flex items-start gap-1.5 rounded-[10px] bg-[#FF453A]/[0.06] px-3 py-2 text-[12px] leading-relaxed"
+                      style={{ color: IOS_RED }}
+                    >
+                      <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                      <span>{testError}</span>
+                    </div>
+                  )}
+                  {testing && (
+                    <div className="mx-auto mt-3 grid aspect-square w-full max-w-[220px] place-items-center rounded-[14px] border border-dashed border-border bg-muted/40">
+                      <div className="flex flex-col items-center gap-2 text-muted-foreground">
+                        <Loader2 className="h-5 w-5 animate-spin" />
+                        <span className="text-[12px]">正在生成照片…</span>
+                      </div>
+                    </div>
+                  )}
+                  {testSrc && (
+                    <div className="mt-3">
+                      <div className="mx-auto w-full max-w-[220px] overflow-hidden rounded-[14px] shadow-sm ring-1 ring-black/[0.06] dark:ring-white/10">
+                        <img
+                          src={testSrc}
+                          alt="测试生成的图片"
+                          data-testid="imggen-test-result"
+                          className="block aspect-square w-full object-cover"
+                        />
+                      </div>
+                      <div className="mt-2 flex items-center justify-center gap-1.5 text-[12px] leading-relaxed text-emerald-600 dark:text-emerald-400/90">
+                        <CheckCircle2 className="h-3.5 w-3.5 shrink-0" strokeWidth={2.2} />
+                        <span>测试成功</span>
+                      </div>
+                    </div>
                   )}
                 </div>
 
@@ -683,57 +776,6 @@ export function ImageGenPage({ onBack }: { onBack: () => void }) {
                     还没有配置生图接口：填写 OpenAI 兼容的生图地址与模型名后，AI 回复里的照片标签才能生成真实照片。
                   </div>
                 )}
-
-                {/* 测试生图 */}
-                <div>
-                  <button
-                    type="button"
-                    data-testid="imggen-test"
-                    onClick={() => void runImgGenTest()}
-                    disabled={testing}
-                    className="flex h-11 w-full items-center justify-center gap-1.5 rounded-[14px] bg-white/60 text-[13.5px] font-medium text-foreground shadow-[0_6px_20px_rgba(17,24,39,0.08)] ring-1 ring-white/70 backdrop-blur-2xl transition-all active:scale-[0.98] active:bg-white/85 disabled:opacity-50 dark:bg-white/[0.1] dark:ring-white/[0.12] dark:active:bg-white/[0.16]"
-                  >
-                    {testing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ImagePlus className="h-3.5 w-3.5" />}
-                    {testing ? '正在生图…（约 10-60 秒）' : '测试生图'}
-                  </button>
-                  <p className="mt-1.5 text-center text-[11px] leading-snug text-muted-foreground/70">
-                    按当前配置真实生成一张，验证接口连通与生图效果
-                  </p>
-                  {testError && (
-                    <div
-                      data-testid="imggen-test-error"
-                      className="mt-2 flex items-start gap-1.5 rounded-[10px] bg-[#FF453A]/[0.06] px-3 py-2 text-[12px] leading-relaxed"
-                      style={{ color: IOS_RED }}
-                    >
-                      <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                      <span>{testError}</span>
-                    </div>
-                  )}
-                  {testing && (
-                    <div className="mx-auto mt-3 grid aspect-square w-full max-w-[220px] place-items-center rounded-[14px] border border-dashed border-border bg-muted/40">
-                      <div className="flex flex-col items-center gap-2 text-muted-foreground">
-                        <Loader2 className="h-5 w-5 animate-spin" />
-                        <span className="text-[12px]">正在生成照片…</span>
-                      </div>
-                    </div>
-                  )}
-                  {testSrc && (
-                    <div className="mt-3">
-                      <div className="mx-auto w-full max-w-[220px] overflow-hidden rounded-[14px] shadow-sm ring-1 ring-black/[0.06] dark:ring-white/10">
-                        <img
-                          src={testSrc}
-                          alt="测试生成的图片"
-                          data-testid="imggen-test-result"
-                          className="block aspect-square w-full object-cover"
-                        />
-                      </div>
-                      <div className="mt-2 flex items-center justify-center gap-1.5 text-[12px] leading-relaxed text-emerald-600 dark:text-emerald-400/90">
-                        <CheckCircle2 className="h-3.5 w-3.5 shrink-0" strokeWidth={2.2} />
-                        <span>测试成功</span>
-                      </div>
-                    </div>
-                  )}
-                </div>
               </GrayCard>
             </section>
             )}
