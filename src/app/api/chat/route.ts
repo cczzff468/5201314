@@ -80,12 +80,12 @@ function isValidToolRoundMessages(value: unknown): value is ToolRoundMessage[] {
 }
 
 /** v1.9.23 工具定义收窄：只放行 type:function 且函数名/描述/参数形状合法的项
- *  （v2.3.0 上限 48→64：真机模式 22 网页 + 29 真机（新增原生系统级工具 8 件）= 51，留余量） */
+ *  （v2.4.2 上限 64→72：真机模式 22 网页 + 30 真机 + 8 系统级 + 10 矩阵扩展 = 62，留余量） */
 function sanitizeTools(value: unknown): ToolDef[] {
   if (!Array.isArray(value)) return [];
   const out: ToolDef[] = [];
   for (const item of value) {
-    if (out.length >= 64) break;
+    if (out.length >= 72) break;
     if (typeof item !== 'object' || item === null) continue;
     const rec = item as Record<string, unknown>;
     const fn = rec.function;

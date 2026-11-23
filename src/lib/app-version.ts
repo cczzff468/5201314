@@ -11,9 +11,9 @@
  */
 
 /** 当前最新版本（纯网页热更时与 APK versionName 可短暂不同步，下次重打 APK 对齐） */
-export const APP_VERSION = '2.4.1';
+export const APP_VERSION = '2.4.2';
 /** 版本号数字（与 android-shell versionCode 保持一致；覆盖安装要求只增不减；纯网页热更不动） */
-export const APP_VERSION_CODE = 68;
+export const APP_VERSION_CODE = 69;
 
 export interface AppReleaseNote {
   version: string;
@@ -24,6 +24,19 @@ export interface AppReleaseNote {
 
 /** 版本历史（新→旧；设置 › APP 更新 页渲染，最新一条即当前版本） */
 export const APP_RELEASE_NOTES: AppReleaseNote[] = [
+  {
+    version: '2.4.2',
+    date: '2026-11-23',
+    items: [
+      '【需重装 APK】吃醋封印页彻底重做：极简黑白灰 + 毛玻璃苹果系统风——全屏 rgba(0,0,0,0.7) 深色遮罩叠系统级背后模糊（隐约能看到桌面图标）；顶部换成 TA 的圆形头像 + 名字；「QQ 已被封印」纯白大字；纤细倒计时；尝试次数改柔和暗红 #FF453A；去哄哄变白色半透明毛玻璃胶囊、返回主屏幕深灰胶囊、强制解锁缩成底部微弱下划线链接（点击弹二次确认卡）',
+      '【需重装 APK】拦截尝试次数不再乱涨：只有你【真的一次次点开】被锁 App 才 +1（旧版被踢回桌面失败/停在原地时轮询每秒都在加——没碰手机也涨到十几次）；停留/被锁 App 内部弹窗一律不计数',
+      '【需重装 APK】AI 新增 10 件系统级工具：查今日步数（getStepCount）/ 识别运动状态（静止·步行·跑步·乘车，getCurrentActivity）/ 估算昨晚睡眠（getSleepData）/ 列手机文件（listFiles）/ 读文本文件（readFileContent）/ 存文字到手机（saveTextToFile，AI 也会按人设主动存值得留念的内容）/ 网络下载到手机（downloadFile）/ 打开系统设置页（openSystemSetting：WiFi·蓝牙·应用管理…）/ 查网络状态（getNetworkInfo：WiFi 还是流量·信号几格）/ openApp 打开应用简写别名',
+      '【需重装 APK】权限中心新增「身体活动（步数/运动）」项（查步数/运动识别前置，一键弹系统授权框）；Manifest 补齐 ACTIVITY_RECOGNITION / 网络状态权限',
+      '【需重装 APK】划掉后台不再误报「未授权」：无障碍服务状态改用组件名归一化比对（旧版只认简写形态，ROM 存全写时进程重拉就误报）；常驻守护服务加 onTaskRemoved 自拉起（划掉后台 1 秒内自动复活）',
+      '【网页热更·免重装】定闹钟消息修复：模型把分钟发成字符串（如 "58"）时，旧版工具气泡会显示成「定19点00的闹钟」（实际定的是 19:58）——现在一律按数字强转；且只有真定成功才写进 TA 的记忆（失败不再记「定了闹钟」）',
+      '【网页热更·免重装】工具矩阵上限 64→72：62 件工具全量下发（健康运动/文件/下载/设置/网络十件新工具全部注册为 Function Calling）',
+    ],
+  },
   {
     version: '2.4.1',
     date: '2026-11-23',

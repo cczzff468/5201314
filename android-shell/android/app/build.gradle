@@ -11,8 +11,8 @@ android {
         applicationId "com.z.aiphone"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 68          // v2.4.1 setRealAlarm 加固（parseInt + ROM 时钟包兑底链）+ 拦截窗秒级提速（预构建 + 先踢后弹）+ 吃醋封印页美化（环形倒计时）
-        versionName "2.4.1"     // v2.4.1：定闹钟失败根修 + 锁应用拦截 0.1s + 拦截窗垂直居中/进度环
+        versionCode 69          // v2.4.2 封印页黑白灰重做 + 尝试计数语义修 + 新工具矩阵 10 件 + a11y 状态匹配修 + onTaskRemoved
+        versionName "2.4.2"     // v2.4.2：极简毛玻璃拦截页 + 步数/运动/睡眠/文件/下载/设置/网络工具
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.

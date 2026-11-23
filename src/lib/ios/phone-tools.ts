@@ -84,6 +84,7 @@ export async function toolActionText(toolName: string, args: Record<string, unkn
     freezeRealApp: true,
     unfreezeRealApp: true,
     openRealApp: true,
+    openApp: true, // v2.4.2 别名（同 openRealApp）
   };
   if (realPkgTools[toolName]) {
     const pkg = S(args.packageName);
@@ -106,6 +107,8 @@ export async function toolActionText(toolName: string, args: Record<string, unkn
     S(args.songName) ||
     S(args.city) ||
     S(args.title) ||
+    S(args.path) ||
+    S(args.settingName) ||
     '';
   const map: Record<string, string> = {
     freezeApp: /^(全部|所有|all)/i.test(target) ? (S(args.action) === 'unfreeze' ? '解冻全部应用' : '冻结全部应用') : target ? `冻结${target}` : '冻结应用',
@@ -155,12 +158,12 @@ export async function toolActionText(toolName: string, args: Record<string, unkn
     pressKey: '按按键',
     // v2.3.0 原生系统级工具
     setRealAlarm:
-      typeof args.hour === 'number'
-        ? `定${args.hour}点${String(typeof args.minute === 'number' ? args.minute : 0).padStart(2, '0')}的闹钟`
+      Number.isFinite(Number(args.hour)) && Number.isFinite(Number(args.minute))
+        ? `定${Math.round(Number(args.hour))}点${String(Math.round(Number(args.minute))).padStart(2, '0')}的闹钟`
         : '定系统闹钟',
     startCountdown:
-      typeof args.seconds === 'number' && args.seconds >= 60
-        ? `开${Math.round(args.seconds / 60)}分钟倒计时`
+      Number.isFinite(Number(args.seconds)) && Number(args.seconds) >= 60
+        ? `开${Math.round(Number(args.seconds) / 60)}分钟倒计时`
         : '开系统倒计时',
     createCalendarEvent: target ? `把「${target}」写进系统日历` : '写系统日历',
     makePhoneCall: target ? `打电话给${target || S(args.phoneNumber)}` : '拨打电话',
@@ -168,6 +171,17 @@ export async function toolActionText(toolName: string, args: Record<string, unkn
     searchRealContact: target ? `查${target}的电话` : '查真机通讯录',
     toggleFlashlight: args.on === false ? '关手电筒' : '开手电筒',
     getRealLocation: '查你的定位',
+    // v2.4.2 系统级工具矩阵扩展
+    getStepCount: '查你的步数',
+    getCurrentActivity: '识别你的运动状态',
+    getSleepData: '查你的睡眠',
+    listFiles: target ? `看${target}目录` : '看手机文件',
+    readFileContent: target ? `读「${target}」` : '读手机文件',
+    saveTextToFile: target ? `存「${target}」到手机` : '保存文件到手机',
+    downloadFile: '下载文件',
+    openSystemSetting: target ? `打开${target}设置` : '打开系统设置',
+    getNetworkInfo: '查网络状态',
+    openApp: realTarget ? `打开真机${realTarget}` : '打开真机应用',
   };
   return map[toolName] || toolName;
 }
@@ -281,6 +295,17 @@ const TOOL_CAPS: Record<string, { label: string; device?: boolean }> = {
   searchRealContact: { label: '查真机通讯录', device: true },
   toggleFlashlight: { label: '开关手电筒', device: true },
   getRealLocation: { label: '查真机定位', device: true },
+  // ---- v2.4.2 系统级工具矩阵扩展（健康运动 / 文件管理 / 网络下载 / 系统设置 / 网络信息） ----
+  getStepCount: { label: '查今日步数', device: true },
+  getCurrentActivity: { label: '识别当前运动状态', device: true },
+  getSleepData: { label: '查昨晚睡眠', device: true },
+  listFiles: { label: '列手机目录文件', device: true },
+  readFileContent: { label: '读手机文本文件', device: true },
+  saveTextToFile: { label: '保存文本到手机', device: true },
+  downloadFile: { label: '下载网络文件', device: true },
+  openSystemSetting: { label: '打开系统设置页', device: true },
+  getNetworkInfo: { label: '查网络状态', device: true },
+  openApp: { label: '打开真机 App', device: true },
 };
 
 /** 字符串参数 schema 快捷构造 */
@@ -693,11 +718,78 @@ export function buildPhoneTools(): PhoneToolDef[] {
       {},
       [],
     );
+    // ---- v2.4.2 系统级工具矩阵扩展（健康运动 / 文件管理 / 网络下载 / 系统设置 / 网络信息） ----
+    add(
+      'getStepCount',
+      '查看机主【今天走了多少步】（真机硬件计步传感器实时读取，按今日零点起算）。机主问「我今天走了多少步」「运动量怎么样」时用这个；人设合适时也可主动关心（如「今天才 800 步，下楼走走嘛」/「都两万步了快歇歇」）。',
+      {},
+      [],
+    );
+    add(
+      'getCurrentActivity',
+      '识别机主【当前的运动状态】（静止 / 步行 / 跑步 / 可能乘车——真机加速度传感器实时采样 2.5 秒判定）。想知道机主此刻是不是在走路、跑步还是躺着时用这个；手机放得很稳时「静止」和「乘车」物理上分不开，结果里会如实说明。',
+      {},
+      [],
+    );
+    add(
+      'getSleepData',
+      '估算机主【昨晚睡了多久】（按手机使用记录推算：昨晚最后一次放下手机 → 今早第一次拿起手机的长间隔）。机主问「我昨晚睡了几个小时」「睡得好吗」时用这个；结果会标注是估算值。熬夜到凌晨/记录不足时会如实说识别不出来。',
+      {},
+      [],
+    );
+    add(
+      'listFiles',
+      '列出机主手机公共目录里的文件（Download 下载 / DCIM 相册 / Pictures 图片 / Music 音乐 / Movies 视频 / Documents 文档）。path 填目录（默认 Download；中文别名如「下载」「相册」也认）。机主问「我下载了什么」「相册里有什么」时用这个；配合 readFileContent 能读出文本文件内容。',
+      { path: strParam('目录路径（可选，默认 Download；支持：Download/DCIM/Pictures/Music/Movies/Documents 或中文「下载/相册/图片/音乐/视频/文档」）') },
+      [],
+    );
+    add(
+      'readFileContent',
+      '读取机主手机本地【文本文件】的内容（限公共目录、单个 ≤256KB；图片/音视频/安装包等二进制文件读不了）。path 填完整路径如「Download/笔记.txt」。机主说「帮我看看这个文件写了什么」「读一下那个 txt」时用这个；不知道文件名就先调 listFiles 看目录。',
+      { path: strParam('文件完整路径（如「Download/笔记.txt」「Documents/日记.md」）') },
+      ['path'],
+    );
+    add(
+      'saveTextToFile',
+      '把一段文字【保存成文本文件】存进机主手机的「Download/AI Phone/」目录（真实写入，打开手机文件管理器就能看到）。机主说「帮我存一下这段话」「把刚才聊的存成文件」时用这个；也可以按你的判断主动保存值得留念的内容（如机主说过的重要的话/你们聊出的计划，按人设记忆上下文自己决定要不要存）。',
+      {
+        content: strParam('要保存的完整文字内容'),
+        filename: strParam('文件名（可选，默认「AI保存-日期.txt」；不用带路径）'),
+      },
+      ['content'],
+    );
+    add(
+      'downloadFile',
+      '用系统下载器把网络上的文件【下载到机主手机】（DownloadManager 原生下载，完成后通知栏会提示，文件保存在 Download 目录）。url 填 http/https 下载地址，filename 填保存的文件名（可选）。机主说「帮我把这个链接的图片/音乐/文件下下来」时用这个；下载完成后告诉机主文件在哪。',
+      {
+        url: strParam('下载地址（http:// 或 https:// 开头）'),
+        filename: strParam('保存的文件名（可选，默认取链接尾段）'),
+      },
+      ['url'],
+    );
+    add(
+      'openSystemSetting',
+      '直接打开机主手机的某个【系统设置页】（标准 Intent 直跳，一步到位）。settingName 支持：wifi/Wi-Fi设置、bluetooth/蓝牙、airplane/飞行模式、应用管理/全部应用、notifications/通知、sound/声音音量、display/显示亮度、battery/电池省电、storage/存储空间、location/位置定位、security/安全、date/日期时间、locale/语言输入法、accessibility/无障碍、dnd/勿扰、about/关于手机、home/桌面、cast/投屏、nfc、print/打印。机主说「帮我打开 WiFi 设置」「去蓝牙设置看看」时用这个。',
+      { settingName: strParam('设置页名字（如：wifi、蓝牙、应用管理、通知、电池、存储、关于手机）') },
+      ['settingName'],
+    );
+    add(
+      'getNetworkInfo',
+      '查看机主手机【当前的网络状态】：连的是 Wi-Fi 还是流量、信号强度几格、Wi-Fi 网络名、蜂窝制式（5G/4G/3G）。机主问「我现在用的 WiFi 还是流量」「信号怎么样」「这 WiFi 叫什么」时用这个。',
+      {},
+      [],
+    );
+    add(
+      'openApp',
+      '打开机主真实手机上的一个应用（openRealApp 的简写别名，两者完全等价）。系统应用（时钟/闹钟/日历/计算器/设置/相机/图库/联系人/拨号/短信/浏览器）直接把中文名填进 packageName；第三方 App 填 Android 包名（如 com.tencent.mm 微信、com.ss.android.ugc.aweme 抖音），不确定包名就先调 searchRealApp 搜。机主说「打开抖音」「打开设置」时用这个。',
+      { packageName: strParam('应用名：系统应用直接填中文名（时钟/设置/相机…）或第三方包名（如 com.tencent.mm）') },
+      ['packageName'],
+    );
   }
 
-  // 服务端 sanitizeTools 上限：网页 22 + 真机 21（原生化）+ v2.3.0 原生系统级 8 件 = 51，
-  // 上限已同步提到 64（api/chat/route.ts sanitizeTools）
-  return tools.slice(0, 64);
+  // 服务端 sanitizeTools 上限：网页 22 + 真机 22 + v2.3.0 原生系统级 8 件 + v2.4.2 矩阵扩展 10 件 = 62，
+  // 上限已同步提到 72（api/chat/route.ts sanitizeTools）
+  return tools.slice(0, 72);
 }
 
 // ---------------- 工具执行器（全部走 web-tools 内部路由函数） ----------------
@@ -1030,14 +1122,22 @@ export async function execWebTool(name: string, args: Record<string, unknown>): 
         return runDeviceTool((d) => d.labNotificationSnapshot(15));
       // ---- v2.3.0 原生系统级工具执行器 ----
       case 'setRealAlarm': {
-        const hour = Number(args.hour);
-        const minute = Number(args.minute);
+        const hour = Math.round(Number(args.hour));
+        const minute = Math.round(Number(args.minute));
         if (!Number.isFinite(hour) || hour < 0 || hour > 23 || !Number.isFinite(minute) || minute < 0 || minute > 59) {
           return '【失败】setRealAlarm 时间不合法（hour 填 0-23，minute 填 0-59；如下午两点半 = hour:14, minute:30）';
         }
         const label = S(args.label) || undefined;
-        rememberToolAction(`你替机主在真实手机上定了系统闹钟 ${hour}:${String(minute).padStart(2, '0')}${label ? `（${label.slice(0, 30)}）` : ''}`);
-        return runDeviceTool((d) => d.labSetRealAlarm(hour, minute, label));
+        // v2.4.2：定成功才写记忆碎片（旧版先写后执行——失败也会记住「定了闹钟」）
+        return runDeviceTool(async (d) => {
+          const r = await d.labSetRealAlarm(hour, minute, label);
+          if (r.ok) {
+            rememberToolAction(
+              `你替机主在真实手机上定了系统闹钟 ${hour}:${String(minute).padStart(2, '0')}${label ? `（${label.slice(0, 30)}）` : ''}`,
+            );
+          }
+          return r;
+        });
       }
       case 'startCountdown': {
         const seconds = Number(args.seconds);
@@ -1088,6 +1188,62 @@ export async function execWebTool(name: string, args: Record<string, unknown>): 
       }
       case 'getRealLocation':
         return runDeviceTool((d) => d.labGetRealLocation());
+      // ---- v2.4.2 系统级工具矩阵扩展（健康运动/文件/下载/设置/网络） ----
+      case 'getStepCount':
+        return runDeviceTool((d) => d.labGetStepCount());
+      case 'getCurrentActivity':
+        return runDeviceTool((d) => d.labGetCurrentActivity());
+      case 'getSleepData':
+        return runDeviceTool((d) => d.labGetSleepData());
+      case 'listFiles':
+        return runDeviceTool((d) => d.labListFiles(S(args.path) || 'Download'));
+      case 'readFileContent': {
+        const fp = S(args.path);
+        if (!fp) return '【失败】readFileContent 缺文件路径（path，如「Download/笔记.txt」；不确定文件名先 listFiles 看目录）';
+        return runDeviceTool((d) => d.labReadFileContent(fp));
+      }
+      case 'saveTextToFile': {
+        const content = S(args.content);
+        if (!content) return '【失败】saveTextToFile 缺正文内容（content）';
+        const fname = S(args.filename) || undefined;
+        // v2.4.2 内容型工具：成功才写记忆碎片（AI 记得自己存过什么）
+        return runDeviceTool(async (d) => {
+          const r = await d.labSaveTextToFile(content, fname);
+          if (r.ok) rememberToolAction(`你把一段内容（${content.slice(0, 60)}…）存进了机主手机的「${fname ?? 'AI保存-默认名'}」文件`);
+          return r;
+        });
+      }
+      case 'downloadFile': {
+        const url = S(args.url);
+        if (!url || !/^https?:\/\//.test(url)) return '【失败】downloadFile 缺合法下载地址（url，要 http/https 开头）';
+        const dname = S(args.filename) || undefined;
+        return runDeviceTool((d) => d.labDownloadFile(url, dname));
+      }
+      case 'openSystemSetting': {
+        const sn = S(args.settingName);
+        if (!sn) return '【失败】openSystemSetting 缺设置页名字（settingName，如：wifi、蓝牙、应用管理、电池）';
+        return runDeviceTool((d) => d.labOpenSystemSetting(sn));
+      }
+      case 'getNetworkInfo':
+        return runDeviceTool((d) => d.labGetNetworkInfo());
+      case 'openApp': {
+        // v2.4.2：openRealApp 的简写别名（机主好记）——同一执行器
+        const pkg = S(args.packageName);
+        if (!pkg) return '【失败】openApp 缺应用名（packageName，系统应用填中文名如 时钟/设置，第三方填包名如 com.tencent.mm）';
+        const SYSTEM_APP_NAMES = [
+          '时钟', '闹钟', '计时器', '秒表', '日历', '日程', '计算器', '设置', '相机', '拍照',
+          '图库', '相册', '照片', '联系人', '通讯录', '拨号', '电话', '短信', '信息', '浏览器',
+          'clock', 'alarm', 'timer', 'calendar', 'calculator', 'calc', 'setting', 'settings',
+          'camera', 'gallery', 'photo', 'contact', 'dial', 'phone', 'sms', 'message', 'browser', 'email', '邮件',
+        ];
+        const isSystemApp = SYSTEM_APP_NAMES.some(
+          (k) => pkg.toLowerCase() === k || pkg.includes(k),
+        ) && !pkg.includes('.');
+        if (isSystemApp) {
+          return runDeviceTool((d) => d.labOpenSystemApp(pkg));
+        }
+        return runDeviceTool((d) => d.labOpenApp(pkg));
+      }
       case 'searchRealApp':
         return labText(await toolSearchRealApp(S(args.keyword)));
       case 'lockApp': {

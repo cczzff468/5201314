@@ -28,19 +28,28 @@ import {
   nativeA11yTap,
   nativeBringToFront,
   nativeCreateCalendarEvent,
+  nativeDownloadFile,
+  nativeGetCurrentActivity,
   nativeGetBatteryStatus,
   nativeGetBrightness,
   nativeGetForegroundApp,
+  nativeGetNetworkInfo,
   nativeGetRealLocation,
   nativeGetRecentNotifications,
   nativeGetRecentSMS,
   nativeGetScreenSize,
+  nativeGetSleepData,
+  nativeGetStepCount,
   nativeGetVolume,
+  nativeListFiles,
   nativeListInstalledApps,
   nativeLockApp,
   nativeMakePhoneCall,
   nativeOpenApp,
   nativeOpenSystemApp,
+  nativeOpenSystemSetting,
+  nativeReadFileContent,
+  nativeSaveTextToFile,
   nativeSearchRealContact,
   nativeSendSMS,
   nativeSetBrightness,
@@ -483,6 +492,148 @@ export async function labOpenSystemApp(name: string): Promise<DeviceOpResult> {
   return { ok: true, text: `已打开系统「${name}」（标准系统入口直连）` };
 }
 
+// ================= v2.4.2 健康运动 / 文件管理 / 网络下载 / 系统设置 / 网络信息 =================
+
+/** 今日步数（TYPE_STEP_COUNTER 硬件计步 + 今日零点基线折算） */
+export async function labGetStepCount(): Promise<DeviceOpResult> {
+  const r = await nativeGetStepCount();
+  if (!r.ok) {
+    const why =
+      r.reason === 'no-permission'
+        ? '身体活动权限未开启：去 设置 › 权限给予 › 身体活动（步数/运动） 开启'
+        : r.reason === 'no-sensor'
+          ? '这台手机没有计步传感器（少数低端机型没有）'
+          : r.reason === 'no-data'
+            ? '计步传感器暂时没返回数据（稍后再试一次）'
+            : a11yGateText(r.reason);
+    return { ok: false, text: `查步数失败：${why}` };
+  }
+  const steps = r.steps ?? 0;
+  const est = r.estimated ? '（估算：今天第一次读取前走的步数没算进来）' : '';
+  return { ok: true, text: `今天走了 ${steps} 步${est}` };
+}
+
+/** 当前运动状态（加速度计：静止/步行/跑步/可能乘车/活动中） */
+export async function labGetCurrentActivity(): Promise<DeviceOpResult> {
+  const r = await nativeGetCurrentActivity();
+  if (!r.ok) {
+    const why =
+      r.reason === 'no-permission'
+        ? '身体活动权限未开启：去 设置 › 权限给予 › 身体活动（步数/运动） 开启'
+        : r.reason === 'no-sensor'
+          ? '这台手机没有加速度传感器'
+          : r.reason === 'no-data'
+            ? '采样太短没测到有效数据（稍后再试）'
+            : a11yGateText(r.reason);
+    return { ok: false, text: `运动状态识别失败：${why}` };
+  }
+  return { ok: true, text: `当前状态：${r.activity ?? '未知'}——${r.detail ?? ''}` };
+}
+
+/** 昨晚睡眠估算（UsageStats 亮屏间隔推算） */
+export async function labGetSleepData(): Promise<DeviceOpResult> {
+  const r = await nativeGetSleepData();
+  if (!r.ok) {
+    const why =
+      r.reason === 'no-usage-permission'
+        ? '睡眠估算需要「使用情况访问」权限：去 设置 › 权限给予 › 使用情况访问 开启'
+        : r.reason === 'no-data'
+          ? '手机使用记录太少，估不出来'
+          : a11yGateText(r.reason);
+    return { ok: false, text: `睡眠查询失败：${why}` };
+  }
+  if (!r.found) return { ok: true, text: r.note ?? '没能识别出昨晚的睡眠时段' };
+  const min = r.sleepMinutes ?? 0;
+  const h = Math.floor(min / 60);
+  const m = min % 60;
+  const dur = h > 0 ? `${h} 小时 ${m} 分钟` : `${min} 分钟`;
+  return {
+    ok: true,
+    text: `昨晚睡了约 ${dur}（${r.from} 放下手机 → ${r.to} 第一次拿起，按手机使用记录估算，仅供参考）`,
+  };
+}
+
+/** 文件大小人话（B/KB/MB） */
+function fmtFileSize(n?: number): string {
+  if (n == null) return '';
+  if (n < 1024) return `${n}B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)}KB`;
+  return `${(n / 1024 / 1024).toFixed(1)}MB`;
+}
+
+/** 列公共目录文件（Download/DCIM/Pictures/Music/Movies/Documents；中文别名自动映射） */
+export async function labListFiles(path: string): Promise<DeviceOpResult> {
+  const r = await nativeListFiles(path);
+  if (!r.ok) {
+    const why = r.reason === 'bad-path' ? r.detail ?? '只能看公共目录（Download/DCIM/Pictures/Music/Movies/Documents）' : a11yGateText(r.reason);
+    return { ok: false, text: `列目录失败：${why}` };
+  }
+  const items = r.items ?? [];
+  if (items.length === 0) return { ok: true, text: `「${r.path ?? path}」目录是空的${r.note ? `（${r.note}）` : ''}` };
+  const rows = items
+    .slice(0, 30)
+    .map((f) => `${f.dir ? '📁' : '📄'} ${f.name}${f.dir ? '/' : ` ${fmtFileSize(f.size)}`}`);
+  const more = items.length > 30 ? `\n…还有 ${items.length - 30} 个` : '';
+  return { ok: true, text: `「${r.path ?? path}」共 ${items.length} 项：\n${rows.join('\n')}${more}` };
+}
+
+/** 读文本文件内容（≤256KB；二进制拒读） */
+export async function labReadFileContent(path: string): Promise<DeviceOpResult> {
+  const r = await nativeReadFileContent(path);
+  if (!r.ok) {
+    const map: Record<string, string> = {
+      'bad-path': r.detail ?? '要填完整路径（如「Download/笔记.txt」）',
+      'not-found': r.detail ?? '找不到这个文件（不确定文件名先 listFiles 看目录）',
+      binary: r.detail ?? '这是二进制文件，读不出文字',
+    };
+    return { ok: false, text: `读文件失败：${map[r.reason ?? ''] ?? a11yGateText(r.reason)}` };
+  }
+  return { ok: true, text: `「${r.path ?? path}」（${fmtFileSize(r.size)}）内容：\n${r.content ?? ''}` };
+}
+
+/** 存文本文件到「Download/AI Phone/」 */
+export async function labSaveTextToFile(content: string, filename?: string): Promise<DeviceOpResult> {
+  const r = await nativeSaveTextToFile(content, filename);
+  if (!r.ok) {
+    const map: Record<string, string> = {
+      'bad-params': r.detail ?? '缺正文内容',
+    };
+    return { ok: false, text: `保存失败：${map[r.reason ?? ''] ?? r.detail ?? a11yGateText(r.reason)}` };
+  }
+  return { ok: true, text: `已保存：${r.path ?? 'Download/AI Phone/'}（${fmtFileSize(r.size)}）——打开手机文件管理器的下载目录就能看到` };
+}
+
+/** 系统下载器（DownloadManager 下载到 Download/） */
+export async function labDownloadFile(url: string, filename?: string): Promise<DeviceOpResult> {
+  const r = await nativeDownloadFile(url, filename);
+  if (!r.ok) {
+    const map: Record<string, string> = {
+      'bad-params': r.detail ?? '缺合法下载地址（http/https 开头）',
+    };
+    return { ok: false, text: `下载启动失败：${map[r.reason ?? ''] ?? r.detail ?? a11yGateText(r.reason)}` };
+  }
+  return { ok: true, text: r.note ?? `已开始下载，文件将保存到 ${r.path}` };
+}
+
+/** 打开系统设置页（wifi/蓝牙/应用管理/通知/电池…标准 Intent 直跳） */
+export async function labOpenSystemSetting(settingName: string): Promise<DeviceOpResult> {
+  const r = await nativeOpenSystemSetting(settingName);
+  if (!r.ok) {
+    const map: Record<string, string> = {
+      'unknown-setting': r.detail ?? '不认识这个设置页（可试：wifi/蓝牙/应用管理/通知/电池/存储…）',
+    };
+    return { ok: false, text: `打开设置失败：${map[r.reason ?? ''] ?? r.detail ?? a11yGateText(r.reason)}` };
+  }
+  return { ok: true, text: `已打开系统「${r.setting ?? settingName}」` };
+}
+
+/** 网络状态（Wi-Fi/移动网络/断网 + 信号强度） */
+export async function labGetNetworkInfo(): Promise<DeviceOpResult> {
+  const r = await nativeGetNetworkInfo();
+  if (!r.ok) return { ok: false, text: `网络状态读取失败：${r.detail ?? a11yGateText(r.reason)}` };
+  return { ok: true, text: `当前网络：${r.detail ?? r.type ?? '未知'}` };
+}
+
 /** 最近通知（通知环形缓冲，需「通知使用权」；v2.4.1：已消费（AI 质问过的）通知隐身 + 采集窗记账） */
 export async function labNotificationSnapshot(limit = 10): Promise<DeviceOpResult> {
   const r = await nativeGetRecentNotifications(limit);
@@ -598,7 +749,7 @@ export function isNeverLockPkg(pkg: string): boolean {
  */
 export async function labLockApp(
   pkg: string,
-  opts: { unlockAt?: number; charName?: string; message?: string; contactId?: string; app?: string } = {},
+  opts: { unlockAt?: number; charName?: string; message?: string; contactId?: string; app?: string; avatar?: string } = {},
 ): Promise<DeviceOpResult> {
   // v2.1.1 防伪包名：合法 Android 包名必含「.」（如 com.tencent.mm）——「QQ」「抖音」
   // 这类应用名混进来直接报错指路（中文名解析在上层 toolFreezeRealApp/lockApp 工具完成），
@@ -612,7 +763,21 @@ export async function labLockApp(
   if (isNeverLockPkg(pkg)) {
     return { ok: false, text: `禁止锁定核心应用（${pkg}）——锁了会导致手机无法操作` };
   }
-  const r = await nativeLockApp({ pkg, ...opts });
+  // v2.4.2 拦截窗头像：没显式传头像时按 contactId 从通讯录取对应 App 槽位的头像
+  // （拿不到不影响锁，原生用角色名首字 monogram 兜底）
+  let avatar = opts.avatar;
+  if (!avatar && opts.contactId) {
+    try {
+      const { listContacts } = await import('./contacts-store');
+      const { avatarFor } = await import('@/lib/contacts');
+      const c = (await listContacts()).find((x) => x.id === opts.contactId);
+      const slot = opts.app === 'wx' ? 'wx' : opts.app === 'qq' ? 'qq' : 'sms';
+      avatar = avatarFor(c ?? null, slot) ?? undefined;
+    } catch {
+      /* 头像拿不到不影响锁 */
+    }
+  }
+  const r = await nativeLockApp({ pkg, ...opts, avatar });
   if (!r.ok) return { ok: false, text: `锁定失败：${a11yGateText(r.reason)}` };
   const dur = opts.unlockAt ? `，${Math.max(1, Math.round((opts.unlockAt - Date.now()) / 60_000))} 分钟后自动解锁` : '（直到哄好才解锁）';
   return { ok: true, text: `已在真实手机上锁定 ${pkg}${dur}：一点开就会被立即弹回桌面并看到你的拦截窗` };

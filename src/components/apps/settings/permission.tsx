@@ -21,6 +21,7 @@ import {
   CheckCircle2,
   ChevronRight,
   FolderOpen,
+  Footprints,
   HeartHandshake,
   Loader2,
   MapPin,
@@ -93,6 +94,8 @@ import {
   requestOverlayPermission,
   requestSendSmsPermission,
   requestSmsPermission,
+  requestActivityRecognitionPermission,
+  activityRecognitionPermission,
   callPhonePermission,
   sendSmsPermission,
   smsPermission,
@@ -369,6 +372,29 @@ export const PERM_DEFS: PermDef[] = [
           'callPhone',
           '拨打电话权限已开启',
           '申请通道异常，请重试；或到 系统设置 › 应用 › 权限 手动开启电话权限（需 APP v2.3.0+）',
+        );
+      }
+      if (r.granted) return { ok: true };
+      if (r.canAsk === false) return { ok: false, note: '系统已停用授权弹窗：请去系统设置手动开启' };
+      return { ok: false };
+    },
+  },
+  {
+    // v2.4.2 健康运动工具（getStepCount / getCurrentActivity）前置权限
+    key: 'activityRecognition',
+    label: '身体活动（步数/运动）',
+    desc: '让 AI 看你的今日步数、识别走路/跑步状态',
+    icon: Footprints,
+    actionLabel: '允许身体活动识别',
+    persistDeniedFallback: true,
+    query: () => queryPermState('activityRecognition', () => activityRecognitionPermission()),
+    request: async () => {
+      const r = await requestActivityRecognitionPermission();
+      if (r === null) {
+        return permRequestFallback(
+          'activityRecognition',
+          '身体活动权限已开启',
+          '申请通道异常，请重试；或到 系统设置 › 应用 › 权限 › 身体活动 手动开启（需 APP v2.4.2+）',
         );
       }
       if (r.granted) return { ok: true };

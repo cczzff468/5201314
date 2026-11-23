@@ -141,6 +141,96 @@ export interface NativeLocationResult {
   reason?: string;
 }
 
+// ---------------- v2.4.2 健康运动 / 文件 / 下载 / 网络工具结果 ----------------
+
+/** v2.4.2 今日步数（TYPE_STEP_COUNTER 硬件计步 + 今日零点基线折算） */
+export interface NativeStepResult {
+  ok?: boolean;
+  reason?: string;
+  steps?: number;
+  totalSinceReboot?: number;
+  estimated?: boolean;
+}
+
+/** v2.4.2 当前运动状态（加速度计启发式：静止/步行/跑步/可能乘车/活动中） */
+export interface NativeActivityResult {
+  ok?: boolean;
+  reason?: string;
+  activity?: string;
+  detail?: string;
+}
+
+/** v2.4.2 昨晚睡眠估算（UsageStats 亮屏间隔推算） */
+export interface NativeSleepResult {
+  ok?: boolean;
+  reason?: string;
+  found?: boolean;
+  sleepMinutes?: number;
+  from?: string;
+  to?: string;
+  estimated?: boolean;
+  note?: string;
+}
+
+/** v2.4.2 公共目录文件清单 */
+export interface NativeFileItem {
+  name: string;
+  dir?: boolean;
+  size?: number;
+  mime?: string;
+}
+
+export interface NativeFileListResult {
+  ok?: boolean;
+  reason?: string;
+  detail?: string;
+  path?: string;
+  items?: NativeFileItem[];
+  note?: string;
+}
+
+/** v2.4.2 文本文件内容 */
+export interface NativeFileReadResult {
+  ok?: boolean;
+  reason?: string;
+  detail?: string;
+  path?: string;
+  size?: number;
+  content?: string;
+  truncated?: boolean;
+}
+
+/** v2.4.2 保存文本文件结果 */
+export interface NativeFileSaveResult {
+  ok?: boolean;
+  reason?: string;
+  detail?: string;
+  path?: string;
+  size?: number;
+}
+
+/** v2.4.2 系统下载器结果 */
+export interface NativeDownloadResult {
+  ok?: boolean;
+  reason?: string;
+  detail?: string;
+  id?: number;
+  path?: string;
+  note?: string;
+}
+
+/** v2.4.2 网络状态 */
+export interface NativeNetworkResult {
+  ok?: boolean;
+  reason?: string;
+  detail?: string;
+  type?: 'wifi' | 'cellular' | 'offline' | 'other' | 'unknown';
+  wifiLevel?: number;
+  ssid?: string;
+  cellGen?: string;
+  cellLevel?: number;
+}
+
 type CapPlugin = {
   hasUsagePermission(): Promise<{ granted: boolean }>;
   openUsagePermissionSettings(): Promise<void>;
@@ -240,6 +330,18 @@ type CapPlugin = {
   requestSendSmsPermission(): Promise<RuntimePermResult>;
   callPhonePermission(): Promise<RuntimePermResult>;
   requestCallPhonePermission(): Promise<RuntimePermResult>;
+  /** v2.4.2 健康运动/文件/下载/设置/网络工具组 */
+  getStepCount(): Promise<NativeStepResult>;
+  getCurrentActivity(): Promise<NativeActivityResult>;
+  getSleepData(): Promise<NativeSleepResult>;
+  listFiles(options: { path?: string }): Promise<NativeFileListResult>;
+  readFileContent(options: { path: string }): Promise<NativeFileReadResult>;
+  saveTextToFile(options: { content: string; filename?: string }): Promise<NativeFileSaveResult>;
+  downloadFile(options: { url: string; filename?: string }): Promise<NativeDownloadResult>;
+  openSystemSetting(options: { settingName: string }): Promise<NativeActionResult>;
+  getNetworkInfo(): Promise<NativeNetworkResult>;
+  activityRecognitionPermission(): Promise<RuntimePermResult>;
+  requestActivityRecognitionPermission(): Promise<RuntimePermResult>;
 };
 
 type CapacitorCore = {
@@ -493,6 +595,18 @@ function bridgePlugin(): CapPlugin {
     requestSendSmsPermission: () => nativeCall<RuntimePermResult>('requestSendSmsPermission', {}, 60_000),
     callPhonePermission: () => nativeCall<RuntimePermResult>('callPhonePermission'),
     requestCallPhonePermission: () => nativeCall<RuntimePermResult>('requestCallPhonePermission', {}, 60_000),
+    // v2.4.2 健康运动/文件/下载/设置/网络工具组
+    getStepCount: () => nativeCall<NativeStepResult>('getStepCount', {}, 8000),
+    getCurrentActivity: () => nativeCall<NativeActivityResult>('getCurrentActivity', {}, 8000),
+    getSleepData: () => nativeCall<NativeSleepResult>('getSleepData', {}, 10_000),
+    listFiles: (options) => nativeCall<NativeFileListResult>('listFiles', options ?? {}, 10_000),
+    readFileContent: (options) => nativeCall<NativeFileReadResult>('readFileContent', options ?? {}, 12_000),
+    saveTextToFile: (options) => nativeCall<NativeFileSaveResult>('saveTextToFile', options ?? {}, 10_000),
+    downloadFile: (options) => nativeCall<NativeDownloadResult>('downloadFile', options ?? {}, 10_000),
+    openSystemSetting: (options) => nativeCall<NativeActionResult>('openSystemSetting', options ?? {}, 8000),
+    getNetworkInfo: () => nativeCall<NativeNetworkResult>('getNetworkInfo', {}, 6000),
+    activityRecognitionPermission: () => nativeCall<RuntimePermResult>('activityRecognitionPermission'),
+    requestActivityRecognitionPermission: () => nativeCall<RuntimePermResult>('requestActivityRecognitionPermission', {}, 60_000),
   };
 }
 
@@ -1049,6 +1163,135 @@ export async function requestCallPhonePermission(): Promise<RuntimePermResult | 
     return await nativeOrTimeout(p.requestCallPhonePermission(), 60_000);
   } catch {
     return null;
+  }
+}
+
+// ---------------- v2.4.2 健康运动 / 文件 / 下载 / 网络工具组 ----------------
+
+/** 身体活动权限查询（ACTIVITY_RECOGNITION；29- 恒真；null=旧 APK） */
+export async function activityRecognitionPermission(): Promise<RuntimePermResult | null> {
+  const p = await nativePlugin();
+  if (!p) return null;
+  try {
+    return await nativeOrTimeout(p.activityRecognitionPermission());
+  } catch {
+    return null;
+  }
+}
+
+/** 身体活动权限申请（系统运行时弹框） */
+export async function requestActivityRecognitionPermission(): Promise<RuntimePermResult | null> {
+  const p = await nativePlugin();
+  if (!p) return null;
+  try {
+    return await nativeOrTimeout(p.requestActivityRecognitionPermission(), 60_000);
+  } catch {
+    return null;
+  }
+}
+
+/** 今日步数（TYPE_STEP_COUNTER 硬件计步 + 今日零点基线折算） */
+export async function nativeGetStepCount(): Promise<NativeStepResult> {
+  if (!isNativePerception()) return { ok: false, reason: 'not-native' };
+  try {
+    const r = await nativeCall<NativeStepResult>('getStepCount', {}, 8000);
+    return r ?? { ok: false, reason: '桥无响应' };
+  } catch {
+    return { ok: false, reason: '桥无响应' };
+  }
+}
+
+/** 当前运动状态（加速度计：静止/步行/跑步/可能乘车/活动中） */
+export async function nativeGetCurrentActivity(): Promise<NativeActivityResult> {
+  if (!isNativePerception()) return { ok: false, reason: 'not-native' };
+  try {
+    const r = await nativeCall<NativeActivityResult>('getCurrentActivity', {}, 8000);
+    return r ?? { ok: false, reason: '桥无响应' };
+  } catch {
+    return { ok: false, reason: '桥无响应' };
+  }
+}
+
+/** 昨晚睡眠估算（UsageStats 亮屏间隔推算；需使用情况访问） */
+export async function nativeGetSleepData(): Promise<NativeSleepResult> {
+  if (!isNativePerception()) return { ok: false, reason: 'not-native' };
+  try {
+    const r = await nativeCall<NativeSleepResult>('getSleepData', {}, 10_000);
+    return r ?? { ok: false, reason: '桥无响应' };
+  } catch {
+    return { ok: false, reason: '桥无响应' };
+  }
+}
+
+/** 列公共目录文件（Download/DCIM/Pictures/Music/Movies/Documents） */
+export async function nativeListFiles(path: string): Promise<NativeFileListResult> {
+  if (!isNativePerception()) return { ok: false, reason: 'not-native' };
+  try {
+    const r = await nativeCall<NativeFileListResult>('listFiles', { path }, 10_000);
+    return r ?? { ok: false, reason: '桥无响应' };
+  } catch {
+    return { ok: false, reason: '桥无响应' };
+  }
+}
+
+/** 读文本文件内容（≤256KB；二进制拒读） */
+export async function nativeReadFileContent(path: string): Promise<NativeFileReadResult> {
+  if (!isNativePerception()) return { ok: false, reason: 'not-native' };
+  try {
+    const r = await nativeCall<NativeFileReadResult>('readFileContent', { path }, 12_000);
+    return r ?? { ok: false, reason: '桥无响应' };
+  } catch {
+    return { ok: false, reason: '桥无响应' };
+  }
+}
+
+/** 存文本文件到「Download/AI Phone/」 */
+export async function nativeSaveTextToFile(content: string, filename?: string): Promise<NativeFileSaveResult> {
+  if (!isNativePerception()) return { ok: false, reason: 'not-native' };
+  try {
+    const r = await nativeCall<NativeFileSaveResult>('saveTextToFile', { content, filename }, 10_000);
+    return r ?? { ok: false, reason: '桥无响应' };
+  } catch {
+    return { ok: false, reason: '桥无响应' };
+  }
+}
+
+/** 系统下载器（DownloadManager 下载到 Download/） */
+export async function nativeDownloadFile(url: string, filename?: string): Promise<NativeDownloadResult> {
+  if (!isNativePerception()) return { ok: false, reason: 'not-native' };
+  try {
+    const r = await nativeCall<NativeDownloadResult>('downloadFile', { url, filename }, 10_000);
+    return r ?? { ok: false, reason: '桥无响应' };
+  } catch {
+    return { ok: false, reason: '桥无响应' };
+  }
+}
+
+/** 打开系统设置页（wifi/蓝牙/应用管理/通知/电池…标准 Intent 直跳） */
+export async function nativeOpenSystemSetting(
+  settingName: string,
+): Promise<NativeActionResult & { setting?: string; detail?: string }> {
+  if (!isNativePerception()) return { ok: false, reason: 'not-native' };
+  try {
+    const r = await nativeCall<NativeActionResult & { setting?: string; detail?: string }>(
+      'openSystemSetting',
+      { settingName },
+      8000,
+    );
+    return r ?? { ok: false, reason: '桥无响应' };
+  } catch {
+    return { ok: false, reason: '桥无响应' };
+  }
+}
+
+/** 网络状态（Wi-Fi/移动网络/断网 + 信号强度） */
+export async function nativeGetNetworkInfo(): Promise<NativeNetworkResult> {
+  if (!isNativePerception()) return { ok: false, reason: 'not-native' };
+  try {
+    const r = await nativeCall<NativeNetworkResult>('getNetworkInfo', {}, 6000);
+    return r ?? { ok: false, reason: '桥无响应' };
+  } catch {
+    return { ok: false, reason: '桥无响应' };
   }
 }
 
@@ -1705,6 +1948,7 @@ export async function nativeLockApp(opts: {
   message?: string;
   contactId?: string;
   app?: string;
+  avatar?: string;
 }): Promise<{ ok: boolean; reason?: string }> {
   if (!isNativePerception()) return { ok: false, reason: 'not-native' };
   if (!(await nativeJealousyGuardSupported())) return { ok: false, reason: 'old-apk' };
@@ -1739,6 +1983,7 @@ export async function nativeJealousyGuardSyncLock(opts: {
   message?: string;
   contactId?: string;
   app?: string;
+  avatar?: string;
 }): Promise<{ ok: boolean; reason?: string }> {
   if (!isNativePerception()) return { ok: false, reason: 'not-native' };
   if (!(await nativeJealousyGuardSupported())) return { ok: false, reason: 'old-apk' };

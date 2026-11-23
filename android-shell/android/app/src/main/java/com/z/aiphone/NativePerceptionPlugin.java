@@ -21,8 +21,10 @@ import android.media.AudioManager;
 import android.net.Uri;
 import android.os.BatteryManager;
 import android.os.Build;
+import android.os.Environment;
 import android.os.PowerManager;
 import android.os.Process;
+import android.provider.MediaStore;
 import android.provider.Settings;
 import android.service.notification.NotificationListenerService;
 import android.view.WindowManager;
@@ -44,6 +46,7 @@ import com.getcapacitor.annotation.PermissionCallback;
 import org.json.JSONObject;
 import org.json.JSONTokener;
 
+import java.io.File;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Calendar;
@@ -128,7 +131,9 @@ import java.util.concurrent.atomic.AtomicReference;
         // v2.3.0 发送短信（SmsManager 静默发送）
         @Permission(strings = { android.Manifest.permission.SEND_SMS }, alias = "sendSms"),
         // v2.3.0 直接拨打电话（ACTION_CALL；未授权时降级拉拨号盘）
-        @Permission(strings = { android.Manifest.permission.CALL_PHONE }, alias = "callPhone")
+        @Permission(strings = { android.Manifest.permission.CALL_PHONE }, alias = "callPhone"),
+        // v2.4.2 身体活动（getStepCount 计步 / getCurrentActivity 运动识别；API 29+ 危险权限）
+        @Permission(strings = { "android.permission.ACTIVITY_RECOGNITION" }, alias = "activityRecognition")
     }
 )
 public class NativePerceptionPlugin extends Plugin {
@@ -485,13 +490,30 @@ public class NativePerceptionPlugin extends Plugin {
 
     // ================= 无障碍服务（权限 + 能力组） =================
 
-    /** 无障碍服务是否已开启（enabled_accessibility_services 含本服务组件） */
+    /** 无障碍服务是否已开启（enabled_accessibility_services 含本服务组件）。
+     *  v2.4.2 根修（机主实测「杀后台后权限中心显示未授权」）：旧版字符串 contains
+     *  只认「pkg/.AiAccessibilityService」简写形态——多数 ROM 存的是全写
+     *  「pkg/pkg.AiAccessibilityService」，进程被杀重拉后 isConnected 短暂为 false、
+     *  字符串兑底又匹配不上 → 误报未授权。改为逐项 ComponentName.unflattenFromString
+     *  归一化比对（简写/全写/大小写都吃得下），设置还在就永远如实报已授权。 */
     private boolean checkA11yEnabled() {
         if (AiAccessibilityService.isConnected()) return true;
         try {
             String flat = Settings.Secure.getString(
                     getContext().getContentResolver(), Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
-            return flat != null && flat.contains(getContext().getPackageName() + "/.AiAccessibilityService");
+            if (flat == null || flat.isEmpty()) return false;
+            ComponentName mine = new ComponentName(getContext(), AiAccessibilityService.class);
+            for (String entry : flat.split(":")) {
+                String e = entry.trim();
+                if (e.isEmpty()) continue;
+                try {
+                    ComponentName cn = ComponentName.unflattenFromString(e);
+                    if (mine.equals(cn)) return true;
+                } catch (Throwable ignored) {
+                    // 脏条目：跳过
+                }
+            }
+            return false;
         } catch (Exception e) {
             return false;
         }
@@ -1018,6 +1040,7 @@ public class NativePerceptionPlugin extends Plugin {
         String message = null;
         String contactId = null;
         String appKind = null;
+        String avatar = null; // v2.4.2 拦截窗头像 dataURL（网页侧联系人头像透传）
         long unlockAt = 0L;
         try {
             pkg = call.getString("pkg", null);
@@ -1041,13 +1064,17 @@ public class NativePerceptionPlugin extends Plugin {
         } catch (Throwable ignored) {
         }
         try {
+            avatar = call.getString("avatar", null);
+        } catch (Throwable ignored) {
+        }
+        try {
             unlockAt = call.getLong("unlockAt", 0L);
         } catch (Throwable t) {
             unlockAt = 0L;
         }
         try {
             String fail = LockOverlayService.syncLock(getContext(), pkg, unlockAt, charName, message,
-                    contactId, appKind);
+                    contactId, appKind, avatar);
             JSObject ret = new JSObject();
             if (fail == null) {
                 ret.put("ok", true);
@@ -2514,6 +2541,856 @@ public class NativePerceptionPlugin extends Plugin {
                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         }
         return null;
+    }
+
+    // ================= v2.4.2 系统级工具矩阵扩展（健康运动 / 文件管理 / 网络下载 / 系统设置 / 网络信息） =================
+
+    /** 身体活动权限（ACTIVITY_RECOGNITION；API 29+ 危险权限，28- 安装即授予） */
+    @PluginMethod
+    public void activityRecognitionPermission(PluginCall call) {
+        if (Build.VERSION.SDK_INT < 29) {
+            resolvePerm(call, true, false);
+            return;
+        }
+        PermissionState s = getPermissionStates().get("activityRecognition");
+        JSObject ret = new JSObject();
+        ret.put("granted", s == PermissionState.GRANTED);
+        ret.put("canAsk", s == PermissionState.PROMPT);
+        call.resolve(ret);
+    }
+
+    /** 申请身体活动权限（系统运行时弹框；计步/运动识别前置） */
+    @PluginMethod
+    public void requestActivityRecognitionPermission(PluginCall call) {
+        if (Build.VERSION.SDK_INT < 29) {
+            resolvePerm(call, true, false);
+            return;
+        }
+        PermissionState s = getPermissionStates().get("activityRecognition");
+        if (s == PermissionState.GRANTED) {
+            resolvePerm(call, true, false);
+            return;
+        }
+        if (s == PermissionState.PROMPT) {
+            requestPermissionForAlias("activityRecognition", call, "activityRecognitionPermissionCallback");
+            return;
+        }
+        resolvePerm(call, false, false);
+    }
+
+    @PermissionCallback
+    private void activityRecognitionPermissionCallback(PluginCall call) {
+        PermissionState s = getPermissionStates().get("activityRecognition");
+        JSObject ret = new JSObject();
+        ret.put("granted", s == PermissionState.GRANTED);
+        ret.put("canAsk", s == PermissionState.PROMPT);
+        call.resolve(ret);
+    }
+
+    /** 身体活动权限实时判定（29+ checkSelfPermission；28- 恒真） */
+    private boolean hasActivityRecognition() {
+        if (Build.VERSION.SDK_INT < 29) return true;
+        return ContextCompat.checkSelfPermission(getContext(), "android.permission.ACTIVITY_RECOGNITION")
+                == android.content.pm.PackageManager.PERMISSION_GRANTED;
+    }
+
+    /**
+     * 今日步数（SensorManager TYPE_STEP_COUNTER 硬件计步——机主规格）。
+     * 传感器给的是「自上次开机累计值」——按「今日零点基线」折算成今日步数：
+     * 基线持久化（dayKey + base + lastSeen），跨天滚动用昨天最后一次读数当新基线。
+     * → {ok, steps, totalSinceReboot, estimated} / {ok:false, reason}
+     */
+    @PluginMethod
+    public void getStepCount(PluginCall call) {
+        if (!hasActivityRecognition()) {
+            call.resolve(toolFail("no-permission"));
+            return;
+        }
+        new Thread(() -> call.resolve(readStepCounter()), "step-counter").start();
+    }
+
+    /** 硬件计步传感器采样（≤1.5s 等首个事件；后台线程）+ 今日基线折算 */
+    private JSObject readStepCounter() {
+        try {
+            android.hardware.SensorManager sm =
+                    (android.hardware.SensorManager) getContext().getSystemService(Context.SENSOR_SERVICE);
+            if (sm == null) return toolFail("no-sensor");
+            android.hardware.Sensor stepSensor = sm.getDefaultSensor(android.hardware.Sensor.TYPE_STEP_COUNTER);
+            if (stepSensor == null) return toolFail("no-sensor");
+
+            final CountDownLatch latch = new CountDownLatch(1);
+            final AtomicReference<Float> stepsRef = new AtomicReference<>(null);
+            android.hardware.SensorEventListener listener = new android.hardware.SensorEventListener() {
+                @Override
+                public void onSensorChanged(android.hardware.SensorEvent event) {
+                    if (event.values != null && event.values.length > 0) {
+                        stepsRef.set(event.values[0]);
+                        latch.countDown();
+                    }
+                }
+
+                @Override
+                public void onAccuracyChanged(android.hardware.Sensor sensor, int accuracy) {
+                }
+            };
+            sm.registerListener(listener, stepSensor, android.hardware.SensorManager.SENSOR_DELAY_FASTEST);
+            boolean got = latch.await(1500, TimeUnit.MILLISECONDS);
+            sm.unregisterListener(listener);
+            Float total = stepsRef.get();
+            if (!got || total == null) return toolFail("no-data"); // 部分机型首次采样慢/传感器静默
+
+            // 今日基线折算（dayKey = yyyy-MM-dd；跨天用 lastSeen 当新基线）
+            Calendar cal = Calendar.getInstance();
+            String dayKey = String.format(Locale.US, "%04d-%02d-%02d",
+                    cal.get(Calendar.YEAR), cal.get(Calendar.MONTH) + 1, cal.get(Calendar.DAY_OF_MONTH));
+            android.content.SharedPreferences sp =
+                    getContext().getSharedPreferences("health_steps", Context.MODE_PRIVATE);
+            String storedDay = sp.getString("dayKey", "");
+            float base = sp.getFloat("base", -1f);
+            float lastSeen = sp.getFloat("lastSeen", -1f);
+            float todayBase;
+            boolean estimated;
+            if (storedDay.equals(dayKey) && base >= 0) {
+                todayBase = base;
+                estimated = false;
+            } else {
+                // 跨天：昨天最后一次读数当新基线（没见过昨天 → 从当前读数起算，标注估算）
+                todayBase = lastSeen >= 0 && total >= lastSeen && (total - lastSeen) < 20000 ? lastSeen : total;
+                estimated = todayBase == total;
+            }
+            float today = Math.max(0f, total - todayBase);
+            sp.edit().putString("dayKey", dayKey)
+                    .putFloat("base", todayBase)
+                    .putFloat("lastSeen", total)
+                    .putLong("lastAt", System.currentTimeMillis())
+                    .apply();
+
+            JSObject ret = new JSObject();
+            ret.put("ok", true);
+            ret.put("steps", Math.round(today));
+            ret.put("totalSinceReboot", Math.round(total));
+            ret.put("estimated", estimated);
+            return ret;
+        } catch (Throwable t) {
+            return toolFail("failed");
+        }
+    }
+
+    /**
+     * 当前运动状态（静止/步行/跑步/可能乘车）：加速度计采样 2.5s 幅值标准差 +
+     * 过零节奏（步频代理）启发式判定（国产 ROM 无 Google ActivityRecognitionClient，
+     * 加速度计是唯一普适通道；乘车与静坐手机放稳时物理不可区分——如实标注）。
+     */
+    @PluginMethod
+    public void getCurrentActivity(PluginCall call) {
+        if (!hasActivityRecognition()) {
+            call.resolve(toolFail("no-permission"));
+            return;
+        }
+        new Thread(() -> call.resolve(sampleActivity()), "activity-sample").start();
+    }
+
+    private JSObject sampleActivity() {
+        try {
+            android.hardware.SensorManager sm =
+                    (android.hardware.SensorManager) getContext().getSystemService(Context.SENSOR_SERVICE);
+            if (sm == null) return toolFail("no-sensor");
+            android.hardware.Sensor acc = sm.getDefaultSensor(android.hardware.Sensor.TYPE_ACCELEROMETER);
+            if (acc == null) return toolFail("no-sensor");
+
+            final Object lock = new Object();
+            final List<Float> mags = new ArrayList<>();
+            android.hardware.SensorEventListener listener = new android.hardware.SensorEventListener() {
+                @Override
+                public void onSensorChanged(android.hardware.SensorEvent event) {
+                    if (event.values == null || event.values.length < 3) return;
+                    float x = event.values[0], y = event.values[1], z = event.values[2];
+                    float mag = (float) Math.sqrt(x * x + y * y + z * z);
+                    synchronized (lock) {
+                        if (mags.size() < 2000) mags.add(mag);
+                    }
+                }
+
+                @Override
+                public void onAccuracyChanged(android.hardware.Sensor sensor, int accuracy) {
+                }
+            };
+            sm.registerListener(listener, acc, android.hardware.SensorManager.SENSOR_DELAY_GAME);
+            try {
+                Thread.sleep(2500L);
+            } catch (InterruptedException ignored) {
+            }
+            sm.unregisterListener(listener);
+
+            List<Float> samples;
+            synchronized (lock) {
+                samples = new ArrayList<>(mags);
+            }
+            if (samples.size() < 30) return toolFail("no-data");
+
+            // 幅值统计：均值（≈重力 9.8）+ 标准差 + 相对均值过零节奏（步频代理）
+            double sum = 0;
+            for (float v : samples) sum += v;
+            double mean = sum / samples.size();
+            double var = 0;
+            for (float v : samples) var += (v - mean) * (v - mean);
+            double std = Math.sqrt(var / samples.size());
+            int crossings = 0;
+            for (int i = 1; i < samples.size(); i++) {
+                if ((samples.get(i - 1) - mean) * (samples.get(i) - mean) < 0) crossings++;
+            }
+            double hz = crossings / 2.0 / 2.5;
+
+            String activity;
+            String detail;
+            if (std < 0.18) {
+                activity = "静止";
+                detail = "手机很稳（可能静坐/躺着，或乘车时放在支架上——这两种物理上区分不了）";
+            } else if (std < 1.6 && hz >= 1.3 && hz <= 2.8) {
+                activity = "步行";
+                detail = String.format(Locale.US, "有规律的脚步节奏（约 %.1f 步/秒）", hz);
+            } else if (std >= 1.6) {
+                activity = "跑步";
+                detail = String.format(Locale.US, "震动幅度大（波动 ±%.1f m/s²），在剧烈运动", std);
+            } else if (std < 0.6) {
+                activity = "可能乘车";
+                detail = "轻微持续颠簸（车身震动），也可能只是手持小幅晃动";
+            } else {
+                activity = "活动中";
+                detail = String.format(Locale.US, "有持续晃动（波动 ±%.1f m/s²）", std);
+            }
+
+            JSObject ret = new JSObject();
+            ret.put("ok", true);
+            ret.put("activity", activity);
+            ret.put("detail", detail);
+            ret.put("std", Math.round(std * 100) / 100.0);
+            ret.put("samples", samples.size());
+            return ret;
+        } catch (Throwable t) {
+            return toolFail("failed");
+        }
+    }
+
+    /**
+     * 昨晚睡眠估算（无健康数据接入时的诚实通道）：UsageStats 事件流里找
+     * 「昨晚最后一次亮屏使用 → 今早第一次亮屏使用」的长间隔。需「使用情况访问」权限。
+     */
+    @PluginMethod
+    public void getSleepData(PluginCall call) {
+        if (!checkUsagePermission()) {
+            call.resolve(toolFail("no-usage-permission"));
+            return;
+        }
+        try {
+            UsageStatsManager usm = (UsageStatsManager) getContext().getSystemService(Context.USAGE_STATS_SERVICE);
+            if (usm == null) {
+                call.resolve(toolFail("failed"));
+                return;
+            }
+            Calendar cal = Calendar.getInstance();
+            cal.add(Calendar.DAY_OF_MONTH, -1);
+            cal.set(Calendar.HOUR_OF_DAY, 18);
+            cal.set(Calendar.MINUTE, 0);
+            cal.set(Calendar.SECOND, 0);
+            long from = cal.getTimeInMillis();
+            long to = System.currentTimeMillis();
+
+            UsageEvents events = usm.queryEvents(from, to);
+            UsageEvents.Event ev = new UsageEvents.Event();
+            List<Long> activeTs = new ArrayList<>();
+            while (events.hasNextEvent()) {
+                events.getNextEvent(ev);
+                int t = ev.getEventType();
+                if (t == UsageEvents.Event.ACTIVITY_RESUMED
+                        || t == UsageEvents.Event.ACTIVITY_PAUSED
+                        || t == UsageEvents.Event.MOVE_TO_FOREGROUND) {
+                    activeTs.add(ev.getTimeStamp());
+                }
+            }
+            if (activeTs.size() < 2) {
+                call.resolve(toolFail("no-data"));
+                return;
+            }
+            java.util.Collections.sort(activeTs);
+            // 今早第一次使用：今天 04:00 后的第一条；昨晚最后一次使用：04:00 前的最后一条
+            Calendar m = Calendar.getInstance();
+            m.set(Calendar.HOUR_OF_DAY, 4);
+            m.set(Calendar.MINUTE, 0);
+            m.set(Calendar.SECOND, 0);
+            long morningGate = m.getTimeInMillis();
+            Long firstMorning = null;
+            long lastNight = -1;
+            for (Long ts : activeTs) {
+                if (ts >= morningGate) {
+                    firstMorning = ts;
+                    break;
+                }
+            }
+            for (Long ts : activeTs) {
+                if (ts < morningGate) lastNight = ts;
+            }
+            if (firstMorning == null || lastNight < 0 || firstMorning - lastNight < 3 * 3600_000L) {
+                JSObject ret = new JSObject();
+                ret.put("ok", true);
+                ret.put("found", false);
+                ret.put("note", "没能从手机使用记录里识别出昨晚一段连续 ≥3 小时的睡眠（可能熬夜到早上/数据不足）");
+                call.resolve(ret);
+                return;
+            }
+            long sleepMs = firstMorning - lastNight;
+            SimpleDateFormat hm = new SimpleDateFormat("HH:mm", Locale.getDefault());
+            JSObject ret = new JSObject();
+            ret.put("ok", true);
+            ret.put("found", true);
+            ret.put("sleepMinutes", Math.round(sleepMs / 60_000.0));
+            ret.put("from", hm.format(new Date(lastNight)));
+            ret.put("to", hm.format(new Date(firstMorning)));
+            ret.put("estimated", true);
+            call.resolve(ret);
+        } catch (Throwable t) {
+            call.resolve(toolFail("failed"));
+        }
+    }
+
+    // ---------------- 文件管理（公共目录白名单：Download / DCIM / Pictures / Music / Movies / Documents） ----------------
+
+    /** 公共目录白名单（文件工具只进这些顶层目录——绝不去翻应用私有目录） */
+    private static final String[] FILE_TOP_DIRS = {"Download", "DCIM", "Pictures", "Music", "Movies", "Documents"};
+
+    /**
+     * 规范化相对路径：去头尾 /、..，映射中文别名；返回白名单内的 "Top/Sub" 形态，非法返回 null。
+     * path 形如 "Download"、"下载/学习资料"、"DCIM/Camera"。
+     */
+    private String normalizePublicPath(String raw) {
+        if (raw == null) return "Download";
+        String p = raw.trim().replace("\\", "/");
+        while (p.startsWith("/")) p = p.substring(1);
+        while (p.endsWith("/")) p = p.substring(0, p.length() - 1);
+        if (p.isEmpty()) return "Download";
+        p = p.replace("下载", "Download").replace("相册", "DCIM").replace("照片", "DCIM")
+                .replace("图片", "Pictures").replace("音乐", "Music").replace("电影", "Movies")
+                .replace("视频", "Movies").replace("文档", "Documents");
+        if (p.contains("..")) return null; // 防目录穿越
+        int slash = p.indexOf('/');
+        String top = slash > 0 ? p.substring(0, slash) : p;
+        for (String d : FILE_TOP_DIRS) {
+            if (top.equalsIgnoreCase(d)) {
+                return slash > 0 ? d + "/" + p.substring(slash + 1) : d;
+            }
+        }
+        return null;
+    }
+
+    /** 列出公共目录文件：File API 直读 + MediaStore 兜底合并（API 33+ 其他应用的非媒体文件 File 不可见） */
+    @PluginMethod
+    public void listFiles(PluginCall call) {
+        String path = normalizePublicPath(call.getString("path", "Download"));
+        if (path == null) {
+            call.resolve(toolFail("bad-path", "只能看公共目录：Download(下载) / DCIM(相册) / Pictures / Music / Movies / Documents"));
+            return;
+        }
+        new Thread(() -> {
+            try {
+                Context ctx = getContext();
+                File dir = new File(Environment.getExternalStorageDirectory(), path);
+                List<String> names = new ArrayList<>();
+                JSArray items = new JSArray();
+                File[] children = dir.isDirectory() && dir.canRead() ? dir.listFiles() : null;
+                if (children != null) {
+                    java.util.Arrays.sort(children, (a, b) -> {
+                        if (a.isDirectory() != b.isDirectory()) return a.isDirectory() ? -1 : 1;
+                        return a.getName().compareToIgnoreCase(b.getName());
+                    });
+                    int n = 0;
+                    for (File f : children) {
+                        if (f.getName().startsWith(".")) continue;
+                        if (n++ >= 60) break;
+                        JSObject o = new JSObject();
+                        o.put("name", f.getName());
+                        o.put("dir", f.isDirectory());
+                        o.put("size", f.length());
+                        items.put(o);
+                        names.add(f.getName());
+                    }
+                }
+                // MediaStore 兜底（API 29+）：File 看不到的已索引文件补进来
+                if (Build.VERSION.SDK_INT >= 29 && items.length() < 60) {
+                    try {
+                        Cursor c = ctx.getContentResolver().query(
+                                MediaStore.Files.getContentUri("external"),
+                                new String[]{
+                                        MediaStore.MediaColumns.DISPLAY_NAME,
+                                        MediaStore.MediaColumns.SIZE,
+                                        MediaStore.MediaColumns.MIME_TYPE},
+                                MediaStore.MediaColumns.RELATIVE_PATH + " LIKE ?",
+                                new String[]{path + "/%"}, null);
+                        if (c != null) {
+                            while (c.moveToNext() && items.length() < 60) {
+                                String nm = c.getString(0);
+                                if (nm == null || names.contains(nm)) continue;
+                                names.add(nm);
+                                JSObject o = new JSObject();
+                                o.put("name", nm);
+                                o.put("dir", false);
+                                o.put("size", c.getLong(1));
+                                String mime = c.getString(2);
+                                if (mime != null) o.put("mime", mime);
+                                items.put(o);
+                            }
+                            c.close();
+                        }
+                    } catch (Throwable ignored) {
+                        // MediaStore 不可用：File 列表已够
+                    }
+                }
+                JSObject ret = new JSObject();
+                ret.put("ok", true);
+                ret.put("path", path);
+                ret.put("items", items);
+                if (items.length() == 0) {
+                    ret.put("note", "目录为空（或需要「媒体文件」权限才能看到其他应用保存的文件）");
+                }
+                call.resolve(ret);
+            } catch (Throwable t) {
+                call.resolve(toolFail("failed", "列目录失败：" + safeMsg(t)));
+            }
+        }, "list-files").start();
+    }
+
+    /** 读文本文件（≤256KB；二进制检测拒绝——图片/安装包读不出文字） */
+    @PluginMethod
+    public void readFileContent(PluginCall call) {
+        String path = normalizePublicPath(call.getString("path", ""));
+        if (path == null || path.equals("Download")) {
+            call.resolve(toolFail("bad-path", "要填完整文件路径（如「Download/笔记.txt」）；只能读公共目录：Download / DCIM / Pictures / Music / Movies / Documents"));
+            return;
+        }
+        final String fpath = path;
+        new Thread(() -> {
+            try {
+                File f = new File(Environment.getExternalStorageDirectory(), fpath);
+                byte[] data = null;
+                if (f.isFile() && f.canRead() && f.length() <= 256 * 1024) {
+                    try (java.io.FileInputStream fis = new java.io.FileInputStream(f)) {
+                        data = new byte[(int) f.length()];
+                        int read = fis.read(data);
+                        if (read < 0) read = 0;
+                        if (read < data.length) data = java.util.Arrays.copyOf(data, read);
+                    }
+                }
+                // MediaStore 兜底（File 不可见时按绝对路径查索引）
+                if (data == null && Build.VERSION.SDK_INT >= 29) {
+                    data = readViaMediaStore(f.getAbsolutePath());
+                }
+                if (data == null) {
+                    call.resolve(toolFail("not-found", "找不到或读不了这个文件（可能不存在/超过 256KB/需要「媒体文件」权限）——不确定文件名就先调 listFiles 看目录"));
+                    return;
+                }
+                // 二进制嗅探：含 \0 → 拒读
+                for (byte b : data) {
+                    if (b == 0) {
+                        call.resolve(toolFail("binary", "这是二进制文件（图片/音视频/安装包等），读不出文字内容"));
+                        return;
+                    }
+                }
+                String content;
+                try {
+                    content = new String(data, java.nio.charset.StandardCharsets.UTF_8);
+                } catch (Throwable t) {
+                    call.resolve(toolFail("binary", "这不是文本文件（编码解析失败）"));
+                    return;
+                }
+                // 控制字符占比过高也算二进制
+                int weird = 0;
+                int check = Math.min(content.length(), 2000);
+                for (int i = 0; i < check; i++) {
+                    char ch = content.charAt(i);
+                    if (ch < 9 || (ch > 13 && ch < 32)) weird++;
+                }
+                if (check > 0 && weird * 100 / check > 5) {
+                    call.resolve(toolFail("binary", "这不是文本文件（控制字符过多）"));
+                    return;
+                }
+                boolean truncated = content.length() > 16000;
+                JSObject ret = new JSObject();
+                ret.put("ok", true);
+                ret.put("path", fpath);
+                ret.put("size", data.length);
+                ret.put("content", truncated ? content.substring(0, 16000) + "\n…（内容过长已截断）" : content);
+                ret.put("truncated", truncated);
+                call.resolve(ret);
+            } catch (Throwable t) {
+                call.resolve(toolFail("failed", "读文件失败：" + safeMsg(t)));
+            }
+        }, "read-file").start();
+    }
+
+    /** MediaStore 按绝对路径读文件字节（API 29+；未索引返回 null） */
+    private byte[] readViaMediaStore(String absolutePath) {
+        Cursor c = null;
+        try {
+            c = getContext().getContentResolver().query(
+                    MediaStore.Files.getContentUri("external"),
+                    new String[]{MediaStore.MediaColumns._ID},
+                    MediaStore.MediaColumns.DATA + "=?",
+                    new String[]{absolutePath}, null);
+            if (c == null) return null;
+            if (!c.moveToFirst()) return null;
+            long id = c.getLong(0);
+            try (java.io.InputStream is = getContext().getContentResolver().openInputStream(
+                    MediaStore.Files.getContentUri("external", id))) {
+                if (is == null) return null;
+                java.io.ByteArrayOutputStream bos = new java.io.ByteArrayOutputStream();
+                byte[] buf = new byte[8192];
+                int n;
+                while ((n = is.read(buf)) > 0 && bos.size() <= 256 * 1024) bos.write(buf, 0, n);
+                return bos.toByteArray();
+            }
+        } catch (Throwable t) {
+            return null;
+        } finally {
+            if (c != null) {
+                try {
+                    c.close();
+                } catch (Throwable ignored) {
+                }
+            }
+        }
+    }
+
+    /** 存文本文件到「Download/AI Phone/」（API 29+ MediaStore 直写；旧系统 File 直写） */
+    @PluginMethod
+    public void saveTextToFile(PluginCall call) {
+        final String content = call.getString("content", "");
+        final String rawName = call.getString("filename", "");
+        if (content == null || content.isEmpty()) {
+            call.resolve(toolFail("bad-params", "缺正文内容（content）"));
+            return;
+        }
+        String name = rawName == null ? "" : rawName.trim();
+        if (name.isEmpty()) {
+            name = "AI保存-" + new SimpleDateFormat("MMdd-HHmmss", Locale.US).format(new Date()) + ".txt";
+        }
+        name = name.replace("/", "_").replace("\\", "_").replace(":", "_").replace("..", "_");
+        if (name.length() > 60) name = name.substring(0, 60);
+        final String fname = name;
+        new Thread(() -> {
+            try {
+                Context ctx = getContext();
+                byte[] bytes = content.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+                String savedPath;
+                if (Build.VERSION.SDK_INT >= 29) {
+                    android.content.ContentValues cv = new android.content.ContentValues();
+                    cv.put(MediaStore.MediaColumns.DISPLAY_NAME, fname);
+                    cv.put(MediaStore.MediaColumns.MIME_TYPE, "text/plain");
+                    cv.put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/AI Phone");
+                    cv.put(MediaStore.MediaColumns.IS_PENDING, 1);
+                    Uri uri = ctx.getContentResolver().insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, cv);
+                    if (uri == null) {
+                        call.resolve(toolFail("failed", "系统拒绝了写入下载目录"));
+                        return;
+                    }
+                    try (java.io.OutputStream os = ctx.getContentResolver().openOutputStream(uri)) {
+                        if (os == null) throw new IllegalStateException("无法打开输出流");
+                        os.write(bytes);
+                    }
+                    android.content.ContentValues done = new android.content.ContentValues();
+                    done.put(MediaStore.MediaColumns.IS_PENDING, 0);
+                    ctx.getContentResolver().update(uri, done, null, null);
+                    savedPath = "Download/AI Phone/" + fname;
+                } else {
+                    File dir = new File(Environment
+                            .getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "AI Phone");
+                    if (!dir.exists() && !dir.mkdirs()) {
+                        call.resolve(toolFail("failed", "创建下载子目录失败（存储权限）"));
+                        return;
+                    }
+                    File f = new File(dir, fname);
+                    try (java.io.FileOutputStream fos = new java.io.FileOutputStream(f)) {
+                        fos.write(bytes);
+                    }
+                    savedPath = "Download/AI Phone/" + fname;
+                }
+                JSObject ret = new JSObject();
+                ret.put("ok", true);
+                ret.put("path", savedPath);
+                ret.put("size", bytes.length);
+                call.resolve(ret);
+            } catch (Throwable t) {
+                call.resolve(toolFail("failed", "保存失败：" + safeMsg(t)));
+            }
+        }, "save-file").start();
+    }
+
+    // ---------------- 网络下载（系统 DownloadManager） ----------------
+
+    /** 系统下载器（DownloadManager）：把网络文件下到 Download/，完成后通知栏提示，AI 可告诉机主路径 */
+    @PluginMethod
+    public void downloadFile(PluginCall call) {
+        try {
+            final String url = call.getString("url", "");
+            String rawName = call.getString("filename", "");
+            if (url == null || !(url.startsWith("http://") || url.startsWith("https://"))) {
+                call.resolve(toolFail("bad-params", "缺合法下载地址（url，要 http/https 开头）"));
+                return;
+            }
+            String name = rawName == null ? "" : rawName.trim();
+            if (name.isEmpty()) {
+                int slash = url.lastIndexOf('/');
+                name = slash >= 0 && slash < url.length() - 1
+                        ? url.substring(slash + 1).split("\\?")[0] : "下载文件";
+                if (name.isEmpty() || name.length() > 60) name = "下载文件-" + System.currentTimeMillis();
+            }
+            name = name.replace("/", "_").replace("\\", "_").replace(":", "_");
+            android.app.DownloadManager.Request req = new android.app.DownloadManager.Request(Uri.parse(url));
+            req.setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, name);
+            req.setTitle(name);
+            req.setDescription("AI Phone 正在下载");
+            req.setNotificationVisibility(android.app.DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
+            req.setAllowedOverMetered(true);
+            req.setAllowedOverRoaming(true);
+            android.app.DownloadManager dm =
+                    (android.app.DownloadManager) getContext().getSystemService(Context.DOWNLOAD_SERVICE);
+            if (dm == null) {
+                call.resolve(toolFail("failed", "系统下载服务不可用"));
+                return;
+            }
+            long id = dm.enqueue(req);
+            JSObject ret = new JSObject();
+            ret.put("ok", true);
+            ret.put("id", id);
+            ret.put("path", "Download/" + name);
+            ret.put("note", "已交给系统下载器，完成后通知栏会提示；文件保存在 Download/" + name);
+            call.resolve(ret);
+        } catch (Throwable t) {
+            call.resolve(toolFail("failed", "下载启动失败：" + safeMsg(t)));
+        }
+    }
+
+    // ---------------- 系统设置跳转 + 网络状态 ----------------
+
+    /** 打开系统设置页（Wi-Fi/蓝牙/应用管理等，Settings.ACTION_* 标准 Intent 直跳——机主规格） */
+    @PluginMethod
+    public void openSystemSetting(PluginCall call) {
+        final String raw = call.getString("settingName", "");
+        String n = raw == null ? "" : raw.trim().toLowerCase(Locale.ROOT);
+        Intent i = null;
+        String label = raw;
+        if (n.contains("wifi") || n.contains("无线") || n.contains("wi-fi") || n.contains("wlan")) {
+            i = new Intent(Settings.ACTION_WIFI_SETTINGS);
+            label = "Wi-Fi 设置";
+        } else if (n.contains("蓝牙") || n.contains("bluetooth")) {
+            i = new Intent(Settings.ACTION_BLUETOOTH_SETTINGS);
+            label = "蓝牙设置";
+        } else if (n.contains("飞行") || n.contains("airplane")) {
+            i = new Intent(Settings.ACTION_AIRPLANE_MODE_SETTINGS);
+            label = "飞行模式";
+        } else if (n.contains("全部应用") || n.contains("所有应用") || n.contains("all app")) {
+            i = new Intent(Settings.ACTION_MANAGE_ALL_APPLICATIONS_SETTINGS);
+            label = "全部应用管理";
+        } else if (n.contains("应用") || n.contains("app") || n.contains("管理")) {
+            i = new Intent(Settings.ACTION_APPLICATION_SETTINGS);
+            label = "应用管理";
+        } else if (n.contains("通知") || n.contains("notification")) {
+            if (Build.VERSION.SDK_INT >= 26) {
+                i = new Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                        .putExtra(Settings.EXTRA_APP_PACKAGE, getContext().getPackageName());
+                label = "本应用通知设置";
+            } else {
+                i = new Intent(Settings.ACTION_APPLICATION_SETTINGS);
+                label = "应用管理";
+            }
+        } else if (n.contains("声音") || n.contains("音量") || n.contains("sound") || n.contains("volume")) {
+            i = new Intent(Settings.ACTION_SOUND_SETTINGS);
+            label = "声音设置";
+        } else if (n.contains("显示") || n.contains("亮度") || n.contains("display") || n.contains("brightness")) {
+            i = new Intent(Settings.ACTION_DISPLAY_SETTINGS);
+            label = "显示设置";
+        } else if (n.contains("电池") || n.contains("battery") || n.contains("省电")) {
+            i = new Intent(Settings.ACTION_BATTERY_SAVER_SETTINGS);
+            label = "电池设置";
+        } else if (n.contains("存储") || n.contains("storage") || n.contains("空间")) {
+            i = new Intent(Settings.ACTION_INTERNAL_STORAGE_SETTINGS);
+            label = "存储设置";
+        } else if (n.contains("位置") || n.contains("定位") || n.contains("location")) {
+            i = new Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS);
+            label = "位置信息设置";
+        } else if (n.contains("安全") || n.contains("security")) {
+            i = new Intent(Settings.ACTION_SECURITY_SETTINGS);
+            label = "安全设置";
+        } else if (n.contains("日期") || n.contains("时间") || n.contains("date")) {
+            i = new Intent(Settings.ACTION_DATE_SETTINGS);
+            label = "日期和时间";
+        } else if (n.contains("语言") || n.contains("locale") || n.contains("输入法")) {
+            i = new Intent(Settings.ACTION_LOCALE_SETTINGS);
+            label = "语言设置";
+        } else if (n.contains("无障碍") || n.contains("accessibility")) {
+            i = new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS);
+            label = "无障碍设置";
+        } else if (n.contains("勿扰") || n.contains("dnd") || n.contains("zen")) {
+            i = new Intent(Settings.ACTION_ZEN_MODE_PRIORITY_SETTINGS);
+            label = "勿扰模式";
+        } else if (n.contains("关于") || n.contains("about") || n.contains("本机")) {
+            i = new Intent(Settings.ACTION_DEVICE_INFO_SETTINGS);
+            label = "关于手机";
+        } else if (n.contains("桌面") || n.contains("主屏") || n.contains("home")) {
+            i = new Intent(Settings.ACTION_HOME_SETTINGS);
+            label = "桌面设置";
+        } else if (n.contains("投屏") || n.contains("cast")) {
+            i = new Intent(Settings.ACTION_CAST_SETTINGS);
+            label = "投屏设置";
+        } else if (n.contains("nfc")) {
+            i = new Intent(Settings.ACTION_NFC_SETTINGS);
+            label = "NFC";
+        } else if (n.contains("打印") || n.contains("print")) {
+            i = new Intent(Settings.ACTION_PRINT_SETTINGS);
+            label = "打印设置";
+        }
+        if (i == null) {
+            call.resolve(toolFail("unknown-setting", "不认识「" + raw + "」这个设置页；支持：wifi/蓝牙/飞行模式/应用管理/通知/声音/显示/电池/存储/位置/安全/日期时间/语言/无障碍/勿扰/关于手机/桌面/投屏/nfc/打印"));
+            return;
+        }
+        try {
+            final Intent fi = i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            final String flabel = label;
+            Context ctx = getContext();
+            boolean appVisible = MainActivity.isAppInForeground();
+            if (!appVisible) {
+                android.os.Handler main = new android.os.Handler(android.os.Looper.getMainLooper());
+                main.post(() -> {
+                    android.view.View bal = addBalExemptionOverlay();
+                    try {
+                        ctx.startActivity(fi);
+                    } finally {
+                        if (bal != null) main.postDelayed(() -> removeViewQuietly(bal), 800L);
+                    }
+                });
+            } else {
+                ctx.startActivity(fi);
+            }
+            JSObject ret = new JSObject();
+            ret.put("ok", true);
+            ret.put("setting", flabel);
+            call.resolve(ret);
+        } catch (Throwable t) {
+            call.resolve(toolFail("start-failed", "打开设置失败：" + safeMsg(t)));
+        }
+    }
+
+    /** 网络状态：Wi-Fi / 移动网络 / 断网 + 信号强度（Wi-Fi 格数 / 蜂窝制式与格数） */
+    @PluginMethod
+    public void getNetworkInfo(PluginCall call) {
+        try {
+            Context ctx = getContext();
+            android.net.ConnectivityManager cm =
+                    (android.net.ConnectivityManager) ctx.getSystemService(Context.CONNECTIVITY_SERVICE);
+            JSObject ret = new JSObject();
+            ret.put("ok", true);
+            if (cm == null) {
+                ret.put("type", "unknown");
+                ret.put("detail", "读不到网络服务");
+                call.resolve(ret);
+                return;
+            }
+            android.net.Network nw = cm.getActiveNetwork();
+            android.net.NetworkCapabilities caps = nw != null ? cm.getNetworkCapabilities(nw) : null;
+            boolean online = caps != null
+                    && caps.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET);
+            if (!online) {
+                ret.put("type", "offline");
+                ret.put("detail", "当前没有可用网络（Wi-Fi 和流量都没连）");
+                call.resolve(ret);
+                return;
+            }
+            boolean wifi = caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_WIFI);
+            boolean cell = caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_CELLULAR);
+            if (wifi) {
+                ret.put("type", "wifi");
+                StringBuilder d = new StringBuilder("Wi-Fi 已连接");
+                try {
+                    android.net.wifi.WifiManager wmgr = (android.net.wifi.WifiManager)
+                            ctx.getApplicationContext().getSystemService(Context.WIFI_SERVICE);
+                    if (wmgr != null) {
+                        int rssi = wmgr.getConnectionInfo().getRssi();
+                        int level = android.net.wifi.WifiManager.calculateSignalLevel(rssi, 5);
+                        ret.put("wifiLevel", level);
+                        String[] desc = {"很弱", "较弱", "一般", "良好", "满格"};
+                        d.append("（信号").append(desc[Math.max(0, Math.min(4, level))])
+                                .append("，").append(rssi).append(" dBm）");
+                        String ssid = wmgr.getConnectionInfo().getSSID();
+                        if (ssid != null) {
+                            String clean = ssid.replace("\"", "");
+                            if (!clean.isEmpty() && !"<unknown ssid>".equals(clean) && !clean.contains("unknown")) {
+                                ret.put("ssid", clean);
+                                d.append("，网络：").append(clean);
+                            }
+                        }
+                    }
+                } catch (Throwable ignored) {
+                    // Wi-Fi 详情拿不到不影响主结论
+                }
+                ret.put("detail", d.toString());
+            } else if (cell) {
+                ret.put("type", "cellular");
+                StringBuilder d = new StringBuilder("移动网络已连接");
+                try {
+                    android.telephony.TelephonyManager tm = (android.telephony.TelephonyManager)
+                            ctx.getSystemService(Context.TELEPHONY_SERVICE);
+                    if (tm != null) {
+                        String gen = "移动网络";
+                        try {
+                            int nt = tm.getDataNetworkType();
+                            gen = nt == android.telephony.TelephonyManager.NETWORK_TYPE_NR ? "5G"
+                                    : nt == android.telephony.TelephonyManager.NETWORK_TYPE_LTE ? "4G"
+                                    : nt == android.telephony.TelephonyManager.NETWORK_TYPE_HSDPA
+                                    || nt == android.telephony.TelephonyManager.NETWORK_TYPE_HSUPA
+                                    || nt == android.telephony.TelephonyManager.NETWORK_TYPE_HSPA
+                                    || nt == android.telephony.TelephonyManager.NETWORK_TYPE_EVDO_0
+                                    || nt == android.telephony.TelephonyManager.NETWORK_TYPE_EVDO_A ? "3G" : "2G";
+                        } catch (Throwable ignored) {
+                        }
+                        d.append("（").append(gen).append("）");
+                        ret.put("cellGen", gen);
+                        try {
+                            if (Build.VERSION.SDK_INT >= 28) {
+                                int lvl = tm.getSignalStrength().getLevel(); // 0-4
+                                ret.put("cellLevel", lvl);
+                                String[] desc = {"很弱", "较弱", "一般", "良好", "满格"};
+                                d.append("，信号").append(desc[Math.max(0, Math.min(4, lvl))]);
+                            }
+                        } catch (Throwable ignored) {
+                        }
+                    }
+                } catch (Throwable ignored) {
+                }
+                ret.put("detail", d.toString());
+            } else {
+                ret.put("type", "other");
+                ret.put("detail", "已联网（VPN/以太网等其他通道）");
+            }
+            call.resolve(ret);
+        } catch (Throwable t) {
+            call.resolve(toolFail("failed", "网络状态读取失败：" + safeMsg(t)));
+        }
+    }
+
+    /** 通用失败结构（ok:false + reason + detail 人话） */
+    private static JSObject toolFail(String reason, String detail) {
+        JSObject ret = new JSObject();
+        ret.put("ok", false);
+        ret.put("reason", reason);
+        if (detail != null) ret.put("detail", detail);
+        return ret;
+    }
+
+    private static JSObject toolFail(String reason) {
+        return toolFail(reason, null);
+    }
+
+    /** 异常消息安全提取 */
+    private static String safeMsg(Throwable t) {
+        return t.getMessage() == null ? t.getClass().getSimpleName() : t.getMessage();
     }
 
     /** v2.3.0：发送短信权限查询/申请（权限中心 + sendSMS 工具前置） */

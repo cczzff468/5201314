@@ -625,19 +625,35 @@ function syncJealousyGuard(pkg: string | null, unlockAt: number, charName: strin
   const cfg = getJealousyConfig();
   if (cfg.senseMode !== 'device') return; // 网页锁在网页内部，原生守护无意义
   const l = pkg ? readJealousyRuntime().lock : null;
-  void nativeJealousyGuardSyncLock(
-    pkg
-      ? {
-          pkg,
-          unlockAt,
-          charName,
-          // v2.2.0 拦截窗【去哄哄 TA】直达聊天：吃醋锁同样透传联系人身份
-          contactId: l?.contactId ?? undefined,
-          app: l?.app ?? undefined,
-          message: l?.reason ?? undefined,
-        }
-      : {},
-  ).catch(() => null);
+  if (!pkg) {
+    void nativeJealousyGuardSyncLock({}).catch(() => null);
+    return;
+  }
+  // v2.4.2 拦截窗头像：按联系人取对应 App 槽位头像（拿不到原生用角色名首字兜底）
+  void (async () => {
+    let avatar: string | undefined;
+    try {
+      if (l?.contactId) {
+        const { listContacts } = await import('./contacts-store');
+        const { avatarFor } = await import('@/lib/contacts');
+        const c = (await listContacts()).find((x) => x.id === l.contactId);
+        const slot = l.app === 'wx' ? 'wx' : l.app === 'qq' ? 'qq' : 'sms';
+        avatar = avatarFor(c ?? null, slot) ?? undefined;
+      }
+    } catch {
+      /* 头像拿不到不影响锁 */
+    }
+    await nativeJealousyGuardSyncLock({
+      pkg,
+      unlockAt,
+      charName,
+      // v2.2.0 拦截窗【去哄哄 TA】直达聊天：吃醋锁同样透传联系人身份
+      contactId: l?.contactId ?? undefined,
+      app: l?.app ?? undefined,
+      message: l?.reason ?? undefined,
+      avatar,
+    }).catch(() => null);
+  })();
 }
 
 /**

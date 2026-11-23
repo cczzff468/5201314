@@ -56,6 +56,40 @@ public class KeepAliveService extends Service {
         return START_STICKY;
     }
 
+    /**
+     * v2.4.2 根修（机主实测「从最近任务划掉 App 后，权限中心常驻守护显示未授权」）：
+     * 国产 ROM 从最近任务划掉 = 强杀进程，START_STICKY 的系统重建不可靠；这里在
+     * onTaskRemoved 里用 AlarmManager 定个 900ms 的「自杀闹钟」拉起本服务——
+     * 只要用户还开着守护开关（enabled），划掉后台一秒内自动复活，权限中心状态回真。
+     */
+    @Override
+    public void onTaskRemoved(Intent rootIntent) {
+        try {
+            if (isEnabled(this)) {
+                android.app.AlarmManager am = (android.app.AlarmManager) getSystemService(Context.ALARM_SERVICE);
+                Intent i = new Intent(this, KeepAliveService.class);
+                android.app.PendingIntent pi = android.app.PendingIntent.getService(
+                        this, 4451, i,
+                        android.os.Build.VERSION.SDK_INT >= 26
+                                ? android.app.PendingIntent.FLAG_IMMUTABLE | android.app.PendingIntent.FLAG_UPDATE_CURRENT
+                                : android.app.PendingIntent.FLAG_UPDATE_CURRENT);
+                long at = System.currentTimeMillis() + 900L;
+                if (android.os.Build.VERSION.SDK_INT >= 31) {
+                    try {
+                        am.setExactAndAllowWhileIdle(android.app.AlarmManager.RTC_WAKEUP, at, pi);
+                    } catch (SecurityException se) {
+                        am.setAndAllowWhileIdle(android.app.AlarmManager.RTC_WAKEUP, at, pi);
+                    }
+                } else {
+                    am.setAndAllowWhileIdle(android.app.AlarmManager.RTC_WAKEUP, at, pi);
+                }
+            }
+        } catch (Throwable ignored) {
+            // 自拉起失败（ROM 拦截）：交给 START_STICKY 兜底
+        }
+        super.onTaskRemoved(rootIntent);
+    }
+
     @Override
     public void onDestroy() {
         running = false;

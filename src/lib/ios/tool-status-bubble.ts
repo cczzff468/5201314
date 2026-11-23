@@ -190,6 +190,17 @@ export function toolStatusLabel(
     searchRealContact: '查真机通讯录',
     toggleFlashlight: '开关手电筒',
     getRealLocation: '查你的定位',
+    // v2.4.2 系统级工具矩阵扩展
+    getStepCount: '查你的步数',
+    getCurrentActivity: '识别你的运动状态',
+    getSleepData: '查你的睡眠',
+    listFiles: '看手机文件',
+    readFileContent: '读手机文件',
+    saveTextToFile: '保存文件到手机',
+    downloadFile: '下载文件',
+    openSystemSetting: target ? `打开${target}设置` : '打开系统设置',
+    getNetworkInfo: '查网络状态',
+    openApp: target ? `打开${target}` : '打开应用',
   };
 
   const action = actionMap[toolName] || `调用${toolName}`;

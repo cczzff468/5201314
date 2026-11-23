@@ -118,6 +118,30 @@ function decide(messages: Array<{ role: string; content: unknown }>): { text?: s
       ],
     };
   }
+  if (prompt.includes('查步数') || prompt.includes('走了多少步')) {
+    // v2.4.2 E2E：健康运动工具组（getStepCount 新工具注册 + 执行器分发验证）
+    return {
+      calls: [toolCall('call_steps_1', 'getStepCount', {})],
+    };
+  }
+  if (prompt.includes('打开WiFi设置') || prompt.includes('打开wifi设置')) {
+    // v2.4.2 E2E：系统设置跳转工具（openSystemSetting 新工具）
+    return {
+      calls: [toolCall('call_setting_1', 'openSystemSetting', { settingName: 'wifi' })],
+    };
+  }
+  if (prompt.includes('保存到手机')) {
+    // v2.4.2 E2E：saveTextToFile（AI 按人设主动存文件）
+    return {
+      calls: [toolCall('call_save_1', 'saveTextToFile', { content: '机主今天说想吃火锅', filename: '心愿清单.txt' })],
+    };
+  }
+  if (prompt.includes('查网络') || prompt.includes('wifi还是流量')) {
+    // v2.4.2 E2E：getNetworkInfo（网络状态新工具）
+    return {
+      calls: [toolCall('call_net_1', 'getNetworkInfo', {})],
+    };
+  }
   return { text: `收到：${prompt.slice(0, 40)}` };
 }
 
