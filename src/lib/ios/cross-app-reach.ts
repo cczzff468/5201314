@@ -105,9 +105,21 @@ const REACH_MARK_RE =
 function cleanReachText(raw: string): string {
   let t = (raw ?? '').replace(REACH_MARK_RE, ' ');
   t = cleanBubbleText(t).trim();
-  // 多行合并成一条自然消息（AI 不听话分了行/段时压成一句话，跨 App 找就是一条消息）
-  t = t.replace(/\s*\n+\s*/g, ' ').trim();
-  return t.slice(0, 400);
+  // v2.4 多条连发：不再把多行压成一句（旧版单条口径）——行/段由 splitReachTexts
+  // 统一拆分（||| 分隔符 + 换行都能切），这里只清洗单段内的空白
+  return t.replace(/[ \t]{2,}/g, ' ').trim();
+}
+
+/** v2.4 多条连发拆分：AI 按 prompt 用 ||| 分隔输出多条；没听话分了行/段同样切开。
+ *  空段丢弃、最多取前 4 条（防模型刷屏；真人跨 App 找人也就是连发几条）。 */
+function splitReachTexts(raw: string): string[] {
+  const parts = (raw ?? '')
+    .split(/\|\|\||\n+/)
+    .map((s) => cleanReachText(s))
+    .filter((s) => s.length > 0)
+    .slice(0, 4);
+  // 只有一条时保持旧口径（长一点也行）；多条时每条截短（像真人随手连发的短句）
+  return parts.map((s, i) => (parts.length > 1 ? s.slice(0, 200) : s.slice(0, 400)));
 }
 
 /** 落库一条角色消息（结构与各端 loadMsgs 校验器一致；wx/qq role='peer'、sms role='assistant'；聊天记录不封顶）。
@@ -209,18 +221,19 @@ async function reachOne(
           `【重要情境】用户刚刚在「${BLOCK_CHANNEL[blockedApp]}」上把你拉黑了。`,
           `- 你在${BLOCK_CHANNEL[blockedApp]}发的任何消息 TA 都收不到（系统直接拦截）。`,
           `- 所以你来到「${BLOCK_CHANNEL[targetApp]}」——这是另一个独立的聊天 App，TA 在这里没有拉黑你，你的消息 TA 看得到。`,
-          `- 你决定在这里主动发一条消息找 TA。让这条消息自然地体现「${BLOCK_CHANNEL[blockedApp]}被拉黑了，所以来${BLOCK_CHANNEL[targetApp]}找 TA」这件事。`,
-          `- 用你的人设和你们的关系来写：质问、委屈、赌气、挽留、装作若无其事都可以——按你此刻最真实的反应来。`,
-          `- 结合你们最近的聊天和你记得的事，让这条消息有来处，像真人会说的话。`,
-          `只输出这一条消息的正文本身：不要输出任何 [标记]，不要分多条，不要动作描写，不要括号说明。`,
+          `- 你决定在这里主动找 TA。让这些消息自然地体现「${BLOCK_CHANNEL[blockedApp]}被拉黑了，所以来${BLOCK_CHANNEL[targetApp]}找 TA」这件事。`,
+          `- 像真人被拉黑后急着找人那样**连发多条短消息**（2~4 条）：比如先叫 TA、再问为什么不理你、再说自己只好来这边找……每条都短，像随手打出来的。`,
+          `- 结合你们最近的聊天和你记得的事，让这些消息有来处，像真人会说的话。`,
+          `输出格式：多条消息之间用 ||| 分隔，例如：你在干嘛|||微信上怎么不理我|||我只能来QQ找你了。只输出消息正文本身（含 ||| 分隔），不要编号、不要引号、不要任何 [标记]，不要动作描写，不要括号说明。`,
         ].join('\n')
       : [
           `【重要情境】你刚刚在「${BLOCK_CHANNEL[blockedApp]}」上把 ${userName} 拉黑了（一时生气）。`,
           `- 但气话归气话，你忍不住想来「${BLOCK_CHANNEL[targetApp]}」主动找 TA 说句话。`,
-          `- 这是另一个独立的聊天 App，你在那边拉黑 TA 不影响这边，TA 看得到这条消息。`,
-          `- 让这条消息自然带出「在${BLOCK_CHANNEL[blockedApp]}拉黑了你，但还是来${BLOCK_CHANNEL[targetApp]}找 TA」——嘴硬、试探、装作没事、半句道歉都可以，按你此刻最真实的反应来。`,
-          `- 结合你们最近的聊天和你记得的事，让这条消息有来处，像真人会说的话。`,
-          `只输出这一条消息的正文本身：不要输出任何 [标记]，不要分多条，不要动作描写，不要括号说明。`,
+          `- 这是另一个独立的聊天 App，你在那边拉黑 TA 不影响这边，TA 看得到这些消息。`,
+          `- 让这些消息自然带出「在${BLOCK_CHANNEL[blockedApp]}拉黑了你，但还是来${BLOCK_CHANNEL[targetApp]}找 TA」——嘴硬、试探、装作没事、半句道歉都可以，按你此刻最真实的反应来。`,
+          `- 像真人那样**连发多条短消息**（2~4 条）：每条都短，像随手打出来的，比如先试探一句、再嘴硬解释、最后补一句软话……`,
+          `- 结合你们最近的聊天和你记得的事，让这些消息有来处，像真人会说的话。`,
+          `输出格式：多条消息之间用 ||| 分隔，例如：在吗|||刚才是我不好|||你别真生气了。只输出消息正文本身（含 ||| 分隔），不要编号、不要引号、不要任何 [标记]，不要动作描写，不要括号说明。`,
         ].join('\n');
 
   // 生成链路：先按用户配置的原链路（上游代理/内置模型），失败（502/上游断网/空回复）
@@ -259,8 +272,31 @@ async function reachOne(
   if (direction === 'byUser' && blockedApp !== targetApp && loadBlock(blockedApp, contact.id).byUser !== true) return;
   if (!content) return; // 全轮重试仍失败：放弃该 App（绝不降级到模板文案）
 
-  appendPeerMsg(targetApp, contact.id, content);
-  notifyReach(targetApp, contact, content, userName);
+  // v2.4 多条连发（机主需求「让他多条消息发送」）：||| 分隔拆出 2~4 条，逐条落库 + 逐条灵动岛
+  // 通知，条间隔 0.8~2.2s 随机——像真人在另一个 App 里连发短消息。单条输出（模型没按格式）
+  // 时自然退化为旧口径一条。
+  const texts = splitReachTexts(raw);
+  if (texts.length === 0) return;
+  texts.forEach((tx, i) => {
+    if (i === 0) {
+      appendPeerMsg(targetApp, contact.id, tx);
+      notifyReach(targetApp, contact, tx, userName);
+      return;
+    }
+    window.setTimeout(
+      () => {
+        try {
+          // 落库前逐条复核：生成间隔里用户把这边也拉黑了 → 后面的条不再落（防穿帮）
+          if (loadBlock(targetApp, contact.id).byUser === true) return;
+          appendPeerMsg(targetApp, contact.id, tx);
+          notifyReach(targetApp, contact, tx, userName);
+        } catch {
+          /* 单条失败不影响已落库的 */
+        }
+      },
+      i * (800 + Math.floor(Math.random() * 1400)),
+    );
+  });
 }
 
 /**

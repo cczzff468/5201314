@@ -147,18 +147,23 @@ import { cutUnfinishedMusicTag, runMusicRemote, takeMusicRemote, togetherLiveBlo
 import {
   acceptBlockReq,
   applyCharBlockAction,
+  applyCharUnblockApps,
   applyUserBlockReq,
   blockActionKindOf,
   blockCoversAt,
+  BLOCK_CHANNEL,
   BLOCK_REQ_MAX_REJECTED,
   buildBlockPromptBlock,
+  charReqDecisionOnlyOf,
   charRequestOnlyOf,
   isUserBlockIntent,
   loadBlock,
+  parseUnblockTargets,
   rejectBlockReq,
   resolveUserReqByChar,
   setUserBlock,
   userReqActionKindOf,
+  type BlockApp,
   type BlockEntry,
 } from '@/lib/ios/block-state';
 import { isProactiveCallOff } from '@/lib/ios/proactive-call';
@@ -1242,8 +1247,9 @@ export function ChatPage({
    *  全局通话层负责渲染通话页与悬浮小窗，宿主只关心把结果落成消息。 */
   const writeCallCard = useCallback(
     (r: ChatCallResult) => {
-      // 40-a 拉黑拦截：用户拉黑了该角色（byUser）后，通话结束卡片不再落库（AI 侧产物不进聊天记录）
-      if (loadBlock('qq', peer.id).byUser) return;
+      // 40-a 拉黑拦截：用户拉黑了该角色（byUser）后，通话结束卡片不再落库（AI 侧产物不进聊天记录）；
+      // v2.4 byChar 同口径：角色拉黑用户后 AI 侧产物（卡片/转写）同样不落库
+      if (loadBlock('qq', peer.id).byUser || loadBlock('qq', peer.id).byChar) return;
       const st = callResultToCardState(r);
       const card: QQMsg = {
         id: uid(),
@@ -1280,8 +1286,8 @@ export function ChatPage({
         window.setTimeout(() => {
           // L9：延迟窗口内发生换号 → 旧账号通话尾巴不再写进新账号聊天记录
           if (epoch !== qqSessionEpoch) return;
-          // 40-a 拉黑拦截：落库前再核一次（等待窗口内用户可能已拉黑）
-          if (loadBlock('qq', peer.id).byUser) return;
+          // 40-a 拉黑拦截：落库前再核一次（等待窗口内用户可能已拉黑）；v2.4 byChar 同口径
+          if (loadBlock('qq', peer.id).byUser || loadBlock('qq', peer.id).byChar) return;
           const msg: QQMsg = { id: uid(), role: 'peer', content: after, time: Date.now() };
           saveMsgs(peer.id, [...loadMsgs(peer.id), msg]);
           setMsgs((prev) => (prev.some((m) => m.id === msg.id) ? prev : [...prev, msg]));
@@ -1296,8 +1302,8 @@ export function ChatPage({
    *  文字已随通话转写一并沉淀记忆（chat-call 引擎），这里只负责呈现与持久化（照常进后续 AI 上下文） */
   const sendCallFollowup = useCallback(
     (texts: string[]) => {
-      // 40-a 拉黑拦截：用户拉黑了该角色（byUser）后，挂断续聊文字不再落库
-      if (loadBlock('qq', peer.id).byUser) return;
+      // 40-a 拉黑拦截：用户拉黑了该角色（byUser）后，挂断续聊文字不再落库；v2.4 byChar 同口径
+      if (loadBlock('qq', peer.id).byUser || loadBlock('qq', peer.id).byChar) return;
       // L9 换号防串号：调度时刻捕获会话纪元，各条延迟回调执行时比对失配则跳过写入
       const epoch = qqSessionEpoch;
       texts.forEach((t, i) => {
@@ -1305,8 +1311,8 @@ export function ChatPage({
           () => {
             // L9：连发间隔内发生换号 → 旧账号通话尾巴不再写进新账号聊天记录
             if (epoch !== qqSessionEpoch) return;
-            // 40-a 拉黑拦截：落库前再核一次（连发间隔内用户可能已拉黑）
-            if (loadBlock('qq', peer.id).byUser) return;
+            // 40-a 拉黑拦截：落库前再核一次（连发间隔内用户可能已拉黑）；v2.4 byChar 同口径
+            if (loadBlock('qq', peer.id).byUser || loadBlock('qq', peer.id).byChar) return;
             const msg: QQMsg = { id: uid(), role: 'peer', content: t, time: Date.now() };
             saveMsgs(peer.id, [...loadMsgs(peer.id), msg]);
             setMsgs((prev) => (prev.some((m) => m.id === msg.id) ? prev : [...prev, msg]));
@@ -1470,7 +1476,7 @@ export function ChatPage({
       // [语音通话] 标记只对「本次投递批次」有效——旧实现残留 true 会让后续不带标记的
       // bg 回复也凭空触发来电。判定/调度完成即复位；带标记的正常触发先完成调度再清，不受影响
       try {
-        if (wantCallSeenRef.current && !requestOnly && !loadBlock('qq', peer.id).byUser) {
+        if (wantCallSeenRef.current && !requestOnly && !loadBlock('qq', peer.id).byUser && !loadBlock('qq', peer.id).byChar) {
           // C3：off 档拦截（用户关闭「AI 主动来电」时标记来电不再真的拨出）+ 统一来电守卫互查
           if (isProactiveCallOff()) return;
           if (recentAiCallWithin(peer.id)) return;
@@ -1509,7 +1515,7 @@ export function ChatPage({
         //（qq-videocall-last:*，与语音 qq-vc-last:* 互不挤占），幂等防御/换号纪元挡板照抄语音块；
         // 来电快照与全局会话都带 media='video'：IncomingCallLayer 横幅显示「邀请你视频通话」+视频接听图标，
         // GlobalCallLayer 渲染视频通话页。QQ 不用 hiddenView（与语音来电同款可见路径）
-        if (wantVideoCallSeenRef.current && !requestOnly && !loadBlock('qq', peer.id).byUser) {
+        if (wantVideoCallSeenRef.current && !requestOnly && !loadBlock('qq', peer.id).byUser && !loadBlock('qq', peer.id).byChar) {
           // C3：off 档拦截 + 统一来电守卫互查（同语音块口径）
           if (isProactiveCallOff()) return;
           if (recentAiCallWithin(peer.id)) return;
@@ -1872,11 +1878,31 @@ export function ChatPage({
             if (res.changed && bk === 'block') {
               out.push({ id: uid(), role: 'peer', content: '', time: t, kind: 'sys', sys: { text: `你已被「${peer.name}」拉黑` } });
               t += 1;
-            } else if (res.changed && bk === 'unblock') {
-              out.push({ id: uid(), role: 'peer', content: '', time: t, kind: 'sys', sys: { text: `「${peer.name}」解除了对你的拉黑` } });
-              t += 1;
-              // 40-a：角色主动解除拉黑 = 视同同意用户侧待处理申请（有的话置终态，避免卡片永远「等待对方处理」）
-              settleUserBlockReq('accepted');
+            } else if (bk === 'unblock') {
+              // v2.4 跨 App 解除：[解除拉黑:微信]/[解除拉黑:全部]（例：微信被拉黑后用户来 QQ 求和，
+              // 角色在 QQ 输出 [解除拉黑:微信] 解除微信拉黑）；每解除一端在本会话落一条系统行
+              if (res.changed) {
+                out.push({ id: uid(), role: 'peer', content: '', time: t, kind: 'sys', sys: { text: `「${peer.name}」解除了对你的拉黑` } });
+                t += 1;
+                // 40-a：角色主动解除拉黑 = 视同同意用户侧待处理申请（有的话置终态，避免卡片永远「等待对方处理」）
+                settleUserBlockReq('accepted');
+              }
+              const parsed = parseUnblockTargets(part.action.targetId);
+              const targetApps = parsed === 'all' ? (['wx', 'qq', 'sms'] as BlockApp[]) : parsed;
+              if (targetApps) {
+                const done = applyCharUnblockApps(peer.id, targetApps.filter((a) => a !== 'qq'));
+                for (const app of done) {
+                  out.push({
+                    id: uid(),
+                    role: 'peer',
+                    content: '',
+                    time: t,
+                    kind: 'sys',
+                    sys: { text: `「${peer.name}」解除了你在${BLOCK_CHANNEL[app]}上被拉黑的状态` },
+                  });
+                  t += 1;
+                }
+              }
             } else if (res.reqCreated && bk === 'request') {
               out.push({ id: uid(), role: 'peer', content: '', time: t, kind: 'blockreq', blkreq: { reason: res.entry.reqReason ?? '', status: 'pending' } });
               t += 1;
@@ -1905,8 +1931,9 @@ export function ChatPage({
           // 40-a 拉黑破口修复（与微信单聊同构）：仅申请卡模式（用户拉黑角色，requestOnly）下，
           // 除上面放行的拉黑类标记（blockActionKindOf/userReqActionKindOf）外的所有动作标记
           //（资金/建群/邀请/退群挽留/视觉等）一律丢弃不执行——该模式下正文已被下方 continue 拦截，
-          // 动作若照常执行会绕过拉黑语义（被拉黑还能动钱/建群）。现场读拉黑状态防回合内变更
-          if (loadBlock('qq', peer.id).byUser) continue;
+          // 动作若照常执行会绕过拉黑语义（被拉黑还能动钱/建群）。现场读拉黑状态防回合内变更。
+          // v2.4 byChar 决策模式同口径：拉黑期间 AI 只能输出拉黑类标记，其它动作一律丢弃
+          if (loadBlock('qq', peer.id).byUser || loadBlock('qq', peer.id).byChar) continue;
           // 退群挽留动作（[拉回群聊]/[设为管理员]/[转让群主]/[放弃邀请]）优先分流给 quit-flow 执行
           //（权限/配额在 quit-flow 内硬校验；返回 false 说明没有活跃流程，继续走卡片动作）
           if (isQuitWinbackAction(part.action)) {
@@ -1954,7 +1981,7 @@ export function ChatPage({
           // 拉黑（仅申请卡模式）下与资金/视觉标记同口径拦截——拉黑期间 AI 不许动手机。
           if (part.action.kind === 'phone-op') {
             const argText = part.action.targetId.trim();
-            if (argText && !loadBlock('qq', peer.id).byUser) {
+            if (argText && !loadBlock('qq', peer.id).byUser && !loadBlock('qq', peer.id).byChar) {
               musicActedRef.current = true; // 纯动作回复（无正文）不落空回复失败徽标（与播控同口径）
               const cmdName = argText.split(/[:：]/)[0] ?? '';
               out.push({ id: uid(), role: 'peer', content: '', time: t, kind: 'sys', sys: { text: `「${peer.name}」正在操作手机（${cmdName}）…` } });
@@ -2172,8 +2199,9 @@ export function ChatPage({
           continue;
         }
         // 40-a：仅申请卡模式（用户拉黑了角色）——AI 的正文/表情一律丢弃，只有上面动作分支产出的
-        // 申请卡片与系统行能落盘（入口守卫已保证：能走到这里的 byUser 回合必然处于可申请状态）
-        if (loadBlock('qq', peer.id).byUser) continue;
+        // 申请卡片与系统行能落盘（入口守卫已保证：能走到这里的 byUser 回合必然处于可申请状态）。
+        // v2.4 byChar 决策模式同口径：拉黑中角色说不出话，正文一律丢弃，只有决策标记产出的系统行能落盘
+        if (loadBlock('qq', peer.id).byUser || loadBlock('qq', peer.id).byChar) continue;
         // #42：下方 segs/stripEmojiText 仅正常模式（byUser=false）执行——byUser continue 上面已拦，
         // 不再在三元里再判 byUser；保留 stickersOnNow 三元用于表情开关关闭时剥 emoji
         const segs = mergeRichSegments(splitReplySegments(part.text, !asSingle));
@@ -2273,17 +2301,22 @@ export function ChatPage({
     // 40-a 拉黑拦截（第一层）：用户拉黑角色（byUser）后，本 App 内 AI 不能发任何消息——回合静默取消。
     // 唯一例外=「解除拉黑申请卡片」仍可发起（charRequestOnlyOf 放行模式：回合照常请求，但回复中
     // 除申请卡片/系统行外的正文由 buildReplyMsgs 丢弃）；申请同意后的回应回合因 byUser 已清自然放行。
-    //（密友值也不计：回合被取消 = 没有互动发生）
+    //（密友值也不计：回合被取消 = 没有互动发生）。
+    // v2.4 byChar 拦截（微信真实语义）：角色拉黑用户后 AI 普通消息同样发不出（用户收不到）；
+    // 唯一放行=用户发来「解除拉黑申请」pending 中（charReqDecisionOnlyOf 决策回合：正文丢弃，
+    // 只留同意/拒绝/解除拉黑标记与系统行）。用户普通消息照常落库但根本不触发回合（send 入口拦）。
     const blkEntry = loadBlock('qq', peer.id);
     if (blkEntry.byUser && !charRequestOnlyOf(blkEntry)) return;
+    if (blkEntry.byChar && !charReqDecisionOnlyOf(blkEntry)) return;
     // 40-b：跨 App/群聊近况刷新（fire-and-forget，供下一轮使用；本轮用预热缓存）
     void buildCrossContextBlocks(peer.id, 'qq', me.realName || me.name)
       .then((b) => {
         crossCtxRef.current = b;
       })
       .catch(() => {});
-    // 40-a：本轮是否处于「仅申请卡」放行模式（byUser 命中且守卫放行）——finalize 不落兑底占位
-    const requestOnly = blkEntry.byUser === true;
+    // 40-a：本轮是否处于「仅申请卡」放行模式（byUser 命中且守卫放行）——finalize 不落兑底占位；
+    // v2.4 byChar 决策模式同口径（正文丢弃时空回复不打失败徽标）
+    const requestOnly = blkEntry.byUser === true || blkEntry.byChar === true;
     // 密友值：对照 QQ 规则，我方每发一条消息 +2（每日上限 20）；批次触发（null）同样计一轮互动
     addBondPoints(peer.id, BOND_MSG_POINTS);
     // base 按 id 去重（保留后出现者）：extra/userMsg 里的消息通常已先一步进了 msgs state，
@@ -3278,10 +3311,22 @@ export function ChatPage({
   const send = useCallback(async () => {
     const text = input.trim();
     const staged = pendingImgsRef.current;
-    // 40-a 拉黑拦截：被角色拉黑（byChar）后本 App 内不能发送任何消息（toast + 不落库）；
-    // 唯一例外是「解除拉黑申请」，走输入区上方独立入口，不在 send 链上
-    if (loadBlock('qq', peer.id).byChar) {
-      onToast('对方已将你拉黑，无法发送');
+    // v2.4 byChar 新语义（微信真实拒收）：被角色拉黑后消息照发照显示（气泡红 ! + 「消息已发出，
+    // 但被对方拒收了」提示行），但角色收不到——不触发 AI 回合、不排队、不解析提醒指令。
+    // 唯一例外是「解除拉黑申请」，走输入区上方独立入口，不在 send 链上。
+    if (peer.id !== me.id && loadBlock('qq', peer.id).byChar) {
+      if (text || staged.length > 0) {
+        const blkMsg: QQMsg | null = text
+          ? { id: uid(), role: 'me', content: text, time: Date.now(), quote: quote ?? undefined, unread: true }
+          : null;
+        const blkImgs: QQMsg[] = staged.map((p) => ({ id: uid(), role: 'me', content: p.src, time: Date.now(), kind: 'image', unread: true }));
+        pendingImgsRef.current = [];
+        setPendingImgs([]);
+        setInput('');
+        clearChatDraft('qq', peer.id);
+        setQuote(null);
+        setMsgs((prev) => [...qqMarkPeerRead(prev), ...(blkMsg ? [blkMsg] : []), ...blkImgs]);
+      }
       return;
     }
     // 预览条还有待发图、输入框没文字：只发图（照原 flushPendingImages 口径）
@@ -3421,11 +3466,6 @@ export function ChatPage({
    *  presetTranscript = 文字转语音/划转文字/Web Speech 实时结果；selfChat 只记录；回复中排队补跑 */
   const commitVoiceMsg = useCallback(
     (clip: VoiceClip, presetTranscript?: string) => {
-      // 40-a 拉黑拦截：被角色拉黑（byChar）后语音消息也不能发（按住说话/文字转语音/划转文字共用本入口）
-      if (loadBlock('qq', peer.id).byChar) {
-        onToast('对方已将你拉黑，无法发送');
-        return;
-      }
       const hasText = typeof presetTranscript === 'string' && presetTranscript.trim().length > 0;
       const voice: VoiceMsgData = hasText
         ? { url: clip.dataUrl, duration: clip.duration, wave: clip.wave, localText: clip.localText, transcript: presetTranscript, stt: 'done' }
@@ -3434,6 +3474,9 @@ export function ChatPage({
       setMsgs((prev) => [...qqMarkPeerRead(prev), msg]);
       // 给自己发消息（「我」详情页入口）：只记录，不触发 AI 回复
       if (peer.id === me.id) return;
+      // v2.4 byChar 新语义（微信拒收）：被角色拉黑后语音照常落库（气泡红 ! + 拒收行），
+      // 但角色收不到——不转写、不触发回合、不排队
+      if (loadBlock('qq', peer.id).byChar) return;
       /** 触发 AI 回复（对方正在回复——流式或连发投递中——则排队补跑）；转写完成后再触发，AI 才能读到语音内容 */
       const kickTurn = () => {
         if (isChatStreaming(sessionKey) || isAiDelivering(sessionKey)) {
@@ -3466,13 +3509,13 @@ export function ChatPage({
   /** 「划到转文字」松开后：先识别再预览，由用户决定发送文字 / 发送语音（原始录音）/ 取消 */
   const sttPreview = useSttPreview({
     onSendText: (text) => {
-      // 40-a 拉黑拦截：被角色拉黑（byChar）后不能发送
-      if (loadBlock('qq', peer.id).byChar) {
-        onToast('对方已将你拉黑，无法发送');
-        return;
-      }
       const userMsg: QQMsg = { id: uid(), role: 'me', content: text, time: Date.now(), unread: true };
       if (peer.id === me.id) {
+        setMsgs((prev) => [...qqMarkPeerRead(prev), userMsg]);
+        return;
+      }
+      // v2.4 byChar 新语义（微信拒收）：被角色拉黑后文字照常落库（气泡红 ! + 拒收行），不触发回合
+      if (loadBlock('qq', peer.id).byChar) {
         setMsgs((prev) => [...qqMarkPeerRead(prev), userMsg]);
         return;
       }
@@ -5322,7 +5365,7 @@ export function ChatPage({
         <>
         {/* 40-a：被角色拉黑提示条 + 用户发起「解除拉黑申请」入口（pending 或已达拒绝上限时隐藏，
             会话内改用跨 App/电话联系方式不受影响）。展开的小面板 = 理由输入 + 发送/取消 */}
-        {blk.byChar === true && blk.userReqStatus !== 'pending' && (blk.userReqRejectedCount ?? 0) < BLOCK_REQ_MAX_REJECTED && (
+        {blk.byChar === true && (blk.userReqRejectedCount ?? 0) < BLOCK_REQ_MAX_REJECTED && (
           userReqOpen ? (
             <div className="px-3 pb-1 pt-2" data-testid="qq-user-blockreq-panel">
               <div className="flex items-center gap-2 rounded-[10px] border border-black/[0.07] bg-[#F6F7F8] px-2.5 py-1.5 dark:border-white/[0.08] dark:bg-white/[0.07]">

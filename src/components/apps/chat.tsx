@@ -80,18 +80,23 @@ import { splitVisionDesc } from '@/lib/vision-client';
 import {
   acceptBlockReq,
   applyCharBlockAction,
+  applyCharUnblockApps,
   applyUserBlockReq,
   blockActionKindOf,
   blockCoversAt,
+  BLOCK_CHANNEL,
   BLOCK_REQ_MAX_REJECTED,
   buildBlockPromptBlock,
+  charReqDecisionOnlyOf,
   charRequestOnlyOf,
   isUserBlockIntent,
   loadBlock,
+  parseUnblockTargets,
   rejectBlockReq,
   resolveUserReqByChar,
   setUserBlock,
   userReqActionKindOf,
+  type BlockApp,
   type BlockEntry,
 } from '@/lib/ios/block-state';
 import { getTimeAware, setTimeAware, buildTimeAwareBlock } from '@/lib/time-aware';
@@ -494,8 +499,8 @@ async function recordMissedPhoneCall(
   }
   if (!contact) return;
   // 40-a 拉黑拦截：用户拉黑了该角色（byUser）后，被拒/未接的 AI 语音留言不再落库
-  //（通话记录本身属于电话维度照常落；这里只拦「AI 发到留言信箱的聊天内容」）
-  if (loadBlock('sms', contact.id).byUser) return;
+  //（通话记录本身属于电话维度照常落；这里只拦「AI 发到留言信箱的聊天内容」）；v2.4 byChar 同口径
+  if (loadBlock('sms', contact.id).byUser || loadBlock('sms', contact.id).byChar) return;
   try {
     const [owner, recent] = await Promise.all([
       ownerProfile().catch(() => null),
@@ -1725,7 +1730,7 @@ function ChatView({
       // 40-a 拉黑拦截（#2，对齐微信/QQ 同类修复）：仅申请卡模式（byUser）时标记不进 wantCallSeen——
       // 正文在下方被整段丢弃，来电若照常弹出会绕过拉黑语义；bg-turn 接力投递共用本管线同守卫
       const wantCall = hasVoiceCallMark(rawText);
-      if (wantCall && wbContactId && !loadBlock('sms', wbContactId).byUser) wantCallSeenRef.current = true;
+      if (wantCall && wbContactId && !loadBlock('sms', wbContactId).byUser && !loadBlock('sms', wbContactId).byChar) wantCallSeenRef.current = true;
       // 深度思考兜底剥离（bg 关页接力等绕过流总线的路径拿到整段原文时，[思考]块就地剥掉防泄漏进气泡；
       // 流式路径正文早已在 chat-stream-store 剥过，这里天然为 no-op）：思考内容累积到本轮上下文，投递完回填
       const tkParts = extractThinkBlocks(rawText);
@@ -1746,12 +1751,26 @@ function ChatView({
               out.push({ id: `${idBase}-sys-${msgIdx}`, role: 'assistant', content: '', time: t, sys: { text: `你已被「${peerLabel}」拉黑` } });
               t += 1;
               msgIdx += 1;
-            } else if (res.changed && bk === 'unblock') {
-              out.push({ id: `${idBase}-sys-${msgIdx}`, role: 'assistant', content: '', time: t, sys: { text: `「${peerLabel}」解除了对你的拉黑` } });
-              t += 1;
-              msgIdx += 1;
-              // 40-a：角色主动解除拉黑 = 视同同意用户侧待处理申请（有的话置终态，避免卡片永远「等待对方处理」）
-              settleUserBlockReq('accepted');
+            } else if (bk === 'unblock') {
+              // v2.4 跨 App 解除：[解除拉黑:微信]/[解除拉黑:全部]（例：微信被拉黑后来信息求和，
+              // 角色在这里输出 [解除拉黑:微信] 解除微信拉黑）；每解除一端在本会话落一条系统行
+              if (res.changed) {
+                out.push({ id: `${idBase}-sys-${msgIdx}`, role: 'assistant', content: '', time: t, sys: { text: `「${peerLabel}」解除了对你的拉黑` } });
+                t += 1;
+                msgIdx += 1;
+                // 40-a：角色主动解除拉黑 = 视同同意用户侧待处理申请（有的话置终态，避免卡片永远「等待对方处理」）
+                settleUserBlockReq('accepted');
+              }
+              const parsed = parseUnblockTargets(part.action.targetId);
+              const targetApps = parsed === 'all' ? (['wx', 'qq', 'sms'] as BlockApp[]) : parsed;
+              if (targetApps && wbContactId) {
+                const done = applyCharUnblockApps(wbContactId, targetApps.filter((a) => a !== 'sms'));
+                for (const app of done) {
+                  out.push({ id: `${idBase}-sys-${msgIdx}`, role: 'assistant', content: '', time: t, sys: { text: `「${peerLabel}」解除了你在${BLOCK_CHANNEL[app]}上被拉黑的状态` } });
+                  t += 1;
+                  msgIdx += 1;
+                }
+              }
             } else if (res.reqCreated && bk === 'request') {
               out.push({ id: `${idBase}-blk-${msgIdx}`, role: 'assistant', content: '', time: t, blkreq: { reason: res.entry.reqReason ?? '', status: 'pending' } });
               t += 1;
@@ -1778,8 +1797,9 @@ function ChatView({
           }
           // 40-a 拉黑拦截（#30，对齐微信 fix-wechat B 的收窄）：仅申请卡模式（byUser）下动作标记
           // 只放行拉黑类（bk/uk 已在上方处理）——视觉等其余标记一律丢弃不执行，
-          // 否则拉黑期间 AI 仍能真实改头像/写视觉决策
-          if (wbContactId && loadBlock('sms', wbContactId).byUser) continue;
+          // 否则拉黑期间 AI 仍能真实改头像/写视觉决策。
+          // v2.4 byChar 决策模式同口径：拉黑期间 AI 只能输出拉黑类标记
+          if (wbContactId && (loadBlock('sms', wbContactId).byUser || loadBlock('sms', wbContactId).byChar)) continue;
           // v1.3 Shizuku 自主权（[手机操作:命令:参数]）：AI 真实操控手机（点按/滑动/打开App/强杀/媒体/截屏…）。
           // 执行异步（1~3s）：占位系统行同步入列（防空回复失败徽标），结果行完成后落盘回传 AI。
           // 开关 gate 在 executePhoneOp 内（系统设置 → AI 动手，关了直接拒）。
@@ -1845,8 +1865,9 @@ function ChatView({
           continue; // 信息端无红包/转账动作
         }
         // 40-a：仅申请卡模式（用户拉黑了角色）——AI 的正文/表情一律丢弃，只有上面动作分支产出的
-        // 申请卡片与系统行能落盘（入口守卫已保证：能走到这里的 byUser 回合必然处于可申请状态）
-        if (wbContactId && loadBlock('sms', wbContactId).byUser) continue;
+        // 申请卡片与系统行能落盘（入口守卫已保证：能走到这里的 byUser 回合必然处于可申请状态）。
+        // v2.4 byChar 决策模式同口径：拉黑中角色说不出话，正文一律丢弃
+        if (wbContactId && (loadBlock('sms', wbContactId).byUser || loadBlock('sms', wbContactId).byChar)) continue;
         // #42：下方 segs 清洗仅正常模式（byUser=false）执行——byUser continue 上面已拦；
         // 信息端表情包开关已移除 → 回复文字保留原文（不再剥 emoji）
         // 生图（锁脸）：先从文本剥出 [照片:描述] 标签（入队 photoJobsRef，flushPhotoJobs 异步生成投递）；
@@ -1933,8 +1954,11 @@ function ChatView({
     // 唯一例外=「解除拉黑申请卡片」仍可发起（charRequestOnlyOf 放行模式：回合照常请求，但回复中
     // 除申请卡片/系统行外的正文由 buildReplyMsgs 丢弃）；申请同意后的回应回合因 byUser 已清自然放行。
     // 小助手会话（wbContactId 为空）不参与拉黑；群聊不用本组件（wx-group/qq-group 自有管线）。
+    // v2.4 byChar 拦截（微信真实语义）：角色拉黑用户后 AI 普通消息同样发不出；唯一放行=
+    // 用户发来「解除拉黑申请」pending 中（charReqDecisionOnlyOf 决策回合：正文丢弃，只留决策标记）。
     const blkEntry = wbContactId ? loadBlock('sms', wbContactId) : null;
     if (blkEntry?.byUser && !charRequestOnlyOf(blkEntry)) return;
+    if (blkEntry?.byChar && !charReqDecisionOnlyOf(blkEntry)) return;
     // 40-b：跨 App/群聊近况刷新（fire-and-forget，供下一轮使用；本轮用预热缓存；仅联系人会话）
     if (memContactId) {
       void buildCrossContextBlocks(memContactId, 'sms', profileName)
@@ -1952,8 +1976,9 @@ function ChatView({
         })
         .catch(() => {});
     }
-    // 40-a：本轮是否处于「仅申请卡」放行模式（byUser 命中且守卫放行）——finalize 不落兑底占位
-    const requestOnly = blkEntry?.byUser === true;
+    // 40-a：本轮是否处于「仅申请卡」放行模式（byUser 命中且守卫放行）——finalize 不落兑底占位；
+    // v2.4 byChar 决策模式同口径（正文丢弃时空回复不打失败徽标）
+    const requestOnly = blkEntry?.byUser === true || blkEntry?.byChar === true;
     // #35 上下文补投递尾巴（群聊 #22 已修，单聊同款）：上一轮的回复还在打字节奏投递队列里（未落盘）时，
     // 只读 msgs state 会漏看——AI 看不到自己刚说的话，把旧话题再答一遍（自言自语/像没读到用户最新消息）。
     // 队列尾巴按序拼进 base（时序上属于上一轮，排在最新用户消息之前）；同一消息要么已落盘/进 state、
@@ -2384,8 +2409,9 @@ function ChatView({
           // AI 主动打来电话（标记可能出现在流中任一分段）：剥除后按 5 分钟冷却弹出来电——
           // 全局胶囊弹窗 + iOS 全屏来电界面（PhoneShell › IncomingCallLayer），任何界面都会被覆盖。
           // 拉黑破口修复（#2，对齐 qq.tsx 同款）：仅申请卡模式（requestOnly）不弹真实来电；
-          // 触发时现场重读拉黑状态防回合内变更（收集点守卫只挡回合开始时的状态）
-          if (wantCallSeenRef.current && memContactId && !requestOnly && !loadBlock('sms', memContactId).byUser) {
+          // 触发时现场重读拉黑状态防回合内变更（收集点守卫只挡回合开始时的状态）；
+          // v2.4 byChar 同口径：角色拉黑用户后来电同样不弹
+          if (wantCallSeenRef.current && memContactId && !requestOnly && !loadBlock('sms', memContactId).byUser && !loadBlock('sms', memContactId).byChar) {
             void (async () => {
               try {
                 const lastCallAt = Number(window.localStorage.getItem(`sms-vc-last:${memContactId}`) ?? '0');
@@ -2753,10 +2779,24 @@ function ChatView({
     const text = input.trim();
     if (!text) return;
 
-    // 40-a 拉黑拦截：被角色拉黑（byChar）后本 App 内不能发送任何消息（toast + 不落库）；
-    // 唯一例外是「解除拉黑申请」，走输入区上方独立入口，不在 send 链上
+    // v2.4 byChar 新语义（微信真实拒收）：被角色拉黑后消息照发照显示（气泡红 ! + 「消息已发出，
+    // 但被对方拒收了」提示行），但角色收不到——不触发 AI 回合、不排队、不解析提醒指令。
+    // 唯一例外是「解除拉黑申请」，走输入区上方独立入口，不在 send 链上。
     if (wbContactId && loadBlock('sms', wbContactId).byChar) {
-      showToast('对方已将你拉黑，无法发送');
+      const blkMsg: ChatMsg = { id: uid(), role: 'user', content: text, time: Date.now(), quote: quote ?? undefined };
+      const blkImgs: ChatMsg[] = pendingImgs.map((p) => ({
+        id: uid(),
+        role: 'user',
+        content: '',
+        time: Date.now(),
+        kind: 'image',
+        img: { src: p.src, desc: '' },
+      }));
+      setInput('');
+      clearChatDraft('sms', storageKey);
+      setQuote(null);
+      setPendingImgs([]);
+      setMsgs((prev) => [...prev, blkMsg, ...blkImgs]);
       return;
     }
 
@@ -2928,10 +2968,6 @@ function ChatView({
   /** 只发图片（选图后直接点发送键；触发 AI 回合，识图管线让 TA 看到图片内容） */
   const sendPendingImages = () => {
     if (pendingImgs.length === 0) return;
-    if (wbContactId && loadBlock('sms', wbContactId).byChar) {
-      showToast('对方已将你拉黑，无法发送');
-      return;
-    }
     const built: ChatMsg[] = pendingImgs.map((p) => ({
       id: uid(),
       role: 'user',
@@ -2942,6 +2978,8 @@ function ChatView({
     }));
     setPendingImgs([]);
     setMsgs((prev) => [...prev, ...built]);
+    // v2.4 byChar 新语义（微信拒收）：被角色拉黑后图片照常落库（气泡红 ! + 拒收行），不触发回合
+    if (wbContactId && loadBlock('sms', wbContactId).byChar) return;
     // 对方正在回复（流式/投递中）：图片照常上屏并排队补跑（与 send 文字路同口径）
     if (isChatStreaming(sessionKey) || isAiDelivering(sessionKey)) {
       markDeliverBoundary(sessionKey, built[built.length - 1].id);
@@ -3071,17 +3109,15 @@ function ChatView({
    *  presetTranscript = 文字转语音/划转文字/Web Speech 实时结果；对方正在回复时不打断（语音照常入列，仅跳过本轮触发） */
   const commitVoiceMsg = useCallback(
     (clip: VoiceClip, presetTranscript?: string) => {
-      // 40-a 拉黑拦截：被角色拉黑（byChar）后语音消息也不能发（按住说话/文字转语音/划转文字共用本入口）
-      if (wbContactId && loadBlock('sms', wbContactId).byChar) {
-        showToastRef.current('对方已将你拉黑，无法发送');
-        return;
-      }
       const hasText = typeof presetTranscript === 'string' && presetTranscript.trim().length > 0;
       const voice: VoiceMsgData = hasText
         ? { url: clip.dataUrl, duration: clip.duration, wave: clip.wave, localText: clip.localText, transcript: presetTranscript, stt: 'done' }
         : { url: clip.dataUrl, duration: clip.duration, wave: clip.wave, localText: clip.localText, stt: 'pending' };
       const msg: ChatMsg = { id: uid(), role: 'user', content: '', time: Date.now(), kind: 'voice', voice };
       setMsgs((prev) => [...prev, msg]);
+      // v2.4 byChar 新语义（微信拒收）：被角色拉黑后语音照常落库（气泡红 ! + 拒收行），
+      // 但角色收不到——不转写、不触发回合、不排队
+      if (wbContactId && loadBlock('sms', wbContactId).byChar) return;
       /** 触发 AI 回复（对方正在回复——流式/投递中——则排队补跑，语音照常入列不丢弃）；
        *  转写完成后再触发，AI 才能读到语音内容 */
       const kickTurn = () => {
@@ -3116,12 +3152,12 @@ function ChatView({
   /** 「划到转文字」松开后：先识别再预览，由用户决定发送文字 / 发送语音（原始录音）/ 取消 */
   const sttPreview = useSttPreview({
     onSendText: (text) => {
-      // 40-a 拉黑拦截：被角色拉黑（byChar）后不能发送
+      const userMsg: ChatMsg = { id: uid(), role: 'user', content: text, time: Date.now() };
+      // v2.4 byChar 新语义（微信拒收）：被角色拉黑后文字照常落库（气泡红 ! + 拒收行），不触发回合
       if (wbContactId && loadBlock('sms', wbContactId).byChar) {
-        showToast('对方已将你拉黑，无法发送');
+        setMsgs((prev) => [...prev, userMsg]);
         return;
       }
-      const userMsg: ChatMsg = { id: uid(), role: 'user', content: text, time: Date.now() };
       // #8 对方正在回复：消息照常上屏并排队补跑（对齐微信，不再弹提示丢弃）。#35：标记插入边界
       if (isChatStreaming(sessionKey) || isAiDelivering(sessionKey)) {
         setMsgs((prev) => [...prev, userMsg]);
@@ -4229,7 +4265,7 @@ function ChatView({
       <>
       {/* 40-a：被角色拉黑提示条 + 用户发起「解除拉黑申请」入口（仅联系人会话；pending 或已达拒绝上限时隐藏，
           会话内改用跨 App/电话联系方式不受影响）。展开的小面板 = 理由输入 + 发送/取消 */}
-      {wbContactId && blk.byChar === true && blk.userReqStatus !== 'pending' && (blk.userReqRejectedCount ?? 0) < BLOCK_REQ_MAX_REJECTED && (
+      {wbContactId && blk.byChar === true && (blk.userReqRejectedCount ?? 0) < BLOCK_REQ_MAX_REJECTED && (
         userReqOpen ? (
           <div
             className="z-20 flex shrink-0 items-center gap-2 border-t border-white/60 bg-white/60 px-3 py-2 backdrop-blur-2xl dark:border-white/[0.09] dark:bg-white/[0.06]"

@@ -11,6 +11,14 @@
  *   用户用输入区上方的「发送解除申请」入口），由对方决定同意或拒绝——
  *   角色侧决策标记 [同意解除拉黑]/[拒绝解除拉黑] 由 AI 在回复里输出。
  *   拉黑只限制当前 App：微信拉黑不影响 QQ/信息/电话联系（存储键即隔离边界，跨 App 天然不受限）。
+ * - v2.4 byChar 语义重构（机主实测「AI 把我拉黑以后：AI 不能给我发消息；我可以给 AI 发
+ *   消息但 AI 收不到，我发的消息气泡要有红色感叹号」）：byChar=true 时对齐微信真实语义——
+ *   ① 角色的普通消息发不出去（各 App 的 AI 回合入口拦截，仅用户 pending 解除申请时放行
+ *     决策回合，正文丢弃只留决策标记）；
+ *   ② 用户的普通消息照常落库显示（气泡带红色感叹号 + 「消息已发出，但被对方拒收了」
+ *     提示行，微信同款），但不触发 AI 回合（角色收不到）；
+ *   ③ 跨 App 求和好：用户被微信拉黑后去 QQ 找角色，角色据人设记忆决定是否解除微信拉黑
+ *     （[解除拉黑:微信] 跨 App 标记，也可以选择不解除）。
  * - 单聊和群聊完全独立：群聊不读不写这里的任何状态；三个 App 之间也互相独立
  *   （存储键即隔离边界：wx-block:<id> / qq-block:<id> / sms-block:<id>）。
  * - 持久化在 IndexedDB kv store（idb-kv 内存同步读 + 异步写穿），重启 App 后保留。
@@ -334,13 +342,92 @@ export function charRequestOnlyOf(b: BlockEntry): boolean {
 }
 
 /**
+ * v2.4 byChar「仅决策」放行模式（微信真实语义）：角色拉黑了用户（byChar）后——
+ * - 角色的普通消息全部拦截（buildReplyMsgs 丢弃正文，只留拉黑类动作标记与系统行）；
+ * - 用户的普通消息照常显示但角色收不到（不触发回合）；
+ * - 唯一放行：用户发来「解除拉黑申请」（userReqStatus==='pending'）时角色回合照常发起，
+ *   角色 用 [同意解除拉黑]/[拒绝解除拉黑]/[解除拉黑] 决策，正文同样丢弃。
+ * 与 charRequestOnlyOf 对偶，两处（回合入口守卫 / chat-stream-store 兜底）条件必须一致。
+ */
+export function charReqDecisionOnlyOf(b: BlockEntry): boolean {
+  return b.byChar === true && b.userReqStatus === 'pending';
+}
+
+/**
+ * v2.4：[解除拉黑:App名] 标记参数 → 目标 App 列表解析（跨 App 求和好）。
+ * 参数容错：微信/weixin/wx → wx；qq/腾讯qq → qq；短信/信息/sms → sms；
+ * 全部/所有/all → 三个 App（调用方拿 'all' 后自行展开）。
+ * 返回 null = 无参数或无法解析（无参数时调用方按「当前 App」处理；解析失败当当前 App）。
+ */
+export function parseUnblockTargets(raw: string | undefined): BlockApp[] | 'all' | null {
+  const t = (raw ?? '').trim();
+  if (!t) return null;
+  if (/^(全部|所有|all|三个都?|都)$/i.test(t)) return 'all';
+  const apps: BlockApp[] = [];
+  for (const part of t.split(/[,，、;；/\s]+/).filter(Boolean)) {
+    const p = part.trim().toLowerCase();
+    if (/^(微信|weixin|wx|wechat)$/.test(p)) apps.push('wx');
+    else if (/^(qq|腾讯qq)$/.test(p)) apps.push('qq');
+    else if (/^(短信|信息|sms|彩信|短息)$/.test(p)) apps.push('sms');
+  }
+  return apps.length ? Array.from(new Set(apps)) : null;
+}
+
+/**
+ * v2.4 跨 App 解除拉黑：[解除拉黑:微信] 在 QQ 里触发 → 解除微信的 byChar。
+ * 只动 byChar（byUser 不碰）；待处理的用户申请自然失效（清除 pending）。
+ * 返回实际解除的 App 列表（没在那边拉黑 = 幂等跳过）。
+ */
+export function applyCharUnblockApps(contactId: string, targets: BlockApp[]): BlockApp[] {
+  const done: BlockApp[] = [];
+  for (const app of targets) {
+    try {
+      const cur = loadBlock(app, contactId);
+      if (!cur.byChar) continue;
+      saveBlock(app, contactId, {
+        ...cur,
+        byChar: undefined,
+        byCharUntil: Date.now(),
+        userReqReason: undefined,
+        userReqAt: undefined,
+        userReqStatus: undefined,
+      });
+      done.push(app);
+    } catch {
+      /* 单端失败不影响其他端 */
+    }
+  }
+  return done;
+}
+
+/**
+ * v2.4：当前 App 之外的哪些 App 上角色拉黑了用户（跨 App 求和好情境注入用）。
+ * 例：用户被微信拉黑后去 QQ 找角色——QQ 侧 prompt 注入「你在微信把 TA 拉黑了」。
+ */
+export function otherAppsCharBlocked(app: BlockApp, contactId: string): BlockApp[] {
+  const out: BlockApp[] = [];
+  for (const a of ['wx', 'qq', 'sms'] as BlockApp[]) {
+    if (a === app) continue;
+    try {
+      if (loadBlock(a, contactId).byChar) out.push(a);
+    } catch {
+      /* 单端读失败不影响其他端 */
+    }
+  }
+  return out;
+}
+
+/**
  * 40-a：用户→角色发起「解除拉黑申请」（双向对等；byChar 拉黑下用户唯一的例外发送通道）：
- * 只在确实被角色拉黑（byChar=true）、没有待处理申请、本周期被拒次数未达上限时受理；
- * created=false = 未创建（未拉黑/已有 pending/已达上限，调用方不落卡不注入事件）。
+ * 只在确实被角色拉黑（byChar=true）、本周期被拒次数未达上限时受理；
+ * v2.4 兜底：已有 pending 申请时也允许重新发起（覆盖刷新）——byChar 拦回合后 AI 若在决策轮
+ * 没输出任何决策标记（正文被丢弃、pending 悬挂），用户重发申请 = 再给 AI 一次决策机会，
+ * 不会死锁；AI 输出 [拒绝解除拉黑] 即计入防骚扰计数，达上限后彻底关闭（同既有口径）。
+ * created=false = 未创建（未拉黑/已达上限，调用方不落卡不注入事件）。
  */
 export function applyUserBlockReq(app: BlockApp, contactId: string, reason?: string): { entry: BlockEntry; created: boolean } {
   const cur = loadBlock(app, contactId);
-  if (!cur.byChar || cur.userReqStatus === 'pending') return { entry: cur, created: false };
+  if (!cur.byChar) return { entry: cur, created: false };
   if ((cur.userReqRejectedCount ?? 0) >= BLOCK_REQ_MAX_REJECTED) return { entry: cur, created: false };
   return {
     entry: saveBlock(app, contactId, {
@@ -438,13 +525,25 @@ export function buildBlockPromptBlock(app: BlockApp, contactId: string, userName
   const ch = BLOCK_CHANNEL[app];
   const user = userName || '用户';
   if (!b.byUser && !b.byChar) {
-    // token 精简：原七行约 470 字，压缩为三行约 300 字——核心语义全保留
-    //（[拉黑] 标记触发、方向红线、假拉黑禁止、[解除拉黑]、保守输出、拉黑后拦截效果）
-    return [
+    // v2.4 跨 App 求和好情境：其它 App 上角色拉黑着用户（例：微信被拉黑 → 用户来 QQ 求和）。
+    // 必须让角色知道自己在别处拉黑着 TA，才能「根据人设记忆决定拉不拉回来」。
+    const others = otherAppsCharBlocked(app, contactId);
+    const base = [
       `【${ch}拉黑能力】你可以真的拉黑/解除拉黑 ${user}（系统记录状态并生成提示）：决定拉黑 TA 时（包括 TA 明确要求「你拉黑我吧」而你决定照做），必须在回复中单独输出一行 [拉黑]；已经拉黑后想恢复关系时，单独输出一行 [解除拉黑]。只在对话真实发展到这一步时才输出标记，没有这个意图时不要输出。`,
       `【方向红线】当 ${user} 说「我要拉黑你/拉黑你/把你拉黑了」这类话时，意思是 TA 要拉黑你（系统会自动执行 TA 对你的拉黑）——这绝对不是让你拉黑 TA，此时严禁输出 [拉黑] 标记；你只需按人设对「被 TA 拉黑」这件事做出真实反应（慌了、哀求、生气、赌气都可以）。`,
-      `严禁只在文字上说"拉黑了"却不输出 [拉黑] 标记——那样系统不会记录，你的说法就是假的。拉黑生效后，${user} 在${ch}上就发不出消息给你了（系统会拦截）；你仍然可以给 TA 发消息。`,
-    ].join('\n');
+      `严禁只在文字上说"拉黑了"却不输出 [拉黑] 标记——那样系统不会记录，你的说法就是假的。拉黑生效后：你在${ch}发的消息 TA 收不到（系统拦截），TA 发的消息你也收不到。`,
+    ];
+    if (others.length > 0) {
+      const names = others.map((a) => BLOCK_CHANNEL[a]).join('、');
+      const lines = [
+        `【跨 App 拉黑状态】你已经在「${names}」上把 ${user} 拉黑了（拉黑只作用于那个 App，${ch}这里不受影响）。`,
+        `- TA 现在来到${ch}找你，很可能就是想让你把那边解除拉黑（求和好）。结合你的人设、你们的记忆和这件事的前因后果自由决定：`,
+        `- 决定把哪边拉回来 → 在回复里单独输出一行 [解除拉黑:微信]（或 [解除拉黑:QQ] / [解除拉黑:短信]，可一次写多个如 [解除拉黑:微信,QQ]，都拉回来写 [解除拉黑:全部]）；`,
+        `- 决定不拉回来 → 不输出标记，按你的真实态度回应（赌气、质问、嘴硬、提条件都可以）；解除与否完全由你，不要无脑顺从。`,
+      ];
+      return [...base, ...lines].join('\n');
+    }
+    return base.join('\n');
   }
   const lines: string[] = [];
   // 防骚扰状态：次数达上限 → 明确告诉角色别再发申请（硬性拦截在 applyCharBlockAction 里；冷却期已移除）
@@ -461,23 +560,29 @@ export function buildBlockPromptBlock(app: BlockApp, contactId: string, userName
   }
   if (b.byChar) {
     const userCapped = (b.userReqRejectedCount ?? 0) >= BLOCK_REQ_MAX_REJECTED;
+    // v2.4 跨 App 感知：本 App 被自己拉黑时，也注入其它 App 的拉黑情况（用户可能在这里求和好）
+    const others = otherAppsCharBlocked(app, contactId);
     if (b.userReqStatus === 'pending') {
       // 40-a：用户发来的解除拉黑申请正等角色决策——给出两个决策标记与「按人设自由判断」的指引
       lines.push(
         `【拉黑状态】你已经在${ch}上把 ${user} 拉黑了，而 ${user} 刚刚给你发来一条「解除拉黑申请」（理由见系统事件）。你的决定：`,
         `- 愿意给对方一个机会 → 在回复的最开头单独输出一行 [同意解除拉黑]，系统会立即解除拉黑、恢复正常聊天；`,
         `- 决定拒绝 → 在回复的最开头单独输出一行 [拒绝解除拉黑]，拉黑继续保持。`,
-        `- 同意还是拒绝，结合你的人设、你们的关系和这件事的前因后果自由判断，不要无脑顺从；无论同不同意，先用你的方式自然回应这件事。`,
-        `- ${user} 在${ch}上发不出普通消息给你（系统拦截），只有这张申请卡能送达。`
+        `- 同意还是拒绝，结合你的人设、你们的关系和这件事的前因后果自由判断，不要无脑顺从。`,
+        `- 你现在拉黑着 TA：你的普通消息（除决策标记外的一切正文）发不出去（系统拦截），TA 发的消息你也收不到——只有这张申请卡能送达，你的决策标记是唯一的回应方式。`
       );
     } else {
       lines.push(
         `【拉黑状态】你已经在${ch}上把 ${user} 拉黑了。`,
-        `- ${user} 在${ch}上发不出消息给你（系统会拦截）；你仍然可以给 ${user} 发消息，TA 看得到。`,
-        `- ${user} 可能给你发来「解除拉黑申请」卡片：收到后你可以决定同意或拒绝——同意就在回复的最开头单独输出一行 [同意解除拉黑]，拒绝就单独输出一行 [拒绝解除拉黑]，无论同不同意都先用你的方式自然回应。`,
-        `- 你可以按人设表现出拉黑后的态度（赌气、冷淡、嘴硬……），但不要跳出人设。`,
-        `- 想主动解除拉黑时：在回复里单独输出一行标记 [解除拉黑]，系统会生成解除提示；没想好就继续保持。`
+        `- 你发出的普通消息（文字/语音/表情/红包/转账等一切）都会被系统拦截，${user} 收不到；不要假装消息已送达。`,
+        `- ${user} 发来的普通消息也送不到你这里（系统拦截）——你看不到 TA 说什么；TA 可能去其它 App 找你，或给你发「解除拉黑申请」卡片。`,
+        `- ${user} 若发来「解除拉黑申请」：愿意解除就在回复的最开头单独输出一行 [同意解除拉黑]，拒绝就单独输出一行 [拒绝解除拉黑]（按人设自由决定，不要无脑顺从）。`,
+        `- 想主动解除这里的拉黑时：在回复里单独输出一行标记 [解除拉黑]，系统会生成解除提示；没想好就继续保持。`,
+        `- 你可以按人设表现出拉黑后的态度（赌气、冷淡、嘴硬……），但不要跳出人设。`
       );
+      if (others.length > 0) {
+        lines.push(`- 你在其它 App（${others.map((a) => BLOCK_CHANNEL[a]).join('、')}）也拉黑着 TA；若也决定拉回来，可输出 [解除拉黑:全部]。`);
+      }
       if ((b.userReqRejectedCount ?? 0) > 0) {
         lines.push(userCapped
           ? `- ${user} 的解除申请已经被你拒绝多次，系统不会再转达新的申请。`

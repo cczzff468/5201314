@@ -51,7 +51,7 @@ import { extractJsonToolCalls, stripJsonToolCalls, looksLikePartialToolJson, str
 import { createThinkFilter } from '@/lib/deep-think';
 import { describeImagesAuto } from '@/lib/vision-client';
 import { clearDeliverBoundary, isAiDelivering, scheduleAiDelivery } from '@/lib/ios/ai-delivery';
-import { charRequestOnlyOf, loadBlock, type BlockApp } from '@/lib/ios/block-state';
+import { charReqDecisionOnlyOf, charRequestOnlyOf, loadBlock, type BlockApp } from '@/lib/ios/block-state';
 // 40-B 多账号 AI 认知隔离：主账号（该 App 当前账号为大号）下计算「用户的小号」聊天摘录并合并进人设 system 消息
 import {
   getAccountById,
@@ -602,7 +602,7 @@ async function runStream(rt: StreamRuntime, opts: BeginChatStreamOptions): Promi
   // 剩余裸 JSON 代执行后绝不能再把净化全文重进分段器发一遍）
   let deliveredAnyText = false;
   const segSink = opts.onSegment
-    ? (seg: string): void => {
+    ? ((seg: string): void => {
         let piece = seg;
         if (jsonHold) {
           piece = jsonHold + seg;
@@ -630,7 +630,7 @@ async function runStream(rt: StreamRuntime, opts: BeginChatStreamOptions): Promi
         }
         deliveredAnyText = true;
         opts.onSegment?.(piece);
-      }
+      })
     : null;
   let scanner = multi && segSink ? createReplySegmentScanner(segSink) : null;
   // 深度思考剥离器：与分段器同源同生命周期（SDK 兜底重建时一并重建）；未输出 [思考] 块的
@@ -1210,6 +1210,9 @@ export function beginChatStream(opts: BeginChatStreamOptions): boolean {
   if (blkSession) {
     const blkEntry = loadBlock(blkSession.app, blkSession.contactId);
     if (blkEntry.byUser && !charRequestOnlyOf(blkEntry)) return true;
+    // v2.4 byChar 兜底（微信真实语义）：角色拉黑用户后 AI 普通消息同样发不出——除用户 pending
+    // 解除申请的决策回合（charReqDecisionOnlyOf）外同样静默拦截
+    if (blkEntry.byChar && !charReqDecisionOnlyOf(blkEntry)) return true;
   }
   // 第十六轮：情绪/作息打点（拉黑会话提前 return 不计；正常会话在流发起前记录）
   noteEngagement(opts.sessionKey, opts.messages);

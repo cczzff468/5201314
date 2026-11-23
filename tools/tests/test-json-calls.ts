@@ -193,5 +193,72 @@ function makeSegSink() {
   check('F. 零扣留', r.heldAtFinish === '');
 }
 
+console.log('== 6. v2.3.2 形状二「工具名{参数}」（机主实测 setRealAlarm{"hour":17,"minute":52}） ==');
+check(
+  '形状二纯调用整条剥除 → null',
+  stripJsonToolCalls('setRealAlarm{"hour":17,"minute":52}') === null,
+);
+check(
+  '形状二正文内联剥除',
+  stripJsonToolCalls('好的马上定setRealAlarm{"hour":17,"minute":52}等你哦') === '好的马上定等你哦',
+);
+check(
+  '形状二中文正文里内联',
+  stripJsonToolCalls('我用setRealAlarm{"hour":17,"minute":52}给你定了') === '我用给你定了',
+);
+check(
+  '形状二带括号包裹 setRealAlarm({...}) 剥除',
+  stripJsonToolCalls('马上setRealAlarm({"hour":17,"minute":52})就好') === '马上就好',
+);
+check(
+  '形状二 pretty 多行参数剥除',
+  stripJsonToolCalls('好嘞\nlockApp{\n  "packageName": "com.tencent.mm"\n}') === '好嘞',
+);
+const ex5 = extractJsonToolCalls('setRealAlarm{"hour":17,"minute":52}');
+check('形状二提取 setRealAlarm 参数完整', ex5.length === 1 && ex5[0].name === 'setRealAlarm' && (ex5[0].args as { hour: number; minute: number }).hour === 17 && (ex5[0].args as { minute: number }).minute === 52, JSON.stringify(ex5));
+const ex6 = extractJsonToolCalls('好哦switchToChat{}');
+check('形状二空参数提取', ex6.length === 1 && ex6[0].name === 'switchToChat' && Object.keys(ex6[0].args).length === 0);
+const ex7 = extractJsonToolCalls('先setVolume{"volume":3}再lockApp({"packageName":"com.x"})');
+check('形状二两处提取（括号包裹+裸贴）', ex7.length === 2 && ex7[0].name === 'setVolume' && ex7[1].name === 'lockApp', JSON.stringify(ex7));
+const ex8 = extractJsonToolCalls('{"name": "setRealAlarm", "hour": 17, "minute": 52}');
+check('扁平形状（无 arguments 包裹）参数不丢', ex8.length === 1 && ex8[0].name === 'setRealAlarm' && (ex8[0].args as { hour: number }).hour === 17 && (ex8[0].args as { minute: number }).minute === 52, JSON.stringify(ex8));
+check(
+  '扁平形状剥除',
+  stripJsonToolCalls('马上{"name": "setRealAlarm", "hour": 17, "minute": 52}好') === '马上好',
+);
+check('非工具名标识符+{参数} 不误剥', stripJsonToolCalls('配置foo{"timeout":30}就这样') === '配置foo{"timeout":30}就这样');
+check('工具名与{之间有空格不误剥', stripJsonToolCalls('setVolume {"volume":3} 说明') === 'setVolume {"volume":3} 说明');
+check('形状二半截 → true（扣留）', looksLikePartialToolJson('setRealAlarm{"hour":17,"min') === true);
+check('形状二半截带正文 → true', looksLikePartialToolJson('马上setRealAlarm({"hour":17') === true);
+check('形状二完整 → false（不扣留，走提取）', looksLikePartialToolJson('setRealAlarm{"hour":17,"minute":52}') === false);
+check(
+  '形状二尾部残缺切除连工具名',
+  stripTrailingPartialToolJson('定好闹钟哦setRealAlarm{"hour":17,"minu') === '定好闹钟哦',
+);
+check(
+  '形状二尾部残缺带括号',
+  stripTrailingPartialToolJson('马上setRealAlarm({"hour":') === '马上',
+);
+check('形状二完整尾巴不动', stripTrailingPartialToolJson('setRealAlarm{"hour":17,"minute":52}') === 'setRealAlarm{"hour":17,"minute":52}');
+check('普通标识符半截不动', stripTrailingPartialToolJson('你好foo{"msg": "hel') === '你好foo{"msg": "hel');
+
+// 场景 G：形状二流式分段（机主实测「切回界面也是这样、锁应用也是这样」的流式形态）
+{
+  const s = makeSegSink();
+  s.sink('好的');
+  s.sink('setRealAlarm{"hour":17,"minute":52}');
+  const r = s.finish();
+  check('G. 形状二整段：正文上屏、调用提取', JSON.stringify(r.displayed) === '["好的"]' && r.pendingJsonCalls.length === 1 && r.pendingJsonCalls[0].name === 'setRealAlarm', JSON.stringify(r.displayed) + JSON.stringify(r.pendingJsonCalls));
+}
+// 场景 H：形状二流掐断在半截
+{
+  const s = makeSegSink();
+  s.sink('马上');
+  s.sink('setRealAlarm{"hour":17,"mi');
+  const r = s.finish();
+  check('H. 形状二断流：半截不上屏', JSON.stringify(r.displayed) === '["马上"]' && r.heldAtFinish.includes('setRealAlarm') === false || r.displayed.join('').includes('setRealAlarm') === false, JSON.stringify(r.displayed));
+  check('H. 形状二断流：零误提取', r.pendingJsonCalls.length === 0);
+}
+
 console.log(`\n== 结果：${pass} ok / ${fail} fail ==`);
 process.exit(fail > 0 ? 1 : 0);

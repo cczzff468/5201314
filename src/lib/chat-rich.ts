@@ -416,8 +416,13 @@ export function extractRichActionParts(text: string): RichActionPart[] {
     const raw = (m[2] ?? '').trim();
     const kind = ACTION_LABELS[m[1]];
     if (BLOCK_ACTION_KINDS.has(kind)) {
-      // 拉黑类动作没有目标 ID；申请解除拉黑的 targetId = 申请理由全文（不按冒号截断）
-      parts.push({ type: 'action', action: { kind, targetId: kind === 'request-unblock' ? raw : '' } });
+      // 拉黑类动作：申请解除拉黑的 targetId = 申请理由全文（不按冒号截断）；
+      // v2.4 解除拉黑的 targetId = 跨 App 参数（[解除拉黑:微信] → '微信'，空 = 当前 App）；
+      // 其余拉黑类动作没有目标 ID
+      parts.push({
+        type: 'action',
+        action: { kind, targetId: kind === 'request-unblock' || kind === 'unblock-user' ? raw : '' },
+      });
     } else if (kind === 'mute-member') {
       // [禁言:成员:时长]：名字取第一段，时长取剩余整段（兼容写法丢时长由执行器兑底）
       // #81：AI 误写多人 [禁言:张三:李四:1小时] 时只禁言张三、李四被静默丢弃——解析时检测 segs[1]

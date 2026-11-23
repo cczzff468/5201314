@@ -469,7 +469,8 @@ export async function buildCrossAppBlock(contactId: string, currentApp: CrossApp
         try {
           const blk = loadBlock(app as BlockApp, contactId);
           if (blk.byUser) return `（注意：${me} 已经在这个 App 把你拉黑了——你在那边发的消息 TA 收不到，下面的记录只是历史）`;
-          if (blk.byChar) return `（你在这个 App 把 ${me} 拉黑了，TA 在那边发不出消息给你）`;
+          // v2.4 byChar 新语义（微信真实）：角色拉黑用户 → 双向消息都断（角色发不出、用户发的角色收不到）
+          if (blk.byChar) return `（你在这个 App 把 ${me} 拉黑了——你发不出消息给 TA，TA 发的消息你也收不到，下面的记录只是历史）`;
         } catch {
           /* 读不到按无拉黑 */
         }

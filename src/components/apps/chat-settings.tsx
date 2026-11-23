@@ -778,7 +778,7 @@ export function ChatSettingsPage({
         )}
 
         {/* 拉黑：双向拉黑开关（40-a 重构后真实拦截：byUser=true → AI 静默不发普通消息、仅可发申请卡回应；
-            byChar=true → 用户所有发送入口被拦 toast。开关只控制 byUser；对方拉黑时 byChar 由 AI 决策） */}
+            byChar=true → 双向断联（微信真实语义：AI 发不出消息、用户发的 AI 也收不到，气泡带红感叹号拒收标）。开关只控制 byUser；对方拉黑时 byChar 由 AI 决策） */}
         {onToggleBlock && (
           <>
             <div className={`${cardCls} mt-3 overflow-hidden`}>
@@ -2090,7 +2090,7 @@ export function SmsChatSettingsPage({
         )}
 
         {/* 拉黑：双向拉黑开关（40-a 重构后真实拦截：byUser=true → AI 静默不发普通消息、仅可发申请卡回应；
-            byChar=true → 用户所有发送入口被拦 toast。开关只控制 byUser；对方拉黑时 byChar 由 AI 决策） */}
+            byChar=true → 双向断联（微信真实语义：AI 发不出消息、用户发的 AI 也收不到，气泡带红感叹号拒收标）。开关只控制 byUser；对方拉黑时 byChar 由 AI 决策） */}
         {onToggleBlock && (
           <>
             <div className={`${t.cardCls} mt-3`}>

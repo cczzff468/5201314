@@ -492,11 +492,12 @@ export async function parseReminderInstruction(app: ProactiveApp, cid: string, t
       task = { id: genId(), app, cid, kind: 'interval', intervalMs: Math.max(5_000, Math.round(mins * 60_000)), note: (parsed.note ?? '').slice(0, 80) || '按约定主动发消息', createdAt: now };
     }
     addReminder(app, task);
-    // C13：拉黑期间引擎对该联系人全停（tickInner byUser 守卫），创建成功的提醒不会送达——
+    // C13：拉黑期间引擎对该联系人全停（tickInner 双向拉黑守卫），创建成功的提醒不会送达——
     // 系统行当场说明，避免 UI 承诺与实际行为脱节（解除拉黑后照常恢复）
     const blockedNow = (() => {
       try {
-        return loadBlock(app, cid).byUser;
+        const b = loadBlock(app, cid);
+        return b.byUser === true || b.byChar === true;
       } catch {
         return false;
       }
@@ -1357,11 +1358,12 @@ async function tickInner(): Promise<void> {
     // 人设非空不再要求（用户反馈「设置了定时发消息到点不发」）：普通聊天对空人设照常回复
     //（persona.ts 对空人设有自然兑底），主动消息同口径；USER/无名仍排除
     if (!contact || contact.kind === 'user' || !contact.name?.trim()) continue;
-    // 拉黑守卫：用户拉黑角色（byUser）→ 该 App 主动消息全停（含定时/事件/提醒）；
-    // 角色拉黑用户（byChar）不再拦截主动消息（C8：与 block prompt「你拉黑 TA 后你仍然可以给
-    // TA 发消息」承诺对齐——AI 拉黑后主动找人是被认可的叙事语义，cross-app-reach byChar 同款）
+    // 拉黑守卫：用户拉黑角色（byUser）→ 该 App 主动消息全停（含定时/事件/提醒）。
+    // v2.4 byChar 同停（微信真实语义：角色拉黑用户后 AI 的消息发不出去，本 App 内主动
+    // 消息同样拦——绝不穿帮「聊天里不回但主动消息照发」）；跨 App 找人（cross-app-reach）
+    // 照旧走目标 App（那边没被拉黑）
     const blk = loadBlock(app, cid);
-    if (blk.byUser) continue;
+    if (blk.byUser || blk.byChar) continue;
 
     // 静音锁（全局逻辑冲突修复 #1）：用户正在该会话内或近 5 分钟内有互动 → 跳过定时/自主/习惯触发；
     // 事件/提醒是用户明确约定，不受此限。10s tick 稍后再试。
@@ -1522,7 +1524,7 @@ async function tickInner(): Promise<void> {
       continue;
     }
     const blkAnx = loadBlock(anxAppTyped, cid);
-    if (blkAnx.byUser) continue; // 拉黑期间不穿透（同四类触发口径）
+    if (blkAnx.byUser || blkAnx.byChar) continue; // 拉黑期间不穿透（同四类触发口径，byChar v2.4 同停）
     // 静音锁（全局逻辑冲突修复 #1）：用户近 5 分钟内有互动 → 强制休眠焦虑追发，
     // 避免用户正聊浪漫话题时 AI 突然"查岗"导致精分。与 timer/auto/habit-miss 同口径。
     try {
@@ -1717,7 +1719,7 @@ export async function manuallyFireEvent(app: ProactiveApp, cid: string, eventId:
     // 人设非空不再要求（与 tickInner 同口径）
     if (!contact || contact.kind === 'user' || !contact.name?.trim()) return false;
     const blk = loadBlock(app, cid);
-    if (blk.byUser) return false; // 与 tickInner 同口径：仅用户拉黑拦截（C8）
+    if (blk.byUser || blk.byChar) return false; // 与 tickInner 同口径：双向拉黑均拦截（v2.4 byChar 同停）
     // 配角圈注入不再限 NPC（与上方 generateProactiveText 同口径；CHAR 也有配角圈/背景近况）
     const npcExtra = buildNpcPromptExtra(contact, all) as unknown as Record<string, unknown> | null;
     await fireProactive(app, contact, { kind: 'event', eventName: evt.name }, npcExtra);
@@ -1781,7 +1783,7 @@ export async function fireProactiveNudge(
     const contact = all.find((c) => c.id === cid);
     if (!contact || contact.kind === 'user' || !contact.name?.trim()) return false;
     const blk = loadBlock(app, cid);
-    if (blk.byUser) return false; // 用户拉黑时不打扰
+    if (blk.byUser || blk.byChar) return false; // 拉黑（任一方向）时不打扰
     // 正在通话中不打扰（与 tickInner 守卫同思路；主动消息调度已有互斥，这里轻量跳过）
     if (useIncomingCall.getState().call || useGlobalCall.getState().session) return false;
     // 生成 + 投递（fireProactive 自带去重/重试/兜底）

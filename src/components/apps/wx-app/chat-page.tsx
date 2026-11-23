@@ -61,18 +61,23 @@ import { cutUnfinishedMusicTag, runMusicRemote, takeMusicRemote, togetherLiveBlo
 import {
   acceptBlockReq,
   applyCharBlockAction,
+  applyCharUnblockApps,
   applyUserBlockReq,
   blockActionKindOf,
   blockCoversAt,
+  BLOCK_CHANNEL,
   BLOCK_REQ_MAX_REJECTED,
   buildBlockPromptBlock,
+  charReqDecisionOnlyOf,
   charRequestOnlyOf,
   isUserBlockIntent,
   loadBlock,
+  parseUnblockTargets,
   rejectBlockReq,
   resolveUserReqByChar,
   setUserBlock,
   userReqActionKindOf,
+  type BlockApp,
   type BlockEntry,
 } from '@/lib/ios/block-state';
 import { isProactiveCallOff } from '@/lib/ios/proactive-call';
@@ -1174,8 +1179,9 @@ export function ChatPage({
    *  全局通话层负责渲染通话页与悬浮小窗，宿主只关心把结果落成消息。 */
   const writeCallCard = useCallback(
     (r: ChatCallResult) => {
-      // 40-a 拉黑拦截：用户拉黑了该角色（byUser）后，通话结束卡片不再落库（AI 侧产物不进聊天记录）
-      if (loadBlock('wx', peer.id).byUser) return;
+      // 40-a 拉黑拦截：用户拉黑了该角色（byUser）后，通话结束卡片不再落库（AI 侧产物不进聊天记录）；
+      // v2.4 byChar 同口径：角色拉黑用户后 AI 侧产物（卡片/转写）同样不落库
+      if (loadBlock('wx', peer.id).byUser || loadBlock('wx', peer.id).byChar) return;
       const st = callResultToCardState(r);
       const card: WxMsg = {
         id: uid(),
@@ -1208,8 +1214,8 @@ export function ChatPage({
       if (r.afterText && r.direction === 'out' && !r.connected) {
         const after = r.afterText;
         window.setTimeout(() => {
-          // 40-a 拉黑拦截：落库前再核一次（等待窗口内用户可能已拉黑）
-          if (loadBlock('wx', peer.id).byUser) return;
+          // 40-a 拉黑拦截：落库前再核一次（等待窗口内用户可能已拉黑）；v2.4 byChar 同口径
+          if (loadBlock('wx', peer.id).byUser || loadBlock('wx', peer.id).byChar) return;
           const msg: WxMsg = { id: uid(), role: 'peer', content: after, time: Date.now() };
           saveMsgs(peer.id, [...loadMsgs(peer.id), msg]);
           setMsgs((prev) => (prev.some((m) => m.id === msg.id) ? prev : [...prev, msg]));
@@ -1224,13 +1230,13 @@ export function ChatPage({
    *  文字已随通话转写一并沉淀记忆（chat-call 引擎），这里只负责呈现与持久化（照常进后续 AI 上下文） */
   const sendCallFollowup = useCallback(
     (texts: string[]) => {
-      // 40-a 拉黑拦截：用户拉黑了该角色（byUser）后，挂断续聊文字不再落库
-      if (loadBlock('wx', peer.id).byUser) return;
+      // 40-a 拉黑拦截：用户拉黑了该角色（byUser）后，挂断续聊文字不再落库；v2.4 byChar 同口径
+      if (loadBlock('wx', peer.id).byUser || loadBlock('wx', peer.id).byChar) return;
       texts.forEach((t, i) => {
         window.setTimeout(
           () => {
-            // 40-a 拉黑拦截：落库前再核一次（连发间隔内用户可能已拉黑）
-            if (loadBlock('wx', peer.id).byUser) return;
+            // 40-a 拉黑拦截：落库前再核一次（连发间隔内用户可能已拉黑）；v2.4 byChar 同口径
+            if (loadBlock('wx', peer.id).byUser || loadBlock('wx', peer.id).byChar) return;
             const msg: WxMsg = { id: uid(), role: 'peer', content: t, time: Date.now() };
             saveMsgs(peer.id, [...loadMsgs(peer.id), msg]);
             setMsgs((prev) => (prev.some((m) => m.id === msg.id) ? prev : [...prev, msg]));
@@ -1561,8 +1567,9 @@ export function ChatPage({
     // 审计 #8：电话 App 通话全屏层进行中（useUI.callActive）不叠加 AI 来电——其他端通话中不被打断
     if (useUI.getState().callActive) return;
     // 40-a 拉黑拦截（审计破口二）：用户拉黑 AI（byUser）后 [语音通话] 不弹真实来电——
-    // request-only 模式下正文都被丢弃，来电邀请更不能送达；入口直接 return（wantCallSeen 处另有双保险）
-    if (loadBlock('wx', peer.id).byUser) return;
+    // request-only 模式下正文都被丢弃，来电邀请更不能送达；入口直接 return（wantCallSeen 处另有双保险）。
+    // v2.4 byChar 同口径：角色拉黑用户后来电同样不弹（AI 说不出话，弹了也穿帮）
+    if (loadBlock('wx', peer.id).byUser || loadBlock('wx', peer.id).byChar) return;
     // C3：用户关闭「AI 主动来电」档位（off）时标记来电也不再真的拨出；距上次任意通道 AI 来电
     // 不足 3 分钟同样让路（防与主动来电/另一标记贴脸连打——两套冷却体系此前互不感知）
     if (isProactiveCallOff()) return;
@@ -1600,8 +1607,8 @@ export function ChatPage({
     // 审计 #8：电话 App 通话全屏层进行中（useUI.callActive）不叠加 AI 来电——其他端通话中不被打断
     if (useUI.getState().callActive) return;
     // 40-a 拉黑拦截：用户拉黑 AI（byUser）后 [视频通话] 不弹真实来电——request-only 模式下正文都被
-    // 丢弃，视频邀请更不能送达；入口直接 return（wantVideoCallSeen 处另有双保险）
-    if (loadBlock('wx', peer.id).byUser) return;
+    // 丢弃，视频邀请更不能送达；入口直接 return（wantVideoCallSeen 处另有双保险）；v2.4 byChar 同口径
+    if (loadBlock('wx', peer.id).byUser || loadBlock('wx', peer.id).byChar) return;
     // C3：off 档拦截 + 统一来电守卫互查（同 triggerAiVoiceCall 口径）
     if (isProactiveCallOff()) return;
     if (recentAiCallWithin(peer.id)) return;
@@ -1703,7 +1710,9 @@ export function ChatPage({
         // 状态、写零钱账单、建群。先算好标记类型再按模式分流（bk/uk 下方直接复用）
         const bk = blockActionKindOf(part.action);
         const uk = userReqActionKindOf(part.action);
-        if (!bk && !uk && loadBlock('wx', peer.id).byUser) continue;
+        // v2.4：byChar 决策模式（角色拉黑用户）同口径只放行拉黑类标记——拉黑期间 AI 不能
+        // 动资金/建群/手机/视觉等任何其它真实状态
+        if (!bk && !uk && (loadBlock('wx', peer.id).byUser || loadBlock('wx', peer.id).byChar)) continue;
         // 双向拉黑类动作（[拉黑]/[解除拉黑]/[申请解除拉黑:理由]）：改状态 + 生成系统消息/申请卡片，
         // 不走红包/转账处理；幂等——状态没变化（重复拉黑/没被拉黑就申请等）不产出任何消息
         if (bk) {
@@ -1712,11 +1721,32 @@ export function ChatPage({
           if (res.changed && bk === 'block') {
             out.push({ id: uid(), role: 'peer', content: '', time: t, kind: 'sys', sys: { text: `你已被「${peer.name}」拉黑` } });
             t += 1;
-          } else if (res.changed && bk === 'unblock') {
-            out.push({ id: uid(), role: 'peer', content: '', time: t, kind: 'sys', sys: { text: `「${peer.name}」解除了对你的拉黑` } });
-            t += 1;
-            // 40-a：角色主动解除拉黑 = 视同同意用户侧待处理申请（有的话置终态，避免卡片永远「等待对方处理」）
-            settleUserBlockReq('accepted');
+          } else if (bk === 'unblock') {
+            // v2.4 跨 App 解除：[解除拉黑:微信]/[解除拉黑:全部]——无参数=仅当前 App（旧口径），
+            // 带 App 名 = 跨 App 解除那边的 byChar（例：微信被拉黑后用户来 QQ 求和，角色在 QQ 输出
+            // [解除拉黑:微信] 解除微信拉黑）；每解除一端在本会话落一条系统行，那边会话重进可见
+            if (res.changed) {
+              out.push({ id: uid(), role: 'peer', content: '', time: t, kind: 'sys', sys: { text: `「${peer.name}」解除了对你的拉黑` } });
+              t += 1;
+              // 40-a：角色主动解除拉黑 = 视同同意用户侧待处理申请（有的话置终态，避免卡片永远「等待对方处理」）
+              settleUserBlockReq('accepted');
+            }
+            const parsed = parseUnblockTargets(part.action.targetId);
+            const targetApps = parsed === 'all' ? (['wx', 'qq', 'sms'] as BlockApp[]) : parsed;
+            if (targetApps) {
+              const done = applyCharUnblockApps(peer.id, targetApps.filter((a) => a !== 'wx'));
+              for (const app of done) {
+                out.push({
+                  id: uid(),
+                  role: 'peer',
+                  content: '',
+                  time: t,
+                  kind: 'sys',
+                  sys: { text: `「${peer.name}」解除了你在${BLOCK_CHANNEL[app]}上被拉黑的状态` },
+                });
+                t += 1;
+              }
+            }
           } else if (res.reqCreated && bk === 'request') {
             out.push({ id: uid(), role: 'peer', content: '', time: t, kind: 'blockreq', blkreq: { reason: res.entry.reqReason ?? '', status: 'pending' } });
             t += 1;
@@ -2049,8 +2079,11 @@ export function ChatPage({
         continue;
       }
       // 40-a：仅申请卡模式（用户拉黑了角色）——AI 的正文/表情一律丢弃，只有上面动作分支产出的
-      // 申请卡片与系统行能落盘（入口守卫已保证：能走到这里的 byUser 回合必然处于可申请状态）
-      if (loadBlock('wx', peer.id).byUser) continue;
+      // 申请卡片与系统行能落盘（入口守卫已保证：能走到这里的 byUser 回合必然处于可申请状态）。
+      // v2.4 byChar 决策模式（角色拉黑了用户 + 用户 pending 解除申请）：正文同样丢弃——
+      // 拉黑中角色说不出话，只有决策标记（同意/拒绝/解除拉黑）产出的系统行能落盘
+      const blkNow = loadBlock('wx', peer.id);
+      if (blkNow.byUser || blkNow.byChar) continue;
       // #42：下方 segs/stripEmojiText 仅正常模式（byUser=false）执行——byUser continue 上面已拦，
       // 不再在三元里再判 byUser；保留 stickersOn 三元用于表情开关关闭时剥 emoji
       const segs = mergeRichSegments(splitReplySegments(part.text, !asSingle));
@@ -2279,8 +2312,12 @@ export function ChatPage({
     // 40-a 拉黑拦截（第一层）：用户拉黑角色（byUser）后，本 App 内 AI 不能发任何消息——回合静默取消。
     // 唯一例外=「解除拉黑申请卡片」仍可发起（charRequestOnlyOf 放行模式：回合照常请求，但回复中
     // 除申请卡片/系统行外的正文由 buildReplyMsgs 丢弃）；申请同意后的回应回合因 byUser 已清自然放行。
+    // v2.4 byChar 拦截（微信真实语义）：角色拉黑用户后 AI 的普通消息同样发不出（用户收不到，
+    // 拒不假装送达）；唯一放行=用户发来「解除拉黑申请」pending 中（charReqDecisionOnlyOf 决策回合：
+    // 正文丢弃，只留同意/拒绝/解除拉黑标记与系统行）。用户普通消息照常落库但根本不触发回合（send 入口拦）。
     const blkEntry = loadBlock('wx', peer.id);
     if (blkEntry.byUser && !charRequestOnlyOf(blkEntry)) return;
+    if (blkEntry.byChar && !charReqDecisionOnlyOf(blkEntry)) return;
     // 40-b：跨 App/群聊近况刷新（fire-and-forget，供下一轮使用；本轮用预热缓存）
     void buildCrossContextBlocks(peer.id, 'wx', me.realName || me.name)
       .then((b) => {
@@ -2304,8 +2341,9 @@ export function ChatPage({
     // 第二十九轮「头像感知」：AI 头像描述懒补（换过头像但识图还没成功时补一次；fire-and-forget）
     const peerAvatarSrc = avatarFor(peer, 'wx');
     if (peerAvatarSrc) ensureAvatarDesc(peer.id, 'wx', peerAvatarSrc, 'peer');
-    // 40-a：本轮是否处于「仅申请卡」放行模式（byUser 命中且守卫放行）——finalize 不落兑底占位
-    const requestOnly = blkEntry.byUser === true;
+    // 40-a：本轮是否处于「仅申请卡」放行模式（byUser 命中且守卫放行）——finalize 不落兑底占位；
+    // v2.4 byChar 决策模式同口径（正文丢弃时空回复不打失败徽标）
+    const requestOnly = blkEntry.byUser === true || blkEntry.byChar === true;
     // base 按 id 去重（保留后出现者）：extra/userMsg 里的消息通常已先一步进了 msgs state，
     // 不去重会把同一条消息算两遍——多图识图时重复 id 污染 turnImageMsgIds 映射，描述回写错位（#25）
     // #35 上下文补投递尾巴（群聊 #22 已修，单聊同款）：上一轮的回复还在打字节奏投递队列里（未落盘）时，
@@ -3202,10 +3240,21 @@ export function ChatPage({
   const send = useCallback(async () => {
     const text = input.trim();
     if (!text && pendingImgs.length === 0) return;
-    // 40-a 拉黑拦截：被角色拉黑（byChar）后本 App 内不能发送任何消息（toast + 不落库）；
-    // 唯一例外是「解除拉黑申请」，走输入区上方独立入口，不在 send 链上
-    if (loadBlock('wx', peer.id).byChar) {
-      onToast('对方已将你拉黑，无法发送');
+    // v2.4 byChar 新语义（微信真实拒收，机主实测「我可以给 AI 发消息但 AI 收不到，气泡带红色感叹号」）：
+    // 被角色拉黑后消息照发照显示（气泡红 ! + 「消息已发出，但被对方拒收了」提示行），
+    // 但角色收不到——不触发 AI 回合、不排队、不解析提醒指令；图片与文字同口径一起落库。
+    // 唯一例外是「解除拉黑申请」，走输入区上方独立入口，不在 send 链上。
+    if (peer.id !== me.id && loadBlock('wx', peer.id).byChar) {
+      const blkMsg: WxMsg | null = text
+        ? { id: uid(), role: 'me', content: text, time: Date.now(), quote: quote ?? undefined, unread: true }
+        : null;
+      const blkImgs: WxMsg[] = pendingImgs.map((p) => ({ id: uid(), role: 'me', content: '', time: Date.now(), kind: 'image' as const, img: { src: p.src }, unread: true }));
+      const blkBatch = [...(blkMsg ? [blkMsg] : []), ...blkImgs];
+      setInput('');
+      clearChatDraft('wx', peer.id);
+      setQuote(null);
+      setPendingImgs([]);
+      setMsgs((prev) => [...markPeerRead(prev), ...blkBatch]);
       return;
     }
     // 发送提示音（设置 › 通知可配；文字/图片/转语音共用的发送链入口）
@@ -3307,11 +3356,6 @@ export function ChatPage({
    *  presetTranscript = 文字转语音/划转文字/Web Speech 实时结果；selfChat 只记录；回复中排队补跑 */
   const commitVoiceMsg = useCallback(
     (clip: VoiceClip, presetTranscript?: string) => {
-      // 40-a 拉黑拦截：被角色拉黑（byChar）后语音消息也不能发（按住说话/文字转语音/划转文字共用本入口）
-      if (loadBlock('wx', peer.id).byChar) {
-        onToast('对方已将你拉黑，无法发送');
-        return;
-      }
       const hasText = typeof presetTranscript === 'string' && presetTranscript.trim().length > 0;
       const voice: VoiceMsgData = hasText
         ? { url: clip.dataUrl, duration: clip.duration, wave: clip.wave, localText: clip.localText, transcript: presetTranscript, stt: 'done' }
@@ -3320,6 +3364,9 @@ export function ChatPage({
       setMsgs((prev) => [...markPeerRead(prev), msg]);
       // 给自己发消息（「我」详情页入口）：只记录，不触发 AI 回复
       if (peer.id === me.id) return;
+      // v2.4 byChar 新语义（微信拒收）：被角色拉黑后语音照常落库（气泡红 ! + 拒收行），
+      // 但角色收不到——不转写、不触发回合、不排队
+      if (loadBlock('wx', peer.id).byChar) return;
       /** 触发 AI 回复（对方正在回复——流式或连发投递中——则排队补跑）；转写完成后再触发，AI 才能读到语音内容 */
       const kickTurn = () => {
         if (isChatStreaming(sessionKey) || isAiDelivering(sessionKey)) {
@@ -3353,13 +3400,13 @@ export function ChatPage({
   /** 「划到转文字」松开后：先识别再预览，由用户决定发送文字 / 发送语音（原始录音）/ 取消 */
   const sttPreview = useSttPreview({
     onSendText: (text) => {
-      // 40-a 拉黑拦截：被角色拉黑（byChar）后不能发送
-      if (loadBlock('wx', peer.id).byChar) {
-        onToast('对方已将你拉黑，无法发送');
-        return;
-      }
       const userMsg: WxMsg = { id: uid(), role: 'me', content: text, time: Date.now(), unread: true };
       if (peer.id === me.id) {
+        setMsgs((prev) => [...markPeerRead(prev), userMsg]);
+        return;
+      }
+      // v2.4 byChar 新语义（微信拒收）：被角色拉黑后文字照常落库（气泡红 ! + 拒收行），不触发回合
+      if (loadBlock('wx', peer.id).byChar) {
         setMsgs((prev) => [...markPeerRead(prev), userMsg]);
         return;
       }
@@ -5448,7 +5495,7 @@ export function ChatPage({
         <>
         {/* 40-a：被角色拉黑提示条 + 用户发起「解除拉黑申请」入口（pending 或已达拒绝上限时隐藏，
             会话内改用跨 App/电话联系方式不受影响）。展开的小面板 = 理由输入 + 发送/取消 */}
-        {blk.byChar === true && blk.userReqStatus !== 'pending' && (blk.userReqRejectedCount ?? 0) < BLOCK_REQ_MAX_REJECTED && (
+        {blk.byChar === true && (blk.userReqRejectedCount ?? 0) < BLOCK_REQ_MAX_REJECTED && (
           userReqOpen ? (
             <div className="px-2.5 pb-1 pt-2" data-testid="wx-user-blockreq-panel">
               <div className="flex items-center gap-2 rounded-[4px] border border-black/25 bg-white/75 px-2 py-1.5 dark:border-white/25 dark:bg-white/[0.13]">

@@ -70,6 +70,24 @@ function decide(messages: Array<{ role: string; content: unknown }>): { text?: s
     // 内联拼接一个字都剥不掉；验证现在正文上屏干净 + JSON 提取真执行
     return { text: '好的～我这就帮你定闹钟哦{"name": "setRealAlarm", "arguments": {"hour": 16, "minute": 23}}' };
   }
+  if (prompt.includes('裸格式二') || prompt.includes('定17点52')) {
+    // v2.3.2 E2E（机主实测「AI 定闹钟显示 setRealAlarm{"hour":17,"minute":52}，切回界面/
+    // 锁应用全是这样」）：模型把工具调用写成「函数名直接拼参数对象」——不带
+    // {"name":...,"arguments":...} 包裹。验证形状二提取代执行 + 正文剥除
+    return { text: '好的马上定setRealAlarm{"hour":17,"minute":52}等你哦' };
+  }
+  if (prompt.includes('拉黑我吧') || prompt.includes('你把我拉黑')) {
+    // v2.4 byChar E2E：角色输出 [拉黑] 标记（applyCharBlockAction block → byChar 跃迁）
+    return { text: '[拉黑]哼，你说的哦，那我真拉黑你了，你好好反省吧！' };
+  }
+  if (prompt.includes('拉回来') || prompt.includes('把我拉回来') || prompt.includes('解除拉黑')) {
+    // v2.4 跨 App 解除 E2E：角色在另一个 App 输出 [解除拉黑:全部] 解除所有 App 的 byChar
+    return { text: '好吧好吧，谁让你都追到这里来了…[解除拉黑:全部]下次不许再惹我生气了！' };
+  }
+  if (prompt.includes('系统代执行') || prompt.includes('系统强制检查')) {
+    // v2.4 E2E：工具轮代执行/强制检查的收尾汇报轮也带解除标记（防标记在收尾丢失）
+    return { text: '好啦好啦，我消气了…[解除拉黑:全部]下次不许再惹我生气了哦！' };
+  }
   if (prompt.includes('多行JSON')) {
     // v2.3.1 E2E：模型把工具调用 pretty-print 多行展开——流式分段器按换行把 JSON
     // 撕成多条半截上屏（第二种泄漏形态）；验证扣留缓冲拼齐提取、零半截上屏
