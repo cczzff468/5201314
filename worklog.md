@@ -3380,3 +3380,18 @@ Task: 机主实测三反馈——①让 AI 锁应用，AI 一直扯东扯西说�
 - [验证] tsc 改动文件 0 错误；eslint 0 error（11 条 android build 中间产物 warning 为既有基线）；git push 经 gh-proxy 镜像成功（直连 github TLS 被沙箱掐断）
 
 Stage Summary: 三大顽疾一次根治——调音量按真机实际档位百分比换算（再无「调了没变化/调大反变小」）；「锁应用/解锁/调音量/切回聊天/截图」五类明确指令加了确定性兜底代执行（模型拖延一次系统直接真办，「等会等会」从此白等）；名字在前句式补全进工具轮；工具通道 5 分钟自愈。关键文件：phone-tools.ts（解析器+代执行+正则+硬化）、device-ops.ts（音量百分比换算）、device-autonomy.ts（标记文档）、app-version.ts（v2.2.1）
+
+## 2026-11-23 · 第二十五轮：API 设置三连根修——拉取模型变少 / 测试连接误报失败 / 慢速服务商超时（v2.2.2 热更）
+
+Task: 机主反馈「同一个 API 地址和密钥，拉取模型少了，还连接不上，用别的功能（聊天等）连接上」。诊断 + 根修 + commit。
+
+- [诊断·证据链] dev.log 全量比对：用户 API 为单一 chat/completions 端点，沙箱服务器出口对该地址 GET /models 大多通（200 in 0.5~8.3s）、POST chat/completions 时通时断（10.5s 网络级失败占多数、偶有 29.5s 慢成功）→ 聊天链路有 directOnly→浏览器直连兜底 + 60s 宽容超时所以「能用」；测试连接同链路失败后浏览器直连被 CORS 拦（简单请求不带 Key → 401）→ 一路红到底「连接不上」；模型列表只走服务器单通道，部分中转/WAF 对服务器出口 IP 与用户本机 IP 返回不同列表 → 「拉取模型变少」；同一时段实测聊天 29.5s 成功、测试连接 30s 整被 AbortSignal 掐断——测试比聊天严苛是超时根因；沙箱出口实测：国内四家毫秒级可达、api.openai.com 8s 超时（海外/受限路由场景坐实）
+- [根修·统一拉取] direct-api.ts 新增 pullModelsUnified：服务器代理 /api/settings/models 与浏览器直连 directFetchModels **并行**发起、结果并集去重排序，再并入 localStorage 缓存（aiphone:models-cache:v1，按 地址+Key 记忆、LRU 20 组、单组 800 上限）——**列表只增不减**，服务商临时抽风也不会「变少」；双通道都挂但有缓存 → 展示缓存 + 灰提示（不标红）；接口可达但无模型列表接口 → 优雅降级 hint；全挂 → 合并错误
+- [根修·四页接入] 聊天/识图/语音/画图四个设置页 fetchModels 全部换用统一拉取（voice 保留 TTS 专属手动填写提示）；来源透明化：双通道合并/仅浏览器直连/仅缓存各给对应提示文案
+- [根修·测试连接] api.tsx runTest 重构为与聊天同链路多通道：服务器测试 →（directOnly / 私网 / upstreamStatus 403·429 / 非 JSON 网关页）→ 并行「directTest 浏览器直连 + pullModelsUnified 双通道模型探针」（探针顺手写缓存供拉取按钮复用）；直连成功 → 绿✅（浏览器直连）；**聊天双通道都没测通但模型探针拉到 → 全新琥珀色「连接基本可用」态**（地址与密钥有效 + 共 N 个模型 + 说明聊天实际双通道自动切换、能收发即无需处理）——机主的 WAF 场景不再误报「连接不上」；401/400/404 为服务商确定性结论不再无谓直连重试；testPartial 独立状态与 testConnected 黄态区分（后者才是「配置问题」）
+- [根修·服务端] test-connection：超时 30s→60s 对齐 /api/chat（慢速中转首响应 29.5s+ 不再误报）；全部错误响应新增 upstreamStatus 字段供客户端精准分流；底部兜底分支（如候选一 404 换路后候选二网络不可达）补 directOnly 让客户端走浏览器兜底，不再停在含糊「请稍后重试」；models 路由 12s→15s、directTest 20s→45s 同理放宽
+- [测试设施] mock-openai 扩 5 模型列表 + waf-block Key 模拟（Authorization 含 waf-block 时 POST 403「Access denied by WAF policy」、GET /models 照常 200）——完整复现机主「拉模型能用/测试连接失败/聊天能用」三症状
+- [E2E·Agent Browser 全链路] ①拉取模型：5 模型面板 + 排序去重 + 「浏览器直连拉取到 5 个模型」提示 + localStorage 缓存落库 ✓ ②WAF 场景（waf-block Key）测试连接 → 琥珀「连接基本可用：API 地址与密钥有效（模型列表验证通过，共 5 个模型）」✓ ③正常 Key → 绿「连接成功（浏览器直连）· 延迟 32ms」✓ ④mock 临时减至 1 模型重拉 → 仍 5 个（缓存并集，只增不减）✓ ⑤真实 DeepSeek 错 Key → 401 确定性报错（upstreamStatus 透传）✓ 全程控制台零错误、无 hydration 报错
+- [验证] tsc 改动文件 0 错误（全量报告其余为既有基线）；eslint 7 文件 0 告警；dev.log 无编译错误；git commit 5be4171
+
+Stage Summary: 「测试连接」从单通道严苛判定改为与聊天完全同构的多通道判定——服务器 POST、浏览器直连 POST、双通道模型探针三级递进，WAF/限流/慢速场景给出诚实的「基本可用」而不是吓人的「连接不上」；「拉取模型」从单通道改为双通道并集 + 本地缓存只增不减，「变少」从机制上不可能再发生。关键文件：direct-api.ts（pullModelsUnified+缓存）、api.tsx（runTest 多通道+testPartial）、settings/{vision,voice,imagegen}.tsx（统一拉取接入）、api/settings/{test-connection,models}/route.ts（超时+upstreamStatus+directOnly 兜底）
