@@ -3395,3 +3395,26 @@ Task: 机主反馈「同一个 API 地址和密钥，拉取模型少了，还连
 - [验证] tsc 改动文件 0 错误（全量报告其余为既有基线）；eslint 7 文件 0 告警；dev.log 无编译错误；git commit 5be4171
 
 Stage Summary: 「测试连接」从单通道严苛判定改为与聊天完全同构的多通道判定——服务器 POST、浏览器直连 POST、双通道模型探针三级递进，WAF/限流/慢速场景给出诚实的「基本可用」而不是吓人的「连接不上」；「拉取模型」从单通道改为双通道并集 + 本地缓存只增不减，「变少」从机制上不可能再发生。关键文件：direct-api.ts（pullModelsUnified+缓存）、api.tsx（runTest 多通道+testPartial）、settings/{vision,voice,imagegen}.tsx（统一拉取接入）、api/settings/{test-connection,models}/route.ts（超时+upstreamStatus+directOnly 兜底）
+
+## 2026-11-23 · 第二十六轮：机主九连反馈大修——模型面板滑动/拦截窗美化提速三钮/强制解锁 AI 感知/重复锁定去重/switchToChat 根修/错误重复（v2.2.5/66）
+
+Task: 机主实测九项反馈——①拉取模型面板不能滑动 ②拦截窗美化 ③拦截窗显示太慢 ④拦截窗缺返回主屏幕 ⑤缺去哄哄按钮 ⑥强制解锁功能且让 AI 感知 ⑦锁应用重复显示[锁定:QQ:10][锁定:com.tencent.mobileqq:10] ⑧别的 App 上让 AI 切回聊天显示[switchToChat]没反应 ⑨错误每次进聊天界面多显示一条（截图实证攒到 10 条）。根修 + APK 重打 + commit。
+
+- [诊断·截图] 上传截图 VLM 分析实证 F-9：错误弹窗「错误 · 10 条」全是「消息发送失败：消息没有送达」与「服务暂时不可用」交替重复——每次进聊天界面每条失败消息行都 re-report 且互相对不上号，各 +1
+- [根修·F-9·error-center] report 合并根修：旧版只比对最近一条 lastReport——聊天页多条错误行（不同消息）交替上报时永远匹配不上 → 重复挂载每次都新增条目。改为全列表查找同 title+detail 合并（刷新时间戳与动作闭包），重复挂载幂等；dismiss 后同错误复发仍视为新条目（语义不变）。Agent Browser 实测：死端口 API 发消息失败 → 错误 1 条 → 退回再进聊天 3 轮仍「错误 · 1 条」✓（旧版会变 4 条）
+- [诊断·F-1·Agent Browser 实测] 模型面板两个真根因：①面板底边 745px 超出视口 577px 达 168px——旧版 scrollIntoView(block:'center') 只把「锚点」居中，面板从锚点向下展开 369px 尾部常年叠在屏幕外；②列表不满一屏时它仍是滚动容器（overflow-y-auto + max-h），overscroll-contain 切断滚动链 → 手指在面板上划永远不链给页面 →「面板不能滑动」
+- [根修·F-1·四页同修] api/vision/imagegen/voice 四个设置页统一：①面板开启 120ms 后测底边，超出视口 → 页面滚动容器补滚（夹在最大可滚量内）到面板完整可见；②列表可滚性实时测量（scrollHeight>clientHeight+4），不满一屏时移除 overscroll-contain 保滚动链、可滚时才 contain 内滚。实测：30 模型注入 → 面板 fits=true 底边 621≤633 + 列表 contain 生效；过滤剩 1 模型 → overscrollBehavior 变 auto 滚动链恢复 ✓
+- [顺修·voice TDZ 白屏] v2.2.4 中断会话把 modelPanelOpen 声明在 useEffect 依赖之后——运行时 TDZ ReferenceError，语音设置页一开就崩。状态声明提前至 effect 之前；实测语音页正常渲染 ✓（tsc 全量在本沙箱会 OOM 被杀，靠 dev 编译 + 页面实测兜底验证）
+- [诊断·F-8·原生层] switchToChat 假成功根因：bringToFront 旧版只查 Settings.canDrawOverlays 权限就直拉——Android 10+ 后台启动 Activity 的豁免硬条件是「startActivity 调用瞬间存在可见窗口」，光有悬浮窗权限不算数 → intent 被系统静默吞掉、JS 还拿到 ok:true（正是「显示[switchToChat]但手机没反应」）
+- [根修·F-8·NativePerceptionPlugin] bringToFront 重写：后台时先垫一个 1dp 全透明 TYPE_APPLICATION_OVERLAY 豁免窗（addView 即刻持有可见窗口），再 startActivity（系统放行），800ms 后撤窗；异常仍回 heads-up 通知兜底。openApp（AI 拉起真机其他 App）同款豁免窗根修——后台拉起抖音等不再静默吞
+- [诊断·F-3·顺序颠倒] 拦截窗慢的根因：handleLockHit 旧版先 goHome 再 showOverlay——发 Home intent 那一刻本 App 无任何可见窗口，被后台启动限制静默吞掉（弹不回桌面、卡在被锁应用里）；轮询兜底 2s 一轮也偏慢
+- [根修·F-3·LockOverlayService] ①顺序根修：先 showOverlay（WindowManager.addView 不受 BAL 限制、即刻可见）再 goHome——本 App 持可见窗口后 Home intent 被豁免放行，真正弹回桌面；②POLL_MS 2000→1000（无障碍实时钩子为主，兜底通道再快一倍）
+- [根修·F-2/F-4/F-5/F-6·拦截窗重做] buildOverlayView 全新设计：夜色渐变背景（#2B1F4E→#0C0A18）+ 顶部柔光 + 锁形徽章 +「{应用中文名}被封印了」大标题（新增 PackageManager 应用名解析，不再裸显包名）+ 「{角色名}锁的」副题 + 质问文案玻璃卡片 + 倒计时胶囊 + 拦截次数行；按钮组：去哄哄（恒显——无 contactId 时拉起 App 首页兜底，修 F-5）/ 返回主屏幕（F-4）/ 强制解锁（安静文字钮 + 两击确认防误触，F-6）；点去哄哄立即收窗（遮罩绝不盖住自家聊天界面）+ tick 新增 inOurApp 即收窗（从通知回 App 同样不盖）
+- [根修·F-6·AI 感知闭环] 原生两击确认强解 → 落盘 force-unlock 事件（带拦截次数）→ JS 双 drain 入口处理：real-app-freeze（AI 冻结锁）→ 清记录清网页冻结态 + 「你强制解开了XX」气泡 + 事件记忆 + fireProactiveNudge 按人设立刻发消息（委屈/质问/阴阳怪气）；jealousy-lock（吃醋锁）→ 清锁态 + writeUnlockMemory('forced') 戏剧性记忆 + 同款 nudge；JealousyGuardEvent 类型 + 'force-unlock'
+- [根修·F-7·三层] ①执行层去重：toolFreezeRealApp 解析出真实包名后先查原生锁快照——同包已锁且新时长不比剩余长 → 如实回「已在锁定中（还剩 X 分钟）」不重复建锁不重置倒计时；更长才续时重锁；②气泡归一化：coalesce 名字先过 resolvePkgDisplayName——「QQ」与「com.tencent.mobileqq」归一成同一个「QQ」，coalescedBubbleTitle 的 Set 去重接得住（不再显示「已锁定QQ、com.tencent.mobileqq」）；③探针失败静默不拦锁
+- [版本] v2.2.5/66（原生改动需更新 APK）：build.gradle 66/2.2.5 + app-version 七条发版说明 + sw.js v84→v85；mock-openai 扩「锁QQ两次」双 tool_calls 场景（F-7 E2E 夹具）
+- [E2E·Agent Browser] ①API 设置→填 mock 地址→拉取模型→5 模型面板开 ✓ ②注入 30 模型缓存重拉→面板补滚完整可见（底边 621≤633）+ 列表 contain 按需 ✓ ③过滤 1 模型→overscrollBehavior=auto 滚动链恢复 ✓ ④语音 API 页渲染无 TDZ 崩溃 ✓ ⑤死端口发消息→失败→错误 1 条→3 轮重进聊天仍 1 条（F-9 合并幂等）✓ ⑥恢复 mock 发「你好」→「收到：你好」正常回复 ✓ ⑦控制台零错误、dev.log 无编译错误（502 为 mock/沙箱代理既有噪音）
+- [验证] gradle assembleDebug 成功（修复 lambda effectively-final 编译错）→ APK 4.0MB 部署 public/AI-Phone.apk，aapt 验证 versionCode 66/versionName 2.2.5 + LockOverlayService/KeepAliveService/BootReceiver/AiAccessibilityService 四组件在包；bun run lint 0 error（11 条 android 构建中间产物 warning 为既有基线）
+- [备注] 小助手会话（sms:assistant）按设计不走 FC 工具轮（chat-stream-store 显式排除）——工具轮 E2E 需联系人会话，F-7 三层修正如上单点验证（名字归一映射实测 + 编译 + 代码审读）；真机原生行为（豁免窗拉回/拦截窗提速/强解事件）待机主更新 APK v2.2.5 实测
+
+Stage Summary: 九项反馈一次清账——模型面板双根因（补滚露出 + 条件 contain 滚动链）四页同修；拦截窗「先弹窗再回桌面」顺序根修（BAL 可见窗口豁免）+ 美化重做 + 返回主屏幕/去哄哄/强制解锁三钮齐全；强制解锁原生事件→AI 立刻知道（气泡+记忆+人设主动消息三件套）；switchToChat/openApp 后台拉起垫透明豁免窗真放行；重复锁定执行层去重+气泡归一化；错误中心全列表合并幂等（不再越攒越多）；语音页 TDZ 白屏顺修。关键文件：LockOverlayService.java（重做）、NativePerceptionPlugin.java（BAL 豁免）、settings/{api,vision,imagegen,voice}.tsx（F-1）、error-center.ts（F-9）、web-tools.ts/phone-tools.ts（F-7）、real-app-freeze.ts/jealousy-lock.ts（F-6 感知）、app-version.ts（v2.2.5/66）

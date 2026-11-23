@@ -11,6 +11,8 @@ import android.app.AppOpsManager;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.content.pm.ApplicationInfo;
+import android.content.pm.PackageManager;
 import android.content.pm.ServiceInfo;
 import android.graphics.Color;
 import android.graphics.PixelFormat;
@@ -20,14 +22,18 @@ import android.os.Build;
 import android.os.Handler;
 import android.os.HandlerThread;
 import android.os.IBinder;
+import android.os.Looper;
 import android.os.Process;
 import android.provider.Settings;
 import android.view.Gravity;
+import android.view.View;
 import android.view.WindowManager;
 import android.widget.Button;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
+import android.widget.ScrollView;
 import android.widget.TextView;
+import android.widget.Toast;
 
 import androidx.core.app.NotificationCompat;
 
@@ -84,6 +90,8 @@ public class LockOverlayService extends Service {
     private static volatile String message = "";
     private static volatile String contactId = "";
     private static volatile String appKind = ""; // 'wx' | 'qq' | 'sms'（空 = 无去哄哄按钮）
+    /** v2.2.5 F-2：被锁应用的中文应用名（PackageManager 标题；拦截窗标题用，不再裸显包名） */
+    private static volatile String appLabel = "";
     private static volatile boolean serviceRunning = false;
     private static volatile boolean overlayShowing = false;
     /** 遮罩期间用户仍停留在锁定 App / 反复点开被拦的总次数（每次拦截 +1） */
@@ -107,8 +115,9 @@ public class LockOverlayService extends Service {
     private static final String CHANNEL_ID = "lock_guard";
     private static final int NOTIFY_ID = 7791;
 
-    /** 轮询周期：v2.2.0 3s → 2s（无障碍实时钩子为主，这里只是无障碍未开启时的兜底） */
-    private static final long POLL_MS = 2000L;
+    /** 轮询周期：v2.2.5 F-3 2s → 1s（无障碍实时钩子为主，这里只是无障碍未开启时的
+     *  兜底——机主实测拦截窗弹出太慢，兜底通道再快一倍：无障碍可用时零延迟，不可用时 ≤1s） */
+    private static final long POLL_MS = 1000L;
 
     /** 同一次拦截的防抖窗（800ms 内无障碍事件 + 轮询双通道同时命中只算一次） */
     private static final long HIT_DEBOUNCE_MS = 800L;
@@ -136,6 +145,8 @@ public class LockOverlayService extends Service {
 
     private HandlerThread engineThread;
     private Handler engine;
+    /** v2.2.5 F-6：强制解锁按钮的两击确认态（true=已点第一次等确认；3s 超时还原文案） */
+    private boolean forceArmed = false;
     /** v2.2.0 倒计时每秒刷新线程（遮罩可见期间驱动；与引擎线程分离防互相阻塞） */
     private Handler uiTickHandler;
     private HandlerThread uiTickThread;
@@ -188,10 +199,23 @@ public class LockOverlayService extends Service {
         message = msg == null ? "" : msg.trim();
         contactId = cid == null ? "" : cid.trim();
         appKind = ak == null ? "" : ak.trim();
+        appLabel = resolveAppLabel(pkg); // v2.2.5 F-2：拦截窗标题用中文应用名
         openAttempts = 0;
         startForegroundNotify();
         scheduleTick(0L); // 立即首轮
         return START_STICKY;
+    }
+
+    /** v2.2.5 F-2：解析被锁应用的中文应用名（PackageManager；失败回空串） */
+    private String resolveAppLabel(String pkg) {
+        try {
+            PackageManager pm = getPackageManager();
+            ApplicationInfo ai = pm.getApplicationInfo(pkg, 0);
+            CharSequence label = pm.getApplicationLabel(ai);
+            return label == null ? "" : label.toString();
+        } catch (Throwable t) {
+            return "";
+        }
     }
 
     @Override
@@ -274,10 +298,14 @@ public class LockOverlayService extends Service {
 
             if (onLocked) {
                 handleLockHit("poll"); // v2.2.0：检测到 → 立即回桌面 + 弹拦截窗
-            } else if (overlayShowing && System.currentTimeMillis() >= overlayHoldUntil) {
-                // 已离开锁定 App（被弹回桌面/切走）且超出保持窗：收起遮罩（再开还会再弹）。
-                // 保持窗内的拦截窗不收——那正是给用户看的质问/倒计时界面。
-                removeOverlay();
+            } else if (overlayShowing) {
+                // 已离开锁定 App：两种情况收窗——
+                // ① fg 是本 App（用户从去哄哄/通知回来了）：绝不盖住自家聊天界面，立即收；
+                // ② 超出保持窗（15s）：用户已放弃打开，收起（再开还会再弹）。
+                boolean inOurApp = fg != null && fg.equals(getPackageName());
+                if (inOurApp || System.currentTimeMillis() >= overlayHoldUntil) {
+                    removeOverlay();
+                }
             }
         } catch (Throwable ignored) {
             // 引擎绝不 crash
@@ -287,9 +315,11 @@ public class LockOverlayService extends Service {
 
     /**
      * v2.2.0 拦截核心：锁定应用露头（无障碍实时钩子或轮询兜底命中）→
-     * ① 立刻弹回桌面（不等用户在被锁应用里做任何操作）；
-     * ② 紧接着弹出全屏拦截窗（盖在桌面之上：质问文案 + 倒计时 + 去哄哄）；
-     * ③ 每次拦截计数 +1 且节流落盘 lock-attempt 事件（AI 感知强行突破的信号源）。
+     * v2.2.5 F-3 顺序根修：① 先弹全屏拦截窗（WindowManager.addView 不受后台启动限制，
+     *    窗口 add 即刻可见）→ ② 本 App 在 startActivity 那一刻已持有「可见窗口」，
+     *    Home intent 被系统放行（Android 10+ 后台启动豁免的硬条件就是调用瞬间存在
+     *    可见窗口——旧版先 goHome 后加窗，Home intent 被静默吞掉：机主实测「拦截窗
+     *    显示太慢 / 弹不出来」正是这个）→ ③ 每次拦截计数 +1 且节流落盘事件。
      */
     private void handleLockHit(String via) {
         try {
@@ -306,16 +336,15 @@ public class LockOverlayService extends Service {
                 persistEvent("lock-attempt", lockPkg, "第" + openAttempts + "次想打开");
             }
 
-            // ① 立刻弹回桌面：持有悬浮窗权限（建锁前置校验）+ overlay 可见窗口 = 豁免
-            //    Android 10+ 后台 Activity 启动限制；HOME intent 双保险。
-            goHome();
-
-            // ② 弹全屏拦截窗（盖在桌面之上，用户看到的第一屏就是 TA 的质问）
+            // ① 弹全屏拦截窗（先有可见窗口）
             if (!overlayShowing) {
                 persistEvent("lock-shown", lockPkg, message);
                 showOverlay();
             }
             overlayHoldUntil = now + OVERLAY_HOLD_MS; // 刷新保持窗：这轮拦截的窗持续展示
+
+            // ② 有了可见窗口再弹回桌面（后台启动豁免成立，真正弹得回去）
+            goHome();
             refreshOverlayTexts();
         } catch (Throwable ignored) {
             // 拦截链路绝不 crash
@@ -343,6 +372,7 @@ public class LockOverlayService extends Service {
         message = "";
         contactId = "";
         appKind = "";
+        appLabel = "";
         openAttempts = 0;
         overlayHoldUntil = 0L;
         clearPersistedLock(getApplicationContext());
@@ -433,101 +463,175 @@ public class LockOverlayService extends Service {
         }
     }
 
-    /** 构建拦截窗视图（纯代码布局：深色渐变 + AI 质问文案 + 每秒倒计时 + 去哄哄/我知道了） */
+    /**
+     * 构建拦截窗视图（v2.2.5 F-2 美化重做 + F-4 返回主屏幕 + F-5 去哄哄恒显 + F-6 强制解锁）：
+     * 深紫夜色渐变 → 锁形徽章 →「{应用名}被封印了」主标题 → {角色名}锁的 副题 →
+     * 质问文案卡片 → 倒计时胶囊 → 拦截次数 → 去哄哄（主按钮·粉）/ 返回主屏幕（次按钮）/
+     * 强制解锁（安静文字钮·两击确认）。小屏包 ScrollView 防溢出。
+     */
     private FrameLayout buildOverlayView() {
         final Context ctx = this;
         FrameLayout root = new FrameLayout(ctx);
-        root.setBackgroundColor(Color.parseColor("#F2191B2E"));
+        // 夜色渐变背景（F-2：旧版纯色 #F2191B2E 偏闷，改上下渐变更有层次）
+        GradientDrawable rootBg = new GradientDrawable(
+                GradientDrawable.Orientation.TOP_BOTTOM,
+                new int[]{Color.parseColor("#2B1F4E"), Color.parseColor("#171231"), Color.parseColor("#0C0A18")});
+        root.setBackground(rootBg);
+
+        final String who = charName == null || charName.isEmpty() ? "TA" : charName;
+
+        // 顶部柔光（粉紫色圆斑，固定在根层顶部——不随内容滚动，作为徽章背后的氛围光）
+        FrameLayout glow = new FrameLayout(ctx);
+        GradientDrawable glowBg = new GradientDrawable();
+        glowBg.setShape(GradientDrawable.OVAL);
+        glowBg.setColors(new int[]{Color.parseColor("#26FFC7E0"), Color.parseColor("#00FFC7E0")});
+        glowBg.setOrientation(GradientDrawable.Orientation.TR_BL);
+        glow.setBackground(glowBg);
+        FrameLayout.LayoutParams glowLp = new FrameLayout.LayoutParams(dp(300), dp(300), Gravity.TOP | Gravity.CENTER_HORIZONTAL);
+        glowLp.topMargin = -dp(80);
+        root.addView(glow, glowLp);
+
+        ScrollView sc = new ScrollView(ctx);
+        sc.setFillViewport(true);
+        sc.setVerticalScrollBarEnabled(false);
+        sc.setOverScrollMode(View.OVER_SCROLL_NEVER);
+        FrameLayout.LayoutParams scLp = new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT);
+        root.addView(sc, scLp);
 
         LinearLayout box = new LinearLayout(ctx);
         box.setOrientation(LinearLayout.VERTICAL);
         box.setGravity(Gravity.CENTER_HORIZONTAL);
-        box.setPadding(dp(36), dp(72), dp(36), dp(48));
+        box.setPadding(dp(34), dp(56), dp(34), dp(44));
+        ScrollView.LayoutParams boxLp = new ScrollView.LayoutParams(
+                ScrollView.LayoutParams.MATCH_PARENT, ScrollView.LayoutParams.WRAP_CONTENT);
+        sc.addView(box, boxLp);
 
-        // 图标行
-        TextView icon = new TextView(ctx);
-        icon.setText("🚫");
-        icon.setTextSize(44);
-        icon.setGravity(Gravity.CENTER);
-        box.addView(icon);
+        // 锁形徽章（圆形玻璃底 + 🔒）
+        FrameLayout badgeWrap = new FrameLayout(ctx);
+        FrameLayout.LayoutParams badgeWrapLp = new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT);
+        box.addView(badgeWrap, badgeWrapLp);
+        TextView badge = new TextView(ctx);
+        badge.setText("🔒");
+        badge.setTextSize(30);
+        badge.setGravity(Gravity.CENTER);
+        GradientDrawable badgeBg = new GradientDrawable();
+        badgeBg.setShape(GradientDrawable.OVAL);
+        badgeBg.setColor(Color.parseColor("#66FFFFFF"));
+        badgeBg.setStroke(dp(1), Color.parseColor("#59FFFFFF"));
+        badge.setBackground(badgeBg);
+        FrameLayout.LayoutParams badgeLp = new FrameLayout.LayoutParams(dp(74), dp(74), Gravity.CENTER_HORIZONTAL);
+        badgeWrap.addView(badge, badgeLp);
 
-        // 标题：{角色名}的吃醋封印
+        // 主标题：{应用名}被封印了（F-2：中文应用名替代旧「{角色名}的吃醋封印」）
         TextView title = new TextView(ctx);
-        String who = charName == null || charName.isEmpty() ? "TA" : charName;
-        title.setText(who + "的吃醋封印");
-        title.setTextSize(21);
+        String what = appLabel == null || appLabel.isEmpty() ? "这个应用" : appLabel;
+        title.setText(what + "被封印了");
+        title.setTextSize(23);
         title.setTypeface(Typeface.DEFAULT_BOLD, Typeface.BOLD);
-        title.setTextColor(Color.parseColor("#FFD7DE"));
+        title.setTextColor(Color.WHITE);
         title.setGravity(Gravity.CENTER);
-        title.setPadding(0, dp(18), 0, dp(10));
+        title.setPadding(dp(6), dp(22), dp(6), 0);
         box.addView(title);
 
-        // AI 质问文案
+        // 副题：{角色名} 锁的
+        TextView by = new TextView(ctx);
+        by.setText(who + " 锁的");
+        by.setTextSize(13);
+        by.setTextColor(Color.parseColor("#FFC7DE"));
+        by.setGravity(Gravity.CENTER);
+        by.setPadding(0, dp(7), 0, 0);
+        box.addView(by);
+
+        // 质问文案卡片（半透明白玻璃圆角卡）
         TextView msg = new TextView(ctx);
         msg.setText(message == null || message.isEmpty() ? "被我没收啦，说了要专心。" : message);
         msg.setTextSize(16);
-        msg.setTextColor(Color.WHITE);
+        msg.setTextColor(Color.parseColor("#F2EFFA"));
         msg.setGravity(Gravity.CENTER);
         msg.setLineSpacing(dp(4), 1f);
-        msg.setTag("msg");
-        box.addView(msg);
+        msg.setPadding(dp(20), dp(14), dp(20), dp(14));
+        GradientDrawable msgBg = new GradientDrawable();
+        msgBg.setCornerRadius(dp(18));
+        msgBg.setColor(Color.parseColor("#14FFFFFF"));
+        msgBg.setStroke(dp(1), Color.parseColor("#24FFFFFF"));
+        msg.setBackground(msgBg);
+        LinearLayout.LayoutParams msgLp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        msgLp.topMargin = dp(24);
+        box.addView(msg, msgLp);
 
-        // 倒计时行（v2.2.0：真实剩余时间，每秒刷新）
+        // 倒计时胶囊（每秒刷新；圆角药丸底）
         TextView countdown = new TextView(ctx);
-        countdown.setTextSize(15);
-        countdown.setTextColor(Color.parseColor("#B8BEDC"));
+        countdown.setTextSize(13);
+        countdown.setTextColor(Color.parseColor("#D9C9F2"));
         countdown.setGravity(Gravity.CENTER);
-        countdown.setPadding(0, dp(14), 0, 0);
+        countdown.setPadding(dp(16), dp(7), dp(16), dp(7));
+        GradientDrawable cdBg = new GradientDrawable();
+        cdBg.setCornerRadius(dp(999));
+        cdBg.setColor(Color.parseColor("#17FFFFFF"));
+        countdown.setBackground(cdBg);
         countdown.setTag("countdown");
         countdown.setText(countdownText());
-        box.addView(countdown);
+        LinearLayout.LayoutParams cdLp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        cdLp.gravity = Gravity.CENTER_HORIZONTAL;
+        cdLp.topMargin = dp(18);
+        box.addView(countdown, cdLp);
 
         // 拦截次数行（反复手贱点开时显示，AI 感知强行突破的原生展示）
         TextView attempts = new TextView(ctx);
         attempts.setTextSize(12);
         attempts.setTextColor(Color.parseColor("#8C92B4"));
         attempts.setGravity(Gravity.CENTER);
-        attempts.setPadding(0, dp(6), 0, 0);
+        attempts.setPadding(0, dp(8), 0, 0);
         attempts.setTag("attempts");
         box.addView(attempts);
 
-        // 【去哄哄 TA】按钮（v2.2.0：拉起本 App 直达对应聊天——复用 localNotify 点击直达协议）
-        if (contactId != null && !contactId.isEmpty()) {
-            Button coax = new Button(ctx);
-            coax.setText("去哄哄 " + who);
-            coax.setTextSize(16);
-            coax.setTextColor(Color.parseColor("#221A33"));
-            coax.setPadding(dp(30), 0, dp(30), 0);
-            coax.setAllCaps(false);
-            GradientDrawable coaxBg = new GradientDrawable();
-            coaxBg.setCornerRadius(dp(24));
-            coaxBg.setColor(Color.parseColor("#FFE3EC"));
-            coax.setBackground(coaxBg);
-            coax.setOnClickListener((v) -> {
-                try {
-                    openChatWithTarget();
-                } catch (Throwable ignored) {
-                }
-                // 遮罩保留（没哄好之前锁还在），但用户已进聊天界面；锁到期/哄好解锁时自动收起
-            });
-            LinearLayout.LayoutParams coaxLp = new LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT, dp(52));
-            coaxLp.topMargin = dp(30);
-            box.addView(coax, coaxLp);
-        }
+        // 【去哄哄 TA】主按钮（F-5：恒显——无联系人信息时点开直达 App 首页聊天列表，
+        // 有信息时按 localNotify 直达协议精准跳对应聊天）
+        Button coax = new Button(ctx);
+        coax.setText("去哄哄 " + who);
+        coax.setTextSize(16);
+        coax.setTextColor(Color.parseColor("#2A1622"));
+        coax.setAllCaps(false);
+        coax.setPadding(0, 0, 0, 0);
+        coax.setStateListAnimator(null);
+        GradientDrawable coaxBg = new GradientDrawable();
+        coaxBg.setCornerRadius(dp(28));
+        coaxBg.setColor(Color.parseColor("#FFD9E6"));
+        coax.setBackground(coaxBg);
+        coax.setOnClickListener((v) -> {
+            try {
+                openChatWithTarget();
+            } catch (Throwable ignored) {
+            }
+            // v2.2.5：立即收窗去聊天（锁仍然生效，遮罩绝不盖住自家聊天界面；
+            // TA 再跑去点被锁 App，露头即再弹）
+            try {
+                removeOverlay();
+            } catch (Throwable ignored) {
+            }
+        });
+        LinearLayout.LayoutParams coaxLp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(56));
+        coaxLp.topMargin = dp(32);
+        box.addView(coax, coaxLp);
 
-        // 【我知道了】按钮（收起遮罩回桌面；再点被锁 App 还会再弹）
+        // 【返回主屏幕】次按钮（F-4：机主要求的显式回桌面钮——收遮罩 + 送回桌面）
         Button home = new Button(ctx);
-        home.setText("我知道了");
+        home.setText("返回主屏幕");
         home.setTextSize(15);
-        home.setTextColor(Color.parseColor("#D8DCEF"));
-        home.setPadding(dp(30), 0, dp(30), 0);
+        home.setTextColor(Color.parseColor("#E9E4F7"));
         home.setAllCaps(false);
-        GradientDrawable bg = new GradientDrawable();
-        bg.setCornerRadius(dp(24));
-        bg.setColor(Color.parseColor("#3A3550"));
-        bg.setStroke(dp(1), Color.parseColor("#55507A"));
-        home.setBackground(bg);
+        home.setPadding(0, 0, 0, 0);
+        home.setStateListAnimator(null);
+        GradientDrawable homeBg = new GradientDrawable();
+        homeBg.setCornerRadius(dp(24));
+        homeBg.setColor(Color.parseColor("#1FFFFFFF"));
+        homeBg.setStroke(dp(1), Color.parseColor("#33FFFFFF"));
+        home.setBackground(homeBg);
         home.setOnClickListener((v) -> {
             try {
                 goHome(); // 保险：若用户从其他入口进来，再送一程回桌面
@@ -536,13 +640,73 @@ public class LockOverlayService extends Service {
             removeOverlay(); // 立即收起（点按钮=用户放弃打开，tick 会再判定）
         });
         LinearLayout.LayoutParams btnLp = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, dp(46));
-        btnLp.topMargin = contactId != null && !contactId.isEmpty() ? dp(12) : dp(30);
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(48));
+        btnLp.topMargin = dp(12);
         box.addView(home, btnLp);
 
-        FrameLayout.LayoutParams fl = new FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT);
-        root.addView(box, fl);
+        // 【强制解锁】安静文字钮（F-6：两击确认——误触不直接解；确认后原生解锁 +
+        // 落盘 force-unlock 事件，JS drain 后 AI 立刻知道「TA 没哄我，强解了」）
+        final Button force = new Button(ctx);
+        force.setText("强制解锁");
+        force.setTextSize(13);
+        force.setTextColor(Color.parseColor("#B49BD6"));
+        force.setAllCaps(false);
+        force.setPadding(0, dp(10), 0, dp(6));
+        force.setStateListAnimator(null);
+        force.setBackgroundColor(Color.TRANSPARENT);
+        force.setTag("force");
+        force.setOnClickListener((v) -> {
+            if (!forceArmed) {
+                // 第一次点：确认态（3 秒内再点才真解；超时还原文案）
+                forceArmed = true;
+                force.setText("再点一次确认强解（" + who + "会知道）");
+                force.setTextColor(Color.parseColor("#FFB3C2"));
+                v.postDelayed(() -> {
+                    forceArmed = false;
+                    try {
+                        force.setText("强制解锁");
+                        force.setTextColor(Color.parseColor("#B49BD6"));
+                    } catch (Throwable ignored) {
+                    }
+                }, 3000L);
+                return;
+            }
+            forceArmed = false;
+            try {
+                // 解锁前先落事件（internalUnlock 会清 lockPkg）——AI 感知强解的信号源
+                persistEvent("force-unlock", lockPkg,
+                        "机主没有哄，直接强制解锁（期间共拦截 " + openAttempts + " 次）");
+            } catch (Throwable ignored) {
+            }
+            try {
+                internalUnlock("user-force");
+            } catch (Throwable ignored) {
+            }
+            try {
+                new Handler(Looper.getMainLooper()).post(() -> {
+                    try {
+                        Toast.makeText(getApplicationContext(),
+                                "已解锁（" + who + "会知道你强解的哦）", Toast.LENGTH_SHORT).show();
+                    } catch (Throwable ignored) {
+                    }
+                });
+            } catch (Throwable ignored) {
+            }
+        });
+        LinearLayout.LayoutParams forceLp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        forceLp.topMargin = dp(10);
+        box.addView(force, forceLp);
+
+        // 底部小字：锁归谁管的说明
+        TextView manage = new TextView(ctx);
+        manage.setText("封印由 " + who + " 管理 · 哄好、倒计时到点或强制解锁都会解开");
+        manage.setTextSize(11);
+        manage.setTextColor(Color.parseColor("#6F668F"));
+        manage.setGravity(Gravity.CENTER);
+        manage.setPadding(0, dp(6), 0, 0);
+        box.addView(manage);
+
         return root;
     }
 
@@ -551,9 +715,19 @@ public class LockOverlayService extends Service {
      * （{app:'wechat'|'qq'|'chat', contactId}）→ handleOnNewIntent →
      * injectLocalNotifyOpen → 网页导航总线直达对应聊天界面。
      * 冷启动（App 被杀过）由 MainActivity.onCreate 的 extras 兜底处理。
+     * v2.2.5 F-5：contactId 缺失（AI 没带会话上下文）时不再不显示按钮——
+     * 直接拉起 App 首页（聊天列表所在），TA 自己点进去哄。
      */
     private void openChatWithTarget() {
         try {
+            if (contactId == null || contactId.isEmpty()) {
+                Intent home = new Intent(this, MainActivity.class);
+                home.setPackage(getPackageName());
+                home.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_REORDER_TO_FRONT
+                        | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+                startActivity(home);
+                return;
+            }
             String navApp = "wx".equals(appKind) ? "wechat" : "qq".equals(appKind) ? "qq" : "chat";
             JSONObject target = new JSONObject();
             target.put("app", navApp);

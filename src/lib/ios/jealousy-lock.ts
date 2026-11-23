@@ -688,6 +688,40 @@ async function drainJealousyGuardEvents(): Promise<void> {
         }
       }
       // 锁已被 JS 侧先解开（正常 tick 驱动）或包名不匹配 → 幂等忽略
+    } else if (ev.type === 'force-unlock') {
+      // v2.2.5 F-6：机主在原生拦截窗点了【强制解锁】（没哄直接强解）——
+      // 吃醋锁的对齐链路：清锁态 + 解网页冻结 + 写「强制解锁」戏剧性记忆 + 主动消息
+      const rt = readJealousyRuntime();
+      const l = rt.lock;
+      if (l && !l.web && l.pkg === ev.pkg) {
+        unfreezeWebPkg(ev.pkg); // 原生遮罩已撤（服务自停），网页图标一并恢复
+        writeRt({
+          lock: null,
+          patrol: null,
+          lastUnlock: { at: ev.ts, kind: 'forced', pkg: ev.pkg },
+          pendingUnfreeze: null,
+        });
+        const appName = pkgDisplayName(ev.pkg);
+        try {
+          const contact = await findContact(l.contactId).catch(() => null);
+          await writeUnlockMemory('forced', contact, l.app, appName);
+        } catch {
+          /* 记忆失败不影响对齐 */
+        }
+        // 主动消息：按人设立刻来一条（委屈/质问/阴阳怪气由人设决定）
+        if (l.contactId) {
+          try {
+            const { fireProactiveNudge } = await import('./proactive-msg');
+            void fireProactiveNudge((l.app ?? 'sms') as 'wx' | 'qq' | 'sms', l.contactId, {
+              dedupeKey: `jealousy-force-unlock-${ev.pkg}-${l.lockedAt}`,
+              context: `你们之间刚发生了一件事：你吃醋把「${appName}」锁了（TA 点开就会被弹回桌面看到你的拦截窗），但 TA 没有哄你，直接在拦截窗点了【强制解锁】把它强行解开了${ev.text ? `（${ev.text}）` : ''}。以你的角色人设、结合你们最近的聊天记忆，主动给 TA 发一条消息——可以委屈、可以质问 TA 不哄你、也可以阴阳怪气，一两句话就够，别太正式`,
+            }).catch(() => false);
+          } catch {
+            /* nudge 失败静默（记忆已写） */
+          }
+        }
+      }
+      // 无活跃吃醋锁（可能被 JS 先解）→ 幂等忽略
     } else if (ev.type === 'lock-shown' || ev.type === 'lock-attempt') {
       // v2.0.0 遮罩锁新事件：用户试图打开被锁应用（遮罩已弹出）/反复尝试 → AI 按人设发消息质问
       await reactLockShown(ev, ev.type === 'lock-attempt');

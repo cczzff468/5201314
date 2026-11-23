@@ -36,6 +36,9 @@ function decide(messages: Array<{ role: string; content: unknown }>): { text?: s
     if (prompt.includes('解冻')) {
       return { text: '解冻好了，这三个应用现在都能打开了～' };
     }
+    if (prompt.includes('重复锁定QQ') || prompt.includes('锁QQ两次')) {
+      return { text: '锁好啦，QQ 已经在我的封印名单里了～' };
+    }
     return { text: '都办好了～' };
   }
 
@@ -49,6 +52,15 @@ function decide(messages: Array<{ role: string; content: unknown }>): { text?: s
           reason: '你让我全冻的，别怪我哦',
           durationMin: 30,
         }),
+      ],
+    };
+  }
+  if (prompt.includes('重复锁定QQ') || prompt.includes('锁QQ两次')) {
+    // v2.2.5 F-7 E2E：模型同一轮按应用名与包名各锁一次（机主实测重复显示场景）
+    return {
+      calls: [
+        toolCall('call_dup_1', 'freezeRealApp', { packageName: 'QQ', durationMinutes: 10, reason: '你玩太久了' }),
+        toolCall('call_dup_2', 'freezeRealApp', { packageName: 'com.tencent.mobileqq', durationMinutes: 10, reason: '你玩太久了' }),
       ],
     };
   }

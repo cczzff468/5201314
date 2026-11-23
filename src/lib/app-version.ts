@@ -11,9 +11,9 @@
  */
 
 /** 当前最新版本（与 android-shell versionName 保持一致） */
-export const APP_VERSION = '2.2.1';
+export const APP_VERSION = '2.2.5';
 /** 版本号数字（与 android-shell versionCode 保持一致；覆盖安装要求只增不减） */
-export const APP_VERSION_CODE = 65;
+export const APP_VERSION_CODE = 66;
 
 export interface AppReleaseNote {
   version: string;
@@ -24,6 +24,19 @@ export interface AppReleaseNote {
 
 /** 版本历史（新→旧；设置 › APP 更新 页渲染，最新一条即当前版本） */
 export const APP_RELEASE_NOTES: AppReleaseNote[] = [
+  {
+    version: '2.2.5',
+    date: '2026-11-23',
+    items: [
+      '【需更新 APK·拦截窗大改版】拦截窗美化重做：夜色渐变 + 锁形徽章 + 「XX被封印了」大标题（显示应用中文名）+ 质问文案卡片 + 倒计时胶囊；新增【返回主屏幕】与【强制解锁】两个按钮，【去哄哄 TA】改成永远显示（没带聊天定位也能点进去哄）',
+      '【需更新 APK·拦截窗提速根修】点开被锁应用后拦截窗弹出太快太稳了：旧版先发回桌面指令再弹窗——回桌面那一刻 App 没有任何可见窗口，被 Android 10+ 静默吞掉（卡在被锁应用里、窗半天不出来）；现在先弹窗（即刻可见）再借窗口豁免真弹回桌面，兑底轮询也从 2 秒提到 1 秒',
+      '【需更新 APK·强制解锁 AI 感知】拦截窗新增【强制解锁】（两击确认防误触）：强解瞬间 AI 就知道你没哄 TA、直接掀了 TA 的封印——立刻按人设来消息质问/委屈/阴阳怪气 + 写进记忆（下轮聊天还能翻旧账）',
+      '【需更新 APK·switchToChat 根修】在别的 App 上让 AI 切回聊天终于真的切了：旧版后台拉回只查了悬浮窗权限（不够，Android 要求调用瞬间真有可见窗口）被静默吞；现在先垫一个透明悬浮窗占住可见窗口位再拉起，真机后台也百分百拉回（openRealApp 拉起其他 App 同步根修）',
+      '锁应用不再重复显示：AI 同一轮按应用名（QQ）和包名（com.tencent.mobileqq）各锁一次时，同一个应用只锁一次、气泡只显示一次中文名；已锁中的应用再次锁不会重置倒计时，如实告知「已在锁定中，还剩 X 分钟」',
+      '拉取模型面板滑动修复：面板打开时自动滚到完整可见（旧版尾部常年叠在屏幕外）；列表不满一屏时放开滚动限制，手指划面板能带动页面滚动',
+      '错误不再越攒越多：同一个错误每次进聊天界面不再重复计一条（旧版能攒到 10 条一样）；语音设置页白屏崩溃顺修',
+    ],
+  },
   {
     version: '2.2.1',
     date: '2026-11-23',

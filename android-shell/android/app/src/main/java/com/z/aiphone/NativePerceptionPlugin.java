@@ -25,6 +25,7 @@ import android.os.PowerManager;
 import android.os.Process;
 import android.provider.Settings;
 import android.service.notification.NotificationListenerService;
+import android.view.WindowManager;
 
 import androidx.core.app.NotificationCompat;
 import androidx.core.content.ContextCompat;
@@ -755,39 +756,86 @@ public class NativePerceptionPlugin extends Plugin {
      */
     @PluginMethod
     public void bringToFront(PluginCall call) {
-        try {
-            boolean appVisible = MainActivity.isAppInForeground();
-            boolean hasOverlay = Settings.canDrawOverlays(getContext());
-            // 前台 或 后台但有悬浮窗豁免 → 直拉
-            if (appVisible || hasOverlay) {
-                Intent i = new Intent(getContext(), MainActivity.class);
-                i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_REORDER_TO_FRONT);
-                getContext().startActivity(i);
+        final boolean appVisible = MainActivity.isAppInForeground();
+        final boolean hasOverlayPerm = Settings.canDrawOverlays(getContext());
+        // 前台 → 直拉；后台但有悬浮窗权限 → v2.2.5 F-8 根修：先垫一个即时小悬浮窗，
+        // 让本 App 在 startActivity 那一刻持有「可见窗口」——Android 10+ 后台启动
+        // Activity 的豁免条件是「调用瞬间存在可见窗口」，光有悬浮窗权限不算数
+        // （这正是机主实测「显示[switchToChat]但手机没反应」的根因：startActivity
+        // 被系统静默吞掉、旧代码还回 ok:true）；无悬浮窗权限 → heads-up 通知兑底。
+        if (appVisible || hasOverlayPerm) {
+            final android.os.Handler main = new android.os.Handler(android.os.Looper.getMainLooper());
+            main.post(() -> {
+                final android.view.View balWin = appVisible ? null : addBalExemptionOverlay();
+                boolean launched = true;
+                try {
+                    Intent i = new Intent(getContext(), MainActivity.class);
+                    i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_REORDER_TO_FRONT
+                            | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+                    getContext().startActivity(i);
+                } catch (Throwable t) {
+                    launched = false;
+                }
+                if (!launched) {
+                    if (balWin != null) removeViewQuietly(balWin);
+                    sendPullbackHeadsUp(); // 极个别 ROM 仍拦 → 高优先级通知兑底
+                } else if (balWin != null) {
+                    // 豁免窗口使命完成（startActivity 已放行），800ms 后撤下
+                    main.postDelayed(() -> removeViewQuietly(balWin), 800L);
+                }
                 JSObject ret = new JSObject();
                 ret.put("ok", true);
-                ret.put("via", appVisible ? "foreground" : "overlay-exempt");
+                ret.put("via", appVisible ? "foreground" : (launched ? "overlay-window" : "notification"));
                 call.resolve(ret);
-                return;
-            }
-            // 后台且无悬浮窗：系统不允许后台启动 Activity → heads-up 通知兑底
-            boolean notified = sendPullbackHeadsUp();
-            JSObject ret = new JSObject();
-            ret.put("ok", notified);
-            ret.put("via", "notification");
-            if (!notified) {
-                ret.put("reason", "background-blocked-no-overlay");
-            }
-            call.resolve(ret);
-        } catch (Exception e) {
-            // startActivity 抛异常（极少数 ROM）→ 通知兑底再试一次
-            boolean notified = sendPullbackHeadsUp();
-            JSObject ret = new JSObject();
-            ret.put("ok", notified);
-            ret.put("via", "notification");
-            if (!notified) {
-                ret.put("reason", e.getMessage() == null ? "start-failed" : e.getMessage());
-            }
-            call.resolve(ret);
+            });
+            return;
+        }
+        // 后台且无悬浮窗：系统不允许后台启动 Activity → heads-up 通知兑底
+        boolean notified = sendPullbackHeadsUp();
+        JSObject ret = new JSObject();
+        ret.put("ok", notified);
+        ret.put("via", "notification");
+        if (!notified) {
+            ret.put("reason", "background-blocked-no-overlay");
+        }
+        call.resolve(ret);
+    }
+
+    /**
+     * v2.2.5 F-8：BAL 豁免小悬浮窗——1dp 全透明 TYPE_APPLICATION_OVERLAY 窗口，
+     * addView 即刻生效（悬浮窗不需要后台启动豁免），随后 startActivity 因本 App
+     * 持有可见窗口被系统放行。必须在主线程调用（WindowManager 视图线程亲和）。
+     * 返回 null=添加失败（权限被回收等），调用方按实际结果走兑底。
+     */
+    private android.view.View addBalExemptionOverlay() {
+        try {
+            if (!Settings.canDrawOverlays(getContext())) return null;
+            WindowManager wm = (WindowManager) getContext().getSystemService(Context.WINDOW_SERVICE);
+            if (wm == null) return null;
+            android.view.View v = new android.view.View(getContext());
+            v.setBackgroundColor(android.graphics.Color.TRANSPARENT);
+            WindowManager.LayoutParams lp = new WindowManager.LayoutParams(
+                    1, 1,
+                    Build.VERSION.SDK_INT >= 26
+                            ? WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+                            : WindowManager.LayoutParams.TYPE_PHONE,
+                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                            | WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+                            | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL,
+                    android.graphics.PixelFormat.TRANSLUCENT);
+            wm.addView(v, lp);
+            return v;
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    /** 静默移除一个 WindowManager 视图（豁免窗收尾；失败忽略） */
+    private void removeViewQuietly(android.view.View v) {
+        try {
+            WindowManager wm = (WindowManager) getContext().getSystemService(Context.WINDOW_SERVICE);
+            if (wm != null) wm.removeView(v);
+        } catch (Throwable ignored) {
         }
     }
 
@@ -835,7 +883,9 @@ public class NativePerceptionPlugin extends Plugin {
 
     /** 打开任意应用（PackageManager LaunchIntent，替代 monkey -p）→ {ok} / {ok:false, reason:not-found}
      *  v2.2.0：本 App 在后台且无悬浮窗权限时后台启动会被系统静默拦截——如实报
-     *  no-overlay-permission（Web 侧话术指引进权限页开悬浮窗），不再假装成功。 */
+     *  no-overlay-permission（Web 侧话术指引进权限页开悬浮窗），不再假装成功。
+     *  v2.2.5：有悬浮窗权限时与 bringToFront 同款 BAL 豁免小窗垫底，startActivity
+     *  才真正放行（旧版有权限但无可见窗口同样被静默吞）。 */
     @PluginMethod
     public void openApp(PluginCall call) {
         final String pkgRaw = call.getString("pkg", "");
@@ -848,7 +898,8 @@ public class NativePerceptionPlugin extends Plugin {
             return;
         }
         // 后台 + 无悬浮窗豁免 = Android 10+ 系统必然拦下（静默失败）——前置如实反馈
-        if (!MainActivity.isAppInForeground() && !Settings.canDrawOverlays(getContext())) {
+        final boolean appVisible = MainActivity.isAppInForeground();
+        if (!appVisible && !Settings.canDrawOverlays(getContext())) {
             JSObject ret = new JSObject();
             ret.put("ok", false);
             ret.put("reason", "no-overlay-permission");
@@ -865,6 +916,28 @@ public class NativePerceptionPlugin extends Plugin {
                 return;
             }
             launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            if (!appVisible) {
+                // v2.2.5 BAL 豁免：先垫可见小悬浮窗再 startActivity（同 bringToFront）
+                final android.os.Handler main = new android.os.Handler(android.os.Looper.getMainLooper());
+                main.post(() -> {
+                    android.view.View balWin = addBalExemptionOverlay();
+                    try {
+                        getContext().startActivity(launch);
+                    } catch (Throwable t) {
+                        if (balWin != null) removeViewQuietly(balWin);
+                        JSObject ret1 = new JSObject();
+                        ret1.put("ok", false);
+                        ret1.put("reason", t.getMessage() == null ? "start-failed" : t.getMessage());
+                        call.resolve(ret1);
+                        return;
+                    }
+                    if (balWin != null) main.postDelayed(() -> removeViewQuietly(balWin), 800L);
+                    JSObject ret2 = new JSObject();
+                    ret2.put("ok", true);
+                    call.resolve(ret2);
+                });
+                return;
+            }
             getContext().startActivity(launch);
             JSObject ret = new JSObject();
             ret.put("ok", true);

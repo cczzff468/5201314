@@ -156,7 +156,9 @@ export interface RealFreezeGuardEvent {
  * 处理单条原生守护事件（freezeRealApp 锁的专用处理器）：
  * - lock-shown / lock-attempt + pkg 匹配当前冻结记录 → 拦截计数++ → 节流驱动
  *   AI 反应（fireProactiveNudge 按人设/记忆发质问 + 写事件记忆）；
- * - native-unlock + pkg 匹配 → 原生已到期解锁（WebView 死过一段）→ JS 对齐清记录。
+ * - native-unlock + pkg 匹配 → 原生已到期解锁（WebView 死过一段）→ JS 对齐清记录；
+ * - force-unlock + pkg 匹配 → v2.2.5 F-6：机主在拦截窗点【强制解锁】（没哄直接强解）→
+ *   JS 对齐清记录 + 聊天气泡 + 事件记忆 + 立刻驱动 AI 按人设发消息（委屈/质问/阴阳怪气）。
  * 返回 true=事件属于本处理器（已消费）。
  * 注：jealousy-lock 的 drainJealousyGuardEvents 也会把事件先转到这里——双 drain
  * 入口谁先取到都不丢 freezeRealApp 锁的拦截信号。
@@ -175,6 +177,64 @@ export async function handleRealFreezeGuardEvent(ev: RealFreezeGuardEvent): Prom
       if (wf && wf.src === 'ai') unfreezeWebPkg(r.pkg);
     } catch {
       /* 静默 */
+    }
+    return true;
+  }
+
+  // v2.2.5 F-6：机主在拦截窗点了【强制解锁】——没哄、直接强解。TA 都动手掀桌了，
+  // AI 必须立刻知道（气泡提示 + 事件记忆 + 主动消息三件套，与网页侧强制解锁同款体验）。
+  if (ev.type === 'force-unlock') {
+    setRealFrozen(null);
+    try {
+      const { getWebFrozen, unfreezeWebPkg } = await import('./web-app-lock');
+      const wf = getWebFrozen(r.pkg);
+      if (wf && wf.src === 'ai') unfreezeWebPkg(r.pkg);
+    } catch {
+      /* 静默 */
+    }
+    let appName = r.pkg;
+    try {
+      const { resolvePkgDisplayName } = await import('./jealousy-lock');
+      appName = await resolvePkgDisplayName(r.pkg);
+    } catch {
+      /* 名称解析失败兜底包名 */
+    }
+    const contactId = r.contactId ?? '';
+    const app = (r.app ?? 'sms') as 'wx' | 'qq' | 'sms';
+    const sessionKey = app === 'wx' ? `wx:${contactId}` : app === 'qq' ? `qq:${contactId}` : `sms:c:${contactId}`;
+    // 聊天里弹系统提示条「你强制解开了XX」（机主在聊天里看到 TA 已经知道了）
+    if (contactId) {
+      try {
+        const { pushToolStatusBubble } = await import('./tool-status-bubble');
+        pushToolStatusBubble(sessionKey, {
+          title: `你强制解开了${appName}`,
+          status: 'done',
+        });
+      } catch {
+        /* 气泡失败不影响主流程 */
+      }
+      // 事件记忆：AI 下轮聊天自然能提起「你居然直接强解了」
+      try {
+        const { memAddEventFragment } = await import('@/lib/memory');
+        memAddEventFragment(
+          contactId,
+          app,
+          `（系统：TA 没有哄我，直接在拦截窗点了强制解锁，把我封印的「${appName}」强行解开了${ev.text ? `（${ev.text}）` : ''}）`,
+          { sourceTag: 'real-freeze-force-unlock' },
+        );
+      } catch {
+        /* 记忆失败不影响 nudge */
+      }
+      // 主动消息：按人设立刻来一条（委屈/质问/阴阳怪气由人设决定）
+      try {
+        const { fireProactiveNudge } = await import('./proactive-msg');
+        await fireProactiveNudge(app, contactId, {
+          dedupeKey: `real-force-unlock-${r.pkg}-${r.unlockAt}`,
+          context: `你们之间刚发生了一件事：你把「${appName}」锁了（TA 点开就会被弹回桌面看到你的拦截窗），但 TA 没有哄你，直接在拦截窗点了【强制解锁】把它强行解开了${ev.text ? `（${ev.text}）` : ''}。以你的角色人设、结合你们最近的聊天记忆，主动给 TA 发一条消息——可以委屈、可以质问 TA 不哄你、也可以阴阳怪气，一两句话就够，别太正式`,
+        });
+      } catch {
+        /* nudge 失败静默（记忆已写，下轮聊天仍能提起） */
+      }
     }
     return true;
   }

@@ -1798,7 +1798,10 @@ export async function runPhoneToolRound(
             : fn === 'unfreezeRealApp'
               ? '解锁'
               : null;
-      const coName = coVerb
+      // v2.2.5 F-7 气泡名字归一化：真机锁定目标先解析成中文应用名——模型同轮按
+      // 「QQ」与「com.tencent.mobileqq」各锁一次时两个名字归一成同一个「QQ」，
+      // coalescedBubbleTitle 的 Set 去重才接得住（直接裸拼会显示「已锁定QQ、com.tencent.mobileqq」）
+      const coNameRaw: string = coVerb
         ? fn === 'freezeApp'
           ? /^(全部|所有|all)/i.test(S2(args.appName))
             ? '全部应用'
@@ -1807,6 +1810,20 @@ export async function runPhoneToolRound(
             ? S2(args.appName) || '真机应用'
             : S2(args.packageName) || '真机应用'
         : '';
+      let coName = coNameRaw;
+      if (
+        coNameRaw &&
+        coNameRaw !== '全部应用' &&
+        coNameRaw !== '真机应用' &&
+        (fn === 'freezeRealApp' || fn === 'lockApp' || fn === 'unfreezeRealApp')
+      ) {
+        try {
+          const { resolvePkgDisplayName } = await import('./jealousy-lock');
+          coName = await resolvePkgDisplayName(coNameRaw);
+        } catch {
+          coName = coNameRaw;
+        }
+      }
       const continueCo = !!coVerb && !!bubbleCoalesce && bubbleCoalesce.verb === coVerb;
       if (coVerb && !continueCo) bubbleCoalesce = { verb: coVerb, names: [] };
       const coalesceActive = !!coVerb && !!bubbleCoalesce;

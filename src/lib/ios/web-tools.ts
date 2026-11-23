@@ -920,6 +920,38 @@ export async function toolFreezeRealApp(
   const unlockAt = Date.now() + durationMin * 60_000;
   const charName = opts?.charName?.trim() || 'TA';
   const reason = opts?.reason?.trim() || undefined;
+  // 应用中文名提前解析（去重话术与成功回执共用）
+  let displayName = pkg;
+  try {
+    const { resolvePkgDisplayName } = await import('./jealousy-lock');
+    displayName = await resolvePkgDisplayName(pkg);
+  } catch {
+    /* 名称解析失败兜底包名 */
+  }
+  // v2.2.5 F-7 重复锁定去重（机主实测：「我让 AI 锁应用，有时显示[锁定:QQ:10]
+  // [锁定:com.tencent.mobileqq:10]」——模型同轮按应用名与包名各调一次，同包双锁双显示）：
+  // 已在锁名单（原生守护正锁着同一包名）→ 新时长不比剩余长时如实回「已在锁定中」
+  // 不重复建锁；更长才续时重锁。探测失败静默走正常锁流程（绝不因探针坏了拦住锁）。
+  try {
+    const { nativeJealousyGuardStatus } = await import('./native-perception');
+    const st = await nativeJealousyGuardStatus();
+    if (st?.running && st.pkg && st.pkg.toLowerCase() === pkg.toLowerCase()) {
+      const curAt = typeof st.unlockAt === 'number' ? st.unlockAt : -1;
+      if (curAt <= 0 || curAt >= unlockAt) {
+        const leftMin = curAt > 0 ? Math.max(1, Math.round((curAt - Date.now()) / 60_000)) : 0;
+        island('chat', '锁定真机应用', `${displayName} 已在锁定中，无需重复锁定`);
+        return {
+          ok: true,
+          text: `${displayName}（${pkg}）已经在你的锁定名单里了${
+            curAt <= 0 ? '（锁到哄好为止）' : `（还剩约 ${leftMin} 分钟自动解锁）`
+          }，本次无需重复锁定。想锁更久就把 durationMinutes 加大（只有更长才会续时）；TA 要是不听话，直接发消息质问 TA。`,
+        };
+      }
+      // 新时长更长 → 走续时重锁（下方正常流程，剩余时间被刷新）
+    }
+  } catch {
+    /* 状态探针异常：静默，不拦锁 */
+  }
   // v2.2.0：contactId/app 透传原生——拦截窗【去哄哄 TA】按钮拉起本 App 后直达对应聊天
   const r = await labLockApp(pkg, {
     unlockAt,
@@ -936,13 +968,6 @@ export async function toolFreezeRealApp(
   const { setRealFrozen } = await import('./real-app-freeze');
   setRealFrozen({ pkg, unlockAt, charName, reason, contactId: opts?.contactId, app: opts?.app });
   // 网页有对应体 → 同步冻结网页图标（点击弹锁定界面；强制解锁时一并解真机锁）
-  let displayName = pkg;
-  try {
-    const { resolvePkgDisplayName } = await import('./jealousy-lock');
-    displayName = await resolvePkgDisplayName(pkg);
-  } catch {
-    /* 名称解析失败兜底包名 */
-  }
   const { webAppOfPkg, setWebFrozen } = await import('./web-app-lock');
   const web = webAppOfPkg(pkg);
   if (web) {

@@ -115,8 +115,12 @@ export function VoicePage({ onBack }: { onBack: () => void }) {
   // v2.2.4 模型面板滑动三连修：撤 fixed 全屏遮罩（在变换容器内不参与滚动链、
   // 吃掉页面触摸拖动——面板高于一屏时「什么都滑不了」）改 document click 委托
   // outside-click 关闭：拖动滚动不触发 click（面板保持打开、页面正常滚）；
-  // 开面板时把模型区滚到可视中部；列表 overscroll-contain 内滚强化。
+  // v2.2.5 顺修：状态声明提前到 effect 之前（上一轮把 modelPanelOpen 声明在
+  // effect 依赖之后——运行时 TDZ ReferenceError，语音设置页一开就白屏）。
   const modelSectionRef = useRef<HTMLDivElement>(null);
+  const [ttsModels, setTtsModels] = useState<string[]>([]);
+  const [modelQuery, setModelQuery] = useState('');
+  const [modelPanelOpen, setModelPanelOpen] = useState(false);
   useEffect(() => {
     if (!modelPanelOpen) return;
     const onDocClick = (e: MouseEvent) => {
@@ -127,9 +131,36 @@ export function VoicePage({ onBack }: { onBack: () => void }) {
     return () => document.removeEventListener('click', onDocClick, true);
   }, [modelPanelOpen]);
 
-  const [ttsModels, setTtsModels] = useState<string[]>([]);
-  const [modelQuery, setModelQuery] = useState('');
-  const [modelPanelOpen, setModelPanelOpen] = useState(false);
+  // v2.2.5 F-1 模型面板露出双根修（与聊天 API 页同款）：① 面板底边出屏 → 页面滚动
+  // 容器补滚到面板完整可见（旧版只把锚点居中，面板尾部常年叠在屏幕外）；
+  // ② 列表不满一屏时移除 overscroll-contain——contain 切断滚动链，手指划面板什么都不动。
+  const [modelListScrollable, setModelListScrollable] = useState(false);
+  useEffect(() => {
+    const sec = modelSectionRef.current;
+    const list = (sec?.querySelector('[data-model-panel] .overflow-y-auto') as HTMLElement | null) ?? null;
+    setModelListScrollable(!!list && list.scrollHeight - list.clientHeight > 4);
+  }, [ttsModels, modelPanelOpen, modelQuery]);
+  useEffect(() => {
+    if (!modelPanelOpen) return;
+    const t = window.setTimeout(() => {
+      const sec = modelSectionRef.current;
+      if (!sec) return;
+      const sc = sec.closest('.overflow-y-auto') as HTMLElement | null;
+      const panel = sec.querySelector('[data-model-panel]') as HTMLElement | null;
+      if (!sc || !panel) {
+        sec.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        return;
+      }
+      const pr = panel.getBoundingClientRect();
+      const vh = window.innerHeight;
+      if (pr.bottom > vh - 12) {
+        const over = pr.bottom - (vh - 12);
+        const max = sc.scrollHeight - sc.clientHeight;
+        sc.scrollTop = Math.min(max, sc.scrollTop + over);
+      }
+    }, 120);
+    return () => window.clearTimeout(t);
+  }, [modelPanelOpen, ttsModels, modelQuery]);
 
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewError, setPreviewError] = useState('');
@@ -197,12 +228,7 @@ export function VoicePage({ onBack }: { onBack: () => void }) {
     setTtsModels(sorted);
     setModelQuery('');
     setModelPanelOpen(true);
-    // v2.2.4：面板开启后把模型区滚到可视中部（面板向下展开，锚点在屏幕下半部时
-    // 底部会超出屏幕；配合列表内部滚动 + 页面可滚三保险）
-    window.setTimeout(
-      () => modelSectionRef.current?.scrollIntoView({ block: 'center', behavior: 'smooth' }),
-      80,
-    );
+    // v2.2.5：露出逻辑移入 modelPanelOpen effect（补滚到面板完整可见）
   };
 
   const fetchTtsModels = async () => {
@@ -688,7 +714,10 @@ export function VoicePage({ onBack }: { onBack: () => void }) {
               {/* 模型列表面板（拉取成功后展开；TTS 相关模型排前）
                   v2.2.4：撤 fixed 全屏遮罩改 outside-click（遮罩吃页面滚动 → 面板滑不动） */}
               {modelPanelOpen && (
-                <div className="absolute -left-4 -right-4 top-full z-30 mt-1 overflow-hidden rounded-[20px] border border-white/60 bg-white/85 shadow-2xl ring-1 ring-black/[0.05] backdrop-blur-2xl dark:border-white/[0.1] dark:bg-[#1C1C1E]/85">
+                <div
+                  data-model-panel
+                  className="absolute -left-4 -right-4 top-full z-30 mt-1 overflow-hidden rounded-[20px] border border-white/60 bg-white/85 shadow-2xl ring-1 ring-black/[0.05] backdrop-blur-2xl dark:border-white/[0.1] dark:bg-[#1C1C1E]/85"
+                >
                     <div className="border-b border-black/[0.05] p-2 dark:border-white/[0.06]">
                       <Input
                         value={modelQuery}
@@ -698,7 +727,12 @@ export function VoicePage({ onBack }: { onBack: () => void }) {
                         className="h-10 rounded-[12px] border-black/[0.05] bg-white/70 text-[13px] shadow-sm backdrop-blur-xl dark:border-white/[0.09] dark:bg-white/[0.09]"
                       />
                     </div>
-                    <div className="thin-scrollbar max-h-[min(360px,48vh)] overscroll-contain overflow-y-auto" style={{ touchAction: 'pan-y', WebkitOverflowScrolling: 'touch' }}>
+                    <div
+                      className={`thin-scrollbar max-h-[min(360px,48vh)] overflow-y-auto ${
+                        modelListScrollable ? 'overscroll-contain' : ''
+                      }`}
+                      style={{ touchAction: 'pan-y', WebkitOverflowScrolling: 'touch' }}
+                    >
                       {filteredTtsModels.length === 0 ? (
                         <div className="px-4 py-6 text-center text-[13px] text-muted-foreground">没有匹配的模型</div>
                       ) : (

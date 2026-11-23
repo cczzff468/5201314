@@ -1385,10 +1385,11 @@ export interface JealousyGuardEvent {
    * - 'native-unlock'：锁到期由原生服务解开
    * - 'lock-shown'：用户打开了锁定名单应用，全屏遮罩已弹出（AI 可据此发消息质问）
    * - 'lock-attempt'：遮罩期间用户仍停留/反复想打开锁定应用
+   * - 'force-unlock'：v2.2.5 用户在拦截窗点了【强制解锁】（没哄、直接强解——AI 立刻知道）
    * - 'breach'：旧协议兼容（锁被强行打破）
    * - 'degrade'：原生守护遇到容错降级（权限丢失等）
    */
-  type: 'native-unlock' | 'lock-shown' | 'lock-attempt' | 'breach' | 'degrade';
+  type: 'native-unlock' | 'lock-shown' | 'lock-attempt' | 'force-unlock' | 'breach' | 'degrade';
   /** 涉事应用包名 */
   pkg: string;
   /** 人话说明（进 AI 决策与通知链路） */

@@ -52,18 +52,23 @@ export const useErrorCenter = create<ErrorCenterState>((set, get) => ({
     const t = String(title || '错误').trim().slice(0, 60);
     const d = String(detail || '').trim().slice(0, 3000);
     const now = Date.now();
-    // 同标题+同详情 → 永久合并（同一问题只占一条；高频重报只刷新时间与动作闭包——
-    // 挂载侧 effect 依赖里含每次渲染都换新身份的 onRetry 时也不会堆积）。
-    // 边界：合并目标已被 dismiss（用户点了知道了）→ 同错误复发视为新条目重新出现。
-    const merged =
-      lastReport.title === t &&
-      lastReport.detail === d &&
-      get().errors.some((e) => e.id === lastReport.id);
-    if (merged) {
-      if (action) {
-        set((s) => ({ errors: s.errors.map((e) => (e.id === lastReport.id ? { ...e, actionLabel: action.label, actionRun: action.run } : e)) }));
-      }
-      return lastReport.id;
+    // 同标题+同详情 → 合并进既有条目（同一问题只占一条；高频重报只刷新时间与动作闭包）。
+    // v2.2.5 F-9 根修（机主实测「一个错误点进去聊天界面就显示一次」攒到 10 条）：
+    // 旧版只比对最近一条 lastReport——聊天页多条错误行交替上报时永远对不上号，
+    // 于是「每次进聊天界面」每条错误行都 re-report 一次、每条都新增一条错误。
+    // 改为全列表查找同 title+detail 合并（刷新时间戳/动作），重复挂载变幂等；
+    // 已被 dismiss（用户点了知道了）→ 条目不在列表 → 同错误复发视为新条目重新出现。
+    const existed = get().errors.find((e) => e.title === t && e.detail === d);
+    if (existed) {
+      lastReport = { title: t, detail: d, at: now, id: existed.id };
+      set((s) => ({
+        errors: s.errors.map((e) =>
+          e.id === existed.id
+            ? { ...e, at: now, scope: scope ?? e.scope, actionLabel: action?.label, actionRun: action?.run }
+            : e,
+        ),
+      }));
+      return existed.id;
     }
     const id = 'err-' + now.toString(36) + '-' + Math.random().toString(36).slice(2, 7);
     lastReport = { title: t, detail: d, at: now, id };
