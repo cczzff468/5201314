@@ -1909,29 +1909,37 @@ public class NativePerceptionPlugin extends Plugin {
             JSObject ret = new JSObject();
             try {
                 Context ctx = getContext();
-                // ① 找第一个可写的可见日历
+                // v2.4.3 根修（机主实测「加日程失败」）：WRITE_CALENDAR 运行时权限未授予时，
+                // 旧版直接 query CalendarContract → SecurityException → 只回「no-permission」，
+                // ACTION_INSERT 预填降级永远走不到。新口径：无权限直接跳过直写，
+                // 走 ACTION_INSERT 意图（无需任何权限，拉起日历应用预填好让机主点保存）；
+                // 有权限才 query + insert。JS 侧已前置 requestCalendarPermission 弹授权框。
+                boolean canWrite = ContextCompat.checkSelfPermission(
+                        ctx, android.Manifest.permission.WRITE_CALENDAR) == PackageManager.PERMISSION_GRANTED;
                 long calId = -1;
                 String calName = "";
-                try (Cursor c = ctx.getContentResolver().query(
-                        android.provider.CalendarContract.Calendars.CONTENT_URI,
-                        new String[]{android.provider.CalendarContract.Calendars._ID,
-                                android.provider.CalendarContract.Calendars.CALENDAR_DISPLAY_NAME,
-                                android.provider.CalendarContract.Calendars.CALENDAR_ACCESS_LEVEL},
-                        android.provider.CalendarContract.Calendars.VISIBLE + "=1", null,
-                        android.provider.CalendarContract.Calendars.CALENDAR_ACCESS_LEVEL + " DESC")) {
-                    if (c != null) {
-                        while (c.moveToNext()) {
-                            int access = c.getInt(2);
-                            if (access >= android.provider.CalendarContract.Calendars.CAL_ACCESS_CONTRIBUTOR) {
+                if (canWrite) {
+                    try (Cursor c = ctx.getContentResolver().query(
+                            android.provider.CalendarContract.Calendars.CONTENT_URI,
+                            new String[]{android.provider.CalendarContract.Calendars._ID,
+                                    android.provider.CalendarContract.Calendars.CALENDAR_DISPLAY_NAME,
+                                    android.provider.CalendarContract.Calendars.CALENDAR_ACCESS_LEVEL},
+                            android.provider.CalendarContract.Calendars.VISIBLE + "=1", null,
+                            android.provider.CalendarContract.Calendars.CALENDAR_ACCESS_LEVEL + " DESC")) {
+                        if (c != null) {
+                            while (c.moveToNext()) {
+                                int access = c.getInt(2);
+                                if (access >= android.provider.CalendarContract.Calendars.CAL_ACCESS_CONTRIBUTOR) {
+                                    calId = c.getLong(0);
+                                    calName = c.getString(1);
+                                    break;
+                                }
+                            }
+                            if (calId < 0 && c.getCount() > 0) {
+                                c.moveToFirst();
                                 calId = c.getLong(0);
                                 calName = c.getString(1);
-                                break;
                             }
-                        }
-                        if (calId < 0 && c.getCount() > 0) {
-                            c.moveToFirst();
-                            calId = c.getLong(0);
-                            calName = c.getString(1);
                         }
                     }
                 }
@@ -4118,6 +4126,293 @@ public class NativePerceptionPlugin extends Plugin {
             ret.put("playing", null);
         }
         call.resolve(ret);
+    }
+
+    // ================= v2.4.3 媒体传输控制 + 真机日历读取 + APP 内下载/更新 =================
+
+    /**
+     * 媒体传输控制（帮机主切歌）：action = next/prev/play/pause/toggle。
+     * 数据链路：MediaListenerService.sendMediaCommand（MediaSessionManager 活跃会话
+     * 优先 + 通知 token controller 兜底）。需要「通知使用权」（与正在听什么歌同权限）。
+     */
+    @PluginMethod
+    public void controlMedia(PluginCall call) {
+        final String action = call.getString("action", "");
+        if (action == null || action.trim().isEmpty()) {
+            call.reject("缺少 action 参数（next/prev/play/pause/toggle）");
+            return;
+        }
+        JSObject ret = new JSObject();
+        try {
+            if (!checkMediaPermission()) {
+                ret.put("ok", false);
+                ret.put("reason", "no-media-permission");
+                call.resolve(ret);
+                return;
+            }
+            if (MediaListenerService.instance == null) {
+                try {
+                    if (Build.VERSION.SDK_INT >= 24) {
+                        NotificationListenerService.requestRebind(
+                                new ComponentName(getContext(), MediaListenerService.class));
+                    }
+                } catch (Throwable ignored) {
+                }
+                ret.put("ok", false);
+                ret.put("reason", "connecting");
+                call.resolve(ret);
+                return;
+            }
+            boolean ok = MediaListenerService.sendMediaCommand(action.trim());
+            ret.put("ok", ok);
+            ret.put("action", action.trim());
+            if (!ok) ret.put("reason", "no-active-session");
+            call.resolve(ret);
+        } catch (Throwable t) {
+            ret.put("ok", false);
+            ret.put("reason", t.getMessage() == null ? "failed" : t.getMessage());
+            call.resolve(ret);
+        }
+    }
+
+    /**
+     * 读真机系统日历某天的日程（CalendarContract.Instances 查询）：
+     * date 支持 "YYYY-MM-DD"，空 = 今天。需 READ_CALENDAR 权限（JS 侧已前置弹授权）。
+     * 返回 events: [{title, begin, end, allDay, location}]（begin/end 毫秒时间戳）。
+     */
+    @PluginMethod
+    public void getRealCalendarEvents(PluginCall call) {
+        final String date = call.getString("date", "");
+        final PluginCall fcall = call;
+        new Thread(() -> {
+            JSObject ret = new JSObject();
+            try {
+                Context ctx = getContext();
+                if (ContextCompat.checkSelfPermission(ctx, android.Manifest.permission.READ_CALENDAR)
+                        != PackageManager.PERMISSION_GRANTED) {
+                    ret.put("ok", false);
+                    ret.put("reason", "no-permission");
+                    fcall.resolve(ret);
+                    return;
+                }
+                // 日期解析：YYYY-MM-DD / YYYY/MM-DD / 空 = 今天
+                java.util.Calendar c = java.util.Calendar.getInstance();
+                String d = date == null ? "" : date.trim();
+                java.util.regex.Matcher m = java.util.regex.Pattern
+                        .compile("^(\\d{4})[-/](\\d{1,2})[-/](\\d{1,2})$").matcher(d);
+                if (m.matches()) {
+                    c.set(Integer.parseInt(m.group(1)), Integer.parseInt(m.group(2)) - 1,
+                            Integer.parseInt(m.group(3)), 0, 0, 0);
+                    c.set(java.util.Calendar.MILLISECOND, 0);
+                } else {
+                    c.set(java.util.Calendar.HOUR_OF_DAY, 0);
+                    c.set(java.util.Calendar.MINUTE, 0);
+                    c.set(java.util.Calendar.SECOND, 0);
+                    c.set(java.util.Calendar.MILLISECOND, 0);
+                }
+                long start = c.getTimeInMillis();
+                long end = start + 86_400_000L;
+                Uri uri = android.provider.CalendarContract.Instances.CONTENT_URI
+                        .buildUpon().appendPath(String.valueOf(start))
+                        .appendPath(String.valueOf(end)).build();
+                JSArray events = new JSArray();
+                try (Cursor cur = ctx.getContentResolver().query(uri, new String[]{
+                        android.provider.CalendarContract.Instances.TITLE,
+                        android.provider.CalendarContract.Instances.BEGIN,
+                        android.provider.CalendarContract.Instances.END,
+                        android.provider.CalendarContract.Instances.ALL_DAY,
+                        android.provider.CalendarContract.Instances.EVENT_LOCATION}, null, null,
+                        android.provider.CalendarContract.Instances.BEGIN + " ASC")) {
+                    while (cur != null && cur.moveToNext()) {
+                        String title = cur.getString(0);
+                        if (title == null || title.trim().isEmpty()) continue;
+                        JSObject e = new JSObject();
+                        e.put("title", title.trim());
+                        e.put("begin", cur.getLong(1));
+                        e.put("end", cur.getLong(2));
+                        e.put("allDay", cur.getInt(3) == 1);
+                        String loc = cur.getString(4);
+                        if (loc != null && !loc.trim().isEmpty()) e.put("location", loc.trim());
+                        events.put(e);
+                    }
+                }
+                ret.put("ok", true);
+                ret.put("events", events);
+                fcall.resolve(ret);
+            } catch (SecurityException se) {
+                ret.put("ok", false);
+                ret.put("reason", "no-permission");
+                fcall.resolve(ret);
+            } catch (Throwable t) {
+                ret.put("ok", false);
+                ret.put("reason", t.getMessage() == null ? "failed" : t.getMessage());
+                fcall.resolve(ret);
+            }
+        }, "cal-read").start();
+    }
+
+    /**
+     * APP 内保存 base64 数据到公共下载目录（v2.4.3 机主需求「导出备份无法下载」根修）：
+     * Android WebView 里 blob: URL 的 <a download> 不触发 DownloadListener（静默失败），
+     * 备份导出改走本方法——API 29+ MediaStore.Downloads（免权限），28- 直接写公共
+     * Download 目录（WRITE_EXTERNAL_STORAGE 已声明 maxSdkVersion=28）。
+     * 完成后 Toast 告知文件位置。
+     */
+    @PluginMethod
+    public void saveBase64Download(PluginCall call) {
+        final String filename = call.getString("filename", "");
+        final String mime = call.getString("mime", "application/octet-stream");
+        final String base64 = call.getString("base64", "");
+        final PluginCall fcall = call;
+        if (filename == null || filename.trim().isEmpty() || base64 == null || base64.isEmpty()) {
+            call.reject("缺少 filename / base64 参数");
+            return;
+        }
+        new Thread(() -> {
+            JSObject ret = new JSObject();
+            try {
+                Context ctx = getContext();
+                byte[] raw;
+                try {
+                    String b64 = base64;
+                    int comma = base64.indexOf(',');
+                    if (base64.startsWith("data:") && comma > 0) b64 = base64.substring(comma + 1);
+                    raw = android.util.Base64.decode(b64, android.util.Base64.DEFAULT);
+                } catch (Throwable t) {
+                    ret.put("ok", false);
+                    ret.put("reason", "bad-base64");
+                    fcall.resolve(ret);
+                    return;
+                }
+                String name = filename.trim();
+                if (Build.VERSION.SDK_INT >= 29) {
+                    android.content.ContentValues cv = new android.content.ContentValues();
+                    cv.put(MediaStore.Downloads.DISPLAY_NAME, name);
+                    cv.put(MediaStore.Downloads.MIME_TYPE, mime == null || mime.isEmpty()
+                            ? "application/octet-stream" : mime);
+                    cv.put(MediaStore.Downloads.IS_PENDING, 1);
+                    Uri uri = ctx.getContentResolver().insert(
+                            MediaStore.Downloads.EXTERNAL_CONTENT_URI, cv);
+                    if (uri == null) throw new IllegalStateException("insert-failed");
+                    try (java.io.OutputStream os = ctx.getContentResolver().openOutputStream(uri)) {
+                        if (os == null) throw new IllegalStateException("open-failed");
+                        os.write(raw);
+                        os.flush();
+                    }
+                    android.content.ContentValues done = new android.content.ContentValues();
+                    done.put(MediaStore.Downloads.IS_PENDING, 0);
+                    ctx.getContentResolver().update(uri, done, null, null);
+                } else {
+                    File dir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
+                    if (!dir.exists()) dir.mkdirs();
+                    try (java.io.FileOutputStream fos = new java.io.FileOutputStream(new File(dir, name))) {
+                        fos.write(raw);
+                        fos.flush();
+                    }
+                }
+                ret.put("ok", true);
+                ret.put("path", "Download/" + name);
+                ret.put("bytes", raw.length);
+                fcall.resolve(ret);
+                try {
+                    final Context appCtx = ctx.getApplicationContext();
+                    new android.os.Handler(android.os.Looper.getMainLooper()).post(() -> {
+                        try {
+                            android.widget.Toast.makeText(appCtx,
+                                    "已保存到 Download/" + name, android.widget.Toast.LENGTH_LONG).show();
+                        } catch (Throwable ignored) {
+                        }
+                    });
+                } catch (Throwable ignored) {
+                }
+            } catch (Throwable t) {
+                ret.put("ok", false);
+                ret.put("reason", t.getMessage() == null ? "save-failed" : t.getMessage());
+                fcall.resolve(ret);
+            }
+        }, "save-b64").start();
+    }
+
+    /**
+     * APP 内下载 APK 并调起安装（v2.4.3 机主需求「更新 APP 在 APP 里面下载安装」）：
+     * ① 检查 canRequestPackageInstalls（Android 8+ 「安装未知应用」授权）——未授权跳
+     *    系统授权页并回 needPermission（JS 提示机主允许后重试）；
+     * ② 已授权 → 系统 DownloadManager 后台下载（通知栏进度条），轮询完成 →
+     *    FileProvider content:// URI 调起包安装器（REQUEST_INSTALL_PACKAGES 已声明）。
+     */
+    @PluginMethod
+    public void downloadAndInstallApk(PluginCall call) {
+        final String url = call.getString("url", "");
+        if (url == null || !url.startsWith("http")) {
+            call.reject("缺少 url 参数（http/https 开头）");
+            return;
+        }
+        try {
+            Context ctx = getContext();
+            if (!ctx.getPackageManager().canRequestPackageInstalls()) {
+                // 未授权「安装未知应用」：跳本 APP 授权页，JS 提示机主允许后重试
+                Intent i = new Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                        Uri.parse("package:" + ctx.getPackageName()));
+                i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                ctx.startActivity(i);
+                JSObject ret = new JSObject();
+                ret.put("ok", false);
+                ret.put("needPermission", true);
+                call.resolve(ret);
+                return;
+            }
+            final String name = "AI-Phone-Update-" + System.currentTimeMillis() + ".apk";
+            android.app.DownloadManager.Request req = new android.app.DownloadManager.Request(Uri.parse(url));
+            req.setTitle("AI Phone 更新包");
+            req.setDescription("下载完成后自动弹出安装");
+            req.setMimeType("application/vnd.android.package-archive");
+            req.setNotificationVisibility(android.app.DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
+            req.setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, name);
+            android.app.DownloadManager dm = (android.app.DownloadManager)
+                    ctx.getSystemService(Context.DOWNLOAD_SERVICE);
+            if (dm == null) throw new IllegalStateException("no-download-manager");
+            final long id = dm.enqueue(req);
+            // 轮询线程：下载完成 → FileProvider 安装意图（最多等 10 分钟）
+            final Context appCtx = ctx.getApplicationContext();
+            new Thread(() -> {
+                try {
+                    boolean done = false;
+                    for (int i = 0; i < 600 && !done; i++) {
+                        Thread.sleep(1000L);
+                        try (Cursor c = dm.query(
+                                new android.app.DownloadManager.Query().setFilterById(id))) {
+                            if (c != null && c.moveToFirst()) {
+                                int status = c.getInt(c.getColumnIndex(
+                                        android.app.DownloadManager.COLUMN_STATUS));
+                                if (status == android.app.DownloadManager.STATUS_SUCCESSFUL) done = true;
+                                else if (status == android.app.DownloadManager.STATUS_FAILED) return;
+                            }
+                        }
+                    }
+                    if (!done) return;
+                    File apk = new File(Environment.getExternalStoragePublicDirectory(
+                            Environment.DIRECTORY_DOWNLOADS), name);
+                    if (!apk.exists()) return;
+                    Uri uri = androidx.core.content.FileProvider.getUriForFile(appCtx,
+                            appCtx.getPackageName() + ".fileprovider", apk);
+                    Intent install = new Intent(Intent.ACTION_VIEW);
+                    install.setDataAndType(uri, "application/vnd.android.package-archive");
+                    install.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_ACTIVITY_NEW_TASK);
+                    appCtx.startActivity(install);
+                } catch (Throwable ignored) {
+                    // 安装链路绝不 crash（文件已在 Download 目录，机主可手动点装）
+                }
+            }, "apk-install").start();
+            JSObject ret = new JSObject();
+            ret.put("ok", true);
+            ret.put("downloading", true);
+            call.resolve(ret);
+        } catch (Throwable t) {
+            JSObject ret = new JSObject();
+            ret.put("ok", false);
+            ret.put("reason", t.getMessage() == null ? "start-failed" : t.getMessage());
+            call.resolve(ret);
+        }
     }
 
     // ================= v2.1.0 修改系统设置（WRITE_SETTINGS：亮度/铃声）+ 常驻守护 + 开机自启 =================

@@ -27,6 +27,7 @@ import {
   nativeA11ySwipe,
   nativeA11yTap,
   nativeBringToFront,
+  nativeControlMedia,
   nativeCreateCalendarEvent,
   nativeDownloadFile,
   nativeGetCurrentActivity,
@@ -34,6 +35,8 @@ import {
   nativeGetBrightness,
   nativeGetForegroundApp,
   nativeGetNetworkInfo,
+  nativeGetNowPlaying,
+  nativeGetRealCalendarEvents,
   nativeGetRealLocation,
   nativeGetRecentNotifications,
   nativeGetRecentSMS,
@@ -393,7 +396,10 @@ export async function labStartCountdown(seconds: number, label?: string): Promis
   return { ok: true, text: `已在系统时钟里开好倒计时：${human}${label ? `（${label.slice(0, 30)}）` : ''}——到点手机会响` };
 }
 
-/** 写系统日历（CalendarContract 直写；失败降级日历应用预填） */
+/** 写系统日历（CalendarContract 直写；失败降级日历应用预填）。
+ * v2.4.3 根修（机主实测「加日程失败」）：WRITE_CALENDAR 运行时权限从未授予时旧版必
+ * SecurityException——现在写入前先自动弹系统授权框（聊天中 App 恒在前台，机主点
+ * 允许即可）；拒绝/超时不拦写入，原生侧自动降级 ACTION_INSERT 拉起日历应用预填。 */
 export async function labCreateCalendarEvent(opts: {
   title: string;
   beginTs?: number;
@@ -401,6 +407,16 @@ export async function labCreateCalendarEvent(opts: {
   location?: string;
   allDay?: boolean;
 }): Promise<DeviceOpResult> {
+  // v2.4.3 权限自动补授：未授予 → 弹一次系统授权框（App 在前台时才会弹）
+  try {
+    const permMod = await import('./native-perception');
+    const st = await permMod.calendarPermission();
+    if (st && !st.granted) {
+      await permMod.requestCalendarPermission();
+    }
+  } catch {
+    /* 权限探测失败不拦写入（原生侧还有降级） */
+  }
   const r = await nativeCreateCalendarEvent(opts);
   if (!r.ok) {
     return {
@@ -416,6 +432,79 @@ export async function labCreateCalendarEvent(opts: {
     return { ok: true, text: `已打开日历并预填好日程「${opts.title.slice(0, 30)}」（${when}）——机主在日历里点一下保存就存进系统日历了` };
   }
   return { ok: true, text: `已写进系统日历：${r.calendar ? `${r.calendar}·` : ''}「${opts.title.slice(0, 30)}」（${when}）——打开手机日历就能看到` };
+}
+
+/** 读真机系统日历某天日程（需 READ_CALENDAR；未授权自动弹授权框） */
+export async function labGetRealCalendarEvents(date?: string): Promise<DeviceOpResult> {
+  try {
+    const permMod = await import('./native-perception');
+    const st = await permMod.calendarPermission();
+    if (st && !st.granted) {
+      await permMod.requestCalendarPermission();
+    }
+  } catch {
+    /* 权限探测失败不拦查询 */
+  }
+  const r = await nativeGetRealCalendarEvents(date);
+  if (!r.ok) {
+    return {
+      ok: false,
+      text: `日历查询失败：${r.reason === 'no-permission' ? '日历权限未开启：去 设置 › 权限给予 › 日历 开启' : a11yGateText(r.reason)}`,
+    };
+  }
+  const list = r.events ?? [];
+  if (list.length === 0) return { ok: true, text: '系统日历里这天没有日程安排' };
+  const fmtTs = (ts: number) => {
+    const d = new Date(ts);
+    return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  };
+  const rows = list
+    .slice(0, 15)
+    .map((e) => `· ${e.allDay ? '全天' : `${fmtTs(e.begin)}-${fmtTs(e.end)}`} ${e.title}${e.location ? `（${e.location}）` : ''}`);
+  return { ok: true, text: `【真机系统日历日程】\n${rows.join('\n')}` };
+}
+
+/** 看机主现在在听什么歌（网易云/QQ音乐/Spotify 等后台播放中） */
+export async function labGetNowPlaying(): Promise<DeviceOpResult> {
+  const r = await nativeGetNowPlaying();
+  if (r.needPermission) {
+    return { ok: false, text: '读不到歌单信息：「通知使用权」未开启——去 设置 › 权限给予 › 正在收听检测 开启后，我就能知道你在听什么歌了' };
+  }
+  if (r.connecting) {
+    return { ok: false, text: '正在连接媒体监听（刚开启权限/刚重启），几秒后再问我一次' };
+  }
+  if (!r.ok) return { ok: false, text: `读不到正在听的歌：${a11yGateText(undefined)}` };
+  const p = r.playing;
+  if (!p || (!p.title && p.state !== 'playing')) {
+    return { ok: true, text: '现在没有任何 App 在放歌' };
+  }
+  const state = p.state === 'playing' ? '正在播放' : '暂停中';
+  return {
+    ok: true,
+    text: `机主现在正在用【${p.app || '音乐App'}】听歌：
+《${p.title || '未知歌曲'}》- ${p.artist || '未知歌手'}${p.album ? `（专辑：${p.album}）` : ''}\n状态：${state}`,
+  };
+}
+
+/** 帮机主切歌/暂停/继续（真机后台音乐 App 的媒体控制） */
+export async function labControlRealMedia(action: 'next' | 'prev' | 'play' | 'pause' | 'toggle'): Promise<DeviceOpResult> {
+  const verbs: Record<string, string> = {
+    next: '切到下一首',
+    prev: '切回上一首',
+    play: '继续播放',
+    pause: '暂停播放',
+    toggle: '切换播放/暂停',
+  };
+  const r = await nativeControlMedia(action);
+  if (!r.ok) {
+    if (r.reason === 'no-media-permission') {
+      return { ok: false, text: '控制不了音乐：「通知使用权」未开启——去 设置 › 权限给予 › 正在收听检测 开启' };
+    }
+    if (r.reason === 'connecting') return { ok: false, text: '正在连接媒体监听，几秒后再试' };
+    if (r.reason === 'no-active-session') return { ok: false, text: '现在没有正在播放的音乐（机主没在听歌）' };
+    return { ok: false, text: `切歌失败：${a11yGateText(r.reason)}` };
+  }
+  return { ok: true, text: `已${verbs[action] ?? '操作'}——机主的耳机里应该已经变了` };
 }
 
 /** 拨打电话（CALL_PHONE 已授直接拨；未授拉拨号盘预填） */

@@ -201,6 +201,10 @@ export function toolStatusLabel(
     openSystemSetting: target ? `打开${target}设置` : '打开系统设置',
     getNetworkInfo: '查网络状态',
     openApp: target ? `打开${target}` : '打开应用',
+    // v2.4.3 真机媒体感知/控制 + 真机日历读取
+    getNowPlaying: '看你在听什么歌',
+    controlRealMusic: arg('action') === 'next' ? '帮你切歌' : arg('action') === 'prev' ? '帮你切回上一首' : arg('action') === 'pause' ? '暂停音乐' : arg('action') === 'play' ? '继续放歌' : '控制音乐',
+    getRealCalendarEvents: '查系统日历日程',
   };
 
   const action = actionMap[toolName] || `调用${toolName}`;

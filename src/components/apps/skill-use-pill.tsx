@@ -1,17 +1,22 @@
 'use client';
 
 /**
- * v1.3 Shizuku 技能使用浮层（五端共用：信息/QQ/QQ群/微信/微信群）：
- * AI 执行 [手机操作:…] 标记期间，聊天界面正中央弹出椭圆形胶囊包裹的提示——
- * 执行中转圈「谁 正在使用技能 · 命令」；完成后变绿勾（成功）/红叉（失败）+ 简要结果，
- * 约 1.8s 后自动淡出。结果同时照旧以系统行落盘进消息流与 AI 历史，浮层只是屏幕中央的即时可视化。
- * 纯展示浮层：pointer-events-none 全程不挡聊天交互；start/finish 均为稳定引用（ref+函数式 setState），
- * 在五端巨大的 useCallback/异步闭包里捕获也不会失效。
+ * v1.3 技能使用浮层（五端共用：信息/QQ/QQ群/微信/微信群）。
+ *
+ * v2.4.3 与 ToolStatusBubble 统一样式 + 文案简化（机主规格「把所有的工具使用提示
+ * 都统一一下样式，然后简化一下」）：
+ * - 文案三态与聊天内工具气泡完全同口径——执行中「{谁} 正在{动作}…」/ 成功
+ *   「{谁} 已{动作}」/ 失败「{谁} {动作}失败」，删掉「正在使用技能」「技能执行
+ *   成功/失败」这类冗词；
+ * - 图标徽章与 ToolStatusBubble 同款（Loader 旋转 / 绿勾圆徽 / 红叉圆徽）；
+ * - 保留深色毛玻璃胶囊（浮层悬在聊天正中，任何底色上都必须可读）。
+ * 纯展示浮层：pointer-events-none 全程不挡聊天交互；start/finish 均为稳定引用
+ * （ref+函数式 setState），在五端巨大的 useCallback/异步闭包里捕获也不会失效。
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { CircleCheck, CircleX, Loader2, Sparkles } from 'lucide-react';
+import { Check, Loader2, X } from 'lucide-react';
 
 export type OpPillState = {
   /** 操作者显示名（角色名/群成员名） */
@@ -80,37 +85,39 @@ export function SkillUsePill({ pill }: { pill: OpPillState | null }) {
           aria-live="polite"
           data-testid="skill-use-pill"
         >
-          {/* 椭圆形包裹：胶囊（rounded-full）+ 毛玻璃 + 细描边，视觉重心在屏幕正中 */}
+          {/* 深色毛玻璃胶囊：与 ToolStatusBubble 同款图标徽章 + 同款三态文案 */}
           <div
-            className="flex max-w-[82%] items-center gap-2 rounded-full bg-black/60 py-2.5 pl-4 pr-5 shadow-xl ring-1 ring-white/15 backdrop-blur-xl"
+            className="flex max-w-[82%] items-center gap-2 rounded-full bg-black/55 px-3.5 py-[7px] shadow-xl ring-1 ring-white/15 backdrop-blur-xl"
+            style={{ minHeight: 30, boxSizing: 'border-box' }}
             title={pill.note || undefined}
           >
             {pill.phase === 'run' ? (
-              <Loader2 className="h-4 w-4 shrink-0 animate-spin text-white/85" aria-hidden="true" />
+              <Loader2 className="h-[15px] w-[15px] shrink-0 animate-spin text-white/70" aria-hidden="true" />
             ) : pill.phase === 'ok' ? (
-              <CircleCheck className="h-4 w-4 shrink-0 text-emerald-400" aria-hidden="true" />
+              <span
+                aria-hidden
+                className="grid h-[18px] w-[18px] shrink-0 place-items-center rounded-full bg-emerald-500/15"
+              >
+                <Check className="h-[11px] w-[11px] text-emerald-400" strokeWidth={3} />
+              </span>
             ) : (
-              <CircleX className="h-4 w-4 shrink-0 text-red-400" aria-hidden="true" />
+              <span
+                aria-hidden
+                className="grid h-[18px] w-[18px] shrink-0 place-items-center rounded-full bg-[#FF453A]/15"
+              >
+                <X className="h-[11px] w-[11px] text-[#FF6961]" strokeWidth={2.6} />
+              </span>
             )}
-            <span className="flex min-w-0 items-center gap-1.5 text-[13px] leading-none text-white/95">
-              {pill.phase === 'run' ? (
-                <>
-                  <Sparkles className="h-3.5 w-3.5 shrink-0 text-amber-300/90" aria-hidden="true" />
-                  <span className="shrink-0 font-medium">{pill.name}</span>
-                  <span className="shrink-0 text-white/55">正在使用技能</span>
-                  <span className="text-white/35">·</span>
-                  <span className="truncate text-white/80">{pill.cmd}</span>
-                </>
-              ) : (
-                <>
-                  <span className="shrink-0 font-medium">{pill.name}</span>
-                  <span className={`shrink-0 ${pill.phase === 'ok' ? 'text-emerald-400' : 'text-red-400'}`}>
-                    {pill.phase === 'ok' ? '技能执行成功' : '技能执行失败'}
-                  </span>
-                  <span className="text-white/35">·</span>
-                  <span className="truncate text-white/70">{pill.note || pill.cmd}</span>
-                </>
-              )}
+            <span
+              className={`truncate text-[12.5px] leading-none ${
+                pill.phase === 'fail' ? 'text-[#FF6961]' : 'text-white/90'
+              }`}
+            >
+              {pill.phase === 'run'
+                ? `${pill.name} 正在${pill.cmd}…`
+                : pill.phase === 'ok'
+                  ? `${pill.name} 已${pill.cmd}`
+                  : `${pill.name} ${pill.cmd}失败`}
             </span>
           </div>
         </motion.div>

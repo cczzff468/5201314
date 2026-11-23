@@ -110,6 +110,19 @@ export interface NativeCalendarResult {
   reason?: string;
 }
 
+/** v2.4.3 真机系统日历某天日程（getRealCalendarEvents） */
+export interface NativeRealCalendarResult {
+  ok?: boolean;
+  events?: Array<{
+    title: string;
+    begin: number;
+    end: number;
+    allDay?: boolean;
+    location?: string;
+  }>;
+  reason?: string;
+}
+
 export interface NativeCallSmsResult {
   ok?: boolean;
   /** direct-call=直接拨 / dialer=拉拨号盘 / silent=静默发送 / compose=拉短信应用预填 */
@@ -252,6 +265,14 @@ type CapPlugin = {
     } | null;
   }>;
   requestScreenCapture(): Promise<{ ok: boolean; canceled?: boolean }>;
+  /** v2.4.3 媒体传输控制（切歌/暂停/继续） */
+  controlMedia(options: { action: string }): Promise<{ ok?: boolean; action?: string; reason?: string }>;
+  /** v2.4.3 读真机系统日历某天日程 */
+  getRealCalendarEvents(options: { date?: string }): Promise<NativeRealCalendarResult>;
+  /** v2.4.3 APP 内保存 base64 到下载目录（备份导出） */
+  saveBase64Download(options: { filename: string; mime?: string; base64: string }): Promise<{ ok?: boolean; path?: string; bytes?: number; reason?: string }>;
+  /** v2.4.3 APP 内下载 APK 并调起安装 */
+  downloadAndInstallApk(options: { url: string }): Promise<{ ok?: boolean; downloading?: boolean; needPermission?: boolean; reason?: string }>;
   grabScreenFrame(): Promise<{ ok: boolean; needSession?: boolean; frame?: string }>;
   stopScreenCapture(): Promise<void>;
   /** v2.0.0 无障碍组 */
@@ -517,6 +538,10 @@ function bridgePlugin(): CapPlugin {
     hasMediaPermission: () => nativeCall<{ granted: boolean }>('hasMediaPermission'),
     openMediaPermissionSettings: () => nativeCall<void>('openMediaPermissionSettings'),
     getNowPlaying: () => nativeCall<NowPlayingResult>('getNowPlaying'),
+    controlMedia: (options) => nativeCall<{ ok?: boolean; action?: string; reason?: string }>('controlMedia', options ?? {}, 8000),
+    getRealCalendarEvents: (options) => nativeCall<NativeRealCalendarResult>('getRealCalendarEvents', options ?? {}, 12_000),
+    saveBase64Download: (options) => nativeCall<{ ok?: boolean; path?: string; bytes?: number; reason?: string }>('saveBase64Download', options ?? {}, 60_000),
+    downloadAndInstallApk: (options) => nativeCall<{ ok?: boolean; downloading?: boolean; needPermission?: boolean; reason?: string }>('downloadAndInstallApk', options ?? {}, 15_000),
     requestScreenCapture: () => nativeCall<{ ok: boolean; canceled?: boolean }>('requestScreenCapture'),
     grabScreenFrame: () => nativeCall<{ ok: boolean; needSession?: boolean; frame?: string }>('grabScreenFrame'),
     stopScreenCapture: () => nativeCall<void>('stopScreenCapture'),
@@ -1027,6 +1052,97 @@ export async function nativeCreateCalendarEvent(opts: {
   try {
     const r = await nativeCall<NativeCalendarResult>('createCalendarEvent', opts, 12_000);
     return { ok: r?.ok === true, via: r?.via, calendar: r?.calendar, reason: r?.reason };
+  } catch {
+    return { ok: false, reason: '桥无响应' };
+  }
+}
+
+// ---------------- v2.4.3 媒体控制 / 真机日历读取 / APP 内下载 ----------------
+
+/** 现在正在听什么歌（原生快照；needPermission=true 需引导开「通知使用权」） */
+export async function nativeGetNowPlaying(): Promise<{
+  ok: boolean;
+  needPermission?: boolean;
+  connecting?: boolean;
+  playing?: { app: string; pkg: string; title: string; artist: string; album: string; state: string } | null;
+}> {
+  if (!isNativePerception()) return { ok: false, playing: null };
+  try {
+    const r = await nativeCall<{
+      ok?: boolean;
+      needPermission?: boolean;
+      connecting?: boolean;
+      playing?: { app: string; pkg: string; title: string; artist: string; album: string; state: string } | null;
+    }>('getNowPlaying', {}, 8000);
+    return {
+      ok: r?.ok === true,
+      needPermission: r?.needPermission,
+      connecting: r?.connecting,
+      playing: r?.playing ?? null,
+    };
+  } catch {
+    return { ok: false, playing: null };
+  }
+}
+
+/** 媒体传输控制（next/prev/play/pause/toggle——帮机主切歌/暂停/继续） */
+export async function nativeControlMedia(
+  action: 'next' | 'prev' | 'play' | 'pause' | 'toggle',
+): Promise<{ ok: boolean; reason?: string }> {
+  if (!isNativePerception()) return { ok: false, reason: 'not-native' };
+  try {
+    const r = await nativeCall<{ ok?: boolean; reason?: string }>('controlMedia', { action }, 8000);
+    return { ok: r?.ok === true, reason: r?.reason };
+  } catch {
+    return { ok: false, reason: '桥无响应' };
+  }
+}
+
+/** 读真机系统日历某天日程（date="YYYY-MM-DD" 或空=今天；需 READ_CALENDAR） */
+export async function nativeGetRealCalendarEvents(date?: string): Promise<NativeRealCalendarResult> {
+  if (!isNativePerception()) return { ok: false, reason: 'not-native' };
+  try {
+    return await nativeCall<NativeRealCalendarResult>('getRealCalendarEvents', { date: date ?? '' }, 12_000);
+  } catch {
+    return { ok: false, reason: '桥无响应' };
+  }
+}
+
+/** APP 内保存 base64 到公共下载目录（Android WebView 里 blob 下载静默失败的根修） */
+export async function nativeSaveBase64Download(filename: string, base64: string, mime = 'application/json'): Promise<{
+  ok: boolean;
+  path?: string;
+  bytes?: number;
+  reason?: string;
+}> {
+  if (!isNativePerception()) return { ok: false, reason: 'not-native' };
+  try {
+    const r = await nativeCall<{ ok?: boolean; path?: string; bytes?: number; reason?: string }>(
+      'saveBase64Download',
+      { filename, base64, mime },
+      60_000,
+    );
+    return { ok: r?.ok === true, path: r?.path, bytes: r?.bytes, reason: r?.reason };
+  } catch {
+    return { ok: false, reason: '桥无响应' };
+  }
+}
+
+/** APP 内下载 APK 并调起安装（未授「安装未知应用」时回 needPermission 并已跳授权页） */
+export async function nativeDownloadAndInstallApk(url: string): Promise<{
+  ok: boolean;
+  downloading?: boolean;
+  needPermission?: boolean;
+  reason?: string;
+}> {
+  if (!isNativePerception()) return { ok: false, reason: 'not-native' };
+  try {
+    const r = await nativeCall<{ ok?: boolean; downloading?: boolean; needPermission?: boolean; reason?: string }>(
+      'downloadAndInstallApk',
+      { url },
+      15_000,
+    );
+    return { ok: r?.ok === true, downloading: r?.downloading, needPermission: r?.needPermission, reason: r?.reason };
   } catch {
     return { ok: false, reason: '桥无响应' };
   }

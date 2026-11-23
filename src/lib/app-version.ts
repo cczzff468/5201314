@@ -11,9 +11,9 @@
  */
 
 /** 当前最新版本（纯网页热更时与 APK versionName 可短暂不同步，下次重打 APK 对齐） */
-export const APP_VERSION = '2.4.2';
+export const APP_VERSION = '2.4.3';
 /** 版本号数字（与 android-shell versionCode 保持一致；覆盖安装要求只增不减；纯网页热更不动） */
-export const APP_VERSION_CODE = 69;
+export const APP_VERSION_CODE = 70;
 
 export interface AppReleaseNote {
   version: string;
@@ -24,6 +24,21 @@ export interface AppReleaseNote {
 
 /** 版本历史（新→旧；设置 › APP 更新 页渲染，最新一条即当前版本） */
 export const APP_RELEASE_NOTES: AppReleaseNote[] = [
+  {
+    version: '2.4.3',
+    date: '2026-11-23',
+    items: [
+      '【需重装 APK】吃醋封印页不再自动消失：去掉 15 秒自动收窗——弹出来就一直显示倒计时，直到你点「返回主屏幕/去哄哄/强制解锁」或倒计时结束才收起（机主实测「打开后什么也没碰它自己消失了」的根修）',
+      '【需重装 APK】加日程不再失败：AI 往系统日历写日程前会自动弹一次日历权限授权框（点允许即可）；没授权也会自动降级打开日历 App 预填好，点一下保存就存进真日历',
+      '【需重装 APK】AI 知道你在听什么歌 + 能帮你切歌：新增「正在听什么歌」感知开关（感知设置里开，聊天时 AI 自然知道你耳机里在放什么）+ getNowPlaying / controlRealMusic 两个新工具（切下一首/上一首/暂停/继续）',
+      '【需重装 APK】AI 新增读真机系统日历工具（getRealCalendarEvents）：「我今天有什么安排」读的是真日历数据',
+      '【需重装 APK】导出备份改为 APP 内下载：备份 JSON 直接存进手机 Download 目录（旧版 WebView 里点导出没反应的根修）',
+      '【需重装 APK】更新 APP 不再跳浏览器：点「立即更新」直接在 APP 内下载（通知栏有进度条），下载完自动弹出安装；首次会请你去系统里允许「安装未知应用」',
+      '选了真机后 AI 不再误用网站工具：真机模式下闹钟/日历/音乐只注册真机版本（setRealAlarm/createCalendarEvent/controlRealMusic），不会再把闹钟定到网页时钟里',
+      '工具使用提示统一简化：屏幕中央浮层改成与聊天内工具气泡同款样式和文案（「谢予安 正在定闹钟…/已定闹钟/定闹钟失败」），删掉「正在使用技能」等冗词',
+      '右上角「错误」按钮已删除（不要了）；聊天长按菜单保留复制/删除/多选/重新生成（重试）',
+    ],
+  },
   {
     version: '2.4.2',
     date: '2026-11-23',

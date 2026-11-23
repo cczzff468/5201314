@@ -144,11 +144,13 @@ public class LockOverlayService extends Service {
     private static final long HIT_DEBOUNCE_MS = 800L;
     private static volatile long lastHitAt = 0L;
 
-    /** v2.2.0 拦截窗保持窗口：弹回桌面后拦截窗继续盖在桌面上展示质问/倒计时，
-     * 用户点【我知道了】或超出保持窗（15s）才收起——否则 goHome 后下一轮 2s 轮询
-     * 判定「已离开锁定应用」立刻收窗，拦截窗只闪现两秒根本看不清 */
-    private static final long OVERLAY_HOLD_MS = 15_000L;
-    private static volatile long overlayHoldUntil = 0L;
+    /** v2.2.0 拦截窗保持机制（v2.4.3 根修：去掉 15s 自动收窗）：机主实测「封印页打开后什么
+     * 也没碰，它自己消失了」——正是旧版 OVERLAY_HOLD_MS=15s 到点自动 removeOverlay 所为。
+     * 新口径：拦截窗一旦弹出就【常驻展示】（倒计时每秒刷新），只有四种情况收起——
+     * ① 用户点【返回主屏幕】/【去哄哄】/【强制解锁】按钮；
+     * ② 前台切回本 App（去哄哄/通知入口——绝不盖住自家聊天界面）；
+     * ③ 到期/哄好解锁（internalUnlock → removeOverlay）；
+     * ④ 权限丢失降级（degrade 路径仍保留遮罩现状不动）。 */
 
     /** degrade 事件节流（权限丢失类，每 5 分钟最多一条） */
     private static final long DEGRADE_EVENT_MS = 5 * 60_000L;
@@ -382,12 +384,11 @@ public class LockOverlayService extends Service {
                 // v2.4.2 尝试计数语义根修：已离开锁定 App（含 fg=null）——下一次「真实进入」
                 // 才算一次新尝试；停在被锁 App 上的重复命中绝不计数
                 onLockedSticky = false;
+                // v2.4.3 封印页常驻：不再自动收窗（机主实测 15s 自动消失的根因）。
+                // 只有前台切回本 App 才立即收（绝不盖住自家聊天界面）。
                 if (overlayShowing) {
-                    // 已离开锁定 App：两种情况收窗——
-                    // ① fg 是本 App（用户从去哄哄/通知回来了）：绝不盖住自家聊天界面，立即收；
-                    // ② 超出保持窗（15s）：用户已放弃打开，收起（再开还会再弹）。
                     boolean inOurApp = fg != null && fg.equals(getPackageName());
-                    if (inOurApp || System.currentTimeMillis() >= overlayHoldUntil) {
+                    if (inOurApp) {
                         removeOverlay();
                     }
                 }
@@ -447,7 +448,6 @@ public class LockOverlayService extends Service {
                 persistEvent("lock-shown", lockPkg, message);
                 showOverlay();
             }
-            overlayHoldUntil = now + OVERLAY_HOLD_MS; // 刷新保持窗：这轮拦截的窗持续展示
             if (!kicked) goHome();
             refreshOverlayTexts();
         } catch (Throwable ignored) {
@@ -483,7 +483,6 @@ public class LockOverlayService extends Service {
         lastAttemptCountAt = 0L;
         avatarData = "";
         avatarBmp = null;
-        overlayHoldUntil = 0L;
         clearPersistedLock(getApplicationContext());
         stopForeground(STOP_FOREGROUND_REMOVE);
         stopSelf();

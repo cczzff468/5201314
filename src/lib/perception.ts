@@ -47,6 +47,8 @@ export interface PerceptionConfig {
   vlmScreen: boolean;
   /** 屏幕串流地址（串流工具的 MJPEG/单帧 JPEG 地址；空 = 用浏览器屏幕分享） */
   streamUrl: string;
+  /** v2.4.3 正在听什么歌（真机）：后台音乐 App 的歌名/歌手/状态注入 AI 上下文（需「通知使用权」） */
+  nowPlaying: boolean;
 }
 
 const STORE_KEY = 'chat-perception-v1';
@@ -60,6 +62,7 @@ const DEFAULT_CFG: PerceptionConfig = {
   aiLoc: '',
   vlmScreen: false,
   streamUrl: '',
+  nowPlaying: false,
 };
 
 // 布尔/字符串键分桶派生：out[k] 以联合键写入时 TS 会把写入类型算成各属性类型交集（boolean & string = never），
@@ -67,7 +70,7 @@ const DEFAULT_CFG: PerceptionConfig = {
 type BoolCfgKey = { [K in keyof PerceptionConfig]: PerceptionConfig[K] extends boolean ? K : never }[keyof PerceptionConfig];
 type StrCfgKey = { [K in keyof PerceptionConfig]: PerceptionConfig[K] extends string ? K : never }[keyof PerceptionConfig];
 
-const BOOL_KEYS: BoolCfgKey[] = ['typing', 'battery', 'calendar', 'weather', 'vlmScreen'];
+const BOOL_KEYS: BoolCfgKey[] = ['typing', 'battery', 'calendar', 'weather', 'vlmScreen', 'nowPlaying'];
 const STR_KEYS: StrCfgKey[] = ['userLoc', 'aiLoc', 'streamUrl'];
 
 function sanitize(v: unknown): PerceptionConfig {
@@ -122,7 +125,7 @@ export function setPerception(sessionKey: string, patch: Partial<PerceptionConfi
 
 /** 任一感知项开启 */
 export function perceptionAnyOn(cfg: PerceptionConfig): boolean {
-  return cfg.typing || cfg.battery || cfg.calendar || cfg.weather || cfg.vlmScreen;
+  return cfg.typing || cfg.battery || cfg.calendar || cfg.weather || cfg.vlmScreen || cfg.nowPlaying;
 }
 
 /** 已开启项数（设置入口行摘要用） */
@@ -246,6 +249,44 @@ export async function weatherLineFor(locRaw: string): Promise<string | null> {
   return job;
 }
 
+// ---------------- 正在听什么歌（v2.4.3 真机：模块级缓存 + 预热刷新） ----------------
+
+/** 最近一次拿到的正在播放快照（null = 未取到/没在放歌；模块级，页会话内有效） */
+let nowPlayingCache: { line: string; ts: number } | null = null;
+let nowPlayingInflight = false;
+
+/** 预热：拉一次原生正在播放快照（fire-and-forget；非原生/无权限静默） */
+async function refreshNowPlaying(): Promise<void> {
+  if (nowPlayingInflight) return;
+  nowPlayingInflight = true;
+  try {
+    const { isNativePerception, nativeGetNowPlaying } = await import('./ios/native-perception');
+    if (!isNativePerception()) return;
+    const r = await nativeGetNowPlaying();
+    if (r.ok && r.playing && (r.playing.title || r.playing.state === 'playing')) {
+      const p = r.playing;
+      const state = p.state === 'playing' ? '正在播放' : '暂停中';
+      nowPlayingCache = {
+        line: `用户手机后台正在用 ${p.app || '音乐App'} 听歌：《${p.title || '未知歌曲'}》- ${p.artist || '未知歌手'}（${state}）`,
+        ts: Date.now(),
+      };
+    } else {
+      nowPlayingCache = null;
+    }
+  } catch {
+    /* 拉不到保持原状 */
+  } finally {
+    nowPlayingInflight = false;
+  }
+}
+
+/** 同步读缓存（超过 5 分钟的快照视为陈旧丢弃） */
+function cachedNowPlayingLine(): string | null {
+  if (!nowPlayingCache) return null;
+  if (Date.now() - nowPlayingCache.ts > 5 * 60_000) return null;
+  return nowPlayingCache.line;
+}
+
 // ---------------- 预热（挂载时 + 每轮发送后 fire-and-forget） ----------------
 
 /** 预热感知数据（聊天页挂载 / 设置保存 / 每轮 runAiTurn 开头调用；失败静默） */
@@ -258,6 +299,7 @@ export async function prewarmPerception(sessionKey: string): Promise<void> {
     if (cfg.aiLoc.trim()) jobs.push(weatherLineFor(cfg.aiLoc).catch(() => null));
   }
   if (cfg.vlmScreen) jobs.push(refreshScreenDescription(cfg.streamUrl).catch(() => null));
+  if (cfg.nowPlaying) jobs.push(refreshNowPlaying().catch(() => null));
   if (jobs.length === 0) return;
   await Promise.allSettled(jobs);
 }
@@ -353,6 +395,12 @@ export function buildPerceptionBlock(sessionKey: string, opts: PerceptionBlockOp
   if (cfg.vlmScreen) {
     const desc = getCachedScreenDescription(cfg.streamUrl);
     if (desc) lines.push(`用户此刻的屏幕画面（系统实时截取）：${desc}`);
+  }
+
+  // v2.4.3 正在听什么歌（真机「通知使用权」）
+  if (cfg.nowPlaying) {
+    const np = cachedNowPlayingLine();
+    if (np) lines.push(np);
   }
 
   if (lines.length === 0) return '';

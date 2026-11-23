@@ -11,8 +11,8 @@ android {
         applicationId "com.z.aiphone"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 69          // v2.4.2 封印页黑白灰重做 + 尝试计数语义修 + 新工具矩阵 10 件 + a11y 状态匹配修 + onTaskRemoved
-        versionName "2.4.2"     // v2.4.2：极简毛玻璃拦截页 + 步数/运动/睡眠/文件/下载/设置/网络工具
+        versionCode 70          // v2.4.3 封印页常驻修 + 日历权限自动授 + 媒体控制/日历读取 + APP 内下载更新
+        versionName "2.4.3"     // v2.4.3：封印页不自动消失 + 切歌 + 备份/更新 APP 内下载安装
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.

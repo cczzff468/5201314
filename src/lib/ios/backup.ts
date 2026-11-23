@@ -459,17 +459,48 @@ export async function exportBackupToDownload(opts?: {
   const filename = opts?.safety
     ? `aiphone-backup-safety-${stamp}${pad(d.getSeconds())}.json`
     : `aiphone-backup-${stamp}.json`;
-  const url = URL.createObjectURL(blob);
+
+  // v2.4.3 APP 内下载根修（机主实测「导出备份无法下载」）：Android WebView 里
+  // blob: URL 的 <a download> 点击静默失败（不触发 DownloadListener）——原生壳里
+  // 改走原生 saveBase64Download（MediaStore 写入公共下载目录 + Toast 告知位置），
+  // 失败再回退浏览器下载链路。
+  let nativeSaved = false;
   try {
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-  } finally {
-    // 延迟回收：Safari 在 click 同帧回收会导致下载取消
-    setTimeout(() => URL.revokeObjectURL(url), 30_000);
+    const { isNativePerception, nativeSaveBase64Download } = await import('./native-perception');
+    if (isNativePerception()) {
+      // Blob → base64（分块读取，几 MB 备份也安全）
+      const b64 = await new Promise<string>((resolve, reject) => {
+        const fr = new FileReader();
+        fr.onload = () => {
+          try {
+            resolve(String(fr.result ?? ''));
+          } catch (e) {
+            reject(e);
+          }
+        };
+        fr.onerror = () => reject(fr.error ?? new Error('Blob 读取失败'));
+        fr.readAsDataURL(blob);
+      });
+      const r = await nativeSaveBase64Download(filename, b64, 'application/json');
+      nativeSaved = r.ok;
+    }
+  } catch {
+    /* 原生通道失败：回退浏览器下载 */
+  }
+
+  if (!nativeSaved) {
+    const url = URL.createObjectURL(blob);
+    try {
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    } finally {
+      // 延迟回收：Safari 在 click 同帧回收会导致下载取消
+      setTimeout(() => URL.revokeObjectURL(url), 30_000);
+    }
   }
   if (!opts?.safety) {
     // 手动导出成功 → 记录「最近一次备份时间」（localStorage；随备份文件一起迁移）

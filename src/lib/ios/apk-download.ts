@@ -68,3 +68,33 @@ export function launchApkDownload(markCopied: (v: boolean) => void): void {
   }
   void copyApkLink(markCopied, 10000);
 }
+
+// ---------------- v2.4.3 APP 内下载 + 安装（机主需求：更新别再跳浏览器） ----------------
+
+export type NativeApkUpdateResult =
+  /** 已开始 APP 内下载（通知栏进度条，完成后自动弹安装框） */
+  | { kind: 'downloading' }
+  /** 「安装未知应用」未授权：已跳系统授权页，机主允许后重试 */
+  | { kind: 'need-permission' }
+  /** 原生通道失败（回退 launchApkDownload 旧链路） */
+  | { kind: 'fallback' };
+
+/**
+ * APP 内更新（原生壳专用）：DownloadManager 下载 → 完成自动调起系统安装器。
+ * 浏览器/旧 APK 返回 fallback（调用方走旧链路：iframe intent + 复制直链）。
+ */
+export async function updateApkInApp(): Promise<NativeApkUpdateResult> {
+  if (typeof window === 'undefined') return { kind: 'fallback' };
+  try {
+    const { isNativePerception, nativeDownloadAndInstallApk } = await import('./native-perception');
+    if (!isNativePerception()) return { kind: 'fallback' };
+    const url = getApkUrl();
+    if (!/^https?:\/\//.test(url)) return { kind: 'fallback' };
+    const r = await nativeDownloadAndInstallApk(url);
+    if (r.ok && r.downloading) return { kind: 'downloading' };
+    if (r.needPermission) return { kind: 'need-permission' };
+    return { kind: 'fallback' };
+  } catch {
+    return { kind: 'fallback' };
+  }
+}

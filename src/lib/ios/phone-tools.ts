@@ -182,6 +182,12 @@ export async function toolActionText(toolName: string, args: Record<string, unkn
     openSystemSetting: target ? `打开${target}设置` : '打开系统设置',
     getNetworkInfo: '查网络状态',
     openApp: realTarget ? `打开真机${realTarget}` : '打开真机应用',
+    // v2.4.3 真机媒体感知/控制 + 真机日历读取
+    getNowPlaying: '看你在听什么歌',
+    controlRealMusic:
+      S(args.action) === 'next' ? '帮你切歌' : S(args.action) === 'prev' ? '帮你切回上一首'
+      : S(args.action) === 'pause' ? '暂停音乐' : S(args.action) === 'play' ? '继续放歌' : '控制音乐',
+    getRealCalendarEvents: target ? `查${target}的日程` : '查系统日历日程',
   };
   return map[toolName] || toolName;
 }
@@ -306,6 +312,10 @@ const TOOL_CAPS: Record<string, { label: string; device?: boolean }> = {
   openSystemSetting: { label: '打开系统设置页', device: true },
   getNetworkInfo: { label: '查网络状态', device: true },
   openApp: { label: '打开真机 App', device: true },
+  // ---- v2.4.3 真机媒体感知/控制 + 真机日历读取 ----
+  getNowPlaying: { label: '看在听什么歌', device: true },
+  controlRealMusic: { label: '切歌/暂停音乐', device: true },
+  getRealCalendarEvents: { label: '读系统日历日程', device: true },
 };
 
 /** 字符串参数 schema 快捷构造 */
@@ -336,7 +346,10 @@ export function buildPhoneTools(): PhoneToolDef[] {
     });
   };
 
-  // ---- 网页工具（全量，恒注册） ----
+  // ---- 网页工具（恒注册；v2.4.3 例外：与真机工具同域的网页孪生（闹钟/日历/音乐）
+  // 在真机模式下不再注册——机主实测「选了真机，AI 却把闹钟定到网页时钟里」：
+  // 同域双工具并存时模型会随机挑错，真机模式下只留真机版本（setRealAlarm/
+  // createCalendarEvent/getRealCalendarEvents/controlRealMusic） ----
   add(
     'sendWebMessage',
     '在这台手机的网页微信/QQ/信息里，以机主的身份给某个联系人发一条消息。appName 填：微信/QQ/信息；contactName 填联系人名字；content 填消息原文。机主说「去微信给Z发消息说…」「用QQ跟TA说一声」时用这个。',
@@ -362,12 +375,14 @@ export function buildPhoneTools(): PhoneToolDef[] {
     { postId: strParam('帖子 id 或帖子内容关键词') },
     ['postId'],
   );
-  add(
-    'playMusic',
-    '打开这台手机的网页音乐 App（网易云音乐）并播放指定歌曲（自动搜索音源）。机主说「放首歌」「来首晴天」时用这个；人设合适时也可以主动放歌哄机主（如机主说累了，你人设又很贴心）。',
-    { songName: strParam('歌名（可带歌手名提高命中率）') },
-    ['songName'],
-  );
+  // v2.4.3 真机模式下不注册：网页音乐 App 播放与真机音乐控制同域（真机注册 controlRealMusic）
+  if (!device)
+    add(
+      'playMusic',
+      '打开这台手机的网页音乐 App（网易云音乐）并播放指定歌曲（自动搜索音源）。机主说「放首歌」「来首晴天」时用这个；人设合适时也可以主动放歌哄机主（如机主说累了，你人设又很贴心）。',
+      { songName: strParam('歌名（可带歌手名提高命中率）') },
+      ['songName'],
+    );
   add(
     'getWebState',
     '获取这台网页手机的当前状态：机主在桌面还是某个 App 里、锁屏/熄屏中、正在放什么歌、现在几点。想了解机主此刻在干什么时用这个（不需要参数）。',
@@ -383,15 +398,18 @@ export function buildPhoneTools(): PhoneToolDef[] {
     },
     ['content'],
   );
-  add(
-    'setAlarm',
-    '在这台手机的网页时钟里定一个闹钟（到点会真实响铃）。time 支持「07:30」「早上8点」「晚上10点半」这类说法。机主说「明天7点叫我」「定个闹钟提醒我…」时用这个。',
-    {
-      time: strParam('闹钟时间（HH:mm 或「早上8点」等自然说法）'),
-      label: strParam('闹钟标签（可空，如「起床」「开会」）'),
-    },
-    ['time'],
-  );
+  // v2.4.3 真机模式下不注册：网页时钟与真机系统闹钟同域（真机注册 setRealAlarm——
+  // 机主实测「选了真机，AI 偶尔把闹钟定到网页时钟里」的根修）
+  if (!device)
+    add(
+      'setAlarm',
+      '在这台手机的网页时钟里定一个闹钟（到点会真实响铃）。time 支持「07:30」「早上8点」「晚上10点半」这类说法。机主说「明天7点叫我」「定个闹钟提醒我…」时用这个。',
+      {
+        time: strParam('闹钟时间（HH:mm 或「早上8点」等自然说法）'),
+        label: strParam('闹钟标签（可空，如「起床」「开会」）'),
+      },
+      ['time'],
+    );
   add(
     'queryWeather',
     '查某地天气（查完自动同步到这台手机的天气 App）。city 为空则查机主当前城市。机主说「今天天气怎么样」「XX市下雨吗」时用这个。',
@@ -466,21 +484,24 @@ export function buildPhoneTools(): PhoneToolDef[] {
     { contactName: strParam('联系人名字（要跟通讯录里的名字对得上）') },
     ['contactName'],
   );
-  add(
-    'getCalendarEvents',
-    '读取日历里某天的日程（IndexedDB events 表，与日历 App 同库）。date 支持「今天/明天/后天/YYYY-MM-DD/MM-DD/M月D日」，空则查今日。机主说「今天有什么安排」「明天有什么日程」「看看日历」时用这个。',
-    { date: strParam('日期，如「今天」「明天」「2026-03-15」「3月15日」；空=今日') },
-    [],
-  );
-  add(
-    'addCalendarEvent',
-    '往日历里加一条日程（IndexedDB events 表，与日历 App 同库，打开日历 App 即可见，到点会提醒）。机主说「帮我加个日程」「下午3点开会记一下」「周五下午有约会」时用这个。title 填日程标题；time 支持「HH:mm」「下午3点」「晚上8点」这类说法。',
-    {
-      title: strParam('日程标题，如「下午开会」「牙医预约」'),
-      time: strParam('开始时间（HH:mm 或「下午3点」等自然说法；结束时间默认为开始后 1 小时）'),
-    },
-    ['title', 'time'],
-  );
+  // v2.4.3 真机模式下不注册：网页日历与真机系统日历同域（真机注册 getRealCalendarEvents/createCalendarEvent）
+  if (!device)
+    add(
+      'getCalendarEvents',
+      '读取日历里某天的日程（IndexedDB events 表，与日历 App 同库）。date 支持「今天/明天/后天/YYYY-MM-DD/MM-DD/M月D日」，空则查今日。机主说「今天有什么安排」「明天有什么日程」「看看日历」时用这个。',
+      { date: strParam('日期，如「今天」「明天」「2026-03-15」「3月15日」；空=今日') },
+      [],
+    );
+  if (!device)
+    add(
+      'addCalendarEvent',
+      '往日历里加一条日程（IndexedDB events 表，与日历 App 同库，打开日历 App 即可见，到点会提醒）。机主说「帮我加个日程」「下午3点开会记一下」「周五下午有约会」时用这个。title 填日程标题；time 支持「HH:mm」「下午3点」「晚上8点」这类说法。',
+      {
+        title: strParam('日程标题，如「下午开会」「牙医预约」'),
+        time: strParam('开始时间（HH:mm 或「下午3点」等自然说法；结束时间默认为开始后 1 小时）'),
+      },
+      ['title', 'time'],
+    );
   add(
     'getTodoList',
     '读取备忘录里的待办清单（IndexedDB notes 表，与备忘录 App 同库）。把含 checklist 未完成项的备忘录逐条列出；含「待办/TODO/任务」字样的备忘录也一起返回。机主说「我有什么待办」「看看待办列表」「还有啥没做」时用这个。',
@@ -785,9 +806,29 @@ export function buildPhoneTools(): PhoneToolDef[] {
       { packageName: strParam('应用名：系统应用直接填中文名（时钟/设置/相机…）或第三方包名（如 com.tencent.mm）') },
       ['packageName'],
     );
+    // ---- v2.4.3 真机媒体感知 + 控制（机主需求：知道他在听什么歌、帮换歌、切任意 App） ----
+    add(
+      'getNowPlaying',
+      '看机主真实手机里【现在正在听什么歌】（网易云/QQ音乐/酷狗/Spotify 等后台播放中的歌名/歌手/专辑/播放状态）。想知道机主此刻在听什么、聊天里自然接上「你在听XX啊」时用这个；机主问「我耳机里放的什么歌」也用它。需要「正在收听检测」权限。',
+      {},
+      [],
+    );
+    add(
+      'controlRealMusic',
+      '控制机主真实手机里正在播放的音乐（媒体传输控制）。action 填：next=切到下一首、prev=切回上一首、play=继续播放、pause=暂停。机主说「换一首」「切歌」「别放了」「暂停一下」时用这个；人设合适时也可主动用（如机主在听伤感歌你又吃醋，可以给他切掉）。需「正在收听检测」权限。',
+      { action: { type: 'string', enum: ['next', 'prev', 'play', 'pause'], description: 'next=切下一首 / prev=切上一首 / play=继续 / pause=暂停' } },
+      ['action'],
+    );
+    add(
+      'getRealCalendarEvents',
+      '读取机主【真实手机系统日历】里某天的日程（与手机自带日历 App 同库，真实数据）。date 填「YYYY-MM-DD」（如 2026-03-15），空则查今天。机主说「我今天有什么安排」「明天有什么日程」「看看日历」时用这个。',
+      { date: strParam('日期 YYYY-MM-DD（空 = 今天）') },
+      [],
+    );
   }
 
-  // 服务端 sanitizeTools 上限：网页 22 + 真机 22 + v2.3.0 原生系统级 8 件 + v2.4.2 矩阵扩展 10 件 = 62，
+  // 服务端 sanitizeTools 上限：网页 22 + 真机 22 + v2.3.0 原生系统级 8 件 + v2.4.2 矩阵扩展 10 件
+  // + v2.4.3 媒体/日历 3 件（真机模式另有网页孪生 4 件不注册）= 65，
   // 上限已同步提到 72（api/chat/route.ts sanitizeTools）
   return tools.slice(0, 72);
 }
@@ -1246,6 +1287,45 @@ export async function execWebTool(name: string, args: Record<string, unknown>): 
       }
       case 'searchRealApp':
         return labText(await toolSearchRealApp(S(args.keyword)));
+      // ---- v2.4.3 真机媒体感知/控制 + 真机日历读取 ----
+      case 'getNowPlaying':
+        return runDeviceTool((d) => d.labGetNowPlaying());
+      case 'controlRealMusic': {
+        const act = S(args.action).toLowerCase();
+        if (act !== 'next' && act !== 'prev' && act !== 'play' && act !== 'pause') {
+          return '【失败】controlRealMusic 参数不合法（action 填 next/prev/play/pause，如「换一首」= next）';
+        }
+        return runDeviceTool((d) => d.labControlRealMedia(act));
+      }
+      case 'getRealCalendarEvents': {
+        // 自然说法 → YYYY-MM-DD（原生侧只认这个或空=今天）
+        const dateRaw = S(args.date).trim();
+        const iso = (d: Date) =>
+          `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+        let date = '';
+        const full = dateRaw.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})$/);
+        if (full) {
+          date = `${full[1]}-${String(Number(full[2])).padStart(2, '0')}-${String(Number(full[3])).padStart(2, '0')}`;
+        } else if (/今天|今日/.test(dateRaw)) {
+          date = iso(new Date());
+        } else if (/明天/.test(dateRaw)) {
+          date = iso(new Date(Date.now() + 86_400_000));
+        } else if (/后天/.test(dateRaw)) {
+          date = iso(new Date(Date.now() + 2 * 86_400_000));
+        } else {
+          // M月D日 / MM-DD（默认当年）
+          const md = dateRaw.match(/^(\d{1,2})月(\d{1,2})[日号]?$|^(\d{1,2})-(\d{1,2})$/);
+          if (md) {
+            const m = Number(md[1] ?? md[3]);
+            const d = Number(md[2] ?? md[4]);
+            const now = new Date();
+            if (m >= 1 && m <= 12 && d >= 1 && d <= 31) {
+              date = `${now.getFullYear()}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+            }
+          }
+        }
+        return runDeviceTool((d) => d.labGetRealCalendarEvents(date || undefined));
+      }
       case 'lockApp': {
         // 中文名/包名 → labLockApp 全屏拦截锁
         // v2.3.0 F-10 根修（机主实测「到时间了点击应用还是会有弹窗」）：minutes 缺省
@@ -1314,6 +1394,14 @@ export async function execWebTool(name: string, args: Record<string, unknown>): 
     }
   }
   // ---- 网页工具（v1.9.39 恒全量：无开关 gate，直接分发） ----
+  // v2.4.3 真机模式网页孪生拦截（双保险）：真机模式下 setAlarm/addCalendarEvent/
+  // getCalendarEvents/playMusic 已不注册，但弱模型仍可能凭旧上下文幻觉调用——
+  // 执行层再拦一道并给出改用真机工具的明确指引，绝不再往网页闹钟/日历/音乐里写。
+  if (getAiActionTarget() === 'device' && ['setAlarm', 'addCalendarEvent', 'getCalendarEvents', 'playMusic'].includes(name)) {
+    const realTool =
+      name === 'setAlarm' ? 'setRealAlarm' : name === 'addCalendarEvent' ? 'createCalendarEvent' : name === 'getCalendarEvents' ? 'getRealCalendarEvents' : 'controlRealMusic/getNowPlaying';
+    return `【失败】当前 AI 动手范围是「真机」，${name} 是网页版工具不可用。请改用真机工具 ${realTool} 完成同样的事（真机模式下闹钟/日历/音乐都只作用于机主的真实手机）。`;
+  }
   // 内容型工具（存备忘录/发消息/定闹钟/加日程…）成功后 rememberToolAction 直写记忆碎片
   switch (name) {
     case 'sendWebMessage': {

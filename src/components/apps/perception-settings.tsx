@@ -21,6 +21,7 @@ import {
   ChevronLeft,
   CloudSun,
   Keyboard,
+  Music2,
 } from 'lucide-react';
 import { ChatToggle } from './chat-settings';
 import { useChatSkin } from '@/lib/ios/chat-skin';
@@ -190,6 +191,17 @@ export function PerceptionSettingsPage({
             onChange={(v) => update({ calendar: v })}
             accent={accent}
             testId={`${testPrefix}-settings-perception-calendar`}
+          />
+          <div className={`border-t ${dividerCls}`} />
+          {/* v2.4.3 真机正在听什么歌（需 APK + 「通知使用权」） */}
+          <ToggleRow
+            icon={<Music2 size={I.size} strokeWidth={I.strokeWidth} />}
+            title="正在听什么歌"
+            desc="真机后台音乐 App 的歌名/歌手（需 APK + 正在收听检测权限）"
+            on={cfg.nowPlaying}
+            onChange={(v) => update({ nowPlaying: v })}
+            accent={accent}
+            testId={`${testPrefix}-settings-perception-nowplaying`}
           />
         </div>
 

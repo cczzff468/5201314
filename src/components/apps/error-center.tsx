@@ -91,25 +91,15 @@ export default function ErrorCenter() {
   }, []);
 
   const current = openId ? errors.find((e) => e.id === openId) || null : null;
-  const badgeCount = errors.length;
+  void errors; // v2.4.3：错误列表仍在（InlineErrorChip 点击可打开详情），只是不再有右上角入口
 
   // 弹窗正文（iOS 弹窗风：标题 + 滚动详情 + 操作行）
+  // v2.4.3 机主规格「把右上角的错误那个按钮删除，不要了」：极简指示器（右上角
+  // 「错误 N」胶囊）已删除——错误仍会上报进中心（不 crash 链路不变），但界面上
+  // 不再有常驻入口；InlineErrorChip（各功能内联的「点击查看详情」小胶囊）点击
+  // 仍可打开本弹窗看详情。
   return (
     <>
-      {/* 极简指示器：有错才出现（机主要求「界面上不要显示错误提示了，只显示一个错误/异常」） */}
-      {badgeCount > 0 && !open && (
-        <button
-          type="button"
-          aria-label={`错误：${badgeCount} 条，点击查看详情`}
-          data-testid="error-center-badge"
-          onClick={openList}
-          className="absolute right-2 top-[52px] z-[90] flex items-center gap-1 rounded-full bg-black/45 px-2.5 py-1 text-[11px] font-medium text-white backdrop-blur-md active:scale-95 dark:bg-white/60 dark:text-black"
-        >
-          <span className="inline-block h-[7px] w-[7px] rounded-full bg-red-500" aria-hidden />
-          错误{badgeCount > 1 ? ` ${badgeCount}` : ''}
-        </button>
-      )}
-
       {/* 详情/列表弹窗（z-[97]：打开时盖住来电层以外的全部内容；错误弹窗优先级仅次于熄屏） */}
       {open && (
         <div className="absolute inset-0 z-[97] flex items-center justify-center bg-black/35 backdrop-blur-[2px]" role="dialog" aria-modal="true" data-testid="error-center-dialog">

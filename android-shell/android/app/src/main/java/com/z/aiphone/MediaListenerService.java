@@ -130,6 +130,71 @@ public class MediaListenerService extends NotificationListenerService {
         return latestInfo;
     }
 
+    // ================= v2.4.3 媒体传输控制（帮机主切歌/暂停/继续） =================
+
+    /**
+     * 对当前活跃媒体会话下发传输控制（next/prev/play/pause/toggle）。
+     * 双通道取会话：
+     * ① MediaSessionManager.getActiveSessions(本通知监听组件)——「通知使用权」持有者的
+     *   官方通道，返回的 controller 天然带传输控制权限（优先取正在播放的会话）；
+     * ② 兜底：EXTRA_MEDIA_SESSION token 建立的 controller（部分 ROM getActiveSessions
+     *   返回空但通知 token 仍可控制）。
+     * 返回是否已成功下发（无活跃会话/全部失败返回 false，插件层给出可读原因）。
+     */
+    public static boolean sendMediaCommand(String action) {
+        MediaController target = null;
+        // ① 官方通道：活跃会话列表（正在播放的优先，否则第一个）
+        try {
+            MediaListenerService svc = instance;
+            android.content.Context ctx = svc != null ? svc.getApplicationContext() : null;
+            if (ctx != null) {
+                android.media.session.MediaSessionManager msm =
+                        (android.media.session.MediaSessionManager)
+                                ctx.getSystemService(android.content.Context.MEDIA_SESSION_SERVICE);
+                if (msm != null) {
+                    android.content.ComponentName cn =
+                            new android.content.ComponentName(ctx, MediaListenerService.class);
+                    List<MediaController> list = msm.getActiveSessions(cn);
+                    for (MediaController c : list) {
+                        PlaybackState ps = c.getPlaybackState();
+                        if (ps != null && ps.getState() == PlaybackState.STATE_PLAYING) {
+                            target = c;
+                            break;
+                        }
+                    }
+                    if (target == null && !list.isEmpty()) target = list.get(0);
+                }
+            }
+        } catch (Throwable ignored) {
+            // 无权限/ROM 限制：走兜底通道
+        }
+        // ② 兜底：通知 token 建立的 controller
+        if (target == null && instance != null) target = instance.controller;
+        if (target == null) return false;
+        try {
+            MediaController.TransportControls tc = target.getTransportControls();
+            if (tc == null) return false;
+            if ("next".equals(action)) {
+                tc.skipToNext();
+            } else if ("prev".equals(action)) {
+                tc.skipToPrevious();
+            } else if ("play".equals(action)) {
+                tc.play();
+            } else if ("pause".equals(action)) {
+                tc.pause();
+            } else if ("toggle".equals(action)) {
+                PlaybackState ps = target.getPlaybackState();
+                if (ps != null && ps.getState() == PlaybackState.STATE_PLAYING) tc.pause();
+                else tc.play();
+            } else {
+                return false;
+            }
+            return true;
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
     @Override
     public void onListenerConnected() {
         super.onListenerConnected();

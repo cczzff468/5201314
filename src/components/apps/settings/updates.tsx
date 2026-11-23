@@ -19,6 +19,7 @@ import {
   copyApkLink,
   getApkUrl,
   launchApkDownload,
+  updateApkInApp,
 } from '@/lib/ios/apk-download';
 
 // v1.4.2 APP 更新：自动检查 + 红点 + 版本历史
@@ -37,6 +38,8 @@ import { DetailShell } from './shared';
 export function AppUpdatePage({ onBack }: { onBack: () => void }) {
   const nativeMode = isNativePerception();
   const [copied, setCopied] = useState(false);
+  /** v2.4.3 APP 内下载状态：downloading=通知栏下载中 / perm=等「安装未知应用」授权 */
+  const [dlState, setDlState] = useState<'none' | 'downloading' | 'perm'>('none');
   const apkUrl = getApkUrl();
 
   const info = useAppUpdate((s) => s.info);
@@ -57,6 +60,23 @@ export function AppUpdatePage({ onBack }: { onBack: () => void }) {
   /** 点下载即把指纹记为已见过（红点消；同版本不再自动弹窗） */
   const markSeen = (): void => {
     dismiss();
+  };
+
+  /** v2.4.3 原生壳下载：APP 内 DownloadManager 下载 + 完成自动弹安装；
+   *  未授「安装未知应用」→ 跳授权页提示；原生通道失败回退旧链路 */
+  const doNativeUpdate = (): void => {
+    setDlState('none');
+    void updateApkInApp().then((r) => {
+      if (r.kind === 'downloading') {
+        setDlState('downloading');
+        markSeen();
+      } else if (r.kind === 'need-permission') {
+        setDlState('perm');
+      } else {
+        launchApkDownload(setCopied);
+        markSeen();
+      }
+    });
   };
 
   return (
@@ -106,24 +126,27 @@ export function AppUpdatePage({ onBack }: { onBack: () => void }) {
         <div className="mx-4 mt-4 space-y-2">
           {nativeMode ? (
             <>
+              {dlState === 'perm' ? (
+                <p className="rounded-[10px] bg-amber-500/10 px-3 py-2 text-[12px] leading-relaxed text-amber-600 dark:text-amber-400">
+                  已打开「安装未知应用」授权页——请允许 AI Phone 安装应用，允许后回来再点一次下载按钮。
+                </p>
+              ) : null}
               <button
                 type="button"
                 data-testid="appupdate-download-btn"
-                onClick={() => {
-                  launchApkDownload(setCopied);
-                  markSeen();
-                }}
+                onClick={doNativeUpdate}
                 className="block w-full rounded-full bg-[#34C759] py-2.5 text-center text-[14px] font-medium text-white transition-opacity active:opacity-70"
               >
-                {copied
-                  ? '✓ 下载链接已复制，等下载完从通知栏安装'
+                {dlState === 'downloading'
+                  ? '✓ 正在 APP 内下载（通知栏有进度），下载完自动弹安装'
                   : hasUpdate
-                    ? `立即更新 v${version}（自动复制链接）`
-                    : `重新下载 v${version}（自动复制链接）`}
+                    ? `立即更新 v${version}（APP 内下载）`
+                    : `重新下载 v${version}（APP 内下载）`}
               </button>
               <p className="text-[12px] leading-snug text-muted-foreground">
-                点按钮自动复制下载链接并尝试拉起手机浏览器（页面不会跳走）；下载完从顶部下拉通知栏点开安装，
-                提示「未知应用」按系统引导允许。
+                {dlState === 'downloading'
+                  ? '下载在通知栏显示进度，完成后自动弹出安装框（覆盖安装、数据不丢）。'
+                  : '点按钮直接在 APP 内下载更新包（通知栏有进度），下载完自动弹出安装；首次会请你去系统里允许「安装未知应用」，允许后回来重点一次即可。'}
               </p>
             </>
           ) : (

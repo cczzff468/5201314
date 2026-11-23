@@ -176,4 +176,7 @@
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
     <!-- v2.4.2 网络下载工具（downloadFile 走系统 DownloadManager，免存储权限写公共下载目录） -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- v2.4.3 APP 内更新安装（downloadAndInstallApk 调起包安装器；Android 8+ 还需
+         机主在「安装未知应用」页允许本 APP，插件会自动跳转授权页） -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
 </manifest>
