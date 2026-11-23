@@ -126,8 +126,9 @@ export async function POST(request: Request) {
           method: 'POST',
           headers,
           body: payload,
-          // 30s：部分中转/冷启动较慢的服务商首响应可超过 15s（过短会误报「地址不可达」）
-          signal: AbortSignal.timeout(30_000),
+          // v2.2.2：30s → 60s，与 /api/chat 的上游超时对齐——部分中转/冷启动服务商
+          // 首响应可超过 30s（实测聊天 29.5s 成功的同一时段，测试连接 30s 整被掐断误报失败）
+          signal: AbortSignal.timeout(60_000),
         });
       } catch {
         // 网络错误 / 超时：换下一个候选路径
@@ -155,6 +156,7 @@ export async function POST(request: Request) {
             ok: false,
             error: '接口可达但响应不是标准补全格式，请确认该地址为 OpenAI 兼容 chat/completions 端点',
             connected: true,
+            upstreamStatus: res.status,
             url,
           },
           { status: 502 }
@@ -184,6 +186,7 @@ export async function POST(request: Request) {
             ok: false,
             error: detail ? `参数被拒绝（400）：${detail}` : '请求参数被拒绝（400），请检查模型名与配置',
             connected: true,
+            upstreamStatus: res.status,
             url,
           },
           { status: 502 }
@@ -192,7 +195,7 @@ export async function POST(request: Request) {
 
       if (res.status === 401) {
         return NextResponse.json(
-          { ok: false, error: 'API Key 无效或未授权（401）', connected: true, url },
+          { ok: false, error: 'API Key 无效或未授权（401）', connected: true, upstreamStatus: res.status, url },
           { status: 502 }
         );
       }
@@ -205,6 +208,7 @@ export async function POST(request: Request) {
               error: `服务拒绝访问（403）：${detail} —— 该服务商对服务器所在地区限制，已改用浏览器直连`,
               connected: true,
               directOnly: true,
+              upstreamStatus: res.status,
               url,
             },
             { status: 502 }
@@ -215,6 +219,7 @@ export async function POST(request: Request) {
             ok: false,
             error: detail ? `服务拒绝访问（403）：${detail}` : '服务拒绝访问（403）',
             connected: true,
+            upstreamStatus: res.status,
             url,
           },
           { status: 502 }
@@ -229,6 +234,7 @@ export async function POST(request: Request) {
             ok: false,
             error: '接口路径或模型不存在（404），请检查 API 地址与模型名',
             connected: true,
+            upstreamStatus: res.status,
             url,
           },
           { status: 502 }
@@ -241,6 +247,7 @@ export async function POST(request: Request) {
             ok: false,
             error: detail ? `触发限流或额度不足（429）：${detail}` : '触发限流或额度不足（429）',
             connected: true,
+            upstreamStatus: res.status,
             url,
           },
           { status: 502 }
@@ -252,6 +259,7 @@ export async function POST(request: Request) {
           ok: false,
           error: detail ? `上游接口返回 ${res.status}：${detail}` : `上游接口返回 ${res.status}`,
           connected: true,
+          upstreamStatus: res.status,
           url,
         },
         { status: 502 }
@@ -272,9 +280,15 @@ export async function POST(request: Request) {
     );
   }
 
-  // 有响应但未在上面返回（理论上不会走到）：统一兜底
+  // 有过响应但未在上面返回（如前一候选 404 换路后、后一候选网络不可达）：
+  // v2.2.2 补 directOnly 让客户端走浏览器直连兜底，不再停在含糊的「请稍后重试」
   return NextResponse.json(
-    { ok: false, error: '测试失败，请稍后重试', url: lastUrl },
+    {
+      ok: false,
+      error: '测试未能完成（部分路径不可达），已改用浏览器直连',
+      directOnly: true,
+      url: lastUrl,
+    },
     { status: 502 }
   );
 }

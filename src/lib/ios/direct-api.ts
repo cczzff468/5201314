@@ -75,7 +75,9 @@ export interface DirectTestResult {
   error?: string;
 }
 
-export async function directTest(config: ApiConfig, timeoutMs = 20000): Promise<DirectTestResult> {
+export async function directTest(config: ApiConfig, timeoutMs = 45000): Promise<DirectTestResult> {
+  // v2.2.2：20s → 45s——部分中转/冷启动服务商首响应可超过 20s（聊天链路本身 60s），
+  // 过短会把「能用但慢」误报成「连接不上」（机主反馈：聊天能发但测试连接总失败）
   const model = config.model.trim() || 'gpt-4o-mini';
   const candidates = buildCandidates(config.baseUrl, 'chat/completions');
 
@@ -258,6 +260,155 @@ export async function directFetchModels(
         ? '浏览器直连超时：地址不可达或网络受限'
         : directFetchErrorHint(baseUrl),
   };
+}
+
+// ---------------- 统一模型拉取（服务器代理 + 浏览器直连双通道并集） ----------------
+
+/**
+ * 为什么需要双通道并集：部分 API（中转/反代/WAF）对「云端服务器出口 IP」与「用户本机 IP」
+ * 返回不同的模型列表（地区过滤、按 IP 限流、边缘缓存不一致等），单一通道经常只能看到子集
+ * ——机主反馈「同一个地址和密钥，拉取模型变少了」正是这种场景。两条通道并行拉取取并集，
+ * 再并入本地缓存（按 地址+Key 记忆）：列表只增不减，服务商临时抽风也不会「变少」。
+ */
+
+export interface UnifiedModelsResult {
+  /** 并集合并后的模型列表（排序去重；可能全部来自本地缓存） */
+  models: string[];
+  /** 双通道与缓存都没有拿到模型时的致命错误 */
+  error?: string;
+  /** 接口可达但无模型列表接口 / 本次实时拉取失败仅展示缓存 等降级说明 */
+  hint?: string;
+  /** 服务器代理通道拿到的模型数 */
+  viaServer: number;
+  /** 浏览器直连通道拿到的模型数 */
+  viaDirect: number;
+  /** true = 双通道实时拉取都失败，models 完全来自上次成功拉取的缓存 */
+  fromCacheOnly: boolean;
+}
+
+const MODELS_CACHE_KEY = 'aiphone:models-cache:v1';
+const MODELS_CACHE_MAX_ENTRIES = 20;
+const MODELS_CACHE_MAX_MODELS = 800;
+
+interface ModelsCacheEntry {
+  models: string[];
+  at: number;
+}
+
+type ModelsCache = Record<string, ModelsCacheEntry>;
+
+function readModelsCache(): ModelsCache {
+  try {
+    const raw = window.localStorage.getItem(MODELS_CACHE_KEY);
+    if (!raw) return {};
+    const parsed: unknown = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+    const out: ModelsCache = {};
+    for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
+      if (!v || typeof v !== 'object') continue;
+      const modelsRaw = (v as { models?: unknown }).models;
+      if (!Array.isArray(modelsRaw)) continue;
+      const models = modelsRaw.filter((m): m is string => typeof m === 'string');
+      const atRaw = (v as { at?: unknown }).at;
+      out[k] = { models, at: typeof atRaw === 'number' ? atRaw : 0 };
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+function writeModelsCache(cacheKey: string, models: string[]): void {
+  try {
+    const cache = readModelsCache();
+    cache[cacheKey] = { models: models.slice(0, MODELS_CACHE_MAX_MODELS), at: Date.now() };
+    // LRU 收敛：最多保留 20 个「地址+Key」组合，防止长期使用膨胀
+    const entries = Object.entries(cache).sort((a, b) => b[1].at - a[1].at);
+    const trimmed: ModelsCache = {};
+    for (const [k, v] of entries.slice(0, MODELS_CACHE_MAX_ENTRIES)) trimmed[k] = v;
+    window.localStorage.setItem(MODELS_CACHE_KEY, JSON.stringify(trimmed));
+  } catch {
+    // localStorage 不可用（隐私模式等）：跳过缓存，不影响本次拉取
+  }
+}
+
+/** 多列表并集去重排序 */
+function unionModels(...lists: string[][]): string[] {
+  const set = new Set<string>();
+  for (const list of lists) for (const m of list) if (typeof m === 'string' && m) set.add(m);
+  return [...set].sort((a, b) => a.localeCompare(b));
+}
+
+/**
+ * 统一拉取模型列表：服务器代理与浏览器直连并行请求、结果并集、并入本地缓存（只增不减）。
+ * 任意通道成功即有结果；双通道都失败但有缓存 → 返回缓存（fromCacheOnly）；
+ * 双通道都失败且无缓存 → 返回合并后的错误。四个设置页（聊天/识图/语音/画图）共用。
+ */
+export async function pullModelsUnified(baseUrl: string, apiKey: string): Promise<UnifiedModelsResult> {
+  // 服务器代理通道（自身网络异常返回 null，不打断另一条通道）
+  const serverPull = fetch('/api/settings/models', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ baseUrl, apiKey }),
+  })
+    .then(
+      async (res) =>
+        ({
+          ok: res.ok,
+          data: (await res.json().catch(() => null)) as
+            | { models?: string[]; hint?: string; error?: string; url?: string; directOnly?: boolean }
+            | null,
+        }) as { ok: boolean; data: { models?: string[]; hint?: string; error?: string; url?: string; directOnly?: boolean } | null },
+    )
+    .catch(() => null);
+
+  // 浏览器直连通道（内网地址 / 对服务器出口受限的服务商经常只有这条路能拿到完整列表）
+  const directPull = directFetchModels(baseUrl, apiKey).catch(() => null);
+
+  const [serverOut, directOut] = await Promise.all([serverPull, directPull]);
+
+  const serverModels =
+    serverOut?.data && Array.isArray(serverOut.data.models) ? serverOut.data.models : [];
+  const directModels = directOut && Array.isArray(directOut.models) ? directOut.models : [];
+  const live = unionModels(serverModels, directModels);
+
+  const cacheKey = `${baseUrl.trim()}|${apiKey.trim()}`;
+  const cached = readModelsCache()[cacheKey]?.models ?? [];
+  const merged = live.length > 0 ? unionModels(live, cached) : cached;
+
+  if (merged.length > 0) {
+    if (live.length > 0) {
+      writeModelsCache(cacheKey, merged);
+      return {
+        models: merged,
+        viaServer: serverModels.length,
+        viaDirect: directModels.length,
+        fromCacheOnly: false,
+      };
+    }
+    // 双通道实时拉取都失败，但有历史缓存：展示缓存并说明（不标红，模型选用不受影响）
+    return {
+      models: merged,
+      viaServer: 0,
+      viaDirect: 0,
+      fromCacheOnly: true,
+      hint: `本次实时拉取未成功（网络受限），已展示上次成功拉取的 ${merged.length} 个模型，可直接选用或手动输入`,
+    };
+  }
+
+  // 没有任何模型：接口可达但没有模型列表接口 → 优雅降级提示；都失败 → 合并错误
+  const serverHint = typeof serverOut?.data?.hint === 'string' ? serverOut.data.hint : '';
+  const directHint = directOut && typeof directOut.hint === 'string' ? directOut.hint : '';
+  if (serverHint || directHint) {
+    return { models: [], viaServer: 0, viaDirect: 0, fromCacheOnly: false, hint: serverHint || directHint };
+  }
+  const serverErr = serverOut?.data?.error ?? (serverOut ? '' : '服务器代理不可达');
+  const directErr = directOut?.error ?? '';
+  const error =
+    serverErr && directErr && serverErr !== directErr
+      ? `${serverErr}；浏览器直连也不可用：${directErr}`
+      : serverErr || directErr || '拉取模型失败，请稍后重试';
+  return { models: [], viaServer: 0, viaDirect: 0, fromCacheOnly: false, error };
 }
 
 // ---------------- 识图（非流式多模态，图片理解用） ----------------

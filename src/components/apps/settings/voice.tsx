@@ -31,10 +31,7 @@ import { Input } from '@/components/ui/input';
 
 import { Switch } from '@/components/ui/switch';
 
-import {
-  directFetchModels,
-  isPrivateApiUrl,
-} from '@/lib/ios/direct-api';
+import { pullModelsUnified } from '@/lib/ios/direct-api';
 
 import { isWebSpeechSupported } from '@/lib/ios/web-speech';
 
@@ -195,42 +192,19 @@ export function VoicePage({ onBack }: { onBack: () => void }) {
     setModelsError('');
     setModelsHint('');
     try {
-      const res = await fetch('/api/settings/models', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ baseUrl: ttsConfig.baseUrl, apiKey: ttsConfig.apiKey }),
-      });
-      const data = (await res.json().catch(() => null)) as
-        | { models?: string[]; hint?: string; error?: string; url?: string; directOnly?: boolean }
-        | null;
-      // 内网地址或服务器不可达/地区限制（directOnly）：改用浏览器直连拉取
-      if (!data || data.directOnly || (data.error && isPrivateApiUrl(ttsConfig.baseUrl))) {
-        const direct = await directFetchModels(ttsConfig.baseUrl, ttsConfig.apiKey);
-        if (direct.error) {
-          const serverMsg = typeof data?.error === 'string' ? data.error : '';
-          setModelsError(
-            serverMsg && !isPrivateApiUrl(ttsConfig.baseUrl)
-              ? `${serverMsg}；浏览器直连也不可用：${direct.error}`
-              : direct.error
-          );
-          return;
-        }
-        if (direct.hint && direct.models.length === 0) {
-          setModelsHint(TTS_MODEL_MANUAL_HINT);
-          return;
-        }
-        applyTtsModels(direct.models);
+      // v2.2.2：双通道统一拉取（服务器代理 + 浏览器直连并行取并集，再并入本地缓存只增不减）
+      const out = await pullModelsUnified(ttsConfig.baseUrl, ttsConfig.apiKey);
+      if (out.models.length > 0) {
+        applyTtsModels(out.models);
+        if (out.fromCacheOnly) setModelsHint(out.hint ?? '');
         return;
       }
-      if (!res.ok || !data || data.error) {
-        const base = data?.error ?? '拉取模型失败，请稍后重试';
-        setModelsError(data?.url ? `${base}（实际请求：${data.url}）` : base);
-      } else if (data.hint && (data.models ?? []).length === 0) {
+      if (out.hint) {
         // MiniMax 等无模型列表接口：优雅降级，可用常用模型 chips 或手动填写
         setModelsHint(TTS_MODEL_MANUAL_HINT);
-      } else {
-        applyTtsModels(data.models ?? []);
+        return;
       }
+      setModelsError(out.error ?? '拉取模型失败，请稍后重试');
     } catch {
       setModelsError('无法连接到服务器');
     } finally {

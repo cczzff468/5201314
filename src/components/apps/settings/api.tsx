@@ -37,9 +37,9 @@ import { Input } from '@/components/ui/input';
 import { Slider } from '@/components/ui/slider';
 
 import {
-  directFetchModels,
   directTest,
   isPrivateApiUrl,
+  pullModelsUnified,
 } from '@/lib/ios/direct-api';
 
 // 云端助手（微信 7x24 自动回复）：部署到用户自己的 Supabase。
@@ -91,6 +91,9 @@ export function ApiPage({ onBack }: { onBack: () => void }) {
   const [testError, setTestError] = useState('');
   const [testConnected, setTestConnected] = useState(false);
   const [testUrl, setTestUrl] = useState('');
+  // v2.2.2：「连接基本可用」中间态——chat/completions 双通道测试都未完成，但模型列表
+  // 验证了地址与密钥有效（聊天实际走双通道自动切换，能收发即正常），不再误报「连接不上」
+  const [testPartial, setTestPartial] = useState<{ modelCount: number } | null>(null);
 
   const [maxText, setMaxText] = useState(() => String(apiConfig.maxTokens));
   // v2.2：温度数值输入缓冲（与 Slider 双向同步——拖滑块更新 tempText，输入框改值也回写 apiConfig）
@@ -136,6 +139,7 @@ export function ApiPage({ onBack }: { onBack: () => void }) {
     setTestError('');
     setTestConnected(false);
     setTestUrl('');
+    setTestPartial(null);
   };
 
   const applyBuiltin = (p: (typeof BUILTIN_API_PRESETS)[number]) => {
@@ -176,46 +180,30 @@ export function ApiPage({ onBack }: { onBack: () => void }) {
     setModelsError('');
     setModelsHint('');
     try {
-      const res = await fetch('/api/settings/models', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ baseUrl: apiConfig.baseUrl, apiKey: apiConfig.apiKey }),
-      });
-      const data = (await res.json().catch(() => null)) as
-        | { models?: string[]; hint?: string; error?: string; url?: string; directOnly?: boolean }
-        | null;
-      // 内网地址或服务器不可达/地区限制（directOnly）：改用浏览器直连拉取
-      if (!data || data.directOnly || (data.error && isPrivateApiUrl(apiConfig.baseUrl))) {
-        const direct = await directFetchModels(apiConfig.baseUrl, apiConfig.apiKey);
-        if (direct.error) {
-          const serverMsg = typeof data?.error === 'string' ? data.error : '';
-          setModelsError(
-            serverMsg && !isPrivateApiUrl(apiConfig.baseUrl)
-              ? `${serverMsg}；浏览器直连也不可用：${direct.error}`
-              : direct.error
-          );
-          return;
-        }
-        if (direct.hint && direct.models.length === 0) {
-          setModelsHint(direct.hint);
-          return;
-        }
-        setModels(direct.models);
+      // v2.2.2：双通道统一拉取（服务器代理 + 浏览器直连并行取并集，再并入本地缓存只增不减）
+      // ——修复「同一个地址和密钥拉取模型变少」：部分服务商对服务器出口 IP 与用户本机
+      // 返回不同的模型列表，单一通道经常只能看到子集
+      const out = await pullModelsUnified(apiConfig.baseUrl, apiConfig.apiKey);
+      if (out.models.length > 0) {
+        setModels(out.models);
         setModelQuery('');
         setModelPanelOpen(true);
+        if (out.fromCacheOnly) {
+          setModelsHint(out.hint ?? '');
+        } else if (out.viaDirect > 0 && out.viaServer > 0) {
+          setModelsHint(
+            `双通道合并拉取到 ${out.models.length} 个模型（服务器 ${out.viaServer} + 浏览器直连补充）`,
+          );
+        } else if (out.viaDirect > 0 && out.viaServer === 0) {
+          setModelsHint(`浏览器直连拉取到 ${out.models.length} 个模型（服务器通道不可用）`);
+        }
         return;
       }
-      if (!res.ok || !data || data.error) {
-        const base = data?.error ?? '拉取模型失败，请稍后重试';
-        setModelsError(data?.url ? `${base}（实际请求：${data.url}）` : base);
-      } else if (data.hint && (data.models ?? []).length === 0) {
-        // 反代等无模型列表接口：优雅降级，提示手动输入
-        setModelsHint(data.hint);
-      } else {
-        setModels(data.models ?? []);
-        setModelQuery('');
-        setModelPanelOpen(true);
+      if (out.hint) {
+        setModelsHint(out.hint);
+        return;
       }
+      setModelsError(out.error ?? '拉取模型失败，请稍后重试');
     } catch {
       setModelsError('无法连接到服务器');
     } finally {
@@ -251,6 +239,7 @@ export function ApiPage({ onBack }: { onBack: () => void }) {
             connected?: boolean;
             url?: string;
             directOnly?: boolean;
+            upstreamStatus?: number;
           }
         | null;
       setTestUrl(typeof data?.url === 'string' ? data.url : '');
@@ -258,26 +247,43 @@ export function ApiPage({ onBack }: { onBack: () => void }) {
         setTestOk({ latencyMs: data.latencyMs ?? 0, model: data.model ?? apiConfig.model });
         return;
       }
-      // 私有地址（云端服务器必然不可达）或服务器明确建议直连（地区限制/网络不可达/限流）：
-      // 改用浏览器直连兑底；服务器返回非 JSON（网关错误页等 data=null）时私有地址同样兑底，
-      // 避免误报「测试失败」
+      const isPrivate = isPrivateApiUrl(apiConfig.baseUrl);
       const serverError = data?.error ?? '测试失败，请稍后重试';
-      if (data?.directOnly || isPrivateApiUrl(apiConfig.baseUrl)) {
-        const direct = await directTest(apiConfig);
-        if (direct.ok) {
-          setTestOk({ latencyMs: direct.latencyMs, model: direct.model, viaDirect: true });
-          return;
-        }
-        setTestUrl(apiConfig.baseUrl);
-        setTestError(
-          isPrivateApiUrl(apiConfig.baseUrl)
-            ? direct.error ?? '浏览器直连失败'
-            : `${serverError}；浏览器直连也不可用：${direct.error ?? '请确认该 API 允许跨域访问（CORS）'}`
-        );
+      // v2.2.2：需要浏览器直连兑底的情况：私网地址 / 服务器网络不可达或地区受限（directOnly）/
+      // 403、429（可能是 WAF/限流针对服务器出口 IP，用户本机不一定受影响）/ 服务器返回非 JSON。
+      // 401（Key 无效）、400（参数）、404（路径不存在）是服务商给出的确定性结论，不再直连重试
+      const needsDirect =
+        isPrivate ||
+        !data ||
+        Boolean(data.directOnly) ||
+        data.upstreamStatus === 403 ||
+        data.upstreamStatus === 429;
+      if (!needsDirect) {
+        setTestError(serverError);
+        setTestConnected(Boolean(data?.connected));
         return;
       }
-      setTestError(serverError);
-      setTestConnected(Boolean(data?.connected));
+      // 并行：浏览器直连测试 + 双通道模型列表探针（探针同时写入模型缓存，供「拉取模型」复用）
+      const [direct, probe] = await Promise.all([
+        directTest(apiConfig),
+        pullModelsUnified(apiConfig.baseUrl, apiConfig.apiKey),
+      ]);
+      if (direct.ok) {
+        setTestOk({ latencyMs: direct.latencyMs, model: direct.model, viaDirect: true });
+        return;
+      }
+      // 聊天端点双通道都没测通，但模型列表能拉到 → 地址与密钥有效，
+      // 聊天实际在「服务器代理 / 浏览器直连」间自动切换：不再误报「连接不上」
+      if (probe.models.length > 0) {
+        setTestPartial({ modelCount: probe.models.length });
+        return;
+      }
+      setTestUrl(apiConfig.baseUrl);
+      setTestError(
+        isPrivate
+          ? direct.error ?? '浏览器直连失败'
+          : `${serverError}；浏览器直连也不可用：${direct.error ?? '请确认该 API 允许跨域访问（CORS）'}`
+      );
     } catch {
       setTestError('无法连接到服务器');
     } finally {
@@ -679,6 +685,17 @@ export function ApiPage({ onBack }: { onBack: () => void }) {
           {testOk && (
             <div className="rounded-[16px] border border-emerald-500/30 bg-emerald-400/15 px-4 py-3 text-[13px] leading-relaxed text-emerald-700 backdrop-blur-xl dark:bg-emerald-300/[0.08] dark:text-emerald-300">
               ✅ 连接成功{testOk.viaDirect ? '（浏览器直连）' : ''} · 延迟 {testOk.latencyMs}ms · 模型 {testOk.model}
+            </div>
+          )}
+          {testPartial && (
+            <div
+              data-testid="test-partial"
+              className="rounded-[16px] border border-amber-500/30 bg-amber-400/15 px-4 py-3 text-[13px] font-medium leading-relaxed text-amber-700 backdrop-blur-xl dark:bg-amber-300/[0.08] dark:text-amber-200/90"
+            >
+              ⚠️ 连接基本可用：API 地址与密钥有效（模型列表验证通过，共 {testPartial.modelCount} 个模型）
+              <span className="mt-1 block text-[12px] font-normal opacity-80">
+                chat/completions 测试请求从当前网络未能完成；实际聊天会在「服务器代理 / 浏览器直连」双通道间自动切换，能正常收发消息即无需处理。
+              </span>
             </div>
           )}
           {testError && (

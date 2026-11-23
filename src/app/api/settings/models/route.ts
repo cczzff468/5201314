@@ -119,7 +119,8 @@ export async function POST(request: Request) {
       res = await fetch(url, {
         method: 'GET',
         headers,
-        signal: AbortSignal.timeout(12000),
+        // v2.2.2：12s → 15s，与浏览器直连通道的超时对齐（慢速中转首包常超过 12s）
+        signal: AbortSignal.timeout(15_000),
       });
     } catch {
       // 网络错误 / 超时：换下一个候选路径，都失败再报错

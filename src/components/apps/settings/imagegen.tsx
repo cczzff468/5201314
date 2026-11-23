@@ -38,10 +38,7 @@ import { Textarea } from '@/components/ui/textarea';
 
 import { Switch } from '@/components/ui/switch';
 
-import {
-  directFetchModels,
-  isPrivateApiUrl,
-} from '@/lib/ios/direct-api';
+import { pullModelsUnified } from '@/lib/ios/direct-api';
 
 import {
   extractImgGenError,
@@ -170,7 +167,8 @@ export function ImageGenPage({ onBack }: { onBack: () => void }) {
     setImgGenPresets(imgGenPresets.filter((p) => p.id !== id));
   };
 
-  // —— 拉取模型列表（与识图/语音页同款：服务端拉取，内网地址/不可达时浏览器直连兜底） ——
+  // —— 拉取模型列表（v2.2.2：双通道统一拉取——服务器代理 + 浏览器直连并行取并集，
+  //    再并入本地缓存只增不减，修复「同一个地址和密钥拉取模型变少」） ——
   const fetchModels = async () => {
     if (!imgGenConfig.baseUrl.trim()) {
       setModelsError('请先填写 API 地址');
@@ -180,40 +178,19 @@ export function ImageGenPage({ onBack }: { onBack: () => void }) {
     setModelsError('');
     setModelsHint('');
     try {
-      const res = await fetch('/api/settings/models', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ baseUrl: imgGenConfig.baseUrl, apiKey: imgGenConfig.apiKey }),
-      });
-      const data = (await res.json().catch(() => null)) as
-        | { models?: string[]; hint?: string; error?: string; directOnly?: boolean }
-        | null;
-      // 内网地址或服务器不可达/地区限制（directOnly）：改用浏览器直连拉取
-      if (!data || data.directOnly || (data.error && isPrivateApiUrl(imgGenConfig.baseUrl))) {
-        const direct = await directFetchModels(imgGenConfig.baseUrl, imgGenConfig.apiKey);
-        if (direct.error) {
-          setModelsError(direct.error);
-          return;
-        }
-        if (direct.hint && direct.models.length === 0) {
-          setModelsHint(direct.hint);
-          return;
-        }
-        setModels(direct.models);
+      const out = await pullModelsUnified(imgGenConfig.baseUrl, imgGenConfig.apiKey);
+      if (out.models.length > 0) {
+        setModels(out.models);
         setModelQuery('');
         setModelPanelOpen(true);
+        if (out.fromCacheOnly) setModelsHint(out.hint ?? '');
         return;
       }
-      if (!res.ok || !data || data.error) {
-        setModelsError(data?.error ?? '拉取模型失败，请稍后重试');
-      } else if (data.hint && (data.models ?? []).length === 0) {
-        // 反代等无模型列表接口：优雅降级，提示手动输入
-        setModelsHint(data.hint);
-      } else {
-        setModels(data.models ?? []);
-        setModelQuery('');
-        setModelPanelOpen(true);
+      if (out.hint) {
+        setModelsHint(out.hint);
+        return;
       }
+      setModelsError(out.error ?? '拉取模型失败，请稍后重试');
     } catch {
       setModelsError('无法连接到服务器');
     } finally {

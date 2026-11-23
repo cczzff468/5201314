@@ -90,13 +90,32 @@ const server = Bun.serve({
     const url = new URL(req.url);
 
     if (url.pathname.endsWith('/models') && req.method === 'GET') {
+      // v2.2.2 E2E：多模型列表（测双通道并集与本地缓存只增不减）
       return new Response(
-        JSON.stringify({ object: 'list', data: [{ id: 'mock-1', object: 'model' }] }),
+        JSON.stringify({
+          object: 'list',
+          data: [
+            { id: 'mock-1', object: 'model' },
+            { id: 'mock-2', object: 'model' },
+            { id: 'mock-3', object: 'model' },
+            { id: 'gpt-4o-mini', object: 'model' },
+            { id: 'deepseek-chat', object: 'model' },
+          ],
+        }),
         { headers: { 'Content-Type': 'application/json', ...cors } },
       );
     }
 
     if (url.pathname.endsWith('/chat/completions') && req.method === 'POST') {
+      // v2.2.2 E2E：WAF 场景模拟——Key 为 waf-block 时 POST 被拒（403），
+      // 但 GET /models 正常：复现「拉模型能用、测试连接失败、聊天可用」的机主反馈场景
+      const auth = req.headers.get('authorization') ?? '';
+      if (auth.includes('waf-block')) {
+        return new Response(
+          JSON.stringify({ error: { message: 'Access denied by WAF policy (simulated)' } }),
+          { status: 403, headers: { 'Content-Type': 'application/json', ...cors } },
+        );
+      }
       const body = (await req.json()) as {
         messages?: Array<{ role: string; content: unknown }>;
         stream?: boolean;
