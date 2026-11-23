@@ -623,9 +623,18 @@ let tickBusy = false;
 function syncJealousyGuard(pkg: string | null, unlockAt: number, charName: string): void {
   const cfg = getJealousyConfig();
   if (cfg.senseMode !== 'device') return; // 网页锁在网页内部，原生守护无意义
+  const l = pkg ? readJealousyRuntime().lock : null;
   void nativeJealousyGuardSyncLock(
     pkg
-      ? { pkg, unlockAt, charName }
+      ? {
+          pkg,
+          unlockAt,
+          charName,
+          // v2.2.0 拦截窗【去哄哄 TA】直达聊天：吃醋锁同样透传联系人身份
+          contactId: l?.contactId ?? undefined,
+          app: l?.app ?? undefined,
+          message: l?.reason ?? undefined,
+        }
       : {},
   ).catch(() => null);
 }
@@ -651,6 +660,15 @@ async function drainJealousyGuardEvents(): Promise<void> {
   if (!events || events.length === 0) return;
 
   for (const ev of events) {
+    // v2.2.0 先转给 freezeRealApp 锁的事件处理器（吃醋锁与 freezeRealApp 共用同一个
+    // 原生守护/事件池——单锁设计下谁 drain 到都先让 real-freeze 看一眼，不匹配它的
+    // 冻结记录时返回 false 继续走吃醋锁逻辑，两边信号都不丢）
+    try {
+      const { handleRealFreezeGuardEvent } = await import('./real-app-freeze');
+      if (await handleRealFreezeGuardEvent(ev)) continue;
+    } catch {
+      /* real-freeze 处理器异常不影响吃醋锁自身逻辑 */
+    }
     if (ev.type === 'native-unlock') {
       const rt = readJealousyRuntime();
       // 锁仍活跃且正是这个应用 → 原生已替我们执行了 pm unsuspend，JS 只需对齐状态
@@ -983,10 +1001,18 @@ async function executeJealousyLock(
   unlockAt: number,
   charName: string,
   message = '',
+  ident?: { contactId?: string; app?: string },
 ): Promise<{ ok: boolean; web: boolean; failNote: string }> {
   const cfg = getJealousyConfig();
   if (cfg.senseMode === 'device') {
-    const r = await deviceLockApp(pkg, { unlockAt, charName, message });
+    // v2.2.0：contactId/app 透传——拦截窗【去哄哄 TA】拉起本 App 后直达对应聊天
+    const r = await deviceLockApp(pkg, {
+      unlockAt,
+      charName,
+      message,
+      contactId: ident?.contactId,
+      app: ident?.app,
+    });
     if (!r.ok) return { ok: false, web: false, failNote: r.text };
     // v2.2 需求一.3：真机锁若在网页里有对应体 → 同步冻结网页图标（灰显可点）。
     // 锁定界面只在用户点击被锁 App 时出现（不再 AI 一锁就全屏弹出）；解锁三通道
@@ -1128,7 +1154,10 @@ async function runJealousyDecision(trigger: TriggerInfo): Promise<void> {
   const { unlockAt, untilCoaxed } = parseLockDuration(j, cfg);
   if (wantLock && trigger.pkg) {
     if (!reason) reason = `你刷${appName}都不理我，我很不开心。`;
-    const exe = await executeJealousyLock(trigger.pkg, unlockAt, contact.name, reason);
+    const exe = await executeJealousyLock(trigger.pkg, unlockAt, contact.name, reason, {
+      contactId: contact.id,
+      app: chat.app,
+    });
     locked = exe.ok;
     lockFailNote = exe.failNote;
     if (!exe.ok) {
@@ -1579,7 +1608,10 @@ async function runJealousyWatch(): Promise<void> {
     const duration = parseLockDuration({ lockMin: dec.lockMin }, cfg);
     lockUntilCoaxed = duration.untilCoaxed;
     const lockMsgForOverlay = dec.message ? dec.message.replace(/\s+/g, ' ').slice(0, 120) : `你刷${pkgDisplayName(dec.lockPkg)}都不理我，我很不开心。`;
-    const exe = await executeJealousyLock(dec.lockPkg, duration.unlockAt, contact.name, lockMsgForOverlay);
+    const exe = await executeJealousyLock(dec.lockPkg, duration.unlockAt, contact.name, lockMsgForOverlay, {
+      contactId: contact.id,
+      app: chat.app,
+    });
     if (exe.ok) {
       locked = true;
       const now = Date.now();
@@ -1748,8 +1780,14 @@ export async function jealousyWatchNow(): Promise<{ ran: boolean; act: string; i
 async function detectForcedBreach(l: JealousyLock): Promise<void> {
   const st = await deviceLockState(l.pkg);
   if (st !== false) return; // true=守护在跑且锁的就是这个包；null=查询失败——都不判定
-  // 锁引擎失联 → 自愈重锁（同一参数，含遮罩文案）
-  const relock = await deviceLockApp(l.pkg, { unlockAt: l.unlockAt, charName: l.charName, message: l.reason });
+  // 锁引擎失联 → 自愈重锁（同一参数，含遮罩文案 + v2.2.0 去哄哄身份）
+  const relock = await deviceLockApp(l.pkg, {
+    unlockAt: l.unlockAt,
+    charName: l.charName,
+    message: l.reason,
+    contactId: l.contactId,
+    app: l.app,
+  });
   if (!relock.ok) {
     writeRt((r) => {
       const w = readWatch(r);

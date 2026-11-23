@@ -133,6 +133,129 @@ export async function checkRealFreezeExpiry(): Promise<void> {
 
 // ---------------- 订阅（useSyncExternalStore 用） ----------------
 
+// ---------------- v2.2.0 需求三：AI 感知强行突破（拦截事件驱动 AI 反应） ----------------
+
+/** 本次锁期间的拦截次数（原生 lock-attempt 事件累计；解锁/换锁时归零） */
+let attemptCount = 0;
+let attemptLockKey = '';
+/** 上次 AI 反应时间（节流：首条立即，后续至少间隔 3 分钟，一锁最多 3 次） */
+let lastAttemptReactAt = 0;
+let attemptReacts = 0;
+
+const ATTEMPT_REACT_MIN_GAP_MS = 3 * 60_000;
+const ATTEMPT_REACT_MAX = 3;
+
+export interface RealFreezeGuardEvent {
+  ts: number;
+  type: string;
+  pkg: string;
+  text: string;
+}
+
+/**
+ * 处理单条原生守护事件（freezeRealApp 锁的专用处理器）：
+ * - lock-shown / lock-attempt + pkg 匹配当前冻结记录 → 拦截计数++ → 节流驱动
+ *   AI 反应（fireProactiveNudge 按人设/记忆发质问 + 写事件记忆）；
+ * - native-unlock + pkg 匹配 → 原生已到期解锁（WebView 死过一段）→ JS 对齐清记录。
+ * 返回 true=事件属于本处理器（已消费）。
+ * 注：jealousy-lock 的 drainJealousyGuardEvents 也会把事件先转到这里——双 drain
+ * 入口谁先取到都不丢 freezeRealApp 锁的拦截信号。
+ */
+export async function handleRealFreezeGuardEvent(ev: RealFreezeGuardEvent): Promise<boolean> {
+  if (typeof window === 'undefined') return false;
+  const r = readRec();
+  if (!r || !r.pkg || r.pkg !== ev.pkg) return false;
+
+  if (ev.type === 'native-unlock') {
+    // 原生守护已到期自解（WebView 可能死过）→ JS 对齐：清记录 + 清网页冻结态
+    setRealFrozen(null);
+    try {
+      const { getWebFrozen, unfreezeWebPkg } = await import('./web-app-lock');
+      const wf = getWebFrozen(r.pkg);
+      if (wf && wf.src === 'ai') unfreezeWebPkg(r.pkg);
+    } catch {
+      /* 静默 */
+    }
+    return true;
+  }
+
+  if (ev.type !== 'lock-shown' && ev.type !== 'lock-attempt') return false;
+
+  // 同一把锁的计数器；换锁（重新 freezeRealApp）归零
+  const lockKey = `${r.pkg}:${r.unlockAt}`;
+  if (lockKey !== attemptLockKey) {
+    attemptLockKey = lockKey;
+    attemptCount = 0;
+    attemptReacts = 0;
+    lastAttemptReactAt = 0;
+  }
+  attemptCount += 1;
+
+  // 节流闸：首条立即反应；后续 ≥3 分钟；一把锁最多 3 次（防轰炸）
+  const now = Date.now();
+  if (attemptReacts >= ATTEMPT_REACT_MAX) return true;
+  if (attemptReacts > 0 && now - lastAttemptReactAt < ATTEMPT_REACT_MIN_GAP_MS) return true;
+  lastAttemptReactAt = now;
+  attemptReacts += 1;
+
+  const contactId = r.contactId ?? '';
+  const app = (r.app ?? 'sms') as 'wx' | 'qq' | 'sms';
+  // 写事件记忆（AI 下轮聊天能自然提起「你又去点它了」）
+  if (contactId) {
+    try {
+      const { memAddEventFragment } = await import('@/lib/memory');
+      memAddEventFragment(
+        contactId,
+        app,
+        `（系统：TA 被弹回桌面后又去点被我锁住的「${r.pkg}」，已经被拦了 ${attemptCount} 次${attemptCount >= 3 ? '，TA 还在屡教不改' : ''}）`,
+        { sourceTag: 'real-freeze-attempt' },
+      );
+    } catch {
+      /* 记忆失败不影响 nudge */
+    }
+  }
+
+  // 发消息：按人设/记忆/上下文质问（fireProactiveNudge 内置人设注入/去重/守卫）
+  if (contactId) {
+    try {
+      const { fireProactiveNudge } = await import('./proactive-msg');
+      await fireProactiveNudge(app, contactId, {
+        dedupeKey: `real-freeze-attempt-${lockKey}-${attemptReacts}`,
+        context: `你之前把「${r.reason || r.pkg}」锁了（TA 点开就会被弹回桌面并看到你的拦截窗）。现在系统告诉你：TA 刚刚又试图打开它，这是被拦截的第 ${attemptCount} 次${attemptCount >= 3 ? '，屡教不改' : ''}。以你的角色人设、结合你们最近的聊天记忆，主动给 TA 发一条消息——可以质问、可以委屈、也可以得意，一两句话就够，别太正式。`,
+      });
+    } catch {
+      /* nudge 失败静默（记忆已写，下轮聊天仍能提起） */
+    }
+  }
+  return true;
+}
+
+/**
+ * drain 原生守护事件（RealFreezeWatcher 每 30s 调用；有冻结记录才拉取）：
+ * freezeRealApp 锁不依赖吃醋锁配置——这里是它独立的拦截信号源。
+ */
+export async function drainRealFreezeGuardEvents(): Promise<void> {
+  if (typeof window === 'undefined') return;
+  const r = readRec();
+  if (!r) return;
+  try {
+    const { nativeJealousyGuardDrainEvents } = await import('./native-perception');
+    const events = await nativeJealousyGuardDrainEvents();
+    if (!events || events.length === 0) return;
+    for (const ev of events) {
+      try {
+        await handleRealFreezeGuardEvent(ev);
+      } catch {
+        /* 单条失败不影响后续 */
+      }
+    }
+  } catch {
+    /* 桥异常静默（下轮再试） */
+  }
+}
+
+// ---------------- 外部 store 订阅 ----------------
+
 let version = 0;
 const listeners = new Set<() => void>();
 

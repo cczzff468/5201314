@@ -3,6 +3,7 @@ package com.z.aiphone;
 import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
+import android.app.PendingIntent;
 import android.app.Service;
 import android.app.usage.UsageEvents;
 import android.app.usage.UsageStatsManager;
@@ -37,23 +38,28 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * 应用锁定遮罩服务（v2.0.0 去 Shizuku 化核心）：真机「吃醋锁 / 应用锁定」的原生引擎。
+ * 应用锁定遮罩服务（v2.0.0 去 Shizuku 化核心 / v2.2.0 「点击立即弹回桌面」重构）：
+ * 真机「吃醋锁 / 应用锁定」的原生引擎。
  *
- * 【替代方案】旧实现经 Shizuku 以 shell 权限执行 pm suspend（应用被系统级挂起）。
- * 普通应用没有任何公开 API 能挂起别的应用，去 Shizuku 后改为「悬浮窗遮罩锁」：
- *
- *   1) 经「使用情况访问权限」每 3 秒轮询一次前台应用（UsageStatsManager
- *      .queryEvents 事件流，取最近一条 ACTIVITY_RESUMED 的包名）；
- *   2) 检测到锁定名单内的应用进入前台 → 立刻经「悬浮窗权限」在最顶层弹出
- *      全屏遮罩（TYPE_APPLICATION_OVERLAY），拦截用户对该应用的一切操作；
- *   3) 遮罩上显示 AI 的质问文案（如「被我没收啦，说了要专心」）+ 倒计时 +
- *      【回到桌面】按钮（回桌面后遮罩自动收起，再开还会再弹）；
- *   4) 锁到期（unlockAt）自动解锁并落盘 native-unlock 事件；
- *   5) 全程事件落盘（lock-shown / lock-attempt / degrade），JS 醒来后经
- *      jealousyGuardDrainEvents 取走对账 —— 事件协议与旧 JealousyGuardService 兼容。
+ * 【v2.2.0 拦截闭环（机主规格）】
+ *   1) 双通道实时感知前台应用：
+ *      - 无障碍事件流（AiAccessibilityService TYPE_WINDOW_STATE_CHANGED →
+ *        notifyForegroundHit 静态钩子，零延迟）；
+ *      - UsageStats 事件流轮询兜底（无障碍未开启时 2s 一轮）。
+ *   2) 检测到锁定名单内的应用一露头 → 【立刻】双动作：
+ *      - ACTION_MAIN + CATEGORY_HOME 弹回手机桌面（建锁前置校验悬浮窗权限，
+ *        持有 overlay 视图 = 可见窗口，豁免 Android 10+ 后台启动限制）；
+ *      - 紧接着弹出全局全屏拦截窗（TYPE_APPLICATION_OVERLAY，盖在桌面之上）：
+ *        AI 质问文案 + 真实倒计时（每秒刷新）+【去哄哄 TA】（拉起本 App 直达聊天）+
+ *        【我知道了】（收起遮罩，回桌面）。
+ *      绝不等用户在被锁应用里做任何操作。
+ *   3) 每拦截一次（用户反复手贱点被锁 App）→ openAttempts++ 且逐次落盘
+ *      lock-attempt 事件（带第 N 次），JS 醒来后经 jealousyGuardDrainEvents
+ *      取走 → AI 收到信号按人设记忆发消息（网页侧 real-app-freeze 处理）。
+ *   4) 到期（unlockAt）自动解锁并落盘 native-unlock 事件（JS 对账清记录）。
  *
  * 【与 JS 侧分工】建锁/续锁/哄好解锁都由 JS 发起（经插件 jealousyGuardSyncLock /
- * lockApp 把 pkg/unlockAt/charName/message 同步过来；pkg 空 = JS 已解锁，停服务）。
+ * lockApp 把 pkg/unlockAt/charName/message/contactId/app 同步过来；pkg 空 = 解锁停服务）。
  * 本服务只负责原生兜底：WebView 被杀/冻结时锁依然生效（前台服务独立于 WebView 存活）。
  *
  * 【安全】只锁 JS 指定的单个包名（^[\w.]+$ 校验）；遮罩只覆盖不劫持数据；
@@ -67,15 +73,21 @@ public class LockOverlayService extends Service {
     private static final String EXTRA_UNLOCK_AT = "unlockAt";
     private static final String EXTRA_CHAR_NAME = "charName";
     private static final String EXTRA_MESSAGE = "message";
+    /** v2.2.0：锁定者联系人 id + 所在 App（去哄哄按钮拉起本 App 后直达对应聊天） */
+    private static final String EXTRA_CONTACT_ID = "contactId";
+    private static final String EXTRA_APP_KIND = "appKind";
 
     /** 静态锁状态（跨实例共享；JS 经插件读写） */
     private static volatile String lockPkg = null;
     private static volatile long unlockAt = 0L; // 0 = 直到哄好（不判到期）
     private static volatile String charName = "";
     private static volatile String message = "";
+    private static volatile String contactId = "";
+    private static volatile String appKind = ""; // 'wx' | 'qq' | 'sms'（空 = 无去哄哄按钮）
     private static volatile boolean serviceRunning = false;
     private static volatile boolean overlayShowing = false;
-    private static volatile int openAttempts = 0; // 遮罩期间用户仍停留在锁定 App 的轮询计数
+    /** 遮罩期间用户仍停留在锁定 App / 反复点开被拦的总次数（每次拦截 +1） */
+    private static volatile int openAttempts = 0;
 
     /** 事件落盘（协议与旧 JealousyGuardService 兼容：native-unlock / lock-shown / lock-attempt / degrade） */
     private static final String PREFS_NAME = "jealousy_guard"; // 沿用旧文件名：旧事件一并兼容
@@ -88,16 +100,28 @@ public class LockOverlayService extends Service {
     private static final String KEY_ACTIVE_UNLOCK_AT = "active_unlock_at";
     private static final String KEY_ACTIVE_CHAR = "active_char";
     private static final String KEY_ACTIVE_MSG = "active_msg";
+    private static final String KEY_ACTIVE_CONTACT = "active_contact";
+    private static final String KEY_ACTIVE_APP_KIND = "active_app_kind";
 
     /** 常驻前台通知（IMPORTANCE_LOW 静默） */
     private static final String CHANNEL_ID = "lock_guard";
     private static final int NOTIFY_ID = 7791;
 
-    /** 轮询周期：3 秒（机主规格） */
-    private static final long POLL_MS = 3000L;
+    /** 轮询周期：v2.2.0 3s → 2s（无障碍实时钩子为主，这里只是无障碍未开启时的兜底） */
+    private static final long POLL_MS = 2000L;
 
-    /** lock-attempt 事件节流（遮罩期间持续停留在锁定 App，每 45s 落盘一次） */
-    private static final long ATTEMPT_EVENT_MS = 45_000L;
+    /** 同一次拦截的防抖窗（800ms 内无障碍事件 + 轮询双通道同时命中只算一次） */
+    private static final long HIT_DEBOUNCE_MS = 800L;
+    private static volatile long lastHitAt = 0L;
+
+    /** v2.2.0 拦截窗保持窗口：弹回桌面后拦截窗继续盖在桌面上展示质问/倒计时，
+     * 用户点【我知道了】或超出保持窗（15s）才收起——否则 goHome 后下一轮 2s 轮询
+     * 判定「已离开锁定应用」立刻收窗，拦截窗只闪现两秒根本看不清 */
+    private static final long OVERLAY_HOLD_MS = 15_000L;
+    private static volatile long overlayHoldUntil = 0L;
+
+    /** lock-attempt 事件落盘节流（每次拦截都值得 AI 知道；2s 节流只防单次停留重复计数） */
+    private static final long ATTEMPT_EVENT_MS = 2_000L;
     private static volatile long lastAttemptEventAt = 0L;
 
     /** degrade 事件节流（权限丢失类，每 5 分钟最多一条） */
@@ -112,6 +136,9 @@ public class LockOverlayService extends Service {
 
     private HandlerThread engineThread;
     private Handler engine;
+    /** v2.2.0 倒计时每秒刷新线程（遮罩可见期间驱动；与引擎线程分离防互相阻塞） */
+    private Handler uiTickHandler;
+    private HandlerThread uiTickThread;
     private WindowManager wm;
     private FrameLayout overlayView;
 
@@ -121,12 +148,16 @@ public class LockOverlayService extends Service {
     public void onCreate() {
         super.onCreate();
         serviceRunning = true;
+        instance = this; // v2.2.0 无障碍实时钩子直达入口
         appCtx = getApplicationContext();
         startForegroundNotify();
         wm = (WindowManager) getSystemService(WINDOW_SERVICE);
         engineThread = new HandlerThread("lock_overlay_engine");
         engineThread.start();
         engine = new Handler(engineThread.getLooper());
+        uiTickThread = new HandlerThread("lock_overlay_ui_tick");
+        uiTickThread.start();
+        uiTickHandler = new Handler(uiTickThread.getLooper());
     }
 
     @Override
@@ -135,6 +166,8 @@ public class LockOverlayService extends Service {
         long ua = intent == null ? 0L : intent.getLongExtra(EXTRA_UNLOCK_AT, 0L);
         String cn = intent == null ? "" : intent.getStringExtra(EXTRA_CHAR_NAME);
         String msg = intent == null ? "" : intent.getStringExtra(EXTRA_MESSAGE);
+        String cid = intent == null ? "" : intent.getStringExtra(EXTRA_CONTACT_ID);
+        String ak = intent == null ? "" : intent.getStringExtra(EXTRA_APP_KIND);
 
         if (pkg == null || pkg.trim().isEmpty() || !pkg.matches("^[\\w.]+$")) {
             // pkg 空 = 解锁：收遮罩、停服务
@@ -153,6 +186,8 @@ public class LockOverlayService extends Service {
         unlockAt = ua;
         charName = cn == null ? "" : cn.trim();
         message = msg == null ? "" : msg.trim();
+        contactId = cid == null ? "" : cid.trim();
+        appKind = ak == null ? "" : ak.trim();
         openAttempts = 0;
         startForegroundNotify();
         scheduleTick(0L); // 立即首轮
@@ -164,9 +199,14 @@ public class LockOverlayService extends Service {
         serviceRunning = false;
         removeOverlay();
         if (engine != null) engine.removeCallbacksAndMessages(null);
+        if (uiTickHandler != null) uiTickHandler.removeCallbacksAndMessages(null);
         if (engineThread != null) {
             engineThread.quitSafely();
             engineThread = null;
+        }
+        if (uiTickThread != null) {
+            uiTickThread.quitSafely();
+            uiTickThread = null;
         }
         super.onDestroy();
     }
@@ -176,8 +216,32 @@ public class LockOverlayService extends Service {
         return null;
     }
 
-    // ================= 引擎（3s 轮询） =================
+    // ================= v2.2.0 无障碍实时钩子（AiAccessibilityService 调用） =================
 
+    /**
+     * 无障碍事件流实时回调：TYPE_WINDOW_STATE_CHANGED 检测到包名进入前台。
+     * 只在本服务持锁（lockPkg 非空）且包名命中时行动——零轮询延迟，露头即拦。
+     * 服务未运行时静默（无锁可拦）。
+     */
+    public static void notifyForegroundHit(String pkg) {
+        if (!serviceRunning || lockPkg == null) return;
+        if (pkg == null || !pkg.equals(lockPkg)) return;
+        final LockOverlayService svc = instance;
+        if (svc == null || svc.engine == null) return;
+        // 转发到引擎线程执行（无障碍事件在主线程回调，拦截逻辑统一走引擎线程防竞态）
+        svc.engine.post(() -> {
+            try {
+                svc.handleLockHit("a11y");
+            } catch (Throwable ignored) {
+                // 拦截链路绝不 crash
+            }
+        });
+    }
+
+    /** 运行中的服务实例（notifyForegroundHit 直达；onCreate 赋值 / onDestroy 清空） */
+    private static volatile LockOverlayService instance;
+
+    // ================= 引擎（2s 轮询兜底 + 拦截处理） =================
     private void scheduleTick(long delayMs) {
         if (engine == null) return;
         engine.postDelayed(this::tick, delayMs <= 0 ? 0 : delayMs);
@@ -204,26 +268,16 @@ public class LockOverlayService extends Service {
                 return;
             }
 
-            // ③ 前台判定（UsageStats 事件流，取最近一条 RESUMED 的包名）
+            // ③ 前台判定（UsageStats 事件流，取最近一条 RESUMED 的包名）——无障碍钩子的兜底通道
             String fg = currentForegroundPkg();
             boolean onLocked = fg != null && fg.equals(lockPkg);
 
-            // ④ 遮罩联动：进锁定 App → 弹全屏遮罩；离开 → 收起
-            if (onLocked && !overlayShowing) {
-                openAttempts++;
-                persistEvent("lock-shown", lockPkg, message);
-                showOverlay();
-            } else if (!onLocked && overlayShowing) {
-                removeOverlay(); // 用户回桌面/切走：收起遮罩（再开还会再弹）
-            } else if (onLocked && overlayShowing) {
-                // 仍停留在锁定 App（遮罩盖着点不进去）：累计尝试并节流落盘
-                openAttempts++;
-                long now = System.currentTimeMillis();
-                if (now - lastAttemptEventAt >= ATTEMPT_EVENT_MS) {
-                    lastAttemptEventAt = now;
-                    persistEvent("lock-attempt", lockPkg, "第" + openAttempts + "次想打开");
-                }
-                refreshOverlayTexts();
+            if (onLocked) {
+                handleLockHit("poll"); // v2.2.0：检测到 → 立即回桌面 + 弹拦截窗
+            } else if (overlayShowing && System.currentTimeMillis() >= overlayHoldUntil) {
+                // 已离开锁定 App（被弹回桌面/切走）且超出保持窗：收起遮罩（再开还会再弹）。
+                // 保持窗内的拦截窗不收——那正是给用户看的质问/倒计时界面。
+                removeOverlay();
             }
         } catch (Throwable ignored) {
             // 引擎绝不 crash
@@ -231,13 +285,66 @@ public class LockOverlayService extends Service {
         scheduleTick(POLL_MS);
     }
 
+    /**
+     * v2.2.0 拦截核心：锁定应用露头（无障碍实时钩子或轮询兜底命中）→
+     * ① 立刻弹回桌面（不等用户在被锁应用里做任何操作）；
+     * ② 紧接着弹出全屏拦截窗（盖在桌面之上：质问文案 + 倒计时 + 去哄哄）；
+     * ③ 每次拦截计数 +1 且节流落盘 lock-attempt 事件（AI 感知强行突破的信号源）。
+     */
+    private void handleLockHit(String via) {
+        try {
+            long now = System.currentTimeMillis();
+            // 双通道防抖：800ms 内无障碍 + 轮询同时命中只算一次拦截
+            if (now - lastHitAt < HIT_DEBOUNCE_MS) return;
+            lastHitAt = now;
+
+            openAttempts++;
+            // 逐次落盘 lock-attempt（2s 节流防单次停留重复；文本带累计次数——
+            // JS 侧 drain 后驱动 AI 按人设质问「又去点了？」）
+            if (now - lastAttemptEventAt >= ATTEMPT_EVENT_MS) {
+                lastAttemptEventAt = now;
+                persistEvent("lock-attempt", lockPkg, "第" + openAttempts + "次想打开");
+            }
+
+            // ① 立刻弹回桌面：持有悬浮窗权限（建锁前置校验）+ overlay 可见窗口 = 豁免
+            //    Android 10+ 后台 Activity 启动限制；HOME intent 双保险。
+            goHome();
+
+            // ② 弹全屏拦截窗（盖在桌面之上，用户看到的第一屏就是 TA 的质问）
+            if (!overlayShowing) {
+                persistEvent("lock-shown", lockPkg, message);
+                showOverlay();
+            }
+            overlayHoldUntil = now + OVERLAY_HOLD_MS; // 刷新保持窗：这轮拦截的窗持续展示
+            refreshOverlayTexts();
+        } catch (Throwable ignored) {
+            // 拦截链路绝不 crash
+        }
+    }
+
+    /** 弹回手机主屏幕（Home Screen） */
+    private void goHome() {
+        try {
+            Intent i = new Intent(Intent.ACTION_MAIN);
+            i.addCategory(Intent.CATEGORY_HOME);
+            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_REORDER_TO_FRONT);
+            startActivity(i);
+        } catch (Throwable ignored) {
+            // 个别 ROM 拦截：遮罩仍然弹出，用户点【我知道了】回桌面
+        }
+    }
+
     /** 内部解锁：收遮罩 + 清锁状态（含持久化）+ 停服务（reason 只用于日志口径，不落盘） */
     private void internalUnlock(String reason) {
         removeOverlay();
+        instance = null;
         lockPkg = null;
         unlockAt = 0L;
         message = "";
+        contactId = "";
+        appKind = "";
         openAttempts = 0;
+        overlayHoldUntil = 0L;
         clearPersistedLock(getApplicationContext());
         stopForeground(STOP_FOREGROUND_REMOVE);
         stopSelf();
@@ -250,7 +357,8 @@ public class LockOverlayService extends Service {
             if (app == null) return;
             app.getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
                     .edit().remove(KEY_ACTIVE_PKG).remove(KEY_ACTIVE_UNLOCK_AT)
-                    .remove(KEY_ACTIVE_CHAR).remove(KEY_ACTIVE_MSG).apply();
+                    .remove(KEY_ACTIVE_CHAR).remove(KEY_ACTIVE_MSG)
+                    .remove(KEY_ACTIVE_CONTACT).remove(KEY_ACTIVE_APP_KIND).apply();
         } catch (Throwable ignored) {
         }
     }
@@ -298,7 +406,7 @@ public class LockOverlayService extends Service {
         }
     }
 
-    // ================= 全屏遮罩（SYSTEM_ALERT_WINDOW） =================
+    // ================= 全屏拦截窗（SYSTEM_ALERT_WINDOW） =================
 
     private void showOverlay() {
         if (overlayShowing || wm == null) return;
@@ -318,13 +426,14 @@ public class LockOverlayService extends Service {
             overlayView = buildOverlayView();
             wm.addView(overlayView, lp);
             overlayShowing = true;
+            startUiTick(); // v2.2.0：遮罩期间倒计时每秒刷新
         } catch (Throwable t) {
             overlayShowing = false;
             overlayView = null;
         }
     }
 
-    /** 构建遮罩视图（纯代码布局，不依赖 res：深色渐变 + AI 质问文案 + 倒计时 + 回到桌面按钮） */
+    /** 构建拦截窗视图（纯代码布局：深色渐变 + AI 质问文案 + 每秒倒计时 + 去哄哄/我知道了） */
     private FrameLayout buildOverlayView() {
         final Context ctx = this;
         FrameLayout root = new FrameLayout(ctx);
@@ -363,40 +472,72 @@ public class LockOverlayService extends Service {
         msg.setTag("msg");
         box.addView(msg);
 
-        // 倒计时行
+        // 倒计时行（v2.2.0：真实剩余时间，每秒刷新）
         TextView countdown = new TextView(ctx);
-        countdown.setTextSize(14);
+        countdown.setTextSize(15);
         countdown.setTextColor(Color.parseColor("#B8BEDC"));
         countdown.setGravity(Gravity.CENTER);
         countdown.setPadding(0, dp(14), 0, 0);
         countdown.setTag("countdown");
+        countdown.setText(countdownText());
         box.addView(countdown);
 
-        // 回到桌面按钮
+        // 拦截次数行（反复手贱点开时显示，AI 感知强行突破的原生展示）
+        TextView attempts = new TextView(ctx);
+        attempts.setTextSize(12);
+        attempts.setTextColor(Color.parseColor("#8C92B4"));
+        attempts.setGravity(Gravity.CENTER);
+        attempts.setPadding(0, dp(6), 0, 0);
+        attempts.setTag("attempts");
+        box.addView(attempts);
+
+        // 【去哄哄 TA】按钮（v2.2.0：拉起本 App 直达对应聊天——复用 localNotify 点击直达协议）
+        if (contactId != null && !contactId.isEmpty()) {
+            Button coax = new Button(ctx);
+            coax.setText("去哄哄 " + who);
+            coax.setTextSize(16);
+            coax.setTextColor(Color.parseColor("#221A33"));
+            coax.setPadding(dp(30), 0, dp(30), 0);
+            coax.setAllCaps(false);
+            GradientDrawable coaxBg = new GradientDrawable();
+            coaxBg.setCornerRadius(dp(24));
+            coaxBg.setColor(Color.parseColor("#FFE3EC"));
+            coax.setBackground(coaxBg);
+            coax.setOnClickListener((v) -> {
+                try {
+                    openChatWithTarget();
+                } catch (Throwable ignored) {
+                }
+                // 遮罩保留（没哄好之前锁还在），但用户已进聊天界面；锁到期/哄好解锁时自动收起
+            });
+            LinearLayout.LayoutParams coaxLp = new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, dp(52));
+            coaxLp.topMargin = dp(30);
+            box.addView(coax, coaxLp);
+        }
+
+        // 【我知道了】按钮（收起遮罩回桌面；再点被锁 App 还会再弹）
         Button home = new Button(ctx);
-        home.setText("回到桌面");
-        home.setTextSize(16);
-        home.setTextColor(Color.parseColor("#221A33"));
-        home.setPadding(dp(34), 0, dp(34), 0);
+        home.setText("我知道了");
+        home.setTextSize(15);
+        home.setTextColor(Color.parseColor("#D8DCEF"));
+        home.setPadding(dp(30), 0, dp(30), 0);
         home.setAllCaps(false);
         GradientDrawable bg = new GradientDrawable();
         bg.setCornerRadius(dp(24));
-        bg.setColor(Color.parseColor("#FFE3EC"));
+        bg.setColor(Color.parseColor("#3A3550"));
+        bg.setStroke(dp(1), Color.parseColor("#55507A"));
         home.setBackground(bg);
         home.setOnClickListener((v) -> {
             try {
-                Intent i = new Intent(Intent.ACTION_MAIN);
-                i.addCategory(Intent.CATEGORY_HOME);
-                i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                startActivity(i);
+                goHome(); // 保险：若用户从其他入口进来，再送一程回桌面
             } catch (Throwable ignored) {
             }
             removeOverlay(); // 立即收起（点按钮=用户放弃打开，tick 会再判定）
         });
         LinearLayout.LayoutParams btnLp = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT, dp(52));
-        btnLp.topMargin = dp(30);
-        btnLp.gravity = Gravity.CENTER_HORIZONTAL;
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(46));
+        btnLp.topMargin = contactId != null && !contactId.isEmpty() ? dp(12) : dp(30);
         box.addView(home, btnLp);
 
         FrameLayout.LayoutParams fl = new FrameLayout.LayoutParams(
@@ -405,13 +546,73 @@ public class LockOverlayService extends Service {
         return root;
     }
 
-    /** 每轮 tick 刷新倒计时文案 */
+    /**
+     * 去哄哄：拉起 MainActivity 并带上 localNotify 同款 target extra
+     * （{app:'wechat'|'qq'|'chat', contactId}）→ handleOnNewIntent →
+     * injectLocalNotifyOpen → 网页导航总线直达对应聊天界面。
+     * 冷启动（App 被杀过）由 MainActivity.onCreate 的 extras 兜底处理。
+     */
+    private void openChatWithTarget() {
+        try {
+            String navApp = "wx".equals(appKind) ? "wechat" : "qq".equals(appKind) ? "qq" : "chat";
+            JSONObject target = new JSONObject();
+            target.put("app", navApp);
+            target.put("contactId", contactId);
+            Intent i = new Intent(this, MainActivity.class);
+            i.setPackage(getPackageName());
+            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_REORDER_TO_FRONT
+                    | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+            i.putExtra("local_notify_url", "/");
+            i.putExtra("local_notify_target", target.toString());
+            startActivity(i);
+        } catch (Throwable ignored) {
+            // 拉起失败：至少回 App 首页
+            try {
+                Intent i = new Intent(this, MainActivity.class);
+                i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_REORDER_TO_FRONT);
+                startActivity(i);
+            } catch (Throwable ignored2) {
+            }
+        }
+    }
+
+    /** v2.2.0 倒计时每秒刷新（uiTickHandler 驱动；到期即时解锁免等下一轮 tick） */
+    private void startUiTick() {
+        if (uiTickHandler == null) return;
+        uiTickHandler.removeCallbacksAndMessages(null);
+        uiTickHandler.postDelayed(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    if (!overlayShowing || uiTickHandler == null) return;
+                    // 到期即时解锁（倒计时最后一秒落地，免等 2s 轮询）
+                    if (unlockAt != 0 && System.currentTimeMillis() >= unlockAt) {
+                        persistEvent("native-unlock", lockPkg, "");
+                        internalUnlock("expired");
+                        return;
+                    }
+                    refreshOverlayTexts();
+                    uiTickHandler.postDelayed(this, 1000L);
+                } catch (Throwable ignored) {
+                    // UI 刷新绝不 crash
+                }
+            }
+        }, 1000L);
+    }
+
+    /** 每秒刷新倒计时文案 + 拦截次数行 */
     private void refreshOverlayTexts() {
         try {
             if (overlayView == null) return;
             TextView countdown = (TextView) overlayView.findViewWithTag("countdown");
             if (countdown != null) {
                 countdown.setText(countdownText());
+            }
+            TextView attempts = (TextView) overlayView.findViewWithTag("attempts");
+            if (attempts != null) {
+                attempts.setText(openAttempts >= 2
+                        ? "这是你第 " + openAttempts + " 次想打开它了"
+                        : "");
             }
         } catch (Throwable ignored) {
         }
@@ -422,12 +623,14 @@ public class LockOverlayService extends Service {
         long left = unlockAt - System.currentTimeMillis();
         if (left <= 0) return "马上解锁…";
         long min = left / 60_000L;
-        if (min >= 1) return "还剩 " + min + " 分钟自动解锁";
-        return "还剩 " + (left / 1000L) + " 秒自动解锁";
+        long sec = (left % 60_000L) / 1000L;
+        if (min >= 1) return "剩余 " + min + " 分 " + (sec < 10 ? "0" : "") + sec + " 秒自动解锁";
+        return "剩余 " + sec + " 秒自动解锁";
     }
 
     private void removeOverlay() {
         try {
+            if (uiTickHandler != null) uiTickHandler.removeCallbacksAndMessages(null);
             if (overlayView != null && wm != null) wm.removeView(overlayView);
         } catch (Throwable ignored) {
         }
@@ -454,7 +657,7 @@ public class LockOverlayService extends Service {
             Notification n = new NotificationCompat.Builder(this, CHANNEL_ID)
                     .setSmallIcon(android.R.drawable.ic_lock_lock)
                     .setContentTitle("吃醋守护运行中")
-                    .setContentText("锁定名单应用将被全屏遮罩拦截")
+                    .setContentText("锁定名单应用将被立即弹回桌面")
                     .setOngoing(true)
                     .setOnlyAlertOnce(true)
                     .build();
@@ -502,7 +705,8 @@ public class LockOverlayService extends Service {
     // ================= JS 桥静态入口（插件调用） =================
 
     /** 建锁/续锁/解锁（pkg 空=解锁停服务）；返回 null=ok，否则失败原因 */
-    public static String syncLock(Context ctx, String pkg, long ua, String charName, String message) {
+    public static String syncLock(Context ctx, String pkg, long ua, String charName, String message,
+                                  String contactId, String appKind) {
         try {
             if (pkg == null || pkg.trim().isEmpty()) {
                 // 解锁：服务可能未运行（无锁可解）也算成功
@@ -530,6 +734,8 @@ public class LockOverlayService extends Service {
                         .putLong(KEY_ACTIVE_UNLOCK_AT, ua)
                         .putString(KEY_ACTIVE_CHAR, charName == null ? "" : charName)
                         .putString(KEY_ACTIVE_MSG, message == null ? "" : message)
+                        .putString(KEY_ACTIVE_CONTACT, contactId == null ? "" : contactId)
+                        .putString(KEY_ACTIVE_APP_KIND, appKind == null ? "" : appKind)
                         .apply();
             } catch (Throwable ignored) {
             }
@@ -538,6 +744,8 @@ public class LockOverlayService extends Service {
             i.putExtra(EXTRA_UNLOCK_AT, ua);
             i.putExtra(EXTRA_CHAR_NAME, charName == null ? "" : charName);
             i.putExtra(EXTRA_MESSAGE, message == null ? "" : message);
+            i.putExtra(EXTRA_CONTACT_ID, contactId == null ? "" : contactId);
+            i.putExtra(EXTRA_APP_KIND, appKind == null ? "" : appKind);
             if (Build.VERSION.SDK_INT >= 26) {
                 ctx.startForegroundService(i);
             } else {
@@ -559,6 +767,7 @@ public class LockOverlayService extends Service {
         public boolean overlayShown;
         public boolean usageAccess;
         public boolean overlayPerm;
+        public int openAttempts;
     }
 
     public static Snapshot snapshot(Context ctx) {
@@ -567,6 +776,7 @@ public class LockOverlayService extends Service {
         s.pkg = lockPkg;
         s.unlockAt = unlockAt;
         s.overlayShown = overlayShowing;
+        s.openAttempts = openAttempts;
         s.eventCount = 0;
         try {
             SharedPreferences sp = ctx.getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
@@ -624,7 +834,9 @@ public class LockOverlayService extends Service {
             }
             String ch = sp.getString(KEY_ACTIVE_CHAR, "");
             String msg = sp.getString(KEY_ACTIVE_MSG, "");
-            syncLock(ctx, pkg, ua, ch, msg);
+            String cid = sp.getString(KEY_ACTIVE_CONTACT, "");
+            String ak = sp.getString(KEY_ACTIVE_APP_KIND, "");
+            syncLock(ctx, pkg, ua, ch, msg, cid, ak);
         } catch (Throwable ignored) {
             // 开机重梳绝不 crash
         }

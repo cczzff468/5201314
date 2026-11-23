@@ -11,8 +11,8 @@ android {
         applicationId "com.z.aiphone"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 64          // v2.1.0 防杀后台三件套（BootReceiver 开机自启 + KeepAliveService 常驻守护前台服务 + WRITE_SETTINGS 亮度/铃声）
-        versionName "2.1.0"     // v2.1.0：开机自启动 + 前台常驻守护 + AI 调亮度/静音（含吃醋锁重启重梳）
+        versionCode 65          // v2.2.0 锁定闭环重构（无障碍实时拦截 + 立即回桌面 + 去哄哄直达 + 截屏单飞队列 + 后台拉回豁免）
+        versionName "2.2.0"     // v2.2.0：点击立即弹回桌面 + AI 动态锁时长 + 拦截感知质问 + 后台拉回修复
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.

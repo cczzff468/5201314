@@ -90,6 +90,9 @@ public class AiAccessibilityService extends AccessibilityService {
             if (!transientWin) {
                 stablePkg = pkg;
                 stableAt = now;
+                // v2.2.0 应用锁定实时钩子：锁定名单应用一露头 → 通知 LockOverlayService
+                // 立即回桌面 + 弹拦截窗（服务未持锁时静态方法内部直接短路，零开销）
+                LockOverlayService.notifyForegroundHit(pkg);
             } else if (stablePkg == null) {
                 stablePkg = pkg;
                 stableAt = now;
@@ -133,23 +136,50 @@ public class AiAccessibilityService extends AccessibilityService {
         return new ForegroundInfo(s, stableAt, lastWindowPkg);
     }
 
-    // ================= 静默截屏（API 30+） =================
+    // ================= 静默截屏（API 30+，v2.2.0 单飞队列 + 失败重试） =================
 
     /** 截屏结果回调（dataUrl 与 error 互斥） */
     public interface ShotCallback {
         void onResult(String dataUrl, String error);
     }
 
+    /** v2.2.0 单飞队列：takeScreenshot 同一时刻只允许一个请求在飞——上一个还没完成时
+     *  新请求排队等待（Android 的 takeScreenshot 并发调用会直接拒绝后来者，这正是
+     *  机主实测「AI 有时截得到屏有时截不到」的根因：看屏幕→点一下→再看屏幕，两连拍
+     *  间隔太短，第二拍被系统丢掉）。队列在 SHOT_EXECUTOR 串行线程上逐个出列执行。 */
+    private static final java.util.ArrayDeque<ShotCallback> shotQueue = new java.util.ArrayDeque<>();
+    private static boolean shotInFlight = false;
+
+    /** 内部：取下一个排队请求开飞（SHOT_EXECUTOR 上调用，串行免锁） */
+    private void pumpShotQueue() {
+        ShotCallback next;
+        synchronized (shotQueue) {
+            if (shotInFlight) return;
+            next = shotQueue.poll();
+            if (next == null) return;
+            shotInFlight = true;
+        }
+        doShootScreenshot(next, 0);
+    }
+
     /**
      * 静默截屏：AccessibilityService.takeScreenshot（API 30+）→ 降采样 JPEG base64。
      * 输出与旧 shizukuScreencap 同构（宽 ≤720、JPEG、dataURL）。
-     * 任何一步失败回调 error（no-a11y / not-supported / empty）。
+     * v2.2.0：并发请求自动排队；系统拒绝（ERROR_TAKE_SCREENSHOT_INTERNAL_ERROR，多为
+     * 前一请求未完成）时延迟 450ms 自动重试一次（仅一次，防死循环）。
      */
     public void shootScreenshot(final ShotCallback cb) {
         if (Build.VERSION.SDK_INT < 30) {
             cb.onResult(null, "not-supported"); // API < 30 无此接口
             return;
         }
+        synchronized (shotQueue) {
+            shotQueue.add(cb);
+        }
+        SHOT_EXECUTOR.execute(this::pumpShotQueue);
+    }
+
+    private void doShootScreenshot(final ShotCallback cb, final int retry) {
         try {
             takeScreenshot(Display.DEFAULT_DISPLAY, SHOT_EXECUTOR,
                     new AccessibilityService.TakeScreenshotCallback() {
@@ -159,19 +189,19 @@ public class AiAccessibilityService extends AccessibilityService {
                             try {
                                 buffer = result.getHardwareBuffer();
                                 if (buffer == null) {
-                                    cb.onResult(null, "empty");
+                                    finishShot(cb, null, "empty", retry);
                                     return;
                                 }
                                 Bitmap bmp = Bitmap.wrapHardwareBuffer(buffer, null);
                                 if (bmp == null) {
-                                    cb.onResult(null, "empty");
+                                    finishShot(cb, null, "empty", retry);
                                     return;
                                 }
                                 // 软拷贝出可压缩的位图（hardware bitmap 不能直接 compress）
                                 Bitmap soft = bmp.copy(Bitmap.Config.ARGB_8888, false);
                                 bmp.recycle();
                                 if (soft == null) {
-                                    cb.onResult(null, "empty");
+                                    finishShot(cb, null, "empty", retry);
                                     return;
                                 }
                                 // 降采样：宽 ≤720（与 shizukuScreencap 同规格，控制回传体积）
@@ -188,9 +218,9 @@ public class AiAccessibilityService extends AccessibilityService {
                                 soft.compress(Bitmap.CompressFormat.JPEG, 75, bos);
                                 soft.recycle();
                                 String b64 = Base64.encodeToString(bos.toByteArray(), Base64.NO_WRAP);
-                                cb.onResult("data:image/jpeg;base64," + b64, null);
+                                finishShot(cb, "data:image/jpeg;base64," + b64, null, retry);
                             } catch (Throwable t) {
-                                cb.onResult(null, "failed");
+                                finishShot(cb, null, "failed", retry);
                             } finally {
                                 if (buffer != null) {
                                     try {
@@ -203,12 +233,35 @@ public class AiAccessibilityService extends AccessibilityService {
 
                         @Override
                         public void onFailure(int errorCode) {
-                            cb.onResult(null, "error-" + errorCode); // ERROR_TAKE_SCREENSHOT_INTERNAL_ERROR 等
+                            finishShot(cb, null, "error-" + errorCode, retry);
                         }
                     });
         } catch (Throwable t) {
-            cb.onResult(null, "failed");
+            finishShot(cb, null, "failed", retry);
         }
+    }
+
+    /** 出队收尾：回调结果 → 标记空闲 → 泡下一单；失败且还有重试额度 → 延迟重试 */
+    private void finishShot(final ShotCallback cb, final String dataUrl, final String error, final int retry) {
+        // 系统拒绝且未重试过：延迟 450ms 再试一次（前一请求占用中是最常见的拒绝原因）
+        if (dataUrl == null && retry < 1 && error != null && error.startsWith("error-")) {
+            SHOT_EXECUTOR.execute(() -> {
+                try {
+                    Thread.sleep(450L);
+                } catch (InterruptedException ignored) {
+                }
+                doShootScreenshot(cb, retry + 1);
+            });
+            return;
+        }
+        synchronized (shotQueue) {
+            shotInFlight = false;
+        }
+        try {
+            cb.onResult(dataUrl, error);
+        } catch (Throwable ignored) {
+        }
+        SHOT_EXECUTOR.execute(this::pumpShotQueue);
     }
 
     // ================= 模拟点击 / 滑动（dispatchGesture） =================

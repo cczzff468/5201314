@@ -1208,6 +1208,11 @@ function ChatView({
   });
   /** 全局流式回复状态（请求由 chat-stream-store 发起并接收，退出聊天页/退出 App 不中断） */
   const sessionKey = `sms:${storageKey}`;
+  // v2.2.0 需求四：进入聊天界面 → 清除所有未读的聊天系统通知（原生按 chat- 前缀批量撤，
+  // 常驻守护通知不受影响；通知本身点击已 autoCancel，这里清还挂着的未读）
+  useEffect(() => {
+    void import('@/lib/ios/local-notify').then((m) => m.cancelChatNotifications()).catch(() => null);
+  }, [sessionKey]);
   /** Task 40 错误提示优化：用户点「隐藏这条提示」的失败提示行（内存态，重挂载/刷新后恢复显示） */
   const [hiddenFail, setHiddenFail] = useState<Record<string, boolean>>({});
   const stream = useChatStream(sessionKey);

@@ -2,6 +2,7 @@ package com.z.aiphone;
 
 import android.app.Activity;
 import android.app.AppOpsManager;
+import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
@@ -741,25 +742,100 @@ public class NativePerceptionPlugin extends Plugin {
     /**
      * 把本 App 强行拉到前台（吃醋拉回/切回聊天）：FLAG_ACTIVITY_NEW_TASK。
      * MainActivity launchMode=singleTask：已运行只重排到前，不重开实例。
+     *
+     * v2.2.0 「在别的 App 切不回来」根修：Android 10+ 后台启动 Activity 限制——
+     * App 在后台时普通 startActivity 会被系统静默拦截（不抛异常、只是没反应），这正是
+     * 机主实测「我让 AI 切回聊天界面，但没切回来」的根因。修复策略：
+     * ① App 在前台 → 直接 startActivity；
+     * ② App 在后台 + 已授悬浮窗权限（SYSTEM_ALERT_WINDOW）→ 持有 overlay 视图的应用
+     *    豁免后台启动限制，startActivity 直达；
+     * ③ App 在后台 + 无悬浮窗权限 → 无法绕过（系统安全限制）：立刻发一条高优先级
+     *    heads-up 通知（点击直达 App），返回 {ok:true, via:'notification'}——用户点
+     *    一下通知即回，绝不足丢。返回 reason='no-overlay-permission' 供 JS 侧指引。
      */
     @PluginMethod
     public void bringToFront(PluginCall call) {
         try {
-            Intent i = new Intent(getContext(), MainActivity.class);
-            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_REORDER_TO_FRONT);
-            getContext().startActivity(i);
+            boolean appVisible = MainActivity.isAppInForeground();
+            boolean hasOverlay = Settings.canDrawOverlays(getContext());
+            // 前台 或 后台但有悬浮窗豁免 → 直拉
+            if (appVisible || hasOverlay) {
+                Intent i = new Intent(getContext(), MainActivity.class);
+                i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_REORDER_TO_FRONT);
+                getContext().startActivity(i);
+                JSObject ret = new JSObject();
+                ret.put("ok", true);
+                ret.put("via", appVisible ? "foreground" : "overlay-exempt");
+                call.resolve(ret);
+                return;
+            }
+            // 后台且无悬浮窗：系统不允许后台启动 Activity → heads-up 通知兑底
+            boolean notified = sendPullbackHeadsUp();
             JSObject ret = new JSObject();
-            ret.put("ok", true);
+            ret.put("ok", notified);
+            ret.put("via", "notification");
+            if (!notified) {
+                ret.put("reason", "background-blocked-no-overlay");
+            }
             call.resolve(ret);
         } catch (Exception e) {
+            // startActivity 抛异常（极少数 ROM）→ 通知兑底再试一次
+            boolean notified = sendPullbackHeadsUp();
             JSObject ret = new JSObject();
-            ret.put("ok", false);
-            ret.put("reason", e.getMessage() == null ? "start-failed" : e.getMessage());
+            ret.put("ok", notified);
+            ret.put("via", "notification");
+            if (!notified) {
+                ret.put("reason", e.getMessage() == null ? "start-failed" : e.getMessage());
+            }
             call.resolve(ret);
         }
     }
 
-    /** 打开任意应用（PackageManager LaunchIntent，替代 monkey -p）→ {ok} / {ok:false, reason:not-found} */
+    /** 拉回兑底 heads-up 通知：高优先级渠道横幅，点一下就回 App（通知点击走 localNotify 同款跳转链） */
+    private boolean sendPullbackHeadsUp() {
+        try {
+            Context ctx = getContext();
+            NotificationManager nm =
+                    (NotificationManager) ctx.getSystemService(Context.NOTIFICATION_SERVICE);
+            if (nm == null) return false;
+            if (Build.VERSION.SDK_INT >= 33
+                    && ContextCompat.checkSelfPermission(ctx, android.Manifest.permission.POST_NOTIFICATIONS)
+                            != PackageManager.PERMISSION_GRANTED) {
+                return false;
+            }
+            if (!nm.areNotificationsEnabled()) return false;
+            if (Build.VERSION.SDK_INT >= 26) {
+                NotificationChannel ch = new NotificationChannel(
+                        PULLBACK_CHANNEL, "拉回提醒", NotificationManager.IMPORTANCE_HIGH);
+                ch.setDescription("AI 把你拉回聊天的高优先级提醒（点一下即可回去）");
+                ch.setLockscreenVisibility(Notification.VISIBILITY_PUBLIC);
+                nm.createNotificationChannel(ch);
+            }
+            Intent contentIntent = new Intent(ctx, MainActivity.class);
+            contentIntent.setPackage(ctx.getPackageName());
+            contentIntent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+            contentIntent.putExtra(EXTRA_LOCAL_NOTIFY_URL, "/");
+            PendingIntent pi = PendingIntent.getActivity(ctx, 9101, contentIntent,
+                    PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
+            Notification n = new NotificationCompat.Builder(ctx, PULLBACK_CHANNEL)
+                    .setSmallIcon(android.R.drawable.ic_dialog_info)
+                    .setContentTitle("回来陪我说话")
+                    .setContentText("点一下这里回到聊天")
+                    .setAutoCancel(true)
+                    .setContentIntent(pi)
+                    .setPriority(NotificationCompat.PRIORITY_HIGH)
+                    .setCategory(NotificationCompat.CATEGORY_MESSAGE)
+                    .build();
+            nm.notify("pullback", 9101, n);
+            return true;
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    /** 打开任意应用（PackageManager LaunchIntent，替代 monkey -p）→ {ok} / {ok:false, reason:not-found}
+     *  v2.2.0：本 App 在后台且无悬浮窗权限时后台启动会被系统静默拦截——如实报
+     *  no-overlay-permission（Web 侧话术指引进权限页开悬浮窗），不再假装成功。 */
     @PluginMethod
     public void openApp(PluginCall call) {
         final String pkgRaw = call.getString("pkg", "");
@@ -768,6 +844,14 @@ public class NativePerceptionPlugin extends Plugin {
             JSObject ret = new JSObject();
             ret.put("ok", false);
             ret.put("reason", "bad-pkg");
+            call.resolve(ret);
+            return;
+        }
+        // 后台 + 无悬浮窗豁免 = Android 10+ 系统必然拦下（静默失败）——前置如实反馈
+        if (!MainActivity.isAppInForeground() && !Settings.canDrawOverlays(getContext())) {
+            JSObject ret = new JSObject();
+            ret.put("ok", false);
+            ret.put("reason", "no-overlay-permission");
             call.resolve(ret);
             return;
         }
@@ -855,6 +939,8 @@ public class NativePerceptionPlugin extends Plugin {
         String pkg = null;
         String charName = null;
         String message = null;
+        String contactId = null;
+        String appKind = null;
         long unlockAt = 0L;
         try {
             pkg = call.getString("pkg", null);
@@ -868,13 +954,23 @@ public class NativePerceptionPlugin extends Plugin {
             message = call.getString("message", null);
         } catch (Throwable ignored) {
         }
+        // v2.2.0：锁定者联系人 id + 所在 App（拦截窗【去哄哄 TA】按钮拉起本 App 后直达聊天）
+        try {
+            contactId = call.getString("contactId", null);
+        } catch (Throwable ignored) {
+        }
+        try {
+            appKind = call.getString("app", null);
+        } catch (Throwable ignored) {
+        }
         try {
             unlockAt = call.getLong("unlockAt", 0L);
         } catch (Throwable t) {
             unlockAt = 0L;
         }
         try {
-            String fail = LockOverlayService.syncLock(getContext(), pkg, unlockAt, charName, message);
+            String fail = LockOverlayService.syncLock(getContext(), pkg, unlockAt, charName, message,
+                    contactId, appKind);
             JSObject ret = new JSObject();
             if (fail == null) {
                 ret.put("ok", true);
@@ -1445,6 +1541,7 @@ public class NativePerceptionPlugin extends Plugin {
     @Override
     public void load() {
         super.load();
+        instanceRef = this; // v2.2.0 冷启动通知直达兜底用
         if (agentStopReceiver != null) return; // 防重入（每 bridge 实例只 load 一次）
         agentStopReceiver = new BroadcastReceiver() {
             @Override
@@ -1745,9 +1842,16 @@ public class NativePerceptionPlugin extends Plugin {
 
     /** 本地通知渠道 id（与 Agent 常驻通知分开） */
     private static final String LOCAL_NOTIFY_CHANNEL = "local_notify";
+    /** v2.2.0 拉回 heads-up 兑底通知渠道 */
+    private static final String PULLBACK_CHANNEL = "pullback_reminder";
     /** 无 tag 本地通知的自增 id 起点（避开 Agent 常驻通知 id 7788） */
     private static final java.util.concurrent.atomic.AtomicInteger LOCAL_NOTIFY_SEQ =
             new java.util.concurrent.atomic.AtomicInteger(8100);
+
+    /** v2.2.0 已发出的带 tag 通知登记（localNotifyCancelByTagPrefix 按前缀批量撤销用；
+     * 进程内有效——重启后通知本身也被系统清了，无对账需求） */
+    private static final java.util.Set<String> issuedTags =
+            java.util.Collections.synchronizedSet(new java.util.HashSet<>());
 
     /** localNotify 可选 url / target extra 键（点击直达） */
     private static final String EXTRA_LOCAL_NOTIFY_URL = "local_notify_url";
@@ -1793,6 +1897,9 @@ public class NativePerceptionPlugin extends Plugin {
                 nm.createNotificationChannel(ch);
             }
             int id = (tag == null || tag.isEmpty()) ? LOCAL_NOTIFY_SEQ.getAndIncrement() : tag.hashCode();
+            if (tag != null && !tag.isEmpty()) {
+                issuedTags.add(tag); // v2.2.0 登记：按前缀批量撤销用
+            }
             Intent contentIntent = new Intent(ctx, MainActivity.class);
             contentIntent.setPackage(ctx.getPackageName());
             contentIntent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP);
@@ -1839,9 +1946,50 @@ public class NativePerceptionPlugin extends Plugin {
             if (tag != null && !tag.isEmpty()) {
                 NotificationManager nm =
                         (NotificationManager) getContext().getSystemService(Context.NOTIFICATION_SERVICE);
-                if (nm != null) nm.cancel(tag, tag.hashCode());
+                if (nm != null) {
+                    nm.cancel(tag, tag.hashCode());
+                    issuedTags.remove(tag);
+                }
             }
             ret.put("ok", true);
+            call.resolve(ret);
+        } catch (Throwable t) {
+            ret.put("ok", false);
+            ret.put("reason", t.getMessage() == null ? t.getClass().getSimpleName() : t.getMessage());
+            call.resolve(ret);
+        }
+    }
+
+    /**
+     * v2.2.0 按前缀批量撤销本地通知 localNotifyCancelByTagPrefix({prefix})：
+     * 进聊天界面后清掉所有未读的聊天消息通知（等价 LocalNotifications.removeAll，但只清
+     * 本 App 发的聊天通知——常驻守护/锁定守护等系统常驻通知不受影响）。
+     */
+    @PluginMethod
+    public void localNotifyCancelByTagPrefix(PluginCall call) {
+        String prefix = call.getString("prefix", "");
+        JSObject ret = new JSObject();
+        try {
+            int n = 0;
+            if (prefix != null && !prefix.isEmpty()) {
+                NotificationManager nm =
+                        (NotificationManager) getContext().getSystemService(Context.NOTIFICATION_SERVICE);
+                if (nm != null) {
+                    String[] snapshot;
+                    synchronized (issuedTags) {
+                        snapshot = issuedTags.toArray(new String[0]);
+                    }
+                    for (String t : snapshot) {
+                        if (t != null && t.startsWith(prefix)) {
+                            nm.cancel(t, t.hashCode());
+                            issuedTags.remove(t);
+                            n++;
+                        }
+                    }
+                }
+            }
+            ret.put("ok", true);
+            ret.put("canceled", n);
             call.resolve(ret);
         } catch (Throwable t) {
             ret.put("ok", false);
@@ -1894,6 +2042,38 @@ public class NativePerceptionPlugin extends Plugin {
             // 注入失败静默
         }
     }
+
+    /**
+     * v2.2.0 冷启动通知直达兜底（MainActivity.onCreate 延迟调用）：
+     * App 被杀后点通知拉起时 handleOnNewIntent 不会触发——这里经插件实例补注入。
+     * 首个插件实例延迟 1.8s 后 bridge 已就绪；找不到实例时静默（用户落在首页）。
+     */
+    public static void injectPendingOpenFromColdBoot(String url, String targetJson) {
+        try {
+            if ((url == null || url.isEmpty()) && (targetJson == null || targetJson.isEmpty())) return;
+            NativePerceptionPlugin plugin = instanceRef;
+            if (plugin == null || plugin.getBridge() == null) {
+                // bridge 未就绪：再等 1.5s 兜一次（WebView 加载慢的机器）
+                final android.os.Handler h = new android.os.Handler(android.os.Looper.getMainLooper());
+                h.postDelayed(() -> {
+                    try {
+                        NativePerceptionPlugin p2 = instanceRef;
+                        if (p2 != null && p2.getBridge() != null) {
+                            p2.injectLocalNotifyOpen(url, targetJson);
+                        }
+                    } catch (Throwable ignored) {
+                    }
+                }, 1500L);
+                return;
+            }
+            plugin.injectLocalNotifyOpen(url, targetJson);
+        } catch (Throwable ignored) {
+            // 冷启动兜底绝不 crash
+        }
+    }
+
+    /** v2.2.0 插件实例引用（冷启动注入兜底用；load 赋值 / unload 清空） */
+    private static volatile NativePerceptionPlugin instanceRef;
 
     // ================= 权限与工具 =================
 

@@ -174,11 +174,23 @@ export async function labOpenApp(pkg: string): Promise<DeviceOpResult> {
   return { ok: true, text: `已拉起 ${pkg}` };
 }
 
-/** 把本 App 强行拉到前台（吃醋拉回/切回聊天） */
+/** 把本 App 强行拉到前台（吃醋拉回/切回聊天）；v2.2.0 原生侧后台启动限制三段修复 */
 export async function labBringToFront(): Promise<DeviceOpResult> {
   const r = await nativeBringToFront();
   if (r === null) return { ok: false, text: '桥无响应（原生调用超时）' };
-  if (!r.ok) return { ok: false, text: `拉回失败：${a11yGateText(r.reason)}` };
+  if (!r.ok) {
+    if (r.reason === 'background-blocked-no-overlay') {
+      return {
+        ok: false,
+        text: '手机系统不允许后台直接拉起 APP（Android 10+ 安全限制）：已发一条高优先级通知，TA 点一下就能回到聊天。想彻底解锁后台拉回：去 设置 › 权限给予 开启「悬浮窗权限」',
+      };
+    }
+    return { ok: false, text: `拉回失败：${a11yGateText(r.reason)}` };
+  }
+  // via: foreground/overlay-exempt = 直接切回；notification = 通知兑底（已弹横幅）
+  if (r.via === 'notification') {
+    return { ok: true, text: '已弹高优先级通知把 TA 喊回来（系统不允许后台硬拉，点通知即回聊天）' };
+  }
   return { ok: true, text: '已把 AI Phone 拉到前台' };
 }
 
@@ -328,16 +340,23 @@ export async function visionAsk(image: string, ask: string, timeoutMs = 90_000):
   throw new Error(msg);
 }
 
-/** 「看屏幕」完整链：无障碍静默截屏 → VLM 描述（识图失败时只报截屏成功） */
+/** 「看屏幕」完整链：无障碍静默截屏 → VLM 描述（识图失败时只报截屏成功）。
+ *  v2.2.0 提示词精简（机主实测旧版返回带「归一化坐标 + 像素估算」双坐标系统的长篇
+ *  罗列，AI 还会原文复述给机主）——现在要求紧凑清单（≤10 行、单坐标系统），
+ *  并在结果尾部附「勿复述」指引：向机主汇报用一句话概括，情报仅供 AI 自己定位用。 */
 export async function labLookScreen(detailed: boolean): Promise<DeviceOpResult & { image?: string }> {
   const shot = await labScreencap();
   if (!shot.ok) return shot;
   try {
     const ask = detailed
-      ? '详细描述真实手机屏幕内容：当前应用、界面布局、可见文字、可点元素及其大致位置（上/中/下/左/右）。如有可能给出关键元素的坐标（像素 x,y）。'
-      : '描述当前真实手机屏幕内容（应用/界面/可见文字/可点元素）。';
+      ? '用紧凑清单描述手机屏幕（总长不超过 10 行）：第一行「当前：应用名·界面名」；后面每行一个可点元素，格式「名称 x,y」（像素坐标）；最多列 10 个最重要的元素。不要归一化坐标、不要像素估算说明、不要布局描述、不要解释坐标含义。'
+      : '一句话（不超过 30 字）说明当前屏幕是什么应用什么页面，正在显示什么。';
     const desc = await visionAsk(shot.image ?? '', ask, 30_000);
-    return { ok: true, text: desc, image: shot.image };
+    return {
+      ok: true,
+      text: `${desc}\n（这份情报仅供你定位用：向机主汇报时用一句自然的话概括即可，绝不许把这份坐标清单原文复述给机主）`,
+      image: shot.image,
+    };
   } catch (e) {
     return {
       ok: true,
@@ -376,13 +395,14 @@ export function isNeverLockPkg(pkg: string): boolean {
 }
 
 /**
- * 锁定应用（v2.0.0：LockOverlayService 全屏遮罩锁，替代 pm suspend）：
- * UsageStats 3s 轮询前台 → 检测到锁定应用 → 悬浮窗全屏拦截（AI 质问文案 +
- * 回到桌面按钮）；unlockAt=0 锁到哄好为止。
+ * 锁定应用（v2.0.0：LockOverlayService 全屏拦截锁，v2.2.0 检测到即回桌面 + 弹拦截窗）：
+ * 无障碍实时钩子 + UsageStats 兑底双通道感知 → 锁定应用一露头立即弹回桌面 +
+ * 弹拦截窗（AI 质问文案 + 每秒倒计时 + 去哄哄按钮）；unlockAt=0 锁到哄好为止。
+ * v2.2.0 新增 contactId/app：拦截窗【去哄哄 TA】拉起本 App 后直达对应聊天。
  */
 export async function labLockApp(
   pkg: string,
-  opts: { unlockAt?: number; charName?: string; message?: string } = {},
+  opts: { unlockAt?: number; charName?: string; message?: string; contactId?: string; app?: string } = {},
 ): Promise<DeviceOpResult> {
   // v2.1.1 防伪包名：合法 Android 包名必含「.」（如 com.tencent.mm）——「QQ」「抖音」
   // 这类应用名混进来直接报错指路（中文名解析在上层 toolFreezeRealApp/lockApp 工具完成），
@@ -399,7 +419,7 @@ export async function labLockApp(
   const r = await nativeLockApp({ pkg, ...opts });
   if (!r.ok) return { ok: false, text: `锁定失败：${a11yGateText(r.reason)}` };
   const dur = opts.unlockAt ? `，${Math.max(1, Math.round((opts.unlockAt - Date.now()) / 60_000))} 分钟后自动解锁` : '（直到哄好才解锁）';
-  return { ok: true, text: `已在真实手机上锁定 ${pkg}${dur}：打开就会被全屏遮罩拦住` };
+  return { ok: true, text: `已在真实手机上锁定 ${pkg}${dur}：一点开就会被立即弹回桌面并看到你的拦截窗` };
 }
 
 /** 解锁应用（停遮罩停守护） */
@@ -409,12 +429,12 @@ export async function labUnlockApp(): Promise<DeviceOpResult> {
   return { ok: true, text: '已解锁（应用恢复正常可用）' };
 }
 
-/** 真机「冻结」应用（v2.0.0 语义变更：pm suspend 退役 → 全屏遮罩锁；函数名保留兼容） */
+/** 真机「冻结」应用（v2.0.0 语义变更：pm suspend 退役 → 全屏拦截锁；函数名保留兼容） */
 export async function labSuspendApp(pkg: string): Promise<DeviceOpResult> {
   return labLockApp(pkg);
 }
 
-/** 真机「解冻」应用（v2.0.0 语义变更：解锁遮罩锁；函数名保留兼容） */
+/** 真机「解冻」应用（v2.0.0 语义变更：解锁拦截锁；函数名保留兼容） */
 export async function labUnsuspendApp(_pkg: string): Promise<DeviceOpResult> {
   return labUnlockApp();
 }

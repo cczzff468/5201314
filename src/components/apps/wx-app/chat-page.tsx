@@ -396,6 +396,10 @@ export function ChatPage({
   const [ttsSend, setTtsSend] = useState(false);
   /** 全局流式回复状态（请求由 chat-stream-store 发起并接收，退出聊天页/退出 App 不中断） */
   const sessionKey = `wx:${peer.id}`;
+  // v2.2.0 需求四：进入聊天界面 → 清除所有未读的聊天系统通知（chat- 前缀批量撤）
+  useEffect(() => {
+    void import('@/lib/ios/local-notify').then((m) => m.cancelChatNotifications()).catch(() => null);
+  }, [sessionKey]);
   // v1.9.23 工具轮系统行实时上屏：phone-tools 直接落 kv 后广播 chat-stream-sysline，按会话增量合并
   useEffect(() => {
     const h = (e: Event) => {

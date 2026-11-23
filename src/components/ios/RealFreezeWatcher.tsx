@@ -1,17 +1,20 @@
 'use client';
 
 /**
- * 真机 App 冻结到期守护（v2.2 需求四：AI 自定义锁定时长）。
+ * 真机 App 冻结到期守护（v2.2 需求四：AI 自定义锁定时长；v2.2.0 拦截信号 drain）。
  *
  * freezeRealApp 冻结真机应用时落 real-app-freeze 记录（unlockAt = AI 给的时长）；
- * 本守望者每 30s 检查一次到期情况：到点自动 pm unsuspend 解冻 + 清记录 +
- * 清同包名的 AI 网页冻结态。解冻失败（Shizuku 断连）下一轮重试，绝不丢。
+ * 本守望者每 30s 两件事：
+ * ① 到期检查：到点自动解锁真机应用 + 清记录 + 清同包名的 AI 网页冻结态；
+ *   解锁失败（桥断连）下一轮重试，绝不丢。
+ * ② 拦截事件 drain（v2.2.0 需求三：AI 感知强行突破）：TA 反复手贱点被锁 App →
+ *   原生守护每次拦截都落盘 lock-attempt → 这里取走并驱动 AI 按人设发质问消息。
  *
  * 挂载：PhoneShell watchersReady 区（解锁后空闲挂载，与其他 Watcher 同款生命周期）。
  */
 
 import { useEffect } from 'react';
-import { checkRealFreezeExpiry } from '@/lib/ios/real-app-freeze';
+import { checkRealFreezeExpiry, drainRealFreezeGuardEvents } from '@/lib/ios/real-app-freeze';
 
 /** tick 间隔（与吃醋锁守望者同节拍） */
 const TICK_MS = 30_000;
@@ -30,7 +33,8 @@ export default function RealFreezeWatcher() {
 
     const loop = async () => {
       if (stopped) return;
-      await checkRealFreezeExpiry();
+      // ① 到期解锁；② 拦截事件 drain → AI 反应（两件都静默容错）
+      await Promise.allSettled([checkRealFreezeExpiry(), drainRealFreezeGuardEvents()]);
       if (stopped) return;
       timer = setTimeout(() => void loop(), TICK_MS);
     };
@@ -39,7 +43,10 @@ export default function RealFreezeWatcher() {
 
     // 页面回前台立即补一轮（后台定时器可能被节流漏掉）
     const onVisible = () => {
-      if (document.visibilityState === 'visible') void checkRealFreezeExpiry();
+      if (document.visibilityState === 'visible') {
+        void checkRealFreezeExpiry();
+        void drainRealFreezeGuardEvents();
+      }
     };
     document.addEventListener('visibilitychange', onVisible);
 

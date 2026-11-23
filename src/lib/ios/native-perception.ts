@@ -85,10 +85,12 @@ export interface RecentNotificationItem {
   text: string;
 }
 
-/** 原生动作通用结果（点按/滑动/按键/输入/打开应用等） */
+/** 原生动作通用结果（点按/滑动/按键/输入/打开应用等）；v2.2.0 bringToFront 带 via 通道标记 */
 export interface NativeActionResult {
   ok?: boolean;
   reason?: string;
+  /** v2.2.0 拉回通道：foreground=前台直拉 / overlay-exempt=悬浮窗豁免后台拉 / notification=通知兜底 */
+  via?: string;
 }
 
 type CapPlugin = {
@@ -1030,6 +1032,20 @@ export async function localNotify(opts: {
   }
 }
 
+/**
+ * v2.2.0 按前缀批量撤销已弹的系统通知（localNotifyCancelByTagPrefix 原生通道）：
+ * 进聊天界面后清掉所有未读的聊天消息通知（等价 LocalNotifications.removeAll，
+ * 但只清本 App 发的带 tag 通知——常驻守护通知不受影响）。非原生壳静默 no-op。
+ */
+export async function localNotifyCancelByTagPrefix(prefix: string): Promise<void> {
+  if (!isNativePerception() || !prefix) return;
+  try {
+    await nativeCall('localNotifyCancelByTagPrefix', { prefix }, 4000);
+  } catch {
+    // 旧壳无该方法/桥异常：静默（通知本身点开也会 autoCancel）
+  }
+}
+
 /** 原生感知插件：优先官方注入的代理（同源页面），否则自建协议直连（跨域页面） */
 async function nativePlugin(): Promise<CapPlugin | null> {
   if (!isNativePerception()) return null;
@@ -1416,9 +1432,11 @@ export async function nativeJealousyGuardSupported(): Promise<boolean> {
 }
 
 /**
- * 锁定应用（v2.0.0 lockApp：UsageStats 轮询 + 全屏遮罩拦截，无需 Shizuku）：
- * - pkg + unlockAt（0=直到哄好）+ charName + message（遮罩上的 AI 质问文案）；
- * - 不传 pkg → 解锁（停遮罩停守护）。
+ * 锁定应用（v2.0.0 lockApp：无障碍实时钩子 + UsageStats 兑底 → 检测到立即回桌面 +
+ * 全屏拦截窗，无需 Shizuku）：
+ * - pkg + unlockAt（0=直到哄好）+ charName + message（拦截窗上的 AI 质问文案）；
+ * - v2.2.0 新增 contactId/app：拦截窗【去哄哄 TA】按钮拉起本 App 后直达对应聊天；
+ * - 不传 pkg → 解锁（停拦截窗停守护）。
  * 返回 ok（false=旧 APK/桥断/无悬浮窗权限等，reason 给人话）。
  */
 export async function nativeLockApp(opts: {
@@ -1426,6 +1444,8 @@ export async function nativeLockApp(opts: {
   unlockAt?: number;
   charName?: string;
   message?: string;
+  contactId?: string;
+  app?: string;
 }): Promise<{ ok: boolean; reason?: string }> {
   if (!isNativePerception()) return { ok: false, reason: 'not-native' };
   if (!(await nativeJealousyGuardSupported())) return { ok: false, reason: 'old-apk' };
@@ -1451,13 +1471,15 @@ export async function nativeUnlockApp(): Promise<{ ok: boolean; reason?: string 
 
 /**
  * 同步锁状态给原生守护服务（jealousy-lock 锁定/解锁/更新时调用；与 lockApp 同内核，
- * 方法名保留：旧调用方零改动兼容）。
+ * 方法名保留：旧调用方零改动兼容）。v2.2.0 新增 contactId/app 透传（去哄哄直达聊天）。
  */
 export async function nativeJealousyGuardSyncLock(opts: {
   pkg?: string;
   unlockAt?: number;
   charName?: string;
   message?: string;
+  contactId?: string;
+  app?: string;
 }): Promise<{ ok: boolean; reason?: string }> {
   if (!isNativePerception()) return { ok: false, reason: 'not-native' };
   if (!(await nativeJealousyGuardSupported())) return { ok: false, reason: 'old-apk' };

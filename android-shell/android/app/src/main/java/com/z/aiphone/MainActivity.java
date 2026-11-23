@@ -22,12 +22,34 @@ public class MainActivity extends BridgeActivity {
     /** 公共下载目录里的目标文件名（与 getUriForFile / FileProvider 路径对应） */
     private static final String APK_FILE_NAME = "AI-Phone.apk";
 
+    /** v2.2.0 进程前后台跟踪（bringToFront 后台拉回豁免判定用）：
+     *  onStart 置 true / onStop 置 false——生命周期回调都在主线程，volatile 读足够安全 */
+    private static volatile boolean appInForeground = false;
+
+    /** 本 App 是否在前台（NativePerceptionPlugin.bringToFront 后台启动限制判定用） */
+    public static boolean isAppInForeground() {
+        return appInForeground;
+    }
+
     /** 音量键翻页直通开关（阅读 App 通过 NativePerception.setVolumeKeyTurn 同步；
      *  开启时音量上/下键不再调系统音量，改为向 WebView 派发 window.__nativeVolTurn(dir)） */
     public static boolean volumeKeyTurn = false;
 
     /** 返回键/返回手势：上一次按下时间（双击退出的窗口判定） */
     private long lastBackAt = 0;
+
+    /** v2.2.0 生命周期前后台打点（bringToFront 后台拉回豁免判定用） */
+    @Override
+    public void onStart() {
+        super.onStart();
+        appInForeground = true;
+    }
+
+    @Override
+    public void onStop() {
+        super.onStop();
+        appInForeground = false;
+    }
 
     /** 音量键拦截：阅读器开启「音量键翻页」时消费音量键（不调系统音量），
      *  转发给 WebView 的 window.__nativeVolTurn(±1)；关闭时保持系统默认行为。
@@ -87,6 +109,28 @@ public class MainActivity extends BridgeActivity {
         // 原生感知插件注册（必须先于 super.onCreate）
         registerPlugin(NativePerceptionPlugin.class);
         super.onCreate(savedInstanceState);
+
+        // v2.2.0 冷启动通知直达兜底：App 被杀后点通知栏里的聊天通知拉起 →
+        // handleOnNewIntent 不会触发（不走 onNewIntent），extras 挂在 getIntent() 里。
+        // 这里 postDelayed 1.8s（等 WebView 首屏加载）后交给插件注入链路直达聊天。
+        try {
+            Intent boot = getIntent();
+            if (boot != null) {
+                final String url = boot.getStringExtra("local_notify_url");
+                final String target = boot.getStringExtra("local_notify_target");
+                if ((url != null && !url.isEmpty()) || (target != null && !target.isEmpty())) {
+                    final android.os.Handler h = new android.os.Handler(getMainLooper());
+                    h.postDelayed(() -> {
+                        try {
+                            NativePerceptionPlugin.injectPendingOpenFromColdBoot(url, target);
+                        } catch (Throwable ignored) {
+                            // 兜底失败静默（用户自然落在首页）
+                        }
+                    }, 1800L);
+                }
+            }
+        } catch (Throwable ignored) {
+        }
 
         // WebView 下载接管：安卓 WebView 默认没有下载处理（<a href="xx.apk" download>
         // 点击毫无反应的根因）。设置 DownloadListener → 系统下载管理器（通知栏进度）

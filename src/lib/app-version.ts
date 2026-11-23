@@ -11,9 +11,9 @@
  */
 
 /** 当前最新版本（与 android-shell versionName 保持一致） */
-export const APP_VERSION = '2.1.0';
+export const APP_VERSION = '2.2.0';
 /** 版本号数字（与 android-shell versionCode 保持一致；覆盖安装要求只增不减） */
-export const APP_VERSION_CODE = 64;
+export const APP_VERSION_CODE = 65;
 
 export interface AppReleaseNote {
   version: string;
@@ -24,6 +24,19 @@ export interface AppReleaseNote {
 
 /** 版本历史（新→旧；设置 › APP 更新 页渲染，最新一条即当前版本） */
 export const APP_RELEASE_NOTES: AppReleaseNote[] = [
+  {
+    version: '2.2.0',
+    date: '2026-11-23',
+    items: [
+      '【需更新 APK·锁定闭环大重构】应用锁定「点击立即弹回桌面」：被锁应用一点开就被无障碍实时事件流（零延迟）+ 使用情况兑底双通道捕捉，立刻弹回手机桌面并弹出全屏拦截窗——绝不许你在被锁应用里多待一秒',
+      '拦截窗全新升级：真实倒计时每秒刷新（剩余 X 分 X 秒）+ 新增【去哄哄 TA】按钮（点了直接拉回 App 跳到 TA 的聊天界面）+ 反复手贱点开时显示「这是你第 N 次想打开它了」',
+      'AI 动态决定锁定时长：freezeRealApp 新增 durationMinutes 参数，AI 按人设/记忆/此刻情境自主计算锁多久（吃醋小惩 5~15 分钟、认真生气 1~3 小时），到点自动解锁',
+      'AI 感知强行突破：你被弹回桌面后每次再手贱去点被锁 App，系统都偷偷告诉 AI（点了几次）——AI 按人设发消息质问你、写进记忆，下轮聊天能自然提起「你是不是又去点它了」',
+      '修复「在别的 App 切不回聊天」：Android 10+ 后台启动限制根修——App 在后台时优先经悬浮窗权限豁免硬拉；无悬浮窗权限则弹高优先级通知（点一下即回聊天），绝不再静默失败',
+      '修复「AI 有时截得到屏有时截不到」：无障碍截屏改单飞队列（连续截屏不再被系统拒绝）+ 失败自动重试一次；看屏幕情报改紧凑清单（单一像素坐标、最多 10 行），AI 汇报不再长篇罗列坐标',
+      '进入聊天界面自动清掉通知栏所有未读的聊天消息通知；点通知栏消息拉起 App 直达对应聊天（含 App 被杀后的冷启动场景）',
+    ],
+  },
   {
     version: '2.1.0',
     date: '2026-11-22',

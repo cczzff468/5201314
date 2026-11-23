@@ -209,6 +209,43 @@ export function cancelLocalNotify(tag: string): void {
   }
 }
 
+/**
+ * v2.2.0 需求四：清除所有未读的聊天消息系统通知（进入聊天界面时调用，
+ * 等价 LocalNotifications.removeAll 但只清 chat- 前缀的聊天通知——常驻守护/
+ * 拉回提醒等系统通知不受影响）：
+ * - 原生壳 → NativePerception.localNotifyCancelByTagPrefix({prefix:'chat-'})；
+ * - 浏览器/PWA → SW getNotifications 逐条按 tag 前缀 close。
+ * fire-and-forget 全程静默（通知已点的 autoCancel，这里只清还挂着的未读）。
+ */
+export function cancelChatNotifications(): void {
+  try {
+    if (typeof window === 'undefined') return;
+    // ① 原生壳：按前缀批量撤销（v2.2.0 新方法；旧壳无该方法桥内静默）
+    if (isNativePerception()) {
+      void import('./native-perception')
+        .then((np) => np.localNotifyCancelByTagPrefix('chat-'))
+        .catch(() => null);
+      return;
+    }
+    // ② 浏览器/PWA：SW 已弹通知按 tag 前缀逐条关闭
+    void (async () => {
+      try {
+        const reg = await ensureSwRegistration();
+        if (!reg) return;
+        const list = await reg.getNotifications();
+        for (const n of list) {
+          const tag = (n as Notification & { tag?: string }).tag ?? '';
+          if (tag.startsWith('chat-')) n.close();
+        }
+      } catch {
+        // 静默
+      }
+    })();
+  } catch {
+    // 全程静默：清通知绝不影响业务主链路
+  }
+}
+
 // ---------------- C6：原生通知点击事件监听（幂等，client-only） ----------------
 
 /**

@@ -870,11 +870,12 @@ export async function toolSearchRealApp(keyword: string): Promise<WebToolResult>
 
 /**
  * 真机模式：锁定真实手机上的应用（v2.0.0 语义升级：pm suspend 退役 → labLockApp
- * 全屏遮罩锁——打开该应用会被遮罩拦住，显示 AI 质问文案，直到到时/手动解锁）。
- * v2.2 需求四：AI 自定义锁定时长——durationMin 由大模型按【人设+记忆+上下文】动态输出
- * （默认 30 分钟），落 real-app-freeze 记录（解锁清账/锁定界面信息源）。
+ * 全屏拦截锁——v2.2.0 检测到即【立即弹回桌面 + 弹拦截窗】，绝不许用户在被锁应用里停留）。
+ * v2.2 需求四：AI 自定义锁定时长——durationMinutes 由大模型按【人设+记忆+上下文】
+ * 动态输出（默认 30 分钟），落 real-app-freeze 记录（解锁清账/锁定界面信息源）。
  * v2.2 需求一/二：同步冻结网页对应体（有对应体时，桌面图标变灰、点击弹锁定界面）；
- * contactId/app 供锁定界面动态头像与【去哄哄 TA】精准跳聊天；应用名走中文名解析。
+ * contactId/app 供拦截窗【去哄哄 TA】拉起本 App 后精准跳聊天 + 头像解析；
+ * 应用名走中文名解析。
  */
 export async function toolFreezeRealApp(
   packageName: string,
@@ -919,7 +920,14 @@ export async function toolFreezeRealApp(
   const unlockAt = Date.now() + durationMin * 60_000;
   const charName = opts?.charName?.trim() || 'TA';
   const reason = opts?.reason?.trim() || undefined;
-  const r = await labLockApp(pkg, { unlockAt, charName, message: reason });
+  // v2.2.0：contactId/app 透传原生——拦截窗【去哄哄 TA】按钮拉起本 App 后直达对应聊天
+  const r = await labLockApp(pkg, {
+    unlockAt,
+    charName,
+    message: reason,
+    contactId: opts?.contactId,
+    app: opts?.app,
+  });
   if (!r.ok) {
     island('chat', '锁定真机应用', brief(r.text, 80));
     return r;
@@ -949,7 +957,7 @@ export async function toolFreezeRealApp(
   island('chat', '锁定真机应用', `已锁定${displayName}（${durationMin} 分钟后自动解锁）`);
   return {
     ok: true,
-    text: `已在真实手机上锁定${displayName}（${pkg}，打开会被全屏遮罩拦住；${durationMin} 分钟后自动解锁，也可让 TA 撒娇哄你解开或调 unfreezeRealApp 解开）`,
+    text: `已在真实手机上锁定${displayName}（${pkg}：TA 一点开就会被立即弹回桌面并看到你的拦截窗和倒计时；${durationMin} 分钟后自动解锁。若 TA 反复手贱去点，系统每次都会拦截并告诉你——你可以趁机发消息质问；哄好原谅了就调 unfreezeRealApp 立刻解开）`,
   };
 }
 

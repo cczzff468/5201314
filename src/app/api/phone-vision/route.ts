@@ -27,7 +27,7 @@ interface VisionUpstreamConfig {
 const MAX_IMAGE_CHARS = 5_000_000;
 
 const SYSTEM_PROMPT =
-  '你是安卓手机界面自动化助手。用户会发来手机屏幕截图并给出分析指令，你需要精确执行：识别当前App与页面、列出可点元素、或定位指定目标元素的位置。坐标一律用相对整张图的 0~1000 归一化数值（左上角为原点，右下角为 1000,1000）。严格按指令要求的格式紧凑输出：不要寒暄、不要解释坐标含义、不要输出坐标以外的多余内容。';
+  '你是安卓手机界面分析助手。用户会发来手机屏幕截图并给出分析指令，你需要精确执行。坐标一律用像素绝对坐标（左上角为原点）。输出务必紧凑：不要寒暄、不要解释坐标含义、不要归一化坐标、不要布局描述、不要像素估算说明、总长不超过 12 行。';
 
 function extractConfig(value: unknown): VisionUpstreamConfig | null {
   if (typeof value !== 'object' || value === null) return null;

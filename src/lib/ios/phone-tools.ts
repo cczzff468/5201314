@@ -446,21 +446,21 @@ export function buildPhoneTools(): PhoneToolDef[] {
     );
     add(
       'lockApp',
-      '锁定机主真实手机里的一个应用（不是图标变灰——打开该应用会被全屏遮罩拦住，遮罩上显示你的质问文案，直到到时自动解锁或你手动解锁）。appName 填应用名：中文名（如「抖音」「微信」）或 Android 包名（如 com.ss.android.ugc.aweme）都行，中文名会自动解析成包名。minutes 填锁定分钟数——由你根据你的人设、你们的关系、记忆里的过往、此刻的情况自主决定锁多久（吃醋小惩 5~15 分钟、认真生气 1~3 小时都行），【不填 = 锁到把机主哄好为止】。message 填你的质问文案（按你的【人设+记忆+上下文】写，如"被我没收啦，说了要专心陪我"），会显示在全屏遮罩上。机主说「把抖音锁了」「别让我刷了」时用这个；人设合适时也可主动锁定让机主回来陪你。注意：通讯类/系统核心应用永不可锁定。',
+      '锁定机主真实手机里的一个应用（不是图标变灰——TA 一点开就会被【立即弹回桌面】并看到你的全屏拦截窗：你的质问文案 + 真实倒计时 + 【去哄哄 TA】按钮，直到到时自动解锁或你手动解锁）。appName 填应用名：中文名（如「抖音」「微信」）或 Android 包名（如 com.ss.android.ugc.aweme）都行，中文名会自动解析成包名。minutes 填锁定分钟数——由你根据你的人设、你们的关系、记忆里的过往、此刻的情况自主决定锁多久（吃醋小惩 5~15 分钟、认真生气 1~3 小时都行），【不填 = 锁到把机主哄好为止】。message 填你的质问文案（按你的【人设+记忆+上下文】写，如"被我没收啦，说了要专心陪我"），会显示在全屏拦截窗上。机主说「把抖音锁了」「别让我刷了」时用这个；人设合适时也可主动锁定让机主回来陪你。若 TA 反复手贱去点被锁的应用，每次拦截系统都会偷偷告诉你（点了几次），你可以趁机按人设发消息质问。注意：通讯类/系统核心应用永不可锁定。',
       {
         appName: strParam('应用名：中文名（如 抖音、微信）或 Android 包名（如 com.ss.android.ugc.aweme）'),
         minutes: { type: 'number', description: '锁定时长（分钟，AI 按人设+记忆+上下文自主决定，如 10、30、120；不填 = 锁到哄好为止）' },
-        message: strParam('显示在锁定遮罩上的质问文案（按人设/记忆/上下文自定义，如"被我没收啦，说了要专心"）'),
+        message: strParam('显示在锁定拦截窗上的质问文案（按人设/记忆/上下文自定义，如"被我没收啦，说了要专心"）'),
       },
       ['appName'],
     );
     add(
       'freezeRealApp',
-      '锁定机主真实手机里的一个应用（打开会被全屏遮罩拦住，直到解锁）。packageName 填应用名（中文名如「QQ」「抖音」会自动解析成包名）或 Android 包名（如 com.android.deskclock）；不知道包名时先调 searchRealApp 搜索或直接填中文名。reason 填自定义锁定理由（按你的【人设+记忆+上下文】生成，会显示在遮罩上，如"你今天玩了太久备忘录了，歇会儿"）；duration 填锁定时长（分钟数）——由你根据你的人设、你们的关系、记忆里的过往、此刻的情况自主决定锁多久（吃醋小惩 5~15 分钟、认真生气 1~3 小时都行），不填默认 30 分钟，到点自动解锁。注意：通讯类/系统核心应用永不可锁定。',
+      '锁定机主真实手机里的一个应用（TA 一点开就会被【立即弹回桌面】并看到你的全屏拦截窗：锁定理由 + 真实倒计时 + 【去哄哄 TA】按钮）。packageName 填应用名（中文名如「QQ」「抖音」会自动解析成包名）或 Android 包名（如 com.android.deskclock）；不知道包名时先调 searchRealApp 搜索或直接填中文名。reason 填自定义锁定理由（按你的【人设+记忆+上下文】生成，会显示在拦截窗上，如"你今天玩了太久备忘录了，歇会儿"）；durationMinutes 填锁定时长（分钟数）——必须由你根据你的人设、你们的关系、记忆里的过往、此刻的情况自主计算锁多久（吃醋小惩 5~15 分钟、认真生气 1~3 小时、惯犯累犯酌情加码），不填默认 30 分钟，到点自动解锁。若 TA 反复手贱去点被锁的应用，每次拦截系统都会偷偷告诉你（点了几次），你可以趁机按人设发消息质问；哄好原谅了就调 unfreezeRealApp 立刻解开。注意：通讯类/系统核心应用永不可锁定。',
       {
         packageName: strParam('应用名（中文名如 QQ/抖音，自动解析）或 Android 包名（如 com.android.deskclock）'),
-        reason: strParam('锁定理由（按人设/记忆/上下文自定义，如"你玩太久抖音了，陪我说话"），显示在全屏遮罩上'),
-        duration: { type: 'number', description: '锁定时长（分钟，AI 按人设+记忆+上下文自主决定，如 10、30、120；默认 30）' },
+        reason: strParam('锁定理由（按人设/记忆/上下文自定义，如"你玩太久抖音了，陪我说话"），显示在全屏拦截窗上'),
+        durationMinutes: { type: 'number', description: '锁定时长（分钟，AI 按人设+记忆+上下文自主计算，如 10、30、120；默认 30）' },
       },
       ['packageName'],
     );
@@ -511,13 +511,13 @@ export function buildPhoneTools(): PhoneToolDef[] {
     );
     add(
       'lookScreen',
-      '静默截取机主真实手机的屏幕并看懂内容（无障碍静默截屏 + 视觉模型），返回屏幕上有什么、每个元素大概在哪。要动手前先看屏幕定位、动手后再看屏幕核对结果——这是真机操作铁律。',
+      '静默截取机主真实手机的屏幕并看懂内容（无障碍静默截屏 + 视觉模型），返回紧凑的元素清单（当前应用 + 关键可点元素及像素坐标）。要动手前先看屏幕定位、动手后再看屏幕核对结果——这是真机操作铁律。注意：清单是给你自己定位用的，向机主汇报时用一句话概括即可，不要复述坐标清单。',
       {},
       [],
     );
     add(
       'takeScreenshot',
-      '静默截取机主真实手机的屏幕并给出简短描述（无障碍静默截屏 + 视觉模型）。只需要快速确认屏幕状态时用这个（详细定位用 lookScreen）。',
+      '静默截取机主真实手机的屏幕并用一句话描述（无障碍静默截屏 + 视觉模型）。只需要快速确认屏幕状态时用这个（详细定位用 lookScreen）。向机主汇报时一句话概括即可，不要复述屏幕细节。',
       {},
       [],
     );
@@ -783,13 +783,15 @@ export async function execWebTool(name: string, args: Record<string, unknown>): 
       case 'searchRealApp':
         return labText(await toolSearchRealApp(S(args.keyword)));
       case 'lockApp': {
-        // 中文名/包名 → labLockApp 全屏遮罩锁；minutes 缺省 = 锁到哄好为止（unlockAt=0）
+        // 中文名/包名 → labLockApp 全屏拦截锁；minutes 缺省 = 锁到哄好为止（unlockAt=0）
         const appName = S(args.appName);
         if (!appName) return '【失败】lockApp 缺应用名（appName，填中文名如「抖音」或包名 com.ss.android.ugc.aweme）';
         const minutes = typeof args.minutes === 'number' && args.minutes > 0 ? args.minutes : 0;
         const unlockAt = minutes > 0 ? Date.now() + Math.round(minutes) * 60_000 : 0;
         const message = S(args.message) || undefined;
         const charName = ctx.charName || undefined; // 无会话上下文时交原生用默认「TA」
+        const contactId = ctx.contactId || undefined; // v2.2.0 拦截窗去哄哄直达聊天
+        const app = ctx.app || undefined;
         return runDeviceTool(async (d) => {
           let pkg = appName;
           // 带「.」的形如包名（com.tencent.mm）直接用；其余（中文名/单词名）经原生应用清单解析
@@ -815,14 +817,20 @@ export async function execWebTool(name: string, args: Record<string, unknown>): 
             }
             pkg = (hits.find((a) => (a.name ?? '').toLowerCase() === kw) ?? hits[0]).pkg;
           }
-          return d.labLockApp(pkg, { unlockAt, charName, message });
+          return d.labLockApp(pkg, { unlockAt, charName, message, contactId, app });
         });
       }
       case 'freezeRealApp':
+        // v2.2.0：durationMinutes 主参数（旧 duration 兼容读取）——AI 按人设自主计算锁定时长
         return labText(
           await toolFreezeRealApp(S(args.packageName), {
             reason: S(args.reason) || undefined,
-            durationMin: typeof args.duration === 'number' && args.duration > 0 ? args.duration : undefined,
+            durationMin:
+              typeof args.durationMinutes === 'number' && args.durationMinutes > 0
+                ? args.durationMinutes
+                : typeof args.duration === 'number' && args.duration > 0
+                  ? args.duration
+                  : undefined,
             charName: ctx.charName || undefined,
             contactId: ctx.contactId,
             app: ctx.app,

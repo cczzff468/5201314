@@ -273,19 +273,27 @@ export interface DeviceOpOutcome {
 }
 
 /**
- * 锁真机应用（v2.0.0：LockOverlayService 全屏遮罩锁，替代 pm suspend）。
- * UsageStats 3s 轮询前台 → 检测到锁定应用 → 悬浮窗全屏拦截（质问文案 + 回到桌面按钮）。
+ * 锁真机应用（v2.0.0：LockOverlayService 全屏拦截锁，替代 pm suspend；
+ * v2.2.0 检测到即立即回桌面 + 弹拦截窗 + 拦截事件逐次落盘）。
+ * contactId/app v2.2.0 新增：拦截窗【去哄哄 TA】按钮拉起本 App 后直达对应聊天。
  */
 export async function deviceLockApp(
   pkg: string,
-  opts: { unlockAt?: number; charName?: string; message?: string } = {},
+  opts: { unlockAt?: number; charName?: string; message?: string; contactId?: string; app?: string } = {},
 ): Promise<DeviceOpOutcome> {
   if (!/^[\w.]+$/.test(pkg)) return { ok: false, text: `包名不合法（${pkg}）` };
   try {
     const { nativeLockApp } = await import('./native-perception');
-    const r = await nativeLockApp({ pkg, unlockAt: opts.unlockAt ?? 0, charName: opts.charName, message: opts.message });
+    const r = await nativeLockApp({
+      pkg,
+      unlockAt: opts.unlockAt ?? 0,
+      charName: opts.charName,
+      message: opts.message,
+      contactId: opts.contactId,
+      app: opts.app,
+    });
     if (!r.ok) return { ok: false, text: `锁应用失败：${nativeDegradeText(r.reason)}` };
-    return { ok: true, text: `已在真实手机上锁住 ${pkg}（打开就会被全屏遮罩拦住，直到倒计时结束或哄好）` };
+    return { ok: true, text: `已在真实手机上锁住 ${pkg}（TA 一点开就会被立即弹回桌面并看到你的拦截窗，直到倒计时结束或哄好）` };
   } catch {
     return { ok: false, text: '锁应用异常' };
   }
