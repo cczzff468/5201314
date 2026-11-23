@@ -20,8 +20,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { Sparkles } from 'lucide-react';
 import { useAppUpdate } from '@/lib/ios/app-update';
-import { launchApkDownload, updateApkInApp } from '@/lib/ios/apk-download';
-import { isNativePerception } from '@/lib/ios/native-perception';
+import { startApkUpdate, type ApkUpdateState } from '@/lib/ios/apk-download';
+import { ApkUpdateProgressCard } from '@/components/ios/ApkUpdateProgressCard';
 import { useUI } from '@/lib/ios/store';
 
 /** 开机后延迟首查（避开开机风暴） */
@@ -38,8 +38,8 @@ export default function AppUpdateDialog() {
   const locked = useUI((s) => s.locked);
 
   const [launched, setLaunched] = useState(false);
-  /** v2.4.3 APP 内下载状态：downloading=通知栏下载中 / perm=等「安装未知应用」授权 */
-  const [dlState, setDlState] = useState<'none' | 'downloading' | 'perm'>('none');
+  /** v2.4.4 下载进度（null=未开始；有值=进度条模式——点按钮立刻有反馈） */
+  const [dl, setDl] = useState<ApkUpdateState | null>(null);
   // 「立即更新」后的收尾计时（文案展示 2.2s 再关弹窗）
   const closeTimer = useRef<number | null>(null);
 
@@ -74,45 +74,20 @@ export default function AppUpdateDialog() {
   const latest = info.notes[0];
   const sizeMb = info.apkSize ? ` · ${(info.apkSize / 1024 / 1024).toFixed(1)}MB` : '';
 
+  /** v2.4.4 统一更新流程：点「立即更新」立刻切进度模式（弹窗内有百分比进度条，
+   *  不再点了没反应）；新 APK APP 内下载自动弹安装，旧 APK 秒级转系统下载通道 */
   const doUpdate = (): void => {
-    if (isNativePerception()) {
-      // v2.4.3 原生壳：APP 内下载 + 自动弹安装（不再跳浏览器）——
-      // 未授「安装未知应用」时提示去允许；原生通道失败回退旧链路（intent + 复制直链）
-      setLaunched(true);
-      void updateApkInApp().then((r) => {
-        if (r.kind === 'downloading') {
-          setDlState('downloading');
-        } else if (r.kind === 'need-permission') {
-          setDlState('perm');
-        } else {
-          setDlState('none');
-          launchApkDownload(() => {});
-          setDlState('downloading');
-        }
-      });
-    } else {
-      // 浏览器：直接触发 APK 下载
-      try {
-        const a = document.createElement('a');
-        a.href = getApkHref();
-        a.download = 'AI-Phone.apk';
-        a.rel = 'noopener';
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-      } catch {
-        /* 下载触发失败也按已处理收口 */
-      }
-      setLaunched(true);
-    }
+    setLaunched(true);
+    setDl({ phase: 'preparing', percent: -1, bytesSoFar: 0, totalBytes: 0, note: '正在发起下载…' });
+    void startApkUpdate(setDl);
   };
 
-  /** v2.4.3：APP 内下载中/等授权时「收起」改为手动关闭（不写 seen，机主稍后继续） */
+  /** 下载中/等授权时「收起」改为手动关闭（不写 seen，机主稍后继续） */
   const closeNow = (): void => {
     if (closeTimer.current) window.clearTimeout(closeTimer.current);
     useAppUpdate.getState().dismiss();
     setLaunched(false);
-    setDlState('none');
+    setDl(null);
   };
 
   return (
@@ -149,36 +124,10 @@ export default function AppUpdateDialog() {
         )}
         <p className="mt-2 text-[10.5px] text-muted-foreground/70">覆盖安装、数据不丢 · 完整版本历史见 设置 › APP 更新</p>
 
-        {/* 按钮 */}
-        {launched && dlState === 'downloading' ? (
-          <div className="mt-4 space-y-2">
-            <p className="rounded-full bg-[#34C759]/10 py-2.5 text-[13px] font-medium text-[#248A3D]">
-              ✓ 正在 APP 内下载更新包（通知栏有进度），下载完会自动弹出安装
-            </p>
-            <button type="button" onClick={closeNow} className="h-8 w-full text-[12.5px] text-muted-foreground active:opacity-60">
-              先在后台下着，稍后再装
-            </button>
-          </div>
-        ) : launched && dlState === 'perm' ? (
-          <div className="mt-4 space-y-2">
-            <p className="rounded-full bg-amber-500/10 px-3 py-2.5 text-[12.5px] leading-relaxed text-amber-600 dark:text-amber-400">
-              已打开「安装未知应用」授权页——请允许 AI Phone 安装应用，允许后回来再点一次「立即更新」
-            </p>
-            <div className="flex items-center gap-2.5">
-              <button type="button" onClick={closeNow} className="h-10 flex-1 rounded-full border border-black/10 text-[14px] text-muted-foreground active:bg-muted/60 dark:border-white/15">
-                下次再说
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setDlState('none');
-                  setLaunched(false);
-                }}
-                className="h-10 flex-1 rounded-full bg-[#34C759] text-[14px] font-medium text-white active:opacity-70"
-              >
-                已允许，重试
-              </button>
-            </div>
+        {/* 按钮：v2.4.4 下载中展示进度卡（百分比进度条 + 阶段指引 + 重试） */}
+        {launched && dl ? (
+          <div className="mt-4">
+            <ApkUpdateProgressCard state={dl} onRetry={doUpdate} onClose={closeNow} />
           </div>
         ) : launched ? (
           <p className="mt-4 rounded-full bg-[#34C759]/10 py-2.5 text-[13px] font-medium text-[#248A3D]">
@@ -210,13 +159,4 @@ export default function AppUpdateDialog() {
       </span>
     </div>
   );
-}
-
-/** APK 直链（与 apk-download.getApkUrl 同源逻辑；弹窗内独立取，避免额外 hook 约束） */
-function getApkHref(): string {
-  try {
-    return new URL('/AI-Phone.apk', window.location.href).href;
-  } catch {
-    return '/AI-Phone.apk';
-  }
 }

@@ -1590,7 +1590,15 @@ const generating = new Set<string>();
  * v51 焦虑触发 / v56 追发引擎：一轮连发多条（条数不限一般 2~6 条）；轮次间隔由 anxLoop
  * 动态插值排程（最短/最长等待可配，越焦虑追得越紧）。
  */
-async function fireProactive(app: ProactiveApp, contact: ContactRecord, trigger: FireTrigger, npcExtra: Record<string, unknown> | null): Promise<boolean> {
+async function fireProactive(
+  app: ProactiveApp,
+  contact: ContactRecord,
+  trigger: FireTrigger,
+  npcExtra: Record<string, unknown> | null,
+  /** v2.4.4 生成后过滳器（锁定尝试反应用：从多行输出里抽出 [锁定留言:…] 指令行再投递剩余行；
+   *  返回空数组 = 本轮只改留言不发消息，按已消费处理） */
+  filterTexts?: (texts: string[]) => string[],
+): Promise<boolean> {
   const key = `${app}:${contact.id}`;
   if (generating.has(key)) return false; // 上一轮生成中：本轮不算数（提醒任务不消费，交给那轮）
   generating.add(key);
@@ -1649,8 +1657,17 @@ async function fireProactive(app: ProactiveApp, contact: ContactRecord, trigger:
     const recent = readNormMsgs(app, contact.id).slice(-6).filter((m) => m.role === 'assistant').map((m) => m.text.trim());
     const lastSent = getLast(app, contact.id).lastSentText?.trim();
     if (lastSent) recent.push(lastSent);
-    const kept = texts.filter((t) => t.trim() && !recent.includes(t.trim()));
+    let kept = texts.filter((t) => t.trim() && !recent.includes(t.trim()));
     if (kept.length === 0) return true;
+    // v2.4.4 指令抽取（调用方过滳器：抽取 [锁定留言:…] 等指令行，只投递真正要发的话）
+    if (filterTexts) {
+      try {
+        kept = filterTexts(kept);
+      } catch {
+        /* 过滳器异常按原样投递 */
+      }
+      if (kept.length === 0) return true; // 全是指令行：本轮只执行指令不发消息，按已消费处理
+    }
     await deliverProactiveMsg(app, contact, kept, trigger);
     return true;
   } catch {
@@ -1763,7 +1780,7 @@ export function eventLabel(e: ProactiveEvent): string {
 export async function fireProactiveNudge(
   app: ProactiveApp,
   cid: string,
-  opts: { dedupeKey: string; context: string; dailyCap?: number },
+  opts: { dedupeKey: string; context: string; dailyCap?: number; filterTexts?: (texts: string[]) => string[] },
 ): Promise<boolean> {
   try {
     if (isProactiveMasterOff()) return false;
@@ -1786,9 +1803,9 @@ export async function fireProactiveNudge(
     if (blk.byUser || blk.byChar) return false; // 拉黑（任一方向）时不打扰
     // 正在通话中不打扰（与 tickInner 守卫同思路；主动消息调度已有互斥，这里轻量跳过）
     if (useIncomingCall.getState().call || useGlobalCall.getState().session) return false;
-    // 生成 + 投递（fireProactive 自带去重/重试/兜底）
+    // 生成 + 投递（fireProactive 自带去重/重试/兜底；filterTexts：生成后指令抽取）
     const npcExtra = buildNpcPromptExtra(contact, all) as unknown as Record<string, unknown> | null;
-    await fireProactive(app, contact, { kind: 'event', eventName: opts.context }, npcExtra);
+    await fireProactive(app, contact, { kind: 'event', eventName: opts.context }, npcExtra, opts.filterTexts);
     // 记录幂等与计数（无论生成成败都记——避免失败重试风暴；情境类消息错过就错过）
     kvSetRaw(firedKey, { at: Date.now() });
     kvSetRaw(dayKey, cnt + 1);

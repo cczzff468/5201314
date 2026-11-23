@@ -438,6 +438,10 @@ export interface BackupDownloadResult {
   filename: string;
   /** 服务端数据未能纳入（GET /api/backup 不可达；本地全量照常导出） */
   serverSkipped: boolean;
+  /** v2.4.4 文件落到哪：native=APP 内存进 Download 目录 / browser=浏览器下载已触发 /
+   *  webview-unsupported=旧 APK 原生保存不可用（WebView 里 blob 下载大概率静默失败，
+   *  已尝试系统通道但需用户自查——UI 必须如实提示，不再假装「已开始下载」） */
+  savedVia: 'native' | 'browser' | 'webview-unsupported';
 }
 
 /**
@@ -462,12 +466,16 @@ export async function exportBackupToDownload(opts?: {
 
   // v2.4.3 APP 内下载根修（机主实测「导出备份无法下载」）：Android WebView 里
   // blob: URL 的 <a download> 点击静默失败（不触发 DownloadListener）——原生壳里
-  // 改走原生 saveBase64Download（MediaStore 写入公共下载目录 + Toast 告知位置），
-  // 失败再回退浏览器下载链路。
+  // 改走原生 saveBase64Download（MediaStore 写入公共下载目录 + Toast 告知位置）。
+  // v2.4.4 根修「一直正在导出」：旧 APK 没有该方法时 Capacitor 不回包 → JS 挂 60s。
+  // 现在能力探测秒级判死（nativeSaveBase64Download 内置），回退时如实上报通道，
+  // 绝不再假装下载已开始。
   let nativeSaved = false;
+  let inNativeShell = false;
   try {
     const { isNativePerception, nativeSaveBase64Download } = await import('./native-perception');
     if (isNativePerception()) {
+      inNativeShell = true;
       // Blob → base64（分块读取，几 MB 备份也安全）
       const b64 = await new Promise<string>((resolve, reject) => {
         const fr = new FileReader();
@@ -488,7 +496,9 @@ export async function exportBackupToDownload(opts?: {
     /* 原生通道失败：回退浏览器下载 */
   }
 
+  let savedVia: BackupDownloadResult['savedVia'] = nativeSaved ? 'native' : inNativeShell ? 'webview-unsupported' : 'browser';
   if (!nativeSaved) {
+    // 回退：blob 锚点（真浏览器可用；WebView 里大概率静默失败——savedVia 已如实标记）
     const url = URL.createObjectURL(blob);
     try {
       const a = document.createElement('a');
@@ -497,6 +507,9 @@ export async function exportBackupToDownload(opts?: {
       document.body.appendChild(a);
       a.click();
       a.remove();
+    } catch {
+      /* 触发失败：浏览器通道也标记为不支持（UI 引导换途径） */
+      if (savedVia === 'browser') savedVia = 'webview-unsupported';
     } finally {
       // 延迟回收：Safari 在 click 同帧回收会导致下载取消
       setTimeout(() => URL.revokeObjectURL(url), 30_000);
@@ -517,6 +530,7 @@ export async function exportBackupToDownload(opts?: {
     stores: Object.keys(backup.data).length,
     filename,
     serverSkipped: backup.manifest.serverSkipped === true,
+    savedVia,
   };
 }
 

@@ -1148,7 +1148,7 @@ async function runJealousyDecision(trigger: TriggerInfo): Promise<void> {
   const canLock = canLockPkgInMode(trigger.pkg, cfg);
   const lockPowerDesc =
     cfg.senseMode === 'device'
-      ? '把对方真实手机里的应用锁住（全屏遮罩封印：TA 一打开这个应用，整个屏幕就会被你的吃醋封印盖住——显示你的质问，只能回桌面，直到你原谅 TA 或倒计时结束才解锁）'
+      ? '把对方真实手机里的应用锁住（全屏遮罩锁定：TA 一打开这个应用，整个屏幕就会被你的吃醋锁定盖住——显示你的质问，只能回桌面，直到你原谅 TA 或倒计时结束才解锁）'
       : '把对方手机里的应用锁住（应用图标会变灰、点开只会看到你留下的提示，直到你原谅 TA 或倒计时结束才解锁）';
   const { memChatRecallBlock } = await import('@/lib/memory');
   const system = [
@@ -1261,8 +1261,8 @@ async function runJealousyDecision(trigger: TriggerInfo): Promise<void> {
     });
     // 锁定必有一条剧情消息（机主规格：锁定后 AI 必须在聊天界面通知用户）
     if (messages.length === 0) messages = [reason];
-    // 系统通知（用户在别的 App 里也能第一时间知道被锁了；v2.0 文案：吃醋封印）
-    void notifyIfHidden(`${appName}被${contact.name}吃醋封印了`, reason, {
+    // 系统通知（用户在别的 App 里也能第一时间知道被锁了；v2.0 文案：吃醋锁定）
+    void notifyIfHidden(`${appName}被${contact.name}吃醋锁定了`, reason, {
       tag: 'jealousy-lock',
       target: { app: chat.app === 'wx' ? 'wechat' : chat.app === 'qq' ? 'qq' : 'chat', contactId: contact.id },
     });
@@ -1294,7 +1294,7 @@ async function runJealousyDecision(trigger: TriggerInfo): Promise<void> {
         messages,
         {
           kind: 'event',
-          eventName: locked ? `吃醋封印：${appName}` : `吃醋提醒：${appName}`,
+          eventName: locked ? `吃醋锁定：${appName}` : `吃醋提醒：${appName}`,
         },
         intel.peekImage
           ? { src: intel.peekImage, desc: intel.peekNote ? intel.peekNote.slice(0, 100) : '你手机现在的屏幕（我截的）' }
@@ -1720,9 +1720,9 @@ async function runJealousyWatch(): Promise<void> {
         fg: null,
         departIntent: null,
       });
-      // 锁定消息兜底 + 系统通知（吃醋封印）+ 记忆
+      // 锁定消息兜底 + 系统通知（吃醋锁定）+ 记忆
       const msgs = dec.messages.length > 0 ? dec.messages : [reason];
-      void notifyIfHidden(`${pkgDisplayName(dec.lockPkg)}被${contact.name}吃醋封印了`, reason, {
+      void notifyIfHidden(`${pkgDisplayName(dec.lockPkg)}被${contact.name}吃醋锁定了`, reason, {
         tag: 'jealousy-lock',
         target: { app: chat.app === 'wx' ? 'wechat' : chat.app === 'qq' ? 'qq' : 'chat', contactId: contact.id },
       });
@@ -1741,7 +1741,7 @@ async function runJealousyWatch(): Promise<void> {
         const { deliverProactiveMsg } = await import('./proactive-msg');
         await deliverProactiveMsg(chat.app, contact, msgs, {
           kind: 'event',
-          eventName: `吃醋封印：${pkgDisplayName(dec.lockPkg)}`,
+          eventName: `吃醋锁定：${pkgDisplayName(dec.lockPkg)}`,
         });
         markNotifiesConsumed(shownNotifyKeys); // v2.4.1 已质问 → 消费，下轮不翻旧账
       } catch {
@@ -1883,25 +1883,28 @@ async function detectForcedBreach(l: JealousyLock): Promise<void> {
   }
 }
 
-/** lock-shown / lock-attempt 事件的 AI 反应节流（10 分钟一条，防轰炸） */
-let lastLockShownReactAt = 0;
-
 /**
- * v2.0.0 遮罩锁戏剧性事件反应：用户试图打开被锁应用（全屏遮罩弹出）→ AI 按人设
- * 发一条质问/得意/吃醋消息（LLM 生成，失败给兜底文案）+ 未读角标。10 分钟节流。
+ * v2.0.0 遮罩锁戏剧性事件反应（v2.4.4 重写）：用户试图打开被锁应用（全屏遮罩弹出）→
+ * AI 按人设/记忆/尝试次数自主决定——发几条消息（多条连发）/暂时不理/顺便改掉拦截窗
+ * 上的留言（[锁定留言:…] 指令行热更新原生遮罩文案）。v2.4.4 删 10 分钟节流：
+ * 每次真实尝试都反应，态度和条数由 AI 自己拿捏。LLM 失败走兜底文案（至少一条）。
  */
 async function reactLockShown(ev: import('./native-perception').JealousyGuardEvent, isRepeat: boolean): Promise<void> {
-  const now = Date.now();
-  if (now - lastLockShownReactAt < 10 * 60_000) return;
   const rt = readJealousyRuntime();
   const l = rt.lock;
   if (!l || l.web || l.pkg !== ev.pkg) return;
-  lastLockShownReactAt = now;
   const contact = await findContact(l.contactId).catch(() => null);
   if (!contact || contact.kind === 'user' || !contact.name?.trim()) return;
   const appName = pkgDisplayName(ev.pkg);
+  // 尝试次数：原生 lock-attempt 事件自带「第N次想打开」；解析不出时用 isRepeat 粗分
+  const cntMatch = ev.text?.match(/第\s*(\d+)\s*次/);
+  const attemptNo = cntMatch ? Number(cntMatch[1]) : isRepeat ? 2 : 1;
 
-  let msg = isRepeat ? `还想着${appName}呢？说了多少遍，哄好我之前它归我管。` : `我看到你想开${appName}了——被我的封印拦住了吧？有这功夫不如来哄哄我。`;
+  let msgs: string[] = [
+    isRepeat
+      ? `还想着${appName}呢？说了多少遍，哄好我之前它归我管。`
+      : `我看到你想开${appName}了——被我锁住了吧？有这功夫不如来哄哄我。`,
+  ];
   try {
     const ownerName = cachedOwnerName() || '用户';
     const { memChatRecallBlock } = await import('@/lib/memory');
@@ -1911,29 +1914,65 @@ async function reactLockShown(ev: import('./native-perception').JealousyGuardEve
         userName: ownerName,
         ownerName,
         extraRules: [
-          '只输出要发给 TA 的一条消息本身（不要引号不要解释，50 字以内）。',
-          `背景：你之前吃醋把「${appName}」锁了（TA 打开就会看到你的全屏封印${isRepeat ? '，而且 TA 刚才已经反复试了好几次' : ''}）。现在系统告诉你 TA 又试图打开它被拦住了。按你的人设发一条质问/得意/吃醋的消息。`,
+          `背景：你之前吃醋把「${appName}」锁了（TA 打开就会看到你的全屏锁定遮罩，已经被拦了 ${attemptNo} 次）。现在系统告诉你 TA 又试图打开它被拦住了。以你的角色人设、结合你们最近的聊天记忆和被拦次数，自己决定要不要发消息、发几条：可以质问、可以委屈、可以得意、也可以暂时不理 TA；想发多条就连发（每条一行，一行一条，不要空行/编号）。你还可以顺便改掉拦截窗上 TA 一眼就能看到的那句留言（当前是：「${l.reason || '（无）'}」）：想改的话在输出的最后一行单独写 [锁定留言:新留言]（30 字以内，第一人称，符合你此刻的情绪）；如果只想改留言不想发消息，就只输出这一行。`,
         ],
       }),
-      memChatRecallBlock(l.contactId, l.app, `吃醋 封印 ${appName}`, {
+      memChatRecallBlock(l.contactId, l.app, `吃醋 锁定 ${appName}`, {
         altMainName: cachedOwnerName(),
         altMainRelation: contact.relation?.trim() || '',
       }),
     ]
       .filter(Boolean)
       .join('\n\n');
-    const raw = await callJealousyLlm(system, `TA 试图打开被你锁住的「${appName}」，被全屏封印拦住了${isRepeat ? '（已经试了好几次）' : ''}。发一条消息给 TA。`);
-    const t = raw.trim().replace(/^["「『]+|["」』]+$/g, '').slice(0, 200);
-    if (t.length >= 4) msg = t;
+    const raw = await callJealousyLlm(
+      system,
+      `TA 试图打开被你锁住的「${appName}」，被全屏锁定遮罩拦住了（第 ${attemptNo} 次）。按你的人设决定怎么反应（可多条连发，可顺便改拦截窗留言）。`,
+    );
+    const lines = (raw ?? '')
+      .trim()
+      .split(/\n+/)
+      .map((s) =>
+        s
+          .replace(/^[-–—•·\d.、]+\s*/, '')
+          .replace(/^[「"'『]+|[」"'』]+$/g, '')
+          .trim(),
+      )
+      .filter(Boolean);
+    const kept: string[] = [];
+    let newLockMsg = '';
+    for (const line of lines) {
+      const m = line.match(/^\s*[\[［]\s*锁定留言\s*[:：]\s*(.+?)\s*[\]］]\s*$/);
+      if (m && m[1].trim()) {
+        newLockMsg = m[1].trim().slice(0, 60);
+      } else if (line !== '[不发]') {
+        kept.push(line.slice(0, 200));
+      }
+    }
+    // 热改拦截窗留言（原生遮罩下一秒同步 + 运行时记录同步，AI 下轮上下文里是新留言）
+    if (newLockMsg) {
+      writeRt((r) => (r.lock ? { lock: { ...r.lock, reason: newLockMsg } } : {}));
+      try {
+        const { nativeUpdateLockMessage } = await import('./native-perception');
+        void nativeUpdateLockMessage(newLockMsg);
+      } catch {
+        /* 桥不可用：仅 JS 侧记录 */
+      }
+    }
+    if (kept.length > 0) {
+      msgs = kept.slice(0, 10);
+    } else if (newLockMsg) {
+      msgs = []; // 只改了留言：本轮不发消息（AI 自己选的）
+    }
   } catch {
     /* LLM 失败走兜底文案 */
   }
 
+  if (msgs.length === 0) return;
   try {
     const { deliverProactiveMsg } = await import('./proactive-msg');
-    await deliverProactiveMsg(l.app, contact, [msg], {
+    await deliverProactiveMsg(l.app, contact, msgs, {
       kind: 'event',
-      eventName: `TA 试图打开被锁的${appName}`,
+      eventName: `TA 试图打开被锁的${appName}（第${attemptNo}次）`,
     });
   } catch {
     /* 静默 */

@@ -11,9 +11,9 @@
  */
 
 /** 当前最新版本（纯网页热更时与 APK versionName 可短暂不同步，下次重打 APK 对齐） */
-export const APP_VERSION = '2.4.3';
+export const APP_VERSION = '2.4.4';
 /** 版本号数字（与 android-shell versionCode 保持一致；覆盖安装要求只增不减；纯网页热更不动） */
-export const APP_VERSION_CODE = 70;
+export const APP_VERSION_CODE = 71;
 
 export interface AppReleaseNote {
   version: string;
@@ -24,6 +24,18 @@ export interface AppReleaseNote {
 
 /** 版本历史（新→旧；设置 › APP 更新 页渲染，最新一条即当前版本） */
 export const APP_RELEASE_NOTES: AppReleaseNote[] = [
+  {
+    version: '2.4.4',
+    date: '2026-11-23',
+    items: [
+      '【需重装 APK】拦截页措辞改为「锁定」：「XX 已被封印」→「XX 已被锁定」，强制解锁提示同步改（整页不再出现「封印」字样）',
+      '【需重装 APK】AI 可以改锁定留言了：你每试图打开被锁的应用，AI 都知道是第几次——它会按人设/记忆/心情决定要不要顺便改掉拦截页上那句质问（比如越试越凶），改完下一秒拦截页就换新文案',
+      '【网页热更·免重装】删掉「3 分钟节流、一把锁最多 3 条」：你每试一次 AI 都会知道并按人设反应——发不发、发几条、什么态度（质问/委屈/得意/装不理你）都由 TA 自己拿捏，可以连发多条',
+      '【需重装 APK】点「立即更新」有进度弹窗了：下载进度百分比实时可见（APP 内下载走通知栏+弹窗双进度），完成后自动弹安装；旧版本 APK 也能用（自动走系统下载通道，不再点了没反应）',
+      '【需重装 APK】导出备份不再卡在「正在导出」：旧 APK 不支持 APP 内保存时秒级回退并如实提示（不再挂 60 秒假装在导出），新 APK 直接存进 Download 目录',
+      '【需重装 APK】原生桥新增能力探测：网页先问一声「这个方法你的 APK 支持吗」，旧 APK 秒回「不支持」自动换路——彻底根治「点了没反应/一直转圈」这类假死',
+    ],
+  },
   {
     version: '2.4.3',
     date: '2026-11-23',

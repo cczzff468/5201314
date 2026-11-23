@@ -83,6 +83,23 @@ export function setRealFrozen(next: RealFrozenRec | null): void {
   bump();
 }
 
+/**
+ * v2.4.4 只改锁定留言（AI 按人设/记忆/尝试次数改写拦截窗文案）：不动包名/解锁时间/
+ * 锁定者（setRealFrozen 的同锁去重会拦掉纯 reason 变更，这里绕开它直写）。
+ */
+export function updateRealFrozenReason(reason: string): void {
+  if (typeof window === 'undefined') return;
+  const r = readRec();
+  if (!r || !reason.trim()) return;
+  rec = { ...r, reason: reason.trim() };
+  try {
+    window.localStorage.setItem(KEY, JSON.stringify(rec));
+  } catch {
+    /* 隐私模式静默 */
+  }
+  bump();
+}
+
 // ---------------- 到期自动解冻（RealFreezeWatcher 每 30s 调用） ----------------
 
 /** 单飞闸：解冻（pm unsuspend + 桥超时）进行中时避免重入 */
@@ -138,12 +155,6 @@ export async function checkRealFreezeExpiry(): Promise<void> {
 /** 本次锁期间的拦截次数（原生 lock-attempt 事件累计；解锁/换锁时归零） */
 let attemptCount = 0;
 let attemptLockKey = '';
-/** 上次 AI 反应时间（节流：首条立即，后续至少间隔 3 分钟，一锁最多 3 次） */
-let lastAttemptReactAt = 0;
-let attemptReacts = 0;
-
-const ATTEMPT_REACT_MIN_GAP_MS = 3 * 60_000;
-const ATTEMPT_REACT_MAX = 3;
 
 export interface RealFreezeGuardEvent {
   ts: number;
@@ -154,8 +165,9 @@ export interface RealFreezeGuardEvent {
 
 /**
  * 处理单条原生守护事件（freezeRealApp 锁的专用处理器）：
- * - lock-shown / lock-attempt + pkg 匹配当前冻结记录 → 拦截计数++ → 节流驱动
- *   AI 反应（fireProactiveNudge 按人设/记忆发质问 + 写事件记忆）；
+ * - lock-shown / lock-attempt + pkg 匹配当前冻结记录 → 拦截计数++ → 每次都驱动
+ *   AI 反应（v2.4.4 删节流：fireProactiveNudge 按人设/记忆/次数自主决定发几条，
+ *   还可经 [锁定留言:…] 指令热改拦截窗文案 + 写事件记忆）；
  * - native-unlock + pkg 匹配 → 原生已到期解锁（WebView 死过一段）→ JS 对齐清记录；
  * - force-unlock + pkg 匹配 → v2.2.5 F-6：机主在拦截窗点【强制解锁】（没哄直接强解）→
  *   JS 对齐清记录 + 聊天气泡 + 事件记忆 + 立刻驱动 AI 按人设发消息（委屈/质问/阴阳怪气）。
@@ -219,7 +231,7 @@ export async function handleRealFreezeGuardEvent(ev: RealFreezeGuardEvent): Prom
         memAddEventFragment(
           contactId,
           app,
-          `（系统：TA 没有哄我，直接在拦截窗点了强制解锁，把我封印的「${appName}」强行解开了${ev.text ? `（${ev.text}）` : ''}）`,
+          `（系统：TA 没有哄我，直接在拦截窗点了强制解锁，把我锁住的「${appName}」强行解开了${ev.text ? `（${ev.text}）` : ''}）`,
           { sourceTag: 'real-freeze-force-unlock' },
         );
       } catch {
@@ -246,20 +258,23 @@ export async function handleRealFreezeGuardEvent(ev: RealFreezeGuardEvent): Prom
   if (lockKey !== attemptLockKey) {
     attemptLockKey = lockKey;
     attemptCount = 0;
-    attemptReacts = 0;
-    lastAttemptReactAt = 0;
   }
   attemptCount += 1;
 
-  // 节流闸：首条立即反应；后续 ≥3 分钟；一把锁最多 3 次（防轰炸）
-  const now = Date.now();
-  if (attemptReacts >= ATTEMPT_REACT_MAX) return true;
-  if (attemptReacts > 0 && now - lastAttemptReactAt < ATTEMPT_REACT_MIN_GAP_MS) return true;
-  lastAttemptReactAt = now;
-  attemptReacts += 1;
-
+  // v2.4.4 机主规格：删掉「3 分钟节流、一把锁最多 3 次」闸门——每一次真实尝试都让
+  // AI 知道（事件记忆 + 主动消息）；发不发、发几条、什么态度由 AI 按人设/记忆/尝试
+  // 次数自己决定（去重/拉黑/幻觉过滤等质量闸仍在 fireProactiveNudge 内保留）。
   const contactId = r.contactId ?? '';
   const app = (r.app ?? 'sms') as 'wx' | 'qq' | 'sms';
+  let appName = r.pkg;
+  try {
+    const { resolvePkgDisplayName } = await import('./jealousy-lock');
+    appName = await resolvePkgDisplayName(r.pkg);
+  } catch {
+    /* 名称解析失败兜底包名 */
+  }
+  const attemptNo = attemptCount;
+
   // 写事件记忆（AI 下轮聊天能自然提起「你又去点它了」）
   if (contactId) {
     try {
@@ -267,7 +282,7 @@ export async function handleRealFreezeGuardEvent(ev: RealFreezeGuardEvent): Prom
       memAddEventFragment(
         contactId,
         app,
-        `（系统：TA 被弹回桌面后又去点被我锁住的「${r.pkg}」，已经被拦了 ${attemptCount} 次${attemptCount >= 3 ? '，TA 还在屡教不改' : ''}）`,
+        `（系统：TA 被弹回桌面后又去点被我锁住的「${appName}」，已经被拦了 ${attemptNo} 次${attemptNo >= 3 ? '，TA 还在屡教不改' : ''}）`,
         { sourceTag: 'real-freeze-attempt' },
       );
     } catch {
@@ -275,13 +290,39 @@ export async function handleRealFreezeGuardEvent(ev: RealFreezeGuardEvent): Prom
     }
   }
 
-  // 发消息：按人设/记忆/上下文质问（fireProactiveNudge 内置人设注入/去重/守卫）
+  // 发消息：按人设/记忆/尝试次数自主决定（可多条连发；可顺便改拦截窗上的留言）
   if (contactId) {
     try {
       const { fireProactiveNudge } = await import('./proactive-msg');
       await fireProactiveNudge(app, contactId, {
-        dedupeKey: `real-freeze-attempt-${lockKey}-${attemptReacts}`,
-        context: `你之前把「${r.reason || r.pkg}」锁了（TA 点开就会被弹回桌面并看到你的拦截窗）。现在系统告诉你：TA 刚刚又试图打开它，这是被拦截的第 ${attemptCount} 次${attemptCount >= 3 ? '，屡教不改' : ''}。以你的角色人设、结合你们最近的聊天记忆，主动给 TA 发一条消息——可以质问、可以委屈、也可以得意，一两句话就够，别太正式。`,
+        dedupeKey: `real-freeze-attempt-${lockKey}-${attemptNo}`,
+        dailyCap: 60,
+        context: `你之前把「${appName}」锁了（TA 点开就会被弹回桌面并看到你的拦截窗）。现在系统告诉你：TA 刚刚又试图打开它，这是被拦截的第 ${attemptNo} 次${attemptNo >= 3 ? '（屡教不改）' : ''}。以你的角色人设、结合你们最近的聊天记忆和 TA 被拦的次数，自己决定要不要发消息、发几条：可以质问、可以委屈、可以得意、也可以暂时不理 TA；想发多条就连发（每条一行，一行一条）。你还可以顺便改掉拦截窗上 TA 一眼就能看到的那句留言（当前是：「${r.reason || '（无）'}」）：想改的话在输出的最后一行单独写 [锁定留言:新留言]（30 字以内，第一人称，符合你此刻的情绪），不想改就不用写这一行；如果只想改留言不想发消息，就只输出这一行。`,
+        filterTexts: (texts) => {
+          const kept: string[] = [];
+          for (const t of texts) {
+            const m = t.match(/^\s*[\[［]\s*锁定留言\s*[:：]\s*(.+?)\s*[\]］]\s*$/);
+            if (m && m[1].trim()) {
+              const newMsg = m[1].trim().slice(0, 60);
+              // 热更新：原生拦截窗下一秒就换新文案 + JS 侧记录同步（AI 下轮上下文里是新留言）
+              try {
+                void import('./native-perception').then(({ nativeUpdateLockMessage }) =>
+                  nativeUpdateLockMessage(newMsg),
+                );
+              } catch {
+                /* 桥不可用：仅 JS 侧更新 */
+              }
+              try {
+                updateRealFrozenReason(newMsg);
+              } catch {
+                /* 记录更新失败不影响发消息 */
+              }
+            } else {
+              kept.push(t);
+            }
+          }
+          return kept;
+        },
       });
     } catch {
       /* nudge 失败静默（记忆已写，下轮聊天仍能提起） */

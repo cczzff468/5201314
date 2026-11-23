@@ -1151,7 +1151,54 @@ public class NativePerceptionPlugin extends Plugin {
         call.resolve(ret);
     }
 
-    // ================= 消息读取（短信 / 通知） =================
+    /**
+     * v2.4.4 锁定期热更新留言 updateLockMessage({message})：AI 按人设/记忆/尝试次数
+     * 改写拦截窗上的锁定文案（不重置计数/倒计时；展示中的遮罩下一秒同步）。
+     * → {ok:true} / {ok:false, reason}
+     */
+    @PluginMethod
+    public void updateLockMessage(PluginCall call) {
+        String msg = null;
+        try {
+            msg = call.getString("message", null);
+        } catch (Throwable ignored) {
+        }
+        JSObject ret = new JSObject();
+        try {
+            String fail = LockOverlayService.updateLockMessage(getContext(), msg);
+            ret.put("ok", fail == null);
+            if (fail != null) ret.put("reason", fail);
+        } catch (Throwable t) {
+            ret.put("ok", false);
+            ret.put("reason", t.getMessage() == null ? "update-failed" : t.getMessage());
+        }
+        call.resolve(ret);
+    }
+
+    /**
+     * v2.4.4 桥能力探测 bridgeCapabilities()：旧 APK 里调不存在的方法时，Capacitor 只
+     * 记日志不回包——网页侧会挂到超时（机主实测「导出一直正在导出」的根因）。
+     * 新 APK 用这个方法一次性把「新增方法清单」报给网页：网页先探测再调用，
+     * 旧 APK 探测 2.5s 超时即知方法不存在，秒级回退，不再长等。
+     * → {ok:true, methods:["updateLockMessage",...]}
+     */
+    @PluginMethod
+    public void bridgeCapabilities(PluginCall call) {
+        JSObject ret = new JSObject();
+        JSArray methods = new JSArray();
+        // 与 NativePerceptionPlugin 本体同步维护（新增 @PluginMethod 后记得补进来）
+        methods.put("updateLockMessage");
+        methods.put("bridgeCapabilities");
+        methods.put("saveBase64Download");
+        methods.put("downloadAndInstallApk");
+        methods.put("queryLastApkDownload");
+        methods.put("controlMedia");
+        methods.put("getRealCalendarEvents");
+        methods.put("getNowPlaying");
+        ret.put("ok", true);
+        ret.put("methods", methods);
+        call.resolve(ret);
+    }
 
     /**
      * 最近短信 getRecentSMS({limit?})：ContentResolver 读收件箱（需 READ_SMS 运行时权限）。
@@ -4339,7 +4386,13 @@ public class NativePerceptionPlugin extends Plugin {
      *    系统授权页并回 needPermission（JS 提示机主允许后重试）；
      * ② 已授权 → 系统 DownloadManager 后台下载（通知栏进度条），轮询完成 →
      *    FileProvider content:// URI 调起包安装器（REQUEST_INSTALL_PACKAGES 已声明）。
+     * v2.4.4：记下 enqueue 的下载 id + 起始时间 → queryLastApkDownload 可查真实进度
+     * （网页侧进度弹窗用；页面刷新后凭时间窗内最近一次下载继续查）。
      */
+    /** 最近一次 APP 内 APK 下载（downloadAndInstallApk enqueue 后写入；静态跨页面存活） */
+    private static volatile long lastDlId = -1L;
+    private static volatile long lastDlAt = 0L;
+
     @PluginMethod
     public void downloadAndInstallApk(PluginCall call) {
         final String url = call.getString("url", "");
@@ -4372,7 +4425,8 @@ public class NativePerceptionPlugin extends Plugin {
                     ctx.getSystemService(Context.DOWNLOAD_SERVICE);
             if (dm == null) throw new IllegalStateException("no-download-manager");
             final long id = dm.enqueue(req);
-            // 轮询线程：下载完成 → FileProvider 安装意图（最多等 10 分钟）
+            lastDlId = id;
+            lastDlAt = System.currentTimeMillis();
             final Context appCtx = ctx.getApplicationContext();
             new Thread(() -> {
                 try {
@@ -4406,11 +4460,68 @@ public class NativePerceptionPlugin extends Plugin {
             JSObject ret = new JSObject();
             ret.put("ok", true);
             ret.put("downloading", true);
+            ret.put("dlId", id);
             call.resolve(ret);
         } catch (Throwable t) {
             JSObject ret = new JSObject();
             ret.put("ok", false);
             ret.put("reason", t.getMessage() == null ? "start-failed" : t.getMessage());
+            call.resolve(ret);
+        }
+    }
+
+    /**
+     * v2.4.4 查询 APP 内 APK 下载进度 queryLastApkDownload()：
+     * → {status: "running"|"succeeded"|"failed"|"none", bytesSoFar, totalBytes}
+     * 网页侧进度弹窗每秒轮询（downloadAndInstallApk 成功启动后）；跨页面刷新仍可查
+     * （静态 id + 30 分钟时间窗内有效；超过即 none，弹窗自行收口）。
+     */
+    @PluginMethod
+    public void queryLastApkDownload(PluginCall call) {
+        JSObject ret = new JSObject();
+        try {
+            final long id = lastDlId;
+            if (id < 0 || System.currentTimeMillis() - lastDlAt > 30 * 60_000L) {
+                ret.put("status", "none");
+                ret.put("bytesSoFar", 0L);
+                ret.put("totalBytes", 0L);
+                call.resolve(ret);
+                return;
+            }
+            android.app.DownloadManager dm = (android.app.DownloadManager)
+                    getContext().getSystemService(Context.DOWNLOAD_SERVICE);
+            if (dm == null) throw new IllegalStateException("no-download-manager");
+            try (Cursor c = dm.query(new android.app.DownloadManager.Query().setFilterById(id))) {
+                if (c == null || !c.moveToFirst()) {
+                    // 记录被系统清掉（罕见）：按已完结处理，网页侧停止轮询
+                    ret.put("status", "none");
+                    ret.put("bytesSoFar", 0L);
+                    ret.put("totalBytes", 0L);
+                    call.resolve(ret);
+                    return;
+                }
+                int status = c.getInt(c.getColumnIndex(android.app.DownloadManager.COLUMN_STATUS));
+                long soFar = c.getLong(c.getColumnIndex(
+                        android.app.DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR));
+                long total = c.getLong(c.getColumnIndex(
+                        android.app.DownloadManager.COLUMN_TOTAL_SIZE_BYTES));
+                if (status == android.app.DownloadManager.STATUS_SUCCESSFUL) {
+                    ret.put("status", "succeeded");
+                } else if (status == android.app.DownloadManager.STATUS_FAILED
+                        || status == android.app.DownloadManager.STATUS_PAUSED) {
+                    ret.put("status", "failed");
+                } else {
+                    ret.put("status", "running");
+                }
+                ret.put("bytesSoFar", soFar);
+                ret.put("totalBytes", total);
+            }
+            call.resolve(ret);
+        } catch (Throwable t) {
+            ret.put("status", "none");
+            ret.put("bytesSoFar", 0L);
+            ret.put("totalBytes", 0L);
+            ret.put("reason", t.getMessage() == null ? "query-failed" : t.getMessage());
             call.resolve(ret);
         }
     }

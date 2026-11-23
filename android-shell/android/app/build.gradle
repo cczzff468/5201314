@@ -11,8 +11,8 @@ android {
         applicationId "com.z.aiphone"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 70          // v2.4.3 封印页常驻修 + 日历权限自动授 + 媒体控制/日历读取 + APP 内下载更新
-        versionName "2.4.3"     // v2.4.3：封印页不自动消失 + 切歌 + 备份/更新 APP 内下载安装
+        versionCode 71          // v2.4.4 封印→锁定文案 + AI 可改锁定留言 + 桥能力探测 + APK 下载进度查询
+        versionName "2.4.4"     // v2.4.4：拦截窗改「锁定」措辞 + 每次尝试 AI 都反应可多条 + 更新/导出不再卡死
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.

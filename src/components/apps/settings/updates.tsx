@@ -1,6 +1,6 @@
 'use client';
 
-// APP 更新页（v1.4.2：自动检查 + 红点 + 版本历史）。
+// APP 更新页（v1.4.2：自动检查 + 红点 + 版本历史；v2.4.4：下载改带实时进度的弹窗）。
 
 import {
   useEffect,
@@ -18,9 +18,12 @@ import { isNativePerception } from '@/lib/ios/native-perception';
 import {
   copyApkLink,
   getApkUrl,
-  launchApkDownload,
-  updateApkInApp,
+  startApkUpdate,
+  type ApkUpdateState,
 } from '@/lib/ios/apk-download';
+
+// v2.4.4 更新进度卡（设置页全屏弹窗 + 开机弹窗共用）
+import { ApkUpdateProgressCard } from '@/components/ios/ApkUpdateProgressCard';
 
 // v1.4.2 APP 更新：自动检查 + 红点 + 版本历史
 import { useAppUpdate } from '@/lib/ios/app-update';
@@ -38,8 +41,8 @@ import { DetailShell } from './shared';
 export function AppUpdatePage({ onBack }: { onBack: () => void }) {
   const nativeMode = isNativePerception();
   const [copied, setCopied] = useState(false);
-  /** v2.4.3 APP 内下载状态：downloading=通知栏下载中 / perm=等「安装未知应用」授权 */
-  const [dlState, setDlState] = useState<'none' | 'downloading' | 'perm'>('none');
+  /** v2.4.4 下载进度弹窗：null=关；有值=按阶段渲染进度条/指引/重试 */
+  const [dl, setDl] = useState<ApkUpdateState | null>(null);
   const apkUrl = getApkUrl();
 
   const info = useAppUpdate((s) => s.info);
@@ -62,21 +65,12 @@ export function AppUpdatePage({ onBack }: { onBack: () => void }) {
     dismiss();
   };
 
-  /** v2.4.3 原生壳下载：APP 内 DownloadManager 下载 + 完成自动弹安装；
-   *  未授「安装未知应用」→ 跳授权页提示；原生通道失败回退旧链路 */
-  const doNativeUpdate = (): void => {
-    setDlState('none');
-    void updateApkInApp().then((r) => {
-      if (r.kind === 'downloading') {
-        setDlState('downloading');
-        markSeen();
-      } else if (r.kind === 'need-permission') {
-        setDlState('perm');
-      } else {
-        launchApkDownload(setCopied);
-        markSeen();
-      }
-    });
+  /** v2.4.4 统一更新流程：点按钮立刻弹进度弹窗（不再点了没反应），
+   *  新 APK 走 APP 内下载（真实百分比），旧 APK 秒级回退系统下载通道，浏览器流式下载 */
+  const doUpdate = (): void => {
+    setDl({ phase: 'preparing', percent: -1, bytesSoFar: 0, totalBytes: 0, note: '正在发起下载…' });
+    markSeen();
+    void startApkUpdate(setDl);
   };
 
   return (
@@ -124,47 +118,24 @@ export function AppUpdatePage({ onBack }: { onBack: () => void }) {
 
         {/* 下载区（有新版或 APK 就绪时展示主按钮） */}
         <div className="mx-4 mt-4 space-y-2">
-          {nativeMode ? (
-            <>
-              {dlState === 'perm' ? (
-                <p className="rounded-[10px] bg-amber-500/10 px-3 py-2 text-[12px] leading-relaxed text-amber-600 dark:text-amber-400">
-                  已打开「安装未知应用」授权页——请允许 AI Phone 安装应用，允许后回来再点一次下载按钮。
-                </p>
-              ) : null}
-              <button
-                type="button"
-                data-testid="appupdate-download-btn"
-                onClick={doNativeUpdate}
-                className="block w-full rounded-full bg-[#34C759] py-2.5 text-center text-[14px] font-medium text-white transition-opacity active:opacity-70"
-              >
-                {dlState === 'downloading'
-                  ? '✓ 正在 APP 内下载（通知栏有进度），下载完自动弹安装'
-                  : hasUpdate
-                    ? `立即更新 v${version}（APP 内下载）`
-                    : `重新下载 v${version}（APP 内下载）`}
-              </button>
-              <p className="text-[12px] leading-snug text-muted-foreground">
-                {dlState === 'downloading'
-                  ? '下载在通知栏显示进度，完成后自动弹出安装框（覆盖安装、数据不丢）。'
-                  : '点按钮直接在 APP 内下载更新包（通知栏有进度），下载完自动弹出安装；首次会请你去系统里允许「安装未知应用」，允许后回来重点一次即可。'}
-              </p>
-            </>
-          ) : (
-            <>
-              <a
-                href="/AI-Phone.apk"
-                download
-                data-testid="appupdate-download-btn"
-                onClick={markSeen}
-                className="block w-full rounded-full bg-[#34C759] py-2.5 text-center text-[14px] font-medium text-white transition-opacity active:opacity-70"
-              >
-                {hasUpdate ? `立即更新 v${version}` : `下载 v${version}（AI-Phone.apk）`}
-              </a>
-              <p className="text-[12px] leading-snug text-muted-foreground">
-                浏览器直接下载 APK 后传到手机安装（或用手机浏览器打开本页下载）；已装旧版直接覆盖安装，数据不丢。
-              </p>
-            </>
-          )}
+          <button
+            type="button"
+            data-testid="appupdate-download-btn"
+            onClick={doUpdate}
+            disabled={dl?.phase === 'downloading' || dl?.phase === 'preparing'}
+            className="block w-full rounded-full bg-[#34C759] py-2.5 text-center text-[14px] font-medium text-white transition-opacity active:opacity-70 disabled:opacity-60"
+          >
+            {dl?.phase === 'downloading' || dl?.phase === 'preparing'
+              ? '正在下载（进度见弹窗）…'
+              : hasUpdate
+                ? `立即更新 v${version}`
+                : `重新下载 v${version}`}
+          </button>
+          <p className="text-[12px] leading-snug text-muted-foreground">
+            {nativeMode
+              ? '点按钮弹出下载进度窗（新版本在 APP 内下载，完成后自动弹安装；旧版本自动转系统下载通道，数据不丢）。'
+              : '点按钮弹出下载进度窗，下载完打开 APK 覆盖安装（数据不丢）。'}
+          </p>
           <button
             type="button"
             onClick={() => void copyApkLink(setCopied)}
@@ -204,6 +175,24 @@ export function AppUpdatePage({ onBack }: { onBack: () => void }) {
           <p className="mt-3 text-[11px] text-muted-foreground/70">覆盖安装、数据不丢（聊天记录都在服务器和本地存储里）。</p>
         </div>
       </div>
+
+      {/* v2.4.4 下载进度弹窗（点「立即更新/重新下载」即弹：百分比进度条 + 阶段指引） */}
+      {dl ? (
+        <div
+          className="absolute inset-0 z-[95] flex items-center justify-center bg-black/35 px-8 backdrop-blur-[2px]"
+          role="dialog"
+          aria-modal="true"
+          aria-label="下载更新进度"
+        >
+          <div className="w-full max-w-[320px] rounded-[22px] border border-border/60 bg-card/95 p-5 shadow-[0_20px_50px_-12px_rgba(0,0,0,0.45)] backdrop-blur-xl">
+            <ApkUpdateProgressCard
+              state={dl}
+              onRetry={doUpdate}
+              onClose={() => setDl(null)}
+            />
+          </div>
+        </div>
+      ) : null}
     </DetailShell>
   );
 }

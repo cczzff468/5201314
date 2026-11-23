@@ -524,7 +524,7 @@ export function JealousyLockSection({
             <ShieldAlert size={12} strokeWidth={2} className="mt-0.5 shrink-0 text-black/30 dark:text-white/30" aria-hidden />
             <p className="text-[10.5px] leading-snug text-black/35 dark:text-white/35">
               {deviceSense
-                ? '真机模式：把真实手机里被锁的 App 用全屏遮罩拦住（打开就被 TA 的吃醋封印盖住，直到倒计时结束或哄好 TA），还能无障碍静默截屏取证、把你拉回。锁多久由 TA 自定。需 APK + 悬浮窗权限。'
+                ? '真机模式：把真实手机里被锁的 App 用全屏遮罩拦住（打开就被 TA 的吃醋锁定盖住，直到倒计时结束或哄好 TA），还能无障碍静默截屏取证、把你拉回。锁多久由 TA 自定。需 APK + 悬浮窗权限。'
                 : '网页模式：锁这台手机里的应用，图标变灰点不开。锁多久由 TA 自定。'}
             </p>
           </div>

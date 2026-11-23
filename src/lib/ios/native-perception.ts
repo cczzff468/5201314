@@ -295,6 +295,12 @@ type CapPlugin = {
   jealousyGuardSyncLock(options: { pkg?: string; unlockAt?: number; charName?: string; message?: string }): Promise<{ ok?: boolean; reason?: string }>;
   jealousyGuardStatus(): Promise<JealousyGuardStatusResult>;
   jealousyGuardDrainEvents(): Promise<{ events?: JealousyGuardEvent[] }>;
+  /** v2.4.4 锁定期热更新留言（AI 按人设/记忆/尝试次数改拦截窗文案） */
+  updateLockMessage(options: { message: string }): Promise<{ ok?: boolean; reason?: string }>;
+  /** v2.4.4 桥能力探测（旧 APK 调不存在方法会挂到超时——先探测再调用，秒级回退） */
+  bridgeCapabilities(): Promise<{ ok?: boolean; methods?: string[] }>;
+  /** v2.4.4 APP 内 APK 下载进度查询（进度弹窗轮询） */
+  queryLastApkDownload(): Promise<{ status?: string; bytesSoFar?: number; totalBytes?: number }>; 
   /** v2.0.0 消息读取组 */
   getRecentSMS(options?: { limit?: number }): Promise<{ ok?: boolean; items?: RecentSmsItem[]; reason?: string; connecting?: boolean }>;
   getRecentNotifications(options?: { limit?: number }): Promise<{ ok?: boolean; items?: RecentNotificationItem[]; reason?: string; connecting?: boolean }>;
@@ -563,6 +569,9 @@ function bridgePlugin(): CapPlugin {
     lockApp: (options) => nativeCall<{ ok?: boolean; reason?: string }>('lockApp', options ?? {}, 10_000),
     unlockApp: () => nativeCall<{ ok?: boolean; reason?: string }>('unlockApp', {}, 10_000),
     jealousyGuardSyncLock: (options) => nativeCall<{ ok?: boolean; reason?: string }>('jealousyGuardSyncLock', options ?? {}, 10_000),
+    updateLockMessage: (options) => nativeCall<{ ok?: boolean; reason?: string }>('updateLockMessage', options ?? {}, 8000),
+    bridgeCapabilities: () => nativeCall<{ ok?: boolean; methods?: string[] }>('bridgeCapabilities', {}, 4000),
+    queryLastApkDownload: () => nativeCall<{ status?: string; bytesSoFar?: number; totalBytes?: number }>('queryLastApkDownload', {}, 5000),
     jealousyGuardStatus: () => nativeCall<JealousyGuardStatusResult>('jealousyGuardStatus'),
     jealousyGuardDrainEvents: () => nativeCall<{ events?: JealousyGuardEvent[] }>('jealousyGuardDrainEvents'),
     // v2.0.0 消息读取组
@@ -1108,7 +1117,9 @@ export async function nativeGetRealCalendarEvents(date?: string): Promise<Native
   }
 }
 
-/** APP 内保存 base64 到公共下载目录（Android WebView 里 blob 下载静默失败的根修） */
+/** APP 内保存 base64 到公共下载目录（Android WebView 里 blob 下载静默失败的根修）。
+ *  v2.4.4 根修「导出一直正在导出」：旧 APK 没有此方法时 Capacitor 只记日志不回包，
+ *  JS 会挂到 60s 超时——先经能力探测（秒级）确认方法存在才真调，不存在立即回退。 */
 export async function nativeSaveBase64Download(filename: string, base64: string, mime = 'application/json'): Promise<{
   ok: boolean;
   path?: string;
@@ -1116,6 +1127,7 @@ export async function nativeSaveBase64Download(filename: string, base64: string,
   reason?: string;
 }> {
   if (!isNativePerception()) return { ok: false, reason: 'not-native' };
+  if (!(await nativeHasMethod('saveBase64Download'))) return { ok: false, reason: 'not-supported' };
   try {
     const r = await nativeCall<{ ok?: boolean; path?: string; bytes?: number; reason?: string }>(
       'saveBase64Download',
@@ -1128,23 +1140,94 @@ export async function nativeSaveBase64Download(filename: string, base64: string,
   }
 }
 
-/** APP 内下载 APK 并调起安装（未授「安装未知应用」时回 needPermission 并已跳授权页） */
+/** APP 内下载 APK 并调起安装（未授「安装未知应用」时回 needPermission 并已跳授权页）。
+ *  v2.4.4 同样先能力探测：旧 APK 无此方法时秒级回退（不再挂 15s）。 */
 export async function nativeDownloadAndInstallApk(url: string): Promise<{
   ok: boolean;
   downloading?: boolean;
   needPermission?: boolean;
+  dlId?: number;
   reason?: string;
 }> {
   if (!isNativePerception()) return { ok: false, reason: 'not-native' };
+  if (!(await nativeHasMethod('downloadAndInstallApk'))) return { ok: false, reason: 'not-supported' };
   try {
-    const r = await nativeCall<{ ok?: boolean; downloading?: boolean; needPermission?: boolean; reason?: string }>(
+    const r = await nativeCall<{ ok?: boolean; downloading?: boolean; needPermission?: boolean; dlId?: number; reason?: string }>(
       'downloadAndInstallApk',
       { url },
       15_000,
     );
-    return { ok: r?.ok === true, downloading: r?.downloading, needPermission: r?.needPermission, reason: r?.reason };
+    return { ok: r?.ok === true, downloading: r?.downloading, needPermission: r?.needPermission, dlId: r?.dlId, reason: r?.reason };
   } catch {
     return { ok: false, reason: '桥无响应' };
+  }
+}
+
+// ---------------- v2.4.4 桥能力探测（旧 APK 方法缺失秒级回退） ----------------
+
+/** 能力探测结果缓存（会话级；旧 APK 探测超时 4s 后永不重试，后续全部秒回） */
+let capMethodsPromise: Promise<Set<string>> | null = null;
+
+/** 探测原生桥支持的方法集（非原生/旧 APK/超时 → 空集） */
+function nativeBridgeMethods(): Promise<Set<string>> {
+  if (capMethodsPromise) return capMethodsPromise;
+  capMethodsPromise = (async () => {
+    if (typeof window === 'undefined' || !isNativePerception()) return new Set<string>();
+    try {
+      const r = await nativeCall<{ ok?: boolean; methods?: string[] }>('bridgeCapabilities', {}, 4000);
+      return new Set(Array.isArray(r?.methods) ? r.methods.filter((m): m is string => typeof m === 'string') : []);
+    } catch {
+      // 旧 APK 无此方法（挂到超时）或桥异常：一律视为无新方法
+      return new Set<string>();
+    }
+  })();
+  return capMethodsPromise;
+}
+
+/** 指定原生方法是否存在（能力探测；不存在时调用方秒级回退，不再长等超时） */
+export async function nativeHasMethod(method: string): Promise<boolean> {
+  try {
+    return (await nativeBridgeMethods()).has(method);
+  } catch {
+    return false;
+  }
+}
+
+/** 锁定期热更新拦截窗留言（AI 按人设/记忆/尝试次数改写；旧 APK 无此方法时静默失败不影响发消息） */
+export async function nativeUpdateLockMessage(message: string): Promise<{ ok: boolean; reason?: string }> {
+  if (!isNativePerception()) return { ok: false, reason: 'not-native' };
+  try {
+    const r = await nativeCall<{ ok?: boolean; reason?: string }>('updateLockMessage', { message }, 8000);
+    return { ok: r?.ok === true, reason: r?.reason };
+  } catch {
+    return { ok: false, reason: '桥无响应' };
+  }
+}
+
+/** 查询 APP 内 APK 下载进度（进度弹窗轮询；旧 APK 无此方法 → status:'none'） */
+export async function nativeQueryLastApkDownload(): Promise<{
+  status: 'running' | 'succeeded' | 'failed' | 'none';
+  bytesSoFar: number;
+  totalBytes: number;
+}> {
+  if (!isNativePerception()) return { status: 'none', bytesSoFar: 0, totalBytes: 0 };
+  if (!(await nativeHasMethod('queryLastApkDownload'))) {
+    return { status: 'none', bytesSoFar: 0, totalBytes: 0 };
+  }
+  try {
+    const r = await nativeCall<{ status?: string; bytesSoFar?: number; totalBytes?: number }>(
+      'queryLastApkDownload',
+      {},
+      5000,
+    );
+    const st = r?.status === 'running' || r?.status === 'succeeded' || r?.status === 'failed' ? r.status : 'none';
+    return {
+      status: st,
+      bytesSoFar: typeof r?.bytesSoFar === 'number' ? r.bytesSoFar : 0,
+      totalBytes: typeof r?.totalBytes === 'number' ? r.totalBytes : 0,
+    };
+  } catch {
+    return { status: 'none', bytesSoFar: 0, totalBytes: 0 };
   }
 }
 

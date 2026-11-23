@@ -597,7 +597,7 @@ public class LockOverlayService extends Service {
     /**
      * 构建拦截窗视图（v2.4.2 极简黑白灰 + 毛玻璃·苹果级系统风彻底重做）：
      * 全屏 rgba(0,0,0,0.7) 深色遮罩（窗口层叠 FLAG_BLUR_BEHIND 毛玻璃，隐约可见
-     * 桌面图标）→ 顶部居中【AI 角色圆形头像】→ 角色名 → 大标题「{应用名} 已被封印」
+     * 桌面图标）→ 顶部居中【AI 角色圆形头像】→ 角色名 → 大标题「{应用名} 已被锁定」
      * 纯白粗体 → 理由副题（浅灰）→ 纤细倒计时「剩余 X分Y秒 自动解锁」→ 暗红尝试
      * 次数（#FF453A）→ 毛玻璃胶囊【去哄哄】/ 深灰胶囊【返回主屏幕】/ 极弱下划线
      * 【强制解锁】（点击弹窗内二次确认卡）。全程无彩色（唯一暖色：#FF453A 警示红）。
@@ -673,9 +673,9 @@ public class LockOverlayService extends Service {
         name.setPadding(0, dp(12), 0, 0);
         box.addView(name);
 
-        // 主标题：{应用名} 已被封印（纯白粗体大字——机主规格）
+        // 主标题：{应用名} 已被锁定（纯白粗体大字——机主规格）
         TextView title = new TextView(ctx);
-        title.setText(what + " 已被封印");
+        title.setText(what + " 已被锁定");
         title.setTextSize(26);
         title.setTypeface(Typeface.DEFAULT_BOLD, Typeface.BOLD);
         title.setTextColor(Color.WHITE);
@@ -683,7 +683,7 @@ public class LockOverlayService extends Service {
         title.setPadding(dp(4), dp(16), dp(4), 0);
         box.addView(title);
 
-        // 副标题：封印理由（AI 按人设记忆/上下文生成，浅灰居中）
+        // 副标题：锁定理由（AI 按人设记忆/上下文生成；锁定期可被 AI 随时改写，浅灰居中）
         TextView subtitle = new TextView(ctx);
         subtitle.setText(reason);
         subtitle.setTextSize(14);
@@ -691,6 +691,7 @@ public class LockOverlayService extends Service {
         subtitle.setGravity(Gravity.CENTER);
         subtitle.setLineSpacing(dp(5), 1f);
         subtitle.setPadding(dp(10), dp(14), dp(10), 0);
+        subtitle.setTag("subtitle");
         box.addView(subtitle);
 
         // 倒计时：纤细无衬线「剩余 X分Y秒 自动解锁」（机主规格）
@@ -839,7 +840,7 @@ public class LockOverlayService extends Service {
         card.addView(ct);
 
         TextView cb = new TextView(ctx);
-        cb.setText(who + " 会知道你绕过了封印");
+        cb.setText(who + " 会知道你绕过了锁定");
         cb.setTextSize(13);
         cb.setTextColor(Color.parseColor("#99FFFFFF"));
         cb.setGravity(Gravity.CENTER);
@@ -995,6 +996,13 @@ public class LockOverlayService extends Service {
                         ? "这是你第 " + openAttempts + " 次想打开它了"
                         : "");
             }
+            // v2.4.4 锁定留言热更新：AI 按人设/记忆/尝试次数改写 message 后（updateLockMessage），
+            // 展示中的遮罩下一秒即同步新文案（不重建 View 树，防闪烁）。
+            TextView subtitle = (TextView) overlayView.findViewWithTag("subtitle");
+            if (subtitle != null && message != null && !message.isEmpty()
+                    && !message.equals(subtitle.getText().toString())) {
+                subtitle.setText(message);
+            }
         } catch (Throwable ignored) {
         }
     }
@@ -1148,6 +1156,36 @@ public class LockOverlayService extends Service {
         } catch (Throwable t) {
             // Android 12+ 后台启动前台服务限制等
             return t.getMessage() == null ? "start-failed" : t.getMessage();
+        }
+    }
+
+    /** v2.4.4 锁定期热更新留言（AI 按人设/记忆/尝试次数改写拦截窗文案）：
+     * 只改 message + 持久化（重启重梳/下次弹窗都用新文案），绝不重置尝试计数/解锁时间；
+     * 遮罩在展 → 下一秒 refreshOverlayTextsInner 同步；未展 → 重新预构建下一发。 */
+    public static String updateLockMessage(Context ctx, String msg) {
+        try {
+            if (msg == null) msg = "";
+            msg = msg.trim();
+            if (msg.isEmpty()) return "empty-message";
+            if (lockPkg == null || lockPkg.isEmpty()) return "no-active-lock";
+            message = msg;
+            // 持久化同步（BootReceiver 重梳后也是新文案）
+            try {
+                Context app = ctx != null ? ctx : appCtx;
+                if (app != null) {
+                    app.getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+                            .edit().putString(KEY_ACTIVE_MSG, msg).apply();
+                }
+            } catch (Throwable ignored) {
+            }
+            LockOverlayService svc = instance;
+            if (svc != null) {
+                svc.refreshOverlayTexts(); // 展示中的遮罩即时换文案
+                svc.prebuildOverlay();     // 未展示的下一发也用新文案
+            }
+            return null;
+        } catch (Throwable t) {
+            return t.getMessage() == null ? "update-failed" : t.getMessage();
         }
     }
 

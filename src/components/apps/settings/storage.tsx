@@ -297,11 +297,21 @@ export function StoragePage({ onBack }: { onBack: () => void }) {
       const r = await exportBackupToDownload({
         onProgress: (done, total) => setBackupProgress(`${done}/${total}`),
       });
-      setBackupMsgOk(true);
       const serverNote = r.serverSkipped ? '；服务端数据未包含（接口不可达）' : '';
-      setBackupMsg(
-        `已导出 ${r.records} 条记录（${r.stores} 个模块 · ${(r.bytes / 1024 / 1024).toFixed(2)} MB）—「${r.filename}」已开始下载${serverNote}`,
-      );
+      const base = `已导出 ${r.records} 条记录（${r.stores} 个模块 · ${(r.bytes / 1024 / 1024).toFixed(2)} MB）`;
+      // v2.4.4 如实按落盘通道提示（旧 APK 不再假装「已开始下载」）
+      if (r.savedVia === 'native') {
+        setBackupMsgOk(true);
+        setBackupMsg(`${base} —「${r.filename}」已存进手机 Download 目录（通知栏/文件管理器可见）${serverNote}`);
+      } else if (r.savedVia === 'browser') {
+        setBackupMsgOk(true);
+        setBackupMsg(`${base} —「${r.filename}」已开始下载${serverNote}`);
+      } else {
+        setBackupMsgOk(false);
+        setBackupMsg(
+          `${base}，但当前 APP 版本不支持在 APP 内保存文件——请检查系统通知栏有没有「${r.filename}」的下载；没有的话，用手机浏览器打开本页面再导出一次即可（或先到 设置 › APP 更新 安装新版本，之后就能直接存进 Download 目录）`,
+        );
+      }
       setLastBackupAt(readLastBackupTime());
     } catch (err) {
       setBackupMsgOk(false);

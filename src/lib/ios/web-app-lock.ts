@@ -301,7 +301,7 @@ export function pruneExpiredWebFrozen(): void {
 
 /**
  * openApp/switchToApp 拦截：被冻结返回 true（调用方中止打开），同时请求弹全屏锁定提示。
- * 与真机体验对齐：遮罩锁后点灰图标 → TA 的吃醋封印遮罩 → 这里弹 TA 的留言。
+ * 与真机体验对齐：遮罩锁后点灰图标 → TA 的吃醋锁定遮罩 → 这里弹 TA 的留言。
  */
 export function blockWebAppOpen(appId: AppId): boolean {
   if (!isWebAppFrozen(appId)) return false;
