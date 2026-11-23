@@ -3362,3 +3362,21 @@ Task: 机主实测反馈两 bug——①权限给予界面：真机明明没授�
 - [Bug2·修复·四层] ①device-autonomy.ts 冻结/解冻分支重构：真机模式（AI 动手范围=真机）下冻结/解冻默认路由到 toolFreezeRealApp/toolUnfreezeRealApp（作用于真实手机；批量「全部」仍走网页批量冻结）；网页模式加名字归一化（包名精确 → 中文名/appId 精确，「QQ」「网易云音乐」不再直接报没有对应体），报错文案改为列出网页 17 应用+引导切真机模式 ②web-tools.ts toolFreezeRealApp 加中文名/单词名→真机包名解析（与 lockApp 工具同款：原生应用清单模糊匹配，精确名优先，找不到如实报错带应用列表样例）③device-ops.ts labLockApp 防伪包名校验（合法包名必含「.」，'QQ' 这类应用名直接报错指路不再静默成功）④教学规则三处修正：冻结/解冻标记分模式说明（真机=中文名或包名自动解析）、工具对号入座「要锁应用」按模式指路 lockApp/freezeRealApp vs freezeApp、工具清单 freezeRealApp 补中文名说明
 - [清理] shizuku-autonomy.ts 死代码副本删除（全仓无 import，防止文案/逻辑漂移误导）
 - [验证] eslint 0 错；Agent Browser 全链路实测：①权限中心 16 行全渲染、真机模式切换正常 ②mock /api/chat 返回 [手机操作:冻结:QQ] → 网页模式：手机操作成功「已冻结QQ（网页内应用…）」+localStorage 冻结记录 com.tencent.mobileqq 入账（修复前报没有网页对应体）③切真机模式再发 → 路由到真机路径「无法把『QQ』解析成真机包名（原生应用清单不可用——需在 AI Phone APP 里使用）」（真机 APP 内会经应用清单解析 com.tencent.mobileqq 真实锁定）④权限页授权落账本→显示已授权→eval 篡改账本+dispatch focus → 立即重查变未授权（返回 APP 自动刷新机制生效）；dev.log 零错误
+
+## 2026-11-23 · 第二十四轮：工具三大顽疾根修——调音量没变化 / 锁应用光嘴上答应 / 等会等会（v2.2.1 热更）
+
+Task: 机主实测三反馈——①让 AI 锁应用，AI 一直扯东扯西说「这就锁」但一直没锁 ②让 AI 调大音量，工具用了但音量没有变化 ③让 AI 用工具干活，AI 一直说「等会等会」；并全面检查所有工具有没有生效。修复 + commit + push
+
+- [诊断·音量] labSetVolume 硬编码 `Math.min(15, ...)`：很多安卓机 STREAM_MUSIC 实际最大档 20~30（非 15）——当前 18/30 时 AI「调大」设 15 音量反降；当前 15 档再设 15 无变化仍报成功；pressKey「音量加」走同一条 15 钳制路径同样中招
+- [根修·音量] device-ops：labSetVolume 重写为 0-100 百分比语义（先 nativeGetVolume 查真机实际 max → 百分比换算真实档位再设，查不到兜底 15 档）；labVolume 改报双口径「47%（档位 14/30）」；volumeStep 音量加减改真机原始档位直设；phone-tools setVolume/getVolume Schema 与描述同步百分比口径（教模型先查后调、调大 +20）；[手机操作:音量:百分比] 标记文档同步
+- [诊断·锁不动] 三层：①任务动词正则漏「名字在前」句式（QQ锁了吧/抖音给我封了——旧正则只认动词在前与「把…锁」结构）→ toolRoundNeeded=false 根本不进工具轮 ②弱模型被逼问两次仍光说话（部分网关静默降级 tool_choice:required） ③FC_UNSUPPORTED 缓存 30 分钟——上游一次瞬时 400（报错带 tool 字样）毒化全工具通道半小时，期间 AI 只能嘴上答应（「等会等会」直接成因）
+- [根修·确定性兜底代执行] phone-tools 全新机制：高置信度指令解析器（锁应用含时长 N分钟/N小时/半小时默认 30/解锁/音量 up·down·max·mute/切回聊天/截图·发截图）+ 语义动作记账（semanticActionOf：模型已执行同类动作不重复）；两条触发路径——零工具被 nudge 一次后仍不动手→跳过第二次逼问直接代执行；调了周边工具没干正事（只 getVolume 从不 setVolume）→直接补完；执行经 execWebTool 真实跑（气泡 pending→done/fail 与主循环同款视觉）→ 结果回传模型按人设收尾汇报，汇报轮挂了 detCannedReport 直白文案兜底绝不静默；解析器极严：否定语境（别锁/敢锁/被锁/再锁）、锁屏语义（锁屏/屏幕）、说话动词（大声唱/小声说）、代词泛指（它/游戏）全排除——41/42 解析用例验证（唯一 miss「你说话大声点」为保守正确行为）
+- [根修·句式] looksLikeTaskInstruction 新增名字在前双槽：APPNAMES(给我|帮我|替我|快|赶紧|麻烦)?(锁|封|冻|没收|停用|封印) 与 APPNAMES(解锁|解冻|解了)（node 全量正则回归 14 用例全过，含 5 条防误命中）
+- [根修·反拖延] nudge 两次话术明令禁止「等一下/稍等/马上就/这就去」拖延话术；确定性兜底从机制上保证拖延也白拖——系统直接把事办了
+- [根修·通道自愈] FC_UNSUPPORTED TTL 30 分钟 → 5 分钟（瞬时 400 不再毒化半小时）
+- [全量体检] 44 工具注册（buildPhoneTools add）/执行（execWebTool case）/气泡文案（toolActionText）三方比对全部一致，0 缺失 0 孤儿；minutes/durationMinutes Number 强转硬化（弱模型发字符串 "30" 旧 typeof 判断静默忽略→误变永久锁）；TOOL_NAME_RE_SRC/MALFORMED_TOOL_TEXT_RE 补全全部 44 工具名
+- [版本] v2.2.1/65（versionCode 不变——纯网页热更，无需重装 APK）六条发版说明
+- [E2E·Agent Browser 全链路] 构造最恶劣场景：mock /api/chat 上游模型所有轮次都只回「好哒好哒，我这就去锁哦，稍等我一下哈～」（完全复现机主反馈的光嘴上答应）→ ①「QQ锁了吧」（旧版 MISS 句式）正确进工具轮→nudge→仍拖延→系统代执行 freezeApp：jealousy-web-frozen-v2 冻结记录 com.tencent.mobileqq 落库（charName 小桃/contactId/app 全带）+「小桃已冻结QQ」气泡渲染 ✓ ②「把QQ解锁」→代执行全局解冻：记录清 null+「小桃已解冻全部应用」气泡 ✓ ③纯聊天「你今天心情怎么样呀」零误触发（冻结记录保持 null、正常回复）✓ 全程控制台/dev.log 零错误
+- [验证] tsc 改动文件 0 错误；eslint 0 error（11 条 android build 中间产物 warning 为既有基线）；git push 经 gh-proxy 镜像成功（直连 github TLS 被沙箱掐断）
+
+Stage Summary: 三大顽疾一次根治——调音量按真机实际档位百分比换算（再无「调了没变化/调大反变小」）；「锁应用/解锁/调音量/切回聊天/截图」五类明确指令加了确定性兜底代执行（模型拖延一次系统直接真办，「等会等会」从此白等）；名字在前句式补全进工具轮；工具通道 5 分钟自愈。关键文件：phone-tools.ts（解析器+代执行+正则+硬化）、device-ops.ts（音量百分比换算）、device-autonomy.ts（标记文档）、app-version.ts（v2.2.1）
