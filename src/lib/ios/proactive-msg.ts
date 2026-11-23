@@ -1110,6 +1110,25 @@ export async function deliverProactiveMsg(
   if (texts.length === 0 && !image) return;
   const cid = contact.id;
   const sessionKey = app === 'wx' ? `wx:${cid}` : app === 'qq' ? `qq:${cid}` : `sms:c:${cid}`;
+  // v2.10 机主定调「吃醋主动发信息的多条消息回复，根据我选择的回复条数」：
+  // 主动消息与普通聊天同口径——按该会话设置的回复条数把长文本拆成多条连发
+  // （选了 1 条 = 整段一条；选了 N 条 = 按句切分，超出 N 条时尾部并入最后一条，
+  // 绝不丢内容；拆分失败静默用原文，主动消息照常送达）。
+  let finalTexts = texts;
+  try {
+    const { getReplyCount, splitReplySegments } = await import('@/lib/reply-count');
+    const rc = getReplyCount(sessionKey);
+    if (rc > 1) {
+      const parts = texts.flatMap((t) => splitReplySegments(t, true)).filter((t) => t.trim());
+      if (parts.length > rc) {
+        finalTexts = [...parts.slice(0, rc - 1), parts.slice(rc - 1).join('')];
+      } else if (parts.length > 0) {
+        finalTexts = parts;
+      }
+    }
+  } catch {
+    /* 拆分失败：整段照发 */
+  }
   const notifyApp = app === 'wx' ? ('wechat' as const) : app === 'qq' ? ('qq' as const) : ('chat' as const);
   const avatarApp = app as AccountApp;
   const now = Date.now();
@@ -1117,7 +1136,7 @@ export async function deliverProactiveMsg(
     app === 'sms'
       ? { id: genId(), role: 'assistant' as const, content: t, time: now + i * 50, kind: 'text' as const }
       : { id: genId(), role: 'peer' as const, content: t, time: now + i * 50, kind: 'text' as const };
-  const baseMsgs = texts.map(mkMsg);
+  const baseMsgs = finalTexts.map(mkMsg);
   const msgs: Array<(typeof baseMsgs)[number] | { id: string; role: 'assistant' | 'peer'; content: string; time: number; kind: 'image'; img: { src: string; desc: string } }> = [...baseMsgs];
   if (image && image.src.startsWith('data:image/')) {
     const imgMsg = {

@@ -961,6 +961,53 @@ export async function toolFreezeRealApp(
   };
 }
 
+/**
+ * 真机模式：截取机主真实手机当前的屏幕，作为一张图片消息直接发进当前聊天
+ * （v2.10 机主实测「让 AI 把截图发给我，他没发」——AI 看得到屏幕却发不出来，
+ * 这里补上「发图进聊天」的闭环：无障碍静默截屏 → kind:'image' 消息落当前会话
+ * → 广播刷新，机主在聊天里立刻看到截图；caption 可选附一句说明文字）。
+ */
+export async function toolSendScreenshot(caption?: string): Promise<WebToolResult> {
+  const { labScreencap } = await import('./device-ops');
+  const shot = await labScreencap();
+  if (!shot.ok || !shot.image) {
+    return { ok: false, text: shot.text || '截屏失败（无法把截图发进聊天）' };
+  }
+  const ctx = getToolSessionContext();
+  if (!ctx.sessionKey) {
+    return { ok: true, text: '截屏成功，但当前不在聊天会话里，截图没法作为消息发出（让机主先跟你聊天时再要截图）' };
+  }
+  try {
+    const { kvKeyForSession } = await import('./tool-status-bubble');
+    const key = kvKeyForSession(ctx.sessionKey);
+    const existing = kvGet<unknown[]>(key);
+    const list = Array.isArray(existing) ? existing : [];
+    const role: 'assistant' | 'peer' =
+      ctx.sessionKey.startsWith('wx:') || ctx.sessionKey.startsWith('qq:') ? 'peer' : 'assistant';
+    const msg = {
+      id: genId(),
+      role,
+      content: '',
+      time: Date.now(),
+      kind: 'image' as const,
+      img: { src: shot.image, desc: (caption ?? '').trim() },
+    };
+    kvSet(key, [...list, msg].slice(-200));
+    // 广播消息变更（三端聊天页监听 'tool-status-msgs' 事件增量刷新，图片消息立即可见）
+    try {
+      window.dispatchEvent(
+        new CustomEvent('tool-status-msgs', { detail: { sessionKey: ctx.sessionKey } }),
+      );
+    } catch {
+      /* 广播失败不影响落库 */
+    }
+    const capText = (caption ?? '').trim();
+    return { ok: true, text: `已把手机屏幕截图发进聊天${capText ? `（附言：${capText.slice(0, 40)}）` : ''}，机主现在能在聊天里看到这张图了` };
+  } catch {
+    return { ok: false, text: '截图成功但写进聊天失败（存储异常，可让机主稍后再试）' };
+  }
+}
+
 /** 真机模式：解锁真实手机里的应用（v2.0.0：撤下全屏遮罩锁；解锁是全局的，
  *  不再按 pkg unsuspend）。同步清 JS 侧锁定记录 + AI 网页冻结态（网页图标恢复）。 */
 export async function toolUnfreezeRealApp(packageName?: string): Promise<WebToolResult> {

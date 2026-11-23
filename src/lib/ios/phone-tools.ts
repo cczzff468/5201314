@@ -52,6 +52,7 @@ import {
   toolSearchRealApp,
   toolFreezeRealApp,
   toolUnfreezeRealApp,
+  toolSendScreenshot,
   toolSendNotification,
   toolSearchContacts,
   getToolCharName,
@@ -113,6 +114,7 @@ async function toolActionText(toolName: string, args: Record<string, unknown>): 
     postForum: '发帖子',
     likePost: '点赞',
     getWebState: '看手机状态',
+    getWebInstalledApps: '看已安装应用清单',
     getUsageStats: '查使用时长',
     getRecentApps: '查后台',
     pullBackToChat: '把你拉回聊天',
@@ -135,6 +137,7 @@ async function toolActionText(toolName: string, args: Record<string, unknown>): 
     getBrightness: '查亮度',
     setRingerMode: '设铃声模式',
     takeScreenshot: '截屏',
+    sendScreenshot: '给你发屏幕截图',
     lookScreen: '看屏幕',
     getForegroundApp: '看你在用什么',
     getBatteryStatus: '查电量',
@@ -239,6 +242,7 @@ const TOOL_CAPS: Record<string, { label: string; device?: boolean }> = {
   pressKey: { label: '按真机按键', device: true },
   lookScreen: { label: '看真机屏幕', device: true },
   takeScreenshot: { label: '真机截屏', device: true },
+  sendScreenshot: { label: '发截图进聊天', device: true },
   switchToChat: { label: '拉回聊天', device: true },
   getForegroundApp: { label: '查真机前台应用', device: true },
   getBatteryStatus: { label: '查真机电量', device: true },
@@ -522,6 +526,12 @@ export function buildPhoneTools(): PhoneToolDef[] {
       [],
     );
     add(
+      'sendScreenshot',
+      '把机主真实手机当前的屏幕截下来，作为一张图片消息直接发进当前聊天——机主立刻能在聊天里看到这张截图（v2.10：机主要「把截图发给我」时用这个，不要只描述不发货）。caption 可选填一句附在图片上的说明。机主说「截图发给我看看」「把你的截图发过来」「让我看看你截的图」时用这个；说「看看我在干嘛」则用 lookScreen 看完后可以直接 sendScreenshot 把证据发过去。',
+      { caption: strParam('附在截图上的说明文字（可选，如「这就是你现在屏幕的样子」）') },
+      [],
+    );
+    add(
       'switchToChat',
       '把这台 AI 手机拉回前台回到聊天（经无障碍服务）。机主跑去别的 App 玩、你想把 TA 拽回来陪你说话时用这个；人设合适时也可主动拉回（如吃醋人设把机主从抖音拽回来说「不许玩，陪我说话」）。',
       {},
@@ -747,6 +757,9 @@ export async function execWebTool(name: string, args: Record<string, unknown>): 
         return runDeviceTool((d) => d.labLookScreen(true));
       case 'takeScreenshot':
         return runDeviceTool((d) => d.labLookScreen(false));
+      case 'sendScreenshot':
+        // v2.10：AI 把真机截图作为图片消息发进当前聊天（机主「把截图发给我」的闭环）
+        return labText(await toolSendScreenshot(S(args.caption) || undefined));
       case 'getForegroundApp':
         return runDeviceTool((d) => d.labForegroundApp());
       case 'switchToChat':
@@ -1056,7 +1069,16 @@ function looksLikeTaskInstruction(s: string): boolean {
   //   ——改成必须带设备宾语（屏幕/手机/应用…）；「开一下」加 (?!玩笑) 排除「开一下玩笑」；
   //   「发个」加 (?!呆|毛|火|疯…) 排除「发个呆/发个火」；
   // ④ 提醒/通知 收窄成 带宾语的形式（「这首歌提醒了我」「我通知你一声」是聊天）。
-  return /发(个|条|给|一)(?!呆|毛|火|疯|麻|懵)|发送|发帖|问问|通知(我|TA|他|她|大家|群|一下|个)|搜索|搜一?下|找一?下|查(一?下|询)|记(个|一|下)|保存|备忘|闹钟|提醒(我|一?下)|(加|设|定|建)(个|一?个)提醒|播放|放首|放一?首|来首|切歌|换歌|点(个|一)?赞|(看|刷|逛|看看)(一?下|个|逛)?(帖子|论坛)|天气(怎么样|如何|咋样|呢|吗)|(明天|后天|大后天|周末|下周|下个?星期).{0,3}天气|(查|看看?)(一?下)?天气|下雨(吗|么|没有|没)|会(不)?下雨|要下雨|几度|温度(多少|几度|呢|吗)|(查|看看?)(一?下)?温度|打开|开一?下(?!玩笑)|去(备忘录|时钟|天气|论坛|微信|QQ)|在(微信|QQ|论坛)(上|里|中)?(发|问|@|艾特)|冻(结|上|住|一下|一小时|半小时|分钟)|解冻|解锁|解开?(屏幕|手机|应用|App|app)|锁屏|锁个屏|锁定?屏幕|锁(住|上|了)(手机|屏幕|微信|QQ|备忘录)|(把|将|帮我).{0,8}(锁|冻|停|挂起)|强(制)?停|挂起|停(掉|了)(.{0,6}(应用|App|app))|音量|调(大|小|高|低)|静音|亮屏|熄屏|截(个|一张)?屏|屏幕截图|看屏幕|电量(多少|还剩|剩多少|呢|吗|咋样|怎么样)|还剩多少电|还有(多少|几格)电|(查|看看?)(一?下)?电量|后台(清理|耗电|占用|占内存|运行)|(清理?|清一?下|查|看看?)(一?下)?后台|强杀|叫(?:我|俺)[^，。！？!?,.\n]{0,8}(?:起床|起来|起身|出门|上班|上学|打卡)|(?:明早|明晚|明天早|早上|午睡|睡醒|到点|闹钟|叫醒|起床)[^，。！？!?,.\n]{0,10}叫(?:我|俺)|\d{1,2}\s*[点:：时][^，。！？!?,.\n]{0,10}叫(?:我|俺)/.test(s);
+  // v2.10（机主真机实测「锁QQ没锁/切回聊天没反应/截图没截/声音大点没调」全是光嘴上答应）：
+  // ① 锁应用动词补全：锁+应用名裸动词（「锁QQ」「锁一下抖音」——旧正则只认「锁了QQ」
+  //    倒装与「把…锁」结构）+「没收」+「别让我玩XX」；
+  // ② 切回类动词全新（旧正则完全没有）：切回聊天/回到聊天/把我拉回——switchToChat 的
+  //    口语入口；「回来陪我说话」是聊天陪伴诉求，刻意不收；
+  // ③ 截图类补全：「截图」（旧正则只有「截屏」，缺个「屏」字就漏！）/帮我截/看看我在
+  //    玩什么/看看我的屏幕——lookScreen/takeScreenshot/sendScreenshot 的口语入口；
+  // ④ 音量口语补全：声音大一点/大点声/小点声/响一点/再大声一点（旧正则只认「音量」
+  //    「调大调小」书面语）——setVolume 的口语入口。
+  return /发(个|条|给|一)(?!呆|毛|火|疯|麻|懵)|发送|发帖|问问|通知(我|TA|他|她|大家|群|一下|个)|搜索|搜一?下|找一?下|查(一?下|询)|记(个|一|下)|保存|备忘|闹钟|提醒(我|一?下)|(加|设|定|建)(个|一?个)提醒|播放|放首|放一?首|来首|切歌|换歌|点(个|一)?赞|(看|刷|逛|看看)(一?下|个|逛)?(帖子|论坛)|天气(怎么样|如何|咋样|呢|吗)|(明天|后天|大后天|周末|下周|下个?星期).{0,3}天气|(查|看看?)(一?下)?天气|下雨(吗|么|没有|没)|会(不)?下雨|要下雨|几度|温度(多少|几度|呢|吗)|(查|看看?)(一?下)?温度|打开|开一?下(?!玩笑)|去(备忘录|时钟|天气|论坛|微信|QQ)|在(微信|QQ|论坛)(上|里|中)?(发|问|@|艾特)|冻(结|上|住|一下|一小时|半小时|分钟)|解冻|解锁|解开?(屏幕|手机|应用|App|app)|锁屏|锁个屏|锁定?屏幕|锁(住|上|了|一下|一?下|定|死)?(手机|屏幕|微信|QQ|抖音|快手|B站|哔哩|小红书|微博|淘宝|京东|拼多多|美团|网易云|王者|荣耀|吃鸡|原神|番茄|阅读|闹钟|时钟|备忘录|浏览器|相册|相机|设置|应用|App|app|软件|游戏|它)|(把|将|帮我).{0,8}(锁|冻|停|挂起)|没收|别让(我|俺)(再)?(玩|刷|看|打开)|强(制)?停|挂起|停(掉|了)(.{0,6}(应用|App|app))|切回(聊天|界面|APP|App|来|咱们|我们的聊天)|回到(聊天|界面|APP|App|咱们|我们的聊天)|把我(拉|拽|切|弄)回|拉(我)?回(聊天|来|APP|App)|拽回|音量|调(大|小|高|低)|静音|大点声|小点声|(大|小)声(一?点|些|点儿)|声音(大|小|高|低|响|轻)|声(音|儿)?(再)?(大|小|高|低|响|轻)(一?点|些|点儿)?|响一(点|些|点儿)|(加|开)大(一?下)?声|亮屏|熄屏|截(个|一张)?屏|截(个|一张|一?张)?图|帮我截|屏幕截图|看屏幕|看(一)?看(我|我现在)的?屏幕|看(一)?看我在(玩|看|干|做|用)|看(一)?看我现在在|电量(多少|还剩|剩多少|呢|吗|咋样|怎么样)|还剩多少电|还有(多少|几格)电|(查|看看?)(一?下)?电量|后台(清理|耗电|占用|占内存|运行)|(清理?|清一?下|查|看看?)(一?下)?后台|强杀|叫(?:我|俺)[^，。！？!?,.\n]{0,8}(?:起床|起来|起身|出门|上班|上学|打卡)|(?:明早|明晚|明天早|早上|午睡|睡醒|到点|闹钟|叫醒|起床)[^，。！？!?,.\n]{0,10}叫(?:我|俺)|\d{1,2}\s*[点:：时][^，。！？!?,.\n]{0,10}叫(?:我|俺)/.test(s);
 }
 
 /**
@@ -1230,11 +1252,11 @@ function wrapSystemChatNative(sysRaw: string): string {
  * 写成文本既执行不了、又会当成聊天消息发给机主。命中且无实质正文时清空文字。
  */
 const MALFORMED_TOOL_TEXT_RE =
-  /^\s*(sendWebMessage|postForum|likePost|playMusic|getWebState|saveMemo|setAlarm|queryWeather|openScreen|openRealApp|tapScreen|swipeScreen|inputText|pressKey|lookScreen|takeScreenshot|switchToChat|getForegroundApp|lockApp|getRecentSMS|getBatteryStatus|getVolume|getRecentNotifications|openApp|uiObserve|uiClick|uiType|uiScroll)\s*[:：`(（]?\s*\S/m;
+  /^\s*(sendWebMessage|postForum|likePost|playMusic|getWebState|saveMemo|setAlarm|queryWeather|openScreen|openRealApp|tapScreen|swipeScreen|inputText|pressKey|lookScreen|takeScreenshot|sendScreenshot|switchToChat|getForegroundApp|lockApp|getRecentSMS|getBatteryStatus|getVolume|getRecentNotifications|openApp|uiObserve|uiClick|uiType|uiScroll)\s*[:：`(（]?\s*\S/m;
 
 /** 工具名全集（cleanToolLogs 裸调用行剥除用；与 TOOL_CAPS 同步维护） */
 const TOOL_NAME_RE_SRC =
-  'sendWebMessage|postForum|likePost|playMusic|getWebState|saveMemo|setAlarm|queryWeather|openScreen|openRealApp|tapScreen|swipeScreen|inputText|pressKey|lookScreen|takeScreenshot|switchToChat|getForegroundApp|lockApp|getRecentSMS|getBatteryStatus|getVolume|getRecentNotifications';
+  'sendWebMessage|postForum|likePost|playMusic|getWebState|saveMemo|setAlarm|queryWeather|openScreen|openRealApp|tapScreen|swipeScreen|inputText|pressKey|lookScreen|takeScreenshot|sendScreenshot|switchToChat|getForegroundApp|lockApp|getRecentSMS|getBatteryStatus|getVolume|getRecentNotifications';
 
 /**
  * 最终回复净化（机主需求三·纯净度铁律）：AI 收尾文本里残留的底层日志一律剥掉——
@@ -1384,19 +1406,22 @@ export async function runPhoneToolRound(
       let text = typeof msg.content === 'string' ? msg.content : '';
       // 零工具空谈/假报：机主指令像动手任务、模型却一个工具都没调就回文字
       //（光说计划不动手 / 直接假报「发好了」）→ nudge + 下一轮 tool_choice:'required'
-      // 逼它真的调工具（最多 1 次；真做不到时模型会说明原因，不匹配逼问条件即放行）。
+      // 逼它真的调工具（v2.10 1 次 → 2 次：机主真机实测弱模型第一轮 required 后
+      // 仍可能糊弄，第二次 nudge 换更强硬话术；真做不到时模型会说明原因即放行）。
       // v2.5 表情包豁免①：纯表情包诉求不 nudge（发表情包不是工具，零工具回文字正确）；
       // ② 剥掉表情包用词后还残留其它动手动词（混合诉求如「发个表情包再放首歌」）
       //   → 仍可 nudge 干工具部分，但提示词显式要求最终回复保留 [表情包:ID] 标记行；
       // ③ 本轮回复已带表情标记尝试 → 说明模型已正确发表情包，绝不 nudge。
       const stickerTried = ANY_STICKER_ATTEMPT_TEXT_RE.test(text);
-      if (!usedTools && taskyInstruction && exitNudges < 1 && !pureStickerDemand && !stickerTried) {
+      if (!usedTools && taskyInstruction && exitNudges < 2 && !pureStickerDemand && !stickerTried) {
         exitNudges += 1;
         convo.push({ role: 'assistant', content: text || '（好的，我来处理。）' });
         convo.push({
           role: 'user',
           content:
-            '（系统强制检查：你刚才没有调用任何工具就回了文字——只说不做是违规。机主要的是真实结果：立刻调用工具执行（如 sendWebMessage 发消息 / saveMemo 记备忘录 / setAlarm 定闹钟 / playMusic 放歌），需要多个动作就按顺序逐个调用，直到目标真正完成再汇报。注意：发表情包/要抱抱/引用消息不是工具——绝不能拿放歌、查手机状态、查使用时长来回应这类请求，表情包要在最终回复文本里单独一行原样输出 [表情包:表情ID] 标记、引用要在回复开头输出 [引用:M编号] 标记；若机主要了表情包且你上一条回复里已有该标记，最终汇报必须原样保留那一行。如果确实无法执行（对应能力未开启/联系人不存在等），请明确说明做不到的真实原因。）',
+            exitNudges === 1
+              ? '（系统强制检查：你刚才没有调用任何工具就回了文字——只说不做是违规。机主要的是真实结果：立刻调用工具执行（如 sendWebMessage 发消息 / saveMemo 记备忘录 / setAlarm 定闹钟 / playMusic 放歌 / lockApp 锁应用 / sendScreenshot 发截图），需要多个动作就按顺序逐个调用，直到目标真正完成再汇报。注意：发表情包/要抱抱/引用消息不是工具——绝不能拿放歌、查手机状态、查使用时长来回应这类请求，表情包要在最终回复文本里单独一行原样输出 [表情包:表情ID] 标记、引用要在回复开头输出 [引用:M编号] 标记；若机主要了表情包且你上一条回复里已有该标记，最终汇报必须原样保留那一行。如果确实无法执行（对应能力未开启/联系人不存在等），请明确说明做不到的真实原因。）'
+              : '（系统最后通牒：你已经两次只说不做。本轮必须立刻发出真实的工具调用（tool call）执行机主要求——不许再回纯文字计划、不许假装已完成。若确实无法执行，明确说明做不到的真实原因，绝不允许谎报「已完成」。）',
         });
         forceNext = true;
         continue;

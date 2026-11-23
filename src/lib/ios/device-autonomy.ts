@@ -209,6 +209,7 @@ function buildWebMarkerRules(): string[] {
       '[手机操作:按键:返回/主页/多任务/通知/锁屏/音量加/音量减]（无障碍全局动作）',
       '[手机操作:真机打开:包名]（拉起真实手机里安装的 App，如 [手机操作:真机打开:com.tencent.mm]）',
       '[手机操作:看屏幕:]（无障碍静默截屏看真实屏幕内容，用于定位/核对）',
+      '[手机操作:截图:] / [手机操作:发截图:附言]（截图=简述当前屏幕；发截图=把屏幕截图作为图片消息直接发进当前聊天，机主要「把截图发给我」时用这个，附言可选）',
       '[手机操作:锁定:包名(:分钟数)] 或 [手机操作:真机冻结:包名(:分钟数)]（锁定真机应用：全屏遮罩封印，TA 一打开就被质问文案盖住只能回桌面；分钟数可选=AI 按人设决定的锁定时长，如 [手机操作:锁定:com.android.deskclock:15]，不填=锁到哄好）',
       '[手机操作:解锁:] / [手机操作:真机解冻:包名]（解锁真机应用，撤下遮罩）',
       '[手机操作:搜真机应用:关键词]（搜索真机已安装应用，如 [手机操作:搜真机应用:闹钟] → com.android.deskclock）',
@@ -563,10 +564,18 @@ export async function executePhoneOp(argRaw: string): Promise<{ ok: boolean; tex
     }
     case '看屏幕':
     case '读屏幕':
-    case '截屏': {
+    case '截屏':
+    case '截图': {
       if (getAiActionTarget() !== 'device') return RETIRED_WEB_ONLY;
-      // 「看屏幕/读屏幕」= 截屏 + VLM 详细描述；「截屏」= 简述（信息量对人/AI 都够）
-      return runDevice(async (d) => d.labLookScreen(cmd !== '截屏'));
+      // 「看屏幕/读屏幕」= 截屏 + VLM 详细描述；「截屏/截图」= 简述（信息量对人/AI 都够）
+      return runDevice(async (d) => d.labLookScreen(cmd === '看屏幕' || cmd === '读屏幕'));
+    }
+    case '发截图': {
+      // v2.10：[手机操作:发截图:附言] —— AI 把真机截图作为图片消息发进当前聊天（sendScreenshot 的流式兑底通道）
+      if (getAiActionTarget() !== 'device') return RETIRED_WEB_ONLY;
+      const { toolSendScreenshot } = await import('./web-tools');
+      const r = await toolSendScreenshot(p[0] || undefined);
+      return { ok: r.ok, text: r.text.replace(/^【[^】]+】/, '') };
     }
     case '前台': {
       if (getAiActionTarget() !== 'device') return RETIRED_WEB_ONLY;
@@ -633,7 +642,7 @@ async function runDevice(
  */
 const OP_GAP_MS = 1200;
 const UI_SETTLE_MS = 2500;
-const UI_TOUCH_CMDS = ['打开', '播歌', '冻结', '解冻', '拉回', '真机打开', '点按', '点文字', '滑动', '输入', '按键', '看屏幕', '读屏幕', '截屏', '锁定', '解锁', '真机冻结', '真机解冻'];
+const UI_TOUCH_CMDS = ['打开', '播歌', '冻结', '解冻', '拉回', '真机打开', '点按', '点文字', '滑动', '输入', '按键', '看屏幕', '读屏幕', '截屏', '截图', '发截图', '锁定', '解锁', '真机冻结', '真机解冻'];
 
 let opChain: Promise<unknown> = Promise.resolve();
 

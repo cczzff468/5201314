@@ -52,8 +52,8 @@ interface ToolStatusMsg {
   sys?: boolean;
 }
 
-/** sessionKey → kv 存储键 的映射（与三端 loadMsgs/saveMsgs 同款） */
-function kvKeyForSession(sessionKey: string): string {
+/** sessionKey → kv 存储键 的映射（与三端 loadMsgs/saveMsgs 同款；v2.2.0 导出：sendScreenshot 工具发图进会话复用） */
+export function kvKeyForSession(sessionKey: string): string {
   if (sessionKey === 'assistant') return 'ios-chat-assistant-msgs';
   if (sessionKey.startsWith('wx:')) return `wx-chat-msgs:${sessionKey.slice(3)}`;
   if (sessionKey.startsWith('qq:')) return `qq-chat-msgs:${sessionKey.slice(3)}`;
@@ -168,6 +168,7 @@ export function toolStatusLabel(
     getTodoList: '看待办',
     addTodo: '加待办',
     takeScreenshot: '截屏',
+    sendScreenshot: '给你发屏幕截图',
     lookScreen: '看屏幕',
     getForegroundApp: '看你在用什么',
     getBatteryStatus: '查电量',
