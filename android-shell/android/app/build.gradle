@@ -11,8 +11,8 @@ android {
         applicationId "com.z.aiphone"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 66          // v2.2.5 拦截窗重做（先弹窗再回桌面 BAL 豁免 + 美化 + 返回主屏幕/去哄哄/强制解锁）+ switchToChat 后台真拉回 + 轮询提速
-        versionName "2.2.5"     // v2.2.5：拦截窗美化提速三钮 + 强制解锁 AI 感知 + switchToChat 根修 + 重复锁定去重
+        versionCode 67          // v2.3.0 原生系统级工具 13 件（闹钟/日历/倒计时/电话/短信/通讯录/手电筒/定位/系统应用直达/音量流）+ 锁到期硬闸
+        versionName "2.3.0"     // v2.3.0：AI 系统管家工具组 + 到期仍弹窗根修 + 拦截窗动画 + 轮询 700ms
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.

@@ -39,6 +39,9 @@ function decide(messages: Array<{ role: string; content: unknown }>): { text?: s
     if (prompt.includes('重复锁定QQ') || prompt.includes('锁QQ两次')) {
       return { text: '锁好啦，QQ 已经在我的封印名单里了～' };
     }
+    if (prompt.includes('定个闹钟') || prompt.includes('明早七点叫我')) {
+      return { text: '闹钟定好啦，明早七点准时叫你起床～' };
+    }
     return { text: '都办好了～' };
   }
 
@@ -53,6 +56,18 @@ function decide(messages: Array<{ role: string; content: unknown }>): { text?: s
           durationMin: 30,
         }),
       ],
+    };
+  }
+  if (prompt.includes('裸JSON') || prompt.includes('裸json')) {
+    // v2.3.0 F-11 E2E：模型把工具调用写成裸 JSON 文本（机主实测「偶尔显示
+    // {"name": "getForegroundApp", "arguments": {}} 没反应」）——不回 tool_calls，
+    // 只回 text：验证系统提取裸 JSON 真执行而不是把 JSON 发进聊天
+    return { text: '{"name": "switchToChat", "arguments": {}}' };
+  }
+  if (prompt.includes('定个闹钟') || prompt.includes('明早七点叫我')) {
+    // v2.3.0 新工具 E2E：setRealAlarm 系统闹钟
+    return {
+      calls: [toolCall('call_alarm_1', 'setRealAlarm', { hour: 7, minute: 0, label: '起床啦' })],
     };
   }
   if (prompt.includes('重复锁定QQ') || prompt.includes('锁QQ两次')) {

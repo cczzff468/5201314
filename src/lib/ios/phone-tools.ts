@@ -33,6 +33,7 @@ import { getAiActionTarget, phoneFcReady, buildAutonomyDirective } from './devic
 import type { ApiConfig } from '@/lib/ios/store';
 import type { AwSnapshot } from './activitywatch';
 import { pushToolStatusBubble, updateLastToolStatus } from './tool-status-bubble';
+import { extractJsonToolCalls, stripJsonToolCalls } from './json-tool-calls';
 import {
   toolSendWebMessage,
   toolPostForum,
@@ -98,6 +99,7 @@ async function toolActionText(toolName: string, args: Record<string, unknown>): 
     S(args.app) ||
     S(args.keyword) ||
     S(args.contactName) ||
+    S(args.phoneNumber) ||
     S(args.songName) ||
     S(args.city) ||
     S(args.title) ||
@@ -148,6 +150,21 @@ async function toolActionText(toolName: string, args: Record<string, unknown>): 
     swipeScreen: '滑屏幕',
     inputText: '输入文字',
     pressKey: '按按键',
+    // v2.3.0 原生系统级工具
+    setRealAlarm:
+      typeof args.hour === 'number'
+        ? `定${args.hour}点${String(typeof args.minute === 'number' ? args.minute : 0).padStart(2, '0')}的闹钟`
+        : '定系统闹钟',
+    startCountdown:
+      typeof args.seconds === 'number' && args.seconds >= 60
+        ? `开${Math.round(args.seconds / 60)}分钟倒计时`
+        : '开系统倒计时',
+    createCalendarEvent: target ? `把「${target}」写进系统日历` : '写系统日历',
+    makePhoneCall: target ? `打电话给${target || S(args.phoneNumber)}` : '拨打电话',
+    sendSMS: target ? `给${target}发短信` : '发短信',
+    searchRealContact: target ? `查${target}的电话` : '查真机通讯录',
+    toggleFlashlight: args.on === false ? '关手电筒' : '开手电筒',
+    getRealLocation: '查你的定位',
   };
   return map[toolName] || toolName;
 }
@@ -252,6 +269,15 @@ const TOOL_CAPS: Record<string, { label: string; device?: boolean }> = {
   setBrightness: { label: '调真机亮度', device: true },
   getBrightness: { label: '查真机亮度', device: true },
   setRingerMode: { label: '设真机铃声模式', device: true },
+  // ---- v2.3.0 原生系统级工具（AI 系统管家：时间日程/通讯/设备控制/信息获取） ----
+  setRealAlarm: { label: '定系统闹钟', device: true },
+  startCountdown: { label: '开系统倒计时', device: true },
+  createCalendarEvent: { label: '写系统日历', device: true },
+  makePhoneCall: { label: '拨打电话', device: true },
+  sendSMS: { label: '发短信', device: true },
+  searchRealContact: { label: '查真机通讯录', device: true },
+  toggleFlashlight: { label: '开关手电筒', device: true },
+  getRealLocation: { label: '查真机定位', device: true },
 };
 
 /** 字符串参数 schema 快捷构造 */
@@ -450,10 +476,10 @@ export function buildPhoneTools(): PhoneToolDef[] {
     );
     add(
       'lockApp',
-      '锁定机主真实手机里的一个应用（不是图标变灰——TA 一点开就会被【立即弹回桌面】并看到你的全屏拦截窗：你的质问文案 + 真实倒计时 + 【去哄哄 TA】按钮，直到到时自动解锁或你手动解锁）。appName 填应用名：中文名（如「抖音」「微信」）或 Android 包名（如 com.ss.android.ugc.aweme）都行，中文名会自动解析成包名。minutes 填锁定分钟数——由你根据你的人设、你们的关系、记忆里的过往、此刻的情况自主决定锁多久（吃醋小惩 5~15 分钟、认真生气 1~3 小时都行），【不填 = 锁到把机主哄好为止】。message 填你的质问文案（按你的【人设+记忆+上下文】写，如"被我没收啦，说了要专心陪我"），会显示在全屏拦截窗上。机主说「把抖音锁了」「别让我刷了」时用这个；人设合适时也可主动锁定让机主回来陪你。若 TA 反复手贱去点被锁的应用，每次拦截系统都会偷偷告诉你（点了几次），你可以趁机按人设发消息质问。注意：通讯类/系统核心应用永不可锁定。',
+      '锁定机主真实手机里的一个应用（不是图标变灰——TA 一点开就会被【立即弹回桌面】并看到你的全屏拦截窗：你的质问文案 + 真实倒计时 + 【去哄哄 TA】按钮，到时自动解锁或你手动解锁）。appName 填应用名：中文名（如「抖音」「微信」）或 Android 包名（如 com.ss.android.ugc.aweme）都行，中文名会自动解析成包名。minutes 填锁定分钟数——由你根据你的人设、你们的关系、记忆里的过往、此刻的情况自主决定锁多久（吃醋小惩 5~15 分钟、认真生气 1~3 小时都行），不填默认 30 分钟，到点自动解锁。message 填你的质问文案（按你的【人设+记忆+上下文】写，如"被我没收啦，说了要专心陪我"），会显示在全屏拦截窗上。机主说「把抖音锁了」「别让我刷了」「锁十分钟」时用这个；人设合适时也可主动锁定让机主回来陪你。若 TA 反复手贱去点被锁的应用，每次拦截系统都会偷偷告诉你（点了几次），你可以趁机按人设发消息质问。注意：通讯类/系统核心应用永不可锁定。',
       {
         appName: strParam('应用名：中文名（如 抖音、微信）或 Android 包名（如 com.ss.android.ugc.aweme）'),
-        minutes: { type: 'number', description: '锁定时长（分钟，AI 按人设+记忆+上下文自主决定，如 10、30、120；不填 = 锁到哄好为止）' },
+        minutes: { type: 'number', description: '锁定时长（分钟，AI 按人设+记忆+上下文自主决定，如 10、30、120；不填默认 30 分钟，到点自动解锁）' },
         message: strParam('显示在锁定拦截窗上的质问文案（按人设/记忆/上下文自定义，如"被我没收啦，说了要专心"）'),
       },
       ['appName'],
@@ -476,8 +502,8 @@ export function buildPhoneTools(): PhoneToolDef[] {
     );
     add(
       'openRealApp',
-      '在机主的真实手机里拉起一个已安装的 App（经无障碍服务）。packageName 填 Android 包名，如 com.tencent.mm（微信）、com.ss.android.ugc.aweme（抖音）、com.netease.cloudmusic（网易云音乐）。机主说「打开真机上的抖音」时用这个。',
-      { packageName: strParam('Android 包名，如 com.tencent.mm') },
+      '在机主的真实手机里打开一个应用。要打开【系统应用】（时钟/闹钟/计时器/日历/计算器/设置/相机/图库/联系人/拨号/短信/浏览器）时直接把名字填进 packageName（如「时钟」「闹钟」「日历」「计算器」——系统标准入口直达，不需要包名！）；要打开第三方 App 才填 Android 包名，如 com.tencent.mm（微信）、com.ss.android.ugc.aweme（抖音）、com.netease.cloudmusic（网易云音乐），不确定包名时先调 searchRealApp 搜。机主说「打开抖音」「打开时钟」「定个闹钟前先打开时钟看看」时用这个。',
+      { packageName: strParam('应用名：系统应用直接填中文名（时钟/闹钟/日历/计算器/设置/相机/图库/联系人/拨号/短信/浏览器）或第三方包名（如 com.tencent.mm）') },
       ['packageName'],
     );
     add(
@@ -557,8 +583,11 @@ export function buildPhoneTools(): PhoneToolDef[] {
     );
     add(
       'setVolume',
-      '调节机主真实手机的媒体音量（原生 AudioManager）。volume 填 0-100 的音量百分比（0=静音，100=该手机最大音量——系统会自动换算成真机实际档位，各机型最大档不同不影响）。机主说「声音调大点/小点/最大/静音」时用这个；想精准就先调 getVolume 看当前百分比，调大一般比当前高 20 左右、调小低 20 左右。',
-      { volume: { type: 'number', description: '音量百分比 0-100（0=静音，100=该手机最大音量）' } },
+      '调节机主真实手机的音量（原生 AudioManager）。volume 填 0-100 的音量百分比（0=静音，100=该手机最大音量——系统会自动换算成真机实际档位，各机型最大档不同不影响）。streamType 可选：media=媒体音量（默认，听歌看视频）/ alarm=闹钟音量 / ring=来电铃声量 / call=通话音量——机主说「闹钟声音太大了」「来电铃声调大点」时选对应流，普通「声音大点/小点」不用填走媒体音量。想精准就先调 getVolume 看当前百分比，调大一般比当前高 20 左右、调小低 20 左右。',
+      {
+        volume: { type: 'number', description: '音量百分比 0-100（0=静音，100=该手机最大音量）' },
+        streamType: { type: 'string', enum: ['media', 'alarm', 'ring', 'call'], description: '音量流（可选，默认 media）：media=媒体 / alarm=闹钟 / ring=铃声 / call=通话' },
+      },
       ['volume'],
     );
     add(
@@ -591,11 +620,81 @@ export function buildPhoneTools(): PhoneToolDef[] {
       {},
       [],
     );
+    // ---- v2.3.0 原生系统级工具（AI 系统管家） ----
+    add(
+      'setRealAlarm',
+      '在机主的【真实系统时钟】里定一个真的闹钟（AlarmClock 标准协议直连系统时钟应用，到点手机会响铃提醒，不是网页模拟）。机主说「明早七点叫我」「定个八点的闹钟」「下午三点提醒我」时用这个（注意：明确说了「叫我起床/定闹钟」就用这个，别用网页版 setAlarm）。hour 填 0-23 小时（24 小时制），minute 填 0-59 分，label 填闹钟备注（可选，如「起床啦」）。',
+      {
+        hour: { type: 'number', description: '小时（0-23，24 小时制，如下午 2 点 = 14）' },
+        minute: { type: 'number', description: '分钟（0-59）' },
+        label: strParam('闹钟备注（可选，如「起床啦」「吃药提醒」）'),
+      },
+      ['hour', 'minute'],
+    );
+    add(
+      'startCountdown',
+      '在机主的【真实系统时钟】里开一个倒计时/计时器（系统计时器标准协议，到点手机会响）。机主说「十分钟后再叫我」「开个五分钟的倒计时」「泡面计时三分钟」时用这个。seconds 填秒数（如 5 分钟 = 300），label 填计时器备注（可选）。',
+      {
+        seconds: { type: 'number', description: '倒计时秒数（正整数，如 5 分钟 = 300）' },
+        label: strParam('计时器备注（可选，如「泡面」「休息结束」）'),
+      },
+      ['seconds'],
+    );
+    add(
+      'createCalendarEvent',
+      '往机主的【真实系统日历】里写一个日程（CalendarContract 直写，打开手机日历就能看到；无默认日历时会打开日历应用预填好让机主点一下保存）。机主说「周五下午三点提醒我开会」「帮我记个日程」「下周二和小明约了饭」时用这个。title 填日程标题；startTime 填开始时间（自然语言或时间戳都行，如 "2026-11-25 15:00" 或 "明天上午九点"）；endTime 填结束时间（可选，默认开始后 1 小时）；location 填地点（可选）。',
+      {
+        title: strParam('日程标题（如「和小明吃饭」「牙医复诊」）'),
+        startTime: strParam('开始时间（如 "2026-11-25 15:00"、"明天上午九点"，或毫秒时间戳）'),
+        endTime: strParam('结束时间（可选，默认开始后 1 小时）'),
+        location: strParam('地点（可选，如「公司楼下咖啡店」）'),
+      },
+      ['title', 'startTime'],
+    );
+    add(
+      'makePhoneCall',
+      '用机主的真机拨打电话（已授「拨打电话」权限时直接拨出去；未授权时拉起拨号盘并填好号码，机主点一下拨号键就打）。机主说「打电话给妈妈」「给 XX 拨过去」时用这个。phoneNumber 填电话号码（不确定号码时先调 searchRealContact 查通讯录）。',
+      {
+        phoneNumber: strParam('电话号码（如 13800138000；不确定就先 searchRealContact 查通讯录）'),
+      },
+      ['phoneNumber'],
+    );
+    add(
+      'sendSMS',
+      '用机主的真机发短信（已授「发送短信」权限时 SmsManager 静默直接发出；未授权时打开短信应用并填好收件人和正文，机主点一下发送）。机主说「给 XX 发个短信说我要晚点到」时用这个。phoneNumber 填手机号，message 填短信正文。',
+      {
+        phoneNumber: strParam('收信人手机号（不确定就先 searchRealContact 查通讯录）'),
+        message: strParam('短信正文（直接发出去的内容，写完整）'),
+      },
+      ['phoneNumber', 'message'],
+    );
+    add(
+      'searchRealContact',
+      '在机主的【真机通讯录】里搜联系人（读真实通讯录，返回名字+电话+号码类型）。机主说「打电话给妈妈但不记得号码」「查一下 XX 的电话」时先用这个，拿到号码再用 makePhoneCall / sendSMS。name 填联系人名字（支持模糊匹配，如「妈」能搜到「妈妈」「二姨妈妈」）。',
+      {
+        name: strParam('联系人名字（支持模糊，如：妈、小明、王医生）'),
+      },
+      ['name'],
+    );
+    add(
+      'toggleFlashlight',
+      '打开/关闭机主真机的手电筒（闪光灯常亮）。机主说「开一下手电筒」「帮我照个亮」「关掉手电筒」时用这个；人设合适时也可以主动帮 TA 开（如 TA 说在楼道里找不到钥匙）。on 填 true=开 / false=关。',
+      {
+        on: { type: 'boolean', description: 'true=打开手电筒 / false=关闭手电筒' },
+      },
+      ['on'],
+    );
+    add(
+      'getRealLocation',
+      '获取机主真机当前的【真实 GPS 定位】：经纬度 + 精度 + 城市名 + 详细地址（需位置权限）。机主问「我在哪」「我现在在哪个城市」「帮我看看附近」时用这个（需要联网/GPS 开启）。',
+      {},
+      [],
+    );
   }
 
-  // 服务端 sanitizeTools 上限：网页 22 + 真机 21（原生化工具组 + v2.1.0 亮度/铃声三件）= 43，
-  // 上限已同步提到 48（api/chat/route.ts sanitizeTools）
-  return tools.slice(0, 48);
+  // 服务端 sanitizeTools 上限：网页 22 + 真机 21（原生化）+ v2.3.0 原生系统级 8 件 = 51，
+  // 上限已同步提到 64（api/chat/route.ts sanitizeTools）
+  return tools.slice(0, 64);
 }
 
 // ---------------- 工具执行器（全部走 web-tools 内部路由函数） ----------------
@@ -690,6 +789,119 @@ function formatNativeUsageText(snap: AwSnapshot): string {
   return `【真机使用时长（机主的真实手机）】${parts.join('；')}`;
 }
 
+/**
+ * v2.3.0 弹性时间解析（createCalendarEvent 的 startTime/endTime）：
+ * 支持 毫秒时间戳 / "2026-11-25 15:00" / "15:00"（今天已过则明天）/ 相对（30分钟后、
+ * 2小时后、明天/后天+时刻）/ 中文时段（明天上午九点、下周三下午三点半）。
+ * 解析失败返回 undefined（上层兜底默认时间，不拦日程写入）。
+ */
+function parseFlexibleTime(raw: string): number | undefined {
+  const s = (raw ?? '').trim();
+  if (!s) return undefined;
+  // ① 毫秒时间戳
+  if (/^\d{12,14}$/.test(s)) {
+    const v = Number(s);
+    return Number.isFinite(v) && v > 1e12 ? v : undefined;
+  }
+  const now = new Date();
+  // ② 相对时长：N分钟(之)后 / N小时后 / N天(之)后 / 半小时后 / 一个半小时后
+  const rel = s.match(/^(半|一?个?半?|\d+(?:\.\d+)?)(?:个)?(分钟|小时|钟头|天)(?:之|过)?后$/);
+  if (rel) {
+    let n = rel[1] === '半' ? 0.5 : rel[1].replace('个', '') === '' ? 1 : Number(rel[1].replace('个', ''));
+    if (!Number.isFinite(n)) n = 1;
+    if (rel[1].startsWith('一') || rel[1].startsWith('1')) {
+      if (rel[1] === '一个半' || rel[1] === '1个半') n = 1.5;
+    }
+    const unitMs = rel[2] === '分钟' ? 60_000 : rel[2] === '小时' || rel[2] === '钟头' ? 3_600_000 : 86_400_000;
+    return Date.now() + Math.round(n * unitMs);
+  }
+  // ③ 完整日期时间："2026-11-25 15:00" / "2026/11/25 15:30" / "2026-11-25"
+  const full = s.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})(?:[ T]+(\d{1,2}):(\d{2}))?/);
+  if (full) {
+    const d = new Date(
+      Number(full[1]), Number(full[2]) - 1, Number(full[3]),
+      full[4] ? Number(full[4]) : 9, full[5] ? Number(full[5]) : 0,
+    );
+    return Number.isNaN(d.getTime()) ? undefined : d.getTime();
+  }
+  // ④ 日词 +（可选时段+时刻）：明天上午九点 / 后天 15:00 / 今天晚上8点半 / 大后天早上7点
+  // 「今晚/明晚」先归一成「今天晚上/明天晚上」（时段词不能跟日词一起被剥掉——
+  // 否则「今晚八点」丢掉「晚」被解析成早上 8 点）
+  const normalized = /^今晚/.test(s) ? `今天晚上${s.slice(2)}` : /^明晚/.test(s) ? `明天晚上${s.slice(2)}` : s;
+  const dayWords: Array<[string, number]> = [
+    ['大后天', 3], ['后天', 2], ['明天', 1], ['今日', 0], ['今天', 0],
+  ];
+  let dayOffset: number | null = null;
+  let rest = normalized;
+  for (const [w, off] of dayWords) {
+    if (rest.startsWith(w)) {
+      dayOffset = off;
+      rest = rest.slice(w.length).trim();
+      break;
+    }
+  }
+  if (dayOffset !== null) {
+    const parsed = parseClockTime(rest);
+    if (parsed) {
+      const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() + dayOffset, parsed[0], parsed[1]);
+      return d.getTime();
+    }
+    // 只有日词没给时刻 → 默认上午 9 点
+    return new Date(now.getFullYear(), now.getMonth(), now.getDate() + dayOffset, 9, 0).getTime();
+  }
+  // ⑤ 裸时刻："15:00" / "9:30" / "上午九点" / "晚上8点半"（今天已过 → 明天）
+  const clock = parseClockTime(rest);
+  if (clock) {
+    let d = new Date(now.getFullYear(), now.getMonth(), now.getDate(), clock[0], clock[1]);
+    if (d.getTime() <= now.getTime()) d = new Date(d.getTime() + 86_400_000);
+    return d.getTime();
+  }
+  return undefined;
+}
+
+/** 时段+时刻解析："15:00" / "上午九点" / "下午3点半" / "晚上8点40" → [hour, minute] */
+function parseClockTime(s: string): [number, number] | null {
+  const t = (s ?? '').trim();
+  if (!t) return null;
+  // 纯数字时刻 15:00 / 9:30
+  const hm = t.match(/^(\d{1,2})[:：点时](\d{1,2})?分?$/);
+  if (hm) {
+    const h = Number(hm[1]);
+    const m = hm[2] ? Number(hm[2]) : 0;
+    if (h >= 0 && h <= 23 && m >= 0 && m <= 59) return [h, m];
+    return null;
+  }
+  // 中文时段 + 时刻：上午九点 / 下午3点半 / 中午12点 / 晚上8点40
+  const zh = t.match(/^(凌晨|早上|早晨|上午|中午|下午|傍晚|晚上|夜里)?\s*(\d{1,2}|[一二两三四五六七八九十]+)(?:点|[:：])(半|(\d{1,2})分?)?$/);
+  if (zh) {
+    let h = /^\d+$/.test(zh[2]) ? Number(zh[2]) : zhNumber(zh[2]);
+    if (h === null) return null;
+    const period = zh[1] ?? '';
+    if (period === '下午' || period === '傍晚' || period === '晚上' || period === '夜里') {
+      if (h < 12) h += 12;
+    } else if (period === '中午' && h < 12) {
+      h += 12; // 中午1点 = 13 点（中午12点 = 12 点不加）
+    } else if (period === '凌晨' && h === 12) {
+      h = 0;
+    }
+    const m = zh[3] === '半' ? 30 : zh[4] ? Number(zh[4]) : 0;
+    if (h >= 0 && h <= 23 && m >= 0 && m <= 59) return [h, m];
+  }
+  return null;
+}
+
+/** 中文数字（一~九十九）→ 数字 */
+function zhNumber(s: string): number | null {
+  const digits: Record<string, number> = { 一: 1, 二: 2, 两: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9, 十: 10 };
+  if (!s) return null;
+  if (s === '十') return 10;
+  if (/^十[一二三四五六七八九]$/.test(s)) return 10 + digits[s[1]];
+  if (/^[一二两三四五六七八九]十$/.test(s)) return digits[s[0]] * 10;
+  if (/^[一二两三四五六七八九]十[一二三四五六七八九]$/.test(s)) return digits[s[0]] * 10 + digits[s[2]];
+  if (/^[一二两三四五六七八九]$/.test(s)) return digits[s];
+  return null;
+}
+
 /** 执行一个工具调用（name + JSON 参数）：网页工具走 web-tools 内部路由，真机工具走 device-ops（无障碍服务/原生 API） */
 export async function execWebTool(name: string, args: Record<string, unknown>): Promise<string> {
   const S = (v: unknown): string => (typeof v === 'string' ? v.trim() : '');
@@ -705,7 +917,21 @@ export async function execWebTool(name: string, args: Record<string, unknown>): 
     switch (name) {
       case 'openRealApp': {
         const pkg = S(args.packageName);
-        if (!pkg) return '【失败】openRealApp 缺包名（packageName，如 com.tencent.mm）';
+        if (!pkg) return '【失败】openRealApp 缺应用名（packageName，系统应用填中文名如 时钟/日历，第三方填包名如 com.tencent.mm）';
+        // v2.3.0：系统应用（时钟/闹钟/日历/计算器/设置/相机/图库/联系人/拨号/短信/浏览器）
+        // 直接走标准 Intent 直达——绝不遍历应用清单找包名（机主实测「连定个闹钟都要先搜包名」）
+        const SYSTEM_APP_NAMES = [
+          '时钟', '闹钟', '计时器', '秒表', '日历', '日程', '计算器', '设置', '相机', '拍照',
+          '图库', '相册', '照片', '联系人', '通讯录', '拨号', '电话', '短信', '信息', '浏览器',
+          'clock', 'alarm', 'timer', 'calendar', 'calculator', 'calc', 'setting', 'settings',
+          'camera', 'gallery', 'photo', 'contact', 'dial', 'phone', 'sms', 'message', 'browser', 'email', '邮件',
+        ];
+        const isSystemApp = SYSTEM_APP_NAMES.some(
+          (k) => pkg.toLowerCase() === k || pkg.includes(k),
+        ) && !pkg.includes('.');
+        if (isSystemApp) {
+          return runDeviceTool((d) => d.labOpenSystemApp(pkg));
+        }
         return runDeviceTool((d) => d.labOpenApp(pkg));
       }
       case 'tapScreen': {
@@ -773,6 +999,12 @@ export async function execWebTool(name: string, args: Record<string, unknown>): 
         const vol = Number(args.volume);
         if (!Number.isFinite(vol)) return '【失败】setVolume 缺音量百分比（volume，0-100；0=静音 100=最大）';
         const clamped = Math.max(0, Math.min(100, Math.round(vol)));
+        // v2.3.0：streamType 可选（media/alarm/ring/call）——指定流走原生分流，默认媒体
+        const stream = S(args.streamType).toLowerCase();
+        const validStreams = ['media', 'alarm', 'ring', 'call'];
+        if (stream && validStreams.includes(stream) && stream !== 'media') {
+          return runDeviceTool((d) => d.labSetVolumeStream(clamped, stream as 'alarm' | 'ring' | 'call'));
+        }
         return runDeviceTool((d) => d.labSetVolume(clamped));
       }
       case 'getBrightness':
@@ -793,16 +1025,80 @@ export async function execWebTool(name: string, args: Record<string, unknown>): 
         return runDeviceTool((d) => d.labRecentSMS(15));
       case 'getRecentNotifications':
         return runDeviceTool((d) => d.labNotificationSnapshot(15));
+      // ---- v2.3.0 原生系统级工具执行器 ----
+      case 'setRealAlarm': {
+        const hour = Number(args.hour);
+        const minute = Number(args.minute);
+        if (!Number.isFinite(hour) || hour < 0 || hour > 23 || !Number.isFinite(minute) || minute < 0 || minute > 59) {
+          return '【失败】setRealAlarm 时间不合法（hour 填 0-23，minute 填 0-59；如下午两点半 = hour:14, minute:30）';
+        }
+        const label = S(args.label) || undefined;
+        rememberToolAction(`你替机主在真实手机上定了系统闹钟 ${hour}:${String(minute).padStart(2, '0')}${label ? `（${label.slice(0, 30)}）` : ''}`);
+        return runDeviceTool((d) => d.labSetRealAlarm(hour, minute, label));
+      }
+      case 'startCountdown': {
+        const seconds = Number(args.seconds);
+        if (!Number.isFinite(seconds) || seconds <= 0) {
+          return '【失败】startCountdown 缺秒数（seconds，正整数，如 5 分钟 = 300）';
+        }
+        const label = S(args.label) || undefined;
+        rememberToolAction(`你替机主在真实手机上开了 ${Math.round(seconds / 60)} 分钟倒计时${label ? `（${label.slice(0, 30)}）` : ''}`);
+        return runDeviceTool((d) => d.labStartCountdown(seconds, label));
+      }
+      case 'createCalendarEvent': {
+        const title = S(args.title);
+        if (!title) return '【失败】createCalendarEvent 缺标题（title）';
+        const beginTs = parseFlexibleTime(S(args.startTime));
+        const endTs = parseFlexibleTime(S(args.endTime));
+        const location = S(args.location) || undefined;
+        rememberToolAction(
+          `你替机主在真实系统日历里写了日程「${title.slice(0, 50)}」${S(args.startTime) ? `（${S(args.startTime).slice(0, 30)}）` : ''}`,
+        );
+        return runDeviceTool((d) => d.labCreateCalendarEvent({ title, beginTs, endTs, location }));
+      }
+      case 'makePhoneCall': {
+        const phone = S(args.phoneNumber);
+        if (!phone || !/^[\d+\-\s()\uFF08\uFF09]{3,20}$/.test(phone)) {
+          return '【失败】makePhoneCall 电话号码不合法（phoneNumber，如 13800138000；不确定号码先调 searchRealContact 查通讯录）';
+        }
+        rememberToolAction(`你用机主的真机拨了电话给 ${phone}`);
+        return runDeviceTool((d) => d.labMakePhoneCall(phone));
+      }
+      case 'sendSMS': {
+        const phone = S(args.phoneNumber);
+        const message = S(args.message);
+        if (!phone || !/^[\d+\-\s()\uFF08\uFF09]{3,20}$/.test(phone)) {
+          return '【失败】sendSMS 电话号码不合法（phoneNumber；不确定号码先调 searchRealContact 查通讯录）';
+        }
+        if (!message) return '【失败】sendSMS 缺短信正文（message）';
+        rememberToolAction(`你用机主的真机给 ${phone} 发了短信：「${message.slice(0, 90)}」`);
+        return runDeviceTool((d) => d.labSendSMS(phone, message));
+      }
+      case 'searchRealContact': {
+        const name = S(args.name);
+        if (!name) return '【失败】searchRealContact 缺联系人名字（name）';
+        return runDeviceTool((d) => d.labSearchRealContact(name));
+      }
+      case 'toggleFlashlight': {
+        const on = args.on !== false; // 缺省 true（开关语义明确）
+        return runDeviceTool((d) => d.labToggleFlashlight(on));
+      }
+      case 'getRealLocation':
+        return runDeviceTool((d) => d.labGetRealLocation());
       case 'searchRealApp':
         return labText(await toolSearchRealApp(S(args.keyword)));
       case 'lockApp': {
-        // 中文名/包名 → labLockApp 全屏拦截锁；minutes 缺省 = 锁到哄好为止（unlockAt=0）
-        // v2.11：minutes Number 强转（弱模型常发字符串 "30"，旧 typeof number 判断会静默忽略 → 误变永久锁）
+        // 中文名/包名 → labLockApp 全屏拦截锁
+        // v2.3.0 F-10 根修（机主实测「到时间了点击应用还是会有弹窗」）：minutes 缺省
+        // 不再是「锁到哄好为止」（unlockAt=0 永不过期）——AI 嘴上说锁 10 分钟但没传
+        // minutes 时，旧默认会变成永久锁、到点也弹窗；现在缺省 = 30 分钟（与
+        // freezeRealApp 同口径），到点必解。真要锁到哄好就明说传一个足够大的值。
+        // v2.11：minutes Number 强转（弱模型常发字符串 "30"，旧 typeof number 判断会静默忽略）
         const appName = S(args.appName);
         if (!appName) return '【失败】lockApp 缺应用名（appName，填中文名如「抖音」或包名 com.ss.android.ugc.aweme）';
         const minutesNum = Number(args.minutes);
-        const minutes = Number.isFinite(minutesNum) && minutesNum > 0 ? minutesNum : 0;
-        const unlockAt = minutes > 0 ? Date.now() + Math.round(minutes) * 60_000 : 0;
+        const minutes = Number.isFinite(minutesNum) && minutesNum > 0 ? minutesNum : 30;
+        const unlockAt = Date.now() + Math.round(minutes) * 60_000;
         const message = S(args.message) || undefined;
         const charName = ctx.charName || undefined; // 无会话上下文时交原生用默认「TA」
         const contactId = ctx.contactId || undefined; // v2.2.0 拦截窗去哄哄直达聊天
@@ -1527,13 +1823,18 @@ function wrapSystemChatNative(sysRaw: string): string {
  * 「把工具调用写成纯文本」的 malformed 输出检测（弱 FC 模型常见病）：
  * 形如「sendWebMessage:…」「openScreen(微信)」的行——真实工具调用应走 tool_calls 通道，
  * 写成文本既执行不了、又会当成聊天消息发给机主。命中且无实质正文时清空文字。
+ * v2.3.0 同步新增 8 个原生系统级工具名。
  */
 const MALFORMED_TOOL_TEXT_RE =
-  /^\s*(sendWebMessage|postForum|likePost|playMusic|getWebState|saveMemo|setAlarm|queryWeather|openScreen|freezeApp|getWebInstalledApps|getUsageStats|getRecentApps|pullBackToChat|searchWebApp|sendNotification|searchContacts|openChat|getCalendarEvents|addCalendarEvent|getTodoList|addTodo|searchRealApp|freezeRealApp|unfreezeRealApp|lockApp|setVolume|setBrightness|getBrightness|setRingerMode|openRealApp|tapScreen|swipeScreen|inputText|pressKey|lookScreen|takeScreenshot|sendScreenshot|switchToChat|getForegroundApp|getRecentSMS|getBatteryStatus|getVolume|getRecentNotifications|openApp|uiObserve|uiClick|uiType|uiScroll)\s*[:：`(（]?\s*\S/m;
+  /^\s*(sendWebMessage|postForum|likePost|playMusic|getWebState|saveMemo|setAlarm|queryWeather|openScreen|freezeApp|getWebInstalledApps|getUsageStats|getRecentApps|pullBackToChat|searchWebApp|sendNotification|searchContacts|openChat|getCalendarEvents|addCalendarEvent|getTodoList|addTodo|searchRealApp|freezeRealApp|unfreezeRealApp|lockApp|setVolume|setBrightness|getBrightness|setRingerMode|openRealApp|tapScreen|swipeScreen|inputText|pressKey|lookScreen|takeScreenshot|sendScreenshot|switchToChat|getForegroundApp|getRecentSMS|getBatteryStatus|getVolume|getRecentNotifications|setRealAlarm|startCountdown|createCalendarEvent|makePhoneCall|sendSMS|searchRealContact|toggleFlashlight|getRealLocation|openApp|uiObserve|uiClick|uiType|uiScroll)\s*[:：`(（]?\s*\S/m;
 
-/** 工具名全集（cleanToolLogs 裸调用行剥除用；v2.11 与 TOOL_CAPS 全量同步 44 个） */
+/** 工具名全集（cleanToolLogs 裸调用行剥除用）——裸 JSON 提取版在 ./json-tool-calls（v2.3.0 与 TOOL_CAPS 全量同步 52 个） */
 const TOOL_NAME_RE_SRC =
-  'sendWebMessage|postForum|likePost|playMusic|getWebState|saveMemo|setAlarm|queryWeather|openScreen|freezeApp|getWebInstalledApps|getUsageStats|getRecentApps|pullBackToChat|searchWebApp|sendNotification|searchContacts|openChat|getCalendarEvents|addCalendarEvent|getTodoList|addTodo|searchRealApp|freezeRealApp|unfreezeRealApp|lockApp|setVolume|openRealApp|tapScreen|swipeScreen|inputText|pressKey|lookScreen|takeScreenshot|sendScreenshot|switchToChat|getForegroundApp|getBatteryStatus|getVolume|getRecentSMS|getRecentNotifications|setBrightness|getBrightness|setRingerMode';
+  'sendWebMessage|postForum|likePost|playMusic|getWebState|saveMemo|setAlarm|queryWeather|openScreen|freezeApp|getWebInstalledApps|getUsageStats|getRecentApps|pullBackToChat|searchWebApp|sendNotification|searchContacts|openChat|getCalendarEvents|addCalendarEvent|getTodoList|addTodo|searchRealApp|freezeRealApp|unfreezeRealApp|lockApp|setVolume|openRealApp|tapScreen|swipeScreen|inputText|pressKey|lookScreen|takeScreenshot|sendScreenshot|switchToChat|getForegroundApp|getBatteryStatus|getVolume|getRecentSMS|getRecentNotifications|setBrightness|getBrightness|setRingerMode|setRealAlarm|startCountdown|createCalendarEvent|makePhoneCall|sendSMS|searchRealContact|toggleFlashlight|getRealLocation';
+
+// v2.3.0 F-11 裸 JSON 工具调用提取/剥除：纯函数抽到独立模块 json-tool-calls（防循环依赖），
+// 这里 re-export 保持既有 import 兼容
+export { extractJsonToolCalls, stripJsonToolCalls } from './json-tool-calls';
 
 /**
  * 最终回复净化（机主需求三·纯净度铁律）：AI 收尾文本里残留的底层日志一律剥掉——
@@ -1685,7 +1986,24 @@ export async function runPhoneToolRound(
       if (e instanceof Error && e.message === 'TOOLS_UNSUPPORTED') return null;
       throw e; // 网络等其他错误：交给上层回退流式
     }
-    const calls = Array.isArray(msg.tool_calls) ? msg.tool_calls : [];
+    const rawCalls = Array.isArray(msg.tool_calls) ? msg.tool_calls : [];
+    // v2.3.0 F-11 裸 JSON 工具调用提取（机主实测「偶尔显示 {"name": "getForegroundApp",
+    // "arguments": {}} 没反应」）：弱模型把工具调用写成 JSON 文本混在 content 里而
+    // 不走 tool_calls 通道——提取出来当真实工具调用执行，绝不把裸 JSON 发给机主。
+    let calls = rawCalls;
+    let jsonCallsExtracted = false;
+    if (rawCalls.length === 0) {
+      const content = typeof msg.content === 'string' ? msg.content : '';
+      const extracted = extractJsonToolCalls(content);
+      if (extracted.length > 0) {
+        calls = extracted.map((c, idx) => ({
+          id: `json-${Date.now()}-${idx}`,
+          type: 'function',
+          function: { name: c.name, arguments: JSON.stringify(c.args) },
+        }));
+        jsonCallsExtracted = true;
+      }
+    }
     if (calls.length === 0) {
       let text = typeof msg.content === 'string' ? msg.content : '';
       // 零工具空谈/假报：机主指令像动手任务、模型却一个工具都没调就回文字
@@ -1765,11 +2083,19 @@ export async function runPhoneToolRound(
           /* 汇报兜底失败：按空回复交给上层空文案管线 */
         }
       }
-      return { text: cleanToolLogs(text), usedTools };
+      return { text: stripJsonToolCalls(cleanToolLogs(text)) ?? '', usedTools };
     }
     // 有工具调用：执行（串行——消息/帖子等操作天然有序）→ 结果回传模型
+    // v2.3.0 F-11：裸 JSON 提取出的调用同样进这条链路；assistant 消息里带上
+    // tool_calls 形状让上游上下文连贯（content 用剥掉裸 JSON 后的残余文本）。
     usedTools = true;
-    convo.push({ role: 'assistant', content: msg.content ?? '', tool_calls: msg.tool_calls });
+    convo.push({
+      role: 'assistant',
+      content: jsonCallsExtracted
+        ? stripJsonToolCalls(typeof msg.content === 'string' ? msg.content : '') || ''
+        : msg.content ?? '',
+      tool_calls: calls,
+    });
     for (const call of calls) {
       if (shouldAbort?.()) return { text: '', usedTools };
       const fn = call.function?.name ?? '';
@@ -1871,7 +2197,7 @@ export async function runPhoneToolRound(
   convo.push({ role: 'user', content: '（系统提示：已达工具调用轮数上限。请直接向机主汇报目前的执行结果，不要输出工具名或日志格式。）' });
   try {
     const fin = await fcRequest(convo, [], config);
-    return { text: cleanToolLogs(typeof fin.content === 'string' ? fin.content : ''), usedTools };
+    return { text: stripJsonToolCalls(cleanToolLogs(typeof fin.content === 'string' ? fin.content : '')) ?? '', usedTools };
   } catch {
     return { text: '', usedTools };
   }

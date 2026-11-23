@@ -27,19 +27,29 @@ import {
   nativeA11ySwipe,
   nativeA11yTap,
   nativeBringToFront,
+  nativeCreateCalendarEvent,
   nativeGetBatteryStatus,
   nativeGetBrightness,
   nativeGetForegroundApp,
+  nativeGetRealLocation,
   nativeGetRecentNotifications,
   nativeGetRecentSMS,
   nativeGetScreenSize,
   nativeGetVolume,
   nativeListInstalledApps,
   nativeLockApp,
+  nativeMakePhoneCall,
   nativeOpenApp,
+  nativeOpenSystemApp,
+  nativeSearchRealContact,
+  nativeSendSMS,
   nativeSetBrightness,
+  nativeSetRealAlarm,
   nativeSetRingerMode,
   nativeSetVolume,
+  nativeSetVolumeStream,
+  nativeStartCountdown,
+  nativeToggleFlashlight,
   nativeUnlockApp,
 } from './native-perception';
 import { useSettings } from './store';
@@ -314,6 +324,151 @@ export async function labSetRingerMode(mode: 'silent' | 'vibrate' | 'normal'): P
   if (r === null) return { ok: false, text: '桥无响应（原生调用超时）' };
   if (!r.ok) return { ok: false, text: `铃声模式设置失败：${a11yGateText(r.reason)}` };
   return { ok: true, text: `铃声模式已设为${label}${r.via === 'ring-volume' ? '（铃声量方式）' : ''}` };
+}
+
+/** 指定音量流调音（alarm/ring/call；百分比语义，原生按流实际最大档换算——
+ *  v2.3.0 机主需求：媒体/闹钟/通话音量分开调） */
+export async function labSetVolumeStream(
+  percent: number,
+  stream: 'alarm' | 'ring' | 'call',
+): Promise<DeviceOpResult> {
+  const pct = Math.max(0, Math.min(100, Math.round(percent)));
+  const label = stream === 'alarm' ? '闹钟' : stream === 'ring' ? '铃声' : '通话';
+  const r = await nativeSetVolumeStream(pct, stream);
+  if (!r.ok) return { ok: false, text: `${label}音量调节失败：${a11yGateText(r.reason)}` };
+  return { ok: true, text: `${label}音量已调到 ${pct}%（档位 ${r.volume}/${r.max}）` };
+}
+
+// ================= v2.3.0 原生系统级工具（AI 系统管家） =================
+
+/** 定系统闹钟（AlarmClock.ACTION_SET_ALARM 标准协议——直接进系统时钟，绝不找包名） */
+export async function labSetRealAlarm(hour: number, minute: number, label?: string): Promise<DeviceOpResult> {
+  const h = Math.max(0, Math.min(23, Math.round(hour)));
+  const m = Math.max(0, Math.min(59, Math.round(minute)));
+  const r = await nativeSetRealAlarm(h, m, label);
+  if (!r.ok) {
+    return {
+      ok: false,
+      text: `定闹钟失败：${r.reason === 'no-handler' ? '手机上没有标准闹钟应用（罕见）' : a11yGateText(r.reason)}`,
+    };
+  }
+  const mm = String(m).padStart(2, '0');
+  return { ok: true, text: `已在系统时钟里定好闹钟：${h}:${mm}${label ? `（${label.slice(0, 30)}）` : ''}——打开手机时钟就能看到` };
+}
+
+/** 系统倒计时（AlarmClock.ACTION_SET_TIMER 标准协议） */
+export async function labStartCountdown(seconds: number, label?: string): Promise<DeviceOpResult> {
+  const s = Math.max(1, Math.round(seconds));
+  const r = await nativeStartCountdown(s, label);
+  if (!r.ok) {
+    return {
+      ok: false,
+      text: `倒计时设置失败：${r.reason === 'no-handler' ? '手机上没有标准计时器应用（罕见）' : a11yGateText(r.reason)}`,
+    };
+  }
+  const min = Math.floor(s / 60);
+  const sec = s % 60;
+  const human = min >= 1 ? (sec > 0 ? `${min} 分 ${sec} 秒` : `${min} 分钟`) : `${s} 秒`;
+  return { ok: true, text: `已在系统时钟里开好倒计时：${human}${label ? `（${label.slice(0, 30)}）` : ''}——到点手机会响` };
+}
+
+/** 写系统日历（CalendarContract 直写；失败降级日历应用预填） */
+export async function labCreateCalendarEvent(opts: {
+  title: string;
+  beginTs?: number;
+  endTs?: number;
+  location?: string;
+  allDay?: boolean;
+}): Promise<DeviceOpResult> {
+  const r = await nativeCreateCalendarEvent(opts);
+  if (!r.ok) {
+    return {
+      ok: false,
+      text: `日程写入失败：${r.reason === 'no-permission' ? '日历权限未开启：去 设置 › 权限给予 › 日历 开启' : r.reason === 'no-calendar-app' ? '手机上没有日历应用' : a11yGateText(r.reason)}`,
+    };
+  }
+  const begin = opts.beginTs ? new Date(opts.beginTs) : null;
+  const when = begin
+    ? `${begin.getMonth() + 1}月${begin.getDate()}日 ${String(begin.getHours()).padStart(2, '0')}:${String(begin.getMinutes()).padStart(2, '0')}`
+    : '稍后';
+  if (r.via === 'intent') {
+    return { ok: true, text: `已打开日历并预填好日程「${opts.title.slice(0, 30)}」（${when}）——机主在日历里点一下保存就存进系统日历了` };
+  }
+  return { ok: true, text: `已写进系统日历：${r.calendar ? `${r.calendar}·` : ''}「${opts.title.slice(0, 30)}」（${when}）——打开手机日历就能看到` };
+}
+
+/** 拨打电话（CALL_PHONE 已授直接拨；未授拉拨号盘预填） */
+export async function labMakePhoneCall(phoneNumber: string): Promise<DeviceOpResult> {
+  const r = await nativeMakePhoneCall(phoneNumber);
+  if (!r.ok) return { ok: false, text: `拨号失败：${a11yGateText(r.reason)}` };
+  if (r.via === 'dialer') {
+    return { ok: true, text: `已拉起拨号盘并填好号码 ${phoneNumber}（未授直接拨打权限——机主点一下拨号键就打出去；想让我直接拨就去 设置 › 权限给予 › 拨打电话 开启）` };
+  }
+  return { ok: true, text: `正在直接拨打电话：${phoneNumber}` };
+}
+
+/** 发短信（SEND_SMS 已授静默发；未授拉短信应用预填） */
+export async function labSendSMS(phoneNumber: string, message: string): Promise<DeviceOpResult> {
+  const r = await nativeSendSMS(phoneNumber, message);
+  if (!r.ok) return { ok: false, text: `短信发送失败：${a11yGateText(r.reason)}` };
+  if (r.via === 'compose') {
+    return { ok: true, text: `已打开短信应用并填好给 ${phoneNumber} 的内容（未授静默发送权限——机主点一下发送就发出去了；想让我静默发就去 设置 › 权限给予 › 发送短信 开启）` };
+  }
+  return { ok: true, text: `短信已静默发出：给 ${phoneNumber} 发了「${message.slice(0, 60)}」` };
+}
+
+/** 查真机通讯录（按名字模糊匹配；需通讯录读取权限） */
+export async function labSearchRealContact(name: string): Promise<DeviceOpResult> {
+  const r = await nativeSearchRealContact(name);
+  if (!r.ok) {
+    return {
+      ok: false,
+      text: `通讯录查询失败：${r.reason === 'no-permission' ? '通讯录权限未开启：去 设置 › 权限给予 › 通讯录 开启' : a11yGateText(r.reason)}`,
+    };
+  }
+  const list = r.contacts ?? [];
+  if (list.length === 0) return { ok: true, text: `通讯录里没有找到叫「${name}」的联系人` };
+  const rows = list.slice(0, 10).map((c) => `${c.name}：${c.phone}（${c.type}）`);
+  return { ok: true, text: `通讯录找到 ${list.length} 位：\n${rows.join('\n')}` };
+}
+
+/** 手电筒开关 */
+export async function labToggleFlashlight(on: boolean): Promise<DeviceOpResult> {
+  const r = await nativeToggleFlashlight(on);
+  if (!r.ok) {
+    return {
+      ok: false,
+      text: `手电筒操作失败：${r.reason === 'no-flash' ? '手机没有闪光灯（或不支持手电筒）' : a11yGateText(r.reason)}`,
+    };
+  }
+  return { ok: true, text: `手电筒已${r.on ?? on ? '打开' : '关闭'}` };
+}
+
+/** 真实 GPS 定位（需位置权限） */
+export async function labGetRealLocation(): Promise<DeviceOpResult> {
+  const r = await nativeGetRealLocation();
+  if (r === null) return { ok: false, text: '桥无响应（原生调用超时）' };
+  if (!r.ok) {
+    return {
+      ok: false,
+      text: `定位失败：${r.reason === 'no-permission' ? '位置权限未开启：去 设置 › 权限给予 › 位置信息 开启' : r.reason === 'no-fix' ? '暂时拿不到定位（GPS 信号弱/定位服务未开，稍后再试）' : a11yGateText(r.reason)}`,
+    };
+  }
+  const parts = [`GPS 定位成功：${r.city ?? '未知城市'}，经纬度 ${r.lat?.toFixed(4)}, ${r.lng?.toFixed(4)}（精度约 ${r.accuracy ?? '?'} 米）`];
+  if (r.address) parts.push(`地址：${r.address.slice(0, 80)}`);
+  return { ok: true, text: parts.join('\n') };
+}
+
+/** 系统应用直达（时钟/闹钟/日历/计算器…标准 Intent，不找包名） */
+export async function labOpenSystemApp(name: string): Promise<DeviceOpResult> {
+  const r = await nativeOpenSystemApp(name);
+  if (!r.ok) {
+    return {
+      ok: false,
+      text: `打开失败：${r.reason === 'unknown-app' ? `不认识「${name}」这个系统应用（可试：时钟/闹钟/日历/计算器/设置/相机/图库/联系人/拨号/短信/浏览器）` : a11yGateText(r.reason)}`,
+    };
+  }
+  return { ok: true, text: `已打开系统「${name}」（标准系统入口直连）` };
 }
 
 /** 最近通知（通知环形缓冲，需「通知使用权」） */

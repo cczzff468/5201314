@@ -159,4 +159,13 @@
         android:name="android.permission.WRITE_EXTERNAL_STORAGE"
         android:maxSdkVersion="28"
         tools:ignore="ScopedStorage" />
+    <!-- v2.3.0 原生系统级工具：发送短信（SmsManager 静默发送；危险权限，运行时弹框） -->
+    <uses-permission android:name="android.permission.SEND_SMS" />
+    <!-- v2.3.0 原生系统级工具：直接拨打电话（ACTION_CALL；危险权限，运行时弹框，未授权降级拉拨号盘） -->
+    <uses-permission android:name="android.permission.CALL_PHONE" />
+    <!-- v2.3.0 原生系统级工具：写入系统闹钟（AlarmClock.ACTION_SET_ALARM；普通权限安装即授予） -->
+    <uses-permission android:name="com.android.alarm.permission.SET_ALARM" />
+    <!-- v2.3.0 原生系统级工具：手电筒（CameraManager.setTorchMode，部分 ROM 需要） -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera.flash" android:required="false" />
 </manifest>

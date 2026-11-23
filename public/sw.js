@@ -24,9 +24,9 @@
  */
 
 /** 缓存版本号：缓存策略变更时 bump（旧缓存会在 activate 时清除） */
-const CACHE_VER = 'ai-static-v85';
+const CACHE_VER = 'ai-static-v86';
 /** 离线壳缓存（HTML 导航；与静态缓存同版本号，activate 一并清理重建） */
-const SHELL_CACHE = 'ai-shell-v85';
+const SHELL_CACHE = 'ai-shell-v86';
 /** 壳缓存键：所有导航变体（?open=… / #hash）归一化为根路径单键，防变体膨胀 */
 const SHELL_KEY = new URL('/', self.location.origin).href;
 /** 静态缓存条目上限（FIFO 修剪：dev 热编译不断换 chunk URL，不设限会无限膨胀） */

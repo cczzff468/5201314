@@ -124,7 +124,11 @@ import java.util.concurrent.atomic.AtomicReference;
                 android.Manifest.permission.READ_MEDIA_AUDIO
         }, alias = "mediaFiles33"),
         // v2.0.0 媒体文件（Android 12 及以下：旧存储权限）
-        @Permission(strings = { android.Manifest.permission.READ_EXTERNAL_STORAGE }, alias = "mediaFilesLegacy")
+        @Permission(strings = { android.Manifest.permission.READ_EXTERNAL_STORAGE }, alias = "mediaFilesLegacy"),
+        // v2.3.0 发送短信（SmsManager 静默发送）
+        @Permission(strings = { android.Manifest.permission.SEND_SMS }, alias = "sendSms"),
+        // v2.3.0 直接拨打电话（ACTION_CALL；未授权时降级拉拨号盘）
+        @Permission(strings = { android.Manifest.permission.CALL_PHONE }, alias = "callPhone")
     }
 )
 public class NativePerceptionPlugin extends Plugin {
@@ -1530,10 +1534,28 @@ public class NativePerceptionPlugin extends Plugin {
         }
     }
 
-    /** 设置媒体音量 setVolume({volume})（0~max 自动钳制）→ {ok, volume} */
+    /** v2.3.0：AudioManager 流名 → STREAM 常量（setVolume/getVolume 的 stream 参数） */
+    private int streamOfName(String stream) {
+        if (stream == null) return AudioManager.STREAM_MUSIC;
+        switch (stream.trim().toLowerCase(Locale.ROOT)) {
+            case "alarm": case "闹钟": return AudioManager.STREAM_ALARM;
+            case "ring": case "铃声": case "来电": return AudioManager.STREAM_RING;
+            case "call": case "通话": case "voice": case "电话": return AudioManager.STREAM_VOICE_CALL;
+            case "system": case "系统": return AudioManager.STREAM_SYSTEM;
+            case "notification": case "通知": return AudioManager.STREAM_NOTIFICATION;
+            default: return AudioManager.STREAM_MUSIC;
+        }
+    }
+
+    /** 设置音量 setVolume({volume, stream, percentMode})：
+     *  percentMode=true 时 volume 按 0-100 百分比解释（内部按该流实际最大档换算）；
+     *  否则按绝对档位（旧协议，媒体流百分比换算在 Web 侧完成后传入）。
+     *  stream 可选：media（默认）/ alarm / ring / call → {ok, volume, max, stream} */
     @PluginMethod
     public void setVolume(PluginCall call) {
         Integer v = call.getInt("volume", null);
+        final String streamName = call.getString("stream", "media");
+        final boolean percentMode = Boolean.TRUE.equals(call.getBoolean("percentMode", Boolean.FALSE));
         if (v == null) {
             call.reject("缺少 volume 参数");
             return;
@@ -1542,11 +1564,20 @@ public class NativePerceptionPlugin extends Plugin {
             AudioManager am = (AudioManager) getContext().getSystemService(Context.AUDIO_SERVICE);
             JSObject ret = new JSObject();
             if (am != null) {
-                int max = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC);
-                int vol = Math.max(0, Math.min(max, v));
-                am.setStreamVolume(AudioManager.STREAM_MUSIC, vol, 0);
+                int stream = streamOfName(streamName);
+                int max = am.getStreamMaxVolume(stream);
+                int vol;
+                if (percentMode) {
+                    int pct = Math.max(0, Math.min(100, v));
+                    vol = Math.max(0, Math.min(max, (int) Math.round(pct / 100.0 * max)));
+                } else {
+                    vol = Math.max(0, Math.min(max, v));
+                }
+                am.setStreamVolume(stream, vol, 0);
                 ret.put("ok", true);
                 ret.put("volume", vol);
+                ret.put("max", max);
+                ret.put("stream", streamName == null ? "media" : streamName.trim().toLowerCase(Locale.ROOT));
             } else {
                 ret.put("ok", false);
                 ret.put("reason", "unavailable");
@@ -1591,6 +1622,842 @@ public class NativePerceptionPlugin extends Plugin {
             }
             call.resolve(ret);
         }, "app-label").start();
+    }
+
+    // ================= v2.3.0 原生系统级工具（机主「AI 系统管家」需求） =================
+
+    /**
+     * 系统闹钟（AlarmClock.ACTION_SET_ALARM 标准协议，直接拉起系统时钟的闹钟设置）。
+     * 参数：hour（0-23）、minute（0-59）、label（可选备注）、skipUi（可选：true=部分
+     * ROM 支持免确认直接建）。返回 ok / reason（no-handler=设备无标准闹钟应用）。
+     */
+    @PluginMethod
+    public void setRealAlarm(PluginCall call) {
+        Integer hour = call.getInt("hour", null);
+        Integer minute = call.getInt("minute", null);
+        final String label = call.getString("label", "");
+        final boolean skipUi = Boolean.TRUE.equals(call.getBoolean("skipUi", Boolean.TRUE));
+        if (hour == null || minute == null || hour < 0 || hour > 23 || minute < 0 || minute > 59) {
+            call.reject("hour/minute 参数不合法（0-23 / 0-59）");
+            return;
+        }
+        try {
+            Intent i = new Intent(android.provider.AlarmClock.ACTION_SET_ALARM)
+                    .putExtra(android.provider.AlarmClock.EXTRA_HOUR, hour)
+                    .putExtra(android.provider.AlarmClock.EXTRA_MINUTES, minute)
+                    .putExtra(android.provider.AlarmClock.EXTRA_SKIP_UI, skipUi)
+                    .putExtra(android.provider.AlarmClock.EXTRA_MESSAGE, label == null ? "" : label)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            if (i.resolveActivity(getContext().getPackageManager()) == null) {
+                JSObject ret = new JSObject();
+                ret.put("ok", false);
+                ret.put("reason", "no-handler");
+                call.resolve(ret);
+                return;
+            }
+            boolean appVisible = MainActivity.isAppInForeground();
+            final Intent fi = i;
+            if (!appVisible) {
+                android.os.Handler main = new android.os.Handler(android.os.Looper.getMainLooper());
+                main.post(() -> {
+                    android.view.View bal = addBalExemptionOverlay();
+                    try {
+                        getContext().startActivity(fi);
+                    } finally {
+                        if (bal != null) main.postDelayed(() -> removeViewQuietly(bal), 800L);
+                    }
+                });
+            } else {
+                getContext().startActivity(i);
+            }
+            JSObject ret = new JSObject();
+            ret.put("ok", true);
+            ret.put("hour", hour);
+            ret.put("minute", minute);
+            call.resolve(ret);
+        } catch (Throwable t) {
+            JSObject ret = new JSObject();
+            ret.put("ok", false);
+            ret.put("reason", t.getMessage() == null ? "start-failed" : t.getMessage());
+            call.resolve(ret);
+        }
+    }
+
+    /**
+     * 系统倒计时/计时器（AlarmClock.ACTION_SET_TIMER 标准协议）。
+     * 参数：seconds（>0）、label（可选）。返回 ok / reason。
+     */
+    @PluginMethod
+    public void startCountdown(PluginCall call) {
+        Integer seconds = call.getInt("seconds", null);
+        final String label = call.getString("label", "");
+        if (seconds == null || seconds <= 0 || seconds > 24 * 3600 * 100) {
+            call.reject("seconds 参数不合法（正整数秒）");
+            return;
+        }
+        try {
+            Intent i = new Intent(android.provider.AlarmClock.ACTION_SET_TIMER)
+                    .putExtra(android.provider.AlarmClock.EXTRA_LENGTH, seconds)
+                    .putExtra(android.provider.AlarmClock.EXTRA_MESSAGE, label == null ? "" : label)
+                    .putExtra(android.provider.AlarmClock.EXTRA_SKIP_UI, true)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            if (i.resolveActivity(getContext().getPackageManager()) == null) {
+                JSObject ret = new JSObject();
+                ret.put("ok", false);
+                ret.put("reason", "no-handler");
+                call.resolve(ret);
+                return;
+            }
+            boolean appVisible = MainActivity.isAppInForeground();
+            final Intent fi = i;
+            if (!appVisible) {
+                android.os.Handler main = new android.os.Handler(android.os.Looper.getMainLooper());
+                main.post(() -> {
+                    android.view.View bal = addBalExemptionOverlay();
+                    try {
+                        getContext().startActivity(fi);
+                    } finally {
+                        if (bal != null) main.postDelayed(() -> removeViewQuietly(bal), 800L);
+                    }
+                });
+            } else {
+                getContext().startActivity(i);
+            }
+            JSObject ret = new JSObject();
+            ret.put("ok", true);
+            ret.put("seconds", seconds);
+            call.resolve(ret);
+        } catch (Throwable t) {
+            JSObject ret = new JSObject();
+            ret.put("ok", false);
+            ret.put("reason", t.getMessage() == null ? "start-failed" : t.getMessage());
+            call.resolve(ret);
+        }
+    }
+
+    /**
+     * 写入系统日历（CalendarContract 直写 ContentResolver，静默无 UI）：
+     * 找第一个可见日历账号 → INSERT Events。需要 WRITE_CALENDAR 运行时权限。
+     * 参数：title（必填）、beginTs/endTs（毫秒时间戳，缺 end 用 begin+1h）、location（可选）、
+     * allDay（可选：跨天日程）。直写失败（无默认日历/权限拒绝）降级 ACTION_INSERT
+     * 意图（拉起日历应用预填好让机主确认）。
+     */
+    @PluginMethod
+    public void createCalendarEvent(PluginCall call) {
+        final String title = call.getString("title", "");
+        Long beginTs = call.getLong("beginTs", null);
+        Long endTs = call.getLong("endTs", null);
+        final String location = call.getString("location", "");
+        final boolean allDay = Boolean.TRUE.equals(call.getBoolean("allDay", Boolean.FALSE));
+        if (title == null || title.trim().isEmpty()) {
+            call.reject("缺少 title 参数");
+            return;
+        }
+        final long begin = beginTs != null && beginTs > 0 ? beginTs : System.currentTimeMillis();
+        final long end = endTs != null && endTs > begin ? endTs : begin + 3600_000L;
+        final PluginCall fcall = call;
+        new Thread(() -> {
+            JSObject ret = new JSObject();
+            try {
+                Context ctx = getContext();
+                // ① 找第一个可写的可见日历
+                long calId = -1;
+                String calName = "";
+                try (Cursor c = ctx.getContentResolver().query(
+                        android.provider.CalendarContract.Calendars.CONTENT_URI,
+                        new String[]{android.provider.CalendarContract.Calendars._ID,
+                                android.provider.CalendarContract.Calendars.CALENDAR_DISPLAY_NAME,
+                                android.provider.CalendarContract.Calendars.CALENDAR_ACCESS_LEVEL},
+                        android.provider.CalendarContract.Calendars.VISIBLE + "=1", null,
+                        android.provider.CalendarContract.Calendars.CALENDAR_ACCESS_LEVEL + " DESC")) {
+                    if (c != null) {
+                        while (c.moveToNext()) {
+                            int access = c.getInt(2);
+                            if (access >= android.provider.CalendarContract.Calendars.CAL_ACCESS_CONTRIBUTOR) {
+                                calId = c.getLong(0);
+                                calName = c.getString(1);
+                                break;
+                            }
+                        }
+                        if (calId < 0 && c.getCount() > 0) {
+                            c.moveToFirst();
+                            calId = c.getLong(0);
+                            calName = c.getString(1);
+                        }
+                    }
+                }
+                if (calId > 0) {
+                    // ② 直写 Events（静默）
+                    android.content.ContentValues cv = new android.content.ContentValues();
+                    cv.put(android.provider.CalendarContract.Events.CALENDAR_ID, calId);
+                    cv.put(android.provider.CalendarContract.Events.TITLE, title.trim());
+                    cv.put(android.provider.CalendarContract.Events.DTSTART, begin);
+                    if (allDay) {
+                        cv.put(android.provider.CalendarContract.Events.ALL_DAY, 1);
+                        cv.put(android.provider.CalendarContract.Events.DTSTART, beginOfDay(begin));
+                        cv.put(android.provider.CalendarContract.Events.DTEND, beginOfDay(end));
+                    } else {
+                        cv.put(android.provider.CalendarContract.Events.ALL_DAY, 0);
+                        cv.put(android.provider.CalendarContract.Events.DTSTART, begin);
+                        cv.put(android.provider.CalendarContract.Events.DTEND, end);
+                    }
+                    if (location != null && !location.trim().isEmpty()) {
+                        cv.put(android.provider.CalendarContract.Events.EVENT_LOCATION, location.trim());
+                    }
+                    cv.put(android.provider.CalendarContract.Events.EVENT_TIMEZONE,
+                            java.util.TimeZone.getDefault().getID());
+                    Uri uri = ctx.getContentResolver()
+                            .insert(android.provider.CalendarContract.Events.CONTENT_URI, cv);
+                    if (uri != null) {
+                        ret.put("ok", true);
+                        ret.put("via", "insert");
+                        ret.put("calendar", calName);
+                        ret.put("eventTitle", title.trim());
+                        fcall.resolve(ret);
+                        return;
+                    }
+                }
+                // ③ 直写失败 → 降级 ACTION_INSERT（拉起日历应用预填好）
+                Intent i = new Intent(Intent.ACTION_INSERT)
+                        .setData(android.provider.CalendarContract.Events.CONTENT_URI)
+                        .putExtra(android.provider.CalendarContract.EXTRA_EVENT_BEGIN_TIME, begin)
+                        .putExtra(android.provider.CalendarContract.EXTRA_EVENT_END_TIME, end)
+                        .putExtra(android.provider.CalendarContract.Events.TITLE, title.trim())
+                        .putExtra(android.provider.CalendarContract.Events.ALL_DAY, allDay ? 1 : 0)
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                if (i.resolveActivity(ctx.getPackageManager()) == null) {
+                    ret.put("ok", false);
+                    ret.put("reason", "no-calendar-app");
+                    fcall.resolve(ret);
+                    return;
+                }
+                boolean appVisible = MainActivity.isAppInForeground();
+                final Intent fi = i;
+                if (!appVisible) {
+                    android.os.Handler main = new android.os.Handler(android.os.Looper.getMainLooper());
+                    main.post(() -> {
+                        android.view.View bal = addBalExemptionOverlay();
+                        try {
+                            ctx.startActivity(fi);
+                        } finally {
+                            if (bal != null) main.postDelayed(() -> removeViewQuietly(bal), 800L);
+                        }
+                    });
+                } else {
+                    ctx.startActivity(i);
+                }
+                ret.put("ok", true);
+                ret.put("via", "intent");
+                ret.put("eventTitle", title.trim());
+                fcall.resolve(ret);
+            } catch (SecurityException se) {
+                ret.put("ok", false);
+                ret.put("reason", "no-permission");
+                fcall.resolve(ret);
+            } catch (Throwable t) {
+                ret.put("ok", false);
+                ret.put("reason", t.getMessage() == null ? "failed" : t.getMessage());
+                fcall.resolve(ret);
+            }
+        }, "cal-event").start();
+    }
+
+    /** 当天零点（allDay 日程的 DTSTART/DTEND 对齐） */
+    private long beginOfDay(long ts) {
+        java.util.Calendar c = java.util.Calendar.getInstance();
+        c.setTimeInMillis(ts);
+        c.set(java.util.Calendar.HOUR_OF_DAY, 0);
+        c.set(java.util.Calendar.MINUTE, 0);
+        c.set(java.util.Calendar.SECOND, 0);
+        c.set(java.util.Calendar.MILLISECOND, 0);
+        return c.getTimeInMillis();
+    }
+
+    /**
+     * 拨打电话：CALL_PHONE 权限已授 → Intent.ACTION_CALL 直接拨；未授权 →
+     * ACTION_DIAL 拉起拨号盘预填号码（机主按一下拨号键）。返回 via 标记。
+     */
+    @PluginMethod
+    public void makePhoneCall(PluginCall call) {
+        final String phone = call.getString("phoneNumber", "");
+        if (phone == null || phone.trim().isEmpty()) {
+            call.reject("缺少 phoneNumber 参数");
+            return;
+        }
+        try {
+            Context ctx = getContext();
+            boolean appVisible = MainActivity.isAppInForeground();
+            boolean hasCallPerm = ContextCompat.checkSelfPermission(ctx,
+                    android.Manifest.permission.CALL_PHONE) == PackageManager.PERMISSION_GRANTED;
+            Intent i;
+            String via;
+            if (hasCallPerm) {
+                i = new Intent(Intent.ACTION_CALL, Uri.parse("tel:" + phone.trim()));
+                via = "direct-call";
+            } else {
+                i = new Intent(Intent.ACTION_DIAL, Uri.parse("tel:" + phone.trim()));
+                via = "dialer";
+            }
+            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            final Intent fi = i;
+            if (!appVisible) {
+                android.os.Handler main = new android.os.Handler(android.os.Looper.getMainLooper());
+                main.post(() -> {
+                    android.view.View bal = addBalExemptionOverlay();
+                    try {
+                        ctx.startActivity(fi);
+                    } finally {
+                        if (bal != null) main.postDelayed(() -> removeViewQuietly(bal), 800L);
+                    }
+                });
+            } else {
+                ctx.startActivity(i);
+            }
+            JSObject ret = new JSObject();
+            ret.put("ok", true);
+            ret.put("via", via);
+            ret.put("phoneNumber", phone.trim());
+            call.resolve(ret);
+        } catch (Throwable t) {
+            JSObject ret = new JSObject();
+            ret.put("ok", false);
+            ret.put("reason", t.getMessage() == null ? "start-failed" : t.getMessage());
+            call.resolve(ret);
+        }
+    }
+
+    /**
+     * 发短信：SEND_SMS 权限已授 → SmsManager 静默直接发送；未授权 →
+     * ACTION_SENDTO sms: 拉起短信应用预填收件人与正文。返回 via 标记。
+     */
+    @PluginMethod
+    public void sendSMS(PluginCall call) {
+        final String phone = call.getString("phoneNumber", "");
+        final String message = call.getString("message", "");
+        if (phone == null || phone.trim().isEmpty() || message == null || message.trim().isEmpty()) {
+            call.reject("缺少 phoneNumber / message 参数");
+            return;
+        }
+        try {
+            Context ctx = getContext();
+            boolean hasSmsPerm = ContextCompat.checkSelfPermission(ctx,
+                    android.Manifest.permission.SEND_SMS) == PackageManager.PERMISSION_GRANTED;
+            if (hasSmsPerm) {
+                android.telephony.SmsManager sm = android.os.Build.VERSION.SDK_INT >= 31
+                        ? ctx.getSystemService(android.telephony.SmsManager.class)
+                        : android.telephony.SmsManager.getDefault();
+                if (sm == null) {
+                    JSObject ret = new JSObject();
+                    ret.put("ok", false);
+                    ret.put("reason", "no-sms-service");
+                    call.resolve(ret);
+                    return;
+                }
+                // 长短信自动分段发送
+                java.util.ArrayList<String> parts = sm.divideMessage(message.trim());
+                if (parts.size() <= 1) {
+                    sm.sendTextMessage(phone.trim(), null, message.trim(), null, null);
+                } else {
+                    sm.sendMultipartTextMessage(phone.trim(), null, parts, null, null);
+                }
+                JSObject ret = new JSObject();
+                ret.put("ok", true);
+                ret.put("via", "silent");
+                ret.put("phoneNumber", phone.trim());
+                call.resolve(ret);
+            } else {
+                // 降级：拉起短信应用预填（机主点一下发送）
+                Intent i = new Intent(Intent.ACTION_SENDTO, Uri.parse("smsto:" + phone.trim()))
+                        .putExtra("sms_body", message.trim())
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                boolean appVisible = MainActivity.isAppInForeground();
+                final Intent fi = i;
+                if (!appVisible) {
+                    android.os.Handler main = new android.os.Handler(android.os.Looper.getMainLooper());
+                    main.post(() -> {
+                        android.view.View bal = addBalExemptionOverlay();
+                        try {
+                            ctx.startActivity(fi);
+                        } finally {
+                            if (bal != null) main.postDelayed(() -> removeViewQuietly(bal), 800L);
+                        }
+                    });
+                } else {
+                    ctx.startActivity(i);
+                }
+                JSObject ret = new JSObject();
+                ret.put("ok", true);
+                ret.put("via", "compose");
+                ret.put("phoneNumber", phone.trim());
+                call.resolve(ret);
+            }
+        } catch (Throwable t) {
+            JSObject ret = new JSObject();
+            ret.put("ok", false);
+            ret.put("reason", t.getMessage() == null ? "send-failed" : t.getMessage());
+            call.resolve(ret);
+        }
+    }
+
+    /**
+     * 查真机通讯录（ContactsContract 按显示名模糊匹配；需 READ_CONTACTS）：
+     * 返回 contacts:[{name, phone}]（最多 20 条，含多号码展开）。
+     */
+    @PluginMethod
+    public void searchRealContact(PluginCall call) {
+        final String name = call.getString("name", "");
+        if (name == null || name.trim().isEmpty()) {
+            call.reject("缺少 name 参数");
+            return;
+        }
+        final PluginCall fcall = call;
+        new Thread(() -> {
+            JSObject ret = new JSObject();
+            try {
+                Context ctx = getContext();
+                if (ContextCompat.checkSelfPermission(ctx, android.Manifest.permission.READ_CONTACTS)
+                        != PackageManager.PERMISSION_GRANTED) {
+                    ret.put("ok", false);
+                    ret.put("reason", "no-permission");
+                    fcall.resolve(ret);
+                    return;
+                }
+                String kw = name.trim();
+                java.util.ArrayList<JSONObject> out = new java.util.ArrayList<>();
+                // ① 按 display name 匹配联系人 id
+                java.util.LinkedHashSet<Long> ids = new java.util.LinkedHashSet<>();
+                try (Cursor c = ctx.getContentResolver().query(
+                        android.provider.ContactsContract.Contacts.CONTENT_URI,
+                        new String[]{android.provider.ContactsContract.Contacts._ID,
+                                android.provider.ContactsContract.Contacts.DISPLAY_NAME},
+                        android.provider.ContactsContract.Contacts.DISPLAY_NAME + " LIKE ?",
+                        new String[]{"%" + kw + "%"}, null)) {
+                    if (c != null) {
+                        while (c.moveToNext() && ids.size() < 20) {
+                            long id = c.getLong(0);
+                            String nm = c.getString(1);
+                            ids.add(id);
+                        }
+                    }
+                }
+                // ② 逐个取号码（含多号码）
+                for (long id : ids) {
+                    try (Cursor p = ctx.getContentResolver().query(
+                            android.provider.ContactsContract.CommonDataKinds.Phone.CONTENT_URI,
+                            new String[]{android.provider.ContactsContract.CommonDataKinds.Phone.NUMBER,
+                                    android.provider.ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME,
+                                    android.provider.ContactsContract.CommonDataKinds.Phone.TYPE},
+                            android.provider.ContactsContract.CommonDataKinds.Phone.CONTACT_ID + "=?",
+                            new String[]{String.valueOf(id)}, null)) {
+                        if (p != null) {
+                            while (p.moveToNext() && out.size() < 20) {
+                                String num = p.getString(0);
+                                if (num == null || num.trim().isEmpty()) continue;
+                                String nm = p.getString(1);
+                                int type = p.getInt(2);
+                                String typeLabel;
+                                switch (type) {
+                                    case android.provider.ContactsContract.CommonDataKinds.Phone.TYPE_MOBILE:
+                                        typeLabel = "手机"; break;
+                                    case android.provider.ContactsContract.CommonDataKinds.Phone.TYPE_HOME:
+                                        typeLabel = "宅电"; break;
+                                    case android.provider.ContactsContract.CommonDataKinds.Phone.TYPE_WORK:
+                                        typeLabel = "工作"; break;
+                                    default: typeLabel = "电话"; break;
+                                }
+                                JSONObject o = new JSONObject();
+                                o.put("name", nm == null ? kw : nm);
+                                o.put("phone", num.trim());
+                                o.put("type", typeLabel);
+                                out.add(o);
+                            }
+                        }
+                    }
+                }
+                ret.put("ok", true);
+                JSArray arr = new JSArray();
+                for (JSONObject o : out) arr.put(o);
+                ret.put("contacts", arr);
+                ret.put("count", out.size());
+                fcall.resolve(ret);
+            } catch (Throwable t) {
+                ret.put("ok", false);
+                ret.put("reason", t.getMessage() == null ? "failed" : t.getMessage());
+                fcall.resolve(ret);
+            }
+        }, "contact-search").start();
+    }
+
+    /** 手电筒开关（CameraManager.setTorchMode；无需相机运行时权限） */
+    @PluginMethod
+    public void toggleFlashlight(PluginCall call) {
+        final boolean on = Boolean.TRUE.equals(call.getBoolean("on", Boolean.TRUE));
+        try {
+            android.hardware.camera2.CameraManager cm =
+                    (android.hardware.camera2.CameraManager) getContext()
+                            .getSystemService(Context.CAMERA_SERVICE);
+            if (cm == null) {
+                JSObject ret = new JSObject();
+                ret.put("ok", false);
+                ret.put("reason", "no-camera-service");
+                call.resolve(ret);
+                return;
+            }
+            String found = null;
+            boolean hasFlash = false;
+            for (String id : cm.getCameraIdList()) {
+                Boolean torch = cm.getCameraCharacteristics(id)
+                        .get(android.hardware.camera2.CameraCharacteristics.FLASH_INFO_AVAILABLE);
+                if (Boolean.TRUE.equals(torch)) {
+                    found = id;
+                    hasFlash = true;
+                    break;
+                }
+            }
+            if (!hasFlash || found == null) {
+                JSObject ret = new JSObject();
+                ret.put("ok", false);
+                ret.put("reason", "no-flash");
+                call.resolve(ret);
+                return;
+            }
+            final String camId = found;
+            cm.setTorchMode(camId, on);
+            JSObject ret = new JSObject();
+            ret.put("ok", true);
+            ret.put("on", on);
+            call.resolve(ret);
+        } catch (Throwable t) {
+            JSObject ret = new JSObject();
+            ret.put("ok", false);
+            ret.put("reason", t.getMessage() == null ? "failed" : t.getMessage());
+            call.resolve(ret);
+        }
+    }
+
+    /**
+     * 真实 GPS 定位（LocationManager：lastKnownLocation 优先 + 8s 单次刷新；
+     * Geocoder 解析城市）。需位置运行时权限。返回 lat/lng/accuracy/city/address。
+     */
+    @PluginMethod
+    public void getRealLocation(PluginCall call) {
+        final PluginCall fcall = call;
+        new Thread(() -> {
+            JSObject ret = new JSObject();
+            try {
+                Context ctx = getContext();
+                boolean fine = ContextCompat.checkSelfPermission(ctx,
+                        android.Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED;
+                boolean coarse = ContextCompat.checkSelfPermission(ctx,
+                        android.Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED;
+                if (!fine && !coarse) {
+                    ret.put("ok", false);
+                    ret.put("reason", "no-permission");
+                    fcall.resolve(ret);
+                    return;
+                }
+                android.location.LocationManager lm =
+                        (android.location.LocationManager) ctx.getSystemService(Context.LOCATION_SERVICE);
+                if (lm == null) {
+                    ret.put("ok", false);
+                    ret.put("reason", "no-location-service");
+                    fcall.resolve(ret);
+                    return;
+                }
+                // ① lastKnownLocation（快）
+                android.location.Location best = null;
+                List<String> providers = lm.getProviders(true);
+                for (String p : providers) {
+                    try {
+                        android.location.Location l = lm.getLastKnownLocation(p);
+                        if (l != null && (best == null || l.getTime() > best.getTime())) best = l;
+                    } catch (SecurityException ignored) {
+                    }
+                }
+                // ② 太旧（>2 分钟）或没有 → 单次请求刷新（最多 8 秒，GPS+网络双通道）
+                boolean fresh = best != null && System.currentTimeMillis() - best.getTime() < 120_000L;
+                if (!fresh) {
+                    final CountDownLatch latch = new CountDownLatch(1);
+                    final AtomicReference<android.location.Location> got = new AtomicReference<>(null);
+                    android.location.LocationListener listener = new android.location.LocationListener() {
+                        @Override
+                        public void onLocationChanged(android.location.Location location) {
+                            android.location.Location cur = got.get();
+                            if (cur == null || location.getAccuracy() < cur.getAccuracy()) {
+                                got.set(location);
+                            }
+                            latch.countDown();
+                        }
+                    };
+                    try {
+                        if (fine && lm.isProviderEnabled(android.location.LocationManager.GPS_PROVIDER)) {
+                            lm.requestLocationUpdates(android.location.LocationManager.GPS_PROVIDER,
+                                    0, 0, listener, android.os.Looper.getMainLooper());
+                        }
+                        if (lm.isProviderEnabled(android.location.LocationManager.NETWORK_PROVIDER)) {
+                            lm.requestLocationUpdates(android.location.LocationManager.NETWORK_PROVIDER,
+                                    0, 0, listener, android.os.Looper.getMainLooper());
+                        }
+                        latch.await(8, TimeUnit.SECONDS);
+                    } catch (Throwable ignored) {
+                    } finally {
+                        try {
+                            lm.removeUpdates(listener);
+                        } catch (Throwable ignored) {
+                        }
+                    }
+                    if (got.get() != null
+                            && (best == null || got.get().getTime() > best.getTime())) {
+                        best = got.get();
+                    }
+                }
+                if (best == null) {
+                    ret.put("ok", false);
+                    ret.put("reason", "no-fix");
+                    fcall.resolve(ret);
+                    return;
+                }
+                ret.put("ok", true);
+                ret.put("lat", best.getLatitude());
+                ret.put("lng", best.getLongitude());
+                ret.put("accuracy", Math.round(best.getAccuracy()));
+                // ③ Geocoder 城市解析（失败不影响定位结果）
+                try {
+                    android.location.Geocoder gc = new android.location.Geocoder(ctx, Locale.getDefault());
+                    List<android.location.Address> addrs = gc.getFromLocation(
+                            best.getLatitude(), best.getLongitude(), 1);
+                    if (addrs != null && !addrs.isEmpty()) {
+                        android.location.Address a = addrs.get(0);
+                        String city = a.getLocality();
+                        if (city == null || city.isEmpty()) city = a.getSubAdminArea();
+                        if (city == null || city.isEmpty()) city = a.getAdminArea();
+                        if (city != null && !city.isEmpty()) ret.put("city", city);
+                        StringBuilder sb = new StringBuilder();
+                        for (int i = 0; i <= Math.max(a.getMaxAddressLineIndex(), 0); i++) {
+                            String line = a.getAddressLine(i);
+                            if (line != null && !line.isEmpty()) {
+                                if (sb.length() > 0) sb.append(" ");
+                                sb.append(line);
+                            }
+                        }
+                        if (sb.length() > 0) ret.put("address", sb.toString());
+                    }
+                } catch (Throwable ignored) {
+                }
+                fcall.resolve(ret);
+            } catch (Throwable t) {
+                ret.put("ok", false);
+                ret.put("reason", t.getMessage() == null ? "failed" : t.getMessage());
+                fcall.resolve(ret);
+            }
+        }, "real-location").start();
+    }
+
+    /**
+     * 系统应用直达（机主抱怨 openApp 只会找包名）：「时钟」「闹钟」「日历」「计算器」
+     * 这类系统应用直接走标准 Intent 协议（ACTION_SHOW_ALARMS / Calendar / CALCULATOR
+     * category 等），绝不遍历应用清单。返回 ok / via（intent / launch）/ reason。
+     */
+    @PluginMethod
+    public void openSystemApp(PluginCall call) {
+        final String nameRaw = call.getString("name", "");
+        final String name = nameRaw == null ? "" : nameRaw.trim().toLowerCase(Locale.ROOT);
+        if (name.isEmpty()) {
+            call.reject("缺少 name 参数");
+            return;
+        }
+        try {
+            Context ctx = getContext();
+            Intent direct = systemAppIntent(ctx, name);
+            if (direct == null) {
+                JSObject ret = new JSObject();
+                ret.put("ok", false);
+                ret.put("reason", "unknown-app");
+                call.resolve(ret);
+                return;
+            }
+            boolean appVisible = MainActivity.isAppInForeground();
+            final Intent fi = direct;
+            if (!appVisible) {
+                android.os.Handler main = new android.os.Handler(android.os.Looper.getMainLooper());
+                main.post(() -> {
+                    android.view.View bal = addBalExemptionOverlay();
+                    try {
+                        ctx.startActivity(fi);
+                    } finally {
+                        if (bal != null) main.postDelayed(() -> removeViewQuietly(bal), 800L);
+                    }
+                });
+            } else {
+                ctx.startActivity(direct);
+            }
+            JSObject ret = new JSObject();
+            ret.put("ok", true);
+            ret.put("via", "intent");
+            call.resolve(ret);
+        } catch (Throwable t) {
+            JSObject ret = new JSObject();
+            ret.put("ok", false);
+            ret.put("reason", t.getMessage() == null ? "start-failed" : t.getMessage());
+            call.resolve(ret);
+        }
+    }
+
+    /** 系统应用标准 Intent 映射（中英别名 → 标准协议；无匹配返回 null） */
+    private Intent systemAppIntent(Context ctx, String name) {
+        // 闹钟列表 / 时钟（标准 AlarmClock 协议，绝不需要包名）
+        if (name.contains("闹钟") || name.contains("alarm")) {
+            return new Intent(android.provider.AlarmClock.ACTION_SHOW_ALARMS)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        }
+        if (name.contains("时钟") || name.contains("clock") || name.contains("时间")
+                || name.contains("计时") || name.contains("timer") || name.contains("秒表")) {
+            Intent i = new Intent(android.provider.AlarmClock.ACTION_SHOW_TIMERS)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            if (i.resolveActivity(ctx.getPackageManager()) != null) return i;
+            // 无计时器协议 → 拉系统时钟主包（常见 OEM 时钟）
+            for (String pkg : new String[]{"com.android.deskclock", "com.sec.android.app.clockpackage",
+                    "com.google.android.deskclock", "com.android.calendar"}) {
+                Intent li = ctx.getPackageManager().getLaunchIntentForPackage(pkg);
+                if (li != null) {
+                    li.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                    return li;
+                }
+            }
+            return new Intent(android.provider.AlarmClock.ACTION_SHOW_ALARMS)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        }
+        // 日历
+        if (name.contains("日历") || name.contains("calendar") || name.contains("日程")) {
+            Intent li = ctx.getPackageManager().getLaunchIntentForPackage("com.android.calendar");
+            if (li == null) li = ctx.getPackageManager().getLaunchIntentForPackage("com.google.android.calendar");
+            if (li != null) {
+                li.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                return li;
+            }
+            return new Intent(Intent.ACTION_VIEW)
+                    .setData(android.provider.CalendarContract.Events.CONTENT_URI)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        }
+        // 计算器（CATEGORY_APP_CALCULATOR 标准协议）
+        if (name.contains("计算") || name.contains("calculator") || name.contains("calc")) {
+            return Intent.makeMainSelectorActivity(Intent.ACTION_MAIN, Intent.CATEGORY_APP_CALCULATOR)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        }
+        // 设置
+        if (name.contains("设置") || name.contains("setting")) {
+            return new Intent(Settings.ACTION_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        }
+        // 相机
+        if (name.contains("相机") || name.contains("拍照") || name.contains("camera")) {
+            // 相机无 CATEGORY_APP_CAMERA 常量：MediaStore 标准拍照模式 Intent
+            return new Intent(android.provider.MediaStore.INTENT_ACTION_STILL_IMAGE_CAMERA)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        }
+        // 图库/相册
+        if (name.contains("图库") || name.contains("相册") || name.contains("照片")
+                || name.contains("gallery") || name.contains("photo")) {
+            return Intent.makeMainSelectorActivity(Intent.ACTION_MAIN, Intent.CATEGORY_APP_GALLERY)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        }
+        // 联系人/通讯录
+        if (name.contains("联系人") || name.contains("通讯录") || name.contains("contact")) {
+            return new Intent(Intent.ACTION_VIEW)
+                    .setData(android.provider.ContactsContract.Contacts.CONTENT_URI)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        }
+        // 拨号/电话
+        if (name.contains("拨号") || name.contains("电话") || name.contains("dial") || name.contains("phone")) {
+            return new Intent(Intent.ACTION_DIAL).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        }
+        // 短信/信息
+        if (name.contains("短信") || name.contains("信息") || name.contains("sms") || name.contains("message")) {
+            return new Intent(Intent.ACTION_MAIN)
+                    .addCategory(Intent.CATEGORY_APP_MESSAGING)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        }
+        // 浏览器
+        if (name.contains("浏览器") || name.contains("browser")) {
+            return Intent.makeMainSelectorActivity(Intent.ACTION_MAIN, Intent.CATEGORY_APP_BROWSER)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        }
+        // 邮件
+        if (name.contains("邮件") || name.contains("email") || name.contains("邮箱")) {
+            return Intent.makeMainSelectorActivity(Intent.ACTION_MAIN, Intent.CATEGORY_APP_EMAIL)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        }
+        // 音乐（标准 CATEGORY_APP_MUSIC）
+        if (name.contains("音乐") || name.contains("music") || name.contains("播放器")) {
+            return Intent.makeMainSelectorActivity(Intent.ACTION_MAIN, Intent.CATEGORY_APP_MUSIC)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        }
+        return null;
+    }
+
+    /** v2.3.0：发送短信权限查询/申请（权限中心 + sendSMS 工具前置） */
+    @PluginMethod
+    public void sendSmsPermission(PluginCall call) {
+        PermissionState s = getPermissionStates().get("sendSms");
+        JSObject ret = new JSObject();
+        ret.put("granted", s == PermissionState.GRANTED);
+        ret.put("canAsk", s == PermissionState.PROMPT);
+        call.resolve(ret);
+    }
+
+    @PluginMethod
+    public void requestSendSmsPermission(PluginCall call) {
+        PermissionState s = getPermissionStates().get("sendSms");
+        if (s == PermissionState.GRANTED) {
+            resolvePerm(call, true, false);
+            return;
+        }
+        if (s == PermissionState.PROMPT) {
+            requestPermissionForAlias("sendSms", call, "sendSmsPermissionCallback");
+            return;
+        }
+        resolvePerm(call, false, false);
+    }
+
+    @PermissionCallback
+    private void sendSmsPermissionCallback(PluginCall call) {
+        PermissionState s = getPermissionStates().get("sendSms");
+        JSObject ret = new JSObject();
+        ret.put("granted", s == PermissionState.GRANTED);
+        ret.put("canAsk", s == PermissionState.PROMPT);
+        call.resolve(ret);
+    }
+
+    /** v2.3.0：拨打电话权限查询/申请 */
+    @PluginMethod
+    public void callPhonePermission(PluginCall call) {
+        PermissionState s = getPermissionStates().get("callPhone");
+        JSObject ret = new JSObject();
+        ret.put("granted", s == PermissionState.GRANTED);
+        ret.put("canAsk", s == PermissionState.PROMPT);
+        call.resolve(ret);
+    }
+
+    @PluginMethod
+    public void requestCallPhonePermission(PluginCall call) {
+        PermissionState s = getPermissionStates().get("callPhone");
+        if (s == PermissionState.GRANTED) {
+            resolvePerm(call, true, false);
+            return;
+        }
+        if (s == PermissionState.PROMPT) {
+            requestPermissionForAlias("callPhone", call, "callPhonePermissionCallback");
+            return;
+        }
+        resolvePerm(call, false, false);
+    }
+
+    @PermissionCallback
+    private void callPhonePermissionCallback(PluginCall call) {
+        PermissionState s = getPermissionStates().get("callPhone");
+        JSObject ret = new JSObject();
+        ret.put("granted", s == PermissionState.GRANTED);
+        ret.put("canAsk", s == PermissionState.PROMPT);
+        call.resolve(ret);
     }
 
     // ================= Mobile Agent 底座（保留，与 Shizuku 无关） =================

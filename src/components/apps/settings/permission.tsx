@@ -1,6 +1,6 @@
 'use client';
 
-// 权限给予页（v2.1.0：系统权限 14 项（新增修改系统设置/开机自启动/常驻守护）+ 通知/麦克风 / 时长数据源 / AI 动手范围）。
+// 权限给予页（v2.3.0：系统权限 16 项（新增发送短信/拨打电话）+ 通知/麦克风 / 时长数据源 / AI 动手范围）。
 
 import {
   useCallback,
@@ -28,6 +28,7 @@ import {
   Mic,
   MousePointerClick,
   PanelTop,
+  Phone,
   Power,
   RefreshCw,
   ShieldCheck,
@@ -57,7 +58,7 @@ import {
   type AiActionTarget,
 } from '@/lib/ios/device-autonomy';
 
-// v2.1.0 权限中心 14 项：全部经原生系统 API / 无障碍服务（AiAccessibilityService），
+// v2.3.0 权限中心 16 项：全部经原生系统 API / 无障碍服务（AiAccessibilityService），
 // Shizuku 通道整体退役
 import {
   accessibilityPermission,
@@ -84,12 +85,16 @@ import {
   requestAlarmPermission,
   requestBatteryPermission,
   requestCalendarPermission,
+  requestCallPhonePermission,
   requestContactsPermission,
   requestLocationPermission,
   requestMediaFilesPermission,
   requestMicPermission,
   requestOverlayPermission,
+  requestSendSmsPermission,
   requestSmsPermission,
+  callPhonePermission,
+  sendSmsPermission,
   smsPermission,
   writeSettingsPermission,
 } from '@/lib/ios/native-perception';
@@ -111,7 +116,7 @@ import {
 } from './shared';
 
 
-// ---------------- 权限给予（v2.1.0：机主 14 项系统权限 + 通知/麦克风；v1.9.40 弹窗去长文·看门狗防卡「申请中」仍生效） ----------------
+// ---------------- 权限给予（v2.3.0：机主 16 项系统权限 + 通知/麦克风；v1.9.40 弹窗去长文·看门狗防卡「申请中」仍生效） ----------------
 
 /** 单个权限的运行时状态（v1.9.38：网页里也能授权，无「需真机」态） */
 export type PermState = 'checking' | 'granted' | 'denied' | 'web-denied';
@@ -161,7 +166,7 @@ export interface PermDef {
 
 /**
  * 权限给予页的权限清单。
- * v2.1.0 机主 14 项排前（无障碍/使用情况/悬浮窗/通知使用/短信/通讯录/日历/闹钟/位置/
+ * v2.3.0 机主 16 项排前（无障碍/使用情况/悬浮窗/通知使用/短信/发送短信/拨打电话/通讯录/日历/闹钟/位置/
  * 媒体文件/电池优化/修改系统设置/开机自启动/常驻守护），通知/麦克风并列其后；全部走原生系统 API + 无障碍服务，无 Shizuku。
  * v1.9.38 基础权限全部无需真机：通知/麦克风/位置走浏览器授权框，
  * 其余在网页里点「去开启」即完成授权（网页授权账本记账）；
@@ -232,7 +237,7 @@ function permRequestFallback(
 }
 
 export const PERM_DEFS: PermDef[] = [
-  // ---- 机主 14 项（v2.0.0 权限中心 11 项 + v2.1.0 防杀后台三件套；检测 + 原生 Intent 直跳系统授权页） ----
+  // ---- 机主 16 项（v2.0.0 权限中心 11 项 + v2.1.0 防杀后台三件套 + v2.3.0 发送短信/拨打电话；检测 + 原生 Intent 直跳系统授权页） ----
   {
     key: 'accessibility',
     label: '无障碍服务',
@@ -318,6 +323,52 @@ export const PERM_DEFS: PermDef[] = [
           'sms',
           '短信权限已开启',
           '申请通道异常，请重试；或到 系统设置 › 应用 › 权限 手动开启短信权限',
+        );
+      }
+      if (r.granted) return { ok: true };
+      if (r.canAsk === false) return { ok: false, note: '系统已停用授权弹窗：请去系统设置手动开启' };
+      return { ok: false };
+    },
+  },
+  {
+    // v2.3.0 原生系统级工具：AI 静默发短信（sendSMS）
+    key: 'sendSms',
+    label: '发送短信',
+    desc: '让 AI 直接替你发短信（未开则拉起短信应用预填）',
+    icon: MessageSquareText,
+    actionLabel: '允许发送短信',
+    persistDeniedFallback: true,
+    query: () => queryPermState('sendSms', () => sendSmsPermission()),
+    request: async () => {
+      const r = await requestSendSmsPermission();
+      if (r === null) {
+        return permRequestFallback(
+          'sendSms',
+          '发送短信权限已开启',
+          '申请通道异常，请重试；或到 系统设置 › 应用 › 权限 手动开启短信权限（需 APP v2.3.0+）',
+        );
+      }
+      if (r.granted) return { ok: true };
+      if (r.canAsk === false) return { ok: false, note: '系统已停用授权弹窗：请去系统设置手动开启' };
+      return { ok: false };
+    },
+  },
+  {
+    // v2.3.0 原生系统级工具：AI 直接拨打电话（makePhoneCall）
+    key: 'callPhone',
+    label: '拨打电话',
+    desc: '让 AI 直接替你拨号（未开则拉拨号盘预填号码）',
+    icon: Phone,
+    actionLabel: '允许直接拨打电话',
+    persistDeniedFallback: true,
+    query: () => queryPermState('callPhone', () => callPhonePermission()),
+    request: async () => {
+      const r = await requestCallPhonePermission();
+      if (r === null) {
+        return permRequestFallback(
+          'callPhone',
+          '拨打电话权限已开启',
+          '申请通道异常，请重试；或到 系统设置 › 应用 › 权限 手动开启电话权限（需 APP v2.3.0+）',
         );
       }
       if (r.granted) return { ok: true };
@@ -530,7 +581,7 @@ export const PERM_DEFS: PermDef[] = [
       return { ok: true, note: '常驻守护已开启' };
     },
   },
-  // ---- 既有权限（与 14 项并列展示） ----
+  // ---- 既有权限（与 16 项并列展示） ----
   {
     key: 'mic',
     label: '麦克风权限',
@@ -779,7 +830,7 @@ export function PermissionHubPage({ onBack }: { onBack: () => void }) {
           </p>
         </div>
 
-        {/* ===== 基础权限（机主 14 项 + 通知/麦克风） ===== */}
+        {/* ===== 基础权限（机主 16 项 + 通知/麦克风） ===== */}
         <SectionLabel icon={ShieldCheck} tone="#34C759" right={
           <button
             type="button"

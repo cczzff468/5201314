@@ -181,6 +181,15 @@ export function toolStatusLabel(
     swipeScreen: '滑屏幕',
     inputText: '输入文字',
     pressKey: '按按键',
+    // v2.3.0 原生系统级工具
+    setRealAlarm: '定系统闹钟',
+    startCountdown: '开系统倒计时',
+    createCalendarEvent: '写系统日历',
+    makePhoneCall: '拨打电话',
+    sendSMS: '发短信',
+    searchRealContact: '查真机通讯录',
+    toggleFlashlight: '开关手电筒',
+    getRealLocation: '查你的定位',
   };
 
   const action = actionMap[toolName] || `调用${toolName}`;

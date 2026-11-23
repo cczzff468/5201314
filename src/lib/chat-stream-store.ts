@@ -45,6 +45,8 @@ import { apiChainOf } from '@/lib/api-fallback';
 import { safeLlmFetch } from '@/lib/ios/api-circuit-breaker';
 import { directChatStream, isPrivateApiUrl } from '@/lib/ios/direct-api';
 import { createReplySegmentScanner, replyMinTarget } from '@/lib/reply-count';
+// v2.3.0 F-11：裸 JSON 工具调用提取/剥除（segSink 投递关口拦截 + finalize 代执行）
+import { extractJsonToolCalls, stripJsonToolCalls } from '@/lib/ios/json-tool-calls';
 // 深度思考：流式统一剥离 [思考]…[/思考] 块（正文/分段器只见纯正文，思考内容单独收集交 finalize）
 import { createThinkFilter } from '@/lib/deep-think';
 import { describeImagesAuto } from '@/lib/vision-client';
@@ -585,9 +587,29 @@ async function runStream(rt: StreamRuntime, opts: BeginChatStreamOptions): Promi
   // 原文只在本模块累计（raw），不写入展示状态 —— 流式期间页面只显示「正在输入」，
   // 不再有「先全文后消失」的流式气泡；分段与展示状态完全分离（流式和分条不改同一块状态）
   const multi = typeof opts.replyCount === 'number' && opts.replyCount > 1;
-  // onSegment 直通包装：保持与分段器同源的单回调口径（v74 删补发后不再计数已投分段，
-  // 原计数只服务于已删除的条数补发判定）
-  const segSink = opts.onSegment ? (seg: string): void => { opts.onSegment?.(seg); } : null;
+  // v2.3.0 F-11 流式关口拦截：模型把工具调用写成裸 JSON 文本流进来（非 tool_calls 通道）——
+  // 分段器会把整段 JSON 当正文放出上屏（机主实测「显示 {"name": "switchToChat", …} 没反应」）。
+  // segSink 投递关口先过 extractJsonToolCalls：整段就是 JSON 调用 → 扣下存 pendingJsonCalls
+  // （finalize 前统一代执行，工具气泡照常）；混合段（正文里夹 JSON）→ 投递剥净后的正文。
+  const pendingJsonCalls: Array<{ name: string; args: Record<string, unknown> }> = [];
+  const segSink = opts.onSegment
+    ? (seg: string): void => {
+        const calls = extractJsonToolCalls(seg);
+        if (calls.length > 0) {
+          const clean = stripJsonToolCalls(seg);
+          if (calls.length > 0 && clean === null) {
+            // 整段就是裸 JSON 工具调用：不上屏，转交 finalize 代执行
+            for (const c of calls) pendingJsonCalls.push(c);
+            return;
+          }
+          // 混合段：剥净后投递（极少见——JSON 通常独立成段）
+          if (clean) opts.onSegment?.(clean);
+          for (const c of calls) pendingJsonCalls.push(c);
+          return;
+        }
+        opts.onSegment?.(seg);
+      }
+    : null;
   let scanner = multi && segSink ? createReplySegmentScanner(segSink) : null;
   // 深度思考剥离器：与分段器同源同生命周期（SDK 兜底重建时一并重建）；未输出 [思考] 块的
   // 会话零行为变化（纯透传），输出过则正文/思考两侧永不合流
@@ -1041,6 +1063,69 @@ async function runStream(rt: StreamRuntime, opts: BeginChatStreamOptions): Promi
           scanner?.push(tkEnd.text);
         }
         if (tkEnd.thinking) thinkText += tkEnd.thinking;
+        // v2.3.0 F-11 流式兜底（机主实测「在别的 App 让 AI 切回聊天，偶尔显示
+        // {"name": "getForegroundApp", "arguments": {}} 没反应」的另一半根因）：
+        // 非任务句式不进工具轮 → 流式管线把模型写成文本的裸 JSON 工具调用当正文显示。
+        // segSink 关口已拦截整段 JSON（pendingJsonCalls）；这里统一代执行（工具气泡照常）
+        // + 正文剥掉残余 JSON + 重置分段器（held 里扣住的 JSON 段作废）。
+        try {
+          const rawCalls = extractJsonToolCalls(raw);
+          const merged = [...pendingJsonCalls];
+          const seenKeys = new Set(pendingJsonCalls.map((c) => `${c.name}:${JSON.stringify(c.args)}`));
+          for (const c of rawCalls) {
+            const k = `${c.name}:${JSON.stringify(c.args)}`;
+            if (!seenKeys.has(k)) {
+              seenKeys.add(k);
+              merged.push(c);
+            }
+          }
+          if (merged.length > 0) {
+            const clean = stripJsonToolCalls(raw) ?? '';
+            const { execWebTool, toolActionText } = await import('@/lib/ios/phone-tools');
+            const { pushToolStatusBubble, updateLastToolStatus } = await import('@/lib/ios/tool-status-bubble');
+            const charName = opts.charName || 'TA';
+            const detResults: Array<{ label: string; text: string }> = [];
+            for (const jc of merged) {
+              try {
+                const actionText = await toolActionText(jc.name, jc.args);
+                if (opts.sessionKey && actionText) {
+                  pushToolStatusBubble(opts.sessionKey, { title: `${charName}正在${actionText}...`, status: 'pending' });
+                }
+                const result = await execWebTool(jc.name, jc.args);
+                detResults.push({ label: actionText || jc.name, text: result });
+                const isFail = result.startsWith('【失败】');
+                if (opts.sessionKey && actionText) {
+                  updateLastToolStatus(opts.sessionKey, {
+                    title: isFail ? `${charName}尝试${actionText}失败了` : `${charName}已${actionText}`,
+                    status: isFail ? 'fail' : 'done',
+                  });
+                }
+              } catch {
+                /* 单个工具失败不影响其余提取 */
+              }
+            }
+            raw = clean;
+            // 整条回复就是裸 JSON（已代执行）：生成一句直白汇报文案兜底，
+            // 绝不让 finalize 拿到空 content 报「空回复」错误
+            if (!raw) {
+              const ok = detResults.filter((r) => !r.text.startsWith('【失败】')).map((r) => r.label);
+              const fail = detResults.filter((r) => r.text.startsWith('【失败】'));
+              const parts: string[] = [];
+              if (ok.length > 0) parts.push(`已经帮你${ok.join('、')}了`);
+              for (const f of fail.slice(0, 2)) {
+                parts.push(`${f.label}没成功：${f.text.replace(/^【失败】/, '').slice(0, 50)}`);
+              }
+              raw = parts.join('；') || '（已经办好了）';
+            }
+            // 重置分段器：held 里扣住的裸 JSON 段一并作废，按净化/兜底文本重新分段
+            if (multi && segSink) {
+              scanner = createReplySegmentScanner(segSink);
+              if (raw) scanner.push(raw);
+            }
+          }
+        } catch {
+          /* 兜底层异常不影响正常收尾 */
+        }
         // v2.4-fix2：finalize 前先放出 scanner 全部剩余段（held 里扣住的多句）。
         // 症状：第二句「三个点」显示但没发——held 里的段没通过 onSegment 投递，
         // 仅靠 finalize.tail 只能取回最后一段，前面的 held 段丢失。

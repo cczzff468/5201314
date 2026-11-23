@@ -115,9 +115,9 @@ public class LockOverlayService extends Service {
     private static final String CHANNEL_ID = "lock_guard";
     private static final int NOTIFY_ID = 7791;
 
-    /** 轮询周期：v2.2.5 F-3 2s → 1s（无障碍实时钩子为主，这里只是无障碍未开启时的
-     *  兜底——机主实测拦截窗弹出太慢，兜底通道再快一倍：无障碍可用时零延迟，不可用时 ≤1s） */
-    private static final long POLL_MS = 1000L;
+    /** 轮询周期：v2.3.0 F-3 再提速 1s → 700ms（无障碍实时钩子为主，这里只是无障碍
+     *  未开启时的兜底——机主实测拦截窗弹出太慢：无障碍可用时零延迟，不可用时 ≤0.7s） */
+    private static final long POLL_MS = 700L;
 
     /** 同一次拦截的防抖窗（800ms 内无障碍事件 + 轮询双通道同时命中只算一次） */
     private static final long HIT_DEBOUNCE_MS = 800L;
@@ -324,6 +324,14 @@ public class LockOverlayService extends Service {
     private void handleLockHit(String via) {
         try {
             long now = System.currentTimeMillis();
+            // v2.3.0 F-10 到期硬闸（机主实测「到时间了点击应用还是会有弹窗」）：
+            // 无障碍实时钩子可能在到期与下一轮 tick（1s）之间的窗口期命中——到期
+            // 的锁绝不弹窗，直接走到期解锁链路（免得弹一个秒收的幽灵窗）。
+            if (unlockAt != 0 && now >= unlockAt) {
+                persistEvent("native-unlock", lockPkg, "");
+                internalUnlock("expired");
+                return;
+            }
             // 双通道防抖：800ms 内无障碍 + 轮询同时命中只算一次拦截
             if (now - lastHitAt < HIT_DEBOUNCE_MS) return;
             lastHitAt = now;
@@ -456,6 +464,31 @@ public class LockOverlayService extends Service {
             overlayView = buildOverlayView();
             wm.addView(overlayView, lp);
             overlayShowing = true;
+            // v2.3.0 F-2 美化增强：入场动画（整体淡入 + 轻微上浮——比硬生生闪出
+            // 更精致，180ms 不拖累拦截速度）；视图动画必须主线程执行
+            try {
+                final View content = overlayView;
+                content.setAlpha(0f);
+                content.setTranslationY(dp(14));
+                new Handler(Looper.getMainLooper()).post(() -> {
+                    try {
+                        content.animate().alpha(1f).translationY(0f)
+                                .setDuration(180L)
+                                .withEndAction(() -> {
+                                    try {
+                                        content.setAlpha(1f);
+                                        content.setTranslationY(0f);
+                                    } catch (Throwable ignored) {
+                                    }
+                                })
+                                .start();
+                    } catch (Throwable ignored) {
+                        // 动画失败不影响拦截
+                    }
+                });
+            } catch (Throwable ignored) {
+                // 动画链路绝不 crash
+            }
             startUiTick(); // v2.2.0：遮罩期间倒计时每秒刷新
         } catch (Throwable t) {
             overlayShowing = false;

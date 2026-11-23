@@ -93,6 +93,54 @@ export interface NativeActionResult {
   via?: string;
 }
 
+/** v2.3.0 原生系统级工具结果 */
+export interface NativeAlarmResult {
+  ok?: boolean;
+  hour?: number;
+  minute?: number;
+  seconds?: number;
+  reason?: string;
+}
+
+export interface NativeCalendarResult {
+  ok?: boolean;
+  via?: 'insert' | 'intent';
+  calendar?: string;
+  eventTitle?: string;
+  reason?: string;
+}
+
+export interface NativeCallSmsResult {
+  ok?: boolean;
+  /** direct-call=直接拨 / dialer=拉拨号盘 / silent=静默发送 / compose=拉短信应用预填 */
+  via?: string;
+  phoneNumber?: string;
+  reason?: string;
+}
+
+export interface RealContactItem {
+  name: string;
+  phone: string;
+  type: string;
+}
+
+export interface NativeContactResult {
+  ok?: boolean;
+  contacts?: RealContactItem[];
+  count?: number;
+  reason?: string;
+}
+
+export interface NativeLocationResult {
+  ok?: boolean;
+  lat?: number;
+  lng?: number;
+  accuracy?: number;
+  city?: string;
+  address?: string;
+  reason?: string;
+}
+
 type CapPlugin = {
   hasUsagePermission(): Promise<{ granted: boolean }>;
   openUsagePermissionSettings(): Promise<void>;
@@ -178,6 +226,20 @@ type CapPlugin = {
   keepAliveStart(): Promise<{ ok?: boolean; reason?: string }>;
   keepAliveStop(): Promise<{ ok?: boolean }>;
   bootAutoStartStatus(): Promise<RuntimePermResult & { enabled?: boolean }>;
+  /** v2.3.0 原生系统级工具组 */
+  setRealAlarm(options: { hour: number; minute: number; label?: string }): Promise<NativeAlarmResult>;
+  startCountdown(options: { seconds: number; label?: string }): Promise<NativeAlarmResult>;
+  createCalendarEvent(options: { title: string; beginTs?: number; endTs?: number; location?: string; allDay?: boolean }): Promise<NativeCalendarResult>;
+  makePhoneCall(options: { phoneNumber: string }): Promise<NativeCallSmsResult>;
+  sendSMS(options: { phoneNumber: string; message: string }): Promise<NativeCallSmsResult>;
+  searchRealContact(options: { name: string }): Promise<NativeContactResult>;
+  toggleFlashlight(options: { on: boolean }): Promise<{ ok?: boolean; on?: boolean; reason?: string }>;
+  getRealLocation(): Promise<NativeLocationResult>;
+  openSystemApp(options: { name: string }): Promise<NativeActionResult>;
+  sendSmsPermission(): Promise<RuntimePermResult>;
+  requestSendSmsPermission(): Promise<RuntimePermResult>;
+  callPhonePermission(): Promise<RuntimePermResult>;
+  requestCallPhonePermission(): Promise<RuntimePermResult>;
 };
 
 type CapacitorCore = {
@@ -417,6 +479,20 @@ function bridgePlugin(): CapPlugin {
     keepAliveStart: () => nativeCall<{ ok?: boolean; reason?: string }>('keepAliveStart', {}, 8000),
     keepAliveStop: () => nativeCall<{ ok?: boolean }>('keepAliveStop', {}, 8000),
     bootAutoStartStatus: () => nativeCall<RuntimePermResult & { enabled?: boolean }>('bootAutoStartStatus'),
+    // v2.3.0 原生系统级工具组
+    setRealAlarm: (options) => nativeCall<NativeAlarmResult>('setRealAlarm', options ?? {}, 8000),
+    startCountdown: (options) => nativeCall<NativeAlarmResult>('startCountdown', options ?? {}, 8000),
+    createCalendarEvent: (options) => nativeCall<NativeCalendarResult>('createCalendarEvent', options ?? {}, 12_000),
+    makePhoneCall: (options) => nativeCall<NativeCallSmsResult>('makePhoneCall', options ?? {}, 8000),
+    sendSMS: (options) => nativeCall<NativeCallSmsResult>('sendSMS', options ?? {}, 10_000),
+    searchRealContact: (options) => nativeCall<NativeContactResult>('searchRealContact', options ?? {}, 10_000),
+    toggleFlashlight: (options) => nativeCall<{ ok?: boolean; on?: boolean; reason?: string }>('toggleFlashlight', options ?? {}, 6000),
+    getRealLocation: () => nativeCall<NativeLocationResult>('getRealLocation', {}, 15_000),
+    openSystemApp: (options) => nativeCall<NativeActionResult>('openSystemApp', options ?? {}, 8000),
+    sendSmsPermission: () => nativeCall<RuntimePermResult>('sendSmsPermission'),
+    requestSendSmsPermission: () => nativeCall<RuntimePermResult>('requestSendSmsPermission', {}, 60_000),
+    callPhonePermission: () => nativeCall<RuntimePermResult>('callPhonePermission'),
+    requestCallPhonePermission: () => nativeCall<RuntimePermResult>('requestCallPhonePermission', {}, 60_000),
   };
 }
 
@@ -789,6 +865,188 @@ export async function nativeSetRingerMode(mode: 'silent' | 'vibrate' | 'normal')
   if (!p) return null;
   try {
     return await nativeOrTimeout(p.setRingerMode({ mode }), 8000);
+  } catch {
+    return null;
+  }
+}
+
+// ---------------- v2.3.0 原生系统级工具组 ----------------
+
+/** 定系统闹钟（AlarmClock.ACTION_SET_ALARM 标准协议，直接进系统时钟） */
+export async function nativeSetRealAlarm(
+  hour: number,
+  minute: number,
+  label?: string,
+): Promise<{ ok: boolean; reason?: string; hour?: number; minute?: number }> {
+  if (!isNativePerception()) return { ok: false, reason: 'not-native' };
+  try {
+    const r = await nativeCall<NativeAlarmResult>('setRealAlarm', { hour, minute, label }, 8000);
+    return { ok: r?.ok === true, reason: r?.reason, hour: r?.hour, minute: r?.minute };
+  } catch {
+    return { ok: false, reason: '桥无响应' };
+  }
+}
+
+/** 系统倒计时/计时器（AlarmClock.ACTION_SET_TIMER 标准协议） */
+export async function nativeStartCountdown(
+  seconds: number,
+  label?: string,
+): Promise<{ ok: boolean; reason?: string; seconds?: number }> {
+  if (!isNativePerception()) return { ok: false, reason: 'not-native' };
+  try {
+    const r = await nativeCall<NativeAlarmResult>('startCountdown', { seconds, label }, 8000);
+    return { ok: r?.ok === true, reason: r?.reason, seconds: r?.seconds };
+  } catch {
+    return { ok: false, reason: '桥无响应' };
+  }
+}
+
+/** 写系统日历（CalendarContract 直写，失败降级日历应用预填） */
+export async function nativeCreateCalendarEvent(opts: {
+  title: string;
+  beginTs?: number;
+  endTs?: number;
+  location?: string;
+  allDay?: boolean;
+}): Promise<{ ok: boolean; via?: string; calendar?: string; reason?: string }> {
+  if (!isNativePerception()) return { ok: false, reason: 'not-native' };
+  try {
+    const r = await nativeCall<NativeCalendarResult>('createCalendarEvent', opts, 12_000);
+    return { ok: r?.ok === true, via: r?.via, calendar: r?.calendar, reason: r?.reason };
+  } catch {
+    return { ok: false, reason: '桥无响应' };
+  }
+}
+
+/** 拨打电话（有 CALL_PHONE 权限直接拨，否则拉拨号盘预填） */
+export async function nativeMakePhoneCall(
+  phoneNumber: string,
+): Promise<{ ok: boolean; via?: string; reason?: string }> {
+  if (!isNativePerception()) return { ok: false, reason: 'not-native' };
+  try {
+    const r = await nativeCall<NativeCallSmsResult>('makePhoneCall', { phoneNumber }, 8000);
+    return { ok: r?.ok === true, via: r?.via, reason: r?.reason };
+  } catch {
+    return { ok: false, reason: '桥无响应' };
+  }
+}
+
+/** 发短信（有 SEND_SMS 权限 SmsManager 静默发，否则拉短信应用预填） */
+export async function nativeSendSMS(
+  phoneNumber: string,
+  message: string,
+): Promise<{ ok: boolean; via?: string; reason?: string }> {
+  if (!isNativePerception()) return { ok: false, reason: 'not-native' };
+  try {
+    const r = await nativeCall<NativeCallSmsResult>('sendSMS', { phoneNumber, message }, 10_000);
+    return { ok: r?.ok === true, via: r?.via, reason: r?.reason };
+  } catch {
+    return { ok: false, reason: '桥无响应' };
+  }
+}
+
+/** 查真机通讯录（按名字模糊匹配，需 READ_CONTACTS） */
+export async function nativeSearchRealContact(
+  name: string,
+): Promise<{ ok: boolean; contacts?: RealContactItem[]; reason?: string }> {
+  if (!isNativePerception()) return { ok: false, reason: 'not-native' };
+  try {
+    const r = await nativeCall<NativeContactResult>('searchRealContact', { name }, 10_000);
+    return { ok: r?.ok === true, contacts: r?.contacts ?? [], reason: r?.reason };
+  } catch {
+    return { ok: false, reason: '桥无响应' };
+  }
+}
+
+/** 手电筒开关（CameraManager.setTorchMode） */
+export async function nativeToggleFlashlight(on: boolean): Promise<{ ok: boolean; on?: boolean; reason?: string }> {
+  if (!isNativePerception()) return { ok: false, reason: 'not-native' };
+  try {
+    const r = await nativeCall<{ ok?: boolean; on?: boolean; reason?: string }>('toggleFlashlight', { on }, 6000);
+    return { ok: r?.ok === true, on: r?.on, reason: r?.reason };
+  } catch {
+    return { ok: false, reason: '桥无响应' };
+  }
+}
+
+/** 真实 GPS 定位（lastKnown + 8s 单次刷新；Geocoder 反解城市） */
+export async function nativeGetRealLocation(): Promise<NativeLocationResult | null> {
+  if (!isNativePerception()) return null;
+  try {
+    return await nativeCall<NativeLocationResult>('getRealLocation', {}, 15_000);
+  } catch {
+    return null;
+  }
+}
+
+/** 系统应用直达（时钟/闹钟/日历/计算器…标准 Intent，不找包名） */
+export async function nativeOpenSystemApp(name: string): Promise<{ ok: boolean; reason?: string; via?: string }> {
+  if (!isNativePerception()) return { ok: false, reason: 'not-native' };
+  try {
+    const r = await nativeCall<NativeActionResult>('openSystemApp', { name }, 8000);
+    return { ok: r?.ok === true, reason: r?.reason, via: r?.via };
+  } catch {
+    return { ok: false, reason: '桥无响应' };
+  }
+}
+
+/** 指定音量流设音量（media/alarm/ring/call；percentMode=0-100 百分比，原生按流实际最大档换算） */
+export async function nativeSetVolumeStream(
+  volume: number,
+  stream: 'media' | 'alarm' | 'ring' | 'call',
+): Promise<{ ok: boolean; volume?: number; max?: number; reason?: string }> {
+  if (!isNativePerception()) return { ok: false, reason: 'not-native' };
+  try {
+    const r = await nativeCall<{ ok?: boolean; volume?: number; max?: number; reason?: string }>(
+      'setVolume',
+      { volume, stream, percentMode: true },
+      6000,
+    );
+    return { ok: r?.ok === true, volume: r?.volume, max: r?.max, reason: r?.reason };
+  } catch {
+    return { ok: false, reason: '桥无响应' };
+  }
+}
+
+/** 发送短信权限查询（权限中心；null=旧 APK 无此方法） */
+export async function sendSmsPermission(): Promise<RuntimePermResult | null> {
+  const p = await nativePlugin();
+  if (!p) return null;
+  try {
+    return await nativeOrTimeout(p.sendSmsPermission());
+  } catch {
+    return null;
+  }
+}
+
+/** 发送短信权限申请 */
+export async function requestSendSmsPermission(): Promise<RuntimePermResult | null> {
+  const p = await nativePlugin();
+  if (!p) return null;
+  try {
+    return await nativeOrTimeout(p.requestSendSmsPermission(), 60_000);
+  } catch {
+    return null;
+  }
+}
+
+/** 拨打电话权限查询（权限中心；null=旧 APK 无此方法） */
+export async function callPhonePermission(): Promise<RuntimePermResult | null> {
+  const p = await nativePlugin();
+  if (!p) return null;
+  try {
+    return await nativeOrTimeout(p.callPhonePermission());
+  } catch {
+    return null;
+  }
+}
+
+/** 拨打电话权限申请 */
+export async function requestCallPhonePermission(): Promise<RuntimePermResult | null> {
+  const p = await nativePlugin();
+  if (!p) return null;
+  try {
+    return await nativeOrTimeout(p.requestCallPhonePermission(), 60_000);
   } catch {
     return null;
   }
