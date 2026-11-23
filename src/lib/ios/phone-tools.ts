@@ -551,14 +551,14 @@ export function buildPhoneTools(): PhoneToolDef[] {
     );
     add(
       'getVolume',
-      '查看机主真实手机当前的媒体音量档位（原生 AudioManager）。',
+      '查看机主真实手机当前的媒体音量（原生 AudioManager；返回百分比与真实档位，如「媒体音量：47%（档位 14/30）」）。要调大调小时先看这个，再设一个更高/更低的百分比。',
       {},
       [],
     );
     add(
       'setVolume',
-      '调节机主真实手机的媒体音量（原生 AudioManager）。volume 填 0-15 的整数（0=静音，15=最大）。机主说「声音调小点」「静音」「音量调到最大」时用这个。',
-      { volume: { type: 'number', description: '音量档位 0-15（0=静音，15=最大）' } },
+      '调节机主真实手机的媒体音量（原生 AudioManager）。volume 填 0-100 的音量百分比（0=静音，100=该手机最大音量——系统会自动换算成真机实际档位，各机型最大档不同不影响）。机主说「声音调大点/小点/最大/静音」时用这个；想精准就先调 getVolume 看当前百分比，调大一般比当前高 20 左右、调小低 20 左右。',
+      { volume: { type: 'number', description: '音量百分比 0-100（0=静音，100=该手机最大音量）' } },
       ['volume'],
     );
     add(
@@ -771,8 +771,8 @@ export async function execWebTool(name: string, args: Record<string, unknown>): 
         return runDeviceTool((d) => d.labVolume());
       case 'setVolume': {
         const vol = Number(args.volume);
-        if (!Number.isFinite(vol)) return '【失败】setVolume 缺音量档位（volume，0-15 整数）';
-        const clamped = Math.max(0, Math.min(15, Math.round(vol)));
+        if (!Number.isFinite(vol)) return '【失败】setVolume 缺音量百分比（volume，0-100；0=静音 100=最大）';
+        const clamped = Math.max(0, Math.min(100, Math.round(vol)));
         return runDeviceTool((d) => d.labSetVolume(clamped));
       }
       case 'getBrightness':
@@ -797,9 +797,11 @@ export async function execWebTool(name: string, args: Record<string, unknown>): 
         return labText(await toolSearchRealApp(S(args.keyword)));
       case 'lockApp': {
         // 中文名/包名 → labLockApp 全屏拦截锁；minutes 缺省 = 锁到哄好为止（unlockAt=0）
+        // v2.11：minutes Number 强转（弱模型常发字符串 "30"，旧 typeof number 判断会静默忽略 → 误变永久锁）
         const appName = S(args.appName);
         if (!appName) return '【失败】lockApp 缺应用名（appName，填中文名如「抖音」或包名 com.ss.android.ugc.aweme）';
-        const minutes = typeof args.minutes === 'number' && args.minutes > 0 ? args.minutes : 0;
+        const minutesNum = Number(args.minutes);
+        const minutes = Number.isFinite(minutesNum) && minutesNum > 0 ? minutesNum : 0;
         const unlockAt = minutes > 0 ? Date.now() + Math.round(minutes) * 60_000 : 0;
         const message = S(args.message) || undefined;
         const charName = ctx.charName || undefined; // 无会话上下文时交原生用默认「TA」
@@ -835,14 +837,15 @@ export async function execWebTool(name: string, args: Record<string, unknown>): 
       }
       case 'freezeRealApp':
         // v2.2.0：durationMinutes 主参数（旧 duration 兼容读取）——AI 按人设自主计算锁定时长
+        // v2.11：Number 强转（弱模型常发字符串 "30"，旧 typeof number 判断会静默忽略）
         return labText(
           await toolFreezeRealApp(S(args.packageName), {
             reason: S(args.reason) || undefined,
             durationMin:
-              typeof args.durationMinutes === 'number' && args.durationMinutes > 0
-                ? args.durationMinutes
-                : typeof args.duration === 'number' && args.duration > 0
-                  ? args.duration
+              Number(args.durationMinutes) > 0
+                ? Number(args.durationMinutes)
+                : Number(args.duration) > 0
+                  ? Number(args.duration)
                   : undefined,
             charName: ctx.charName || undefined,
             contactId: ctx.contactId,
@@ -967,9 +970,13 @@ export async function execWebTool(name: string, args: Record<string, unknown>): 
 
 // ---------------- 工具轮请求（服务端代理 toolMode / 浏览器直连双路径） ----------------
 
-/** 上游「不支持 tools 参数」记忆（baseUrl|model → 失效时间）：本轮会话内不再重试，直接走流式 */
+/** 上游「不支持 tools 参数」记忆（baseUrl|model → 失效时间）：本轮会话内不再重试，直接走流式。
+ *  v2.11 TTL 30 分钟 → 5 分钟：部分网关瞬时 400（报错带 tool 字样，如 tools 数组格式抖动/
+ *  临时模型路由切换）也会被记进此缓存——30 分钟毒化整个工具通道，期间 AI 只能光嘴上
+ *  答应不动手（机主实测「锁QQ没锁/等会等会」的直接成因之一）；5 分钟既避免每次都撞墙
+ *  又能快速自愈。 */
 const FC_UNSUPPORTED = new Map<string, number>();
-const FC_UNSUPPORTED_TTL_MS = 30 * 60 * 1000;
+const FC_UNSUPPORTED_TTL_MS = 5 * 60 * 1000;
 
 /** 工具轮请求的出参（上游 choices[0].message 的最小形状） */
 export interface FcUpstreamMessage {
@@ -1078,7 +1085,12 @@ function looksLikeTaskInstruction(s: string): boolean {
   //    玩什么/看看我的屏幕——lookScreen/takeScreenshot/sendScreenshot 的口语入口；
   // ④ 音量口语补全：声音大一点/大点声/小点声/响一点/再大声一点（旧正则只认「音量」
   //    「调大调小」书面语）——setVolume 的口语入口。
-  return /发(个|条|给|一)(?!呆|毛|火|疯|麻|懵)|发送|发帖|问问|通知(我|TA|他|她|大家|群|一下|个)|搜索|搜一?下|找一?下|查(一?下|询)|记(个|一|下)|保存|备忘|闹钟|提醒(我|一?下)|(加|设|定|建)(个|一?个)提醒|播放|放首|放一?首|来首|切歌|换歌|点(个|一)?赞|(看|刷|逛|看看)(一?下|个|逛)?(帖子|论坛)|天气(怎么样|如何|咋样|呢|吗)|(明天|后天|大后天|周末|下周|下个?星期).{0,3}天气|(查|看看?)(一?下)?天气|下雨(吗|么|没有|没)|会(不)?下雨|要下雨|几度|温度(多少|几度|呢|吗)|(查|看看?)(一?下)?温度|打开|开一?下(?!玩笑)|去(备忘录|时钟|天气|论坛|微信|QQ)|在(微信|QQ|论坛)(上|里|中)?(发|问|@|艾特)|冻(结|上|住|一下|一小时|半小时|分钟)|解冻|解锁|解开?(屏幕|手机|应用|App|app)|锁屏|锁个屏|锁定?屏幕|锁(住|上|了|一下|一?下|定|死)?(手机|屏幕|微信|QQ|抖音|快手|B站|哔哩|小红书|微博|淘宝|京东|拼多多|美团|网易云|王者|荣耀|吃鸡|原神|番茄|阅读|闹钟|时钟|备忘录|浏览器|相册|相机|设置|应用|App|app|软件|游戏|它)|(把|将|帮我).{0,8}(锁|冻|停|挂起)|没收|别让(我|俺)(再)?(玩|刷|看|打开)|强(制)?停|挂起|停(掉|了)(.{0,6}(应用|App|app))|切回(聊天|界面|APP|App|来|咱们|我们的聊天)|回到(聊天|界面|APP|App|咱们|我们的聊天)|把我(拉|拽|切|弄)回|拉(我)?回(聊天|来|APP|App)|拽回|音量|调(大|小|高|低)|静音|大点声|小点声|(大|小)声(一?点|些|点儿)|声音(大|小|高|低|响|轻)|声(音|儿)?(再)?(大|小|高|低|响|轻)(一?点|些|点儿)?|响一(点|些|点儿)|(加|开)大(一?下)?声|亮屏|熄屏|截(个|一张)?屏|截(个|一张|一?张)?图|帮我截|屏幕截图|看屏幕|看(一)?看(我|我现在)的?屏幕|看(一)?看我在(玩|看|干|做|用)|看(一)?看我现在在|电量(多少|还剩|剩多少|呢|吗|咋样|怎么样)|还剩多少电|还有(多少|几格)电|(查|看看?)(一?下)?电量|后台(清理|耗电|占用|占内存|运行)|(清理?|清一?下|查|看看?)(一?下)?后台|强杀|叫(?:我|俺)[^，。！？!?,.\n]{0,8}(?:起床|起来|起身|出门|上班|上学|打卡)|(?:明早|明晚|明天早|早上|午睡|睡醒|到点|闹钟|叫醒|起床)[^，。！？!?,.\n]{0,10}叫(?:我|俺)|\d{1,2}\s*[点:：时][^，。！？!?,.\n]{0,10}叫(?:我|俺)/.test(s);
+  // v2.11（机主实测「锁应用光嘴上答应不锁」）：⑤ 名字在前句式全新——「QQ锁了吧」「抖音
+  //    给我封了」「微信冻结一下」「备忘录解了」这类应用名打头的锁/冻/封/解指令，旧正则
+  //    只认动词在前（锁QQ）和「把…锁」结构，名字打头的全部 MISS → 不进工具轮 →
+  //    模型只能光嘴上答应；新槽：APPNAMES(给我|帮我…)?(锁|封|冻|没收|停用|封印) 与
+  //    APPNAMES(解锁|解冻|解了)。
+  return /发(个|条|给|一)(?!呆|毛|火|疯|麻|懵)|发送|发帖|问问|通知(我|TA|他|她|大家|群|一下|个)|搜索|搜一?下|找一?下|查(一?下|询)|记(个|一|下)|保存|备忘|闹钟|提醒(我|一?下)|(加|设|定|建)(个|一?个)提醒|播放|放首|放一?首|来首|切歌|换歌|点(个|一)?赞|(看|刷|逛|看看)(一?下|个|逛)?(帖子|论坛)|天气(怎么样|如何|咋样|呢|吗)|(明天|后天|大后天|周末|下周|下个?星期).{0,3}天气|(查|看看?)(一?下)?天气|下雨(吗|么|没有|没)|会(不)?下雨|要下雨|几度|温度(多少|几度|呢|吗)|(查|看看?)(一?下)?温度|打开|开一?下(?!玩笑)|去(备忘录|时钟|天气|论坛|微信|QQ)|在(微信|QQ|论坛)(上|里|中)?(发|问|@|艾特)|冻(结|上|住|一下|一小时|半小时|分钟)|解冻|解锁|解开?(屏幕|手机|应用|App|app)|锁屏|锁个屏|锁定?屏幕|锁(住|上|了|一下|一?下|定|死)?(手机|屏幕|微信|QQ|抖音|快手|B站|哔哩|小红书|微博|淘宝|京东|拼多多|美团|网易云|王者|荣耀|吃鸡|原神|番茄|阅读|闹钟|时钟|备忘录|浏览器|相册|相机|设置|应用|App|app|软件|游戏|它)|(把|将|帮我).{0,8}(锁|冻|停|挂起)|没收|别让(我|俺)(再)?(玩|刷|看|打开)|强(制)?停|挂起|停(掉|了)(.{0,6}(应用|App|app))|切回(聊天|界面|APP|App|来|咱们|我们的聊天)|回到(聊天|界面|APP|App|咱们|我们的聊天)|把我(拉|拽|切|弄)回|拉(我)?回(聊天|来|APP|App)|拽回|音量|调(大|小|高|低)|静音|大点声|小点声|(大|小)声(一?点|些|点儿)|声音(大|小|高|低|响|轻)|声(音|儿)?(再)?(大|小|高|低|响|轻)(一?点|些|点儿)?|响一(点|些|点儿)|(加|开)大(一?下)?声|亮屏|熄屏|截(个|一张)?屏|截(个|一张|一?张)?图|帮我截|屏幕截图|看屏幕|看(一)?看(我|我现在)的?屏幕|看(一)?看我在(玩|看|干|做|用)|看(一)?看我现在在|电量(多少|还剩|剩多少|呢|吗|咋样|怎么样)|还剩多少电|还有(多少|几格)电|(查|看看?)(一?下)?电量|后台(清理|耗电|占用|占内存|运行)|(清理?|清一?下|查|看看?)(一?下)?后台|强杀|叫(?:我|俺)[^，。！？!?,.\n]{0,8}(?:起床|起来|起身|出门|上班|上学|打卡)|(?:明早|明晚|明天早|早上|午睡|睡醒|到点|闹钟|叫醒|起床)[^，。！？!?,.\n]{0,10}叫(?:我|俺)|\d{1,2}\s*[点:：时][^，。！？!?,.\n]{0,10}叫(?:我|俺)|(?:微信|QQ|抖音|快手|B站|哔哩|小红书|微博|淘宝|京东|拼多多|美团|网易云|王者|荣耀|吃鸡|原神|番茄|阅读|闹钟|时钟|备忘录|浏览器|相册|相机|设置|应用|App|app|软件|游戏)[，,、 ]{0,3}(?:给我|帮我|替我|快|赶紧|麻烦)?(?:锁|封|冻|没收|停用|封印)|(?:微信|QQ|抖音|快手|B站|哔哩|小红书|微博|淘宝|京东|拼多多|美团|网易云|王者|荣耀|吃鸡|原神|番茄|阅读|闹钟|时钟|备忘录|浏览器|相册|相机|设置|应用|App|app|软件)(?:解锁|解冻|解了)/.test(s);
 }
 
 /**
@@ -1180,6 +1192,271 @@ export function toolRoundNeeded(userText: string): boolean {
   return false; // 纯闲聊：流式直连，工具误命中从机制上杜绝
 }
 
+// ---------------- v2.11 确定性兜底执行（「锁QQ没锁/调音量没变化/等会等会」终极端兜底） ----------------
+//
+// 机主实测：弱 FC 模型 + 会静默降级 tool_choice 的网关，被 nudge 两次 + 最后通牒后仍可能
+// 光嘴上答应不动手（「这就锁哦~」「等我会儿~」）。对一小撮【高置信度、句式固定】的指令
+// （锁应用/解锁/调音量/切回聊天/截图），模型一轮逼问失败后由系统直接解析参数并强制代执行，
+// 执行结果回传模型收尾汇报——从机制上保证「让 TA 做，就一定真做了」。
+// 安全阀：解析器极严（否定语境/锁屏语义/说话动词全部排除）+ 只在 nudge 失败后触发 +
+// 模型已自己执行过同类动作时不重复执行。
+
+/** 高置信度锁应用指令可识别的应用名（不含 手机/屏幕——那是锁屏语义；不含 它/游戏 等代词泛指；大小写不敏感） */
+const DET_LOCK_APP_SRC =
+  '微信|QQ|抖音|快手|哔哩哔哩|B站|b站|小红书|微博|淘宝|京东|拼多多|美团|网易云|网易云音乐|QQ音乐|酷狗|汽水音乐|王者|王者荣耀|吃鸡|和平精英|原神|崩铁|星穹铁道|明日方舟|第五人格|蛋仔派对|光遇|金铲铲|番茄|番茄小说|七猫|飞卢|阅读|书城|闹钟|时钟|秒表|计时器|备忘录|便签|日记|浏览器|Chrome|夸克|相册|图库|相机|设置|应用商店|商店|游戏中心|贴吧|知乎|豆瓣|虎扑|斗鱼|虎牙|闲鱼|转转|得物|唯品会|钉钉|飞书|企业微信|Telegram|WhatsApp|ins|推特|Facebook|youtube|YouTube|TikTok|tiktok';
+
+/** 确定性兜底意图 */
+type DetIntent =
+  | { kind: 'lock'; app: string; minutes: number }
+  | { kind: 'unlock' }
+  | { kind: 'volume'; dir: 'up' | 'down' | 'max' | 'mute' }
+  | { kind: 'switchChat' }
+  | { kind: 'screenshot'; send: boolean };
+
+/** 代词/泛指名（解析命中也不代执行——无上下文解析不出具体包名，交还模型链路） */
+const DET_VAGUE_APPS = new Set(['它', '这个应用', '那个应用', '这个软件', '这软件', '游戏']);
+
+/** 编译缓存（模块级复用，避免每次调用重编长正则） */
+let detReCache: {
+  lockVerb: RegExp;
+  appBefore: RegExp;
+  appAfter: RegExp;
+} | null = null;
+function detRe(): { lockVerb: RegExp; appBefore: RegExp; appAfter: RegExp } {
+  if (!detReCache) {
+    detReCache = {
+      // 锁定动词（长枝先试防截断：没收/封印/封了/锁死/锁定/锁上/冻结/锁）——不含「停」（太泛）
+      lockVerb: /(没收|封(印|了)?|锁死|锁定?上?|冻结?|锁)/g,
+      // 名字在前：APP + 可选「给/给我/帮我/快…」助词后紧跟句尾动词位
+      appBefore: new RegExp(`(${DET_LOCK_APP_SRC})(给?我|帮我|快|快点|赶紧|麻烦)?\\s*$`, 'i'),
+      // 名字在后：动词 + 可选「了/一下/住/上」 + APP
+      appAfter: new RegExp(`^(了|一下|住|上)?\\s*(${DET_LOCK_APP_SRC})`, 'i'),
+    };
+  }
+  return detReCache;
+}
+
+/**
+ * 解析「锁应用」指令 → 应用名 + 时长（分钟，默认 30）。
+ * 命中条件：锁定动词 ±14 字符内有已知应用名（名字在前「把QQ锁了/抖音给我封了」或名字在后
+ * 「锁QQ/冻结备忘录」）。否定/被动/锁屏语境整体排除。
+ */
+function parseLockIntent(s: string): { kind: 'lock'; app: string; minutes: number } | null {
+  // 否定/被动/条件语境：别锁/不用锁/敢锁/再锁/被锁/被封（"我QQ被封了"是吐槽不是指令）
+  if (
+    /别(锁|冻|封|没收)|不许(锁|冻|封)|不准(锁|冻|封)|不用(锁|冻|封)|不要(锁|冻|封)|敢(锁|冻|封|没收)|再(锁|冻|封|没收)|被(锁|冻|封)|锁屏|锁定?屏幕|屏幕锁定|锁死屏幕|心.{0,3}(锁|封)/.test(s)
+  ) {
+    return null;
+  }
+  const { lockVerb, appBefore, appAfter } = detRe();
+  lockVerb.lastIndex = 0;
+  let m: RegExpExecArray | null;
+  while ((m = lockVerb.exec(s)) !== null) {
+    const i = m.index;
+    // 名字在前（动词前 14 字符内以应用名结尾）：把QQ锁了 / 抖音给我封了 / 微信冻结一下
+    const before = s.slice(Math.max(0, i - 14), i);
+    const bm = before.match(appBefore);
+    // 名字在后（动词后紧跟应用名）：锁QQ / 锁定抖音 / 冻结备忘录
+    const after = s.slice(i + m[0].length, i + m[0].length + 12);
+    const am = after.match(appAfter);
+    const app = bm?.[1] ?? am?.[2] ?? '';
+    if (!app || DET_VAGUE_APPS.has(app)) continue; // 代词/泛指名解析不出具体包名，交还模型链路
+    // 时长：N分钟 / N小时 / 半小时（缺省 30 分钟——与 freezeRealApp 默认口径一致）
+    let minutes = 30;
+    const dm = s.match(/(\d+(?:\.\d+)?)\s*(个小时|小时|钟头|分钟)|半个(小时|钟头)/);
+    if (dm) {
+      if (dm[0].includes('半')) minutes = 30;
+      else if (dm[2] === '分钟') minutes = Math.max(1, Math.round(parseFloat(dm[1])));
+      else minutes = Math.max(1, Math.round(parseFloat(dm[1]) * 60));
+    }
+    return { kind: 'lock', app, minutes };
+  }
+  return null;
+}
+
+/** 解析音量意图（up/down/max/mute）；显式语境（音量/媒体…）最可信，裸口语排除「大声唱/小声说」类说话语义 */
+function parseVolumeIntent(s: string): 'up' | 'down' | 'max' | 'mute' | null {
+  if (/(音量|媒体).{0,8}(最大|满格|拉满|开满)|(最大|满格|拉满).{0,3}(音量|媒体)/.test(s)) return 'max';
+  if (/(音量|声音|媒体|声儿).{0,8}(调大|开大|变大|加大|放大|大一点|大点|大声点?|调高|高一点|高些|再大|响一点?)/.test(s)) return 'up';
+  if (/(音量|声音|媒体|声儿).{0,8}(调小|变小|减小|降低|关小|小一点|小点|小声点?|调低|低一点|低些|轻一点?)/.test(s)) return 'down';
+  if (/(音量|媒体).{0,4}(静音|关掉|调成?零|设为?零)|静音(音量|媒体)/.test(s)) return 'mute';
+  // 裸口语（大点声/小声点）：后接唱/说/喊等说话动词时是「说话大声点」不是调音量——跳过
+  if (!/(大|小)声点?[唱说喊叫读笑骂]|[唱说喊叫读笑骂].{0,6}(大声|小声|大点|小点)/.test(s)) {
+    if (/大点声|大声点|再大(一)?点声|响一(点|些)/.test(s)) return 'up';
+    if (/小点声|小声点|小(一)?点声/.test(s)) return 'down';
+  }
+  return null;
+}
+
+/**
+ * 解析机主指令里的高置信度动手指令（确定性兜底执行用）。
+ * - 真机专属意图（音量/截图）仅在「AI 动手范围 = 真机」时产出（网页模式无对应工具）
+ * - 顺序：锁应用 > 解锁 > 音量 > 切回聊天 > 截图；最多取 3 条防误伤
+ */
+function parseDeterministicIntents(sRaw: string): DetIntent[] {
+  const s = stripChatNativeArchives(String(sRaw || ''));
+  if (!s.trim()) return [];
+  const device = getAiActionTarget() === 'device';
+  const out: DetIntent[] = [];
+  const lock = parseLockIntent(s);
+  if (lock) out.push(lock);
+  if (!/屏幕|锁屏|新成就|成就|关卡|谜题|谜语/.test(s) && /解锁|解冻/.test(s)) {
+    out.push({ kind: 'unlock' });
+  }
+  if (device) {
+    const vol = parseVolumeIntent(s);
+    if (vol) out.push({ kind: 'volume', dir: vol });
+  }
+  if (/切回(聊天|界面|APP|App|来|咱们|我们的)|回到(聊天|界面|APP|App|咱们的聊天)|把我(拉|拽|切|弄)回|拉(我)?回(聊天|来|APP|App)|拽(我)?回/.test(s)) {
+    out.push({ kind: 'switchChat' });
+  }
+  if (device && !/别截|不许截|不要截/.test(s) && /截图|截屏|截(个|一张|一?张)(图|屏)/.test(s)) {
+    out.push({ kind: 'screenshot', send: /发(给|过来|给我|我看看|我)/.test(s) });
+  }
+  return out.slice(0, 3);
+}
+
+/** 意图 → 语义动作键（与模型自己调过的工具对账，防重复执行） */
+function detSatisfier(it: DetIntent): string {
+  switch (it.kind) {
+    case 'lock':
+      return 'lock';
+    case 'unlock':
+      return 'unlock';
+    case 'volume':
+      return 'volume';
+    case 'switchChat':
+      return 'switchChat';
+    case 'screenshot':
+      return it.send ? 'sendScreenshot' : 'screenshot';
+  }
+}
+
+/** 工具调用 → 语义动作键（runPhoneToolRound 主循环执行时记账） */
+function semanticActionOf(fn: string, args: Record<string, unknown>): string[] {
+  switch (fn) {
+    case 'lockApp':
+    case 'freezeRealApp':
+      return ['lock'];
+    case 'freezeApp':
+      return [String(args.action ?? '') === 'unfreeze' ? 'unlock' : 'lock'];
+    case 'unfreezeRealApp':
+      return ['unlock'];
+    case 'setVolume':
+      return ['volume'];
+    case 'pressKey':
+      return /音量/.test(String(args.key ?? '')) ? ['volume'] : [];
+    case 'setRingerMode':
+      return ['volume']; // 静音诉求被铃声模式满足也算
+    case 'switchToChat':
+    case 'pullBackToChat':
+      return ['switchChat'];
+    case 'sendScreenshot':
+      return ['screenshot', 'sendScreenshot'];
+    case 'takeScreenshot':
+    case 'lookScreen':
+      return ['screenshot'];
+    default:
+      return [];
+  }
+}
+
+/** 确定性执行一个意图（经 execWebTool 真实执行 + 灵动岛气泡，与主循环同款视觉） */
+async function execDetIntent(
+  it: DetIntent,
+  opts?: { sessionKey?: string; charName?: string },
+): Promise<{ label: string; text: string }> {
+  const device = getAiActionTarget() === 'device';
+  const charName = opts?.charName || 'TA';
+  let toolName = '';
+  let toolArgs: Record<string, unknown> = {};
+  let label = '';
+  switch (it.kind) {
+    case 'lock':
+      if (device) {
+        toolName = 'lockApp';
+        toolArgs = { appName: it.app, minutes: it.minutes };
+      } else {
+        toolName = 'freezeApp';
+        toolArgs = { appName: it.app, action: 'freeze', durationMin: it.minutes };
+      }
+      label = `锁定${it.app}（${it.minutes} 分钟）`;
+      break;
+    case 'unlock':
+      if (device) {
+        toolName = 'unfreezeRealApp';
+      } else {
+        toolName = 'freezeApp';
+        toolArgs = { appName: '全部', action: 'unfreeze' };
+      }
+      label = '解锁应用';
+      break;
+    case 'volume': {
+      let target: number;
+      if (it.dir === 'max') target = 100;
+      else if (it.dir === 'mute') target = 0;
+      else {
+        // 读当前百分比 → ±20（读不到按中档猜测：up→70 / down→30）
+        target = it.dir === 'up' ? 70 : 30;
+        try {
+          const { nativeGetVolume } = await import('./native-perception');
+          const g = await nativeGetVolume();
+          if (g?.ok && typeof g.volume === 'number' && typeof g.max === 'number' && g.max > 0) {
+            const cur = Math.round((g.volume / g.max) * 100);
+            target = Math.max(0, Math.min(100, cur + (it.dir === 'up' ? 20 : -20)));
+          }
+        } catch {
+          /* 读不到用猜测值 */
+        }
+      }
+      toolName = 'setVolume';
+      toolArgs = { volume: target };
+      label = it.dir === 'up' ? '调大音量' : it.dir === 'down' ? '调小音量' : it.dir === 'max' ? '音量开到最大' : '静音';
+      break;
+    }
+    case 'switchChat':
+      toolName = device ? 'switchToChat' : 'pullBackToChat';
+      label = '拉回聊天';
+      break;
+    case 'screenshot':
+      toolName = it.send ? 'sendScreenshot' : 'takeScreenshot';
+      label = it.send ? '把截图发进聊天' : '截屏';
+      break;
+  }
+  // 气泡（与主循环同款 pending → done/fail）
+  const actionText = await toolActionText(toolName, toolArgs);
+  if (opts?.sessionKey) {
+    pushToolStatusBubble(opts.sessionKey, { title: `${charName}正在${actionText}...`, status: 'pending' });
+  }
+  let result: string;
+  try {
+    result = await withTimeout(execWebTool(toolName, toolArgs), TOOL_EXEC_TIMEOUT_MS, '工具执行超时（120s）');
+  } catch (e) {
+    result = `【失败】${e instanceof Error ? e.message : '执行异常'}`;
+  }
+  if (opts?.sessionKey) {
+    const isFail = result.startsWith('【失败】');
+    updateLastToolStatus(opts.sessionKey, {
+      title: isFail ? `${charName}尝试${actionText}失败了` : `${charName}已${actionText}`,
+      status: isFail ? 'fail' : 'done',
+    });
+  }
+  return { label, text: result };
+}
+
+/** 兜底汇报轮也失败时的直白收尾文案（绝不静默：真做了什么就说什么） */
+function detCannedReport(results: Array<{ label: string; text: string }>): string {
+  const ok = results.filter((r) => !r.text.startsWith('【失败】')).map((r) => r.label);
+  const fail = results.filter((r) => r.text.startsWith('【失败】'));
+  const parts: string[] = [];
+  if (ok.length > 0) parts.push(`已经帮你${ok.join('、')}了`);
+  for (const f of fail) {
+    const reason = f.text.replace(/^【失败】/, '').slice(0, 60);
+    parts.push(`${f.label}没成功：${reason}`);
+  }
+  return parts.join('；') || '（处理完了）';
+}
+
 /**
  * 工具轮对【深度思考】格式的临时豁免：工具轮从 system 里剥掉【深度思考】规则段、
  * 换成豁免说明——动手阶段免思考块，最终收尾文字不带头块也完全合法。
@@ -1252,11 +1529,11 @@ function wrapSystemChatNative(sysRaw: string): string {
  * 写成文本既执行不了、又会当成聊天消息发给机主。命中且无实质正文时清空文字。
  */
 const MALFORMED_TOOL_TEXT_RE =
-  /^\s*(sendWebMessage|postForum|likePost|playMusic|getWebState|saveMemo|setAlarm|queryWeather|openScreen|openRealApp|tapScreen|swipeScreen|inputText|pressKey|lookScreen|takeScreenshot|sendScreenshot|switchToChat|getForegroundApp|lockApp|getRecentSMS|getBatteryStatus|getVolume|getRecentNotifications|openApp|uiObserve|uiClick|uiType|uiScroll)\s*[:：`(（]?\s*\S/m;
+  /^\s*(sendWebMessage|postForum|likePost|playMusic|getWebState|saveMemo|setAlarm|queryWeather|openScreen|freezeApp|getWebInstalledApps|getUsageStats|getRecentApps|pullBackToChat|searchWebApp|sendNotification|searchContacts|openChat|getCalendarEvents|addCalendarEvent|getTodoList|addTodo|searchRealApp|freezeRealApp|unfreezeRealApp|lockApp|setVolume|setBrightness|getBrightness|setRingerMode|openRealApp|tapScreen|swipeScreen|inputText|pressKey|lookScreen|takeScreenshot|sendScreenshot|switchToChat|getForegroundApp|getRecentSMS|getBatteryStatus|getVolume|getRecentNotifications|openApp|uiObserve|uiClick|uiType|uiScroll)\s*[:：`(（]?\s*\S/m;
 
-/** 工具名全集（cleanToolLogs 裸调用行剥除用；与 TOOL_CAPS 同步维护） */
+/** 工具名全集（cleanToolLogs 裸调用行剥除用；v2.11 与 TOOL_CAPS 全量同步 44 个） */
 const TOOL_NAME_RE_SRC =
-  'sendWebMessage|postForum|likePost|playMusic|getWebState|saveMemo|setAlarm|queryWeather|openScreen|openRealApp|tapScreen|swipeScreen|inputText|pressKey|lookScreen|takeScreenshot|sendScreenshot|switchToChat|getForegroundApp|lockApp|getRecentSMS|getBatteryStatus|getVolume|getRecentNotifications';
+  'sendWebMessage|postForum|likePost|playMusic|getWebState|saveMemo|setAlarm|queryWeather|openScreen|freezeApp|getWebInstalledApps|getUsageStats|getRecentApps|pullBackToChat|searchWebApp|sendNotification|searchContacts|openChat|getCalendarEvents|addCalendarEvent|getTodoList|addTodo|searchRealApp|freezeRealApp|unfreezeRealApp|lockApp|setVolume|openRealApp|tapScreen|swipeScreen|inputText|pressKey|lookScreen|takeScreenshot|sendScreenshot|switchToChat|getForegroundApp|getBatteryStatus|getVolume|getRecentSMS|getRecentNotifications|setBrightness|getBrightness|setRingerMode';
 
 /**
  * 最终回复净化（机主需求三·纯净度铁律）：AI 收尾文本里残留的底层日志一律剥掉——
@@ -1342,10 +1619,17 @@ export async function runPhoneToolRound(
   // v2.4 批量气泡合并：连续同类冻结/解冻/锁定/解锁调用（如 freezeApp 逐一冻结 17 个应用）
   // 只渲染一条系统气泡，文案合并为「已冻结微信、QQ、电话等 16 个应用」——绝不刷屏
   let bubbleCoalesce: { verb: '冻结' | '解冻' | '锁定' | '解锁'; names: string[] } | null = null;
-  /** 零工具轮 nudge 已注入次数（最多 1 次：真做不到时模型会说明原因，即放行） */
+  /** 零工具轮 nudge 已注入次数（v2.10 最多 2 次：真做不到时模型会说明原因，即放行） */
   let exitNudges = 0;
   /** 下一轮是否强制必调工具（tool_choice:'required'）：零工具轮嘴上计划时逼它真动手 */
   let forceNext = false;
+  // v2.11 确定性兜底：高置信度指令（锁应用/解锁/音量/切回聊天/截图）解析结果 +
+  // 模型已自己执行过的语义动作集（防重复执行）——nudge 失败后系统直接代执行，
+  // 从机制上终结「光嘴上答应不动手」
+  const detIntents = parseDeterministicIntents(lastUserMsg);
+  const detSatisfied = new Set<string>();
+  /** 兜底代执行后已注入过汇报轮标记 */
+  let detExecuted = false;
 
   // v2.6 聊天基本功直通轮：机主诉求是纯表情包/引用消息/抱抱蹭蹭（不含其它动手任务）时，
   // 发表情包与引用是回复文本里的标记能力（[表情包:ID] / [引用:M编号]），根本不需要工具——
@@ -1413,18 +1697,53 @@ export async function runPhoneToolRound(
       //   → 仍可 nudge 干工具部分，但提示词显式要求最终回复保留 [表情包:ID] 标记行；
       // ③ 本轮回复已带表情标记尝试 → 说明模型已正确发表情包，绝不 nudge。
       const stickerTried = ANY_STICKER_ATTEMPT_TEXT_RE.test(text);
-      if (!usedTools && taskyInstruction && exitNudges < 2 && !pureStickerDemand && !stickerTried) {
+      // v2.11 确定性兜底就绪（两条触发路径）：
+      // ① 零工具路径：模型光嘴上答应被 nudge 过至少一次（exitNudges>=1）仍不动手 → 跳过第二次
+      //    nudge 直接代执行（不再给模型第三次扯东扯西的机会）；
+      // ② 调了工具没干正事路径：模型调过 getVolume/searchRealApp 等周边工具却始终没做正事
+      //    （usedTools=true 但语义动作未满足，如只查了音量从没 setVolume）→ nudge 被
+      //    !usedTools 拦住永不触发，这里直接代执行补完。
+      const detPending = detIntents.filter((it) => !detSatisfied.has(detSatisfier(it)));
+      const detReady = !detExecuted && detPending.length > 0 && (exitNudges >= 1 || usedTools);
+      if (!detReady && !usedTools && taskyInstruction && exitNudges < 2 && !pureStickerDemand && !stickerTried) {
         exitNudges += 1;
         convo.push({ role: 'assistant', content: text || '（好的，我来处理。）' });
         convo.push({
           role: 'user',
           content:
             exitNudges === 1
-              ? '（系统强制检查：你刚才没有调用任何工具就回了文字——只说不做是违规。机主要的是真实结果：立刻调用工具执行（如 sendWebMessage 发消息 / saveMemo 记备忘录 / setAlarm 定闹钟 / playMusic 放歌 / lockApp 锁应用 / sendScreenshot 发截图），需要多个动作就按顺序逐个调用，直到目标真正完成再汇报。注意：发表情包/要抱抱/引用消息不是工具——绝不能拿放歌、查手机状态、查使用时长来回应这类请求，表情包要在最终回复文本里单独一行原样输出 [表情包:表情ID] 标记、引用要在回复开头输出 [引用:M编号] 标记；若机主要了表情包且你上一条回复里已有该标记，最终汇报必须原样保留那一行。如果确实无法执行（对应能力未开启/联系人不存在等），请明确说明做不到的真实原因。）'
-              : '（系统最后通牒：你已经两次只说不做。本轮必须立刻发出真实的工具调用（tool call）执行机主要求——不许再回纯文字计划、不许假装已完成。若确实无法执行，明确说明做不到的真实原因，绝不允许谎报「已完成」。）',
+              ? '（系统强制检查：你刚才没有调用任何工具就回了文字——只说不做是违规。机主要的是真实结果：立刻调用工具执行（如 sendWebMessage 发消息 / saveMemo 记备忘录 / setAlarm 定闹钟 / playMusic 放歌 / lockApp 锁应用 / setVolume 调音量 / sendScreenshot 发截图），需要多个动作就按顺序逐个调用，直到目标真正完成再汇报。绝不许用「等一下」「稍等」「马上就」「这就去」这类拖延话术敷衍——要么立刻动手，要么如实说做不到。注意：发表情包/要抱抱/引用消息不是工具——绝不能拿放歌、查手机状态、查使用时长来回应这类请求，表情包要在最终回复文本里单独一行原样输出 [表情包:表情ID] 标记、引用要在回复开头输出 [引用:M编号] 标记；若机主要了表情包且你上一条回复里已有该标记，最终汇报必须原样保留那一行。如果确实无法执行（对应能力未开启/联系人不存在等），请明确说明做不到的真实原因。）'
+              : '（系统最后通牒：你已经两次只说不做。本轮必须立刻发出真实的工具调用（tool call）执行机主要求——不许再回纯文字计划、不许假装已完成、不许再说「等一下/稍等/马上」。若确实无法执行，明确说明做不到的真实原因，绝不允许谎报「已完成」。）',
         });
         forceNext = true;
         continue;
+      }
+      // v2.11 确定性兜底代执行：模型被逼问后仍不动手（或调了不相干工具没干正事）——
+      // 系统直接解析机主指令参数并真实执行（锁应用/调音量/切回聊天/截图），
+      // 执行结果回传模型收尾汇报；汇报轮也挂了就用直白文案兜底（绝不静默）。
+      if (detReady) {
+        detExecuted = true;
+        usedTools = true;
+        const detResults: Array<{ label: string; text: string }> = [];
+        for (const it of detPending) {
+          if (shouldAbort?.()) return { text: '', usedTools };
+          detResults.push(await execDetIntent(it, { sessionKey: opts?.sessionKey, charName: opts?.charName }));
+        }
+        convo.push({ role: 'assistant', content: text || '（好的，我来处理。）' });
+        convo.push({
+          role: 'user',
+          content: `（系统代执行：你迟迟没有动手，系统已替你真实执行了机主要求的操作，真实结果如下：\n${detResults
+            .map((r) => `- ${r.label}：${r.text.replace(/^【(成功|失败)】/, '').slice(0, 200)}`)
+            .join('\n')}\n请用符合你人设的一两句自然的话向机主汇报真实结果：成功就说做好了（可带一点你的性格），失败就如实说原因并给指引。不要提「系统代执行」，不要输出工具名/日志，不要说「等一下/稍等」。）`,
+        });
+        try {
+          const fin = await fcRequest(convo, [], config);
+          const finText = typeof fin.content === 'string' ? fin.content : '';
+          if (finText.trim()) return { text: cleanToolLogs(finText), usedTools: true };
+        } catch {
+          /* 汇报轮失败：用直白兜底文案 */
+        }
+        return { text: cleanToolLogs(detCannedReport(detResults)), usedTools: true };
       }
       // malformed 工具文本净化：模型把工具调用写成纯文本——绝不能当聊天消息发给机主。
       if (text.trim() && MALFORMED_TOOL_TEXT_RE.test(text) && text.replace(/\s|```/g, '').length < 160) {
@@ -1510,6 +1829,8 @@ export async function runPhoneToolRound(
       } catch (e) {
         result = `【失败】${e instanceof Error ? e.message : '执行异常'}`;
       }
+      // v2.11 语义动作记账：模型自己执行过的动作不再由确定性兜底重复执行
+      for (const sem of semanticActionOf(fn, args)) detSatisfied.add(sem);
       // v2.2 需求三：工具执行后更新气泡为 done/fail（[角色名]已[动作] / [角色名]尝试[动作]失败了）
       // v2.4 批量合并：连续冻结/解冻更新同一条气泡，最终态为合并文案（如「已冻结微信、QQ、电话等 16 个应用」）
       if (opts?.sessionKey && actionText) {

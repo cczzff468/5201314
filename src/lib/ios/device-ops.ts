@@ -141,11 +141,17 @@ export async function labKey(keycode: number | string): Promise<DeviceOpResult> 
   return { ok: true, text: `已按按键 ${keycode}` };
 }
 
-/** 音量步进（AudioManager；±1 档） */
+/** 音量步进（AudioManager；±1 档——按真机真实档位直设，不走 0-15 换算防降档） */
 async function volumeStep(dir: 1 | -1): Promise<DeviceOpResult> {
-  const cur = await nativeGetVolume();
-  if (cur?.ok && typeof cur.volume === 'number') {
-    return labSetVolume(cur.volume + dir);
+  const r = await nativeGetVolume();
+  if (r?.ok && typeof r.volume === 'number') {
+    const max = typeof r.max === 'number' && r.max > 0 ? r.max : 15;
+    const target = Math.max(0, Math.min(max, r.volume + dir));
+    const rr = await nativeSetVolume(target);
+    if (rr === null) return { ok: false, text: '桥无响应（原生调用超时）' };
+    if (!rr.ok) return { ok: false, text: `音量调节失败：${a11yGateText(rr.reason)}` };
+    const finalVol = typeof rr.volume === 'number' ? rr.volume : target;
+    return { ok: true, text: `媒体音量已${dir > 0 ? '加' : '减'}一档（${finalVol}/${max}）` };
   }
   return { ok: false, text: '音量调节失败（原生通道不可用）' };
 }
@@ -246,23 +252,42 @@ export async function labBattery(): Promise<DeviceOpResult> {
   return { ok: false, text: `电量查询失败：${a11yGateText(r.reason)}` };
 }
 
-/** 音量档位（AudioManager STREAM_MUSIC） */
+/** 音量档位（AudioManager STREAM_MUSIC；v2.11 改报百分比+档位双口径，配合 setVolume 0-100 百分比语义） */
 export async function labVolume(): Promise<DeviceOpResult> {
   const r = await nativeGetVolume();
   if (r === null) return { ok: false, text: '桥无响应（原生调用超时）' };
   if (r.ok && typeof r.volume === 'number') {
-    return { ok: true, text: `媒体音量档位：${r.volume}/${r.max ?? '?'}` };
+    const max = typeof r.max === 'number' && r.max > 0 ? r.max : 15;
+    const pct = Math.round((r.volume / max) * 100);
+    return { ok: true, text: `媒体音量：${pct}%（档位 ${r.volume}/${max}；调大调小用 setVolume 填 0-100 的百分比）` };
   }
   return { ok: false, text: `音量查询失败：${a11yGateText(r.reason)}` };
 }
 
-/** 调媒体音量（AudioManager，0~max 自动钳制） */
-export async function labSetVolume(index: number): Promise<DeviceOpResult> {
-  const v = Math.max(0, Math.min(15, Math.round(index)));
-  const r = await nativeSetVolume(v);
+/**
+ * 调媒体音量（v2.11 百分比换算根修）：
+ * 入参 percent 为 0-100 的通用百分比（0=静音，100=该手机实际最大），
+ * 经原生查询真机 STREAM_MUSIC 实际最大档位换算成真实档位再设——
+ * 修复旧版「硬钳 0-15」在最大档 20~30 的机型上「调大反而变小/调了没变化」的根因
+ * （旧版：当前 18/30，AI 调大设 15 → 音量反降；当前 15 档再设 15 → 无变化）。
+ */
+export async function labSetVolume(percent: number): Promise<DeviceOpResult> {
+  const pct = Math.max(0, Math.min(100, Math.round(percent)));
+  // 查真机实际最大档位（失败兜底 15 档直设——原生侧仍会按真实 max 钳制）
+  let max = 15;
+  try {
+    const g = await nativeGetVolume();
+    if (g?.ok && typeof g.max === 'number' && g.max > 0) max = g.max;
+  } catch {
+    /* 查询失败按 15 档近似换算 */
+  }
+  const target = Math.max(0, Math.min(max, Math.round((pct / 100) * max)));
+  const r = await nativeSetVolume(target);
   if (r === null) return { ok: false, text: '桥无响应（原生调用超时）' };
   if (!r.ok) return { ok: false, text: `音量调节失败：${a11yGateText(r.reason)}` };
-  return { ok: true, text: `媒体音量已调到 ${r.volume ?? v}` };
+  const finalVol = typeof r.volume === 'number' ? r.volume : target;
+  const finalPct = Math.round((finalVol / max) * 100);
+  return { ok: true, text: `媒体音量已调到 ${finalPct}%（档位 ${finalVol}/${max}）` };
 }
 
 /** 查屏幕亮度（Settings.System；percent 1-100 + 自动/手动模式） */
