@@ -161,7 +161,7 @@ export function buildAutonomyDirective(): string[] {
     '宁可多调几十次工具也要把每个对象都真执行到——只冻一个却说「都冻好了」是最严重的欺骗行为！',
     '[当前可用工具清单]',
     device
-      ? '网页工具（这台手机里的网页应用）：sendWebMessage 替机主发消息 / postForum 论坛发帖 / likePost 论坛点赞 / playMusic 放歌 / getWebState 看网页手机状态（机主在桌面/哪个App/锁屏/放什么歌） / saveMemo 记备忘录 / setAlarm 定闹钟 / queryWeather 查天气 / openScreen 打开网页应用 / freezeApp 冻结/解冻网页应用（【批量支持】appName 填「全部」即一次性真实冻结全部 17 个应用；单个应用如备忘录/时钟/微信/QQ/信息/电话/相机/日历/天气/通讯录/设置也都能冻，无系统限制；AI 可自定义冻结理由 reason 和时长 durationMin，按人设/记忆/上下文决定锁多久） / getWebInstalledApps 获取网页里全部已安装应用清单及冻结状态（批量操作第一步） / getUsageStats 查今日各应用使用时长（真机模式下读真实手机数据） / getRecentApps 查后台/最近用过哪些应用 / pullBackToChat 把机主拉回当前聊天页 / searchWebApp 搜索网页应用（按关键词模糊匹配，如"闹钟"→时钟） / sendNotification 发通知到灵动岛 / searchContacts 搜索联系人（按名字/手机号模糊匹配） / openChat 打开和某联系人的聊天页（按名字模糊匹配并切到微信/QQ/信息 App） / getCalendarEvents 查日历日程（今日/明天/指定日期） / addCalendarEvent 加日历日程 / getTodoList 看备忘录待办 / addTodo 加备忘录待办。真机工具（经无障碍服务+原生 API 作用于机主真实手机）：getForegroundApp 查前台在用哪个 App（看机主在干什么） / lockApp 锁定真机应用（全屏遮罩封印：TA 一打开就被你的质问盖住只能回桌面；可带 message 质问文案和 minutes 时长，不填=锁到哄好） / takeScreenshot 无障碍静默截屏（识图看 TA 在看什么） / switchToChat 把 AI Phone 强行拉回前台（回到聊天） / getUsageStats 查真实手机今日各应用使用时长 / getRecentSMS 读真机最近短信 / getRecentNotifications 读真机最近通知（微信/QQ 等一切通知） / searchRealApp 搜索真机已安装应用（如"闹钟"→com.android.deskclock） / freezeRealApp 锁定真机应用（=lockApp；可带 reason 与 duration 分钟，到点自动解锁） / unfreezeRealApp 解锁真机应用 / openRealApp 拉起真机 App / tapScreen 点按屏幕 / swipeScreen 滑动 / inputText 输入文字（原生支持中文） / pressKey 全局动作（返回/主页/多任务/通知栏/锁屏/音量加减） / lookScreen 看真机屏幕内容（定位/核对） / getBatteryStatus 查电量 / getVolume 查音量 / setVolume 调媒体音量 / setBrightness 调屏幕亮度（percent 1-100；深夜贴心调暗护眼、或撒娇调暗逼 TA 回消息，需「修改系统设置」权限） / getBrightness 查当前亮度与自动/手动模式 / setRingerMode 设铃声模式（silent 静音 / vibrate 振动 / normal 响铃；TA 睡着了贴心静音）。'
+      ? '网页工具（这台手机里的网页应用）：sendWebMessage 替机主发消息 / postForum 论坛发帖 / likePost 论坛点赞 / playMusic 放歌 / getWebState 看网页手机状态（机主在桌面/哪个App/锁屏/放什么歌） / saveMemo 记备忘录 / setAlarm 定闹钟 / queryWeather 查天气 / openScreen 打开网页应用 / freezeApp 冻结/解冻网页应用（【批量支持】appName 填「全部」即一次性真实冻结全部 17 个应用；单个应用如备忘录/时钟/微信/QQ/信息/电话/相机/日历/天气/通讯录/设置也都能冻，无系统限制；AI 可自定义冻结理由 reason 和时长 durationMin，按人设/记忆/上下文决定锁多久） / getWebInstalledApps 获取网页里全部已安装应用清单及冻结状态（批量操作第一步） / getUsageStats 查今日各应用使用时长（真机模式下读真实手机数据） / getRecentApps 查后台/最近用过哪些应用 / pullBackToChat 把机主拉回当前聊天页 / searchWebApp 搜索网页应用（按关键词模糊匹配，如"闹钟"→时钟） / sendNotification 发通知到灵动岛 / searchContacts 搜索联系人（按名字/手机号模糊匹配） / openChat 打开和某联系人的聊天页（按名字模糊匹配并切到微信/QQ/信息 App） / getCalendarEvents 查日历日程（今日/明天/指定日期） / addCalendarEvent 加日历日程 / getTodoList 看备忘录待办 / addTodo 加备忘录待办。真机工具（经无障碍服务+原生 API 作用于机主真实手机）：getForegroundApp 查前台在用哪个 App（看机主在干什么） / lockApp 锁定真机应用（全屏遮罩封印：TA 一打开就被你的质问盖住只能回桌面；可带 message 质问文案和 minutes 时长，不填=锁到哄好） / takeScreenshot 无障碍静默截屏（识图看 TA 在看什么） / switchToChat 把 AI Phone 强行拉回前台（回到聊天） / getUsageStats 查真实手机今日各应用使用时长 / getRecentSMS 读真机最近短信 / getRecentNotifications 读真机最近通知（微信/QQ 等一切通知） / searchRealApp 搜索真机已安装应用（如"闹钟"→com.android.deskclock） / freezeRealApp 锁定真机应用（=lockApp；packageName 可填中文名（如 QQ/抖音）或包名，自动解析；可带 reason 与 duration 分钟，到点自动解锁） / unfreezeRealApp 解锁真机应用 / openRealApp 拉起真机 App / tapScreen 点按屏幕 / swipeScreen 滑动 / inputText 输入文字（原生支持中文） / pressKey 全局动作（返回/主页/多任务/通知栏/锁屏/音量加减） / lookScreen 看真机屏幕内容（定位/核对） / getBatteryStatus 查电量 / getVolume 查音量 / setVolume 调媒体音量 / setBrightness 调屏幕亮度（percent 1-100；深夜贴心调暗护眼、或撒娇调暗逼 TA 回消息，需「修改系统设置」权限） / getBrightness 查当前亮度与自动/手动模式 / setRingerMode 设铃声模式（silent 静音 / vibrate 振动 / normal 响铃；TA 睡着了贴心静音）。'
       : '网页工具（这台手机里的网页应用）：sendWebMessage 替机主发消息 / postForum 论坛发帖 / likePost 论坛点赞 / playMusic 放歌 / getWebState 看网页手机状态（机主在桌面/哪个App/锁屏/放什么歌） / saveMemo 记备忘录 / setAlarm 定闹钟 / queryWeather 查天气 / openScreen 打开网页应用 / freezeApp 冻结/解冻网页应用（【批量支持】appName 填「全部」即一次性真实冻结全部 17 个应用；单个应用如备忘录/时钟/微信/QQ/信息/电话/相机/日历/天气/通讯录/设置也都能冻，无系统限制；AI 可自定义冻结理由 reason 和时长 durationMin） / getWebInstalledApps 获取网页里全部已安装应用清单及冻结状态（批量操作第一步） / getUsageStats 查今日各应用使用时长 / getRecentApps 查后台/最近用过哪些应用（看机主刚在干什么） / pullBackToChat 把机主拉回当前聊天页 / searchWebApp 搜索网页应用（按关键词模糊匹配，如"闹钟"→时钟） / sendNotification 发通知到灵动岛 / searchContacts 搜索联系人（按名字/手机号模糊匹配） / openChat 打开和某联系人的聊天页（按名字模糊匹配并切到微信/QQ/信息 App） / getCalendarEvents 查日历日程（今日/明天/指定日期） / addCalendarEvent 加日历日程 / getTodoList 看备忘录待办 / addTodo 加备忘录待办。真机工具未开放（当前动手范围是「网站里面」）；需要时让机主到 设置 › 权限给予 › AI 动手范围 切到「真机」。',
     device
       ? '[真机操作铁律] 真机命令直接作用于机主的真实手机：不确定坐标时先 lookScreen 看屏幕再动手；关键操作后要再看屏幕核对结果；失败如实报，绝不假装成功。'
@@ -184,9 +184,15 @@ export const buildShizukuAutonomyRules = buildDeviceAutonomyRules;
 function buildWebMarkerRules(): string[] {
   const lines: string[] = [];
   const markers: string[] = [];
+  const device = getAiActionTarget() === 'device';
   markers.push('[手机操作:打开:应用名]（打开这台手机里的应用界面，如 [手机操作:打开:微信]）');
   markers.push('[手机操作:播歌:歌名]（自动搜歌播放，可带歌手名，如 [手机操作:播歌:晴天 周杰伦]）');
-  markers.push('[手机操作:冻结:应用名] / [手机操作:解冻:应用名]（网页内应用冻结/恢复，吃醋锁同款；批量操作应用名填「全部」即一次性真实冻结/解冻全部应用）');
+  // v2.1.1 分模式教学：真机模式下冻结/解冻作用于真实手机（中文名自动解析包名）
+  markers.push(
+    device
+      ? '[手机操作:冻结:应用名(:分钟数)] / [手机操作:解冻:应用名]（真机模式：冻结=锁定真实手机上的应用，应用名填中文名（如 QQ/抖音/微信）或包名都会自动解析；分钟数可选不填默认 30；要批量冻结全部网页应用填「全部」）'
+      : '[手机操作:冻结:应用名] / [手机操作:解冻:应用名]（网页内应用冻结/恢复，吃醋锁同款；批量操作应用名填「全部」即一次性真实冻结/解冻全部应用）',
+  );
   markers.push('[手机操作:查后台:]（最近用过哪些应用）');
   markers.push('[手机操作:使用时长:]（今日各应用使用时长）');
   markers.push('[手机操作:拉回:]（把机主切回聊天页）');
@@ -195,7 +201,6 @@ function buildWebMarkerRules(): string[] {
   markers.push('[手机操作:搜联系人:关键词]（搜索联系人，如 [手机操作:搜联系人:小桃] → 找到联系人；发消息不确定全名时先搜）');
 
   // 真机模式：额外开放真机命令（v1.9.36；v1.9.39 恒全量，无开关裁剪）
-  const device = getAiActionTarget() === 'device';
   if (device) {
     markers.push(
       '[手机操作:点按:x:y]（在真实屏幕上点坐标，坐标靠「看屏幕」获得）',
@@ -264,7 +269,7 @@ export function buildPhoneToolRules(): string[] {
   return [
     `【Web 工具调用·最高优先级】这台手机里的所有 App（微信/QQ/信息/论坛/音乐/备忘录/时钟/天气）都活在你的网页生态里，你已经接入内部工具（Function Calling）。可用工具：${caps.join('；')}${deviceCaps}。机主的请求涉及任何实际动作（发消息/发帖/点赞/放歌/记备忘录/定闹钟/查天气/打开应用/操控真机）时，你绝对不能只回复文字、也不许只口头答应——必须立刻输出对应的工具调用（tool call）。只说不做是违规。`,
     '【多步任务·链式执行】机主一句话里有多个要求时（如「给Z发个微信说晚安，再帮我定个8点的闹钟，顺便记一下明天要带伞」），按顺序逐个调用工具：sendWebMessage → setAlarm → saveMemo，每个工具的真实执行结果会以 role:"tool" 自动回传给你，全部做完后再用一两句自然的话向机主汇报总结果（如「微信发了、闹钟也定好啦，备忘录也记上了」）。',
-    '【工具对号入座】每个诉求用对口的手段：要表情包/要抱抱蹭蹭 → 【不是工具！】那是你聊天里的基本功——在聊天回复文本里直接单独一行输出 [表情包:表情ID] 标记（微信/QQ/信息聊天通用；ID 从表情包清单里选，系统会把它变成真表情发出），绝不许调用任何工具、也绝不许拿放歌（playMusic）、冻结应用（freezeApp）、查手机状态或替机主发消息（sendWebMessage）来回应发表情包的请求；要听歌 → playMusic；要锁应用 → freezeApp。拿不准时看工具描述里写的适用场景，别拿不相干的工具答非所问。',
+    `【工具对号入座】每个诉求用对口的手段：要表情包/要抱抱蹭蹭 → 【不是工具！】那是你聊天里的基本功——在聊天回复文本里直接单独一行输出 [表情包:表情ID] 标记（微信/QQ/信息聊天通用；ID 从表情包清单里选，系统会把它变成真表情发出），绝不许调用任何工具、也绝不许拿放歌（playMusic）、冻结应用、查手机状态或替机主发消息（sendWebMessage）来回应发表情包的请求；要听歌 → playMusic；要锁应用 → ${device ? 'lockApp / freezeRealApp（锁定真实手机上的应用，中文名（如 QQ/抖音）或包名都行）' : 'freezeApp（冻结网页里的应用）'}。拿不准时看工具描述里写的适用场景，别拿不相干的工具答非所问。`,
     '【聊天请求不是工具】「叫我宝宝/叫我XX」「以后就这么叫我」「说话温柔点」「换个称呼」「多陪我聊会儿」这类称呼、口吻、聊天方式请求【全是聊天本身，不是任何工具任务】——直接在回复文本里照做（从这次起就按新称呼叫），绝不许为这种请求调用任何工具、也不许输出 [手机操作:…] 标记；工具只服务明确的动手诉求（发消息/放歌/定闹钟/记备忘录…），聊天里的一切「怎么说」都靠你自己的嘴。',
     '【结果如实】工具回传的结果是真实执行反馈：成功了才能说做好了，失败（联系人不存在/没搜到歌/真机不可达）要如实告诉机主原因，绝不假装成功；失败反馈里带可用选项清单时，可以换准确参数重试一次。',
     '【纯净度铁律】你最终发给机主的聊天气泡里，严禁出现任何底层操作日志：(内心独白：…)、(正在操作：…)、(内部反馈：…)、工具名、参数、执行步骤清单一律不许出现——所有操作过程系统会自动用灵动岛弹窗播报给机主，你只需要像正常人一样说结果（如「我已经在微信上给Z发过去了哦」）。',
@@ -399,13 +404,40 @@ export async function executePhoneOp(argRaw: string): Promise<{ ok: boolean; tex
       if (p[0] === 'com.z.aiphone' || p[0].startsWith('com.z.aiphone.')) {
         return { ok: false, text: '禁止冻结/解冻本应用自身' };
       }
-      const { webAppOfPkg, setWebFrozen, unfreezeWebPkg } = await import('./web-app-lock');
-      const web = webAppOfPkg(p[0]);
       // 会话上下文（charName/contactId/app）——锁定界面动态头像 + 【去哄哄 TA】精准跳聊天
       const { getToolSessionContext } = await import('./web-tools');
       const ctx = getToolSessionContext();
+      const isAll = p[0] === '全部' || p[0] === '所有' || /全部应用|所有应用/.test(p[0]);
+      // v2.1.1 真机模式路由：AI 动手范围=真机时，冻结/解冻默认作用于真实手机
+      // （中文名→包名自动解析，toolFreezeRealApp 内完成）——修复「真机上让锁 QQ
+      // 却报『网页端只能冻结内置应用』」；批量「全部」仍走网页（真机锁是逐应用遮罩）
+      if (getAiActionTarget() === 'device' && !isAll) {
+        const { toolFreezeRealApp, toolUnfreezeRealApp } = await import('./web-tools');
+        if (cmd === '冻结') {
+          const durRaw = Number(p[1]);
+          const r = await toolFreezeRealApp(p[0], {
+            durationMin: Number.isFinite(durRaw) && durRaw > 0 ? durRaw : undefined,
+            charName: ctx.charName || undefined,
+            contactId: ctx.contactId,
+            app: ctx.app,
+          });
+          return { ok: r.ok, text: r.text.replace(/^【[^】]+】/, '') };
+        }
+        const r = await toolUnfreezeRealApp(p[0]);
+        return { ok: r.ok, text: r.text.replace(/^【[^】]+】/, '') };
+      }
+      const { webAppOfPkg, setWebFrozen, unfreezeWebPkg } = await import('./web-app-lock');
+      // v2.1.1 名字归一化：包名精确 → 中文名/appId 精确（「QQ」「网易云音乐」
+      // 这类中文名不再直接报「没有网页对应体」）
+      let web = webAppOfPkg(p[0]);
+      if (!web) {
+        const { WEB_LOCK_APPS } = await import('./web-app-lock');
+        const lower = p[0].toLowerCase();
+        web = WEB_LOCK_APPS.find((a) => a.name === p[0] || a.appId === lower || a.pkg.toLowerCase() === lower) ?? null;
+      }
+      const pkgKey = web?.pkg ?? p[0];
       // v2.4 批量冻结标记：「全部/所有」→ 真实循环遍历每个网页内置应用挨个写入冻结态
-      if (cmd === '冻结' && (p[0] === '全部' || p[0] === '所有' || /全部应用|所有应用/.test(p[0]))) {
+      if (cmd === '冻结' && isAll) {
         const { WEB_LOCK_APPS } = await import('./web-app-lock');
         const unlockAt = Date.now() + 30 * 60_000;
         for (const a of WEB_LOCK_APPS) {
@@ -420,9 +452,14 @@ export async function executePhoneOp(argRaw: string): Promise<{ ok: boolean; tex
         return { ok: true, text: `已真实冻结网页里全部 ${WEB_LOCK_APPS.length} 个应用（30 分钟后自动解冻）` };
       }
       if (cmd === '冻结') {
-        if (!web) return { ok: false, text: `网页端只能冻结内置应用（如 网易云音乐/浏览器/淘宝/美团/照片/X论坛），「${p[0]}」没有网页对应体` };
+        if (!web) {
+          return {
+            ok: false,
+            text: `网页里没有叫「${p[0]}」的应用（网页内置：网易云音乐/浏览器/淘宝/美团/照片/X论坛/备忘录/时钟/日历/天气/相机/通讯录/设置/微信/QQ/信息/电话）。要冻结真实手机上的「${p[0]}」，请到 设置 › 权限给予 › AI 动手范围 选「真机」后再说一遍`,
+          };
+        }
         // 标记兜底不支持自定义时长（固定 30 分钟，FC 工具才有 durationMin）
-        setWebFrozen(p[0], Date.now() + 30 * 60_000, ctx.charName || 'AI', 'ai', {
+        setWebFrozen(pkgKey, Date.now() + 30 * 60_000, ctx.charName || 'AI', 'ai', {
           contactId: ctx.contactId,
           app: ctx.app,
         });
@@ -434,25 +471,25 @@ export async function executePhoneOp(argRaw: string): Promise<{ ok: boolean; tex
         }
         return { ok: true, text: `已冻结${web.name}（网页内应用：图标变灰、点开见提示，30 分钟后自动解冻）` };
       }
-      if (isJealousyUnlockAllowed(p[0])) {
-        onJealousyUnfreeze(p[0]);
-        return { ok: true, text: `已解冻 ${p[0]}（吃醋锁已解开）` };
+      if (isJealousyUnlockAllowed(pkgKey)) {
+        onJealousyUnfreeze(pkgKey);
+        return { ok: true, text: `已解冻 ${web?.name ?? pkgKey}（吃醋锁已解开）` };
       }
       // v2.4 批量解冻标记：「全部/所有」→ 清掉全部冻结记录
-      if (cmd === '解冻' && (p[0] === '全部' || p[0] === '所有' || /全部应用|所有应用/.test(p[0]))) {
-        const { getWebFrozenMap, unfreezeWebPkg } = await import('./web-app-lock');
+      if (cmd === '解冻' && isAll) {
+        const { getWebFrozenMap } = await import('./web-app-lock');
         const frozenList = Object.values(getWebFrozenMap());
         if (frozenList.length === 0) return { ok: true, text: '当前没有任何被冻结的应用' };
         for (const rec of frozenList) unfreezeWebPkg(rec.pkg);
         return { ok: true, text: `已解冻全部 ${frozenList.length} 个应用（网页内应用全部恢复可用）` };
       }
       const { getWebFrozen } = await import('./web-app-lock');
-      const frozen = getWebFrozen(p[0]);
+      const frozen = getWebFrozen(pkgKey);
       if (frozen) {
-        unfreezeWebPkg(p[0]);
-        return { ok: true, text: `已解冻${web?.name ?? p[0]}（网页内应用恢复可用）` };
+        unfreezeWebPkg(pkgKey);
+        return { ok: true, text: `已解冻${web?.name ?? pkgKey}（网页内应用恢复可用）` };
       }
-      return { ok: true, text: `${p[0]} 当前没有被冻结` };
+      return { ok: true, text: `${web?.name ?? p[0]} 当前没有被冻结` };
     }
     case 'agent':
     case '智能体': {

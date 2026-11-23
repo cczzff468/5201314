@@ -456,9 +456,9 @@ export function buildPhoneTools(): PhoneToolDef[] {
     );
     add(
       'freezeRealApp',
-      '锁定机主真实手机里的一个应用（打开会被全屏遮罩拦住，直到解锁）。packageName 必须是真实包名（如 com.android.deskclock）；直接用中文名锁定更方便，用 lockApp。不知道包名时先调 searchRealApp 搜索。reason 填自定义锁定理由（按你的【人设+记忆+上下文】生成，会显示在遮罩上，如"你今天玩了太久备忘录了，歇会儿"）；duration 填锁定时长（分钟数）——由你根据你的人设、你们的关系、记忆里的过往、此刻的情况自主决定锁多久（吃醋小惩 5~15 分钟、认真生气 1~3 小时都行），不填默认 30 分钟，到点自动解锁。注意：通讯类/系统核心应用永不可锁定。',
+      '锁定机主真实手机里的一个应用（打开会被全屏遮罩拦住，直到解锁）。packageName 填应用名（中文名如「QQ」「抖音」会自动解析成包名）或 Android 包名（如 com.android.deskclock）；不知道包名时先调 searchRealApp 搜索或直接填中文名。reason 填自定义锁定理由（按你的【人设+记忆+上下文】生成，会显示在遮罩上，如"你今天玩了太久备忘录了，歇会儿"）；duration 填锁定时长（分钟数）——由你根据你的人设、你们的关系、记忆里的过往、此刻的情况自主决定锁多久（吃醋小惩 5~15 分钟、认真生气 1~3 小时都行），不填默认 30 分钟，到点自动解锁。注意：通讯类/系统核心应用永不可锁定。',
       {
-        packageName: strParam('Android 包名（如 com.android.deskclock），不确定时先调 searchRealApp'),
+        packageName: strParam('应用名（中文名如 QQ/抖音，自动解析）或 Android 包名（如 com.android.deskclock）'),
         reason: strParam('锁定理由（按人设/记忆/上下文自定义，如"你玩太久抖音了，陪我说话"），显示在全屏遮罩上'),
         duration: { type: 'number', description: '锁定时长（分钟，AI 按人设+记忆+上下文自主决定，如 10、30、120；默认 30）' },
       },

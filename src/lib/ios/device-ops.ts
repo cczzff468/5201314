@@ -384,7 +384,15 @@ export async function labLockApp(
   pkg: string,
   opts: { unlockAt?: number; charName?: string; message?: string } = {},
 ): Promise<DeviceOpResult> {
-  if (!/^[\w.]+$/.test(pkg)) return { ok: false, text: `包名不合法（${pkg}）` };
+  // v2.1.1 防伪包名：合法 Android 包名必含「.」（如 com.tencent.mm）——「QQ」「抖音」
+  // 这类应用名混进来直接报错指路（中文名解析在上层 toolFreezeRealApp/lockApp 工具完成），
+  // 不再让原生拿到永不命中的伪包名「静默锁成功」
+  if (!/^[\w.]+$/.test(pkg) || !pkg.includes('.')) {
+    return {
+      ok: false,
+      text: `「${pkg}」不是合法的 Android 包名（形如 com.tencent.mm）。锁定真机应用请填中文名（如「QQ」「抖音」）或包名——中文名会自动解析成包名`,
+    };
+  }
   if (isNeverLockPkg(pkg)) {
     return { ok: false, text: `禁止锁定核心应用（${pkg}）——锁了会导致手机无法操作` };
   }

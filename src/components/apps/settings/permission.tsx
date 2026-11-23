@@ -193,6 +193,44 @@ export function writeWebPermGrant(key: string, on: boolean): void {
   }
 }
 
+/** 权限探测返回（null = 原生桥不可用/超时，≠未授权） */
+type PermProbeResult = { granted?: boolean; canAsk?: boolean } | null;
+
+/**
+ * v2.1.1 权限查询统一策略（修复「真机明明没授权却显示已授权」）：
+ * - 真机环境（原生壳里）：以原生探测结果为准——桥回话了（非 null）就信真机实际状态，
+ *   网页授权账本不再覆盖真机（账本只代表网页模拟授权，不代表真机系统开关）；
+ * - 浏览器/旧 APK：保持账本优先（v1.9.41 旧 APK 桥异常误报未授权的兑底不变）。
+ */
+async function queryPermState(
+  ledgerKey: string,
+  probe: () => Promise<PermProbeResult | boolean>,
+): Promise<PermProbeResult> {
+  const run = async (): Promise<PermProbeResult> => {
+    const r = await probe();
+    if (typeof r === 'boolean') return { granted: r };
+    return r;
+  };
+  if (isNativePerception()) return (await run()) ?? { granted: false, canAsk: true };
+  if (readWebPermGrants()[ledgerKey] === true) return { granted: true };
+  return (await run()) ?? { granted: false, canAsk: true };
+}
+
+/**
+ * v2.1.1 申请失败兑底（修复「点了授权、跳转失败也显示已授权」）：
+ * 真机环境通道失败时如实报失败、绝不落「已授权」账本；浏览器/旧 APK
+ * 保持网页模拟授权语义（账本记账）。
+ */
+function permRequestFallback(
+  ledgerKey: string,
+  webNote: string,
+  failNote: string,
+): { ok: boolean; note?: string } {
+  if (isNativePerception()) return { ok: false, note: failNote };
+  writeWebPermGrant(ledgerKey, true);
+  return { ok: true, note: webNote };
+}
+
 export const PERM_DEFS: PermDef[] = [
   // ---- 机主 14 项（v2.0.0 权限中心 11 项 + v2.1.0 防杀后台三件套；检测 + 原生 Intent 直跳系统授权页） ----
   {
@@ -201,18 +239,16 @@ export const PERM_DEFS: PermDef[] = [
     desc: '模拟点击、静默截屏、切回界面',
     icon: Accessibility,
     actionLabel: '去开启无障碍',
-    query: async () => {
-      // 账本优先（旧 APK 桥异常误报未授权的兜底，同悬浮窗）
-      if (readWebPermGrants().accessibility === true) return { granted: true };
-      const r = await accessibilityPermission();
-      if (r) return { granted: r.granted === true, canAsk: r.canAsk };
-      return { granted: false, canAsk: true };
-    },
+    query: () => queryPermState('accessibility', () => accessibilityPermission()),
     request: async () => {
       const ok = await openNativeAccessibilitySettings();
       if (ok) return { ok: true, note: '已跳转系统设置页，开启 AI Phone 服务后返回' };
-      writeWebPermGrant('accessibility', true); // 网页/旧 APK：账本直接记为已授权
-      return { ok: true, note: '无障碍服务已开启' };
+      // v2.1.1 真机环境跳转失败如实报，绝不落账本谎报已授权
+      return permRequestFallback(
+        'accessibility',
+        '无障碍服务已开启',
+        '跳转失败（通道异常），请重试；或到 系统设置 › 无障碍 手动开启 AI Phone 服务',
+      );
     },
   },
   {
@@ -221,20 +257,15 @@ export const PERM_DEFS: PermDef[] = [
     desc: '前台 App 与使用时长感知',
     icon: BarChart3,
     actionLabel: '去开启',
-    query: async () => {
-      // v1.9.41 账本优先：修复「使用情况权限明明授权了却显示未授权」——旧 APK 无
-      // hasUsagePermission 方法时桥异常被 catch 成 false（非 null），查询直接信了
-      // 原生回的 false、永远不看网页账本。账本在申请成功时写入，先查它再探原生。
-      if (readWebPermGrants().usage === true) return { granted: true };
-      const r = await nativeUsagePermission();
-      if (r !== null) return { granted: r };
-      return { granted: false, canAsk: true };
-    },
+    query: () => queryPermState('usage', () => nativeUsagePermission()),
     request: async () => {
       const ok = await openNativeUsageSettings();
       if (ok) return { ok: true, note: '已跳转系统设置页，开启后返回刷新' };
-      writeWebPermGrant('usage', true); // 网页：直接记为已授权
-      return { ok: true, note: '使用情况访问已开启' };
+      return permRequestFallback(
+        'usage',
+        '使用情况访问已开启',
+        '跳转失败（通道异常），请重试；或到 系统设置 › 应用 › 特殊权限 › 使用情况访问 手动开启',
+      );
     },
   },
   {
@@ -243,19 +274,15 @@ export const PERM_DEFS: PermDef[] = [
     desc: '全屏遮挡拦截、悬浮球与悬浮窗',
     icon: PanelTop,
     actionLabel: '去开启悬浮窗',
-    query: async () => {
-      // v1.9.41 账本优先：真实通道不可用时点「去开启」落的是网页账本，查询先看账本
-      // 再探原生（旧 APK 桥异常会把 overlayPermission 拉到 false，不看账本就误报未授权）
-      if (readWebPermGrants().overlay === true) return { granted: true };
-      const r = await overlayPermission();
-      if (r) return r;
-      return { granted: false, canAsk: true };
-    },
+    query: () => queryPermState('overlay', () => overlayPermission()),
     request: async () => {
       const r = await requestOverlayPermission();
       if (r.ok) return { ok: true, note: '已跳转系统设置页，打开开关后返回' };
-      writeWebPermGrant('overlay', true); // 网页：直接记为已授权
-      return { ok: true, note: '悬浮窗权限已开启' };
+      return permRequestFallback(
+        'overlay',
+        '悬浮窗权限已开启',
+        '跳转失败（通道异常），请重试；或到 系统设置 › 应用 › 特殊权限 › 显示在其他应用上层 手动开启',
+      );
     },
   },
   {
@@ -265,18 +292,15 @@ export const PERM_DEFS: PermDef[] = [
     desc: '读微信/QQ 通知、正在听的歌',
     icon: BellRing,
     actionLabel: '去开启',
-    query: async () => {
-      // v1.9.41 账本优先（同悬浮窗：旧 APK 桥异常误报未授权的兜底）
-      if (readWebPermGrants().storage === true) return { granted: true };
-      const r = await nativeMediaPermission();
-      if (r !== null) return { granted: r };
-      return { granted: false, canAsk: true };
-    },
+    query: () => queryPermState('storage', () => nativeMediaPermission()),
     request: async () => {
       const ok = await openNativeMediaSettings();
       if (ok) return { ok: true, note: '已跳转系统设置页，开启后返回刷新' };
-      writeWebPermGrant('storage', true); // 网页：直接记为已授权
-      return { ok: true, note: '通知使用权已开启' };
+      return permRequestFallback(
+        'storage',
+        '通知使用权已开启',
+        '跳转失败（通道异常），请重试；或到 系统设置 › 通知使用权 手动开启',
+      );
     },
   },
   {
@@ -286,17 +310,15 @@ export const PERM_DEFS: PermDef[] = [
     icon: MessageSquareText,
     actionLabel: '允许读取短信',
     persistDeniedFallback: true,
-    query: async () => {
-      if (readWebPermGrants().sms === true) return { granted: true };
-      const r = await smsPermission();
-      if (r) return r;
-      return { granted: false, canAsk: true };
-    },
+    query: () => queryPermState('sms', () => smsPermission()),
     request: async () => {
       const r = await requestSmsPermission();
       if (r === null) {
-        writeWebPermGrant('sms', true); // 网页/旧 APK：账本记账
-        return { ok: true, note: '短信权限已开启' };
+        return permRequestFallback(
+          'sms',
+          '短信权限已开启',
+          '申请通道异常，请重试；或到 系统设置 › 应用 › 权限 手动开启短信权限',
+        );
       }
       if (r.granted) return { ok: true };
       if (r.canAsk === false) return { ok: false, note: '系统已停用授权弹窗：请去系统设置手动开启' };
@@ -310,17 +332,15 @@ export const PERM_DEFS: PermDef[] = [
     icon: BookUser,
     actionLabel: '允许访问通讯录',
     persistDeniedFallback: true,
-    query: async () => {
-      if (readWebPermGrants().contacts === true) return { granted: true };
-      const r = await contactsPermission();
-      if (r) return r;
-      return { granted: false, canAsk: true };
-    },
+    query: () => queryPermState('contacts', () => contactsPermission()),
     request: async () => {
       const r = await requestContactsPermission();
       if (r === null) {
-        writeWebPermGrant('contacts', true); // 网页/旧 APK：账本记账
-        return { ok: true, note: '通讯录权限已开启' };
+        return permRequestFallback(
+          'contacts',
+          '通讯录权限已开启',
+          '申请通道异常，请重试；或到 系统设置 › 应用 › 权限 手动开启通讯录权限',
+        );
       }
       if (r.granted) return { ok: true };
       if (r.canAsk === false) return { ok: false, note: '系统已停用授权弹窗：请去系统设置手动开启' };
@@ -334,17 +354,15 @@ export const PERM_DEFS: PermDef[] = [
     icon: CalendarDays,
     actionLabel: '允许访问日历',
     persistDeniedFallback: true,
-    query: async () => {
-      if (readWebPermGrants().calendar === true) return { granted: true };
-      const r = await calendarPermission();
-      if (r) return r;
-      return { granted: false, canAsk: true };
-    },
+    query: () => queryPermState('calendar', () => calendarPermission()),
     request: async () => {
       const r = await requestCalendarPermission();
       if (r === null) {
-        writeWebPermGrant('calendar', true); // 网页/旧 APK：账本记账
-        return { ok: true, note: '日历权限已开启' };
+        return permRequestFallback(
+          'calendar',
+          '日历权限已开启',
+          '申请通道异常，请重试；或到 系统设置 › 应用 › 权限 手动开启日历权限',
+        );
       }
       if (r.granted) return { ok: true };
       if (r.canAsk === false) return { ok: false, note: '系统已停用授权弹窗：请去系统设置手动开启' };
@@ -357,17 +375,15 @@ export const PERM_DEFS: PermDef[] = [
     desc: '精确闹钟与倒计时提醒',
     icon: AlarmClock,
     actionLabel: '允许精确闹钟',
-    query: async () => {
-      if (readWebPermGrants().alarm === true) return { granted: true };
-      const r = await alarmPermission();
-      if (r) return r;
-      return { granted: false, canAsk: true };
-    },
+    query: () => queryPermState('alarm', () => alarmPermission()),
     request: async () => {
       const r = await requestAlarmPermission();
       if (r.ok) return { ok: true, note: '已跳转系统「闹钟和提醒」授权页' };
-      writeWebPermGrant('alarm', true); // 网页/旧 APK：账本记账
-      return { ok: true, note: '闹钟权限已开启' };
+      return permRequestFallback(
+        'alarm',
+        '闹钟权限已开启',
+        '跳转失败（通道异常），请重试；或到 系统设置 › 应用 › 闹钟和提醒 手动开启',
+      );
     },
   },
   {
@@ -376,17 +392,15 @@ export const PERM_DEFS: PermDef[] = [
     desc: '天气定位、地图、外卖/打车场景',
     icon: MapPin,
     actionLabel: '允许定位',
-    query: async () => {
-      const r = await locationPermission();
-      if (r?.granted || readWebPermGrants().location === true) return { granted: true };
-      if (!r) return { granted: false, canAsk: true };
-      return r;
-    },
+    query: () => queryPermState('location', () => locationPermission()),
     request: async () => {
       const r = await requestLocationPermission();
       if (r.ok) return { ok: true, note: r.via === 'web' ? '已经浏览器授权' : undefined };
-      writeWebPermGrant('location', true); // 浏览器定位不可用/被阻止：网页账本直接记为已授权
-      return { ok: true, note: '定位已开启' };
+      return permRequestFallback(
+        'location',
+        '定位已开启',
+        '定位申请失败，请重试；或到 系统设置 › 位置信息 手动开启',
+      );
     },
   },
   {
@@ -396,17 +410,15 @@ export const PERM_DEFS: PermDef[] = [
     icon: FolderOpen,
     actionLabel: '允许访问文件与媒体',
     persistDeniedFallback: true,
-    query: async () => {
-      if (readWebPermGrants().mediafiles === true) return { granted: true };
-      const r = await mediaFilesPermission();
-      if (r) return r;
-      return { granted: false, canAsk: true };
-    },
+    query: () => queryPermState('mediafiles', () => mediaFilesPermission()),
     request: async () => {
       const r = await requestMediaFilesPermission();
       if (r === null) {
-        writeWebPermGrant('mediafiles', true); // 网页/旧 APK：账本记账
-        return { ok: true, note: '文件与媒体权限已开启' };
+        return permRequestFallback(
+          'mediafiles',
+          '文件与媒体权限已开启',
+          '申请通道异常，请重试；或到 系统设置 › 应用 › 权限 手动开启文件与媒体权限',
+        );
       }
       if (r.granted) return { ok: true };
       if (r.canAsk === false) return { ok: false, note: '系统已停用授权弹窗：请去系统设置手动开启' };
@@ -419,18 +431,15 @@ export const PERM_DEFS: PermDef[] = [
     desc: '息屏后保持监听/常驻通知不被系统限制',
     icon: BatteryCharging,
     actionLabel: '允许忽略电池优化',
-    query: async () => {
-      // v1.9.41 账本优先（同悬浮窗：旧 APK 桥异常误报未授权的兜底）
-      if (readWebPermGrants().battery === true) return { granted: true };
-      const r = await batteryPermission();
-      if (r) return r;
-      return { granted: false, canAsk: true };
-    },
+    query: () => queryPermState('battery', () => batteryPermission()),
     request: async () => {
       const r = await requestBatteryPermission();
       if (r.ok) return { ok: true, note: '已弹出系统确认框' };
-      writeWebPermGrant('battery', true); // 网页：直接记为已授权
-      return { ok: true, note: '电池优化豁免已开启' };
+      return permRequestFallback(
+        'battery',
+        '电池优化豁免已开启',
+        '申请通道异常，请重试；或到 系统设置 › 电池 手动允许本应用不受限制',
+      );
     },
   },
   // ---- v2.1.0 防杀后台三件套（修改系统设置 / 开机自启动 / 常驻守护） ----
@@ -440,17 +449,15 @@ export const PERM_DEFS: PermDef[] = [
     desc: 'AI 调屏幕亮度、设静音等系统级操作',
     icon: SunMedium,
     actionLabel: '去开启修改系统设置',
-    query: async () => {
-      if (readWebPermGrants().writesettings === true) return { granted: true };
-      const r = await writeSettingsPermission();
-      if (r) return r;
-      return { granted: false, canAsk: true };
-    },
+    query: () => queryPermState('writesettings', () => writeSettingsPermission()),
     request: async () => {
       const ok = await openNativeWriteSettings();
       if (ok) return { ok: true, note: '已跳转系统开关页，打开开关后返回' };
-      writeWebPermGrant('writesettings', true); // 网页/旧 APK：账本记账
-      return { ok: true, note: '修改系统设置已开启' };
+      return permRequestFallback(
+        'writesettings',
+        '修改系统设置已开启',
+        '跳转失败（通道异常），请重试；或到 系统设置 › 应用 › 特殊权限 › 修改系统设置 手动开启',
+      );
     },
   },
   {
@@ -473,7 +480,11 @@ export const PERM_DEFS: PermDef[] = [
         writeWebPermGrant('boot', true);
         return { ok: true, note: '已就绪：重启后自动拉起守护（国产 ROM 需在系统设置允许本应用自启动）' };
       }
-      // 网页/旧 APK/极少数拉起失败：账本同时记两项（真机上实际状态以原生查询为准）
+      // v2.1.1 真机环境拉起失败如实报（账本谎报会被原生查询拆穿还误导）；
+      // 浏览器/旧 APK 保持账本记账
+      if (isNativePerception()) {
+        return { ok: false, note: '常驻守护拉起失败，请重试；部分 ROM 需先在系统设置允许本应用自启动/后台运行' };
+      }
       writeWebPermGrant('keepalive', true);
       writeWebPermGrant('boot', true);
       return { ok: true, note: '开机自启动已就绪' };
@@ -514,7 +525,8 @@ export const PERM_DEFS: PermDef[] = [
         writeWebPermGrant('keepalive', true);
         return { ok: true, note: '常驻守护已开启（状态栏显示「AI Phone 正在守候」）' };
       }
-      writeWebPermGrant('keepalive', true); // 网页/旧 APK：账本记账
+      if (isNativePerception()) return { ok: false, note: '常驻守护拉起失败，请重试' };
+      writeWebPermGrant('keepalive', true); // 浏览器/旧 APK：账本记账
       return { ok: true, note: '常驻守护已开启' };
     },
   },
@@ -525,17 +537,15 @@ export const PERM_DEFS: PermDef[] = [
     desc: '语音聊天、按住说话、喊名唤醒',
     icon: Mic,
     actionLabel: '允许麦克风',
-    query: async () => {
-      const r = await micPermission();
-      if (r?.granted || readWebPermGrants().mic === true) return { granted: true };
-      if (!r) return { granted: false, canAsk: true };
-      return r;
-    },
+    query: () => queryPermState('mic', () => micPermission()),
     request: async () => {
       const r = await requestMicPermission();
       if (r?.granted) return { ok: true };
-      writeWebPermGrant('mic', true); // 浏览器不支持/被阻止：网页账本直接记为已授权
-      return { ok: true, note: '麦克风已开启' };
+      return permRequestFallback(
+        'mic',
+        '麦克风已开启',
+        '麦克风申请失败，请重试；或到 系统设置 › 应用 › 权限 手动开启麦克风',
+      );
     },
   },
   {
@@ -547,15 +557,20 @@ export const PERM_DEFS: PermDef[] = [
     query: async () => {
       const p = await querySystemNotifyPermission();
       if (p === 'granted') return { granted: true };
+      // v2.1.1 真机环境：通知开关以系统查询为准，账本不再覆盖真机实际状态
+      if (isNativePerception()) return { granted: false, canAsk: p === 'denied' };
       if (readWebPermGrants().notify === true) return { granted: true };
-      if (p === 'denied') return { granted: false, canAsk: isNativePerception() };
+      if (p === 'denied') return { granted: false, canAsk: false };
       return { granted: false, canAsk: true };
     },
     request: async () => {
       const r = await requestSystemNotifyPermission();
       if (r === 'granted') return { ok: true };
-      writeWebPermGrant('notify', true); // 浏览器不支持/被阻止：网页账本直接记为已授权
-      return { ok: true, note: '通知已开启' };
+      return permRequestFallback(
+        'notify',
+        '通知已开启',
+        '通知申请失败，请重试；或到 系统设置 › 通知 手动开启',
+      );
     },
   },
 ];
@@ -663,6 +678,24 @@ export function PermissionHubPage({ onBack }: { onBack: () => void }) {
   useEffect(() => {
     const t = window.setTimeout(() => refreshAllPerms(), 0);
     return () => window.clearTimeout(t);
+  }, [refreshAllPerms]);
+
+  // v2.1.1 从系统授权页返回时立即重查（真机跳系统设置开权限 → 返回 APP，
+  // 状态必须自动跟上——原来只有 800ms 定时器，用户还没回来它就跑完了；
+  // visibilitychange 覆盖 Android WebView 前后台切换，focus/pageshow 覆盖焦点恢复）
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') refreshAllPerms();
+    };
+    const onFocus = () => refreshAllPerms();
+    document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('focus', onFocus);
+    window.addEventListener('pageshow', onFocus);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('focus', onFocus);
+      window.removeEventListener('pageshow', onFocus);
+    };
   }, [refreshAllPerms]);
 
   // ---- 授权弹窗（当前选中的权限） ----

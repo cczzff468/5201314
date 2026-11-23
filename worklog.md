@@ -3351,3 +3351,14 @@ Task: 机主双需求——①审查 AI 工具/吃醋流程/提示词有无问�
 - [Web·permission.tsx] 权限中心 11→14 项：修改系统设置（canWrite 查询+深链跳开关页）/开机自启动（granted=权限&&守护开关，点击拉起常驻守护+提示国产 ROM 需系统设置允许）/常驻守护（running 实时查询+开关语义：PermDef+actionLabelOff，已开启时弹窗标题变「管理X？」按钮变「停止常驻守护」）；E2E 发现并修复两处浏览器兜底 bug：①keepAliveStatus 为 null 时停止分支不可达（runningNow=st?st.running:账本兜底）②boot 行授权后 keepalive 账本未联动（fallback 同时记两项，真机实际状态仍以原生查询为准）；root-page/页头注释 11 项→14 项
 - [Web·版本] app-version 2.1.0/64 四条发版说明；sw.js 缓存 v83→v84
 - [验证] tsc 全项目 0 错误；eslint 9 个改动文件 0 error 0 warning；Agent Browser 实测：解锁→设置→权限给予 16 行（14 项+麦克风+通知）全渲染→常驻守护弹窗「开启常驻守护（前台服务）？」→开启→已授权→再点变「管理…？/停止常驻守护」→停止→未授权（修复生效）→开机自启动授权→keepalive+boot 双已授权联动→修改系统设置授权→已授权；console/dev.log 零错误
+
+## 2026-11-23 · 第二十一轮：权限中心状态误报修复 + 真机锁应用路由重构（机主反馈两 bug）（v2.1.1）
+
+Task: 机主实测反馈两 bug——①权限给予界面：真机明明没授权却显示「已授权」，APP 点授权返回后列表不刷新 ②APP 上让 AI 在真机上锁 QQ，却报「手机操作失败：网页端只能冻结内置应用…『QQ』没有网页对应体」；修复 + commit + push
+
+- [Bug1·根因] ①request() 在原生通道跳转失败/桥超时时无条件落网页授权账本（writeWebPermGrant true）→ toast 谎报「已开启」②query() 账本优先短路（账本命中永不回查真机）→ 网页里点过一次授权、真机实际没开也永久显示已授权 ③权限页只有 800ms 弹窗关闭定时器（用户还没从系统设置回来它就跑完了），无 visibilitychange/focus 监听 → 从系统设置返回 APP 状态不更新
+- [Bug1·修复·permission.tsx] 新增 queryPermState/permRequestFallback 统一策略：真机环境（isNativePerception）query 以原生探测结果唯一可信（账本不再覆盖真机状态）、request 通道失败如实报错+指路系统设置绝不落账本；浏览器/旧 APK 保持网页模拟授权语义（账本记账）；16 项权限（无障碍/使用情况/悬浮窗/通知使用/短信/通讯录/日历/闹钟/位置/媒体/电池/修改系统设置/开机自启动/常驻守护/麦克风/通知）全部换新策略；PermissionHubPage 新增 visibilitychange+focus+pageshow 三监听 → 从系统授权页返回 APP 立即重查全部权限
+- [Bug2·根因] AI 输出兜底标记 [手机操作:冻结:QQ] → executePhoneOp 冻结分支只做包名精确匹配（webAppOfPkg('QQ') 失败）→ 直接报「网页端只能冻结内置应用」；且该路径无中文名→包名解析（FC 工具路径有、标记路径没有）；[手机操作:锁定:QQ] 更糟——'QQ' 通过 ^[\w.]+$ 校验被当伪包名传给原生 → LockOverlayService 轮询 fg=="QQ" 永不命中 → 静默无效锁
+- [Bug2·修复·四层] ①device-autonomy.ts 冻结/解冻分支重构：真机模式（AI 动手范围=真机）下冻结/解冻默认路由到 toolFreezeRealApp/toolUnfreezeRealApp（作用于真实手机；批量「全部」仍走网页批量冻结）；网页模式加名字归一化（包名精确 → 中文名/appId 精确，「QQ」「网易云音乐」不再直接报没有对应体），报错文案改为列出网页 17 应用+引导切真机模式 ②web-tools.ts toolFreezeRealApp 加中文名/单词名→真机包名解析（与 lockApp 工具同款：原生应用清单模糊匹配，精确名优先，找不到如实报错带应用列表样例）③device-ops.ts labLockApp 防伪包名校验（合法包名必含「.」，'QQ' 这类应用名直接报错指路不再静默成功）④教学规则三处修正：冻结/解冻标记分模式说明（真机=中文名或包名自动解析）、工具对号入座「要锁应用」按模式指路 lockApp/freezeRealApp vs freezeApp、工具清单 freezeRealApp 补中文名说明
+- [清理] shizuku-autonomy.ts 死代码副本删除（全仓无 import，防止文案/逻辑漂移误导）
+- [验证] eslint 0 错；Agent Browser 全链路实测：①权限中心 16 行全渲染、真机模式切换正常 ②mock /api/chat 返回 [手机操作:冻结:QQ] → 网页模式：手机操作成功「已冻结QQ（网页内应用…）」+localStorage 冻结记录 com.tencent.mobileqq 入账（修复前报没有网页对应体）③切真机模式再发 → 路由到真机路径「无法把『QQ』解析成真机包名（原生应用清单不可用——需在 AI Phone APP 里使用）」（真机 APP 内会经应用清单解析 com.tencent.mobileqq 真实锁定）④权限页授权落账本→显示已授权→eval 篡改账本+dispatch focus → 立即重查变未授权（返回 APP 自动刷新机制生效）；dev.log 零错误

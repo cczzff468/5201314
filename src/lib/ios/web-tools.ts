@@ -880,9 +880,39 @@ export async function toolFreezeRealApp(
   packageName: string,
   opts?: { reason?: string; durationMin?: number; charName?: string; contactId?: string; app?: string },
 ): Promise<WebToolResult> {
-  const { labLockApp } = await import('./device-ops');
-  const pkg = (packageName ?? '').trim();
-  if (!pkg) return { ok: false, text: '请填要锁定的真机应用包名（如 com.android.deskclock）' };
+  const { labLockApp, labInstalledApps } = await import('./device-ops');
+  let pkg = (packageName ?? '').trim();
+  if (!pkg) return { ok: false, text: '请填要锁定的真机应用名或包名（如「QQ」、抖音、com.android.deskclock）' };
+  // v2.1.1 中文名/单词名 → 真机应用清单解析（与 lockApp 工具同款能力）：
+  // 形如包名（含「.」）直接用；其余先经原生应用清单模糊匹配出真实包名——
+  // 修复「机主让锁 QQ，'QQ' 被当伪包名传给原生导致永不命中的静默无效锁」
+  if (!/^[\w.]+\.[\w.]+$/.test(pkg)) {
+    const apps = await labInstalledApps();
+    if (apps.length === 0) {
+      return {
+        ok: false,
+        text: `无法把「${packageName}」解析成真机包名（原生应用清单不可用——需在 AI Phone APP（原生壳）里使用，浏览器预览读不到真机应用）。也可直接填 Android 包名（如 com.tencent.mm）`,
+      };
+    }
+    const kw = pkg.toLowerCase();
+    const hits = apps.filter((a) => {
+      const n = (a.name ?? '').toLowerCase();
+      const q = (a.pkg ?? '').toLowerCase();
+      return n === kw || n.includes(kw) || q.includes(kw) || (n.length > 0 && kw.includes(n));
+    });
+    if (hits.length === 0) {
+      const sample = apps
+        .slice(0, 30)
+        .map((a) => a.name || a.pkg)
+        .filter(Boolean)
+        .join('、');
+      return {
+        ok: false,
+        text: `真机上没有找到叫「${packageName}」的应用${sample ? `。真机上的应用有（部分）：${sample}` : ''}——请换准确的应用名，或先用 searchRealApp 搜索`,
+      };
+    }
+    pkg = (hits.find((a) => (a.name ?? '').toLowerCase() === kw) ?? hits[0]).pkg;
+  }
   // AI 自定义时长（默认 30 分钟；宽限 1 分钟 ~ 7 天防呆）
   const rawDur = opts?.durationMin && opts.durationMin > 0 ? opts.durationMin : 30;
   const durationMin = Math.max(1, Math.min(10_080, rawDur));
