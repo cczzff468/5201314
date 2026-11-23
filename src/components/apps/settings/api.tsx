@@ -87,6 +87,24 @@ export function ApiPage({ onBack }: { onBack: () => void }) {
   const [modelsError, setModelsError] = useState('');
   const [modelsHint, setModelsHint] = useState('');
 
+  // v2.2.4 模型面板滑动三连修（机主实测「拉取模型那个面板不能滑动了」）：
+  // ① 旧 fixed 全屏遮罩吃掉页面触摸滚动（fixed 元素在变换容器内不参与滚动链——
+  //    面板高度抬到 ~490px 超出一屏后：页面拖不动、列表又不满无需滚 → 什么都滑不了）
+  //    → 撤掉遮罩，改 document click 委托做 outside-click 关闭：拖动滚动不触发 click
+  //    （面板保持打开、页面正常滚），真实点击外部才关闭；
+  // ② 面板开启后把模型区滚到可视中部（面板从锚点向下展开，不滚底部会超屏）；
+  // ③ 列表内部滚动强化（overscroll-contain + touch-action + 高度上限收敛）。
+  const modelSectionRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!modelPanelOpen) return;
+    const onDocClick = (e: MouseEvent) => {
+      const el = modelSectionRef.current;
+      if (el && e.target instanceof Node && !el.contains(e.target)) setModelPanelOpen(false);
+    };
+    document.addEventListener('click', onDocClick, true);
+    return () => document.removeEventListener('click', onDocClick, true);
+  }, [modelPanelOpen]);
+
   const [testLoading, setTestLoading] = useState(false);
   const [testOk, setTestOk] = useState<{ latencyMs: number; model: string; viaDirect?: boolean } | null>(null);
   const [testError, setTestError] = useState('');
@@ -189,6 +207,12 @@ export function ApiPage({ onBack }: { onBack: () => void }) {
         setModels(out.models);
         setModelQuery('');
         setModelPanelOpen(true);
+        // v2.2.4：面板开启后把模型区滚到可视中部（面板向下展开，锚点在屏幕下半部时
+        // 底部会超出屏幕；配合列表内部滚动 + 页面可滚三保险）
+        window.setTimeout(
+          () => modelSectionRef.current?.scrollIntoView({ block: 'center', behavior: 'smooth' }),
+          80,
+        );
         // v2.2.3：通道计数提示全删（「浏览器直连拉取到 N 个（服务器通道不可用）」等）——
         // 模型总数改由面板底部计数行展示，单一数据源不再出现「说 7 个只见 6 个」的错觉；
         // 仅保留「本次实时拉取失败、展示的是上次缓存」这一条有行动价值的提示
@@ -470,7 +494,7 @@ export function ApiPage({ onBack }: { onBack: () => void }) {
             </div>
 
             {/* 模型 */}
-            <div className="relative">
+            <div ref={modelSectionRef} className="relative">
               <FieldLabel>模型</FieldLabel>
               <div className="flex gap-2">
                 <Input
@@ -501,13 +525,7 @@ export function ApiPage({ onBack }: { onBack: () => void }) {
               )}
 
               {modelPanelOpen && (
-                <>
-                  <div
-                    className="fixed inset-0 z-20"
-                    onClick={() => setModelPanelOpen(false)}
-                    aria-hidden="true"
-                  />
-                  <div className="absolute -left-4 -right-4 top-full z-30 mt-1 overflow-hidden rounded-[20px] border border-white/60 bg-white/85 shadow-2xl ring-1 ring-black/[0.05] backdrop-blur-2xl dark:border-white/[0.1] dark:bg-[#1C1C1E]/85">
+                <div className="absolute -left-4 -right-4 top-full z-30 mt-1 overflow-hidden rounded-[20px] border border-white/60 bg-white/85 shadow-2xl ring-1 ring-black/[0.05] backdrop-blur-2xl dark:border-white/[0.1] dark:bg-[#1C1C1E]/85">
                     <div className="border-b border-black/[0.05] p-2 dark:border-white/[0.06]">
                       <Input
                         value={modelQuery}
@@ -517,7 +535,7 @@ export function ApiPage({ onBack }: { onBack: () => void }) {
                         className="h-10 rounded-[12px] border-black/[0.05] bg-white/70 text-[13px] shadow-sm backdrop-blur-xl dark:border-white/[0.09] dark:bg-white/[0.09]"
                       />
                     </div>
-                    <div className="thin-scrollbar max-h-[min(420px,60vh)] overflow-y-auto">
+                    <div className="thin-scrollbar max-h-[min(360px,48vh)] overscroll-contain overflow-y-auto" style={{ touchAction: 'pan-y', WebkitOverflowScrolling: 'touch' }}>
                       {filteredModels.length === 0 ? (
                         <div className="px-4 py-6 text-center text-[13px] text-muted-foreground">
                           没有匹配的模型
@@ -544,13 +562,12 @@ export function ApiPage({ onBack }: { onBack: () => void }) {
                         ))
                       )}
                     </div>
-                    {/* v2.2.3：底部计数行——面板高度从 256px 抬到 420px（小屏 60vh）后仍可能有
-                        模型在折叠线以下，计数行让总数永远可见，不再出现「拉到 7 个只见 6 个」的错觉 */}
+                    {/* v2.2.3：底部计数行——小屏折叠线以下仍有模型时计数行让总数永远可见；
+                        v2.2.4 列表高度收敛到 min(360px,48vh) + overscroll-contain 内滚 */}
                     <div className="border-t border-black/[0.05] px-4 py-2 text-center text-[11px] tabular-nums text-muted-foreground dark:border-white/[0.06]">
                       {q ? `匹配 ${filteredModels.length}，共 ${models.length} 个模型` : `共 ${models.length} 个模型`}
                     </div>
                   </div>
-                </>
               )}
             </div>
 

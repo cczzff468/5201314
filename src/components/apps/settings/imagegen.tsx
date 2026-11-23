@@ -109,6 +109,21 @@ export function ImageGenPage({ onBack }: { onBack: () => void }) {
   const [modelsError, setModelsError] = useState('');
   const [modelsHint, setModelsHint] = useState('');
 
+  // v2.2.4 模型面板滑动三连修：撤 fixed 全屏遮罩（在变换容器内不参与滚动链、
+  // 吃掉页面触摸拖动——面板高于一屏时「什么都滑不了」）改 document click 委托
+  // outside-click 关闭：拖动滚动不触发 click（面板保持打开、页面正常滚）；
+  // 开面板时把模型区滚到可视中部；列表 overscroll-contain 内滚强化。
+  const modelSectionRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!modelPanelOpen) return;
+    const onDocClick = (e: MouseEvent) => {
+      const el = modelSectionRef.current;
+      if (el && e.target instanceof Node && !el.contains(e.target)) setModelPanelOpen(false);
+    };
+    document.addEventListener('click', onDocClick, true);
+    return () => document.removeEventListener('click', onDocClick, true);
+  }, [modelPanelOpen]);
+
   // 测试生图（真实生成一张：成功展示图片、失败展示错误）
   const [testing, setTesting] = useState(false);
   const [testError, setTestError] = useState('');
@@ -185,6 +200,12 @@ export function ImageGenPage({ onBack }: { onBack: () => void }) {
         setModels(out.models);
         setModelQuery('');
         setModelPanelOpen(true);
+        // v2.2.4：面板开启后把模型区滚到可视中部（面板向下展开，锚点在屏幕下半部时
+        // 底部会超出屏幕；配合列表内部滚动 + 页面可滚三保险）
+        window.setTimeout(
+          () => modelSectionRef.current?.scrollIntoView({ block: 'center', behavior: 'smooth' }),
+          80,
+        );
         if (out.fromCacheOnly) setModelsHint(out.hint ?? '');
         return;
       }
@@ -532,7 +553,7 @@ export function ImageGenPage({ onBack }: { onBack: () => void }) {
                 </div>
 
                 {/* 模型名 + 拉取 */}
-                <div className="relative">
+                <div ref={modelSectionRef} className="relative">
                   <FieldLabel>模型名</FieldLabel>
                   <div className="flex gap-2">
                     <Input
@@ -565,13 +586,7 @@ export function ImageGenPage({ onBack }: { onBack: () => void }) {
                   )}
 
                   {modelPanelOpen && (
-                    <>
-                      <div
-                        className="fixed inset-0 z-20"
-                        onClick={() => setModelPanelOpen(false)}
-                        aria-hidden="true"
-                      />
-                      <div className="absolute -left-4 -right-4 top-full z-30 mt-1 overflow-hidden rounded-[20px] border border-white/60 bg-white/85 shadow-2xl ring-1 ring-black/[0.05] backdrop-blur-2xl dark:border-white/[0.1] dark:bg-[#1C1C1E]/85">
+                    <div className="absolute -left-4 -right-4 top-full z-30 mt-1 overflow-hidden rounded-[20px] border border-white/60 bg-white/85 shadow-2xl ring-1 ring-black/[0.05] backdrop-blur-2xl dark:border-white/[0.1] dark:bg-[#1C1C1E]/85">
                         <div className="border-b border-black/[0.05] p-2 dark:border-white/[0.06]">
                           <Input
                             value={modelQuery}
@@ -581,7 +596,7 @@ export function ImageGenPage({ onBack }: { onBack: () => void }) {
                             className="h-10 rounded-[12px] border-black/[0.05] bg-white/70 text-[13px] shadow-sm backdrop-blur-xl dark:border-white/[0.09] dark:bg-white/[0.09]"
                           />
                         </div>
-                        <div className="thin-scrollbar max-h-[min(420px,60vh)] overflow-y-auto">
+                        <div className="thin-scrollbar max-h-[min(360px,48vh)] overscroll-contain overflow-y-auto" style={{ touchAction: 'pan-y', WebkitOverflowScrolling: 'touch' }}>
                           {filteredModels.length === 0 ? (
                             <div className="px-4 py-6 text-center text-[13px] text-muted-foreground">
                               没有匹配的模型
@@ -605,12 +620,11 @@ export function ImageGenPage({ onBack }: { onBack: () => void }) {
                             ))
                           )}
                         </div>
-                        {/* v2.2.3：底部计数行（总数永远可见，不再出现「拉到 7 个只见 6 个」的错觉） */}
+                        {/* v2.2.3：底部计数行（总数永远可见）；v2.2.4 撤 fixed 遮罩（吃页面滚动）改 outside-click */}
                         <div className="border-t border-black/[0.05] px-4 py-2 text-center text-[11px] tabular-nums text-muted-foreground dark:border-white/[0.06]">
                           {q ? `匹配 ${filteredModels.length}，共 ${models.length} 个模型` : `共 ${models.length} 个模型`}
                         </div>
                       </div>
-                    </>
                   )}
                 </div>
 

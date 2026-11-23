@@ -366,6 +366,22 @@ const ACTION_LABELS: Record<string, RichActionKind> = {
   拍了拍: 'pat',
   // Shizuku 真实手机操作（v1.3；参数为「命令:参数…」整段，由 executePhoneOp 再解析）
   手机操作: 'phone-op',
+  // v2.2.4 弱 FC 简写标记兜底（机主实测：模型光输出 [锁定:QQ:10] / [switchToChat]——
+  // 不带「手机操作:」前缀，解析不认、聊天里落出裸文字且不执行，锁了/拉回全部假执行）：
+  // 简写全部按 phone-op 交给 executePhoneOp 同款执行器；switchToChat / pullBackToChat
+  // 裸标记（无参数）在 extractRichActionParts 里自动补「拉回:」参数。
+  锁定: 'phone-op',
+  真机冻结: 'phone-op',
+  冻结: 'phone-op',
+  解冻: 'phone-op',
+  解锁: 'phone-op',
+  拉回: 'phone-op',
+  switchToChat: 'phone-op',
+  pullBackToChat: 'phone-op',
+  截屏: 'phone-op',
+  截图: 'phone-op',
+  发截图: 'phone-op',
+  看屏幕: 'phone-op',
 };
 
 const ACTION_RE = /\[(领取红包|退回红包|拒收红包|收款转账|退回转账|拒收转账|收下亲属卡|拒收亲属卡|收下礼物卡|同意解除拉黑|拒绝解除拉黑|申请解除拉黑|解除拉黑|拉黑|禁言|解禁|取消禁言|移出群聊|踢出群聊|移出|踢出|改群名|修改群名|改公告|修改公告|更新公告|创建群聊|建群|邀请进群|拉进群|拉人进群|邀请|任命管理员|设管理员|拉回群聊|设为管理员|转让群主|放弃邀请|帮点外卖|给我点外卖|请客点外卖|请你吃外卖|我请你吃|自己点外卖|给TA点外卖|买个礼物送你|送你个礼物|代付淘宝订单|代付淘宝|帮我代付|代付|帮付|帮我取快递|帮你取快递|帮忙取件|帮取快递|帮付淘宝|帮你付淘宝|帮你买演出票|帮你买票|帮买票|帮你买|帮TA买|帮你下单|自己买|给我也买|送礼物|收礼物|收下礼物|生成新头像|换朋友圈背景|选图设头像|选图设背景|选图发送|换头像|存相册|发朋友圈|发说说|发动态|引用|拍一拍|拍了拍|手机操作)(?:[:：]([^\][]*))?\]/g;
@@ -483,8 +499,12 @@ export function extractRichActionParts(text: string): RichActionPart[] {
     } else if (kind === 'phone-op') {
       // [手机操作:命令:参数…]（v1.3 Shizuku 自主权）：参数整段保留（命令与参数由
       // device-autonomy.executePhoneOp 再解析；参数里可能出现冒号/坐标/包名，不能截断）；
-      // 空 body 丢弃（[手机操作] 没写命令等于没写标记）
-      if (raw) parts.push({ type: 'action', action: { kind, targetId: raw } });
+      // 空 body 丢弃（[手机操作] 没写命令等于没写标记）。
+      // v2.2.4 弱 FC 简写兑底：[switchToChat] / [pullBackToChat] 裸标记（无参数）自动
+      // 补「拉回:」——机主实测模型把工具名当标记输出导致「切回聊天没反应」。
+      const label = m[1];
+      const target = raw || (label === 'switchToChat' || label === 'pullBackToChat' ? '拉回:' : '');
+      if (target) parts.push({ type: 'action', action: { kind, targetId: target } });
     } else {
       // 卡片处理动作：targetId 取第一段；第三段及以后（旧版感谢语/理由）直接丢弃：回应内容由 AI 人设正文承担
       const targetId = raw.split(/[:：]/)[0].trim();
