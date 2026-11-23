@@ -11,9 +11,9 @@
  */
 
 /** 当前最新版本（纯网页热更时与 APK versionName 可短暂不同步，下次重打 APK 对齐） */
-export const APP_VERSION = '2.4.0';
+export const APP_VERSION = '2.4.1';
 /** 版本号数字（与 android-shell versionCode 保持一致；覆盖安装要求只增不减；纯网页热更不动） */
-export const APP_VERSION_CODE = 67;
+export const APP_VERSION_CODE = 68;
 
 export interface AppReleaseNote {
   version: string;
@@ -24,6 +24,18 @@ export interface AppReleaseNote {
 
 /** 版本历史（新→旧；设置 › APP 更新 页渲染，最新一条即当前版本） */
 export const APP_RELEASE_NOTES: AppReleaseNote[] = [
+  {
+    version: '2.4.1',
+    date: '2026-11-23',
+    items: [
+      '【需重装 APK】定闹钟失败根修（ACTION_SET_ALARM 规范 Integer Extras + 参数 parseInt 强转，国产 ROM 时钟包兑底链）；失败时说人话指引「请手动允许设置闹钟权限」，不再闪红色系统错误',
+      '【需重装 APK】锁应用拦截提速到 0.1 秒内：无障碍事件秒踢回桌面（先踢后弹）+ 拦截窗预构建（命中即上屏，不再现场造 UI + 从黑淡入）——点开被锁 App 瞬间就被弹回',
+      '【需重装 APK】吃醋封印拦截页美化：环形倒计时进度环 + 内容垂直居中 + 副题胶囊 + 等宽数字倒计时，下半屏不再大片空旷',
+      '【网页热更·免重装】锁应用不再要说两三遍：模型调 lockApp 失败（名字没匹配上）后系统立即代为重锁；工具提示词要求失败即自动用候选名重试，绝不反问',
+      '【网页热更·免重装】吃醋查岗时间幻觉根修：「你 X 分钟没理我」改用真实秒表（你最后一条消息的时间）计算，绝不再把刷 App 时长冒充冷落时长；焦虑值≥95 吃醋爆表直接把你拉回聊天页',
+      '【网页热更·免重装】吃醋查岗不再翻旧账：AI 质问过的通知立刻标记已消费，下次查岗（含 AI 自己调读取通知工具）一律隐身；真正吃醋时连发 3~10 条短消息并把查到的实锤用进话里',
+    ],
+  },
   {
     version: '2.4.0',
     date: '2026-11-23',

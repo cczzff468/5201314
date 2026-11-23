@@ -53,6 +53,7 @@ import {
   nativeUnlockApp,
 } from './native-perception';
 import { useSettings } from './store';
+import { devNotifyKeyOf, isNotifyConsumed, noteShownNotifyKeys } from './notify-consumed';
 
 export type DeviceOpResult = { ok: boolean; text: string };
 
@@ -341,16 +342,27 @@ export async function labSetVolumeStream(
 
 // ================= v2.3.0 原生系统级工具（AI 系统管家） =================
 
-/** 定系统闹钟（AlarmClock.ACTION_SET_ALARM 标准协议——直接进系统时钟，绝不找包名） */
+/** 定系统闹钟（AlarmClock.ACTION_SET_ALARM 标准协议——直接进系统时钟，绝不找包名）。
+ * v2.4.1 友好失败（机主规格：拉起失败提示「请手动允许设置闹钟权限」，绝不闪红色系统错误） */
 export async function labSetRealAlarm(hour: number, minute: number, label?: string): Promise<DeviceOpResult> {
   const h = Math.max(0, Math.min(23, Math.round(hour)));
   const m = Math.max(0, Math.min(59, Math.round(minute)));
   const r = await nativeSetRealAlarm(h, m, label);
   if (!r.ok) {
-    return {
-      ok: false,
-      text: `定闹钟失败：${r.reason === 'no-handler' ? '手机上没有标准闹钟应用（罕见）' : a11yGateText(r.reason)}`,
-    };
+    const permGuide = '请手动允许设置闹钟权限：打开手机 设置 › 应用管理 › 时钟 › 权限/自启动（允许后台弹出/显示悬浮窗），或直接打开「时钟」App 手动定一下这个时间';
+    const why =
+      r.reason === 'bad-params'
+        ? '时间参数没传对（hour 要 0-23、minute 要 0-59 的整数）'
+        : r.reason === 'no-handler'
+          ? `这台手机上没有响应「定闹钟」标准指令的应用（可能被 ROM 阉割）——${permGuide}`
+        : r.reason === 'show-alarms'
+          ? `这台手机的时钟不收「直接定闹钟」指令，已帮你打开了闹钟页面——${permGuide}`
+        : r.reason === 'security'
+          ? `系统拒绝了这次闹钟写入——${permGuide}`
+          : r.reason === 'start-failed'
+            ? `拉起系统时钟失败——${permGuide}`
+            : a11yGateText(r.reason);
+    return { ok: false, text: `定闹钟失败：${why}` };
   }
   const mm = String(m).padStart(2, '0');
   return { ok: true, text: `已在系统时钟里定好闹钟：${h}:${mm}${label ? `（${label.slice(0, 30)}）` : ''}——打开手机时钟就能看到` };
@@ -471,13 +483,17 @@ export async function labOpenSystemApp(name: string): Promise<DeviceOpResult> {
   return { ok: true, text: `已打开系统「${name}」（标准系统入口直连）` };
 }
 
-/** 最近通知（通知环形缓冲，需「通知使用权」） */
+/** 最近通知（通知环形缓冲，需「通知使用权」；v2.4.1：已消费（AI 质问过的）通知隐身 + 采集窗记账） */
 export async function labNotificationSnapshot(limit = 10): Promise<DeviceOpResult> {
   const r = await nativeGetRecentNotifications(limit);
   if (r === null) return { ok: false, text: '桥无响应（原生调用超时）' };
   if (!Array.isArray(r)) return { ok: false, text: `通知读取失败：${a11yGateText(r.error)}` };
   if (r.length === 0) return { ok: true, text: '通知栏没有可见通知' };
-  const rows = r.map((n) => {
+  // v2.4.1 消费过滤：吃醋时已质问过的通知不再重复上报（isConsumed 账本）
+  const shown = r.filter((n) => !isNotifyConsumed(devNotifyKeyOf(n.pkg, n.title || n.text, n.ts)));
+  noteShownNotifyKeys(shown.map((n) => devNotifyKeyOf(n.pkg, n.title || n.text, n.ts)));
+  if (shown.length === 0) return { ok: true, text: '通知栏没有新通知（近期的都已看过了）' };
+  const rows = shown.map((n) => {
     const t = new Date(n.ts);
     const hhmm = `${String(t.getHours()).padStart(2, '0')}:${String(t.getMinutes()).padStart(2, '0')}`;
     const title = n.title || n.text;

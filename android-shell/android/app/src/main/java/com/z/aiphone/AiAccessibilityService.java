@@ -341,6 +341,22 @@ public class AiAccessibilityService extends AccessibilityService {
         }
     }
 
+    /**
+     * v2.4.1 秒踢回桌面（LockOverlayService 拦截链用）：performGlobalAction(HOME) 由系统
+     * 无障碍通道执行，【不受 Android 10+ 后台 Activity 启动限制】、无需可见窗口豁免——
+     * 比 startActivity(Home intent) 快且稳（后者后台调用会被系统静默吞掉）。
+     * 服务未连接返回 false（调用方自行降级走 Home intent 路线）。
+     */
+    public static boolean kickHome() {
+        AiAccessibilityService svc = instance;
+        if (svc == null) return false;
+        try {
+            return svc.globalAction("home");
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
     // ================= 文本输入（ACTION_SET_TEXT） =================
 
     /**

@@ -27,6 +27,7 @@
 import { useNotifyCenter, type NotificationCenterItem } from './notification-center';
 import { getBatterySnapshot } from './battery';
 import { useIncomingCall } from './incoming-call';
+import { devNotifyKeyOf, webNotifyKeyOf, isNotifyConsumed, noteShownNotifyKeys } from './notify-consumed';
 
 // ---------------- 观察者（自我过滤的锚点） ----------------
 
@@ -171,15 +172,19 @@ function ensureWebTrackers(): void {
 
 // ---------------- 网页模式采集（绝不触碰真机桥） ----------------
 
-/** 【通知栏】网页手机通知中心快照（自我过滤后） */
+/** 【通知栏】网页手机通知中心快照（自我过滤后；v2.4.1：已消费通知隐身 + 采集窗记账） */
 function webNotifyLines(observer: SenseObserver | null): string[] {
   try {
     const now = Date.now();
     const items = useNotifyCenter.getState().items; // 新→旧
-    const candidates = items.filter((i) => !i.read || now - i.ts < 30 * 60_000).slice(0, 10);
-    const rows = candidates.filter((i) => !isSelfNotify(i, observer)).slice(0, 6).map(describeNotifyItem);
+    const candidates = items
+      .filter((i) => !isNotifyConsumed(webNotifyKeyOf(i.id))) // v2.4.1 AI 质问过的不翻旧账
+      .filter((i) => !i.read || now - i.ts < 30 * 60_000)
+      .slice(0, 10);
+    const rows = candidates.filter((i) => !isSelfNotify(i, observer)).slice(0, 6);
     if (rows.length === 0) return [];
-    return [`【TA 的通知栏（网页手机实时快照）】${rows.join('；')}`];
+    noteShownNotifyKeys(rows.map((i) => webNotifyKeyOf(i.id)));
+    return [`【TA 的通知栏（网页手机实时快照）】${rows.map(describeNotifyItem).join('；')}`];
   } catch {
     return [];
   }
@@ -389,25 +394,29 @@ function devicePkgName(pkg: string): string {
 
 /** 原生只读探测轻封装（v2.0.0 去 Shizuku：全部经 native-perception 原生桥；失败静默降级） */
 
-/** 【通知栏】MediaListenerService 通知环形缓冲（需「通知使用权」；自我过滤 com.z.aiphone/systemui） */
+/** 【通知栏】MediaListenerService 通知环形缓冲（需「通知使用权」；自我过滤 com.z.aiphone/systemui；
+ * v2.4.1：已消费（AI 质问过的）通知隐身 + 采集窗记账——吃醋绝不翻旧账） */
 async function deviceNotifyLines(): Promise<string[]> {
   try {
     const { nativeGetRecentNotifications } = await import('./native-perception');
     const r = await nativeGetRecentNotifications(12);
     if (!r || !Array.isArray(r) || r.length === 0) return [];
-    // 只看最近 2 小时 + 自我过滤 + 去重（同包同标题只留一条）
+    // 只看最近 2 小时 + 自我过滤 + 已消费过滤 + 去重（同包同标题只留一条）
     const twoHoursAgo = Date.now() - 2 * 3600_000;
     const seen = new Set<string>();
     const filtered = r.filter((n) => {
       if (isSelfDevicePkg(n.pkg)) return false;
       if (n.ts < twoHoursAgo) return false;
+      if (isNotifyConsumed(devNotifyKeyOf(n.pkg, n.title || n.text, n.ts))) return false; // v2.4.1
       const key = `${n.pkg}|${n.title}`;
       if (seen.has(key)) return false;
       seen.add(key);
       return true;
     });
     if (filtered.length === 0) return [];
-    const parts = filtered.slice(-6).map((n) => `${n.app || devicePkgName(n.pkg)}「${(n.title || n.text).slice(0, 16)}」${n.title && n.text ? `：${n.text.slice(0, 24)}` : ''}`);
+    const shown = filtered.slice(-6);
+    noteShownNotifyKeys(shown.map((n) => devNotifyKeyOf(n.pkg, n.title || n.text, n.ts)));
+    const parts = shown.map((n) => `${n.app || devicePkgName(n.pkg)}「${(n.title || n.text).slice(0, 16)}」${n.title && n.text ? `：${n.text.slice(0, 24)}` : ''}`);
     return [`【TA 真机的通知栏（实时快照）】${parts.join('；')}`];
   } catch {
     return [];

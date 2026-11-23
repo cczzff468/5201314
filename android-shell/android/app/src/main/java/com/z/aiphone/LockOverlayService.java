@@ -14,8 +14,11 @@ import android.content.SharedPreferences;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.content.pm.ServiceInfo;
+import android.graphics.Canvas;
 import android.graphics.Color;
+import android.graphics.Paint;
 import android.graphics.PixelFormat;
+import android.graphics.RectF;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Build;
@@ -153,6 +156,12 @@ public class LockOverlayService extends Service {
     private WindowManager wm;
     private FrameLayout overlayView;
 
+    /** v2.4.1 极速拦截：建锁时【预构建】好的拦截窗视图——命中时只剩 wm.addView（几毫秒），
+     * 不再现场造 20+ 个 View（旧版从命中到可见的延迟大头）；参数变化/解锁时作废。 */
+    private FrameLayout prebuiltOverlay;
+    /** v2.4.1 环形倒计时：本次锁的起始时刻（armedAt→unlockAt 的进度弧）；unlockAt=0 不画弧 */
+    private static volatile long armedAt = 0L;
+
     // ================= 生命周期 =================
 
     @Override
@@ -201,9 +210,35 @@ public class LockOverlayService extends Service {
         appKind = ak == null ? "" : ak.trim();
         appLabel = resolveAppLabel(pkg); // v2.2.5 F-2：拦截窗标题用中文应用名
         openAttempts = 0;
+        armedAt = System.currentTimeMillis(); // v2.4.1 环形倒计时起点
         startForegroundNotify();
         scheduleTick(0L); // 立即首轮
+        prebuildOverlay(); // v2.4.1 极速拦截：整棵 View 树建锁时就造好并预热
         return START_STICKY;
+    }
+
+    /**
+     * v2.4.1 预构建拦截窗视图（机主规格：拦截时才建 View/加载资源会卡顿——把 UI 预热
+     * 挪到建锁时）：主线程一次性建好整棵树缓存住，命中时只剩 addView 即刻可见。
+     * 构建失败不致命（命中时现场重建的老路还在）。
+     */
+    private void prebuildOverlay() {
+        try {
+            final LockOverlayService svc = this;
+            final Handler main = new Handler(Looper.getMainLooper());
+            main.post(() -> {
+                try {
+                    FrameLayout v = svc.buildOverlayView();
+                    if (lockPkg != null && !lockPkg.isEmpty()) {
+                        svc.prebuiltOverlay = v; // 解锁/换锁目标会先走 internalUnlock 或重新 arm（重建）
+                    }
+                } catch (Throwable ignored) {
+                    // 预构建失败：命中时走现场构建老路
+                }
+            });
+        } catch (Throwable ignored) {
+            // 预构建链路绝不 crash
+        }
     }
 
     /** v2.2.5 F-2：解析被锁应用的中文应用名（PackageManager；失败回空串） */
@@ -344,15 +379,20 @@ public class LockOverlayService extends Service {
                 persistEvent("lock-attempt", lockPkg, "第" + openAttempts + "次想打开");
             }
 
-            // ① 弹全屏拦截窗（先有可见窗口）
+            // v2.4.1 先踢后弹（机主规格：旧版先弹窗后跳转，弹窗卡在被锁 App 上显得极慢）：
+            // ① 秒踢：无障碍 GLOBAL_ACTION_HOME —— 系统无障碍通道执行，【不受 Android 10+
+            //    后台 Activity 启动限制】、无需可见窗口豁免，被锁 App 瞬间退后台；
+            // ② 瞬弹：预构建好的拦截窗（TYPE_APPLICATION_OVERLAY 最高层级）addView 即刻
+            //    可见，无任何入场动画延迟（旧版从纯黑淡入 180ms 拖慢感知）；
+            // ③ 无障碍不可用兜底：先弹窗拿到「可见窗口」豁免后台启动限制，再补 Home
+            //    intent（顺序不能反：没有可见窗口时 Home intent 会被系统静默吞掉）。
+            boolean kicked = AiAccessibilityService.kickHome();
             if (!overlayShowing) {
                 persistEvent("lock-shown", lockPkg, message);
                 showOverlay();
             }
             overlayHoldUntil = now + OVERLAY_HOLD_MS; // 刷新保持窗：这轮拦截的窗持续展示
-
-            // ② 有了可见窗口再弹回桌面（后台启动豁免成立，真正弹得回去）
-            goHome();
+            if (!kicked) goHome();
             refreshOverlayTexts();
         } catch (Throwable ignored) {
             // 拦截链路绝不 crash
@@ -373,10 +413,12 @@ public class LockOverlayService extends Service {
 
     /** 内部解锁：收遮罩 + 清锁状态（含持久化）+ 停服务（reason 只用于日志口径，不落盘） */
     private void internalUnlock(String reason) {
+        prebuiltOverlay = null; // v2.4.1：解锁作废预构建视图（下一把锁重新预热）
         removeOverlay();
         instance = null;
         lockPkg = null;
         unlockAt = 0L;
+        armedAt = 0L;
         message = "";
         contactId = "";
         appKind = "";
@@ -448,52 +490,38 @@ public class LockOverlayService extends Service {
 
     private void showOverlay() {
         if (overlayShowing || wm == null) return;
-        try {
-            int type = Build.VERSION.SDK_INT >= 26
-                    ? WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-                    : WindowManager.LayoutParams.TYPE_PHONE; // minSdk 24：老系统 TYPE_PHONE 仍可用
-
-            WindowManager.LayoutParams lp = new WindowManager.LayoutParams(
-                    WindowManager.LayoutParams.MATCH_PARENT,
-                    WindowManager.LayoutParams.MATCH_PARENT,
-                    type,
-                    WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
-                            | WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
-                    PixelFormat.OPAQUE);
-
-            overlayView = buildOverlayView();
-            wm.addView(overlayView, lp);
-            overlayShowing = true;
-            // v2.3.0 F-2 美化增强：入场动画（整体淡入 + 轻微上浮——比硬生生闪出
-            // 更精致，180ms 不拖累拦截速度）；视图动画必须主线程执行
+        // v2.4.1 极速上屏：视图统一在主线程构建/上屏（a11y 回调本就在主线程；轮询路径
+        // post 过来最多等一帧）。旧版从纯黑 setAlpha(0) 淡入 180ms 的入场动画已删——
+        // 机主规格「瞬间弹窗」：addView 即刻可见，被锁 App 在同帧内已被秒踢回桌面。
+        Runnable add = () -> {
+            if (overlayShowing || wm == null) return;
             try {
-                final View content = overlayView;
-                content.setAlpha(0f);
-                content.setTranslationY(dp(14));
-                new Handler(Looper.getMainLooper()).post(() -> {
-                    try {
-                        content.animate().alpha(1f).translationY(0f)
-                                .setDuration(180L)
-                                .withEndAction(() -> {
-                                    try {
-                                        content.setAlpha(1f);
-                                        content.setTranslationY(0f);
-                                    } catch (Throwable ignored) {
-                                    }
-                                })
-                                .start();
-                    } catch (Throwable ignored) {
-                        // 动画失败不影响拦截
-                    }
-                });
-            } catch (Throwable ignored) {
-                // 动画链路绝不 crash
+                int type = Build.VERSION.SDK_INT >= 26
+                        ? WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+                        : WindowManager.LayoutParams.TYPE_PHONE; // minSdk 24：老系统 TYPE_PHONE 仍可用
+
+                WindowManager.LayoutParams lp = new WindowManager.LayoutParams(
+                        WindowManager.LayoutParams.MATCH_PARENT,
+                        WindowManager.LayoutParams.MATCH_PARENT,
+                        type,
+                        WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
+                                | WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
+                        PixelFormat.OPAQUE);
+
+                FrameLayout view = prebuiltOverlay != null ? prebuiltOverlay : buildOverlayView();
+                prebuiltOverlay = null; // 一次性：已上屏的树不再复用（防 WindowManager 双父）
+                wm.addView(view, lp);
+                overlayView = view;
+                overlayShowing = true;
+                refreshOverlayTexts(); // 预构建视图上的倒计时/次数可能已过期，上屏即校准
+                startUiTick(); // v2.2.0：遮罩期间倒计时每秒刷新
+            } catch (Throwable t) {
+                overlayShowing = false;
+                overlayView = null;
             }
-            startUiTick(); // v2.2.0：遮罩期间倒计时每秒刷新
-        } catch (Throwable t) {
-            overlayShowing = false;
-            overlayView = null;
-        }
+        };
+        if (Looper.myLooper() == Looper.getMainLooper()) add.run();
+        else new Handler(Looper.getMainLooper()).post(add);
     }
 
     /**
@@ -505,86 +533,109 @@ public class LockOverlayService extends Service {
     private FrameLayout buildOverlayView() {
         final Context ctx = this;
         FrameLayout root = new FrameLayout(ctx);
-        // 夜色渐变背景（F-2：旧版纯色 #F2191B2E 偏闷，改上下渐变更有层次）
+        // 夜色渐变背景（v2.4.1 美化：暖梅紫夜 → 墨黑，纵向三段更有纵深）
         GradientDrawable rootBg = new GradientDrawable(
                 GradientDrawable.Orientation.TOP_BOTTOM,
-                new int[]{Color.parseColor("#2B1F4E"), Color.parseColor("#171231"), Color.parseColor("#0C0A18")});
+                new int[]{Color.parseColor("#33205C"), Color.parseColor("#1A1338"), Color.parseColor("#0B0916")});
         root.setBackground(rootBg);
 
         final String who = charName == null || charName.isEmpty() ? "TA" : charName;
 
-        // 顶部柔光（粉紫色圆斑，固定在根层顶部——不随内容滚动，作为徽章背后的氛围光）
+        // 顶部柔光（粉紫圆斑：徽章背后的氛围光，不随内容滚动）
         FrameLayout glow = new FrameLayout(ctx);
         GradientDrawable glowBg = new GradientDrawable();
         glowBg.setShape(GradientDrawable.OVAL);
-        glowBg.setColors(new int[]{Color.parseColor("#26FFC7E0"), Color.parseColor("#00FFC7E0")});
+        glowBg.setColors(new int[]{Color.parseColor("#2EFFC7E0"), Color.parseColor("#00FFC7E0")});
         glowBg.setOrientation(GradientDrawable.Orientation.TR_BL);
         glow.setBackground(glowBg);
-        FrameLayout.LayoutParams glowLp = new FrameLayout.LayoutParams(dp(300), dp(300), Gravity.TOP | Gravity.CENTER_HORIZONTAL);
-        glowLp.topMargin = -dp(80);
+        FrameLayout.LayoutParams glowLp = new FrameLayout.LayoutParams(dp(320), dp(320), Gravity.TOP | Gravity.CENTER_HORIZONTAL);
+        glowLp.topMargin = -dp(90);
         root.addView(glow, glowLp);
+
+        // 底部第二颗暗紫圆斑（v2.4.1 美化：填掉下半屏的大片空旷，纵向重心平衡）
+        FrameLayout glow2 = new FrameLayout(ctx);
+        GradientDrawable glow2Bg = new GradientDrawable();
+        glow2Bg.setShape(GradientDrawable.OVAL);
+        glow2Bg.setColors(new int[]{Color.parseColor("#16B49BD6"), Color.parseColor("#00B49BD6")});
+        glow2Bg.setOrientation(GradientDrawable.Orientation.BOTTOM_TOP);
+        glow2.setBackground(glow2Bg);
+        FrameLayout.LayoutParams glow2Lp = new FrameLayout.LayoutParams(dp(280), dp(280), Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
+        glow2Lp.bottomMargin = -dp(110);
+        root.addView(glow2, glow2Lp);
 
         ScrollView sc = new ScrollView(ctx);
         sc.setFillViewport(true);
         sc.setVerticalScrollBarEnabled(false);
         sc.setOverScrollMode(View.OVER_SCROLL_NEVER);
-        FrameLayout.LayoutParams scLp = new FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT);
-        root.addView(sc, scLp);
+        root.addView(sc, new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
+
+        // v2.4.1 美化：内容整块【垂直居中】（旧版内容堆在上半屏、下方 60% 全空）。
+        // 小屏内容超高时 ScrollView 照常滚动，居中不裁切。
+        FrameLayout viewport = new FrameLayout(ctx);
+        sc.addView(viewport, new ScrollView.LayoutParams(
+                ScrollView.LayoutParams.MATCH_PARENT, ScrollView.LayoutParams.MATCH_PARENT));
 
         LinearLayout box = new LinearLayout(ctx);
         box.setOrientation(LinearLayout.VERTICAL);
         box.setGravity(Gravity.CENTER_HORIZONTAL);
-        box.setPadding(dp(34), dp(56), dp(34), dp(44));
-        ScrollView.LayoutParams boxLp = new ScrollView.LayoutParams(
-                ScrollView.LayoutParams.MATCH_PARENT, ScrollView.LayoutParams.WRAP_CONTENT);
-        sc.addView(box, boxLp);
+        box.setPadding(dp(30), dp(18), dp(30), dp(24));
+        viewport.addView(box, new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.CENTER));
 
-        // 锁形徽章（圆形玻璃底 + 🔒）
-        FrameLayout badgeWrap = new FrameLayout(ctx);
-        FrameLayout.LayoutParams badgeWrapLp = new FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT);
-        box.addView(badgeWrap, badgeWrapLp);
-        TextView badge = new TextView(ctx);
-        badge.setText("🔒");
-        badge.setTextSize(30);
-        badge.setGravity(Gravity.CENTER);
-        GradientDrawable badgeBg = new GradientDrawable();
-        badgeBg.setShape(GradientDrawable.OVAL);
-        badgeBg.setColor(Color.parseColor("#66FFFFFF"));
-        badgeBg.setStroke(dp(1), Color.parseColor("#59FFFFFF"));
-        badge.setBackground(badgeBg);
-        FrameLayout.LayoutParams badgeLp = new FrameLayout.LayoutParams(dp(74), dp(74), Gravity.CENTER_HORIZONTAL);
-        badgeWrap.addView(badge, badgeLp);
+        // ===== 锁徽章 + 环形倒计时（v2.4.1 美化核心：徽章外一圈剩余时间进度环） =====
+        FrameLayout badge = new FrameLayout(ctx);
+        FrameLayout.LayoutParams badgeLp = new FrameLayout.LayoutParams(dp(132), dp(132), Gravity.CENTER_HORIZONTAL);
+        badgeLp.topMargin = dp(8);
+        RingTimerView ring = new RingTimerView(ctx);
+        ring.setTag("ring");
+        badge.addView(ring, new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
+        TextView lockGlyph = new TextView(ctx);
+        lockGlyph.setText("🔒");
+        lockGlyph.setTextSize(36);
+        lockGlyph.setGravity(Gravity.CENTER);
+        badge.addView(lockGlyph, new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
+        box.addView(badge, badgeLp);
 
-        // 主标题：{应用名}被封印了（F-2：中文应用名替代旧「{角色名}的吃醋封印」）
+        // 主标题：{应用名}被封印了（v2.4.1 美化：字号提级、层级拉开）
         TextView title = new TextView(ctx);
         String what = appLabel == null || appLabel.isEmpty() ? "这个应用" : appLabel;
         title.setText(what + "被封印了");
-        title.setTextSize(23);
+        title.setTextSize(25);
         title.setTypeface(Typeface.DEFAULT_BOLD, Typeface.BOLD);
         title.setTextColor(Color.WHITE);
         title.setGravity(Gravity.CENTER);
-        title.setPadding(dp(6), dp(22), dp(6), 0);
+        title.setPadding(dp(6), dp(18), dp(6), 0);
         box.addView(title);
 
-        // 副题：{角色名} 锁的
+        // 副题胶囊：{角色名} 的吃醋封印（v2.4.1 美化：胶囊底替代裸文字）
         TextView by = new TextView(ctx);
-        by.setText(who + " 锁的");
-        by.setTextSize(13);
+        by.setText(who + " 的吃醋封印");
+        by.setTextSize(12);
         by.setTextColor(Color.parseColor("#FFC7DE"));
         by.setGravity(Gravity.CENTER);
-        by.setPadding(0, dp(7), 0, 0);
-        box.addView(by);
+        by.setPadding(dp(14), dp(6), dp(14), dp(6));
+        GradientDrawable byBg = new GradientDrawable();
+        byBg.setCornerRadius(dp(999));
+        byBg.setColor(Color.parseColor("#1FFFFFFF"));
+        byBg.setStroke(dp(1), Color.parseColor("#26FFC7DE"));
+        by.setBackground(byBg);
+        LinearLayout.LayoutParams byLp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        byLp.gravity = Gravity.CENTER_HORIZONTAL;
+        byLp.topMargin = dp(10);
+        box.addView(by, byLp);
 
         // 质问文案卡片（半透明白玻璃圆角卡）
         TextView msg = new TextView(ctx);
-        msg.setText(message == null || message.isEmpty() ? "被我没收啦，说了要专心。" : message);
+        msg.setText(message == null || message.isEmpty() ? "被我没收啦，说了要专心陪我。" : message);
         msg.setTextSize(16);
         msg.setTextColor(Color.parseColor("#F2EFFA"));
         msg.setGravity(Gravity.CENTER);
         msg.setLineSpacing(dp(4), 1f);
-        msg.setPadding(dp(20), dp(14), dp(20), dp(14));
+        msg.setPadding(dp(20), dp(15), dp(20), dp(15));
         GradientDrawable msgBg = new GradientDrawable();
         msgBg.setCornerRadius(dp(18));
         msgBg.setColor(Color.parseColor("#14FFFFFF"));
@@ -592,38 +643,38 @@ public class LockOverlayService extends Service {
         msg.setBackground(msgBg);
         LinearLayout.LayoutParams msgLp = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-        msgLp.topMargin = dp(24);
+        msgLp.topMargin = dp(22);
         box.addView(msg, msgLp);
 
-        // 倒计时胶囊（每秒刷新；圆角药丸底）
+        // 倒计时胶囊（v2.4.1 美化：等宽数字体 + 字号提升——核心信息醒目，不再是一行小灰字）
         TextView countdown = new TextView(ctx);
-        countdown.setTextSize(13);
-        countdown.setTextColor(Color.parseColor("#D9C9F2"));
+        countdown.setTextSize(15);
+        countdown.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
+        countdown.setTextColor(Color.parseColor("#ECD9F7"));
         countdown.setGravity(Gravity.CENTER);
-        countdown.setPadding(dp(16), dp(7), dp(16), dp(7));
+        countdown.setPadding(dp(18), dp(9), dp(18), dp(9));
         GradientDrawable cdBg = new GradientDrawable();
         cdBg.setCornerRadius(dp(999));
-        cdBg.setColor(Color.parseColor("#17FFFFFF"));
+        cdBg.setColor(Color.parseColor("#1CFFFFFF"));
         countdown.setBackground(cdBg);
         countdown.setTag("countdown");
         countdown.setText(countdownText());
         LinearLayout.LayoutParams cdLp = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
         cdLp.gravity = Gravity.CENTER_HORIZONTAL;
-        cdLp.topMargin = dp(18);
+        cdLp.topMargin = dp(16);
         box.addView(countdown, cdLp);
 
         // 拦截次数行（反复手贱点开时显示，AI 感知强行突破的原生展示）
         TextView attempts = new TextView(ctx);
         attempts.setTextSize(12);
-        attempts.setTextColor(Color.parseColor("#8C92B4"));
+        attempts.setTextColor(Color.parseColor("#FF9FB6"));
         attempts.setGravity(Gravity.CENTER);
         attempts.setPadding(0, dp(8), 0, 0);
         attempts.setTag("attempts");
         box.addView(attempts);
 
-        // 【去哄哄 TA】主按钮（F-5：恒显——无联系人信息时点开直达 App 首页聊天列表，
-        // 有信息时按 localNotify 直达协议精准跳对应聊天）
+        // 【去哄哄 TA】主按钮（恒显——无联系人信息时点开直达 App 首页聊天列表）
         Button coax = new Button(ctx);
         coax.setText("去哄哄 " + who);
         coax.setTextSize(16);
@@ -640,8 +691,7 @@ public class LockOverlayService extends Service {
                 openChatWithTarget();
             } catch (Throwable ignored) {
             }
-            // v2.2.5：立即收窗去聊天（锁仍然生效，遮罩绝不盖住自家聊天界面；
-            // TA 再跑去点被锁 App，露头即再弹）
+            // 立即收窗去聊天（锁仍然生效，遮罩绝不盖住自家聊天界面；再点被锁 App 露头即再弹）
             try {
                 removeOverlay();
             } catch (Throwable ignored) {
@@ -649,10 +699,10 @@ public class LockOverlayService extends Service {
         });
         LinearLayout.LayoutParams coaxLp = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, dp(56));
-        coaxLp.topMargin = dp(32);
+        coaxLp.topMargin = dp(30);
         box.addView(coax, coaxLp);
 
-        // 【返回主屏幕】次按钮（F-4：机主要求的显式回桌面钮——收遮罩 + 送回桌面）
+        // 【返回主屏幕】次按钮（显式回桌面钮——收遮罩 + 送回桌面）
         Button home = new Button(ctx);
         home.setText("返回主屏幕");
         home.setTextSize(15);
@@ -677,7 +727,7 @@ public class LockOverlayService extends Service {
         btnLp.topMargin = dp(12);
         box.addView(home, btnLp);
 
-        // 【强制解锁】安静文字钮（F-6：两击确认——误触不直接解；确认后原生解锁 +
+        // 【强制解锁】安静文字钮（两击确认——误触不直接解；确认后原生解锁 +
         // 落盘 force-unlock 事件，JS drain 后 AI 立刻知道「TA 没哄我，强解了」）
         final Button force = new Button(ctx);
         force.setText("强制解锁");
@@ -731,16 +781,75 @@ public class LockOverlayService extends Service {
         forceLp.topMargin = dp(10);
         box.addView(force, forceLp);
 
-        // 底部小字：锁归谁管的说明
+        // 底部小字：锁链装饰 + 说明（v2.4.1 美化：⛓ 呼应「封印」主题）
         TextView manage = new TextView(ctx);
-        manage.setText("封印由 " + who + " 管理 · 哄好、倒计时到点或强制解锁都会解开");
+        manage.setText("⛓ 封印由 " + who + " 管理 · 哄好、到点或强制解锁都会解开");
         manage.setTextSize(11);
-        manage.setTextColor(Color.parseColor("#6F668F"));
+        manage.setTextColor(Color.parseColor("#8A7FA8"));
         manage.setGravity(Gravity.CENTER);
         manage.setPadding(0, dp(6), 0, 0);
         box.addView(manage);
 
         return root;
+    }
+
+    /**
+     * v2.4.1 环形倒计时 View（锁徽章外圈）：暗色 track 全环 + 剩余时间进度弧（粉色圆头）；
+     * unlockAt=0（锁到哄好）时满环常亮。每秒由 refreshOverlayTexts 喂进度，纯 onDraw 无动画
+     * 框架，绘制成本极低（拦截窗预构建时一次性创建，不拖累秒踢速度）。
+     */
+    private class RingTimerView extends View {
+        private final Paint trackPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint arcPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private volatile float fraction = 1f;
+        private final RectF oval = new RectF();
+
+        RingTimerView(Context c) {
+            super(c);
+            trackPaint.setStyle(Paint.Style.STROKE);
+            trackPaint.setStrokeWidth(dp(5));
+            trackPaint.setColor(Color.parseColor("#1FFFFFFF"));
+            arcPaint.setStyle(Paint.Style.STROKE);
+            arcPaint.setStrokeCap(Paint.Cap.ROUND);
+            arcPaint.setStrokeWidth(dp(5));
+            arcPaint.setColor(Color.parseColor("#FFC7DE"));
+        }
+
+        /** 喂剩余占比（0~1；变化小于 0.2% 不重绘，省电） */
+        void setRemaining(float f) {
+            float v = Math.max(0f, Math.min(1f, f));
+            if (Math.abs(v - fraction) < 0.002f) return;
+            fraction = v;
+            invalidate();
+        }
+
+        @Override
+        protected void onDraw(Canvas canvas) {
+            try {
+                int w = getWidth(), h = getHeight();
+                if (w <= 0 || h <= 0) return;
+                float cx = w / 2f, cy = h / 2f;
+                float r = Math.min(w, h) / 2f - dp(4);
+                canvas.drawCircle(cx, cy, r, trackPaint);
+                if (unlockAt != 0) {
+                    oval.set(cx - r, cy - r, cx + r, cy + r);
+                    canvas.drawArc(oval, -90f, 360f * fraction, false, arcPaint);
+                } else {
+                    canvas.drawCircle(cx, cy, r, arcPaint); // 锁到哄好：满环常亮
+                }
+            } catch (Throwable ignored) {
+                // 绘制绝不 crash
+            }
+        }
+    }
+
+    /** v2.4.1 环形进度：剩余时间 / 锁定总时长（armedAt 起算；unlockAt=0 恒 1） */
+    private float remainFraction() {
+        if (unlockAt == 0) return 1f;
+        long total = unlockAt - armedAt;
+        if (total <= 0) return 0f;
+        long left = unlockAt - System.currentTimeMillis();
+        return Math.max(0f, Math.min(1f, left / (float) total));
     }
 
     /**
@@ -807,8 +916,16 @@ public class LockOverlayService extends Service {
         }, 1000L);
     }
 
-    /** 每秒刷新倒计时文案 + 拦截次数行 */
+    /** 每秒刷新倒计时文案 + 拦截次数行 + 环形进度（v2.4.1：视图挂在主线程，非主线程调用自动转发） */
     private void refreshOverlayTexts() {
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            refreshOverlayTextsInner();
+        } else {
+            new Handler(Looper.getMainLooper()).post(this::refreshOverlayTextsInner);
+        }
+    }
+
+    private void refreshOverlayTextsInner() {
         try {
             if (overlayView == null) return;
             TextView countdown = (TextView) overlayView.findViewWithTag("countdown");
@@ -820,6 +937,11 @@ public class LockOverlayService extends Service {
                 attempts.setText(openAttempts >= 2
                         ? "这是你第 " + openAttempts + " 次想打开它了"
                         : "");
+            }
+            // v2.4.1 环形倒计时进度弧（每秒一喂）
+            View ringAny = overlayView.findViewWithTag("ring");
+            if (ringAny instanceof RingTimerView) {
+                ((RingTimerView) ringAny).setRemaining(remainFraction());
             }
         } catch (Throwable ignored) {
         }
@@ -836,13 +958,20 @@ public class LockOverlayService extends Service {
     }
 
     private void removeOverlay() {
-        try {
-            if (uiTickHandler != null) uiTickHandler.removeCallbacksAndMessages(null);
-            if (overlayView != null && wm != null) wm.removeView(overlayView);
-        } catch (Throwable ignored) {
-        }
-        overlayView = null;
-        overlayShowing = false;
+        // v2.4.1：视图上屏/移除统一主线程（addView 绑定的 ViewRoot 线程必须一致）；
+        // 收窗后立刻预构建下一发（用户再手贼点被锁 App 时又是零构建 addView）。
+        Runnable rm = () -> {
+            try {
+                if (uiTickHandler != null) uiTickHandler.removeCallbacksAndMessages(null);
+                if (overlayView != null && wm != null) wm.removeView(overlayView);
+            } catch (Throwable ignored) {
+            }
+            overlayView = null;
+            overlayShowing = false;
+            prebuildOverlay();
+        };
+        if (Looper.myLooper() == Looper.getMainLooper()) rm.run();
+        else new Handler(Looper.getMainLooper()).post(rm);
     }
 
     private int dp(int v) {

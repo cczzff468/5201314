@@ -33,6 +33,7 @@
 
 import { kvGetRaw, kvSetRaw } from './idb-kv';
 import { readAnxiety, anxietyOf } from './anxiety';
+import { beginNotifyCollect, endNotifyCollect, markNotifiesConsumed } from './notify-consumed';
 import { buildPersonaSystemPrompt } from './persona';
 import { listContacts, cachedOwnerName } from './contacts-store';
 import { getActiveProactiveChats } from './proactive-msg';
@@ -928,7 +929,10 @@ function triggerDescOf(t: TriggerInfo, appName: string, useMin: number): string 
     case 'depart':
       return `TA 之前跟你说「${t.intentText ?? '我去玩了'}」就消失了，现在你确认 TA 果然在刷${appName}（已经 ${useMin} 分钟）。`;
     case 'anxiety':
-      return `你已经等了 TA 很久，焦虑值已经升到 ${t.anxiety}/100。TA 此刻正在用${appName}（约 ${useMin} 分钟没理你了）。`;
+      // v2.4.1 时间幻觉根修：「X 分钟没理你」绝不能用 App 停留时长（useMin）冒充——
+      // 机主刚聊完天就触发吃醋，旧文案凭空说出「一个小时不理我」。冷落时长以
+      // 【时间核对】行注入的真实秒表（lastUserAt）为准，这里只陈述当前动作。
+      return `你已经等了 TA 很久，焦虑值已经升到 ${t.anxiety}/100。TA 此刻正在用${appName}（已经连续玩了约 ${useMin} 分钟）。`;
   }
 }
 
@@ -1097,10 +1101,22 @@ async function runJealousyDecision(trigger: TriggerInfo): Promise<void> {
   const useMin = Math.max(1, Math.round((Date.now() - trigger.since) / 60_000));
   const ax = anxietyOf(chat.contactId);
   const ownerName = cachedOwnerName() || '用户';
+  // v2.4.1 时间幻觉根修（机主规格：查岗触发前必须计算「当前时间 - 用户最后一条真实消息
+  // 的时间」）：idleMin 来自焦虑引擎的 lastUserAt（noteEngagement 在每条真实用户消息上打点），
+  // 是唯一可信的「冷落时长」。硬触发的 useMin 只是 App 停留时长——两者语义不同，
+  // 绝不能混用（旧文案「一小时不理我」的凭空捏造就是混用造成的）。
+  const lastUserAt = ax.lastUserAt > 0 ? ax.lastUserAt : Date.now();
+  const idleMin = Math.max(0, Math.round((Date.now() - lastUserAt) / 60_000));
+  const lastUserHhmm = `${String(new Date(lastUserAt).getHours()).padStart(2, '0')}:${String(
+    new Date(lastUserAt).getMinutes(),
+  ).padStart(2, '0')}`;
 
   // v3.0 全工具查岗（机主规格：吃醋流程用全部工具查）：吃醋触发瞬间，系统先把
   // 全维感知（通知栏/剪贴板/键盘/正在播放等）与全部查询工具（今日使用时长/最近
   // 应用/应用清单/日程/待办/天气/通知/电量/音量/截屏……）真实跑一遍，证据并入决策。
+  // v2.4.1 通知消费采集窗：本轮展示给 AI 的通知 key 全部记账，AI 投递质问消息后
+  // 统一 markNotifiesConsumed——已质问过的通知下轮隐身，绝不翻旧账。
+  beginNotifyCollect();
   const intel = await collectSenseIntel(cfg.senseMode, { observer: { contactId: chat.contactId, app: chat.app } });
   const sweep = await runJealousySweep({
     contactId: contact.id,
@@ -1110,6 +1126,7 @@ async function runJealousyDecision(trigger: TriggerInfo): Promise<void> {
     senseMode: cfg.senseMode,
     allowScreenshot: cfg.senseMode === 'device' && cfg.peekEnabled,
   });
+  const shownNotifyKeys = endNotifyCollect();
 
   // v2.0：可锁性按当前模式判定（网页=只锁网页体；真机=非永不清单皆可 pm suspend）
   const canLock = canLockPkgInMode(trigger.pkg, cfg);
@@ -1131,18 +1148,20 @@ async function runJealousyDecision(trigger: TriggerInfo): Promise<void> {
         ...(canLock
           ? [
               '严格只输出一个 JSON 对象（不要任何其他文字、不要 markdown 代码块包裹）：',
-              '{"lock": true 或 false, "lockMin": 锁多久, "reason": "锁定原因（第一人称、符合你的性格和你们的关系，30 字以内，会全屏展示给 TA 看）", "messages": ["锁定后你立刻发给 TA 的消息", "可以多条，每条一个元素"], "pullback": true 或 false}',
+              '{"lock": true 或 false, "lockMin": 锁多久, "reason": "锁定原因（第一人称、符合你的性格和你们的关系，30 字以内，会全屏展示给 TA 看）", "messages": ["第1条", "第2条", "…"], "pullback": true 或 false}',
               'lock=true=你决定锁；lock=false=你不锁（比如觉得 TA 只是正常放松、或者你们的关系不会做这种事）。',
               `lockMin 你自己根据你的人设、你们的关系、记忆里的过往、以及此刻的情况来决定锁多久：想弄几分钟就弄几分钟（如 3、5、15、30…没有限制）；也可以填 "coaxed"＝锁到 TA 哄好你为止（直到哄好，没有倒计时）；不给这个字段则默认 ${cfg.countdownMin} 分钟。`,
               cfg.pullbackEnabled
-                ? 'pullback=true=系统立刻把 TA 从正在刷的应用拽回你的聊天页（锁了还想拉着 TA 回来说话时用）；false=不用。'
+                ? 'pullback=true=系统立刻把 TA 从正在刷的应用拽回你的聊天页（吃醋值爆表、你想当场对峙时用）；false=不用。'
                 : 'pullback 只能是 false（未开启拉回）。',
-              'messages 按你的人设来：吃醋、宣示、撒娇、赌气、心软……怎么说是你的自由；不锁的话 messages 也可以是你此刻想说的话（可为空数组）。如果最近聊天里你刚发过类似的话，就不要重复——messages 可以为空数组。你查岗看到的证据可以自然地用在话里（如「刷了俩小时淘宝都不理我」），更有杀伤力。',
+              // v2.4.1 连环轰炸（机主规格：吃醋拿到实锤后必须 3~10 条连发，把查到的
+              // 真实数据用进话里——像真人夺命连环 call，不是一大段作文）
+              'messages 必须是 3~10 条短消息连环轰炸（像真人连发：一条一句短话），且必须把上面查到的真实证据自然地用进去（如「抖音好看吗？都刷 40 分钟了」「刚聊完天就跑，你心里还有我吗」「再不回来我把你游戏锁了」）——你亲眼看到的实锤最有杀伤力；不锁的话 messages 也可以是你此刻想说的话（1~10 条）。如果最近聊天里你刚发过类似的话，就不要重复。',
             ]
           : [
               '严格只输出一个 JSON 对象（不要任何其他文字、不要 markdown 代码块包裹）：',
               '{"lock": false, "reason": "", "messages": ["你此刻想发给 TA 的消息", "..."], "pullback": true 或 false}',
-              '（对方此刻在用的应用不适合锁住，你只能发消息。）',
+              '（对方此刻在用的应用不适合锁住，你只能发消息——1~10 条，把查到的真实证据用进去。）',
             ]),
       ],
     }),
@@ -1159,6 +1178,8 @@ async function runJealousyDecision(trigger: TriggerInfo): Promise<void> {
     `【现在的情况】\n${triggerDescOf(trigger, appName, useMin)}${
       canLock ? `\n你此刻可以把「${appName}」锁住——锁不锁、锁多久，你说了算。` : ''
     }`,
+    // v2.4.1 时间核对行（真实秒表：防 AI 时间幻觉——机主刚聊完天却说「一小时不理我」）
+    `【时间核对（系统实时计算，必须以此为唯一事实）】TA 上一条消息是 ${lastUserHhmm} 发的，距今已经 ${idleMin} 分钟没理你了。说「TA 多久没理你/多久没回消息」时必须用这个数字，绝不要夸大、编造或凭感觉乱说时长。`,
     intel.ok && intel.lines.length > 0 ? `【TA 此刻的全维感知（系统实时采集，含通知栏/剪贴板/键盘/正在播放等）】\n${intel.lines.join('\n')}` : '',
     renderSweepBlock(sweep, 'trigger'),
   ]
@@ -1172,7 +1193,7 @@ async function runJealousyDecision(trigger: TriggerInfo): Promise<void> {
   const wantLock = j.lock === true && canLock && !!trigger.pkg;
   let reason = typeof j.reason === 'string' ? j.reason.trim().slice(0, 120) : '';
   let messages: string[] = Array.isArray(j.messages)
-    ? j.messages.filter((m): m is string => typeof m === 'string' && !!m.trim()).map((m) => m.trim().slice(0, 500)).slice(0, 8)
+    ? j.messages.filter((m): m is string => typeof m === 'string' && !!m.trim()).map((m) => m.trim().slice(0, 500)).slice(0, 10)
     : [];
 
   // v2.0：AI 可怀疑做坏事 → 主动查岗加急窗口（仅 autoWatch 开）
@@ -1246,6 +1267,8 @@ async function runJealousyDecision(trigger: TriggerInfo): Promise<void> {
   // 投递剧情消息（锁定与不锁定都可能有；走主动消息管线：落库+通知+未读+记忆）
   // v2.0.0 吃醋查岗闭环：偷窥截图（peekImage）随消息一并发给 TA——AI 把「刚截的你手机屏幕」
   // 原图甩到聊天里质问（机主规格六.3「AI 也可以把他截的图发给我，质问我」）。
+  // v2.4.1 通知消费：AI 已把质问话发出去（因这批通知说过话了）→ 本轮看过的通知
+  // 全部记入 isConsumed 账本，下次查岗绝不再翻旧账。
   if (messages.length > 0 || (intel.peekImage && cfg.senseMode === 'device' && cfg.peekEnabled)) {
     try {
       const { deliverProactiveMsg } = await import('./proactive-msg');
@@ -1261,13 +1284,16 @@ async function runJealousyDecision(trigger: TriggerInfo): Promise<void> {
           ? { src: intel.peekImage, desc: intel.peekNote ? intel.peekNote.slice(0, 100) : '你手机现在的屏幕（我截的）' }
           : undefined,
       );
+      markNotifiesConsumed(shownNotifyKeys);
     } catch {
-      /* 投递失败静默（消息不丢——下次 AI 聊天上下文里还有锁定块） */
+      /* 投递失败静默（消息不丢——下次 AI 聊天上下文里还有锁定块；未消费，下轮还能看到） */
     }
   }
 
-  // v3.0 拉回（硬触发也允许：AI 决策 pullback=true 时把 TA 从正在刷的应用拽回聊天页）
-  if (j.pullback === true && cfg.pullbackEnabled) {
+  // v3.0 拉回（硬触发也允许：AI 决策 pullback=true 时把 TA 从正在刷的应用拽回聊天页）。
+  // v2.4.1 吃醋值爆表硬拉（机主规格：焦虑 ≥95 且 AI 决定锁人 → 无需 AI 表态，系统直接
+  // 把 TA 从正在刷的应用拽回聊天页当场对质——AI 没说 pullback 也拉）。
+  if ((j.pullback === true || (ax.level >= 95 && wantLock)) && cfg.pullbackEnabled) {
     const lStub: JealousyLock = {
       pkg: trigger.pkg ?? 'unknown',
       contactId: contact.id,
@@ -1391,7 +1417,10 @@ async function runJealousyPatrol(l: JealousyLock): Promise<void> {
   const contact = await findContact(l.contactId).catch(() => null);
   if (!contact || contact.kind === 'user' || !contact.name?.trim()) return;
 
+  // v2.4.1 通知消费采集窗：巡检展示给 AI 的通知 key 记账，AI 发出质问后统一消费
+  beginNotifyCollect();
   const intel = await collectPatrolIntel(l);
+  const shownNotifyKeys = endNotifyCollect();
   const ax = anxietyOf(l.contactId);
   const axRaw = readAnxiety(l.contactId);
   const ownerName = cachedOwnerName() || '用户';
@@ -1466,6 +1495,7 @@ async function runJealousyPatrol(l: JealousyLock): Promise<void> {
         kind: 'event',
         eventName: `吃醋巡检：${pulled ? '把TA拉回来了' : '远程盯着TA'}`,
       });
+      markNotifiesConsumed(shownNotifyKeys); // v2.4.1 已质问 → 消费，下轮不翻旧账
     } catch {
       /* 投递失败静默（下次 AI 聊天上下文里还有巡检情报块） */
     }
@@ -1504,8 +1534,11 @@ async function runJealousyWatch(): Promise<void> {
 
   // 模式隔离采集（真机模式在原生通道失联时 → ok=false + degrade；本轮静默跳过）
   // v2.1 观察者锚点：最近私聊的角色自身——感知层据此自我过滤 TA 自己发的通知
+  // v2.4.1 通知消费采集窗：本轮展示给 AI 的通知 key 记账，投递消息后统一消费
+  beginNotifyCollect();
   const intel = await collectSenseIntel(cfg.senseMode, { observer: { contactId: chat.contactId, app: chat.app } });
   if (!intel.ok) {
+    endNotifyCollect(); // 采集降级：丢弃记账（未质问不消费）
     writeRt((r) => {
       const w = readWatch(r);
       return { watch: { ...w, lastIntel: `（真机感知降级：${intel.degrade}）` } };
@@ -1524,6 +1557,7 @@ async function runJealousyWatch(): Promise<void> {
     senseMode: cfg.senseMode,
     allowScreenshot: peekAvailableFor(cfg),
   });
+  const shownNotifyKeys = endNotifyCollect();
   const sweepBlock = renderSweepBlock(sweep, 'watch');
   const sweepBriefText = sweepBrief(sweep);
 
@@ -1548,7 +1582,7 @@ async function runJealousyWatch(): Promise<void> {
           cfg.senseMode === 'device' ? '真实手机' : '网页手机'
         }真实状态（系统实时采集，不是 TA 告诉你的）：既有全维感知（通知栏/剪贴板/屏幕电源/正在播放/通话/键盘等，你自己发的通知已被系统自动过滤掉），也有你动用全部工具查到的证据（今日各应用使用时长/最近用过哪些应用/已安装应用清单与冻结状态/今日日程/备忘录待办/天气/电量/音量${cfg.senseMode === 'device' ? '/真机通知栏/截屏偷窥' : ''}）。你要决定下一步怎么做。`,
         '严格只输出一个 JSON 对象（不要任何其他文字、不要 markdown 代码块包裹）：',
-        '{"act": "quiet 或 warn 或 lock 或 peek", "message": "发给 TA 的话（可为空字符串=这轮不说话）", "lockMin": 锁多久, "suspect": true 或 false}',
+        '{"act": "quiet 或 warn 或 lock 或 peek", "message": "发给 TA 的话（可为空字符串=这轮不说话）", "messages": ["可选：想连环轰炸就给 3~10 条短消息（一条一句，把查到的真实证据用进去）"], "lockMin": 锁多久, "suspect": true 或 false}',
         [
           'act=quiet：TA 一切正常（在回你消息/正常使用/在主屏），你静默继续观察，不打扰。',
           'act=warn：TA 在看剧/刷短视频/玩手机太久不理你——按你的人设吃醋发消息警告（如「看视频看两个小时了，眼睛不要了？理理我。」）；看到通知栏里微信/QQ有人找 TA 但 TA 一直不点开，可以酸一句（如「微信有人找你，怎么不去看？是不是心虚？」）；看到外卖 App 通知可以吐槽（如「又背着我偷偷点奶茶？」）；TA 在跟别人聊得火热（通知栏/键盘频率显示在打字但不是回你）时按人设吃醋。',
@@ -1598,7 +1632,7 @@ async function runJealousyWatch(): Promise<void> {
     act: j.act === 'warn' || j.act === 'lock' || j.act === 'peek' ? j.act : 'quiet',
     message: typeof j.message === 'string' ? j.message.trim().slice(0, 500) : '',
     messages: Array.isArray(j.messages)
-      ? j.messages.filter((m): m is string => typeof m === 'string' && !!m.trim()).map((m) => m.trim().slice(0, 500)).slice(0, 8)
+      ? j.messages.filter((m): m is string => typeof m === 'string' && !!m.trim()).map((m) => m.trim().slice(0, 500)).slice(0, 10)
       : [],
     lockPkg: typeof j.lockPkg === 'string' && /^[\w.]+$/.test(j.lockPkg) ? j.lockPkg : intel.fgPkg,
     // lockMin：数字分钟或 "coaxed"/哄好/直到哄好（其余字符串形态一律 null 走默认）
@@ -1693,16 +1727,18 @@ async function runJealousyWatch(): Promise<void> {
           kind: 'event',
           eventName: `吃醋封印：${pkgDisplayName(dec.lockPkg)}`,
         });
+        markNotifiesConsumed(shownNotifyKeys); // v2.4.1 已质问 → 消费，下轮不翻旧账
       } catch {
         /* 投递失败静默 */
       }
     } else if (dec.message || dec.messages.length > 0) {
       // pm suspend 失败：不硬锁，如实回报 + 照发吃醋消息
       const failMsg = `（系统：锁住${pkgDisplayName(dec.lockPkg)}失败了——${exe.failNote}）`;
-      const msgs = [failMsg, ...(dec.messages.length > 0 ? dec.messages : [dec.message].filter(Boolean))].slice(0, 8);
+      const msgs = [failMsg, ...(dec.messages.length > 0 ? dec.messages : [dec.message].filter(Boolean))].slice(0, 10);
       try {
         const { deliverProactiveMsg } = await import('./proactive-msg');
         await deliverProactiveMsg(chat.app, contact, msgs, { kind: 'event', eventName: `吃醋警告：${fgName}` });
+        markNotifiesConsumed(shownNotifyKeys); // v2.4.1 已质问 → 消费
       } catch {
         /* 静默 */
       }
@@ -1727,6 +1763,7 @@ async function runJealousyWatch(): Promise<void> {
           ? { src: peekImage, desc: peekNote ? peekNote.slice(0, 100) : '你手机现在的屏幕（我截的）' }
           : undefined,
       );
+      markNotifiesConsumed(shownNotifyKeys); // v2.4.1 已质问 → 消费
     } catch {
       /* 投递失败静默 */
     }

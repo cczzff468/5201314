@@ -1624,39 +1624,116 @@ public class NativePerceptionPlugin extends Plugin {
         }, "app-label").start();
     }
 
-    // ================= v2.3.0 原生系统级工具（机主「AI 系统管家」需求） =================
+    // ================= v2.3.0 原生系统级工具（机主「AI 系统管家」需求）· v2.4.1 setRealAlarm 加固 =================
+
+    /** 国产 ROM 时钟包候选（标准 action 解析不到 handler 时逐个 setPackage 再试） */
+    private static final String[] CLOCK_PKG_CANDIDATES = {
+            "com.android.deskclock",            // AOSP / 小米 / 华为 / 荣耀（多数魔改仍沿用）
+            "com.sec.android.app.clockpackage", // 三星
+            "com.coloros.alarmclock",           // OPPO / 一加（ColorOS）
+            "com.coloros.clock",                // OPPO 新版
+            "com.android.BBKClock",             // vivo（BBK）
+            "com.vivo.clock",                   // vivo 新版
+    };
+
+    /**
+     * 参数强健化（parseInt）：弱模型常把 hour/minute 发成浮点（19.0）、字符串（"19"）、
+     * 甚至拼接时间（"19:58"）。Capacitor 的 call.getInt 遇到字符串/浮点会抛异常或返 null
+     * ——这里全部手撸解析：Integer/Long → intValue；Double/Float → Math.round；
+     * 字符串 → 剥空白/「点」后 parseInt；"19:58" 拆两半。绝不让参数形态毁掉定闹钟。
+     */
+    private static Integer coerceInt(Object raw) {
+        try {
+            if (raw == null || raw == org.json.JSONObject.NULL) return null;
+            if (raw instanceof Integer || raw instanceof Long || raw instanceof Short || raw instanceof Byte) {
+                return ((Number) raw).intValue();
+            }
+            if (raw instanceof Double || raw instanceof Float) {
+                return (int) Math.round(((Number) raw).doubleValue());
+            }
+            if (raw instanceof Boolean) return null;
+            String s = raw.toString().trim();
+            if (s.isEmpty()) return null;
+            // 纯数字（可能带小数尾巴 "19.0"）
+            java.util.regex.Matcher m = java.util.regex.Pattern.compile("^(\\d+)(?:\\.0+)?$").matcher(s);
+            if (m.matches()) return Integer.parseInt(m.group(1));
+            return null;
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    /** "19:58" / "19：58" / "19点58" → [19, 58]；解析不到返回 null */
+    private static int[] parseHmString(String s) {
+        try {
+            java.util.regex.Matcher m = java.util.regex.Pattern
+                    .compile("^(\\d{1,2})\\s*[:：点时]\\s*(\\d{1,2})$").matcher(s.trim());
+            if (!m.matches()) return null;
+            return new int[]{Integer.parseInt(m.group(1)), Integer.parseInt(m.group(2))};
+        } catch (Throwable t) {
+            return null;
+        }
+    }
 
     /**
      * 系统闹钟（AlarmClock.ACTION_SET_ALARM 标准协议，直接拉起系统时钟的闹钟设置）。
-     * 参数：hour（0-23）、minute（0-59）、label（可选备注）、skipUi（可选：true=部分
-     * ROM 支持免确认直接建）。返回 ok / reason（no-handler=设备无标准闹钟应用）。
+     *
+     * v2.4.1 加固（机主规格三连）：
+     * ① Intent 规范：AlarmClock.ACTION_SET_ALARM + EXTRA_HOUR / EXTRA_MINUTES 两个
+     *    Integer Extras（绝不用字符串拼接时间——系统不认）；EXTRA_MESSAGE 备注直传。
+     * ② 参数 parseInt 强转（coerceInt/parseHmString），非法 resolve ok:false + reason
+     *    'bad-params'（不再 call.reject —— JS 侧拿到的是友好话术，不再是红色系统错误）。
+     * ③ 国产 ROM 兼容链：标准 action resolveActivity 为空（阉割/包可见性过滤）→
+     *    已知厂商时钟包逐个 setPackage 再试 → 仍不行 ACTION_SHOW_ALARMS 打开闹钟
+     *    列表（reason='show-alarms'，让 JS 引导机主手动允许闹钟权限）→ 全失败
+     *    reason='no-handler'。全链 try/catch，任何异常都 resolve 结构化结果。
      */
     @PluginMethod
     public void setRealAlarm(PluginCall call) {
-        Integer hour = call.getInt("hour", null);
-        Integer minute = call.getInt("minute", null);
+        Integer hour = null;
+        Integer minute = null;
+        try {
+            org.json.JSONObject data = call.getData();
+            Object hourRaw = data == null ? null : data.opt("hour");
+            Object minuteRaw = data == null ? null : data.opt("minute");
+            hour = coerceInt(hourRaw);
+            minute = coerceInt(minuteRaw);
+            // 字符串拼接时间兜底：hour 发成 "19:58" 且 minute 缺失 → 拆两半补齐
+            if ((hour == null || minute == null) && hourRaw != null && !(hourRaw instanceof Number)) {
+                int[] hm = parseHmString(String.valueOf(hourRaw));
+                if (hm != null) {
+                    if (hour == null) hour = hm[0];
+                    if (minute == null) minute = hm[1];
+                }
+            }
+        } catch (Throwable t) {
+            hour = null;
+            minute = null;
+        }
         final String label = call.getString("label", "");
         final boolean skipUi = Boolean.TRUE.equals(call.getBoolean("skipUi", Boolean.TRUE));
         if (hour == null || minute == null || hour < 0 || hour > 23 || minute < 0 || minute > 59) {
-            call.reject("hour/minute 参数不合法（0-23 / 0-59）");
+            call.resolve(alarmFail("bad-params"));
             return;
         }
         try {
-            Intent i = new Intent(android.provider.AlarmClock.ACTION_SET_ALARM)
-                    .putExtra(android.provider.AlarmClock.EXTRA_HOUR, hour)
-                    .putExtra(android.provider.AlarmClock.EXTRA_MINUTES, minute)
-                    .putExtra(android.provider.AlarmClock.EXTRA_SKIP_UI, skipUi)
+            final Intent i = new Intent(android.provider.AlarmClock.ACTION_SET_ALARM)
+                    .putExtra(android.provider.AlarmClock.EXTRA_HOUR, hour)      // Integer Extra（0-23）
+                    .putExtra(android.provider.AlarmClock.EXTRA_MINUTES, minute) // Integer Extra（0-59）
                     .putExtra(android.provider.AlarmClock.EXTRA_MESSAGE, label == null ? "" : label)
+                    .putExtra(android.provider.AlarmClock.EXTRA_SKIP_UI, skipUi)
                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-            if (i.resolveActivity(getContext().getPackageManager()) == null) {
-                JSObject ret = new JSObject();
-                ret.put("ok", false);
-                ret.put("reason", "no-handler");
-                call.resolve(ret);
+
+            // ② 国产 ROM 兜底链：标准解析 → 厂商包候选 → 闹钟列表
+            Intent resolved = resolveAlarmIntent(i);
+            if (resolved == null) {
+                call.resolve(alarmFail("no-handler"));
                 return;
             }
             boolean appVisible = MainActivity.isAppInForeground();
-            final Intent fi = i;
+            // 列表兜底 ≠ 定成功：只打开了闹钟页，如实上报 show-alarms（JS 引导手动允许权限）
+            boolean showAlarmsOnly = android.provider.AlarmClock.ACTION_SHOW_ALARMS.equals(resolved.getAction());
+            final Intent fi = resolved;
             if (!appVisible) {
                 android.os.Handler main = new android.os.Handler(android.os.Looper.getMainLooper());
                 main.post(() -> {
@@ -1668,19 +1745,64 @@ public class NativePerceptionPlugin extends Plugin {
                     }
                 });
             } else {
-                getContext().startActivity(i);
+                getContext().startActivity(fi);
+            }
+            if (showAlarmsOnly) {
+                call.resolve(alarmFail("show-alarms"));
+                return;
             }
             JSObject ret = new JSObject();
             ret.put("ok", true);
             ret.put("hour", hour);
             ret.put("minute", minute);
             call.resolve(ret);
+        } catch (android.content.ActivityNotFoundException anf) {
+            call.resolve(alarmFail("no-handler"));
+        } catch (SecurityException se) {
+            call.resolve(alarmFail("security"));
         } catch (Throwable t) {
-            JSObject ret = new JSObject();
-            ret.put("ok", false);
-            ret.put("reason", t.getMessage() == null ? "start-failed" : t.getMessage());
-            call.resolve(ret);
+            call.resolve(alarmFail("start-failed"));
         }
+    }
+
+    /** setRealAlarm 失败结构（resolve 不 reject：JS 侧换友好话术，绝不闪红色系统错误） */
+    private static JSObject alarmFail(String reason) {
+        JSObject ret = new JSObject();
+        ret.put("ok", false);
+        ret.put("reason", reason);
+        return ret;
+    }
+
+    /**
+     * 定闹钟 Intent 解析链：标准 action 全局解析 → 已知厂商时钟包 setPackage 再试 →
+     * ACTION_SHOW_ALARMS（只打开闹钟列表，标记 show-alarms 由 JS 引导手动允许权限）。
+     * 返回可直接 startActivity 的 Intent（已吸收 setPackage）；全链不通返回 null。
+     */
+    private Intent resolveAlarmIntent(Intent proto) {
+        try {
+            PackageManager pm = getContext().getPackageManager();
+            if (proto.resolveActivity(pm) != null) return proto;
+            // 国产 ROM：action 被 ROM 改名/包可见性过滤解析不到 → 显式点名厂商时钟包
+            for (String pkg : CLOCK_PKG_CANDIDATES) {
+                try {
+                    Intent cand = new Intent(proto)
+                            .setPackage(pkg)
+                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                    if (cand.resolveActivity(pm) != null) return cand;
+                } catch (Throwable ignored) {
+                    // 候选包不存在/不可见：试下一个
+                }
+            }
+            // 最后兜底：打不开「直接定」通道，至少把系统闹钟列表打开（JS 引导机主允许权限）
+            Intent show = new Intent(android.provider.AlarmClock.ACTION_SHOW_ALARMS)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            if (show.resolveActivity(pm) != null) {
+                return show;
+            }
+        } catch (Throwable ignored) {
+            // 解析链绝不抛
+        }
+        return null;
     }
 
     /**
