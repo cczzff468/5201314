@@ -7,6 +7,8 @@ import {
   useState,
 } from 'react';
 
+import { Check } from 'lucide-react';
+
 import {
   Activity,
   AudioLines,
@@ -44,8 +46,12 @@ import { localDB } from '@/lib/ios/db';
 import {
   WALLPAPER_PRESETS,
   useSettings,
+  type BatteryPercentMode,
   type ThemeMode,
 } from '@/lib/ios/store';
+
+// v2.4.10 电量百分比预览：状态栏同款电池组件（三种显示方式实时小预览）
+import { BatteryIcon } from '@/components/ios/StatusBar';
 
 import { imgGenConfigReady } from '@/lib/imggen';
 
@@ -111,6 +117,9 @@ export function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
   // 状态栏显示开关（Task 36）：控制顶部时间/信号/电量状态栏是否显示
   const statusBarVisible = useSettings((s) => s.statusBarVisible);
   const setStatusBarVisible = useSettings((s) => s.setStatusBarVisible);
+  // v2.4.10 电量百分比显示方式（三选一：不显示 / 图标外部 / 图标内部 iOS 16+ 风格）
+  const batteryPercent = useSettings((s) => s.batteryPercent);
+  const setBatteryPercent = useSettings((s) => s.setBatteryPercent);
   // 灵动岛常驻开关（用户需求）：关闭后隐藏顶部黑色胶囊基础灵动岛，只显示 APP 灵动岛
   const islandPersistent = useSettings((s) => s.islandPersistent);
   const setIslandPersistent = useSettings((s) => s.setIslandPersistent);
@@ -378,6 +387,41 @@ export function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
             </button>
           </div>
         </div>
+
+        {/* v2.4.10 电量百分比显示方式（机主需求：设置里三选一）：
+            不显示（只有电池图标）/ 电池图标外部（原样式，默认）/ 电池图标内部（iOS 16+ 同款，
+            按机主参考图：纯填充块无描边、数字嵌电池内无 % 号）。每行左侧是状态栏同款组件的
+            实时小预览（固定 67% 电量示例），选中即全局状态栏电量实时切换、立即持久化。 */}
+        <div className="mx-4 mt-4 divide-y divide-black/[0.05] overflow-hidden rounded-[22px] bg-white/55 shadow-[0_8px_28px_rgba(17,24,39,0.06)] ring-1 ring-white/70 backdrop-blur-2xl dark:divide-white/[0.06] dark:bg-white/[0.06] dark:ring-white/[0.09]">
+          {([
+            { value: 'none', label: '不显示' },
+            { value: 'outside', label: '电池图标外部' },
+            { value: 'inside', label: '电池图标内部' },
+          ] as { value: BatteryPercentMode; label: string }[]).map((o) => (
+            <button
+              key={o.value}
+              type="button"
+              role="radio"
+              aria-checked={batteryPercent === o.value}
+              aria-label={`电量百分比：${o.label}`}
+              data-testid={`settings-battery-${o.value}`}
+              onClick={() => setBatteryPercent(o.value)}
+              className="flex min-h-[52px] w-full items-center gap-3 px-4 text-left transition-colors active:bg-muted/50"
+            >
+              {/* 实时小预览：状态栏同款电池（固定 67% 示例，黑前景/白数字与参考图一致） */}
+              <span className="flex h-[20px] w-[76px] shrink-0 items-center justify-center text-foreground">
+                <BatteryIcon level={67} charging={false} low={false} mode={o.value} light={false} />
+              </span>
+              <span className="min-w-0 flex-1 truncate text-[16px]">{o.label}</span>
+              {batteryPercent === o.value && (
+                <Check className="h-5 w-5 shrink-0 text-foreground" strokeWidth={2.5} />
+              )}
+            </button>
+          ))}
+        </div>
+        <p className="mt-2 px-8 text-[11.5px] leading-relaxed text-muted-foreground">
+          状态栏电量的显示方式，选完即时生效；「电池图标内部」为 iOS 16+ 同款样式。
+        </p>
 
         {/* 悬浮工具（v72）：两个开关控制手机右下角的可拖拽悬浮球——
             提示词查看器（下一轮完整 Prompt 只读预览）与快捷操作（API/世界书一键切换）。

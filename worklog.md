@@ -3559,3 +3559,17 @@ Work Log:
 - [验证] tsc --noEmit 0 错误、改动文件 lint 0 问题；Java 侧人工复核（无本地 Android SDK，gradle 编译交由机主 bun run apk:build）
 
 Stage Summary: 状态栏方案换法定案——原生层窗口级隐藏（hide(statusBars)+主题 windowFullscreen），冷启动首帧即全屏、全界面天然一致、零采样零时序；自绘状态栏回归为唯一状态栏；顶部避让只剩挖孔（内容整体上移，无挖孔机型真全屏）；右缘白条叠加 pointer:coarse 零滚动条占位 + 滚动容器身份摘除两道保险，若仍未除则按机主定调收档。v2.4.9/code 74 需重装 APK（bun run apk:build）。关键文件：MainActivity.java、styles.xml、globals.css、native-shell.ts、PhoneShell.tsx、app-version.ts、sw.js、app/build.gradle
+
+## 2026-11-25 · 第二十六轮 v2.4.10：设置新增「电量百分比」三模式（不显示/图标外部/图标内部 iOS 16+）+ 新 APK 安装指引
+
+Task: 机主晨间反馈——①「有的地方系统状态栏还是没有和 APP 融合在一起，有没有更好的解决办法，或者不显示系统状态栏」②「设置里面添加一个电量百分比显示：一个是不显示，一个是在电池图标外部，还有一个在电池图标内部（内部按参考图来）」。截图 07:29 复盘：顶部白色系统状态栏硬贴在深色资料页上方 + 旧 APK（code 73）特征——v2.4.9 的「隐藏系统状态栏」原生方案已在库（APK code 74 已部署 public/AI-Phone.apk，dex 已验 getShellInfo 桥在位），机主手机未装新 APK 才仍见白条；②为全新网页层功能。
+
+Work Log:
+- [诊断·截图复盘] 07:29 截图顶部白底系统状态栏（07:29 时间/5G/网速/半电图标）+ 深色页面硬分界 = v2.4.7 融合方案在深色页的失败案例 + 机主手机仍在 code 73；仓库 public/AI-Phone.apk 经 aapt 验证 versionCode=74/versionName=2.4.9、classes7.dex 含 getShellInfo/setSystemBarStyles/AIPhoneNative 桥——新 APK 齐备待装
+- [新功能·电量百分比三模式] ①store.ts：BatteryPercentMode（outside/inside/none）+ batteryPercent 状态（默认 outside=现行样式，升级用户零感知）+ setBatteryPercent（IndexedDB settings.batteryPercent 立即持久化）+ load() 读回校验（非法值回 outside）②StatusBar.tsx BatteryIcon 重构三模式并可导出复用：outside=现行描边电池+左外侧「N%」；none=只有描边电池；inside=按机主参考图 iOS 16+ 同款——37×14px 纯填充圆角块无描边，充入段前景色/充电 #30D158/低电 #FF453A、其余 32% 半透明轨道（随状态栏主题深浅自适应），数字（无 % 号、几何居中、8.5px semibold tabular-nums）反前景色（浅状态栏黑字/深状态栏白字，充入段与轨道上双区可读），右侧浅灰正极凸点；无障碍 role=img aria-label「电量N%·充电中」三模式齐备
+- [设置 UI] root-page.tsx「电量百分比」专属卡片（显示与亮度分组之后）：三行 radio（不显示/电池图标外部/电池图标内部），每行左侧状态栏同款 BatteryIcon 实时小预览（固定 67% 示例，与参考图一致的深底白数字观感），选中即全局状态栏电量实时换样式 + 立即持久化；附说明行「iOS 16+ 同款样式」
+- [联动口径] StatusBar 传 lightText 给 BatteryIcon（inside 数字反色依据）；PhoneShell 锁屏/主屏/App 窗口共用同一 ph-statusbar——锁屏顶部电量同步跟随所选模式
+- [版本] v2.4.10（纯网页热更免重装；versionCode 74 不动——无原生改动，新 APK 即上一轮 code 74 全屏沉浸版）/ app-version 两条发版说明（含「还看得到系统状态栏=装的还是旧 APK → 设置›APP 更新 装新版 code 74」指引）/ sw.js v92→v93（CSS/JS 变更强制缓存重建）
+- [E2E·Agent Browser] ①设置页三行渲染齐（radio aria-checked 联动）+ 三预览各自形态 VLM 复核通过（不显示=纯电池/外部=67% 在左/内部=纯填充块白数字嵌内+右侧对勾）②点选「内部」：状态栏电池 DOM 即变 37px 无描边纯填充（100% 充电绿 + 居中数字）✓ ③整页 reload 持久化：设置仍选中「内部」、状态栏仍 37px 组件 ✓ ④点「不显示」：描边电池零百分比文字 ✓ ⑤控制台/页面错误零、tsc 改动文件 0 错误（37 个为未触碰基线）、eslint 改动文件 0 问题、/api/app-version 返回 2.4.10/74
+
+Stage Summary: 机主两件清账——①系统状态栏「不显示」方案（v2.4.9 原生 hide+windowFullscreen）已随 code 74 APK 齐备，发版说明写明「仍见系统状态栏=装旧 APK，去设置›APP 更新装新版即全屏」；②设置新增「电量百分比」三选一（不显示/图标外部/图标内部 iOS 16+ 参考图同款），状态栏电量实时跟随+立即持久化，网页热更免重装。关键文件：store.ts（BatteryPercentMode+持久化）、StatusBar.tsx（BatteryIcon 三模式重构导出）、root-page.tsx（电量百分比卡片+实时预览）、app-version.ts（v2.4.10）、sw.js（v93）

@@ -4,6 +4,7 @@ import { useSyncExternalStore } from 'react';
 import { formatIOSTime } from '@/lib/ios/clock';
 import { useBattery } from '@/lib/ios/battery';
 import { useLightForeground } from '@/lib/ios/foreground';
+import { useSettings, type BatteryPercentMode } from '@/lib/ios/store';
 // 性能：音乐岛可见性走微型 flag store（StatusBar 是首屏静态组件，不把 music-store+music-api
 // 千行级模块拖进首屏 bundle；MusicIsland 写入时双写同步）
 import { useMusicIslandVisible } from '@/lib/ios/music-island-flag';
@@ -21,11 +22,67 @@ function SignalBars() {
   );
 }
 
-function BatteryIcon({ level, charging, low }: { level: number; charging: boolean; low: boolean }) {
+interface BatteryIconProps {
+  level: number;
+  charging: boolean;
+  low: boolean;
+  /** 电量百分比显示方式（v2.4.10）：outside=图标外部数字+% / inside=图标内部数字
+   * （iOS 16+ 风格：纯填充块、数字嵌电池内、无 % 号）/ none=不显示百分比 */
+  mode: BatteryPercentMode;
+  /** 状态栏前景是否浅色（白字）：决定 inside 模式里嵌入数字用反色（黑）保证对比；
+ *  外部/描边样式不受影响（跟随 currentColor） */
+  light?: boolean;
+}
+
+/** 状态栏电池图标（v2.4.10 三模式，设置›电量百分比实时切换）：
+ *  - outside：数字+% 在电池左侧（默认/现行样式，描边电池）
+ *  - none：只有描边电池图标，无百分比
+ *  - inside：iOS 16+ 同款（用户参考图）：纯填充块无描边，左侧充入部分前景色/
+ *    充电绿/低电红，其余半透明轨道，数字（无 % 号）嵌在电池内反色居中，右侧浅灰凸点。
+ *  也导出给设置页做实时预览（预览传固定 level + light=false） */
+export function BatteryIcon({ level, charging, low, mode, light = false }: BatteryIconProps) {
   const fill = Math.min(100, Math.max(0, level));
+
+  if (mode === 'inside') {
+    // iOS 16+ 内嵌式：无描边纯填充；数字反前景色（浅色状态栏→黑字，深色→白字）
+    const numColor = light ? 'text-black' : 'text-white';
+    return (
+      <span
+        role="img"
+        aria-label={`电量${Math.round(level)}%${charging ? '，充电中' : ''}`}
+        className="relative inline-block h-[14px] w-[37px] shrink-0"
+      >
+        {/* 电池本体轨道（未充入部分）：半透明前景色（浅底=浅灰、深底=暗灰，随状态栏主题） */}
+        <span className="absolute inset-0 rounded-[4.5px] bg-current opacity-[0.32]" />
+        {/* 充入电量：充电绿 / 低电红 / 前景色（充电与低电时数字保持反色可读） */}
+        <span
+          className={`absolute inset-y-0 left-0 rounded-[4.5px] transition-all duration-300 ${
+            charging ? 'bg-[#30D158]' : low ? 'bg-[#FF453A]' : 'bg-current'
+          }`}
+          style={{ width: `${fill}%` }}
+        />
+        {/* 嵌入数字（无 % 号，几何居中——参考图实测口径） */}
+        <span
+          className={`absolute inset-0 flex items-center justify-center text-[8.5px] font-semibold leading-none tabular-nums ${numColor}`}
+        >
+          {Math.round(level)}
+        </span>
+        {/* 正极凸点（与轨道同色调） */}
+        <span className="absolute -right-[3px] top-1/2 h-[5px] w-[2px] -translate-y-1/2 rounded-r-[1.5px] bg-current opacity-40" />
+      </span>
+    );
+  }
+
+  // outside / none：描边电池（现行样式）；outside 在左侧带数字+%，none 只有图标
   return (
-    <span className="flex items-center gap-[3px]">
-      <span className="text-[12px] font-semibold tabular-nums">{Math.round(level)}%</span>
+    <span
+      role="img"
+      aria-label={`电量${Math.round(level)}%${charging ? '，充电中' : ''}`}
+      className="flex items-center gap-[3px]"
+    >
+      {mode === 'outside' && (
+        <span className="text-[12px] font-semibold tabular-nums">{Math.round(level)}%</span>
+      )}
       <span className="relative inline-block h-[12.5px] w-[25px]">
         {/* 外框（不随低电量变红） */}
         <span className="absolute inset-0 rounded-[4.5px] border-[1.2px] border-current opacity-40" />
@@ -76,6 +133,8 @@ export default function StatusBar() {
   );
   const battery = useBattery();
   const lightText = useLightForeground();
+  // v2.4.10 电量百分比显示方式（设置›电量百分比三选一，实时跟随）
+  const batteryPercent = useSettings((s) => s.batteryPercent);
   const musicIslandVisible = useMusicIslandVisible();
   const mtIslandVisible = useMtIsland((s) => s.visible);
   const tbIslandVisible = useTbIsland((s) => s.visible);
@@ -106,8 +165,9 @@ export default function StatusBar() {
           <path d="M8 2.2c2.5 0 4.8 1 6.5 2.7l-1.3 1.3A7.3 7.3 0 0 0 8 4a7.3 7.3 0 0 0-5.2 2.2L1.5 4.9A9.2 9.2 0 0 1 8 2.2Z" />
         </svg>
         )}
-        {/* 电量图标常驻（未就绪时按 100% 绘制；缓存已在首帧绘制前同步恢复，不再闪断） */}
-        <BatteryIcon level={level} charging={battery?.charging ?? false} low={low} />
+        {/* 电量图标常驻（未就绪时按 100% 绘制；缓存已在首帧绘制前同步恢复，不再闪断）。
+            v2.4.10 三模式：outside=数字+% 在外 / inside=数字嵌电池内（iOS 16+） / none=无百分比 */}
+        <BatteryIcon level={level} charging={battery?.charging ?? false} low={low} mode={batteryPercent} light={lightText} />
       </div>
     </div>
   );

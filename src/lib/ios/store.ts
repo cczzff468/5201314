@@ -394,6 +394,13 @@ export type IconStyle = 'real' | 'glass' | 'liquid';
  *  emoji=Emoji 大字图（柔和马卡龙底色 + 品类 emoji，无图片请求） */
 export type GoodsImgStyle = 'cartoon' | 'sketch' | 'emoji';
 
+/** 电量百分比显示方式（v2.4.10）：
+ *  outside=电池图标外部（数字+% 在图标左侧，默认/现行样式）；
+ *  inside=电池图标内部（iOS 16+ 同款：纯填充块无描边，数字嵌在电池里、无 % 号）；
+ *  none=不显示百分比（只显示电池图标）。
+ * 持久化 settings.batteryPercent；状态栏电量实时跟随 */
+export type BatteryPercentMode = 'outside' | 'inside' | 'none';
+
 interface SettingsState {
   theme: ThemeMode;
   /** 主屏图标风格（默认 real=真实图标；持久化 settings.iconStyle） */
@@ -444,6 +451,10 @@ interface SettingsState {
    *  只显示 APP 灵动岛（音乐岛大/小窗、美团/淘宝配送岛、灵动岛通知卡、来电胶囊等）。
    *  与状态栏开关独立：关灵动岛不影响状态栏文字/图标 */
   islandPersistent: boolean;
+  /** 电量百分比显示方式（v2.4.10）：outside=图标外部数字+%（默认/现行样式） /
+   *  inside=图标内部数字（iOS 16+ 风格：纯填充块、数字嵌电池内、无 % 号） /
+   *  none=不显示百分比（只有电池图标）；持久化 settings.batteryPercent */
+  batteryPercent: BatteryPercentMode;
   /** 后台保活开关（v80）：开启后切到后台/锁屏时尽量保持网页运行——Worker 心跳 +
    *  无声音频双通道防节流/防冻结，AI 主动消息与后台接力轮询不中断（代价是略更耗电） */
   bgKeepAlive: boolean;
@@ -504,6 +515,8 @@ interface SettingsState {
   setAppFontWeight: (weight: number) => void;
   /** 顶部状态栏显示开关；立即持久化，PhoneShell/StatusBar 实时响应 */
   setStatusBarVisible: (v: boolean) => void;
+  /** 电量百分比显示方式；立即持久化，状态栏电量实时响应 */
+  setBatteryPercent: (m: BatteryPercentMode) => void;
   /** 灵动岛常驻开关；立即持久化，PhoneShell 实时响应（APP 灵动岛不受影响） */
   setIslandPersistent: (v: boolean) => void;
   /** 后台保活开关；立即持久化并启停 keepalive 双通道（Worker 心跳 + 无声音频） */
@@ -570,6 +583,8 @@ export const useSettings = create<SettingsState>((set, get) => ({
   appFontWeight: 400,
   statusBarVisible: true,
   islandPersistent: true,
+  // 电量百分比默认图标外部（升级用户的现行样式不变）
+  batteryPercent: 'outside',
   bgKeepAlive: false,
   assistViewer: false,
   assistQuickOps: false,
@@ -585,7 +600,7 @@ export const useSettings = create<SettingsState>((set, get) => ({
   load: async () => {
     if (get().loaded) return;
     try {
-      const [themeRec, wallpaperRec, lockWallpaperRec, apiRec, presetsRec, apiFallbacksRec, visionRec, visionPresetsRec, lockRec, profileRec, iconsRec, ttsRec, sttRec, imgGenRec, imgGenPresetsRec, fontRec, fontScaleRec, fontWeightRec, statusBarRec, iconStyleRec, goodsImgStyleRec, themeResetRec, islandPersistentRec, assistViewerRec, assistQuickOpsRec, bubbleStyleRec, bubbleSchemesRec, liquidSkinRec, chatDecorRec, customCssRec, bgKeepAliveRec] = await Promise.all([
+      const [themeRec, wallpaperRec, lockWallpaperRec, apiRec, presetsRec, apiFallbacksRec, visionRec, visionPresetsRec, lockRec, profileRec, iconsRec, ttsRec, sttRec, imgGenRec, imgGenPresetsRec, fontRec, fontScaleRec, fontWeightRec, statusBarRec, iconStyleRec, goodsImgStyleRec, themeResetRec, islandPersistentRec, assistViewerRec, assistQuickOpsRec, bubbleStyleRec, bubbleSchemesRec, liquidSkinRec, chatDecorRec, customCssRec, bgKeepAliveRec, batteryPercentRec] = await Promise.all([
         localDB.get('settings', 'theme'),
         localDB.get('settings', 'wallpaper'),
         localDB.get('settings', 'lockWallpaper'),
@@ -617,6 +632,7 @@ export const useSettings = create<SettingsState>((set, get) => ({
         localDB.get('settings', 'chatDecor'),
         localDB.get('settings', 'customCss'),
         localDB.get('settings', 'bgKeepAlive'),
+        localDB.get('settings', 'batteryPercent'),
       ]);
 
       // 性能：八个含敏感 Key 的字段并行解密（secret-box 的 PBKDF2 密钥进程内缓存只派生一次）——
@@ -938,6 +954,11 @@ export const useSettings = create<SettingsState>((set, get) => ({
         assistQuickOps: assistQuickOpsRec?.value === true,
         // 后台保活：无记录 = 关（默认关，省电；用户按需开启）
         bgKeepAlive: bgKeepAliveRec?.value === true,
+        // 电量百分比显示方式：无记录/非法值 = 图标外部（默认，升级用户现行样式不变）
+        batteryPercent:
+          batteryPercentRec?.value === 'inside' || batteryPercentRec?.value === 'none'
+            ? batteryPercentRec.value
+            : 'outside',
         iconStyle,
         goodsImgStyle,
         // 聊天气泡装扮 + 收藏夹：无记录/脏数据回默认（normalize 内部校验 kind/color/结构）
@@ -1072,6 +1093,11 @@ export const useSettings = create<SettingsState>((set, get) => ({
   setStatusBarVisible: (v) => {
     set({ statusBarVisible: v });
     void localDB.put('settings', { key: 'statusBarVisible', value: v });
+  },
+
+  setBatteryPercent: (m) => {
+    set({ batteryPercent: m });
+    void localDB.put('settings', { key: 'batteryPercent', value: m });
   },
 
   setIslandPersistent: (v) => {

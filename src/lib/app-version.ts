@@ -11,7 +11,7 @@
  */
 
 /** 当前最新版本（纯网页热更时与 APK versionName 可短暂不同步，下次重打 APK 对齐） */
-export const APP_VERSION = '2.4.9';
+export const APP_VERSION = '2.4.10';
 /** 版本号数字（与 android-shell versionCode 保持一致；覆盖安装要求只增不减；纯网页热更不动） */
 export const APP_VERSION_CODE = 74;
 
@@ -24,6 +24,14 @@ export interface AppReleaseNote {
 
 /** 版本历史（新→旧；设置 › APP 更新 页渲染，最新一条即当前版本） */
 export const APP_RELEASE_NOTES: AppReleaseNote[] = [
+  {
+    version: '2.4.10',
+    date: '2026-11-25',
+    items: [
+      '【网页热更·免重装】设置新增「电量百分比」显示方式三选一：不显示（只有电池图标）/ 电池图标外部（原样式）/ 电池图标内部（iOS 16+ 同款：纯填充块无描边、数字嵌在电池里、无 % 号）——设置页每项带实时小预览，选完状态栏电量即时换样式',
+      '【重要提醒·需重装 APK】如果手机上还看得到顶部的「系统状态栏」（时间/信号在 APP 顶上独立一条，深色页面时是白底那一条）——说明装的还是旧 APK：去 设置 › APP 更新 下载安装新版（versionCode 74）即全屏沉浸，系统状态栏不再显示，时间/信号/电量由 APP 自带状态栏显示（电量百分比样式也跟着上面的设置走）',
+    ],
+  },
   {
     version: '2.4.9',
     date: '2026-11-24',
