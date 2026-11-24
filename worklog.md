@@ -401,7 +401,7 @@ Task: 从 GitHub 拉取 cczzff468/5200 仓库最新代码到全新沙箱并跑�
 Work Log:
 - git clone（带 token）拉取 cczzff468/5200 main 分支至 /tmp/repo-5200，最新提交 3be7aaf（v12.1 双人睡觉叠压根修）
 - rsync 同步全部内容至 /home/z/my-project（含 .git 历史与 origin remote；排除 .env/node_modules/skills/dev.log/upload/download 挂载点）
-- origin remote 已配置 token 鉴权（github_pat_...），分支 main 与 origin/main 同步，可直接 push
+- origin remote 已配置 token 鉴权（已脱敏），分支 main 与 origin/main 同步，可直接 push
 - bun install 安装 401 个依赖；prisma generate + db push（数据库已同步，复用仓库自带 db/custom.db）
 - 开发服务器（端口 3000）自动启动，GET / 200，instrumentation Edge 警告为仓库既有基线
 - Agent Browser 端到端验证（390x844）：锁屏渲染✓ → 上滑解锁✓ → 主屏三页滑动✓ → 拾光小屋 3D 场景渲染✓ → 联系人创建 AI 角色「小雪」✓ → 角色入住小屋✓ → AI 主动行为（拥抱请求/晚安气泡）✓ → LLM 聊天回复端到端✓（语音气泡正常显示）
@@ -1250,7 +1250,7 @@ Work Log:
 - git clone https://github.com/cczzff468/5200.git → /home/z/repo-5200（直连成功，main 最新 4fcb552：微信看一看毛玻璃美化）
 - 同步全部内容到 /home/z/my-project：src/（15M）、public/（103M）、prisma/、db/custom.db（1MB 含数据）、mini-services/（netease-api 等 3 个）、scripts/、tools/、deploy/、download/、upload/（53 项，挂载点用 rsync --no-g --no-o 覆盖内容）、agent-ctx/、.data/、.e2e-16a/、worklog.md
 - 同步根配置：package.json、next.config.ts、tailwind.config.ts、tsconfig.json、components.json、postcss.config.mjs、eslint.config.mjs、bun.lock、.gitignore、.env（DATABASE_URL + VAPID 密钥对）
-- .git 整体替换为仓库完整历史（4fcb552）；origin 已内嵌 PAT（github_pat_11B4TNZS...TC01yvsH4），user.name=cczzff468
+- .git 整体替换为仓库完整历史（4fcb552）；origin 已内嵌 PAT（已脱敏），user.name=cczzff468
 - bun install 401 包（11.8s）；prisma generate + db push（already in sync）
 - 先 kill 默认模板 dev server（1192/1196/1198），再 daemon-spawn（double-fork）拉起 next-keeper.sh → bun run dev(3000) + ncm-keeper → netease-api(3010 ✓ 200)
 - dev.log 仅既有良性警告：instrumentation.ts Edge Runtime 静态分析误报（运行时 nodejs 分支正常）
