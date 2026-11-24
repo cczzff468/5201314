@@ -88,8 +88,7 @@ import { blobToDataUrl } from '@/lib/ios/audio-utils';
 import { stopVoicePlayback, VOICE_PLAY_ERROR_EVENT } from '@/lib/ios/voice-player';
 import { aiVoiceFreqLabel, decideAiVoiceMessage, getAiVoiceFreq, saveAiVoiceFreq, synthesizeAiVoice } from '@/lib/ios/ai-voice';
 import { addressNameOf, displayNameOf, isFriendIn, meTileLabel, nameVariantHit, contactNameVariants, type ContactRecord } from '@/lib/contacts';
-import { buildShizukuAutonomyRules, enqueuePhoneOp } from '@/lib/ios/device-autonomy';
-import { useOpPill, SkillUsePill } from './skill-use-pill';
+import { buildShizukuAutonomyRules, enqueuePhoneOp, phoneOpVerb, shortPhoneOpText } from '@/lib/ios/device-autonomy';
 import { buildNpcPromptExtra } from '@/lib/ios/npc-bond';
 import { buildPersonaSystemPrompt } from '@/lib/ios/persona';
 // 美团×AI 联动（C11 群内帮点外卖）：目录+代点教学注入 + [帮点外卖] 执行 + 草稿卡历史序列化
@@ -2491,7 +2490,6 @@ export function WxGroupChatPage({
   }, [gid]);
   const [msgs, setMsgs] = useState<WxGroupMsg[]>(() => loadGroupMsgs(gid));
   // v1.3 Shizuku：AI 使用技能时聊天界面正中的椭圆形胶囊浮层（start/finish 稳定引用，异步闭包里安全调用）
-  const opPill = useOpPill();
   // 存储侧追加（AI 开场白/卡片接受后的「XX加入了群聊」事件等后台落盘）→ 广播后即时重读，
   // 修掉「接受邀请进群但加入事件晚一拍落盘时页面看不到」的时序缺口
   useEffect(() => {
@@ -3050,8 +3048,8 @@ export function WxGroupChatPage({
     if (m.kind === 'mtdraft' && m.mtdraft) return mtDraftHistoryLine(m.mtdraft.did, m.senderName || '群友');
     // v1.3 Shizuku：手机操作结果行（notice）回给 AI——动手成员下一轮看到自己刚才的结果。
     // 圆括号+显式“勿复述”指引：防 AI 把反馈原文抄给机主（曾出现复述「手机操作成功：已拉起…」）
-    if (m.kind === 'notice' && (m.noticeText ?? '').startsWith('手机操作')) {
-      return `（内部反馈：你刚才的手机操作结果——${m.noticeText}。这是只给你看的，用你自己的话告诉机主结果即可，严禁复述本行）`;
+    if (m.kind === 'notice' && ((m.noticeRaw ?? m.noticeText) || '').startsWith('手机操作')) {
+      return `（内部反馈：你刚才的手机操作结果——${m.noticeRaw ?? m.noticeText}。这是只给你看的，用你自己的话告诉机主结果即可，严禁复述本行）`;
     }
     return m.content;
   };
@@ -3122,7 +3120,7 @@ export function WxGroupChatPage({
         const ctxMsgs = sortMsgsByTime(
           // v1.3 Shizuku：手机操作结果行（noticeText 以「手机操作」开头）保留进上下文——
           // 动手的成员下一轮要知道自己刚才干成没干成；其余 notice（进群/红包过期等群事件）照旧过滤
-          [...loadGroupMsgs(gid), ...pending].filter((m) => (m.kind !== 'notice' || (m.noticeText ?? '').startsWith('手机操作')) && !m.recalled),
+          [...loadGroupMsgs(gid), ...pending].filter((m) => (m.kind !== 'notice' || ((m.noticeRaw ?? m.noticeText) ?? '').startsWith('手机操作')) && !m.recalled),
         ).slice(-24);
         // 上下文映射：自己 → assistant；机主/其他成员 → 「发言者：内容」user 消息（富媒体按占位文本；
         // 任何成员引用了别的消息都带「（引用 名字：「内容」）」前缀，群里 AI 也能理解引用关系）
@@ -3482,14 +3480,26 @@ export function WxGroupChatPage({
                 const argText = part.action.targetId.trim();
                 if (argText) {
                   const cmdName = argText.split(/[:：]/)[0] ?? '';
-                  all.push({ id: `${aiMsgId}-sys-${all.length}`, role: 'peer', senderId: char.id, senderName: charName, content: '', time: t, kind: 'notice', noticeText: `${charName} 正在操作手机（${cmdName}）…` });
+                  // v2.4.5 工具提示统一：占位/结果极简短文案；结果原文（含屏幕坐标情报）
+                  // 存 noticeRaw 只回喂动手成员（AI），用户只看一句话
+                  const verb = phoneOpVerb(cmdName);
+                  all.push({ id: `${aiMsgId}-sys-${all.length}`, role: 'peer', senderId: char.id, senderName: charName, content: '', time: t, kind: 'notice', noticeText: `${charName} 正在${verb}…` });
                   t += 1;
                   void (async () => {
-                    let agentSeq = 0; // v1.5 Agent 进度行序号（防同毫秒 id 撞车）
-                    // 串行队列：多步指令（打开→播放→切歌）按书写顺序逐个执行，轮到本条才亮技能胶囊
-                    const res = await enqueuePhoneOp(argText, () => opPill.start(charName, cmdName));
-                    opPill.finish(res.ok, res.text);
-                    const sysMsg: WxGroupMsg = { id: `${aiMsgId}-sysres-${Date.now()}`, role: 'peer', senderId: char.id, senderName: charName, content: '', time: Date.now(), kind: 'notice', noticeText: `手机操作${res.ok ? '成功' : '失败'}：${res.text}` };
+                    // 串行队列：多步指令（打开→播放→切歌）按书写顺序逐个执行
+                    const res = await enqueuePhoneOp(argText);
+                    const short = shortPhoneOpText(res.text);
+                    const sysMsg: WxGroupMsg = {
+                      id: `${aiMsgId}-sysres-${Date.now()}`,
+                      role: 'peer',
+                      senderId: char.id,
+                      senderName: charName,
+                      content: '',
+                      time: Date.now(),
+                      kind: 'notice',
+                      noticeText: `${charName} ${res.ok ? `已${verb}` : `${verb}失败`}${short ? `：${short}` : ''}`,
+                      noticeRaw: `手机操作${res.ok ? '成功' : '失败'}：${res.text}`,
+                    };
                     const cur = loadGroupMsgs(gid);
                     saveGroupMsgs(gid, [...cur, sysMsg]);
                     if (mountedRef.current) setMsgs(loadGroupMsgs(gid));
@@ -5190,7 +5200,6 @@ export function WxGroupChatPage({
   return (
     <div className="relative flex h-full flex-col bg-[#EDEDED] dark:bg-[#111111]">
       {/* v1.3 Shizuku：AI 使用技能 → 聊天界面正中的椭圆形胶囊浮层（pointer-events-none 不挡交互） */}
-      <SkillUsePill pill={opPill.pill} />
       {/* 聊天背景层（聊天信息页设置：纯色/图片；顶栏与输入栏自身有底色，不受影响；按群独立） */}
       {bg.mode !== 'default' && (
         <div aria-hidden="true" className="pointer-events-none absolute inset-0 z-0" style={chatBgLayerStyle(bg, bgImageUrl)} />

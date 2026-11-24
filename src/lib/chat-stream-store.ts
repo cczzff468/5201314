@@ -144,6 +144,10 @@ export interface ChatVisionInput {
    *  识图描述上下文行标注「谁发的图片」，防群聊里把机主发的图说成 AI 自己发的；
    *  缺省沿用「我」（单聊=机主本人，行为不变） */
   speakerLabel?: string;
+  /** v2.4.5 回看旧图标记：用户让 AI「再看看之前发的那张图」时，图片是历史的旧图
+   *  而非刚刚新发——注入文案改为「翻看旧图」口径，防 AI 误当新图回应
+   *  （机主实测：隔天 AI 突然说「你发过来的这三张图我也看到了」，把旧图当新收到的图） */
+  revisit?: boolean;
 }
 
 /** finalize 结果：流结束（成功/失败）后的最终数据 */
@@ -840,7 +844,12 @@ async function runStream(rt: StreamRuntime, opts: BeginChatStreamOptions): Promi
         // fix3-8 识图描述上下文行带发送者：群聊里是谁发的图片就说谁发了（speakerLabel），
         // 未传时维持「我」（单聊=机主本人），单数/复数两种既有句式均不变
         const speaker = opts.vision.speakerLabel || '我';
-        const prefix = n > 1 ? `（${speaker}发了 ${n} 张图片，图片内容分别是：` : `（${speaker}发了一张图片，图片内容是：`;
+        // v2.4.5 回看旧图（revisit）：「翻看旧图」口径，防模型把历史图当成刚收到的新图回应
+        const prefix = opts.vision.revisit
+          ? `（${speaker}想让你再看看之前发过的图片（是旧图不是新发的），${n > 1 ? `一共 ${n} 张，内容分别是：` : '内容是：'}`
+          : n > 1
+            ? `（${speaker}发了 ${n} 张图片，图片内容分别是：`
+            : `（${speaker}发了一张图片，图片内容是：`;
         workMessages = [...baseMessages, { role: 'user' as const, content: `${prefix}${desc}）` }];
         // 描述回写落盘（onVision 由各 App 提供）：之后的聊天历史 AI 都能读到图片内容；
         // 换号中止后不再回写（旧账号会话的落盘动作全部停止）

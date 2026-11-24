@@ -141,6 +141,10 @@ function msgText(m: unknown): string | null {
   if (kind === 'image') {
     const img = o.img as { desc?: unknown } | null | undefined;
     const d = typeof img?.desc === 'string' && img.desc.trim() ? img.desc.trim() : '';
+    // v2.4.5 时效化：超过 48h 的旧图只保留 [图片] 占位——旧版把换情头那三张图的描述
+    // 持续注入之后每一轮其他 App 聊天与主动消息，AI 时不时当新鲜事提起
+    const at = typeof o.time === 'number' && Number.isFinite(o.time) ? o.time : 0;
+    if (at && Date.now() - at > 48 * 3600_000) return '[图片]';
     return d ? truncate(`[图片]（图片内容：${d}）`, LINE_CAP_PRIVATE) : '[图片]';
   }
   if (kind === 'call') {

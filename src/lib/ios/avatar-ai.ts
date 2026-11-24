@@ -163,9 +163,14 @@ export function buildAvatarBlock(peerCid: string, meCid: string, userLabel: stri
     );
   }
   if (meDesc) {
+    // v2.4.5 时效化：换头像 72h 内才下发「最近换过头像，自然回应」的指令；
+    // 过期后只陈述事实——旧版永不过期，AI 隔一两周还煞有介事说「你最近换过头像」很出戏
+    const freshAvatar = Date.now() - meDesc.at < 72 * 3600_000;
     lines.push(
       `- ${userLabel}的头像：${meDesc.desc || '（画面内容你还没看过，不要编造）'}（${fmtDay(meDesc.at)}更换的）。` +
-        `${userLabel}最近换过头像——像真人一样自然注意到并回应这件事（夸/调侃/问细节都行，符合你的人设和你们的关系），不要装作没看见，也不要编造没发生过的头像变化。`,
+        (freshAvatar
+          ? `${userLabel}最近换过头像——像真人一样自然注意到并回应这件事（夸/调侃/问细节都行，符合你的人设和你们的关系），不要装作没看见，也不要编造没发生过的头像变化。`
+          : '头像已经换过一阵子了，除非聊到头像话题否则不必主动提起。'),
     );
   }
   return lines.join('\n');

@@ -38,6 +38,9 @@ export interface ToolStatusPayload {
   status: 'pending' | 'done' | 'fail';
   /** 工具名（用于合并/去重） */
   tool?: string;
+  /** v2.4.5 长按「重新操作」：标记路径的原始命令（[手机操作:…] 的参数段）。
+  *  有值的气泡才能重试（重新入队执行；FC 工具路径无 args 快照不提供重试） */
+  op?: string;
 }
 
 /** 统一的消息形状（跨三端；role 按会话所属 App 决定：sms 端用 'assistant'，wx/qq 端用 'peer'） */
@@ -66,17 +69,18 @@ export function kvKeyForSession(sessionKey: string): string {
   return `ios-chat-msgs:${sessionKey}`;
 }
 
-/** 推送一条 tool_status 气泡到指定会话 */
-export function pushToolStatusBubble(sessionKey: string, payload: ToolStatusPayload): void {
-  if (!sessionKey) return;
+/** 推送一条 tool_status 气泡到指定会话（返回消息 id：串行多操作时按 id 精确回写结果） */
+export function pushToolStatusBubble(sessionKey: string, payload: ToolStatusPayload): string {
+  if (!sessionKey) return '';
   const key = kvKeyForSession(sessionKey);
   const existing = kvGet<unknown[]>(key);
   const list = Array.isArray(existing) ? existing : [];
   // role 按所属 App 决定：微信/QQ 端用 'peer'（对端消息位，与 wx/qq loadMsgs role 过滤一致），
   // 信息端（sms:assistant / sms:c:* / 默认）用 'assistant'
   const role: 'assistant' | 'peer' = sessionKey.startsWith('wx:') || sessionKey.startsWith('qq:') ? 'peer' : 'assistant';
+  const id = genId();
   const msg: ToolStatusMsg = {
-    id: genId(),
+    id,
     role,
     content: payload.title,
     time: Date.now(),
@@ -87,6 +91,7 @@ export function pushToolStatusBubble(sessionKey: string, payload: ToolStatusPayl
   kvSet(key, [...list, msg]);
   // 广播消息变更（三端聊天页订阅此事件刷新）
   broadcastMsgsChange(sessionKey);
+  return id;
 }
 
 /** 更新最近一条 tool_status 气泡（防刷屏：连续调用工具时更新而非新增） */
@@ -107,6 +112,33 @@ export function updateLastToolStatus(sessionKey: string, patch: Partial<ToolStat
       return;
     }
   }
+}
+
+/** v2.4.5 按消息 id 精确更新指定 tool_status 气泡（串行多操作各回写各的，不串台） */
+export function updateToolStatusById(sessionKey: string, id: string, patch: Partial<ToolStatusPayload>): void {
+  if (!sessionKey || !id) return;
+  const key = kvKeyForSession(sessionKey);
+  const existing = kvGet<unknown[]>(key);
+  if (!Array.isArray(existing)) return;
+  const idx = existing.findIndex((m) => (m as { id?: string })?.id === id);
+  if (idx < 0) return;
+  const m = existing[idx] as Record<string, unknown>;
+  if (m.kind !== 'tool_status' || typeof m.tool !== 'object' || !m.tool) return;
+  const tool = { ...(m.tool as ToolStatusPayload), ...patch };
+  const list = [...existing];
+  list[idx] = { ...m, tool, content: tool.title ?? (m.content as string) };
+  kvSet(key, list);
+  broadcastMsgsChange(sessionKey);
+}
+
+/** v2.4.5 长按「删除」：从会话消息里移除指定 tool_status 气泡 */
+export function removeToolStatusMsg(sessionKey: string, id: string): void {
+  if (!sessionKey || !id) return;
+  const key = kvKeyForSession(sessionKey);
+  const existing = kvGet<unknown[]>(key);
+  if (!Array.isArray(existing)) return;
+  kvSet(key, existing.filter((m) => (m as { id?: string })?.id !== id));
+  broadcastMsgsChange(sessionKey);
 }
 
 /** 广播消息变更（三端聊天页订阅 'tool-status-msgs' 事件刷新） */

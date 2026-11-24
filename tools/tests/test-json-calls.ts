@@ -68,7 +68,8 @@ const ex3 = extractJsonToolCalls('{"name": "sendSMS", "arguments": "{\\"phoneNum
 check('arguments 为字符串时解析', ex3.length === 1 && (ex3[0].args as { phoneNumber: string }).phoneNumber === '13800138000');
 const ex4 = extractJsonToolCalls('重复重复{"name":"getVolume","arguments":{}}{"name":"getVolume","arguments":{}}');
 check('同调用去重', ex4.length === 1);
-check('TOOL_NAME_SET 含 52 个工具', TOOL_NAME_SET.size === 52, `实际 ${TOOL_NAME_SET.size}`);
+// v2.4.5：52 → 62（补 v2.4.2 十件 + v2.4.3 三件：步数/运动/睡眠/文件四件/下载 + 听歌/切歌/真机日历读取）
+check('TOOL_NAME_SET 含 62 个工具', TOOL_NAME_SET.size === 62, `实际 ${TOOL_NAME_SET.size}`);
 
 console.log('== 3. looksLikePartialToolJson（分段扣留判定）==');
 check('半截开头 { → true', looksLikePartialToolJson('{') === true);

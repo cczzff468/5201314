@@ -665,7 +665,7 @@ export function buildPhoneTools(): PhoneToolDef[] {
     );
     add(
       'getRecentNotifications',
-      '读取机主真实手机通知栏的最近通知快照（原生通知监听）。想知道机主手机上刚来了什么消息时用这个。',
+      '读取机主真实手机通知栏的最近通知快照（原生通知监听）。想知道机主手机上刚来了什么消息时用这个。注意：查机主在听什么歌用 getNowPlaying，不要用这个。',
       {},
       [],
     );
@@ -809,13 +809,13 @@ export function buildPhoneTools(): PhoneToolDef[] {
     // ---- v2.4.3 真机媒体感知 + 控制（机主需求：知道他在听什么歌、帮换歌、切任意 App） ----
     add(
       'getNowPlaying',
-      '看机主真实手机里【现在正在听什么歌】（网易云/QQ音乐/酷狗/Spotify 等后台播放中的歌名/歌手/专辑/播放状态）。想知道机主此刻在听什么、聊天里自然接上「你在听XX啊」时用这个；机主问「我耳机里放的什么歌」也用它。需要「正在收听检测」权限。',
+      '看机主真实手机里【现在正在听什么歌】（网易云/QQ音乐/酷狗/Spotify 等后台播放中的歌名/歌手/专辑/播放状态）。想知道机主此刻在听什么、聊天里自然接上「你在听XX啊」时用这个；机主问「我耳机里放的什么歌」「你看看我在听什么」也用它（优先用这个，不要用 getRecentNotifications 查歌）。需「通知使用权」权限（设置 › 权限给予 › 通知使用权）。',
       {},
       [],
     );
     add(
       'controlRealMusic',
-      '控制机主真实手机里正在播放的音乐（媒体传输控制）。action 填：next=切到下一首、prev=切回上一首、play=继续播放、pause=暂停。机主说「换一首」「切歌」「别放了」「暂停一下」时用这个；人设合适时也可主动用（如机主在听伤感歌你又吃醋，可以给他切掉）。需「正在收听检测」权限。',
+      '控制机主真实手机里正在播放的音乐（媒体传输控制）。action 填：next=切到下一首、prev=切回上一首、play=继续播放、pause=暂停。机主说「换一首」「切歌」「别放了」「暂停一下」时用这个；人设合适时也可主动用（如机主在听伤感歌你又吃醋，可以给他切掉）。需「通知使用权」权限（设置 › 权限给予 › 通知使用权）。',
       { action: { type: 'string', enum: ['next', 'prev', 'play', 'pause'], description: 'next=切下一首 / prev=切上一首 / play=继续 / pause=暂停' } },
       ['action'],
     );
@@ -1633,7 +1633,7 @@ function looksLikeTaskInstruction(s: string): boolean {
   //    只认动词在前（锁QQ）和「把…锁」结构，名字打头的全部 MISS → 不进工具轮 →
   //    模型只能光嘴上答应；新槽：APPNAMES(给我|帮我…)?(锁|封|冻|没收|停用|封印) 与
   //    APPNAMES(解锁|解冻|解了)。
-  return /发(个|条|给|一)(?!呆|毛|火|疯|麻|懵)|发送|发帖|问问|通知(我|TA|他|她|大家|群|一下|个)|搜索|搜一?下|找一?下|查(一?下|询)|记(个|一|下)|保存|备忘|闹钟|提醒(我|一?下)|(加|设|定|建)(个|一?个)提醒|播放|放首|放一?首|来首|切歌|换歌|点(个|一)?赞|(看|刷|逛|看看)(一?下|个|逛)?(帖子|论坛)|天气(怎么样|如何|咋样|呢|吗)|(明天|后天|大后天|周末|下周|下个?星期).{0,3}天气|(查|看看?)(一?下)?天气|下雨(吗|么|没有|没)|会(不)?下雨|要下雨|几度|温度(多少|几度|呢|吗)|(查|看看?)(一?下)?温度|打开|开一?下(?!玩笑)|去(备忘录|时钟|天气|论坛|微信|QQ)|在(微信|QQ|论坛)(上|里|中)?(发|问|@|艾特)|冻(结|上|住|一下|一小时|半小时|分钟)|解冻|解锁|解开?(屏幕|手机|应用|App|app)|锁屏|锁个屏|锁定?屏幕|锁(住|上|了|一下|一?下|定|死)?(手机|屏幕|微信|QQ|抖音|快手|B站|哔哩|小红书|微博|淘宝|京东|拼多多|美团|网易云|王者|荣耀|吃鸡|原神|番茄|阅读|闹钟|时钟|备忘录|浏览器|相册|相机|设置|应用|App|app|软件|游戏|它)|(把|将|帮我).{0,8}(锁|冻|停|挂起)|没收|别让(我|俺)(再)?(玩|刷|看|打开)|强(制)?停|挂起|停(掉|了)(.{0,6}(应用|App|app))|切回(聊天|界面|APP|App|来|咱们|我们的聊天)|回到(聊天|界面|APP|App|咱们|我们的聊天)|把我(拉|拽|切|弄)回|拉(我)?回(聊天|来|APP|App)|拽回|音量|调(大|小|高|低)|静音|大点声|小点声|(大|小)声(一?点|些|点儿)|声音(大|小|高|低|响|轻)|声(音|儿)?(再)?(大|小|高|低|响|轻)(一?点|些|点儿)?|响一(点|些|点儿)|(加|开)大(一?下)?声|亮屏|熄屏|截(个|一张)?屏|截(个|一张|一?张)?图|帮我截|屏幕截图|看屏幕|看(一)?看(我|我现在)的?屏幕|看(一)?看我在(玩|看|干|做|用)|看(一)?看我现在在|电量(多少|还剩|剩多少|呢|吗|咋样|怎么样)|还剩多少电|还有(多少|几格)电|(查|看看?)(一?下)?电量|后台(清理|耗电|占用|占内存|运行)|(清理?|清一?下|查|看看?)(一?下)?后台|强杀|叫(?:我|俺)[^，。！？!?,.\n]{0,8}(?:起床|起来|起身|出门|上班|上学|打卡)|(?:明早|明晚|明天早|早上|午睡|睡醒|到点|闹钟|叫醒|起床)[^，。！？!?,.\n]{0,10}叫(?:我|俺)|\d{1,2}\s*[点:：时][^，。！？!?,.\n]{0,10}叫(?:我|俺)|(?:微信|QQ|抖音|快手|B站|哔哩|小红书|微博|淘宝|京东|拼多多|美团|网易云|王者|荣耀|吃鸡|原神|番茄|阅读|闹钟|时钟|备忘录|浏览器|相册|相机|设置|应用|App|app|软件|游戏)[，,、 ]{0,3}(?:给我|帮我|替我|快|赶紧|麻烦)?(?:锁|封|冻|没收|停用|封印)|(?:微信|QQ|抖音|快手|B站|哔哩|小红书|微博|淘宝|京东|拼多多|美团|网易云|王者|荣耀|吃鸡|原神|番茄|阅读|闹钟|时钟|备忘录|浏览器|相册|相机|设置|应用|App|app|软件)(?:解锁|解冻|解了)/.test(s);
+  return /发(个|条|给|一)(?!呆|毛|火|疯|麻|懵)|发送|发帖|问问|通知(我|TA|他|她|大家|群|一下|个)|搜索|搜一?下|找一?下|查(一?下|询)|记(个|一|下)|保存|备忘|闹钟|提醒(我|一?下)|(加|设|定|建)(个|一?个)提醒|(加|添加|增设|新建|创建|设|定|建|记|写|排|存)(个|一?个|点|条|些)?(日程|行程|安排|日历|事件)|(日程|行程|日历|事件)(里|上|中|APP|App|app)?(加|添|写|记|排|建|设|定|存)|(记|查|看|读|瞅)(一?下|个)?(我)?的?(日程|行程|日历|安排)|有(什么|啥)(安排|日程|行程)|在(日历|日程表?)(里|上|中|APP|App|app)?(加|添|写|记|排|建|设|定|存|标|注)|播放|放首|放一?首|来首|切歌|换歌|点(个|一)?赞|(看|刷|逛|看看)(一?下|个|逛)?(帖子|论坛)|天气(怎么样|如何|咋样|呢|吗)|(明天|后天|大后天|周末|下周|下个?星期).{0,3}天气|(查|看看?)(一?下)?天气|下雨(吗|么|没有|没)|会(不)?下雨|要下雨|几度|温度(多少|几度|呢|吗)|(查|看看?)(一?下)?温度|打开|开一?下(?!玩笑)|去(备忘录|时钟|天气|论坛|微信|QQ)|在(微信|QQ|论坛)(上|里|中)?(发|问|@|艾特)|冻(结|上|住|一下|一小时|半小时|分钟)|解冻|解锁|解开?(屏幕|手机|应用|App|app)|锁屏|锁个屏|锁定?屏幕|锁(住|上|了|一下|一?下|定|死)?(手机|屏幕|微信|QQ|抖音|快手|B站|哔哩|小红书|微博|淘宝|京东|拼多多|美团|网易云|王者|荣耀|吃鸡|原神|番茄|阅读|闹钟|时钟|备忘录|浏览器|相册|相机|设置|应用|App|app|软件|游戏|它)|(把|将|帮我).{0,8}(锁|冻|停|挂起)|没收|别让(我|俺)(再)?(玩|刷|看|打开)|强(制)?停|挂起|停(掉|了)(.{0,6}(应用|App|app))|切回(聊天|界面|APP|App|来|咱们|我们的聊天)|回到(聊天|界面|APP|App|咱们|我们的聊天)|把我(拉|拽|切|弄)回|拉(我)?回(聊天|来|APP|App)|拽回|音量|调(大|小|高|低)|静音|大点声|小点声|(大|小)声(一?点|些|点儿)|声音(大|小|高|低|响|轻)|声(音|儿)?(再)?(大|小|高|低|响|轻)(一?点|些|点儿)?|响一(点|些|点儿)|(加|开)大(一?下)?声|亮屏|熄屏|截(个|一张)?屏|截(个|一张|一?张)?图|帮我截|屏幕截图|看屏幕|看(一)?看(我|我现在)的?屏幕|看(一)?看我在(玩|看|干|做|用|听)|看(一)?看我现在在|电量(多少|还剩|剩多少|呢|吗|咋样|怎么样)|还剩多少电|还有(多少|几格)电|(查|看看?)(一?下)?电量|后台(清理|耗电|占用|占内存|运行)|(清理?|清一?下|查|看看?)(一?下)?后台|强杀|叫(?:我|俺)[^，。！？!?,.\n]{0,8}(?:起床|起来|起身|出门|上班|上学|打卡)|(?:明早|明晚|明天早|早上|午睡|睡醒|到点|闹钟|叫醒|起床)[^，。！？!?,.\n]{0,10}叫(?:我|俺)|\d{1,2}\s*[点:：时][^，。！？!?,.\n]{0,10}叫(?:我|俺)|(?:微信|QQ|抖音|快手|B站|哔哩|小红书|微博|淘宝|京东|拼多多|美团|网易云|王者|荣耀|吃鸡|原神|番茄|阅读|闹钟|时钟|备忘录|浏览器|相册|相机|设置|应用|App|app|软件|游戏)[，,、 ]{0,3}(?:给我|帮我|替我|快|赶紧|麻烦)?(?:锁|封|冻|没收|停用|封印)|(?:微信|QQ|抖音|快手|B站|哔哩|小红书|微博|淘宝|京东|拼多多|美团|网易云|王者|荣耀|吃鸡|原神|番茄|阅读|闹钟|时钟|备忘录|浏览器|相册|相机|设置|应用|App|app|软件)(?:解锁|解冻|解了)/.test(s);
 }
 
 /**
@@ -2073,11 +2073,11 @@ function wrapSystemChatNative(sysRaw: string): string {
  * v2.3.0 同步新增 8 个原生系统级工具名。
  */
 const MALFORMED_TOOL_TEXT_RE =
-  /^\s*(sendWebMessage|postForum|likePost|playMusic|getWebState|saveMemo|setAlarm|queryWeather|openScreen|freezeApp|getWebInstalledApps|getUsageStats|getRecentApps|pullBackToChat|searchWebApp|sendNotification|searchContacts|openChat|getCalendarEvents|addCalendarEvent|getTodoList|addTodo|searchRealApp|freezeRealApp|unfreezeRealApp|lockApp|setVolume|setBrightness|getBrightness|setRingerMode|openRealApp|tapScreen|swipeScreen|inputText|pressKey|lookScreen|takeScreenshot|sendScreenshot|switchToChat|getForegroundApp|getRecentSMS|getBatteryStatus|getVolume|getRecentNotifications|setRealAlarm|startCountdown|createCalendarEvent|makePhoneCall|sendSMS|searchRealContact|toggleFlashlight|getRealLocation|openApp|uiObserve|uiClick|uiType|uiScroll)\s*[:：`(（]?\s*\S/m;
+  /^\s*(sendWebMessage|postForum|likePost|playMusic|getWebState|saveMemo|setAlarm|queryWeather|openScreen|freezeApp|getWebInstalledApps|getUsageStats|getRecentApps|pullBackToChat|searchWebApp|sendNotification|searchContacts|openChat|getCalendarEvents|addCalendarEvent|getTodoList|addTodo|searchRealApp|freezeRealApp|unfreezeRealApp|lockApp|setVolume|setBrightness|getBrightness|setRingerMode|openRealApp|tapScreen|swipeScreen|inputText|pressKey|lookScreen|takeScreenshot|sendScreenshot|switchToChat|getForegroundApp|getRecentSMS|getBatteryStatus|getVolume|getRecentNotifications|setRealAlarm|startCountdown|createCalendarEvent|makePhoneCall|sendSMS|searchRealContact|toggleFlashlight|getRealLocation|getStepCount|getCurrentActivity|getSleepData|listFiles|readFileContent|saveTextToFile|downloadFile|openApp|getNowPlaying|controlRealMusic|getRealCalendarEvents|uiObserve|uiClick|uiType|uiScroll)\s*[:：`(（]?\s*\S/m;
 
 /** 工具名全集（cleanToolLogs 裸调用行剥除用）——裸 JSON 提取版在 ./json-tool-calls（v2.3.0 与 TOOL_CAPS 全量同步 52 个） */
 const TOOL_NAME_RE_SRC =
-  'sendWebMessage|postForum|likePost|playMusic|getWebState|saveMemo|setAlarm|queryWeather|openScreen|freezeApp|getWebInstalledApps|getUsageStats|getRecentApps|pullBackToChat|searchWebApp|sendNotification|searchContacts|openChat|getCalendarEvents|addCalendarEvent|getTodoList|addTodo|searchRealApp|freezeRealApp|unfreezeRealApp|lockApp|setVolume|openRealApp|tapScreen|swipeScreen|inputText|pressKey|lookScreen|takeScreenshot|sendScreenshot|switchToChat|getForegroundApp|getBatteryStatus|getVolume|getRecentSMS|getRecentNotifications|setBrightness|getBrightness|setRingerMode|setRealAlarm|startCountdown|createCalendarEvent|makePhoneCall|sendSMS|searchRealContact|toggleFlashlight|getRealLocation';
+  'sendWebMessage|postForum|likePost|playMusic|getWebState|saveMemo|setAlarm|queryWeather|openScreen|freezeApp|getWebInstalledApps|getUsageStats|getRecentApps|pullBackToChat|searchWebApp|sendNotification|searchContacts|openChat|getCalendarEvents|addCalendarEvent|getTodoList|addTodo|searchRealApp|freezeRealApp|unfreezeRealApp|lockApp|setVolume|openRealApp|tapScreen|swipeScreen|inputText|pressKey|lookScreen|takeScreenshot|sendScreenshot|switchToChat|getForegroundApp|getBatteryStatus|getVolume|getRecentSMS|getRecentNotifications|setBrightness|getBrightness|setRingerMode|setRealAlarm|startCountdown|createCalendarEvent|makePhoneCall|sendSMS|searchRealContact|toggleFlashlight|getRealLocation|getStepCount|getCurrentActivity|getSleepData|listFiles|readFileContent|saveTextToFile|downloadFile|getNowPlaying|controlRealMusic|getRealCalendarEvents';
 
 // v2.3.0 F-11 裸 JSON 工具调用提取/剥除：纯函数抽到独立模块 json-tool-calls（防循环依赖），
 // 这里 re-export 保持既有 import 兼容

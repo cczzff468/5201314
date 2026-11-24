@@ -122,8 +122,8 @@ import {
 } from '@/lib/perception';
 import { useEnterSend, setEnterSend, guardEnterToSend } from '@/lib/enter-send';
 // v1.3 Shizuku 自主权：[手机操作:命令] 标记的执行器 + 按开关动态注入的教学规则（设置 APP → AI 动手）
-import { buildShizukuAutonomyRules, enqueuePhoneOp } from '@/lib/ios/device-autonomy';
-import { useOpPill, SkillUsePill } from '../skill-use-pill';
+import { buildShizukuAutonomyRules, enqueuePhoneOp, phoneOpVerb, shortPhoneOpText } from '@/lib/ios/device-autonomy';
+import { pushToolStatusBubble, updateToolStatusById } from '@/lib/ios/tool-status-bubble';
 import { kvGet, kvSet, kvDel } from '@/lib/ios/idb-kv';
 import { getMemSettings, memAfterAiTurn, memChatRecallBlock, memConvoFromRaw, memPurgeMessageSources, setMemScopeForApp } from '@/lib/memory';
 import { aiWriteLetterOnRequest, coupleChatBlock, coupleLetterAskHit } from '@/lib/ios/couple-ai';
@@ -330,7 +330,6 @@ export function ChatPage({
   // 函数式改读共享源计算（任一侧的写入都立即对两侧生效），订阅把 commit 广播回本实例 state
   const [msgs, setMsgsState] = useState<WxMsg[]>(() => wxSessionMsgs.init(peer.id));
   // v1.3 Shizuku：AI 使用技能时聊天界面正中的椭圆形胶囊浮层（start/finish 稳定引用，异步闭包里安全调用）
-  const opPill = useOpPill();
   const setMsgs = useCallback(
     (next: WxMsg[] | ((prev: WxMsg[]) => WxMsg[])) => {
       wxSessionMsgs.commit(peer.id, next);
@@ -1821,19 +1820,31 @@ export function ChatPage({
           if (argText && !loadBlock('wx', peer.id).byUser) {
             ctx.phoneActed = true; // 纯动作回复（无正文）不落空回复失败徽标
             const cmdName = argText.split(/[:：]/)[0] ?? '';
-            out.push({ id: uid(), role: 'peer', content: '', time: t, kind: 'sys', sys: { text: `「${peer.name}」正在操作手机（${cmdName}）…` } });
-            t += 1;
+            // v2.4.5 工具提示统一：占位/结果走聊天流 ToolStatusBubble（极简胶囊+长按复制/删除/重试）；
+            // 结果原文（含屏幕坐标情报）只落隐藏 sys.op 行回喂 AI，用户只看短文案
+            const bubbleId = pushToolStatusBubble(sessionKey, {
+              title: `${peer.name}正在${phoneOpVerb(cmdName)}…`,
+              status: 'pending',
+              tool: 'phone-op',
+              op: argText,
+            });
             void (async () => {
-              // 串行队列：多步指令（打开→播放→切歌）按书写顺序逐个执行，轮到本条才亮技能胶囊
-              const res = await enqueuePhoneOp(argText, () => opPill.start(peer.name, cmdName));
-              opPill.finish(res.ok, res.text);
+              // 串行队列：多步指令（打开→播放→切歌）按书写顺序逐个执行
+              const res = await enqueuePhoneOp(argText);
+              const verb = phoneOpVerb(cmdName);
+              updateToolStatusById(sessionKey, bubbleId, {
+                status: res.ok ? 'done' : 'fail',
+                title: res.ok ? `${peer.name}已${verb}` : `${peer.name}${verb}失败`,
+                body: shortPhoneOpText(res.text) || undefined,
+              });
+              // 隐藏结果行：AI 下一轮看到完整结果，用户不可见
               const sysMsg: WxMsg = {
                 id: uid(),
                 role: 'peer',
                 content: '',
                 time: Date.now(),
                 kind: 'sys',
-                sys: { text: `手机操作${res.ok ? '成功' : '失败'}：${res.text}`, op: true },
+                sys: { text: `手机操作${res.ok ? '成功' : '失败'}：${res.text}`, op: true, hide: true },
               };
               saveMsgs(peer.id, appendWithBoundary(sessionKey, loadMsgs(peer.id), sysMsg));
               setMsgs((prev) => (prev.some((m) => m.id === sysMsg.id) ? prev : [...prev, sysMsg]));
@@ -2806,14 +2817,23 @@ export function ChatPage({
         turnImageMsgIds.unshift(m.id);
       }
     }
-    // 回看兜底（用户实测：发图让 AI 看，AI 第一次没看懂，再让它看第二遍时不应要求重新发图）：
-    // 本轮没有新图时，若用户最新消息带「看图」意图（看/图/照片/识别…），回退取会话里最近的「我」发的
-    // 图片（最多 3 张，可跨过 AI 的回复取到）——AI 自己就能看到之前发的图，识图描述回写后历史永久可读。
-    // 全会话扫描而非仅当轮：用户发图 → AI 回复 → 用户「你再看看」的场景（中间隔了 AI 消息）也要能取到图。
-    if (turnImages.length === 0 && /看|图|照片|识/.test(userMsg?.content ?? '')) {
-      for (let i = base.length - 1; i >= 0 && turnImages.length < 3; i--) {
+    // 回看兜底（用户实测：发图让 AI 看，AI 第一次没看懂，再让它看第二遍时不应要求重新发图）。
+    // v2.4.5 根修「隔天 AI 突然说『你发过来的这三张图我也看到了』」：
+    // 旧版触发正则 /看|图|照片|识/ 单字命中（「我看到啦」「意图」都中招）+ 全会话无窗扫描 +
+    // 不挑已有 desc 的图——旧图被当「刚发的新图」重投给 AI，AI 于是隔三差五主动提旧图。
+    // 收紧为：①消息需同时含「图/照片/头像」和「看/瞅/瞧/识/认/描述」双要素；
+    // ②只扫最近 24 条（回看场景图就在眼前几条，翻出上个月的图毫无意义）；
+    // ③只回看还没识过图的（img.desc 已有的图在历史里 AI 本来就能读到，无需重投）；
+    // ④走 revisit 口径注入（「想让你再看看之前发过的图片」而非「发了 N 张图片」）。
+    const revisitText = userMsg?.content ?? '';
+    const wantsImageRevisit =
+      turnImages.length === 0 &&
+      /[图片照片头像]/.test(revisitText) &&
+      /[看瞅瞧识认描述]/.test(revisitText);
+    if (wantsImageRevisit) {
+      for (let i = base.length - 1; i >= Math.max(0, base.length - 24) && turnImages.length < 3; i--) {
         const m = base[i];
-        if (m.role === 'me' && m.kind === 'image' && m.img?.src) {
+        if (m.role === 'me' && m.kind === 'image' && m.img?.src && !m.img.desc) {
           turnImages.unshift(m.img.src);
           turnImageMsgIds.unshift(m.id);
         }
@@ -2855,7 +2875,7 @@ export function ChatPage({
       replyCount,
       ...(turnImages.length > 0
         ? {
-            vision: { images: turnImages, text: userMsg?.content ?? '' },
+            vision: { images: turnImages, text: userMsg?.content ?? '', revisit: wantsImageRevisit },
             // 识图描述按「图N：」行拆分后逐张回写（img.desc 持久化）：turnImageMsgIds 与 turnImages
             // 一一对应，每张图各得自己的描述（#25）；某张拆不出（空串）就跳过、保持 [图片] 占位，
             // 防编造规则兜住，之后的聊天历史 AI 都能读到图片内容
@@ -4504,7 +4524,6 @@ export function ChatPage({
       }
     >
       {/* v1.3 Shizuku：AI 使用技能 → 聊天界面正中的椭圆形胶囊浮层（pointer-events-none 不挡交互） */}
-      <SkillUsePill pill={opPill.pill} />
       {/* 自定义 CSS（聊天作用域，按联系人隔离）：只影响本联系人的聊天页；前缀
           [data-phone-shell] [data-chat-css="wx:联系人ID"] 比全局多一级属性 → 特异性压制全局 */}
       {chatCustomCss?.trim() ? <style>{scopeCss(chatCustomCss, chatCssScopeSelector(wxCssKey))}</style> : null}
@@ -4759,6 +4778,8 @@ export function ChatPage({
           const i = winStart + wi;
           // 错误占位消息（旧版失败落库文案）：新版失败改由触发消息上的红色 ! 徽标表达，不再渲染占位文字行
           if (m.error) return null;
+          // v2.4.5：隐藏的手机操作结果行（sys.op + hide，含坐标情报原文）只回喂 AI，整行不渲染（无空隙）
+          if (m.kind === 'sys' && m.sys?.hide) return null;
           // 照片堆叠成员行：折叠态已并入堆叠卡片渲染，整行跳过（组内 joined 保证无时间分隔行穿插）；
           // 该组被「展开」后（头部 id 记入 expandedStacks）成员恢复逐条平铺（与群聊 wx-group 同口径）
           const memberHeadIdx = stackMemberIdx.get(i);
@@ -4855,7 +4876,9 @@ export function ChatPage({
             ) : m.kind === 'notice' && m.notice ? (
               <WxNoticeRow icon={m.notice.icon} pre={m.notice.pre} accent={m.notice.accent} />
             ) : m.kind === 'sys' && m.sys ? (
-              /* 系统提示行（拉黑/解除拉黑等状态变更）：居中半透明胶囊，与撤回行同款 */
+              /* 系统提示行（拉黑/解除拉黑等状态变更）：居中半透明胶囊，与撤回行同款；
+                 v2.4.5 sys.hide（手机操作结果原文/坐标情报）只回喂 AI，屏上不渲染 */
+              m.sys.hide ? null :
               <div data-testid="wx-sys-row" className="py-1.5 text-center">
                 <span className="inline-block rounded-[4px] border border-black/15 bg-white/75 px-2 py-[3px] text-[12px] leading-[1.4] text-black/50 dark:border-white/15 dark:bg-white/[0.13] dark:text-white/60">
                   {m.sys.text}
@@ -4865,8 +4888,9 @@ export function ChatPage({
               /* 工具调用状态气泡（毛玻璃椭圆胶囊）：居中显示，不带头像/不带气泡尾巴；
                  v2.3 修复：分支提前到头像行【之前】命中——之前落在头像行内部导致气泡左侧
                  多出一个角色头像（系统级提示绝不带头像）。
-                 由 web-tools.island() 推到当前会话；不进 AI 上下文/记忆/翻译/语音合成 */
-              <ToolStatusBubble tool={m.tool} />
+                 由 web-tools.island() 推到当前会话；不进 AI 上下文/记忆/翻译/语音合成；
+                 v2.4.5 传 msgId/sessionKey 启用长按菜单（复制/删除/重新操作） */
+              <ToolStatusBubble tool={m.tool} msgId={m.id} sessionKey={sessionKey} />
             ) : m.kind === 'blockreq' && m.blkreq ? (
               /* 申请解除拉黑卡片：40-a 双向——角色发起（左侧，头像在左，用户点同意/拒绝）/
                  用户发起（右侧机主侧，角色用 [同意/拒绝解除拉黑] 标记决策，仅展示状态不可点） */

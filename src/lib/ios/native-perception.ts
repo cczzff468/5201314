@@ -1058,6 +1058,8 @@ export async function nativeCreateCalendarEvent(opts: {
   allDay?: boolean;
 }): Promise<{ ok: boolean; via?: string; calendar?: string; reason?: string }> {
   if (!isNativePerception()) return { ok: false, reason: 'not-native' };
+  // v2.4.5 能力探测：新 APK 明确没有此方法时秒级回 old-apk（不再挂 12s 超时后报「桥无响应」）
+  if ((await nativeMethodState('createCalendarEvent')) === 'no') return { ok: false, reason: 'old-apk' };
   try {
     const r = await nativeCall<NativeCalendarResult>('createCalendarEvent', opts, 12_000);
     return { ok: r?.ok === true, via: r?.via, calendar: r?.calendar, reason: r?.reason };
@@ -1073,9 +1075,12 @@ export async function nativeGetNowPlaying(): Promise<{
   ok: boolean;
   needPermission?: boolean;
   connecting?: boolean;
+  reason?: 'old-apk';
   playing?: { app: string; pkg: string; title: string; artist: string; album: string; state: string } | null;
 }> {
   if (!isNativePerception()) return { ok: false, playing: null };
+  // v2.4.5 能力探测：旧 APK 没有此方法时秒级回 old-apk（不再挂 8s）
+  if ((await nativeMethodState('getNowPlaying')) === 'no') return { ok: false, playing: null, reason: 'old-apk' } as { ok: boolean; playing: null };
   try {
     const r = await nativeCall<{
       ok?: boolean;
@@ -1090,7 +1095,7 @@ export async function nativeGetNowPlaying(): Promise<{
       playing: r?.playing ?? null,
     };
   } catch {
-    return { ok: false, playing: null };
+    return { ok: false, playing: null, reason: '桥无响应' } as { ok: boolean; playing: null };
   }
 }
 
@@ -1099,6 +1104,8 @@ export async function nativeControlMedia(
   action: 'next' | 'prev' | 'play' | 'pause' | 'toggle',
 ): Promise<{ ok: boolean; reason?: string }> {
   if (!isNativePerception()) return { ok: false, reason: 'not-native' };
+  // v2.4.5 能力探测：旧 APK 没有此方法时秒级回 old-apk
+  if ((await nativeMethodState('controlMedia')) === 'no') return { ok: false, reason: 'old-apk' };
   try {
     const r = await nativeCall<{ ok?: boolean; reason?: string }>('controlMedia', { action }, 8000);
     return { ok: r?.ok === true, reason: r?.reason };
@@ -1110,6 +1117,8 @@ export async function nativeControlMedia(
 /** 读真机系统日历某天日程（date="YYYY-MM-DD" 或空=今天；需 READ_CALENDAR） */
 export async function nativeGetRealCalendarEvents(date?: string): Promise<NativeRealCalendarResult> {
   if (!isNativePerception()) return { ok: false, reason: 'not-native' };
+  // v2.4.5 能力探测：旧 APK 没有此方法时秒级回 old-apk
+  if ((await nativeMethodState('getRealCalendarEvents')) === 'no') return { ok: false, reason: 'old-apk' };
   try {
     return await nativeCall<NativeRealCalendarResult>('getRealCalendarEvents', { date: date ?? '' }, 12_000);
   } catch {
@@ -1190,6 +1199,29 @@ export async function nativeHasMethod(method: string): Promise<boolean> {
     return (await nativeBridgeMethods()).has(method);
   } catch {
     return false;
+  }
+}
+
+/** v2.4.5 三态能力探测：'yes'=新 APK 确认有 / 'no'=新 APK 确认没有（秒级回退） /
+ *  'unknown'=旧 APK 没有 bridgeCapabilities 通道（探测不出，调用方按原超时逻辑走）。
+ *  区别于 nativeHasMethod 的布尔语义：旧 APK 上空集≠没有，不能误杀。 */
+/** 三态探测结果缓存（yes/no 确定性结论缓存；unknown 不缓存，下次调用重探） */
+const methodStateCache = new Map<string, 'yes' | 'no'>();
+
+export async function nativeMethodState(method: string): Promise<'yes' | 'no' | 'unknown'> {
+  if (typeof window === 'undefined' || !isNativePerception()) return 'unknown';
+  const hit = methodStateCache.get(method);
+  if (hit) return hit;
+  try {
+    const r = await nativeCall<{ ok?: boolean; methods?: string[] }>('bridgeCapabilities', {}, 4000);
+    if (r?.ok === true && Array.isArray(r.methods)) {
+      const st: 'yes' | 'no' = r.methods.includes(method) ? 'yes' : 'no';
+      methodStateCache.set(method, st);
+      return st;
+    }
+    return 'unknown';
+  } catch {
+    return 'unknown';
   }
 }
 
@@ -1668,11 +1700,22 @@ export async function nativeGetRecentSMS(limit = 20): Promise<RecentSmsItem[] | 
 }
 
 /** 最近通知（需「通知使用权」；通知环形缓冲） */
-export async function nativeGetRecentNotifications(limit = 20): Promise<RecentNotificationItem[] | { error: string } | null> {
+export async function nativeGetRecentNotifications(
+  limit = 20,
+): Promise<RecentNotificationItem[] | { error: string } | { connecting: true } | null> {
   if (!isNativePerception()) return null;
   try {
-    const r = await nativeCall<{ ok?: boolean; items?: RecentNotificationItem[]; reason?: string }>('getRecentNotifications', { limit }, 10_000);
-    if (r?.ok) return r.items ?? [];
+    const r = await nativeCall<{
+      ok?: boolean;
+      items?: RecentNotificationItem[];
+      reason?: string;
+      connecting?: boolean;
+    }>('getRecentNotifications', { limit }, 10_000);
+    if (r?.ok) {
+      // v2.4.5 服务还在重连（刚授权/刚重启）：透传 connecting，不再伪装成「没有可见通知」
+      if (r.connecting) return { connecting: true };
+      return r.items ?? [];
+    }
     return { error: r?.reason ?? 'failed' };
   } catch {
     return null;

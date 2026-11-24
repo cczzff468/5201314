@@ -421,7 +421,15 @@ export async function labCreateCalendarEvent(opts: {
   if (!r.ok) {
     return {
       ok: false,
-      text: `日程写入失败：${r.reason === 'no-permission' ? '日历权限未开启：去 设置 › 权限给予 › 日历 开启' : r.reason === 'no-calendar-app' ? '手机上没有日历应用' : a11yGateText(r.reason)}`,
+      text: `日程写入失败：${
+        r.reason === 'no-permission'
+          ? '日历权限未开启：去 设置 › 权限给予 › 日历 开启'
+          : r.reason === 'no-calendar-app'
+            ? '手机上没有日历应用'
+            : r.reason === 'old-apk'
+              ? '当前安装的 APK 版本过旧，没有写系统日历的能力——请到 设置 › 关于本机 › 检查更新 升级到最新 APK 后再试'
+              : '原生通道失败（若一直失败说明 APK 过旧，到 设置 › 关于本机 › 检查更新 升级后重试）'
+      }`,
     };
   }
   const begin = opts.beginTs ? new Date(opts.beginTs) : null;
@@ -449,7 +457,13 @@ export async function labGetRealCalendarEvents(date?: string): Promise<DeviceOpR
   if (!r.ok) {
     return {
       ok: false,
-      text: `日历查询失败：${r.reason === 'no-permission' ? '日历权限未开启：去 设置 › 权限给予 › 日历 开启' : a11yGateText(r.reason)}`,
+      text: `日历查询失败：${
+        r.reason === 'no-permission'
+          ? '日历权限未开启：去 设置 › 权限给予 › 日历 开启'
+          : r.reason === 'old-apk'
+            ? '当前安装的 APK 版本过旧，读不了系统日历——请到 设置 › 关于本机 › 检查更新 升级到最新 APK'
+            : a11yGateText(r.reason)
+      }`,
     };
   }
   const list = r.events ?? [];
@@ -467,13 +481,20 @@ export async function labGetRealCalendarEvents(date?: string): Promise<DeviceOpR
 /** 看机主现在在听什么歌（网易云/QQ音乐/Spotify 等后台播放中） */
 export async function labGetNowPlaying(): Promise<DeviceOpResult> {
   const r = await nativeGetNowPlaying();
+  if (r.reason === 'old-apk') {
+    return { ok: false, text: '读不到正在听的歌：当前安装的 APK 版本过旧，没有听歌感知能力——请到 设置 › 关于本机 › 检查更新 升级到最新 APK' };
+  }
   if (r.needPermission) {
-    return { ok: false, text: '读不到歌单信息：「通知使用权」未开启——去 设置 › 权限给予 › 正在收听检测 开启后，我就能知道你在听什么歌了' };
+    return { ok: false, text: '读不到歌单信息：「通知使用权」未开启——去 设置 › 权限给予 › 通知使用权 开启后，我就能知道你在听什么歌了' };
   }
   if (r.connecting) {
     return { ok: false, text: '正在连接媒体监听（刚开启权限/刚重启），几秒后再问我一次' };
   }
-  if (!r.ok) return { ok: false, text: `读不到正在听的歌：${a11yGateText(undefined)}` };
+  if (!r.ok)
+    return {
+      ok: false,
+      text: '读不到正在听的歌：原生通道失败（若一直失败，到 设置 › 关于本机 › 检查更新 升级到最新 APK 后重试）',
+    };
   const p = r.playing;
   if (!p || (!p.title && p.state !== 'playing')) {
     return { ok: true, text: '现在没有任何 App 在放歌' };
@@ -498,8 +519,10 @@ export async function labControlRealMedia(action: 'next' | 'prev' | 'play' | 'pa
   const r = await nativeControlMedia(action);
   if (!r.ok) {
     if (r.reason === 'no-media-permission') {
-      return { ok: false, text: '控制不了音乐：「通知使用权」未开启——去 设置 › 权限给予 › 正在收听检测 开启' };
+      return { ok: false, text: '控制不了音乐：「通知使用权」未开启——去 设置 › 权限给予 › 通知使用权 开启' };
     }
+    if (r.reason === 'old-apk')
+      return { ok: false, text: '控制不了音乐：当前安装的 APK 版本过旧——请到 设置 › 关于本机 › 检查更新 升级到最新 APK' };
     if (r.reason === 'connecting') return { ok: false, text: '正在连接媒体监听，几秒后再试' };
     if (r.reason === 'no-active-session') return { ok: false, text: '现在没有正在播放的音乐（机主没在听歌）' };
     return { ok: false, text: `切歌失败：${a11yGateText(r.reason)}` };
@@ -727,7 +750,13 @@ export async function labGetNetworkInfo(): Promise<DeviceOpResult> {
 export async function labNotificationSnapshot(limit = 10): Promise<DeviceOpResult> {
   const r = await nativeGetRecentNotifications(limit);
   if (r === null) return { ok: false, text: '桥无响应（原生调用超时）' };
-  if (!Array.isArray(r)) return { ok: false, text: `通知读取失败：${a11yGateText(r.error)}` };
+  if (!Array.isArray(r)) {
+    // v2.4.5：服务重连中不再伪装「没有可见通知」（AI 会据此误判机主没在听歌等）
+    if ('connecting' in r && (r as { connecting?: boolean }).connecting) {
+      return { ok: false, text: '通知监听还在连接中（刚开启权限/刚重启），几秒后再试' };
+    }
+    return { ok: false, text: `通知读取失败：${a11yGateText((r as { error?: string }).error)}` };
+  }
   if (r.length === 0) return { ok: true, text: '通知栏没有可见通知' };
   // v2.4.1 消费过滤：吃醋时已质问过的通知不再重复上报（isConsumed 账本）
   const shown = r.filter((n) => !isNotifyConsumed(devNotifyKeyOf(n.pkg, n.title || n.text, n.ts)));

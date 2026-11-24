@@ -213,6 +213,9 @@ export interface WxGroupMsg {
   tr?: GroupTrData;
   /** 系统通知行（进群/退出等），居中灰字渲染；有 notice（红包/转账通知）时用带图标的彩色尾词样式 */
   noticeText?: string;
+  /** v2.4.5 手机操作结果原文（含屏幕坐标情报）：只回喂动手成员（AI 上下文），用户屏上只看
+   *  noticeText 的极简短文案；历史构建优先读 noticeRaw（缺省回退 noticeText，旧数据兼容） */
+  noticeRaw?: string;
   /** 群事件详情（noticeText 为群事件文本时有值：加入/退出/禁言/管理员/转让/改名/公告/建群）；
    *  事件不参与 AI 正常回复（历史过滤掉），但会按时间排序注入 system 让成员感知 */
   evt?: GroupEventDetail;
