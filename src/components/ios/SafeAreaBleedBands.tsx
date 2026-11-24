@@ -1,32 +1,55 @@
 'use client';
 
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef } from 'react';
 import { useSettings, useSystemDark, useUI } from '@/lib/ios/store';
-import { compositeBg, rgbaCss, type Rgba } from '@/lib/ios/bg-sample';
+import {
+  compositeBg,
+  rgbaCss,
+  imgPixelAt,
+  bgImagePixelAt,
+  bgImageUrlOf,
+  ensureBgImageStrip,
+  type Rgba,
+} from '@/lib/ios/bg-sample';
+import { publishBleedTopStops, type BleedStop } from '@/lib/ios/bleed-band-state';
 
 /**
- * 安全区出血条带（v2.4.7）：APK 里把「App 页面自己的底色」延伸铺满安全区条带，
- * 取代 v2.4.6 固定 bg-background 的出血——浅色主题下深色页面（照片查看器黑底、
- * 音乐播放页等）的顶部会露一条白带 + 横屏侧挖孔避让区露白竖条（机主反馈的
- * 「其他界面状态栏没融入 APP」「右缘空白还是没解决」的真根因：那不是滚动条，
- * 而是 AppWindow 出血根的白底）。主屏幕/锁屏不受影响（壁纸层本就铺满物理屏）。
+ * 安全区出血条带（v2.4.8 重做）：APK 里把「App 页面自己的底色/顶边像素」延伸铺满
+ * 安全区条带，系统状态栏浮在页面颜色上——每个界面都融入、且【首帧即正确】。
  *
- * 做法（对 AppWindow 出血根内、[data-safe-inset] 之外的四个条带区）：
- * - 顶带（0..sat）/底带（H-sab..H）/右带（W-sar..W）/左带（0..sal）四个
- *   pointer-events-none 的绝对定位条带 div，由本组件渲染并直接改 style（零 React 重渲）；
- * - 每 500ms（与状态栏基调探针同节拍）沿「紧贴条带内侧的那一行/列」多点采样：
- *   elementFromPoint 命中 → compositeBg 沿祖先合成有效背景色（渐变取首停）；
- * - 各点颜色按采样比例拼成 linear-gradient：页面顶部横向有分色（左深右浅等）
- *   时条带随之分段延续，肉眼近似「页面像素延伸进安全区」；
- * - 全部采样点同色时退化纯色背景（渲染更省）；某点命中失败（全局浮层/越界）
- *   沿用上一个成功颜色，防条带缺口。
+ * 机主反馈 v2.4.7 的三个问题及根因：
+ * ①「显示的太慢」——旧版 500ms 轮询：打开 App 后条带最长半秒才换色（期间白条）；
+ * ②「有的融合不进去」——采样链 elementFromPoint→compositeBg 只认 CSS 背景：
+ *    命中 <img>（照片查看器/商品头图）时颜色回落祖先白底 → 黑图上白条带；
+ *    状态栏探针同理（y=27 在 APK 里落在内容层之上，恒采白）；
+ * ③ 打开 App 的首帧也白——旧版 useEffect 采样在首帧绘制之后才跑。
  *
- * 生效范围：仅 html[data-app-native]（APK 原生壳）且 App 窗口打开中（phase=open、
- * 非锁屏/多任务）；网页端四变量恒 0 → 条带 display:none，零视觉变化。
+ * 本版三层时机：
+ * A. 首帧（useLayoutEffect，浏览器绘制前同步采样+上色）——App 打开的第一帧
+ *    条带就是页面颜色，零白帧；
+ * B. 即时（MutationObserver 监听 App DOM 变化 → 60ms 防抖重采；scroll 捕获
+ *    监听 → 80ms 节流重采）——App 内切页/弹层/滚动，条带一两帧内跟上；
+ * C. 兜底（500ms 慢轮询 + resize）——渐进动画等无 DOM 事件的颜色变化。
+ *
+ * 采样源升级（按优先级取色）：
+ * 1. <img> 命中 → imgPixelAt（object-fit 真实映射 + 缩绘画布读像素，
+ *    跨域图回落第 2 层）——「图片顶边像素延伸」，机主需求的本义；
+ * 2. 带 background-image:url() 的元素 → bgImagePixelAt（background-size/position
+ *    映射；未解码则 ensureBgImageStrip 异步解码后重采一轮）；
+ * 3. CSS 背景 compositeBg（颜色/渐变首停/半透明逐层合成——v2.4.7 的原路径）；
+ * 4. 全点失败 → App 根有效背景色（不再沿用上一轮：换 App 立即反映新底色）。
+ *
+ * 生效范围：仅 html[data-app-native]（APK 原生壳）且 App 窗口打开中；
+ * 网页端四变量恒 0 → 条带 display:none。顶带停点发布到 bleed-band-state
+ * （StatusBarToneProbe 消费，状态栏图标明暗与条带同源）。
  */
 
-/** 采样周期：App 内页面切换最迟半秒跟上（实时性主要由依赖变化立即采样兜住） */
+/** 兜底慢轮询周期（即时性主要靠 A/B 两层时机兜住） */
 const SAMPLE_INTERVAL_MS = 500;
+/** MutationObserver 防抖：App 内切页/弹层的重采延迟 */
+const MUTATION_DEBOUNCE_MS = 60;
+/** scroll 节流间隔：滚动中条带跟随（黄头滚出→白底） */
+const SCROLL_THROTTLE_MS = 80;
 /** 沿条带内侧的采样点比例（避两端极值：圆角/贴边浮层） */
 const SAMPLE_RATIOS = [0.06, 0.28, 0.5, 0.72, 0.94] as const;
 /** 采样行/列向条带内侧偏移（物理 CSS px）：紧贴接缝，颜色逐像素连续 */
@@ -58,6 +81,8 @@ export default function SafeAreaBleedBands() {
     left: null,
   });
   const lastPaint = useRef<Partial<Record<BandKind, string>>>({});
+  /** 异步图片解码完成后待触发的一次重采（ensureBgImageStrip 回调用） */
+  const resampleRef = useRef<() => void>(() => {});
 
   const activeApp = useUI((s) => s.activeApp);
   const phase = useUI((s) => s.phase);
@@ -93,6 +118,7 @@ export default function SafeAreaBleedBands() {
     }
     if (!any) {
       lastPaint.current = {};
+      publishBleedTopStops([]); // 网页端清空（探针回落旧路径）
       return;
     }
 
@@ -102,23 +128,47 @@ export default function SafeAreaBleedBands() {
     const content = root.querySelector('[data-safe-inset]');
     if (!content) return;
 
-    /** 单点采样：命中栈自上而下找第一个属于 App 内容盒的元素（全局浮层如通知中心
-     *  下拉边条/悬浮球等透明层会被穿透跳过）→ 合成背景色；栈里找不到则弃点 */
+    /** 结构化兜底色：App 根的有效背景（compositeBg 沿祖先到出血根，恒不透明）。
+     *  全点采样失败时用它——换 App/切页立即反映新底色，不再「沿用上一轮颜色」。 */
+    let fallbackColor: string | null = null;
+    const appRoot = content.firstElementChild;
+    if (appRoot instanceof HTMLElement) {
+      const bg: Rgba | null = compositeBg(appRoot, root);
+      if (bg) fallbackColor = rgbaCss(bg);
+    }
+
+    /** 异步媒体待解码标记（本轮有 bg-image 触发了 ensureBgImageStrip） */
+    let asyncPending = false;
+
+    /** 单点采样：命中栈自上而下找第一个属于 App 内容盒的元素——
+     *  <img> → 像素采样（object-fit 映射）；带 bg-image url → 像素采样（未解码则挂异步）；
+     *  其余/未命中 → compositeBg 合成背景色；栈里找不到内容盒元素 → 兜底色 */
     const pick = (x: number, y: number): string | null => {
       const stack = document.elementsFromPoint(x, y);
       for (const el of stack) {
-        if (!content.contains(el)) continue;
+        if (!content.contains(el)) continue; // 全局浮层（通知中心边条/悬浮球）穿透跳过
+        if (el instanceof HTMLImageElement) {
+          const px = imgPixelAt(el, x, y);
+          if (px) return rgbaCss(px); // 图片顶边像素延续
+          continue; // letterbox/跨域/未解码 → 沿栈继续找下层元素
+        }
+        if (el instanceof HTMLElement && bgImageUrlOf(el)) {
+          const px = bgImagePixelAt(el, x, y);
+          if (px) return rgbaCss(px);
+          ensureBgImageStrip(el, () => resampleRef.current()); // 解码完成后重采一轮
+          asyncPending = true;
+          continue; // 本轮未就绪：沿栈继续（下一轮采样走像素路径）
+        }
         const bg: Rgba | null = compositeBg(el, root);
         if (bg) return rgbaCss(bg);
       }
-      return null;
+      return fallbackColor;
     };
-    /** 一条边取色：沿行/列多点采样（坐标恒 (x, y) 对），失败点直接丢弃（不插入伪停点，
-     *  成功点保持真实比例位置；全失败本轮不画，条带保持上一轮颜色） */
+    /** 一条边取色：沿行/列多点采样（坐标恒 (x, y) 对），失败点用兜底色 */
     const edgeStops = (coords: Array<[number, number, number]>): Stop[] => {
       const out: Stop[] = [];
       for (const [ratio, x, y] of coords) {
-        const c = pick(x, y);
+        const c = pick(x, y) ?? fallbackColor;
         if (c) out.push({ ratio, color: c });
       }
       return out;
@@ -133,10 +183,11 @@ export default function SafeAreaBleedBands() {
       el.style.background = bg;
     };
 
+    let topStops: Stop[] = [];
     if (sat > 0) {
       const y = rect.top + sat + SEAM_OFFSET_PX;
-      const stops = edgeStops(SAMPLE_RATIOS.map((r) => [r, rect.left + rect.width * r, y] as [number, number, number]));
-      paint('top', bandBackground(stops, true));
+      topStops = edgeStops(SAMPLE_RATIOS.map((r) => [r, rect.left + rect.width * r, y] as [number, number, number]));
+      paint('top', bandBackground(topStops, true));
     }
     if (sab > 0) {
       const y = rect.bottom - sab - SEAM_OFFSET_PX;
@@ -153,19 +204,84 @@ export default function SafeAreaBleedBands() {
       const stops = edgeStops(SAMPLE_RATIOS.map((r) => [r, x, rect.top + rect.height * r] as [number, number, number]));
       paint('left', bandBackground(stops, false));
     }
+
+    // 顶带停点发布（StatusBarToneProbe 消费：状态栏图标明暗与条带同源同色）
+    if (sat > 0) publishBleedTopStops(topStops as BleedStop[]);
   }, [readVar]);
 
-  // 采样循环：暂停时不跑；恢复 / 前台 App、窗口相位、主题深浅变化后立即一次；
-  // resize（APK 旋转：configChanges 不重载页面，安全区变量由原生回调更新）也立即重采
+  // resampleRef 永远指向最新 sample（异步图片解码回调防陈旧闭包）
   useEffect(() => {
+    resampleRef.current = sample;
+  }, [sample]);
+
+  /** A 层时机：useLayoutEffect——浏览器绘制【前】同步采样上色（App 打开首帧即正确，
+   *  消「打开瞬间白条带闪一下」）。依赖变化（换 App/开关动画结束/主题翻转）也走首帧路径。 */
+  useLayoutEffect(() => {
     if (paused) return;
     sample();
-    const timer = window.setInterval(sample, SAMPLE_INTERVAL_MS);
+  }, [paused, sample, theme, systemDark, activeApp, phase]);
+
+  /** B+C 层时机：MutationObserver（切页/弹层）+ scroll 节流 + resize + 500ms 兜底轮询 */
+  useEffect(() => {
+    if (paused) return;
+    // MutationObserver：App 内任何 DOM 变化（页面切换/浮层/列表更新）→ 防抖重采。
+    // 条带自身 style 写入也会触发观察器（band 元素在 root 子树内）——
+    // 回调里过滤「全部变化都来自条带元素」的批次，防自反馈循环。
+    let mutTimer = 0;
+    const onMutations = (records: MutationRecord[]) => {
+      const meaningful = records.some((r) => {
+        const t = r.target as Element;
+        return !(t instanceof HTMLElement && t.dataset.bleedBand !== undefined);
+      });
+      if (!meaningful) return;
+      if (mutTimer) return;
+      mutTimer = window.setTimeout(() => {
+        mutTimer = 0;
+        sample();
+      }, MUTATION_DEBOUNCE_MS);
+    };
+    const mo = new MutationObserver(onMutations);
+    mo.observe(document.documentElement, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ['class', 'style'],
+    });
+    let loadTimer = 0;
+
+    // scroll 捕获节流：滚动中页面顶部内容变化（黄头滚出→白底露出），条带即时跟随
+    let lastScroll = 0;
+    const onScroll = () => {
+      const now = performance.now();
+      if (now - lastScroll < SCROLL_THROTTLE_MS) return;
+      lastScroll = now;
+      sample();
+    };
+    document.addEventListener('scroll', onScroll, { capture: true, passive: true });
+
+    // img 加载捕获：图片解码完成不触发 MutationObserver（load 不改属性）——
+    // 晚到的图片（照片查看器/商品头图）就绪后立即重采，条带换上图片像素
+    const onLoad = () => {
+      if (loadTimer) return;
+      loadTimer = window.setTimeout(() => {
+        loadTimer = 0;
+        sample();
+      }, 40);
+    };
+    document.addEventListener('load', onLoad, { capture: true, passive: true });
+
     const onResize = () => sample();
     window.addEventListener('resize', onResize);
+    const timer = window.setInterval(sample, SAMPLE_INTERVAL_MS);
+
     return () => {
-      window.clearInterval(timer);
+      mo.disconnect();
+      if (mutTimer) window.clearTimeout(mutTimer);
+      if (loadTimer) window.clearTimeout(loadTimer);
+      document.removeEventListener('scroll', onScroll, true);
+      document.removeEventListener('load', onLoad, true);
       window.removeEventListener('resize', onResize);
+      window.clearInterval(timer);
     };
   }, [paused, sample, theme, systemDark, activeApp, phase]);
 

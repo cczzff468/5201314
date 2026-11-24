@@ -1745,3 +1745,31 @@ html[data-app-native] .ph-lock-pad-top {
 html[data-app-native] .ph-folder-pt {
   padding-top: calc(96px + var(--app-sat, 0px)) !important;
 }
+
+/* ---------------- v2.4.8 ⑤ APK 右缘白竖条根除（滚动条占位中立化） ----------------
+   根因链（实测定位）：globals.css 全局给所有元素定制了滚动条（Task 40 的
+   「*::-webkit-scrollbar{width:4px}」+「* { scrollbar-width:thin }」）。Chromium 的
+   行为是——一旦元素带 ::-webkit-scrollbar 自定义样式，滚动条从 overlay（浮层、
+   零占位）切换成 classic（实心、参与布局）：右侧永久预留 4px 轨道位。桌面/新
+   Chrome 有 scrollbar-width:thin 压制 + overlay fluent 化不占位（所以网站端没这
+   问题）；但 Android WebView（机主真机为旧版 Chromium，不识别 scrollbar-width）
+   上 effective 的就是 webkit 自定义滚动条 → 每个可滚容器右缘 4px 白条
+   （截图实测 12 物理px ÷ 3x 密度 = 整 4 CSS px，与规则逐像素对上）。
+   药方：APK 原生模式下把滚动条全套中立化——
+   ① ::-webkit-scrollbar 各部件 display:none（旧 WebView 走这条：无滚动条=零占位）；
+   ② scrollbar-width:none（新 WebView 走这条：标准属性亦零占位）；
+   网站端（无 data-app-native）完全不受影响，Task 40 的「滚动时才显示细条」体验保留。
+   原生 App 观感本就该无常驻滚动条——顺带对齐 iOS 真机。 */
+html[data-app-native] *::-webkit-scrollbar,
+html[data-app-native] *::-webkit-scrollbar-track,
+html[data-app-native] *::-webkit-scrollbar-thumb,
+html[data-app-native] *::-webkit-scrollbar-corner,
+html[data-app-native] *::-webkit-scrollbar-button {
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
+}
+html[data-app-native] * {
+  scrollbar-width: none !important;
+  scrollbar-color: transparent transparent !important;
+}

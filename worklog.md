@@ -3528,3 +3528,19 @@ Work Log:
 - [E2E·Agent Browser 原生模式模拟（AIPhoneNative 桥 + 安全区 40/12/20/0 + 横屏 1080×891）] ①浅色照片页：条带纯白与页面无缝（顶带/右带/底带 rgb(255,255,255)）②深色相机页（真 App 真黑底非造假 DOM）：像素级实测顶带 y=0-39 全 (0,0,0)、右缘条 x=1068-1079 全 (0,0,0)、底带全黑——机主截图里的白带+白竖条双根除；VLM 复核「连续融合、无白色条带、无白色竖条、全黑沉浸」③条带跟随：改页面底色 1.6s 内条带同步换色（interval 实证）④网页端（去 data-app-native）：四条带 display:none 零视觉变化⑤控制台/页面错误零、tsc 0 错误、lint 0 error（11 warning 为 android 构建产物既有基线）
 
 Stage Summary: 机主两连反馈真根因清账——「右缘空白」两代误诊（滚动条→真凶：AppWindow 出血层固定 bg-background 白底垫在右侧避让区/顶部状态栏条带后面；旧 APK 则是 Capacitor SystemBars decor padding 露白 windowBackground），根修为出血条带实时采样页面边缘颜色延伸铺满（渐变分段、图标明暗同源）；来电/语音/视频通话页与通知中心一并 data-bleed 融入。v2.4.7/code 73，网页热更即生效、新 APK 已重打。关键文件：SafeAreaBleedBands.tsx（新）、bg-sample.ts（新）、StatusBarToneProbe.tsx（重构共用）、AppWindow.tsx、IncomingCallLayer.tsx、GlobalCallLayer.tsx、voice-call-screen.tsx、NotificationCenter.tsx、app-version.ts、sw.js、app/build.gradle
+
+## 2026-11-24 · 第二十四轮 v2.4.8：状态栏融入「别的办法」——首帧同步上色 + 媒体像素采样 + 事件驱动即时精化（彻底解决「显示太慢 / 有的融合不进去」）
+
+Task: 机主 21:22 实测截图复盘（v2.4.7 推送 12 分钟后）：①「右边缘空白还是没有解决」——照片页右缘 14 物理px（≈4.7 CSS px，曲面屏竖屏 sar 避让区）灰白竖条仍在：v2.4.7 出血条带采不到 <img> 像素，颜色回落错值；②「顶部状态栏融入有没有别的办法，有的融合不进去、显示的太慢」——500ms 轮询导致的换色延迟（打开瞬间白条闪现）+ 图片顶边页面采样失败（compositeBg 只认 CSS 背景）。本轮换掉整个采样时机架构 + 补齐媒体像素采样能力。
+
+Work Log:
+- [诊断·像素级] 21:22 截图右缘 x=1066..1079 恒 (204,204,204) 灰、x≤1066 为图片暗色 (18,18,18)——v2.4.7 条带在跑但颜色错（采不到图片）；顶部 y=0..6 纯白后接页面灰渐变——同因。时间线：v2.4.7 提交于 21:10，截图 21:22，机主看到的是 500ms 延迟窗口 + 图片页采样失败的 v2.4.7 实况
+- [SafeAreaBleedBands 重做] 三层时机：A 首帧——useLayoutEffect 在浏览器绘制前同步采样上色（React commit 顺序保证，打开 App 第一帧条带即页面色，零白闪）；B 即时——MutationObserver（childList/subtree/class+style，60ms 防抖，条带自身 style 写入批次过滤防自反馈）+ scroll 捕获（80ms 节流：黄头滚出→条带跟随换色）+ img load 捕获（40ms 防抖：晚解码图片就绪即重采，load 事件不触发 MutationObserver 的补漏）；C 兜底——500ms 慢轮询 + resize。换 App/切页/主题翻转全走 A 层（依赖变化即重跑 useLayoutEffect）
+- [bg-sample 媒体像素采样] imgPixelAt（<img> 命中：object-fit 五模式 fill/cover/contain/none/scale-down + object-position 真实映射换算视口坐标→源图坐标，图片缩绘 48px 宽离屏画布按 URL 缓存读素，跨域/letterbox 回落 CSS 链）+ bgImagePixelAt/ensureBgImageStrip（CSS background-image:url() 首层：background-size cover/contain/显式尺寸 + position 映射，未解码则异步解码完成后回调重采）——「图片顶边像素延伸」从壁纸专属扩展到所有 App 页面（机主需求的本义）
+- [采样链优先级] <img> 像素 > bg-image url 像素 > compositeBg（CSS 色/渐变首停/逐层 alpha 合成）> App 根有效背景色（新兜底：全点失败立即反映新 App 底色，不再沿用上一轮颜色）
+- [StatusBarToneProbe 重做] APK 模式改读出血条带停点（bleed-band-state 发布订阅，与条带同源同色）：修 v2.4.7 图标侧根因——旧探针 y=+27 在 APK 里落在内容层（--app-sat 起）之上，elementFromPoint 命中出血根恒白 → 黑底页「黑图标压黑条带」；网页端维持原 elementFromPoint 路径不变；首帧 useLayoutEffect + 条带发布订阅即时驱动
+- [滚动条中立化] globals.css html[data-app-native] 下 *::-webkit-scrollbar 全部件 display:none/width:0 + * scrollbar-width:none——旧 WebView（不识别 scrollbar-width 标准属性）上生效的是全局 *::-webkit-scrollbar{width:4px} 自定义滚动条：Chromium 行为=自定义即 classic（实心占位），每个可滚容器右缘永久预留 4px 轨道位，与用户截图 12-14 物理px 白/灰竖条逐像素对上；网页端不受影响（Task 40 滚动才显示细条体验保留）。LightningCSS 把 *::-webkit-scrollbar 规范化为等价后代选择器（实测编译产物核对）
+- [版本] v2.4.8 纯网页热更（原生壳零改动，APK 免重装即生效；versionCode 73 不动）/ app-version 五条发版说明 / sw.js v90→v91
+- [E2E·Agent Browser 原生模式模拟] ①相机（黑根）：顶带 rgb(0,0,0) 像素级 y=0..40 全黑；②天气（透明根+渐变）：条带=渐变首停 rgb(14,27,58)，视觉复核「连续融合无白条」；③照片查看器（白根+黑浮层）：条带黑（接缝采样命中浮层而非白根兜底——机主截图场景 141629 根修实证）；④注入双色渐变 img（cover 裁剪）：条带=linear-gradient 红→绿，停点色值与 object-fit cover 裁剪映射的源像素逐点核算一致；⑤模拟 sar=30：右条带几何 (x=360,w=30,全高) + 渐变上色含图片右缘像素停点；⑥合成溢出容器 scrollbar-width=none；⑦网页模式回归：假状态栏 flex 可见、无条带、控制台零错误；⑧lint 改动文件 0 问题
+
+Stage Summary: 状态栏融入换掉「轮询+CSS色采样」旧法——绘制前同步上色（首帧即对）+ DOM/滚动/图片加载事件驱动（60~80ms 跟上）+ <img>/bg-image 像素级采样（object-fit 逐像素对位，「融合不进去」的图片页根治）+ 图标明暗与条带同源；APK 滚动条占位全套中立化根除右缘轨道白条（与曲面屏 sar 条带像素延伸双保险）。v2.4.8 纯网页热更免重装。关键文件：SafeAreaBleedBands.tsx（重做）、bg-sample.ts（媒体像素采样）、bleed-band-state.ts（新）、StatusBarToneProbe.tsx（重做）、globals.css、app-version.ts、sw.js
