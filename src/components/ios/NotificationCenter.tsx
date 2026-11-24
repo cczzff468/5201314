@@ -434,10 +434,14 @@ export default function NotificationCenter() {
         </>
       )}
 
-      {/* 毛玻璃背板：点空白处收起（展开后才可点，拖动期间 pointer-events 关闭） */}
+      {/* 毛玻璃背板：点空白处收起（展开后才可点，拖动期间 pointer-events 关闭）。
+          v2.4.7 data-bleed：APK 里背板出血铺满物理屏——半透明毛玻璃连同系统状态栏
+          条带一起盖住（下拉通知时状态栏区域也是模糊壁纸的延续，不再露独立色带）；
+          网页端四变量恒 0，与壳同矩形零变化。 */}
       <motion.div
         style={{ opacity: backdropOpacity, pointerEvents: open ? 'auto' : 'none' }}
         onClick={() => useNotifyCenter.getState().closeCenter()}
+        data-bleed=""
         className="absolute inset-0 bg-black/50 backdrop-blur-xl"
       />
 

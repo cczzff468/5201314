@@ -385,11 +385,16 @@ function IncomingCallScreenImpl({ call }: { call: IncomingCallSnapshot }) {
       animate={{ opacity: 1, scale: 1 }}
       exit={{ opacity: 0 }}
       transition={{ duration: 0.28, ease: [0.32, 0.72, 0, 1] }}
-      className="pointer-events-auto absolute inset-0 z-[84] flex flex-col overflow-hidden bg-gradient-to-b from-[#4a4a4e] via-[#333336] to-[#1c1c1e] text-white"
+      data-bleed=""
+      className="pointer-events-auto absolute inset-0 z-[84] overflow-hidden bg-gradient-to-b from-[#4a4a4e] via-[#333336] to-[#1c1c1e] text-white"
       role="dialog"
       aria-label={`来自${call.name}的电话`}
       data-testid="incoming-call-screen"
     >
+      {/* v2.4.7 data-bleed：APK 里整层出血铺满物理屏（含系统状态栏条带，深色渐变
+          延续到状态栏后面，真原生来电同款沉浸）；内容层 data-safe-inset 内缩回
+          原几何（内容位置与网站端一致）。网页端四变量恒 0，与壳同矩形零变化。 */}
+      <div data-safe-inset="" className="absolute inset-0 flex flex-col">
       {/* 顶部操作行：左上「退出」（收起来电界面，来电继续响铃只剩弹窗）+ 右上信息角标 */}
       <div className="relative pt-[64px]">
         <button
@@ -466,6 +471,7 @@ function IncomingCallScreenImpl({ call }: { call: IncomingCallSnapshot }) {
             testId="incoming-screen-accept"
           />
         </div>
+      </div>
       </div>
     </motion.div>
   );

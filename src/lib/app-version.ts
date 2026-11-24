@@ -11,9 +11,9 @@
  */
 
 /** 当前最新版本（纯网页热更时与 APK versionName 可短暂不同步，下次重打 APK 对齐） */
-export const APP_VERSION = '2.4.6';
+export const APP_VERSION = '2.4.7';
 /** 版本号数字（与 android-shell versionCode 保持一致；覆盖安装要求只增不减；纯网页热更不动） */
-export const APP_VERSION_CODE = 72;
+export const APP_VERSION_CODE = 73;
 
 export interface AppReleaseNote {
   version: string;
@@ -24,6 +24,16 @@ export interface AppReleaseNote {
 
 /** 版本历史（新→旧；设置 › APP 更新 页渲染，最新一条即当前版本） */
 export const APP_RELEASE_NOTES: AppReleaseNote[] = [
+  {
+    version: '2.4.7',
+    date: '2026-11-24',
+    items: [
+      '【网页热更·免重装】所有 App 界面的系统状态栏真正融入了：相机黑底、照片查看器黑底这类深色页面顶部不再露白条带——页面自己的底色实时延伸铺满状态栏条带，逐像素连续（浅色页面本来就是白底无感，深色页面告别突兀白带）',
+      '【网页热更·免重装】右缘白竖条根除（真根因）：那不是滚动条，是 App 窗口安全区出血层的固定白底——现在改为实时采样页面边缘颜色延伸铺满避让区，深色页面不再出现右侧白竖条，横屏左右避让区同色无缝',
+      '【网页热更·免重装】来电/通话页也融入了：全屏来电、语音/视频通话页的深色渐变/黑底延伸到状态栏后面（此前顶上会露壁纸或白带），通知中心下拉时毛玻璃背板连同状态栏一起盖住',
+      '【网页热更·免重装】条带颜色会跟随页面变化：顶部导航栏滚动变色、深浅色切换、打开内页等场景下半秒内跟上（与状态栏图标明暗同一套采样源，颜色和图标永远匹配）',
+    ],
+  },
   {
     version: '2.4.6',
     date: '2026-11-24',

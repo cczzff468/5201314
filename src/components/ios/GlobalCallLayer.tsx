@@ -86,11 +86,17 @@ export default function GlobalCallLayer() {
   return (
     <div ref={rootRef} className="pointer-events-none absolute inset-0" data-testid="global-call-layer">
       {/* 全屏通话页：key=seq 保证新通话重挂载；小窗化时只做视觉隐藏（组件必须保持挂载，
-          一旦卸载 useChatCall 的清理 effect 会终止通话引擎）——电话不断的关键 */}
+          一旦卸载 useChatCall 的清理 effect 会终止通话引擎）——电话不断的关键。
+          v2.4.7 data-bleed + bg-black：APK 里通话层出血铺满物理屏（顶部系统状态栏
+          条带露出黑底，与通话页深色底无缝连续——视频通话页内部画面层在
+          [data-safe-inset] 内容盒里保持原几何）；语音通话皮肤（VoiceCallScreen）
+          自带出血渐变铺满整层盖住这里的黑底。网页端四变量恒 0，与壳同矩形零变化。 */}
       <div
-        className={`pointer-events-auto absolute inset-0 z-[62] ${view === 'full' ? '' : 'pointer-events-none invisible'}`}
+        className={`pointer-events-auto absolute inset-0 z-[62] bg-black ${view === 'full' ? '' : 'pointer-events-none invisible'}`}
         aria-hidden={view !== 'full'}
+        data-bleed=""
       >
+        <div data-safe-inset="" className="absolute inset-0">
         {isVideo ? (
           /* 视频通话页（Task 22）：同一全局层承载，微信/QQ/电话三皮肤共用引擎；
              电话视频无「消息回复」语义（电话无聊天面板），不传 onMessageReply */
@@ -174,6 +180,8 @@ export default function GlobalCallLayer() {
           }}
         />
         )}
+        </div>
+        {/* /data-safe-inset 内容盒（v2.4.7） */}
       </div>
       {/* 悬浮小窗 / 边缘条（仅小窗化时渲染；全屏页保持挂载在上方） */}
       {view === 'pip' && (pipDocked ? <CallPipEdge /> : <CallPipWindow variant={variant} media={session.media} rootRef={rootRef} />)}

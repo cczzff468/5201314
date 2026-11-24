@@ -3514,3 +3514,17 @@ Work Log:
 - [验证] tsc 移植文件 0 错误（基线错误均在未触碰文件）；lint 改动文件仅既有基线；Agent Browser 原生模式模拟（注入 AIPhoneNative+安全区 38/16）：锁屏/主屏壁纸铺满全屏含安全区、自绘状态栏隐藏、内容从安全区下开始、App 窗口出血铺满+内容内缩、横屏侧挖孔左右避让全过；VLM 截图复核全过；gradle assembleDebug 产出 APK 部署 public/AI-Phone.apk（versionCode 72）
 
 Stage Summary: 右缘常驻白条（WebView 滚动条轨道）+ 顶部系统状态栏白色硬分界两个真机观感问题根除——窗口强制 edge-to-edge、系统状态栏浮在壁纸/App 底色上、图标明暗随壁纸深浅自动切换；安全区变量原生预注入首帧即就位（消启动下移）；横屏挖孔侧边自动左右避让；bun run apk:build 一键重打 APK（含 buildTools 36 钉死修掉卡死点）。v2.4.6/code 72，需重装 APK 生效。关键文件：MainActivity.java、capacitor.config.ts、www/index.html、layout.tsx、globals.css、PhoneShell.tsx、AppWindow.tsx、LockScreen.tsx、AppSwitcher.tsx、HomeScreen.tsx、native-shell.ts、app-version.ts、build-apk.sh、android/build.gradle、app/build.gradle、package.json
+
+## 2026-11-24 · 第二十三轮 v2.4.7：App 界面状态栏融入根修（出血条带实时采样页面底色）+ 右缘白竖条真根因根除 + 来电/通知中心融入
+
+Task: 机主新截图实测——①「右缘空白还是没解决」（v2.4.6 以为根除实则仍在）；②「主界面状态栏融入了，其他界面没有，让其他界面都状态栏融入 APP」。逐像素复盘真机四张截图（14:16 三张旧 APK + 20:17 新装 v2.4.6 后）定位真根因并根修。
+
+Work Log:
+- [诊断·像素级] 四张截图右缘恒 12px 纯白竖条（x=1068-1079，全高）、顶部 y=0-118 白带、深色页面上分界刺眼。20:17 截图无自绘状态栏 → 机主确已装 v2.4.6；且 12px÷2.95 密度 = --app-sar≈4 CSS px——右缘白条根本不是滚动条（上一轮误诊）：横屏右侧避让区（data-safe-inset 内容内缩 sar）之外露出的是 AppWindow 出血根（data-bleed）的 bg-background——浅色主题下就是纯白。旧 APK 同宽白条则是 Capacitor 8 SystemBars 插件默认 'css' 模式给 decor 打的右内边距 + 白 windowBackground，两代机制不同、同一块避让区。同理顶部白带 = 出血根白底垫在系统状态栏条带后面：主屏壁纸层在容器外铺满所以「融入」了，App 窗口出血的却是固定白底 → 机主「主界面融入、其他界面没有」的分界感
+- [根修·SafeAreaBleedBands] AppWindow 出血根内新增四条出血条带（top/right/bottom/left，pointer-events-none、与内容盒零重叠）：每 500ms 沿「紧贴条带内侧的行/列」五点采样（0.06/0.28/0.5/0.72/0.94 比例）→ elementsFromPoint 命中栈自上而下找第一个属于内容盒的元素（通知中心下拉边条/悬浮球等全局浮层穿透跳过；比 elementFromPoint 单命中多解决「栈顶透明浮层挡视线」）→ 沿祖先链标准 alpha compositing 合成有效背景色（渐变取首停）→ 各点按比例拼 linear-gradient 铺进条带（同色退化纯色；失败点直接丢弃不插伪停点，全失败保持上一轮）。页面底色逐像素连续延伸进安全区：深色页面（相机黑底/照片查看器黑底）顶带变黑、右带变黑，浅色页面白色无感——「状态栏融入每个 App 页面」
+- [根修·bg-sample 共享库] StatusBarToneProbe 的颜色采样底层（canvas 规范化任意 CSS 色/渐变首停/alpha 合成链/相对亮度）抽到 src/lib/ios/bg-sample.ts 供基调探针与出血条带共用（同一套采样源 → 条带颜色与状态栏图标明暗永远匹配）；顺修两枚开发中实测炸弹：①合成公式 b 通道笔误 (1-layer.b)→(1-layer.a)（负值蓝通道产出 rgb(255,255,-51561) 被 Chrome 夹 0 变纯黄条带）；②rgbaCss 每通道 clamp 0-255 兜底；③纵向边采样坐标 (x,y) 对曾对调（右/左带永远采不到点）
+- [融入·通话链路] 全屏来电页（IncomingCallLayer z-84）根挂 data-bleed + 内容包 data-safe-inset（深色渐变延伸到状态栏后面，内容几何不变）；全局通话层（GlobalCallLayer z-62）出血根 + bg-black + 内容盒（视频通话页黑底铺满物理屏，语音皮肤 VoiceCallScreen 自带出血渐变盖满）；VoiceCallScreen 根 data-bleed + safe-inset 包内容；通知中心毛玻璃背板（NotificationCenter scrim）data-bleed（下拉时状态栏条带同样被模糊遮罩盖住）——「其他界面」全覆盖
+- [版本] v2.4.7（纯网页热更免重装亦生效）/ versionCode 73 + app-version 四条发版说明 + sw.js v89→v90；bun run apk:build 一键重打（gradle BUILD SUCCESSFUL 24s）→ APK 4.1MB versionCode 73 部署 public/AI-Phone.apk
+- [E2E·Agent Browser 原生模式模拟（AIPhoneNative 桥 + 安全区 40/12/20/0 + 横屏 1080×891）] ①浅色照片页：条带纯白与页面无缝（顶带/右带/底带 rgb(255,255,255)）②深色相机页（真 App 真黑底非造假 DOM）：像素级实测顶带 y=0-39 全 (0,0,0)、右缘条 x=1068-1079 全 (0,0,0)、底带全黑——机主截图里的白带+白竖条双根除；VLM 复核「连续融合、无白色条带、无白色竖条、全黑沉浸」③条带跟随：改页面底色 1.6s 内条带同步换色（interval 实证）④网页端（去 data-app-native）：四条带 display:none 零视觉变化⑤控制台/页面错误零、tsc 0 错误、lint 0 error（11 warning 为 android 构建产物既有基线）
+
+Stage Summary: 机主两连反馈真根因清账——「右缘空白」两代误诊（滚动条→真凶：AppWindow 出血层固定 bg-background 白底垫在右侧避让区/顶部状态栏条带后面；旧 APK 则是 Capacitor SystemBars decor padding 露白 windowBackground），根修为出血条带实时采样页面边缘颜色延伸铺满（渐变分段、图标明暗同源）；来电/语音/视频通话页与通知中心一并 data-bleed 融入。v2.4.7/code 73，网页热更即生效、新 APK 已重打。关键文件：SafeAreaBleedBands.tsx（新）、bg-sample.ts（新）、StatusBarToneProbe.tsx（重构共用）、AppWindow.tsx、IncomingCallLayer.tsx、GlobalCallLayer.tsx、voice-call-screen.tsx、NotificationCenter.tsx、app-version.ts、sw.js、app/build.gradle

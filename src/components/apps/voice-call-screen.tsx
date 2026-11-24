@@ -98,9 +98,15 @@ export function VoiceCallScreen(props: VoiceCallScreenProps) {
       role="dialog"
       aria-label={`与${props.name}的语音通话`}
       data-testid={`vc-screen-${props.variant}`}
+      data-bleed=""
     >
-      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_top,rgba(255,255,255,0.07),transparent_55%)]" />
-      {variant === 'wx' ? <WxCallScreen {...props} /> : <QqCallScreen {...props} />}
+      {/* v2.4.7 data-bleed：APK 里通话页出血铺满物理屏（深色辐射渐变延续到系统
+          状态栏条带后面，真原生通话同款沉浸）；内容层 data-safe-inset 内缩回原几何。
+          网页端四变量恒 0，与壳同矩形零变化。 */}
+      <div data-safe-inset="" className="absolute inset-0 flex flex-col">
+        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_top,rgba(255,255,255,0.07),transparent_55%)]" />
+        {variant === 'wx' ? <WxCallScreen {...props} /> : <QqCallScreen {...props} />}
+      </div>
     </div>
   );
 }

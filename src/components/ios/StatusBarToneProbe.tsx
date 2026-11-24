@@ -7,6 +7,7 @@ import {
   pushStatusBarTone,
   type StatusBarTone,
 } from '@/lib/ios/status-bar-tone';
+import { compositeBg, relativeLuminance } from '@/lib/ios/bg-sample';
 
 /**
  * 状态栏自动基调探针（Task 100-f）：
@@ -20,10 +21,10 @@ import {
  *   全局状态栏层是 pointer-events-none，elementFromPoint 天然穿透）；
  * - 命中元素必须被容器包含，否则本轮弃用该点（防采样到灵动岛通知/来电层等全局浮层）；
  * - 从命中元素向上走祖先按标准 alpha compositing 合成有效背景色（半透明层逐层叠加），
- *   走出链路仍未不透明由容器 bg-background 兜底（跟随主题、恒不透明）；
- *   backgroundColor 透明且带 background-image 渐变时取渐变第一个颜色停靠点
- *   （天气全屏蓝天是 backgroundImage 实现，180deg 渐变首端即状态栏区域色）；
- * - 相对亮度（sRGB 线性化）L < 0.5 → 背景深 → tone='light'（白前景），否则 'dark'；
+ *   走出链路仍未不透明时弃用该点；backgroundColor 透明且带渐变时取渐变首停
+ *   （天气全屏蓝天等 backgroundImage 实现）——合成器在 @/lib/ios/bg-sample 共享
+ *   （v2.4.7 起与 SafeAreaBleedBands 出血条带共用同一套采样底层）；
+ * - 相对亮度 L < 0.5 → 背景深 → tone='light'（白前景），否则 'dark'；
  *   两点各算一个亮度，取更接近中间值 0.5 的那点裁决（越临界越由它定对比最稳）。
  *
  * 基调经 pushStatusBarTone/popStatusBarTone 走既有屏幕级基调栈（foreground.ts 的
@@ -38,95 +39,6 @@ const SAMPLE_INTERVAL_MS = 500;
 const BAR_MIDLINE_Y = 27;
 /** 左右采样点 x 比例：避开顶部中央灵动岛/时间文字 */
 const SAMPLE_X_RATIOS = [0.18, 0.82] as const;
-
-type Rgba = { r: number; g: number; b: number; a: number };
-
-/** 主题变量是 oklch（getComputedStyle 原样返回 oklch(1 0 0)），手写解析器覆盖不全，
- *  用 1×1 离屏画布让浏览器把任意 CSS 颜色（rgb/rgba/hex/oklch/color()…）规范化成 sRGB 字节 */
-let colorCtx: CanvasRenderingContext2D | null = null;
-const colorCache = new Map<string, Rgba | null>();
-
-function parseCssColor(raw: string): Rgba | null {
-  const v = raw.trim();
-  if (!v || v === 'none' || v === 'transparent') return null;
-  const cached = colorCache.get(v);
-  if (cached !== undefined) return cached;
-  let out: Rgba | null = null;
-  if (typeof document !== 'undefined') {
-    if (!colorCtx) {
-      const canvas = document.createElement('canvas');
-      canvas.width = 1;
-      canvas.height = 1;
-      colorCtx = canvas.getContext('2d', { willReadFrequently: true });
-    }
-    const ctx = colorCtx;
-    if (ctx) {
-      ctx.clearRect(0, 0, 1, 1);
-      ctx.fillStyle = '#feff01'; // 哨兵色（采样源是 getComputedStyle 输出，不会出现）
-      ctx.fillStyle = v;
-      ctx.fillRect(0, 0, 1, 1); // 必须真正绘制：fillStyle 只改状态不上像素（修复前像素恒为 clearRect 的透明色 → 一切颜色解析成 a=0）
-      const d = ctx.getImageData(0, 0, 1, 1).data;
-      const hitSentinel = d[0] === 254 && d[1] === 255 && d[2] === 1 && d[3] === 255;
-      if (!hitSentinel) out = { r: d[0], g: d[1], b: d[2], a: d[3] / 255 };
-    }
-  }
-  colorCache.set(v, out);
-  return out;
-}
-
-/** 渐变兜底：全屏渐变（天气蓝天等）靠 background-image 实现、backgroundColor 透明，
- *  提取渐变里第一个颜色停靠点——180deg 顶→底渐变的首端即状态栏区域的颜色 */
-function firstGradientStop(bgImage: string): string | null {
-  if (!bgImage || !bgImage.includes('gradient')) return null;
-  const m = bgImage.match(/(rgba?\([^)]+\)|#[0-9a-fA-F]{3,8}|oklch\([^)]+\)|color\([^)]+\))/);
-  return m ? m[0] : null;
-}
-
-/** 从命中元素向上合成有效背景色（前→后标准 alpha compositing）；
- *  容器自身（含）也在链上：bg-background 不透明，天然兜底；理论走完仍透明按白底补全 */
-function compositeBg(el: Element, container: HTMLElement): Rgba | null {
-  let r = 0;
-  let g = 0;
-  let b = 0;
-  let a = 0; // 预乘累积
-  let node: Element | null = el;
-  while (node) {
-    const style = window.getComputedStyle(node);
-    let layer = parseCssColor(style.backgroundColor);
-    // 全透明 backgroundColor（rgba(0,0,0,0)）视同「无背景」：回落渐变首停（天气蓝天等
-    // backgroundImage 渐变场景，修复前被 a=0 对象挡住永远走不到渐变分支）
-    if (!layer || layer.a <= 0) {
-      const stop = firstGradientStop(style.backgroundImage);
-      if (stop) layer = parseCssColor(stop);
-    }
-    if (layer && layer.a > 0) {
-      r = layer.r * layer.a + r * (1 - layer.a);
-      g = layer.g * layer.a + g * (1 - layer.a);
-      b = layer.b * layer.a + b * (1 - layer.a);
-      a = layer.a + a * (1 - layer.a);
-      if (a >= 0.999) break;
-    }
-    if (node === container) break;
-    node = node.parentElement;
-  }
-  if (a <= 0) return null;
-  const w = 1 - Math.min(a, 1);
-  return {
-    r: Math.min(255, r + 255 * w),
-    g: Math.min(255, g + 255 * w),
-    b: Math.min(255, b + 255 * w),
-    a: 1,
-  };
-}
-
-/** 相对亮度（sRGB 线性化后 L = 0.2126R + 0.7152G + 0.0722B） */
-function srgbLin(c8: number): number {
-  const c = c8 / 255;
-  return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
-}
-function relativeLuminance(c: Rgba): number {
-  return 0.2126 * srgbLin(c.r) + 0.7152 * srgbLin(c.g) + 0.0722 * srgbLin(c.b);
-}
 
 export default function StatusBarToneProbe() {
   const holderRef = useRef<HTMLDivElement | null>(null);

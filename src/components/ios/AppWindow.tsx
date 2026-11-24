@@ -3,6 +3,7 @@
 import { useUI, useSettings, useSystemDark, selectResolvedTheme } from '@/lib/ios/store';
 import { APP_MAP } from '../apps/registry';
 import StatusBarToneProbe from './StatusBarToneProbe';
+import SafeAreaBleedBands from './SafeAreaBleedBands';
 
 /**
  * App 窗口容器：iOS 风格的打开/关闭缩放动画。
@@ -55,6 +56,11 @@ export default function AppWindow() {
         phase === 'open' ? 'scale-100 rounded-none opacity-100' : 'scale-[0.18] rounded-[48px] opacity-0 will-change-[transform,scale,opacity]'
       } ${shopDark ? 'shop-dark' : ''}`}
     >
+      {/* v2.4.7 出血条带：把「页面自己的底色」铺满安全区条带（顶部系统状态栏带 +
+          横屏左右避让带）——替代根 bg-background 固定白/黑底在深色页面（照片查看器
+          黑底等）上露出的白条带/右缘白竖条，页面底色逐像素连续延伸，系统状态栏
+          真正「融入」每一个 App 页面。条带与内容盒不重叠，pointer-events-none。 */}
+      <SafeAreaBleedBands />
       <div data-safe-inset="" className="absolute inset-0">
         {/* v2.4.6 内容层内缩：窗口根出血铺满物理屏（App 底色延伸到系统状态栏后面，
             真原生 App 同款沉浸）；内容从安全区下开始，各 App 原为自绘状态栏留出的
