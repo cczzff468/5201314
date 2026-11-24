@@ -3496,3 +3496,21 @@ Task: 机主九连反馈——①吃醋封印页打开后什么也没碰会自�
 - [构建] gradlew assembleDebug 36s BUILD SUCCESSFUL（Xmx1024m）→ APK 4.2MB versionCode 70 部署 public/AI-Phone.apk，/api/app-version 返回 2.4.3/code 70
 
 Stage Summary: 机主九连反馈清账——封印页 15 秒自动收窗根修（常驻直到按钮/到期/回本App）；加日程 SecurityException 双保险根修（JS 前置弹授权框+原生无权限直落 ACTION_INSERT 预填）；真机媒体感知控制三件套（getNowPlaying/controlRealMusic 工具+感知设置「正在听什么歌」开关注入）+ 真机日历读取工具；导出备份与 APP 更新双双改 APP 内下载（MediaStore/DownloadManager+FileProvider 安装器+REQUEST_INSTALL_PACKAGES）；真机模式工具分流双保险（注册层藏网页孪生+执行层拦幻觉调用）；工具提示统一简化；右上角错误按钮删除。关键文件：LockOverlayService.java（常驻修）、MediaListenerService.java（sendMediaCommand）、NativePerceptionPlugin.java（controlMedia/getRealCalendarEvents/saveBase64Download/downloadAndInstallApk+日历权限修）、phone-tools.ts（分流+3新工具）、perception.ts（nowPlaying 块）、backup.ts/apk-download.ts/AppUpdateDialog.tsx/updates.tsx（APP内下载）、skill-use-pill.tsx（统一简化）、error-center.tsx（删角标）、app-version.ts（v2.4.3/70）
+
+## 2026-11-24 · v2.4.6 APK 全屏沉浸移植（右缘白条根除 + 状态栏融合 + 安全区预注入 + 横屏避让 + apk:build 一键构建）
+
+Task: 机主带三张真机截图反馈——①右边缘有空白（APP 有、网站没有，疑滚动条）；②顶部系统状态栏与 APP 融合；③安全区条带壁纸化（顶部黑条改壁纸顶边像素延伸）；④原生预注入消首帧位移；⑤横屏左右安全区避让；⑥bun run apk:build 一键重打 APK。注意：上一会话曾把同批改动误做在 stale 的 master 谱系（云端助手 v4，2026-11-19 停更），本次整体移植到活跃 main 谱系（第二十一轮 v2.4.5）之上，并按本线横屏「去壳铺满、天然轴向」定调适配。
+
+Work Log:
+- [诊断·像素级] 三张截图右缘 14px 纯白竖条（内容铺到 x=w-15、w-14 起纯白 255）：Android WebView 页面可滚时在右缘画经典滚动条轨道（浅色主题白道）——Chrome 手机浏览器用透明 overlay 滚动条所以网站没这问题；顶部条带 = 旧 APK WebView 被压到状态栏下，系统条区域露 windowBackground（白）
+- [原生] MainActivity：① setDecorFitsSystemWindows(false) + LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS（WebView 画到物理屏最边含挖孔）；② insets 监听（systemBars∪displayCutout）缓存 dp 值 + evaluateJavascript 推 window.__aiphoneApplySafeArea；③ setVertical/HorizontalScrollBarEnabled(false) + OVER_SCROLL_NEVER（右缘白条根除）；④ addJavascriptInterface 挂 AIPhoneNative 桥（getSafeArea/setSystemBarsStyle）；⑤ www/index.html 与 layout.tsx body 首位内联脚本同步预注入 --app-sat/-sar/-sab/-sal（首帧即按安全区布局，消启动下移抖动）
+- [配置] capacitor.config.ts：SystemBars 插件 insetsHandling: 'disable'（停掉 Capacitor 8 默认给 decor 打的 safe-area padding，实测 Capacitor 8 SystemBars.java 确有该键，'css' 默认会 padding）；cap sync 后生效
+- [网页] globals.css html[data-app-native] 规则组：① body overflow:hidden（永不滚 = 滚动条轨道无源，与原生关滚动条双保险）；② .ph-statusbar display:none（系统状态栏已透出，双状态栏时间/电量重复根除）；③ [data-bleed] 出血层（锁屏根/App 窗口根/文件夹毛玻璃/熄屏黑幕/AppSwitcher 根）负值逃出内缩容器铺满物理屏——壁纸/App 底色/毛玻璃逐像素连续，浅色壁纸下不再有条带分界（安全区条带壁纸化）；④ [data-safe-inset] 出血层内内容再内缩（锁屏时钟/App 内容从安全区下开始）；⑤ .ph-switcher-top/.ph-lock-pad-top/.ph-folder-pt 三处占位随安全区增高
+- [横屏适配] 本线第十八轮定调横屏为「去壳铺满视口、天然轴向」（无旋转映射）——四边变量原值直用，横屏挖孔在侧边时 sar/sal>0 直接左右避让（浏览器实测：侧挖孔 left=38 时 App 内容 left=38、返回键 left=54、出血层 -38 盖住条带）
+- [PhoneShell] 壁纸层留在安全区容器外铺满物理屏（系统状态栏浮在壁纸顶边像素上）+ data-shell-content 内容层四边内缩 + topLight（useLightForeground('top')）→ setNativeSystemBarsStyle 同步系统状态栏/导航栏图标明暗（暗壁纸白图标、浅壁纸黑图标，与自绘状态栏同一套判定源）
+- [AppWindow] 根 data-bleed（App 底色延伸到系统状态栏后面，真原生 App 同款沉浸）+ 内层 data-safe-inset（内容从安全区下开始，各 App 原自绘状态栏留白自然变成系统条下方留白）；保留本线 pan-none（刀切边根治）与性能注释
+- [构建] ① package.json 加 "apk:build": "bash scripts/build-apk.sh" 一键入口（JDK→SDK→cap sync→gradle 全链）；② 根 build.gradle subprojects 统一钉 buildToolsVersion 36.0.0（AGP 8.13 对库模块默认 35 未装触发联网+license 失败，实测卡死点）；③ app build.gradle versionCode 72 / versionName 2.4.6（需重装 APK 生效）
+- [移植适配] master 谱系 371 文件落后，逐文件核对后移植 15 处（MainActivity 在 main 的 v2.2.0 音量键/前后台/冷启动通知直加上叠加，互不冲突）；横屏旋转映射规则整组不移植（本线已无旋转）
+- [验证] tsc 移植文件 0 错误（基线错误均在未触碰文件）；lint 改动文件仅既有基线；Agent Browser 原生模式模拟（注入 AIPhoneNative+安全区 38/16）：锁屏/主屏壁纸铺满全屏含安全区、自绘状态栏隐藏、内容从安全区下开始、App 窗口出血铺满+内容内缩、横屏侧挖孔左右避让全过；VLM 截图复核全过；gradle assembleDebug 产出 APK 部署 public/AI-Phone.apk（versionCode 72）
+
+Stage Summary: 右缘常驻白条（WebView 滚动条轨道）+ 顶部系统状态栏白色硬分界两个真机观感问题根除——窗口强制 edge-to-edge、系统状态栏浮在壁纸/App 底色上、图标明暗随壁纸深浅自动切换；安全区变量原生预注入首帧即就位（消启动下移）；横屏挖孔侧边自动左右避让；bun run apk:build 一键重打 APK（含 buildTools 36 钉死修掉卡死点）。v2.4.6/code 72，需重装 APK 生效。关键文件：MainActivity.java、capacitor.config.ts、www/index.html、layout.tsx、globals.css、PhoneShell.tsx、AppWindow.tsx、LockScreen.tsx、AppSwitcher.tsx、HomeScreen.tsx、native-shell.ts、app-version.ts、build-apk.sh、android/build.gradle、app/build.gradle、package.json

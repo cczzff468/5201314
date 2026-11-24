@@ -11,9 +11,9 @@
  */
 
 /** 当前最新版本（纯网页热更时与 APK versionName 可短暂不同步，下次重打 APK 对齐） */
-export const APP_VERSION = '2.4.5';
+export const APP_VERSION = '2.4.6';
 /** 版本号数字（与 android-shell versionCode 保持一致；覆盖安装要求只增不减；纯网页热更不动） */
-export const APP_VERSION_CODE = 71;
+export const APP_VERSION_CODE = 72;
 
 export interface AppReleaseNote {
   version: string;
@@ -24,6 +24,18 @@ export interface AppReleaseNote {
 
 /** 版本历史（新→旧；设置 › APP 更新 页渲染，最新一条即当前版本） */
 export const APP_RELEASE_NOTES: AppReleaseNote[] = [
+  {
+    version: '2.4.6',
+    date: '2026-11-24',
+    items: [
+      '【需重装 APK 生效】APP 全屏沉浸改造：窗口强制 edge-to-edge，系统状态栏直接浮在壁纸顶边像素上——顶部那条恒灰/黑的条带没了，浅色壁纸下也不再有色带分界',
+      '【需重装 APK 生效】右缘常驻白条根除：那是 WebView 自带的竖向滚动条轨道（页面可滚就画一条白道）——原生关闭滚动条 + 网页壳永不滚动双保险，APP 与网站观感终于一致（所有界面通用，非单个页面问题）',
+      '【需重装 APK 生效】安全区预注入消首帧位移：APK 里 WebView 加载前原生就写好安全区变量，首帧即按安全区布局，不再「先上后下」抖那一下',
+      '【需重装 APK 生效】状态栏真正融入 APP：双状态栏（系统条 + 自绘条时间电量重复）不见了——自绘状态栏隐藏，系统图标颜色随壁纸深浅自动切换（暗壁纸上自动白图标，浅壁纸上自动黑图标）',
+      '【需重装 APK 生效】横屏挖孔侧边避让：横屏时挖孔在侧边的话内容自动左右避让（此前只处理上下），旋转实时重排不闪屏',
+      '【需重装 APK 生效】新增一键重打 APK：项目根目录 bun run apk:build 自动走完 JDK/SDK/cap sync/gradle 全链路，不用再手动 gradle',
+    ],
+  },
   {
     version: '2.4.5',
     date: '2026-11-24',

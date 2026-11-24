@@ -5,7 +5,11 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
 <title>AI Phone</title>
 <style>
+  /* v1.9.46 APK 全屏沉浸：窗口已 edge-to-edge，本页黑底铺到物理屏顶/底；
+     安全区变量由原生预注入（window.AIPhoneNative，与远程页 layout 内联脚本同一套机制） */
+  :root { --app-sat: 0px; --app-sab: 0px; --app-sar: 0px; --app-sal: 0px; }
   * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { height: 100%; overflow: hidden; overscroll-behavior: none; }
   body {
     font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Helvetica Neue", sans-serif;
     background: #000;
@@ -13,7 +17,7 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    padding: 24px;
+    padding: calc(24px + var(--app-sat)) calc(24px + var(--app-sar)) calc(24px + var(--app-sab)) calc(24px + var(--app-sal));
   }
   .card {
     width: 100%;
@@ -117,6 +121,20 @@
     </div>
   </div>
 <script>
+  // v1.9.46 安全区预注入（APK 原生壳）：本页也要避让系统状态栏/手势条——
+  // 原生桥在 WebView 建立即存在，这里同步读一次写 CSS 变量（首帧即就位）。
+  try {
+    var N = window.AIPhoneNative;
+    if (N && typeof N.getSafeArea === 'function') {
+      var r = JSON.parse(N.getSafeArea() || '{}');
+      var d = document.documentElement;
+      if (typeof r.top === 'number') d.style.setProperty('--app-sat', r.top + 'px');
+      if (typeof r.right === 'number') d.style.setProperty('--app-sar', r.right + 'px');
+      if (typeof r.bottom === 'number') d.style.setProperty('--app-sab', r.bottom + 'px');
+      if (typeof r.left === 'number') d.style.setProperty('--app-sal', r.left + 'px');
+    }
+  } catch (e) {}
+
   // v1.4.3：已保存地址 → 先探活再自动进入。
   // 背景：预览服务器（沙箱）会随会话结束而关闭。旧版「保存过就无条件跳转」，
   // 服务器关了 APP 就变白屏砖——没有任何入口换新地址。现在先向 /api/app-version

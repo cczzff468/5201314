@@ -1683,3 +1683,65 @@
     height: calc(100svh - env(safe-area-inset-top) - env(safe-area-inset-bottom)) !important;
   }
 }
+
+/* ---------------- v2.4.6 APK 原生模式（html[data-app-native]，变量由 layout 内联脚本预注入） ----------------
+   配套原生壳（MainActivity）改动：Capacitor SystemBars 的 decor-padding 关闭（insetsHandling: disable）+
+   窗口强制 edge-to-edge + WebView 全屏绘制到挖孔。网页端据此：
+   ① 壁纸铺满物理屏（不随安全区收缩），系统状态栏浮在壁纸上——「安全区条带壁纸化」，
+     替代旧版露出的 windowBackground 灰/黑条（浅色壁纸下条带分界的根因）；
+   ② 手机壳内容层整体按真实安全区内缩（--app-sat/-sar/-sab/-sal，原生预注入首帧即就位，
+     消启动瞬间的一次布局下移；横屏旋转由原生回调实时更新——本线横屏为「去壳铺满视口、
+     天然轴向」（第十八轮定调，无旋转映射），左右挖孔避让直接用 sar/sal 原值即生效）；
+   ③ 自绘 iOS 状态栏隐藏（真系统状态栏就在壁纸上方，双状态栏时间/电量重复的根因）；
+   ④ body 永不滚动（外壳是全屏 fixed 布局）——WebView 经典「右缘常驻白条」即 body 可滚时的
+     竖向滚动条轨道，双保险与原生 setVerticalScrollBarEnabled(false) 一并根除。
+   仅 APK 内生效：浏览器/桌面预览无 AIPhoneNative → data-app-native 不存在，全部规则休眠。 */
+html[data-app-native] {
+  /* 原生未上报前（理论到不了这一格）兜底 0，避免 layout 脚本缺席时布局漂移 */
+  --app-sat: 0px;
+  --app-sar: 0px;
+  --app-sab: 0px;
+  --app-sal: 0px;
+}
+/* ④ 页面永不滚动：外层是 100svh 全屏壳，body 没有滚动语义；
+   overscroll-behavior 顺手关掉 WebView 边缘回弹光晕 */
+html[data-app-native] body {
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+/* ③ 隐藏自绘状态栏（系统状态栏已由壁纸上方透出，保留会时间/电量双份重复）。
+   z-70 的空位由系统状态栏天然补齐，无需占位。 */
+html[data-app-native] .ph-statusbar {
+  display: none !important;
+}
+/* ② 安全区「出血」层：需要铺满物理屏的背景/遮罩元素（锁屏根、多任务根、App 窗口根、
+   文件夹毛玻璃底、熄屏黑幕等）反向逃出内容内缩容器，盖住系统状态栏条带——条带上是
+   壁纸/App 底色/毛玻璃的延续，与下方内容逐像素连续，无任何分界线。负值展开优先级
+   压过 inset 工具类。横屏天然轴向（无旋转），四边原值直用。 */
+html[data-app-native] [data-bleed] {
+  top: calc(0px - var(--app-sat, 0px)) !important;
+  right: calc(0px - var(--app-sar, 0px)) !important;
+  bottom: calc(0px - var(--app-sab, 0px)) !important;
+  left: calc(0px - var(--app-sal, 0px)) !important;
+}
+/* 出血层里的可交互/内容层再内缩回来（如锁屏时钟、App 窗口内容），避免顶进系统状态栏；
+   App 窗口借此实现「底色出血铺满 + 内容从安全区下开始」的原生沉浸观感 */
+html[data-app-native] [data-safe-inset] {
+  top: var(--app-sat, 0px) !important;
+  right: var(--app-sar, 0px) !important;
+  bottom: var(--app-sab, 0px) !important;
+  left: var(--app-sal, 0px) !important;
+}
+/* 多任务切换器顶部留白（原 64px 让自绘状态栏+灵动岛；APK 里让位给系统状态栏：
+   系统条高 + 原 64px），毛玻璃根已出血、内容行从安全区下开始 */
+html[data-app-native] .ph-switcher-top {
+  height: calc(64px + var(--app-sat, 0px)) !important;
+}
+/* 锁屏密码键盘顶部占位：APK 里随安全区增高，键盘不顶进系统状态栏（毛玻璃罩仍铺满全屏） */
+html[data-app-native] .ph-lock-pad-top {
+  height: calc(120px + var(--app-sat, 0px)) !important;
+}
+/* 主屏文件夹毛玻璃面板：根已出血铺满物理屏，内容顶部留白叠加安全区（图标行不顶进系统条） */
+html[data-app-native] .ph-folder-pt {
+  padding-top: calc(96px + var(--app-sat, 0px)) !important;
+}

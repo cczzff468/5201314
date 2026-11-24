@@ -6,16 +6,27 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
 import android.view.KeyEvent;
+import android.view.View;
+import android.view.WindowManager;
 import android.webkit.CookieManager;
 import android.webkit.DownloadListener;
+import android.webkit.JavascriptInterface;
 import android.widget.Toast;
+import androidx.annotation.Keep;
 import androidx.core.content.ContextCompat;
 import androidx.core.content.FileProvider;
+import androidx.core.graphics.Insets;
+import androidx.core.view.ViewCompat;
+import androidx.core.view.WindowCompat;
+import androidx.core.view.WindowInsetsCompat;
+import androidx.core.view.WindowInsetsControllerCompat;
 import com.getcapacitor.BridgeActivity;
 import java.io.File;
+import org.json.JSONObject;
 
 public class MainActivity extends BridgeActivity {
 
@@ -37,6 +48,14 @@ public class MainActivity extends BridgeActivity {
 
     /** 返回键/返回手势：上一次按下时间（双击退出的窗口判定） */
     private long lastBackAt = 0;
+
+    /** v2.4.6 安全区缓存（CSS px，即 dp）：HTML 解析期同步可读（网页首帧即按安全区布局,
+     *  消「启动瞬间一次布局下移」）；inset 监听线程写、JS 桥线程读，volatile 保证可见。 */
+    private volatile int safeTop = 0, safeRight = 0, safeBottom = 0, safeLeft = 0;
+
+    /** v2.4.6 网页桥（addJavascriptInterface 在 super.onCreate 的 WebView 创建后立即挂上,
+     *  先于任何页面加载 → 远程页 body 首位内联脚本同步 getSafeArea() 预注入 CSS 变量）。 */
+    private final NativeBridge nativeBridge = new NativeBridge();
 
     /** v2.2.0 生命周期前后台打点（bringToFront 后台拉回豁免判定用） */
     @Override
@@ -108,7 +127,42 @@ public class MainActivity extends BridgeActivity {
     public void onCreate(Bundle savedInstanceState) {
         // 原生感知插件注册（必须先于 super.onCreate）
         registerPlugin(NativePerceptionPlugin.class);
+
+        // v2.4.6 ① 全屏沉浸：窗口强制 edge-to-edge——WebView 画到物理屏最边（含挖孔区）,
+        // 系统状态栏/导航条浮在网页壁纸上，取代旧版「WebView 被压到状态栏下 + 条带露
+        // windowBackground 灰/黑底」（浅色壁纸上那条分界线的根因）。
+        // Capacitor 8 内置 SystemBars 插件默认会给 decor 打 padding（WebView<140 或无
+        // viewport-fit 时），capacitor.config.ts 已配 insetsHandling: 'disable' 关掉它,
+        // 安全区改由下方 ② 的原生桥下发，首帧即就位。
+        WindowCompat.setDecorFitsSystemWindows(getWindow(), false);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            // 允许内容画进挖孔区（横屏挖孔在侧边时左右同理）
+            WindowManager.LayoutParams lp = getWindow().getAttributes();
+            lp.layoutInDisplayCutoutMode =
+                    WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS;
+            getWindow().setAttributes(lp);
+        }
+
         super.onCreate(savedInstanceState);
+
+        // v2.4.6 ② 安全区监听：缓存最新 insets（systemBars + displayCutout 的并集 = 真实
+        // 避让区；旋转/键盘变化都会回调）+ 把 dp 值经 evaluateJavascript 推给
+        // window.__aiphoneApplySafeArea（网页侧更新 --app-sat/-sar/-sab/-sal,
+        // configChanges 已声明 orientation/screenSize → 不重载页面，仅重排）。
+        // 返回值保持「透传」：Chromium WebView 自己也监听 insets（键盘 visualViewport/
+        // resizes-content 机制），在 decor 层 CONSUMED 会切断它——只读取、不拦截。
+        final View decor = getWindow().getDecorView();
+        ViewCompat.setOnApplyWindowInsetsListener(decor, (v, insets) -> {
+            Insets area = insets.getInsets(
+                    WindowInsetsCompat.Type.systemBars() | WindowInsetsCompat.Type.displayCutout());
+            float density = getResources().getDisplayMetrics().density;
+            safeTop = Math.round(area.top / density);
+            safeRight = Math.round(area.right / density);
+            safeBottom = Math.round(area.bottom / density);
+            safeLeft = Math.round(area.left / density);
+            pushInsetsToWeb();
+            return insets;
+        });
 
         // v2.2.0 冷启动通知直达兜底：App 被杀后点通知栏里的聊天通知拉起 →
         // handleOnNewIntent 不会触发（不走 onNewIntent），extras 挂在 getIntent() 里。
@@ -132,15 +186,88 @@ public class MainActivity extends BridgeActivity {
         } catch (Throwable ignored) {
         }
 
-        // WebView 下载接管：安卓 WebView 默认没有下载处理（<a href="xx.apk" download>
-        // 点击毫无反应的根因）。设置 DownloadListener → 系统下载管理器（通知栏进度）
-        // → 下载完成自动弹安装（APK MIME 时）。
+        // v2.4.6 ③ 右缘常驻白条根除：Android WebView 页面可滚时会在右缘画一条经典
+        // 滚动条轨道（浅色主题下就是白道，截图里 APP 有、网站没有的「右缘空白」）。
+        // 本应用是全屏壳（网页侧 body 已锁 overflow:hidden），View 级滚动条没有存在
+        // 意义——直接关掉竖/横滚动条与 overscroll 光晕。
         if (this.bridge != null && this.bridge.getWebView() != null) {
-            this.bridge.getWebView().setDownloadListener(new DownloadListener() {
+            android.webkit.WebView webView = this.bridge.getWebView();
+            webView.setVerticalScrollBarEnabled(false);
+            webView.setHorizontalScrollBarEnabled(false);
+            webView.setOverScrollMode(View.OVER_SCROLL_NEVER);
+
+            // v2.4.6 网页安全区桥（WebView 建立即挂，任何页面首帧可同步读）
+            webView.addJavascriptInterface(nativeBridge, "AIPhoneNative");
+
+            // WebView 下载接管：安卓 WebView 默认没有下载处理（<a href="xx.apk" download>
+            // 点击毫无反应的根因）。设置 DownloadListener → 系统下载管理器（通知栏进度）
+            // → 下载完成自动弹安装（APK MIME 时）。
+            webView.setDownloadListener(new DownloadListener() {
                 @Override
                 public void onDownloadStart(String url, String userAgent,
                         String contentDisposition, String mimetype, long contentLength) {
                     MainActivity.this.startDownload(url, userAgent);
+                }
+            });
+        }
+    }
+
+    /** 把缓存安全区推给网页（页面未就绪时静默失败，下次 inset 变化/加载时会再推） */
+    private void pushInsetsToWeb() {
+        if (this.bridge == null || this.bridge.getWebView() == null) return;
+        final String payload = safeAreaJson();
+        this.bridge.getWebView().post(() -> {
+            try {
+                this.bridge.getWebView().evaluateJavascript(
+                        "try{window.__aiphoneApplySafeArea&&window.__aiphoneApplySafeArea('" + payload + "')}catch(e){}",
+                        null);
+            } catch (Exception ignored) {
+            }
+        });
+    }
+
+    private String safeAreaJson() {
+        JSONObject o = new JSONObject();
+        try {
+            o.put("top", safeTop);
+            o.put("right", safeRight);
+            o.put("bottom", safeBottom);
+            o.put("left", safeLeft);
+        } catch (Exception ignored) {
+        }
+        return o.toString();
+    }
+
+    /** v2.4.6 网页可调的原生桥（挂名 window.AIPhoneNative） */
+    @Keep
+    private class NativeBridge {
+        /** 当前安全区（CSS px）。HTML 解析期同步调用——首帧即按安全区布局（消首帧位移）。 */
+        @JavascriptInterface
+        public String getSafeArea() {
+            return safeAreaJson();
+        }
+
+        /** 系统状态栏/导航栏图标明暗（网页按壁纸实测亮度推过来，系统条真正「融入」APP）:
+         *  LIGHT=深色图标配浅背景；DARK=白色图标配深背景；DEFAULT=随系统主题。 */
+        @JavascriptInterface
+        public void setSystemBarsStyle(String style) {
+            final boolean lightIcons = "DARK".equalsIgnoreCase(style);
+            final boolean isDefault = "DEFAULT".equalsIgnoreCase(style);
+            runOnUiThread(() -> {
+                try {
+                    WindowInsetsControllerCompat ctl = WindowCompat.getInsetsController(
+                            getWindow(), getWindow().getDecorView());
+                    if (isDefault) {
+                        boolean night = (getResources().getConfiguration().uiMode
+                                & android.content.res.Configuration.UI_MODE_NIGHT_MASK)
+                                == android.content.res.Configuration.UI_MODE_NIGHT_YES;
+                        ctl.setAppearanceLightStatusBars(!night);
+                        ctl.setAppearanceLightNavigationBars(!night);
+                    } else {
+                        ctl.setAppearanceLightStatusBars(!lightIcons);
+                        ctl.setAppearanceLightNavigationBars(!lightIcons);
+                    }
+                } catch (Exception ignored) {
                 }
             });
         }

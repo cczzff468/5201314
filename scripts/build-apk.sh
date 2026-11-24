@@ -6,7 +6,7 @@
 # 本脚本完整重走工具链：JDK → Android SDK → Capacitor 依赖 → cap sync → gradle 打包。
 # 首次全量约 5~8 分钟（含下载 ~350MB 工具链）；SDK/JDK 已在位时约 3 分钟。
 #
-# 用法：bash scripts/build-apk.sh
+# 用法：bun run apk:build（= bash scripts/build-apk.sh，v1.9.46 起一键入口）
 set -euo pipefail
 
 MY_PROJECT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

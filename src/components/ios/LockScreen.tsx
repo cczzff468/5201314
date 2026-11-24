@@ -277,6 +277,7 @@ export default function LockScreen() {
   return (
     <motion.div
       className="absolute inset-0 z-[65] select-none overflow-hidden"
+      data-bleed=""
       style={{ touchAction: 'none' }}
       // 解锁退场：从当前位置继续上滑并淡出（与拖拽手势无缝衔接）
       exit={{ y: -420, opacity: 0 }}
@@ -310,8 +311,10 @@ export default function LockScreen() {
             exit={{ opacity: 0, y: -30 }}
             transition={{ duration: 0.2 }}
           >
-            {/* 可拖拽内容层 */}
+            {/* 可拖拽内容层（v1.9.46 data-safe-inset：APK 里从安全区下开始，时钟/小组件不顶进系统状态栏；
+                网页端变量为 0 时 top/bottom 回 0，与原布局零差异） */}
             <div
+              data-safe-inset=""
               className={`absolute inset-0 flex flex-col ${fg}`}
               style={{
                 transform: `translateY(${dy}px)`,
@@ -434,7 +437,8 @@ export default function LockScreen() {
             exit={{ opacity: 0 }}
             transition={{ duration: 0.2 }}
           >
-            <div className="h-[120px]" />
+            {/* v1.9.46 顶部占位高 APK 里随安全区长（毛玻璃罩仍铺满全屏，密码键盘避让系统条） */}
+            <div className="ph-lock-pad-top h-[120px]" />
             <p className="text-[17px] font-medium text-white">{padTitle}</p>
             {mode === 'resetNew' && (
               <p className="mt-1 text-[13px] text-white/55">设置一个新的锁屏密码</p>

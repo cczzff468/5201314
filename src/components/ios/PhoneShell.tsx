@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import dynamic from 'next/dynamic';
 import { AnimatePresence } from 'framer-motion';
 import { selectResolvedTheme, useSettings, useSystemDark, useUI, useWallpaperStyle, type AppId } from '@/lib/ios/store';
@@ -10,6 +10,7 @@ import { useIncomingCall } from '@/lib/ios/incoming-call';
 import { GLOBAL_CSS_SCOPE, scopeCss } from '@/lib/ios/custom-css';
 import { isVoiceHoldActive } from '@/lib/ios/voice-hold-flag';
 import { useLightForeground } from '@/lib/ios/foreground';
+import { setNativeSystemBarsStyle } from '@/lib/ios/native-shell';
 import { ensureAccountOwnerContacts, migrateFromServer } from '@/lib/ios/contacts-store';
 import { startOwnerProfileSync } from '@/lib/ios/owner-profile-sync';
 import { ensureAppFontApplied } from '@/lib/ios/fonts';
@@ -147,6 +148,9 @@ export default function PhoneShell() {
   // 改由 globals.css 的 text-[Npx]/leading-[Npx] calc 规则只缩放文字；倍率存在 :root --app-font-scale，此处无需感知
   // 横杠颜色与状态栏同一套判定（但按壁纸底部区域实测，上亮下暗壁纸横杠可独立选色）：身后背景深→白杠、浅→黑杠
   const barLight = useLightForeground('bottom');
+  // v2.4.6 APK 原生：顶部区域前景明暗（与自绘状态栏同一套判定——App 前台/锁屏壁纸/主屏壁纸实测）
+  // 推给原生桥同步系统状态栏/导航栏图标颜色，系统条浮在壁纸上时深浅匹配、真正融合
+  const topLight = useLightForeground('top');
   // 状态栏显示开关（Task 36）：设置页可关闭顶部时间/信号/电量状态栏
   const statusBarVisible = useSettings((s) => s.statusBarVisible);
   // 沉浸式全屏（阅读器打开期间）：状态栏与静态灵动岛一起隐藏，退出阅读器自动恢复
@@ -220,6 +224,14 @@ export default function PhoneShell() {
   useEffect(() => {
     void migrateFromServer();
   }, []);
+
+  // v2.4.6 APK 原生：系统状态栏/导航栏图标颜色随「身后背景」明暗同步——
+  // 深背景→白色图标、浅背景→深色图标（与自绘状态栏文字同一套判定源，含锁屏/主屏壁纸实测、
+  // App 前台基调覆盖）。网页端无桥静默。此 effect 在水合后建立同步；启动首帧由原生侧
+  // 默认（随系统主题）先行，随后第一次渲染即对齐壁纸深浅，肉眼无感。
+  useEffect(() => {
+    setNativeSystemBarsStyle(topLight ? 'DARK' : 'LIGHT');
+  }, [topLight]);
 
   // 全局滚动条显隐（Task 40）：滚动时给滚动容器打 data-scrolling=true，停止 ~0.9s 后回 false；
   // 配合 globals.css 的滚动条规则实现「滚动时才显示滚动条」（此前一打开就常驻显丑）。
@@ -565,6 +577,17 @@ export default function PhoneShell() {
     ? { width: FRAME_W * fit.scale, height: FRAME_H * fit.scale }
     : undefined;
 
+  // v2.4.6 APK 原生安全区内容容器样式：壁纸层留在容器外铺满物理屏（系统状态栏浮在壁纸上），
+  // 其余内容层整体内缩避让系统条/挖孔。本线横屏为「去壳铺满视口、天然轴向」（第十八轮定调，
+  // 无旋转映射）→ 四边变量原值直用，横屏挖孔在侧边时 sar/sal>0 自动左右避让。
+  // 网页端四个变量恒 0（layout 预注入脚本只在 APK 内设值）→ 容器与壳同矩形，零视觉变化。
+  const contentInsetStyle: CSSProperties = {
+    top: 'var(--app-sat, 0px)',
+    right: 'var(--app-sar, 0px)',
+    bottom: 'var(--app-sab, 0px)',
+    left: 'var(--app-sal, 0px)',
+  };
+
   // 壳内内容（壁纸 → 主屏 → App → 全局层）：横竖屏共用同一份，只换外壳几何
   const shellInner = (
     <>
@@ -573,14 +596,20 @@ export default function PhoneShell() {
             联系人聊天/线下的 CSS（更高优先级，前缀多一级属性）都能压制它（第七十轮） */}
         {globalCustomCss.trim() ? <style>{scopeCss(globalCustomCss, GLOBAL_CSS_SCOPE)}</style> : null}
 
-        {/* 壁纸层：自定义壁纸绘制见 CustomWallpaperLayers（D6：四周「边缘色延伸带」——
-            取原图最外一行/列像素拉伸铺出，无 blur、接缝逐像素同色，肉眼几乎看不出垫了东西；
-            预设壁纸保持单层 cover，-inset-[2px] 超采样防边缘细缝） */}
+        {/* 壁纸层：v2.4.6 留在安全区容器外——APK 里铺满物理屏（系统状态栏浮在壁纸顶边像素上，
+            「安全区条带壁纸化」），网站端容器与壳同矩形、效果等同原直挂。自定义壁纸绘制见
+            CustomWallpaperLayers（D6：四周「边缘色延伸带」——取原图最外一行/列像素拉伸铺出，
+            无 blur、接缝逐像素同色，肉眼几乎看不出垫了东西；预设壁纸保持单层 cover，
+            -inset-[2px] 超采样防边缘细缝） */}
         {customWallpaperUrl ? (
           <CustomWallpaperLayers url={customWallpaperUrl} />
         ) : (
           <div className="absolute -inset-[2px]" style={wallpaperStyle} aria-hidden="true" />
         )}
+
+        {/* 内容层：APK 原生安全区容器（position:absolute 不建层叠上下文，内部 z-40~z-95
+            与壁纸的层叠关系保持不变）。四边 var 由 layout 预注入脚本/原生回调维护。 */}
+        <div className="absolute" data-shell-content="" style={contentInsetStyle}>
 
         {/* 主屏幕 */}
         <HomeScreen />
@@ -653,12 +682,15 @@ export default function PhoneShell() {
         {/* 锁屏（含密码验证 / 手电筒 / 锁屏直达相机；解锁时播放退场动画） */}
         <AnimatePresence>{locked && <LockScreen key="lockscreen" />}</AnimatePresence>
 
-        {/* 熄屏遮罩（电源键熄屏；轻点或再按电源键唤醒到锁屏） */}
+        {/* 熄屏遮罩（电源键熄屏；轻点或再按电源键唤醒到锁屏）。
+            v2.4.6 data-bleed：APK 里出血铺满物理屏（含系统状态栏条带）——熄屏即整屏黑，
+            不残留壁纸顶边。 */}
         {screenOff && (
           <div
             role="button"
             aria-label="轻点唤醒屏幕"
             onClick={pressPower}
+            data-bleed=""
             className="absolute inset-0 z-[95] cursor-pointer bg-black"
           />
         )}
@@ -741,6 +773,9 @@ export default function PhoneShell() {
             <TogetherInviteWatcher />
           </>
         )}
+
+        </div>
+        {/* /内容层安全区容器（v2.4.6 APK 原生） */}
 
         {/* 电源键（桌面端机身右侧：熄屏 ↔ 亮屏锁定） */}
         <button

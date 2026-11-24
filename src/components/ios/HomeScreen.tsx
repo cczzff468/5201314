@@ -1105,7 +1105,8 @@ function FolderPanel({
       aria-modal="true"
       aria-label={`文件夹${folder.name}`}
       data-testid="folder-panel"
-      className={`folder-fade absolute inset-0 z-40 flex flex-col items-center pb-[120px] pt-[96px] backdrop-blur-2xl ${
+      data-bleed=""
+      className={`folder-fade ph-folder-pt absolute inset-0 z-40 flex flex-col items-center pb-[120px] pt-[96px] backdrop-blur-2xl ${
         dark ? 'bg-black/55' : 'bg-black/30'
       }`}
       onPointerDown={(e) => {

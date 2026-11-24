@@ -10,6 +10,11 @@ import StatusBarToneProbe from './StatusBarToneProbe';
  * 容器内末尾挂自动基调探针（Task 100-f）：非自管基调的 App，状态栏前景实时跟随
  * 实际渲染背景明暗（深底白字/浅底黑字）；音乐 App 自管基调不挂（避免推栈打架）。
  *
+ * v2.4.6 data-bleed：APK 里窗口出血铺满物理屏——App 自己的背景色（bg-background/
+ * 美团黄/淘宝橙…）延伸到系统状态栏后面，系统条浮在 APP 底色上（真原生 App 同款沉浸）；
+ * 各 App 内部原为自绘状态栏留出的 ~54px 顶部空间自然变成系统条下方留白，头部位置不变。
+ * 网站端变量为 0 时与壳同矩形，零视觉变化。
+ *
  * 深色模式适配（第六十七轮）：淘宝/美团两个购物 App 界面体量大（数千行、写死浅色
  * 表面色），逐类改 dark: 变体不现实——全局深色时给容器挂 shop-dark 作用域类，
  * 由 shop-dark.css（构建期脚本从两个 App 的源码提取色值生成）按选择器覆盖：
@@ -35,6 +40,7 @@ export default function AppWindow() {
     <div
       role="dialog"
       aria-label={meta.name}
+      data-bleed=""
       // 性能（v71 界面加载提速）：
       // ① transition 列表必须含 scale——Tailwind v4 的 scale-* 走独立 CSS scale 属性
       //    （不是 transform！），v72.3 前列表只写了 transform/opacity/border-radius，
@@ -49,8 +55,13 @@ export default function AppWindow() {
         phase === 'open' ? 'scale-100 rounded-none opacity-100' : 'scale-[0.18] rounded-[48px] opacity-0 will-change-[transform,scale,opacity]'
       } ${shopDark ? 'shop-dark' : ''}`}
     >
-      <App />
-      {!meta.statusBarToneSelfManaged && <StatusBarToneProbe />}
+      <div data-safe-inset="" className="absolute inset-0">
+        {/* v2.4.6 内容层内缩：窗口根出血铺满物理屏（App 底色延伸到系统状态栏后面，
+            真原生 App 同款沉浸）；内容从安全区下开始，各 App 原为自绘状态栏留出的
+            ~54px 顶部空间自然变成系统条下方留白，头部位置与网站端一致。 */}
+        <App />
+        {!meta.statusBarToneSelfManaged && <StatusBarToneProbe />}
+      </div>
     </div>
   );
 }

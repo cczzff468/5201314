@@ -189,6 +189,7 @@ export default function AppSwitcher() {
 
   return (
     <div
+      data-bleed=""
       className={`absolute inset-0 z-[60] flex flex-col transition-opacity duration-[240ms] ${
         shown ? 'opacity-100' : 'opacity-0'
       }`}
@@ -229,8 +230,9 @@ export default function AppSwitcher() {
         />
       </div>
 
-      {/* 顶部留出状态栏 + 灵动岛 */}
-      <div className="h-[64px] shrink-0" />
+      {/* 顶部留出状态栏 + 灵动岛（v1.9.46 ph-switcher-top：APK 里叠加真实安全区——毛玻璃根已出血铺满物理屏，
+          系统状态栏浮在玻璃上，卡片行从安全区下方开始） */}
+      <div className="ph-switcher-top h-[64px] shrink-0" />
 
       {/* 卡片横向轮播。
           滚动容器必须带垂直内边距（py-12）：外层 items-center 会把它收缩到正好卡片高，

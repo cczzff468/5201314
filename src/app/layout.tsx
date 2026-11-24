@@ -61,6 +61,39 @@ export default function RootLayout({
             v2.2：dev 模式不注册 SW——Turbopack dev 重启后 chunk 内容变但 SW 的 SWR 缓存返回旧
             chunk，导致 next/dynamic 组件「module factory is not available」运行时错误。
             SW 缓存只对生产环境（稳定 chunk）有意义；dev 模式 chunks 是 no-cache，SW 反而干扰。 */}
+        {/* v1.9.46 APK 原生安全区预注入（消首帧位移 + 安全区条带壁纸化的网页端入口）：
+            ① 预注入：本脚本渲染在 body 首位、先于任何内容绘制执行——APK 原生壳
+               (MainActivity addJavascriptInterface) 的 window.AIPhoneNative 从 WebView 建立起
+               就存在，HTML 解析到本脚本时同步调 getSafeArea() 把真实安全区写进
+               <html> 的 --app-sat/-sar/-sab/-sal，首帧即按安全区布局，零位移；
+               网页/浏览器无该对象 → 什么也不做，四个变量保持 0，行为与从前完全一致。
+            ② data-app-native 标记：globals.css 与 PhoneShell 据此启用 APK 专属布局
+               （壁纸铺满物理屏、内容内缩、隐藏自绘状态栏避免与系统状态栏重复）。
+            ③ __aiphoneApplySafeArea：横竖屏旋转时原生侧 evaluateJavascript 回调，
+               实时更新变量（configChanges 指定不重载页面，旋转仅重排不闪白）。 */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `(function () {
+  function apply(r) {
+    try {
+      var d = document.documentElement;
+      if (typeof r.top === 'number') d.style.setProperty('--app-sat', r.top + 'px');
+      if (typeof r.right === 'number') d.style.setProperty('--app-sar', r.right + 'px');
+      if (typeof r.bottom === 'number') d.style.setProperty('--app-sab', r.bottom + 'px');
+      if (typeof r.left === 'number') d.style.setProperty('--app-sal', r.left + 'px');
+      d.setAttribute('data-app-native', '1');
+    } catch (e) {}
+  }
+  window.__aiphoneApplySafeArea = function (payload) {
+    try { apply(typeof payload === 'string' ? JSON.parse(payload) : payload); } catch (e) {}
+  };
+  try {
+    var N = window.AIPhoneNative;
+    if (N && typeof N.getSafeArea === 'function') apply(JSON.parse(N.getSafeArea() || '{}'));
+  } catch (e) {}
+})();`,
+          }}
+        />
         <script
           dangerouslySetInnerHTML={{
             __html: `try{if('serviceWorker' in navigator){if(${process.env.NODE_ENV === 'production'}){navigator.serviceWorker.register('/sw.js').catch(function(){});}else{navigator.serviceWorker.getRegistrations().then(function(rs){rs.forEach(function(r){r.unregister();});}).catch(function(){});if(window.caches){window.caches.keys().then(function(ks){ks.forEach(function(k){window.caches.delete(k);});}).catch(function(){});}}}}catch(e){}

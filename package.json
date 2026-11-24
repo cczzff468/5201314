@@ -11,7 +11,8 @@
     "asr:copy": "bun scripts/copy-asr.mjs",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
-    "db:reset": "prisma migrate reset"
+    "db:reset": "prisma migrate reset",
+    "apk:build": "bash scripts/build-apk.sh"
   },
   "dependencies": {
     "@capacitor/android": "^8.6.0",

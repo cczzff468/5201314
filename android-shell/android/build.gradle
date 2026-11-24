@@ -24,6 +24,18 @@ allprojects {
     }
 }
 
+// v2.4.6 一键构建适配：AGP 8.13 对库模块（capacitor-android 等）默认 buildTools 35，
+// 本机 SDK 只装 36.0.0 → 触发联网下载 + license 校验失败（apk:build 卡在这）。
+// 插件应用即改（早于模块求值），所有 Android 模块统一钉 36.0.0。
+subprojects {
+    plugins.withId('com.android.application') {
+        android.buildToolsVersion = '36.0.0'
+    }
+    plugins.withId('com.android.library') {
+        android.buildToolsVersion = '36.0.0'
+    }
+}
+
 task clean(type: Delete) {
     delete rootProject.buildDir
 }
