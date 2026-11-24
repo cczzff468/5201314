@@ -11,9 +11,9 @@
  */
 
 /** 当前最新版本（纯网页热更时与 APK versionName 可短暂不同步，下次重打 APK 对齐） */
-export const APP_VERSION = '2.4.8';
+export const APP_VERSION = '2.4.9';
 /** 版本号数字（与 android-shell versionCode 保持一致；覆盖安装要求只增不减；纯网页热更不动） */
-export const APP_VERSION_CODE = 73;
+export const APP_VERSION_CODE = 74;
 
 export interface AppReleaseNote {
   version: string;
@@ -24,6 +24,16 @@ export interface AppReleaseNote {
 
 /** 版本历史（新→旧；设置 › APP 更新 页渲染，最新一条即当前版本） */
 export const APP_RELEASE_NOTES: AppReleaseNote[] = [
+  {
+    version: '2.4.9',
+    date: '2026-11-24',
+    items: [
+      '【需重装 APK】系统状态栏改为直接隐藏——不再「融入」（旧方案显示慢、有的页面融合不进去的根子），冷启动第一帧起就全屏；时间/信号/电量由 App 自带状态栏显示，从顶部边缘滑动可随时临时呼出系统状态栏',
+      '【需重装 APK】App 自带状态栏回归显示：全屏后的唯一状态栏，无挖孔机型顶到物理屏顶（真全屏），挖孔机型落在挖孔下缘',
+      '【需重装 APK】顶部避让量只剩挖孔高度（状态栏已隐藏不再占位）——内容整体上移，无挖孔机型顶部内容与屏顶零距离',
+      '【需重装 APK】导航栏图标明暗拆分：底部按底部背景取色（上下双色壁纸不再错色）；右缘白条再叠加两道保险：WebView 滚动容器身份摘除 + 触屏设备一律零滚动条占位',
+    ],
+  },
   {
     version: '2.4.8',
     date: '2026-11-24',

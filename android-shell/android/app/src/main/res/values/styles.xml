@@ -13,10 +13,17 @@
         <item name="windowActionBar">false</item>
         <item name="windowNoTitle">true</item>
         <item name="android:background">@null</item>
+        <!-- v2.4.9 全屏：主题层隐藏系统状态栏（冷启动第一帧起就生效，零闪现——
+             MainActivity 运行时 WindowInsetsControllerCompat.hide(statusBars) 的兜底；
+             API 35+ 上该项被忽略，运行时 hide() 依然生效）。时间/信号/电量由网页自绘
+             状态栏显示，系统条不再与网页内容争夺顶部。 -->
+        <item name="android:windowFullscreen">true</item>
     </style>
 
 
     <style name="AppTheme.NoActionBarLaunch" parent="Theme.SplashScreen">
         <item name="android:background">@drawable/splash</item>
+        <!-- v2.4.9 全屏：启动页期间系统状态栏也隐藏（与运行时一致的全屏体验） -->
+        <item name="android:windowFullscreen">true</item>
     </style>
 </resources>

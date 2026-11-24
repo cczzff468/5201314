@@ -128,9 +128,7 @@ public class MainActivity extends BridgeActivity {
         // 原生感知插件注册（必须先于 super.onCreate）
         registerPlugin(NativePerceptionPlugin.class);
 
-        // v2.4.6 ① 全屏沉浸：窗口强制 edge-to-edge——WebView 画到物理屏最边（含挖孔区）,
-        // 系统状态栏/导航条浮在网页壁纸上，取代旧版「WebView 被压到状态栏下 + 条带露
-        // windowBackground 灰/黑底」（浅色壁纸上那条分界线的根因）。
+        // v2.4.6 ① 全屏沉浸：窗口强制 edge-to-edge——WebView 画到物理屏最边（含挖孔区）。
         // Capacitor 8 内置 SystemBars 插件默认会给 decor 打 padding（WebView<140 或无
         // viewport-fit 时），capacitor.config.ts 已配 insetsHandling: 'disable' 关掉它,
         // 安全区改由下方 ② 的原生桥下发，首帧即就位。
@@ -145,21 +143,40 @@ public class MainActivity extends BridgeActivity {
 
         super.onCreate(savedInstanceState);
 
-        // v2.4.6 ② 安全区监听：缓存最新 insets（systemBars + displayCutout 的并集 = 真实
-        // 避让区；旋转/键盘变化都会回调）+ 把 dp 值经 evaluateJavascript 推给
+        // v2.4.9 ⓪ 系统状态栏直接【隐藏】（机主定调：不要融入、不显示，全屏；时间/信号/电量
+        // 由网页自绘状态栏显示——globals.css 已同步移除 APK 模式对 .ph-statusbar 的隐藏规则）。
+        // 原生层窗口级一次生效：无网页配色/时序参与（旧「融入」方案显示慢、有的页面融合不进去的
+        // 根因就是走网页层采样链），且本 App 所有界面都在同一个 WebView 窗口里——天然全界面一致。
+        // BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE：从顶部边缘滑动可临时呼出（浮层展示、几秒后
+        // 自动收起，不挤压内容）；导航栏保持显示（底部手势区不变）。
+        try {
+            WindowInsetsControllerCompat bars = WindowCompat.getInsetsController(
+                    getWindow(), getWindow().getDecorView());
+            bars.setSystemBarsBehavior(
+                    WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
+            bars.hide(WindowInsetsCompat.Type.statusBars());
+        } catch (Throwable ignored) {
+            // 极旧 ROM 拒绝时静默：styles.xml 已加 windowFullscreen 主题项兜底
+        }
+
+        // v2.4.6 ② 安全区监听：缓存最新 insets + 把 dp 值经 evaluateJavascript 推给
         // window.__aiphoneApplySafeArea（网页侧更新 --app-sat/-sar/-sab/-sal,
         // configChanges 已声明 orientation/screenSize → 不重载页面，仅重排）。
+        // v2.4.9 顶部口径变更：top 只取【挖孔】inset，不再并入 systemBars——状态栏已隐藏
+        // （systemBars.top 恒 0），且顶部从边缘临时呼出状态栏时是浮层展示（全屏应用标准行为，
+        // 不把内容顶下来）；网页自绘状态栏正好落在挖孔下缘，无挖孔机型顶到物理屏顶=真全屏。
+        // 其余三边仍取 systemBars ∪ displayCutout 并集（底部导航条/横屏侧边挖孔照旧避让）。
         // 返回值保持「透传」：Chromium WebView 自己也监听 insets（键盘 visualViewport/
         // resizes-content 机制），在 decor 层 CONSUMED 会切断它——只读取、不拦截。
         final View decor = getWindow().getDecorView();
         ViewCompat.setOnApplyWindowInsetsListener(decor, (v, insets) -> {
-            Insets area = insets.getInsets(
-                    WindowInsetsCompat.Type.systemBars() | WindowInsetsCompat.Type.displayCutout());
+            Insets cut = insets.getInsets(WindowInsetsCompat.Type.displayCutout());
+            Insets sys = insets.getInsets(WindowInsetsCompat.Type.systemBars());
             float density = getResources().getDisplayMetrics().density;
-            safeTop = Math.round(area.top / density);
-            safeRight = Math.round(area.right / density);
-            safeBottom = Math.round(area.bottom / density);
-            safeLeft = Math.round(area.left / density);
+            safeTop = Math.round(cut.top / density);
+            safeRight = Math.round(Math.max(sys.right, cut.right) / density);
+            safeBottom = Math.round(Math.max(sys.bottom, cut.bottom) / density);
+            safeLeft = Math.round(Math.max(sys.left, cut.left) / density);
             pushInsetsToWeb();
             return insets;
         });
@@ -190,11 +207,17 @@ public class MainActivity extends BridgeActivity {
         // 滚动条轨道（浅色主题下就是白道，截图里 APP 有、网站没有的「右缘空白」）。
         // 本应用是全屏壳（网页侧 body 已锁 overflow:hidden），View 级滚动条没有存在
         // 意义——直接关掉竖/横滚动条与 overscroll 光晕。
+        // v2.4.9 追加两道保险（右缘白条多轮未除的最后一搏）：scrollBarStyle 强制
+        // INSIDE_OVERLAY（即使某处重新启用滚动条也是浮层绘制、绝不预留布局位）；
+        // setScrollContainer(false)（把「可滚容器」身份摘掉，Chromium 滚动条预留
+        // 通道的判定入口直接关闭）。
         if (this.bridge != null && this.bridge.getWebView() != null) {
             android.webkit.WebView webView = this.bridge.getWebView();
             webView.setVerticalScrollBarEnabled(false);
             webView.setHorizontalScrollBarEnabled(false);
             webView.setOverScrollMode(View.OVER_SCROLL_NEVER);
+            webView.setScrollBarStyle(View.SCROLLBARS_INSIDE_OVERLAY);
+            webView.setScrollContainer(false);
 
             // v2.4.6 网页安全区桥（WebView 建立即挂，任何页面首帧可同步读）
             webView.addJavascriptInterface(nativeBridge, "AIPhoneNative");
@@ -247,10 +270,39 @@ public class MainActivity extends BridgeActivity {
             return safeAreaJson();
         }
 
-        /** 系统状态栏/导航栏图标明暗（网页按壁纸实测亮度推过来，系统条真正「融入」APP）:
+        /** v2.4.9 壳版本桥：网页据 getShellInfo 是否存在区分新旧壳——新壳系统状态栏已隐藏
+         *  （网页自绘状态栏回归显示）；旧壳无此方法，网页维持 v2.4.8 行为（自绘状态栏
+         *  隐藏、系统状态栏融入），避免旧 APK 先拿到新 CSS 时出现双状态栏。 */
+        @JavascriptInterface
+        public String getShellInfo() {
+            JSONObject o = new JSONObject();
+            try {
+                o.put("versionCode", 74);
+                o.put("versionName", "2.4.9");
+                o.put("fullscreen", true); // 系统状态栏隐藏（全屏）标记
+            } catch (Exception ignored) {
+            }
+            return o.toString();
+        }
+
+        /** 系统状态栏/导航栏图标明暗——状态栏/导航栏可分别设置（v2.4.9 拆分：状态栏已隐藏，
+         *  呼出时浮在顶部背景上、用顶部明暗；导航栏在底部、用底部明暗——上下双色壁纸不再错色）：
          *  LIGHT=深色图标配浅背景；DARK=白色图标配深背景；DEFAULT=随系统主题。 */
         @JavascriptInterface
+        public void setSystemBarStyles(String statusStyle, String navStyle) {
+            applyBarStyle(statusStyle, true);
+            applyBarStyle(navStyle, false);
+        }
+
+        /** 旧接口（v2.4.6~2.4.8）：状态栏/导航栏同色设置——保留兼容，网页新版改调上面的拆分版 */
+        @JavascriptInterface
         public void setSystemBarsStyle(String style) {
+            applyBarStyle(style, true);
+            applyBarStyle(style, false);
+        }
+
+        /** 单条系统条的图标明暗（statusBar=true 状态栏 / false 导航栏） */
+        private void applyBarStyle(String style, final boolean statusBar) {
             final boolean lightIcons = "DARK".equalsIgnoreCase(style);
             final boolean isDefault = "DEFAULT".equalsIgnoreCase(style);
             runOnUiThread(() -> {
@@ -261,11 +313,11 @@ public class MainActivity extends BridgeActivity {
                         boolean night = (getResources().getConfiguration().uiMode
                                 & android.content.res.Configuration.UI_MODE_NIGHT_MASK)
                                 == android.content.res.Configuration.UI_MODE_NIGHT_YES;
-                        ctl.setAppearanceLightStatusBars(!night);
-                        ctl.setAppearanceLightNavigationBars(!night);
+                        if (statusBar) ctl.setAppearanceLightStatusBars(!night);
+                        else ctl.setAppearanceLightNavigationBars(!night);
                     } else {
-                        ctl.setAppearanceLightStatusBars(!lightIcons);
-                        ctl.setAppearanceLightNavigationBars(!lightIcons);
+                        if (statusBar) ctl.setAppearanceLightStatusBars(!lightIcons);
+                        else ctl.setAppearanceLightNavigationBars(!lightIcons);
                     }
                 } catch (Exception ignored) {
                 }

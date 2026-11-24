@@ -1692,7 +1692,10 @@
    ② 手机壳内容层整体按真实安全区内缩（--app-sat/-sar/-sab/-sal，原生预注入首帧即就位，
      消启动瞬间的一次布局下移；横屏旋转由原生回调实时更新——本线横屏为「去壳铺满视口、
      天然轴向」（第十八轮定调，无旋转映射），左右挖孔避让直接用 sar/sal 原值即生效）；
-   ③ 自绘 iOS 状态栏隐藏（真系统状态栏就在壁纸上方，双状态栏时间/电量重复的根因）；
+   ③ 自绘 iOS 状态栏双壳分支（v2.4.9）：新壳（getShellInfo 桥存在 → data-shell-fullscreen）
+      系统状态栏已由原生层直接【隐藏】，自绘的时间/信号/电量状态栏成为全屏后唯一的状态栏；
+      旧壳维持 v2.4.8 隐藏行为（旧 APK 先拿到新 CSS 也不会双状态栏）；顶部内缩量只剩
+      挖孔高（sat=挖孔，无挖孔机型 0＝自绘状态栏顶到物理屏顶）；
    ④ body 永不滚动（外壳是全屏 fixed 布局）——WebView 经典「右缘常驻白条」即 body 可滚时的
      竖向滚动条轨道，双保险与原生 setVerticalScrollBarEnabled(false) 一并根除。
    仅 APK 内生效：浏览器/桌面预览无 AIPhoneNative → data-app-native 不存在，全部规则休眠。 */
@@ -1709,9 +1712,10 @@ html[data-app-native] body {
   overflow: hidden;
   overscroll-behavior: none;
 }
-/* ③ 隐藏自绘状态栏（系统状态栏已由壁纸上方透出，保留会时间/电量双份重复）。
-   z-70 的空位由系统状态栏天然补齐，无需占位。 */
-html[data-app-native] .ph-statusbar {
+/* ③ v2.4.9 双壳分支：旧壳（无 getShellInfo 桥，系统状态栏还在显示）维持隐藏自绘状态栏
+   防双状态栏；新壳（data-shell-fullscreen，系统状态栏已原生隐藏）自绘状态栏回归显示——
+   全屏后的唯一状态栏（时间/信号/电量）。网站端无任一标记，规则全休眠。 */
+html[data-app-native]:not([data-shell-fullscreen]) .ph-statusbar {
   display: none !important;
 }
 /* ② 安全区「出血」层：需要铺满物理屏的背景/遮罩元素（锁屏根、多任务根、App 窗口根、
@@ -1772,4 +1776,22 @@ html[data-app-native] *::-webkit-scrollbar-button {
 html[data-app-native] * {
   scrollbar-width: none !important;
   scrollbar-color: transparent transparent !important;
+}
+/* v2.4.9 保险二号（右缘白条多轮反馈仍未除的最后一搏）：触屏设备一律零滚动条占位——
+   @media (pointer: coarse) 不依赖 data-app-native 标记（标记未及设置/异常的任何触屏
+   WebView 都直接免疫「classic 滚动条预留右缘轨道」）；APK WebView 恒命中；手机浏览器
+   本就是 overlay 滚动条视觉不显，无感；桌面鼠标（fine pointer）保留 Task 40 体验不变。 */
+@media (pointer: coarse) {
+  *::-webkit-scrollbar,
+  *::-webkit-scrollbar-track,
+  *::-webkit-scrollbar-thumb,
+  *::-webkit-scrollbar-corner,
+  *::-webkit-scrollbar-button {
+    display: none !important;
+    width: 0 !important;
+    height: 0 !important;
+  }
+  * {
+    scrollbar-width: none !important;
+  }
 }

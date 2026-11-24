@@ -10,7 +10,7 @@ import { useIncomingCall } from '@/lib/ios/incoming-call';
 import { GLOBAL_CSS_SCOPE, scopeCss } from '@/lib/ios/custom-css';
 import { isVoiceHoldActive } from '@/lib/ios/voice-hold-flag';
 import { useLightForeground } from '@/lib/ios/foreground';
-import { setNativeSystemBarsStyle } from '@/lib/ios/native-shell';
+import { setNativeSystemBarStyles } from '@/lib/ios/native-shell';
 import { ensureAccountOwnerContacts, migrateFromServer } from '@/lib/ios/contacts-store';
 import { startOwnerProfileSync } from '@/lib/ios/owner-profile-sync';
 import { ensureAppFontApplied } from '@/lib/ios/fonts';
@@ -225,13 +225,12 @@ export default function PhoneShell() {
     void migrateFromServer();
   }, []);
 
-  // v2.4.6 APK 原生：系统状态栏/导航栏图标颜色随「身后背景」明暗同步——
-  // 深背景→白色图标、浅背景→深色图标（与自绘状态栏文字同一套判定源，含锁屏/主屏壁纸实测、
-  // App 前台基调覆盖）。网页端无桥静默。此 effect 在水合后建立同步；启动首帧由原生侧
-  // 默认（随系统主题）先行，随后第一次渲染即对齐壁纸深浅，肉眼无感。
+  // v2.4.9 APK 原生：系统状态栏已隐藏（临时呼出时浮在顶部背景上）、导航栏常驻底部——
+  // 图标明暗拆分同步：状态栏按顶部背景、导航栏按底部背景（上下双色壁纸不再互相错色）。
+  // 网页端无桥静默。此 effect 在水合后建立同步；启动首帧由原生侧默认（随系统主题）先行。
   useEffect(() => {
-    setNativeSystemBarsStyle(topLight ? 'DARK' : 'LIGHT');
-  }, [topLight]);
+    setNativeSystemBarStyles(topLight ? 'DARK' : 'LIGHT', barLight ? 'DARK' : 'LIGHT');
+  }, [topLight, barLight]);
 
   // 全局滚动条显隐（Task 40）：滚动时给滚动容器打 data-scrolling=true，停止 ~0.9s 后回 false；
   // 配合 globals.css 的滚动条规则实现「滚动时才显示滚动条」（此前一打开就常驻显丑）。

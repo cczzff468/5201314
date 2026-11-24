@@ -68,7 +68,10 @@ export default function RootLayout({
                <html> 的 --app-sat/-sar/-sab/-sal，首帧即按安全区布局，零位移；
                网页/浏览器无该对象 → 什么也不做，四个变量保持 0，行为与从前完全一致。
             ② data-app-native 标记：globals.css 与 PhoneShell 据此启用 APK 专属布局
-               （壁纸铺满物理屏、内容内缩、隐藏自绘状态栏避免与系统状态栏重复）。
+               （壁纸铺满物理屏、内容内缩）；v2.4.9 新壳（getShellInfo 桥存在）另打
+               data-shell-fullscreen 标记：系统状态栏由原生层直接隐藏——自绘状态栏回归
+               显示，成为全屏后的唯一状态栏；旧壳（无该桥）维持 v2.4.8 行为（自绘状态栏
+               隐藏、系统状态栏融入），避免旧 APK 先拿到新 CSS 时出现双状态栏。
             ③ __aiphoneApplySafeArea：横竖屏旋转时原生侧 evaluateJavascript 回调，
                实时更新变量（configChanges 指定不重载页面，旋转仅重排不闪白）。 */}
         <script
@@ -90,6 +93,10 @@ export default function RootLayout({
   try {
     var N = window.AIPhoneNative;
     if (N && typeof N.getSafeArea === 'function') apply(JSON.parse(N.getSafeArea() || '{}'));
+    if (N && typeof N.getShellInfo === 'function') {
+      // v2.4.9 新壳：系统状态栏已原生隐藏（全屏）——自绘状态栏回归显示
+      document.documentElement.setAttribute('data-shell-fullscreen', '1');
+    }
   } catch (e) {}
 })();`,
           }}

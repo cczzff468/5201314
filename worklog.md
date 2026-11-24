@@ -3544,3 +3544,18 @@ Work Log:
 - [E2E·Agent Browser 原生模式模拟] ①相机（黑根）：顶带 rgb(0,0,0) 像素级 y=0..40 全黑；②天气（透明根+渐变）：条带=渐变首停 rgb(14,27,58)，视觉复核「连续融合无白条」；③照片查看器（白根+黑浮层）：条带黑（接缝采样命中浮层而非白根兜底——机主截图场景 141629 根修实证）；④注入双色渐变 img（cover 裁剪）：条带=linear-gradient 红→绿，停点色值与 object-fit cover 裁剪映射的源像素逐点核算一致；⑤模拟 sar=30：右条带几何 (x=360,w=30,全高) + 渐变上色含图片右缘像素停点；⑥合成溢出容器 scrollbar-width=none；⑦网页模式回归：假状态栏 flex 可见、无条带、控制台零错误；⑧lint 改动文件 0 问题
 
 Stage Summary: 状态栏融入换掉「轮询+CSS色采样」旧法——绘制前同步上色（首帧即对）+ DOM/滚动/图片加载事件驱动（60~80ms 跟上）+ <img>/bg-image 像素级采样（object-fit 逐像素对位，「融合不进去」的图片页根治）+ 图标明暗与条带同源；APK 滚动条占位全套中立化根除右缘轨道白条（与曲面屏 sar 条带像素延伸双保险）。v2.4.8 纯网页热更免重装。关键文件：SafeAreaBleedBands.tsx（重做）、bg-sample.ts（媒体像素采样）、bleed-band-state.ts（新）、StatusBarToneProbe.tsx（重做）、globals.css、app-version.ts、sw.js
+
+## 2026-11-24 · 第二十五轮 v2.4.9：换法落地——系统状态栏直接【隐藏】（全屏沉浸），App 自带状态栏回归显示
+
+Task: 机主第三轮反馈定调：①「右边缘白条问题有没有更好的解决办法，如果没有就这样吧」②「系统状态栏能不能让他隐藏，不要融入APP了，就是不显示系统状态栏，全屏显示，网站里面的状态栏显示出来」——放弃「融入」路线（v2.4.6~8 三代采样链：显示慢/融合不进去的病根就是走网页层配色），改走原生层窗口级隐藏：一锤定音、冷启动首帧即生效、单 WebView 窗口天然全界面一致。
+
+Work Log:
+- [MainActivity·状态栏隐藏] onCreate super 后 WindowInsetsControllerCompat.hide(statusBars) + BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE（顶部边缘滑动可临时呼出、几秒自动收起、浮层展示不压内容；导航栏保留）；styles.xml 两个主题（AppTheme.NoActionBar + NoActionBarLaunch）加 android:windowFullscreen=true——冷启动第一帧起状态栏就隐藏，零闪现，运行时 hide() 的主题级兜底（API 35+ 忽略 legacy 项、运行时调用仍生效）
+- [顶部避让口径] inset 监听 safeTop 改只取 displayCutout（状态栏隐藏后 systemBars.top 恒 0；临时呼出时浮在网页上、不把内容顶下来——全屏应用标准行为）；其余三边仍 systemBars∪cutout 并集（底部导航/横屏侧挖孔避让不变）。无挖孔机型 sat=0：自绘状态栏顶到物理屏顶（真全屏）；挖孔机型 sat=挖孔高：状态栏落在挖孔下缘
+- [自绘状态栏回归·双壳分支] NativeBridge 新增 getShellInfo() 壳版本桥（versionCode/versionName/fullscreen）：新壳（有此桥）layout 内联脚本同步打 data-shell-fullscreen 标记 → 自绘状态栏回归显示（全屏后唯一状态栏，即机主说的「网站里面的状态栏显示出来」）；旧壳（无此桥）维持 v2.4.8 隐藏行为——旧 APK 先拿到新 CSS 也不会出现双状态栏（CSS 规则 html[data-app-native]:not([data-shell-fullscreen]) .ph-statusbar{display:none})
+- [右缘白条·最后两道保险] 原生：setScrollBarStyle(SCROLLBARS_INSIDE_OVERLAY)（即使滚动条被某处重新启用也是浮层绘制、绝不预留布局位）+ setScrollContainer(false)（摘掉 WebView「可滚容器」身份，Chromium 滚动条预留通道的判定入口直接关闭）；网页：@media (pointer:coarse) 下 *::-webkit-scrollbar 全部件 display:none + scrollbar-width:none——不依赖 data-app-native 标记（任何触屏 WebView 直接免疫 classic 滚动条预留右缘轨道），桌面鼠标（fine pointer）保留 Task 40 滚动条体验不变。若此轮后仍有白条，即非滚动条占位问题，按机主定调收档
+- [导航栏图标明暗拆分] NativeBridge 新增 setSystemBarStyles(statusStyle, navStyle)（旧 setSystemBarsStyle 保留兼容）：状态栏（临时呼出）按顶部背景、导航栏（常驻底部）按底部背景取色——上下双色壁纸不再互相错色；PhoneShell 改调拆分接口（topLight/barLight 双源）
+- [版本] v2.4.9 / versionCode 73→74（原生壳改动：MainActivity + styles.xml，必须重装 APK）/ app-version 四条发版说明 / sw.js v91→v92（CSS 变更强制缓存重建）
+- [验证] tsc --noEmit 0 错误、改动文件 lint 0 问题；Java 侧人工复核（无本地 Android SDK，gradle 编译交由机主 bun run apk:build）
+
+Stage Summary: 状态栏方案换法定案——原生层窗口级隐藏（hide(statusBars)+主题 windowFullscreen），冷启动首帧即全屏、全界面天然一致、零采样零时序；自绘状态栏回归为唯一状态栏；顶部避让只剩挖孔（内容整体上移，无挖孔机型真全屏）；右缘白条叠加 pointer:coarse 零滚动条占位 + 滚动容器身份摘除两道保险，若仍未除则按机主定调收档。v2.4.9/code 74 需重装 APK（bun run apk:build）。关键文件：MainActivity.java、styles.xml、globals.css、native-shell.ts、PhoneShell.tsx、app-version.ts、sw.js、app/build.gradle

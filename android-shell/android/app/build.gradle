@@ -14,8 +14,8 @@ android {
         applicationId "com.z.aiphone"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 73          // v2.4.7 App 页面底色出血条带（状态栏/侧避让区融入修复，纯网页热更亦可生效）；v72 = 2.4.6
-        versionName "2.4.7"     // v2.4.7：App 窗口出血条带实时采样页面底色 + 来电/通知中心融入
+        versionCode 74          // v2.4.9 系统状态栏直接隐藏（全屏）+ 自绘状态栏回归 + 顶部避让改纯挖孔；v73 = 2.4.7
+        versionName "2.4.9"     // v2.4.9：全屏沉浸（状态栏隐藏）+ 滚动条占位双保险 + 导航栏图标明暗拆分
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
