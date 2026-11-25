@@ -3684,3 +3684,25 @@ Stage Summary:
 - 电池图标三点反馈逐项落实（67% 预览实测：左 2/3 填充+右浅轨道、粗体白字、凸点间隙清晰）
 - 新开屏全元素 agent-browser 实测通过（含底部三件），无 console 错误、hydration 干净
 - 网页热更全部即时生效；APK（code 80）已重打，覆盖安装后换新启动器图标+原生灰白闪屏
+
+---
+Task ID: 34（第三十三轮 · v2.4.17）
+Agent: 主控 Agent（Z.ai Code）
+Task: 机主四张截图反馈——电池图标三调（外部/不显示回退原样式+内部描边跟随胶囊色+凸点缩小）+ 设置电量百分比行图标统一 + APK 状态栏上提 + App 名改纯 Cove + App 图标再生成三枚（删除 COVE 字体图标/雾中远山/静月港湾重画+加 Cove 字）+ 开屏动画三主题可选（星空月夜/雾中远山/静月港湾）+ 多任务卡片短屏裁切根修
+
+Work Log:
+- 电池图标（StatusBar.tsx）：outside/none 模式回退第三十轮前原样式（40% 半透明描边 1.2px+填充 inset 1.8px+40% 半透明凸点）；inside 模式胶囊壳加 1px 描边颜色=填充色（常态 currentColor 黑↔黑/白↔白、充电 #30D158、低电 #FF453A 同色描边）+ 凸点缩小 3.5×7→2.5×5.5 仍半圆右缘离体 1.5px；VLM 实测充电态：完整绿描边+100% 反色数字+白闪电+小凸点 ✓
+- 设置电量百分比行：弃第三十二轮「状态栏仿真预览条」（9:41+电池样条），改 RowIcon 绿色 BatteryCharging 与其他行统一（机主要求「前面的图标变成跟其他的图标一样」）
+- APK 状态栏上提（globals.css+PhoneShell+SafeAreaBleedBands）：新增 --app-sat-eff 变量——新壳（data-shell-fullscreen）=挖孔高×45%（旧壳=全额、网页端=0）；内容层/出血层/安全区内缩/切换器顶部/锁屏键盘/文件夹五链路同步换用；状态栏时间从 sat+6 提到 0.45sat+6 贴近真机 6-20px 位置，App 内容同步上提、状态栏与内容间距不变；SafeAreaBleedBands 顶带高度与采样 y 同步 eff
+- 浏览器顶栏网页端 37→34px 再上提（header+书签面板同步）
+- App 名改纯「Cove」：layout metadata title/public manifest.json/api/pwa/manifest 动态路由三处去「— 仿 iOS 智能助手」后缀——机主截图里 PWA 安装弹窗与「没做过就出现」的启动画面（Chrome 按 manifest 生成的 PWA launch splash）都显示短名
+- App 图标再生成三枚（z-ai 两轮 prompt）：1 号弃 COVE 文字改「拱门静湾」（灰白拱门+静水圆石）、2 号雾中远山重画（三大层叠山影+淡日盘、去噪点）、3 号静月港湾重画（全出血夜空新月+平滑水面映月+低区衬线 Cove 字，修内嵌圆角瓷片问题两轮）；rebuild-cove-icons.mjs 全链重建（web 五尺寸+maskable+apple-touch+APK mipmap 全密度+11 密度原生 splash）；设置三选一文案更新（拱门静湾/雾中远山/静月港湾·带 Cove 字）
+- 开屏动画三主题（BootSplash.tsx 重写+splash-theme.ts+cove3-* keyframes）：star 星空月夜（默认·深夜炭色渐变+26 星点固定数组闪烁+周期流星+奶白新月呼吸光晕缓浮+「长夜，自有一颗安静的月亮。」）/ mist 雾中远山（灰白雾面+噪点+双雾团+三层山影 26/32/38s 极慢横漂+淡日盘+「喧嚣之外，静水一湾。」）/ moon 静月港湾（夜空静水地平线+中轴新月+月影光柱七横纹微闪+微波+「一轮月，泊进安静的港湾。」）；共用骨架（EN 诗行/衬线 Cove/LOCAL 时钟/ENTER 呼吸环/微光进度条）；localStorage 同步写+useLayoutEffect 首帧换主题（零闪烁零 hydration mismatch）+IndexedDB store 同源；设置新增「开屏动画」行（Sparkles 紫 RowIcon）+三选一弹窗（76px 微缩场景 CSS 预览卡）；实测三主题渲染/选择/持久化全通过
+- 多任务卡片短屏自适应（AppSwitcher.tsx）：机主截图「后台应用卡片有点问题」根因=360×800 WebView（1080×2400÷3）上 64+卡片 541+图标行 52+提示 22+横杠 30 超出视口卡片底部硬裁；改滚动容器实测可用高（rAF 首帧+ResizeObserver，老 WebView 降级单次测量）按 390:844 等比收窄卡片（320~541 高钳制）；360×800 实测完整无裁切、460×940 无回归
+- 版本 2.4.17 / versionCode 81（app-version.ts+build.gradle+MainActivity getShellInfo 三处）+ 发布说明六条；APK 重打
+
+Stage Summary:
+- 电池图标充电态 VLM 像素级实测：描边/填充/凸点/数字全部符合机主规格
+- 开屏三主题 agent-browser 实测：星点闪烁/流星/新月光晕/山影横漂/月影光柱全渲染，选择器点选→localStorage 持久化→冷启动首帧新主题 ✓
+- 多任务卡片 360×800 短屏实测：卡片圆角/图标行/横杠全可见
+- 网页热更即时生效；APK（code 81）重打含新图标/纯 Cove 名/45% 挖孔状态栏上提

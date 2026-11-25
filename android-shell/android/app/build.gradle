@@ -14,8 +14,8 @@ android {
         applicationId "com.z.aiphone"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 80          // v2.4.16 韩系灰白新图标+新开屏（借鉴机主参考图）；v79 = 2.4.15
-        versionName "2.4.16"    // v2.4.16：灰白图标/闪屏重生成 + getShellInfo 桥升 80
+        versionCode 81          // v2.4.17 纯Cove名+新三图标+状态栏上提；v80 = 2.4.16
+        versionName "2.4.17"    // v2.4.17：纯 Cove 名/三新图标/45% 挖孔状态栏上提 + getShellInfo 桥升 81
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
