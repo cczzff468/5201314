@@ -11,9 +11,9 @@
  */
 
 /** 当前最新版本（纯网页热更时与 APK versionName 可短暂不同步，下次重打 APK 对齐） */
-export const APP_VERSION = '2.4.11';
+export const APP_VERSION = '2.4.12';
 /** 版本号数字（与 android-shell versionCode 保持一致；覆盖安装要求只增不减；纯网页热更不动） */
-export const APP_VERSION_CODE = 75;
+export const APP_VERSION_CODE = 76;
 
 export interface AppReleaseNote {
   version: string;
@@ -24,6 +24,16 @@ export interface AppReleaseNote {
 
 /** 版本历史（新→旧；设置 › APP 更新 页渲染，最新一条即当前版本） */
 export const APP_RELEASE_NOTES: AppReleaseNote[] = [
+  {
+    version: '2.4.12',
+    date: '2026-11-26',
+    items: [
+      '【网页热更·免重装】「电池图标内部」按机主 HTML+CSS 规格重写：34×16 描边电池（2px 实线描边、4px 圆角、右侧 2×6 正极凸点）+ 黑色填充（充电绿/低电红）+ 浅灰电量槽衬托，百分比数字 11px 粗体嵌在电池内靠左 3px、按填充边界黑白自动反色（黑填充上白数字、灰槽上黑数字）；点按状态栏电池图标弹出 iOS 风格电量详情卡片（大号百分比 + 电池条 + 充电状态，点空白处自动关）',
+      '【网页热更·免重装】浏览器打开网站时「添加到主屏幕」即真全屏：PWA 显示模式改为 fullscreen——从主屏幕图标打开不再有系统状态栏（普通浏览器标签页里系统状态栏任何网页都无法隐藏，浏览器安全限制）；APK 内不变已隐藏',
+      '【需重装 APK · versionCode 76】系统状态栏隐藏终极加固：传统 systemUiVisibility 通道（FULLSCREEN+IMMERSIVE_STICKY，部分国产 ROM 只认这条、顶部滑出后自动收回）与新 API 双通道并用，回前台后 0.8s/2.5s 两次延迟补藏（权限弹窗关掉后系统条被拉回的场景也盖住），旋屏/重获焦点全部重申——顶部系统条这回真不出来了',
+      '【重要】仍看得到顶部「系统状态栏」= 手机上是旧 APK：去 设置 › APP 更新 下载覆盖安装（数据不丢），装完首屏即全屏；浏览器里请「添加到主屏幕」后从图标打开',
+    ],
+  },
   {
     version: '2.4.11',
     date: '2026-11-25',

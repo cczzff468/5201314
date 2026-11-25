@@ -1,6 +1,8 @@
 'use client';
 
-import { useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
+import { createPortal } from 'react-dom';
+import { Zap } from 'lucide-react';
 import { formatIOSTime } from '@/lib/ios/clock';
 import { useBattery } from '@/lib/ios/battery';
 import { useLightForeground } from '@/lib/ios/foreground';
@@ -22,28 +24,33 @@ function SignalBars() {
   );
 }
 
-/* ============ v2.4.11 分段式电池（inside 模式）几何常量 ============
- * 参考图（机主上传照片）像素级测量，40px 高原型上：
- *   已充电段 47×40 实心黑胶囊（圆角 ≈ 高的 21%）｜透明缝 4px｜
- *   未充电段 20×40 浅灰胶囊（#AFAEB3）｜透明缝 3px｜正极凸点 6×14 灰；
- *   白色数字 19px 高（≈ 47.5% 电池高）嵌在已充电段上、几何居中（数字中心=填充段中心）。
- * 按 16px 渲染高度等比换算（×0.4）：本体宽 29px（填充+缝+空槽）、缝 1.7px、
- * 凸点 2.4×5.6px、数字 10px 半粗 tabular（无 % 号）、总宽恒定 33px。 */
-const BAT_H = 16;      // 电池高（与 WiFi 图标等高——参考图口径：电池=WiFi/信号等高）
-const BAT_BODY = 29;   // 电池本体宽（填充+缝+空槽；原型 71/40×16）
-const BAT_GAP = 1.7;   // 填充段↔空槽的透明缝（背景透出，即参考图的白缝）
-const BAT_TIP_W = 2.4; // 正极凸点宽
-const BAT_TIP_H = 5.6; // 正极凸点高（原型 35% 高度，垂直居中）
-const BAT_TOTAL = BAT_BODY + BAT_GAP + BAT_TIP_W; // 常宽：电量增减只挪填充/空槽边界
+/* ============ v2.4.12 inside 模式电池（机主 HTML+CSS 规格原文 100% 还原）============
+ * 一、结构：
+ *   battery-container（相对定位）
+ *   ├ battery-body：34×16 圆角矩形（border 2px 实线、border-radius 4px）
+ *   │   ├ battery-fill：绝对定位高度铺满、宽随电量%（黑色圆角矩形，低电红）
+ *   │   └ battery-text：绝对定位在电池主体内部、靠左对齐距左边 3px、11px 粗体
+ *   └ battery-cap：2×6 正极凸点（右侧、垂直居中、顶部/底部微圆角）
+ * 二、颜色：填充纯黑 #000000（充电绿/低电红）；<100% 时右侧灰槽背景衬托；
+ *   数字反色——落在黑填充上=白字、落在灰槽上=黑字（规格 mix-blend-mode: difference 的
+ *   分层渲染等价实现：双层同文 clip 叠印，彩色填充态下颜色依然可控、不发脏色）。 */
+const BAT_H = 16; // battery-body 高（规格：约 16px）
+const BAT_BODY_W = 34; // battery-body 宽（规格：约 34px）
+const BAT_BORDER = 2; // 描边（规格：2px 实线黑色）
+const BAT_INNER_W = BAT_BODY_W - BAT_BORDER * 2; // 内腔宽 30（fill / 文字层坐标系）
+const BAT_CAP_W = 2; // battery-cap 宽（规格：2px）
+const BAT_CAP_H = 6; // battery-cap 高（规格：6px）
+const BAT_CAP_GAP = 1.5; // 本体↔凸点缝
+const BAT_TOTAL_W = BAT_BODY_W + BAT_CAP_GAP + BAT_CAP_W; // 总宽 37.5（常宽，电量增减只挪填充边界）
 
 interface BatteryIconProps {
   level: number;
   charging: boolean;
   low: boolean;
   /** 电量百分比显示方式（v2.4.10）：outside=图标外部数字+% / inside=图标内部数字
-   *  （v2.4.11 分段式实心电池，完全复刻机主参考图）/ none=不显示百分比 */
+   *  （v2.4.12 机主规格版：2px 描边电池+黑填充+灰槽，数字靠左 3px 双色反染）/ none=不显示 */
   mode: BatteryPercentMode;
-  /** 状态栏前景是否浅色（白字）：决定 inside 模式里嵌入数字用反色（黑）保证对比；
+  /** 状态栏前景是否浅色（白字）：inside 模式整套反色（白描边白填充、深灰槽）；
  *  外部/描边样式不受影响（跟随 currentColor） */
   light?: boolean;
 }
@@ -51,81 +58,64 @@ interface BatteryIconProps {
 /** 状态栏电池图标（v2.4.10 三模式，设置›电量百分比实时切换）：
  *  - outside：数字+% 在电池左侧（默认/现行样式，描边电池）
  *  - none：只有描边电池图标，无百分比
- *  - inside：iOS 16+ 同款（用户参考图）：纯填充块无描边，左侧充入部分前景色/
- *    充电绿/低电红，其余半透明轨道，数字（无 % 号）嵌在电池内反色居中，右侧浅灰凸点。
+ *  - inside：机主 HTML+CSS 规格版（v2.4.12 重写）——34×16 描边电池（2px 实线描边、
+ *    4px 圆角、右侧 2×6 正极凸点）+ 黑填充（充电绿/低电红）+ 浅灰电量槽，数字 11px
+ *    粗体嵌电池内靠左 3px、按填充边界黑白自动反色。
  *  也导出给设置页做实时预览（预览传固定 level + light=false） */
 export function BatteryIcon({ level, charging, low, mode, light = false }: BatteryIconProps) {
   const fill = Math.min(100, Math.max(0, level));
 
   if (mode === 'inside') {
-    /* v2.4.11 分段式电池（完全复刻机主参考图，照片像素级测量 40px 高原型 → 16px 等比）：
-     * 已充电段=实心圆角胶囊（黑/白随前景、充电绿/低电红）｜透明缝｜未充电段=独立浅灰
-     * 圆角胶囊（currentColor@0.32 ≈ 参考图 #AFAEB3）｜透明缝｜灰色正极凸点。
-     * 数字（无 % 号）嵌在已充电段上几何居中（参考图实测：数字中心=填充段中心、
-     * 高≈电池 47.5%）；电量低到填充段装不下数字时改居中电池本体并按填充边界分色
-     * （边界左=反色、右=前景色——iOS 16 同款动态对比，任何电量全程黑白分明）。 */
-    const numColor = light ? 'text-black' : 'text-white'; // 填充段上的数字反色
-    const fgColor = light ? 'text-white' : 'text-black'; // 空槽/透缝上的数字用前景色
-    const fillColor = charging ? 'bg-[#30D158]' : low ? 'bg-[#FF453A]' : 'bg-current';
-    const fillPx = (BAT_BODY * fill) / 100; // 填充段宽 = 电量% × 本体宽
-    const trackPx = BAT_BODY - fillPx - BAT_GAP; // 空槽宽（100% 时收敛到 0）
-    const digits = Math.round(level);
-    // 填充段是否装得下数字（10px 半粗 tabular 每位 ≈5.8px，两侧各留 ~2px 边距）
-    const digitsW = String(digits).length * 5.8 + 1;
-    const digitsFit = fillPx >= digitsW + 4.5;
+    /* v2.4.12 机主规格版（结构/尺寸/圆角/对齐全部按规格原文死磕）：
+     * - battery-fill 宽 = 电量% × 内腔宽（30px），铺满内腔高，圆角 2px 圆角矩形；
+     * - battery-text 双层叠印：第一层=填充上反色字（黑填充→白字）clip 到填充右边界，
+     *   第二层=灰槽上黑字 clip 到边界以右——数字跨过填充边界时黑白自动分色；
+     * - 光学垂直居中 +0.5px（数字无降部，em 盒居中后重心偏上 ~0.55px 的修正）。 */
+    const fillPx = (BAT_INNER_W * fill) / 100;
+    const fillBg = charging ? '#30D158' : low ? '#FF453A' : light ? '#FFFFFF' : '#000000';
+    const trackBg = light ? 'rgba(255,255,255,0.25)' : '#E9E9EB';
+    const onFillColor = light && !charging && !low ? '#000000' : '#FFFFFF'; // 填充上的数字（与填充反色；彩色填充一律白字）
+    const onTrackColor = light ? '#FFFFFF' : '#000000'; // 灰槽上的数字
+    const digits = String(Math.round(level));
     return (
       <span
         role="img"
         aria-label={`电量${Math.round(level)}%${charging ? '，充电中' : ''}`}
-        className="relative inline-block shrink-0"
-        style={{ height: BAT_H, width: BAT_TOTAL }}
+        className="battery-container relative inline-block shrink-0"
+        style={{ width: BAT_TOTAL_W, height: BAT_H }}
       >
-        {/* 空槽（未充电段）：独立浅灰圆角胶囊 */}
-        {trackPx > 0.8 && (
+        {/* battery-body：2px 实线描边圆角矩形；灰槽即本体背景（<100% 时右侧衬托填充） */}
+        <span
+          className="battery-body relative block overflow-hidden rounded-[4px] border-2 border-current"
+          style={{ width: BAT_BODY_W, height: BAT_H, background: trackBg }}
+        >
+          {/* battery-fill：absolute 铺满内腔高、宽随电量、圆角矩形 */}
           <span
-            className="absolute inset-y-0 rounded-[3px] bg-current opacity-[0.32]"
-            style={{ left: fillPx + BAT_GAP, width: trackPx }}
+            className="battery-fill absolute bottom-0 left-0 top-0 transition-all duration-300"
+            style={{ width: fillPx, background: fillBg, borderRadius: 2 }}
           />
-        )}
-        {/* 已充电段：实心胶囊（圆角随宽度收缩，极窄时成圆点不糊） */}
-        {fillPx > 0.8 && (
+          {/* battery-text 第一层：填充上反色字（clip 到填充右边界） */}
           <span
-            className={`absolute inset-y-0 left-0 ${fillColor} transition-all duration-300`}
-            style={{ width: fillPx, borderRadius: Math.min(3, fillPx / 2) }}
-          />
-        )}
-        {/* 数字：装得下→嵌已充电段居中（参考图口径）；装不下→居中本体、按填充边界分色两份叠印。
-            注意两份分色层的坐标基准必须与本体同宽（left-0 + width=本体，而非 inset-0
-            ——根 span 含正极凸点更宽，inset-0 会把数字带偏右且裁剪基准也错） */}
-        {digitsFit ? (
-          <span
-            className={`absolute inset-y-0 left-0 flex translate-y-[1.5px] items-center justify-center text-[10px] font-semibold leading-none tabular-nums ${numColor}`}
-            style={{ width: fillPx }}
+            aria-hidden="true"
+            className="battery-text absolute inset-y-0 left-0 flex translate-y-[0.5px] items-center pl-[3px] text-[11px] font-bold leading-none tabular-nums"
+            style={{ width: BAT_INNER_W, color: onFillColor, clipPath: `inset(0px ${BAT_INNER_W - fillPx}px 0px 0px)` }}
           >
             {digits}
           </span>
-        ) : (
-          <>
-            <span
-              aria-hidden="true"
-              className={`absolute inset-y-0 left-0 flex translate-y-[1.5px] items-center justify-center text-[10px] font-semibold leading-none tabular-nums ${numColor}`}
-              style={{ width: BAT_BODY, clipPath: `inset(0px ${BAT_BODY - fillPx}px 0px 0px)` }}
-            >
-              {digits}
-            </span>
-            <span
-              aria-hidden="true"
-              className={`absolute inset-y-0 left-0 flex translate-y-[1.5px] items-center justify-center text-[10px] font-semibold leading-none tabular-nums ${fgColor}`}
-              style={{ width: BAT_BODY, clipPath: `inset(0px 0px 0px ${fillPx}px)` }}
-            >
-              {digits}
-            </span>
-          </>
-        )}
-        {/* 正极凸点（与空槽同灰，垂直居中） */}
+          {/* battery-text 第二层：灰槽上黑字（clip 到填充右边界以右） */}
+          <span
+            aria-hidden="true"
+            className="battery-text absolute inset-y-0 left-0 flex translate-y-[0.5px] items-center pl-[3px] text-[11px] font-bold leading-none tabular-nums"
+            style={{ width: BAT_INNER_W, color: onTrackColor, clipPath: `inset(0px 0px 0px ${fillPx}px)` }}
+          >
+            {digits}
+          </span>
+        </span>
+        {/* battery-cap：右侧 2×6 正极凸点（垂直居中、顶部/底部微圆角） */}
         <span
-          className="absolute top-1/2 -translate-y-1/2 rounded-full bg-current opacity-[0.32]"
-          style={{ left: BAT_BODY + BAT_GAP, height: BAT_TIP_H, width: BAT_TIP_W }}
+          aria-hidden="true"
+          className="battery-cap absolute top-1/2 -translate-y-1/2 rounded-[1px] bg-current"
+          style={{ right: 0, width: BAT_CAP_W, height: BAT_CAP_H }}
         />
       </span>
     );
@@ -168,10 +158,102 @@ export function BatteryIcon({ level, charging, low, mode, light = false }: Batte
   );
 }
 
+/* ============ v2.4.12 电量详情弹窗（机主需求：点状态栏电池图标弹窗看电量）============
+ * iOS 风格卡片（portal 到 body，不受状态栏 pointer-events-none / 层叠上下文限制）：
+ * 状态徽标（充电中/电池供电/电量偏低）+ 大号百分比 + 小组件风格大电池条 + 尾注。
+ * 行为：点空白处关、Esc 关、5.2s 自动关、入场 200ms 缩放淡入（右上角原点）。 */
+function BatteryDetail({
+  level,
+  charging,
+  low,
+  onClose,
+}: {
+  level: number;
+  charging: boolean;
+  low: boolean;
+  onClose: () => void;
+}) {
+  const [entered, setEntered] = useState(false);
+
+  useEffect(() => {
+    const raf = requestAnimationFrame(() => setEntered(true));
+    const timer = window.setTimeout(onClose, 5200); // 自动关
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    document.addEventListener('keydown', onKey);
+    return () => {
+      cancelAnimationFrame(raf);
+      window.clearTimeout(timer);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [onClose]);
+
+  const pct = Math.round(Math.min(100, Math.max(0, level)));
+  const tone = charging ? 'text-[#30D158]' : low ? 'text-[#FF453A]' : 'text-black/55 dark:text-white/55';
+
+  return createPortal(
+    <>
+      {/* 全屏背板：点空白处关闭（portal 出了状态栏的 pointer-events-none 容器） */}
+      <button
+        type="button"
+        aria-label="关闭电量详情"
+        data-testid="battery-detail-backdrop"
+        className="fixed inset-0 z-[300] cursor-default"
+        onClick={onClose}
+      />
+      <div
+        role="dialog"
+        aria-label={`电量详情 ${pct}%`}
+        data-testid="battery-detail"
+        className="pointer-events-auto fixed right-[10px] top-[58px] z-[310] w-[236px] rounded-[24px] border border-black/[0.07] bg-white/95 p-5 shadow-[0_16px_48px_rgba(0,0,0,0.22)] backdrop-blur-2xl transition-[opacity,transform] duration-200 ease-out dark:border-white/[0.09] dark:bg-zinc-900/[0.95] dark:shadow-[0_16px_48px_rgba(0,0,0,0.55)]"
+        style={{
+          opacity: entered ? 1 : 0,
+          transform: entered ? 'translateY(0) scale(1)' : 'translateY(-6px) scale(0.94)',
+          transformOrigin: 'top right',
+        }}
+      >
+        {/* 状态徽标行 */}
+        <div className={`flex items-center justify-center gap-[5px] text-[13px] font-semibold ${tone}`}>
+          {charging && <Zap aria-hidden="true" className="h-[13px] w-[13px] fill-current" />}
+          {charging ? '充电中' : low ? '电量偏低' : '电池供电'}
+        </div>
+        {/* 大号百分比 */}
+        <div className="mt-1 text-center tabular-nums tracking-tight text-black dark:text-white">
+          <span className="text-[46px] font-semibold leading-none">{pct}</span>
+          <span className="ml-[2px] text-[20px] font-medium opacity-40">%</span>
+        </div>
+        {/* iOS 小组件风格大电池条（描边槽+填充+右凸点，同款配色规则） */}
+        <div className="mt-[14px] flex items-center justify-center">
+          <span className="relative flex items-center">
+            <span className="relative block h-[13px] w-[168px] overflow-hidden rounded-[4px] border-[1.5px] border-black/25 bg-black/[0.05] dark:border-white/40 dark:bg-white/[0.12]">
+              <span
+                className={`absolute inset-y-[1.5px] left-[1.5px] rounded-[2px] transition-all duration-500 ${
+                  charging ? 'bg-[#30D158]' : low ? 'bg-[#FF453A]' : 'bg-black dark:bg-white'
+                }`}
+                style={{ width: `calc((100% - 3px) * ${pct / 100})` }}
+              />
+            </span>
+            <span aria-hidden="true" className="ml-[2px] h-[6px] w-[2px] rounded-[1px] bg-black/25 dark:bg-white/40" />
+          </span>
+        </div>
+        {/* 尾注 */}
+        <p className="mt-[13px] text-center text-[11.5px] leading-relaxed text-black/45 dark:text-white/45">
+          {low && !charging ? '电量不足 20%，建议尽快连接充电器' : '设备真实电量 · 轻点空白处关闭'}
+        </p>
+      </div>
+    </>,
+    document.body
+  );
+}
+
 /**
  * 1:1 仿 iOS 状态栏：左侧实时时间（每秒刷新，24 小时制），右侧信号/WiFi/真实电量。
  * 电量使用 Battery Status API（@/lib/ios/battery），低于 20% 仅电量填充变红（百分比与外框不变色）。
  * 文字颜色由 useLightForeground 判定（默认按背景顶部区域实测明暗，与 Home 横杠同一套逻辑但区域不同）。
+ *
+ * v2.4.12：点按电池图标弹出 iOS 风格「电量详情」卡片（大号百分比+电池条+充电状态），
+ * 点空白处/5 秒自动/Esc 均可关闭——inside 模式数字小，弹窗给出精确电量。
  *
  * 第二十三轮反馈：灵动岛音乐弹窗（小/大）可见期间，只有「移动数据」（信号）图标消失，
  * WiFi/电量保留（真机 iOS 灵动岛同语义）；弹窗消失后图标恢复。
@@ -199,6 +281,9 @@ export default function StatusBar() {
   // 音乐灵动岛：仅隐藏信号（第二十三轮口径）；美团/淘宝配送灵动岛：信号 + WiFi 一起隐藏，仅保留电量（最新反馈）
   const hideSignal = musicIslandVisible || mtIslandVisible || tbIslandVisible;
   const hideWifi = mtIslandVisible || tbIslandVisible;
+  // v2.4.12 电量详情弹窗开关（点状态栏电池图标）
+  const [batteryOpen, setBatteryOpen] = useState(false);
+  const closeBatteryDetail = useCallback(() => setBatteryOpen(false), []);
 
   const now = clockSecond > 0 ? new Date(clockSecond * 1000) : null;
   const level = battery?.level ?? 100;
@@ -224,9 +309,24 @@ export default function StatusBar() {
         </svg>
         )}
         {/* 电量图标常驻（未就绪时按 100% 绘制；缓存已在首帧绘制前同步恢复，不再闪断）。
-            v2.4.10 三模式：outside=数字+% 在外 / inside=数字嵌电池内（iOS 16+） / none=无百分比 */}
-        <BatteryIcon level={level} charging={battery?.charging ?? false} low={low} mode={batteryPercent} light={lightText} />
+            v2.4.10 三模式：outside=数字+% 在外 / inside=数字嵌电池内（v2.4.12 机主规格版） / none=无百分比。
+            v2.4.12 点按弹出电量详情卡（pointer-events-auto 打通状态栏点击；命中区上下扩 9px 便于点按） */}
+        <button
+          type="button"
+          aria-label={`电量 ${Math.round(level)}%，点按查看电量详情`}
+          aria-haspopup="dialog"
+          aria-expanded={batteryOpen}
+          data-testid="statusbar-battery"
+          onClick={() => setBatteryOpen((v) => !v)}
+          className="pointer-events-auto flex cursor-pointer select-none items-center rounded-lg py-[9px] outline-none transition-opacity duration-150 active:opacity-55 focus-visible:ring-2 focus-visible:ring-current/60"
+        >
+          <BatteryIcon level={level} charging={battery?.charging ?? false} low={low} mode={batteryPercent} light={lightText} />
+        </button>
       </div>
+      {/* 电量详情弹窗（portal 到 body；任意电量百分比模式下都可点看精确电量） */}
+      {batteryOpen && (
+        <BatteryDetail level={level} charging={battery?.charging ?? false} low={low} onClose={closeBatteryDetail} />
+      )}
     </div>
   );
 }

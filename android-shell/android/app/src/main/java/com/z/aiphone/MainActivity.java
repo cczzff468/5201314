@@ -68,32 +68,78 @@ public class MainActivity extends BridgeActivity {
     public void onStop() {
         super.onStop();
         appInForeground = false;
+        // v2.4.12 撤销补藏哨兵：退后台后不再延迟补藏（免得切回来瞬问多余 hide 抢在布局前）
+        reHideHandler.removeCallbacks(reHideRunnable);
     }
 
-    /** v2.4.11 ③ 系统状态栏重申隐藏：切后台/权限弹窗等场景系统条可能被拉回，回来即再藏。
-     *  onCreate 里已用同一逻辑首迷生效（含 FLAG_FULLSCREEN 双保险），此处只做重申。
-     *  （public：BridgeActivity 的 onResume 为 public，protected 会降权编译不过） */
-    @Override
-    public void onResume() {
-        super.onResume();
+    /** v2.4.12 全屏隐藏终极加固（机主反馈「还是这样，没有变化」）：新旧两条通道同时下发——
+     *  ① 传统 systemUiVisibility：FULLSCREEN + IMMERSIVE_STICKY + LAYOUT_STABLE/LAYOUT_FULLSCREEN
+     *    （API 30 起废弃但实际仍生效；部分国产 ROM 只认这条；IMMERSIVE_STICKY 让顶部滑出后
+     *    自动收回，防部分 ROM「滑出一次就赖着不走」）
+     *  ② WindowInsetsControllerCompat.hide(statusBars)（API 30+ 官方路径 + 兼容包装）
+     *  ③ FLAG_FULLSCREEN 窗口级兑底。三条全发，任何 ROM/任何场景命中其一即全屏。 */
+    private void hideSystemBarsRobust() {
         try {
-            WindowCompat.getInsetsController(getWindow(), getWindow().getDecorView())
-                    .hide(WindowInsetsCompat.Type.statusBars());
+            View decor = getWindow() != null ? getWindow().getDecorView() : null;
+            if (decor != null) {
+                decor.setSystemUiVisibility(
+                        View.SYSTEM_UI_FLAG_FULLSCREEN
+                                | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+                                | View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                                | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN);
+            }
+        } catch (Throwable ignored) {
+        }
+        try {
+            WindowInsetsControllerCompat bars = WindowCompat.getInsetsController(
+                    getWindow(), getWindow().getDecorView());
+            bars.setSystemBarsBehavior(
+                    WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
+            bars.hide(WindowInsetsCompat.Type.statusBars());
+        } catch (Throwable ignored) {
+        }
+        try {
+            getWindow().addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN);
         } catch (Throwable ignored) {
         }
     }
 
-    /** v2.4.11 ③ 窗口重获焦点（权限弹窗关闭/键盘收起等）时再藏一次，确保全屏不回退 */
+    /** v2.4.12 补藏哨兵：回前台/重获焦点后系统条可能被权限弹窗、转场动画晚一拍拉回——
+     *  0.8s 与 2.5s 两次延迟补藏（onStop 撤销；用户主动滑出的瞬时条不受影响：
+     *  IMMERSIVE_STICKY 自己会收）。 */
+    private final android.os.Handler reHideHandler = new android.os.Handler(android.os.Looper.getMainLooper());
+    private final Runnable reHideRunnable = this::hideSystemBarsRobust;
+
+    private void scheduleRehideWatchdog() {
+        reHideHandler.removeCallbacks(reHideRunnable);
+        reHideHandler.postDelayed(reHideRunnable, 800L);
+        reHideHandler.postDelayed(reHideRunnable, 2500L);
+    }
+
+    /** v2.4.12 ③ 系统状态栏重申隐藏：切后台/权限弹窗等场景系统条可能被拉回，回来即再藏
+     *  （onCreate 里已用同一逻辑首帧生效，此处 + 延迟哨兵双保险）。
+     *  （public：BridgeActivity 的 onResume 为 public，protected 会降权编译不过） */
+    @Override
+    public void onResume() {
+        super.onResume();
+        hideSystemBarsRobust();
+        scheduleRehideWatchdog();
+    }
+
+    /** v2.4.12 ③ 窗口重获焦点（权限弹窗关闭/键盘收起等）时再藏一次，确保全屏不回退 */
     @Override
     public void onWindowFocusChanged(boolean hasFocus) {
         super.onWindowFocusChanged(hasFocus);
         if (hasFocus) {
-            try {
-                WindowCompat.getInsetsController(getWindow(), getWindow().getDecorView())
-                        .hide(WindowInsetsCompat.Type.statusBars());
-            } catch (Throwable ignored) {
-            }
+            hideSystemBarsRobust();
         }
+    }
+
+    /** v2.4.12 ③ 旋屏/系统配置变化（manifest 已声明 configChanges 不重载页面）后再申全屏 */
+    @Override
+    public void onConfigurationChanged(android.content.res.Configuration newConfig) {
+        super.onConfigurationChanged(newConfig);
+        hideSystemBarsRobust();
     }
 
     /** 音量键拦截：阅读器开启「音量键翻页」时消费音量键（不调系统音量），
@@ -175,18 +221,9 @@ public class MainActivity extends BridgeActivity {
         // 根因就是走网页层采样链），且本 App 所有界面都在同一个 WebView 窗口里——天然全界面一致。
         // BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE：从顶部边缘滑动可临时呼出（浮层展示、几秒后
         // 自动收起，不挤压内容）；导航栏保持显示（底部手势区不变）。
-        try {
-            WindowInsetsControllerCompat bars = WindowCompat.getInsetsController(
-                    getWindow(), getWindow().getDecorView());
-            bars.setSystemBarsBehavior(
-                    WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
-            bars.hide(WindowInsetsCompat.Type.statusBars());
-            // v2.4.11 ② 保险：附加传统 FLAG_FULLSCREEN（API 30 起废弃但兼容保留——
-            // 极旧 ROM / 部分国产 ROM 只认这个；与 edge-to-edge 同用无害）
-            getWindow().addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN);
-        } catch (Throwable ignored) {
-            // 极旧 ROM 拒绝时静默：styles.xml 已加 windowFullscreen 主题项兜底
-        }
+        // v2.4.12 改走 hideSystemBarsRobust()：传统 systemUiVisibility（IMMERSIVE_STICKY，
+        // 部分国产 ROM 只认这条、顶边滑出后自动收回）+ 兼容控制器 + FLAG_FULLSCREEN 三通道齐发。
+        hideSystemBarsRobust();
 
         // v2.4.6 ② 安全区监听：缓存最新 insets + 把 dp 值经 evaluateJavascript 推给
         // window.__aiphoneApplySafeArea（网页侧更新 --app-sat/-sar/-sab/-sal,
@@ -306,8 +343,8 @@ public class MainActivity extends BridgeActivity {
         public String getShellInfo() {
             JSONObject o = new JSONObject();
             try {
-                o.put("versionCode", 75);
-                o.put("versionName", "2.4.11");
+                o.put("versionCode", 76);
+                o.put("versionName", "2.4.12");
                 o.put("fullscreen", true); // 系统状态栏隐藏（全屏）标记
             } catch (Exception ignored) {
             }

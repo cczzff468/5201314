@@ -395,10 +395,10 @@ export function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
           </div>
         </div>
 
-        {/* v2.4.10 电量百分比显示方式（机主需求：设置里三选一）：
-            不显示（只有电池图标）/ 电池图标外部（原样式，默认）/ 电池图标内部（iOS 16+ 同款，
-            按机主参考图：纯填充块无描边、数字嵌电池内无 % 号）。每行左侧是状态栏同款组件的
-            实时小预览（固定 67% 电量示例），选中即全局状态栏电量实时切换、立即持久化。 */}
+        {/* v2.4.10 电量百分比显示方式（机主需求：设置里三选一；v2.4.12 inside 按机主 HTML/CSS
+            规格重写）：不显示（只有电池图标）/ 电池图标外部（原样式，默认）/ 电池图标内部
+            （2px 描边电池+黑填充+浅灰电量槽，数字嵌电池内靠左 3px 黑白反色）。每行左侧是
+            状态栏同款组件的实时小预览（固定 67% 电量示例），选中即全局状态栏电量实时切换、立即持久化。 */}
         <div className="mx-4 mt-4 divide-y divide-black/[0.05] overflow-hidden rounded-[22px] bg-white/55 shadow-[0_8px_28px_rgba(17,24,39,0.06)] ring-1 ring-white/70 backdrop-blur-2xl dark:divide-white/[0.06] dark:bg-white/[0.06] dark:ring-white/[0.09]">
           {([
             { value: 'none', label: '不显示' },
@@ -415,7 +415,7 @@ export function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
               onClick={() => setBatteryPercent(o.value)}
               className="flex min-h-[52px] w-full items-center gap-3 px-4 text-left transition-colors active:bg-muted/50"
             >
-              {/* 实时小预览：状态栏同款电池（固定 67% 示例，黑前景/白数字与参考图一致） */}
+              {/* 实时小预览：状态栏同款电池（固定 67% 示例，v2.4.12 规格版：黑描边黑填充灰槽） */}
               <span className="flex h-[20px] w-[76px] shrink-0 items-center justify-center text-foreground">
                 <BatteryIcon level={67} charging={false} low={false} mode={o.value} light={false} />
               </span>
@@ -427,7 +427,7 @@ export function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
           ))}
         </div>
         <p className="mt-2 px-8 text-[11.5px] leading-relaxed text-muted-foreground">
-          状态栏电量的显示方式，选完即时生效；「电池图标内部」为参考图同款分段式：实心填充块+浅灰电量槽，数字嵌在填充块上。
+          状态栏电量的显示方式，选完即时生效；「电池图标内部」为参考图同款：黑色描边电池 + 黑色填充 + 浅灰电量槽，数字嵌在电池内靠左、按填充边界黑白自动反色。点按状态栏电池图标可弹出电量详情卡片。
         </p>
 
         {/* 悬浮工具（v72）：两个开关控制手机右下角的可拖拽悬浮球——
