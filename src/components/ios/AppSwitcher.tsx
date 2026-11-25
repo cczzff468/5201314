@@ -10,7 +10,7 @@ import {
   WALLPAPER_PRESETS,
   type AppId,
 } from '@/lib/ios/store';
-import { APP_MAP, AppIconById, AppStaticIcon } from '../apps/registry';
+import { APP_MAP, AppIconById } from '../apps/registry';
 // v1.9.21 吃醋锁网页降级：冻结 App 的多任务卡片盖「已冻结」遮罩（点击仍会被 openApp/switchToApp 拦截弹全屏提示）
 import { isWebAppFrozen, webFrozenBy, subscribeWebLock, getWebLockVersion } from '@/lib/ios/web-app-lock';
 // 第三十四轮：Android WebView 渲染降级（backdrop-filter 光栅化缺陷 → 切换器背景改静态缩图模糊）
@@ -56,7 +56,12 @@ export default function AppSwitcher() {
    *  （如 360×800 WebView：64+卡片 541+图标行 52+提示 22+横杠 30 超出视口）卡片
    *  底部被硬裁（机主截图反馈「后台应用卡片有点问题：卡到一半被切、底部圆角没了」），
    *  现按可用高自适应卡片尺寸（保持 390:844 等比，宽度随之收窄），任何屏都完整展示 */
+  // 第三十三轮：卡片行可用高度实测（打开后 rAF 首帧量一次 + ResizeObserver 跟随
+  // 旋屏/窗口变化；老 WebView 无 RO 时一次性测量仍生效，旋屏后重开重测）。
+  // 量的是滚动容器内容盒高——卡片净可用 = 容器高 - 上下 py-12（96px 阴影呼吸位）。
+  // 第三十六轮：同步量容器宽（卡片「太小了」按机主反馈放大：宽 78% 屏幅，上限 340）。
   const [availH, setAvailH] = useState<number | null>(null);
+  const [availW, setAvailW] = useState<number | null>(null);
   const [drag, setDrag] = useState<{ id: AppId; dy: number } | null>(null);
   const [killing, setKilling] = useState<AppId | null>(null);
 
@@ -81,6 +86,16 @@ export default function AppSwitcher() {
     return () => cancelAnimationFrame(raf);
   }, [open]);
 
+  // 第三十六轮：切换器打开期间全局禁用 backdrop-filter（html.task-switching）——
+  // WebView 卡片改实况渲染真实界面后，App 内大量 backdrop-blur 元素在旧 Chromium
+  // 光栅化下会塔灰块（机主真机实测）；打开期间整页 backdrop-filter 临时关闭
+  // （全部被切换器全屏覆盖遮住，无视觉感知），关闭/卸载时同步摘除。
+  useEffect(() => {
+    if (!open) return;
+    document.documentElement.classList.add('task-switching');
+    return () => document.documentElement.classList.remove('task-switching');
+  }, [open]);
+
   // #64：组件卸载时清理 onScroll rAF 节流挂起的回调
   useEffect(() => {
     return () => {
@@ -99,7 +114,10 @@ export default function AppSwitcher() {
     const el = scrollRef.current;
     if (!el) return;
     let ro: ResizeObserver | null = null;
-    const measure = () => setAvailH(el.clientHeight);
+    const measure = () => {
+      setAvailH(el.clientHeight);
+      setAvailW(el.clientWidth);
+    };
     const raf = requestAnimationFrame(measure);
     try {
       ro = new ResizeObserver(measure);
@@ -139,12 +157,17 @@ export default function AppSwitcher() {
   };
 
   const CARD_GAP = 20; // gap-5
-  // 第三十三轮：卡片尺寸自适应——宽 250 起步按 390:844 等比（541 高）；短屏机型
-  // 可用高不足时【等比收窄宽度】保证卡片完整不被裁（保持与真机屏幕 1:1 比例）
-  const CARD_H_MAX = Math.round((SCREEN_H * 250) / SCREEN_W);
-  const budgetH = availH != null ? availH - 96 : CARD_H_MAX; // 减 py-12×2（96px）
-  const CARD_H = Math.max(320, Math.min(CARD_H_MAX, budgetH));
-  const CARD_W = Math.round((SCREEN_W * CARD_H) / SCREEN_H);
+  // 第三十六轮：卡片放大（机主反馈「卡片太小了」）——目标宽 = 容器宽 78%
+  // （iOS 切换器同比例），上限 340；再受可用高预算约束等比收窄（短屏机型完整展示）。
+  // （第三十三轮旧基准：固定 250 起步 → 升到 78% 屏幅，390 逻辑屏上≈304、短屏自适应）
+  const CARD_W_TARGET = availW != null ? Math.round(availW * 0.78) : 305;
+  const CARD_W_BASE = Math.min(340, Math.max(250, CARD_W_TARGET));
+  const budgetH = availH != null ? availH - 96 : null; // 减 py-12×2（96px 阴影呼吸位）
+  const CARD_W =
+    budgetH != null
+      ? Math.min(CARD_W_BASE, Math.max(220, Math.round((budgetH * SCREEN_W) / SCREEN_H)))
+      : CARD_W_BASE;
+  const CARD_H = Math.round((SCREEN_H * CARD_W) / SCREEN_W);
   const PREVIEW_SCALE = CARD_W / SCREEN_W;
   const STEP = CARD_W + CARD_GAP;
 
@@ -380,43 +403,15 @@ export default function AppSwitcher() {
                     <span className="text-[11px] text-white/55">哄好 TA 或等倒计时结束才能打开</span>
                   </div>
                 )}
-                {/* 卡片预览（第三十五轮 WebView 分支）：
-                    - 浏览器：实时 App 预览——按真机 390x844 尺寸渲染后整体等比缩小（1:1 还原界面观感，不可交互；相机特殊处理避免重复占用摄像头）；
-                    - Android WebView：【静态卡片脸】——实时预览在毛玻璃/液态图标样式下会在旧
-                      Chromium 光栅化里塌成灰块（机主真机截图：卡片内容全灰无文字；第三十四轮
-                      只降级了背景，卡片本体仍实况渲染 App 内一堆 backdrop-blur 元素），改为
-                      零 backdrop-filter 的静态脸：柔和渐变底 + 居中大图标（AppStaticIcon）+
-                      App 名 + 底部 home 横杠——彻底免疫塌缩，视觉上仍是干净的 App 卡片 */}
+                {/* 卡片预览（第三十六轮：统一实况渲染真实界面）：
+                    按 390x844 真实尺寸渲染后整体等比缩放进卡片（1:1 还原界面观感，
+                    不可交互；相机特殊处理避免重复占用摄像头）——Android WebView 同样
+                    实况渲染（机主要求「后台卡片要真实的界面」）；灰块风险由切换器
+                    打开期间全局禁用 backdrop-filter（html.task-switching）兜底，
+                    背景 WebView 侧仍走第三十四轮静态缩图模糊（超大 backdrop 采样
+                    是实锤缺陷，小面积 App 内元素经全局禁用后无碍）。 */}
                 <div className="pointer-events-none h-full w-full select-none overflow-hidden">
-                  {webview ? (
-                    <div
-                      className="relative flex h-full w-full flex-col items-center justify-center"
-                      style={{
-                        background: lightGlass
-                          ? 'linear-gradient(180deg, #FBFBFD 0%, #F2F2F5 100%)'
-                          : 'linear-gradient(180deg, #1E1E22 0%, #26262B 100%)',
-                      }}
-                    >
-                      {/* 居中大图标 + App 名 */}
-                      <span className="block h-[76px] w-[76px]">
-                        <AppStaticIcon id={id} />
-                      </span>
-                      <span
-                        className={`mt-[14px] text-[15px] font-medium ${
-                          lightGlass ? 'text-black/70' : 'text-white/85'
-                        }`}
-                      >
-                        {meta.name}
-                      </span>
-                      {/* 底部 home 横杠（快照观感收尾） */}
-                      <span
-                        aria-hidden="true"
-                        className={`absolute bottom-[10px] left-1/2 h-[5px] w-[110px] -translate-x-1/2 rounded-full ${
-                          lightGlass ? 'bg-black/25' : 'bg-white/40'
-                        }`}
-                      />
-                    </div>
-                  ) : id === 'camera' ? (
+                  {id === 'camera' ? (
                     <div className="flex h-full w-full flex-col items-center justify-center gap-3 bg-black text-white/35">
                       <Camera className="h-12 w-12" strokeWidth={1.2} />
                       <span className="text-[13px]">相机</span>

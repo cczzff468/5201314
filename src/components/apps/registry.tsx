@@ -565,34 +565,6 @@ export function AppIconById({ id, variant = 'auto' }: { id: AppId; variant?: 'au
   return <LineIcon variant={variant}>{GLYPHS[id]}</LineIcon>;
 }
 
-/** WebView 静态卡片图标（第三十五轮）：Android WebView 多任务卡片降级预览专用——
- *  【零 backdrop-filter】的静态图标（有实体图直铺 PNG；无线条图 App 用实体深色底座
- *  + 线条 glyph），不受毛玻璃/液态图标样式影响——WebView 旧 Chromium 下任何
- *  backdrop-filter 都有光栅化塌缩风险（机主真机截图：卡片内容灰块），静态图标
- *  从根本上免疫。尺寸由外层容器控制（卡片静态脸 76px 级别）。 */
-export function AppStaticIcon({ id }: { id: AppId }) {
-  const image = IMAGES[id];
-  if (image) {
-    return (
-      <span className="relative block h-full w-full overflow-hidden rounded-[17px] shadow-[0_4px_14px_rgba(0,0,0,0.18)] ring-1 ring-black/[0.08]">
-        <img
-          src={image}
-          alt=""
-          loading="lazy"
-          decoding="async"
-          draggable={false}
-          className="block h-full w-full scale-[1.07] select-none object-cover"
-        />
-      </span>
-    );
-  }
-  return (
-    <span className="flex h-full w-full items-center justify-center rounded-[17px] bg-[linear-gradient(160deg,#3A3A40_0%,#232327_100%)] text-[#F4F4F6] shadow-[inset_0_1px_0_rgba(255,255,255,0.14),0_4px_14px_rgba(0,0,0,0.20)] ring-1 ring-white/[0.12] [&>svg]:h-[46%] [&>svg]:w-[46%]">
-      {GLYPHS[id]}
-    </span>
-  );
-}
-
 /** 图标样式选择器的固定预览（主题页「图标样式」三选一）：每张预览永远按自己代表的
  *  样式渲染（不随全局 iconStyle 翻转），用户在任意选中态下都能对比三种样式的真实长相 */
 export function AppStylePreview({ id, style }: { id: AppId; style: IconStyle }) {
