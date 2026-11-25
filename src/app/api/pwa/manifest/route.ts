@@ -21,7 +21,7 @@ export async function GET() {
 
   const manifest = {
     id: '/',
-    name: 'Cove — 仿 iOS 智能助手',
+    name: 'Cove',
     short_name: 'Cove',
     description:
       '高还原度 iOS 风格 AI 恋人手机：微信/QQ/信息三端聊天、朋友圈、情侣空间 3D 小屋、网易云音乐、美团、淘宝、塔罗等 20+ 应用；数据本地优先存于浏览器 IndexedDB，可安装到主屏幕全屏使用、断网也能打开。',

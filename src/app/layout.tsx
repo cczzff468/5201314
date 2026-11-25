@@ -9,7 +9,7 @@ const geistSans = Geist({
 });
 
 export const metadata: Metadata = {
-  title: "Cove — 仿 iOS 智能助手",
+  title: "Cove",
   description:
     "高还原度 iOS 风格 AI 聊天手机：灵动岛状态栏、真实电量、相册、相机、计算器、时钟、音乐、天气、备忘录、日历、录音机、浏览器、设置。本地优先，数据存于 IndexedDB。",
   keywords: ["Cove", "iOS", "AI聊天", "仿苹果", "PWA", "IndexedDB", "Next.js"],
