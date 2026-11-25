@@ -3728,3 +3728,24 @@ Stage Summary:
 - 四开屏主题全实测渲染（star/mist 回归无恙+moon 雨窗/chat 对话新主题）；选择器 2×2 四卡+选完即播预览+localStorage 持久化+favicon 即时换 ✓
 - 电池 inside 模式胶囊上下顶满+圆角圆润（弹窗预览+状态栏双实测）
 - 三 App 图标满幅干净（VLM 三枚对比：拱门 9/山月 8/月夜 8.5 分，风格统一同系列）；APK code 82 重打含新图标+暖白原生闪屏
+
+---
+Task ID: 36（第三十五轮 · v2.4.19）
+Agent: 主控 Agent（Z.ai Code）
+Task: 机主六项反馈——电池图标内部再调（实心胶囊不要圆角/边框圆角但填满·左边没填满/充电边框不变绿/低电不变红）+ 开屏动画冷启动先显示另一个几秒后才变所选 + 对话开屏再美化（背景+气泡）+ 删除长按主屏唤起语音助手 + 删除电量百分比下方提示 + App 图标换成机主发的两张参考图（IMG_193210 云朵C / 1795606141984 弧C微笑）+ 切毛玻璃/液态图标后后台卡片仍灰块（190830 截图）
+
+Work Log:
+- 【电池 inside 三调】①实心胶囊【方角】：填充层圆角 4→0（方角矩形被本体 overflow-hidden 圆角边框裁切——「边框圆、填充方而满」）；②【填满左边】：填充 left 内缩 1→0、宽度基数 26px、fill≥100 时 left/right 双 0 贴满四边（之前左侧恒留 1px 空隙）；③【无状态色】：accent（充绿 #30D158/低红 #FF453A）整体下线——边框/填充/凸点恒 currentColor（浅色黑/深色白），充电仅保留数字右侧小闪电；数字色/投影同步简化（无充低白字分支）；agent-browser 实测：黑胶囊白字 100、方角填满左右、零绿零红 ✓
+- 【开屏首帧错主题根修】机主「刚打开出现的是另一个、过几秒才显示我选择的」：APK WebView 冷启动 SSR HTML 先于 JS 水合绘制（慢网络缺口数秒），此前 SSR 恒按默认 star 渲染→水合前用户看到错误主题。修法=三写持久化：①splash-theme.ts 增 cookie（writeSplashThemeCookie 一年 lax）②setSplashTheme 双写 localStorage+cookie ③page.tsx 改 async server component await cookies() 读 cove-splash-theme 把 initialTheme 烤进 SSR HTML ④BootSplash 增 initialTheme prop（useState 初始化优先级 forceTheme＞initialTheme＞star）+水合后仍按 localStorage 校准并自愈补写 cookie ⑤store 水合时 cookie 自愈（老用户升级首启下次即正确）；splash-theme.ts 改同构模块（去 'use client'——server/client 两侧可导入，window 访问全带守卫）；curl 三态实测：无 cookie=star、cookie=moon=雨窗诗行、cookie=chat=气泡对话——SSR HTML 直接烤出正确主题 ✓
+- 【对话开屏再美化】背景：纯白→暖米白纸底+蜜桃(左上)/雾蓝(右下)双柔光晕大 blur 缓漂+三颗微光点呼吸；新增顶部聊天头部（三圆拼云笑脸 SVG 头像 cove3-float 轻浮+Cove 名+绿点「在线 · 等你的消息」）；气泡升级：右侧机主炭黑渐变(#35353E→#1D1D23)+内顶高光+深投影、左侧白底细 ring+影子+每条配迷你云朵头像（22px 同族 SVG）；新增「正在输入」三点弹跳气泡（cove4-typing 1.05s 错相 0.16s）收尾接棒；结尾爱心分隔线轻浮（cove4-heart-float）；时间线压缩 i*260→i*230（收尾提前 300ms 可见）；时间戳对比度提升（#B4B4BA→#9E9EA5、9px）；chat 竖排微字移除（与右侧气泡打架）；agent-browser 全序列实测：头部/双色气泡/头像/输入中/爱心字标全渲染 ✓
+- 【长按语音助手删除】HomeScreen：空白长按恢复纯「420ms 进编辑」（删 600ms 助手阈值 holdOn 分支/420~600ms 松手补偿/一次性提示胶囊+6s 计时/Mic 图标）；agent-voice-ball：删 openSeq 订阅唤起 effect+holdEnabled 层挂载分支（layerOn 只随悬浮球开关，点球/喊唤醒名仍可唤起）；assistant-hold.ts 模块整体删除；实测：主屏空白按住 750ms 直接进编辑模式（图标抖动+完成胶囊），无语音助手浮层 ✓
+- 【电量百分比提示删除】设置入口行下方「状态栏电量的显示方式，点上方选择弹窗即时生效；点按状态栏电池图标可弹出电量详情卡片。」说明文字整段删除；实测该行下方直接是 悬浮工具 分组，零残留 ✓
+- 【App 图标换机主参考图】两张参考图 SVG 矢量逐元素重绘（scripts/svg-r35/ 源文件入库）：①云朵 C（1 号默认·IMG_193210）=白底 #FDFDFD+灰胖月牙 C（双同心粗弧叠描边：灰 stroke 92+白 stroke 80→两缘各 6px 轮廓、圆头端帽=圆润端点）环抱云朵笑脸（Material 云路径均匀放大 16.25×白填充灰描边 0.37+眼/微笑/腮红，右缘吃进 C 内缘 ~60px 参考图同款白填充遮挡）+左上对话气泡（单闭合路径圆+右下尾巴+内点）+cove 单线字标（c 弧/o 圆/v 折/e 弧+横杠，基线 880 字高 84 描边 10 圆头）；②弧 C 微笑（2 号·1795606141984）=米白底 #F4F4F2+径向渐变柔影+石板蓝 #8B93A6 C 弧（r118 描边 16.5 圆头±38° 开口朝右）+两端点圆钮+弧内上侧深石板眼点 #5F6779+独立微笑浅弧+宽字距 cove 小字标（字高 67 描边 8 深石板 #4E5670）；rebuild-cove-icons-r35.mjs 全链重建：web icon-{1,2}-{192,256,512,1024}+maskable+apple-touch+icon-3 全套覆写为 1 号内容（历史 '3' 引用兜底）+APK mipmap 五密度 foreground/方/圆+ic_launcher_background #FDFDFD+11 密度原生 splash（云朵 C+Cove 衬线字纸白底）；VLM 对比两枚：云朵笑脸/气泡/字标全渲染与参考一致、弧 C 端钮/眼点/微笑/字标全一致 ✓
+- 【图标系统配套】设置改两选一（APP_ICON_OPTIONS 两项：云朵 C 云朵笑脸·环抱月牙 C / 弧 C 微笑 极简弧线·圆点小脸；弹窗 grid-cols-3→2、行副题三选一→两选一）；store：appIcon 加载归一（'3' 残留→'1'）、setAppIcon 拒绝 '3'；【破缓存 ?v=35】PNG 全套换新后浏览器可能还缓存旧图（agent-browser 实测弹窗曾显示旧拱门图）——设置行/弹窗/manifest 路由/layout icons/apple-touch 全部加 ?v=35 强制拉新；实测弹窗两枚新图标渲染正确、点选 2 号行预览 29px 即时换新 ✓
+- 【多任务卡片灰块根修（第二轮）】机主 190830 截图：第三十四轮只降级了切换器【背景】（静态缩图模糊），卡片本体仍实况渲染 390×844 App 组件——毛玻璃/液态图标样式下 App 内部一堆 backdrop-blur 元素在旧 Chromium 光栅化预算崩→卡片内容全灰无文字。修法=AppSwitcher 卡片 WebView 分支【静态卡片脸】：零 backdrop-filter——lightGlass 渐变底（#FBFBFD→#F2F2F5 / #1E1E22→#26262B）+居中 76px AppStaticIcon+App 名 15px+底部 110×5 home 横杠；registry 新增 AppStaticIcon（有 image 直铺 PNG squircle 17px 圆角 ring/无图 App 实体深色渐变底座+glyph 46% 缩放——不随全局图标样式翻转）；「正在使用」徽章/冻结遮罩 WebView 下免 backdrop-blur；agent-browser 模拟 data-app-native 实测：WebView=静态脸（绿电话图标+电话名+横杠、零灰块）、浏览器=实况预览（拨号键盘完整渲染）双路径 ✓
+- 版本 2.4.19 / versionCode 83（app-version.ts 2.4.19/83+build.gradle 83+getShellInfo 桥 83 三处对齐；补 2.4.18 历史三条）；APK v2.4.19 重打成功（public/Cove.apk 4.2M；unzip 抽取 mipmap-xxxhdpi 实测=新云朵 C 图标 ✓）
+
+Stage Summary:
+- 六项全部闭环：电池方角填满无状态色（实测）、开屏 cookie SSR 烤首帧（curl 三主题验证）、对话开屏头部/渐变气泡/输入中/爱心收尾（实测）、长按助手删除进编辑直达（实测）、提示文字零残留（实测）、图标双选一 SVG 重绘+APK 全链重打（VLM 双枚对比+弹窗实测+APK 抽包验证）
+- 多任务卡片 WebView 静态脸第二轮根修：卡片内容从实况渲染改零 backdrop-filter 静态预览——彻底免疫旧 Chromium 光栅化塌缩；浏览器端实况预览无回归
+- lint 0 errors；dev server 无错误；全流程 agent-browser 端到端验证（解锁→设置→弹窗→切换器→编辑模式）
