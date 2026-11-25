@@ -86,16 +86,6 @@ export default function AppSwitcher() {
     return () => cancelAnimationFrame(raf);
   }, [open]);
 
-  // 第三十六轮：切换器打开期间全局禁用 backdrop-filter（html.task-switching）——
-  // WebView 卡片改实况渲染真实界面后，App 内大量 backdrop-blur 元素在旧 Chromium
-  // 光栅化下会塔灰块（机主真机实测）；打开期间整页 backdrop-filter 临时关闭
-  // （全部被切换器全屏覆盖遮住，无视觉感知），关闭/卸载时同步摘除。
-  useEffect(() => {
-    if (!open) return;
-    document.documentElement.classList.add('task-switching');
-    return () => document.documentElement.classList.remove('task-switching');
-  }, [open]);
-
   // #64：组件卸载时清理 onScroll rAF 节流挂起的回调
   useEffect(() => {
     return () => {
@@ -406,11 +396,13 @@ export default function AppSwitcher() {
                 {/* 卡片预览（第三十六轮：统一实况渲染真实界面）：
                     按 390x844 真实尺寸渲染后整体等比缩放进卡片（1:1 还原界面观感，
                     不可交互；相机特殊处理避免重复占用摄像头）——Android WebView 同样
-                    实况渲染（机主要求「后台卡片要真实的界面」）；灰块风险由切换器
-                    打开期间全局禁用 backdrop-filter（html.task-switching）兜底，
-                    背景 WebView 侧仍走第三十四轮静态缩图模糊（超大 backdrop 采样
-                    是实锤缺陷，小面积 App 内元素经全局禁用后无碍）。 */}
-                <div className="pointer-events-none h-full w-full select-none overflow-hidden">
+                    实况渲染（机主要求「后台卡片要真实的界面」）；灰块风险由预览容器
+                    .bf-off-zone 局部禁用 backdrop-filter（globals.css !important）兜底
+                    ——旧 Chromium 光栅化预算崩的元凶是卡片内 App 大量 backdrop-blur
+                    嵌套，局部关掉后实况渲染即出真实界面；切换器自身背景/徽章的
+                    backdrop-filter 不受影响（浏览器端背景毛玻璃保留，WebView 背景
+                    本就是第三十四轮静态缩图实现）。 */}
+                <div className="bf-off-zone pointer-events-none h-full w-full select-none overflow-hidden">
                   {id === 'camera' ? (
                     <div className="flex h-full w-full flex-col items-center justify-center gap-3 bg-black text-white/35">
                       <Camera className="h-12 w-12" strokeWidth={1.2} />

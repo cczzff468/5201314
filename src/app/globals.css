@@ -1949,14 +1949,16 @@ html[data-app-native] * {
   50%      { transform: translateY(-7px) rotate(-6deg); opacity: 1; }
 }
 
-/* 第三十六轮：任务切换器打开期间全局禁用 backdrop-filter——
-   WebView 卡片改实况渲染真实界面后，App 内大量 backdrop-blur 元素在旧 Chromium
-   的光栅化预算下会把卡片内容塌成灰块（机主真机实测）；切换器全屏覆盖期间临时
-   关闭整页 backdrop-filter（全部被切换器遮住，无视觉感知），卡片即渲染真实界面；
-   关闭/卸载时同步摘除（AppSwitcher effect 管理 class 挂摘）。 */
-html.task-switching *,
-html.task-switching *::before,
-html.task-switching *::after {
+/* 第三十六轮：多任务卡片预览区禁用 backdrop-filter——
+   WebView 卡片改实况渲染真实界面后，卡片内 App 组件大量 backdrop-blur 元素在
+   旧 Chromium 的光栅化预算下会把卡片内容塌成灰块（机主真机实测）；只在卡片
+   预览容器（.bf-off-zone，AppSwitcher 每张卡片的实况渲染层）内关闭
+   backdrop-filter——切换器自己的毛玻璃背景/徽章不受影响（浏览器端背景毛玻璃
+   保留原效果，WebView 端背景本就是第三十四轮静态缩图实现）。 */
+.bf-off-zone,
+.bf-off-zone *,
+.bf-off-zone *::before,
+.bf-off-zone *::after {
   backdrop-filter: none !important;
   -webkit-backdrop-filter: none !important;
 }
