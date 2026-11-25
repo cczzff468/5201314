@@ -10,7 +10,7 @@ import {
   WALLPAPER_PRESETS,
   type AppId,
 } from '@/lib/ios/store';
-import { APP_MAP, AppIconById } from '../apps/registry';
+import { APP_MAP, AppIconById, AppStaticIcon } from '../apps/registry';
 // v1.9.21 吃醋锁网页降级：冻结 App 的多任务卡片盖「已冻结」遮罩（点击仍会被 openApp/switchToApp 拦截弹全屏提示）
 import { isWebAppFrozen, webFrozenBy, subscribeWebLock, getWebLockVersion } from '@/lib/ios/web-app-lock';
 // 第三十四轮：Android WebView 渲染降级（backdrop-filter 光栅化缺陷 → 切换器背景改静态缩图模糊）
@@ -354,16 +354,23 @@ export default function AppSwitcher() {
                   if (e.key === 'Enter' || e.key === ' ') switchToApp(id);
                 }}
               >
-                {/* 「正在使用」徽章（最新使用） */}
+                {/* 「正在使用」徽章（最新使用；WebView 下免 backdrop-blur——旧 Chromium 光栅化风险） */}
                 {i === 0 && !isKilling && (
-                  <span className="absolute left-2.5 top-2.5 z-10 rounded-full bg-[#1c1c1e]/80 px-2.5 py-[5px] text-[12px] font-medium leading-none text-white ring-1 ring-white/25 backdrop-blur-sm">
+                  <span
+                    className={`absolute left-2.5 top-2.5 z-10 rounded-full bg-[#1c1c1e]/85 px-2.5 py-[5px] text-[12px] font-medium leading-none text-white ring-1 ring-white/25 ${
+                      webview ? '' : 'backdrop-blur-sm'
+                    }`}
+                  >
                     正在使用
                   </span>
                 )}
-                {/* v1.9.21 吃醋锁：被冻结的 App 卡片盖深色遮罩+小锁（预览置灰不可辨，点卡片弹全屏留言） */}
+                {/* v1.9.21 吃醋锁：被冻结的 App 卡片盖深色遮罩+小锁（预览置灰不可辨，点卡片弹全屏留言；
+                    WebView 下免 backdrop-blur） */}
                 {isWebAppFrozen(id) && !isKilling && (
                   <div
-                    className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 bg-black/60 backdrop-blur-[2px]"
+                    className={`absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 bg-black/60 ${
+                      webview ? '' : 'backdrop-blur-[2px]'
+                    }`}
                     data-testid={`web-frozen-card-${id}`}
                   >
                     <span className="flex h-11 w-11 items-center justify-center rounded-full bg-[#ff5c8a]/90 shadow-lg">
@@ -373,9 +380,43 @@ export default function AppSwitcher() {
                     <span className="text-[11px] text-white/55">哄好 TA 或等倒计时结束才能打开</span>
                   </div>
                 )}
-                {/* 实时 App 预览：按真机 390x844 尺寸渲染后整体等比缩小（1:1 还原界面观感，不可交互；相机特殊处理避免重复占用摄像头） */}
+                {/* 卡片预览（第三十五轮 WebView 分支）：
+                    - 浏览器：实时 App 预览——按真机 390x844 尺寸渲染后整体等比缩小（1:1 还原界面观感，不可交互；相机特殊处理避免重复占用摄像头）；
+                    - Android WebView：【静态卡片脸】——实时预览在毛玻璃/液态图标样式下会在旧
+                      Chromium 光栅化里塌成灰块（机主真机截图：卡片内容全灰无文字；第三十四轮
+                      只降级了背景，卡片本体仍实况渲染 App 内一堆 backdrop-blur 元素），改为
+                      零 backdrop-filter 的静态脸：柔和渐变底 + 居中大图标（AppStaticIcon）+
+                      App 名 + 底部 home 横杠——彻底免疫塌缩，视觉上仍是干净的 App 卡片 */}
                 <div className="pointer-events-none h-full w-full select-none overflow-hidden">
-                  {id === 'camera' ? (
+                  {webview ? (
+                    <div
+                      className="relative flex h-full w-full flex-col items-center justify-center"
+                      style={{
+                        background: lightGlass
+                          ? 'linear-gradient(180deg, #FBFBFD 0%, #F2F2F5 100%)'
+                          : 'linear-gradient(180deg, #1E1E22 0%, #26262B 100%)',
+                      }}
+                    >
+                      {/* 居中大图标 + App 名 */}
+                      <span className="block h-[76px] w-[76px]">
+                        <AppStaticIcon id={id} />
+                      </span>
+                      <span
+                        className={`mt-[14px] text-[15px] font-medium ${
+                          lightGlass ? 'text-black/70' : 'text-white/85'
+                        }`}
+                      >
+                        {meta.name}
+                      </span>
+                      {/* 底部 home 横杠（快照观感收尾） */}
+                      <span
+                        aria-hidden="true"
+                        className={`absolute bottom-[10px] left-1/2 h-[5px] w-[110px] -translate-x-1/2 rounded-full ${
+                          lightGlass ? 'bg-black/25' : 'bg-white/40'
+                        }`}
+                      />
+                    </div>
+                  ) : id === 'camera' ? (
                     <div className="flex h-full w-full flex-col items-center justify-center gap-3 bg-black text-white/35">
                       <Camera className="h-12 w-12" strokeWidth={1.2} />
                       <span className="text-[13px]">相机</span>
