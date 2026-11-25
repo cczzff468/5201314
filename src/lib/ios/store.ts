@@ -990,9 +990,9 @@ export const useSettings = create<SettingsState>((set, get) => ({
           batteryPercentRec?.value === 'inside' || batteryPercentRec?.value === 'none'
             ? batteryPercentRec.value
             : 'outside',
-        // App 图标三选一：无记录/非法值 = '1'（纯白压印 cove）
-        appIcon:
-          appIconRec?.value === '2' || appIconRec?.value === '3' ? appIconRec.value : '1',
+        // App 图标两选一（第三十五轮：机主参考图 SVG 重绘版）：无记录/非法值/历史 '3' = '1'
+        //（云朵 C；老三选一下线，残留 '3' 归一到 1 号——文件层 icon-3 已覆写为 1 号内容兑底）
+        appIcon: appIconRec?.value === '2' ? '2' : '1',
         // 开屏动画主题（第三十四轮四选一）：IndexedDB 无记录/非法值时再兜底读一次
         // localStorage（同步）——冷启动 BootSplash 首帧就是它，设置页显示与之一致
         splashTheme:
@@ -1147,7 +1147,8 @@ export const useSettings = create<SettingsState>((set, get) => ({
   },
 
   setAppIcon: (id) => {
-    if (id !== '1' && id !== '2' && id !== '3') return;
+    // 第三十五轮：两选一（'3' 已下线——历史残留值拒绝写入，加载侧已归一为 '1'）
+    if (id !== '1' && id !== '2') return;
     set({ appIcon: id });
     void localDB.put('settings', { key: 'appIcon', value: id });
     // 第三十四轮「立马生效」：浏览器标签页 favicon 即时换新所选图标（无需刷新/重装）——

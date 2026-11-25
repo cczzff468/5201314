@@ -14,8 +14,8 @@ android {
         applicationId "com.z.aiphone"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 82          // v2.4.18 韩系新三图标重生成+APK splash 暖白；v81 = 2.4.17
-        versionName "2.4.18"    // v2.4.18：拱门静湾/雾中远山/静月港湾重生成（满幅修边）+ native splash 暖白底 + getShellInfo 桥升 82
+        versionCode 83          // v2.4.19 机主参考图双图标（云朵C/弧C微笑）SVG 重绘+两选一+多任务卡片 WebView 静态脸+开屏 cookie 首帧；v82 = 2.4.18
+        versionName "2.4.19"    // v2.4.19：云朵C默认图标重打+原生 splash 纸白底+长按助手删除+电池方角填充
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.

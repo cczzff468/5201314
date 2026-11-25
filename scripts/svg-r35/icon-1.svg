@@ -1,0 +1,38 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+  <!-- Cove 图标一「云朵 C」：机主参考图 IMG_20261125_193210 逐元素矢量重绘
+       白底 + 灰色胖月牙 C（环抱开口朝右）+ 云朵笑脸（眼睛/微笑/腮红）+
+       左上对话气泡（含圆点+尾巴）+ 底部 cove 单线字标 -->
+  <rect width="1024" height="1024" fill="#FDFDFD"/>
+
+  <!-- 胖月牙 C：两段同心粗弧叠出「轮廓描边月牙」——灰粗弧(描边色) + 白细弧(挖空中段)
+       r=223 / stroke 92 vs 80 → 两缘各留 6px 灰轮廓；圆头端点=圆弧端帽自然圆润 -->
+  <path d="M 684 654 A 223 223 0 1 1 684 256" fill="none" stroke="#7A7F85" stroke-width="92" stroke-linecap="round"/>
+  <path d="M 684 654 A 223 223 0 1 1 684 256" fill="none" stroke="#FDFDFD" stroke-width="80" stroke-linecap="round"/>
+
+  <!-- 云朵笑脸：Material 云路径均匀放大 16.25 倍（390 宽），白填充+灰描边；
+       右缘越过 C 内缘 ~60px——白填充自然吃掉 C 轮廓线（参考图同款前后遮挡） -->
+  <g transform="translate(355, 275) scale(16.25)">
+    <path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96z"
+          fill="#FFFFFF" stroke="#7A7F85" stroke-width="0.37" stroke-linejoin="round"/>
+  </g>
+  <!-- 脸：眼睛 / 微笑 / 腮红（画在云中心 (550,470) 一带） -->
+  <circle cx="505" cy="472" r="15.5" fill="#5B6066"/>
+  <circle cx="600" cy="472" r="15.5" fill="#5B6066"/>
+  <path d="M 534 512 Q 553 528 572 512" fill="none" stroke="#5B6066" stroke-width="7" stroke-linecap="round"/>
+  <ellipse cx="470" cy="504" rx="24" ry="13" fill="#D8D3D0"/>
+  <ellipse cx="634" cy="504" rx="24" ry="13" fill="#D8D3D0"/>
+
+  <!-- 对话气泡：圆 + 右下尾巴（单闭合路径），白填充+灰描边；内一点深灰 -->
+  <path d="M 380.5 328.6 A 74 74 0 1 0 353.4 340.4 L 382 372 Z"
+        fill="#FFFFFF" stroke="#7A7F85" stroke-width="6" stroke-linejoin="round"/>
+  <circle cx="338" cy="256" r="12.5" fill="#5B6066"/>
+
+  <!-- cove 单线字标：c 弧 / o 圆 / v 折 / e 弧+横杠，基线 880、字高 84、描边 10 圆头 -->
+  <g fill="none" stroke="#7A7F85" stroke-width="10" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M 357 805.8 A 42 42 0 1 0 357 870.2"/>
+    <circle cx="448" cy="838" r="42"/>
+    <path d="M 528 796 L 570 880 L 612 796"/>
+    <path d="M 728.4 859 A 42 42 0 1 0 713 874.4"/>
+    <path d="M 650 838 L 734 838"/>
+  </g>
+</svg>

@@ -629,16 +629,16 @@ export function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
             className="flex min-h-[52px] w-full items-center gap-3 px-4 text-left transition-colors active:bg-muted/50"
           >
             <span className="grid h-[31px] w-[31px] shrink-0 place-items-center">
-              {/* 当前 App 图标小预览（ squircle 圆角 + 细描边） */}
+              {/* 当前 App 图标小预览（ squircle 圆角 + 细描边；?v=35 破缓存——本轮 PNG 全套换新后旧图可能还在浏览器缓存里） */}
               <img
-                src={`/icons/app/icon-${appIcon}-192.png`}
+                src={`/icons/app/icon-${appIcon}-192.png?v=35`}
                 alt="当前 App 图标"
                 className="h-[29px] w-[29px] rounded-[6.8px] object-cover ring-[0.5px] ring-black/10"
               />
             </span>
             <span className="min-w-0 flex-1">
               <span className="block truncate text-[16px]">App 图标</span>
-              <span className="mt-0.5 block truncate text-[11.5px] text-muted-foreground">Cove 三选一 · 开屏与桌面图标即时跟随</span>
+              <span className="mt-0.5 block truncate text-[11.5px] text-muted-foreground">Cove 两选一 · 开屏与桌面图标即时跟随</span>
             </span>
             <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground/60" strokeWidth={2.2} />
           </button>
@@ -715,16 +715,16 @@ function batteryModeLabel(mode: BatteryPercentMode): string {
   return mode === 'inside' ? '电池图标内部' : mode === 'outside' ? '电池图标外部' : '不显示';
 }
 
-/** 三张备选图标（第三十四轮：机主要求再美化重新生成——韩系满幅插画风；
- *  拱门静湾=暖调拱门框日出、雾中远山=三层灰阶山影+淡日盘、静月港湾=夜空新月映水带 Cove 字） */
-const APP_ICON_OPTIONS: { id: '1' | '2' | '3'; name: string; desc: string }[] = [
-  { id: '1', name: '拱门静湾', desc: '拱门框日 · 暖调静水' },
-  { id: '2', name: '雾中远山', desc: '层叠山影 · 淡日灰阶' },
-  { id: '3', name: '静月港湾', desc: '新月映水 · 带 Cove 字' },
+/** 两张备选图标（第三十五轮：机主发来两张参考图 SVG 矢量重绘——
+ *  云朵 C=胖月牙环抱云朵笑脸+对话气泡+cove 字标；弧 C 微笑=石板蓝 C 弧+端点钮/眼点+
+ *  微笑弧+宽字距字标；老三选一（拱门静湾/雾中远山/静月港湾）下线，历史 '3' 归一为 '1'） */
+const APP_ICON_OPTIONS: { id: '1' | '2'; name: string; desc: string }[] = [
+  { id: '1', name: '云朵 C', desc: '云朵笑脸 · 环抱月牙 C' },
+  { id: '2', name: '弧 C 微笑', desc: '极简弧线 · 圆点小脸' },
 ];
 
-/** 第三十一轮：App 图标三选一弹窗（iOS 居中卡）：
- *  三张大图预览（64px squircle，选中态蓝描边+角标），点选即时生效：
+/** 第三十一轮：App 图标选一弹窗（iOS 居中卡；第三十五轮改两选一）：
+ *  两张大图预览（64px squircle，选中态蓝描边+角标），点选即时生效：
  *  开屏动画/设置预览即时跟随；同时异步同步服务器（PWA manifest 动态图标，
  *  「添加到主屏幕/安装」时浏览器拉取所选图标）。点背板/Esc/好 关闭。 */
 function AppIconDialog({
@@ -732,8 +732,8 @@ function AppIconDialog({
   onPick,
   onClose,
 }: {
-  current: '1' | '2' | '3';
-  onPick: (id: '1' | '2' | '3') => void;
+  current: '1' | '2';
+  onPick: (id: '1' | '2') => void;
   onClose: () => void;
 }) {
   const [entered, setEntered] = useState(false);
@@ -774,8 +774,8 @@ function AppIconDialog({
             <p className="text-[16px] font-semibold text-black dark:text-white">App 图标</p>
             <p className="mt-0.5 text-[11.5px] text-muted-foreground">Cove · 选一个喜欢的样子</p>
           </div>
-          {/* 三张图标大预览（横排三列） */}
-          <div className="grid grid-cols-3 gap-2 px-4 py-4">
+          {/* 两张大图预览（横排两列） */}
+          <div className="grid grid-cols-2 gap-2 px-4 py-4">
             {APP_ICON_OPTIONS.map((o) => {
               const sel = current === o.id;
               return (
@@ -796,7 +796,7 @@ function AppIconDialog({
                 >
                   <span className="relative">
                     <img
-                      src={`/icons/app/icon-${o.id}-192.png`}
+                      src={`/icons/app/icon-${o.id}-192.png?v=35`}
                       alt={o.name}
                       className={`h-[64px] w-[64px] rounded-[15px] object-cover shadow-[0_6px_16px_rgba(0,0,0,0.14)] ${sel ? '' : 'opacity-95'}`}
                     />

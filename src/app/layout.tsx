@@ -17,10 +17,10 @@ export const metadata: Metadata = {
   manifest: "/api/pwa/manifest",
   icons: {
     icon: [
-      { url: "/icons/app/icon-1-192.png", sizes: "192x192", type: "image/png" },
-      { url: "/icons/app/icon-1-512.png", sizes: "512x512", type: "image/png" },
+      { url: "/icons/app/icon-1-192.png?v=35", sizes: "192x192", type: "image/png" },
+      { url: "/icons/app/icon-1-512.png?v=35", sizes: "512x512", type: "image/png" },
     ],
-    apple: "/icons/app/apple-touch-icon.png",
+    apple: "/icons/app/apple-touch-icon.png?v=35",
   },
   // iOS 添加到主屏幕：全屏独立窗口 + 沉浸式状态栏 + 桌面图标名
   appleWebApp: {

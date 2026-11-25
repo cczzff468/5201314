@@ -11,9 +11,9 @@
  */
 
 /** 当前最新版本（纯网页热更时与 APK versionName 可短暂不同步，下次重打 APK 对齐） */
-export const APP_VERSION = '2.4.17';
+export const APP_VERSION = '2.4.19';
 /** 版本号数字（与 android-shell versionCode 保持一致；覆盖安装要求只增不减；纯网页热更不动） */
-export const APP_VERSION_CODE = 81;
+export const APP_VERSION_CODE = 83;
 
 export interface AppReleaseNote {
   version: string;
@@ -24,6 +24,27 @@ export interface AppReleaseNote {
 
 /** 版本历史（新→旧；设置 › APP 更新 页渲染，最新一条即当前版本） */
 export const APP_RELEASE_NOTES: AppReleaseNote[] = [
+  {
+    version: '2.4.19',
+    date: '2026-11-26',
+    items: [
+      '【需重装 APK · versionCode 83】App 图标换成机主参考图双选一：云朵 C（默认 · 灰月牙环抱云朵笑脸 + 对话气泡 + cove 字标）/ 弧 C 微笑（石板蓝 C 弧 + 眼点 + 微笑弧 + 宽字距字标）——启动器/自适应/圆形/原生闪屏全链重打',
+      '【需重装 APK】多任务卡片灰块根修：切毛玻璃/液态图标后，Android WebView 下卡片改「静态脸」（渐变底 + 居中大图标 + App 名），彻底免疫旧 Chromium 光栅化塌缩（浏览器端仍实时预览）',
+      '【网页热更·免重装】开屏动画首帧修复：所选主题烤进服务端首屏（cookie），冷启动不再先显示另一个主题几秒才切换',
+      '【网页热更·免重装】电池图标内部模式：实心胶囊方角且四边填满（左边不再留缝）、充电边框不变绿、低电边框不变红',
+      '【网页热更·免重装】「对话」开屏动画再美化：暖米白纸底 + 蜜桃/雾蓝双光晕、云朵笑脸头像 + 在线状态、炭黑渐变气泡 + 正在输入三点 + 爱心收尾',
+      '【网页热更·免重装】长按主屏唤起语音助手功能删除（长按空白恢复直接进编辑模式）；电量百分比下方说明文字删除',
+    ],
+  },
+  {
+    version: '2.4.18',
+    date: '2026-11-26',
+    items: [
+      '【需重装 APK · versionCode 82】韩系三图标重生成（拱门静湾/雾中远山/静月港湾·带 Cove 字）+ 原生闪屏暖白底',
+      '【网页热更·免重装】开屏动画新增「雨落成诗」（雨窗水珠/雨丝/涟漪/手写诗行）与「对话」（聊天气泡浮现）主题，四选一即选即播',
+      '【网页热更·免重装】电池胶囊上下填满 + 圆角更圆；WebView 多任务切换器背景改静态雾面（首轮灰块缓解）',
+    ],
+  },
   {
     version: '2.4.17',
     date: '2026-11-26',
