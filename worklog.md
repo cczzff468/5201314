@@ -3706,3 +3706,25 @@ Stage Summary:
 - 开屏三主题 agent-browser 实测：星点闪烁/流星/新月光晕/山影横漂/月影光柱全渲染，选择器点选→localStorage 持久化→冷启动首帧新主题 ✓
 - 多任务卡片 360×800 短屏实测：卡片圆角/图标行/横杠全可见
 - 网页热更即时生效；APK（code 81）重打含新图标/纯 Cove 名/45% 挖孔状态栏上提
+
+---
+Task ID: 35（第三十四轮 · v2.4.18）
+Agent: 主控 Agent（Z.ai Code）
+Task: 机主五张截图反馈——切换毛玻璃/液态透明图标后多任务卡片变灰块（174126/174153）+ APP 状态栏再上移 + 系统状态栏区白色条带（170846）+ 电池内部模式实心胶囊上下填满&圆角更圆 + 静月港湾开屏改雨窗风格（175039 参考图）+ 新增对话开屏（IMG_175823 参考图）+ App 图标再美化重生成（韩系）+ 图标/开屏选择立马生效无需更新
+
+Work Log:
+- 【多任务卡片根修】机主截图逐像素比对定位：174126 切换器背景纯黑+卡片内容全灰块无文字、174153 主题卡正常但相邻设置卡灰块——根因是 Android WebView（旧 Chromium）backdrop-filter 光栅化塌缩：毛玻璃/液态图标模式下主屏 24 枚嵌套 backdrop-blur 图标被切换器 46px 超大 backdrop-filter 采样（backdrop root 嵌套+合成层超预算）→ 整帧所有 backdrop-filter 元素塌成不透明黑/灰块盖住内容；修法=webview-render.ts（桥/data-app-native/UA wv) 三重判定+MutationObserver 跟晚注入）→ AppSwitcher WebView 分支改「静态缩图模糊」：60×128 小图层 blur(3px)（光栅成本≈0）+ transform scale(8) 双线性放大=雾面壁纸+玻璃罩双层，零 backdrop-filter 从根免疫；浏览器端保留原 46px 实时毛玻璃（桌面实测无回归）；模拟 data-app-native 实测：静态分支生效（scale(8) 元素在 DOM、backdrop-filter 元素消失）+卡片内容清晰
+- 【白条带根修】170846 像素采样：顶部 42 设备 px（=14 CSS px=45%×sat）纯白条带，下方才是 App 底色——根因=SafeAreaBleedBands 读 --app-sat-eff 用 getComputedStyle+parseFloat，而该变量在 CSS 里是 calc(var(--app-sat)*0.45)：自定义属性 computed value 不解析 calc（原样返回 token 串）→ parseFloat=NaN→0 → 顶带永不绘制 → sat-eff 区透出 AppWindow bg-background（浅色=纯白）→「有的地方系统状态栏那里有白色的」（顶色非白的 App 都能看到）；修法=readVarPx 探针元素（padding-top:var(--app-sat-eff) 真实属性解析回 px，常驻复用+卸载清理）；模拟实测：bandBg 从 EMPTY→rgb(255,255,255)（时钟 App 顶白=正确同色），wechat 顶 #EDEDED 场景 band 与 nav 连续无缝
+- 【状态栏再上提】机主连续三轮「往上一点」：sat-eff 乘数 45%→28%（时间距物理顶 8~14px 量级贴近真机 iPhone）+ StatusBar pt 6→4；模拟实测 satEff 探针解析 9.24px（33×0.28）✓
+- 【电池图标】inside 模式：填充层 top/bottom inset 1.5→0（「实心胶囊整体上下填满」——贴满胶囊内缘）+ 圆角更圆（本体 4.2→5.2≈高 36%、填充 2.8→4、凸点半径 1.6 同步）；设置弹窗+状态栏实测：100% 绿胶囊上下顶满、圆弧平滑、反色数字清晰 ✓
+- 【雨落成诗（moon 重做）】机主 175039 雨窗短视频参考图逐元素复刻：蓝灰雨窗玻璃渐变（C4CEDA→7E8DA1）+两层雾团缓漂+9 条斜落雨丝（各自周期/延迟 cove4-fall）+28 颗水珠（静珠呼吸 cove4-breathe/滑珠缓降伸长 cove4-drop-run，高光 radial-gradient+底部内阴影）+中央三圈错相涟漪（cove4-ripple）+手写体智芒星（zhimangxing 公共字体 head 注入）64px 花体 cove 蓝晕缓浮+左上 LET THE WORLD WAIT/外面的世界，晚一点再说。+四组散落诗行（灰的雨灰的伞/小名字里明明是雨停了/在地里埋了一颗种子名字叫等的人会回消息/雨打在檐上会变成声音）；实测：雨丝/水珠/涟漪/花体 cove/诗行/竖排 COVE·RAINY WINDOW 全渲染
+- 【对话（chat 新增）】机主 IMG_175823 聊天记录参考图：纯白底+噪点+五行气泡错峰上浮回弹（cove4-bubble 640ms：右侧深灰 #1E1E24=机主（宇宙这么大你消失了那我该去哪找你 20:17 已读/为什么那么肯定 20:18 已读）、左侧浅灰 #E9E9EE=Cove（我消失不了的/你在哪我就在哪/我一直在你心里不是吗）），聊完安静浮出 Cove 字标+「等的人，会回消息」；实测气泡/时间戳/已读/字标全渲染
+- 【四选一+立马生效】splash-theme.ts 增 chat 类型（readSplashTheme/store normalization/setSplashTheme 三处校验同步）；设置弹窗 grid-cols-3→2（2×2 四卡 84px：雨窗=水珠雨丝+手写 cove、对话=双色气泡微缩）；【立马生效】选完即整屏播放一遍（root-page splashPreview state→BootSplash forceTheme 预览自退场自卸载，点选实测 splashVisible=true+localStorage 同步+对话主题全屏播放 ✓）+ App 图标选择即时换 favicon（link[rel=icon] href 重写 icon-{id}-，无需刷新）
+- 【App 图标韩系重生成】三枚 z-ai 生成+满幅修边：1 号拱门静湾（石拱门框落日+静水倒影+暖米杏莫兰迪，1024 满幅直用）、2 号雾中远山（wallpaper 措辞避「图标套图标」+像素级 detect_bounds 边缘检测裁边（1024×771 内容区）+双次 inset 修切去 AI 圆角瓷片/投影残留）、3 号静月港湾（金月+夜海竖向月光倒影+小岛剪影+底部 Cove 字，内容区 868×873 裁边放大）；rebuild-cove-icons.mjs SRC→newicons3+BG 暖白 #F2EFE9 全链重建（web 五尺寸+maskable+apple-touch+PWA 通知 fallback icons/pwa 同步+APK mipmap 全密度+11 密度原生 splash 暖白）；设置三选一文案同步（拱门框日·暖调静水/层叠山影·淡日灰阶/新月映水·带 Cove 字）
+- 版本 2.4.18 / versionCode 82（build.gradle+getShellInfo 桥）；APK 重打成功（public/Cove.apk 5.1M）
+
+Stage Summary:
+- 白条带/卡片灰块两根因均「像素级取证→复现→修→模拟 APK 环境实测」闭环：band 从不绘制→正确采样 App 顶色；WebView 切换器背景从塌黑→静态雾面、卡片内容清晰
+- 四开屏主题全实测渲染（star/mist 回归无恙+moon 雨窗/chat 对话新主题）；选择器 2×2 四卡+选完即播预览+localStorage 持久化+favicon 即时换 ✓
+- 电池 inside 模式胶囊上下顶满+圆角圆润（弹窗预览+状态栏双实测）
+- 三 App 图标满幅干净（VLM 三枚对比：拱门 9/山月 8/月夜 8.5 分，风格统一同系列）；APK code 82 重打含新图标+暖白原生闪屏
