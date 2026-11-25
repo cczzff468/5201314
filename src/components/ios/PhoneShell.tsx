@@ -31,7 +31,6 @@ import HomeScreen from './HomeScreen';
 import { APP_MAP, preloadApp, preloadHeavyApps } from '@/components/apps/registry';
 import { CustomWallpaperLayers } from './WallpaperLayers';
 import AppWindow from './AppWindow';
-import AppSwitcher from './AppSwitcher';
 import LockScreen from './LockScreen';
 import IslandNotificationLayer from './IslandNotification';
 
@@ -133,13 +132,14 @@ const MIN_SCALE = 0.4;
 
 /**
  * 手机壳：桌面端显示 iPhone 机身外框（含电源键），移动端全屏。
- * 内部依次为 壁纸层 → 主屏幕 → App 窗口 → 多任务切换器 → 锁屏 → 熄屏遮罩 → 状态栏 → 灵动岛。
+ * 内部依次为 壁纸层 → 主屏幕 → App 窗口 → 锁屏 → 熄屏遮罩 → 状态栏 → 灵动岛。
+ * （第三十七轮：多任务切换器整件删除——Android WebView 上卡片渲染始终不稳，
+ * 底部上滑手势改为 iOS 同语义「回主屏幕」，最近使用清单仅供 AI 感知上报。）
  */
 export default function PhoneShell() {
   const theme = useSettings((s) => s.theme);
   const systemDark = useSystemDark();
   const load = useSettings((s) => s.load);
-  const switcherOpen = useUI((s) => s.switcherOpen);
   const locked = useUI((s) => s.locked);
   const screenOff = useUI((s) => s.screenOff);
   const pressPower = useUI((s) => s.pressPower);
@@ -359,7 +359,8 @@ export default function PhoneShell() {
     return () => window.clearTimeout(t);
   }, [unlockedOnce]);
 
-  // 底部边缘上滑手势（全局）：从屏幕最底下往上滑 → 打开多任务切换器，主屏幕与所有 App 内均生效（含时钟）。
+  // 底部边缘上滑手势（全局）：从屏幕最底下往上滑 → 回主屏幕（第三十七轮：多任务切换器已删，
+  // 上滑改为 iOS 同语义「退出当前 App 回主屏」；主屏上滑无动作）。
   // 用 window 捕获阶段原生 Pointer 监听而非组件 onTouch 事件：
   // ① 鼠标/触摸/触控笔统一支持（旧实现仅 touch 事件，桌面鼠标永远无法触发，时钟等界面看起来“不能多任务”）；
   // ② 捕获阶段先于一切子组件，不会被任何 stopPropagation 拦截；
@@ -374,7 +375,7 @@ export default function PhoneShell() {
       const g = edgeGesture.current;
       if (!g || g.fired) return;
       // 语音「按住说话」进行中：本次边缘手势作废（按住胶囊就在边缘带内，
-      // 录音上滑取消不能把多任务卡片拉起来）
+      // 录音上滑取消不能误触回主屏）
       if (isVoiceHoldActive()) {
         finish();
         return;
@@ -384,16 +385,15 @@ export default function PhoneShell() {
       if (forward > OPEN_DELTA && forward > lateral * 0.85) {
         g.fired = true;
         const ui = useUI.getState();
-        // 来电响铃中守卫（#1）：来电界面挂 z-94，比切换器 z-60 高得多。
-        // 边缘上滑若不拦会「隐形打开切换器」——切换器在来电界面之下，挂断后才凭空出现。
-        // 与 store.openSwitcher 内守卫成双保险：onMove 先短路手势，避免 openSwitcher 再走一遭。
-        if (!ui.locked && !ui.screenOff && !ui.switcherOpen && !ui.alarmRinging && !ui.homeEdit && !ui.callActive && !useIncomingCall.getState().call) {
+        // 来电响铃中守卫（#1）：来电界面挂 z-94，手势不抢层级——直接不触发。
+        if (!ui.locked && !ui.screenOff && !ui.alarmRinging && !ui.homeEdit && !ui.callActive && !useIncomingCall.getState().call) {
           try {
             navigator.vibrate?.(8);
           } catch {
             /* 震动不可用 */
           }
-          ui.openSwitcher();
+          // 第三十七轮：上滑=回主屏幕（App 前台时退出；主屏上无动作）
+          if (ui.activeApp) ui.exitForegroundApp();
         }
       }
     };
@@ -420,7 +420,7 @@ export default function PhoneShell() {
       const ui = useUI.getState();
       // 来电响铃中守卫（#1）：onDown 直接不认领手势，避免后续 onMove/finish 绑定 window。
       // ui.callActive=电话 App 通话全屏层显示中（接听后），同样不应被边缘手势打断。
-      if (ui.locked || ui.screenOff || ui.switcherOpen || ui.alarmRinging || ui.callActive || useIncomingCall.getState().call) return;
+      if (ui.locked || ui.screenOff || ui.alarmRinging || ui.callActive || useIncomingCall.getState().call) return;
       // 录音按住进行中（如另一根手指按下）：不启动边缘手势
       if (isVoiceHoldActive()) return;
       if (e.pointerType === 'mouse' && e.button !== 0) return;
@@ -670,10 +670,10 @@ export default function PhoneShell() {
 
         {/* Home 指示条：所有界面常显，颜色由 useLightForeground 随身后背景明暗选黑/白
             （白底黑杠、黑底白杠；饱和色背景按明暗取色，不像 mix-blend-difference 那样变互补色）。
-            上滑 = 打开多任务切换器：由 PhoneShell 顶部 window 捕获阶段全局边缘手势接管（鼠标/触摸均可，
+            上滑 = 回主屏幕：由 PhoneShell 顶部 window 捕获阶段全局边缘手势接管（鼠标/触摸均可，
             主屏幕与所有 App 内一致生效）；指示条本体 pointer-events-none——
             纯视觉元素不拦截点击（否则会挡住 App 内底部区域的按钮，如表情面板弹窗的完成按钮） */}
-        {!screenOff && !switcherOpen && (
+        {!screenOff && (
           <div
             aria-hidden="true"
             className="pointer-events-none absolute inset-x-0 bottom-0 z-[72] flex h-[28px] items-end justify-center pb-[7px] touch-none"
@@ -685,9 +685,6 @@ export default function PhoneShell() {
             />
           </div>
         )}
-
-        {/* 多任务切换器（主屏幕或 App 内均可打开；锁定时被锁屏覆盖） */}
-        <AppSwitcher />
 
         {/* 锁屏（含密码验证 / 手电筒 / 锁屏直达相机；解锁时播放退场动画） */}
         <AnimatePresence>{locked && <LockScreen key="lockscreen" />}</AnimatePresence>

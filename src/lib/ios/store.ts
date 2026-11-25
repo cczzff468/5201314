@@ -42,8 +42,6 @@ import { localDB } from './db';
 import { decryptValue } from './secure-store';
 import { encryptSecret, decryptSecret, isEncrypted } from './secret-box';
 import { clearAllChatCooldowns } from '../chat-errors';
-import { useGlobalCall } from './global-call';
-import { useIncomingCall } from './incoming-call';
 // v1.9.21 吃醋锁网页降级：openApp/switchToApp 拦截被冻结的网页 App（web-app-lock 零运行时依赖，无循环引用）
 import { blockWebAppOpen } from './web-app-lock';
 import type { AddressMode } from '../contacts';
@@ -1755,9 +1753,9 @@ const MAX_RECENT_APPS = 6;
 interface UIState {
   activeApp: AppId | null;
   phase: AppPhase;
-  /** 最近使用过的 App（多任务切换器卡片，最新在前；关闭 App 仍保留在后台） */
+  /** 最近使用过的 App（第三十七轮：切换器已删，仅供 AI 感知上报「最近用过」；最新在前） */
   recentApps: AppId[];
-  /** 多任务切换器是否打开（可在主屏幕或任一 App 内打开） */
+  /** 【已废弃】多任务切换器开关——第三十七轮整件删除，恒 false（保留字段防外部读点报错） */
   switcherOpen: boolean;
   /** 锁屏是否激活（页面加载即锁定；锁定时覆盖全部交互） */
   locked: boolean;
@@ -1771,18 +1769,18 @@ interface UIState {
   alarmRinging: boolean;
   /** 电话 App 通话全屏层显示中（深色背景，状态栏/Home 横杠需白前景） */
   callActive: boolean;
-  /** 主屏幕编辑（抖动）模式进行中：底部边缘上滑手势不触发多任务切换器 */
+  /** 主屏幕编辑（抖动）模式进行中：底部边缘上滑手势不触发回主屏 */
   homeEdit: boolean;
   openApp: (id: AppId) => void;
   closeApp: () => void;
+  /** 【已废弃】切换器已删——保留空实现防旧调用点报错（恒无动作） */
   openSwitcher: () => void;
+  /** 【已废弃】同上 */
   closeSwitcher: () => void;
-  /** 切换器关闭动画期间先把前台 App 退到后台（立即露出主屏幕） */
+  /** 退出前台 App 回主屏幕（底部上滑手势调用——iOS 同语义） */
   exitForegroundApp: () => void;
-  /** 在切换器里点卡片：切到该 App（无论当前是否已有 App 在前台） */
+  /** 跨 App 直达：切到该 App（无论当前是否已有 App 在前台） */
   switchToApp: (id: AppId) => void;
-  /** 在切换器里上滑卡片：彻底关闭该 App（若是前台 App 则一并退出） */
-  killApp: (id: AppId) => void;
   /** 解锁（锁屏上滑验证通过） */
   unlock: () => void;
   /** 立即锁定（关闭一切 App/切换器/锁屏相机，回到锁屏） */
@@ -1868,25 +1866,11 @@ export const useUI = create<UIState>((set, get) => ({
     }, 380);
   },
   openSwitcher: () => {
-    // 主屏幕或 App 内都可打开（打开/关闭动画进行中除外；锁定时禁止）
-    if (get().locked) return;
-    if (get().switcherOpen || get().phase === 'opening' || get().phase === 'closing') return;
-    // 全局语音通话全屏页守卫（C-4）：全屏通话页 z-62 在切换器 z-60 之上（层级表既定设计，不改数值），
-    // 此刻打开切换器会被通话页完全盖住 → 「隐形切换器」（Home 横杠消失、界面无变化，
-    // 且 switcherOpen 后边缘手势被 onDown 短路、z-60 遮罩在 z-62 之下点不到，挂断后才凭空出现）。
-    // 处理：直接忽略本次手势——通话页保持最前、Home 横杠不隐藏；用户先点通话页左上角小窗图标
-    // 收成悬浮小窗（view='pip'，z-64）后，上滑即可正常打开切换器。
-    // 不采用「先最小化再打开」：小窗 z-64 悬在切换器之上，切换器开着时点小窗 expand() 回全屏
-    // （z-62）又落到切换器之下，同样复现隐形切换器卡死，而 expand 在 global-call store 无法在此守卫。
-    const gCall = useGlobalCall.getState();
-    if (gCall.session && gCall.view === 'full') return;
-    // 来电响铃中守卫（#1）：来电界面挂 z-94，比切换器 z-60 高得多，且 onDown 也会守卫——
-    // 此处双保险：响铃中 openSwitcher 永不应被触发（即使旧调用方绕过边缘手势直接调用本 action）。
-    if (useIncomingCall.getState().call) return;
-    set({ switcherOpen: true });
+    // 第三十七轮：多任务切换器整件删除（Android WebView 卡片渲染始终不稳）。
+    // 本 action 保留为空实现——防旧调用点（如有）报错；切换器永不打开。
   },
   closeSwitcher: () => {
-    if (get().switcherOpen) set({ switcherOpen: false });
+    // 同上：恒无动作（switcherOpen 永远 false）
   },
   exitForegroundApp: () => {
     if (get().activeApp) set({ activeApp: null, phase: 'closed' });
@@ -1900,14 +1884,6 @@ export const useUI = create<UIState>((set, get) => ({
       switcherOpen: false,
       recentApps: [id, ...get().recentApps.filter((a) => a !== id)].slice(0, MAX_RECENT_APPS),
     });
-  },
-  killApp: (id) => {
-    const patch: Partial<UIState> = { recentApps: get().recentApps.filter((a) => a !== id) };
-    if (get().activeApp === id) {
-      patch.activeApp = null;
-      patch.phase = 'closed';
-    }
-    set(patch);
   },
   unlock: () => {
     set({ locked: false, screenOff: false, lockCameraOpen: false, torchOpen: false });
