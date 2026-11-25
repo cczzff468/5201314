@@ -6,14 +6,14 @@
  *   但用户不知道有新功能——由「检查更新」弹窗告知。
  * - 原生壳更新（新插件方法）：必须重装 APK（覆盖安装，数据不丢）。
  *
- * 发版流程：改本文件（bump 版本 + 补说明）→ 重打 APK 放 public/AI-Phone.apk →
+ * 发版流程：改本文件（bump 版本 + 补说明）→ 重打 APK 放 public/Cove.apk →
  * 客户端指纹（version+APK mtime+size）变化 → 进 APP 自动弹「发现新版本」。
  */
 
 /** 当前最新版本（纯网页热更时与 APK versionName 可短暂不同步，下次重打 APK 对齐） */
-export const APP_VERSION = '2.4.14';
+export const APP_VERSION = '2.4.15';
 /** 版本号数字（与 android-shell versionCode 保持一致；覆盖安装要求只增不减；纯网页热更不动） */
-export const APP_VERSION_CODE = 78;
+export const APP_VERSION_CODE = 79;
 
 export interface AppReleaseNote {
   version: string;
@@ -24,6 +24,20 @@ export interface AppReleaseNote {
 
 /** 版本历史（新→旧；设置 › APP 更新 页渲染，最新一条即当前版本） */
 export const APP_RELEASE_NOTES: AppReleaseNote[] = [
+  {
+    version: '2.4.15',
+    date: '2026-11-26',
+    items: [
+      '【需重装 APK · versionCode 79】App 正式更名 Cove：桌面图标/通知/系统设置里全部显示新名字，APK 更名为 Cove.apk；新启动器图标（纯白压印 cove）+ 韩系奶油启动闪屏（冷启动图标弹入 + wordmark + 微光扫过）',
+      '【需重装 APK】通知渠道/常驻守护/下载器等原生提示全部改叫 Cove；存文件目录改为 Download/Cove；保活链路复核（开机自启 + START_STICKY 重梳 + 常驻守护前台服务不变）',
+      '【网页热更·免重装】电池图标内部【第三十一轮删除重建】：两轮真机截图 VLM 实测——iOS 16.1+ 真实样式是实心胶囊（整体填满不按电量比例）+ 数字几何居中反色镂空 + 充电绿胶囊白字白闪电 + 凸点紧贴，跟 iPhone 状态栏一模一样',
+      '【网页热更·免重装】设置 › App 图标：Cove 三选一（纯白压印 / 气泡C / 星光气泡，机主上传修图去水印去留白），开屏动画与设置预览即时跟随、动态 manifest 同步（添加到主屏幕用所选图标）；App 名称/网页标题/manifest 全链改 Cove',
+      '【网页热更·免重装】设置 › 电量百分比弹窗美化：每个选项带状态栏仿真预览条（9:41 + 电池所见即所得）+ 毛玻璃卡弹性入场 + 选中角标',
+      '【网页热更·免重装】App 内浏览器顶栏上移 8px（状态栏预留 54→46px，地址栏不再压得低）',
+      '【网页热更·免重装】UI 清洗：全局长文本截断兜底、错误/调试原文不再裸露界面、系统提示统一毛玻璃极简风',
+      '【网页热更·免重装】内存泄漏清理：全局守望者/监听器/播放器的定时器与事件监听全部随组件卸载注销；长列表节点上限防膨胀',
+    ],
+  },
   {
     version: '2.4.14',
     date: '2026-11-26',

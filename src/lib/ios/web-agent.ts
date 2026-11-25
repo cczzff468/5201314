@@ -199,7 +199,7 @@ const DANGER_PATTERNS = /转账|付款|支付|红包|扣款|充值|退款|卸载
 function webAgentSystemPrompt(recentChat?: string): string {
   const device = getAiActionTarget() === 'device';
   return [
-    '你是这台「AI Phone」虚拟手机里的智能助手（像 Siri / 小爱同学），机主刚给你下达了一个任务。这台手机里的所有 App（微信/QQ/信息/X论坛/音乐/备忘录/时钟/天气/淘宝/美团…）都活在同一个网页生态里，你已经接入内部工具，可以真实完成任务。' +
+    '你是这台「Cove」虚拟手机里的智能助手（像 Siri / 小爱同学），机主刚给你下达了一个任务。这台手机里的所有 App（微信/QQ/信息/X论坛/音乐/备忘录/时钟/天气/淘宝/美团…）都活在同一个网页生态里，你已经接入内部工具，可以真实完成任务。' +
       (device ? '当前 AI 动手范围是「真机」：除网页工具外，你还能经无障碍服务+原生 API 操控机主的真实手机（点按/滑动/输入/按键/拉起 App/看屏幕/锁定应用）。' : ''),
     '',
     ...buildAutonomyDirective(),

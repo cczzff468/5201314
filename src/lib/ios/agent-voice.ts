@@ -735,7 +735,7 @@ export function useAgentRecorder(opts: {
           if (phaseRef.current === 'starting' && !deadRef.current) {
             setPhaseSafe('idle');
             optsRef.current.onStartError(
-              '无法使用麦克风：请在系统设置 › 应用 › AI Phone › 权限中允许「麦克风」，或直接打字下发任务'
+              '无法使用麦克风：请在系统设置 › 应用 › Cove › 权限中允许「麦克风」，或直接打字下发任务'
             );
           }
           return;

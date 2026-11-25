@@ -1387,7 +1387,7 @@ async function jealousyPullback(l: JealousyLock): Promise<boolean> {
   const cfg = getJealousyConfig();
   let ok = false;
   if (cfg.senseMode === 'device') {
-    // 真机模式：bringToFront（FLAG_ACTIVITY_NEW_TASK）把 AI Phone 拉到真机前台（机主规格：强行拉回）
+    // 真机模式：bringToFront（FLAG_ACTIVITY_NEW_TASK）把 Cove 拉到真机前台（机主规格：强行拉回）
     const r = await devicePullback();
     ok = r.ok;
   } else {

@@ -96,7 +96,7 @@ function appMetaOf(item: NotificationCenterItem): NcAppMeta {
   let key = 'system';
   let name = '系统';
   let appId: NcAppMeta['appId'];
-  let src: string | undefined = '/icons/pwa/icon-192.png'; // 缺省：AI Phone 应用图标
+  let src: string | undefined = '/icons/pwa/icon-192.png'; // 缺省：Cove 应用图标
   let emoji: string | undefined;
   if (tag === 'agent' || tag.startsWith('agent-') || tag.startsWith('agent:')) {
     key = 'agent';

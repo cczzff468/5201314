@@ -16,7 +16,7 @@ import androidx.core.app.NotificationCompat;
 /**
  * 常驻守护前台服务（v2.1.0 防杀后台核心）。
  *
- * 【作用】挂一条状态栏「小常驻通知」（AI Phone 正在守候），让安卓系统不轻易
+ * 【作用】挂一条状态栏「小常驻通知」（Cove 正在守候），让安卓系统不轻易
  * 回收本应用的后台进程——监控服务（LockOverlayService 吃醋遮罩锁）、查岗感知、
  * WebView 冻结后依然存活的守护全部因此受益。
  *
@@ -109,13 +109,13 @@ public class KeepAliveService extends Service {
             if (nm != null && Build.VERSION.SDK_INT >= 26) {
                 NotificationChannel ch = new NotificationChannel(
                         CHANNEL_ID, "AI 守护常驻", NotificationManager.IMPORTANCE_LOW);
-                ch.setDescription("AI Phone 后台守护的常驻通知（防系统杀后台）");
+                ch.setDescription("Cove 后台守护的常驻通知（防系统杀后台）");
                 ch.setShowBadge(false);
                 nm.createNotificationChannel(ch);
             }
             Notification n = new NotificationCompat.Builder(this, CHANNEL_ID)
                     .setSmallIcon(android.R.drawable.presence_online)
-                    .setContentTitle("AI Phone 正在守候")
+                    .setContentTitle("Cove 正在守候")
                     .setContentText("TA 的吃醋锁与查岗感知随时待命（保持后台守护）")
                     .setOngoing(true)
                     .setOnlyAlertOnce(true)

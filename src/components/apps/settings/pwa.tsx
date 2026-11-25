@@ -298,7 +298,7 @@ export function PwaInstallPage({ onBack }: { onBack: () => void }) {
               },
               { icon: <span className="text-[13px] font-semibold">①</span>, text: '点 Safari 底部工具栏正中的「分享」按钮（方框向上箭头）' },
               { icon: <span className="text-[13px] font-semibold">②</span>, text: '上下滑动列表，找到「添加到主屏幕」并点它' },
-              { icon: <span className="text-[13px] font-semibold">③</span>, text: '右上点「添加」——桌面会出现 AI Phone 图标' },
+              { icon: <span className="text-[13px] font-semibold">③</span>, text: '右上点「添加」——桌面会出现 Cove 图标' },
             ].map((step, i) => (
               <div key={i} className="flex items-start gap-2.5">
                 <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-black/[0.06] text-muted-foreground dark:bg-white/[0.1]">

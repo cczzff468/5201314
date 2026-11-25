@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# AI Phone APK 一键重打脚本（沙箱重建后 public/AI-Phone.apk 丢失时使用）
+# AI Phone APK 一键重打脚本（沙箱重建后 public/Cove.apk 丢失时使用）
 #
 # 背景：APK（4MB，debug 签名可直接安装）不进 git（.gitignore 排除），
 # 沙箱每次重建后文件消失 → 网页端「设置 › APP 更新」显示打包中、无法下载。
@@ -14,7 +14,7 @@ SHELL_DIR="$MY_PROJECT/android-shell"
 SDK_HOME="$HOME/android-sdk"
 JDK_HOME="$HOME/jdk"
 APK_SRC="$SHELL_DIR/android/app/build/outputs/apk/debug/app-debug.apk"
-APK_DST="$MY_PROJECT/public/AI-Phone.apk"
+APK_DST="$MY_PROJECT/public/Cove.apk"
 
 log() { echo -e "\033[1;32m[build-apk]\033[0m $*"; }
 
@@ -66,4 +66,4 @@ export PATH="$JAVA_HOME/bin:$PATH"
 # ---------- 5) 部署 ----------
 cp "$APK_SRC" "$APK_DST"
 SIZE=$(ls -lh "$APK_DST" | awk '{print $5}')
-log "完成：public/AI-Phone.apk（$SIZE）——网页端「设置 › APP 更新」即可下载"
+log "完成：public/Cove.apk（$SIZE）——网页端「设置 › APP 更新」即可下载"

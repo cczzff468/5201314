@@ -401,6 +401,14 @@ export type GoodsImgStyle = 'cartoon' | 'sketch' | 'emoji';
  * 持久化 settings.batteryPercent；状态栏电量实时跟随 */
 export type BatteryPercentMode = 'outside' | 'inside' | 'none';
 
+/** App 图标（第三十一轮：App 改名 Cove，三选一图标）：
+ *  '1'=纯白压印 cove / '2'=C 对话气泡 / '3'=星光气泡 cove
+ *  持久化 settings.appIcon（开屏动画/设置预览即时跟随）+ 同步服务器 AppConfig（PWA manifest 动态图标） */
+export type AppIconId = '1' | '2' | '3';
+export const APP_ICON_IDS: AppIconId[] = ['1', '2', '3'];
+/** App 显示名（第三十一轮改名） */
+export const APP_DISPLAY_NAME = 'Cove';
+
 interface SettingsState {
   theme: ThemeMode;
   /** 主屏图标风格（默认 real=真实图标；持久化 settings.iconStyle） */
@@ -455,6 +463,11 @@ interface SettingsState {
    *  inside=图标内部数字（iOS 16+ 风格：纯填充块、数字嵌电池内、无 % 号） /
    *  none=不显示百分比（只有电池图标）；持久化 settings.batteryPercent */
   batteryPercent: BatteryPercentMode;
+  /** App 图标三选一（第三十一轮）：'1'/'2'/'3'，持久化 settings.appIcon；
+   *  开屏动画与设置预览即时跟随；同时同步服务器（PWA manifest 动态返回所选图标） */
+  appIcon: AppIconId;
+  /** 切换 App 图标（即时持久化本地 + 异步同步服务器 manifest 图标） */
+  setAppIcon: (id: AppIconId) => void;
   /** 后台保活开关（v80）：开启后切到后台/锁屏时尽量保持网页运行——Worker 心跳 +
    *  无声音频双通道防节流/防冻结，AI 主动消息与后台接力轮询不中断（代价是略更耗电） */
   bgKeepAlive: boolean;
@@ -585,6 +598,7 @@ export const useSettings = create<SettingsState>((set, get) => ({
   islandPersistent: true,
   // 电量百分比默认图标外部（升级用户的现行样式不变）
   batteryPercent: 'outside',
+  appIcon: '1',
   bgKeepAlive: false,
   assistViewer: false,
   assistQuickOps: false,
@@ -600,7 +614,7 @@ export const useSettings = create<SettingsState>((set, get) => ({
   load: async () => {
     if (get().loaded) return;
     try {
-      const [themeRec, wallpaperRec, lockWallpaperRec, apiRec, presetsRec, apiFallbacksRec, visionRec, visionPresetsRec, lockRec, profileRec, iconsRec, ttsRec, sttRec, imgGenRec, imgGenPresetsRec, fontRec, fontScaleRec, fontWeightRec, statusBarRec, iconStyleRec, goodsImgStyleRec, themeResetRec, islandPersistentRec, assistViewerRec, assistQuickOpsRec, bubbleStyleRec, bubbleSchemesRec, liquidSkinRec, chatDecorRec, customCssRec, bgKeepAliveRec, batteryPercentRec] = await Promise.all([
+      const [themeRec, wallpaperRec, lockWallpaperRec, apiRec, presetsRec, apiFallbacksRec, visionRec, visionPresetsRec, lockRec, profileRec, iconsRec, ttsRec, sttRec, imgGenRec, imgGenPresetsRec, fontRec, fontScaleRec, fontWeightRec, statusBarRec, iconStyleRec, goodsImgStyleRec, themeResetRec, islandPersistentRec, assistViewerRec, assistQuickOpsRec, bubbleStyleRec, bubbleSchemesRec, liquidSkinRec, chatDecorRec, customCssRec, bgKeepAliveRec, batteryPercentRec, appIconRec] = await Promise.all([
         localDB.get('settings', 'theme'),
         localDB.get('settings', 'wallpaper'),
         localDB.get('settings', 'lockWallpaper'),
@@ -633,6 +647,7 @@ export const useSettings = create<SettingsState>((set, get) => ({
         localDB.get('settings', 'customCss'),
         localDB.get('settings', 'bgKeepAlive'),
         localDB.get('settings', 'batteryPercent'),
+        localDB.get('settings', 'appIcon'),
       ]);
 
       // 性能：八个含敏感 Key 的字段并行解密（secret-box 的 PBKDF2 密钥进程内缓存只派生一次）——
@@ -959,6 +974,9 @@ export const useSettings = create<SettingsState>((set, get) => ({
           batteryPercentRec?.value === 'inside' || batteryPercentRec?.value === 'none'
             ? batteryPercentRec.value
             : 'outside',
+        // App 图标三选一：无记录/非法值 = '1'（纯白压印 cove）
+        appIcon:
+          appIconRec?.value === '2' || appIconRec?.value === '3' ? appIconRec.value : '1',
         iconStyle,
         goodsImgStyle,
         // 聊天气泡装扮 + 收藏夹：无记录/脏数据回默认（normalize 内部校验 kind/color/结构）
@@ -1098,6 +1116,18 @@ export const useSettings = create<SettingsState>((set, get) => ({
   setBatteryPercent: (m) => {
     set({ batteryPercent: m });
     void localDB.put('settings', { key: 'batteryPercent', value: m });
+  },
+
+  setAppIcon: (id) => {
+    if (id !== '1' && id !== '2' && id !== '3') return;
+    set({ appIcon: id });
+    void localDB.put('settings', { key: 'appIcon', value: id });
+    // 同步服务器：PWA manifest 动态返回所选图标（添加到主屏幕/安装时生效）
+    void fetch('/api/pwa/app-icon', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ icon: id }),
+    }).catch(() => undefined);
   },
 
   setIslandPersistent: (v) => {

@@ -529,7 +529,7 @@ public class NativePerceptionPlugin extends Plugin {
         call.resolve(ret);
     }
 
-    /** 跳系统「无障碍」设置页（用户手动找到「AI Phone」开启服务） */
+    /** 跳系统「无障碍」设置页（用户手动找到「Cove」开启服务） */
     @PluginMethod
     public void openAccessibilitySettings(PluginCall call) {
         try {
@@ -3114,7 +3114,7 @@ public class NativePerceptionPlugin extends Plugin {
         }
     }
 
-    /** 存文本文件到「Download/AI Phone/」（API 29+ MediaStore 直写；旧系统 File 直写） */
+    /** 存文本文件到「Download/Cove/」（API 29+ MediaStore 直写；旧系统 File 直写） */
     @PluginMethod
     public void saveTextToFile(PluginCall call) {
         final String content = call.getString("content", "");
@@ -3139,7 +3139,7 @@ public class NativePerceptionPlugin extends Plugin {
                     android.content.ContentValues cv = new android.content.ContentValues();
                     cv.put(MediaStore.MediaColumns.DISPLAY_NAME, fname);
                     cv.put(MediaStore.MediaColumns.MIME_TYPE, "text/plain");
-                    cv.put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/AI Phone");
+                    cv.put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS + "/Cove");
                     cv.put(MediaStore.MediaColumns.IS_PENDING, 1);
                     Uri uri = ctx.getContentResolver().insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, cv);
                     if (uri == null) {
@@ -3153,10 +3153,10 @@ public class NativePerceptionPlugin extends Plugin {
                     android.content.ContentValues done = new android.content.ContentValues();
                     done.put(MediaStore.MediaColumns.IS_PENDING, 0);
                     ctx.getContentResolver().update(uri, done, null, null);
-                    savedPath = "Download/AI Phone/" + fname;
+                    savedPath = "Download/Cove/" + fname;
                 } else {
                     File dir = new File(Environment
-                            .getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "AI Phone");
+                            .getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "Cove");
                     if (!dir.exists() && !dir.mkdirs()) {
                         call.resolve(toolFail("failed", "创建下载子目录失败（存储权限）"));
                         return;
@@ -3165,7 +3165,7 @@ public class NativePerceptionPlugin extends Plugin {
                     try (java.io.FileOutputStream fos = new java.io.FileOutputStream(f)) {
                         fos.write(bytes);
                     }
-                    savedPath = "Download/AI Phone/" + fname;
+                    savedPath = "Download/Cove/" + fname;
                 }
                 JSObject ret = new JSObject();
                 ret.put("ok", true);
@@ -3201,7 +3201,7 @@ public class NativePerceptionPlugin extends Plugin {
             android.app.DownloadManager.Request req = new android.app.DownloadManager.Request(Uri.parse(url));
             req.setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, name);
             req.setTitle(name);
-            req.setDescription("AI Phone 正在下载");
+            req.setDescription("Cove 正在下载");
             req.setNotificationVisibility(android.app.DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
             req.setAllowedOverMetered(true);
             req.setAllowedOverRoaming(true);
@@ -4455,7 +4455,7 @@ public class NativePerceptionPlugin extends Plugin {
             }
             final String name = "AI-Phone-Update-" + System.currentTimeMillis() + ".apk";
             android.app.DownloadManager.Request req = new android.app.DownloadManager.Request(Uri.parse(url));
-            req.setTitle("AI Phone 更新包");
+            req.setTitle("Cove 更新包");
             req.setDescription("下载完成后自动弹出安装");
             req.setMimeType("application/vnd.android.package-archive");
             req.setNotificationVisibility(android.app.DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
@@ -4739,7 +4739,7 @@ public class NativePerceptionPlugin extends Plugin {
 
     // ---------------- 常驻守护（前台服务）+ 开机自启动 ----------------
 
-    /** 开启常驻守护（拉起 KeepAliveService「AI Phone 正在守候」前台服务 + 记自启开关） */
+    /** 开启常驻守护（拉起 KeepAliveService「Cove 正在守候」前台服务 + 记自启开关） */
     @PluginMethod
     public void keepAliveStart(PluginCall call) {
         String fail = KeepAliveService.start(getContext());

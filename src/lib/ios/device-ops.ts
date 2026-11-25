@@ -220,7 +220,7 @@ export async function labBringToFront(): Promise<DeviceOpResult> {
   if (r.via === 'notification') {
     return { ok: true, text: '已弹高优先级通知把 TA 喊回来（系统不允许后台硬拉，点通知即回聊天）' };
   }
-  return { ok: true, text: '已把 AI Phone 拉到前台' };
+  return { ok: true, text: '已把 Cove 拉到前台' };
 }
 
 /**
@@ -703,7 +703,7 @@ export async function labReadFileContent(path: string): Promise<DeviceOpResult> 
   return { ok: true, text: `「${r.path ?? path}」（${fmtFileSize(r.size)}）内容：\n${r.content ?? ''}` };
 }
 
-/** 存文本文件到「Download/AI Phone/」 */
+/** 存文本文件到「Download/Cove/」 */
 export async function labSaveTextToFile(content: string, filename?: string): Promise<DeviceOpResult> {
   const r = await nativeSaveTextToFile(content, filename);
   if (!r.ok) {
@@ -712,7 +712,7 @@ export async function labSaveTextToFile(content: string, filename?: string): Pro
     };
     return { ok: false, text: `保存失败：${map[r.reason ?? ''] ?? r.detail ?? a11yGateText(r.reason)}` };
   }
-  return { ok: true, text: `已保存：${r.path ?? 'Download/AI Phone/'}（${fmtFileSize(r.size)}）——打开手机文件管理器的下载目录就能看到` };
+  return { ok: true, text: `已保存：${r.path ?? 'Download/Cove/'}（${fmtFileSize(r.size)}）——打开手机文件管理器的下载目录就能看到` };
 }
 
 /** 系统下载器（DownloadManager 下载到 Download/） */

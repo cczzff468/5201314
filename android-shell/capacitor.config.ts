@@ -15,7 +15,7 @@ import type { CapacitorConfig } from '@capacitor/cli';
  */
 const config: CapacitorConfig = {
   appId: 'com.z.aiphone',
-  appName: 'AI Phone',
+  appName: 'Cove',
   webDir: 'www',
   server: {
     // 允许 WebView 内导航到任意服务器（配置页 → 用户填的预览地址）

@@ -192,7 +192,7 @@ public class MainActivity extends BridgeActivity {
             return;
         }
         lastBackAt = now;
-        Toast.makeText(this, "再按一次退出 AI Phone", Toast.LENGTH_SHORT).show();
+        Toast.makeText(this, "再按一次退出 Cove", Toast.LENGTH_SHORT).show();
     }
 
     @Override
@@ -361,7 +361,7 @@ public class MainActivity extends BridgeActivity {
         public String getShellInfo() {
             JSONObject o = new JSONObject();
             try {
-                o.put("versionCode", 78);
+                o.put("versionCode", 79);
                 o.put("versionName", "2.4.14");
                 o.put("fullscreen", true); // 系统状态栏隐藏（全屏）标记
             } catch (Exception ignored) {

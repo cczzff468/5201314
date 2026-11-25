@@ -850,7 +850,7 @@ export function buildPhoneTools(): PhoneToolDef[] {
     );
     add(
       'saveTextToFile',
-      '把一段文字【保存成文本文件】存进机主手机的「Download/AI Phone/」目录（真实写入，打开手机文件管理器就能看到）。机主说「帮我存一下这段话」「把刚才聊的存成文件」时用这个；也可以按你的判断主动保存值得留念的内容（如机主说过的重要的话/你们聊出的计划，按人设记忆上下文自己决定要不要存）。',
+      '把一段文字【保存成文本文件】存进机主手机的「Download/Cove/」目录（真实写入，打开手机文件管理器就能看到）。机主说「帮我存一下这段话」「把刚才聊的存成文件」时用这个；也可以按你的判断主动保存值得留念的内容（如机主说过的重要的话/你们聊出的计划，按人设记忆上下文自己决定要不要存）。',
       {
         content: strParam('要保存的完整文字内容'),
         filename: strParam('文件名（可选，默认「AI保存-日期.txt」；不用带路径）'),
@@ -1203,7 +1203,7 @@ export async function execWebTool(name: string, args: Record<string, unknown>): 
       case 'getForegroundApp':
         return runDeviceTool((d) => d.labForegroundApp());
       case 'switchToChat':
-        // 真机拉回：把本 App（AI Phone）拉到前台回聊天；网页模式的等价能力是 openChat/pullBackToChat
+        // 真机拉回：把本 App（Cove）拉到前台回聊天；网页模式的等价能力是 openChat/pullBackToChat
         return runDeviceTool((d) => d.labBringToFront());
       case 'getBatteryStatus':
         return runDeviceTool((d) => d.labBattery());

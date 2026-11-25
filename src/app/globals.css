@@ -1795,3 +1795,38 @@ html[data-app-native] * {
     scrollbar-width: none !important;
   }
 }
+
+/* ============ 第三十一轮：Cove 韩系开屏动画（boot splash）============
+ * 灵感：韩系极简（奶油底 + 柔和大色晕缓漂 + 大留白 + 细字距 wordmark + 微光扫过）。
+ * - 开屏层 z-[110] 盖住锁屏/一切全局层，1.9s 后自动淡出卸载；
+ * - 图标入场：0.62s 弹性缩放淡入（0.86→1）+ 柔和投影；
+ * - wordmark「Cove」：细字距拉宽（0.42em），逐字错峰上浮淡入；
+ * - 底部 3px 进度细条：韩系微光从左到右扫过（无限循环，开屏期间持续）；
+ * - 退场：整层 0.55s 淡出 + 轻微放大 1.03（不抢走下方锁屏的入场注意力）。 */
+@keyframes cove-splash-orb-a {
+  0%   { transform: translate(-12%, -8%) scale(1); }
+  50%  { transform: translate(6%, 10%) scale(1.18); }
+  100% { transform: translate(-12%, -8%) scale(1); }
+}
+@keyframes cove-splash-orb-b {
+  0%   { transform: translate(10%, 12%) scale(1.1); }
+  50%  { transform: translate(-8%, -6%) scale(0.94); }
+  100% { transform: translate(10%, 12%) scale(1.1); }
+}
+@keyframes cove-splash-icon-in {
+  0%   { opacity: 0; transform: scale(0.86); }
+  60%  { opacity: 1; transform: scale(1.02); }
+  100% { opacity: 1; transform: scale(1); }
+}
+@keyframes cove-splash-word-in {
+  0%   { opacity: 0; transform: translateY(7px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+@keyframes cove-splash-shimmer {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(320%); }
+}
+@keyframes cove-splash-fade {
+  0%   { opacity: 1; }
+  100% { opacity: 0; }
+}

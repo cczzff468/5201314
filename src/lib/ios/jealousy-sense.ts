@@ -332,7 +332,7 @@ export async function deviceLockState(pkg: string): Promise<boolean | null> {
   }
 }
 
-/** 强行拉回：bringToFront 把本 APP（AI Phone）切到真机前台（FLAG_ACTIVITY_NEW_TASK） */
+/** 强行拉回：bringToFront 把本 APP（Cove）切到真机前台（FLAG_ACTIVITY_NEW_TASK） */
 export async function devicePullback(): Promise<DeviceOpOutcome> {
   try {
     const { nativeBringToFront } = await import('./native-perception');

@@ -1,7 +1,7 @@
 <?xml version='1.0' encoding='utf-8'?>
 <resources>
-    <string name="app_name">AI Phone</string>
-    <string name="title_activity_main">AI Phone</string>
+    <string name="app_name">Cove</string>
+    <string name="title_activity_main">Cove</string>
     <string name="package_name">com.z.aiphone</string>
     <string name="custom_url_scheme">com.z.aiphone</string>
     <!-- v2.0.0 AI 无障碍服务：系统设置 › 无障碍 里展示的用途说明 -->

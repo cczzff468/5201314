@@ -92,7 +92,7 @@ export function AppUpdatePage({ onBack }: { onBack: () => void }) {
               <Sparkles className="h-[22px] w-[22px] text-white" aria-hidden="true" />
             </div>
             <div className="min-w-0 flex-1">
-              <p className="font-medium">AI Phone v{version}{sizeMb}</p>
+              <p className="font-medium">Cove v{version}{sizeMb}</p>
               {checking ? (
                 <p className="mt-0.5 flex items-center gap-1.5 text-muted-foreground">
                   <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />正在检查更新…

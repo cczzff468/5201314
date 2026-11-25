@@ -5,10 +5,10 @@ import android.content.Context;
 import android.content.Intent;
 
 /**
- * 开机自启动接收器（v2.1.0）：手机重启后把 AI Phone 的守护能力自动拉回后台。
+ * 开机自启动接收器（v2.1.0）：手机重启后把 Cove 的守护能力自动拉回后台。
  *
  * 【开机清单】
- *  ① 常驻守护前台服务（KeepAliveService「AI Phone 正在守候」）——用户在
+ *  ① 常驻守护前台服务（KeepAliveService「Cove 正在守候」）——用户在
  *     设置 › 权限给予 › 常驻守护 开启过才拉起（开关持久化在 keepalive/enabled）；
  *  ② 重梳重启前还活跃的吃醋锁（LockOverlayService.rearmFromPrefs）——锁状态
  *     持久化在 jealousy_guard 里，重启前没到期/锁到哄好的锁重新武装遮罩，

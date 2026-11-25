@@ -3640,3 +3640,28 @@ Work Log:
 - [浏览器·记忆] ai-browser-state-v2 localStorage：page/mode/engine/winPos/ballPos 全持久化——reload 后点悬浮球即恢复上次页面+引擎+窗口位置（实测 example.com+搜狗引擎还原）；悬浮球旧键兼容读取
 - [悬浮球·出现时机] AIBrowserBall：everUsed（用过=store.used||localStorage page）才渲染——首次未用不显示，AI 一搜索/开网页即常驻；美化：品牌蓝三段渐变+外圈光环 ring-white/30+呼吸动效（box-shadow 5s 循环）+Compass 图标+开窗态半透明 X
 - [E2E] ①电池 DOM：body 34×14.5 border 2/radius 5、fill 28×8.5（修复后）、cap 2×6、双层数字 100 ②设置弹窗：点行开（三选项+当前选中）→点选即关+状态栏实时切 outside（100% 出现）③浏览器：工具唤起 78%×46% 浮窗+iframe example.com+引擎百度、引擎菜单 6 项、切搜狗生效、拖拽精确位移、关窗→球出现（aria-label「继续上次看的网页」）→reload→解锁→点球→恢复上次页面+引擎 ④搜索→sogou URL ⑤tsc 改动文件 0 错误、eslint 0 错误（11 条 warning 全在 APK 构建中间产物）、清错重载后页面 0 报错
+
+---
+Task ID: 31
+Agent: 主控 Agent（Z.ai Code）
+Task: App 改名 Cove（图标三选一+韩系开屏）+ 电池图标 iOS 实测重建 + UI 清洗 + 内存审计 —— v2.4.15（versionCode 79）
+
+Work Log:
+- 【图标修复】机主上传 3 张图（豆包生成）：image-edit 两轮去水印/满幅化 + sharp 确定性裁剪（质量阈值 bbox/发丝边检测）+ iOS squircle 蒙版 → public/icons/app/icon-{1,2,3}-{1024,512,256,192,maskable}.png + apple-touch-icon；icon-2 内容审核触发走原图几何裁剪（水印区 x≥1454 天然排除）
+- 【App 改名 Cove 全链】manifest.json + layout.tsx 元数据/标题/appleWebApp；sw 不变；约 30 处用户可见「AI Phone」文案改 Cove（设置引导/更新弹窗/权限提示/工具描述/Download 目录）；Android strings.xml + capacitor appName + Java 通知/下载/Toast 文案；APK 更名 Cove.apk（apk-download/app-version route/build-apk.sh 同步改路径）；包名 com.z.aiphone 保持不变（覆盖安装兼容）
+- 【图标三选一】store 新增 settings.appIcon（'1'|'2'|'3'，IndexedDB 持久化 + setAppIcon 同步 POST）；API：/api/pwa/app-icon（GET/POST，Prisma AppConfig kv 表 upsert）+ /api/pwa/manifest（动态 manifest，按选择返回 icon-{n}-*，Content-Type application/manifest+json）；layout manifest 指向动态路由；设置 › 关于本机卡新增「App 图标」行 + 三列大图弹窗（选中蓝描边+角标）
+- 【韩系开屏】BootSplash.tsx（page.tsx 顶层挂载，fixed z-[9999]）：奶油底 #FAF8F3 + 暖玫瑰/淡抹茶两团 blur 色晕缓漂 + 所选图标弹性入场（0.86→1 弹性曲线）+ 「Cove」wordmark 0.42em 细字距逐字错峰上浮 + 3px 微光循环扫过 + 1.25s 后 0.55s 淡出自动卸载；keyframes cove-splash-* 入 globals.css
+- 【电池图标删除重建（第三十一轮）】image-search 两轮真机参考（iPhone 14 Pro 锁屏 45%/深壁纸 78%/充电绿 79%）+ VLM 逐项实测定稿：iOS 16.1+ 百分比样式 = 实心胶囊整体填满（非比例填充、无轨道）+ 胶囊色=状态色（常态前景色/充电绿/低电红）+ 数字几何居中反色镂空（9px semibold）+ 充电数字右侧白色小闪电 + 凸点紧贴（50% 高 13% 宽）；outside/none 模式同步 iOS 化（全不透明 1.2px 细描边、填充贴内缘、凸点全不透明）
+- 【设置弹窗美化】电量百分比弹窗：每选项带「状态栏仿真预览条」（9:41 + 当前样式电池所见即所得，暖米色渐变条）+ 标题区 + 毛玻璃卡弹性入场 + 选中蓝角标；入口行同款预览条
+- 【浏览器顶栏上移】browser.tsx 两处 pt-[54px] → pt-[46px]（状态栏内容带下沿 42px，地址栏上移 8px 不重叠）
+- 【UI 清洗】toast 重制毛玻璃极简风（rounded-[22px] + bg-white/80 + backdrop-blur-2xl + 细描边；destructive 红 90%）+ 标题/描述 break-words 防溢出；错误中心/灵动岛/通知中心复核（本就毛玻璃+truncate，v18 起原始错误只进弹窗）
+- 【内存审计】python 扫描 useEffect 内 interval/listener/RAF 无 cleanup 模式 → 9 个候选全部复核为误报（模块级单例有意常驻或已有 cleanup）；createObjectURL/revokeObjectURL 全配对；EventSource（notify-sse/bg-turn）为设计常驻
+- 【长列表】聊天（v1.9.2 分窗）/朋友圈/QQ空间（renderCount 渐进）已有窗口化；X论坛 FeedList 补分窗（尾部锚定 40 条 + 「加载更早的帖子」步进 40）
+- 【APK 重打】gen-android-branding.mjs：mipmap 全密度 launcher/round/foreground（自适应 62% 安全区）+ values/ic_launcher_background 奶油白 + 全密度 portrait/land splash drawable（奶油底+色晕+图标+Cove wordmark，SVG 合成）；build.gradle versionCode 79 / versionName 2.4.15；getShellInfo 桥升 79；app-version.ts 新增 2.4.15 release notes
+- 【部署验证】bun run lint 0 errors；dev 服务器因 Prisma 客户端缓存（db:push 后 AppConfig 模型不识别 500）重启一次后 POST/动态 manifest 全通；Agent Browser 端到端：开屏（奶油底+图标+wordmark+微光条）→ 锁屏 → 上滑解锁 → 主屏 → 设置（电池行预览条/弹窗三选项/inside 模式状态栏实测=绿色实心胶囊+白100+白闪电+凸点）→ App 图标弹窗三选一切换（row img 实时换 icon-3 + 服务器 POST 200 + manifest 返回 icon-3）→ 浏览器顶栏上移无重叠；控制台零错误；误杀的 im-gateway(3100) 已重启恢复
+- APK 构建 BUILD SUCCESSFUL：public/Cove.apk（7.1M，versionCode 79，新图标+韩系闪屏+改名 Cove）
+
+Stage Summary:
+- v2.4.15（code 79）双端就绪：网页热更全部生效；APK 需重装（改名+图标+闪屏走原生层）
+- 电池图标与真机 iOS 16.1+ 截图逐像素规格对齐（VLM 三轮实测）
+- App 品牌三件套（名/图标/开屏）可自定义且持久化（本地 IndexedDB + 服务器 SQLite 双写）

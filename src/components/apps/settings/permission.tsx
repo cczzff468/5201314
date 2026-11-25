@@ -250,12 +250,12 @@ export const PERM_DEFS: PermDef[] = [
     query: () => queryPermState('accessibility', () => accessibilityPermission()),
     request: async () => {
       const ok = await openNativeAccessibilitySettings();
-      if (ok) return { ok: true, note: '已跳转系统设置页，开启 AI Phone 服务后返回' };
+      if (ok) return { ok: true, note: '已跳转系统设置页，开启 Cove 服务后返回' };
       // v2.1.1 真机环境跳转失败如实报，绝不落账本谎报已授权
       return permRequestFallback(
         'accessibility',
         '无障碍服务已开启',
-        '跳转失败（通道异常），请重试；或到 系统设置 › 无障碍 手动开启 AI Phone 服务',
+        '跳转失败（通道异常），请重试；或到 系统设置 › 无障碍 手动开启 Cove 服务',
       );
     },
   },
@@ -570,7 +570,7 @@ export const PERM_DEFS: PermDef[] = [
   {
     key: 'keepalive',
     label: '常驻守护（前台服务）',
-    desc: '状态栏常驻「AI Phone 正在守候」防杀后台',
+    desc: '状态栏常驻「Cove 正在守候」防杀后台',
     icon: HeartHandshake,
     actionLabel: '开启常驻守护',
     actionLabelOff: '停止常驻守护',
@@ -600,7 +600,7 @@ export const PERM_DEFS: PermDef[] = [
       const r = await keepAliveStart();
       if (r.ok) {
         writeWebPermGrant('keepalive', true);
-        return { ok: true, note: '常驻守护已开启（状态栏显示「AI Phone 正在守候」）' };
+        return { ok: true, note: '常驻守护已开启（状态栏显示「Cove 正在守候」）' };
       }
       if (isNativePerception()) return { ok: false, note: '常驻守护拉起失败，请重试' };
       writeWebPermGrant('keepalive', true); // 浏览器/旧 APK：账本记账

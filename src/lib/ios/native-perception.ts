@@ -728,7 +728,7 @@ export async function accessibilityPermission(): Promise<A11yPermResult | null> 
   }
 }
 
-/** 跳系统「无障碍」设置页（找到 AI Phone 开启服务，一次开启终身有效） */
+/** 跳系统「无障碍」设置页（找到 Cove 开启服务，一次开启终身有效） */
 export async function openNativeAccessibilitySettings(): Promise<boolean> {
   const p = await nativePlugin();
   if (!p) return false;
@@ -1476,7 +1476,7 @@ export async function nativeReadFileContent(path: string): Promise<NativeFileRea
   }
 }
 
-/** 存文本文件到「Download/AI Phone/」 */
+/** 存文本文件到「Download/Cove/」 */
 export async function nativeSaveTextToFile(content: string, filename?: string): Promise<NativeFileSaveResult> {
   if (!isNativePerception()) return { ok: false, reason: 'not-native' };
   try {
@@ -1537,7 +1537,7 @@ export async function keepAliveStatus(): Promise<{ running?: boolean; enabled?: 
   }
 }
 
-/** 开启常驻守护（前台服务「AI Phone 正在守候」+ 记开机自启开关） */
+/** 开启常驻守护（前台服务「Cove 正在守候」+ 记开机自启开关） */
 export async function keepAliveStart(): Promise<{ ok: boolean; reason?: string }> {
   const p = await nativePlugin();
   if (!p) return { ok: false, reason: 'not-native' };
@@ -2309,7 +2309,7 @@ export async function nativeMediaPermission(): Promise<boolean | null> {
   }
 }
 
-/** 跳系统设置「通知使用权」（找到 AI Phone 开启，一次授权终身有效） */
+/** 跳系统设置「通知使用权」（找到 Cove 开启，一次授权终身有效） */
 export async function openNativeMediaSettings(): Promise<boolean> {
   const p = await nativePlugin();
   if (!p) return false;

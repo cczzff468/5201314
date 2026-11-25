@@ -12,11 +12,11 @@
 
 /** APK 直链（绝对地址；非浏览器环境返回相对路径） */
 export function getApkUrl(): string {
-  if (typeof window === 'undefined') return '/AI-Phone.apk';
+  if (typeof window === 'undefined') return '/Cove.apk';
   try {
-    return new URL('/AI-Phone.apk', window.location.href).href;
+    return new URL('/Cove.apk', window.location.href).href;
   } catch {
-    return '/AI-Phone.apk';
+    return '/Cove.apk';
   }
 }
 
@@ -51,9 +51,9 @@ export function launchApkDownload(markCopied: (v: boolean) => void): void {
   const proto = window.location.protocol.replace(':', '');
   if (proto === 'https' || proto === 'http') {
     try {
-      const direct = new URL('/AI-Phone.apk', window.location.href).href;
+      const direct = new URL('/Cove.apk', window.location.href).href;
       const intentUrl =
-        `intent://${window.location.host}/AI-Phone.apk#Intent;scheme=${proto};` +
+        `intent://${window.location.host}/Cove.apk#Intent;scheme=${proto};` +
         `action=android.intent.action.VIEW;S.browser_fallback_url=${encodeURIComponent(direct)};end`;
       const f = document.createElement('iframe');
       f.setAttribute('aria-hidden', 'true');
@@ -137,14 +137,14 @@ function mb(bytes: number): string {
 /**
  * 旧 APK 兜底通道：原生壳里 WebView 的 http 下载会交给 MainActivity 的
  * DownloadListener → 系统 DownloadManager（通知栏进度）。这里点一个真实
- * <a href="/AI-Phone.apk" download>（http 直链，不是 blob——blob 在 WebView
+ * <a href="/Cove.apk" download>（http 直链，不是 blob——blob 在 WebView
  * 里不触发 DownloadListener）+ 复制直链兜底。
  */
 function triggerLegacyAnchorDownload(): void {
   try {
     const a = document.createElement('a');
     a.href = getApkUrl();
-    a.download = 'AI-Phone.apk';
+    a.download = 'Cove.apk';
     a.rel = 'noopener';
     document.body.appendChild(a);
     a.click();
@@ -209,7 +209,7 @@ export async function startApkUpdate(
       try {
         const a = document.createElement('a');
         a.href = url;
-        a.download = 'AI-Phone.apk';
+        a.download = 'Cove.apk';
         document.body.appendChild(a);
         a.click();
         a.remove();
@@ -258,7 +258,7 @@ export async function startApkUpdate(
         percent: -1,
         bytesSoFar: 0,
         totalBytes: 0,
-        note: '已打开「安装未知应用」授权页——请允许 AI Phone 安装应用，回来再点一次「立即更新」。',
+        note: '已打开「安装未知应用」授权页——请允许 Cove 安装应用，回来再点一次「立即更新」。',
       };
       emit(perm);
       return perm;

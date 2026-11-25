@@ -346,3 +346,11 @@ model ReadingMemory {
 
   @@index([bookUrl, kind])
 }
+
+/// App 全局配置（key-value）：当前存 PWA 图标选择（key='appIcon'，value='1'|'2'|'3'），
+/// /api/pwa/manifest 动态读取返回所选图标（浏览器安装 PWA 时拉取）
+model AppConfig {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
+}

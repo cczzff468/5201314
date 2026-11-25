@@ -456,7 +456,7 @@ export function useVoiceRecorder(opts: {
           if (phaseRef.current === 'starting' && !deadRef.current) {
             setPhaseSafe('idle');
             optsRef.current.onStartError(
-              '无法使用麦克风：请在系统设置 › 应用 › AI Phone › 权限中允许「麦克风」'
+              '无法使用麦克风：请在系统设置 › 应用 › Cove › 权限中允许「麦克风」'
             );
           }
           return;

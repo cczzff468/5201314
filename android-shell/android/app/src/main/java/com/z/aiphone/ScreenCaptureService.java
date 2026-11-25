@@ -222,7 +222,7 @@ public class ScreenCaptureService extends Service {
         Notification.Builder b = (Build.VERSION.SDK_INT >= 26)
                 ? new Notification.Builder(this, CHANNEL_ID)
                 : new Notification.Builder(this);
-        b.setContentTitle("AI Phone · 屏幕感知中")
+        b.setContentTitle("Cove · 屏幕感知中")
                 .setContentText("TA 能看到你的屏幕（本轮会话）")
                 .setSmallIcon(android.R.drawable.ic_menu_view)
                 .setOngoing(true)

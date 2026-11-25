@@ -895,7 +895,7 @@ export async function toolFreezeRealApp(
     if (apps.length === 0) {
       return {
         ok: false,
-        text: `无法把「${packageName}」解析成真机包名（原生应用清单不可用——需在 AI Phone APP（原生壳）里使用，浏览器预览读不到真机应用）。也可直接填 Android 包名（如 com.tencent.mm）`,
+        text: `无法把「${packageName}」解析成真机包名（原生应用清单不可用——需在 Cove APP（原生壳）里使用，浏览器预览读不到真机应用）。也可直接填 Android 包名（如 com.tencent.mm）`,
       };
     }
     const kw = pkg.toLowerCase();

@@ -127,6 +127,10 @@ export function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
   const setBatteryPercent = useSettings((s) => s.setBatteryPercent);
   // 第三十轮：电量百分比显示方式弹窗开关（点行打开，选完/点背板关闭）
   const [batteryModeOpen, setBatteryModeOpen] = useState(false);
+  // 第三十一轮：App 图标三选一（App 改名 Cove；开屏/设置预览即时跟随 + 同步服务器 manifest）
+  const appIcon = useSettings((s) => s.appIcon);
+  const setAppIcon = useSettings((s) => s.setAppIcon);
+  const [appIconOpen, setAppIconOpen] = useState(false);
   // 灵动岛常驻开关（用户需求）：关闭后隐藏顶部黑色胶囊基础灵动岛，只显示 APP 灵动岛
   const islandPersistent = useSettings((s) => s.islandPersistent);
   const setIslandPersistent = useSettings((s) => s.setIslandPersistent);
@@ -410,8 +414,14 @@ export function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
             onClick={() => setBatteryModeOpen(true)}
             className="flex min-h-[52px] w-full items-center gap-3 px-4 text-left transition-colors active:bg-muted/50"
           >
-            <span className="flex h-[20px] w-[76px] shrink-0 items-center justify-center text-foreground">
-              <BatteryIcon level={67} charging={false} low={false} mode={batteryPercent} light={false} />
+            {/* 入口行预览：状态栏仿真样条（9:41 + 当前样式电池），与弹窗内预览同款 */}
+            <span className="flex h-[30px] w-[92px] shrink-0 items-center justify-between rounded-[9px] bg-gradient-to-br from-[#E8E4DC] via-[#EFEBE4] to-[#E2D9CC] px-[7px] shadow-[inset_0_1px_2px_rgba(0,0,0,0.08)] ring-1 ring-black/[0.06]">
+              <span className="text-[10.5px] font-semibold leading-none tabular-nums tracking-tight text-black">
+                9:41
+              </span>
+              <span className="flex items-center text-black">
+                <BatteryIcon level={67} charging={false} low={false} mode={batteryPercent} light={false} />
+              </span>
             </span>
             <span className="min-w-0 flex-1 truncate text-[16px]">电量百分比</span>
             <span className="shrink-0 text-[13px] text-muted-foreground">{batteryModeLabel(batteryPercent)}</span>
@@ -604,9 +614,32 @@ export function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
           <MainRow icon={Database} tone={TONE_GREEN} label="存储" onClick={() => onOpen('storage')} />
         </div>
 
-        {/* 关于本机 + APP 更新（v1.3：APK 下载入口从感知设置提升到系统设置）；v1.9.22 新增添加到主屏幕 */}
+        {/* 关于本机 + APP 图标 + APP 更新（v1.3：APK 下载入口从感知设置提升到系统设置）；v1.9.22 新增添加到主屏幕 */}
         <div className="mx-4 mt-4 divide-y divide-black/[0.05] overflow-hidden rounded-[22px] bg-white/55 shadow-[0_8px_28px_rgba(17,24,39,0.06)] ring-1 ring-white/70 backdrop-blur-2xl dark:divide-white/[0.06] dark:bg-white/[0.06] dark:ring-white/[0.09]">
           <MainRow icon={Info} tone={TONE_GRAY} label="关于本机" onClick={() => onOpen('about')} />
+          {/* 第三十一轮：App 图标三选一（改名 Cove 后机主要求可选图标）——行内预览当前图标 */}
+          <button
+            type="button"
+            aria-haspopup="dialog"
+            aria-expanded={appIconOpen}
+            data-testid="settings-app-icon-row"
+            onClick={() => setAppIconOpen(true)}
+            className="flex min-h-[52px] w-full items-center gap-3 px-4 text-left transition-colors active:bg-muted/50"
+          >
+            <span className="grid h-[31px] w-[31px] shrink-0 place-items-center">
+              {/* 当前 App 图标小预览（ squircle 圆角 + 细描边） */}
+              <img
+                src={`/icons/app/icon-${appIcon}-192.png`}
+                alt="当前 App 图标"
+                className="h-[29px] w-[29px] rounded-[6.8px] object-cover ring-[0.5px] ring-black/10"
+              />
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-[16px]">App 图标</span>
+              <span className="mt-0.5 block truncate text-[11.5px] text-muted-foreground">Cove 三选一 · 开屏与桌面图标即时跟随</span>
+            </span>
+            <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground/60" strokeWidth={2.2} />
+          </button>
           <MainRow
             icon={Download}
             tone={TONE_CYAN}
@@ -624,6 +657,13 @@ export function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
             testId="settings-pwa-entry"
           />
         </div>
+        {appIconOpen && (
+          <AppIconDialog
+            current={appIcon}
+            onPick={setAppIcon}
+            onClose={() => setAppIconOpen(false)}
+          />
+        )}
 
         <p className="py-6 text-center text-[12px] text-muted-foreground">
           iOS Web · 本地优先架构 · 数据仅存于你的浏览器
@@ -637,8 +677,126 @@ function batteryModeLabel(mode: BatteryPercentMode): string {
   return mode === 'inside' ? '电池图标内部' : mode === 'outside' ? '电池图标外部' : '不显示';
 }
 
-/** 第三十轮：电量百分比显示方式弹窗（iOS 居中卡：三选项各带状态栏同款实时预览，
- *  点选即时生效持久化；点背板/Esc 关闭；portal 到 body 不受卡片层叠限制） */
+/** 三张备选图标（机主上传修图：去水印+四周去留白，squircle 满幅） */
+const APP_ICON_OPTIONS: { id: '1' | '2' | '3'; name: string; desc: string }[] = [
+  { id: '1', name: '纯白压印', desc: 'cove · 新拟态浮雕' },
+  { id: '2', name: '气泡 C', desc: '对话气泡与 C 融合' },
+  { id: '3', name: '星光气泡', desc: '气泡 + AI 星光' },
+];
+
+/** 第三十一轮：App 图标三选一弹窗（iOS 居中卡）：
+ *  三张大图预览（64px squircle，选中态蓝描边+角标），点选即时生效：
+ *  开屏动画/设置预览即时跟随；同时异步同步服务器（PWA manifest 动态图标，
+ *  「添加到主屏幕/安装」时浏览器拉取所选图标）。点背板/Esc/好 关闭。 */
+function AppIconDialog({
+  current,
+  onPick,
+  onClose,
+}: {
+  current: '1' | '2' | '3';
+  onPick: (id: '1' | '2' | '3') => void;
+  onClose: () => void;
+}) {
+  const [entered, setEntered] = useState(false);
+  useEffect(() => {
+    const raf = requestAnimationFrame(() => setEntered(true));
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    document.addEventListener('keydown', onKey);
+    return () => {
+      cancelAnimationFrame(raf);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [onClose]);
+
+  return createPortal(
+    <>
+      <button
+        type="button"
+        aria-label="关闭 App 图标弹窗"
+        data-testid="app-icon-backdrop"
+        className="fixed inset-0 z-[300] cursor-default bg-black/35 backdrop-blur-[2px]"
+        onClick={onClose}
+      />
+      <div
+        role="dialog"
+        aria-label="App 图标"
+        data-testid="app-icon-dialog"
+        className="pointer-events-none fixed inset-0 z-[310] flex items-center justify-center p-8"
+      >
+        <div
+          className={`pointer-events-auto w-full max-w-[320px] overflow-hidden rounded-[24px] bg-white/90 shadow-[0_18px_48px_rgba(0,0,0,0.28)] ring-1 ring-black/[0.06] backdrop-blur-2xl transition-[opacity,transform] duration-[280ms] ease-[cubic-bezier(0.32,0.72,0,1.2)] dark:bg-zinc-900/[0.92] dark:ring-white/[0.09] ${
+            entered ? 'translate-y-0 scale-100 opacity-100' : 'translate-y-3 scale-[0.92] opacity-0'
+          }`}
+        >
+          {/* 标题区 */}
+          <div className="border-b border-black/[0.06] px-5 pb-3 pt-4 text-center dark:border-white/[0.08]">
+            <p className="text-[16px] font-semibold text-black dark:text-white">App 图标</p>
+            <p className="mt-0.5 text-[11.5px] text-muted-foreground">Cove · 选一个喜欢的样子</p>
+          </div>
+          {/* 三张图标大预览（横排三列） */}
+          <div className="grid grid-cols-3 gap-2 px-4 py-4">
+            {APP_ICON_OPTIONS.map((o) => {
+              const sel = current === o.id;
+              return (
+                <button
+                  key={o.id}
+                  type="button"
+                  role="menuitemradio"
+                  aria-checked={sel}
+                  aria-label={`${o.name}（${o.desc}）`}
+                  data-testid={`app-icon-option-${o.id}`}
+                  onClick={() => {
+                    onPick(o.id);
+                    onClose();
+                  }}
+                  className={`flex flex-col items-center gap-2 rounded-[16px] px-1 py-3 transition-all active:scale-[0.97] ${
+                    sel ? 'bg-[#007AFF]/[0.08] ring-[1.5px] ring-[#007AFF]/60' : 'ring-[1.5px] ring-transparent'
+                  }`}
+                >
+                  <span className="relative">
+                    <img
+                      src={`/icons/app/icon-${o.id}-192.png`}
+                      alt={o.name}
+                      className={`h-[64px] w-[64px] rounded-[15px] object-cover shadow-[0_6px_16px_rgba(0,0,0,0.14)] ${sel ? '' : 'opacity-95'}`}
+                    />
+                    {sel && (
+                      <span className="absolute -right-[6px] -top-[6px] grid h-[18px] w-[18px] place-items-center rounded-full bg-[#007AFF] shadow-[0_2px_6px_rgba(0,122,255,0.5)] ring-2 ring-white">
+                        <Check className="h-[12px] w-[12px] text-white" strokeWidth={3.2} />
+                      </span>
+                    )}
+                  </span>
+                  <span className="text-center leading-tight">
+                    <span className={`block text-[12.5px] ${sel ? 'font-semibold text-[#007AFF]' : 'text-black/85 dark:text-white/85'}`}>{o.name}</span>
+                    <span className="mt-0.5 block text-[9.5px] text-muted-foreground">{o.desc}</span>
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+          <p className="px-6 pb-2 text-center text-[10.5px] leading-relaxed text-muted-foreground">
+            开屏动画即时跟随；已安装到桌面的图标需重新添加一次才会换新
+          </p>
+          <button
+            type="button"
+            onClick={onClose}
+            className="w-full border-t border-black/[0.06] py-3 text-[16px] font-medium text-[#007AFF] transition-colors active:bg-black/[0.04] dark:border-white/[0.08] dark:active:bg-white/[0.06]"
+          >
+            好
+          </button>
+        </div>
+      </div>
+    </>,
+    document.body,
+  );
+}
+
+/** 第三十一轮：电量百分比显示方式弹窗美化（iOS 居中卡）：
+ * - 每个选项带【状态栏仿真预览条】：深浅两张壁纸样条上呈现 9:41 + 信号/WiFi + 三种电池样式，
+ *   所见即所得（原来只有一个孤零零的图标，机主要求美化）；
+ * - 毛玻璃卡体 + 弹性入场 + 选中态高亮描边；点选即时生效持久化；点背板/Esc 关闭；
+ * - portal 到 body 不受卡片层叠限制 */
 function BatteryModeDialog({
   current,
   onPick,
@@ -664,7 +822,7 @@ function BatteryModeDialog({
   const options: { value: BatteryPercentMode; label: string; desc: string }[] = [
     { value: 'none', label: '不显示', desc: '只有电池图标' },
     { value: 'outside', label: '电池图标外部', desc: '数字+% 在电池左侧' },
-    { value: 'inside', label: '电池图标内部', desc: 'iOS 同款 · 数字嵌电池内' },
+    { value: 'inside', label: '电池图标内部', desc: 'iOS 16.1+ 同款 · 数字嵌电池内' },
   ];
 
   return createPortal(
@@ -683,10 +841,15 @@ function BatteryModeDialog({
         className="pointer-events-none fixed inset-0 z-[310] flex items-center justify-center p-8"
       >
         <div
-          className={`pointer-events-auto w-full max-w-[300px] overflow-hidden rounded-[24px] bg-white/95 shadow-[0_18px_48px_rgba(0,0,0,0.28)] ring-1 ring-black/[0.06] backdrop-blur-2xl transition-[opacity,transform] duration-200 ease-out dark:bg-zinc-900/[0.95] dark:ring-white/[0.09] ${
-            entered ? 'translate-y-0 scale-100 opacity-100' : 'translate-y-2 scale-95 opacity-0'
+          className={`pointer-events-auto w-full max-w-[320px] overflow-hidden rounded-[24px] bg-white/90 shadow-[0_18px_48px_rgba(0,0,0,0.28)] ring-1 ring-black/[0.06] backdrop-blur-2xl transition-[opacity,transform] duration-[280ms] ease-[cubic-bezier(0.32,0.72,0,1.2)] dark:bg-zinc-900/[0.92] dark:ring-white/[0.09] ${
+            entered ? 'translate-y-0 scale-100 opacity-100' : 'translate-y-3 scale-[0.92] opacity-0'
           }`}
         >
+          {/* 标题区（iOS 弹窗标题 + 说明） */}
+          <div className="border-b border-black/[0.06] px-5 pb-3 pt-4 text-center dark:border-white/[0.08]">
+            <p className="text-[16px] font-semibold text-black dark:text-white">电量百分比</p>
+            <p className="mt-0.5 text-[11.5px] text-muted-foreground">状态栏电量的显示方式</p>
+          </div>
           <div className="divide-y divide-black/[0.05] dark:divide-white/[0.06]">
             {options.map((o) => (
               <button
@@ -699,17 +862,32 @@ function BatteryModeDialog({
                   onPick(o.value);
                   onClose();
                 }}
-                className="flex min-h-[54px] w-full items-center gap-3 px-4 text-left transition-colors active:bg-black/[0.04] dark:active:bg-white/[0.06]"
+                className={`flex w-full items-center gap-3 px-4 py-3 text-left transition-colors active:bg-black/[0.04] dark:active:bg-white/[0.06] ${
+                  current === o.value ? 'bg-[#007AFF]/[0.06]' : ''
+                }`}
               >
-                {/* 实时小预览：状态栏同款电池（固定 67% 示例） */}
-                <span className="flex h-[20px] w-[76px] shrink-0 items-center justify-center text-foreground">
-                  <BatteryIcon level={67} charging={false} low={false} mode={o.value} light={false} />
+                {/* 状态栏仿真预览条：浅色壁纸样条上「9:41 + 电池」所见即所得 */}
+                <span
+                  className="relative flex h-[30px] w-[92px] shrink-0 items-center justify-between overflow-hidden rounded-[9px] bg-gradient-to-br from-[#E8E4DC] via-[#EFEBE4] to-[#E2D9CC] px-[7px] shadow-[inset_0_1px_2px_rgba(0,0,0,0.08)] ring-1 ring-black/[0.06]"
+                  data-testid={`battery-mode-preview-${o.value}`}
+                >
+                  <span className="text-[10.5px] font-semibold leading-none tabular-nums tracking-tight text-black">
+                    9:41
+                  </span>
+                  <span className="flex items-center text-black">
+                    <BatteryIcon level={67} charging={false} low={false} mode={o.value} light={false} />
+                  </span>
+                  {/* 选中态右上角小对勾角标 */}
+                  {current === o.value && (
+                    <span className="absolute right-[3px] top-[3px] grid h-[13px] w-[13px] place-items-center rounded-full bg-[#007AFF] shadow-sm">
+                      <Check className="h-[9px] w-[9px] text-white" strokeWidth={3.2} />
+                    </span>
+                  )}
                 </span>
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-[15.5px]">{o.label}</span>
                   <span className="mt-0.5 block truncate text-[11px] text-muted-foreground">{o.desc}</span>
                 </span>
-                {current === o.value && <Check className="h-5 w-5 shrink-0 text-[#007AFF]" strokeWidth={2.5} />}
               </button>
             ))}
           </div>

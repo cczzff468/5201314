@@ -104,7 +104,7 @@ export default function AppUpdateDialog() {
         </div>
         <p className="mt-3 text-[16px] font-semibold leading-6">发现新版本</p>
         <p className="mt-0.5 text-[12.5px] text-muted-foreground">
-          AI Phone v{info.version}
+          Cove v{info.version}
           {sizeMb}
         </p>
 

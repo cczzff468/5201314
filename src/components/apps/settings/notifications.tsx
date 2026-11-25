@@ -278,7 +278,7 @@ export function NotificationPage({ onBack }: { onBack: () => void }) {
       {denied && (
         <p className="mt-3 px-1 text-[13px] leading-relaxed" style={{ color: IOS_RED }}>
           {isNativePerception()
-            ? '系统通知权限未开启：请在系统设置 › 应用 › AI Phone › 通知 中允许；Android 13+ 也可重新打开上方开关触发系统授权弹窗。'
+            ? '系统通知权限未开启：请在系统设置 › 应用 › Cove › 通知 中允许；Android 13+ 也可重新打开上方开关触发系统授权弹窗。'
             : '通知已被浏览器拒绝，请在浏览器设置中恢复。'}
         </p>
       )}
@@ -315,7 +315,7 @@ export function NotificationPage({ onBack }: { onBack: () => void }) {
       {testResult === 'fail-perm' && (
         <p className="mt-2 px-1 text-[12px] leading-relaxed" style={{ color: IOS_RED }}>
           {isNativePerception()
-            ? '通知权限未开启：请在系统设置 › 应用 › AI Phone › 通知 中允许；Android 13+ 也可重新打开上方开关触发系统授权弹窗。'
+            ? '通知权限未开启：请在系统设置 › 应用 › Cove › 通知 中允许；Android 13+ 也可重新打开上方开关触发系统授权弹窗。'
             : '通知权限被浏览器拒绝：请先在浏览器站点设置中允许通知，再发送测试。'}
         </p>
       )}

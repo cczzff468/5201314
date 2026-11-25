@@ -9,7 +9,7 @@
  * 「···」更多按钮 → 底部弹层菜单（推荐/不感兴趣/举报，主框架渲染）。
  */
 
-import { memo, type ReactNode } from 'react';
+import { memo, useState, type ReactNode } from 'react';
 import {
   castVote as castVoteCore,
   countShort,
@@ -479,19 +479,41 @@ export const PostCard = memo(function PostCard({ post, onOpen }: { post: ForumPo
   );
 });
 
-/** 时间线列表（已过滤排序好的 posts）+ 底部提示（可由主页传入无限生成 loading footer） */
+/** 时间线列表（已过滤排序好的 posts）+ 底部提示（可由主页传入无限生成 loading footer）。
+ *  第三十一轮：分窗渲染（长列表防 DOM 膨胀）——初始只渲染最近 FEED_WINDOW 条，
+ *  底部「加载更多」按钮步进扩窗（帖子卡是重卡片：媒体网格/投票/操作行，
+ *  几百张一次性 map 是滚动卡顿主因；与聊天/朋友圈同款分窗口径）。 */
+const FEED_WINDOW = 40;
+const FEED_STEP = 40;
 export function FeedList({ posts, footer }: { posts: ForumPost[]; footer?: React.ReactNode }) {
   const t = useXTheme();
   const f = useForum();
+  // 窗口从尾部锚定（新帖到达自然进窗，自动滚底不受影响），与聊天分窗同向
+  const [visibleCount, setVisibleCount] = useState(FEED_WINDOW);
+  const winStart = Math.max(0, posts.length - visibleCount);
+  const shown = posts.slice(winStart);
+  // posts 变短（切过滤/换社区）时收敛窗口防越界空窗
+  const safeShown = shown.length > 0 ? shown : posts.slice(0, Math.min(FEED_WINDOW, posts.length));
   return (
     <div>
-      {posts.map((p) => (
+      {safeShown.map((p) => (
         <PostCard key={p.id} post={p} onOpen={() => f.openThread(p.id)} />
       ))}
-      {footer ?? (
-        <p className="py-6 text-center text-[13px]" style={{ color: t.secondary }}>
-          {posts.length ? '已经到底啦 · X论坛' : ''}
-        </p>
+      {winStart > 0 ? (
+        <button
+          type="button"
+          onClick={() => setVisibleCount((c) => c + FEED_STEP)}
+          className="w-full py-4 text-center text-[14px] active:opacity-60"
+          style={{ color: t.accent }}
+        >
+          加载更早的帖子（还有 {winStart} 条）
+        </button>
+      ) : (
+        (footer ?? (
+          <p className="py-6 text-center text-[13px]" style={{ color: t.secondary }}>
+            {posts.length ? '已经到底啦 · X论坛' : ''}
+          </p>
+        ))
       )}
     </div>
   );

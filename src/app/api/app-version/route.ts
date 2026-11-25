@@ -7,7 +7,7 @@ import { APP_VERSION, APP_VERSION_CODE, APP_RELEASE_NOTES } from '@/lib/app-vers
  *
  * 返回：
  *  - version / code / notes：最新版本号与说明（含完整版本历史）；
- *  - apkReady / apkSize / apkMtime：public/AI-Phone.apk 是否在位与文件指纹；
+ *  - apkReady / apkSize / apkMtime：public/Cove.apk 是否在位与文件指纹；
  *  - fingerprint：网页版本 + APK 文件指纹合成串——客户端与 localStorage 里
  *    「上次见过的指纹」比对，不同即视为有新版（弹窗提示）。
  *
@@ -22,7 +22,7 @@ export async function GET() {
   let apkSize: number | null = null;
   let apkMtime: number | null = null;
   try {
-    const apkPath = path.join(process.cwd(), 'public', 'AI-Phone.apk');
+    const apkPath = path.join(process.cwd(), 'public', 'Cove.apk');
     const st = await fs.stat(apkPath);
     if (st.isFile() && st.size > 1024) {
       apkReady = true;
