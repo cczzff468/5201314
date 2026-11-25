@@ -18,12 +18,12 @@ import path from 'path';
 const ROOT = path.resolve(import.meta.dir, '..');
 const APP_DIR = path.join(ROOT, 'public/icons/app');
 const RES = path.join(ROOT, 'android-shell/android/app/src/main/res');
-const SRC = ['/tmp/newicons2/gen-1.png', '/tmp/newicons2/gen-2.png', '/tmp/newicons2/gen-3.png'];
+const SRC = ['/tmp/newicons3/gen-1.png', '/tmp/newicons3/gen-2.png', '/tmp/newicons3/gen-3.png'];
 
-/** 冷灰白底（与自适应背景一致，冷调非奶油） */
-const BG = '#EFEFED';
-/** wordmark 灰 */
-const INK = '#4A4A48';
+/** 暖白底（第三十四轮：1 号拱门暖调——与自适应背景同域，非净白非奶油） */
+const BG = '#F2EFE9';
+/** wordmark 暖灰 */
+const INK = '#4A4742';
 
 const SVG_SQUIRCLE = (size, radiusRatio = 0.22) =>
   Buffer.from(`<svg width="${size}" height="${size}"><rect x="0" y="0" width="${size}" height="${size}" rx="${Math.round(size * radiusRatio)}" ry="${Math.round(size * radiusRatio)}" fill="#fff"/></svg>`);

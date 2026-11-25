@@ -717,11 +717,11 @@ function batteryModeLabel(mode: BatteryPercentMode): string {
   return mode === 'inside' ? '电池图标内部' : mode === 'outside' ? '电池图标外部' : '不显示';
 }
 
-/** 三张备选图标（第三十三轮：机主要求再生成——灰白字体图标删除换拱门静湾、
- *  雾中远山/静月港湾重生成，静月港湾带 Cove 字） */
+/** 三张备选图标（第三十四轮：机主要求再美化重新生成——韩系满幅插画风；
+ *  拱门静湾=暖调拱门框日出、雾中远山=三层灰阶山影+淡日盘、静月港湾=夜空新月映水带 Cove 字） */
 const APP_ICON_OPTIONS: { id: '1' | '2' | '3'; name: string; desc: string }[] = [
-  { id: '1', name: '拱门静湾', desc: '灰白拱门 · 韩系极简' },
-  { id: '2', name: '雾中远山', desc: '层叠远山 · 诗意灰阶' },
+  { id: '1', name: '拱门静湾', desc: '拱门框日 · 暖调静水' },
+  { id: '2', name: '雾中远山', desc: '层叠山影 · 淡日灰阶' },
   { id: '3', name: '静月港湾', desc: '新月映水 · 带 Cove 字' },
 ];
 
