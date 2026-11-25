@@ -361,8 +361,8 @@ public class MainActivity extends BridgeActivity {
         public String getShellInfo() {
             JSONObject o = new JSONObject();
             try {
-                o.put("versionCode", 83);
-                o.put("versionName", "2.4.19");
+                o.put("versionCode", 84);
+                o.put("versionName", "2.4.20");
                 o.put("fullscreen", true); // 系统状态栏隐藏（全屏）标记
             } catch (Exception ignored) {
             }

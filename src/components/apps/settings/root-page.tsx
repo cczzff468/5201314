@@ -826,7 +826,7 @@ function AppIconDialog({
             })}
           </div>
           <p className="px-6 pb-2 text-center text-[10.5px] leading-relaxed text-muted-foreground">
-            开屏动画即时跟随；已安装到桌面的图标需重新添加一次才会换新
+            开屏动画即时跟随；PWA 桌面图标自动跟随（Chrome/Edge 装的会在下次打开时检查更新，无需重新下载）；iOS 主屏图标需重新添加一次；APK 原生图标随新包
           </p>
           <button
             type="button"

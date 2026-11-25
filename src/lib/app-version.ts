@@ -11,9 +11,9 @@
  */
 
 /** 当前最新版本（纯网页热更时与 APK versionName 可短暂不同步，下次重打 APK 对齐） */
-export const APP_VERSION = '2.4.19';
+export const APP_VERSION = '2.4.20';
 /** 版本号数字（与 android-shell versionCode 保持一致；覆盖安装要求只增不减；纯网页热更不动） */
-export const APP_VERSION_CODE = 83;
+export const APP_VERSION_CODE = 84;
 
 export interface AppReleaseNote {
   version: string;
@@ -24,6 +24,17 @@ export interface AppReleaseNote {
 
 /** 版本历史（新→旧；设置 › APP 更新 页渲染，最新一条即当前版本） */
 export const APP_RELEASE_NOTES: AppReleaseNote[] = [
+  {
+    version: '2.4.20',
+    date: '2026-11-26',
+    items: [
+      '【需重装 APK · versionCode 84】App 图标裁剪根修：自适应前景层整图铺满 108dp → 居中缩 72dp 安全区，长按图标/启动器遮罩下 cove 字标不再被裁掉上半',
+      '【网页热更·免重装】多任务卡片改真实界面：切毛玻璃/液态图标后后台卡片实况渲染 App 真实界面（切换器打开期间全局禁 backdrop-filter 免疫灰块）；卡片同步放大到屏幅 78%',
+      '【网页热更·免重装】电池图标内部重写：边框跟随实心胶囊分段变色（无胶囊的右段边框为灰），填充方角全高「整体大小一样」，边框圆角减小不再吃填充端部',
+      '【网页热更·免重装】「对话」开屏动画改星空样式：深夜蓝紫星空底 + 星点闪烁 + 流星 + 星云光晕，气泡换星夜蓝/烟白玻璃',
+      '【网页热更·免重装】设置页重排：API/识图/图像/语音上移「锁屏与密码」下面，开屏动画上移「App 图标」上面，关于本机移到最底部',
+    ],
+  },
   {
     version: '2.4.19',
     date: '2026-11-26',
