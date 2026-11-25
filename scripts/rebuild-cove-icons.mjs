@@ -18,7 +18,7 @@ import path from 'path';
 const ROOT = path.resolve(import.meta.dir, '..');
 const APP_DIR = path.join(ROOT, 'public/icons/app');
 const RES = path.join(ROOT, 'android-shell/android/app/src/main/res');
-const SRC = ['/tmp/newicons/gen-1b.png', '/tmp/newicons/gen-2b.png', '/tmp/newicons/gen-3b.png'];
+const SRC = ['/tmp/newicons2/gen-1.png', '/tmp/newicons2/gen-2.png', '/tmp/newicons2/gen-3.png'];
 
 /** 冷灰白底（与自适应背景一致，冷调非奶油） */
 const BG = '#EFEFED';

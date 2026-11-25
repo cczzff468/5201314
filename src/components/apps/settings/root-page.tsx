@@ -671,11 +671,12 @@ function batteryModeLabel(mode: BatteryPercentMode): string {
   return mode === 'inside' ? '电池图标内部' : mode === 'outside' ? '电池图标外部' : '不显示';
 }
 
-/** 三张备选图标（第三十二轮：机主要求删除重生成——韩系灰白 AI 生成三选一） */
+/** 三张备选图标（第三十三轮：机主要求再生成——灰白字体图标删除换拱门静湾、
+ *  雾中远山/静月港湾重生成，静月港湾带 Cove 字） */
 const APP_ICON_OPTIONS: { id: '1' | '2' | '3'; name: string; desc: string }[] = [
-  { id: '1', name: '灰白字标', desc: 'COVE · 韩系极简' },
-  { id: '2', name: '雾中远山', desc: '涟漪 · 诗意灰阶' },
-  { id: '3', name: '静月港湾', desc: '新月 · 柔和留白' },
+  { id: '1', name: '拱门静湾', desc: '灰白拱门 · 韩系极简' },
+  { id: '2', name: '雾中远山', desc: '层叠远山 · 诗意灰阶' },
+  { id: '3', name: '静月港湾', desc: '新月映水 · 带 Cove 字' },
 ];
 
 /** 第三十一轮：App 图标三选一弹窗（iOS 居中卡）：
