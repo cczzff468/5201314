@@ -34,11 +34,14 @@ function SignalBars() {
  *    轨道=前景色 26% 透明）；充电时数字右侧小闪电。 */
 const IOS_BAT_H = 14.5; // 本体高
 const IOS_BAT_BODY_W = 28; // 本体宽
-const IOS_BAT_RADIUS = 4.2; // 胶囊圆角（≈高 29%）
-const IOS_BAT_FILL_INSET = 1.5; // 填充上下/左内缩（避开圆角裁切）
+const IOS_BAT_RADIUS = 5.2; // 胶囊圆角（第三十四轮：4.2 → 5.2 ≈高 36%，机主要求「圆角再圆一点」）
+const IOS_BAT_FILL_INSET_X = 1; // 填充左右内缩（避开圆角裁切）
+const IOS_BAT_FILL_INSET_Y = 0; // 填充上下内缩（第三十四轮：1.5 → 0，机主要求「实心胶囊整体上下填满」）
+const IOS_BAT_FILL_RADIUS = 4; // 填充层圆角（第三十四轮：2.8 → 4，随胶囊同步更圆）
 const IOS_BAT_CAP_W = 2.5; // 正极凸点宽（第三十三轮：3.5 → 2.5，机主要求小一点点）
 const IOS_BAT_CAP_H = 5.5; // 正极凸点高（第三十三轮：7 → 5.5）
 const IOS_BAT_CAP_GAP = 1.5; // 本体↔凸点间隙（机主要求离开一点点）
+const IOS_BAT_CAP_RADIUS = 1.6; // 凸点圆角（第三十四轮：随「更圆」口径同步微调）
 const IOS_BAT_TOTAL_W = IOS_BAT_BODY_W + IOS_BAT_CAP_GAP + IOS_BAT_CAP_W; // 总宽 32
 
 interface BatteryIconProps {
@@ -65,10 +68,11 @@ export function BatteryIcon({ level, charging, low, mode, light = false }: Batte
   const fill = Math.min(100, Math.max(0, level));
 
   if (mode === 'inside') {
-    /* 第三十三轮（按机主反馈）：
-     * - 胶囊壳加 1px 描边，颜色跟随填充色（黑↔黑/白↔白/充绿/低红）；
-     * - 凸点缩小（2.5×5.5）仍跟随填充色、离体 1.5px；
-     * - 保留：按电量比例填充 + 26% 轨道 + 数字 10.5px bold 反色居中。 */
+    /* 第三十四轮（按机主反馈）：
+     * - 实心胶囊【整体上下填满】：填充层 top/bottom 内缩 1.5 → 0（贴满胶囊内缘，
+     *   圆角跟随胶囊更圆）；
+     * - 圆角更圆：本体 4.2 → 5.2、填充 2.8 → 4、凸点半径同步微调；
+     * - 保留：1px 描边跟随填充色 + 比例填充 + 26% 轨道 + 数字 10.5px bold 反色居中。 */
     const accent = charging ? '#30D158' : low ? '#FF453A' : undefined; // undefined = currentColor
     // 数字色 = 填充反色：常态时前景浅→胶囊白→黑字，前景深→胶囊黑→白字；充电/低电恒白
     const numColor = charging || low ? '#FFFFFF' : light ? '#000000' : '#FFFFFF';
@@ -103,15 +107,16 @@ export function BatteryIcon({ level, charging, low, mode, light = false }: Batte
             className="absolute inset-0"
             style={{ background: 'currentColor', opacity: 0.26 }}
           />
-          {/* 填充层：按电量比例（贴圆角内缘；颜色=状态色；inset 用 inline style 保证 JIT 不吃掉） */}
+          {/* 填充层：按电量比例（上下贴满胶囊内缘——整体上下填满；颜色=状态色） */}
           <span
             aria-hidden="true"
-            className="absolute rounded-[2.8px] transition-[width] duration-300"
+            className="absolute transition-[width] duration-300"
             style={{
-              top: IOS_BAT_FILL_INSET,
-              bottom: IOS_BAT_FILL_INSET,
-              left: IOS_BAT_FILL_INSET,
-              width: `calc(${IOS_BAT_BODY_W - IOS_BAT_FILL_INSET * 2}px * ${fill / 100})`,
+              top: IOS_BAT_FILL_INSET_Y,
+              bottom: IOS_BAT_FILL_INSET_Y,
+              left: IOS_BAT_FILL_INSET_X,
+              borderRadius: IOS_BAT_FILL_RADIUS,
+              width: `calc(${IOS_BAT_BODY_W - IOS_BAT_FILL_INSET_X * 2}px * ${fill / 100})`,
               background: accent ?? 'currentColor',
             }}
           />
@@ -135,7 +140,7 @@ export function BatteryIcon({ level, charging, low, mode, light = false }: Batte
             )}
           </span>
         </span>
-        {/* battery-cap：右侧正极凸点（第三十三轮缩小：2.5×5.5；半圆右缘、离本体 1.5px；颜色随填充色） */}
+        {/* battery-cap：右侧正极凸点（2.5×5.5；半圆右缘、离本体 1.5px；颜色随填充色；圆角更圆） */}
         <span
           aria-hidden="true"
           className="battery-cap absolute top-1/2 -translate-y-1/2"
@@ -143,7 +148,7 @@ export function BatteryIcon({ level, charging, low, mode, light = false }: Batte
             right: 0,
             width: IOS_BAT_CAP_W,
             height: IOS_BAT_CAP_H,
-            borderRadius: `0 ${IOS_BAT_CAP_W}px ${IOS_BAT_CAP_W}px 0`,
+            borderRadius: `0 ${IOS_BAT_CAP_RADIUS}px ${IOS_BAT_CAP_RADIUS}px 0`,
             background: accent ?? 'currentColor',
           }}
         />
@@ -323,7 +328,7 @@ export default function StatusBar() {
 
   return (
     <div
-      className={`ph-statusbar pointer-events-none absolute inset-x-0 top-0 z-[70] flex h-[54px] items-center justify-between pb-[12px] pl-[24px] pr-[13px] pt-[6px] text-[15px] font-semibold ${
+      className={`ph-statusbar pointer-events-none absolute inset-x-0 top-0 z-[70] flex h-[54px] items-center justify-between pb-[12px] pl-[24px] pr-[13px] pt-[4px] text-[15px] font-semibold ${
         lightText ? 'text-white [text-shadow:0_1px_2px_rgba(0,0,0,0.25)]' : 'text-black'
       }`}
       aria-label="状态栏"

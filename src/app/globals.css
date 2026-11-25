@@ -1705,16 +1705,16 @@ html[data-app-native] {
   --app-sar: 0px;
   --app-sab: 0px;
   --app-sal: 0px;
-  /* 第三十三轮·状态栏上提（机主反馈「APP 里面的状态栏往上一点」）：
+  /* 第三十四轮·状态栏再上提（机主连续三轮「状态栏往上一点」）：
      顶部有效内缩量。旧壳（系统状态栏还在显示）= 全额安全区（不越系统条）；
-     新壳（系统状态栏已原生隐藏）= 挖孔高 × 45% —— 挖孔居中且多被自绘黑色灵动岛
-     盖住，时间/信号/电量在两侧不会撞挖孔，状态栏从 sat+6 提到 0.45sat+6
-     （贴近真机 6-20px 的位置），App 内容同步上提、状态栏与内容间距不变；
+     新壳（系统状态栏已原生隐藏）= 挖孔高 × 28% —— 45% → 28%，时间/信号/电量
+     进一步贴近物理屏顶（真机 iPhone 侧文字距顶 8~14px 量级），自绘黑色灵动岛
+     同步上移更接近挖孔，App 内容同步上提、状态栏与内容间距不变；
      无挖孔机型 sat=0 → eff=0 照旧顶到物理屏顶。 */
   --app-sat-eff: var(--app-sat, 0px);
 }
 html[data-app-native][data-shell-fullscreen] {
-  --app-sat-eff: calc(var(--app-sat, 0px) * 0.45);
+  --app-sat-eff: calc(var(--app-sat, 0px) * 0.28);
 }
 /* ④ 页面永不滚动：外层是 100svh 全屏壳，body 没有滚动语义；
    overscroll-behavior 顺手关掉 WebView 边缘回弹光晕 */

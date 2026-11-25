@@ -13,6 +13,8 @@ import {
 import { APP_MAP, AppIconById } from '../apps/registry';
 // v1.9.21 吃醋锁网页降级：冻结 App 的多任务卡片盖「已冻结」遮罩（点击仍会被 openApp/switchToApp 拦截弹全屏提示）
 import { isWebAppFrozen, webFrozenBy, subscribeWebLock, getWebLockVersion } from '@/lib/ios/web-app-lock';
+// 第三十四轮：Android WebView 渲染降级（backdrop-filter 光栅化缺陷 → 切换器背景改静态缩图模糊）
+import { useAndroidWebView } from '@/lib/ios/webview-render';
 
 /** 手机屏幕逻辑尺寸（App 按此尺寸 1:1 渲染再整体缩放进卡片，保证卡片内是真实界面的等比还原） */
 const SCREEN_W = 390;
@@ -42,6 +44,9 @@ export default function AppSwitcher() {
   const wallpaperPreset = useSettings((s) => s.wallpaperPreset);
   const customWallpaperUrl = useSettings((s) => s.customWallpaperUrl);
   const measuredLight = useMeasuredWallpaperLight(wallpaperStyle);
+  // 第三十四轮：Android WebView 下 backdrop-filter 光栅化缺陷（毛玻璃/液态图标模式下
+  // 切换器背景塌纯黑 + 卡片内容塌灰块——机主真机截图实测），改静态缩图模糊实现
+  const webview = useAndroidWebView();
 
   /** 本地退出动画中（点击空白/上滑横杠时先播放淡出再真正关闭）；退出即回主屏幕 */
   const [closing, setClosing] = useState(false);
@@ -237,20 +242,41 @@ export default function AppSwitcher() {
           页面内容不参与采样，这张拷贝保证淡入淡出全程玻璃都有内容可模糊（也兜底不支持 backdrop 的环境）。
           玻璃罩两层：白色半透明罩提亮 + 轻压暗罩保对比度——
           亮壁纸=奶白毛玻璃（白 0.42/黑 0.06）配深色文字；深壁纸=深色毛玻璃（白 0.08/黑 0.20）配白色文字；
-          深色压暗从旧版 0.30 减到 0.20：壁纸的色彩明暗纹理能透过玻璃看出来，不再糊成一团死黑 */}
+          深色压暗从旧版 0.30 减到 0.20：壁纸的色彩明暗纹理能透过玻璃看出来，不再糊成一团死黑。
+          【第三十四轮 WebView 分支】Android WebView（旧 Chromium）的 backdrop-filter 光栅化
+          缺陷：毛玻璃/液态图标模式下切换器 46px 超大 backdrop-filter 采样含 24 枚嵌套
+          backdrop-blur 的图标 → 整帧 backdrop-filter 塌缩成黑/灰块（机主真机实测：背景纯黑、
+          卡片内容全灰无文字）。WebView 下改「静态缩图模糊」：60×128 小图层 blur(3px)
+          （光栅成本趋近零）+ transform scale(8) 双线性放大（天然雾面）+ 玻璃罩同款双层 ——
+          不采样任何 backdrop，从根本上免疫该缺陷；视觉上仍是壁纸雾化毛玻璃。 */}
       <div
         aria-hidden="true"
         className="pointer-events-none absolute inset-0 overflow-hidden"
         style={{ zIndex: -1 }}
       >
-        <div className="absolute inset-0" style={wallpaperStyle} />
-        <div
-          className="absolute inset-0"
-          style={{
-            backdropFilter: 'blur(46px) saturate(1.65) brightness(1.1)',
-            WebkitBackdropFilter: 'blur(46px) saturate(1.65) brightness(1.1)',
-          }}
-        />
+        {webview ? (
+          /* WebView：静态缩图模糊（小图 + 轻模糊 + 8 倍放大 = 雾面壁纸，零 backdrop-filter） */
+          <div
+            className="absolute left-1/2 top-1/2 h-[128px] w-[60px]"
+            style={{
+              ...wallpaperStyle,
+              filter: 'blur(3px) saturate(1.35) brightness(1.06)',
+              transform: 'translate(-50%, -50%) scale(8)',
+            }}
+          />
+        ) : (
+          /* 浏览器：backdrop-filter 实时毛玻璃（原实现） */
+          <>
+            <div className="absolute inset-0" style={wallpaperStyle} />
+            <div
+              className="absolute inset-0"
+              style={{
+                backdropFilter: 'blur(46px) saturate(1.65) brightness(1.1)',
+                WebkitBackdropFilter: 'blur(46px) saturate(1.65) brightness(1.1)',
+              }}
+            />
+          </>
+        )}
         <div
           className="absolute inset-0"
           style={{ background: lightGlass ? 'rgba(255,255,255,0.42)' : 'rgba(255,255,255,0.08)' }}

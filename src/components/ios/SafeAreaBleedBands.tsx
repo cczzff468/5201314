@@ -101,13 +101,35 @@ export default function SafeAreaBleedBands() {
     return Number.isFinite(v) ? v : 0;
   }, []);
 
+  /** 第三十四轮根修（机主反馈「有的地方系统状态栏那里有白色的」）：
+   *  readVar 对 --app-sat-eff 恒返回 0 —— 该变量在 CSS 里是 calc(var(--app-sat) * 0.28)，
+   *  自定义属性的 computed value 不解析 calc（原样返回 token 串），parseFloat(calc(...))
+   *  = NaN → 0 → 顶带永不绘制 → sat-eff 区透出 AppWindow 根的 bg-background（浅色模式
+   *  纯白）→ 顶部白条带。修法：探针元素把变量用在真实属性（padding-top）上读回解析后的
+   *  px 值。探针常驻复用（hidden 零布局影响），每次采样读一次（500ms 轮询内开销可忽略）。 */
+  const probeRef = useRef<HTMLDivElement | null>(null);
+  const readVarPx = useCallback((name: string): number => {
+    if (typeof document === 'undefined') return 0;
+    let probe = probeRef.current;
+    if (!probe || !probe.isConnected) {
+      probe = document.createElement('div');
+      probe.setAttribute('aria-hidden', 'true');
+      probe.style.cssText = 'position:absolute;left:0;top:0;width:0;height:0;visibility:hidden;pointer-events:none;';
+      document.documentElement.appendChild(probe);
+      probeRef.current = probe;
+    }
+    probe.style.paddingTop = `var(${name}, 0px)`;
+    const v = parseFloat(getComputedStyle(probe).paddingTop);
+    return Number.isFinite(v) ? v : 0;
+  }, []);
+
   const sample = useCallback(() => {
     const root = holderRef.current?.parentElement as HTMLElement | null;
     if (!root || typeof document === 'undefined') return;
     const nativeMode = document.documentElement.hasAttribute('data-app-native');
-    // 第三十三轮：顶带改用有效内缩 --app-sat-eff（新壳 45% 挖孔，状态栏上提同源）——
-    // 条带高度/采样 y 与内容层顶边对齐；其余三边原值
-    const sat = nativeMode ? readVar('--app-sat-eff') : 0;
+    // 第三十四轮根修：顶带改用探针读【解析后】的 --app-sat-eff（见 readVarPx 注释）——
+    // calc 表达式经真实属性解析回 px；其余三边原值（纯 px 直读）
+    const sat = nativeMode ? readVarPx('--app-sat-eff') : 0;
     const satFull = nativeMode ? readVar('--app-sat') : 0;
     const sar = nativeMode ? readVar('--app-sar') : 0;
     const sab = nativeMode ? readVar('--app-sab') : 0;
@@ -210,7 +232,15 @@ export default function SafeAreaBleedBands() {
 
     // 顶带停点发布（StatusBarToneProbe 消费：状态栏图标明暗与条带同源同色）
     if (sat > 0) publishBleedTopStops(topStops as BleedStop[]);
-  }, [readVar]);
+  }, [readVar, readVarPx]);
+
+  /** 组件卸载时移除探针元素（常驻复用，仅卸载时清理） */
+  useEffect(() => {
+    return () => {
+      probeRef.current?.remove();
+      probeRef.current = null;
+    };
+  }, []);
 
   // resampleRef 永远指向最新 sample（异步图片解码回调防陈旧闭包）
   useEffect(() => {
