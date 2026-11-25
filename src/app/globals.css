@@ -1939,3 +1939,12 @@ html[data-app-native] * {
   60%  { opacity: 1; transform: translateY(-2px) scale(1.015); }
   100% { opacity: 1; transform: translateY(0) scale(1); }
 }
+/* 第三十五轮：chat 主题再美化——输入中三点（Cove 正在回）逐点弹跳 + 头像云轻浮 */
+@keyframes cove4-typing {
+  0%, 60%, 100% { transform: translateY(0); opacity: 0.45; }
+  30%           { transform: translateY(-4.5px); opacity: 1; }
+}
+@keyframes cove4-heart-float {
+  0%, 100% { transform: translateY(0) rotate(8deg); opacity: 0.75; }
+  50%      { transform: translateY(-7px) rotate(-6deg); opacity: 1; }
+}

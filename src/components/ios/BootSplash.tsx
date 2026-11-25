@@ -448,52 +448,171 @@ export default function BootSplash({
         </>
       )}
 
-      {/* ---------- 主题 D：对话（第三十四轮新增·机主聊天记录参考图） ---------- */}
+      {/* ---------- 主题 D：对话（第三十五轮再美化·背景+气泡全面升级） ---------- */}
       {theme === 'chat' && (
         <>
-          {/* 纯白底 + 极淡噪点（纸感） */}
-          <div className="absolute inset-0" style={{ background: 'linear-gradient(178deg, #FDFDFE 0%, #FAFAFC 60%, #F6F6F9 100%)' }} />
+          {/* 暖白纸底（第三十五轮：纯白 → 暖米白，更柔和的纸感） */}
+          <div className="absolute inset-0" style={{ background: 'linear-gradient(178deg, #FDFDFC 0%, #FAFAF7 55%, #F6F6F3 100%)' }} />
+          {/* 双柔光晕：蜜桃（左上）+ 雾蓝（右下）大 blur 缓漂——韩系低饱和氛围底 */}
           <div
-            className="absolute inset-0 opacity-[0.05] mix-blend-multiply"
+            className="absolute left-[-18%] top-[-12%] h-[46%] w-[74%] rounded-full opacity-[0.62] blur-[70px]"
+            style={{
+              background: 'radial-gradient(closest-side, rgba(255,222,212,0.6) 0%, rgba(255,222,212,0.22) 55%, rgba(255,222,212,0) 100%)',
+              animation: 'cove2-mist-a 11s ease-in-out infinite',
+            }}
+          />
+          <div
+            className="absolute bottom-[-16%] right-[-20%] h-[46%] w-[72%] rounded-full opacity-[0.58] blur-[70px]"
+            style={{
+              background: 'radial-gradient(closest-side, rgba(216,229,255,0.6) 0%, rgba(216,229,255,0.22) 55%, rgba(216,229,255,0) 100%)',
+              animation: 'cove2-mist-b 13s ease-in-out infinite',
+            }}
+          />
+          {/* 极淡噪点（纸感） */}
+          <div
+            className="absolute inset-0 opacity-[0.045] mix-blend-multiply"
             style={{ backgroundImage: GRAIN_URI, backgroundSize: '160px 160px' }}
           />
-          {/* 顶部小字：EN 宽字距 */}
-          <p
-            className="absolute left-1/2 top-[6%] -translate-x-1/2 text-[9.5px] font-semibold uppercase tracking-[0.5em]"
-            style={{ ...rise(160), color: '#B4B4BA', textIndent: '0.5em' }}
-          >
-            {meta.en}
-          </p>
-          {/* 聊天气泡流（右侧=机主深灰/左侧=Cove 浅灰；逐条错峰上浮） */}
-          <div className="absolute inset-x-0 top-[13%] flex flex-col gap-[14px] px-[8%]">
+          {/* 散落微光点（暖灰/蜜桃小圆·极低调呼吸） */}
+          {[
+            { l: 14, t: 20, s: 5, c: 'rgba(226,200,190,0.5)' },
+            { l: 86, t: 24, s: 4, c: 'rgba(206,218,240,0.55)' },
+            { l: 78, t: 74, s: 5, c: 'rgba(226,200,190,0.42)' },
+          ].map((p, i) => (
+            <span
+              key={i}
+              aria-hidden="true"
+              className="absolute rounded-full"
+              style={{
+                left: `${p.l}%`, top: `${p.t}%`, width: p.s, height: p.s, background: p.c,
+                animation: `cove4-breathe ${3600 + i * 700}ms ease-in-out ${(i % 3) * 400}ms infinite`,
+              }}
+            />
+          ))}
+
+          {/* 顶部聊天头部：云朵头像（轻浮）+ Cove + 在线状态 */}
+          <div className="absolute inset-x-0 top-[4.8%] flex flex-col items-center gap-[4px]" style={rise(160)}>
+            <span
+              className="block"
+              style={{ animation: 'cove3-float 6s ease-in-out infinite', filter: 'drop-shadow(0 3px 8px rgba(28,28,30,0.12))' }}
+            >
+              {/* 云朵头像：三圆拼云 + 眼睛/微笑/腮红（与 App 图标云朵 C 同族气质） */}
+              <svg viewBox="0 0 48 40" width="40" height="34" aria-hidden="true">
+                <g fill="#FFFFFF">
+                  <circle cx="16" cy="23" r="10.5" />
+                  <circle cx="27" cy="16" r="11.5" />
+                  <circle cx="36" cy="24" r="8.5" />
+                  <rect x="14" y="21" width="23" height="10" rx="5" />
+                </g>
+                <circle cx="21" cy="22.5" r="1.7" fill="#5B6066" />
+                <circle cx="31" cy="22.5" r="1.7" fill="#5B6066" />
+                <path d="M23.2 26.4 q2.8 2.3 5.6 0" stroke="#5B6066" strokeWidth="1.5" strokeLinecap="round" fill="none" />
+                <ellipse cx="18.4" cy="25.6" rx="2.1" ry="1.3" fill="rgba(240,197,190,0.65)" />
+                <ellipse cx="33.6" cy="25.6" rx="2.1" ry="1.3" fill="rgba(240,197,190,0.65)" />
+              </svg>
+            </span>
+            <p className="text-[12.5px] font-semibold tracking-[0.08em] text-[#26262B]">Cove</p>
+            <p className="flex items-center gap-[4px] text-[9px] font-medium tracking-[0.16em] text-[#9C9CA2]">
+              <span className="h-[4.5px] w-[4.5px] rounded-full bg-[#34C759] shadow-[0_0_5px_rgba(52,199,89,0.75)]" />
+              在线 · 等你的消息
+            </p>
+          </div>
+
+          {/* 聊天气泡流（右侧=机主炭黑渐变/左侧=Cove 白底带云朵头像；逐条错峰上浮） */}
+          <div className="absolute inset-x-0 top-[15.5%] flex flex-col gap-[12px] px-[8%]">
             {CHAT_LINES.map((line, i) => (
               <div
                 key={i}
-                className={`flex w-full flex-col ${line.side === 'right' ? 'items-end' : 'items-start'}`}
-                style={{ animation: `cove4-bubble 640ms cubic-bezier(0.22,0.9,0.3,1) ${260 + i * 300}ms both` }}
+                className={`flex w-full items-end gap-[7px] ${line.side === 'right' ? 'justify-end' : 'justify-start'}`}
+                style={{ animation: `cove4-bubble 640ms cubic-bezier(0.22,0.9,0.3,1) ${180 + i * 230}ms both` }}
               >
-                <span
-                  className={`max-w-[76%] px-[15px] py-[10px] text-[15px] font-medium leading-snug tracking-[0.02em] ${
-                    line.side === 'right'
-                      ? 'rounded-[19px] rounded-br-[6px] bg-[#1E1E24] text-white shadow-[0_3px_10px_rgba(30,30,36,0.14)]'
-                      : 'rounded-[19px] rounded-bl-[6px] bg-[#E9E9EE] text-[#1C1C1E] shadow-[0_2px_8px_rgba(28,28,30,0.08)]'
-                  }`}
-                >
-                  {line.text}
-                </span>
-                {line.time && (
-                  <span className="mt-[5px] pr-[4px] text-[9px] tabular-nums text-[#B9B9BF]">
-                    {line.time} · 已读
+                {/* 左侧气泡配迷你云朵头像（对话感） */}
+                {line.side === 'left' && (
+                  <span
+                    className="mb-[1px] shrink-0"
+                    style={{ filter: 'drop-shadow(0 1.5px 4px rgba(28,28,30,0.10))' }}
+                    aria-hidden="true"
+                  >
+                    <svg viewBox="0 0 48 40" width="22" height="19">
+                      <g fill="#FFFFFF">
+                        <circle cx="16" cy="23" r="10.5" />
+                        <circle cx="27" cy="16" r="11.5" />
+                        <circle cx="36" cy="24" r="8.5" />
+                        <rect x="14" y="21" width="23" height="10" rx="5" />
+                      </g>
+                      <circle cx="21.5" cy="23" r="1.5" fill="#8A8A90" />
+                      <circle cx="30.5" cy="23" r="1.5" fill="#8A8A90" />
+                      <path d="M23.4 26.2 q2.3 1.9 4.6 0" stroke="#8A8A90" strokeWidth="1.3" strokeLinecap="round" fill="none" />
+                    </svg>
                   </span>
                 )}
+                <div className={`flex max-w-[74%] flex-col ${line.side === 'right' ? 'items-end' : 'items-start'}`}>
+                  <span
+                    className={`px-[15px] py-[10px] text-[15px] font-medium leading-snug tracking-[0.02em] ${
+                      line.side === 'right'
+                        ? 'rounded-[19px] rounded-br-[7px] bg-[linear-gradient(150deg,#35353E_0%,#24242B_58%,#1D1D23_100%)] text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.10),0_4px_14px_rgba(29,29,35,0.16)]'
+                        : 'rounded-[19px] rounded-bl-[7px] bg-white text-[#1C1C1E] ring-1 ring-black/[0.05] shadow-[inset_0_1px_0_rgba(255,255,255,0.9),0_3px_10px_rgba(28,28,30,0.07)]'
+                    }`}
+                  >
+                    {line.text}
+                  </span>
+                  {line.time && (
+                    <span className="mt-[4px] pr-[5px] text-[9px] font-medium tabular-nums tracking-[0.06em] text-[#9E9EA5]">
+                      {line.time} · 已读
+                    </span>
+                  )}
+                </div>
               </div>
             ))}
-            {/* 对话结束：细线 + Cove 字标安静浮出 */}
+            {/* 「正在输入」三点气泡（Cove 正在回——收尾前的小呼吸，随后字标接棒） */}
             <div
-              className="mt-[22px] flex flex-col items-center gap-[9px]"
-              style={{ animation: `cove2-rise 900ms cubic-bezier(0.22,0.9,0.3,1) ${260 + CHAT_LINES.length * 300 + 320}ms both` }}
+              className="flex w-full items-end gap-[7px]"
+              style={{ animation: `cove4-bubble 640ms cubic-bezier(0.22,0.9,0.3,1) ${180 + CHAT_LINES.length * 230 + 160}ms both` }}
             >
-              <span className="block h-[0.5px] w-[52px] bg-[#D6D6DC]" />
+              <span
+                className="mb-[1px] shrink-0"
+                style={{ filter: 'drop-shadow(0 1.5px 4px rgba(28,28,30,0.10))' }}
+                aria-hidden="true"
+              >
+                <svg viewBox="0 0 48 40" width="22" height="19">
+                  <g fill="#FFFFFF">
+                    <circle cx="16" cy="23" r="10.5" />
+                    <circle cx="27" cy="16" r="11.5" />
+                    <circle cx="36" cy="24" r="8.5" />
+                    <rect x="14" y="21" width="23" height="10" rx="5" />
+                  </g>
+                  <circle cx="21.5" cy="23" r="1.5" fill="#8A8A90" />
+                  <circle cx="30.5" cy="23" r="1.5" fill="#8A8A90" />
+                  <path d="M23.4 26.2 q2.3 1.9 4.6 0" stroke="#8A8A90" strokeWidth="1.3" strokeLinecap="round" fill="none" />
+                </svg>
+              </span>
+              <span className="flex h-[32px] items-center gap-[5px] rounded-[16px] bg-white px-[14px] ring-1 ring-black/[0.05] shadow-[0_3px_10px_rgba(28,28,30,0.07)]">
+                {[0, 1, 2].map((d) => (
+                  <span
+                    key={d}
+                    aria-hidden="true"
+                    className="h-[6px] w-[6px] rounded-full bg-[#C4C4CA]"
+                    style={{ animation: `cove4-typing 1.05s ease-in-out ${d * 0.16}s infinite` }}
+                  />
+                ))}
+              </span>
+            </div>
+
+            {/* 对话结束：细线 + 小爱心轻浮 + Cove 字标安静浮出 */}
+            <div
+              className="mt-[18px] flex flex-col items-center gap-[9px]"
+              style={{ animation: `cove2-rise 900ms cubic-bezier(0.22,0.9,0.3,1) ${180 + (CHAT_LINES.length + 1) * 230 + 200}ms both` }}
+            >
+              <span className="flex items-center gap-[10px]" aria-hidden="true">
+                <span className="block h-[0.5px] w-[44px] bg-[#D8D8DE]" />
+                <svg viewBox="0 0 24 24" width="11" height="11" style={{ animation: 'cove4-heart-float 2.6s ease-in-out infinite' }}>
+                  <path
+                    d="M12 21s-8.4-5.3-10.2-10C.5 7.5 2.6 4 6.1 4c2.2 0 3.9 1.2 4.9 3C12.4 5.2 14.1 4 16.3 4c3.5 0 5.6 3.5 4.3 7-1.8 4.7-8.6 10-8.6 10z"
+                    fill="#E8B4B0"
+                  />
+                </svg>
+                <span className="block h-[0.5px] w-[44px] bg-[#D8D8DE]" />
+              </span>
               <span className="font-serif text-[24px] font-medium leading-none tracking-[0.26em] text-[#1C1C1E]" style={{ textIndent: '0.26em' }}>
                 Cove
               </span>
@@ -544,11 +663,11 @@ export default function BootSplash({
           </div>
         </>
       )}
-      {/* moon/chat：右侧竖排微字（主题布局不占右中轴） */}
-      {(theme === 'moon' || theme === 'chat') && (
+      {/* moon：右侧竖排微字（chat 第三十五轮去掉——顶部聊天头部已带品牌，竖排字会与右侧气泡打架） */}
+      {theme === 'moon' && (
         <span
           className="absolute right-[16px] top-1/2 origin-center translate-y-[-50%] rotate-90 text-[8.5px] font-medium uppercase tracking-[0.5em]"
-          style={{ ...rise(1100), color: theme === 'moon' ? meta.sub : '#C2C2C8', opacity: 0.75 }}
+          style={{ ...rise(1100), color: meta.sub, opacity: 0.75 }}
         >
           {meta.side}
         </span>
