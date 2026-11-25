@@ -80,11 +80,28 @@ async function main() {
   for (const [tag, scale] of Object.entries(densities)) {
     const dir = path.join(RES, `mipmap-${tag}`);
     fs.mkdirSync(dir, { recursive: true });
-    // 自适应前景：108dp 画布整图铺满（视区中心 66% 完整含云朵 C 与字标）
+    // 自适应前景（第三十六轮根修「APP 图标裁剪有点问题」）：
+    // 之前整图铺满 108dp 画布 → 系统遮罩只显示中心 72dp（66.67%）视区，
+    // 源图底部的 cove 字标（y 796~885 = 77.7%~86.4%）落在视区外被启动器
+    // 遮罩裁掉（机主长按图标截图：字标只剩上半）。改：透明 108dp 画布 +
+    // 完整图标居中缩到 72dp（视区=安全区，含出血余量为 0——字标底 62.2dp
+    // 距视区底 9.8dp，圆形遮罩下 sqrt(13.8²+26.2²)=29.6dp < 36dp 半径全入）；
+    // 背景层 ic_launcher_background(#FDFDFD) 与图标底同色，四角被遮罩吃掉无痕。
     const fgSize = Math.round(108 * scale);
+    const contentSize = Math.round(72 * scale);
     fs.writeFileSync(
       path.join(dir, 'ic_launcher_foreground.png'),
-      await sharp(mainBuf).resize(fgSize, fgSize, { fit: 'cover' }).png().toBuffer()
+      await sharp({
+        create: { width: fgSize, height: fgSize, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } },
+      })
+        .composite([
+          {
+            input: await sharp(mainBuf).resize(contentSize, contentSize, { fit: 'cover' }).png().toBuffer(),
+            gravity: 'center',
+          },
+        ])
+        .png()
+        .toBuffer()
     );
     // 传统方图标：squircle 圆角（半径 22%）+ 透明角
     const legacy = Math.round(48 * scale);
