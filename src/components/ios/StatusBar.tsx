@@ -24,20 +24,21 @@ function SignalBars() {
   );
 }
 
-/* ============ inside 模式电池（第三十三轮：按机主反馈再调）============
- * 第三十二轮基础上按机主反馈调整：
- *  - 【边框跟随实心胶囊】：胶囊壳加 1px 描边，颜色 = 填充色（常态前景色 → 浅色模式
- *    黑边/深色模式白边；充电绿 #30D158/低电红 #FF453A 时同色描边）——机主要求
- *    「如果是黑色那就是黑色，如果是白色那就是白色」；
- *  - 凸点跟随填充色（同上），且【小一点点】：3.5×7 → 2.5×5.5，仍半圆 + 1.5px 离体间隙；
- *  - 保留：数字 10.5px bold 反色居中 + 柔和投影；实心胶囊按电量比例填充（填充=状态色，
- *    轨道=前景色 26% 透明）；充电时数字右侧小闪电。 */
+/* ============ inside 模式电池（第三十五轮：按机主反馈再调）============
+ * 第三十四轮基础上按机主反馈调整：
+ *  - 【实心胶囊整体不要圆角】：填充层圆角归零（方角矩形），仅边框保留圆角——
+ *    方角填充被本体 overflow-hidden 圆角裁切，视觉「边框圆、填充方而满」；
+ *  - 【填满左右】：填充层 left 内缩 1 → 0（之前左侧恒留 1px 空隙），100% 时四边贴满；
+ *  - 【充电边框不变绿 / 低电边框不变红】：状态色整体下线，边框/填充/凸点一律
+ *    currentColor（浅色黑/深色白），充电仅保留数字右侧小闪电；
+ *  - 保留：凸点 2.5×5.5 半圆 + 1.5px 离体间隙；数字 10.5px bold 反色居中 + 柔和投影；
+ *    实心胶囊按电量比例填充（填充=前景色，轨道=前景色 26% 透明）。 */
 const IOS_BAT_H = 14.5; // 本体高
 const IOS_BAT_BODY_W = 28; // 本体宽
-const IOS_BAT_RADIUS = 5.2; // 胶囊圆角（第三十四轮：4.2 → 5.2 ≈高 36%，机主要求「圆角再圆一点」）
-const IOS_BAT_FILL_INSET_X = 1; // 填充左右内缩（避开圆角裁切）
+const IOS_BAT_RADIUS = 5.2; // 胶囊圆角（边框保留圆角；实心填充层零圆角——被本体圆角裁切自然贴合）
+const IOS_BAT_FILL_INSET_X = 0; // 填充左右内缩（第三十五轮：1 → 0，机主要求「左边也要填满」）
 const IOS_BAT_FILL_INSET_Y = 0; // 填充上下内缩（第三十四轮：1.5 → 0，机主要求「实心胶囊整体上下填满」）
-const IOS_BAT_FILL_RADIUS = 4; // 填充层圆角（第三十四轮：2.8 → 4，随胶囊同步更圆）
+const IOS_BAT_FILL_RADIUS = 0; // 填充层圆角（第三十五轮：4 → 0，机主要求「实心胶囊整体不要圆角」——方角填充+圆角边框）
 const IOS_BAT_CAP_W = 2.5; // 正极凸点宽（第三十三轮：3.5 → 2.5，机主要求小一点点）
 const IOS_BAT_CAP_H = 5.5; // 正极凸点高（第三十三轮：7 → 5.5）
 const IOS_BAT_CAP_GAP = 1.5; // 本体↔凸点间隙（机主要求离开一点点）
@@ -68,20 +69,20 @@ export function BatteryIcon({ level, charging, low, mode, light = false }: Batte
   const fill = Math.min(100, Math.max(0, level));
 
   if (mode === 'inside') {
-    /* 第三十四轮（按机主反馈）：
-     * - 实心胶囊【整体上下填满】：填充层 top/bottom 内缩 1.5 → 0（贴满胶囊内缘，
-     *   圆角跟随胶囊更圆）；
-     * - 圆角更圆：本体 4.2 → 5.2、填充 2.8 → 4、凸点半径同步微调；
-     * - 保留：1px 描边跟随填充色 + 比例填充 + 26% 轨道 + 数字 10.5px bold 反色居中。 */
-    const accent = charging ? '#30D158' : low ? '#FF453A' : undefined; // undefined = currentColor
-    // 数字色 = 填充反色：常态时前景浅→胶囊白→黑字，前景深→胶囊黑→白字；充电/低电恒白
-    const numColor = charging || low ? '#FFFFFF' : light ? '#000000' : '#FFFFFF';
-    // 柔和投影：保证数字叠在半透明轨道上仍可读（常态用反相光晕，彩底用暗晕）
-    const numHalo = charging || low
-      ? '0 0 2px rgba(0,0,0,0.35), 0 1px 1px rgba(0,0,0,0.25)'
-      : light
-        ? '0 0 2px rgba(255,255,255,0.55)'
-        : '0 0 2px rgba(0,0,0,0.35)';
+    /* 第三十五轮（按机主反馈）：
+     * - 实心填充层【整体不要圆角】：填充圆角 4 → 0（方角矩形），被本体 overflow-hidden
+     *   圆角边框裁切——「边框要圆角、里面胶囊方角」的机主要求；
+     * - 【填满左边】：填充 left 内缩 1 → 0、宽度基数同步（26px 满比例），100% 时
+     *   左右上下完全贴满内缘（之前左侧恒留 1px 空隙）；
+     * - 【充电不变绿 / 低电不变红】：状态色 accent 整体下线——边框、填充、凸点一律
+     *   currentColor（浅色模式黑/深色模式白），充电仅保留数字右侧小闪电指示；
+     * - 保留：数字 10.5px bold 反色居中 + 柔和投影 + 26% 轨道。 */
+    // 数字色 = 填充反色：前景浅→胶囊白→黑字，前景深→胶囊黑→白字（常态恒定，无状态色分支）
+    const numColor = light ? '#000000' : '#FFFFFF';
+    // 柔和投影：保证数字叠在半透明轨道上仍可读（反相光晕）
+    const numHalo = light
+      ? '0 0 2px rgba(255,255,255,0.55)'
+      : '0 0 2px rgba(0,0,0,0.35)';
     const digits = String(Math.round(level));
     return (
       <span
@@ -90,14 +91,14 @@ export function BatteryIcon({ level, charging, low, mode, light = false }: Batte
         className="battery-container relative inline-block shrink-0"
         style={{ width: IOS_BAT_TOTAL_W, height: IOS_BAT_H }}
       >
-        {/* battery-body：胶囊壳（第三十三轮加 1px 描边跟随填充色；底=26% 轨道层 + 比例填充层） */}
+        {/* battery-body：胶囊壳（圆角边框 + 26% 轨道层 + 方角比例填充层；色恒 currentColor） */}
         <span
           className="battery-body relative block overflow-hidden"
           style={{
             width: IOS_BAT_BODY_W,
             height: IOS_BAT_H,
             borderRadius: IOS_BAT_RADIUS,
-            border: `1px solid ${accent ?? 'currentColor'}`,
+            border: '1px solid currentColor',
             boxSizing: 'border-box',
           }}
         >
@@ -107,7 +108,8 @@ export function BatteryIcon({ level, charging, low, mode, light = false }: Batte
             className="absolute inset-0"
             style={{ background: 'currentColor', opacity: 0.26 }}
           />
-          {/* 填充层：按电量比例（上下贴满胶囊内缘——整体上下填满；颜色=状态色） */}
+          {/* 填充层：按电量比例（上下左右贴满内缘——左右 0 内缩修「左边没填满」；
+              零圆角方角矩形，方角被本体圆角边框裁切；颜色恒 currentColor 无状态色） */}
           <span
             aria-hidden="true"
             className="absolute transition-[width] duration-300"
@@ -115,9 +117,13 @@ export function BatteryIcon({ level, charging, low, mode, light = false }: Batte
               top: IOS_BAT_FILL_INSET_Y,
               bottom: IOS_BAT_FILL_INSET_Y,
               left: IOS_BAT_FILL_INSET_X,
+              right: fill >= 100 ? IOS_BAT_FILL_INSET_X : undefined,
               borderRadius: IOS_BAT_FILL_RADIUS,
-              width: `calc(${IOS_BAT_BODY_W - IOS_BAT_FILL_INSET_X * 2}px * ${fill / 100})`,
-              background: accent ?? 'currentColor',
+              width:
+                fill >= 100
+                  ? undefined
+                  : `calc(${IOS_BAT_BODY_W - 2 - IOS_BAT_FILL_INSET_X * 2}px * ${fill / 100})`,
+              background: 'currentColor',
             }}
           />
           {/* battery-text：居中大号粗体数字（反色 + 柔和投影；光学微左让出凸点） */}
@@ -140,7 +146,7 @@ export function BatteryIcon({ level, charging, low, mode, light = false }: Batte
             )}
           </span>
         </span>
-        {/* battery-cap：右侧正极凸点（2.5×5.5；半圆右缘、离本体 1.5px；颜色随填充色；圆角更圆） */}
+        {/* battery-cap：右侧正极凸点（2.5×5.5；半圆右缘、离本体 1.5px；颜色恒 currentColor） */}
         <span
           aria-hidden="true"
           className="battery-cap absolute top-1/2 -translate-y-1/2"
@@ -149,7 +155,7 @@ export function BatteryIcon({ level, charging, low, mode, light = false }: Batte
             width: IOS_BAT_CAP_W,
             height: IOS_BAT_CAP_H,
             borderRadius: `0 ${IOS_BAT_CAP_RADIUS}px ${IOS_BAT_CAP_RADIUS}px 0`,
-            background: accent ?? 'currentColor',
+            background: 'currentColor',
           }}
         />
       </span>

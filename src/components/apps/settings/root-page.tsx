@@ -416,7 +416,8 @@ export function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
         {/* 第三十轮：电量百分比显示方式改为【点行弹窗选择】（机主需求：设置里的百分比显示选择要弹窗）。
             第三十三轮：入口行左侧图标改为与其他行一致的 RowIcon（机主要求「前面的图标变成跟其他的图标一样」，
             弃用第三十二轮的状态栏仿真预览条）；当前模式名 + ›，点开 iOS 居中弹窗：三选项各带状态栏同款
-            实时小预览（固定 67%），点选即时生效并持久化；点背板/Esc 关闭。 */}
+            实时小预览（固定 67%），点选即时生效并持久化；点背板/Esc 关闭。
+            第三十五轮：入口行下方说明文字按机主要求删除（保持卡片列表干净）。 */}
         <div className="mx-4 mt-4 overflow-hidden rounded-[22px] bg-white/55 shadow-[0_8px_28px_rgba(17,24,39,0.06)] ring-1 ring-white/70 backdrop-blur-2xl dark:bg-white/[0.06] dark:ring-white/[0.09]">
           <button
             type="button"
@@ -432,9 +433,6 @@ export function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
             <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground/60" strokeWidth={2.2} />
           </button>
         </div>
-        <p className="mt-2 px-8 text-[11.5px] leading-relaxed text-muted-foreground">
-          状态栏电量的显示方式，点上方选择弹窗即时生效；点按状态栏电池图标可弹出电量详情卡片。
-        </p>
         {batteryModeOpen && (
           <BatteryModeDialog
             current={batteryPercent}
