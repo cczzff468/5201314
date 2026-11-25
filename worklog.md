@@ -3621,3 +3621,22 @@ Work Log:
 - [网页卡片·web-link-msg.ts+web-link-bubble.tsx] pushWebLinkBubble（kv 写+tool-status-msgs 事件广播复用三端聊天页现有监听，role 按 wx/qq=peer；【不加 sys 标记——weblink 是正常可见消息非系统行，加了会被 chat 渲染成空 sys 胶囊，实测踩坑修复】）；extractFirstUrl（http(s) 直配+www. 裸域名词边界防误伤）；WebLinkBubble 组件：252px 白卡+箭头小方块（左右侧）+favicon（失败回渐变首字母方块五色轮换）+域名+「网页」标+标题两行+摘要两行+底注（https 锁标+域名+「轻点打开›」），点卡 openAIBrowser({origin:'link'})
 - [聊天·chat.tsx 接入] ChatMsg kind 新增 'weblink'+weblink 字段；历史 filter/序列化（[网页]（标题/链接/摘要））+渲染分支（WebLinkBubble，多选/拉黑图标/已送达与 forumshare 同款）；baseSys 注入 systemPerceptionBlock（perceptionBlock 旁，prewarmSystemPerception 预热）；send() 用户发链接→readUserSentLink 9s 超时预读→sysEvent 注入本轮上下文（X 论坛链接除外走 forumshare 口径）
 - [E2E·Agent Browser] ①电池 inside 模式 DOM 实测：container 40×14/body 36×14 border 1px/背景 rgba(0,0,0,0) 透明轨道 ✓/fill 33×9/cap 2×6/双层 texts "100"；VLM 确认「黑色描边+黑填充+数字 100 嵌电池内白色显示、无灰槽」②分屏面板高度=壳 50%（288.5/577=0.50 ratio）③悬浮球点击开/关面板 ✓④地址栏输 example.com→iframe 加载 https://example.com/ ✓⑤阅读模式正文渲染（Example Domain+正文）⑥highlightWebText 工具实测：命中段 FFD60A 黄底渲染+滚动到位 ✓⑦weblink 卡片实测（IndexedDB 注入→chat 渲染 252px 卡+域名+摘要+轻点打开）→点卡唤起分屏浏览器加载同 URL ✓⑧搜索流：输「今日科技新闻」→bing 结果页 iframe 加载+VLM 确认（下半屏浏览器+上半屏聊天+蓝色悬浮球三要素齐）⑨搜索/阅读 API 直测 200 ✓⑩tsc 改动文件 0 错误（基线错误未触碰）+eslint 0 问题+页面 0 报错
+
+## 2026-11-25 · 第三十轮 v2.4.14：电池按参考图删除重建 + 设置弹窗选择 + 网页状态栏补藏/上移 + 通知模块彻底重构（逐条独立通知）+ AI 浏览器小窗化（versionCode 78）
+
+Task: 机主五件——①「电池图标删除重建，跟 iOS一样」（附参考图 IMG_20261125_141242）②「设置里面的百分比显示选择要弹窗」③「网页打开为什么系统状态栏还显示」+「APP上面的网站上面的状态栏往上一点」④彻底重构系统通知（安卓原生 Local Notifications、AI 每条消息一条独立通知不合并、IMPORTANCE_HIGH 响铃震动、后台才弹、串行队列防吞、点击直达聊天）⑤AI 浏览器小窗化（可移动、记忆上次页面、内置百度/360/淘宝/搜狗/抖音/快手主用百度、悬浮球 AI 搜索后才出现+美化）。改完立刻 commit。
+
+Work Log:
+- [电池·参考图定稿] VLM 双轮问询机主参考图：满电黑/绿实心电池+白色镂空数字、宽高比 2.3:1、圆润胶囊（圆角≈高 35%）、粗描边壳体（≈高 14%）、【填充与描边间有可见缝隙】（≈描边 50%，iOS 特有细缝）、数字居中偏左（让出凸点）、凸点 2×≈高41%、充电只变色无闪电——按此逐项重建
+- [电池·重建] StatusBar.tsx inside 全删重写：本体 34×14.5 rounded-[5px] border-2（强调色 currentColor/绿/红）；fill 独立胶囊 absolute top/bottom-[1px]（视觉距本体边 3px=边框2+缝1，实测修复两个坐标 bug：absolute 的 top/bottom 相对 padding 盒需减边框、Tailwind bottom-1=4px 必须 bottom-[1px]）宽=电量%×28 自带 radius 2.5；数字 9.5px semibold -translate-x-[1.5px] 居中偏左、双层 clip 反色（裁剪线=padding 盒坐标 fill 右缘 gap+fillPx）；cap 2×6 缝 1.5 实心同色；DOM 实测 fill 28×8.5/radius 5/border 2/缝隙可见，VLM 确认「填充与描边间一圈缝隙与真 iPhone 一致」
+- [设置·弹窗] root-page.tsx：三行 radio 卡改为单行入口（实时预览+当前模式名+›）→ BatteryModeDialog（createPortal 居中 24px 圆角卡+背板模糊+E2E 实测三选项 aria-checked 联动+选中即关）+「好」按钮；batteryModeLabel 辅助
+- [状态栏·上移] StatusBar pb-[12px]：时间/信号/电池整体上移 6px（实测时间中心 30→24px@54px 栏），网页顶部不再压得低
+- [状态栏·网页补藏] MainActivity insets 监听新增：statusBars 一旦 isVisible → 350ms 后 reHideRunnable 三通道收回（网页滚动/iframe 触发的顶部滑出从「悬停数秒」变「闪一下即收」；350ms 延迟避开手势中闪烁拉锯）
+- [通知·重构] 新模块 message-notifications.ts：scheduleLocalNotification({id,title,body,target})——①前台闸（isPageBackground）②消息 id 去重（Set 500 上限）③模块级 promise 串行链（连发 N 条按序逐条过桥，并发不被系统吞）④tag=msg-<id> 每条独立条目绝不覆盖 ⑤点击 target 直达聊天（local-notify-open→navigateFromSystemNotify 既有链路）；notifyStats 可观测；cancelAllMessageNotifications（msg- 前缀）
+- [通知·接线] island-notify maybeWebNotification 原生分支整体改调新模块（信息/微信/QQ 三端 AI 消息投递共用 pushChatNotification 管线自动全覆盖）；local-notify.ts cancelChatNotifications 扩清 msg- 前缀；native-perception.ts localNotify 桥透传 headsUp
+- [通知·原生] NativePerceptionPlugin local_notify_high 渠道显式配齐：IMPORTANCE_HIGH+enableVibration（0/180/90/180 节奏）+默认通知铃（AudioAttributes USAGE_NOTIFICATION）+呼吸灯 0xFF0A84FF+锁屏 PRIVATE（机主规格「弹横幅、响铃、震动」三件全齐；渠道重要性创建后不可改，v2.4.13 新渠道 id 沿用）；POST_NOTIFICATIONS 双闸既有
+- [浏览器·小窗化] AIBrowserSheet 重写为可移动浮窗：78%×46% 圆角 22 卡（默认右下 3%/7%）、抓手条 setPointerCapture 拖拽（>0px 阈值、归一化位置持久化）、入场缩放淡入、iframe/阅读模式/慢加载逃生条/阅读高亮全保留；实测拖动 (-150,-180) 精确位移
+- [浏览器·六引擎] ai-browser-store：SEARCH_ENGINES 百度（主用默认）/360/淘宝/搜狗/抖音/快手（各自搜索 URL 模板）；工具栏引擎按钮+弹出菜单（aria-checked 联动、持久化）；实测切换搜狗后搜索「天气」→ sogou.com/web?query=%E5%A4%A9%E6%B0%94
+- [浏览器·记忆] ai-browser-state-v2 localStorage：page/mode/engine/winPos/ballPos 全持久化——reload 后点悬浮球即恢复上次页面+引擎+窗口位置（实测 example.com+搜狗引擎还原）；悬浮球旧键兼容读取
+- [悬浮球·出现时机] AIBrowserBall：everUsed（用过=store.used||localStorage page）才渲染——首次未用不显示，AI 一搜索/开网页即常驻；美化：品牌蓝三段渐变+外圈光环 ring-white/30+呼吸动效（box-shadow 5s 循环）+Compass 图标+开窗态半透明 X
+- [E2E] ①电池 DOM：body 34×14.5 border 2/radius 5、fill 28×8.5（修复后）、cap 2×6、双层数字 100 ②设置弹窗：点行开（三选项+当前选中）→点选即关+状态栏实时切 outside（100% 出现）③浏览器：工具唤起 78%×46% 浮窗+iframe example.com+引擎百度、引擎菜单 6 项、切搜狗生效、拖拽精确位移、关窗→球出现（aria-label「继续上次看的网页」）→reload→解锁→点球→恢复上次页面+引擎 ④搜索→sogou URL ⑤tsc 改动文件 0 错误、eslint 0 错误（11 条 warning 全在 APK 构建中间产物）、清错重载后页面 0 报错

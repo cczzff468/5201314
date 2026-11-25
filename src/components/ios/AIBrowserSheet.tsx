@@ -1,33 +1,31 @@
 'use client';
 
 /**
- * AI 专属分屏浏览器 —— 底部半屏分屏面板（第二十九轮核心 UI，PhoneShell 壳层 z-59）。
+ * AI 专属分屏浏览器 —— 可移动小窗（第三十轮：固定底部半屏改小窗，机主需求「让它变成小窗，可以移动」）。
  *
- * 需求规格（机主：AI 系统感知工具包 + AI 专属分屏浏览器）：
- *  - 不是全屏弹窗！从底部弹出的【半屏分屏面板（Bottom Sheet）】：
- *    上半屏 = AI 与用户的聊天界面（保持可见和互动，App 窗口 z-40 在面板下方照常可点）；
- *    下半屏（1/2 屏幕）= AI 的内置浏览器。
- *  - 触发：AI 需要搜索资料 / 用户发了链接 / AI 主动想分享网页（工具 openWebBrowser 唤起）、
- *    屏幕侧边浏览器悬浮球（AIBrowserBall，常驻入口）、聊天里点网页分享卡片（origin='link'）。
- *
- * 双模式：
- *  - 网页模式（web）：iframe 直接加载（保真浏览；部分站点 X-Frame-Options 拒嵌时给出
- *    「新窗口打开/切阅读模式」逃生条）；
- *  - 阅读模式（reader）：服务端 /api/web-tools/read 抽取的纯正文（Jina Reader 风格），
- *    AI 的高亮工具（highlightWebText）在阅读模式下点亮文本并滚动到位——跨域 iframe
- *    无法注入脚本，阅读模式是「AI 帮你看这里」的落地载体。
- *
- * 状态源：ai-browser-store（zustand 全局单例，工具执行器/聊天卡片/悬浮球共用）。
+ * 形态：
+ * - 圆角 22px 浮窗（宽 78% × 高 46%，默认贴右下、可拖到任意位置），标题条拖拽换位
+ *   （setPointerCapture + 归一化位置 localStorage 持久化，与聊天悬浮窗同款范式）；
+ * - 上半屏聊天/任何 App 照常可用（根层 pointer-events-none 不挡下层，窗口本体 auto）；
+ * - 工具栏：后退 + 地址/搜索输入 + 引擎选择（百度主用/360/淘宝/搜狗/抖音/快手）+ 网页↔阅读
+ *   模式切换 + 关闭；
+ * - 网页模式：iframe 直接加载（6s 慢加载检测 → 逃生条「切阅读模式/新窗口打开」）；
+ * - 阅读模式：服务端 /api/web-tools/read 抽取纯正文（Jina Reader 风格），AI 的
+ *   highlightWebText 工具在阅读模式点亮文本并滚动到位；
+ * - 悬浮球/网页卡片/AI 工具唤起后点开即显示【上次看的页面】（store 持久化恢复）。
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, ArrowUpRight, BookOpen, Globe, Loader2, Search, X } from 'lucide-react';
-import { useAIBrowser, type AIBrowserPage } from '@/lib/ios/ai-browser-store';
+import { ArrowLeft, ArrowUpRight, BookOpen, ChevronDown, Globe, Loader2, Search, X } from 'lucide-react';
+import { useAIBrowser, SEARCH_ENGINES, type AIBrowserPage, type SearchEngineId } from '@/lib/ios/ai-browser-store';
 
-/** 面板占壳高的比例（需求：下半屏 1/2 屏幕） */
-const SHEET_RATIO = 0.5;
+/** 小窗尺寸（占壳比例） */
+const WIN_W = 0.78;
+const WIN_H = 0.46;
+/** 拖拽把手热区（标题条） */
+const GRAB_H = 40;
 
-/** URL/搜索词归一：带协议的当网址，其余当搜索词 */
+/** URL/搜索词归一：带协议的当网址，其余当搜索词（走当前引擎，百度主用） */
 function normalizeInput(raw: string): { url?: string; query?: string } {
   const t = raw.trim();
   if (!t) return {};
@@ -49,7 +47,6 @@ function ReaderParagraphs({ text, highlight }: { text: string; highlight: { text
   const paras = useMemo(() => text.split('\n').filter((p) => p.trim()), [text]);
   const highlightRef = useRef<HTMLParagraphElement | null>(null);
 
-  // 高亮命中段：包含目标文本的首段（AI highlightWebText 工具触发；seq 变化重新定位）
   useEffect(() => {
     if (!highlight?.text || paras.length === 0) return;
     const idx = paras.findIndex((p) => p.includes(highlight.text));
@@ -69,7 +66,7 @@ function ReaderParagraphs({ text, highlight }: { text: string; highlight: { text
           <p
             key={i}
             ref={hit ? (el) => { highlightRef.current = el; } : undefined}
-            className={`mb-3 text-[14.5px] leading-[1.75] ${
+            className={`mb-3 text-[14px] leading-[1.75] ${
               hit
                 ? 'rounded-[8px] bg-[#FFD60A]/45 px-1.5 py-1 font-medium text-black shadow-[0_1px_4px_rgba(250,204,21,0.4)] ring-1 ring-[#FF9F0A]/50 dark:text-black'
                 : 'text-black/80 dark:text-white/75'
@@ -83,14 +80,20 @@ function ReaderParagraphs({ text, highlight }: { text: string; highlight: { text
   );
 }
 
-export default function AIBrowserSheet() {
-  const { open, origin, mode, page, highlight, reading, openPanel, closePanel, setMode, setPage, setLoading, clearHighlight, goBack } = useAIBrowser();
+export default function AIBrowserWindow() {
+  const {
+    open, origin, mode, page, engine, enginePickerOpen, highlight, reading, winPos,
+    openPanel, closePanel, setMode, setEngine, setEnginePicker, setPage, setLoading, clearHighlight, goBack, setWinPos,
+  } = useAIBrowser();
   const historyLen = useAIBrowser((s) => s.history.length);
   const [input, setInput] = useState('');
   const [shown, setShown] = useState(false); // 入场动画态
   const [readerPage, setReaderPage] = useState<AIBrowserPage | null>(null); // 阅读模式数据
   const [iframeSlow, setIframeSlow] = useState(false); // iframe 加载缓慢/被拒嵌提示
+  const [dragging, setDragging] = useState(false);
+  const dragStart = useRef<{ px: number; py: number; wx: number; wy: number } | null>(null);
   const inputFocus = useRef(false);
+  const winRef = useRef<HTMLDivElement | null>(null);
 
   // 打开时同步地址栏 + 入场动画 + 慢加载检测复位；重置阅读 loading（跨热重载/重开的脏态）
   useEffect(() => {
@@ -98,7 +101,7 @@ export default function AIBrowserSheet() {
       setShown(true);
       setInput(page?.url ?? '');
       setIframeSlow(false);
-      setLoading(false); // 开面板即清 stale loading（zustand 模块态跨热重载/重开存留，不重置会永久卡「提取中」）
+      setLoading(false); // 开窗口即清 stale loading（zustand 模块态跨热重载/重开存留，不重置会永久卡「提取中」）
       const t = requestAnimationFrame(() => setShown(true));
       return () => cancelAnimationFrame(t);
     }
@@ -120,7 +123,7 @@ export default function AIBrowserSheet() {
         if (!alive || !data.ok || !data.page) return;
         const p: AIBrowserPage = { ...data.page, readAt: Date.now() };
         setReaderPage(p);
-        setPage(p); // 回写 store（AI 感知注入用）
+        setPage(p); // 回写 store（AI 感知注入 + 悬浮球「上次看的页面」记忆用）
       })
       .catch(() => undefined)
       .finally(() => {
@@ -133,10 +136,13 @@ export default function AIBrowserSheet() {
     };
   }, [open, mode, page?.url, readerPage?.url, readerPage?.text, setLoading, setPage]);
 
-  // 模式切换离开阅读模式时清高亮
+  // 模式切换离开阅读模式时清高亮 + 关引擎弹层
   useEffect(() => {
     if (mode !== 'reader') clearHighlight();
   }, [mode, clearHighlight]);
+  useEffect(() => {
+    if (!open) setEnginePicker(false);
+  }, [open, setEnginePicker]);
 
   // 网页模式慢加载检测（6s 仍无 onLoad → 弹逃生条：X-Frame-Options 拒嵌的可能）
   useEffect(() => {
@@ -146,37 +152,75 @@ export default function AIBrowserSheet() {
     return () => window.clearTimeout(timer);
   }, [open, mode, page?.url]);
 
+  /* ---------------- 标题条拖拽（小窗移动） ---------------- */
+
+  const onGrabPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!winRef.current) return;
+    const shell = (e.currentTarget.closest('[data-phone-shell]') as HTMLElement | null) ?? document.body;
+    const rect = winRef.current.getBoundingClientRect();
+    const sRect = shell.getBoundingClientRect();
+    const nx = (rect.x - sRect.x) / sRect.width;
+    const ny = (rect.y - sRect.y) / sRect.height;
+    (e.target as HTMLElement).setPointerCapture(e.pointerId);
+    dragStart.current = { px: e.clientX, py: e.clientY, wx: nx, wy: ny };
+    setDragging(true);
+  };
+
+  const onGrabPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!dragStart.current || !winRef.current) return;
+    const shell = (e.currentTarget.closest('[data-phone-shell]') as HTMLElement | null) ?? document.body;
+    const sRect = shell.getBoundingClientRect();
+    const dx = (e.clientX - dragStart.current.px) / sRect.width;
+    const dy = (e.clientY - dragStart.current.py) / sRect.height;
+    // 归一化位置（窗口左上角），clamp 留 6px 边界（窗口至少露 40px 在屏内）
+    const ww = WIN_W;
+    const wh = WIN_H;
+    const x = Math.min(Math.max(dragStart.current.wx + dx, 0.02 - 0), 1 - ww * 0.35);
+    const y = Math.min(Math.max(dragStart.current.wy + dy, 0.02), 1 - 0.12);
+    setWinPos({ x: Math.max(x, -ww + 0.4), y });
+  };
+
+  const onGrabPointerUp = () => {
+    setDragging(false);
+    dragStart.current = null;
+  };
+
   if (!open) return null;
 
   const displayUrl = page?.url ?? '';
+  const engineName = SEARCH_ENGINES.find((e) => e.id === engine)?.name ?? '百度';
+  // 默认位置：右下（露出 Home 指示条）
+  const posStyle: React.CSSProperties = winPos
+    ? { left: `${winPos.x * 100}%`, top: `${winPos.y * 100}%` }
+    : { right: '3%', bottom: '7%' };
 
   return (
-    <div
-      className="pointer-events-none absolute inset-x-0 bottom-0 z-[59]"
-      style={{ height: `${SHEET_RATIO * 100}%` }}
-      data-testid="ai-browser-sheet"
-      role="dialog"
-      aria-label="AI 分屏浏览器"
-    >
-      {/* 半屏面板本体：从底部滑入 */}
+    <div className="pointer-events-none absolute inset-0 z-[59]" data-testid="ai-browser-sheet" role="dialog" aria-label="AI 浏览器小窗">
+      {/* 小窗本体：浮层圆角卡（入场缩放淡入 + 拖拽时去掉过渡） */}
       <div
-        className={`pointer-events-auto absolute inset-x-0 bottom-0 flex h-full flex-col overflow-hidden rounded-t-[22px] border-t border-black/10 bg-[#F5F5F7] shadow-[0_-14px_44px_rgba(0,0,0,0.28)] ring-1 ring-black/[0.06] transition-transform duration-[380ms] ease-[cubic-bezier(0.32,0.72,0,1)] dark:border-white/15 dark:bg-[#1C1C1E] dark:ring-white/10 ${
-          shown ? 'translate-y-0' : 'translate-y-full'
-        }`}
+        ref={winRef}
+        className={`pointer-events-auto absolute flex flex-col overflow-hidden rounded-[22px] border border-black/10 bg-[#F5F5F7] shadow-[0_18px_50px_rgba(0,0,0,0.34)] ring-1 ring-black/[0.06] transition-[opacity,transform] duration-[320ms] ease-[cubic-bezier(0.32,0.72,0,1)] dark:border-white/15 dark:bg-[#1C1C1E] dark:ring-white/10 ${
+          shown ? 'translate-y-0 scale-100 opacity-100' : 'translate-y-4 scale-95 opacity-0'
+        } ${dragging ? 'transition-none' : ''}`}
+        style={{ width: `${WIN_W * 100}%`, height: `${WIN_H * 100}%`, ...posStyle }}
       >
-        {/* 拖拽条 + 工具栏 */}
-        <div className="shrink-0 border-b border-black/[0.07] bg-white/85 backdrop-blur-xl dark:border-white/10 dark:bg-[#2A2A2C]/90">
-          {/* 抓手 */}
-          <div className="flex justify-center pt-[7px]">
-            <button
-              type="button"
-              aria-label="收起分屏浏览器"
-              onClick={closePanel}
-              className="h-[5px] w-[38px] rounded-full bg-black/20 transition active:bg-black/35 dark:bg-white/25"
-            />
+        {/* 标题条（拖拽把手）+ 工具栏 */}
+        <div className="shrink-0 border-b border-black/[0.07] bg-white/90 backdrop-blur-xl dark:border-white/10 dark:bg-[#2A2A2C]/95">
+          {/* 抓手条：整条可拖动换位（触摸/鼠标皆可） */}
+          <div
+            className="flex h-[26px] cursor-grab touch-none select-none items-center justify-center active:cursor-grabbing"
+            onPointerDown={onGrabPointerDown}
+            onPointerMove={onGrabPointerMove}
+            onPointerUp={onGrabPointerUp}
+            onPointerCancel={onGrabPointerUp}
+            aria-label="拖动移动浏览器小窗"
+            role="button"
+            tabIndex={-1}
+          >
+            <span className="h-[5px] w-[38px] rounded-full bg-black/15 transition dark:bg-white/20" />
           </div>
-          {/* 地址/搜索栏 + 工具按钮 */}
-          <div className="flex items-center gap-1.5 px-2.5 pb-2 pt-1.5">
+          {/* 工具栏：后退 + 地址/搜索 + 引擎 + 模式 + 关闭 */}
+          <div className="flex items-center gap-1.5 px-2 pb-2">
             <button
               type="button"
               aria-label="后退"
@@ -220,15 +264,46 @@ export default function AIBrowserSheet() {
                     if (url || query) openPanel({ ...(url ? { url } : { query }), origin: 'user' });
                   }
                 }}
-                placeholder="搜索或输入网址"
+                placeholder={`搜一下或输入网址（${engineName}）`}
                 aria-label="地址栏：搜索或输入网址"
                 enterKeyHint="go"
                 className="min-w-0 flex-1 bg-transparent text-[13px] leading-none text-black/85 outline-none placeholder:text-black/30 dark:text-white/85 dark:placeholder:text-white/30"
               />
-              {page?.title ? (
-                <span className="hidden max-w-[90px] truncate text-[11px] text-black/35 dark:text-white/35 sm:block">{hostOf(displayUrl)}</span>
-              ) : null}
             </form>
+            {/* 引擎选择（百度主用；点击弹小菜单切 360/淘宝/搜狗/抖音/快手） */}
+            <div className="relative shrink-0">
+              <button
+                type="button"
+                aria-label={`搜索引擎：${engineName}，点击切换`}
+                aria-expanded={enginePickerOpen}
+                data-testid="ai-browser-engine"
+                onClick={() => setEnginePicker(!enginePickerOpen)}
+                className="flex h-[30px] items-center gap-[3px] rounded-full bg-black/[0.05] px-2.5 text-[12px] font-medium text-black/65 transition active:scale-95 dark:bg-white/10 dark:text-white/65"
+              >
+                {engineName}
+                <ChevronDown className="h-[12px] w-[12px]" strokeWidth={2.4} aria-hidden="true" />
+              </button>
+              {enginePickerOpen ? (
+                <div className="absolute right-0 top-[34px] z-[3] w-[104px] overflow-hidden rounded-[14px] bg-white/95 py-1 shadow-[0_10px_30px_rgba(0,0,0,0.22)] ring-1 ring-black/[0.08] backdrop-blur-xl dark:bg-[#2A2A2C]/95 dark:ring-white/10">
+                  {SEARCH_ENGINES.map((e) => (
+                    <button
+                      key={e.id}
+                      type="button"
+                      role="menuitemradio"
+                      aria-checked={engine === e.id}
+                      data-testid={`ai-engine-${e.id}`}
+                      onClick={() => setEngine(e.id as SearchEngineId)}
+                      className={`flex w-full items-center justify-between px-3 py-[7px] text-left text-[13px] transition-colors active:bg-black/[0.05] dark:active:bg-white/[0.08] ${
+                        engine === e.id ? 'font-semibold text-[#007AFF]' : 'text-black/75 dark:text-white/75'
+                      }`}
+                    >
+                      {e.name}
+                      {engine === e.id ? <span className="h-[6px] w-[6px] rounded-full bg-[#007AFF]" aria-hidden="true" /> : null}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+            </div>
             {/* 模式切换：网页 ↔ 阅读 */}
             <button
               type="button"
@@ -248,7 +323,7 @@ export default function AIBrowserSheet() {
             {/* 关闭 */}
             <button
               type="button"
-              aria-label="关闭分屏浏览器"
+              aria-label="关闭 AI 浏览器"
               onClick={closePanel}
               className="grid h-[30px] w-[30px] shrink-0 place-items-center rounded-full bg-black/[0.05] text-black/60 transition active:scale-90 dark:bg-white/10 dark:text-white/60"
             >
@@ -259,7 +334,7 @@ export default function AIBrowserSheet() {
 
         {/* 内容区 */}
         <div className="relative min-h-0 flex-1 overflow-hidden">
-          {/* AI 唤起来源提示条（工具触发时让机主知道是 AI 打开的；几秒后淡出无需常驻） */}
+          {/* AI 唤起来源提示条（工具触发时让机主知道是 AI 打开的） */}
           {origin === 'ai' ? (
             <div className="pointer-events-none absolute inset-x-0 top-0 z-[2] flex justify-center">
               <span className="mt-2 rounded-full bg-black/70 px-3 py-[4px] text-[11px] font-medium text-white shadow-lg backdrop-blur-sm">
@@ -274,7 +349,7 @@ export default function AIBrowserSheet() {
                 <iframe
                   key={displayUrl}
                   src={displayUrl}
-                  title="AI 分屏浏览器"
+                  title="AI 浏览器"
                   onLoad={() => setIframeSlow(false)}
                   referrerPolicy="no-referrer"
                   sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox"
@@ -282,23 +357,21 @@ export default function AIBrowserSheet() {
                 />
                 {/* 慢加载/被拒嵌逃生条 */}
                 {iframeSlow ? (
-                  <div className="absolute inset-x-0 bottom-0 z-[2] flex items-center gap-2 bg-gradient-to-t from-black/75 to-transparent px-4 pb-3 pt-8">
-                    <p className="flex-1 text-[11.5px] leading-tight text-white/90">
-                      网页加载较慢，或该站点不允许内嵌浏览。
-                    </p>
+                  <div className="absolute inset-x-0 bottom-0 z-[2] flex items-center gap-2 bg-gradient-to-t from-black/75 to-transparent px-3 pb-2.5 pt-7">
+                    <p className="flex-1 text-[11px] leading-tight text-white/90">网页加载较慢，或该站点不允许内嵌浏览。</p>
                     <button
                       type="button"
                       onClick={() => setMode('reader')}
-                      className="shrink-0 rounded-full bg-white/90 px-3 py-[5px] text-[11.5px] font-medium text-black shadow-md active:scale-95"
+                      className="shrink-0 rounded-full bg-white/90 px-2.5 py-[4px] text-[11px] font-medium text-black shadow-md active:scale-95"
                     >
-                      切阅读模式
+                      阅读模式
                     </button>
                     <button
                       type="button"
                       onClick={() => displayUrl && window.open(displayUrl, '_blank', 'noopener')}
-                      className="flex shrink-0 items-center gap-1 rounded-full bg-white/25 px-3 py-[5px] text-[11.5px] font-medium text-white ring-1 ring-white/40 backdrop-blur-sm active:scale-95"
+                      className="flex shrink-0 items-center gap-1 rounded-full bg-white/25 px-2.5 py-[4px] text-[11px] font-medium text-white ring-1 ring-white/40 backdrop-blur-sm active:scale-95"
                     >
-                      <ArrowUpRight className="h-[12px] w-[12px]" strokeWidth={2.4} />
+                      <ArrowUpRight className="h-[11px] w-[11px]" strokeWidth={2.4} />
                       新窗口
                     </button>
                   </div>
@@ -306,14 +379,14 @@ export default function AIBrowserSheet() {
               </>
             ) : (
               <div className="flex h-full flex-col items-center justify-center gap-3 bg-gradient-to-b from-[#F5F5F7] to-[#EDEDF0] px-8 dark:from-[#1C1C1E] dark:to-[#141416]">
-                <span className="grid h-[52px] w-[52px] place-items-center rounded-[15px] bg-[#007AFF]/12 text-[#007AFF]">
-                  <Search className="h-[24px] w-[24px]" strokeWidth={2} />
+                <span className="grid h-[46px] w-[46px] place-items-center rounded-[14px] bg-[#007AFF]/12 text-[#007AFF]">
+                  <Search className="h-[21px] w-[21px]" strokeWidth={2} />
                 </span>
-                <p className="text-[14px] font-semibold text-black/70 dark:text-white/70">AI 浏览器</p>
-                <p className="text-center text-[12px] leading-relaxed text-black/40 dark:text-white/40">
-                  输入网址或搜索词开始浏览
+                <p className="text-[13.5px] font-semibold text-black/70 dark:text-white/70">AI 浏览器</p>
+                <p className="text-center text-[11.5px] leading-relaxed text-black/40 dark:text-white/40">
+                  输入网址或搜索词（{engineName}）开始
                   <br />
-                  聊天里让 TA 搜资料、发链接，也会在这里打开
+                  聊天里让 TA 搜资料、发链接也会在这里打开
                 </p>
               </div>
             )
@@ -326,11 +399,11 @@ export default function AIBrowserSheet() {
                   <p className="text-[12.5px]">正在提取网页正文…</p>
                 </div>
               ) : readerPage?.text ? (
-                <div className="px-4 pb-6 pt-4">
-                  <p className="text-[16px] font-bold leading-snug text-black/90 dark:text-white/90">{readerPage.title}</p>
+                <div className="px-4 pb-6 pt-3">
+                  <p className="text-[15px] font-bold leading-snug text-black/90 dark:text-white/90">{readerPage.title}</p>
                   <p className="mt-1 text-[10.5px] text-black/35 dark:text-white/35">{hostOf(readerPage.url)} · 阅读模式</p>
                   {readerPage.desc ? (
-                    <p className="mt-2 rounded-[8px] bg-black/[0.04] px-2.5 py-2 text-[12px] leading-relaxed text-black/55 dark:bg-white/[0.06] dark:text-white/50">
+                    <p className="mt-2 rounded-[8px] bg-black/[0.04] px-2.5 py-2 text-[11.5px] leading-relaxed text-black/55 dark:bg-white/[0.06] dark:text-white/50">
                       {readerPage.desc}
                     </p>
                   ) : null}

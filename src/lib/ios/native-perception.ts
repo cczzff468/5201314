@@ -1764,11 +1764,13 @@ export async function localNotify(opts: {
   tag?: string;
   url?: string;
   target?: unknown;
+  /** 横幅优先级（默认 true：IMPORTANCE_HIGH 渠道弹横幅+响铃+震动；false 退回静默渠道） */
+  headsUp?: boolean;
 }): Promise<boolean | null> {
   const p = await nativePlugin();
   if (!p) return null;
   try {
-    await nativeCall('localNotify', { title: opts.title, body: opts.body, tag: opts.tag, url: opts.url, target: opts.target }, 5000);
+    await nativeCall('localNotify', { title: opts.title, body: opts.body, tag: opts.tag, url: opts.url, target: opts.target, headsUp: opts.headsUp ?? true }, 5000);
     return true;
   } catch {
     return false;

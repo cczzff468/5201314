@@ -11,9 +11,9 @@
  */
 
 /** 当前最新版本（纯网页热更时与 APK versionName 可短暂不同步，下次重打 APK 对齐） */
-export const APP_VERSION = '2.4.13';
+export const APP_VERSION = '2.4.14';
 /** 版本号数字（与 android-shell versionCode 保持一致；覆盖安装要求只增不减；纯网页热更不动） */
-export const APP_VERSION_CODE = 77;
+export const APP_VERSION_CODE = 78;
 
 export interface AppReleaseNote {
   version: string;
@@ -25,10 +25,11 @@ export interface AppReleaseNote {
 /** 版本历史（新→旧；设置 › APP 更新 页渲染，最新一条即当前版本） */
 export const APP_RELEASE_NOTES: AppReleaseNote[] = [
   {
-    version: '2.4.13',
+    version: '2.4.14',
     date: '2026-11-26',
     items: [
-      '【需重装 APK · versionCode 77】悬浮窗失效根修：APK 覆盖安装后系统回拉服务（START_STICKY 空意图重启）不再误把还活跃的吃醋锁静默解锁——先读持久化锁原地重新武装（留言/头像/倒计时全保留），锁应用拦截悬浮窗恢复弹出；本地通知换 IMPORTANCE_HIGH 新渠道，后台通知改为横幅悬浮弹出（旧渠道优先级低永不弹横幅）',
+      '【需重装 APK · versionCode 78】系统通知模块彻底重构：AI 每发一条消息弹一条独立系统通知（绝不合并、不覆盖），通知渠道 IMPORTANCE_HIGH 显式配横幅+响铃+震动，串行队列保证连发 5 条弹 5 条不被系统吞掉，后台/息屏才弹（前台只渲染聊天），点任意通知直达对应聊天界面；网页浏览时系统状态栏一冒头 350ms 内主动收回（不再悬停数秒）',
+      '【网页热更·免重装】「电池图标内部」按机主参考图删除重建：粗描边 2px 圆润胶囊 + 填充独立胶囊（与壳体间可见缝隙）+ 数字居中偏左双层反色，跟 iOS 一样；设置里「电量百分比」改为点行弹窗选择（iOS 居中弹窗三选项带实时预览）；状态栏整体上移 6px（网页顶部不再压得那么低）',
       '【网页热更·免重装】「电池图标内部」改为真实 iOS 16.1+ 同款规格（弃自定义 HTML 规格）：细描边 1.5px 圆角胶囊 + 透明轨道（背景透出、无灰槽）+ 按电量比例实心填充，描边/填充/凸点三色一体（常态前景色/充电绿/低电红），百分比数字 9px 半粗几何居中、按填充边界双层反色（黑填充上白字、透明轨道上前景色字），无闪电无 % 号',
       '【网页热更·免重装】新增「AI 系统感知工具包」：AI 可读取剪贴板、开关手电筒、查询网络类型与信号强度（Function Calling 工具 + 感知数据注入 System Prompt，结合人设/记忆/上下文使用）',
       '【网页热更·免重装】新增「AI 专属分屏浏览器」：底部半屏分屏面板（上半屏聊天保持可见可聊、下半屏内置浏览器）+ 屏幕侧边浏览器悬浮球常驻入口；AI 联网三件套——searchWeb 真实网络搜索、openWebBrowser 自动打开网页、sendWebLink 发网页分享卡片（点击即开）；用户在聊天里发链接 AI 自动读取网页正文摘要',

@@ -3898,11 +3898,28 @@ public class NativePerceptionPlugin extends Plugin {
                 ch.setDescription("页面在后台时的提醒通知（Agent 完成 / AI 来电 / 情侣小家动态等）");
                 nm.createNotificationChannel(ch);
                 if (headsUp) {
+                    // 第三十轮·通知模块重构：IMPORTANCE_HIGH 渠道显式配响铃+震动（机主规格：
+                    // 「确保能弹横幅、响铃、震动」——部分 ROM 只看渠道重要性不落默认音/震，
+                    // 显式配置三件全齐）；渠道重要性创建后不可改，v2.4.13 起用新渠道 id。
                     NotificationChannel high = new NotificationChannel(
-                            LOCAL_NOTIFY_HIGH_CHANNEL, "重要提醒（横幅）",
+                            LOCAL_NOTIFY_HIGH_CHANNEL, "AI 消息（逐条横幅）",
                             NotificationManager.IMPORTANCE_HIGH);
-                    high.setDescription("重要消息的悬浮横幅提醒（AI 来电/紧急消息，弹出预览后自动收起）");
+                    high.setDescription("AI 每条消息一条独立横幅通知（不合并）；点击直达对应聊天");
                     high.setLockscreenVisibility(Notification.VISIBILITY_PRIVATE);
+                    high.enableVibration(true);
+                    high.setVibrationPattern(new long[]{0, 180, 90, 180});
+                    high.enableLights(true);
+                    high.setLightColor(0xFF0A84FF);
+                    try {
+                        high.setSound(
+                                android.media.RingtoneManager.getDefaultUri(android.media.RingtoneManager.TYPE_NOTIFICATION),
+                                new android.media.AudioAttributes.Builder()
+                                        .setUsage(android.media.AudioAttributes.USAGE_NOTIFICATION)
+                                        .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                                        .build());
+                    } catch (Throwable ignored) {
+                        // 默认铃音不可用时保持渠道默认音
+                    }
                     nm.createNotificationChannel(high);
                     useChannel = LOCAL_NOTIFY_HIGH_CHANNEL;
                 }

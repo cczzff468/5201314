@@ -6,6 +6,7 @@ import {
   useEffect,
   useState,
 } from 'react';
+import { createPortal } from 'react-dom';
 
 import { Check } from 'lucide-react';
 
@@ -124,6 +125,8 @@ export function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
   // v2.4.10 电量百分比显示方式（三选一：不显示 / 图标外部 / 图标内部 iOS 16+ 风格）
   const batteryPercent = useSettings((s) => s.batteryPercent);
   const setBatteryPercent = useSettings((s) => s.setBatteryPercent);
+  // 第三十轮：电量百分比显示方式弹窗开关（点行打开，选完/点背板关闭）
+  const [batteryModeOpen, setBatteryModeOpen] = useState(false);
   // 灵动岛常驻开关（用户需求）：关闭后隐藏顶部黑色胶囊基础灵动岛，只显示 APP 灵动岛
   const islandPersistent = useSettings((s) => s.islandPersistent);
   const setIslandPersistent = useSettings((s) => s.setIslandPersistent);
@@ -395,40 +398,36 @@ export function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
           </div>
         </div>
 
-        {/* v2.4.10 电量百分比显示方式（机主需求：设置里三选一；inside 为第二十九轮真实 iOS 16.1+ 同款（细描边透明轨道+居中数字反色），弃机主 HTML/CSS
-            规格重写）：不显示（只有电池图标）/ 电池图标外部（原样式，默认）/ 电池图标内部
-            （2px 描边电池+黑填充+浅灰电量槽，数字嵌电池内靠左 3px 黑白反色）。每行左侧是
-            状态栏同款组件的实时小预览（固定 67% 电量示例），选中即全局状态栏电量实时切换、立即持久化。 */}
-        <div className="mx-4 mt-4 divide-y divide-black/[0.05] overflow-hidden rounded-[22px] bg-white/55 shadow-[0_8px_28px_rgba(17,24,39,0.06)] ring-1 ring-white/70 backdrop-blur-2xl dark:divide-white/[0.06] dark:bg-white/[0.06] dark:ring-white/[0.09]">
-          {([
-            { value: 'none', label: '不显示' },
-            { value: 'outside', label: '电池图标外部' },
-            { value: 'inside', label: '电池图标内部' },
-          ] as { value: BatteryPercentMode; label: string }[]).map((o) => (
-            <button
-              key={o.value}
-              type="button"
-              role="radio"
-              aria-checked={batteryPercent === o.value}
-              aria-label={`电量百分比：${o.label}`}
-              data-testid={`settings-battery-${o.value}`}
-              onClick={() => setBatteryPercent(o.value)}
-              className="flex min-h-[52px] w-full items-center gap-3 px-4 text-left transition-colors active:bg-muted/50"
-            >
-              {/* 实时小预览：状态栏同款电池（固定 67% 示例，真实 iOS 版：细描边+透明轨道+居中双色数字） */}
-              <span className="flex h-[20px] w-[76px] shrink-0 items-center justify-center text-foreground">
-                <BatteryIcon level={67} charging={false} low={false} mode={o.value} light={false} />
-              </span>
-              <span className="min-w-0 flex-1 truncate text-[16px]">{o.label}</span>
-              {batteryPercent === o.value && (
-                <Check className="h-5 w-5 shrink-0 text-foreground" strokeWidth={2.5} />
-              )}
-            </button>
-          ))}
+        {/* 第三十轮：电量百分比显示方式改为【点行弹窗选择】（机主需求：设置里的百分比显示选择要弹窗）。
+            一行入口（实时预览当前样式 + 当前模式名 + ›），点开 iOS 居中弹窗：三选项各带状态栏同款
+            实时小预览（固定 67%），点选即时生效并持久化；点背板/Esc 关闭。 */}
+        <div className="mx-4 mt-4 overflow-hidden rounded-[22px] bg-white/55 shadow-[0_8px_28px_rgba(17,24,39,0.06)] ring-1 ring-white/70 backdrop-blur-2xl dark:bg-white/[0.06] dark:ring-white/[0.09]">
+          <button
+            type="button"
+            aria-haspopup="dialog"
+            aria-expanded={batteryModeOpen}
+            data-testid="settings-battery-mode-row"
+            onClick={() => setBatteryModeOpen(true)}
+            className="flex min-h-[52px] w-full items-center gap-3 px-4 text-left transition-colors active:bg-muted/50"
+          >
+            <span className="flex h-[20px] w-[76px] shrink-0 items-center justify-center text-foreground">
+              <BatteryIcon level={67} charging={false} low={false} mode={batteryPercent} light={false} />
+            </span>
+            <span className="min-w-0 flex-1 truncate text-[16px]">电量百分比</span>
+            <span className="shrink-0 text-[13px] text-muted-foreground">{batteryModeLabel(batteryPercent)}</span>
+            <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground/60" strokeWidth={2.2} />
+          </button>
         </div>
         <p className="mt-2 px-8 text-[11.5px] leading-relaxed text-muted-foreground">
-          状态栏电量的显示方式，选完即时生效；「电池图标内部」为参考图同款：黑色描边电池 + 黑色填充 + 浅灰电量槽，数字嵌在电池内靠左、按填充边界黑白自动反色。点按状态栏电池图标可弹出电量详情卡片。
+          状态栏电量的显示方式，点上方选择弹窗即时生效；点按状态栏电池图标可弹出电量详情卡片。
         </p>
+        {batteryModeOpen && (
+          <BatteryModeDialog
+            current={batteryPercent}
+            onPick={setBatteryPercent}
+            onClose={() => setBatteryModeOpen(false)}
+          />
+        )}
 
         {/* 悬浮工具（v72）：两个开关控制手机右下角的可拖拽悬浮球——
             提示词查看器（下一轮完整 Prompt 只读预览）与快捷操作（API/世界书一键切换）。
@@ -633,3 +632,99 @@ export function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
     </>
   );
 }
+/** 电量百分比模式中文名（入口行右侧 value 展示） */
+function batteryModeLabel(mode: BatteryPercentMode): string {
+  return mode === 'inside' ? '电池图标内部' : mode === 'outside' ? '电池图标外部' : '不显示';
+}
+
+/** 第三十轮：电量百分比显示方式弹窗（iOS 居中卡：三选项各带状态栏同款实时预览，
+ *  点选即时生效持久化；点背板/Esc 关闭；portal 到 body 不受卡片层叠限制） */
+function BatteryModeDialog({
+  current,
+  onPick,
+  onClose,
+}: {
+  current: BatteryPercentMode;
+  onPick: (m: BatteryPercentMode) => void;
+  onClose: () => void;
+}) {
+  const [entered, setEntered] = useState(false);
+  useEffect(() => {
+    const raf = requestAnimationFrame(() => setEntered(true));
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    document.addEventListener('keydown', onKey);
+    return () => {
+      cancelAnimationFrame(raf);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [onClose]);
+
+  const options: { value: BatteryPercentMode; label: string; desc: string }[] = [
+    { value: 'none', label: '不显示', desc: '只有电池图标' },
+    { value: 'outside', label: '电池图标外部', desc: '数字+% 在电池左侧' },
+    { value: 'inside', label: '电池图标内部', desc: 'iOS 同款 · 数字嵌电池内' },
+  ];
+
+  return createPortal(
+    <>
+      <button
+        type="button"
+        aria-label="关闭电量百分比弹窗"
+        data-testid="battery-mode-backdrop"
+        className="fixed inset-0 z-[300] cursor-default bg-black/35 backdrop-blur-[2px]"
+        onClick={onClose}
+      />
+      <div
+        role="dialog"
+        aria-label="电量百分比显示方式"
+        data-testid="battery-mode-dialog"
+        className="pointer-events-none fixed inset-0 z-[310] flex items-center justify-center p-8"
+      >
+        <div
+          className={`pointer-events-auto w-full max-w-[300px] overflow-hidden rounded-[24px] bg-white/95 shadow-[0_18px_48px_rgba(0,0,0,0.28)] ring-1 ring-black/[0.06] backdrop-blur-2xl transition-[opacity,transform] duration-200 ease-out dark:bg-zinc-900/[0.95] dark:ring-white/[0.09] ${
+            entered ? 'translate-y-0 scale-100 opacity-100' : 'translate-y-2 scale-95 opacity-0'
+          }`}
+        >
+          <div className="divide-y divide-black/[0.05] dark:divide-white/[0.06]">
+            {options.map((o) => (
+              <button
+                key={o.value}
+                type="button"
+                role="menuitemradio"
+                aria-checked={current === o.value}
+                data-testid={`battery-mode-${o.value}`}
+                onClick={() => {
+                  onPick(o.value);
+                  onClose();
+                }}
+                className="flex min-h-[54px] w-full items-center gap-3 px-4 text-left transition-colors active:bg-black/[0.04] dark:active:bg-white/[0.06]"
+              >
+                {/* 实时小预览：状态栏同款电池（固定 67% 示例） */}
+                <span className="flex h-[20px] w-[76px] shrink-0 items-center justify-center text-foreground">
+                  <BatteryIcon level={67} charging={false} low={false} mode={o.value} light={false} />
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-[15.5px]">{o.label}</span>
+                  <span className="mt-0.5 block truncate text-[11px] text-muted-foreground">{o.desc}</span>
+                </span>
+                {current === o.value && <Check className="h-5 w-5 shrink-0 text-[#007AFF]" strokeWidth={2.5} />}
+              </button>
+            ))}
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="w-full border-t border-black/[0.06] py-3 text-[16px] font-medium text-[#007AFF] transition-colors active:bg-black/[0.04] dark:border-white/[0.08] dark:active:bg-white/[0.06]"
+          >
+            好
+          </button>
+        </div>
+      </div>
+    </>,
+    document.body,
+  );
+}
+
+

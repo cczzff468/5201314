@@ -244,6 +244,24 @@ public class MainActivity extends BridgeActivity {
             safeBottom = Math.round(Math.max(sys.bottom, cut.bottom) / density);
             safeLeft = Math.round(Math.max(sys.left, cut.left) / density);
             pushInsetsToWeb();
+            // 第三十轮·网页浏览时系统状态栏再显示根修：IMMERSIVE_STICKY 的系统行为是「顶部
+            // 滑出→悬停数秒→自动收回」，但网页里滚动/触摸（尤其 iframe 全屏铺到顶边时）会
+            // 频繁触发顶部滑出，机主观感即「网页一打开系统状态栏就又显示了」。这里监听
+            // statusBars 可见性：一旦冒头，350ms 后主动三通道齐发收回——比系统默认的
+            // 悬停数秒快一个量级，看得到即收回（机主感知：闪一下就没了，不再赖着）。
+            // 350ms 延迟：避开系统手势过程中的连续 insets 变化（手势中途立即抢藏会被系统
+            // 再拉起造成闪烁拉锯），等手势落定再藏一次即稳。
+            try {
+                if (insets.isVisible(WindowInsetsCompat.Type.statusBars())) {
+                    android.os.Handler h = reHideHandler;
+                    if (h != null) {
+                        h.removeCallbacks(reHideRunnable);
+                        h.postDelayed(reHideRunnable, 350L);
+                    }
+                }
+            } catch (Throwable ignored) {
+                // isVisible 老系统不可用时静默（IMMERSIVE_STICKY 自动收回兜底仍在）
+            }
             return insets;
         });
 
@@ -343,8 +361,8 @@ public class MainActivity extends BridgeActivity {
         public String getShellInfo() {
             JSONObject o = new JSONObject();
             try {
-                o.put("versionCode", 77);
-                o.put("versionName", "2.4.13");
+                o.put("versionCode", 78);
+                o.put("versionName", "2.4.14");
                 o.put("fullscreen", true); // 系统状态栏隐藏（全屏）标记
             } catch (Exception ignored) {
             }
