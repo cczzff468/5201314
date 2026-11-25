@@ -70,6 +70,32 @@ public class MainActivity extends BridgeActivity {
         appInForeground = false;
     }
 
+    /** v2.4.11 ③ 系统状态栏重申隐藏：切后台/权限弹窗等场景系统条可能被拉回，回来即再藏。
+     *  onCreate 里已用同一逻辑首迷生效（含 FLAG_FULLSCREEN 双保险），此处只做重申。
+     *  （public：BridgeActivity 的 onResume 为 public，protected 会降权编译不过） */
+    @Override
+    public void onResume() {
+        super.onResume();
+        try {
+            WindowCompat.getInsetsController(getWindow(), getWindow().getDecorView())
+                    .hide(WindowInsetsCompat.Type.statusBars());
+        } catch (Throwable ignored) {
+        }
+    }
+
+    /** v2.4.11 ③ 窗口重获焦点（权限弹窗关闭/键盘收起等）时再藏一次，确保全屏不回退 */
+    @Override
+    public void onWindowFocusChanged(boolean hasFocus) {
+        super.onWindowFocusChanged(hasFocus);
+        if (hasFocus) {
+            try {
+                WindowCompat.getInsetsController(getWindow(), getWindow().getDecorView())
+                        .hide(WindowInsetsCompat.Type.statusBars());
+            } catch (Throwable ignored) {
+            }
+        }
+    }
+
     /** 音量键拦截：阅读器开启「音量键翻页」时消费音量键（不调系统音量），
      *  转发给 WebView 的 window.__nativeVolTurn(±1)；关闭时保持系统默认行为。
      *  纯浏览器/旧 APK 里音量键永远到不了网页层，这正是用户反馈"开了没反应"的根因。 */
@@ -155,6 +181,9 @@ public class MainActivity extends BridgeActivity {
             bars.setSystemBarsBehavior(
                     WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
             bars.hide(WindowInsetsCompat.Type.statusBars());
+            // v2.4.11 ② 保险：附加传统 FLAG_FULLSCREEN（API 30 起废弃但兼容保留——
+            // 极旧 ROM / 部分国产 ROM 只认这个；与 edge-to-edge 同用无害）
+            getWindow().addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN);
         } catch (Throwable ignored) {
             // 极旧 ROM 拒绝时静默：styles.xml 已加 windowFullscreen 主题项兜底
         }
@@ -277,8 +306,8 @@ public class MainActivity extends BridgeActivity {
         public String getShellInfo() {
             JSONObject o = new JSONObject();
             try {
-                o.put("versionCode", 74);
-                o.put("versionName", "2.4.9");
+                o.put("versionCode", 75);
+                o.put("versionName", "2.4.11");
                 o.put("fullscreen", true); // 系统状态栏隐藏（全屏）标记
             } catch (Exception ignored) {
             }

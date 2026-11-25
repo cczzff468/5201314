@@ -11,9 +11,9 @@
  */
 
 /** 当前最新版本（纯网页热更时与 APK versionName 可短暂不同步，下次重打 APK 对齐） */
-export const APP_VERSION = '2.4.10';
+export const APP_VERSION = '2.4.11';
 /** 版本号数字（与 android-shell versionCode 保持一致；覆盖安装要求只增不减；纯网页热更不动） */
-export const APP_VERSION_CODE = 74;
+export const APP_VERSION_CODE = 75;
 
 export interface AppReleaseNote {
   version: string;
@@ -24,6 +24,16 @@ export interface AppReleaseNote {
 
 /** 版本历史（新→旧；设置 › APP 更新 页渲染，最新一条即当前版本） */
 export const APP_RELEASE_NOTES: AppReleaseNote[] = [
+  {
+    version: '2.4.11',
+    date: '2026-11-25',
+    items: [
+      '【网页热更·免重装】「电池图标内部」按参考图重绘为分段式实心电池：实心填充块（黑/白随状态栏、充电绿/低电红）+ 透明缝 + 独立浅灰电量槽 + 灰色正极凸点，百分比数字嵌在填充块上几何居中（参考图像素级同比例）；低电量时装不下数字会改居中电池并按边界分色，全程黑白分明',
+      '【网页热更·免重装】设置 › APP 更新 新增「原生壳自检」：装了旧 APK 会直接标黄提示（顶部的系统状态栏还占着一条就是它），新壳显示绿色勾；设置首页 APP 更新行也会标「旧壳·需重装」——一眼分清该不该重装，不用再猜',
+      '【需重装 APK · versionCode 75】系统状态栏隐藏三重保险：传统全屏 FLAG_FULLSCREEN 双保险 + 切后台/权限弹窗回来时自动重新隐藏（onResume/窗口焦点重申），任何界面不再冒出系统状态栏',
+      '【重要】顶部的系统状态栏（时间/信号白底那一条）还在显示 = 手机上装的是旧 APK：去 设置 › APP 更新 下载覆盖安装（数据不丢），装完首屏即全屏沉浸',
+    ],
+  },
   {
     version: '2.4.10',
     date: '2026-11-25',

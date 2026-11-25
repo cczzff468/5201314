@@ -22,12 +22,26 @@ function SignalBars() {
   );
 }
 
+/* ============ v2.4.11 分段式电池（inside 模式）几何常量 ============
+ * 参考图（机主上传照片）像素级测量，40px 高原型上：
+ *   已充电段 47×40 实心黑胶囊（圆角 ≈ 高的 21%）｜透明缝 4px｜
+ *   未充电段 20×40 浅灰胶囊（#AFAEB3）｜透明缝 3px｜正极凸点 6×14 灰；
+ *   白色数字 19px 高（≈ 47.5% 电池高）嵌在已充电段上、几何居中（数字中心=填充段中心）。
+ * 按 16px 渲染高度等比换算（×0.4）：本体宽 29px（填充+缝+空槽）、缝 1.7px、
+ * 凸点 2.4×5.6px、数字 10px 半粗 tabular（无 % 号）、总宽恒定 33px。 */
+const BAT_H = 16;      // 电池高（与 WiFi 图标等高——参考图口径：电池=WiFi/信号等高）
+const BAT_BODY = 29;   // 电池本体宽（填充+缝+空槽；原型 71/40×16）
+const BAT_GAP = 1.7;   // 填充段↔空槽的透明缝（背景透出，即参考图的白缝）
+const BAT_TIP_W = 2.4; // 正极凸点宽
+const BAT_TIP_H = 5.6; // 正极凸点高（原型 35% 高度，垂直居中）
+const BAT_TOTAL = BAT_BODY + BAT_GAP + BAT_TIP_W; // 常宽：电量增减只挪填充/空槽边界
+
 interface BatteryIconProps {
   level: number;
   charging: boolean;
   low: boolean;
   /** 电量百分比显示方式（v2.4.10）：outside=图标外部数字+% / inside=图标内部数字
-   * （iOS 16+ 风格：纯填充块、数字嵌电池内、无 % 号）/ none=不显示百分比 */
+   *  （v2.4.11 分段式实心电池，完全复刻机主参考图）/ none=不显示百分比 */
   mode: BatteryPercentMode;
   /** 状态栏前景是否浅色（白字）：决定 inside 模式里嵌入数字用反色（黑）保证对比；
  *  外部/描边样式不受影响（跟随 currentColor） */
@@ -44,31 +58,75 @@ export function BatteryIcon({ level, charging, low, mode, light = false }: Batte
   const fill = Math.min(100, Math.max(0, level));
 
   if (mode === 'inside') {
-    // iOS 16+ 内嵌式：无描边纯填充；数字反前景色（浅色状态栏→黑字，深色→白字）
-    const numColor = light ? 'text-black' : 'text-white';
+    /* v2.4.11 分段式电池（完全复刻机主参考图，照片像素级测量 40px 高原型 → 16px 等比）：
+     * 已充电段=实心圆角胶囊（黑/白随前景、充电绿/低电红）｜透明缝｜未充电段=独立浅灰
+     * 圆角胶囊（currentColor@0.32 ≈ 参考图 #AFAEB3）｜透明缝｜灰色正极凸点。
+     * 数字（无 % 号）嵌在已充电段上几何居中（参考图实测：数字中心=填充段中心、
+     * 高≈电池 47.5%）；电量低到填充段装不下数字时改居中电池本体并按填充边界分色
+     * （边界左=反色、右=前景色——iOS 16 同款动态对比，任何电量全程黑白分明）。 */
+    const numColor = light ? 'text-black' : 'text-white'; // 填充段上的数字反色
+    const fgColor = light ? 'text-white' : 'text-black'; // 空槽/透缝上的数字用前景色
+    const fillColor = charging ? 'bg-[#30D158]' : low ? 'bg-[#FF453A]' : 'bg-current';
+    const fillPx = (BAT_BODY * fill) / 100; // 填充段宽 = 电量% × 本体宽
+    const trackPx = BAT_BODY - fillPx - BAT_GAP; // 空槽宽（100% 时收敛到 0）
+    const digits = Math.round(level);
+    // 填充段是否装得下数字（10px 半粗 tabular 每位 ≈5.8px，两侧各留 ~2px 边距）
+    const digitsW = String(digits).length * 5.8 + 1;
+    const digitsFit = fillPx >= digitsW + 4.5;
     return (
       <span
         role="img"
         aria-label={`电量${Math.round(level)}%${charging ? '，充电中' : ''}`}
-        className="relative inline-block h-[14px] w-[37px] shrink-0"
+        className="relative inline-block shrink-0"
+        style={{ height: BAT_H, width: BAT_TOTAL }}
       >
-        {/* 电池本体轨道（未充入部分）：半透明前景色（浅底=浅灰、深底=暗灰，随状态栏主题） */}
-        <span className="absolute inset-0 rounded-[4.5px] bg-current opacity-[0.32]" />
-        {/* 充入电量：充电绿 / 低电红 / 前景色（充电与低电时数字保持反色可读） */}
+        {/* 空槽（未充电段）：独立浅灰圆角胶囊 */}
+        {trackPx > 0.8 && (
+          <span
+            className="absolute inset-y-0 rounded-[3px] bg-current opacity-[0.32]"
+            style={{ left: fillPx + BAT_GAP, width: trackPx }}
+          />
+        )}
+        {/* 已充电段：实心胶囊（圆角随宽度收缩，极窄时成圆点不糊） */}
+        {fillPx > 0.8 && (
+          <span
+            className={`absolute inset-y-0 left-0 ${fillColor} transition-all duration-300`}
+            style={{ width: fillPx, borderRadius: Math.min(3, fillPx / 2) }}
+          />
+        )}
+        {/* 数字：装得下→嵌已充电段居中（参考图口径）；装不下→居中本体、按填充边界分色两份叠印。
+            注意两份分色层的坐标基准必须与本体同宽（left-0 + width=本体，而非 inset-0
+            ——根 span 含正极凸点更宽，inset-0 会把数字带偏右且裁剪基准也错） */}
+        {digitsFit ? (
+          <span
+            className={`absolute inset-y-0 left-0 flex translate-y-[1.5px] items-center justify-center text-[10px] font-semibold leading-none tabular-nums ${numColor}`}
+            style={{ width: fillPx }}
+          >
+            {digits}
+          </span>
+        ) : (
+          <>
+            <span
+              aria-hidden="true"
+              className={`absolute inset-y-0 left-0 flex translate-y-[1.5px] items-center justify-center text-[10px] font-semibold leading-none tabular-nums ${numColor}`}
+              style={{ width: BAT_BODY, clipPath: `inset(0px ${BAT_BODY - fillPx}px 0px 0px)` }}
+            >
+              {digits}
+            </span>
+            <span
+              aria-hidden="true"
+              className={`absolute inset-y-0 left-0 flex translate-y-[1.5px] items-center justify-center text-[10px] font-semibold leading-none tabular-nums ${fgColor}`}
+              style={{ width: BAT_BODY, clipPath: `inset(0px 0px 0px ${fillPx}px)` }}
+            >
+              {digits}
+            </span>
+          </>
+        )}
+        {/* 正极凸点（与空槽同灰，垂直居中） */}
         <span
-          className={`absolute inset-y-0 left-0 rounded-[4.5px] transition-all duration-300 ${
-            charging ? 'bg-[#30D158]' : low ? 'bg-[#FF453A]' : 'bg-current'
-          }`}
-          style={{ width: `${fill}%` }}
+          className="absolute top-1/2 -translate-y-1/2 rounded-full bg-current opacity-[0.32]"
+          style={{ left: BAT_BODY + BAT_GAP, height: BAT_TIP_H, width: BAT_TIP_W }}
         />
-        {/* 嵌入数字（无 % 号，几何居中——参考图实测口径） */}
-        <span
-          className={`absolute inset-0 flex items-center justify-center text-[8.5px] font-semibold leading-none tabular-nums ${numColor}`}
-        >
-          {Math.round(level)}
-        </span>
-        {/* 正极凸点（与轨道同色调） */}
-        <span className="absolute -right-[3px] top-1/2 h-[5px] w-[2px] -translate-y-1/2 rounded-r-[1.5px] bg-current opacity-40" />
       </span>
     );
   }

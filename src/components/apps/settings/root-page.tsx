@@ -67,6 +67,10 @@ import {
   useAgentVoice,
 } from '@/lib/ios/agent-voice';
 
+// v2.4.11 原生壳自诊断（还看得到系统状态栏 = 手机上是旧 APK，一眼分辨）
+import { readShellInfo } from '@/lib/ios/shell-info';
+import { isNativePerception } from '@/lib/ios/native-perception';
+
 // v1.4.2 APP 更新：自动检查 + 红点 + 版本历史
 import { useAppUpdate } from '@/lib/ios/app-update';
 
@@ -134,6 +138,9 @@ export function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
   // v1.4.2 APP 更新：版本清单 + 有新版红点（开机 6s 自动检查未到/失败时，打开设置补拉一次）
   const updInfo = useAppUpdate((s) => s.info);
   const updHas = useAppUpdate((s) => s.hasUpdate);
+  // v2.4.11 壳自检（同步桥只读一次）：APK 里读不到壳版本 → 旧壳，系统状态栏没隐藏等修复都不在
+  const shellInfo = readShellInfo();
+  const shellOld = isNativePerception() && !shellInfo;
   const updCheck = useAppUpdate((s) => s.check);
   useEffect(() => {
     if (useAppUpdate.getState().info === null) void updCheck(true);
@@ -420,7 +427,7 @@ export function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
           ))}
         </div>
         <p className="mt-2 px-8 text-[11.5px] leading-relaxed text-muted-foreground">
-          状态栏电量的显示方式，选完即时生效；「电池图标内部」为 iOS 16+ 同款样式。
+          状态栏电量的显示方式，选完即时生效；「电池图标内部」为参考图同款分段式：实心填充块+浅灰电量槽，数字嵌在填充块上。
         </p>
 
         {/* 悬浮工具（v72）：两个开关控制手机右下角的可拖拽悬浮球——
@@ -605,8 +612,8 @@ export function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
             icon={Download}
             tone={TONE_CYAN}
             label="APP 更新"
-            value={updHas ? '有新版' : updInfo ? `v${updInfo.version}` : undefined}
-            badge={updHas}
+            value={shellOld ? '旧壳·需重装' : shellInfo ? `壳 v${shellInfo.versionName}` : updHas ? '有新版' : updInfo ? `v${updInfo.version}` : undefined}
+            badge={updHas || shellOld}
             onClick={() => onOpen('appupdate')}
             testId="settings-appupdate-entry"
           />

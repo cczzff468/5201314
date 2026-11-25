@@ -8,12 +8,18 @@ import {
 } from 'react';
 
 import {
+  AlertTriangle,
   Loader2,
   RefreshCw,
+  ShieldCheck,
+  Smartphone,
   Sparkles,
 } from 'lucide-react';
 
 import { isNativePerception } from '@/lib/ios/native-perception';
+
+// v2.4.11 原生壳自诊断：还看得到系统状态栏 = 手机上是旧 APK（一键分辨）
+import { readShellInfo } from '@/lib/ios/shell-info';
 
 import {
   copyApkLink,
@@ -40,6 +46,9 @@ import { DetailShell } from './shared';
 
 export function AppUpdatePage({ onBack }: { onBack: () => void }) {
   const nativeMode = isNativePerception();
+  // v2.4.11 壳自检（同步桥，读一次即缓存）：新壳返回版本，旧壳/APK 外为 null
+  const shell = readShellInfo();
+  const shellOld = nativeMode && !shell;
   const [copied, setCopied] = useState(false);
   /** v2.4.4 下载进度弹窗：null=关；有值=按阶段渲染进度条/指引/重试 */
   const [dl, setDl] = useState<ApkUpdateState | null>(null);
@@ -115,6 +124,34 @@ export function AppUpdatePage({ onBack }: { onBack: () => void }) {
             </p>
           ) : null}
         </div>
+
+        {/* v2.4.11 原生壳自检卡：把「系统状态栏还在显示是不是旧 APK」变成一眼结论 */}
+        {shell ? (
+          <div className="mx-4 mt-3 flex items-start gap-2.5 rounded-[16px] bg-[#34C759]/10 p-3.5 text-[12.5px] leading-relaxed text-[#1D8A38] ring-1 ring-[#34C759]/25 dark:text-[#4ADE80]">
+            <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+            <p className="min-w-0">
+              原生壳 v{shell.versionName}（构建 {shell.versionCode}）· 系统状态栏已隐藏 ✓
+              <span className="mt-0.5 block text-[11.5px] text-[#1D8A38]/70 dark:text-[#4ADE80]/70">
+                全屏沉浸生效中：时间/信号/电量由 App 自带状态栏显示。
+              </span>
+            </p>
+          </div>
+        ) : shellOld ? (
+          <div className="mx-4 mt-3 flex items-start gap-2.5 rounded-[16px] bg-[#FF9F0A]/12 p-3.5 text-[12.5px] leading-relaxed text-[#B25000] ring-1 ring-[#FF9F0A]/35 dark:bg-[#FF9F0A]/10 dark:text-[#FFB340]">
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+            <p className="min-w-0">
+              检测到<b>旧版原生壳</b>——顶部的系统状态栏还占着一条、右缘白条等修复都不在。
+              <span className="mt-0.5 block text-[11.5px] text-[#B25000]/80 dark:text-[#FFB340]/80">
+                点下方按钮重新下载并<b>覆盖安装</b>（数据不丢），装完这里会变绿。
+              </span>
+            </p>
+          </div>
+        ) : (
+          <div className="mx-4 mt-3 flex items-start gap-2.5 rounded-[16px] bg-muted/60 p-3.5 text-[12px] leading-relaxed text-muted-foreground">
+            <Smartphone className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+            <p className="min-w-0">浏览器预览模式：无原生壳。装 APK 后这里会显示壳版本与全屏状态。</p>
+          </div>
+        )}
 
         {/* 下载区（有新版或 APK 就绪时展示主按钮） */}
         <div className="mx-4 mt-4 space-y-2">

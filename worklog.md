@@ -3573,3 +3573,16 @@ Work Log:
 - [E2E·Agent Browser] ①设置页三行渲染齐（radio aria-checked 联动）+ 三预览各自形态 VLM 复核通过（不显示=纯电池/外部=67% 在左/内部=纯填充块白数字嵌内+右侧对勾）②点选「内部」：状态栏电池 DOM 即变 37px 无描边纯填充（100% 充电绿 + 居中数字）✓ ③整页 reload 持久化：设置仍选中「内部」、状态栏仍 37px 组件 ✓ ④点「不显示」：描边电池零百分比文字 ✓ ⑤控制台/页面错误零、tsc 改动文件 0 错误（37 个为未触碰基线）、eslint 改动文件 0 问题、/api/app-version 返回 2.4.10/74
 
 Stage Summary: 机主两件清账——①系统状态栏「不显示」方案（v2.4.9 原生 hide+windowFullscreen）已随 code 74 APK 齐备，发版说明写明「仍见系统状态栏=装旧 APK，去设置›APP 更新装新版即全屏」；②设置新增「电量百分比」三选一（不显示/图标外部/图标内部 iOS 16+ 参考图同款），状态栏电量实时跟随+立即持久化，网页热更免重装。关键文件：store.ts（BatteryPercentMode+持久化）、StatusBar.tsx（BatteryIcon 三模式重构导出）、root-page.tsx（电量百分比卡片+实时预览）、app-version.ts（v2.4.10）、sw.js（v93）
+
+## 2026-11-25 · 第二十七轮 v2.4.11：电池图标内部按参考图像素级复刻（分段式实心电池）+ 壳自检一键分辨旧 APK + 状态栏隐藏三重保险（versionCode 75）
+
+Task: 机主反馈两件——①「电池图标内部再美化一下，完全根据我发给你的来」（新参考图：Camera_XHS 照片）②「系统状态栏还是这样，没有变化」。07:53 截图复核：顶部仍是一条白底系统状态栏（07:53 时间/通知图标/5G/网速/半电图）+ 黑色 APP 内容自绘状态栏并行——结论：机主手机装的仍是旧 APK（v2.4.9 起系统状态栏为原生层直接隐藏，新 APK dex 已验 getShellInfo 桥在位；网页内容从服务器加载永远最新、壳不会自更新）。本轮：①参考图像素级测量后完全复刻分段式电池；②把「该不该重装 APK」做成设置页里机器可判的自检；③原生隐藏加固三重保险 + versionCode 75 重打 APK。
+
+Work Log:
+- [参考图·像素级测量] PIL 逐像素分析机主照片（394×208）：电池为**分段式**（非 iOS 单胶囊）——已充电段 47×40 实心黑胶囊（圆角≈高 21%）｜透明缝 4px｜未充电段 20×40 浅灰胶囊（#AFAEB3）｜缝 3px｜正极凸点 6×14 灰；白色数字 67 高 19px（≈电池 47.5%）、嵌在**已充电段**上几何居中（数字中心=填充段中心 254.5 vs 255 实测吻合）；电池/WiFi/信号等高 40px。按 16px 渲染高度等比换算（×0.4）：本体 29px+缝 1.7+凸点 2.4×5.6=常宽 33px、数字 10px 半粗 tabular
+- [复刻·BatteryIcon inside 重写] StatusBar.tsx：分段式三要素——①填充胶囊（currentColor/充电 #30D158/低电 #FF453A，圆角随宽度收缩）宽=电量%×本体 ②空槽胶囊（currentColor@0.32≈参考图 #AFAEB3）③凸点（同灰、35% 高度垂直居中）；数字（无 % 号）嵌**已充电段**几何居中（参考图口径）；**低电适配**：填充段装不下数字时改居中电池本体+按填充边界 clip-path 分色两份叠印（边界左=反色/右=前景色，iOS 16 动态对比同款——修期间发现并根除 inset-0 坐标基准 bug：两份分色层曾以根 span（含凸点 33px）为基准致数字右偏 2px 且裁剪错位，改 left-0+width=本体对齐）；数字光学居中 +1.5px translate（字体 ascent 上偏实测数字重心 6.33 vs 目标 8，修正后 8.0）；light 参数下全套反色（浅色状态栏→白填充黑数字）
+- [壳自检·shell-info.ts] 新模块读 AIPhoneNative.getShellInfo() 同步桥（模块级缓存、SSR 安全）：新壳返回 {versionCode,versionName,fullscreen}，旧壳/浏览器 null；与 isNativePerception() 组合三态——APK+新壳（绿卡「原生壳 v2.4.11·系统状态栏已隐藏 ✓」）/APK+旧壳（黄卡「检测到旧版原生壳——点下方重新下载覆盖安装」）/浏览器（灰卡「预览模式」）
+- [壳自检·UI 落位] updates.tsx APP 更新页版本卡下新增三态自检卡（ShieldCheck/AlertTriangle/Smartphone 图标）；root-page.tsx 设置首页「APP 更新」行 value 联动（旧壳→「旧壳·需重装」+红点 badge；新壳→「壳 v2.4.11」）——机主打开设置一眼即知该不该重装，不再靠猜
+- [原生加固·MainActivity] 系统状态栏隐藏三重保险：①onCreate 现路径 WindowInsetsControllerCompat.hide+TRANSIENT（原有）②附加传统 FLAG_FULLSCREEN（API 30 废弃但极旧 ROM/部分国产 ROM 兼容）③onResume+onWindowFocusChanged(hasFocus) 反复重申（权限弹窗/切后台回来系统条被拉回时再藏）；getShellInfo 桥升 versionCode 75/2.4.11；build.gradle versionCode 74→75
+- [版本] v2.4.11 / APP_VERSION_CODE 75 / sw.js v93→v94 / 发版说明四条（分段式电池、壳自检、三重保险、「仍见系统状态栏=旧 APK」指引）
+- [E2E·Agent Browser] ①设置预览 inside 模式实测几何：填充 0..19.7px（67%✓）+白缝+空槽 22..28.7+缝+凸点 31..33.7——与参考图逐段吻合；VLM 复核「五要素齐全、数字居中、无缺陷」②低电 40%（临时改预览 level 验证后还原）：分色叠印 DOM 两层 clip 正确、黑数字在灰槽上可读、白数字在填充上可读、总墨迹居中 14.7≈14.5 ③100% 充电态状态栏：绿胶囊+白 100+灰凸点（VLM 确认）④壳自检三态卡渲染 ✓（浏览器态文案在位）⑤发版说明四条全渲染 ✓ ⑥eslint 0 问题 ⑦APK 重打（工具链沙箱重建后全量重下：JDK21+SDK36+gradle）
