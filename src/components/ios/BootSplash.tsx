@@ -79,10 +79,11 @@ const THEME_META: Record<
   chat: {
     en: 'Someone is thinking of you',
     cn: '我一直在你心里，不是吗。',
-    ink: '#1C1C1E',
-    sub: '#8A8A8E',
+    // 第三十六轮：chat 星空化——配色切深色系（深夜蓝紫底 + 白/浅灰文字）
+    ink: '#E9E9E4',
+    sub: 'rgba(199,199,193,0.85)',
     side: 'Cove · Always Here',
-    bar: 'rgba(28,28,30,0.08)',
+    bar: 'rgba(233,233,228,0.14)',
   },
 };
 
@@ -448,53 +449,64 @@ export default function BootSplash({
         </>
       )}
 
-      {/* ---------- 主题 D：对话（第三十五轮再美化·背景+气泡全面升级） ---------- */}
+      {/* ---------- 主题 D：对话（第三十六轮：星空化——夜空底 + 星点流星 + 星云光晕） ---------- */}
       {theme === 'chat' && (
         <>
-          {/* 暖白纸底（第三十五轮：纯白 → 暖米白，更柔和的纸感） */}
-          <div className="absolute inset-0" style={{ background: 'linear-gradient(178deg, #FDFDFC 0%, #FAFAF7 55%, #F6F6F3 100%)' }} />
-          {/* 双柔光晕：蜜桃（左上）+ 雾蓝（右下）大 blur 缓漂——韩系低饱和氛围底 */}
+          {/* 深夜蓝紫渐变底（第三十六轮：暖米白纸底 → 星空夜底，与 star 同族气质） */}
           <div
-            className="absolute left-[-18%] top-[-12%] h-[46%] w-[74%] rounded-full opacity-[0.62] blur-[70px]"
+            className="absolute inset-0"
+            style={{ background: 'linear-gradient(172deg, #111319 0%, #1A1E2C 46%, #232840 78%, #161823 100%)' }}
+          />
+          {/* 地平线微光（底部极淡的夜雾亮带，偏蓝紫） */}
+          <div
+            className="absolute inset-x-0 bottom-0 h-[26%]"
+            style={{ background: 'linear-gradient(to top, rgba(140,150,190,0.14) 0%, rgba(140,150,190,0) 100%)' }}
+          />
+          {/* 星点：固定位置闪烁（复用 star 主题星表） */}
+          {STARS.map(([l, t, s, dur], i) => (
+            <span
+              key={i}
+              aria-hidden="true"
+              className="absolute rounded-full bg-[#E9E9E4]"
+              style={{
+                left: `${l}%`,
+                top: `${t}%`,
+                width: s,
+                height: s,
+                animation: `cove3-twinkle ${dur}ms ease-in-out ${(i % 7) * 240}ms infinite`,
+              }}
+            />
+          ))}
+          {/* 周期流星（细长渐隐光痕，从对话夜空划过） */}
+          <span
+            aria-hidden="true"
+            className="absolute left-[16%] top-[12%] block h-[1.5px] w-[76px] origin-left rounded-full"
             style={{
-              background: 'radial-gradient(closest-side, rgba(255,222,212,0.6) 0%, rgba(255,222,212,0.22) 55%, rgba(255,222,212,0) 100%)',
+              background: 'linear-gradient(90deg, rgba(233,233,228,0) 0%, rgba(233,233,228,0.9) 100%)',
+              animation: 'cove3-shoot 3.4s ease-out 700ms infinite',
+            }}
+          />
+          {/* 星云光晕：左上深紫 + 右下深蓝，大 blur 缓漂（夜空氛围底） */}
+          <div
+            className="absolute left-[-18%] top-[-12%] h-[46%] w-[74%] rounded-full opacity-[0.55] blur-[70px]"
+            style={{
+              background: 'radial-gradient(closest-side, rgba(108,92,180,0.30) 0%, rgba(108,92,180,0.12) 55%, rgba(108,92,180,0) 100%)',
               animation: 'cove2-mist-a 11s ease-in-out infinite',
             }}
           />
           <div
-            className="absolute bottom-[-16%] right-[-20%] h-[46%] w-[72%] rounded-full opacity-[0.58] blur-[70px]"
+            className="absolute bottom-[-16%] right-[-20%] h-[46%] w-[72%] rounded-full opacity-[0.5] blur-[70px]"
             style={{
-              background: 'radial-gradient(closest-side, rgba(216,229,255,0.6) 0%, rgba(216,229,255,0.22) 55%, rgba(216,229,255,0) 100%)',
+              background: 'radial-gradient(closest-side, rgba(70,100,180,0.28) 0%, rgba(70,100,180,0.10) 55%, rgba(70,100,180,0) 100%)',
               animation: 'cove2-mist-b 13s ease-in-out infinite',
             }}
           />
-          {/* 极淡噪点（纸感） */}
-          <div
-            className="absolute inset-0 opacity-[0.045] mix-blend-multiply"
-            style={{ backgroundImage: GRAIN_URI, backgroundSize: '160px 160px' }}
-          />
-          {/* 散落微光点（暖灰/蜜桃小圆·极低调呼吸） */}
-          {[
-            { l: 14, t: 20, s: 5, c: 'rgba(226,200,190,0.5)' },
-            { l: 86, t: 24, s: 4, c: 'rgba(206,218,240,0.55)' },
-            { l: 78, t: 74, s: 5, c: 'rgba(226,200,190,0.42)' },
-          ].map((p, i) => (
-            <span
-              key={i}
-              aria-hidden="true"
-              className="absolute rounded-full"
-              style={{
-                left: `${p.l}%`, top: `${p.t}%`, width: p.s, height: p.s, background: p.c,
-                animation: `cove4-breathe ${3600 + i * 700}ms ease-in-out ${(i % 3) * 400}ms infinite`,
-              }}
-            />
-          ))}
 
           {/* 顶部聊天头部：云朵头像（轻浮）+ Cove + 在线状态 */}
           <div className="absolute inset-x-0 top-[4.8%] flex flex-col items-center gap-[4px]" style={rise(160)}>
             <span
               className="block"
-              style={{ animation: 'cove3-float 6s ease-in-out infinite', filter: 'drop-shadow(0 3px 8px rgba(28,28,30,0.12))' }}
+              style={{ animation: 'cove3-float 6s ease-in-out infinite', filter: 'drop-shadow(0 0 12px rgba(233,233,228,0.22)) drop-shadow(0 3px 8px rgba(0,0,0,0.45))' }}
             >
               {/* 云朵头像：三圆拼云 + 眼睛/微笑/腮红（与 App 图标云朵 C 同族气质） */}
               <svg viewBox="0 0 48 40" width="40" height="34" aria-hidden="true">
@@ -511,8 +523,8 @@ export default function BootSplash({
                 <ellipse cx="33.6" cy="25.6" rx="2.1" ry="1.3" fill="rgba(240,197,190,0.65)" />
               </svg>
             </span>
-            <p className="text-[12.5px] font-semibold tracking-[0.08em] text-[#26262B]">Cove</p>
-            <p className="flex items-center gap-[4px] text-[9px] font-medium tracking-[0.16em] text-[#9C9CA2]">
+            <p className="text-[12.5px] font-semibold tracking-[0.08em] text-[#E9E9E4]">Cove</p>
+            <p className="flex items-center gap-[4px] text-[9px] font-medium tracking-[0.16em] text-white/55">
               <span className="h-[4.5px] w-[4.5px] rounded-full bg-[#34C759] shadow-[0_0_5px_rgba(52,199,89,0.75)]" />
               在线 · 等你的消息
             </p>
@@ -530,7 +542,7 @@ export default function BootSplash({
                 {line.side === 'left' && (
                   <span
                     className="mb-[1px] shrink-0"
-                    style={{ filter: 'drop-shadow(0 1.5px 4px rgba(28,28,30,0.10))' }}
+                    style={{ filter: 'drop-shadow(0 1.5px 5px rgba(8,10,22,0.5))' }}
                     aria-hidden="true"
                   >
                     <svg viewBox="0 0 48 40" width="22" height="19">
@@ -550,14 +562,14 @@ export default function BootSplash({
                   <span
                     className={`px-[15px] py-[10px] text-[15px] font-medium leading-snug tracking-[0.02em] ${
                       line.side === 'right'
-                        ? 'rounded-[19px] rounded-br-[7px] bg-[linear-gradient(150deg,#35353E_0%,#24242B_58%,#1D1D23_100%)] text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.10),0_4px_14px_rgba(29,29,35,0.16)]'
-                        : 'rounded-[19px] rounded-bl-[7px] bg-white text-[#1C1C1E] ring-1 ring-black/[0.05] shadow-[inset_0_1px_0_rgba(255,255,255,0.9),0_3px_10px_rgba(28,28,30,0.07)]'
+                        ? 'rounded-[19px] rounded-br-[7px] bg-[linear-gradient(150deg,#3E4468_0%,#2C3151_58%,#232743_100%)] text-[#F0F0F4] shadow-[inset_0_1px_0_rgba(255,255,255,0.10),0_4px_14px_rgba(8,10,22,0.45)] ring-1 ring-white/10'
+                        : 'rounded-[19px] rounded-bl-[7px] bg-white/[0.10] text-[#ECECF0] ring-1 ring-white/15 shadow-[inset_0_1px_0_rgba(255,255,255,0.07),0_3px_10px_rgba(8,10,22,0.35)]'
                     }`}
                   >
                     {line.text}
                   </span>
                   {line.time && (
-                    <span className="mt-[4px] pr-[5px] text-[9px] font-medium tabular-nums tracking-[0.06em] text-[#9E9EA5]">
+                    <span className="mt-[4px] pr-[5px] text-[9px] font-medium tabular-nums tracking-[0.06em] text-white/45">
                       {line.time} · 已读
                     </span>
                   )}
@@ -571,7 +583,7 @@ export default function BootSplash({
             >
               <span
                 className="mb-[1px] shrink-0"
-                style={{ filter: 'drop-shadow(0 1.5px 4px rgba(28,28,30,0.10))' }}
+                style={{ filter: 'drop-shadow(0 1.5px 5px rgba(8,10,22,0.5))' }}
                 aria-hidden="true"
               >
                 <svg viewBox="0 0 48 40" width="22" height="19">
@@ -586,12 +598,12 @@ export default function BootSplash({
                   <path d="M23.4 26.2 q2.3 1.9 4.6 0" stroke="#8A8A90" strokeWidth="1.3" strokeLinecap="round" fill="none" />
                 </svg>
               </span>
-              <span className="flex h-[32px] items-center gap-[5px] rounded-[16px] bg-white px-[14px] ring-1 ring-black/[0.05] shadow-[0_3px_10px_rgba(28,28,30,0.07)]">
+              <span className="flex h-[32px] items-center gap-[5px] rounded-[16px] bg-white/[0.10] px-[14px] ring-1 ring-white/15 shadow-[inset_0_1px_0_rgba(255,255,255,0.07),0_3px_10px_rgba(8,10,22,0.35)]">
                 {[0, 1, 2].map((d) => (
                   <span
                     key={d}
                     aria-hidden="true"
-                    className="h-[6px] w-[6px] rounded-full bg-[#C4C4CA]"
+                    className="h-[6px] w-[6px] rounded-full bg-white/45"
                     style={{ animation: `cove4-typing 1.05s ease-in-out ${d * 0.16}s infinite` }}
                   />
                 ))}
@@ -604,19 +616,19 @@ export default function BootSplash({
               style={{ animation: `cove2-rise 900ms cubic-bezier(0.22,0.9,0.3,1) ${180 + (CHAT_LINES.length + 1) * 230 + 200}ms both` }}
             >
               <span className="flex items-center gap-[10px]" aria-hidden="true">
-                <span className="block h-[0.5px] w-[44px] bg-[#D8D8DE]" />
-                <svg viewBox="0 0 24 24" width="11" height="11" style={{ animation: 'cove4-heart-float 2.6s ease-in-out infinite' }}>
+                <span className="block h-[0.5px] w-[44px] bg-white/25" />
+                <svg viewBox="0 0 24 24" width="11" height="11" style={{ animation: 'cove4-heart-float 2.6s ease-in-out infinite', filter: 'drop-shadow(0 0 4px rgba(232,180,176,0.45))' }}>
                   <path
                     d="M12 21s-8.4-5.3-10.2-10C.5 7.5 2.6 4 6.1 4c2.2 0 3.9 1.2 4.9 3C12.4 5.2 14.1 4 16.3 4c3.5 0 5.6 3.5 4.3 7-1.8 4.7-8.6 10-8.6 10z"
                     fill="#E8B4B0"
                   />
                 </svg>
-                <span className="block h-[0.5px] w-[44px] bg-[#D8D8DE]" />
+                <span className="block h-[0.5px] w-[44px] bg-white/25" />
               </span>
-              <span className="font-serif text-[24px] font-medium leading-none tracking-[0.26em] text-[#1C1C1E]" style={{ textIndent: '0.26em' }}>
+              <span className="font-serif text-[24px] font-medium leading-none tracking-[0.26em] text-[#E9E9E4]" style={{ textIndent: '0.26em' }}>
                 Cove
               </span>
-              <span className="text-[10.5px] tracking-[0.3em] text-[#B4B4BA]" style={{ textIndent: '0.3em' }}>
+              <span className="text-[10.5px] tracking-[0.3em] text-white/50" style={{ textIndent: '0.3em' }}>
                 等的人，会回消息
               </span>
             </div>
