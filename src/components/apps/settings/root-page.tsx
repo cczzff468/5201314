@@ -312,6 +312,60 @@ export function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
           <MainRow icon={Lock} tone={TONE_RED} label="锁屏与密码" onClick={() => onOpen('lock')} />
         </div>
 
+        {/* 第三十六轮：AI 服务四件套上移到「锁屏与密码」下面（机主要求：API、识图、图像、语言放这里）
+            ——从原「开发者」组剪出，开发者组剩 ClawBox + 存储改组名「云端与存储」 */}
+        <div className="mx-4 mt-4 divide-y divide-black/[0.05] overflow-hidden rounded-[22px] bg-white/55 shadow-[0_8px_28px_rgba(17,24,39,0.06)] ring-1 ring-white/70 backdrop-blur-2xl dark:divide-white/[0.06] dark:bg-white/[0.06] dark:ring-white/[0.09]">
+          <MainRow
+            icon={Wrench}
+            tone={TONE_GRAY}
+            label="API 配置"
+            value={apiKey.trim() ? `已配置 · ${apiModel}` : '未配置'}
+            onClick={() => onOpen('api')}
+          />
+          <MainRow
+            icon={Eye}
+            tone={TONE_PURPLE}
+            label="识图模型"
+            value={visionConfigured ? `已配置 · ${visionModel.trim() || '未填模型名'}` : '未配置'}
+            onClick={() => onOpen('vision')}
+          />
+          <button
+            type="button"
+            data-testid="settings-imggen-row"
+            onClick={() => onOpen('imggen')}
+            className="flex min-h-[52px] w-full items-center gap-3 px-4 py-2 text-left transition-colors active:bg-muted/50"
+          >
+            <RowIcon icon={ImagePlus} tone={TONE_PINK} />
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-[16px]">图像生成</span>
+              <span className="mt-0.5 block truncate text-[12px] text-muted-foreground">
+                自动生图 · 锁脸 · OpenAI 兼容
+              </span>
+            </span>
+            <span className="max-w-[50%] shrink-0 truncate text-[15px] text-muted-foreground">
+              {imgGenConfig.enabled && imgGenReady
+                ? `已开启 · ${imgGenConfig.model.trim() || '未填模型名'}`
+                : imgGenReady
+                  ? '已配置'
+                  : '未配置'}
+            </span>
+            <ChevronRight className="h-5 w-5 shrink-0 text-muted-foreground/60" />
+          </button>
+          <MainRow
+            icon={AudioLines}
+            tone={TONE_CYAN}
+            label="语音 API"
+            value={
+              ttsProvider === 'builtin'
+                ? '内置语音 · 免费'
+                : ttsConfigured
+                  ? `已配置 · ${ttsModel.trim() || '未填模型名'}`
+                  : '未配置'
+            }
+            onClick={() => onOpen('voice')}
+          />
+        </div>
+
         {/* 显示与亮度 / 壁纸 / 通知 */}
         <div className="mx-4 mt-4 divide-y divide-black/[0.05] overflow-hidden rounded-[22px] bg-white/55 shadow-[0_8px_28px_rgba(17,24,39,0.06)] ring-1 ring-white/70 backdrop-blur-2xl dark:divide-white/[0.06] dark:bg-white/[0.06] dark:ring-white/[0.09]">
           <MainRow
@@ -545,59 +599,11 @@ export function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
           </button>
         </div>
 
-        {/* 开发者 */}
-        <div className="mb-2 mt-6 px-8 text-[13px] text-muted-foreground">开发者</div>
+        {/* 云端与存储（第三十六轮：API/识图/图像/语音四件套上移「锁屏与密码」下方后，
+            剩 ClawBox + 存储重组改组名——不再叫「开发者」） */}
+        <div className="mb-2 mt-6 px-8 text-[13px] text-muted-foreground">云端与存储</div>
         <div className="mx-4 divide-y divide-black/[0.05] overflow-hidden rounded-[22px] bg-white/55 shadow-[0_8px_28px_rgba(17,24,39,0.06)] ring-1 ring-white/70 backdrop-blur-2xl dark:divide-white/[0.06] dark:bg-white/[0.06] dark:ring-white/[0.09]">
-          <MainRow
-            icon={Wrench}
-            tone={TONE_GRAY}
-            label="API 配置"
-            value={apiKey.trim() ? `已配置 · ${apiModel}` : '未配置'}
-            onClick={() => onOpen('api')}
-          />
-          <MainRow
-            icon={Eye}
-            tone={TONE_PURPLE}
-            label="识图模型"
-            value={visionConfigured ? `已配置 · ${visionModel.trim() || '未填模型名'}` : '未配置'}
-            onClick={() => onOpen('vision')}
-          />
-          <button
-            type="button"
-            data-testid="settings-imggen-row"
-            onClick={() => onOpen('imggen')}
-            className="flex min-h-[52px] w-full items-center gap-3 px-4 py-2 text-left transition-colors active:bg-muted/50"
-          >
-            <RowIcon icon={ImagePlus} tone={TONE_PINK} />
-            <span className="min-w-0 flex-1">
-              <span className="block truncate text-[16px]">图像生成</span>
-              <span className="mt-0.5 block truncate text-[12px] text-muted-foreground">
-                自动生图 · 锁脸 · OpenAI 兼容
-              </span>
-            </span>
-            <span className="max-w-[50%] shrink-0 truncate text-[15px] text-muted-foreground">
-              {imgGenConfig.enabled && imgGenReady
-                ? `已开启 · ${imgGenConfig.model.trim() || '未填模型名'}`
-                : imgGenReady
-                  ? '已配置'
-                  : '未配置'}
-            </span>
-            <ChevronRight className="h-5 w-5 shrink-0 text-muted-foreground/60" />
-          </button>
-          <MainRow
-            icon={AudioLines}
-            tone={TONE_CYAN}
-            label="语音 API"
-            value={
-              ttsProvider === 'builtin'
-                ? '内置语音 · 免费'
-                : ttsConfigured
-                  ? `已配置 · ${ttsModel.trim() || '未填模型名'}`
-                  : '未配置'
-            }
-            onClick={() => onOpen('voice')}
-          />
-          {/* ClawBox（v24）：放在语音 API 下面（机主定调）——云端助手 + 真机接入两个页签 */}
+          {/* ClawBox（v24）：云端助手 + 真机接入两个页签 */}
           <button
             type="button"
             data-testid="settings-cloud-entry"
@@ -616,9 +622,33 @@ export function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
           <MainRow icon={Database} tone={TONE_GREEN} label="存储" onClick={() => onOpen('storage')} />
         </div>
 
-        {/* 关于本机 + APP 图标 + APP 更新（v1.3：APK 下载入口从感知设置提升到系统设置）；v1.9.22 新增添加到主屏幕 */}
+        {/* 第三十三轮：开屏动画（第三十六轮上移到「App 图标」上面——机主要求）——
+            行入口预览当前主题微缩场景 + 名称，点开四选一弹窗（星空月夜/雾中远山/雨落成诗/对话·星空版），
+            点选【立马生效】：选完即整屏播放一遍预览 + 本会话下次冷启动/下次打开即播放所选主题 */}
+        <div className="mx-4 mt-4 overflow-hidden rounded-[22px] bg-white/55 shadow-[0_8px_28px_rgba(17,24,39,0.06)] ring-1 ring-white/70 backdrop-blur-2xl dark:bg-white/[0.06] dark:ring-white/[0.09]">
+          <button
+            type="button"
+            aria-haspopup="dialog"
+            aria-expanded={splashThemeOpen}
+            data-testid="settings-splash-theme-row"
+            onClick={() => setSplashThemeOpen(true)}
+            className="flex min-h-[52px] w-full items-center gap-3 px-4 text-left transition-colors active:bg-muted/50"
+          >
+            <RowIcon icon={Sparkles} tone={TONE_PURPLE} />
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-[16px]">开屏动画</span>
+              <span className="mt-0.5 block truncate text-[11.5px] text-muted-foreground">
+                四款主题 · 选择后立即播放预览
+              </span>
+            </span>
+            <span className="shrink-0 text-[13px] text-muted-foreground">{splashThemeName(splashTheme)}</span>
+            <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground/60" strokeWidth={2.2} />
+          </button>
+        </div>
+
+        {/* APP 图标 + APP 更新 + 添加到主屏幕（v1.3：APK 下载入口从感知设置提升到系统设置；
+            v1.9.22 新增添加到主屏幕；第三十六轮「关于本机」移至设置最底部） */}
         <div className="mx-4 mt-4 divide-y divide-black/[0.05] overflow-hidden rounded-[22px] bg-white/55 shadow-[0_8px_28px_rgba(17,24,39,0.06)] ring-1 ring-white/70 backdrop-blur-2xl dark:divide-white/[0.06] dark:bg-white/[0.06] dark:ring-white/[0.09]">
-          <MainRow icon={Info} tone={TONE_GRAY} label="关于本机" onClick={() => onOpen('about')} />
           {/* 第三十一轮：App 图标三选一（改名 Cove 后机主要求可选图标）——行内预览当前图标 */}
           <button
             type="button"
@@ -666,30 +696,6 @@ export function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
             onClose={() => setAppIconOpen(false)}
           />
         )}
-
-        {/* 第三十三轮：开屏动画三主题（机主要求「灰白雾底变成星空月球什么的，做三个可以选」）——
-            行入口预览当前主题微缩场景 + 名称，点开四选一弹窗（星空月夜/雾中远山/雨落成诗/对话），
-            点选【立马生效】：选完即整屏播放一遍预览 + 本会话下次冷启动/下次打开即播放所选主题 */}
-        <div className="mx-4 mt-4 overflow-hidden rounded-[22px] bg-white/55 shadow-[0_8px_28px_rgba(17,24,39,0.06)] ring-1 ring-white/70 backdrop-blur-2xl dark:bg-white/[0.06] dark:ring-white/[0.09]">
-          <button
-            type="button"
-            aria-haspopup="dialog"
-            aria-expanded={splashThemeOpen}
-            data-testid="settings-splash-theme-row"
-            onClick={() => setSplashThemeOpen(true)}
-            className="flex min-h-[52px] w-full items-center gap-3 px-4 text-left transition-colors active:bg-muted/50"
-          >
-            <RowIcon icon={Sparkles} tone={TONE_PURPLE} />
-            <span className="min-w-0 flex-1">
-              <span className="block truncate text-[16px]">开屏动画</span>
-              <span className="mt-0.5 block truncate text-[11.5px] text-muted-foreground">
-                四款主题 · 选择后立即播放预览
-              </span>
-            </span>
-            <span className="shrink-0 text-[13px] text-muted-foreground">{splashThemeName(splashTheme)}</span>
-            <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground/60" strokeWidth={2.2} />
-          </button>
-        </div>
         {splashThemeOpen && (
           <SplashThemeDialog
             current={splashTheme}
@@ -702,6 +708,11 @@ export function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
           />
         )}
         {splashPreview && <BootSplash forceTheme={splashPreview} />}
+
+        {/* 关于本机（第三十六轮：移到设置列表最下面——机主要求） */}
+        <div className="mx-4 mt-4 divide-y divide-black/[0.05] overflow-hidden rounded-[22px] bg-white/55 shadow-[0_8px_28px_rgba(17,24,39,0.06)] ring-1 ring-white/70 backdrop-blur-2xl dark:divide-white/[0.06] dark:bg-white/[0.06] dark:ring-white/[0.09]">
+          <MainRow icon={Info} tone={TONE_GRAY} label="关于本机" onClick={() => onOpen('about')} />
+        </div>
 
         <p className="py-6 text-center text-[12px] text-muted-foreground">
           iOS Web · 本地优先架构 · 数据仅存于你的浏览器
@@ -944,9 +955,10 @@ function BatteryModeDialog({
   );
 }
 
-/** 开屏动画主题中文名（入口行右侧 value 展示；第三十四轮：moon 重做为雨落成诗 + 新增 chat 对话） */
+/** 开屏动画主题中文名（入口行右侧 value 展示；第三十四轮：moon 重做为雨落成诗 + 新增 chat 对话；
+ *  第三十六轮：chat 星空化——名字同步改「星空对话」） */
 function splashThemeName(t: CoveSplashTheme): string {
-  return t === 'star' ? '星空月夜' : t === 'mist' ? '雾中远山' : t === 'moon' ? '雨落成诗' : '对话';
+  return t === 'star' ? '星空月夜' : t === 'mist' ? '雾中远山' : t === 'moon' ? '雨落成诗' : '星空对话';
 }
 
 /** 四主题微缩场景底（弹窗预览卡背景——CSS 渐变近似还原各主题第一眼观感） */
@@ -973,16 +985,16 @@ const SPLASH_THEME_PREVIEW: Record<
     desc: '雨丝 · 水珠 · 诗行',
   },
   chat: {
-    bg: 'linear-gradient(178deg, #FDFDFE 0%, #FAFAFC 60%, #F6F6F9 100%)',
-    fg: '#1C1C1E',
-    accent: '#1E1E24',
-    desc: '气泡 · 情话 · 已读',
+    bg: 'linear-gradient(172deg, #111319 0%, #1A1E2C 46%, #232840 78%, #161823 100%)',
+    fg: '#E9E9E4',
+    accent: 'rgba(255,255,255,0.14)',
+    desc: '星点 · 气泡 · 情话',
   },
 };
 
 /** 第三十四轮：开屏动画四选一弹窗（iOS 居中卡，与 App 图标弹窗同规格）：
  *  四张 76×76 微缩场景预览（CSS 渐变近似还原主题观感：星空=深底+月、
- *  远山=灰白+山影渐变、雨窗=蓝灰+水珠、对话=白底+气泡），点选【立马生效】——
+ *  远山=灰白+山影渐变、雨窗=蓝灰+水珠、星空对话=星空底+气泡），点选【立马生效】——
  *  选完即整屏播放一遍（BootSplash forceTheme 预览）+ localStorage 已同步写，
  *  下次冷启动 BootSplash 首帧即新主题；点背板/Esc/好 关闭。 */
 function SplashThemeDialog({
