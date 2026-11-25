@@ -1,6 +1,11 @@
 'use client';
 
 import { create } from 'zustand';
+import {
+  readSplashTheme,
+  writeSplashThemeSync,
+  type CoveSplashTheme,
+} from './splash-theme';
 import { startKeepAlive, stopKeepAlive } from './keepalive';
 import {
   DEFAULT_BUBBLE_STYLE,
@@ -400,12 +405,14 @@ export type GoodsImgStyle = 'cartoon' | 'sketch' | 'emoji';
  *  none=不显示百分比（只显示电池图标）。
  * 持久化 settings.batteryPercent；状态栏电量实时跟随 */
 export type BatteryPercentMode = 'outside' | 'inside' | 'none';
-
 /** App 图标（第三十一轮：App 改名 Cove，三选一图标）：
  *  '1'=纯白压印 cove / '2'=C 对话气泡 / '3'=星光气泡 cove
  *  持久化 settings.appIcon（开屏动画/设置预览即时跟随）+ 同步服务器 AppConfig（PWA manifest 动态图标） */
 export type AppIconId = '1' | '2' | '3';
 export const APP_ICON_IDS: AppIconId[] = ['1', '2', '3'];
+/** 开屏动画主题（第三十三轮三选一）：star=星空月夜（默认）/ mist=雾中远山 / moon=静月港湾；
+ *  定义在 ./splash-theme（BootSplash 与设置页共用），此处 re-export 供消费方从 store 统一引入 */
+export type { CoveSplashTheme } from './splash-theme';
 /** App 显示名（第三十一轮改名） */
 export const APP_DISPLAY_NAME = 'Cove';
 
@@ -468,6 +475,11 @@ interface SettingsState {
   appIcon: AppIconId;
   /** 切换 App 图标（即时持久化本地 + 异步同步服务器 manifest 图标） */
   setAppIcon: (id: AppIconId) => void;
+  /** 开屏动画主题三选一（第三十三轮）：star=星空月夜（默认）/ mist=霎中远山 /
+   *  moon=静月港湾；持久化 settings.splashTheme + localStorage（BootSplash 首帧同步读） */
+  splashTheme: CoveSplashTheme;
+  /** 切换开屏动画主题（即时持久化：localStorage 同步写（下会冷启动首帧即生效）+ IndexedDB） */
+  setSplashTheme: (t: CoveSplashTheme) => void;
   /** 后台保活开关（v80）：开启后切到后台/锁屏时尽量保持网页运行——Worker 心跳 +
    *  无声音频双通道防节流/防冻结，AI 主动消息与后台接力轮询不中断（代价是略更耗电） */
   bgKeepAlive: boolean;
@@ -599,6 +611,7 @@ export const useSettings = create<SettingsState>((set, get) => ({
   // 电量百分比默认图标外部（升级用户的现行样式不变）
   batteryPercent: 'outside',
   appIcon: '1',
+  splashTheme: 'star',
   bgKeepAlive: false,
   assistViewer: false,
   assistQuickOps: false,
@@ -614,7 +627,7 @@ export const useSettings = create<SettingsState>((set, get) => ({
   load: async () => {
     if (get().loaded) return;
     try {
-      const [themeRec, wallpaperRec, lockWallpaperRec, apiRec, presetsRec, apiFallbacksRec, visionRec, visionPresetsRec, lockRec, profileRec, iconsRec, ttsRec, sttRec, imgGenRec, imgGenPresetsRec, fontRec, fontScaleRec, fontWeightRec, statusBarRec, iconStyleRec, goodsImgStyleRec, themeResetRec, islandPersistentRec, assistViewerRec, assistQuickOpsRec, bubbleStyleRec, bubbleSchemesRec, liquidSkinRec, chatDecorRec, customCssRec, bgKeepAliveRec, batteryPercentRec, appIconRec] = await Promise.all([
+      const [themeRec, wallpaperRec, lockWallpaperRec, apiRec, presetsRec, apiFallbacksRec, visionRec, visionPresetsRec, lockRec, profileRec, iconsRec, ttsRec, sttRec, imgGenRec, imgGenPresetsRec, fontRec, fontScaleRec, fontWeightRec, statusBarRec, iconStyleRec, goodsImgStyleRec, themeResetRec, islandPersistentRec, assistViewerRec, assistQuickOpsRec, bubbleStyleRec, bubbleSchemesRec, liquidSkinRec, chatDecorRec, customCssRec, bgKeepAliveRec, batteryPercentRec, appIconRec, splashThemeRec] = await Promise.all([
         localDB.get('settings', 'theme'),
         localDB.get('settings', 'wallpaper'),
         localDB.get('settings', 'lockWallpaper'),
@@ -648,6 +661,7 @@ export const useSettings = create<SettingsState>((set, get) => ({
         localDB.get('settings', 'bgKeepAlive'),
         localDB.get('settings', 'batteryPercent'),
         localDB.get('settings', 'appIcon'),
+        localDB.get('settings', 'splashTheme'),
       ]);
 
       // 性能：八个含敏感 Key 的字段并行解密（secret-box 的 PBKDF2 密钥进程内缓存只派生一次）——
@@ -977,6 +991,12 @@ export const useSettings = create<SettingsState>((set, get) => ({
         // App 图标三选一：无记录/非法值 = '1'（纯白压印 cove）
         appIcon:
           appIconRec?.value === '2' || appIconRec?.value === '3' ? appIconRec.value : '1',
+        // 开屏动画主题（第三十三轮）：IndexedDB 无记录/非法值时再兜底读一次
+        // localStorage（同步）——冷启动 BootSplash 首帧就是它，设置页显示与之一致
+        splashTheme:
+          splashThemeRec?.value === 'mist' || splashThemeRec?.value === 'moon' || splashThemeRec?.value === 'star'
+            ? splashThemeRec.value
+            : readSplashTheme(),
         iconStyle,
         goodsImgStyle,
         // 聊天气泡装扮 + 收藏夹：无记录/脏数据回默认（normalize 内部校验 kind/color/结构）
@@ -1128,6 +1148,14 @@ export const useSettings = create<SettingsState>((set, get) => ({
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ icon: id }),
     }).catch(() => undefined);
+  },
+
+  setSplashTheme: (t) => {
+    if (t !== 'star' && t !== 'mist' && t !== 'moon') return;
+    set({ splashTheme: t });
+    // localStorage 同步写：下次冷启动 BootSplash 首帧（useLayoutEffect）即读到新主题
+    writeSplashThemeSync(t);
+    void localDB.put('settings', { key: 'splashTheme', value: t });
   },
 
   setIslandPersistent: (v) => {

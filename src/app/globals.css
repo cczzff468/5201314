@@ -1864,3 +1864,47 @@ html[data-app-native] * {
   0%   { opacity: 1; transform: scale(1); }
   100% { opacity: 0; transform: scale(1.045); }
 }
+
+/* ============ 第三十三轮：开屏动画三主题（星空月夜/雾中远山/静月港湾）============
+ * 机主反馈「灰白雾面渐变底变成星空月球什么的，做三个可以选」：
+ * 共用骨架（rise 上浮/ENTER 呼吸 pulse/底部微光 sweep/退场 exit/雾团 mist-a/b）不变，
+ * 三套主题各自的场景动效：星空=星点闪烁+流星+月晕呼吸；远山=三层山影极慢横漂；
+ * 港湾=月倒影光柱横纹微闪。 */
+@keyframes cove3-twinkle {
+  0%, 100% { opacity: 0.18; }
+  50%      { opacity: 0.92; }
+}
+@keyframes cove3-shoot {
+  0%   { transform: translate3d(0, 0, 0) rotate(-32deg); opacity: 0; }
+  12%  { opacity: 0.9; }
+  46%  { transform: translate3d(240px, 150px, 0) rotate(-32deg); opacity: 0; }
+  100% { transform: translate3d(240px, 150px, 0) rotate(-32deg); opacity: 0; }
+}
+@keyframes cove3-moon-glow {
+  0%, 100% { filter: drop-shadow(0 0 10px rgba(233,233,228,0.28)); opacity: 0.94; }
+  50%      { filter: drop-shadow(0 0 22px rgba(233,233,228,0.5)); opacity: 1; }
+}
+@keyframes cove3-float {
+  0%, 100% { transform: translateY(0); }
+  50%      { transform: translateY(-7px); }
+}
+@keyframes cove3-mtn-a {
+  0%, 100% { transform: translateX(-2.5%); }
+  50%      { transform: translateX(2.5%); }
+}
+@keyframes cove3-mtn-b {
+  0%, 100% { transform: translateX(3%); }
+  50%      { transform: translateX(-3%); }
+}
+@keyframes cove3-mtn-c {
+  0%, 100% { transform: translateX(-1.6%); }
+  50%      { transform: translateX(1.6%); }
+}
+@keyframes cove3-shimmer {
+  0%, 100% { opacity: 0.32; transform: scaleX(1); }
+  50%      { opacity: 0.85; transform: scaleX(1.12); }
+}
+@keyframes cove3-wave {
+  0%, 100% { transform: translateX(0); }
+  50%      { transform: translateX(-14px); }
+}

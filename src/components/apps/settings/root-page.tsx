@@ -39,6 +39,7 @@ import {
   Wifi,
   Wrench,
   ShieldCheck,
+  Sparkles,
 } from 'lucide-react';
 
 import { useUI } from '@/lib/ios/store';
@@ -50,6 +51,7 @@ import {
   useSettings,
   type BatteryPercentMode,
   type ThemeMode,
+  type CoveSplashTheme,
 } from '@/lib/ios/store';
 
 // v2.4.10 电量百分比预览：状态栏同款电池组件（三种显示方式实时小预览）
@@ -130,6 +132,9 @@ export function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
   const [batteryModeOpen, setBatteryModeOpen] = useState(false);
   // 第三十一轮：App 图标三选一（App 改名 Cove；开屏/设置预览即时跟随 + 同步服务器 manifest）
   const appIcon = useSettings((s) => s.appIcon);
+  const splashTheme = useSettings((s) => s.splashTheme);
+  const setSplashTheme = useSettings((s) => s.setSplashTheme);
+  const [splashThemeOpen, setSplashThemeOpen] = useState(false);
   const setAppIcon = useSettings((s) => s.setAppIcon);
   const [appIconOpen, setAppIconOpen] = useState(false);
   // 灵动岛常驻开关（用户需求）：关闭后隐藏顶部黑色胶囊基础灵动岛，只显示 APP 灵动岛
@@ -659,6 +664,37 @@ export function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
           />
         )}
 
+        {/* 第三十三轮：开屏动画三主题（机主要求「灰白雾底变成星空月球什么的，做三个可以选」）——
+            行入口预览当前主题微缩场景 + 名称，点开三选一弹窗（星空月夜/雾中远山/静月港湾），
+            点选即时生效：本会话下次冷启动/下次打开即播放所选主题 */}
+        <div className="mx-4 mt-4 overflow-hidden rounded-[22px] bg-white/55 shadow-[0_8px_28px_rgba(17,24,39,0.06)] ring-1 ring-white/70 backdrop-blur-2xl dark:bg-white/[0.06] dark:ring-white/[0.09]">
+          <button
+            type="button"
+            aria-haspopup="dialog"
+            aria-expanded={splashThemeOpen}
+            data-testid="settings-splash-theme-row"
+            onClick={() => setSplashThemeOpen(true)}
+            className="flex min-h-[52px] w-full items-center gap-3 px-4 text-left transition-colors active:bg-muted/50"
+          >
+            <RowIcon icon={Sparkles} tone={TONE_PURPLE} />
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-[16px]">开屏动画</span>
+              <span className="mt-0.5 block truncate text-[11.5px] text-muted-foreground">
+                三款主题 · 下次打开 Cove 时播放
+              </span>
+            </span>
+            <span className="shrink-0 text-[13px] text-muted-foreground">{splashThemeName(splashTheme)}</span>
+            <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground/60" strokeWidth={2.2} />
+          </button>
+        </div>
+        {splashThemeOpen && (
+          <SplashThemeDialog
+            current={splashTheme}
+            onPick={setSplashTheme}
+            onClose={() => setSplashThemeOpen(false)}
+          />
+        )}
+
         <p className="py-6 text-center text-[12px] text-muted-foreground">
           iOS Web · 本地优先架构 · 数据仅存于你的浏览器
         </p>
@@ -900,4 +936,185 @@ function BatteryModeDialog({
   );
 }
 
+/** 开屏动画主题中文名（入口行右侧 value 展示） */
+function splashThemeName(t: CoveSplashTheme): string {
+  return t === 'star' ? '星空月夜' : t === 'mist' ? '雾中远山' : '静月港湾';
+}
 
+/** 三主题微缩场景底（弹窗预览卡背景——CSS 渐变近似还原各主题第一眼观感） */
+const SPLASH_THEME_PREVIEW: Record<
+  CoveSplashTheme,
+  { bg: string; fg: string; accent: string; desc: string }
+> = {
+  star: {
+    bg: 'linear-gradient(176deg, #15161B 0%, #1C1E26 46%, #23252F 78%, #1A1B22 100%)',
+    fg: '#E9E9E4',
+    accent: 'radial-gradient(circle at 30% 28%, #F4F4EF 0%, #E4E4DE 62%, #D4D4CE 100%)',
+    desc: '星点 · 新月 · 深夜',
+  },
+  mist: {
+    bg: 'linear-gradient(168deg, #F6F6F4 0%, #EDEDEB 52%, #E7E7E4 100%)',
+    fg: '#3A3A38',
+    accent: 'linear-gradient(180deg, #D8D8D3 0%, #AFAFAA 60%, #8A8A86 100%)',
+    desc: '雾面 · 山影 · 灰白',
+  },
+  moon: {
+    bg: 'linear-gradient(178deg, #191A20 0%, #20222B 62%, #131419 100%)',
+    fg: '#EDEDE8',
+    accent: 'radial-gradient(circle at 30% 30%, #F2F2ED 0%, #E2E2DC 60%, #D0D0CA 100%)',
+    desc: '静水 · 月影 · 夜航',
+  },
+};
+
+/** 第三十三轮：开屏动画三选一弹窗（iOS 居中卡，与 App 图标弹窗同规格）：
+ *  三张 76×76 微缩场景预览（CSS 渐变近似还原主题观感：星空=深底+月、
+ *  远山=灰白+山影渐变、港湾=夜水+月），点选即时生效（本会话 localStorage 已同步写，
+ *  下次冷启动 BootSplash 首帧即新主题）；点背板/Esc/好 关闭。 */
+function SplashThemeDialog({
+  current,
+  onPick,
+  onClose,
+}: {
+  current: CoveSplashTheme;
+  onPick: (t: CoveSplashTheme) => void;
+  onClose: () => void;
+}) {
+  const [entered, setEntered] = useState(false);
+  useEffect(() => {
+    const raf = requestAnimationFrame(() => setEntered(true));
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    document.addEventListener('keydown', onKey);
+    return () => {
+      cancelAnimationFrame(raf);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [onClose]);
+
+  const options: CoveSplashTheme[] = ['star', 'mist', 'moon'];
+
+  return createPortal(
+    <>
+      <button
+        type="button"
+        aria-label="关闭开屏动画弹窗"
+        data-testid="splash-theme-backdrop"
+        className="fixed inset-0 z-[300] cursor-default bg-black/35 backdrop-blur-[2px]"
+        onClick={onClose}
+      />
+      <div
+        role="dialog"
+        aria-label="开屏动画"
+        data-testid="splash-theme-dialog"
+        className="pointer-events-none fixed inset-0 z-[310] flex items-center justify-center p-8"
+      >
+        <div
+          className={`pointer-events-auto w-full max-w-[320px] overflow-hidden rounded-[24px] bg-white/90 shadow-[0_18px_48px_rgba(0,0,0,0.28)] ring-1 ring-black/[0.06] backdrop-blur-2xl transition-[opacity,transform] duration-[280ms] ease-[cubic-bezier(0.32,0.72,0,1.2)] dark:bg-zinc-900/[0.92] dark:ring-white/[0.09] ${
+            entered ? 'translate-y-0 scale-100 opacity-100' : 'translate-y-3 scale-[0.92] opacity-0'
+          }`}
+        >
+          <div className="border-b border-black/[0.06] px-5 pb-3 pt-4 text-center dark:border-white/[0.08]">
+            <p className="text-[16px] font-semibold text-black dark:text-white">开屏动画</p>
+            <p className="mt-0.5 text-[11.5px] text-muted-foreground">Cove · 三款主题任选</p>
+          </div>
+          <div className="grid grid-cols-3 gap-2 px-4 py-4">
+            {options.map((t) => {
+              const sel = current === t;
+              const pv = SPLASH_THEME_PREVIEW[t];
+              return (
+                <button
+                  key={t}
+                  type="button"
+                  role="menuitemradio"
+                  aria-checked={sel}
+                  aria-label={`${splashThemeName(t)}（${pv.desc}）`}
+                  data-testid={`splash-theme-option-${t}`}
+                  onClick={() => {
+                    onPick(t);
+                    onClose();
+                  }}
+                  className={`flex flex-col items-center gap-2 rounded-[16px] px-1 py-3 transition-all active:scale-[0.97] ${
+                    sel ? 'bg-[#007AFF]/[0.08] ring-[1.5px] ring-[#007AFF]/60' : 'ring-[1.5px] ring-transparent'
+                  }`}
+                >
+                  <span className="relative">
+                    {/* 微缩场景卡：CSS 渐变近似各主题 */}
+                    <span
+                      className={`flex h-[76px] w-[76px] items-center justify-center overflow-hidden rounded-[15px] shadow-[0_6px_16px_rgba(0,0,0,0.14)] ${sel ? '' : 'opacity-95'}`}
+                      style={{ background: pv.bg }}
+                      aria-hidden="true"
+                    >
+                      {t === 'mist' ? (
+                        // 远山：山形渐变块
+                        <span
+                          className="absolute inset-x-[10%] bottom-0 block h-[38%]"
+                          style={{ background: pv.accent, clipPath: 'polygon(0% 100%, 12% 42%, 30% 68%, 48% 22%, 66% 62%, 84% 34%, 100% 78%, 100% 100%)' }}
+                        />
+                      ) : (
+                        // 星空/港湾：新月（渐变圆 + 缺口圆）
+                        <>
+                          <span
+                            className="absolute left-[22%] top-[20%] block h-[20px] w-[20px] rounded-full"
+                            style={{ background: pv.accent }}
+                          />
+                          <span
+                            className="absolute left-[27%] top-[16%] block h-[19px] w-[19px] rounded-full"
+                            style={{ background: t === 'star' ? '#1C1E26' : '#20222B' }}
+                          />
+                          {t === 'star' &&
+                            Array.from({ length: 5 }).map((_, i) => (
+                              <span
+                                key={i}
+                                className="absolute rounded-full"
+                                style={{
+                                  left: `${58 + (i % 3) * 12}%`,
+                                  top: `${18 + i * 15}%`,
+                                  width: 2,
+                                  height: 2,
+                                  background: '#E9E9E4',
+                                  opacity: 0.8,
+                                }}
+                              />
+                            ))}
+                          {t === 'moon' && (
+                            <span
+                              className="absolute left-1/2 top-[64%] block h-[2px] w-[34px] -translate-x-1/2 rounded-full"
+                              style={{ background: '#E6E6E0', opacity: 0.5 }}
+                            />
+                          )}
+                        </>
+                      )}
+                    </span>
+                    {sel && (
+                      <span className="absolute -right-[6px] -top-[6px] grid h-[18px] w-[18px] place-items-center rounded-full bg-[#007AFF] shadow-[0_2px_6px_rgba(0,122,255,0.5)] ring-2 ring-white">
+                        <Check className="h-[12px] w-[12px] text-white" strokeWidth={3.2} />
+                      </span>
+                    )}
+                  </span>
+                  <span className="text-center leading-tight">
+                    <span className={`block text-[12.5px] ${sel ? 'font-semibold text-[#007AFF]' : 'text-black/85 dark:text-white/85'}`}>
+                      {splashThemeName(t)}
+                    </span>
+                    <span className="mt-0.5 block text-[9.5px] text-muted-foreground">{pv.desc}</span>
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+          <p className="px-6 pb-2 text-center text-[10.5px] leading-relaxed text-muted-foreground">
+            点选即时生效 · 下次打开 Cove 时播放所选主题
+          </p>
+          <button
+            type="button"
+            onClick={onClose}
+            className="w-full border-t border-black/[0.06] py-3 text-[16px] font-medium text-[#007AFF] transition-colors active:bg-black/[0.04] dark:border-white/[0.08] dark:active:bg-white/[0.06]"
+          >
+            好
+          </button>
+        </div>
+      </div>
+    </>,
+    document.body,
+  );
+}
