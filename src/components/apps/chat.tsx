@@ -133,6 +133,11 @@ import { useEnterSend, setEnterSend, guardEnterToSend } from '@/lib/enter-send';
 // （AI 回合把卡片序列化成「帖子正文＋热门评论」上下文）+ 异步写记忆；点卡深链回论坛
 import { forumShareHistoryLine, noteForumLinkSharedToChat, resolveForumLinkPost } from '@/lib/ios/forum-share';
 import { ForumShareBubble } from './forum/share-card';
+// 第二十九轮「AI 系统感知工具包 + AI 专属分屏浏览器」：感知注入 + 用户发链接预读 + 网页分享卡气泡
+import { buildSystemPerceptionBlock, prewarmSystemPerception } from '@/lib/ios/system-perception';
+import { readUserSentLink } from '@/lib/ios/web-tools';
+import { extractFirstUrl } from '@/lib/ios/web-link-msg';
+import { WebLinkBubble } from './web-link-bubble';
 import { ToolStatusBubble } from './tool-status-bubble';
 import { kvDel, kvGet, kvSet, kvSetDebounced } from '@/lib/ios/idb-kv';
 import { getMemSettings, memAfterAiTurn, memChatRecallBlock, memConvoFromRaw, memPurgeMessageSources, memRecallBlock, memSummarizeCallNow, profileRecallBlock, setMemScopeForApp } from '@/lib/memory';
@@ -202,8 +207,9 @@ interface ChatMsg {
   /** 消息类型（缺省 = text；旧数据无此字段天然兼容；textcard = 文字图片卡片；
    *  forumshare = X 论坛帖子分享卡——粘贴帖子链接发送时自动跟在链接文字后；
    *  sticker = 表情包消息（AI 直接输出 [表情包:ID] 标记发真表情，stk 携带图片与意思）；
-   *  tool_status = 工具调用状态气泡（毛玻璃椭圆胶囊，居中显示，不进 AI 上下文/记忆/转发）） */
-  kind?: 'text' | 'voice' | 'image' | 'textcard' | 'forumshare' | 'tool_status' | 'sticker';
+   *  tool_status = 工具调用状态气泡（毛玻璃椭圆胶囊，居中显示，不进 AI 上下文/记忆/转发）；
+   *  weblink = 网页分享卡片（第二十九轮：AI 的 sendWebLink 工具发出，点卡片在 AI 分屏浏览器打开）） */
+  kind?: 'text' | 'voice' | 'image' | 'textcard' | 'forumshare' | 'tool_status' | 'sticker' | 'weblink';
   /** 表情包消息数据（kind==='sticker' 时有效；stk.url 图片地址、stk.meaning 意思、
    *  stk.sid 表情包唯一 ID——AI 上下文回写 [表情包:ID] 示范格式，与微信/QQ 同口径） */
   stk?: { url: string; meaning: string; sid: string };
@@ -214,6 +220,10 @@ interface ChatMsg {
   /** X 论坛帖子分享卡数据（kind==='forumshare' 时有效；渲染时实时读论坛 store，
    *  点卡片深链跳论坛打开帖子，删帖自动失效；AI 历史读 forumShareHistoryLine 序列化） */
   forumshare?: { pid: string };
+  /** 网页分享卡片数据（kind==='weblink' 时有效，第二十九轮）：AI 的 sendWebLink 工具
+   *  发出（tool-executor 经 pushWebLinkBubble 落库）；点卡片唤起 AI 分屏浏览器打开网页；
+   *  AI 历史/记忆读「[网页] 标题+链接+摘要」序列化 */
+  weblink?: { url: string; title: string; desc?: string; favicon?: string };
   /** 语音消息数据（kind==='voice' 时有效；音频 dataURL 持久化在聊天记录里） */
   voice?: VoiceMsgData;
   /** 图片消息数据（kind==='image' 时有效；自动生图投递，src 为压缩 dataURL；
@@ -2024,7 +2034,7 @@ function ChatView({
           m.kind !== 'tool_status' &&
           // v1.3 Shizuku：手机操作结果行（sys.op）进历史——AI 必须看到自己上一轮动手的结果
           //（成功才说成功、失败如实报；否则会以为没动手而重复操作）
-          (m.content || m.sys?.op || m.kind === 'voice' || (m.kind === 'image' && m.img) || (m.kind === 'textcard' && m.card) || (m.kind === 'forumshare' && m.forumshare) || (m.kind === 'sticker' && m.stk))
+          (m.content || m.sys?.op || m.kind === 'voice' || (m.kind === 'image' && m.img) || (m.kind === 'textcard' && m.card) || (m.kind === 'forumshare' && m.forumshare) || (m.kind === 'sticker' && m.stk) || (m.kind === 'weblink' && m.weblink))
       )
       .sort((a, b) => a.time - b.time)
       .slice(-historyLimitFor(ctxMode))
@@ -2055,6 +2065,9 @@ function ChatView({
                   : m.kind === 'forumshare' && m.forumshare
                   ? // v39：帖子分享卡序列化成「帖子正文＋热门评论」可读文本（AI 能看懂卡片内容）
                     forumShareHistoryLine(m.forumshare.pid, wbContactId ?? undefined)
+                  : m.kind === 'weblink' && m.weblink
+                  ? // 第二十九轮：网页分享卡序列化（AI 能看懂卡片内容并自然地聊）
+                    `[网页]（标题：${m.weblink.title}，链接：${m.weblink.url}${m.weblink.desc ? `，摘要：${m.weblink.desc.slice(0, 150)}` : ''}）`
                   : m.sys?.op
                     ? // v1.3 Shizuku：操作结果行回给 AI（下一轮它知道自己刚才干了什么、成没成）。
                       // 圆括号+显式“勿复述”指引：防 AI 把反馈原文抄给机主（曾出现复述「手机操作成功：已拉起…」）
@@ -2126,6 +2139,10 @@ function ChatView({
       lastMsgTime: msgs.length > 0 ? msgs[msgs.length - 1].time : null,
     });
     void prewarmPerception(sessionKey);
+    // 第二十九轮「AI 系统感知工具包」：网络/手电筒/剪贴板/分屏浏览器当前页 注入 system
+    //（预热剪贴板授权，下一轮就有数据；空数据零 token 自然省略）
+    const systemPerceptionBlock = buildSystemPerceptionBlock();
+    void prewarmSystemPerception();
     // 世界书：仅联系人会话参与（AI 助手会话无联系人角色）；命中触发词条目按插入位置注入
     //（每本书独立包裹成【世界设定开始】/【世界设定结束】块；有内容时 system 末尾附带使用规则）
     const wbBlocks = wbContactId
@@ -2178,6 +2195,8 @@ function ChatView({
       ...(wbContactId ? [promptRule('sms-voice-call', SMS_VOICE_CALL_RULE) ?? ''] : []),
       timeBlock,
       perceptionBlock,
+      // 第二十九轮：AI 系统感知（网络/手电筒/剪贴板/分屏浏览器当前页）——紧随既有感知块
+      systemPerceptionBlock,
       // v1.3 Shizuku 自主权：[手机操作:…] 教学规则按当前开关注入（总开关关/非手机APP环境 → 空，零 token）
       ...buildShizukuAutonomyRules(),
       // v54【引用存档前缀·禁止模仿】信息端 AI 无引用能力（无 [引用:M编号] 标记机制），
@@ -2891,7 +2910,19 @@ function ChatView({
         return;
       }
     }
-    startAiTurn(userMsg, undefined, undefined, linkCard ? [linkCard] : undefined);
+    // 第二十九轮【用户发链接→AI 自动读网页】：消息里带 http(s) 链接 → 后台预读网页正文
+    // （/api/web-tools/read，9s 超时不拖慢回复），摘要以 sysEvent 注入本轮上下文——
+    // AI 结合人设/记忆自然地聊网页内容；工具轮路径（toolRoundNeeded 命中链接必进）里
+    // 模型还会自己调 openWebBrowser 深入看。两条路径互补：流式路径靠这里，FC 路径靠工具。
+    const sentLink = text ? extractFirstUrl(text) : null;
+    const linkSummary =
+      sentLink && !linkPost // X论坛链接走 forumshare 卡片口径（正文+评论），不重复读网页
+        ? await Promise.race([
+            readUserSentLink(text).catch(() => ''),
+            new Promise<string>((r) => setTimeout(() => r(''), 9000)),
+          ])
+        : '';
+    startAiTurn(userMsg, linkSummary || undefined, undefined, linkCard ? [linkCard] : undefined);
   };
 
   /** 分句发送批次触发：把已发出的整批消息交给 AI 统一回复（输入框为空时点「发送」）；
@@ -4038,6 +4069,50 @@ function ChatView({
                   <div className={`flex max-w-[76%] flex-col ${mine ? 'items-end' : 'items-start'}`}>
                     <div {...bubblePress}>
                       <ForumShareBubble pid={m.forumshare.pid} side={mine ? 'right' : 'left'} />
+                    </div>
+                    {/* iMessage：已送达挂在最后一条己方消息下沿（与文本/语音/图片气泡同规则） */}
+                    {mine && i === lastUserIdx && (
+                      <p className="mt-1 self-stretch pl-1 text-left text-[11px] leading-none text-muted-foreground">已送达</p>
+                    )}
+                  </div>
+                  {!mine && blockedIconOf(m)}
+                  {selectMode && mine && (
+                    <span
+                      aria-hidden="true"
+                      data-testid={`sms-select-${m.id}`}
+                      className={`ml-2 grid h-[20px] w-[20px] shrink-0 self-center place-items-center rounded-full border ${
+                        selectedIds.includes(m.id) ? 'border-[#007AFF] bg-[#007AFF] text-white' : 'border-black/25 dark:border-white/35'
+                      }`}
+                    >
+                      {selectedIds.includes(m.id) && <CircleCheck className="h-[14px] w-[14px]" strokeWidth={2.2} />}
+                    </span>
+                  )}
+                </motion.div>
+              ) : m.kind === 'weblink' && m.weblink ? (
+                /* 第二十九轮 网页分享卡片（AI 的 sendWebLink 工具发出）：favicon+标题+摘要+域名
+                   精美卡片，点卡片唤起 AI 分屏浏览器（底部半屏）打开网页；AI 历史读
+                   [网页]（标题/链接/摘要）序列化；多选/拉黑图标与其它卡片消息一致 */
+                <motion.div
+                  initial={{ opacity: 0, y: 10, scale: 0.97 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  transition={{ type: 'spring', stiffness: 500, damping: 36 }}
+                  className={`flex ${mine ? 'justify-end' : 'justify-start'} ${grouped ? 'mt-[3px]' : 'mt-2.5'}`}
+                >
+                  {selectMode && !mine && (
+                    <span
+                      aria-hidden="true"
+                      data-testid={`sms-select-${m.id}`}
+                      className={`mr-2 grid h-[20px] w-[20px] shrink-0 self-center place-items-center rounded-full border ${
+                        selectedIds.includes(m.id) ? 'border-[#007AFF] bg-[#007AFF] text-white' : 'border-black/25 dark:border-white/35'
+                      }`}
+                    >
+                      {selectedIds.includes(m.id) && <CircleCheck className="h-[14px] w-[14px]" strokeWidth={2.2} />}
+                    </span>
+                  )}
+                  {mine && (m.replyFail ? failBadgeOf(m) : blockedIconOf(m))}
+                  <div className={`flex max-w-[76%] flex-col ${mine ? 'items-end' : 'items-start'}`}>
+                    <div {...bubblePress}>
+                      <WebLinkBubble data={m.weblink} side={mine ? 'right' : 'left'} />
                     </div>
                     {/* iMessage：已送达挂在最后一条己方消息下沿（与文本/语音/图片气泡同规则） */}
                     {mine && i === lastUserIdx && (

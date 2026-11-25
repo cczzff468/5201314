@@ -85,6 +85,8 @@ const AssistiveTools = dynamic(() => import('./AssistiveTools'), { ssr: false })
 /** v73 AI 聊天悬浮小窗：聊天页「小窗模式」开启后常驻悬浮（z-58，高于悬浮球/迷你播放器、
  *  低于多任务切换器）——切底部 App 不卸载，与全屏聊天实时互通；组件未开启时渲染 null 零开销 */
 const ChatFloatWindow = dynamic(() => import('./ChatFloatWindow'), { ssr: false });
+const AIBrowserSheet = dynamic(() => import('./AIBrowserSheet'), { ssr: false });
+const AIBrowserBall = dynamic(() => import('./AIBrowserBall'), { ssr: false });
 
 // 音乐灵动岛（第十六轮反馈）：音乐在播时占据灵动岛锚位的常驻音乐弹窗，所有界面都显示
 // （小弹窗常驻 / 大弹窗 5 秒 / 点小弹窗展开 / 点大弹窗跳听歌 / 点别处收回；消息通知展示期间隐身）
@@ -632,6 +634,13 @@ export default function PhoneShell() {
             消息与会话状态同全屏实时互通（会话消息共享源）。
             v78：解锁后空闲挂载——小窗仅在用户主动开启后才有内容，延迟挂载无感知 */}
         {layersReady && <ChatFloatWindow />}
+
+        {/* 第二十九轮「AI 专属分屏浏览器」：
+            · AIBrowserSheet（z-59）：底部半屏分屏面板（上半屏聊天保持可见可互动，下半屏内置
+              浏览器；AI 工具 openWebBrowser / 聊天网页分享卡片 / 悬浮球均可唤起）；
+            · AIBrowserBall（z-57）：屏幕右侧常驻浏览器悬浮球（点击随时唤起/收起，可拖动换位）。 */}
+        {layersReady && <AIBrowserSheet />}
+        {layersReady && !immersive && <AIBrowserBall />}
 
         {/* v1.5 Mobile Agent：运行进度条（含紧急停止，z-60）+ 敏感操作确认弹层（z-95，Agent 运行中全局可见） */}
         {layersReady && <AgentGlobalLayers />}

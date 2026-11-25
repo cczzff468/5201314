@@ -38,6 +38,9 @@ import { runWeatherReport } from './agent-weather';
 import { useUI } from './store';
 import type { NotifyApp } from './island-notify';
 import { pushToolStatusBubble } from './tool-status-bubble';
+import { readClipboard, readNetworkState, setFlashlight, cachedClipboard } from './system-perception';
+import { openAIBrowser, highlightAIBrowserText, aiBrowserSnapshot } from './ai-browser-store';
+import { pushWebLinkBubble, extractFirstUrl } from './web-link-msg';
 
 /** 当前工具调用的目标会话 sessionKey（由 phone-tools execWebTool 设置，
  *  web-tools 的 island() 读它决定气泡发到哪个会话；为空时退回灵动岛弹窗）。 */
@@ -1365,6 +1368,170 @@ export async function toolAddTodo(text: string): Promise<WebToolResult> {
 }
 
 // ============================================================
+// AI 系统感知 + 分屏浏览器联动（第二十九轮「AI 系统感知工具包 + AI 专属分屏浏览器」）
+// ============================================================
+
+/** getClipboard()：读取系统剪贴板文本（授权后可读；结果缓存供 system prompt 注入） */
+export async function toolGetClipboard(): Promise<WebToolResult> {
+  const snap = await readClipboard();
+  if (!snap.ok) {
+    return {
+      ok: false,
+      text: `【剪贴板读取失败】${snap.error || '当前环境不支持'}。建议引导机主直接把内容粘贴到聊天里发给你。`,
+    };
+  }
+  const text = snap.text.trim();
+  if (!text) {
+    return { ok: true, text: '【剪贴板为空】机主刚复制的内容是空的（或只有文件/图片，文本读不到）。' };
+  }
+  return {
+    ok: true,
+    text: `【剪贴板内容】（${new Date(snap.at).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })} 复制）\n${text.slice(0, 600)}`,
+  };
+}
+
+/** toggleFlashlight(on)：开关手电筒（真机 Torch API；网页环境如实报不可用） */
+export async function toolToggleFlashlight(on: boolean): Promise<WebToolResult> {
+  const snap = await setFlashlight(on);
+  if (!snap.available && on) {
+    return {
+      ok: false,
+      text: '【手电筒不可用】当前环境没有真机闪光灯（网页/桌面浏览器）。可以告诉机主：锁屏页左下角有手电筒按钮，或下拉控制中心开。',
+    };
+  }
+  return {
+    ok: true,
+    text: `【手电筒已${on ? '打开' : '关闭'}】${on ? '闪光灯亮着，记得不用时帮你关掉哦。' : '已经关掉了。'}`,
+  };
+}
+
+/** getNetworkState()：当前网络类型（WiFi/5G/4G）与信号强度 */
+export function toolGetNetworkState(): WebToolResult {
+  const net = readNetworkState();
+  if (!net.online) {
+    return { ok: true, text: '【网络状态】当前离线（无网络连接）。联网的事等恢复网络再说。' };
+  }
+  const extra: string[] = [];
+  if (net.raw.saveData) extra.push('省流量模式开启');
+  if (net.raw.downlink && net.raw.downlink > 0) extra.push(`估计带宽 ${net.raw.downlink} Mbps`);
+  return {
+    ok: true,
+    text: `【网络状态】${net.kind}，${net.strength}${extra.length ? `（${extra.join('，')}）` : ''}。`,
+  };
+}
+
+/** searchWeb(query) / webSearch(keyword)：真实网络搜索（服务端 /api/web-tools/search） */
+export async function toolSearchWeb(query: string): Promise<WebToolResult> {
+  const q = (query || '').trim();
+  if (!q) return { ok: false, text: '【搜索失败】搜索词是空的，请想好要搜什么再调用。' };
+  try {
+    const res = await fetch(`/api/web-tools/search?q=${encodeURIComponent(q)}&num=6`, { cache: 'no-store' });
+    const data = (await res.json()) as { ok: boolean; hits?: { title: string; url: string; snippet: string; siteName: string }[]; error?: string };
+    if (!data.ok || !data.hits || data.hits.length === 0) {
+      return { ok: false, text: `【搜索无结果】${data.error || `没有搜到「${q}」的相关内容`}。可以换个说法再搜，或直接告诉机主你知道的部分。` };
+    }
+    const lines = data.hits.map((h, i) => `${i + 1}. ${h.title}\n   ${h.url}\n   ${h.snippet.slice(0, 120)}`);
+    return {
+      ok: true,
+      text: `【搜索「${q}」的结果】共 ${data.hits.length} 条（可把有用的话总结给机主；想打开哪个网页就调 openWebBrowser）：\n${lines.join('\n')}`,
+    };
+  } catch (e) {
+    return { ok: false, text: `【搜索失败】${e instanceof Error ? e.message.slice(0, 100) : '网络异常'}。稍后可以再试一次。` };
+  }
+}
+
+/** 服务端读取网页正文（/api/web-tools/read；openWebBrowser / sendWebLink / 用户发链接共用） */
+export async function readWebPageText(url: string): Promise<{ ok: boolean; title: string; desc: string; favicon: string; text: string; error?: string }> {
+  try {
+    const res = await fetch(`/api/web-tools/read?url=${encodeURIComponent(url)}`, { cache: 'no-store' });
+    const data = (await res.json()) as {
+      ok: boolean;
+      error?: string;
+      page?: { title: string; desc: string; favicon: string; text: string; truncated: boolean };
+    };
+    if (!data.ok || !data.page) {
+      return { ok: false, title: '', desc: '', favicon: '', text: '', error: data.error || '网页读取失败' };
+    }
+    return { ok: true, title: data.page.title, desc: data.page.desc, favicon: data.page.favicon, text: data.page.text };
+  } catch (e) {
+    return { ok: false, title: '', desc: '', favicon: '', text: '', error: e instanceof Error ? e.message.slice(0, 100) : '网络异常' };
+  }
+}
+
+/** openWebBrowser(url, searchQuery)：唤起 AI 分屏浏览器（底部半屏面板，聊天上半屏保持可见） */
+export async function toolOpenWebBrowser(url?: string, searchQuery?: string): Promise<WebToolResult> {
+  const link = (url || '').trim() || extractFirstUrl(searchQuery || '');
+  if (!link && !searchQuery?.trim()) {
+    return { ok: false, text: '【打开浏览器失败】需要传 url（完整网址）或 searchQuery（搜索词）至少一个。' };
+  }
+  openAIBrowser(link ? { url: link, origin: 'ai' } : { query: searchQuery!.trim(), origin: 'ai' });
+  const target = link || searchQuery!.trim();
+  // 抽取正文给 AI「立刻能讨论页面内容」（加载是异步的，正文先读回来）
+  if (link) {
+    const page = await readWebPageText(link);
+    if (page.ok && page.text) {
+      return {
+        ok: true,
+        text: `【分屏浏览器已打开】「${page.title}」已在下半屏打开，机主上半屏还能继续和你聊天。\n页面正文（前 1500 字，结合它跟机主聊）：\n${page.text.slice(0, 1500)}`,
+      };
+    }
+    return {
+      ok: true,
+      text: `【分屏浏览器已打开】${link} 已在下半屏打开。正文抽取失败（${page.error}）——页面可能需要机主手动看，或换 openWebBrowser 用搜索词打开。`,
+    };
+  }
+  return {
+    ok: true,
+    text: `【分屏浏览器已打开】已用「${target}」在下半屏打开搜索结果页。可以接着调 searchWeb 工具拿到结构化结果自己先看。`,
+  };
+}
+
+/** sendWebLink(url, title)：往聊天里发一张「网页分享卡片」（点击即在分屏浏览器打开） */
+export async function toolSendWebLink(url: string, title?: string): Promise<WebToolResult> {
+  const link = (url || '').trim() || extractFirstUrl(title || '');
+  if (!link) {
+    return { ok: false, text: '【发链接失败】需要传 url 参数（完整 http(s) 网址）。' };
+  }
+  const page = await readWebPageText(link);
+  const cardTitle = (title || '').trim() || page.title || link;
+  pushWebLinkBubble(currentToolSessionKey, {
+    url: link,
+    title: cardTitle,
+    desc: page.ok ? page.desc || page.text.slice(0, 100) : '',
+    favicon: page.ok ? page.favicon : '',
+  });
+  const brief = page.ok && page.text ? `\n页面摘要（你已经在读这个网页了，可以自然地聊它）：${page.text.slice(0, 400)}` : '';
+  return {
+    ok: true,
+    text: `【网页卡片已发出】已在聊天里发出「${cardTitle}」的分享卡片（机主点卡片就能打开网页）。${brief}`,
+  };
+}
+
+/** highlightWebText(text)：在分屏浏览器里高亮一段文字（阅读模式点亮并滚动到位） */
+export function toolHighlightWebText(text: string): WebToolResult {
+  const t = (text || '').trim();
+  if (!t) return { ok: false, text: '【高亮失败】需要传 text 参数（要在网页里点亮的那段文字）。' };
+  const br = aiBrowserSnapshot();
+  if (!br?.open) {
+    return { ok: false, text: '【高亮失败】分屏浏览器当前没开着。先调 openWebBrowser 打开网页，再高亮。' };
+  }
+  highlightAIBrowserText(t);
+  return {
+    ok: true,
+    text: `【已高亮】已在分屏浏览器里把「${t.slice(0, 40)}」点亮（阅读模式下生效并自动滚动到位）。可以告诉机主：你看下半屏我给你标的地方。`,
+  };
+}
+
+/** 用户发链接时后台预读（chat.tsx send 流程调用）：返回注入 AI 上下文的摘要行（失败静默空串） */
+export async function readUserSentLink(text: string): Promise<string> {
+  const link = extractFirstUrl(text);
+  if (!link) return '';
+  const page = await readWebPageText(link);
+  if (!page.ok || !page.text) return '';
+  return `（系统感知：机主刚发了一个链接 ${link}，网页内容是——标题「${page.title}」，正文节选：${page.text.slice(0, 600)}。这是只给你看的背景资料，结合人设自然地聊，严禁复述本行格式）`;
+}
+
+// ============================================================
 // 调试口（E2E / console 验证用）
 // ============================================================
 
@@ -1395,5 +1562,13 @@ if (typeof window !== 'undefined') {
     toolGetTodoList,
     toolAddTodo,
     parseAlarmTime,
+    toolGetClipboard,
+    toolToggleFlashlight,
+    toolGetNetworkState,
+    toolSearchWeb,
+    toolOpenWebBrowser,
+    toolSendWebLink,
+    toolHighlightWebText,
+    readUserSentLink,
   };
 }

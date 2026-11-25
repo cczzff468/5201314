@@ -395,7 +395,7 @@ export function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
           </div>
         </div>
 
-        {/* v2.4.10 电量百分比显示方式（机主需求：设置里三选一；v2.4.12 inside 按机主 HTML/CSS
+        {/* v2.4.10 电量百分比显示方式（机主需求：设置里三选一；inside 为第二十九轮真实 iOS 16.1+ 同款（细描边透明轨道+居中数字反色），弃机主 HTML/CSS
             规格重写）：不显示（只有电池图标）/ 电池图标外部（原样式，默认）/ 电池图标内部
             （2px 描边电池+黑填充+浅灰电量槽，数字嵌电池内靠左 3px 黑白反色）。每行左侧是
             状态栏同款组件的实时小预览（固定 67% 电量示例），选中即全局状态栏电量实时切换、立即持久化。 */}
@@ -415,7 +415,7 @@ export function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
               onClick={() => setBatteryPercent(o.value)}
               className="flex min-h-[52px] w-full items-center gap-3 px-4 text-left transition-colors active:bg-muted/50"
             >
-              {/* 实时小预览：状态栏同款电池（固定 67% 示例，v2.4.12 规格版：黑描边黑填充灰槽） */}
+              {/* 实时小预览：状态栏同款电池（固定 67% 示例，真实 iOS 版：细描边+透明轨道+居中双色数字） */}
               <span className="flex h-[20px] w-[76px] shrink-0 items-center justify-center text-foreground">
                 <BatteryIcon level={67} charging={false} low={false} mode={o.value} light={false} />
               </span>

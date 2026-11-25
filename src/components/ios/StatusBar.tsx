@@ -24,98 +24,102 @@ function SignalBars() {
   );
 }
 
-/* ============ v2.4.12 inside 模式电池（机主 HTML+CSS 规格原文 100% 还原）============
- * 一、结构：
- *   battery-container（相对定位）
- *   ├ battery-body：34×16 圆角矩形（border 2px 实线、border-radius 4px）
- *   │   ├ battery-fill：绝对定位高度铺满、宽随电量%（黑色圆角矩形，低电红）
- *   │   └ battery-text：绝对定位在电池主体内部、靠左对齐距左边 3px、11px 粗体
- *   └ battery-cap：2×6 正极凸点（右侧、垂直居中、顶部/底部微圆角）
- * 二、颜色：填充纯黑 #000000（充电绿/低电红）；<100% 时右侧灰槽背景衬托；
- *   数字反色——落在黑填充上=白字、落在灰槽上=黑字（规格 mix-blend-mode: difference 的
- *   分层渲染等价实现：双层同文 clip 叠印，彩色填充态下颜色依然可控、不发脏色）。 */
-const BAT_H = 16; // battery-body 高（规格：约 16px）
-const BAT_BODY_W = 34; // battery-body 宽（规格：约 34px）
-const BAT_BORDER = 2; // 描边（规格：2px 实线黑色）
-const BAT_INNER_W = BAT_BODY_W - BAT_BORDER * 2; // 内腔宽 30（fill / 文字层坐标系）
-const BAT_CAP_W = 2; // battery-cap 宽（规格：2px）
-const BAT_CAP_H = 6; // battery-cap 高（规格：6px）
-const BAT_CAP_GAP = 1.5; // 本体↔凸点缝
-const BAT_TOTAL_W = BAT_BODY_W + BAT_CAP_GAP + BAT_CAP_W; // 总宽 37.5（常宽，电量增减只挪填充边界）
+/* ============ inside 模式电池（第二十九轮：真实 iOS 16.1+ 同款，弃机主 HTML 规格）============
+ * 依据真实 iOS 截图 VLM 像素级分析（iPhone 状态栏带内部百分比的电池）：
+ *  - 细描边圆角胶囊（无粗边框、无灰色槽背景）：未充电段是【透明轨道】——由描边勾勒轮廓，
+ *    背景直接透出（VLM 实测："未填充段：白色/透明即背景色，由黑色描边包围形成空轨道"）；
+ *  - 电量填充段按百分比宽实心填充，内缩在描边内（iOS 16.1 起随电量动态伸缩）；
+ *  - 描边/填充/正极凸点三色一体（跟随同一个强调色：常态=前景色、充电=#30D158 绿、低电=#FF453A 红）；
+ *  - 百分比数字【几何居中】在电池本体内（VLM 实测："大致横向居中于电池内部"），字号≈内腔高的 65%
+ *    （9px semibold），双层叠印反色——落在填充上=填充反色字（黑填充→白字/绿红填充→白字），
+ *    落在透明轨道上=前景色字（继承状态栏文字色，黑底白字/白底黑字自动适配）；
+ *  - 无充电闪电（真机带内部百分比时充电只变绿不画闪电）、无 % 号。 */
+const IOS_BAT_H = 13.5; // 本体高（真实 iOS ≈ 13pt）
+const IOS_BAT_BODY_W = 36; // 本体宽（带内部百分比版比纯图标宽，容纳 3 位数）
+const IOS_BAT_BORDER = 1.5; // 细描边（真实 iOS ≈ 1pt@3x，非机主规格的 2px 粗边）
+const IOS_BAT_INNER_W = IOS_BAT_BODY_W - IOS_BAT_BORDER * 2; // 内腔宽 33
+const IOS_BAT_CAP_W = 2; // 正极凸点宽
+const IOS_BAT_CAP_H = 5.5; // 正极凸点高（≈本体高 40%）
+const IOS_BAT_CAP_GAP = 1.5; // 本体↔凸点缝
+const IOS_BAT_TOTAL_W = IOS_BAT_BODY_W + IOS_BAT_CAP_GAP + IOS_BAT_CAP_W; // 总宽 39.5
 
 interface BatteryIconProps {
   level: number;
   charging: boolean;
   low: boolean;
   /** 电量百分比显示方式（v2.4.10）：outside=图标外部数字+% / inside=图标内部数字
-   *  （v2.4.12 机主规格版：2px 描边电池+黑填充+灰槽，数字靠左 3px 双色反染）/ none=不显示 */
+   *  （第二十九轮：真实 iOS 16.1+ 同款——细描边透明轨道+居中数字反色）/ none=不显示 */
   mode: BatteryPercentMode;
-  /** 状态栏前景是否浅色（白字）：inside 模式整套反色（白描边白填充、深灰槽）；
- *  外部/描边样式不受影响（跟随 currentColor） */
+  /** 状态栏前景是否浅色（白字）：inside 模式下决定填充反色字取色（白填充→黑字）；
+ *  其余颜色一律走 currentColor 自动适配 */
   light?: boolean;
 }
 
 /** 状态栏电池图标（v2.4.10 三模式，设置›电量百分比实时切换）：
  *  - outside：数字+% 在电池左侧（默认/现行样式，描边电池）
  *  - none：只有描边电池图标，无百分比
- *  - inside：机主 HTML+CSS 规格版（v2.4.12 重写）——34×16 描边电池（2px 实线描边、
- *    4px 圆角、右侧 2×6 正极凸点）+ 黑填充（充电绿/低电红）+ 浅灰电量槽，数字 11px
- *    粗体嵌电池内靠左 3px、按填充边界黑白自动反色。
+ *  - inside：真实 iOS 16.1+ 同款（第二十九轮重写，弃机主 HTML 规格）——细描边（1.5px）
+ *    圆角胶囊+透明轨道（背景透出，无灰槽）+ 按电量比例的实心填充，描边/填充/凸点三色一体
+ *    （常态前景色/充电绿/低电红），百分比数字 9px semibold 几何居中嵌电池内、按填充边界
+ *    双层叠印反色（填充上=反色字/轨道上=前景色字），无充电闪电无 % 号。
  *  也导出给设置页做实时预览（预览传固定 level + light=false） */
 export function BatteryIcon({ level, charging, low, mode, light = false }: BatteryIconProps) {
   const fill = Math.min(100, Math.max(0, level));
 
   if (mode === 'inside') {
-    /* v2.4.12 机主规格版（结构/尺寸/圆角/对齐全部按规格原文死磕）：
-     * - battery-fill 宽 = 电量% × 内腔宽（30px），铺满内腔高，圆角 2px 圆角矩形；
-     * - battery-text 双层叠印：第一层=填充上反色字（黑填充→白字）clip 到填充右边界，
-     *   第二层=灰槽上黑字 clip 到边界以右——数字跨过填充边界时黑白自动分色；
-     * - 光学垂直居中 +0.5px（数字无降部，em 盒居中后重心偏上 ~0.55px 的修正）。 */
-    const fillPx = (BAT_INNER_W * fill) / 100;
-    const fillBg = charging ? '#30D158' : low ? '#FF453A' : light ? '#FFFFFF' : '#000000';
-    const trackBg = light ? 'rgba(255,255,255,0.25)' : '#E9E9EB';
-    const onFillColor = light && !charging && !low ? '#000000' : '#FFFFFF'; // 填充上的数字（与填充反色；彩色填充一律白字）
-    const onTrackColor = light ? '#FFFFFF' : '#000000'; // 灰槽上的数字
+    /* 真实 iOS 16.1+ 版：
+     * - 强调色（描边+填充+凸点同色）：充电绿/低电红/常态跟随前景色（currentColor）；
+     * - 填充宽 = 电量% × 内腔宽（33px），absolute 内缩在描边内、圆角胶囊；
+     * - 数字双层叠印：第一层=填充上反色字（黑/白按 light 定、彩色填充一律白）clip 到填充右边界，
+     *   第二层=透明轨道上前景色字（不设 color 继承 currentColor）clip 到边界以右；
+     * - 数字几何居中在本体（非填充段），宽度=本体宽，9px semibold tabular-nums。 */
+    const fillPx = (IOS_BAT_INNER_W * fill) / 100;
+    const accent = charging ? '#30D158' : low ? '#FF453A' : undefined; // undefined = currentColor
+    const onFillColor = charging || low ? '#FFFFFF' : light ? '#000000' : '#FFFFFF'; // 填充上的反色字
     const digits = String(Math.round(level));
     return (
       <span
         role="img"
         aria-label={`电量${Math.round(level)}%${charging ? '，充电中' : ''}`}
         className="battery-container relative inline-block shrink-0"
-        style={{ width: BAT_TOTAL_W, height: BAT_H }}
+        style={{ width: IOS_BAT_TOTAL_W, height: IOS_BAT_H }}
       >
-        {/* battery-body：2px 实线描边圆角矩形；灰槽即本体背景（<100% 时右侧衬托填充） */}
+        {/* battery-body：细描边圆角胶囊；轨道透明（背景透出，无灰槽） */}
         <span
-          className="battery-body relative block overflow-hidden rounded-[4px] border-2 border-current"
-          style={{ width: BAT_BODY_W, height: BAT_H, background: trackBg }}
+          className="battery-body relative block overflow-hidden rounded-[4.5px] border-[1.5px]"
+          style={{ width: IOS_BAT_BODY_W, height: IOS_BAT_H, borderColor: accent ?? 'currentColor' }}
         >
-          {/* battery-fill：absolute 铺满内腔高、宽随电量、圆角矩形 */}
+          {/* battery-fill：absolute 内缩描边内、宽随电量、圆角胶囊（iOS 16.1 起随电量动态伸缩） */}
           <span
-            className="battery-fill absolute bottom-0 left-0 top-0 transition-all duration-300"
-            style={{ width: fillPx, background: fillBg, borderRadius: 2 }}
+            className="battery-fill absolute bottom-[1.5px] left-[1.5px] top-[1.5px] transition-all duration-300"
+            style={{
+              width: fillPx,
+              borderRadius: 3,
+              background: accent ?? 'currentColor',
+            }}
           />
           {/* battery-text 第一层：填充上反色字（clip 到填充右边界） */}
           <span
             aria-hidden="true"
-            className="battery-text absolute inset-y-0 left-0 flex translate-y-[0.5px] items-center pl-[3px] text-[11px] font-bold leading-none tabular-nums"
-            style={{ width: BAT_INNER_W, color: onFillColor, clipPath: `inset(0px ${BAT_INNER_W - fillPx}px 0px 0px)` }}
+            className="battery-text absolute inset-y-0 left-0 flex items-center justify-center text-[9px] font-semibold leading-none tabular-nums"
+            style={{ width: IOS_BAT_BODY_W, color: onFillColor, clipPath: `inset(0px ${IOS_BAT_BORDER + IOS_BAT_INNER_W - fillPx}px 0px 0px)` }}
           >
             {digits}
           </span>
-          {/* battery-text 第二层：灰槽上黑字（clip 到填充右边界以右） */}
+          {/* battery-text 第二层：透明轨道上前景色字（继承 currentColor，clip 到填充右边界以右） */}
           <span
             aria-hidden="true"
-            className="battery-text absolute inset-y-0 left-0 flex translate-y-[0.5px] items-center pl-[3px] text-[11px] font-bold leading-none tabular-nums"
-            style={{ width: BAT_INNER_W, color: onTrackColor, clipPath: `inset(0px 0px 0px ${fillPx}px)` }}
+            className="battery-text absolute inset-y-0 left-0 flex items-center justify-center text-[9px] font-semibold leading-none tabular-nums"
+            style={{ width: IOS_BAT_BODY_W, clipPath: `inset(0px 0px 0px ${IOS_BAT_BORDER + fillPx}px)` }}
           >
             {digits}
           </span>
         </span>
-        {/* battery-cap：右侧 2×6 正极凸点（垂直居中、顶部/底部微圆角） */}
+        {/* battery-cap：右侧正极凸点（垂直居中、与描边同强调色） */}
         <span
           aria-hidden="true"
-          className="battery-cap absolute top-1/2 -translate-y-1/2 rounded-[1px] bg-current"
-          style={{ right: 0, width: BAT_CAP_W, height: BAT_CAP_H }}
+          className="battery-cap absolute top-1/2 -translate-y-1/2 rounded-[1.5px]"
+          style={{ right: 0, width: IOS_BAT_CAP_W, height: IOS_BAT_CAP_H, background: accent ?? 'currentColor' }}
         />
       </span>
     );
@@ -309,7 +313,7 @@ export default function StatusBar() {
         </svg>
         )}
         {/* 电量图标常驻（未就绪时按 100% 绘制；缓存已在首帧绘制前同步恢复，不再闪断）。
-            v2.4.10 三模式：outside=数字+% 在外 / inside=数字嵌电池内（v2.4.12 机主规格版） / none=无百分比。
+            v2.4.10 三模式：outside=数字+% 在外 / inside=数字嵌电池内（第二十九轮真实 iOS 16.1+ 同款） / none=无百分比。
             v2.4.12 点按弹出电量详情卡（pointer-events-auto 打通状态栏点击；命中区上下扩 9px 便于点按） */}
         <button
           type="button"

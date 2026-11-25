@@ -194,16 +194,30 @@ public class LockOverlayService extends Service {
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
-        String pkg = intent == null ? null : intent.getStringExtra(EXTRA_PKG);
-        long ua = intent == null ? 0L : intent.getLongExtra(EXTRA_UNLOCK_AT, 0L);
-        String cn = intent == null ? "" : intent.getStringExtra(EXTRA_CHAR_NAME);
-        String msg = intent == null ? "" : intent.getStringExtra(EXTRA_MESSAGE);
-        String cid = intent == null ? "" : intent.getStringExtra(EXTRA_CONTACT_ID);
-        String ak = intent == null ? "" : intent.getStringExtra(EXTRA_APP_KIND);
-        String av = intent == null ? "" : intent.getStringExtra(EXTRA_AVATAR);
+        // v2.4.13 悬浮窗失效根修：intent == null = START_STICKY 回拉（APK 覆盖安装/进程被系统
+        // 回收后重启）——旧版无条件走 internalUnlock("js-unlock") 把还活跃的锁静默杀掉，
+        // 机主侧表现即「悬浮窗权限明明授了，锁应用/通知时却再也弹不出（以前可以）」。
+        // 覆盖安装 74→75→76 三连更（36 小时内）每次都触发这条路径，锁全部静默丢失。
+        // 现在：先读持久化锁，未到期则【原地重新武装】（不走 syncLock 二次 startService，
+        // 避免与本次 onStartCommand 重入竞态）；无记录/已到期/权限缺失才干净解锁停服务。
+        if (intent == null) {
+            if (rearmLockInPlace()) {
+                persistEvent("sticky-rearm", lockPkg, "START_STICKY 回拉后原地重梳武装");
+                return START_STICKY;
+            }
+            internalUnlock("sticky-no-lock");
+            return START_NOT_STICKY;
+        }
+        String pkg = intent.getStringExtra(EXTRA_PKG);
+        long ua = intent.getLongExtra(EXTRA_UNLOCK_AT, 0L);
+        String cn = intent.getStringExtra(EXTRA_CHAR_NAME);
+        String msg = intent.getStringExtra(EXTRA_MESSAGE);
+        String cid = intent.getStringExtra(EXTRA_CONTACT_ID);
+        String ak = intent.getStringExtra(EXTRA_APP_KIND);
+        String av = intent.getStringExtra(EXTRA_AVATAR);
 
         if (pkg == null || pkg.trim().isEmpty() || !pkg.matches("^[\\w.]+$")) {
-            // pkg 空 = 解锁：收遮罩、停服务
+            // pkg 空 = JS 显式解锁：收遮罩、停服务
             internalUnlock("js-unlock");
             return START_NOT_STICKY;
         }
@@ -1243,6 +1257,49 @@ public class LockOverlayService extends Service {
     }
 
     // ================= v2.1.0 开机重梳（BootReceiver 调用） =================
+
+    /**
+     * v2.4.13 START_STICKY 回拉原地重梳（onStartCommand intent==null 时调用）：
+     * 读持久化锁，未到期且不在永不锁名单→【现场重新武装】（与建锁路径同构，但不再二次
+     * startService，避免与本次 onStartCommand 重入竞态）；无记录/已到期/包名非法→false
+     * （调用方走干净解锁停服务）。头像/留言/角色名等全部从持久化恢复，重梳后拦截窗
+     * 体验与更新前完全一致。
+     */
+    private boolean rearmLockInPlace() {
+        try {
+            if (!Settings.canDrawOverlays(this)) return false; // 悬浮窗权限被系统重置→交 JS 自愈重锁
+            SharedPreferences sp = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+            String p = sp.getString(KEY_ACTIVE_PKG, null);
+            if (p == null || p.trim().isEmpty() || !p.matches("^[\\w.]+$")) return false;
+            long ua = sp.getLong(KEY_ACTIVE_UNLOCK_AT, 0L);
+            if (ua != 0 && System.currentTimeMillis() >= ua) return false; // 已到期
+            for (String bad : NEVER_LOCK) {
+                if (bad.equals(p)) return false;
+            }
+            lockPkg = p;
+            unlockAt = ua;
+            charName = sp.getString(KEY_ACTIVE_CHAR, "");
+            message = sp.getString(KEY_ACTIVE_MSG, "");
+            contactId = sp.getString(KEY_ACTIVE_CONTACT, "");
+            appKind = sp.getString(KEY_ACTIVE_APP_KIND, "");
+            avatarData = sp.getString(KEY_ACTIVE_AVATAR, "");
+            appLabel = resolveAppLabel(p);
+            openAttempts = 0;
+            onLockedSticky = false;
+            lastAttemptCountAt = 0L;
+            if (engine != null) {
+                engine.post(this::decodeAvatar);
+            } else {
+                decodeAvatar();
+            }
+            startForegroundNotify();
+            scheduleTick(0L);
+            prebuildOverlay();
+            return true;
+        } catch (Throwable t) {
+            return false;
+        }
+    }
 
     /**
      * 重启后重梳持久化的活跃吃醋锁：重启前没到期（或锁到哄好 unlockAt=0）的锁

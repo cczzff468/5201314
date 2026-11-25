@@ -30,9 +30,9 @@
  *    setRealAlarm{"hour":17, 也扣住/切掉，绝不放半截乱码上屏。
  */
 
-/** 工具名全集（与 phone-tools TOOL_CAPS 全量同步；v2.3.0 共 52 个） */
+/** 工具名全集（与 phone-tools TOOL_CAPS 全量同步；v2.3.0 共 52 个 + 第二十九轮 7 个感知/浏览器工具） */
 const TOOL_NAME_RE_SRC =
-  'sendWebMessage|postForum|likePost|playMusic|getWebState|saveMemo|setAlarm|queryWeather|openScreen|freezeApp|getWebInstalledApps|getUsageStats|getRecentApps|pullBackToChat|searchWebApp|sendNotification|searchContacts|openChat|getCalendarEvents|addCalendarEvent|getTodoList|addTodo|searchRealApp|freezeRealApp|unfreezeRealApp|lockApp|setVolume|openRealApp|tapScreen|swipeScreen|inputText|pressKey|lookScreen|takeScreenshot|sendScreenshot|switchToChat|getForegroundApp|getBatteryStatus|getVolume|getRecentSMS|getRecentNotifications|setBrightness|getBrightness|setRingerMode|setRealAlarm|startCountdown|createCalendarEvent|makePhoneCall|sendSMS|searchRealContact|toggleFlashlight|getRealLocation|getStepCount|getCurrentActivity|getSleepData|listFiles|readFileContent|saveTextToFile|downloadFile|getNowPlaying|controlRealMusic|getRealCalendarEvents';
+  'sendWebMessage|postForum|likePost|playMusic|getWebState|saveMemo|setAlarm|queryWeather|openScreen|freezeApp|getWebInstalledApps|getUsageStats|getRecentApps|pullBackToChat|searchWebApp|sendNotification|searchContacts|openChat|getCalendarEvents|addCalendarEvent|getTodoList|addTodo|searchRealApp|freezeRealApp|unfreezeRealApp|lockApp|setVolume|openRealApp|tapScreen|swipeScreen|inputText|pressKey|lookScreen|takeScreenshot|sendScreenshot|switchToChat|getForegroundApp|getBatteryStatus|getVolume|getRecentSMS|getRecentNotifications|setBrightness|getBrightness|setRingerMode|setRealAlarm|startCountdown|createCalendarEvent|makePhoneCall|sendSMS|searchRealContact|toggleFlashlight|getRealLocation|getStepCount|getCurrentActivity|getSleepData|listFiles|readFileContent|saveTextToFile|downloadFile|getNowPlaying|controlRealMusic|getRealCalendarEvents|getClipboard|getNetworkState|openWebBrowser|searchWeb|webSearch|sendWebLink|highlightWebText';
 
 /** 工具名集合（裸 JSON 提取时 O(1) 校验用） */
 export const TOOL_NAME_SET = new Set(TOOL_NAME_RE_SRC.split('|'));

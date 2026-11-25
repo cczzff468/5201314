@@ -3836,6 +3836,10 @@ public class NativePerceptionPlugin extends Plugin {
 
     /** 本地通知渠道 id（与 Agent 常驻通知分开） */
     private static final String LOCAL_NOTIFY_CHANNEL = "local_notify";
+    /** v2.4.13 悬浮横幅渠道：渠道重要性创建后不可改（IMPORTANCE_DEFAULT 永远不弹 heads-up），
+     * 换新渠道 id 用 IMPORTANCE_HIGH，机主反馈的「系统通知时弹不出悬浮窗」——通知永不横幅
+     * 弹出正是此因。headsUp=true（默认）走此渠道 + PRIORITY_HIGH。 */
+    private static final String LOCAL_NOTIFY_HIGH_CHANNEL = "local_notify_high";
     /** v2.2.0 拉回 heads-up 兑底通知渠道 */
     private static final String PULLBACK_CHANNEL = "pullback_reminder";
     /** 无 tag 本地通知的自增 id 起点（避开 Agent 常驻通知 id 7788） */
@@ -3851,7 +3855,9 @@ public class NativePerceptionPlugin extends Plugin {
     private static final String EXTRA_LOCAL_NOTIFY_URL = "local_notify_url";
     private static final String EXTRA_LOCAL_NOTIFY_TARGET = "local_notify_target";
 
-    /** 本地通知 localNotify({title, body, tag?, url?, target?})：页面后台时的即时提醒 */
+    /** 本地通知 localNotify({title, body, tag?, url?, target?, headsUp?})：页面后台时的即时提醒。
+     *  v2.4.13：headsUp 默认 true——走 IMPORTANCE_HIGH 渠道弹出悬浮横幅（旧 DEFAULT 渠道
+     *  从创建起就永不弹横幅）；传 false 退回旧静默渠道。 */
     @PluginMethod
     public void localNotify(PluginCall call) {
         String title = call.getString("title", "");
@@ -3859,6 +3865,7 @@ public class NativePerceptionPlugin extends Plugin {
         String tag = call.getString("tag", null);
         String url = call.getString("url", null);
         String target = call.getString("target", null);
+        boolean headsUp = call.getBoolean("headsUp", true);
         JSObject ret = new JSObject();
         try {
             Context ctx = getContext();
@@ -3884,11 +3891,21 @@ public class NativePerceptionPlugin extends Plugin {
                 call.resolve(ret);
                 return;
             }
+            String useChannel = LOCAL_NOTIFY_CHANNEL;
             if (Build.VERSION.SDK_INT >= 26) {
                 NotificationChannel ch = new NotificationChannel(
                         LOCAL_NOTIFY_CHANNEL, "应用提醒", NotificationManager.IMPORTANCE_DEFAULT);
                 ch.setDescription("页面在后台时的提醒通知（Agent 完成 / AI 来电 / 情侣小家动态等）");
                 nm.createNotificationChannel(ch);
+                if (headsUp) {
+                    NotificationChannel high = new NotificationChannel(
+                            LOCAL_NOTIFY_HIGH_CHANNEL, "重要提醒（横幅）",
+                            NotificationManager.IMPORTANCE_HIGH);
+                    high.setDescription("重要消息的悬浮横幅提醒（AI 来电/紧急消息，弹出预览后自动收起）");
+                    high.setLockscreenVisibility(Notification.VISIBILITY_PRIVATE);
+                    nm.createNotificationChannel(high);
+                    useChannel = LOCAL_NOTIFY_HIGH_CHANNEL;
+                }
             }
             int id = (tag == null || tag.isEmpty()) ? LOCAL_NOTIFY_SEQ.getAndIncrement() : tag.hashCode();
             if (tag != null && !tag.isEmpty()) {
@@ -3909,11 +3926,16 @@ public class NativePerceptionPlugin extends Plugin {
                             ? (PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT)
                             : PendingIntent.FLAG_IMMUTABLE);
             NotificationCompat.Builder builder =
-                    new NotificationCompat.Builder(ctx, LOCAL_NOTIFY_CHANNEL)
+                    new NotificationCompat.Builder(ctx, useChannel)
                             .setSmallIcon(android.R.drawable.ic_dialog_info)
                             .setContentTitle(title == null || title.isEmpty() ? "提醒" : title)
                             .setAutoCancel(true)
                             .setContentIntent(contentPi);
+            if (headsUp) {
+                // heads-up 三件套：高优先级 + 消息类目 + 震动（部分 ROM 需全配才弹横幅）
+                builder.setPriority(NotificationCompat.PRIORITY_HIGH)
+                        .setCategory(NotificationCompat.CATEGORY_MESSAGE);
+            }
             if (body != null && !body.isEmpty()) {
                 builder.setContentText(body);
             }

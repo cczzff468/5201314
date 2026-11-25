@@ -63,8 +63,16 @@ import {
   toolAddCalendarEvent,
   toolGetTodoList,
   toolAddTodo,
+  toolGetClipboard,
+  toolToggleFlashlight,
+  toolGetNetworkState,
+  toolSearchWeb,
+  toolOpenWebBrowser,
+  toolSendWebLink,
+  toolHighlightWebText,
   type WebToolResult,
 } from './web-tools';
+import { extractFirstUrl } from './web-link-msg';
 
 // ---------------- 类型 ----------------
 
@@ -188,6 +196,14 @@ export async function toolActionText(toolName: string, args: Record<string, unkn
       S(args.action) === 'next' ? '帮你切歌' : S(args.action) === 'prev' ? '帮你切回上一首'
       : S(args.action) === 'pause' ? '暂停音乐' : S(args.action) === 'play' ? '继续放歌' : '控制音乐',
     getRealCalendarEvents: target ? `查${target}的日程` : '查系统日历日程',
+    // 第二十九轮：AI 系统感知 + 分屏浏览器工具
+    getClipboard: '读剪贴板',
+    getNetworkState: '查网络状态',
+    searchWeb: target ? `搜索「${target}」` : '搜索网络',
+    webSearch: target ? `搜索「${target}」` : '搜索网络',
+    openWebBrowser: S(args.searchQuery) || S(args.url) ? `打开「${S(args.searchQuery) || S(args.url).slice(0, 24)}」网页` : '打开分屏浏览器',
+    sendWebLink: target ? `分享「${target.slice(0, 16)}」链接` : '发网页卡片',
+    highlightWebText: '点亮网页里的那句话',
   };
   return map[toolName] || toolName;
 }
@@ -269,6 +285,16 @@ const TOOL_CAPS: Record<string, { label: string; device?: boolean }> = {
   addCalendarEvent: { label: '加日历日程' },
   getTodoList: { label: '看备忘录待办' },
   addTodo: { label: '加备忘录待办' },
+  // ---- 第二十九轮：AI 系统感知 + 分屏浏览器（网页工具，两种模式恒注册；
+  //      toggleFlashlight 双模式：真机模式走原生闪光灯、网页模式走 Torch API） ----
+  getClipboard: { label: '读剪贴板' },
+  toggleFlashlight: { label: '开关手电筒' },
+  getNetworkState: { label: '查网络状态' },
+  openWebBrowser: { label: '打开分屏浏览器' },
+  searchWeb: { label: '搜索网络' },
+  webSearch: { label: '搜索网络' },
+  sendWebLink: { label: '发网页卡片' },
+  highlightWebText: { label: '高亮网页文字' },
   // ---- 真机工具（经无障碍服务/原生 API 作用于真实手机；仅「AI 动手范围 = 真机」时注册） ----
   searchRealApp: { label: '搜索真机应用', device: true },
   freezeRealApp: { label: '锁定真机应用', device: true },
@@ -299,7 +325,6 @@ const TOOL_CAPS: Record<string, { label: string; device?: boolean }> = {
   makePhoneCall: { label: '拨打电话', device: true },
   sendSMS: { label: '发短信', device: true },
   searchRealContact: { label: '查真机通讯录', device: true },
-  toggleFlashlight: { label: '开关手电筒', device: true },
   getRealLocation: { label: '查真机定位', device: true },
   // ---- v2.4.2 系统级工具矩阵扩展（健康运动 / 文件管理 / 网络下载 / 系统设置 / 网络信息） ----
   getStepCount: { label: '查今日步数', device: true },
@@ -483,6 +508,59 @@ export function buildPhoneTools(): PhoneToolDef[] {
     '打开与某联系人的聊天页（按名字模糊匹配联系人 → 自动切到对应的微信/QQ/信息 App 并打开）。机主说「打开和Z的聊天」「去微信找小桃」「切到我和TA的对话」时用这个；不知道全名时先调 searchContacts 搜。',
     { contactName: strParam('联系人名字（要跟通讯录里的名字对得上）') },
     ['contactName'],
+  );
+  // ---- 第二十九轮：AI 系统感知 + 分屏浏览器工具（网页模式恒注册；toggleFlashlight
+  //      真机模式由下方 device 段注册走原生闪光灯） ----
+  add(
+    'getClipboard',
+    '读取机主手机系统的剪贴板文本（机主刚复制过什么你就能看到什么）。机主说「看看我复制了什么」「帮我看看剪贴板」「我刚复制的那个发给你」时用这个；也可以在机主说「发给你/粘过来」却没发内容时主动调（TA可能忘了粘贴）。注意：部分环境需要机主点一下页面授权才能读。',
+    {},
+    [],
+  );
+  if (!device)
+    add(
+      'toggleFlashlight',
+      '打开/关闭机主的手电筒（真机模式下控制真实闪光灯；网页环境用 Torch API 控制闪光灯，不支持时如实告知）。机主说「开一下手电筒」「帮我照个亮」「关掉手电筒」时用这个；人设合适时也可以主动帮 TA 开（如 TA 说在楼道里找不到钥匙）。on 填 true=开 / false=关。',
+      {
+        on: { type: 'boolean', description: 'true=打开手电筒 / false=关闭手电筒' },
+      },
+      ['on'],
+    );
+  add(
+    'getNetworkState',
+    '查询机主手机当前的网络状态：网络类型（WiFi/5G/4G/蜂窝/离线）+ 信号强弱 + 是否省流量模式。机主问「我现在是WiFi还是流量」「网速怎么样」「信号好不好」时用这个；你想推视频/大图前也可以先查（弱网就换文字）。',
+    {},
+    [],
+  );
+  add(
+    'openWebBrowser',
+    '打开「AI 分屏浏览器」：屏幕下半屏弹出的内置浏览器，机主上半屏还能继续和你聊天。两种用法：① url 填完整网址（机主发链接让你看、你想给 TA 看某个网页时）；② searchQuery 填搜索词（想搜资料给 TA 看时，自动打开搜索结果页）。打开后你能拿到网页的标题和正文节选，可以边看边聊（如「我帮你找到了这个网页，你看这里…」）。',
+    {
+      url: strParam('要打开的完整网址（http/https 开头；与 searchQuery 二选一）'),
+      searchQuery: strParam('搜索词（与 url 二选一；填了就打开搜索结果页）'),
+    },
+    [],
+  );
+  add(
+    'searchWeb',
+    '发起真实的网络搜索（联网搜索引擎），拿到结果列表（标题+链接+摘要）。机主问实时性问题（新闻/比分/天气之外的资讯/不懂的知识）、让你「搜一下/查一下/帮我找找」时用这个；结合你的人设和记忆消化结果后用自己的话总结给机主，想深入看哪个结果再调 openWebBrowser 打开。',
+    { query: strParam('搜索词，如「小米新发布会时间」') },
+    ['query'],
+  );
+  add(
+    'sendWebLink',
+    '在聊天里发一张精美的「网页分享卡片」（带图标/标题/摘要，机主点卡片就在分屏浏览器里打开网页）。适合：你搜到/看到好东西想分享给机主、机主让你发链接、你想让 TA 自己看某个页面。url 填完整网址，title 填你想显示的标题（不填自动抓网页标题）；发完后卡片还会附带网页摘要给你，可以接着自然地聊。',
+    {
+      url: strParam('要分享的完整网址（http/https 开头）'),
+      title: strParam('卡片标题（不填自动抓网页标题）'),
+    },
+    ['url'],
+  );
+  add(
+    'highlightWebText',
+    '在分屏浏览器里高亮（点亮）一段文字——先把那句话染成醒目色并滚动到位，然后你就可以说「你看下半屏我给你标的地方」。前提：分屏浏览器已打开着（先调 openWebBrowser）；阅读模式下效果最佳。text 填网页里存在的那段原文（一定要用网页正文里的原句，不要自己改写）。',
+    { text: strParam('要高亮的网页原文片段（用正文里的原句）') },
+    ['text'],
   );
   // v2.4.3 真机模式下不注册：网页日历与真机系统日历同域（真机注册 getRealCalendarEvents/createCalendarEvent）
   if (!device)
@@ -1223,10 +1301,8 @@ export async function execWebTool(name: string, args: Record<string, unknown>): 
         if (!name) return '【失败】searchRealContact 缺联系人名字（name）';
         return runDeviceTool((d) => d.labSearchRealContact(name));
       }
-      case 'toggleFlashlight': {
-        const on = args.on !== false; // 缺省 true（开关语义明确）
-        return runDeviceTool((d) => d.labToggleFlashlight(on));
-      }
+      // 第二十九轮：toggleFlashlight 双模式——cap.device 已摘，改由网页分发段统一入口
+      // （真机模式 runDeviceTool 走原生闪光灯；网页模式 web-tools 走 Torch API）
       case 'getRealLocation':
         return runDeviceTool((d) => d.labGetRealLocation());
       // ---- v2.4.2 系统级工具矩阵扩展（健康运动/文件/下载/设置/网络） ----
@@ -1506,6 +1582,40 @@ export async function execWebTool(name: string, args: Record<string, unknown>): 
       if (r.ok) rememberToolAction(`你替机主在备忘录加了待办：「${S(args.text).slice(0, 90)}」`);
       return labText(r);
     }
+    // ---- 第二十九轮：AI 系统感知 + 分屏浏览器（searchWeb/readWebPage/execWebTool 同段） ----
+    case 'getClipboard':
+      return labText(await toolGetClipboard());
+    case 'toggleFlashlight': {
+      // 双模式：真机走原生闪光灯（与旧 device 段同款语义），网页走 Torch API
+      if (getAiActionTarget() === 'device') {
+        const on = args.on !== false; // 缺省 true（开关语义明确）
+        return runDeviceTool((d) => d.labToggleFlashlight(on));
+      }
+      const on = args.on !== false;
+      return labText(await toolToggleFlashlight(on));
+    }
+    case 'getNetworkState':
+      return labText(toolGetNetworkState());
+    case 'searchWeb':
+    case 'webSearch': {
+      // webSearch = searchWeb 的别名（弱模型口语化调用兼容；两个名都指向同一次搜索）
+      const q = S(args.query) || S(args.keyword);
+      return labText(await toolSearchWeb(q));
+    }
+    case 'openWebBrowser': {
+      const r = await toolOpenWebBrowser(S(args.url), S(args.searchQuery));
+      if (r.ok && (S(args.url) || S(args.searchQuery))) {
+        rememberToolAction(`你打开了分屏浏览器给机主看「${(S(args.searchQuery) || S(args.url)).slice(0, 60)}」`);
+      }
+      return labText(r);
+    }
+    case 'sendWebLink': {
+      const r = await toolSendWebLink(S(args.url), S(args.title));
+      if (r.ok) rememberToolAction(`你给机主分享了网页「${(S(args.title) || S(args.url)).slice(0, 60)}」`);
+      return labText(r);
+    }
+    case 'highlightWebText':
+      return labText(toolHighlightWebText(S(args.text)));
     default:
       return `【失败】未知工具「${name}」`;
   }
@@ -1633,7 +1743,11 @@ function looksLikeTaskInstruction(s: string): boolean {
   //    只认动词在前（锁QQ）和「把…锁」结构，名字打头的全部 MISS → 不进工具轮 →
   //    模型只能光嘴上答应；新槽：APPNAMES(给我|帮我…)?(锁|封|冻|没收|停用|封印) 与
   //    APPNAMES(解锁|解冻|解了)。
-  return /发(个|条|给|一)(?!呆|毛|火|疯|麻|懵)|发送|发帖|问问|通知(我|TA|他|她|大家|群|一下|个)|搜索|搜一?下|找一?下|查(一?下|询)|记(个|一|下)|保存|备忘|闹钟|提醒(我|一?下)|(加|设|定|建)(个|一?个)提醒|(加|添加|增设|新建|创建|设|定|建|记|写|排|存)(个|一?个|点|条|些)?(日程|行程|安排|日历|事件)|(日程|行程|日历|事件)(里|上|中|APP|App|app)?(加|添|写|记|排|建|设|定|存)|(记|查|看|读|瞅)(一?下|个)?(我)?的?(日程|行程|日历|安排)|有(什么|啥)(安排|日程|行程)|在(日历|日程表?)(里|上|中|APP|App|app)?(加|添|写|记|排|建|设|定|存|标|注)|播放|放首|放一?首|来首|切歌|换歌|点(个|一)?赞|(看|刷|逛|看看)(一?下|个|逛)?(帖子|论坛)|天气(怎么样|如何|咋样|呢|吗)|(明天|后天|大后天|周末|下周|下个?星期).{0,3}天气|(查|看看?)(一?下)?天气|下雨(吗|么|没有|没)|会(不)?下雨|要下雨|几度|温度(多少|几度|呢|吗)|(查|看看?)(一?下)?温度|打开|开一?下(?!玩笑)|去(备忘录|时钟|天气|论坛|微信|QQ)|在(微信|QQ|论坛)(上|里|中)?(发|问|@|艾特)|冻(结|上|住|一下|一小时|半小时|分钟)|解冻|解锁|解开?(屏幕|手机|应用|App|app)|锁屏|锁个屏|锁定?屏幕|锁(住|上|了|一下|一?下|定|死)?(手机|屏幕|微信|QQ|抖音|快手|B站|哔哩|小红书|微博|淘宝|京东|拼多多|美团|网易云|王者|荣耀|吃鸡|原神|番茄|阅读|闹钟|时钟|备忘录|浏览器|相册|相机|设置|应用|App|app|软件|游戏|它)|(把|将|帮我).{0,8}(锁|冻|停|挂起)|没收|别让(我|俺)(再)?(玩|刷|看|打开)|强(制)?停|挂起|停(掉|了)(.{0,6}(应用|App|app))|切回(聊天|界面|APP|App|来|咱们|我们的聊天)|回到(聊天|界面|APP|App|咱们|我们的聊天)|把我(拉|拽|切|弄)回|拉(我)?回(聊天|来|APP|App)|拽回|音量|调(大|小|高|低)|静音|大点声|小点声|(大|小)声(一?点|些|点儿)|声音(大|小|高|低|响|轻)|声(音|儿)?(再)?(大|小|高|低|响|轻)(一?点|些|点儿)?|响一(点|些|点儿)|(加|开)大(一?下)?声|亮屏|熄屏|截(个|一张)?屏|截(个|一张|一?张)?图|帮我截|屏幕截图|看屏幕|看(一)?看(我|我现在)的?屏幕|看(一)?看我在(玩|看|干|做|用|听)|看(一)?看我现在在|电量(多少|还剩|剩多少|呢|吗|咋样|怎么样)|还剩多少电|还有(多少|几格)电|(查|看看?)(一?下)?电量|后台(清理|耗电|占用|占内存|运行)|(清理?|清一?下|查|看看?)(一?下)?后台|强杀|叫(?:我|俺)[^，。！？!?,.\n]{0,8}(?:起床|起来|起身|出门|上班|上学|打卡)|(?:明早|明晚|明天早|早上|午睡|睡醒|到点|闹钟|叫醒|起床)[^，。！？!?,.\n]{0,10}叫(?:我|俺)|\d{1,2}\s*[点:：时][^，。！？!?,.\n]{0,10}叫(?:我|俺)|(?:微信|QQ|抖音|快手|B站|哔哩|小红书|微博|淘宝|京东|拼多多|美团|网易云|王者|荣耀|吃鸡|原神|番茄|阅读|闹钟|时钟|备忘录|浏览器|相册|相机|设置|应用|App|app|软件|游戏)[，,、 ]{0,3}(?:给我|帮我|替我|快|赶紧|麻烦)?(?:锁|封|冻|没收|停用|封印)|(?:微信|QQ|抖音|快手|B站|哔哩|小红书|微博|淘宝|京东|拼多多|美团|网易云|王者|荣耀|吃鸡|原神|番茄|阅读|闹钟|时钟|备忘录|浏览器|相册|相机|设置|应用|App|app|软件)(?:解锁|解冻|解了)/.test(s);
+  // 第二十九轮：感知/分屏浏览器工具口语入口——剪贴板（看看我复制了什么）、手电筒（开个灯）、
+  // 网络状态（是WiFi还是流量/网速怎么样）、链接（机主发链接必进工具轮让 AI 读网页）。
+  // 「链接」收窄成动词/指令语气（发链接/打开链接/看看链接），防「我们之间的链接」误命中；
+  // 「网络」同样收窄成查询语气（网速/信号怎么样/是WiFi还是…），裸「网络」不单飞。
+  return /发(个|条|给|一)(?!呆|毛|火|疯|麻|懵)|发送|发帖|问问|通知(我|TA|他|她|大家|群|一下|个)|搜索|搜一?下|找一?下|查(一?下|询)|记(个|一|下)|保存|备忘|闹钟|提醒(我|一?下)|(加|设|定|建)(个|一?个)提醒|(加|添加|增设|新建|创建|设|定|建|记|写|排|存)(个|一?个|点|条|些)?(日程|行程|安排|日历|事件)|(日程|行程|日历|事件)(里|上|中|APP|App|app)?(加|添|写|记|排|建|设|定|存)|(记|查|看|读|瞅)(一?下|个)?(我)?的?(日程|行程|日历|安排)|有(什么|啥)(安排|日程|行程)|在(日历|日程表?)(里|上|中|APP|App|app)?(加|添|写|记|排|建|设|定|存|标|注)|播放|放首|放一?首|来首|切歌|换歌|点(个|一)?赞|(看|刷|逛|看看)(一?下|个|逛)?(帖子|论坛)|天气(怎么样|如何|咋样|呢|吗)|(明天|后天|大后天|周末|下周|下个?星期).{0,3}天气|(查|看看?)(一?下)?天气|下雨(吗|么|没有|没)|会(不)?下雨|要下雨|几度|温度(多少|几度|呢|吗)|(查|看看?)(一?下)?温度|打开|开一?下(?!玩笑)|去(备忘录|时钟|天气|论坛|微信|QQ)|在(微信|QQ|论坛)(上|里|中)?(发|问|@|艾特)|冻(结|上|住|一下|一小时|半小时|分钟)|解冻|解锁|解开?(屏幕|手机|应用|App|app)|锁屏|锁个屏|锁定?屏幕|锁(住|上|了|一下|一?下|定|死)?(手机|屏幕|微信|QQ|抖音|快手|B站|哔哩|小红书|微博|淘宝|京东|拼多多|美团|网易云|王者|荣耀|吃鸡|原神|番茄|阅读|闹钟|时钟|备忘录|浏览器|相册|相机|设置|应用|App|app|软件|游戏|它)|(把|将|帮我).{0,8}(锁|冻|停|挂起)|没收|别让(我|俺)(再)?(玩|刷|看|打开)|强(制)?停|挂起|停(掉|了)(.{0,6}(应用|App|app))|切回(聊天|界面|APP|App|来|咱们|我们的聊天)|回到(聊天|界面|APP|App|咱们|我们的聊天)|把我(拉|拽|切|弄)回|拉(我)?回(聊天|来|APP|App)|拽回|音量|调(大|小|高|低)|静音|大点声|小点声|(大|小)声(一?点|些|点儿)|声音(大|小|高|低|响|轻)|声(音|儿)?(再)?(大|小|高|低|响|轻)(一?点|些|点儿)?|响一(点|些|点儿)|(加|开)大(一?下)?声|亮屏|熄屏|截(个|一张)?屏|截(个|一张|一?张)?图|帮我截|屏幕截图|看屏幕|看(一)?看(我|我现在)的?屏幕|看(一)?看我在(玩|看|干|做|用|听)|看(一)?看我现在在|电量(多少|还剩|剩多少|呢|吗|咋样|怎么样)|还剩多少电|还有(多少|几格)电|(查|看看?)(一?下)?电量|后台(清理|耗电|占用|占内存|运行)|(清理?|清一?下|查|看看?)(一?下)?后台|强杀|叫(?:我|俺)[^，。！？!?,.\n]{0,8}(?:起床|起来|起身|出门|上班|上学|打卡)|(?:明早|明晚|明天早|早上|午睡|睡醒|到点|闹钟|叫醒|起床)[^，。！？!?,.\n]{0,10}叫(?:我|俺)|\d{1,2}\s*[点:：时][^，。！？!?,.\n]{0,10}叫(?:我|俺)|(?:微信|QQ|抖音|快手|B站|哔哩|小红书|微博|淘宝|京东|拼多多|美团|网易云|王者|荣耀|吃鸡|原神|番茄|阅读|闹钟|时钟|备忘录|浏览器|相册|相机|设置|应用|App|app|软件|游戏)[，,、 ]{0,3}(?:给我|帮我|替我|快|赶紧|麻烦)?(?:锁|封|冻|没收|停用|封印)|(?:微信|QQ|抖音|快手|B站|哔哩|小红书|微博|淘宝|京东|拼多多|美团|网易云|王者|荣耀|吃鸡|原神|番茄|阅读|闹钟|时钟|备忘录|浏览器|相册|相机|设置|应用|App|app|软件)(?:解锁|解冻|解了)|剪贴板|粘贴板|手电筒|闪光灯|照(个|一)?亮|帮我照|网速|信号(怎么样|咋样|如何|好不好|不好|差|弱)|(查|看看?|测)(一?下)?(网络|信号|网速)|(是|用的?)(WiFi|wifi|流量|5G|5g|4G|4g)还是|浏览器|(打开|看看?|搜|读)(一?下|个|看)?(网页|链接|网址|网站)|发(个|一)?(链接|网址|网页)|链接(发|给|分享)|把(这个|这个)?链接|高亮|点亮/.test(s);
 }
 
 /**
@@ -1730,6 +1844,8 @@ export function stripChatNativeArchives(s: string): string {
 export function toolRoundNeeded(userText: string): boolean {
   const normalized = stripChatNativeArchives(String(userText || ''));
   if (!normalized.trim()) return false; // 纯表情/图片/语音消息：聊天，绝不进工具轮
+  // 第二十九轮：用户发链接 → 必进工具轮（AI 调 openWebBrowser 读网页、结合人设聊内容）
+  if (extractFirstUrl(normalized)) return true;
   if (looksLikeTaskInstruction(normalized)) return true; // 动手任务（含混合：带任务动词就进）
   if (CHAT_NATIVE_DEMAND_TEXT_RE.test(normalized)) return true; // 表情包/引用诉求：进内部直通/混合分流
   return false; // 纯闲聊：流式直连，工具误命中从机制上杜绝

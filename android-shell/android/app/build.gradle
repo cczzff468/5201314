@@ -14,8 +14,8 @@ android {
         applicationId "com.z.aiphone"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 76          // v2.4.12 系统状态栏隐藏三通道终极加固（IMMERSIVE_STICKY 传统通道+兼容控制器+FLAG_FULLSCREEN+回前台延迟补藏哨兵）；v75 = 2.4.11
-        versionName "2.4.12"    // v2.4.12：全屏隐藏加固 + getShellInfo 桥升 76
+        versionCode 77          // v2.4.13 悬浮窗失效根修（START_STICKY 回拉原地重梳防 APK 更新丢锁）+ 本地通知 heads-up 横幅渠道（IMPORTANCE_HIGH）；v76 = 2.4.12
+        versionName "2.4.13"    // v2.4.13：悬浮窗根修 + 通知横幅渠道 + getShellInfo 桥升 77
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
