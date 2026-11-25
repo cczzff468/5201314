@@ -47,6 +47,11 @@ export default function AppSwitcher() {
   const [closing, setClosing] = useState(false);
   const [shown, setShown] = useState(false);
   const [activeIdx, setActiveIdx] = useState(0);
+  /** 第三十三轮：卡片行可用高度（滚动容器实测，ResizeObserver 跟随——短屏机型
+   *  （如 360×800 WebView：64+卡片 541+图标行 52+提示 22+横杠 30 超出视口）卡片
+   *  底部被硬裁（机主截图反馈「后台应用卡片有点问题：卡到一半被切、底部圆角没了」），
+   *  现按可用高自适应卡片尺寸（保持 390:844 等比，宽度随之收窄），任何屏都完整展示 */
+  const [availH, setAvailH] = useState<number | null>(null);
   const [drag, setDrag] = useState<{ id: AppId; dy: number } | null>(null);
   const [killing, setKilling] = useState<AppId | null>(null);
 
@@ -81,6 +86,28 @@ export default function AppSwitcher() {
     };
   }, []);
 
+  // 第三十三轮：卡片行可用高度实测（打开后 rAF 首帧量一次 + ResizeObserver 跟随
+  // 旋屏/窗口变化；老 WebView 无 RO 时一次性测量仍生效，旋屏后重开重测）。
+  // 量的是滚动容器内容盒高——卡片净可用 = 容器高 - 上下 py-12（96px 阴影呼吸位）。
+  useEffect(() => {
+    if (!open) return;
+    const el = scrollRef.current;
+    if (!el) return;
+    let ro: ResizeObserver | null = null;
+    const measure = () => setAvailH(el.clientHeight);
+    const raf = requestAnimationFrame(measure);
+    try {
+      ro = new ResizeObserver(measure);
+      ro.observe(el);
+    } catch {
+      /* 无 RO 环境静默 */
+    }
+    return () => {
+      cancelAnimationFrame(raf);
+      ro?.disconnect();
+    };
+  }, [open]);
+
   if (!open && !closing) return null;
 
   // 毛玻璃明暗（WallpaperLightness 返回布尔：true=该区域偏浅 / null=测量中）：
@@ -106,10 +133,14 @@ export default function AppSwitcher() {
     }, 240);
   };
 
-  const CARD_W = 250; // 变窄版卡片
-  const CARD_H = Math.round((SCREEN_H * CARD_W) / SCREEN_W); // 保持与真机屏幕 1:1 比例
-  const PREVIEW_SCALE = CARD_W / SCREEN_W;
   const CARD_GAP = 20; // gap-5
+  // 第三十三轮：卡片尺寸自适应——宽 250 起步按 390:844 等比（541 高）；短屏机型
+  // 可用高不足时【等比收窄宽度】保证卡片完整不被裁（保持与真机屏幕 1:1 比例）
+  const CARD_H_MAX = Math.round((SCREEN_H * 250) / SCREEN_W);
+  const budgetH = availH != null ? availH - 96 : CARD_H_MAX; // 减 py-12×2（96px）
+  const CARD_H = Math.max(320, Math.min(CARD_H_MAX, budgetH));
+  const CARD_W = Math.round((SCREEN_W * CARD_H) / SCREEN_H);
+  const PREVIEW_SCALE = CARD_W / SCREEN_W;
   const STEP = CARD_W + CARD_GAP;
 
   const onScroll = () => {
