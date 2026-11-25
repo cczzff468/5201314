@@ -400,9 +400,10 @@ export default function BrowserApp() {
 
   return (
     <div className="flex h-full w-full flex-col overflow-hidden bg-background text-foreground">
-      {/* 顶部地址栏区（第三十一轮：46px 为状态栏预留——状态栏内容带下沿 ~42px，地址栏整体上移不再压得低） */}
-      <header className="shrink-0 border-b border-white/60 bg-white/60 pt-[46px] shadow-[0_8px_28px_rgba(17,24,39,0.07)] backdrop-blur-2xl dark:border-white/[0.09] dark:bg-white/[0.06]">
-        <div className="flex items-center gap-2 px-4 pt-1.5">
+      {/* 顶部地址栏区（第三十二轮：再上移——机主反馈上轮 8px 无感，预留 46→37px，
+          状态栏文字带下沿 ~32px、地址栏 37px 起步只留 5px 呼吸隙，贴近真机 Safari 观感） */}
+      <header className="shrink-0 border-b border-white/60 bg-white/60 pt-[37px] shadow-[0_8px_28px_rgba(17,24,39,0.07)] backdrop-blur-2xl dark:border-white/[0.09] dark:bg-white/[0.06]">
+        <div className="flex items-center gap-2 px-4 pt-0.5">
           <BackToHome className="static! shrink-0" />
           <div className="flex h-10 min-w-0 flex-1 items-center gap-2 rounded-full bg-white/60 px-3.5 shadow-sm ring-1 ring-white/70 backdrop-blur-xl transition-shadow focus-within:ring-2 focus-within:ring-foreground/25 dark:bg-white/[0.08] dark:ring-white/[0.1]">
             {loading ? (
@@ -453,8 +454,8 @@ export default function BrowserApp() {
           )}
         </div>
 
-        {/* 搜索引擎 iOS 分段控件（居中） */}
-        <div role="group" aria-label="搜索引擎" className="flex justify-center pb-3 pt-2">
+        {/* 搜索引擎 iOS 分段控件（居中；第三十二轮同步收紧行距） */}
+        <div role="group" aria-label="搜索引擎" className="flex justify-center pb-2.5 pt-1.5">
           <div className="flex rounded-full bg-white/60 p-[3px] shadow-sm ring-1 ring-white/70 backdrop-blur-xl dark:bg-white/[0.08] dark:ring-white/[0.1]">
             {ENGINES.map((item) => (
               <button
@@ -541,7 +542,7 @@ export default function BrowserApp() {
       {/* #28：书签面板（同 App 内弹出层） */}
       {bookmarksOpen && (
         <div className="absolute inset-0 z-50 flex flex-col bg-background">
-          <div className="flex h-12 shrink-0 items-center justify-between border-b border-border/60 px-4 pt-[46px]">
+          <div className="flex h-12 shrink-0 items-center justify-between border-b border-border/60 px-4 pt-[37px]">
             <button
               type="button"
               onClick={() => setBookmarksOpen(false)}

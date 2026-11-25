@@ -1796,37 +1796,58 @@ html[data-app-native] * {
   }
 }
 
-/* ============ 第三十一轮：Cove 韩系开屏动画（boot splash）============
- * 灵感：韩系极简（奶油底 + 柔和大色晕缓漂 + 大留白 + 细字距 wordmark + 微光扫过）。
- * - 开屏层 z-[110] 盖住锁屏/一切全局层，1.9s 后自动淡出卸载；
- * - 图标入场：0.62s 弹性缩放淡入（0.86→1）+ 柔和投影；
- * - wordmark「Cove」：细字距拉宽（0.42em），逐字错峰上浮淡入；
- * - 底部 3px 进度细条：韩系微光从左到右扫过（无限循环，开屏期间持续）；
- * - 退场：整层 0.55s 淡出 + 轻微放大 1.03（不抢走下方锁屏的入场注意力）。 */
-@keyframes cove-splash-orb-a {
-  0%   { transform: translate(-12%, -8%) scale(1); }
-  50%  { transform: translate(6%, 10%) scale(1.18); }
-  100% { transform: translate(-12%, -8%) scale(1); }
+/* ============ 第三十二轮：Cove 开屏动画（删除重建——灰白韩系氛围版）============
+ * 借鉴机主三张参考图（星盘罗盘 / 雨窗水纹 Alcove / 魔法阵）转译为灰白韩系：
+ * - 冷灰白渐变底 + 噪点雾面 + 双雾团缓漂（雨窗氛围）；
+ * - 细线同心轨道环正/反旋转（星盘+魔法阵），涟漪环从中心周期扩散（水纹）；
+ * - EN 宽字距小字 + 衬线 wordmark + 中文诗行错峰上浮（EN+CN 混排）；
+ * - 底部 LOCAL 实时时钟 + ENTER 呼吸圆环；2.6s 后淡出（0.6s + 轻放大）卸载。
+ * 旧 cove-splash-* keyframes 全部废弃删除。 */
+@keyframes cove2-mist-a {
+  0%   { transform: translate(-10%, -6%) scale(1); }
+  50%  { transform: translate(7%, 9%) scale(1.16); }
+  100% { transform: translate(-10%, -6%) scale(1); }
 }
-@keyframes cove-splash-orb-b {
-  0%   { transform: translate(10%, 12%) scale(1.1); }
-  50%  { transform: translate(-8%, -6%) scale(0.94); }
-  100% { transform: translate(10%, 12%) scale(1.1); }
+@keyframes cove2-mist-b {
+  0%   { transform: translate(9%, 10%) scale(1.08); }
+  50%  { transform: translate(-7%, -5%) scale(0.94); }
+  100% { transform: translate(9%, 10%) scale(1.08); }
 }
-@keyframes cove-splash-icon-in {
-  0%   { opacity: 0; transform: scale(0.86); }
-  60%  { opacity: 1; transform: scale(1.02); }
+@keyframes cove2-ring-a {
+  0%   { opacity: 0; transform: scale(0.82); }
   100% { opacity: 1; transform: scale(1); }
 }
-@keyframes cove-splash-word-in {
-  0%   { opacity: 0; transform: translateY(7px); }
+@keyframes cove2-ring-b {
+  0%   { opacity: 0; transform: scale(1.14); }
+  100% { opacity: 1; transform: scale(1); }
+}
+@keyframes cove2-spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+@keyframes cove2-spin-rev {
+  from { transform: rotate(360deg); }
+  to   { transform: rotate(0deg); }
+}
+@keyframes cove2-ripple {
+  0%   { transform: scale(0.42); opacity: 0.55; }
+  70%  { opacity: 0.14; }
+  100% { transform: scale(1.55); opacity: 0; }
+}
+@keyframes cove2-rise {
+  0%   { opacity: 0; transform: translateY(9px); }
   100% { opacity: 1; transform: translateY(0); }
 }
-@keyframes cove-splash-shimmer {
-  0%   { transform: translateX(-100%); }
-  100% { transform: translateX(320%); }
+@keyframes cove2-pulse {
+  0%   { transform: scale(1); opacity: 0.7; }
+  70%  { transform: scale(1.42); opacity: 0; }
+  100% { transform: scale(1.42); opacity: 0; }
 }
-@keyframes cove-splash-fade {
-  0%   { opacity: 1; }
-  100% { opacity: 0; }
+@keyframes cove2-sweep {
+  0%   { transform: translateX(-110%); }
+  100% { transform: translateX(310%); }
+}
+@keyframes cove2-exit {
+  0%   { opacity: 1; transform: scale(1); }
+  100% { opacity: 0; transform: scale(1.045); }
 }

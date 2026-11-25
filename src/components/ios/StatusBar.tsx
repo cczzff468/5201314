@@ -24,25 +24,23 @@ function SignalBars() {
   );
 }
 
-/* ============ inside 模式电池（第三十一轮：删除重建——真实 iOS 16.1+ 同款）============
- * 两轮真机截图 VLM 实测定稿（iPhone 14 Pro 锁屏 45% + 深壁纸 78% + 充电绿 79%）：
- *  - 宽高比 ≈ 1.93:1 的圆润胶囊（28×14.5），圆角 ≈ 高的 29%（4.2px）；
- *  - 【实心整体填满】：百分比开启时 iOS 把整个胶囊画成实心色块（不是按电量比例的部分
- *    填充、也没有透明轨道）——电量信息由数字本身传达；胶囊色即状态色：
- *    常态=前景色（浅壁纸黑/深壁纸白）、充电=绿 #30D158、低电(<20%)=红 #FF453A；
- *  - 数字在胶囊内【几何居中】（实测中心 48%，光学微偏左让出凸点），字号 ≈ 高的 46%
- *    （9px semibold tabular），颜色 = 填充的反色（黑底白字/白底黑字/彩底白字）；
- *  - 充电：数字右侧一枚白色小闪电（同色同风格，实充电电平不再显示比例）；
- *  - 凸点：紧贴本体（实测无间距，视觉留 0.5px 发丝缝），宽 ≈ 高 13%（1.9px）、
- *    高 ≈ 本体高 50%（7.2px），与本体同色实心，右缘小圆角；
- *  - 无 % 号、常态无闪电。 */
-const IOS_BAT_H = 14.5; // 本体高（实测比例）
-const IOS_BAT_BODY_W = 28; // 本体宽（1.93:1 带数字版）
+/* ============ inside 模式电池（第三十二轮：按机主反馈重调）============
+ * 在第三十一轮实心胶囊基础上按机主三点反馈重调：
+ *  - 数字【再变大变粗】：9px semibold → 10.5px bold tabular，仍几何居中；
+ *  - 实心胶囊改【按电量比例填充】：填充色仍为状态色（常态前景色/充电绿 #30D158/低电红
+ *    #FF453A），未充满部分留同色 26% 透明轨道（无边框、保持胶囊轮廓可读）；
+ *  - 凸点改【半圆】：宽 3.5 = 高 7 的一半、右缘全圆角成半圆，与本体留 1.5px 间隙
+ *    （机主要求「离开本体一点点」），颜色跟随填充色；
+ *  - 数字色随填充反色（黑底白字/白底黑字/彩底白字），外加柔和投影保证低电量时
+ *    数字叠在轨道上也清晰；充电时数字右侧白色小闪电（同色同投影）。 */
+const IOS_BAT_H = 14.5; // 本体高
+const IOS_BAT_BODY_W = 28; // 本体宽
 const IOS_BAT_RADIUS = 4.2; // 胶囊圆角（≈高 29%）
-const IOS_BAT_CAP_W = 1.9; // 正极凸点宽（≈高 13%）
-const IOS_BAT_CAP_H = 7.2; // 正极凸点高（≈本体高 50%）
-const IOS_BAT_CAP_GAP = 0.5; // 本体↔凸点发丝缝（实测紧贴）
-const IOS_BAT_TOTAL_W = IOS_BAT_BODY_W + IOS_BAT_CAP_GAP + IOS_BAT_CAP_W; // 总宽 30.4
+const IOS_BAT_FILL_INSET = 1.5; // 填充上下/左内缩（避开圆角裁切）
+const IOS_BAT_CAP_W = 3.5; // 正极凸点宽（半圆：宽 = 高的一半）
+const IOS_BAT_CAP_H = 7; // 正极凸点高（≈本体高 48%）
+const IOS_BAT_CAP_GAP = 1.5; // 本体↔凸点间隙（机主要求离开一点点）
+const IOS_BAT_TOTAL_W = IOS_BAT_BODY_W + IOS_BAT_CAP_GAP + IOS_BAT_CAP_W; // 总宽 33
 
 interface BatteryIconProps {
   level: number;
@@ -68,13 +66,19 @@ export function BatteryIcon({ level, charging, low, mode, light = false }: Batte
   const fill = Math.min(100, Math.max(0, level));
 
   if (mode === 'inside') {
-    /* 真实 iOS 16.1+ 重建版（第三十一轮）：
-     * - 实心胶囊整体填满：常态 currentColor / 充电 #30D158 / 低电 #FF453A；
-     * - 数字反色镂空居中（黑胶囊→白字、白胶囊→黑字、彩色胶囊→白字）；
-     * - 充电附白色小闪电（数字右侧）；凸点同色紧贴。 */
+    /* 第三十二轮（按机主反馈重调）：
+     * - 胶囊按电量比例填充（填充=状态色，轨道=前景色 26% 透明无边框）；
+     * - 数字 10.5px bold 反色居中 + 柔和投影（叠轨道也清晰）；
+     * - 凸点半圆（宽=高/2）离本体 1.5px。 */
     const accent = charging ? '#30D158' : low ? '#FF453A' : undefined; // undefined = currentColor
     // 数字色 = 填充反色：常态时前景浅→胶囊白→黑字，前景深→胶囊黑→白字；充电/低电恒白
     const numColor = charging || low ? '#FFFFFF' : light ? '#000000' : '#FFFFFF';
+    // 柔和投影：保证数字叠在半透明轨道上仍可读（常态用反相光晕，彩底用暗晕）
+    const numHalo = charging || low
+      ? '0 0 2px rgba(0,0,0,0.35), 0 1px 1px rgba(0,0,0,0.25)'
+      : light
+        ? '0 0 2px rgba(255,255,255,0.55)'
+        : '0 0 2px rgba(0,0,0,0.35)';
     const digits = String(Math.round(level));
     return (
       <span
@@ -83,36 +87,54 @@ export function BatteryIcon({ level, charging, low, mode, light = false }: Batte
         className="battery-container relative inline-block shrink-0"
         style={{ width: IOS_BAT_TOTAL_W, height: IOS_BAT_H }}
       >
-        {/* battery-body：实心圆润胶囊（iOS 16.1+ 百分比样式：整体填满、轨道不存在） */}
+        {/* battery-body：胶囊壳（无边框；底=内部 26% 轨道层 + 按电量比例填充层） */}
         <span
           className="battery-body relative block overflow-hidden"
           style={{
             width: IOS_BAT_BODY_W,
             height: IOS_BAT_H,
             borderRadius: IOS_BAT_RADIUS,
-            background: accent ?? 'currentColor',
           }}
         >
-          {/* battery-text：反色镂空数字（几何居中、光学微左让出凸点） */}
+          {/* 轨道层：currentColor 26%（做胶囊底色，电量未充满时可见） */}
           <span
             aria-hidden="true"
-            className="battery-text absolute inset-y-0 left-0 flex -translate-x-[0.8px] items-center justify-center text-[9px] font-semibold leading-none tabular-nums"
-            style={{ width: IOS_BAT_BODY_W, color: numColor }}
+            className="absolute inset-0"
+            style={{ background: 'currentColor', opacity: 0.26 }}
+          />
+          {/* 填充层：按电量比例（贴圆角内缘；颜色=状态色；inset 用 inline style 保证 JIT 不吃掉） */}
+          <span
+            aria-hidden="true"
+            className="absolute rounded-[2.8px] transition-[width] duration-300"
+            style={{
+              top: IOS_BAT_FILL_INSET,
+              bottom: IOS_BAT_FILL_INSET,
+              left: IOS_BAT_FILL_INSET,
+              width: `calc(${IOS_BAT_BODY_W - IOS_BAT_FILL_INSET * 2}px * ${fill / 100})`,
+              background: accent ?? 'currentColor',
+            }}
+          />
+          {/* battery-text：居中大号粗体数字（反色 + 柔和投影；光学微左让出凸点） */}
+          <span
+            aria-hidden="true"
+            className="battery-text absolute inset-y-0 left-0 flex -translate-x-[0.5px] items-center justify-center text-[10.5px] font-bold leading-none tabular-nums"
+            style={{ width: IOS_BAT_BODY_W, color: numColor, textShadow: numHalo }}
           >
             {digits}
-            {/* 充电小闪电（iOS 16.1+：数字右侧、与数字同色） */}
+            {/* 充电小闪电（数字右侧、与数字同色同投影） */}
             {charging && (
               <svg
                 viewBox="0 0 12 20"
-                className="ml-[2px] h-[8px] w-[5px] fill-current"
+                className="ml-[2px] h-[9px] w-[5.5px] fill-current"
                 aria-hidden="true"
+                style={{ filter: 'drop-shadow(0 0 1px rgba(0,0,0,0.3))' }}
               >
                 <path d="M7.5 1 2 11.5h3.2L4.5 19 10 8.2H6.6L7.5 1Z" />
               </svg>
             )}
           </span>
         </span>
-        {/* battery-cap：右侧正极凸点（垂直居中、紧贴本体、与胶囊同色实心） */}
+        {/* battery-cap：右侧正极凸点（半圆：宽=高/2、右缘全圆角；离本体 1.5px；颜色随填充色） */}
         <span
           aria-hidden="true"
           className="battery-cap absolute top-1/2 -translate-y-1/2"
@@ -120,7 +142,7 @@ export function BatteryIcon({ level, charging, low, mode, light = false }: Batte
             right: 0,
             width: IOS_BAT_CAP_W,
             height: IOS_BAT_CAP_H,
-            borderRadius: '0 1px 1px 0',
+            borderRadius: `0 ${IOS_BAT_CAP_W}px ${IOS_BAT_CAP_W}px 0`,
             background: accent ?? 'currentColor',
           }}
         />
@@ -299,7 +321,7 @@ export default function StatusBar() {
 
   return (
     <div
-      className={`ph-statusbar pointer-events-none absolute inset-x-0 top-0 z-[70] flex h-[54px] items-center justify-between pb-[12px] pl-[30px] pr-[13px] pt-[6px] text-[15px] font-semibold ${
+      className={`ph-statusbar pointer-events-none absolute inset-x-0 top-0 z-[70] flex h-[54px] items-center justify-between pb-[12px] pl-[24px] pr-[13px] pt-[6px] text-[15px] font-semibold ${
         lightText ? 'text-white [text-shadow:0_1px_2px_rgba(0,0,0,0.25)]' : 'text-black'
       }`}
       aria-label="状态栏"

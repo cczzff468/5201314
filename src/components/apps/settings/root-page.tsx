@@ -677,11 +677,11 @@ function batteryModeLabel(mode: BatteryPercentMode): string {
   return mode === 'inside' ? '电池图标内部' : mode === 'outside' ? '电池图标外部' : '不显示';
 }
 
-/** 三张备选图标（机主上传修图：去水印+四周去留白，squircle 满幅） */
+/** 三张备选图标（第三十二轮：机主要求删除重生成——韩系灰白 AI 生成三选一） */
 const APP_ICON_OPTIONS: { id: '1' | '2' | '3'; name: string; desc: string }[] = [
-  { id: '1', name: '纯白压印', desc: 'cove · 新拟态浮雕' },
-  { id: '2', name: '气泡 C', desc: '对话气泡与 C 融合' },
-  { id: '3', name: '星光气泡', desc: '气泡 + AI 星光' },
+  { id: '1', name: '灰白字标', desc: 'COVE · 韩系极简' },
+  { id: '2', name: '雾中远山', desc: '涟漪 · 诗意灰阶' },
+  { id: '3', name: '静月港湾', desc: '新月 · 柔和留白' },
 ];
 
 /** 第三十一轮：App 图标三选一弹窗（iOS 居中卡）：

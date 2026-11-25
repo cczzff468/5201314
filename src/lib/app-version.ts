@@ -11,9 +11,9 @@
  */
 
 /** 当前最新版本（纯网页热更时与 APK versionName 可短暂不同步，下次重打 APK 对齐） */
-export const APP_VERSION = '2.4.15';
+export const APP_VERSION = '2.4.16';
 /** 版本号数字（与 android-shell versionCode 保持一致；覆盖安装要求只增不减；纯网页热更不动） */
-export const APP_VERSION_CODE = 79;
+export const APP_VERSION_CODE = 80;
 
 export interface AppReleaseNote {
   version: string;
@@ -24,6 +24,17 @@ export interface AppReleaseNote {
 
 /** 版本历史（新→旧；设置 › APP 更新 页渲染，最新一条即当前版本） */
 export const APP_RELEASE_NOTES: AppReleaseNote[] = [
+  {
+    version: '2.4.16',
+    date: '2026-11-26',
+    items: [
+      '【需重装 APK · versionCode 80】App 图标删除重生成：韩系灰白三选一（灰白字标 / 雾中远山 / 静月港湾），启动器/自适应/圆形全链替换 + 冷灰白原生闪屏',
+      '【需重装 APK】开屏动画删除重建（借鉴星盘/雨窗/魔法阵参考图）：灰白雾面底+轨道环正反旋转+涟漪扩散+衬线 Cove wordmark+EN/CN 诗行+LOCAL 时钟+ENTER 呼吸环，点按可跳过',
+      '【网页热更·免重装】电池图标按机主反馈微调：数字变大变粗（10.5px bold）、实心胶囊改按电量比例填充、右侧凸点改半圆且离本体 1.5px',
+      '【网页热更·免重装】App 内浏览器网站状态栏再上移（预留 46→37px，贴近真机 Safari）+ 搜索引擎行收紧',
+      '【网页热更·免重装】状态栏时间往左移 6px（30→24px）',
+    ],
+  },
   {
     version: '2.4.15',
     date: '2026-11-26',

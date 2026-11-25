@@ -3665,3 +3665,22 @@ Stage Summary:
 - v2.4.15（code 79）双端就绪：网页热更全部生效；APK 需重装（改名+图标+闪屏走原生层）
 - 电池图标与真机 iOS 16.1+ 截图逐像素规格对齐（VLM 三轮实测）
 - App 品牌三件套（名/图标/开屏）可自定义且持久化（本地 IndexedDB + 服务器 SQLite 双写）
+
+---
+Task ID: 33（第三十二轮 · v2.4.16）
+Agent: 主控 Agent（Z.ai Code）
+Task: 机主五点反馈——电池图标微调（数字变大变粗/胶囊按电量比例/凸点半圆离体）+ 浏览器网站状态栏再上移 + 状态栏时间左移 + App 图标删除重生成（韩系灰白）+ 开屏动画删除重建（借鉴机主三张参考图）
+
+Work Log:
+- 电池图标 inside 模式（StatusBar.tsx）：数字 9px semibold → 10.5px bold；实心胶囊改按电量比例填充（填充=状态色常态前景/充电绿/低电红，轨道=前景色 26% 透明无边框）；数字反色+柔和投影（低电量叠轨道也清晰）；凸点改半圆（3.5×7，宽=高/2 右缘全圆角）离本体 1.5px；充电闪电同投影
+- 状态栏时间左移：pl-30 → pl-24
+- 浏览器 App 网站状态栏再上移（上轮 8px 机主反馈无感）：header pt-46→37 + 内层 pt-1.5→0.5 + 引擎行 pt-2/pb-3→1.5/2.5 + 书签面板同步；实测状态栏下沿→地址栏间距 15-20px→~12px
+- App 图标删除重生成：z-ai 图像生成韩系灰白三款（灰白字标 COVE/雾中远山涟漪/静月港湾新月），两轮 prompt 约束「全出血无内框」；scripts/rebuild-cove-icons.mjs 一键全链（web 192/256/512/1024/maskable + apple-touch + APK mipmap 全密度前景/方/圆 + ic_launcher_background #EFEFED + 原生 splash 11 密度「图标+衬线 Cove wordmark」）；设置三选一文案同步
+- 开屏动画删除重建（BootSplash.tsx + globals.css cove2-* keyframes）：借鉴星盘/雨窗 Alcove/魔法阵三参考图——冷灰白渐变+噪点雾面、双雾团缓漂、细线轨道环×2 正反 46s/64s 旋转+刻度+四方位节点、涟漪 2.8s 扩散、LET THE WORLD WAIT 宽字距小字+衬线 Cove wordmark 46px+中文诗行「喧嚣之外，静水一湾。」、右侧竖排 COVE · QUIET HARBOR、左下 LOCAL 实时时钟、右下 ENTER 呼吸圆环、底部微光进度条；2.6s 淡出、点按跳过
+- 修复新开屏 hydration mismatch：SVG 刻度线 Math.sin/cos 浮点在 Node/浏览器序列化尾数不同（16 vs 17 位），坐标 toFixed(2) 归一
+- 版本 2.4.16 / versionCode 80（app-version.ts + build.gradle + MainActivity getShellInfo 三处联动）；APK 重打成功（public/Cove.apk 5.0M）
+
+Stage Summary:
+- 电池图标三点反馈逐项落实（67% 预览实测：左 2/3 填充+右浅轨道、粗体白字、凸点间隙清晰）
+- 新开屏全元素 agent-browser 实测通过（含底部三件），无 console 错误、hydration 干净
+- 网页热更全部即时生效；APK（code 80）已重打，覆盖安装后换新启动器图标+原生灰白闪屏
