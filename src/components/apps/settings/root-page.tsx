@@ -13,6 +13,7 @@ import { Check } from 'lucide-react';
 import {
   Activity,
   AudioLines,
+  BatteryCharging,
   Bell,
   Bluetooth,
   Box,
@@ -403,7 +404,8 @@ export function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
         </div>
 
         {/* 第三十轮：电量百分比显示方式改为【点行弹窗选择】（机主需求：设置里的百分比显示选择要弹窗）。
-            一行入口（实时预览当前样式 + 当前模式名 + ›），点开 iOS 居中弹窗：三选项各带状态栏同款
+            第三十三轮：入口行左侧图标改为与其他行一致的 RowIcon（机主要求「前面的图标变成跟其他的图标一样」，
+            弃用第三十二轮的状态栏仿真预览条）；当前模式名 + ›，点开 iOS 居中弹窗：三选项各带状态栏同款
             实时小预览（固定 67%），点选即时生效并持久化；点背板/Esc 关闭。 */}
         <div className="mx-4 mt-4 overflow-hidden rounded-[22px] bg-white/55 shadow-[0_8px_28px_rgba(17,24,39,0.06)] ring-1 ring-white/70 backdrop-blur-2xl dark:bg-white/[0.06] dark:ring-white/[0.09]">
           <button
@@ -414,15 +416,7 @@ export function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
             onClick={() => setBatteryModeOpen(true)}
             className="flex min-h-[52px] w-full items-center gap-3 px-4 text-left transition-colors active:bg-muted/50"
           >
-            {/* 入口行预览：状态栏仿真样条（9:41 + 当前样式电池），与弹窗内预览同款 */}
-            <span className="flex h-[30px] w-[92px] shrink-0 items-center justify-between rounded-[9px] bg-gradient-to-br from-[#E8E4DC] via-[#EFEBE4] to-[#E2D9CC] px-[7px] shadow-[inset_0_1px_2px_rgba(0,0,0,0.08)] ring-1 ring-black/[0.06]">
-              <span className="text-[10.5px] font-semibold leading-none tabular-nums tracking-tight text-black">
-                9:41
-              </span>
-              <span className="flex items-center text-black">
-                <BatteryIcon level={67} charging={false} low={false} mode={batteryPercent} light={false} />
-              </span>
-            </span>
+            <RowIcon icon={BatteryCharging} tone={TONE_GREEN} />
             <span className="min-w-0 flex-1 truncate text-[16px]">电量百分比</span>
             <span className="shrink-0 text-[13px] text-muted-foreground">{batteryModeLabel(batteryPercent)}</span>
             <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground/60" strokeWidth={2.2} />

@@ -582,8 +582,10 @@ export default function PhoneShell() {
   // 其余内容层整体内缩避让系统条/挖孔。本线横屏为「去壳铺满视口、天然轴向」（第十八轮定调，
   // 无旋转映射）→ 四边变量原值直用，横屏挖孔在侧边时 sar/sal>0 自动左右避让。
   // 网页端四个变量恒 0（layout 预注入脚本只在 APK 内设值）→ 容器与壳同矩形，零视觉变化。
+  // 第三十三轮：顶边改用 --app-sat-eff（新壳 45% 挖孔，状态栏上提——机主反馈
+  // 「APP 里面的状态栏往上一点」；内容随状态栏同步上提，间距不变；网页端恒 0）。
   const contentInsetStyle: CSSProperties = {
-    top: 'var(--app-sat, 0px)',
+    top: 'var(--app-sat-eff, 0px)',
     right: 'var(--app-sar, 0px)',
     bottom: 'var(--app-sab, 0px)',
     left: 'var(--app-sal, 0px)',

@@ -105,13 +105,16 @@ export default function SafeAreaBleedBands() {
     const root = holderRef.current?.parentElement as HTMLElement | null;
     if (!root || typeof document === 'undefined') return;
     const nativeMode = document.documentElement.hasAttribute('data-app-native');
-    const sat = nativeMode ? readVar('--app-sat') : 0;
+    // 第三十三轮：顶带改用有效内缩 --app-sat-eff（新壳 45% 挖孔，状态栏上提同源）——
+    // 条带高度/采样 y 与内容层顶边对齐；其余三边原值
+    const sat = nativeMode ? readVar('--app-sat-eff') : 0;
+    const satFull = nativeMode ? readVar('--app-sat') : 0;
     const sar = nativeMode ? readVar('--app-sar') : 0;
     const sab = nativeMode ? readVar('--app-sab') : 0;
     const sal = nativeMode ? readVar('--app-sal') : 0;
 
     // 网页端（或安全区全 0）：条带零尺寸，display:none 省合成层
-    const any = sat > 0 || sar > 0 || sab > 0 || sal > 0;
+    const any = satFull > 0 || sar > 0 || sab > 0 || sal > 0;
     for (const kind of Object.keys(bandRefs.current) as BandKind[]) {
       const el = bandRefs.current[kind];
       if (el) el.style.display = any ? 'block' : 'none';
@@ -293,7 +296,8 @@ export default function SafeAreaBleedBands() {
     };
     switch (kind) {
       case 'top':
-        return { ...base, top: 0, left: 0, right: 0, height: 'var(--app-sat, 0px)' };
+        // 第三十三轮：顶带高度 = 有效内缩（与内容层顶边同步上提）
+        return { ...base, top: 0, left: 0, right: 0, height: 'var(--app-sat-eff, 0px)' };
       case 'bottom':
         return { ...base, bottom: 0, left: 0, right: 0, height: 'var(--app-sab, 0px)' };
       case 'right':
