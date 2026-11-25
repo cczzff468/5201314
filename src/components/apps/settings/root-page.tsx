@@ -985,16 +985,16 @@ const SPLASH_THEME_PREVIEW: Record<
     desc: '雨丝 · 水珠 · 诗行',
   },
   chat: {
-    bg: 'linear-gradient(172deg, #111319 0%, #1A1E2C 46%, #232840 78%, #161823 100%)',
-    fg: '#E9E9E4',
-    accent: 'rgba(255,255,255,0.14)',
-    desc: '星点 · 气泡 · 情话',
+    bg: 'linear-gradient(172deg, #0A0E1E 0%, #141B34 38%, #1C2648 68%, #0C1124 100%)',
+    fg: '#F2E6C2',
+    accent: 'radial-gradient(circle at 72% 30%, #F2D48F 0%, #E0AE55 55%, #C28C2E 100%)',
+    desc: '金月 · 星尘 · 情话',
   },
 };
 
 /** 第三十四轮：开屏动画四选一弹窗（iOS 居中卡，与 App 图标弹窗同规格）：
  *  四张 76×76 微缩场景预览（CSS 渐变近似还原主题观感：星空=深底+月、
- *  远山=灰白+山影渐变、雨窗=蓝灰+水珠、星空对话=星空底+气泡），点选【立马生效】——
+ *  远山=灰白+山影渐变、雨窗=蓝灰+水珠、星空对话=星空底+金月+星尘光带），点选【立马生效】——
  *  选完即整屏播放一遍（BootSplash forceTheme 预览）+ localStorage 已同步写，
  *  下次冷启动 BootSplash 首帧即新主题；点背板/Esc/好 关闭。 */
 function SplashThemeDialog({
@@ -1079,14 +1079,25 @@ function SplashThemeDialog({
                           style={{ background: pv.accent, clipPath: 'polygon(0% 100%, 12% 42%, 30% 68%, 48% 22%, 66% 62%, 84% 34%, 100% 78%, 100% 100%)' }}
                         />
                       ) : t === 'chat' ? (
-                        // 对话：两枚气泡（右上深灰 + 左下浅灰）
+                        // 星空对话：金新月（右上）+ 散点星尘 + 一抹光带
                         <>
                           <span
-                            className="absolute right-[10%] top-[16%] block h-[16px] w-[46%] rounded-[8px] rounded-br-[3px]"
-                            style={{ background: '#1E1E24' }}
+                            className="absolute right-[8%] top-[12%] block h-[30px] w-[30px] rounded-full"
+                            style={{ background: pv.accent, boxShadow: '0 0 12px rgba(233,189,102,0.45)' }}
                           />
+                          {/* 月牙：左上叠底色圆挖出开口（同主体主题造型） */}
                           <span
-                            className="absolute bottom-[18%] left-[10%] block h-[16px] w-[38%] rounded-[8px] rounded-bl-[3px] bg-[#E9E9EE]"
+                            className="absolute right-[24%] top-[10%] block h-[26px] w-[26px] rounded-full"
+                            style={{ background: pv.bg }}
+                          />
+                          <span className="absolute left-[14%] top-[22%] block h-[2px] w-[2px] rounded-full bg-white/90" />
+                          <span className="absolute left-[30%] top-[14%] block h-[1.5px] w-[1.5px] rounded-full bg-[#F2D48F]/90" />
+                          <span className="absolute left-[46%] top-[30%] block h-[2px] w-[2px] rounded-full bg-white/70" />
+                          <span className="absolute bottom-[24%] left-[18%] block h-[1.5px] w-[1.5px] rounded-full bg-white/60" />
+                          <span className="absolute bottom-[36%] left-[38%] block h-[2px] w-[2px] rounded-full bg-[#F2D48F]/70" />
+                          <span
+                            className="absolute bottom-[16%] left-[10%] block h-[1.5px] w-[54%] rotate-[-14deg] rounded-full"
+                            style={{ background: 'linear-gradient(90deg, rgba(244,214,140,0.75) 0%, rgba(210,170,100,0) 100%)' }}
                           />
                         </>
                       ) : t === 'moon' ? (

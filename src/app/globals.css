@@ -1930,17 +1930,29 @@ html[data-app-native] * {
   70%  { opacity: 0.16; }
   100% { transform: scale(1.25); opacity: 0; }
 }
-@keyframes cove4-bubble {
-  0%   { opacity: 0; transform: translateY(14px) scale(0.92); }
-  60%  { opacity: 1; transform: translateY(-2px) scale(1.015); }
-  100% { opacity: 1; transform: translateY(0) scale(1); }
-}
-/* 第三十五轮：chat 主题再美化——输入中三点（Cove 正在回）逐点弹跳 + 头像云轻浮 */
-@keyframes cove4-typing {
-  0%, 60%, 100% { transform: translateY(0); opacity: 0.45; }
-  30%           { transform: translateY(-4.5px); opacity: 1; }
-}
+/* 第三十五轮：chat 收束小月牙轻浮（第三十七轮沿用——月牙替代了旧爱心图标） */
 @keyframes cove4-heart-float {
   0%, 100% { transform: translateY(0) rotate(8deg); opacity: 0.75; }
   50%      { transform: translateY(-7px) rotate(-6deg); opacity: 1; }
+}
+
+/* ============ 第三十七轮：chat 主题星空化（机主参考图：金月+星尘光带+四芒星）============
+ * 四芒星缓闪（缩放+透明度双重呼吸）、金月缓浮与光晕呼吸（复用 cove3-float）、
+ * 星尘光带流动（SVG stroke-dashoffset 位移——dash 段沿路径滑行即「流星拖尾」）、
+ * 金色签名轻浮（复用 cove4-heart-float 的节律）。 */
+@keyframes cove5-sparkle {
+  0%, 100% { opacity: 0.35; transform: scale(0.82); }
+  50%      { opacity: 1;    transform: scale(1.08); }
+}
+@keyframes cove5-trail-flow {
+  from { stroke-dashoffset: 320; }
+  to   { stroke-dashoffset: 0; }
+}
+@keyframes cove5-moon-float {
+  0%, 100% { transform: translateY(0) rotate(-2deg); }
+  50%      { transform: translateY(-9px) rotate(1.5deg); }
+}
+@keyframes cove5-gold-glow {
+  0%, 100% { opacity: 0.55; }
+  50%      { opacity: 1; }
 }

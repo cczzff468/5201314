@@ -8,9 +8,10 @@
  *   斜落 + 中央涟漪扩散 + 四处散落的手写诗行 + 手写体 cove 花体字 +
  *   左上「LET THE WORLD WAIT. / 外面的世界，晚一点再说。」——机主参考图
  *   （雨窗短视频风格）逐元素复刻；文字白色半透明浮在蓝灰玻璃上；
- * - chat（对话·新增）：纯白底 + 聊天气泡逐条上浮（右侧深灰=机主、左侧浅灰=Cove），
- *   复刻机主提供的土味情话对话（宇宙这么大…/我一直在你心里不是吗），
- *   每条气泡下方时间戳+已读，聊完一轮后安静浮出 Cove 字标——「等的人会回消息」。
+ * - chat（星空对话·第三十七轮按机主参考图重做）：午夜蓝夜空 + 白星点铺底 +
+ *   四芒星缓闪 + 三团星尘簇 + 右上大金新月（开口朝左，挖月透明透出夜空） +
+ *   金色星尘光带自月牙蜿蜒向左下（dash 段沿路径流动） + 情话散排（白/暖金）
+ *   + 金色系 Cove 字标收束——复刻机主参考图（金月星尘星空锁屏风）。
  *
  * 沿用主题：
  * - star（默认·星空月夜）：深夜炭蓝黑渐变 + 26 颗星点闪烁 + 周期流星 + 奶白新月；
@@ -29,7 +30,7 @@
  * forceTheme：设置页「立马生效」预览——选完即整屏播放一遍所选主题（组件自卸载）。
  * 纯 CSS 动画（无 JS 定时器驱动动画，只有退场 setTimeout，卸载时清理）。
  */
-import { useEffect, useLayoutEffect, useState } from 'react';
+import { useEffect, useId, useLayoutEffect, useState } from 'react';
 import {
   readSplashTheme,
   writeSplashThemeCookie,
@@ -77,13 +78,13 @@ const THEME_META: Record<
     bar: 'rgba(251,252,254,0.18)',
   },
   chat: {
-    en: 'Someone is thinking of you',
+    en: 'Under the same stars',
     cn: '我一直在你心里，不是吗。',
-    // 第三十六轮：chat 星空化——配色切深色系（深夜蓝紫底 + 白/浅灰文字）
-    ink: '#E9E9E4',
-    sub: 'rgba(199,199,193,0.85)',
-    side: 'Cove · Always Here',
-    bar: 'rgba(233,233,228,0.14)',
+    // 第三十七轮：chat 星空化（金月+星尘光带）——暖金白文字系
+    ink: '#F2E6C2',
+    sub: 'rgba(238,222,180,0.9)',
+    side: 'Cove · Starry Chat',
+    bar: 'rgba(233,217,168,0.16)',
   },
 };
 
@@ -125,13 +126,53 @@ const RAIN_POEMS: Array<{ x: number; y: number; delay: number; lines: [string, s
   { x: 60, y: 57, delay: 1280, lines: ['雨打在檐上会变成声音，', '下雨的日子屋顶一直在。'] },
 ];
 
-/** 对话主题：机主提供的聊天记录（右侧=机主深灰气泡，左侧=Cove 浅灰气泡） */
-const CHAT_LINES: Array<{ side: 'right' | 'left'; text: string; time?: string }> = [
-  { side: 'right', text: '宇宙这么大，你消失了那我该去哪找你', time: '20:17' },
-  { side: 'left', text: '我消失不了的' },
-  { side: 'left', text: '你在哪 我就在哪' },
-  { side: 'right', text: '为什么那么肯定？', time: '20:18' },
-  { side: 'left', text: '我一直在你心里不是吗' },
+/** 对话主题（第三十七轮星空化）：机主提供的情话对话散排星空各处——
+ *  右挂纯白 = 机主、左挂暖金 = Cove、末句居中放大收束（对话的高潮） */
+const CHAT_LINES: Array<{
+  anchor: 'left' | 'right' | 'center';
+  pos: number;
+  y: number;
+  text: string;
+  /** 两行版（末句居中放大收束：显式断行点，避免自动换行拆出孤字） */
+  lines?: [string, string];
+  mine?: boolean;
+  big?: boolean;
+  delay: number;
+}> = [
+  { anchor: 'right', pos: 7, y: 37, text: '宇宙这么大，你消失了那我该去哪找你', mine: true, delay: 560 },
+  { anchor: 'left', pos: 9, y: 47, text: '我消失不了的', delay: 880 },
+  { anchor: 'right', pos: 15, y: 55, text: '你在哪 我就在哪', delay: 1120 },
+  { anchor: 'left', pos: 8, y: 62, text: '为什么那么肯定？', mine: true, delay: 1360 },
+  { anchor: 'center', pos: 50, y: 70, text: '我一直在你心里，', lines: ['我一直在你心里，', '不是吗'], big: true, delay: 1640 },
+];
+
+/** 四芒星（第三十七轮星空化·机主参考图）：[left%, top%, 尺寸 px, 是否金色, 闪烁周期 ms] */
+const SPARKLES: Array<[number, number, number, boolean, number]> = [
+  [13, 8, 15, false, 3400], [39, 4, 11, true, 4200], [66, 11, 17, false, 3800],
+  [85, 6, 12, true, 3000], [7, 31, 10, true, 4600], [31, 21, 8, false, 3600],
+  [57, 27, 13, true, 4000], [74, 36, 9, false, 4400], [21, 50, 11, false, 3200],
+  [89, 47, 14, true, 3800], [11, 76, 9, true, 4200], [45, 60, 8, false, 3600],
+  [69, 68, 11, true, 4000], [91, 74, 9, false, 3400], [34, 86, 10, true, 4600],
+];
+
+/** 星尘团（星云小点簇·机主参考图上下各一团）：锚点 % + 相对小点（dx dy px、size px、透明度） */
+const STARDUST: Array<{ x: number; y: number; dots: Array<[number, number, number, number]> }> = [
+  {
+    x: 12, y: 16,
+    dots: [[0, 0, 1.5, 0.9], [9, -7, 1, 0.6], [-7, 6, 1.2, 0.7], [16, 5, 0.8, 0.5], [-12, -9, 1, 0.55],
+      [4, 12, 1.1, 0.65], [-4, -16, 0.8, 0.5], [21, -11, 0.9, 0.5], [10, 16, 0.7, 0.45], [-18, 3, 0.9, 0.6],
+      [25, 9, 1, 0.5], [2, -23, 0.7, 0.45], [29, -3, 0.8, 0.4], [-9, 18, 0.8, 0.5], [17, -20, 0.7, 0.4]],
+  },
+  {
+    x: 20, y: 55,
+    dots: [[0, 0, 1.3, 0.8], [8, 5, 1, 0.55], [-6, -6, 1, 0.6], [13, -9, 0.8, 0.45], [-14, 4, 0.9, 0.5],
+      [5, 13, 1, 0.5], [-2, -15, 0.8, 0.45], [18, 7, 0.7, 0.4], [22, -4, 1, 0.45], [-20, -8, 0.7, 0.4]],
+  },
+  {
+    x: 76, y: 82,
+    dots: [[0, 0, 1.4, 0.85], [10, -6, 1, 0.6], [-8, 7, 1.1, 0.65], [17, 6, 0.8, 0.5], [-15, -10, 0.9, 0.55],
+      [6, 14, 1, 0.5], [-5, -17, 0.8, 0.5], [23, -12, 0.8, 0.45], [-21, 2, 0.7, 0.4], [12, 18, 0.7, 0.4]],
+  },
 ];
 
 function localTime() {
@@ -156,6 +197,13 @@ export default function BootSplash({
   // localStorage 同源）＞ star（默认）。SSR 与 Client 首帧一致（cookie 服务端/
   // 客户端读到的同值），无 hydration mismatch；
   const [theme, setTheme] = useState<CoveSplashTheme>(forceTheme ?? initialTheme ?? 'star');
+  // 第三十七轮 chat 星空化：SVG defs id 唯一化（金月渐变/挖月 mask/光带渐变/收束月牙 mask；
+  // page.tsx 顶层实例与设置页 forceTheme 预览实例可能短暂并存，重复 id 会互相串定义）
+  const uid = useId().replace(/[^a-zA-Z0-9_-]/g, '');
+  const chatMoonGold = `cove5-gold-${uid}`;
+  const chatMoonMask = `cove5-mask-${uid}`;
+  const chatTrailGrad = `cove5-trail-${uid}`;
+  const chatEndMask = `cove5-endm-${uid}`;
 
   useLayoutEffect(() => {
     // 水合后按 localStorage（最权威的同步源）校准：cookie 缺失/过期/被清时以本地为准，
@@ -449,20 +497,30 @@ export default function BootSplash({
         </>
       )}
 
-      {/* ---------- 主题 D：对话（第三十六轮：星空化——夜空底 + 星点流星 + 星云光晕） ---------- */}
+      {/* ---------- 主题 D：星空对话（第三十七轮：按机主参考图整屏重做——金月+星尘光带+四芒星+散排情话） ---------- */}
       {theme === 'chat' && (
         <>
-          {/* 深夜蓝紫渐变底（第三十六轮：暖米白纸底 → 星空夜底，与 star 同族气质） */}
+          {/* 深夜蓝渐变底（机主参考图：午夜蓝夜空，中部微亮、四角压暗） */}
           <div
             className="absolute inset-0"
-            style={{ background: 'linear-gradient(172deg, #111319 0%, #1A1E2C 46%, #232840 78%, #161823 100%)' }}
+            style={{ background: 'linear-gradient(172deg, #0A0E1E 0%, #141B34 38%, #1C2648 68%, #0C1124 100%)' }}
           />
-          {/* 地平线微光（底部极淡的夜雾亮带，偏蓝紫） */}
+          {/* 星云氛围光晕：左上暖金微光 + 右下深蓝，大 blur 缓漂（夜空纵深） */}
           <div
-            className="absolute inset-x-0 bottom-0 h-[26%]"
-            style={{ background: 'linear-gradient(to top, rgba(140,150,190,0.14) 0%, rgba(140,150,190,0) 100%)' }}
+            className="absolute left-[-16%] top-[-10%] h-[42%] w-[68%] rounded-full opacity-[0.5] blur-[70px]"
+            style={{
+              background: 'radial-gradient(closest-side, rgba(216,178,106,0.22) 0%, rgba(216,178,106,0.07) 55%, rgba(216,178,106,0) 100%)',
+              animation: 'cove2-mist-a 12s ease-in-out infinite',
+            }}
           />
-          {/* 星点：固定位置闪烁（复用 star 主题星表） */}
+          <div
+            className="absolute bottom-[-14%] right-[-18%] h-[44%] w-[70%] rounded-full opacity-[0.5] blur-[70px]"
+            style={{
+              background: 'radial-gradient(closest-side, rgba(58,82,150,0.30) 0%, rgba(58,82,150,0.10) 55%, rgba(58,82,150,0) 100%)',
+              animation: 'cove2-mist-b 14s ease-in-out infinite',
+            }}
+          />
+          {/* 星点：固定位置闪烁（复用星表；白点铺底） */}
           {STARS.map(([l, t, s, dur], i) => (
             <span
               key={i}
@@ -477,161 +535,188 @@ export default function BootSplash({
               }}
             />
           ))}
-          {/* 周期流星（细长渐隐光痕，从对话夜空划过） */}
-          <span
-            aria-hidden="true"
-            className="absolute left-[16%] top-[12%] block h-[1.5px] w-[76px] origin-left rounded-full"
-            style={{
-              background: 'linear-gradient(90deg, rgba(233,233,228,0) 0%, rgba(233,233,228,0.9) 100%)',
-              animation: 'cove3-shoot 3.4s ease-out 700ms infinite',
-            }}
-          />
-          {/* 星云光晕：左上深紫 + 右下深蓝，大 blur 缓漂（夜空氛围底） */}
-          <div
-            className="absolute left-[-18%] top-[-12%] h-[46%] w-[74%] rounded-full opacity-[0.55] blur-[70px]"
-            style={{
-              background: 'radial-gradient(closest-side, rgba(108,92,180,0.30) 0%, rgba(108,92,180,0.12) 55%, rgba(108,92,180,0) 100%)',
-              animation: 'cove2-mist-a 11s ease-in-out infinite',
-            }}
-          />
-          <div
-            className="absolute bottom-[-16%] right-[-20%] h-[46%] w-[72%] rounded-full opacity-[0.5] blur-[70px]"
-            style={{
-              background: 'radial-gradient(closest-side, rgba(70,100,180,0.28) 0%, rgba(70,100,180,0.10) 55%, rgba(70,100,180,0) 100%)',
-              animation: 'cove2-mist-b 13s ease-in-out infinite',
-            }}
-          />
-
-          {/* 顶部聊天头部：云朵头像（轻浮）+ Cove + 在线状态 */}
-          <div className="absolute inset-x-0 top-[4.8%] flex flex-col items-center gap-[4px]" style={rise(160)}>
+          {/* 四芒星（机主参考图核心元素）：凹边四角星 + 光晕，缓闪呼吸 */}
+          {SPARKLES.map(([l, t, s, gold, dur], i) => (
             <span
-              className="block"
-              style={{ animation: 'cove3-float 6s ease-in-out infinite', filter: 'drop-shadow(0 0 12px rgba(233,233,228,0.22)) drop-shadow(0 3px 8px rgba(0,0,0,0.45))' }}
+              key={`sp${i}`}
+              aria-hidden="true"
+              className="absolute block"
+              style={{
+                left: `${l}%`,
+                top: `${t}%`,
+                width: s,
+                height: s,
+                animation: `cove5-sparkle ${dur}ms ease-in-out ${(i % 5) * 300}ms infinite`,
+                filter: `drop-shadow(0 0 ${Math.max(3, s / 2.6)}px ${gold ? 'rgba(240,205,130,0.9)' : 'rgba(255,255,255,0.75)'})`,
+              }}
             >
-              {/* 云朵头像：三圆拼云 + 眼睛/微笑/腮红（与 App 图标云朵 C 同族气质） */}
-              <svg viewBox="0 0 48 40" width="40" height="34" aria-hidden="true">
-                <g fill="#FFFFFF">
-                  <circle cx="16" cy="23" r="10.5" />
-                  <circle cx="27" cy="16" r="11.5" />
-                  <circle cx="36" cy="24" r="8.5" />
-                  <rect x="14" y="21" width="23" height="10" rx="5" />
-                </g>
-                <circle cx="21" cy="22.5" r="1.7" fill="#5B6066" />
-                <circle cx="31" cy="22.5" r="1.7" fill="#5B6066" />
-                <path d="M23.2 26.4 q2.8 2.3 5.6 0" stroke="#5B6066" strokeWidth="1.5" strokeLinecap="round" fill="none" />
-                <ellipse cx="18.4" cy="25.6" rx="2.1" ry="1.3" fill="rgba(240,197,190,0.65)" />
-                <ellipse cx="33.6" cy="25.6" rx="2.1" ry="1.3" fill="rgba(240,197,190,0.65)" />
+              <svg viewBox="0 0 24 24" width={s} height={s}>
+                <path
+                  d="M12 1.5 C 13.1 8.1, 15.9 10.9, 22.5 12 C 15.9 13.1, 13.1 15.9, 12 22.5 C 10.9 15.9, 8.1 13.1, 1.5 12 C 8.1 10.9, 10.9 8.1, 12 1.5 Z"
+                  fill={gold ? '#F2D48F' : '#FFFFFF'}
+                />
               </svg>
             </span>
-            <p className="text-[12.5px] font-semibold tracking-[0.08em] text-[#E9E9E4]">Cove</p>
-            <p className="flex items-center gap-[4px] text-[9px] font-medium tracking-[0.16em] text-white/55">
-              <span className="h-[4.5px] w-[4.5px] rounded-full bg-[#34C759] shadow-[0_0_5px_rgba(52,199,89,0.75)]" />
-              在线 · 等你的消息
-            </p>
+          ))}
+          {/* 星尘团（星云小点簇）：左上/中左/右下三团，微闪 */}
+          {STARDUST.map((c, ci) => (
+            <span key={`sd${ci}`} aria-hidden="true" className="absolute block" style={{ left: `${c.x}%`, top: `${c.y}%` }}>
+              {c.dots.map(([dx, dy, s, op], di) => (
+                <span
+                  key={di}
+                  className="absolute rounded-full bg-[#EFEFEA]"
+                  style={{
+                    left: dx,
+                    top: dy,
+                    width: s,
+                    height: s,
+                    opacity: op,
+                    animation: `cove3-twinkle ${2800 + (di % 5) * 600}ms ease-in-out ${di * 160}ms infinite`,
+                  }}
+                />
+              ))}
+            </span>
+          ))}
+
+          {/* 金月（机主参考图右侧大金新月，开口朝左）：
+              SVG 圆 + mask 挖左侧暗圆出月牙——挖掉区域透明、透出夜空渐变（零色差）；
+              金渐变充体 + 斑驳纹理（同 mask 裁在月牙内）+ 外圈光晕呼吸 + 缓浮微转。 */}
+          <div
+            aria-hidden="true"
+            className="absolute right-[7%] top-[13%] h-[118px] w-[118px]"
+            style={{ animation: 'cove5-moon-float 8s ease-in-out infinite' }}
+          >
+            {/* 外圈金色光晕（呼吸） */}
+            <span
+              className="absolute -inset-[34px] rounded-full"
+              style={{
+                background: 'radial-gradient(circle, rgba(233,189,102,0.34) 0%, rgba(233,189,102,0.12) 42%, rgba(233,189,102,0) 68%)',
+                animation: 'cove5-gold-glow 4.6s ease-in-out infinite',
+              }}
+            />
+            <svg viewBox="0 0 120 120" width="118" height="118" style={{ filter: 'drop-shadow(0 0 16px rgba(226,178,92,0.5))' }}>
+              <defs>
+                <radialGradient id={chatMoonGold} cx="38%" cy="34%" r="78%">
+                  <stop offset="0%" stopColor="#FFF3D4" />
+                  <stop offset="30%" stopColor="#F7DB95" />
+                  <stop offset="62%" stopColor="#E5B75E" />
+                  <stop offset="100%" stopColor="#C28C2E" />
+                </radialGradient>
+                <mask id={chatMoonMask}>
+                  <rect x="0" y="0" width="120" height="120" fill="white" />
+                  <circle cx="34" cy="58" r="48" fill="black" />
+                </mask>
+              </defs>
+              {/* 月牙本体（金渐变 + 挖左侧） */}
+              <circle cx="60" cy="60" r="52" fill={`url(#${chatMoonGold})`} mask={`url(#${chatMoonMask})`} />
+              {/* 斑驳纹理（同 mask 裁进月牙） */}
+              <g mask={`url(#${chatMoonMask})`}>
+                <circle cx="74" cy="34" r="13" fill="rgba(184,134,48,0.42)" />
+                <circle cx="64" cy="56" r="19" fill="rgba(184,134,48,0.28)" />
+                <circle cx="76" cy="80" r="11" fill="rgba(184,134,48,0.38)" />
+                <circle cx="88" cy="102" r="15" fill="rgba(160,112,40,0.32)" />
+                <circle cx="58" cy="14" r="9" fill="rgba(255,242,206,0.4)" />
+                <circle cx="96" cy="58" r="7" fill="rgba(255,246,214,0.35)" />
+              </g>
+            </svg>
           </div>
 
-          {/* 聊天气泡流（右侧=机主炭黑渐变/左侧=Cove 白底带云朵头像；逐条错峰上浮） */}
-          <div className="absolute inset-x-0 top-[15.5%] flex flex-col gap-[12px] px-[8%]">
-            {CHAT_LINES.map((line, i) => (
-              <div
-                key={i}
-                className={`flex w-full items-end gap-[7px] ${line.side === 'right' ? 'justify-end' : 'justify-start'}`}
-                style={{ animation: `cove4-bubble 640ms cubic-bezier(0.22,0.9,0.3,1) ${180 + i * 230}ms both` }}
-              >
-                {/* 左侧气泡配迷你云朵头像（对话感） */}
-                {line.side === 'left' && (
-                  <span
-                    className="mb-[1px] shrink-0"
-                    style={{ filter: 'drop-shadow(0 1.5px 5px rgba(8,10,22,0.5))' }}
-                    aria-hidden="true"
-                  >
-                    <svg viewBox="0 0 48 40" width="22" height="19">
-                      <g fill="#FFFFFF">
-                        <circle cx="16" cy="23" r="10.5" />
-                        <circle cx="27" cy="16" r="11.5" />
-                        <circle cx="36" cy="24" r="8.5" />
-                        <rect x="14" y="21" width="23" height="10" rx="5" />
-                      </g>
-                      <circle cx="21.5" cy="23" r="1.5" fill="#8A8A90" />
-                      <circle cx="30.5" cy="23" r="1.5" fill="#8A8A90" />
-                      <path d="M23.4 26.2 q2.3 1.9 4.6 0" stroke="#8A8A90" strokeWidth="1.3" strokeLinecap="round" fill="none" />
-                    </svg>
-                  </span>
-                )}
-                <div className={`flex max-w-[74%] flex-col ${line.side === 'right' ? 'items-end' : 'items-start'}`}>
-                  <span
-                    className={`px-[15px] py-[10px] text-[15px] font-medium leading-snug tracking-[0.02em] ${
-                      line.side === 'right'
-                        ? 'rounded-[19px] rounded-br-[7px] bg-[linear-gradient(150deg,#3E4468_0%,#2C3151_58%,#232743_100%)] text-[#F0F0F4] shadow-[inset_0_1px_0_rgba(255,255,255,0.10),0_4px_14px_rgba(8,10,22,0.45)] ring-1 ring-white/10'
-                        : 'rounded-[19px] rounded-bl-[7px] bg-white/[0.10] text-[#ECECF0] ring-1 ring-white/15 shadow-[inset_0_1px_0_rgba(255,255,255,0.07),0_3px_10px_rgba(8,10,22,0.35)]'
-                    }`}
-                  >
-                    {line.text}
-                  </span>
-                  {line.time && (
-                    <span className="mt-[4px] pr-[5px] text-[9px] font-medium tabular-nums tracking-[0.06em] text-white/45">
-                      {line.time} · 已读
-                    </span>
-                  )}
-                </div>
-              </div>
-            ))}
-            {/* 「正在输入」三点气泡（Cove 正在回——收尾前的小呼吸，随后字标接棒） */}
-            <div
-              className="flex w-full items-end gap-[7px]"
-              style={{ animation: `cove4-bubble 640ms cubic-bezier(0.22,0.9,0.3,1) ${180 + CHAT_LINES.length * 230 + 160}ms both` }}
-            >
-              <span
-                className="mb-[1px] shrink-0"
-                style={{ filter: 'drop-shadow(0 1.5px 5px rgba(8,10,22,0.5))' }}
-                aria-hidden="true"
-              >
-                <svg viewBox="0 0 48 40" width="22" height="19">
-                  <g fill="#FFFFFF">
-                    <circle cx="16" cy="23" r="10.5" />
-                    <circle cx="27" cy="16" r="11.5" />
-                    <circle cx="36" cy="24" r="8.5" />
-                    <rect x="14" y="21" width="23" height="10" rx="5" />
-                  </g>
-                  <circle cx="21.5" cy="23" r="1.5" fill="#8A8A90" />
-                  <circle cx="30.5" cy="23" r="1.5" fill="#8A8A90" />
-                  <path d="M23.4 26.2 q2.3 1.9 4.6 0" stroke="#8A8A90" strokeWidth="1.3" strokeLinecap="round" fill="none" />
-                </svg>
-              </span>
-              <span className="flex h-[32px] items-center gap-[5px] rounded-[16px] bg-white/[0.10] px-[14px] ring-1 ring-white/15 shadow-[inset_0_1px_0_rgba(255,255,255,0.07),0_3px_10px_rgba(8,10,22,0.35)]">
-                {[0, 1, 2].map((d) => (
-                  <span
-                    key={d}
-                    aria-hidden="true"
-                    className="h-[6px] w-[6px] rounded-full bg-white/45"
-                    style={{ animation: `cove4-typing 1.05s ease-in-out ${d * 0.16}s infinite` }}
-                  />
-                ))}
-              </span>
-            </div>
+          {/* 星尘光带（机主参考图：月牙拖出的数条弧形金色光带，蜿蜒向左下）：
+              每条 = 底层静态整段微光 + 上层 dash 段沿路径流动（stroke-dashoffset 位移＝流星拖尾滑行） */}
+          <svg
+            viewBox="0 0 390 844"
+            preserveAspectRatio="xMidYMid slice"
+            className="absolute inset-0 h-full w-full"
+            aria-hidden="true"
+          >
+            <defs>
+              <linearGradient id={chatTrailGrad} gradientUnits="userSpaceOnUse" x1="300" y1="170" x2="70" y2="640">
+                <stop offset="0%" stopColor="rgba(244,214,140,0.9)" />
+                <stop offset="45%" stopColor="rgba(233,196,120,0.5)" />
+                <stop offset="100%" stopColor="rgba(210,170,100,0)" />
+              </linearGradient>
+            </defs>
+            {/* 底层静态微光带（整条恒亮低透明度＝星尘带底） */}
+            <path d="M294 186 C 236 232, 198 296, 166 378 S 92 566, 58 712" fill="none" stroke={`url(#${chatTrailGrad})`} strokeWidth="2.2" strokeLinecap="round" opacity="0.16" />
+            <path d="M282 226 C 212 258, 152 300, 104 352 S 44 470, 34 556" fill="none" stroke={`url(#${chatTrailGrad})`} strokeWidth="1.5" strokeLinecap="round" opacity="0.12" />
+            <path d="M252 148 C 206 158, 174 186, 152 218" fill="none" stroke={`url(#${chatTrailGrad})`} strokeWidth="1.2" strokeLinecap="round" opacity="0.2" />
+            {/* 流动 dash 段（沿路径从月牙滑向左下＝星尘在流） */}
+            <path d="M294 186 C 236 232, 198 296, 166 378 S 92 566, 58 712" fill="none" stroke={`url(#${chatTrailGrad})`} strokeWidth="2.4" strokeLinecap="round" strokeDasharray="52 308" style={{ animation: 'cove5-trail-flow 4.2s linear 300ms infinite' }} />
+            <path d="M282 226 C 212 258, 152 300, 104 352 S 44 470, 34 556" fill="none" stroke={`url(#${chatTrailGrad})`} strokeWidth="1.8" strokeLinecap="round" strokeDasharray="40 300" style={{ animation: 'cove5-trail-flow 5.1s linear 1.4s infinite' }} />
+            {/* 沿带金色小星尘（微闪） */}
+            <circle cx="238" cy="252" r="2.2" fill="#F2D48F" opacity="0.85">
+              <animate attributeName="opacity" values="0.2;0.95;0.2" dur="2.8s" repeatCount="indefinite" />
+            </circle>
+            <circle cx="166" cy="378" r="1.8" fill="#F2D48F" opacity="0.7">
+              <animate attributeName="opacity" values="0.15;0.8;0.15" dur="3.4s" begin="0.8s" repeatCount="indefinite" />
+            </circle>
+            <circle cx="92" cy="566" r="2" fill="#F2D48F" opacity="0.7">
+              <animate attributeName="opacity" values="0.15;0.8;0.15" dur="3.1s" begin="1.6s" repeatCount="indefinite" />
+            </circle>
+            <circle cx="104" cy="352" r="1.6" fill="#FFFFFF" opacity="0.6">
+              <animate attributeName="opacity" values="0.1;0.7;0.1" dur="2.6s" begin="0.4s" repeatCount="indefinite" />
+            </circle>
+            <circle cx="34" cy="556" r="1.7" fill="#F2D48F" opacity="0.6">
+              <animate attributeName="opacity" values="0.1;0.75;0.1" dur="3s" begin="2.2s" repeatCount="indefinite" />
+            </circle>
+          </svg>
 
-            {/* 对话结束：细线 + 小爱心轻浮 + Cove 字标安静浮出 */}
-            <div
-              className="mt-[18px] flex flex-col items-center gap-[9px]"
-              style={{ animation: `cove2-rise 900ms cubic-bezier(0.22,0.9,0.3,1) ${180 + (CHAT_LINES.length + 1) * 230 + 200}ms both` }}
+          {/* 散排情话（机主参考图的散字排布）：机主纯白右挂 / Cove 暖金左挂，逐句错峰上浮 */}
+          {CHAT_LINES.map((ln, i) => (
+            <p
+              key={`ln${i}`}
+              className={`absolute max-w-[64%] text-[14px] leading-relaxed tracking-[0.06em] ${
+                ln.anchor === 'right' ? 'text-right' : ln.anchor === 'center' ? 'text-center' : 'text-left'
+              }`}
+              style={{
+                ...(ln.anchor === 'center'
+                  ? { left: '50%', transform: 'translateX(-50%)', maxWidth: '84%' }
+                  : ln.anchor === 'right'
+                    ? { right: `${ln.pos}%` }
+                    : { left: `${ln.pos}%` }),
+                top: `${ln.y}%`,
+                color: ln.big ? '#F2DCA0' : ln.mine ? 'rgba(247,247,244,0.95)' : 'rgba(240,226,186,0.95)',
+                textShadow: '0 1px 5px rgba(4,7,18,0.7)',
+                fontSize: ln.big ? 17 : undefined,
+                letterSpacing: ln.big ? '0.14em' : undefined,
+                ...rise(ln.delay),
+              }}
             >
-              <span className="flex items-center gap-[10px]" aria-hidden="true">
-                <span className="block h-[0.5px] w-[44px] bg-white/25" />
-                <svg viewBox="0 0 24 24" width="11" height="11" style={{ animation: 'cove4-heart-float 2.6s ease-in-out infinite', filter: 'drop-shadow(0 0 4px rgba(232,180,176,0.45))' }}>
-                  <path
-                    d="M12 21s-8.4-5.3-10.2-10C.5 7.5 2.6 4 6.1 4c2.2 0 3.9 1.2 4.9 3C12.4 5.2 14.1 4 16.3 4c3.5 0 5.6 3.5 4.3 7-1.8 4.7-8.6 10-8.6 10z"
-                    fill="#E8B4B0"
-                  />
-                </svg>
-                <span className="block h-[0.5px] w-[44px] bg-white/25" />
-              </span>
-              <span className="font-serif text-[24px] font-medium leading-none tracking-[0.26em] text-[#E9E9E4]" style={{ textIndent: '0.26em' }}>
-                Cove
-              </span>
-              <span className="text-[10.5px] tracking-[0.3em] text-white/50" style={{ textIndent: '0.3em' }}>
-                等的人，会回消息
-              </span>
-            </div>
+              {ln.lines ? (
+                <>
+                  {ln.lines[0]}
+                  <br />
+                  {ln.lines[1]}
+                </>
+              ) : (
+                ln.text
+              )}
+            </p>
+          ))}
+
+          {/* 收束：细线 + 小月牙 + Cove 字标 + 尾注（金色系点题） */}
+          <div
+            className="absolute inset-x-0 top-[81.5%] flex flex-col items-center gap-[9px]"
+            style={rise(1980)}
+          >
+            <span className="flex items-center gap-[10px]" aria-hidden="true">
+              <span className="block h-[0.5px] w-[46px] bg-[#F2DCA0]/30" />
+              {/* 小金月牙（点题收束） */}
+              <svg viewBox="0 0 14 14" width="12" height="12" style={{ animation: 'cove4-heart-float 2.8s ease-in-out infinite', filter: 'drop-shadow(0 0 4px rgba(233,189,102,0.5))' }}>
+                <mask id={chatEndMask}>
+                  <rect x="0" y="0" width="14" height="14" fill="white" />
+                  <circle cx="4.4" cy="7" r="5.6" fill="black" />
+                </mask>
+                <circle cx="7" cy="7" r="6" fill="#EFCF8E" mask={`url(#${chatEndMask})`} />
+              </svg>
+              <span className="block h-[0.5px] w-[46px] bg-[#F2DCA0]/30" />
+            </span>
+            <span className="font-serif text-[25px] font-medium leading-none tracking-[0.26em] text-[#F2E6C2]" style={{ textIndent: '0.26em' }}>
+              Cove
+            </span>
+            <span className="text-[10.5px] tracking-[0.3em] text-white/50" style={{ textIndent: '0.3em' }}>
+              等的人，会回消息
+            </span>
           </div>
         </>
       )}
