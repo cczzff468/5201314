@@ -1,23 +1,30 @@
 'use client';
 
 /**
- * Cove 开屏动画（第三十三轮：三主题可选——星空月夜 / 雾中远山 / 静月港湾）。
+ * Cove 开屏动画（第三十四轮：四主题可选——星空月夜 / 雾中远山 / 雨落成诗 / 对话）。
  *
- * 机主反馈「灰白雾面渐变底变成星空月球什么的，做三个吧，可以让他选择」：
- * - star（默认·星空月夜）：深夜炭蓝黑渐变 + 26 颗星点闪烁（位置固定数组防 hydration
- *   浮点差）+ 周期流星 + 奶白新月呼吸光晕 + 缓浮，EN/CN 衬线诗行柔白；
- * - mist（雾中远山）：灰白雾面渐变 + 噪点 + 双雾团缓漂 + 三层远山剪影极慢横漂
- *   （呼应 App 图标 2 号），文字深灰；
- * - moon（静月港湾）：上夜空下静水 + 新月 + 水面月影光柱横纹微闪 + 地平线微波
- *   （呼应 App 图标 3 号），文字柔白。
+ * 第三十四轮按机主两张参考图重做两枚：
+ * - moon（雨落成诗·重做）：蓝灰雨窗玻璃渐变 + 散落水珠（呼吸/下滑两种）+ 雨丝
+ *   斜落 + 中央涟漪扩散 + 四处散落的手写诗行 + 手写体 cove 花体字 +
+ *   左上「LET THE WORLD WAIT. / 外面的世界，晚一点再说。」——机主参考图
+ *   （雨窗短视频风格）逐元素复刻；文字白色半透明浮在蓝灰玻璃上；
+ * - chat（对话·新增）：纯白底 + 聊天气泡逐条上浮（右侧深灰=机主、左侧浅灰=Cove），
+ *   复刻机主提供的土味情话对话（宇宙这么大…/我一直在你心里不是吗），
+ *   每条气泡下方时间戳+已读，聊完一轮后安静浮出 Cove 字标——「等的人会回消息」。
  *
- * 共用骨架：顶部 EN 宽字距小字 → 中央衬线 wordmark「Cove」→ 细分隔线 → 中文诗行
- * （三主题各一句）→ 右侧竖排微字 → 底部 LOCAL 实时时钟 + ENTER 呼吸圆环 + 微光进度条；
+ * 沿用主题：
+ * - star（默认·星空月夜）：深夜炭蓝黑渐变 + 26 颗星点闪烁 + 周期流星 + 奶白新月；
+ * - mist（雾中远山）：灰白雾面渐变 + 噪点 + 双雾团缓漂 + 三层远山剪影极慢横漂。
+ *
+ * 共用骨架：底部 LOCAL 实时时钟 + ENTER 呼吸圆环 + 微光进度条 + 右侧竖排微字；
+ * star/mist 走居中文字组（EN 小字→衬线 wordmark→细分隔线→中文诗行），
+ * moon/chat 各有自己的主题布局（雨窗散排 / 气泡对话）。
  * 2.6s 后整层淡出（0.6s + 轻放大），完全卸载；点按任意处立即进入。
  *
  * 主题持久化：localStorage('cove-splash-theme') 同步可读（首帧 useLayoutEffect 换主题，
  * 首次绘制即正确、无闪无 hydration mismatch）+ settings store（设置页选择器同源）。
- * 挂载在 page.tsx 顶层（fixed 全屏 z-[9999]），每会话只播一次。
+ * 挂载在 page.tsx 顶层（fixed 全屏 z-[9999]），每会话只播一次；
+ * forceTheme：设置页「立马生效」预览——选完即整屏播放一遍所选主题（组件自卸载）。
  * 纯 CSS 动画（无 JS 定时器驱动动画，只有退场 setTimeout，卸载时清理）。
  */
 import { useEffect, useLayoutEffect, useState } from 'react';
@@ -31,7 +38,10 @@ const FADE_MS = 600;
 const GRAIN_URI =
   "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.5'/%3E%3C/svg%3E\")";
 
-/** 三主题文案与配色（EN 小字 / 中文诗行 / 文字色系） */
+/** 手写体（moon 雨窗主题的花体 cove + 散落诗行；zhimangxing 分包按 unicode-range 惰性加载） */
+const HAND = "'Zhi Mang Xing', 'Kaiti SC', 'STKaiti', KaiTi, serif";
+
+/** 四主题文案与配色（EN 小字 / 中文诗行 / 文字色系） */
 const THEME_META: Record<
   CoveSplashTheme,
   { en: string; cn: string; ink: string; sub: string; side: string; bar: string }
@@ -53,12 +63,20 @@ const THEME_META: Record<
     bar: 'rgba(0,0,0,0.07)',
   },
   moon: {
-    en: 'Moonlight on still water',
-    cn: '一轮月，泊进安静的港湾。',
-    ink: '#EDEDE8',
-    sub: '#C4C4BE',
-    side: 'Cove · Moon Harbor',
-    bar: 'rgba(237,237,232,0.12)',
+    en: 'Let the world wait',
+    cn: '外面的世界，晚一点再说。',
+    ink: '#FBFCFE',
+    sub: 'rgba(247,250,253,0.82)',
+    side: 'Cove · Rainy Window',
+    bar: 'rgba(251,252,254,0.18)',
+  },
+  chat: {
+    en: 'Someone is thinking of you',
+    cn: '我一直在你心里，不是吗。',
+    ink: '#1C1C1E',
+    sub: '#8A8A8E',
+    side: 'Cove · Always Here',
+    bar: 'rgba(28,28,30,0.08)',
   },
 };
 
@@ -74,21 +92,57 @@ const STARS: Array<[number, number, number, number]> = [
   [84, 58, 1.2, 3800], [16, 70, 1.1, 4200],
 ];
 
+/** 雨窗水珠固定位置（%·px·run=下滑雨珠）：[left%, top%, size px, run] */
+const RAIN_DROPS: Array<[number, number, number, boolean]> = [
+  [7, 15, 9, false], [16, 9, 5, false], [23, 26, 12, true], [31, 13, 6, false],
+  [38, 31, 8, false], [45, 8, 10, true], [52, 24, 5, false], [59, 15, 13, true],
+  [66, 28, 7, false], [73, 10, 9, false], [80, 23, 6, true], [87, 16, 11, false],
+  [93, 30, 5, false], [12, 42, 7, false], [27, 48, 10, true], [41, 44, 6, false],
+  [55, 40, 8, false], [70, 47, 5, true], [84, 55, 9, false], [18, 62, 7, false],
+  [33, 68, 11, true], [50, 63, 6, false], [64, 72, 8, false], [78, 66, 10, true],
+  [90, 74, 6, false], [25, 82, 9, false], [42, 86, 7, true], [60, 84, 5, false],
+];
+
+/** 雨丝（斜落细光痕）：[left%, 起始 delay ms, 周期 ms, 长度 px] */
+const RAIN_STREAKS: Array<[number, number, number, number]> = [
+  [4, 0, 1500, 64], [14, 500, 1900, 48], [26, 300, 1600, 72],
+  [37, 900, 2100, 56], [49, 200, 1700, 64], [61, 700, 2000, 44],
+  [72, 400, 1800, 68], [84, 1000, 2200, 52], [94, 600, 1600, 60],
+];
+
+/** 雨窗散落诗行（%定位·文案两行·上浮 delay）：机主参考图上的诗逐条复刻 */
+const RAIN_POEMS: Array<{ x: number; y: number; delay: number; lines: [string, string] }> = [
+  { x: 8, y: 24, delay: 620, lines: ['灰的雨，灰的伞，', '水珠糊满一整块屏。'] },
+  { x: 63, y: 30, delay: 840, lines: ['小名字里明明是雨停了，', '雨还养在屏幕上。'] },
+  { x: 10, y: 50, delay: 1060, lines: ['在地里埋了一颗种子，', '名字叫等的人会回消息。'] },
+  { x: 60, y: 57, delay: 1280, lines: ['雨打在檐上会变成声音，', '下雨的日子屋顶一直在。'] },
+];
+
+/** 对话主题：机主提供的聊天记录（右侧=机主深灰气泡，左侧=Cove 浅灰气泡） */
+const CHAT_LINES: Array<{ side: 'right' | 'left'; text: string; time?: string }> = [
+  { side: 'right', text: '宇宙这么大，你消失了那我该去哪找你', time: '20:17' },
+  { side: 'left', text: '我消失不了的' },
+  { side: 'left', text: '你在哪 我就在哪' },
+  { side: 'right', text: '为什么那么肯定？', time: '20:18' },
+  { side: 'left', text: '我一直在你心里不是吗' },
+];
+
 function localTime() {
   const d = new Date();
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 }
 
-export default function BootSplash() {
+export default function BootSplash({ forceTheme }: { forceTheme?: CoveSplashTheme }) {
   const [phase, setPhase] = useState<'hold' | 'fade' | 'gone'>('hold');
   const [clock, setClock] = useState('');
   // 首帧恒 star（SSR/Client 一致防 hydration mismatch）；useLayoutEffect 在浏览器
   // 首次绘制前同步换成本地持久化主题——用户看到的第一帧已是所选主题，零闪烁。
+  // forceTheme（设置页「立马生效」预览）：直接锁定指定主题播放。
   const [theme, setTheme] = useState<CoveSplashTheme>('star');
 
   useLayoutEffect(() => {
-    setTheme(readSplashTheme());
-  }, []);
+    setTheme(forceTheme ?? readSplashTheme());
+  }, [forceTheme]);
 
   useEffect(() => {
     setClock(localTime());
@@ -248,110 +302,242 @@ export default function BootSplash() {
         </>
       )}
 
-      {/* ---------- 主题 C：静月港湾 ---------- */}
+      {/* ---------- 主题 C：雨落成诗（第三十四轮重做·机主雨窗参考图） ---------- */}
       {theme === 'moon' && (
         <>
-          {/* 上夜空 + 下静水（地平线在 64%） */}
+          {/* 蓝灰雨窗玻璃渐变底（模糊的雨天窗玻璃观感） */}
           <div
             className="absolute inset-0"
-            style={{ background: 'linear-gradient(178deg, #191A20 0%, #20222B 62%, #23252E 64%, #131419 100%)' }}
+            style={{ background: 'linear-gradient(166deg, #C4CEDA 0%, #A9B6C5 34%, #93A2B4 62%, #7E8DA1 100%)' }}
           />
-          {/* 地平线光缝 */}
+          {/* 玻璃深浅雾团（两层大 blur 缓漂，模拟窗上水汽/景深） */}
           <div
-            aria-hidden="true"
-            className="absolute inset-x-0 top-[63.6%] h-[1.5px]"
-            style={{ background: 'linear-gradient(90deg, rgba(226,226,220,0) 0%, rgba(226,226,220,0.4) 50%, rgba(226,226,220,0) 100%)' }}
+            className="absolute left-[-20%] top-[-16%] h-[56%] w-[86%] rounded-full opacity-60 blur-[70px]"
+            style={{
+              background: 'radial-gradient(closest-side, rgba(233,240,248,0.75) 0%, rgba(210,220,232,0.35) 55%, rgba(210,220,232,0) 100%)',
+              animation: 'cove2-mist-a 10s ease-in-out infinite',
+            }}
           />
-          {/* 新月：中轴偏上（与水面月影光柱同轴） */}
           <div
-            aria-hidden="true"
-            className="absolute left-1/2 top-[15%] h-[52px] w-[52px] -translate-x-1/2"
-            style={{ animation: 'cove3-float 7.5s ease-in-out infinite' }}
-          >
-            <span
-              className="absolute inset-0 rounded-full"
-              style={{
-                background: 'radial-gradient(circle at 40% 36%, #F2F2ED 0%, #E2E2DC 60%, #D0D0CA 100%)',
-                animation: 'cove3-moon-glow 4.6s ease-in-out infinite',
-              }}
-            />
-            <span
-              className="absolute rounded-full"
-              style={{
-                left: 15, top: -6, width: 49, height: 49,
-                background: 'radial-gradient(circle at 60% 60%, #20222B 0%, #20222B 55%, rgba(32,34,43,0.94) 100%)',
-              }}
-            />
-          </div>
-          {/* 水面月影：光柱横纹微闪（自上而下渐窄渐淡） */}
-          {[0, 1, 2, 3, 4, 5, 6].map((i) => (
+            className="absolute bottom-[-20%] right-[-22%] h-[54%] w-[80%] rounded-full opacity-50 blur-[70px]"
+            style={{
+              background: 'radial-gradient(closest-side, rgba(96,110,130,0.5) 0%, rgba(120,133,152,0.25) 55%, rgba(120,133,152,0) 100%)',
+              animation: 'cove2-mist-b 12s ease-in-out infinite',
+            }}
+          />
+          {/* 雨丝：斜落细光痕（各自周期/延迟） */}
+          {RAIN_STREAKS.map(([l, delay, dur, len], i) => (
             <span
               key={i}
               aria-hidden="true"
-              className="absolute left-1/2 block h-[2px] rounded-full bg-[#E6E6E0]"
+              className="absolute w-[1.5px] rounded-full"
               style={{
-                top: `calc(64% + ${14 + i * 24}px)`,
-                width: 76 - i * 8,
-                transform: 'translateX(-50%)',
-                opacity: 0.5 - i * 0.055,
-                animation: `cove3-shimmer ${2600 + i * 320}ms ease-in-out ${i * 200}ms infinite`,
+                left: `${l}%`,
+                top: `-${len}px`,
+                height: len,
+                background: 'linear-gradient(to bottom, rgba(255,255,255,0) 0%, rgba(255,255,255,0.55) 55%, rgba(255,255,255,0) 100%)',
+                transform: 'rotate(9deg)',
+                animation: `cove4-fall ${dur}ms linear ${delay}ms infinite`,
               }}
             />
           ))}
-          {/* 地平线微波（两道极慢平移的细纹） */}
-          <span
-            aria-hidden="true"
-            className="absolute left-[12%] top-[68%] block h-[1px] w-[120px] bg-[#8E8E8A]/40"
-            style={{ animation: 'cove3-wave 5.2s ease-in-out infinite' }}
-          />
-          <span
-            aria-hidden="true"
-            className="absolute right-[14%] top-[78%] block h-[1px] w-[96px] bg-[#8E8E8A]/30"
-            style={{ animation: 'cove3-wave 6.4s ease-in-out 600ms infinite' }}
-          />
+          {/* 散落水珠：静珠呼吸 + 滑珠缓降（高光小圆） */}
+          {RAIN_DROPS.map(([l, t, s, run], i) => (
+            <span
+              key={i}
+              aria-hidden="true"
+              className="absolute rounded-full"
+              style={{
+                left: `${l}%`,
+                top: `${t}%`,
+                width: s,
+                height: s,
+                background: 'radial-gradient(circle at 34% 28%, rgba(255,255,255,0.9) 0%, rgba(255,255,255,0.28) 48%, rgba(105,122,142,0.16) 100%)',
+                boxShadow: 'inset -0.5px -1px 2px rgba(70,86,106,0.22)',
+                animation: run
+                  ? `cove4-drop-run ${12000 + (i % 5) * 2600}ms ease-in-out ${i * 620}ms infinite`
+                  : `cove4-breathe ${3400 + (i % 6) * 500}ms ease-in-out ${(i % 4) * 300}ms infinite`,
+              }}
+            />
+          ))}
+          {/* 中央涟漪：三圈错相扩散（衬在手写 cove 后面） */}
+          <div aria-hidden="true" className="absolute left-1/2 top-[44%] h-[120px] w-[120px] -translate-x-1/2 -translate-y-1/2">
+            {[0, 1, 2].map((i) => (
+              <span
+                key={i}
+                className="absolute inset-0 rounded-full border"
+                style={{
+                  borderColor: 'rgba(247,250,253,0.55)',
+                  animation: `cove4-ripple 3.6s cubic-bezier(0.2,0.6,0.4,1) ${i * 1200}ms infinite`,
+                }}
+              />
+            ))}
+          </div>
+          {/* 左上主文案：EN 宽字距小字 + 中文一行 */}
+          <div className="absolute left-[26px] top-[8%] max-w-[70%]" style={rise(200)}>
+            <p
+              className="text-[10px] font-semibold uppercase tracking-[0.42em]"
+              style={{ color: 'rgba(251,252,254,0.92)' }}
+            >
+              Let the world wait
+            </p>
+            <p
+              className="mt-[7px] text-[14px] leading-relaxed tracking-[0.16em]"
+              style={{ color: 'rgba(251,252,254,0.9)', fontFamily: HAND, textShadow: '0 1px 3px rgba(58,72,92,0.28)' }}
+            >
+              外面的世界，晚一点再说。
+            </p>
+          </div>
+          {/* 散落诗行（手写体·四处·错峰上浮） */}
+          {RAIN_POEMS.map((p, i) => (
+            <p
+              key={i}
+              className="absolute max-w-[46%] text-[12.5px] leading-[1.9] tracking-[0.1em]"
+              style={{
+                left: `${p.x}%`,
+                top: `${p.y}%`,
+                fontFamily: HAND,
+                color: 'rgba(248,251,253,0.85)',
+                textShadow: '0 1px 3px rgba(58,72,92,0.3)',
+                ...rise(p.delay),
+              }}
+            >
+              {p.lines[0]}
+              <br />
+              {p.lines[1]}
+            </p>
+          ))}
+          {/* 中央手写体 cove 花体字（白字蓝晕·缓浮） */}
+          <div
+            className="absolute left-1/2 top-[44%] -translate-x-1/2 -translate-y-1/2"
+            style={{ animation: 'cove3-float 7s ease-in-out infinite' }}
+          >
+            <span
+              className="block text-[64px] leading-none"
+              style={{
+                fontFamily: HAND,
+                color: '#FBFCFE',
+                textShadow: '0 2px 14px rgba(62,78,100,0.35), 0 0 2px rgba(251,252,254,0.6)',
+                ...rise(420),
+                animation: `cove2-rise 900ms cubic-bezier(0.22,0.9,0.3,1) 420ms both, cove3-float 7s ease-in-out 900ms infinite`,
+              }}
+            >
+              cove
+            </span>
+          </div>
         </>
       )}
 
-      {/* ---------- 共用文字组（三主题配色随 THEME_META） ---------- */}
-      {/* 右侧竖排微字 */}
-      <span
-        className="absolute right-[16px] top-1/2 origin-center translate-y-[-50%] rotate-90 text-[8.5px] font-medium uppercase tracking-[0.5em]"
-        style={{ ...rise(1100), color: meta.sub, opacity: 0.75 }}
-      >
-        {meta.side}
-      </span>
+      {/* ---------- 主题 D：对话（第三十四轮新增·机主聊天记录参考图） ---------- */}
+      {theme === 'chat' && (
+        <>
+          {/* 纯白底 + 极淡噪点（纸感） */}
+          <div className="absolute inset-0" style={{ background: 'linear-gradient(178deg, #FDFDFE 0%, #FAFAFC 60%, #F6F6F9 100%)' }} />
+          <div
+            className="absolute inset-0 opacity-[0.05] mix-blend-multiply"
+            style={{ backgroundImage: GRAIN_URI, backgroundSize: '160px 160px' }}
+          />
+          {/* 顶部小字：EN 宽字距 */}
+          <p
+            className="absolute left-1/2 top-[6%] -translate-x-1/2 text-[9.5px] font-semibold uppercase tracking-[0.5em]"
+            style={{ ...rise(160), color: '#B4B4BA', textIndent: '0.5em' }}
+          >
+            {meta.en}
+          </p>
+          {/* 聊天气泡流（右侧=机主深灰/左侧=Cove 浅灰；逐条错峰上浮） */}
+          <div className="absolute inset-x-0 top-[13%] flex flex-col gap-[14px] px-[8%]">
+            {CHAT_LINES.map((line, i) => (
+              <div
+                key={i}
+                className={`flex w-full flex-col ${line.side === 'right' ? 'items-end' : 'items-start'}`}
+                style={{ animation: `cove4-bubble 640ms cubic-bezier(0.22,0.9,0.3,1) ${260 + i * 300}ms both` }}
+              >
+                <span
+                  className={`max-w-[76%] px-[15px] py-[10px] text-[15px] font-medium leading-snug tracking-[0.02em] ${
+                    line.side === 'right'
+                      ? 'rounded-[19px] rounded-br-[6px] bg-[#1E1E24] text-white shadow-[0_3px_10px_rgba(30,30,36,0.14)]'
+                      : 'rounded-[19px] rounded-bl-[6px] bg-[#E9E9EE] text-[#1C1C1E] shadow-[0_2px_8px_rgba(28,28,30,0.08)]'
+                  }`}
+                >
+                  {line.text}
+                </span>
+                {line.time && (
+                  <span className="mt-[5px] pr-[4px] text-[9px] tabular-nums text-[#B9B9BF]">
+                    {line.time} · 已读
+                  </span>
+                )}
+              </div>
+            ))}
+            {/* 对话结束：细线 + Cove 字标安静浮出 */}
+            <div
+              className="mt-[22px] flex flex-col items-center gap-[9px]"
+              style={{ animation: `cove2-rise 900ms cubic-bezier(0.22,0.9,0.3,1) ${260 + CHAT_LINES.length * 300 + 320}ms both` }}
+            >
+              <span className="block h-[0.5px] w-[52px] bg-[#D6D6DC]" />
+              <span className="font-serif text-[24px] font-medium leading-none tracking-[0.26em] text-[#1C1C1E]" style={{ textIndent: '0.26em' }}>
+                Cove
+              </span>
+              <span className="text-[10.5px] tracking-[0.3em] text-[#B4B4BA]" style={{ textIndent: '0.3em' }}>
+                等的人，会回消息
+              </span>
+            </div>
+          </div>
+        </>
+      )}
 
-      {/* 中央文字组：偏上（夜空主题把中央让给月/星） */}
-      <div className="absolute inset-0 flex flex-col items-center justify-center gap-[13px] pt-[8%]">
-        {/* 顶部英文宽字距小字 */}
-        <p
-          className="font-serif text-[10.5px] font-medium uppercase tracking-[0.52em]"
-          style={{ ...rise(180), color: meta.sub, textIndent: '0.52em' }}
+      {/* ---------- 共用文字组（star/mist：居中版式；moon/chat 各有主题布局） ---------- */}
+      {(theme === 'star' || theme === 'mist') && (
+        <>
+          {/* 右侧竖排微字 */}
+          <span
+            className="absolute right-[16px] top-1/2 origin-center translate-y-[-50%] rotate-90 text-[8.5px] font-medium uppercase tracking-[0.5em]"
+            style={{ ...rise(1100), color: meta.sub, opacity: 0.75 }}
+          >
+            {meta.side}
+          </span>
+
+          {/* 中央文字组：偏上（夜空主题把中央让给月/星） */}
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-[13px] pt-[8%]">
+            {/* 顶部英文宽字距小字 */}
+            <p
+              className="font-serif text-[10.5px] font-medium uppercase tracking-[0.52em]"
+              style={{ ...rise(180), color: meta.sub, textIndent: '0.52em' }}
+            >
+              {meta.en}
+            </p>
+            {/* wordmark：衬线大字 */}
+            <h1
+              className="font-serif text-[46px] font-medium leading-none tracking-[0.2em]"
+              style={{ ...rise(400), color: meta.ink, textIndent: '0.2em' }}
+            >
+              Cove
+            </h1>
+            {/* 细分隔线 */}
+            <span className="block h-[0.5px] w-[64px]" style={{ ...rise(560), background: meta.sub, opacity: 0.55 }} />
+            {/* 中文诗行（宽字距） */}
+            <p
+              className="font-serif text-[12.5px] tracking-[0.34em]"
+              style={{ ...rise(680), color: meta.sub, textIndent: '0.34em' }}
+            >
+              {meta.cn}
+            </p>
+          </div>
+        </>
+      )}
+      {/* moon/chat：右侧竖排微字（主题布局不占右中轴） */}
+      {(theme === 'moon' || theme === 'chat') && (
+        <span
+          className="absolute right-[16px] top-1/2 origin-center translate-y-[-50%] rotate-90 text-[8.5px] font-medium uppercase tracking-[0.5em]"
+          style={{ ...rise(1100), color: theme === 'moon' ? meta.sub : '#C2C2C8', opacity: 0.75 }}
         >
-          {meta.en}
-        </p>
-        {/* wordmark：衬线大字 */}
-        <h1
-          className="font-serif text-[46px] font-medium leading-none tracking-[0.2em]"
-          style={{ ...rise(400), color: meta.ink, textIndent: '0.2em' }}
-        >
-          Cove
-        </h1>
-        {/* 细分隔线 */}
-        <span className="block h-[0.5px] w-[64px]" style={{ ...rise(560), background: meta.sub, opacity: 0.55 }} />
-        {/* 中文诗行（宽字距） */}
-        <p
-          className="font-serif text-[12.5px] tracking-[0.34em]"
-          style={{ ...rise(680), color: meta.sub, textIndent: '0.34em' }}
-        >
-          {meta.cn}
-        </p>
-      </div>
+          {meta.side}
+        </span>
+      )}
 
       {/* 底部左：LOCAL 实时时钟 */}
       <div
         className="absolute bottom-[30px] left-[26px] flex items-baseline gap-[7px] font-serif tabular-nums"
-        style={{ ...rise(980), color: meta.sub }}
+        style={{ ...rise(980), color: theme === 'moon' ? meta.ink : meta.sub }}
       >
         <span className="text-[8.5px] uppercase tracking-[0.3em]">Local</span>
         <span className="text-[15px] font-medium tracking-[0.12em]">{clock || '--:--'}</span>
@@ -362,10 +548,13 @@ export default function BootSplash() {
         <span className="relative grid h-[52px] w-[52px] place-items-center rounded-full">
           <span
             className="absolute inset-0 rounded-full border"
-            style={{ borderColor: meta.sub, opacity: 0.5, animation: 'cove2-pulse 2.2s cubic-bezier(0.4,0,0.6,1) infinite' }}
+            style={{ borderColor: theme === 'moon' ? meta.sub : meta.sub, opacity: 0.5, animation: 'cove2-pulse 2.2s cubic-bezier(0.4,0,0.6,1) infinite' }}
           />
-          <span className="absolute inset-0 rounded-full border" style={{ borderColor: meta.sub, opacity: 0.7 }} />
-          <span className="font-serif text-[9.5px] font-medium uppercase tracking-[0.24em]" style={{ color: meta.sub }}>
+          <span className="absolute inset-0 rounded-full border" style={{ borderColor: theme === 'moon' ? meta.sub : meta.sub, opacity: 0.7 }} />
+          <span
+            className="font-serif text-[9.5px] font-medium uppercase tracking-[0.24em]"
+            style={{ color: theme === 'moon' ? meta.ink : meta.sub }}
+          >
             Enter
           </span>
         </span>
@@ -376,7 +565,10 @@ export default function BootSplash() {
         <span
           className="absolute inset-y-0 left-0 w-[36%] rounded-full"
           style={{
-            background: `linear-gradient(90deg, ${meta.sub}00 0%, ${meta.sub}CC 45%, ${meta.sub} 60%, ${meta.sub}00 100%)`,
+            background:
+              theme === 'moon'
+                ? 'linear-gradient(90deg, rgba(251,252,254,0) 0%, rgba(251,252,254,0.8) 45%, rgba(251,252,254,1) 60%, rgba(251,252,254,0) 100%)'
+                : `linear-gradient(90deg, ${meta.sub}00 0%, ${meta.sub}CC 45%, ${meta.sub} 60%, ${meta.sub}00 100%)`,
             animation: 'cove2-sweep 1.35s cubic-bezier(0.4,0,0.6,1) infinite',
           }}
         />

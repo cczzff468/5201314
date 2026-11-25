@@ -49,6 +49,11 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="zh-CN" suppressHydrationWarning>
+      <head>
+        {/* 手写体（智芒星·分包 unicode-range 惰性加载）：开屏「雨落成诗」主题的
+            花体 cove + 散落诗行；情侣空间书信共用同一份（浏览器自动去重） */}
+        <link rel="stylesheet" href="/fonts/zhimangxing/font.css" />
+      </head>
       <body className={`${geistSans.variable} antialiased bg-background text-foreground`}>
         {children}
         <Toaster />

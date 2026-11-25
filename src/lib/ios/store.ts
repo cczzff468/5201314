@@ -476,7 +476,8 @@ interface SettingsState {
   /** 切换 App 图标（即时持久化本地 + 异步同步服务器 manifest 图标） */
   setAppIcon: (id: AppIconId) => void;
   /** 开屏动画主题三选一（第三十三轮）：star=星空月夜（默认）/ mist=霎中远山 /
-   *  moon=静月港湾；持久化 settings.splashTheme + localStorage（BootSplash 首帧同步读） */
+   *  moon=雨落成诗（第三十四轮重做）/ chat=对话（第三十四轮新增）；
+   *  持久化 settings.splashTheme + localStorage（BootSplash 首帧同步读） */
   splashTheme: CoveSplashTheme;
   /** 切换开屏动画主题（即时持久化：localStorage 同步写（下会冷启动首帧即生效）+ IndexedDB） */
   setSplashTheme: (t: CoveSplashTheme) => void;
@@ -991,10 +992,13 @@ export const useSettings = create<SettingsState>((set, get) => ({
         // App 图标三选一：无记录/非法值 = '1'（纯白压印 cove）
         appIcon:
           appIconRec?.value === '2' || appIconRec?.value === '3' ? appIconRec.value : '1',
-        // 开屏动画主题（第三十三轮）：IndexedDB 无记录/非法值时再兜底读一次
+        // 开屏动画主题（第三十四轮四选一）：IndexedDB 无记录/非法值时再兜底读一次
         // localStorage（同步）——冷启动 BootSplash 首帧就是它，设置页显示与之一致
         splashTheme:
-          splashThemeRec?.value === 'mist' || splashThemeRec?.value === 'moon' || splashThemeRec?.value === 'star'
+          splashThemeRec?.value === 'mist' ||
+            splashThemeRec?.value === 'moon' ||
+            splashThemeRec?.value === 'star' ||
+            splashThemeRec?.value === 'chat'
             ? splashThemeRec.value
             : readSplashTheme(),
         iconStyle,
@@ -1142,6 +1146,17 @@ export const useSettings = create<SettingsState>((set, get) => ({
     if (id !== '1' && id !== '2' && id !== '3') return;
     set({ appIcon: id });
     void localDB.put('settings', { key: 'appIcon', value: id });
+    // 第三十四轮「立马生效」：浏览器标签页 favicon 即时换新所选图标（无需刷新/重装）——
+    // <link rel="icon"> 全部重写指向 icon-{id}，下一帧标签页图标就是新选择
+    try {
+      if (typeof document !== 'undefined') {
+        document.querySelectorAll<HTMLLinkElement>('link[rel="icon"]').forEach((l) => {
+          l.href = l.href.replace(/icon-[123]-/, `icon-${id}-`);
+        });
+      }
+    } catch {
+      /* favicon 换写失败静默（不影响主流程） */
+    }
     // 同步服务器：PWA manifest 动态返回所选图标（添加到主屏幕/安装时生效）
     void fetch('/api/pwa/app-icon', {
       method: 'POST',
@@ -1151,7 +1166,7 @@ export const useSettings = create<SettingsState>((set, get) => ({
   },
 
   setSplashTheme: (t) => {
-    if (t !== 'star' && t !== 'mist' && t !== 'moon') return;
+    if (t !== 'star' && t !== 'mist' && t !== 'moon' && t !== 'chat') return;
     set({ splashTheme: t });
     // localStorage 同步写：下次冷启动 BootSplash 首帧（useLayoutEffect）即读到新主题
     writeSplashThemeSync(t);

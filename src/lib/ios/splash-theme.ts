@@ -1,8 +1,9 @@
 /**
- * 开屏动画主题（第三十三轮：三选一）——共享类型与同步读取器。
+ * 开屏动画主题（第三十四轮：四选一）——共享类型与同步读取器。
  *
  * star=星空月夜（默认·深夜星点+新月）/ mist=雾中远山（灰白雾面+三层山影）/
- * moon=静月港湾（夜空静水+月影光柱）。
+ * moon=雨落成诗（第三十四轮按机主参考图重做：蓝灰雨窗+水珠+涟漪+散落诗行+手写体 cove）/
+ * chat=对话（第三十四轮新增：白底聊天气泡逐条浮现——机主提供的土味情话对话）。
  *
  * 持久化双写：
  * - localStorage（同步可读）：BootSplash 首帧 useLayoutEffect 换主题，冷启动第一帧
@@ -11,7 +12,7 @@
  */
 'use client';
 
-export type CoveSplashTheme = 'star' | 'mist' | 'moon';
+export type CoveSplashTheme = 'star' | 'mist' | 'moon' | 'chat';
 
 /** localStorage 键（同步可读：首帧换主题零闪烁） */
 export const SPLASH_THEME_KEY = 'cove-splash-theme';
@@ -21,7 +22,7 @@ export function readSplashTheme(): CoveSplashTheme {
   try {
     if (typeof window === 'undefined') return 'star';
     const v = window.localStorage.getItem(SPLASH_THEME_KEY);
-    if (v === 'mist' || v === 'moon' || v === 'star') return v;
+    if (v === 'mist' || v === 'moon' || v === 'star' || v === 'chat') return v;
   } catch {
     /* 隐私模式等不可用：回默认 */
   }
