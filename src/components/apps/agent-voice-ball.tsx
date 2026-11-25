@@ -29,11 +29,11 @@
  *   喊唤醒名/点球都能唤起；真任务仍被原生闸拒绝并原样说明）+ 已解锁 +
  *   悬浮球开关 + 无 Agent 任务运行 + 无通话/来电
  *
- * D3 全局语音助手（长按唤起）在本组件上补齐（不重复造轮子）：
- * - 唤起：主屏长按空白 600ms → assistant-hold.requestAssistantHold()（openSeq 自增）→
- *   本组件订阅后打开会话直接开录（Siri 手势语义）；麦克风不可用/拒绝授权自动回退
- *   聚焦浮层内文字输入框；ESC/关闭按钮退出；会话打开期间其它 UI 冻结但不卸载
- *   （全屏暗化层挡住底层滚动/点击）
+ * D3 全局语音助手（第三十五轮：主屏长按唤起已按机主要求删除——assistant-hold
+ * 模块下线；唤起仅剩点悬浮球/喊唤醒名两条路）：
+ * - 唤起：点悬浮球/喊唤醒名 → 打开会话直接开录（Siri 手势语义）；麦克风不可用/拒绝
+ *   授权自动回退聚焦浮层内文字输入框；ESC/关闭按钮退出；会话打开期间其它 UI 冻结
+ *   但不卸载（全屏暗化层挡住底层滚动/点击）
  * - 视觉：会话底部上浮入场 + 光球四态（呼吸/监听/思考/说话，克制暖色板无蓝紫主色）+
  *   转写流单行流式（Web Speech 实时增量）+ 指令结果卡片淡入
  * - 指令路由（assistant-commands 本地正则零 LLM 延迟，置于天气/打开 App 直达之后、
@@ -52,8 +52,6 @@ import { useUI } from '@/lib/ios/store';
 import { useIncomingCall } from '@/lib/ios/incoming-call';
 import { useOfflineAsr } from '@/lib/ios/offline-asr';
 import { isNativePerception, requestMicPermission } from '@/lib/ios/native-perception';
-// D3 全局语音助手：主屏长按唤起信号（assistant-hold 独立小 store，启用默认开）
-import { useAssistantHold } from '@/lib/ios/assistant-hold';
 // D3 全局语音助手：指令路由层（发消息/闹钟/提醒/音乐/报时，本地正则零 LLM 延迟）
 import {
   matchSendMessageIntent,
@@ -212,11 +210,10 @@ export default function AgentVoiceBall() {
 
   // 挂载级开关：APP 原生壳看 autonomy 总闸；网页端只看悬浮球开关（v90.1 起网页也出球，
   // 喊唤醒名/点球都能唤起——修复「叫名字没反应」：此前网页整层不挂载）。
-  // D3：语音助手启用（assistant-hold，默认开）时本层也常驻——关掉悬浮球仍保留长按唤起的
-  // 全屏会话（悬浮球本体仍只随 ballLayerOn 显示，不因助手启用而冒出来）
+  // 第三十五轮：长按主屏唤起语音助手已按机主要求删除（assistant-hold 模块下线），
+  // 层挂载只随悬浮球开关（点悬浮球/喊唤醒名仍可唤起全屏会话）。
   const ballLayerOn = cfg.ball && (native ? autoOn : true);
-  const holdEnabled = useAssistantHold((s) => s.enabled);
-  const layerOn = ballLayerOn || holdEnabled;
+  const layerOn = ballLayerOn;
   // 瞬时隐藏（保持挂载：唤醒循环/探针不停，只是看不见）；会话打开时层保持可见（渲染处用 layerVisible）
   const visible = ballLayerOn && !locked && !screenOff && !switcherOpen && !agentRunning && !callActive && !incomingCall;
 
@@ -468,23 +465,6 @@ export default function AgentVoiceBall() {
     }
     return undefined;
   }, [sessionOpen]);
-
-  // ---- D3 主屏长按唤起（assistant-hold.openSeq 自增 → 打开会话直接开录）----
-  // 门槛与点悬浮球一致：锁屏/熄屏/多任务/通话/来电/Agent 任务运行中不唤起；
-  // 已开着视为「确认」，不重复打开（对话保留）。序号哨兵防 openSession 身份变化时误重开。
-  const holdSeq = useAssistantHold((s) => s.openSeq);
-  const lastHoldSeqRef = useRef(0);
-  useEffect(() => {
-    if (holdSeq <= lastHoldSeqRef.current) return;
-    lastHoldSeqRef.current = holdSeq;
-    const ui = useUI.getState();
-    if (ui.locked || ui.screenOff || ui.switcherOpen || ui.callActive || ui.alarmRinging) return;
-    if (useIncomingCall.getState().call) return;
-    if (agentRunningRef.current || sessionOpenRef.current) return;
-    clearFollowup();
-    vibrateSafely(18);
-    openSession({}); // 不问候直接开录（Siri 手势语义）；无麦环境 onStartError → 自动聚焦文字输入框
-  }, [holdSeq, openSession, clearFollowup]);
 
   // ---- D3 ESC 退出会话（键盘路径；捕获阶段优先于底层 Escape 处理并阻断冒泡）----
   useEffect(() => {

@@ -3,11 +3,9 @@
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { kvSet } from '@/lib/ios/idb-kv';
 import dynamic from 'next/dynamic';
-import { Plus, Search, X, Mic } from 'lucide-react';
+import { Plus, Search, X } from 'lucide-react';
 import { useUI, useSettings, useSystemDark, selectResolvedTheme, type AppId } from '@/lib/ios/store';
 import { shellScale } from '@/lib/ios/shell-scale';
-// D3 全局语音助手：主屏长按唤起信号 + 启用开关/唤起方式提示（独立小 store，localStorage 持久化）
-import { isAssistantHoldEnabled, markAssistantHintShown, requestAssistantHold, useAssistantHold } from '@/lib/ios/assistant-hold';
 import { useHomeWallpaperLight } from '@/lib/ios/foreground';
 import { localDB } from '@/lib/ios/db';
 // v1.9.21 吃醋锁网页降级：冻结 App 图标置灰 + 小锁角标 + 「由 XX 管理」标签
@@ -301,8 +299,6 @@ const LAYOUT_KEY = 'homeLayout';
 const DOCK_CAPACITY = 4;
 const LONG_PRESS_MS = 420;
 const MOVE_CANCEL_PX = 10;
-/** D3 全局语音助手：主屏长按空白处唤起时长（略长于进编辑的 420ms，松手在两者之间仍进编辑） */
-const ASSISTANT_HOLD_MS = 600;
 /** 页容量：含小组件的页（小组件行 + 3 行 App）/ 普通页 20 App */
 const PAGE_WIDGET_CAP = 14;
 const PAGE_CAP = 20;
@@ -1266,15 +1262,6 @@ export default function HomeScreen() {
   const phase = useUI((s) => s.phase);
   const homeVisible = !activeApp || phase === 'closing';
   const locked = useUI((s) => s.locked);
-  // D3 全局语音助手：唤起方式一次性提示（未展示过 + 助手启用时在主屏底部出现；
-  // 解锁进主屏起 6s 后或点按即标记已展示，localStorage 持久化不再打扰）
-  const holdHint = useAssistantHold((s) => s.enabled && !s.hintShown);
-  useEffect(() => {
-    // 停留在锁屏/主屏不可见期间不计时：解锁进主屏后才开始 6s 倒计时
-    if (!holdHint || !homeVisible || locked) return undefined;
-    const t = window.setTimeout(() => markAssistantHintShown(), 6000);
-    return () => window.clearTimeout(t);
-  }, [holdHint, homeVisible, locked]);
   // 主屏壁纸整体亮度：浅色壁纸（如白图）时图标标签/页点自动改深色，保证可读
   const wallpaperLight = useHomeWallpaperLight();
   // 深色模式（第六十七轮：文件夹 tile 适配深色——深色烟熏玻璃，与图标深色分支同源）
@@ -2940,9 +2927,8 @@ export default function HomeScreen() {
   };
 
   /** 空白处（非图标/小组件/按钮）按下：
-   *  - 未编辑 + 语音助手启用：按住 600ms → 唤起全屏语音助手（D3）；
-    期间 420~600ms 松手 → 松手时进入编辑（保留原有「长按进编辑」手感）；
-   *  - 未编辑 + 语音助手关闭：按住 420ms → 进入编辑模式（原有行为不变）；
+   *  - 未编辑：按住 420ms → 进入编辑模式（第三十五轮：长按唤起语音助手已按机主要求删除，
+ *    恢复纯「长按进编辑」原生手感）；
    *  - 编辑中：快速点按（≤350ms 且未移动）→ 退出编辑模式（用户要求点击空白取消编辑）；
    *  - 轻扫翻页：非编辑模式任意位置起手；编辑模式仅空白处起手（图标上起手 = 拖拽换位），
    *    保证编辑模式下也能左右滑动切换页面 */
@@ -2968,22 +2954,10 @@ export default function HomeScreen() {
     blankStart.current = { x: e.clientX, y: e.clientY };
     blankDownAt.current = performance.now();
     if (edit) return;
-    // D3 语音助手启用：空白长按阈值抬到 600ms（唤起助手）；420~600ms 的松手仍进编辑（见 rootPointerUp）。
-    // 期间移动手指超阈值取消（rootPointerMove 的 MOVE_CANCEL_PX 判定，防误触）
-    const holdOn = isAssistantHoldEnabled();
+    // 长按空白 420ms → 进入编辑模式；期间移动手指超阈值取消（rootPointerMove 判定，防误触）
     blankTimer.current = window.setTimeout(() => {
       blankTimer.current = null;
       blankStart.current = null;
-      if (holdOn) {
-        // 唤起全局语音助手：其它 UI 由全屏会话浮层冻结（不卸载）；麦克风不可用时浮层内自动回退文字输入
-        requestAssistantHold();
-        try {
-          navigator.vibrate?.(18);
-        } catch {
-          /* 震动不可用 */
-        }
-        return;
-      }
       compactPages();
       setEdit(true);
       try {
@@ -2991,7 +2965,7 @@ export default function HomeScreen() {
       } catch {
         /* 震动不可用 */
       }
-    }, holdOn ? ASSISTANT_HOLD_MS : LONG_PRESS_MS);
+    }, LONG_PRESS_MS);
   };
 
   const rootPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
@@ -3034,23 +3008,6 @@ export default function HomeScreen() {
     const start = blankStart.current;
     const downAt = blankDownAt.current;
     clearBlankPress();
-    // D3：语音助手启用时空白长按 600ms 已让位给唤起；420~600ms 之间的松手仍按旧手势进编辑
-    //（保留「长按主屏空白进编辑」能力，只是从「按到 420ms 即进」变成「按到 420ms 后松手即进」）
-    if (!edit && start && isAssistantHoldEnabled()) {
-      const dx = e.clientX - start.x;
-      const dy = e.clientY - start.y;
-      const held = performance.now() - downAt;
-      if (dx * dx + dy * dy <= MOVE_CANCEL_PX * MOVE_CANCEL_PX && held >= LONG_PRESS_MS && held < ASSISTANT_HOLD_MS) {
-        compactPages();
-        setEdit(true);
-        try {
-          navigator.vibrate?.(10);
-        } catch {
-          /* 震动不可用 */
-        }
-        return;
-      }
-    }
     if (!edit || !start) return;
     const dx = e.clientX - start.x;
     const dy = e.clientY - start.y;
@@ -3564,20 +3521,6 @@ export default function HomeScreen() {
           ))}
         </div>
       </div>
-      {/* D3 全局语音助手 · 唤起方式一次性提示（解锁进主屏首次出现，6s 自动或点按即标记已展示；
-          触控目标 ≥44px；不参与翻页/编辑交互（仅提示层） */}
-      {holdHint && homeVisible && !locked && !edit && !spotlight ? (
-        <button
-          type="button"
-          data-testid="assistant-hold-hint"
-          aria-label="知道了：长按主屏空白处可唤起语音助手"
-          onClick={() => markAssistantHintShown()}
-          className="absolute inset-x-0 bottom-[148px] z-[30] mx-auto flex h-11 w-fit max-w-[86%] items-center gap-2 rounded-full bg-black/55 px-[16px] text-[13px] font-medium text-white/90 backdrop-blur-xl ring-1 ring-white/15 transition-transform active:scale-95"
-        >
-          <Mic className="h-[15px] w-[15px] shrink-0" strokeWidth={2} aria-hidden="true" />
-          <span className="truncate">长按主屏空白处，唤起语音助手</span>
-        </button>
-      ) : null}
 
       {/* 弹性占位：分页视口改为绝对定位后，由它把页点/Dock 撑回屏幕底部 */}
       <div className="flex-1" />
