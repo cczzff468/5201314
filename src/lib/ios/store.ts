@@ -4,6 +4,7 @@ import { create } from 'zustand';
 import {
   readSplashTheme,
   writeSplashThemeSync,
+  writeSplashThemeCookie,
   type CoveSplashTheme,
 } from './splash-theme';
 import { startKeepAlive, stopKeepAlive } from './keepalive';
@@ -1018,6 +1019,9 @@ export const useSettings = create<SettingsState>((set, get) => ({
       if (!lockConfig.lockScreen) useUI.setState({ locked: false });
       // v80 后台保活：开机即按持久化状态拉起（冷启动无手势时音频通道等第一次交互自动续播）
       if (get().bgKeepAlive) startKeepAlive();
+      // 第三十五轮 cookie 自愈：老用户 localStorage/IndexedDB 已有主题但还没写过 cookie
+      //（cookie 是本轮才加的第三持久化源）——水合时补写，下次冷启动 SSR 首屏即正确主题
+      writeSplashThemeCookie(get().splashTheme);
     } catch {
       set({ loaded: true });
     }
@@ -1168,8 +1172,11 @@ export const useSettings = create<SettingsState>((set, get) => ({
   setSplashTheme: (t) => {
     if (t !== 'star' && t !== 'mist' && t !== 'moon' && t !== 'chat') return;
     set({ splashTheme: t });
-    // localStorage 同步写：下次冷启动 BootSplash 首帧（useLayoutEffect）即读到新主题
+    // localStorage 同步写：下次冷启动 BootSplash 首帧（useLayoutEffect）即读到新主题；
+    // cookie 同步写（第三十五轮）：下次冷启动 SSR 首屏就烤出所选主题——修「刚打开
+    // 先显示另一个开屏、几秒后才变所选」（APK WebView 水合前绘制的就是错误主题）
     writeSplashThemeSync(t);
+    writeSplashThemeCookie(t);
     void localDB.put('settings', { key: 'splashTheme', value: t });
   },
 

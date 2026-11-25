@@ -21,14 +21,20 @@
  * moon/chat 各有自己的主题布局（雨窗散排 / 气泡对话）。
  * 2.6s 后整层淡出（0.6s + 轻放大），完全卸载；点按任意处立即进入。
  *
- * 主题持久化：localStorage('cove-splash-theme') 同步可读（首帧 useLayoutEffect 换主题，
- * 首次绘制即正确、无闪无 hydration mismatch）+ settings store（设置页选择器同源）。
+ * 主题持久化三写（第三十五轮）：localStorage('cove-splash-theme') 同步可读
+ * （水合后 useLayoutEffect 校准主题，无闪无 hydration mismatch）+ cookie（服务端可读：
+ * page.tsx 把 initialTheme 烤进 SSR HTML——修「冷启动先显示另一个开屏几秒后才变
+ * 所选的」，APK WebView 水合前的绘制即正确主题）+ settings store（设置页同源）。
  * 挂载在 page.tsx 顶层（fixed 全屏 z-[9999]），每会话只播一次；
  * forceTheme：设置页「立马生效」预览——选完即整屏播放一遍所选主题（组件自卸载）。
  * 纯 CSS 动画（无 JS 定时器驱动动画，只有退场 setTimeout，卸载时清理）。
  */
 import { useEffect, useLayoutEffect, useState } from 'react';
-import { readSplashTheme, type CoveSplashTheme } from '@/lib/ios/splash-theme';
+import {
+  readSplashTheme,
+  writeSplashThemeCookie,
+  type CoveSplashTheme,
+} from '@/lib/ios/splash-theme';
 
 /** 开屏节奏：2.6s 起淡出（0.6s）→ 3.2s 完全卸载 */
 const HOLD_MS = 2600;
@@ -132,16 +138,30 @@ function localTime() {
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 }
 
-export default function BootSplash({ forceTheme }: { forceTheme?: CoveSplashTheme }) {
+export default function BootSplash({
+  /** 第三十五轮：SSR 首屏烤入的主题（page.tsx 服务端读 cookie）——修「刚打开先
+   *  显示另一个开屏、几秒后才变所选」：水合前 WebView 绘制的 SSR HTML 就是它；
+   *  与 localStorage 持久值同源（选择时双写），undefined = 无 cookie 回默认 star */
+  initialTheme,
+  /** 设置页「立马生效」预览：直接锁定指定主题播放 */
+  forceTheme,
+}: {
+  initialTheme?: CoveSplashTheme;
+  forceTheme?: CoveSplashTheme;
+}) {
   const [phase, setPhase] = useState<'hold' | 'fade' | 'gone'>('hold');
   const [clock, setClock] = useState('');
-  // 首帧恒 star（SSR/Client 一致防 hydration mismatch）；useLayoutEffect 在浏览器
-  // 首次绘制前同步换成本地持久化主题——用户看到的第一帧已是所选主题，零闪烁。
-  // forceTheme（设置页「立马生效」预览）：直接锁定指定主题播放。
-  const [theme, setTheme] = useState<CoveSplashTheme>('star');
+  // 初始主题优先级：forceTheme（设置预览）＞ initialTheme（SSR cookie 烤入，与
+  // localStorage 同源）＞ star（默认）。SSR 与 Client 首帧一致（cookie 服务端/
+  // 客户端读到的同值），无 hydration mismatch；
+  const [theme, setTheme] = useState<CoveSplashTheme>(forceTheme ?? initialTheme ?? 'star');
 
   useLayoutEffect(() => {
-    setTheme(forceTheme ?? readSplashTheme());
+    // 水合后按 localStorage（最权威的同步源）校准：cookie 缺失/过期/被清时以本地为准，
+    // 并自愈补写 cookie（老用户升级首启、清 cookie 重选等场景），下次冷启动 SSR 即正确
+    const local = readSplashTheme();
+    setTheme(forceTheme ?? local);
+    writeSplashThemeCookie(local);
   }, [forceTheme]);
 
   useEffect(() => {
