@@ -92,6 +92,31 @@ export function CustomWallpaperLayers({ url }: { url: string }) {
     const sideW = (W - fgW) / 2;
     const topH = (H - fgH) / 2;
     const bg = `url(${url})`;
+    // 第三十七轮「状态栏白色背景」根修：近距离补满。短缺 ≤ 64px 时不再用
+    // 「最外行/列拉伸」垫边——细窄的纯色垫边正好压在状态栏（挖孔带）下方，
+    // 机主看到的就是「状态栏有条白色/浅色背景」（真机截图实测 25px 条带
+    // 与照片比例短缺逐像素对上）。改为前景轻微放大铺满（≤8% 裁切肉眼无感，
+    // 与 cover 同几何）；大短缺（宽照片 letterbox）仍走延伸带——那是有意的留白设计。
+    const CLOSE_FILL_MAX = 64;
+    const closeFill = (topH > 0 && topH <= CLOSE_FILL_MAX) || (sideW > 0 && sideW <= CLOSE_FILL_MAX);
+    if (closeFill) {
+      layers = (
+        <div
+          aria-hidden="true"
+          className="absolute"
+          style={{
+            left: -OVER,
+            top: -OVER,
+            width: W,
+            height: H,
+            backgroundImage: bg,
+            backgroundSize: 'cover',
+            backgroundPosition: 'center',
+            backgroundRepeat: 'no-repeat',
+          }}
+        />
+      );
+    } else {
     // 边缘带背景：千倍放大后只露出最外一行/列（对 800px 高的图 ≈ 最外 0.8 行）
     const vBandSize = `100% ${Math.round(H * 1000)}px`;
     const hBandSize = `${Math.round(W * 1000)}px 100%`;
@@ -173,6 +198,7 @@ export function CustomWallpaperLayers({ url }: { url: string }) {
         />
       </>
     );
+    }
   }
 
   return (

@@ -1705,19 +1705,34 @@ html[data-app-native] {
   --app-sar: 0px;
   --app-sab: 0px;
   --app-sal: 0px;
-  /* 第三十四轮·状态栏再上提（机主连续三轮「状态栏往上一点」）：
-     顶部有效内缩量。旧壳（系统状态栏还在显示）= 全额安全区（不越系统条）；
-     新壳（系统状态栏已原生隐藏）= 挖孔高 × 28% —— 45% → 28%，时间/信号/电量
-     进一步贴近物理屏顶（真机 iPhone 侧文字距顶 8~14px 量级），自绘黑色灵动岛
-     同步上移更接近挖孔，App 内容同步上提、状态栏与内容间距不变；
-     无挖孔机型 sat=0 → eff=0 照旧顶到物理屏顶。 */
+  /* 第三十七轮「状态栏白色背景」彻底根除·兜底层：APK 里 html/body 一律压黑。
+     手机壳理论上铺满视口，但 overscroll 光晕/亚像素取整/旧 WebView 布局毛刺
+     任何一刻露出 body 白底（浅色主题 bg-background=纯白）都会变成顶部白条；
+     压黑后即使露出也是「iPhone 边框黑」，永不再是白色。 */
+  background: #000;
+}
+html[data-app-native] body {
+  background: #000 !important;
+}
+html[data-app-native] [data-pwa-wrap] {
+  /* 竖屏浅色底 #dcdce1 是桌面端留白观感；APK 全屏模式没有留白语义，压黑 */
+  background: #000 !important;
+}
+/* 第三十四轮·状态栏再上提（机主连续三轮「状态栏往上一点」）：
+   顶部有效内缩量。旧壳（系统状态栏还在显示）= 全额安全区（不越系统条）；
+   新壳（系统状态栏已原生隐藏）= 挖孔高 × 28% —— 45% → 28%，时间/信号/电量
+   进一步贴近物理屏顶（真机 iPhone 侧文字距顶 8~14px 量级），自绘黑色灵动岛
+   同步上移更接近挖孔，App 内容同步上提、状态栏与内容间距不变；
+   无挖孔机型 sat=0 → eff=0 照旧顶到物理屏顶。 */
+html[data-app-native] {
   --app-sat-eff: var(--app-sat, 0px);
 }
 html[data-app-native][data-shell-fullscreen] {
   --app-sat-eff: calc(var(--app-sat, 0px) * 0.28);
 }
 /* ④ 页面永不滚动：外层是 100svh 全屏壳，body 没有滚动语义；
-   overscroll-behavior 顺手关掉 WebView 边缘回弹光晕 */
+   overscroll-behavior 顺手关掉 WebView 边缘回弹光晕；
+   第三十七轮：背景压黑兜底（见上方 html[data-app-native] 注释——顶部白条根除） */
 html[data-app-native] body {
   overflow: hidden;
   overscroll-behavior: none;

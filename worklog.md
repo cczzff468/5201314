@@ -3768,3 +3768,20 @@ Stage Summary:
 - 六项全部闭环且浏览器端到端实测：电池 SVG 分段边框（像素级验证）、星空对话开屏（VLM 全要素确认）、多任务真实界面 305×660（VLM 确认真实设置 UI 零灰块+局部禁作用域精修保住浏览器毛玻璃背景）、APK 前景 72dp 居中（程序化 alpha bbox 验证）、设置三移动+组改名（VLM 滚动验证三问全过）、PWA 换图标机制如实说明
 - 灰块修复方案演进两步：全局禁 backdrop-filter（会误伤切换器自身毛玻璃）→ .bf-off-zone 卡片预览区局部禁（精确命中元凶：卡片内 App 组件 backdrop-blur 嵌套）
 - lint 0 errors；reload 后 console 0 errors；APK v2.4.20 重打含图标前景根修
+
+---
+Task ID: 38（第三十七轮）
+Agent: 主控 Agent（Z.ai Code）
+Task: 机主五项反馈——多任务后台卡片功能删除 + 对话开屏动画变星空（211103 参考图：金月星尘星空）+ 电池图标内部圆角圆一点点 + 有的界面系统状态栏还是有白色的背景（211431/211345 截图：顶部 25px 物理条带，完全解决）+ APP 不下载点击换图标问答
+
+Work Log:
+- 【多任务切换器整件删除】机主定夺（Android WebView 上卡片渲染始终不稳，第三十四/三十六两轮修复仍有灰块）：①删 AppSwitcher.tsx 组件+PhoneShell 挂载；②底部上滑手势改 iOS 同语义「回主屏幕」（exitForegroundApp；App 前台时退出、主屏无动作；来电/响铃/编辑/通话/语音按住守卫全保留）；③store openSwitcher/closeSwitcher 留空实现防旧调用点报错+killApp 删除（无调用方）+switcherOpen 字段保留恒 false（30+ 处读点零改动）+删两个 now-unused import；④globals.css 删 .ph-switcher-top 与 .bf-off-zone（切换器专用规则）；⑤recentApps 保留——AI 感知「最近用过应用」上报（web-usage-ledger）仍用
+- 【对话开屏动画星空化·机主参考图逐元素复刻】参考图（211103 金月星尘锁屏风）六要素全复刻：①午夜蓝夜空渐变(#0A0E1E→#141B34→#1C2648→#0C1124)+左上暖金/右下深蓝星云光晕缓漂；②四芒星 15 颗（凹边四角星 SVG path+drop-shadow 光晕+cove5-sparkle 缩放透明双呼吸，白/金两色）；③星尘簇三团（左上/中左/右下，小点微闪 cove3-twinkle）；④右上大金新月 118px·开口朝左（SVG circle+mask 挖左侧暗圆——挖区透明直接透夜空渐变零色差；金 radialGradient 充体+6 处斑驳纹理同 mask 裁内+外圈金色光晕呼吸+缓浮微转）；⑤金色星尘光带三条（M294,186 蜿蜒至 (58,712) 等——底层静态整段微光+上层 dash 段沿路径流动（stroke-dashoffset 320→0 位移=流星拖尾从月牙滑向左下）+沿线金色小星尘 5 颗 SMIL 微闪）；⑥情话散排（机主纯白右挂/Cove 暖金左挂/末句居中两行放大「我一直在你心里，/不是吗」显式断行防孤字+金色系收束：细线+小金月牙+Cove 字标+尾注）；⑦useId 唯一化 SVG defs id（顶层实例与设置页 forceTheme 预览实例短暂并存防串定义）；⑧设置页微缩预览同步（金月+星点+光带，desc「金月 · 星尘 · 情话」）+删旧气泡实现（cove4-bubble/typing keyframes）；验证：VLM 确认金月开口朝左+斑驳纹理、四芒星、光带拖尾、散排情话可读、Cove 字标收束、断行自然 ✓
+- 【电池图标内部圆角】机主「内部圆角圆一点点」：填充方角 → rx 2.2 柔和小圆（0 太硬/旧版大圆角又「太圆」的折中）；宽度改按电量比例精确（=clipW），左右两端同圆角、上下仍全高贴内缘（「整体大小一样」不裁腰）、100% 四角微圆；绘制次序保证零瑕疵（填充先画、同色描边后画盖住角部与描边带的 0.8px 溢出）；验证：设置弹窗 67% 预览 VLM 确认「填充右端小圆角、上下顶满内腔、边框左黑右灰」✓
+- 【状态栏白色背景·彻底根除三管齐下】机主两张截图逐像素分析：条带=0→25px 物理（8.3dp@3x）恰=sat-eff 挖孔带高度，且「下方内容从 25px 整齐开始」与自定义壁纸「contain+边缘延伸带」的短缺几何逐像素对上——三条根除：①【壁纸近距离补满】WallpaperLayers 短缺 ≤64px 时不再用「最外行/列拉伸」垫边（细窄纯色垫边压在状态栏下就是机主看到的白条），改 cover 轻微放大铺满（≤8% 裁切肉眼无感；大短缺宽照片仍走延伸带=有意 letterbox）；②【APK 压黑兜底】html[data-app-native]/body/[data-pwa-wrap] 一律 background #000（浅色主题 body=纯白，overscroll 光晕/亚像素取整/旧 WebView 毛刺任何一刻露白都变白条；压黑后露出也只是「iPhone 边框黑」永非白）；③【多任务切换器删除】消灭 WebView 下最不稳定的 bleed 面（其毛玻璃/静态缩图分支全随之删除）；验证：①上传 1080×2200 顶 3 行米色测试图（旧代码会渲染 ~20px 平色条带）→修复后 y=0 即壁纸深蓝内容零条带（DOM 确认 cover 层已替代延伸带）✓ ②APK sim（sat=96/sat-eff=26.88）壁纸下 0→27px 连续深蓝 ✓ ③19 个 App 出血带色与内容逐段一致（weather 蓝/music 粉/qq 紫等全 band=content）✓
+- 【PWA/APK 不下载点击换图标问答】（沿用第三十六轮已答机制，本轮口头再答）：Chrome/Edge PWA=manifest 动态路由 no-store，下次打开自动换桌面图标（免下载）；iOS Safari 主屏图标=安装时快照需重新添加；APK 原生图标=随新包重装
+
+Stage Summary:
+- 五项全部闭环：切换器删除（上滑改回主屏+store 空实现零破坏）、星空开屏六要素 VLM 全确认、电池 rx 2.2（67% 预览验证）、状态栏白条三管齐下（壁纸近距离补满实测零条带+APK 压黑+切换器删除）、PWA 问答
+- 状态栏白条根因定位方法论：截图像素扫描（25px=8.3dp=sat-eff 25/28≈89%）+壁纸 contain 几何反推（1080×2200→topH≈20px）+DOM 层序核查——三条候选源全部封死，浏览器端无法复现 APK 环境也用 data-app-native 模拟全链验证
+- lint 0 errors；dev server 编译无错；agent-browser 端到端实测（解锁→上传壁纸→像素采样→APK sim 出血带→设置弹窗电池预览→开屏两时点截图 VLM）
