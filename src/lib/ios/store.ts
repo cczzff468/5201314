@@ -332,7 +332,22 @@ export interface WallpaperPreset {
   base: string;
 }
 
+/** 壁纸预设（第三十九轮新增前两项：机主上传的两张图——浅滩小鲨（默认主屏）/初雪情书（默认锁屏）） */
 export const WALLPAPER_PRESETS: WallpaperPreset[] = [
+  {
+    id: 'shark-reef',
+    name: '浅滩小鲨',
+    css: 'url(/wallpapers/shark-reef.jpg) center / cover no-repeat',
+    light: true,
+    base: '#d8e0e6',
+  },
+  {
+    id: 'snow-lyrics',
+    name: '初雪情书',
+    css: 'url(/wallpapers/snow-lyrics.jpg) center / cover no-repeat',
+    light: true,
+    base: '#d4d7df',
+  },
   {
     id: 'dark-stream',
     name: '暗流',
@@ -587,9 +602,9 @@ interface SettingsState {
 export const useSettings = create<SettingsState>((set, get) => ({
   // 主题默认浅色（用户要求）；load 时无记录/一次性迁移后也回退到浅色
   theme: 'light',
-  wallpaperPreset: 'graphite',
+  wallpaperPreset: 'shark-reef',
   customWallpaperUrl: null,
-  lockWallpaperPreset: 'graphite',
+  lockWallpaperPreset: 'snow-lyrics',
   lockCustomWallpaperUrl: null,
   apiConfig: { ...DEFAULT_API_CONFIG },
   apiPresets: [],
@@ -738,7 +753,7 @@ export const useSettings = create<SettingsState>((set, get) => ({
       }
       if (themeReset) void localDB.put('settings', { key: 'themeDefaultLight', value: true });
 
-      let wallpaperPreset = 'graphite';
+      let wallpaperPreset = 'shark-reef';
       let customWallpaperUrl: string | null = null;
       if (wallpaperRec && typeof wallpaperRec.value === 'object' && wallpaperRec.value !== null) {
         const w = wallpaperRec.value as { preset?: unknown; customBlob?: unknown };
@@ -749,8 +764,8 @@ export const useSettings = create<SettingsState>((set, get) => ({
         }
       }
 
-      // 锁屏壁纸（完全独立，默认 graphite）：{ preset, customBlob } 同时记录，移除自定义后可回退到已选预设
-      let lockWallpaperPreset = 'graphite';
+      // 锁屏壁纸（完全独立，默认 snow-lyrics）：{ preset, customBlob } 同时记录，移除自定义后可回退到已选预设
+      let lockWallpaperPreset = 'snow-lyrics';
       let lockCustomWallpaperUrl: string | null = null;
       if (lockWallpaperRec && typeof lockWallpaperRec.value === 'object' && lockWallpaperRec.value !== null) {
         const lw = lockWallpaperRec.value as LockWallpaperRecord;
@@ -760,6 +775,24 @@ export const useSettings = create<SettingsState>((set, get) => ({
         if (lw.customBlob instanceof Blob) {
           lockCustomWallpaperUrl = URL.createObjectURL(lw.customBlob);
         }
+      }
+
+      // 第三十九轮一次性壁纸迁移（wp39 标记）：机主上传两张新图设为默认——
+      // 主屏 → 浅滩小鲨（航拍浅滩小鲨鱼）/ 锁屏 → 初雪情书（雪景歌词）。存量设备的
+      // IndexedDB 里已有旧默认（石墨黑）记录，改默认值对老记录无效——这里无标记时
+      // 强制切换一次（仅「无自定义壁纸」时覆盖，上传过的自定义图原样保留），并把新
+      // 预设值 + wp39 标记落库，之后重启不再介入（用户此后仍可自由改回任何预设）
+      const wp39Rec = await localDB.get('settings', 'wp39');
+      if (!wp39Rec) {
+        if (!customWallpaperUrl) {
+          wallpaperPreset = 'shark-reef';
+          void localDB.put('settings', { key: 'wallpaper', value: { preset: 'shark-reef' } });
+        }
+        if (!lockCustomWallpaperUrl) {
+          lockWallpaperPreset = 'snow-lyrics';
+          void localDB.put('settings', { key: 'lockWallpaper', value: { preset: 'snow-lyrics' } });
+        }
+        void localDB.put('settings', { key: 'wp39', value: true });
       }
 
       let apiConfig: ApiConfig = { ...DEFAULT_API_CONFIG };
