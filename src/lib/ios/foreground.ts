@@ -71,14 +71,14 @@ export function useLightForeground(region: 'top' | 'bottom' = 'top'): boolean {
   const toneOverride = useStatusBarTone();
 
   if (callActive) return true; // 电话通话全屏层（深色渐变，盖在 App 上）→ 白前景
-  if (activeApp && !switcherOpen) {
-    // 屏幕级基调最优先（锁屏时页面虽仍挂载但状态栏在锁屏壁纸上，基调不越界）；
-    // 无覆盖时回落 App 静态声明/主题
-    if (toneOverride && !locked) return toneOverride === 'light';
-    return APP_STATUS_BAR_LIGHT[activeApp] ?? dark;
-  }
   if (torchOpen) return false; // 全屏白 → 黑前景
   if (alarmRinging) return dark; // 响铃弹层为背景色 → 随主题
+  // 屏幕级基调最优先（第四十二轮：从「仅 App 前台时生效」扩为全屏层通用——语音助手会话
+  // 等深色全屏层在主屏上打开时也要白字；锁屏/切换器时页面虽仍挂载但状态栏在锁屏壁纸上，基调不越界）
+  if (toneOverride && !locked && !switcherOpen) return toneOverride === 'light';
+  if (activeApp && !switcherOpen) {
+    return APP_STATUS_BAR_LIGHT[activeApp] ?? dark;
+  }
   // 锁屏（无 App 前台）时永远用锁屏壁纸（锁屏壁纸已完全独立），其余用主屏壁纸
   return !lightWallpaper || lockCameraOpen;
 }

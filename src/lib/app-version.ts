@@ -11,9 +11,9 @@
  */
 
 /** 当前最新版本（纯网页热更时与 APK versionName 可短暂不同步，下次重打 APK 对齐） */
-export const APP_VERSION = '2.4.24';
+export const APP_VERSION = '2.4.25';
 /** 版本号数字（与 android-shell versionCode 保持一致；覆盖安装要求只增不减；纯网页热更不动） */
-export const APP_VERSION_CODE = 88;
+export const APP_VERSION_CODE = 89;
 
 export interface AppReleaseNote {
   version: string;
@@ -24,6 +24,15 @@ export interface AppReleaseNote {
 
 /** 版本历史（新→旧；设置 › APP 更新 页渲染，最新一条即当前版本） */
 export const APP_RELEASE_NOTES: AppReleaseNote[] = [
+  {
+    version: '2.4.25',
+    date: '2026-11-26',
+    items: [
+      '【需重装 APK · versionCode 89】开屏闪屏对齐新默认图标：情书字标（机主原图）——上一版 v88 忘了重生成 splash（仍是小词灵），本轮补齐',
+      '【网页热更·免重装】云端助手大升级：新增「云备份与恢复」（聊天/记忆/联系人/世界书/论坛全量备份进你自己的 Supabase，手动备份/二次确认恢复/每天每周自动备份）；新增「离线消息推送」（Supabase Realtime 监听新消息表，App 后台时手机系统横幅通知，点击直达聊天）',
+      '【网页热更·免重装】换图标失败提示升级：一键「立即更新 App」按钮直拉更新弹窗；旧壳看门狗分层（不再误报失败）；语音助手唤起界面顶部白条根治（黑底铺满全屏 + 状态栏强制白字）；删除上滑通知中心后续：App 图标弹窗说明文案删除；开屏动画与 App 图标同卡片；ClawBox 命名三件（入口行=云端助手，真机接入页签=ClawBox）+ Supabase 令牌页一键打开按钮',
+    ],
+  },
   {
     version: '2.4.24',
     date: '2026-11-26',

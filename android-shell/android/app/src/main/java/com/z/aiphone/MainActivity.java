@@ -483,15 +483,16 @@ public class MainActivity extends BridgeActivity {
          *  transparent 透明融合=物理系统条常驻透明显示+内容全额安全区避让 / hidden 完全隐藏=
          *  三通道隐藏真全屏）；statusBarMode 字段同步上报当前模式（诊断用，网页以 IndexedDB
          *  为权威源不依赖此字段）。
-         *  v2.4.24（第四十一轮）：版本同步 88 / 2.4.24（图标五变体：3 号情书字标换机主
+         *  v2.4.25（第四十二轮）：版本同步 89 / 2.4.25（开屏闪屏对齐情书字标默认图标）。
+         *  v2.4.24（第四十一轮）：图标五变体：3 号情书字标换机主
          *  原图设默认 + 新增 5 号元气气泡；switchAppIcon 升级返回状态串 'ok'/'bad_alias'
          *  ——网页侧据此立即恢复旧壳不支持的切换，根治「卡在正在为您更换图标」）。 */
         @JavascriptInterface
         public String getShellInfo() {
             JSONObject o = new JSONObject();
             try {
-                o.put("versionCode", 88);
-                o.put("versionName", "2.4.24");
+                o.put("versionCode", 89);
+                o.put("versionName", "2.4.25");
                 o.put("fullscreen", true); // 壳能力标记：v2.4.9+（系统条可原生隐藏/显示）
                 o.put("statusBarMode", statusBarMode); // v2.4.22：当前状态栏外观模式
             } catch (Exception ignored) {
