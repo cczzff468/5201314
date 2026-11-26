@@ -9,6 +9,8 @@
  * - setSystemBarStyles(statusStyle, navStyle)（v2.4.9）：状态栏/导航栏图标明暗分别设置——
  *   状态栏临时呼出时浮在顶部背景上、按顶色；导航栏常驻底部、按底色（上下双色壁纸不错色）。
  *   'LIGHT'=深色图标配浅背景，'DARK'=白色图标配深背景，'DEFAULT'=随系统主题。
+ * - setStatusBarMode(mode)（v2.4.22·第三十九轮）：状态栏外观模式——'transparent' 透明融合
+ *   （物理系统条常驻透明显示）/ 'hidden' 完全隐藏（三通道隐藏真全屏沉浸）。
  *
  * 注意：安全区 CSS 变量的「预注入」不在本模块——layout.tsx 的 body 首位内联脚本在
  * HTML 解析期同步读取本桥（早于首帧），React 水合后任何组件都可直接用 var(--app-sat) 等
@@ -23,6 +25,9 @@ export interface NativeSafeArea {
 }
 
 export type NativeBarStyle = 'LIGHT' | 'DARK' | 'DEFAULT';
+
+/** 状态栏外观模式（第三十九轮）：transparent=透明融合 / hidden=完全隐藏 */
+export type NativeStatusBarMode = 'transparent' | 'hidden';
 
 export type AppIconAliasId = '1' | '2';
 
@@ -40,6 +45,7 @@ interface NativeBridge {
   setSystemBarStyles?(statusStyle: NativeBarStyle, navStyle: NativeBarStyle): void;
   getCurrentIcon?(): string;
   switchAppIcon?(alias: string): void;
+  setStatusBarMode?(mode: string): void;
 }
 
 declare global {
@@ -122,5 +128,29 @@ export function getNativeCurrentIcon(): AppIconAliasId | null {
     return raw === '1' || raw === '2' ? raw : null;
   } catch {
     return null;
+  }
+}
+
+/** v2.4.22+ 壳判定（第三十九轮）：状态栏模式桥是否存在（旧壳/浏览器恒 false——
+ *  网页侧据此决定透明模式下自绘状态栏是否让位给物理系统条，防双状态栏） */
+export function hasNativeStatusBarMode(): boolean {
+  if (typeof window === 'undefined') return false;
+  const N = window.AIPhoneNative;
+  return !!N && typeof N.setStatusBarMode === 'function';
+}
+
+/** v2.4.22 状态栏外观模式（第三十九轮）：'transparent'（透明融合·物理系统条常驻透明
+ *  显示+内容全额安全区避让）/ 'hidden'（完全隐藏·三通道隐藏真全屏）。
+ *  返回是否成功送达原生（旧壳/浏览器恒 false，调用方静默降级为纯网页行为）；
+ *  原生侧同步写 SharedPreferences，冷启动 onCreate 即按记忆模式布局（防首帧闪错）。 */
+export function setNativeStatusBarMode(mode: NativeStatusBarMode): boolean {
+  if (typeof window === 'undefined') return false;
+  const N = window.AIPhoneNative;
+  if (!N || typeof N.setStatusBarMode !== 'function') return false;
+  try {
+    N.setStatusBarMode(mode);
+    return true;
+  } catch {
+    return false;
   }
 }

@@ -5,6 +5,8 @@
 
 import {
   Check,
+  Eye,
+  EyeOff,
   Monitor,
   Moon,
   Sun,
@@ -14,6 +16,7 @@ import type { LucideIcon } from 'lucide-react';
 
 import {
   useSettings,
+  type StatusBarMode,
   type ThemeMode,
 } from '@/lib/ios/store';
 
@@ -31,11 +34,30 @@ export function ThemePage({ onBack }: { onBack: () => void }) {
   const theme = useSettings((s) => s.theme);
   const setTheme = useSettings((s) => s.setTheme);
   const appIcon = useSettings((s) => s.appIcon);
+  const statusBarMode = useSettings((s) => s.statusBarMode);
+  const setStatusBarMode = useSettings((s) => s.setStatusBarMode);
 
   const options: { value: ThemeMode; label: string; icon: LucideIcon }[] = [
     { value: 'light', label: '浅色', icon: Sun },
     { value: 'dark', label: '深色', icon: Moon },
     { value: 'auto', label: '跟随系统', icon: Monitor },
+  ];
+
+  // 状态栏模式两选一（第三十九轮：机主需求「状态栏外观设置」）
+  const sbModes: { value: StatusBarMode; label: string; desc: string; icon: LucideIcon; recommended?: boolean }[] = [
+    {
+      value: 'transparent',
+      label: '透明融合',
+      desc: '背景透明融入顶部 · 保留时间电量 WiFi',
+      icon: Eye,
+      recommended: true,
+    },
+    {
+      value: 'hidden',
+      label: '完全隐藏',
+      desc: '真全屏沉浸 · 从屏幕顶部下拉可临时呼出',
+      icon: EyeOff,
+    },
   ];
 
   return (
@@ -60,7 +82,56 @@ export function ThemePage({ onBack }: { onBack: () => void }) {
         })}
       </GroupCard>
 
-      {/* App 图标（第三十八轮：机主要求「设置→外观」放图标网格）——四选一点选即换：
+      {/* 状态栏模式（第三十九轮：机主规格两选一）——点选即生效并持久化（本地数据库 +
+          localStorage 首帧镜像 + APK 原生 SharedPreferences 三写，重启自动应用）：
+          透明融合 = 状态栏背景透明与 App 顶部背景融为一体（保留时间/电量/WiFi）；
+          完全隐藏 = 彻底隐藏物理状态栏真全屏（顶边下拉临时呼出）。 */}
+      <div className="mt-4">
+        <p className="mb-2 px-1 text-[12.5px] font-medium text-black/45 dark:text-white/45">状态栏模式</p>
+        <div
+          role="radiogroup"
+          aria-label="状态栏模式"
+          data-testid="statusbar-mode-group"
+          className="divide-y divide-black/[0.05] overflow-hidden rounded-[22px] bg-white/55 shadow-[0_8px_28px_rgba(17,24,39,0.06)] ring-1 ring-white/70 backdrop-blur-2xl dark:divide-white/[0.06] dark:bg-white/[0.06] dark:ring-white/[0.09]"
+        >
+          {sbModes.map((o) => {
+            const Icon = o.icon;
+            const sel = statusBarMode === o.value;
+            return (
+              <button
+                key={o.value}
+                type="button"
+                role="radio"
+                aria-checked={sel}
+                aria-label={`${o.label}（${o.desc}）`}
+                data-testid={`statusbar-mode-${o.value}`}
+                onClick={() => setStatusBarMode(o.value)}
+                className="flex min-h-[54px] w-full items-center gap-3 px-4 py-1.5 text-left transition-colors active:bg-muted/50"
+              >
+                <Icon className="h-5 w-5 shrink-0 text-muted-foreground" strokeWidth={2} />
+                <span className="min-w-0 flex-1">
+                  <span className="flex items-center gap-1.5">
+                    <span className="text-[16px]">{o.label}</span>
+                    {o.recommended && (
+                      <span className="rounded-full bg-[#007AFF]/[0.1] px-1.5 py-[1px] text-[9.5px] font-medium text-[#007AFF]">
+                        推荐
+                      </span>
+                    )}
+                  </span>
+                  <span className="mt-0.5 block truncate text-[11.5px] text-muted-foreground">{o.desc}</span>
+                </span>
+                {sel && <Check className="h-5 w-5 shrink-0 text-foreground" strokeWidth={2.5} />}
+              </button>
+            );
+          })}
+        </div>
+        <p className="mt-2.5 px-1 text-[11px] leading-relaxed text-muted-foreground">
+          选择即生效并保存到本地数据库，重启后自动应用；透明模式下内容自动避让状态栏与
+          刘海（safe-area），隐藏模式下内容顶格全屏。APK 端需 v2.4.22+ 壳生效原生系统条切换。
+        </p>
+      </div>
+
+      {/* App 图标（第三十八轮：机主要求「设置→外观」放图标网格；第三十九轮两选一）——点选即换：
           APK 端原生 activity-alias 切换（免重装、旧图标消失新图标上桌面、App 退回桌面）；
           浏览器/PWA 端 manifest 动态接口自动跟随（Chrome/Edge 下次打开时生效）。 */}
       <div className="mt-4">

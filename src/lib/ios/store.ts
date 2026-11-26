@@ -1,6 +1,7 @@
 'use client';
 
 import { create } from 'zustand';
+import { setNativeStatusBarMode, type StatusBarMode } from './native-shell';
 import {
   readSplashTheme,
   writeSplashThemeSync,
@@ -428,6 +429,9 @@ export const APP_ICON_IDS: AppIconId[] = ['1', '2'];
 /** 开屏动画主题（第三十三轮三选一）：star=星空月夜（默认）/ mist=雾中远山 / moon=静月港湾；
  *  定义在 ./splash-theme（BootSplash 与设置页共用），此处 re-export 供消费方从 store 统一引入 */
 export type { CoveSplashTheme } from './splash-theme';
+/** 状态栏外观模式（第三十九轮）：transparent=透明融合 / hidden=完全隐藏；
+ *  定义在 ./native-shell（桥层），此处 re-export 供设置页等从 store 统一引入 */
+export type { StatusBarMode } from './native-shell';
 /** App 显示名（第三十一轮改名） */
 export const APP_DISPLAY_NAME = 'Cove';
 
@@ -477,6 +481,14 @@ interface SettingsState {
   appFontScale: number;
   /** 顶部状态栏显示开关（Task 36）：false = 隐藏时间/信号/电量状态栏（灵动岛为硬件开孔保留） */
   statusBarVisible: boolean;
+  /** 状态栏外观模式（第三十九轮）：transparent=透明融合（推荐·状态栏背景透明与顶部背景
+   *  融为一体，保留时间/电量/WiFi；v2.4.22+ APK 物理系统条常驻透明显示，自绘状态栏让位） /
+   *  hidden=完全隐藏（彻底隐藏状态栏真全屏沉浸；顶边下拉可临时呼出——APK 走系统
+   *  IMMERSIVE_STICKY，浏览器走 PhoneShell 顶边手势）；持久化 settings.statusBarMode
+   *  + localStorage 首帧镜像 + 原生 SharedPreferences 三写，重启自动应用） */
+  statusBarMode: StatusBarMode;
+  /** 切换状态栏外观模式（即时持久化 + localStorage 镜像 + 原生桥切换物理系统条） */
+  setStatusBarMode: (mode: StatusBarMode) => void;
   /** 灵动岛常驻开关：true = 顶部黑色胶囊灵动岛常驻显示；false = 隐藏基础胶囊，
    *  只显示 APP 灵动岛（音乐岛大/小窗、美团/淘宝配送岛、灵动岛通知卡、来电胶囊等）。
    *  与状态栏开关独立：关灵动岛不影响状态栏文字/图标 */
@@ -624,6 +636,7 @@ export const useSettings = create<SettingsState>((set, get) => ({
   appFontScale: 1,
   appFontWeight: 400,
   statusBarVisible: true,
+  statusBarMode: 'transparent',
   islandPersistent: true,
   // 电量百分比默认图标外部（升级用户的现行样式不变）
   batteryPercent: 'outside',
@@ -644,7 +657,7 @@ export const useSettings = create<SettingsState>((set, get) => ({
   load: async () => {
     if (get().loaded) return;
     try {
-      const [themeRec, wallpaperRec, lockWallpaperRec, apiRec, presetsRec, apiFallbacksRec, visionRec, visionPresetsRec, lockRec, profileRec, iconsRec, ttsRec, sttRec, imgGenRec, imgGenPresetsRec, fontRec, fontScaleRec, fontWeightRec, statusBarRec, iconStyleRec, goodsImgStyleRec, themeResetRec, islandPersistentRec, assistViewerRec, assistQuickOpsRec, bubbleStyleRec, bubbleSchemesRec, liquidSkinRec, chatDecorRec, customCssRec, bgKeepAliveRec, batteryPercentRec, appIconRec, splashThemeRec] = await Promise.all([
+      const [themeRec, wallpaperRec, lockWallpaperRec, apiRec, presetsRec, apiFallbacksRec, visionRec, visionPresetsRec, lockRec, profileRec, iconsRec, ttsRec, sttRec, imgGenRec, imgGenPresetsRec, fontRec, fontScaleRec, fontWeightRec, statusBarRec, statusBarModeRec, iconStyleRec, goodsImgStyleRec, themeResetRec, islandPersistentRec, assistViewerRec, assistQuickOpsRec, bubbleStyleRec, bubbleSchemesRec, liquidSkinRec, chatDecorRec, customCssRec, bgKeepAliveRec, batteryPercentRec, appIconRec, splashThemeRec] = await Promise.all([
         localDB.get('settings', 'theme'),
         localDB.get('settings', 'wallpaper'),
         localDB.get('settings', 'lockWallpaper'),
@@ -664,6 +677,7 @@ export const useSettings = create<SettingsState>((set, get) => ({
         localDB.get('settings', 'appFontScale'),
         localDB.get('settings', 'appFontWeight'),
         localDB.get('settings', 'statusBarVisible'),
+        localDB.get('settings', 'statusBarMode'),
         localDB.get('settings', 'iconStyle'),
         localDB.get('settings', 'goodsImgStyle'),
         localDB.get('settings', 'themeDefaultLight'),
@@ -1012,6 +1026,8 @@ export const useSettings = create<SettingsState>((set, get) => ({
             : 400,
         // 状态栏开关：无记录 = 显示（默认开）；仅接受布尔值
         statusBarVisible: typeof statusBarRec?.value === 'boolean' ? statusBarRec.value : true,
+        // 状态栏外观模式（第三十九轮）：无记录/非法值 = 透明融合（推荐默认）
+        statusBarMode: statusBarModeRec?.value === 'hidden' ? 'hidden' : 'transparent',
         // 灵动岛常驻：无记录 = 常驻（默认开）；仅接受布尔值
         islandPersistent: typeof islandPersistentRec?.value === 'boolean' ? islandPersistentRec.value : true,
         assistViewer: assistViewerRec?.value === true,
@@ -1054,6 +1070,15 @@ export const useSettings = create<SettingsState>((set, get) => ({
       // 第三十五轮 cookie 自愈：老用户 localStorage/IndexedDB 已有主题但还没写过 cookie
       //（cookie 是本轮才加的第三持久化源）——水合时补写，下次冷启动 SSR 首屏即正确主题
       writeSplashThemeCookie(get().splashTheme);
+      // 第三十九轮状态栏模式自愈与同步：装载值回写 localStorage 镜像（首帧 CSS 首次
+      // 冷启动未及写入时补齐）+ 送原生桥对齐（APK onCreate 已按 SharedPreferences 先行，
+      // 此处幂等重申——两源漂移时以 IndexedDB 为准）
+      try {
+        window.localStorage.setItem('cove-statusbar-mode', get().statusBarMode);
+      } catch {
+        /* 写失败静默 */
+      }
+      setNativeStatusBarMode(get().statusBarMode);
     } catch {
       set({ loaded: true });
     }
@@ -1171,6 +1196,24 @@ export const useSettings = create<SettingsState>((set, get) => ({
   setStatusBarVisible: (v) => {
     set({ statusBarVisible: v });
     void localDB.put('settings', { key: 'statusBarVisible', value: v });
+  },
+
+  setStatusBarMode: (mode) => {
+    if (mode !== 'transparent' && mode !== 'hidden') return;
+    set({ statusBarMode: mode });
+    // ① IndexedDB 持久化（本地数据库：重启后 load 读回自动应用）
+    void localDB.put('settings', { key: 'statusBarMode', value: mode });
+    // ② localStorage 镜像（同步源）：layout 内联脚本冷启动首帧即读到——防水合前自绘
+    // 状态栏闪一下（hidden 模式 CSS 首帧即 display:none）
+    try {
+      if (typeof window !== 'undefined') window.localStorage.setItem('cove-statusbar-mode', mode);
+    } catch {
+      /* 隐私模式写失败静默：IndexedDB 仍在 */
+    }
+    // ③ 原生桥（v2.4.22+ APK）：物理系统条 transparent 常驻透明 / hidden 三通道隐藏；
+    // 原生侧同步写 SharedPreferences，冷启动 onCreate 即按记忆模式布局；旧壳/浏览器
+    // 静默（返回 false 不影响流程——浏览器端 CSS 行为已生效）
+    setNativeStatusBarMode(mode);
   },
 
   setBatteryPercent: (m) => {

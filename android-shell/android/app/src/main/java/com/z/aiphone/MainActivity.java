@@ -35,6 +35,23 @@ public class MainActivity extends BridgeActivity {
     /** 公共下载目录里的目标文件名（与 getUriForFile / FileProvider 路径对应） */
     private static final String APK_FILE_NAME = "AI-Phone.apk";
 
+    /** v2.4.22（第三十九轮）状态栏外观模式持久化：SharedPreferences 键——网页 IndexedDB
+     *  是权威源，这里是原生侧镜像（冷启动 onCreate 先于网页加载即按记忆模式布局，防首帧闪错）
+ *  'transparent'（透明融合·默认）/'hidden'（完全隐藏） */
+    private static final String PREFS_NAME = "cove_prefs";
+    private static final String KEY_SB_MODE = "statusbar_mode";
+    private static final String KEY_SB_STATUS_STYLE = "statusbar_status_style";
+    private static final String KEY_SB_NAV_STYLE = "statusbar_nav_style";
+
+    /** 当前状态栏外观模式（volatile：insets 监听线程读、UI 线程写；默认 transparent——
+     *  机主规格「透明融合（推荐）」；onCreate 里会被 SharedPreferences 记忆值覆盖） */
+    private volatile String statusBarMode = "transparent";
+
+    /** 最近一次网页下发的系统条图标明暗（LIGHT/DARK/DEFAULT；null=从未下发）——
+     *  透明模式下状态栏常驻显示，冷启动网页水合前（可达秒级）先按记忆值上色，防图标错色闪现 */
+    private volatile String lastStatusStyle = null;
+    private volatile String lastNavStyle = null;
+
     /** v2.2.0 进程前后台跟踪（bringToFront 后台拉回豁免判定用）：
      *  onStart 置 true / onStop 置 false——生命周期回调都在主线程，volatile 读足够安全 */
     private static volatile boolean appInForeground = false;
@@ -108,7 +125,8 @@ public class MainActivity extends BridgeActivity {
 
     /** v2.4.12 补藏哨兵：回前台/重获焦点后系统条可能被权限弹窗、转场动画晚一拍拉回——
      *  0.8s 与 2.5s 两次延迟补藏（onStop 撤销；用户主动滑出的瞬时条不受影响：
-     *  IMMERSIVE_STICKY 自己会收）。 */
+     *  IMMERSIVE_STICKY 自己会收）。仅 hidden 模式调度（transparent 模式状态栏本就该在）。
+     */
     private final android.os.Handler reHideHandler = new android.os.Handler(android.os.Looper.getMainLooper());
     private final Runnable reHideRunnable = this::hideSystemBarsRobust;
 
@@ -118,30 +136,99 @@ public class MainActivity extends BridgeActivity {
         reHideHandler.postDelayed(reHideRunnable, 2500L);
     }
 
-    /** v2.4.12 ③ 系统状态栏重申隐藏：切后台/权限弹窗等场景系统条可能被拉回，回来即再藏
-     *  （onCreate 里已用同一逻辑首帧生效，此处 + 延迟哨兵双保险）。
+    /** v2.4.22（第三十九轮）状态栏外观模式总入口：
+     *  - 'hidden'（完全隐藏）：hideSystemBarsRobust() 三通道齐发（传统 FULLSCREEN+IMMERSIVE_STICKY /
+     *    WindowInsetsControllerCompat.hide / FLAG_FULLSCREEN）——真全屏沉浸，顶边下拉由系统
+     *    IMMERSIVE_STICKY 瞬时呼出后自动收回；
+     *  - 'transparent'（透明融合）：setDecorFitsSystemWindows(false) 保持 edge-to-edge +
+     *    状态栏常驻显示（show）+ 背景透明（statusBarColor=TRANSPARENT）+ 不含 FULLSCREEN/
+     *    IMMERSIVE 标志（内容 LAYOUT_FULLSCREEN 画进状态栏与挖孔下）；导航栏维持显示不受影响；
+     *    图标明暗按最近一次网页下发值（无记忆随系统主题）——网页色调探针持续驱动。
+     *  persist=true 时同步写 SharedPreferences（网页桥路径；冷启动 onCreate 读回）。
+     *  生命周期回调（onResume/onWindowFocusChanged/onConfigurationChanged）一律重申当前模式
+     *  ——权限弹窗/转场把状态栏拉回时，transparent 重申 show、hidden 重申 hide。 */
+    private void applyStatusBarMode(String mode, boolean persist) {
+        if (mode == null || !("transparent".equals(mode) || "hidden".equals(mode))) {
+            mode = "transparent";
+        }
+        statusBarMode = mode;
+        if (persist) {
+            try {
+                getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+                        .edit()
+                        .putString(KEY_SB_MODE, mode)
+                        .apply();
+            } catch (Throwable ignored) {
+            }
+        }
+        if ("hidden".equals(mode)) {
+            hideSystemBarsRobust();
+        } else {
+            showStatusBarTransparent();
+        }
+        // 安全区口径随模式变（顶部：transparent=系统条∪挖孔 / hidden=仅挖孔）——主动推一次，
+        // 部分 ROM show/hide 不触发 insets 回调时也能把新值送到网页
+        pushInsetsToWeb();
+    }
+
+    /** v2.4.22 透明融合模式落地：状态栏常驻 + 透明背景 + edge-to-edge */
+    private void showStatusBarTransparent() {
+        try {
+            WindowCompat.setDecorFitsSystemWindows(getWindow(), false);
+        } catch (Throwable ignored) {
+        }
+        try {
+            View decor = getWindow() != null ? getWindow().getDecorView() : null;
+            if (decor != null) {
+                // 不含 FULLSCREEN/IMMERSIVE_STICKY（状态栏常驻不自动收）；保留 LAYOUT 系标志：
+                // 内容画进状态栏/挖孔下方，与 Wallpaper 出血层共同实现「融入」
+                decor.setSystemUiVisibility(
+                        View.SYSTEM_UI_FLAG_LAYOUT_STABLE | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN);
+            }
+        } catch (Throwable ignored) {
+        }
+        try {
+            WindowInsetsControllerCompat bars = WindowCompat.getInsetsController(
+                    getWindow(), getWindow().getDecorView());
+            bars.setSystemBarsBehavior(
+                    WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
+            bars.show(WindowInsetsCompat.Type.statusBars());
+        } catch (Throwable ignored) {
+        }
+        try {
+            getWindow().clearFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN);
+            // 状态栏背景透明（API 35 起废弃但实际生效；edge-to-edge 下兜底）
+            getWindow().setStatusBarColor(android.graphics.Color.TRANSPARENT);
+        } catch (Throwable ignored) {
+        }
+        // 图标明暗：按记忆值重申（无记忆随系统主题——网页水合后色调探针接管）
+        applyBarStyle(lastStatusStyle, true);
+    }
+
+    /** v2.4.12 ③ 系统状态栏重申（v2.4.22 起按当前模式重申）：切后台/权限弹窗等场景
+     *  系统条可能被拉回，回来即按模式重申（transparent=show / hidden=hide）。
      *  （public：BridgeActivity 的 onResume 为 public，protected 会降权编译不过） */
     @Override
     public void onResume() {
         super.onResume();
-        hideSystemBarsRobust();
-        scheduleRehideWatchdog();
+        applyStatusBarMode(statusBarMode, false);
+        if ("hidden".equals(statusBarMode)) scheduleRehideWatchdog();
     }
 
-    /** v2.4.12 ③ 窗口重获焦点（权限弹窗关闭/键盘收起等）时再藏一次，确保全屏不回退 */
+    /** v2.4.12 ③ 窗口重获焦点（权限弹窗关闭/键盘收起等）时按当前模式重申，确保不回退 */
     @Override
     public void onWindowFocusChanged(boolean hasFocus) {
         super.onWindowFocusChanged(hasFocus);
         if (hasFocus) {
-            hideSystemBarsRobust();
+            applyStatusBarMode(statusBarMode, false);
         }
     }
 
-    /** v2.4.12 ③ 旋屏/系统配置变化（manifest 已声明 configChanges 不重载页面）后再申全屏 */
+    /** v2.4.12 ③ 旋屏/系统配置变化（manifest 已声明 configChanges 不重载页面）后再按模式重申 */
     @Override
     public void onConfigurationChanged(android.content.res.Configuration newConfig) {
         super.onConfigurationChanged(newConfig);
-        hideSystemBarsRobust();
+        applyStatusBarMode(statusBarMode, false);
     }
 
     /** 音量键拦截：阅读器开启「音量键翻页」时消费音量键（不调系统音量），
@@ -217,22 +304,33 @@ public class MainActivity extends BridgeActivity {
 
         super.onCreate(savedInstanceState);
 
-        // v2.4.9 ⓪ 系统状态栏直接【隐藏】（机主定调：不要融入、不显示，全屏；时间/信号/电量
-        // 由网页自绘状态栏显示——globals.css 已同步移除 APK 模式对 .ph-statusbar 的隐藏规则）。
-        // 原生层窗口级一次生效：无网页配色/时序参与（旧「融入」方案显示慢、有的页面融合不进去的
-        // 根因就是走网页层采样链），且本 App 所有界面都在同一个 WebView 窗口里——天然全界面一致。
-        // BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE：从顶部边缘滑动可临时呼出（浮层展示、几秒后
-        // 自动收起，不挤压内容）；导航栏保持显示（底部手势区不变）。
-        // v2.4.12 改走 hideSystemBarsRobust()：传统 systemUiVisibility（IMMERSIVE_STICKY，
-        // 部分国产 ROM 只认这条、顶边滑出后自动收回）+ 兼容控制器 + FLAG_FULLSCREEN 三通道齐发。
-        hideSystemBarsRobust();
+        // v2.4.9 ⓪ 系统状态栏【隐藏】→ v2.4.22（第三十九轮）改为【按用户选择的状态栏外观模式】：
+        // SharedPreferences 记忆值先于网页加载生效（网页 IndexedDB 是权威源，冷启动时序上
+        // 来不及）——透明融合模式状态栏常驻透明显示，完全隐藏模式三通道齐发隐藏。
+        // 默认 transparent（机主规格「透明融合（推荐）」）；网页装载后会经 setStatusBarMode
+        // 桥幂等重申（两源漂移以 IndexedDB 为准）。
+        // v2.4.12 的 hideSystemBarsRobust 三通道（IMMERSIVE_STICKY + 兼容控制器 + FLAG_FULLSCREEN）
+        // 保留给 hidden 模式；顶部边缘滑出临时呼出（浮层展示自动收起）两模式语义不变。
+        try {
+            String savedMode = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+                    .getString(KEY_SB_MODE, "transparent");
+            lastStatusStyle = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+                    .getString(KEY_SB_STATUS_STYLE, null);
+            lastNavStyle = getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+                    .getString(KEY_SB_NAV_STYLE, null);
+            applyStatusBarMode(savedMode, false);
+        } catch (Throwable ignored) {
+            applyStatusBarMode("transparent", false);
+        }
 
         // v2.4.6 ② 安全区监听：缓存最新 insets + 把 dp 值经 evaluateJavascript 推给
         // window.__aiphoneApplySafeArea（网页侧更新 --app-sat/-sar/-sab/-sal,
         // configChanges 已声明 orientation/screenSize → 不重载页面，仅重排）。
-        // v2.4.9 顶部口径变更：top 只取【挖孔】inset，不再并入 systemBars——状态栏已隐藏
-        // （systemBars.top 恒 0），且顶部从边缘临时呼出状态栏时是浮层展示（全屏应用标准行为，
-        // 不把内容顶下来）；网页自绘状态栏正好落在挖孔下缘，无挖孔机型顶到物理屏顶=真全屏。
+        // v2.4.9 顶部口径：top 只取【挖孔】inset（状态栏隐藏时 systemBars.top 恒 0）。
+        // v2.4.22（第三十九轮）随模式切换：transparent=取系统条∪挖孔并集（状态栏常驻显示，
+        // 内容按全额避让——与网页侧 --app-sat-eff 全额口径配套，等效用户规格「透明模式
+        // padding-top: safe-area-inset-top」）；hidden=仅挖孔（v2.4.9 口径，顶边临时呼出
+        // 状态栏是浮层展示不挤压内容，真全屏）。
         // 其余三边仍取 systemBars ∪ displayCutout 并集（底部导航条/横屏侧边挖孔照旧避让）。
         // 返回值保持「透传」：Chromium WebView 自己也监听 insets（键盘 visualViewport/
         // resizes-content 机制），在 decor 层 CONSUMED 会切断它——只读取、不拦截。
@@ -241,20 +339,20 @@ public class MainActivity extends BridgeActivity {
             Insets cut = insets.getInsets(WindowInsetsCompat.Type.displayCutout());
             Insets sys = insets.getInsets(WindowInsetsCompat.Type.systemBars());
             float density = getResources().getDisplayMetrics().density;
-            safeTop = Math.round(cut.top / density);
+            boolean sbTransparent = "transparent".equals(statusBarMode);
+            safeTop = Math.round((sbTransparent ? Math.max(sys.top, cut.top) : cut.top) / density);
             safeRight = Math.round(Math.max(sys.right, cut.right) / density);
             safeBottom = Math.round(Math.max(sys.bottom, cut.bottom) / density);
             safeLeft = Math.round(Math.max(sys.left, cut.left) / density);
             pushInsetsToWeb();
-            // 第三十轮·网页浏览时系统状态栏再显示根修：IMMERSIVE_STICKY 的系统行为是「顶部
-            // 滑出→悬停数秒→自动收回」，但网页里滚动/触摸（尤其 iframe 全屏铺到顶边时）会
-            // 频繁触发顶部滑出，机主观感即「网页一打开系统状态栏就又显示了」。这里监听
-            // statusBars 可见性：一旦冒头，350ms 后主动三通道齐发收回——比系统默认的
-            // 悬停数秒快一个量级，看得到即收回（机主感知：闪一下就没了，不再赖着）。
-            // 350ms 延迟：避开系统手势过程中的连续 insets 变化（手势中途立即抢藏会被系统
-            // 再拉起造成闪烁拉锯），等手势落定再藏一次即稳。
+            // 第三十轮·网页浏览时系统状态栏再显示根修（v2.4.22 起仅 hidden 模式——transparent
+            // 模式状态栏本就该在，重藏反而打架）：IMMERSIVE_STICKY 的系统行为是「顶部滑出→悬停
+            // 数秒→自动收回」，但网页里滚动/触摸（尤其 iframe 全屏铺到顶边时）会频繁触发顶部滑出，
+            // 机主观感即「网页一打开系统状态栏就又显示了」。监听 statusBars 可见性：一旦冒头，
+            // 350ms 后主动三通道齐发收回（等手势落定再藏，避免手势中途抢藏被系统再拉起拉锯）。
             try {
-                if (insets.isVisible(WindowInsetsCompat.Type.statusBars())) {
+                if ("hidden".equals(statusBarMode)
+                        && insets.isVisible(WindowInsetsCompat.Type.statusBars())) {
                     android.os.Handler h = reHideHandler;
                     if (h != null) {
                         h.removeCallbacks(reHideRunnable);
@@ -376,17 +474,36 @@ public class MainActivity extends BridgeActivity {
         /** v2.4.9 壳版本桥：网页据 getShellInfo 是否存在区分新旧壳——新壳系统状态栏已隐藏
          *  （网页自绘状态栏回归显示）；旧壳无此方法，网页维持 v2.4.8 行为（自绘状态栏
          *  隐藏、系统状态栏融入），避免旧 APK 先拿到新 CSS 时出现双状态栏。
-         *  v2.4.21：版本同步 85 / 2.4.21（新增 activity-alias 图标四变体 + 换图标桥）。 */
+         *  v2.4.21：版本同步 85 / 2.4.21（新增 activity-alias 图标四变体 + 换图标桥；
+         *  第三十九轮收敛回两变体）。
+         *  v2.4.22（第三十九轮）：版本同步 86 / 2.4.22（新增状态栏外观模式桥 setStatusBarMode：
+         *  transparent 透明融合=物理系统条常驻透明显示+内容全额安全区避让 / hidden 完全隐藏=
+         *  三通道隐藏真全屏）；statusBarMode 字段同步上报当前模式（诊断用，网页以 IndexedDB
+         *  为权威源不依赖此字段）。 */
         @JavascriptInterface
         public String getShellInfo() {
             JSONObject o = new JSONObject();
             try {
-                o.put("versionCode", 85);
-                o.put("versionName", "2.4.21");
-                o.put("fullscreen", true); // 系统状态栏隐藏（全屏）标记
+                o.put("versionCode", 86);
+                o.put("versionName", "2.4.22");
+                o.put("fullscreen", true); // 壳能力标记：v2.4.9+（系统条可原生隐藏/显示）
+                o.put("statusBarMode", statusBarMode); // v2.4.22：当前状态栏外观模式
             } catch (Exception ignored) {
             }
             return o.toString();
+        }
+
+        /** v2.4.22（第三十九轮）状态栏外观模式桥（机主规格）：
+         *  - mode='transparent' 透明融合：WindowCompat.setDecorFitsSystemWindows(window,false)
+         *    + 状态栏背景透明（TRANSPARENT）+ 状态栏常驻显示；图标明暗按 App 主题自动切换
+         *    （网页色调探针持续下发，冷启动按 SharedPreferences 记忆值先行）；
+         *  - mode='hidden' 完全隐藏：SYSTEM_UI_FLAG_FULLSCREEN + IMMERSIVE_STICKY 三通道
+         *    齐藏（含兼容控制器 + FLAG_FULLSCREEN），顶边下拉临时呼出，内容画到挖孔与顶边。
+         *  同步写 SharedPreferences——下次冷启动 onCreate 先于网页加载即按记忆模式布局。
+         *  非法输入回退 transparent（网页侧已校验，双保险）。 */
+        @JavascriptInterface
+        public void setStatusBarMode(final String mode) {
+            runOnUiThread(() -> applyStatusBarMode(mode, true));
         }
 
         /** v2.4.21 一键无感换图标（Activity Alias）①查询当前启用图标（第三十九轮两变体）：
@@ -479,10 +596,23 @@ public class MainActivity extends BridgeActivity {
             applyBarStyle(style, false);
         }
 
-        /** 单条系统条的图标明暗（statusBar=true 状态栏 / false 导航栏） */
+        /** 单条系统条的图标明暗（statusBar=true 状态栏 / false 导航栏）。
+         *  v2.4.22（第三十九轮）：同步记忆 + SharedPreferences 持久化——透明模式下状态栏
+         *  常驻显示，冷启动网页水合前（色调探针接管前）先按记忆值上色，防图标错色闪现。 */
         private void applyBarStyle(String style, final boolean statusBar) {
-            final boolean lightIcons = "DARK".equalsIgnoreCase(style);
-            final boolean isDefault = "DEFAULT".equalsIgnoreCase(style);
+            final String norm = style != null ? style.toUpperCase() : null;
+            if (norm != null && (norm.equals("LIGHT") || norm.equals("DARK") || norm.equals("DEFAULT"))) {
+                if (statusBar) lastStatusStyle = norm; else lastNavStyle = norm;
+                try {
+                    getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+                            .edit()
+                            .putString(statusBar ? KEY_SB_STATUS_STYLE : KEY_SB_NAV_STYLE, norm)
+                            .apply();
+                } catch (Throwable ignored) {
+                }
+            }
+            final boolean lightIcons = "DARK".equalsIgnoreCase(norm);
+            final boolean isDefault = "DEFAULT".equalsIgnoreCase(norm);
             runOnUiThread(() -> {
                 try {
                     WindowInsetsControllerCompat ctl = WindowCompat.getInsetsController(

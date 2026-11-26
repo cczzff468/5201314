@@ -11,9 +11,9 @@
  */
 
 /** 当前最新版本（纯网页热更时与 APK versionName 可短暂不同步，下次重打 APK 对齐） */
-export const APP_VERSION = '2.4.21';
+export const APP_VERSION = '2.4.22';
 /** 版本号数字（与 android-shell versionCode 保持一致；覆盖安装要求只增不减；纯网页热更不动） */
-export const APP_VERSION_CODE = 85;
+export const APP_VERSION_CODE = 86;
 
 export interface AppReleaseNote {
   version: string;
@@ -24,6 +24,19 @@ export interface AppReleaseNote {
 
 /** 版本历史（新→旧；设置 › APP 更新 页渲染，最新一条即当前版本） */
 export const APP_RELEASE_NOTES: AppReleaseNote[] = [
+  {
+    version: '2.4.22',
+    date: '2026-11-26',
+    items: [
+      '【需重装 APK · versionCode 86】状态栏外观设置：设置›显示与亮度新增「状态栏模式」两选一——透明融合（推荐·状态栏背景透明融入顶部背景，保留时间/电量/WiFi）与完全隐藏（彻底隐藏状态栏真全屏沉浸，从屏幕顶部下拉可临时呼出）',
+      '【需重装 APK】原生桥 setStatusBarMode(mode)：transparent=WindowCompat.setDecorFitsSystemWindows(false)+状态栏背景透明+常驻显示+图标明暗随 App 主题；hidden=FULLSCREEN+IMMERSIVE_STICKY 三通道隐藏，内容延伸到刘海与顶边；模式写入 SharedPreferences，冷启动即按记忆模式布局',
+      '【需重装 APK】图标四变体收敛回两变体：删除暗黑版（星夜金月）/二次元版（樱花萌云）的 activity-alias 与全部 mipmap 素材（第三十九轮机主定夺）',
+      '【网页热更·免重装】状态栏模式三重持久化（IndexedDB 本地数据库 + localStorage 首帧镜像 + 原生 SharedPreferences），重启自动应用；透明模式内容全额避让状态栏与刘海（safe-area），隐藏模式内容顶格全屏；浏览器端隐藏模式支持顶边下拉临时呼出自绘状态栏',
+      '【网页热更·免重装】删除「星空对话」开屏动画（四主题收敛回三主题：星空月夜/霎中远山/雨落成诗，存量选择自动回落默认星空月夜）',
+      '【网页热更·免重装】新默认壁纸：主屏「浅滩小鲨」（航拍浅滩小鲨鱼）与锁屏「初雪情书」（雪景歌词），存量设备一次性自动切换（自定义壁纸不受影响）',
+      '【网页热更·免重装】拾光小屋移到主界面第四页独立成页（v12 定向迁移，其余图标排布原样不动）；锁屏时间字体再变粗一档（semibold）',
+    ],
+  },
   {
     version: '2.4.21',
     date: '2026-11-26',

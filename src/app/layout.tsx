@@ -101,6 +101,19 @@ export default function RootLayout({
     if (N && typeof N.getShellInfo === 'function') {
       // v2.4.9 新壳：系统状态栏已原生隐藏（全屏）——自绘状态栏回归显示
       document.documentElement.setAttribute('data-shell-fullscreen', '1');
+      // v2.4.22 新壳（第三十九轮）：状态栏模式桥存在——透明模式下物理系统条常驻显示，
+      // 自绘状态栏让位（CSS 防双状态栏）；旧壳无此桥，透明模式维持自绘状态栏
+      if (typeof N.setStatusBarMode === 'function') {
+        document.documentElement.setAttribute('data-sb-native', '1');
+      }
+    }
+  } catch (e) {}
+  // 第三十九轮状态栏模式首帧镜像：localStorage 同步可读（store 装载前 CSS 即生效——
+  // hidden 模式自绘状态栏首帧 display:none 不闪现；值由 setStatusBarMode/load 回写）
+  try {
+    var m = localStorage.getItem('cove-statusbar-mode');
+    if (m === 'hidden' || m === 'transparent') {
+      document.documentElement.setAttribute('data-sb-mode', m);
     }
   } catch (e) {}
 })();`,

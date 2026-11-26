@@ -19,6 +19,9 @@ export interface ShellInfo {
   versionName: string;
   /** 系统状态栏隐藏（全屏）标记 */
   fullscreen: boolean;
+  /** v2.4.22（第三十九轮）：当前状态栏外观模式（transparent/hidden）——诊断展示用，
+   *  网页权威源是 IndexedDB settings.statusBarMode，不依赖此字段做行为判定 */
+  statusBarMode?: string;
 }
 
 /** 模块级缓存：addJavascriptInterface 的同步桥每次调用结果一致，读一次即可 */
