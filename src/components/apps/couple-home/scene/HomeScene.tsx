@@ -4438,7 +4438,12 @@ export default function HomeScene(props: HomeSceneProps) {
       shadows="soft"
       dpr={Q_DPR[quality]}
       camera={{ fov: 48, near: 0.1, far: 80, position: [0, 6.2, 7.4] }}
-      style={{ touchAction: 'none' }}
+      // 第四十一轮沉浸式根治：canvas 顶到物理屏顶（fullBleedTop）；首帧前兜底天空色
+      // 挂在 canvas 元素自身（媒体本体；渲染后 scene.background 接管逐帧天空渐变）
+      style={{
+        touchAction: 'none',
+        backgroundColor: night ? SKY_NIGHT[weatherFx ?? 'sunny'] : SKY_DAY[weatherFx ?? 'sunny'],
+      }}
       resize={{ offsetSize: true }}
       performance={{ min: 0.5 }}
     >

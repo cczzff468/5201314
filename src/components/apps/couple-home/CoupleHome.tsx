@@ -4524,9 +4524,13 @@ export default function CoupleHome({ close }: { close: () => void }) {
   // #efece4 改为随昼夜/天气联动的天空色（与 HomeScene NightBlend 的目标色同源）——
   // R3F canvas 像素采样（bg-sample canvasPixelAt）前的首帧/loading 阶段，出血条带
   // 与状态栏基调探针回落到此底色，即所见即天空色，不再出米白断层
+  // 第四十一轮沉浸式根治（机主规格「3D 页面最外层 div 绝对禁止设置背景色」）：
+  // 根 div 不再设任何背景色——3D canvas 从物理屏顶 y=0 直接铺起（AppWindow fullBleedTop），
+  // 天空色由 HomeScene 的 scene.background（3D 场景本体）渲染；canvas 首帧前的兜底色
+  // 挂在 <Canvas> 元素自身 style 上（媒体本体，非外层容器）。rootBg 仅保留给 Canvas 兜底。
   const rootBg = night ? SKY_NIGHT[weatherFx] : SKY_DAY[weatherFx];
   return (
-    <div ref={rootRef} className="absolute inset-0 select-none overflow-hidden" style={{ backgroundColor: rootBg }}>
+    <div ref={rootRef} className="absolute inset-0 select-none overflow-hidden">
       {/* 照片选择（相框用；隐藏） */}
       <input
         ref={fileInputRef}

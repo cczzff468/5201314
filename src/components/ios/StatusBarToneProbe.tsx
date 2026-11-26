@@ -7,7 +7,7 @@ import {
   pushStatusBarTone,
   type StatusBarTone,
 } from '@/lib/ios/status-bar-tone';
-import { compositeBg, relativeLuminance, parseCssColor, canvasPixelAt } from '@/lib/ios/bg-sample';
+import { compositeBg, relativeLuminance, parseCssColor, canvasPixelAt, type Rgba } from '@/lib/ios/bg-sample';
 import { getBleedTopStops, subscribeBleedTop } from '@/lib/ios/bleed-band-state';
 
 /**
@@ -103,7 +103,8 @@ export default function StatusBarToneProbe() {
       if (!hit || !container.contains(hit)) continue;
       // 第四十轮：<canvas>/<video>（拾光小屋 R3F 天空/相机全屏视频）先试像素直读——
       // 透明/未渲染时 canvasPixelAt 返 null，回落 compositeBg 沿祖先链读页面根底色
-      let bg = null;
+      // 第四十一轮补类型：bg 显式 Rgba | null（上轮推断窄化成 null 的 tsc 基线错）
+      let bg: Rgba | null = null;
       if (hit instanceof HTMLCanvasElement || hit instanceof HTMLVideoElement) {
         const px = canvasPixelAt(hit, x, y);
         if (px) bg = px;

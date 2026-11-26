@@ -42,6 +42,11 @@ export default function AppWindow() {
       role="dialog"
       aria-label={meta.name}
       data-bleed=""
+      // 第四十一轮沉浸式根治（拾光小屋/阅读）：data-bleed-full——关掉内容层顶部安全区内缩，
+      // App 自身媒体（3D canvas/阅读背景图）从物理屏顶 y=0 铺起，状态栏/灵动岛浮于其上；
+      // 配套 globals.css：[data-bleed-full] [data-safe-inset] top 归零。其余 App 维持
+      // 「底色出血 + 内容从安全区下开始」既有口径。
+      data-bleed-full={meta.fullBleedTop ? '' : undefined}
       // 性能（v71 界面加载提速）：
       // ① transition 列表必须含 scale——Tailwind v4 的 scale-* 走独立 CSS scale 属性
       //    （不是 transform！），v72.3 前列表只写了 transform/opacity/border-radius，

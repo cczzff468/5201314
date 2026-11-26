@@ -1787,6 +1787,23 @@ html[data-app-native] [data-safe-inset] {
   bottom: var(--app-sab, 0px) !important;
   left: var(--app-sal, 0px) !important;
 }
+/* ---------------- 第四十一轮沉浸式根治（机主规格：拾光小屋 3D / 阅读背景图） ----------------
+   data-bleed-full 的 App（registry fullBleedTop: true）：内容层顶部内缩归零——
+   App 自身媒体（拾光小屋 R3F canvas 天空色 / 阅读主题渐变与背景图）从物理屏顶
+   y=0 直接铺起，延伸到物理灵动岛与状态栏【下方】，状态栏/灵动岛浮于真实内容上
+   ——彻底取代「采样条带拼色」（旧路径条带色 ≠ 内容首行像素时就是机主截图里的
+   灰蓝遮罩盒子）。App 内部自管顶部避让（TopBar pt/页面 pt-[54px] 等已含状态栏
+   高度；HTML 媒体本体无交互不受影响）。左右/底部内缩维持原口径（横屏挖孔避让
+   照旧）。出血条带仍绘制但被内容盖住（z 序：条带在内容层之前）——零可见、零
+   干扰；状态栏基调探针采到的是真实媒体像素（天空色/背景图），图标明暗随之。 */
+html[data-app-native] [data-bleed-full] [data-safe-inset] {
+  top: 0px !important;
+}
+/* full-bleed App 内部自管顶部避让的统一挂点：类名元素在自身 pt 基础上加回有效安全区
+   （拾光小屋 TopBar 等；仅 [data-bleed-full] 容器内生效——couple-space 内嵌同组件不受影响） */
+html[data-app-native] [data-bleed-full] .ch-hud-top {
+  padding-top: calc(2.75rem + var(--app-sat-eff, 0px)) !important;
+}
 /* 锁屏密码键盘顶部占位：APK 里随有效安全区同步（毛玻璃罩仍铺满全屏） */
 html[data-app-native] .ph-lock-pad-top {
   height: calc(120px + var(--app-sat-eff, 0px)) !important;

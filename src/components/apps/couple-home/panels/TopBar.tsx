@@ -99,7 +99,11 @@ export default function TopBar({
   onOpenPicker,
 }: TopBarProps) {
   return (
-    <div className="relative z-20 flex items-start justify-between p-3 pt-11">
+    // 第四十一轮沉浸式根治：App fullBleedTop（cottage）后内容从物理屏顶开始——顶部避让
+    // 改为自管：globals.css 里 [data-bleed-full] .ch-hud-top 在 pt-11(44px) 基础上加回
+    // var(--app-sat-eff)（APK 内为有效安全区）；couple-space 内嵌（非全出血）维持 pt-11
+    // 原口径；浏览器恒 0 无变化——按钮与状态栏底部恒保持原间距
+    <div className="ch-hud-top relative z-20 flex items-start justify-between p-3 pt-11">
       {/* 左列：返回 + 拍照（v7.0 相机按钮移到返回键下方） */}
       <div className="pointer-events-auto flex flex-col gap-2">
         <button

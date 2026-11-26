@@ -124,6 +124,10 @@ export interface AppMeta {
   /** App 自管屏幕级基调（音乐 App 各页面按背景明暗自行 push/pop）；
    *  true 时自动基调探针不介入（双方都推栈会互相打架） */
   statusBarToneSelfManaged?: boolean;
+  /** 第四十一轮沉浸式根治：全出血顶——App 自身媒体（拾光小屋 3D canvas / 阅读背景图）
+   *  直接铺到物理屏顶（状态栏/灵动岛浮于其上，取代「采样条带拼色」）；
+   *  AppWindow 对其关掉 [data-safe-inset] 顶部内缩（内容从 y=0 开始），App 内部自管顶部避让 */
+  fullBleedTop?: boolean;
 }
 
 function IconTile({ className = '', children }: { className?: string; children?: ReactNode }) {
@@ -301,6 +305,10 @@ interface AppDef {
   component: ComponentType;
   statusBarLight?: boolean;
   statusBarToneSelfManaged?: boolean;
+  /** 第四十一轮沉浸式根治：全出血顶——App 自身媒体（拾光小屋 3D canvas / 阅读背景图）
+   *  直接铺到物理屏顶（状态栏/灵动岛浮于其上，取代「采样条带拼色」）；
+   *  AppWindow 对其关掉 [data-safe-inset] 顶部内缩（内容从 y=0 开始），App 内部自管顶部避让 */
+  fullBleedTop?: boolean;
 }
 
 const APP_DEFS: AppDef[] = [
@@ -499,6 +507,8 @@ const APP_DEFS: AppDef[] = [
     // 备用线条图（毛玻璃/液态样式时展示）：小屋轮廓
     glyph: <HouseIcon className={GLYPH_CLASS} strokeWidth={GLYPH_STROKE} />,
     component: CottageApp,
+    // 第四十一轮：3D canvas 顶到屏幕最上方（天空色延伸到灵动岛/状态栏下方，无任何拼色条带）
+    fullBleedTop: true,
   },
   {
     id: 'reading',
@@ -506,6 +516,8 @@ const APP_DEFS: AppDef[] = [
     image: '/icons/reading.png',
     glyph: <BookOpen className={GLYPH_CLASS} strokeWidth={GLYPH_STROKE} />,
     component: ReadingApp,
+    // 第四十一轮：阅读背景图/主题渐变直接延伸到状态栏上方（顶层容器背景即页面背景，无缝）
+    fullBleedTop: true,
   },
   {
     id: 'forum',
