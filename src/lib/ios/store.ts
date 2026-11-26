@@ -998,8 +998,7 @@ export const useSettings = create<SettingsState>((set, get) => ({
         splashTheme:
           splashThemeRec?.value === 'mist' ||
             splashThemeRec?.value === 'moon' ||
-            splashThemeRec?.value === 'star' ||
-            splashThemeRec?.value === 'chat'
+            splashThemeRec?.value === 'star'
             ? splashThemeRec.value
             : readSplashTheme(),
         iconStyle,
@@ -1171,7 +1170,8 @@ export const useSettings = create<SettingsState>((set, get) => ({
   },
 
   setSplashTheme: (t) => {
-    if (t !== 'star' && t !== 'mist' && t !== 'moon' && t !== 'chat') return;
+    // 第三十九轮：删星空对话（chat）——三选一，非法值拒绝写入
+    if (t !== 'star' && t !== 'mist' && t !== 'moon') return;
     set({ splashTheme: t });
     // localStorage 同步写：下次冷启动 BootSplash 首帧（useLayoutEffect）即读到新主题；
     // cookie 同步写（第三十五轮）：下次冷启动 SSR 首屏就烤出所选主题——修「刚打开

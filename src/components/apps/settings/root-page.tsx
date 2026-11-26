@@ -624,8 +624,9 @@ export function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
           <MainRow icon={Database} tone={TONE_GREEN} label="存储" onClick={() => onOpen('storage')} />
         </div>
 
-        {/* 第三十三轮：开屏动画（第三十六轮上移到「App 图标」上面——机主要求）——
-            行入口预览当前主题微缩场景 + 名称，点开四选一弹窗（星空月夜/雾中远山/雨落成诗/对话·星空版），
+        {/* 第三十三轮：开屏动画（第三十六轮上移到「App 图标」上面——机主要求；
+            第三十九轮：删星空对话后剩三选一）——
+            行入口预览当前主题微缩场景 + 名称，点开三选一弹窗（星空月夜/雾中远山/雨落成诗），
             点选【立马生效】：选完即整屏播放一遍预览 + 本会话下次冷启动/下次打开即播放所选主题 */}
         <div className="mx-4 mt-4 overflow-hidden rounded-[22px] bg-white/55 shadow-[0_8px_28px_rgba(17,24,39,0.06)] ring-1 ring-white/70 backdrop-blur-2xl dark:bg-white/[0.06] dark:ring-white/[0.09]">
           <button
@@ -640,7 +641,7 @@ export function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
             <span className="min-w-0 flex-1">
               <span className="block truncate text-[16px]">开屏动画</span>
               <span className="mt-0.5 block truncate text-[11.5px] text-muted-foreground">
-                四款主题 · 选择后立即播放预览
+                三款主题 · 选择后立即播放预览
               </span>
             </span>
             <span className="shrink-0 text-[13px] text-muted-foreground">{splashThemeName(splashTheme)}</span>
@@ -912,13 +913,13 @@ function BatteryModeDialog({
   );
 }
 
-/** 开屏动画主题中文名（入口行右侧 value 展示；第三十四轮：moon 重做为雨落成诗 + 新增 chat 对话；
- *  第三十六轮：chat 星空化——名字同步改「星空对话」） */
+/** 开屏动画主题中文名（入口行右侧 value 展示；第三十四轮：moon 重做为雨落成诗；
+ *  第三十六轮：chat 星空化改名「星空对话」；第三十九轮：机主删除星空对话——三选一） */
 function splashThemeName(t: CoveSplashTheme): string {
-  return t === 'star' ? '星空月夜' : t === 'mist' ? '雾中远山' : t === 'moon' ? '雨落成诗' : '星空对话';
+  return t === 'star' ? '星空月夜' : t === 'mist' ? '雾中远山' : '雨落成诗';
 }
 
-/** 四主题微缩场景底（弹窗预览卡背景——CSS 渐变近似还原各主题第一眼观感） */
+/** 三主题微缩场景底（弹窗预览卡背景——CSS 渐变近似还原各主题第一眼观感；第三十九轮删 chat） */
 const SPLASH_THEME_PREVIEW: Record<
   CoveSplashTheme,
   { bg: string; fg: string; accent: string; desc: string }
@@ -941,17 +942,11 @@ const SPLASH_THEME_PREVIEW: Record<
     accent: 'radial-gradient(circle at 34% 28%, rgba(255,255,255,0.9) 0%, rgba(255,255,255,0.28) 48%, rgba(105,122,142,0.16) 100%)',
     desc: '雨丝 · 水珠 · 诗行',
   },
-  chat: {
-    bg: 'linear-gradient(172deg, #0A0E1E 0%, #141B34 38%, #1C2648 68%, #0C1124 100%)',
-    fg: '#F2E6C2',
-    accent: 'radial-gradient(circle at 72% 30%, #F2D48F 0%, #E0AE55 55%, #C28C2E 100%)',
-    desc: '金月 · 地球 · 星尘 · 情话',
-  },
 };
 
-/** 第三十四轮：开屏动画四选一弹窗（iOS 居中卡，与 App 图标弹窗同规格）：
- *  四张 76×76 微缩场景预览（CSS 渐变近似还原主题观感：星空=深底+月、
- *  远山=灰白+山影渐变、雨窗=蓝灰+水珠、星空对话=星空底+金月+星尘光带），点选【立马生效】——
+/** 第三十四轮：开屏动画弹窗（iOS 居中卡，与 App 图标弹窗同规格；第三十九轮三选一）：
+ *  三张 76×76 微缩场景预览（CSS 渐变近似还原主题观感：星空=深底+月、
+ *  远山=灰白+山影渐变、雨窗=蓝灰+水珠），点选【立马生效】——
  *  选完即整屏播放一遍（BootSplash forceTheme 预览）+ localStorage 已同步写，
  *  下次冷启动 BootSplash 首帧即新主题；点背板/Esc/好 关闭。 */
 function SplashThemeDialog({
@@ -976,7 +971,7 @@ function SplashThemeDialog({
     };
   }, [onClose]);
 
-  const options: CoveSplashTheme[] = ['star', 'mist', 'moon', 'chat'];
+  const options: CoveSplashTheme[] = ['star', 'mist', 'moon'];
 
   return createPortal(
     <>
@@ -1000,7 +995,7 @@ function SplashThemeDialog({
         >
           <div className="border-b border-black/[0.06] px-5 pb-3 pt-4 text-center dark:border-white/[0.08]">
             <p className="text-[16px] font-semibold text-black dark:text-white">开屏动画</p>
-            <p className="mt-0.5 text-[11.5px] text-muted-foreground">Cove · 四款主题任选</p>
+            <p className="mt-0.5 text-[11.5px] text-muted-foreground">Cove · 三款主题任选</p>
           </div>
           <div className="grid grid-cols-2 gap-2 px-4 py-4">
             {options.map((t) => {
@@ -1035,36 +1030,6 @@ function SplashThemeDialog({
                           className="absolute inset-x-[10%] bottom-0 block h-[38%]"
                           style={{ background: pv.accent, clipPath: 'polygon(0% 100%, 12% 42%, 30% 68%, 48% 22%, 66% 62%, 84% 34%, 100% 78%, 100% 100%)' }}
                         />
-                      ) : t === 'chat' ? (
-                        // 星空对话：金新月（右上）+ 散点星尘 + 一抹光带
-                        <>
-                          <span
-                            className="absolute right-[8%] top-[12%] block h-[30px] w-[30px] rounded-full"
-                            style={{ background: pv.accent, boxShadow: '0 0 12px rgba(233,189,102,0.45)' }}
-                          />
-                          {/* 月牙：左上叠底色圆挖出开口（同主体主题造型） */}
-                          <span
-                            className="absolute right-[24%] top-[10%] block h-[26px] w-[26px] rounded-full"
-                            style={{ background: pv.bg }}
-                          />
-                          {/* 小地球（第三十八轮）：蓝圆+大气光环 */}
-                          <span
-                            className="absolute left-[10%] top-[38%] block h-[13px] w-[13px] rounded-full"
-                            style={{
-                              background: 'radial-gradient(circle at 34% 28%, #7EC8F5 0%, #3E86CE 45%, #123B70 100%)',
-                              boxShadow: '0 0 7px rgba(110,170,245,0.6)',
-                            }}
-                          />
-                          <span className="absolute left-[14%] top-[22%] block h-[2px] w-[2px] rounded-full bg-white/90" />
-                          <span className="absolute left-[30%] top-[14%] block h-[1.5px] w-[1.5px] rounded-full bg-[#F2D48F]/90" />
-                          <span className="absolute left-[46%] top-[30%] block h-[2px] w-[2px] rounded-full bg-white/70" />
-                          <span className="absolute bottom-[24%] left-[18%] block h-[1.5px] w-[1.5px] rounded-full bg-white/60" />
-                          <span className="absolute bottom-[36%] left-[38%] block h-[2px] w-[2px] rounded-full bg-[#F2D48F]/70" />
-                          <span
-                            className="absolute bottom-[16%] left-[10%] block h-[1.5px] w-[54%] rotate-[-14deg] rounded-full"
-                            style={{ background: 'linear-gradient(90deg, rgba(244,214,140,0.75) 0%, rgba(210,170,100,0) 100%)' }}
-                          />
-                        </>
                       ) : t === 'moon' ? (
                         // 雨窗：蓝灰底 + 三颗高光水珠 + 斜雨丝 + 手写 cove 意象
                         <>

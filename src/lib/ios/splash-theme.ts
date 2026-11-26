@@ -1,9 +1,8 @@
 /**
- * 开屏动画主题（第三十四轮：四选一）——共享类型与同步读取器。
+ * 开屏动画主题（第三十四轮：四选一；第三十九轮：机主删除星空对话（chat）——三选一）。
  *
  * star=星空月夜（默认·深夜星点+新月）/ mist=雾中远山（灰白雾面+三层山影）/
- * moon=雨落成诗（第三十四轮按机主参考图重做：蓝灰雨窗+水珠+涟漪+散落诗行+手写体 cove）/
- * chat=对话（第三十四轮新增：白底聊天气泡逐条浮现——机主提供的土味情话对话）。
+ * moon=雨落成诗（第三十四轮按机主参考图重做：蓝灰雨窗+水珠+涟漪+散落诗行+手写体 cove）。
  *
  * 持久化三写（第三十五轮加 cookie）：
  * - localStorage（同步可读）：BootSplash 首帧 useLayoutEffect 换主题，水合后第一帧
@@ -19,7 +18,7 @@
  * server component（page.tsx 读 cookie）与 client（BootSplash/store）两侧均可导入。
  */
 
-export type CoveSplashTheme = 'star' | 'mist' | 'moon' | 'chat';
+export type CoveSplashTheme = 'star' | 'mist' | 'moon';
 
 /** localStorage 键（同步可读：首帧换主题零闪烁） */
 export const SPLASH_THEME_KEY = 'cove-splash-theme';
@@ -27,9 +26,10 @@ export const SPLASH_THEME_KEY = 'cove-splash-theme';
 /** cookie 键（服务端可读：SSR 首屏烤主题，防水合前闪错主题） */
 export const SPLASH_THEME_COOKIE = 'cove-splash-theme';
 
-/** 值校验（localStorage / cookie / IndexedDB 三源共用） */
+/** 值校验（localStorage / cookie / IndexedDB 三源共用；第三十九轮：'chat' 不再合法——
+ *  存量星空对话偏好自动回落默认 star） */
 export function validateSplashTheme(v: unknown): CoveSplashTheme | null {
-  return v === 'mist' || v === 'moon' || v === 'star' || v === 'chat' ? v : null;
+  return v === 'mist' || v === 'moon' || v === 'star' ? v : null;
 }
 
 /** 同步读持久化主题（无效值/不可用环境回默认 star）——BootSplash 首帧与设置页共用 */
