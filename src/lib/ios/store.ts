@@ -333,8 +333,16 @@ export interface WallpaperPreset {
   base: string;
 }
 
-/** 壁纸预设（第三十九轮新增前两项：机主上传的两张图——浅滩小鲨（默认主屏）/初雪情书（默认锁屏）） */
+/** 壁纸预设（第四十轮新增首位：机主上传图三「雾窗情书」——起雾车窗手写 Yes +
+ *  "If only I were in your eye…" 文艺字，低饱和冷灰白治愈系，设为默认主屏壁纸） */
 export const WALLPAPER_PRESETS: WallpaperPreset[] = [
+  {
+    id: 'fog-window',
+    name: '雾窗情书',
+    css: 'url(/wallpapers/fog-window.jpg) center / cover no-repeat',
+    light: true,
+    base: '#c8ccd3',
+  },
   {
     id: 'shark-reef',
     name: '浅滩小鲨',
@@ -615,7 +623,7 @@ interface SettingsState {
 export const useSettings = create<SettingsState>((set, get) => ({
   // 主题默认浅色（用户要求）；load 时无记录/一次性迁移后也回退到浅色
   theme: 'light',
-  wallpaperPreset: 'shark-reef',
+  wallpaperPreset: 'fog-window',
   customWallpaperUrl: null,
   lockWallpaperPreset: 'snow-lyrics',
   lockCustomWallpaperUrl: null,
@@ -768,7 +776,7 @@ export const useSettings = create<SettingsState>((set, get) => ({
       }
       if (themeReset) void localDB.put('settings', { key: 'themeDefaultLight', value: true });
 
-      let wallpaperPreset = 'shark-reef';
+      let wallpaperPreset = 'fog-window';
       let customWallpaperUrl: string | null = null;
       if (wallpaperRec && typeof wallpaperRec.value === 'object' && wallpaperRec.value !== null) {
         const w = wallpaperRec.value as { preset?: unknown; customBlob?: unknown };
@@ -808,6 +816,18 @@ export const useSettings = create<SettingsState>((set, get) => ({
           void localDB.put('settings', { key: 'lockWallpaper', value: { preset: 'snow-lyrics' } });
         }
         void localDB.put('settings', { key: 'wp39', value: true });
+      }
+
+      // 第四十轮一次性主屏壁纸迁移（wp40 标记）：机主上传图三「雾窗情书」设为默认主屏。
+      // 仅「无自定义壁纸 且 当前预设仍是上一轮默认 shark-reef」时切换（用户明确选过
+      // 其它预设则尊重选择不覆盖）；锁屏壁纸不动（初雪情书维持）。标记落库后不再介入。
+      const wp40Rec = await localDB.get('settings', 'wp40');
+      if (!wp40Rec) {
+        if (!customWallpaperUrl && wallpaperPreset === 'shark-reef') {
+          wallpaperPreset = 'fog-window';
+          void localDB.put('settings', { key: 'wallpaper', value: { preset: 'fog-window' } });
+        }
+        void localDB.put('settings', { key: 'wp40', value: true });
       }
 
       let apiConfig: ApiConfig = { ...DEFAULT_API_CONFIG };
