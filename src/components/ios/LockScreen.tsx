@@ -327,8 +327,9 @@ export default function LockScreen() {
               {/* 日期 + 农历 + 大时钟（v2 简约：更轻的字重 + 更克制的透明度层级） */}
               <div className="flex flex-col items-center px-6 pt-[82px]">
                 {dateLine && <p className="text-center text-[15px] font-medium tracking-[0.02em] opacity-90">{dateLine}</p>}
+                {/* 大时钟（第三十九轮：机主「再变粗一点」——font-medium → font-semibold） */}
                 <p
-                  className="mt-1.5 text-center text-[86px] font-medium leading-[1.04] tracking-[-0.02em] tabular-nums"
+                  className="mt-1.5 text-center text-[86px] font-semibold leading-[1.04] tracking-[-0.02em] tabular-nums"
                   style={lightText ? { textShadow: '0 2px 20px rgba(0,0,0,0.18)' } : undefined}
                 >
                   {now ? formatIOSTime(now) : ''}
