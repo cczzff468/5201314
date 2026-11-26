@@ -3850,3 +3850,31 @@ Stage Summary:
 - 七项全闭环 + 1 项紧急崩溃修复；发版 v2.4.23（versionCode 87）APK 6.8MB 已部署 public/Cove.apk
 - 沉浸式断层的根因方法论：出血条带采样链与渲染技术的「盲区」——WebGL Canvas/Video 像素不可被 CSS 采样读到时回落页面根底色，根底色恒定而内容动态即成断层；canvasPixelAt 补齐采样盲区+根色与内容联动兜底双保险
 - 图标四变体架构回归（第三十九轮曾收敛两变体）：新增款走「手绘 SVG+VLM 评审迭代」管线（数值螺旋/贴边三角尾/V 形短尾等细节四轮收敛），存量设备经原生 migrateIconOnce（不退进程）+网页 icon40（appIconChosen 判据）双通道一次性迁移到 4 号默认
+
+---
+Task ID: 42（第四十一轮）
+Agent: 主控 Agent（Z.ai Code）
+Task: 机主八项——电池外框圆角跟随内部 + 情书字标换机主原图并设默认 + 新增第 5 号图标 + 换图标卡死根治 + 图五换雾窗情书壁纸 + 删上滑通知中心 + 拾光小屋/阅读页顶部遮罩根治（fullBleedTop 全出血沉浸） + 全局根节点透明约束
+
+Work Log:
+- 【电池外框圆角】IOS_BAT_RADIUS 3→4.2 与内部填充 IOS_BAT_FILL_RADIUS 完全一致——外框描边/26% 轨道/胶囊色描边三层圆角统一，角部零错位（机主「内部外面的边框圆角跟随里面的」），commit cc26beb
+- 【换图标卡死根因定位】机主实锤「点击情书字标/小词灵一直卡在正在为您更换图标」：截图 111244 有物理系统状态栏（绿电 39% 充电图标=系统条非自绘）→ 机主仍在 v86 壳（2.4.22，parseIconAliasIndex 只认 '1'~'2'）→ 点 3/4/5 号时原生静默 return，网页提示层永不撤（catch 吞错且无看门狗）。三层防护根治（app-icon-grid + native-shell + MainActivity v88）：①v2.4.24+ switchAppIcon 返回状态串（'ok'=受理/'bad_alias'=壳不认识该别名）——网页非 'ok' 立即撤提示层；②'ok' 但 4s App 未退（原生异步异常兜底）看门狗恢复；③恢复时对齐回 getNativeCurrentIcon（挂载对齐同口径防「网页选A桌面是B」漂移）+ 红色可操作提示（引导「设置›APP更新」装最新版）；switchingRef 防旧定时器串扰，commit 8853644
+- 【图标五变体】机主两张原图入库 scripts/icon-src-r41/（icon-3.jpg=Cove 字标设计稿 1536² / icon-5.png=萌系对话气泡 1079²），「你自己不用改」=仅等比缩放零设计改动；rebuild-cove-icons-r41.mjs 全链（web 192/256/512/1024/maskable ×5、APK mipmap 五密度三件×5、anydpi XML×10、cove_icon_bgs 四角采样、默认名/apple-touch/favicon=3 号情书字标）；registry fullBleedTop 之外新增 AppMeta.fullBleedTop；store AppIconId '1'~'5'+默认 '3'+icon41 一次性迁移（无 appIconChosen 且 '4'→'3'，icon40 历史链保留）+favicon regex icon-[12345]；APP_ICON_VARIANTS 五项+v41 破缓存；app-icon/manifest API 五值+兜底 '3'；layout 静态初始 icon-3；root-page/theme 文案「五款图标」
+- 【原生 v88/2.4.24】AndroidManifest 新增 MainActivityIcon5+默认启用 3 号（4 号关）；MainActivity parseIconAliasIndex '1'~'5'、getCurrentIcon DEFAULT=i2、switchAppIcon 循环 5+String 状态回传、migrateIconOnce 存量→3 号（icon_migrated_v88）、getShellInfo 88/2.4.24；build.gradle 88/2.4.24+app-version 发布说明四条
+- 【图五壁纸】1795663833042.png（661×1439 雨窗雨珠+雾面手写 Yes+If only I were in your eye…）sharp q82 重编码 369K→75K 覆盖 public/wallpapers/fog-window.jpg；预设 css 加 ?v=41 破缓存（默认值/迁移链不动，存量选此预设设备全部拿到新图）；base 兜底色 3×3 均色 #C1C8D3，commit f6a0861
+- 【删上滑/下拉通知中心】机主定夺整件删除：NotificationCenter.tsx 组件删（下拉面板+顶部边缘下拖手势+状态栏左右点按热区两入口一并消失）+PhoneShell 挂载/dynamic 导入删；notification-center store 保留（条目账本供 AI 感知 jealousy-sense-extra 与设置›通知页消费；open/openCenter/closeCenter/toggleCenter 空转 no-op）；灵动岛横幅/系统通知/免打扰不受影响，commit 8613382
+- 【fullBleedTop 全出血沉浸·根治机主截图「灰蓝遮罩盒子」】根因：顶部「采样条带拼色」（SafeAreaBleedBands 把安全区条带涂成采样色）在这两页失真——拾光小屋 canvas 采样失败回落页面根 CSS 天空色 #a8d8ef（其下 3D 实际渲染米色房间）= 机主截图「浅灰蓝横带+米色场景」断层；阅读页条带纯色 vs 页面渐变/背景图。修法（机主规格逐条）：registry cottage/reading 标 fullBleedTop → AppWindow 挂 data-bleed-full → globals.css [data-bleed-full] [data-safe-inset] top 归零——内容从物理屏顶 y=0 铺起，3D canvas 天空色/阅读背景图直接延伸到物理灵动岛与状态栏下方（「Canvas 直接顶到屏幕最上方」「阅读背景图直接延伸到状态栏上方」原文落地）；出血条带被内容盖住零可见；CoupleHome 根 div 删 backgroundColor（「3D 页面最外层 div 绝对禁止设置背景色」原文）——天空色改挂 Canvas 元素自身 style（渲染后 scene.background 接管）；TopBar .ch-hud-top 自管避让（pt-11 基础上加回 var(--app-sat-eff)，仅 full-bleed 容器生效——couple-space 内嵌同组件不受影响）；阅读 SB_H=54 既有口径恰从状态栏下开始，commit 2f3c9b4
+- 【全局根节点透明】机主规格「body/#root/main 强制 transparent」按语义落地：APK 内 body #000→transparent（手机壳满屏覆盖 body 不参与可见渲染；透明后露 WebView 窗口底 #000000 与 html 压黑同为机身黑零差异）；html 层保留 #000 兜底（旧 WebView 未初始化帧防白条最后防线）；「页面顶部 padding-top: env(safe-area-inset-top)」确认既有等效更强口径（[data-safe-inset] top=var(--app-sat-eff) 原生实时上报，优于 env() 在 edge-to-edge WebView 恒 0）；全局实色背景扫描零页面根级残留，commit 10c5a8d
+- 【原生 WebView 四项核查全过】overScrollMode=OVER_SCROLL_NEVER ✓ WebView match_parent ✓ WindowCompat.setDecorFitsSystemWindows(false)+cutout ALWAYS ✓ capacitor insetsHandling disable ✓（均为既有，向机主如实报告）
+- 附带修复：StatusBarToneProbe 第四十轮遗留 tsc 基线错（bg 显式 Rgba|null）；native-shell 补 StatusBarMode 导出别名（store 既有引用名）
+
+验证:
+- tsc 0 errors（我的改动文件；项目历史基线错误在未触碰文件）；lint 0 errors（12 条历史 warning 不变）；dev server 200
+- agent-browser 全链实测（iPhone 14 设备模拟 + html[data-app-native][data-shell-fullscreen] --app-sat:38px/--app-sab:16px 原生模式注入）：锁屏上滑解锁→主屏（新雾窗情书壁纸 url?v=41 DOM 断言+VLM 确认雨窗内容）→设置›显示与亮度（五选一网格：情书字标默认选中✓icon41 迁移生效、元气气泡点选/回选、favicon icon-3?v=41 即时重写✓）→顶部下拉手势（通知中心无面板/零 DOM 残留✓已删）→第 4 页拾光小屋（fullBleed✓ canvas top=0 h=828、TopBar padTop=54.64=44+10.64✓、VLM「状态栏与3D天空连续无条带盒子」「返回按钮无遮挡」、取消按钮退回主屏✓）→阅读（siTop=0✓、VLM「状态栏背景与页面渐变连续无断层」）→console 零 error（仅 THREE 历史警告）
+- 图五新壁纸、icon-3/icon-5 机主原图、电池 4.2 统一圆角均渲染确认
+
+Stage Summary:
+- 八项全闭环；发版 v2.4.24（versionCode 88）APK 重打部署 public/Cove.apk
+- 换图标卡死根因方法论：JS 桥调用「成功送达」≠「原生成功受理」——旧壳静默忽略新能力号时网页侧必须有状态回传+看门狗+恢复对齐三件套，任何「全屏等待层」都必须有兜底退出路径
+- 沉浸式架构升级：出血条带拼色（适配静态 CSS 背景的 90% App）+ fullBleedTop 全出血（动态媒体 App：3D canvas/背景图直接顶到物理屏顶）双轨制——后续新增全屏媒体类 App 挂 fullBleedTop 即可
+- 机主仍在 v86 壳的证据链（物理绿电状态栏+卡死截图）→ 需覆盖安装 v88（public/Cove.apk 或设置›APP更新）：换 3/4/5 号图标即刻生效、状态栏双条消除、迁移链自动把桌面图标切到情书字标
