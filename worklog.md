@@ -3802,3 +3802,27 @@ Stage Summary:
 - PWA 自动跟随口径重申（机主已知）：Chrome/Edge 装的 PWA 下次打开时 Chrome 检查 manifest（no-store 动态接口）自动换桌面图标，无需重新下载安装；iOS Safari 主屏图标=安装时快照需重新添加
 - APK 构建：沙箱重建后 JDK/SDK 重下（首次失败=gradle daemon OOM 被杀，--max-workers=1 单 worker 重试成功）；public/Cove.apk 4.9MB versionCode 85
 - lint 0 errors；agent-browser 端到端实测（外观页四选一/开屏两时点截图 VLM/电池弹窗预览 VLM/主屏截图 VLM/favicon DOM 断言/manifest JSON 断言）
+
+---
+Task ID: 40（第三十九轮）
+Agent: 主控 Agent（Z.ai Code）
+Task: 机主七项——删除暗黑版/二次元版图标 + 删除星空对话开屏 + 拾光小屋移到主界面第四页 + 默认壁纸/锁屏壁纸换机主两张上传图 + 锁屏时间再变粗 + 状态栏外观设置（透明融合/完全隐藏两档沉浸式·原生端+前端联动全规格）
+
+Work Log:
+- 【删暗黑版/二次元版图标】四变体收敛回两变体：Manifest 删 MainActivityIcon3/4 两个 activity-alias（注释同步两变体口径）；MainActivity 原生桥收敛（parseIconAliasIndex '1'~'2'、getCurrentIcon/switchAppIcon 循环 4→2）；APK mipmap 五密度×3件+anydpi XML×4 共 30 资源删除、web public/icons/app/icon-3/4 十文件删除；前端 store AppIconId='1'|'2'（存量 '3'/'4' 装载校验归一 '1'）+ AppIconGrid 两变体 + native-shell 校验 + app-icon/manifest API 收敛（GET 存量归一防 manifest 指向已删 PNG）+ favicon 正则 icon-[12]；rg 全项目零残留
+- 【删星空对话开屏】CoveSplashTheme 删 'chat'（四主题→三：星空月夜/雾中远山/雨落成诗；validateSplashTheme 三源共用校验——存量 chat 偏好自动回落 star）；BootSplash chat 整屏渲染分支 310 行删除（金月/地球/流星/四芒星/星尘带/情话散排全下线）+ CHAT_LINES/SPARKLES/STARDUST/THEME_META.chat/8 个 SVG defs uid/useId 导入清零（908→521 行）；设置页入口行「四款→三款」+弹窗 options/名称/预览卡/微缩场景分支全收敛；globals.css 删 cove5 五组 keyframes + cove4-heart-float（孤儿）
+- 【拾光小屋第四页】LAYOUT_VERSION 11→12：defaultLayout 新增 PAGE4_APP_IDS=['cottage'] 独立第四页（PAGE3 删 cottage 页尾 10 App）；v11→v12 走【定向迁移】（第三十八轮已定调图标绝不自动重排）——cottage 从任意页/Dock/文件夹/hidden 摘出插到第 4 页首位，其余排布原样保留；v10 及更早仍整版重置
+- 【新壁纸】机主两图入库：shark-reef.jpg（第一张·航拍浅滩小鲨·661×1439）/snow-lyrics.jpg（第二张·雪景歌词·665×1439，均为 JPEG 数据重命名为 .jpg）；WALLPAPER_PRESETS 头插「浅滩小鲨」「初雪情书」（均 light:true 黑字；sharp 3×3 均色 #d8e0e6/#d4d7df 作 base 防透底）；初始默认 wallpaperPreset/lockWallpaperPreset 改新 id；wp39 一次性迁移（存量设备 IndexedDB 已有旧默认记录——无标记时强制切换（无自定义壁纸才覆盖）+新值与标记落库，重启不再介入）
+- 【锁屏时间加粗】86px 大时钟 font-medium(500)→font-semibold(600)（iOS 真机锁屏同档）
+- 【状态栏外观设置·全规格落地】机主安卓标准方案逐条实现：
+  ①【UI】设置›显示与亮度新增「状态栏模式」radiogroup 两选一：透明融合（Eye 图标+「推荐」蓝徽+「背景透明融入顶部 · 保留时间电量 WiFi」）/完全隐藏（EyeOff+「真全屏沉浸 · 从屏幕顶部下拉可临时呼出」）+持久化脚注
+  ②【原生桥】MainActivity setStatusBarMode(mode)：'transparent'=WindowCompat.setDecorFitsSystemWindows(false)+状态栏常驻 show+背景 TRANSPARENT+无 FULLSCREEN/IMMERSIVE 标志（内容 LAYOUT_FULLSCREEN 画进状态栏与挖孔下）+图标明暗按记忆值（网页色调探针持续驱动，冷启动防错色闪现）；'hidden'=hideSystemBarsRobust 三通道齐发（FULLSCREEN+IMMERSIVE_STICKY/兼容控制器/FLAG_FULLSCREEN）；SharedPreferences（cove_prefs/statusbar_mode）持久化——onCreate 先于网页加载按记忆模式布局；生命周期三回调按当前模式重申；补藏哨兵/350ms 冒头重收仅 hidden 调度（transparent 重藏会打架）；insets 顶部口径随模式（transparent=系统条∪挖孔全额避让=等效规格「padding-top: env(safe-area-inset-top)」/hidden=仅挖孔）；getShellInfo 86/2.4.22+statusBarMode 上报；applyBarStyle 上移 MainActivity（编译修复）
+  ③【CSS 安全区】layout 内联脚本预置 data-sb-mode（localStorage 镜像首帧生效防闪）+data-sb-native（v2.4.22+ 壳探测）；globals.css：hidden 模式 .ph-statusbar display:none、v2.4.22+ APK 透明模式自绘状态栏让位物理条（防双状态栏）+--app-sat-eff 回全额；隐藏模式内容顶格（28% 挖孔口径不变）；PhoneShell showStatusBar 渲染汇总+store→html 权威同步（loaded 后送原生防默认值瞬时错切）+浏览器端顶边下拉（壳顶 20px 边缘带≥26px）瞬时呼出自绘状态栏 2.8s 自动收回（APK 走系统 IMMERSIVE_STICKY 不重复；与通知中心手势共存 iOS 同语义）
+  ④【持久化】三重写：IndexedDB settings.statusBarMode（本地数据库·重启 load 读回自动应用）+localStorage cove-statusbar-mode（首帧镜像）+原生 SharedPreferences——重启自动应用实测通过
+- 【发版】build.gradle 86/2.4.22+app-version 七条发布说明；APK 重打部署（BUILD SUCCESSFUL 26s；aapt 验证 86/2.4.22✓两别名✓icon-3/4 零残留✓；classes7.dex 含 setStatusBarMode/cove_prefs/statusbar_mode 桥字符串✓）
+
+Stage Summary:
+- 七项全闭环：图标两变体（web+APK 素材+API 三端同步删除）、星空对话开屏三主题收敛（存量自愈回落 star）、拾光小屋第四页（v12 定向迁移不动其余排布）、新壁纸双默认（wp39 存量迁移）、锁屏 semibold、状态栏模式全链（UI+原生桥+CSS 安全区+三重持久化）、发版 v86
+- 状态栏模式双端行为矩阵：浏览器（transparent=自绘常驻/hidden=隐藏+顶边下拉呼出）；v2.4.22+ APK（transparent=物理系统条常驻透明+自绘让位+内容全额避让/hidden=三通道隐藏+系统顶边滑出）；旧 APK 壳（transparent 退化自绘常驻=现状/hidden=隐藏）——旧壳零破坏平滑升级
+- agent-browser 端到端实测全链：锁屏雪景+粗时间→解锁主屏浅滩壁纸（url DOM 断言）+状态栏常驻→第四页拾光小屋独占→状态栏模式选择器（选中+推荐徽标）→切隐藏状态栏消失→顶边下拉呼出（真实拖拽 DOM sb:true）→2.8s 收回（sb:false）→reload 持久化（mode=hidden 自动应用）→UI 切回透明恢复→开屏三选一无星空对话→errors 清零复查
+- lint 0 errors；tsc --noEmit 0 errors（两次：图标收敛后/状态栏模式后）；构建错误「loaded 重复声明」当场修复复验
