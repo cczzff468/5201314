@@ -11,9 +11,9 @@
  */
 
 /** 当前最新版本（纯网页热更时与 APK versionName 可短暂不同步，下次重打 APK 对齐） */
-export const APP_VERSION = '2.4.20';
+export const APP_VERSION = '2.4.21';
 /** 版本号数字（与 android-shell versionCode 保持一致；覆盖安装要求只增不减；纯网页热更不动） */
-export const APP_VERSION_CODE = 84;
+export const APP_VERSION_CODE = 85;
 
 export interface AppReleaseNote {
   version: string;
@@ -24,6 +24,18 @@ export interface AppReleaseNote {
 
 /** 版本历史（新→旧；设置 › APP 更新 页渲染，最新一条即当前版本） */
 export const APP_RELEASE_NOTES: AppReleaseNote[] = [
+  {
+    version: '2.4.21',
+    date: '2026-11-26',
+    items: [
+      '【需重装 APK · versionCode 85】一键无感换图标（Activity Alias）：设置›显示与亮度新增图标网格四选一——原版云朵 C/弧 C 微笑/暗黑版星夜金月/二次元版樱花萌云，点选后免重装即刻换桌面图标（旧图标消失、新图标上桌面、App 自动退回桌面刷新启动器）',
+      '【需重装 APK】AndroidManifest 迁 launcher 入口到四个 activity-alias + 原生桥 switchAppIcon（setComponentEnabledSetting 先启目标再关其余，HOME + System.exit(0) 强退刷新）+ getCurrentIcon 查询对齐',
+      '【网页热更·免重装】浏览器/PWA 端同步：manifest 动态接口四选一（Chrome/Edge 装的 PWA 下次打开自动换桌面图标，无需重新下载）+ favicon 即时换新 + 新图标 PNG 全链重打（web/APK mipmap 四变体全密度）',
+      '【网页热更·免重装】电池图标内部圆角再圆润一档（rx 2.2 → 3.2，柔和小圆）',
+      '【网页热更·免重装】「星空对话」开屏再美化：新增蓝色地球（渐变大陆+大气光晕+环轨道微星）、两颗流星滑痕、星点加密与整体星象层次',
+      '【网页热更·免重装】主屏图标不再自适应屏幕：删矮视口行数收敛与自动重排（图标恒按固定 6 行网格布局，不随窗口尺寸自动排序）',
+    ],
+  },
   {
     version: '2.4.20',
     date: '2026-11-26',

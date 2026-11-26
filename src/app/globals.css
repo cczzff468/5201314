@@ -321,6 +321,17 @@
     transform: none;
   }
 }
+/* 第三十八轮：App 图标切换提示层（APK 原生 activity-alias 切换前的可见画面） */
+@keyframes cove-icon-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes cove-icon-pop {
+  0% { transform: scale(0.68); opacity: 0; }
+  60% { opacity: 1; }
+  100% { transform: scale(1); opacity: 1; }
+}
+
 @keyframes app-splash-spin {
   to {
     transform: rotate(360deg);
@@ -1962,6 +1973,10 @@ html[data-app-native] * {
 @keyframes cove5-trail-flow {
   from { stroke-dashoffset: 320; }
   to   { stroke-dashoffset: 0; }
+}
+@keyframes cove5-earth-glow {
+  0%, 100% { opacity: 0.85; transform: scale(1); }
+  50%      { opacity: 1; transform: scale(1.07); }
 }
 @keyframes cove5-moon-float {
   0%, 100% { transform: translateY(0) rotate(-2deg); }

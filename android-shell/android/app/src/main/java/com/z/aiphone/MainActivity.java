@@ -2,9 +2,11 @@ package com.z.aiphone;
 
 import android.app.DownloadManager;
 import android.content.BroadcastReceiver;
+import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.content.pm.PackageManager;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -319,6 +321,22 @@ public class MainActivity extends BridgeActivity {
         }
     }
 
+    /** v2.4.21 图标别名组件全名（i=0~3 → .MainActivityIcon1~4，与 Manifest 一致） */
+    private String iconAliasComponent(int i) {
+        return getPackageName() + ".MainActivityIcon" + (i + 1);
+    }
+
+    /** v2.4.21 别名序号解析：'1'~'4'（或全名 com.z.aiphone.MainActivityIconN）→ 0~3；非法 → -1 */
+    private static int parseIconAliasIndex(String aliasId) {
+        if (aliasId == null) return -1;
+        String s = aliasId.trim();
+        int dot = s.lastIndexOf('.');
+        if (dot >= 0) s = s.substring(dot + 1).replace("MainActivityIcon", "");
+        if (s.length() != 1) return -1;
+        char c = s.charAt(0);
+        return (c >= '1' && c <= '4') ? c - '1' : -1;
+    }
+
     /** 把缓存安全区推给网页（页面未就绪时静默失败，下次 inset 变化/加载时会再推） */
     private void pushInsetsToWeb() {
         if (this.bridge == null || this.bridge.getWebView() == null) return;
@@ -356,17 +374,92 @@ public class MainActivity extends BridgeActivity {
 
         /** v2.4.9 壳版本桥：网页据 getShellInfo 是否存在区分新旧壳——新壳系统状态栏已隐藏
          *  （网页自绘状态栏回归显示）；旧壳无此方法，网页维持 v2.4.8 行为（自绘状态栏
-         *  隐藏、系统状态栏融入），避免旧 APK 先拿到新 CSS 时出现双状态栏。 */
+         *  隐藏、系统状态栏融入），避免旧 APK 先拿到新 CSS 时出现双状态栏。
+         *  v2.4.21：版本同步 85 / 2.4.21（新增 activity-alias 图标四变体 + 换图标桥）。 */
         @JavascriptInterface
         public String getShellInfo() {
             JSONObject o = new JSONObject();
             try {
-                o.put("versionCode", 84);
-                o.put("versionName", "2.4.20");
+                o.put("versionCode", 85);
+                o.put("versionName", "2.4.21");
                 o.put("fullscreen", true); // 系统状态栏隐藏（全屏）标记
             } catch (Exception ignored) {
             }
             return o.toString();
+        }
+
+        /** v2.4.21 一键无感换图标（Activity Alias）①查询当前启用图标：
+         *  返回 '1'~'4'。判定口径：getComponentEnabledSetting 只回「上次设置值」——
+         *  ENABLED=启用；DEFAULT=按 Manifest 默认（仅 1 号 enabled=true，其余 false）；
+         *  DISABLED / DISABLED_USER=禁用。网页设置页图标网格挂载时先调它对齐选中态
+         *  （APK 覆盖安装后别名重置回默认 1 号，与网页偏好可能漂移，以原生为准）。 */
+        @JavascriptInterface
+        public String getCurrentIcon() {
+            try {
+                PackageManager pm = getPackageManager();
+                String pkg = getPackageName();
+                for (int i = 0; i < 4; i++) {
+                    ComponentName cn = new ComponentName(pkg, iconAliasComponent(i));
+                    int state = pm.getComponentEnabledSetting(cn);
+                    boolean enabled = state == PackageManager.COMPONENT_ENABLED_STATE_ENABLED
+                            || (state == PackageManager.COMPONENT_ENABLED_STATE_DEFAULT && i == 0);
+                    if (enabled) return String.valueOf(i + 1);
+                }
+            } catch (Throwable ignored) {
+            }
+            return "1";
+        }
+
+        /** v2.4.21 一键无感换图标（Activity Alias）②切换：网页传 '1'~'4'。
+         *  流程（机主规格·安卓标准方案）：
+         *  ① 先启目标别名（防全禁断档——全禁时 App 在启动器瞬间无入口）再关其余，
+         *    全程 DONT_KILL_APP（切换期间不杀进程，避免 WebView 中途黑屏）；
+         *  ② HOME Intent 退回桌面 + 650ms 后 finishAffinity + System.exit(0) 硬退：
+         *    进程级退出让启动器立即重查 launcher 组件——旧图标消失、新图标上桌面。
+         *  650ms 延迟：给网页把提示层画完 + 服务器偏好 POST 发出（PWA manifest 同步）
+         *  + HOME 转场完成的时间；退出时机过早会看到黑屏一闪。 */
+        @JavascriptInterface
+        public void switchAppIcon(final String aliasId) {
+            final int idx = parseIconAliasIndex(aliasId);
+            if (idx < 0) return; // 非法输入静默（网页侧已校验，双保险）
+            runOnUiThread(() -> {
+                boolean ok = false;
+                try {
+                    PackageManager pm = getPackageManager();
+                    String pkg = getPackageName();
+                    // ① 先启目标（防断档）
+                    pm.setComponentEnabledSetting(
+                            new ComponentName(pkg, iconAliasComponent(idx)),
+                            PackageManager.COMPONENT_ENABLED_STATE_ENABLED,
+                            PackageManager.DONT_KILL_APP);
+                    // ② 再关其余（同一 MainActivity 的其它别名全部下线——旧图标消失）
+                    for (int i = 0; i < 4; i++) {
+                        if (i == idx) continue;
+                        pm.setComponentEnabledSetting(
+                                new ComponentName(pkg, iconAliasComponent(i)),
+                                PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
+                                PackageManager.DONT_KILL_APP);
+                    }
+                    ok = true;
+                } catch (Throwable ignored) {
+                }
+                if (!ok) return;
+                // ③ 强制退回桌面（HOME Intent），随后硬退进程逼启动器重查图标
+                try {
+                    Intent home = new Intent(Intent.ACTION_MAIN);
+                    home.addCategory(Intent.CATEGORY_HOME);
+                    home.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                    startActivity(home);
+                } catch (Throwable ignored) {
+                }
+                reHideHandler.postDelayed(() -> {
+                    try {
+                        finishAffinity();
+                    } catch (Throwable ignored) {
+                    }
+                    System.exit(0);
+                }, 650L);
+            });
         }
 
         /** 系统状态栏/导航栏图标明暗——状态栏/导航栏可分别设置（v2.4.9 拆分：状态栏已隐藏，

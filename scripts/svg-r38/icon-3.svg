@@ -1,0 +1,84 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+  <!-- Cove 图标三「暗黑版·星夜金月」：与「星空对话」开屏同设计语言——
+       午夜蓝夜空渐变底 + 大金新月（开口朝左，mask 挖月）+ 斑驳纹理 + 星点/
+       四芒星 + 金色星尘光带 + cove 金色单线字标 -->
+  <defs>
+    <linearGradient id="night" x1="0" y1="0" x2="0.22" y2="1">
+      <stop offset="0%" stop-color="#0A0E1E"/>
+      <stop offset="42%" stop-color="#141B34"/>
+      <stop offset="72%" stop-color="#1C2648"/>
+      <stop offset="100%" stop-color="#0C1124"/>
+    </linearGradient>
+    <radialGradient id="goldmoon" cx="40%" cy="34%" r="78%">
+      <stop offset="0%" stop-color="#FFF3D4"/>
+      <stop offset="30%" stop-color="#F7DB95"/>
+      <stop offset="62%" stop-color="#E5B75E"/>
+      <stop offset="100%" stop-color="#C28C2E"/>
+    </radialGradient>
+    <mask id="mooncut">
+      <rect x="0" y="0" width="1024" height="1024" fill="white"/>
+      <circle cx="398" cy="448" r="242" fill="black"/>
+    </mask>
+    <radialGradient id="goldglow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#E9BD66" stop-opacity="0.42"/>
+      <stop offset="52%" stop-color="#E9BD66" stop-opacity="0.14"/>
+      <stop offset="100%" stop-color="#E9BD66" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="trail" x1="540" y1="330" x2="240" y2="760" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#F4D68C" stop-opacity="0.85"/>
+      <stop offset="55%" stop-color="#E5B75E" stop-opacity="0.4"/>
+      <stop offset="100%" stop-color="#D2A24C" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+  <rect width="1024" height="1024" fill="url(#night)"/>
+
+  <!-- 金月外圈光晕（径向渐变模拟光扩散） -->
+  <circle cx="580" cy="412" r="360" fill="url(#goldglow)"/>
+
+  <!-- 金新月本体：主圆 (572,418) r 236，左侧暗圆挖出月牙（开口朝左；瘦月牙——VLM 首评「略偏满」收窄） -->
+  <circle cx="572" cy="418" r="236" fill="url(#goldmoon)" mask="url(#mooncut)"/>
+  <!-- 斑驳纹理（同 mask 裁在月牙内；仅深色隕坑——浅色光斑首评像瑕疵已删） -->
+  <g mask="url(#mooncut)">
+    <circle cx="668" cy="258" r="44" fill="#B8862F" opacity="0.4"/>
+    <circle cx="620" cy="472" r="62" fill="#B8862F" opacity="0.28"/>
+    <circle cx="690" cy="562" r="34" fill="#A07028" opacity="0.35"/>
+  </g>
+
+  <!-- 金色星尘光带：自月牙下尖蜿蜒向左下（起点离月身——VLM 首评「像从月亮里长出来」已移出） -->
+  <path d="M 470 545 C 420 595, 375 665, 335 745" fill="none" stroke="url(#trail)" stroke-width="9" stroke-linecap="round"/>
+  <path d="M 428 505 C 390 550, 360 605, 340 660" fill="none" stroke="url(#trail)" stroke-width="5" stroke-linecap="round" opacity="0.6"/>
+  <!-- 沿带小星尘 -->
+  <circle cx="420" cy="595" r="7" fill="#F2D48F" opacity="0.9"/>
+  <circle cx="375" cy="665" r="6" fill="#F2D48F" opacity="0.75"/>
+  <circle cx="335" cy="745" r="7" fill="#F2D48F" opacity="0.85"/>
+  <circle cx="360" cy="605" r="5" fill="#FFFFFF" opacity="0.7"/>
+  <circle cx="340" cy="660" r="4.5" fill="#FFFFFF" opacity="0.6"/>
+
+  <!-- 星点铺底（白点 + 微金点） -->
+  <circle cx="150" cy="150" r="7" fill="#FFFFFF" opacity="0.9"/>
+  <circle cx="250" cy="240" r="4.5" fill="#FFFFFF" opacity="0.6"/>
+  <circle cx="130" cy="330" r="5" fill="#FFFFFF" opacity="0.75"/>
+  <circle cx="210" cy="120" r="4" fill="#F2D48F" opacity="0.7"/>
+  <circle cx="840" cy="140" r="6" fill="#FFFFFF" opacity="0.85"/>
+  <circle cx="920" cy="240" r="4.5" fill="#FFFFFF" opacity="0.6"/>
+  <circle cx="880" cy="90" r="4" fill="#F2D48F" opacity="0.7"/>
+  <circle cx="120" cy="560" r="4.5" fill="#FFFFFF" opacity="0.55"/>
+  <circle cx="200" cy="700" r="5" fill="#FFFFFF" opacity="0.5"/>
+  <circle cx="840" cy="620" r="5" fill="#FFFFFF" opacity="0.6"/>
+  <circle cx="900" cy="720" r="4" fill="#FFFFFF" opacity="0.45"/>
+  <circle cx="810" cy="780" r="6" fill="#F2D48F" opacity="0.5"/>
+
+  <!-- 四芒星（凹边四角星，金白两色） -->
+  <path d="M 190 420 C 197 446, 208 457, 234 464 C 208 471, 197 482, 190 508 C 183 482, 172 471, 146 464 C 172 457, 183 446, 190 420 Z" fill="#FFFFFF" opacity="0.92"/>
+  <path d="M 880 500 C 887 526, 898 537, 924 544 C 898 551, 887 562, 880 588 C 873 562, 862 551, 836 544 C 862 537, 873 526, 880 500 Z" fill="#F2D48F" opacity="0.9"/>
+  <path d="M 700 130 C 705 148, 713 156, 731 161 C 713 166, 705 174, 700 192 C 695 174, 687 166, 669 161 C 687 156, 695 148, 700 130 Z" fill="#FFFFFF" opacity="0.8"/>
+
+  <!-- cove 单线字标（金色，几何同 icon-1：基线 880、字高 84、描边 10 圆头） -->
+  <g fill="none" stroke="#E9C87F" stroke-width="10" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M 357 805.8 A 42 42 0 1 0 357 870.2"/>
+    <circle cx="448" cy="838" r="42"/>
+    <path d="M 528 796 L 570 880 L 612 796"/>
+    <path d="M 728.4 859 A 42 42 0 1 0 713 874.4"/>
+    <path d="M 650 838 L 734 838"/>
+  </g>
+</svg>

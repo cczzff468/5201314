@@ -49,6 +49,7 @@ import { localDB } from '@/lib/ios/db';
 import {
   WALLPAPER_PRESETS,
   useSettings,
+  type AppIconId,
   type BatteryPercentMode,
   type ThemeMode,
   type CoveSplashTheme,
@@ -76,6 +77,7 @@ import {
 
 // v2.4.11 原生壳自诊断（还看得到系统状态栏 = 手机上是旧 APK，一眼分辨）
 import { readShellInfo } from '@/lib/ios/shell-info';
+import { AppIconGrid } from './app-icon-grid';
 import { isNativePerception } from '@/lib/ios/native-perception';
 
 // v1.4.2 APP 更新：自动检查 + 红点 + 版本历史
@@ -661,14 +663,14 @@ export function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
             <span className="grid h-[31px] w-[31px] shrink-0 place-items-center">
               {/* 当前 App 图标小预览（ squircle 圆角 + 细描边；?v=35 破缓存——本轮 PNG 全套换新后旧图可能还在浏览器缓存里） */}
               <img
-                src={`/icons/app/icon-${appIcon}-192.png?v=35`}
+                src={`/icons/app/icon-${appIcon}-192.png?v=36`}
                 alt="当前 App 图标"
                 className="h-[29px] w-[29px] rounded-[6.8px] object-cover ring-[0.5px] ring-black/10"
               />
             </span>
             <span className="min-w-0 flex-1">
               <span className="block truncate text-[16px]">App 图标</span>
-              <span className="mt-0.5 block truncate text-[11.5px] text-muted-foreground">Cove 两选一 · 开屏与桌面图标即时跟随</span>
+              <span className="mt-0.5 block truncate text-[11.5px] text-muted-foreground">四款图标 · 免重装一键切换</span>
             </span>
             <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground/60" strokeWidth={2.2} />
           </button>
@@ -726,25 +728,17 @@ function batteryModeLabel(mode: BatteryPercentMode): string {
   return mode === 'inside' ? '电池图标内部' : mode === 'outside' ? '电池图标外部' : '不显示';
 }
 
-/** 两张备选图标（第三十五轮：机主发来两张参考图 SVG 矢量重绘——
- *  云朵 C=胖月牙环抱云朵笑脸+对话气泡+cove 字标；弧 C 微笑=石板蓝 C 弧+端点钮/眼点+
- *  微笑弧+宽字距字标；老三选一（拱门静湾/雾中远山/静月港湾）下线，历史 '3' 归一为 '1'） */
-const APP_ICON_OPTIONS: { id: '1' | '2'; name: string; desc: string }[] = [
-  { id: '1', name: '云朵 C', desc: '云朵笑脸 · 环抱月牙 C' },
-  { id: '2', name: '弧 C 微笑', desc: '极简弧线 · 圆点小脸' },
-];
-
-/** 第三十一轮：App 图标选一弹窗（iOS 居中卡；第三十五轮改两选一）：
- *  两张大图预览（64px squircle，选中态蓝描边+角标），点选即时生效：
- *  开屏动画/设置预览即时跟随；同时异步同步服务器（PWA manifest 动态图标，
- *  「添加到主屏幕/安装」时浏览器拉取所选图标）。点背板/Esc/好 关闭。 */
+/** App 图标弹窗（iOS 居中卡；第三十一轮三选一 → 第三十八轮四选一）：
+ *  共享 AppIconGrid 渲染四款大图（选中态蓝描边+角标），点选即换——APK 端走原生
+ *  activity-alias 切换（全屏提示层 + 免重装 + 自动退回桌面）；浏览器端同步服务器
+ *  （PWA manifest 动态图标，下次打开自动跟随）。点背板/Esc/好 关闭。 */
 function AppIconDialog({
   current,
   onPick,
   onClose,
 }: {
-  current: '1' | '2';
-  onPick: (id: '1' | '2') => void;
+  current: AppIconId;
+  onPick: (id: AppIconId) => void;
   onClose: () => void;
 }) {
   const [entered, setEntered] = useState(false);
@@ -785,48 +779,11 @@ function AppIconDialog({
             <p className="text-[16px] font-semibold text-black dark:text-white">App 图标</p>
             <p className="mt-0.5 text-[11.5px] text-muted-foreground">Cove · 选一个喜欢的样子</p>
           </div>
-          {/* 两张大图预览（横排两列） */}
-          <div className="grid grid-cols-2 gap-2 px-4 py-4">
-            {APP_ICON_OPTIONS.map((o) => {
-              const sel = current === o.id;
-              return (
-                <button
-                  key={o.id}
-                  type="button"
-                  role="menuitemradio"
-                  aria-checked={sel}
-                  aria-label={`${o.name}（${o.desc}）`}
-                  data-testid={`app-icon-option-${o.id}`}
-                  onClick={() => {
-                    onPick(o.id);
-                    onClose();
-                  }}
-                  className={`flex flex-col items-center gap-2 rounded-[16px] px-1 py-3 transition-all active:scale-[0.97] ${
-                    sel ? 'bg-[#007AFF]/[0.08] ring-[1.5px] ring-[#007AFF]/60' : 'ring-[1.5px] ring-transparent'
-                  }`}
-                >
-                  <span className="relative">
-                    <img
-                      src={`/icons/app/icon-${o.id}-192.png?v=35`}
-                      alt={o.name}
-                      className={`h-[64px] w-[64px] rounded-[15px] object-cover shadow-[0_6px_16px_rgba(0,0,0,0.14)] ${sel ? '' : 'opacity-95'}`}
-                    />
-                    {sel && (
-                      <span className="absolute -right-[6px] -top-[6px] grid h-[18px] w-[18px] place-items-center rounded-full bg-[#007AFF] shadow-[0_2px_6px_rgba(0,122,255,0.5)] ring-2 ring-white">
-                        <Check className="h-[12px] w-[12px] text-white" strokeWidth={3.2} />
-                      </span>
-                    )}
-                  </span>
-                  <span className="text-center leading-tight">
-                    <span className={`block text-[12.5px] ${sel ? 'font-semibold text-[#007AFF]' : 'text-black/85 dark:text-white/85'}`}>{o.name}</span>
-                    <span className="mt-0.5 block text-[9.5px] text-muted-foreground">{o.desc}</span>
-                  </span>
-                </button>
-              );
-            })}
-          </div>
+          {/* 四款图标网格（共享 AppIconGrid：APK 端原生一键切换 + PWA 自动跟随，
+              选点逻辑与「设置›显示与亮度」外观页同一份） */}
+          <AppIconGrid current={current} size="dialog" onAfterPick={onClose} />
           <p className="px-6 pb-2 text-center text-[10.5px] leading-relaxed text-muted-foreground">
-            开屏动画即时跟随；PWA 桌面图标自动跟随（Chrome/Edge 装的会在下次打开时检查更新，无需重新下载）；iOS 主屏图标需重新添加一次；APK 原生图标随新包
+            APK 端免重装一键切换（切换后自动退回桌面，旧图标消失新图标上桌面）；浏览器安装的 PWA 桌面图标自动跟随（Chrome/Edge 下次打开时检查更新，无需重新下载）；iOS 主屏图标需重新添加一次
           </p>
           <button
             type="button"
@@ -988,7 +945,7 @@ const SPLASH_THEME_PREVIEW: Record<
     bg: 'linear-gradient(172deg, #0A0E1E 0%, #141B34 38%, #1C2648 68%, #0C1124 100%)',
     fg: '#F2E6C2',
     accent: 'radial-gradient(circle at 72% 30%, #F2D48F 0%, #E0AE55 55%, #C28C2E 100%)',
-    desc: '金月 · 星尘 · 情话',
+    desc: '金月 · 地球 · 星尘 · 情话',
   },
 };
 
@@ -1089,6 +1046,14 @@ function SplashThemeDialog({
                           <span
                             className="absolute right-[24%] top-[10%] block h-[26px] w-[26px] rounded-full"
                             style={{ background: pv.bg }}
+                          />
+                          {/* 小地球（第三十八轮）：蓝圆+大气光环 */}
+                          <span
+                            className="absolute left-[10%] top-[38%] block h-[13px] w-[13px] rounded-full"
+                            style={{
+                              background: 'radial-gradient(circle at 34% 28%, #7EC8F5 0%, #3E86CE 45%, #123B70 100%)',
+                              boxShadow: '0 0 7px rgba(110,170,245,0.6)',
+                            }}
                           />
                           <span className="absolute left-[14%] top-[22%] block h-[2px] w-[2px] rounded-full bg-white/90" />
                           <span className="absolute left-[30%] top-[14%] block h-[1.5px] w-[1.5px] rounded-full bg-[#F2D48F]/90" />

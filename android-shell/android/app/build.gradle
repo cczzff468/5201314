@@ -14,8 +14,8 @@ android {
         applicationId "com.z.aiphone"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 84          // v2.4.20 自适应前景层 72dp 安全区根修（启动器遮罩不再裁 cove 字标）；v83 = 2.4.19
-        versionName "2.4.20"    // v2.4.20：图标裁剪根修 + 多任务真实界面 + 电池边框跟随胶囊 + 对话开屏星空化 + 设置重排
+        versionCode 85          // v2.4.21 一键无感换图标（activity-alias 四变体 + 原生切换桥 + 强制回桌面）；v84 = 2.4.20
+        versionName "2.4.21"    // v2.4.21：图标四选一免重装切换（原版/弧C微笑/暗黑星空/二次元樱花）
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.

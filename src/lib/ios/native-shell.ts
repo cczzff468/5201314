@@ -24,10 +24,22 @@ export interface NativeSafeArea {
 
 export type NativeBarStyle = 'LIGHT' | 'DARK' | 'DEFAULT';
 
+export type AppIconAliasId = '1' | '2' | '3' | '4';
+
+/** v2.4.21 一键换图标桥（MainActivity.NativeBridge——方法存在即 v2.4.21+ 壳） */
+interface NativeIconBridge {
+  /** 当前启用的图标别名 '1'~'4'（APK 覆盖安装后重置回 '1'，以原生为准） */
+  getCurrentIcon(): string;
+  /** 切换图标别名（先启目标再关其余 + HOME + System.exit 强退回桌面） */
+  switchAppIcon(alias: string): void;
+}
+
 interface NativeBridge {
   getSafeArea(): string;
   setSystemBarsStyle(style: NativeBarStyle): void;
   setSystemBarStyles?(statusStyle: NativeBarStyle, navStyle: NativeBarStyle): void;
+  getCurrentIcon?(): string;
+  switchAppIcon?(alias: string): void;
 }
 
 declare global {
@@ -89,5 +101,26 @@ export function setNativeSystemBarStyles(statusStyle: NativeBarStyle, navStyle: 
     }
   } catch {
     /* 原生侧异常不影响网页运行 */
+  }
+}
+
+/** v2.4.21 一键无感换图标（Activity Alias）：换图标桥是否可用
+ *  （方法存在 = v2.4.21+ APK 壳；旧壳/浏览器恒 null——网格静默走 PWA 自动跟随流） */
+export function getNativeIconBridge(): NativeIconBridge | null {
+  if (typeof window === 'undefined') return null;
+  const N = window.AIPhoneNative;
+  if (!N || typeof N.switchAppIcon !== 'function' || typeof N.getCurrentIcon !== 'function') return null;
+  return { getCurrentIcon: () => N.getCurrentIcon!(), switchAppIcon: (a: string) => N.switchAppIcon!(a) };
+}
+
+/** 读原生当前启用图标别名 '1'~'4'（无桥/异常回 null，调用方自行兜底） */
+export function getNativeCurrentIcon(): AppIconAliasId | null {
+  const N = window.AIPhoneNative;
+  if (typeof window === 'undefined' || !N || typeof N.getCurrentIcon !== 'function') return null;
+  try {
+    const raw = N.getCurrentIcon();
+    return raw === '1' || raw === '2' || raw === '3' || raw === '4' ? raw : null;
+  } catch {
+    return null;
   }
 }

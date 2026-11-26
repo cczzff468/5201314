@@ -407,8 +407,8 @@ export type BatteryPercentMode = 'outside' | 'inside' | 'none';
 /** App 图标（第三十一轮：App 改名 Cove，三选一图标）：
  *  '1'=纯白压印 cove / '2'=C 对话气泡 / '3'=星光气泡 cove
  *  持久化 settings.appIcon（开屏动画/设置预览即时跟随）+ 同步服务器 AppConfig（PWA manifest 动态图标） */
-export type AppIconId = '1' | '2' | '3';
-export const APP_ICON_IDS: AppIconId[] = ['1', '2', '3'];
+export type AppIconId = '1' | '2' | '3' | '4';
+export const APP_ICON_IDS: AppIconId[] = ['1', '2', '3', '4'];
 /** 开屏动画主题（第三十三轮三选一）：star=星空月夜（默认）/ mist=雾中远山 / moon=静月港湾；
  *  定义在 ./splash-theme（BootSplash 与设置页共用），此处 re-export 供消费方从 store 统一引入 */
 export type { CoveSplashTheme } from './splash-theme';
@@ -469,8 +469,9 @@ interface SettingsState {
    *  inside=图标内部数字（iOS 16+ 风格：纯填充块、数字嵌电池内、无 % 号） /
    *  none=不显示百分比（只有电池图标）；持久化 settings.batteryPercent */
   batteryPercent: BatteryPercentMode;
-  /** App 图标三选一（第三十一轮）：'1'/'2'/'3'，持久化 settings.appIcon；
-   *  开屏动画与设置预览即时跟随；同时同步服务器（PWA manifest 动态返回所选图标） */
+  /** App 图标（第三十一轮三选一 → 第三十八轮四选一：1 云朵C/2 弧C微笑/3 暗黑版/4 二次元版），
+   *  持久化 settings.appIcon；开屏动画与设置预览/favicon 即时跟随；同时同步服务器
+   *  （PWA manifest 动态返回所选图标）；APK 端另由原生 activity-alias 切换桌面图标 */
   appIcon: AppIconId;
   /** 切换 App 图标（即时持久化本地 + 异步同步服务器 manifest 图标） */
   setAppIcon: (id: AppIconId) => void;
@@ -990,7 +991,7 @@ export const useSettings = create<SettingsState>((set, get) => ({
             : 'outside',
         // App 图标两选一（第三十五轮：机主参考图 SVG 重绘版）：无记录/非法值/历史 '3' = '1'
         //（云朵 C；老三选一下线，残留 '3' 归一到 1 号——文件层 icon-3 已覆写为 1 号内容兑底）
-        appIcon: appIconRec?.value === '2' ? '2' : '1',
+        appIcon: APP_ICON_IDS.includes(appIconRec?.value as AppIconId) ? (appIconRec?.value as AppIconId) : '1',
         // 开屏动画主题（第三十四轮四选一）：IndexedDB 无记录/非法值时再兜底读一次
         // localStorage（同步）——冷启动 BootSplash 首帧就是它，设置页显示与之一致
         splashTheme:
@@ -1145,8 +1146,8 @@ export const useSettings = create<SettingsState>((set, get) => ({
   },
 
   setAppIcon: (id) => {
-    // 第三十五轮：两选一（'3' 已下线——历史残留值拒绝写入，加载侧已归一为 '1'）
-    if (id !== '1' && id !== '2') return;
+    // 第三十八轮：四选一（'3' 重生为暗黑版、'4' 新增二次元版；非法值拒绝写入）
+    if (id !== '1' && id !== '2' && id !== '3' && id !== '4') return;
     set({ appIcon: id });
     void localDB.put('settings', { key: 'appIcon', value: id });
     // 第三十四轮「立马生效」：浏览器标签页 favicon 即时换新所选图标（无需刷新/重装）——
@@ -1154,7 +1155,7 @@ export const useSettings = create<SettingsState>((set, get) => ({
     try {
       if (typeof document !== 'undefined') {
         document.querySelectorAll<HTMLLinkElement>('link[rel="icon"]').forEach((l) => {
-          l.href = l.href.replace(/icon-[123]-/, `icon-${id}-`);
+          l.href = l.href.replace(/icon-[1234]-/, `icon-${id}-`);
         });
       }
     } catch {
