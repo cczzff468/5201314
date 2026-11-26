@@ -1723,7 +1723,14 @@ html[data-app-native] {
   background: #000;
 }
 html[data-app-native] body {
-  background: #000 !important;
+  /* 第四十一轮·机主规格「根节点强制透明」语义落地：APK 内 body 透明——
+     手机壳/壁纸/App 窗口满屏覆盖，body 自身不参与任何可见渲染；透明后露出的
+     WebView 窗口底（capacitor android.backgroundColor=#000000）与 html 压黑同为
+     机身黑，零视觉差异、纯语义化。html 层保留 #000 兜底（绝不可透明：旧 WebView
+     未初始化帧/overscroll 毛刺露出的是未定义内容，压黑= iPhone 边框黑，永不出
+     白条——第三十七轮定调）。浏览器端 body 保留主题底色（桌面预览的页面留白
+     观感，非沉浸链路）。 */
+  background: transparent !important;
 }
 html[data-app-native] [data-pwa-wrap] {
   /* 竖屏浅色底 #dcdce1 是桌面端留白观感；APK 全屏模式没有留白语义，压黑 */
