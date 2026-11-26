@@ -3826,3 +3826,27 @@ Stage Summary:
 - 状态栏模式双端行为矩阵：浏览器（transparent=自绘常驻/hidden=隐藏+顶边下拉呼出）；v2.4.22+ APK（transparent=物理系统条常驻透明+自绘让位+内容全额避让/hidden=三通道隐藏+系统顶边滑出）；旧 APK 壳（transparent 退化自绘常驻=现状/hidden=隐藏）——旧壳零破坏平滑升级
 - agent-browser 端到端实测全链：锁屏雪景+粗时间→解锁主屏浅滩壁纸（url DOM 断言）+状态栏常驻→第四页拾光小屋独占→状态栏模式选择器（选中+推荐徽标）→切隐藏状态栏消失→顶边下拉呼出（真实拖拽 DOM sb:true）→2.8s 收回（sb:false）→reload 持久化（mode=hidden 自动应用）→UI 切回透明恢复→开屏三选一无星空对话→errors 清零复查
 - lint 0 errors；tsc --noEmit 0 errors（两次：图标收敛后/状态栏模式后）；构建错误「loaded 重复声明」当场修复复验
+
+---
+Task ID: 41（第四十轮）
+Agent: 主控 Agent（Z.ai Code）
+Task: 机主七项——紧急修复 GRID_ROW_CAP 崩溃 + 电池内部圆角再圆 + 状态栏两模式一律常驻显示网页状态栏 + 图三设默认主屏壁纸 + 拾光小屋弹窗取消按钮返主屏 + 全局沉浸式断层根修（图一浅蓝/图二深灰绿） + 新增两款图标第 4 号设默认
+
+Work Log:
+- 【紧急崩溃】第三十八轮删「矮视口行数收敛」时删了 GRID_ROW_CAP 定义但漏改 4 处引用（pageHasRoom/sanitize 超行摘出/hitTestAt targetRow/注释）→ 机主报 Runtime ReferenceError（拖动图标即崩）——统一替换恒定值 MAX_PAGE_ROWS(6)（语义与「行数上限恒 6」定调一致），commit 712f9e7
+- 【电池圆角】IOS_BAT_FILL_RADIUS 3.2→4.2（0→2.2→3.2→4.2 四档渐进；13.5px 内腔高下仍保上下全高不裁腰），commit 103f9e6
+- 【状态栏常驻】机主定调「不管透明融合/完全隐藏都让网页里的状态栏显示出来」：PhoneShell showStatusBar 收敛为 statusBarVisible && !immersive（删 mode 三元/sbReveal 瞬时呼出/顶边下拉手势/sbNativeMode 让位）；globals.css 删三规则（hidden 隐藏、APK 透明让位、APK 透明回全额安全区）——顶部有效内缩恒挖孔 28% 口径；MainActivity v2.4.23 applyStatusBarMode 两模式统一（物理系统条一律三通道隐藏防双条，删 showStatusBarTransparent 整方法；insets 恒仅挖孔；350ms 冒头补藏/onResume 哨兵两模式统一）；theme.tsx 两选项描述如实化+脚注；附带修复 statusBarMode 声明误删致 GET / 500，commit e3cbdd2
+- 【图三壁纸】机主上传图三入库 public/wallpapers/fog-window.jpg（起雾车窗手写 Yes + "If only I were in your eye…" 文艺字，1078×2345 低饱和冷灰白治愈系；sharp q82 重编码 972K→197K；3×3 均色 #c8ccd3 作 base）；WALLPAPER_PRESETS 头插「雾窗情书」（light:true）；默认 wallpaperPreset 'shark-reef'→'fog-window'；wp40 一次性迁移（无自定义壁纸且当前是上轮默认 shark-reef 才切，尊重明确选择），commit e3fce6f
+- 【拾光小屋取消按钮】CompanionPicker 无 companion（首次进小屋）时底部新增「取消（返回主界面）」——关弹窗+exitForegroundApp() 退小屋回手机主屏（此前无 companion 弹窗零出口被卡死）；有 companion 保留原「取消（继续和TA在一起）」，commit c2585c3
+- 【沉浸式断层根修】全局扫描定位：图一（浅蓝）图二（深灰绿）均为拾光小屋/情侣小家——全窗 R3F WebGL Canvas 天空色随昼夜/天气变（白天 #a8d8ef/夜晚 #232733），但出血条带采样链 compositeBg 只认 CSS 背景，命中 <canvas> 恒透明回落页面根恒定米白 #efece4 → 条带永远米白成断层。三层修：①bg-sample 新增 canvasPixelAt（drawImage 源矩形 1×1 缩绘离屏 1×1 再 getImageData；HomeScene 已开 preserveDrawingBuffer 可读 WebGL 帧；透明返 null 沿栈回落）——SafeAreaBleedBands.pick 与 StatusBarToneProbe 双消费点接入（相机全屏 video 同路径）；②CoupleHome 根 bg-[#efece4] 改随昼夜/天气动态天空色（SKY_DAY/SKY_NIGHT 自 HomeScene 导出同源）+loading 占位底色删（回落根天空色）；③情侣轨迹 TrackPage 顶栏 #f6f6f8/92→#eef0f2/92 对齐地图底色（第二实锤点）；其余 App 扫描结论零断层（美团黄/淘宝橙/天气蓝等彩色头部本就 flush），commit e4697c6
+- 【新增两款图标+默认 4 号】机主参考图手绘 SVG（scripts/svg-r40/，gen.cjs 数值螺旋），VLM 四轮评审迭代：3「情书字标」（暖纸底幽灵水印 Cove 字标：超粗圆润 C 环抱 ove、o=对话气泡贴边三角尾——长柄版曾读作放大镜已修、v 折、e 圆环横杠右下开口、海浪下划线、散点小花）；4「小词灵」（白底灰线 cove 小生物：c 云朵身体内螺旋、o/v 波浪中段、e 卷尾自波浪末端顺滑卷入、脸锚定 o 鼓包、右上独立对话气泡 V 形短尾——蜗牛触角版已修、底部 cove 单线字标与 1/2 家族同款）。全链：rebuild-cove-icons-r40.mjs（web PNG 4 尺寸+maskable ×4 变体、APK mipmap 五密度三件×4、anydpi XML×8、前景 bbox 72px 居中程序化验证、默认名/apple-touch=4 号、splash 全密度重生成 icon-4）；Manifest 四别名（4 号 enabled=true）；MainActivity v2.4.23（parseIconAliasIndex '1'~'4'、getCurrentIcon DEFAULT=4、switchAppIcon 循环 4、migrateIconOnce 一次性别名迁移存量 1/2→4 不退进程）；store 四变体+默认 '4'+icon40 迁移（无 appIconChosen 且 '1'→'4'）+appIconChosen 标记+favicon regex icon-[1234]；app-icon-grid 四变体+v40；app-icon/manifest API 四值+兜底 '4'；build.gradle 87/2.4.23+发版说明七条+APK 6.8MB 重打部署（aapt 验证 versionCode 87/四别名 4 号 enabled/mipmap 全打入/dex 含迁移方法/splash=小词灵），commit abcff63
+
+验证:
+- tsc --noEmit 0 errors；lint 0 errors（12 条历史 warning 不变）
+- agent-browser 全链实测：锁屏（初雪情书）→解锁主屏（雾窗情书新壁纸·wp40 迁移生效）→设置›显示与亮度（图标网格四选一·小词灵默认选中·icon40 迁移生效；状态栏模式两选项描述如实）→切「完全隐藏」（状态栏仍常驻显示✓新口径生效）→切回透明→主屏第 4 页拾光小屋→打开（顶部无灰白断层✓canvas 像素采样+根色联动生效；「取消（返回主界面）」按钮在✓）→点取消退回主屏✓；版本指纹弹窗检测到 2.4.23 新版本✓；errors 清零
+- VLM 终审：icon-3/icon-4 均「可上线」（四轮迭代：v/e 粘连、放大镜手柄、蜗牛触角、脸漂浮逐项收敛）；APK splash 内嵌小词灵✓；电池填充圆角「柔和偏圆」✓
+
+Stage Summary:
+- 七项全闭环 + 1 项紧急崩溃修复；发版 v2.4.23（versionCode 87）APK 6.8MB 已部署 public/Cove.apk
+- 沉浸式断层的根因方法论：出血条带采样链与渲染技术的「盲区」——WebGL Canvas/Video 像素不可被 CSS 采样读到时回落页面根底色，根底色恒定而内容动态即成断层；canvasPixelAt 补齐采样盲区+根色与内容联动兜底双保险
+- 图标四变体架构回归（第三十九轮曾收敛两变体）：新增款走「手绘 SVG+VLM 评审迭代」管线（数值螺旋/贴边三角尾/V 形短尾等细节四轮收敛），存量设备经原生 migrateIconOnce（不退进程）+网页 icon40（appIconChosen 判据）双通道一次性迁移到 4 号默认
