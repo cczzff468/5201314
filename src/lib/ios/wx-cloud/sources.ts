@@ -124,7 +124,7 @@
 // 云端写失败时游标永远停在旧值、同批每轮重收）；②游标+已回清单双写网关本机
 // （local-wx-state.json / /state 端点——Supabase 402 受限期间重启/热重载不再重收整批）。
 // 配套 im-gateway v26 热重载泄漏根治（旧循环/旧 socket 不再泄漏叠加重复回复）。
-export const CLOUD_RUNTIME_VER = 25;
+export const CLOUD_RUNTIME_VER = 26;
 
 export const WX_CLOUD_CORE = String.raw`
 // ---- 微信云端助手核心（自动生成，勿手工编辑） ----
@@ -225,6 +225,42 @@ function supaHeaders() {
   }
   return { apikey: SUPA_KEY, Authorization: 'Bearer ' + SUPA_KEY, 'Content-Type': 'application/json' };
 }
+
+// ---------------- v26（第四十二轮）离线消息推送：入站真机消息写 messages 表 ----------------
+// App 后台时由 Supabase Realtime 广播给手机（cloud-notify.ts 订阅 → 系统横幅通知）；
+// 网关与云端函数可能双跑同一条消息——确定性 id（发送者+内容哈希）+ ignore-duplicates
+// 头保证只插一次（重复插入静默跳过，不报错不重推）。best-effort：失败绝不影响收发。
+function pushOfflineNotify(rowId, channel, fromName, content, target) {
+  if (!SUPA_URL || !SUPA_KEY) return Promise.resolve(false);
+  try {
+    return fetch(SUPA_URL + '/rest/v1/messages', {
+      method: 'POST',
+      headers: Object.assign(supaHeaders(), { Prefer: 'resolution=ignore-duplicates' }),
+      body: JSON.stringify([
+        {
+          id: String(rowId).slice(0, 80),
+          channel: channel,
+          from_name: String(fromName || '').slice(0, 60),
+          content: String(content || '').slice(0, 400),
+          target: target ? JSON.stringify(target) : null,
+        },
+      ]),
+    })
+      .then(function (r) { return r.ok; })
+      .catch(function () { return false; });
+  } catch (e) {
+    return Promise.resolve(false);
+  }
+}
+
+/** 确定性行 id：同一消息（同发送者+同内容）无论网关/云端函数哪个先处理都同 id */
+function pushRowId(channel, fromId, content) {
+  var h = 0;
+  var s = String(fromId || '') + '|' + String(content || '');
+  for (var i = 0; i < s.length; i++) { h = ((h << 5) - h + s.charCodeAt(i)) & 0x7fffffff; }
+  return channel + '-' + h + '-' + s.length;
+}
+
 
 async function supaGetJson(path) {
   // v8 中继读：经云端函数（平台凭证读 Storage）；失败按「没有」处理，与直读语义一致
@@ -1370,6 +1406,16 @@ async function handleWxMsg(cfg, msg) {
   // v16 主动消息收件凭据：记住最近一次会话的 from_user_id + context_token（站内「主动发消息」
   // 引擎触发 send-active 时用；iLink 主动发送没有独立接口，只能复用会话上下文——新鲜度自管）
   noteWxLastCtx(msg.from_user_id, msg.context_token);
+  // v26（第四十二轮）离线推送：入站真机微信消息写 messages 表（App 后台时 Realtime →
+  // 系统横幅；确定性 id 防网关/云端双跑重复插；best-effort 不影响收发）
+  var wxPersona = (cfg.wechat && cfg.wechat.persona) || null;
+  pushOfflineNotify(
+    pushRowId('wx', msg.from_user_id, text),
+    'wx',
+    (wxPersona && wxPersona.contactName) || '微信好友',
+    text,
+    wxPersona && wxPersona.contactId ? { app: 'wechat', contactId: String(wxPersona.contactId) } : null,
+  );
   // v12 真机微信「对方正在输入中…」：官方协议 status 1=开始输入（长操作每 5s 续一次保活）、
   // 2=结束输入。旧版用反了（回复前发 2=结束、回复后又不收尾）——真机微信上从来
   // 看不到「正在输入」。现在：取 ticket → 发 1 → LLM 期间每 5s 续 1 → 回复发完发 2 收尾。
@@ -2518,6 +2564,20 @@ async function handleQqEvent(cfg, t, d) {
   await coreSleep(600);
   var recheck = await loadQqClaims(true);
   if (recheck && typeof recheck[msgId] === 'number' && recheck[msgId] !== myClaimTs) return false;
+
+  // v26（第四十二轮）离线推送：入站真机 QQ 消息写 messages 表（认领门之后——只有真正
+  // 认领到的那一路写，天然单次；App 后台时 Realtime → 系统横幅；best-effort 不影响收发）
+  var qqPersona = (cfg.qq && cfg.qq.persona) || null;
+  var qqFromName = isGroup
+    ? ((d.author && d.author.member && d.author.member.nick) || (d.author && d.author.nick) || 'QQ 群友')
+    : ((qqPersona && qqPersona.contactName) || 'QQ 好友');
+  pushOfflineNotify(
+    pushRowId('qq', msgId, content),
+    'qq',
+    qqFromName,
+    content,
+    qqPersona && qqPersona.contactId ? { app: 'qq', contactId: String(qqPersona.contactId) } : null,
+  );
   // v20 入站图片识图：有图 URL 且本地 VLM 端点可用 → 逐张转描述，占位盲区替换成真内容
   //（AI 真正看得到图——真机 QQ 上「会识图」；描述失败/端点不在退占位不影响收发主流程）
   if (imgUrls.length && VLM_LOCAL_URL) {

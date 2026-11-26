@@ -247,6 +247,16 @@ export default function PhoneShell() {
     if (loaded) setNativeStatusBarMode(statusBarMode);
   }, [statusBarMode, loaded]);
 
+  // 第四十二轮云端能力开机挂载（装载完成后一次性）：
+  // ① 离线消息推送：Supabase Realtime 监听 messages 表（App 后台时经系统通知弹横幅；
+  //    动态 import 不拖首屏 bundle；云端未部署/通知闸关 = 静默跳过）
+  // ② 云备份自动备份监听：visibilitychange（App 退后台）+ 30 分钟兜底轮询（超期静默执行）
+  useEffect(() => {
+    if (!loaded) return;
+    void import('@/lib/ios/cloud-notify').then((m) => m.ensureCloudNotify());
+    void import('@/lib/ios/cloud-backup').then((m) => m.startAutoBackupWatcher());
+  }, [loaded]);
+
   // （第四十轮收敛：隐藏模式·顶边下拉呼出与 sbReveal 自动收回整段删除——机主定调
   //   两模式自绘状态栏一律常驻渲染，状态栏永远在场，无「呼出/收回」语义可言）
 

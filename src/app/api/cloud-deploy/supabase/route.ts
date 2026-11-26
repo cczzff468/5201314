@@ -40,7 +40,7 @@ export const runtime = 'nodejs';
  */
 
 type DeployRequest = {
-  op?: 'projects' | 'keys' | 'check-service-key' | 'storage-setup' | 'deploy' | 'func-call' | 'unschedule-cron' | 'schedule-cron';
+  op?: 'projects' | 'keys' | 'check-service-key' | 'storage-setup' | 'deploy' | 'func-call' | 'unschedule-cron' | 'schedule-cron' | 'backup-setup' | 'backup-save' | 'backup-blob' | 'backup-list' | 'backup-download' | 'backup-delete';
   /** Supabase Access Token（supabase.com → Account Settings → Access Tokens） */
   token?: string;
   /** 项目 ref */
@@ -62,6 +62,29 @@ type DeployRequest = {
   body?: Record<string, unknown>;
   /** func-call：超时毫秒（默认 70s，ping 默 100s 轮询窗口可到 150s） */
   timeoutMs?: number;
+  // ---- 第四十二轮：云备份 + 离线推送 ----
+  /** backup-save：备份 JSON 全文（48MB 上限） */
+  payload?: string;
+  /** backup-save：'manual' | 'auto'（备份记录分类） */
+  backupKind?: 'manual' | 'auto';
+  /** backup-save：设备标识（展示用） */
+  device?: string;
+  /** backup-save：App 版本（展示用） */
+  appVersion?: string;
+  /** backup-save：包含的区块摘要（展示用） */
+  sections?: string;
+  /** backup-blob：目标桶（avatar_bucket / image_bucket） */
+  bucket?: 'avatar_bucket' | 'image_bucket';
+  /** backup-blob：对象路径（backup-download/backup-delete 为 image_bucket/... 全路径） */
+  path?: string;
+  /** backup-blob：base64 内容 */
+  content?: string;
+  /** backup-blob：MIME */
+  contentType?: string;
+  /** backup-download / backup-delete：Storage 全路径（bucket/rest） */
+  storagePath?: string;
+  /** backup-delete：记录行 id */
+  backupId?: string;
 };
 
 const MGMT = 'https://api.supabase.com';
@@ -687,6 +710,236 @@ export async function POST(req: NextRequest) {
         status: r.status,
         headers: { 'Content-Type': r.headers.get('content-type') ?? 'application/json' },
       });
+    }
+
+    // ================= 第四十二轮：云备份 + 离线推送（Supabase Storage + Database + Realtime） =================
+    // backup-setup：建 backups 表（备份记录）+ messages 表（离线推送 Realtime 事件源）+
+    //   avatar_bucket / image_bucket 两 Storage 桶（头像/背景二进制）+ realtime 发布订阅
+    //   —— Management API SQL（Access Token 鉴权，与上面建桶同一主路径），幂等可重入。
+    if (p.op === 'backup-setup') {
+      const DDL = [
+        // 备份记录表（机主规格：存用户的备份记录；payload 本体走 Storage image_bucket/backups/）
+        `create table if not exists public.backups (
+          id uuid primary key default gen_random_uuid(),
+          created_at timestamptz not null default now(),
+          kind text not null default 'manual',
+          size_bytes bigint not null default 0,
+          storage_path text,
+          device text,
+          app_version text,
+          sections text
+        );`,
+        // 离线推送事件源表：网关/云端函数收到真机微信/QQ 新消息时插入一行 → Realtime 广播
+        // 给后台 App → 本地系统横幅通知。id 用 text（写入方给确定性 id——同一条消息无论
+        // 网关还是云端函数先处理都同 id，重复插入静默跳过，绝不重推）
+        `create table if not exists public.messages (
+          id text primary key,
+          created_at timestamptz not null default now(),
+          channel text not null default 'wx',
+          from_name text not null default '',
+          content text not null default '',
+          target text
+        );`,
+        // 两桶（私有）+ wx-cloud 兜底建（未走过一键部署的项目也能直接用云备份）
+        `insert into storage.buckets (id, name, public) values
+          ('avatar_bucket','avatar_bucket',false), ('image_bucket','image_bucket',false)
+          on conflict (id) do nothing;`,
+        // realtime 发布（幂等：已在发布里/不存在都静默过）
+        `do $$ begin
+          begin alter publication supabase_realtime add table public.messages;
+          exception when duplicate_object then null; when undefined_object then null;
+          end;
+        end $$;`,
+      ];
+      const results: string[] = [];
+      let failed = 0;
+      for (const query of DDL) {
+        try {
+          const r = await fetch(`${MGMT}/v1/projects/${ref}/database/query`, {
+            method: 'POST',
+            headers: { ...auth, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ query, read_only: false }),
+            signal: AbortSignal.timeout(30_000),
+          });
+          if (r.ok) {
+            results.push('ok');
+          } else {
+            failed += 1;
+            results.push(`HTTP ${r.status}：${(await r.text().catch(() => '')).slice(0, 160)}`);
+          }
+        } catch {
+          failed += 1;
+          results.push('Management API 连不上/超时');
+        }
+      }
+      if (failed > 0) {
+        return bad(
+          502,
+          'backup_setup_failed',
+          `云端初始化有 ${failed} 步失败：${results.filter((x) => x !== 'ok').join('；')}。可到 Supabase → SQL Editor 手动执行建表 SQL 后重试（幂等）`,
+        );
+      }
+      return NextResponse.json({ ok: true, msg: '云端备份/推送结构就绪（backups/messages 表 + avatar/image 桶 + Realtime）' });
+    }
+
+    // backup-save：上传备份 JSON 到 image_bucket/backups/ + 写 backups 记录行。
+    // 依赖 serviceKey（Storage 写入 + PostgREST 插行）——两种头型逐一试（同上面直传兜底）。
+    if (p.op === 'backup-save') {
+      const serviceKey = typeof p.serviceKey === 'string' ? p.serviceKey.trim() : '';
+      const payload = typeof p.payload === 'string' ? p.payload : '';
+      const kind = p.backupKind === 'auto' ? 'auto' : 'manual';
+      if (!serviceKey) return bad(400, 'missing_service_key', '项目密钥缺失：请先完成一键部署或手动粘贴 service key');
+      if (!payload || payload.length > 48_000_000) return bad(400, 'invalid_payload', '备份内容缺失或超过 48MB 上限');
+      const path = `backups/${Date.now()}-${kind}.json`;
+      const meta = {
+        kind,
+        size_bytes: payload.length,
+        device: typeof p.device === 'string' ? p.device.slice(0, 120) : '',
+        app_version: typeof p.appVersion === 'string' ? p.appVersion.slice(0, 40) : '',
+        sections: typeof p.sections === 'string' ? p.sections.slice(0, 400) : '',
+        storage_path: `image_bucket/${path}`,
+      };
+      const base = `https://${ref}.supabase.co`;
+      // ① 上传 JSON（image_bucket，私有，service key 头型两试）
+      let upErr = '';
+      let uploaded = false;
+      for (const v of storageAuthVariants(serviceKey)) {
+        const r = await fetch(`${base}/storage/v1/object/image_bucket/${path}`, {
+          method: 'POST',
+          headers: { ...v.headers, 'Content-Type': 'application/json', 'x-upsert': 'true' },
+          body: payload,
+          signal: AbortSignal.timeout(90_000),
+        }).catch(() => null);
+        if (r?.ok) {
+          uploaded = true;
+          break;
+        }
+        if (r) upErr = `HTTP ${r.status}：${(await r.text().catch(() => '')).slice(0, 160)}`;
+        else upErr = 'Storage 上传连不上/超时';
+      }
+      if (!uploaded) return bad(502, 'backup_upload_failed', `备份上传失败（${upErr}）`);
+      // ② 写记录行（best-effort：失败不影响备份本体，列表页会看不到这条但文件在）
+      let rowOk = false;
+      for (const v of storageAuthVariants(serviceKey)) {
+        const r = await fetch(`${base}/rest/v1/backups`, {
+          method: 'POST',
+          headers: { ...v.headers, 'Content-Type': 'application/json', Prefer: 'return=minimal' },
+          body: JSON.stringify(meta),
+          signal: AbortSignal.timeout(20_000),
+        }).catch(() => null);
+        if (r?.ok) {
+          rowOk = true;
+          break;
+        }
+      }
+      return NextResponse.json({ ok: true, storage_path: `image_bucket/${path}`, row: rowOk, size: payload.length });
+    }
+
+    // backup-blob：上传单个二进制（头像 → avatar_bucket / 壁纸背景图 → image_bucket）。
+    if (p.op === 'backup-blob') {
+      const serviceKey = typeof p.serviceKey === 'string' ? p.serviceKey.trim() : '';
+      const bucket = p.bucket === 'avatar_bucket' ? 'avatar_bucket' : 'image_bucket';
+      const path = typeof p.path === 'string' ? p.path.replace(/[^a-z0-9/_.\-]/gi, '').slice(0, 200) : '';
+      const b64 = typeof p.content === 'string' ? p.content : '';
+      const contentType = typeof p.contentType === 'string' ? p.contentType.slice(0, 60) : 'application/octet-stream';
+      if (!serviceKey || !path || !b64) return bad(400, 'missing_blob', '密钥/路径/内容缺失');
+      if (b64.length > 26_000_000) return bad(400, 'blob_too_large', '单个文件超过 ~19MB 上限');
+      let buf: Buffer;
+      try {
+        buf = Buffer.from(b64, 'base64');
+      } catch {
+        return bad(400, 'invalid_b64');
+      }
+      const base = `https://${ref}.supabase.co`;
+      let lastErr = '';
+      for (const v of storageAuthVariants(serviceKey)) {
+        const r = await fetch(`${base}/storage/v1/object/${bucket}/${path}`, {
+          method: 'POST',
+          headers: { ...v.headers, 'Content-Type': contentType, 'x-upsert': 'true' },
+          body: new Uint8Array(buf),
+          signal: AbortSignal.timeout(60_000),
+        }).catch(() => null);
+        if (r?.ok) return NextResponse.json({ ok: true, storage_path: `${bucket}/${path}`, size: buf.length });
+        if (r) lastErr = `HTTP ${r.status}：${(await r.text().catch(() => '')).slice(0, 160)}`;
+        else lastErr = 'Storage 连不上/超时';
+      }
+      return bad(502, 'blob_upload_failed', `文件上传失败（${lastErr}）`);
+    }
+
+    // backup-list：最近备份记录（PostgREST select，service key）。
+    if (p.op === 'backup-list') {
+      const serviceKey = typeof p.serviceKey === 'string' ? p.serviceKey.trim() : '';
+      if (!serviceKey) return bad(400, 'missing_service_key');
+      const base = `https://${ref}.supabase.co`;
+      let lastErr = '';
+      for (const v of storageAuthVariants(serviceKey)) {
+        const r = await fetch(
+          `${base}/rest/v1/backups?select=id,created_at,kind,size_bytes,storage_path,device,app_version,sections&order=created_at.desc&limit=20`,
+          { headers: v.headers, signal: AbortSignal.timeout(20_000) },
+        ).catch(() => null);
+        if (r?.ok) {
+          const rows = (await r.json().catch(() => null)) as unknown;
+          return NextResponse.json({ ok: true, rows: Array.isArray(rows) ? rows : [] });
+        }
+        if (r) lastErr = `HTTP ${r.status}：${(await r.text().catch(() => '')).slice(0, 160)}`;
+        else lastErr = '连不上/超时';
+      }
+      return bad(502, 'backup_list_failed', `读取备份列表失败（${lastErr}）`);
+    }
+
+    // backup-download：取回备份 JSON（Storage 私有对象，service key 流式转发）。
+    if (p.op === 'backup-download') {
+      const serviceKey = typeof p.serviceKey === 'string' ? p.serviceKey.trim() : '';
+      const storagePath = typeof p.storagePath === 'string' ? p.storagePath.replace(/[^a-z0-9/_.\-]/gi, '').slice(0, 240) : '';
+      if (!serviceKey || !storagePath || !storagePath.includes('/')) return bad(400, 'missing_path');
+      const [bucket, ...rest] = storagePath.split('/');
+      const base = `https://${ref}.supabase.co`;
+      for (const v of storageAuthVariants(serviceKey)) {
+        const r = await fetch(`${base}/storage/v1/object/${bucket}/${rest.join('/')}`, {
+          headers: v.headers,
+          signal: AbortSignal.timeout(90_000),
+        }).catch(() => null);
+        if (r?.ok) {
+          return new NextResponse(r.body, {
+            status: 200,
+            headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' },
+          });
+        }
+        if (r && (r.status === 403 || r.status === 401)) continue; // 换头型再试
+      }
+      return bad(502, 'backup_download_failed', '取回备份失败：文件不存在或密钥无读取权限');
+    }
+
+    // backup-delete：删记录行 + 删 Storage 对象（best-effort，幂等）。
+    if (p.op === 'backup-delete') {
+      const serviceKey = typeof p.serviceKey === 'string' ? p.serviceKey.trim() : '';
+      const id = typeof p.backupId === 'string' ? p.backupId.replace(/[^a-z0-9\-]/gi, '').slice(0, 40) : '';
+      const storagePath = typeof p.storagePath === 'string' ? p.storagePath.replace(/[^a-z0-9/_.\-]/gi, '').slice(0, 240) : '';
+      if (!serviceKey || !id) return bad(400, 'missing_id');
+      const base = `https://${ref}.supabase.co`;
+      let rowDeleted = false;
+      for (const v of storageAuthVariants(serviceKey)) {
+        const r = await fetch(`${base}/rest/v1/backups?id=eq.${id}`, {
+          method: 'DELETE',
+          headers: v.headers,
+          signal: AbortSignal.timeout(15_000),
+        }).catch(() => null);
+        if (r?.ok) {
+          rowDeleted = true;
+          break;
+        }
+      }
+      if (storagePath.includes('/')) {
+        const [bucket, ...rest] = storagePath.split('/');
+        for (const v of storageAuthVariants(serviceKey)) {
+          await fetch(`${base}/storage/v1/object/${bucket}/${rest.join('/')}`, {
+            method: 'DELETE',
+            headers: v.headers,
+            signal: AbortSignal.timeout(15_000),
+          }).catch(() => null);
+        }
+      }
+      return NextResponse.json({ ok: true, row: rowDeleted });
     }
 
     return bad(400, 'unknown_op');

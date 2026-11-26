@@ -37,6 +37,9 @@ import nextDynamic from 'next/dynamic';
 
 import { Input } from '@/components/ui/input';
 
+// 第四十二轮：云备份与恢复区块（云端助手页签底部）
+import { BackupSection } from './backup-section';
+
 import { Switch } from '@/components/ui/switch';
 
 import {
@@ -1282,6 +1285,10 @@ export function ClawBoxPage({ onBack }: { onBack: () => void }) {
             </button>
           </div>
         </section>
+
+        {/* ==================== 第四十二轮：云备份与恢复（机主规格：手动备份/二次确认恢复/
+             自动备份开关+频率/备份记录；离线推送 messages 表同库 Realtime） ==================== */}
+        <BackupSection />
         </>
         )}
 
