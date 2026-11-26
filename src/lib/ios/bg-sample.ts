@@ -241,6 +241,52 @@ export function imgPixelAt(img: HTMLImageElement, vx: number, vy: number): Rgba 
   return readPixel(strip, img.naturalWidth, img.naturalHeight, pt.sx, pt.sy);
 }
 
+/* ================= 第四十轮 <canvas>/<video> 像素采样（拾光小屋断层根修） =================
+ * 机主截图实锤：拾光小屋全窗 R3F WebGL Canvas（天空色随昼夜/天气变）——
+ * compositeBg 只认 CSS 背景，命中 <canvas> 时恒透明 → 回落页面根米白底 →
+ * 出血条带永远画米白，与昼夜天空（浅蓝/深灰绿）形成「灰白色断层」。本函数把
+ * canvas / video 在某视口坐标处的像素变成可同步读取：drawImage 源矩形 1×1
+ * 缩绘到离屏 1×1 画布再 getImageData（WebGL 需 preserveDrawingBuffer——
+ * HomeScene 已开 gl={{preserveDrawingBuffer:true}}；未开/未渲染时画布透明
+ * 返回 null，调用方沿栈回落 CSS 采样，行为与从前一致）。
+ * video（相机 App 全屏 <video>）同一路径：readyState≥2 有帧可读。 */
+let mediaCtx: CanvasRenderingContext2D | null = null;
+
+/** <canvas>/<video> 在视口坐标 (vx,vy) 处的像素（同步；透明像素返回 null 走 CSS 回落） */
+export function canvasPixelAt(el: HTMLCanvasElement | HTMLVideoElement, vx: number, vy: number): Rgba | null {
+  const rect = el.getBoundingClientRect();
+  if (rect.width <= 0 || rect.height <= 0) return null;
+  if (el instanceof HTMLVideoElement) {
+    if (el.readyState < 2 || !el.videoWidth || !el.videoHeight) return null;
+  } else {
+    if (el.width <= 0 || el.height <= 0) return null;
+  }
+  const natW = el instanceof HTMLVideoElement ? el.videoWidth : el.width;
+  const natH = el instanceof HTMLVideoElement ? el.videoHeight : el.height;
+  // 视口坐标 → 媒体像素坐标（canvas/video 以 fill 方式铺满自身盒）
+  const sx = ((vx - rect.left) / rect.width) * natW;
+  const sy = ((vy - rect.top) / rect.height) * natH;
+  if (sx < 0 || sx >= natW || sy < 0 || sy >= natH) return null;
+  if (!mediaCtx) {
+    const c = document.createElement('canvas');
+    c.width = 1;
+    c.height = 1;
+    mediaCtx = c.getContext('2d', { willReadFrequently: true });
+  }
+  const ctx = mediaCtx;
+  if (!ctx) return null;
+  try {
+    ctx.clearRect(0, 0, 1, 1);
+    ctx.drawImage(el, Math.floor(sx), Math.floor(sy), 1, 1, 0, 0, 1, 1);
+    const d = ctx.getImageData(0, 0, 1, 1).data;
+    // 透明（未渲染/加载中/black frame 前）→ null 沿栈回落 CSS 采样
+    if (d[3] <= 8) return null;
+    return { r: d[0], g: d[1], b: d[2], a: d[3] / 255 };
+  } catch {
+    return null; // 跨域污染/安全上下文异常：静默回落
+  }
+}
+
 /** CSS background-image: url(...) 的首层 URL（无 url 或纯渐变返回 null） */
 export function bgImageUrlOf(el: Element): string | null {
   const raw = getComputedStyle(el).backgroundImage;

@@ -174,6 +174,7 @@ import { ensureTodayDiary } from './ta-diary';
 import TaDiarySheet from './TaDiarySheet';
 import type { CompanionCmd, CompanionEvent } from './scene/companion-rt';
 import type { BubbleCmd } from './scene/HomeScene';
+import { SKY_DAY, SKY_NIGHT } from './scene/HomeScene';
 import type { BoyWear, CharAction, CharPose, CharRT, FurnitureItem, FurnitureKind, GirlWear, HomeMode, HomeState, HomeWeather, LayoutSnap, NoteEntry, Pet2State, PetCareKind, PetCoat, PetState, PetWear, RoomId } from './types';
 import { sanitizeBoyWear, sanitizeWear } from './types';
 import {
@@ -258,7 +259,7 @@ const PuzzleGame = dynamic(() => import('./games/PuzzleGame'), { ssr: false });
 const HomeScene = dynamic(() => import('./scene/HomeScene'), {
   ssr: false,
   loading: () => (
-    <div className="absolute inset-0 flex items-center justify-center bg-[#f3f0e8]">
+    <div className="absolute inset-0 flex items-center justify-center">
       <div className="flex items-center gap-2 rounded-full bg-white/80 px-4 py-2 text-[13px] text-[#6b6b6b] shadow-sm">
         <Loader2 className="h-4 w-4 animate-spin text-[#e8a3b3]" />
         小家布置中…
@@ -266,6 +267,8 @@ const HomeScene = dynamic(() => import('./scene/HomeScene'), {
     </div>
   ),
 });
+/* 第四十轮：loading 占位底色删除（透明白）——阶段无 canvas 可采样时，出血条带/基调
+ * 探针回落页面根底色（已随昼夜/天气联动为天空色，见下方 rootBg），首帧即无断层 */
 
 /** 商城缩略图工作室（隐藏离屏画布，商品 1:1 快照） */
 const ShopThumbStudio = dynamic(() => import('./scene/ShopThumbs'), { ssr: false });
@@ -4517,8 +4520,13 @@ export default function CoupleHome({ close }: { close: () => void }) {
       ? 'bottom-[330px]'
       : 'bottom-[272px]';
 
+  // 第四十轮根修（机主截图「拾光小屋顶部灰白色断层」）：页面根底色从恒定米白
+  // #efece4 改为随昼夜/天气联动的天空色（与 HomeScene NightBlend 的目标色同源）——
+  // R3F canvas 像素采样（bg-sample canvasPixelAt）前的首帧/loading 阶段，出血条带
+  // 与状态栏基调探针回落到此底色，即所见即天空色，不再出米白断层
+  const rootBg = night ? SKY_NIGHT[weatherFx] : SKY_DAY[weatherFx];
   return (
-    <div ref={rootRef} className="absolute inset-0 select-none overflow-hidden bg-[#efece4]">
+    <div ref={rootRef} className="absolute inset-0 select-none overflow-hidden" style={{ backgroundColor: rootBg }}>
       {/* 照片选择（相框用；隐藏） */}
       <input
         ref={fileInputRef}

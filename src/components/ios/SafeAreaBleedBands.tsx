@@ -6,6 +6,7 @@ import {
   compositeBg,
   rgbaCss,
   imgPixelAt,
+  canvasPixelAt,
   bgImagePixelAt,
   bgImageUrlOf,
   ensureBgImageStrip,
@@ -166,7 +167,9 @@ export default function SafeAreaBleedBands() {
     let asyncPending = false;
 
     /** 单点采样：命中栈自上而下找第一个属于 App 内容盒的元素——
-     *  <img> → 像素采样（object-fit 映射）；带 bg-image url → 像素采样（未解码则挂异步）；
+     *  <img> → 像素采样（object-fit 映射）；<canvas>/<video> → 像素采样（第四十轮：
+     *  拾光小屋 R3F 天空/相机全屏视频，preserveDrawingBuffer 下可同步读回；
+     *  透明（未渲染）返回 null 沿栈继续）；带 bg-image url → 像素采样（未解码则挂异步）；
      *  其余/未命中 → compositeBg 合成背景色；栈里找不到内容盒元素 → 兜底色 */
     const pick = (x: number, y: number): string | null => {
       const stack = document.elementsFromPoint(x, y);
@@ -176,6 +179,11 @@ export default function SafeAreaBleedBands() {
           const px = imgPixelAt(el, x, y);
           if (px) return rgbaCss(px); // 图片顶边像素延续
           continue; // letterbox/跨域/未解码 → 沿栈继续找下层元素
+        }
+        if (el instanceof HTMLCanvasElement || el instanceof HTMLVideoElement) {
+          const px = canvasPixelAt(el, x, y);
+          if (px) return rgbaCss(px); // WebGL/视频顶边像素延续（拾光小屋天空色根修）
+          continue; // 未渲染/透明/跨域 → 沿栈继续（CSS 回落）
         }
         if (el instanceof HTMLElement && bgImageUrlOf(el)) {
           const px = bgImagePixelAt(el, x, y);

@@ -1856,8 +1856,9 @@ export function TrackPage({ state, patch, days, showToast, close }: { state: Cou
 
   return (
     <div className="relative flex h-full flex-col">
-      {/* 顶栏 */}
-      <div className="shrink-0 bg-[#f6f6f8]/92 dark:bg-zinc-900/92 pt-[54px] backdrop-blur-md">
+      {/* 顶栏（第四十轮：浅色底 #f6f6f8/92 → #eef0f2/92 对齐下方真实地图底色——
+          出血条带与地图逐像素连续，顶部不再有灰白断层；深色维持暗色顶栏对比） */}
+      <div className="shrink-0 bg-[#eef0f2]/92 dark:bg-zinc-900/92 pt-[54px] backdrop-blur-md">
         <div className="relative flex h-11 items-center px-1.5">
           <button type="button" onClick={close} aria-label="返回" className="flex h-9 w-9 items-center justify-center rounded-full text-[#3a3a40] dark:text-zinc-200 transition-opacity active:opacity-50">
             <ArrowLeft className="h-5 w-5" strokeWidth={2.2} />

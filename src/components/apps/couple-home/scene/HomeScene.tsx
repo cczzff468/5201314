@@ -1322,16 +1322,17 @@ function EditCameraKick({ mode }: { mode: HomeMode }) {
 
 // ---------------- 灯光（昼夜 mix 平滑过渡） ----------------
 
-/** v9 各天气天空底色（白天） */
-const SKY_DAY: Record<HomeWeather, string> = {
+/** v9 各天气天空底色（白天）——第四十轮导出：CoupleHome 页面根底色同源联动
+ *  （canvas 未渲染首帧/动态导入 loading 的兜底色，出血条带 CSS 回落路径即天空色） */
+export const SKY_DAY: Record<HomeWeather, string> = {
   sunny: '#a8d8ef',
   cloudy: '#ccd6dd',
   overcast: '#b3bac2',
   rain: '#8f98a1',
   snow: '#e3eaf1',
 };
-/** v9 各天气天空底色（夜晚） */
-const SKY_NIGHT: Record<HomeWeather, string> = {
+/** v9 各天气天空底色（夜晚）——同 SKY_DAY 第四十轮导出 */
+export const SKY_NIGHT: Record<HomeWeather, string> = {
   sunny: '#232733',
   cloudy: '#20242c',
   overcast: '#1b1e24',
