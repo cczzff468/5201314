@@ -18,14 +18,15 @@
             android:launchMode="singleTask"
             android:exported="true">
             <!-- v2.4.21 一键无感换图标（Activity Alias）：MAIN/LAUNCHER 入口从 MainActivity
-                 本体迁到下方四个 activity-alias——启动器桌面图标由「当前启用的别名」决定；
+                 本体迁到下方 activity-alias——启动器桌面图标由「当前启用的别名」决定；
                  网页桥 AIPhoneNative.switchAppIcon(alias) 经 PackageManager 切换启用态实现
                  不重装换图标（切换后 App 强制退回桌面，启动器即时重查 launcher 组件）。
                  MainActivity 本体不再挂 launcher 过滤器（否则本体+别名会在桌面出多个图标）。 -->
         </activity>
 
-        <!-- ============ v2.4.21 图标别名（一键换图标）：四变体，同一 MainActivity ============ -->
-        <!-- 规则：默认只开启 1 号（原版·云朵 C），其余 enabled=false；切换由原生桥
+        <!-- ============ v2.4.21 图标别名（一键换图标）：两变体，同一 MainActivity ============
+             （第三十九轮：机主删除暗黑版/二次元版——四变体收敛回两变体）
+             规则：默认只开启 1 号（原版·云朵 C），其余 enabled=false；切换由原生桥
              setComponentEnabledSetting 完成（先启目标再关其余，全程 DONT_KILL_APP，
              收尾 HOME Intent + System.exit 强制回桌面刷新启动器图标）。
              覆盖安装新 APK 后各别名启用态重置回本清单默认（1 号）。 -->
@@ -49,34 +50,6 @@
             android:exported="true"
             android:icon="@mipmap/ic_launcher_2"
             android:roundIcon="@mipmap/ic_launcher_2_round"
-            android:label="@string/app_name"
-            android:targetActivity=".MainActivity">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
-        </activity-alias>
-        <!-- 3 号：暗黑版·星夜金月 -->
-        <activity-alias
-            android:name=".MainActivityIcon3"
-            android:enabled="false"
-            android:exported="true"
-            android:icon="@mipmap/ic_launcher_3"
-            android:roundIcon="@mipmap/ic_launcher_3_round"
-            android:label="@string/app_name"
-            android:targetActivity=".MainActivity">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
-        </activity-alias>
-        <!-- 4 号：二次元版·樱花萌云 -->
-        <activity-alias
-            android:name=".MainActivityIcon4"
-            android:enabled="false"
-            android:exported="true"
-            android:icon="@mipmap/ic_launcher_4"
-            android:roundIcon="@mipmap/ic_launcher_4_round"
             android:label="@string/app_name"
             android:targetActivity=".MainActivity">
             <intent-filter>

@@ -1,7 +1,8 @@
 'use client';
 
 /**
- * App 图标四选一网格（第三十八轮：一键无感换图标 Activity Alias）。
+ * App 图标两选一网格（第三十八轮新增「App 图标」网格；第三十九轮：机主删除暗黑版/二次元版，
+ *  四变体收敛回两变体——云朵 C 原版 + 弧 C 微笑）。
  *
  * 共享组件：设置›显示与亮度（外观）内联网格 + 设置主页「App 图标」弹窗复用同一份。
  * 选点行为按运行端自动分流：
@@ -22,12 +23,11 @@ import { Check } from 'lucide-react';
 import { useSettings, type AppIconId } from '@/lib/ios/store';
 import { getNativeIconBridge, getNativeCurrentIcon } from '@/lib/ios/native-shell';
 
-/** 四变体清单（名称与描述：设置网格 + 弹窗 + 设置主页入口副标题共用） */
+/** 两变体清单（名称与描述：设置网格 + 弹窗 + 设置主页入口副标题共用；
+ *  第三十九轮：删暗黑版（星夜金月）/二次元版（樱花萌云）） */
 export const APP_ICON_VARIANTS: { id: AppIconId; name: string; desc: string }[] = [
   { id: '1', name: '云朵 C', desc: '原版 · 月牙环抱云朵笑脸' },
   { id: '2', name: '弧 C 微笑', desc: '极简弧线 · 圆点小脸' },
-  { id: '3', name: '暗黑版', desc: '星夜金月 · 星尘光带' },
-  { id: '4', name: '二次元版', desc: '樱花萌云 · 闪闪大眼' },
 ];
 
 /** 破缓存版本号（本轮 PNG 全套换新后旧图可能还在浏览器缓存里） */

@@ -651,7 +651,7 @@ export function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
         {/* APP 图标 + APP 更新 + 添加到主屏幕（v1.3：APK 下载入口从感知设置提升到系统设置；
             v1.9.22 新增添加到主屏幕；第三十六轮「关于本机」移至设置最底部） */}
         <div className="mx-4 mt-4 divide-y divide-black/[0.05] overflow-hidden rounded-[22px] bg-white/55 shadow-[0_8px_28px_rgba(17,24,39,0.06)] ring-1 ring-white/70 backdrop-blur-2xl dark:divide-white/[0.06] dark:bg-white/[0.06] dark:ring-white/[0.09]">
-          {/* 第三十一轮：App 图标三选一（改名 Cove 后机主要求可选图标）——行内预览当前图标 */}
+          {/* 第三十一轮：App 图标两选一（第三十九轮：删暗黑版/二次元版）——行内预览当前图标 */}
           <button
             type="button"
             aria-haspopup="dialog"
@@ -670,7 +670,7 @@ export function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
             </span>
             <span className="min-w-0 flex-1">
               <span className="block truncate text-[16px]">App 图标</span>
-              <span className="mt-0.5 block truncate text-[11.5px] text-muted-foreground">四款图标 · 免重装一键切换</span>
+              <span className="mt-0.5 block truncate text-[11.5px] text-muted-foreground">两款图标 · 免重装一键切换</span>
             </span>
             <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground/60" strokeWidth={2.2} />
           </button>
@@ -728,8 +728,8 @@ function batteryModeLabel(mode: BatteryPercentMode): string {
   return mode === 'inside' ? '电池图标内部' : mode === 'outside' ? '电池图标外部' : '不显示';
 }
 
-/** App 图标弹窗（iOS 居中卡；第三十一轮三选一 → 第三十八轮四选一）：
- *  共享 AppIconGrid 渲染四款大图（选中态蓝描边+角标），点选即换——APK 端走原生
+/** App 图标弹窗（iOS 居中卡；第三十一轮三选一 → 第三十八轮四选一 → 第三十九轮两选一）：
+ *  共享 AppIconGrid 渲染两款大图（选中态蓝描边+角标），点选即换——APK 端走原生
  *  activity-alias 切换（全屏提示层 + 免重装 + 自动退回桌面）；浏览器端同步服务器
  *  （PWA manifest 动态图标，下次打开自动跟随）。点背板/Esc/好 关闭。 */
 function AppIconDialog({
@@ -779,7 +779,7 @@ function AppIconDialog({
             <p className="text-[16px] font-semibold text-black dark:text-white">App 图标</p>
             <p className="mt-0.5 text-[11.5px] text-muted-foreground">Cove · 选一个喜欢的样子</p>
           </div>
-          {/* 四款图标网格（共享 AppIconGrid：APK 端原生一键切换 + PWA 自动跟随，
+          {/* 两款图标网格（共享 AppIconGrid：APK 端原生一键切换 + PWA 自动跟随，
               选点逻辑与「设置›显示与亮度」外观页同一份） */}
           <AppIconGrid current={current} size="dialog" onAfterPick={onClose} />
           <p className="px-6 pb-2 text-center text-[10.5px] leading-relaxed text-muted-foreground">

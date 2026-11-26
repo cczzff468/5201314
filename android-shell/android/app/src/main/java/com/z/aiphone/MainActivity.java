@@ -321,12 +321,13 @@ public class MainActivity extends BridgeActivity {
         }
     }
 
-    /** v2.4.21 图标别名组件全名（i=0~3 → .MainActivityIcon1~4，与 Manifest 一致） */
+    /** v2.4.21 图标别名组件全名（i=0~1 → .MainActivityIcon1~2，与 Manifest 一致；
+     *  第三十九轮：删暗黑版/二次元版，四变体收敛回两变体） */
     private String iconAliasComponent(int i) {
         return getPackageName() + ".MainActivityIcon" + (i + 1);
     }
 
-    /** v2.4.21 别名序号解析：'1'~'4'（或全名 com.z.aiphone.MainActivityIconN）→ 0~3；非法 → -1 */
+    /** v2.4.21 别名序号解析：'1'~'2'（或全名 com.z.aiphone.MainActivityIconN）→ 0~1；非法 → -1 */
     private static int parseIconAliasIndex(String aliasId) {
         if (aliasId == null) return -1;
         String s = aliasId.trim();
@@ -334,7 +335,7 @@ public class MainActivity extends BridgeActivity {
         if (dot >= 0) s = s.substring(dot + 1).replace("MainActivityIcon", "");
         if (s.length() != 1) return -1;
         char c = s.charAt(0);
-        return (c >= '1' && c <= '4') ? c - '1' : -1;
+        return (c >= '1' && c <= '2') ? c - '1' : -1;
     }
 
     /** 把缓存安全区推给网页（页面未就绪时静默失败，下次 inset 变化/加载时会再推） */
@@ -388,8 +389,8 @@ public class MainActivity extends BridgeActivity {
             return o.toString();
         }
 
-        /** v2.4.21 一键无感换图标（Activity Alias）①查询当前启用图标：
-         *  返回 '1'~'4'。判定口径：getComponentEnabledSetting 只回「上次设置值」——
+        /** v2.4.21 一键无感换图标（Activity Alias）①查询当前启用图标（第三十九轮两变体）：
+         *  返回 '1'~'2'。判定口径：getComponentEnabledSetting 只回「上次设置值」——
          *  ENABLED=启用；DEFAULT=按 Manifest 默认（仅 1 号 enabled=true，其余 false）；
          *  DISABLED / DISABLED_USER=禁用。网页设置页图标网格挂载时先调它对齐选中态
          *  （APK 覆盖安装后别名重置回默认 1 号，与网页偏好可能漂移，以原生为准）。 */
@@ -398,7 +399,7 @@ public class MainActivity extends BridgeActivity {
             try {
                 PackageManager pm = getPackageManager();
                 String pkg = getPackageName();
-                for (int i = 0; i < 4; i++) {
+                for (int i = 0; i < 2; i++) {
                     ComponentName cn = new ComponentName(pkg, iconAliasComponent(i));
                     int state = pm.getComponentEnabledSetting(cn);
                     boolean enabled = state == PackageManager.COMPONENT_ENABLED_STATE_ENABLED
@@ -410,7 +411,7 @@ public class MainActivity extends BridgeActivity {
             return "1";
         }
 
-        /** v2.4.21 一键无感换图标（Activity Alias）②切换：网页传 '1'~'4'。
+        /** v2.4.21 一键无感换图标（Activity Alias）②切换：网页传 '1'~'2'（第三十九轮两变体）。
          *  流程（机主规格·安卓标准方案）：
          *  ① 先启目标别名（防全禁断档——全禁时 App 在启动器瞬间无入口）再关其余，
          *    全程 DONT_KILL_APP（切换期间不杀进程，避免 WebView 中途黑屏）；
@@ -433,7 +434,7 @@ public class MainActivity extends BridgeActivity {
                             PackageManager.COMPONENT_ENABLED_STATE_ENABLED,
                             PackageManager.DONT_KILL_APP);
                     // ② 再关其余（同一 MainActivity 的其它别名全部下线——旧图标消失）
-                    for (int i = 0; i < 4; i++) {
+                    for (int i = 0; i < 2; i++) {
                         if (i == idx) continue;
                         pm.setComponentEnabledSetting(
                                 new ComponentName(pkg, iconAliasComponent(i)),

@@ -24,11 +24,11 @@ export interface NativeSafeArea {
 
 export type NativeBarStyle = 'LIGHT' | 'DARK' | 'DEFAULT';
 
-export type AppIconAliasId = '1' | '2' | '3' | '4';
+export type AppIconAliasId = '1' | '2';
 
 /** v2.4.21 一键换图标桥（MainActivity.NativeBridge——方法存在即 v2.4.21+ 壳） */
 interface NativeIconBridge {
-  /** 当前启用的图标别名 '1'~'4'（APK 覆盖安装后重置回 '1'，以原生为准） */
+  /** 当前启用的图标别名 '1'~'2'（第三十九轮两变体；APK 覆盖安装后重置回 '1'，以原生为准） */
   getCurrentIcon(): string;
   /** 切换图标别名（先启目标再关其余 + HOME + System.exit 强退回桌面） */
   switchAppIcon(alias: string): void;
@@ -113,13 +113,13 @@ export function getNativeIconBridge(): NativeIconBridge | null {
   return { getCurrentIcon: () => N.getCurrentIcon!(), switchAppIcon: (a: string) => N.switchAppIcon!(a) };
 }
 
-/** 读原生当前启用图标别名 '1'~'4'（无桥/异常回 null，调用方自行兜底） */
+/** 读原生当前启用图标别名 '1'~'2'（无桥/异常回 null，调用方自行兜底） */
 export function getNativeCurrentIcon(): AppIconAliasId | null {
   const N = window.AIPhoneNative;
   if (typeof window === 'undefined' || !N || typeof N.getCurrentIcon !== 'function') return null;
   try {
     const raw = N.getCurrentIcon();
-    return raw === '1' || raw === '2' || raw === '3' || raw === '4' ? raw : null;
+    return raw === '1' || raw === '2' ? raw : null;
   } catch {
     return null;
   }

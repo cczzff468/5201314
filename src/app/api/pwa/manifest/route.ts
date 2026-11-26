@@ -2,19 +2,19 @@ import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 
 /**
- * 动态 PWA manifest（第三十一轮三选一 → 第三十八轮四选一）。
+ * 动态 PWA manifest（第三十一轮三选一 → 第三十八轮四选一 → 第三十九轮两选一）。
  *
  * 浏览器「添加到主屏幕/安装」时拉取本路由（layout.tsx manifest 指到这里）：
  * - name/short_name 恒为 Cove；
- * - icons 按 AppConfig['appIcon']（'1'|'2'|'3'|'4'，设置 › 外观/APP 图标 写入）动态返回所选图标；
- * - 无记录/异常兜底回静态默认（icon-1 纯白压印 cove）。
+ * - icons 按 AppConfig['appIcon']（'1'|'2'，设置 › 外观/APP 图标 写入）动态返回所选图标；
+ * - 无记录/异常/存量 '3'/'4'（已删变体）兜底回静态默认（icon-1 云朵 C）。
  * 图标文件本身是静态的（public/icons/app/icon-{n}-*.png），只有选择状态存 SQLite。
  */
 export async function GET() {
   let icon = '1';
   try {
     const rec = await db.appConfig.findUnique({ where: { key: 'appIcon' } });
-    if (rec?.value === '2' || rec?.value === '3' || rec?.value === '4') icon = rec.value;
+    if (rec?.value === '2') icon = rec.value;
   } catch {
     // 数据库异常：回默认图标（安装能力不受影响）
   }
