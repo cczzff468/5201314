@@ -29,11 +29,11 @@ export type NativeBarStyle = 'LIGHT' | 'DARK' | 'DEFAULT';
 /** 状态栏外观模式（第三十九轮）：transparent=透明融合 / hidden=完全隐藏 */
 export type NativeStatusBarMode = 'transparent' | 'hidden';
 
-export type AppIconAliasId = '1' | '2';
+export type AppIconAliasId = '1' | '2' | '3' | '4';
 
 /** v2.4.21 一键换图标桥（MainActivity.NativeBridge——方法存在即 v2.4.21+ 壳） */
 interface NativeIconBridge {
-  /** 当前启用的图标别名 '1'~'2'（第三十九轮两变体；APK 覆盖安装后重置回 '1'，以原生为准） */
+  /** 当前启用的图标别名 '1'~'4'（第四十轮四变体；APK 覆盖安装后重置回 Manifest 默认 4 号，以原生为准） */
   getCurrentIcon(): string;
   /** 切换图标别名（先启目标再关其余 + HOME + System.exit 强退回桌面） */
   switchAppIcon(alias: string): void;
@@ -125,7 +125,7 @@ export function getNativeCurrentIcon(): AppIconAliasId | null {
   if (typeof window === 'undefined' || !N || typeof N.getCurrentIcon !== 'function') return null;
   try {
     const raw = N.getCurrentIcon();
-    return raw === '1' || raw === '2' ? raw : null;
+    return raw === '1' || raw === '2' || raw === '3' || raw === '4' ? raw : null;
   } catch {
     return null;
   }

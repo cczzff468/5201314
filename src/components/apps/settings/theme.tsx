@@ -134,7 +134,7 @@ export function ThemePage({ onBack }: { onBack: () => void }) {
         </p>
       </div>
 
-      {/* App 图标（第三十八轮：机主要求「设置→外观」放图标网格；第三十九轮两选一）——点选即换：
+      {/* App 图标（第三十八轮：机主要求「设置→外观」放图标网格；第四十轮四选一·4 号默认）——点选即换：
           APK 端原生 activity-alias 切换（免重装、旧图标消失新图标上桌面、App 退回桌面）；
           浏览器/PWA 端 manifest 动态接口自动跟随（Chrome/Edge 下次打开时生效）。 */}
       <div className="mt-4">

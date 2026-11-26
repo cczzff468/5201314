@@ -24,15 +24,16 @@
                  MainActivity 本体不再挂 launcher 过滤器（否则本体+别名会在桌面出多个图标）。 -->
         </activity>
 
-        <!-- ============ v2.4.21 图标别名（一键换图标）：两变体，同一 MainActivity ============
-             （第三十九轮：机主删除暗黑版/二次元版——四变体收敛回两变体）
-             规则：默认只开启 1 号（原版·云朵 C），其余 enabled=false；切换由原生桥
-             setComponentEnabledSetting 完成（先启目标再关其余，全程 DONT_KILL_APP，
-             收尾 HOME Intent + System.exit 强制回桌面刷新启动器图标）。
-             覆盖安装新 APK 后各别名启用态重置回本清单默认（1 号）。 -->
+        <!-- ============ v2.4.21 图标别名（一键换图标）：四变体，同一 MainActivity ============
+             （第三十九轮曾收敛两变体 → 第四十轮机主新增两款：3 情书字标 / 4 小词灵）
+             规则：默认只开启 4 号（小词灵·第四十轮起新默认），其余 enabled=false；
+             切换由原生桥 setComponentEnabledSetting 完成（先启目标再关其余，全程
+             DONT_KILL_APP，收尾 HOME Intent + System.exit 强制回桌面刷新启动器图标）。
+             覆盖安装新 APK 后各别名启用态重置回本清单默认（4 号）；v2.4.23 起原生侧
+             另有一次性别名迁移（存量设备图标 1/2 → 4，见 MainActivity migrateIconOnce）。 -->
         <activity-alias
             android:name=".MainActivityIcon1"
-            android:enabled="true"
+            android:enabled="false"
             android:exported="true"
             android:icon="@mipmap/ic_launcher_1"
             android:roundIcon="@mipmap/ic_launcher_1_round"
@@ -50,6 +51,34 @@
             android:exported="true"
             android:icon="@mipmap/ic_launcher_2"
             android:roundIcon="@mipmap/ic_launcher_2_round"
+            android:label="@string/app_name"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <!-- 3 号：情书字标（第四十轮新增·机主参考图：暖纸底幽灵水印 Cove 字标+海浪线） -->
+        <activity-alias
+            android:name=".MainActivityIcon3"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@mipmap/ic_launcher_3"
+            android:roundIcon="@mipmap/ic_launcher_3_round"
+            android:label="@string/app_name"
+            android:targetActivity=".MainActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <!-- 4 号：小词灵（第四十轮新增·机主参考图：白底灰线 cove 小生物+对话气泡）——默认 -->
+        <activity-alias
+            android:name=".MainActivityIcon4"
+            android:enabled="true"
+            android:exported="true"
+            android:icon="@mipmap/ic_launcher_4"
+            android:roundIcon="@mipmap/ic_launcher_4_round"
             android:label="@string/app_name"
             android:targetActivity=".MainActivity">
             <intent-filter>

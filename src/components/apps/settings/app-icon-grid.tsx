@@ -1,8 +1,8 @@
 'use client';
 
 /**
- * App 图标两选一网格（第三十八轮新增「App 图标」网格；第三十九轮：机主删除暗黑版/二次元版，
- *  四变体收敛回两变体——云朵 C 原版 + 弧 C 微笑）。
+ * App 图标四选一网格（第三十八轮新增；第三十九轮曾收敛两变体 → 第四十轮机主新增两款：
+ *  3 情书字标 / 4 小词灵，四变体且第 4 号为默认）。
  *
  * 共享组件：设置›显示与亮度（外观）内联网格 + 设置主页「App 图标」弹窗复用同一份。
  * 选点行为按运行端自动分流：
@@ -14,8 +14,8 @@
  * - 浏览器/PWA：仅更新偏好——manifest 是动态接口（no-store），Chrome/Edge
  *   安装的 PWA 下次打开时自动检查并换掉桌面图标（无需重新下载安装）。
  *
- * APK 端选中态对齐：覆盖安装新 APK 后各别名启用态重置回默认 1 号，与网页偏好
- * 可能漂移——网格挂载时先读原生 getCurrentIcon 对齐一次（以原生为准）。
+ * APK 端选中态对齐：覆盖安装新 APK 后各别名启用态重置回 Manifest 默认（v2.4.23 起
+ * 4 号），与网页偏好可能漂移——网格挂载时先读原生 getCurrentIcon 对齐一次（以原生为准）。
  */
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -23,15 +23,17 @@ import { Check } from 'lucide-react';
 import { useSettings, type AppIconId } from '@/lib/ios/store';
 import { getNativeIconBridge, getNativeCurrentIcon } from '@/lib/ios/native-shell';
 
-/** 两变体清单（名称与描述：设置网格 + 弹窗 + 设置主页入口副标题共用；
- *  第三十九轮：删暗黑版（星夜金月）/二次元版（樱花萌云）） */
+/** 四变体清单（名称与描述：设置网格 + 弹窗 + 设置主页入口副标题共用；
+ *  第四十轮：机主新增两款——3 情书字标 / 4 小词灵（默认）） */
 export const APP_ICON_VARIANTS: { id: AppIconId; name: string; desc: string }[] = [
   { id: '1', name: '云朵 C', desc: '原版 · 月牙环抱云朵笑脸' },
   { id: '2', name: '弧 C 微笑', desc: '极简弧线 · 圆点小脸' },
+  { id: '3', name: '情书字标', desc: '暖纸底 · 幽灵水印 Cove 与海浪线' },
+  { id: '4', name: '小词灵', desc: 'cove 化身小生物 · 冒泡说话（默认）' },
 ];
 
-/** 破缓存版本号（本轮 PNG 全套换新后旧图可能还在浏览器缓存里） */
-export const APP_ICON_V = 'v=36';
+/** 破缓存版本号（第四十轮 PNG 全套换新后旧图可能还在浏览器缓存里） */
+export const APP_ICON_V = 'v=40';
 
 /** APK 原生切换提示层：新图标大图 + iOS 菊花转 + 机主规格文案
  *  （原生侧 HOME + System.exit 前唯一可见画面，~1.2s） */

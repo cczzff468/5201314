@@ -1,0 +1,46 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+  <!-- Cove 图标三「情书字标」：暖白纸底 + 幽灵水印 Cove 字标（超粗圆润 C 环抱 ove、
+       o 对话气泡、v 折、e 圆环横杠）+ 海浪下划线 + 散点 + 右下小花（VLM 三版：
+       字标收紧 880 宽、o-v-e 各留 ≥10px 间隙、v 视觉顶对齐 x 高、颜色再深一档） -->
+  <rect width="1024" height="1024" fill="#EFEDEA"/>
+
+  <g transform="translate(8 24)">
+  <!-- ===== Cove 字标（基线 ~600，C 高 288 / x 高 150；总宽 121..888 居中） ===== -->
+  <!-- C：环 r108 描边 72 圆头，开口朝右 ±50° -->
+  <path d="M 334.4 527.7 A 108 108 0 1 1 334.4 362.3" fill="none" stroke="#99A5B8" stroke-width="72" stroke-linecap="round"/>
+
+  <!-- o：对话气泡——空心浅描边圆 + 贴边紧凑三角尾（VLM 四版：长柄读作放大镜，改贴边小尾） -->
+  <circle cx="455" cy="512" r="62" fill="#EFEDEA" stroke="#ABB5C3" stroke-width="26"/>
+  <path d="M 431 566 L 398 599 L 404 541 Z" fill="#ABB5C3"/>
+
+  <!-- v：超粗折线圆头（视觉顶 437=x 高顶，左缘 542 与 o 间隙 12） -->
+  <path d="M 570 465 L 622 575 L 674 465" fill="none" stroke="#99A5B8" stroke-width="56" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <!-- e：圆环（右下开口 -60°..+5°）+ 中横杠（左缘 714 与 v 间隙 12） -->
+  <path d="M 865.8 515.5 A 66 66 0 1 1 849 467.9" fill="none" stroke="#99A5B8" stroke-width="44" stroke-linecap="round"/>
+  <path d="M 736 512 L 866 512" fill="none" stroke="#99A5B8" stroke-width="44" stroke-linecap="round"/>
+
+  <!-- ===== 海浪下划线（字标下方两浪 + 末端微扬；距 e 底 45px） ===== -->
+  <path d="M 160 690 C 250 656, 340 656, 430 690 C 520 724, 610 724, 700 690 C 742 676, 792 670, 845 676"
+        fill="none" stroke="#B2BCC9" stroke-width="22" stroke-linecap="round"/>
+
+  <!-- ===== 散点装饰（浅粉/浅灰/淡黄） ===== -->
+  <circle cx="150" cy="230" r="11" fill="#F1CBD6"/>
+  <circle cx="860" cy="200" r="8.5" fill="#DCDFE4"/>
+  <circle cx="160" cy="860" r="9" fill="#EEE0BC"/>
+  <circle cx="450" cy="888" r="7" fill="#F1CBD6" opacity="0.75"/>
+  <circle cx="628" cy="908" r="5.5" fill="#DCDFE4" opacity="0.8"/>
+
+  <!-- 右下小花：五瓣 + 暖心 -->
+  <g transform="translate(840 848)">
+    <g fill="#F1CBD6">
+      <ellipse cx="0" cy="-22" rx="12" ry="20"/>
+      <ellipse cx="0" cy="-22" rx="12" ry="20" transform="rotate(72)"/>
+      <ellipse cx="0" cy="-22" rx="12" ry="20" transform="rotate(144)"/>
+      <ellipse cx="0" cy="-22" rx="12" ry="20" transform="rotate(216)"/>
+      <ellipse cx="0" cy="-22" rx="12" ry="20" transform="rotate(288)"/>
+    </g>
+    <circle cx="0" cy="0" r="8.5" fill="#EEE0BC"/>
+  </g>
+  </g>
+</svg>

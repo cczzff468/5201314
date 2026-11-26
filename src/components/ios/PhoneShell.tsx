@@ -155,11 +155,12 @@ export default function PhoneShell() {
   const topLight = useLightForeground('top');
   // 状态栏显示开关（Task 36）：设置页可关闭顶部时间/信号/电量状态栏
   const statusBarVisible = useSettings((s) => s.statusBarVisible);
-  // 状态栏外观模式（第四十轮收敛）：机主定调「不管透明融合/完全隐藏都让网页里的
-  // 状态栏显示出来」——两模式下自绘状态栏一律常驻渲染（透明浮层融入顶部，保留
-  // 时间/电量/WiFi）；模式差异仅剩原生层语义（v2.4.23 起两模式物理系统条均隐藏，
-  // 自绘状态栏是唯一状态栏，不再有让位/呼出分支）；旧 APK 壳（< v2.4.9）物理条
-  // 仍在显示，由 globals.css 旧壳规则继续隐藏自绘状态栏防双条
+  // 状态栏外观模式（第四十轮收敛：机主定调「不管透明融合/完全隐藏都让网页里的
+  // 状态栏显示出来」）——两模式下自绘状态栏一律常驻渲染（透明浮层融入顶部，保留
+  // 时间/电量/WiFi）；模式值仍持久化并同步原生桥（v2.4.23 起两模式物理系统条均
+  // 隐藏，自绘状态栏是唯一状态栏）；旧 APK 壳（< v2.4.9）物理条仍在显示，由
+  // globals.css 旧壳规则继续隐藏自绘状态栏防双条
+  const statusBarMode = useSettings((s) => s.statusBarMode);
   // 沉浸式全屏（阅读器打开期间）：状态栏与静态灵动岛一起隐藏，退出阅读器自动恢复
   const immersive = useImmersive();
   const showStatusBar = statusBarVisible && !immersive;

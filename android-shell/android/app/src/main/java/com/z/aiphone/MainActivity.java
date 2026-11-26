@@ -287,6 +287,10 @@ public class MainActivity extends BridgeActivity {
             applyStatusBarMode("transparent", false);
         }
 
+        // v2.4.23（第四十轮）：一次性别名迁移——默认图标 1 → 4（小词灵），
+        // 存量设备覆盖安装后桌面图标无感切换（详见 migrateIconOnce 注释）
+        migrateIconOnce();
+
         // v2.4.6 ② 安全区监听：缓存最新 insets + 把 dp 值经 evaluateJavascript 推给
         // window.__aiphoneApplySafeArea（网页侧更新 --app-sat/-sar/-sab/-sal,
         // configChanges 已声明 orientation/screenSize → 不重载页面，仅重排）。
@@ -385,7 +389,8 @@ public class MainActivity extends BridgeActivity {
         return getPackageName() + ".MainActivityIcon" + (i + 1);
     }
 
-    /** v2.4.21 别名序号解析：'1'~'2'（或全名 com.z.aiphone.MainActivityIconN）→ 0~1；非法 → -1 */
+    /** v2.4.21 别名序号解析：'1'~'4'（或全名 com.z.aiphone.MainActivityIconN）→ 0~3；
+     *  （第四十轮：机主新增 3 情书字标 / 4 小词灵，四变体）；非法 → -1 */
     private static int parseIconAliasIndex(String aliasId) {
         if (aliasId == null) return -1;
         String s = aliasId.trim();
@@ -393,7 +398,44 @@ public class MainActivity extends BridgeActivity {
         if (dot >= 0) s = s.substring(dot + 1).replace("MainActivityIcon", "");
         if (s.length() != 1) return -1;
         char c = s.charAt(0);
-        return (c >= '1' && c <= '2') ? c - '1' : -1;
+        return (c >= '1' && c <= '4') ? c - '1' : -1;
+    }
+
+    /** v2.4.23（第四十轮）一次性别名迁移：默认图标 1 → 4（小词灵）。覆盖安装后各别名
+     *  启用态按 Manifest 默认重置（4 号）无需迁移；但存量设备（v2.4.22 及之前装过）
+     *  的 PackageManager 记忆仍是 1/2 号启用——冷启动时（WebView 加载前）一次性把
+     *  启用态切到 4 号 + 落 SharedPreferences 标记（cove_prefs/icon_migrated_v87），
+     *  之后不再介入（用户此后可经网页图标网格自由换）。不打 HOME/不退进程——启动器
+     *  收到 PACKAGE_CHANGED 广播后自行刷新桌面图标（个别启动器迟到几秒无害）。 */
+    private void migrateIconOnce() {
+        try {
+            android.content.SharedPreferences sp = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+            if (sp.getBoolean("icon_migrated_v87", false)) return;
+            PackageManager pm = getPackageManager();
+            String pkg = getPackageName();
+            boolean need = false;
+            for (int i = 0; i < 4; i++) {
+                int state = pm.getComponentEnabledSetting(new ComponentName(pkg, iconAliasComponent(i)));
+                boolean enabled = state == PackageManager.COMPONENT_ENABLED_STATE_ENABLED
+                        || (state == PackageManager.COMPONENT_ENABLED_STATE_DEFAULT && i == 0);
+                if (enabled && i != 3) { need = true; break; }
+            }
+            if (need) {
+                pm.setComponentEnabledSetting(
+                        new ComponentName(pkg, iconAliasComponent(3)),
+                        PackageManager.COMPONENT_ENABLED_STATE_ENABLED,
+                        PackageManager.DONT_KILL_APP);
+                for (int i = 0; i < 4; i++) {
+                    if (i == 3) continue;
+                    pm.setComponentEnabledSetting(
+                            new ComponentName(pkg, iconAliasComponent(i)),
+                            PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
+                            PackageManager.DONT_KILL_APP);
+                }
+            }
+            sp.edit().putBoolean("icon_migrated_v87", true).apply();
+        } catch (Throwable ignored) {
+        }
     }
 
     /** 把缓存安全区推给网页（页面未就绪时静默失败，下次 inset 变化/加载时会再推） */
@@ -439,13 +481,16 @@ public class MainActivity extends BridgeActivity {
          *  v2.4.22（第三十九轮）：版本同步 86 / 2.4.22（新增状态栏外观模式桥 setStatusBarMode：
          *  transparent 透明融合=物理系统条常驻透明显示+内容全额安全区避让 / hidden 完全隐藏=
          *  三通道隐藏真全屏）；statusBarMode 字段同步上报当前模式（诊断用，网页以 IndexedDB
-         *  为权威源不依赖此字段）。 */
+         *  为权威源不依赖此字段）。
+         *  v2.4.23（第四十轮）：版本同步 87 / 2.4.23（状态栏模式收敛：两模式物理系统条均
+         *  隐藏、网页自绘状态栏唯一常驻；图标四变体：3 情书字标 / 4 小词灵，默认 4 号 +
+         *  migrateIconOnce 一次性别名迁移）。 */
         @JavascriptInterface
         public String getShellInfo() {
             JSONObject o = new JSONObject();
             try {
-                o.put("versionCode", 86);
-                o.put("versionName", "2.4.22");
+                o.put("versionCode", 87);
+                o.put("versionName", "2.4.23");
                 o.put("fullscreen", true); // 壳能力标记：v2.4.9+（系统条可原生隐藏/显示）
                 o.put("statusBarMode", statusBarMode); // v2.4.22：当前状态栏外观模式
             } catch (Exception ignored) {
@@ -476,19 +521,20 @@ public class MainActivity extends BridgeActivity {
             try {
                 PackageManager pm = getPackageManager();
                 String pkg = getPackageName();
-                for (int i = 0; i < 2; i++) {
+                // 第四十轮：四变体 + 默认启用别名 = 4 号（DEFAULT 态按 Manifest 即 4 启用）
+                for (int i = 0; i < 4; i++) {
                     ComponentName cn = new ComponentName(pkg, iconAliasComponent(i));
                     int state = pm.getComponentEnabledSetting(cn);
                     boolean enabled = state == PackageManager.COMPONENT_ENABLED_STATE_ENABLED
-                            || (state == PackageManager.COMPONENT_ENABLED_STATE_DEFAULT && i == 0);
+                            || (state == PackageManager.COMPONENT_ENABLED_STATE_DEFAULT && i == 3);
                     if (enabled) return String.valueOf(i + 1);
                 }
             } catch (Throwable ignored) {
             }
-            return "1";
+            return "4";
         }
 
-        /** v2.4.21 一键无感换图标（Activity Alias）②切换：网页传 '1'~'2'（第三十九轮两变体）。
+        /** v2.4.21 一键无感换图标（Activity Alias）②切换：网页传 '1'~'4'（第四十轮四变体）。
          *  流程（机主规格·安卓标准方案）：
          *  ① 先启目标别名（防全禁断档——全禁时 App 在启动器瞬间无入口）再关其余，
          *    全程 DONT_KILL_APP（切换期间不杀进程，避免 WebView 中途黑屏）；
@@ -511,7 +557,7 @@ public class MainActivity extends BridgeActivity {
                             PackageManager.COMPONENT_ENABLED_STATE_ENABLED,
                             PackageManager.DONT_KILL_APP);
                     // ② 再关其余（同一 MainActivity 的其它别名全部下线——旧图标消失）
-                    for (int i = 0; i < 2; i++) {
+                    for (int i = 0; i < 4; i++) {
                         if (i == idx) continue;
                         pm.setComponentEnabledSetting(
                                 new ComponentName(pkg, iconAliasComponent(i)),

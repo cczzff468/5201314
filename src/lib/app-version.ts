@@ -11,9 +11,9 @@
  */
 
 /** 当前最新版本（纯网页热更时与 APK versionName 可短暂不同步，下次重打 APK 对齐） */
-export const APP_VERSION = '2.4.22';
+export const APP_VERSION = '2.4.23';
 /** 版本号数字（与 android-shell versionCode 保持一致；覆盖安装要求只增不减；纯网页热更不动） */
-export const APP_VERSION_CODE = 86;
+export const APP_VERSION_CODE = 87;
 
 export interface AppReleaseNote {
   version: string;
@@ -24,6 +24,18 @@ export interface AppReleaseNote {
 
 /** 版本历史（新→旧；设置 › APP 更新 页渲染，最新一条即当前版本） */
 export const APP_RELEASE_NOTES: AppReleaseNote[] = [
+  {
+    version: '2.4.23',
+    date: '2026-11-26',
+    items: [
+      '【需重装 APK · versionCode 87】新增两款 App 图标：3「情书字标」（暖纸底幽灵水印 Cove 字标+海浪线）与 4「小词灵」（白底灰线 cove 小生物+对话气泡）——第 4 号小词灵设为默认图标，覆盖安装后存量设备桌面图标一次性无感迁移到小词灵（不退进程）',
+      '【需重装 APK】状态栏外观设置收敛（机主定调「不管透明融合/完全隐藏都让网页里的状态栏显示出来」）：两种模式下网页自绘状态栏一律常驻显示（时间/电量/WiFi 永远在场），物理系统条两模式均原生隐藏防双条',
+      '【网页热更·免重装】拾光小屋顶部灰白断层根修：出血条带采样新增 <canvas>/<video> 像素直读（R3F 天空色/相机视频可被读取），页面根底色随昼夜/天气联动天空色——图一浅蓝/图二深灰绿断层根除',
+      '【网页热更·免重装】新默认主屏壁纸「雾窗情书」（起雾车窗手写 Yes·低饱和冷灰白治愈系），存量设备一次性切换；情侣轨迹顶栏对齐地图底色',
+      '【网页热更·免重装】电池图标内部圆角再圆一档（2.2→3.2→4.2 渐进）；拾光小屋「谁陪你住进拾光小屋？」弹窗新增取消按钮（返回主界面，此前无 companion 时零出口）',
+      '【网页热更·免重装】紧急修复主屏 GRID_ROW_CAP 未定义运行时崩溃（图标拖动/摆放路径全链恢复）',
+    ],
+  },
   {
     version: '2.4.22',
     date: '2026-11-26',

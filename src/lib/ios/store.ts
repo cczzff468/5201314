@@ -428,12 +428,13 @@ export type GoodsImgStyle = 'cartoon' | 'sketch' | 'emoji';
  *  none=不显示百分比（只显示电池图标）。
  * 持久化 settings.batteryPercent；状态栏电量实时跟随 */
 export type BatteryPercentMode = 'outside' | 'inside' | 'none';
-/** App 图标（第三十一轮：App 改名 Cove，可选图标；第三十九轮：机主删除暗黑版/二次元版——
- *  四变体收敛回两变体，存量 '3'/'4' 偏好在装载校验时自动回落 '1'）：
- *  '1'=云朵 C（原版） / '2'=弧 C 微笑
- *  持久化 settings.appIcon（开屏动画/设置预览即时跟随）+ 同步服务器 AppConfig（PWA manifest 动态图标） */
-export type AppIconId = '1' | '2';
-export const APP_ICON_IDS: AppIconId[] = ['1', '2'];
+/** App 图标（第三十一轮：App 改名 Cove 可选图标 → 第四十轮：机主新增两款，四变体，
+ *  第 4 号小词灵为【默认】）：
+ *  '1'=云朵 C（原版） / '2'=弧 C 微笑 / '3'=情书字标（暖纸底幽灵水印） / '4'=小词灵（白底灰线小生物）
+ *  持久化 settings.appIcon（开屏动画/设置预览即时跟随）+ 同步服务器 AppConfig（PWA manifest 动态图标）
+ *  + appIconChosen 标记（用户是否明确选择过——未选择且为旧默认 '1' 时一次迁到新默认 '4'） */
+export type AppIconId = '1' | '2' | '3' | '4';
+export const APP_ICON_IDS: AppIconId[] = ['1', '2', '3', '4'];
 /** 开屏动画主题（第三十三轮三选一）：star=星空月夜（默认）/ mist=雾中远山 / moon=静月港湾；
  *  定义在 ./splash-theme（BootSplash 与设置页共用），此处 re-export 供消费方从 store 统一引入 */
 export type { CoveSplashTheme } from './splash-theme';
@@ -506,11 +507,11 @@ interface SettingsState {
    *  inside=图标内部数字（iOS 16+ 风格：纯填充块、数字嵌电池内、无 % 号） /
    *  none=不显示百分比（只有电池图标）；持久化 settings.batteryPercent */
   batteryPercent: BatteryPercentMode;
-  /** App 图标（第三十一轮三选一 → 第三十八轮四选一：1 云朵C/2 弧C微笑/3 暗黑版/4 二次元版），
+  /** App 图标（第四十轮：四选一——1 云朵C / 2 弧C微笑 / 3 情书字标 / 4 小词灵【默认】），
    *  持久化 settings.appIcon；开屏动画与设置预览/favicon 即时跟随；同时同步服务器
    *  （PWA manifest 动态返回所选图标）；APK 端另由原生 activity-alias 切换桌面图标 */
   appIcon: AppIconId;
-  /** 切换 App 图标（即时持久化本地 + 异步同步服务器 manifest 图标） */
+  /** 切换 App 图标（即时持久化本地 + 异步同步服务器 manifest 图标 + appIconChosen 标记） */
   setAppIcon: (id: AppIconId) => void;
   /** 开屏动画主题三选一（第三十三轮）：star=星空月夜（默认）/ mist=霎中远山 /
    *  moon=雨落成诗（第三十四轮重做）/ chat=对话（第三十四轮新增）；
@@ -649,7 +650,7 @@ export const useSettings = create<SettingsState>((set, get) => ({
   islandPersistent: true,
   // 电量百分比默认图标外部（升级用户的现行样式不变）
   batteryPercent: 'outside',
-  appIcon: '1',
+  appIcon: '4',
   splashTheme: 'star',
   bgKeepAlive: false,
   assistViewer: false,
@@ -666,7 +667,7 @@ export const useSettings = create<SettingsState>((set, get) => ({
   load: async () => {
     if (get().loaded) return;
     try {
-      const [themeRec, wallpaperRec, lockWallpaperRec, apiRec, presetsRec, apiFallbacksRec, visionRec, visionPresetsRec, lockRec, profileRec, iconsRec, ttsRec, sttRec, imgGenRec, imgGenPresetsRec, fontRec, fontScaleRec, fontWeightRec, statusBarRec, statusBarModeRec, iconStyleRec, goodsImgStyleRec, themeResetRec, islandPersistentRec, assistViewerRec, assistQuickOpsRec, bubbleStyleRec, bubbleSchemesRec, liquidSkinRec, chatDecorRec, customCssRec, bgKeepAliveRec, batteryPercentRec, appIconRec, splashThemeRec] = await Promise.all([
+      const [themeRec, wallpaperRec, lockWallpaperRec, apiRec, presetsRec, apiFallbacksRec, visionRec, visionPresetsRec, lockRec, profileRec, iconsRec, ttsRec, sttRec, imgGenRec, imgGenPresetsRec, fontRec, fontScaleRec, fontWeightRec, statusBarRec, statusBarModeRec, iconStyleRec, goodsImgStyleRec, themeResetRec, islandPersistentRec, assistViewerRec, assistQuickOpsRec, bubbleStyleRec, bubbleSchemesRec, liquidSkinRec, chatDecorRec, customCssRec, bgKeepAliveRec, batteryPercentRec, appIconRec, iconChosenRec, icon40Rec, splashThemeRec] = await Promise.all([
         localDB.get('settings', 'theme'),
         localDB.get('settings', 'wallpaper'),
         localDB.get('settings', 'lockWallpaper'),
@@ -701,6 +702,8 @@ export const useSettings = create<SettingsState>((set, get) => ({
         localDB.get('settings', 'bgKeepAlive'),
         localDB.get('settings', 'batteryPercent'),
         localDB.get('settings', 'appIcon'),
+        localDB.get('settings', 'appIconChosen'),
+        localDB.get('settings', 'icon40'),
         localDB.get('settings', 'splashTheme'),
       ]);
 
@@ -1062,7 +1065,23 @@ export const useSettings = create<SettingsState>((set, get) => ({
             : 'outside',
         // App 图标两选一（第三十九轮：删暗黑版/二次元版）：无记录/非法值/历史 '3'/'4' = '1'
         //（云朵 C 原版；下线变体的残留偏好归一到 1 号，图标 PNG 与原生 alias 同步删除）
-        appIcon: APP_ICON_IDS.includes(appIconRec?.value as AppIconId) ? (appIconRec?.value as AppIconId) : '1',
+        appIcon: (() => {
+          // 第四十轮：四变体；非法值回落新默认 '4'（第 4 号小词灵）
+          let saved = APP_ICON_IDS.includes(appIconRec?.value as AppIconId)
+            ? (appIconRec?.value as AppIconId)
+            : '4';
+          // 一次性迁移（icon40 标记）：用户从未明确选过（无 appIconChosen 记录）且当前
+          // 仍是旧默认 '1' → 切到新默认 '4'；明确选过任何变体则尊重选择不覆盖。
+          // 标记落库后不再介入（此后用户可自由换任意变体）。
+          if (!icon40Rec) {
+            if (!iconChosenRec && saved === '1') {
+              saved = '4';
+              void localDB.put('settings', { key: 'appIcon', value: '4' });
+            }
+            void localDB.put('settings', { key: 'icon40', value: true });
+          }
+          return saved;
+        })(),
         // 开屏动画主题（第三十四轮四选一）：IndexedDB 无记录/非法值时再兜底读一次
         // localStorage（同步）——冷启动 BootSplash 首帧就是它，设置页显示与之一致
         splashTheme:
@@ -1243,16 +1262,18 @@ export const useSettings = create<SettingsState>((set, get) => ({
   },
 
   setAppIcon: (id) => {
-    // 第三十九轮：两选一（'1'=云朵 C 原版 / '2'=弧 C 微笑；非法值拒绝写入）
-    if (id !== '1' && id !== '2') return;
+    // 第四十轮：四选一（'1' 云朵C / '2' 弧C微笑 / '3' 情书字标 / '4' 小词灵；非法值拒绝写入）
+    if (id !== '1' && id !== '2' && id !== '3' && id !== '4') return;
     set({ appIcon: id });
     void localDB.put('settings', { key: 'appIcon', value: id });
+    // 用户明确选择标记（icon40 一次性迁移的判据；此后默认值变化不再自动覆盖）
+    void localDB.put('settings', { key: 'appIconChosen', value: true });
     // 第三十四轮「立马生效」：浏览器标签页 favicon 即时换新所选图标（无需刷新/重装）——
     // <link rel="icon"> 全部重写指向 icon-{id}，下一帧标签页图标就是新选择
     try {
       if (typeof document !== 'undefined') {
         document.querySelectorAll<HTMLLinkElement>('link[rel="icon"]').forEach((l) => {
-          l.href = l.href.replace(/icon-[12]-/, `icon-${id}-`);
+          l.href = l.href.replace(/icon-[1234]-/, `icon-${id}-`);
         });
       }
     } catch {
