@@ -128,7 +128,7 @@ const WeatherWidget = dynamic(() => import('@/components/apps/weather').then((m)
  * - 长按住拖拽可自由放置：App↔App、小组件↔小组件、小组件↔App（小组件不能进 Dock）、跨页拖拽；
  *   插入语义——放到哪格就落哪格，其余项顺移让位（不要求先与目标换位，旁边没 App 也能放）；
  *   Dock 是连续插入轨道（按指针 x 决定插入点，空位直接放入）；
- * - 矮视口（手机分屏/自由小窗）：网格行数按实测壳高收敛（GRID_ROW_CAP 3~6 行），
+ * - 第三十八轮：主屏图标不再自适应屏幕——网格恒固定 6 行（矮视口超出部分裁切不重排）；
  *   页点带/Dock 容器 pointer-events-none 穿透（底行图标不被浮层挡住按压），
  *   拖到底部空白只落到最后一条可视行（不会落进屏幕外「消失」）；
  * - 拖拽动画：被拖项为 fixed 浮动副本（挂在根层级，绝不落入带 backdrop-filter 的
@@ -403,13 +403,8 @@ function pageCap(page: Tile[], insertingWidget = false): number {
  *  行高 76px+行距 16px → 6 行（536px）完整可见、7 行（628px）会顶进页点/Dock 区域。
  *  页面已改为 overflow-hidden 永不滚动，所有落点/补位/加小组件入口都按 6 行封顶 */
 const MAX_PAGE_ROWS = 6;
-/** 行数上限的运行时值：默认 = MAX_PAGE_ROWS（390×844 满高壳）。矮视口（手机分屏/自由小窗，
- *  移动端壳高 =100svh 可低至 ~500px）由 HomeScreen 挂载后按真实壳高收紧（3~6 行）——
- *  否则 6 行网格会顶进 z-10 的页点带/Dock（底行 App 被盖住按住拖不动，用户实测），
- *  且拖到底部空白会落到屏幕外第 5/6 行「移到底部消失」（用户实测）。
- *  纯函数（pageHasRoom/rowsOf 校验、hitTest 空白兜底、sanitize 重排）都读这里，
- *  保证「布局允许的行」与「屏幕上摸得到的行」永远一致 */
-let GRID_ROW_CAP = MAX_PAGE_ROWS;
+/** 页内行数上限：恒 = MAX_PAGE_ROWS（第三十八轮：删「矮视口行数收敛」——机主要求
+ *  主屏图标不要适应屏幕、不要自己排序；矮视口/分屏下超出的行只是不可见，绝不自动挪走） */
 
 /** 一页 tiles 顺序摆放占用的总行数（含小组件跨行与空占位格；空页=0） */
 function rowsOf(tiles: Tile[]): number {
@@ -1620,50 +1615,21 @@ export default function HomeScreen() {
   /** 副轴（判定斜向手势用） */
   const swipeY = (e: { clientX: number; clientY: number }) => e.clientY;
 
-  // ---------------- 矮视口网格行数收敛 ----------------
-  // 用户实测（手机分屏/自由小窗，壳高仅 ~500px）：①编辑模式下底部行 App 按住拖不动——
-  // 底行图标被 z-10 的页点带/Dock 盖住，按压全落在浮层上；②文件夹拖到底部空白会
-  // 「移到底部消失」——空白兜底夹到静态 6 行上限，第 5/6 行在屏幕外。
-  // 这里按真实壳高把 GRID_ROW_CAP 收敛到「最后一行图标底边不越过页点带顶边」：
-  // 桌面壳逻辑高恒 844（fit 缩放只影响视觉不改内部布局）→ 恒 6 行、行为不变；
-  // 移动端 scale 恒 1，root 实测高即壳本地高（100svh，URL 栏显隐不影响）。
-  const [rowCap, setRowCap] = useState(MAX_PAGE_ROWS);
-  const dockCount = layout.dock.length;
-  /** 横屏去壳全屏（视口宽>高）：网格限宽居中 + 行数按真实壳高收敛（翻页手势天然轴向） */
+  // ---------------- 横屏检测（第三十八轮：图标不再自适应屏幕） ----------------
+  // 机主定夺：主屏图标固定布局——删「矮视口行数收敛（GRID_ROW_CAP 3~6 行）+
+  // 行数收紧后存量超行布局自动重排到后续页」两套自适应逻辑：图标恒按固定 6 行
+  // 网格布局，窗口矮（手机分屏/自由小窗）时超出的行只是被裁不可见，绝不自动排序。
+  // 横屏检测保留（视口宽>高）：网格限宽居中（翻页手势天然轴向）。
   const [landscape, setLandscape] = useState(false);
   useLayoutEffect(() => {
     const measure = () => {
       const isLandscape = window.innerWidth > window.innerHeight;
       setLandscape((prev) => (prev === isLandscape ? prev : isLandscape));
-      let shellH = 844;
-      // 横屏全屏 = 真实视口高度；竖屏移动端（<640px）= 100svh 实测高；竖屏桌面壳逻辑高恒 844
-      if (isLandscape || !window.matchMedia('(min-width: 640px)').matches) {
-        const root = rootRef.current;
-        if (!root) return;
-        shellH = root.getBoundingClientRect().height / (shellScale.value || 1);
-      }
-      // 页点带顶边 = 壳高 − 根容器 pb-38 − Dock 高（有 App 84 / 空 26）− 页点带 34（与渲染处常量一致）
-      const dockH = layoutRef.current.dock.length > 0 ? 84 : 26;
-      const bandTop = shellH - 38 - dockH - 34;
-      // 首行图标顶 = 网格 pt-72；行距 = 行高 76（图标 60+间距 5+标签 11）+ 行间隙 16 = 92
-      const cap = Math.floor((bandTop - 72 - ICON_SIZE) / (ICON_SIZE + 5 + 11 + GRID_GAP_Y)) + 1;
-      const next = Math.max(3, Math.min(MAX_PAGE_ROWS, cap));
-      GRID_ROW_CAP = next;
-      setRowCap((prev) => (prev === next ? prev : next));
     };
     measure();
     window.addEventListener('resize', measure);
     return () => window.removeEventListener('resize', measure);
-  }, [dockCount]);
-  // 行数上限收紧（窗口缩放/Dock 满空切换）后，把存量超行布局重排到后续页并回写
-  useEffect(() => {
-    const cur = layoutRef.current;
-    if (!cur.pages.some((pg) => rowsOf(pg) > GRID_ROW_CAP)) return;
-    const next = sanitizeLayout(cur);
-    layoutRef.current = next;
-    setLayout(next);
-    persist(next);
-  }, [rowCap]);
+  }, []);
 
   // 首次加载：读取持久化布局（兼容旧单页格式）
   useEffect(() => {
@@ -3487,8 +3453,8 @@ export default function HomeScreen() {
           横向：视口占满全屏宽，翻页裁切发生在屏幕真实边缘（水平内边距由每页 px-5 承担，
           否则滑动时内容在离边缘 20px 处被硬裁、两侧露壁纸条——D2 修复）；纵向：页面
           overflow-hidden 永不上下滚动（用户要求：APP 放到下面时主屏会跟着竖向滑动，已废）——
-          页内容按行封顶（GRID_ROW_CAP：满高壳 6 行，矮视口实测收敛 3~6 行），全部落在页点上方可视区内，存量超行布局加载时
-          由 sanitizeLayout 摘出重排到后续页；页点与 Dock（relative z-10）悬浮在页面之上。
+          页内容按行封顶（GRID_ROW_CAP 恒 = 6 行，第三十八轮起不再随视口收敛：图标不适应屏幕、
+          不自动排序——矮视口超出的行被裁切但保持原位）；页点与 Dock（relative z-10）悬浮在页面之上。
           pan-none（第七轮根治）：overflow:hidden 仍是滚动容器——4 页宽的轨道会被
           触摸惯性/对角滑动横向滚出，主屏两侧露出「刀切」空白；overflow:clip 彻底滚不动 */}
       <div className="absolute inset-0 pan-none">
