@@ -2,12 +2,17 @@
 
 /**
  * 陪伴角色选择弹窗（v8.0：进入小屋弹联系人列表；⋮ 菜单「换个TA」再弹）
- * 从 CoupleHome.tsx 原样搬移，行为零变化。
+ * 自 CoupleHome.tsx 搬移。
+ *
+ * 第四十轮：无 companion（首次进小屋）时底部增加「取消（返回主界面）」按钮——
+ * 退出小屋 App 回手机主屏幕（此前无 companion 时弹窗无法关闭，只能选人或去建联系人）；
+ * 有 companion 时保留原「取消（继续和TA在一起）」（⋮ 菜单浏览场景，关弹窗不退 App）。
  */
 
 import { AnimatePresence, motion } from 'framer-motion';
 import { ChevronRight } from 'lucide-react';
 import type { ContactRecord } from '@/lib/contacts';
+import { useUI } from '@/lib/ios/store';
 
 export interface CompanionPickerProps {
   open: boolean;
@@ -72,12 +77,23 @@ export default function CompanionPicker({ open, contacts, companion, onChoose, o
                   </button>
                 ))}
             </div>
-            {companion && (
+            {companion ? (
               <button
                 onClick={onClose}
                 className="mt-3 w-full rounded-full bg-[#f1efe9] dark:bg-zinc-800 py-2 text-[12.5px] font-medium text-[#8a8a86] dark:text-zinc-400 transition active:scale-95"
               >
                 取消（继续和{companion.name}在一起）
+              </button>
+            ) : (
+              <button
+                onClick={() => {
+                  onClose();
+                  useUI.getState().exitForegroundApp();
+                }}
+                aria-label="取消并返回主界面"
+                className="mt-3 w-full rounded-full bg-[#f1efe9] dark:bg-zinc-800 py-2 text-[12.5px] font-medium text-[#8a8a86] dark:text-zinc-400 transition active:scale-95"
+              >
+                取消（返回主界面）
               </button>
             )}
           </motion.div>
