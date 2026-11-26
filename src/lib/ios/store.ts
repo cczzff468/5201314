@@ -333,15 +333,15 @@ export interface WallpaperPreset {
   base: string;
 }
 
-/** 壁纸预设（第四十轮新增首位：机主上传图三「雾窗情书」——起雾车窗手写 Yes +
- *  "If only I were in your eye…" 文艺字，低饱和冷灰白治愈系，设为默认主屏壁纸） */
+/** 壁纸预设（第四十一轮首位更新：机主图五新「雾窗情书」——雨后车窗雨珠滑落 +
+ *  雾面手写 Yes + "If only I were in your eye…"，冷灰白治愈系，默认主屏壁纸） */
 export const WALLPAPER_PRESETS: WallpaperPreset[] = [
   {
     id: 'fog-window',
     name: '雾窗情书',
-    css: 'url(/wallpapers/fog-window.jpg) center / cover no-repeat',
+    css: 'url(/wallpapers/fog-window.jpg?v=41) center / cover no-repeat',
     light: true,
-    base: '#c8ccd3',
+    base: '#C1C8D3',
   },
   {
     id: 'shark-reef',
