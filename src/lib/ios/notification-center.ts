@@ -14,10 +14,12 @@
  *    ≤50 条小体量字符串，不需要 IndexedDB；存储不可用时退化为本次会话内存态。
  * 3. 订阅：轻量 zustand store（与 agent-voice.ts 同款 create 用法），
  *    持久化走模块级 subscribe 单点写入（items 引用变了才落盘）。
- * 4. 未读计数：unreadCountOf + useNotifyUnreadCount（返回原始 number，避免引用比较重渲染），
- *    状态栏小红点消费。
- * 5. 面板开关 open 也收在本 store：local-notify 的原生点击监听导航后可直接 closeCenter() 收面板
- *    （「store 加 close 钩子」），UI 组件只订阅不持有真相。
+ * 4. 未读计数：unreadCountOf + useNotifyUnreadCount（返回原始 number，避免引用比较重渲染）
+ *    （第四十一轮：下拉面板整件删除后暂无 UI 消费方，保留工具供后续复用）。
+ * 5. 面板开关 open 收在本 store：第四十一轮机主定夺删除「上滑/下拉通知中心」整件
+ *    （顶部下拖手势 + 状态栏点按热区 + 面板 UI 一并移除）——open/openCenter/closeCenter/
+ *    toggleCenter 保留为空转 no-op（旧调用点 local-notify 导航收面板不报错）；条目账本
+ *    （items）继续供 AI 感知（jealousy-sense-extra）与设置›通知页消费。
  * 6. 点击导航：target 走 island-notify.navigateFromSystemNotify（动态 import，避免把
  *    灵动岛大模块拖进仅用 local-notify 的入口包）；无 target 时 window.location.href = url（'/' 不跳）。
  */

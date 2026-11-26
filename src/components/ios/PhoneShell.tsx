@@ -102,10 +102,7 @@ const GlobalCallLayer = dynamic(() => import('./GlobalCallLayer'), { ssr: false 
 // 全局来电层（AI 来电弹窗胶囊/微信大窗 + iOS 全屏来电界面）：懒加载，仅在有来电时渲染内容
 const IncomingCallLayer = dynamic(() => import('./IncomingCallLayer'), { ssr: false });
 
-// C6 应用内通知中心（下拉面板 + 顶部手势/点按入口）：层级 z-[61]（App 窗口上、锁屏下），
-// 入口 gate 在组件内部（仅解锁后可用）；懒加载与其它全局层同套路
-const NotificationCenter = dynamic(() => import('./NotificationCenter'), { ssr: false });
-// v18 全局错误中心（极简「错误」指示器 + 点击弹窗看详情）：App 窗口/通知中心之上
+// v18 全局错误中心（极简「错误」指示器 + 点击弹窗看详情）：App 窗口之上
 const ErrorCenter = dynamic(() => import('@/components/apps/error-center'), { ssr: false });
 
 // v1.5 Mobile Agent 全局层（运行进度条含紧急停止 + 敏感操作确认卡）：懒加载，
@@ -679,9 +676,9 @@ export default function PhoneShell() {
             「角色名 · 锁定原因」+【去哄哄 TA】/【强制解锁】；锁屏期间不弹、解锁后第一时间出现 */}
         <JealousyLockOverlay />
 
-        {/* C6 应用内通知中心：z-[61]（App 窗口之上、锁屏/来电层之下）；入口手势/点按热区由组件
-            自带 window 捕获阶段监听实现（gate：仅解锁后可用），不侵入状态栏/灵动岛既有交互 */}
-        <NotificationCenter />
+        {/* C6 应用内通知中心：第四十一轮机主定夺整件删除（顶部下拖手势+状态栏点按热区+下拉面板一并移除；
+            notification-center store 保留——条目/未读数继续供 AI 感知与设置›通知页消费，
+            灵动岛横幅不受影响）；全屏吃醋锁 z-86 */}
 
         {/* v18 全局错误中心：极简指示器 z-[90]（有错才出现）+ 详情弹窗 z-[97]（机主定调
             「全部错误提示弹窗化」：界面不铺错误长文，点击弹窗看标题+详细） */}
