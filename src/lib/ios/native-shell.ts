@@ -28,6 +28,8 @@ export type NativeBarStyle = 'LIGHT' | 'DARK' | 'DEFAULT';
 
 /** 状态栏外观模式（第三十九轮）：transparent=透明融合 / hidden=完全隐藏 */
 export type NativeStatusBarMode = 'transparent' | 'hidden';
+/** 既有导出别名（store/theme 等消费方按此名引入；第四十一轮补齐导出修既有 tsc 基线错） */
+export type StatusBarMode = NativeStatusBarMode;
 
 export type AppIconAliasId = '1' | '2' | '3' | '4' | '5';
 
