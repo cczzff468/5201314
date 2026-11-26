@@ -3785,3 +3785,20 @@ Stage Summary:
 - 五项全部闭环：切换器删除（上滑改回主屏+store 空实现零破坏）、星空开屏六要素 VLM 全确认、电池 rx 2.2（67% 预览验证）、状态栏白条三管齐下（壁纸近距离补满实测零条带+APK 压黑+切换器删除）、PWA 问答
 - 状态栏白条根因定位方法论：截图像素扫描（25px=8.3dp=sat-eff 25/28≈89%）+壁纸 contain 几何反推（1080×2200→topH≈20px）+DOM 层序核查——三条候选源全部封死，浏览器端无法复现 APK 环境也用 data-app-native 模拟全链验证
 - lint 0 errors；dev server 编译无错；agent-browser 端到端实测（解锁→上传壁纸→像素采样→APK sim 出血带→设置弹窗电池预览→开屏两时点截图 VLM）
+
+---
+Task ID: 39（第三十八轮）
+Agent: 主控 Agent（Z.ai Code）
+Task: 机主四项——一键无感换图标（Activity Alias 安卓标准方案全规格）+ 电池图标内部圆角再圆一点点 + 星空对话开屏再美化（要地球月球星星月亮）+ 主屏图标不要适应屏幕/自动排序
+
+Work Log:
+- 【一键无感换图标·Activity Alias 全链】机主给安卓标准方案规格逐条落地：①Manifest：MainActivity 的 MAIN/LAUNCHER 迁到四个 activity-alias（.MainActivityIcon1~4，同一 targetActivity，各自 mipmap 图标，默认仅 1 号 enabled=true——本体不挂 launcher 过滤器防桌面多图标）；②原生桥 switchAppIcon(alias)：setComponentEnabledSetting 先启目标（防全禁断档）再关其余（DONT_KILL_APP）→ HOME Intent 退桌面 → 650ms 后 finishAffinity+System.exit(0)（机主规格「强制退回主屏幕」——进程级退出逼启动器重查组件，旧图标消失新图标上桌面）；getCurrentIcon 按 getComponentEnabledSetting 状态机判定（ENABLED 或 DEFAULT×1号=启用）；③图标四变体：icon-3 暗黑版=星夜金月（与星空对话开屏同设计语言：午夜蓝渐变+mask 挖月+斑驳+星尘光带+金字标）、icon-4 二次元版=樱花萌云（粉渐变+闪闪大眼+ω猫嘴+腮红+爱心气泡+玫瑰金字标），rebuild-cove-icons-r38.mjs 全链（web 四套+APK mipmap 四变体×5 密度+anydpi 自适应 XML+色板；前景 alpha bbox 四变体均 72px 完美居中）；VLM 两轮评审修正（瘦月牙/流星起点离月/删浅色斑驳/气泡尾巴指向云）；④前端共享 AppIconGrid（外观页内联+主页弹窗复用）：点选先持久化再分流——APK 桥存在→全屏提示层「正在为您更换图标，App 即将退回桌面…」550ms 后调原生；浏览器→绿提示自动跟随；APK 挂载 getCurrentIcon 对齐（防覆盖安装重置漂移）；⑤store/API/manifest/favicon 四选一链路 + v=36 破缓存；⑥发版 85/2.4.21+APK 重打（aapt 验证 versionCode 85、四别名、mipmap 全打入）；验证：外观页点选暗黑版→选中+提示→API '3'→manifest icon-3?v=36→favicon 即时换 icon-4→弹窗一致→lint 0 errors
+- 【电池圆角】IOS_BAT_FILL_RADIUS 2.2→3.2（三档渐进 0→2.2→3.2）；67% 预览 VLM：柔和小圆角✓顶满✓右段灰✓无瑕疵
+- 【星空开屏再美化】左中蓝色地球 86px（海洋径向渐变+46s 自转大陆组 clip 圆内+70s 反向云层视差+静态极冠+晨昏线+高光+大气光晕呼吸 cove5-earth-glow+缓浮）+轨道小月亮 3.2px 暖白 animateMotion 11s 环绕+两道流星（金/银白，DOM 在金月前=从月牙身后掠过）+预览 desc「金月 · 地球 · 星尘 · 情话」+预览卡小地球；VLM：地球带大陆光晕✓金月✓流星✓无渲染错误
+- 【主屏图标固定布局】删矮视口 GRID_ROW_CAP 收敛（恒=6 行）+删行数收紧自动重排 useEffect（图标绝不自动挪位；矮视口超出行仅裁切不可见）+保留横屏限宽/加载期版本迁移；主屏 4 列 VLM 整齐无异常
+
+Stage Summary:
+- 四项全闭环：换图标三端打通（APK 原生 alias 免重装强退刷新/PWA manifest 动态自动跟随/favicon 即时）、电池三档圆角渐进、开屏地球+流星要素齐、主屏固定 6 行不再自适应
+- PWA 自动跟随口径重申（机主已知）：Chrome/Edge 装的 PWA 下次打开时 Chrome 检查 manifest（no-store 动态接口）自动换桌面图标，无需重新下载安装；iOS Safari 主屏图标=安装时快照需重新添加
+- APK 构建：沙箱重建后 JDK/SDK 重下（首次失败=gradle daemon OOM 被杀，--max-workers=1 单 worker 重试成功）；public/Cove.apk 4.9MB versionCode 85
+- lint 0 errors；agent-browser 端到端实测（外观页四选一/开屏两时点截图 VLM/电池弹窗预览 VLM/主屏截图 VLM/favicon DOM 断言/manifest JSON 断言）
