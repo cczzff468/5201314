@@ -347,12 +347,13 @@ model ReadingMemory {
   @@index([bookUrl, kind])
 }
 
-/// ===== 账号系统（注册审核/邀请码/双登录）=====
+/// ===== 账号系统（注册审核/邀请码/双登录/忘记密码）=====
 /// 登录账号：邮箱唯一注册；密码 scrypt 哈希存储（禁止明文）；
 /// status: pending 待审核（强制拦截主界面）| approved 已通过（解锁全部功能）
-/// role: user 普通用户 | admin 超级管理员（写死白名单邮箱，登录自动识别）
+/// role: user 普通用户 | admin 管理员（可审核/发邀请码，不能设管理员）
+///      | super_admin 超级管理员（机主邮箱写死，可设/撤管理员，永久已通过）
 /// 邮箱验证码注册的账号默认 pending+user；邀请码注册的账号直接 approved；
-/// 白名单邮箱注册/登录恒为 admin+approved；首个注册账号自动成为管理员（引导规则）
+/// 超管邮箱写死在代码（ensureSuperAdmin 自动建号占位，任何人无法抢注）
 model AuthUser {
   id           String    @id @default(cuid())
   /// 登录邮箱（QQ邮箱；邀请码注册可无邮箱，凭用户名+密码登录）
@@ -361,7 +362,7 @@ model AuthUser {
   name         String?
   /// scrypt 哈希（salt:hex 格式，绝不存明文）
   password     String
-  /// 'user' | 'admin'
+  /// 'user' 普通用户 | 'admin' 管理员 | 'super_admin' 超级管理员（写死）
   role         String    @default("user")
   /// 'pending' | 'approved'
   status       String    @default("pending")
@@ -378,7 +379,7 @@ model VerificationCode {
   email     String
   /// HMAC-SHA256(code) 十六进制
   codeHash  String
-  /// 'register' 注册 | 'login' 验证码登录
+  /// 'register' 注册 | 'login' 验证码登录 | 'reset' 忘记密码重置
   purpose   String
   used      Boolean  @default(false)
   expiresAt DateTime

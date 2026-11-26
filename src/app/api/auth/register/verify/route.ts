@@ -1,14 +1,15 @@
 /**
  * POST /api/auth/register/verify —— 邮箱验证码注册·第二步：回填验证码建号
- * body: { email, code, password, name? }
- * 成功后创建账号（默认 pending 待审核 + user 普通用户）并自动登录（永久会话）。
- * 白名单邮箱 / 系统尚无管理员（引导规则）→ 直接 admin+approved。
+ * body: { email, code, password, name }
+ * 机主第 44 轮表单规格：用户名必填（2~20 位，与既有用户名/邮箱不撞车）。
+ * 成功后创建账号（pending 待审核 + user 普通用户）并自动登录（永久会话）。
+ * env ADMIN_QQ_EMAILS 白名单邮箱 → admin+approved；超管邮箱永远走 ensure 占位无法到达此处。
  */
 
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { consumeCode } from '@/lib/auth/code';
-import { hashPassword, isAdminEmail, issueToken, SESSION_COOKIE, type SessionUser } from '@/lib/auth/server';
+import { hashPassword, isAdminEmail, ensureSuperAdmin, issueToken, SESSION_COOKIE, toSessionUser } from '@/lib/auth/server';
 
 export const runtime = 'nodejs';
 
@@ -23,6 +24,10 @@ export async function POST(req: NextRequest) {
   }
   const { email, code, password, name } = body as { email?: unknown; code?: unknown; password?: unknown; name?: unknown };
 
+  const displayName = typeof name === 'string' ? name.trim() : '';
+  if (!displayName || displayName.length < 2 || displayName.length > 20) {
+    return NextResponse.json({ error: '请输入 2~20 位的用户名' }, { status: 400 });
+  }
   if (typeof email !== 'string' || !QQ_EMAIL_RE.test(email.trim())) {
     return NextResponse.json({ error: '请输入正确的 QQ 邮箱（@qq.com）' }, { status: 400 });
   }
@@ -32,15 +37,22 @@ export async function POST(req: NextRequest) {
   if (typeof password !== 'string' || password.length < 6 || password.length > 72) {
     return NextResponse.json({ error: '密码长度需为 6~72 位' }, { status: 400 });
   }
-  const displayName = typeof name === 'string' ? name.trim() : '';
-  if (displayName && (displayName.length < 2 || displayName.length > 20)) {
-    return NextResponse.json({ error: '用户名长度需为 2~20 位' }, { status: 400 });
-  }
 
   const normalized = email.trim().toLowerCase();
+
+  await ensureSuperAdmin();
+
   const exists = await db.authUser.findUnique({ where: { email: normalized } });
   if (exists) {
     return NextResponse.json({ error: '该邮箱已注册，请直接登录' }, { status: 400 });
+  }
+
+  // 用户名唯一：不能与任何已有用户名/邮箱撞车（登录时二者都可作为账号输入）
+  const clash = await db.authUser.findFirst({
+    where: { OR: [{ name: displayName }, { email: displayName.toLowerCase() }] },
+  });
+  if (clash) {
+    return NextResponse.json({ error: '该用户名已被使用，请换一个' }, { status: 400 });
   }
 
   const ok = await consumeCode(normalized, code.trim(), 'register');
@@ -48,30 +60,21 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: '验证码错误或已过期' }, { status: 400 });
   }
 
-  // 权限判定：白名单 → admin；系统还没有任何管理员 → 引导规则（首个账号即管理员）
-  const hasAdmin = await db.authUser.findFirst({ where: { role: 'admin' } });
-  const isAdmin = isAdminEmail(normalized) || !hasAdmin;
+  // env 白名单邮箱 → admin+approved；其余一律 user+pending（管理员由超管在用户管理里设置）
+  const isAdmin = isAdminEmail(normalized);
 
   const user = await db.authUser.create({
     data: {
       email: normalized,
-      name: displayName || null,
+      name: displayName,
       password: hashPassword(password),
       role: isAdmin ? 'admin' : 'user',
       status: isAdmin ? 'approved' : 'pending',
     },
   });
 
-  const session: SessionUser = {
-    id: user.id,
-    email: user.email,
-    name: user.name,
-    role: user.role === 'admin' ? 'admin' : 'user',
-    status: user.status === 'approved' ? 'approved' : 'pending',
-    sessionTyp: 'password',
-  };
   const { token, maxAge } = issueToken(user.id, 'password');
-  const res = NextResponse.json({ user: session });
+  const res = NextResponse.json({ user: toSessionUser(user, 'password') });
   res.cookies.set(SESSION_COOKIE, token, { httpOnly: true, sameSite: 'lax', path: '/', maxAge });
   return res;
 }

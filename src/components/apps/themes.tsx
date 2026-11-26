@@ -17,7 +17,7 @@ import { IOSNavBar, IOSScreen } from '@/components/ios/IOSNavBar';
 import { BackToHome } from '@/components/ios/BackToHome';
 import { ThemesWidgetsPage } from '@/components/ios/WidgetGallery';
 import { APPS, AppStylePreview, AppIconTile } from '@/components/apps/registry';
-import { useAuth } from '@/lib/auth/store';
+import { isAdminRole, useAuth } from '@/lib/auth/store';
 import {
   selectResolvedTheme,
   useSettings,
@@ -243,7 +243,8 @@ async function cropSquareIcon(file: File): Promise<Blob | null> {
 export default function ThemesApp() {
   const theme = useSettings((s) => s.theme);
   // 账号角色：审核 App 仅管理员可见（自定义图标列表同步过滤，普通用户不可见）
-  const isAdmin = useAuth((s) => s.user?.role === 'admin');
+  const role = useAuth((s) => s.user?.role);
+  const isAdmin = isAdminRole(role);
   const iconApps = isAdmin ? APPS : APPS.filter((a) => a.id !== 'review');
   const setTheme = useSettings((s) => s.setTheme);
   const customIcons = useSettings((s) => s.customIcons);

@@ -6,7 +6,7 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { hashPassword, issueToken, SESSION_COOKIE, type SessionUser } from '@/lib/auth/server';
+import { hashPassword, issueToken, SESSION_COOKIE, toSessionUser } from '@/lib/auth/server';
 
 export const runtime = 'nodejs';
 
@@ -51,11 +51,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: '该用户名已被使用，请换一个' }, { status: 400 });
   }
 
-  // 引导规则：系统还没有任何管理员 → 首个注册账号直接成为管理员
-  const hasAdmin = await db.authUser.findFirst({ where: { role: 'admin' } });
-  const isAdmin = !hasAdmin;
-
-  // 事务：作废邀请码 + 建号原子完成（避免作废了码但建号失败的边界情况）
+  // 邀请码注册一律 user+approved（管理员只能由超管在用户管理里设置）
   const user = await db.$transaction(async (tx) => {
     await tx.inviteCode.update({
       where: { id: invite.id },
@@ -66,22 +62,14 @@ export async function POST(req: NextRequest) {
         email: null,
         name: displayName,
         password: hashPassword(password),
-        role: isAdmin ? 'admin' : 'user',
+        role: 'user',
         status: 'approved',
       },
     });
   });
 
-  const session: SessionUser = {
-    id: user.id,
-    email: user.email,
-    name: user.name,
-    role: user.role === 'admin' ? 'admin' : 'user',
-    status: 'approved',
-    sessionTyp: 'password',
-  };
   const { token, maxAge } = issueToken(user.id, 'password');
-  const res = NextResponse.json({ user: session });
+  const res = NextResponse.json({ user: toSessionUser(user, 'password') });
   res.cookies.set(SESSION_COOKIE, token, { httpOnly: true, sameSite: 'lax', path: '/', maxAge });
   return res;
 }

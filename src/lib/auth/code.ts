@@ -22,7 +22,7 @@ export function generateCode(): string {
   return String(randomInt(0, 1000000)).padStart(6, '0');
 }
 
-export type CodePurpose = 'register' | 'login';
+export type CodePurpose = 'register' | 'login' | 'reset';
 
 /** 生成并存入新验证码；60 秒内重复发送返回 null（路由层转「发送太频繁」提示） */
 export async function createCode(email: string, purpose: CodePurpose): Promise<string> {

@@ -1,12 +1,13 @@
 /**
- * POST /api/auth/login/verify —— 邮箱验证码登录·第二步：回填验证码（临时会话 24 小时）
+ * POST /api/auth/login/verify —— 邮箱验证码登录·第二步：回填验证码
  * body: { email, code }
+ * 会话与账号密码登录同为永久（机主第 44 轮定夺：不是临时登录，忘记密码时可直接凭验证码进账号）。
  */
 
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { consumeCode } from '@/lib/auth/code';
-import { issueToken, SESSION_COOKIE, type SessionUser } from '@/lib/auth/server';
+import { issueToken, SESSION_COOKIE, toSessionUser } from '@/lib/auth/server';
 
 export const runtime = 'nodejs';
 
@@ -37,15 +38,7 @@ export async function POST(req: NextRequest) {
   }
 
   const { token, maxAge } = issueToken(user.id, 'email');
-  const session: SessionUser = {
-    id: user.id,
-    email: user.email,
-    name: user.name,
-    role: user.role === 'admin' ? 'admin' : 'user',
-    status: user.status === 'approved' ? 'approved' : 'pending',
-    sessionTyp: 'email',
-  };
-  const res = NextResponse.json({ user: session });
+  const res = NextResponse.json({ user: toSessionUser(user, 'email') });
   res.cookies.set(SESSION_COOKIE, token, { httpOnly: true, sameSite: 'lax', path: '/', maxAge });
   return res;
 }

@@ -16,8 +16,14 @@ export interface AuthUser {
   id: string;
   email: string | null;
   name: string | null;
-  role: 'user' | 'admin';
+  /** user 普通用户 | admin 管理员（可审核/发邀请码）| super_admin 超级管理员（机主写死，可设管理员） */
+  role: 'user' | 'admin' | 'super_admin';
   status: 'pending' | 'approved';
+}
+
+/** 是否管理员及以上（admin 或 super_admin）：审核 APP 可见性等前端过滤用 */
+export function isAdminRole(role: string | null | undefined): boolean {
+  return role === 'admin' || role === 'super_admin';
 }
 
 export type AuthPhase = 'loading' | 'guest' | 'pending' | 'authed';

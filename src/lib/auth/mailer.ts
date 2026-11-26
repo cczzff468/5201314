@@ -36,19 +36,35 @@ function getTransporter(): nodemailer.Transporter {
 /**
  * 发送 6 位数字验证码邮件（10 分钟内有效）。
  * 授权码未配置时抛 Error（message 会被前端 toast 直接展示）。
+ * purpose：register 注册 | login 验证码登录 | reset 忘记密码重置
  */
-export async function sendVerifyCodeEmail(email: string, code: string, purpose: 'register' | 'login'): Promise<void> {
+export async function sendVerifyCodeEmail(
+  email: string,
+  code: string,
+  purpose: 'register' | 'login' | 'reset',
+): Promise<void> {
   if (!isSmtpConfigured()) {
     throw new Error('验证码邮件服务尚未配置（管理员未填入QQ邮箱授权码），请暂时使用邀请码注册或账号密码登录');
   }
   // 星尘序列：数字间夹圆点 + 前后无"验证码"字样，避免被邮件明文扫描直接提取
   const spaced = code.split('').join('·');
-  const subject = purpose === 'register' ? '【Cove 星际通讯】入舰坐标校准信' : '【Cove 星际通讯】身份确认信';
+  const subject =
+    purpose === 'register'
+      ? '【Cove 星际通讯】入舰坐标校准信'
+      : purpose === 'reset'
+        ? '【Cove 星际通讯】密钥重铸信'
+        : '【Cove 星际通讯】身份确认信';
+  const actionText =
+    purpose === 'register'
+      ? '为确保这是你本人，请将下方的星尘校准序列转为数字后，在 10 分钟内输入到 Cove 端口。'
+      : purpose === 'reset'
+        ? '你申请重铸舱门密钥。请将下方的星尘校准序列转为数字后，在 10 分钟内输入到 Cove 端口。重铸成功后旧密钥将立即作废。'
+        : '为确保这是你本人，请将下方的星尘校准序列转为数字后，在 10 分钟内输入到 Cove 端口。';
   const text = [
     '你好，星际旅行者：',
     '',
     'Cove 星港刚刚记录到一次与你有关的操作请求。',
-    '为确保这是你本人，请将下方的星尘校准序列转为数字后，在 10 分钟内输入到 Cove 端口。',
+    actionText,
     '',
     `星尘序列：${spaced}`,
     '',
@@ -65,4 +81,23 @@ export async function sendVerifyCodeEmail(email: string, code: string, purpose: 
     subject,
     text,
   });
+}
+
+/**
+ * 发验证码（自动适配 SMTP 配置状态）：
+ * - 已配置授权码 → 真实发信，返回 { dev: false }
+ * - 未配置 → 不发信、返回 { dev: true }，由路由层把验证码直接回显给前端（开发模式），
+ *   机主填入 QQ_SMTP_AUTH_CODE 后自动切换为真实邮件发送，无需改代码。
+ */
+export async function sendCodeOrDev(
+  email: string,
+  code: string,
+  purpose: 'register' | 'login' | 'reset',
+): Promise<{ dev: boolean }> {
+  if (!isSmtpConfigured()) {
+    console.log(`[auth] SMTP 未配置（开发回显模式）→ ${email} ${purpose} 验证码：${code}`);
+    return { dev: true };
+  }
+  await sendVerifyCodeEmail(email, code, purpose);
+  return { dev: false };
 }

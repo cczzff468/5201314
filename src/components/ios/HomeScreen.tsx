@@ -12,7 +12,7 @@ import { localDB } from '@/lib/ios/db';
 import { isWebAppFrozen, subscribeWebLock, getWebLockVersion } from '@/lib/ios/web-app-lock';
 import { useUnreadTotal, useBadge, wxUnreads, qqUnreads, chatBadge, phoneBadge } from '@/lib/unread-store';
 import { DOCK_APPS, APPS, APP_MAP, AppIconById, AppMiniIcon, preloadApp } from '../apps/registry';
-import { useAuth } from '@/lib/auth/store';
+import { isAdminRole, useAuth } from '@/lib/auth/store';
 import {
   ProfileCardEditor,
   ProfileCardWidget,
@@ -1440,7 +1440,7 @@ export default function HomeScreen() {
   /** 账号角色（账号系统）：审核 App（id='review'）仅管理员可见——图标与 Spotlight
    *  在渲染层过滤，普通用户完全看不到该入口（需求第三节 4） */
   const authUser = useAuth((s) => s.user);
-  const isAdmin = authUser?.role === 'admin';
+  const isAdmin = isAdminRole(authUser?.role);
   /** 当前页（0 起）；翻页 = track 平移 */
   const [page, setPage] = useState(0);
   const [edit, setEdit] = useState(false);

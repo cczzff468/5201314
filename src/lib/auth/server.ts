@@ -1,13 +1,19 @@
 /**
- * 账号系统服务端核心：密码 scrypt 哈希、会话令牌（HMAC 签名 Cookie）、管理员白名单。
+ * 账号系统服务端核心：密码 scrypt 哈希、会话令牌（HMAC 签名 Cookie）、超级管理员写死。
  *
- * 设计约束（需求第七节「强制安全规则」）：
- * - 密码加密存储、禁止明文 → scrypt(随机盐) 一次性哈希，格式 "salt:hash"（十六进制）
- * - 账号密码永久登录有效 → 密码登录令牌有效期 10 年（等效永久）
- * - 邮箱验证码临时登录 → 验证码登录令牌有效期 24 小时
- * - 令牌自包含（uid/类型/过期时间）+ HMAC-SHA256 防篡改，服务端无会话表，零额外存储
- * - 管理员白名单写死：ADMIN_QQ_EMAILS（逗号分隔）+ 引导规则（系统无管理员时
- *   第一个注册账号自动成为管理员，避免白名单未填时管理员被锁死在门外）
+ * 角色三级（机主第 44 轮定夺）：
+ * - super_admin 超级管理员：QQ 邮箱写死在代码（机主专属，自动建号、永久已通过、可设/撤管理员）
+ * - admin 管理员：可审核用户、生成邀请码，但不能设管理员（只有超管能设）
+ * - user 普通用户：邮箱注册需审核（pending），邀请码注册直接 approved
+ *
+ * 会话策略（机主第 44 轮修订）：
+ * - 账号密码登录：永久（10 年）
+ * - 邮箱验证码登录：同样是正式登录（永久 10 年）——不是临时会话；忘记密码时可直接凭验证码登录
+ *
+ * 安全约束：
+ * - 密码 scrypt(随机盐) 一次性哈希，格式 "salt:hex"，禁止明文
+ * - 令牌自包含（uid/类型/过期时间）+ HMAC-SHA256 防篡改，服务端无会话表
+ * - 超管邮箱写死：任何人在任何时机都无法抢注/冒充（ensureSuperAdmin 先建号占位）
  */
 
 import { createHmac, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
@@ -17,26 +23,87 @@ import { db } from '@/lib/db';
 /** 会话 Cookie 名 */
 export const SESSION_COOKIE = 'cove_session';
 
-/** 密码登录令牌有效期：10 年（需求：账号密码永久有效） */
+/** 登录令牌有效期：10 年（账号密码与邮箱验证码登录同为永久——机主第 44 轮定夺） */
 const PASSWORD_TOKEN_TTL_MS = 10 * 365 * 24 * 60 * 60 * 1000;
-/** 验证码登录令牌有效期：24 小时（需求：邮箱验证码临时登录） */
-const EMAIL_TOKEN_TTL_MS = 24 * 60 * 60 * 1000;
+const EMAIL_TOKEN_TTL_MS = 10 * 365 * 24 * 60 * 60 * 1000;
 
 /** 签名密钥：env 优先（轮换即全员下线），缺失时回退固定值保证沙箱/自部署可用 */
 const AUTH_SECRET = process.env.AUTH_SECRET || 'cove-dev-secret-fallback';
 
-/** 管理员白名单：ADMIN_QQ_EMAILS 逗号分隔（trim + 转小写比较） */
+// ---------------- 超级管理员（机主·写死） ----------------
+
+/** 机主 QQ 邮箱（写死：最高级管理员，永久已通过，只有此账号能设/撤管理员） */
+export const SUPER_ADMIN_EMAIL = '3024996594@qq.com';
+/** 机主用户名（登录账号） */
+const SUPER_ADMIN_NAME = '20060620';
+/** 机主密码（建号初始密码，可直接登录） */
+const SUPER_ADMIN_PASSWORD = '123456';
+
+/** 是否机主邮箱（超管判定唯一来源，写死不可配） */
+export function isSuperAdminEmail(email: string | null | undefined): boolean {
+  return Boolean(email && email.trim().toLowerCase() === SUPER_ADMIN_EMAIL);
+}
+
+/**
+ * 确保超管账号存在且规格正确（写死邮箱占位 → 任何人无法抢注）：
+ * - 不存在 → 直接建号（email/name/password/role=super_admin/status=approved，免审核直接通过）
+ * - 存在但角色/状态/密码被改坏 → 强制归位（机主规格写死）
+ * - 每进程只做一次重量级校正（scrypt 验密），之后轻量检查
+ */
+async function doEnsureSuperAdmin(): Promise<void> {
+  const existing = await db.authUser.findUnique({ where: { email: SUPER_ADMIN_EMAIL } });
+  if (!existing) {
+    const nameTaken = await db.authUser.findFirst({ where: { name: SUPER_ADMIN_NAME } });
+    await db.authUser.create({
+      data: {
+        email: SUPER_ADMIN_EMAIL,
+        name: nameTaken ? null : SUPER_ADMIN_NAME,
+        password: hashPassword(SUPER_ADMIN_PASSWORD),
+        role: 'super_admin',
+        status: 'approved',
+      },
+    });
+    return;
+  }
+  const patch: { role?: string; status?: string; password?: string; name?: string | null } = {};
+  if (existing.role !== 'super_admin') patch.role = 'super_admin';
+  if (existing.status !== 'approved') patch.status = 'approved';
+  if (!verifyPassword(SUPER_ADMIN_PASSWORD, existing.password)) patch.password = hashPassword(SUPER_ADMIN_PASSWORD);
+  if (!existing.name) {
+    const nameTaken = await db.authUser.findFirst({ where: { name: SUPER_ADMIN_NAME } });
+    if (!nameTaken) patch.name = SUPER_ADMIN_NAME;
+  }
+  if (Object.keys(patch).length > 0) {
+    await db.authUser.update({ where: { id: existing.id }, data: patch });
+  }
+}
+
+/** ensure 结果缓存：同进程内「已确认无误」的账号不再重复跑 scrypt 验密 */
+let ensureOkUid: string | null = null;
+
+export async function ensureSuperAdmin(): Promise<void> {
+  const existing = await db.authUser.findUnique({ where: { email: SUPER_ADMIN_EMAIL } });
+  if (existing && ensureOkUid === existing.id) return;
+  await doEnsureSuperAdmin();
+  const fresh = await db.authUser.findUnique({ where: { email: SUPER_ADMIN_EMAIL } });
+  if (fresh) ensureOkUid = fresh.id;
+}
+
+/** 管理员白名单（env 附加普通管理员，逗号分隔；超管邮箱独立写死不受此项影响） */
 export function isAdminEmail(email: string | null | undefined): boolean {
   if (!email) return false;
+  if (isSuperAdminEmail(email)) return false; // 超管走独立判定
   const raw = process.env.ADMIN_QQ_EMAILS || '';
   const list = raw.split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
   return list.includes(email.trim().toLowerCase());
 }
 
+// ---------------- 会话令牌 ----------------
+
 /** 会话令牌负载 */
 interface TokenPayload {
   uid: string;
-  /** 'password' 永久 | 'email' 临时（24h） */
+  /** 'password' 密码登录 | 'email' 验证码登录（两者同为永久会话） */
   typ: 'password' | 'email';
   iat: number;
   exp: number;
@@ -107,41 +174,74 @@ export interface SessionUser {
   id: string;
   email: string | null;
   name: string | null;
-  role: 'user' | 'admin';
+  role: 'user' | 'admin' | 'super_admin';
   status: 'pending' | 'approved';
-  /** 登录方式：password 永久 | email 临时 */
+  /** 登录方式：password 密码 | email 验证码（两者同为永久会话） */
   sessionTyp: 'password' | 'email';
 }
 
+/** 角色归一（未知值一律按 user 处理，防脏数据提权） */
+export function normalizeRole(role: string): 'user' | 'admin' | 'super_admin' {
+  if (role === 'super_admin') return 'super_admin';
+  if (role === 'admin') return 'admin';
+  return 'user';
+}
+
+/** DB 行 → 会话用户（各登录/注册路由共用） */
+export function toSessionUser(
+  user: { id: string; email: string | null; name: string | null; role: string; status: string },
+  sessionTyp: 'password' | 'email',
+): SessionUser {
+  return {
+    id: user.id,
+    email: user.email,
+    name: user.name,
+    role: normalizeRole(user.role),
+    status: user.status === 'approved' ? 'approved' : 'pending',
+    sessionTyp,
+  };
+}
+
 /**
- * 从请求读会话用户：校验令牌 → 载入 AuthUser；
- * 白名单邮箱自动升为 admin+approved（管理员账号永久已通过，无需审核）。
+ * 从请求读会话用户：先确保超管账号在位（防抢注/防丢号）→ 校验令牌 → 载入 AuthUser；
+ * 超管邮箱强制归位 super_admin+approved；env 白名单邮箱自动升 admin+approved。
  */
 export async function getSessionUser(req: NextRequest): Promise<SessionUser | null> {
+  await ensureSuperAdmin();
   const payload = verifyToken(req.cookies.get(SESSION_COOKIE)?.value);
   if (!payload) return null;
   const user = await db.authUser.findUnique({ where: { id: payload.uid } });
   if (!user) return null;
   let { role, status } = user;
-  if (isAdminEmail(user.email)) {
-    if (role !== 'admin' || status !== 'approved') {
-      role = 'admin';
+  if (isSuperAdminEmail(user.email)) {
+    if (role !== 'super_admin' || status !== 'approved') {
+      role = 'super_admin';
       status = 'approved';
       await db.authUser.update({ where: { id: user.id }, data: { role, status } });
     }
+  } else if (isAdminEmail(user.email) && (role !== 'admin' || status !== 'approved')) {
+    role = 'admin';
+    status = 'approved';
+    await db.authUser.update({ where: { id: user.id }, data: { role, status } });
   }
   return {
     id: user.id,
     email: user.email,
     name: user.name,
-    role: role === 'admin' ? 'admin' : 'user',
+    role: normalizeRole(role),
     status: status === 'approved' ? 'approved' : 'pending',
     sessionTyp: payload.typ,
   };
 }
 
-/** 管理员校验：供审核/邀请码接口调用，非管理员返回 null */
+/** 管理员校验（admin 或 super_admin）：审核/邀请码接口用 */
 export async function getAdminUser(req: NextRequest): Promise<SessionUser | null> {
   const user = await getSessionUser(req);
-  return user && user.role === 'admin' ? user : null;
+  return user && (user.role === 'admin' || user.role === 'super_admin') ? user : null;
+}
+
+/** 超级管理员校验：设/撤管理员接口专用（管理员不可以设管理员——机主定夺） */
+export async function getSuperAdminUser(req: NextRequest): Promise<SessionUser | null> {
+  const user = await getSessionUser(req);
+  return user && user.role === 'super_admin' ? user : null;
 }

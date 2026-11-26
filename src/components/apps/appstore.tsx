@@ -26,7 +26,7 @@ import {
 } from 'lucide-react';
 import { localDB } from '@/lib/ios/db';
 import { useSettings, useUI, type AppId } from '@/lib/ios/store';
-import { useAuth } from '@/lib/auth/store';
+import { isAdminRole, useAuth } from '@/lib/auth/store';
 import { IOSScreen } from '@/components/ios/IOSNavBar';
 import { BackToHome } from '@/components/ios/BackToHome';
 import { APPS, AppIconTile } from './registry';
@@ -295,7 +295,8 @@ export default function AppStoreApp() {
   /** 设置「个人信息」卡片的资料（头像/名字）——右上角账户头像与它同源 */
   const profile = useSettings((s) => s.profile);
   /** 账号角色：审核 App 仅管理员可见（普通用户的 App Store 列表/搜索/详情均不出现） */
-  const isAdmin = useAuth((s) => s.user?.role === 'admin');
+  const role = useAuth((s) => s.user?.role);
+  const isAdmin = isAdminRole(role);
   const apps = useMemo(() => (isAdmin ? APPS : APPS.filter((a) => a.id !== 'review')), [isAdmin]);
 
   /** 布局 hidden 里的 App id（小组件记录 'widget:*' 不属于本 App 管辖） */
