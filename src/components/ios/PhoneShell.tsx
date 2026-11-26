@@ -161,7 +161,7 @@ export default function PhoneShell() {
   //（CSS display:none 防双条，此处也不再渲染省 1s 时钟 interval）；旧 APK 壳透明模式
   // 退化为自绘常驻（无模式桥，物理条恒隐藏）
   const statusBarMode = useSettings((s) => s.statusBarMode);
-  const loaded = useSettings((s) => s.loaded);
+  //（loaded 已在上方声明——store 装载完成标记，此处复用不重复声明）
   // 隐藏模式·顶边下拉瞬时呼出的自绘状态栏（2.8s 自动收回，IMMERSIVE_STICKY 同语义）
   const [sbReveal, setSbReveal] = useState(false);
   /** v2.4.22+ 新壳判定（模块级一次性探测：透明模式下自绘状态栏是否让位给物理条） */

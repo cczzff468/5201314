@@ -596,41 +596,46 @@ public class MainActivity extends BridgeActivity {
             applyBarStyle(style, false);
         }
 
-        /** 单条系统条的图标明暗（statusBar=true 状态栏 / false 导航栏）。
-         *  v2.4.22（第三十九轮）：同步记忆 + SharedPreferences 持久化——透明模式下状态栏
-         *  常驻显示，冷启动网页水合前（色调探针接管前）先按记忆值上色，防图标错色闪现。 */
-        private void applyBarStyle(String style, final boolean statusBar) {
-            final String norm = style != null ? style.toUpperCase() : null;
-            if (norm != null && (norm.equals("LIGHT") || norm.equals("DARK") || norm.equals("DEFAULT"))) {
-                if (statusBar) lastStatusStyle = norm; else lastNavStyle = norm;
-                try {
-                    getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
-                            .edit()
-                            .putString(statusBar ? KEY_SB_STATUS_STYLE : KEY_SB_NAV_STYLE, norm)
-                            .apply();
-                } catch (Throwable ignored) {
-                }
+        // v2.4.22（第三十九轮）：applyBarStyle 上移到 MainActivity（showStatusBarTransparent
+        // 透明模式重申图标明暗也要调）；桥方法只做委托
+    }
+
+    /** 单条系统条的图标明暗（statusBar=true 状态栏 / false 导航栏）。
+     *  v2.4.22（第三十九轮）：同步记忆 + SharedPreferences 持久化——透明模式下状态栏
+     *  常驻显示，冷启动网页水合前（色调探针接管前）先按记忆值上色，防图标错色闪现；
+     *  本方法从 NativeBridge 上移至 MainActivity（showStatusBarTransparent 也要调用）。
+     *  LIGHT=深色图标配浅背景；DARK=白色图标配深背景；DEFAULT=随系统主题。 */
+    private void applyBarStyle(String style, final boolean statusBar) {
+        final String norm = style != null ? style.toUpperCase() : null;
+        if (norm != null && (norm.equals("LIGHT") || norm.equals("DARK") || norm.equals("DEFAULT"))) {
+            if (statusBar) lastStatusStyle = norm; else lastNavStyle = norm;
+            try {
+                getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+                        .edit()
+                        .putString(statusBar ? KEY_SB_STATUS_STYLE : KEY_SB_NAV_STYLE, norm)
+                        .apply();
+            } catch (Throwable ignored) {
             }
-            final boolean lightIcons = "DARK".equalsIgnoreCase(norm);
-            final boolean isDefault = "DEFAULT".equalsIgnoreCase(norm);
-            runOnUiThread(() -> {
-                try {
-                    WindowInsetsControllerCompat ctl = WindowCompat.getInsetsController(
-                            getWindow(), getWindow().getDecorView());
-                    if (isDefault) {
-                        boolean night = (getResources().getConfiguration().uiMode
-                                & android.content.res.Configuration.UI_MODE_NIGHT_MASK)
-                                == android.content.res.Configuration.UI_MODE_NIGHT_YES;
-                        if (statusBar) ctl.setAppearanceLightStatusBars(!night);
-                        else ctl.setAppearanceLightNavigationBars(!night);
-                    } else {
-                        if (statusBar) ctl.setAppearanceLightStatusBars(!lightIcons);
-                        else ctl.setAppearanceLightNavigationBars(!lightIcons);
-                    }
-                } catch (Exception ignored) {
-                }
-            });
         }
+        final boolean lightIcons = "DARK".equalsIgnoreCase(norm);
+        final boolean isDefault = "DEFAULT".equalsIgnoreCase(norm);
+        runOnUiThread(() -> {
+            try {
+                WindowInsetsControllerCompat ctl = WindowCompat.getInsetsController(
+                        getWindow(), getWindow().getDecorView());
+                if (isDefault) {
+                    boolean night = (getResources().getConfiguration().uiMode
+                            & android.content.res.Configuration.UI_MODE_NIGHT_MASK)
+                            == android.content.res.Configuration.UI_MODE_NIGHT_YES;
+                    if (statusBar) ctl.setAppearanceLightStatusBars(!night);
+                    else ctl.setAppearanceLightNavigationBars(!night);
+                } else {
+                    if (statusBar) ctl.setAppearanceLightStatusBars(!lightIcons);
+                    else ctl.setAppearanceLightNavigationBars(!lightIcons);
+                }
+            } catch (Exception ignored) {
+            }
+        });
     }
 
     /** 用系统 DownloadManager 下载（公共 Download 目录，通知栏自带进度条），
