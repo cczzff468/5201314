@@ -13,15 +13,15 @@ export const metadata: Metadata = {
   description:
     "高还原度 iOS 风格 AI 聊天手机：灵动岛状态栏、真实电量、相册、相机、计算器、时钟、音乐、天气、备忘录、日历、录音机、浏览器、设置。本地优先，数据存于 IndexedDB。",
   keywords: ["Cove", "iOS", "AI聊天", "仿苹果", "PWA", "IndexedDB", "Next.js"],
-  // PWA 可安装：动态 manifest（/api/pwa/manifest 按设置›APP图标 四选一实时返回所选图标；
-  // 静态初始图标 = 当前默认 4 号小词灵（第四十轮），运行时 favicon 重写即时跟随用户选择）
+  // PWA 可安装：动态 manifest（/api/pwa/manifest 按设置›APP图标 五选一实时返回所选图标；
+  // 静态初始图标 = 当前默认 3 号情书字标（第四十一轮），运行时 favicon 重写即时跟随用户选择）
   manifest: "/api/pwa/manifest",
   icons: {
     icon: [
-      { url: "/icons/app/icon-4-192.png?v=40", sizes: "192x192", type: "image/png" },
-      { url: "/icons/app/icon-4-512.png?v=40", sizes: "512x512", type: "image/png" },
+      { url: "/icons/app/icon-3-192.png?v=41", sizes: "192x192", type: "image/png" },
+      { url: "/icons/app/icon-3-512.png?v=41", sizes: "512x512", type: "image/png" },
     ],
-    apple: "/icons/app/apple-touch-icon.png?v=40",
+    apple: "/icons/app/apple-touch-icon.png?v=41",
   },
   // iOS 添加到主屏幕：全屏独立窗口 + 沉浸式状态栏 + 桌面图标名
   appleWebApp: {

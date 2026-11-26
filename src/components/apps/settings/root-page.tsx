@@ -652,7 +652,7 @@ export function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
         {/* APP 图标 + APP 更新 + 添加到主屏幕（v1.3：APK 下载入口从感知设置提升到系统设置；
             v1.9.22 新增添加到主屏幕；第三十六轮「关于本机」移至设置最底部） */}
         <div className="mx-4 mt-4 divide-y divide-black/[0.05] overflow-hidden rounded-[22px] bg-white/55 shadow-[0_8px_28px_rgba(17,24,39,0.06)] ring-1 ring-white/70 backdrop-blur-2xl dark:divide-white/[0.06] dark:bg-white/[0.06] dark:ring-white/[0.09]">
-          {/* App 图标四选一（第四十轮：新增情书字标/小词灵，4 号默认）——行内预览当前图标 */}
+          {/* App 图标五选一（第四十一轮：3 号换机主原图设默认 + 新增 5 号元气气泡）——行内预览当前图标 */}
           <button
             type="button"
             aria-haspopup="dialog"
@@ -662,16 +662,16 @@ export function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
             className="flex min-h-[52px] w-full items-center gap-3 px-4 text-left transition-colors active:bg-muted/50"
           >
             <span className="grid h-[31px] w-[31px] shrink-0 place-items-center">
-              {/* 当前 App 图标小预览（squircle 圆角 + 细描边；?v=40 破缓存——第四十轮 PNG 全套换新） */}
+              {/* 当前 App 图标小预览（squircle 圆角 + 细描边；?v=41 破缓存——第四十一轮 3/5 号换机主原图） */}
               <img
-                src={`/icons/app/icon-${appIcon}-192.png?v=40`}
+                src={`/icons/app/icon-${appIcon}-192.png?v=41`}
                 alt="当前 App 图标"
                 className="h-[29px] w-[29px] rounded-[6.8px] object-cover ring-[0.5px] ring-black/10"
               />
             </span>
             <span className="min-w-0 flex-1">
               <span className="block truncate text-[16px]">App 图标</span>
-              <span className="mt-0.5 block truncate text-[11.5px] text-muted-foreground">四款图标 · 免重装一键切换</span>
+              <span className="mt-0.5 block truncate text-[11.5px] text-muted-foreground">五款图标 · 免重装一键切换</span>
             </span>
             <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground/60" strokeWidth={2.2} />
           </button>
@@ -780,7 +780,7 @@ function AppIconDialog({
             <p className="text-[16px] font-semibold text-black dark:text-white">App 图标</p>
             <p className="mt-0.5 text-[11.5px] text-muted-foreground">Cove · 选一个喜欢的样子</p>
           </div>
-          {/* 四款图标网格（共享 AppIconGrid：APK 端原生一键切换 + PWA 自动跟随，
+          {/* 五款图标网格（共享 AppIconGrid：APK 端原生一键切换 + PWA 自动跟随，
               选点逻辑与「设置›显示与亮度」外观页同一份） */}
           <AppIconGrid current={current} size="dialog" onAfterPick={onClose} />
           <p className="px-6 pb-2 text-center text-[10.5px] leading-relaxed text-muted-foreground">

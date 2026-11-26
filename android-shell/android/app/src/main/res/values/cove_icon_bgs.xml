@@ -1,8 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- 第四十轮：四变体图标自适应背景层色（被前景 72dp 全遮，格式兜底） -->
-    <color name="cove_icon_bg_1">#FDFDFD</color><!-- r253 g253 b253 -->
-    <color name="cove_icon_bg_2">#F4F4F2</color><!-- r244 g244 b242 -->
-    <color name="cove_icon_bg_3">#EFEDEA</color><!-- r239 g237 b234 -->
-    <color name="cove_icon_bg_4">#FFFFFF</color><!-- r255 g255 b255 -->
+    <!-- 第四十一轮：五变体图标自适应背景层色（被前景 72dp 全遮，格式兜底；3/5 为机主原图四角采样） -->
+    <color name="cove_icon_bg_1">#FDFDFD</color>
+    <color name="cove_icon_bg_2">#F4F4F2</color>
+    <color name="cove_icon_bg_3">#F2F1EC</color>
+    <color name="cove_icon_bg_4">#FFFFFF</color>
+    <color name="cove_icon_bg_5">#35BC55</color>
 </resources>

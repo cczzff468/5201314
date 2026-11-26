@@ -11,9 +11,9 @@
  */
 
 /** 当前最新版本（纯网页热更时与 APK versionName 可短暂不同步，下次重打 APK 对齐） */
-export const APP_VERSION = '2.4.23';
+export const APP_VERSION = '2.4.24';
 /** 版本号数字（与 android-shell versionCode 保持一致；覆盖安装要求只增不减；纯网页热更不动） */
-export const APP_VERSION_CODE = 87;
+export const APP_VERSION_CODE = 88;
 
 export interface AppReleaseNote {
   version: string;
@@ -24,6 +24,16 @@ export interface AppReleaseNote {
 
 /** 版本历史（新→旧；设置 › APP 更新 页渲染，最新一条即当前版本） */
 export const APP_RELEASE_NOTES: AppReleaseNote[] = [
+  {
+    version: '2.4.24',
+    date: '2026-11-26',
+    items: [
+      '【需重装 APK · versionCode 88】App 图标五变体：3「情书字标」换成机主提供的设计原图（Cove 字标·原图零改动）并设为默认——覆盖安装后存量设备桌面图标一次性无感迁移到情书字标；新增 5「元气气泡」（机主萌系对话气泡原图）',
+      '【需重装 APK】换图标卡死根治：旧壳收到不认识的图标号时会卡在「正在为您更换图标」永远不退——原生 switchAppIcon 升级返回状态串（ok=受理 / bad_alias=不支持），网页侧三层防护（状态回传立即恢复 + 4 秒看门狗兑底 + 恢复后对齐回当前桌面图标并给出可操作提示）',
+      '【网页热更·免重装】主屏默认壁纸「雾窗情书」换成机主新图（雨窗 Yes + If only I were in your eye…），存量设备未自选过壁纸时一次性切换',
+      '【网页热更·免重装】电池图标外框圆角跟随内部填充（描边/轨道与填充同 4.2 圆角，角部零错位）；删除上滑通知中心手势；阅读页与拾光小屋顶部遮罩根治（顶层容器透明化，背景图/3D 天空直接延伸到状态栏下方）',
+    ],
+  },
   {
     version: '2.4.23',
     date: '2026-11-26',

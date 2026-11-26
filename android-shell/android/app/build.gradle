@@ -14,8 +14,8 @@ android {
         applicationId "com.z.aiphone"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 87          // v2.4.23 状态栏两模式收敛（物理条均隐藏·自绘唯一常驻）+ 图标四变体（3 情书字标/4 小词灵·默认 4 号）+ 一次性别名迁移；v86 = 2.4.22
-        versionName "2.4.23"    // v2.4.23：状态栏常驻显示两模式等效；新默认图标小词灵
+        versionCode 88          // v2.4.24 图标五变体（3 情书字标换机主原图设默认 + 5 元气气泡）+ switchAppIcon 状态串回传（根治卡提示层）；v87 = 2.4.23
+        versionName "2.4.24"    // v2.4.24：情书字标默认图标（机主原图）+ 元气气泡新图标 + 换图标卡死根治
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.

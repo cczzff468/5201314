@@ -29,14 +29,18 @@ export type NativeBarStyle = 'LIGHT' | 'DARK' | 'DEFAULT';
 /** 状态栏外观模式（第三十九轮）：transparent=透明融合 / hidden=完全隐藏 */
 export type NativeStatusBarMode = 'transparent' | 'hidden';
 
-export type AppIconAliasId = '1' | '2' | '3' | '4';
+export type AppIconAliasId = '1' | '2' | '3' | '4' | '5';
 
-/** v2.4.21 一键换图标桥（MainActivity.NativeBridge——方法存在即 v2.4.21+ 壳） */
+/** v2.4.21 一键换图标桥（MainActivity.NativeBridge——方法存在即 v2.4.21+ 壳）
+ *  第四十一轮：switchAppIcon 升级为返回状态字符串（v2.4.24+ 壳）——'ok'=切换已受理
+ *  （App 将退回桌面）/ 其它或 undefined=旧壳不支持该别名或失败（网页侧立即恢复，
+ *  修复「点新图标卡在『正在为您更换图标』永远不退」） */
 interface NativeIconBridge {
-  /** 当前启用的图标别名 '1'~'4'（第四十轮四变体；APK 覆盖安装后重置回 Manifest 默认 4 号，以原生为准） */
+  /** 当前启用的图标别名 '1'~'5'（第四十一轮五变体；APK 覆盖安装后重置回 Manifest 默认 3 号，以原生为准） */
   getCurrentIcon(): string;
-  /** 切换图标别名（先启目标再关其余 + HOME + System.exit 强退回桌面） */
-  switchAppIcon(alias: string): void;
+  /** 切换图标别名（先启目标再关其余 + HOME + System.exit 强退回桌面）；
+ *  v2.4.24+ 返回 'ok'（受理）/ 'bad_alias'（旧壳不认识该别名） */
+  switchAppIcon(alias: string): string | void;
 }
 
 interface NativeBridge {
@@ -44,7 +48,7 @@ interface NativeBridge {
   setSystemBarsStyle(style: NativeBarStyle): void;
   setSystemBarStyles?(statusStyle: NativeBarStyle, navStyle: NativeBarStyle): void;
   getCurrentIcon?(): string;
-  switchAppIcon?(alias: string): void;
+  switchAppIcon?(alias: string): string | void;
   setStatusBarMode?(mode: string): void;
 }
 
@@ -111,21 +115,25 @@ export function setNativeSystemBarStyles(statusStyle: NativeBarStyle, navStyle: 
 }
 
 /** v2.4.21 一键无感换图标（Activity Alias）：换图标桥是否可用
- *  （方法存在 = v2.4.21+ APK 壳；旧壳/浏览器恒 null——网格静默走 PWA 自动跟随流） */
+ *  （方法存在 = v2.4.21+ APK 壳；旧壳/浏览器恒 null——网格静默走 PWA 自动跟随流）
+ *  第四十一轮：返回的包装同时透传原生返回值（v2.4.24+ 'ok'/'bad_alias'；旧壳 undefined） */
 export function getNativeIconBridge(): NativeIconBridge | null {
   if (typeof window === 'undefined') return null;
   const N = window.AIPhoneNative;
   if (!N || typeof N.switchAppIcon !== 'function' || typeof N.getCurrentIcon !== 'function') return null;
-  return { getCurrentIcon: () => N.getCurrentIcon!(), switchAppIcon: (a: string) => N.switchAppIcon!(a) };
+  return {
+    getCurrentIcon: () => N.getCurrentIcon!(),
+    switchAppIcon: (a: string) => N.switchAppIcon!(a),
+  };
 }
 
-/** 读原生当前启用图标别名 '1'~'2'（无桥/异常回 null，调用方自行兜底） */
+/** 读原生当前启用图标别名 '1'~'5'（无桥/异常回 null，调用方自行兜底） */
 export function getNativeCurrentIcon(): AppIconAliasId | null {
   const N = window.AIPhoneNative;
   if (typeof window === 'undefined' || !N || typeof N.getCurrentIcon !== 'function') return null;
   try {
     const raw = N.getCurrentIcon();
-    return raw === '1' || raw === '2' || raw === '3' || raw === '4' ? raw : null;
+    return raw === '1' || raw === '2' || raw === '3' || raw === '4' || raw === '5' ? raw : null;
   } catch {
     return null;
   }
