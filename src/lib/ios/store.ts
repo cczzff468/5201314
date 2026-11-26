@@ -1872,7 +1872,8 @@ export type AppId =
   | 'couple'
   | 'cottage'
   | 'forum'
-  | 'reading';
+  | 'reading'
+  | 'review';
 
 export type AppPhase = 'closed' | 'opening' | 'open' | 'closing';
 

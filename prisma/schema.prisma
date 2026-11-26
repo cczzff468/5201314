@@ -347,6 +347,59 @@ model ReadingMemory {
   @@index([bookUrl, kind])
 }
 
+/// ===== 账号系统（注册审核/邀请码/双登录）=====
+/// 登录账号：邮箱唯一注册；密码 scrypt 哈希存储（禁止明文）；
+/// status: pending 待审核（强制拦截主界面）| approved 已通过（解锁全部功能）
+/// role: user 普通用户 | admin 超级管理员（写死白名单邮箱，登录自动识别）
+/// 邮箱验证码注册的账号默认 pending+user；邀请码注册的账号直接 approved；
+/// 白名单邮箱注册/登录恒为 admin+approved；首个注册账号自动成为管理员（引导规则）
+model AuthUser {
+  id           String    @id @default(cuid())
+  /// 登录邮箱（QQ邮箱；邀请码注册可无邮箱，凭用户名+密码登录）
+  email        String?   @unique
+  /// 用户名（邀请码注册的登录名；与邮箱二选一登录）
+  name         String?
+  /// scrypt 哈希（salt:hex 格式，绝不存明文）
+  password     String
+  /// 'user' | 'admin'
+  role         String    @default("user")
+  /// 'pending' | 'approved'
+  status       String    @default("pending")
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@index([status])
+}
+
+/// 邮箱验证码（一次性）：邮箱 + 哈希 + 用途 + 10 分钟过期，验证成功立即作废；
+/// code 存 HMAC 哈希（不存明文，防库泄露后被扫描撞码）
+model VerificationCode {
+  id        String   @id @default(cuid())
+  email     String
+  /// HMAC-SHA256(code) 十六进制
+  codeHash  String
+  /// 'register' 注册 | 'login' 验证码登录
+  purpose   String
+  used      Boolean  @default(false)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([email, purpose])
+}
+
+/// 邀请码（管理员手动授权）：COVE-xxxx-xxxx（随机大小写字母+数字）
+/// 单次使用；注册成功即标记 used 并记录使用者
+model InviteCode {
+  id        String    @id @default(cuid())
+  /// COVE-XXXX-XXXX（区分大小写）
+  code      String    @unique
+  used      Boolean   @default(false)
+  /// 使用者（用户名或邮箱）
+  usedBy    String?
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+}
+
 /// App 全局配置（key-value）：当前存 PWA 图标选择（key='appIcon'，value='1'|'2'|'3'），
 /// /api/pwa/manifest 动态读取返回所选图标（浏览器安装 PWA 时拉取）
 model AppConfig {

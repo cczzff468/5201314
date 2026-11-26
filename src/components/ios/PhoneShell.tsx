@@ -28,6 +28,8 @@ import '@/lib/ios/cloud-history-sync';
 import { shellScale } from '@/lib/ios/shell-scale';
 import StatusBar from './StatusBar';
 import HomeScreen from './HomeScreen';
+import AuthScreen, { PendingReviewScreen } from './auth/AuthScreens';
+import { useAuth, useAuthBoot } from '@/lib/auth/store';
 import { APP_MAP, preloadApp, preloadHeavyApps } from '@/components/apps/registry';
 import { CustomWallpaperLayers } from './WallpaperLayers';
 import AppWindow from './AppWindow';
@@ -143,6 +145,10 @@ export default function PhoneShell() {
   const loaded = useSettings((s) => s.loaded);
   const customWallpaperUrl = useSettings((s) => s.customWallpaperUrl);
   const wallpaperStyle = useWallpaperStyle();
+  // 账号门禁（第一层）：挂载即拉取会话（/api/auth/me）；
+  // guest→登录/注册页，pending→强制审核等待页，authed→正常手机体验
+  useAuthBoot();
+  const authPhase = useAuth((s) => s.phase);
   // 全局字体大小倍率（Task 36 修订）：不再在 PhoneShell 缩放容器（旧 transform scale 会连界面一起缩小/放大），
   // 改由 globals.css 的 text-[Npx]/leading-[Npx] calc 规则只缩放文字；倍率存在 :root --app-font-scale，此处无需感知
   // 横杠颜色与状态栏同一套判定（但按壁纸底部区域实测，上亮下暗壁纸横杠可独立选色）：身后背景深→白杠、浅→黑杠
@@ -559,10 +565,11 @@ export default function PhoneShell() {
     };
   }, [toast]);
 
-  // 开机门控：设置从 IndexedDB 读出前只显示纯黑开机屏。
+  // 开机门控：设置从 IndexedDB 读出前只显示纯黑开机屏（会话拉取中同样保持纯黑，
+  // 避免登录页闪现后又被会话顶回主屏的闪烁）。
   // 若用户关闭了锁屏，locked 会在 load() 内同步纠正为 false——
   // 先等 loaded 再渲染锁屏/主屏，锁屏就不会“闪现一下再消失”。
-  if (!loaded) {
+  if (!loaded || authPhase === 'loading') {
     // 横屏全屏：纯黑铺满；竖屏桌面带壳占位，移动全屏随视口
     return (
       <div data-pwa-wrap="" className="flex min-h-[100svh] w-full items-center justify-center bg-[#dcdce1] dark:bg-black sm:p-8">
@@ -616,6 +623,60 @@ export default function PhoneShell() {
     bottom: 'var(--app-sab, 0px)',
     left: 'var(--app-sal, 0px)',
   };
+
+  // 账号门禁（第一层）：未登录 → 登录/注册页；待审核 → 强制审核等待页（需求第二、七节）。
+  // 门禁层保留手机壳/壁纸/灵动岛/状态栏观感，隐藏全部功能入口（主屏/App 窗口/全局层
+  // 均不挂载——待审核用户无任何聊天、设置入口）；登录成功或审核通过（phase 变化）
+  // 自动切到正常手机体验，无需路由跳转。
+  if (authPhase === 'guest' || authPhase === 'pending') {
+    return (
+      <div
+        data-pwa-wrap=""
+        className={
+          fit.landscape
+            ? 'min-h-[100svh] w-full bg-black'
+            : 'flex min-h-[100svh] w-full items-center justify-center bg-[#dcdce1] dark:bg-black sm:p-8'
+        }
+      >
+        <div className="relative h-[100svh] w-full shrink-0 sm:h-auto sm:w-auto" style={placeholderStyle}>
+          <div
+            data-phone-shell=""
+            data-pwa-portrait-shell={fit.landscape ? undefined : ''}
+            className={
+              fit.landscape
+                ? `relative h-[100svh] w-full pan-none bg-black ${dark ? 'dark' : ''}`
+                : `relative h-[100svh] w-full pan-none bg-black sm:h-[844px] sm:w-[390px] sm:rounded-[56px] sm:border-[12px] sm:border-[#151517] sm:shadow-[0_40px_90px_-20px_rgba(0,0,0,0.55),0_0_0_1px_rgba(255,255,255,0.08)] ${dark ? 'dark' : ''}`
+            }
+            style={fit.landscape ? undefined : { transform: `scale(${fit.scale})`, transformOrigin: 'top left' }}
+          >
+            {/* 灵动岛（硬件开孔，常驻视觉锚点） */}
+            <div
+              className="pointer-events-none absolute left-1/2 top-[11px] h-[33px] w-[118px] -translate-x-1/2 rounded-full bg-black"
+              aria-hidden="true"
+            />
+            {/* 壁纸层（与主屏同源：自定义壁纸边缘延伸 / 预设壁纸 cover） */}
+            {customWallpaperUrl ? (
+              <CustomWallpaperLayers url={customWallpaperUrl} />
+            ) : (
+              <div className="absolute -inset-[2px]" style={wallpaperStyle} aria-hidden="true" />
+            )}
+            {/* 门禁内容层（登录/注册 或 审核等待） */}
+            <div className="absolute" data-shell-content="" style={contentInsetStyle}>
+              {authPhase === 'pending' ? <PendingReviewScreen /> : <AuthScreen />}
+              {showStatusBar && <StatusBar />}
+            </div>
+            {/* Home 指示条（门禁层用白杠：下方有深色渐变压暗） */}
+            <div
+              aria-hidden="true"
+              className="pointer-events-none absolute inset-x-0 bottom-0 z-[72] flex h-[28px] items-end justify-center pb-[7px] touch-none"
+            >
+              <div className="ph-homebar h-[5px] w-[134px] rounded-full bg-white/90" />
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   // 壳内内容（壁纸 → 主屏 → App → 全局层）：横竖屏共用同一份，只换外壳几何
   const shellInner = (

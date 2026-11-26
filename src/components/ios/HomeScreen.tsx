@@ -12,6 +12,7 @@ import { localDB } from '@/lib/ios/db';
 import { isWebAppFrozen, subscribeWebLock, getWebLockVersion } from '@/lib/ios/web-app-lock';
 import { useUnreadTotal, useBadge, wxUnreads, qqUnreads, chatBadge, phoneBadge } from '@/lib/unread-store';
 import { DOCK_APPS, APPS, APP_MAP, AppIconById, AppMiniIcon, preloadApp } from '../apps/registry';
+import { useAuth } from '@/lib/auth/store';
 import {
   ProfileCardEditor,
   ProfileCardWidget,
@@ -363,8 +364,9 @@ const PAGE2_APP_IDS: AppId[] = ['reminders', 'recorder', 'calendar', 'clock'];
  *  情侣空间随后纳入页尾（不升版：存量布局同样走「缺失 App 补位」自动上屏））；
  *  拾光小屋自 v12 起迁往第 4 页独立成页（机主指定「把拾光小屋放在第四页」） */
 const PAGE3_APP_IDS: AppId[] = ['music', 'wechat', 'appstore', 'qq', 'memory', 'worldbook', 'meituan', 'couple', 'forum', 'reading'];
-/** 第 4 页 App（v12：拾光小屋独立成页——机主指定；后续新增 App 的默认补位仍从末页往后找空间） */
-const PAGE4_APP_IDS: AppId[] = ['cottage'];
+/** 第 4 页 App（v12：拾光小屋独立成页——机主指定；后续新增 App 的默认补位仍从末页往后找空间；
+ *  审核App（账号系统管理员后台）也在第 4 页——仅 admin 可见，非 admin 由渲染层过滤） */
+const PAGE4_APP_IDS: AppId[] = ['cottage', 'review'];
 /** 其余小组件（默认收起不显示：写入 hidden，需要时从「+」画廊/主题小组件页找回；
  *  网易云小组件自 v6 起默认上屏第 3 页，不再收起；
  *  v9 起 widgets-7 的四个新小组件 iCity/表盘时钟/拍立得也默认收起——用户要求新添加的小组件不显示；
@@ -1435,6 +1437,10 @@ export default function HomeScreen() {
 
   // ---------------- 布局（编辑模式数据） ----------------
   const [layout, setLayout] = useState<HomeLayout>(() => defaultLayout());
+  /** 账号角色（账号系统）：审核 App（id='review'）仅管理员可见——图标与 Spotlight
+   *  在渲染层过滤，普通用户完全看不到该入口（需求第三节 4） */
+  const authUser = useAuth((s) => s.user);
+  const isAdmin = authUser?.role === 'admin';
   /** 当前页（0 起）；翻页 = track 平移 */
   const [page, setPage] = useState(0);
   const [edit, setEdit] = useState(false);
@@ -3025,7 +3031,10 @@ export default function HomeScreen() {
   };
 
   // ---------------- 渲染 ----------------
-  const results = APPS; // Spotlight 全量列表
+  // Spotlight 全量列表（审核 App 普通用户不可见）；
+  // 主屏页面同样按角色过滤审核 App（visiblePages，非 admin 时剔除 id='review' 的 tile）
+  const results = APPS.filter((a) => isAdmin || a.id !== 'review');
+  const visiblePages = isAdmin ? layout.pages : layout.pages.map((p) => p.filter((t) => !(t.kind === 'app' && t.id === 'review')));
   const folders = layout.folders ?? [];
   const openFolder = openFolderId ? (folders.find((f) => f.id === openFolderId) ?? null) : null;
   /** 页点可见性：编辑模式常显；平时滑动中/翻页后短暂显示，静止时同位置显示搜索胶囊 */
@@ -3502,7 +3511,7 @@ export default function HomeScreen() {
           style={{ transform: `translateX(-${page * 100}%)`, transitionTimingFunction: 'cubic-bezier(0.32, 0.72, 0, 1)' }}
         >
           {/* eslint-disable-next-line react-hooks/refs -- 页内 tile 渲染读 dragGeo 拖拽几何（拖拽开始时捕获的静态快照），占位槽需真实槽位尺寸防跳动 */}
-          {layout.pages.map((tiles, p) => (
+          {visiblePages.map((tiles, p) => (
             <div
               key={p}
               data-testid={`home-page-${p}`}

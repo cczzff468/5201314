@@ -26,6 +26,7 @@ import {
 } from 'lucide-react';
 import { localDB } from '@/lib/ios/db';
 import { useSettings, useUI, type AppId } from '@/lib/ios/store';
+import { useAuth } from '@/lib/auth/store';
 import { IOSScreen } from '@/components/ios/IOSNavBar';
 import { BackToHome } from '@/components/ios/BackToHome';
 import { APPS, AppIconTile } from './registry';
@@ -72,6 +73,7 @@ const TAGLINES: Record<AppId, string> = {
   cottage: '拾光小屋，把日常装进小家',
   forum: 'X论坛，大家都在聊什么',
   reading: '免费书源聚合阅读 · AI 伴读',
+  review: '账号注册审核与邀请码管理（仅管理员）',
 };
 
 /** 分类（排行榜副标题 & 搜索关键字） */
@@ -104,6 +106,7 @@ const CATEGORY: Record<AppId, string> = {
   cottage: '生活',
   forum: '社交',
   reading: '图书',
+  review: '实用工具',
 };
 
 /** App 标签页分组 */
@@ -291,6 +294,9 @@ export default function AppStoreApp() {
   const switchToApp = useUI((s) => s.switchToApp);
   /** 设置「个人信息」卡片的资料（头像/名字）——右上角账户头像与它同源 */
   const profile = useSettings((s) => s.profile);
+  /** 账号角色：审核 App 仅管理员可见（普通用户的 App Store 列表/搜索/详情均不出现） */
+  const isAdmin = useAuth((s) => s.user?.role === 'admin');
+  const apps = useMemo(() => (isAdmin ? APPS : APPS.filter((a) => a.id !== 'review')), [isAdmin]);
 
   /** 布局 hidden 里的 App id（小组件记录 'widget:*' 不属于本 App 管辖） */
   const [hiddenApps, setHiddenApps] = useState<AppId[]>([]);
@@ -348,24 +354,24 @@ export default function AppStoreApp() {
     }
   }, []);
 
-  const removed = useMemo(() => APPS.filter((a) => hiddenApps.includes(a.id)), [hiddenApps]);
+  const removed = useMemo(() => apps.filter((a) => hiddenApps.includes(a.id)), [apps, hiddenApps]);
   const removedSet = useMemo(() => new Set(removed.map((a) => a.id)), [removed]);
 
   const searchResults = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return APPS;
-    return APPS.filter(
+    if (!q) return apps;
+    return apps.filter(
       (a) =>
         a.name.toLowerCase().includes(q) ||
         TAGLINES[a.id].toLowerCase().includes(q) ||
         CATEGORY[a.id].toLowerCase().includes(q),
     );
-  }, [query]);
+  }, [apps, query]);
 
   /* ------------------------------- 详情页 ------------------------------- */
 
   if (detailId) {
-    const app = APPS.find((a) => a.id === detailId);
+    const app = apps.find((a) => a.id === detailId);
     if (app) {
       const isRemoved = removedSet.has(app.id);
       const meta = metaFor(app.id);
@@ -556,7 +562,7 @@ export default function AppStoreApp() {
                 <h2 className="px-4 text-[22px] font-bold tracking-tight">{group.title}</h2>
                 <ul className="mt-1">
                   {group.ids.map((id) => {
-                    const app = APPS.find((a) => a.id === id);
+                    const app = apps.find((a) => a.id === id);
                     if (!app) return null;
                     const isRemoved = removedSet.has(id);
                     return (
@@ -577,7 +583,7 @@ export default function AppStoreApp() {
               </section>
             ))}
             <p className="mt-5 px-4 text-[12px] leading-relaxed text-muted-foreground">
-              {APPS.length} 个系统 App · 已移除 {removed.length} 个 · 点蓝色云图标即可恢复回主屏幕
+              {apps.length} 个系统 App · 已移除 {removed.length} 个 · 点蓝色云图标即可恢复回主屏幕
             </p>
           </div>
         )}
@@ -642,7 +648,7 @@ export default function AppStoreApp() {
               />
             </div>
             <p className="mt-4 px-4 text-[13px] text-muted-foreground">
-              {query.trim() ? `“${query.trim()}” 的搜索结果 · ${searchResults.length} 个` : `全部 App · ${APPS.length} 个`}
+              {query.trim() ? `“${query.trim()}” 的搜索结果 · ${searchResults.length} 个` : `全部 App · ${apps.length} 个`}
             </p>
             <ul className="-mx-0 mt-1">
               {searchResults.map((a) => {

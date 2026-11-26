@@ -24,6 +24,7 @@ import {
     Palette,
     Phone as PhoneGlyph,
     Settings as SettingsIcon,
+    ShieldCheck,
     ShoppingBag,
     Store,
     UtensilsCrossed,
@@ -113,6 +114,8 @@ const ReadingApp = dynamic(() => import('./reading/ReadingApp'), {
   ssr: false,
   loading: () => <AppSplash appId="reading" />,
 });
+// 审核 App（账号系统管理员后台：仅 admin 可见——可见性过滤在 HomeScreen 渲染层）
+const ReviewApp = dynamic(() => import('./review'), { ssr: false, loading: () => <AppSplash appId="review" /> });
 
 export interface AppMeta {
   id: AppId;
@@ -528,6 +531,14 @@ const APP_DEFS: AppDef[] = [
     glyph: <ForumGlyph />,
     component: ForumApp,
   },
+  {
+    // 审核 App（账号系统管理员后台）：仅管理员可见——HomeScreen 渲染层按角色过滤，
+    // 普通用户主屏/Spotlight 完全不出现；无实体图标（磨砂玻璃底座 + 盾形对勾线条）
+    id: 'review',
+    name: '审核',
+    glyph: <ShieldCheck className={GLYPH_CLASS} strokeWidth={GLYPH_STROKE} />,
+    component: ReviewApp,
+  },
 ];
 
 /** appId → 真实图标原图路径（有 image 字段的 App），供卡片底色场景（AppIconTile）复用 */
@@ -687,6 +698,7 @@ const APP_IMPORTERS: Record<AppId, () => Promise<unknown>> = {
   cottage: () => import('./cottage'),
   forum: () => import('./forum/forum'),
   reading: () => import('./reading/ReadingApp'),
+  review: () => import('./review'),
 };
 
 /** 预载指定 App 的 chunk（幂等、失败静默）：图标按下/悬停时调用 */
