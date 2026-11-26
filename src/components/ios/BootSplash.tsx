@@ -11,7 +11,9 @@
  * - chat（星空对话·第三十七轮按机主参考图重做）：午夜蓝夜空 + 白星点铺底 +
  *   四芒星缓闪 + 三团星尘簇 + 右上大金新月（开口朝左，挖月透明透出夜空） +
  *   金色星尘光带自月牙蜿蜒向左下（dash 段沿路径流动） + 情话散排（白/暖金）
- *   + 金色系 Cove 字标收束——复刻机主参考图（金月星尘星空锁屏风）。
+ *   + 金色系 Cove 字标收束——复刻机主参考图（金月星尘星空锁屏风）；
+ *   第三十八轮再美化（机主「要有地球」）：左中蓝色地球（海洋渐变+旋转大陆组+
+ *   反向云层视差+晨昏线+大气光晕呼吸+轨道小月亮环绕）+ 两道金色流星周期划过。
  *
  * 沿用主题：
  * - star（默认·星空月夜）：深夜炭蓝黑渐变 + 26 颗星点闪烁 + 周期流星 + 奶白新月；
@@ -200,6 +202,10 @@ export default function BootSplash({
   // 第三十七轮 chat 星空化：SVG defs id 唯一化（金月渐变/挖月 mask/光带渐变/收束月牙 mask；
   // page.tsx 顶层实例与设置页 forceTheme 预览实例可能短暂并存，重复 id 会互相串定义）
   const uid = useId().replace(/[^a-zA-Z0-9_-]/g, '');
+  const chatEarthOcean = `cove5-earth-ocean-${uid}`;
+  const chatEarthShade = `cove5-earth-shade-${uid}`;
+  const chatEarthHi = `cove5-earth-hi-${uid}`;
+  const chatEarthClip = `cove5-earth-clip-${uid}`;
   const chatMoonGold = `cove5-gold-${uid}`;
   const chatMoonMask = `cove5-mask-${uid}`;
   const chatTrailGrad = `cove5-trail-${uid}`;
@@ -577,6 +583,93 @@ export default function BootSplash({
               ))}
             </span>
           ))}
+
+          {/* 地球（第三十八轮机主「要那种有地球月球星星的」）：左中蓝色行星——
+              海洋径向渐变 + 旋转大陆组（clip 在星球圆内 46s 自转=行星转动视感）+
+              云层反向慢旋（视差）+ 晨昏线右暗 + 顶左高光 + 大气光晕呼吸 +
+              倾斜椭圆轨道小月亮 animateMotion 环绕（暖白 3px，恒在星球前方）。 */}
+          <div
+            aria-hidden="true"
+            className="absolute left-[7%] top-[19%] h-[86px] w-[86px]"
+            style={{ animation: 'cove5-moon-float 9s ease-in-out infinite' }}
+          >
+            <span
+              className="absolute -inset-[22px] rounded-full"
+              style={{
+                background: 'radial-gradient(circle, rgba(118,178,250,0.34) 0%, rgba(100,160,240,0.1) 46%, rgba(100,160,240,0) 72%)',
+                animation: 'cove5-earth-glow 5s ease-in-out infinite',
+              }}
+            />
+            <svg viewBox="0 0 120 120" width="86" height="86" style={{ filter: 'drop-shadow(0 0 12px rgba(80,140,230,0.42))' }}>
+              <defs>
+                <radialGradient id={chatEarthOcean} cx="36%" cy="28%" r="80%">
+                  <stop offset="0%" stopColor="#7EC8F5" />
+                  <stop offset="38%" stopColor="#3E86CE" />
+                  <stop offset="72%" stopColor="#1B5290" />
+                  <stop offset="100%" stopColor="#0C2E5C" />
+                </radialGradient>
+                <linearGradient id={chatEarthShade} x1="0" y1="0" x2="1" y2="0">
+                  <stop offset="52%" stopColor="rgba(6,14,30,0)" />
+                  <stop offset="100%" stopColor="rgba(6,14,30,0.55)" />
+                </linearGradient>
+                <radialGradient id={chatEarthHi} cx="32%" cy="26%" r="42%">
+                  <stop offset="0%" stopColor="rgba(255,255,255,0.5)" />
+                  <stop offset="100%" stopColor="rgba(255,255,255,0)" />
+                </radialGradient>
+                <clipPath id={chatEarthClip}>
+                  <circle cx="60" cy="60" r="44" />
+                </clipPath>
+              </defs>
+              {/* 星球本体：海洋渐变 */}
+              <circle cx="60" cy="60" r="44" fill={`url(#${chatEarthOcean})`} />
+              <g clipPath={`url(#${chatEarthClip})`}>
+                {/* 旋转大陆组（46s 自转——大陆公转绕行=行星转动视感） */}
+                <g>
+                  <animateTransform attributeName="transform" type="rotate" from="0 60 60" to="360 60 60" dur="46s" repeatCount="indefinite" />
+                  <path d="M 30 38 C 38 30, 52 30, 58 37 C 62 42, 58 50, 50 52 C 42 55, 32 52, 28 46 C 25 42, 26 40, 30 38 Z" fill="#3F9E63" opacity="0.92" />
+                  <path d="M 72 62 C 80 58, 90 62, 92 70 C 93 77, 86 83, 78 82 C 70 81, 66 74, 68 68 Z" fill="#4CB074" opacity="0.88" />
+                  <path d="M 40 74 C 46 70, 54 72, 56 78 C 57 84, 50 88, 44 86 C 38 84, 36 79, 40 74 Z" fill="#41985E" opacity="0.85" />
+                </g>
+                {/* 云层（反向 70s 慢旋=视差） */}
+                <g opacity="0.38">
+                  <animateTransform attributeName="transform" type="rotate" from="360 60 60" to="0 60 60" dur="70s" repeatCount="indefinite" />
+                  <ellipse cx="60" cy="34" rx="20" ry="5" fill="#FFFFFF" opacity="0.5" />
+                  <ellipse cx="58" cy="82" rx="17" ry="4.5" fill="#FFFFFF" opacity="0.4" />
+                  <ellipse cx="30" cy="60" rx="8" ry="3.5" fill="#FFFFFF" opacity="0.45" />
+                </g>
+                {/* 静态极冠（两极不随自转移动，盖在大陆组上方） */}
+                <ellipse cx="61" cy="18" rx="13" ry="6" fill="#EAF4FF" opacity="0.5" />
+                {/* 晨昏线（右暗）+ 顶左高光（球体立体感） */}
+                <circle cx="60" cy="60" r="44" fill={`url(#${chatEarthShade})`} />
+                <circle cx="60" cy="60" r="44" fill={`url(#${chatEarthHi})`} />
+              </g>
+              {/* 轨道小月亮：沿倾斜椭圆环绕（3.2px 暖白+微光，恒在星球前方滑过） */}
+              <g transform="rotate(-18 60 60)">
+                <circle r="3.2" fill="#F2EFE4" opacity="0.95" style={{ filter: 'drop-shadow(0 0 3px rgba(255,250,230,0.8))' }}>
+                  <animateMotion dur="11s" repeatCount="indefinite" path="M 10 60 a 50 14 0 1 0 100 0 a 50 14 0 1 0 -100 0" />
+                </circle>
+              </g>
+            </svg>
+          </div>
+
+          {/* 流星（第三十八轮：两道流星周期划过右上→左下方向——金色/银白各一，
+              复用 cove3-shoot 位移轨迹；DOM 在金月之前=流星从月牙身后掠过） */}
+          <span
+            aria-hidden="true"
+            className="absolute left-[20%] top-[9%] block h-[1.6px] w-[92px] origin-left rounded-full"
+            style={{
+              background: 'linear-gradient(90deg, rgba(244,214,140,0) 0%, rgba(244,214,140,0.95) 100%)',
+              animation: 'cove3-shoot 5.6s ease-out 1.2s infinite',
+            }}
+          />
+          <span
+            aria-hidden="true"
+            className="absolute left-[52%] top-[5%] block h-[1.4px] w-[70px] origin-left rounded-full"
+            style={{
+              background: 'linear-gradient(90deg, rgba(255,255,255,0) 0%, rgba(255,255,255,0.9) 100%)',
+              animation: 'cove3-shoot 7.2s ease-out 3.6s infinite',
+            }}
+          />
 
           {/* 金月（机主参考图右侧大金新月，开口朝左）：
               SVG 圆 + mask 挖左侧暗圆出月牙——挖掉区域透明、透出夜空渐变（零色差）；
