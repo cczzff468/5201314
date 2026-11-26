@@ -3878,3 +3878,33 @@ Stage Summary:
 - 换图标卡死根因方法论：JS 桥调用「成功送达」≠「原生成功受理」——旧壳静默忽略新能力号时网页侧必须有状态回传+看门狗+恢复对齐三件套，任何「全屏等待层」都必须有兜底退出路径
 - 沉浸式架构升级：出血条带拼色（适配静态 CSS 背景的 90% App）+ fullBleedTop 全出血（动态媒体 App：3D canvas/背景图直接顶到物理屏顶）双轨制——后续新增全屏媒体类 App 挂 fullBleedTop 即可
 - 机主仍在 v86 壳的证据链（物理绿电状态栏+卡死截图）→ 需覆盖安装 v88（public/Cove.apk 或设置›APP更新）：换 3/4/5 号图标即刻生效、状态栏双条消除、迁移链自动把桌面图标切到情书字标
+
+---
+Task ID: 43（第四十二轮）
+Agent: 主控 Agent（Z.ai Code）
+Task: 机主十项——换图标失败提示升级 + 图标/弹窗显示修正 + 语音助手唤起白条根治 + 开屏动画与App图标同卡 + ClawBox 命名三件 + Supabase 令牌页按钮 + 云备份系统（Storage+Database 全链）+ 自动备份触发 + 离线消息推送（Realtime+Local Notification）+ 发版 v2.4.25
+
+Work Log:
+- 【换图标失败 UX】机主实锤「点击元气气泡显示更换失败已恢复」= 仍在 v86 旧壳（截图 120718 物理绿电状态栏佐证）——旧壳无状态回传，第四十一轮的「非 ok 立即恢复」对旧壳支持的图标（1/2 号）会误报失败。分层：旧壳（versionCode<88，readShellInfo 判定）改 2.8s 看门狗（支持的图标 ~1.5s 退桌面无假警报；不支持的静默无动作→看门狗恢复）；v88+ 维持状态串即时判定；失败提示升级为可操作文案 +「立即更新 App」按钮（useAppUpdate.check(true) 直拉全局 AppUpdateDialog → APP 内下载安装）
+- 【图标显示不一样 双半根因】①机主仍在 v86：切换失败桌面图标≠所选（上一条修复）②v88 忘了重生成 splash（冷启动闪屏仍是 icon-4 小词灵≠默认图标 icon-3）——gen-splash-r42.mjs 全密度重生成 + APK v89 重打；雾窗情书壁纸缩略图与实际同源 ?v=41（md5 实证一致）
+- 【语音助手唤起白条双根修】①会话层（bg-black/85 z-[57]）inset-0 只到安全区内缩顶，其上露出底下 App 出血条带（浅色 App=白条）→ 会话挂 data-bleed 反向逃逸到物理屏顶黑底铺满；②黑字压黑底 → 会话打开期间 pushStatusBarTone('light')。agent-browser 实测发现第三缺口：tone 推送原只在 App 前台分支生效（主屏上开语音会话仍黑字）——foreground.ts 基调优先级重构（屏幕级基调全屏层通用，电筒/响铃/通话保持更高优先级）。实测：native 模拟（--app-sat:38px）会话 top=0/h=844/bleed ✓；会话开=白字 ✓ 会话关=回壁纸黑字 ✓；VLM 复核「无白条、白字黑底高对比」
+- 【删除提示】App 图标弹窗底部说明（root-page）+ 外观页网格下方说明（theme.tsx）删除（机主定夺）
+- 【开屏动画+App 图标放在一起】开屏动画行并入 App 图标同卡片（行序：开屏动画→App 图标→APP 更新→添加到主屏幕）
+- 【ClawBox 命名三件 + Supabase 令牌页】设置入口行 ClawBox→「云端助手」（副文案+云备份）；页内页签 真机接入→「ClawBox」（页题同步云端助手）；qq/wx 接入页导航文案同步；云端助手页 Access Token 下新增「打开 Supabase 令牌页」按钮（window.open supabase.com/dashboard/account/tokens）
+- 【云备份系统】机主规格逐条：①数据结构——backup-setup op（Management API SQL 幂等）：backups 表（记录：kind/size/storage_path/device/app_version/sections）+ avatar_bucket/image_bucket 两私有桶 + messages 表 + realtime 发布；②备份内容——cloud-backup.ts IndexedDB 全库 dump（chat-sessions/chat-messages/contacts/kv/settings/notes/events/reminders/call-logs/voicemails/alarms/cities/albums/visionDecisions，Blob 值上传两桶后 JSON 留 __coveBlob 引用，恢复取回重建；enc:v1 密文与 apiConfig/wx-cloud-state 系密钥不入备份；照片/录音/音乐/铃声四大二进制仓不入）；③设置 UI——云端助手页「云备份与恢复」区块（backup-section.tsx）：立即手动备份（首次自动幂等初始化）/从云端恢复（AlertDialog 二次确认防误触）/自动备份开关+每天每周频率/备份记录列表单条删除；④代理 op 全家（save/blob/list/download/delete，密钥透传不留存，Storage 头型两试同既有口径）
+- 【自动备份触发】机主规格「setInterval 或监听进入后台（visibilitychange）」双通道：startAutoBackupWatcher 挂 PhoneShell loaded（hidden 时 + 30 分钟兜底轮询）→ 超期（24h/7d 减 10 分钟提前量）静默 runBackup('auto')，失败只进 console
+- 【离线推送】①生产端 sources.ts v26（CLOUD_RUNTIME_VER 25→26）：pushOfflineNotify+pushRowId（确定性 id）——微信 handleWxMsg + QQ handleQqEvent（认领门后）双写入，ignore-duplicates 头防网关/云端双跑重插；②消费端 cloud-notify.ts：ensureCloudNotify（PhoneShell loaded 动态 import，@supabase/supabase-js 动态加载）——supabase.channel() 订阅 messages INSERT：前台静默（走既有气泡渲染）、后台/息屏 showSystemNotification（APK 原生通知栏+浏览器 SW 双通道，点击直达聊天 target）；③网关 bun --hot 已热载新 sources；已知边界：网关中继模式（SUPA_KEY 空）网关侧不写、云端函数 cron 开时照写
+- 【发版 v2.4.25/89】build.gradle/MainActivity/app-version 三处同步 + 发布说明三条；APK 7.8MB 重打部署（aapt 实测 89/2.4.25；splash VLM 确认 icon-3 字标）
+- 【排查插曲】cloud.tsx「const anualKeyOpen...」疑似语法损坏实为 Bash 工具输出层把 "[m" 当 ANSI 转义序列吞掉（od -c 验证源码完好、tsc/bun build 双解析通过）——后续读代码遇到 [m 开头片段需用 od/python 验证
+
+验证:
+- tsc 我的文件 0 errors（全量基线 74 行均为未触碰文件历史错：scripts bun 类型/chat.tsx stickerId/couple-space BOARD_BGS 等）；lint 0 errors（12 条历史 warning 不变）
+- agent-browser 全链：解锁→设置（云端助手入口新名+副文案 ✓；开屏动画与 App 图标同卡片相邻 ✓）→云端助手页（两页签 云端助手/ClawBox ✓；Supabase 令牌页按钮 ✓；云备份与恢复区块渲染+未部署引导态 ✓）→App 图标弹窗（五变体·情书字标默认选中 ✓；底部说明已删 ✓）→语音会话（native 模拟 bleed+top=0+黑底铺满 ✓；主屏白字缺口修复后 开=白字/关=黑字 ✓；VLM「无白条高对比」✓）
+- cloud-deploy 备份 API 契约实测：无 token→missing_token；假 token→上游 401 透传；download 无权限→明确文案
+- dev server 200；console 零 error；app-version API 2.4.25/89
+
+Stage Summary:
+- 十项全闭环 + 发版 v2.4.25（versionCode 89）APK 7.8MB 部署 public/Cove.apk（splash=情书字标机主原图）
+- 机主需覆盖安装 v89：换图标即刻生效（v86 卡死/误报全解）+ 开屏闪屏=情书字标 + 状态栏双条消除
+- 云端架构升级：用户自有 Supabase 上新增 backups/messages 两表 + avatar/image 两桶——云备份（全库 dump+Blob 引用化）与离线推送（确定性 id 写入+Realtime 订阅+后台系统横幅）双系统同库共生，密钥全部本机密文留存服务器零留存
+- 沉浸式第三缺口方法论：屏幕级基调栈原「仅 App 前台」的设计在「全屏浮层出现在主屏」场景失效——基调优先级重构为全屏层通用
