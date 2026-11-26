@@ -39,7 +39,7 @@ function SignalBars() {
 const IOS_BAT_H = 14.5; // 本体高
 const IOS_BAT_BODY_W = 28; // 本体宽
 const IOS_BAT_RADIUS = 3; // 边框圆角（第三十六轮：5.2 → 3——「内部电量太圆了」；填充不再被裁腰）
-const IOS_BAT_FILL_RADIUS = 2.2; // 填充圆角（第三十七轮：0 → 2.2——机主「内部圆角圆一点点」，柔和小圆不过分）
+const IOS_BAT_FILL_RADIUS = 3.2; // 填充圆角（第三十八轮：2.2 → 3.2——机主再要「圆一点点」，仍保上下全高不裁腰）
 const IOS_BAT_STROKE = 1; // 描边粗细（灰段/胶囊色段同粗）
 const IOS_BAT_INNER_W = 27; // 描边内缘宽（28 - 0.5×2 描边位）
 const IOS_BAT_INNER_H = 13.5; // 描边内缘高
@@ -137,11 +137,10 @@ export function BatteryIcon({ level, charging, low, mode, light = false }: Batte
             stroke={gray}
             strokeWidth={IOS_BAT_STROKE}
           />
-          {/* 胶囊色层（clip 到电量宽度）：全高实心填充（第三十七轮：圆角 2.2——机主要求
-              「内部圆角圆一点点」：方角太硬、旧版大圆角又「太圆」，取柔和小圆；宽度=clipW
-              精确到电比、左右两端同圆角）+ 同色描边——边框跟随实心胶囊 */}
+          {/* 胶囊色层（clip 到电量宽度）：全高实心填充（第三十八轮：圆角 3.2——机主再要
+              「圆一点点」，柔和中圆；宽度=clipW 精确到电比、左右两端同圆角）+ 同色描边——边框跟随实心胶囊 */}
           <g clipPath={`url(#${clipId})`}>
-            {/* 实心填充：全高贴描边内缘（整体大小一样），小圆角 2.2（柔和不裁腰） */}
+            {/* 实心填充：全高贴描边内缘（整体大小一样），中圆角 3.2（柔和不裁腰） */}
             <rect
               x={IOS_BAT_STROKE / 2}
               y={IOS_BAT_STROKE / 2}
