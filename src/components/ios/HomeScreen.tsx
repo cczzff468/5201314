@@ -340,7 +340,10 @@ const DOTS_LINGER_MS = 1100;
 /** 页网格行间距（gap-y-[16px]，与渲染处保持一致；行距拟合用） */
 const GRID_GAP_Y = 16;
 
-/** 当前布局版本：v11 = D1 桌面小组件：第 1 页天气旁新增「快捷联系人」小组件（TA 头像+
+/** 当前布局版本：v12 = 拾光小屋独立第四页（第三十九轮：机主「把拾光小屋放在第四页」）——
+ *  v11→v12 走【定向迁移】（只挪 cottage 到第 4 页首位，其余排布/文件夹/Dock 原样保留——
+ *  第三十八轮已定调「图标绝不自动重排」，v12 不做整版重置）；v10 及更早仍整版重置；
+ *  v11 = D1 桌面小组件：第 1 页天气旁新增「快捷联系人」小组件（TA 头像+
  *  发消息，点击直达信息会话）、日历小组件重做为周几+大字日期+最近一条日程（2×2）并
  *  默认上屏第 2 页气泡旁（此前默认收起）——存量旧版本布局直接重置为新默认（保留 hidden
  *  删除记录：删过日历小组件的老用户不会复活）；
@@ -349,7 +352,7 @@ const GRID_GAP_Y = 16;
  *  v9 = widgets-7 的四个新小组件（iCity/日历/表盘时钟/拍立得）改为默认收起不上屏
  *  （用户要求：新添加的小组件不显示；需要时从「+」画廊或主题 App「小组件」界面一键找回）；
  *  世界书 App 纳入第 3 页默认排布；日记/一起听/对话气泡/黑胶/iCity/表盘时钟/拍立得均默认收起 */
-const LAYOUT_VERSION = 11;
+const LAYOUT_VERSION = 12;
 /** 第 1 页 App（用户指定顺序；时钟/天气小组件在其上方；App Store 已移至第 3 页——仍是已移除 App 的唯一恢复入口） */
 const PAGE1_APP_IDS: AppId[] = ['weather', 'themes', 'browser', 'notes', 'camera', 'photos', 'files', 'calculator'];
 /** 第 2 页 App（用户指定顺序；信息卡片/气泡小组件在其上方；音乐/微信移至第 3 页） */
@@ -358,8 +361,10 @@ const PAGE2_APP_IDS: AppId[] = ['reminders', 'recorder', 'calendar', 'clock'];
  *  世界书自 v9 起纳入页尾——否则 v9 重置路径提前 return 不会走 App 补位逻辑，世界书会从主屏消失；
  *  美团自 v10 起纳入页尾——存量布局走 sanitize 的「缺失 App 补位」自动上屏；
  *  情侣空间随后纳入页尾（不升版：存量布局同样走「缺失 App 补位」自动上屏））；
- *  拾光小屋（原「情侣小家」独立 App）纳入页尾（不升版：存量布局自动补位上屏） */
-const PAGE3_APP_IDS: AppId[] = ['music', 'wechat', 'appstore', 'qq', 'memory', 'worldbook', 'meituan', 'couple', 'cottage', 'forum', 'reading'];
+ *  拾光小屋自 v12 起迁往第 4 页独立成页（机主指定「把拾光小屋放在第四页」） */
+const PAGE3_APP_IDS: AppId[] = ['music', 'wechat', 'appstore', 'qq', 'memory', 'worldbook', 'meituan', 'couple', 'forum', 'reading'];
+/** 第 4 页 App（v12：拾光小屋独立成页——机主指定；后续新增 App 的默认补位仍从末页往后找空间） */
+const PAGE4_APP_IDS: AppId[] = ['cottage'];
 /** 其余小组件（默认收起不显示：写入 hidden，需要时从「+」画廊/主题小组件页找回；
  *  网易云小组件自 v6 起默认上屏第 3 页，不再收起；
  *  v9 起 widgets-7 的四个新小组件 iCity/表盘时钟/拍立得也默认收起——用户要求新添加的小组件不显示；
@@ -387,6 +392,7 @@ function defaultLayout(): HomeLayout {
         { kind: 'widget', widget: 'netease' },
         ...PAGE3_APP_IDS.map((id) => ({ kind: 'app' as const, id })),
       ],
+      PAGE4_APP_IDS.map((id) => ({ kind: 'app' as const, id })),
     ],
     dock: DOCK_APPS.map((a) => a.id),
     hidden: DEFAULT_HIDDEN_WIDGETS.map(widgetKey),
@@ -425,7 +431,8 @@ function pageHasRoom(page: Tile[], extra: Tile[] = [], insertingWidget = false):
 /**
  * 校验/修复持久化布局：
  * - 兼容旧单页 {grid}：迁移为第 1 页；
- * - v6 起布局重排：旧版本直接重置为新默认（保留 hidden 删除记录）；
+ * - v11→v12：定向迁移——拾光小屋挪到第 4 页首位（其余排布原样保留，不整版重置）；
+ * - v10 及更早：直接重置为新默认（保留 hidden 删除记录）；
  * - 小组件全布局唯一、App 去重、Dock ≤4、缺失 App 按容量补到末尾有空间的页（hidden 的除外）。
  */
 function sanitizeLayout(raw: unknown): HomeLayout {
@@ -445,11 +452,41 @@ function sanitizeLayout(raw: unknown): HomeLayout {
     }
   }
 
-  // 布局版本升级（v6/v7 重排等）：旧版本布局直接重置为新默认（App 全部按用户指定的新排布落位）。
-  // hidden 合并「默认收起的第三/四页其余小组件」与存量删除记录，并从默认页里滤掉 hidden 项
-  // （否则被删过的 App/小组件会随默认页短暂重现，直到下一次 sanitize 才被剔除）；
-  // 网易云旧收起记录放行——v5 及更早它是「默认收起」而非「用户删除」，v6 要上屏第 3 页
-  if ((typeof r.v === 'number' ? r.v : 1) < LAYOUT_VERSION) {
+  // 布局版本升级：v11→v12 走【定向迁移】——只把拾光小屋挪到第 4 页首位，
+  // 其余排布/文件夹/Dock/hidden 全部原样保留（第三十八轮已定调「图标绝不自动重排」，
+  // v12 只响应机主的单点指令「把拾光小屋放在第四页」，不做整版重置）；
+  // v10 及更早仍整版重置为新默认。hidden 合并「默认收起的第三/四页其余小组件」与存量
+  // 删除记录，并从默认页里滤掉 hidden 项（否则被删过的 App/小组件会随默认页短暂重现，
+  // 直到下一次 sanitize 才被剔除）；网易云旧收起记录放行——v5 及更早它是「默认收起」
+  // 而非「用户删除」，v6 要上屏第 3 页
+  const layoutVer = typeof r.v === 'number' ? r.v : 1;
+  if (layoutVer === 11 && Array.isArray(r.pages)) {
+    // v11→v12：cottage 从任意页/Dock/文件夹/hidden 里摘出，放到第 4 页首位
+    //（页数不足 4 新建空页补齐；hidden 里的 cottage 同步放出——机主要它出现在第四页）
+    hidden.delete('cottage');
+    const migratedPages = (r.pages as unknown[]).map((p) =>
+      Array.isArray(p)
+        ? p.filter((t) => {
+            const o = t as { kind?: unknown; id?: unknown } | null;
+            return !(o && typeof o === 'object' && o.kind === 'app' && o.id === 'cottage');
+          })
+        : [],
+    );
+    while (migratedPages.length < 4) migratedPages.push([]);
+    migratedPages[3].unshift({ kind: 'app', id: 'cottage' });
+    r.pages = migratedPages;
+    if (Array.isArray(r.dock)) r.dock = (r.dock as unknown[]).filter((id) => id !== 'cottage');
+    if (Array.isArray(r.folders)) {
+      r.folders = (r.folders as unknown[]).map((f) => {
+        if (!f || typeof f !== 'object') return f;
+        const fo = f as { apps?: unknown };
+        if (Array.isArray(fo.apps)) fo.apps = fo.apps.filter((a) => a !== 'cottage');
+        return f;
+      });
+    }
+    // 版本号对齐后续通用解析（r 已就地迁移，走下方正常校验路径，返回时带 v=12）
+    r.v = LAYOUT_VERSION;
+  } else if (layoutVer < LAYOUT_VERSION) {
     const merged = new Set([...def.hidden, ...hidden]);
     merged.delete(widgetKey('netease'));
     const pages = def.pages.map((p) =>
