@@ -25,9 +25,11 @@
  */
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Check } from 'lucide-react';
+import { Check, Download } from 'lucide-react';
 import { useSettings, type AppIconId } from '@/lib/ios/store';
 import { getNativeIconBridge, getNativeCurrentIcon } from '@/lib/ios/native-shell';
+import { readShellInfo } from '@/lib/ios/shell-info';
+import { useAppUpdate } from '@/lib/ios/app-update';
 
 /** 五变体清单（名称与描述：设置网格 + 弹窗 + 设置主页入口副标题共用；
  *  第四十一轮：3 号换机主原图设为默认 + 新增 5 号元气气泡） */
@@ -98,7 +100,7 @@ export function AppIconGrid({
   const switchingRef = useRef<AppIconId | null>(null);
   const [tip, setTip] = useState(false);
   /** 切换失败提示（第四十一轮：旧壳不支持/原生异常/未退看门狗） */
-  const [failTip, setFailTip] = useState<'bad_alias' | 'error' | 'watchdog' | null>(null);
+  const [failTip, setFailTip] = useState<'bad_alias' | 'error' | 'watchdog' | 'legacy' | null>(null);
   // APK 端挂载对齐只做一次（用 ref 防电流速器重渲染期间反复触发）
   const aligned = useRef(false);
 
@@ -122,9 +124,13 @@ export function AppIconGrid({
     if (nat) {
       setSwitching(id);
       switchingRef.current = id;
-      // 【第四十一轮卡死根治】切换失败（旧壳不认识新别名/原生异常/App 未退）时
-      // 撤提示层 + 对齐回原生当前图标 + 出可操作提示——绝不再永远卡在提示层。
-      const recover = (reason: 'bad_alias' | 'error' | 'watchdog') => {
+      // 【第四十二轮·机主实况】旧壳（v2.4.23-）switchAppIcon 返 void 且不认识新图标号时
+      // 静默无动作——第四十一轮的立即恢复会误报「失败」（即使切换其实会成功）。本轮分层：
+      // ① v2.4.24+ 壳：状态串回传（'ok' 受理/'bad_alias' 不支持）——非 'ok' 立即恢复；
+      // ② 旧壳（无状态回传）：无法即时判定成败——用 2.8s 看门狗：支持的图标切换会在
+      //    ~1.5s 内退回桌面（无假警报）；不支持的图标静默无动作 → 2.8s 后恢复 + 引导更新；
+      // ③ 恢复时对齐回原生当前图标 + 出可操作提示（含「立即更新」按钮直拉更新弹窗）。
+      const recover = (reason: 'bad_alias' | 'error' | 'watchdog' | 'legacy') => {
         if (switchingRef.current !== id) return; // 已恢复/已切换别的
         switchingRef.current = null;
         setSwitching(null);
@@ -132,8 +138,11 @@ export function AppIconGrid({
         const nativeNow = getNativeCurrentIcon();
         if (nativeNow && nativeNow !== id) setAppIcon(nativeNow);
         setFailTip(reason);
-        window.setTimeout(() => setFailTip(null), 5200);
+        window.setTimeout(() => setFailTip(null), 7000);
       };
+      // 壳代际：v2.4.24+ 有状态串；更早的壳只能靠看门狗判「没退出去」
+      const shellVer = readShellInfo()?.versionCode ?? 0;
+      const legacyShell = shellVer < 88;
       window.setTimeout(() => {
         let status: string | undefined;
         try {
@@ -141,18 +150,22 @@ export function AppIconGrid({
         } catch {
           status = undefined;
         }
+        if (legacyShell) {
+          // 旧壳无状态回传：等待看门狗（成功切换会在 ~1.5s 退桌面；没退 = 壳不认识此图标）
+          window.setTimeout(() => recover('legacy'), 2800);
+          return;
+        }
         if (status !== 'ok') {
-          // 旧壳（无返回值/不认识该别名）或原生同步异常——立即恢复
+          // v2.4.24+ 壳明确拒绝（bad_alias）或原生同步异常——立即恢复
           recover(status === 'bad_alias' ? 'bad_alias' : 'error');
           return;
         }
         // 受理 'ok'：App 应在 ~1.2s 内退回桌面；4s 看门狗兜底（原生异步异常等）
-        switchingRef.current = id;
         window.setTimeout(() => recover('watchdog'), 4000);
       }, 550);
       return;
     }
-    // ③ 浏览器/PWA：即时反馈轻提示（弹窗脚注已有完整说明）
+    // ③ 浏览器/PWA：即时反馈轻提示
     setTip(true);
     window.setTimeout(() => setTip(false), 2400);
     onAfterPick?.();
@@ -223,19 +236,36 @@ export function AppIconGrid({
           已更换 ✓ 桌面图标自动跟随（Chrome/Edge 装的 PWA 下次打开时生效，无需重新下载）
         </p>
       )}
-      {/* APK 原生切换失败提示（第四十一轮：旧壳不支持该图标/切换异常/未退出——不再永远卡提示层） */}
+      {/* APK 原生切换失败提示（第四十二轮：旧壳不支持该图标/未退出——恢复 + 一键拉起更新弹窗） */}
       {failTip && (
-        <p
+        <div
           data-testid="app-icon-fail-tip"
-          className="px-6 pb-1.5 text-center text-[10.5px] leading-relaxed text-[#FF453A]"
+          className="flex flex-col items-center gap-1.5 px-6 pb-2 pt-1 text-center"
           style={{ animation: 'cove-icon-fade 260ms ease both' }}
         >
-          {failTip === 'bad_alias'
-            ? '当前 App 版本暂不支持这款桌面图标——请到「设置 › APP 更新」安装最新版后重试'
-            : failTip === 'watchdog'
-              ? '桌面图标更换未完成，已为您恢复——可稍后重试或更新 App'
-              : '桌面图标更换失败，已为您恢复——可稍后重试'}
-        </p>
+          <p className="text-[10.5px] leading-relaxed text-[#FF453A]">
+            {failTip === 'bad_alias' || failTip === 'legacy'
+              ? '当前 App 版本暂不支持更换这款桌面图标（应用内图标已切换）——安装最新版 App 后即可同步桌面图标'
+              : failTip === 'watchdog'
+                ? '桌面图标更换未完成，已为您恢复——可稍后重试或更新 App'
+                : '桌面图标更换失败，已为您恢复——可稍后重试'}
+          </p>
+          {(failTip === 'bad_alias' || failTip === 'legacy' || failTip === 'watchdog') && (
+            <button
+              type="button"
+              data-testid="app-icon-fail-update-btn"
+              onClick={() => {
+                setFailTip(null);
+                // 直拉全局更新弹窗（AppUpdateDialog：检查→发现新版→立即更新→APP 内下载安装）
+                void useAppUpdate.getState().check(true);
+              }}
+              className="flex items-center gap-1 rounded-full bg-[#34C759]/12 px-3.5 py-1.5 text-[11.5px] font-medium text-[#248A3D] transition active:scale-95 dark:bg-[#30D158]/15 dark:text-[#30D158]"
+            >
+              <Download className="h-3.5 w-3.5" aria-hidden="true" />
+              立即更新 App（覆盖安装 · 数据不丢）
+            </button>
+          )}
+        </div>
       )}
       {/* APK 原生切换全屏提示层（HOME + System.exit 前的可见画面） */}
       {switching && <SwitchingOverlay next={switching} />}

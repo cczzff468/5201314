@@ -364,7 +364,7 @@ export function QqConnectPage({
           <BannerLine
             tone="warn"
             text="云端未部署：QQ 收发消息已停摆"
-            detail={{ title: '云端未部署会怎样？', paras: ['QQ 收发的配置中心/聊天历史存云端——不部署云端就无法收发。', embedded ? '切到上方「云端助手」页签完成一键部署，部署完自动恢复。' : '路径：设置 → ClawBox（云端助手页签，Supabase 一键部署即可），部署完自动恢复。'] }}
+            detail={{ title: '云端未部署会怎样？', paras: ['QQ 收发的配置中心/聊天历史存云端——不部署云端就无法收发。', embedded ? '切到上方「云端助手」页签完成一键部署，部署完自动恢复。' : '路径：设置 → 云端助手（ClawBox 页签同屏，Supabase 一键部署即可），部署完自动恢复。'] }}
           />
         ) : null}
 
@@ -375,7 +375,7 @@ export function QqConnectPage({
               <BannerLine
                 tone="warn"
                 text="先部署云端助手，才能接入 QQ"
-                detail={{ title: '为什么要先部署云端？', paras: ['QQ 收发消息走云端 Webhook——不部署云端就无法接入。', embedded ? '切到上方「云端助手」页签完成一键部署，再切回来扫码或填凭证。' : '路径：设置 → ClawBox（云端助手页签，Supabase 一键部署即可），部署完回来扫码或填凭证。'] }}
+                detail={{ title: '为什么要先部署云端？', paras: ['QQ 收发消息走云端 Webhook——不部署云端就无法接入。', embedded ? '切到上方「云端助手」页签完成一键部署，再切回来扫码或填凭证。' : '路径：设置 → 云端助手（ClawBox 页签同屏，Supabase 一键部署即可），部署完回来扫码或填凭证。'] }}
               />
             </div>
           ) : (

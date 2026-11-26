@@ -605,7 +605,8 @@ export function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
             剩 ClawBox + 存储重组改组名——不再叫「开发者」） */}
         <div className="mb-2 mt-6 px-8 text-[13px] text-muted-foreground">云端与存储</div>
         <div className="mx-4 divide-y divide-black/[0.05] overflow-hidden rounded-[22px] bg-white/55 shadow-[0_8px_28px_rgba(17,24,39,0.06)] ring-1 ring-white/70 backdrop-blur-2xl dark:divide-white/[0.06] dark:bg-white/[0.06] dark:ring-white/[0.09]">
-          {/* ClawBox（v24）：云端助手 + 真机接入两个页签 */}
+          {/* ClawBox（v24）→ 第四十二轮机主定名：入口行更名「云端助手」（页内两页签 =
+              云端助手 + ClawBox·原真机接入）；含云备份与恢复入口 */}
           <button
             type="button"
             data-testid="settings-cloud-entry"
@@ -614,9 +615,9 @@ export function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
           >
             <RowIcon icon={Box} tone={TONE_ORANGE} />
             <span className="min-w-0 flex-1">
-              <span className="block truncate text-[16px]">ClawBox</span>
+              <span className="block truncate text-[16px]">云端助手</span>
               <span className="mt-0.5 block truncate text-[12px] text-muted-foreground">
-                云端助手 · 真机接入 · 7×24 自动回复
+                云端助手 · ClawBox · 7×24 自动回复 · 云备份
               </span>
             </span>
             <ChevronRight className="h-5 w-5 shrink-0 text-muted-foreground/60" />
@@ -624,11 +625,11 @@ export function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
           <MainRow icon={Database} tone={TONE_GREEN} label="存储" onClick={() => onOpen('storage')} />
         </div>
 
-        {/* 第三十三轮：开屏动画（第三十六轮上移到「App 图标」上面——机主要求；
-            第三十九轮：删星空对话后剩三选一）——
-            行入口预览当前主题微缩场景 + 名称，点开三选一弹窗（星空月夜/雾中远山/雨落成诗），
+        {/* 第三十三轮开屏动画 + 第四十二轮机主要求「开屏动画、App 图标放在一起」：
+            原独立卡片并入下方「App 图标」同卡片（行序：开屏动画 → App 图标 → APP 更新 → 添加到主屏幕）。
+            开屏动画行：入口预览当前主题微缩场景 + 名称，点开三选一弹窗（星空月夜/雾中远山/雨落成诗），
             点选【立马生效】：选完即整屏播放一遍预览 + 本会话下次冷启动/下次打开即播放所选主题 */}
-        <div className="mx-4 mt-4 overflow-hidden rounded-[22px] bg-white/55 shadow-[0_8px_28px_rgba(17,24,39,0.06)] ring-1 ring-white/70 backdrop-blur-2xl dark:bg-white/[0.06] dark:ring-white/[0.09]">
+        <div className="mx-4 mt-4 divide-y divide-black/[0.05] overflow-hidden rounded-[22px] bg-white/55 shadow-[0_8px_28px_rgba(17,24,39,0.06)] ring-1 ring-white/70 backdrop-blur-2xl dark:divide-white/[0.06] dark:bg-white/[0.06] dark:ring-white/[0.09]">
           <button
             type="button"
             aria-haspopup="dialog"
@@ -647,11 +648,7 @@ export function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
             <span className="shrink-0 text-[13px] text-muted-foreground">{splashThemeName(splashTheme)}</span>
             <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground/60" strokeWidth={2.2} />
           </button>
-        </div>
 
-        {/* APP 图标 + APP 更新 + 添加到主屏幕（v1.3：APK 下载入口从感知设置提升到系统设置；
-            v1.9.22 新增添加到主屏幕；第三十六轮「关于本机」移至设置最底部） */}
-        <div className="mx-4 mt-4 divide-y divide-black/[0.05] overflow-hidden rounded-[22px] bg-white/55 shadow-[0_8px_28px_rgba(17,24,39,0.06)] ring-1 ring-white/70 backdrop-blur-2xl dark:divide-white/[0.06] dark:bg-white/[0.06] dark:ring-white/[0.09]">
           {/* App 图标五选一（第四十一轮：3 号换机主原图设默认 + 新增 5 号元气气泡）——行内预览当前图标 */}
           <button
             type="button"
@@ -781,11 +778,9 @@ function AppIconDialog({
             <p className="mt-0.5 text-[11.5px] text-muted-foreground">Cove · 选一个喜欢的样子</p>
           </div>
           {/* 五款图标网格（共享 AppIconGrid：APK 端原生一键切换 + PWA 自动跟随，
-              选点逻辑与「设置›显示与亮度」外观页同一份） */}
+              选点逻辑与「设置›显示与亮度」外观页同一份）。
+              第四十二轮：底部说明提示删除（机主定夺——切结果由即时反馈/失败提示承担） */}
           <AppIconGrid current={current} size="dialog" onAfterPick={onClose} />
-          <p className="px-6 pb-2 text-center text-[10.5px] leading-relaxed text-muted-foreground">
-            APK 端免重装一键切换（切换后自动退回桌面，旧图标消失新图标上桌面）；浏览器安装的 PWA 桌面图标自动跟随（Chrome/Edge 下次打开时检查更新，无需重新下载）；iOS 主屏图标需重新添加一次
-          </p>
           <button
             type="button"
             onClick={onClose}

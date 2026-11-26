@@ -142,10 +142,7 @@ export function ThemePage({ onBack }: { onBack: () => void }) {
         <div className="overflow-hidden rounded-[22px] bg-white/55 shadow-[0_8px_28px_rgba(17,24,39,0.06)] ring-1 ring-white/70 backdrop-blur-2xl dark:bg-white/[0.06] dark:ring-white/[0.09]">
           <AppIconGrid current={appIcon} size="page" />
         </div>
-        <p className="mt-2.5 px-1 text-[11px] leading-relaxed text-muted-foreground">
-          点选即换：APK 端免重装一键切换（切换后自动退回桌面）；浏览器安装的 PWA
-          桌面图标自动跟随（下次打开时生效，无需重新下载）；iOS 主屏图标需重新添加一次。
-        </p>
+        {/* 第四十二轮：说明提示删除（机主定夺——切结果由即时反馈/失败提示承担） */}
       </div>
 
       <p className="mt-3 px-1 text-[12px] leading-relaxed text-muted-foreground">

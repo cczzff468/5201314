@@ -84,6 +84,7 @@ import {
 import { isSpeaking, isTtsConfigured, speakUserTts, stopSpeaking } from '@/lib/ios/tts-client';
 import { isWebSpeechSupported } from '@/lib/ios/web-speech';
 import { voiceTurn } from '@/lib/ios/agent-chat';
+import { pushStatusBarTone, popStatusBarTone } from '@/lib/ios/status-bar-tone';
 import { assistantGreeting } from '@/lib/ios/assistant-persona';
 import { matchOpenAppIntent, openAppPage } from '@/lib/ios/agent-app-nav';
 import { matchWeatherIntent, runWeatherReport } from '@/lib/ios/agent-weather';
@@ -222,6 +223,17 @@ export default function AgentVoiceBall() {
   const sessionOpenRef = useRef(false);
   useEffect(() => {
     sessionOpenRef.current = sessionOpen;
+  }, [sessionOpen]);
+  // 第四十二轮（机主截图「语音助手唤起界面状态栏那里还是有白色的」双根修）：
+  // ① 白条根因：会话层未出血——inset-0 只到安全区内缩顶（sat-eff），其上露出底下 App 的
+  //    出血条带（浅色 App 采出白/浅色）→ 深色语音会话顶上顶着一条白——改挂 data-bleed
+  //    （渲染处）反向逃逸到物理屏顶，黑底铺满，状态栏浮在黑底上；
+  // ② 黑字压黑底根因：基调探针按「被会话盖住的浅色 App」采样出黑字——会话打开期间
+  //    强制推亮色基调（白字），关闭自动弹回。
+  useEffect(() => {
+    if (!sessionOpen) return;
+    const id = pushStatusBarTone('light');
+    return () => popStatusBarTone(id);
   }, [sessionOpen]);
   const [turns, setTurns] = useState<SessionTurn[]>([]);
   const turnsRef = useRef<SessionTurn[]>([]);
@@ -986,6 +998,7 @@ export default function AgentVoiceBall() {
             role="dialog"
             aria-label="语音助手会话"
             data-testid="agent-voice-session"
+            data-bleed=""
             className="pointer-events-auto absolute inset-0 z-[1] flex flex-col overflow-hidden bg-black/85 backdrop-blur-2xl"
             onPointerDown={bumpFollowup}
           >

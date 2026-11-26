@@ -24,6 +24,7 @@ import {
   Database,
   Eye,
   EyeOff,
+  ExternalLink,
   Loader2,
   MessageCircle,
   RefreshCw,
@@ -793,19 +794,20 @@ export function ClawBoxPage({ onBack }: { onBack: () => void }) {
   //    testid 保留在接入页自身根节点上，E2E 口径不变）——
 
   return (
-    <DetailShell title="ClawBox" onBack={onBack} gray>
+    <DetailShell title="云端助手" onBack={onBack} gray>
       <div className="flex flex-col gap-5">
-        {/* v24 两个页签（毛玻璃胶囊分段控件）：云端助手 / 真机接入——同一界面切换，
-            真机接入不再是单独的界面；active 胶囊内高光白底 + 按下微缩，动效 200ms */}
+        {/* v24 两个页签（毛玻璃胶囊分段控件）——第四十二轮机主定名：云端助手 / ClawBox
+            （原「真机接入」页签更名 ClawBox，页题/入口行从 ClawBox 更名云端助手）。
+            active 胶囊内高光白底 + 按下微缩，动效 200ms */}
         <div
           role="tablist"
-          aria-label="ClawBox 功能页签"
+          aria-label="云端助手功能页签"
           className="flex w-full rounded-full bg-white/50 p-[3px] shadow-[inset_0_1px_0_rgba(255,255,255,0.7),0_4px_16px_rgba(17,24,39,0.05)] ring-1 ring-white/60 backdrop-blur-2xl dark:bg-white/[0.07] dark:ring-white/[0.1]"
         >
           {(
             [
               { id: 'cloud', icon: Cloud, label: '云端助手' },
-              { id: 'device', icon: Smartphone, label: '真机接入' },
+              { id: 'device', icon: Smartphone, label: 'ClawBox' },
             ] as const
           ).map((t) => {
             const active = tab === t.id;
@@ -936,6 +938,16 @@ export function ClawBoxPage({ onBack }: { onBack: () => void }) {
                 <p className="mt-1.5 text-[11px] leading-relaxed text-muted-foreground/80">
                   supabase.com → Account Settings → Access Tokens 生成；只在你自己的浏览器密文保存。
                 </p>
+                {/* 第四十二轮机主需求：一键打开 Supabase 令牌页（生成/复制 Access Token） */}
+                <button
+                  type="button"
+                  data-testid="cloud-open-supabase-tokens-btn"
+                  onClick={() => window.open('https://supabase.com/dashboard/account/tokens', '_blank', 'noopener')}
+                  className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-full border border-black/10 py-2 text-[12.5px] font-medium text-foreground/75 transition-colors active:bg-muted/50 dark:border-white/15"
+                >
+                  <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
+                  打开 Supabase 令牌页（生成 Access Token）
+                </button>
               </div>
 
               {/* 读取项目列表 */}

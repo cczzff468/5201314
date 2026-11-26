@@ -309,7 +309,7 @@ export function WeixinConnectPage({
                   </DialogHeader>
                   <div className="space-y-2 text-[13px] leading-[1.6] text-black/70 dark:text-white/75">
                     <p>部署云端后，TA 才会在真机微信上自动回复。</p>
-                    <p>{embedded ? '切到上方「云端助手」页签完成一键部署（免费）即可。' : '路径：设置 → ClawBox（云端助手页签），一键部署（免费）即可。'}</p>
+                    <p>{embedded ? '切到上方「云端助手」页签完成一键部署（免费）即可。' : '路径：设置 → 云端助手（ClawBox 页签同屏），一键部署（免费）即可。'}</p>
                   </div>
                 </DialogContent>
               </Dialog>
@@ -473,7 +473,7 @@ export function WeixinConnectPage({
                   </DialogHeader>
                   <div className="space-y-2 text-[13px] leading-[1.6] text-black/70 dark:text-white/75">
                     <p>TA 在真机微信上的消息收发由云端 7×24 接管，未部署云端时无法接入。</p>
-                    <p>{embedded ? '在上方「云端助手」页签完成一键部署后，切回本页签选角色、扫码接入。' : '路径：设置 → ClawBox（云端助手页签，Supabase 一键部署即可），部署完回来选角色、扫码接入。'}</p>
+                    <p>{embedded ? '在上方「云端助手」页签完成一键部署后，切回本页签选角色、扫码接入。' : '路径：设置 → 云端助手（ClawBox 页签同屏，Supabase 一键部署即可），部署完回来选角色、扫码接入。'}</p>
                   </div>
                 </DialogContent>
               </Dialog>
