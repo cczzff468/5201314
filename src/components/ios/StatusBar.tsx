@@ -38,7 +38,7 @@ function SignalBars() {
  *    26% 轨道底、充电数字侧小闪电。 */
 const IOS_BAT_H = 14.5; // 本体高
 const IOS_BAT_BODY_W = 28; // 本体宽
-const IOS_BAT_RADIUS = 3; // 边框圆角（第三十六轮：5.2 → 3——「内部电量太圆了」；填充不再被裁腰）
+const IOS_BAT_RADIUS = 4.2; // 边框圆角（第四十一轮：3 → 4.2——机主「内部外面的边框圆角跟随里面的」：外框/轨道/描边全部与内部填充同圆角，角部零错位）
 const IOS_BAT_FILL_RADIUS = 4.2; // 填充圆角（第四十轮：3.2 → 4.2——机主再要「圆一点」，0→2.2→3.2→4.2 四档渐进；13.5px 内腔高下 4.2 仍保上下全高不裁腰、两端圆润接近胶囊)
 const IOS_BAT_STROKE = 1; // 描边粗细（灰段/胶囊色段同粗）
 const IOS_BAT_INNER_W = 27; // 描边内缘宽（28 - 0.5×2 描边位）
