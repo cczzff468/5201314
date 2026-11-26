@@ -420,12 +420,12 @@ function rowsOf(tiles: Tile[]): number {
 }
 
 /** 页内还能否容纳 extra 一批 tile：把「现内容 + extra」整体模拟摆放后校验——
- *  行数 ≤ GRID_ROW_CAP（硬约束：超出即顶进页点/Dock 被裁/屏幕外，页面又不可滚动；
- *  矮视口下由组件实测收敛，见 GRID_ROW_CAP 注释）
+ *  行数 ≤ MAX_PAGE_ROWS（硬约束：超出即顶进页点/Dock 被裁/屏幕外，页面又不可滚动；
+ *  矮视口下由组件实测收敛，见 MAX_PAGE_ROWS 注释）
  *  且格数 ≤ 页容量。extra 会按顺序接在页尾摆放，与各入口的追加语义一致 */
 function pageHasRoom(page: Tile[], extra: Tile[] = [], insertingWidget = false): boolean {
   if (page.length + extra.length > pageCap(page, insertingWidget)) return false;
-  return rowsOf([...page, ...extra]) <= GRID_ROW_CAP;
+  return rowsOf([...page, ...extra]) <= MAX_PAGE_ROWS;
 }
 
 /**
@@ -708,7 +708,7 @@ function sanitizeLayout(raw: unknown): HomeLayout {
   for (let i = 0; i < pages.length; i++) {
     const pg = pages[i];
     const overflow: Tile[] = [];
-    while (rowsOf(pg) > GRID_ROW_CAP && pg.length > 0) {
+    while (rowsOf(pg) > MAX_PAGE_ROWS && pg.length > 0) {
       let cut = -1;
       for (let j = pg.length - 1; j >= 0; j--) {
         if (pg[j].kind !== 'widget') {
@@ -1653,7 +1653,7 @@ export default function HomeScreen() {
   const swipeY = (e: { clientX: number; clientY: number }) => e.clientY;
 
   // ---------------- 横屏检测（第三十八轮：图标不再自适应屏幕） ----------------
-  // 机主定夺：主屏图标固定布局——删「矮视口行数收敛（GRID_ROW_CAP 3~6 行）+
+  // 机主定夺：主屏图标固定布局——删「矮视口行数收敛（MAX_PAGE_ROWS 3~6 行）+
   // 行数收紧后存量超行布局自动重排到后续页」两套自适应逻辑：图标恒按固定 6 行
   // 网格布局，窗口矮（手机分屏/自由小窗）时超出的行只是被裁不可见，绝不自动排序。
   // 横屏检测保留（视口宽>高）：网格限宽居中（翻页手势天然轴向）。
@@ -2355,12 +2355,12 @@ export default function HomeScreen() {
       const ownPads = itemIdx >= 0 ? ownRunLen(layoutRef.current.pages, p, itemIdx) : 0;
       const sim = pageTiles.filter((_, i) => !(itemIdx >= 0 && i >= itemIdx - ownPads && i <= itemIdx));
       const { starts, after, occupied } = flowPositions(sim);
-      // v2.5 修复「想把 App 放到某行下面却怎么也放不进去」：目标行只夹到 GRID_ROW_CAP
+      // v2.5 修复「想把 App 放到某行下面却怎么也放不进去」：目标行只夹到 MAX_PAGE_ROWS
       // （矮视口实测收敛，默认 6）之内——内容下方的空白行允许直接放入（用户要求把
       // 备忘录放到音乐下面：旧版夹到 flow 末行 end.r，末行之下的空行永远落不进去，
       // 反而挤进末行把尾巴图标顶到下一行，看起来就是「放不了、一直往下跑」）。
       // 可视边界由行数上限兜底（主屏不可滚动；矮视口收敛后 cap 行以下仍在屏幕外，依旧进不去）
-      const targetRow = Math.min(gridRow, GRID_ROW_CAP - 1);
+      const targetRow = Math.min(gridRow, MAX_PAGE_ROWS - 1);
       // 插入点：第一个 flow 起点 ≥ 目标格（行主序）的 tile 之前；没有则页尾
       let idx = sim.length;
       for (let i = 0; i < starts.length; i++) {
@@ -3490,7 +3490,7 @@ export default function HomeScreen() {
           横向：视口占满全屏宽，翻页裁切发生在屏幕真实边缘（水平内边距由每页 px-5 承担，
           否则滑动时内容在离边缘 20px 处被硬裁、两侧露壁纸条——D2 修复）；纵向：页面
           overflow-hidden 永不上下滚动（用户要求：APP 放到下面时主屏会跟着竖向滑动，已废）——
-          页内容按行封顶（GRID_ROW_CAP 恒 = 6 行，第三十八轮起不再随视口收敛：图标不适应屏幕、
+          页内容按行封顶（MAX_PAGE_ROWS 恒 = 6 行，第三十八轮起不再随视口收敛：图标不适应屏幕、
           不自动排序——矮视口超出的行被裁切但保持原位）；页点与 Dock（relative z-10）悬浮在页面之上。
           pan-none（第七轮根治）：overflow:hidden 仍是滚动容器——4 页宽的轨道会被
           触摸惯性/对角滑动横向滚出，主屏两侧露出「刀切」空白；overflow:clip 彻底滚不动 */}
