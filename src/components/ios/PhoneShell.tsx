@@ -10,7 +10,7 @@ import { useIncomingCall } from '@/lib/ios/incoming-call';
 import { GLOBAL_CSS_SCOPE, scopeCss } from '@/lib/ios/custom-css';
 import { isVoiceHoldActive } from '@/lib/ios/voice-hold-flag';
 import { useLightForeground } from '@/lib/ios/foreground';
-import { setNativeSystemBarStyles, setNativeStatusBarMode, hasNativeStatusBarMode, isNativeShell } from '@/lib/ios/native-shell';
+import { setNativeSystemBarStyles, setNativeStatusBarMode } from '@/lib/ios/native-shell';
 import { ensureAccountOwnerContacts, migrateFromServer } from '@/lib/ios/contacts-store';
 import { startOwnerProfileSync } from '@/lib/ios/owner-profile-sync';
 import { ensureAppFontApplied } from '@/lib/ios/fonts';
@@ -155,23 +155,14 @@ export default function PhoneShell() {
   const topLight = useLightForeground('top');
   // 状态栏显示开关（Task 36）：设置页可关闭顶部时间/信号/电量状态栏
   const statusBarVisible = useSettings((s) => s.statusBarVisible);
-  // 状态栏外观模式（第三十九轮）：transparent=透明融合（推荐）/ hidden=完全隐藏；
-  // 渲染口径：浏览器端 transparent=自绘状态栏常驻（本就透明浮层）；hidden=不渲染、
-  // 顶边下拉瞬时呼出（sbReveal）；v2.4.22+ APK 透明模式下自绘状态栏让位给物理系统条
-  //（CSS display:none 防双条，此处也不再渲染省 1s 时钟 interval）；旧 APK 壳透明模式
-  // 退化为自绘常驻（无模式桥，物理条恒隐藏）
-  const statusBarMode = useSettings((s) => s.statusBarMode);
-  //（loaded 已在上方声明——store 装载完成标记，此处复用不重复声明）
-  // 隐藏模式·顶边下拉瞬时呼出的自绘状态栏（2.8s 自动收回，IMMERSIVE_STICKY 同语义）
-  const [sbReveal, setSbReveal] = useState(false);
-  /** v2.4.22+ 新壳判定（模块级一次性探测：透明模式下自绘状态栏是否让位给物理条） */
-  const sbNativeMode = useRef(hasNativeStatusBarMode()).current;
+  // 状态栏外观模式（第四十轮收敛）：机主定调「不管透明融合/完全隐藏都让网页里的
+  // 状态栏显示出来」——两模式下自绘状态栏一律常驻渲染（透明浮层融入顶部，保留
+  // 时间/电量/WiFi）；模式差异仅剩原生层语义（v2.4.23 起两模式物理系统条均隐藏，
+  // 自绘状态栏是唯一状态栏，不再有让位/呼出分支）；旧 APK 壳（< v2.4.9）物理条
+  // 仍在显示，由 globals.css 旧壳规则继续隐藏自绘状态栏防双条
   // 沉浸式全屏（阅读器打开期间）：状态栏与静态灵动岛一起隐藏，退出阅读器自动恢复
   const immersive = useImmersive();
-  const showStatusBar =
-    statusBarVisible &&
-    !immersive &&
-    (statusBarMode === 'transparent' ? !sbNativeMode : sbReveal);
+  const showStatusBar = statusBarVisible && !immersive;
   // 灵动岛常驻开关（用户需求）：关闭后隐藏顶部黑色胶囊基础灵动岛，
   // 只显示 APP 灵动岛（音乐岛大/小窗、美团/淘宝配送岛、灵动岛通知卡、来电胶囊等均不受影响）
   const islandPersistent = useSettings((s) => s.islandPersistent);
@@ -258,50 +249,8 @@ export default function PhoneShell() {
     if (loaded) setNativeStatusBarMode(statusBarMode);
   }, [statusBarMode, loaded]);
 
-  // 第三十九轮隐藏模式·顶边下拉瞬时呼出自绘状态栏（仅浏览器/PWA——APK 由系统
-  // IMMERSIVE_STICKY 顶边滑出物理条承担，网页再画会双条）：按下点在壳顶部边缘带、
-  // 明确下拉 ≥26px 即呼出，2.8s 自动收回（不挤压内容，浮层展示）。
-  // 与通知中心顶部手势共存：同一拉操作两条都响应（iOS 同款——拉出通知面板时
-  // 状态栏也常驻显示）；状态栏 z-70 在通知面板 z-61 之上，浮层叠加无冲突。
-  useEffect(() => {
-    if (statusBarMode !== 'hidden' || isNativeShell()) return;
-    let active = false;
-    let startY = 0;
-    let timer = 0;
-    const onDown = (e: PointerEvent) => {
-      if (e.pointerType === 'mouse' && e.button !== 0) return;
-      const shell = shellRef.current;
-      if (!shell) return;
-      const rect = shell.getBoundingClientRect();
-      if (rect.height <= 0) return;
-      // 壳顶部 20px 边缘带（桌面端 transform scale 后 rect 已是屏幕坐标，按高度比例换算）
-      if (e.clientY < rect.top + (20 * rect.height) / FRAME_H) {
-        active = true;
-        startY = e.clientY;
-      }
-    };
-    const onMove = (e: PointerEvent) => {
-      if (!active) return;
-      if (e.clientY - startY > 26) {
-        active = false;
-        setSbReveal(true);
-        window.clearTimeout(timer);
-        timer = window.setTimeout(() => setSbReveal(false), 2800);
-      }
-    };
-    const onUp = () => {
-      active = false;
-    };
-    window.addEventListener('pointerdown', onDown, { capture: true, passive: true });
-    window.addEventListener('pointermove', onMove, { capture: true, passive: true });
-    window.addEventListener('pointerup', onUp, { capture: true, passive: true });
-    return () => {
-      window.clearTimeout(timer);
-      window.removeEventListener('pointerdown', onDown, { capture: true });
-      window.removeEventListener('pointermove', onMove, { capture: true });
-      window.removeEventListener('pointerup', onUp, { capture: true });
-    };
-  }, [statusBarMode]);
+  // （第四十轮收敛：隐藏模式·顶边下拉呼出与 sbReveal 自动收回整段删除——机主定调
+  //   两模式自绘状态栏一律常驻渲染，状态栏永远在场，无「呼出/收回」语义可言）
 
   // 全局滚动条显隐（Task 40）：滚动时给滚动容器打 data-scrolling=true，停止 ~0.9s 后回 false；
   // 配合 globals.css 的滚动条规则实现「滚动时才显示滚动条」（此前一打开就常驻显丑）。
@@ -772,11 +721,11 @@ export default function PhoneShell() {
         )}
 
         {/* 状态栏 + 灵动岛 + 全局灵动岛通知（通知展开期间灵动岛隐藏，收起后恢复）。
-            状态栏渲染（第三十九轮状态栏外观模式·showStatusBar 汇总）：
-            - transparent：浏览器/PWA 与旧 APK 壳 = 自绘状态栏常驻（透明浮层融入顶部）；
-              v2.4.22+ APK = 让位给常驻显示的物理系统条（不渲染防双条）
-            - hidden：默认不渲染（真全屏沉浸）；浏览器端顶边下拉 sbReveal 瞬时呼出 2.8s
-            开关（Task 36/37）：statusBarVisible=false 时以上全不渲染；灵动岛一并隐藏；
+            状态栏渲染（第四十轮收敛·机主定调「不管透明融合/完全隐藏都让网页里的状态栏
+            显示出来」）：两模式下自绘状态栏一律常驻（透明浮层融入顶部，时间/电量/WiFi
+            永远在场）；v2.4.23+ APK 物理系统条两模式均隐藏（自绘是唯一状态栏）；
+            旧 APK 壳（< v2.4.9）物理条仍显示，由 globals.css 旧壳规则隐藏自绘防双条。
+            开关（Task 36/37）：statusBarVisible=false 时不渲染；灵动岛一并隐藏；
             全局弹窗不受影响——灵动岛通知卡/来电胶囊/闹钟横幅等仍照常从原位弹出。 */}
         {showStatusBar && <StatusBar />}
         {statusBarVisible && !immersive && islandPersistent && !islandCovered && (

@@ -481,11 +481,12 @@ interface SettingsState {
   appFontScale: number;
   /** 顶部状态栏显示开关（Task 36）：false = 隐藏时间/信号/电量状态栏（灵动岛为硬件开孔保留） */
   statusBarVisible: boolean;
-  /** 状态栏外观模式（第三十九轮）：transparent=透明融合（推荐·状态栏背景透明与顶部背景
-   *  融为一体，保留时间/电量/WiFi；v2.4.22+ APK 物理系统条常驻透明显示，自绘状态栏让位） /
-   *  hidden=完全隐藏（彻底隐藏状态栏真全屏沉浸；顶边下拉可临时呼出——APK 走系统
-   *  IMMERSIVE_STICKY，浏览器走 PhoneShell 顶边手势）；持久化 settings.statusBarMode
-   *  + localStorage 首帧镜像 + 原生 SharedPreferences 三写，重启自动应用） */
+  /** 状态栏外观模式（第三十九轮新增 → 第四十轮收敛：机主定调「不管透明融合/完全隐藏
+   *  都让网页里的状态栏显示出来」）：transparent=透明融合（推荐）/ hidden=完全隐藏——
+   *  两模式下自绘状态栏均常驻渲染（透明浮层融入顶部，时间/电量/WiFi 永远在场）；
+   *  v2.4.23+ APK 物理系统条两模式均隐藏（自绘是唯一状态栏，模式差异仅原生历史语义）；
+   *  持久化 settings.statusBarMode + localStorage 首帧镜像 + 原生 SharedPreferences 三写，
+   *  重启自动应用 */
   statusBarMode: StatusBarMode;
   /** 切换状态栏外观模式（即时持久化 + localStorage 镜像 + 原生桥切换物理系统条） */
   setStatusBarMode: (mode: StatusBarMode) => void;
@@ -1203,8 +1204,8 @@ export const useSettings = create<SettingsState>((set, get) => ({
     set({ statusBarMode: mode });
     // ① IndexedDB 持久化（本地数据库：重启后 load 读回自动应用）
     void localDB.put('settings', { key: 'statusBarMode', value: mode });
-    // ② localStorage 镜像（同步源）：layout 内联脚本冷启动首帧即读到——防水合前自绘
-    // 状态栏闪一下（hidden 模式 CSS 首帧即 display:none）
+    // ② localStorage 镜像（同步源）：layout 内联脚本冷启动首帧即读到（第四十轮收敛后
+    // 无 CSS 隐藏分支消费，仅作标记与调试，仍双写保持一致性）
     try {
       if (typeof window !== 'undefined') window.localStorage.setItem('cove-statusbar-mode', mode);
     } catch {

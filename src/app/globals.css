@@ -1754,29 +1754,17 @@ html[data-app-native] body {
 html[data-app-native]:not([data-shell-fullscreen]) .ph-statusbar {
   display: none !important;
 }
-/* ---------------- 第三十九轮 状态栏外观模式（data-sb-mode / data-sb-native） ----------------
-   机主需求「状态栏外观设置」两档沉浸式：
-   - transparent 透明融合（推荐·默认）：状态栏背景透明与顶部背景融为一体，保留时间/电量/WiFi。
-     浏览器/PWA：自绘状态栏常驻（本就是透明浮层，即现状）；
-     v2.4.22+ APK（data-sb-native）：物理系统条常驻透明显示，自绘状态栏让位隐藏防双条，
-     内容按全额安全区避让（--app-sat-eff 回全额，等效用户规格「padding-top: safe-area-inset-top」）；
-     旧 APK 壳：无模式桥——物理条恒隐藏，透明模式退化为自绘状态栏常驻（v2.4.9 起现状）。
-   - hidden 完全隐藏：彻底隐藏状态栏真全屏沉浸。自绘状态栏 display:none（CSS 首帧生效，
-     localStorage 首帧镜像由 layout 内联脚本预置防闪）；APK 物理条由原生三通道隐藏，
-     顶边下拉由系统 IMMERSIVE_STICKY 瞬时呼出；浏览器端由 PhoneShell 顶边下拉手势瞬时呼出。
-   data-sb-mode 由 layout 内联脚本（localStorage 镜像）与 PhoneShell（store 权威值）双写。 */
-html[data-sb-mode='hidden'] .ph-statusbar {
-  display: none !important;
-}
-/* v2.4.22+ APK 透明融合：物理系统条在场——自绘状态栏让位（防双状态栏） */
-html[data-app-native][data-sb-native][data-sb-mode='transparent'] .ph-statusbar {
-  display: none !important;
-}
-/* v2.4.22+ APK 透明融合：顶部有效内缩量回全额（系统条∪挖孔，内容避让可见状态栏——
-   复用旧壳口径；原生 insets 监听按模式上报 max(sys,cut)）；hidden 维持 28% 挖孔口径 */
-html[data-app-native][data-shell-fullscreen][data-sb-native][data-sb-mode='transparent'] {
-  --app-sat-eff: var(--app-sat, 0px);
-}
+/* ---------------- 第三十九轮状态栏外观模式 → 第四十轮收敛 ----------------
+   机主第四十轮定调「不管透明融合/完全隐藏都让网页里面的状态栏显示出来」：
+   - 自绘状态栏两模式一律常驻渲染（透明浮层融入顶部，时间/电量/WiFi 永远在场）——
+     本节不再有任何 display:none 分支（原 hidden 隐藏规则、v2.4.22+ APK 透明模式
+     让位规则整段删除）；
+   - v2.4.23+ APK（data-sb-native）：两模式物理系统条均原生隐藏（自绘是唯一状态栏，
+     防双条），顶部有效内缩恒为挖孔 28% 口径（原「透明模式回全额安全区」规则删除）；
+   - 旧 APK 壳（< v2.4.9，无模式桥）：物理条恒显示，沿用上方旧壳规则隐藏自绘防双条。
+   data-sb-mode 由 layout 内联脚本（localStorage 镜像）与 PhoneShell（store 权威值）双写；
+   模式值仍持久化（IndexedDB + localStorage + 原生 SharedPreferences），UI 选择保留，
+   原生层 v2.4.23 起两模式等效（均隐藏物理条，见 MainActivity 第四十轮注释）。 */
 /* ② 安全区「出血」层：需要铺满物理屏的背景/遮罩元素（锁屏根、多任务根、App 窗口根、
    文件夹毛玻璃底、熄屏黑幕等）反向逃出内容内缩容器，盖住系统状态栏条带——条带上是
    壁纸/App 底色/毛玻璃的延续，与下方内容逐像素连续，无任何分界线。负值展开优先级

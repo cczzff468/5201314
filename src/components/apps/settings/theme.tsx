@@ -43,19 +43,21 @@ export function ThemePage({ onBack }: { onBack: () => void }) {
     { value: 'auto', label: '跟随系统', icon: Monitor },
   ];
 
-  // 状态栏模式两选一（第三十九轮：机主需求「状态栏外观设置」）
+  // 状态栏模式两选一（第三十九轮新增 → 第四十轮收敛：机主定调「不管透明融合/
+  // 完全隐藏都让网页里面的状态栏显示出来」——两模式下自绘状态栏均常驻显示，
+  // 模式差异仅原生层历史语义（v2.4.23 起两模式等效：物理系统条均隐藏、自绘唯一））
   const sbModes: { value: StatusBarMode; label: string; desc: string; icon: LucideIcon; recommended?: boolean }[] = [
     {
       value: 'transparent',
       label: '透明融合',
-      desc: '背景透明融入顶部 · 保留时间电量 WiFi',
+      desc: '状态栏常驻 · 背景透明融入页面顶部',
       icon: Eye,
       recommended: true,
     },
     {
       value: 'hidden',
       label: '完全隐藏',
-      desc: '真全屏沉浸 · 从屏幕顶部下拉可临时呼出',
+      desc: '物理系统条彻底隐藏 · 网页状态栏仍常驻',
       icon: EyeOff,
     },
   ];
@@ -82,10 +84,11 @@ export function ThemePage({ onBack }: { onBack: () => void }) {
         })}
       </GroupCard>
 
-      {/* 状态栏模式（第三十九轮：机主规格两选一）——点选即生效并持久化（本地数据库 +
-          localStorage 首帧镜像 + APK 原生 SharedPreferences 三写，重启自动应用）：
-          透明融合 = 状态栏背景透明与 App 顶部背景融为一体（保留时间/电量/WiFi）；
-          完全隐藏 = 彻底隐藏物理状态栏真全屏（顶边下拉临时呼出）。 */}
+      {/* 状态栏模式（第四十轮收敛：机主定调「不管透明融合/完全隐藏都让网页里的
+          状态栏显示出来」）——两模式下自绘状态栏均常驻渲染（时间/电量/WiFi 永远
+          在场，透明浮层融入顶部）；v2.4.23+ APK 物理系统条两模式均隐藏（自绘是
+          唯一状态栏）。点选即生效并持久化（本地数据库 + localStorage 首帧镜像 +
+          原生 SharedPreferences 三写，重启自动应用）。 */}
       <div className="mt-4">
         <p className="mb-2 px-1 text-[12.5px] font-medium text-black/45 dark:text-white/45">状态栏模式</p>
         <div
@@ -126,8 +129,8 @@ export function ThemePage({ onBack }: { onBack: () => void }) {
           })}
         </div>
         <p className="mt-2.5 px-1 text-[11px] leading-relaxed text-muted-foreground">
-          选择即生效并保存到本地数据库，重启后自动应用；透明模式下内容自动避让状态栏与
-          刘海（safe-area），隐藏模式下内容顶格全屏。APK 端需 v2.4.22+ 壳生效原生系统条切换。
+          选择即生效并保存到本地数据库，重启后自动应用；两种模式下网页状态栏均常驻显示
+          （时间/电量/WiFi），内容按挖孔口径避让顶部安全区。APK 端需 v2.4.23+ 壳生效。
         </p>
       </div>
 
