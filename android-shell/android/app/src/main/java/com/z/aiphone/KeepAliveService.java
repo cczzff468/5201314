@@ -47,6 +47,15 @@ public class KeepAliveService extends Service {
         super.onCreate();
         running = true;
         startForegroundNotify();
+        // v2.4.27（第四十六轮·后台通知根修）：按持久化配置拉起原生后台轮询器
+        // （网页桥 setBgNotifyConfig 已启用过的话）。常驻守护开着 → 进程不被冻结，
+        // BgNotifyPoller 的 10s 轮询全天候在线：App 退后台期间 AI 消息逐条弹
+        // heads-up（机主反馈「点进 APP 通知才出现」的根修配套）。
+        try {
+            BgNotifyPoller.ensureStartedFromPrefs(this);
+        } catch (Throwable ignored) {
+            // 拉起失败不阻塞守护
+        }
     }
 
     @Override

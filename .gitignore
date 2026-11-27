@@ -7,3 +7,4 @@ agent-ctx/
 upload/
 *.log
 .DS_Store
+.data/

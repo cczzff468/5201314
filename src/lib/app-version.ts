@@ -11,9 +11,9 @@
  */
 
 /** 当前最新版本（纯网页热更时与 APK versionName 可短暂不同步，下次重打 APK 对齐） */
-export const APP_VERSION = '2.4.26';
+export const APP_VERSION = '2.4.27';
 /** 版本号数字（与 android-shell versionCode 保持一致；覆盖安装要求只增不减；纯网页热更不动） */
-export const APP_VERSION_CODE = 90;
+export const APP_VERSION_CODE = 91;
 
 export interface AppReleaseNote {
   version: string;
@@ -24,6 +24,18 @@ export interface AppReleaseNote {
 
 /** 版本历史（新→旧；设置 › APP 更新 页渲染，最新一条即当前版本） */
 export const APP_RELEASE_NOTES: AppReleaseNote[] = [
+  {
+    version: '2.4.27',
+    date: '2026-11-27',
+    items: [
+      '【需重装 APK · versionCode 91】系统键盘跟随根修：Manifest 补 windowSoftInputMode=adjustResize + 全局布局兜底测高（可见显示框差值），窗口不缩的 ROM 上把键盘高度并入底部安全区——输入条贴键盘上沿；窗口已缩的自动归零防双重抬升',
+      '【需重装 APK】后台通知根修：退后台后原生壳 10s 轮询服务端接力队列（BgNotifyPoller），AI 每条消息一条 heads-up 悬浮通知立即弹出（不用再点进 APP 才出现）；退后台瞬间自动交接回复生成给服务器，回前台不双回复',
+      '【需重装 APK】悬浮通知只显示最后一个的补修：原生通知下发间隔 1200ms→2400ms，每条横幅都有独立弹出+停留时间（通知栏里仍逐条独立堆叠互不覆盖）',
+      '【需重装 APK】应用锁定界面沉浸式：全屏遮罩加 FLAG_LAYOUT_NO_LIMITS，深色毛玻璃延伸到状态栏与导航栏下方，顶部不再露一条未压暗的桌面',
+      '【网页热更·免重装】阅读 App 图标换机主上传的「山丘阅读」官方图标（蓝底白书本+红书签）；审核 App 图标换机主上传的灰底盾形对勾',
+      '【网页热更·免重装】拉取模型弹窗三连修：补滚基准改用手机壳真实可视区（桌面预览不再裁尾）、锚点行（模型标签/输入行）不再被滚出屏（“上面遮挡模型”）、触屏设备不再自动聚焦搜索框（键盘不弹半屏）；API/识图/生图/语音四页同步',
+    ],
+  },
   {
     version: '2.4.26',
     date: '2026-11-27',

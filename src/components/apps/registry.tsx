@@ -516,7 +516,8 @@ const APP_DEFS: AppDef[] = [
   {
     id: 'reading',
     name: '阅读',
-    image: '/icons/reading.png',
+    // 第四十六轮：机主上传「山丘阅读」官方图标（蓝底白书本+红书签，iOS 圆角已自带）
+    image: '/icons/reading.png?v=46',
     glyph: <BookOpen className={GLYPH_CLASS} strokeWidth={GLYPH_STROKE} />,
     component: ReadingApp,
     // 第四十一轮：阅读背景图/主题渐变直接延伸到状态栏上方（顶层容器背景即页面背景，无缝）
@@ -533,9 +534,11 @@ const APP_DEFS: AppDef[] = [
   },
   {
     // 审核 App（账号系统管理员后台）：仅管理员可见——HomeScreen 渲染层按角色过滤，
-    // 普通用户主屏/Spotlight 完全不出现；无实体图标（磨砂玻璃底座 + 盾形对勾线条）
+    // 普通用户主屏/Spotlight 完全不出现；第四十六轮：机主上传灰底盾形对勾图标（256 PNG）
+    // 替换原磨砂玻璃+线条（磨砂/液态图标样式时仍回退盾形对勾线条）
     id: 'review',
     name: '审核',
+    image: '/icons/review.png?v=46',
     glyph: <ShieldCheck className={GLYPH_CLASS} strokeWidth={GLYPH_STROKE} />,
     component: ReviewApp,
   },

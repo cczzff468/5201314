@@ -56,6 +56,8 @@ import {
   FieldLabel,
   SectionLabel,
   GrayCard,
+  IS_TOUCH_DEVICE,
+  useModelPanelReveal,
 } from './shared';
 
 import { FaceLockSection } from './lock';
@@ -133,27 +135,9 @@ export function ImageGenPage({ onBack }: { onBack: () => void }) {
     const list = (sec?.querySelector('[data-model-panel] .overflow-y-auto') as HTMLElement | null) ?? null;
     setModelListScrollable(!!list && list.scrollHeight - list.clientHeight > 4);
   }, [models, modelPanelOpen, modelQuery]);
-  useEffect(() => {
-    if (!modelPanelOpen) return;
-    const t = window.setTimeout(() => {
-      const sec = modelSectionRef.current;
-      if (!sec) return;
-      const sc = sec.closest('.overflow-y-auto') as HTMLElement | null;
-      const panel = sec.querySelector('[data-model-panel]') as HTMLElement | null;
-      if (!sc || !panel) {
-        sec.scrollIntoView({ block: 'center', behavior: 'smooth' });
-        return;
-      }
-      const pr = panel.getBoundingClientRect();
-      const vh = window.innerHeight;
-      if (pr.bottom > vh - 12) {
-        const over = pr.bottom - (vh - 12);
-        const max = sc.scrollHeight - sc.clientHeight;
-        sc.scrollTop = Math.min(max, sc.scrollTop + over);
-      }
-    }, 120);
-    return () => window.clearTimeout(t);
-  }, [modelPanelOpen, models, modelQuery]);
+  // v2.4.27（第四十六轮）：补滚露出逻辑抽成共享 hook（api/vision/imggen/voice 四页同一实现）——
+  // 容器可见底边基准 + 锚点行不破屏上限 + 键盘/窗口尺寸变化重算（详见 shared.tsx 注释）
+  useModelPanelReveal(modelSectionRef, modelPanelOpen, models, modelQuery);
 
   // 测试生图（真实生成一张：成功展示图片、失败展示错误）
   const [testing, setTesting] = useState(false);
@@ -621,7 +605,8 @@ export function ImageGenPage({ onBack }: { onBack: () => void }) {
                             value={modelQuery}
                             onChange={(e) => setModelQuery(e.target.value)}
                             placeholder="搜索模型，如 image / flux"
-                            autoFocus
+                            // v2.4.27：触屏不 autoFocus——面板一开就拉起软键盘会盖住半个面板
+                            autoFocus={!IS_TOUCH_DEVICE}
                             className="h-10 rounded-[12px] border-black/[0.05] bg-white/70 text-[13px] shadow-sm backdrop-blur-xl dark:border-white/[0.09] dark:bg-white/[0.09]"
                           />
                         </div>

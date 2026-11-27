@@ -72,6 +72,11 @@ public class MainActivity extends BridgeActivity {
      *  消「启动瞬间一次布局下移」）；inset 监听线程写、JS 桥线程读，volatile 保证可见。 */
     private volatile int safeTop = 0, safeRight = 0, safeBottom = 0, safeLeft = 0;
 
+    /** v2.4.27（第四十六轮·键盘跟随根修）：全局布局兜底测得的键盘高度（dp）。
+     *  窗口未缩（edge-to-edge，键盘悬在 WebView 上）= 键盘高（抬 --app-sab）；
+     *  窗口已缩（老系统 adjustResize 生效，Chromium 已重排）归零（防双重抬升）。 */
+    private volatile int kbFallbackDp = 0;
+
     /** v2.4.6 网页桥（addJavascriptInterface 在 super.onCreate 的 WebView 创建后立即挂上,
      *  先于任何页面加载 → 远程页 body 首位内联脚本同步 getSafeArea() 预注入 CSS 变量）。 */
     private final NativeBridge nativeBridge = new NativeBridge();
@@ -81,6 +86,13 @@ public class MainActivity extends BridgeActivity {
     public void onStart() {
         super.onStart();
         appInForeground = true;
+        // v2.4.27（第四十六轮·后台通知根修）：回前台——原生轮询器继续静默记录
+        // （弹通知交还给网页 JS：灵动岛横幅 + localNotify 逐条串行队列），
+        // 防同一批消息原生/网页双弹
+        try {
+            BgNotifyPoller.onAppForegrounded();
+        } catch (Throwable ignored) {
+        }
     }
 
     @Override
@@ -89,6 +101,12 @@ public class MainActivity extends BridgeActivity {
         appInForeground = false;
         // v2.4.12 撤销补藏哨兵：退后台后不再延迟补藏（免得切回来瞬问多余 hide 抢在布局前）
         reHideHandler.removeCallbacks(reHideRunnable);
+        // v2.4.27（第四十六轮·后台通知根修）：退后台边界轮询——把当前 pending 消息
+        // id 记为「已见」不弹（前台时网页已弹过横幅），此后新到消息才弹 heads-up
+        try {
+            BgNotifyPoller.onAppBackgrounded(this);
+        } catch (Throwable ignored) {
+        }
     }
 
     /** v2.4.12 全屏隐藏终极加固（机主反馈「还是这样，没有变化」）：新旧两条通道同时下发——
@@ -306,19 +324,17 @@ public class MainActivity extends BridgeActivity {
         ViewCompat.setOnApplyWindowInsetsListener(decor, (v, insets) -> {
             Insets cut = insets.getInsets(WindowInsetsCompat.Type.displayCutout());
             Insets sys = insets.getInsets(WindowInsetsCompat.Type.systemBars());
-            // v2.4.26（第四十五轮）软键盘：decorFitsSystemWindows=false + 全屏下窗口不会为键盘
-            // 自动缩，Chromium 的键盘只覆盖在 WebView 上（visualViewport 变矮），页面底部输入条
-            // 因此被键盘压住（机主反馈「输入的时候输入框不跟随系统键盘弹起来」）。这里把 IME
-            // inset 并入 safeBottom 下发（--app-sab）——网页端内容层底边随键盘抬升，聊天输入条
-            // 始终贴在键盘上沿。键盘收起时 ime.bottom=0，自动还原原底部安全区。
-            Insets ime = insets.getInsets(WindowInsetsCompat.Type.ime());
+            // v2.4.27（第四十六轮·键盘跟随根修）：键盘高度不再直接并入 ime inset——改由下方
+            // 全局布局兜底测高统一供源（kbFallbackDp）：窗口为键盘缩小时（老系统 adjustResize
+            // 实际生效）Chromium 已重排（ICB 收缩），再抬 --app-sab 会双重抬升；窗口不缩时
+            // （API 30+ edge-to-edge，Manifest 新加的 adjustResize 只派发 insets 不缩窗口）
+            // 兜底测得键盘高度抬 --app-sab，输入条贴键盘上沿。详见 installKeyboardHeightFallback。
             float density = getResources().getDisplayMetrics().density;
             // v2.4.23 两模式统一：top 仅挖孔（物理系统条一律隐藏，systemBars.top 恒 0）
             safeTop = Math.round(cut.top / density);
             safeRight = Math.round(Math.max(sys.right, cut.right) / density);
-            safeBottom = Math.round(Math.max(sys.bottom, cut.bottom) / density);
-            int imeBottom = Math.round(ime.bottom / density);
-            if (imeBottom > safeBottom) safeBottom = imeBottom;
+            int baseBottom = Math.round(Math.max(sys.bottom, cut.bottom) / density);
+            safeBottom = Math.max(baseBottom, kbFallbackDp);
             safeLeft = Math.round(Math.max(sys.left, cut.left) / density);
             pushInsetsToWeb();
             // 第三十轮·网页浏览时系统状态栏再显示根修（v2.4.23 起两模式统一补藏——物理条
@@ -339,6 +355,13 @@ public class MainActivity extends BridgeActivity {
             }
             return insets;
         });
+
+        // v2.4.27（第四十六轮·键盘跟随根修）：全局布局兜底测高——IME insets 在旧 ROM
+        // （API<30 或不派发 insets 的国产 ROM）上拿不到，这里用「可见显示框 vs 真实屏幕
+        // 高度」的差值测键盘：窗口未缩（edge-to-edge，键盘悬在 WebView 上）差值=键盘高
+        // → 并入 kbFallbackDp → --app-sab 抬升输入条；窗口已缩（老系统 adjustResize 生效，
+        // decor 高度 < 屏幕）Chromium 已重排 → 归零防双重抬升。差值 <120dp 视为导航条/噪声。
+        installKeyboardHeightFallback(decor);
 
         // v2.2.0 冷启动通知直达兜底：App 被杀后点通知栏里的聊天通知拉起 →
         // handleOnNewIntent 不会触发（不走 onNewIntent），extras 挂在 getIntent() 里。
@@ -511,6 +534,62 @@ public class MainActivity extends BridgeActivity {
         }
     }
 
+    /**
+     * v2.4.27（第四十六轮·键盘跟随根修）：全局布局兜底测高（经典 KeyboardHeightProvider 技术）。
+     * 每次全局布局回调时：
+     * 1. 窗口自身高度（decor.getHeight()）&lt; 真实屏幕高度 → 窗口已为键盘缩小（老系统
+     *    adjustResize 真实生效）——Chromium 已重排（ICB 收缩、输入条已可见），kbFallback
+     *    归零（再抬 --app-sab 会双重抬升）；
+     * 2. 窗口满屏（edge-to-edge / API 30+ 不缩窗）时，「真实屏高 − 可见显示框底」的差值
+     *    = 键盘高度（窗口没缩、键盘悬在 WebView 上遮住底边）→ kbFallback = 差值 →
+     *    insets 监听把它并入 safeBottom 下发（--app-sab）→ 网页内容层底边随键盘抬升，
+     *    聊天输入条贴在键盘上沿；
+     * 3. 差值 &lt; 120dp 视为导航条/手势条/取整噪声（导航条 ≤~63dp，键盘 ≥~200dp），归零。
+     * 值变化才推送（布局回调频繁，避免每次都 evaluateJavascript）。
+     */
+    private void installKeyboardHeightFallback(final View decor) {
+        try {
+            decor.getViewTreeObserver().addOnGlobalLayoutListener(() -> {
+                try {
+                    android.graphics.Rect r = new android.graphics.Rect();
+                    decor.getWindowVisibleDisplayFrame(r);
+                    android.util.DisplayMetrics dm = new android.util.DisplayMetrics();
+                    getWindowManager().getDefaultDisplay().getRealMetrics(dm);
+                    int displayH = dm.heightPixels;
+                    int decorH = decor.getHeight();
+                    int diffPx = displayH - r.bottom;
+                    float density = getResources().getDisplayMetrics().density;
+                    int dp = Math.round(diffPx / density);
+                    // 窗口已缩（Chromium 已重排）或差值过小（导航条/噪声）→ 0
+                    if (decorH > 0 && decorH < displayH - Math.round(4 * density)) dp = 0;
+                    if (dp < 120) dp = 0;
+                    if (dp != kbFallbackDp) {
+                        kbFallbackDp = dp;
+                        // 重新计算 safeBottom 并推送（与 insets 监听同一条推送链）
+                        float d2 = getResources().getDisplayMetrics().density;
+                        Insets sys = Insets.of(0, 0, 0, 0);
+                        try {
+                            android.view.WindowInsets raw = decor.getRootWindowInsets();
+                            if (raw != null) {
+                                WindowInsetsCompat c = WindowInsetsCompat.toWindowInsetsCompat(raw);
+                                sys = c.getInsets(WindowInsetsCompat.Type.systemBars()
+                                        | WindowInsetsCompat.Type.displayCutout());
+                            }
+                        } catch (Throwable ignored) {
+                        }
+                        int base = Math.round(Math.max(Math.max(sys.bottom, 0), 0) / d2);
+                        safeBottom = Math.max(base, kbFallbackDp);
+                        pushInsetsToWeb();
+                    }
+                } catch (Throwable ignored) {
+                    // 测高失败静默：insets 主通道（API 30+ adjustResize 派发）不受影响
+                }
+            });
+        } catch (Throwable ignored) {
+            // 监听注册失败静默（不影响其它链路）
+        }
+    }
+
     /** 把缓存安全区推给网页（页面未就绪时静默失败，下次 inset 变化/加载时会再推） */
     private void pushInsetsToWeb() {
         if (this.bridge == null || this.bridge.getWebView() == null) return;
@@ -546,6 +625,34 @@ public class MainActivity extends BridgeActivity {
             return safeAreaJson();
         }
 
+        /** v2.4.27（第四十六轮·后台通知根修）①配置下发：
+         *  json = { url: "https://xxx"（服务器 origin）, enabled: bool（通知总闸）, dnd: bool（免打扰） }
+         *  网页（bg-relay-watcher）启动/每轮 peek/回前台时同步——原生 BgNotifyPoller
+         *  据此拉起/停止 10s 轮询线程，在 App 退后台（WebView JS 冻结）时逐条弹
+         *  heads-up（机主反馈「点进 APP 通知才出现」的根修）。旧壳/浏览器不存在此方法时
+         *  网页端静默跳过，行为与从前完全一致。 */
+        @JavascriptInterface
+        public void setBgNotifyConfig(final String json) {
+            try {
+                BgNotifyPoller.setConfig(MainActivity.this, json);
+            } catch (Throwable ignored) {
+                // 桥异常不影响页面
+            }
+        }
+
+        /** v2.4.27（第四十六轮·后台通知根修）②批次认领：返回
+         *  { batchKeys: [...] }——退后台期间原生已弹过 heads-up 的批次（与网页守望者
+         *  同构的去重键 `${sessionKey}#${count}#${hash}`）并清空队列；网页把它们并入
+         *  seen 集合 + 会话横幅抑制，回前台后同一批消息不再弹第二轮（防双弹）。 */
+        @JavascriptInterface
+        public String consumeBgNotified() {
+            try {
+                return BgNotifyPoller.consumeNotifiedBatches(MainActivity.this);
+            } catch (Throwable t) {
+                return "{\"batchKeys\":[]}";
+            }
+        }
+
         /** v2.4.9 壳版本桥：网页据 getShellInfo 是否存在区分新旧壳——新壳系统状态栏已隐藏
          *  （网页自绘状态栏回归显示）；旧壳无此方法，网页维持 v2.4.8 行为（自绘状态栏
          *  隐藏、系统状态栏融入），避免旧 APK 先拿到新 CSS 时出现双状态栏。
@@ -556,15 +663,14 @@ public class MainActivity extends BridgeActivity {
          *  三通道隐藏真全屏）；statusBarMode 字段同步上报当前模式（诊断用，网页以 IndexedDB
          *  为权威源不依赖此字段）。
          *  v2.4.25（第四十二轮）：版本同步 89 / 2.4.25（开屏闪屏对齐情书字标默认图标）。
-         *  v2.4.24（第四十一轮）：图标五变体：3 号情书字标换机主
-         *  原图设默认 + 新增 5 号元气气泡；switchAppIcon 升级返回状态串 'ok'/'bad_alias'
-         *  ——网页侧据此立即恢复旧壳不支持的切换，根治「卡在正在为您更换图标」）。 */
+         *  v2.4.27（第四十六轮）：版本同步 91 / 2.4.27（键盘跟随 adjustResize + 全局布局
+         *  兜底测高；后台通知原生轮询 BgNotifyPoller；锁屏遮罩沉浸式 FLAG_LAYOUT_NO_LIMITS）。 */
         @JavascriptInterface
         public String getShellInfo() {
             JSONObject o = new JSONObject();
             try {
-                o.put("versionCode", 89);
-                o.put("versionName", "2.4.25");
+                o.put("versionCode", 91);
+                o.put("versionName", "2.4.27");
                 o.put("fullscreen", true); // 壳能力标记：v2.4.9+（系统条可原生隐藏/显示）
                 o.put("statusBarMode", statusBarMode); // v2.4.22：当前状态栏外观模式
             } catch (Exception ignored) {

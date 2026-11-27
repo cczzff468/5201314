@@ -153,6 +153,16 @@ function relayPreviewText(raw: string): string {
   return t || '[新消息]';
 }
 
+/** v2.4.27（第四十六轮·后台通知原生轮询）：与客户端 bg-relay-watcher 完全一致的
+ *  djb2 短哈希——服务端直接产出 batchKey（`${key}#${count}#${hash}`），Java 侧
+ *  原样转存，客户端回前台时据此把「原生已弹过横幅/通知的批次」并入 seen 集合，
+ *  两端去重口径一字不差。 */
+function hashStr(s: string): string {
+  let h = 5381;
+  for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0;
+  return (h >>> 0).toString(36);
+}
+
 function enqueue(sessionKey: string, texts: string[], single: boolean, title: string): PendingItem {
   const item: PendingItem = {
     id: `bg-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
@@ -385,6 +395,63 @@ export async function GET(req: Request): Promise<NextResponse> {
     return wantPreview
       ? NextResponse.json({ counts, previews })
       : NextResponse.json({ counts });
+  }
+
+  // v2.4.27（第四十六轮·后台通知根修）：APK 原生轮询专用视图 pollNative=1。
+  // 背景：WebView 退后台 JS 被冻结——bg-relay-watcher/系统通知只在回前台才跑，
+  // 机主反馈「点进去 APP 通知和悬浮通知才出现」。原生壳（BgNotifyPoller）改为
+  // 每 10s 直接 GET 本视图：每会话返回【逐条消息】（id 稳定 = `${item.id}#${i}`，
+  // 原生按 id 去重后每条弹一条 heads-up 通知——「AI 发几条就弹几次」）+ batchKey
+  // （与客户端守望者去重键完全同构：`${key}#${count}#${hash(preview)}`）。
+  // 只读不消费：正式投递/落盘仍由聊天页拉取（GET ?sessionKey= + consume）完成，
+  // 客户端回前台时用 consumeBgNotified 把原生已弹过的 batchKey 并入 seen 集合防双弹。
+  if (sp.get('pollNative')) {
+    const sessions: Record<
+      string,
+      {
+        batchKey: string;
+        count: number;
+        title: string;
+        avatar?: string;
+        target?: { app: string; contactId?: string; groupId?: string };
+        messages: { id: string; text: string }[];
+      }
+    > = {};
+    pending.forEach((arr, key) => {
+      const rawCount = arr.reduce((s, it) => s + it.texts.length, 0);
+      if (rawCount <= 0) return;
+      const first = arr[0];
+      const meta = sessionMetas.get(key);
+      const preview = relayPreviewText(first?.texts?.[0] ?? '');
+      // 逐条消息：single 模式按 &&& 拆分（客户端 buildReplyMsgs 同款分段口径），
+      // deliver 模式每条 text 即一条消息；文本走 relayPreviewText 净化（通知预览用）
+      const messages: { id: string; text: string }[] = [];
+      arr.forEach((item) => {
+        if (item.single) {
+          (item.texts[0] ?? '').split('&&&').forEach((seg, i) => {
+            const txt = relayPreviewText(seg);
+            if (txt && txt !== '[新消息]') messages.push({ id: `${item.id}#${i}`, text: txt });
+          });
+        } else {
+          item.texts.forEach((t, i) => {
+            const txt = relayPreviewText(t);
+            if (txt && txt !== '[新消息]') messages.push({ id: `${item.id}#${i}`, text: txt });
+          });
+        }
+      });
+      if (messages.length === 0) return;
+      const relayTarget = relayTargetOf(key);
+      sessions[key] = {
+        // 去重键与守望者 peekAll 视图口径一字不差（count 用原始 texts 总数）
+        batchKey: `${key}#${rawCount}#${hashStr(preview)}`,
+        count: rawCount,
+        title: meta?.title || first?.title || appDefaultName(key),
+        ...(meta?.avatar ? { avatar: meta.avatar } : {}),
+        ...(relayTarget ? { target: relayTarget } : {}),
+        messages,
+      };
+    });
+    return NextResponse.json({ sessions });
   }
 
   const sessionKey = sp.get('sessionKey');

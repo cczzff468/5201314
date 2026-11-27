@@ -3908,3 +3908,36 @@ Stage Summary:
 - 机主需覆盖安装 v89：换图标即刻生效（v86 卡死/误报全解）+ 开屏闪屏=情书字标 + 状态栏双条消除
 - 云端架构升级：用户自有 Supabase 上新增 backups/messages 两表 + avatar/image 两桶——云备份（全库 dump+Blob 引用化）与离线推送（确定性 id 写入+Realtime 订阅+后台系统横幅）双系统同库共生，密钥全部本机密文留存服务器零留存
 - 沉浸式第三缺口方法论：屏幕级基调栈原「仅 App 前台」的设计在「全屏浮层出现在主屏」场景失效——基调优先级重构为全屏层通用
+
+---
+Task ID: 44（第四十六轮）
+Agent: 主控 Agent（Z.ai Code）
+Task: 机主五项——键盘跟随根修（adjustResize+兜底测高）/ 后台通知根修（原生轮询逐条弹 heads-up）/ 悬浮通知间隔补修 / 应用锁定遮罩沉浸式 / 阅读与审核 App 图标换机主原图 + 拉取模型弹窗三连修 + 联机功能调研（不做）
+
+Work Log:
+- 【仓库同步】机主迁移仓库 github.com/cczzff468/5201314.git（主分支）完整拉取同步至本项目（db 带 custom.db 现有账号数据；.env DATABASE_URL 改本地路径；bun install + prisma generate + dev server 就绪）
+- 【键盘跟随根修】v2.4.26 只把 IME inset 并入 --app-sab，但 Manifest 从未声明 windowSoftInputMode——旧 ROM（API<30 / 不派发 IME insets 的国产 ROM）ime() 恒 0，机主实锤「输入框不跟随系统键盘弹起来」。三件：①AndroidManifest 补 android:windowSoftInputMode="adjustResize"（API 30+ 派发 insets 不缩窗 / 老 API 窗口实际缩）；②MainActivity insets 监听不再直接并 IME inset，改由新 installKeyboardHeightFallback 全局布局兜底测高供源：可见显示框差值=键盘高（窗口未缩）→ 并入 safeBottom 抬 --app-sab；窗口已缩（decor 高<屏幕，Chromium 已重排）自动归零防双重抬升；差值<120dp 视为导航条噪声；③值变化才推送（布局回调频繁）
+- 【后台通知根修（最大项）】机主实锤「APP 系统通知/悬浮通知要点进 APP 才出现 + 只显示最后一个」。根因链：WebView 退后台 JS 冻结 → bg-relay-watcher/系统通知全挂 → 消息只在回前台 flush；且 pagehide 接力只在关页触发（切后台不触发，回复根本没人生成）。五件：
+  ①【服务端】/api/chat/bg 新增 pollNative=1 视图：每会话返回逐条消息（id 稳定 `${itemId}#${i}`；single 模式按 &&& 拆分）+ 与守望者同构 batchKey（`${key}#${count}#${djb2(preview)}`——服务端内联同款 hashStr，两端去重口径一字不差）；
+  ②【原生】新增 BgNotifyPoller.java：10s 轮询线程（HttpURLConnection GET pollNative），按消息 id 去重（SharedPreferences StringSet 400 上限）逐条弹 heads-up（local_notify_high 渠道同款 + 点击直达 target extras），相邻间隔 2400ms 与网页对齐；App 前台只记已见不弹（前台由网页弹，防双弹）；MainActivity.onStop 边界轮询把当前 pending 记已见不弹（前台已看过横幅的批次不重弹）；已弹批次 batchKey 存待认领队列；
+  ③【交接】bg-turn.ts 新增 visibilitychange→hidden（仅 APK）交接：在流会话 beacon(mode=generate) + 未投完尾巴 beacon(mode=deliver)，随后 handoffStreamsToBgRelay（chat-stream-store 新导出：作废本地流不落盘不上报 cancel——与 abortStreamsByPrefix 差异化）+ purgeDeliveryQueueExact（ai-delivery 新导出：精确键清投递队列防回前台双投）；
+  ④【桥】MainActivity.NativeBridge 新增 setBgNotifyConfig({url,enabled,dnd})（拉起/停止轮询器）+ consumeBgNotified()（返回已弹批次并清空）；KeepAliveService.onCreate 按持久化配置拉起轮询器（开机自启场景）；
+  ⑤【网页协作】bg-relay-watcher：模块加载即 consumeBgNotified 并入 seen 集合 + suppressSessionBanner（回前台同一批不再弹第二轮）；每轮 peek/回前台同步原生轮询配置（地址/总闸/免打扰）
+- 【悬浮通知只显示最后一个补修】message-notifications NOTIFY_SPACING_MS 1200→2400（1.2s 间隔下后一条横幅弹出太快前一条几乎看不见，观感仍像只弹最后一条；通知栏仍逐条独立堆叠）；应用内灵动岛队列（第四十五轮）实测正常（3 条消息 current+2 queued 逐条 3s 播放）
+- 【锁屏沉浸式】LockOverlayService 遮罩窗口加 FLAG_LAYOUT_NO_LIMITS + 根视图 SYSTEM_UI_FLAG_LAYOUT_STABLE|FULLSCREEN|HIDE_NAVIGATION 双保险——TYPE_APPLICATION_OVERLAY 默认不越过状态栏，顶部露一条未压暗桌面（机主「应用锁定界面系统状态栏没有沉浸式」）；加后深色毛玻璃遮罩延伸到状态栏/导航栏下方逐像素连续，状态栏图标仍可见
+- 【图标】阅读 App → 机主上传「山丘阅读」官方图标（1024→256 PNG 压缩 39KB，蓝底白书本红书签）；审核 App → 机主上传灰底盾形对勾（888→256 PNG 71KB，registry 加 image 字段替换原磨砂线条，glass/liquid 样式仍回退 ShieldCheck 线条）；两处 ?v=46 破缓存
+- 【拉取模型弹窗三连修】机主「API拉取弹窗上面那里还在遮挡模型」：①补滚基准 window.innerHeight → 滚动容器可见底边（桌面预览壳 844 外窗口再高也按真实可视区算，APK 全屏两者相等）——原版桌面预览面板尾部被壳裁剪仍不触发补滚；②补滚上限加 anchorBudget（锚点行顶部余量）——面板再长也优先保「模型标签/输入行」在屏内，尾部由列表内部滚动兜底；③visualViewport resize + window resize 双监听重算补滚（键盘弹起/收起/旋转）——原版 deps 不含视口尺寸，键盘弹起后布局变化不再修正。触屏设备去掉搜索框 autoFocus（面板一开就拉起软键盘盖半屏的直接诱因）。四处同款面板（api/vision/imagegen/voice）统一抽成 shared.tsx useModelPanelReveal + IS_TOUCH_DEVICE 共享导出
+- 【联机功能调研（不实施）】机主要求「先去github看看」：调研结论见最终回复（推荐自部署 Next.js+Prisma/SQLite+既有 SSE/im-gateway 联机服（零配置零费用，数百人稳）；备选 Supabase 免费版（项目已有机型+Management API 自动开通）；P2P 备选 Trystero（github.com/dmotz/trystero，公共 Nostr/MQTT 信令零服务器但无持久化，红包/转账账本不可用）；一起听同步模式参考 Yueby/music-together 与 Jusic-serve）
+- 【发版 v2.4.27/91】build.gradle 91/2.4.27 + MainActivity getShellInfo 同步 + app-version 六条发布说明；APK 重打部署 public/Cove.apk
+
+验证:
+- tsc --noEmit 0 errors；lint 0 errors（1 条 layout.tsx 历史 warning 不变）
+- agent-browser 全链：注册测试号（邀请码）→ 登录 → 解锁 → 主屏第 3 页阅读图标=山丘阅读蓝底书本（VLM 确认）→ 提升 admin 后第 4 页审核图标=灰底盾形对勾（VLM 确认）→ 设置›API 配置 → mock 模型列表 → 拉取模型：面板打开 844 视口（底 832≤832 ✓ 模型行可见 ✓ 桌面 autoFocus ✓）；缩到 620 视口（模拟键盘）：reveal 重跑底 608≤608 ✓ 模型行可见 ✓（修复前面板底 769 被裁 149px）；缩到 500 视口：anchorBudget 生效模型行仍可见（sectionTop 102≥scTop 98，修复前会被压出屏）✓
+- pollNative API 实测：deliver 入队 2 条（含 &&& 段）→ pollNative 返回 2 条消息 + batchKey wx:tester#2#1ryxzjr 与 peekAll preview 哈希同构 ✓ → consume 清队 ✓
+- 灵动岛队列实测：push 3 条 → current=第一条 + queue=[第二、三]（截图确认第一条横幅渲染）✓
+- dev server 200；console 零 error；bg watcher 10s peek 正常
+
+Stage Summary:
+- 五项全闭环 + 发版 v2.4.27（versionCode 91）APK 重打部署 public/Cove.apk——机主覆盖安装后：输入框贴键盘上沿、退后台 AI 消息逐条弹悬浮通知（不用点进 APP）、锁定遮罩全屏沉浸
+- 后台通知架构：网页（前台弹）+ 原生轮询（后台弹）双通道，batchKey 同构去重防双弹；退后台自动交接回复生成给服务端，回前台不双回复不双投递
+- 联机功能：调研完成（推荐方案+备选+GitHub 参考），按机主要求本轮不实施

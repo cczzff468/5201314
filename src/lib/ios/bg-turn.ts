@@ -30,8 +30,8 @@
  * 未注册时服务端回退为 App 名、无头像）。
  */
 
-import { getActiveStreamPayloads } from '../chat-stream-store';
-import { getDeliveringSessionKeys, peekPendingMsgs } from './ai-delivery';
+import { getActiveStreamPayloads, handoffStreamsToBgRelay } from '../chat-stream-store';
+import { getDeliveringSessionKeys, peekPendingMsgs, purgeDeliveryQueueExact } from './ai-delivery';
 
 export interface BgSessionMeta {
   title: string;
@@ -271,6 +271,50 @@ if (typeof window !== 'undefined') {
       }
     } catch {
       // pagehide 里任何异常都吞掉（不影响卸载）
+    }
+  });
+
+  // v2.4.27（第四十六轮·后台通知根修）：APK 退后台交接——与 pagehide 接力同一套 beacon，
+  // 但触发点是 visibilitychange→hidden（切后台/锁屏 WebView JS 即将冻结，pagehide 不触发，
+  // 机主反馈「点进 APP 通知和悬浮通知才出现」的直接根因）。
+  // ① 在流会话 → beacon(mode=generate, payload) 让服务端接管生成，随后本地流作废
+  //   （冻结期间网络虽续但回调全挂；回前台本地续流 + 服务端接力会双回复——直接作废本地，
+  //   回复完全走服务端 pending，原生 BgNotifyPoller 轮询弹 heads-up 通知）；
+  // ② 已收完但没投完的会话 → beacon(mode=deliver, texts)，随后本地投递队列清空
+  //   （purgeDeliveryQueueExact：回前台聊天页 pullBgPending 统一投递，不双投）。
+  // 仅 APK 生效：浏览器标签退后台 JS 继续跑（节流但流不冻结），无需交接。
+  // 仅单聊生效：群聊不走接力（与 pagehide 口径一致），群聊流保持原样回前台续上。
+  document.addEventListener('visibilitychange', () => {
+    try {
+      if (document.visibilityState !== 'hidden') return;
+      const isApk = !!(window as unknown as { androidBridge?: unknown }).androidBridge;
+      if (!isApk) return;
+      const streams = getActiveStreamPayloads().filter((s) => !isGroupSession(s.sessionKey));
+      for (const s of streams) {
+        sendBgBeacon(
+          {
+            mode: 'generate',
+            sessionKey: s.sessionKey,
+            payload: { messages: s.messages, config: s.config },
+            meta: beaconMeta(s.sessionKey),
+          },
+          s.sessionKey,
+        );
+      }
+      const deliverKeys: string[] = [];
+      for (const key of getDeliveringSessionKeys()) {
+        if (isGroupSession(key)) continue;
+        if (streams.some((s) => s.sessionKey === key)) continue;
+        const texts = undeliveredTexts(key);
+        if (texts.length === 0) continue;
+        sendBgBeacon({ mode: 'deliver', sessionKey: key, texts, meta: beaconMeta(key) }, key);
+        deliverKeys.push(key);
+      }
+      // 交接后作废本地流/清本地队列（防回前台双回复/双投递）
+      if (streams.length > 0) handoffStreamsToBgRelay(streams.map((s) => s.sessionKey));
+      for (const key of deliverKeys) purgeDeliveryQueueExact(key);
+    } catch {
+      // 交接失败静默（与 pagehide 同口径）
     }
   });
 }

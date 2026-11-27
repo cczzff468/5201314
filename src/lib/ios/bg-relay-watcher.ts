@@ -33,16 +33,89 @@ import { onBgPendingEvent, onBgSseOpen, startBgSse } from './bg-turn';
 import {
   clearSessionBannerSuppress,
   clearStaleSessionBannerSuppress,
+  isSysNotifyEnabled,
   pushChatNotification,
   suppressSessionBanner,
   type NotifyApp,
   type NotifyTarget,
 } from './island-notify';
+import { isNotifyDndActive } from './notification-center';
 import { getDeliveringSessionKeys, subscribeAiDeliveryActive, yieldToEventLoop } from './ai-delivery';
 // v1.9.17 后台接力提速：isPageBackground 双信号判定——页面在后台时事件驱动 peek 立即执行
 //（后台 setTimeout 被强节流 1s→1次/分钟，防抖反而把接力横幅拖慢，机主退后台收不到通知的根因之一）
 import { isPageBackground } from './system-notify';
 import { onKeepAliveTick } from './keepalive';
+
+// ---------------- v2.4.27 原生后台通知协作（第四十六轮·后台通知根修） ----------------
+
+/** APK 原生桥（MainActivity addJavascriptInterface 的 window.AIPhoneNative）上
+ *  本模块用到的两个方法（旧壳不存在时全体静默跳过，不影响浏览器端） */
+interface AIPhoneNativeBg {
+  setBgNotifyConfig?: (json: string) => void;
+  consumeBgNotified?: () => string;
+}
+
+/** APK 退后台期间原生 BgNotifyPoller 已弹过 heads-up 的批次，回前台后绝不再弹（防双弹）。
+ * 模块加载即同步执行（先于任何聊天页挂载/投递）：原生侧存的是服务端同构 batchKey
+ * （`${sessionKey}#${count}#${hash}`），直接并入 seen 集合；对应会话再拉横幅抑制
+ * （聊天页正式投递同一批时三出口全跳，与守望者自己弹过后的口径一致）。 */
+function absorbNativeNotifiedBatches(): void {
+  try {
+    const N = (window as unknown as { AIPhoneNative?: AIPhoneNativeBg }).AIPhoneNative;
+    if (!N || typeof N.consumeBgNotified !== 'function') return;
+    const raw = N.consumeBgNotified();
+    if (!raw) return;
+    const parsed = JSON.parse(raw) as { batchKeys?: unknown };
+    const keys = Array.isArray(parsed.batchKeys)
+      ? parsed.batchKeys.filter((k): k is string => typeof k === 'string')
+      : [];
+    if (keys.length === 0) return;
+    const seen = loadSeen();
+    let changed = false;
+    for (const bk of keys) {
+      if (seen.has(bk)) continue;
+      seen.add(bk);
+      changed = true;
+      const key = bk.split('#')[0];
+      if (key) suppressSessionBanner(key);
+    }
+    if (changed) saveSeen(seen);
+  } catch {
+    // 原生桥不存在/返回异常：静默（非 APK 或旧壳）
+  }
+}
+
+/** 把「服务器地址 + 通知总闸 + 免打扰」推给原生轮询器（BgNotifyPoller）：
+ *  原生只在本页冻结（App 退后台）时轮询 pollNative 视图弹 heads-up；
+ *  enabled=false 或免打扰开启时原生侧跳过弹通知。每次 peek 周期与回前台时
+ *  同步一次（同步桥调用开销极小，免打扰/总闸切换最多一个周期内生效）。 */
+function pushNativePollConfig(): void {
+  try {
+    const N = (window as unknown as { AIPhoneNative?: AIPhoneNativeBg }).AIPhoneNative;
+    if (!N || typeof N.setBgNotifyConfig !== 'function') return;
+    N.setBgNotifyConfig(
+      JSON.stringify({
+        url: window.location.origin,
+        enabled: isSysNotifyEnabled(),
+        dnd: isNotifyDndActive(),
+      }),
+    );
+  } catch {
+    // 静默：非 APK / 旧壳
+  }
+}
+
+// 模块加载即吸收（PhoneShell 引入本模块，早于聊天页投递）；旧壳/浏览器零动作
+if (typeof window !== 'undefined') {
+  absorbNativeNotifiedBatches();
+  pushNativePollConfig();
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+      absorbNativeNotifiedBatches();
+      pushNativePollConfig();
+    }
+  });
+}
 
 // ---------------- 常量 ----------------
 
@@ -167,6 +240,8 @@ async function peekOnce(): Promise<void> {
       suppressSessionBanner(key);
     }
     if (changed) saveSeen(seen);
+    // v2.4.27：周期同步原生轮询配置（地址/总闸/免打扰）——设置变更最多一个 peek 周期内生效
+    pushNativePollConfig();
   } catch {
     // 网络异常/解析失败静默：下次事件/轮询重试（消息本体在服务端队列，不丢）
   } finally {

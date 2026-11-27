@@ -16,7 +16,16 @@
             android:label="@string/title_activity_main"
             android:theme="@style/AppTheme.NoActionBarLaunch"
             android:launchMode="singleTask"
-            android:exported="true">
+            android:exported="true"
+            android:windowSoftInputMode="adjustResize">
+            <!-- v2.4.27（第四十六轮·键盘跟随根修）：windowSoftInputMode=adjustResize。
+                 根因：MainActivity 全屏沉浸（decorFitsSystemWindows=false + 旧版无该项）
+                 下软键盘弹出时窗口不缩，Chromium 键盘只覆盖在 WebView 上——输入条被压住
+                 （机主反馈「输入的时候输入框不跟随系统键盘弹起来」）。加 adjustResize 后：
+                 API 30+ 窗口不缩但 IME insets 会被派发到 insets 监听（并入 app-sab 下发，
+                 内容层底边随键盘抬升）；API <30 窗口实际缩、WebView 重排（visualViewport
+                 同步收缩）。MainActivity 另有全局布局兜底测高（旧 ROM/不派发 IME insets 时
+                 用可见显示框差值补 app-sab）。 -->
             <!-- v2.4.21 一键无感换图标（Activity Alias）：MAIN/LAUNCHER 入口从 MainActivity
                  本体迁到下方 activity-alias——启动器桌面图标由「当前启用的别名」决定；
                  网页桥 AIPhoneNative.switchAppIcon(alias) 经 PackageManager 切换启用态实现

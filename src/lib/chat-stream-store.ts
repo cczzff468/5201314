@@ -1334,6 +1334,39 @@ export function abortStreamsByPrefix(prefix: string): number {
   return aborted;
 }
 
+/**
+ * v2.4.27（第四十六轮·后台通知根修）：把进行中的流「交接」给服务端接力——
+ * 仅在 APK 退后台（visibilitychange→hidden，bg-turn 触发）时调用：
+ * 与 pagehide 接力（sendBeacon generate）配套，本地流预先作废（不再喂分段/
+ * 不再 finalize 落盘/不再清 activePayloads），回复完全由服务端 bg 生成 →
+ * pending 队列 → 原生 BgNotifyPoller 轮询弹通知；用户回前台时聊天页照常
+ * pullBgPending 投递。与 abortStreamsByPrefix 的差异：**不上报 cancel**（接力
+ * 正是这次要保活的对象），且按精确会话集合作废（不做前缀匹配）。
+ * @param only 只作废这些会话键（undefined = 全部进行中的流）。群聊会话不走接力
+ *   （beacon 侧已排除）——调用方传非群会话列表，冻结期间群聊流保持原样，
+ *   回前台还能续上。
+ * 返回被作废的会话键数组（调用方仅用于日志/诊断）。
+ */
+export function handoffStreamsToBgRelay(only?: string[]): string[] {
+  const allow = only ? new Set(only) : null;
+  const keys: string[] = [];
+  streams.forEach((rt, key) => {
+    if (rt.state.status !== 'streaming') return;
+    if (allow && !allow.has(key)) return;
+    keys.push(key);
+    rt.finalized = true; // runStream 收尾时跳过 finalize（本地不再落盘，防双回复）
+    rt.aborted = true; // onDelta 停止喂分段器（冻结期间流中分段不再产生）
+  });
+  if (keys.length > 0) {
+    for (const key of keys) {
+      streams.delete(key);
+      activePayloads.delete(key);
+    }
+    emit();
+  }
+  return keys;
+}
+
 /** 订阅任意流状态变化（useChatStream 用） */
 export function subscribeChatStreams(fn: () => void): () => void {
   subs.add(fn);

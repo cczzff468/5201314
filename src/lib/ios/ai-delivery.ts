@@ -343,21 +343,33 @@ export function purgeDeliveryQueueByPrefix(prefix: string): number {
     if (key.startsWith(prefix)) keys.push(key);
   });
   for (const key of keys) {
-    const queue = queues.get(key);
-    if (queue) {
-      for (const batch of queue) {
-        try {
-          batch.resolve();
-        } catch {
-          // resolve 回调异常不影响其余批清理
-        }
-      }
-    }
-    queues.delete(key);
-    insertBeforeIds.delete(key);
+    purgeDeliveryQueueExact(key);
   }
-  if (keys.length > 0) emitActive();
   return keys.length;
+}
+
+/**
+ * v2.4.27（第四十六轮·后台通知根修）：清空【精确会话键】的待投递批次并复位状态。
+ * APK 退后台交接（bg-turn visibilitychange→hidden）用：把未投递尾巴上报给服务端
+ * pending 队列（deliver 接力）后，本地队列同步清空——否则用户回前台时本地投递
+ * 与聊天页 pullBgPending 各投一遍（双消息）。语义与 purgeDeliveryQueueByPrefix
+ * 完全一致（resolve 防悬挂 + 清插入边界），只是按精确键而非前缀。
+ * 返回是否确有清理（false = 该会话本就无队列）。
+ */
+export function purgeDeliveryQueueExact(sessionKey: string): boolean {
+  const queue = queues.get(sessionKey);
+  if (!queue) return false;
+  for (const batch of queue) {
+    try {
+      batch.resolve();
+    } catch {
+      // resolve 回调异常不影响清理
+    }
+  }
+  queues.delete(sessionKey);
+  insertBeforeIds.delete(sessionKey);
+  emitActive();
+  return true;
 }
 
 /** 带边界的落库拼接：有边界且边界消息还在列表里时，把 item 插到边界消息之前；否则照旧追加 */

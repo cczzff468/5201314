@@ -14,8 +14,8 @@ android {
         applicationId "com.z.aiphone"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 90          // v2.4.26 登录页沉浸+图标记忆恢复+键盘 IME inset；v89 = 2.4.25 开屏闪屏换情书字标
-        versionName "2.4.26"    // v2.4.26：门禁页全出血沉浸 / 覆盖安装后图标自愈 / 系统键盘跟随输入条
+        versionCode 91          // v2.4.27 键盘跟随 adjustResize+兜底测高 / 后台通知原生轮询 / 锁屏沉浸；v90 = 2.4.26 登录页沉浸
+        versionName "2.4.27"    // v2.4.27：键盘跟随根修 / 后台通知逐条弹 / 拉取模型面板三连修 / 阅读审核新图标
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.

@@ -580,6 +580,13 @@ public class LockOverlayService extends Service {
                         WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
                                 | WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
                         PixelFormat.TRANSLUCENT); // v2.4.2 半透明：底下是桌面，毛玻璃遮罩要透
+                // v2.4.27（第四十六轮·锁屏沉浸式根修）：加 FLAG_LAYOUT_NO_LIMITS——
+                // TYPE_APPLICATION_OVERLAY 默认不越过系统状态栏，遮罩只盖到状态栏下沿，
+                // 顶部那一条仍是未压暗的桌面 → 机主反馈「应用锁定界面系统状态栏没有沉浸式」。
+                // 加 NO_LIMITS 后全屏遮罩（含毛玻璃/深色半透）延伸到状态栏和导航栏下方，
+                // 顶部条带与下方遮罩逐像素连续；状态栏图标仍由系统画在最上层（时间/电量
+                // 正常可见，正是锁屏该有的样子）。
+                lp.flags |= WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS;
                 // v2.4.2 毛玻璃（机主规格 backdrop-filter: blur(20px)）：API 31+ 开
                 // FLAG_BLUR_BEHIND + setBlurBehindRadius —— 系统级背后实时模糊；
                 // 不支持的 ROM 自动退化为纯深色遮罩（rgba(0,0,0,0.7) 由根视图承担）。
@@ -594,6 +601,16 @@ public class LockOverlayService extends Service {
 
                 FrameLayout view = prebuiltOverlay != null ? prebuiltOverlay : buildOverlayView();
                 prebuiltOverlay = null; // 一次性：已上屏的树不再复用（防 WindowManager 双父）
+                // v2.4.27（锁屏沉浸式）：根视图挂 LAYOUT_STABLE/LAYOUT_FULLSCREEN/
+                // LAYOUT_HIDE_NAVIGATION（部分国产 ROM 对 overlay 窗口认这套，双保险；
+                // 不支持的 ROM 静默——FLAG_LAYOUT_NO_LIMITS 主通道已生效）
+                try {
+                    view.setSystemUiVisibility(
+                            View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                                    | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                                    | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION);
+                } catch (Throwable ignored) {
+                }
                 wm.addView(view, lp);
                 overlayView = view;
                 overlayShowing = true;

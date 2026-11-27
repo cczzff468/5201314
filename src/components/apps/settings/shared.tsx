@@ -4,7 +4,9 @@
 
 import {
   useEffect,
+  useRef,
   useState,
+  type RefObject,
 } from 'react';
 
 import type { ReactNode } from 'react';
@@ -225,4 +227,68 @@ export function useOwnerAvatar(): string | null {
     };
   }, []);
   return ownerAvatar;
+}
+
+// ---------------- 拉取模型面板（api/vision/imggen/voice 四页共用） ----------------
+
+/** 触屏设备探测（模块级一次性）：模型面板搜索框 autoFocus 仅桌面保留——
+ *  触屏上面板一开就拉起软键盘会盖住大半个面板（v2.4.27 机主反馈「拉取弹窗
+ *  上面那里还在遮挡模型」的直接诱因之一）；桌面保留 autoFocus 键盘直达搜索 */
+export const IS_TOUCH_DEVICE =
+  typeof window !== 'undefined' &&
+  ('ontouchstart' in window || (navigator.maxTouchPoints ?? 0) > 0);
+
+/**
+ * 模型下拉面板的「自动补滚露出」hook（v2.4.27 第四十六轮统一四页实现）：
+ * - ① 可见底边以滚动容器为准（桌面预览壳内才是真实可视区），并与窗口取小——
+ *   旧版用 window.innerHeight，桌面预览时手机壳 844px 外的窗口很高，面板尾部
+ *   被壳裁剪也不触发补滚（APK 全屏时两者相等，行为不变）；
+ * - ② 补滚上限收紧：除最大可滚量外，还不得超过「锚点行顶部到容器顶部」的余量——
+ *   面板再长也优先保「模型标签/输入行」在屏内（被压出容器顶部即机主反馈的
+ *   「上面那里遮挡模型」），面板尾部超出时由列表内部滚动兜底；
+ * - ③ 键盘弹起/窗口尺寸变化（搜索框拉起软键盘、旋转、拖动预览窗口）时重算补滚：
+ *   visualViewport resize + window resize 双监听，键盘收起后同样回到正确位置。
+ * 用法：const ref = useRef<HTMLDivElement>(null); useModelPanelReveal(ref, open, models, query);
+ */
+export function useModelPanelReveal(
+  modelSectionRef: RefObject<HTMLDivElement | null>,
+  modelPanelOpen: boolean,
+  models: string[],
+  modelQuery: string,
+): void {
+  useEffect(() => {
+    if (!modelPanelOpen) return;
+    const reveal = () => {
+      const sec = modelSectionRef.current;
+      if (!sec) return;
+      const sc = sec.closest('.overflow-y-auto') as HTMLElement | null;
+      const panel = sec.querySelector('[data-model-panel]') as HTMLElement | null;
+      if (!sc || !panel) {
+        sec.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        return;
+      }
+      const pr = panel.getBoundingClientRect();
+      const sr = sec.getBoundingClientRect();
+      const scr = sc.getBoundingClientRect();
+      const visibleBottom = Math.min(scr.bottom, window.innerHeight);
+      if (pr.bottom > visibleBottom - 12) {
+        // 面板尾部出屏：补滚（夹在最大可滚量内；页面不够长时列表内部滚兑底）
+        const over = pr.bottom - (visibleBottom - 12);
+        const max = sc.scrollHeight - sc.clientHeight;
+        // 锚点行（模型标签/输入行）不破屏：最多滚到锚点行顶部刚到容器顶部为止
+        const anchorBudget = Math.max(0, sr.top - scr.top - 4);
+        sc.scrollTop = Math.min(max, sc.scrollTop + Math.max(0, Math.min(over, anchorBudget)));
+      }
+    };
+    const t = window.setTimeout(reveal, 120);
+    const vv = typeof window !== 'undefined' ? window.visualViewport : null;
+    const onVvResize = () => reveal();
+    vv?.addEventListener('resize', onVvResize);
+    window.addEventListener('resize', onVvResize);
+    return () => {
+      window.clearTimeout(t);
+      vv?.removeEventListener('resize', onVvResize);
+      window.removeEventListener('resize', onVvResize);
+    };
+  }, [modelSectionRef, modelPanelOpen, models, modelQuery]);
 }
