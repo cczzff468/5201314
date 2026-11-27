@@ -323,14 +323,18 @@ function serverTableCounts(server: ServerBackupSection): Record<string, number> 
 }
 
 /**
- * 导出范围过滤（文件 App「数据管理 · 导出与导入」的模块选择器）：
+ * 导出范围过滤（文件 App「数据管理」的模块 / 单 App 备份）：
  * - includeStores：只导出这些 store（未列出的整仓跳过）
  * - includeKvBuckets：kv 桶白名单（按 kvBucketOf 前缀分组过滤），不传 = kv 全量
- * fonts / localStorage / server 段不受影响（始终随文件走）。
+ * - includeKvPrefixes：kv 键前缀/精确键白名单（单 App 备份用），传空数组 = 不导出 kv
+ * - includeLocalStoragePrefixes：localStorage 键前缀白名单（单 App 备份用），传空数组 = 不导出
+ * fonts / server 段不受影响（始终随文件走）。
  */
 export interface CollectBackupFilter {
   includeStores?: string[];
   includeKvBuckets?: string[];
+  includeKvPrefixes?: string[];
+  includeLocalStoragePrefixes?: string[];
 }
 
 /** kv 桶前缀判定（与 storage-stats.kvBucketOf 同规则；此处独立实现避免循环依赖） */
@@ -386,6 +390,14 @@ export async function collectBackup(
               continue;
             }
           }
+          // kv 前缀过滤：单 App 备份只带走该 App 的键（传空数组 = 不导出 kv）
+          if (store === 'kv' && filter?.includeKvPrefixes) {
+            const key = String(rec?.key ?? '');
+            if (!filter.includeKvPrefixes.some((p) => key === p || key.startsWith(p))) {
+              skip++;
+              continue;
+            }
+          }
           // settings 密文信封 → 解密为明文（跨设备可恢复；导入后加载流程自动重新加密）
           if (store === 'settings' && rec && typeof rec.value === 'object' && rec.value !== null) {
             const dec = await decryptValue(rec.value);
@@ -432,9 +444,11 @@ export async function collectBackup(
 
     const ls: Record<string, string> = {};
     try {
+      const lsPrefixes = filter?.includeLocalStoragePrefixes;
       for (let i = 0; i < window.localStorage.length; i++) {
         const k = window.localStorage.key(i);
         if (k == null) continue;
+        if (lsPrefixes && !lsPrefixes.some((p) => k === p || k.startsWith(p))) continue;
         ls[k] = window.localStorage.getItem(k) ?? '';
       }
     } catch {

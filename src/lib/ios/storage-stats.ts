@@ -3,7 +3,7 @@
 /**
  * 本机数据统计与清理工具（自设置›储存空间页抽出，供文件 App「数据管理」复用）：
  * - statStore / statKv：IndexedDB 真实字节实测（Blob 取 size、字符串取 UTF-8）
- * - DATA_MODULES：数据管理页的模块总表（展示 / 导出 / 清理三处共用同一份映射）
+ * - APP_DATA_SPECS：数据管理页的 App 级总表（列表 / 备份 / 清理共用同一份映射）
  * - autoCleanMedia：老照片自动压缩（4 天以上压图、7 天以上清理超大原图）
  * - cleanRegenerableAssets：可再生缓存键清理（主题激活素材绝不触碰）
  */
@@ -157,67 +157,163 @@ export async function readStorageEstimate(): Promise<{ usage: number; quota: num
   return { usage: 0, quota: 0 };
 }
 
-// ---------------- 数据管理模块总表（展示 / 导出 / 清理三处共用） ----------------
+// ---------------- App 级数据总表（列表 / 备份 / 清理共用同一份映射） ----------------
 
-export interface DataModule {
+export interface AppDataSpec {
   id: string;
   label: string;
-  /** 环形图与图例色点 */
-  color: string;
+  /** 主屏图标路径（列表中灰度渲染） */
+  image: string;
+  /** IndexedDB 记录仓 */
   stores: IOSStoreName[];
-  kvBuckets: KvBucketName[];
+  /** kv 键前缀（精确键或前缀；空 = 该 App 不使用 kv） */
+  kvPrefixes: string[];
+  /** localStorage 键前缀（阅读排版 / 小屋存档等小体量数据） */
+  lsPrefixes: string[];
 }
 
-/** 八大模块：聊天 / 角色卡与联系人 / 记忆 / 世界书 / 社交 / 媒体库 / 备忘日程 / 设置与系统 */
-export const DATA_MODULES: DataModule[] = [
-  { id: 'chat', label: '聊天数据', color: '#0A84FF', stores: ['chat-sessions', 'chat-messages', 'call-logs', 'voicemails'], kvBuckets: ['chat'] },
-  { id: 'chars', label: '角色卡与联系人', color: '#FF2D78', stores: ['contacts', 'visionDecisions'], kvBuckets: [] },
-  { id: 'memory', label: '记忆', color: '#5E5CE6', stores: [], kvBuckets: ['memory'] },
-  { id: 'worldbook', label: '世界书', color: '#BF5AF2', stores: [], kvBuckets: ['worldbook'] },
-  { id: 'social', label: '社交内容', color: '#FF9F0A', stores: [], kvBuckets: ['wx', 'qq'] },
-  { id: 'media', label: '媒体库', color: '#FFD60A', stores: ['photos', 'albums', 'recordings', 'music', 'ringtones'], kvBuckets: [] },
-  { id: 'agenda', label: '备忘与日程', color: '#32D74B', stores: ['notes', 'events', 'reminders'], kvBuckets: [] },
-  { id: 'sys', label: '设置与系统', color: '#64D2FF', stores: ['settings', 'alarms', 'cities'], kvBuckets: ['music', 'system'] },
+/**
+ * 按 App 独立管理：每一行对应一个真实 App，
+ * 数据来源 = IndexedDB 记录仓 + kv 前缀 + localStorage 前缀。
+ */
+export const APP_DATA_SPECS: AppDataSpec[] = [
+  {
+    id: 'chat',
+    label: '聊天 · 信息',
+    image: '/icons/chat.png',
+    stores: ['chat-sessions', 'chat-messages', 'call-logs', 'voicemails'],
+    kvPrefixes: ['ios-chat', 'sms-chat', 'chat-translate'],
+    lsPrefixes: [],
+  },
+  { id: 'wechat', label: '微信', image: '/icons/wechat.png', stores: [], kvPrefixes: ['wx'], lsPrefixes: [] },
+  { id: 'qq', label: 'QQ', image: '/icons/qq.png', stores: [], kvPrefixes: ['qq'], lsPrefixes: [] },
+  { id: 'forum', label: 'X 论坛', image: '/icons/forum.png', stores: [], kvPrefixes: ['forum'], lsPrefixes: [] },
+  { id: 'music', label: '音乐', image: '/icons/music.png', stores: ['music'], kvPrefixes: ['music'], lsPrefixes: [] },
+  { id: 'reading', label: '阅读', image: '/icons/reading.png', stores: [], kvPrefixes: ['rd-'], lsPrefixes: ['rd-'] },
+  { id: 'cottage', label: '拾光小屋 · 3D', image: '/icons/cottage.png', stores: [], kvPrefixes: ['cabin', 'cottage'], lsPrefixes: ['cabin-'] },
+  { id: 'photos', label: '照片与相册', image: '/icons/photos.png', stores: ['photos', 'albums', 'visionDecisions'], kvPrefixes: [], lsPrefixes: [] },
+  { id: 'notes', label: '备忘录 · 日程', image: '/icons/notes.png', stores: ['notes', 'events', 'reminders'], kvPrefixes: [], lsPrefixes: [] },
+  { id: 'memory', label: '记忆 · 世界书', image: '/icons/memory-helper.png', stores: [], kvPrefixes: ['mem-', 'worldbook', 'wb-'], lsPrefixes: [] },
 ];
 
-export interface ModuleStat extends DataModule {
-  stat: StoreStat;
+export interface AppDataStat extends AppDataSpec {
+  bytes: number;
+  lastAt: number | null;
 }
 
-/** 并发实测全部模块占用（模块占用分析环形图数据源） */
-export async function computeModuleStats(): Promise<ModuleStat[]> {
-  const kv = await statKv();
-  const moduleStats = await Promise.all(
-    DATA_MODULES.map(async (m) => {
-      const storeStats = await Promise.all(m.stores.map((s) => statStore(s)));
-      const kvStats = m.kvBuckets.map((b) => kv[b]);
-      return { ...m, stat: mergeStats(...storeStats, ...kvStats) };
-    }),
-  );
-  return moduleStats;
+function matchesPrefix(key: string, prefixes: string[]): boolean {
+  return prefixes.some((p) => key === p || key.startsWith(p));
 }
 
-// ---------------- 模块清理（危险操作） ----------------
-
-/** 清空所选模块：store 整仓 clear + kv 按桶前缀逐键删除；返回清理的 kv 键数 */
-export async function clearModules(moduleIds: string[]): Promise<number> {
-  const targets = DATA_MODULES.filter((m) => moduleIds.includes(m.id));
-  let kvDeleted = 0;
-  for (const m of targets) {
-    for (const s of m.stores) {
-      await localDB.clear(s);
+function readLsEntries(): [string, string][] {
+  const out: [string, string][] = [];
+  try {
+    for (let i = 0; i < window.localStorage.length; i++) {
+      const k = window.localStorage.key(i);
+      if (k == null) continue;
+      out.push([k, window.localStorage.getItem(k) ?? '']);
     }
-    if (m.kvBuckets.length > 0) {
-      const rows = await localDB.getAll('kv');
-      for (const r of rows) {
-        if (m.kvBuckets.includes(kvBucketOf(r.key))) {
-          await localDB.delete('kv', r.key);
-          kvDeleted++;
-        }
+  } catch {
+    // 隐私模式等读不到：仅统计 IndexedDB
+  }
+  return out;
+}
+
+/** 并发实测各 App 占用（列表数据源） */
+export async function computeAppStats(): Promise<AppDataStat[]> {
+  const kvRows = await localDB.getAll('kv').catch(() => [] as { key: string; value: unknown }[]);
+  const ls = readLsEntries();
+  const storeStats = await Promise.all(
+    APP_DATA_SPECS.map((spec) => Promise.all(spec.stores.map((s) => statStore(s)))),
+  );
+  return APP_DATA_SPECS.map((spec, i) => {
+    let bytes = 0;
+    let lastAt: number | null = null;
+    for (const s of storeStats[i]) {
+      bytes += s.bytes;
+      if (s.lastAt != null && (lastAt == null || s.lastAt > lastAt)) lastAt = s.lastAt;
+    }
+    if (spec.kvPrefixes.length > 0) {
+      for (const r of kvRows) {
+        if (matchesPrefix(r.key, spec.kvPrefixes)) bytes += valueBytes(r.value) + strBytes(r.key);
       }
     }
+    if (spec.lsPrefixes.length > 0) {
+      for (const [k, v] of ls) {
+        if (matchesPrefix(k, spec.lsPrefixes)) bytes += strBytes(k) + strBytes(v);
+      }
+    }
+    return { ...spec, bytes, lastAt };
+  });
+}
+
+// ---------------- App 级清理（红色危险操作） ----------------
+
+/** 清空所选 App：store 整仓 clear + kv 前缀逐键删除 + localStorage 前缀逐键删除 */
+export async function clearAppData(appIds: string[]): Promise<void> {
+  const specs = APP_DATA_SPECS.filter((s) => appIds.includes(s.id));
+  if (specs.length === 0) return;
+  for (const spec of specs) {
+    for (const s of spec.stores) await localDB.clear(s);
   }
-  return kvDeleted;
+  const kvPrefixes = specs.flatMap((s) => s.kvPrefixes);
+  if (kvPrefixes.length > 0) {
+    const rows = await localDB.getAll('kv');
+    for (const r of rows) {
+      if (matchesPrefix(r.key, kvPrefixes)) await localDB.delete('kv', r.key);
+    }
+  }
+  const lsPrefixes = specs.flatMap((s) => s.lsPrefixes);
+  if (lsPrefixes.length > 0) {
+    try {
+      const doomed: string[] = [];
+      for (let i = 0; i < window.localStorage.length; i++) {
+        const k = window.localStorage.key(i);
+        if (k != null && matchesPrefix(k, lsPrefixes)) doomed.push(k);
+      }
+      for (const k of doomed) window.localStorage.removeItem(k);
+    } catch {
+      // 隐私模式等读不到：只清 IndexedDB
+    }
+  }
+}
+
+// ---------------- 备份标记（已备份 / 未备份全局汇总） ----------------
+
+const APP_BACKUP_MARKS_KEY = 'app-backup-marks-v1';
+
+export interface AppBackupMark {
+  at: number;
+  bytes: number;
+}
+export type AppBackupMarks = Record<string, AppBackupMark>;
+
+export async function readAppBackupMarks(): Promise<AppBackupMarks> {
+  try {
+    const v = (await localDB.get('settings', APP_BACKUP_MARKS_KEY))?.value;
+    return v && typeof v === 'object' ? (v as AppBackupMarks) : {};
+  } catch {
+    return {};
+  }
+}
+
+export async function markAppsBackedUp(entries: { id: string; bytes: number }[]): Promise<AppBackupMarks> {
+  const marks = await readAppBackupMarks();
+  const at = Date.now();
+  for (const e of entries) marks[e.id] = { at, bytes: e.bytes };
+  await localDB.put('settings', { key: APP_BACKUP_MARKS_KEY, value: marks });
+  return marks;
+}
+
+export async function clearAppBackupMarks(appIds?: string[]): Promise<AppBackupMarks> {
+  if (!appIds) {
+    await localDB.put('settings', { key: APP_BACKUP_MARKS_KEY, value: {} });
+    return {};
+  }
+  const marks = await readAppBackupMarks();
+  for (const id of appIds) delete marks[id];
+  await localDB.put('settings', { key: APP_BACKUP_MARKS_KEY, value: marks });
+  return marks;
 }
 
 // ---------------- 浏览器持久化保护 ----------------
