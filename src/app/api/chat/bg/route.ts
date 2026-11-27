@@ -163,6 +163,32 @@ function hashStr(s: string): string {
   return (h >>> 0).toString(36);
 }
 
+/** v2.4.28（第四十七轮）：pollNative / peekAll(preview) 共用的逐条消息构建：
+ *  single 模式按 &&& 拆分（客户端 buildReplyMsgs 同款分段口径），deliver 模式每条
+ *  text 即一条消息；文本走 relayPreviewText 净化（通知预览用）；id 稳定（`${item.id}#${i}`）。
+ *  createdAt = 所属 PendingItem 的入队时刻（v2.4.28 新增）——原生 BgNotifyPoller 用它
+ *  区分「退后台前就躺在队列里的旧消息」与「退后台瞬间/之后到达的新消息」，
+ *  修 deliver 接力与边界轮询的竞态（旧实现把刚入队的新消息标记已见导致永不弹通知）。 */
+function buildRelayMessages(
+  arr: PendingItem[],
+): { id: string; text: string; createdAt: number }[] {
+  const messages: { id: string; text: string; createdAt: number }[] = [];
+  arr.forEach((item) => {
+    if (item.single) {
+      (item.texts[0] ?? '').split('&&&').forEach((seg, i) => {
+        const txt = relayPreviewText(seg);
+        if (txt && txt !== '[新消息]') messages.push({ id: `${item.id}#${i}`, text: txt, createdAt: item.createdAt });
+      });
+    } else {
+      item.texts.forEach((t, i) => {
+        const txt = relayPreviewText(t);
+        if (txt && txt !== '[新消息]') messages.push({ id: `${item.id}#${i}`, text: txt, createdAt: item.createdAt });
+      });
+    }
+  });
+  return messages;
+}
+
 function enqueue(sessionKey: string, texts: string[], single: boolean, title: string): PendingItem {
   const item: PendingItem = {
     id: `bg-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
@@ -375,7 +401,15 @@ export async function GET(req: Request): Promise<NextResponse> {
     const counts: Record<string, number> = {};
     const previews: Record<
       string,
-      { count: number; title: string; avatar?: string; preview: string }
+      {
+        count: number;
+        title: string;
+        avatar?: string;
+        preview: string;
+        /** v2.4.28（第四十七轮）：逐条消息（id/文本）——网页守望者据它逐条弹通知，
+         *  不再把一批消息合并成一条横幅（机主规格「AI 发几条消息就弹几次」） */
+        messages?: { id: string; text: string }[];
+      }
     > = {};
     const wantPreview = sp.get('preview') === '1';
     pending.forEach((arr, key) => {
@@ -385,11 +419,13 @@ export async function GET(req: Request): Promise<NextResponse> {
       if (!wantPreview) return;
       const first = arr[0];
       const meta = sessionMetas.get(key);
+      const msgs = buildRelayMessages(arr);
       previews[key] = {
         count: n,
         title: meta?.title || first?.title || appDefaultName(key),
         ...(meta?.avatar ? { avatar: meta.avatar } : {}),
         preview: relayPreviewText(first?.texts?.[0] ?? ''),
+        ...(msgs.length > 0 ? { messages: msgs.map(({ id, text }) => ({ id, text })) } : {}),
       };
     });
     return wantPreview
@@ -403,6 +439,9 @@ export async function GET(req: Request): Promise<NextResponse> {
   // 每 10s 直接 GET 本视图：每会话返回【逐条消息】（id 稳定 = `${item.id}#${i}`，
   // 原生按 id 去重后每条弹一条 heads-up 通知——「AI 发几条就弹几次」）+ batchKey
   // （与客户端守望者去重键完全同构：`${key}#${count}#${hash(preview)}`）。
+  // v2.4.28（第四十七轮）：每条消息附带 createdAt（入队时刻）——原生边界轮询用它
+  // 区分「退后台前的旧存货」与「退后台后到达的新消息」，修 deliver 接力竞态
+  // （旧实现竞态下把刚入队的新消息标已见 → 永不弹通知 → 点回 APP 才看到）。
   // 只读不消费：正式投递/落盘仍由聊天页拉取（GET ?sessionKey= + consume）完成，
   // 客户端回前台时用 consumeBgNotified 把原生已弹过的 batchKey 并入 seen 集合防双弹。
   if (sp.get('pollNative')) {
@@ -414,7 +453,7 @@ export async function GET(req: Request): Promise<NextResponse> {
         title: string;
         avatar?: string;
         target?: { app: string; contactId?: string; groupId?: string };
-        messages: { id: string; text: string }[];
+        messages: { id: string; text: string; createdAt: number }[];
       }
     > = {};
     pending.forEach((arr, key) => {
@@ -425,20 +464,7 @@ export async function GET(req: Request): Promise<NextResponse> {
       const preview = relayPreviewText(first?.texts?.[0] ?? '');
       // 逐条消息：single 模式按 &&& 拆分（客户端 buildReplyMsgs 同款分段口径），
       // deliver 模式每条 text 即一条消息；文本走 relayPreviewText 净化（通知预览用）
-      const messages: { id: string; text: string }[] = [];
-      arr.forEach((item) => {
-        if (item.single) {
-          (item.texts[0] ?? '').split('&&&').forEach((seg, i) => {
-            const txt = relayPreviewText(seg);
-            if (txt && txt !== '[新消息]') messages.push({ id: `${item.id}#${i}`, text: txt });
-          });
-        } else {
-          item.texts.forEach((t, i) => {
-            const txt = relayPreviewText(t);
-            if (txt && txt !== '[新消息]') messages.push({ id: `${item.id}#${i}`, text: txt });
-          });
-        }
-      });
+      const messages = buildRelayMessages(arr);
       if (messages.length === 0) return;
       const relayTarget = relayTargetOf(key);
       sessions[key] = {

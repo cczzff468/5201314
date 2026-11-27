@@ -8,3 +8,4 @@ upload/
 *.log
 .DS_Store
 .data/
+tsconfig.tsbuildinfo

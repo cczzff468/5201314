@@ -19,11 +19,14 @@
  * - 20s 兜底轮询（多实例部署等收不到广播的场景最后防线）；
  * - peek（GET /api/chat/bg?peekAll=1&preview=1）发现有待达消息的会话：
  *   · 该会话正在流式/投递中 → 跳过（原管线投递时会正常弹横幅，不抑制）；
- *   · 否则直接 pushChatNotification 弹灵动岛横幅 + 提示音（页面隐藏时走系统通知；
- *     DND/会话免打扰/系统通知总闸在 pushChatNotification 内统一生效），
+ *   · 否则【逐条】pushChatNotification（v2.4.28：服务端带回逐条 messages，
+ *     AI 发几条就弹几次，不再把一批消息合并成一条首条预览横幅），
  *     并 suppressSessionBanner —— 聊天页稍后正式投递同一批消息时不再重复弹
  *     （观察到该会话投递忙→闲跃迁或 5min TTL 后解除）；
- *   · 不消费服务端队列：正式落盘投递仍由聊天页挂载拉取完成（读拉/写清协议不变）。
+ *   · 不消费服务端队列：正式落盘投递仍由聊天页挂载拉取完成（读拉/写清协议不变）；
+ * - v2.4.28：APK 新壳（带原生 BgNotifyPoller）页面后台期间不弹网页通知，只叫醒
+ *   原生轮询器（pokeBgNotify）立即拉一轮——WebView 后台 JS 可能被冻结，原生侧
+ *   不依赖 JS；旧壳/浏览器维持网页自己弹。
  *
  * 去重键 = `${sessionKey}#${count}#${preview hash}`（localStorage 持久化，上限 200 条）：
  * 数量或首条预览变化（新接力到达）才会再次弹；旧条目残留无害（上限淘汰）。
@@ -36,6 +39,7 @@ import {
   isSysNotifyEnabled,
   pushChatNotification,
   suppressSessionBanner,
+  truncateBody,
   type NotifyApp,
   type NotifyTarget,
 } from './island-notify';
@@ -46,13 +50,39 @@ import { getDeliveringSessionKeys, subscribeAiDeliveryActive, yieldToEventLoop }
 import { isPageBackground } from './system-notify';
 import { onKeepAliveTick } from './keepalive';
 
-// ---------------- v2.4.27 原生后台通知协作（第四十六轮·后台通知根修） ----------------
+// ---------------- v2.4.27 原生后台通知协作（第四十七轮升级） ----------------
 
 /** APK 原生桥（MainActivity addJavascriptInterface 的 window.AIPhoneNative）上
- *  本模块用到的两个方法（旧壳不存在时全体静默跳过，不影响浏览器端） */
+ *  本模块用到的三个方法（旧壳不存在时全体静默跳过，不影响浏览器端）
+ *  v2.4.28 新增 pokeBgNotify：网页在后台收到 SSE 接力广播时叫醒原生轮询线程
+ *  立即拉一轮（毫秒级），WebView 冻结时原生自己的快速节奏兑底 */
 interface AIPhoneNativeBg {
   setBgNotifyConfig?: (json: string) => void;
   consumeBgNotified?: () => string;
+  pokeBgNotify?: () => void;
+}
+
+/** 壳是否带【修好的】原生后台轮询器（v2.4.28+ / versionCode 92+，标志=pokeBgNotify 桥）：
+ *  有它时页面后台期间的通知完全交给原生（叫醒即拉即弹，避免网页/原生双弹）；
+ *  v91 旧壳（有轮询器但无唤醒桥、边界轮询有竞态）与浏览器 → 网页自己弹（维持原行为，
+ *  不把通知让位给可能有竞态的旧轮询器——旧壳上宁可冒双弹风险也不冒漏通知风险）。 */
+function hasNativeBgPoller(): boolean {
+  try {
+    const N = (window as unknown as { AIPhoneNative?: AIPhoneNativeBg }).AIPhoneNative;
+    return !!N && typeof N.pokeBgNotify === 'function';
+  } catch {
+    return false;
+  }
+}
+
+/** 叫醒原生轮询器立即拉一轮（v2.4.28 新桥；旧壳无此方法时静默） */
+function pokeNativePoller(): void {
+  try {
+    const N = (window as unknown as { AIPhoneNative?: AIPhoneNativeBg }).AIPhoneNative;
+    if (N && typeof N.pokeBgNotify === 'function') N.pokeBgNotify();
+  } catch {
+    // 静默：旧壳无此方法
+  }
 }
 
 /** APK 退后台期间原生 BgNotifyPoller 已弹过 heads-up 的批次，回前台后绝不再弹（防双弹）。
@@ -191,6 +221,8 @@ interface RelayPreview {
   title?: string;
   avatar?: string;
   preview?: string;
+  /** v2.4.28：服务端逐条消息（id/文本）——每条消息各弹一次通知（不合并） */
+  messages?: { id: string; text: string }[];
 }
 
 let peekInflight = false;
@@ -203,6 +235,15 @@ async function peekOnce(): Promise<void> {
   }
   peekInflight = true;
   try {
+    // v2.4.28（第四十七轮·后台通知双根修）：APK 新壳（带原生 BgNotifyPoller）在页面
+    // 后台期间把系统通知完全交给原生轮询线程——WebView 后台 JS 可能被冻结，网页弹了
+    // 也可能被系统挂起；原生侧不依赖 JS，SSE 广播到达时这里只做一件事：叫醒原生
+    // 轮询器立即拉一轮（pokeBgNotify，毫秒级），不弹网页通知（防双弹）。
+    // 旧壳/浏览器无轮询器 → 维持原行为：网页自己弹（逐条）。
+    if (isPageBackground() && hasNativeBgPoller()) {
+      pokeNativePoller();
+      return;
+    }
     const res = await fetch('/api/chat/bg?peekAll=1&preview=1');
     if (!res.ok) return;
     const data = (await res.json()) as { previews?: Record<string, RelayPreview> };
@@ -228,14 +269,36 @@ async function peekOnce(): Promise<void> {
       // 5min 内到达的批次#4 横幅被吞）。清旧 → 弹新 → 重新武装，抑制永远只覆盖
       // 「已弹过横幅的当前批」，正式投递同一批时不重复弹
       clearSessionBannerSuppress(key);
-      pushChatNotification({
-        sessionKey: key,
-        app: parsed.app,
-        title: p.title?.trim() || '新消息',
-        avatar: p.avatar ?? null,
-        body: preview,
-        target: parsed.target,
-      });
+      // v2.4.28（第四十七轮·逐条弹根修）：服务端带回逐条消息时每条消息各弹一次
+      // （灵动岛横幅逐条排队 + 原生 localNotify 逐条 heads-up，串行间隔 2.4s）——
+      // 旧实现一批只弹一条首条预览横幅，机主看到的正是「把 AI 的消息弄到一起了」。
+      // 服务端旧版本无 messages 字段时回退单条预览（兼容）。
+      const msgs = Array.isArray(p.messages) ? p.messages : [];
+      const bodies = msgs
+        .filter((m) => m && typeof m.id === 'string' && typeof m.text === 'string')
+        .map((m) => truncateBody(m.text))
+        .filter((t) => t.length > 0);
+      if (bodies.length > 0) {
+        for (const body of bodies) {
+          pushChatNotification({
+            sessionKey: key,
+            app: parsed.app,
+            title: p.title?.trim() || '新消息',
+            avatar: p.avatar ?? null,
+            body,
+            target: parsed.target,
+          });
+        }
+      } else {
+        pushChatNotification({
+          sessionKey: key,
+          app: parsed.app,
+          title: p.title?.trim() || '新消息',
+          avatar: p.avatar ?? null,
+          body: preview,
+          target: parsed.target,
+        });
+      }
       // 正式投递同一批消息时不再重复弹（投递忙→闲跃迁或 TTL 后解除）
       suppressSessionBanner(key);
     }

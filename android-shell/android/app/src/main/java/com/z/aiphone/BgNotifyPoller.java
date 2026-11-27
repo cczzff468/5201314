@@ -23,25 +23,39 @@ import java.net.URL;
 import java.nio.charset.StandardCharsets;
 
 /**
- * v2.4.27（第四十六轮·后台通知根修）：APK 原生后台消息轮询器。
+ * v2.4.28（第四十七轮·后台通知双根修）：APK 原生后台消息轮询器。
  *
- * 【背景】WebView 退后台 JS 被冻结——bg-relay-watcher/灵动岛横幅/系统通知全部
+ * 【背景】WebView 退后台 JS 可能被冻结——bg-relay-watcher/灵动岛横幅/系统通知
  * 只在用户点回 APP 后才跑，机主反馈「APP 系统通知和悬浮通知要点进去才出现」。
  * 服务端接力（/api/chat/bg）把回复生成进 pending 队列后，只有回前台才被拉取。
  *
- * 【方案】零配置零付费：原生侧起一条 10s 轮询线程，直接 GET 服务端的
- * pollNative 视图（每会话返回逐条消息 + 与网页守望者同构的 batchKey 去重键）：
+ * 【方案】零配置零付费：原生侧起一条轮询线程，直接 GET 服务端的 pollNative
+ * 视图（每会话返回逐条消息 + 与网页守望者同构的 batchKey 去重键）：
  * - App 在后台（MainActivity.isAppInForeground()==false）且有【新消息 id】时，
  *   每条消息弹一条 heads-up 通知（IMPORTANCE_HIGH 渠道 + CATEGORY_MESSAGE +
  *   点击直达对应聊天）——「AI 发几条消息就弹几次悬浮通知」；
  * - 通知 id 用稳定消息 id（tag=bgm-<id>）：通知栏逐条独立堆叠、互不覆盖，
  *   重复轮询也不会重复弹（SharedPreferences 去重集合，重启也不丢）；
  * - App 在前台时只把当前 pending id 记为「已见」不弹（前台由网页 JS 弹，
- *   防止同一批消息双弹）；退后台瞬间的边界轮询同样只标记不弹（那批消息
- *   网页在前台时已经看到过横幅）；
- * - 已弹过通知的 batchKey 存入待认领队列：网页回前台加载时经
+ *   防止同一批消息双弹）；
+ * - 已弹过/已见过的 batchKey 存入待认领队列：网页回前台加载时经
  *   AIPhoneNative.consumeBgNotified() 取走并入自己的 seen 集合 + 横幅抑制
  *   （聊天页正式投递同一批时不再弹第二轮）——两端去重口径完全一致。
+ *
+ * 【v2.4.28 两处根修（机主反馈「AI 发来消息不通知，点进 APP 才通知」）】
+ * ① 边界竞态根修：旧版退后台瞬间的「边界轮询」把当时 pending 里的消息全部标记
+ *   已见不弹——而网页在 visibilitychange→hidden 发出的 deliver 接力 beacon 可能在
+ *   边界轮询 GET 之前就已入队（sendBeacon 与边界 GET 同时在途）→ 刚入队的【新】
+ *   消息被当成「前台已看过」静默吞掉，永不弹通知（点回 APP 才看到）。
+ *   现服务端每条消息带 createdAt（入队时刻）：边界轮询只静默标记「退后台 800ms
+ *   之前就在队列里的旧存货」（网页前台时确实已弹过横幅）；createdAt 落在
+ *   退后台前后窗口内的新消息 → 照常弹 heads-up（App 此刻已退后台）。
+ * ② 立即生效根修（自适应节奏 + 唤醒）：
+ *   - 轮询间隔自适应：退后台 75s 内（生成窗口）+ 每次弹到新消息后 45s 内 = 4s
+ *     快节奏；后台空闲 15s；前台 30s（前台通知由网页负责，原生只维持 seen 去重）；
+ *   - onAppBackgrounded 即刻唤醒轮询线程（wait/notify，不再傻等上一个整周期）；
+ *   - 新桥 AIPhoneNative.pokeBgNotify()：网页在后台收到 SSE bg-pending 广播时
+ *     （WebView JS 还活着、但通知已让位原生防双弹）叫醒原生立即拉一轮——毫秒级。
  *
  * 【生命周期】轮询线程挂在进程上（静态单例）：
  * - 网页启动时 AIPhoneNative.setBgNotifyConfig({url, enabled, dnd}) 下发配置并拉起；
@@ -64,7 +78,16 @@ public final class BgNotifyPoller {
     /** 已弹过通知的 batchKey 待认领队列（网页 consumeBgNotified 取走并清空） */
     private static final String KEY_PENDING_BATCH_KEYS = "pending_batch_keys";
 
-    private static final int POLL_INTERVAL_MS = 10_000;
+    /** 后台空闲节奏（v2.4.28：10s → 15s——后台通知由快节奏窗口优先覆盖） */
+    private static final int POLL_IDLE_MS = 15_000;
+    /** 快节奏（退后台生成窗口 / 弹到新消息后）：机主要求「AI 发来消息立马生效」 */
+    private static final int POLL_FAST_MS = 4_000;
+    /** 前台节奏：前台通知由网页负责，原生只维持 seen 去重，放慢省流量 */
+    private static final int POLL_FG_MS = 30_000;
+    /** 退后台后的快节奏窗口（服务端生成一般 2~15s，多轮消息排队再放宽） */
+    private static final long FAST_AFTER_BG_MS = 75_000;
+    /** 每次发现新消息后的快节奏窗口（连发多条的批次接着来） */
+    private static final long FAST_AFTER_HIT_MS = 45_000;
     /** 相邻两条 heads-up 的最小间隔（与网页端 NOTIFY_SPACING_MS 对齐，横幅逐条可见） */
     private static final int POST_SPACING_MS = 2400;
     private static final int HTTP_TIMEOUT_MS = 10_000;
@@ -72,6 +95,8 @@ public final class BgNotifyPoller {
     private static final int SEEN_IDS_MAX = 400;
     /** 待认领 batchKey 上限 */
     private static final int PENDING_KEYS_MAX = 40;
+    /** 边界判定容差：createdAt ≥ 退后台时刻-800ms 视为「新消息」（deliver beacon 竞态窗口） */
+    private static final long BOUNDARY_MARGIN_MS = 800;
 
     /** 与 NativePerceptionPlugin 共用的渠道 id（同名同配，幂等创建） */
     private static final String HIGH_CHANNEL = "local_notify_high";
@@ -79,6 +104,13 @@ public final class BgNotifyPoller {
     private static volatile Thread worker = null;
     private static volatile boolean running = false;
     private static final Object START_LOCK = new Object();
+
+    /** 轮循环节奏锁：wait/notify 唤醒 + pollOnce 串行化（边界线程与主循环互斥防双弹） */
+    private static final Object POLL_LOCK = new Object();
+    /** 最近一次退后台时刻（0 = 从未退过）；边界轮询用它区分旧存货/新消息 */
+    private static volatile long lastBackgroundAt = 0L;
+    /** 快节奏截止时刻（退后台/弹到新消息/被 poke 时延长） */
+    private static volatile long fastUntil = 0L;
 
     private BgNotifyPoller() {
     }
@@ -156,11 +188,42 @@ public final class BgNotifyPoller {
             running = false;
             worker = null; // 循环按 running 旗标自然退出（线程自灭，不 interrupt）
         }
+        // 唤醒可能在 wait 的轮询线程，让它立刻看到 running=false 退出
+        synchronized (POLL_LOCK) {
+            POLL_LOCK.notifyAll();
+        }
     }
 
     /** 当前轮询线程是否在跑（诊断/网页状态展示用） */
     public static boolean isRunning() {
         return running;
+    }
+
+    /**
+     * v2.4.28 新桥 AIPhoneNative.pokeBgNotify() 入口：叫醒轮询线程立即拉一轮
+     * （网页在后台收到 SSE bg-pending 广播时调用——WebView JS 还活着但通知已让位
+     * 原生防双弹，这里把「立即」补上：毫秒级拉取 + 弹通知，不等下一个周期）。
+     * 同时拉起（未跑时）+ 延长快节奏窗口。同步部分放独立线程：防轮询中（锁被占）
+     * 阻塞 WebView 桥线程。
+     */
+    public static void poke() {
+        try {
+            SharedPreferences sp = appPrefs;
+            if (sp == null || !sp.getBoolean(KEY_ENABLED, false)) return;
+            Context ctx = appContext;
+            if (ctx != null) ensureStarted(ctx);
+            new Thread(() -> {
+                try {
+                    synchronized (POLL_LOCK) {
+                        long now = System.currentTimeMillis();
+                        if (now + FAST_AFTER_HIT_MS > fastUntil) fastUntil = now + FAST_AFTER_HIT_MS;
+                        POLL_LOCK.notifyAll();
+                    }
+                } catch (Throwable ignored) {
+                }
+            }, "bg-notify-poke").start();
+        } catch (Throwable ignored) {
+        }
     }
 
     // ================= 网页桥：待认领 batchKey =================
@@ -195,22 +258,31 @@ public final class BgNotifyPoller {
     // ================= 生命周期（MainActivity 回调） =================
 
     /**
-     * MainActivity.onStop 调用：App 退后台。
-     * 立即做一次【边界轮询】——把当前 pending 的消息 id 全部记为「已见」但【不弹】
-     * （这些消息网页在前台时已经看到/弹过横幅），之后轮询发现的新 id 才是
-     * 「后台期间到达的新消息」→ 弹 heads-up。
+     * MainActivity.onStop 调用：App 退后台（UI 线程——只做 volatile 写 + 拉起
+     * 一次性线程，绝不阻塞主线程）。
+     * ① 记录退后台时刻（边界轮询用它区分旧存货/新消息）；
+     * ② 一次性线程跑【边界轮询】：把「退后台前就躺在队列里的旧存货」（createdAt
+     *   早于退后台时刻-800ms，网页前台时已弹过横幅）记为已见不弹；退后台前后
+     *   窗口内到达的【新】消息照常弹 heads-up（v2.4.28 边界竞态根修——旧版无脑
+     *   全标记，deliver 接力 beacon 抢先入队的新消息被吞，永不弹通知）；
+     * ③ 边界轮询完成后唤醒主循环进入快节奏（4s）。
      */
     public static void onAppBackgrounded(Context ctx) {
         // 轮询线程在跑才需要边界标记；线程没跑（未配置）零动作
         if (!running) return;
         if (ctx != null) cacheContext(ctx.getApplicationContext());
-        final Thread self = worker;
-        if (self == null) return;
-        // 直接在独立一次性线程里跑（不干扰主轮循环节奏）
+        if (worker == null) return;
+        lastBackgroundAt = System.currentTimeMillis();
         new Thread(() -> {
             try {
                 pollOnce(true);
             } catch (Throwable ignored) {
+            } finally {
+                synchronized (POLL_LOCK) {
+                    long now = System.currentTimeMillis();
+                    if (now + FAST_AFTER_BG_MS > fastUntil) fastUntil = now + FAST_AFTER_BG_MS;
+                    POLL_LOCK.notifyAll(); // 主循环立刻进入快节奏
+                }
             }
         }, "bg-notify-boundary").start();
     }
@@ -229,86 +301,127 @@ public final class BgNotifyPoller {
             } catch (Throwable ignored) {
                 // 网络异常等静默：下一轮重试（消息本体在服务端队列，不丢）
             }
-            try {
-                Thread.sleep(POLL_INTERVAL_MS);
-            } catch (InterruptedException ie) {
-                Thread.currentThread().interrupt();
-                return;
+            synchronized (POLL_LOCK) {
+                long now = System.currentTimeMillis();
+                long sleepMs = now < fastUntil
+                        ? POLL_FAST_MS
+                        : (MainActivity.isAppInForeground() ? POLL_FG_MS : POLL_IDLE_MS);
+                try {
+                    POLL_LOCK.wait(sleepMs);
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    return;
+                }
+                if (!running) return;
             }
         }
     }
 
     /**
-     * 单轮轮询：GET {url}/api/chat/bg?pollNative=1。
+     * 单轮轮询：GET {url}/api/chat/bg?pollNative=1（POLL_LOCK 串行——边界线程与
+     * 主循环互斥，防同一批消息双弹）。
      *
-     * @param markOnly true = 边界轮询（只把当前消息 id 记为已见，不弹通知）；
-     *                 false = 常规轮询（App 后台时对未见 id 逐条弹 heads-up）。
+     * @param boundary true = 边界轮询（退后台瞬间）：旧存货只标记已见不弹；
+     *                 退后台前后窗口内到达的新消息照常弹（竞态根修）。
+     *                 false = 常规轮询：后台弹 / 前台只标记。
      */
-    private static void pollOnce(boolean markOnly) {
-        SharedPreferences sp = appPrefs;
-        if (sp == null) return;
-        String base = sp.getString(KEY_URL, null);
-        if (normalizeUrl(base) == null) return;
-        boolean dnd = sp.getBoolean(KEY_DND, false);
-        String body = httpGet(base + "/api/chat/bg?pollNative=1");
-        if (body == null || body.isEmpty()) return;
-        JSONObject root;
-        try {
-            root = new JSONObject(body);
-        } catch (Throwable t) {
-            return; // 非 JSON 响应（代理报错页等）：静默跳过本轮
-        }
-        JSONObject sessions = root.optJSONObject("sessions");
-        if (sessions == null) return;
-
-        boolean inForeground = MainActivity.isAppInForeground();
-        // markOnly 或前台或总闸关闭 → 只标记不弹
-        boolean postAllowed = !markOnly && !inForeground && sp.getBoolean(KEY_ENABLED, false) && !dnd;
-
-        java.util.Set<String> seen = new java.util.HashSet<>(loadSeenIds(sp));
+    private static void pollOnce(boolean boundary) {
+        // 预初始化（锁内早退路径直接返回空表——锁外发通知循环安全跳过）
         java.util.List<NotificationJob> jobs = new java.util.ArrayList<>();
-        java.util.List<String> newBatchKeys = new java.util.ArrayList<>();
+        synchronized (POLL_LOCK) {
+            SharedPreferences sp = appPrefs;
+            if (sp == null) return;
+            String base = sp.getString(KEY_URL, null);
+            if (normalizeUrl(base) == null) return;
+            boolean dnd = sp.getBoolean(KEY_DND, false);
+            String body = httpGet(base + "/api/chat/bg?pollNative=1");
+            if (body == null || body.isEmpty()) return;
+            JSONObject root;
+            try {
+                root = new JSONObject(body);
+            } catch (Throwable t) {
+                return; // 非 JSON 响应（代理报错页等）：静默跳过本轮
+            }
+            JSONObject sessions = root.optJSONObject("sessions");
+            if (sessions == null) return;
 
-        java.util.Iterator<String> it = sessions.keys();
-        while (it.hasNext()) {
-            String key = it.next();
-            JSONObject sess = sessions.optJSONObject(key);
-            if (sess == null) continue;
-            String title = sess.optString("title", "");
-            if (title == null || title.isEmpty()) title = "新消息";
-            String target = null;
-            JSONObject t = sess.optJSONObject("target");
-            if (t != null) target = t.toString();
-            JSONArray msgs = sess.optJSONArray("messages");
-            if (msgs == null) continue;
-            boolean anyNew = false;
-            for (int i = 0; i < msgs.length(); i++) {
-                JSONObject m = msgs.optJSONObject(i);
-                if (m == null) continue;
-                String id = m.optString("id", "");
-                String text = m.optString("text", "");
-                if (id == null || id.isEmpty()) continue;
-                if (seen.contains(id)) continue; // 已弹过/已见过：去重
-                seen.add(id);
-                anyNew = true;
-                if (postAllowed) {
-                    jobs.add(new NotificationJob("bgm-" + id, title, text, target));
+            boolean inForeground = MainActivity.isAppInForeground();
+            // 总闸关闭/免打扰 → 只标记不弹（与网页口径一致）
+            boolean canPost = sp.getBoolean(KEY_ENABLED, false) && !dnd;
+
+            java.util.Set<String> seen = new java.util.HashSet<>(loadSeenIds(sp));
+            jobs = new java.util.ArrayList<>();
+            java.util.List<String> newBatchKeys = new java.util.ArrayList<>();
+            boolean anyPosted = false;
+
+            java.util.Iterator<String> it = sessions.keys();
+            while (it.hasNext()) {
+                String key = it.next();
+                JSONObject sess = sessions.optJSONObject(key);
+                if (sess == null) continue;
+                String title = sess.optString("title", "");
+                if (title == null || title.isEmpty()) title = "新消息";
+                String target = null;
+                JSONObject t = sess.optJSONObject("target");
+                if (t != null) target = t.toString();
+                JSONArray msgs = sess.optJSONArray("messages");
+                if (msgs == null) continue;
+                boolean anyNew = false;
+                for (int i = 0; i < msgs.length(); i++) {
+                    JSONObject m = msgs.optJSONObject(i);
+                    if (m == null) continue;
+                    String id = m.optString("id", "");
+                    String text = m.optString("text", "");
+                    long createdAt = m.optLong("createdAt", 0L);
+                    if (id == null || id.isEmpty()) continue;
+                    if (seen.contains(id)) continue; // 已弹过/已见过：去重
+                    // 边界轮询的旧存货判定：退后台 margin 之前就躺在队列里
+                    //（网页前台时已弹过横幅）→ 只标记已见不弹。
+                    // v2.4.28：deliver 接力 beacon 抢先入队的新消息（createdAt 在
+                    // 退后台前后窗口内）不再被吞——照常走弹通知分支。
+                    boolean staleLeftover = boundary
+                            && lastBackgroundAt > 0
+                            && createdAt > 0
+                            && createdAt < lastBackgroundAt - BOUNDARY_MARGIN_MS;
+                    if (staleLeftover) {
+                        seen.add(id);
+                        anyNew = true;
+                        continue;
+                    }
+                    if (inForeground && !boundary) {
+                        // 前台常规轮询：只标记已见（通知由网页 JS 弹，防双弹）
+                        seen.add(id);
+                        anyNew = true;
+                        continue;
+                    }
+                    // 后台（或边界轮询遇到新消息）：逐条弹 heads-up
+                    seen.add(id);
+                    anyNew = true;
+                    anyPosted = true;
+                    if (canPost) {
+                        jobs.add(new NotificationJob("bgm-" + id, title, text, target));
+                    }
+                }
+                if (anyNew) {
+                    String bk = sess.optString("batchKey", "");
+                    if (bk != null && !bk.isEmpty()) newBatchKeys.add(bk);
                 }
             }
-            if (anyNew) {
-                String bk = sess.optString("batchKey", "");
-                if (bk != null && !bk.isEmpty()) newBatchKeys.add(bk);
+
+            if (seen.size() > 0 || newBatchKeys.size() > 0) {
+                saveSeenIds(sp, seen);
+            }
+            if (newBatchKeys.size() > 0) {
+                appendPendingBatchKeys(sp, newBatchKeys);
+            }
+            // 弹到新消息 → 延长快节奏窗口（连发批次接着来）
+            if (anyPosted) {
+                long now = System.currentTimeMillis();
+                if (now + FAST_AFTER_HIT_MS > fastUntil) fastUntil = now + FAST_AFTER_HIT_MS;
             }
         }
-
-        if (seen.size() > 0 || newBatchKeys.size() > 0) {
-            saveSeenIds(sp, seen);
-        }
-        if (newBatchKeys.size() > 0) {
-            appendPendingBatchKeys(sp, newBatchKeys);
-        }
-
-        // 逐条弹（间隔与网页端对齐：每条横幅都有独立弹出+停留时间）
+        // 逐条弹（锁外——2.4s 间隔的 sleep 链不阻塞主循环/poke；id 已在锁内标记
+        // 去重，后续轮询不会重复弹同一批）
         Context ctx = appContext;
         for (NotificationJob job : jobs) {
             try {

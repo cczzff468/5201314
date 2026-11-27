@@ -3941,3 +3941,27 @@ Stage Summary:
 - 五项全闭环 + 发版 v2.4.27（versionCode 91）APK 重打部署 public/Cove.apk——机主覆盖安装后：输入框贴键盘上沿、退后台 AI 消息逐条弹悬浮通知（不用点进 APP）、锁定遮罩全屏沉浸
 - 后台通知架构：网页（前台弹）+ 原生轮询（后台弹）双通道，batchKey 同构去重防双弹；退后台自动交接回复生成给服务端，回前台不双回复不双投递
 - 联机功能：调研完成（推荐方案+备选+GitHub 参考），按机主要求本轮不实施
+
+---
+
+## 第四十七轮 v2.4.28（2026-11-28）后台通知双根修（竞态+立即生效）+ 悬浮通知逐条弹根修 + 电池图标充电绿/铺满
+
+Agent: 主控 Agent（Z.ai Code）
+Task: 机主三项——①APP 通知 AI 发来消息不通知要点进 APP 才通知；②悬浮通知把 AI 的消息弄到一起了（要 AI 发几条弹几条、立即生效）；③电池图标充电时内部变绿闪电变绿、外部模式填充铺满
+
+Work Log:
+- 【根因一·边界竞态（点进 APP 才通知的直接根因之一）】v2.4.27 边界轮询（onStop 时把当时 pending 全部标记已见不弹）与 deliver 接力 beacon 存在竞态：网页 visibilitychange→hidden 发出 mode=deliver 的 sendBeacon 与 MainActivity.onStop 拉起的边界轮询 GET 同时在途——beacon 先到服务端时，刚入队的【新】消息（用户从未见过）被边界轮询当成「前台已看过」标记已见 → 原生永不弹 + batchKey 记入待认领 → 回前台 absorb 吞掉网页弹窗 → 直到点进聊天页才看到消息。修复：服务端 pollNative 每条消息带 createdAt（入队时刻）；BgNotifyPoller 边界轮询只静默标记 createdAt < 退后台时刻-800ms 的旧存货（网页前台确实弹过横幅），退后台前后窗口内到达的新消息照常逐条弹 heads-up
+- 【根因二·立即生效】v2.4.27 固定 10s 轮询 + 竞态吞消息 = 体感「不通知」。四件：①自适应节奏——退后台 75s 内（生成窗口）4s 一轮、每次弹到新消息后再保持 45s 快节奏、后台空闲 15s、前台 30s（前台通知由网页负责，原生只维持 seen 去重，流量从 6 req/min 降下来）；②wait/notify 唤醒——退后台后边界线程完成即 notifyAll 主循环立刻进快节奏（旧版傻等上一个整周期最坏 10s）；③新桥 pokeBgNotify——网页在后台收到 SSE bg-pending 广播（WebView JS 还活着）时叫醒原生立即拉一轮（毫秒级；poke 的同步部分放独立线程防阻塞 WebView 桥线程）；④主线程零阻塞——onAppBackgrounded 只做 volatile 写+拉起一次性线程（旧版同步块在轮询持锁时可能卡 UI 线程）；pollOnce 整体 POLL_LOCK 串行（边界线程与主循环互斥防双弹），发通知的 2.4s sleep 链移到锁外
+- 【根因三·悬浮通知合并（AI 消息弄到一起）】网页守望者 peekOnce 旧版对每批 pending 只弹一条首条预览横幅（batchKey 去重=一批一条）——AI 连发 3 条、用户在别处/回前台时只看到 1 条合并横幅。修复：服务端 peekAll+preview 视图带回逐条 messages（buildRelayMessages 与 pollNative 同源构建）；守望者对每条消息各调一次 pushChatNotification（灵动岛横幅逐条 3s 排队 + 原生 localNotify 逐条 2.4s 串行 heads-up，tag=msg-<随机id> 独立堆叠不覆盖）——AI 发几条就弹几次
+- 【防双弹边界重划】新壳（有 setBgNotifyConfig 桥=v91+）页面后台期间守望者不再自己弹（网页弹的时机不可靠且与原生轮询重叠会双弹），只 pokeBgNotify 叫醒原生；旧壳/浏览器维持网页自弹（逐条）。前台行为不变（守望者逐条弹+聊天页投递横幅抑制）
+- 【电池图标·充电绿】inside 模式：充电时胶囊填充+跟随描边变绿（#30D158，iOS 充电语义），数字侧小闪电变绿+白色光环（绿填充/灰轨道上都可见）；低电不变红口径维持。outside/none 模式：充电闪电由白变绿（与绿色填充同色，白色光环保对比）
+- 【电池图标·铺满】outside/none 模式填充旧版四边留 1.8px 悬浮缝（100% 时右缘也有 1.8px 空隙 → 机主「图标里面没有铺满」）：改 1.2px 描边位贴边 + 宽度按 2.4px 留位计算，100% 时四边贴描边内缘真正铺满
+- 【通知总闸口径对齐】island-notify.maybeWebNotification 原生分支补 isSysNotifyEnabled 闸（旧版只有网页分支有——设置里关「允许通知」后 APK 通道照弹，与网页口径不一致）
+- 【发版 v2.4.28/92】build.gradle 92/2.4.28 + MainActivity getShellInfo/pokeBgNotify 桥 + app-version 五条发布说明 + APK 重打部署 public/Cove.apk
+
+验证:
+- lint/tsc 0 errors（待跑）；pollNative/peekAll 新字段 createdAt/messages API 实测（待跑）；agent-browser 登录链路+守望者逐条弹实测（待跑）；APK 重打 aapt 实测 versionCode 92（待跑）
+
+Stage Summary:
+- 后台通知三通道分工定型：前台=网页（逐条）、后台+新壳=原生轮询（竞态修复+4s 快节奏+poke 毫秒级）、后台+旧壳=网页自弹（逐条）；batchKey 同构去重防双弹口径不变
+- 机主覆盖安装 v92 APK 后：退后台 AI 消息 0~4s 内逐条弹悬浮通知（JS 冻结时兜底 4s 轮询，JS 活着时 poke 毫秒级）；回前台不再有「点了 APP 才弹一串」

@@ -697,6 +697,10 @@ function maybeWebNotification(n: IslandNotification): void {
   // （连发 5 条弹 5 个通知，并发不被系统吞）+ 前台闸（只渲染聊天不弹通知）+ 点击直达对应聊天。
   // 应用内灵动岛弹窗（pushChatNotification 前半段）不受影响，照常逐条弹。
   if (isNativePerception()) {
+    // v2.4.28：原生分支补系统通知总闸——设置里关了「允许通知」后，原生 localNotify
+    // 只查 Android 系统级权限（areNotificationsEnabled），应用内总闸被绕过（网页
+    // 分支一直有此闸）——两分支口径对齐，关闭后 Web/原生/推送三通道全部静音。
+    if (!isSysNotifyEnabled()) return;
     scheduleLocalNotification({
       id: n.id,
       title: n.title,

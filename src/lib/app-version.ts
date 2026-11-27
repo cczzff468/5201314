@@ -11,9 +11,9 @@
  */
 
 /** 当前最新版本（纯网页热更时与 APK versionName 可短暂不同步，下次重打 APK 对齐） */
-export const APP_VERSION = '2.4.27';
+export const APP_VERSION = '2.4.28';
 /** 版本号数字（与 android-shell versionCode 保持一致；覆盖安装要求只增不减；纯网页热更不动） */
-export const APP_VERSION_CODE = 91;
+export const APP_VERSION_CODE = 92;
 
 export interface AppReleaseNote {
   version: string;
@@ -24,6 +24,17 @@ export interface AppReleaseNote {
 
 /** 版本历史（新→旧；设置 › APP 更新 页渲染，最新一条即当前版本） */
 export const APP_RELEASE_NOTES: AppReleaseNote[] = [
+  {
+    version: '2.4.28',
+    date: '2026-11-28',
+    items: [
+      '【需重装 APK · versionCode 92】后台通知双根修一：退后台瞬间 deliver 接力与边界轮询的竞态修复——旧版竞态下刚入队的新消息被标记已见永不弹通知（点回 APP 才看到）；现在服务端每条消息带到达时刻，边界轮询只静默旧存货，新消息照常立即弹',
+      '【需重装 APK】后台通知双根修二：立即生效——轮询改自适应节奏（退后台 75s 内 4s 一轮、弹到新消息后续 45s 保持快节奏、前台 30s/空闲 15s 省流量），退后台瞬间即刻唤醒；新增 pokeBgNotify 桥，网页后台收到 SSE 广播时叫醒原生毫秒级拉取弹通知',
+      '【网页热更·免重装】悬浮通知合并根修：服务端接力队列带回逐条消息，网页守望者 AI 发几条消息就逐条弹几次（灵动岛横幅逐条排队 + 系统通知逐条串行），不再把一批消息合并成一条首条预览',
+      '【网页热更·免重装】状态栏电池：充电时图标内部填充变绿、闪电变绿（白色光环保证在绿色填充上可见）；外部/无百分比模式填充贴满内腔（旧版 1.8px 悬浮缝 → 看着没填满，现四边贴描边内缘真正铺满）',
+      '【网页热更·免重装】设置里关「允许通知」后原生 APK 通道同步静音（旧版原生分支绕过应用内总闸，与网页分支口径不一致）',
+    ],
+  },
   {
     version: '2.4.27',
     date: '2026-11-27',

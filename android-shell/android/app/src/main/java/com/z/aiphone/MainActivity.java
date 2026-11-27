@@ -653,6 +653,19 @@ public class MainActivity extends BridgeActivity {
             }
         }
 
+        /** v2.4.28（第四十七轮·后台通知双根修）③叫醒轮询器：网页在后台收到
+         *  SSE 接力广播（WebView JS 还活着、但通知已让位原生防双弹）时调用——
+         *  原生轮询线程立即拉一轮 + 逐条弹 heads-up（毫秒级，不等下个周期）。
+         *  旧壳无此方法时网页静默跳过。 */
+        @JavascriptInterface
+        public void pokeBgNotify() {
+            try {
+                BgNotifyPoller.poke();
+            } catch (Throwable ignored) {
+                // 桥异常不影响页面
+            }
+        }
+
         /** v2.4.9 壳版本桥：网页据 getShellInfo 是否存在区分新旧壳——新壳系统状态栏已隐藏
          *  （网页自绘状态栏回归显示）；旧壳无此方法，网页维持 v2.4.8 行为（自绘状态栏
          *  隐藏、系统状态栏融入），避免旧 APK 先拿到新 CSS 时出现双状态栏。
@@ -664,13 +677,15 @@ public class MainActivity extends BridgeActivity {
          *  为权威源不依赖此字段）。
          *  v2.4.25（第四十二轮）：版本同步 89 / 2.4.25（开屏闪屏对齐情书字标默认图标）。
          *  v2.4.27（第四十六轮）：版本同步 91 / 2.4.27（键盘跟随 adjustResize + 全局布局
-         *  兜底测高；后台通知原生轮询 BgNotifyPoller；锁屏遮罩沉浸式 FLAG_LAYOUT_NO_LIMITS）。 */
+         *  兜底测高；后台通知原生轮询 BgNotifyPoller；锁屏遮罩沉浸式 FLAG_LAYOUT_NO_LIMITS）。
+         * v2.4.28（第四十七轮）：版本同步 92 / 2.4.28（后台通知双根修：边界轮询竞态修复
+         *  + 自适应快速轮询 4s + pokeBgNotify 唤醒桥）。 */
         @JavascriptInterface
         public String getShellInfo() {
             JSONObject o = new JSONObject();
             try {
-                o.put("versionCode", 91);
-                o.put("versionName", "2.4.27");
+                o.put("versionCode", 92);
+                o.put("versionName", "2.4.28");
                 o.put("fullscreen", true); // 壳能力标记：v2.4.9+（系统条可原生隐藏/显示）
                 o.put("statusBarMode", statusBarMode); // v2.4.22：当前状态栏外观模式
             } catch (Exception ignored) {
