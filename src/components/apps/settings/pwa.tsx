@@ -37,7 +37,7 @@ import {
 
 import { AboutRow } from './profile';
 
-import { formatBytes } from './storage';
+import { formatBytes } from '@/lib/ios/storage-stats';
 
 
 // ---------------- 添加到主屏幕（v1.9.22：PWA 安装引导 + 离线能力管理） ----------------

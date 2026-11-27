@@ -23,7 +23,7 @@ import { mainOwnerContact } from '@/lib/ios/contacts-store';
 
 // ---------------- 常量与类型 ----------------
 
-export type Page = 'root' | 'account' | 'profile' | 'theme' | 'notification' | 'storage' | 'wallpaper' | 'font' | 'api' | 'vision' | 'imggen' | 'voice' | 'about' | 'lock' | 'prompts' | 'autonomy' | 'voiceagent' | 'appupdate' | 'pwa' | 'cloud';
+export type Page = 'root' | 'account' | 'profile' | 'theme' | 'notification' | 'wallpaper' | 'font' | 'api' | 'vision' | 'imggen' | 'voice' | 'about' | 'lock' | 'prompts' | 'autonomy' | 'voiceagent' | 'appupdate' | 'pwa' | 'cloud';
 
 export const IOS_RED = '#FF453A';
 

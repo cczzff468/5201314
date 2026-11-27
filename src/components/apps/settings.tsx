@@ -17,7 +17,6 @@ import { PermissionHubPage } from './settings/permission';
 import { AppUpdatePage } from './settings/updates';
 import { ThemePage } from './settings/theme';
 import { NotificationPage } from './settings/notifications';
-import { StoragePage } from './settings/storage';
 import { WallpaperPage } from './settings/wallpaper';
 import { ApiPage } from './settings/api';
 import { VisionPage } from './settings/vision';
@@ -38,7 +37,6 @@ export * from './settings/permission';
 export * from './settings/updates';
 export * from './settings/theme';
 export * from './settings/notifications';
-export * from './settings/storage';
 export * from './settings/wallpaper';
 export * from './settings/api';
 export * from './settings/vision';
@@ -59,7 +57,7 @@ export default function SettingsApp() {
   // 消费清空放到挂载后的 effect 里——渲染期间写 store 会触发「渲染中更新其它组件」告警。
   const [page, setPage] = useState<Page>(() => {
     const pending = useUI.getState().pendingSettingsPage;
-    if (pending && ['root', 'account', 'profile', 'theme', 'notification', 'storage', 'wallpaper', 'font', 'api', 'vision', 'imggen', 'voice', 'about', 'lock', 'prompts', 'autonomy', 'voiceagent', 'appupdate', 'cloud'].includes(pending)) {
+    if (pending && ['root', 'account', 'profile', 'theme', 'notification', 'wallpaper', 'font', 'api', 'vision', 'imggen', 'voice', 'about', 'lock', 'prompts', 'autonomy', 'voiceagent', 'appupdate', 'cloud'].includes(pending)) {
       return pending as Page;
     }
     return 'root';
@@ -75,7 +73,6 @@ export default function SettingsApp() {
       {page === 'profile' && <ProfilePage onBack={() => setPage('root')} />}
       {page === 'theme' && <ThemePage onBack={() => setPage('root')} />}
       {page === 'notification' && <NotificationPage onBack={() => setPage('root')} />}
-      {page === 'storage' && <StoragePage onBack={() => setPage('root')} />}
       {page === 'wallpaper' && <WallpaperPage onBack={() => setPage('root')} />}
       {page === 'api' && <ApiPage onBack={() => setPage('root')} />}
       {page === 'cloud' && <ClawBoxPage onBack={() => setPage('root')} />}

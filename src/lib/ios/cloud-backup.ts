@@ -423,45 +423,77 @@ export async function deleteBackup(row: BackupRow): Promise<{ ok: boolean; messa
 
 export interface CloudBackupPrefs {
   auto: boolean;
-  freq: 'daily' | 'weekly';
+  /** 备份间隔：6h/12h（机主要求的小时级）/daily/weekly */
+  freq: '6h' | '12h' | 'daily' | 'weekly';
+  /** 云端保留份数：超出后最旧的自动删除（runBackup 后 pruneBackups 执行） */
+  keep: number;
   lastAt: number;
   lastSize?: number;
   lastKind?: string;
 }
 
+const FREQ_INTERVALS: Record<CloudBackupPrefs['freq'], number> = {
+  '6h': 6 * 3600_000,
+  '12h': 12 * 3600_000,
+  daily: 24 * 3600_000,
+  weekly: 7 * 24 * 3600_000,
+};
+
+const FREQ_LEGACY = new Set<string>(['6h', '12h', 'daily', 'weekly']);
+
 export async function readBackupPrefs(): Promise<CloudBackupPrefs> {
   try {
-    const [autoRec, freqRec, lastRec] = await Promise.all([
+    const [autoRec, freqRec, keepRec, lastRec] = await Promise.all([
       localDB.get('settings', 'cloudBackupAuto'),
       localDB.get('settings', 'cloudBackupFreq'),
+      localDB.get('settings', 'cloudBackupKeep'),
       localDB.get('settings', 'cloudBackupLast'),
     ]);
     const last = (lastRec?.value ?? null) as { at?: unknown; size?: unknown; kind?: unknown } | null;
+    const freqRaw = String(freqRec?.value ?? '');
     return {
       auto: autoRec?.value === true,
-      freq: freqRec?.value === 'weekly' ? 'weekly' : 'daily',
+      freq: FREQ_LEGACY.has(freqRaw) ? (freqRaw as CloudBackupPrefs['freq']) : 'daily',
+      keep: typeof keepRec?.value === 'number' && keepRec.value >= 1 ? keepRec.value : 3,
       lastAt: typeof last?.at === 'number' ? last.at : 0,
       lastSize: typeof last?.size === 'number' ? last.size : undefined,
       lastKind: typeof last?.kind === 'string' ? last.kind : undefined,
     };
   } catch {
-    return { auto: false, freq: 'daily', lastAt: 0 };
+    return { auto: false, freq: 'daily', keep: 3, lastAt: 0 };
   }
 }
 
 export async function writeBackupPrefs(patch: Partial<Omit<CloudBackupPrefs, 'lastAt' | 'lastSize' | 'lastKind'>>): Promise<void> {
   if (patch.auto !== undefined) await localDB.put('settings', { key: 'cloudBackupAuto', value: patch.auto });
   if (patch.freq !== undefined) await localDB.put('settings', { key: 'cloudBackupFreq', value: patch.freq });
+  if (patch.keep !== undefined) await localDB.put('settings', { key: 'cloudBackupKeep', value: patch.keep });
 }
 
-/** 超期判定：距离上次备份超过频率窗口（每日=24h / 每周=7d，留 10 分钟提前量防边界空转） */
+/** 超期判定：距离上次备份超过频率窗口（留 10 分钟提前量防边界空转） */
 export function isOverdue(prefs: CloudBackupPrefs): boolean {
   if (!prefs.auto) return false;
-  const interval = prefs.freq === 'weekly' ? 7 * 24 * 3600_000 : 24 * 3600_000;
-  return Date.now() - prefs.lastAt >= interval - 600_000;
+  return Date.now() - prefs.lastAt >= (FREQ_INTERVALS[prefs.freq] ?? FREQ_INTERVALS.daily) - 600_000;
 }
 
 let autoRunning = false;
+
+/** 按保留份数清理最旧的云端备份（keep <= 0 = 不限制） */
+export async function pruneBackups(keep: number): Promise<void> {
+  if (!Number.isFinite(keep) || keep < 1) return;
+  try {
+    const r = await listBackups();
+    if (!r.ok || !r.rows) return;
+    const rows = [...r.rows].sort(
+      (a, b) => Date.parse(b.created_at ?? '') - Date.parse(a.created_at ?? ''),
+    );
+    for (const row of rows.slice(keep)) {
+      await deleteBackup(row);
+    }
+  } catch {
+    /* 静默：清理失败不阻塞主流程 */
+  }
+}
 
 /** 静默自动备份（绝不打扰用户：所有失败吞掉只进 console） */
 export async function maybeAutoBackup(): Promise<void> {
@@ -472,6 +504,7 @@ export async function maybeAutoBackup(): Promise<void> {
     autoRunning = true;
     const r = await runBackup('auto');
     if (!r.ok) console.warn('[cloud-backup] 自动备份失败（静默）:', r.message ?? r.error);
+    else await pruneBackups(prefs.keep);
   } catch {
     /* 静默 */
   } finally {

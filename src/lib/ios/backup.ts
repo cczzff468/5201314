@@ -323,16 +323,41 @@ function serverTableCounts(server: ServerBackupSection): Record<string, number> 
 }
 
 /**
- * 收集全量备份内容（原始 keyPath：kv/settings 用 key，其余用 id——写入时记录自带 keyPath 字段）：
+ * 导出范围过滤（文件 App「数据管理 · 导出与导入」的模块选择器）：
+ * - includeStores：只导出这些 store（未列出的整仓跳过）
+ * - includeKvBuckets：kv 桶白名单（按 kvBucketOf 前缀分组过滤），不传 = kv 全量
+ * fonts / localStorage / server 段不受影响（始终随文件走）。
+ */
+export interface CollectBackupFilter {
+  includeStores?: string[];
+  includeKvBuckets?: string[];
+}
+
+/** kv 桶前缀判定（与 storage-stats.kvBucketOf 同规则；此处独立实现避免循环依赖） */
+function kvBucketOfKey(key: string): string {
+  if (key.startsWith('wx')) return 'wx';
+  if (key.startsWith('qq')) return 'qq';
+  if (key.startsWith('ios-chat') || key.startsWith('sms-chat') || key.startsWith('chat-translate')) return 'chat';
+  if (key.startsWith('mem-')) return 'memory';
+  if (key.startsWith('worldbook') || key.startsWith('wb-bind')) return 'worldbook';
+  if (key.startsWith('music')) return 'music';
+  return 'system';
+}
+
+/**
+ * 收集备份内容（原始 keyPath：kv/settings 用 key，其余用 id——写入时记录自带 keyPath 字段）：
  * 主库逐 store 分库读取（不整库一把抓，控内存）→ 字体独立库 → 服务端表 → localStorage 快照。
  * onProgress 逐段回报（done/total，total = 主库 store 数 + 字体 + 服务端共 2 段）。
  */
 export async function collectBackup(
   onProgress?: (done: number, total: number) => void,
+  filter?: CollectBackupFilter,
 ): Promise<BackupFile> {
   const db = await openRawDb();
   try {
-    const storeNames = [...db.objectStoreNames];
+    const storeNames = [...db.objectStoreNames].filter(
+      (s) => !filter?.includeStores || filter.includeStores.includes(s),
+    );
     const total = storeNames.length + 2;
     const data: Record<string, Record<string, unknown>[]> = {};
     const counts: Record<string, number> = {};
@@ -354,6 +379,13 @@ export async function collectBackup(
       for (const raw of rows) {
         try {
           let rec = raw as Record<string, unknown>;
+          // kv 桶过滤：模块导出时只带走所选桶的键（未选桶计入 skipped）
+          if (store === 'kv' && filter?.includeKvBuckets) {
+            if (!filter.includeKvBuckets.includes(kvBucketOfKey(String(rec?.key ?? '')))) {
+              skip++;
+              continue;
+            }
+          }
           // settings 密文信封 → 解密为明文（跨设备可恢复；导入后加载流程自动重新加密）
           if (store === 'settings' && rec && typeof rec.value === 'object' && rec.value !== null) {
             const dec = await decryptValue(rec.value);
@@ -453,8 +485,10 @@ export interface BackupDownloadResult {
 export async function exportBackupToDownload(opts?: {
   safety?: boolean;
   onProgress?: (done: number, total: number) => void;
+  /** 导出范围过滤（模块选择器 / 轻量导出）；不传 = 全量 */
+  filter?: CollectBackupFilter;
 }): Promise<BackupDownloadResult> {
-  const backup = await collectBackup(opts?.onProgress);
+  const backup = await collectBackup(opts?.onProgress, opts?.filter);
   const json = JSON.stringify(backup);
   const blob = new Blob([json], { type: 'application/json' });
   const d = new Date();

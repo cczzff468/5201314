@@ -1,16 +1,16 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import dynamic from 'next/dynamic';
 import type { ReactNode } from 'react';
 import type { ReadTagsOptions } from 'jsmediatags';
 import {
   CalendarDays,
-  ChevronRight,
   CircleCheck,
   Download,
   FileText,
-  HardDrive,
   Image as ImageIcon,
+  Loader2,
   Mic,
   Music2,
   Pause,
@@ -35,12 +35,14 @@ import { BackToHome } from '@/components/ios/BackToHome';
 import WheelDatePicker from './wheel-date-picker';
 
 /**
- * 文件 App：
- * - 根级页：我的 iPhone / 存储空间卡（navigator.storage.estimate）/ 6 个资料库统计
- * - 二级页：各资料库条目列表（照片缩略图+大图预览、录音/音乐点按播放、备忘录只读全文、事件/提醒标题+日期）
- * - 添加能力：照片/录音/音乐库右上角「+」从设备导入文件（音频自动读时长，音乐另读 ID3 标签与封面）；
- *   备忘录/日历事件/提醒库「+」新建表单，写入同一 IndexedDB store —— 照片/音乐/备忘录/日历/提醒
- *   各原 App 直接展示这些数据，单条删除经 localDB.delete
+ * 文件 App（机主规格重构）：
+ * - 打开即「数据管理」长页：模块占用分析（环形图）/ 浏览器持久化保护 / 媒体清理 /
+ *   Supabase 云端备份 / 导出与导入（模块选择）/ 模块清理（危险）——设置里的存储、
+ *   缓存、备份能力全部收拢于此；App 图标与名字仍叫「文件」
+ * - 底部 LIBRARY 区块保留原六大资料库入口，二级页为各资料库条目列表
+ *   （照片缩略图+大图预览、录音/音乐点按播放、备忘录只读全文、事件/提醒标题+日期）
+ * - 添加能力：照片/录音/音乐库右上角「+」从设备导入文件（音频自动读时长，音乐另读
+ *   ID3 标签与封面）；备忘录/日历事件/提醒库「+」新建表单，写入同一 IndexedDB store
  */
 
 type LibKey = 'photos' | 'recordings' | 'music' | 'notes' | 'events' | 'reminders';
@@ -74,17 +76,6 @@ function formatBytes(bytes: number): string {
   if (!Number.isFinite(bytes) || bytes <= 0) return '0 KB';
   if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-/** 字节数 → GB 保留两位 */
-function formatGB(bytes: number): string {
-  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
-}
-
-function formatPct(p: number): string {
-  if (!Number.isFinite(p) || p <= 0) return '0';
-  if (p < 0.1) return '<0.1';
-  return String(parseFloat(p.toFixed(1)));
 }
 
 /** 去扩展名（音乐导入兜底标题） */
@@ -1073,10 +1064,20 @@ function LibraryView({
 
 // ---------------- 根级页 ----------------
 
+// 机主规格重构：文件 App 打开即「数据管理」（模块占用 / 持久化保护 / 媒体清理 / 云备份 /
+// 导出导入 / 危险清理），原六大资料库浏览降级为底部「LIBRARY」区块入口，功能零删减。
+const DataManager = dynamic(() => import('./files/data-manager'), {
+  ssr: false,
+  loading: () => (
+    <div className="flex h-[320px] items-center justify-center gap-2 text-[14px] text-muted-foreground">
+      <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> 正在打开数据管理…
+    </div>
+  ),
+});
+
 export default function FilesApp() {
-  const [view, setView] = useState<LibKey | 'root'>('root');
+  const [view, setView] = useState<LibKey | 'data'>('data');
   const [stats, setStats] = useState<LibStats | null>(null);
-  const [storage, setStorage] = useState<{ usage: number; quota: number } | null>(null);
 
   const refreshStats = useCallback(() => {
     void (async () => {
@@ -1088,91 +1089,30 @@ export default function FilesApp() {
     })();
   }, []);
 
-  // 挂载：统计 + 存储估算（setState 均在 await 之后的异步回调内）
+  // 挂载：统计各库条数（setState 均在 await 之后的异步回调内）
   useEffect(() => {
     refreshStats();
-    let alive = true;
-    void (async () => {
-      try {
-        if (typeof navigator.storage?.estimate === 'function') {
-          const est = await navigator.storage.estimate();
-          if (alive) setStorage({ usage: est.usage ?? 0, quota: est.quota ?? 0 });
-        }
-      } catch {
-        /* 忽略存储估算失败 */
-      }
-    })();
-    return () => {
-      alive = false;
-    };
   }, [refreshStats]);
 
-  // 从二级页返回：刷新统计（可能存在删除）
+  // 从二级库返回：刷新统计（可能存在删除）
   const handleBack = useCallback(() => {
-    setView('root');
+    setView('data');
     refreshStats();
   }, [refreshStats]);
 
-  if (view !== 'root') {
+  if (view !== 'data') {
     const lib = LIBS.find((l) => l.key === view);
     return <LibraryView key={view} lib={view} name={lib?.name ?? ''} onBack={handleBack} onChanged={refreshStats} />;
   }
 
-  const pct = storage && storage.quota > 0 ? (storage.usage / storage.quota) * 100 : 0;
-  const barWidth = pct > 0 ? Math.min(100, Math.max(1.5, pct)) : 0;
-
   return (
     <div className="relative flex h-full w-full flex-col overflow-hidden bg-background text-foreground">
       <div className="no-scrollbar flex-1 overflow-y-auto">
-        <IOSNavBar inline title="文件" left={<BackToHome className="static!" />} />
-
-        {/* 位置头：我的 iPhone（纯展示，无跳转故不加箭头） */}
-        <div className="flex items-center gap-3 px-5 pb-2 pt-1">
-          <HardDrive className="h-5 w-5 shrink-0 text-muted-foreground" strokeWidth={1.8} />
-          <span className="flex-1 text-[17px]">我的 iPhone</span>
-        </div>
-
-        {/* 存储空间卡 */}
-        <div className="mx-4 mt-1 rounded-[20px] bg-white/60 p-4 shadow-[0_8px_28px_rgba(17,24,39,0.07)] ring-1 ring-white/70 backdrop-blur-2xl dark:bg-white/[0.06] dark:ring-white/[0.09]">
-          <div className="flex items-baseline justify-between gap-3">
-            <span className="text-[16px] font-semibold">存储空间</span>
-            <span className="text-[13px] text-muted-foreground">
-              {storage ? `${formatBytes(storage.usage)} / ${formatGB(storage.quota)}` : '计算中…'}
-            </span>
-          </div>
-          <div className="mt-3 h-1.5 w-full overflow-hidden rounded-full bg-white/60 ring-1 ring-white/70 backdrop-blur-xl dark:bg-white/[0.08] dark:ring-white/[0.1]">
-            <div
-              className="h-full rounded-full bg-foreground transition-[width] duration-500"
-              style={{ width: `${barWidth}%` }}
-            />
-          </div>
-          <div className="mt-2 text-[12px] text-muted-foreground">
-            {storage ? `${formatPct(pct)}% 已使用` : ''}
-          </div>
-        </div>
-
-        {/* 资料库列表卡 */}
-        <div className="mx-4 mt-4 divide-y divide-border/60 overflow-hidden rounded-[20px] bg-white/60 shadow-[0_8px_28px_rgba(17,24,39,0.07)] ring-1 ring-white/70 backdrop-blur-2xl dark:bg-white/[0.06] dark:ring-white/[0.09]">
-          {LIBS.map((l) => (
-            <button
-              key={l.key}
-              type="button"
-              onClick={() => setView(l.key)}
-              className="flex w-full items-center gap-3 px-4 py-3 text-left transition-colors active:bg-muted/50"
-            >
-              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[9px] bg-gradient-to-b from-[#C8C8CD] to-[#8E8E93] dark:from-[#5A5A5F] dark:to-[#3A3A3E]">
-                <l.icon className="h-5 w-5 text-white" strokeWidth={1.9} />
-              </span>
-              <span className="min-w-0 flex-1 truncate text-[17px]">{l.name}</span>
-              <span className="shrink-0 text-[15px] text-muted-foreground">{statText(l.key, stats)}</span>
-              <ChevronRight className="h-5 w-5 shrink-0 text-muted-foreground/60" strokeWidth={2} />
-            </button>
-          ))}
-        </div>
-
-        <div className="px-8 pb-[40px] pt-4 text-center text-[12px] leading-relaxed text-muted-foreground">
-          照片、录音、音乐可从右上角「+」导入设备文件；备忘录、日历事件、提醒可在此新建，与各应用数据互通。
-        </div>
+        <IOSNavBar inline title="数据管理" left={<BackToHome className="static!" />} />
+        <DataManager
+          libs={LIBS.map((l) => ({ key: l.key, name: l.name, icon: l.icon, statText: statText(l.key, stats) }))}
+          onOpenLib={(key) => setView(key as LibKey)}
+        />
       </div>
     </div>
   );

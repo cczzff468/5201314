@@ -19,7 +19,6 @@ import {
   Box,
   ChevronLeft,
   ChevronRight,
-  Database,
   Download,
   Eye,
   Image as ImageIcon,
@@ -601,12 +600,10 @@ export function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
           </button>
         </div>
 
-        {/* 云端与存储（第三十六轮：API/识图/图像/语音四件套上移「锁屏与密码」下方后，
-            剩 ClawBox + 存储重组改组名——不再叫「开发者」） */}
-        <div className="mb-2 mt-6 px-8 text-[13px] text-muted-foreground">云端与存储</div>
+        {/* 云端（第三十六轮重组）：存储 / 缓存 / 备份能力已整体迁至文件 App › 数据管理
+            （机主规格），此处仅保留云端助手（ClawBox 部署与 7×24 自动回复本体） */}
+        <div className="mb-2 mt-6 px-8 text-[13px] text-muted-foreground">云端</div>
         <div className="mx-4 divide-y divide-black/[0.05] overflow-hidden rounded-[22px] bg-white/55 shadow-[0_8px_28px_rgba(17,24,39,0.06)] ring-1 ring-white/70 backdrop-blur-2xl dark:divide-white/[0.06] dark:bg-white/[0.06] dark:ring-white/[0.09]">
-          {/* ClawBox（v24）→ 第四十二轮机主定名：入口行更名「云端助手」（页内两页签 =
-              云端助手 + ClawBox·原真机接入）；含云备份与恢复入口 */}
           <button
             type="button"
             data-testid="settings-cloud-entry"
@@ -617,12 +614,11 @@ export function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
             <span className="min-w-0 flex-1">
               <span className="block truncate text-[16px]">云端助手</span>
               <span className="mt-0.5 block truncate text-[12px] text-muted-foreground">
-                云端助手 · ClawBox · 7×24 自动回复 · 云备份
+                云端助手 · ClawBox · 7×24 自动回复
               </span>
             </span>
             <ChevronRight className="h-5 w-5 shrink-0 text-muted-foreground/60" />
           </button>
-          <MainRow icon={Database} tone={TONE_GREEN} label="存储" onClick={() => onOpen('storage')} />
         </div>
 
         {/* 第三十三轮开屏动画 + 第四十二轮机主要求「开屏动画、App 图标放在一起」：
