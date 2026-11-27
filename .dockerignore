@@ -1,0 +1,11 @@
+node_modules
+.next
+.git
+.github
+android-shell
+tool-results
+agent-ctx
+upload
+*.log
+dev.log
+server.log
