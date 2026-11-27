@@ -11,9 +11,9 @@
  */
 
 /** 当前最新版本（纯网页热更时与 APK versionName 可短暂不同步，下次重打 APK 对齐） */
-export const APP_VERSION = '2.4.25';
+export const APP_VERSION = '2.4.26';
 /** 版本号数字（与 android-shell versionCode 保持一致；覆盖安装要求只增不减；纯网页热更不动） */
-export const APP_VERSION_CODE = 89;
+export const APP_VERSION_CODE = 90;
 
 export interface AppReleaseNote {
   version: string;
@@ -24,6 +24,18 @@ export interface AppReleaseNote {
 
 /** 版本历史（新→旧；设置 › APP 更新 页渲染，最新一条即当前版本） */
 export const APP_RELEASE_NOTES: AppReleaseNote[] = [
+  {
+    version: '2.4.26',
+    date: '2026-11-27',
+    items: [
+      '【需重装 APK · versionCode 90】登录/注册页真正沉浸：门禁内容层改成全额安全区出血，深色压暗渐变压到物理屏顶（此前顶部露一条亮壁纸=「白色背景」），状态栏强制白字',
+      '【需重装 APK】桌面图标不再被覆盖安装打回默认：机主所选图标写入 SharedPreferences，冷启动 + 安装完成广播 + 网页开机对账三处静默恢复（此前每次更新都变回 3 号情书字标）',
+      '【需重装 APK】系统键盘跟随：IME inset 并入底部安全区下发（--app-sab），聊天/表单输入条贴在键盘上沿，不再被键盘压住',
+      '【网页热更·免重装】审核 App 打开即拉齐三个统计卡（待审核/可用码/用户），不再需要点下面的分段标签才出数；补左上「主界面」返回键',
+      '【网页热更·免重装】AI 连发几条消息就弹几次悬浮通知：应用内灵动岛改为逐条排队（不再相互顶替只剩最后一条），原生系统通知去掉「前台不发」的死闸并按 1.2s 间隔逐条下发',
+      '【网页热更·免重装】登录页顶部品牌图标改为跟随机主所选 App 图标（此前是写死的通用图标）',
+    ],
+  },
   {
     version: '2.4.25',
     date: '2026-11-26',

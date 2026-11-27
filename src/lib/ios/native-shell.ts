@@ -51,6 +51,8 @@ interface NativeBridge {
   setSystemBarStyles?(statusStyle: NativeBarStyle, navStyle: NativeBarStyle): void;
   getCurrentIcon?(): string;
   switchAppIcon?(alias: string): string | void;
+  /** 第四十五轮：静默恢复别名（不弹 HOME/不退进程）；返回 'ok' / 'bad_alias' */
+  restoreAppIcon?(alias: string): string;
   setStatusBarMode?(mode: string): void;
 }
 
@@ -138,6 +140,20 @@ export function getNativeCurrentIcon(): AppIconAliasId | null {
     return raw === '1' || raw === '2' || raw === '3' || raw === '4' || raw === '5' ? raw : null;
   } catch {
     return null;
+  }
+}
+
+/** 第四十五轮：静默恢复图标别名（不弹 HOME/不退进程，启动器自刷新）——
+ *  用于「覆盖安装后原生重置回默认 3 号、与网页机主所选漂移」的开机自愈。
+ *  返回是否已送达原生（旧壳无该桥 → false，调用方静默跳过）。 */
+export function restoreNativeAppIcon(alias: AppIconAliasId): boolean {
+  if (typeof window === 'undefined') return false;
+  const N = window.AIPhoneNative;
+  if (!N || typeof N.restoreAppIcon !== 'function') return false;
+  try {
+    return N.restoreAppIcon(alias) === 'ok';
+  } catch {
+    return false;
   }
 }
 

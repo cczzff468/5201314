@@ -290,6 +290,9 @@ public class MainActivity extends BridgeActivity {
         // v2.4.23（第四十轮）：一次性别名迁移——默认图标 1 → 4（小词灵），
         // 存量设备覆盖安装后桌面图标无感切换（详见 migrateIconOnce 注释）
         migrateIconOnce();
+        // 第四十五轮：恢复机主所选桌面图标（覆盖安装后别名启用态会被重置回默认 3 号，
+        // 机主看到「图标变回情书字标」）——有记忆值时静默切回，无记忆值零动作。
+        restoreIconFromPrefs(this);
 
         // v2.4.6 ② 安全区监听：缓存最新 insets + 把 dp 值经 evaluateJavascript 推给
         // window.__aiphoneApplySafeArea（网页侧更新 --app-sat/-sar/-sab/-sal,
@@ -303,11 +306,19 @@ public class MainActivity extends BridgeActivity {
         ViewCompat.setOnApplyWindowInsetsListener(decor, (v, insets) -> {
             Insets cut = insets.getInsets(WindowInsetsCompat.Type.displayCutout());
             Insets sys = insets.getInsets(WindowInsetsCompat.Type.systemBars());
+            // v2.4.26（第四十五轮）软键盘：decorFitsSystemWindows=false + 全屏下窗口不会为键盘
+            // 自动缩，Chromium 的键盘只覆盖在 WebView 上（visualViewport 变矮），页面底部输入条
+            // 因此被键盘压住（机主反馈「输入的时候输入框不跟随系统键盘弹起来」）。这里把 IME
+            // inset 并入 safeBottom 下发（--app-sab）——网页端内容层底边随键盘抬升，聊天输入条
+            // 始终贴在键盘上沿。键盘收起时 ime.bottom=0，自动还原原底部安全区。
+            Insets ime = insets.getInsets(WindowInsetsCompat.Type.ime());
             float density = getResources().getDisplayMetrics().density;
             // v2.4.23 两模式统一：top 仅挖孔（物理系统条一律隐藏，systemBars.top 恒 0）
             safeTop = Math.round(cut.top / density);
             safeRight = Math.round(Math.max(sys.right, cut.right) / density);
             safeBottom = Math.round(Math.max(sys.bottom, cut.bottom) / density);
+            int imeBottom = Math.round(ime.bottom / density);
+            if (imeBottom > safeBottom) safeBottom = imeBottom;
             safeLeft = Math.round(Math.max(sys.left, cut.left) / density);
             pushInsetsToWeb();
             // 第三十轮·网页浏览时系统状态栏再显示根修（v2.4.23 起两模式统一补藏——物理条
@@ -439,6 +450,67 @@ public class MainActivity extends BridgeActivity {
         }
     }
 
+    /** 第四十五轮：机主所选桌面图标记忆键（cove_prefs/icon_current = '1'~'5'）。
+     *  覆盖安装新 APK 后 PackageManager 的别名启用态会重置回 Manifest 默认（3 号情书字标），
+     *  机主每次更新都看到「图标变回默认」，故把选择落到 SharedPreferences，启动/覆盖安装后恢复。 */
+    private static final String KEY_ICON_CURRENT = "icon_current";
+
+    /** 读出当前启用的别名序号（0~4；无启用/异常 → -1） */
+    private static int currentIconIndex(Context ctx) {
+        try {
+            PackageManager pm = ctx.getPackageManager();
+            String pkg = ctx.getPackageName();
+            for (int i = 0; i < 5; i++) {
+                int state = pm.getComponentEnabledSetting(
+                        new ComponentName(pkg, pkg + ".MainActivityIcon" + (i + 1)));
+                boolean enabled = state == PackageManager.COMPONENT_ENABLED_STATE_ENABLED
+                        || (state == PackageManager.COMPONENT_ENABLED_STATE_DEFAULT && i == 2);
+                if (enabled) return i;
+            }
+        } catch (Throwable ignored) {
+        }
+        return -1;
+    }
+
+    /** 静默切到指定别名（先启目标再关其余，DONT_KILL_APP，不弹 HOME/不退进程） */
+    private static void applyIconAlias(Context ctx, int idx) {
+        if (idx < 0 || idx > 4) return;
+        try {
+            PackageManager pm = ctx.getPackageManager();
+            String pkg = ctx.getPackageName();
+            pm.setComponentEnabledSetting(
+                    new ComponentName(pkg, pkg + ".MainActivityIcon" + (idx + 1)),
+                    PackageManager.COMPONENT_ENABLED_STATE_ENABLED,
+                    PackageManager.DONT_KILL_APP);
+            for (int i = 0; i < 5; i++) {
+                if (i == idx) continue;
+                pm.setComponentEnabledSetting(
+                        new ComponentName(pkg, pkg + ".MainActivityIcon" + (i + 1)),
+                        PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
+                        PackageManager.DONT_KILL_APP);
+            }
+        } catch (Throwable ignored) {
+        }
+    }
+
+    /**
+     * 按 SharedPreferences 里机主的选择恢复桌面图标（冷启动 / 覆盖安装广播时调用）。
+     * 与当前启用态一致时零动作；不一致才切换（如更新 APK 后被重置回 3 号）。
+     */
+    static void restoreIconFromPrefs(Context ctx) {
+        try {
+            android.content.SharedPreferences sp =
+                    ctx.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
+            String saved = sp.getString(KEY_ICON_CURRENT, null);
+            if (saved == null) return;
+            int idx = parseIconAliasIndex(saved);
+            if (idx < 0) return;
+            if (currentIconIndex(ctx) == idx) return;
+            applyIconAlias(ctx, idx);
+        } catch (Throwable ignored) {
+        }
+    }
+
     /** 把缓存安全区推给网页（页面未就绪时静默失败，下次 inset 变化/加载时会再推） */
     private void pushInsetsToWeb() {
         if (this.bridge == null || this.bridge.getWebView() == null) return;
@@ -550,6 +622,13 @@ public class MainActivity extends BridgeActivity {
         public String switchAppIcon(final String aliasId) {
             final int idx = parseIconAliasIndex(aliasId);
             if (idx < 0) return "bad_alias"; // 非法输入：回状态串（网页侧立即恢复，不再卡提示层）
+            // 第四十五轮：记住机主的选择（覆盖安装后 restoreIconFromPrefs 据此恢复，
+            // 不再每次更新都退回默认 3 号情书字标）
+            try {
+                getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+                        .edit().putString(KEY_ICON_CURRENT, String.valueOf(idx + 1)).apply();
+            } catch (Throwable ignored) {
+            }
             runOnUiThread(() -> {
                 boolean ok = false;
                 try {
@@ -589,6 +668,24 @@ public class MainActivity extends BridgeActivity {
                 }, 650L);
             });
             return "ok";
+        }
+
+        /** 第四十五轮：静默恢复图标别名（网页开机自检用）——
+         *  网页的图标偏好（IndexedDB）与原生启用态漂移时（覆盖安装后原生被重置回 3 号），
+         *  网页调本方法把启用态切回机主所选：不弹 HOME、不退进程，只写记忆 + 切组件，
+         *  启动器收到 PACKAGE_CHANGED 自行刷新。返回 'ok' / 'bad_alias'。 */
+        @JavascriptInterface
+        public String restoreAppIcon(final String aliasId) {
+            final int idx = parseIconAliasIndex(aliasId);
+            if (idx < 0) return "bad_alias";
+            try {
+                getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+                        .edit().putString(KEY_ICON_CURRENT, String.valueOf(idx + 1)).apply();
+                applyIconAlias(MainActivity.this, idx);
+                return "ok";
+            } catch (Throwable t) {
+                return "bad_alias";
+            }
         }
 
         /** 系统状态栏/导航栏图标明暗——状态栏/导航栏可分别设置（v2.4.9 拆分：状态栏已隐藏，

@@ -157,8 +157,9 @@ interface IslandNotifyState {
 
 /** 弹窗停留时长（需求：显示时长可控，默认 3 秒后自动收起；点击可立即收起） */
 export const AUTO_DISMISS_MS = 3000;
-/** 不同会话排队上限（超出丢最旧，防刷屏） */
-const MAX_QUEUE = 4;
+/** 不同会话排队上限（超出丢最旧，防刷屏）；第四十五轮 4 → 12：
+ *  AI 连发多条消息时每条都要各弹一次（队列太浅会把先到的几条直接丢掉） */
+const MAX_QUEUE = 12;
 /** 通知正文最大字符数 */
 const BODY_MAX = 80;
 /** 导航请求有效期（App 未登录等场景挂起后过期作废） */
@@ -417,13 +418,11 @@ export function pushChatNotification(input: ChatNotifyInput): void {
     st.show(n);
     armAutoDismiss();
   } else {
-    // 展示中/收起动画中：直接顶替当前（当前条未展示完也算弹过了）→ 每条消息都有一次弹出
-    if (st.current) {
-      st.show(n);
-      if (!st.exiting) armAutoDismiss();
-    } else {
-      st.enqueue(n);
-    }
+    // 第四十五轮（机主规格「AI 发几条消息就弹几次悬浮通知」）：
+    // 旧版「展示中直接顶替当前」在连发场景下会把前几条瞬间盖掉——视觉上只剩最后一条
+    // （机主反馈「悬浮通知只显示最后一个」）。改为进入队列逐条排队：每条消息各播一次，
+    // 当前条播完自动接着下一条。
+    st.enqueue(n);
   }
   maybeWebNotification(n);
 }

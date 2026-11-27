@@ -167,6 +167,9 @@
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <!-- 第四十五轮：覆盖安装完成 → 静默恢复机主所选桌面图标（更新后别名启用态
+                     会被重置回 Manifest 默认 3 号情书字标） -->
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
             </intent-filter>
         </receiver>
 

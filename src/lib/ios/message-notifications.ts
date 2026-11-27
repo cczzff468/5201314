@@ -23,8 +23,6 @@
  * 入口：island-notify.maybeWebNotification 原生分支（信息/微信/QQ 三端 AI 消息投递共用）。
  */
 
-import { isPageBackground } from './system-notify';
-
 /** 消息通知请求（id 必填：每条消息一个独立通知） */
 export interface MessageNotificationReq {
   /** 消息唯一 ID（消息 id / 通知 id）——决定独立通知条目，绝不用同一 ID 覆盖 */
@@ -77,17 +75,22 @@ async function postOne(req: MessageNotificationReq): Promise<boolean> {
   }
 }
 
+/** 相邻两条系统通知的最小间隔（ms）：Android 的 heads-up 横幅同屏只留一条，
+ *  毫秒级连发会让前几条直接被后一条顶掉（机主反馈「悬浮通知只显示最后一个」）。
+ *  逐条间隔下发，每条横幅都有完整的弹出/停留时间。 */
+const NOTIFY_SPACING_MS = 1200;
+
 /**
  * 逐条调度一条 AI 消息系统通知（规范入口）：
- * 1. 前台（用户正看着 App）→ 直接 return（前台只渲染聊天，不弹系统通知）；
- * 2. 非原生壳环境 → 静默 no-op（网页环境的通知走 Web 通道，由调用方分流）；
- * 3. 同一消息 id 只发一次（去重）；
- * 4. 入串行队列：保证 5 条消息弹 5 个通知、按顺序到达、并发不被系统吞。
+ * 1. 同一消息 id 只发一次（去重）；
+ * 2. 入串行队列：保证 5 条消息弹 5 个通知、按顺序到达、并发不被系统吞；
+ * 3. 第四十五轮：不再要求页面在后台——旧口径「前台只渲染聊天、不弹系统通知」在 APK 里
+ *    变成「进了 App 才看得到通知」的反效果（后台 WebView 被冻结，消息本就是回前台才生成，
+ *    那时又判定为前台 → 一律不发）。真正的「正在看这条会话」抑制由 pushChatNotification
+ *    的前台闸负责（该闸命中时根本不会走到本函数）。
  */
 export function scheduleLocalNotification(req: MessageNotificationReq): void {
   if (typeof window === 'undefined') return;
-  // 三、1：只有后台/息屏才发（前台直接渲染聊天界面）
-  if (!isPageBackground()) return;
   // 二、1：消息 id 去重——同一条消息绝不弹第二条
   if (sentIds.has(req.id)) return;
   sentIds.add(req.id);
@@ -98,11 +101,12 @@ export function scheduleLocalNotification(req: MessageNotificationReq): void {
     // Set 迭代顺序即插入顺序：丢掉最老的 100 条
   }
   notifyStats.queued += 1;
-  // 三、3：串行链——逐条过桥，顺序稳定
+  // 三、3：串行链——逐条过桥，顺序稳定，且条与条之间留出横幅展示间隔
   chain = chain
     .then(async () => {
       const ok = await postOne(req);
       if (ok) notifyStats.sent += 1;
+      await new Promise<void>((resolve) => window.setTimeout(resolve, NOTIFY_SPACING_MS));
     })
     .catch(() => undefined)
     .finally(() => {

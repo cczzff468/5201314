@@ -36,6 +36,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAuth, type AuthUser } from '@/lib/auth/store';
+import { useSettings } from '@/lib/ios/store';
 
 // ---------------- 小组件 ----------------
 
@@ -180,6 +181,10 @@ type RegTab = 'email' | 'invite';
 
 export default function AuthScreen() {
   const setUser = useAuth((s) => s.setUser);
+  /** 第四十五轮：品牌区图标跟随机主所选 App 图标（此前写死通用心形图标，机主反馈
+   *  「上面的图标变成默认图标（情书字标）」——改成当前选中图标原图，与桌面/开屏同源） */
+  const appIconId = useSettings((s) => s.appIcon);
+  const [brandIconOk, setBrandIconOk] = useState(true);
   const [mode, setMode] = useState<Mode>('login');
   const [loginTab, setLoginTab] = useState<LoginTab>('password');
   const [regTab, setRegTab] = useState<RegTab>('email');
@@ -437,8 +442,20 @@ export default function AuthScreen() {
 
       {/* 品牌 */}
       <div className="relative flex flex-col items-center pb-5 pt-[13%]">
-        <div className="flex h-[72px] w-[72px] items-center justify-center rounded-[22px] bg-white/85 shadow-lg backdrop-blur-xl dark:bg-[#2c2c2e]/90">
-          <MessageCircleHeart className="h-10 w-10 text-black dark:text-white" strokeWidth={1.8} />
+        <div className="relative h-[72px] w-[72px] overflow-hidden rounded-[22px] shadow-lg ring-[0.5px] ring-white/30">
+          {brandIconOk ? (
+            <img
+              src={`/icons/app/icon-${appIconId}-192.png?v=41`}
+              alt="Cove"
+              draggable={false}
+              className="h-full w-full object-cover"
+              onError={() => setBrandIconOk(false)}
+            />
+          ) : (
+            <div className="flex h-full w-full items-center justify-center bg-white/85 backdrop-blur-xl dark:bg-[#2c2c2e]/90">
+              <MessageCircleHeart className="h-10 w-10 text-black dark:text-white" strokeWidth={1.8} />
+            </div>
+          )}
         </div>
         <div className="mt-3 text-[26px] font-bold tracking-tight text-white [text-shadow:0_1px_6px_rgba(0,0,0,0.4)]">
           Cove

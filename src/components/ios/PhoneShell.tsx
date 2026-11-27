@@ -253,6 +253,16 @@ export default function PhoneShell() {
     if (loaded) setNativeStatusBarMode(statusBarMode);
   }, [statusBarMode, loaded]);
 
+  // 第四十五轮：桌面图标开机自愈——覆盖安装 APK 后原生别名启用态被重置回默认 3 号
+  // （情书字标），与机主在网页里选的图标漂移；装载完成后按 IndexedDB 权威值静默切回
+  // （不弹 HOME、不退进程，启动器自行刷新）。
+  useEffect(() => {
+    if (!loaded) return;
+    void import('@/lib/ios/app-icon-sync')
+      .then((m) => m.syncChosenAppIcon())
+      .catch(() => undefined);
+  }, [loaded]);
+
   // 第四十二轮云端能力开机挂载（装载完成后一次性）：
   // ① 离线消息推送：Supabase Realtime 监听 messages 表（App 后台时经系统通知弹横幅；
   //    动态 import 不拖首屏 bundle；云端未部署/通知闸关 = 静默跳过）
@@ -660,10 +670,14 @@ export default function PhoneShell() {
             ) : (
               <div className="absolute -inset-[2px]" style={wallpaperStyle} aria-hidden="true" />
             )}
-            {/* 门禁内容层（登录/注册 或 审核等待） */}
-            <div className="absolute" data-shell-content="" style={contentInsetStyle}>
+            {/* 门禁内容层（登录/注册 或 审核等待）
+                第四十五轮沉浸式修复：data-bleed——门禁页自己的底色/渐变压暗直接铺满物理屏顶
+                （含系统状态栏条带）。此前本层从安全区下开始，条带露出的壁纸是亮的 → 机主截图
+                「登录页状态栏那里一块白色、没有沉浸式」。登录页深色压暗渐变压到物理屏顶后，
+                状态栏白字浮在深色背景上；待审核页是整页白/黑底，状态栏随页面底色取黑/白。 */}
+            <div className="absolute" data-shell-content="" data-bleed="" style={contentInsetStyle}>
               {authPhase === 'pending' ? <PendingReviewScreen /> : <AuthScreen />}
-              {showStatusBar && <StatusBar />}
+              {showStatusBar && <StatusBar forceLight={authPhase === 'guest' ? true : undefined} />}
             </div>
             {/* Home 指示条（门禁层用白杠：下方有深色渐变压暗） */}
             <div

@@ -22,7 +22,18 @@ public class BootReceiver extends BroadcastReceiver {
 
     @Override
     public void onReceive(Context ctx, Intent intent) {
-        if (intent == null || !Intent.ACTION_BOOT_COMPLETED.equals(intent.getAction())) return;
+        if (intent == null) return;
+        // 第四十五轮：覆盖安装新 APK 后，桌面图标的别名启用态会被重置回 Manifest 默认
+        // （3 号情书字标）——机主每次更新都看到「图标变回默认」。安装完成广播里静默恢复
+        // 机主所选图标（不动进程、不弹 HOME，启动器自行刷新）。
+        if (Intent.ACTION_MY_PACKAGE_REPLACED.equals(intent.getAction())) {
+            try {
+                MainActivity.restoreIconFromPrefs(ctx);
+            } catch (Throwable ignored) {
+            }
+            return;
+        }
+        if (!Intent.ACTION_BOOT_COMPLETED.equals(intent.getAction())) return;
         // ① 常驻守护（用户开启过才拉起）
         try {
             KeepAliveService.startFromBoot(ctx);

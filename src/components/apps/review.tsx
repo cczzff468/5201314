@@ -27,9 +27,10 @@ import {
   Ticket,
   UserCog,
 } from 'lucide-react';
-import { IOSNavBar, IOSScreen } from '@/components/ios/IOSNavBar';
+import { IOSBackButton, IOSNavBar, IOSScreen } from '@/components/ios/IOSNavBar';
 import { toast } from 'sonner';
 import { isAdminRole, useAuth } from '@/lib/auth/store';
+import { useUI } from '@/lib/ios/store';
 
 interface PendingUser {
   id: string;
@@ -139,12 +140,15 @@ export default function ReviewApp() {
     }
   }, []);
 
+  /** 第四十五轮：三个统计卡（待审核 / 可用码 / 用户）的数值在打开即全部拉齐——
+   *  旧版按 tab 懒加载，刚打开时只有「待审核」有数字，另外两个显示「—」，
+   *  必须点下面的分段标签才出数（机主反馈「需要点击下面的才显示」）。 */
   useEffect(() => {
     if (!isAdmin) return;
-    if (tab === 'pending' && pending === null) void loadPending();
-    if (tab === 'invites' && invites === null) void loadInvites();
-    if (tab === 'users' && isSuper && users === null) void loadUsers();
-  }, [tab, isAdmin, isSuper, pending, invites, users, loadPending, loadInvites, loadUsers]);
+    void loadPending();
+    void loadInvites();
+    if (isSuper) void loadUsers();
+  }, [isAdmin, isSuper, loadPending, loadInvites, loadUsers]);
 
   // 通过审核：pending → approved（服务端二次校验管理员权限）
   const approve = async (u: PendingUser) => {
@@ -227,9 +231,8 @@ export default function ReviewApp() {
 
   const refresh = async () => {
     setRefreshing(true);
-    if (tab === 'pending') await loadPending();
-    else if (tab === 'invites') await loadInvites();
-    else if (tab === 'users' && isSuper) await loadUsers();
+    // 刷新 = 三个统计卡一起对账（顶部数字始终与列表一致）
+    await Promise.all([loadPending(), loadInvites(), isSuper ? loadUsers() : Promise.resolve()]);
     setRefreshing(false);
   };
 
@@ -256,6 +259,10 @@ export default function ReviewApp() {
     <IOSScreen>
       <IOSNavBar
         title="审核"
+        // 第四十五轮：左上补「返回主界面」——审核页此前没有任何返回入口，只能靠上滑手势，
+        // 机主点哪都像「被弹回主界面」，以为进了个假页面。
+        left={<IOSBackButton onClick={() => useUI.getState().closeApp()} label="主界面" />}
+        inline
         right={
           <button
             type="button"

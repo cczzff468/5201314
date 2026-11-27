@@ -1784,6 +1784,13 @@ html[data-app-native] [data-bleed] {
   bottom: calc(0px - var(--app-sab, 0px)) !important;
   left: calc(0px - var(--app-sal, 0px)) !important;
 }
+/* 第四十五轮·门禁页（登录/注册、待审核）全出血：顶部改按【全额】安全区逃逸，而不是
+   28% 挖孔口径——此前门禁内容层从 28% 处开始，上方那一条仍露着亮壁纸，机主截图
+   「APP登录页系统状态栏那里还有白色背景、没有沉浸式」。全额逃逸后登录页的深色压暗
+   渐变压到物理屏顶逐像素连续；页面内部靠自身 pt 留白，挖孔不压文字。 */
+html[data-app-native] [data-shell-content][data-bleed] {
+  top: calc(0px - var(--app-sat, 0px)) !important;
+}
 /* 出血层里的可交互/内容层再内缩回来（如锁屏时钟、App 窗口内容），避免顶进系统状态栏；
    App 窗口借此实现「底色出血铺满 + 内容从安全区下开始」的原生沉浸观感。
    第三十三轮：顶部改用有效内缩（新壳 45% 挖孔）——与状态栏同步上提，

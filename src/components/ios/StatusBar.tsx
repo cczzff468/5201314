@@ -338,7 +338,7 @@ function BatteryDetail({
  * 可见性由 MusicIsland 写入 music-store.islandVisible（美团/淘宝岛同读）+ music-island-flag
  * 微型 store（本组件只读后者），不重复维护口径。
  */
-export default function StatusBar() {
+export default function StatusBar({ forceLight }: { forceLight?: boolean } = {}) {
   const clockSecond = useSyncExternalStore(
     (onChange) => {
       const timer = window.setInterval(onChange, 1000);
@@ -348,7 +348,10 @@ export default function StatusBar() {
     () => 0
   );
   const battery = useBattery();
-  const lightText = useLightForeground();
+  const autoLight = useLightForeground();
+  // 第四十五轮：门禁页（登录/注册）显式白字——登录页深色压暗渐变压到物理屏顶，
+  // 自动判定在「未解锁/无 App 前台」时只看壁纸明暗，浅色壁纸会给出黑字（压深底上不可读）。
+  const lightText = forceLight ?? autoLight;
   // v2.4.10 电量百分比显示方式（设置›电量百分比三选一，实时跟随）
   const batteryPercent = useSettings((s) => s.batteryPercent);
   const musicIslandVisible = useMusicIslandVisible();
