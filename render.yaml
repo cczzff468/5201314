@@ -1,0 +1,30 @@
+# Render 一键部署（预览用）——给没有电脑、只有手机的机主
+#
+# 用法（手机浏览器即可，不用电脑、不用买服务器）：
+#   1. 打开 https://render.com ，用 GitHub 账号登录（cczzff468）
+#   2. New + → Blueprint → 选仓库 5201314 → Apply
+#   3. 等首轮构建（约 5~10 分钟）→ 得到形如 https://cove-preview.onrender.com 的地址
+#   4. 打开该地址就是活的 App（APK 配置页也可以填这个地址）
+#
+# 免费实例限制：
+#   - 15 分钟没人访问会休眠，再次打开要等 30~60 秒冷启动
+#   - 磁盘是临时的：重新部署/重启后数据库回到仓库里的 db/custom.db（聊天写入不长期保留）
+#   - 512MB 内存，够单机预览用；若频繁 OOM，可把 plan 改成 starter（付费）
+#
+# 注意：免费实例的地址是公开的，任何人拿到链接都能打开登录页。
+services:
+  - type: web
+    name: cove-preview
+    runtime: node
+    plan: free
+    region: singapore
+    healthCheckPath: /
+    buildCommand: npm install --legacy-peer-deps && npx prisma generate && npm run build
+    startCommand: node .next/standalone/server.js
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: DATABASE_URL
+        value: "file:./db/custom.db"
+      - key: NODE_ENV
+        value: production

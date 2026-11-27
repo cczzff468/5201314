@@ -12,7 +12,8 @@
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "db:reset": "prisma migrate reset",
-    "apk:build": "bash scripts/build-apk.sh"
+    "apk:build": "bash scripts/build-apk.sh",
+    "start:node": "node .next/standalone/server.js"
   },
   "dependencies": {
     "@capacitor/android": "^8.6.0",
