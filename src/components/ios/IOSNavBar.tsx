@@ -15,6 +15,7 @@ export function IOSNavBar({
   right,
   large = true,
   inline = false,
+  onTitleClick,
   className = '',
 }: {
   title: string;
@@ -22,6 +23,8 @@ export function IOSNavBar({
   right?: ReactNode;
   large?: boolean;
   inline?: boolean;
+  /** 可选：点标题文字触发（如审核页点「审核」两字返回主界面） */
+  onTitleClick?: () => void;
   className?: string;
 }) {
   return (
@@ -29,7 +32,20 @@ export function IOSNavBar({
       <div className="relative flex h-11 items-center justify-between px-4">
         <div className="flex min-w-0 flex-1 items-center gap-1.5">
           {left}
-          {inline && <span className="truncate text-[19px] font-bold leading-none tracking-tight">{title}</span>}
+          {inline &&
+            (onTitleClick ? (
+              <button
+                type="button"
+                aria-label={`${title}，点按返回主界面`}
+                title="返回主界面"
+                onClick={onTitleClick}
+                className="truncate text-[19px] font-bold leading-none tracking-tight transition-opacity active:opacity-40"
+              >
+                {title}
+              </button>
+            ) : (
+              <span className="truncate text-[19px] font-bold leading-none tracking-tight">{title}</span>
+            ))}
         </div>
         {!inline && !large && (
           <div className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 text-[19px] font-bold tracking-tight">

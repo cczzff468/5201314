@@ -440,8 +440,8 @@ export default function AuthScreen() {
       {/* 深色渐变压暗壁纸，保证表单可读性（上浅下深，锁定页质感） */}
       <div aria-hidden className="pointer-events-none absolute inset-0 bg-gradient-to-b from-black/35 via-black/45 to-black/55" />
 
-      {/* 品牌 */}
-      <div className="relative flex flex-col items-center pb-5 pt-[13%]">
+      {/* 品牌（机主反馈登录界面太靠上，整体下移：13%→24%） */}
+      <div className="relative flex flex-col items-center pb-5 pt-[24%]">
         <div className="relative h-[72px] w-[72px] overflow-hidden rounded-[22px] shadow-lg ring-[0.5px] ring-white/30">
           {brandIconOk ? (
             <img

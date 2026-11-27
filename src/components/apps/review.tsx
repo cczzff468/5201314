@@ -27,7 +27,7 @@ import {
   Ticket,
   UserCog,
 } from 'lucide-react';
-import { IOSBackButton, IOSNavBar, IOSScreen } from '@/components/ios/IOSNavBar';
+import { IOSNavBar, IOSScreen } from '@/components/ios/IOSNavBar';
 import { toast } from 'sonner';
 import { isAdminRole, useAuth } from '@/lib/auth/store';
 import { useUI } from '@/lib/ios/store';
@@ -259,9 +259,8 @@ export default function ReviewApp() {
     <IOSScreen>
       <IOSNavBar
         title="审核"
-        // 第四十五轮：左上补「返回主界面」——审核页此前没有任何返回入口，只能靠上滑手势，
-        // 机主点哪都像「被弹回主界面」，以为进了个假页面。
-        left={<IOSBackButton onClick={() => useUI.getState().closeApp()} label="主界面" />}
+        // 机主定稿：去掉左上「主界面」返回键——点导航栏「审核」两字即返回主界面
+        onTitleClick={() => useUI.getState().closeApp()}
         inline
         right={
           <button

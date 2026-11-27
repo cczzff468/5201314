@@ -13,7 +13,7 @@ const nextConfig: NextConfig = {
   reactStrictMode: false,
   // 预览面板通过 *.space.zhipuaidemo.cn 域名访问 dev server（每次会话 chat_id 不同，
   // 用通配符覆盖所有预览域名）；Next 16 dev server 默认只允许 localhost，不配会被拒致预览空白
-  allowedDevOrigins: ["*.space.zhipuaidemo.cn", "*.zhipuaidemo.cn", "localhost", "127.0.0.1"],
+  allowedDevOrigins: ["*.space.zhipuaidemo.cn", "*.zhipuaidemo.cn", "*.monkeycode-ai.online", "localhost", "127.0.0.1"],
   // 触发 dev server 进程内重启以加载 src/instrumentation.ts（拉起 ncm-keeper 守护网易云 API）
   outputFileTracingIncludes: {},
   // 4GB 沙箱内存紧张：Next 16.4 已移除 experimental.turbopackMemoryLimit
