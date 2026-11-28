@@ -131,6 +131,8 @@ export interface AppMeta {
    *  直接铺到物理屏顶（状态栏/灵动岛浮于其上，取代「采样条带拼色」）；
    *  AppWindow 对其关掉 [data-safe-inset] 顶部内缩（内容从 y=0 开始），App 内部自管顶部避让 */
   fullBleedTop?: boolean;
+  /** v2.4.36 液态玻璃窗（同 AppDef.glassWindow，对象表二次声明） */
+  glassWindow?: boolean;
 }
 
 function IconTile({ className = '', children }: { className?: string; children?: ReactNode }) {
@@ -312,6 +314,10 @@ interface AppDef {
    *  直接铺到物理屏顶（状态栏/灵动岛浮于其上，取代「采样条带拼色」）；
    *  AppWindow 对其关掉 [data-safe-inset] 顶部内缩（内容从 y=0 开始），App 内部自管顶部避让 */
   fullBleedTop?: boolean;
+  /** v2.4.36 液态玻璃窗：App 根自带半透明毛玻璃底（App Store/时钟——机主令
+   *  「底部 tab 后面不要有白板背景」）。AppWindow 对其摘掉不透明 bg-background，
+   *  壁纸透过整窗 blur 柔光可见，底部悬浮胶囊 tab 脚下不再是白板。 */
+  glassWindow?: boolean;
 }
 
 const APP_DEFS: AppDef[] = [
@@ -336,6 +342,7 @@ const APP_DEFS: AppDef[] = [
     image: '/icons/clock.png',
     glyph: <ClockIcon className={GLYPH_CLASS} strokeWidth={GLYPH_STROKE} />,
     component: ClockApp,
+    glassWindow: true,
   },
   {
     id: 'calculator',
@@ -460,6 +467,7 @@ const APP_DEFS: AppDef[] = [
     image: '/icons/appstore.png',
     glyph: <Store className={GLYPH_CLASS} strokeWidth={GLYPH_STROKE} />,
     component: AppStoreApp,
+    glassWindow: true,
   },
   {
     id: 'memory',

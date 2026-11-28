@@ -53,16 +53,17 @@ export * from './settings/cloud';
 
 /**
  * SETTINGS-THEME：设置 App 全域强制浅色 token。
- * 机主要求设置子界面恒呈现「绿/白/灰/蓝」清爽浅色风，不随系统深色主题变黑。
+ * 机主要求设置子界面恒呈现「白/灰/蓝」清爽浅色风，不随系统深色主题变黑。
  * Tailwind 语义色（bg-background / text-foreground / text-muted-foreground / bg-muted /
  * bg-popover 等）的取值来自 :root 与 .dark 两套 CSS 变量的级联——这里在最外层用
- * inline CSS 变量把整套值钉死为浅色（页面底 #F3F6F3、卡片白、次文字 zinc-500、
- * 主色蓝 #007AFF、破坏性红 #FF3B30），深色主题下设置 App（含不可修改的 IOSNavBar
- * 与 ui/ 内 Input、Textarea、alert-dialog、Slider 等共享件）也整体呈现浅色。
+ * inline CSS 变量把整套值钉死为浅色（v2.4.36 页面底改中性 #F2F2F7——原 #F3F6F3
+ * 绿调在屏幕上呈「泛黄」观感，按机主参考图换 iOS systemGroupedBackground；卡片白、
+ * 次文字 zinc-500、主色蓝 #007AFF、破坏性红 #FF3B30），深色主题下设置 App（含不可
+ * 修改的 IOSNavBar 与 ui/ 内 Input、Textarea、alert-dialog、Slider 等共享件）也整体呈现浅色。
  * 包装层用 display:contents，不产生布局盒子，IOSScreen 仍作为唯一 flex 子级填满 App 窗口。
  */
 const SETTINGS_LIGHT_TOKENS = {
-  '--background': '#F3F6F3',
+  '--background': '#F2F2F7',
   '--foreground': '#18181B',
   '--card': '#FFFFFF',
   '--card-foreground': '#18181B',
@@ -100,7 +101,10 @@ export default function SettingsApp() {
   return (
     <div className="contents" style={SETTINGS_LIGHT_TOKENS}>
       <IOSScreen className="relative">
-        {page === 'root' && <RootPage onOpen={setPage} />}
+        {/* v2.4.36 液态玻璃改版：RootPage 常驻挂载——子页全部经共享 DetailShell 以底部
+            弹层浮在其上（不再整页替换），主列表的滚动位置与各弹窗开关状态在开关子页
+            期间全程保留（iOS 导航栈感）；RootPage 只读设置与本地状态，常驻挂载无副作用 */}
+        <RootPage onOpen={setPage} />
         {page === 'account' && <AccountSwitchPage onBack={() => setPage('root')} />}
         {page === 'profile' && <ProfilePage onBack={() => setPage('root')} />}
         {page === 'theme' && <ThemePage onBack={() => setPage('root')} />}

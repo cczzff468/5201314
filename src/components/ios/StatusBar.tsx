@@ -81,14 +81,20 @@ export function BatteryIcon({ level, charging, low, mode, light = false }: Batte
      *   （永在无胶囊的最右侧）；
      * - 【内部电量太圆了/整体大小一样】：填充=方角矩形全高贴描边内缘（无裁腰），
      *   边框圆角 5.2 → 3 只作用于描边角，不再吃填充端部高度；
-     * - 沿用：充电不变绿/低电不变红（色恒定）、100% 四边贴满、数字反色+投影、
-     *   26% 轨道、充电数字侧小闪电。 */
-    // 数字色 = 填充反色：前景浅→胶囊白→黑字，前景深→胶囊黑→白字（常态恒定，无状态色分支）
-    const numColor = light ? '#000000' : '#FFFFFF';
-    // 柔和投影：保证数字叠在半透明轨道上仍可读（反相光晕）
-    const numHalo = light
-      ? '0 0 2px rgba(255,255,255,0.55)'
-      : '0 0 2px rgba(0,0,0,0.35)';
+     * - 沿用：100% 四边贴满、数字反色+投影、26% 轨道、充电数字侧小闪电。
+     * v2.4.36 充电绿（机主令）：充电时胶囊填充与跟随描边变 #30D158、数字恒白
+     * （绿底白字），数字侧小闪电也变绿（白色光晕保证在绿胶囊上可见）；
+     * 不充电时维持原恒定色口径。 */
+    // 数字色：充电时绿胶囊 → 恒白字；常态 = 填充反色（前景浅→胶囊白→黑字，前景深→胶囊黑→白字）
+    const numColor = charging ? '#FFFFFF' : light ? '#000000' : '#FFFFFF';
+    // 柔和投影：保证数字叠在半透明轨道/绿胶囊上仍可读（反相光晕）
+    const numHalo = charging
+      ? '0 0 2px rgba(0,0,0,0.30)'
+      : light
+        ? '0 0 2px rgba(255,255,255,0.55)'
+        : '0 0 2px rgba(0,0,0,0.35)';
+    // v2.4.36 充电绿：胶囊层颜色（填充+跟随描边同色）；常态 currentColor 自适应
+    const capsuleColor = charging ? '#30D158' : undefined;
     // 恒定灰（描边右段/凸点）：黑胶囊（浅底）配 40% 黑灰；白胶囊（深底）配 40% 白灰
     const gray = light ? 'rgba(255,255,255,0.40)' : 'rgba(0,0,0,0.40)';
     const digits = String(Math.round(level));
@@ -137,8 +143,7 @@ export function BatteryIcon({ level, charging, low, mode, light = false }: Batte
             stroke={gray}
             strokeWidth={IOS_BAT_STROKE}
           />
-          {/* 胶囊色层（clip 到电量宽度）：全高实心填充（第三十八轮：圆角 3.2——机主再要
-              「圆一点点」，柔和中圆；宽度=clipW 精确到电比、左右两端同圆角）+ 同色描边——边框跟随实心胶囊 */}
+          {/* 胶囊色层（clip 到电量宽度）：全高实心填充（v2.4.36 充电时整层变绿 #30D158）+ 同色描边——边框跟随实心胶囊 */}
           <g clipPath={`url(#${clipId})`}>
             {/* 实心填充：全高贴描边内缘（整体大小一样），中圆角 3.2（柔和不裁腰） */}
             <rect
@@ -147,7 +152,7 @@ export function BatteryIcon({ level, charging, low, mode, light = false }: Batte
               width={Math.max(clipW, 0.01)}
               height={IOS_BAT_INNER_H}
               rx={IOS_BAT_FILL_RADIUS}
-              fill="currentColor"
+              fill={capsuleColor ?? 'currentColor'}
             />
             {/* 胶囊色描边（与填充同色同圆角——覆盖灰描边段的左段） */}
             <rect
@@ -157,7 +162,7 @@ export function BatteryIcon({ level, charging, low, mode, light = false }: Batte
               height={IOS_BAT_INNER_H}
               rx={IOS_BAT_RADIUS}
               fill="none"
-              stroke="currentColor"
+              stroke={capsuleColor ?? 'currentColor'}
               strokeWidth={IOS_BAT_STROKE}
             />
           </g>
@@ -179,15 +184,19 @@ export function BatteryIcon({ level, charging, low, mode, light = false }: Batte
           style={{ width: IOS_BAT_BODY_W, color: numColor, textShadow: numHalo }}
         >
           {digits}
-          {/* 充电小闪电（数字右侧、与数字同色同投影） */}
+          {/* 充电小闪电（数字右侧；v2.4.36 变绿 #30D158——白色光晕双层保证在绿胶囊/灰轨道上都清晰） */}
           {charging && (
             <svg
               viewBox="0 0 12 20"
-              className="ml-[2px] h-[9px] w-[5.5px] fill-current"
+              className="ml-[2px] h-[9px] w-[5.5px]"
               aria-hidden="true"
-              style={{ filter: 'drop-shadow(0 0 1px rgba(0,0,0,0.3))' }}
+              style={{
+                color: '#30D158',
+                filter:
+                  'drop-shadow(0 0 1px rgba(255,255,255,0.95)) drop-shadow(0 0 1px rgba(255,255,255,0.85))',
+              }}
             >
-              <path d="M7.5 1 2 11.5h3.2L4.5 19 10 8.2H6.6L7.5 1Z" />
+              <path d="M7.5 1 2 11.5h3.2L4.5 19 10 8.2H6.6L7.5 1Z" fill="currentColor" />
             </svg>
           )}
         </span>
@@ -217,14 +226,19 @@ export function BatteryIcon({ level, charging, low, mode, light = false }: Batte
           }`}
           style={{ width: `calc((100% - 3.6px) * ${fill / 100})` }}
         />
-        {/* 充电闪电 */}
+        {/* 充电闪电（v2.4.36 变绿 #30D158——白色光晕在绿填充上清晰可辨） */}
         {charging && (
           <svg
             viewBox="0 0 12 20"
-            className="absolute left-1/2 top-1/2 h-[11px] w-[7px] -translate-x-1/2 -translate-y-1/2 fill-white drop-shadow-[0_0_1px_rgba(0,0,0,0.4)]"
+            className="absolute left-1/2 top-1/2 h-[11px] w-[7px] -translate-x-1/2 -translate-y-1/2"
             aria-hidden="true"
+            style={{
+              color: '#30D158',
+              filter:
+                'drop-shadow(0 0 1.5px rgba(255,255,255,0.95)) drop-shadow(0 0 1px rgba(255,255,255,0.9))',
+            }}
           >
-            <path d="M7.5 1 2 11.5h3.2L4.5 19 10 8.2H6.6L7.5 1Z" />
+            <path d="M7.5 1 2 11.5h3.2L4.5 19 10 8.2H6.6L7.5 1Z" fill="currentColor" />
           </svg>
         )}
         {/* 正极凸点（40% 半透明同描边色——回退原样式） */}

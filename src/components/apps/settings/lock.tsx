@@ -215,7 +215,7 @@ export function FaceLockSection() {
                     {hasRef && (
                       <span
                         aria-label="已设置参考图"
-                        className="absolute -bottom-0.5 -right-0.5 h-3.5 w-3.5 rounded-full border-2 border-[#F3F6F3] bg-[#34C759]"
+                        className="absolute -bottom-0.5 -right-0.5 h-3.5 w-3.5 rounded-full border-2 border-[#F2F2F7] bg-[#34C759]"
                       />
                     )}
                   </span>

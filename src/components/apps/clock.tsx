@@ -1133,7 +1133,7 @@ export default function ClockApp() {
   const timerDone = useTimerStore((s) => s.phase === 'done');
 
   return (
-    <div className="relative flex h-full w-full flex-col overflow-hidden bg-gradient-to-b from-[#F7F7FA] to-[#EFEFF4] text-foreground dark:from-[#141418] dark:to-[#0E0E12]">
+    <div className="relative flex h-full w-full flex-col overflow-hidden bg-[#F2F2F7]/[0.60] text-foreground backdrop-blur-2xl dark:bg-[#0E0E12]/[0.72]">
       <IOSNavBar
         title={TABS[tab].label}
         inline

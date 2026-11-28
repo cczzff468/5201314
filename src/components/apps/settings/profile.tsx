@@ -111,7 +111,7 @@ export function ProfilePage({ onBack }: { onBack: () => void }) {
               <User className="h-11 w-11 text-[#7C7C84]" strokeWidth={1.8} />
             </span>
           )}
-          <span className="absolute -bottom-0.5 -right-0.5 flex h-[30px] w-[30px] items-center justify-center rounded-full border-[3px] border-[#F3F6F3] bg-white/85 shadow-sm backdrop-blur-xl">
+          <span className="absolute -bottom-0.5 -right-0.5 flex h-[30px] w-[30px] items-center justify-center rounded-full border-[3px] border-[#F2F2F7] bg-white/85 shadow-sm backdrop-blur-xl">
             <Camera className="h-[15px] w-[15px] text-zinc-900" strokeWidth={2.2} />
           </span>
         </button>

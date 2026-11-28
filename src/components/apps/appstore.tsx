@@ -379,7 +379,7 @@ export default function AppStoreApp() {
       const isRemoved = removedSet.has(app.id);
       const meta = metaFor(app.id);
       return (
-        <IOSScreen className="bg-gradient-to-b from-[#F7F7FA] to-[#EFEFF4] dark:from-[#141418] dark:to-[#0E0E12]">
+        <IOSScreen className="bg-[#F2F2F7]/[0.60]! backdrop-blur-2xl dark:bg-[#0E0E12]/[0.72]!">
           <div className="no-scrollbar flex-1 overflow-y-auto" data-testid="appstore-detail">
             {/* 顶部：圆形玻璃返回/分享按钮（同真实商店） */}
             <div className="sticky top-0 z-20 bg-white/60 pt-[54px] backdrop-blur-2xl dark:bg-black/40">
@@ -532,7 +532,7 @@ export default function AppStoreApp() {
   /* ------------------------------- 浏览视图 ------------------------------- */
 
   return (
-    <IOSScreen className="bg-gradient-to-b from-[#F7F7FA] to-[#EFEFF4] dark:from-[#141418] dark:to-[#0E0E12]">
+    <IOSScreen className="bg-[#F2F2F7]/[0.60]! backdrop-blur-2xl dark:bg-[#0E0E12]/[0.72]!">
       {/* 顶栏：返回键（回主屏，与其他 App 根页一致）+ 大标题 + 账户头像（跟随设置
         * 「个人信息」卡片的头像——传了自定义头像显示图片，没传显示同款灰渐变人形占位） */}
       <header className="shrink-0 bg-white/60 pt-[54px] backdrop-blur-2xl dark:bg-black/40">

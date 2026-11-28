@@ -29,6 +29,7 @@ import {
   Mic,
   PanelTop,
   Plane,
+  Search,
   SlidersHorizontal,
   Smartphone,
   Sun,
@@ -37,6 +38,7 @@ import {
   UsersRound,
   Wifi,
   Wrench,
+  X,
   ShieldCheck,
   Sparkles,
 } from 'lucide-react';
@@ -167,6 +169,9 @@ export function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
 
   const [airplane, setAirplane] = useState(false);
 
+  // v2.4.36 底部浮动搜索胶囊（机主 iOS 设置参考图）：输入即过滤下方各设置入口行
+  const [search, setSearch] = useState('');
+
   // v1.9.38 AI 动手恒开（无开关）：主列表入口右侧改显动手范围（localStorage 现场读取；
   // 从子页切换后返回时 RootPage 重挂载，状态自动刷新）
   const autonomyTarget = getAiActionTarget() === 'device' ? '真机' : '网站里面';
@@ -224,6 +229,25 @@ export function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
   const fontRowValue =
     BUILTIN_APP_FONTS.find((f) => f.id === appFontId)?.name ?? (appFontId.startsWith('custom:') ? '自定义' : '默认');
 
+  /** 搜索过滤（v2.4.36）：q 非空时只保留标签命中的导航入口行；开关行（状态栏/灵动岛常驻/
+   *  后台保活/提示词查看器/快捷操作）、弹窗行（电量百分比/开屏动画/App 图标）、
+   *  头像资料卡、无线控制演示组等非导航区块整组隐藏；全组无命中时连卡片带分组标题一起隐藏 */
+  const q = search.trim().toLowerCase();
+  const match = (label: string): boolean => !q || label.toLowerCase().includes(q);
+  const showProfileCard = match('账号管理');
+  const showLock = match('锁屏与密码');
+  const showAiService =
+    match('API 配置') || match('识图模型') || match('图像生成') || match('语音 API');
+  const showDisplay = match('显示与亮度') || match('壁纸') || match('通知') || match('字体');
+  const showAssist = match('默认预设（内置）');
+  const showAiCtrl = match('权限给予') || match('语音助手');
+  const showCloud = match('云端助手');
+  const showIconsCard = match('APP 更新') || match('添加到主屏幕');
+  const showAbout = match('关于本机');
+  const anyResult =
+    showProfileCard || showLock || showAiService || showDisplay || showAssist ||
+    showAiCtrl || showCloud || showIconsCard || showAbout;
+
   return (
     <>
       {/* 顶部：返回主屏幕箭头 + 大标题「设置」（用户要求补上标签；返回键处不显示文字） */}
@@ -240,9 +264,15 @@ export function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
           <span className="truncate text-[19px] font-bold leading-none tracking-tight">设置</span>
         </div>
       </div>
-      <div className="no-scrollbar flex-1 overflow-y-auto pb-5">
-        {/* 个人资料卡（点击进入个人信息：头像/名字/标签）+ 切换账号入口行（同一分组） */}
+      {/* 主滚动区：底部 padding 放在内层包裹盒上（不能直接放滚动容器——padding 会抬
+          高 sticky 子元素的吸附基准线，胶囊会浮在“padding+12px”高处而不是紧贴底 12px） */}
+      <div className="no-scrollbar flex-1 overflow-y-auto">
+        <div className="pb-[74px]">
+        {/* 个人资料卡（点击进入个人信息：头像/名字/标签）+ 切换账号入口行（同一分组）。
+            搜索中：头像资料卡属非搜索 UI 整体隐藏，仅保留命中的「账号管理」导航行 */}
+        {showProfileCard && (
         <div className="mx-4 mt-2 divide-y divide-black/[0.05] overflow-hidden rounded-[22px] bg-white/80 shadow-[0_2px_12px_rgba(0,0,0,0.04)] ring-1 ring-black/[0.05] backdrop-blur-2xl">
+          {!q && (
           <button
             type="button"
             onClick={() => onOpen('profile')}
@@ -269,7 +299,9 @@ export function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
             </span>
             <ChevronRight className="h-5 w-5 shrink-0 text-zinc-500/60" />
           </button>
+          )}
           {/* 账号管理入口（Task 40-C / v2 适配）：右侧值 = 恒机主名（无全局当前账号） */}
+          {match('账号管理') && (
           <MainRow
             icon={UsersRound}
             tone={TONE_CYAN}
@@ -278,9 +310,12 @@ export function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
             onClick={() => onOpen('account')}
             testId="settings-account-entry"
           />
+          )}
         </div>
+        )}
 
-        {/* 无线控制（演示项） */}
+        {/* 无线控制（演示项）。搜索中整组隐藏（飞行模式为开关、无线/蓝牙为演示展示行，非导航入口） */}
+        {!q && (
         <div className="mx-4 mt-4 divide-y divide-black/[0.05] overflow-hidden rounded-[22px] bg-white/80 shadow-[0_2px_12px_rgba(0,0,0,0.04)] ring-1 ring-black/[0.05] backdrop-blur-2xl">
           <div className="flex min-h-[52px] items-center gap-3 px-4 py-2">
             <RowIcon icon={Plane} tone={TONE_ORANGE} />
@@ -307,15 +342,20 @@ export function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
           <MainRow icon={Wifi} tone={TONE_BLUE} label="无线局域网" value="我爱你" chevron />
           <MainRow icon={Bluetooth} tone={TONE_BLUE} label="蓝牙" value="love" chevron />
         </div>
+        )}
 
         {/* 锁屏与密码（按用户要求不显示开启状态提示） */}
+        {showLock && (
         <div className="mx-4 mt-4 divide-y divide-black/[0.05] overflow-hidden rounded-[22px] bg-white/80 shadow-[0_2px_12px_rgba(0,0,0,0.04)] ring-1 ring-black/[0.05] backdrop-blur-2xl">
           <MainRow icon={Lock} tone={TONE_RED} label="锁屏与密码" onClick={() => onOpen('lock')} />
         </div>
+        )}
 
         {/* 第三十六轮：AI 服务四件套上移到「锁屏与密码」下面（机主要求：API、识图、图像、语言放这里）
             ——从原「开发者」组剪出，开发者组剩 ClawBox + 存储改组名「云端与存储」 */}
+        {showAiService && (
         <div className="mx-4 mt-4 divide-y divide-black/[0.05] overflow-hidden rounded-[22px] bg-white/80 shadow-[0_2px_12px_rgba(0,0,0,0.04)] ring-1 ring-black/[0.05] backdrop-blur-2xl">
+          {match('API 配置') && (
           <MainRow
             icon={Wrench}
             tone={TONE_GRAY}
@@ -323,6 +363,8 @@ export function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
             value={apiKey.trim() ? `已配置 · ${apiModel}` : '未配置'}
             onClick={() => onOpen('api')}
           />
+          )}
+          {match('识图模型') && (
           <MainRow
             icon={Eye}
             tone={TONE_PURPLE}
@@ -330,6 +372,8 @@ export function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
             value={visionConfigured ? `已配置 · ${visionModel.trim() || '未填模型名'}` : '未配置'}
             onClick={() => onOpen('vision')}
           />
+          )}
+          {match('图像生成') && (
           <button
             type="button"
             data-testid="settings-imggen-row"
@@ -352,6 +396,8 @@ export function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
             </span>
             <ChevronRight className="h-5 w-5 shrink-0 text-zinc-500/60" />
           </button>
+          )}
+          {match('语音 API') && (
           <MainRow
             icon={AudioLines}
             tone={TONE_CYAN}
@@ -365,10 +411,14 @@ export function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
             }
             onClick={() => onOpen('voice')}
           />
+          )}
         </div>
+        )}
 
-        {/* 显示与亮度 / 壁纸 / 通知 */}
+        {/* 显示与亮度 / 壁纸 / 通知（搜索中：开关行整组隐藏，只过滤导航入口行） */}
+        {showDisplay && (
         <div className="mx-4 mt-4 divide-y divide-black/[0.05] overflow-hidden rounded-[22px] bg-white/80 shadow-[0_2px_12px_rgba(0,0,0,0.04)] ring-1 ring-black/[0.05] backdrop-blur-2xl">
+          {match('显示与亮度') && (
           <MainRow
             icon={Sun}
             tone={TONE_BLUE}
@@ -376,6 +426,8 @@ export function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
             value={THEME_SHORT[theme]}
             onClick={() => onOpen('theme')}
           />
+          )}
+          {match('壁纸') && (
           <MainRow
             icon={ImageIcon}
             tone={TONE_CYAN}
@@ -383,7 +435,11 @@ export function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
             value={wallpaperName}
             onClick={() => onOpen('wallpaper')}
           />
+          )}
+          {match('通知') && (
           <MainRow icon={Bell} tone={TONE_RED} label="通知" onClick={() => onOpen('notification')} />
+          )}
+          {match('字体') && (
           <MainRow
             icon={Type}
             tone={TONE_CYAN}
@@ -391,9 +447,11 @@ export function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
             value={fontRowValue}
             onClick={() => onOpen('font')}
           />
+          )}
           {/* 状态栏开关（Task 36；Task 37 换绿色大开关；v58 行为更新）：关闭后隐藏顶部时间/信号/电量状态栏
               与黑色胶囊基础灵动岛；APP 灵动岛（音乐岛、美团/淘宝配送岛、灵动岛通知卡、来电胶囊）照常显示。
               与飞行模式同款 iOS 原生 51×31 大开关，开启态 #34C759 绿 */}
+          {!q && (
           <div className="flex min-h-[52px] items-center gap-3 px-4 py-2">
             <RowIcon icon={PanelTop} tone={TONE_GRAY} />
             <span className="min-w-0 flex-1 truncate text-[16px]">状态栏</span>
@@ -415,9 +473,11 @@ export function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
               />
             </button>
           </div>
+          )}
           {/* 灵动岛常驻开关（用户需求）：关闭后顶部黑色胶囊灵动岛不显示，
               但 APP 灵动岛（音乐岛大/小窗、外卖/快递配送岛、灵动岛通知卡、来电胶囊）照常显示。
               与飞行模式同款 iOS 原生 51×31 大开关，开启态 #34C759 绿 */}
+          {!q && (
           <div className="flex min-h-[52px] items-center gap-3 px-4 py-2">
             <RowIcon icon={Smartphone} tone={TONE_GRAY} />
             <span className="min-w-0 flex-1 truncate text-[16px]">灵动岛常驻</span>
@@ -439,9 +499,11 @@ export function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
               />
             </button>
           </div>
+          )}
           {/* v80 后台保活开关：Worker 心跳 + 无声音频双通道——切到后台/锁屏时尽量保持
               网页运行（防定时器节流/防冻结），AI 主动消息与后台接力轮询不中断；代价是略更耗电。
               与飞行模式同款 iOS 原生 51×31 大开关，默认关（省电），开启态 #34C759 绿 */}
+          {!q && (
           <div className="flex min-h-[52px] items-center gap-3 px-4 py-2">
             <RowIcon icon={Activity} tone={TONE_GRAY} />
             <span className="min-w-0 flex-1">
@@ -466,13 +528,17 @@ export function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
               />
             </button>
           </div>
+          )}
         </div>
+        )}
 
         {/* 第三十轮：电量百分比显示方式改为【点行弹窗选择】（机主需求：设置里的百分比显示选择要弹窗）。
             第三十三轮：入口行左侧图标改为与其他行一致的 RowIcon（机主要求「前面的图标变成跟其他的图标一样」，
             弃用第三十二轮的状态栏仿真预览条）；当前模式名 + ›，点开 iOS 居中弹窗：三选项各带状态栏同款
             实时小预览（固定 67%），点选即时生效并持久化；点背板/Esc 关闭。
             第三十五轮：入口行下方说明文字按机主要求删除（保持卡片列表干净）。 */}
+        {/* 电量百分比弹窗行（搜索中隐藏：非导航入口） */}
+        {!q && (
         <div className="mx-4 mt-4 overflow-hidden rounded-[22px] bg-white/80 shadow-[0_2px_12px_rgba(0,0,0,0.04)] ring-1 ring-black/[0.05] backdrop-blur-2xl">
           <button
             type="button"
@@ -488,6 +554,7 @@ export function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
             <ChevronRight className="h-4 w-4 shrink-0 text-zinc-500/60" strokeWidth={2.2} />
           </button>
         </div>
+        )}
         {batteryModeOpen && (
           <BatteryModeDialog
             current={batteryPercent}
@@ -500,8 +567,11 @@ export function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
             提示词查看器（下一轮完整 Prompt 只读预览）与快捷操作（API/世界书一键切换）。
             两个开关全关时不显示悬浮球；与状态栏/灵动岛同款 iOS 原生 51×31 大开关。
             v1.9.13：默认预设入口移到「提示词查看器」上方（机主要求的排序） */}
+        {showAssist && (
+        <>
         <div className="mb-2 mt-6 px-8 text-[13px] text-zinc-500">悬浮工具</div>
         <div className="mx-4 divide-y divide-black/[0.05] overflow-hidden rounded-[22px] bg-white/80 shadow-[0_2px_12px_rgba(0,0,0,0.04)] ring-1 ring-black/[0.05] backdrop-blur-2xl">
+          {match('默认预设（内置）') && (
           <MainRow
             icon={Layers}
             tone={TONE_PURPLE}
@@ -510,6 +580,8 @@ export function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
             onClick={() => onOpen('prompts')}
             testId="settings-prompts-row"
           />
+          )}
+          {!q && (
           <div className="flex min-h-[52px] items-center gap-3 px-4 py-2">
             <RowIcon icon={Eye} tone={TONE_CYAN} />
             <span className="min-w-0 flex-1">
@@ -534,6 +606,8 @@ export function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
               />
             </button>
           </div>
+          )}
+          {!q && (
           <div className="flex min-h-[52px] items-center gap-3 px-4 py-2">
             <RowIcon icon={SlidersHorizontal} tone={TONE_GREEN} />
             <span className="min-w-0 flex-1">
@@ -558,14 +632,20 @@ export function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
               />
             </button>
           </div>
+          )}
         </div>
+        </>
+        )}
 
         {/* AI 感知与操控：v1.9.36「AI 动手」入口改为「权限给予」——系统权限（v2.3.0 权限中心 16 项，
             原生系统 API + 无障碍服务，无 Shizuku）/时长数据源/AI 动手范围（真机 vs 网站）一页全管；
             v1.9.38 AI 动手能力恒开（能力开关组下线）；
             v1.9.3 语音唤起智能体拆出为独立设置页（同分组独立入口） */}
+        {showAiCtrl && (
+        <>
         <div className="mb-2 mt-6 px-8 text-[13px] text-zinc-500">AI 感知与操控</div>
         <div className="mx-4 divide-y divide-black/[0.05] overflow-hidden rounded-[22px] bg-white/80 shadow-[0_2px_12px_rgba(0,0,0,0.04)] ring-1 ring-black/[0.05] backdrop-blur-2xl">
+          {match('权限给予') && (
           <button
             type="button"
             data-testid="settings-autonomy-entry"
@@ -582,6 +662,8 @@ export function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
             </span>
             <ChevronRight className="h-5 w-5 shrink-0 text-zinc-500/60" />
           </button>
+          )}
+          {match('语音助手') && (
           <button
             type="button"
             data-testid="settings-agentvoice-entry"
@@ -598,12 +680,18 @@ export function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
             </span>
             <ChevronRight className="h-5 w-5 shrink-0 text-zinc-500/60" />
           </button>
+          )}
         </div>
+        </>
+        )}
 
         {/* 云端（第三十六轮重组）：存储 / 缓存 / 备份能力已整体迁至文件 App › 数据管理
             （机主规格），此处仅保留云端助手（ClawBox 部署与 7×24 自动回复本体） */}
+        {showCloud && (
+        <>
         <div className="mb-2 mt-6 px-8 text-[13px] text-zinc-500">云端</div>
         <div className="mx-4 divide-y divide-black/[0.05] overflow-hidden rounded-[22px] bg-white/80 shadow-[0_2px_12px_rgba(0,0,0,0.04)] ring-1 ring-black/[0.05] backdrop-blur-2xl">
+          {match('云端助手') && (
           <button
             type="button"
             data-testid="settings-cloud-entry"
@@ -619,13 +707,19 @@ export function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
             </span>
             <ChevronRight className="h-5 w-5 shrink-0 text-zinc-500/60" />
           </button>
+          )}
         </div>
+        </>
+        )}
 
         {/* 第三十三轮开屏动画 + 第四十二轮机主要求「开屏动画、App 图标放在一起」：
             原独立卡片并入下方「App 图标」同卡片（行序：开屏动画 → App 图标 → APP 更新 → 添加到主屏幕）。
             开屏动画行：入口预览当前主题微缩场景 + 名称，点开三选一弹窗（星空月夜/雾中远山/雨落成诗），
             点选【立马生效】：选完即整屏播放一遍预览 + 本会话下次冷启动/下次打开即播放所选主题 */}
+        {/* 搜索中：开屏动画 / App 图标两个弹窗行隐藏，仅保留命中的导航行（APP 更新/添加到主屏幕） */}
+        {showIconsCard && (
         <div className="mx-4 mt-4 divide-y divide-black/[0.05] overflow-hidden rounded-[22px] bg-white/80 shadow-[0_2px_12px_rgba(0,0,0,0.04)] ring-1 ring-black/[0.05] backdrop-blur-2xl">
+          {!q && (
           <button
             type="button"
             aria-haspopup="dialog"
@@ -644,8 +738,10 @@ export function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
             <span className="shrink-0 text-[13px] text-zinc-500">{splashThemeName(splashTheme)}</span>
             <ChevronRight className="h-4 w-4 shrink-0 text-zinc-500/60" strokeWidth={2.2} />
           </button>
+          )}
 
           {/* App 图标五选一（第四十一轮：3 号换机主原图设默认 + 新增 5 号元气气泡）——行内预览当前图标 */}
+          {!q && (
           <button
             type="button"
             aria-haspopup="dialog"
@@ -668,6 +764,8 @@ export function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
             </span>
             <ChevronRight className="h-4 w-4 shrink-0 text-zinc-500/60" strokeWidth={2.2} />
           </button>
+          )}
+          {match('APP 更新') && (
           <MainRow
             icon={Download}
             tone={TONE_CYAN}
@@ -677,6 +775,8 @@ export function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
             onClick={() => onOpen('appupdate')}
             testId="settings-appupdate-entry"
           />
+          )}
+          {match('添加到主屏幕') && (
           <MainRow
             icon={Smartphone}
             tone={TONE_PINK}
@@ -684,7 +784,9 @@ export function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
             onClick={() => onOpen('pwa')}
             testId="settings-pwa-entry"
           />
+          )}
         </div>
+        )}
         {appIconOpen && (
           <AppIconDialog
             current={appIcon}
@@ -705,14 +807,52 @@ export function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
         )}
         {splashPreview && <BootSplash forceTheme={splashPreview} />}
 
-        {/* 关于本机（第三十六轮：移到设置列表最下面——机主要求） */}
-        <div className="mx-4 mt-4 divide-y divide-black/[0.05] overflow-hidden rounded-[22px] bg-white/80 shadow-[0_2px_12px_rgba(0,0,0,0.04)] ring-1 ring-black/[0.05] backdrop-blur-2xl">
+        {/* 关于本机（第三十六轮：移到设置列表最下面——机主要求）。
+            mb-2：末段卡与下方 sticky 搜索胶囊之间留间隙，胶囊不压最后一行 */}
+        {showAbout && (
+        <div className="mx-4 mb-2 mt-4 divide-y divide-black/[0.05] overflow-hidden rounded-[22px] bg-white/80 shadow-[0_2px_12px_rgba(0,0,0,0.04)] ring-1 ring-black/[0.05] backdrop-blur-2xl">
           <MainRow icon={Info} tone={TONE_GRAY} label="关于本机" onClick={() => onOpen('about')} />
         </div>
+        )}
+
+        {/* 搜索无结果空态 */}
+        {q && !anyResult && (
+          <p className="p-10 text-center text-[14px] text-zinc-400">没有找到相关设置项</p>
+        )}
 
         <p className="py-6 text-center text-[12px] text-zinc-500">
           iOS Web · 本地优先架构 · 数据仅存于你的浏览器
         </p>
+
+        {/* 底部浮动搜索胶囊（v2.4.36 机主 iOS 设置参考图）：sticky 悬浮于滚动容器底部，
+            实时过滤上方设置入口行；仅过滤、不触发任何页面跳转；滚动容器底部 pb-[74px]
+            保证最后一行能滚出胶囊悬浮区 */}
+        <div className="sticky bottom-3 z-30 mx-4 mt-4">
+          <div className="flex h-[50px] items-center gap-2.5 rounded-full border border-white/55 bg-white/75 px-4 shadow-[0_8px_28px_rgba(24,24,27,0.10),inset_0_1px_0_rgba(255,255,255,0.6)] backdrop-blur-2xl dark:border-white/10 dark:bg-zinc-900/70">
+            <Search className="h-5 w-5 shrink-0 text-zinc-400" aria-hidden="true" />
+            <input
+              type="text"
+              className="flex-1 bg-transparent text-[15px] text-zinc-900 outline-none placeholder:text-zinc-400 dark:text-zinc-50"
+              placeholder="搜索"
+              aria-label="搜索设置项"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              enterKeyHint="search"
+            />
+            {search !== '' && (
+              <button
+                type="button"
+                aria-label="清空搜索"
+                onClick={() => setSearch('')}
+                className="flex h-6 w-6 items-center justify-center rounded-full bg-black/[0.06] active:scale-90 dark:bg-white/10"
+              >
+                <X className="h-3.5 w-3.5 text-zinc-500" />
+              </button>
+            )}
+            <Mic className="h-5 w-5 shrink-0 text-zinc-400" aria-hidden="true" />
+          </div>
+        </div>
+        </div>
       </div>
     </>
   );

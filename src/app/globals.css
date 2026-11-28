@@ -1998,3 +1998,142 @@ html[data-app-native] * {
   70%  { opacity: 0.16; }
   100% { transform: scale(1.25); opacity: 0; }
 }
+
+/* ============================================================
+ * 液态玻璃（Liquid Glass）全局设计语言 · v2.4.36
+ * 机主全局令：全 App 统一「液态玻璃 + 毛玻璃 + 极简胶囊」质感——
+ * 卡片/面板半透明 + blur(20px) + 极细白色描边 + 弥散柔光晕阴影；
+ * 按钮一律 999px 胶囊；操作反馈统一屏幕中央液态玻璃胶囊（2s 自动消失）。
+ * ============================================================ */
+
+/* ---- 1) 液态玻璃面板基元（组合工具类，按需拼装） ---- */
+
+/* 液态玻璃底：白色半透明 + 20px 高斯模糊 + 饱和度提升 + 极细白描边 */
+.liquid-glass {
+  background: rgba(255, 255, 255, 0.62);
+  -webkit-backdrop-filter: blur(20px) saturate(1.65);
+  backdrop-filter: blur(20px) saturate(1.65);
+  border: 1px solid rgba(255, 255, 255, 0.5);
+}
+.dark .liquid-glass {
+  background: rgba(28, 28, 32, 0.58);
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+/* 液态玻璃卡：玻璃底 + 弥散柔光晕阴影（替代生硬纯黑投影） + 大圆角 */
+.liquid-card {
+  background: rgba(255, 255, 255, 0.62);
+  -webkit-backdrop-filter: blur(20px) saturate(1.65);
+  backdrop-filter: blur(20px) saturate(1.65);
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  border-radius: 24px;
+  box-shadow:
+    0 2px 6px rgba(24, 24, 27, 0.03),
+    0 12px 40px rgba(24, 24, 27, 0.07),
+    inset 0 1px 0 rgba(255, 255, 255, 0.55);
+}
+.dark .liquid-card {
+  background: rgba(28, 28, 32, 0.58);
+  border-color: rgba(255, 255, 255, 0.1);
+  box-shadow:
+    0 2px 6px rgba(0, 0, 0, 0.18),
+    0 12px 40px rgba(0, 0, 0, 0.32),
+    inset 0 1px 0 rgba(255, 255, 255, 0.07);
+}
+
+/* 弥散柔光晕阴影（挂在已有卡片上即可替换生硬黑影） */
+.glow-soft {
+  box-shadow:
+    0 2px 6px rgba(24, 24, 27, 0.03),
+    0 12px 40px rgba(24, 24, 27, 0.07) !important;
+}
+.dark .glow-soft {
+  box-shadow:
+    0 2px 6px rgba(0, 0, 0, 0.18),
+    0 12px 40px rgba(0, 0, 0, 0.32) !important;
+}
+
+/* ---- 2) 中央液态玻璃胶囊 Toast（全局操作反馈统一通道） ----
+ * sonner：视口钉在屏幕正中（覆盖 position 定位），每条 toast 为胶囊玻璃。
+ * 配 layout.tsx：position 属性仅作占位，实际位置由本段 CSS 全权接管。 */
+
+/* 视口（ol[data-sonner-toaster]——sonner v2 挂在 OL 上）：屏幕几何中心 */
+ol[data-sonner-toaster] {
+  position: fixed !important;
+  top: 50% !important;
+  bottom: auto !important;
+  right: auto !important;
+  left: 50% !important;
+  /* 上移半枚前弹高度：让「最前一条」胶囊几何居中于屏幕（sonner 以 OL 顶边为基线堆叠） */
+  transform: translate(-50%, calc(-50% - var(--front-toast-height, 54px) / 2)) !important;
+  width: max-content !important;
+  max-width: min(86vw, 420px) !important;
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  gap: 8px !important;
+  z-index: 400 !important; /* 全局最顶：盖过弹窗（z-50/80）与抽屉，不被任何元素遮挡 */
+}
+/* 单条 toast（li）：胶囊化 + 液态玻璃 */
+[data-sonner-toaster] [data-sonner-toast] {
+  border-radius: 999px !important;
+  /* 宽度随内容（sonner 默认 var(--width)=356px 定宽 + OL 塌缩会把文字挤成竖排）：
+     max-content 撑开 + 上限 86vw，胶囊随文案长度自适应 */
+  width: max-content !important;
+  max-width: min(86vw, 420px) !important;
+  /* 归位正常流：sonner 默认 LI 绝对定位 + --index 堆叠会在 OL 收缩时把胶囊甩向右侧；
+     改 relative + transform none，交给上面 OL 的 flex column + gap 居中堆叠 */
+  position: relative !important;
+  transform: none !important;
+  left: auto !important;
+  padding: 11px 20px !important;
+  background: rgba(255, 255, 255, 0.66) !important;
+  border: 1px solid rgba(255, 255, 255, 0.55) !important;
+  color: rgba(24, 24, 27, 0.94) !important;
+  -webkit-backdrop-filter: blur(20px) saturate(1.7) !important;
+  backdrop-filter: blur(20px) saturate(1.7) !important;
+  box-shadow:
+    0 4px 12px rgba(24, 24, 27, 0.06),
+    0 16px 48px rgba(24, 24, 27, 0.14),
+    inset 0 1px 0 rgba(255, 255, 255, 0.6) !important;
+  font-size: 13.5px !important;
+  font-weight: 500 !important;
+  line-height: 1.4 !important;
+  align-items: center !important;
+}
+.dark [data-sonner-toaster] [data-sonner-toast] {
+  background: rgba(30, 30, 34, 0.62) !important;
+  border-color: rgba(255, 255, 255, 0.12) !important;
+  color: rgba(244, 244, 245, 0.96) !important;
+  box-shadow:
+    0 4px 12px rgba(0, 0, 0, 0.2),
+    0 16px 48px rgba(0, 0, 0, 0.4),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08) !important;
+}
+/* 图标与文字同色（success/error 保留语义色图标） */
+[data-sonner-toaster] [data-sonner-toast] [data-icon] {
+  margin-right: 2px;
+}
+/* 描述行收窄 */
+[data-sonner-toaster] [data-sonner-toast] [data-description] {
+  color: inherit !important;
+  opacity: 0.78 !important;
+  font-size: 12.5px !important;
+}
+/* 关闭按钮弱化 */
+[data-sonner-toaster] [data-sonner-toast] [data-close-button] {
+  border-radius: 999px !important;
+  background: transparent !important;
+  border: none !important;
+  color: inherit !important;
+  opacity: 0.45;
+}
+
+/* ---- 3) shadcn 经典 Toast（use-toast 通道）：已在 ui/toast.tsx 组件层直接中央胶囊化 ---- */
+
+/* ---- 4) 层级令牌（弹窗/抽屉/胶囊提示 z-index 全局口径） ----
+ * 弹窗内容 ≤ z-80（App 窗内浮层）；全局抽屉/居中弹窗 z-[200..320]；
+ * 中央胶囊提示 z-400（永远最顶）。此处不逐元素强制，仅文档化约定：
+ * App 窗口 z-40 / 窗内 sticky 头 z-20 / 窗内浮层 z-30~80 /
+ * 全局弹层 200+ / 系统级（锁屏/来电）300+ / 中央胶囊 400。
+ */

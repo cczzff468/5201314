@@ -3,22 +3,19 @@
 // 设置 App 共享层：Page 路由类型、IOS_RED 色板、通用小组件（GroupCard / RowIcon / LineIcon / MainRow / DetailShell / FieldLabel / SectionLabel / GrayCard）与 useOwnerAvatar。只依赖 React 与项目 lib，不 import 其他设置子模块。
 
 import {
+  useCallback,
   useEffect,
   useRef,
   useState,
+  type PointerEvent as ReactPointerEvent,
   type RefObject,
 } from 'react';
 
 import type { ReactNode } from 'react';
 
-import { ChevronRight } from 'lucide-react';
+import { ChevronRight, X } from 'lucide-react';
 
 import type { LucideIcon } from 'lucide-react';
-
-import {
-  IOSBackButton,
-  IOSNavBar,
-} from '@/components/ios/IOSNavBar';
 
 import { mainOwnerContact } from '@/lib/ios/contacts-store';
 
@@ -127,13 +124,20 @@ export function MainRow({
   );
 }
 
-/** 详情页外壳：居中标题导航 + 返回按钮 + 右滑进入动画；
- *  SETTINGS-THEME：子页恒浅色（绿/白/灰/蓝清爽风）——整页底色固定 #F3F6F3（带一点绿意的
- *  浅灰白），文字恒深色 text-zinc-900，不随深色主题变黑；gray 参数语义保留（true 时导航栏
- *  透明无毛玻璃），两个分支底色同为浅色。
- *  历史沿革：v68 曾加过 4 枚彩色氛围光晕（蓝/紫/橙/粉，给玻璃卡的 backdrop-blur 提供折射光），
- *  本轮起按用户要求全部删除（先删珊瑚色橙/粉两枚，再删蓝/紫两枚）——
- *  子页背景回归纯浅灰，无任何彩色光斑特效 */
+/** 详情页外壳 v2.4.36「液态玻璃底部弹层」：设置 App 全域从整页跳转改为 bottom sheet——
+ *  遮罩 bg-black/25 极淡黑（背后常驻的主列表 RootPage 隐约可见，点遮罩关闭），面板为
+ *  rounded-t-[28px] 玻璃白（bg-white/[0.94] + backdrop-blur-2xl + 白高光描边 + 上抛柔影，
+ *  深色模式换 zinc-900 玻璃）。入场：遮罩淡入 200ms + 面板底部滑入 300ms ease-out；
+ *  关闭：遮罩淡出 200ms / 面板下滑 260ms，动画播完才回调 onBack（真实卸载由父级路由
+ *  状态机控制）。关闭途径：点遮罩 / 右上角 X / Esc / 按住顶部（grabber + 标题行）
+ *  下拉超 90px 松手。内容区保留字面 overflow-y-auto（useModelPanelReveal 靠
+ *  closest('.overflow-y-auto') 找滚动容器）；子页内 Radix AlertDialog portal 到 body
+ *  （z-50 壳外层）仍压在面板上方，Esc 先让这些更上层的弹窗吃掉，不连坐关面板。
+ *  gray 参数保留入参但视觉忽略（v2.4.36 前用于子页导航栏透明分支，面板化后无导航栏）。
+ *  面板 z-[200]/z-[201]：App 窗口（z-40）内部自成一层的层级；PhoneShell 的 transform
+ *  使 fixed 相对机身定位（与通知页 ToneSheet 同机制），天然只覆盖手机屏。
+ *  历史沿革：v68 曾加过 4 枚彩色氛围光晕（蓝/紫/橙/粉），后按用户要求全部删除；
+ *  v2.4.36 前为整页浅灰底（#F2F2F7）+ 居中标题导航栏 + 返回键 + 右滑入场。 */
 export function DetailShell({
   title,
   onBack,
@@ -145,23 +149,142 @@ export function DetailShell({
   children: ReactNode;
   gray?: boolean;
 }) {
+  // v2.4.36 面板化：gray 不再参与视觉（保留入参兼容全部子页调用点）
+  void gray;
+  const [phase, setPhase] = useState<'open' | 'closing'>('open');
+  const closeTimer = useRef<number | null>(null);
+  const onBackRef = useRef(onBack);
+  onBackRef.current = onBack;
+  const sheetRef = useRef<HTMLDivElement | null>(null);
+  const dragStartY = useRef<number | null>(null);
+
+  /** 统一关闭入口：先播退场动画（遮罩淡出 / 面板下滑 260ms），播完再回调 onBack */
+  const requestClose = useCallback(() => {
+    if (closeTimer.current !== null) return; // 已在关闭流程中
+    setPhase('closing');
+    closeTimer.current = window.setTimeout(() => {
+      closeTimer.current = null;
+      onBackRef.current();
+    }, 260);
+  }, []);
+
+  // Esc 关闭；子页内还有更上层的弹层开着（Radix AlertDialog/Dialog portal 到 body、
+  // 通知页 ToneSheet 等挂 aria-modal 的内嵌面板）时，这次 Esc 只关那层，不连坐关本面板
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key !== 'Escape') return;
+      if (document.querySelector('[aria-modal="true"]:not([data-detail-sheet])')) return;
+      requestClose();
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [requestClose]);
+
+  // 卸载兑底：父级强卸载（切 App / 直接回主屏）时清掉未走完的关闭计时器
+  useEffect(
+    () => () => {
+      if (closeTimer.current !== null) {
+        window.clearTimeout(closeTimer.current);
+        closeTimer.current = null;
+      }
+    },
+    [],
+  );
+
+  // ---- 顶部标题区（grabber + 标题行）下拉关闭；内容滚动区不参与 ----
+  const onHeaderPointerDown = (e: ReactPointerEvent<HTMLDivElement>): void => {
+    if (closeTimer.current !== null || dragStartY.current !== null) return;
+    // X 关闭按钮上的按下不进拖拽：pointer capture 会改写后续 click 目标，破坏按钮
+    if ((e.target as HTMLElement).closest('button')) return;
+    dragStartY.current = e.clientY;
+    e.currentTarget.setPointerCapture(e.pointerId);
+    const sheet = sheetRef.current;
+    if (sheet) sheet.style.transition = 'none'; // 拖拽跟手：临时关过渡
+  };
+  const onHeaderPointerMove = (e: ReactPointerEvent<HTMLDivElement>): void => {
+    if (dragStartY.current === null) return;
+    const dy = Math.max(0, e.clientY - dragStartY.current);
+    const sheet = sheetRef.current;
+    if (sheet) sheet.style.transform = `translateY(${dy}px)`;
+  };
+  const onHeaderPointerUp = (e: ReactPointerEvent<HTMLDivElement>): void => {
+    if (dragStartY.current === null) return;
+    const dy = Math.max(0, e.clientY - dragStartY.current);
+    dragStartY.current = null;
+    const sheet = sheetRef.current;
+    if (!sheet) return;
+    if (dy > 90) {
+      // 下拉超阈值：保留当前位移作退场起点（exit 关键帧的隐式 from），动画连续不跳变
+      requestClose();
+      return;
+    }
+    sheet.style.transition = 'transform 200ms ease-out'; // 未超阈值：回弹复位
+    sheet.style.transform = '';
+  };
+  const onHeaderPointerCancel = (): void => {
+    if (dragStartY.current === null) return;
+    dragStartY.current = null;
+    const sheet = sheetRef.current;
+    if (sheet) {
+      sheet.style.transition = 'transform 200ms ease-out';
+      sheet.style.transform = '';
+    }
+  };
+
+  const closing = phase === 'closing';
   return (
-    <div className="relative flex h-full w-full flex-col bg-[#F3F6F3] text-zinc-900">
-      <IOSNavBar
-        title={title}
-        large={false}
-        left={<IOSBackButton onClick={onBack} label="" />}
-        className={gray ? 'bg-transparent! backdrop-blur-none!' : ''}
+    <>
+      {/* 极淡黑遮罩：背后常驻的主列表隐约可见；点击关闭 */}
+      <button
+        type="button"
+        aria-label="关闭"
+        onClick={requestClose}
+        className={`fixed inset-0 z-[200] cursor-default bg-black/25 ${
+          closing ? 'animate-out fade-out duration-200' : 'animate-in fade-in duration-200'
+        }`}
       />
-      <div className="no-scrollbar relative flex-1 overflow-y-auto">
+      {/* 液态玻璃面板（PhoneShell transform 使 fixed 相对机身定位，只覆盖手机屏） */}
+      <div
+        ref={sheetRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        data-detail-sheet=""
+        className={`fixed inset-x-0 bottom-0 z-[201] flex max-h-[86%] flex-col rounded-t-[28px] border-x border-t border-white/60 bg-white/[0.94] shadow-[0_-8px_40px_rgba(24,24,27,0.14),inset_0_1px_0_rgba(255,255,255,0.6)] backdrop-blur-2xl dark:border-white/10 dark:bg-zinc-900/[0.94] ${
+          closing
+            ? 'animate-out slide-out-to-bottom duration-260'
+            : 'animate-in slide-in-from-bottom duration-300 ease-out'
+        }`}
+      >
+        {/* 顶部拖拽关闭区（grabber + 标题行；touch-none 防浏览器拖动劫持，不影响内容滚动） */}
         <div
-          key={title}
-          className="animate-in slide-in-from-right-6 fade-in duration-300 px-4 pb-[40px] pt-2"
+          className="relative shrink-0 cursor-grab touch-none active:cursor-grabbing"
+          onPointerDown={onHeaderPointerDown}
+          onPointerMove={onHeaderPointerMove}
+          onPointerUp={onHeaderPointerUp}
+          onPointerCancel={onHeaderPointerCancel}
         >
-          {children}
+          <div className="flex justify-center">
+            <span className="mt-2.5 h-[5px] w-9 rounded-full bg-black/15 dark:bg-white/20" aria-hidden="true" />
+          </div>
+          <div className="relative flex h-[52px] shrink-0 items-center justify-center px-14">
+            <span className="max-w-full truncate text-[17px] font-semibold text-zinc-900 dark:text-zinc-50">{title}</span>
+            <button
+              type="button"
+              aria-label="关闭"
+              onClick={requestClose}
+              className="absolute right-3 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-full bg-black/[0.05] transition active:scale-90 dark:bg-white/10"
+            >
+              <X className="h-4 w-4 text-zinc-600 dark:text-zinc-300" />
+            </button>
+          </div>
+        </div>
+        {/* 内容滚动区：保留字面 overflow-y-auto——useModelPanelReveal 靠它找滚动容器 */}
+        <div className="no-scrollbar relative flex-1 overflow-y-auto">
+          <div className="px-4 pb-[44px] pt-1">{children}</div>
         </div>
       </div>
-    </div>
+    </>
   );
 }
 

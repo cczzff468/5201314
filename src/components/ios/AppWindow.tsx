@@ -36,6 +36,10 @@ export default function AppWindow() {
   if (!meta) return null;
   const App = meta.component;
   const shopDark = dark && SHOP_DARK_APPS.has(activeApp);
+  // v2.4.36 液态玻璃窗（App Store/时钟）：App 根自带半透明毛玻璃底——窗口层摘掉
+  // 不透明 bg-background，壁纸透过整窗柔光可见（底部悬浮胶囊 tab 脚下不再是白板）。
+  // 其余 App 维持不透明底（内容可读性优先）。
+  const glassWindow = meta.glassWindow === true;
 
   return (
     <div
@@ -57,7 +61,9 @@ export default function AppWindow() {
       //    显存常驻 + App 内任何更新的重绘都要走大合成层，是「打开后界面反而卡」的元凶之一。
       // pan-none（第七轮）：overflow:hidden 的窗口仍可被触摸惯性/对角滑动横向滚出
       // （任意 App 内容超宽即触发，两侧露出「刀切」空白）；overflow:clip 彻底滚不动。
-      className={`absolute inset-0 z-40 pan-none bg-background transition-[transform,scale,opacity,border-radius] duration-[380ms] ease-[cubic-bezier(0.32,0.72,0,1)] ${
+      className={`absolute inset-0 z-40 pan-none transition-[transform,scale,opacity,border-radius] duration-[380ms] ease-[cubic-bezier(0.32,0.72,0,1)] ${
+        glassWindow ? 'bg-transparent backdrop-blur-2xl' : 'bg-background'
+      } ${
         phase === 'open' ? 'scale-100 rounded-none opacity-100' : 'scale-[0.18] rounded-[48px] opacity-0 will-change-[transform,scale,opacity]'
       } ${shopDark ? 'shop-dark' : ''}`}
     >

@@ -2,9 +2,9 @@ import type { Metadata, Viewport } from "next";
 import { Geist } from "next/font/google";
 import "./globals.css";
 import { Toaster } from "@/components/ui/toaster";
-// v2.4.29：sonner 轻提示挂载（文件 App 存储管理/审核页等已在用 toast()，
-// 但从未挂过 Sonner Toaster —— 调用静默不显示）；胶囊圆角贴合新设计语言，
-// 底部居中避开手机状态栏与灵动岛
+// v2.4.36 液态玻璃大清洗：sonner 轻提示改为「屏幕中央液态玻璃胶囊」——
+// position 仅作占位（globals.css 已把视口钉死在屏幕几何中心并胶囊化），
+// 所有后台操作反馈（已备份/已切换/已清理…）统一走这里，2 秒自动消失。
 import { Toaster as SonnerToaster } from "@/components/ui/sonner";
 
 const geistSans = Geist({
@@ -63,8 +63,10 @@ export default function RootLayout({
         {children}
         <Toaster />
         <SonnerToaster
-          position="bottom-center"
-          offset="88px"
+          position="top-center"
+          duration={2000}
+          gap={8}
+          visibleToasts={2}
           toastOptions={{ classNames: { toast: "!rounded-full !font-sans" } }}
         />
         {/* v80 预览提速：启动即注册 Service Worker（资源 SWR 缓存 + v1.9.22 离线壳）。

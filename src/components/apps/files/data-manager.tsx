@@ -1,25 +1,26 @@
 'use client';
 
 /**
- * 文件 App · 存储管理（v2.4.32 第五十一轮改版）
+ * 文件 App · 存储管理（v2.4.36 · iPhone 储存空间截图复刻）
  *
- * 机主规格四项：
- * - 一键云端备份从「快捷操作」移入「云端与恢复」区（与云端能力同区）；
- * - 新增「拉取备份」：从云端拉最新一份备份 → 确认后恢复（与云端恢复同款确认弹窗）；
- * - 应用占用胶囊美化：绿点删除、两行文案（名称 + 占用大小）、底部相对用量细条；
- * - 快捷操作区收敛为 备份 / 清除数据 / 导入备份 三胶囊。
- *
- * 视觉：页面底色浅色 #F5F5F7 / 深色 #0E0E12；所有卡片为微投影毛玻璃
- * （rounded-[28px] + 极弱 ring + 0.035 投影），操作按钮一律胶囊；
- * 配色写死 iOS 系统色：主操作蓝 #007AFF（备份/选中态）、危险红 #FF3B30
- * （清理/清除数据），文本 zinc 系，全 dark: 变体；
- * 操作反馈全部用 sonner 轻提示，危险操作走毛玻璃 AlertDialog；
- * 数据层（app-storage / storage-stats / backup / cloud-backup）原样复用，零改动。
+ * 机主规格（对照 iOS「iPhone 储存空间」设置页逐项复刻）：
+ * - 页面纯色化：浅色 #F2F2F4 / 深色 #0E0E12；所有卡片改为不透明白（深色 #1C1C1E），
+ *   rounded-[26px] + 极弱弥散投影，去掉毛玻璃模糊与 ring 描边，操作按钮一律胶囊；
+ * - Hero：Cove 大标题 + 「已使用 X / Y」+「可用 Z」+ iOS 四段色进度条
+ *   （红 #FF3B30 / 橙 #FF9500 / 黄 #FFCC00 / 浅灰 #C7C7CC）+ 图例行；
+ * - 新增「推荐」区：自动清理媒体缓存 / 云端自动备份 两张开关卡（分别沿用
+ *   mediaAuto→writeMediaAutoClean 与 prefs.auto→writeBackupPrefs 既有持久化逻辑）；
+ * - 应用占用：单张白卡列表行（46px 图标 + 名称 + 「上次备份」副行 + 大小 + chevron），
+ *   分隔线从文本列起笔；新增「大小/名称」排序胶囊 + 底部悬浮搜索胶囊（实时过滤，
+ *   搜索时收起推荐 / 快捷操作 / 云端与恢复）；
+ * - 快捷操作（备份 / 导入备份 / 清除数据）与云端与恢复区功能全量保留，仅换白卡皮肤；
+ * - 长按多选 / 确认弹窗 / 导入免刷新 / 持久化检测等数据层逻辑零改动。
  */
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import {
-  Check, ChevronDown, CloudUpload, Download, Loader2, RefreshCw, Trash2,
+  ArrowUpDown, Check, ChevronDown, CloudUpload, Download, HardDrive, Loader2,
+  Mic, RefreshCw, Search, Sparkles, Trash2, X,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -35,8 +36,7 @@ import {
   type AppModuleDef, type AppStat, type BackupState,
 } from '@/lib/ios/app-storage';
 import {
-  cleanMedia, ensurePersistentStorage,
-  readMediaAutoClean,
+  cleanMedia, ensurePersistentStorage, readMediaAutoClean, writeMediaAutoClean,
 } from '@/lib/ios/storage-stats';
 import {
   exportBackupToDownload, inspectBackupFile, restoreBackup as restoreLocalBackup,
@@ -49,15 +49,12 @@ import {
 import { rehydrateKvFromIdb } from '@/lib/ios/idb-kv';
 import { useSettings, useUI } from '@/lib/ios/store';
 
-// ---------------- 局部样式基元（毛玻璃 / 胶囊） ----------------
+// ---------------- 局部样式基元（v2.4.36 纯色卡片 / 胶囊） ----------------
 
-/** 页面底色：浅色 #F5F5F7，深色 #0E0E12 */
-const PAGE_BG = 'bg-[#F5F5F7] dark:bg-[#0E0E12]';
-/** 毛玻璃卡基底（圆角各处不同：hero 32 / 卡 28 / 小胶囊 22） */
-const GLASS_BASE =
-  'bg-white/70 dark:bg-white/[0.06] backdrop-blur-2xl ring-1 ring-black/[0.05] dark:ring-white/[0.08] shadow-[0_2px_12px_rgba(0,0,0,0.035)]';
-/** 标准毛玻璃卡（28px 圆角） */
-const GLASS = `rounded-[28px] ${GLASS_BASE}`;
+/** 页面底色：浅色 #F2F2F4，深色 #0E0E12（对照 iPhone 储存空间设置页） */
+const PAGE_BG = 'bg-[#F2F2F4] dark:bg-[#0E0E12]';
+/** 不透明白卡（26px 圆角 + 极弱弥散投影，无毛玻璃无描边） */
+const CARD = 'rounded-[26px] bg-white shadow-[0_1px_3px_rgba(0,0,0,0.04)] dark:bg-[#1C1C1E]';
 /** 收纳区小胶囊 chip（云端恢复 / 记录 / 导入） */
 const CHIPO =
   'rounded-full bg-black/[0.04] dark:bg-white/[0.07] px-3.5 py-2 text-[12.5px] font-medium text-zinc-600 dark:text-zinc-300 transition active:scale-95 disabled:opacity-40';
@@ -164,26 +161,28 @@ function GlassConfirm({
   );
 }
 
-// ---------------- 应用占用宫格胶囊（短按 / 长按手势） ----------------
+// ---------------- 应用占用列表行（短按 / 长按手势） ----------------
 
 /**
- * 紧凑宫格胶囊（双列网格单元）：图标 + 名称 + 已备份绿点，不显示占用大小。
- * 短按（<500ms 且无移动）进详情页 / 多选下切换勾选；
- * 长按（按住 >=480ms，移动超 10px 取消）进入多选并勾选当前卡。
- * pointer events 自实现（触摸隐式捕获保证抬手事件必达），键盘 Enter/Space 等价短按。
+ * v2.4.36 iOS 储存空间风列表行：46px 图标列 + 文本列（分隔线从文本列起笔，
+ * 不穿过图标），名称 15.5px + 「上次备份」副行，右侧占用大小 + chevron。
+ * 短按（<500ms 且无移动）多选下切换勾选；长按（按住 >=480ms，移动超 10px 取消）
+ * 进入多选并勾选当前行。pointer events 自实现（触摸隐式捕获保证抬手事件必达），
+ * 键盘 Enter/Space 等价短按。
  */
 function AppCell({
-  app, safe, size, share, selected, multiMode, disabled, onTap, onLongPress,
+  app, backupText, size, selected, multiMode, disabled, divider, onTap, onLongPress,
 }: {
   app: AppModuleDef;
-  safe: boolean;
-  /** 占用字节数（v2.4.32 两行文案的第二行） */
+  /** 第二行副文案（上次备份：X / 未备份，由父级按 isAppSafe 派生） */
+  backupText: string;
+  /** 占用字节数（右侧主数值 + aria-label） */
   size: number;
-  /** 相对总占用比例 0~1（v2.4.32 底部用量细条宽度） */
-  share: number;
   selected: boolean;
   multiMode: boolean;
   disabled: boolean;
+  /** 是否绘制文本列顶部分隔线（列表首行 false） */
+  divider: boolean;
   onTap: () => void;
   onLongPress: () => void;
 }) {
@@ -263,51 +262,61 @@ function AppCell({
           if (!disabled) onTap();
         }
       }}
-      className={`relative flex min-h-[64px] w-full cursor-pointer select-none items-center gap-3 px-4 transition-all duration-200 [-webkit-touch-callout:none] ${
+      className={`relative flex min-h-[68px] w-full cursor-pointer select-none items-stretch [-webkit-touch-callout:none] ${
         selected && multiMode
           ? 'bg-[#007AFF]/[0.06] dark:bg-[#007AFF]/[0.12]'
           : ''
       } ${disabled ? 'opacity-60' : 'active:bg-black/[0.03] dark:active:bg-white/[0.05]'}`}
     >
-      {/* 彩色原样 App 图标（轻投影提升质感） */}
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img
-        src={app.icon}
-        alt={`${app.label}图标`}
-        className="h-[44px] w-[44px] shrink-0 rounded-[12px] object-cover shadow-[0_2px_8px_rgba(0,0,0,0.10)]"
-        draggable={false}
-      />
-      {/* 名称 + 副行（已备份标记 + 占用大小） */}
-      <div className="min-w-0 flex-1">
-        <p className="truncate text-[15px] font-semibold leading-tight text-zinc-900 dark:text-zinc-50">
-          {app.label}
-        </p>
-        <p className="mt-[3px] truncate text-[11.5px] font-medium tabular-nums text-zinc-400 dark:text-zinc-500">
-          {safe ? '已备份 · ' : ''}
-          {formatBytesAscii(size)} · {Math.round(share * 100) || 0}%
-        </p>
+      {/* 图标列（分隔线不进入此列，对照 iOS 储存空间列表） */}
+      <div className="flex w-[62px] shrink-0 items-center self-stretch pl-4">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={app.icon}
+          alt={`${app.label}图标`}
+          className="h-[46px] w-[46px] shrink-0 rounded-[12px] object-cover shadow-[0_2px_8px_rgba(0,0,0,0.10)]"
+          draggable={false}
+        />
       </div>
-      <span className="sr-only">长按进入多选</span>
+      {/* 文本列（顶部分隔线从本列起笔） */}
+      <div
+        className={`flex min-w-0 flex-1 items-center gap-3 py-3 pr-4 ${
+          divider ? 'border-t border-black/[0.06] dark:border-white/[0.08]' : ''
+        }`}
+      >
+        {/* 名称 + 「上次备份」副行 */}
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-[15.5px] font-semibold leading-tight text-zinc-900 dark:text-zinc-50">
+            {app.label}
+          </p>
+          <p className="mt-[3px] truncate text-[11.5px] text-zinc-400 dark:text-zinc-500">
+            {backupText}
+          </p>
+        </div>
+        <span className="sr-only">长按进入多选</span>
 
-      {/* 右侧：多选 = 勾选圈；普通 = chevron 引导（已备份加绿色小点） */}
-      {multiMode ? (
-        <span
-          aria-hidden
-          className={`grid h-[22px] w-[22px] shrink-0 place-items-center rounded-full border-2 transition-all duration-200 ${
-            selected ? 'border-[#007AFF] bg-[#007AFF] text-white' : 'border-zinc-300 bg-white/60 dark:border-zinc-600 dark:bg-transparent'
-          }`}
-        >
-          {selected && <Check className="h-3.5 w-3.5" strokeWidth={3.2} />}
-        </span>
-      ) : (
-        <span className="flex shrink-0 items-center gap-2">
-          {safe && <span aria-hidden className="h-[7px] w-[7px] rounded-full bg-[#34C759]" />}
-          <ChevronDown
+        {/* 右侧：多选 = 勾选圈；普通 = 占用大小 + chevron 引导 */}
+        {multiMode ? (
+          <span
             aria-hidden
-            className="h-4 w-4 -rotate-90 text-black/20 dark:text-white/25"
-          />
-        </span>
-      )}
+            className={`grid h-[22px] w-[22px] shrink-0 place-items-center rounded-full border-2 transition-all duration-200 ${
+              selected ? 'border-[#007AFF] bg-[#007AFF] text-white' : 'border-zinc-300 bg-white/60 dark:border-zinc-600 dark:bg-transparent'
+            }`}
+          >
+            {selected && <Check className="h-3.5 w-3.5" strokeWidth={3.2} />}
+          </span>
+        ) : (
+          <span className="flex shrink-0 items-center gap-2">
+            <span className="text-[14px] font-medium tabular-nums text-zinc-500 dark:text-zinc-400">
+              {formatBytesAscii(size)}
+            </span>
+            <ChevronDown
+              aria-hidden
+              className="h-4 w-4 -rotate-90 text-black/20 dark:text-white/25"
+            />
+          </span>
+        )}
+      </div>
     </div>
   );
 }
@@ -315,8 +324,8 @@ function AppCell({
 /** 数据未加载时的骨架行（iOS 列表行样式） */
 function SkeletonCell() {
   return (
-    <div aria-hidden className="flex min-h-[64px] w-full animate-pulse items-center gap-3 px-4">
-      <div className="h-[44px] w-[44px] shrink-0 rounded-[12px] bg-black/[0.06] dark:bg-white/[0.08]" />
+    <div aria-hidden className="flex min-h-[68px] w-full animate-pulse items-center gap-3 px-4">
+      <div className="h-[46px] w-[46px] shrink-0 rounded-[12px] bg-black/[0.06] dark:bg-white/[0.08]" />
       <div className="flex-1 space-y-2">
         <div className="h-3.5 w-2/5 rounded-full bg-black/[0.06] dark:bg-white/[0.08]" />
         <div className="h-2.5 w-1/4 rounded-full bg-black/[0.05] dark:bg-white/[0.06]" />
@@ -337,13 +346,17 @@ export default function DataManager() {
   const [prefs, setPrefs] = useState<CloudBackupPrefs | null>(null);
   const [mediaAuto, setMediaAuto] = useState(false);
   const [persisted, setPersisted] = useState<boolean | null>(null);
-  /** v2.4.35 iOS 储存空间风 hero：浏览器存储配额（quota/usage，navigator.storage.estimate） */
+  /** 浏览器存储配额（quota/usage，navigator.storage.estimate） */
   const [quota, setQuota] = useState<number | null>(null);
 
   // ---- 交互状态 ----
   const [sel, setSel] = useState<Set<string>>(new Set());
   const [multiMode, setMultiMode] = useState(false);
   const [busy, setBusy] = useState<'' | 'backup' | 'clean' | 'cloud' | 'pull' | 'restore' | 'import'>('');
+  /** v2.4.36 应用占用排序：按大小（默认）/ 按名称 a-z */
+  const [sortMode, setSortMode] = useState<'size' | 'name'>('size');
+  /** v2.4.36 底部搜索胶囊：按应用名实时过滤 */
+  const [query, setQuery] = useState('');
 
   // 危险确认弹窗
   const [confirmClean, setConfirmClean] = useState<string[] | null>(null);
@@ -411,13 +424,25 @@ export default function DataManager() {
   );
 
   // ---- 派生数据 ----
-  const sorted = [...(stats ?? [])].sort((a, b) => b.bytes - a.bytes);
-  const statOf = (id: string) => (stats ?? []).find((s) => s.id === id);
+  /** 按占用大小降序（hero 分段与应用占用默认序共用基准，不受排序切换影响） */
+  const bySize = [...(stats ?? [])].sort((a, b) => b.bytes - a.bytes);
+  /** 展示序列：按大小（默认）或按名称 a-z（中文按拼音序） */
+  const sorted =
+    sortMode === 'size'
+      ? bySize
+      : [...(stats ?? [])].sort((a, b) =>
+          (appOf(a.id)?.label ?? a.id).localeCompare(appOf(b.id)?.label ?? b.id, 'zh'),
+        );
   const totalBytes = (stats ?? []).reduce((s, x) => s + x.bytes, 0);
-  const totalRecords = (stats ?? []).reduce((s, x) => s + x.records, 0);
-  const safeBytes = (stats ?? []).filter((s) => backup && isAppSafe(s, backup)).reduce((s, x) => s + x.bytes, 0);
-  const dirtyBytes = Math.max(0, totalBytes - safeBytes);
+  const statOf = (id: string) => (stats ?? []).find((s) => s.id === id);
   const allSelected = sel.size === APP_MODULES.length;
+
+  /** 搜索过滤（按应用名，忽略大小写；空查询 = 全量） */
+  const q = query.trim().toLowerCase();
+  const searching = q !== '';
+  const visibleStats = searching
+    ? sorted.filter((s) => (appOf(s.id)?.label ?? s.id).toLowerCase().includes(q))
+    : sorted;
 
   const lastBackupText = (() => {
     if (!backup || backup.lastAt <= 0) return '从未备份';
@@ -427,15 +452,15 @@ export default function DataManager() {
 
   const latestCloud = cloudRows.length > 0 ? cloudRows[0] : null;
 
-  // ---- v2.4.35 iOS 储存空间风派生：配额分母 + 前 4 大应用分段 ----
-  /** iOS 系统色分段（红/橙/深灰/浅灰——机主截图配色） */
-  const SEG_COLORS = ['#FF3B30', '#FF9500', '#9E9E9E', '#C7C7CC'];
+  // ---- hero 派生：配额分母 + 前 4 大应用分段 ----
+  /** iOS 系统色分段（红/橙/黄/浅灰——机主截图配色） */
+  const SEG_COLORS = ['#FF3B30', '#FF9500', '#FFCC00', '#C7C7CC'];
   /** hero 分母：优先真实配额（取「已用×2.5」与 1GB 的较大者做下限，防配额≈已用时条顶满）；无配额时已用+512MB */
   const heroDenominator = quota
     ? Math.max(quota, totalBytes * 2.5, 1024 * 1024 * 1024)
     : Math.max(totalBytes + 512 * 1024 * 1024, 1024 * 1024 * 1024);
   /** 前 4 大应用（占用 >0 才上榜）+ 占配额百分比 */
-  const segStats = sorted
+  const segStats = bySize
     .filter((s) => s.bytes > 0)
     .slice(0, 4)
     .map((s) => ({
@@ -443,6 +468,20 @@ export default function DataManager() {
       pct: (s.bytes / heroDenominator) * 100,
     }))
     .filter((s): s is { app: AppModuleDef; pct: number } => !!s.app);
+
+  // ---- 推荐 · 开关（v2.4.36，沿用既有持久化） ----
+  /** 自动清理媒体缓存：写 settings 表；开启后由上方 effect 静默执行一次（24h 节流） */
+  const toggleMediaAuto = () => {
+    const next = !mediaAuto;
+    setMediaAuto(next);
+    void writeMediaAutoClean(next).catch(() => undefined);
+  };
+  /** 云端自动备份：与「云端与恢复」区的自动备份开关同一份数据 */
+  const toggleCloudAuto = () => {
+    const next = !prefs?.auto;
+    setPrefs((p) => (p ? { ...p, auto: next } : p));
+    void writeBackupPrefs({ auto: next });
+  };
 
   // ---- 多选 ----
   const toggleSel = (id: string) =>
@@ -564,7 +603,7 @@ export default function DataManager() {
     }
   };
 
-  // ---- 拉取备份（v2.4.32 机主新增：从云端拉取最新一份备份 → 确认后恢复） ----
+  // ---- 拉取备份（从云端拉取最新一份备份 → 确认后恢复） ----
   const doPullBackup = async () => {
     if (busy) return;
     if (!backup?.cloudReady) {
@@ -606,7 +645,7 @@ export default function DataManager() {
     }
   };
 
-  // ---- 本地备份文件导入（v2.4.35：免刷新生效，不再自动下载安全备份） ----
+  // ---- 本地备份文件导入（免刷新生效，不再自动下载安全备份） ----
   const doImportFile = async (file: File) => {
     if (busy) return;
     setBusy('import');
@@ -622,7 +661,7 @@ export default function DataManager() {
         useSettings.setState({ loaded: false });
         await useSettings.getState().load();
       } catch {
-        /* 重注水失败：退回刷新页面兑底 */
+        /* 重注水失败：退回刷新页面兜底 */
         window.location.reload();
         return;
       }
@@ -642,8 +681,6 @@ export default function DataManager() {
     }
   };
 
-  // ---- 健康检查已删（v2.4.31）：快捷操作区改为 备份 / 清除数据 / 导入备份 三胶囊 ----
-
   // ---- 清理确认弹窗文案 ----
   const confirmTarget = confirmClean ?? (confirmGlobal ? APP_MODULES.map((a) => a.id) : []);
   const confirmName =
@@ -654,30 +691,37 @@ export default function DataManager() {
   const confirmRecords = confirmTarget.reduce((s, id) => s + (statOf(id)?.records ?? 0), 0);
 
   return (
-    <div className={`${PAGE_BG} min-h-full pb-12 text-zinc-800 antialiased dark:text-zinc-100`}>
-      {/* ============ 1) Hero（v2.4.35 机主截图改版：iOS 储存空间风——Cove 标题 + 已使用 X/Y + 分段进度条 + 图例） ============ */}
+    <div className={`${PAGE_BG} flex min-h-full flex-col text-zinc-800 antialiased dark:text-zinc-100`}>
+      {/* ============ 1) Hero（iOS 储存空间风：Cove 标题 + 已使用 X/Y + 可用 Z + 分段进度条 + 图例） ============ */}
       <div
-        className={`overflow-hidden px-4 pt-3 transition-all duration-300 ${
-          multiMode ? 'max-h-0 -translate-y-2 pt-0 opacity-0' : 'max-h-[300px] opacity-100'
+        className={`overflow-hidden px-4 pt-4 transition-all duration-300 ${
+          multiMode ? 'max-h-0 -translate-y-2 pt-0 opacity-0' : 'max-h-[360px] opacity-100'
         }`}
       >
-        <div className={`${GLASS_BASE} relative rounded-[32px] p-5`}>
-          {/* 第一行：Cove 大标题 + 右侧刷新胶囊 + 已使用 X/Y */}
+        <div className={`${CARD} relative p-5`}>
+          {/* 第一行：Cove 大标题 + 右侧刷新按钮 + 已使用 / 可用 */}
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
               <p className="text-[24px] font-bold leading-tight tracking-tight text-zinc-900 dark:text-white">Cove</p>
-              <p className="mt-1 text-[12px] font-medium tabular-nums text-zinc-400 dark:text-zinc-500">
-                {stats
-                  ? `已使用 ${formatBytesAscii(totalBytes)} / ${formatBytesAscii(heroDenominator)}`
-                  : '正在扫描…'}
-              </p>
+              {stats ? (
+                <>
+                  <p className="mt-1.5 text-[12px] font-medium tabular-nums text-zinc-500 dark:text-zinc-400">
+                    已使用 {formatBytesAscii(totalBytes)} / {formatBytesAscii(heroDenominator)}
+                  </p>
+                  <p className="mt-[2px] text-[12px] font-medium tabular-nums text-zinc-500 dark:text-zinc-400">
+                    可用 {formatBytesAscii(Math.max(0, heroDenominator - totalBytes))}
+                  </p>
+                </>
+              ) : (
+                <p className="mt-1.5 text-[12px] font-medium text-zinc-400 dark:text-zinc-500">正在扫描…</p>
+              )}
             </div>
             <button
               type="button"
               aria-label="重新扫描"
               onClick={() => void refresh()}
               disabled={scanning}
-              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white/70 ring-1 ring-black/[0.05] backdrop-blur-xl transition active:scale-90 disabled:opacity-50 dark:bg-white/[0.08] dark:ring-white/[0.1]"
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white shadow-[0_1px_3px_rgba(0,0,0,0.06)] ring-1 ring-black/[0.04] transition active:scale-90 disabled:opacity-50 dark:bg-white/[0.08] dark:ring-white/[0.1]"
             >
               <RefreshCw className={`h-4 w-4 text-zinc-500 dark:text-zinc-300 ${scanning ? 'animate-spin' : ''}`} aria-hidden />
             </button>
@@ -686,7 +730,7 @@ export default function DataManager() {
           {/* 第二行：iOS 分段储存进度条（前 4 大应用分段着色，其余为可用空间） */}
           <div
             aria-label="储存占用构成"
-            className="mt-3.5 flex h-[14px] w-full gap-[2px] overflow-hidden rounded-full bg-black/[0.05] p-0 dark:bg-white/[0.08]"
+            className="mt-4 flex h-[14px] w-full gap-[2px] overflow-hidden rounded-full bg-black/[0.05] p-0 dark:bg-white/[0.08]"
           >
             {segStats.map((s, i) => (
               <span
@@ -710,20 +754,97 @@ export default function DataManager() {
                 {s.app.label}
               </span>
             ))}
-            <span className="flex items-center gap-1.5 text-[11.5px] font-medium text-zinc-400 dark:text-zinc-500">
+            <span className="flex items-center gap-1.5 text-[11.5px] font-medium text-zinc-600 dark:text-zinc-300">
               <span aria-hidden className="h-[9px] w-[9px] rounded-full bg-black/[0.08] dark:bg-white/[0.14]" />
               可用空间
             </span>
           </div>
-
-          {/* 概览小字（保留总览信息） */}
-          <p className="mt-2.5 text-[11px] text-zinc-400 dark:text-zinc-500">
-            {stats ? `${stats.length} 个应用 · ${totalRecords} 项数据 · 已备份 ${formatBytesAscii(safeBytes)}` : ''}
-          </p>
         </div>
       </div>
 
-      {/* ============ 2) 应用占用列表（多选时标题行切换为选择栏） ============ */}
+      {/* ============ 2) 推荐（v2.4.36 新增，对照「卸载未使用的 App」推荐卡；搜索时隐藏） ============ */}
+      {!searching && (
+        <>
+          <h2 className="px-5 pb-2.5 pt-7 text-[13px] font-semibold text-zinc-500 dark:text-zinc-400">推荐</h2>
+          <section aria-label="推荐" className="px-4">
+            <div className="flex flex-col gap-3">
+              {/* 自动清理媒体缓存（沿用 mediaAuto 持久化） */}
+              <div className={`${CARD} p-4`}>
+                <div className="flex items-center gap-3">
+                  <span
+                    aria-hidden
+                    className="grid h-[38px] w-[38px] shrink-0 place-items-center rounded-[8px] bg-[#007AFF] dark:bg-[#0A84FF]"
+                  >
+                    <Sparkles className="h-[19px] w-[19px] text-white" />
+                  </span>
+                  <p className="min-w-0 flex-1 text-[15px] font-semibold text-zinc-900 dark:text-zinc-50">自动清理媒体缓存</p>
+                  <button
+                    type="button"
+                    onClick={toggleMediaAuto}
+                    aria-pressed={mediaAuto}
+                    aria-label="切换自动清理媒体缓存"
+                    className={`flex shrink-0 items-center gap-1 rounded-full px-3 py-1.5 text-[13.5px] font-semibold transition active:scale-95 ${
+                      mediaAuto
+                        ? 'text-[#248A3D] dark:text-[#30D158]'
+                        : 'text-[#007AFF] active:bg-[#007AFF]/[0.08] dark:text-[#0A84FF] dark:active:bg-[#0A84FF]/[0.15]'
+                    }`}
+                  >
+                    {mediaAuto ? (
+                      <>
+                        <Check className="h-3.5 w-3.5" strokeWidth={3} aria-hidden />
+                        已开启
+                      </>
+                    ) : (
+                      '启用'
+                    )}
+                  </button>
+                </div>
+                <p className="mt-2.5 text-[12px] leading-relaxed text-zinc-500 dark:text-zinc-400">
+                  开启后自动释放媒体缓存空间。储存空间不足时自动清理已备份的临时媒体，你的聊天记录与文稿数据将会保存。
+                </p>
+              </div>
+
+              {/* 云端自动备份（沿用 prefs.auto 持久化，与云端与恢复区同源） */}
+              <div className={`${CARD} p-4`}>
+                <div className="flex items-center gap-3">
+                  <span
+                    aria-hidden
+                    className="grid h-[38px] w-[38px] shrink-0 place-items-center rounded-[8px] bg-[#007AFF] dark:bg-[#0A84FF]"
+                  >
+                    <HardDrive className="h-[19px] w-[19px] text-white" />
+                  </span>
+                  <p className="min-w-0 flex-1 text-[15px] font-semibold text-zinc-900 dark:text-zinc-50">云端自动备份</p>
+                  <button
+                    type="button"
+                    onClick={toggleCloudAuto}
+                    aria-pressed={!!prefs?.auto}
+                    aria-label="切换云端自动备份"
+                    className={`flex shrink-0 items-center gap-1 rounded-full px-3 py-1.5 text-[13.5px] font-semibold transition active:scale-95 ${
+                      prefs?.auto
+                        ? 'text-[#248A3D] dark:text-[#30D158]'
+                        : 'text-[#007AFF] active:bg-[#007AFF]/[0.08] dark:text-[#0A84FF] dark:active:bg-[#0A84FF]/[0.15]'
+                    }`}
+                  >
+                    {prefs?.auto ? (
+                      <>
+                        <Check className="h-3.5 w-3.5" strokeWidth={3} aria-hidden />
+                        已开启
+                      </>
+                    ) : (
+                      '启用'
+                    )}
+                  </button>
+                </div>
+                <p className="mt-2.5 text-[12px] leading-relaxed text-zinc-500 dark:text-zinc-400">
+                  定期自动备份全部应用数据到云端，换机或清数据后可一键恢复。
+                </p>
+              </div>
+            </div>
+          </section>
+        </>
+      )}
+
+      {/* ============ 3) 应用占用列表（多选时标题行切换为选择栏；标题行含排序胶囊） ============ */}
       {multiMode ? (
         <div className="flex items-center gap-2 px-5 pb-2.5 pt-1">
           <h2 className="text-[14px] font-semibold text-zinc-800 dark:text-zinc-100">已选 {sel.size} 项</h2>
@@ -744,42 +865,55 @@ export default function DataManager() {
           </button>
         </div>
       ) : (
-        <div className="flex items-baseline justify-between px-5 pb-2.5 pt-6">
+        <div className="flex items-center justify-between px-5 pb-2.5 pt-7">
           <h2 className="text-[13px] font-semibold text-zinc-500 dark:text-zinc-400">应用占用</h2>
-          <span className="text-[11px] text-zinc-400 dark:text-zinc-500">按大小排序</span>
+          {/* 排序胶囊：大小（默认）/ 名称 a-z，点击切换 */}
+          <button
+            type="button"
+            onClick={() => setSortMode((m) => (m === 'size' ? 'name' : 'size'))}
+            aria-label={sortMode === 'size' ? '当前按大小排序，点击改为按名称排序' : '当前按名称排序，点击改为按大小排序'}
+            className="flex items-center gap-1 rounded-full bg-[#007AFF]/[0.10] px-3 py-[5px] text-[13px] font-medium text-[#007AFF] transition active:scale-95 dark:bg-[#0A84FF]/[0.18] dark:text-[#0A84FF]"
+          >
+            {sortMode === 'size' ? '大小' : '名称'}
+            <ArrowUpDown className="h-3.5 w-3.5" aria-hidden />
+          </button>
         </div>
       )}
 
       <section aria-label="应用占用列表" className="px-4">
-        {/* v2.4.35 iOS 储存空间风：单张大玻璃卡 + 列表行（divide-y 分隔，图标右侧起线） */}
-        <div className={`${GLASS} overflow-hidden`}>
-          {stats === null
-            ? [0, 1, 2, 3, 4, 5, 6, 7].map((i) => <SkeletonCell key={i} />)
-            : sorted.map((stat, idx) => {
-                const app = appOf(stat.id);
-                if (!app) return null;
-                return (
-                  <div key={app.id} className={idx > 0 ? 'border-t border-black/[0.05] dark:border-white/[0.06]' : ''}>
-                    <AppCell
-                      app={app}
-                      safe={backup ? isAppSafe(stat, backup) : false}
-                      size={stat.bytes}
-                      share={totalBytes > 0 ? stat.bytes / totalBytes : 0}
-                      selected={sel.has(app.id)}
-                      multiMode={multiMode}
-                      disabled={busy !== ''}
-                      onTap={() => {
-                        if (multiMode) toggleSel(app.id); // 非多选短按无操作（长按进入多选）
-                      }}
-                      onLongPress={() => enterMulti(app.id)}
-                    />
-                  </div>
-                );
-              })}
+        {/* 单张不透明白卡 + 列表行（分隔线从文本列起笔，不穿过图标） */}
+        <div className={`${CARD} overflow-hidden`}>
+          {stats === null ? (
+            [0, 1, 2, 3, 4, 5, 6, 7].map((i) => <SkeletonCell key={i} />)
+          ) : visibleStats.length === 0 ? (
+            <p className="px-4 py-12 text-center text-[13px] text-zinc-400 dark:text-zinc-500">无匹配应用</p>
+          ) : (
+            visibleStats.map((stat, idx) => {
+              const app = appOf(stat.id);
+              if (!app) return null;
+              const safe = backup ? isAppSafe(stat, backup) : false;
+              return (
+                <AppCell
+                  key={app.id}
+                  app={app}
+                  backupText={safe && backup ? `上次备份：${fmtCloudTime(backup.lastAt)}` : '未备份'}
+                  size={stat.bytes}
+                  divider={idx > 0}
+                  selected={sel.has(app.id)}
+                  multiMode={multiMode}
+                  disabled={busy !== ''}
+                  onTap={() => {
+                    if (multiMode) toggleSel(app.id); // 非多选短按无操作（长按进入多选）
+                  }}
+                  onLongPress={() => enterMulti(app.id)}
+                />
+              );
+            })
+          )}
         </div>
       </section>
 
-      {/* ============ 3) 悬浮毛玻璃操作栏（多选 > 0 时滑出） ============ */}
+      {/* ============ 4) 悬浮毛玻璃操作栏（多选 > 0 时滑出；浮动元素允许毛玻璃） ============ */}
       {multiMode && (
         <div
           aria-hidden={sel.size === 0}
@@ -787,7 +921,7 @@ export default function DataManager() {
             sel.size > 0 ? 'translate-y-0 opacity-100' : 'pointer-events-none translate-y-16 opacity-0'
           }`}
         >
-          <div className="flex items-center gap-2 rounded-full bg-white/85 px-3 py-2.5 ring-1 ring-black/[0.06] shadow-[0_12px_40px_rgba(0,0,0,0.16)] backdrop-blur-2xl dark:bg-zinc-900/85 dark:ring-white/[0.1]">
+          <div className="flex items-center gap-2 rounded-full bg-white/90 px-3 py-2.5 ring-1 ring-black/[0.05] shadow-[0_8px_28px_rgba(0,0,0,0.12)] backdrop-blur-2xl dark:bg-[#1C1C1E]/90 dark:ring-white/[0.08]">
             <button
               type="button"
               onClick={() => void backupApps([...sel])}
@@ -818,234 +952,270 @@ export default function DataManager() {
         </div>
       )}
 
-      {/* ============ 5) 快捷操作（v2.4.35：备份 / 导入备份 / 清除数据——机主令清除数据放最后） ============ */}
-      <h2 className="px-5 pb-2.5 pt-7 text-[13px] font-semibold text-zinc-500 dark:text-zinc-400">快捷操作</h2>
-      <section aria-label="快捷操作" className="px-4">
-        {/* 三胶囊：备份（本地全量导出）/ 导入备份（文件选择器）/ 清除数据（危险，放最后） */}
-        <div className="grid grid-cols-3 gap-3">
-          <button
-            type="button"
-            onClick={() => void backupApps(APP_MODULES.map((a) => a.id))}
-            disabled={busy !== ''}
-            className="flex h-[52px] items-center justify-center gap-1.5 rounded-full bg-white/70 text-[13.5px] font-semibold text-zinc-700 ring-1 ring-black/[0.05] backdrop-blur-2xl transition active:scale-[0.97] disabled:opacity-50 dark:bg-white/[0.06] dark:text-zinc-200 dark:ring-white/[0.08]"
-          >
-            {busy === 'backup' ? (
-              <Loader2 className="h-[17px] w-[17px] animate-spin" aria-hidden />
-            ) : (
-              <CloudUpload className="h-[17px] w-[17px] text-[#007AFF]" aria-hidden />
-            )}
-            {busy === 'backup' ? '备份中…' : '备份'}
-          </button>
-          <button
-            type="button"
-            onClick={() => importRef.current?.click()}
-            disabled={busy !== ''}
-            className="flex h-[52px] items-center justify-center gap-1.5 rounded-full bg-white/70 text-[13.5px] font-semibold text-zinc-700 ring-1 ring-black/[0.05] backdrop-blur-2xl transition active:scale-[0.97] disabled:opacity-50 dark:bg-white/[0.06] dark:text-zinc-200 dark:ring-white/[0.08]"
-          >
-            {busy === 'import' ? (
-              <Loader2 className="h-[17px] w-[17px] animate-spin" aria-hidden />
-            ) : (
-              <Download className="h-[17px] w-[17px] text-[#34C759]" aria-hidden />
-            )}
-            {busy === 'import' ? '导入中…' : '导入备份'}
-          </button>
-          <button
-            type="button"
-            onClick={() => setConfirmGlobal(true)}
-            disabled={busy !== ''}
-            className="flex h-[52px] items-center justify-center gap-1.5 rounded-full bg-[#FF3B30]/[0.08] text-[13.5px] font-semibold text-[#D70015] ring-1 ring-[#FF3B30]/25 backdrop-blur-2xl transition active:scale-[0.97] disabled:opacity-50 dark:text-[#FF453A]"
-          >
-            {busy === 'clean' ? (
-              <Loader2 className="h-[17px] w-[17px] animate-spin" aria-hidden />
-            ) : (
-              <Trash2 className="h-[17px] w-[17px] text-[#FF3B30]" aria-hidden />
-            )}
-            {busy === 'clean' ? '清理中…' : '清除数据'}
-          </button>
-        </div>
-      </section>
-
-      {/* ============ 7) 云端与恢复（v2.4.32：一键云端备份 + 拉取备份移入本区） ============ */}
-      <h2 className="px-5 pb-2.5 pt-7 text-[13px] font-semibold text-zinc-500 dark:text-zinc-400">云端与恢复</h2>
-      <section aria-label="云端与恢复" className="px-4">
-        <div className={`${GLASS} p-4`}>
-          {/* 顶部双按钮（v2.4.32 机主规格）：一键云端备份（主操作蓝） + 拉取备份（毛玻璃描边） */}
-          <div className="grid grid-cols-2 gap-3">
-            <button
-              type="button"
-              onClick={() => void doCloudBackup()}
-              disabled={busy !== ''}
-              className="flex h-[50px] items-center justify-center gap-2 rounded-full bg-[#007AFF] text-[13.5px] font-semibold text-white shadow-[0_6px_20px_rgba(0,122,255,0.32)] transition active:scale-[0.97] disabled:opacity-50"
-            >
-              {busy === 'cloud' ? (
-                <Loader2 className="h-[17px] w-[17px] animate-spin" aria-hidden />
-              ) : (
-                <CloudUpload className="h-[17px] w-[17px]" aria-hidden />
-              )}
-              {busy === 'cloud' ? '备份中…' : '一键云端备份'}
-            </button>
-            <button
-              type="button"
-              onClick={() => void doPullBackup()}
-              disabled={busy !== ''}
-              aria-label="从云端拉取最新备份"
-              className="flex h-[50px] items-center justify-center gap-2 rounded-full bg-white/70 text-[13.5px] font-semibold text-[#007AFF] ring-1 ring-[#007AFF]/25 backdrop-blur-2xl transition active:scale-[0.97] disabled:opacity-50 dark:bg-[#0A84FF]/[0.12] dark:text-[#0A84FF] dark:ring-[#0A84FF]/30"
-            >
-              {busy === 'pull' ? (
-                <Loader2 className="h-[17px] w-[17px] animate-spin" aria-hidden />
-              ) : (
-                <Download className="h-[17px] w-[17px]" aria-hidden />
-              )}
-              {busy === 'pull' ? '拉取中…' : '拉取备份'}
-            </button>
-          </div>
-
-          {/* 首行：上次备份 + 云端状态点 */}
-          <div className="mt-4 flex items-center gap-2">
-            <span
-              aria-hidden
-              className={`h-2 w-2 shrink-0 rounded-full ${backup?.cloudReady ? 'bg-[#34C759]' : 'bg-zinc-300 dark:bg-zinc-600'}`}
-            />
-            <span className="text-[13px] font-semibold text-zinc-700 dark:text-zinc-200">上次备份</span>
-            <span className="min-w-0 flex-1 truncate text-[12.5px] text-zinc-400">{lastBackupText}</span>
-          </div>
-
-          {/* 一行小胶囊 chips */}
-          <div className="mt-3 flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              onClick={() => latestCloud && setConfirmRestoreRow(latestCloud)}
-              disabled={busy !== '' || !latestCloud}
-              className={CHIPO}
-            >
-              云端恢复
-            </button>
-            <button
-              type="button"
-              onClick={() => setShowRecords((v) => !v)}
-              disabled={busy !== ''}
-              aria-expanded={showRecords}
-              className={`flex items-center gap-1 ${CHIPO}`}
-            >
-              备份记录{cloudRows.length > 0 ? ` (${cloudRows.length})` : ''}
-              <ChevronDown className={`h-3 w-3 text-zinc-400 transition-transform ${showRecords ? 'rotate-180' : ''}`} aria-hidden />
-            </button>
-            <button type="button" onClick={() => importRef.current?.click()} disabled={busy !== ''} className={CHIPO}>
-              导入备份文件
-            </button>
-            <span className="flex items-center gap-2 rounded-full bg-black/[0.04] px-3.5 py-2 text-[12.5px] font-medium text-zinc-600 dark:bg-white/[0.07] dark:text-zinc-300">
-              自动备份
-              <Switch
-                checked={!!prefs?.auto}
-                onCheckedChange={(v) => {
-                  setPrefs((p) => (p ? { ...p, auto: v } : p));
-                  void writeBackupPrefs({ auto: v });
-                }}
-                aria-label="自动备份开关"
-                className="scale-[0.8]"
-              />
-            </span>
-            {prefs?.auto && (
-              <MiniSelect
-                label="间隔"
-                value={prefs.freq}
-                options={FREQ_OPTIONS}
-                onChange={(v) => {
-                  setPrefs({ ...prefs, freq: v as CloudBackupPrefs['freq'] });
-                  void writeBackupPrefs({ freq: v as CloudBackupPrefs['freq'] });
-                }}
-              />
-            )}
-            {prefs?.auto && (
-              <MiniSelect
-                label="保留"
-                value={String(prefs.keep ?? 3)}
-                options={KEEP_OPTIONS}
-                onChange={(v) => {
-                  setPrefs({ ...prefs, keep: Number(v) });
-                  void writeBackupPrefs({ keep: Number(v) });
-                }}
-              />
-            )}
-          </div>
-
-          {/* 云端备份记录列表（自定义细滚动条） */}
-          {showRecords && (
-            <div className="mt-3 max-h-64 overflow-y-auto overscroll-contain rounded-[22px] bg-black/[0.03] ring-1 ring-black/[0.04] [scrollbar-width:thin] [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-black/10 dark:bg-white/[0.04] dark:ring-white/[0.06] dark:[&::-webkit-scrollbar-thumb]:bg-white/15">
-              {cloudRows.length === 0 ? (
-                <p className="px-3 py-5 text-center text-[12px] text-zinc-400">
-                  {backup?.cloudReady ? '云端还没有备份' : '未部署云端助手'}
-                </p>
-              ) : (
-                cloudRows.slice(0, 20).map((row) => (
-                  <div
-                    key={row.id}
-                    className="flex items-center gap-2 border-b border-black/[0.05] px-3.5 py-2.5 text-[12px] last:border-b-0 dark:border-white/[0.06]"
-                  >
-                    <span
-                      aria-hidden
-                      className={`h-1.5 w-1.5 shrink-0 rounded-full ${
-                        row.kind === 'auto' ? 'bg-zinc-300 dark:bg-zinc-600' : 'bg-[#34C759]'
-                      }`}
-                    />
-                    <span className="min-w-0 flex-1 truncate text-zinc-500 dark:text-zinc-400">
-                      {fmtCloudTime(Date.parse(row.created_at ?? '') || 0)} · {row.kind === 'auto' ? '自动' : '手动'}
-                      {row.size_bytes ? ` · ${formatBytesAscii(row.size_bytes)}` : ''}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => setConfirmRestoreRow(row)}
-                      disabled={busy !== ''}
-                      className="shrink-0 rounded-full px-2 py-0.5 text-[12px] font-medium text-[#007AFF] transition active:scale-95 disabled:opacity-40 dark:text-[#0A84FF]"
-                    >
-                      恢复
-                    </button>
-                    <button
-                      type="button"
-                      aria-label="删除这条云端备份"
-                      onClick={() => void doDeleteCloudRow(row)}
-                      disabled={busy !== ''}
-                      className="shrink-0 rounded-full px-2 py-0.5 text-[12px] text-zinc-400 transition hover:text-[#FF3B30] active:scale-95 disabled:opacity-40"
-                    >
-                      删除
-                    </button>
-                  </div>
-                ))
-              )}
-            </div>
-          )}
-
-          {/* 持久化状态行 */}
-          <div className="mt-3 flex items-center gap-2 text-[11.5px]">
-            {persisted === null ? (
-              <span className="text-zinc-400">持久化存储 · 检测中…</span>
-            ) : persisted ? (
-              <span className="font-medium text-[#248A3D] dark:text-[#30D158]">持久化存储 已开启</span>
-            ) : (
+      {/* ============ 5) 快捷操作（备份 / 导入备份 / 清除数据——清除数据放最后；搜索时隐藏） ============ */}
+      {!searching && (
+        <>
+          <h2 className="px-5 pb-2.5 pt-7 text-[13px] font-semibold text-zinc-500 dark:text-zinc-400">快捷操作</h2>
+          <section aria-label="快捷操作" className="px-4">
+            {/* 三胶囊：不透明白底 + 彩色图标（备份蓝 / 导入绿 / 清除数据红底浅染放最后） */}
+            <div className="grid grid-cols-3 gap-3">
               <button
                 type="button"
-                onClick={() => void ensurePersistentStorage().then((ok) => setPersisted(ok))}
-                className="text-zinc-400 underline-offset-2 transition-colors hover:text-zinc-600 hover:underline dark:hover:text-zinc-300"
+                onClick={() => void backupApps(APP_MODULES.map((a) => a.id))}
+                disabled={busy !== ''}
+                className="flex h-[50px] items-center justify-center gap-1.5 rounded-full bg-white text-[13px] font-semibold text-zinc-700 shadow-[0_1px_3px_rgba(0,0,0,0.03)] ring-1 ring-black/[0.04] transition active:scale-[0.97] disabled:opacity-50 dark:bg-[#1C1C1E] dark:text-zinc-200 dark:ring-white/[0.06]"
               >
-                点此开启持久化
+                {busy === 'backup' ? (
+                  <Loader2 className="h-[17px] w-[17px] animate-spin" aria-hidden />
+                ) : (
+                  <CloudUpload className="h-[17px] w-[17px] text-[#007AFF]" aria-hidden />
+                )}
+                {busy === 'backup' ? '备份中…' : '备份'}
+              </button>
+              <button
+                type="button"
+                onClick={() => importRef.current?.click()}
+                disabled={busy !== ''}
+                className="flex h-[50px] items-center justify-center gap-1.5 rounded-full bg-white text-[13px] font-semibold text-zinc-700 shadow-[0_1px_3px_rgba(0,0,0,0.03)] ring-1 ring-black/[0.04] transition active:scale-[0.97] disabled:opacity-50 dark:bg-[#1C1C1E] dark:text-zinc-200 dark:ring-white/[0.06]"
+              >
+                {busy === 'import' ? (
+                  <Loader2 className="h-[17px] w-[17px] animate-spin" aria-hidden />
+                ) : (
+                  <Download className="h-[17px] w-[17px] text-[#34C759]" aria-hidden />
+                )}
+                {busy === 'import' ? '导入中…' : '导入备份'}
+              </button>
+              <button
+                type="button"
+                onClick={() => setConfirmGlobal(true)}
+                disabled={busy !== ''}
+                className="flex h-[50px] items-center justify-center gap-1.5 rounded-full bg-[#FF3B30]/[0.06] text-[13px] font-semibold text-[#D70015] ring-1 ring-[#FF3B30]/[0.12] transition active:scale-[0.97] disabled:opacity-50 dark:bg-[#FF3B30]/[0.12] dark:text-[#FF453A] dark:ring-[#FF3B30]/[0.25]"
+              >
+                {busy === 'clean' ? (
+                  <Loader2 className="h-[17px] w-[17px] animate-spin" aria-hidden />
+                ) : (
+                  <Trash2 className="h-[17px] w-[17px] text-[#FF3B30]" aria-hidden />
+                )}
+                {busy === 'clean' ? '清理中…' : '清除数据'}
+              </button>
+            </div>
+          </section>
+        </>
+      )}
+
+      {/* ============ 6) 云端与恢复（一键云端备份 + 拉取备份 + 记录 / 自动备份 / 持久化；搜索时隐藏） ============ */}
+      {!searching && (
+        <>
+          <h2 className="px-5 pb-2.5 pt-7 text-[13px] font-semibold text-zinc-500 dark:text-zinc-400">云端与恢复</h2>
+          <section aria-label="云端与恢复" className="px-4">
+            <div className={`${CARD} p-4`}>
+              {/* 顶部双按钮：一键云端备份（主操作蓝实底） + 拉取备份（蓝描边） */}
+              <div className="grid grid-cols-2 gap-3">
+                <button
+                  type="button"
+                  onClick={() => void doCloudBackup()}
+                  disabled={busy !== ''}
+                  className="flex h-[50px] items-center justify-center gap-2 rounded-full bg-[#007AFF] text-[13px] font-semibold text-white shadow-[0_4px_14px_rgba(0,122,255,0.25)] transition active:scale-[0.97] disabled:opacity-50 dark:bg-[#0A84FF]"
+                >
+                  {busy === 'cloud' ? (
+                    <Loader2 className="h-[17px] w-[17px] animate-spin" aria-hidden />
+                  ) : (
+                    <CloudUpload className="h-[17px] w-[17px]" aria-hidden />
+                  )}
+                  {busy === 'cloud' ? '备份中…' : '一键云端备份'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void doPullBackup()}
+                  disabled={busy !== ''}
+                  aria-label="从云端拉取最新备份"
+                  className="flex h-[50px] items-center justify-center gap-2 rounded-full bg-[#007AFF]/[0.08] text-[13px] font-semibold text-[#007AFF] ring-1 ring-[#007AFF]/25 transition active:scale-[0.97] disabled:opacity-50 dark:bg-[#0A84FF]/[0.14] dark:text-[#0A84FF] dark:ring-[#0A84FF]/30"
+                >
+                  {busy === 'pull' ? (
+                    <Loader2 className="h-[17px] w-[17px] animate-spin" aria-hidden />
+                  ) : (
+                    <Download className="h-[17px] w-[17px]" aria-hidden />
+                  )}
+                  {busy === 'pull' ? '拉取中…' : '拉取备份'}
+                </button>
+              </div>
+
+              {/* 首行：上次备份 + 云端状态点 */}
+              <div className="mt-4 flex items-center gap-2">
+                <span
+                  aria-hidden
+                  className={`h-2 w-2 shrink-0 rounded-full ${backup?.cloudReady ? 'bg-[#34C759]' : 'bg-zinc-300 dark:bg-zinc-600'}`}
+                />
+                <span className="text-[13px] font-semibold text-zinc-700 dark:text-zinc-200">上次备份</span>
+                <span className="min-w-0 flex-1 truncate text-[12.5px] text-zinc-400">{lastBackupText}</span>
+              </div>
+
+              {/* 一行小胶囊 chips */}
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => latestCloud && setConfirmRestoreRow(latestCloud)}
+                  disabled={busy !== '' || !latestCloud}
+                  className={CHIPO}
+                >
+                  云端恢复
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowRecords((v) => !v)}
+                  disabled={busy !== ''}
+                  aria-expanded={showRecords}
+                  className={`flex items-center gap-1 ${CHIPO}`}
+                >
+                  备份记录{cloudRows.length > 0 ? ` (${cloudRows.length})` : ''}
+                  <ChevronDown className={`h-3 w-3 text-zinc-400 transition-transform ${showRecords ? 'rotate-180' : ''}`} aria-hidden />
+                </button>
+                <button type="button" onClick={() => importRef.current?.click()} disabled={busy !== ''} className={CHIPO}>
+                  导入备份文件
+                </button>
+                <span className="flex items-center gap-2 rounded-full bg-black/[0.04] px-3.5 py-2 text-[12.5px] font-medium text-zinc-600 dark:bg-white/[0.07] dark:text-zinc-300">
+                  自动备份
+                  <Switch
+                    checked={!!prefs?.auto}
+                    onCheckedChange={(v) => {
+                      setPrefs((p) => (p ? { ...p, auto: v } : p));
+                      void writeBackupPrefs({ auto: v });
+                    }}
+                    aria-label="自动备份开关"
+                    className="scale-[0.8]"
+                  />
+                </span>
+                {prefs?.auto && (
+                  <MiniSelect
+                    label="间隔"
+                    value={prefs.freq}
+                    options={FREQ_OPTIONS}
+                    onChange={(v) => {
+                      setPrefs({ ...prefs, freq: v as CloudBackupPrefs['freq'] });
+                      void writeBackupPrefs({ freq: v as CloudBackupPrefs['freq'] });
+                    }}
+                  />
+                )}
+                {prefs?.auto && (
+                  <MiniSelect
+                    label="保留"
+                    value={String(prefs.keep ?? 3)}
+                    options={KEEP_OPTIONS}
+                    onChange={(v) => {
+                      setPrefs({ ...prefs, keep: Number(v) });
+                      void writeBackupPrefs({ keep: Number(v) });
+                    }}
+                  />
+                )}
+              </div>
+
+              {/* 云端备份记录列表（自定义细滚动条） */}
+              {showRecords && (
+                <div className="mt-3 max-h-64 overflow-y-auto overscroll-contain rounded-[22px] bg-black/[0.03] ring-1 ring-black/[0.04] [scrollbar-width:thin] [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-black/10 dark:bg-white/[0.04] dark:ring-white/[0.06] dark:[&::-webkit-scrollbar-thumb]:bg-white/15">
+                  {cloudRows.length === 0 ? (
+                    <p className="px-3 py-5 text-center text-[12px] text-zinc-400">
+                      {backup?.cloudReady ? '云端还没有备份' : '未部署云端助手'}
+                    </p>
+                  ) : (
+                    cloudRows.slice(0, 20).map((row) => (
+                      <div
+                        key={row.id}
+                        className="flex items-center gap-2 border-b border-black/[0.05] px-3.5 py-2.5 text-[12px] last:border-b-0 dark:border-white/[0.06]"
+                      >
+                        <span
+                          aria-hidden
+                          className={`h-1.5 w-1.5 shrink-0 rounded-full ${
+                            row.kind === 'auto' ? 'bg-zinc-300 dark:bg-zinc-600' : 'bg-[#34C759]'
+                          }`}
+                        />
+                        <span className="min-w-0 flex-1 truncate text-zinc-500 dark:text-zinc-400">
+                          {fmtCloudTime(Date.parse(row.created_at ?? '') || 0)} · {row.kind === 'auto' ? '自动' : '手动'}
+                          {row.size_bytes ? ` · ${formatBytesAscii(row.size_bytes)}` : ''}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setConfirmRestoreRow(row)}
+                          disabled={busy !== ''}
+                          className="shrink-0 rounded-full px-2 py-0.5 text-[12px] font-medium text-[#007AFF] transition active:scale-95 disabled:opacity-40 dark:text-[#0A84FF]"
+                        >
+                          恢复
+                        </button>
+                        <button
+                          type="button"
+                          aria-label="删除这条云端备份"
+                          onClick={() => void doDeleteCloudRow(row)}
+                          disabled={busy !== ''}
+                          className="shrink-0 rounded-full px-2 py-0.5 text-[12px] text-zinc-400 transition hover:text-[#FF3B30] active:scale-95 disabled:opacity-40"
+                        >
+                          删除
+                        </button>
+                      </div>
+                    ))
+                  )}
+                </div>
+              )}
+
+              {/* 持久化状态行 */}
+              <div className="mt-3 flex items-center gap-2 text-[11.5px]">
+                {persisted === null ? (
+                  <span className="text-zinc-400">持久化存储 · 检测中…</span>
+                ) : persisted ? (
+                  <span className="font-medium text-[#248A3D] dark:text-[#30D158]">持久化存储 已开启</span>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => void ensurePersistentStorage().then((ok) => setPersisted(ok))}
+                    className="text-zinc-400 underline-offset-2 transition-colors hover:text-zinc-600 hover:underline dark:hover:text-zinc-300"
+                  >
+                    点此开启持久化
+                  </button>
+                )}
+              </div>
+
+              {/* 云端未部署引导 */}
+              {backup && !backup.cloudReady && (
+                <button
+                  type="button"
+                  onClick={() => openSettings('settings')}
+                  className="mt-2 w-full text-left text-[11.5px] leading-relaxed text-zinc-400 underline-offset-2 transition-colors hover:text-zinc-600 hover:underline dark:hover:text-zinc-300"
+                >
+                  ↳ 前往 设置 › 云端助手 完成 Supabase 部署
+                </button>
+              )}
+            </div>
+          </section>
+        </>
+      )}
+
+      {/* ============ 7) 底部悬浮搜索胶囊（多选时让位给操作栏；mt-auto 保证短内容也贴底） ============ */}
+      {!multiMode && (
+        <div className="sticky bottom-4 z-30 mt-auto px-4 pb-4 pt-2">
+          <div className="flex h-[50px] items-center gap-2.5 rounded-full bg-white/75 px-4 ring-1 ring-black/[0.05] shadow-[0_8px_28px_rgba(0,0,0,0.10)] backdrop-blur-2xl dark:bg-[#1C1C1E]/75 dark:ring-white/[0.08]">
+            <Search className="h-5 w-5 shrink-0 text-zinc-500 dark:text-zinc-400" aria-hidden />
+            <input
+              type="text"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="应用程序"
+              aria-label="搜索应用"
+              className="min-w-0 flex-1 bg-transparent text-[15px] text-zinc-900 outline-none placeholder:text-zinc-400 dark:text-zinc-50 dark:placeholder:text-zinc-500"
+            />
+            {query !== '' && (
+              <button
+                type="button"
+                onClick={() => setQuery('')}
+                aria-label="清除搜索内容"
+                className="grid h-[22px] w-[22px] shrink-0 place-items-center rounded-full bg-black/[0.08] text-zinc-500 transition active:scale-90 dark:bg-white/[0.12] dark:text-zinc-400"
+              >
+                <X className="h-3.5 w-3.5" aria-hidden />
               </button>
             )}
+            <Mic className="h-5 w-5 shrink-0 text-zinc-500 dark:text-zinc-400" aria-hidden />
           </div>
-
-          {/* 云端未部署引导 */}
-          {backup && !backup.cloudReady && (
-            <button
-              type="button"
-              onClick={() => openSettings('settings')}
-              className="mt-2 w-full text-left text-[11.5px] leading-relaxed text-zinc-400 underline-offset-2 transition-colors hover:text-zinc-600 hover:underline dark:hover:text-zinc-300"
-            >
-              ↳ 前往 设置 › 云端助手 完成 Supabase 部署
-            </button>
-          )}
         </div>
-      </section>
+      )}
 
-      {/* ============ 8) 危险确认弹窗（毛玻璃 iOS 分区按钮） ============ */}
+      {/* ============ 8) 危险确认弹窗（毛玻璃 iOS 分区按钮，保持原样） ============ */}
       <GlassConfirm
         open={confirmClean !== null || confirmGlobal}
         onOpenChange={(o) => {
