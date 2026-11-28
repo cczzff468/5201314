@@ -5,6 +5,10 @@ import android.app.PendingIntent;
 import android.content.Context;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
+import android.graphics.Canvas;
+import android.graphics.Color;
+import android.graphics.Paint;
+import android.graphics.Typeface;
 import android.graphics.drawable.Icon;
 import android.os.Build;
 import android.util.Base64;
@@ -226,6 +230,54 @@ public final class NotifyAvatars {
             return out != null ? out : src;
         } catch (Throwable t) {
             return src;
+        }
+    }
+
+    // ================= v2.4.34 头像 monogram 兜底（右侧头像永不缺席） =================
+
+    /** monogram 位图 LRU（首字→位图；不同标题首字种类有限，缓存命中率高） */
+    private static final LruCache<String, Bitmap> MONO_CACHE = new LruCache<>(12);
+
+    /**
+     * v2.4.34（机主令「通知右侧头像不能一会有一会没有」）：会话没上报头像/头像解码失败时，
+     * 用角色名首字画一张 monogram 圆形头像位图（灰白底 + 深灰粗字 + 细描边，与锁定拦截窗
+     * 的 monogram 同一风格）——通知卡右侧永远有头像可看，绝不空缺。
+     *
+     * @param title 通知标题（角色名；取第一个 Unicode 字符）
+     */
+    public static Bitmap monogram(Context ctx, String title) {
+        try {
+            String c = title == null ? "" : title.trim();
+            if (c.isEmpty()) c = "TA";
+            String head = c.substring(0, c.offsetByCodePoints(0, 1));
+            Bitmap hit = MONO_CACHE.get(head);
+            if (hit != null) return hit;
+            final int S = 128;
+            Bitmap bmp = Bitmap.createBitmap(S, S, Bitmap.Config.ARGB_8888);
+            Canvas cv = new Canvas(bmp);
+            // 圆底：半透明白（深色通知栏上也柔和；与拦截窗 monogram 同色系）
+            Paint bg = new Paint(Paint.ANTI_ALIAS_FLAG);
+            bg.setColor(Color.parseColor("#2E48525A"));
+            cv.drawCircle(S / 2f, S / 2f, S / 2f, bg);
+            // 首字：白色粗体居中
+            Paint tp = new Paint(Paint.ANTI_ALIAS_FLAG);
+            tp.setColor(Color.WHITE);
+            tp.setTypeface(Typeface.DEFAULT_BOLD);
+            tp.setTextSize(58f);
+            tp.setTextAlign(Paint.Align.CENTER);
+            // 垂直居中：ascent/descent 中线校正
+            float ty = S / 2f - (tp.ascent() + tp.descent()) / 2f;
+            cv.drawText(head, S / 2f, ty, tp);
+            // 极细描边环（与拦截窗头像同规格）
+            Paint ring = new Paint(Paint.ANTI_ALIAS_FLAG);
+            ring.setStyle(Paint.Style.STROKE);
+            ring.setStrokeWidth(2f);
+            ring.setColor(Color.parseColor("#3DFFFFFF"));
+            cv.drawCircle(S / 2f, S / 2f, S / 2f - 1f, ring);
+            MONO_CACHE.put(head, bmp);
+            return bmp;
+        } catch (Throwable t) {
+            return null;
         }
     }
 }

@@ -86,6 +86,11 @@ public final class BgNotifyPoller {
     private static final String KEY_URL = "url";
     private static final String KEY_ENABLED = "enabled";
     private static final String KEY_DND = "dnd";
+    /** v2.4.34：网页推送的机主所选 APP 图标号（'1'~'5'；空 = 回落 cove_prefs/icon_current）。
+     *  旧版只读 cove_prefs/icon_current（只有用户经图标网格切换/开机对账时才写），
+     *  机主在网页选过图标但从未触发桥落盘时通知左图标一直是默认 3 号——本键由
+     *  setBgNotifyConfig 每个轮询周期从网页同步，永远是最新的选择。 */
+    private static final String KEY_ICON_CHOICE = "icon_choice";
     /** 已弹过/已见过的消息 id 集合（稳定 id：服务端 `${itemId}#${i}`） */
     private static final String KEY_SEEN_IDS = "seen_ids";
     /** 已弹过通知的 batchKey 待认领队列（网页 consumeBgNotified 取走并清空） */
@@ -147,7 +152,8 @@ public final class BgNotifyPoller {
 
     /**
      * 网页桥 AIPhoneNative.setBgNotifyConfig(json) 入口。
-     * json: { url: "https://xxx"（服务器 origin，轮询 base）, enabled: bool, dnd: bool }
+     * json: { url: "https://xxx"（服务器 origin，轮询 base）, enabled: bool, dnd: bool,
+     *         icon: "1"~"5"（机主所选 APP 图标号，v2.4.34 通知左图标用） }
      * enabled=true 且 url 合法 → 拉起轮询线程；enabled=false → 停止并清空配置。
      */
     public static void setConfig(Context ctx, String json) {
@@ -159,12 +165,16 @@ public final class BgNotifyPoller {
             String url = o.optString("url", "");
             boolean enabled = o.optBoolean("enabled", false);
             boolean dnd = o.optBoolean("dnd", false);
+            // v2.4.34 机主所选图标号（'1'~'5' 合法才落盘，防脏值）
+            String icon = o.optString("icon", "");
+            if (icon == null || !icon.matches("^[1-5]$")) icon = "";
             // URL 规范：去尾部斜杠；非 http(s) 一律视为无效（清空）
             String norm = normalizeUrl(url);
             sp.edit()
                     .putString(KEY_URL, norm)
                     .putBoolean(KEY_ENABLED, enabled && norm != null)
                     .putBoolean(KEY_DND, dnd)
+                    .putString(KEY_ICON_CHOICE, icon)
                     .apply();
             if (enabled && norm != null) {
                 ensureStarted(app);
@@ -172,7 +182,7 @@ public final class BgNotifyPoller {
                 stop();
             }
         } catch (Throwable ignored) {
-            // 配置异常静默（坏 JSON 不影响既有轮询）
+            // 配置异常静默（坏 JSON 不影响既有轮询；icon 落盘失败回落 cove_prefs）
         }
     }
 
@@ -626,11 +636,19 @@ public final class BgNotifyPoller {
             }
         } catch (Throwable ignored) {
         }
-        // 大图标：会话角色 AI 头像（机主规格「右面显示 AI 头像」；缺失不带）
+        // 大图标：会话角色 AI 头像（机主规格「右面显示 AI 头像」）。
+        // v2.4.34 头像永不缺席：会话没上报头像/解码失败 → 角色名首字 monogram 兜底
+        //（旧版缺失时右侧空缺，机主看到「一会有一会没有」）。
         android.graphics.Bitmap large = null;
         if (job.avatar != null && !job.avatar.isEmpty()) {
             try {
                 large = NotifyAvatars.decode(job.avatar);
+            } catch (Throwable ignored) {
+            }
+        }
+        if (large == null) {
+            try {
+                large = NotifyAvatars.monogram(ctx, title);
             } catch (Throwable ignored) {
             }
         }
@@ -642,7 +660,8 @@ public final class BgNotifyPoller {
 
     /**
      * v2.4.30：机主所选 APP 图标 URL（v2.4.33 起作通知【小】图标位图用）。
-     * cove_prefs/icon_current（'1'~'5'，默认 '3'）→ {服务器base}/icons/app/icon-X-192.png。
+     * v2.4.34 取值优先级：bg_notify/icon_choice（网页每个轮询周期同步的最新选择）
+     *  → cove_prefs/icon_current（图标切换桥落盘的值）→ 默认 '3'。
      * base 取轮询配置里的服务器地址；无配置/异常返回 null（回落 ic_stat_cove 单色资源）。
      */
     private static String chosenAppIconUrl(Context ctx) {
@@ -654,8 +673,12 @@ public final class BgNotifyPoller {
             }
             String base = sp.getString(KEY_URL, null);
             if (base == null || base.isEmpty()) return null;
-            SharedPreferences cp = ctx.getSharedPreferences("cove_prefs", Context.MODE_PRIVATE);
-            String cur = cp.getString("icon_current", "3");
+            // v2.4.34：网页周期同步的图标号优先（永远最新），cove_prefs 兜底
+            String cur = sp.getString(KEY_ICON_CHOICE, "");
+            if (cur == null || !cur.matches("^[1-5]$")) {
+                SharedPreferences cp = ctx.getSharedPreferences("cove_prefs", Context.MODE_PRIVATE);
+                cur = cp.getString("icon_current", "3");
+            }
             if (cur == null || cur.isEmpty()) cur = "3";
             return base + "/icons/app/icon-" + cur + "-192.png";
         } catch (Throwable t) {

@@ -68,10 +68,17 @@ export function registerBgSession(sessionKey: string, meta: BgSessionMeta): void
   // 头像预压缩（异步）：pagehide 是同步瞬间取不到异步结果，这里挂载时就压好缓存
   const raw = meta.avatar;
   if (raw) {
-    void compressAvatarForPush(raw).then((small) => {
+    void compressAvatarForPush(raw, meta.title).then((small) => {
       const cur = sessionMetas.get(sessionKey);
       // 会话期间头像没被重新注册/没被清掉才回填
       if (cur && cur.avatarRaw === raw && small) cur.avatarSmall = small;
+    });
+  } else {
+    // v2.4.34 头像永不缺席：会话没头像（没传/空串）→ 用标题首字画 monogram 兜底，
+    // 通知/Web Push 右侧头像绝不空缺（原生侧另有同款 monogram 双保险）
+    void compressAvatarForPush('', meta.title).then((small) => {
+      const cur = sessionMetas.get(sessionKey);
+      if (cur && !cur.avatarSmall && small) cur.avatarSmall = small;
     });
   }
 }
@@ -88,24 +95,51 @@ const AVATAR_PUSH_MAX = 2600;
 const avatarCompCache = new Map<string, string | null>();
 const AVATAR_CACHE_MAX = 64;
 
-/** 把任意头像（路径/dataURL）压成 96px 圆形 JPEG dataURL；失败/超限返回 null（通知不带头像） */
-async function compressAvatarForPush(src: string): Promise<string | null> {
-  const cached = avatarCompCache.get(src);
+/** 把任意头像（路径/dataURL）压成 96px 圆形 JPEG dataURL；失败/超限返回 null（通知不带头像）。
+ *  v2.4.34：src 空/不可加载时用标题首字画 monogram（灰底白字圆形）兑底——
+ *  头像缺失的会话（没传头像/emoji 头像/跨域加载失败）也能带上「头像」，
+ *  通知卡右侧不再一会有一会没有。 */
+async function compressAvatarForPush(src: string, title?: string): Promise<string | null> {
+  const cacheKey = src || `#mono:${title ?? ''}`;
+  const cached = avatarCompCache.get(cacheKey);
   if (cached !== undefined) return cached;
   const out = await new Promise<string | null>((resolve) => {
     try {
+      const S = 96;
+      const canvas = document.createElement('canvas');
+      canvas.width = S;
+      canvas.height = S;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return resolve(null);
+      const drawMonogram = () => {
+        try {
+          const head = (title ?? '').trim().slice(0, 1) || 'TA';
+          ctx.beginPath();
+          ctx.arc(S / 2, S / 2, S / 2, 0, Math.PI * 2);
+          ctx.closePath();
+          ctx.clip();
+          ctx.fillStyle = '#48525A';
+          ctx.fillRect(0, 0, S, S);
+          ctx.fillStyle = '#FFFFFF';
+          ctx.font = 'bold 46px system-ui, -apple-system, sans-serif';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(head, S / 2, S / 2 + 2);
+          resolve(canvas.toDataURL('image/jpeg', 0.72));
+        } catch {
+          resolve(null);
+        }
+      };
+      if (!src) {
+        drawMonogram(); // v2.4.34：无头像源 → monogram 兑底
+        return;
+      }
       const img = new Image();
       img.crossOrigin = 'anonymous';
       const timer = window.setTimeout(() => resolve(null), 4000);
       img.onload = () => {
         window.clearTimeout(timer);
         try {
-          const S = 96;
-          const canvas = document.createElement('canvas');
-          canvas.width = S;
-          canvas.height = S;
-          const ctx = canvas.getContext('2d');
-          if (!ctx) return resolve(null);
           // 圆形裁切铺满（系统通知里头像以圆形呈现）
           ctx.beginPath();
           ctx.arc(S / 2, S / 2, S / 2, 0, Math.PI * 2);
@@ -120,7 +154,7 @@ async function compressAvatarForPush(src: string): Promise<string | null> {
       };
       img.onerror = () => {
         window.clearTimeout(timer);
-        resolve(null);
+        drawMonogram(); // v2.4.34：头像加载失败 → monogram 兑底（不再空手而归）
       };
       img.src = src;
     } catch {
@@ -128,7 +162,7 @@ async function compressAvatarForPush(src: string): Promise<string | null> {
     }
   });
   const final = out && out.length <= AVATAR_PUSH_MAX ? out : null;
-  avatarCompCache.set(src, final);
+  avatarCompCache.set(cacheKey, final);
   if (avatarCompCache.size > AVATAR_CACHE_MAX) {
     const oldest = avatarCompCache.keys().next().value;
     if (oldest !== undefined) avatarCompCache.delete(oldest);

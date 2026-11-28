@@ -8,10 +8,13 @@ import android.graphics.Rect;
 import android.hardware.HardwareBuffer;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.util.Base64;
 import android.view.Display;
 import android.view.accessibility.AccessibilityEvent;
 import android.view.accessibility.AccessibilityNodeInfo;
+import android.view.accessibility.AccessibilityWindowInfo;
 
 import java.io.ByteArrayOutputStream;
 import java.util.concurrent.Executor;
@@ -60,6 +63,48 @@ public class AiAccessibilityService extends AccessibilityService {
     private static volatile String stablePkg;
     private static volatile long stableAt;
 
+    /**
+     * v2.4.34（幽灵前台根修）：待验证的前台候选。
+     *
+     * 病灶：TYPE_WINDOW_STATE_CHANGED 不只在前台切换时发——QQ 等应用的后台悬浮窗
+     * （悬浮聊天气泡/快速回复面板/推送拉起的服务窗口）也会发同包名事件，旧版直接把
+     * stablePkg 接管成 QQ，导致：① AI 感知「你正在刷 QQ」（其实你在别的 App）；
+     * ② LockOverlayService 弹出锁定拦截窗（机主没点 QQ 也被弹窗+计数）。
+     *
+     * 修法：非瞬态事件一律先进「待验证」态，350ms 后（窗口切换过渡完成）校验——
+     * 屏幕点亮 且 事件包名 == 当前活跃（active+focused）窗口的包名 才算真前台切换；
+     * 否则是后台悬浮窗事件，静默丢弃（不接管 stablePkg、不通知锁定服务）。
+     * 连发事件去抖只跟最新一条；活跃窗口判不了（null）时保守放行（不误拦真切换）。
+     */
+    private static volatile String pendingPkg;
+    private static volatile long pendingAt;
+    /** 候选验证延时（窗口切换过渡完成窗口期；过长拖慢真感知、过短误判悬浮窗） */
+    private static final long PENDING_VALIDATE_MS = 350L;
+    private final Handler mainHandler = new Handler(Looper.getMainLooper());
+    private final Runnable pendingValidate = new Runnable() {
+        @Override
+        public void run() {
+            try {
+                String pkg = pendingPkg;
+                pendingPkg = null;
+                if (pkg == null || pkg.isEmpty()) return;
+                // 闸一：屏幕必须点亮（熄屏态不可能有用户真实前台切换；QQ 后台服务在熄屏时也会发窗口事件）
+                if (!isScreenInteractive()) return;
+                // 闸二：事件包名必须与当前「活跃窗口」一致（后台悬浮窗不是活跃窗口——
+                // 真前台切换 350ms 后过渡已完成，活跃窗口就是它；判不了（null）保守放行）
+                String active = activeWindowPkg();
+                if (active != null && !active.equals(pkg)) return; // 幽灵：后台悬浮窗事件
+                stablePkg = pkg;
+                stableAt = System.currentTimeMillis();
+                // v2.2.0 应用锁定实时钩子：锁定名单应用一露头 → 通知 LockOverlayService
+                // 立即回桌面 + 弹拦截窗（服务未持锁时静态方法内部直接短路，零开销）
+                LockOverlayService.notifyForegroundHit(pkg);
+            } catch (Throwable ignored) {
+                // 校验链路绝不 crash 服务
+            }
+        }
+    };
+
     /** 截屏后台线程（JPEG 压缩 + base64 不占主线程） */
     private static final Executor SHOT_EXECUTOR = Executors.newSingleThreadExecutor();
 
@@ -72,6 +117,10 @@ public class AiAccessibilityService extends AccessibilityService {
     @Override
     public void onDestroy() {
         if (instance == this) instance = null;
+        try {
+            mainHandler.removeCallbacks(pendingValidate); // 待验证候选随服务销毁一并丢弃
+        } catch (Throwable ignored) {
+        }
         super.onDestroy();
     }
 
@@ -88,11 +137,18 @@ public class AiAccessibilityService extends AccessibilityService {
             // 瞬态窗口防抖：输入法/对话框窗口不立即接管 stable（1.2s 内仍在则转正）
             boolean transientWin = isTransientPackage(pkg);
             if (!transientWin) {
-                stablePkg = pkg;
-                stableAt = now;
-                // v2.2.0 应用锁定实时钩子：锁定名单应用一露头 → 通知 LockOverlayService
-                // 立即回桌面 + 弹拦截窗（服务未持锁时静态方法内部直接短路，零开销）
-                LockOverlayService.notifyForegroundHit(pkg);
+                // v2.4.34 幽灵前台根修：非瞬态事件不再立即接管 stable——先进待验证态，
+                // 350ms 后经「亮屏 + 活跃窗口包名一致」双闸校验（见 pendingValidate），
+                // QQ 后台悬浮窗等幽灵事件在那里被丢弃，绝不再污染 AI 感知与锁定拦截。
+                // 连发事件去抖只跟最新一条：同包名窗口期内只刷新时间，新包名顶掉旧回调。
+                if (pkg.equals(pendingPkg) && now - pendingAt < PENDING_VALIDATE_MS) {
+                    pendingAt = now;
+                } else {
+                    pendingPkg = pkg;
+                    pendingAt = now;
+                    mainHandler.removeCallbacks(pendingValidate);
+                    mainHandler.postDelayed(pendingValidate, PENDING_VALIDATE_MS);
+                }
             } else if (stablePkg == null) {
                 stablePkg = pkg;
                 stableAt = now;
@@ -100,6 +156,36 @@ public class AiAccessibilityService extends AccessibilityService {
         } catch (Throwable ignored) {
             // 感知事件绝不 crash 服务
         }
+    }
+
+    /** v2.4.34：屏幕是否点亮（PowerManager.isInteractive；异常保守返回 true 不误拦） */
+    private boolean isScreenInteractive() {
+        try {
+            android.os.PowerManager pm = (android.os.PowerManager) getSystemService(POWER_SERVICE);
+            return pm == null || pm.isInteractive();
+        } catch (Throwable t) {
+            return true;
+        }
+    }
+
+    /**
+     * v2.4.34：当前「活跃窗口」的包名（isActive + isFocused 的窗口 = 用户正交互的真前台；
+     * 后台悬浮窗/气泡不在其列）。窗口自身无 getPackageName，经其根节点读取。
+     * 无窗口/根节点拿不到/异常返回 null（调用方保守放行）。
+     */
+    private String activeWindowPkg() {
+        try {
+            for (AccessibilityWindowInfo w : getWindows()) {
+                if (w != null && w.isActive() && w.isFocused()) {
+                    AccessibilityNodeInfo root = w.getRoot();
+                    if (root == null) return null;
+                    CharSequence p = root.getPackageName();
+                    return p == null ? null : p.toString();
+                }
+            }
+        } catch (Throwable ignored) {
+        }
+        return null;
     }
 
     /** 瞬态窗口包名判定（输入法/系统弹层不视为前台切换） */

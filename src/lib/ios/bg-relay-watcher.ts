@@ -56,6 +56,9 @@ import { snapRelayMessages } from './relay-snap';
 //（后台 setTimeout 被强节流 1s→1次/分钟，防抖反而把接力横幅拖慢，机主退后台收不到通知的根因之一）
 import { isPageBackground } from './system-notify';
 import { onKeepAliveTick } from './keepalive';
+// v2.4.34：机主所选 APP 图标号随轮询配置同步给原生（通知左图标）；store 已被
+// island-notify 静态依赖，此处再引入无新增环
+import { useSettings } from './store';
 
 // ---------------- v2.4.27 原生后台通知协作（第四十七轮升级） ----------------
 
@@ -137,19 +140,30 @@ function absorbNativeNotifiedBatches(): void {
   }
 }
 
-/** 把「服务器地址 + 通知总闸 + 免打扰」推给原生轮询器（BgNotifyPoller）：
+/** 把「服务器地址 + 通知总闸 + 免打扰 + 机主所选图标号」推给原生轮询器（BgNotifyPoller）：
  *  原生只在本页冻结（App 退后台）时轮询 pollNative 视图弹 heads-up；
  *  enabled=false 或免打扰开启时原生侧跳过弹通知。每次 peek 周期与回前台时
- *  同步一次（同步桥调用开销极小，免打扰/总闸切换最多一个周期内生效）。 */
+ *  同步一次（同步桥调用开销极小，免打扰/总闸切换最多一个周期内生效）。
+ *  v2.4.34：icon = 设置›APP图标 所选号（'1'~'5'）——原生通知左图标据此下载对应
+ *  PNG；旧版原生只读 cove_prefs（用户不主动切图标就永远是默认 3 号，机主实测
+ *  「左图标没变成我选的」）。 */
 function pushNativePollConfig(): void {
   try {
     const N = (window as unknown as { AIPhoneNative?: AIPhoneNativeBg }).AIPhoneNative;
     if (!N || typeof N.setBgNotifyConfig !== 'function') return;
+    let icon = '';
+    try {
+      const v = useSettings.getState().appIcon;
+      if (v === '1' || v === '2' || v === '3' || v === '4' || v === '5') icon = v;
+    } catch {
+      /* 设置未就绪：不带 icon，原生回落 cove_prefs */
+    }
     N.setBgNotifyConfig(
       JSON.stringify({
         url: window.location.origin,
         enabled: isSysNotifyEnabled(),
         dnd: isNotifyDndActive(),
+        icon,
       }),
     );
   } catch {

@@ -11,9 +11,9 @@
  */
 
 /** 当前最新版本（纯网页热更时与 APK versionName 可短暂不同步，下次重打 APK 对齐） */
-export const APP_VERSION = '2.4.33';
+export const APP_VERSION = '2.4.34';
 /** 版本号数字（与 android-shell versionCode 保持一致；覆盖安装要求只增不减；纯网页热更不动） */
-export const APP_VERSION_CODE = 95;
+export const APP_VERSION_CODE = 96;
 
 export interface AppReleaseNote {
   version: string;
@@ -24,6 +24,17 @@ export interface AppReleaseNote {
 
 /** 版本历史（新→旧；设置 › APP 更新 页渲染，最新一条即当前版本） */
 export const APP_RELEASE_NOTES: AppReleaseNote[] = [
+  {
+    version: '2.4.34',
+    date: '2026-11-28',
+    items: [
+      '【需重装 APK · versionCode 96】幽灵拦截根修（没点 QQ 也弹锁定窗）：QQ 后台悬浮窗/快速回复面板也会发同名窗口事件，旧版直接当成「你打开了 QQ」→ 现在双闸校验——① 亮屏 + 活跃窗口包名一致才算真前台切换；② 无障碍命中后再用 UsageStats 交叉验证「最近几秒确有真实打开记录」，验证不过绝不弹窗、绝不计数，AI 也不会再说你打开过',
+      '【需重装 APK】拦截计数全局同步：同一把锁的「第 N 次想打开」落盘持久化，服务重启/后台回收重梳后计数接续累计不再归零，拦截窗数字与 AI 口径永远一致',
+      '【需重装 APK】通知图标双修：左图标 = 你选的那一枚（网页每个周期把最新选择同步给原生，不再因为没主动切过图标而一直显示默认 3 号）；右侧头像永不缺席——没头像/加载失败时用 TA 名字首字自动画一枚同风格头像',
+      '【网页热更·免重装】工具提示去乱码：后台工具调用的失败提示不再裸露底层报文（URL/JSON/英文堆栈），统一净化成短中文人话（如「需要无障碍权限」「网络不太好」），极简毛玻璃胶囊只留重点',
+      '【网页热更·免重装】稳定性与内存：全局守望者/常驻组件的定时器与监听器复查清漏；三端聊天长会话分窗渲染保持；文件 App 全量备份/恢复链路复核（本地导出+导入、云端备份/拉取/恢复，含字体与服务端数据）',
+    ],
+  },
   {
     version: '2.4.33',
     date: '2026-11-28',

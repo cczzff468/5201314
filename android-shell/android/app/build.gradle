@@ -14,8 +14,8 @@ android {
         applicationId "com.z.aiphone"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 95          // v2.4.33 通知图标方向根修（小图标=机主所选APP图标位图/大图标=AI头像）+ 补齐 v2.4.32 锁定界面文案/头像/沉浸式（上版忘重打 APK）；v94 = 2.4.30 一消息一弹窗
-        versionName "2.4.33"    // v2.4.33：通知图标左=所选图标右=AI头像 + 锁定界面三连修实装 + 锁定标记质问文案透传
+        versionCode 96          // v2.4.34 幽灵拦截根修（无障碍活跃窗口校验+UsageStats 交叉验证，QQ 后台悬浮窗绝不误弹锁定窗）+ 拦截计数落盘全局同步 + 通知图标双修（左=所选图标周期同步/右=头像 monogram 兜底永不缺席）；v95 = 2.4.33
+        versionName "2.4.34"    // v2.4.34：幽灵拦截根修 + 计数全局同步 + 通知图标双修 + 工具提示去乱码
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.

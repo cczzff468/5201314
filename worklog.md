@@ -4077,3 +4077,33 @@ Stage Summary:
 - 锁定界面三连修：沉浸式（fitInsets 新口径）+「xx 已被 xx 锁定」文案 + AI 头像/名字全路径兜底（会话联系人→情侣绑定）
 - 文件 App：一键云端备份+拉取备份入「云端与恢复」区；应用占用胶囊去绿点+大小+用量条美化
 - 关键文件：api/chat/bg/route.ts、bg-relay-watcher.ts、BgNotifyPoller.java、LockOverlayService.java、device-ops.ts、web-agent.ts、phone-tools.ts、files/data-manager.tsx、files.tsx、app-version.ts
+
+## v2.4.34（versionCode 96）——幽灵拦截根修 + 通知图标双修 + 计数全局同步 + 工具提示去乱码
+
+机主反馈四项（截图三连：QQ 锁定窗自动弹出 + AI 说你打开了 + 通知左图标没变 + 右头像时有时无）+ 四项排查令（幽灵 Bug 严锁/内存性能/统一 UI/文件 App 备份可用）。
+
+根修（原生 Java，需重装 APK v96）：
+- 幽灵拦截双闸根修（没点 QQ 也弹锁定窗 + AI 说你打开了 + 拦截记录里全是你）：
+  · 首闸（AiAccessibilityService）：TYPE_WINDOW_STATE_CHANGED 不只前台切换才发——QQ 后台悬浮窗/快速回复面板也发同包名事件，旧版直接接管 stablePkg（AI 感知你正在刷 QQ）并触发锁定拦截。现改为 350ms 待验证态 + 双闸校验：亮屏（PowerManager.isInteractive）+ 事件包名 == 活跃窗口（isActive+isFocused 的窗口经 getRoot() 读包名）才算真前台切换，连发事件去抖只跟最新一条；服务销毁清待验证回调
+  · 二闸（LockOverlayService）：无障碍命中后 UsageStats 交叉验证——最近 4s 内确有该应用 ACTIVITY_RESUMED（真实打开必有，350ms 复核一次容忍落账竞态）才弹窗/踢回/计数；无使用情况权限保守放行（首闸仍生效）。handleLockHit 拆成校验层 + handleLockHitConfirmed 执行层
+- 拦截计数全局同步（机主令）：openAttempts 按「pkg#unlockAt 锁身份」落盘（saveAttempts/restoreAttempts/clearAttempts），服务重启/START_STICKY 回拉重梳/续锁同一把锁接续累计不再归零，拦截窗「第 N 次」与 AI 口径一致；换锁自然归零
+- 通知图标双修：
+  · 左图标 = 机主所选：BgNotifyPoller 新增 bg_notify/icon_choice 键，网页每个轮询周期把设置›APP图标 最新选择随 setBgNotifyConfig 推给原生（旧版只读 cove_prefs/icon_current——用户没主动切过图标时永远是默认 3 号），chosenAppIconUrl 按 icon_choice → cove_prefs → '3' 优先级取值
+  · 右头像永不缺席：NotifyAvatars 新增 monogram(ctx,title)（首字圆形头像位图，与锁定拦截窗 monogram 同风格，LRU 12 条）；BgNotifyPoller.postHeadsUp 与 NativePerceptionPlugin.postLocalNotify 两路：头像没上报/解码失败 → monogram 兜底，通知卡右侧绝不再一会有一会没有
+- 网页侧对齐：bg-turn.registerBgSession 无头像/加载失败时 canvas 画标题首字 monogram（beacon meta 永远带头像，服务端 sessionMetas/Web Push 同受益）；local-notify.notifyIfHidden 原生分支统一携带 appIcon（自动读当前设置）+ 可选 avatar——所有原生通知左图标统一为所选图标
+
+网页热更（免重装）：
+- 工具提示去乱码（机主令「清理底层乱码，统一极简毛玻璃」）：toolStatusLabel 失败副文案过 sanitizeFailText——常见底层报错映射短中文（无障碍/悬浮窗/超时/权限/没找到/网络/取消），兜底剥 URL/base64/JSON/英文堆栈/控制字符只留中文片段，净化无果不带副文案（胶囊只剩主文案极简）
+- 文件 App 备份链路复核：全量备份（13 模块并集=完整 kv+全部对象仓+LS，含字体库与服务端段）、本地导出（APK 走原生 MediaStore 存 Download）、导入（先安全备份再恢复）、云端备份/拉取/恢复（Supabase）、自动备份 + 保留份数——agent-browser 实测「备份」按钮成功（toast 已备份 13 个应用 · 162 KB，上次备份→刚刚·本地导出）
+- 内存/监听器复查：三端聊天页分窗渲染（WINDOW_FIRST/WINDOW_STEP 上滑扩展）在位；JealousyWatcher/ProactiveMsgWatcher 等守望者与 IslandNotification/ChatFloatWindow/StatusBar 等常驻组件 addEventListener/clear 全配对；BgNotifyPoller/MediaListenerService 原生侧单例线程+环形缓冲有界
+
+验证：
+- lint 0 errors（12 warnings 全基线：build 中间产物+layout css tag）
+- gradle assembleDebug 一次修复（AccessibilityWindowInfo 无 getPackageName → getRoot().getPackageName()）后 BUILD SUCCESSFUL；apk:build 完成 public/Cove.apk 7.8M（versionCode 96）
+- agent-browser 实测：注册（邀请码）→登录→解锁→主屏→文件 App（快捷操作三胶囊/云端与恢复双按钮/拉取备份友好提示）→备份成功 toast；console/page 零 error
+- dev.log 干净（仅既有后台任务超时基线）
+
+Stage Summary:
+- 幽灵 Bug 三症状（自动弹锁定窗/AI 说你打开了/拦截计数虚涨）同一个根：QQ 后台悬浮窗事件被当前台——双闸校验后只有「亮屏+活跃窗口一致+UsageStats 有真实打开记录」才拦截
+- 计数全局同步：锁身份落盘接续累计；通知图标：网页周期同步所选图标号 + 三路 monogram 兜底
+- 关键文件：AiAccessibilityService.java、LockOverlayService.java、BgNotifyPoller.java、NotifyAvatars.java、NativePerceptionPlugin.java、bg-relay-watcher.ts、bg-turn.ts、local-notify.ts、tool-status-bubble.ts、app-version.ts、build.gradle

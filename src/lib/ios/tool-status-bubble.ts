@@ -154,7 +154,10 @@ function broadcastMsgsChange(sessionKey: string): void {
 }
 
 /** 动态文案生成（v2.2 需求三：与 runPhoneToolRound 气泡同口径——
- *  正在执行「[角色名]正在[动作]...」/ 成功「[角色名]已[动作]」/ 失败「[角色名]尝试[动作]失败了」） */
+ *  正在执行「[角色名]正在[动作]...」/ 成功「[角色名]已[动作]」/ 失败「[角色名]尝试[动作]失败了」）。
+ *  v2.4.34 底层乱码清理（机主令「清理所有后台工具调用的底层乱码，提示语统一极简」）：
+ *  失败副文案不再裸透底层错误串（URL/JSON/协议报文/base64/英文堆栈），先过 sanitizeFailText
+ *  净化——只留人话；净化后没剩什么就不带副文案（胶囊只剩主文案，极简）。 */
 export function toolStatusLabel(
   toolName: string,
   args: Record<string, unknown>,
@@ -241,8 +244,43 @@ export function toolStatusLabel(
 
   const action = actionMap[toolName] || `调用${toolName}`;
   if (!result.ok) {
-    return { title: `${who}尝试${action}失败了`, status: 'fail', body: result.text.slice(0, 60) };
+    return { title: `${who}尝试${action}失败了`, status: 'fail', body: sanitizeFailText(result.text) };
   }
   // 成功文案：[角色名] 已 [动作]（如"谢予安已冻结备忘录"）
   return { title: `${who}已${action}`, status: 'done' };
+}
+
+/**
+ * v2.4.34 底层乱码净化：把工具失败时的底层错误串洗成人话。
+ * - 剥 URL/JSON 括号段/base64 长串/英文堆栈行/控制字符；
+ * - 常见底层报错映射成短中文（找不到应用/无权限/超时/离线）；
+ * - 净化后无有效内容返回 undefined（胶囊不带副文案，保持极简）。
+ */
+function sanitizeFailText(raw: string | undefined): string | undefined {
+  if (!raw) return undefined;
+  let s = String(raw);
+  // 常见底层错误 → 短中文（优先匹配，命中即返）
+  if (/no-a11y|无障碍/i.test(s)) return '需要开启无障碍权限';
+  if (/no-overlay-permission|悬浮窗/i.test(s)) return '需要悬浮窗权限';
+  if (/timeout|超时/i.test(s)) return '操作超时了';
+  if (/no-permission|permission denied|权限/i.test(s)) return '权限不够';
+  if (/not.?found|找不到|未安装|没有这个/i.test(s)) return '没找到目标';
+  if (/network|fetch failed|offline|断网|网络/i.test(s)) return '网络不太好';
+  if (/cancel|取消/i.test(s)) return '被取消了';
+  // 兑底净化：剥 URL / base64 / 花括号 JSON / 换行堆栈 / 控制字符 / 纯英文乱码段
+  s = s
+    .replace(/https?:\/\/\S+/g, '')
+    .replace(/data:[\w/+.-]+;base64,\S+/g, '')
+    .replace(/[\u0000-\u001f\u007f]/g, ' ')
+    .replace(/\{[^{}]*\}/g, '')
+    .replace(/\[[^\u4e00-\u9fa5]{0,24}\]/g, '')
+    .replace(/[\r\n]+/g, ' ')
+    .replace(/[A-Za-z0-9_.\-:;=\/\\<>"'#&%$@!?+*\s]{5,}/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  // 只留中文/常用标点的片段（英文碎词全部丢弃——那正是乱码主体）
+  const zh = s.match(/[\u4e00-\u9fa5][\u4e00-\u9fa5，。！？、～…\s]{1,28}[\u4e00-\u9fa5！？。…～]?/g);
+  const out = (zh ?? []).join('').trim();
+  if (!out || out.length < 2) return undefined;
+  return out.slice(0, 40);
 }

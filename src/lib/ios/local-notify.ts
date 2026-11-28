@@ -28,6 +28,8 @@ import {
   removeCenterByTag,
   openCenterItem,
 } from './notification-center';
+// v2.4.34 通知左图标统一：机主所选 APP 图标（原生壳 localNotify 通道）
+import { useSettings } from './store';
 
 export interface LocalNotifyOptions {
   /** 通知 tag：同 tag 后发替换先发（去重），cancelLocalNotify 按 tag 定向撤销 */
@@ -42,6 +44,11 @@ export interface LocalNotifyOptions {
    *  - 原生通道序列化为 JSON 字符串随 NativePerception.localNotify({target}) 透传，
    *    点击通知由原生侧注入 'local-notify-open' 事件回传（事件契约见 NativePerceptionPlugin）。 */
   target?: unknown;
+  /** v2.4.34：通知左侧小图标 = 机主在 设置›APP图标 选的那一枚（原生壳专用；
+   *  浏览器通道仍用 icon/PWA 图标）。不传时自动读当前设置。 */
+  appIcon?: string;
+  /** v2.4.34：通知右侧大图标 = 角色头像（原生壳专用；缺失时原生侧用标题首字 monogram 兑底） */
+  avatar?: string;
 }
 
 /**
@@ -73,6 +80,18 @@ function nativeFireAndForget(methodName: string, options: Record<string, unknown
     bridge.postMessage(JSON.stringify({ callbackId, pluginId: 'NativePerception', methodName, options }));
   } catch {
     // 桥不可用/序列化失败 → 静默（调用方本就 fire-and-forget）
+  }
+}
+
+/** v2.4.34：机主所选 APP 图标（'1'~'5'）→ 绝对 URL（原生通知左图标用；
+ *  与 message-notifications.chosenAppIconUrl 同口径；读不到返回 undefined） */
+function chosenAppIconUrl(): string | undefined {
+  try {
+    const v = useSettings.getState().appIcon;
+    if (v !== '1' && v !== '2' && v !== '3' && v !== '4' && v !== '5') return undefined;
+    return new URL(`/icons/app/icon-${v}-192.png`, window.location.origin).href;
+  } catch {
+    return undefined;
   }
 }
 
@@ -130,6 +149,11 @@ export async function notifyIfHidden(title: string, body: string, opts: LocalNot
         //（原生侧 parse 失败只带 url，事件契约见 NativePerceptionPlugin.injectLocalNotifyOpen）
         ...(opts.url ? { url: opts.url } : {}),
         ...(opts.target !== undefined ? { target: JSON.stringify(opts.target) } : {}),
+        // v2.4.34 图标方向统一（机主令「所有通知左图标 = 我选的图标，右侧 = TA 头像」）：
+        // 小图标 = 机主所选 APP 图标（不传时自动读当前设置）；大图标 = 角色头像
+        //（缺失时原生侧用标题首字 monogram 兑底，右侧永不空缺）
+        appIcon: opts.appIcon ?? chosenAppIconUrl(),
+        ...(opts.avatar ? { avatar: opts.avatar } : {}),
       });
       return;
     }

@@ -4018,7 +4018,9 @@ public class NativePerceptionPlugin extends Plugin {
             } catch (Throwable ignored) {
             }
         }
-        // v2.4.33 大图标：角色 AI 头像（机主规格「右面显示AI头像」；缺失不带大图标）
+        // v2.4.33 大图标：角色 AI 头像（机主规格「右面显示AI头像」）。
+        // v2.4.34 头像永不缺席：没传/解码失败 → 角色名首字 monogram 兜底（与
+        // BgNotifyPoller 同口径，通知卡右侧绝不空缺）。
         android.graphics.Bitmap largeBmp = null;
         if (avatar != null && !avatar.isEmpty()) {
             try {
@@ -4028,6 +4030,14 @@ public class NativePerceptionPlugin extends Plugin {
         }
         String t = (title == null || title.isEmpty()) ? "提醒" : title;
         String b = body == null ? "" : body;
+        // v2.4.34 头像永不缺席：没传/解码失败 → 角色名首字 monogram 兜底（与
+        // BgNotifyPoller 同口径，通知卡右侧绝不空缺）
+        if (largeBmp == null) {
+            try {
+                largeBmp = NotifyAvatars.monogram(ctx, t);
+            } catch (Throwable ignored) {
+            }
+        }
         android.app.Notification n = NotifyAvatars.buildMessageNotification(
                 ctx, channel, R.drawable.ic_stat_cove, smallBmp, largeBmp,
                 t, b, contentPi, headsUp);

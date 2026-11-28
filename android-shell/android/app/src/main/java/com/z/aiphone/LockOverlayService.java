@@ -121,6 +121,51 @@ public class LockOverlayService extends Service {
     private static final String EVENTS_KEY = "events";
     private static final int EVENT_RING_MAX = 50;
 
+    /** v2.4.34 拦截计数全局同步（机主令「计数器必须全局同步」）：同一把锁
+     *  （pkg+unlockAt 相同 = 同一次锁定事件）的尝试次数落盘，服务重启/START_STICKY
+     *  回拉重梳后计数接续累计，不再归零重来（旧版每次重梳 openAttempts=0，AI 口径
+     *  「第 N 次」与拦截窗展示次数前后矛盾）。换锁（不同 pkg/unlockAt）自然从 0 起算。 */
+    private static final String KEY_ATTEMPTS_COUNT = "attempts_count";
+    private static final String KEY_ATTEMPTS_LOCK = "attempts_lock_id";
+
+    /** 同一把锁的尝试计数落盘（pkg#unlockAt 为锁身份；计 1 存 1，绝不丢） */
+    private static void saveAttempts(Context ctx, String pkg, long ua, int count) {
+        try {
+            Context app = ctx != null ? ctx : appCtx;
+            if (app == null) return;
+            app.getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+                    .edit().putInt(KEY_ATTEMPTS_COUNT, count)
+                    .putString(KEY_ATTEMPTS_LOCK, pkg + "#" + ua)
+                    .apply();
+        } catch (Throwable ignored) {
+        }
+    }
+
+    /** 重梳/建锁时按锁身份找回已累计的尝试次数（不同锁身份 = 0） */
+    private static int restoreAttempts(Context ctx, String pkg, long ua) {
+        try {
+            Context app = ctx != null ? ctx : appCtx;
+            if (app == null) return 0;
+            SharedPreferences sp = app.getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+            String id = pkg + "#" + ua;
+            if (!id.equals(sp.getString(KEY_ATTEMPTS_LOCK, ""))) return 0;
+            return Math.max(0, sp.getInt(KEY_ATTEMPTS_COUNT, 0));
+        } catch (Throwable t) {
+            return 0;
+        }
+    }
+
+    /** 解锁时清掉尝试计数落盘（下次建锁从 0 起算） */
+    private static void clearAttempts(Context ctx) {
+        try {
+            Context app = ctx != null ? ctx : appCtx;
+            if (app == null) return;
+            app.getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+                    .edit().remove(KEY_ATTEMPTS_COUNT).remove(KEY_ATTEMPTS_LOCK).apply();
+        } catch (Throwable ignored) {
+        }
+    }
+
     /** v2.1.0 锁状态持久化（重启重梳用）：syncLock 建锁时写入、解锁时清空；
      * BootReceiver 开机后据此把重启前还活跃的吃醋锁重新武装 */
     private static final String KEY_ACTIVE_PKG = "active_pkg";
@@ -236,7 +281,8 @@ public class LockOverlayService extends Service {
         contactId = cid == null ? "" : cid.trim();
         appKind = ak == null ? "" : ak.trim();
         appLabel = resolveAppLabel(pkg); // v2.2.5 F-2：拦截窗标题用中文应用名
-        openAttempts = 0;
+        // v2.4.34 计数全局同步：同一把锁（pkg+unlockAt 相同）接续累计，换锁才归零
+        openAttempts = restoreAttempts(this, pkg, ua);
         onLockedSticky = false; // v2.4.2 尝试计数从「真实进入」重新起算
         lastAttemptCountAt = 0L;
         avatarData = av == null ? "" : av.trim();
@@ -415,13 +461,70 @@ public class LockOverlayService extends Service {
 
     /**
      * v2.2.0 拦截核心：锁定应用露头（无障碍实时钩子或轮询兜底命中）→
+     * v2.4.34 幽灵拦截第二道闸：无障碍通道命中后先用 UsageStats 交叉验证——
+     * 最近几秒内确有该应用的 ACTIVITY_RESUMED（真实打开必有）才动手弹窗/踢回；
+     * 验证不过（QQ 后台悬浮窗事件——无障碍服务首闸已拦掉大部分，这里是纵深防御）
+     * 延迟 350ms 复核一次（真打开时 RESUMED 可能晚几百毫秒落账），仍不过 = 幽灵，丢弃。
+     * 无使用情况权限时无法验证 → 保守放行（首闸的活跃窗口校验仍生效）。
+     */
+    private void handleLockHit(String via) {
+        try {
+            if (lockPkg == null) return;
+            if ("a11y".equals(via) && hasUsageAccess() && !freshResumedWithin(lockPkg, FRESH_RESUME_MS)) {
+                final String target = lockPkg;
+                engine.postDelayed(() -> {
+                    try {
+                        if (lockPkg == null || !lockPkg.equals(target)) return;
+                        if (!hasUsageAccess() || freshResumedWithin(lockPkg, FRESH_RESUME_MS)) {
+                            handleLockHitConfirmed("a11y-recheck");
+                        }
+                        // 复核仍无新鲜 RESUMED → 幽灵事件（后台悬浮窗），静默丢弃：不弹窗、不计数
+                    } catch (Throwable ignored) {
+                        // 复核链路绝不 crash
+                    }
+                }, 350L);
+                return;
+            }
+            handleLockHitConfirmed(via);
+        } catch (Throwable ignored) {
+            // 拦截链路绝不 crash
+        }
+    }
+
+    /** 无障碍命中交叉验证窗口：真打开时 ACTIVITY_RESUMED 必在几秒内落账 */
+    private static final long FRESH_RESUME_MS = 4_000L;
+
+    /** UsageStats 交叉验证：最近 windowMs 内是否有该应用的真实 ACTIVITY_RESUMED */
+    private boolean freshResumedWithin(String pkg, long windowMs) {
+        if (pkg == null || pkg.isEmpty()) return false;
+        try {
+            UsageStatsManager usm = (UsageStatsManager) getSystemService(Context.USAGE_STATS_SERVICE);
+            if (usm == null) return false;
+            long now = System.currentTimeMillis();
+            UsageEvents events = usm.queryEvents(now - windowMs, now);
+            UsageEvents.Event ev = new UsageEvents.Event();
+            while (events.hasNextEvent()) {
+                events.getNextEvent(ev);
+                if (ev.getEventType() == UsageEvents.Event.ACTIVITY_RESUMED
+                        && pkg.equals(ev.getPackageName())) {
+                    return true;
+                }
+            }
+            return false;
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
+    /**
+     * 拦截执行（已过双闸校验）：
      * v2.2.5 F-3 顺序根修：① 先弹全屏拦截窗（WindowManager.addView 不受后台启动限制，
      *    窗口 add 即刻可见）→ ② 本 App 在 startActivity 那一刻已持有「可见窗口」，
      *    Home intent 被系统放行（Android 10+ 后台启动豁免的硬条件就是调用瞬间存在
      *    可见窗口——旧版先 goHome 后加窗，Home intent 被静默吞掉：机主实测「拦截窗
      *    显示太慢 / 弹不出来」正是这个）→ ③ 每次「真实进入」才计数（v2.4.2 语义修）。
      */
-    private void handleLockHit(String via) {
+    private void handleLockHitConfirmed(String via) {
         try {
             long now = System.currentTimeMillis();
             // v2.3.0 F-10 到期硬闸（机主实测「到时间了点击应用还是会有弹窗」）：
@@ -445,6 +548,8 @@ public class LockOverlayService extends Service {
             if (freshEntry && now - lastAttemptCountAt >= MIN_ATTEMPT_INTERVAL_MS) {
                 lastAttemptCountAt = now;
                 openAttempts++;
+                // v2.4.34 计数落盘（服务重启/重梳后接续，机主令「计数器必须全局同步」）
+                saveAttempts(getApplicationContext(), lockPkg, unlockAt, openAttempts);
                 // 每次真实尝试都落盘 lock-attempt（带累计次数——JS 醒来后驱动
                 // AI 按人设质问「又去点了？」）
                 persistEvent("lock-attempt", lockPkg, "第" + openAttempts + "次想打开");
@@ -497,6 +602,7 @@ public class LockOverlayService extends Service {
         lastAttemptCountAt = 0L;
         avatarData = "";
         avatarBmp = null;
+        clearAttempts(getApplicationContext()); // v2.4.34 计数落盘随锁一并清
         clearPersistedLock(getApplicationContext());
         stopForeground(STOP_FOREGROUND_REMOVE);
         stopSelf();
@@ -1318,7 +1424,8 @@ public class LockOverlayService extends Service {
             appKind = sp.getString(KEY_ACTIVE_APP_KIND, "");
             avatarData = sp.getString(KEY_ACTIVE_AVATAR, "");
             appLabel = resolveAppLabel(p);
-            openAttempts = 0;
+            // v2.4.34 计数全局同步：重梳同一把锁时接续累计（不同锁身份 restore 返回 0）
+            openAttempts = restoreAttempts(this, p, ua);
             onLockedSticky = false;
             lastAttemptCountAt = 0L;
             if (engine != null) {
