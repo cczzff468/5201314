@@ -323,14 +323,29 @@ function serverTableCounts(server: ServerBackupSection): Record<string, number> 
 }
 
 /**
- * 导出范围过滤（文件 App「数据管理 · 导出与导入」的模块选择器）：
+ * 导出范围过滤（文件 App「数据管理」的 App 行备份 / 旧模块选择器共用）：
  * - includeStores：只导出这些 store（未列出的整仓跳过）
- * - includeKvBuckets：kv 桶白名单（按 kvBucketOf 前缀分组过滤），不传 = kv 全量
- * fonts / localStorage / server 段不受影响（始终随文件走）。
+ * - includeKvBuckets：kv 桶白名单（按 kvBucketOf 前缀分组过滤，旧模块选择器通道）
+ * - includeKvPrefixes / excludeKvPrefixes / includeUnmatchedKv：按 App 备份通道——
+ *   白名单前缀命中、或「兜底 App 入选且未被黑名单命中」的键随行；
+ * - includeLsPrefixes / excludeLsPrefixes / includeUnmatchedLs：同语义作用于 localStorage 快照。
+ * fonts / server 段不受影响（始终随文件走）。
  */
 export interface CollectBackupFilter {
   includeStores?: string[];
   includeKvBuckets?: string[];
+  /** 按键名前缀的 kv 白名单（与 includeKvBuckets 取并集） */
+  includeKvPrefixes?: string[];
+  /** 按键名前缀的 kv 黑名单（命中即排除，优先级最高） */
+  excludeKvPrefixes?: string[];
+  /** 未被任何前缀命中的 kv 键是否随行（「设置与系统」App = 其余全部键） */
+  includeUnmatchedKv?: boolean;
+  /** localStorage 键前缀白名单 */
+  includeLsPrefixes?: string[];
+  /** localStorage 键前缀黑名单 */
+  excludeLsPrefixes?: string[];
+  /** 未被任何前缀命中的 localStorage 键是否随行 */
+  includeUnmatchedLs?: boolean;
 }
 
 /** kv 桶前缀判定（与 storage-stats.kvBucketOf 同规则；此处独立实现避免循环依赖） */
@@ -342,6 +357,37 @@ function kvBucketOfKey(key: string): string {
   if (key.startsWith('worldbook') || key.startsWith('wb-bind')) return 'worldbook';
   if (key.startsWith('music')) return 'music';
   return 'system';
+}
+
+/** kv 键是否随行（按 App 备份三段语义：白名单 ∪ 未匹配键 − 黑名单） */
+function kvKeyIncluded(key: string, filter?: CollectBackupFilter): boolean {
+  if (!filter) return true;
+  const hasRule =
+    (filter.includeKvBuckets?.length ?? 0) > 0 ||
+    (filter.includeKvPrefixes?.length ?? 0) > 0 ||
+    (filter.excludeKvPrefixes?.length ?? 0) > 0 ||
+    filter.includeUnmatchedKv === true;
+  if (!hasRule) return true;
+  const inBlack = (filter.excludeKvPrefixes ?? []).some((p) => key.startsWith(p));
+  if (inBlack) return false;
+  const inWhite =
+    (filter.includeKvPrefixes ?? []).some((p) => key.startsWith(p)) ||
+    (filter.includeKvBuckets ?? []).includes(kvBucketOfKey(key));
+  return inWhite || filter.includeUnmatchedKv === true;
+}
+
+/** localStorage 键是否随行（与 kvKeyIncluded 同语义） */
+function lsKeyIncluded(key: string, filter?: CollectBackupFilter): boolean {
+  if (!filter) return true;
+  const hasRule =
+    (filter.includeLsPrefixes?.length ?? 0) > 0 ||
+    (filter.excludeLsPrefixes?.length ?? 0) > 0 ||
+    filter.includeUnmatchedLs === true;
+  if (!hasRule) return true;
+  const inBlack = (filter.excludeLsPrefixes ?? []).some((p) => key.startsWith(p));
+  if (inBlack) return false;
+  const inWhite = (filter.includeLsPrefixes ?? []).some((p) => key.startsWith(p));
+  return inWhite || filter.includeUnmatchedLs === true;
 }
 
 /**
@@ -379,12 +425,11 @@ export async function collectBackup(
       for (const raw of rows) {
         try {
           let rec = raw as Record<string, unknown>;
-          // kv 桶过滤：模块导出时只带走所选桶的键（未选桶计入 skipped）
-          if (store === 'kv' && filter?.includeKvBuckets) {
-            if (!filter.includeKvBuckets.includes(kvBucketOfKey(String(rec?.key ?? '')))) {
-              skip++;
-              continue;
-            }
+          // kv 过滤：按 App 备份（前缀白/黑名单 + 未匹配兜底）与旧模块桶过滤（kvBucketOfKey）
+          // 共用同一判定；未选中的键计入 skipped。
+          if (store === 'kv' && !kvKeyIncluded(String(rec?.key ?? ''), filter)) {
+            skip++;
+            continue;
           }
           // settings 密文信封 → 解密为明文（跨设备可恢复；导入后加载流程自动重新加密）
           if (store === 'settings' && rec && typeof rec.value === 'object' && rec.value !== null) {
@@ -435,6 +480,8 @@ export async function collectBackup(
       for (let i = 0; i < window.localStorage.length; i++) {
         const k = window.localStorage.key(i);
         if (k == null) continue;
+        // 按 App 备份时只带走该 App 名下的 LS 键（未选中键不入快照）
+        if (!lsKeyIncluded(k, filter)) continue;
         ls[k] = window.localStorage.getItem(k) ?? '';
       }
     } catch {
@@ -570,17 +617,23 @@ export async function exportBackupToDownload(opts?: {
 
 /** 读取「最近一次备份时间」的展示文案（YYYY-MM-DD HH:mm）；从未备份/不可读返回 null */
 export function readLastBackupTime(): string | null {
-  if (typeof window === 'undefined') return null;
+  const ts = readLastBackupAt();
+  if (!ts) return null;
+  const d = new Date(ts);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+/** 「最近一次备份」时间戳（毫秒；从未备份/不可读 = 0）——数据管理页绿/灰备份基线判定用 */
+export function readLastBackupAt(): number {
+  if (typeof window === 'undefined') return 0;
   try {
     const raw = window.localStorage.getItem(BACKUP_LAST_KEY);
-    if (!raw) return null;
+    if (!raw) return 0;
     const ts = Date.parse(raw);
-    if (!Number.isFinite(ts)) return null;
-    const d = new Date(ts);
-    const pad = (n: number) => String(n).padStart(2, '0');
-    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    return Number.isFinite(ts) ? ts : 0;
   } catch {
-    return null;
+    return 0;
   }
 }
 
@@ -714,13 +767,17 @@ export async function restoreBackup(file: File): Promise<RestoreResult> {
         skippedStores.push(store);
         continue;
       }
+      // kv 是多 App 共仓（聊天/微信/记忆/论坛…全在这一个 store），按 App 备份文件里只有
+      // 该 App 名下的键——绝不能整仓 clear，逐键 put 覆盖（与云端恢复的 upsert 语义对齐：
+      // 备份里没有的键 = 其它 App 的数据，原样保留）。其余 store 均 singly-owned，整仓替换。
+      const isKv = store === 'kv';
       // 分块事务：整库大事务可能超内存/自动提交边界，150 条一块稳
       const CHUNK = 150;
       for (let i = 0; i < rows.length; i += CHUNK) {
         const chunk = rows.slice(i, i + CHUNK);
         const tx = db.transaction(store, 'readwrite');
         const os = tx.objectStore(store);
-        if (i === 0) os.clear();
+        if (i === 0 && !isKv) os.clear();
         for (const raw of chunk) {
           if (raw == null || typeof raw !== 'object') continue;
           if (store === 'settings' && (raw as Record<string, unknown>).key === 'cryptoKey') continue;
@@ -736,9 +793,17 @@ export async function restoreBackup(file: File): Promise<RestoreResult> {
     }
 
     try {
-      window.localStorage.clear();
+      // 按键定向恢复（不再 clear 全量 localStorage）：按 App 备份文件只含该 App 名下的 LS 键，
+      // 全清会把其它 App 的登录态/小开关一并抹掉；全量备份文件含全部键，逐键覆盖结果不变。
       const ls = backup.localStorage;
       if (ls && typeof ls === 'object') {
+        for (const k of Object.keys(ls)) {
+          try {
+            window.localStorage.removeItem(k);
+          } catch {
+            /* 单键失败不阻塞 */
+          }
+        }
         for (const [k, v] of Object.entries(ls)) {
           try {
             window.localStorage.setItem(k, String(v));
