@@ -283,7 +283,7 @@ export function NotificationPage({ onBack }: { onBack: () => void }) {
         </p>
       )}
       {inIframe && (
-        <p className="mt-3 rounded-[14px] bg-white/55 px-3 py-2 text-[12px] leading-relaxed text-muted-foreground ring-1 ring-white/70 backdrop-blur-xl dark:bg-white/[0.06] dark:ring-white/[0.09]">
+        <p className="mt-3 rounded-[14px] bg-white/80 px-3 py-2 text-[12px] leading-relaxed text-zinc-500 ring-1 ring-black/[0.05] backdrop-blur-xl">
           当前页面嵌在预览面板（iframe）里，部分浏览器会在这里拦截系统通知与后台推送。
           点预览面板右上角「在新标签页打开」后重新开启通知，切走/关闭页面也能收到。
         </p>
@@ -298,15 +298,15 @@ export function NotificationPage({ onBack }: { onBack: () => void }) {
           >
             <span className="text-[16px]">发送测试通知</span>
             {testResult === 'busy' ? (
-              <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+              <Loader2 className="h-4 w-4 animate-spin text-zinc-500" />
             ) : (
-              <ChevronRight className="h-4 w-4 text-muted-foreground" />
+              <ChevronRight className="h-4 w-4 text-zinc-500" />
             )}
           </button>
         </GroupCard>
       </div>
       {testResult === 'ok' && (
-        <p className="mt-2 px-1 text-[12px] leading-relaxed text-muted-foreground">
+        <p className="mt-2 px-1 text-[12px] leading-relaxed text-zinc-500">
           {testChannel === 'native'
             ? '已发送到系统通知栏：下拉通知栏查看；APP 切后台/最小化时，AI 的新消息会像这样弹出。'
             : '已发送：如果没看到弹窗，检查系统/浏览器是否开了「勿扰」或隐藏了通知横幅。'}
@@ -328,7 +328,7 @@ export function NotificationPage({ onBack }: { onBack: () => void }) {
       )}
       {pushState && pushStatusText(pushState, pushDetail) && (
         <p
-          className={`mt-2 px-1 text-[12px] leading-relaxed ${pushState === 'subscribed' ? 'text-muted-foreground' : ''}`}
+          className={`mt-2 px-1 text-[12px] leading-relaxed ${pushState === 'subscribed' ? 'text-zinc-500' : ''}`}
           style={pushState === 'subscribed' ? undefined : { color: IOS_RED }}
         >
           {pushStatusText(pushState, pushDetail)}
@@ -339,7 +339,7 @@ export function NotificationPage({ onBack }: { onBack: () => void }) {
         <button
           type="button"
           onClick={() => void ensureSubscription()}
-          className="mt-1.5 px-1 text-[12px] text-foreground underline underline-offset-2 transition-opacity active:opacity-50"
+          className="mt-1.5 px-1 text-[12px] text-zinc-900 underline underline-offset-2 transition-opacity active:opacity-50"
         >
           重新尝试订阅后台推送
         </button>
@@ -374,21 +374,21 @@ export function DndTimeEditor({
         value={from}
         onChange={(e) => onChange(e.target.value, to)}
         aria-label="免打扰开始时间"
-        className="h-9 rounded-[10px] bg-white/70 px-3 text-[15px] tabular-nums outline-none ring-1 ring-black/10 dark:bg-white/[0.08] dark:ring-white/15"
+        className="h-9 rounded-[10px] bg-white px-3 text-[15px] tabular-nums outline-none ring-1 ring-black/[0.06]"
       />
-      <span className="text-[13px] text-muted-foreground">至</span>
+      <span className="text-[13px] text-zinc-500">至</span>
       <input
         type="time"
         value={to}
         onChange={(e) => onChange(from, e.target.value)}
         aria-label="免打扰结束时间"
-        className="h-9 rounded-[10px] bg-white/70 px-3 text-[15px] tabular-nums outline-none ring-1 ring-black/10 dark:bg-white/[0.08] dark:ring-white/15"
+        className="h-9 rounded-[10px] bg-white px-3 text-[15px] tabular-nums outline-none ring-1 ring-black/[0.06]"
       />
       {(from || to) && (
         <button
           type="button"
           onClick={() => onChange('', '')}
-          className="ml-auto text-[13px] text-muted-foreground underline underline-offset-2 transition-opacity active:opacity-50"
+          className="ml-auto text-[13px] text-zinc-500 underline underline-offset-2 transition-opacity active:opacity-50"
         >
           清除
         </button>
@@ -430,7 +430,7 @@ export function ToneSheetContent({
   return (
     <div className="space-y-4">
       <div>
-        <p className="pb-1.5 pl-1 text-[13px] font-medium text-muted-foreground">内置铃声</p>
+        <p className="pb-1.5 pl-1 text-[13px] font-medium text-zinc-500">内置铃声</p>
         <GroupCard>
           {BUILTIN_NOTIFY_TONES.map((t) => {
             const active = value === t.id;
@@ -441,8 +441,8 @@ export function ToneSheetContent({
                   type="button"
                   onClick={() => onPreview(t.id)}
                   aria-label={`试听${t.name}`}
-                  className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition-colors active:bg-muted/70 ${
-                    playing ? 'text-[#34C759]' : 'text-muted-foreground'
+                  className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition-colors active:bg-black/[0.07] ${
+                    playing ? 'text-[#34C759]' : 'text-zinc-500'
                   }`}
                 >
                   {playing ? (
@@ -466,7 +466,7 @@ export function ToneSheetContent({
       </div>
       {ringtones.length > 0 && (
         <div>
-          <p className="pb-1.5 pl-1 text-[13px] font-medium text-muted-foreground">我的铃声</p>
+          <p className="pb-1.5 pl-1 text-[13px] font-medium text-zinc-500">我的铃声</p>
           <GroupCard>
             {ringtones.map((r) => {
               const id = `custom:${r.id}`;
@@ -478,8 +478,8 @@ export function ToneSheetContent({
                     type="button"
                     onClick={() => onPreview(id)}
                     aria-label={`试听${r.name}`}
-                    className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition-colors active:bg-muted/70 ${
-                      playing ? 'text-[#34C759]' : 'text-muted-foreground'
+                    className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition-colors active:bg-black/[0.07] ${
+                      playing ? 'text-[#34C759]' : 'text-zinc-500'
                     }`}
                   >
                     {playing ? (
@@ -495,7 +495,7 @@ export function ToneSheetContent({
                   >
                     <span className="min-w-0 truncate text-[16px]">
                       {r.name}
-                      <span className="ml-1.5 text-[11px] text-muted-foreground">
+                      <span className="ml-1.5 text-[11px] text-zinc-500">
                         {r.duration > 0 ? formatDuration(r.duration) : '—'}
                       </span>
                     </span>
@@ -505,7 +505,7 @@ export function ToneSheetContent({
                     type="button"
                     onClick={() => onRequestDelete(r)}
                     aria-label={`删除${r.name}`}
-                    className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors active:bg-muted/70"
+                    className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-zinc-500 transition-colors active:bg-black/[0.07]"
                   >
                     <Trash2 className="h-4 w-4" />
                   </button>
@@ -516,7 +516,7 @@ export function ToneSheetContent({
         </div>
       )}
       <div>
-        <p className="pb-1.5 pl-1 text-[13px] font-medium text-muted-foreground">更多</p>
+        <p className="pb-1.5 pl-1 text-[13px] font-medium text-zinc-500">更多</p>
         <GroupCard>
           <button
             type="button"
@@ -527,9 +527,9 @@ export function ToneSheetContent({
             <RowIcon icon={Upload} tone={TONE_BLUE} />
             <span className="min-w-0 flex-1">
               <span className="block text-[16px]">{uploading ? '正在保存…' : '上传自定义铃声'}</span>
-              <span className="block text-[11px] text-muted-foreground">音频文件 · ≤8MB · 永久保存</span>
+              <span className="block text-[11px] text-zinc-500">音频文件 · ≤8MB · 永久保存</span>
             </span>
-            {uploading && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
+            {uploading && <Loader2 className="h-4 w-4 animate-spin text-zinc-500" />}
           </button>
         </GroupCard>
       </div>
@@ -570,8 +570,8 @@ export function ToneSheet({
         className="absolute inset-0 cursor-default bg-black/45 animate-in fade-in duration-200"
       />
       {/* 面板：从底部滑入 */}
-      <div className="absolute inset-x-0 bottom-0 overflow-hidden rounded-t-[18px] bg-[#F7F7F8]/95 shadow-[0_-10px_44px_rgba(0,0,0,0.28)] ring-1 ring-white/60 backdrop-blur-2xl animate-in slide-in-from-bottom-10 fade-in duration-300 dark:bg-[#1C1C1E]/95 dark:ring-white/10">
-        <div className="mx-auto mt-2.5 h-[5px] w-10 shrink-0 rounded-full bg-black/15 dark:bg-white/25" aria-hidden="true" />
+      <div className="absolute inset-x-0 bottom-0 overflow-hidden rounded-t-[18px] bg-white/95 shadow-[0_-10px_44px_rgba(0,0,0,0.28)] ring-1 ring-white/60 backdrop-blur-2xl animate-in slide-in-from-bottom-10 fade-in duration-300">
+        <div className="mx-auto mt-2.5 h-[5px] w-10 shrink-0 rounded-full bg-black/15" aria-hidden="true" />
         <div className="flex items-center justify-between px-4 pb-1 pt-2.5">
           <span className="w-14" aria-hidden="true" />
           <span className="text-[17px] font-semibold">{title}</span>
@@ -690,7 +690,7 @@ export function NotifySoundSection() {
     <div>
       {/* ---------- v1.9.2 真 DND 总开关（横幅/声音/系统通知三出口全静，中心记录照常入账；
           闹钟/提醒/AI 来电豁免——用户明确要求的打扰不静） ---------- */}
-      <p className="mt-6 px-1 pb-1.5 text-[13px] font-medium text-muted-foreground">免打扰模式</p>
+      <p className="mt-6 px-1 pb-1.5 text-[13px] font-medium text-zinc-500">免打扰模式</p>
       <GroupCard>
         <div className="flex h-[48px] items-center gap-3 px-4">
           <RowIcon icon={BellOff} tone={TONE_RED} />
@@ -701,12 +701,12 @@ export function NotifySoundSection() {
             aria-label="免打扰模式"
           />
         </div>
-        <p className="px-4 pb-3.5 pt-1 text-[12px] leading-relaxed text-muted-foreground">
+        <p className="px-4 pb-3.5 pt-1 text-[12px] leading-relaxed text-zinc-500">
           横幅与声音全静，通知照常收入通知中心（闹钟/提醒/来电不受影响）
         </p>
       </GroupCard>
       {/* ---------- 全局 ---------- */}
-      <p className="mt-6 px-1 pb-1.5 text-[13px] font-medium text-muted-foreground">声音与铃声</p>
+      <p className="mt-6 px-1 pb-1.5 text-[13px] font-medium text-zinc-500">声音与铃声</p>
       <GroupCard>
         <div className="flex h-[48px] items-center gap-3 px-4">
           <RowIcon icon={Bell} tone={TONE_RED} />
@@ -721,7 +721,7 @@ export function NotifySoundSection() {
           <div className="flex items-center gap-3 px-4">
             <RowIcon icon={Volume2} tone={TONE_BLUE} />
             <span className="min-w-0 flex-1 text-[16px]">总音量</span>
-            <span className="text-[15px] tabular-nums text-muted-foreground">
+            <span className="text-[15px] tabular-nums text-zinc-500">
               {Math.round(settings.masterVolume * 100)}%
             </span>
           </div>
@@ -754,11 +754,11 @@ export function NotifySoundSection() {
         >
           <RowIcon icon={Moon} tone={TONE_CYAN} />
           <span className="min-w-0 flex-1 text-[16px]">免打扰时段</span>
-          <span className="shrink-0 text-[15px] text-muted-foreground">
+          <span className="shrink-0 text-[15px] text-zinc-500">
             {soundDndLabel(settings.dndFrom, settings.dndTo)}
           </span>
           <ChevronRight
-            className={`h-4 w-4 shrink-0 text-muted-foreground/60 transition-transform ${globalDndOpen ? 'rotate-90' : ''}`}
+            className={`h-4 w-4 shrink-0 text-zinc-500/60 transition-transform ${globalDndOpen ? 'rotate-90' : ''}`}
           />
         </button>
         {globalDndOpen && (
@@ -770,7 +770,7 @@ export function NotifySoundSection() {
         )}
       </GroupCard>
       {!settings.master && (
-        <p className="mt-2 px-1 text-[12px] leading-relaxed text-muted-foreground">
+        <p className="mt-2 px-1 text-[12px] leading-relaxed text-zinc-500">
           已一键静音：各类提示音都不响，配置保留，重新打开即恢复。
         </p>
       )}
@@ -781,7 +781,7 @@ export function NotifySoundSection() {
       )}
 
       {/* ---------- 五分类（无独立开关：总开关 + 音量/免打扰已足够，界面更简洁） ---------- */}
-      <p className="mt-4 px-1 pb-1.5 text-[13px] font-medium text-muted-foreground">按类型配置</p>
+      <p className="mt-4 px-1 pb-1.5 text-[13px] font-medium text-zinc-500">按类型配置</p>
       <GroupCard>
         {categoryKeys.map((key) => {
           const meta = NOTIFY_SOUND_CATEGORY_META[key];
@@ -793,19 +793,19 @@ export function NotifySoundSection() {
               <button
                 type="button"
                 onClick={() => setOpenCat(open ? null : key)}
-                className="flex min-h-[56px] w-full items-center gap-3 px-4 py-2 text-left transition-colors active:bg-muted/40"
+                className="flex min-h-[56px] w-full items-center gap-3 px-4 py-2 text-left transition-colors active:bg-black/[0.04]"
                 aria-expanded={open}
               >
                 <RowIcon icon={ic.icon} tone={ic.tone} />
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-[16px]">{meta.label}</span>
-                  <span className="block truncate text-[12px] text-muted-foreground">{meta.desc}</span>
+                  <span className="block truncate text-[12px] text-zinc-500">{meta.desc}</span>
                 </span>
-                <span className="max-w-[96px] shrink-0 truncate text-[14px] text-muted-foreground">
+                <span className="max-w-[96px] shrink-0 truncate text-[14px] text-zinc-500">
                   {toneDisplayName(cfg.toneId, ringtones)}
                 </span>
                 <ChevronRight
-                  className={`h-4 w-4 shrink-0 text-muted-foreground/60 transition-transform ${open ? 'rotate-90' : ''}`}
+                  className={`h-4 w-4 shrink-0 text-zinc-500/60 transition-transform ${open ? 'rotate-90' : ''}`}
                 />
               </button>
               {open && (
@@ -817,14 +817,14 @@ export function NotifySoundSection() {
                     className="flex h-[44px] w-full items-center justify-between px-4 text-left"
                   >
                     <span className="text-[15px]">提示音</span>
-                    <span className="flex items-center gap-1 text-[15px] text-muted-foreground">
+                    <span className="flex items-center gap-1 text-[15px] text-zinc-500">
                       {toneDisplayName(cfg.toneId, ringtones)}
-                      <ChevronRight className="h-4 w-4 text-muted-foreground/60" />
+                      <ChevronRight className="h-4 w-4 text-zinc-500/60" />
                     </span>
                   </button>
                   {/* 试听 */}
                   <div className="flex h-[44px] items-center justify-between px-4">
-                    <span className="text-[15px] text-muted-foreground">
+                    <span className="text-[15px] text-zinc-500">
                       试听（实际音量 {Math.round(categoryVolume(key) * 100)}%）
                     </span>
                     <button
@@ -834,7 +834,7 @@ export function NotifySoundSection() {
                       className={`flex h-10 w-10 items-center justify-center rounded-full transition-colors ${
                         previewingId === cfg.toneId
                           ? 'bg-[#34C759]/15 text-[#34C759]'
-                          : 'bg-black/[0.05] text-foreground/80 active:bg-black/10 dark:bg-white/10 dark:text-white/85 dark:active:bg-white/20'
+                          : 'bg-black/[0.05] text-zinc-800 active:bg-black/10'
                       }`}
                     >
                       {previewingId === cfg.toneId ? (
@@ -847,8 +847,8 @@ export function NotifySoundSection() {
                   {/* 分类音量 */}
                   <div className="px-4 py-1.5">
                     <div className="mb-2 flex items-center justify-between">
-                      <span className="text-[14px] text-muted-foreground">音量</span>
-                      <span className="text-[13px] tabular-nums text-muted-foreground">
+                      <span className="text-[14px] text-zinc-500">音量</span>
+                      <span className="text-[13px] tabular-nums text-zinc-500">
                         {Math.round(cfg.volume * 100)}%
                       </span>
                     </div>
@@ -870,10 +870,10 @@ export function NotifySoundSection() {
                     aria-expanded={catDndOpen === key}
                   >
                     <span className="text-[15px]">免打扰时段</span>
-                    <span className="flex items-center gap-1 text-[14px] text-muted-foreground">
+                    <span className="flex items-center gap-1 text-[14px] text-zinc-500">
                       {soundDndLabel(cfg.dndFrom, cfg.dndTo)}
                       <ChevronRight
-                        className={`h-4 w-4 text-muted-foreground/60 transition-transform ${catDndOpen === key ? 'rotate-90' : ''}`}
+                        className={`h-4 w-4 text-zinc-500/60 transition-transform ${catDndOpen === key ? 'rotate-90' : ''}`}
                       />
                     </span>
                   </button>
@@ -892,7 +892,7 @@ export function NotifySoundSection() {
       </GroupCard>
 
       {/* ---------- 我的铃声管理 ---------- */}
-      <p className="mt-4 px-1 pb-1.5 text-[13px] font-medium text-muted-foreground">我的铃声</p>
+      <p className="mt-4 px-1 pb-1.5 text-[13px] font-medium text-zinc-500">我的铃声</p>
       <GroupCard>
         <button
           type="button"
@@ -903,9 +903,9 @@ export function NotifySoundSection() {
           <RowIcon icon={Upload} tone={TONE_GREEN} />
           <span className="min-w-0 flex-1 text-[16px]">{uploading ? '正在保存…' : '上传自定义铃声'}</span>
           {uploading ? (
-            <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+            <Loader2 className="h-4 w-4 animate-spin text-zinc-500" />
           ) : (
-            <span className="text-[12px] text-muted-foreground">音频 · ≤8MB</span>
+            <span className="text-[12px] text-zinc-500">音频 · ≤8MB</span>
           )}
         </button>
         {ringtones.length > 0 ? (
@@ -919,7 +919,7 @@ export function NotifySoundSection() {
                   className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition-colors ${
                     previewingId === `custom:${r.id}`
                       ? 'bg-[#34C759]/15 text-[#34C759]'
-                      : 'bg-black/[0.05] text-foreground/80 active:bg-black/10 dark:bg-white/10 dark:text-white/85 dark:active:bg-white/20'
+                      : 'bg-black/[0.05] text-zinc-800 active:bg-black/10'
                   }`}
                 >
                   {previewingId === `custom:${r.id}` ? (
@@ -930,7 +930,7 @@ export function NotifySoundSection() {
                 </button>
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-[15px]">{r.name}</span>
-                  <span className="block text-[11px] text-muted-foreground">
+                  <span className="block text-[11px] text-zinc-500">
                     {r.duration > 0 ? formatDuration(r.duration) : '时长未知'} · 已永久保存
                   </span>
                 </span>
@@ -938,7 +938,7 @@ export function NotifySoundSection() {
                   type="button"
                   onClick={() => setDelTarget(r)}
                   aria-label={`删除${r.name}`}
-                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors active:bg-muted/70"
+                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-zinc-500 transition-colors active:bg-black/[0.07]"
                 >
                   <Trash2 className="h-4 w-4" />
                 </button>
@@ -946,13 +946,13 @@ export function NotifySoundSection() {
             ))}
           </div>
         ) : (
-          <p className="px-4 py-2.5 text-[12px] leading-relaxed text-muted-foreground">
+          <p className="px-4 py-2.5 text-[12px] leading-relaxed text-zinc-500">
             还没有上传的铃声；上传后永久保存在本机，可在任意分类的「提示音」里选用、删除。
           </p>
         )}
       </GroupCard>
 
-      <p className="mt-3 px-1 text-[12px] leading-relaxed text-muted-foreground">
+      <p className="mt-3 px-1 text-[12px] leading-relaxed text-zinc-500">
         设置保存后立即生效，无需重启。免打扰时段内通知照常送达、记录照常保留，只是不响铃不震动。
         声音设置为整机共享，切换聊天账号不受影响。
       </p>
@@ -990,15 +990,15 @@ export function NotifySoundSection() {
       )}
 
       <AlertDialog open={!!delTarget} onOpenChange={(o) => { if (!o) setDelTarget(null); }}>
-        <AlertDialogContent>
+        <AlertDialogContent className="border-black/[0.06] bg-white! text-zinc-900!">
           <AlertDialogHeader>
             <AlertDialogTitle>删除「{delTarget?.name ?? ''}」？</AlertDialogTitle>
-            <AlertDialogDescription>
+            <AlertDialogDescription className="text-zinc-500!">
               使用这个铃声的分类会自动改回默认提示音；删除后不可恢复。
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>取消</AlertDialogCancel>
+            <AlertDialogCancel className="text-zinc-900">取消</AlertDialogCancel>
             <AlertDialogAction onClick={() => void confirmDelete()}>删除</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

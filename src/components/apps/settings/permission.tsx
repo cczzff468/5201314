@@ -127,10 +127,10 @@ export type PermState = 'checking' | 'granted' | 'denied' | 'web-denied';
 /** 权限行状态胶囊 */
 export function PermStatusPill({ state }: { state: PermState }) {
   const map: Record<PermState, { text: string; cls: string }> = {
-    checking: { text: '查询中…', cls: 'bg-black/[0.06] text-muted-foreground dark:bg-white/10' },
-    granted: { text: '已授权', cls: 'bg-[#34C759]/12 text-[#248A3D] dark:text-[#30D158]' },
-    denied: { text: '未授权', cls: 'bg-[#FF9500]/12 text-[#C25000] dark:text-[#FF9F0A]' },
-    'web-denied': { text: '已在系统关闭', cls: 'bg-[#FF3B30]/10 text-[#D70015] dark:text-[#FF453A]' },
+    checking: { text: '查询中…', cls: 'bg-black/[0.06] text-zinc-500' },
+    granted: { text: '已授权', cls: 'bg-[#34C759]/12 text-[#248A3D]' },
+    denied: { text: '未授权', cls: 'bg-[#FF9500]/12 text-[#C25000]' },
+    'web-denied': { text: '已在系统关闭', cls: 'bg-[#FF3B30]/10 text-[#D70015]' },
   };
   const s = map[state];
   const green = state === 'granted';
@@ -667,15 +667,15 @@ export function PermissionRow({
       type="button"
       data-testid={`perm-row-${def.key}`}
       onClick={onClick}
-      className="flex min-h-[52px] w-full items-center gap-3 px-4 py-2 text-left transition-colors active:bg-muted/50"
+      className="flex min-h-[52px] w-full items-center gap-3 px-4 py-2 text-left transition-colors active:bg-black/[0.05]"
     >
       <LineIcon icon={def.icon} />
       <span className="min-w-0 flex-1">
         <span className="block truncate text-[16px]">{def.label}</span>
-        <span className="mt-0.5 block truncate text-[11.5px] text-muted-foreground">{def.desc}</span>
+        <span className="mt-0.5 block truncate text-[11.5px] text-zinc-500">{def.desc}</span>
       </span>
       <PermStatusPill state={state} />
-      <ChevronRight className="h-5 w-5 shrink-0 text-muted-foreground/60" />
+      <ChevronRight className="h-5 w-5 shrink-0 text-zinc-500/60" />
     </button>
   );
 }
@@ -703,17 +703,17 @@ export function ModeRadioRow({
       aria-checked={selected}
       data-testid={testId}
       onClick={onSelect}
-      className="flex min-h-[52px] w-full items-center gap-3 px-4 py-2 text-left transition-colors active:bg-muted/50"
+      className="flex min-h-[52px] w-full items-center gap-3 px-4 py-2 text-left transition-colors active:bg-black/[0.05]"
     >
       <LineIcon icon={Icon} />
       <span className="min-w-0 flex-1">
         <span className="block truncate text-[16px]">{label}</span>
-        <span className="mt-0.5 block truncate text-[11.5px] text-muted-foreground">{desc}</span>
+        <span className="mt-0.5 block truncate text-[11.5px] text-zinc-500">{desc}</span>
       </span>
       <span
         aria-hidden="true"
         className={`flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-full border-[1.5px] transition-colors ${
-          selected ? 'border-[#34C759] bg-[#34C759]' : 'border-black/20 dark:border-white/30'
+          selected ? 'border-[#34C759] bg-[#34C759]' : 'border-black/20'
         }`}
       >
         {selected ? <Check className="h-3.5 w-3.5 text-white" strokeWidth={3} /> : null}
@@ -850,8 +850,8 @@ export function PermissionHubPage({ onBack }: { onBack: () => void }) {
     <DetailShell title="权限给予" onBack={onBack} gray>
       <div className="no-scrollbar flex-1 overflow-y-auto pb-8">
         {/* 说明卡（v1.9.40 精简为一行） */}
-        <div className="mx-1 mt-4 rounded-[22px] bg-white/55 p-4 text-[13px] leading-relaxed ring-1 ring-white/70 backdrop-blur-2xl dark:bg-white/[0.06] dark:ring-white/[0.09]">
-          <p className="text-muted-foreground">
+        <div className="mx-1 mt-4 rounded-[22px] bg-white/80 p-4 text-[13px] leading-relaxed ring-1 ring-black/[0.05] backdrop-blur-2xl">
+          <p className="text-zinc-500">
             点权限行即可开启（真机自动跳系统授权页，浏览器里记网页授权）；AI 动手能力始终开启——你让 TA 做什么就做什么，TA 也会按人设与记忆主动帮你。
           </p>
         </div>
@@ -861,7 +861,7 @@ export function PermissionHubPage({ onBack }: { onBack: () => void }) {
           <button
             type="button"
             onClick={() => { refreshAllPerms(); }}
-            className="flex items-center gap-1 rounded-full bg-black/[0.05] px-2.5 py-1 text-[12px] text-muted-foreground transition-colors active:bg-black/10 dark:bg-white/10 dark:active:bg-white/20"
+            className="flex items-center gap-1 rounded-full bg-black/[0.05] px-2.5 py-1 text-[12px] text-zinc-500 transition-colors active:bg-black/10"
             data-testid="perm-refresh"
           >
             <RefreshCw className="h-3 w-3" strokeWidth={2.4} />
@@ -870,7 +870,7 @@ export function PermissionHubPage({ onBack }: { onBack: () => void }) {
         }>
           基础权限
         </SectionLabel>
-        <div className="mx-1 divide-y divide-black/[0.05] overflow-hidden rounded-[22px] bg-white/55 shadow-[0_8px_28px_rgba(17,24,39,0.06)] ring-1 ring-white/70 backdrop-blur-2xl dark:divide-white/[0.06] dark:bg-white/[0.06] dark:ring-white/[0.09]">
+        <div className="mx-1 divide-y divide-black/[0.05] overflow-hidden rounded-[22px] bg-white/80 shadow-[0_2px_12px_rgba(0,0,0,0.04)] ring-1 ring-black/[0.05] backdrop-blur-2xl">
           {PERM_DEFS.map((d) => (
             <PermissionRow key={d.key} def={d} state={permStates[d.key] ?? 'checking'} onClick={() => setDialogPerm(d)} />
           ))}
@@ -878,14 +878,14 @@ export function PermissionHubPage({ onBack }: { onBack: () => void }) {
 
         {/* ===== 时长数据源（v2.0.0 去 Shizuku：UsageStats 恒走原生系统账本，无模式可选，纯展示） ===== */}
         <SectionLabel icon={Cpu} tone="#FF9500">时长数据源</SectionLabel>
-        <div className="mx-1 divide-y divide-black/[0.05] overflow-hidden rounded-[22px] bg-white/55 shadow-[0_8px_28px_rgba(17,24,39,0.06)] ring-1 ring-white/70 backdrop-blur-2xl dark:divide-white/[0.06] dark:bg-white/[0.06] dark:ring-white/[0.09]">
+        <div className="mx-1 divide-y divide-black/[0.05] overflow-hidden rounded-[22px] bg-white/80 shadow-[0_2px_12px_rgba(0,0,0,0.04)] ring-1 ring-black/[0.05] backdrop-blur-2xl">
           <div className="flex min-h-[52px] items-center gap-3 px-4 py-2">
             <LineIcon icon={Cpu} />
             <span className="min-w-0 flex-1">
               <span className="block truncate text-[16px]">原生 UsageStats</span>
-              <span className="mt-0.5 block truncate text-[11.5px] text-muted-foreground">使用时长直读系统账本（自动启用，无需选择）</span>
+              <span className="mt-0.5 block truncate text-[11.5px] text-zinc-500">使用时长直读系统账本（自动启用，无需选择）</span>
             </span>
-            <span className="shrink-0 rounded-full bg-[#34C759]/12 px-2.5 py-1 text-[12px] font-medium text-[#248A3D] dark:text-[#30D158]">
+            <span className="shrink-0 rounded-full bg-[#34C759]/12 px-2.5 py-1 text-[12px] font-medium text-[#248A3D]">
               自动
             </span>
           </div>
@@ -893,7 +893,7 @@ export function PermissionHubPage({ onBack }: { onBack: () => void }) {
 
         {/* ===== AI 动手范围 ===== */}
         <SectionLabel icon={MousePointerClick} tone="#FF2D55">AI 动手范围</SectionLabel>
-        <div className="mx-1 divide-y divide-black/[0.05] overflow-hidden rounded-[22px] bg-white/55 shadow-[0_8px_28px_rgba(17,24,39,0.06)] ring-1 ring-white/70 backdrop-blur-2xl dark:divide-white/[0.06] dark:bg-white/[0.06] dark:ring-white/[0.09]" role="radiogroup" aria-label="AI 动手范围">
+        <div className="mx-1 divide-y divide-black/[0.05] overflow-hidden rounded-[22px] bg-white/80 shadow-[0_2px_12px_rgba(0,0,0,0.04)] ring-1 ring-black/[0.05] backdrop-blur-2xl" role="radiogroup" aria-label="AI 动手范围">
           <ModeRadioRow
             icon={AppWindow}
             label="网站里面"
@@ -911,21 +911,21 @@ export function PermissionHubPage({ onBack }: { onBack: () => void }) {
             testId="target-device"
           />
         </div>
-        <p className="mx-1 mt-1.5 text-[11.5px] leading-relaxed text-muted-foreground">
+        <p className="mx-1 mt-1.5 text-[11.5px] leading-relaxed text-zinc-500">
           {target === 'device' ? '真机命令会真实作用在你的手机上（经原生系统 API 与无障碍服务）。' : '动手只作用在手机里的网页应用，不碰真实手机。'}
         </p>
       </div>
 
       {/* 权限授权确认弹窗（v1.9.40 iOS 式：标题 + 暂不/开启，无长说明；持久拒绝时按钮变「去系统设置手动开启」） */}
       <AlertDialog open={!!dialogPerm} onOpenChange={(o) => { if (!o) setDialogPerm(null); }}>
-        <AlertDialogContent className="w-[270px] gap-0 rounded-[14px] p-0 sm:w-[270px] sm:max-w-[270px]">
+        <AlertDialogContent className="w-[270px] gap-0 rounded-[14px] border-black/[0.06] bg-white! p-0 text-zinc-900! sm:w-[270px] sm:max-w-[270px]">
           <AlertDialogHeader className="px-5 pb-5 pt-6 sm:text-center">
-            <AlertDialogTitle className="text-center text-[17px] font-semibold leading-snug">
+            <AlertDialogTitle className="text-center text-[17px] font-semibold leading-snug text-zinc-900">
               {dialogPerm ? `${dialogActionOn ? '开启' : '管理'}${dialogPerm.label}？` : ''}
             </AlertDialogTitle>
           </AlertDialogHeader>
-          <AlertDialogFooter className="flex-row border-t border-black/[0.08] dark:border-white/[0.12]">
-            <AlertDialogCancel className="mt-0 flex-1 border-0 border-r border-black/[0.08] py-3 text-[16px] dark:border-white/[0.12]">暂不</AlertDialogCancel>
+          <AlertDialogFooter className="flex-row border-t border-black/[0.08]">
+            <AlertDialogCancel className="mt-0 flex-1 border-0 border-r border-black/[0.08] bg-transparent py-3 text-[16px] text-zinc-900 shadow-none hover:bg-transparent">暂不</AlertDialogCancel>
             <AlertDialogAction
               onClick={(e) => {
                 // v1.9.41：拦住 Radix 默认的点击即关窗——弹窗保持到授权请求结束（申请中…）

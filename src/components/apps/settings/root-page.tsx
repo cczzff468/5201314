@@ -233,7 +233,7 @@ export function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
             type="button"
             onClick={useUI.getState().closeApp}
             aria-label="返回主屏幕"
-            className="flex h-11 w-11 items-center justify-center rounded-full text-foreground transition-colors active:bg-muted/60"
+            className="flex h-11 w-11 items-center justify-center rounded-full text-foreground transition-colors active:bg-black/[0.06]"
           >
             <ChevronLeft className="h-6 w-6" strokeWidth={2.4} />
           </button>
@@ -242,11 +242,11 @@ export function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
       </div>
       <div className="no-scrollbar flex-1 overflow-y-auto pb-5">
         {/* 个人资料卡（点击进入个人信息：头像/名字/标签）+ 切换账号入口行（同一分组） */}
-        <div className="mx-4 mt-2 divide-y divide-black/[0.05] overflow-hidden rounded-[22px] bg-white/55 shadow-[0_8px_28px_rgba(17,24,39,0.06)] ring-1 ring-white/70 backdrop-blur-2xl dark:divide-white/[0.06] dark:bg-white/[0.06] dark:ring-white/[0.09]">
+        <div className="mx-4 mt-2 divide-y divide-black/[0.05] overflow-hidden rounded-[22px] bg-white/80 shadow-[0_2px_12px_rgba(0,0,0,0.04)] ring-1 ring-black/[0.05] backdrop-blur-2xl">
           <button
             type="button"
             onClick={() => onOpen('profile')}
-            className="flex w-full items-center gap-4 p-4 text-left transition-colors active:bg-muted/50"
+            className="flex w-full items-center gap-4 p-4 text-left transition-colors active:bg-black/[0.05]"
           >
             {(profile.avatar || ownerAvatar) ? (
               <img
@@ -263,11 +263,11 @@ export function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
               <span className="block truncate text-[22px] font-semibold leading-tight">
                 {profile.name.trim() || 'iPhone 用户'}
               </span>
-              <span className="mt-1 block truncate text-[13px] text-muted-foreground">
+              <span className="mt-1 block truncate text-[13px] text-zinc-500">
                 {profile.tag.trim() || 'Apple 账户、iCloud'}
               </span>
             </span>
-            <ChevronRight className="h-5 w-5 shrink-0 text-muted-foreground/60" />
+            <ChevronRight className="h-5 w-5 shrink-0 text-zinc-500/60" />
           </button>
           {/* 账号管理入口（Task 40-C / v2 适配）：右侧值 = 恒机主名（无全局当前账号） */}
           <MainRow
@@ -281,7 +281,7 @@ export function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
         </div>
 
         {/* 无线控制（演示项） */}
-        <div className="mx-4 mt-4 divide-y divide-black/[0.05] overflow-hidden rounded-[22px] bg-white/55 shadow-[0_8px_28px_rgba(17,24,39,0.06)] ring-1 ring-white/70 backdrop-blur-2xl dark:divide-white/[0.06] dark:bg-white/[0.06] dark:ring-white/[0.09]">
+        <div className="mx-4 mt-4 divide-y divide-black/[0.05] overflow-hidden rounded-[22px] bg-white/80 shadow-[0_2px_12px_rgba(0,0,0,0.04)] ring-1 ring-black/[0.05] backdrop-blur-2xl">
           <div className="flex min-h-[52px] items-center gap-3 px-4 py-2">
             <RowIcon icon={Plane} tone={TONE_ORANGE} />
             <span className="min-w-0 flex-1 truncate text-[16px]">飞行模式</span>
@@ -294,7 +294,7 @@ export function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
               data-testid="settings-airplane-switch"
               onClick={() => toggleAirplane(!airplane)}
               className={`relative h-[31px] w-[51px] shrink-0 rounded-full transition-colors duration-200 ${
-                airplane ? 'bg-[#34C759]' : 'bg-black/15 dark:bg-white/25'
+                airplane ? 'bg-[#34C759]' : 'bg-black/15'
               }`}
             >
               <span
@@ -309,13 +309,13 @@ export function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
         </div>
 
         {/* 锁屏与密码（按用户要求不显示开启状态提示） */}
-        <div className="mx-4 mt-4 divide-y divide-black/[0.05] overflow-hidden rounded-[22px] bg-white/55 shadow-[0_8px_28px_rgba(17,24,39,0.06)] ring-1 ring-white/70 backdrop-blur-2xl dark:divide-white/[0.06] dark:bg-white/[0.06] dark:ring-white/[0.09]">
+        <div className="mx-4 mt-4 divide-y divide-black/[0.05] overflow-hidden rounded-[22px] bg-white/80 shadow-[0_2px_12px_rgba(0,0,0,0.04)] ring-1 ring-black/[0.05] backdrop-blur-2xl">
           <MainRow icon={Lock} tone={TONE_RED} label="锁屏与密码" onClick={() => onOpen('lock')} />
         </div>
 
         {/* 第三十六轮：AI 服务四件套上移到「锁屏与密码」下面（机主要求：API、识图、图像、语言放这里）
             ——从原「开发者」组剪出，开发者组剩 ClawBox + 存储改组名「云端与存储」 */}
-        <div className="mx-4 mt-4 divide-y divide-black/[0.05] overflow-hidden rounded-[22px] bg-white/55 shadow-[0_8px_28px_rgba(17,24,39,0.06)] ring-1 ring-white/70 backdrop-blur-2xl dark:divide-white/[0.06] dark:bg-white/[0.06] dark:ring-white/[0.09]">
+        <div className="mx-4 mt-4 divide-y divide-black/[0.05] overflow-hidden rounded-[22px] bg-white/80 shadow-[0_2px_12px_rgba(0,0,0,0.04)] ring-1 ring-black/[0.05] backdrop-blur-2xl">
           <MainRow
             icon={Wrench}
             tone={TONE_GRAY}
@@ -334,23 +334,23 @@ export function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
             type="button"
             data-testid="settings-imggen-row"
             onClick={() => onOpen('imggen')}
-            className="flex min-h-[52px] w-full items-center gap-3 px-4 py-2 text-left transition-colors active:bg-muted/50"
+            className="flex min-h-[52px] w-full items-center gap-3 px-4 py-2 text-left transition-colors active:bg-black/[0.05]"
           >
             <RowIcon icon={ImagePlus} tone={TONE_PINK} />
             <span className="min-w-0 flex-1">
               <span className="block truncate text-[16px]">图像生成</span>
-              <span className="mt-0.5 block truncate text-[12px] text-muted-foreground">
+              <span className="mt-0.5 block truncate text-[12px] text-zinc-500">
                 自动生图 · 锁脸 · OpenAI 兼容
               </span>
             </span>
-            <span className="max-w-[50%] shrink-0 truncate text-[15px] text-muted-foreground">
+            <span className="max-w-[50%] shrink-0 truncate text-[15px] text-zinc-500">
               {imgGenConfig.enabled && imgGenReady
                 ? `已开启 · ${imgGenConfig.model.trim() || '未填模型名'}`
                 : imgGenReady
                   ? '已配置'
                   : '未配置'}
             </span>
-            <ChevronRight className="h-5 w-5 shrink-0 text-muted-foreground/60" />
+            <ChevronRight className="h-5 w-5 shrink-0 text-zinc-500/60" />
           </button>
           <MainRow
             icon={AudioLines}
@@ -368,7 +368,7 @@ export function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
         </div>
 
         {/* 显示与亮度 / 壁纸 / 通知 */}
-        <div className="mx-4 mt-4 divide-y divide-black/[0.05] overflow-hidden rounded-[22px] bg-white/55 shadow-[0_8px_28px_rgba(17,24,39,0.06)] ring-1 ring-white/70 backdrop-blur-2xl dark:divide-white/[0.06] dark:bg-white/[0.06] dark:ring-white/[0.09]">
+        <div className="mx-4 mt-4 divide-y divide-black/[0.05] overflow-hidden rounded-[22px] bg-white/80 shadow-[0_2px_12px_rgba(0,0,0,0.04)] ring-1 ring-black/[0.05] backdrop-blur-2xl">
           <MainRow
             icon={Sun}
             tone={TONE_BLUE}
@@ -405,7 +405,7 @@ export function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
               data-testid="settings-statusbar-switch"
               onClick={() => setStatusBarVisible(!statusBarVisible)}
               className={`relative h-[31px] w-[51px] shrink-0 rounded-full transition-colors duration-200 ${
-                statusBarVisible ? 'bg-[#34C759]' : 'bg-black/15 dark:bg-white/25'
+                statusBarVisible ? 'bg-[#34C759]' : 'bg-black/15'
               }`}
             >
               <span
@@ -429,7 +429,7 @@ export function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
               data-testid="settings-island-persistent-switch"
               onClick={() => setIslandPersistent(!islandPersistent)}
               className={`relative h-[31px] w-[51px] shrink-0 rounded-full transition-colors duration-200 ${
-                islandPersistent ? 'bg-[#34C759]' : 'bg-black/15 dark:bg-white/25'
+                islandPersistent ? 'bg-[#34C759]' : 'bg-black/15'
               }`}
             >
               <span
@@ -446,7 +446,7 @@ export function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
             <RowIcon icon={Activity} tone={TONE_GRAY} />
             <span className="min-w-0 flex-1">
               <span className="block truncate text-[16px]">后台保活</span>
-              <span className="mt-0.5 block truncate text-[11.5px] text-muted-foreground">切后台保持网页运行，主动消息与轮询不中断</span>
+              <span className="mt-0.5 block truncate text-[11.5px] text-zinc-500">切后台保持网页运行，主动消息与轮询不中断</span>
             </span>
             <button
               type="button"
@@ -456,7 +456,7 @@ export function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
               data-testid="settings-keepalive-switch"
               onClick={() => setBgKeepAlive(!bgKeepAlive)}
               className={`relative h-[31px] w-[51px] shrink-0 rounded-full transition-colors duration-200 ${
-                bgKeepAlive ? 'bg-[#34C759]' : 'bg-black/15 dark:bg-white/25'
+                bgKeepAlive ? 'bg-[#34C759]' : 'bg-black/15'
               }`}
             >
               <span
@@ -473,19 +473,19 @@ export function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
             弃用第三十二轮的状态栏仿真预览条）；当前模式名 + ›，点开 iOS 居中弹窗：三选项各带状态栏同款
             实时小预览（固定 67%），点选即时生效并持久化；点背板/Esc 关闭。
             第三十五轮：入口行下方说明文字按机主要求删除（保持卡片列表干净）。 */}
-        <div className="mx-4 mt-4 overflow-hidden rounded-[22px] bg-white/55 shadow-[0_8px_28px_rgba(17,24,39,0.06)] ring-1 ring-white/70 backdrop-blur-2xl dark:bg-white/[0.06] dark:ring-white/[0.09]">
+        <div className="mx-4 mt-4 overflow-hidden rounded-[22px] bg-white/80 shadow-[0_2px_12px_rgba(0,0,0,0.04)] ring-1 ring-black/[0.05] backdrop-blur-2xl">
           <button
             type="button"
             aria-haspopup="dialog"
             aria-expanded={batteryModeOpen}
             data-testid="settings-battery-mode-row"
             onClick={() => setBatteryModeOpen(true)}
-            className="flex min-h-[52px] w-full items-center gap-3 px-4 text-left transition-colors active:bg-muted/50"
+            className="flex min-h-[52px] w-full items-center gap-3 px-4 text-left transition-colors active:bg-black/[0.05]"
           >
             <RowIcon icon={BatteryCharging} tone={TONE_GREEN} />
             <span className="min-w-0 flex-1 truncate text-[16px]">电量百分比</span>
-            <span className="shrink-0 text-[13px] text-muted-foreground">{batteryModeLabel(batteryPercent)}</span>
-            <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground/60" strokeWidth={2.2} />
+            <span className="shrink-0 text-[13px] text-zinc-500">{batteryModeLabel(batteryPercent)}</span>
+            <ChevronRight className="h-4 w-4 shrink-0 text-zinc-500/60" strokeWidth={2.2} />
           </button>
         </div>
         {batteryModeOpen && (
@@ -500,8 +500,8 @@ export function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
             提示词查看器（下一轮完整 Prompt 只读预览）与快捷操作（API/世界书一键切换）。
             两个开关全关时不显示悬浮球；与状态栏/灵动岛同款 iOS 原生 51×31 大开关。
             v1.9.13：默认预设入口移到「提示词查看器」上方（机主要求的排序） */}
-        <div className="mb-2 mt-6 px-8 text-[13px] text-muted-foreground">悬浮工具</div>
-        <div className="mx-4 divide-y divide-black/[0.05] overflow-hidden rounded-[22px] bg-white/55 shadow-[0_8px_28px_rgba(17,24,39,0.06)] ring-1 ring-white/70 backdrop-blur-2xl dark:divide-white/[0.06] dark:bg-white/[0.06] dark:ring-white/[0.09]">
+        <div className="mb-2 mt-6 px-8 text-[13px] text-zinc-500">悬浮工具</div>
+        <div className="mx-4 divide-y divide-black/[0.05] overflow-hidden rounded-[22px] bg-white/80 shadow-[0_2px_12px_rgba(0,0,0,0.04)] ring-1 ring-black/[0.05] backdrop-blur-2xl">
           <MainRow
             icon={Layers}
             tone={TONE_PURPLE}
@@ -514,7 +514,7 @@ export function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
             <RowIcon icon={Eye} tone={TONE_CYAN} />
             <span className="min-w-0 flex-1">
               <span className="block truncate text-[16px]">提示词查看器</span>
-              <span className="mt-0.5 block truncate text-[11.5px] text-muted-foreground">悬浮球菜单里预览下一轮完整 Prompt</span>
+              <span className="mt-0.5 block truncate text-[11.5px] text-zinc-500">悬浮球菜单里预览下一轮完整 Prompt</span>
             </span>
             <button
               type="button"
@@ -524,7 +524,7 @@ export function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
               data-testid="settings-assist-viewer-switch"
               onClick={() => setAssistViewer(!assistViewer)}
               className={`relative h-[31px] w-[51px] shrink-0 rounded-full transition-colors duration-200 ${
-                assistViewer ? 'bg-[#34C759]' : 'bg-black/15 dark:bg-white/25'
+                assistViewer ? 'bg-[#34C759]' : 'bg-black/15'
               }`}
             >
               <span
@@ -538,7 +538,7 @@ export function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
             <RowIcon icon={SlidersHorizontal} tone={TONE_GREEN} />
             <span className="min-w-0 flex-1">
               <span className="block truncate text-[16px]">快捷操作</span>
-              <span className="mt-0.5 block truncate text-[11.5px] text-muted-foreground">悬浮球菜单里快速切换 API 与世界书</span>
+              <span className="mt-0.5 block truncate text-[11.5px] text-zinc-500">悬浮球菜单里快速切换 API 与世界书</span>
             </span>
             <button
               type="button"
@@ -548,7 +548,7 @@ export function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
               data-testid="settings-assist-quickops-switch"
               onClick={() => setAssistQuickOps(!assistQuickOps)}
               className={`relative h-[31px] w-[51px] shrink-0 rounded-full transition-colors duration-200 ${
-                assistQuickOps ? 'bg-[#34C759]' : 'bg-black/15 dark:bg-white/25'
+                assistQuickOps ? 'bg-[#34C759]' : 'bg-black/15'
               }`}
             >
               <span
@@ -564,60 +564,60 @@ export function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
             原生系统 API + 无障碍服务，无 Shizuku）/时长数据源/AI 动手范围（真机 vs 网站）一页全管；
             v1.9.38 AI 动手能力恒开（能力开关组下线）；
             v1.9.3 语音唤起智能体拆出为独立设置页（同分组独立入口） */}
-        <div className="mb-2 mt-6 px-8 text-[13px] text-muted-foreground">AI 感知与操控</div>
-        <div className="mx-4 divide-y divide-black/[0.05] overflow-hidden rounded-[22px] bg-white/55 shadow-[0_8px_28px_rgba(17,24,39,0.06)] ring-1 ring-white/70 backdrop-blur-2xl dark:divide-white/[0.06] dark:bg-white/[0.06] dark:ring-white/[0.09]">
+        <div className="mb-2 mt-6 px-8 text-[13px] text-zinc-500">AI 感知与操控</div>
+        <div className="mx-4 divide-y divide-black/[0.05] overflow-hidden rounded-[22px] bg-white/80 shadow-[0_2px_12px_rgba(0,0,0,0.04)] ring-1 ring-black/[0.05] backdrop-blur-2xl">
           <button
             type="button"
             data-testid="settings-autonomy-entry"
             onClick={() => onOpen('autonomy')}
-            className="flex min-h-[52px] w-full items-center gap-3 px-4 py-2 text-left transition-colors active:bg-muted/50"
+            className="flex min-h-[52px] w-full items-center gap-3 px-4 py-2 text-left transition-colors active:bg-black/[0.05]"
           >
             <RowIcon icon={ShieldCheck} tone={TONE_GREEN} />
             <span className="min-w-0 flex-1">
               <span className="block truncate text-[16px]">权限给予</span>
-              <span className="mt-0.5 block truncate text-[12px] text-muted-foreground">无障碍/使用情况/悬浮窗/短信/位置…系统权限 · AI 动手范围</span>
+              <span className="mt-0.5 block truncate text-[12px] text-zinc-500">无障碍/使用情况/悬浮窗/短信/位置…系统权限 · AI 动手范围</span>
             </span>
-            <span className="max-w-[50%] shrink-0 truncate text-[15px] text-muted-foreground">
+            <span className="max-w-[50%] shrink-0 truncate text-[15px] text-zinc-500">
               AI 已开启 · {autonomyTarget}
             </span>
-            <ChevronRight className="h-5 w-5 shrink-0 text-muted-foreground/60" />
+            <ChevronRight className="h-5 w-5 shrink-0 text-zinc-500/60" />
           </button>
           <button
             type="button"
             data-testid="settings-agentvoice-entry"
             onClick={() => onOpen('voiceagent')}
-            className="flex min-h-[52px] w-full items-center gap-3 px-4 py-2 text-left transition-colors active:bg-muted/50"
+            className="flex min-h-[52px] w-full items-center gap-3 px-4 py-2 text-left transition-colors active:bg-black/[0.05]"
           >
             <RowIcon icon={Mic} tone={TONE_CYAN} />
             <span className="min-w-0 flex-1">
               <span className="block truncate text-[16px]">语音助手</span>
-              <span className="mt-0.5 block truncate text-[12px] text-muted-foreground">喊唤醒名/点悬浮球唤起 · 能聊也能办</span>
+              <span className="mt-0.5 block truncate text-[12px] text-zinc-500">喊唤醒名/点悬浮球唤起 · 能聊也能办</span>
             </span>
-            <span className="max-w-[50%] shrink-0 truncate text-[15px] text-muted-foreground">
+            <span className="max-w-[50%] shrink-0 truncate text-[15px] text-zinc-500">
               {agentVoiceOn ? `「${agentVoiceCfg.name || DEFAULT_WAKE_NAME}」已开启` : '已关闭'}
             </span>
-            <ChevronRight className="h-5 w-5 shrink-0 text-muted-foreground/60" />
+            <ChevronRight className="h-5 w-5 shrink-0 text-zinc-500/60" />
           </button>
         </div>
 
         {/* 云端（第三十六轮重组）：存储 / 缓存 / 备份能力已整体迁至文件 App › 数据管理
             （机主规格），此处仅保留云端助手（ClawBox 部署与 7×24 自动回复本体） */}
-        <div className="mb-2 mt-6 px-8 text-[13px] text-muted-foreground">云端</div>
-        <div className="mx-4 divide-y divide-black/[0.05] overflow-hidden rounded-[22px] bg-white/55 shadow-[0_8px_28px_rgba(17,24,39,0.06)] ring-1 ring-white/70 backdrop-blur-2xl dark:divide-white/[0.06] dark:bg-white/[0.06] dark:ring-white/[0.09]">
+        <div className="mb-2 mt-6 px-8 text-[13px] text-zinc-500">云端</div>
+        <div className="mx-4 divide-y divide-black/[0.05] overflow-hidden rounded-[22px] bg-white/80 shadow-[0_2px_12px_rgba(0,0,0,0.04)] ring-1 ring-black/[0.05] backdrop-blur-2xl">
           <button
             type="button"
             data-testid="settings-cloud-entry"
             onClick={() => onOpen('cloud')}
-            className="flex min-h-[52px] w-full items-center gap-3 px-4 py-2 text-left transition-colors active:bg-muted/50"
+            className="flex min-h-[52px] w-full items-center gap-3 px-4 py-2 text-left transition-colors active:bg-black/[0.05]"
           >
             <RowIcon icon={Box} tone={TONE_ORANGE} />
             <span className="min-w-0 flex-1">
               <span className="block truncate text-[16px]">云端助手</span>
-              <span className="mt-0.5 block truncate text-[12px] text-muted-foreground">
+              <span className="mt-0.5 block truncate text-[12px] text-zinc-500">
                 云端助手 · ClawBox · 7×24 自动回复
               </span>
             </span>
-            <ChevronRight className="h-5 w-5 shrink-0 text-muted-foreground/60" />
+            <ChevronRight className="h-5 w-5 shrink-0 text-zinc-500/60" />
           </button>
         </div>
 
@@ -625,24 +625,24 @@ export function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
             原独立卡片并入下方「App 图标」同卡片（行序：开屏动画 → App 图标 → APP 更新 → 添加到主屏幕）。
             开屏动画行：入口预览当前主题微缩场景 + 名称，点开三选一弹窗（星空月夜/雾中远山/雨落成诗），
             点选【立马生效】：选完即整屏播放一遍预览 + 本会话下次冷启动/下次打开即播放所选主题 */}
-        <div className="mx-4 mt-4 divide-y divide-black/[0.05] overflow-hidden rounded-[22px] bg-white/55 shadow-[0_8px_28px_rgba(17,24,39,0.06)] ring-1 ring-white/70 backdrop-blur-2xl dark:divide-white/[0.06] dark:bg-white/[0.06] dark:ring-white/[0.09]">
+        <div className="mx-4 mt-4 divide-y divide-black/[0.05] overflow-hidden rounded-[22px] bg-white/80 shadow-[0_2px_12px_rgba(0,0,0,0.04)] ring-1 ring-black/[0.05] backdrop-blur-2xl">
           <button
             type="button"
             aria-haspopup="dialog"
             aria-expanded={splashThemeOpen}
             data-testid="settings-splash-theme-row"
             onClick={() => setSplashThemeOpen(true)}
-            className="flex min-h-[52px] w-full items-center gap-3 px-4 text-left transition-colors active:bg-muted/50"
+            className="flex min-h-[52px] w-full items-center gap-3 px-4 text-left transition-colors active:bg-black/[0.05]"
           >
             <RowIcon icon={Sparkles} tone={TONE_PURPLE} />
             <span className="min-w-0 flex-1">
               <span className="block truncate text-[16px]">开屏动画</span>
-              <span className="mt-0.5 block truncate text-[11.5px] text-muted-foreground">
+              <span className="mt-0.5 block truncate text-[11.5px] text-zinc-500">
                 三款主题 · 选择后立即播放预览
               </span>
             </span>
-            <span className="shrink-0 text-[13px] text-muted-foreground">{splashThemeName(splashTheme)}</span>
-            <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground/60" strokeWidth={2.2} />
+            <span className="shrink-0 text-[13px] text-zinc-500">{splashThemeName(splashTheme)}</span>
+            <ChevronRight className="h-4 w-4 shrink-0 text-zinc-500/60" strokeWidth={2.2} />
           </button>
 
           {/* App 图标五选一（第四十一轮：3 号换机主原图设默认 + 新增 5 号元气气泡）——行内预览当前图标 */}
@@ -652,7 +652,7 @@ export function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
             aria-expanded={appIconOpen}
             data-testid="settings-app-icon-row"
             onClick={() => setAppIconOpen(true)}
-            className="flex min-h-[52px] w-full items-center gap-3 px-4 text-left transition-colors active:bg-muted/50"
+            className="flex min-h-[52px] w-full items-center gap-3 px-4 text-left transition-colors active:bg-black/[0.05]"
           >
             <span className="grid h-[31px] w-[31px] shrink-0 place-items-center">
               {/* 当前 App 图标小预览（squircle 圆角 + 细描边；?v=41 破缓存——第四十一轮 3/5 号换机主原图） */}
@@ -664,9 +664,9 @@ export function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
             </span>
             <span className="min-w-0 flex-1">
               <span className="block truncate text-[16px]">App 图标</span>
-              <span className="mt-0.5 block truncate text-[11.5px] text-muted-foreground">五款图标 · 免重装一键切换</span>
+              <span className="mt-0.5 block truncate text-[11.5px] text-zinc-500">五款图标 · 免重装一键切换</span>
             </span>
-            <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground/60" strokeWidth={2.2} />
+            <ChevronRight className="h-4 w-4 shrink-0 text-zinc-500/60" strokeWidth={2.2} />
           </button>
           <MainRow
             icon={Download}
@@ -706,11 +706,11 @@ export function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
         {splashPreview && <BootSplash forceTheme={splashPreview} />}
 
         {/* 关于本机（第三十六轮：移到设置列表最下面——机主要求） */}
-        <div className="mx-4 mt-4 divide-y divide-black/[0.05] overflow-hidden rounded-[22px] bg-white/55 shadow-[0_8px_28px_rgba(17,24,39,0.06)] ring-1 ring-white/70 backdrop-blur-2xl dark:divide-white/[0.06] dark:bg-white/[0.06] dark:ring-white/[0.09]">
+        <div className="mx-4 mt-4 divide-y divide-black/[0.05] overflow-hidden rounded-[22px] bg-white/80 shadow-[0_2px_12px_rgba(0,0,0,0.04)] ring-1 ring-black/[0.05] backdrop-blur-2xl">
           <MainRow icon={Info} tone={TONE_GRAY} label="关于本机" onClick={() => onOpen('about')} />
         </div>
 
-        <p className="py-6 text-center text-[12px] text-muted-foreground">
+        <p className="py-6 text-center text-[12px] text-zinc-500">
           iOS Web · 本地优先架构 · 数据仅存于你的浏览器
         </p>
       </div>
@@ -764,14 +764,14 @@ function AppIconDialog({
         className="pointer-events-none fixed inset-0 z-[310] flex items-center justify-center p-8"
       >
         <div
-          className={`pointer-events-auto w-full max-w-[320px] overflow-hidden rounded-[24px] bg-white/90 shadow-[0_18px_48px_rgba(0,0,0,0.28)] ring-1 ring-black/[0.06] backdrop-blur-2xl transition-[opacity,transform] duration-[280ms] ease-[cubic-bezier(0.32,0.72,0,1.2)] dark:bg-zinc-900/[0.92] dark:ring-white/[0.09] ${
+          className={`pointer-events-auto w-full max-w-[320px] overflow-hidden rounded-[24px] bg-white/95 shadow-[0_18px_48px_rgba(0,0,0,0.28)] ring-1 ring-black/[0.06] backdrop-blur-2xl transition-[opacity,transform] duration-[280ms] ease-[cubic-bezier(0.32,0.72,0,1.2)] ${
             entered ? 'translate-y-0 scale-100 opacity-100' : 'translate-y-3 scale-[0.92] opacity-0'
           }`}
         >
           {/* 标题区 */}
-          <div className="border-b border-black/[0.06] px-5 pb-3 pt-4 text-center dark:border-white/[0.08]">
-            <p className="text-[16px] font-semibold text-black dark:text-white">App 图标</p>
-            <p className="mt-0.5 text-[11.5px] text-muted-foreground">Cove · 选一个喜欢的样子</p>
+          <div className="border-b border-black/[0.06] px-5 pb-3 pt-4 text-center">
+            <p className="text-[16px] font-semibold text-zinc-900">App 图标</p>
+            <p className="mt-0.5 text-[11.5px] text-zinc-500">Cove · 选一个喜欢的样子</p>
           </div>
           {/* 五款图标网格（共享 AppIconGrid：APK 端原生一键切换 + PWA 自动跟随，
               选点逻辑与「设置›显示与亮度」外观页同一份）。
@@ -780,7 +780,7 @@ function AppIconDialog({
           <button
             type="button"
             onClick={onClose}
-            className="w-full border-t border-black/[0.06] py-3 text-[16px] font-medium text-[#007AFF] transition-colors active:bg-black/[0.04] dark:border-white/[0.08] dark:active:bg-white/[0.06]"
+            className="w-full border-t border-black/[0.06] py-3 text-[16px] font-medium text-[#007AFF] transition-colors active:bg-black/[0.04]"
           >
             好
           </button>
@@ -840,16 +840,16 @@ function BatteryModeDialog({
         className="pointer-events-none fixed inset-0 z-[310] flex items-center justify-center p-8"
       >
         <div
-          className={`pointer-events-auto w-full max-w-[320px] overflow-hidden rounded-[24px] bg-white/90 shadow-[0_18px_48px_rgba(0,0,0,0.28)] ring-1 ring-black/[0.06] backdrop-blur-2xl transition-[opacity,transform] duration-[280ms] ease-[cubic-bezier(0.32,0.72,0,1.2)] dark:bg-zinc-900/[0.92] dark:ring-white/[0.09] ${
+          className={`pointer-events-auto w-full max-w-[320px] overflow-hidden rounded-[24px] bg-white/95 shadow-[0_18px_48px_rgba(0,0,0,0.28)] ring-1 ring-black/[0.06] backdrop-blur-2xl transition-[opacity,transform] duration-[280ms] ease-[cubic-bezier(0.32,0.72,0,1.2)] ${
             entered ? 'translate-y-0 scale-100 opacity-100' : 'translate-y-3 scale-[0.92] opacity-0'
           }`}
         >
           {/* 标题区（iOS 弹窗标题 + 说明） */}
-          <div className="border-b border-black/[0.06] px-5 pb-3 pt-4 text-center dark:border-white/[0.08]">
-            <p className="text-[16px] font-semibold text-black dark:text-white">电量百分比</p>
-            <p className="mt-0.5 text-[11.5px] text-muted-foreground">状态栏电量的显示方式</p>
+          <div className="border-b border-black/[0.06] px-5 pb-3 pt-4 text-center">
+            <p className="text-[16px] font-semibold text-zinc-900">电量百分比</p>
+            <p className="mt-0.5 text-[11.5px] text-zinc-500">状态栏电量的显示方式</p>
           </div>
-          <div className="divide-y divide-black/[0.05] dark:divide-white/[0.06]">
+          <div className="divide-y divide-black/[0.05]">
             {options.map((o) => (
               <button
                 key={o.value}
@@ -861,7 +861,7 @@ function BatteryModeDialog({
                   onPick(o.value);
                   onClose();
                 }}
-                className={`flex w-full items-center gap-3 px-4 py-3 text-left transition-colors active:bg-black/[0.04] dark:active:bg-white/[0.06] ${
+                className={`flex w-full items-center gap-3 px-4 py-3 text-left transition-colors active:bg-black/[0.04] ${
                   current === o.value ? 'bg-[#007AFF]/[0.06]' : ''
                 }`}
               >
@@ -885,7 +885,7 @@ function BatteryModeDialog({
                 </span>
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-[15.5px]">{o.label}</span>
-                  <span className="mt-0.5 block truncate text-[11px] text-muted-foreground">{o.desc}</span>
+                  <span className="mt-0.5 block truncate text-[11px] text-zinc-500">{o.desc}</span>
                 </span>
               </button>
             ))}
@@ -893,7 +893,7 @@ function BatteryModeDialog({
           <button
             type="button"
             onClick={onClose}
-            className="w-full border-t border-black/[0.06] py-3 text-[16px] font-medium text-[#007AFF] transition-colors active:bg-black/[0.04] dark:border-white/[0.08] dark:active:bg-white/[0.06]"
+            className="w-full border-t border-black/[0.06] py-3 text-[16px] font-medium text-[#007AFF] transition-colors active:bg-black/[0.04]"
           >
             好
           </button>
@@ -980,13 +980,13 @@ function SplashThemeDialog({
         className="pointer-events-none fixed inset-0 z-[310] flex items-center justify-center p-8"
       >
         <div
-          className={`pointer-events-auto w-full max-w-[320px] overflow-hidden rounded-[24px] bg-white/90 shadow-[0_18px_48px_rgba(0,0,0,0.28)] ring-1 ring-black/[0.06] backdrop-blur-2xl transition-[opacity,transform] duration-[280ms] ease-[cubic-bezier(0.32,0.72,0,1.2)] dark:bg-zinc-900/[0.92] dark:ring-white/[0.09] ${
+          className={`pointer-events-auto w-full max-w-[320px] overflow-hidden rounded-[24px] bg-white/95 shadow-[0_18px_48px_rgba(0,0,0,0.28)] ring-1 ring-black/[0.06] backdrop-blur-2xl transition-[opacity,transform] duration-[280ms] ease-[cubic-bezier(0.32,0.72,0,1.2)] ${
             entered ? 'translate-y-0 scale-100 opacity-100' : 'translate-y-3 scale-[0.92] opacity-0'
           }`}
         >
-          <div className="border-b border-black/[0.06] px-5 pb-3 pt-4 text-center dark:border-white/[0.08]">
-            <p className="text-[16px] font-semibold text-black dark:text-white">开屏动画</p>
-            <p className="mt-0.5 text-[11.5px] text-muted-foreground">Cove · 三款主题任选</p>
+          <div className="border-b border-black/[0.06] px-5 pb-3 pt-4 text-center">
+            <p className="text-[16px] font-semibold text-zinc-900">开屏动画</p>
+            <p className="mt-0.5 text-[11.5px] text-zinc-500">Cove · 三款主题任选</p>
           </div>
           <div className="grid grid-cols-2 gap-2 px-4 py-4">
             {options.map((t) => {
@@ -1086,22 +1086,22 @@ function SplashThemeDialog({
                     )}
                   </span>
                   <span className="text-center leading-tight">
-                    <span className={`block text-[12.5px] ${sel ? 'font-semibold text-[#007AFF]' : 'text-black/85 dark:text-white/85'}`}>
+                    <span className={`block text-[12.5px] ${sel ? 'font-semibold text-[#007AFF]' : 'text-zinc-800'}`}>
                       {splashThemeName(t)}
                     </span>
-                    <span className="mt-0.5 block text-[9.5px] text-muted-foreground">{pv.desc}</span>
+                    <span className="mt-0.5 block text-[9.5px] text-zinc-500">{pv.desc}</span>
                   </span>
                 </button>
               );
             })}
           </div>
-          <p className="px-6 pb-2 text-center text-[10.5px] leading-relaxed text-muted-foreground">
+          <p className="px-6 pb-2 text-center text-[10.5px] leading-relaxed text-zinc-500">
             点选立马生效 · 立即播放预览 + 下次打开 Cove 时播放所选主题
           </p>
           <button
             type="button"
             onClick={onClose}
-            className="w-full border-t border-black/[0.06] py-3 text-[16px] font-medium text-[#007AFF] transition-colors active:bg-black/[0.04] dark:border-white/[0.08] dark:active:bg-white/[0.06]"
+            className="w-full border-t border-black/[0.06] py-3 text-[16px] font-medium text-[#007AFF] transition-colors active:bg-black/[0.04]"
           >
             好
           </button>

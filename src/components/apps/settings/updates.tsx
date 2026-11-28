@@ -86,7 +86,7 @@ export function AppUpdatePage({ onBack }: { onBack: () => void }) {
     <DetailShell title="APP 更新" onBack={onBack} gray>
       <div className="no-scrollbar flex-1 overflow-y-auto pb-8">
         {/* 当前版本 + 检查状态卡 */}
-        <div className="mx-4 mt-4 rounded-[22px] bg-white/55 p-4 text-[13px] leading-relaxed ring-1 ring-white/70 backdrop-blur-2xl dark:bg-white/[0.06] dark:ring-white/[0.09]">
+        <div className="mx-4 mt-4 rounded-[22px] bg-white/80 p-4 text-[13px] leading-relaxed text-zinc-900 ring-1 ring-black/[0.05] shadow-[0_2px_12px_rgba(0,0,0,0.04)] backdrop-blur-2xl">
           <div className="flex items-center gap-3">
             <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-[13px] bg-gradient-to-br from-[#34C759] to-[#248A3D] shadow-[0_6px_16px_-5px_rgba(52,199,89,0.6)]">
               <Sparkles className="h-[22px] w-[22px] text-white" aria-hidden="true" />
@@ -94,7 +94,7 @@ export function AppUpdatePage({ onBack }: { onBack: () => void }) {
             <div className="min-w-0 flex-1">
               <p className="font-medium">Cove v{version}{sizeMb}</p>
               {checking ? (
-                <p className="mt-0.5 flex items-center gap-1.5 text-muted-foreground">
+                <p className="mt-0.5 flex items-center gap-1.5 text-zinc-500">
                   <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" />正在检查更新…
                 </p>
               ) : error ? (
@@ -102,9 +102,9 @@ export function AppUpdatePage({ onBack }: { onBack: () => void }) {
               ) : hasUpdate ? (
                 <p className="mt-0.5 font-medium text-[#248A3D]">发现新版本 v{version}，下载后覆盖安装即可</p>
               ) : info ? (
-                <p className="mt-0.5 text-muted-foreground">✓ 已是最新版本</p>
+                <p className="mt-0.5 text-zinc-500">✓ 已是最新版本</p>
               ) : (
-                <p className="mt-0.5 text-muted-foreground">尚未检查</p>
+                <p className="mt-0.5 text-zinc-500">尚未检查</p>
               )}
             </div>
             <button
@@ -112,14 +112,14 @@ export function AppUpdatePage({ onBack }: { onBack: () => void }) {
               data-testid="appupdate-check-btn"
               onClick={() => void check(true)}
               disabled={checking}
-              className="flex h-8 shrink-0 items-center gap-1.5 rounded-full border border-black/10 px-3 text-[12.5px] font-medium text-foreground/75 transition-colors active:bg-muted/50 disabled:opacity-50 dark:border-white/15"
+              className="flex h-8 shrink-0 items-center gap-1.5 rounded-full border border-black/10 px-3 text-[12.5px] font-medium text-zinc-700 transition-colors active:bg-black/[0.05] disabled:opacity-50"
             >
               <RefreshCw className={`h-3.5 w-3.5 ${checking ? 'animate-spin' : ''}`} aria-hidden="true" />
               检查更新
             </button>
           </div>
           {!apkReady && info ? (
-            <p className="mt-2.5 rounded-[10px] bg-muted/60 px-2.5 py-1.5 text-[11.5px] leading-snug text-muted-foreground">
+            <p className="mt-2.5 rounded-[10px] bg-black/[0.04] px-2.5 py-1.5 text-[11.5px] leading-snug text-zinc-500">
               APK 安装包生成中，暂时无法下载——网页端功能不受影响（重进聊天页即是最新）；稍后再来检查。
             </p>
           ) : null}
@@ -127,27 +127,27 @@ export function AppUpdatePage({ onBack }: { onBack: () => void }) {
 
         {/* v2.4.11 原生壳自检卡：把「系统状态栏还在显示是不是旧 APK」变成一眼结论 */}
         {shell ? (
-          <div className="mx-4 mt-3 flex items-start gap-2.5 rounded-[16px] bg-[#34C759]/10 p-3.5 text-[12.5px] leading-relaxed text-[#1D8A38] ring-1 ring-[#34C759]/25 dark:text-[#4ADE80]">
+          <div className="mx-4 mt-3 flex items-start gap-2.5 rounded-[16px] bg-[#34C759]/10 p-3.5 text-[12.5px] leading-relaxed text-[#1D8A38] ring-1 ring-[#34C759]/25">
             <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
             <p className="min-w-0">
               原生壳 v{shell.versionName}（构建 {shell.versionCode}）· 系统状态栏已隐藏 ✓
-              <span className="mt-0.5 block text-[11.5px] text-[#1D8A38]/70 dark:text-[#4ADE80]/70">
+              <span className="mt-0.5 block text-[11.5px] text-[#1D8A38]/70">
                 全屏沉浸生效中：时间/信号/电量由 App 自带状态栏显示。
               </span>
             </p>
           </div>
         ) : shellOld ? (
-          <div className="mx-4 mt-3 flex items-start gap-2.5 rounded-[16px] bg-[#FF9F0A]/12 p-3.5 text-[12.5px] leading-relaxed text-[#B25000] ring-1 ring-[#FF9F0A]/35 dark:bg-[#FF9F0A]/10 dark:text-[#FFB340]">
+          <div className="mx-4 mt-3 flex items-start gap-2.5 rounded-[16px] bg-[#FF9F0A]/12 p-3.5 text-[12.5px] leading-relaxed text-[#B25000] ring-1 ring-[#FF9F0A]/35">
             <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
             <p className="min-w-0">
               检测到<b>旧版原生壳</b>——顶部的系统状态栏还占着一条、右缘白条等修复都不在。
-              <span className="mt-0.5 block text-[11.5px] text-[#B25000]/80 dark:text-[#FFB340]/80">
+              <span className="mt-0.5 block text-[11.5px] text-[#B25000]/80">
                 点下方按钮重新下载并<b>覆盖安装</b>（数据不丢），装完这里会变绿。
               </span>
             </p>
           </div>
         ) : (
-          <div className="mx-4 mt-3 flex items-start gap-2.5 rounded-[16px] bg-muted/60 p-3.5 text-[12px] leading-relaxed text-muted-foreground">
+          <div className="mx-4 mt-3 flex items-start gap-2.5 rounded-[16px] bg-black/[0.04] p-3.5 text-[12px] leading-relaxed text-zinc-500">
             <Smartphone className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
             <p className="min-w-0">浏览器预览模式：无原生壳。装 APK 后这里会显示壳版本与全屏状态。</p>
           </div>
@@ -168,7 +168,7 @@ export function AppUpdatePage({ onBack }: { onBack: () => void }) {
                 ? `立即更新 v${version}`
                 : `重新下载 v${version}`}
           </button>
-          <p className="text-[12px] leading-snug text-muted-foreground">
+          <p className="text-[12px] leading-snug text-zinc-500">
             {nativeMode
               ? '点按钮弹出下载进度窗（新版本在 APP 内下载，完成后自动弹安装；旧版本自动转系统下载通道，数据不丢）。'
               : '点按钮弹出下载进度窗，下载完打开 APK 覆盖安装（数据不丢）。'}
@@ -176,32 +176,32 @@ export function AppUpdatePage({ onBack }: { onBack: () => void }) {
           <button
             type="button"
             onClick={() => void copyApkLink(setCopied)}
-            className="block w-full rounded-full border border-black/10 py-2 text-center text-[13px] font-medium text-foreground/70 transition-colors active:bg-muted/50 dark:border-white/15"
+            className="block w-full rounded-full border border-black/10 py-2 text-center text-[13px] font-medium text-zinc-700 transition-colors active:bg-black/[0.05]"
           >
             {copied ? '✓ 链接已复制' : '复制下载链接'}
           </button>
-          <p className="break-all text-[10.5px] leading-snug text-muted-foreground/70">
+          <p className="break-all text-[10.5px] leading-snug text-zinc-500/70">
             直链（长按可复制）：{apkUrl}
           </p>
         </div>
 
         {/* 版本历史 */}
-        <div className="mx-4 mt-4 rounded-[22px] bg-white/55 p-4 ring-1 ring-white/70 backdrop-blur-2xl dark:bg-white/[0.06] dark:ring-white/[0.09]">
+        <div className="mx-4 mt-4 rounded-[22px] bg-white/80 p-4 text-zinc-900 ring-1 ring-black/[0.05] shadow-[0_2px_12px_rgba(0,0,0,0.04)] backdrop-blur-2xl">
           <p className="text-[13px] font-medium">版本历史</p>
           <div className="mt-2 space-y-3">
             {(info?.notes ?? APP_RELEASE_NOTES).map((n, idx) => (
               <div key={n.version} className={idx === 0 ? '' : 'opacity-80'}>
                 <p className="flex items-baseline gap-2">
                   <span className={`text-[12.5px] font-medium ${idx === 0 ? 'text-[#248A3D]' : ''}`}>v{n.version}</span>
-                  <span className="text-[10.5px] text-muted-foreground/70">{n.date}</span>
+                  <span className="text-[10.5px] text-zinc-500/70">{n.date}</span>
                   {idx === 0 ? (
                     <span className="rounded-[4px] bg-[#34C759]/10 px-1.5 py-px text-[10px] font-medium text-[#248A3D]">最新</span>
                   ) : null}
                 </p>
                 <ul className="mt-1 space-y-0.5">
                   {n.items.map((it, i) => (
-                    <li key={i} className="flex gap-1.5 text-[12px] leading-relaxed text-muted-foreground">
-                      <span className="mt-[7px] h-[3px] w-[3px] shrink-0 rounded-full bg-foreground/30" aria-hidden="true" />
+                    <li key={i} className="flex gap-1.5 text-[12px] leading-relaxed text-zinc-500">
+                      <span className="mt-[7px] h-[3px] w-[3px] shrink-0 rounded-full bg-zinc-900/30" aria-hidden="true" />
                       <span className="min-w-0">{it}</span>
                     </li>
                   ))}
@@ -209,7 +209,7 @@ export function AppUpdatePage({ onBack }: { onBack: () => void }) {
               </div>
             ))}
           </div>
-          <p className="mt-3 text-[11px] text-muted-foreground/70">覆盖安装、数据不丢（聊天记录都在服务器和本地存储里）。</p>
+          <p className="mt-3 text-[11px] text-zinc-500/70">覆盖安装、数据不丢（聊天记录都在服务器和本地存储里）。</p>
         </div>
       </div>
 
@@ -221,7 +221,7 @@ export function AppUpdatePage({ onBack }: { onBack: () => void }) {
           aria-modal="true"
           aria-label="下载更新进度"
         >
-          <div className="w-full max-w-[320px] rounded-[22px] border border-border/60 bg-card/95 p-5 shadow-[0_20px_50px_-12px_rgba(0,0,0,0.45)] backdrop-blur-xl">
+          <div className="w-full max-w-[320px] rounded-[22px] border border-black/[0.06] bg-white/95 p-5 text-zinc-900 shadow-[0_20px_50px_-12px_rgba(0,0,0,0.45)] backdrop-blur-2xl">
             <ApkUpdateProgressCard
               state={dl}
               onRetry={doUpdate}

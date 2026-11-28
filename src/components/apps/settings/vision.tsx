@@ -267,8 +267,8 @@ export function VisionPage({ onBack }: { onBack: () => void }) {
                   onClick={() => applyBuiltin(p)}
                   className={`rounded-full px-3.5 py-1.5 text-[13px] transition-all active:scale-[0.97] ${
                     active
-                      ? 'bg-foreground font-medium text-background shadow-[0_4px_14px_rgba(17,24,39,0.18)]'
-                      : 'bg-white/55 text-foreground/75 ring-1 ring-black/[0.06] backdrop-blur-xl hover:bg-white/80 dark:bg-white/[0.07] dark:text-foreground/75 dark:ring-white/[0.1] dark:hover:bg-white/[0.14]'
+                      ? 'bg-[#007AFF] font-medium text-white shadow-[0_4px_14px_rgba(0,122,255,0.35)]'
+                      : 'bg-white/55 text-zinc-700 ring-1 ring-black/[0.06] backdrop-blur-xl hover:bg-white/80'
                   }`}
                 >
                   {p.name}
@@ -283,8 +283,8 @@ export function VisionPage({ onBack }: { onBack: () => void }) {
                   key={p.id}
                   className={`flex items-center gap-1.5 rounded-full py-1.5 pl-3 pr-2 text-[13px] transition-all active:scale-[0.97] ${
                     active
-                      ? 'bg-foreground font-medium text-background shadow-[0_4px_14px_rgba(17,24,39,0.18)]'
-                      : 'bg-white/55 text-foreground/75 ring-1 ring-black/[0.06] backdrop-blur-xl dark:bg-white/[0.07] dark:text-foreground/75 dark:ring-white/[0.1]'
+                      ? 'bg-[#007AFF] font-medium text-white shadow-[0_4px_14px_rgba(0,122,255,0.35)]'
+                      : 'bg-white/55 text-zinc-700 ring-1 ring-black/[0.06] backdrop-blur-xl'
                   }`}
                 >
                   <button type="button" onClick={() => applyUserPreset(p)} className="max-w-[120px] truncate">
@@ -304,7 +304,7 @@ export function VisionPage({ onBack }: { onBack: () => void }) {
             <button
               type="button"
               onClick={() => setSaveAnchor((v) => (v === 'preset' ? null : 'preset'))}
-              className="flex items-center gap-1 rounded-full bg-white/55 px-3.5 py-1.5 text-[13px] text-muted-foreground ring-1 ring-black/[0.06] backdrop-blur-xl transition-all hover:bg-white/80 active:scale-[0.97] dark:bg-white/[0.07] dark:ring-white/[0.1] dark:hover:bg-white/[0.14]"
+              className="flex items-center gap-1 rounded-full bg-white/55 px-3.5 py-1.5 text-[13px] text-zinc-500 ring-1 ring-black/[0.06] backdrop-blur-xl transition-all hover:bg-white/80 active:scale-[0.97]"
             >
               <Plus className="h-3.5 w-3.5" />
               添加预设
@@ -317,7 +317,7 @@ export function VisionPage({ onBack }: { onBack: () => void }) {
                 onChange={(e) => setPresetName(e.target.value)}
                 placeholder="预设名称，如 本地视觉模型"
                 autoFocus
-                className="h-10 flex-1 rounded-[14px] border-black/[0.05] bg-white/55 text-[14px] shadow-[inset_0_1px_0_rgba(255,255,255,0.7),0_3px_10px_rgba(17,24,39,0.05)] backdrop-blur-2xl dark:border-white/[0.09] dark:bg-white/[0.07] dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.05),0_3px_10px_rgba(0,0,0,0.2)]"
+                className="h-10 flex-1 rounded-[14px] border-black/[0.06] bg-white text-[14px] shadow-[inset_0_1px_0_rgba(255,255,255,0.7),0_3px_10px_rgba(17,24,39,0.05)] backdrop-blur-2xl"
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') savePreset();
                 }}
@@ -326,7 +326,7 @@ export function VisionPage({ onBack }: { onBack: () => void }) {
                 type="button"
                 onClick={savePreset}
                 disabled={!presetName.trim()}
-                className="h-10 shrink-0 rounded-[14px] bg-white/60 px-5 text-[13px] font-medium text-foreground shadow-[0_4px_14px_rgba(17,24,39,0.07)] ring-1 ring-white/70 backdrop-blur-2xl transition-all active:scale-[0.97] active:bg-white/85 disabled:opacity-40 dark:bg-white/[0.1] dark:ring-white/[0.12] dark:active:bg-white/[0.16]"
+                className="h-10 shrink-0 rounded-[14px] bg-white/60 px-5 text-[13px] font-medium text-zinc-900 shadow-[0_4px_14px_rgba(17,24,39,0.07)] ring-1 ring-black/[0.05] backdrop-blur-2xl transition-all active:scale-[0.97] active:bg-white/85 disabled:opacity-40"
               >
                 保存
               </button>
@@ -339,11 +339,11 @@ export function VisionPage({ onBack }: { onBack: () => void }) {
           <SectionLabel
             icon={Wrench}
             tone={TONE_BLUE}
-            right={<span className="text-[11px] text-muted-foreground/70">更改自动保存 · 即时生效</span>}
+            right={<span className="text-[11px] text-zinc-500/70">更改自动保存 · 即时生效</span>}
           >
             连接配置
           </SectionLabel>
-          <div className="flex flex-col gap-4 rounded-[22px] bg-white/55 p-4 shadow-[0_8px_28px_rgba(17,24,39,0.06)] ring-1 ring-white/70 backdrop-blur-2xl dark:bg-white/[0.06] dark:ring-white/[0.09]">
+          <div className="flex flex-col gap-4 rounded-[22px] bg-white/80 p-4 shadow-[0_2px_12px_rgba(0,0,0,0.04)] ring-1 ring-black/[0.05] backdrop-blur-2xl">
             {/* API 地址 */}
             <div>
               <FieldLabel>API 地址</FieldLabel>
@@ -351,7 +351,7 @@ export function VisionPage({ onBack }: { onBack: () => void }) {
                 value={visionConfig.baseUrl}
                 onChange={(e) => patchVisionConfig({ baseUrl: e.target.value })}
                 placeholder="填写识图 API 地址（OpenAI 兼容）"
-                className="h-11 rounded-[14px] border-black/[0.05] bg-white/55 text-[14px] shadow-[inset_0_1px_0_rgba(255,255,255,0.7),0_3px_10px_rgba(17,24,39,0.05)] backdrop-blur-2xl dark:border-white/[0.09] dark:bg-white/[0.07] dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.05),0_3px_10px_rgba(0,0,0,0.2)]"
+                className="h-11 rounded-[14px] border-black/[0.06] bg-white text-[14px] shadow-[inset_0_1px_0_rgba(255,255,255,0.7),0_3px_10px_rgba(17,24,39,0.05)] backdrop-blur-2xl"
               />
             </div>
 
@@ -365,7 +365,7 @@ export function VisionPage({ onBack }: { onBack: () => void }) {
                   onChange={(e) => patchVisionConfig({ apiKey: e.target.value })}
                   placeholder="sk-...（免 Key 接口可留空）"
                   autoComplete="off"
-                  className={`h-11 rounded-[14px] border-black/[0.05] bg-white/55 text-[14px] shadow-[inset_0_1px_0_rgba(255,255,255,0.7),0_3px_10px_rgba(17,24,39,0.05)] backdrop-blur-2xl dark:border-white/[0.09] dark:bg-white/[0.07] dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.05),0_3px_10px_rgba(0,0,0,0.2)] ${
+                  className={`h-11 rounded-[14px] border-black/[0.06] bg-white text-[14px] shadow-[inset_0_1px_0_rgba(255,255,255,0.7),0_3px_10px_rgba(17,24,39,0.05)] backdrop-blur-2xl ${
                     visionConfig.apiKey ? 'pr-16' : 'pr-10'
                   }`}
                 />
@@ -374,7 +374,7 @@ export function VisionPage({ onBack }: { onBack: () => void }) {
                     type="button"
                     onClick={() => updateVisionConfig({ apiKey: '' })}
                     aria-label="清空识图 API Key"
-                    className="absolute right-8 top-1/2 -translate-y-1/2 p-1 text-muted-foreground transition-colors hover:text-foreground"
+                    className="absolute right-8 top-1/2 -translate-y-1/2 p-1 text-zinc-500 transition-colors hover:text-zinc-900"
                   >
                     <X className="h-4 w-4" />
                   </button>
@@ -383,7 +383,7 @@ export function VisionPage({ onBack }: { onBack: () => void }) {
                   type="button"
                   onClick={() => setShowKey((v) => !v)}
                   aria-label={showKey ? '隐藏识图 Key' : '显示识图 Key'}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-muted-foreground transition-opacity hover:opacity-80"
+                  className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-zinc-500 transition-opacity hover:opacity-80"
                 >
                   {showKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                 </button>
@@ -398,13 +398,13 @@ export function VisionPage({ onBack }: { onBack: () => void }) {
                   value={visionConfig.model}
                   onChange={(e) => patchVisionConfig({ model: e.target.value })}
                   placeholder="如 gpt-4o-mini / qwen-vl-plus / glm-4v-flash"
-                  className="h-11 flex-1 rounded-[14px] border-black/[0.05] bg-white/55 text-[14px] shadow-[inset_0_1px_0_rgba(255,255,255,0.7),0_3px_10px_rgba(17,24,39,0.05)] backdrop-blur-2xl dark:border-white/[0.09] dark:bg-white/[0.07] dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.05),0_3px_10px_rgba(0,0,0,0.2)]"
+                  className="h-11 flex-1 rounded-[14px] border-black/[0.06] bg-white text-[14px] shadow-[inset_0_1px_0_rgba(255,255,255,0.7),0_3px_10px_rgba(17,24,39,0.05)] backdrop-blur-2xl"
                 />
                 <button
                   type="button"
                   onClick={() => void fetchModels()}
                   disabled={fetchingModels}
-                  className="flex h-11 shrink-0 items-center gap-1.5 rounded-[14px] bg-white/60 px-4 text-[13px] font-medium text-foreground shadow-[0_4px_14px_rgba(17,24,39,0.07)] ring-1 ring-white/70 backdrop-blur-2xl transition-all active:scale-[0.97] active:bg-white/85 disabled:opacity-50 dark:bg-white/[0.1] dark:ring-white/[0.12] dark:active:bg-white/[0.16]"
+                  className="flex h-11 shrink-0 items-center gap-1.5 rounded-[14px] bg-white/60 px-4 text-[13px] font-medium text-zinc-900 shadow-[0_4px_14px_rgba(17,24,39,0.07)] ring-1 ring-black/[0.05] backdrop-blur-2xl transition-all active:scale-[0.97] active:bg-white/85 disabled:opacity-50"
                 >
                   {fetchingModels && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
                   拉取模型
@@ -416,7 +416,7 @@ export function VisionPage({ onBack }: { onBack: () => void }) {
                 </p>
               )}
               {modelsHint && (
-                <div className="mt-1.5 rounded-[16px] border border-amber-500/30 bg-amber-300/15 px-3.5 py-2 text-[12px] leading-relaxed text-amber-700 backdrop-blur-xl dark:border-amber-400/25 dark:bg-amber-300/[0.08] dark:text-amber-200/90">
+                <div className="mt-1.5 rounded-[16px] border border-amber-500/30 bg-amber-300/15 px-3.5 py-2 text-[12px] leading-relaxed text-amber-700 backdrop-blur-xl">
                   {modelsHint}
                 </div>
               )}
@@ -424,16 +424,16 @@ export function VisionPage({ onBack }: { onBack: () => void }) {
               {modelPanelOpen && (
                 <div
                   data-model-panel
-                  className="absolute -left-4 -right-4 top-full z-30 mt-1 overflow-hidden rounded-[20px] border border-white/60 bg-white/85 shadow-2xl ring-1 ring-black/[0.05] backdrop-blur-2xl dark:border-white/[0.1] dark:bg-[#1C1C1E]/85"
+                  className="absolute -left-4 -right-4 top-full z-30 mt-1 overflow-hidden rounded-[20px] border border-black/[0.06] bg-white/95 shadow-2xl ring-1 ring-black/[0.05] backdrop-blur-2xl"
                 >
-                    <div className="border-b border-black/[0.05] p-2 dark:border-white/[0.06]">
+                    <div className="border-b border-black/[0.05] p-2">
                       <Input
                         value={modelQuery}
                         onChange={(e) => setModelQuery(e.target.value)}
                         placeholder="搜索模型，如 vl / vision"
                         // v2.4.27：触屏不 autoFocus——面板一开就拉起软键盘会盖住半个面板
                         autoFocus={!IS_TOUCH_DEVICE}
-                        className="h-10 rounded-[12px] border-black/[0.05] bg-white/70 text-[13px] shadow-sm backdrop-blur-xl dark:border-white/[0.09] dark:bg-white/[0.09]"
+                        className="h-10 rounded-[12px] border-black/[0.05] bg-white text-[13px] shadow-sm backdrop-blur-xl"
                       />
                     </div>
                     <div
@@ -443,7 +443,7 @@ export function VisionPage({ onBack }: { onBack: () => void }) {
                       style={{ touchAction: 'pan-y', WebkitOverflowScrolling: 'touch' }}
                     >
                       {filteredModels.length === 0 ? (
-                        <div className="px-4 py-6 text-center text-[13px] text-muted-foreground">
+                        <div className="px-4 py-6 text-center text-[13px] text-zinc-500">
                           没有匹配的模型
                         </div>
                       ) : (
@@ -455,18 +455,18 @@ export function VisionPage({ onBack }: { onBack: () => void }) {
                               patchVisionConfig({ model: m });
                               setModelPanelOpen(false);
                             }}
-                            className="flex w-full items-center justify-between gap-2 px-4 py-2.5 text-left transition-colors hover:bg-muted/50"
+                            className="flex w-full items-center justify-between gap-2 px-4 py-2.5 text-left transition-colors hover:bg-black/[0.04]"
                           >
                             <span className="truncate text-[14px]">{m}</span>
                             {visionConfig.model === m && (
-                              <Check className="h-4 w-4 shrink-0 text-foreground" strokeWidth={2.5} />
+                              <Check className="h-4 w-4 shrink-0 text-zinc-900" strokeWidth={2.5} />
                             )}
                           </button>
                         ))
                       )}
                     </div>
                     {/* v2.2.3：底部计数行（总数永远可见）；v2.2.4 撤 fixed 遮罩（吃页面滚动）改 outside-click */}
-                    <div className="border-t border-black/[0.05] px-4 py-2 text-center text-[11px] tabular-nums text-muted-foreground dark:border-white/[0.06]">
+                    <div className="border-t border-black/[0.05] px-4 py-2 text-center text-[11px] tabular-nums text-zinc-500">
                       {q ? `匹配 ${filteredModels.length}，共 ${models.length} 个模型` : `共 ${models.length} 个模型`}
                     </div>
                   </div>
@@ -475,7 +475,7 @@ export function VisionPage({ onBack }: { onBack: () => void }) {
 
             {/* 未配置提示（精简）：v1.9.25 起未配置时自动用聊天模型直识（支持图片输入即可） */}
             {!visionConfig.baseUrl.trim() && (
-              <div className="rounded-[16px] border border-emerald-500/30 bg-emerald-300/15 px-3.5 py-2.5 text-[12px] leading-relaxed text-emerald-700 backdrop-blur-xl dark:border-emerald-400/25 dark:bg-emerald-300/[0.08] dark:text-emerald-200/90">
+              <div className="rounded-[16px] border border-emerald-500/30 bg-emerald-300/15 px-3.5 py-2.5 text-[12px] leading-relaxed text-emerald-700 backdrop-blur-xl">
                 未配置专用识图模型：发图时将自动用聊天模型直接看图（需聊天模型支持图片输入，如 gpt-4o / gemini / qwen-vl / glm-4v 等）；不支持时本次回复不结合图片，可在此另配识图模型。
               </div>
             )}
@@ -488,7 +488,7 @@ export function VisionPage({ onBack }: { onBack: () => void }) {
                   onClick={() => void runVisionTest()}
                   disabled={testing}
                   data-testid="vision-test-btn"
-                  className="flex h-11 flex-1 items-center justify-center gap-1.5 rounded-[14px] bg-white/60 text-[13px] font-medium text-foreground shadow-[0_6px_20px_rgba(17,24,39,0.08)] ring-1 ring-white/70 backdrop-blur-2xl transition-all active:scale-[0.98] active:bg-white/85 disabled:opacity-50 dark:bg-white/[0.1] dark:ring-white/[0.12] dark:active:bg-white/[0.16]"
+                  className="flex h-11 flex-1 items-center justify-center gap-1.5 rounded-[14px] bg-white/60 text-[13px] font-medium text-zinc-900 shadow-[0_6px_20px_rgba(17,24,39,0.08)] ring-1 ring-black/[0.05] backdrop-blur-2xl transition-all active:scale-[0.98] active:bg-white/85 disabled:opacity-50"
                 >
                   {testing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ScanEye className="h-3.5 w-3.5" />}
                   {testing ? '正在识图…' : '测试识图'}
@@ -496,10 +496,10 @@ export function VisionPage({ onBack }: { onBack: () => void }) {
                 <button
                   type="button"
                   onClick={() => setSaveAnchor((v) => (v === 'config' ? null : 'config'))}
-                  className={`flex h-11 flex-1 items-center justify-center gap-2 rounded-[14px] text-[13px] font-medium shadow-[0_6px_20px_rgba(17,24,39,0.08)] ring-1 backdrop-blur-2xl transition-all active:scale-[0.98] dark:active:bg-white/[0.16] ${
+                  className={`flex h-11 flex-1 items-center justify-center gap-2 rounded-[14px] text-[13px] font-medium shadow-[0_6px_20px_rgba(17,24,39,0.08)] ring-1 backdrop-blur-2xl transition-all active:scale-[0.98] ${
                     saveAnchor === 'config'
-                      ? 'bg-foreground text-background ring-transparent dark:bg-white dark:text-black'
-                      : 'bg-white/60 text-foreground ring-white/70 active:bg-white/85 dark:bg-white/[0.1] dark:ring-white/[0.12]'
+                      ? 'bg-[#007AFF] text-white ring-transparent'
+                      : 'bg-white/70 text-zinc-900 ring-black/[0.06] active:bg-white/85'
                   }`}
                 >
                   <Save className="h-3.5 w-3.5" />
@@ -513,7 +513,7 @@ export function VisionPage({ onBack }: { onBack: () => void }) {
                     onChange={(e) => setPresetName(e.target.value)}
                     placeholder="预设名称，如 本地视觉模型"
                     autoFocus
-                    className="h-10 flex-1 rounded-[14px] border-black/[0.05] bg-white/55 text-[14px] shadow-[inset_0_1px_0_rgba(255,255,255,0.7),0_3px_10px_rgba(17,24,39,0.05)] backdrop-blur-2xl dark:border-white/[0.09] dark:bg-white/[0.07] dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.05),0_3px_10px_rgba(0,0,0,0.2)]"
+                    className="h-10 flex-1 rounded-[14px] border-black/[0.06] bg-white text-[14px] shadow-[inset_0_1px_0_rgba(255,255,255,0.7),0_3px_10px_rgba(17,24,39,0.05)] backdrop-blur-2xl"
                     onKeyDown={(e) => {
                       if (e.key === 'Enter') savePreset();
                     }}
@@ -522,7 +522,7 @@ export function VisionPage({ onBack }: { onBack: () => void }) {
                     type="button"
                     onClick={savePreset}
                     disabled={!presetName.trim()}
-                    className="h-10 shrink-0 rounded-[14px] bg-white/60 px-5 text-[13px] font-medium text-foreground shadow-[0_4px_14px_rgba(17,24,39,0.07)] ring-1 ring-white/70 backdrop-blur-2xl transition-all active:scale-[0.97] active:bg-white/85 disabled:opacity-40 dark:bg-white/[0.1] dark:ring-white/[0.12] dark:active:bg-white/[0.16]"
+                    className="h-10 shrink-0 rounded-[14px] bg-white/60 px-5 text-[13px] font-medium text-zinc-900 shadow-[0_4px_14px_rgba(17,24,39,0.07)] ring-1 ring-black/[0.05] backdrop-blur-2xl transition-all active:scale-[0.97] active:bg-white/85 disabled:opacity-40"
                   >
                     保存
                   </button>
@@ -541,7 +541,7 @@ export function VisionPage({ onBack }: { onBack: () => void }) {
               {testResult && (
                 <div
                   data-testid="vision-test-result"
-                  className="mt-2 flex items-start gap-1.5 px-1 text-[12px] leading-relaxed text-emerald-600 dark:text-emerald-400/90"
+                  className="mt-2 flex items-start gap-1.5 px-1 text-[12px] leading-relaxed text-emerald-600"
                 >
                   <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0" strokeWidth={2.2} />
                   <span>{testResult}</span>
@@ -552,7 +552,7 @@ export function VisionPage({ onBack }: { onBack: () => void }) {
         </section>
 
         {/* 使用说明（精简为一段） */}
-        <p className="px-1 text-[12px] leading-relaxed text-muted-foreground">
+        <p className="px-1 text-[12px] leading-relaxed text-zinc-500">
           识图模型只负责「看图」：发图先转文字描述再交给聊天模型；未配置时自动用聊天模型直接看图；图片仅传给你自己配置的接口，预设存本机。
         </p>
       </div>

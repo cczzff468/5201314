@@ -10,7 +10,7 @@ import { useSettings, useUI } from '@/lib/ios/store';
 import { ChatNewMsgPill, useChatAutoScroll } from '@/hooks/use-chat-autoscroll';
 import { pushChatNotification, notifyPreviewText } from '@/lib/ios/island-notify';
 import { playNotifySound } from '@/lib/ios/notify-sound';
-import { appendWithBoundary, markDeliverBoundary, peekPendingMsgs, sortMsgsByTime, scheduleAiDelivery, subscribeAiDelivery, subscribeAiDeliveryActive, isAiDelivering, typingDelayOf } from '@/lib/ios/ai-delivery';
+import { appendWithBoundary, markDeliverBoundary, markSessionFlushNow, peekPendingMsgs, sortMsgsByTime, scheduleAiDelivery, subscribeAiDelivery, subscribeAiDeliveryActive, isAiDelivering, typingDelayOf } from '@/lib/ios/ai-delivery';
 // v20 网站回复同步真机（开关读取）
 import { getWebsiteReplySync } from '@/lib/ios/website-reply-sync';
 import { cleanTextForTts, stopSpeaking } from '@/lib/ios/tts-client';
@@ -913,6 +913,8 @@ export function ChatPage({
    *  #35：合并后按创建时间稳定排序——投递插入边界让落库时序正确，但 state 合并是新项尾部追加，
    *  排序把「插在边界前的旧回复」放回正确位置，显示与下一轮上下文都按真实对话时序 */
   useEffect(() => {
+    // v2.4.35「点进聊天消息已在」：机主刚打开该会话 → 队列里剩余连发消息立即投完
+    markSessionFlushNow(sessionKey);
     return subscribeAiDelivery(sessionKey, () => {
       setMsgs((prev) => {
         const saved = loadMsgs(peer.id);

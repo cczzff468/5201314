@@ -67,7 +67,7 @@ export function AboutRow({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex min-h-[46px] items-center justify-between gap-3 px-4 py-2">
       <span className="shrink-0 text-[16px]">{label}</span>
-      <span className="text-right text-[15px] text-muted-foreground">{value}</span>
+      <span className="text-right text-[15px] text-zinc-500">{value}</span>
     </div>
   );
 }
@@ -111,11 +111,11 @@ export function ProfilePage({ onBack }: { onBack: () => void }) {
               <User className="h-11 w-11 text-[#7C7C84]" strokeWidth={1.8} />
             </span>
           )}
-          <span className="absolute -bottom-0.5 -right-0.5 flex h-[30px] w-[30px] items-center justify-center rounded-full border-[3px] border-background bg-white/70 shadow-sm backdrop-blur-xl dark:bg-white/[0.14]">
-            <Camera className="h-[15px] w-[15px] text-foreground" strokeWidth={2.2} />
+          <span className="absolute -bottom-0.5 -right-0.5 flex h-[30px] w-[30px] items-center justify-center rounded-full border-[3px] border-[#F3F6F3] bg-white/85 shadow-sm backdrop-blur-xl">
+            <Camera className="h-[15px] w-[15px] text-zinc-900" strokeWidth={2.2} />
           </span>
         </button>
-        <p className="mt-2.5 text-[12px] text-muted-foreground">轻点头像，从手机相册选择照片（未设置时跟随联系人资料头像）</p>
+        <p className="mt-2.5 text-[12px] text-zinc-500">轻点头像，从手机相册选择照片（未设置时跟随联系人资料头像）</p>
         <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={onPickFile} />
       </div>
 
@@ -123,29 +123,29 @@ export function ProfilePage({ onBack }: { onBack: () => void }) {
       <div className="mt-6">
         <GroupCard>
           <div className="flex items-center gap-3 px-4 py-1.5">
-            <span className="w-[64px] shrink-0 text-[15px] text-muted-foreground">名字</span>
+            <span className="w-[64px] shrink-0 text-[15px] text-zinc-500">名字</span>
             <Input
               value={profile.name}
               onChange={(e) => setProfile({ name: e.target.value })}
               placeholder="iPhone 用户"
               maxLength={20}
               aria-label="名字"
-              className="h-11 border-0 bg-transparent px-0 text-[16px] shadow-none focus-visible:ring-0 dark:bg-transparent"
+              className="h-11 border-0 bg-transparent px-0 text-[16px] text-zinc-900 shadow-none focus-visible:ring-0"
             />
           </div>
           <div className="flex items-center gap-3 px-4 py-1.5">
-            <span className="w-[64px] shrink-0 text-[15px] text-muted-foreground">标签</span>
+            <span className="w-[64px] shrink-0 text-[15px] text-zinc-500">标签</span>
             <Input
               value={profile.tag}
               onChange={(e) => setProfile({ tag: e.target.value })}
               placeholder="Apple 账户、iCloud"
               maxLength={30}
               aria-label="标签"
-              className="h-11 border-0 bg-transparent px-0 text-[16px] shadow-none focus-visible:ring-0 dark:bg-transparent"
+              className="h-11 border-0 bg-transparent px-0 text-[16px] text-zinc-900 shadow-none focus-visible:ring-0"
             />
           </div>
         </GroupCard>
-        <p className="mt-2 px-1 text-[12px] leading-relaxed text-muted-foreground">
+        <p className="mt-2 px-1 text-[12px] leading-relaxed text-zinc-500">
           名字将显示在锁屏「×××的iPhone」小组件上；头像、名字与标签自动保存。此头像仅用于设置侧（与微信/QQ 各自独立、互不影响）；微信/QQ 请在各自 App 的个人资料页更换。
         </p>
       </div>
@@ -155,10 +155,10 @@ export function ProfilePage({ onBack }: { onBack: () => void }) {
 
 // ---------------- 账号管理 ----------------
 
-/** 账号首字母圆配色：小号=蓝绿系、匿名号=深灰系（深浅色各配一版） */
+/** 账号首字母圆配色：小号=蓝绿系、匿名号=深灰系（SETTINGS-THEME：恒浅色，不随深色变黑） */
 export const ACCOUNT_AVATAR_TONE: Record<'alt' | 'anon', string> = {
-  alt: 'bg-[#D5F0EC] text-[#0E7C6B] dark:bg-[#0E7C6B]/30 dark:text-[#8FDCCE]',
-  anon: 'bg-[#E4E4E9] text-[#55555C] dark:bg-white/[0.14] dark:text-[#C7C7CC]',
+  alt: 'bg-[#D5F0EC] text-[#0E7C6B]',
+  anon: 'bg-[#E4E4E9] text-[#55555C]',
 };
 
 /** accountUsedBy 的 App 中文名映射（「使用中：微信·QQ」副行用） */
@@ -267,7 +267,7 @@ export function AccountSwitchPage({ onBack }: { onBack: () => void }) {
               {renderAvatar(acc)}
               <span className="min-w-0 flex-1">
                 <span className="block truncate text-[16px] leading-snug">{name}</span>
-                <span className="mt-0.5 block truncate text-[12px] text-muted-foreground">{subline(acc)}</span>
+                <span className="mt-0.5 block truncate text-[12px] text-zinc-500">{subline(acc)}</span>
               </span>
               {deletable && (
                 <button
@@ -295,7 +295,7 @@ export function AccountSwitchPage({ onBack }: { onBack: () => void }) {
               setNamingInput('');
               setNamingKind('anon');
             }}
-            className="flex h-[50px] w-full items-center gap-3 px-4 text-left transition-colors active:bg-muted/50"
+            className="flex h-[50px] w-full items-center gap-3 px-4 text-left text-zinc-900 transition-colors active:bg-black/[0.05]"
           >
             <span className="flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-full bg-[#34C759]">
               <Plus className="h-[14px] w-[14px] text-white" strokeWidth={3} />
@@ -303,7 +303,7 @@ export function AccountSwitchPage({ onBack }: { onBack: () => void }) {
             <span className="flex-1 text-[16px]">新建匿名号码</span>
           </button>
         </GroupCard>
-        <p className="mt-3 px-1 text-[12px] leading-relaxed text-muted-foreground">
+        <p className="mt-3 px-1 text-[12px] leading-relaxed text-zinc-500">
           新建小号：打开联系人 App → 「小号」，创建后可在微信 / QQ / 信息 / 电话的切换账号处登录使用。
           四个 App 切换账号互相独立，切换不刷新页面；在联系人 App 删除小号后，正在使用它的 App 会自动退出该账号。
           其他 App 数据（照片、备忘录等）为整机共享，不随账号变化。
@@ -317,10 +317,10 @@ export function AccountSwitchPage({ onBack }: { onBack: () => void }) {
           if (!open) setNamingKind(null);
         }}
       >
-        <AlertDialogContent className="w-[270px] gap-0 rounded-[14px] p-0 sm:w-[270px] sm:max-w-[270px]">
+        <AlertDialogContent className="w-[270px] gap-0 rounded-[14px] border-black/[0.06] bg-white! p-0 text-zinc-900! sm:w-[270px] sm:max-w-[270px]">
           <AlertDialogHeader className="gap-1.5 px-5 pb-3 pt-5 sm:text-center">
             <AlertDialogTitle className="text-center text-[17px] font-semibold leading-snug">新建匿名号码</AlertDialogTitle>
-            <AlertDialogDescription className="text-center text-[13px] leading-snug">
+            <AlertDialogDescription className="text-center text-[13px] leading-snug text-zinc-500!">
               给这个身份起个名字，留空则默认「匿名账号」；创建后可在微信 / QQ / 信息 / 电话中切换使用。
             </AlertDialogDescription>
           </AlertDialogHeader>
@@ -332,16 +332,17 @@ export function AccountSwitchPage({ onBack }: { onBack: () => void }) {
               placeholder="匿名账号"
               maxLength={20}
               aria-label="账号名称"
+              className="bg-white text-zinc-900 ring-1 ring-black/[0.06]"
             />
           </div>
-          <AlertDialogFooter className="flex-row gap-0 border-t border-border sm:flex-row">
-            <AlertDialogCancel className="h-12 flex-1 rounded-none border-0 bg-transparent text-[16px] font-normal text-foreground shadow-none hover:bg-transparent focus-visible:ring-0 active:bg-muted/60 sm:mt-0">
+          <AlertDialogFooter className="flex-row gap-0 border-t border-black/[0.06] sm:flex-row">
+            <AlertDialogCancel className="h-12 flex-1 rounded-none border-0 bg-transparent text-[16px] font-normal text-zinc-900 shadow-none hover:bg-transparent focus-visible:ring-0 active:bg-black/[0.05] sm:mt-0">
               取消
             </AlertDialogCancel>
-            <span aria-hidden="true" className="w-px shrink-0 self-stretch bg-border" />
+            <span aria-hidden="true" className="w-px shrink-0 self-stretch bg-black/[0.06]" />
             <AlertDialogAction
               data-testid="settings-account-create-confirm"
-              className="h-12 flex-1 rounded-none border-0 bg-transparent text-[16px] font-medium text-[#0A84FF] shadow-none hover:bg-transparent focus-visible:ring-0 active:bg-muted/60 sm:mt-0"
+              className="h-12 flex-1 rounded-none border-0 bg-transparent text-[16px] font-medium text-[#0A84FF] shadow-none hover:bg-transparent focus-visible:ring-0 active:bg-black/[0.05] sm:mt-0"
               onClick={() => {
                 const kind = namingKind;
                 setNamingKind(null);
@@ -365,18 +366,18 @@ export function AccountSwitchPage({ onBack }: { onBack: () => void }) {
           if (!open) setDeletingId(null);
         }}
       >
-        <AlertDialogContent className="w-[270px] gap-0 rounded-[14px] p-0 sm:w-[270px] sm:max-w-[270px]">
+        <AlertDialogContent className="w-[270px] gap-0 rounded-[14px] border-black/[0.06] bg-white! p-0 text-zinc-900! sm:w-[270px] sm:max-w-[270px]">
           <AlertDialogHeader className="gap-1.5 px-5 pb-4 pt-5 sm:text-center">
             <AlertDialogTitle className="text-center text-[17px] font-semibold leading-snug">
               删除「{deletingAccount ? displayName(deletingAccount) : ''}」？
             </AlertDialogTitle>
-            <AlertDialogDescription className="text-center text-[13px] leading-snug">
+            <AlertDialogDescription className="text-center text-[13px] leading-snug text-zinc-500!">
               将删除该账号及登录态；正在使用它的微信 / QQ 等会自动退出并回到大号。此操作不可恢复。
             </AlertDialogDescription>
           </AlertDialogHeader>
           <label
             data-testid="settings-account-delete-keep"
-            className="mx-5 mb-1 flex cursor-pointer items-start gap-2.5 rounded-[8px] bg-muted/60 px-3 py-2.5"
+            className="mx-5 mb-1 flex cursor-pointer items-start gap-2.5 rounded-[8px] bg-black/[0.04] px-3 py-2.5"
           >
             <input
               type="checkbox"
@@ -384,16 +385,16 @@ export function AccountSwitchPage({ onBack }: { onBack: () => void }) {
               onChange={(e) => setDelKeepData(e.target.checked)}
               className="mt-0.5 h-4 w-4 shrink-0 accent-[#FF3B30]"
             />
-            <span className="text-left text-[12.5px] leading-[1.55] text-muted-foreground">保留该账号的数据（聊天记录、记忆、朋友圈等；数据不可见也无法恢复登录）</span>
+            <span className="text-left text-[12.5px] leading-[1.55] text-zinc-500">保留该账号的数据（聊天记录、记忆、朋友圈等；数据不可见也无法恢复登录）</span>
           </label>
-          <AlertDialogFooter className="flex-row gap-0 border-t border-border sm:flex-row">
-            <AlertDialogCancel className="h-12 flex-1 rounded-none border-0 bg-transparent text-[16px] font-normal text-foreground shadow-none hover:bg-transparent focus-visible:ring-0 active:bg-muted/60 sm:mt-0">
+          <AlertDialogFooter className="flex-row gap-0 border-t border-black/[0.06] sm:flex-row">
+            <AlertDialogCancel className="h-12 flex-1 rounded-none border-0 bg-transparent text-[16px] font-normal text-zinc-900 shadow-none hover:bg-transparent focus-visible:ring-0 active:bg-black/[0.05] sm:mt-0">
               取消
             </AlertDialogCancel>
-            <span aria-hidden="true" className="w-px shrink-0 self-stretch bg-border" />
+            <span aria-hidden="true" className="w-px shrink-0 self-stretch bg-black/[0.06]" />
             <AlertDialogAction
               data-testid="settings-account-delete-confirm"
-              className="h-12 flex-1 rounded-none border-0 bg-transparent text-[16px] font-medium shadow-none hover:bg-transparent focus-visible:ring-0 active:bg-muted/60 sm:mt-0"
+              className="h-12 flex-1 rounded-none border-0 bg-transparent text-[16px] font-medium shadow-none hover:bg-transparent focus-visible:ring-0 active:bg-black/[0.05] sm:mt-0"
               style={{ color: IOS_RED }}
               onClick={() => {
                 const id = deletingId;
@@ -434,12 +435,12 @@ export function AboutPage({ onBack }: { onBack: () => void }) {
         <AboutRow label="架构" value="本地优先（IndexedDB）" />
         <div className="flex min-h-[46px] items-center justify-between gap-3 px-4 py-2">
           <span className="shrink-0 text-[16px]">浏览器</span>
-          <span className="truncate text-right text-[13px] text-muted-foreground" title={ua || undefined}>
+          <span className="truncate text-right text-[13px] text-zinc-500" title={ua || undefined}>
             {uaShort || '—'}
           </span>
         </div>
       </GroupCard>
-      <p className="mt-3 px-1 text-[12px] leading-relaxed text-muted-foreground">
+      <p className="mt-3 px-1 text-[12px] leading-relaxed text-zinc-500">
         照片、备忘录、日程、聊天与全部设置均保存在浏览器 IndexedDB 中，可随时清理，不会上传服务器。
       </p>
     </DetailShell>

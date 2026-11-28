@@ -217,10 +217,10 @@ export function AppIconGrid({
                 )}
               </span>
               <span className="text-center leading-tight">
-                <span className={`block text-[12.5px] ${sel ? 'font-semibold text-[#007AFF]' : 'text-black/85 dark:text-white/85'}`}>
+                <span className={`block text-[12.5px] ${sel ? 'font-semibold text-[#007AFF]' : 'text-zinc-800'}`}>
                   {o.name}
                 </span>
-                <span className="mt-0.5 block text-[9.5px] text-muted-foreground">{o.desc}</span>
+                <span className="mt-0.5 block text-[9.5px] text-zinc-500">{o.desc}</span>
               </span>
             </button>
           );
@@ -259,7 +259,7 @@ export function AppIconGrid({
                 // 直拉全局更新弹窗（AppUpdateDialog：检查→发现新版→立即更新→APP 内下载安装）
                 void useAppUpdate.getState().check(true);
               }}
-              className="flex items-center gap-1 rounded-full bg-[#34C759]/12 px-3.5 py-1.5 text-[11.5px] font-medium text-[#248A3D] transition active:scale-95 dark:bg-[#30D158]/15 dark:text-[#30D158]"
+              className="flex items-center gap-1 rounded-full bg-[#34C759]/12 px-3.5 py-1.5 text-[11.5px] font-medium text-[#248A3D] transition active:scale-95"
             >
               <Download className="h-3.5 w-3.5" aria-hidden="true" />
               立即更新 App（覆盖安装 · 数据不丢）

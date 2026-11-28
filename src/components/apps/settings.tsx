@@ -6,7 +6,7 @@
 // 对外契约不变：registry 等外部仍按 `import('./settings')` 取 default SettingsApp；
 // 各子模块具名导出统一从本入口再导出，供外部按需引用。
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type CSSProperties } from 'react';
 import { IOSScreen } from '@/components/ios/IOSNavBar';
 import { useUI } from '@/lib/ios/store';
 
@@ -51,6 +51,37 @@ export * from './settings/cloud';
 
 // ---------------- 根组件 ----------------
 
+/**
+ * SETTINGS-THEME：设置 App 全域强制浅色 token。
+ * 机主要求设置子界面恒呈现「绿/白/灰/蓝」清爽浅色风，不随系统深色主题变黑。
+ * Tailwind 语义色（bg-background / text-foreground / text-muted-foreground / bg-muted /
+ * bg-popover 等）的取值来自 :root 与 .dark 两套 CSS 变量的级联——这里在最外层用
+ * inline CSS 变量把整套值钉死为浅色（页面底 #F3F6F3、卡片白、次文字 zinc-500、
+ * 主色蓝 #007AFF、破坏性红 #FF3B30），深色主题下设置 App（含不可修改的 IOSNavBar
+ * 与 ui/ 内 Input、Textarea、alert-dialog、Slider 等共享件）也整体呈现浅色。
+ * 包装层用 display:contents，不产生布局盒子，IOSScreen 仍作为唯一 flex 子级填满 App 窗口。
+ */
+const SETTINGS_LIGHT_TOKENS = {
+  '--background': '#F3F6F3',
+  '--foreground': '#18181B',
+  '--card': '#FFFFFF',
+  '--card-foreground': '#18181B',
+  '--popover': '#FFFFFF',
+  '--popover-foreground': '#18181B',
+  '--primary': '#007AFF',
+  '--primary-foreground': '#FFFFFF',
+  '--secondary': '#F4F4F5',
+  '--secondary-foreground': '#18181B',
+  '--muted': '#F4F4F5',
+  '--muted-foreground': '#71717A',
+  '--accent': '#F4F4F5',
+  '--accent-foreground': '#18181B',
+  '--destructive': '#FF3B30',
+  '--border': '#E4E4E7',
+  '--input': '#E4E4E7',
+  '--ring': '#007AFF',
+} as CSSProperties;
+
 export default function SettingsApp() {
   // 跨 App 跳转（X 论坛「生图模型」入口等）：别的 App switchToApp('settings') 前写入
   // pendingSettingsPage，这里挂载时读取直接进对应设置页（如 imggen 图像生成）。
@@ -67,26 +98,28 @@ export default function SettingsApp() {
   }, []);
 
   return (
-    <IOSScreen className="relative">
-      {page === 'root' && <RootPage onOpen={setPage} />}
-      {page === 'account' && <AccountSwitchPage onBack={() => setPage('root')} />}
-      {page === 'profile' && <ProfilePage onBack={() => setPage('root')} />}
-      {page === 'theme' && <ThemePage onBack={() => setPage('root')} />}
-      {page === 'notification' && <NotificationPage onBack={() => setPage('root')} />}
-      {page === 'wallpaper' && <WallpaperPage onBack={() => setPage('root')} />}
-      {page === 'api' && <ApiPage onBack={() => setPage('root')} />}
-      {page === 'cloud' && <ClawBoxPage onBack={() => setPage('root')} />}
-      {page === 'vision' && <VisionPage onBack={() => setPage('root')} />}
-      {page === 'imggen' && <ImageGenPage onBack={() => setPage('root')} />}
-      {page === 'voice' && <VoicePage onBack={() => setPage('root')} />}
-      {page === 'font' && <FontPage onBack={() => setPage('root')} />}
-      {page === 'lock' && <LockPage onBack={() => setPage('root')} />}
-      {page === 'prompts' && <PromptEntriesPage onBack={() => setPage('root')} />}
-      {page === 'about' && <AboutPage onBack={() => setPage('root')} />}
-      {page === 'autonomy' && <PermissionHubPage onBack={() => setPage('root')} />}
-      {page === 'voiceagent' && <AgentVoicePage onBack={() => setPage('root')} />}
-      {page === 'appupdate' && <AppUpdatePage onBack={() => setPage('root')} />}
-      {page === 'pwa' && <PwaInstallPage onBack={() => setPage('root')} />}
-    </IOSScreen>
+    <div className="contents" style={SETTINGS_LIGHT_TOKENS}>
+      <IOSScreen className="relative">
+        {page === 'root' && <RootPage onOpen={setPage} />}
+        {page === 'account' && <AccountSwitchPage onBack={() => setPage('root')} />}
+        {page === 'profile' && <ProfilePage onBack={() => setPage('root')} />}
+        {page === 'theme' && <ThemePage onBack={() => setPage('root')} />}
+        {page === 'notification' && <NotificationPage onBack={() => setPage('root')} />}
+        {page === 'wallpaper' && <WallpaperPage onBack={() => setPage('root')} />}
+        {page === 'api' && <ApiPage onBack={() => setPage('root')} />}
+        {page === 'cloud' && <ClawBoxPage onBack={() => setPage('root')} />}
+        {page === 'vision' && <VisionPage onBack={() => setPage('root')} />}
+        {page === 'imggen' && <ImageGenPage onBack={() => setPage('root')} />}
+        {page === 'voice' && <VoicePage onBack={() => setPage('root')} />}
+        {page === 'font' && <FontPage onBack={() => setPage('root')} />}
+        {page === 'lock' && <LockPage onBack={() => setPage('root')} />}
+        {page === 'prompts' && <PromptEntriesPage onBack={() => setPage('root')} />}
+        {page === 'about' && <AboutPage onBack={() => setPage('root')} />}
+        {page === 'autonomy' && <PermissionHubPage onBack={() => setPage('root')} />}
+        {page === 'voiceagent' && <AgentVoicePage onBack={() => setPage('root')} />}
+        {page === 'appupdate' && <AppUpdatePage onBack={() => setPage('root')} />}
+        {page === 'pwa' && <PwaInstallPage onBack={() => setPage('root')} />}
+      </IOSScreen>
+    </div>
   );
 }

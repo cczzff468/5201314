@@ -72,12 +72,12 @@ export function ThemePage({ onBack }: { onBack: () => void }) {
               key={o.value}
               type="button"
               onClick={() => setTheme(o.value)}
-              className="flex h-[46px] w-full items-center gap-3 px-4 text-left transition-colors active:bg-muted/50"
+              className="flex h-[46px] w-full items-center gap-3 px-4 text-left text-zinc-900 transition-colors active:bg-black/[0.05]"
             >
-              <Icon className="h-5 w-5 shrink-0 text-muted-foreground" strokeWidth={2} />
+              <Icon className="h-5 w-5 shrink-0 text-zinc-500" strokeWidth={2} />
               <span className="flex-1 text-[16px]">{o.label}</span>
               {theme === o.value && (
-                <Check className="h-5 w-5 shrink-0 text-foreground" strokeWidth={2.5} />
+                <Check className="h-5 w-5 shrink-0 text-[#007AFF]" strokeWidth={2.5} />
               )}
             </button>
           );
@@ -90,12 +90,12 @@ export function ThemePage({ onBack }: { onBack: () => void }) {
           唯一状态栏）。点选即生效并持久化（本地数据库 + localStorage 首帧镜像 +
           原生 SharedPreferences 三写，重启自动应用）。 */}
       <div className="mt-4">
-        <p className="mb-2 px-1 text-[12.5px] font-medium text-black/45 dark:text-white/45">状态栏模式</p>
+        <p className="mb-2 px-1 text-[12.5px] font-medium text-zinc-500">状态栏模式</p>
         <div
           role="radiogroup"
           aria-label="状态栏模式"
           data-testid="statusbar-mode-group"
-          className="divide-y divide-black/[0.05] overflow-hidden rounded-[22px] bg-white/55 shadow-[0_8px_28px_rgba(17,24,39,0.06)] ring-1 ring-white/70 backdrop-blur-2xl dark:divide-white/[0.06] dark:bg-white/[0.06] dark:ring-white/[0.09]"
+          className="divide-y divide-black/[0.05] overflow-hidden rounded-[22px] bg-white/80 shadow-[0_2px_12px_rgba(0,0,0,0.04)] ring-1 ring-black/[0.05] backdrop-blur-2xl"
         >
           {sbModes.map((o) => {
             const Icon = o.icon;
@@ -109,9 +109,9 @@ export function ThemePage({ onBack }: { onBack: () => void }) {
                 aria-label={`${o.label}（${o.desc}）`}
                 data-testid={`statusbar-mode-${o.value}`}
                 onClick={() => setStatusBarMode(o.value)}
-                className="flex min-h-[54px] w-full items-center gap-3 px-4 py-1.5 text-left transition-colors active:bg-muted/50"
+                className="flex min-h-[54px] w-full items-center gap-3 px-4 py-1.5 text-left text-zinc-900 transition-colors active:bg-black/[0.05]"
               >
-                <Icon className="h-5 w-5 shrink-0 text-muted-foreground" strokeWidth={2} />
+                <Icon className="h-5 w-5 shrink-0 text-zinc-500" strokeWidth={2} />
                 <span className="min-w-0 flex-1">
                   <span className="flex items-center gap-1.5">
                     <span className="text-[16px]">{o.label}</span>
@@ -121,14 +121,14 @@ export function ThemePage({ onBack }: { onBack: () => void }) {
                       </span>
                     )}
                   </span>
-                  <span className="mt-0.5 block truncate text-[11.5px] text-muted-foreground">{o.desc}</span>
+                  <span className="mt-0.5 block truncate text-[11.5px] text-zinc-500">{o.desc}</span>
                 </span>
-                {sel && <Check className="h-5 w-5 shrink-0 text-foreground" strokeWidth={2.5} />}
+                {sel && <Check className="h-5 w-5 shrink-0 text-[#007AFF]" strokeWidth={2.5} />}
               </button>
             );
           })}
         </div>
-        <p className="mt-2.5 px-1 text-[11px] leading-relaxed text-muted-foreground">
+        <p className="mt-2.5 px-1 text-[11px] leading-relaxed text-zinc-500">
           选择即生效并保存到本地数据库，重启后自动应用；两种模式下网页状态栏均常驻显示
           （时间/电量/WiFi），内容按挖孔口径避让顶部安全区。APK 端需 v2.4.23+ 壳生效。
         </p>
@@ -138,14 +138,14 @@ export function ThemePage({ onBack }: { onBack: () => void }) {
           APK 端原生 activity-alias 切换（免重装、旧图标消失新图标上桌面、App 退回桌面）；
           浏览器/PWA 端 manifest 动态接口自动跟随（Chrome/Edge 下次打开时生效）。 */}
       <div className="mt-4">
-        <p className="mb-2 px-1 text-[12.5px] font-medium text-black/45 dark:text-white/45">App 图标</p>
-        <div className="overflow-hidden rounded-[22px] bg-white/55 shadow-[0_8px_28px_rgba(17,24,39,0.06)] ring-1 ring-white/70 backdrop-blur-2xl dark:bg-white/[0.06] dark:ring-white/[0.09]">
+        <p className="mb-2 px-1 text-[12.5px] font-medium text-zinc-500">App 图标</p>
+        <div className="overflow-hidden rounded-[22px] bg-white/80 shadow-[0_2px_12px_rgba(0,0,0,0.04)] ring-1 ring-black/[0.05] backdrop-blur-2xl">
           <AppIconGrid current={appIcon} size="page" />
         </div>
         {/* 第四十二轮：说明提示删除（机主定夺——切结果由即时反馈/失败提示承担） */}
       </div>
 
-      <p className="mt-3 px-1 text-[12px] leading-relaxed text-muted-foreground">
+      <p className="mt-3 px-1 text-[12px] leading-relaxed text-zinc-500">
         跟随系统将随设备深色模式自动切换，过渡动画平滑。
       </p>
     </DetailShell>

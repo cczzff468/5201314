@@ -1,10 +1,11 @@
 'use client';
 
 /**
- * 小组件画廊（主屏全部 15 种小组件 1:1 预览，点击右上角 + 添加到主屏幕）：
+ * 小组件画廊（主屏全部 21 种小组件 1:1 预览，点击右上角 + 添加到主屏幕）：
  * - 编辑模式顶栏「+」：主屏内弹出画廊浮层（时钟/天气/信息卡片/气泡/日记/一起听/音乐/
- *   网易云/对话气泡/黑胶/日历/iCity/表盘时钟/拍立得/快捷联系人，全部平铺不分组——用户要求不显示「第几页」），
- *   已添加的显示「已添加」角标不可重复添加；
+ *   网易云/对话气泡/黑胶/日历/iCity/表盘时钟/拍立得/快捷联系人 + 大日期/日历月览/
+ *   黑色月历/周日历/日历进度/提醒事项，全部平铺不分组——用户要求不显示「第几页」）；
+ *   v13 起同款小组件可无限复制（每次添加生成全新实例 id，不与被删的旧实例撞 hidden）；
  *   × 删除过的小组件从 hidden 找回（与「恢复默认」同一数据链路）；
  * - 主题 App「小组件」独立界面（ThemesWidgetsPage）：同一套 1:1 画廊放在
  *   深色壁纸质感的底板上（浅色主题下白字小组件预览同样清晰），增删直接写
@@ -16,8 +17,8 @@
 
 import { useEffect, useState, type ReactNode } from 'react';
 import dynamic from 'next/dynamic';
-import { Check, ChevronLeft, Plus } from 'lucide-react';
-import { localDB } from '@/lib/ios/db';
+import { ChevronLeft, Plus } from 'lucide-react';
+import { localDB, genId } from '@/lib/ios/db';
 import { DiaryCardWidget, loadDiaryCard, type DiaryCardData } from './DiaryCard';
 import { CalendarCardWidget } from './CalendarCard';
 import { TickClockCardWidget } from './TickClockCard';
@@ -31,6 +32,14 @@ import { BubbleCardWidget, loadBubbleCard, type BubbleCardData } from './BubbleC
 import { ICityCardWidget, loadICityCard, type ICityCardData } from './ICityCard';
 import { PolaroidCardWidget, loadPolaroidCard, type PolaroidCardData } from './PolaroidCard';
 import { ContactWidget } from './ContactWidget';
+import {
+  CalendarBigDateWidget,
+  CalendarMonthWidget,
+  CalendarMonthDarkWidget,
+  CalendarWeekWidget,
+  CalendarProgressWidget,
+  RemindersWidget,
+} from './CalendarWidgets';
 
 // 天气小组件懒加载（与主屏同一模块 chunk，首帧不拖慢）
 const WeatherWidget = dynamic(() => import('@/components/apps/weather').then((m) => m.WeatherWidget), {
@@ -40,7 +49,7 @@ const WeatherWidget = dynamic(() => import('@/components/apps/weather').then((m)
   ),
 });
 
-/** 画廊内可添加的小组件种类（主屏全部 15 种，与 HomeScreen 的 WidgetKind 一一对应） */
+/** 画廊内可添加的小组件种类（主屏全部 21 种，与 HomeScreen 的 WidgetKind 一一对应） */
 export type GalleryKind =
   | 'weather'
   | 'clock'
@@ -56,7 +65,13 @@ export type GalleryKind =
   | 'icity'
   | 'tickclock'
   | 'polaroid'
-  | 'contact';
+  | 'contact'
+  | 'calendar-big'
+  | 'calendar-month'
+  | 'calendar-month-dark'
+  | 'calendar-week'
+  | 'calendar-progress'
+  | 'reminders';
 export const GALLERY_KINDS: GalleryKind[] = [
   'weather',
   'clock',
@@ -69,6 +84,12 @@ export const GALLERY_KINDS: GalleryKind[] = [
   'dialog',
   'vinyl',
   'calendar',
+  'calendar-big',
+  'calendar-month',
+  'calendar-month-dark',
+  'calendar-week',
+  'calendar-progress',
+  'reminders',
   'icity',
   'tickclock',
   'polaroid',
@@ -88,6 +109,12 @@ const GALLERY_ITEMS: { kind: GalleryKind; span: string; label: string }[] = [
   { kind: 'dialog', span: 'col-span-4 row-span-2', label: '对话气泡' },
   { kind: 'vinyl', span: 'col-span-2 row-span-3', label: '黑胶' },
   { kind: 'calendar', span: 'col-span-2 row-span-2 self-center', label: '日历' },
+  { kind: 'calendar-big', span: 'col-span-2 row-span-2 self-center', label: '大日期' },
+  { kind: 'calendar-month', span: 'col-span-4 row-span-3', label: '日历月览' },
+  { kind: 'calendar-month-dark', span: 'col-span-4 row-span-3', label: '黑色月历' },
+  { kind: 'calendar-week', span: 'col-span-2 row-span-3', label: '周日历' },
+  { kind: 'calendar-progress', span: 'col-span-2 row-span-2 self-center', label: '日历进度' },
+  { kind: 'reminders', span: 'col-span-2 row-span-2 self-center', label: '提醒事项' },
   { kind: 'icity', span: 'col-span-2 row-span-2 self-center', label: 'iCity' },
   { kind: 'tickclock', span: 'col-span-2 row-span-2 self-center', label: '表盘时钟' },
   { kind: 'polaroid', span: 'col-span-4 row-span-2', label: '拍立得' },
@@ -99,11 +126,13 @@ const LAYOUT_DB_KEY = 'homeLayout';
 /** 布局变更广播事件名（主题页写入 → 主屏监听重读） */
 const LAYOUT_EVENT = 'home-layout-updated';
 
-/** 持久化布局的轻量类型（pages 里 tile 保留 kind/widget/id：写回时不能丢 App id，
- *  否则主屏 sanitize 会把无 id 的 App 判无效删掉、再堆到末页） */
+/** 持久化布局的轻量类型（pages 里 tile 保留 kind/widget/wid/id：写回时不能丢 App id
+ *  与小组件实例 id wid，否则主屏 sanitize 会把无 id 的 App 判无效删掉、多实例小组件
+ *  退回无实例态互相混同，再堆到末页） */
 interface StoredTile {
   kind?: unknown;
   widget?: unknown;
+  wid?: unknown;
   id?: unknown;
 }
 interface StoredLayout {
@@ -113,7 +142,7 @@ interface StoredLayout {
   hidden?: unknown;
 }
 
-const parsePages = (raw: StoredLayout | undefined): { kind: string; widget?: string; id?: string }[][] => {
+const parsePages = (raw: StoredLayout | undefined): { kind: string; widget?: string; wid?: string; id?: string }[][] => {
   if (!raw || !Array.isArray(raw.pages)) return [[], [], [], []];
   return (raw.pages as unknown[]).map((p) =>
     Array.isArray(p)
@@ -122,21 +151,22 @@ const parsePages = (raw: StoredLayout | undefined): { kind: string; widget?: str
           .map((t) => ({
             kind: t.kind as string,
             widget: typeof t.widget === 'string' ? t.widget : undefined,
+            wid: typeof t.wid === 'string' ? t.wid : undefined,
             id: typeof t.id === 'string' ? t.id : undefined,
           }))
       : []
   );
 };
 
-/** 主题页：把小组件添加回主屏布局（unhide + 从最后一页往前找第一张装得下的页追加——
+/** 主题页：把小组件添加回主屏布局（从最后一页往前找第一张装得下的页追加——
  *  小组件聚落在第 3/4 页，不会落到前面的 App 页；都满则新建一页接住；
- *  写回保留原有 tile 全部字段（App id 不能丢） */
+ *  v13 起同款可无限复制：每次添加生成全新实例 id，不再检查是否已在屏上；
+ *  写回保留原有 tile 全部字段（App id 与小组件实例 wid 都不能丢） */
 async function addGalleryWidget(kind: GalleryKind): Promise<boolean> {
   try {
     const rec = await localDB.get('settings', LAYOUT_DB_KEY);
     const raw = rec?.value as StoredLayout | undefined;
     const pages = parsePages(raw);
-    if (pages.some((p) => p.some((t) => t.kind === 'widget' && t.widget === kind))) return false;
     let target = -1;
     for (let i = pages.length - 1; i >= 0; i--) {
       const cap = pages[i].some((t) => t.kind === 'widget') ? 14 : 20;
@@ -149,7 +179,7 @@ async function addGalleryWidget(kind: GalleryKind): Promise<boolean> {
       pages.push([]);
       target = pages.length - 1;
     }
-    pages[target].push({ kind: 'widget', widget: kind });
+    pages[target].push({ kind: 'widget', widget: kind, wid: genId() });
     const hidden = Array.isArray(raw?.hidden)
       ? (raw.hidden as unknown[]).filter((h) => typeof h === 'string' && h !== `widget:${kind}`)
       : [];
@@ -207,63 +237,50 @@ export function ClockGridWidget({ testId, light = false }: { testId?: string; li
   );
 }
 
-/** 画廊单元格：1:1 预览 + 角标（未添加 = 绿色 +，已添加 = 灰色「已添加」不可点） */
+/** 画廊单元格：1:1 预览 + 常显绿色 + 角标（v13 起同款可无限复制，点多少次加多少个） */
 function GalleryCell({
   kind,
   label,
   span,
-  added,
   onAdd,
   children,
 }: {
   kind: GalleryKind;
   label: string;
   span: string;
-  added: boolean;
   onAdd: (kind: GalleryKind) => void;
   children: ReactNode;
 }) {
   return (
     <div data-testid={`gallery-widget-${kind}`} className={`relative ${span}`}>
       <div
-        role={added ? undefined : 'button'}
-        tabIndex={added ? -1 : 0}
-        aria-label={added ? `${label}小组件（已添加到主屏幕）` : `添加${label}小组件到主屏幕`}
-        aria-disabled={added || undefined}
-        onClick={() => {
-          if (!added) onAdd(kind);
-        }}
+        role="button"
+        tabIndex={0}
+        aria-label={`添加${label}小组件到主屏幕`}
+        onClick={() => onAdd(kind)}
         onKeyDown={(e) => {
-          if (!added && (e.key === 'Enter' || e.key === ' ')) {
+          if (e.key === 'Enter' || e.key === ' ') {
             e.preventDefault();
             onAdd(kind);
           }
         }}
-        className={`relative h-full w-full rounded-[20px] ${
-          added ? '' : 'cursor-pointer outline-[1.5px] outline-dashed outline-white/30 -outline-offset-[6px] transition-opacity active:opacity-80'
-        }`}
+        className="relative h-full w-full cursor-pointer rounded-[20px] outline-[1.5px] outline-dashed outline-white/30 -outline-offset-[6px] transition-opacity active:opacity-80"
       >
         {children}
-        {added ? (
-          <span className="absolute right-[8px] top-[8px] z-10 flex items-center gap-[3px] rounded-full bg-black/55 px-[8px] py-[3px] text-[10px] font-medium text-white backdrop-blur-sm">
-            <Check className="h-[11px] w-[11px]" strokeWidth={3} aria-hidden="true" />
-            已添加
-          </span>
-        ) : (
-          <span
-            aria-hidden="true"
-            data-testid={`gallery-add-${kind}`}
-            className="absolute right-[6px] top-[6px] z-10 flex h-[26px] w-[26px] items-center justify-center rounded-full bg-[#34c759] text-white shadow-[0_2px_8px_rgba(0,0,0,0.35)]"
-          >
-            <Plus className="h-[15px] w-[15px]" strokeWidth={3} />
-          </span>
-        )}
+        <span
+          aria-hidden="true"
+          data-testid={`gallery-add-${kind}`}
+          className="absolute right-[6px] top-[6px] z-10 flex h-[26px] w-[26px] items-center justify-center rounded-full bg-[#34c759] text-white shadow-[0_2px_8px_rgba(0,0,0,0.35)]"
+        >
+          <Plus className="h-[15px] w-[15px]" strokeWidth={3} />
+        </span>
       </div>
     </div>
   );
 }
 
-/** 画廊内容（编辑模式浮层与主题页共用）：全部 14 种小组件平铺 1:1 排布（不分组），点击添加 */
+/** 画廊内容（编辑模式浮层与主题页共用）：全部 21 种小组件平铺 1:1 排布（不分组），
+ *  点击添加（v13 起同款可无限复制，无「已添加」态） */
 export function WidgetGalleryContent({
   profileData,
   bubbleData,
@@ -272,7 +289,6 @@ export function WidgetGalleryContent({
   dialogData,
   icityData,
   polaroidData,
-  added,
   onAdd,
 }: {
   profileData: ProfileCardData;
@@ -282,7 +298,6 @@ export function WidgetGalleryContent({
   dialogData: DialogCardData;
   icityData: ICityCardData;
   polaroidData: PolaroidCardData;
-  added: Record<GalleryKind, boolean>;
   onAdd: (kind: GalleryKind) => void;
 }) {
   const node = (kind: GalleryKind) => {
@@ -307,6 +322,18 @@ export function WidgetGalleryContent({
         return <DialogCardWidget data={dialogData} />;
       case 'calendar':
         return <CalendarCardWidget />;
+      case 'calendar-big':
+        return <CalendarBigDateWidget />;
+      case 'calendar-month':
+        return <CalendarMonthWidget />;
+      case 'calendar-month-dark':
+        return <CalendarMonthDarkWidget />;
+      case 'calendar-week':
+        return <CalendarWeekWidget />;
+      case 'calendar-progress':
+        return <CalendarProgressWidget />;
+      case 'reminders':
+        return <RemindersWidget />;
       case 'contact':
         return <ContactWidget />;
       case 'icity':
@@ -323,14 +350,7 @@ export function WidgetGalleryContent({
     <div className="mx-auto w-[326px]" data-testid="widget-gallery">
       <div className="grid grid-cols-4 items-start gap-x-2 gap-y-[16px]">
         {GALLERY_ITEMS.map((item) => (
-          <GalleryCell
-            key={item.kind}
-            kind={item.kind}
-            label={item.label}
-            span={item.span}
-            added={added[item.kind]}
-            onAdd={onAdd}
-          >
+          <GalleryCell key={item.kind} kind={item.kind} label={item.label} span={item.span} onAdd={onAdd}>
             {node(item.kind)}
           </GalleryCell>
         ))}
@@ -340,7 +360,8 @@ export function WidgetGalleryContent({
 }
 
 /** 主题 App「小组件」独立界面：全屏子页（深色壁纸质底板 + 全部小组件 1:1 画廊），
- *  添加直接写持久化布局并广播事件，主屏实时同步；返回按钮关闭子页 */
+ *  添加直接写持久化布局并广播事件，主屏实时同步；返回按钮关闭子页。
+ *  v13 起同款小组件可无限复制：无「已添加」态，点一次加一个（全新实例 id） */
 export function ThemesWidgetsPage({ onClose }: { onClose: () => void }) {
   /** 预览数据：主题 App 为纯客户端组件（registry 动态 ssr:false），可直接同步读 localStorage；
    *  挂载期间数据不可变（编辑器只在主屏），冻结一份即可 */
@@ -353,27 +374,6 @@ export function ThemesWidgetsPage({ onClose }: { onClose: () => void }) {
     icity: loadICityCard(),
     polaroid: loadPolaroidCard(),
   }));
-  /** 主屏布局里已存在的小组件（null = 布局未读到，视作全部已添加防误加重复） */
-  const [present, setPresent] = useState<Set<GalleryKind> | null>(null);
-
-  useEffect(() => {
-    void (async () => {
-      try {
-        const rec = await localDB.get('settings', LAYOUT_DB_KEY);
-        const pages = parsePages(rec?.value as StoredLayout | undefined);
-        const set = new Set<GalleryKind>();
-        for (const p of pages) {
-          for (const t of p) {
-            if (t.kind === 'widget' && typeof t.widget === 'string' && (GALLERY_KINDS as string[]).includes(t.widget))
-              set.add(t.widget as GalleryKind);
-          }
-        }
-        setPresent(set);
-      } catch {
-        /* 读不到布局时保持 null（全部按已添加处理） */
-      }
-    })();
-  }, []);
 
   const handleAdd = (kind: GalleryKind) => {
     void addGalleryWidget(kind).then((ok) => {
@@ -383,14 +383,9 @@ export function ThemesWidgetsPage({ onClose }: { onClose: () => void }) {
         } catch {
           /* 震动不可用 */
         }
-        setPresent((s) => new Set(s ?? []).add(kind));
       }
     });
   };
-
-  const added = Object.fromEntries(
-    GALLERY_KINDS.map((k) => [k, present ? present.has(k) : true])
-  ) as Record<GalleryKind, boolean>;
 
   return (
     <div className="absolute inset-0 z-50 flex flex-col bg-background" data-testid="themes-widgets-page">
@@ -422,12 +417,11 @@ export function ThemesWidgetsPage({ onClose }: { onClose: () => void }) {
             dialogData={cards.dialog}
             icityData={cards.icity}
             polaroidData={cards.polaroid}
-            added={added}
             onAdd={handleAdd}
           />
         </div>
         <p className="mt-2.5 px-1 text-[12px] leading-relaxed text-muted-foreground">
-          全部小组件 1:1 预览：点右上角 + 添加到主屏幕（设置即时生效，主屏自动同步）；删除在主屏编辑模式点 × 即可。
+          点 + 添加到主屏幕；同款小组件可以添加多个；删除在主屏编辑模式点 ×
         </p>
       </div>
     </div>

@@ -315,13 +315,13 @@ export function PromptEntriesPage({ onBack }: { onBack: () => void }) {
 
   /** v70：深度调节胶囊（组展开区内右对齐；取代旧版收起态常驻的深度行） */
   const renderDepthControl = (key: string, spacer: boolean) => (
-    <span className={`${spacer ? '' : 'ml-auto'} flex items-center gap-1 rounded-full bg-black/[0.045] px-1.5 py-[3px] text-[10px] text-muted-foreground dark:bg-white/[0.08]`}>
+    <span className={`${spacer ? '' : 'ml-auto'} flex items-center gap-1 rounded-full bg-black/[0.045] px-1.5 py-[3px] text-[10px] text-zinc-500`}>
       <span className="pl-1">深度</span>
       <button
         type="button"
         aria-label="减小注入深度"
         onClick={() => changeGroupDepth(key, -1)}
-        className="flex h-[18px] w-[18px] items-center justify-center rounded-full bg-white ring-1 ring-black/[0.06] active:scale-90 dark:bg-white/15 dark:ring-white/10"
+        className="flex h-[18px] w-[18px] items-center justify-center rounded-full bg-white ring-1 ring-black/[0.06] active:scale-90"
       >
         <Minus className="h-2.5 w-2.5" />
       </button>
@@ -332,7 +332,7 @@ export function PromptEntriesPage({ onBack }: { onBack: () => void }) {
         type="button"
         aria-label="增大注入深度"
         onClick={() => changeGroupDepth(key, 1)}
-        className="flex h-[18px] w-[18px] items-center justify-center rounded-full bg-white ring-1 ring-black/[0.06] active:scale-90 dark:bg-white/15 dark:ring-white/10"
+        className="flex h-[18px] w-[18px] items-center justify-center rounded-full bg-white ring-1 ring-black/[0.06] active:scale-90"
       >
         <Plus className="h-2.5 w-2.5" />
       </button>
@@ -351,7 +351,7 @@ export function PromptEntriesPage({ onBack }: { onBack: () => void }) {
       <div
         key={e.id}
         data-testid={`prompt-entry-${e.id}`}
-        className={`overflow-hidden bg-white ring-1 ring-black/[0.05] dark:bg-[#2A2A2C] dark:ring-white/[0.08] ${
+        className={`overflow-hidden bg-white ring-1 ring-black/[0.05] ${
           open ? 'rounded-[14px]' : 'rounded-full'
         } ${off ? 'opacity-55' : ''}`}
       >
@@ -374,14 +374,14 @@ export function PromptEntriesPage({ onBack }: { onBack: () => void }) {
             aria-label={`启用 ${e.title}`}
           />
           {/* v68.1 统一：箭头移到右侧 */}
-          <ChevronDown className={`h-3.5 w-3.5 shrink-0 text-muted-foreground/60 transition-transform ${open ? 'rotate-180' : ''}`} />
+          <ChevronDown className={`h-3.5 w-3.5 shrink-0 text-zinc-500/60 transition-transform ${open ? 'rotate-180' : ''}`} />
         </div>
         {open && (
-          <div className="border-t border-black/[0.05] px-3 py-2.5 dark:border-white/[0.08]">
+          <div className="border-t border-black/[0.05] px-3 py-2.5">
             <Textarea
               value={editing ? draft : content}
               onChange={(ev) => setDrafts((d) => ({ ...d, [e.id]: ev.target.value }))}
-              className="min-h-36 rounded-[12px] border-0 bg-black/[0.03] font-mono text-[11px] leading-relaxed ring-1 ring-black/[0.05] focus-visible:ring-2 focus-visible:ring-[#007AFF]/40 dark:bg-white/[0.06] dark:ring-white/10"
+              className="min-h-36 rounded-[12px] border-0 bg-white font-mono text-[11px] leading-relaxed ring-1 ring-black/[0.05] focus-visible:ring-2 focus-visible:ring-[#007AFF]/40"
               data-testid={`prompt-text-${e.id}`}
             />
             <div className="mt-2 flex flex-wrap items-center gap-2">
@@ -397,18 +397,18 @@ export function PromptEntriesPage({ onBack }: { onBack: () => void }) {
               <button
                 type="button"
                 onClick={() => resetMember(e)}
-                className="flex items-center gap-1 rounded-full bg-black/[0.05] px-3 py-[6px] text-[11.5px] font-medium text-foreground/70 transition-colors active:bg-black/[0.08] dark:bg-white/10 dark:text-muted-foreground"
+                className="flex items-center gap-1 rounded-full bg-black/[0.05] px-3 py-[6px] text-[11.5px] font-medium text-zinc-700 transition-colors active:bg-black/[0.08]"
               >
                 <RefreshCw className="h-3 w-3" />
                 恢复默认
               </button>
-              <span className="ml-auto flex items-center gap-1 rounded-full bg-black/[0.045] px-1.5 py-[3px] text-[10px] text-muted-foreground dark:bg-white/[0.08]">
+              <span className="ml-auto flex items-center gap-1 rounded-full bg-black/[0.045] px-1.5 py-[3px] text-[10px] text-zinc-500">
                 <span className="pl-1">深度</span>
                 <button
                   type="button"
                   aria-label="减小注入深度"
                   onClick={() => changeMemberDepth(e, -1)}
-                  className="flex h-[18px] w-[18px] items-center justify-center rounded-full bg-white ring-1 ring-black/[0.06] active:scale-90 dark:bg-white/15 dark:ring-white/10"
+                  className="flex h-[18px] w-[18px] items-center justify-center rounded-full bg-white ring-1 ring-black/[0.06] active:scale-90"
                 >
                   <Minus className="h-2.5 w-2.5" />
                 </button>
@@ -419,7 +419,7 @@ export function PromptEntriesPage({ onBack }: { onBack: () => void }) {
                   type="button"
                   aria-label="增大注入深度"
                   onClick={() => changeMemberDepth(e, 1)}
-                  className="flex h-[18px] w-[18px] items-center justify-center rounded-full bg-white ring-1 ring-black/[0.06] active:scale-90 dark:bg-white/15 dark:ring-white/10"
+                  className="flex h-[18px] w-[18px] items-center justify-center rounded-full bg-white ring-1 ring-black/[0.06] active:scale-90"
                 >
                   <Plus className="h-2.5 w-2.5" />
                 </button>
@@ -459,7 +459,7 @@ export function PromptEntriesPage({ onBack }: { onBack: () => void }) {
       <div
         key={key}
         data-testid={`prompt-group-${key}`}
-        className={`overflow-hidden rounded-[12px] bg-white ring-1 ring-black/[0.05] dark:bg-[#2A2A2C] dark:ring-white/[0.08] ${
+        className={`overflow-hidden rounded-[12px] bg-white ring-1 ring-black/[0.05] ${
           gOff ? 'opacity-55' : ''
         }`
       }>
@@ -473,7 +473,7 @@ export function PromptEntriesPage({ onBack }: { onBack: () => void }) {
               className={`flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-full transition-colors active:scale-90 ${
                 selected.has(key)
                   ? 'bg-[#007AFF] text-white'
-                  : 'bg-black/[0.05] ring-1 ring-black/[0.12] dark:bg-white/10 dark:ring-white/20'
+                  : 'bg-black/[0.05] ring-1 ring-black/[0.12]'
               }`}
             >
               {selected.has(key) && <Check className="h-3 w-3" strokeWidth={3} />}
@@ -493,18 +493,18 @@ export function PromptEntriesPage({ onBack }: { onBack: () => void }) {
             <span className="min-w-0 flex-1 truncate text-[13.5px] font-medium">{panelTitleOf(g)}</span>
           </button>
           <Switch checked={on} onCheckedChange={(v) => toggleGroup(key, v)} aria-label={`启用 ${panelTitleOf(g)}`} data-testid={`prompt-group-switch-${key}`} />
-          <ChevronDown className={`h-4 w-4 shrink-0 text-muted-foreground/60 transition-transform ${open ? 'rotate-180' : ''}`} />
+          <ChevronDown className={`h-4 w-4 shrink-0 text-zinc-500/60 transition-transform ${open ? 'rotate-180' : ''}`} />
         </div>
 
         {/* 展开区：编辑 / 成员列表 + 深度调节 */}
         {open && (
-          <div className="border-t border-black/[0.05] px-3 py-2.5 dark:border-white/[0.08]">
+          <div className="border-t border-black/[0.05] px-3 py-2.5">
             {g.kind === 'merged' ? (
               <>
                 <Textarea
                   value={editing ? draft : groupContent}
                   onChange={(ev) => setDrafts((d) => ({ ...d, [key]: ev.target.value }))}
-                  className="min-h-[260px] rounded-[12px] border-0 bg-black/[0.03] font-mono text-[11px] leading-relaxed ring-1 ring-black/[0.05] focus-visible:ring-2 focus-visible:ring-[#007AFF]/40 dark:bg-white/[0.06] dark:ring-white/10"
+                  className="min-h-[260px] rounded-[12px] border-0 bg-white font-mono text-[11px] leading-relaxed ring-1 ring-black/[0.05] focus-visible:ring-2 focus-visible:ring-[#007AFF]/40"
                   data-testid={`prompt-text-${key}`}
                 />
                 <div className="mt-2 flex flex-wrap items-center gap-2">
@@ -520,7 +520,7 @@ export function PromptEntriesPage({ onBack }: { onBack: () => void }) {
                   <button
                     type="button"
                     onClick={() => resetGroup(g)}
-                    className="flex items-center gap-1 rounded-full bg-black/[0.05] px-3.5 py-[6px] text-[12px] font-medium text-foreground/70 transition-colors active:bg-black/[0.08] dark:bg-white/10 dark:text-muted-foreground"
+                    className="flex items-center gap-1 rounded-full bg-black/[0.05] px-3.5 py-[6px] text-[12px] font-medium text-zinc-700 transition-colors active:bg-black/[0.08]"
                   >
                     <RefreshCw className="h-3.5 w-3.5" />
                     恢复默认
@@ -554,7 +554,7 @@ export function PromptEntriesPage({ onBack }: { onBack: () => void }) {
           <button
             type="button"
             onClick={() => setAdding((v) => !v)}
-            className="flex items-center gap-1 rounded-full bg-black/[0.05] px-3.5 py-[6px] text-[12px] font-medium text-foreground/75 transition-colors active:bg-black/[0.08] dark:bg-white/10 dark:text-muted-foreground"
+            className="flex items-center gap-1 rounded-full bg-black/[0.05] px-3.5 py-[6px] text-[12px] font-medium text-zinc-700 transition-colors active:bg-black/[0.08]"
             data-testid="prompt-add-btn"
           >
             <Plus className="h-3.5 w-3.5" />
@@ -568,8 +568,8 @@ export function PromptEntriesPage({ onBack }: { onBack: () => void }) {
             }}
             className={`flex items-center gap-1 rounded-full px-3.5 py-[6px] text-[12px] font-medium transition-colors active:scale-95 ${
               selectMode
-                ? 'bg-foreground text-background'
-                : 'bg-black/[0.05] text-foreground/75 active:bg-black/[0.08] dark:bg-white/10 dark:text-muted-foreground'
+                ? 'bg-[#007AFF] text-white'
+                : 'bg-black/[0.05] text-zinc-700 active:bg-black/[0.08]'
             }`}
           >
             <Check className="h-3.5 w-3.5" />
@@ -579,7 +579,7 @@ export function PromptEntriesPage({ onBack }: { onBack: () => void }) {
 
         {/* 多选批量操作条 */}
         {selectMode && selCount > 0 && (
-          <div className="sticky top-0 z-10 mb-2.5 flex items-center gap-2 rounded-full bg-white/95 px-4 py-2 shadow-[0_4px_18px_rgba(17,24,39,0.12)] ring-1 ring-black/[0.05] dark:bg-[#2C2C2E]/95 dark:ring-white/10">
+          <div className="sticky top-0 z-10 mb-2.5 flex items-center gap-2 rounded-full bg-white/95 px-4 py-2 shadow-[0_4px_18px_rgba(17,24,39,0.12)] ring-1 ring-black/[0.05]">
             <span className="shrink-0 text-[12px] font-medium">已选 {selCount} 组</span>
             <span className="ml-auto flex items-center gap-1.5">
               <button type="button" onClick={() => batchEnable(true)} className="rounded-full bg-[#34C759] px-3 py-1 text-[11px] font-medium text-white transition-colors active:opacity-80">
@@ -597,16 +597,16 @@ export function PromptEntriesPage({ onBack }: { onBack: () => void }) {
 
         {/* 新增表单（v70 扁平白卡） */}
         {adding && (
-          <div className="mb-2.5 overflow-hidden rounded-[16px] bg-white p-4 ring-1 ring-black/[0.05] dark:bg-[#1C1C1E] dark:ring-white/[0.08]">
+          <div className="mb-2.5 overflow-hidden rounded-[16px] bg-white p-4 ring-1 ring-black/[0.05]">
             <div className="flex flex-col gap-2.5">
               <p className="text-[13px] font-semibold">新增预设条目</p>
               <div className="flex flex-wrap gap-2">
-                <label className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                <label className="flex items-center gap-1.5 text-[11px] text-zinc-500">
                   注入 App
                   <select
                     value={addForm.appId}
                     onChange={(e) => setAddForm({ ...addForm, appId: e.target.value as PromptAppId })}
-                    className="rounded-full border-0 bg-black/[0.04] px-3 py-1 pr-7 text-[12px] ring-1 ring-black/[0.05] dark:bg-white/10 dark:ring-white/10"
+                    className="rounded-full border-0 bg-black/[0.04] px-3 py-1 pr-7 text-[12px] ring-1 ring-black/[0.05]"
                   >
                     {PROMPT_APPS.filter((a) => a.id !== 'global').map((a) => (
                       <option key={a.id} value={a.id}>
@@ -615,25 +615,25 @@ export function PromptEntriesPage({ onBack }: { onBack: () => void }) {
                     ))}
                   </select>
                 </label>
-                <label className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                <label className="flex items-center gap-1.5 text-[11px] text-zinc-500">
                   Role
                   <select
                     value={addForm.role}
                     onChange={(e) => setAddForm({ ...addForm, role: e.target.value as PromptRole })}
-                    className="rounded-full border-0 bg-black/[0.04] px-3 py-1 pr-7 text-[12px] ring-1 ring-black/[0.05] dark:bg-white/10 dark:ring-white/10"
+                    className="rounded-full border-0 bg-black/[0.04] px-3 py-1 pr-7 text-[12px] ring-1 ring-black/[0.05]"
                   >
                     <option value="system">system</option>
                     <option value="user">user</option>
                     <option value="assistant">assistant</option>
                   </select>
                 </label>
-                <label className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                <label className="flex items-center gap-1.5 text-[11px] text-zinc-500">
                   深度
                   <Input
                     value={addForm.depth}
                     onChange={(e) => setAddForm({ ...addForm, depth: e.target.value })}
                     inputMode="numeric"
-                    className="h-7 w-16 rounded-full border-0 bg-black/[0.04] px-3 text-center text-[12px] ring-1 ring-black/[0.05] dark:bg-white/10 dark:ring-white/10"
+                    className="h-7 w-16 rounded-full border-0 bg-black/[0.04] px-3 text-center text-[12px] ring-1 ring-black/[0.05]"
                   />
                 </label>
               </div>
@@ -641,14 +641,14 @@ export function PromptEntriesPage({ onBack }: { onBack: () => void }) {
                 value={addForm.title}
                 onChange={(e) => setAddForm({ ...addForm, title: e.target.value })}
                 placeholder="条目标题（如：微信·我的私人规则）"
-                className="rounded-[12px] border-0 bg-black/[0.03] text-[13px] ring-1 ring-black/[0.05] focus-visible:ring-2 focus-visible:ring-[#007AFF]/40 dark:bg-white/[0.06] dark:ring-white/10"
+                className="rounded-[12px] border-0 bg-white text-[13px] ring-1 ring-black/[0.05] focus-visible:ring-2 focus-visible:ring-[#007AFF]/40"
                 data-testid="prompt-add-title"
               />
               <Textarea
                 value={addForm.content}
                 onChange={(e) => setAddForm({ ...addForm, content: e.target.value })}
                 placeholder="提示词正文"
-                className="min-h-24 rounded-[12px] border-0 bg-black/[0.03] text-[12px] ring-1 ring-black/[0.05] focus-visible:ring-2 focus-visible:ring-[#007AFF]/40 dark:bg-white/[0.06] dark:ring-white/10"
+                className="min-h-24 rounded-[12px] border-0 bg-white text-[12px] ring-1 ring-black/[0.05] focus-visible:ring-2 focus-visible:ring-[#007AFF]/40"
                 data-testid="prompt-add-content"
               />
               <div className="flex gap-2">
@@ -660,7 +660,7 @@ export function PromptEntriesPage({ onBack }: { onBack: () => void }) {
                 >
                   添加（立即生效）
                 </button>
-                <button type="button" onClick={() => setAdding(false)} className="rounded-full bg-black/[0.05] px-5 py-2 text-[12px] font-medium text-foreground/70 transition-colors active:bg-black/[0.08] dark:bg-white/10 dark:text-muted-foreground">
+                <button type="button" onClick={() => setAdding(false)} className="rounded-full bg-black/[0.05] px-5 py-2 text-[12px] font-medium text-zinc-700 transition-colors active:bg-black/[0.08]">
                   收起
                 </button>
               </div>

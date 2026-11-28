@@ -261,7 +261,7 @@ export function PwaInstallPage({ onBack }: { onBack: () => void }) {
             <CheckCircle2 className="mt-0.5 h-6 w-6 shrink-0 text-[#34C759]" aria-hidden="true" />
             <div className="min-w-0">
               <div className="text-[15.5px] font-medium">已安装，正在独立窗口运行</div>
-              <p className="mt-1 text-[12.5px] leading-relaxed text-muted-foreground">
+              <p className="mt-1 text-[12.5px] leading-relaxed text-zinc-500">
                 像真 App 一样全屏、无浏览器地址栏；断网也能打开，聊天记录与照片一直在本机。
               </p>
             </div>
@@ -270,7 +270,7 @@ export function PwaInstallPage({ onBack }: { onBack: () => void }) {
       ) : installEvt ? (
         <GroupCard>
           <div className="px-4 py-4">
-            <p className="text-[13.5px] leading-relaxed text-muted-foreground">
+            <p className="text-[13.5px] leading-relaxed text-zinc-500">
               安装后从主屏幕图标打开：全屏运行、断网可进入，体验接近原生 App。
             </p>
             <button
@@ -288,7 +288,7 @@ export function PwaInstallPage({ onBack }: { onBack: () => void }) {
       ) : iosSafari ? (
         <GroupCard>
           <div className="flex flex-col gap-3 px-4 py-4">
-            <p className="text-[13.5px] leading-relaxed text-muted-foreground">
+            <p className="text-[13.5px] leading-relaxed text-zinc-500">
               iPhone/iPad 需用 Safari 手动添加（iOS 不支持一键安装）：
             </p>
             {[
@@ -301,7 +301,7 @@ export function PwaInstallPage({ onBack }: { onBack: () => void }) {
               { icon: <span className="text-[13px] font-semibold">③</span>, text: '右上点「添加」——桌面会出现 Cove 图标' },
             ].map((step, i) => (
               <div key={i} className="flex items-start gap-2.5">
-                <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-black/[0.06] text-muted-foreground dark:bg-white/[0.1]">
+                <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-black/[0.06] text-zinc-500">
                   {step.icon}
                 </span>
                 <span className="min-w-0 text-[13.5px] leading-relaxed">{step.text}</span>
@@ -312,8 +312,8 @@ export function PwaInstallPage({ onBack }: { onBack: () => void }) {
       ) : (
         <GroupCard>
           <div className="flex items-start gap-3 px-4 py-3.5">
-            <Monitor className="mt-0.5 h-5 w-5 shrink-0 text-muted-foreground" aria-hidden="true" />
-            <p className="min-w-0 text-[13.5px] leading-relaxed text-muted-foreground">
+            <Monitor className="mt-0.5 h-5 w-5 shrink-0 text-zinc-500" aria-hidden="true" />
+            <p className="min-w-0 text-[13.5px] leading-relaxed text-zinc-500">
               当前浏览器还没发出安装邀请。可以多浏览一会后再回来；或用浏览器菜单里的「安装应用 /
               添加到主屏幕」（Chrome/Edge：地址栏右侧安装图标或 ⋮ 菜单；Safari：分享 › 添加到 Dock）。
               手机 Chrome/Edge/Safari 均可安装。
@@ -328,9 +328,9 @@ export function PwaInstallPage({ onBack }: { onBack: () => void }) {
         离线可用
       </SectionLabel>
       <GroupCard>
-        <div className="px-4 py-3.5 text-[13px] leading-relaxed text-muted-foreground">
+        <div className="px-4 py-3.5 text-[13px] leading-relaxed text-zinc-500">
           在线时页面会自动缓存到本机：断网后从主屏幕图标照常打开，微信/信息/相册/备忘录等本机数据应用均可浏览。
-          <span className="text-foreground/80">AI 聊天、在线音乐、天气等联网功能离线时暂停</span>
+          <span className="text-zinc-800">AI 聊天、在线音乐、天气等联网功能离线时暂停</span>
           ，恢复网络即自动可用。
         </div>
       </GroupCard>
@@ -344,13 +344,13 @@ export function PwaInstallPage({ onBack }: { onBack: () => void }) {
         <div className="flex flex-col gap-2.5 px-4 py-4">
           <div className="flex items-center justify-between gap-3">
             <span className="text-[15px]">当前版本</span>
-            <span className="text-[14px] tabular-nums text-muted-foreground">v{APP_VERSION}</span>
+            <span className="text-[14px] tabular-nums text-zinc-500">v{APP_VERSION}</span>
           </div>
           <button
             type="button"
             onClick={doCheckUpdate}
             disabled={busy === 'update' || swActive !== true}
-            className={`${pillBtn} w-full bg-white/60 text-foreground ring-white/70 dark:bg-white/[0.08] dark:ring-white/[0.12]`}
+            className={`${pillBtn} w-full bg-white/80 text-zinc-900 ring-black/[0.06]`}
           >
             {busy === 'update' ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
             检查更新
@@ -363,13 +363,13 @@ export function PwaInstallPage({ onBack }: { onBack: () => void }) {
             className={`${pillBtn} w-full ${
               confirmClear
                 ? 'bg-[#FF3B30]/90 text-white ring-red-300/40'
-                : 'bg-white/60 text-[#FF3B30] ring-white/70 dark:bg-white/[0.08] dark:ring-white/[0.12]'
+                : 'bg-white/80 text-[#FF3B30] ring-black/[0.06]'
             }`}
           >
             {busy === 'clear' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
             {confirmClear ? '再点一次确认清除（不影响聊天记录）' : '清除离线缓存'}
           </button>
-          <p className="text-[11.5px] leading-relaxed text-muted-foreground">
+          <p className="text-[11.5px] leading-relaxed text-zinc-500">
             清除的只是网页离线缓存；聊天记录、照片、备忘录与全部设置存在 IndexedDB，不受影响，推送通知也不受影响。
           </p>
         </div>

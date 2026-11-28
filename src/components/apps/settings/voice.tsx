@@ -464,7 +464,7 @@ export function VoicePage({ onBack }: { onBack: () => void }) {
               data-testid="tts-provider-builtin"
               onClick={() => switchProvider('builtin')}
               className={`rounded-full px-3.5 py-1.5 text-[13px] transition-all active:scale-[0.97] ${
-                isBuiltin ? 'bg-foreground font-medium text-background shadow-[0_4px_14px_rgba(17,24,39,0.18)]' : 'bg-white/55 text-foreground/75 ring-1 ring-black/[0.06] backdrop-blur-xl hover:bg-white/80 dark:bg-white/[0.07] dark:text-foreground/75 dark:ring-white/[0.1] dark:hover:bg-white/[0.14]'
+                isBuiltin ? 'bg-[#007AFF] font-medium text-white shadow-[0_4px_14px_rgba(0,122,255,0.35)]' : 'bg-white/55 text-zinc-700 ring-1 ring-black/[0.06] backdrop-blur-xl hover:bg-white/80'
               }`}
             >
               内置语音（免费）
@@ -474,7 +474,7 @@ export function VoicePage({ onBack }: { onBack: () => void }) {
               data-testid="tts-provider-minimax"
               onClick={() => switchProvider('minimax')}
               className={`rounded-full px-3.5 py-1.5 text-[13px] transition-all active:scale-[0.97] ${
-                isMinimax ? 'bg-foreground font-medium text-background shadow-[0_4px_14px_rgba(17,24,39,0.18)]' : 'bg-white/55 text-foreground/75 ring-1 ring-black/[0.06] backdrop-blur-xl hover:bg-white/80 dark:bg-white/[0.07] dark:text-foreground/75 dark:ring-white/[0.1] dark:hover:bg-white/[0.14]'
+                isMinimax ? 'bg-[#007AFF] font-medium text-white shadow-[0_4px_14px_rgba(0,122,255,0.35)]' : 'bg-white/55 text-zinc-700 ring-1 ring-black/[0.06] backdrop-blur-xl hover:bg-white/80'
               }`}
             >
               MiniMax
@@ -484,7 +484,7 @@ export function VoicePage({ onBack }: { onBack: () => void }) {
               data-testid="tts-provider-openai"
               onClick={() => switchProvider('openai')}
               className={`rounded-full px-3.5 py-1.5 text-[13px] transition-all active:scale-[0.97] ${
-                isTtsOpenai ? 'bg-foreground font-medium text-background shadow-[0_4px_14px_rgba(17,24,39,0.18)]' : 'bg-white/55 text-foreground/75 ring-1 ring-black/[0.06] backdrop-blur-xl hover:bg-white/80 dark:bg-white/[0.07] dark:text-foreground/75 dark:ring-white/[0.1] dark:hover:bg-white/[0.14]'
+                isTtsOpenai ? 'bg-[#007AFF] font-medium text-white shadow-[0_4px_14px_rgba(0,122,255,0.35)]' : 'bg-white/55 text-zinc-700 ring-1 ring-black/[0.06] backdrop-blur-xl hover:bg-white/80'
               }`}
             >
               OpenAI 兼容
@@ -494,7 +494,7 @@ export function VoicePage({ onBack }: { onBack: () => void }) {
               data-testid="tts-provider-fishaudio"
               onClick={() => switchProvider('fishaudio')}
               className={`rounded-full px-3.5 py-1.5 text-[13px] transition-all active:scale-[0.97] ${
-                isFish ? 'bg-foreground font-medium text-background shadow-[0_4px_14px_rgba(17,24,39,0.18)]' : 'bg-white/55 text-foreground/75 ring-1 ring-black/[0.06] backdrop-blur-xl hover:bg-white/80 dark:bg-white/[0.07] dark:text-foreground/75 dark:ring-white/[0.1] dark:hover:bg-white/[0.14]'
+                isFish ? 'bg-[#007AFF] font-medium text-white shadow-[0_4px_14px_rgba(0,122,255,0.35)]' : 'bg-white/55 text-zinc-700 ring-1 ring-black/[0.06] backdrop-blur-xl hover:bg-white/80'
               }`}
             >
               Fish Audio
@@ -507,7 +507,7 @@ export function VoicePage({ onBack }: { onBack: () => void }) {
           <>
             <section>
               <div className="flex items-center justify-between gap-2">
-                <p className="min-w-0 truncate text-[12px] text-muted-foreground">本地合成 · 免费 · 离线可用 · 点卡片设为默认</p>
+                <p className="min-w-0 truncate text-[12px] text-zinc-500">本地合成 · 免费 · 离线可用 · 点卡片设为默认</p>
                 {builtinSupport === false && (
                   <p className="flex shrink-0 items-center gap-1 text-[12px] text-[#FF3B30]">
                     <AlertCircle className="h-3.5 w-3.5 shrink-0" />
@@ -535,8 +535,8 @@ export function VoicePage({ onBack }: { onBack: () => void }) {
                       }}
                       className={`flex flex-col gap-1.5 rounded-[18px] p-3 backdrop-blur-2xl transition-all ${
                         active
-                          ? 'bg-white/85 shadow-[0_8px_22px_rgba(17,24,39,0.1)] ring-1 ring-white/80 dark:bg-white/[0.14] dark:ring-white/[0.16]'
-                          : 'bg-white/45 shadow-[0_2px_10px_rgba(17,24,39,0.04)] ring-1 ring-white/60 dark:bg-white/[0.05] dark:ring-white/[0.08]'
+                          ? 'bg-white/85 shadow-[0_8px_22px_rgba(17,24,39,0.1)] ring-1 ring-white/80'
+                          : 'bg-white/45 shadow-[0_2px_10px_rgba(17,24,39,0.04)] ring-1 ring-black/[0.05]'
                       }`}
                     >
                       <div className="flex items-center justify-between gap-1.5">
@@ -544,7 +544,7 @@ export function VoicePage({ onBack }: { onBack: () => void }) {
                           <span className="truncate text-[15px] font-medium">{v.name}</span>
                           <span
                             className={`shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-medium ${
-                              v.gender === 'female' ? 'bg-pink-500/10 text-pink-600 dark:text-pink-400' : 'bg-sky-500/10 text-sky-600 dark:text-sky-400'
+                              v.gender === 'female' ? 'bg-pink-500/10 text-pink-600' : 'bg-sky-500/10 text-sky-600'
                             }`}
                           >
                             {v.gender === 'female' ? '女' : '男'}
@@ -553,7 +553,7 @@ export function VoicePage({ onBack }: { onBack: () => void }) {
                         {active && <Check className="h-4 w-4 shrink-0" strokeWidth={2.5} aria-hidden="true" />}
                       </div>
                       <div className="flex items-center justify-between gap-1.5">
-                        <span className="truncate text-[11px] text-muted-foreground">{v.label}</span>
+                        <span className="truncate text-[11px] text-zinc-500">{v.label}</span>
                         <button
                           type="button"
                           aria-label={`试听声线${v.name}`}
@@ -562,7 +562,7 @@ export function VoicePage({ onBack }: { onBack: () => void }) {
                             previewBuiltinVoice(v.id);
                           }}
                           className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full transition-all ${
-                            playing ? 'bg-white/90 text-foreground shadow-sm dark:bg-white/[0.22]' : 'bg-white/60 text-muted-foreground ring-1 ring-black/[0.05] active:bg-white/85 dark:bg-white/[0.08] dark:ring-white/[0.1]'
+                            playing ? 'bg-white/90 text-zinc-900 shadow-sm' : 'bg-white/60 text-zinc-500 ring-1 ring-black/[0.05] active:bg-white/85'
                           }`}
                         >
                           <AudioLines className={`h-3.5 w-3.5 ${playing ? 'animate-pulse' : ''}`} aria-hidden="true" />
@@ -580,7 +580,7 @@ export function VoicePage({ onBack }: { onBack: () => void }) {
                 type="button"
                 onClick={() => void runPreview()}
                 disabled={previewLoading}
-                className="flex h-11 w-full items-center justify-center gap-1.5 rounded-[14px] bg-white/60 text-[14px] font-medium text-foreground shadow-[0_6px_20px_rgba(17,24,39,0.08)] ring-1 ring-white/70 backdrop-blur-2xl transition-all active:scale-[0.98] active:bg-white/85 disabled:opacity-50 dark:bg-white/[0.1] dark:ring-white/[0.12] dark:active:bg-white/[0.16]"
+                className="flex h-11 w-full items-center justify-center gap-1.5 rounded-[14px] bg-white/60 text-[14px] font-medium text-zinc-900 shadow-[0_6px_20px_rgba(17,24,39,0.08)] ring-1 ring-black/[0.05] backdrop-blur-2xl transition-all active:scale-[0.98] active:bg-white/85 disabled:opacity-50"
               >
                 {previewLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <AudioLines className="h-4 w-4" />}
                 试听当前声线
@@ -602,18 +602,18 @@ export function VoicePage({ onBack }: { onBack: () => void }) {
           <SectionLabel
             icon={Wrench}
             tone={TONE_BLUE}
-            right={<span className="text-[11px] text-muted-foreground/70">更改自动保存 · 即时生效</span>}
+            right={<span className="text-[11px] text-zinc-500/70">更改自动保存 · 即时生效</span>}
           >
             连接配置
           </SectionLabel>
-          <div className="flex flex-col gap-4 rounded-[22px] bg-white/55 p-4 shadow-[0_8px_28px_rgba(17,24,39,0.06)] ring-1 ring-white/70 backdrop-blur-2xl dark:bg-white/[0.06] dark:ring-white/[0.09]">
+          <div className="flex flex-col gap-4 rounded-[22px] bg-white/80 p-4 shadow-[0_2px_12px_rgba(0,0,0,0.04)] ring-1 ring-black/[0.05] backdrop-blur-2xl">
             <div>
               <FieldLabel>API 地址</FieldLabel>
               <Input
                 value={ttsConfig.baseUrl}
                 onChange={(e) => updateTtsConfig({ baseUrl: e.target.value })}
                 placeholder="填写语音 API 地址（OpenAI 兼容）"
-                className="h-11 rounded-[14px] border-black/[0.05] bg-white/55 text-[14px] shadow-[inset_0_1px_0_rgba(255,255,255,0.7),0_3px_10px_rgba(17,24,39,0.05)] backdrop-blur-2xl dark:border-white/[0.09] dark:bg-white/[0.07] dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.05),0_3px_10px_rgba(0,0,0,0.2)]"
+                className="h-11 rounded-[14px] border-black/[0.06] bg-white text-[14px] shadow-[inset_0_1px_0_rgba(255,255,255,0.7),0_3px_10px_rgba(17,24,39,0.05)] backdrop-blur-2xl"
               />
             </div>
 
@@ -626,14 +626,14 @@ export function VoicePage({ onBack }: { onBack: () => void }) {
                   onChange={(e) => updateTtsConfig({ apiKey: e.target.value })}
                   placeholder={isMinimax ? 'eyJhbGciOi...' : isFish ? 'Fish Audio 的 API Key（fishaudio.org 控制台获取）' : 'sk-...'}
                   autoComplete="off"
-                  className={`h-11 rounded-[14px] border-black/[0.05] bg-white/55 text-[14px] shadow-[inset_0_1px_0_rgba(255,255,255,0.7),0_3px_10px_rgba(17,24,39,0.05)] backdrop-blur-2xl dark:border-white/[0.09] dark:bg-white/[0.07] dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.05),0_3px_10px_rgba(0,0,0,0.2)] ${ttsConfig.apiKey ? 'pr-16' : 'pr-10'}`}
+                  className={`h-11 rounded-[14px] border-black/[0.06] bg-white text-[14px] shadow-[inset_0_1px_0_rgba(255,255,255,0.7),0_3px_10px_rgba(17,24,39,0.05)] backdrop-blur-2xl ${ttsConfig.apiKey ? 'pr-16' : 'pr-10'}`}
                 />
                 {ttsConfig.apiKey && (
                   <button
                     type="button"
                     onClick={() => updateTtsConfig({ apiKey: '' })}
                     aria-label="清空 API Key"
-                    className="absolute right-8 top-1/2 -translate-y-1/2 p-1 text-muted-foreground transition-colors hover:text-foreground"
+                    className="absolute right-8 top-1/2 -translate-y-1/2 p-1 text-zinc-500 transition-colors hover:text-zinc-900"
                   >
                     <X className="h-4 w-4" />
                   </button>
@@ -642,7 +642,7 @@ export function VoicePage({ onBack }: { onBack: () => void }) {
                   type="button"
                   onClick={() => setShowKey((v) => !v)}
                   aria-label={showKey ? '隐藏 Key' : '显示 Key'}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-muted-foreground transition-opacity hover:opacity-80"
+                  className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-zinc-500 transition-opacity hover:opacity-80"
                 >
                   {showKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                 </button>
@@ -657,28 +657,28 @@ export function VoicePage({ onBack }: { onBack: () => void }) {
                   onChange={(e) => updateTtsConfig({ groupId: e.target.value })}
                   placeholder="MiniMax 控制台「账户管理」里的 GroupId"
                   autoComplete="off"
-                  className="h-11 rounded-[14px] border-black/[0.05] bg-white/55 text-[14px] shadow-[inset_0_1px_0_rgba(255,255,255,0.7),0_3px_10px_rgba(17,24,39,0.05)] backdrop-blur-2xl dark:border-white/[0.09] dark:bg-white/[0.07] dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.05),0_3px_10px_rgba(0,0,0,0.2)]"
+                  className="h-11 rounded-[14px] border-black/[0.06] bg-white text-[14px] shadow-[inset_0_1px_0_rgba(255,255,255,0.7),0_3px_10px_rgba(17,24,39,0.05)] backdrop-blur-2xl"
                 />
               </div>
             )}
 
             <div ref={modelSectionRef} className="relative">
               <FieldLabel>
-                模型名{!isMinimax && <span className="ml-1 font-normal text-muted-foreground/70">（选填{isFish ? '，Fish Audio 以音色 ID 定位声线' : ''}）</span>}
+                模型名{!isMinimax && <span className="ml-1 font-normal text-zinc-500/70">（选填{isFish ? '，Fish Audio 以音色 ID 定位声线' : ''}）</span>}
               </FieldLabel>
               <div className="flex gap-2">
                 <Input
                   value={ttsConfig.model}
                   onChange={(e) => updateTtsConfig({ model: e.target.value })}
                   placeholder={isMinimax ? preset.model : isFish ? 'Fish Audio 无需模型名，留空即可' : `如 ${preset.model}，不需要模型可留空`}
-                  className="h-11 flex-1 rounded-[14px] border-black/[0.05] bg-white/55 text-[14px] shadow-[inset_0_1px_0_rgba(255,255,255,0.7),0_3px_10px_rgba(17,24,39,0.05)] backdrop-blur-2xl dark:border-white/[0.09] dark:bg-white/[0.07] dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.05),0_3px_10px_rgba(0,0,0,0.2)]"
+                  className="h-11 flex-1 rounded-[14px] border-black/[0.06] bg-white text-[14px] shadow-[inset_0_1px_0_rgba(255,255,255,0.7),0_3px_10px_rgba(17,24,39,0.05)] backdrop-blur-2xl"
                 />
                 {!isFish && (
                   <button
                     type="button"
                     onClick={() => void fetchTtsModels()}
                     disabled={fetchingModels}
-                    className="flex h-11 shrink-0 items-center gap-1.5 rounded-[14px] bg-white/60 px-4 text-[13px] font-medium text-foreground shadow-[0_4px_14px_rgba(17,24,39,0.07)] ring-1 ring-white/70 backdrop-blur-2xl transition-all active:scale-[0.97] active:bg-white/85 disabled:opacity-50 dark:bg-white/[0.1] dark:ring-white/[0.12] dark:active:bg-white/[0.16]"
+                    className="flex h-11 shrink-0 items-center gap-1.5 rounded-[14px] bg-white/60 px-4 text-[13px] font-medium text-zinc-900 shadow-[0_4px_14px_rgba(17,24,39,0.07)] ring-1 ring-black/[0.05] backdrop-blur-2xl transition-all active:scale-[0.97] active:bg-white/85 disabled:opacity-50"
                   >
                     {fetchingModels && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
                     拉取模型
@@ -692,7 +692,7 @@ export function VoicePage({ onBack }: { onBack: () => void }) {
                 </p>
               )}
               {modelsHint && (
-                <p className="mt-1.5 text-[12px] leading-relaxed text-muted-foreground">{modelsHint}</p>
+                <p className="mt-1.5 text-[12px] leading-relaxed text-zinc-500">{modelsHint}</p>
               )}
 
               {/* 模型列表面板（拉取成功后展开；TTS 相关模型排前）
@@ -700,16 +700,16 @@ export function VoicePage({ onBack }: { onBack: () => void }) {
               {modelPanelOpen && (
                 <div
                   data-model-panel
-                  className="absolute -left-4 -right-4 top-full z-30 mt-1 overflow-hidden rounded-[20px] border border-white/60 bg-white/85 shadow-2xl ring-1 ring-black/[0.05] backdrop-blur-2xl dark:border-white/[0.1] dark:bg-[#1C1C1E]/85"
+                  className="absolute -left-4 -right-4 top-full z-30 mt-1 overflow-hidden rounded-[20px] border border-black/[0.06] bg-white/95 shadow-2xl ring-1 ring-black/[0.05] backdrop-blur-2xl"
                 >
-                    <div className="border-b border-black/[0.05] p-2 dark:border-white/[0.06]">
+                    <div className="border-b border-black/[0.05] p-2">
                       <Input
                         value={modelQuery}
                         onChange={(e) => setModelQuery(e.target.value)}
                         placeholder="搜索模型，如 tts / speech"
                         // v2.4.27：触屏不 autoFocus——面板一开就拉起软键盘会盖住半个面板
                         autoFocus={!IS_TOUCH_DEVICE}
-                        className="h-10 rounded-[12px] border-black/[0.05] bg-white/70 text-[13px] shadow-sm backdrop-blur-xl dark:border-white/[0.09] dark:bg-white/[0.09]"
+                        className="h-10 rounded-[12px] border-black/[0.05] bg-white text-[13px] shadow-sm backdrop-blur-xl"
                       />
                     </div>
                     <div
@@ -719,7 +719,7 @@ export function VoicePage({ onBack }: { onBack: () => void }) {
                       style={{ touchAction: 'pan-y', WebkitOverflowScrolling: 'touch' }}
                     >
                       {filteredTtsModels.length === 0 ? (
-                        <div className="px-4 py-6 text-center text-[13px] text-muted-foreground">没有匹配的模型</div>
+                        <div className="px-4 py-6 text-center text-[13px] text-zinc-500">没有匹配的模型</div>
                       ) : (
                         filteredTtsModels.map((m) => {
                           const isTts = /tts|speech|audio|voice/i.test(m);
@@ -731,18 +731,18 @@ export function VoicePage({ onBack }: { onBack: () => void }) {
                                 updateTtsConfig({ model: m });
                                 setModelPanelOpen(false);
                               }}
-                              className="flex w-full items-center justify-between gap-2 px-4 py-2.5 text-left transition-colors hover:bg-muted/50"
+                              className="flex w-full items-center justify-between gap-2 px-4 py-2.5 text-left transition-colors hover:bg-black/[0.04]"
                             >
                               <span className="flex min-w-0 items-center gap-2">
                                 <span className="truncate text-[14px]">{m}</span>
                                 {isTts && (
-                                  <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+                                  <span className="shrink-0 rounded-full bg-black/[0.05] px-1.5 py-0.5 text-[10px] font-medium text-zinc-500">
                                     语音
                                   </span>
                                 )}
                               </span>
                               {ttsConfig.model.trim() === m && (
-                                <Check className="h-4 w-4 shrink-0 text-foreground" strokeWidth={2.5} />
+                                <Check className="h-4 w-4 shrink-0 text-zinc-900" strokeWidth={2.5} />
                               )}
                             </button>
                           );
@@ -750,7 +750,7 @@ export function VoicePage({ onBack }: { onBack: () => void }) {
                       )}
                     </div>
                     {/* v2.2.3：底部计数行（总数永远可见）；v2.2.4 列表高度收敛 + 内滚强化 */}
-                    <div className="border-t border-black/[0.05] px-4 py-2 text-center text-[11px] tabular-nums text-muted-foreground dark:border-white/[0.06]">
+                    <div className="border-t border-black/[0.05] px-4 py-2 text-center text-[11px] tabular-nums text-zinc-500">
                       {mq ? `匹配 ${filteredTtsModels.length}，共 ${ttsModels.length} 个模型` : `共 ${ttsModels.length} 个模型`}
                     </div>
                   </div>
@@ -763,8 +763,8 @@ export function VoicePage({ onBack }: { onBack: () => void }) {
                     onClick={() => updateTtsConfig({ model: '' })}
                     className={`rounded-full px-2.5 py-1 text-[12px] transition-all active:scale-[0.97] ${
                       !ttsConfig.model.trim()
-                        ? 'bg-foreground font-medium text-background shadow-[0_4px_14px_rgba(17,24,39,0.18)]'
-                        : 'bg-white/55 text-foreground/70 ring-1 ring-black/[0.06] backdrop-blur-xl hover:bg-white/80 dark:bg-white/[0.07] dark:text-foreground/70 dark:ring-white/[0.1] dark:hover:bg-white/[0.14]'
+                        ? 'bg-[#007AFF] font-medium text-white shadow-[0_4px_14px_rgba(0,122,255,0.35)]'
+                        : 'bg-white/55 text-zinc-700 ring-1 ring-black/[0.06] backdrop-blur-xl hover:bg-white/80'
                     }`}
                   >
                     不需要模型（留空）
@@ -777,8 +777,8 @@ export function VoicePage({ onBack }: { onBack: () => void }) {
                     onClick={() => updateTtsConfig({ model: m })}
                     className={`rounded-full px-2.5 py-1 text-[12px] transition-all active:scale-[0.97] ${
                       ttsConfig.model.trim() === m
-                        ? 'bg-foreground font-medium text-background shadow-[0_4px_14px_rgba(17,24,39,0.18)]'
-                        : 'bg-white/55 text-foreground/70 ring-1 ring-black/[0.06] backdrop-blur-xl hover:bg-white/80 dark:bg-white/[0.07] dark:text-foreground/70 dark:ring-white/[0.1] dark:hover:bg-white/[0.14]'
+                        ? 'bg-[#007AFF] font-medium text-white shadow-[0_4px_14px_rgba(0,122,255,0.35)]'
+                        : 'bg-white/55 text-zinc-700 ring-1 ring-black/[0.06] backdrop-blur-xl hover:bg-white/80'
                     }`}
                   >
                     {m}
@@ -794,7 +794,7 @@ export function VoicePage({ onBack }: { onBack: () => void }) {
                 value={ttsConfig.defaultVoiceId}
                 onChange={(e) => updateTtsConfig({ defaultVoiceId: e.target.value })}
                 placeholder={isMinimax ? '如 female-shaonv（留空用系统默认）' : isFish ? '如 Fish Audio 音色 ID（留空用平台默认音色）' : '如 alloy（留空用系统默认）'}
-                className="h-11 w-full rounded-[14px] border-black/[0.05] bg-white/55 text-[14px] shadow-[inset_0_1px_0_rgba(255,255,255,0.7),0_3px_10px_rgba(17,24,39,0.05)] backdrop-blur-2xl dark:border-white/[0.09] dark:bg-white/[0.07] dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.05),0_3px_10px_rgba(0,0,0,0.2)]"
+                className="h-11 w-full rounded-[14px] border-black/[0.06] bg-white text-[14px] shadow-[inset_0_1px_0_rgba(255,255,255,0.7),0_3px_10px_rgba(17,24,39,0.05)] backdrop-blur-2xl"
               />
             </div>
 
@@ -804,7 +804,7 @@ export function VoicePage({ onBack }: { onBack: () => void }) {
                 type="button"
                 onClick={runPreview}
                 disabled={previewLoading}
-                className="flex h-11 w-full items-center justify-center gap-1.5 rounded-[14px] bg-white/60 text-[14px] font-medium text-foreground shadow-[0_6px_20px_rgba(17,24,39,0.08)] ring-1 ring-white/70 backdrop-blur-2xl transition-all active:scale-[0.98] active:bg-white/85 disabled:opacity-50 dark:bg-white/[0.1] dark:ring-white/[0.12] dark:active:bg-white/[0.16]"
+                className="flex h-11 w-full items-center justify-center gap-1.5 rounded-[14px] bg-white/60 text-[14px] font-medium text-zinc-900 shadow-[0_6px_20px_rgba(17,24,39,0.08)] ring-1 ring-black/[0.05] backdrop-blur-2xl transition-all active:scale-[0.98] active:bg-white/85 disabled:opacity-50"
               >
                 {previewLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <AudioLines className="h-4 w-4" />}
                 试听当前音色
@@ -824,13 +824,13 @@ export function VoicePage({ onBack }: { onBack: () => void }) {
                 data-testid="tts-provider-test"
                 onClick={() => void testProvider()}
                 disabled={testingProvider}
-                className="flex h-11 w-full items-center justify-center gap-1.5 rounded-[14px] bg-white/60 text-[14px] font-medium text-foreground shadow-[0_6px_20px_rgba(17,24,39,0.08)] ring-1 ring-white/70 backdrop-blur-2xl transition-all active:scale-[0.98] active:bg-white/85 disabled:opacity-50 dark:bg-white/[0.1] dark:ring-white/[0.12] dark:active:bg-white/[0.16]"
+                className="flex h-11 w-full items-center justify-center gap-1.5 rounded-[14px] bg-white/60 text-[14px] font-medium text-zinc-900 shadow-[0_6px_20px_rgba(17,24,39,0.08)] ring-1 ring-black/[0.05] backdrop-blur-2xl transition-all active:scale-[0.98] active:bg-white/85 disabled:opacity-50"
               >
                 {testingProvider ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wrench className="h-4 w-4" />}
                 {testingProvider ? '测试中…' : '测试服务商连接'}
               </button>
               {providerTestOk && !providerTestError && (
-                <p className="mt-1.5 flex items-start gap-1.5 text-[12px] leading-relaxed text-green-600 dark:text-green-400">
+                <p className="mt-1.5 flex items-start gap-1.5 text-[12px] leading-relaxed text-green-600">
                   <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0" />
                   服务商可用，测试音频已播放。
                 </p>
@@ -850,8 +850,8 @@ export function VoicePage({ onBack }: { onBack: () => void }) {
         {/* 我的音色：自建音色库（名字 + 音色 ID，永久保存；联系人/聊天设置「他的声音」可选用）；紧跟连接配置下方 */}
         <section>
           <SectionLabel icon={AudioLines} tone={TONE_ORANGE}>我的音色</SectionLabel>
-          <div className="flex flex-col gap-3 rounded-[22px] bg-white/55 p-4 shadow-[0_8px_28px_rgba(17,24,39,0.06)] ring-1 ring-white/70 backdrop-blur-2xl dark:bg-white/[0.06] dark:ring-white/[0.09]">
-            <p className="text-[12px] leading-relaxed text-muted-foreground/80">
+          <div className="flex flex-col gap-3 rounded-[22px] bg-white/80 p-4 shadow-[0_2px_12px_rgba(0,0,0,0.04)] ring-1 ring-black/[0.05] backdrop-blur-2xl">
+            <p className="text-[12px] leading-relaxed text-zinc-500/80">
               常用音色存成 preset（名字 + 音色 ID），联系人/聊天设置「他的声音」可点选使用。
             </p>
             {myVoices.length > 0 && (
@@ -860,11 +860,11 @@ export function VoicePage({ onBack }: { onBack: () => void }) {
                   <div
                     key={v.id}
                     data-testid={`my-voice-item-${v.id}`}
-                    className="flex items-center gap-2 rounded-[14px] border border-white/60 bg-white/50 px-4 py-2.5 shadow-[0_3px_12px_rgba(17,24,39,0.05)] backdrop-blur-xl dark:border-white/[0.08] dark:bg-white/[0.06]"
+                    className="flex items-center gap-2 rounded-[14px] border border-black/[0.06] bg-white/75 px-4 py-2.5 shadow-[0_3px_12px_rgba(17,24,39,0.05)] backdrop-blur-xl"
                   >
                     <div className="min-w-0 flex-1">
                       <div className="truncate text-[14px] font-medium">{v.name}</div>
-                      <div className="truncate text-[11px] text-muted-foreground">{v.voiceId}</div>
+                      <div className="truncate text-[11px] text-zinc-500">{v.voiceId}</div>
                     </div>
                     <button
                       type="button"
@@ -872,7 +872,7 @@ export function VoicePage({ onBack }: { onBack: () => void }) {
                       data-testid={`my-voice-preview-${v.id}`}
                       onClick={() => void previewMyVoice(v)}
                       className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-all ${
-                        previewingMyId === v.id ? 'bg-white/90 text-foreground shadow-sm dark:bg-white/[0.22]' : 'bg-white/60 text-muted-foreground ring-1 ring-black/[0.05] active:bg-white/85 dark:bg-white/[0.08] dark:ring-white/[0.1]'
+                        previewingMyId === v.id ? 'bg-white/90 text-zinc-900 shadow-sm' : 'bg-white/60 text-zinc-500 ring-1 ring-black/[0.05] active:bg-white/85'
                       }`}
                     >
                       <AudioLines className={`h-4 w-4 ${previewingMyId === v.id ? 'animate-pulse' : ''}`} aria-hidden="true" />
@@ -882,7 +882,7 @@ export function VoicePage({ onBack }: { onBack: () => void }) {
                       aria-label={`删除音色${v.name}`}
                       data-testid={`my-voice-delete-${v.id}`}
                       onClick={() => removeMyVoice(v.id)}
-                      className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:text-[#FF3B30]"
+                      className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-zinc-500 transition-colors hover:text-[#FF3B30]"
                     >
                       <Trash2 className="h-4 w-4" aria-hidden="true" />
                     </button>
@@ -898,7 +898,7 @@ export function VoicePage({ onBack }: { onBack: () => void }) {
                 maxLength={20}
                 data-testid="my-voice-name"
                 aria-label="我的音色名字"
-                className="h-11 rounded-[14px] border-black/[0.05] bg-white/55 text-[14px] shadow-[inset_0_1px_0_rgba(255,255,255,0.7),0_3px_10px_rgba(17,24,39,0.05)] backdrop-blur-2xl dark:border-white/[0.09] dark:bg-white/[0.07] dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.05),0_3px_10px_rgba(0,0,0,0.2)]"
+                className="h-11 rounded-[14px] border-black/[0.06] bg-white text-[14px] shadow-[inset_0_1px_0_rgba(255,255,255,0.7),0_3px_10px_rgba(17,24,39,0.05)] backdrop-blur-2xl"
               />
               <Input
                 value={myVoiceId}
@@ -906,7 +906,7 @@ export function VoicePage({ onBack }: { onBack: () => void }) {
                 placeholder="音色 ID，如 female-shaonv / alloy / builtin:xiaoyue"
                 data-testid="my-voice-id"
                 aria-label="我的音色 ID"
-                className="h-11 rounded-[14px] border-black/[0.05] bg-white/55 text-[14px] shadow-[inset_0_1px_0_rgba(255,255,255,0.7),0_3px_10px_rgba(17,24,39,0.05)] backdrop-blur-2xl dark:border-white/[0.09] dark:bg-white/[0.07] dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.05),0_3px_10px_rgba(0,0,0,0.2)]"
+                className="h-11 rounded-[14px] border-black/[0.06] bg-white text-[14px] shadow-[inset_0_1px_0_rgba(255,255,255,0.7),0_3px_10px_rgba(17,24,39,0.05)] backdrop-blur-2xl"
               />
               <div className="flex flex-wrap gap-1.5">
                 {BUILTIN_TTS_VOICES.map((b) => (
@@ -916,8 +916,8 @@ export function VoicePage({ onBack }: { onBack: () => void }) {
                     onClick={() => setMyVoiceId(b.id)}
                     className={`rounded-full px-2 py-0.5 text-[11px] transition-all active:scale-[0.97] ${
                       myVoiceId.trim() === b.id
-                        ? 'bg-foreground font-medium text-background shadow-[0_4px_14px_rgba(17,24,39,0.18)]'
-                        : 'bg-white/55 text-foreground/70 ring-1 ring-black/[0.06] backdrop-blur-xl hover:bg-white/80 dark:bg-white/[0.07] dark:text-foreground/70 dark:ring-white/[0.1] dark:hover:bg-white/[0.14]'
+                        ? 'bg-[#007AFF] font-medium text-white shadow-[0_4px_14px_rgba(0,122,255,0.35)]'
+                        : 'bg-white/55 text-zinc-700 ring-1 ring-black/[0.06] backdrop-blur-xl hover:bg-white/80'
                     }`}
                   >
                     {b.name}·{b.gender === 'female' ? '女' : '男'}
@@ -938,8 +938,8 @@ export function VoicePage({ onBack }: { onBack: () => void }) {
                   aria-label="测试当前填写的音色"
                   onClick={() => void previewMyVoice({ id: '__draft__', voiceId: myVoiceId.trim() })}
                   disabled={!myVoiceId.trim()}
-                  className={`flex h-11 flex-1 items-center justify-center gap-1.5 rounded-[14px] bg-white/60 text-[14px] font-medium text-foreground shadow-[0_6px_20px_rgba(17,24,39,0.08)] ring-1 ring-white/70 backdrop-blur-2xl transition-all active:scale-[0.98] active:bg-white/85 disabled:opacity-50 dark:bg-white/[0.1] dark:ring-white/[0.12] dark:active:bg-white/[0.16] ${
-                    previewingMyId === '__draft__' ? 'ring-2 ring-black/[0.15] dark:ring-white/[0.25]' : ''
+                  className={`flex h-11 flex-1 items-center justify-center gap-1.5 rounded-[14px] bg-white/60 text-[14px] font-medium text-zinc-900 shadow-[0_6px_20px_rgba(17,24,39,0.08)] ring-1 ring-black/[0.05] backdrop-blur-2xl transition-all active:scale-[0.98] active:bg-white/85 disabled:opacity-50 ${
+                    previewingMyId === '__draft__' ? 'ring-2 ring-black/[0.15]' : ''
                   }`}
                 >
                   {previewingMyId === '__draft__' ? <Loader2 className="h-4 w-4 animate-spin" /> : <AudioLines className="h-4 w-4" />}
@@ -949,7 +949,7 @@ export function VoicePage({ onBack }: { onBack: () => void }) {
                   type="button"
                   data-testid="my-voice-add"
                   onClick={submitMyVoice}
-                  className="flex h-11 flex-1 items-center justify-center gap-1.5 rounded-[14px] bg-white/60 text-[14px] font-medium text-foreground shadow-[0_6px_20px_rgba(17,24,39,0.08)] ring-1 ring-white/70 backdrop-blur-2xl transition-all active:scale-[0.98] active:bg-white/85 dark:bg-white/[0.1] dark:ring-white/[0.12] dark:active:bg-white/[0.16]"
+                  className="flex h-11 flex-1 items-center justify-center gap-1.5 rounded-[14px] bg-white/60 text-[14px] font-medium text-zinc-900 shadow-[0_6px_20px_rgba(17,24,39,0.08)] ring-1 ring-black/[0.05] backdrop-blur-2xl transition-all active:scale-[0.98] active:bg-white/85"
                 >
                   <Plus className="h-4 w-4" aria-hidden="true" />
                   保存音色
@@ -963,12 +963,12 @@ export function VoicePage({ onBack }: { onBack: () => void }) {
             服务端仅作可选兑底（OpenAI 兼容，配置后启用） */}
         <section>
           <SectionLabel icon={MessageSquareText} tone={TONE_GREEN}>语音识别 STT（转文字）</SectionLabel>
-          <div className="flex flex-col gap-3 rounded-[22px] bg-white/55 p-4 shadow-[0_8px_28px_rgba(17,24,39,0.06)] ring-1 ring-white/70 backdrop-blur-2xl dark:bg-white/[0.06] dark:ring-white/[0.09]">
+          <div className="flex flex-col gap-3 rounded-[22px] bg-white/80 p-4 shadow-[0_2px_12px_rgba(0,0,0,0.04)] ring-1 ring-black/[0.05] backdrop-blur-2xl">
             {/* 识别主通道：Web Speech（浏览器原生实时识别）——提示精简为一行 */}
             <div className="flex items-center justify-between gap-3">
               <div className="min-w-0">
-                <div className="text-[14px] font-medium text-foreground">浏览器实时识别（Web Speech）</div>
-                <p className="mt-0.5 text-[12px] leading-relaxed text-muted-foreground/70">
+                <div className="text-[14px] font-medium text-zinc-900">浏览器实时识别（Web Speech）</div>
+                <p className="mt-0.5 text-[12px] leading-relaxed text-zinc-500/70">
                   通话免提与语音消息转写的主通道（免配置）；关闭后直发语音只有音频。
                   {wsSupport === null ? '' : wsSupport ? '当前浏览器：支持。' : '当前浏览器：不支持。'}
                 </p>
@@ -985,9 +985,9 @@ export function VoicePage({ onBack }: { onBack: () => void }) {
             <OfflineAsrSection />
 
             {/* 服务端兑底（可选）：提示精简为一行 */}
-            <div className="border-t border-black/[0.06] pt-3 dark:border-white/[0.08]">
-              <div className="text-[14px] font-medium text-foreground">服务端兑底（OpenAI 兼容，可选）</div>
-              <p className="mt-0.5 text-[12px] leading-relaxed text-muted-foreground/70">
+            <div className="border-t border-black/[0.06] pt-3">
+              <div className="text-[14px] font-medium text-zinc-900">服务端兑底（OpenAI 兼容，可选）</div>
+              <p className="mt-0.5 text-[12px] leading-relaxed text-zinc-500/70">
                 浏览器识别不可用时的兑底；留空则只用浏览器实时识别。
                 {sttConfig.provider === 'openai' && sttConfig.apiKey.trim() && sttConfig.baseUrl.trim()
                   ? '当前：已启用。'
@@ -1001,7 +1001,7 @@ export function VoicePage({ onBack }: { onBack: () => void }) {
                     value={sttConfig.baseUrl}
                     onChange={(e) => updateSttConfig({ provider: 'openai', baseUrl: e.target.value })}
                     placeholder="填写转写 API 地址（OpenAI 兼容）"
-                    className="h-11 rounded-[14px] border-black/[0.05] bg-white/55 text-[14px] shadow-[inset_0_1px_0_rgba(255,255,255,0.7),0_3px_10px_rgba(17,24,39,0.05)] backdrop-blur-2xl dark:border-white/[0.09] dark:bg-white/[0.07] dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.05),0_3px_10px_rgba(0,0,0,0.2)]"
+                    className="h-11 rounded-[14px] border-black/[0.06] bg-white text-[14px] shadow-[inset_0_1px_0_rgba(255,255,255,0.7),0_3px_10px_rgba(17,24,39,0.05)] backdrop-blur-2xl"
                   />
                 </div>
                 <div>
@@ -1012,12 +1012,12 @@ export function VoicePage({ onBack }: { onBack: () => void }) {
                       value={sttConfig.apiKey}
                       onChange={(e) => updateSttConfig({ provider: 'openai', apiKey: e.target.value })}
                       placeholder="sk-…"
-                      className="h-11 rounded-[14px] border-black/[0.05] bg-white/55 pr-16 text-[14px] shadow-[inset_0_1px_0_rgba(255,255,255,0.7),0_3px_10px_rgba(17,24,39,0.05)] backdrop-blur-2xl dark:border-white/[0.09] dark:bg-white/[0.07] dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.05),0_3px_10px_rgba(0,0,0,0.2)]"
+                      className="h-11 rounded-[14px] border-black/[0.06] bg-white pr-16 text-[14px] shadow-[inset_0_1px_0_rgba(255,255,255,0.7),0_3px_10px_rgba(17,24,39,0.05)] backdrop-blur-2xl"
                     />
                     <button
                       type="button"
                       onClick={() => setShowSttKey((v) => !v)}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-[12px] text-muted-foreground"
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-[12px] text-zinc-500"
                     >
                       {showSttKey ? '隐藏' : '显示'}
                     </button>
@@ -1029,7 +1029,7 @@ export function VoicePage({ onBack }: { onBack: () => void }) {
                     value={sttConfig.model}
                     onChange={(e) => updateSttConfig({ provider: 'openai', model: e.target.value })}
                     placeholder="如 whisper-1（留空用默认 whisper-1）"
-                    className="h-11 rounded-[14px] border-black/[0.05] bg-white/55 text-[14px] shadow-[inset_0_1px_0_rgba(255,255,255,0.7),0_3px_10px_rgba(17,24,39,0.05)] backdrop-blur-2xl dark:border-white/[0.09] dark:bg-white/[0.07] dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.05),0_3px_10px_rgba(0,0,0,0.2)]"
+                    className="h-11 rounded-[14px] border-black/[0.06] bg-white text-[14px] shadow-[inset_0_1px_0_rgba(255,255,255,0.7),0_3px_10px_rgba(17,24,39,0.05)] backdrop-blur-2xl"
                   />
                   <div className="mt-2 flex flex-wrap gap-1.5">
                     {['whisper-1', 'whisper-large-v3', 'SenseVoiceSmall'].map((m) => (
@@ -1039,8 +1039,8 @@ export function VoicePage({ onBack }: { onBack: () => void }) {
                         onClick={() => updateSttConfig({ provider: 'openai', model: m })}
                         className={`rounded-full px-2.5 py-1 text-[12px] transition-all active:scale-[0.97] ${
                           sttConfig.model.trim() === m
-                            ? 'bg-foreground font-medium text-background shadow-[0_4px_14px_rgba(17,24,39,0.18)]'
-                            : 'bg-white/55 text-foreground/70 ring-1 ring-black/[0.06] backdrop-blur-xl hover:bg-white/80 dark:bg-white/[0.07] dark:text-foreground/70 dark:ring-white/[0.1] dark:hover:bg-white/[0.14]'
+                            ? 'bg-[#007AFF] font-medium text-white shadow-[0_4px_14px_rgba(0,122,255,0.35)]'
+                            : 'bg-white/55 text-zinc-700 ring-1 ring-black/[0.06] backdrop-blur-xl hover:bg-white/80'
                         }`
                       }
                       >
@@ -1105,7 +1105,7 @@ export function OfflineAsrDownloadInline({
 
   return (
     <div className="mt-2">
-      {status === 'checking' && <p className="text-[12px] text-muted-foreground">正在检查本地缓存…</p>}
+      {status === 'checking' && <p className="text-[12px] text-zinc-500">正在检查本地缓存…</p>}
 
       {(status === 'not-downloaded' || (status === 'error' && !busy)) && (
         <>
@@ -1113,11 +1113,11 @@ export function OfflineAsrDownloadInline({
             type="button"
             onClick={() => void startDownload()}
             disabled={busy}
-            className="rounded-xl bg-foreground px-4 py-2 text-[13px] font-medium text-background transition-all active:scale-[0.97] disabled:opacity-50"
+            className="rounded-xl bg-[#007AFF] px-4 py-2 text-[13px] font-medium text-white transition-all active:scale-[0.97] disabled:opacity-50"
           >
             {status === 'error' ? `重试${label}` : label}
           </button>
-          <p className="mt-1.5 text-[12px] text-muted-foreground/70">{hint}</p>
+          <p className="mt-1.5 text-[12px] text-zinc-500/70">{hint}</p>
         </>
       )}
 
@@ -1129,20 +1129,20 @@ export function OfflineAsrDownloadInline({
 
       {status === 'downloading' && (
         <div>
-          <div className="h-2 overflow-hidden rounded-full bg-black/[0.07] dark:bg-white/[0.12]">
+          <div className="h-2 overflow-hidden rounded-full bg-black/[0.07]">
             <div
               className="h-full rounded-full bg-[#07C160] transition-[width] duration-300"
               style={{ width: `${Math.max(2, progress?.pct ?? 0)}%` }}
             />
           </div>
-          <div className="mt-1.5 flex items-center justify-between text-[12px] text-muted-foreground">
+          <div className="mt-1.5 flex items-center justify-between text-[12px] text-zinc-500">
             <span>
               下载中 {progress ? `${progress.pct.toFixed(1)}%` : '准备中…'}
               {progress ? ` · ${loadedMb.toFixed(1)}/${totalMb.toFixed(0)} MB` : ''}
             </span>
             <span>{sourceIndex === 0 ? '主源' : '备用源'}</span>
           </div>
-          <p className="mt-1 text-[12px] text-muted-foreground/60">下载完成后自动注入引擎，可离开本页（下次进入续传整包）。</p>
+          <p className="mt-1 text-[12px] text-zinc-500/60">下载完成后自动注入引擎，可离开本页（下次进入续传整包）。</p>
         </div>
       )}
     </div>
@@ -1173,11 +1173,11 @@ export function OfflineAsrSection() {
   };
 
   return (
-    <div className="border-t border-black/[0.06] pt-3 dark:border-white/[0.08]">
+    <div className="border-t border-black/[0.06] pt-3">
       <div className="flex items-center justify-between gap-3">
         <div className="min-w-0">
-          <div className="text-[14px] font-medium text-foreground">离线识别（端侧模型，可选）</div>
-          <p className="mt-0.5 text-[12px] leading-relaxed text-muted-foreground/70">
+          <div className="text-[14px] font-medium text-zinc-900">离线识别（端侧模型，可选）</div>
+          <p className="mt-0.5 text-[12px] leading-relaxed text-zinc-500/70">
             SenseVoice 中文端侧模型（约 229MB，仅下载一次）：断网也可识别。
           </p>
         </div>
@@ -1193,7 +1193,7 @@ export function OfflineAsrSection() {
             type="button"
             onClick={() => void removeModel()}
             disabled={busy}
-            className="shrink-0 whitespace-nowrap rounded-xl px-3 py-1.5 text-[12px] text-muted-foreground ring-1 ring-black/[0.08] transition-all active:scale-[0.97] disabled:opacity-50 dark:ring-white/[0.12]"
+            className="shrink-0 whitespace-nowrap rounded-xl px-3 py-1.5 text-[12px] text-zinc-500 ring-1 ring-black/[0.08] transition-all active:scale-[0.97] disabled:opacity-50"
           >
             删除模型
           </button>

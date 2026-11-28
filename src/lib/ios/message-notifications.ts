@@ -20,6 +20,19 @@
 
 import { useSettings } from './store';
 
+/**
+ * v2.4.35 图标过桥根修：原生层（HttpURLConnection）无法访问 WebView 的
+ * https://localhost 源（Capacitor 请求拦截只对 WebView 生效）——旧版把
+ * `https://localhost/icons/app/icon-1-192.png` 这类绝对 URL 直接传给原生，
+ * 原生下载必败 → 小图标永远回落默认 ic_stat_cove（左上角从不变）、大图标
+ * 路径头像时有时无（dataURL 头像能解、路径头像解不了）。
+ *
+ * 修法：JS 侧先把图标/头像转成 dataURL 再过桥——
+ * - 头像：compressAvatarForPush（96px 圆形 JPEG + monogram 兑底，bg-turn 同源）。
+ * - APP 图标：fetch → blob → FileReader → dataURL，localStorage 持久缓存
+ *  （5 枚静态 PNG，冷启动也能秒取）。
+ */
+
 /** 消息通知请求（id 必填：每条消息一条独立通知） */
 export interface MessageNotificationReq {
   /** 消息唯一 ID（通知 tag 与去重键：同一消息绝不弹第二条） */
@@ -54,41 +67,83 @@ const sentIds = new Set<string>();
 /** 队列指标（设置页/调试可读：当前积压 + 累计发送） */
 export const notifyStats = { queued: 0, sent: 0 };
 
-/* ---------------- 图标规范化（原生侧下载/解码） ---------------- */
+/* ---------------- 图标规范化（v2.4.35：dataURL 过桥，原生可直接解码） ---------------- */
 
-/** 头像/图标 → 原生可解析的绝对地址：站内路径补 origin；dataURL 原样；空返回 undefined */
-function normalizeAvatar(src: string | null | undefined): string | undefined {
-  if (!src || typeof src !== 'string') return undefined;
-  const s = src.trim();
-  if (!s) return undefined;
-  if (s.startsWith('data:image/')) return s;
-  if (/^https?:\/\//i.test(s)) return s;
-  if (s.startsWith('/')) {
-    try {
-      return new URL(s, window.location.origin).href;
-    } catch {
-      return undefined;
+/** APP 图标 dataURL 内存缓存（v → Promise，防并发重复转换） */
+const appIconCache = new Map<string, Promise<string | undefined>>();
+
+/** 站内路径图标 → dataURL（fetch 走 WebView 拦截器可达；localStorage 持久缓存，
+ *  失败返回 undefined → 原生回落默认小图标）。http(s) 绝对地址同网可下时也尝试转内嵌。 */
+async function toDataUrl(src: string): Promise<string | undefined> {
+  const v = useSettings.getState().appIcon;
+  const cacheKey = src.startsWith('/icons/app/') && (v === '1' || v === '2' || v === '3' || v === '4' || v === '5') ? `notify-appicon:${v}` : `notify-img:${src.slice(0, 120)}`;
+  // 持久缓存命中（同文件静态图标二次会话零开销）
+  try {
+    const hit = window.localStorage.getItem(cacheKey);
+    if (hit && hit.startsWith('data:image/')) return hit;
+  } catch {
+    /* localStorage 不可用：内存缓存见下 */
+  }
+  let p = appIconCache.get(cacheKey);
+  if (!p) {
+    p = (async () => {
+      try {
+        const url = src.startsWith('data:') ? src : /^https?:\/\//i.test(src) ? src : new URL(src, window.location.origin).href;
+        if (src.startsWith('data:')) return src;
+        const res = await fetch(url, { cache: 'force-cache' });
+        if (!res.ok) return undefined;
+        const blob = await res.blob();
+        if (!blob.type.startsWith('image/') || blob.size > 400_000) return undefined;
+        const dataUrl: string = await new Promise((resolve, reject) => {
+          const fr = new FileReader();
+          fr.onload = () => resolve(String(fr.result || ''));
+          fr.onerror = () => reject(new Error('read'));
+          fr.readAsDataURL(blob);
+        });
+        if (!dataUrl.startsWith('data:image/')) return undefined;
+        try {
+          window.localStorage.setItem(cacheKey, dataUrl);
+        } catch {
+          /* 配额满：内存缓存仍生效 */
+        }
+        return dataUrl;
+      } catch {
+        return undefined;
+      }
+    })();
+    appIconCache.set(cacheKey, p);
+    if (appIconCache.size > 8) {
+      const oldest = appIconCache.keys().next().value;
+      if (oldest !== undefined && oldest.startsWith('notify-img:')) appIconCache.delete(oldest);
     }
   }
-  return undefined;
+  return p;
 }
 
-/** 机主选择的 APP 图标（设置›APP图标，'1'~'5'）→ 绝对 URL；读取失败返回 undefined */
-function chosenAppIconUrl(): string | undefined {
+/** 机主选择的 APP 图标（设置›APP图标，'1'~'5'）→ dataURL；读取/转换失败返回 undefined */
+async function chosenAppIconDataUrl(): Promise<string | undefined> {
   try {
     const v = useSettings.getState().appIcon;
     if (v !== '1' && v !== '2' && v !== '3' && v !== '4' && v !== '5') return undefined;
-    return normalizeAvatar(`/icons/app/icon-${v}-192.png`);
+    return await toDataUrl(`/icons/app/icon-${v}-192.png`);
   } catch {
     return undefined;
   }
 }
 
-/** 单条下发（内部）：走原生 localNotify（IMPORTANCE_HIGH 多渠道轮询 + BigTextStyle + 机主所选图标大图标） */
+/** 单条下发（内部）：走原生 localNotify（IMPORTANCE_HIGH 多渠道轮询 + BigTextStyle + 图标 dataURL 过桥）。
+ *  v2.4.35：图标/头像全部转 dataURL 再过桥——原生 HttpURLConnection 访问不了 WebView 的
+ *  localhost 源，旧版传绝对 URL 必败（左上角图标从不变 + 右侧头像时有时无的直接根因）。 */
 async function postOne(req: MessageNotificationReq): Promise<boolean> {
   try {
     const np = await import('./native-perception');
     if (!np.isNativePerception()) return false;
+    // 头像 → 96px 圆形 JPEG dataURL（含 monogram 兑底，右侧头像永不缺席）；
+    // APP 图标 → dataURL（左上角 = 机主所选图标）；两路并行转换
+    const [avatarData, appIconData] = await Promise.all([
+      import('./bg-turn').then(({ compressAvatarForPush }) => compressAvatarForPush(req.avatar ?? '', req.title)),
+      chosenAppIconDataUrl(),
+    ]);
     // v2.4.30 一消息一弹窗：tag = msg-<消息id>（唯一 → 系统绝不合并/覆盖）
     const ok = await np.localNotify({
       title: req.title,
@@ -96,10 +151,10 @@ async function postOne(req: MessageNotificationReq): Promise<boolean> {
       tag: `msg-${req.id}`,
       url: '/',
       target: req.target ?? undefined,
-      // v2.4.33 图标方向：小图标 = 机主所选 APP 图标（通知卡左上彩色显示）；
-      // 大图标 = 角色 AI 头像（通知卡右侧）
-      appIcon: chosenAppIconUrl(),
-      avatar: normalizeAvatar(req.avatar),
+      // v2.4.35 图标方向 + dataURL 过桥：小图标 = 机主所选 APP 图标（dataURL）；
+      // 大图标 = 角色 AI 头像（96px 圆形 JPEG dataURL，monogram 兑底）
+      appIcon: appIconData,
+      avatar: avatarData ?? undefined,
     });
     return ok === true;
   } catch {

@@ -326,8 +326,8 @@ export function ImageGenPage({ onBack }: { onBack: () => void }) {
           <GrayCard className="flex flex-col gap-3">
             <div className="flex items-center justify-between gap-3">
               <div className="min-w-0">
-                <div className="text-[14px] font-medium text-foreground">启用自动生图</div>
-                <p className="mt-0.5 text-[12px] leading-relaxed text-muted-foreground/70">
+                <div className="text-[14px] font-medium text-zinc-900">启用自动生图</div>
+                <p className="mt-0.5 text-[12px] leading-relaxed text-zinc-500/70">
                   开启后 AI 回复里的照片标签会自动生成真实照片（支持锁脸保持人物一致）
                 </p>
               </div>
@@ -340,7 +340,7 @@ export function ImageGenPage({ onBack }: { onBack: () => void }) {
               />
             </div>
             {imgGenConfig.enabled ? null : (
-              <p className="text-[12px] leading-relaxed text-muted-foreground">
+              <p className="text-[12px] leading-relaxed text-zinc-500">
                 关闭后 AI 不会自动生成照片，仍可在聊天里手动触发「生成照片」；下方配置请先填好（手动触发生图也依赖这些配置）。
               </p>
             )}
@@ -360,8 +360,8 @@ export function ImageGenPage({ onBack }: { onBack: () => void }) {
                       key={p.id}
                       className={`flex items-center gap-1.5 rounded-full py-1.5 pl-3 pr-2 text-[13px] transition-all active:scale-[0.97] ${
                         active
-                          ? 'bg-foreground font-medium text-background shadow-[0_4px_14px_rgba(17,24,39,0.18)]'
-                          : 'bg-white/55 text-foreground/75 ring-1 ring-black/[0.06] backdrop-blur-xl dark:bg-white/[0.07] dark:text-foreground/75 dark:ring-white/[0.1]'
+                          ? 'bg-[#007AFF] font-medium text-white shadow-[0_4px_14px_rgba(0,122,255,0.35)]'
+                          : 'bg-white/55 text-zinc-700 ring-1 ring-black/[0.06] backdrop-blur-xl'
                       }`}
                     >
                       <button
@@ -401,7 +401,7 @@ export function ImageGenPage({ onBack }: { onBack: () => void }) {
                   type="button"
                   data-testid="imggen-preset-save"
                   onClick={() => setSaveAnchor((v) => (v === 'preset' ? null : 'preset'))}
-                  className="flex items-center gap-1 rounded-full bg-white/55 px-3.5 py-1.5 text-[13px] text-muted-foreground ring-1 ring-black/[0.06] backdrop-blur-xl transition-all hover:bg-white/80 active:scale-[0.97] dark:bg-white/[0.07] dark:ring-white/[0.1] dark:hover:bg-white/[0.14]"
+                  className="flex items-center gap-1 rounded-full bg-white/55 px-3.5 py-1.5 text-[13px] text-zinc-500 ring-1 ring-black/[0.06] backdrop-blur-xl transition-all hover:bg-white/80 active:scale-[0.97]"
                 >
                   <Plus className="h-3.5 w-3.5" />
                   添加预设
@@ -414,7 +414,7 @@ export function ImageGenPage({ onBack }: { onBack: () => void }) {
                     onChange={(e) => setPresetName(e.target.value)}
                     placeholder="预设名称，如 本地生图模型"
                     autoFocus
-                    className="h-10 flex-1 rounded-[14px] border-black/[0.05] bg-white/55 text-[14px] shadow-[inset_0_1px_0_rgba(255,255,255,0.7),0_3px_10px_rgba(17,24,39,0.05)] backdrop-blur-2xl dark:border-white/[0.09] dark:bg-white/[0.07] dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.05),0_3px_10px_rgba(0,0,0,0.2)]"
+                    className="h-10 flex-1 rounded-[14px] border-black/[0.06] bg-white text-[14px] shadow-[inset_0_1px_0_rgba(255,255,255,0.7),0_3px_10px_rgba(17,24,39,0.05)] backdrop-blur-2xl"
                     onKeyDown={(e) => {
                       if (e.key === 'Enter') savePreset();
                     }}
@@ -423,7 +423,7 @@ export function ImageGenPage({ onBack }: { onBack: () => void }) {
                     type="button"
                     onClick={savePreset}
                     disabled={!presetName.trim()}
-                    className="h-10 shrink-0 rounded-[14px] bg-white/60 px-5 text-[13px] font-medium text-foreground shadow-[0_4px_14px_rgba(17,24,39,0.07)] ring-1 ring-white/70 backdrop-blur-2xl transition-all active:scale-[0.97] active:bg-white/85 disabled:opacity-40 dark:bg-white/[0.1] dark:ring-white/[0.12] dark:active:bg-white/[0.16]"
+                    className="h-10 shrink-0 rounded-[14px] bg-white/60 px-5 text-[13px] font-medium text-zinc-900 shadow-[0_4px_14px_rgba(17,24,39,0.07)] ring-1 ring-black/[0.05] backdrop-blur-2xl transition-all active:scale-[0.97] active:bg-white/85 disabled:opacity-40"
                   >
                     保存
                   </button>
@@ -433,7 +433,7 @@ export function ImageGenPage({ onBack }: { onBack: () => void }) {
 
             {/* Tab（用户需求）：连接配置 / 形象锁定（预设下方、连接配置上方，iOS 分段控件风） */}
             <div
-              className="flex rounded-[12px] bg-white/40 p-1 ring-1 ring-black/[0.05] backdrop-blur-xl dark:bg-white/[0.05] dark:ring-white/[0.08]"
+              className="flex rounded-[12px] bg-black/[0.04] p-1 ring-1 ring-black/[0.05] backdrop-blur-xl"
               role="tablist"
               aria-label="图像生成设置分区"
             >
@@ -445,8 +445,8 @@ export function ImageGenPage({ onBack }: { onBack: () => void }) {
                 onClick={() => setImgTab('conn')}
                 className={`h-9 flex-1 rounded-[9px] text-[13.5px] font-medium transition-all ${
                   imgTab === 'conn'
-                    ? 'bg-white/90 text-foreground shadow-sm dark:bg-white/[0.16]'
-                    : 'text-muted-foreground hover:text-foreground'
+                    ? 'bg-white/90 text-zinc-900 shadow-sm'
+                    : 'text-zinc-500 hover:text-zinc-900'
                 }`}
               >
                 连接配置
@@ -459,8 +459,8 @@ export function ImageGenPage({ onBack }: { onBack: () => void }) {
                 onClick={() => setImgTab('face')}
                 className={`h-9 flex-1 rounded-[9px] text-[13.5px] font-medium transition-all ${
                   imgTab === 'face'
-                    ? 'bg-white/90 text-foreground shadow-sm dark:bg-white/[0.16]'
-                    : 'text-muted-foreground hover:text-foreground'
+                    ? 'bg-white/90 text-zinc-900 shadow-sm'
+                    : 'text-zinc-500 hover:text-zinc-900'
                 }`}
               >
                 形象锁定
@@ -473,7 +473,7 @@ export function ImageGenPage({ onBack }: { onBack: () => void }) {
               <SectionLabel
                 icon={Wrench}
                 tone={TONE_BLUE}
-                right={<span className="text-[11px] text-muted-foreground/70">更改自动保存 · 即时生效</span>}
+                right={<span className="text-[11px] text-zinc-500/70">更改自动保存 · 即时生效</span>}
               >
                 连接配置
               </SectionLabel>
@@ -481,15 +481,15 @@ export function ImageGenPage({ onBack }: { onBack: () => void }) {
                 {/* 请求方式（iOS 分段控件风） */}
                 <div>
                   <FieldLabel>请求方式</FieldLabel>
-                  <div className="flex rounded-[12px] bg-white/40 p-1 ring-1 ring-black/[0.05] backdrop-blur-xl dark:bg-white/[0.05] dark:ring-white/[0.08]" role="group" aria-label="请求方式">
+                  <div className="flex rounded-[12px] bg-black/[0.04] p-1 ring-1 ring-black/[0.05] backdrop-blur-xl" role="group" aria-label="请求方式">
                     <button
                       type="button"
                       data-testid="imggen-mode-proxy"
                       onClick={() => patchImgGenConfig({ mode: 'proxy' })}
                       className={`h-8 flex-1 rounded-[9px] text-[13px] font-medium transition-all ${
                         imgGenConfig.mode === 'proxy'
-                          ? 'bg-white/90 text-foreground shadow-sm dark:bg-white/[0.16]'
-                          : 'text-muted-foreground hover:text-foreground'
+                          ? 'bg-white/90 text-zinc-900 shadow-sm'
+                          : 'text-zinc-500 hover:text-zinc-900'
                       }`}
                     >
                       服务端转发（推荐）
@@ -500,14 +500,14 @@ export function ImageGenPage({ onBack }: { onBack: () => void }) {
                       onClick={() => patchImgGenConfig({ mode: 'direct' })}
                       className={`h-8 flex-1 rounded-[9px] text-[13px] font-medium transition-all ${
                         imgGenConfig.mode === 'direct'
-                          ? 'bg-white/90 text-foreground shadow-sm dark:bg-white/[0.16]'
-                          : 'text-muted-foreground hover:text-foreground'
+                          ? 'bg-white/90 text-zinc-900 shadow-sm'
+                          : 'text-zinc-500 hover:text-zinc-900'
                       }`}
                     >
                       浏览器直连
                     </button>
                   </div>
-                  <p className="mt-1.5 text-[12px] leading-relaxed text-muted-foreground/70">
+                  <p className="mt-1.5 text-[12px] leading-relaxed text-zinc-500/70">
                     {imgGenConfig.mode === 'direct'
                       ? '浏览器直接请求生图接口，需接口允许跨域（CORS）。'
                       : '由本站服务器转发生图请求，免跨域、Key 不暴露给页面。'}
@@ -521,7 +521,7 @@ export function ImageGenPage({ onBack }: { onBack: () => void }) {
                     value={imgGenConfig.baseUrl}
                     onChange={(e) => patchImgGenConfig({ baseUrl: e.target.value })}
                     placeholder="填写生图 API 地址（OpenAI 兼容）"
-                    className="h-11 rounded-[14px] border-black/[0.05] bg-white/55 text-[14px] shadow-[inset_0_1px_0_rgba(255,255,255,0.7),0_3px_10px_rgba(17,24,39,0.05)] backdrop-blur-2xl dark:border-white/[0.09] dark:bg-white/[0.07] dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.05),0_3px_10px_rgba(0,0,0,0.2)]"
+                    className="h-11 rounded-[14px] border-black/[0.06] bg-white text-[14px] shadow-[inset_0_1px_0_rgba(255,255,255,0.7),0_3px_10px_rgba(17,24,39,0.05)] backdrop-blur-2xl"
                     data-testid="imggen-baseurl"
                   />
                 </div>
@@ -536,7 +536,7 @@ export function ImageGenPage({ onBack }: { onBack: () => void }) {
                       onChange={(e) => patchImgGenConfig({ apiKey: e.target.value })}
                       placeholder="sk-..."
                       autoComplete="off"
-                      className={`h-11 rounded-[14px] border-black/[0.05] bg-white/55 text-[14px] shadow-[inset_0_1px_0_rgba(255,255,255,0.7),0_3px_10px_rgba(17,24,39,0.05)] backdrop-blur-2xl dark:border-white/[0.09] dark:bg-white/[0.07] dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.05),0_3px_10px_rgba(0,0,0,0.2)] ${
+                      className={`h-11 rounded-[14px] border-black/[0.06] bg-white text-[14px] shadow-[inset_0_1px_0_rgba(255,255,255,0.7),0_3px_10px_rgba(17,24,39,0.05)] backdrop-blur-2xl ${
                         imgGenConfig.apiKey ? 'pr-16' : 'pr-10'
                       }`}
                       data-testid="imggen-apikey"
@@ -546,7 +546,7 @@ export function ImageGenPage({ onBack }: { onBack: () => void }) {
                         type="button"
                         onClick={() => updateImgGenConfig({ apiKey: '' })}
                         aria-label="清空生图 API Key"
-                        className="absolute right-8 top-1/2 -translate-y-1/2 p-1 text-muted-foreground transition-colors hover:text-foreground"
+                        className="absolute right-8 top-1/2 -translate-y-1/2 p-1 text-zinc-500 transition-colors hover:text-zinc-900"
                       >
                         <X className="h-4 w-4" />
                       </button>
@@ -555,7 +555,7 @@ export function ImageGenPage({ onBack }: { onBack: () => void }) {
                       type="button"
                       onClick={() => setShowKey((v) => !v)}
                       aria-label={showKey ? '隐藏生图 Key' : '显示生图 Key'}
-                      className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-muted-foreground transition-opacity hover:opacity-80"
+                      className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-zinc-500 transition-opacity hover:opacity-80"
                     >
                       {showKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                     </button>
@@ -570,7 +570,7 @@ export function ImageGenPage({ onBack }: { onBack: () => void }) {
                       value={imgGenConfig.model}
                       onChange={(e) => patchImgGenConfig({ model: e.target.value })}
                       placeholder="如 gpt-image-2 / flux-pro"
-                      className="h-11 flex-1 rounded-[14px] border-black/[0.05] bg-white/55 text-[14px] shadow-[inset_0_1px_0_rgba(255,255,255,0.7),0_3px_10px_rgba(17,24,39,0.05)] backdrop-blur-2xl dark:border-white/[0.09] dark:bg-white/[0.07] dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.05),0_3px_10px_rgba(0,0,0,0.2)]"
+                      className="h-11 flex-1 rounded-[14px] border-black/[0.06] bg-white text-[14px] shadow-[inset_0_1px_0_rgba(255,255,255,0.7),0_3px_10px_rgba(17,24,39,0.05)] backdrop-blur-2xl"
                       data-testid="imggen-model"
                     />
                     <button
@@ -578,7 +578,7 @@ export function ImageGenPage({ onBack }: { onBack: () => void }) {
                       data-testid="imggen-fetch-models"
                       onClick={() => void fetchModels()}
                       disabled={fetchingModels}
-                      className="flex h-11 shrink-0 items-center gap-1.5 rounded-[14px] bg-white/60 px-4 text-[13px] font-medium text-foreground shadow-[0_4px_14px_rgba(17,24,39,0.07)] ring-1 ring-white/70 backdrop-blur-2xl transition-all active:scale-[0.97] active:bg-white/85 disabled:opacity-50 dark:bg-white/[0.1] dark:ring-white/[0.12] dark:active:bg-white/[0.16]"
+                      className="flex h-11 shrink-0 items-center gap-1.5 rounded-[14px] bg-white/60 px-4 text-[13px] font-medium text-zinc-900 shadow-[0_4px_14px_rgba(17,24,39,0.07)] ring-1 ring-black/[0.05] backdrop-blur-2xl transition-all active:scale-[0.97] active:bg-white/85 disabled:opacity-50"
                     >
                       {fetchingModels && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
                       拉取模型
@@ -590,7 +590,7 @@ export function ImageGenPage({ onBack }: { onBack: () => void }) {
                     </p>
                   )}
                   {modelsHint && (
-                    <div className="mt-1.5 rounded-[16px] border border-amber-500/30 bg-amber-300/15 px-3.5 py-2 text-[12px] leading-relaxed text-amber-700 backdrop-blur-xl dark:border-amber-400/25 dark:bg-amber-300/[0.08] dark:text-amber-200/90">
+                    <div className="mt-1.5 rounded-[16px] border border-amber-500/30 bg-amber-300/15 px-3.5 py-2 text-[12px] leading-relaxed text-amber-700 backdrop-blur-xl">
                       {modelsHint}
                     </div>
                   )}
@@ -598,16 +598,16 @@ export function ImageGenPage({ onBack }: { onBack: () => void }) {
                   {modelPanelOpen && (
                     <div
                       data-model-panel
-                      className="absolute -left-4 -right-4 top-full z-30 mt-1 overflow-hidden rounded-[20px] border border-white/60 bg-white/85 shadow-2xl ring-1 ring-black/[0.05] backdrop-blur-2xl dark:border-white/[0.1] dark:bg-[#1C1C1E]/85"
+                      className="absolute -left-4 -right-4 top-full z-30 mt-1 overflow-hidden rounded-[20px] border border-black/[0.06] bg-white/95 shadow-2xl ring-1 ring-black/[0.05] backdrop-blur-2xl"
                     >
-                        <div className="border-b border-black/[0.05] p-2 dark:border-white/[0.06]">
+                        <div className="border-b border-black/[0.05] p-2">
                           <Input
                             value={modelQuery}
                             onChange={(e) => setModelQuery(e.target.value)}
                             placeholder="搜索模型，如 image / flux"
                             // v2.4.27：触屏不 autoFocus——面板一开就拉起软键盘会盖住半个面板
                             autoFocus={!IS_TOUCH_DEVICE}
-                            className="h-10 rounded-[12px] border-black/[0.05] bg-white/70 text-[13px] shadow-sm backdrop-blur-xl dark:border-white/[0.09] dark:bg-white/[0.09]"
+                            className="h-10 rounded-[12px] border-black/[0.05] bg-white text-[13px] shadow-sm backdrop-blur-xl"
                           />
                         </div>
                         <div
@@ -617,7 +617,7 @@ export function ImageGenPage({ onBack }: { onBack: () => void }) {
                           style={{ touchAction: 'pan-y', WebkitOverflowScrolling: 'touch' }}
                         >
                           {filteredModels.length === 0 ? (
-                            <div className="px-4 py-6 text-center text-[13px] text-muted-foreground">
+                            <div className="px-4 py-6 text-center text-[13px] text-zinc-500">
                               没有匹配的模型
                             </div>
                           ) : (
@@ -629,18 +629,18 @@ export function ImageGenPage({ onBack }: { onBack: () => void }) {
                                   patchImgGenConfig({ model: m });
                                   setModelPanelOpen(false);
                                 }}
-                                className="flex w-full items-center justify-between gap-2 px-4 py-2.5 text-left transition-colors hover:bg-muted/50"
+                                className="flex w-full items-center justify-between gap-2 px-4 py-2.5 text-left transition-colors hover:bg-black/[0.04]"
                               >
                                 <span className="truncate text-[14px]">{m}</span>
                                 {imgGenConfig.model === m && (
-                                  <Check className="h-4 w-4 shrink-0 text-foreground" strokeWidth={2.5} />
+                                  <Check className="h-4 w-4 shrink-0 text-zinc-900" strokeWidth={2.5} />
                                 )}
                               </button>
                             ))
                           )}
                         </div>
                         {/* v2.2.3：底部计数行（总数永远可见）；v2.2.4 撤 fixed 遮罩（吃页面滚动）改 outside-click */}
-                        <div className="border-t border-black/[0.05] px-4 py-2 text-center text-[11px] tabular-nums text-muted-foreground dark:border-white/[0.06]">
+                        <div className="border-t border-black/[0.05] px-4 py-2 text-center text-[11px] tabular-nums text-zinc-500">
                           {q ? `匹配 ${filteredModels.length}，共 ${models.length} 个模型` : `共 ${models.length} 个模型`}
                         </div>
                       </div>
@@ -655,7 +655,7 @@ export function ImageGenPage({ onBack }: { onBack: () => void }) {
                       data-testid="imggen-test"
                       onClick={() => void runImgGenTest()}
                       disabled={testing}
-                      className="flex h-11 flex-1 items-center justify-center gap-1.5 rounded-[14px] bg-white/60 text-[13px] font-medium text-foreground shadow-[0_6px_20px_rgba(17,24,39,0.08)] ring-1 ring-white/70 backdrop-blur-2xl transition-all active:scale-[0.98] active:bg-white/85 disabled:opacity-50 dark:bg-white/[0.1] dark:ring-white/[0.12] dark:active:bg-white/[0.16]"
+                      className="flex h-11 flex-1 items-center justify-center gap-1.5 rounded-[14px] bg-white/60 text-[13px] font-medium text-zinc-900 shadow-[0_6px_20px_rgba(17,24,39,0.08)] ring-1 ring-black/[0.05] backdrop-blur-2xl transition-all active:scale-[0.98] active:bg-white/85 disabled:opacity-50"
                     >
                       {testing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ImagePlus className="h-3.5 w-3.5" />}
                       {testing ? '正在生图…' : '测试生图'}
@@ -663,17 +663,17 @@ export function ImageGenPage({ onBack }: { onBack: () => void }) {
                     <button
                       type="button"
                       onClick={() => setSaveAnchor((v) => (v === 'config' ? null : 'config'))}
-                      className={`flex h-11 flex-1 items-center justify-center gap-2 rounded-[14px] text-[13px] font-medium shadow-[0_6px_20px_rgba(17,24,39,0.08)] ring-1 backdrop-blur-2xl transition-all active:scale-[0.98] dark:active:bg-white/[0.16] ${
+                      className={`flex h-11 flex-1 items-center justify-center gap-2 rounded-[14px] text-[13px] font-medium shadow-[0_6px_20px_rgba(17,24,39,0.08)] ring-1 backdrop-blur-2xl transition-all active:scale-[0.98] ${
                         saveAnchor === 'config'
-                          ? 'bg-foreground text-background ring-transparent dark:bg-white dark:text-black'
-                          : 'bg-white/60 text-foreground ring-white/70 active:bg-white/85 dark:bg-white/[0.1] dark:ring-white/[0.12]'
+                          ? 'bg-[#007AFF] text-white ring-transparent'
+                          : 'bg-white/60 text-zinc-900 ring-white/70 active:bg-white/85'
                       }`}
                     >
                       <Save className="h-3.5 w-3.5" />
                       保存预设
                     </button>
                   </div>
-                  <p className="mt-1.5 text-center text-[11px] leading-snug text-muted-foreground/70">
+                  <p className="mt-1.5 text-center text-[11px] leading-snug text-zinc-500/70">
                     按当前配置真实生成一张（约 10-60 秒），验证接口连通与生图效果
                   </p>
                   {saveAnchor === 'config' && (
@@ -683,7 +683,7 @@ export function ImageGenPage({ onBack }: { onBack: () => void }) {
                         onChange={(e) => setPresetName(e.target.value)}
                         placeholder="预设名称，如 本地生图模型"
                         autoFocus
-                        className="h-10 flex-1 rounded-[14px] border-black/[0.05] bg-white/55 text-[14px] shadow-[inset_0_1px_0_rgba(255,255,255,0.7),0_3px_10px_rgba(17,24,39,0.05)] backdrop-blur-2xl dark:border-white/[0.09] dark:bg-white/[0.07] dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.05),0_3px_10px_rgba(0,0,0,0.2)]"
+                        className="h-10 flex-1 rounded-[14px] border-black/[0.06] bg-white text-[14px] shadow-[inset_0_1px_0_rgba(255,255,255,0.7),0_3px_10px_rgba(17,24,39,0.05)] backdrop-blur-2xl"
                         onKeyDown={(e) => {
                           if (e.key === 'Enter') savePreset();
                         }}
@@ -692,7 +692,7 @@ export function ImageGenPage({ onBack }: { onBack: () => void }) {
                         type="button"
                         onClick={savePreset}
                         disabled={!presetName.trim()}
-                        className="h-10 shrink-0 rounded-[14px] bg-white/60 px-5 text-[13px] font-medium text-foreground shadow-[0_4px_14px_rgba(17,24,39,0.07)] ring-1 ring-white/70 backdrop-blur-2xl transition-all active:scale-[0.97] active:bg-white/85 disabled:opacity-40 dark:bg-white/[0.1] dark:ring-white/[0.12] dark:active:bg-white/[0.16]"
+                        className="h-10 shrink-0 rounded-[14px] bg-white/60 px-5 text-[13px] font-medium text-zinc-900 shadow-[0_4px_14px_rgba(17,24,39,0.07)] ring-1 ring-black/[0.05] backdrop-blur-2xl transition-all active:scale-[0.97] active:bg-white/85 disabled:opacity-40"
                       >
                         保存
                       </button>
@@ -709,8 +709,8 @@ export function ImageGenPage({ onBack }: { onBack: () => void }) {
                     </div>
                   )}
                   {testing && (
-                    <div className="mx-auto mt-3 grid aspect-square w-full max-w-[220px] place-items-center rounded-[14px] border border-dashed border-border bg-muted/40">
-                      <div className="flex flex-col items-center gap-2 text-muted-foreground">
+                    <div className="mx-auto mt-3 grid aspect-square w-full max-w-[220px] place-items-center rounded-[14px] border border-dashed border-black/10 bg-black/[0.03]">
+                      <div className="flex flex-col items-center gap-2 text-zinc-500">
                         <Loader2 className="h-5 w-5 animate-spin" />
                         <span className="text-[12px]">正在生成照片…</span>
                       </div>
@@ -718,7 +718,7 @@ export function ImageGenPage({ onBack }: { onBack: () => void }) {
                   )}
                   {testSrc && (
                     <div className="mt-3">
-                      <div className="mx-auto w-full max-w-[220px] overflow-hidden rounded-[14px] shadow-sm ring-1 ring-black/[0.06] dark:ring-white/10">
+                      <div className="mx-auto w-full max-w-[220px] overflow-hidden rounded-[14px] shadow-sm ring-1 ring-black/[0.06]">
                         <img
                           src={testSrc}
                           alt="测试生成的图片"
@@ -726,7 +726,7 @@ export function ImageGenPage({ onBack }: { onBack: () => void }) {
                           className="block aspect-square w-full object-cover"
                         />
                       </div>
-                      <div className="mt-2 flex items-center justify-center gap-1.5 text-[12px] leading-relaxed text-emerald-600 dark:text-emerald-400/90">
+                      <div className="mt-2 flex items-center justify-center gap-1.5 text-[12px] leading-relaxed text-emerald-600">
                         <CheckCircle2 className="h-3.5 w-3.5 shrink-0" strokeWidth={2.2} />
                         <span>测试成功</span>
                       </div>
@@ -741,7 +741,7 @@ export function ImageGenPage({ onBack }: { onBack: () => void }) {
                     value={imgGenConfig.size}
                     onChange={(e) => patchImgGenConfig({ size: e.target.value })}
                     placeholder="1024x1024 / auto"
-                    className="h-11 rounded-[14px] border-black/[0.05] bg-white/55 text-[14px] shadow-[inset_0_1px_0_rgba(255,255,255,0.7),0_3px_10px_rgba(17,24,39,0.05)] backdrop-blur-2xl dark:border-white/[0.09] dark:bg-white/[0.07] dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.05),0_3px_10px_rgba(0,0,0,0.2)]"
+                    className="h-11 rounded-[14px] border-black/[0.06] bg-white text-[14px] shadow-[inset_0_1px_0_rgba(255,255,255,0.7),0_3px_10px_rgba(17,24,39,0.05)] backdrop-blur-2xl"
                     data-testid="imggen-size"
                   />
                   <div className="mt-2 flex flex-wrap gap-1.5">
@@ -752,8 +752,8 @@ export function ImageGenPage({ onBack }: { onBack: () => void }) {
                         onClick={() => patchImgGenConfig({ size: sv })}
                         className={`rounded-full px-2.5 py-1 text-[12px] transition-all active:scale-[0.97] ${
                           imgGenConfig.size.trim() === sv
-                            ? 'bg-foreground font-medium text-background shadow-[0_4px_14px_rgba(17,24,39,0.18)]'
-                            : 'bg-white/55 text-foreground/70 ring-1 ring-black/[0.06] backdrop-blur-xl hover:bg-white/80 dark:bg-white/[0.07] dark:text-foreground/70 dark:ring-white/[0.1] dark:hover:bg-white/[0.14]'
+                            ? 'bg-[#007AFF] font-medium text-white shadow-[0_4px_14px_rgba(0,122,255,0.35)]'
+                            : 'bg-white/55 text-zinc-700 ring-1 ring-black/[0.06] backdrop-blur-xl hover:bg-white/80'
                         }`}
                       >
                         {sv}
@@ -769,7 +769,7 @@ export function ImageGenPage({ onBack }: { onBack: () => void }) {
                     value={imgGenConfig.quality}
                     onChange={(e) => patchImgGenConfig({ quality: e.target.value })}
                     placeholder="auto / low / medium / high"
-                    className="h-11 rounded-[14px] border-black/[0.05] bg-white/55 text-[14px] shadow-[inset_0_1px_0_rgba(255,255,255,0.7),0_3px_10px_rgba(17,24,39,0.05)] backdrop-blur-2xl dark:border-white/[0.09] dark:bg-white/[0.07] dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.05),0_3px_10px_rgba(0,0,0,0.2)]"
+                    className="h-11 rounded-[14px] border-black/[0.06] bg-white text-[14px] shadow-[inset_0_1px_0_rgba(255,255,255,0.7),0_3px_10px_rgba(17,24,39,0.05)] backdrop-blur-2xl"
                     data-testid="imggen-quality"
                   />
                   <div className="mt-2 flex flex-wrap gap-1.5">
@@ -780,8 +780,8 @@ export function ImageGenPage({ onBack }: { onBack: () => void }) {
                         onClick={() => patchImgGenConfig({ quality: qv })}
                         className={`rounded-full px-2.5 py-1 text-[12px] transition-all active:scale-[0.97] ${
                           imgGenConfig.quality.trim() === qv
-                            ? 'bg-foreground font-medium text-background shadow-[0_4px_14px_rgba(17,24,39,0.18)]'
-                            : 'bg-white/55 text-foreground/70 ring-1 ring-black/[0.06] backdrop-blur-xl hover:bg-white/80 dark:bg-white/[0.07] dark:text-foreground/70 dark:ring-white/[0.1] dark:hover:bg-white/[0.14]'
+                            ? 'bg-[#007AFF] font-medium text-white shadow-[0_4px_14px_rgba(0,122,255,0.35)]'
+                            : 'bg-white/55 text-zinc-700 ring-1 ring-black/[0.06] backdrop-blur-xl hover:bg-white/80'
                         }`}
                       >
                         {qv}
@@ -798,14 +798,14 @@ export function ImageGenPage({ onBack }: { onBack: () => void }) {
                     onChange={(e) => patchImgGenConfig({ extraPrompt: e.target.value })}
                     placeholder="如：写实风格，自然光线，手机自拍质感"
                     rows={3}
-                    className="min-h-[72px] rounded-[14px] border-black/[0.05] bg-white/55 py-2.5 text-[14px] shadow-[inset_0_1px_0_rgba(255,255,255,0.7),0_3px_10px_rgba(17,24,39,0.05)] backdrop-blur-2xl dark:border-white/[0.09] dark:bg-white/[0.07] dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.05),0_3px_10px_rgba(0,0,0,0.2)]"
+                    className="min-h-[72px] rounded-[14px] border-black/[0.06] bg-white py-2.5 text-[14px] shadow-[inset_0_1px_0_rgba(255,255,255,0.7),0_3px_10px_rgba(17,24,39,0.05)] backdrop-blur-2xl"
                     data-testid="imggen-extra"
                   />
                 </div>
 
                 {/* 未配置提示 */}
                 {!imgGenConfig.baseUrl.trim() && (
-                  <div className="rounded-[16px] border border-amber-500/30 bg-amber-300/15 px-3.5 py-2.5 text-[12px] leading-relaxed text-amber-700 backdrop-blur-xl dark:border-amber-400/25 dark:bg-amber-300/[0.08] dark:text-amber-200/90">
+                  <div className="rounded-[16px] border border-amber-500/30 bg-amber-300/15 px-3.5 py-2.5 text-[12px] leading-relaxed text-amber-700 backdrop-blur-xl">
                     还没有配置生图接口：填写 OpenAI 兼容的生图地址与模型名后，AI 回复里的照片标签才能生成真实照片。
                   </div>
                 )}
@@ -817,11 +817,11 @@ export function ImageGenPage({ onBack }: { onBack: () => void }) {
             {imgTab === 'face' && <FaceLockSection />}
 
             {/* 使用说明（页尾） */}
-            <p className="px-1 text-[12px] leading-relaxed text-muted-foreground">
+            <p className="px-1 text-[12px] leading-relaxed text-zinc-500">
               图像生成与聊天/识图配置相互独立、互不覆盖。开启后 AI 回复里出现照片标签会自动生成照片并发进聊天、存入角色相册；在「形象锁定」标签页为角色上传参考图即可锁脸，让照片里的人物长相保持一致。
             </p>
 
-            <p className="text-[11px] leading-relaxed text-muted-foreground/80">
+            <p className="text-[11px] leading-relaxed text-zinc-500/80">
               服务端转发模式由本站代理请求你配置的生图接口，免跨域；配置与预设保存在本机 IndexedDB（API Key 加密存储），保存即生效、无需重启。
             </p>
       </div>

@@ -295,6 +295,48 @@ function splitMultiSegments(content: string): string[] {
   return out;
 }
 
+// ---------------- v2.4.35 无边界「空格墙/逗号墙」兜底切分（机主截图实测根修） ----------------
+
+/**
+ * 弱模型常见的两种「墙」输出（v2.4.35 机主截图实测：AI 把 12 句话用空格连成一行塞进
+ * 同一个气泡——整段无换行、无句末标点、无 &&&，BOUNDARY_SRC 一个边界都匹配不到，
+ * 流式扫描器全程零产出、收尾整段交出 → 一条巨型气泡 + 只在回复结束时弹一次通知）：
+ * - 空格墙：多句话用空格分隔连成一行（「我也想你呀宝宝 修代码累不累呀 要不要先歇会儿…」）；
+ * - 逗号墙：多句话只用逗号/顿号相连（无任何句终符），极长时同样按逗号拆回多条。
+ *
+ * 兜底规则（只在【整段无任何强边界】时启用，正常输出零影响）：
+ * - 空格墙：按空白切开后每段都 ≥2 字且含 CJK（英文单词句绝不误拆：任何一个纯 ASCII
+ *   词段直接放弃兜底）→ 逐条连发；
+ * - 逗号墙：整段 ≥16 字且含 ≥2 个逗号/顿号 → 按逗号拆（「嘿嘿，你认真起来的样子真好看」
+ *   这类单逗号短句照旧一条；只有彻底没有句终符的长墙才拆）。
+ * 返回 null = 不适用（有强边界/拆不出多段），调用方走正常切分。
+ */
+const CJK_RE = /[\u3400-\u9FFF\uF900-\uFAFF\u3040-\u30FF]/;
+const STRONG_BOUNDARY_RE = /&{3,}|\n|[。！？!?～〜]/;
+
+function splitPunctuationWall(content: string): string[] | null {
+  const s = content.trim();
+  if (!s || STRONG_BOUNDARY_RE.test(s)) return null; // 有强边界：走正常切分，绝不插手
+  // ① 空格墙：按空白拆，每段 ≥2 字且含 CJK（防拆英文/纯数字句）
+  if (/\s/.test(s)) {
+    const phrases = s.split(/\s+/).map(trimBlank).filter((x) => x.length > 0);
+    if (phrases.length >= 2 && phrases.every((p) => Array.from(p).length >= 2 && CJK_RE.test(p))) {
+      return dedupConsecutive(phrases);
+    }
+    // 混了空格但不是纯 CJK 短语墙（如英文句）：继续看逗号墙
+  }
+  // ② 逗号墙：无任何句终符的长串逗号句（≥16 字且 ≥2 个逗/顿号）按逗号拆回多条
+  const commas = (s.match(/[，、]/g) ?? []).length;
+  if (Array.from(s).length >= 16 && commas >= 2) {
+    const parts = s
+      .split(/[，、]/)
+      .map((x) => trimBlank(x))
+      .filter((x) => x.length > 0);
+    if (parts.length >= 2) return dedupConsecutive(parts);
+  }
+  return null;
+}
+
 /**
  * 流结束后把完整回复切成多条消息文本（每条独立入库/渲染）。
  * multi（回复条数 > 1）时按「标记 + 换行 + 句末标点 + 动作描写」稳定切分：一句就是一条消息、
@@ -302,6 +344,8 @@ function splitMultiSegments(content: string): string[] {
  * 同一个气泡；不设硬上限（内容多就多切几条、内容少就少发，绝不把溢出句子堆进最后一条）。
  * 单条模式（回复条数 = 1，用户明确要一整条）沿用旧行为只按 &&& 标记切分。
  * 切不出任何非空段时返回 ['']（调用方沿用各自的空回复兜底文案）。
+ * v2.4.35：多条模式切完只剩 1 段时再试「空格墙/逗号墙」兜底（见 splitPunctuationWall）——
+ * 弱模型无换行无标点的整段输出也能拆回逐条连发，通知跟着逐条即时弹（不再堆到最后一条）。
  */
 export function splitReplySegments(content: string, multi = false): string[] {
   if (!multi) {
@@ -312,6 +356,11 @@ export function splitReplySegments(content: string, multi = false): string[] {
   }
   // v55：切分后全员碎片合并（「嗯」「好」「在」这种碎句不再各自成条，并成一条完整消息）
   const segs = mergeTinySegments(dedupConsecutive(splitMultiSegments(content)));
+  if (segs.length > 1) return segs;
+  // v2.4.35 空格墙/逗号墙兜底：正常边界一根都切不动、整段挤成 1 条时按弱边界拆回多条。
+  // 空格拆出的段是模型显式分段（不做碎片合并——「嗯嗯 好的 在的」就是想连发三条短的）
+  const wall = splitPunctuationWall(content);
+  if (wall && wall.length > 1) return wall;
   return segs.length > 0 ? segs : [''];
 }
 

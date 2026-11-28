@@ -52,6 +52,10 @@ const running = new Set<string>();
 const tickListeners = new Map<string, Set<() => void>>();
 /** 投递状态变化订阅（聊天页用：「正在输入」指示） */
 const activeListeners = new Set<() => void>();
+/** v2.4.35「点进聊天消息已在」：机主刚打开的会话键——队列里剩余的连发消息
+ *  跳过打字节奏立即投完（通知都已弹过，点进来就该看到全部消息，而不是看着
+ *  剩下的消息一条一条挤出来）；队列清空时自动解除。 */
+const flushNowKeys = new Set<string>();
 
 /** 默认停顿：各端通常传 typingDelayOf 按内容长度模拟打字；这里给一个保守的通用节奏 */
 function defaultDelay(): number {
@@ -146,6 +150,7 @@ function pump(sessionKey: string): void {
     // 队列空：释放 running 与 queues 的空数组引用（避免 Map 保留空数组永不释放）
     running.delete(sessionKey);
     queues.delete(sessionKey);
+    flushNowKeys.delete(sessionKey);
     emitActive();
     return;
   }
@@ -221,17 +226,26 @@ function pump(sessionKey: string): void {
     emitTick(sessionKey);
     index += 1;
     // v1.9.12：会话没被机主看着 → 快速投递（80ms 条间），通知即到即弹；
-    // 机主正看着 → 按内容长度模拟打字节奏（逐条冒出的真人节奏）
-    const wait = shouldFastDeliver(sessionKey)
-      ? FAST_DELIVER_GAP_MS
-      : Math.max(0, Math.round(delayOf(index - 1, items.length)));
+    // 机主正看着 → 按内容长度模拟打字节奏（逐条冒出的真人节奏）；
+    // v2.4.35 flushNow：机主刚点进该会话 → 0ms 连投（消息已在，不再看它们挤牙膏）
+    const wait = flushNowKeys.has(sessionKey)
+      ? 0
+      : shouldFastDeliver(sessionKey)
+        ? FAST_DELIVER_GAP_MS
+        : Math.max(0, Math.round(delayOf(index - 1, items.length)));
     window.setTimeout(step, wait);
   };
   running.add(sessionKey);
   emitActive();
   // 首条前停顿（分段投递的批间打字节奏）；期间 running 保持，聊天页「正在输入」不闪断。
-  // 页面不可见 / 机主没看着该会话时跳过停顿（节奏对不可见的消息毫无意义，通知越快越好）
-  if (opts?.initialDelay && opts.initialDelay > 0 && !isPageHidden() && !shouldFastDeliver(sessionKey)) {
+  // 页面不可见 / 机主没看着该会话 / 刚点进该会话（v2.4.35 flush）时跳过停顿
+  if (
+    opts?.initialDelay &&
+    opts.initialDelay > 0 &&
+    !isPageHidden() &&
+    !shouldFastDeliver(sessionKey) &&
+    !flushNowKeys.has(sessionKey)
+  ) {
     window.setTimeout(step, Math.round(opts.initialDelay));
   } else {
     step();
@@ -269,6 +283,19 @@ export function scheduleAiDelivery<T>(
 /** 该会话是否正在投递（含排队中的批次）——聊天页用来显示「正在输入」 */
 export function isAiDelivering(sessionKey: string): boolean {
   return running.has(sessionKey) || (queues.get(sessionKey)?.length ?? 0) > 0;
+}
+
+/**
+ * v2.4.35「点进聊天消息已在」（机主令）：机主打开某会话（聊天页挂载/切回）时调用——
+ * 该会话投递队列里剩余的连发消息立即投完（0ms 连投），不再按打字节奏逐条挤。
+ * 通知早已逐条弹过；点进聊天页就该看到全部消息。队列为空时无操作、不标记
+ * （标记只对已有队列生效，防后续新回合被误加速——新回合由流式分段驱动，节奏照旧）。
+ */
+export function markSessionFlushNow(sessionKey: string): void {
+  if (!sessionKey) return;
+  const q = queues.get(sessionKey);
+  if (!q || q.length === 0) return;
+  flushNowKeys.add(sessionKey);
 }
 
 /** 全部正在投递（含排队）的会话键快照：pagehide 时逐会话上报未落盘尾部（bg-turn 接力用） */

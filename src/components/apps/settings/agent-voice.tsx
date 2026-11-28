@@ -81,7 +81,7 @@ export function AutonomySwitch({ on, onToggle, label, testId }: { on: boolean; o
       data-testid={testId}
       onClick={onToggle}
       className={`relative h-[31px] w-[51px] shrink-0 rounded-full transition-colors duration-200 ${
-        on ? 'bg-[#34C759]' : 'bg-black/15 dark:bg-white/25'
+        on ? 'bg-[#34C759]' : 'bg-black/15'
       }`}
     >
       <span
@@ -121,10 +121,10 @@ export function WakeStatusRow({ name }: { name: string }) {
     dot = 'bg-[#FF9500]';
     text = '喊名唤醒已暂停 · 每 40 秒自动重试';
   } else if (!diag.listening) {
-    dot = 'bg-muted-foreground/40';
+    dot = 'bg-zinc-500/40';
     text = diag.lastError || '唤醒监听启动中…';
   } else if (diag.paused) {
-    dot = 'bg-muted-foreground/40';
+    dot = 'bg-zinc-500/40';
     text = '已暂时静音（会话/通话/朗读中），空闲自动恢复';
   }
   const degraded = diag.listening && diag.server === 'fail';
@@ -140,12 +140,12 @@ export function WakeStatusRow({ name }: { name: string }) {
             aria-hidden="true"
             className={`h-2 w-2 shrink-0 rounded-full ${dot} ${diag.listening && !diag.paused && !blocked ? 'animate-pulse' : ''}`}
           />
-          <span className="truncate text-[13px] text-foreground/90" data-testid="agent-voice-wake-status-text">
+          <span className="truncate text-[13px] text-zinc-800" data-testid="agent-voice-wake-status-text">
             {text}
           </span>
         </span>
         {diag.lastText ? (
-          <span className="mt-0.5 block truncate text-[11px] text-muted-foreground" data-testid="agent-voice-wake-last-text">
+          <span className="mt-0.5 block truncate text-[11px] text-zinc-500" data-testid="agent-voice-wake-last-text">
             最近听到：{diag.lastText}
           </span>
         ) : null}
@@ -153,7 +153,7 @@ export function WakeStatusRow({ name }: { name: string }) {
           <span className="mt-0.5 block truncate text-[11px] text-[#FF9500]">识别服务波动：已自动换通道重试，喊名可能暂时不灵</span>
         ) : null}
         {showModelGuide ? (
-          <div className="mt-1.5 border-t border-black/[0.05] pt-2 dark:border-white/[0.08]">
+          <div className="mt-1.5 border-t border-black/[0.05] pt-2">
             <OfflineAsrDownloadInline
               label="下载离线识别模型（喊名零流量零延迟，断网可用）"
               hint="下载完成后喊名自动切回端侧识别，不再上传音频（约 229MB，仅一次）"
@@ -166,7 +166,7 @@ export function WakeStatusRow({ name }: { name: string }) {
           type="button"
           onClick={retryAgentWake}
           data-testid="agent-voice-wake-retry"
-          className="flex h-8 shrink-0 items-center rounded-full bg-foreground/90 px-3 text-[12px] text-background transition active:scale-95"
+          className="flex h-8 shrink-0 items-center rounded-full bg-zinc-900/90 px-3 text-[12px] text-white transition active:scale-95"
         >
           重试
         </button>
@@ -259,17 +259,17 @@ export function AgentVoiceCard() {
       {/* v1.9.3：独立设置页（标题走 DetailShell 导航栏），卡片直接紧跟内容区；
           v1.9.13：卡片左右延伸（mx-4→mx-1，DetailShell px-4 内不再双重缩进），图标改黑白线条 */}
       <div
-        className="mx-1 mt-2 overflow-hidden rounded-[22px] bg-white/55 shadow-[0_8px_28px_rgba(17,24,39,0.06)] ring-1 ring-white/70 backdrop-blur-2xl dark:bg-white/[0.06] dark:ring-white/[0.09]"
+        className="mx-1 mt-2 overflow-hidden rounded-[22px] bg-white/80 shadow-[0_2px_12px_rgba(0,0,0,0.04)] ring-1 ring-black/[0.05] backdrop-blur-2xl"
         data-testid="settings-agent-voice-card"
       >
         {/* 一行说明（v1.9.41 精简） */}
         <div className="flex items-start gap-3 px-4 pt-3">
           <LineIcon icon={Sparkles} />
-          <p className="min-w-0 flex-1 pb-1 text-[11.5px] leading-relaxed text-muted-foreground">
+          <p className="min-w-0 flex-1 pb-1 text-[11.5px] leading-relaxed text-zinc-500">
             喊唤醒名或点悬浮球，随时唤起 TA——能聊也能帮你办事
           </p>
         </div>
-        <div className="mt-1 divide-y divide-black/[0.05] dark:divide-white/[0.06]">
+        <div className="mt-1 divide-y divide-black/[0.05]">
           {/* 专属人设（v1.9.13 可编辑：点开展开编辑器，自定义性格与说话方式；空 = 内置默认） */}
           <div>
             <button
@@ -282,28 +282,28 @@ export function AgentVoiceCard() {
               <LineIcon icon={Fingerprint} />
               <span className="min-w-0 flex-1">
                 <span className="block truncate text-[16px]">专属人设</span>
-                <span className="mt-0.5 block truncate text-[11.5px] text-muted-foreground">
+                <span className="mt-0.5 block truncate text-[11.5px] text-zinc-500">
                   {personaCustom ? cfg.persona.trim().slice(0, 40) : ASSISTANT_PERSONA_TAGLINE}
                 </span>
               </span>
               <span
                 className={`shrink-0 rounded-full px-2.5 py-1 text-[11px] ${
                   personaCustom
-                    ? 'bg-[#007AFF]/10 text-[#007AFF] dark:text-[#64B5FF]'
-                    : 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+                    ? 'bg-[#007AFF]/10 text-[#007AFF]'
+                    : 'bg-emerald-500/10 text-emerald-600'
                 }`}
                 data-testid="agent-voice-persona-badge"
               >
                 {personaCustom ? '已自定义' : cfg.name || DEFAULT_WAKE_NAME}
               </span>
               <ChevronDown
-                className={`h-4 w-4 shrink-0 text-muted-foreground/70 transition-transform ${personaOpen ? 'rotate-180' : ''}`}
+                className={`h-4 w-4 shrink-0 text-zinc-500/70 transition-transform ${personaOpen ? 'rotate-180' : ''}`}
                 aria-hidden="true"
               />
             </button>
             {personaOpen ? (
-              <div className="bg-black/[0.02] px-4 pb-3 dark:bg-white/[0.03]">
-                <p className="pt-1.5 text-[11px] leading-relaxed text-muted-foreground">
+              <div className="bg-black/[0.02] px-4 pb-3">
+                <p className="pt-1.5 text-[11px] leading-relaxed text-zinc-500">
                   写下你想要的性格与说话方式，留空保存 = 恢复默认。
                 </p>
                 <Textarea
@@ -329,7 +329,7 @@ export function AgentVoiceCard() {
                     <button
                       type="button"
                       onClick={() => setPersonaDraft(null)}
-                      className="flex items-center gap-1 rounded-full bg-black/[0.05] px-3 py-[6px] text-[11.5px] font-medium text-foreground/70 transition-colors active:bg-black/[0.08] dark:bg-white/10 dark:text-muted-foreground"
+                      className="flex items-center gap-1 rounded-full bg-black/[0.05] px-3 py-[6px] text-[11.5px] font-medium text-zinc-700 transition-colors active:bg-black/[0.08]"
                     >
                       取消编辑
                     </button>
@@ -338,7 +338,7 @@ export function AgentVoiceCard() {
                     <button
                       type="button"
                       onClick={() => updateAgentVoiceCfg({ persona: '' })}
-                      className="flex items-center gap-1 rounded-full bg-black/[0.05] px-3 py-[6px] text-[11.5px] font-medium text-foreground/70 transition-colors active:bg-black/[0.08] dark:bg-white/10 dark:text-muted-foreground"
+                      className="flex items-center gap-1 rounded-full bg-black/[0.05] px-3 py-[6px] text-[11.5px] font-medium text-zinc-700 transition-colors active:bg-black/[0.08]"
                       data-testid="agent-voice-persona-reset"
                     >
                       <RefreshCw className="h-3 w-3" />
@@ -354,7 +354,7 @@ export function AgentVoiceCard() {
             <LineIcon icon={Mic} />
             <span className="min-w-0 flex-1">
               <span className="block truncate text-[16px]">唤醒名</span>
-              <span className="mt-0.5 block truncate text-[11.5px] text-muted-foreground">喊出即唤起，也是 TA 的名字</span>
+              <span className="mt-0.5 block truncate text-[11.5px] text-zinc-500">喊出即唤起，也是 TA 的名字</span>
             </span>
             <Input
               value={nameDraft}
@@ -373,7 +373,7 @@ export function AgentVoiceCard() {
             <LineIcon icon={Smile} />
             <span className="min-w-0 flex-1">
               <span className="block truncate text-[16px]">TA 怎么称呼你</span>
-              <span className="mt-0.5 block truncate text-[11.5px] text-muted-foreground">对话里 TA 会这样称呼你（可不填）</span>
+              <span className="mt-0.5 block truncate text-[11.5px] text-zinc-500">对话里 TA 会这样称呼你（可不填）</span>
             </span>
             <Input
               value={ownerDraft}
@@ -399,16 +399,16 @@ export function AgentVoiceCard() {
               <LineIcon icon={AudioLines} />
               <span className="min-w-0 flex-1">
                 <span className="block truncate text-[16px]">助手音色</span>
-                <span className="mt-0.5 block truncate text-[11.5px] text-muted-foreground">TA 说话用的声音</span>
+                <span className="mt-0.5 block truncate text-[11.5px] text-zinc-500">TA 说话用的声音</span>
               </span>
-              <span className="shrink-0 text-[13px] text-muted-foreground" data-testid="agent-voice-voice-value">
+              <span className="shrink-0 text-[13px] text-zinc-500" data-testid="agent-voice-voice-value">
                 {cfg.voice ? describeVoiceId(cfg.voice, myVoices) : '跟随语音 API 默认'}
               </span>
-              <ChevronDown className={`h-4 w-4 shrink-0 text-muted-foreground/70 transition-transform ${voiceOpen ? 'rotate-180' : ''}`} aria-hidden="true" />
+              <ChevronDown className={`h-4 w-4 shrink-0 text-zinc-500/70 transition-transform ${voiceOpen ? 'rotate-180' : ''}`} aria-hidden="true" />
             </button>
             {voiceOpen ? (
-              <div className="bg-black/[0.02] px-4 pb-3 dark:bg-white/[0.03]">
-                <p className="pt-1.5 text-[11px] leading-relaxed text-muted-foreground">点选音色 · 点右侧喇叭试听</p>
+              <div className="bg-black/[0.02] px-4 pb-3">
+                <p className="pt-1.5 text-[11px] leading-relaxed text-zinc-500">点选音色 · 点右侧喇叭试听</p>
                 <div className="thin-scrollbar mt-2 flex max-h-72 flex-col gap-1 overflow-y-auto">
                   {voiceOpts.map((opt) => {
                     const active = cfg.voice === opt.voiceId;
@@ -428,12 +428,12 @@ export function AgentVoiceCard() {
                           }
                         }}
                         className={`flex min-h-[44px] cursor-pointer items-center gap-2.5 rounded-[14px] px-3 py-1.5 transition-all ${
-                          active ? 'bg-white/85 ring-1 ring-black/[0.06] dark:bg-white/[0.12] dark:ring-white/[0.14]' : 'bg-white/45 ring-1 ring-transparent hover:bg-white/70 dark:bg-white/[0.05] dark:hover:bg-white/[0.09]'
+                          active ? 'bg-white/85 ring-1 ring-black/[0.06]' : 'bg-white/70 ring-1 ring-transparent hover:bg-white/85'
                         }`}
                       >
                         <span className="min-w-0 flex-1">
                           <span className="block truncate text-[14px] font-medium">{opt.name}</span>
-                          <span className="block truncate text-[10.5px] text-muted-foreground">{opt.sub}</span>
+                          <span className="block truncate text-[10.5px] text-zinc-500">{opt.sub}</span>
                         </span>
                         {canPreview ? (
                           <button
@@ -444,7 +444,7 @@ export function AgentVoiceCard() {
                               previewAssistantVoice(opt.voiceId);
                             }}
                             className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-all ${
-                              previewingVoice === opt.voiceId ? 'bg-foreground text-background' : 'bg-white/70 text-muted-foreground ring-1 ring-black/[0.05] active:bg-white/90 dark:bg-white/[0.09] dark:ring-white/[0.1]'
+                              previewingVoice === opt.voiceId ? 'bg-[#007AFF] text-white' : 'bg-white/70 text-zinc-500 ring-1 ring-black/[0.05] active:bg-white/90'
                             }`}
                           >
                             <AudioLines className={`h-3.5 w-3.5 ${previewingVoice === opt.voiceId ? 'animate-pulse' : ''}`} aria-hidden="true" />
@@ -463,7 +463,7 @@ export function AgentVoiceCard() {
             <LineIcon icon={CircleDot} />
             <span className="min-w-0 flex-1">
               <span className="block truncate text-[16px]">悬浮球</span>
-              <span className="mt-0.5 block truncate text-[11.5px] text-muted-foreground">屏幕右缘小球，点按说话下发任务</span>
+              <span className="mt-0.5 block truncate text-[11.5px] text-zinc-500">屏幕右缘小球，点按说话下发任务</span>
             </span>
             <AutonomySwitch
               on={cfg.ball}
@@ -477,7 +477,7 @@ export function AgentVoiceCard() {
             <LineIcon icon={Ear} />
             <span className="min-w-0 flex-1">
               <span className="block truncate text-[16px]">连续唤醒监听</span>
-              <span className="mt-0.5 block text-[11.5px] leading-snug text-muted-foreground">
+              <span className="mt-0.5 block text-[11.5px] leading-snug text-zinc-500">
                 后台听着唤醒名，喊出即唤起（略增耗电）
               </span>
             </span>
@@ -495,7 +495,7 @@ export function AgentVoiceCard() {
             <LineIcon icon={Volume2} />
             <span className="min-w-0 flex-1">
               <span className="block truncate text-[16px]">执行结果语音播报</span>
-              <span className="mt-0.5 block truncate text-[11.5px] leading-snug text-muted-foreground">
+              <span className="mt-0.5 block truncate text-[11.5px] leading-snug text-zinc-500">
                 任务完成后朗读结果
               </span>
             </span>
@@ -511,7 +511,7 @@ export function AgentVoiceCard() {
             <LineIcon icon={MessagesSquare} />
             <span className="min-w-0 flex-1">
               <span className="block truncate text-[16px]">任务后追问窗口</span>
-              <span className="mt-0.5 block text-[11.5px] leading-snug text-muted-foreground">
+              <span className="mt-0.5 block text-[11.5px] leading-snug text-zinc-500">
                 任务说完可接着说下一个，无需再喊名
               </span>
             </span>
@@ -527,7 +527,7 @@ export function AgentVoiceCard() {
             <LineIcon icon={Repeat} />
             <span className="min-w-0 flex-1">
               <span className="block truncate text-[16px]">连续对话</span>
-              <span className="mt-0.5 block text-[11.5px] leading-snug text-muted-foreground">
+              <span className="mt-0.5 block text-[11.5px] leading-snug text-zinc-500">
                 回答后自动继续听，说话即打断
               </span>
             </span>
@@ -542,7 +542,7 @@ export function AgentVoiceCard() {
       </div>
       {/* 状态提示行（v1.9.41 精简：只在异常时给一行短提示） */}
       {!nativeMode ? (
-        <p className="mx-4 mt-2 text-[11.5px] leading-relaxed text-muted-foreground">
+        <p className="mx-4 mt-2 text-[11.5px] leading-relaxed text-zinc-500">
           浏览器里同样能喊名或点球唤起（需允许麦克风）；真机任务只在 APP 内。
         </p>
       ) : null}

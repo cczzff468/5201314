@@ -263,6 +263,32 @@ function splitSingleReply(raw: string): string[] {
   } else if (tail && tail !== lastEmitted) {
     out.push(tail);
   }
+  // v2.4.35 空格墙/逗号墙兜底（与客户端 reply-count.ts splitPunctuationWall 同口径）：
+  // 整段无换行/无句末标点/无 &&&（弱模型把多句用空格连成一行）时正常边界一根都切不动，
+  // 只剩 1 条巨型消息 → 通知只弹一次。按空格（每段 ≥2 字且含 CJK，英文句不拆）/逗号墙
+  // （≥16 字且 ≥2 逗顿号）拆回逐条，通知跟着逐条弹。
+  if (out.length <= 1) {
+    const s = (raw || '').trim();
+    const STRONG = /&{3,}|\n|[。！？!?～〜]/;
+    if (s && !STRONG.test(s)) {
+      const wall = (() => {
+        if (/\s/.test(s)) {
+          const phrases = s.split(/\s+/).map((x) => x.trim()).filter(Boolean);
+          const CJK = /[\u3400-\u9FFF\uF900-\uFAFF\u3040-\u30FF]/;
+          if (phrases.length >= 2 && phrases.every((p) => Array.from(p).length >= 2 && CJK.test(p))) {
+            return phrases;
+          }
+        }
+        const commas = (s.match(/[，、]/g) ?? []).length;
+        if (Array.from(s).length >= 16 && commas >= 2) {
+          const parts = s.split(/[，、]/).map((x) => x.trim()).filter(Boolean);
+          if (parts.length >= 2) return parts;
+        }
+        return null;
+      })();
+      if (wall && wall.length > 1) return wall;
+    }
+  }
   return out;
 }
 
@@ -451,13 +477,18 @@ async function generateAndEnqueue(sessionKey: string, payload: BgPayload, title:
         emittedAny = true;
       };
       const scanBoundaries = (): void => {
-        // 非全局正则（无 lastIndex 副作用）；从 buf 头部逐个找硬边界，闭合即出段
-        const BOUNDARY = /&{3,}|\n/;
+        // 非全局正则（无 lastIndex 副作用）；从 buf 头部逐个找硬边界，闭合即出段。
+        // v2.4.35 边界补齐：句末标点（。！？!?～〜+收尾引号，并入前一条末尾）也算边界——
+        // 与客户端 createReplySegmentScanner 同口径：模型一句一行/句终即止时，通知在
+        // 生成过程中就逐条弹出（不等整段回复结束）；只有空格墙才留到收尾兜底拆。
+        const BOUNDARY = /&{3,}|\n|[。！？!?～〜]+[”’"』」）)\]]*/;
         for (;;) {
           const m = BOUNDARY.exec(buf);
           if (!m) break;
-          const seg = buf.slice(0, m.index);
-          buf = buf.slice(m.index + m[0].length);
+          const isSentence = /^[。！？!?～〜]/.test(m[0]);
+          const end = m.index + m[0].length;
+          const seg = buf.slice(0, isSentence ? end : m.index);
+          buf = buf.slice(end);
           // 未闭合半角 [ / 全角【（splitSingleReply 同款）：扣住拼下一段（照片/红包标记
           // 内部的换行/句末标点不是消息边界）；思考块期间不扣（整块本来就丢弃）
           const hasOpenBracket =

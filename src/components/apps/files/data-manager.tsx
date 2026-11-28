@@ -46,7 +46,8 @@ import {
   restoreBackup as restoreCloudBackup, runBackup, writeBackupPrefs,
   type BackupRow, type CloudBackupPrefs,
 } from '@/lib/ios/cloud-backup';
-import { useUI } from '@/lib/ios/store';
+import { rehydrateKvFromIdb } from '@/lib/ios/idb-kv';
+import { useSettings, useUI } from '@/lib/ios/store';
 
 // ---------------- 局部样式基元（毛玻璃 / 胶囊） ----------------
 
@@ -262,68 +263,64 @@ function AppCell({
           if (!disabled) onTap();
         }
       }}
-      className={`relative flex h-[72px] w-full cursor-pointer select-none flex-col justify-center gap-2 overflow-hidden rounded-[22px] px-3 transition-all duration-200 [-webkit-touch-callout:none] ${
+      className={`relative flex min-h-[64px] w-full cursor-pointer select-none items-center gap-3 px-4 transition-all duration-200 [-webkit-touch-callout:none] ${
         selected && multiMode
-          ? 'scale-[1.02] bg-[#007AFF]/[0.07] ring-1 ring-[#007AFF]/45 backdrop-blur-2xl shadow-[0_2px_14px_rgba(0,0,0,0.05)] dark:bg-[#007AFF]/[0.12]'
-          : GLASS_BASE
-      } ${disabled ? 'opacity-60' : 'active:scale-[0.98]'}`}
+          ? 'bg-[#007AFF]/[0.06] dark:bg-[#007AFF]/[0.12]'
+          : ''
+      } ${disabled ? 'opacity-60' : 'active:bg-black/[0.03] dark:active:bg-white/[0.05]'}`}
     >
-      {/* 行：彩色 App 图标 + 名称/大小两行（v2.4.32：绿点已删，改大小副行） */}
-      <div className="flex min-w-0 items-center gap-2.5">
-        {/* 彩色原样 App 图标（轻投影提升质感） */}
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          src={app.icon}
-          alt={`${app.label}图标`}
-          className="h-[38px] w-[38px] shrink-0 rounded-[11px] object-cover shadow-[0_2px_8px_rgba(0,0,0,0.10)]"
-          draggable={false}
-        />
-        <div className="min-w-0 flex-1">
-          <p className="truncate text-[13.5px] font-semibold leading-tight text-zinc-800 dark:text-zinc-100">
-            {app.label}
-          </p>
-          <p className="mt-0.5 truncate text-[11px] font-medium tabular-nums text-zinc-400 dark:text-zinc-500">
-            {safe ? '已备份 · ' : ''}
-            {formatBytesAscii(size)}
-          </p>
-        </div>
-      </div>
-      {/* 底部相对用量细条（v2.4.32 美化：中性色，宽 = 占总量比例，最小 4%） */}
-      <div aria-hidden className="h-[3px] w-full overflow-hidden rounded-full bg-black/[0.05] dark:bg-white/[0.08]">
-        <div
-          className="h-full rounded-full bg-zinc-400/70 dark:bg-zinc-400/60"
-          style={{ width: `${Math.max(4, Math.min(100, Math.round(share * 100)))}%` }}
-        />
+      {/* 彩色原样 App 图标（轻投影提升质感） */}
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src={app.icon}
+        alt={`${app.label}图标`}
+        className="h-[44px] w-[44px] shrink-0 rounded-[12px] object-cover shadow-[0_2px_8px_rgba(0,0,0,0.10)]"
+        draggable={false}
+      />
+      {/* 名称 + 副行（已备份标记 + 占用大小） */}
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-[15px] font-semibold leading-tight text-zinc-900 dark:text-zinc-50">
+          {app.label}
+        </p>
+        <p className="mt-[3px] truncate text-[11.5px] font-medium tabular-nums text-zinc-400 dark:text-zinc-500">
+          {safe ? '已备份 · ' : ''}
+          {formatBytesAscii(size)} · {Math.round(share * 100) || 0}%
+        </p>
       </div>
       <span className="sr-only">长按进入多选</span>
 
-      {/* 多选模式：右上角圆形勾选框 */}
-      {multiMode && (
+      {/* 右侧：多选 = 勾选圈；普通 = chevron 引导（已备份加绿色小点） */}
+      {multiMode ? (
         <span
           aria-hidden
-          className={`absolute right-2.5 top-2.5 grid h-[20px] w-[20px] place-items-center rounded-full border-2 transition-all duration-200 ${
+          className={`grid h-[22px] w-[22px] shrink-0 place-items-center rounded-full border-2 transition-all duration-200 ${
             selected ? 'border-[#007AFF] bg-[#007AFF] text-white' : 'border-zinc-300 bg-white/60 dark:border-zinc-600 dark:bg-transparent'
           }`}
         >
-          {selected && <Check className="h-3 w-3" strokeWidth={3.2} />}
+          {selected && <Check className="h-3.5 w-3.5" strokeWidth={3.2} />}
+        </span>
+      ) : (
+        <span className="flex shrink-0 items-center gap-2">
+          {safe && <span aria-hidden className="h-[7px] w-[7px] rounded-full bg-[#34C759]" />}
+          <ChevronDown
+            aria-hidden
+            className="h-4 w-4 -rotate-90 text-black/20 dark:text-white/25"
+          />
         </span>
       )}
     </div>
   );
 }
 
-/** 数据未加载时的骨架宫格胶囊 */
+/** 数据未加载时的骨架行（iOS 列表行样式） */
 function SkeletonCell() {
   return (
-    <div aria-hidden className="flex h-[72px] w-full animate-pulse flex-col justify-center gap-2 rounded-[22px] bg-black/[0.04] px-3 dark:bg-white/[0.05]">
-      <div className="flex items-center gap-2.5">
-        <div className="h-[38px] w-[38px] shrink-0 rounded-[11px] bg-black/[0.06] dark:bg-white/[0.08]" />
-        <div className="flex-1 space-y-1.5">
-          <div className="h-3 w-3/5 rounded-full bg-black/[0.06] dark:bg-white/[0.08]" />
-          <div className="h-2 w-2/5 rounded-full bg-black/[0.05] dark:bg-white/[0.06]" />
-        </div>
+    <div aria-hidden className="flex min-h-[64px] w-full animate-pulse items-center gap-3 px-4">
+      <div className="h-[44px] w-[44px] shrink-0 rounded-[12px] bg-black/[0.06] dark:bg-white/[0.08]" />
+      <div className="flex-1 space-y-2">
+        <div className="h-3.5 w-2/5 rounded-full bg-black/[0.06] dark:bg-white/[0.08]" />
+        <div className="h-2.5 w-1/4 rounded-full bg-black/[0.05] dark:bg-white/[0.06]" />
       </div>
-      <div className="h-[3px] w-full rounded-full bg-black/[0.05] dark:bg-white/[0.07]" />
     </div>
   );
 }
@@ -340,6 +337,8 @@ export default function DataManager() {
   const [prefs, setPrefs] = useState<CloudBackupPrefs | null>(null);
   const [mediaAuto, setMediaAuto] = useState(false);
   const [persisted, setPersisted] = useState<boolean | null>(null);
+  /** v2.4.35 iOS 储存空间风 hero：浏览器存储配额（quota/usage，navigator.storage.estimate） */
+  const [quota, setQuota] = useState<number | null>(null);
 
   // ---- 交互状态 ----
   const [sel, setSel] = useState<Set<string>>(new Set());
@@ -389,6 +388,12 @@ export default function DataManager() {
       } catch {
         setPersisted(false);
       }
+      try {
+        const est = await navigator.storage?.estimate?.();
+        if (est && typeof est.quota === 'number' && est.quota > 0) setQuota(est.quota);
+      } catch {
+        /* 配额不可用：hero 用总占用+固定盈余做分母 */
+      }
     })();
   }, [refresh]);
 
@@ -421,6 +426,23 @@ export default function DataManager() {
   })();
 
   const latestCloud = cloudRows.length > 0 ? cloudRows[0] : null;
+
+  // ---- v2.4.35 iOS 储存空间风派生：配额分母 + 前 4 大应用分段 ----
+  /** iOS 系统色分段（红/橙/深灰/浅灰——机主截图配色） */
+  const SEG_COLORS = ['#FF3B30', '#FF9500', '#9E9E9E', '#C7C7CC'];
+  /** hero 分母：优先真实配额（取「已用×2.5」与 1GB 的较大者做下限，防配额≈已用时条顶满）；无配额时已用+512MB */
+  const heroDenominator = quota
+    ? Math.max(quota, totalBytes * 2.5, 1024 * 1024 * 1024)
+    : Math.max(totalBytes + 512 * 1024 * 1024, 1024 * 1024 * 1024);
+  /** 前 4 大应用（占用 >0 才上榜）+ 占配额百分比 */
+  const segStats = sorted
+    .filter((s) => s.bytes > 0)
+    .slice(0, 4)
+    .map((s) => ({
+      app: appOf(s.id),
+      pct: (s.bytes / heroDenominator) * 100,
+    }))
+    .filter((s): s is { app: AppModuleDef; pct: number } => !!s.app);
 
   // ---- 多选 ----
   const toggleSel = (id: string) =>
@@ -584,23 +606,38 @@ export default function DataManager() {
     }
   };
 
-  // ---- 本地备份文件导入（先导出安全备份，再恢复，成功后 1.4s 刷新） ----
+  // ---- 本地备份文件导入（v2.4.35：免刷新生效，不再自动下载安全备份） ----
   const doImportFile = async (file: File) => {
     if (busy) return;
     setBusy('import');
     try {
-      try {
-        await exportBackupToDownload({ safety: true });
-      } catch (err) {
-        throw new Error(`恢复前安全备份失败（已中止恢复）：${err instanceof Error ? err.message : '未知错误'}`);
-      }
       const r = await restoreLocalBackup(file);
-      toast.success(`恢复成功 · ${r.records} 条数据 · 即将刷新`);
-      window.setTimeout(() => window.location.reload(), 1400);
+      // 免刷新生效（机主令「导入备份以后不要更新网页」）：
+      // ① kv 内存层从 IndexedDB 重新注水（restoreBackup 直写 IDB，内存是旧值）
+      // ② 设置 store 重载（settings 表已被备份覆盖）
+      // ③ 退回主屏强制重挂载各 App（下次进任何 App 读到的都是新数据）
+      // ④ 广播 cove-data-restored：主屏小组件等监听方自行刷新
+      try {
+        await rehydrateKvFromIdb();
+        useSettings.setState({ loaded: false });
+        await useSettings.getState().load();
+      } catch {
+        /* 重注水失败：退回刷新页面兑底 */
+        window.location.reload();
+        return;
+      }
+      try {
+        useUI.getState().exitForegroundApp();
+      } catch {
+        /* 不阻塞 */
+      }
+      window.dispatchEvent(new CustomEvent('cove-data-restored', { detail: { source: 'import', records: r.records } }));
+      toast.success(`恢复成功 · ${r.records} 条数据 · 已生效（重进各 App 即可看到）`);
+      await refresh();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : '恢复失败，请重试');
-      setBusy('');
     } finally {
+      setBusy('');
       setPendingImport(null);
     }
   };
@@ -618,44 +655,71 @@ export default function DataManager() {
 
   return (
     <div className={`${PAGE_BG} min-h-full pb-12 text-zinc-800 antialiased dark:text-zinc-100`}>
-      {/* ============ 1) Hero 毛玻璃总览（多选时收起） ============ */}
+      {/* ============ 1) Hero（v2.4.35 机主截图改版：iOS 储存空间风——Cove 标题 + 已使用 X/Y + 分段进度条 + 图例） ============ */}
       <div
         className={`overflow-hidden px-4 pt-3 transition-all duration-300 ${
-          multiMode ? 'max-h-0 -translate-y-2 pt-0 opacity-0' : 'max-h-[220px] opacity-100'
+          multiMode ? 'max-h-0 -translate-y-2 pt-0 opacity-0' : 'max-h-[300px] opacity-100'
         }`}
       >
         <div className={`${GLASS_BASE} relative rounded-[32px] p-5`}>
+          {/* 第一行：Cove 大标题 + 右侧刷新胶囊 + 已使用 X/Y */}
           <div className="flex items-start justify-between gap-3">
-            {/* 左：总占用大数字 + 概览小字 */}
-            <div className="min-w-0 pt-1">
-              <p className="text-[34px] font-semibold leading-none tracking-tight tabular-nums text-zinc-900 dark:text-white">
-                {stats ? formatBytesAscii(totalBytes) : '…'}
-              </p>
-              <p className="mt-2.5 text-[12px] text-zinc-400">
-                {stats ? `${stats.length} 个应用 · ${totalRecords} 项数据` : '正在扫描…'}
+            <div className="min-w-0">
+              <p className="text-[24px] font-bold leading-tight tracking-tight text-zinc-900 dark:text-white">Cove</p>
+              <p className="mt-1 text-[12px] font-medium tabular-nums text-zinc-400 dark:text-zinc-500">
+                {stats
+                  ? `已使用 ${formatBytesAscii(totalBytes)} / ${formatBytesAscii(heroDenominator)}`
+                  : '正在扫描…'}
               </p>
             </div>
-            {/* 右：刷新胶囊 + 已备份 / 可清理状态胶囊 */}
-            <div className="flex shrink-0 flex-col items-end gap-1.5">
-              <button
-                type="button"
-                aria-label="重新扫描"
-                onClick={() => void refresh()}
-                disabled={scanning}
-                className="flex h-9 w-9 items-center justify-center rounded-full bg-white/70 ring-1 ring-black/[0.05] backdrop-blur-xl transition active:scale-90 disabled:opacity-50 dark:bg-white/[0.08] dark:ring-white/[0.1]"
-              >
-                <RefreshCw className={`h-4 w-4 text-zinc-500 dark:text-zinc-300 ${scanning ? 'animate-spin' : ''}`} aria-hidden />
-              </button>
-              <span className="flex items-center gap-1.5 rounded-full bg-[#34C759]/[0.10] px-2.5 py-1 text-[11px] font-medium text-[#248A3D] dark:text-[#30D158]">
-                <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-[#34C759]" />
-                已备份 {formatBytesAscii(safeBytes)}
-              </span>
-              <span className="flex items-center gap-1.5 rounded-full bg-black/[0.05] px-2.5 py-1 text-[11px] font-medium text-zinc-500 dark:bg-white/[0.08] dark:text-zinc-400">
-                <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-zinc-400 dark:bg-zinc-500" />
-                可清理 {formatBytesAscii(dirtyBytes)}
-              </span>
-            </div>
+            <button
+              type="button"
+              aria-label="重新扫描"
+              onClick={() => void refresh()}
+              disabled={scanning}
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white/70 ring-1 ring-black/[0.05] backdrop-blur-xl transition active:scale-90 disabled:opacity-50 dark:bg-white/[0.08] dark:ring-white/[0.1]"
+            >
+              <RefreshCw className={`h-4 w-4 text-zinc-500 dark:text-zinc-300 ${scanning ? 'animate-spin' : ''}`} aria-hidden />
+            </button>
           </div>
+
+          {/* 第二行：iOS 分段储存进度条（前 4 大应用分段着色，其余为可用空间） */}
+          <div
+            aria-label="储存占用构成"
+            className="mt-3.5 flex h-[14px] w-full gap-[2px] overflow-hidden rounded-full bg-black/[0.05] p-0 dark:bg-white/[0.08]"
+          >
+            {segStats.map((s, i) => (
+              <span
+                key={s.app.id}
+                aria-hidden
+                className="h-full first:rounded-l-full last:rounded-r-full"
+                style={{ backgroundColor: SEG_COLORS[i % SEG_COLORS.length], width: `${Math.max(1.5, Math.min(100, s.pct))}%` }}
+              />
+            ))}
+          </div>
+
+          {/* 第三行：图例（前 4 大应用 + 可用空间） */}
+          <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1.5">
+            {segStats.map((s, i) => (
+              <span key={s.app.id} className="flex items-center gap-1.5 text-[11.5px] font-medium text-zinc-600 dark:text-zinc-300">
+                <span
+                  aria-hidden
+                  className="h-[9px] w-[9px] rounded-full"
+                  style={{ backgroundColor: SEG_COLORS[i % SEG_COLORS.length] }}
+                />
+                {s.app.label}
+              </span>
+            ))}
+            <span className="flex items-center gap-1.5 text-[11.5px] font-medium text-zinc-400 dark:text-zinc-500">
+              <span aria-hidden className="h-[9px] w-[9px] rounded-full bg-black/[0.08] dark:bg-white/[0.14]" />
+              可用空间
+            </span>
+          </div>
+
+          {/* 概览小字（保留总览信息） */}
+          <p className="mt-2.5 text-[11px] text-zinc-400 dark:text-zinc-500">
+            {stats ? `${stats.length} 个应用 · ${totalRecords} 项数据 · 已备份 ${formatBytesAscii(safeBytes)}` : ''}
+          </p>
         </div>
       </div>
 
@@ -687,27 +751,29 @@ export default function DataManager() {
       )}
 
       <section aria-label="应用占用列表" className="px-4">
-        <div className="grid grid-cols-2 gap-3">
+        {/* v2.4.35 iOS 储存空间风：单张大玻璃卡 + 列表行（divide-y 分隔，图标右侧起线） */}
+        <div className={`${GLASS} overflow-hidden`}>
           {stats === null
-            ? [0, 1, 2, 3, 4, 5].map((i) => <SkeletonCell key={i} />)
-            : sorted.map((stat) => {
+            ? [0, 1, 2, 3, 4, 5, 6, 7].map((i) => <SkeletonCell key={i} />)
+            : sorted.map((stat, idx) => {
                 const app = appOf(stat.id);
                 if (!app) return null;
                 return (
-                  <AppCell
-                    key={app.id}
-                    app={app}
-                    safe={backup ? isAppSafe(stat, backup) : false}
-                    size={stat.bytes}
-                    share={totalBytes > 0 ? stat.bytes / totalBytes : 0}
-                    selected={sel.has(app.id)}
-                    multiMode={multiMode}
-                    disabled={busy !== ''}
-                    onTap={() => {
-                      if (multiMode) toggleSel(app.id); // v2.4.31：非多选短按不再进详情页（长按进入多选）
-                    }}
-                    onLongPress={() => enterMulti(app.id)}
-                  />
+                  <div key={app.id} className={idx > 0 ? 'border-t border-black/[0.05] dark:border-white/[0.06]' : ''}>
+                    <AppCell
+                      app={app}
+                      safe={backup ? isAppSafe(stat, backup) : false}
+                      size={stat.bytes}
+                      share={totalBytes > 0 ? stat.bytes / totalBytes : 0}
+                      selected={sel.has(app.id)}
+                      multiMode={multiMode}
+                      disabled={busy !== ''}
+                      onTap={() => {
+                        if (multiMode) toggleSel(app.id); // 非多选短按无操作（长按进入多选）
+                      }}
+                      onLongPress={() => enterMulti(app.id)}
+                    />
+                  </div>
                 );
               })}
         </div>
@@ -752,10 +818,10 @@ export default function DataManager() {
         </div>
       )}
 
-      {/* ============ 5) 快捷操作（v2.4.32：备份 / 清除数据 / 导入备份；一键云端备份移至「云端与恢复」） ============ */}
+      {/* ============ 5) 快捷操作（v2.4.35：备份 / 导入备份 / 清除数据——机主令清除数据放最后） ============ */}
       <h2 className="px-5 pb-2.5 pt-7 text-[13px] font-semibold text-zinc-500 dark:text-zinc-400">快捷操作</h2>
       <section aria-label="快捷操作" className="px-4">
-        {/* v2.4.31 三胶囊：备份（本地全量导出）/ 清除数据（危险，过全局确认弹窗）/ 导入备份（文件选择器） */}
+        {/* 三胶囊：备份（本地全量导出）/ 导入备份（文件选择器）/ 清除数据（危险，放最后） */}
         <div className="grid grid-cols-3 gap-3">
           <button
             type="button"
@@ -772,19 +838,6 @@ export default function DataManager() {
           </button>
           <button
             type="button"
-            onClick={() => setConfirmGlobal(true)}
-            disabled={busy !== ''}
-            className="flex h-[52px] items-center justify-center gap-1.5 rounded-full bg-[#FF3B30]/[0.08] text-[13.5px] font-semibold text-[#D70015] ring-1 ring-[#FF3B30]/25 backdrop-blur-2xl transition active:scale-[0.97] disabled:opacity-50 dark:text-[#FF453A]"
-          >
-            {busy === 'clean' ? (
-              <Loader2 className="h-[17px] w-[17px] animate-spin" aria-hidden />
-            ) : (
-              <Trash2 className="h-[17px] w-[17px] text-[#FF3B30]" aria-hidden />
-            )}
-            {busy === 'clean' ? '清理中…' : '清除数据'}
-          </button>
-          <button
-            type="button"
             onClick={() => importRef.current?.click()}
             disabled={busy !== ''}
             className="flex h-[52px] items-center justify-center gap-1.5 rounded-full bg-white/70 text-[13.5px] font-semibold text-zinc-700 ring-1 ring-black/[0.05] backdrop-blur-2xl transition active:scale-[0.97] disabled:opacity-50 dark:bg-white/[0.06] dark:text-zinc-200 dark:ring-white/[0.08]"
@@ -795,6 +848,19 @@ export default function DataManager() {
               <Download className="h-[17px] w-[17px] text-[#34C759]" aria-hidden />
             )}
             {busy === 'import' ? '导入中…' : '导入备份'}
+          </button>
+          <button
+            type="button"
+            onClick={() => setConfirmGlobal(true)}
+            disabled={busy !== ''}
+            className="flex h-[52px] items-center justify-center gap-1.5 rounded-full bg-[#FF3B30]/[0.08] text-[13.5px] font-semibold text-[#D70015] ring-1 ring-[#FF3B30]/25 backdrop-blur-2xl transition active:scale-[0.97] disabled:opacity-50 dark:text-[#FF453A]"
+          >
+            {busy === 'clean' ? (
+              <Loader2 className="h-[17px] w-[17px] animate-spin" aria-hidden />
+            ) : (
+              <Trash2 className="h-[17px] w-[17px] text-[#FF3B30]" aria-hidden />
+            )}
+            {busy === 'clean' ? '清理中…' : '清除数据'}
           </button>
         </div>
       </section>
@@ -1045,7 +1111,7 @@ export default function DataManager() {
         onAction={() => pendingImport && void doImportFile(pendingImport.file)}
         desc={
           pendingImport
-            ? `将用「${pendingImport.name}」覆盖文件内模块的当前数据（先清空再恢复），其它 App 不受影响。备份内容：${pendingImport.summary}。确认后先自动导出当前数据为安全备份，再执行恢复。`
+            ? `将用「${pendingImport.name}」覆盖文件内模块的当前数据（先清空再恢复），其它 App 不受影响。备份内容：${pendingImport.summary}。恢复后立即生效，无需刷新网页。此操作不可撤销，确认继续？`
             : ''
         }
       />

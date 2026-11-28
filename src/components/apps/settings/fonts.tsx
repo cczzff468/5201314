@@ -50,10 +50,11 @@ import {
 
 // ---------------- 字体 ----------------
 
-/** 字体列表玻璃卡：GrayCard 同款毛玻璃配方但无内边距（divide-y 行列表用，分隔线贴边） */
+/** 字体列表玻璃卡：GrayCard 同款毛玻璃配方但无内边距（divide-y 行列表用，分隔线贴边）。
+ *  SETTINGS-THEME：恒浅色玻璃白，不随深色主题变黑 */
 export function FontListCard({ children }: { children: ReactNode }) {
   return (
-    <div className="divide-y divide-black/[0.05] overflow-hidden rounded-[22px] bg-white/55 shadow-[0_8px_28px_rgba(17,24,39,0.06)] ring-1 ring-white/70 backdrop-blur-2xl dark:divide-white/[0.06] dark:bg-white/[0.06] dark:ring-white/[0.09]">
+    <div className="divide-y divide-black/[0.05] overflow-hidden rounded-[22px] bg-white/80 shadow-[0_2px_12px_rgba(0,0,0,0.04)] ring-1 ring-black/[0.05] backdrop-blur-2xl">
       {children}
     </div>
   );
@@ -189,16 +190,16 @@ export function FontPage({ onBack }: { onBack: () => void }) {
           <div className="flex items-center justify-between gap-3">
             <div className="min-w-0">
               <div className="truncate text-[15px] font-medium">{currentName}</div>
-              <p className="mt-0.5 text-[12px] text-muted-foreground">点下方任意字体立即全局生效</p>
+              <p className="mt-0.5 text-[12px] text-zinc-500">点下方任意字体立即全局生效</p>
             </div>
-            <span className="shrink-0 rounded-full bg-foreground/90 px-2.5 py-1 text-[11px] font-medium text-background">
+            <span className="shrink-0 rounded-full bg-zinc-900/90 px-2.5 py-1 text-[11px] font-medium text-white">
               当前使用
             </span>
           </div>
           <div
             key={previewLoadedTick}
             data-testid="font-page-preview"
-            className="mt-3 rounded-[16px] bg-white/45 px-4 py-3 ring-1 ring-white/70 dark:bg-white/[0.05] dark:ring-white/[0.08]"
+            className="mt-3 rounded-[16px] bg-white/60 px-4 py-3 ring-1 ring-black/[0.05]"
             style={{ fontFamily: previewStack }}
           >
             <p className="text-[24px] leading-relaxed">字体预览 Aa Bb Cc 123</p>
@@ -209,7 +210,7 @@ export function FontPage({ onBack }: { onBack: () => void }) {
 
         {/* 字体大小（Task 36：calc 只缩放文字、界面框架尺寸不变，全 App 实时生效） */}
         <section>
-          <div className="mb-2 px-1 text-[13px] font-medium text-muted-foreground">字体大小</div>
+          <div className="mb-2 px-1 text-[13px] font-medium text-zinc-500">字体大小</div>
           <GrayCard>
             <div className="flex flex-wrap items-center gap-2" data-testid="font-scale-group">
               {FONT_SCALE_OPTIONS.map((o) => {
@@ -226,8 +227,8 @@ export function FontPage({ onBack }: { onBack: () => void }) {
                     }}
                     className={`rounded-full px-4 py-2 text-[13.5px] shadow-[0_2px_10px_rgba(17,24,39,0.05)] backdrop-blur-xl transition-all active:scale-[0.95] ${
                       active
-                        ? 'bg-foreground text-background shadow-[0_4px_14px_rgba(0,0,0,0.16)]'
-                        : 'bg-white/55 text-black/75 ring-1 ring-white/70 hover:bg-white/80 dark:bg-white/[0.08] dark:text-white/80 dark:ring-white/[0.1] dark:hover:bg-white/[0.13]'
+                        ? 'bg-[#007AFF] text-white shadow-[0_4px_14px_rgba(0,122,255,0.35)]'
+                        : 'bg-white/60 text-zinc-700 ring-1 ring-black/[0.06] hover:bg-white/85'
                     }`}
                   >
                     {o.label}
@@ -241,7 +242,7 @@ export function FontPage({ onBack }: { onBack: () => void }) {
 
         {/* 字体粗细（body font-weight 变量；标题等显式字重不受影响） */}
         <section>
-          <div className="mb-2 px-1 text-[13px] font-medium text-muted-foreground">字体粗细</div>
+          <div className="mb-2 px-1 text-[13px] font-medium text-zinc-500">字体粗细</div>
           <GrayCard>
             <div className="flex flex-wrap items-center gap-2" data-testid="font-weight-group">
               {FONT_WEIGHT_OPTIONS.map((o) => {
@@ -259,8 +260,8 @@ export function FontPage({ onBack }: { onBack: () => void }) {
                     style={{ fontWeight: o.weight }}
                     className={`rounded-full px-4 py-2 text-[13.5px] shadow-[0_2px_10px_rgba(17,24,39,0.05)] backdrop-blur-xl transition-all active:scale-[0.95] ${
                       active
-                        ? 'bg-foreground text-background shadow-[0_4px_14px_rgba(0,0,0,0.16)]'
-                        : 'bg-white/55 text-black/75 ring-1 ring-white/70 hover:bg-white/80 dark:bg-white/[0.08] dark:text-white/80 dark:ring-white/[0.1] dark:hover:bg-white/[0.13]'
+                        ? 'bg-[#007AFF] text-white shadow-[0_4px_14px_rgba(0,122,255,0.35)]'
+                        : 'bg-white/60 text-zinc-700 ring-1 ring-black/[0.06] hover:bg-white/85'
                     }`}
                   >
                     {o.label}
@@ -268,7 +269,7 @@ export function FontPage({ onBack }: { onBack: () => void }) {
                 );
               })}
             </div>
-            <p className="mt-2.5 px-1 text-[11.5px] leading-relaxed text-muted-foreground">
+            <p className="mt-2.5 px-1 text-[11.5px] leading-relaxed text-zinc-500">
               大小全局生效（含以后新增的界面）；粗细对正文生效，标题/按钮等已加粗的文字保持原样。
             </p>
           </GrayCard>
@@ -276,7 +277,7 @@ export function FontPage({ onBack }: { onBack: () => void }) {
 
         {/* 内置字体（纯 CSS 栈，点击即应用） */}
         <section>
-          <div className="mb-2 px-1 text-[13px] font-medium text-muted-foreground">内置字体</div>
+          <div className="mb-2 px-1 text-[13px] font-medium text-zinc-500">内置字体</div>
           <FontListCard>
             {BUILTIN_APP_FONTS.map((f) => {
               const selected = appFontId === f.id;
@@ -286,13 +287,13 @@ export function FontPage({ onBack }: { onBack: () => void }) {
                   type="button"
                   data-testid={`font-builtin-${f.id.replace('builtin:', '')}`}
                   onClick={() => pickFont(f.id)}
-                  className="flex min-h-[52px] w-full items-center gap-3 px-4 py-2 text-left transition-colors active:bg-black/[0.04] dark:active:bg-white/[0.06]"
+                  className="flex min-h-[52px] w-full items-center gap-3 px-4 py-2 text-left text-zinc-900 transition-colors active:bg-black/[0.04]"
                 >
                   <span className="min-w-0 flex-1 truncate text-[15px]">{f.name}</span>
-                  <span className="shrink-0 text-[13px] text-muted-foreground" style={{ fontFamily: f.stack }}>
+                  <span className="shrink-0 text-[13px] text-zinc-500" style={{ fontFamily: f.stack }}>
                     Aa 永东 123
                   </span>
-                  {selected && <Check className="h-5 w-5 shrink-0 text-foreground" strokeWidth={2.6} />}
+                  {selected && <Check className="h-5 w-5 shrink-0 text-[#007AFF]" strokeWidth={2.6} />}
                 </button>
               );
             })}
@@ -301,7 +302,7 @@ export function FontPage({ onBack }: { onBack: () => void }) {
 
         {/* 我的字体（本机保存，绝不上传） */}
         <section>
-          <div className="mb-2 px-1 text-[13px] font-medium text-muted-foreground">我的字体（本机保存）</div>
+          <div className="mb-2 px-1 text-[13px] font-medium text-zinc-500">我的字体（本机保存）</div>
           <GrayCard>
             <div className="flex flex-col gap-1">
               {customFonts.map((f) => {
@@ -317,15 +318,15 @@ export function FontPage({ onBack }: { onBack: () => void }) {
                     >
                       <span className="min-w-0 flex-1">
                         <span className="block truncate text-[15px]">{f.name}</span>
-                        <span className="mt-0.5 block truncate text-[11px] text-muted-foreground">{f.fileName}</span>
+                        <span className="mt-0.5 block truncate text-[11px] text-zinc-500">{f.fileName}</span>
                       </span>
                       <span
-                        className="shrink-0 text-[13px] text-muted-foreground"
+                        className="shrink-0 text-[13px] text-zinc-500"
                         style={{ fontFamily: `'${customFontFamilyOf(f.id)}', -apple-system, sans-serif` }}
                       >
                         Aa 永东 123
                       </span>
-                      {selected && <Check className="h-5 w-5 shrink-0 text-foreground" strokeWidth={2.6} />}
+                      {selected && <Check className="h-5 w-5 shrink-0 text-[#007AFF]" strokeWidth={2.6} />}
                     </button>
                     <button
                       type="button"
@@ -335,7 +336,7 @@ export function FontPage({ onBack }: { onBack: () => void }) {
                       className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-all active:scale-[0.94] ${
                         confirming
                           ? 'bg-[#FF3B30]/15 text-[#FF3B30] ring-1 ring-[#FF3B30]/40'
-                          : 'bg-white/60 text-muted-foreground ring-1 ring-black/[0.06] hover:text-[#FF3B30] dark:bg-white/[0.08] dark:ring-white/[0.1]'
+                          : 'bg-white/80 text-zinc-500 ring-1 ring-black/[0.06] hover:text-[#FF3B30]'
                       }`}
                     >
                       <Trash2 className="h-4 w-4" />
@@ -344,7 +345,7 @@ export function FontPage({ onBack }: { onBack: () => void }) {
                 );
               })}
               {customFonts.length === 0 && (
-                <p className="py-2 text-center text-[13px] text-muted-foreground">还没有导入字体，点下方按钮从文件导入</p>
+                <p className="py-2 text-center text-[13px] text-zinc-500">还没有导入字体，点下方按钮从文件导入</p>
               )}
 
               {/* 导入按钮 + 隐藏文件选择器 */}
@@ -354,7 +355,7 @@ export function FontPage({ onBack }: { onBack: () => void }) {
                   data-testid="font-upload"
                   onClick={() => fileInputRef.current?.click()}
                   disabled={uploading}
-                  className="flex items-center gap-2 rounded-[14px] bg-white/55 px-4 py-2.5 text-[14px] shadow-[0_2px_10px_rgba(17,24,39,0.05)] ring-1 ring-white/70 backdrop-blur-xl transition-all active:scale-[0.97] disabled:opacity-60 dark:bg-white/[0.08] dark:ring-white/[0.1]"
+                  className="flex items-center gap-2 rounded-[14px] bg-white/80 px-4 py-2.5 text-[14px] text-zinc-900 shadow-[0_2px_10px_rgba(17,24,39,0.05)] ring-1 ring-black/[0.05] backdrop-blur-xl transition-all active:scale-[0.97] disabled:opacity-60"
                 >
                   {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
                   {uploading ? '导入中…' : '导入字体文件（.ttf / .otf / .woff / .woff2）'}
@@ -372,7 +373,7 @@ export function FontPage({ onBack }: { onBack: () => void }) {
           </GrayCard>
         </section>
 
-        <p className="px-1 text-[12px] leading-relaxed text-muted-foreground">
+        <p className="px-1 text-[12px] leading-relaxed text-zinc-500">
           字体文件仅保存在本机浏览器（IndexedDB），不会上传服务器；清除浏览器数据会一并删除。
         </p>
       </div>

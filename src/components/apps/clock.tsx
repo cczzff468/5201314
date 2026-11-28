@@ -1,5 +1,13 @@
 'use client';
 
+/**
+ * 时钟 App（世界时钟 / 闹钟 / 秒表 / 计时器）· 毛玻璃胶囊视觉版
+ * 页面底色浅 #F7F7FA→#EFEFF4 渐变 / 深 #141418→#0E0E12；卡片一律大圆角毛玻璃
+ * （rounded-[24px~28px] + bg-white/70 + ring-black/[0.05] + backdrop-blur-2xl），
+ * 按钮全部胶囊化，底部 tab 为浮起毛玻璃胶囊条（选中项白胶囊浮起）。
+ * 指针/数字/引擎逻辑零改动。
+ */
+
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { create } from 'zustand';
 import {
@@ -160,7 +168,7 @@ function BottomSheet({ onClose, children }: { onClose: () => void; children: Rea
       <div
         role="dialog"
         aria-modal="true"
-        className={`absolute inset-x-0 bottom-0 rounded-t-[20px] border-t border-border/60 bg-background/85 shadow-2xl backdrop-blur-2xl transition-transform duration-300 ease-out ${
+        className={`absolute inset-x-0 bottom-0 rounded-t-[28px] border-t border-black/[0.05] bg-background/90 shadow-2xl backdrop-blur-2xl transition-transform duration-300 ease-out dark:border-white/[0.08] ${
           shown ? 'translate-y-0' : 'translate-y-full'
         }`}
       >
@@ -323,12 +331,12 @@ function CityRow({
       {/* 左：城市名 + 时差胶囊 */}
       <div className="flex min-w-0 flex-1 flex-col items-start gap-[7px]">
         <div className="max-w-full truncate text-[20px] font-medium leading-tight">{city.name}</div>
-        <span className="max-w-[170px] truncate rounded-full bg-white/60 px-2.5 py-[3px] text-[11px] font-medium leading-none text-muted-foreground ring-1 ring-white/70 backdrop-blur-xl dark:bg-white/[0.08] dark:ring-white/[0.1]">
+        <span className="max-w-[170px] truncate rounded-full bg-black/[0.04] px-2.5 py-[3px] text-[11px] font-medium leading-none text-muted-foreground ring-1 ring-black/[0.05] backdrop-blur-xl dark:bg-white/[0.07] dark:ring-white/[0.08]">
           {off}
         </span>
       </div>
       {/* 右：迷你表盘 + 大时间 + 小秒，iOS 世界时钟同款排版 */}
-      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white/50 ring-1 ring-white/60 backdrop-blur-sm dark:bg-white/[0.05] dark:ring-white/[0.08]">
+      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-black/[0.04] ring-1 ring-black/[0.05] backdrop-blur-xl dark:bg-white/[0.07] dark:ring-white/[0.08]">
         <AnalogClockFace h={clockH} m={clockM} s={clockS} size={26} />
       </div>
       <div className="flex shrink-0 items-baseline gap-1">
@@ -375,14 +383,14 @@ function CityAddSheet({
               value={q}
               onChange={(e) => setQ(e.target.value)}
               placeholder="搜索时区"
-              className="h-10 rounded-[14px] bg-white/60 pl-9 ring-1 ring-white/70 backdrop-blur-xl dark:bg-white/[0.08] dark:ring-white/[0.1]"
+              className="h-10 rounded-full bg-white/70 pl-9 shadow-[0_2px_12px_rgba(0,0,0,0.035)] ring-1 ring-black/[0.05] backdrop-blur-2xl dark:bg-white/[0.06] dark:ring-white/[0.08]"
             />
           </div>
           <button onClick={onClose} className="text-[17px] text-foreground transition-opacity active:opacity-50">
             取消
           </button>
         </div>
-        <div className="thin-scrollbar mt-3 flex-1 overflow-y-auto">
+        <div className="mt-3 flex-1 divide-y divide-black/[0.05] overflow-y-auto overscroll-contain rounded-[24px] bg-white/70 [scrollbar-width:thin] [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-black/10 shadow-[0_2px_12px_rgba(0,0,0,0.035)] ring-1 ring-black/[0.05] backdrop-blur-2xl dark:divide-white/[0.06] dark:bg-white/[0.06] dark:ring-white/[0.08] dark:[&::-webkit-scrollbar-thumb]:bg-white/15">
           {filtered.map((z) => {
             const added = existing.some((c) => c.timezone === z);
             return (
@@ -390,7 +398,7 @@ function CityAddSheet({
                 key={z}
                 disabled={added}
                 onClick={() => onAdd(z)}
-                className="flex w-full items-center justify-between gap-3 rounded-[8px] px-1 py-2.5 text-left transition-colors active:bg-muted disabled:opacity-40"
+                className="flex w-full items-center justify-between gap-3 px-4 py-2.5 text-left transition-colors active:bg-black/[0.03] disabled:opacity-40 dark:active:bg-white/[0.05]"
               >
                 <span className="shrink-0 text-[16px]">{z.split('/').pop()?.replace(/_/g, ' ') ?? z}</span>
                 <span className="truncate text-[12px] text-muted-foreground">{z}</span>
@@ -479,7 +487,7 @@ function WorldClockView({
     <div className="relative flex h-full flex-col">
       <div className="thin-scrollbar flex-1 overflow-y-auto pb-16">
         {/* 英雄时钟：指针表盘 + 大数字本地时间 */}
-        <div className="mx-4 mt-2 mb-3 overflow-hidden rounded-[20px] bg-white/60 shadow-[0_8px_28px_rgba(17,24,39,0.07)] ring-1 ring-white/70 backdrop-blur-2xl dark:bg-white/[0.06] dark:ring-white/[0.09]">
+        <div className="mx-4 mt-2 mb-3 overflow-hidden rounded-[28px] bg-white/70 shadow-[0_2px_12px_rgba(0,0,0,0.035)] ring-1 ring-black/[0.05] backdrop-blur-2xl dark:bg-white/[0.06] dark:ring-white/[0.08]">
           <div className="flex flex-col items-center px-4 pb-6 pt-7">
             <AnalogClockFace h={localH} m={localM} s={localS} size={176} detailed />
             <div className="mt-5 flex items-baseline gap-1.5">
@@ -496,7 +504,7 @@ function WorldClockView({
         {cities.length === 0 ? (
           <div className="pt-16 text-center text-[14px] text-muted-foreground">正在加载世界时钟…</div>
         ) : (
-          <div className="mx-4 mt-1 divide-y divide-border/40 overflow-hidden rounded-[16px] bg-white/60 shadow-[0_8px_28px_rgba(17,24,39,0.07)] ring-1 ring-white/70 backdrop-blur-2xl dark:bg-white/[0.06] dark:ring-white/[0.09]">
+          <div className="mx-4 mt-1 divide-y divide-black/[0.05] overflow-hidden rounded-[24px] bg-white/70 shadow-[0_2px_12px_rgba(0,0,0,0.035)] ring-1 ring-black/[0.05] backdrop-blur-2xl dark:divide-white/[0.06] dark:bg-white/[0.06] dark:ring-white/[0.08]">
             {cities.map((c) => (
               <CityRow key={c.id} city={c} now={now} onLongPress={setSheetCity} />
             ))}
@@ -581,13 +589,13 @@ function AlarmEditorSheet({
           value={time}
           onChange={(e) => setTime(e.target.value)}
           aria-label="闹钟时间"
-          className="mt-4 h-14 w-full rounded-[14px] bg-white/60 px-4 text-[26px] font-light tabular-nums outline-none ring-1 ring-white/70 backdrop-blur-xl [color-scheme:light] dark:bg-white/[0.08] dark:ring-white/[0.1] dark:[color-scheme:dark]"
+          className="mt-4 h-14 w-full rounded-full bg-white/70 px-5 text-[26px] font-light tabular-nums outline-none ring-1 ring-black/[0.05] backdrop-blur-2xl [color-scheme:light] dark:bg-white/[0.06] dark:ring-white/[0.08] dark:[color-scheme:dark]"
         />
         <Input
           value={label}
           onChange={(e) => setLabel(e.target.value)}
           placeholder="标签"
-          className="mt-3 h-11 rounded-[14px] bg-white/60 ring-1 ring-white/70 backdrop-blur-xl dark:bg-white/[0.08] dark:ring-white/[0.1]"
+          className="mt-3 h-11 rounded-full bg-white/70 ring-1 ring-black/[0.05] backdrop-blur-2xl dark:bg-white/[0.06] dark:ring-white/[0.08]"
         />
         <div className="mt-4 text-[13px] text-muted-foreground">重复</div>
         <div className="mt-2 flex flex-wrap gap-2">
@@ -601,7 +609,7 @@ function AlarmEditorSheet({
                 className={`h-9 min-w-9 rounded-full px-3 text-[14px] transition-colors ${
                   on
                     ? 'bg-foreground text-background'
-                    : 'bg-white/60 text-muted-foreground ring-1 ring-white/70 backdrop-blur-xl active:bg-white/80 dark:bg-white/[0.08] dark:ring-white/[0.1] dark:active:bg-white/[0.14]'
+                    : 'bg-black/[0.04] text-muted-foreground ring-1 ring-black/[0.05] backdrop-blur-xl active:bg-black/[0.06] dark:bg-white/[0.07] dark:ring-white/[0.08] dark:active:bg-white/[0.1]'
                 }`}
               >
                 {DAY_LABEL[d]}
@@ -611,7 +619,7 @@ function AlarmEditorSheet({
         </div>
         <button
           onClick={save}
-          className="mt-5 h-12 w-full rounded-[14px] bg-foreground text-[17px] font-semibold text-background transition-opacity active:opacity-70"
+          className="mt-5 h-12 w-full rounded-full bg-foreground text-[17px] font-semibold text-background transition-opacity active:opacity-70"
         >
           保存
         </button>
@@ -676,13 +684,18 @@ function AlarmsView({
         {alarms === null ? (
           <div className="pt-16 text-center text-[14px] text-muted-foreground">正在加载闹钟…</div>
         ) : alarms.length === 0 ? (
-          <div className="flex flex-col items-center gap-2 pt-24 text-muted-foreground">
-            <AlarmClock className="h-10 w-10" strokeWidth={1.2} />
+          <div className="flex flex-col items-center gap-3 pt-24 text-muted-foreground">
+            <span
+              aria-hidden="true"
+              className="grid h-16 w-16 place-items-center rounded-full bg-white/70 shadow-[0_2px_12px_rgba(0,0,0,0.035)] ring-1 ring-black/[0.05] backdrop-blur-2xl dark:bg-white/[0.06] dark:ring-white/[0.08]"
+            >
+              <AlarmClock className="h-8 w-8" strokeWidth={1.2} />
+            </span>
             <div className="text-[15px]">暂无闹钟</div>
             <div className="text-[13px]">点击右上角 + 新建</div>
           </div>
         ) : (
-          <div className="mx-4 mt-1 divide-y divide-border/40 overflow-hidden rounded-[16px] bg-white/60 shadow-[0_8px_28px_rgba(17,24,39,0.07)] ring-1 ring-white/70 backdrop-blur-2xl dark:bg-white/[0.06] dark:ring-white/[0.09]">
+          <div className="mx-4 mt-1 divide-y divide-black/[0.05] overflow-hidden rounded-[24px] bg-white/70 shadow-[0_2px_12px_rgba(0,0,0,0.035)] ring-1 ring-black/[0.05] backdrop-blur-2xl dark:divide-white/[0.06] dark:bg-white/[0.06] dark:ring-white/[0.08]">
             {alarms.map((a) => (
               <div key={a.id} className="flex items-center gap-3 py-[18px] pl-5 pr-4">
                 <button className="min-w-0 flex-1 text-left" onClick={() => setEditor(a)}>
@@ -794,8 +807,8 @@ function StopwatchView() {
     <div className="flex h-full flex-col">
       <div className="flex shrink-0 flex-col items-center px-6 pb-3 pt-4">
         {/* 秒进度表盘环（Apple Watch 同款）：一圈 = 60 秒，随百分秒平滑走动 */}
-        <div className="relative flex h-[184px] w-[184px] items-center justify-center">
-          <svg viewBox="0 0 184 184" className="absolute inset-0 h-full w-full -rotate-90" aria-hidden="true">
+        <div className="relative flex h-[204px] w-[204px] items-center justify-center rounded-full bg-white/70 shadow-[0_2px_12px_rgba(0,0,0,0.035)] ring-1 ring-black/[0.05] backdrop-blur-2xl dark:bg-white/[0.06] dark:ring-white/[0.08]">
+          <svg viewBox="0 0 184 184" className="absolute inset-0 m-auto h-[184px] w-[184px] -rotate-90" aria-hidden="true">
             <circle cx="92" cy="92" r={SW_RING_R} fill="none" strokeWidth={4} className="stroke-border" />
             <circle
               cx="92"
@@ -821,13 +834,13 @@ function StopwatchView() {
           <button
             onClick={running ? swLap : swReset}
             disabled={!running && elapsed === 0}
-            className="flex h-20 w-20 items-center justify-center rounded-full bg-white/60 text-[17px] text-foreground shadow-sm ring-1 ring-white/70 backdrop-blur-xl transition duration-150 active:scale-[0.92] disabled:opacity-40 dark:bg-white/[0.08] dark:ring-white/[0.1]"
+            className="flex h-20 w-20 items-center justify-center rounded-full bg-white/70 text-[17px] text-foreground shadow-[0_2px_12px_rgba(0,0,0,0.035)] ring-1 ring-black/[0.05] backdrop-blur-2xl transition duration-150 active:scale-[0.92] disabled:opacity-40 dark:bg-white/[0.06] dark:ring-white/[0.08]"
           >
             {running ? '计次' : '复位'}
           </button>
           <button
             onClick={running ? swStop : swStart}
-            className={`flex h-20 w-20 items-center justify-center rounded-full text-[17px] shadow-sm backdrop-blur-xl transition duration-150 active:scale-[0.92] ${
+            className={`flex h-20 w-20 items-center justify-center rounded-full text-[17px] shadow-[0_2px_12px_rgba(0,0,0,0.035)] backdrop-blur-2xl transition duration-150 active:scale-[0.92] ${
               running
                 ? 'bg-[#FF453A]/15 text-[#FF453A] ring-1 ring-[#FF453A]/35 dark:bg-[#FF453A]/25'
                 : 'bg-[#30D158]/15 text-[#30D158] ring-1 ring-[#30D158]/35 dark:bg-[#30D158]/25'
@@ -837,14 +850,14 @@ function StopwatchView() {
           </button>
         </div>
       </div>
-      <div className="thin-scrollbar flex-1 overflow-y-auto px-4 pb-8">
+      <div className="flex-1 overflow-hidden px-4 pb-8">
         {rows.length === 0 ? (
           <div className="flex flex-col items-center gap-2 pt-7 text-muted-foreground">
             <Timer className="h-6 w-6 opacity-50" aria-hidden="true" />
             <span className="text-[14px]">计次将显示在这里</span>
           </div>
         ) : (
-          <div className="divide-y divide-border/40 overflow-hidden rounded-[16px] bg-white/60 shadow-[0_8px_28px_rgba(17,24,39,0.07)] ring-1 ring-white/70 backdrop-blur-2xl dark:bg-white/[0.06] dark:ring-white/[0.09]">
+          <div className="max-h-full divide-y divide-black/[0.05] overflow-y-auto overscroll-contain rounded-[24px] bg-white/70 [scrollbar-width:thin] [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-black/10 shadow-[0_2px_12px_rgba(0,0,0,0.035)] ring-1 ring-black/[0.05] backdrop-blur-2xl dark:divide-white/[0.06] dark:bg-white/[0.06] dark:ring-white/[0.08] dark:[&::-webkit-scrollbar-thumb]:bg-white/15">
             {rows.map((r) => (
               <div key={r.n} className="flex min-h-[44px] items-center gap-2 px-4 py-2.5">
                 <span className="w-12 shrink-0 text-[15px] text-muted-foreground">圈 {r.n}</span>
@@ -986,7 +999,7 @@ function Stepper({
       <button
         aria-label={`加${label}`}
         onClick={() => onChange(Math.min(max, value + 1))}
-        className="flex h-10 w-full items-center justify-center rounded-[14px] bg-white/60 text-muted-foreground ring-1 ring-white/70 backdrop-blur-xl transition-colors active:bg-white/80 dark:bg-white/[0.08] dark:ring-white/[0.1] dark:active:bg-white/[0.14]"
+        className="flex h-10 w-full items-center justify-center rounded-full bg-white/70 text-muted-foreground ring-1 ring-black/[0.05] backdrop-blur-2xl transition-colors active:bg-white/90 dark:bg-white/[0.06] dark:ring-white/[0.08] dark:active:bg-white/[0.1]"
       >
         <ChevronUp className="h-5 w-5" />
       </button>
@@ -996,7 +1009,7 @@ function Stepper({
       <button
         aria-label={`减${label}`}
         onClick={() => onChange(Math.max(0, value - 1))}
-        className="flex h-10 w-full items-center justify-center rounded-[14px] bg-white/60 text-muted-foreground ring-1 ring-white/70 backdrop-blur-xl transition-colors active:bg-white/80 dark:bg-white/[0.08] dark:ring-white/[0.1] dark:active:bg-white/[0.14]"
+        className="flex h-10 w-full items-center justify-center rounded-full bg-white/70 text-muted-foreground ring-1 ring-black/[0.05] backdrop-blur-2xl transition-colors active:bg-white/90 dark:bg-white/[0.06] dark:ring-white/[0.08] dark:active:bg-white/[0.1]"
       >
         <ChevronDown className="h-5 w-5" />
       </button>
@@ -1013,21 +1026,21 @@ function TimerView() {
     <div className="relative flex h-full flex-col">
       {phase === 'idle' ? (
         <div className="flex flex-1 flex-col items-center justify-center">
-          <div className="flex items-start gap-5">
+          <div className="flex items-start gap-5 rounded-[28px] bg-white/70 px-6 py-5 shadow-[0_2px_12px_rgba(0,0,0,0.035)] ring-1 ring-black/[0.05] backdrop-blur-2xl dark:bg-white/[0.06] dark:ring-white/[0.08]">
             <Stepper label="时" value={pickH} max={23} onChange={(v) => useTimerStore.setState({ pickH: v })} />
             <Stepper label="分" value={pickM} max={59} onChange={(v) => useTimerStore.setState({ pickM: v })} />
             <Stepper label="秒" value={pickS} max={59} onChange={(v) => useTimerStore.setState({ pickS: v })} />
           </div>
           <button
             onClick={timerStart}
-            className="mt-12 flex h-20 w-20 items-center justify-center rounded-full bg-[#30D158]/15 text-[17px] text-[#30D158] ring-1 ring-[#30D158]/35 backdrop-blur-xl transition duration-150 active:scale-[0.92] dark:bg-[#30D158]/25"
+            className="mt-12 flex h-20 w-20 items-center justify-center rounded-full bg-[#30D158]/15 text-[17px] text-[#30D158] shadow-[0_2px_12px_rgba(0,0,0,0.035)] ring-1 ring-[#30D158]/35 backdrop-blur-2xl transition duration-150 active:scale-[0.92] dark:bg-[#30D158]/25"
           >
             启动
           </button>
         </div>
       ) : (
         <div className="flex flex-1 flex-col items-center justify-center">
-          <div className="relative h-[244px] w-[244px]">
+          <div className="relative h-[244px] w-[244px] rounded-full bg-white/70 shadow-[0_2px_12px_rgba(0,0,0,0.035)] ring-1 ring-black/[0.05] backdrop-blur-2xl dark:bg-white/[0.06] dark:ring-white/[0.08]">
             <svg viewBox="0 0 244 244" className="h-full w-full -rotate-90" aria-hidden="true">
               <circle cx="122" cy="122" r={RING_R} fill="none" strokeWidth={8} className="stroke-muted" />
               <circle
@@ -1050,13 +1063,13 @@ function TimerView() {
           <div className="mt-12 flex w-full items-center justify-between px-12">
             <button
               onClick={phase === 'running' ? timerPause : timerResume}
-              className="flex h-20 w-20 items-center justify-center rounded-full bg-white/60 text-[17px] text-foreground shadow-sm ring-1 ring-white/70 backdrop-blur-xl transition duration-150 active:scale-[0.92] dark:bg-white/[0.08] dark:ring-white/[0.1]"
+              className="flex h-20 w-20 items-center justify-center rounded-full bg-white/70 text-[17px] text-foreground shadow-[0_2px_12px_rgba(0,0,0,0.035)] ring-1 ring-black/[0.05] backdrop-blur-2xl transition duration-150 active:scale-[0.92] dark:bg-white/[0.06] dark:ring-white/[0.08]"
             >
               {phase === 'running' ? '暂停' : '继续'}
             </button>
             <button
               onClick={timerCancel}
-              className="flex h-20 w-20 items-center justify-center rounded-full bg-white/60 text-[17px] text-[#FF453A] shadow-sm ring-1 ring-white/70 backdrop-blur-xl transition duration-150 active:scale-[0.92] dark:bg-white/[0.08] dark:ring-white/[0.1]"
+              className="flex h-20 w-20 items-center justify-center rounded-full bg-white/70 text-[17px] text-[#FF453A] shadow-[0_2px_12px_rgba(0,0,0,0.035)] ring-1 ring-black/[0.05] backdrop-blur-2xl transition duration-150 active:scale-[0.92] dark:bg-white/[0.06] dark:ring-white/[0.08]"
             >
               取消
             </button>
@@ -1082,9 +1095,9 @@ function TabBar({ tab, onChange }: { tab: number; onChange: (t: number) => void 
   return (
     <nav
       aria-label="时钟分区"
-      className="z-50 h-[80px] shrink-0 border-t border-white/70 bg-white/60 pb-[28px] shadow-[0_-4px_24px_rgba(17,24,39,0.06)] backdrop-blur-2xl dark:border-white/[0.09] dark:bg-black/50"
+      className="z-50 h-[80px] shrink-0 pb-[28px]"
     >
-      <div className="flex h-full items-stretch">
+      <div className="mx-3 flex h-[52px] items-stretch rounded-full bg-black/[0.04] p-[5px] shadow-[0_2px_12px_rgba(0,0,0,0.035)] ring-1 ring-black/[0.05] backdrop-blur-2xl dark:bg-white/[0.07] dark:ring-white/[0.08]">
         {TABS.map((t, i) => {
           const active = i === tab;
           const Icon = t.icon;
@@ -1093,11 +1106,13 @@ function TabBar({ tab, onChange }: { tab: number; onChange: (t: number) => void 
               key={t.label}
               onClick={() => onChange(i)}
               aria-current={active ? 'page' : undefined}
-              className={`flex flex-1 flex-col items-center justify-center gap-1 transition-colors ${
-                active ? 'text-foreground' : 'text-muted-foreground active:opacity-60'
+              className={`flex flex-1 flex-col items-center justify-center gap-[3px] rounded-full transition-colors ${
+                active
+                  ? 'bg-white text-foreground shadow-sm ring-1 ring-black/[0.04] dark:bg-white/[0.12] dark:text-white dark:ring-white/[0.08]'
+                  : 'text-muted-foreground active:opacity-60'
               }`}
             >
-              <Icon className="h-6 w-6" fill={active ? 'currentColor' : 'none'} strokeWidth={active ? 1.5 : 1.8} />
+              <Icon className="h-[22px] w-[22px]" fill={active ? 'currentColor' : 'none'} strokeWidth={active ? 1.5 : 1.8} />
               <span className="text-[11px] leading-none">{t.label}</span>
             </button>
           );
@@ -1118,7 +1133,7 @@ export default function ClockApp() {
   const timerDone = useTimerStore((s) => s.phase === 'done');
 
   return (
-    <div className="relative flex h-full w-full flex-col overflow-hidden bg-background text-foreground">
+    <div className="relative flex h-full w-full flex-col overflow-hidden bg-gradient-to-b from-[#F7F7FA] to-[#EFEFF4] text-foreground dark:from-[#141418] dark:to-[#0E0E12]">
       <IOSNavBar
         title={TABS[tab].label}
         inline
@@ -1146,12 +1161,12 @@ export default function ClockApp() {
       {/* 计时完成全屏覆盖层：盖过导航栏/内容/TabBar（z-60 > TabBar z-50），样式沿用原 done 分支语言，
           点「好」timerCancel 复位；App 被退出时随窗口卸载（引擎与 done 态保留，重开即见） */}
       {timerDone && (
-        <div className="absolute inset-0 z-[60] flex flex-col items-center justify-center gap-5 bg-background/95 backdrop-blur-sm">
+        <div className="absolute inset-0 z-[60] flex flex-col items-center justify-center gap-5 bg-[#F5F5F7]/95 backdrop-blur-2xl dark:bg-[#0E0E12]/95">
           <Bell className="h-14 w-14 text-[#FF9F0A]" strokeWidth={1.5} />
           <div className="text-[26px] font-semibold">计时完成</div>
           <button
             onClick={timerCancel}
-            className="rounded-full bg-white/60 px-10 py-3 text-[17px] text-foreground shadow-sm ring-1 ring-white/70 backdrop-blur-xl transition active:scale-[0.96] dark:bg-white/[0.08] dark:ring-white/[0.1]"
+            className="rounded-full bg-white/70 px-10 py-3 text-[17px] text-foreground shadow-[0_2px_12px_rgba(0,0,0,0.035)] ring-1 ring-black/[0.05] backdrop-blur-2xl transition active:scale-[0.96] dark:bg-white/[0.06] dark:ring-white/[0.08]"
           >
             好
           </button>
@@ -1222,7 +1237,7 @@ function RingOverlay({
       <div className="flex items-center gap-8">
         <button
           onClick={onSnooze}
-          className="flex h-24 w-24 items-center justify-center rounded-full bg-white/60 text-[17px] text-foreground shadow-sm ring-1 ring-white/70 backdrop-blur-xl transition active:scale-[0.95] dark:bg-white/[0.08] dark:ring-white/[0.1]"
+          className="flex h-24 w-24 items-center justify-center rounded-full bg-white/70 text-[17px] text-foreground shadow-[0_2px_12px_rgba(0,0,0,0.035)] ring-1 ring-black/[0.05] backdrop-blur-2xl transition active:scale-[0.95] dark:bg-white/[0.06] dark:ring-white/[0.08]"
         >
           稍后提醒
         </button>

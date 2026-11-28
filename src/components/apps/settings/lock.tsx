@@ -168,10 +168,10 @@ export function FaceLockSection() {
       {contacts.length === 0 ? (
         <GrayCard>
           <div className="flex flex-col items-center gap-2.5 py-5 text-center">
-            <span className="grid h-11 w-11 place-items-center rounded-full bg-black/[0.04] dark:bg-white/[0.07]">
-              <ScanFace className="h-5 w-5 text-muted-foreground" strokeWidth={1.8} aria-hidden="true" />
+            <span className="grid h-11 w-11 place-items-center rounded-full bg-black/[0.04]">
+              <ScanFace className="h-5 w-5 text-zinc-500" strokeWidth={1.8} aria-hidden="true" />
             </span>
-            <p className="text-[13px] leading-relaxed text-muted-foreground">
+            <p className="text-[13px] leading-relaxed text-zinc-500">
               还没有角色：先到联系人 App 添加角色，再回来为 TA 设置参考图。
             </p>
           </div>
@@ -200,13 +200,13 @@ export function FaceLockSection() {
                         alt={label}
                         draggable={false}
                         className={`h-12 w-12 rounded-full object-cover transition-all ${
-                          active ? 'ring-2 ring-foreground/60 dark:ring-white/60' : 'opacity-75'
+                          active ? 'ring-2 ring-zinc-900/60' : 'opacity-75'
                         }`}
                       />
                     ) : (
                       <span
-                        className={`grid h-12 w-12 place-items-center rounded-full bg-muted text-[15px] font-medium text-muted-foreground transition-all ${
-                          active ? 'ring-2 ring-foreground/60 dark:ring-white/60' : 'opacity-75'
+                        className={`grid h-12 w-12 place-items-center rounded-full bg-black/[0.05] text-[15px] font-medium text-zinc-500 transition-all ${
+                          active ? 'ring-2 ring-zinc-900/60' : 'opacity-75'
                         }`}
                       >
                         {label.slice(0, 1)}
@@ -215,13 +215,13 @@ export function FaceLockSection() {
                     {hasRef && (
                       <span
                         aria-label="已设置参考图"
-                        className="absolute -bottom-0.5 -right-0.5 h-3.5 w-3.5 rounded-full border-2 border-[#F2F2F7] bg-[#34C759] dark:border-background"
+                        className="absolute -bottom-0.5 -right-0.5 h-3.5 w-3.5 rounded-full border-2 border-[#F3F6F3] bg-[#34C759]"
                       />
                     )}
                   </span>
                   <span
                     className={`w-full truncate px-1 text-center text-[11px] leading-none ${
-                      active ? 'font-medium text-foreground' : 'text-foreground/60'
+                      active ? 'font-medium text-zinc-900' : 'text-zinc-900/60'
                     }`}
                   >
                     {label}
@@ -242,30 +242,30 @@ export function FaceLockSection() {
                       src={sel.avatar}
                       alt={selLabel}
                       draggable={false}
-                      className="h-10 w-10 rounded-full object-cover ring-1 ring-black/[0.06] dark:ring-white/10"
+                      className="h-10 w-10 rounded-full object-cover ring-1 ring-black/[0.06]"
                     />
                   ) : (
-                    <span className="grid h-10 w-10 place-items-center rounded-full bg-muted text-[14px] font-medium text-muted-foreground">
+                    <span className="grid h-10 w-10 place-items-center rounded-full bg-black/[0.05] text-[14px] font-medium text-zinc-500">
                       {selLabel.slice(0, 1)}
                     </span>
                   )}
                   <div className="min-w-0">
-                    <div className="truncate text-[15.5px] font-semibold text-foreground">{selLabel}</div>
-                    <div className="mt-0.5 text-[11.5px] text-muted-foreground">按角色独立保存</div>
+                    <div className="truncate text-[15.5px] font-semibold text-zinc-900">{selLabel}</div>
+                    <div className="mt-0.5 text-[11.5px] text-zinc-500">按角色独立保存</div>
                   </div>
                 </div>
                 {refImg ? (
-                  <span className="flex shrink-0 items-center gap-1 rounded-full bg-[#34C759]/[0.12] px-2.5 py-1 text-[11px] font-medium text-[#1E9E4A] dark:text-[#34C759]">
+                  <span className="flex shrink-0 items-center gap-1 rounded-full bg-[#34C759]/[0.12] px-2.5 py-1 text-[11px] font-medium text-[#1E9E4A]">
                     <ScanFace className="h-3 w-3" strokeWidth={2.4} aria-hidden="true" />
                     已锁脸
                   </span>
                 ) : appearDraft.trim() ? (
-                  <span className="flex shrink-0 items-center gap-1 rounded-full bg-[#FF9500]/[0.14] px-2.5 py-1 text-[11px] font-medium text-[#B26A00] dark:text-[#FFB340]">
+                  <span className="flex shrink-0 items-center gap-1 rounded-full bg-[#FF9500]/[0.14] px-2.5 py-1 text-[11px] font-medium text-[#B26A00]">
                     <PenLine className="h-3 w-3" strokeWidth={2.4} aria-hidden="true" />
                     仅外貌描述
                   </span>
                 ) : (
-                  <span className="flex shrink-0 items-center gap-1 rounded-full bg-black/[0.05] px-2.5 py-1 text-[11px] font-medium text-muted-foreground dark:bg-white/[0.08]">
+                  <span className="flex shrink-0 items-center gap-1 rounded-full bg-black/[0.05] px-2.5 py-1 text-[11px] font-medium text-zinc-500">
                     <span className="h-1.5 w-1.5 rounded-full bg-current opacity-50" aria-hidden="true" />
                     未设置
                   </span>
@@ -275,7 +275,7 @@ export function FaceLockSection() {
               {/* 参考图预览（干净细描边装裱；空态虚线占位） */}
               <div className="mx-auto mt-4 w-full max-w-[210px]">
                 {refImg ? (
-                  <div className="overflow-hidden rounded-[18px] shadow-sm ring-1 ring-black/[0.06] dark:ring-white/[0.1]">
+                  <div className="overflow-hidden rounded-[18px] shadow-sm ring-1 ring-black/[0.06]">
                     <img
                       data-testid="imggen-face-ref-img"
                       src={refImg.src}
@@ -287,11 +287,11 @@ export function FaceLockSection() {
                 ) : (
                   <div
                     aria-hidden="true"
-                    className="grid aspect-square w-full place-items-center rounded-[18px] border border-dashed border-black/10 bg-black/[0.02] px-5 dark:border-white/15 dark:bg-white/[0.03]"
+                    className="grid aspect-square w-full place-items-center rounded-[18px] border border-dashed border-black/10 bg-black/[0.02] px-5"
                   >
                     <div className="flex flex-col items-center gap-2 text-center">
-                      <ScanFace className="h-8 w-8 text-black/25 dark:text-white/30" strokeWidth={1.5} />
-                      <span className="text-[11.5px] leading-relaxed text-muted-foreground/80">
+                      <ScanFace className="h-8 w-8 text-black/25" strokeWidth={1.5} />
+                      <span className="text-[11.5px] leading-relaxed text-zinc-500/80">
                         上传一张正脸照
                         <br />
                         生图时锁定 TA 的长相
@@ -299,7 +299,7 @@ export function FaceLockSection() {
                     </div>
                   </div>
                 )}
-                <p className="pt-2.5 text-center text-[11.5px] leading-[1.6] text-muted-foreground">
+                <p className="pt-2.5 text-center text-[11.5px] leading-[1.6] text-zinc-500">
                   参考图会作为生图输入，保证 TA 每次照片里的脸一致
                 </p>
               </div>
@@ -311,7 +311,7 @@ export function FaceLockSection() {
                   data-testid="imggen-face-upload"
                   onClick={() => fileInputRef.current?.click()}
                   disabled={uploading}
-                  className="flex flex-1 items-center justify-center gap-2 rounded-[14px] bg-white/60 py-2.5 text-[14px] font-medium text-foreground shadow-[0_4px_14px_rgba(17,24,39,0.07)] ring-1 ring-white/70 backdrop-blur-2xl transition-all active:scale-[0.98] active:bg-white/85 disabled:opacity-60 dark:bg-white/[0.1] dark:ring-white/[0.12] dark:active:bg-white/[0.16]"
+                  className="flex flex-1 items-center justify-center gap-2 rounded-[14px] bg-white/60 py-2.5 text-[14px] font-medium text-zinc-900 shadow-[0_4px_14px_rgba(17,24,39,0.07)] ring-1 ring-black/[0.05] backdrop-blur-2xl transition-all active:scale-[0.98] active:bg-white/85 disabled:opacity-60"
                 >
                   {uploading ? (
                     <Loader2 className="h-[16px] w-[16px] animate-spin" aria-hidden="true" />
@@ -325,7 +325,7 @@ export function FaceLockSection() {
                     type="button"
                     data-testid="imggen-face-delete"
                     onClick={onDeleteRef}
-                    className="flex-1 rounded-[14px] bg-white/60 py-2.5 text-[14px] font-medium text-[#FF3B30] shadow-[0_4px_14px_rgba(17,24,39,0.07)] ring-1 ring-white/70 backdrop-blur-2xl transition-all active:scale-[0.98] active:bg-[#FF453A]/10 dark:bg-white/[0.1] dark:ring-white/[0.12]"
+                    className="flex-1 rounded-[14px] bg-white/60 py-2.5 text-[14px] font-medium text-[#FF3B30] shadow-[0_4px_14px_rgba(17,24,39,0.07)] ring-1 ring-black/[0.05] backdrop-blur-2xl transition-all active:scale-[0.98] active:bg-[#FF453A]/10"
                   >
                     删除参考图
                   </button>
@@ -345,12 +345,12 @@ export function FaceLockSection() {
               />
 
               {/* 外貌描述（onBlur 即时保存；带字数计数） */}
-              <div className="mt-4 border-t border-black/[0.05] pt-4 dark:border-white/[0.07]">
+              <div className="mt-4 border-t border-black/[0.05] pt-4">
                 <div className="mb-1.5 flex items-center justify-between">
-                  <div className="text-[13px] font-medium text-muted-foreground">
+                  <div className="text-[13px] font-medium text-zinc-500">
                     外貌描述（锁脸兜底）
                   </div>
-                  <span className="text-[11px] tabular-nums text-muted-foreground/60">{appearDraft.length}/300</span>
+                  <span className="text-[11px] tabular-nums text-zinc-500/60">{appearDraft.length}/300</span>
                 </div>
                 <Textarea
                   data-testid="imggen-face-appear"
@@ -363,9 +363,9 @@ export function FaceLockSection() {
                   rows={3}
                   maxLength={300}
                   aria-label="外貌描述"
-                  className="min-h-[64px] rounded-[14px] border-black/[0.05] bg-white/55 py-2.5 text-[14px] shadow-[inset_0_1px_0_rgba(255,255,255,0.7),0_3px_10px_rgba(17,24,39,0.05)] backdrop-blur-2xl dark:border-white/[0.09] dark:bg-white/[0.07] dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.05),0_3px_10px_rgba(0,0,0,0.2)]"
+                  className="min-h-[64px] rounded-[14px] border-black/[0.06] bg-white py-2.5 text-[14px] shadow-[inset_0_1px_0_rgba(255,255,255,0.7),0_3px_10px_rgba(17,24,39,0.05)] backdrop-blur-2xl"
                 />
-                <p className="pt-2 text-[12px] leading-[1.6] text-muted-foreground/80">
+                <p className="pt-2 text-[12px] leading-[1.6] text-zinc-500/80">
                   未上传参考图或生图模型不支持参考图时，会把这段外貌描述拼进提示词兜底；每个角色独立设置，互不影响。
                 </p>
               </div>
@@ -421,7 +421,7 @@ export function LockPage({ onBack }: { onBack: () => void }) {
     return (
       <DetailShell title="锁屏与密码" onBack={onBack} gray>
         <GroupCard>
-          <div className="divide-y divide-black/[0.05] dark:divide-white/[0.06]">
+          <div className="divide-y divide-black/[0.05]">
             {/* 锁屏总开关：关掉后不再出现锁屏界面 */}
             <div className="flex min-h-[52px] items-center gap-3 px-4 py-2">
               <span className="min-w-0 flex-1 text-[16px]">锁屏</span>
@@ -466,7 +466,7 @@ export function LockPage({ onBack }: { onBack: () => void }) {
             </div>
           </div>
         </GroupCard>
-        <p className="mt-2 px-1 text-[12px] leading-relaxed text-muted-foreground">
+        <p className="mt-2 px-1 text-[12px] leading-relaxed text-zinc-500">
           {lockConfig.lockScreen
             ? '开启后，锁屏上滑解锁需要输入密码；关闭浏览器再打开或按下电源键都会回到锁屏。'
             : '锁屏已关闭：开机和按下电源键都会直接进入主屏幕。'}
@@ -483,20 +483,20 @@ export function LockPage({ onBack }: { onBack: () => void }) {
                     setTempCode('');
                     setStage('verifyChange');
                   }}
-                  className="flex h-[46px] w-full items-center justify-between px-4 text-left transition-colors active:bg-muted/50"
+                  className="flex h-[46px] w-full items-center justify-between px-4 text-left transition-colors active:bg-black/[0.05]"
                 >
                   <span className="text-[16px]">更改密码</span>
-                  <ChevronRight className="h-5 w-5 shrink-0 text-muted-foreground/60" />
+                  <ChevronRight className="h-5 w-5 shrink-0 text-zinc-500/60" />
                 </button>
               )}
               <div className="flex min-h-[52px] items-center justify-between px-4 py-2">
                 <span className="text-[16px]">密码类型</span>
                 {lockConfig.enabled ? (
-                  <span className="text-[15px] text-muted-foreground">
+                  <span className="text-[15px] text-zinc-500">
                     {lockConfig.len === 6 ? '6 位数字' : '4 位数字'}
                   </span>
                 ) : (
-                  <div className="flex rounded-full bg-white/50 p-0.5 ring-1 ring-black/[0.05] backdrop-blur-xl dark:bg-white/[0.06] dark:ring-white/[0.08]" role="radiogroup" aria-label="密码位数">
+                  <div className="flex rounded-full bg-white/50 p-0.5 ring-1 ring-black/[0.05] backdrop-blur-xl" role="radiogroup" aria-label="密码位数">
                     {([4, 6] as const).map((n) => (
                       <button
                         key={n}
@@ -506,8 +506,8 @@ export function LockPage({ onBack }: { onBack: () => void }) {
                         onClick={() => applyLockConfig({ lockScreen: true, enabled: false, code: '', len: n })}
                         className={`h-8 w-[68px] rounded-full text-[14px] transition ${
                           lockConfig.len === n
-                            ? 'bg-white/95 font-medium text-foreground shadow-sm dark:bg-white/[0.2]'
-                            : 'text-muted-foreground'
+                            ? 'bg-white/95 font-medium text-zinc-900 shadow-sm'
+                            : 'text-zinc-500'
                         }`}
                       >
                         {n} 位
@@ -528,22 +528,22 @@ export function LockPage({ onBack }: { onBack: () => void }) {
 
         {/* #63：关闭锁屏总开关前确认（仿 themes.tsx「恢复全部默认图标」对话框） */}
         <AlertDialog open={confirmLockOff} onOpenChange={setConfirmLockOff}>
-          <AlertDialogContent className="w-[270px] gap-0 rounded-[14px] p-0 sm:w-[270px] sm:max-w-[270px]">
+          <AlertDialogContent className="w-[270px] gap-0 rounded-[14px] border-black/[0.06] bg-white! p-0 text-zinc-900! sm:w-[270px] sm:max-w-[270px]">
             <AlertDialogHeader className="gap-1.5 px-5 pb-4 pt-5 sm:text-center">
-              <AlertDialogTitle className="text-center text-[17px] font-semibold leading-snug">
+              <AlertDialogTitle className="text-center text-[17px] font-semibold leading-snug text-zinc-900">
                 关闭锁屏？
               </AlertDialogTitle>
-              <AlertDialogDescription className="text-center text-[13px] leading-snug">
+              <AlertDialogDescription className="text-center text-[13px] leading-snug text-zinc-500!">
                 已设置的锁屏密码将被清除，下次开启锁屏后需重新设置密码。此操作不可撤销。
               </AlertDialogDescription>
             </AlertDialogHeader>
-            <AlertDialogFooter className="flex-row gap-0 border-t border-border sm:flex-row">
-              <AlertDialogCancel className="h-12 flex-1 rounded-none border-0 bg-transparent text-[16px] font-normal text-foreground shadow-none hover:bg-transparent focus-visible:ring-0 active:bg-muted/60 sm:mt-0">
+            <AlertDialogFooter className="flex-row gap-0 border-t border-black/[0.06] sm:flex-row">
+              <AlertDialogCancel className="h-12 flex-1 rounded-none border-0 bg-transparent text-[16px] font-normal text-zinc-900 shadow-none hover:bg-transparent focus-visible:ring-0 active:bg-black/[0.06] sm:mt-0">
                 取消
               </AlertDialogCancel>
-              <span aria-hidden="true" className="w-px shrink-0 self-stretch bg-border" />
+              <span aria-hidden="true" className="w-px shrink-0 self-stretch bg-black/[0.06]" />
               <AlertDialogAction
-                className="h-12 flex-1 rounded-none border-0 bg-transparent text-[16px] font-medium shadow-none hover:bg-transparent focus-visible:ring-0 active:bg-muted/60 sm:mt-0"
+                className="h-12 flex-1 rounded-none border-0 bg-transparent text-[16px] font-medium shadow-none hover:bg-transparent focus-visible:ring-0 active:bg-black/[0.06] sm:mt-0"
                 style={{ color: IOS_RED }}
                 onClick={() => {
                   try {
@@ -604,12 +604,12 @@ export function LockPage({ onBack }: { onBack: () => void }) {
   return (
     <DetailShell title="锁屏与密码" onBack={cancelSub} gray>
       <div className="flex flex-col items-center pt-6">
-        <div className="flex h-12 w-12 items-center justify-center rounded-full bg-white/60 shadow-sm ring-1 ring-white/70 backdrop-blur-xl dark:bg-white/[0.08] dark:ring-white/[0.1]">
-          <Lock className="h-6 w-6 text-muted-foreground" strokeWidth={2} />
+        <div className="flex h-12 w-12 items-center justify-center rounded-full bg-white/60 shadow-sm ring-1 ring-black/[0.05] backdrop-blur-xl">
+          <Lock className="h-6 w-6 text-zinc-500" strokeWidth={2} />
         </div>
         <p className="mt-3 text-[17px] font-semibold">{LOCK_STAGE_TITLE[stage]}</p>
         {stage === 'confirmNew' && (
-          <p className="mt-1 text-[13px] text-muted-foreground">请再次输入相同的密码</p>
+          <p className="mt-1 text-[13px] text-zinc-500">请再次输入相同的密码</p>
         )}
         <PasscodePad
           length={lockConfig.len}
@@ -623,7 +623,7 @@ export function LockPage({ onBack }: { onBack: () => void }) {
         <button
           type="button"
           onClick={cancelSub}
-          className="mt-2 rounded-full bg-white/60 px-6 py-2 text-[15px] text-muted-foreground shadow-sm ring-1 ring-white/70 backdrop-blur-xl transition-all active:scale-[0.96] dark:bg-white/[0.08] dark:ring-white/[0.1]"
+          className="mt-2 rounded-full bg-white/60 px-6 py-2 text-[15px] text-zinc-500 shadow-sm ring-1 ring-black/[0.05] backdrop-blur-xl transition-all active:scale-[0.96]"
         >
           取消
         </button>

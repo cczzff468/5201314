@@ -7,7 +7,7 @@ import { Plus, Search, X } from 'lucide-react';
 import { useUI, useSettings, useSystemDark, selectResolvedTheme, type AppId } from '@/lib/ios/store';
 import { shellScale } from '@/lib/ios/shell-scale';
 import { useHomeWallpaperLight } from '@/lib/ios/foreground';
-import { localDB } from '@/lib/ios/db';
+import { localDB, genId } from '@/lib/ios/db';
 // v1.9.21 吃醋锁网页降级：冻结 App 图标置灰 + 小锁角标 + 「由 XX 管理」标签
 import { isWebAppFrozen, subscribeWebLock, getWebLockVersion } from '@/lib/ios/web-app-lock';
 import { useUnreadTotal, useBadge, wxUnreads, qqUnreads, chatBadge, phoneBadge } from '@/lib/unread-store';
@@ -57,8 +57,16 @@ import { NeteaseCardWidget } from './NeteaseCard';
 import { VinylCardWidget } from './VinylCard';
 import { MusicWidget } from './MusicWidget';
 import { ContactWidget, useTaContact, taNameOf } from './ContactWidget';
-import { WidgetGalleryContent, GALLERY_KINDS, ClockGridWidget, type GalleryKind } from './WidgetGallery';
+import { WidgetGalleryContent, ClockGridWidget } from './WidgetGallery';
 import { CalendarCardWidget } from './CalendarCard';
+import {
+  CalendarBigDateWidget,
+  CalendarMonthWidget,
+  CalendarMonthDarkWidget,
+  CalendarWeekWidget,
+  CalendarProgressWidget,
+  RemindersWidget,
+} from './CalendarWidgets';
 import { ICityCardWidget, ICityCardEditor, loadICityCard, type ICityCardData, DEFAULT_ICITY_CARD, ICITY_CARD_KEY } from './ICityCard';
 import { TickClockCardWidget } from './TickClockCard';
 import { PolaroidCardWidget, PolaroidCardEditor, loadPolaroidCard, type PolaroidCardData, DEFAULT_POLAROID_CARD, POLAROID_CARD_KEY } from './PolaroidCard';
@@ -122,8 +130,9 @@ const WeatherWidget = dynamic(() => import('@/components/apps/weather').then((m)
  *   文件夹结构持久化（layout.folders，App 实体存在夹内，从主网格移除）。
  * 编辑模式（长按任意图标/小组件或长按空白处进入）：
  * - 全部图标/小组件抖动，左上角出现深色「删除」× 角标；
- * - 左上角「+」→ 小组件画廊浮层（全部 15 种小组件 1:1 预览，点 + 添加回主屏，
- *   × 删除过的项从 hidden 找回；与主题 App「小组件」界面同一套画廊）
+ * - 左上角「+」→ 小组件画廊浮层（全部 21 种小组件 1:1 预览，点 + 添加回主屏，
+ *   同款小组件可无限复制（每次生成全新实例 id）；× 删除过的项从 hidden 找回；
+ *   与主题 App「小组件」界面同一套画廊）
  *   + 右上角「恢复默认」与白色「完成」胶囊按钮；
  * - 编辑中点按空白处直接退出编辑（用户要求）；
  * - 长按住拖拽可自由放置：App↔App、小组件↔小组件、小组件↔App（小组件不能进 Dock）、跨页拖拽；
@@ -140,14 +149,17 @@ const WeatherWidget = dynamic(() => import('@/components/apps/weather').then((m)
  * - × 删除的项记入 hidden 持久化（刷新不复活），「恢复默认」可找回。
  */
 
-/** 桌面小组件种类：时钟（大数字卡）/ 天气 / 信息卡片（个人名片）/ 气泡（双头像+各自头顶气泡）/ 日记（日记卡）/ 一起听（双人气泡+迷你播放器）/ 音乐（封面+进度+控制键，真实播放状态）/ 网易云（黑胶播放器卡）/ 对话气泡（双头像+交错双气泡）/ 黑胶（大唱片+唱针）/ 日历（周几+大字日期+最近一条日程）/ iCity（名字+日期+头像胶囊）/ 表盘时钟（刻度表圈）/ 拍立得（三张胶片照）/ 快捷联系人（TA 头像+发消息，直达信息会话） */
-export type WidgetKind = 'weather' | 'clock' | 'profile' | 'bubble' | 'diary' | 'listen' | 'music' | 'netease' | 'dialog' | 'vinyl' | 'calendar' | 'icity' | 'tickclock' | 'polaroid' | 'contact';
+/** 桌面小组件种类：时钟（大数字卡）/ 天气 / 信息卡片（个人名片）/ 气泡（双头像+各自头顶气泡）/ 日记（日记卡）/ 一起听（双人气泡+迷你播放器）/ 音乐（封面+进度+控制键，真实播放状态）/ 网易云（黑胶播放器卡）/ 对话气泡（双头像+交错双气泡）/ 黑胶（大唱片+唱针）/ 日历（周几+大字日期+最近一条日程）/ iCity（名字+日期+头像胶囊）/ 表盘时钟（刻度表圈）/ 拍立得（三张胶片照）/ 快捷联系人（TA 头像+发消息，直达信息会话）/
+ *  日历全家桶：大日期/日历月览/黑色月历/周日历/日历进度 + 提醒事项（v13 小组件改版：同种小组件可添加无数个实例） */
+export type WidgetKind = 'weather' | 'clock' | 'profile' | 'bubble' | 'diary' | 'listen' | 'music' | 'netease' | 'dialog' | 'vinyl' | 'calendar' | 'icity' | 'tickclock' | 'polaroid' | 'contact' | 'calendar-big' | 'calendar-month' | 'calendar-month-dark' | 'calendar-week' | 'calendar-progress' | 'reminders';
 /** 桌面文件夹：名称 + 内部 App 序列（App 从主网格移入；全部拖出或只剩 1 个时文件夹自动解体） */
 type FolderData = { id: string; name: string; apps: AppId[] };
-type Tile = { kind: 'widget'; widget: WidgetKind } | { kind: 'app'; id: AppId } | { kind: 'folder'; id: string } | { kind: 'empty' };
+/** wid = 小组件实例 id（v13 无限复制：同种小组件可多实例并存，画廊添加时生成；
+ *  无 wid = 默认布局与存量旧数据，tileKey 输出与旧版完全一致，零迁移兼容） */
+type Tile = { kind: 'widget'; widget: WidgetKind; wid?: string } | { kind: 'app'; id: AppId } | { kind: 'folder'; id: string } | { kind: 'empty' };
 type Zone = 'grid' | 'dock';
 
-const WIDGET_KINDS: WidgetKind[] = ['weather', 'clock', 'profile', 'bubble', 'diary', 'listen', 'music', 'netease', 'dialog', 'vinyl', 'calendar', 'icity', 'tickclock', 'polaroid', 'contact'];
+const WIDGET_KINDS: WidgetKind[] = ['weather', 'clock', 'profile', 'bubble', 'diary', 'listen', 'music', 'netease', 'dialog', 'vinyl', 'calendar', 'icity', 'tickclock', 'polaroid', 'contact', 'calendar-big', 'calendar-month', 'calendar-month-dark', 'calendar-week', 'calendar-progress', 'reminders'];
 /** 小组件元信息：× 删除角标文案 + 点击行为（openApp=null 的点击开对应编辑器；
  *  contact 特殊：点击经 setPendingChatContact 直达与 TA 的信息会话，见渲染处） */
 const WIDGET_META: Record<WidgetKind, { label: string; openApp: AppId | null }> = {
@@ -166,6 +178,12 @@ const WIDGET_META: Record<WidgetKind, { label: string; openApp: AppId | null }> 
   tickclock: { label: '表盘时钟小组件', openApp: 'clock' },
   polaroid: { label: '拍立得小组件', openApp: null },
   contact: { label: '快捷联系人小组件', openApp: 'chat' },
+  'calendar-big': { label: '大日期小组件', openApp: 'calendar' },
+  'calendar-month': { label: '日历月览小组件', openApp: 'calendar' },
+  'calendar-month-dark': { label: '黑色月历小组件', openApp: 'calendar' },
+  'calendar-week': { label: '周日历小组件', openApp: 'calendar' },
+  'calendar-progress': { label: '日历进度小组件', openApp: 'calendar' },
+  reminders: { label: '提醒事项小组件', openApp: 'reminders' },
 };
 /** 小组件网格跨度：时钟/日记/对话气泡（2 行）/信息卡片（3 行）= 顶部通栏整行，天气/气泡/日历/快捷联系人 = 2×2 方格，
  *  一起听/网易云/黑胶 = 2×3 竖版方格（App 环绕） */
@@ -185,6 +203,12 @@ const WIDGET_SPAN: Record<WidgetKind, string> = {
   tickclock: 'col-span-2 row-span-2 self-center',
   polaroid: 'col-span-4 row-span-2',
   contact: 'col-span-2 row-span-2 self-center',
+  'calendar-big': 'col-span-2 row-span-2 self-center',
+  'calendar-month': 'col-span-4 row-span-3',
+  'calendar-month-dark': 'col-span-4 row-span-3',
+  'calendar-week': 'col-span-2 row-span-3',
+  'calendar-progress': 'col-span-2 row-span-2 self-center',
+  reminders: 'col-span-2 row-span-2 self-center',
 };
 
 /** 小组件网格跨度（数值版）：flow 模拟 / 空白位行列线拟合（槽宽反推单列宽、槽高反推行距）用 */
@@ -204,14 +228,26 @@ const WIDGET_SPAN_SIZE: Record<WidgetKind, { c: number; r: number }> = {
   tickclock: { c: 2, r: 2 },
   polaroid: { c: 4, r: 2 },
   contact: { c: 2, r: 2 },
+  'calendar-big': { c: 2, r: 2 },
+  'calendar-month': { c: 4, r: 3 },
+  'calendar-month-dark': { c: 4, r: 3 },
+  'calendar-week': { c: 2, r: 3 },
+  'calendar-progress': { c: 2, r: 2 },
+  reminders: { c: 2, r: 2 },
 };
 
-/** 小组件稳定键（data-id / hidden / 拖拽 id 用）：带前缀避免与同名 App id（weather）冲突 */
+/** 小组件稳定键（data-id / hidden / 拖拽 id 用）：带前缀避免与同名 App id（weather）冲突；
+ *  多实例时代完整键 = `widget:种类#实例id`（见 tileKey），kind 部分单独解析（# 后缀剥掉） */
 const widgetKey = (w: WidgetKind): string => `widget:${w}`;
 const isWidgetKey = (id: string): boolean => id.startsWith('widget:');
 const widgetOfKey = (id: string): WidgetKind => {
-  const k = id.slice('widget:'.length);
+  const k = id.slice('widget:'.length).split('#')[0];
   return (WIDGET_KINDS as string[]).includes(k) ? (k as WidgetKind) : 'weather';
+};
+/** widget 键里的实例 id（# 后缀；旧格式/默认布局无实例 → undefined） */
+const widOfKey = (id: string): string | undefined => {
+  const i = id.indexOf('#');
+  return i >= 0 ? id.slice(i + 1) : undefined;
 };
 /** 文件夹稳定键（data-id / 拖拽 id 用）：带前缀避免与同名 App id 冲突 */
 const folderKey = (id: string): string => `folder:${id}`;
@@ -220,8 +256,15 @@ const folderIdOfKey = (id: string): string => id.slice('folder:'.length);
 /** 新建文件夹 id（时间戳+序号，重启后不重复） */
 let folderSeq = 0;
 const newFolderId = (): string => `f${Date.now().toString(36)}${(folderSeq++).toString(36)}`;
-/** tile 唯一键（小组件/文件夹用带前缀键，App 用自身 id，空占位格不参与交互用常量键） */
-const tileKey = (t: Tile): string => (t.kind === 'widget' ? widgetKey(t.widget) : t.kind === 'empty' ? 'empty' : t.kind === 'folder' ? folderKey(t.id) : t.id);
+/** tile 唯一键（小组件带 # 实例 id 后缀、文件夹用带前缀键，App 用自身 id，空占位格不参与交互用常量键）；
+ *  无 wid 的小组件输出与旧版完全一致（默认布局与存量数据零迁移） */
+const tileKey = (t: Tile): string =>
+  t.kind === 'widget' ? (t.wid ? `widget:${t.widget}#${t.wid}` : widgetKey(t.widget)) : t.kind === 'empty' ? 'empty' : t.kind === 'folder' ? folderKey(t.id) : t.id;
+/** 从拖拽 id 还原小组件 tile（保留实例 id：多实例拖拽落位/放回原位都不丢 wid） */
+const widgetTileOf = (id: string): Tile & { kind: 'widget' } => {
+  const wid = widOfKey(id);
+  return wid ? { kind: 'widget', widget: widgetOfKey(id), wid } : { kind: 'widget', widget: widgetOfKey(id) };
+};
 
 const GRID_GAP_X = 8;
 
@@ -287,10 +330,10 @@ type Hit =
 interface HomeLayout {
   /** 布局版本（v2 = 微信/音乐/文件/提醒事项在第二页、音乐移出 Dock）；旧版自动迁移 */
   v?: number;
-  /** 多页网格：每页一组 tile（小组件全布局唯一，跟随所在页；时钟/信息卡片通栏整行、天气 2×2 格） */
+  /** 多页网格：每页一组 tile（v13 起小组件同种可多实例，跟随所在页；时钟/信息卡片通栏整行、天气 2×2 格） */
   pages: Tile[][];
   dock: AppId[];
-  /** 用户删除过的项（'widget:weather'/'widget:clock' 或 AppId）：重新加载时不自动补回 */
+  /** 用户删除过的项（'widget:weather' 或带实例的 'widget:weather#xx'、AppId）：重新加载时不自动补回 */
   hidden: string[];
   /** 桌面文件夹（页内以 {kind:'folder', id} tile 引用；App 实体存在这里） */
   folders?: FolderData[];
@@ -435,7 +478,8 @@ function pageHasRoom(page: Tile[], extra: Tile[] = [], insertingWidget = false):
  * - 兼容旧单页 {grid}：迁移为第 1 页；
  * - v11→v12：定向迁移——拾光小屋挪到第 4 页首位（其余排布原样保留，不整版重置）；
  * - v10 及更早：直接重置为新默认（保留 hidden 删除记录）；
- * - 小组件全布局唯一、App 去重、Dock ≤4、缺失 App 按容量补到末尾有空间的页（hidden 的除外）。
+ * - 小组件同种可多实例（不再按种类去重，仅按实例键剔除被删除项）、App 去重、Dock ≤4、
+ *   缺失 App 按容量补到末尾有空间的页（hidden 的除外）。
  */
 function sanitizeLayout(raw: unknown): HomeLayout {
   const allIds = APPS.map((a) => a.id);
@@ -447,9 +491,10 @@ function sanitizeLayout(raw: unknown): HomeLayout {
   if (Array.isArray(r.hidden)) {
     for (const h of r.hidden) {
       if (typeof h !== 'string') continue;
-      // 旧格式 'widget'（全布局唯一时代）→ 天气小组件；小组件键需为已知种类
+      // 旧格式 'widget'（全布局唯一时代）→ 天气小组件；小组件键的 kind 部分（# 实例后缀前）
+      // 需为已知种类，完整键（含 #实例id）原样保留——hidden 按实例精确匹配
       if (h === 'widget' || h === widgetKey('weather')) hidden.add(widgetKey('weather'));
-      else if (isWidgetKey(h) && (WIDGET_KINDS as string[]).includes(h.slice('widget:'.length))) hidden.add(h);
+      else if (isWidgetKey(h) && (WIDGET_KINDS as string[]).includes(h.slice('widget:'.length).split('#')[0])) hidden.add(h);
       else if (!isWidgetKey(h) && (allIds as string[]).includes(h)) hidden.add(h);
     }
   }
@@ -522,40 +567,35 @@ function sanitizeLayout(raw: unknown): HomeLayout {
   }
 
   const pages: Tile[][] = [];
-  const widgetSeen: Record<WidgetKind, boolean> = {
-    weather: hidden.has(widgetKey('weather')),
-    clock: hidden.has(widgetKey('clock')),
-    profile: hidden.has(widgetKey('profile')),
-    bubble: hidden.has(widgetKey('bubble')),
-    diary: hidden.has(widgetKey('diary')),
-    listen: hidden.has(widgetKey('listen')),
-    music: hidden.has(widgetKey('music')),
-    netease: hidden.has(widgetKey('netease')),
-    dialog: hidden.has(widgetKey('dialog')),
-    vinyl: hidden.has(widgetKey('vinyl')),
-    calendar: hidden.has(widgetKey('calendar')),
-    icity: hidden.has(widgetKey('icity')),
-    tickclock: hidden.has(widgetKey('tickclock')),
-    polaroid: hidden.has(widgetKey('polaroid')),
-    contact: hidden.has(widgetKey('contact')),
+  // 小组件「种类是否已在布局/删除记录里」：v13 多实例化后不再做全布局唯一去重，
+  // 只供下方「缺失的默认小组件按默认位补回」判定用；hidden 里 kind 级旧键
+  // （widget:weather）或带 # 实例的新键（widget:weather#xx）都算「该种类已被删过」
+  const hiddenHasKind = (w: WidgetKind): boolean => {
+    if (hidden.has(widgetKey(w))) return true;
+    const pre = `${widgetKey(w)}#`;
+    for (const h of hidden) if (h.startsWith(pre)) return true;
+    return false;
   };
+  const widgetPlaced = Object.fromEntries(WIDGET_KINDS.map((w) => [w, hiddenHasKind(w)])) as Record<WidgetKind, boolean>;
   const placed = new Set<AppId>(dock);
   for (const list of rawPages) {
     const page: Tile[] = [];
     for (const t of list) {
       if (!t || typeof t !== 'object') continue;
-      const o = t as { kind?: unknown; id?: unknown; widget?: unknown };
+      const o = t as { kind?: unknown; id?: unknown; widget?: unknown; wid?: unknown };
       if (o.kind === 'empty') {
         // 空占位格（拖到行尾空位/空列时补齐列位）：原样保留，否则重排会让 App 位置漂移
         page.push({ kind: 'empty' });
         continue;
       }
       if (o.kind === 'widget') {
-        // 已知种类（未知/无 widget 字段 → 天气，兼容最老格式）；每种全布局唯一，重复丢弃
+        // 已知种类（未知/无 widget 字段 → 天气，兼容最老格式）；v13 起同种可多实例并存
+        //（不再按种类去重），仅按 tileKey 精确剔除被删除的那个实例（wid 原样带过去）
         const w = typeof o.widget === 'string' && (WIDGET_KINDS as string[]).includes(o.widget) ? (o.widget as WidgetKind) : 'weather';
-        if (widgetSeen[w]) continue;
-        widgetSeen[w] = true;
-        page.push({ kind: 'widget', widget: w });
+        const wid = typeof o.wid === 'string' && o.wid ? o.wid : undefined;
+        if (wid ? hidden.has(`widget:${w}#${wid}`) : hidden.has(widgetKey(w))) continue;
+        widgetPlaced[w] = true;
+        page.push(wid ? { kind: 'widget', widget: w, wid } : { kind: 'widget', widget: w });
       } else if (o.kind === 'folder' && typeof o.id === 'string' && o.id) {
         // 文件夹 tile：先原样保留，等 folders 解析后统一剔除无效/重复项（校验需要 folders 数据）
         page.push({ kind: 'folder', id: o.id });
@@ -627,49 +667,49 @@ function sanitizeLayout(raw: unknown): HomeLayout {
   // 小组件都在 hidden 里，不会自动复活；用户主动加回后此处不再介入）：时钟→第 1 页头、
   // 天气→时钟旁、信息卡片→第 2 页头、气泡→信息卡片后、日记/一起听/网易云→第 3 页、
   // 对话气泡/黑胶→第 4 页（存量布局不足时新建页）
-  if (!widgetSeen.clock) pages[0].unshift({ kind: 'widget', widget: 'clock' });
-  if (!widgetSeen.weather) {
+  if (!widgetPlaced.clock) pages[0].unshift({ kind: 'widget', widget: 'clock' });
+  if (!widgetPlaced.weather) {
     const at = pages[0].length > 0 && pages[0][0].kind === 'widget' && pages[0][0].widget === 'clock' ? 1 : 0;
     pages[0].splice(at, 0, { kind: 'widget', widget: 'weather' });
   }
   // 快捷联系人缺失时补回第 1 页天气旁（v11 默认位；hidden 里的不补——被删的不自动复活）
-  if (!widgetSeen.contact) {
+  if (!widgetPlaced.contact) {
     const p1 = pages[0];
     const wi = p1.findIndex((t) => t.kind === 'widget' && t.widget === 'weather');
     p1.splice(wi >= 0 ? wi + 1 : p1.length, 0, { kind: 'widget', widget: 'contact' });
   }
-  if (!widgetSeen.profile) {
+  if (!widgetPlaced.profile) {
     while (pages.length < 2) pages.push([]);
     pages[1].unshift({ kind: 'widget', widget: 'profile' });
   }
-  if (!widgetSeen.bubble) {
+  if (!widgetPlaced.bubble) {
     while (pages.length < 2) pages.push([]);
     const p2 = pages[1];
     const pi = p2.findIndex((t) => t.kind === 'widget' && t.widget === 'profile');
     p2.splice(pi >= 0 ? pi + 1 : p2.length, 0, { kind: 'widget', widget: 'bubble' });
   }
-  if (!widgetSeen.diary) {
+  if (!widgetPlaced.diary) {
     while (pages.length < 3) pages.push([]);
     pages[2].unshift({ kind: 'widget', widget: 'diary' });
   }
-  if (!widgetSeen.listen) {
+  if (!widgetPlaced.listen) {
     while (pages.length < 3) pages.push([]);
     const p3 = pages[2];
     const di = p3.findIndex((t) => t.kind === 'widget' && t.widget === 'diary');
     p3.splice(di >= 0 ? di + 1 : p3.length, 0, { kind: 'widget', widget: 'listen' });
   }
-  if (!widgetSeen.netease) {
+  if (!widgetPlaced.netease) {
     while (pages.length < 3) pages.push([]);
     const p3 = pages[2];
     const li = p3.findIndex((t) => t.kind === 'widget' && t.widget === 'listen');
     p3.splice(li >= 0 ? li + 1 : p3.length, 0, { kind: 'widget', widget: 'netease' });
   }
   // 第四页（用户要求）：对话气泡 → 第 4 页头（不足四页新建）、黑胶 → 对话气泡后
-  if (!widgetSeen.dialog) {
+  if (!widgetPlaced.dialog) {
     while (pages.length < 4) pages.push([]);
     pages[3].unshift({ kind: 'widget', widget: 'dialog' });
   }
-  if (!widgetSeen.vinyl) {
+  if (!widgetPlaced.vinyl) {
     while (pages.length < 4) pages.push([]);
     const p4 = pages[3];
     const di = p4.findIndex((t) => t.kind === 'widget' && t.widget === 'dialog');
@@ -678,24 +718,24 @@ function sanitizeLayout(raw: unknown): HomeLayout {
   // widgets-7 四个新小组件缺失时的默认落位：iCity→第 2 页气泡后、日历→第 3 页头、
   // 表盘时钟→第 4 页头、拍立得→表盘时钟后（hidden 里的不补——v9 起默认收起，存量布局已在
   // hidden 里，不会自动复活；用户从画廊主动加回后此处不再介入）
-  if (!widgetSeen.icity) {
+  if (!widgetPlaced.icity) {
     while (pages.length < 2) pages.push([]);
     const p2 = pages[1];
     const bi = p2.findIndex((t) => t.kind === 'widget' && t.widget === 'bubble');
     p2.splice(bi >= 0 ? bi + 1 : p2.length, 0, { kind: 'widget', widget: 'icity' });
   }
-  if (!widgetSeen.calendar) {
+  if (!widgetPlaced.calendar) {
     // v11：日历小组件默认位改第 2 页气泡旁（重做为周几+大字日期+最近日程 2×2 后与气泡并排）
     while (pages.length < 2) pages.push([]);
     const p2 = pages[1];
     const bi = p2.findIndex((t) => t.kind === 'widget' && t.widget === 'bubble');
     p2.splice(bi >= 0 ? bi + 1 : p2.length, 0, { kind: 'widget', widget: 'calendar' });
   }
-  if (!widgetSeen.tickclock) {
+  if (!widgetPlaced.tickclock) {
     while (pages.length < 4) pages.push([]);
     pages[3].unshift({ kind: 'widget', widget: 'tickclock' });
   }
-  if (!widgetSeen.polaroid) {
+  if (!widgetPlaced.polaroid) {
     while (pages.length < 4) pages.push([]);
     const p4 = pages[3];
     const ti = p4.findIndex((t) => t.kind === 'widget' && t.widget === 'tickclock');
@@ -831,7 +871,7 @@ function reorder(layout: HomeLayout, id: string, to: Hit): HomeLayout {
   if (to.zone === 'dock') {
     if (isWidget || isFolder) {
       // 小组件/文件夹不可进 Dock：放回原位
-      const tile: Tile = isFolder ? { kind: 'folder', id: folderIdOfKey(id) } : { kind: 'widget', widget: widgetOfKey(id) };
+      const tile: Tile = isFolder ? { kind: 'folder', id: folderIdOfKey(id) } : widgetTileOf(id);
       pages[fromZone === 'grid' ? fromPage : Math.max(0, pages.length - 1)].splice(
         Math.max(0, Math.min(pages[fromZone === 'grid' ? fromPage : pages.length - 1].length, fromIndex)),
         0,
@@ -860,7 +900,7 @@ function reorder(layout: HomeLayout, id: string, to: Hit): HomeLayout {
   // 空占位格：把新项从自然落点推到指针所指的（行,列）（拖到行尾空位/任意空白格的精确定位）
   const empties: Tile[] = Array.from({ length: padEmpty }, () => ({ kind: 'empty' as const }));
   const tile: Tile = isWidget
-    ? { kind: 'widget', widget: widgetOfKey(id) }
+    ? widgetTileOf(id)
     : isFolder
       ? { kind: 'folder', id: folderIdOfKey(id) }
       : { kind: 'app', id: id as AppId };
@@ -2119,18 +2159,19 @@ export default function HomeScreen() {
     }
   };
 
-  /** 编辑模式「+」画廊：把全部 15 种小组件添加回主屏（× 删除后在此找回；已在屏上则忽略）。
+  /** 编辑模式「+」画廊：把小组件添加到主屏（× 删除后在此找回；v13 起同种小组件
+   *  可无限复制——每次添加都生成全新实例 id，不与 hidden 里被删的旧实例撞键）。
    *  落点 = 当前编辑页起第一张装得下的页（格数按 14、行数按 6 行封顶——小组件按跨行占位
    *  校验，装不下会顺延到后面的页/新建页接住） */
   const addWidgetFromGallery = (kind: WidgetKind) => {
     const cur = layoutRef.current;
-    if (cur.pages.some((p) => p.some((t) => t.kind === 'widget' && t.widget === kind))) return;
+    const tile: Tile = { kind: 'widget', widget: kind, wid: genId() };
     const pages = cur.pages.map((p) => p.slice());
     let target = -1;
     const start = Math.min(pageRef.current, pages.length - 1);
     for (let off = 0; off < pages.length; off++) {
       const pi = (start + off) % pages.length;
-      if (pageHasRoom(pages[pi], [{ kind: 'widget', widget: kind }], true)) {
+      if (pageHasRoom(pages[pi], [tile], true)) {
         target = pi;
         break;
       }
@@ -2139,7 +2180,7 @@ export default function HomeScreen() {
       pages.push([]);
       target = pages.length - 1;
     }
-    pages[target].push({ kind: 'widget', widget: kind });
+    pages[target].push(tile);
     const next: HomeLayout = { ...cur, pages, hidden: cur.hidden.filter((h) => h !== widgetKey(kind)) };
     layoutRef.current = next;
     setLayout(next);
@@ -2493,7 +2534,7 @@ export default function HomeScreen() {
     const tiles = layoutRef.current.pages[p] ?? [];
     const isWidget = isWidgetKey(m.id);
     const tile: Tile = isWidget
-      ? { kind: 'widget', widget: widgetOfKey(m.id) }
+      ? widgetTileOf(m.id)
       : isFolderKey(m.id)
         ? { kind: 'folder', id: folderIdOfKey(m.id) }
         : { kind: 'app', id: m.id as AppId };
@@ -3068,11 +3109,6 @@ export default function HomeScreen() {
     );
   };
 
-  /** 画廊内各小组件是否已在主屏上（+ 浮层用；已在屏上的不可重复添加） */
-  const galleryAdded = Object.fromEntries(
-    GALLERY_KINDS.map((k) => [k, layout.pages.some((p) => p.some((t) => t.kind === 'widget' && t.widget === k))])
-  ) as Record<GalleryKind, boolean>;
-
   /** 从拖拽开始时捕获的静态几何里取某区某类型槽位的尺寸（传 id 则优先精确匹配该 tile）。
    *  跨区拖拽时占位槽必须用目标区的真实槽位尺寸（而不是被拖项起点尺寸），
    *  否则网格 App 拖到 Dock 会把 Dock 拉高、Dock App 拖到网格会把行压矮，产生跳动；
@@ -3091,7 +3127,7 @@ export default function HomeScreen() {
   /** 正在拖拽的项（浮动副本内容，挂在根层级渲染） */
   const floatingTile: Tile | null = dragId
     ? isWidgetKey(dragId)
-      ? { kind: 'widget', widget: widgetOfKey(dragId) }
+      ? widgetTileOf(dragId)
       : isFolderKey(dragId)
         ? { kind: 'folder', id: folderIdOfKey(dragId) }
         : { kind: 'app', id: dragId as AppId }
@@ -3135,7 +3171,7 @@ export default function HomeScreen() {
     if (tile.kind === 'widget') {
       return (
         <div
-          className={`rounded-[22px] ${edit && dragId !== widgetKey(tile.widget) ? 'home-jiggle' : ''}`}
+          className={`rounded-[22px] ${edit && dragId !== tileKey(tile) ? 'home-jiggle' : ''}`}
           style={edit ? { animationDelay: '-0.12s' } : undefined}
         >
           {tile.widget === 'clock' ? (
@@ -3166,6 +3202,18 @@ export default function HomeScreen() {
             <ContactWidget testId="contact-widget" />
           ) : tile.widget === 'polaroid' ? (
             <PolaroidCardWidget data={polaroidCard} />
+          ) : tile.widget === 'calendar-big' ? (
+            <CalendarBigDateWidget testId="home-calendar-big" />
+          ) : tile.widget === 'calendar-month' ? (
+            <CalendarMonthWidget testId="home-calendar-month" />
+          ) : tile.widget === 'calendar-month-dark' ? (
+            <CalendarMonthDarkWidget testId="home-calendar-month-dark" />
+          ) : tile.widget === 'calendar-week' ? (
+            <CalendarWeekWidget testId="home-calendar-week" />
+          ) : tile.widget === 'calendar-progress' ? (
+            <CalendarProgressWidget testId="home-calendar-progress" />
+          ) : tile.widget === 'reminders' ? (
+            <RemindersWidget testId="home-reminders" />
           ) : (
             <WeatherWidget />
           )}
@@ -3822,11 +3870,10 @@ export default function HomeScreen() {
               dialogData={dialogCard}
               icityData={icityCard}
               polaroidData={polaroidCard}
-              added={galleryAdded}
               onAdd={addWidgetFromGallery}
             />
           </div>
-          <p className="pt-2 text-center text-[12px] leading-none text-white/55">全部小组件 1:1 预览 · 点右上角 + 添加到主屏 · 遮罩处点按关闭</p>
+          <p className="pt-2 text-center text-[12px] leading-none text-white/55">全部小组件 1:1 预览 · 点 + 添加到主屏（同款可添加多个） · 遮罩处点按关闭</p>
         </div>
       )}
 

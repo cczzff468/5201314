@@ -31,10 +31,11 @@ export const IOS_RED = '#FF453A';
 
 // ---------------- 通用小组件 ----------------
 
-/** iOS 分组卡片（子页用）：GrayCard 同款毛玻璃配方但无内边距（divide-y 行列表用，分隔线贴边） */
+/** iOS 分组卡片（子页用）：GrayCard 同款毛玻璃配方但无内边距（divide-y 行列表用，分隔线贴边）。
+ *  SETTINGS-THEME：恒浅色玻璃白（bg-white/80 + 黑色低透明描边/分隔线），不随深色主题变黑 */
 export function GroupCard({ children }: { children: ReactNode }) {
   return (
-    <div className="divide-y divide-black/[0.05] overflow-hidden rounded-[22px] bg-white/55 shadow-[0_8px_28px_rgba(17,24,39,0.06)] ring-1 ring-white/70 backdrop-blur-2xl dark:divide-white/[0.06] dark:bg-white/[0.06] dark:ring-white/[0.09]">{children}</div>
+    <div className="divide-y divide-black/[0.05] overflow-hidden rounded-[22px] bg-white/80 shadow-[0_2px_12px_rgba(0,0,0,0.04)] ring-1 ring-black/[0.05] backdrop-blur-2xl">{children}</div>
   );
 }
 
@@ -68,7 +69,7 @@ export function RowIcon({ icon: Icon, tone }: { icon: LucideIcon; tone: string }
 export function LineIcon({ icon: Icon }: { icon: LucideIcon }) {
   return (
     <span className="flex h-[30px] w-[24px] shrink-0 items-center justify-center">
-      <Icon className="h-[20px] w-[20px] text-foreground/85 dark:text-white/85" strokeWidth={1.8} />
+      <Icon className="h-[20px] w-[20px] text-zinc-800/85" strokeWidth={1.8} />
     </span>
   );
 }
@@ -105,21 +106,21 @@ export function MainRow({
         ) : null}
       </span>
       {value !== undefined && (
-        <span className="max-w-[50%] shrink-0 truncate text-[15px] text-muted-foreground">{value}</span>
+        <span className="max-w-[50%] shrink-0 truncate text-[15px] text-zinc-500">{value}</span>
       )}
-      {showChevron && <ChevronRight className="h-5 w-5 shrink-0 text-muted-foreground/60" />}
+      {showChevron && <ChevronRight className="h-5 w-5 shrink-0 text-zinc-500/60" />}
     </>
   );
 
   if (onClick === undefined) {
-    return <div className="flex min-h-[52px] items-center gap-3 px-4 py-2">{inner}</div>;
+    return <div className="flex min-h-[52px] items-center gap-3 px-4 py-2 text-zinc-900">{inner}</div>;
   }
   return (
     <button
       type="button"
       data-testid={testId}
       onClick={onClick}
-      className="flex min-h-[52px] w-full items-center gap-3 px-4 py-2 text-left transition-colors active:bg-muted/50"
+      className="flex min-h-[52px] w-full items-center gap-3 px-4 py-2 text-left text-zinc-900 transition-colors active:bg-black/[0.05]"
     >
       {inner}
     </button>
@@ -127,7 +128,9 @@ export function MainRow({
 }
 
 /** 详情页外壳：居中标题导航 + 返回按钮 + 右滑进入动画；
- *  gray=true 时整页浅灰背景（#F2F2F7，iOS 设置子页风）。
+ *  SETTINGS-THEME：子页恒浅色（绿/白/灰/蓝清爽风）——整页底色固定 #F3F6F3（带一点绿意的
+ *  浅灰白），文字恒深色 text-zinc-900，不随深色主题变黑；gray 参数语义保留（true 时导航栏
+ *  透明无毛玻璃），两个分支底色同为浅色。
  *  历史沿革：v68 曾加过 4 枚彩色氛围光晕（蓝/紫/橙/粉，给玻璃卡的 backdrop-blur 提供折射光），
  *  本轮起按用户要求全部删除（先删珊瑚色橙/粉两枚，再删蓝/紫两枚）——
  *  子页背景回归纯浅灰，无任何彩色光斑特效 */
@@ -143,7 +146,7 @@ export function DetailShell({
   gray?: boolean;
 }) {
   return (
-    <div className={`relative flex h-full w-full flex-col ${gray ? 'bg-[#F2F2F7] dark:bg-transparent' : ''}`}>
+    <div className="relative flex h-full w-full flex-col bg-[#F3F6F3] text-zinc-900">
       <IOSNavBar
         title={title}
         large={false}
@@ -163,7 +166,7 @@ export function DetailShell({
 }
 
 export function FieldLabel({ children }: { children: ReactNode }) {
-  return <div className="mb-1.5 text-[13px] font-medium text-muted-foreground">{children}</div>;
+  return <div className="mb-1.5 text-[13px] font-medium text-zinc-500">{children}</div>;
 }
 
 /** 配置页分组标题：小色块图标 + 灰字标签（iOS 设置风），右侧可选自定义内容 */
@@ -180,7 +183,7 @@ export function SectionLabel({
 }) {
   return (
     <div className="mb-2 flex items-center justify-between">
-      <div className="flex items-center gap-1.5 text-[13px] font-medium text-muted-foreground">
+      <div className="flex items-center gap-1.5 text-[13px] font-medium text-zinc-500">
         <span
           className="flex h-[18px] w-[18px] items-center justify-center rounded-[5px]"
           style={{ backgroundColor: `${tone}1F` }}
@@ -194,11 +197,12 @@ export function SectionLabel({
   );
 }
 
-/** 毛玻璃分组卡片（glassmorphism）：半透明白 + backdrop-blur + 高光描边 + 柔和投影 */
+/** 毛玻璃分组卡片（glassmorphism）：半透明白 + backdrop-blur + 高光描边 + 柔和投影。
+ *  SETTINGS-THEME：恒浅色玻璃白（与 GroupCard 同配方），不随深色主题变黑 */
 export function GrayCard({ children, className = '' }: { children: ReactNode; className?: string }) {
   return (
     <div
-      className={`rounded-[22px] bg-white/55 p-4 shadow-[0_8px_28px_rgba(17,24,39,0.06)] ring-1 ring-white/70 backdrop-blur-2xl dark:bg-white/[0.06] dark:ring-white/[0.09] ${className}`}
+      className={`rounded-[22px] bg-white/80 p-4 shadow-[0_2px_12px_rgba(0,0,0,0.04)] ring-1 ring-black/[0.05] backdrop-blur-2xl ${className}`}
     >
       {children}
     </div>

@@ -370,6 +370,48 @@ export function isKvReady(): boolean {
   return readyDone;
 }
 
+/**
+ * v2.4.35 导入备份免刷新生效：丢弃全部防抖中的写入（恢复是整库快照覆盖，恢复前的
+ * 旧内存值不得再写回 IndexedDB）→ 清空内存缓存 → 从 IndexedDB 全量重新注水。
+ * 调用前必须已完成 restoreBackup（IndexedDB 已是备份内容）；完成后 kvGet 全量
+ * 命中新数据，挂载中的页面靠重进 App / cove-data-restored 事件刷新视图。
+ */
+export async function rehydrateKvFromIdb(): Promise<void> {
+  if (typeof window === 'undefined') return;
+  if (!readyDone) {
+    await ensureKvReady();
+    return;
+  }
+  // 丢弃防抖写入（不落盘——恢复快照即将/已经覆盖这些键）
+  for (const [key, p] of [...pendingWrites]) {
+    window.clearTimeout(p.timer);
+    pendingWrites.delete(key);
+  }
+  if (!idbAvailable) {
+    // 降级模式：restoreBackup 直接写 localStorage 的情况不存在（IDB 打不开时恢复
+    // 本身会失败）——保守起见按 localStorage 现状重建内存
+    memStore.clear();
+    try {
+      for (let i = 0; i < window.localStorage.length; i++) {
+        const k = window.localStorage.key(i);
+        if (!k || !isMigratableKey(k)) continue;
+        const raw = window.localStorage.getItem(k);
+        if (raw == null) continue;
+        try {
+          memStore.set(k, JSON.parse(raw));
+        } catch {
+          memStore.set(k, raw);
+        }
+      }
+    } catch {
+      /* 忽略 */
+    }
+    return;
+  }
+  memStore.clear();
+  await hydrateAll();
+}
+
 /** 测试/验证辅助：某键是否仍在 localStorage（迁移后应为 false） */
 export function lsHas(key: string): boolean {
   if (typeof window === 'undefined') return false;

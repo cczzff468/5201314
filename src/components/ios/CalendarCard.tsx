@@ -24,8 +24,8 @@ import {
   type NormalizedEvent,
 } from '@/components/apps/calendar/shared';
 
-/** 向后查找最近日程的天数窗口 */
-const LOOKAHEAD_DAYS = 7;
+/** 向后查找最近日程的天数窗口（30 天：日程排在 7 天外也能找到，修「添加了日程仍显示近期没有安排」） */
+const LOOKAHEAD_DAYS = 30;
 
 /** 最近一条日程（dayOff = 距今天几天：0=今天、1=明天……） */
 interface NextEvent {

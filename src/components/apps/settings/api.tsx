@@ -393,8 +393,8 @@ export function ApiPage({ onBack }: { onBack: () => void }) {
                   onClick={() => applyBuiltin(p)}
                   className={`rounded-full px-3.5 py-1.5 text-[13px] transition-all active:scale-[0.97] ${
                     active
-                      ? 'bg-foreground font-medium text-background shadow-[0_4px_14px_rgba(17,24,39,0.18)]'
-                      : 'bg-white/55 text-foreground/75 ring-1 ring-black/[0.06] backdrop-blur-xl hover:bg-white/80 dark:bg-white/[0.07] dark:text-foreground/75 dark:ring-white/[0.1] dark:hover:bg-white/[0.14]'
+                      ? 'bg-[#007AFF] font-medium text-white shadow-[0_4px_14px_rgba(0,122,255,0.35)]'
+                      : 'bg-white/55 text-zinc-700 ring-1 ring-black/[0.06] backdrop-blur-xl hover:bg-white/80'
                   }`}
                 >
                   {p.name}
@@ -409,8 +409,8 @@ export function ApiPage({ onBack }: { onBack: () => void }) {
                   key={p.id}
                   className={`flex items-center gap-1.5 rounded-full py-1.5 pl-3 pr-2 text-[13px] transition-all active:scale-[0.97] ${
                     active
-                      ? 'bg-foreground font-medium text-background shadow-[0_4px_14px_rgba(17,24,39,0.18)]'
-                      : 'bg-white/55 text-foreground/75 ring-1 ring-black/[0.06] backdrop-blur-xl dark:bg-white/[0.07] dark:text-foreground/75 dark:ring-white/[0.1]'
+                      ? 'bg-[#007AFF] font-medium text-white shadow-[0_4px_14px_rgba(0,122,255,0.35)]'
+                      : 'bg-white/55 text-zinc-700 ring-1 ring-black/[0.06] backdrop-blur-xl'
                   }`}
                 >
                   <button type="button" onClick={() => applyUserPreset(p)} className="max-w-[120px] truncate">
@@ -431,7 +431,7 @@ export function ApiPage({ onBack }: { onBack: () => void }) {
               type="button"
               onClick={startFreshApi}
               aria-label="清空 API 地址与 API Key，重新填写"
-              className="flex items-center gap-1 rounded-full bg-white/55 px-3.5 py-1.5 text-[13px] text-muted-foreground ring-1 ring-black/[0.06] backdrop-blur-xl transition-all hover:bg-white/80 active:scale-[0.97] dark:bg-white/[0.07] dark:ring-white/[0.1] dark:hover:bg-white/[0.14]"
+              className="flex items-center gap-1 rounded-full bg-white/55 px-3.5 py-1.5 text-[13px] text-zinc-500 ring-1 ring-black/[0.06] backdrop-blur-xl transition-all hover:bg-white/80 active:scale-[0.97]"
             >
               <Plus className="h-3.5 w-3.5" />
               添加预设
@@ -444,11 +444,11 @@ export function ApiPage({ onBack }: { onBack: () => void }) {
           <SectionLabel
             icon={Wrench}
             tone={TONE_BLUE}
-            right={<span className="text-[11px] text-muted-foreground/70">更改自动保存</span>}
+            right={<span className="text-[11px] text-zinc-500/70">更改自动保存</span>}
           >
             连接配置
           </SectionLabel>
-          <div className="flex flex-col gap-4 rounded-[22px] bg-white/55 p-4 shadow-[0_8px_28px_rgba(17,24,39,0.06)] ring-1 ring-white/70 backdrop-blur-2xl dark:bg-white/[0.06] dark:ring-white/[0.09]">
+          <div className="flex flex-col gap-4 rounded-[22px] bg-white/80 p-4 shadow-[0_2px_12px_rgba(0,0,0,0.04)] ring-1 ring-black/[0.05] backdrop-blur-2xl">
             {/* API 地址 */}
             <div>
               <FieldLabel>API 地址</FieldLabel>
@@ -456,7 +456,7 @@ export function ApiPage({ onBack }: { onBack: () => void }) {
                 value={apiConfig.baseUrl}
                 onChange={(e) => updateApiConfig({ baseUrl: e.target.value })}
                 placeholder="填写 API 地址（OpenAI 兼容）"
-                className="h-11 rounded-[14px] border-black/[0.05] bg-white/55 text-[14px] shadow-[inset_0_1px_0_rgba(255,255,255,0.7),0_3px_10px_rgba(17,24,39,0.05)] backdrop-blur-2xl dark:border-white/[0.09] dark:bg-white/[0.07] dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.05),0_3px_10px_rgba(0,0,0,0.2)]"
+                className="h-11 rounded-[14px] border-black/[0.06] bg-white text-[14px] shadow-[inset_0_1px_0_rgba(255,255,255,0.7),0_3px_10px_rgba(17,24,39,0.05)] backdrop-blur-2xl"
               />
             </div>
 
@@ -470,7 +470,7 @@ export function ApiPage({ onBack }: { onBack: () => void }) {
                   onChange={(e) => updateApiConfig({ apiKey: e.target.value })}
                   placeholder="sk-..."
                   autoComplete="off"
-                  className={`h-11 rounded-[14px] border-black/[0.05] bg-white/55 text-[14px] shadow-[inset_0_1px_0_rgba(255,255,255,0.7),0_3px_10px_rgba(17,24,39,0.05)] backdrop-blur-2xl dark:border-white/[0.09] dark:bg-white/[0.07] dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.05),0_3px_10px_rgba(0,0,0,0.2)] ${
+                  className={`h-11 rounded-[14px] border-black/[0.06] bg-white text-[14px] shadow-[inset_0_1px_0_rgba(255,255,255,0.7),0_3px_10px_rgba(17,24,39,0.05)] backdrop-blur-2xl ${
                     apiConfig.apiKey ? 'pr-16' : 'pr-10'
                   }`}
                 />
@@ -483,7 +483,7 @@ export function ApiPage({ onBack }: { onBack: () => void }) {
                       clearTestResult();
                     }}
                     aria-label="清空 API Key"
-                    className="absolute right-8 top-1/2 -translate-y-1/2 p-1 text-muted-foreground transition-colors hover:text-foreground"
+                    className="absolute right-8 top-1/2 -translate-y-1/2 p-1 text-zinc-500 transition-colors hover:text-zinc-900"
                   >
                     <X className="h-4 w-4" />
                   </button>
@@ -492,7 +492,7 @@ export function ApiPage({ onBack }: { onBack: () => void }) {
                   type="button"
                   onClick={() => setShowKey((v) => !v)}
                   aria-label={showKey ? '隐藏 Key' : '显示 Key'}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-muted-foreground transition-opacity hover:opacity-80"
+                  className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-zinc-500 transition-opacity hover:opacity-80"
                 >
                   {showKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                 </button>
@@ -507,13 +507,13 @@ export function ApiPage({ onBack }: { onBack: () => void }) {
                   value={apiConfig.model}
                   onChange={(e) => updateApiConfig({ model: e.target.value })}
                   placeholder="如 gpt-4o-mini / deepseek-chat"
-                  className="h-11 flex-1 rounded-[14px] border-black/[0.05] bg-white/55 text-[14px] shadow-[inset_0_1px_0_rgba(255,255,255,0.7),0_3px_10px_rgba(17,24,39,0.05)] backdrop-blur-2xl dark:border-white/[0.09] dark:bg-white/[0.07] dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.05),0_3px_10px_rgba(0,0,0,0.2)]"
+                  className="h-11 flex-1 rounded-[14px] border-black/[0.06] bg-white text-[14px] shadow-[inset_0_1px_0_rgba(255,255,255,0.7),0_3px_10px_rgba(17,24,39,0.05)] backdrop-blur-2xl"
                 />
                 <button
                   type="button"
                   onClick={() => void fetchModels()}
                   disabled={fetchingModels}
-                  className="flex h-11 shrink-0 items-center gap-1.5 rounded-[14px] bg-white/60 px-4 text-[13px] font-medium text-foreground shadow-[0_4px_14px_rgba(17,24,39,0.07)] ring-1 ring-white/70 backdrop-blur-2xl transition-all active:scale-[0.97] active:bg-white/85 disabled:opacity-50 dark:bg-white/[0.1] dark:ring-white/[0.12] dark:active:bg-white/[0.16]"
+                  className="flex h-11 shrink-0 items-center gap-1.5 rounded-[14px] bg-white/60 px-4 text-[13px] font-medium text-zinc-900 shadow-[0_4px_14px_rgba(17,24,39,0.07)] ring-1 ring-black/[0.05] backdrop-blur-2xl transition-all active:scale-[0.97] active:bg-white/85 disabled:opacity-50"
                 >
                   {fetchingModels && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
                   拉取模型
@@ -525,7 +525,7 @@ export function ApiPage({ onBack }: { onBack: () => void }) {
                 </p>
               )}
               {modelsHint && (
-                <div className="mt-1.5 rounded-[16px] border border-amber-500/30 bg-amber-300/15 px-3.5 py-2 text-[12px] leading-relaxed text-amber-700 backdrop-blur-xl dark:border-amber-400/25 dark:bg-amber-300/[0.08] dark:text-amber-200/90">
+                <div className="mt-1.5 rounded-[16px] border border-amber-500/30 bg-amber-300/15 px-3.5 py-2 text-[12px] leading-relaxed text-amber-700 backdrop-blur-xl">
                   {modelsHint}
                 </div>
               )}
@@ -533,9 +533,9 @@ export function ApiPage({ onBack }: { onBack: () => void }) {
               {modelPanelOpen && (
                 <div
                   data-model-panel
-                  className="absolute -left-4 -right-4 top-full z-30 mt-1 overflow-hidden rounded-[20px] border border-white/60 bg-white/85 shadow-2xl ring-1 ring-black/[0.05] backdrop-blur-2xl dark:border-white/[0.1] dark:bg-[#1C1C1E]/85"
+                  className="absolute -left-4 -right-4 top-full z-30 mt-1 overflow-hidden rounded-[20px] border border-black/[0.06] bg-white/95 shadow-2xl ring-1 ring-black/[0.05] backdrop-blur-2xl"
                 >
-                    <div className="border-b border-black/[0.05] p-2 dark:border-white/[0.06]">
+                    <div className="border-b border-black/[0.05] p-2">
                       <Input
                         value={modelQuery}
                         onChange={(e) => setModelQuery(e.target.value)}
@@ -543,7 +543,7 @@ export function ApiPage({ onBack }: { onBack: () => void }) {
                         // v2.4.27（第四十六轮）：触屏设备不再 autoFocus——面板一开就拉起
                         // 软键盘会盖住半个面板（APK 无键盘跟随时尤甚）；桌面保留 autoFocus
                         autoFocus={!IS_TOUCH_DEVICE}
-                        className="h-10 rounded-[12px] border-black/[0.05] bg-white/70 text-[13px] shadow-sm backdrop-blur-xl dark:border-white/[0.09] dark:bg-white/[0.09]"
+                        className="h-10 rounded-[12px] border-black/[0.05] bg-white text-[13px] shadow-sm backdrop-blur-xl"
                       />
                     </div>
                     <div
@@ -553,7 +553,7 @@ export function ApiPage({ onBack }: { onBack: () => void }) {
                       style={{ touchAction: 'pan-y', WebkitOverflowScrolling: 'touch' }}
                     >
                       {filteredModels.length === 0 ? (
-                        <div className="px-4 py-6 text-center text-[13px] text-muted-foreground">
+                        <div className="px-4 py-6 text-center text-[13px] text-zinc-500">
                           没有匹配的模型
                         </div>
                       ) : (
@@ -565,12 +565,12 @@ export function ApiPage({ onBack }: { onBack: () => void }) {
                               updateApiConfig({ model: m });
                               setModelPanelOpen(false);
                             }}
-                            className="flex w-full items-center justify-between gap-2 px-4 py-2.5 text-left transition-colors hover:bg-muted/50"
+                            className="flex w-full items-center justify-between gap-2 px-4 py-2.5 text-left transition-colors hover:bg-black/[0.04]"
                           >
                             <span className="truncate text-[14px]">{m}</span>
                             {apiConfig.model === m && (
                               <Check
-                                className="h-4 w-4 shrink-0 text-foreground"
+                                className="h-4 w-4 shrink-0 text-zinc-900"
                                 strokeWidth={2.5}
                               />
                             )}
@@ -580,7 +580,7 @@ export function ApiPage({ onBack }: { onBack: () => void }) {
                     </div>
                     {/* v2.2.3：底部计数行——小屏折叠线以下仍有模型时计数行让总数永远可见；
                         v2.2.5 F-1：列表高度收敛到 min(360px,48vh) + 不满一屏时放开 contain 保滚动链 */}
-                    <div className="border-t border-black/[0.05] px-4 py-2 text-center text-[11px] tabular-nums text-muted-foreground dark:border-white/[0.06]">
+                    <div className="border-t border-black/[0.05] px-4 py-2 text-center text-[11px] tabular-nums text-zinc-500">
                       {q ? `匹配 ${filteredModels.length}，共 ${models.length} 个模型` : `共 ${models.length} 个模型`}
                     </div>
                   </div>
@@ -593,7 +593,7 @@ export function ApiPage({ onBack }: { onBack: () => void }) {
                 type="button"
                 onClick={() => void runTest()}
                 disabled={testLoading}
-                className="flex h-11 flex-1 items-center justify-center gap-2 rounded-[14px] bg-white/60 text-[14px] font-medium text-foreground shadow-[0_6px_20px_rgba(17,24,39,0.08)] ring-1 ring-white/70 backdrop-blur-2xl transition-all active:scale-[0.98] active:bg-white/85 disabled:opacity-50 dark:bg-white/[0.1] dark:ring-white/[0.12] dark:active:bg-white/[0.16]"
+                className="flex h-11 flex-1 items-center justify-center gap-2 rounded-[14px] bg-white/60 text-[14px] font-medium text-zinc-900 shadow-[0_6px_20px_rgba(17,24,39,0.08)] ring-1 ring-black/[0.05] backdrop-blur-2xl transition-all active:scale-[0.98] active:bg-white/85 disabled:opacity-50"
               >
                 {testLoading && <Loader2 className="h-4 w-4 animate-spin" />}
                 测试连接
@@ -601,10 +601,10 @@ export function ApiPage({ onBack }: { onBack: () => void }) {
               <button
                 type="button"
                 onClick={() => setSaveAnchor((v) => (v === 'config' ? null : 'config'))}
-                className={`flex h-11 flex-1 items-center justify-center gap-2 rounded-[14px] text-[14px] font-medium shadow-[0_6px_20px_rgba(17,24,39,0.08)] ring-1 backdrop-blur-2xl transition-all active:scale-[0.98] disabled:opacity-40 dark:active:bg-white/[0.16] ${
+                className={`flex h-11 flex-1 items-center justify-center gap-2 rounded-[14px] text-[14px] font-medium shadow-[0_6px_20px_rgba(17,24,39,0.08)] ring-1 backdrop-blur-2xl transition-all active:scale-[0.98] disabled:opacity-40 ${
                   saveAnchor === 'config'
-                    ? 'bg-foreground text-background ring-transparent dark:bg-white dark:text-black'
-                    : 'bg-white/60 text-foreground ring-white/70 active:bg-white/85 dark:bg-white/[0.1] dark:ring-white/[0.12]'
+                    ? 'bg-[#007AFF] text-white ring-transparent'
+                    : 'bg-white/60 text-zinc-900 ring-white/70 active:bg-white/85'
                 }`}
               >
                 <Save className="h-4 w-4" />
@@ -618,7 +618,7 @@ export function ApiPage({ onBack }: { onBack: () => void }) {
                   onChange={(e) => setPresetName(e.target.value)}
                   placeholder="预设名称，如 我的GPT"
                   autoFocus
-                  className="h-10 flex-1 rounded-[14px] border-black/[0.05] bg-white/55 text-[14px] shadow-[inset_0_1px_0_rgba(255,255,255,0.7),0_3px_10px_rgba(17,24,39,0.05)] backdrop-blur-2xl dark:border-white/[0.09] dark:bg-white/[0.07] dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.05),0_3px_10px_rgba(0,0,0,0.2)]"
+                  className="h-10 flex-1 rounded-[14px] border-black/[0.06] bg-white text-[14px] shadow-[inset_0_1px_0_rgba(255,255,255,0.7),0_3px_10px_rgba(17,24,39,0.05)] backdrop-blur-2xl"
                   onKeyDown={(e) => {
                     if (e.key === 'Enter') savePreset();
                   }}
@@ -627,21 +627,21 @@ export function ApiPage({ onBack }: { onBack: () => void }) {
                   type="button"
                   onClick={savePreset}
                   disabled={!presetName.trim()}
-                  className="h-10 shrink-0 rounded-[14px] bg-white/60 px-5 text-[13px] font-medium text-foreground shadow-[0_4px_14px_rgba(17,24,39,0.07)] ring-1 ring-white/70 backdrop-blur-2xl transition-all active:scale-[0.97] active:bg-white/85 disabled:opacity-40 dark:bg-white/[0.1] dark:ring-white/[0.12] dark:active:bg-white/[0.16]"
+                  className="h-10 shrink-0 rounded-[14px] bg-white/60 px-5 text-[13px] font-medium text-zinc-900 shadow-[0_4px_14px_rgba(17,24,39,0.07)] ring-1 ring-black/[0.05] backdrop-blur-2xl transition-all active:scale-[0.97] active:bg-white/85 disabled:opacity-40"
                 >
                   保存
                 </button>
               </div>
             )}
             {testOk && (
-              <div className="rounded-[16px] border border-emerald-500/30 bg-emerald-400/15 px-4 py-3 text-[13px] leading-relaxed text-emerald-700 backdrop-blur-xl dark:bg-emerald-300/[0.08] dark:text-emerald-300">
+              <div className="rounded-[16px] border border-emerald-500/30 bg-emerald-400/15 px-4 py-3 text-[13px] leading-relaxed text-emerald-700 backdrop-blur-xl">
                 ✅ 连接成功{testOk.viaDirect ? '（浏览器直连）' : ''} · 延迟 {testOk.latencyMs}ms · 模型 {testOk.model}
               </div>
             )}
             {testPartial && (
               <div
                 data-testid="test-partial"
-                className="rounded-[16px] border border-amber-500/30 bg-amber-400/15 px-4 py-3 text-[13px] font-medium leading-relaxed text-amber-700 backdrop-blur-xl dark:bg-amber-300/[0.08] dark:text-amber-200/90"
+                className="rounded-[16px] border border-amber-500/30 bg-amber-400/15 px-4 py-3 text-[13px] font-medium leading-relaxed text-amber-700 backdrop-blur-xl"
               >
                 ⚠️ 连接基本可用：API 地址与密钥有效（模型列表验证通过，共 {testPartial.modelCount} 个模型）
                 <span className="mt-1 block text-[12px] font-normal opacity-80">
@@ -672,14 +672,14 @@ export function ApiPage({ onBack }: { onBack: () => void }) {
               </div>
             )}
             {testUrl && (
-              <div className="break-all px-1 text-[11px] leading-relaxed text-muted-foreground/80">
+              <div className="break-all px-1 text-[11px] leading-relaxed text-zinc-500/80">
                 实际请求：{testUrl}
               </div>
             )}
 
             {/* 温度（v2.2.3：随测试按钮上移后下排在测试结果之后） */}
             <div>
-              <div className="mb-2.5 text-[13px] font-medium text-muted-foreground">温度</div>
+              <div className="mb-2.5 text-[13px] font-medium text-zinc-500">温度</div>
               <div className="flex items-center gap-3">
                 <Slider
                   min={0}
@@ -703,7 +703,7 @@ export function ApiPage({ onBack }: { onBack: () => void }) {
                   onChange={(e) => handleTempChange(e.target.value)}
                   onBlur={handleTempBlur}
                   aria-label="温度数值"
-                  className="h-9 w-[76px] rounded-full border-black/[0.05] bg-white/65 text-center text-[13px] tabular-nums shadow-sm ring-1 ring-black/[0.05] backdrop-blur-xl dark:border-white/[0.09] dark:bg-white/[0.1] dark:ring-white/[0.1]"
+                  className="h-9 w-[76px] rounded-full border-black/[0.05] bg-white/65 text-center text-[13px] tabular-nums shadow-sm ring-1 ring-black/[0.05] backdrop-blur-xl"
                 />
               </div>
             </div>
@@ -718,13 +718,13 @@ export function ApiPage({ onBack }: { onBack: () => void }) {
                 value={maxText}
                 onChange={(e) => handleMaxChange(e.target.value)}
                 onBlur={handleMaxBlur}
-                className="h-11 rounded-[14px] border-black/[0.05] bg-white/55 text-[14px] shadow-[inset_0_1px_0_rgba(255,255,255,0.7),0_3px_10px_rgba(17,24,39,0.05)] backdrop-blur-2xl dark:border-white/[0.09] dark:bg-white/[0.07] dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.05),0_3px_10px_rgba(0,0,0,0.2)]"
+                className="h-11 rounded-[14px] border-black/[0.06] bg-white text-[14px] shadow-[inset_0_1px_0_rgba(255,255,255,0.7),0_3px_10px_rgba(17,24,39,0.05)] backdrop-blur-2xl"
               />
             </div>
 
             {/* 未配置 Key 提示 */}
             {!apiConfig.apiKey.trim() && (
-              <div className="rounded-[16px] border border-amber-500/30 bg-amber-300/15 px-3.5 py-2.5 text-[12px] leading-relaxed text-amber-700 backdrop-blur-xl dark:border-amber-400/25 dark:bg-amber-300/[0.08] dark:text-amber-200/90">
+              <div className="rounded-[16px] border border-amber-500/30 bg-amber-300/15 px-3.5 py-2.5 text-[12px] leading-relaxed text-amber-700 backdrop-blur-xl">
                 未配置 API Key 时，AI 助手无法回复；请填写 OpenAI 兼容接口地址与 API Key 后再聊天。
               </div>
             )}
@@ -736,26 +736,26 @@ export function ApiPage({ onBack }: { onBack: () => void }) {
           <SectionLabel
             icon={Repeat}
             tone={TONE_BLUE}
-            right={<span className="text-[11px] text-muted-foreground/70">主渠道失败时自动切换</span>}
+            right={<span className="text-[11px] text-zinc-500/70">主渠道失败时自动切换</span>}
           >
             备用渠道
           </SectionLabel>
-          <div className="flex flex-col gap-4 rounded-[22px] bg-white/55 p-4 shadow-[0_8px_28px_rgba(17,24,39,0.06)] ring-1 ring-white/70 backdrop-blur-2xl dark:bg-white/[0.06] dark:ring-white/[0.09]">
-            <p className="text-[12px] leading-relaxed text-muted-foreground">
+          <div className="flex flex-col gap-4 rounded-[22px] bg-white/80 p-4 shadow-[0_2px_12px_rgba(0,0,0,0.04)] ring-1 ring-black/[0.05] backdrop-blur-2xl">
+            <p className="text-[12px] leading-relaxed text-zinc-500">
               主渠道请求失败（连接不上 / 鉴权失败 / 限流等）且本轮还没有内容产出时，自动按顺序改用下面配置的备用渠道重发，消息照常送达；温度与最大 Token 沿用主渠道。
             </p>
             {apiFallbacks.map((f, i) => (
               <div
                 key={i}
-                className="flex flex-col gap-2.5 rounded-[16px] bg-white/45 p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.6)] ring-1 ring-black/[0.04] dark:bg-white/[0.05] dark:ring-white/[0.07]"
+                className="flex flex-col gap-2.5 rounded-[16px] bg-white/45 p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.6)] ring-1 ring-black/[0.04]"
               >
                 <div className="flex items-center justify-between">
-                  <span className="text-[12px] font-medium text-muted-foreground">备用渠道 {i + 1}</span>
+                  <span className="text-[12px] font-medium text-zinc-500">备用渠道 {i + 1}</span>
                   <button
                     type="button"
                     onClick={() => setApiFallbacks(apiFallbacks.filter((_, j) => j !== i))}
                     aria-label={`删除备用渠道 ${i + 1}`}
-                    className="p-1 text-muted-foreground transition-colors hover:text-red-500"
+                    className="p-1 text-zinc-500 transition-colors hover:text-red-500"
                   >
                     <Trash2 className="h-4 w-4" />
                   </button>
@@ -764,7 +764,7 @@ export function ApiPage({ onBack }: { onBack: () => void }) {
                   value={f.baseUrl}
                   onChange={(e) => patchFallback(i, { baseUrl: e.target.value })}
                   placeholder="备用 API 地址（OpenAI 兼容）"
-                  className="h-10 rounded-[12px] border-black/[0.05] bg-white/55 text-[13px] shadow-sm backdrop-blur-xl dark:border-white/[0.09] dark:bg-white/[0.07]"
+                  className="h-10 rounded-[12px] border-black/[0.06] bg-white text-[13px] shadow-sm backdrop-blur-xl"
                 />
                 <Input
                   value={f.apiKey}
@@ -772,13 +772,13 @@ export function ApiPage({ onBack }: { onBack: () => void }) {
                   type="password"
                   autoComplete="off"
                   placeholder="API Key（反代可留空）"
-                  className="h-10 rounded-[12px] border-black/[0.05] bg-white/55 text-[13px] shadow-sm backdrop-blur-xl dark:border-white/[0.09] dark:bg-white/[0.07]"
+                  className="h-10 rounded-[12px] border-black/[0.06] bg-white text-[13px] shadow-sm backdrop-blur-xl"
                 />
                 <Input
                   value={f.model}
                   onChange={(e) => patchFallback(i, { model: e.target.value })}
                   placeholder="模型（如 deepseek-chat）"
-                  className="h-10 rounded-[12px] border-black/[0.05] bg-white/55 text-[13px] shadow-sm backdrop-blur-xl dark:border-white/[0.09] dark:bg-white/[0.07]"
+                  className="h-10 rounded-[12px] border-black/[0.06] bg-white text-[13px] shadow-sm backdrop-blur-xl"
                 />
               </div>
             ))}
@@ -786,7 +786,7 @@ export function ApiPage({ onBack }: { onBack: () => void }) {
               <button
                 type="button"
                 onClick={() => setApiFallbacks([...apiFallbacks, { baseUrl: '', apiKey: '', model: '' }])}
-                className="flex h-10 w-full items-center justify-center gap-1.5 rounded-[14px] border border-dashed border-black/15 text-[13px] font-medium text-muted-foreground transition-all active:scale-[0.98] hover:border-black/25 hover:text-foreground dark:border-white/15 dark:hover:border-white/30"
+                className="flex h-10 w-full items-center justify-center gap-1.5 rounded-[14px] border border-dashed border-black/15 text-[13px] font-medium text-zinc-500 transition-all active:scale-[0.98] hover:border-black/25 hover:text-zinc-900"
               >
                 <Plus className="h-4 w-4" />
                 添加备用渠道
@@ -805,7 +805,7 @@ export function ApiPage({ onBack }: { onBack: () => void }) {
               className={`flex items-start gap-1.5 rounded-[12px] px-3 py-2 text-[12px] leading-[1.5] ${
                 apiAutoSync.ok
                   ? 'bg-[#34C759]/[0.08] text-[#2E9E4F]'
-                  : 'border border-amber-500/30 bg-amber-300/15 text-amber-700 dark:border-amber-400/25 dark:bg-amber-300/[0.08] dark:text-amber-200/90'
+                  : 'border border-amber-500/30 bg-amber-300/15 text-amber-700'
               }`}
             >
               <Cloud className="mt-[2px] h-[13px] w-[13px] shrink-0" aria-hidden="true" />
@@ -816,7 +816,7 @@ export function ApiPage({ onBack }: { onBack: () => void }) {
               </span>
             </div>
           )}
-          <p className="text-[11px] leading-relaxed text-muted-foreground/80">
+          <p className="text-[11px] leading-relaxed text-zinc-500/80">
             预设保存后下次打开网站依然可用（数据保存在本机 IndexedDB）；已部署云端助手时，改这里的配置会自动同步到云端（真机微信/QQ 的回复跟着换）。
           </p>
         </section>

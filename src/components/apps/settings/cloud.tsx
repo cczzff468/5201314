@@ -127,7 +127,7 @@ import {
 export const WeixinConnectPage = nextDynamic(() => import('../wx-app/connect').then((m) => m.WeixinConnectPage), {
   ssr: false,
   loading: () => (
-    <div className="flex h-full w-full flex-col items-center justify-center gap-2 text-[13px] text-muted-foreground">
+    <div className="flex h-full w-full flex-col items-center justify-center gap-2 text-[13px] text-zinc-500">
       <Loader2 className="h-5 w-5 animate-spin" aria-hidden="true" />
       正在打开真机微信接入…
     </div>
@@ -136,7 +136,7 @@ export const WeixinConnectPage = nextDynamic(() => import('../wx-app/connect').t
 export const QqConnectPage = nextDynamic(() => import('../qq-app/connect').then((m) => m.QqConnectPage), {
   ssr: false,
   loading: () => (
-    <div className="flex h-full w-full flex-col items-center justify-center gap-2 text-[13px] text-muted-foreground">
+    <div className="flex h-full w-full flex-col items-center justify-center gap-2 text-[13px] text-zinc-500">
       <Loader2 className="h-5 w-5 animate-spin" aria-hidden="true" />
       正在打开真机 QQ 接入…
     </div>
@@ -190,12 +190,12 @@ export function useConnectContacts(app: 'wx' | 'qq', enabled: boolean): ContactR
 
 /** 云端助手 · 输入框样式（毛玻璃胶囊统一配方 v23：圆角胶囊化 + 内高光） */
 export const CLOUD_INPUT_CLS =
-  'h-11 rounded-[16px] border-black/[0.05] bg-white/55 text-[14px] shadow-[inset_0_1px_0_rgba(255,255,255,0.7),0_3px_10px_rgba(17,24,39,0.05)] backdrop-blur-2xl dark:border-white/[0.09] dark:bg-white/[0.07] dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.05),0_3px_10px_rgba(0,0,0,0.2)]';
+  'h-11 rounded-[16px] border-black/[0.06] bg-white text-[14px] shadow-[inset_0_1px_0_rgba(255,255,255,0.7),0_3px_10px_rgba(17,24,39,0.05)] backdrop-blur-2xl';
 
 /** 云端助手 · 白底胶囊按钮（次级动作：读取列表 / 重新同步 / 测试 / 停用定时）——v23 毛玻璃胶囊化
  *  （与真机接入子页按钮同一套配方：圆角胶囊 + 半透明 + 内高光 + 按下微缩） */
 export const CLOUD_BTN_CLS =
-  'flex h-11 w-full items-center justify-center gap-2 rounded-full bg-white/60 text-[15px] font-medium text-foreground shadow-[0_6px_20px_rgba(17,24,39,0.08)] ring-1 ring-white/70 backdrop-blur-2xl transition-all active:scale-[0.98] active:bg-white/85 disabled:opacity-50 dark:bg-white/[0.1] dark:ring-white/[0.12] dark:active:bg-white/[0.16]';
+  'flex h-11 w-full items-center justify-center gap-2 rounded-full bg-white/60 text-[15px] font-medium text-zinc-900 shadow-[0_6px_20px_rgba(17,24,39,0.08)] ring-1 ring-black/[0.05] backdrop-blur-2xl transition-all active:scale-[0.98] active:bg-white/85 disabled:opacity-50';
 
 /** 云端助手 · 蓝底胶囊按钮（关键动作：一键部署）——v23 胶囊化（与次级按钮同形） */
 export const CLOUD_BTN_BLUE_CLS =
@@ -203,11 +203,11 @@ export const CLOUD_BTN_BLUE_CLS =
 
 /** 云端助手 · 表单分组卡（v23 毛玻璃胶囊统一：与 GrayCard 同配方 + 独立行距） */
 export const CLOUD_CARD_CLS =
-  'flex flex-col gap-4 rounded-[24px] bg-white/55 p-4 shadow-[0_8px_28px_rgba(17,24,39,0.06)] ring-1 ring-white/70 backdrop-blur-2xl dark:bg-white/[0.06] dark:ring-white/[0.09]';
+  'flex flex-col gap-4 rounded-[24px] bg-white/80 p-4 shadow-[0_2px_12px_rgba(0,0,0,0.04)] ring-1 ring-black/[0.05] backdrop-blur-2xl';
 
 /** 云端助手 · 结果提示框（绿=成功 / 红=失败） */
 export const CLOUD_OK_BOX_CLS =
-  'rounded-[16px] border border-emerald-500/30 bg-emerald-400/15 px-4 py-3 text-[13px] leading-relaxed text-emerald-700 backdrop-blur-xl dark:bg-emerald-300/[0.08] dark:text-emerald-300';
+  'rounded-[16px] border border-emerald-500/30 bg-emerald-400/15 px-4 py-3 text-[13px] leading-relaxed text-emerald-700 backdrop-blur-xl';
 export const CLOUD_ERR_BOX_CLS =
   'rounded-[12px] border border-[#FF453A]/30 bg-[#FF453A]/10 px-4 py-3 text-[13px] leading-relaxed text-[#FF453A]';
 
@@ -255,7 +255,7 @@ export function CloudCopyButton({
       data-testid={testId}
       onClick={() => void copy()}
       disabled={!text}
-      className="flex shrink-0 items-center gap-1 rounded-full bg-black/[0.05] px-3 py-[6px] text-[11.5px] font-medium text-foreground/70 transition-colors active:bg-black/[0.08] disabled:opacity-40 dark:bg-white/10 dark:text-muted-foreground"
+      className="flex shrink-0 items-center gap-1 rounded-full bg-black/[0.05] px-3 py-[6px] text-[11.5px] font-medium text-zinc-700 transition-colors active:bg-black/[0.08] disabled:opacity-40"
     >
       <ClipboardList className="h-3.5 w-3.5" />
       {copied ? '已复制' : label}
@@ -299,15 +299,15 @@ export function CloudFold({
   defaultOpen?: boolean;
 }) {
   return (
-    <Collapsible defaultOpen={defaultOpen} className="rounded-[16px] bg-white/45 ring-1 ring-white/60 backdrop-blur-xl dark:bg-white/[0.05] dark:ring-white/[0.07]">
+    <Collapsible defaultOpen={defaultOpen} className="rounded-[16px] bg-white/70 ring-1 ring-black/[0.05] backdrop-blur-xl">
       <CollapsibleTrigger
         data-testid={testid}
-        className="group flex w-full items-center justify-between gap-2 px-3.5 py-2.5 text-left transition-colors active:bg-black/[0.03] dark:active:bg-white/[0.06]"
+        className="group flex w-full items-center justify-between gap-2 px-3.5 py-2.5 text-left transition-colors active:bg-black/[0.03]"
       >
-        <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-foreground/85">{title}</span>
-        {hint ? <span className="shrink-0 truncate text-[11.5px] text-muted-foreground/80">{hint}</span> : null}
+        <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-zinc-800">{title}</span>
+        {hint ? <span className="shrink-0 truncate text-[11.5px] text-zinc-500/80">{hint}</span> : null}
         <ChevronDown
-          className="h-[16px] w-[16px] shrink-0 text-muted-foreground/70 transition-transform duration-200 group-data-[state=open]:rotate-180"
+          className="h-[16px] w-[16px] shrink-0 text-zinc-500/70 transition-transform duration-200 group-data-[state=open]:rotate-180"
           strokeWidth={2}
           aria-hidden="true"
         />
@@ -802,7 +802,7 @@ export function ClawBoxPage({ onBack }: { onBack: () => void }) {
         <div
           role="tablist"
           aria-label="云端助手功能页签"
-          className="flex w-full rounded-full bg-white/50 p-[3px] shadow-[inset_0_1px_0_rgba(255,255,255,0.7),0_4px_16px_rgba(17,24,39,0.05)] ring-1 ring-white/60 backdrop-blur-2xl dark:bg-white/[0.07] dark:ring-white/[0.1]"
+          className="flex w-full rounded-full bg-white/50 p-[3px] shadow-[inset_0_1px_0_rgba(255,255,255,0.7),0_4px_16px_rgba(17,24,39,0.05)] ring-1 ring-black/[0.05] backdrop-blur-2xl"
         >
           {(
             [
@@ -821,8 +821,8 @@ export function ClawBoxPage({ onBack }: { onBack: () => void }) {
                 onClick={() => setTab(t.id)}
                 className={`flex h-10 flex-1 items-center justify-center gap-1.5 rounded-full text-[14px] font-medium transition-all active:scale-[0.98] ${
                   active
-                    ? 'bg-white text-foreground shadow-[0_2px_10px_rgba(17,24,39,0.1)] ring-1 ring-black/[0.04] dark:bg-white/[0.16] dark:ring-white/[0.1]'
-                    : 'text-muted-foreground active:bg-black/[0.03] dark:active:bg-white/[0.05]'
+                    ? 'bg-white text-zinc-900 shadow-[0_2px_10px_rgba(17,24,39,0.1)] ring-1 ring-black/[0.04]'
+                    : 'text-zinc-500 active:bg-black/[0.03]'
                 }`}
               >
                 <t.icon className={`h-4 w-4 ${active ? 'opacity-90' : 'opacity-60'}`} strokeWidth={2.1} aria-hidden="true" />
@@ -843,34 +843,34 @@ export function ClawBoxPage({ onBack }: { onBack: () => void }) {
               <span
                 aria-hidden="true"
                 className={`inline-block h-[9px] w-[9px] shrink-0 rounded-full ${
-                  pingBad ? 'bg-[#FF453A]' : cloudOn ? 'bg-[#34C759]' : 'bg-black/25 dark:bg-white/30'
+                  pingBad ? 'bg-[#FF453A]' : cloudOn ? 'bg-[#34C759]' : 'bg-black/25'
                 }`}
               />
               <p className="truncate text-[15.5px] font-semibold leading-tight">{statusTitle}</p>
             </div>
             {cloudOn && (
-              <span className="shrink-0 text-[11px] font-medium text-muted-foreground/75">{PLATFORM_LABELS[platform]}</span>
+              <span className="shrink-0 text-[11px] font-medium text-zinc-500/75">{PLATFORM_LABELS[platform]}</span>
             )}
           </div>
-          <p className="mt-1.5 text-[12px] leading-relaxed text-muted-foreground">{statusSub}</p>
+          <p className="mt-1.5 text-[12px] leading-relaxed text-zinc-500">{statusSub}</p>
 
           {/* 关键指标（极简文本对：部署 / 轮询 / 加速 / 测试——一行扫完，无多余视觉噪音） */}
           <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[11.5px]" aria-label="云端状态概览">
-            <span className={supaDeployed ? 'text-emerald-600 dark:text-emerald-400' : 'text-muted-foreground/70'}>
+            <span className={supaDeployed ? 'text-emerald-600' : 'text-zinc-500/70'}>
               部署{supaDeployed ? ' · 已完成' : ' · 未部署'}
             </span>
             {supaDeployed && (
-              <span className={cronOn ? (hbStale ? 'text-[#FF453A]' : 'text-emerald-600 dark:text-emerald-400') : 'text-muted-foreground/70'}>
+              <span className={cronOn ? (hbStale ? 'text-[#FF453A]' : 'text-emerald-600') : 'text-zinc-500/70'}>
                 轮询{cronOn ? (hbStale ? ' · 无心跳' : ' · 运行中') : ' · 已停'}
               </span>
             )}
             {supaDeployed && (
-              <span className={gwOn ? (qqCh?.state === 'error' ? 'text-[#FF453A]' : 'text-emerald-600 dark:text-emerald-400') : 'text-muted-foreground/70'}>
+              <span className={gwOn ? (qqCh?.state === 'error' ? 'text-[#FF453A]' : 'text-emerald-600') : 'text-zinc-500/70'}>
                 加速{gwOn ? (qqCh?.state === 'error' ? ' · 异常' : ' · 在线') : ' · 未开'}
               </span>
             )}
             {lastPing && (
-              <span className={lastPing.ok ? 'text-emerald-600 dark:text-emerald-400' : 'text-[#FF453A]'}>
+              <span className={lastPing.ok ? 'text-emerald-600' : 'text-[#FF453A]'}>
                 测试 · {lastPing.ok ? '正常' : '异常'}
               </span>
             )}
@@ -880,7 +880,7 @@ export function ClawBoxPage({ onBack }: { onBack: () => void }) {
             <button
               type="button"
               onClick={() => lastPing && setResultDialog({ title: '云端测试', body: lastPing.msg })}
-              className="mt-2.5 flex w-full items-center gap-1.5 rounded-[10px] bg-[#FF453A]/[0.07] px-3 py-1.5 text-left text-[12px] text-[#FF453A] active:opacity-70 dark:bg-[#FF453A]/[0.13]"
+              className="mt-2.5 flex w-full items-center gap-1.5 rounded-[10px] bg-[#FF453A]/[0.07] px-3 py-1.5 text-left text-[12px] text-[#FF453A] active:opacity-70"
             >
               <span className="inline-block h-[6px] w-[6px] shrink-0 rounded-full bg-[#FF453A]" aria-hidden />
               <span className="min-w-0 shrink">最近一次云端测试异常 · 点击查看详情</span>
@@ -889,7 +889,7 @@ export function ClawBoxPage({ onBack }: { onBack: () => void }) {
 
           <div className="mt-3">
             <CloudFold title="使用说明" testid="cloud-help-fold">
-              <div className="space-y-2 text-[12px] leading-relaxed text-muted-foreground">
+              <div className="space-y-2 text-[12px] leading-relaxed text-zinc-500">
                 <p>① 填 Access Token → 读取项目 → 一键部署（自动开 24 小时收发）。</p>
                 <p>② 切到上方「真机接入」页签，给微信 / QQ 扫码带上 TA。</p>
                 <p>③ 之后云端 24 小时自动收发；换角色 / 改「API 设置」会自动同步，60 秒内生效。</p>
@@ -909,7 +909,7 @@ export function ClawBoxPage({ onBack }: { onBack: () => void }) {
           <section>
             <SectionLabel icon={Database} tone={TONE_GREEN}>Supabase 连接</SectionLabel>
             <div className={CLOUD_CARD_CLS}>
-              <p className="text-[12px] leading-relaxed text-muted-foreground">
+              <p className="text-[12px] leading-relaxed text-zinc-500">
                 云端以你自己的 Supabase 为配置中心（运行包 / 聊天历史 / 心跳都存这里）：填 Token → 读取项目 → 选择项目，再一键部署。
               </p>
 
@@ -930,12 +930,12 @@ export function ClawBoxPage({ onBack }: { onBack: () => void }) {
                     type="button"
                     onClick={() => setShowSupaToken((v) => !v)}
                     aria-label={showSupaToken ? '隐藏 Token' : '显示 Token'}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-muted-foreground transition-opacity hover:opacity-80"
+                    className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-zinc-500 transition-opacity hover:opacity-80"
                   >
                     {showSupaToken ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                   </button>
                 </div>
-                <p className="mt-1.5 text-[11px] leading-relaxed text-muted-foreground/80">
+                <p className="mt-1.5 text-[11px] leading-relaxed text-zinc-500/80">
                   supabase.com → Account Settings → Access Tokens 生成；只在你自己的浏览器密文保存。
                 </p>
                 {/* 第四十二轮机主需求：一键打开 Supabase 令牌页（生成/复制 Access Token） */}
@@ -943,7 +943,7 @@ export function ClawBoxPage({ onBack }: { onBack: () => void }) {
                   type="button"
                   data-testid="cloud-open-supabase-tokens-btn"
                   onClick={() => window.open('https://supabase.com/dashboard/account/tokens', '_blank', 'noopener')}
-                  className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-full border border-black/10 py-2 text-[12.5px] font-medium text-foreground/75 transition-colors active:bg-muted/50 dark:border-white/15"
+                  className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-full border border-black/10 py-2 text-[12.5px] font-medium text-zinc-700 transition-colors active:bg-black/[0.05]"
                 >
                   <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
                   打开 Supabase 令牌页（生成 Access Token）
@@ -970,7 +970,7 @@ export function ClawBoxPage({ onBack }: { onBack: () => void }) {
               {/* 项目单选列表（名称 + 状态，选中即保存连接） */}
               {projects && projects.length > 0 && (
                 <div
-                  className="overflow-hidden rounded-[14px] ring-1 ring-black/[0.05] dark:ring-white/[0.08]"
+                  className="overflow-hidden rounded-[14px] ring-1 ring-black/[0.05]"
                   role="radiogroup"
                   aria-label="选择 Supabase 项目"
                   data-testid="cloud-supa-proj"
@@ -984,21 +984,21 @@ export function ClawBoxPage({ onBack }: { onBack: () => void }) {
                         role="radio"
                         aria-checked={active}
                         onClick={() => pickProject(p)}
-                        className={`flex w-full items-center gap-2.5 border-b border-black/[0.04] px-3.5 py-2.5 text-left transition-colors last:border-b-0 active:bg-muted/50 dark:border-white/[0.06] ${
-                          active ? 'bg-black/[0.04] dark:bg-white/[0.08]' : ''
+                        className={`flex w-full items-center gap-2.5 border-b border-black/[0.04] px-3.5 py-2.5 text-left transition-colors last:border-b-0 active:bg-black/[0.05] ${
+                          active ? 'bg-black/[0.04]' : ''
                         }`}
                       >
                         <span
                           aria-hidden="true"
                           className={`flex h-[20px] w-[20px] shrink-0 items-center justify-center rounded-full border-[1.5px] transition-colors ${
-                            active ? 'border-[#34C759] bg-[#34C759]' : 'border-black/20 dark:border-white/30'
+                            active ? 'border-[#34C759] bg-[#34C759]' : 'border-black/20'
                           }`}
                         >
                           {active ? <Check className="h-3 w-3 text-white" strokeWidth={3} /> : null}
                         </span>
                         <span className="min-w-0 flex-1">
                           <span className="block truncate text-[14px]">{p.name}</span>
-                          <span className="mt-0.5 block truncate text-[11px] text-muted-foreground">
+                          <span className="mt-0.5 block truncate text-[11px] text-zinc-500">
                             {p.id}
                             {p.region ? ` · ${p.region}` : ''}
                             {p.status ? ` · ${p.status}` : ''}
@@ -1012,7 +1012,7 @@ export function ClawBoxPage({ onBack }: { onBack: () => void }) {
 
               {/* 已连接：一键部署（自动开 24 小时收发 + 秒回加速）/ 云端测试一次 / 重新同步运行包 */}
               {supa?.ref && (
-                <div className="rounded-[16px] bg-white/45 p-3.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.6)] ring-1 ring-black/[0.04] dark:bg-white/[0.05] dark:ring-white/[0.07]">
+                <div className="rounded-[16px] bg-white/45 p-3.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.6)] ring-1 ring-black/[0.04]">
                   <div className="flex flex-col gap-2">
                     {/* 一键部署（部署 Edge Function + 同步运行包 + 顺手清旧轮询任务；msg 自带模式说明） */}
                     <button
@@ -1027,7 +1027,7 @@ export function ClawBoxPage({ onBack }: { onBack: () => void }) {
                     </button>
                     <CloudResultBox r={deployResult} />
                     {deployResult?.ok && deployResult.funcUrl && (
-                      <code className="block break-all font-mono text-[11px] text-muted-foreground">{deployResult.funcUrl}</code>
+                      <code className="block break-all font-mono text-[11px] text-zinc-500">{deployResult.funcUrl}</code>
                     )}
                     {/* service_role key 手动兑底（v7）：平时完全不显示；仅当自动读取真失败
                         （need_manual_key）时自动出现并展开，不再常驻「自动读取失败？」提示行。
@@ -1040,8 +1040,8 @@ export function ClawBoxPage({ onBack }: { onBack: () => void }) {
                       testid="cloud-supa-key-fold"
                       defaultOpen
                     >
-                      <div className="rounded-[12px] bg-black/[0.03] p-3 dark:bg-white/[0.05]">
-                        <p className="text-[11.5px] leading-relaxed text-muted-foreground">
+                      <div className="rounded-[12px] bg-black/[0.03] p-3">
+                        <p className="text-[11.5px] leading-relaxed text-zinc-500">
                           Supabase 控制台 → Project Settings → API Keys，复制 secret 类 key（sb_secret_ 开头或旧版 service_role）粘贴到下面——先验证可写再保存（publishable / anon 无写入权限不行）。
                         </p>
                         <Input
@@ -1073,7 +1073,7 @@ export function ClawBoxPage({ onBack }: { onBack: () => void }) {
                           </p>
                         )}
                         {manualKeySaved && (
-                          <p className="mt-1.5 text-[11.5px] leading-relaxed text-emerald-600 dark:text-emerald-300">
+                          <p className="mt-1.5 text-[11.5px] leading-relaxed text-emerald-600">
                             key 验证通过，已保存到本机密文存储：现在重新点「一键部署」即可。
                           </p>
                         )}
@@ -1087,13 +1087,13 @@ export function ClawBoxPage({ onBack }: { onBack: () => void }) {
                         最直接证据，用户无需手动点「云端测试」验证 */}
                     {supaDeployed && (
                       <div
-                        className="flex items-center justify-between gap-3 rounded-[16px] bg-white/60 px-4 py-3 ring-1 ring-white/60 backdrop-blur-xl dark:bg-white/[0.06] dark:ring-white/[0.08]"
+                        className="flex items-center justify-between gap-3 rounded-[16px] bg-white/60 px-4 py-3 ring-1 ring-black/[0.05] backdrop-blur-xl"
                         data-testid="cloud-cron-row"
                       >
                         <span className="min-w-0 flex-1">
                           <span className="block text-[14.5px] font-medium">云端轮询</span>
                           <span
-                            className={`mt-0.5 block text-[11px] leading-relaxed ${hbStale ? 'text-[#C77700] dark:text-amber-300' : 'text-muted-foreground'}`}
+                            className={`mt-0.5 block text-[11px] leading-relaxed ${hbStale ? 'text-[#C77700]' : 'text-zinc-500'}`}
                             data-testid="cloud-cron-sub"
                           >
                             {cronOn
@@ -1106,7 +1106,7 @@ export function ClawBoxPage({ onBack }: { onBack: () => void }) {
                           </span>
                         </span>
                         {cronBusy ? (
-                          <Loader2 className="h-[22px] w-[22px] shrink-0 animate-spin text-muted-foreground" aria-hidden="true" />
+                          <Loader2 className="h-[22px] w-[22px] shrink-0 animate-spin text-zinc-500" aria-hidden="true" />
                         ) : (
                           <Switch
                             checked={cronOn}
@@ -1119,14 +1119,14 @@ export function ClawBoxPage({ onBack }: { onBack: () => void }) {
                     )}
                     {/* 心跳迟滞修复行（开关开着但多分钟没心跳）：幂等重建定时任务 */}
                     {hbStale && !cronBusy && (
-                      <div className="flex items-center justify-between gap-2.5 rounded-[14px] border border-[#C77700]/25 bg-[#C77700]/[0.06] px-3.5 py-2.5 text-[11.5px] leading-relaxed text-[#8a5b00] dark:border-amber-300/20 dark:bg-amber-300/[0.08] dark:text-amber-200/90">
+                      <div className="flex items-center justify-between gap-2.5 rounded-[14px] border border-[#C77700]/25 bg-[#C77700]/[0.06] px-3.5 py-2.5 text-[11.5px] leading-relaxed text-[#8a5b00]">
                         <span className="min-w-0 flex-1">
                           云端轮询没有心跳：多半是部署时定时任务没建成、或后来被删过——点「修复」立即重建（跑在你的 Supabase 里，免费）
                         </span>
                         <button
                           type="button"
                           onClick={() => void repairCron()}
-                          className="flex shrink-0 items-center gap-1 rounded-full bg-[#C77700]/15 px-3.5 py-[7px] text-[12px] font-medium text-[#8a5b00] transition-colors active:bg-[#C77700]/25 dark:bg-amber-300/15 dark:text-amber-200"
+                          className="flex shrink-0 items-center gap-1 rounded-full bg-[#C77700]/15 px-3.5 py-[7px] text-[12px] font-medium text-[#8a5b00] transition-colors active:bg-[#C77700]/25"
                           data-testid="cloud-cron-repair"
                         >
                           <Wrench className="h-3.5 w-3.5" aria-hidden="true" />
@@ -1141,14 +1141,14 @@ export function ClawBoxPage({ onBack }: { onBack: () => void }) {
                         testid="cloud-cron-sql-fold"
                         defaultOpen
                       >
-                        <div className="rounded-[12px] bg-black/[0.03] p-3 dark:bg-white/[0.05]">
-                          <p className="text-[11.5px] leading-relaxed text-muted-foreground">
+                        <div className="rounded-[12px] bg-black/[0.03] p-3">
+                          <p className="text-[11.5px] leading-relaxed text-zinc-500">
                             {cronFail === 'start'
                               ? '到 Supabase 控制台 → SQL Editor 粘贴执行下面整段：建好 10 秒轮询 + QQ 保持两个定时任务，TA 全天自动回复（免费、零配置）。'
                               : '到 Supabase 控制台 → SQL Editor 粘贴执行下面语句：清掉定时任务，停止后零配额消耗。'}
                           </p>
                           <div className="mt-2 flex items-start justify-between gap-2">
-                            <code className="block max-h-40 min-w-0 flex-1 overflow-y-auto whitespace-pre-wrap break-all font-mono text-[10.5px] leading-relaxed text-muted-foreground">
+                            <code className="block max-h-40 min-w-0 flex-1 overflow-y-auto whitespace-pre-wrap break-all font-mono text-[10.5px] leading-relaxed text-zinc-500">
                               {cronFail === 'start' ? cronStartSql() : cronStopSql()}
                             </code>
                             <CloudCopyButton
@@ -1165,10 +1165,10 @@ export function ClawBoxPage({ onBack }: { onBack: () => void }) {
                         轮询，回复接近秒回；云端 24 小时收发由用户 Supabase 定时任务独立承担
                         （真源：服务端网关状态，本页 6 秒一轮拉取） */}
                     {supaDeployed && (
-                      <div className="flex items-center justify-between gap-3 rounded-[16px] bg-white/60 px-4 py-3 ring-1 ring-white/60 backdrop-blur-xl dark:bg-white/[0.06] dark:ring-white/[0.08]">
+                      <div className="flex items-center justify-between gap-3 rounded-[16px] bg-white/60 px-4 py-3 ring-1 ring-black/[0.05] backdrop-blur-xl">
                         <span className="min-w-0 flex-1">
                           <span className="block text-[14.5px] font-medium">秒回加速（本站在线时）</span>
-                          <span className="mt-0.5 block text-[11px] leading-relaxed text-muted-foreground">
+                          <span className="mt-0.5 block text-[11px] leading-relaxed text-zinc-500">
                             {gwOn
                               ? qqCh?.state === 'ready'
                                 ? `加速中：本站 QQ 长连接 + 微信即时轮询，回复接近秒回${gatewayStatus?.mode === 'relay' ? '（云端函数中继通道）' : ''}`
@@ -1179,7 +1179,7 @@ export function ClawBoxPage({ onBack }: { onBack: () => void }) {
                           </span>
                         </span>
                         {gatewayBusy ? (
-                          <Loader2 className="h-[22px] w-[22px] shrink-0 animate-spin text-muted-foreground" aria-hidden="true" />
+                          <Loader2 className="h-[22px] w-[22px] shrink-0 animate-spin text-zinc-500" aria-hidden="true" />
                         ) : (
                           <Switch
                             checked={gwOn}
@@ -1196,14 +1196,14 @@ export function ClawBoxPage({ onBack }: { onBack: () => void }) {
                         空转文案——连接中/无消息静默就安静（有实质信息才出一行：已连接/异常/未接入）；
                         微信同理删「运行中」空转行——只在异常或有回复量时报数。两行都静默时整块不渲染 */}
                     {supaDeployed && gwOn && (qqCh?.state === 'ready' || qqCh?.state === 'disabled' || qqCh?.lastError || gatewayStatus?.wx?.lastError || gatewayStatus?.wx?.replied) && (
-                      <div className="flex flex-col gap-1.5 rounded-[16px] bg-black/[0.03] px-3.5 py-3 text-[11.5px] leading-relaxed text-muted-foreground ring-1 ring-white/40 backdrop-blur-xl dark:bg-white/[0.04] dark:ring-white/[0.06]" data-testid="cloud-gateway-detail">
+                      <div className="flex flex-col gap-1.5 rounded-[16px] bg-black/[0.03] px-3.5 py-3 text-[11.5px] leading-relaxed text-zinc-500 ring-1 ring-black/[0.05] backdrop-blur-xl" data-testid="cloud-gateway-detail">
                         {(qqCh?.state === 'ready' || qqCh?.state === 'disabled' || qqCh?.lastError) && (
                         <p className="flex items-center gap-1.5">
                           {(qqCh?.state === 'ready' && !qqCh.lastError) || qqCh?.state === 'disabled' ? (
                             qqCh?.state === 'ready' ? (
                               <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-[#34C759]" aria-hidden="true" />
                             ) : (
-                              <CloudOff className="h-3.5 w-3.5 shrink-0 text-muted-foreground/60" aria-hidden="true" />
+                              <CloudOff className="h-3.5 w-3.5 shrink-0 text-zinc-500/60" aria-hidden="true" />
                             )
                           ) : (
                             <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-[#C77700]" aria-hidden="true" />
@@ -1247,17 +1247,17 @@ export function ClawBoxPage({ onBack }: { onBack: () => void }) {
                       type="button"
                       onClick={() => void runSync()}
                       disabled={syncLoading}
-                      className="flex w-full items-center justify-between gap-2 rounded-[16px] bg-white/60 px-4 py-3 text-left transition-colors active:bg-muted/50 disabled:opacity-50 ring-1 ring-white/60 backdrop-blur-xl dark:bg-white/[0.06] dark:ring-white/[0.08]"
+                      className="flex w-full items-center justify-between gap-2 rounded-[16px] bg-white/60 px-4 py-3 text-left transition-colors active:bg-black/[0.05] disabled:opacity-50 ring-1 ring-black/[0.05] backdrop-blur-xl"
                       data-testid="cloud-supa-sync"
                     >
                       <span className="min-w-0 flex-1 text-[14.5px] font-medium">重新同步运行包</span>
                       {syncLoading ? (
-                        <Loader2 className="h-4 w-4 shrink-0 animate-spin text-muted-foreground" />
+                        <Loader2 className="h-4 w-4 shrink-0 animate-spin text-zinc-500" />
                       ) : (
-                        <RefreshCw className="h-4 w-4 shrink-0 text-muted-foreground/70" />
+                        <RefreshCw className="h-4 w-4 shrink-0 text-zinc-500/70" />
                       )}
                     </button>
-                    <p className="text-[11px] leading-relaxed text-muted-foreground/80">换角色 / 改 API 设置会自动同步；点它可手动兑底并升级云端运行时。</p>
+                    <p className="text-[11px] leading-relaxed text-zinc-500/80">换角色 / 改 API 设置会自动同步；点它可手动兑底并升级云端运行时。</p>
                     <CloudResultBox r={syncResult} />
                   </div>
                 </div>
@@ -1297,7 +1297,7 @@ export function ClawBoxPage({ onBack }: { onBack: () => void }) {
           <div
             role="tablist"
             aria-label="真机接入平台"
-            className="flex w-full rounded-full bg-white/50 p-[3px] shadow-[inset_0_1px_0_rgba(255,255,255,0.7),0_4px_16px_rgba(17,24,39,0.05)] ring-1 ring-white/60 backdrop-blur-2xl dark:bg-white/[0.07] dark:ring-white/[0.1]"
+            className="flex w-full rounded-full bg-white/50 p-[3px] shadow-[inset_0_1px_0_rgba(255,255,255,0.7),0_4px_16px_rgba(17,24,39,0.05)] ring-1 ring-black/[0.05] backdrop-blur-2xl"
           >
             {(
               [
@@ -1318,8 +1318,8 @@ export function ClawBoxPage({ onBack }: { onBack: () => void }) {
                   onClick={() => setDevice(o.id)}
                   className={`flex h-11 flex-1 items-center justify-center gap-1.5 rounded-full text-[14px] font-medium transition-all active:scale-[0.98] ${
                     active
-                      ? 'bg-white text-foreground shadow-[0_2px_10px_rgba(17,24,39,0.1)] ring-1 ring-black/[0.04] dark:bg-white/[0.16] dark:ring-white/[0.1]'
-                      : 'text-muted-foreground active:bg-black/[0.03] dark:active:bg-white/[0.05]'
+                      ? 'bg-white text-zinc-900 shadow-[0_2px_10px_rgba(17,24,39,0.1)] ring-1 ring-black/[0.04]'
+                      : 'text-zinc-500 active:bg-black/[0.03]'
                   }`}
                 >
                   <span
@@ -1333,8 +1333,8 @@ export function ClawBoxPage({ onBack }: { onBack: () => void }) {
                   <span
                     className={`ml-0.5 inline-flex max-w-[86px] items-center truncate rounded-full px-2 py-[2px] text-[10.5px] font-medium backdrop-blur-xl ${
                       connected
-                        ? 'bg-emerald-500/[0.1] text-emerald-600 ring-1 ring-emerald-500/20 dark:text-emerald-400'
-                        : 'bg-black/[0.04] text-muted-foreground/85 ring-1 ring-black/[0.03] dark:bg-white/[0.06] dark:ring-white/[0.08]'
+                        ? 'bg-emerald-500/[0.1] text-emerald-600 ring-1 ring-emerald-500/20'
+                        : 'bg-black/[0.04] text-zinc-500/85 ring-1 ring-black/[0.03]'
                     }`}
                   >
                     {connected ? (o.name === '' ? '已接入' : o.name) : '未接入'}
@@ -1347,7 +1347,7 @@ export function ClawBoxPage({ onBack }: { onBack: () => void }) {
           {/* 内嵌接入页（不再整页切换）：微信/QQ 接入界面直接铺在本页签里（embedded 隐藏
               自带顶栏，各自内部滚动）；容器定高 + 圆角裁切，接入完成前未部署提示见页面内横幅 */}
           <div
-            className="relative mt-4 h-[560px] overflow-hidden rounded-[22px] ring-1 ring-black/[0.05] dark:ring-white/[0.08]"
+            className="relative mt-4 h-[560px] overflow-hidden rounded-[22px] ring-1 ring-black/[0.05]"
             data-testid={device === 'wx' ? 'cloud-device-wx-page' : 'cloud-device-qq-page'}
           >
             {device === 'wx' ? (
@@ -1358,7 +1358,7 @@ export function ClawBoxPage({ onBack }: { onBack: () => void }) {
           </div>
 
           {!supaDeployed && (
-            <p className="mt-3 rounded-[14px] bg-[#C77700]/[0.07] px-4 py-2.5 text-[12px] leading-relaxed text-[#8a5b00] ring-1 ring-[#C77700]/20 backdrop-blur-xl dark:bg-amber-300/[0.08] dark:text-amber-200/90 dark:ring-amber-300/15">
+            <p className="mt-3 rounded-[14px] bg-[#C77700]/[0.07] px-4 py-2.5 text-[12px] leading-relaxed text-[#8a5b00] ring-1 ring-[#C77700]/20 backdrop-blur-xl">
               云端还没部署：先切到上方「云端助手」页签完成一键部署（免费），再回来扫码接入——否则 TA 不会在真机上回复。
             </p>
           )}
@@ -1368,19 +1368,19 @@ export function ClawBoxPage({ onBack }: { onBack: () => void }) {
 
       {/* 结果弹窗（部署失败 / 云端测试结果 / 开关失败：标题 + 问题 + 知道了） */}
       <AlertDialog open={!!resultDialog} onOpenChange={(o) => { if (!o) setResultDialog(null); }}>
-        <AlertDialogContent className="w-[290px] gap-0 rounded-[14px] p-0 sm:w-[290px] sm:max-w-[290px]">
+        <AlertDialogContent className="w-[290px] gap-0 rounded-[14px] border-black/[0.06] bg-white! p-0 text-zinc-900! sm:w-[290px] sm:max-w-[290px]">
           <AlertDialogHeader className="gap-2 px-5 pb-4 pt-5">
-            <AlertDialogTitle className="text-center text-[17px] font-semibold leading-snug">
+            <AlertDialogTitle className="text-center text-[17px] font-semibold leading-snug text-zinc-900">
               {resultDialog?.title}
             </AlertDialogTitle>
-            <AlertDialogDescription className="max-h-[50vh] overflow-y-auto whitespace-pre-wrap break-words text-left text-[13px] leading-relaxed">
+            <AlertDialogDescription className="max-h-[50vh] overflow-y-auto whitespace-pre-wrap break-words text-left text-[13px] leading-relaxed text-zinc-500!">
               {resultDialog?.body}
             </AlertDialogDescription>
           </AlertDialogHeader>
-          <AlertDialogFooter className="flex-row gap-0 border-t border-border sm:flex-row">
+          <AlertDialogFooter className="flex-row gap-0 border-t border-black/[0.06] sm:flex-row">
             <AlertDialogAction
               data-testid="cloud-result-dialog-ok"
-              className="h-12 w-full flex-1 rounded-none border-0 bg-transparent text-[16px] font-medium text-[#0071E3] shadow-none hover:bg-transparent focus-visible:ring-0 active:bg-muted/60 sm:mt-0"
+              className="h-12 w-full flex-1 rounded-none border-0 bg-transparent text-[16px] font-medium text-[#0071E3] shadow-none hover:bg-transparent focus-visible:ring-0 active:bg-black/[0.06] sm:mt-0"
               onClick={() => setResultDialog(null)}
             >
               知道了
@@ -1391,22 +1391,22 @@ export function ClawBoxPage({ onBack }: { onBack: () => void }) {
 
       {/* 清除云端配置 · 二次确认（仿锁屏页关闭确认弹窗） */}
       <AlertDialog open={confirmWipe} onOpenChange={setConfirmWipe}>
-        <AlertDialogContent className="w-[270px] gap-0 rounded-[14px] p-0 sm:w-[270px] sm:max-w-[270px]">
+        <AlertDialogContent className="w-[270px] gap-0 rounded-[14px] border-black/[0.06] bg-white! p-0 text-zinc-900! sm:w-[270px] sm:max-w-[270px]">
           <AlertDialogHeader className="gap-1.5 px-5 pb-4 pt-5 sm:text-center">
-            <AlertDialogTitle className="text-center text-[17px] font-semibold leading-snug">
+            <AlertDialogTitle className="text-center text-[17px] font-semibold leading-snug text-zinc-900">
               清除云端配置？
             </AlertDialogTitle>
-            <AlertDialogDescription className="text-center text-[13px] leading-snug">
+            <AlertDialogDescription className="text-center text-[13px] leading-snug text-zinc-500!">
               将清除平台选择与 Supabase 凭证（本机聊天数据不受影响）。已部署的云端函数与定时任务都在你自己的 Supabase 项目里，不会自动删除；如需彻底停用，可到 Supabase SQL Editor 执行 select cron.unschedule('wx-assistant');
             </AlertDialogDescription>
           </AlertDialogHeader>
-          <AlertDialogFooter className="flex-row gap-0 border-t border-border sm:flex-row">
-            <AlertDialogCancel className="h-12 flex-1 rounded-none border-0 bg-transparent text-[16px] font-normal text-foreground shadow-none hover:bg-transparent focus-visible:ring-0 active:bg-muted/60 sm:mt-0">
+          <AlertDialogFooter className="flex-row gap-0 border-t border-black/[0.06] sm:flex-row">
+            <AlertDialogCancel className="h-12 flex-1 rounded-none border-0 bg-transparent text-[16px] font-normal text-zinc-900 shadow-none hover:bg-transparent focus-visible:ring-0 active:bg-black/[0.06] sm:mt-0">
               取消
             </AlertDialogCancel>
-            <span aria-hidden="true" className="w-px shrink-0 self-stretch bg-border" />
+            <span aria-hidden="true" className="w-px shrink-0 self-stretch bg-black/[0.06]" />
             <AlertDialogAction
-              className="h-12 flex-1 rounded-none border-0 bg-transparent text-[16px] font-medium shadow-none hover:bg-transparent focus-visible:ring-0 active:bg-muted/60 sm:mt-0"
+              className="h-12 flex-1 rounded-none border-0 bg-transparent text-[16px] font-medium shadow-none hover:bg-transparent focus-visible:ring-0 active:bg-black/[0.06] sm:mt-0"
               style={{ color: IOS_RED }}
               onClick={() => void doWipe()}
             >

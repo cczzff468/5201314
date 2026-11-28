@@ -98,8 +98,10 @@ const AVATAR_CACHE_MAX = 64;
 /** 把任意头像（路径/dataURL）压成 96px 圆形 JPEG dataURL；失败/超限返回 null（通知不带头像）。
  *  v2.4.34：src 空/不可加载时用标题首字画 monogram（灰底白字圆形）兑底——
  *  头像缺失的会话（没传头像/emoji 头像/跨域加载失败）也能带上「头像」，
- *  通知卡右侧不再一会有一会没有。 */
-async function compressAvatarForPush(src: string, title?: string): Promise<string | null> {
+ *  通知卡右侧不再一会有一会没有。
+ *  v2.4.35 起导出：message-notifications（原生 localNotify 通道）与本模块共用——
+ *  原生层无法下载 WebView 的 localhost URL，头像/图标必须先在 JS 侧转成 dataURL 再过桥。 */
+export async function compressAvatarForPush(src: string, title?: string): Promise<string | null> {
   const cacheKey = src || `#mono:${title ?? ''}`;
   const cached = avatarCompCache.get(cacheKey);
   if (cached !== undefined) return cached;

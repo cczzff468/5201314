@@ -42,7 +42,7 @@ import { BUBBLE_KIND_LABEL, bubbleVisual, TAIL_CLIP_LEFT, TAIL_CLIP_RIGHT } from
 import { ThemeStylePage } from './bubble-style-settings';
 import { pushChatNotification, notifyPreviewText, takeNotifyNavigation, ISLAND_NAV_EVENT } from '@/lib/ios/island-notify';
 import { playNotifySound } from '@/lib/ios/notify-sound';
-import { appendWithBoundary, markDeliverBoundary, peekPendingMsgs, purgeDeliveryQueueByPrefix, sortMsgsByTime, scheduleAiDelivery, subscribeAiDelivery, subscribeAiDeliveryActive, isAiDelivering, typingDelayOf } from '@/lib/ios/ai-delivery';
+import { appendWithBoundary, markDeliverBoundary, markSessionFlushNow, peekPendingMsgs, purgeDeliveryQueueByPrefix, sortMsgsByTime, scheduleAiDelivery, subscribeAiDelivery, subscribeAiDeliveryActive, isAiDelivering, typingDelayOf } from '@/lib/ios/ai-delivery';
 import { consumeBgPending, onBgPageVisible, peekBgBadgeCounts, pullBgPending, registerBgSession, unregisterBgSession, type BgPendingItem } from '@/lib/ios/bg-turn';
 // v2.4.31 接力快照接管：正式投递入口清掉 bgsnap- 快照（快照与正式版本绝不共存）
 import { clearRelaySnaps } from '@/lib/ios/relay-snap';
@@ -1537,6 +1537,8 @@ function ChatView({
    *  #35：合并后按创建时间稳定排序——投递插入边界让落库时序正确，但 state 合并是新项尾部追加，
    *  排序把「插在边界前的旧回复」放回正确位置，显示与下一轮上下文都按真实对话时序 */
   useEffect(() => {
+    // v2.4.35「点进聊天消息已在」：机主刚打开该会话 → 队列里剩余连发消息立即投完
+    markSessionFlushNow(sessionKey);
     return subscribeAiDelivery(sessionKey, () => {
       setMsgs((prev) => {
         const saved = loadMsgs(storageKey) ?? [];
