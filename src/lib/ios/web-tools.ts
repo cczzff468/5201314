@@ -970,6 +970,22 @@ export async function toolFreezeRealApp(
   // 落真机锁定记录（解锁清账/锁定界面信息源；到期由原生遮罩锁自动解锁）
   const { setRealFrozen } = await import('./real-app-freeze');
   setRealFrozen({ pkg, unlockAt, charName, reason, contactId: opts?.contactId, app: opts?.app });
+  // v2.4.31 恢复网页对应体同步冻结（v2.4.30 曾全量删除 → 真机锁成功但网页侧无任何感知，
+  // 机主反馈「让 AI 锁应用，他没有锁」——Cove 界面里对应应用照常能点开）：真机锁定的包名
+  // 在网页有对应体且是【非聊天类】App 时同步冻结网页图标（变灰、点击弹锁定界面，
+  // 与真机锁同一时刻到期；setWebFrozen 自带同值去重不白 bump）。
+  // 聊天类（微信/QQ/信息/电话）不连坐——机主要跟角色聊天，真机锁 QQ 不该把网页 QQ
+  // 一起灰掉（v2.4.30「真机锁 QQ 不再连坐网页 QQ」的修复语义保留）。
+  const { webAppOfPkg, setWebFrozen } = await import('./web-app-lock');
+  const web = webAppOfPkg(pkg);
+  const CHAT_APP_IDS: ReadonlySet<string> = new Set(['wechat', 'qq', 'chat', 'phone']);
+  if (web && !CHAT_APP_IDS.has(web.appId)) {
+    setWebFrozen(pkg, unlockAt, charName, 'ai', {
+      reason,
+      contactId: opts?.contactId,
+      app: opts?.app,
+    });
+  }
   island('chat', '锁定真机应用', `已锁定${displayName}（${durationMin} 分钟后自动解锁）`);
   return {
     ok: true,

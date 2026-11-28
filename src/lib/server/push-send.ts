@@ -7,15 +7,11 @@
  * - 全程尽力而为：无 VAPID / 无订阅 / 发送失败一律静默，不阻塞业务主流程（重开网页仍能
  *   从 pending 队列拉到消息）。
  *
- * v2.4.29（第四十八轮·通知合并与排版根修）：
- * - 【旧病】入参 bodies 是「逐条消息」时每条一发（连发 5 条 = 5 条通知刷屏）；
- *   入参是 single 模式的整段原文时更糟——整段原文（换行折叠成空格）直接塞进一条通知，
- *   全部消息无缝拼成一大段（机主反馈「mua收到啦嘿嘿 你今天怎么这么会呀…」）。
- * - 【新口径】messages = 拆分后的逐条消息（/api/chat/bg 的 splitSingleReply 已按
- *   &&& + 换行拆好），一批消息只发一条通知：
- *   · 1 条 → title = 角色名，body = 该条消息（超长省略号截断）；
- *   · N>1 条 → title = 「角色名：发来了 N 条新消息」，body = 最后一条消息预览
- *     （如「再说一个嘛…」）——绝不把多条消息文本无缝拼接。
+ * v2.4.29（第四十八轮）：一批消息合并成一条通知（「角色名：发来了 N 条新消息」）。
+ * v2.4.31（「通知与聊天界面实时同步」根修·一消息一推）：机主规格「AI 发几条就弹几次」
+ * 重申——Web Push 与灵动岛/原生 heads-up 同口径，【逐条】发送（每条消息一条独立通知，
+ * tag = bg-<批次>-<序号> 唯一不合并）；修复 v2.4.30「一消息一弹窗」重构漏改的服务端
+ * 合并口径（页面关闭期间 Web Push 仍把 N 条折成一条）。
  */
 
 import webpush from 'web-push';
@@ -50,8 +46,6 @@ interface PushSubLike {
 const ICON_MAX_CHARS = 2600;
 /** 单条消息预览长度上限（超长截断加省略号） */
 const BODY_PREVIEW_MAX = 120;
-/** 多条合并时副标题预览最后一条的长度上限（副标题更短，锁屏上一目了然） */
-const BODY_MERGED_MAX = 60;
 
 /** 消息文本 → 通知正文预览（折叠空白） */
 function previewOf(text: string): string {
@@ -65,31 +59,11 @@ function ellipsize(text: string, max: number): string {
 }
 
 /**
- * 一批消息 → 通知标题/正文（机主规格 v2.4.29）：
- * - 单条：title = 角色名，body = 消息全文预览（超长省略号）；
- * - 多条：title = 「角色名：发来了 N 条新消息」，body = 最后一条消息预览（省略号）。
- */
-export function composeBatchNotification(
-  title: string,
-  messages: string[],
-): { title: string; body: string } | null {
-  const cleaned = messages.map(previewOf).filter((t) => t.length > 0);
-  if (cleaned.length === 0) return null;
-  const last = cleaned[cleaned.length - 1] ?? '';
-  if (cleaned.length === 1) {
-    return { title, body: ellipsize(last, BODY_PREVIEW_MAX) };
-  }
-  return {
-    title: `${title}：发来了 ${cleaned.length} 条新消息`,
-    body: ellipsize(last, BODY_MERGED_MAX),
-  };
-}
-
-/**
- * 向全部已订阅浏览器推送（一批消息一条系统通知，v2.4.29 合并口径）：
+ * 向全部已订阅浏览器推送（v2.4.31 一消息一推：每条消息一条独立系统通知，
+ * 与灵动岛/原生 heads-up 的「AI 发几条就弹几次」同口径）：
  * - messages 为拆分后的逐条消息（调用方负责拆分；single 原文勿直接传入）；
  * - icon 仅接受 data:image/ 开头且不超上限的值（超限/缺失时不带，浏览器用默认图标）；
- * - 发送后把 404/410 失效订阅写回订阅表（ alive 过滤，与 /api/push 的串行口径一致尽力而为）。
+ * - 发送后把 404/410 失效订阅写回订阅表（alive 过滤，与 /api/push 的串行口径一致尽力而为）。
  */
 export async function pushToAllSubscribers(
   envelope: PushEnvelope,
@@ -106,9 +80,16 @@ export async function pushToAllSubscribers(
       envelope.icon.length <= ICON_MAX_CHARS
         ? envelope.icon
         : undefined;
-    const composed = composeBatchNotification(envelope.title, messages);
-    if (!composed) return;
+    // v2.4.31 逐条推送：每条消息一条独立通知（tag 唯一防同批合并），
+    // 发送顺序 = 消息顺序（锁屏上自上而下与聊天一致）；空消息过滤在前
+    const cleaned = messages.map(previewOf).filter((t) => t.length > 0);
+    if (cleaned.length === 0) return;
     const stamp = Date.now().toString(36);
+    const vapidDetails = {
+      subject: 'mailto:bg-reply@ios-phone.local',
+      publicKey: vapid.publicKey,
+      privateKey: vapid.privateKey,
+    };
     const alive: PushSubLike[] = [];
     await Promise.all(
       subs.map(async (sub) => {
@@ -121,33 +102,29 @@ export async function pushToAllSubscribers(
           return;
         }
         let dead = false;
-        try {
-          await webpush.sendNotification(
-            sub as unknown as Parameters<typeof webpush.sendNotification>[0],
-            JSON.stringify({
-              title: composed.title,
-              body: composed.body,
-              // 一批一条：tag 固定（sw.js 按 tag 展示，同批不重复）
-              tag: `bg-${stamp}`,
-              url: envelope.url ?? '/',
-              ...(envelope.target !== undefined ? { target: envelope.target } : {}),
-              ...(icon ? { icon } : {}),
-            }),
-            {
-              vapidDetails: {
-                subject: 'mailto:bg-reply@ios-phone.local',
-                publicKey: vapid.publicKey,
-                privateKey: vapid.privateKey,
-              },
-            },
-          );
-        } catch (err) {
-          const e = err as { statusCode?: number };
-          // 404/410 = 订阅已失效/已退订；401/403 = VAPID 钥不匹配/未授权（服务端重置换钥后
-          // 旧公钥订阅的典型回执）——都不可恢复，剔除让客户端下次打开时重新订阅；
-          // 其余错误（瞬时网络失败等）保留订阅
-          if (e?.statusCode === 404 || e?.statusCode === 410 || e?.statusCode === 401 || e?.statusCode === 403) {
-            dead = true;
+        for (let i = 0; i < cleaned.length && !dead; i++) {
+          try {
+            await webpush.sendNotification(
+              sub as unknown as Parameters<typeof webpush.sendNotification>[0],
+              JSON.stringify({
+                title: envelope.title,
+                body: ellipsize(cleaned[i], BODY_PREVIEW_MAX),
+                // 一消息一推：tag 按序号唯一（sw.js 按 tag 展示，同批不折叠、不同批不覆盖）
+                tag: `bg-${stamp}-${i}`,
+                url: envelope.url ?? '/',
+                ...(envelope.target !== undefined ? { target: envelope.target } : {}),
+                ...(icon ? { icon } : {}),
+              }),
+              { vapidDetails },
+            );
+          } catch (err) {
+            const e = err as { statusCode?: number };
+            // 404/410 = 订阅已失效/已退订；401/403 = VAPID 钥不匹配/未授权（服务端重置换钥后
+            // 旧公钥订阅的典型回执）——都不可恢复，剔除让客户端下次打开时重新订阅；
+            // 其余错误（瞬时网络失败等）保留订阅（本批剩余条目停发，下批再试）
+            if (e?.statusCode === 404 || e?.statusCode === 410 || e?.statusCode === 401 || e?.statusCode === 403) {
+              dead = true;
+            }
           }
         }
         if (!dead) alive.push(sub);

@@ -4023,3 +4023,29 @@ Stage Summary:
 - 系统通知「一消息一弹窗」三端（原生轮询/桥接/网页守望）彻底落地：唯一 tag + 三渠道轮询 + PRIORITY_MAX + DEFAULT_ALL + 机主所选 APP 图标大图标 + 仅后台弹（前台灵动岛）
 - 机主十项反馈全数修复：电池原版 / 添加预设=清空 / 文件宫格 / response 清洗 / 绿对号删除 / 锁定界面沉浸+新文案 / 真机锁不连坐 / 生活分享多端+AI次数+多元场景 / 图片补发
 - 关键文件：BgNotifyPoller.java、NativePerceptionPlugin.java、message-notifications.ts、island-notify.ts、native-perception.ts、StatusBar.tsx、settings/api.tsx、files/data-manager.tsx、reply-count.ts、life-share.ts、JealousyLockOverlay.tsx、web-tools.ts、tool-status-bubble.tsx、app-version.ts、build.gradle
+
+## v2.4.31（第五十轮）：通知与聊天界面实时同步根修 + 机主五项反馈
+
+Stage: 完成（浏览器全链路验证通过）
+
+改动明细：
+- 【快照落库·核心】新文件 lib/ios/relay-snap.ts：snapRelayMessages/clearRelaySnaps——服务端接力 pending 的逐条消息以 bgsnap-<id> 前缀直接写入三端消息库（wx-chat-msgs:/qq-chat-msgs:/ios-chat-msgs:，纯 kv 同步操作零组件依赖），wx 端带 unread 回执口径、wx/qq 端 bump 未读角标；按 id 去重幂等（重复 peek 零重复落库）；群聊键跳过（与 bg-turn isGroupSession 同口径）
+- 【守望者改造】bg-relay-watcher.ts peekOnce：busy 检查前置（投递中会话快照不抢写）→【先落库快照（无论 seen 与否——原生轮询已弹过的批次回前台在此补落库）】→ 再 seen 判断逐条弹通知——「收到消息 → 写入本地 → 弹系统通知」成为一套同步动作；服务端无 messages 字段时用首条预览落一条（兼容）
+- 【聊天页接管】三端 deliverBgItems（wx/qq/chat）入口 clearRelaySnaps(sessionKey) 清掉快照 + 同步刷新页面 state（wx 走 wxSessionMsgs.commit 广播、qq/sms 走 setMsgs(loadMsgs)）——正式投递是唯一权威版本，快照与正式版本绝不共存；三端接力投递（enqueueBatch/bgEnqueueBatch）改 0 停顿连发（机主已在通知里看过、正等着看全量，快照→正式替换几乎无感；wx enqueueBatch 加 fast 参、qq/sms bgEnqueueBatch 专线改 fast——F3 照片任务恢复同为接管场景同口径）
+- 【服务端切句对齐】api/chat/bg splitSingleReply 重写：与客户端 reply-count.ts BOUNDARY_SRC 完全同构——句末标点（。！？!?～〜+收尾引号）并入前条、&&&/换行/response 分隔丢弃、未闭合 []/【】 标记保护、空段跳过、连续重复去重、全员 ≤4 字碎句并一条；修「通知 1 条 vs 聊天页 N 条」拆分不一致（单行长文合并根因）+「AI 偶尔只发一条」观感；node 实测 9 用例（单行长文 3 条/引号收尾/标记保护/重复去重/碎句合并）与客户端口径逐一对齐
+- 【Web Push 逐条】server/push-send.ts：v2.4.30「一消息一弹窗」重构漏改的服务端合并口径（composeBatchNotification「发来了 N 条」）删除——每条消息一条独立推送（tag=bg-<批次>-<序号> 唯一），与灵动岛/原生 heads-up 同口径；失效订阅（404/410/401/403）本批停发并剔除，瞬时错误下批再试
+- 【AI 锁应用根修】web-tools.ts toolFreezeRealApp：恢复「真机锁成功 → 同步冻结网页对应体」（v2.4.30 为修「真机锁 QQ 连坐网页 QQ」全量删除，副作用=真机锁成功网页侧零感知，机主反馈「让 AI 锁应用没锁」）；现在排除聊天四 App（wechat/qq/chat/phone 不连坐——机主要跟角色聊天）其余工具/娱乐类恢复同步灰显（与真机锁同时到期）
+- 【文件 App 改版】files/data-manager.tsx：①应用宫格短按不再进详情页（onTap 仅多选模式响应；AppCell aria/sr-only 文案同步），详情页整段（138 行）+ openDetail/closeDetail/detailId/detailShown/detailApp/detailStat/detailSafe/doMediaCompress/doAssetsClean/toggleMediaClean 全删，busy 类型收敛（去 media/assets）②健康检查删除（状态/计时器/toggleHealth/按钮/结果面板/HeartPulse/ShieldCheck 图标）③快捷操作区重排：一键云端备份整行 + 新增「备份（本地全量导出）/ 清除数据（复用全局危险确认弹窗）/ 导入备份（隐藏文件选择器）」三胶囊；mediaAuto 静默清理 effect 保留；onPointerDown 误删事故已修复（恢复 handleDown 绑定）
+- 【版本】2.4.31（versionCode 不动 94，纯网页热更）+ 版本历史五条更新说明
+
+验证：
+- lint 0 errors（12 warnings 全基线：android-shell 构建产物 + layout.tsx 历史遗留）
+- dev server 干净（relay-snap import 路径事故一次修复后零 error）
+- agent-browser 全链路实测：解锁→文件 App（存储管理/快捷操作区三胶囊渲染/健康检查消失/点击图标不进详情）→ 服务端注入 pending（wx:test-snap-001 3 条 deliver）→ peek 触发 → IndexedDB 实查 3 条 bgsnap 快照（role=peer/unread=true/内容逐条正确）+ 未读角标 bump 3 + 通知中心条目 → 重复 peek 幂等（snapCount 仍 3）→ sms:assistant 端到端：注入 2 条→快照落库（role=assistant）→打开信息 App 会话列表立即显示最新消息预览（点进 App 数据早已躺在本地）→点开聊天页→正式投递接管成功（库里 bgsnap 全清、正式 uid 消息 2 条、第一条被语音频率判定升级 3″ 语音条=正常业务行为、输入框在位、无 bgsnap 泄漏）→ 测试数据全部清理（kv/角标/通知中心/服务端队列）
+- 切句算法 node 独立实测 9 用例全过
+
+Stage Summary:
+- 「通知与聊天界面实时同步」三层闭环：①数据写入前置（守望者 peek 先落库快照再弹通知，任意入口点进即见）②正式投递瞬时接管（聊天页挂载清快照+0 停顿连发+完整解析）③visibilitychange 静默刷新（既有 peek 链路自动覆盖，原生弹过的批次回前台补落库）
+- 悬浮弹窗合并双根修补完：服务端 Web Push 逐条推（v2.4.30 漏改）+ 切句口径对齐（通知条数=聊天页条数）
+- AI 锁应用恢复网页同步冻结（聊天类不连坐）；文件 App 按机主要求精简（去详情页/去健康检查/三按钮备份区）
+- 关键文件：relay-snap.ts（新）、bg-relay-watcher.ts、api/chat/bg/route.ts、server/push-send.ts、web-tools.ts、wx-app/chat-page.tsx、qq-app/chat-page.tsx、chat.tsx、files/data-manager.tsx、files.tsx、app-version.ts

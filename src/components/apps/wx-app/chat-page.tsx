@@ -171,6 +171,8 @@ import type { Sticker } from '@/lib/ios/stickers';
 // v73 AI 聊天悬浮小窗：顶栏「小窗模式」按钮入口（打开全局小窗并退出全屏聊天）
 import { openChatFloat } from '@/lib/ios/chat-float-store';
 import { consumeBgPending, onBgPageVisible, pullBgPending, registerBgSession, unregisterBgSession, type BgPendingItem } from '@/lib/ios/bg-turn';
+// v2.4.31 接力快照接管：正式投递入口清掉 bgsnap- 快照（快照与正式版本绝不共存）
+import { clearRelaySnaps } from '@/lib/ios/relay-snap';
 import { useChatFlags, NO_FLAGS, wxChatFlags as wxChatFlagsStore } from '@/lib/chat-flags';
 import { ChatBgPage, ChatReplyCountPage, ChatSearchPage, ChatSettingsPage, ChatTranslatePage, ChatVoiceFreqPage, ChatVoicePage, WorldBookPickerPage, chatBgLayerStyle, type ChatSearchItem, type ChatSettingsBg } from '../chat-settings';
 import { ProactiveMsgPage } from '../proactive-msg-page';
@@ -1459,8 +1461,10 @@ export function ChatPage({
   };
 
   /** 排队投递一批：首批立即上屏（边接收边显示），后续批先按打字节奏停顿（逐条冒出来）；
-   *  batchStarted 记在轮次上下文 ctx 里（runAiTurn 每轮新建、接力投递单独建，互不影响） */
-  const enqueueBatch = (built: WxMsg[], ctx: WxTurnCtx) => {
+   *  batchStarted 记在轮次上下文 ctx 里（runAiTurn 每轮新建、接力投递单独建，互不影响）；
+   *  v2.4.31 fast（接力拉取接管用）：机主已在通知里看过这批内容、正等着看全量——
+   *  跳过打字节奏 0 停顿连发（快照→正式版本的替换几乎无感） */
+  const enqueueBatch = (built: WxMsg[], ctx: WxTurnCtx, fast?: boolean) => {
     if (built.length === 0) return;
     // v20 网站回复同步真机：本轮文字分段收集（投递完成后统一镜像，卡片/照片/系统行不收）
     for (const b of built) {
@@ -1472,10 +1476,12 @@ export function ChatPage({
       sessionKey,
       built,
       deliverAiMsg,
-      {
-        initialDelay: ctx.batchStarted ? typingDelayOf(built[0].content ?? '') : 0,
-        delay: (i) => (i + 1 < built.length ? typingDelayOf(built[i + 1].content ?? '') : 0),
-      },
+      fast
+        ? { initialDelay: 0, delay: () => 0 }
+        : {
+            initialDelay: ctx.batchStarted ? typingDelayOf(built[0].content ?? '') : 0,
+            delay: (i) => (i + 1 < built.length ? typingDelayOf(built[i + 1].content ?? '') : 0),
+          },
     );
     ctx.batchStarted = true;
   };
@@ -2257,9 +2263,15 @@ export function ChatPage({
   /** 退出网页后继续回复（服务端接力）：把拉取到的待达消息按与正常回复完全一致的管线投递
    *  （buildReplyMsgs 解析动作标记/&&& 分段/表情包 → enqueueBatch 排队逐条落盘+灵动岛通知+语音频率判定）。
    *  single=true：texts[0] 是一次完整回复原文（generate 模式，与 finalize 单条模式同管线）；
-   *  single=false：每项就是一条独立消息文本（deliver 模式，一段一条不再二次切分） */
+   *  single=false：每项就是一条独立消息文本（deliver 模式，一段一条不再二次切分）。
+   *  v2.4.31 快照接管（「通知与聊天界面实时同步」根修第二环）：入口先清掉本会话全部
+   *  bgsnap- 快照（守望者在弹通知前预落库的占位消息）——正式投递是唯一权威版本；
+   *  清完同步共享源/页面 state（快照瞬间被正式消息取代，0 停顿连发几乎无感） */
   const deliverBgItems = (items: BgPendingItem[]) => {
     if (items.length === 0) return;
+    clearRelaySnaps(sessionKey);
+    // 共享源与页面 state 同步去快照后的干净列表（commit 广播给全屏/小窗双开的订阅者）
+    wxSessionMsgs.commit(peer.id, loadMsgs(peer.id));
     const ctx: WxTurnCtx = { aiId: uid(), msgIdx: 0, batchStarted: false, wantCallSeen: false, wantVideoCallSeen: false, musicActed: false };
     // Task 30（v56 恢复）：接力回复同样带消息编号映射——落盘记录按绝对位置重算（与生成侧同口径），
     // 生成时 AI 看到的 [引用:M编号] 在投递侧能对上同一条消息（中途删消息才可能漂移，罕见可容忍）
@@ -2287,7 +2299,7 @@ export function ChatPage({
       if (dirty) saveMsgs(peer.id, cur);
       if (built.length === 0) return; // 纯动作标记等解析不出消息：只落盘状态变化，不造占位消息
       queuedAny = true;
-      enqueueBatch(built, ctx);
+      enqueueBatch(built, ctx, true); // fast：接力接管 0 停顿连发（机主正等着看全量）
       flushPhotoJobs(ctx); // 生图（锁脸）：接力回复里的照片标签同样异步生成投递
     };
     for (const item of items) {

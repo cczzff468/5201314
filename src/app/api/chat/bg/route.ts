@@ -172,17 +172,92 @@ function hashStr(s: string): string {
  * 根因：旧版 single 模式只按 &&& 拆分——而多句回复（无 &&&、以换行分段）整段留在同一条
  * 「消息」里，relayPreviewText 又把换行折叠成空格 → 一条通知正文 = 全部消息无缝拼接。
  *
- * 修复：single 模式拆分口径补齐——先按 &&&（客户端 MARKER_RE /&{3,}/ 同款），再把每段按
- * 换行拆开（客户端 splitMultiSegments 的换行边界；句末标点拆分不做——服务端无从得知会话
- * 的回复条数设置，标点拆分在单条模式会话上会过度拆分，换行拆分已覆盖机主反馈的全部场景）。
+ * v2.4.31（「通知与聊天界面实时同步」根修·切句口径对齐）：与客户端 reply-count.ts 的
+ * BOUNDARY_SRC 切句边界完全同构——
+ * · 「&&&」标记 / 换行 / response 分隔标记 = 边界（本身丢弃）；
+ * · 句末标点（。！？!?～〜 + 紧随收尾引号〃’"』」））也 = 边界，但标点与引号【并入前一条末尾】
+ *   （「他说“走吧！”」引号收尾整体留在前一条，与客户端一致）；
+ * · 未闭合 [ / 【 的段先扣住等闭合（祝福语「！」切碎标记的场景）；
+ * · 空段跳过、连续重复去重、全员 ≤4 字碎句并成一条（mergeTinySegments 同口径）。
+ * 修复：旧版只按 &&&+换行拆——模型单行长文（无换行）时通知侧 1 条、聊天页落库 N 条
+ * （机主反馈「悬浮弹窗弄成一条」「AI 偶尔只发一条」的来源之一）；对齐后
+ * 「通知弹几条 = 快照落几条 = 聊天页正式投递几条」三口径一致。
  */
 function splitSingleReply(raw: string): string[] {
+  const full = raw || '';
+  // 与客户端 reply-count.ts 同構的边界（非 global：exec 无 lastIndex 副作用，游标手动推进）
+  const BOUNDARY_ONE_RE = /&{3,}|\n|[。！？!?～〜]+[”’"』」）)\]]*|\s*\bresponse\b\s*/i;
+  const SENTENCE_HEAD_RE = /^[。！？!?～〜]/;
+  const BLANK_CHARS = '\u200B\u200C\u200D\u200E\u200F\u2060\u2800\u3164\uFFA0';
+  const trimBlank = (s: string): string =>
+    s.replace(new RegExp(`^[\\s${BLANK_CHARS}]+`), '').replace(new RegExp(`[\\s${BLANK_CHARS}]+$`), '');
+  const hasOpenBracket = (s: string): boolean =>
+    s.lastIndexOf('[') > s.lastIndexOf(']') || s.lastIndexOf('\u3010') > s.lastIndexOf('\u3011');
+  // 碎句判定与合并（同口径：≤4 字、无结构字符；前段带句末标点直接拼，否则补逗号）
+  const TINY_EXCLUDE_RE = /[\[\]{}()（）【】*「」『』“”"'`]/;
+  const isTiny = (s: string): boolean =>
+    s.length > 0 && !TINY_EXCLUDE_RE.test(s) && Array.from(s).length <= 4;
+  const joinTiny = (a: string, b: string): string =>
+    (/[。！？!?～〜]$/.test(a) ? a + b : `${a}，${b}`);
+
   const out: string[] = [];
-  for (const seg of (raw || '').split(/&{3,}/)) {
-    for (const line of seg.split(/\n+/)) {
-      const t = line.trim();
-      if (t) out.push(t);
+  let lastEmitted = '';
+  let held = '';
+  const emit = (seg: string): void => {
+    if (!held) {
+      if (isTiny(seg)) {
+        held = seg; // 碎句先扣住：等下一段决定合并还是放行
+        return;
+      }
+      out.push(seg);
+      lastEmitted = seg;
+      return;
     }
+    if (seg === held) return; // 与扣住的碎片重复：丢弃
+    if (isTiny(seg)) {
+      held = joinTiny(held, seg); // 下一段也碎：并进扣住的段继续等
+      return;
+    }
+    out.push(held); // 碰到不碎的段：放行扣住的合并段，再正常处理本段
+    lastEmitted = held;
+    held = '';
+    out.push(seg);
+    lastEmitted = seg;
+  };
+
+  let segStart = 0;
+  let scanFrom = 0;
+  for (;;) {
+    const m = BOUNDARY_ONE_RE.exec(full.slice(scanFrom));
+    if (!m) break;
+    const end = scanFrom + m.index + m[0].length;
+    // 句末标点（。！？!?～〜开头）并入本条（「你好！」完整弹出）；标记/换行/response 分隔符本身丢弃
+    const isSentence = SENTENCE_HEAD_RE.test(m[0]);
+    const candidate = full.slice(segStart, isSentence ? end : end - m[0].length);
+    if (hasOpenBracket(candidate)) {
+      // 停在未闭合的标记里：越过标记内边界，等标记闭合后重扫（祝福语带「！」的红包/照片标记）
+      scanFrom = end;
+      continue;
+    }
+    const trimmed = trimBlank(candidate);
+    segStart = end;
+    scanFrom = end;
+    if (trimmed.length === 0) continue; // 空段（连续换行/标记/不可见字符）：跳过
+    if (trimmed === lastEmitted) continue; // 与上一条重复：丢弃
+    emit(trimmed);
+  }
+  // 收尾尾段（没带句末标点的裸行）；有扣住的碎片时一併处理（都碎并成一条，不碎用空格隔开交出）
+  let tail = trimBlank(full.slice(segStart).replace(/&{3,}/g, '\n').replace(/&{1,2}$/, ''));
+  if (held) {
+    if (!tail) out.push(held);
+    else if (isTiny(tail)) out.push(joinTiny(held, tail));
+    else if (tail === held || tail === lastEmitted) out.push(held);
+    else {
+      out.push(held);
+      out.push(tail);
+    }
+  } else if (tail && tail !== lastEmitted) {
+    out.push(tail);
   }
   return out;
 }

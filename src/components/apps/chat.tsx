@@ -44,6 +44,8 @@ import { pushChatNotification, notifyPreviewText, takeNotifyNavigation, ISLAND_N
 import { playNotifySound } from '@/lib/ios/notify-sound';
 import { appendWithBoundary, markDeliverBoundary, peekPendingMsgs, purgeDeliveryQueueByPrefix, sortMsgsByTime, scheduleAiDelivery, subscribeAiDelivery, subscribeAiDeliveryActive, isAiDelivering, typingDelayOf } from '@/lib/ios/ai-delivery';
 import { consumeBgPending, onBgPageVisible, peekBgBadgeCounts, pullBgPending, registerBgSession, unregisterBgSession, type BgPendingItem } from '@/lib/ios/bg-turn';
+// v2.4.31 接力快照接管：正式投递入口清掉 bgsnap- 快照（快照与正式版本绝不共存）
+import { clearRelaySnaps } from '@/lib/ios/relay-snap';
 import {
   abortStreamsByPrefix,
   beginChatStream,
@@ -2515,29 +2517,28 @@ function ChatView({
 
   // ---------------- 退出网页接力（bg-turn）：服务端代跑的回复拉取 + 原管线投递 ----------------
 
-  /** 排队投递一批接力回复（首条立即上屏，后续按打字节奏）——与 startAiTurn 的 enqueueBatch
-   *  首批（batchStarted=false）完全同参数口径 */
+  /** 排队投递一批接力回复——与 startAiTurn 的 enqueueBatch 首批（batchStarted=false）同参数口径；
+   *  v2.4.31 接力快照接管：机主已在通知里看过这批内容、正等着看全量——0 停顿连发
+   *  （快照→正式版本的替换几乎无感；F3 照片任务恢复路径同为接管场景同口径） */
   const bgEnqueueBatch = useCallback(
     (built: ChatMsg[]) => {
       if (built.length === 0) return;
-      void scheduleAiDelivery<ChatMsg>(
-        sessionKey,
-        built,
-        deliverAiMsg,
-        {
-          initialDelay: 0,
-          delay: (i) => (i + 1 < built.length ? typingDelayOf(built[i + 1].content ?? '') : 0),
-        },
-      );
+      void scheduleAiDelivery<ChatMsg>(sessionKey, built, deliverAiMsg, { initialDelay: 0, delay: () => 0 });
     },
     [deliverAiMsg, sessionKey],
   );
 
   /** 接力回复投递：与 finalize 完全同管线（buildReplyMsgs 解析 → 排队投递）。
    *  single=true：texts[0] 是一次完整回复原文（可能含 &&& 分段与动作标记）→ 单条模式；
-   *  single=false：每项就是一条独立消息文本 → 多条模式逐条投递 */
+   *  single=false：每项就是一条独立消息文本 → 多条模式逐条投递。
+   *  v2.4.31 快照接管（「通知与聊天界面实时同步」根修第二环）：入口先清掉本会话全部
+   *  bgsnap- 快照（守望者在弹通知前预落库的占位消息）——正式投递是唯一权威版本，
+   *  清完同步页面 state（快照瞬间被正式消息取代，0 停顿连发几乎无感） */
   const deliverBgItems = useCallback(
     (items: BgPendingItem[]) => {
+      if (items.length === 0) return;
+      clearRelaySnaps(sessionKey);
+      setMsgs(loadMsgs(storageKey) ?? []); // 去（可能存在的）快照后的干净列表，立即刷新页面
       // 接力 generate 存的是完整回复原文：按该会话自己的回复条数决定解析模式（与 finalize 同语义；
       // 小助手会话同口径按设置连发——无人设不再恒单条）
       const bgAsSingle = getReplyCount(sessionKey) <= 1;

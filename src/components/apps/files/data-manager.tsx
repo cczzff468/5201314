@@ -1,28 +1,27 @@
 'use client';
 
 /**
- * 文件 App · 存储管理（第四十九轮 v2.4.30 应用宫格重排）
+ * 文件 App · 存储管理（v2.4.31 第五十轮改版）
  *
  * 彻底推翻 Terminal 终端风，改为「极简毛玻璃 + 胶囊」高级设计：
  * - 视觉：页面底色浅色 #F5F5F7 / 深色 #0E0E12；所有卡片为微投影毛玻璃
  *   （rounded-[28px] + 极弱 ring + 0.035 投影），一切操作按钮 / 选中标记 /
  *   状态 chip / 悬浮栏一律 rounded-full 胶囊；
  * - 配色写死 iOS 系统色：主操作蓝 #007AFF（备份/选中态）、健康绿 #34C759
- *   （已备份/安全）、危险红 #FF3B30（清理/垃圾警告），文本 zinc 系，全 dark: 变体；
+ *   （已备份）、危险红 #FF3B30（清理/清除数据），文本 zinc 系，全 dark: 变体；
  * - 结构（自上而下）：毛玻璃 hero 总览（总占用大数字 + 已备份/可清理胶囊 + 刷新）→
- *   应用占用双列宫格胶囊（图标 + 名称 + 已备份绿点，按大小隐形排序但不显示
- *   占用数值；短按进 App 专属详情页 / 长按 480ms 进多选，多选时 hero 收起 +
- *   底部滑出毛玻璃悬浮操作栏）→ 快捷操作（一键云端备份 / 健康检查
- *   展开红绿结果行）→ 云端与恢复安静收纳区（恢复 / 记录 / 导入 / 自动备份 / 持久化）；
- * - 操作反馈全部改用 sonner 轻提示（替代旧终端日志），危险操作走毛玻璃
- *   AlertDialog（iOS 上下分区按钮）；
+ *   应用占用双列宫格胶囊（图标 + 名称 + 已备份绿点；长按 480ms 进多选，
+ *   多选时 hero 收起 + 底部滑出毛玻璃悬浮操作栏；v2.4.31 起短按不再进详情页）→
+ *   快捷操作（一键云端备份整行 + 备份 / 清除数据 / 导入备份三胶囊；
+ *   v2.4.31 起健康检查已删除）→ 云端与恢复安静收纳区（恢复 / 记录 / 导入 /
+ *   自动备份 / 持久化）；
+ * - 操作反馈全部用 sonner 轻提示，危险操作走毛玻璃 AlertDialog；
  * - 数据层（app-storage / storage-stats / backup / cloud-backup）原样复用，零改动。
  */
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import {
-  Check, ChevronDown, ChevronLeft, CloudUpload, HeartPulse, Images,
-  Loader2, RefreshCw, ShieldCheck, Trash2,
+  Check, ChevronDown, CloudUpload, Download, Loader2, RefreshCw, Trash2,
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -38,8 +37,8 @@ import {
   type AppModuleDef, type AppStat, type BackupState,
 } from '@/lib/ios/app-storage';
 import {
-  cleanMedia, cleanRegenerableAssets, ensurePersistentStorage, lastUsedFromTs,
-  readMediaAutoClean, writeMediaAutoClean,
+  cleanMedia, ensurePersistentStorage,
+  readMediaAutoClean,
 } from '@/lib/ios/storage-stats';
 import {
   exportBackupToDownload, inspectBackupFile, restoreBackup as restoreLocalBackup,
@@ -278,7 +277,7 @@ function AppCell({
           {safe && <span aria-label="已备份" title="已备份" className="h-[7px] w-[7px] shrink-0 rounded-full bg-[#34C759]" />}
         </p>
       </div>
-      <span className="sr-only">长按进入多选，短按查看详情</span>
+      <span className="sr-only">长按进入多选</span>
 
       {/* 多选模式：右侧圆形勾选框 */}
       {multiMode && (
@@ -321,11 +320,7 @@ export default function DataManager() {
   // ---- 交互状态 ----
   const [sel, setSel] = useState<Set<string>>(new Set());
   const [multiMode, setMultiMode] = useState(false);
-  const [busy, setBusy] = useState<'' | 'backup' | 'clean' | 'cloud' | 'restore' | 'import' | 'media' | 'assets'>('');
-  const [healthOpen, setHealthOpen] = useState(false);
-  const [healthScan, setHealthScan] = useState(false);
-  const [detailId, setDetailId] = useState<string | null>(null); // 详情页数据
-  const [detailShown, setDetailShown] = useState(false); // 详情页滑入态
+  const [busy, setBusy] = useState<'' | 'backup' | 'clean' | 'cloud' | 'restore' | 'import'>('');
 
   // 危险确认弹窗
   const [confirmClean, setConfirmClean] = useState<string[] | null>(null);
@@ -334,7 +329,6 @@ export default function DataManager() {
   const [pendingImport, setPendingImport] = useState<{ name: string; file: File; summary: string } | null>(null);
 
   const importRef = useRef<HTMLInputElement | null>(null);
-  const healthTimerRef = useRef<number | null>(null);
   const exitTimerRef = useRef<number | null>(null);
   const openSettings = useUI((s) => s.switchToApp);
 
@@ -382,7 +376,6 @@ export default function DataManager() {
   // 计时器卸载清理
   useEffect(
     () => () => {
-      if (healthTimerRef.current !== null) window.clearTimeout(healthTimerRef.current);
       if (exitTimerRef.current !== null) window.clearTimeout(exitTimerRef.current);
     },
     [],
@@ -404,9 +397,6 @@ export default function DataManager() {
   })();
 
   const latestCloud = cloudRows.length > 0 ? cloudRows[0] : null;
-  const detailApp = detailId ? (appOf(detailId) ?? null) : null;
-  const detailStat = detailId ? (statOf(detailId) ?? null) : null;
-  const detailSafe = !!(detailApp && detailStat && backup && isAppSafe(detailStat, backup));
 
   // ---- 多选 ----
   const toggleSel = (id: string) =>
@@ -445,18 +435,6 @@ export default function DataManager() {
   };
 
   const selectAll = () => setSel(allSelected ? new Set() : new Set(APP_MODULES.map((a) => a.id)));
-
-  // ---- 详情页开合（双 rAF 触发滑入过渡） ----
-  const openDetail = useCallback((id: string) => {
-    setDetailId(id);
-    setDetailShown(false);
-    requestAnimationFrame(() => requestAnimationFrame(() => setDetailShown(true)));
-  }, []);
-
-  const closeDetail = useCallback(() => {
-    setDetailShown(false);
-    window.setTimeout(() => setDetailId(null), 320);
-  }, []);
 
   // ---- 备份（本地导出，按 App 过滤） ----
   const backupApps = async (ids: string[]) => {
@@ -573,57 +551,7 @@ export default function DataManager() {
     }
   };
 
-  // ---- 媒体压缩 / 可再生缓存清理 ----
-  const doMediaCompress = async () => {
-    if (busy) return;
-    setBusy('media');
-    try {
-      const r = await cleanMedia();
-      toast.success(
-        r.compressed > 0 ? `已压缩 ${r.compressed} 张照片 · 释放 ${formatBytesAscii(r.savedBytes)}` : '没有需要压缩的照片',
-      );
-      await refresh(false);
-    } catch {
-      toast.error('压缩清理失败，请重试');
-    } finally {
-      setBusy('');
-    }
-  };
-
-  const doAssetsClean = async () => {
-    if (busy) return;
-    setBusy('assets');
-    try {
-      const r = await cleanRegenerableAssets();
-      toast.success(r.keys > 0 ? `已清理 ${r.keys} 项可再生缓存 · ${formatBytesAscii(r.bytes)}` : '没有可清理的未引用素材');
-      await refresh(false);
-    } catch {
-      toast.error('清理失败，请重试');
-    } finally {
-      setBusy('');
-    }
-  };
-
-  const toggleMediaAuto = (next: boolean) => {
-    setMediaAuto(next);
-    void writeMediaAutoClean(next);
-  };
-
-  // ---- 健康检查：900ms 扫描感 → 展开/收起结果面板 ----
-  const toggleHealth = () => {
-    if (busy || healthScan) return;
-    if (healthOpen) {
-      setHealthOpen(false);
-      return;
-    }
-    setHealthScan(true);
-    if (healthTimerRef.current !== null) window.clearTimeout(healthTimerRef.current);
-    healthTimerRef.current = window.setTimeout(() => {
-      healthTimerRef.current = null;
-      setHealthScan(false);
-      setHealthOpen(true);
-    }, 900);
-  };
+  // ---- 健康检查已删（v2.4.31）：快捷操作区改为 备份 / 清除数据 / 导入备份 三胶囊 ----
 
   // ---- 清理确认弹窗文案 ----
   const confirmTarget = confirmClean ?? (confirmGlobal ? APP_MODULES.map((a) => a.id) : []);
@@ -719,7 +647,9 @@ export default function DataManager() {
                     selected={sel.has(app.id)}
                     multiMode={multiMode}
                     disabled={busy !== ''}
-                    onTap={() => (multiMode ? toggleSel(app.id) : openDetail(app.id))}
+                    onTap={() => {
+                      if (multiMode) toggleSel(app.id); // v2.4.31：非多选短按不再进详情页（长按进入多选）
+                    }}
                     onLongPress={() => enterMulti(app.id)}
                   />
                 );
@@ -766,70 +696,65 @@ export default function DataManager() {
         </div>
       )}
 
-      {/* ============ 5) 快捷操作（一键云端备份 / 健康检查） ============ */}
+      {/* ============ 5) 快捷操作（一键云端备份 + 备份/清除数据/导入备份） ============ */}
       <h2 className="px-5 pb-2.5 pt-7 text-[13px] font-semibold text-zinc-500 dark:text-zinc-400">快捷操作</h2>
       <section aria-label="快捷操作" className="px-4">
-        <div className="grid grid-cols-2 gap-3">
+        <button
+          type="button"
+          onClick={() => void doCloudBackup()}
+          disabled={busy !== ''}
+          className="flex h-[52px] w-full items-center justify-center gap-2 rounded-full bg-[#007AFF] text-[14px] font-semibold text-white shadow-[0_6px_20px_rgba(0,122,255,0.35)] transition active:scale-[0.97] disabled:opacity-50"
+        >
+          {busy === 'cloud' ? (
+            <Loader2 className="h-[18px] w-[18px] animate-spin" aria-hidden />
+          ) : (
+            <CloudUpload className="h-[18px] w-[18px]" aria-hidden />
+          )}
+          {busy === 'cloud' ? '备份中…' : '一键云端备份'}
+        </button>
+
+        {/* v2.4.31 三胶囊：备份（本地全量导出）/ 清除数据（危险，过全局确认弹窗）/ 导入备份（文件选择器） */}
+        <div className="mt-3 grid grid-cols-3 gap-3">
           <button
             type="button"
-            onClick={() => void doCloudBackup()}
+            onClick={() => void backupApps(APP_MODULES.map((a) => a.id))}
             disabled={busy !== ''}
-            className="flex h-[52px] items-center justify-center gap-2 rounded-full bg-[#007AFF] text-[14px] font-semibold text-white shadow-[0_6px_20px_rgba(0,122,255,0.35)] transition active:scale-[0.97] disabled:opacity-50"
+            className="flex h-[52px] items-center justify-center gap-1.5 rounded-full bg-white/70 text-[13.5px] font-semibold text-zinc-700 ring-1 ring-black/[0.05] backdrop-blur-2xl transition active:scale-[0.97] disabled:opacity-50 dark:bg-white/[0.06] dark:text-zinc-200 dark:ring-white/[0.08]"
           >
-            {busy === 'cloud' ? (
-              <Loader2 className="h-[18px] w-[18px] animate-spin" aria-hidden />
+            {busy === 'backup' ? (
+              <Loader2 className="h-[17px] w-[17px] animate-spin" aria-hidden />
             ) : (
-              <CloudUpload className="h-[18px] w-[18px]" aria-hidden />
+              <CloudUpload className="h-[17px] w-[17px] text-[#007AFF]" aria-hidden />
             )}
-            {busy === 'cloud' ? '备份中…' : '一键云端备份'}
+            {busy === 'backup' ? '备份中…' : '备份'}
           </button>
           <button
             type="button"
-            onClick={toggleHealth}
+            onClick={() => setConfirmGlobal(true)}
             disabled={busy !== ''}
-            aria-expanded={healthOpen}
-            className={`flex h-[52px] items-center justify-center gap-2 rounded-full bg-white/70 text-[14px] font-semibold text-zinc-700 ring-1 ring-black/[0.05] backdrop-blur-2xl transition active:scale-[0.97] disabled:opacity-50 dark:bg-white/[0.06] dark:text-zinc-200 dark:ring-white/[0.08] ${
-              healthOpen ? 'ring-[#34C759]/30' : ''
-            }`}
+            className="flex h-[52px] items-center justify-center gap-1.5 rounded-full bg-[#FF3B30]/[0.08] text-[13.5px] font-semibold text-[#D70015] ring-1 ring-[#FF3B30]/25 backdrop-blur-2xl transition active:scale-[0.97] disabled:opacity-50 dark:text-[#FF453A]"
           >
-            {healthScan ? (
-              <Loader2 className="h-[18px] w-[18px] animate-spin text-[#34C759]" aria-hidden />
+            {busy === 'clean' ? (
+              <Loader2 className="h-[17px] w-[17px] animate-spin" aria-hidden />
             ) : (
-              <HeartPulse className="h-[18px] w-[18px] text-[#34C759]" aria-hidden />
+              <Trash2 className="h-[17px] w-[17px] text-[#FF3B30]" aria-hidden />
             )}
-            {healthScan ? '扫描中…' : '健康检查'}
+            {busy === 'clean' ? '清理中…' : '清除数据'}
+          </button>
+          <button
+            type="button"
+            onClick={() => importRef.current?.click()}
+            disabled={busy !== ''}
+            className="flex h-[52px] items-center justify-center gap-1.5 rounded-full bg-white/70 text-[13.5px] font-semibold text-zinc-700 ring-1 ring-black/[0.05] backdrop-blur-2xl transition active:scale-[0.97] disabled:opacity-50 dark:bg-white/[0.06] dark:text-zinc-200 dark:ring-white/[0.08]"
+          >
+            {busy === 'import' ? (
+              <Loader2 className="h-[17px] w-[17px] animate-spin" aria-hidden />
+            ) : (
+              <Download className="h-[17px] w-[17px] text-[#34C759]" aria-hidden />
+            )}
+            {busy === 'import' ? '导入中…' : '导入备份'}
           </button>
         </div>
-
-        {/* 健康结果面板（红 = 可清理垃圾 / 绿 = 安全状态） */}
-        {healthOpen && !healthScan && (
-          <div className="mt-3 space-y-2.5">
-            <div className="flex items-center gap-2.5 rounded-full bg-[#FF3B30]/[0.08] px-4 py-2.5 ring-1 ring-[#FF3B30]/20">
-              <Trash2 className="h-4 w-4 shrink-0 text-[#FF3B30]" aria-hidden />
-              <span className="text-[13px] font-medium text-zinc-700 dark:text-zinc-200">可清理垃圾</span>
-              <span className="text-[13px] font-semibold tabular-nums text-[#D70015] dark:text-[#FF453A]">
-                {formatBytesAscii(dirtyBytes)}
-              </span>
-              <span className="flex-1" />
-              <button
-                type="button"
-                onClick={() => setConfirmGlobal(true)}
-                disabled={busy !== ''}
-                className="shrink-0 rounded-full bg-[#FF3B30] px-3.5 py-1.5 text-[12px] font-semibold text-white transition active:scale-95 disabled:opacity-50"
-              >
-                一键清理
-              </button>
-            </div>
-            <div className="flex items-center gap-2.5 rounded-full bg-[#34C759]/[0.08] px-4 py-2.5 ring-1 ring-[#34C759]/20">
-              <ShieldCheck className="h-4 w-4 shrink-0 text-[#34C759]" aria-hidden />
-              <span className="text-[13px] font-medium text-zinc-700 dark:text-zinc-200">安全状态</span>
-              <span className="flex-1" />
-              <span className="text-[13px] font-semibold tabular-nums text-[#248A3D] dark:text-[#30D158]">
-                {formatBytesAscii(safeBytes)}
-              </span>
-            </div>
-          </div>
-        )}
       </section>
 
       {/* ============ 7) 云端与恢复（安静收纳区） ============ */}
@@ -997,10 +922,9 @@ export default function DataManager() {
         actionCls={DLG_RED}
         onAction={() => {
           const ids = confirmTarget;
-          const after = detailId && ids.includes(detailId) ? closeDetail : undefined;
           setConfirmClean(null);
           setConfirmGlobal(false);
-          void runClean(ids, after);
+          void runClean(ids);
         }}
         desc={
           <>
@@ -1074,144 +998,6 @@ export default function DataManager() {
         }}
       />
 
-      {/* ============ 4) App 专属详情页（绝对定位覆盖层，从右滑入） ============ */}
-      {detailApp && detailStat && (
-        <div
-          role="dialog"
-          aria-label={`${detailApp.label} 存储详情`}
-          className={`absolute inset-0 z-40 flex flex-col bg-[#F5F5F7]/95 backdrop-blur-2xl transition-transform duration-300 ease-out dark:bg-[#0E0E12]/95 ${
-            detailShown ? 'translate-x-0' : 'translate-x-full'
-          }`}
-        >
-          {/* 顶栏：圆形玻璃返回胶囊 + 居中标题 */}
-          <div className="relative flex shrink-0 items-center px-4 pb-2 pt-[54px]">
-            <button
-              type="button"
-              aria-label="返回存储管理"
-              onClick={closeDetail}
-              className="flex h-10 w-10 items-center justify-center rounded-full bg-white/80 ring-1 ring-black/[0.05] backdrop-blur-xl transition active:scale-90 dark:bg-white/[0.08] dark:ring-white/[0.1]"
-            >
-              <ChevronLeft className="h-5 w-5" strokeWidth={2.4} />
-            </button>
-            <span className="pointer-events-none absolute inset-x-0 bottom-2.5 text-center text-[17px] font-bold tracking-tight">
-              {detailApp.label}
-            </span>
-          </div>
-
-          <div className="no-scrollbar flex-1 overflow-y-auto px-4 pb-12">
-            <div className="mx-auto max-w-[420px]">
-              {/* 大图标 + 名称 + 路径 */}
-              <div className="flex flex-col items-center pt-4">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={detailApp.icon}
-                  alt={`${detailApp.label}图标`}
-                  className="h-[88px] w-[88px] rounded-[22px] object-cover shadow-[0_10px_30px_rgba(0,0,0,0.12)]"
-                />
-                <h1 className="mt-3.5 text-[22px] font-bold tracking-tight">{detailApp.label}</h1>
-                <p className="mt-1 font-mono text-[12px] text-zinc-400">{detailApp.path}</p>
-              </div>
-
-              {/* 三个统计胶囊 */}
-              <div className="mt-5 grid grid-cols-3 gap-2.5">
-                <div className={`${GLASS_BASE} rounded-[22px] p-3 text-center`}>
-                  <p className="text-[10.5px] text-zinc-400">占用大小</p>
-                  <p className="mt-1 truncate text-[13.5px] font-semibold tabular-nums">{formatBytesAscii(detailStat.bytes)}</p>
-                </div>
-                <div className={`${GLASS_BASE} rounded-[22px] p-3 text-center`}>
-                  <p className="text-[10.5px] text-zinc-400">数据条数</p>
-                  <p className="mt-1 truncate text-[13.5px] font-semibold tabular-nums">{detailStat.records} 项</p>
-                </div>
-                <div className={`${GLASS_BASE} rounded-[22px] p-3 text-center`}>
-                  <p className="text-[10.5px] text-zinc-400">最近活动</p>
-                  <p className="mt-1 truncate text-[13.5px] font-semibold">
-                    {detailStat.lastAt ? lastUsedFromTs(detailStat.lastAt) : '—'}
-                  </p>
-                </div>
-              </div>
-
-              {/* 备份状态行 */}
-              <div className="mt-4 flex items-center justify-center gap-1.5 text-[12.5px] text-zinc-500 dark:text-zinc-400">
-                <span aria-hidden className={`h-2 w-2 rounded-full ${detailSafe ? 'bg-[#34C759]' : 'bg-zinc-300 dark:bg-zinc-600'}`} />
-                <span className={detailSafe ? 'font-medium text-[#248A3D] dark:text-[#30D158]' : ''}>
-                  {detailSafe ? '已备份' : '未备份'}
-                </span>
-                <span>· {lastBackupText}</span>
-              </div>
-
-              {/* 主操作区 */}
-              <div className="mt-6 space-y-2.5">
-                <button
-                  type="button"
-                  onClick={() => void backupApps([detailApp.id])}
-                  disabled={busy !== ''}
-                  className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-[#007AFF] text-[15px] font-semibold text-white shadow-[0_6px_20px_rgba(0,122,255,0.35)] transition active:scale-[0.98] disabled:opacity-50"
-                >
-                  {busy === 'backup' ? (
-                    <Loader2 className="h-[18px] w-[18px] animate-spin" aria-hidden />
-                  ) : (
-                    <CloudUpload className="h-[18px] w-[18px]" aria-hidden />
-                  )}
-                  {busy === 'backup' ? '正在备份…' : '备份此应用'}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setConfirmClean([detailApp.id])}
-                  disabled={busy !== ''}
-                  className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-[#FF3B30]/10 text-[15px] font-semibold text-[#D70015] ring-1 ring-[#FF3B30]/30 transition active:scale-[0.98] disabled:opacity-50 dark:text-[#FF453A]"
-                >
-                  {busy === 'clean' ? (
-                    <Loader2 className="h-[18px] w-[18px] animate-spin" aria-hidden />
-                  ) : (
-                    <Trash2 className="h-[18px] w-[18px]" aria-hidden />
-                  )}
-                  {busy === 'clean' ? '正在清理…' : detailApp.danger ? '清空此应用（含设置，危险）' : '清理此应用'}
-                </button>
-              </div>
-
-              {/* App 专属附加操作：照片压缩 / 可再生缓存 */}
-              {detailApp.id === 'photos' && (
-                <div className="mt-3 space-y-2.5">
-                  <button
-                    type="button"
-                    onClick={() => void doMediaCompress()}
-                    disabled={busy !== ''}
-                    className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-white/70 text-[14px] font-medium text-zinc-700 ring-1 ring-black/[0.05] backdrop-blur-2xl transition active:scale-[0.98] disabled:opacity-50 dark:bg-white/[0.06] dark:text-zinc-200 dark:ring-white/[0.08]"
-                  >
-                    {busy === 'media' ? (
-                      <Loader2 className="h-[18px] w-[18px] animate-spin" aria-hidden />
-                    ) : (
-                      <Images className="h-[18px] w-[18px] text-zinc-400" aria-hidden />
-                    )}
-                    压缩旧照片
-                  </button>
-                  <div className="flex h-12 items-center justify-between rounded-full bg-white/70 px-5 ring-1 ring-black/[0.05] backdrop-blur-2xl dark:bg-white/[0.06] dark:ring-white/[0.08]">
-                    <span className="text-[14px] font-medium text-zinc-700 dark:text-zinc-200">自动压缩清理</span>
-                    <Switch checked={mediaAuto} onCheckedChange={toggleMediaAuto} aria-label="自动压缩清理开关" />
-                  </div>
-                </div>
-              )}
-              {detailApp.id === 'system' && (
-                <div className="mt-3">
-                  <button
-                    type="button"
-                    onClick={() => void doAssetsClean()}
-                    disabled={busy !== ''}
-                    className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-white/70 text-[14px] font-medium text-zinc-700 ring-1 ring-black/[0.05] backdrop-blur-2xl transition active:scale-[0.98] disabled:opacity-50 dark:bg-white/[0.06] dark:text-zinc-200 dark:ring-white/[0.08]"
-                  >
-                    {busy === 'assets' ? (
-                      <Loader2 className="h-[18px] w-[18px] animate-spin" aria-hidden />
-                    ) : (
-                      <RefreshCw className="h-[18px] w-[18px] text-zinc-400" aria-hidden />
-                    )}
-                    清理可再生缓存
-                  </button>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

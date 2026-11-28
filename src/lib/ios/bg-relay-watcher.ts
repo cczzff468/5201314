@@ -19,11 +19,16 @@
  * - 20s 兜底轮询（多实例部署等收不到广播的场景最后防线）；
  * - peek（GET /api/chat/bg?peekAll=1&preview=1）发现有待达消息的会话：
  *   · 该会话正在流式/投递中 → 跳过（原管线投递时会正常弹横幅，不抑制）；
- *   · 否则【逐条】pushChatNotification（v2.4.28：服务端带回逐条 messages，
+ *   · 否则【先落库快照，再逐条弹通知】（v2.4.31「通知与聊天界面实时同步」根修：
+ *     snapRelayMessages 把服务端逐条 messages 以 bgsnap-<id> 写进对应 App 的消息库
+ *     （IndexedDB）+ 未读角标——机主点进 App 时消息早已躺在本地，不再「点进聊天页才显示」。
+ *     原生轮询已弹过的批次（seen 已标记）回前台 peek 时同样补落库，按 id 去重幂等），
+ *     然后【逐条】pushChatNotification（v2.4.28：服务端带回逐条 messages，
  *     AI 发几条就弹几次，不再把一批消息合并成一条首条预览横幅），
  *     并 suppressSessionBanner —— 聊天页稍后正式投递同一批消息时不再重复弹
  *     （观察到该会话投递忙→闲跃迁或 5min TTL 后解除）；
  *   · 不消费服务端队列：正式落盘投递仍由聊天页挂载拉取完成（读拉/写清协议不变）；
+ *     聊天页正式投递入口会先清掉快照（clearRelaySnaps）再按原管线落盘，两个版本绝不共存；
  * - v2.4.28：APK 新壳（带原生 BgNotifyPoller）页面后台期间不弹网页通知，只叫醒
  *   原生轮询器（pokeBgNotify）立即拉一轮——WebView 后台 JS 可能被冻结，原生侧
  *   不依赖 JS；旧壳/浏览器维持网页自己弹。
@@ -45,6 +50,8 @@ import {
 } from './island-notify';
 import { isNotifyDndActive } from './notification-center';
 import { getDeliveringSessionKeys, subscribeAiDeliveryActive, yieldToEventLoop } from './ai-delivery';
+// v2.4.31 快照落库：先写库再弹通知（通知与聊天界面实时同步根修第一环）
+import { snapRelayMessages } from './relay-snap';
 // v1.9.17 后台接力提速：isPageBackground 双信号判定——页面在后台时事件驱动 peek 立即执行
 //（后台 setTimeout 被强节流 1s→1次/分钟，防抖反而把接力横幅拖慢，机主退后台收不到通知的根因之一）
 import { isPageBackground } from './system-notify';
@@ -260,8 +267,21 @@ async function peekOnce(): Promise<void> {
       if (!parsed) continue;
       const preview = (p.preview ?? '').trim() || '[新消息]';
       const batchKey = `${key}#${p.count}#${hashStr(preview)}`;
+      if (busy.has(key) || isChatStreaming(key) || isAiDelivering(key)) continue; // 投递中：等原管线（快照也不抢写，防与投递队列交错）
+      // v2.4.31 数据写入前置：先落库快照再弹通知——无论 seen 与否都落（原生轮询已弹过
+      // 通知的批次，回前台 peek 时在这里补落库；按 id 去重幂等，重复 peek 零重复落库）。
+      // 落库后机主点进任意入口（通知/图标/会话列表）消息都已在本地库，挂载即渲染；
+      // 聊天页正式投递接管时 clearRelaySnaps 清掉快照，绝不双版本共存。
+      const snapMsgs = Array.isArray(p.messages)
+        ? p.messages.filter((m) => m && typeof m.id === 'string' && typeof m.text === 'string')
+        : [];
+      if (snapMsgs.length > 0) {
+        snapRelayMessages(key, snapMsgs);
+      } else {
+        // 服务端旧版本无逐条 messages 字段：用首条预览落一条快照（id 用 batchKey 保幂等）
+        snapRelayMessages(key, [{ id: batchKey, text: preview }]);
+      }
       if (seen.has(batchKey)) continue; // 这批已弹过横幅（未投递但已告知）
-      if (busy.has(key) || isChatStreaming(key) || isAiDelivering(key)) continue; // 投递中：等原管线
       seen.add(batchKey);
       changed = true;
       // v1.9.8.1 关键：这是「新批次」（数量/首条预览变化）——先清掉旧批次的横幅抑制，
