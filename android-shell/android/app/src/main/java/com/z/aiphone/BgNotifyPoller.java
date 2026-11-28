@@ -57,6 +57,20 @@ import java.nio.charset.StandardCharsets;
  *   - 新桥 AIPhoneNative.pokeBgNotify()：网页在后台收到 SSE bg-pending 广播时
  *     （WebView JS 还活着、但通知已让位原生防双弹）叫醒原生立即拉一轮——毫秒级。
  *
+ * 【v2.4.29（第四十八轮）·通知排版与图标重做】
+ * 机主反馈：AI 连发多条时通知把全部文本揉成一大段（无缝拼接）；左侧图标是系统默认
+ * 蓝图标的默认蓝色图标（带 X 观感）。
+ * ① 合并排版：同一会话同一轮轮询的新消息合并为【一条】通知——
+ *    · 1 条：标题 = 角色名，正文 = 那一条消息（超长省略号）；
+ *    · N>1 条：标题 = 「角色名：发来了 N 条新消息」，正文预览最新一条；
+ *    · NotificationCompat.BigTextStyle：下拉展开可见完整最新一条消息（多行）；
+ *    · 服务端 pollNative 的 messages 已按 &&& + 换行拆好（splitSingleReply，见
+ *      /api/chat/bg）——本侧拿到就是逐条文本，不再出现拼接大段落；
+ *    · tag = bgm-<sessionKey>：同会话后续批次原地更新同一条通知（微信式单条堆叠）。
+ * ② 头像图标：pollNative 每会话携带 avatar（压缩 dataURL）→ NotifyAvatars 解码 →
+ *    setLargeIcon（通知栏显示角色真实头像）；小图标 = 本 App 自有 ic_stat_cove
+ *    （单色气泡，替换 android.R.drawable.ic_dialog_info 默认蓝图标）。
+ *
  * 【生命周期】轮询线程挂在进程上（静态单例）：
  * - 网页启动时 AIPhoneNative.setBgNotifyConfig({url, enabled, dnd}) 下发配置并拉起；
  * - KeepAliveService.onCreate（开机自启/常驻守护场景）按持久化配置拉起；
@@ -88,8 +102,9 @@ public final class BgNotifyPoller {
     private static final long FAST_AFTER_BG_MS = 75_000;
     /** 每次发现新消息后的快节奏窗口（连发多条的批次接着来） */
     private static final long FAST_AFTER_HIT_MS = 45_000;
-    /** 相邻两条 heads-up 的最小间隔（与网页端 NOTIFY_SPACING_MS 对齐，横幅逐条可见） */
-    private static final int POST_SPACING_MS = 2400;
+    /** 相邻两个会话 heads-up 的最小间隔（v2.4.29：通知已按会话合并，间隔 2.4s → 1.2s
+     *  让第二个会话的通知更及时；同会话批次只更新同一条不再堆叠） */
+    private static final int POST_SPACING_MS = 1200;
     private static final int HTTP_TIMEOUT_MS = 10_000;
     /** 已见 id 集合上限（超出整组淘汰，防 SharedPreferences 无限膨胀） */
     private static final int SEEN_IDS_MAX = 400;
@@ -361,12 +376,16 @@ public final class BgNotifyPoller {
                 if (sess == null) continue;
                 String title = sess.optString("title", "");
                 if (title == null || title.isEmpty()) title = "新消息";
+                // v2.4.29：会话头像（压缩 dataURL）→ 通知大图标
+                String avatar = sess.optString("avatar", "");
                 String target = null;
                 JSONObject t = sess.optJSONObject("target");
                 if (t != null) target = t.toString();
                 JSONArray msgs = sess.optJSONArray("messages");
                 if (msgs == null) continue;
                 boolean anyNew = false;
+                // v2.4.29：同一会话本轮新消息合并收集（一次轮询 = 一条通知）
+                java.util.List<String> newTexts = new java.util.ArrayList<>();
                 for (int i = 0; i < msgs.length(); i++) {
                     JSONObject m = msgs.optJSONObject(i);
                     if (m == null) continue;
@@ -394,17 +413,21 @@ public final class BgNotifyPoller {
                         anyNew = true;
                         continue;
                     }
-                    // 后台（或边界轮询遇到新消息）：逐条弹 heads-up
+                    // 后台（或边界轮询遇到新消息）：并入本会话本轮批次（v2.4.29 合并口径）
                     seen.add(id);
                     anyNew = true;
                     anyPosted = true;
-                    if (canPost) {
-                        jobs.add(new NotificationJob("bgm-" + id, title, text, target));
+                    if (canPost && text != null && !text.isEmpty()) {
+                        newTexts.add(text);
                     }
                 }
                 if (anyNew) {
                     String bk = sess.optString("batchKey", "");
                     if (bk != null && !bk.isEmpty()) newBatchKeys.add(bk);
+                }
+                // 本会话本轮有新消息且可弹 → 一条合并通知（tag=bgm-<sessionKey>：同会话原地更新）
+                if (canPost && newTexts.size() > 0) {
+                    jobs.add(new NotificationJob("bgm-" + key, title, newTexts, avatar, target));
                 }
             }
 
@@ -420,14 +443,14 @@ public final class BgNotifyPoller {
                 if (now + FAST_AFTER_HIT_MS > fastUntil) fastUntil = now + FAST_AFTER_HIT_MS;
             }
         }
-        // 逐条弹（锁外——2.4s 间隔的 sleep 链不阻塞主循环/poke；id 已在锁内标记
+        // 逐会话弹（锁外——间隔的 sleep 链不阻塞主循环/poke；id 已在锁内标记
         // 去重，后续轮询不会重复弹同一批）
         Context ctx = appContext;
         for (NotificationJob job : jobs) {
             try {
-                postHeadsUp(ctx, job.tag, job.title, job.body, "/", job.target);
+                postHeadsUp(ctx, job, "/");
             } catch (Throwable ignored) {
-                // 单条失败不影响后续
+                // 单会话失败不影响后续
             }
             try {
                 Thread.sleep(POST_SPACING_MS);
@@ -438,17 +461,22 @@ public final class BgNotifyPoller {
         }
     }
 
-    /** 单条待发通知 */
+    /** 单会话待发合并通知（v2.4.29：一批消息一条通知） */
     private static final class NotificationJob {
+        /** 通知 tag（bgm-<sessionKey>：同会话批次原地更新同一条） */
         final String tag;
         final String title;
-        final String body;
+        /** 本批新消息逐条文本（服务端已拆好；≥1 条） */
+        final java.util.List<String> texts;
+        /** 会话头像（压缩 dataURL；空 = 不带大图标） */
+        final String avatar;
         final String target;
 
-        NotificationJob(String tag, String title, String body, String target) {
+        NotificationJob(String tag, String title, java.util.List<String> texts, String avatar, String target) {
             this.tag = tag;
             this.title = title;
-            this.body = body;
+            this.texts = texts;
+            this.avatar = avatar;
             this.target = target;
         }
     }
@@ -489,14 +517,18 @@ public final class BgNotifyPoller {
     // ================= 通知下发（与 NativePerceptionPlugin.localNotify 同款） =================
 
     /**
-     * 弹一条 heads-up 消息通知（IMPORTANCE_HIGH 渠道 + 消息类目 + 点击直达）。
+     * 弹一条会话合并 heads-up 通知（IMPORTANCE_HIGH 渠道 + 消息类目 + 点击直达）。
+     * v2.4.29 排版（机主规格）：
+     * - 1 条消息：标题 = 角色名，正文 = 该条消息（超长省略号截断）；
+     * - N>1 条：标题 = 「角色名：发来了 N 条新消息」，正文 = 最新一条预览；
+     * - BigTextStyle 展开显示完整最新一条消息（多行全文）；
+     * - 大图标 = 会话头像（NotifyAvatars 解码 dataURL）；小图标 = ic_stat_cove。
      * 点击 → MainActivity（携带 local_notify_url/local_notify_target extras，
      * 走 NativePerceptionPlugin 既有的 handleOnNewIntent → 'local-notify-open'
      * 网页导航链路，直达对应聊天界面）。
      */
-    private static void postHeadsUp(Context ctx, String tag, String title, String body,
-            String url, String targetJson) {
-        if (ctx == null) return;
+    private static void postHeadsUp(Context ctx, NotificationJob job, String url) {
+        if (ctx == null || job == null) return;
         NotificationManager nm = (NotificationManager) ctx.getSystemService(Context.NOTIFICATION_SERVICE);
         if (nm == null) return;
         if (Build.VERSION.SDK_INT >= 33
@@ -507,8 +539,8 @@ public final class BgNotifyPoller {
         if (!nm.areNotificationsEnabled()) return;
         if (Build.VERSION.SDK_INT >= 26) {
             NotificationChannel high = new NotificationChannel(
-                    HIGH_CHANNEL, "AI 消息（逐条横幅）", NotificationManager.IMPORTANCE_HIGH);
-            high.setDescription("AI 每条消息一条独立横幅通知（不合并）；点击直达对应聊天");
+                    HIGH_CHANNEL, "AI 消息（横幅通知）", NotificationManager.IMPORTANCE_HIGH);
+            high.setDescription("AI 消息横幅通知：连发多条自动合并为一条（发来了 N 条新消息）；点击直达对应聊天");
             high.setLockscreenVisibility(Notification.VISIBILITY_PRIVATE);
             high.enableVibration(true);
             high.setVibrationPattern(new long[]{0, 180, 90, 180});
@@ -528,24 +560,52 @@ public final class BgNotifyPoller {
         Intent contentIntent = new Intent(ctx, MainActivity.class);
         contentIntent.setPackage(ctx.getPackageName());
         contentIntent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP);
-        boolean hasDest = (url != null && !url.isEmpty()) || (targetJson != null && !targetJson.isEmpty());
+        boolean hasDest = (url != null && !url.isEmpty()) || (job.target != null && !job.target.isEmpty());
         if (url != null && !url.isEmpty()) contentIntent.putExtra("local_notify_url", url);
-        if (targetJson != null && !targetJson.isEmpty()) contentIntent.putExtra("local_notify_target", targetJson);
-        int id = tag.hashCode();
+        if (job.target != null && !job.target.isEmpty()) contentIntent.putExtra("local_notify_target", job.target);
+        int id = job.tag.hashCode();
         PendingIntent contentPi = PendingIntent.getActivity(ctx, id, contentIntent,
                 hasDest
                         ? (PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT)
                         : PendingIntent.FLAG_IMMUTABLE);
+
+        // ---- v2.4.29 合并排版 ----
+        int count = job.texts.size();
+        String latest = job.texts.get(count - 1);
+        String title = count > 1
+                ? (job.title + "：发来了 " + count + " 条新消息")
+                : (job.title == null || job.title.isEmpty() ? "新消息" : job.title);
         NotificationCompat.Builder builder = new NotificationCompat.Builder(ctx, HIGH_CHANNEL)
-                .setSmallIcon(android.R.drawable.ic_dialog_info)
-                .setContentTitle(title == null || title.isEmpty() ? "新消息" : title)
+                // 小图标：App 自有单色气泡（替换系统默认蓝图标）
+                .setSmallIcon(R.drawable.ic_stat_cove)
+                .setContentTitle(title)
+                // 副标题：只展示最新一条消息的预览（绝不拼接多条文本）
+                .setContentText(ellipsize(latest, 60))
+                // 大文本展开：完整最新一条消息（下拉通知栏可见全文）
+                .setStyle(new NotificationCompat.BigTextStyle()
+                        .setBigContentTitle(title)
+                        .bigText(latest != null ? latest : ""))
                 .setAutoCancel(true)
                 .setContentIntent(contentPi)
                 // heads-up 三件套：高优先级 + 消息类目（部分 ROM 需全配才弹横幅）
                 .setPriority(NotificationCompat.PRIORITY_HIGH)
                 .setCategory(NotificationCompat.CATEGORY_MESSAGE);
-        if (body != null && !body.isEmpty()) builder.setContentText(body);
-        nm.notify(tag, id, builder.build());
+        // 大图标：会话头像（dataURL 解码；失败/缺失跳过，不影响通知本体）
+        if (job.avatar != null && !job.avatar.isEmpty()) {
+            try {
+                android.graphics.Bitmap avatarBmp = NotifyAvatars.decode(job.avatar);
+                if (avatarBmp != null) builder.setLargeIcon(avatarBmp);
+            } catch (Throwable ignored) {
+            }
+        }
+        nm.notify(job.tag, id, builder.build());
+    }
+
+    /** 超长截断加省略号（通知折叠预览用） */
+    private static String ellipsize(String s, int max) {
+        if (s == null) return "";
+        if (s.length() <= max) return s;
+        return s.substring(0, max) + "…";
     }
 
     // ================= SharedPreferences 读写 =================

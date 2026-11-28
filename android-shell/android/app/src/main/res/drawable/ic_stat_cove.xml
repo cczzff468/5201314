@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- v2.4.29（第四十八轮）：系统通知专用小图标（单色对话气泡）。
+     旧版三处通知都用 android.R.drawable.ic_dialog_info（系统默认蓝图标，机主反馈
+     「带 X 的默认蓝色图标」）——换成本 App 自有的单色气泡 glyph：Android 5.0+ 通知
+     小图标按 alpha 蒙版渲染，纯白填充即得标准白色状态栏图标。 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <!-- 圆角对话气泡（Material chat_bubble 同形，尾部朝左下） -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M20,2H4C2.9,2 2,2.9 2,4v18l4,-4h14c1.1,0 2,-0.9 2,-2V4C22,2.9 21.1,2 20,2z" />
+</vector>

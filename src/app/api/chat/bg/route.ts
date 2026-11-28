@@ -144,12 +144,14 @@ function appDefaultName(sessionKey: string): string {
  * v1.9.8 接力横幅预览净化：完整回复原文（可能含 &&& 分段、[拍照:…] / [语音] 等动作标记）
  * → 横幅一条预览文本。只用于守望者横幅展示，不参与投递（投递仍由聊天页 buildReplyMsgs
  * 按各端语义完整解析）。净化不出可读文本时回退 [新消息]。
+ * v2.4.29（第四十八轮）：max 参数化——横幅预览沿用 100 字；系统通知的大文本展开需要
+ * 更长的原文（BigTextStyle 展示完整最新一条，上限 600 字）。
  */
-function relayPreviewText(raw: string): string {
+function relayPreviewText(raw: string, max = 100): string {
   let t = (raw || '').split('&&&')[0] ?? '';
   // 剥方括号动作/媒体标记（[拍照:xxx] [语音] [图片] 等；只剥 ≤30 字的短标记，防误伤长正文）
   t = t.replace(/\[[^\[\]]{1,30}\]/g, ' ');
-  t = t.replace(/\s+/g, ' ').trim().slice(0, 100);
+  t = t.replace(/\s+/g, ' ').trim().slice(0, max);
   return t || '[新消息]';
 }
 
@@ -163,9 +165,32 @@ function hashStr(s: string): string {
   return (h >>> 0).toString(36);
 }
 
+/**
+ * v2.4.29（第四十八轮·通知排版根修）：完整回复原文 → 逐条消息文本。
+ *
+ * 机主反馈：AI 连发多条时系统通知把全部文本揉成一大段（「mua收到啦嘿嘿 你今天怎么这么会呀…」）。
+ * 根因：旧版 single 模式只按 &&& 拆分——而多句回复（无 &&&、以换行分段）整段留在同一条
+ * 「消息」里，relayPreviewText 又把换行折叠成空格 → 一条通知正文 = 全部消息无缝拼接。
+ *
+ * 修复：single 模式拆分口径补齐——先按 &&&（客户端 MARKER_RE /&{3,}/ 同款），再把每段按
+ * 换行拆开（客户端 splitMultiSegments 的换行边界；句末标点拆分不做——服务端无从得知会话
+ * 的回复条数设置，标点拆分在单条模式会话上会过度拆分，换行拆分已覆盖机主反馈的全部场景）。
+ */
+function splitSingleReply(raw: string): string[] {
+  const out: string[] = [];
+  for (const seg of (raw || '').split(/&{3,}/)) {
+    for (const line of seg.split(/\n+/)) {
+      const t = line.trim();
+      if (t) out.push(t);
+    }
+  }
+  return out;
+}
+
 /** v2.4.28（第四十七轮）：pollNative / peekAll(preview) 共用的逐条消息构建：
- *  single 模式按 &&& 拆分（客户端 buildReplyMsgs 同款分段口径），deliver 模式每条
- *  text 即一条消息；文本走 relayPreviewText 净化（通知预览用）；id 稳定（`${item.id}#${i}`）。
+ *  single 模式按 &&& + 换行拆分（v2.4.29 补齐，见 splitSingleReply），deliver 模式每条
+ *  text 即一条消息；文本走 relayPreviewText 净化（通知预览/大文本展开共用，600 字上限）；
+ *  id 稳定（`${item.id}#${i}`）。
  *  createdAt = 所属 PendingItem 的入队时刻（v2.4.28 新增）——原生 BgNotifyPoller 用它
  *  区分「退后台前就躺在队列里的旧消息」与「退后台瞬间/之后到达的新消息」，
  *  修 deliver 接力与边界轮询的竞态（旧实现把刚入队的新消息标记已见导致永不弹通知）。 */
@@ -175,13 +200,13 @@ function buildRelayMessages(
   const messages: { id: string; text: string; createdAt: number }[] = [];
   arr.forEach((item) => {
     if (item.single) {
-      (item.texts[0] ?? '').split('&&&').forEach((seg, i) => {
-        const txt = relayPreviewText(seg);
+      splitSingleReply(item.texts.join('')).forEach((line, i) => {
+        const txt = relayPreviewText(line, 600);
         if (txt && txt !== '[新消息]') messages.push({ id: `${item.id}#${i}`, text: txt, createdAt: item.createdAt });
       });
     } else {
       item.texts.forEach((t, i) => {
-        const txt = relayPreviewText(t);
+        const txt = relayPreviewText(t, 600);
         if (txt && txt !== '[新消息]') messages.push({ id: `${item.id}#${i}`, text: txt, createdAt: item.createdAt });
       });
     }
@@ -215,7 +240,9 @@ function enqueue(sessionKey: string, texts: string[], single: boolean, title: st
   });
   // ② Web Push：页面已关/已冻结时的系统通知（带角色头像；发送/失效清理在 push-send 内）
   // target（sessionKey 反解的点击跳转目标）随载荷下发 —— 用户点开关页期间的
-  // 推送通知，页面重开后直达对应会话，不再裸开首页
+  // 推送通知，页面重开后直达对应会话，不再裸开首页。
+  // v2.4.29（第四十八轮）：messages 传拆分后的逐条消息（旧版传原始 texts——single 模式
+  // 整段原文会被拼成一条大段落通知）；push-send 内部按新口径合并成「角色名：发来了 N 条新消息」
   const relayTarget = relayTargetOf(sessionKey);
   void pushToAllSubscribers(
     {
@@ -223,7 +250,7 @@ function enqueue(sessionKey: string, texts: string[], single: boolean, title: st
       ...(meta?.avatar ? { icon: meta.avatar } : {}),
       ...(relayTarget ? { target: relayTarget } : {}),
     },
-    texts,
+    item.single ? splitSingleReply(texts.join('')) : texts,
   );
   return item;
 }

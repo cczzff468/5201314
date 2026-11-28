@@ -706,6 +706,8 @@ function maybeWebNotification(n: IslandNotification): void {
       title: n.title,
       body: n.subtitle ? `【${n.subtitle}】${n.body}` : n.body,
       target: n.target,
+      // v2.4.29：头像透传（角色头像 → 通知大图标；路径/dataURL 由 message-notifications 规范化）
+      avatar: n.avatar,
     });
     return;
   }

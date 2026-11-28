@@ -2,6 +2,10 @@ import type { Metadata, Viewport } from "next";
 import { Geist } from "next/font/google";
 import "./globals.css";
 import { Toaster } from "@/components/ui/toaster";
+// v2.4.29：sonner 轻提示挂载（文件 App 存储管理/审核页等已在用 toast()，
+// 但从未挂过 Sonner Toaster —— 调用静默不显示）；胶囊圆角贴合新设计语言，
+// 底部居中避开手机状态栏与灵动岛
+import { Toaster as SonnerToaster } from "@/components/ui/sonner";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -18,10 +22,10 @@ export const metadata: Metadata = {
   manifest: "/api/pwa/manifest",
   icons: {
     icon: [
-      { url: "/icons/app/icon-3-192.png?v=41", sizes: "192x192", type: "image/png" },
-      { url: "/icons/app/icon-3-512.png?v=41", sizes: "512x512", type: "image/png" },
+      { url: "/icons/app/icon-3-192.png?v=42", sizes: "192x192", type: "image/png" },
+      { url: "/icons/app/icon-3-512.png?v=42", sizes: "512x512", type: "image/png" },
     ],
-    apple: "/icons/app/apple-touch-icon.png?v=41",
+    apple: "/icons/app/apple-touch-icon.png?v=42",
   },
   // iOS 添加到主屏幕：全屏独立窗口 + 沉浸式状态栏 + 桌面图标名
   appleWebApp: {
@@ -58,6 +62,11 @@ export default function RootLayout({
       <body className={`${geistSans.variable} antialiased bg-background text-foreground`}>
         {children}
         <Toaster />
+        <SonnerToaster
+          position="bottom-center"
+          offset="88px"
+          toastOptions={{ classNames: { toast: "!rounded-full !font-sans" } }}
+        />
         {/* v80 预览提速：启动即注册 Service Worker（资源 SWR 缓存 + v1.9.22 离线壳）。
             原先只有开启通知权限才会注册（push-client），大多数会话享受不到静态资源缓存。
             register 幂等（同 URL 同 scope），与 push-client 的注册不冲突；iframe/不支持环境静默失败。

@@ -40,9 +40,9 @@ export async function GET() {
     theme_color: '#ffffff',
     categories: ['social', 'entertainment', 'lifestyle'],
     icons: [
-      { src: `/icons/app/icon-${icon}-192.png?v=41`, sizes: '192x192', type: 'image/png', purpose: 'any' },
-      { src: `/icons/app/icon-${icon}-512.png?v=41`, sizes: '512x512', type: 'image/png', purpose: 'any' },
-      { src: `/icons/app/icon-${icon}-maskable-512.png?v=41`, sizes: '512x512', type: 'image/png', purpose: 'maskable' },
+      { src: `/icons/app/icon-${icon}-192.png?v=42`, sizes: '192x192', type: 'image/png', purpose: 'any' },
+      { src: `/icons/app/icon-${icon}-512.png?v=42`, sizes: '512x512', type: 'image/png', purpose: 'any' },
+      { src: `/icons/app/icon-${icon}-maskable-512.png?v=42`, sizes: '512x512', type: 'image/png', purpose: 'maskable' },
     ],
     shortcuts: [
       {
@@ -50,28 +50,28 @@ export async function GET() {
         short_name: '信息',
         description: '直达信息 App 会话列表',
         url: '/?open=chat',
-        icons: [{ src: `/icons/app/icon-${icon}-192.png?v=41`, sizes: '192x192', type: 'image/png' }],
+        icons: [{ src: `/icons/app/icon-${icon}-192.png?v=42`, sizes: '192x192', type: 'image/png' }],
       },
       {
         name: '微信',
         short_name: '微信',
         description: '直达微信',
         url: '/?open=wechat',
-        icons: [{ src: `/icons/app/icon-${icon}-192.png?v=41`, sizes: '192x192', type: 'image/png' }],
+        icons: [{ src: `/icons/app/icon-${icon}-192.png?v=42`, sizes: '192x192', type: 'image/png' }],
       },
       {
         name: '网易云音乐',
         short_name: '音乐',
         description: '直达网易云音乐',
         url: '/?open=music',
-        icons: [{ src: `/icons/app/icon-${icon}-192.png?v=41`, sizes: '192x192', type: 'image/png' }],
+        icons: [{ src: `/icons/app/icon-${icon}-192.png?v=42`, sizes: '192x192', type: 'image/png' }],
       },
       {
         name: '情侣空间',
         short_name: '情侣空间',
         description: '直达情侣空间 3D 小屋',
         url: '/?open=couple',
-        icons: [{ src: `/icons/app/icon-${icon}-192.png?v=41`, sizes: '192x192', type: 'image/png' }],
+        icons: [{ src: `/icons/app/icon-${icon}-192.png?v=42`, sizes: '192x192', type: 'image/png' }],
       },
     ],
   };

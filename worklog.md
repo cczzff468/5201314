@@ -3965,3 +3965,34 @@ Work Log:
 Stage Summary:
 - 后台通知三通道分工定型：前台=网页（逐条）、后台+新壳=原生轮询（竞态修复+4s 快节奏+poke 毫秒级）、后台+旧壳=网页自弹（逐条）；batchKey 同构去重防双弹口径不变
 - 机主覆盖安装 v92 APK 后：退后台 AI 消息 0~4s 内逐条弹悬浮通知（JS 冻结时兜底 4s 轮询，JS 活着时 poke 毫秒级）；回前台不再有「点了 APP 才弹一串」
+
+---
+
+## 第四十八轮 v2.4.29（2026-11-28）通知排版/头像图标根修 + PWA 图标安全区 + 文件 App 毛玻璃胶囊重做
+
+Agent: 主控 Agent（Z.ai Code）
+Task: 机主四项——①PWA 图标裁剪（"C" 被遮）；②系统通知排版乱（AI 连发多条揉成一大段）+ 通知图标是默认蓝色带 X 图标（要角色头像 + BigTextStyle + 「发来了 N 条」合并格式）；③彻底推翻 Terminal 风存储管理，重做极简毛玻璃胶囊风（长按多选/短按专属页/一键云备份/健康检查）；④删除 LIBRARY 装饰与照片/录音/音乐分区。改完立刻 commit。
+
+Work Log:
+- 【通知排版根修·服务端】/api/chat/bg 新增 splitSingleReply（single 模式按 &&& + 换行拆分——旧版只按 &&&，多句换行回复整段留在一条「消息」里，relayPreviewText 又把换行折叠成空格 → 一条通知正文 = 全部消息无缝拼接，正是机主截图的「mua收到啦嘿嘿 你今天怎么这么会呀…」大段落）；buildRelayMessages 沿用拆分（预览上限 100→600 字供 BigTextStyle 展开）
+- 【通知合并格式·Web Push】push-send 重写 composeBatchNotification：一批消息只发一条——1 条 → title=角色名 + body=该条消息（超长省略号）；N>1 条 → title=「角色名：发来了 N 条新消息」+ body=最后一条预览（60 字省略号）；绝不无缝拼接多条文本
+- 【通知合并格式·原生轮询】BgNotifyPoller 改按【会话】合并收集（一次轮询一个会话的新消息 = 一条通知）：1 条 → 标题=角色名 正文=该条（省略号）；N>1 → 标题=「角色名：发来了 N 条新消息」正文=最新一条预览；tag=bgm-<sessionKey> 同会话后续批次原地更新（微信式单条堆叠）；POST_SPACING 2.4s→1.2s（按会话间隔）
+- 【BigTextStyle·安卓原生】BgNotifyPoller.postHeadsUp 与 NativePerceptionPlugin.localNotify 全部加 NotificationCompat.BigTextStyle：折叠预览省略号、下拉展开完整最新一条消息（多行全文）
+- 【通知图标根修】三处通知小图标 android.R.drawable.ic_dialog_info（系统默认蓝）→ 新建 res/drawable/ic_stat_cove.xml（单色对话气泡）；新增 NotifyAvatars.java 工具类（dataURL base64 解码 / http 下载 + 采样降维 ≤256px + md5 短键 LRU×16）→ setLargeIcon 显示角色真实头像：pollNative 每会话 avatar 字段（原生轮询）+ localNotify 新 avatar 参数（网页桥）+ island-notify 透传 n.avatar + message-notifications 头像规范化（站内路径→绝对 URL）
+- 【网页桥不堵】localNotify 通知构建+头像解码移入 NOTIFY_POOL 单线程池（旧版在 Capacitor 桥线程同步做，会卡其它插件调用）；桥侧验证后立刻回 ok
+- 【网页侧突发合并】message-notifications.ts 重做：同会话 5s 窗口内的连发消息并入同一条通知（tag=msg-<key>-<seq> 原地更新，计数+1、预览换最新、标题「角色名：发来了 N 条新消息」）；取消多选/进聊天页 cancelAllMessageNotifications 同步清空批次状态；去掉旧的 2.4s 间隔链（合并后不再逐条刷屏）
+- 【PWA 图标安全区根修】根因：r41 对机主原图（icon-3 情书字标/icon-5 元气气泡）满幅直出——maskable/自适应被启动器遮罩裁到 61% 安全区，字标横跨 84% 画幅 → 左侧 "C" 被裁（截图只剩 "ove"）。新脚本 scripts/fix-icon-safezone-r48.mjs：'any' 图标内容 80%（圆形裁剪安全）/ maskable-512 内容 62%（61% 安全区圆内完整）/ APK 自适应前景 72dp→67dp，底垫源图大半径模糊铺满 + 内容四边羽化（接缝 sumdiff 5/765 实测不可见）；manifest/layout 图标破缓存 ?v=41→?v=42
+- 【文件 App 毛玻璃胶囊重做】data-manager.tsx 彻底重写（Terminal 风全废弃）：页面底 #F5F5F7/深色 #0E0E12；hero 毛玻璃总览（总占用大数字 + 已备份绿/可清理灰胶囊 + 圆形刷新）；应用占用横向胶囊卡（rounded-full h-68px：彩色图标 + 名称 + 已备份绿点 + 占用·条数小字 + 灰胶囊占比 chip），按大小降序；短按（<500ms 无移动）进 App 专属详情页（大图标 + 三统计胶囊 + 备份此应用蓝胶囊 + 清理/清空红胶囊 + photos 压缩/自动压缩 + system 可再生缓存），长按 480ms 进多选（卡片 scale-1.03 + 泛蓝 + 圆形勾选），多选时 hero 收起 + 标题行变「已选 N 项 + 全选/完成」+ 底部滑出毛玻璃悬浮操作栏（备份选中(N) 蓝 / 清理选中(N) 红 / 取消 灰）；快捷操作两胶囊：一键云端备份（静默 + toast）与健康检查（900ms 扫描 → 红色可清理垃圾 + 一键清理 / 绿色安全状态）；底部云端与恢复收纳区（云端恢复/备份记录/导入/自动备份+间隔保留/持久化/未部署引导）；危险操作全走毛玻璃 AlertDialog（iOS 分区按钮）
+- 【LIBRARY 下线】files.tsx 1119→35 行：删除 LIBS 六大资料库全部浏览/导入/播放/新建代码（照片录音音乐等分区），文件 App 收敛为纯存储管理器，标题「数据管理」→「存储管理」
+- 【sonner 挂载修复】layout.tsx 补挂 SonnerToaster（review.tsx 与新 data-manager 都在用 toast()，但 Toaster 从未挂载 → 调用静默不显示）；底部居中 + 胶囊圆角贴合新设计
+- 【发版 v2.4.29/93】build.gradle versionCode 93 + versionName 2.4.29；app-version 六条发布说明重写（本轮实际内容）
+
+验证:
+- bun run lint 0 errors（1 条 pre-existing warning）；dev server 无 error
+- agent-browser 实测：登录→解锁→文件 App——hero 总览/胶囊列表/占比 chip 渲染 ✓、短按进详情页（备份/清理胶囊）✓、长按进多选（卡片泛蓝放大 + 已选 1 项 + 悬浮栏 备份选中(1)/清理选中(1)/取消）✓、连选两个（计数 2 实时更新）✓、取消退出 ✓、健康检查（红可清理垃圾+一键清理 / 绿安全状态）✓、一键云端备份 toast「请先在 设置 › 云端助手 部署 Supabase」✓（sonner 胶囊轻提示正常渲染）
+- 图标：VLM 复检 maskable 62% 版 "Cove" 字标完整可见 + 接缝不可见（像素级 sumdiff 5）
+- APK 重打 v93 部署 public/Cove.apk（本轮含原生改动：BgNotifyPoller/NativePerceptionPlugin/NotifyAvatars/ic_stat_cove/图标前景）
+
+Stage Summary:
+- 通知三通道统一新口径：单条=角色名+那条消息（省略号），连发=「角色名：发来了 N 条新消息」+最新一条预览，BigTextStyle 下拉全文，头像大图标+单色气泡小图标
+- 文件 App = 极简毛玻璃胶囊存储管理器（hero 总览/胶囊列表/长按多选/专属详情页/一键云备份/健康检查/云端收纳）

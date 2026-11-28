@@ -892,7 +892,7 @@ public class NativePerceptionPlugin extends Plugin {
             PendingIntent pi = PendingIntent.getActivity(ctx, 9101, contentIntent,
                     PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
             Notification n = new NotificationCompat.Builder(ctx, PULLBACK_CHANNEL)
-                    .setSmallIcon(android.R.drawable.ic_dialog_info)
+                    .setSmallIcon(R.drawable.ic_stat_cove)
                     .setContentTitle("回来陪我说话")
                     .setContentText("点一下这里回到聊天")
                     .setAutoCancel(true)
@@ -3791,7 +3791,7 @@ public class NativePerceptionPlugin extends Plugin {
                     PendingIntent.FLAG_IMMUTABLE);
             NotificationCompat.Builder builder =
                     new NotificationCompat.Builder(ctx, AGENT_NOTIFY_CHANNEL)
-                            .setSmallIcon(android.R.drawable.ic_dialog_info)
+                            .setSmallIcon(R.drawable.ic_stat_cove)
                             .setContentTitle(title)
                             .setOngoing(true)
                             .setOnlyAlertOnce(true)
@@ -3855,9 +3855,24 @@ public class NativePerceptionPlugin extends Plugin {
     private static final String EXTRA_LOCAL_NOTIFY_URL = "local_notify_url";
     private static final String EXTRA_LOCAL_NOTIFY_TARGET = "local_notify_target";
 
-    /** 本地通知 localNotify({title, body, tag?, url?, target?, headsUp?})：页面后台时的即时提醒。
+    /** v2.4.29：通知下发专用单线程池——头像（dataURL 解码 / http 下载）是阻塞操作，
+     * 不能在 Capacitor 桥线程上做（会卡住其它插件调用）；串行也天然匹配网页侧
+     * message-notifications 的串行链顺序。 */
+    private static final java.util.concurrent.ExecutorService NOTIFY_POOL =
+            java.util.concurrent.Executors.newSingleThreadExecutor(r -> {
+                Thread t = new Thread(r, "cove-local-notify");
+                t.setDaemon(true);
+                return t;
+            });
+
+    /** 本地通知 localNotify({title, body, tag?, url?, target?, headsUp?, avatar?})：页面后台时的即时提醒。
      *  v2.4.13：headsUp 默认 true——走 IMPORTANCE_HIGH 渠道弹出悬浮横幅（旧 DEFAULT 渠道
-     *  从创建起就永不弹横幅）；传 false 退回旧静默渠道。 */
+     *  从创建起就永不弹横幅）；传 false 退回旧静默渠道。
+     *  v2.4.29（第四十八轮·机主规格）：
+     *  - avatar（角色头像：dataURL / 绝对 URL）→ 通知大图标（NotifyAvatars 解码下载 + LRU）；
+     *  - 正文自动 BigTextStyle：长消息下拉展开可见全文；
+     *  - 小图标 = ic_stat_cove（替换 android.R.drawable.ic_dialog_info 系统默认蓝图标）；
+     *  - 头像解码/下载在 NOTIFY_POOL 后台线程（不堵桥）；验证仍同步快速失败。 */
     @PluginMethod
     public void localNotify(PluginCall call) {
         String title = call.getString("title", "");
@@ -3865,6 +3880,7 @@ public class NativePerceptionPlugin extends Plugin {
         String tag = call.getString("tag", null);
         String url = call.getString("url", null);
         String target = call.getString("target", null);
+        String avatar = call.getString("avatar", null);
         boolean headsUp = call.getBoolean("headsUp", true);
         JSObject ret = new JSObject();
         try {
@@ -3902,9 +3918,9 @@ public class NativePerceptionPlugin extends Plugin {
                     // 「确保能弹横幅、响铃、震动」——部分 ROM 只看渠道重要性不落默认音/震，
                     // 显式配置三件全齐）；渠道重要性创建后不可改，v2.4.13 起用新渠道 id。
                     NotificationChannel high = new NotificationChannel(
-                            LOCAL_NOTIFY_HIGH_CHANNEL, "AI 消息（逐条横幅）",
+                            LOCAL_NOTIFY_HIGH_CHANNEL, "AI 消息（横幅通知）",
                             NotificationManager.IMPORTANCE_HIGH);
-                    high.setDescription("AI 每条消息一条独立横幅通知（不合并）；点击直达对应聊天");
+                    high.setDescription("AI 消息横幅通知：连发多条自动合并为一条（发来了 N 条新消息）；点击直达对应聊天");
                     high.setLockscreenVisibility(Notification.VISIBILITY_PRIVATE);
                     high.enableVibration(true);
                     high.setVibrationPattern(new long[]{0, 180, 90, 180});
@@ -3928,45 +3944,78 @@ public class NativePerceptionPlugin extends Plugin {
             if (tag != null && !tag.isEmpty()) {
                 issuedTags.add(tag); // v2.2.0 登记：按前缀批量撤销用
             }
-            Intent contentIntent = new Intent(ctx, MainActivity.class);
-            contentIntent.setPackage(ctx.getPackageName());
-            contentIntent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP);
-            boolean hasDest = (url != null && !url.isEmpty()) || (target != null && !target.isEmpty());
-            if (url != null && !url.isEmpty()) {
-                contentIntent.putExtra(EXTRA_LOCAL_NOTIFY_URL, url);
-            }
-            if (target != null && !target.isEmpty()) {
-                contentIntent.putExtra(EXTRA_LOCAL_NOTIFY_TARGET, target);
-            }
-            PendingIntent contentPi = PendingIntent.getActivity(ctx, id, contentIntent,
-                    hasDest
-                            ? (PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT)
-                            : PendingIntent.FLAG_IMMUTABLE);
-            NotificationCompat.Builder builder =
-                    new NotificationCompat.Builder(ctx, useChannel)
-                            .setSmallIcon(android.R.drawable.ic_dialog_info)
-                            .setContentTitle(title == null || title.isEmpty() ? "提醒" : title)
-                            .setAutoCancel(true)
-                            .setContentIntent(contentPi);
-            if (headsUp) {
-                // heads-up 三件套：高优先级 + 消息类目 + 震动（部分 ROM 需全配才弹横幅）
-                builder.setPriority(NotificationCompat.PRIORITY_HIGH)
-                        .setCategory(NotificationCompat.CATEGORY_MESSAGE);
-            }
-            if (body != null && !body.isEmpty()) {
-                builder.setContentText(body);
-            }
-            if (tag != null && !tag.isEmpty()) {
-                nm.notify(tag, id, builder.build());
-            } else {
-                nm.notify(id, builder.build());
-            }
+            // v2.4.29：通知构建+头像解码放后台线程（不堵 Capacitor 桥）；
+            // 桥侧立刻回 ok（验证已过，失败静默——与历史尽力而为口径一致）
+            final Context fCtx = ctx;
+            final NotificationManager fNm = nm;
+            final String fChannel = useChannel;
+            final int fId = id;
+            final String fTitle = title, fBody = body, fTag = tag, fUrl = url, fTarget = target, fAvatar = avatar;
+            final boolean fHeadsUp = headsUp;
+            NOTIFY_POOL.execute(() -> {
+                try {
+                    postLocalNotify(fCtx, fNm, fChannel, fId, fTitle, fBody, fTag, fUrl, fTarget, fAvatar, fHeadsUp);
+                } catch (Throwable ignored) {
+                    // 后台构建失败静默（历史行为：通知尽力而为）
+                }
+            });
             ret.put("ok", true);
             call.resolve(ret);
         } catch (Throwable t) {
             ret.put("ok", false);
             ret.put("reason", t.getMessage() == null ? t.getClass().getSimpleName() : t.getMessage());
             call.resolve(ret);
+        }
+    }
+
+    /** v2.4.29：实际构建并下发一条本地通知（NOTIFY_POOL 后台线程）——
+     *  小图标 ic_stat_cove / 大图标角色头像 / BigTextStyle 全文展开 */
+    private void postLocalNotify(Context ctx, NotificationManager nm, String channel, int id,
+            String title, String body, String tag, String url, String target, String avatar, boolean headsUp) {
+        Intent contentIntent = new Intent(ctx, MainActivity.class);
+        contentIntent.setPackage(ctx.getPackageName());
+        contentIntent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+        boolean hasDest = (url != null && !url.isEmpty()) || (target != null && !target.isEmpty());
+        if (url != null && !url.isEmpty()) {
+            contentIntent.putExtra(EXTRA_LOCAL_NOTIFY_URL, url);
+        }
+        if (target != null && !target.isEmpty()) {
+            contentIntent.putExtra(EXTRA_LOCAL_NOTIFY_TARGET, target);
+        }
+        PendingIntent contentPi = PendingIntent.getActivity(ctx, id, contentIntent,
+                hasDest
+                        ? (PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT)
+                        : PendingIntent.FLAG_IMMUTABLE);
+        NotificationCompat.Builder builder =
+                new NotificationCompat.Builder(ctx, channel)
+                        // 小图标：App 自有单色气泡（v2.4.29 替换系统默认蓝图标）
+                        .setSmallIcon(R.drawable.ic_stat_cove)
+                        .setContentTitle(title == null || title.isEmpty() ? "提醒" : title)
+                        .setAutoCancel(true)
+                        .setContentIntent(contentPi);
+        if (headsUp) {
+            // heads-up 三件套：高优先级 + 消息类目 + 震动（部分 ROM 需全配才弹横幅）
+            builder.setPriority(NotificationCompat.PRIORITY_HIGH)
+                    .setCategory(NotificationCompat.CATEGORY_MESSAGE);
+        }
+        if (body != null && !body.isEmpty()) {
+            builder.setContentText(body);
+            // v2.4.29 BigTextStyle（机主规格）：下拉通知栏展开可见完整最新一条消息
+            //（折叠预览由系统自行省略号截断，不再是一条短短的省略号）
+            builder.setStyle(new NotificationCompat.BigTextStyle().bigText(body));
+        }
+        // v2.4.29 大图标：角色头像（dataURL 解码 / http 下载；失败/缺失跳过）
+        if (avatar != null && !avatar.isEmpty()) {
+            try {
+                android.graphics.Bitmap bmp = NotifyAvatars.decode(avatar);
+                if (bmp != null) builder.setLargeIcon(bmp);
+            } catch (Throwable ignored) {
+            }
+        }
+        if (tag != null && !tag.isEmpty()) {
+            nm.notify(tag, id, builder.build());
+        } else {
+            nm.notify(id, builder.build());
         }
     }
 
