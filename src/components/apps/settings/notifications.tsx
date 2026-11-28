@@ -283,7 +283,7 @@ export function NotificationPage({ onBack }: { onBack: () => void }) {
         </p>
       )}
       {inIframe && (
-        <p className="mt-3 rounded-[14px] bg-white/80 px-3 py-2 text-[12px] leading-relaxed text-zinc-500 ring-1 ring-black/[0.05] backdrop-blur-xl">
+        <p className="mt-3 rounded-[14px] bg-white/[0.72] px-3 py-2 text-[12px] leading-relaxed text-zinc-500 shadow-[0_2px_8px_rgba(24,24,27,0.03),0_14px_44px_rgba(24,24,27,0.07),inset_0_1px_0_rgba(255,255,255,0.55)] ring-1 ring-white/40 backdrop-blur-xl">
           当前页面嵌在预览面板（iframe）里，部分浏览器会在这里拦截系统通知与后台推送。
           点预览面板右上角「在新标签页打开」后重新开启通知，切走/关闭页面也能收到。
         </p>
@@ -567,10 +567,10 @@ export function ToneSheet({
         type="button"
         aria-label="关闭"
         onClick={onClose}
-        className="absolute inset-0 cursor-default bg-black/45 animate-in fade-in duration-200"
+        className="absolute inset-0 cursor-default bg-black/45 backdrop-blur-md animate-in fade-in duration-200"
       />
-      {/* 面板：从底部滑入 */}
-      <div className="absolute inset-x-0 bottom-0 overflow-hidden rounded-t-[18px] bg-white/95 shadow-[0_-10px_44px_rgba(0,0,0,0.28)] ring-1 ring-white/60 backdrop-blur-2xl animate-in slide-in-from-bottom-10 fade-in duration-300">
+      {/* 面板：从底部滑入（v2.4.37 液态玻璃：半透白 + 30px 模糊 + 白描边） */}
+      <div className="absolute inset-x-0 bottom-0 overflow-hidden rounded-t-[28px] bg-white/[0.86] shadow-[0_-8px_40px_rgba(24,24,27,0.12),inset_0_1px_0_rgba(255,255,255,0.6)] ring-1 ring-white/60 backdrop-blur-2xl animate-in slide-in-from-bottom-10 fade-in duration-300">
         <div className="mx-auto mt-2.5 h-[5px] w-10 shrink-0 rounded-full bg-black/15" aria-hidden="true" />
         <div className="flex items-center justify-between px-4 pb-1 pt-2.5">
           <span className="w-14" aria-hidden="true" />

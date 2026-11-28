@@ -267,11 +267,11 @@ export function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
       {/* 主滚动区：底部 padding 放在内层包裹盒上（不能直接放滚动容器——padding 会抬
           高 sticky 子元素的吸附基准线，胶囊会浮在“padding+12px”高处而不是紧贴底 12px） */}
       <div className="no-scrollbar flex-1 overflow-y-auto">
-        <div className="pb-[74px]">
+        <div className="pb-[64px]">
         {/* 个人资料卡（点击进入个人信息：头像/名字/标签）+ 切换账号入口行（同一分组）。
             搜索中：头像资料卡属非搜索 UI 整体隐藏，仅保留命中的「账号管理」导航行 */}
         {showProfileCard && (
-        <div className="mx-4 mt-2 divide-y divide-black/[0.05] overflow-hidden rounded-[22px] bg-white/80 shadow-[0_2px_12px_rgba(0,0,0,0.04)] ring-1 ring-black/[0.05] backdrop-blur-2xl">
+        <div className="mx-4 mt-2 divide-y divide-black/[0.05] overflow-hidden rounded-[24px] bg-white/[0.66] shadow-[0_2px_8px_rgba(24,24,27,0.03),0_14px_44px_rgba(24,24,27,0.07),inset_0_1px_0_rgba(255,255,255,0.55)] ring-1 ring-white/40 backdrop-blur-2xl">
           {!q && (
           <button
             type="button"
@@ -316,7 +316,7 @@ export function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
 
         {/* 无线控制（演示项）。搜索中整组隐藏（飞行模式为开关、无线/蓝牙为演示展示行，非导航入口） */}
         {!q && (
-        <div className="mx-4 mt-4 divide-y divide-black/[0.05] overflow-hidden rounded-[22px] bg-white/80 shadow-[0_2px_12px_rgba(0,0,0,0.04)] ring-1 ring-black/[0.05] backdrop-blur-2xl">
+        <div className="mx-4 mt-4 divide-y divide-black/[0.05] overflow-hidden rounded-[24px] bg-white/[0.66] shadow-[0_2px_8px_rgba(24,24,27,0.03),0_14px_44px_rgba(24,24,27,0.07),inset_0_1px_0_rgba(255,255,255,0.55)] ring-1 ring-white/40 backdrop-blur-2xl">
           <div className="flex min-h-[52px] items-center gap-3 px-4 py-2">
             <RowIcon icon={Plane} tone={TONE_ORANGE} />
             <span className="min-w-0 flex-1 truncate text-[16px]">飞行模式</span>
@@ -346,7 +346,7 @@ export function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
 
         {/* 锁屏与密码（按用户要求不显示开启状态提示） */}
         {showLock && (
-        <div className="mx-4 mt-4 divide-y divide-black/[0.05] overflow-hidden rounded-[22px] bg-white/80 shadow-[0_2px_12px_rgba(0,0,0,0.04)] ring-1 ring-black/[0.05] backdrop-blur-2xl">
+        <div className="mx-4 mt-4 divide-y divide-black/[0.05] overflow-hidden rounded-[24px] bg-white/[0.66] shadow-[0_2px_8px_rgba(24,24,27,0.03),0_14px_44px_rgba(24,24,27,0.07),inset_0_1px_0_rgba(255,255,255,0.55)] ring-1 ring-white/40 backdrop-blur-2xl">
           <MainRow icon={Lock} tone={TONE_RED} label="锁屏与密码" onClick={() => onOpen('lock')} />
         </div>
         )}
@@ -354,7 +354,7 @@ export function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
         {/* 第三十六轮：AI 服务四件套上移到「锁屏与密码」下面（机主要求：API、识图、图像、语言放这里）
             ——从原「开发者」组剪出，开发者组剩 ClawBox + 存储改组名「云端与存储」 */}
         {showAiService && (
-        <div className="mx-4 mt-4 divide-y divide-black/[0.05] overflow-hidden rounded-[22px] bg-white/80 shadow-[0_2px_12px_rgba(0,0,0,0.04)] ring-1 ring-black/[0.05] backdrop-blur-2xl">
+        <div className="mx-4 mt-4 divide-y divide-black/[0.05] overflow-hidden rounded-[24px] bg-white/[0.66] shadow-[0_2px_8px_rgba(24,24,27,0.03),0_14px_44px_rgba(24,24,27,0.07),inset_0_1px_0_rgba(255,255,255,0.55)] ring-1 ring-white/40 backdrop-blur-2xl">
           {match('API 配置') && (
           <MainRow
             icon={Wrench}
@@ -417,7 +417,7 @@ export function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
 
         {/* 显示与亮度 / 壁纸 / 通知（搜索中：开关行整组隐藏，只过滤导航入口行） */}
         {showDisplay && (
-        <div className="mx-4 mt-4 divide-y divide-black/[0.05] overflow-hidden rounded-[22px] bg-white/80 shadow-[0_2px_12px_rgba(0,0,0,0.04)] ring-1 ring-black/[0.05] backdrop-blur-2xl">
+        <div className="mx-4 mt-4 divide-y divide-black/[0.05] overflow-hidden rounded-[24px] bg-white/[0.66] shadow-[0_2px_8px_rgba(24,24,27,0.03),0_14px_44px_rgba(24,24,27,0.07),inset_0_1px_0_rgba(255,255,255,0.55)] ring-1 ring-white/40 backdrop-blur-2xl">
           {match('显示与亮度') && (
           <MainRow
             icon={Sun}
@@ -539,7 +539,7 @@ export function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
             第三十五轮：入口行下方说明文字按机主要求删除（保持卡片列表干净）。 */}
         {/* 电量百分比弹窗行（搜索中隐藏：非导航入口） */}
         {!q && (
-        <div className="mx-4 mt-4 overflow-hidden rounded-[22px] bg-white/80 shadow-[0_2px_12px_rgba(0,0,0,0.04)] ring-1 ring-black/[0.05] backdrop-blur-2xl">
+        <div className="mx-4 mt-4 overflow-hidden rounded-[24px] bg-white/[0.66] shadow-[0_2px_8px_rgba(24,24,27,0.03),0_14px_44px_rgba(24,24,27,0.07),inset_0_1px_0_rgba(255,255,255,0.55)] ring-1 ring-white/40 backdrop-blur-2xl">
           <button
             type="button"
             aria-haspopup="dialog"
@@ -570,7 +570,7 @@ export function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
         {showAssist && (
         <>
         <div className="mb-2 mt-6 px-8 text-[13px] text-zinc-500">悬浮工具</div>
-        <div className="mx-4 divide-y divide-black/[0.05] overflow-hidden rounded-[22px] bg-white/80 shadow-[0_2px_12px_rgba(0,0,0,0.04)] ring-1 ring-black/[0.05] backdrop-blur-2xl">
+        <div className="mx-4 divide-y divide-black/[0.05] overflow-hidden rounded-[24px] bg-white/[0.66] shadow-[0_2px_8px_rgba(24,24,27,0.03),0_14px_44px_rgba(24,24,27,0.07),inset_0_1px_0_rgba(255,255,255,0.55)] ring-1 ring-white/40 backdrop-blur-2xl">
           {match('默认预设（内置）') && (
           <MainRow
             icon={Layers}
@@ -644,7 +644,7 @@ export function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
         {showAiCtrl && (
         <>
         <div className="mb-2 mt-6 px-8 text-[13px] text-zinc-500">AI 感知与操控</div>
-        <div className="mx-4 divide-y divide-black/[0.05] overflow-hidden rounded-[22px] bg-white/80 shadow-[0_2px_12px_rgba(0,0,0,0.04)] ring-1 ring-black/[0.05] backdrop-blur-2xl">
+        <div className="mx-4 divide-y divide-black/[0.05] overflow-hidden rounded-[24px] bg-white/[0.66] shadow-[0_2px_8px_rgba(24,24,27,0.03),0_14px_44px_rgba(24,24,27,0.07),inset_0_1px_0_rgba(255,255,255,0.55)] ring-1 ring-white/40 backdrop-blur-2xl">
           {match('权限给予') && (
           <button
             type="button"
@@ -690,7 +690,7 @@ export function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
         {showCloud && (
         <>
         <div className="mb-2 mt-6 px-8 text-[13px] text-zinc-500">云端</div>
-        <div className="mx-4 divide-y divide-black/[0.05] overflow-hidden rounded-[22px] bg-white/80 shadow-[0_2px_12px_rgba(0,0,0,0.04)] ring-1 ring-black/[0.05] backdrop-blur-2xl">
+        <div className="mx-4 divide-y divide-black/[0.05] overflow-hidden rounded-[24px] bg-white/[0.66] shadow-[0_2px_8px_rgba(24,24,27,0.03),0_14px_44px_rgba(24,24,27,0.07),inset_0_1px_0_rgba(255,255,255,0.55)] ring-1 ring-white/40 backdrop-blur-2xl">
           {match('云端助手') && (
           <button
             type="button"
@@ -718,7 +718,7 @@ export function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
             点选【立马生效】：选完即整屏播放一遍预览 + 本会话下次冷启动/下次打开即播放所选主题 */}
         {/* 搜索中：开屏动画 / App 图标两个弹窗行隐藏，仅保留命中的导航行（APP 更新/添加到主屏幕） */}
         {showIconsCard && (
-        <div className="mx-4 mt-4 divide-y divide-black/[0.05] overflow-hidden rounded-[22px] bg-white/80 shadow-[0_2px_12px_rgba(0,0,0,0.04)] ring-1 ring-black/[0.05] backdrop-blur-2xl">
+        <div className="mx-4 mt-4 divide-y divide-black/[0.05] overflow-hidden rounded-[24px] bg-white/[0.66] shadow-[0_2px_8px_rgba(24,24,27,0.03),0_14px_44px_rgba(24,24,27,0.07),inset_0_1px_0_rgba(255,255,255,0.55)] ring-1 ring-white/40 backdrop-blur-2xl">
           {!q && (
           <button
             type="button"
@@ -810,7 +810,7 @@ export function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
         {/* 关于本机（第三十六轮：移到设置列表最下面——机主要求）。
             mb-2：末段卡与下方 sticky 搜索胶囊之间留间隙，胶囊不压最后一行 */}
         {showAbout && (
-        <div className="mx-4 mb-2 mt-4 divide-y divide-black/[0.05] overflow-hidden rounded-[22px] bg-white/80 shadow-[0_2px_12px_rgba(0,0,0,0.04)] ring-1 ring-black/[0.05] backdrop-blur-2xl">
+        <div className="mx-4 mb-2 mt-4 divide-y divide-black/[0.05] overflow-hidden rounded-[24px] bg-white/[0.66] shadow-[0_2px_8px_rgba(24,24,27,0.03),0_14px_44px_rgba(24,24,27,0.07),inset_0_1px_0_rgba(255,255,255,0.55)] ring-1 ring-white/40 backdrop-blur-2xl">
           <MainRow icon={Info} tone={TONE_GRAY} label="关于本机" onClick={() => onOpen('about')} />
         </div>
         )}
@@ -825,14 +825,14 @@ export function RootPage({ onOpen }: { onOpen: (page: Page) => void }) {
         </p>
 
         {/* 底部浮动搜索胶囊（v2.4.36 机主 iOS 设置参考图）：sticky 悬浮于滚动容器底部，
-            实时过滤上方设置入口行；仅过滤、不触发任何页面跳转；滚动容器底部 pb-[74px]
+            实时过滤上方设置入口行；仅过滤、不触发任何页面跳转；滚动容器底部 pb-[64px]
             保证最后一行能滚出胶囊悬浮区 */}
-        <div className="sticky bottom-3 z-30 mx-4 mt-4">
-          <div className="flex h-[50px] items-center gap-2.5 rounded-full border border-white/55 bg-white/75 px-4 shadow-[0_8px_28px_rgba(24,24,27,0.10),inset_0_1px_0_rgba(255,255,255,0.6)] backdrop-blur-2xl dark:border-white/10 dark:bg-zinc-900/70">
+        <div className="sticky bottom-[6px] z-30 mx-4 mt-3">
+          <div className="flex h-[50px] items-center gap-2.5 rounded-full border border-white/50 bg-white/[0.68] px-4 shadow-[0_8px_28px_rgba(24,24,27,0.10),inset_0_1px_0_rgba(255,255,255,0.6)] backdrop-blur-2xl">
             <Search className="h-5 w-5 shrink-0 text-zinc-400" aria-hidden="true" />
             <input
               type="text"
-              className="flex-1 bg-transparent text-[15px] text-zinc-900 outline-none placeholder:text-zinc-400 dark:text-zinc-50"
+              className="flex-1 bg-transparent text-[15px] text-zinc-900 outline-none placeholder:text-zinc-400"
               placeholder="搜索"
               aria-label="搜索设置项"
               value={search}
@@ -894,7 +894,7 @@ function AppIconDialog({
         type="button"
         aria-label="关闭 App 图标弹窗"
         data-testid="app-icon-backdrop"
-        className="fixed inset-0 z-[300] cursor-default bg-black/35 backdrop-blur-[2px]"
+        className="fixed inset-0 z-[300] cursor-default bg-black/45 backdrop-blur-md"
         onClick={onClose}
       />
       <div
@@ -904,7 +904,7 @@ function AppIconDialog({
         className="pointer-events-none fixed inset-0 z-[310] flex items-center justify-center p-8"
       >
         <div
-          className={`pointer-events-auto w-full max-w-[320px] overflow-hidden rounded-[24px] bg-white/95 shadow-[0_18px_48px_rgba(0,0,0,0.28)] ring-1 ring-black/[0.06] backdrop-blur-2xl transition-[opacity,transform] duration-[280ms] ease-[cubic-bezier(0.32,0.72,0,1.2)] ${
+          className={`pointer-events-auto w-full max-w-[320px] overflow-hidden rounded-[24px] bg-white/[0.84] shadow-[0_4px_12px_rgba(24,24,27,0.05),0_24px_64px_rgba(24,24,27,0.16),inset_0_1px_0_rgba(255,255,255,0.6)] ring-1 ring-white/50 backdrop-blur-2xl transition-[opacity,transform] duration-[280ms] ease-[cubic-bezier(0.32,0.72,0,1.2)] ${
             entered ? 'translate-y-0 scale-100 opacity-100' : 'translate-y-3 scale-[0.92] opacity-0'
           }`}
         >
@@ -970,7 +970,7 @@ function BatteryModeDialog({
         type="button"
         aria-label="关闭电量百分比弹窗"
         data-testid="battery-mode-backdrop"
-        className="fixed inset-0 z-[300] cursor-default bg-black/35 backdrop-blur-[2px]"
+        className="fixed inset-0 z-[300] cursor-default bg-black/45 backdrop-blur-md"
         onClick={onClose}
       />
       <div
@@ -980,7 +980,7 @@ function BatteryModeDialog({
         className="pointer-events-none fixed inset-0 z-[310] flex items-center justify-center p-8"
       >
         <div
-          className={`pointer-events-auto w-full max-w-[320px] overflow-hidden rounded-[24px] bg-white/95 shadow-[0_18px_48px_rgba(0,0,0,0.28)] ring-1 ring-black/[0.06] backdrop-blur-2xl transition-[opacity,transform] duration-[280ms] ease-[cubic-bezier(0.32,0.72,0,1.2)] ${
+          className={`pointer-events-auto w-full max-w-[320px] overflow-hidden rounded-[24px] bg-white/[0.84] shadow-[0_4px_12px_rgba(24,24,27,0.05),0_24px_64px_rgba(24,24,27,0.16),inset_0_1px_0_rgba(255,255,255,0.6)] ring-1 ring-white/50 backdrop-blur-2xl transition-[opacity,transform] duration-[280ms] ease-[cubic-bezier(0.32,0.72,0,1.2)] ${
             entered ? 'translate-y-0 scale-100 opacity-100' : 'translate-y-3 scale-[0.92] opacity-0'
           }`}
         >
@@ -1110,7 +1110,7 @@ function SplashThemeDialog({
         type="button"
         aria-label="关闭开屏动画弹窗"
         data-testid="splash-theme-backdrop"
-        className="fixed inset-0 z-[300] cursor-default bg-black/35 backdrop-blur-[2px]"
+        className="fixed inset-0 z-[300] cursor-default bg-black/45 backdrop-blur-md"
         onClick={onClose}
       />
       <div
@@ -1120,7 +1120,7 @@ function SplashThemeDialog({
         className="pointer-events-none fixed inset-0 z-[310] flex items-center justify-center p-8"
       >
         <div
-          className={`pointer-events-auto w-full max-w-[320px] overflow-hidden rounded-[24px] bg-white/95 shadow-[0_18px_48px_rgba(0,0,0,0.28)] ring-1 ring-black/[0.06] backdrop-blur-2xl transition-[opacity,transform] duration-[280ms] ease-[cubic-bezier(0.32,0.72,0,1.2)] ${
+          className={`pointer-events-auto w-full max-w-[320px] overflow-hidden rounded-[24px] bg-white/[0.84] shadow-[0_4px_12px_rgba(24,24,27,0.05),0_24px_64px_rgba(24,24,27,0.16),inset_0_1px_0_rgba(255,255,255,0.6)] ring-1 ring-white/50 backdrop-blur-2xl transition-[opacity,transform] duration-[280ms] ease-[cubic-bezier(0.32,0.72,0,1.2)] ${
             entered ? 'translate-y-0 scale-100 opacity-100' : 'translate-y-3 scale-[0.92] opacity-0'
           }`}
         >

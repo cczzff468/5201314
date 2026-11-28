@@ -4107,3 +4107,42 @@ Stage Summary:
 - 幽灵 Bug 三症状（自动弹锁定窗/AI 说你打开了/拦截计数虚涨）同一个根：QQ 后台悬浮窗事件被当前台——双闸校验后只有「亮屏+活跃窗口一致+UsageStats 有真实打开记录」才拦截
 - 计数全局同步：锁身份落盘接续累计；通知图标：网页周期同步所选图标号 + 三路 monogram 兜底
 - 关键文件：AiAccessibilityService.java、LockOverlayService.java、BgNotifyPoller.java、NotifyAvatars.java、NativePerceptionPlugin.java、bg-relay-watcher.ts、bg-turn.ts、local-notify.ts、tool-status-bubble.ts、app-version.ts、build.gradle
+
+## v2.4.37——全站液态玻璃（Liquid Glass）顶级重構 · v2（机主五点令：全站通透/子页整页化/弹窗黑遮罩/Tab 玻璃胶囊/搜索下移）
+
+机主令（五点）：① 全站（不只设置）卡片与弹窗全面换液态玻璃材质——半透明 + 高光反射 + blur(30px) saturate(180%) + 24px 大圆角 + 1px 极细白半透明描边（rgba(255,255,255,0.4)）+ 极浅弥散阴影；② 设置、API 配置、识图模型、图像生成等全部子页的「底部滑出毛玻璃弹窗」删除，改跳转独立整页；③ 弹窗弹出时背景加黑色半透明遮罩（背景模糊）；④ App Store/时钟底部 Tab 栏根治「假透明」——外层灰底换真玻璃胶囊；⑤ 底部搜索胶囊往下一点。
+
+一、全局玻璃材质统一（globals.css 未分层规则，层叠恒压过 Tailwind utilities 层，等效全站 !important 不污染源码）：
+- 高模糊统一：全站 backdrop-blur-xl/2xl/3xl 表面统一 blur(30px) saturate(1.8)——只改写 --tw-backdrop-blur 变量，元素上其它 backdrop-* 工具（亮度/饱和）仍正确合成不丢滤镜；实测任意 .backdrop-blur-2xl 计算值全部变为 blur(30px) saturate(1.8)
+- 玻璃边缘反光：全站卡片原「黑色低透明 hairline」（ring-black/[0.03..0.07]/ring-black/5）统一换 1px 极细白色半透明描边 rgba(255,255,255,0.4)（深色模式自动 0.12 防刺眼）——只改写 --tw-ring-color，ring 宽度与 box-shadow 合成不受影响
+- .liquid-glass/.liquid-card/.glow-soft 基元升级到同口径（30px/180%/白 0.4 描边/顶部高光反射 inset + 底缘反光）；中央 sonner 胶囊同步 30px/180%
+- shadcn 四件套（dialog/alert-dialog/sheet/drawer）内容升级：bg-white/[0.78..0.86] 半透明 + border-white/50 + 弥散柔影 + 高光 inset；drawer 圆角 rounded-lg→28px、grabber 去 bg-muted 换白玻璃条；四件 overlay 统一 bg-black/25→bg-black/45 + backdrop-blur-md（机主令：黑色半透明遮罩 + 背景模糊聚焦弹窗）
+
+二、设置子页整页化（DetailShell 单点重写，全部子页/API 配置/识图模型/图像生成/语音等 18 页一次到位）：
+- 底部弹层（rounded-t-28 底部抽屉 + 遮罩 + 下拉关闭）整体删除，改【独立整页】：fixed inset-0 铺满机身，右滑入场 300ms ease-out / 右滑退场 260ms，顶部「返回键 + 居中标题」导航栏（pt-[54px] 避让状态栏与根页同款）；Esc 关闭保留「上层弹窗优先」守卫；内容区保留字面 overflow-y-auto（useModelPanelReveal 兼容零改动）
+- 页面底液态玻璃：bg-[#F2F2F7]/[0.85] + blur(30px)，常驻根列表隐约透出；SETTINGS-THEME 恒浅色口径回归（不挂 dark 变体——v2.4.36 的 dark:bg-zinc-900 会造成深色页底+浅色卡片的断层，根修）
+- 设置 App 入 registry glassWindow（与 App Store/时钟同款壁纸透光窗）；RootPage/IOSScreen 底改 bg-[#F2F2F7]/[0.60]!
+- GroupCard/GrayCard + 全部子页内联卡片（root-page/api/vision/imagegen/voice/agent-voice/cloud/notifications/permission/fonts/prompts/theme/updates/wallpaper）统一新配方：rounded-[24px] bg-white/[0.66] + 1px 白/40 描边 + 弥散柔影 + 顶部高光；模型下拉面板（四页共用）白玻璃化；根页三居中弹窗（App 图标/电量百分比/字号）遮罩升 bg-black/45 + blur-md、卡体白玻璃；顺手根修 duration-s] 历史手误→duration-[280ms]
+
+三、App Store / 时钟 Tab 栏「真全透明液体玻璃胶囊」（机主点名的假透明 Bug）：
+- 外层长条去死板灰底（bg-black/[0.04]+ring+shadow 全删）：border-[0.5px] border-white/60 + bg-white/40 + backdrop-blur-[20px] + rounded-full 完美胶囊（深色 dark:bg-white/[0.09]/border-white/[0.14]）
+- 选中白胶囊非纯白：bg-white/80（玻璃透光）+ 弥散阴影 0 4px 12px rgba(0,0,0,0.05)（深色 dark:bg-white/[0.18]）；p-[5px] 均匀内边距图标居中
+- 假透明的真正根：App 根自带 backdrop-blur-2xl 会形成 backdrop root，窗口层（glassWindow）的壁纸模糊采样被隔离 → 页面被洗白。根修：AppStore/时钟/设置三 App 根容器摘掉自身 backdrop-blur（窗口层 blur(30px) saturate(1.8) 已全权负责壁纸柔光）——实测暗流壁纸下页面边缘像素 235（洗白）→149（壁纸透色），Tab 胶囊与壁纸真正融合
+- 时钟卡片族同步新玻璃配方；时钟 BottomSheet（加城市/闹钟编辑）遮罩 bg-black/50→45+blur-md、面板 #F2F2F7/[0.88] 玻璃化
+
+四、底部搜索胶囊下移 + 弹窗遮罩扫尾：
+- 设置根页搜索胶囊：sticky bottom-3→bottom-[6px]、容器 pb-[74px]→pb-[64px]（实测底距 12px→6px）；文件 App 搜索胶囊 bottom-4→bottom-2（16px→8px）
+- 文件 App GlassConfirm 卡体白玻璃化（bg-white/95→[0.80]+白描边+柔影）；通知页 ToneSheet 面板玻璃化 + 遮罩补 blur；APP 更新下载进度弹窗同口径
+
+验证（agent-browser 端到端 + VLM 截图走查）：
+- 登录（机主号）→ 解锁 → 设置：根页玻璃卡+壁纸透光 ✓；API 配置/图像生成/显示与亮度子页均为【全屏独立页】（返回键+居中标题、右滑入场、Esc/返回退出回根页滚动位置不丢）✓；搜索胶囊底距 6px ✓
+- App Store：Tab 计算样式逐项核对——track bg rgba(255,255,255,0.4)/blur(20px)/border 0.5px rgba(255,255,255,0.6)/radius 999px、选中 bg rgba(255,255,255,0.8) ✓；时钟同口径 ✓；暗流壁纸下页面像素级透出壁纸色调（149 vs 修复前 235）✓
+- 弹窗：alert-dialog overlay bg-black/45 + blur(12px) 计算值 ✓；时钟 BottomSheet 同口径 ✓
+- 深色模式：App Store 深色玻璃正常；设置恒浅色口径回归（子页不再深浅断层）
+- lint 0 errors；dev.log 无新增错误；console 零 error
+
+Stage Summary:
+- 全站材质三件套（blur30/sat180% + 白 0.4 描边 + 弥散柔影高光）经未分层 CSS 变量改写一处生效全站；弹窗四件套黑遮罩+背景模糊
+- 设置子页 18 页从底部抽屉回归独立整页（DetailShell 单点改造）；设置入 glassWindow 壁纸透光
+- Tab 栏假透明双根修：灰底→白 0.4 玻璃胶囊 + App 根嵌套 backdrop-filter 洗白根修（摘 App 根 blur 让窗口层模糊直达壁纸）
+- 关键文件：globals.css、ui/{dialog,sheet,alert-dialog,drawer}.tsx、apps/settings.tsx、apps/settings/{shared,root-page,api,vision,imagegen,voice,agent-voice,cloud,notifications,permission,fonts,prompts,theme,updates,wallpaper}.tsx、apps/{appstore,clock,registry}.tsx、apps/files/data-manager.tsx

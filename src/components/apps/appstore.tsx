@@ -379,7 +379,7 @@ export default function AppStoreApp() {
       const isRemoved = removedSet.has(app.id);
       const meta = metaFor(app.id);
       return (
-        <IOSScreen className="bg-[#F2F2F7]/[0.60]! backdrop-blur-2xl dark:bg-[#0E0E12]/[0.72]!">
+        <IOSScreen className="bg-[#F2F2F7]/[0.60]! dark:bg-[#0E0E12]/[0.72]!">
           <div className="no-scrollbar flex-1 overflow-y-auto" data-testid="appstore-detail">
             {/* 顶部：圆形玻璃返回/分享按钮（同真实商店） */}
             <div className="sticky top-0 z-20 bg-white/60 pt-[54px] backdrop-blur-2xl dark:bg-black/40">
@@ -443,7 +443,7 @@ export default function AppStoreApp() {
             </div>
 
             {/* 四栏数据：评分 / 年龄分级 / 排行榜 / 开发者 */}
-            <div className="mt-6 grid grid-cols-4 divide-x divide-black/[0.05] overflow-hidden rounded-[24px] bg-white/70 shadow-[0_2px_12px_rgba(0,0,0,0.035)] ring-1 ring-black/[0.05] backdrop-blur-2xl dark:divide-white/[0.06] dark:bg-white/[0.06] dark:ring-white/[0.08]">
+            <div className="mt-6 grid grid-cols-4 divide-x divide-black/[0.05] overflow-hidden rounded-[24px] bg-white/[0.62] shadow-[0_2px_8px_rgba(24,24,27,0.03),0_14px_44px_rgba(24,24,27,0.07),inset_0_1px_0_rgba(255,255,255,0.55)] ring-1 ring-black/[0.05] backdrop-blur-2xl dark:divide-white/[0.06] dark:bg-white/[0.07] dark:ring-white/[0.08]">
               <div className="flex flex-col items-center gap-1 px-1 py-3.5">
                 <span className="text-[11px] text-muted-foreground">{meta.count} 万个评分</span>
                 <span className="text-[19px] font-semibold leading-none">{meta.rating}</span>
@@ -532,7 +532,7 @@ export default function AppStoreApp() {
   /* ------------------------------- 浏览视图 ------------------------------- */
 
   return (
-    <IOSScreen className="bg-[#F2F2F7]/[0.60]! backdrop-blur-2xl dark:bg-[#0E0E12]/[0.72]!">
+    <IOSScreen className="bg-[#F2F2F7]/[0.60]! dark:bg-[#0E0E12]/[0.72]!">
       {/* 顶栏：返回键（回主屏，与其他 App 根页一致）+ 大标题 + 账户头像（跟随设置
         * 「个人信息」卡片的头像——传了自定义头像显示图片，没传显示同款灰渐变人形占位） */}
       <header className="shrink-0 bg-white/60 pt-[54px] backdrop-blur-2xl dark:bg-black/40">
@@ -565,7 +565,7 @@ export default function AppStoreApp() {
             {GROUPS.map((group) => (
               <section key={group.title} className="mt-4">
                 <h2 className="px-4 text-[22px] font-bold tracking-tight">{group.title}</h2>
-                <ul className="mx-4 mt-2 divide-y divide-black/[0.05] overflow-hidden rounded-[24px] bg-white/70 shadow-[0_2px_12px_rgba(0,0,0,0.035)] ring-1 ring-black/[0.05] backdrop-blur-2xl dark:divide-white/[0.06] dark:bg-white/[0.06] dark:ring-white/[0.08]">
+                <ul className="mx-4 mt-2 divide-y divide-black/[0.05] overflow-hidden rounded-[24px] bg-white/[0.62] shadow-[0_2px_8px_rgba(24,24,27,0.03),0_14px_44px_rgba(24,24,27,0.07),inset_0_1px_0_rgba(255,255,255,0.55)] ring-1 ring-black/[0.05] backdrop-blur-2xl dark:divide-white/[0.06] dark:bg-white/[0.07] dark:ring-white/[0.08]">
                   {group.ids.map((id) => {
                     const app = apps.find((a) => a.id === id);
                     if (!app) return null;
@@ -599,8 +599,8 @@ export default function AppStoreApp() {
             <p className="text-[13px] text-muted-foreground">{loaded ? `${removed.length} 个 App 等待恢复` : '正在读取…'}</p>
             {!loaded ? (
               <div className="mt-3 space-y-2" aria-hidden="true">
-                <div className="h-[74px] animate-pulse rounded-[24px] bg-white/70 shadow-[0_2px_12px_rgba(0,0,0,0.035)] ring-1 ring-black/[0.05] backdrop-blur-2xl dark:bg-white/[0.06] dark:ring-white/[0.08]" />
-                <div className="h-[74px] animate-pulse rounded-[24px] bg-white/70 shadow-[0_2px_12px_rgba(0,0,0,0.035)] ring-1 ring-black/[0.05] backdrop-blur-2xl dark:bg-white/[0.06] dark:ring-white/[0.08]" />
+                <div className="h-[74px] animate-pulse rounded-[24px] bg-white/[0.62] shadow-[0_2px_8px_rgba(24,24,27,0.03),0_14px_44px_rgba(24,24,27,0.07),inset_0_1px_0_rgba(255,255,255,0.55)] ring-1 ring-black/[0.05] backdrop-blur-2xl dark:bg-white/[0.07] dark:ring-white/[0.08]" />
+                <div className="h-[74px] animate-pulse rounded-[24px] bg-white/[0.62] shadow-[0_2px_8px_rgba(24,24,27,0.03),0_14px_44px_rgba(24,24,27,0.07),inset_0_1px_0_rgba(255,255,255,0.55)] ring-1 ring-black/[0.05] backdrop-blur-2xl dark:bg-white/[0.07] dark:ring-white/[0.08]" />
               </div>
             ) : removed.length === 0 ? (
               <div className="mt-20 flex flex-col items-center" data-testid="appstore-empty">
@@ -613,7 +613,7 @@ export default function AppStoreApp() {
                 </p>
               </div>
             ) : (
-              <ul className="mt-2 divide-y divide-black/[0.05] overflow-hidden rounded-[24px] bg-white/70 shadow-[0_2px_12px_rgba(0,0,0,0.035)] ring-1 ring-black/[0.05] backdrop-blur-2xl dark:divide-white/[0.06] dark:bg-white/[0.06] dark:ring-white/[0.08]">
+              <ul className="mt-2 divide-y divide-black/[0.05] overflow-hidden rounded-[24px] bg-white/[0.62] shadow-[0_2px_8px_rgba(24,24,27,0.03),0_14px_44px_rgba(24,24,27,0.07),inset_0_1px_0_rgba(255,255,255,0.55)] ring-1 ring-black/[0.05] backdrop-blur-2xl dark:divide-white/[0.06] dark:bg-white/[0.07] dark:ring-white/[0.08]">
                 {removed.map((a) => (
                   <AppRow
                     key={a.id}
@@ -655,7 +655,7 @@ export default function AppStoreApp() {
             <p className="mt-4 px-4 text-[13px] text-muted-foreground">
               {query.trim() ? `“${query.trim()}” 的搜索结果 · ${searchResults.length} 个` : `全部 App · ${apps.length} 个`}
             </p>
-            <ul className="mx-4 mt-2 divide-y divide-black/[0.05] overflow-hidden rounded-[24px] bg-white/70 shadow-[0_2px_12px_rgba(0,0,0,0.035)] ring-1 ring-black/[0.05] backdrop-blur-2xl dark:divide-white/[0.06] dark:bg-white/[0.06] dark:ring-white/[0.08]">
+            <ul className="mx-4 mt-2 divide-y divide-black/[0.05] overflow-hidden rounded-[24px] bg-white/[0.62] shadow-[0_2px_8px_rgba(24,24,27,0.03),0_14px_44px_rgba(24,24,27,0.07),inset_0_1px_0_rgba(255,255,255,0.55)] ring-1 ring-black/[0.05] backdrop-blur-2xl dark:divide-white/[0.06] dark:bg-white/[0.07] dark:ring-white/[0.08]">
               {searchResults.map((a) => {
                 const isRemoved = removedSet.has(a.id);
                 return (
@@ -686,9 +686,13 @@ export default function AppStoreApp() {
         )}
       </div>
 
-      {/* 底部标签栏：浮起毛玻璃胶囊条 + 蓝色选中白胶囊浮起 + 已移除角标 */}
+      {/* 底部标签栏 v2.4.37「真全透明液体玻璃胶囊」：外层胶囊不再用灰色死板底色——
+          纯玻璃材质 rgba(255,255,255,0.4) + backdrop-blur(20px)（模糊的是 App 内容→与
+          窗口层玻璃真正融合）+ 0.5px 极细白半透明描边（玻璃边缘反光）+ 999px 完美胶囊；
+          选中态为半透明白胶囊 rgba(255,255,255,0.8)（非纯白，玻璃透光）+ 淡弥散阴影；
+          p-[5px] 左右内边距均匀，三枚图标在胶囊内部完美居中 */}
       <nav aria-label="App Store 标签" className="z-20 shrink-0 pb-[24px] pt-[6px]">
-        <div className="mx-3 grid h-[52px] grid-cols-3 rounded-full bg-black/[0.04] p-[5px] shadow-[0_2px_12px_rgba(0,0,0,0.035)] ring-1 ring-black/[0.05] backdrop-blur-2xl dark:bg-white/[0.07] dark:ring-white/[0.08]">
+        <div className="mx-3 grid h-[52px] grid-cols-3 rounded-full border-[0.5px] border-white/60 bg-white/40 p-[5px] backdrop-blur-[20px] dark:border-white/[0.14] dark:bg-white/[0.09]">
           {TABS.map(({ key, label, icon: Icon }) => {
             const active = tab === key;
             return (
@@ -704,7 +708,7 @@ export default function AppStoreApp() {
                 }}
                 className={`relative flex flex-col items-center justify-center gap-[3px] rounded-full transition-colors ${
                   active
-                    ? `${BLUE} bg-white shadow-sm ring-1 ring-black/[0.04] dark:bg-white/[0.12] dark:ring-white/[0.08]`
+                    ? `${BLUE} bg-white/80 shadow-[0_4px_12px_rgba(0,0,0,0.05)] dark:bg-white/[0.18]`
                     : 'text-muted-foreground/80'
                 }`}
               >

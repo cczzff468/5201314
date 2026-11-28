@@ -95,7 +95,7 @@ export function ThemePage({ onBack }: { onBack: () => void }) {
           role="radiogroup"
           aria-label="状态栏模式"
           data-testid="statusbar-mode-group"
-          className="divide-y divide-black/[0.05] overflow-hidden rounded-[22px] bg-white/80 shadow-[0_2px_12px_rgba(0,0,0,0.04)] ring-1 ring-black/[0.05] backdrop-blur-2xl"
+          className="divide-y divide-black/[0.05] overflow-hidden rounded-[24px] bg-white/[0.66] shadow-[0_2px_8px_rgba(24,24,27,0.03),0_14px_44px_rgba(24,24,27,0.07),inset_0_1px_0_rgba(255,255,255,0.55)] ring-1 ring-white/40 backdrop-blur-2xl"
         >
           {sbModes.map((o) => {
             const Icon = o.icon;
@@ -139,7 +139,7 @@ export function ThemePage({ onBack }: { onBack: () => void }) {
           浏览器/PWA 端 manifest 动态接口自动跟随（Chrome/Edge 下次打开时生效）。 */}
       <div className="mt-4">
         <p className="mb-2 px-1 text-[12.5px] font-medium text-zinc-500">App 图标</p>
-        <div className="overflow-hidden rounded-[22px] bg-white/80 shadow-[0_2px_12px_rgba(0,0,0,0.04)] ring-1 ring-black/[0.05] backdrop-blur-2xl">
+        <div className="overflow-hidden rounded-[24px] bg-white/[0.66] shadow-[0_2px_8px_rgba(24,24,27,0.03),0_14px_44px_rgba(24,24,27,0.07),inset_0_1px_0_rgba(255,255,255,0.55)] ring-1 ring-white/40 backdrop-blur-2xl">
           <AppIconGrid current={appIcon} size="page" />
         </div>
         {/* 第四十二轮：说明提示删除（机主定夺——切结果由即时反馈/失败提示承担） */}

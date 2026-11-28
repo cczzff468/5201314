@@ -606,7 +606,7 @@ export function VoicePage({ onBack }: { onBack: () => void }) {
           >
             连接配置
           </SectionLabel>
-          <div className="flex flex-col gap-4 rounded-[22px] bg-white/80 p-4 shadow-[0_2px_12px_rgba(0,0,0,0.04)] ring-1 ring-black/[0.05] backdrop-blur-2xl">
+          <div className="flex flex-col gap-4 rounded-[24px] bg-white/[0.66] p-4 shadow-[0_2px_8px_rgba(24,24,27,0.03),0_14px_44px_rgba(24,24,27,0.07),inset_0_1px_0_rgba(255,255,255,0.55)] ring-1 ring-white/40 backdrop-blur-2xl">
             <div>
               <FieldLabel>API 地址</FieldLabel>
               <Input
@@ -700,7 +700,7 @@ export function VoicePage({ onBack }: { onBack: () => void }) {
               {modelPanelOpen && (
                 <div
                   data-model-panel
-                  className="absolute -left-4 -right-4 top-full z-30 mt-1 overflow-hidden rounded-[20px] border border-black/[0.06] bg-white/95 shadow-2xl ring-1 ring-black/[0.05] backdrop-blur-2xl"
+                  className="absolute -left-4 -right-4 top-full z-30 mt-1 overflow-hidden rounded-[20px] border border-white/50 bg-white/[0.85] shadow-[0_8px_32px_rgba(24,24,27,0.12),inset_0_1px_0_rgba(255,255,255,0.6)] ring-1 ring-white/40 backdrop-blur-2xl"
                 >
                     <div className="border-b border-black/[0.05] p-2">
                       <Input
@@ -850,7 +850,7 @@ export function VoicePage({ onBack }: { onBack: () => void }) {
         {/* 我的音色：自建音色库（名字 + 音色 ID，永久保存；联系人/聊天设置「他的声音」可选用）；紧跟连接配置下方 */}
         <section>
           <SectionLabel icon={AudioLines} tone={TONE_ORANGE}>我的音色</SectionLabel>
-          <div className="flex flex-col gap-3 rounded-[22px] bg-white/80 p-4 shadow-[0_2px_12px_rgba(0,0,0,0.04)] ring-1 ring-black/[0.05] backdrop-blur-2xl">
+          <div className="flex flex-col gap-3 rounded-[24px] bg-white/[0.66] p-4 shadow-[0_2px_8px_rgba(24,24,27,0.03),0_14px_44px_rgba(24,24,27,0.07),inset_0_1px_0_rgba(255,255,255,0.55)] ring-1 ring-white/40 backdrop-blur-2xl">
             <p className="text-[12px] leading-relaxed text-zinc-500/80">
               常用音色存成 preset（名字 + 音色 ID），联系人/聊天设置「他的声音」可点选使用。
             </p>
@@ -963,7 +963,7 @@ export function VoicePage({ onBack }: { onBack: () => void }) {
             服务端仅作可选兑底（OpenAI 兼容，配置后启用） */}
         <section>
           <SectionLabel icon={MessageSquareText} tone={TONE_GREEN}>语音识别 STT（转文字）</SectionLabel>
-          <div className="flex flex-col gap-3 rounded-[22px] bg-white/80 p-4 shadow-[0_2px_12px_rgba(0,0,0,0.04)] ring-1 ring-black/[0.05] backdrop-blur-2xl">
+          <div className="flex flex-col gap-3 rounded-[24px] bg-white/[0.66] p-4 shadow-[0_2px_8px_rgba(24,24,27,0.03),0_14px_44px_rgba(24,24,27,0.07),inset_0_1px_0_rgba(255,255,255,0.55)] ring-1 ring-white/40 backdrop-blur-2xl">
             {/* 识别主通道：Web Speech（浏览器原生实时识别）——提示精简为一行 */}
             <div className="flex items-center justify-between gap-3">
               <div className="min-w-0">

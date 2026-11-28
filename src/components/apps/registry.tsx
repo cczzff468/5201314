@@ -421,6 +421,8 @@ const APP_DEFS: AppDef[] = [
     image: '/icons/settings.png',
     glyph: <SettingsIcon className={GLYPH_CLASS} strokeWidth={GLYPH_STROKE} />,
     component: SettingsApp,
+    // v2.4.37 液态玻璃窗：壁纸透过整窗柔光可见（与 App Store/时钟同款通透感）
+    glassWindow: true,
   },
   {
     id: 'themes',

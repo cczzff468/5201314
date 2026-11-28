@@ -36,7 +36,7 @@ function SheetOverlay({
     <SheetPrimitive.Overlay
       data-slot="sheet-overlay"
       className={cn(
-        "data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 fixed inset-0 z-50 bg-black/25",
+        "data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 fixed inset-0 z-50 bg-black/45 backdrop-blur-md",
         className
       )}
       {...props}
@@ -58,7 +58,7 @@ function SheetContent({
       <SheetPrimitive.Content
         data-slot="sheet-content"
         className={cn(
-          "data-[state=open]:animate-in data-[state=closed]:animate-out fixed z-50 flex flex-col gap-4 border border-white/60 bg-white/90 shadow-[0_-8px_40px_rgba(24,24,27,0.14),inset_0_1px_0_rgba(255,255,255,0.6)] backdrop-blur-2xl transition ease-in-out data-[state=closed]:duration-300 data-[state=open]:duration-500 dark:border-white/10 dark:bg-zinc-900/90 dark:shadow-[0_-8px_40px_rgba(0,0,0,0.4),inset_0_1px_0_rgba(255,255,255,0.08)]",
+          "data-[state=open]:animate-in data-[state=closed]:animate-out fixed z-50 flex flex-col gap-4 border border-white/50 bg-white/[0.82] shadow-[0_-8px_40px_rgba(24,24,27,0.12),inset_0_1px_0_rgba(255,255,255,0.6)] backdrop-blur-2xl transition ease-in-out data-[state=closed]:duration-300 data-[state=open]:duration-500 dark:border-white/10 dark:bg-zinc-900/[0.86] dark:shadow-[0_-8px_40px_rgba(0,0,0,0.4),inset_0_1px_0_rgba(255,255,255,0.08)]",
           side === "right" &&
             "data-[state=closed]:slide-out-to-right data-[state=open]:slide-in-from-right inset-y-0 right-0 h-full w-3/4 border-l sm:max-w-sm",
           side === "left" &&

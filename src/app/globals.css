@@ -2000,57 +2000,97 @@ html[data-app-native] * {
 }
 
 /* ============================================================
- * 液态玻璃（Liquid Glass）全局设计语言 · v2.4.36
- * 机主全局令：全 App 统一「液态玻璃 + 毛玻璃 + 极简胶囊」质感——
- * 卡片/面板半透明 + blur(20px) + 极细白色描边 + 弥散柔光晕阴影；
- * 按钮一律 999px 胶囊；操作反馈统一屏幕中央液态玻璃胶囊（2s 自动消失）。
+ * 液态玻璃（Liquid Glass）全局设计语言 · v2.4.37 全站通透重構
+ * 机主全局令：全站（不只设置）统一「液体玻璃」——卡片/弹窗半透明 +
+ * blur(30px) saturate(180%) 高模糊高饱和 + 1px 极细白半透明描边
+ * （rgba(255,255,255,0.4) 玻璃边缘反光）+ 大圆角 24px + 颜色极浅的
+ * 弥散阴影（悬浮感）+ 顶部高光反射；弹窗背景加黑色半透明遮罩（背景
+ * 模糊）聚焦弹窗；按钮一律 999px 胶囊；操作反馈统一屏幕中央液态玻璃
+ * 胶囊（2s 自动消失）。
  * ============================================================ */
+
+/* ---- 0) 全站玻璃材质统一（机主 v2.4.37 令：所有界面） ----
+ * 以下规则【不写在 @layer 里】：未分层样式在层叠上永远压过 Tailwind
+ * utilities 层，等效全局 !important 但不污染源码——
+ * ① 高模糊统一：所有 backdrop-blur-xl/2xl/3xl 表面统一为
+ *    blur(30px) saturate(180%) 液体玻璃材质（只改写 --tw-backdrop-blur
+ *    变量，与元素上其它 backdrop-* 工具（亮度/饱和）仍正确合成，
+ *    不会整条覆盖 backdrop-filter 丢失其它滤镜）；
+ * ② 玻璃边缘反光：全站卡片原「黑色低透明 hairline」
+ *    （ring-black/[0.03..0.07]/ring-black/5）统一换为 1px 极细白色
+ *    半透明描边 rgba(255,255,255,0.4)，模拟玻璃边缘反光（深色模式
+ *    自动降至 0.12 防刺眼）；只改写 --tw-ring-color 变量，ring 宽度
+ *    （ring-1/ring-2）与 box-shadow 合成不受影响。 */
+.backdrop-blur-xl,
+.backdrop-blur-2xl,
+.backdrop-blur-3xl {
+  --tw-backdrop-blur: blur(30px) saturate(1.8);
+}
+.ring-black\/\[0\.03\],
+.ring-black\/\[0\.04\],
+.ring-black\/\[0\.05\],
+.ring-black\/\[0\.06\],
+.ring-black\/\[0\.07\],
+.ring-black\/5 {
+  --tw-ring-color: rgba(255, 255, 255, 0.4);
+}
+.dark .ring-black\/\[0\.03\],
+.dark .ring-black\/\[0\.04\],
+.dark .ring-black\/\[0\.05\],
+.dark .ring-black\/\[0\.06\],
+.dark .ring-black\/\[0\.07\],
+.dark .ring-black\/5 {
+  --tw-ring-color: rgba(255, 255, 255, 0.12);
+}
 
 /* ---- 1) 液态玻璃面板基元（组合工具类，按需拼装） ---- */
 
-/* 液态玻璃底：白色半透明 + 20px 高斯模糊 + 饱和度提升 + 极细白描边 */
+/* 液态玻璃底：白色半透明 + 30px 高斯模糊 + 180% 饱和提升 + 1px 白描边 */
 .liquid-glass {
-  background: rgba(255, 255, 255, 0.62);
-  -webkit-backdrop-filter: blur(20px) saturate(1.65);
-  backdrop-filter: blur(20px) saturate(1.65);
-  border: 1px solid rgba(255, 255, 255, 0.5);
+  background: rgba(255, 255, 255, 0.5);
+  -webkit-backdrop-filter: blur(30px) saturate(1.8);
+  backdrop-filter: blur(30px) saturate(1.8);
+  border: 1px solid rgba(255, 255, 255, 0.4);
 }
 .dark .liquid-glass {
   background: rgba(28, 28, 32, 0.58);
-  border-color: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.12);
 }
 
-/* 液态玻璃卡：玻璃底 + 弥散柔光晕阴影（替代生硬纯黑投影） + 大圆角 */
+/* 液态玻璃卡：玻璃底 + 大圆角 24px + 极浅弥散阴影（悬浮感）+ 顶部高光反射 */
 .liquid-card {
-  background: rgba(255, 255, 255, 0.62);
-  -webkit-backdrop-filter: blur(20px) saturate(1.65);
-  backdrop-filter: blur(20px) saturate(1.65);
-  border: 1px solid rgba(255, 255, 255, 0.5);
+  background: rgba(255, 255, 255, 0.5);
+  -webkit-backdrop-filter: blur(30px) saturate(1.8);
+  backdrop-filter: blur(30px) saturate(1.8);
+  border: 1px solid rgba(255, 255, 255, 0.4);
   border-radius: 24px;
   box-shadow:
-    0 2px 6px rgba(24, 24, 27, 0.03),
-    0 12px 40px rgba(24, 24, 27, 0.07),
-    inset 0 1px 0 rgba(255, 255, 255, 0.55);
+    0 2px 8px rgba(24, 24, 27, 0.03),
+    0 14px 44px rgba(24, 24, 27, 0.07),
+    inset 0 1px 0 rgba(255, 255, 255, 0.55),
+    inset 0 -1px 0 rgba(255, 255, 255, 0.08);
 }
 .dark .liquid-card {
   background: rgba(28, 28, 32, 0.58);
-  border-color: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.12);
   box-shadow:
-    0 2px 6px rgba(0, 0, 0, 0.18),
-    0 12px 40px rgba(0, 0, 0, 0.32),
+    0 2px 8px rgba(0, 0, 0, 0.18),
+    0 14px 44px rgba(0, 0, 0, 0.32),
     inset 0 1px 0 rgba(255, 255, 255, 0.07);
 }
 
 /* 弥散柔光晕阴影（挂在已有卡片上即可替换生硬黑影） */
 .glow-soft {
   box-shadow:
-    0 2px 6px rgba(24, 24, 27, 0.03),
-    0 12px 40px rgba(24, 24, 27, 0.07) !important;
+    0 2px 8px rgba(24, 24, 27, 0.03),
+    0 14px 44px rgba(24, 24, 27, 0.07),
+    inset 0 1px 0 rgba(255, 255, 255, 0.55) !important;
 }
 .dark .glow-soft {
   box-shadow:
-    0 2px 6px rgba(0, 0, 0, 0.18),
-    0 12px 40px rgba(0, 0, 0, 0.32) !important;
+    0 2px 8px rgba(0, 0, 0, 0.18),
+    0 14px 44px rgba(0, 0, 0, 0.32),
+    inset 0 1px 0 rgba(255, 255, 255, 0.07) !important;
 }
 
 /* ---- 2) 中央液态玻璃胶囊 Toast（全局操作反馈统一通道） ----
@@ -2087,11 +2127,11 @@ ol[data-sonner-toaster] {
   transform: none !important;
   left: auto !important;
   padding: 11px 20px !important;
-  background: rgba(255, 255, 255, 0.66) !important;
-  border: 1px solid rgba(255, 255, 255, 0.55) !important;
+  background: rgba(255, 255, 255, 0.6) !important;
+  border: 1px solid rgba(255, 255, 255, 0.45) !important;
   color: rgba(24, 24, 27, 0.94) !important;
-  -webkit-backdrop-filter: blur(20px) saturate(1.7) !important;
-  backdrop-filter: blur(20px) saturate(1.7) !important;
+  -webkit-backdrop-filter: blur(30px) saturate(1.8) !important;
+  backdrop-filter: blur(30px) saturate(1.8) !important;
   box-shadow:
     0 4px 12px rgba(24, 24, 27, 0.06),
     0 16px 48px rgba(24, 24, 27, 0.14),

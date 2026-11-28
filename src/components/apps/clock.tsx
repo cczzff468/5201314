@@ -3,7 +3,7 @@
 /**
  * 时钟 App（世界时钟 / 闹钟 / 秒表 / 计时器）· 毛玻璃胶囊视觉版
  * 页面底色浅 #F7F7FA→#EFEFF4 渐变 / 深 #141418→#0E0E12；卡片一律大圆角毛玻璃
- * （rounded-[24px~28px] + bg-white/70 + ring-black/[0.05] + backdrop-blur-2xl），
+ * （rounded-[24px~28px] + bg-white/[0.62] + 1px 白半透明描边 + blur(30px) saturate(180%)），
  * 按钮全部胶囊化，底部 tab 为浮起毛玻璃胶囊条（选中项白胶囊浮起）。
  * 指针/数字/引擎逻辑零改动。
  */
@@ -163,12 +163,12 @@ function BottomSheet({ onClose, children }: { onClose: () => void; children: Rea
       <button
         aria-label="关闭面板"
         onClick={onClose}
-        className={`absolute inset-0 bg-black/50 transition-opacity duration-300 ${shown ? 'opacity-100' : 'opacity-0'}`}
+        className={`absolute inset-0 bg-black/45 backdrop-blur-md transition-opacity duration-300 ${shown ? 'opacity-100' : 'opacity-0'}`}
       />
       <div
         role="dialog"
         aria-modal="true"
-        className={`absolute inset-x-0 bottom-0 rounded-t-[28px] border-t border-black/[0.05] bg-background/90 shadow-2xl backdrop-blur-2xl transition-transform duration-300 ease-out dark:border-white/[0.08] ${
+        className={`absolute inset-x-0 bottom-0 rounded-t-[28px] border-t border-white/60 bg-[#F2F2F7]/[0.88] shadow-[0_-8px_40px_rgba(24,24,27,0.12),inset_0_1px_0_rgba(255,255,255,0.6)] backdrop-blur-2xl transition-transform duration-300 ease-out dark:border-white/[0.08] dark:bg-[#1C1C1E]/[0.92] ${
           shown ? 'translate-y-0' : 'translate-y-full'
         }`}
       >
@@ -487,7 +487,7 @@ function WorldClockView({
     <div className="relative flex h-full flex-col">
       <div className="thin-scrollbar flex-1 overflow-y-auto pb-16">
         {/* 英雄时钟：指针表盘 + 大数字本地时间 */}
-        <div className="mx-4 mt-2 mb-3 overflow-hidden rounded-[28px] bg-white/70 shadow-[0_2px_12px_rgba(0,0,0,0.035)] ring-1 ring-black/[0.05] backdrop-blur-2xl dark:bg-white/[0.06] dark:ring-white/[0.08]">
+        <div className="mx-4 mt-2 mb-3 overflow-hidden rounded-[28px] bg-white/[0.62] shadow-[0_2px_8px_rgba(24,24,27,0.03),0_14px_44px_rgba(24,24,27,0.07),inset_0_1px_0_rgba(255,255,255,0.55)] ring-1 ring-black/[0.05] backdrop-blur-2xl dark:bg-white/[0.07] dark:ring-white/[0.08]">
           <div className="flex flex-col items-center px-4 pb-6 pt-7">
             <AnalogClockFace h={localH} m={localM} s={localS} size={176} detailed />
             <div className="mt-5 flex items-baseline gap-1.5">
@@ -504,7 +504,7 @@ function WorldClockView({
         {cities.length === 0 ? (
           <div className="pt-16 text-center text-[14px] text-muted-foreground">正在加载世界时钟…</div>
         ) : (
-          <div className="mx-4 mt-1 divide-y divide-black/[0.05] overflow-hidden rounded-[24px] bg-white/70 shadow-[0_2px_12px_rgba(0,0,0,0.035)] ring-1 ring-black/[0.05] backdrop-blur-2xl dark:divide-white/[0.06] dark:bg-white/[0.06] dark:ring-white/[0.08]">
+          <div className="mx-4 mt-1 divide-y divide-black/[0.05] overflow-hidden rounded-[24px] bg-white/[0.62] shadow-[0_2px_8px_rgba(24,24,27,0.03),0_14px_44px_rgba(24,24,27,0.07),inset_0_1px_0_rgba(255,255,255,0.55)] ring-1 ring-black/[0.05] backdrop-blur-2xl dark:divide-white/[0.06] dark:bg-white/[0.06] dark:ring-white/[0.08]">
             {cities.map((c) => (
               <CityRow key={c.id} city={c} now={now} onLongPress={setSheetCity} />
             ))}
@@ -595,7 +595,7 @@ function AlarmEditorSheet({
           value={label}
           onChange={(e) => setLabel(e.target.value)}
           placeholder="标签"
-          className="mt-3 h-11 rounded-full bg-white/70 ring-1 ring-black/[0.05] backdrop-blur-2xl dark:bg-white/[0.06] dark:ring-white/[0.08]"
+          className="mt-3 h-11 rounded-full bg-white/[0.62] ring-1 ring-black/[0.05] backdrop-blur-2xl dark:bg-white/[0.06] dark:ring-white/[0.08]"
         />
         <div className="mt-4 text-[13px] text-muted-foreground">重复</div>
         <div className="mt-2 flex flex-wrap gap-2">
@@ -687,7 +687,7 @@ function AlarmsView({
           <div className="flex flex-col items-center gap-3 pt-24 text-muted-foreground">
             <span
               aria-hidden="true"
-              className="grid h-16 w-16 place-items-center rounded-full bg-white/70 shadow-[0_2px_12px_rgba(0,0,0,0.035)] ring-1 ring-black/[0.05] backdrop-blur-2xl dark:bg-white/[0.06] dark:ring-white/[0.08]"
+              className="grid h-16 w-16 place-items-center rounded-full bg-white/[0.62] shadow-[0_2px_8px_rgba(24,24,27,0.03),0_14px_44px_rgba(24,24,27,0.07),inset_0_1px_0_rgba(255,255,255,0.55)] ring-1 ring-black/[0.05] backdrop-blur-2xl dark:bg-white/[0.07] dark:ring-white/[0.08]"
             >
               <AlarmClock className="h-8 w-8" strokeWidth={1.2} />
             </span>
@@ -695,7 +695,7 @@ function AlarmsView({
             <div className="text-[13px]">点击右上角 + 新建</div>
           </div>
         ) : (
-          <div className="mx-4 mt-1 divide-y divide-black/[0.05] overflow-hidden rounded-[24px] bg-white/70 shadow-[0_2px_12px_rgba(0,0,0,0.035)] ring-1 ring-black/[0.05] backdrop-blur-2xl dark:divide-white/[0.06] dark:bg-white/[0.06] dark:ring-white/[0.08]">
+          <div className="mx-4 mt-1 divide-y divide-black/[0.05] overflow-hidden rounded-[24px] bg-white/[0.62] shadow-[0_2px_8px_rgba(24,24,27,0.03),0_14px_44px_rgba(24,24,27,0.07),inset_0_1px_0_rgba(255,255,255,0.55)] ring-1 ring-black/[0.05] backdrop-blur-2xl dark:divide-white/[0.06] dark:bg-white/[0.06] dark:ring-white/[0.08]">
             {alarms.map((a) => (
               <div key={a.id} className="flex items-center gap-3 py-[18px] pl-5 pr-4">
                 <button className="min-w-0 flex-1 text-left" onClick={() => setEditor(a)}>
@@ -807,7 +807,7 @@ function StopwatchView() {
     <div className="flex h-full flex-col">
       <div className="flex shrink-0 flex-col items-center px-6 pb-3 pt-4">
         {/* 秒进度表盘环（Apple Watch 同款）：一圈 = 60 秒，随百分秒平滑走动 */}
-        <div className="relative flex h-[204px] w-[204px] items-center justify-center rounded-full bg-white/70 shadow-[0_2px_12px_rgba(0,0,0,0.035)] ring-1 ring-black/[0.05] backdrop-blur-2xl dark:bg-white/[0.06] dark:ring-white/[0.08]">
+        <div className="relative flex h-[204px] w-[204px] items-center justify-center rounded-full bg-white/[0.62] shadow-[0_2px_8px_rgba(24,24,27,0.03),0_14px_44px_rgba(24,24,27,0.07),inset_0_1px_0_rgba(255,255,255,0.55)] ring-1 ring-black/[0.05] backdrop-blur-2xl dark:bg-white/[0.07] dark:ring-white/[0.08]">
           <svg viewBox="0 0 184 184" className="absolute inset-0 m-auto h-[184px] w-[184px] -rotate-90" aria-hidden="true">
             <circle cx="92" cy="92" r={SW_RING_R} fill="none" strokeWidth={4} className="stroke-border" />
             <circle
@@ -1040,7 +1040,7 @@ function TimerView() {
         </div>
       ) : (
         <div className="flex flex-1 flex-col items-center justify-center">
-          <div className="relative h-[244px] w-[244px] rounded-full bg-white/70 shadow-[0_2px_12px_rgba(0,0,0,0.035)] ring-1 ring-black/[0.05] backdrop-blur-2xl dark:bg-white/[0.06] dark:ring-white/[0.08]">
+          <div className="relative h-[244px] w-[244px] rounded-full bg-white/[0.62] shadow-[0_2px_8px_rgba(24,24,27,0.03),0_14px_44px_rgba(24,24,27,0.07),inset_0_1px_0_rgba(255,255,255,0.55)] ring-1 ring-black/[0.05] backdrop-blur-2xl dark:bg-white/[0.07] dark:ring-white/[0.08]">
             <svg viewBox="0 0 244 244" className="h-full w-full -rotate-90" aria-hidden="true">
               <circle cx="122" cy="122" r={RING_R} fill="none" strokeWidth={8} className="stroke-muted" />
               <circle
@@ -1097,7 +1097,12 @@ function TabBar({ tab, onChange }: { tab: number; onChange: (t: number) => void 
       aria-label="时钟分区"
       className="z-50 h-[80px] shrink-0 pb-[28px]"
     >
-      <div className="mx-3 flex h-[52px] items-stretch rounded-full bg-black/[0.04] p-[5px] shadow-[0_2px_12px_rgba(0,0,0,0.035)] ring-1 ring-black/[0.05] backdrop-blur-2xl dark:bg-white/[0.07] dark:ring-white/[0.08]">
+      {/* v2.4.37 真全透明液体玻璃胶囊：外层不再用灰色死板底色——纯玻璃材质
+          rgba(255,255,255,0.4) + backdrop-blur(20px) + 0.5px 极细白半透明描边
+          （玻璃边缘反光）+ 999px 完美胶囊；选中态为半透明白胶囊
+          rgba(255,255,255,0.8)（非纯白，玻璃透光）+ 淡弥散阴影；p-[5px] 均匀
+          内边距，四枚图标在胶囊内部完美居中 */}
+      <div className="mx-3 flex h-[52px] items-stretch rounded-full border-[0.5px] border-white/60 bg-white/40 p-[5px] backdrop-blur-[20px] dark:border-white/[0.14] dark:bg-white/[0.09]">
         {TABS.map((t, i) => {
           const active = i === tab;
           const Icon = t.icon;
@@ -1108,7 +1113,7 @@ function TabBar({ tab, onChange }: { tab: number; onChange: (t: number) => void 
               aria-current={active ? 'page' : undefined}
               className={`flex flex-1 flex-col items-center justify-center gap-[3px] rounded-full transition-colors ${
                 active
-                  ? 'bg-white text-foreground shadow-sm ring-1 ring-black/[0.04] dark:bg-white/[0.12] dark:text-white dark:ring-white/[0.08]'
+                  ? 'bg-white/80 text-foreground shadow-[0_4px_12px_rgba(0,0,0,0.05)] dark:bg-white/[0.18] dark:text-white'
                   : 'text-muted-foreground active:opacity-60'
               }`}
             >
@@ -1133,7 +1138,7 @@ export default function ClockApp() {
   const timerDone = useTimerStore((s) => s.phase === 'done');
 
   return (
-    <div className="relative flex h-full w-full flex-col overflow-hidden bg-[#F2F2F7]/[0.60] text-foreground backdrop-blur-2xl dark:bg-[#0E0E12]/[0.72]">
+    <div className="relative flex h-full w-full flex-col overflow-hidden bg-[#F2F2F7]/[0.60] text-foreground dark:bg-[#0E0E12]/[0.72]">
       <IOSNavBar
         title={TABS[tab].label}
         inline
@@ -1166,7 +1171,7 @@ export default function ClockApp() {
           <div className="text-[26px] font-semibold">计时完成</div>
           <button
             onClick={timerCancel}
-            className="rounded-full bg-white/70 px-10 py-3 text-[17px] text-foreground shadow-[0_2px_12px_rgba(0,0,0,0.035)] ring-1 ring-black/[0.05] backdrop-blur-2xl transition active:scale-[0.96] dark:bg-white/[0.06] dark:ring-white/[0.08]"
+            className="rounded-full bg-white/[0.62] px-10 py-3 text-[17px] text-foreground shadow-[0_2px_8px_rgba(24,24,27,0.03),0_14px_44px_rgba(24,24,27,0.07),inset_0_1px_0_rgba(255,255,255,0.55)] ring-1 ring-black/[0.05] backdrop-blur-2xl transition active:scale-[0.96] dark:bg-white/[0.07] dark:ring-white/[0.08]"
           >
             好
           </button>

@@ -86,7 +86,7 @@ export function AppUpdatePage({ onBack }: { onBack: () => void }) {
     <DetailShell title="APP 更新" onBack={onBack} gray>
       <div className="no-scrollbar flex-1 overflow-y-auto pb-8">
         {/* 当前版本 + 检查状态卡 */}
-        <div className="mx-4 mt-4 rounded-[22px] bg-white/80 p-4 text-[13px] leading-relaxed text-zinc-900 ring-1 ring-black/[0.05] shadow-[0_2px_12px_rgba(0,0,0,0.04)] backdrop-blur-2xl">
+        <div className="mx-4 mt-4 rounded-[24px] bg-white/[0.66] p-4 text-[13px] leading-relaxed text-zinc-900 shadow-[0_2px_8px_rgba(24,24,27,0.03),0_14px_44px_rgba(24,24,27,0.07),inset_0_1px_0_rgba(255,255,255,0.55)] ring-1 ring-white/40 backdrop-blur-2xl">
           <div className="flex items-center gap-3">
             <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-[13px] bg-gradient-to-br from-[#34C759] to-[#248A3D] shadow-[0_6px_16px_-5px_rgba(52,199,89,0.6)]">
               <Sparkles className="h-[22px] w-[22px] text-white" aria-hidden="true" />
@@ -186,7 +186,7 @@ export function AppUpdatePage({ onBack }: { onBack: () => void }) {
         </div>
 
         {/* 版本历史 */}
-        <div className="mx-4 mt-4 rounded-[22px] bg-white/80 p-4 text-zinc-900 ring-1 ring-black/[0.05] shadow-[0_2px_12px_rgba(0,0,0,0.04)] backdrop-blur-2xl">
+        <div className="mx-4 mt-4 rounded-[24px] bg-white/[0.66] p-4 text-zinc-900 shadow-[0_2px_8px_rgba(24,24,27,0.03),0_14px_44px_rgba(24,24,27,0.07),inset_0_1px_0_rgba(255,255,255,0.55)] ring-1 ring-white/40 backdrop-blur-2xl">
           <p className="text-[13px] font-medium">版本历史</p>
           <div className="mt-2 space-y-3">
             {(info?.notes ?? APP_RELEASE_NOTES).map((n, idx) => (
@@ -216,12 +216,12 @@ export function AppUpdatePage({ onBack }: { onBack: () => void }) {
       {/* v2.4.4 下载进度弹窗（点「立即更新/重新下载」即弹：百分比进度条 + 阶段指引） */}
       {dl ? (
         <div
-          className="absolute inset-0 z-[95] flex items-center justify-center bg-black/35 px-8 backdrop-blur-[2px]"
+          className="absolute inset-0 z-[95] flex items-center justify-center bg-black/45 px-8 backdrop-blur-md"
           role="dialog"
           aria-modal="true"
           aria-label="下载更新进度"
         >
-          <div className="w-full max-w-[320px] rounded-[22px] border border-black/[0.06] bg-white/95 p-5 text-zinc-900 shadow-[0_20px_50px_-12px_rgba(0,0,0,0.45)] backdrop-blur-2xl">
+          <div className="w-full max-w-[320px] rounded-[24px] border border-white/50 bg-white/[0.82] p-5 text-zinc-900 shadow-[0_4px_12px_rgba(24,24,27,0.05),0_24px_64px_rgba(24,24,27,0.16),inset_0_1px_0_rgba(255,255,255,0.6)] backdrop-blur-2xl">
             <ApkUpdateProgressCard
               state={dl}
               onRetry={doUpdate}

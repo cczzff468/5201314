@@ -60,7 +60,7 @@ const CHIPO =
   'rounded-full bg-black/[0.04] dark:bg-white/[0.07] px-3.5 py-2 text-[12.5px] font-medium text-zinc-600 dark:text-zinc-300 transition active:scale-95 disabled:opacity-40';
 
 /** 毛玻璃 AlertDialog 内容壳 + iOS 上下分区按钮样式 */
-const DLG = 'w-[300px] gap-0 rounded-[28px] border-0 bg-white/95 dark:bg-zinc-900/95 p-0 backdrop-blur-2xl sm:max-w-[300px]';
+const DLG = 'w-[300px] gap-0 rounded-[28px] border border-white/50 bg-white/[0.80] dark:bg-zinc-900/[0.85] p-0 shadow-[0_4px_12px_rgba(24,24,27,0.05),0_24px_64px_rgba(24,24,27,0.16),inset_0_1px_0_rgba(255,255,255,0.6)] backdrop-blur-2xl sm:max-w-[300px]';
 const DLG_CANCEL =
   'h-11 flex-1 rounded-none border-0 bg-transparent text-[14px] font-normal text-zinc-600 shadow-none hover:bg-transparent focus-visible:ring-0 active:bg-black/[0.04] dark:text-zinc-300 dark:active:bg-white/[0.06] sm:mt-0';
 const DLG_DIVIDER = 'w-px shrink-0 self-stretch bg-zinc-200/80 dark:bg-zinc-700';
@@ -1187,10 +1187,11 @@ export default function DataManager() {
         </>
       )}
 
-      {/* ============ 7) 底部悬浮搜索胶囊（多选时让位给操作栏；mt-auto 保证短内容也贴底） ============ */}
+      {/* ============ 7) 底部悬浮搜索胶囊（多选时让位给操作栏；mt-auto 保证短内容也贴底；
+          v2.4.37 机主令「往下一点」：吸附位 bottom-4→bottom-2 更贴底） ============ */}
       {!multiMode && (
-        <div className="sticky bottom-4 z-30 mt-auto px-4 pb-4 pt-2">
-          <div className="flex h-[50px] items-center gap-2.5 rounded-full bg-white/75 px-4 ring-1 ring-black/[0.05] shadow-[0_8px_28px_rgba(0,0,0,0.10)] backdrop-blur-2xl dark:bg-[#1C1C1E]/75 dark:ring-white/[0.08]">
+        <div className="sticky bottom-2 z-30 mt-auto px-4 pb-3 pt-2">
+          <div className="flex h-[50px] items-center gap-2.5 rounded-full bg-white/[0.68] px-4 ring-1 ring-black/[0.05] shadow-[0_8px_28px_rgba(0,0,0,0.10),inset_0_1px_0_rgba(255,255,255,0.6)] backdrop-blur-2xl dark:bg-[#1C1C1E]/75 dark:ring-white/[0.08]">
             <Search className="h-5 w-5 shrink-0 text-zinc-500 dark:text-zinc-400" aria-hidden />
             <input
               type="text"

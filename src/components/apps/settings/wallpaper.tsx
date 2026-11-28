@@ -83,7 +83,7 @@ export function WallpaperPage({ onBack }: { onBack: () => void }) {
           })}
         </div>
 
-        <label className="flex h-11 cursor-pointer items-center justify-center gap-2 rounded-full bg-white/80 text-[15px] font-medium text-zinc-900 shadow-[0_2px_12px_rgba(0,0,0,0.04)] ring-1 ring-black/[0.05] backdrop-blur-2xl transition-all active:scale-[0.96]">
+        <label className="flex h-11 cursor-pointer items-center justify-center gap-2 rounded-full bg-white/[0.72] text-[15px] font-medium text-zinc-900 shadow-[0_2px_8px_rgba(24,24,27,0.03),0_14px_44px_rgba(24,24,27,0.07),inset_0_1px_0_rgba(255,255,255,0.55)] ring-1 ring-white/40 backdrop-blur-2xl transition-all active:scale-[0.96]">
           <Upload className="h-4 w-4" />
           上传自定义壁纸
           <input type="file" accept="image/*" className="hidden" onChange={handleUpload} />

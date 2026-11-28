@@ -598,7 +598,7 @@ export function ImageGenPage({ onBack }: { onBack: () => void }) {
                   {modelPanelOpen && (
                     <div
                       data-model-panel
-                      className="absolute -left-4 -right-4 top-full z-30 mt-1 overflow-hidden rounded-[20px] border border-black/[0.06] bg-white/95 shadow-2xl ring-1 ring-black/[0.05] backdrop-blur-2xl"
+                      className="absolute -left-4 -right-4 top-full z-30 mt-1 overflow-hidden rounded-[20px] border border-white/50 bg-white/[0.85] shadow-[0_8px_32px_rgba(24,24,27,0.12),inset_0_1px_0_rgba(255,255,255,0.6)] ring-1 ring-white/40 backdrop-blur-2xl"
                     >
                         <div className="border-b border-black/[0.05] p-2">
                           <Input

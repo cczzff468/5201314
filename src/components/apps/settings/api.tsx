@@ -448,7 +448,7 @@ export function ApiPage({ onBack }: { onBack: () => void }) {
           >
             连接配置
           </SectionLabel>
-          <div className="flex flex-col gap-4 rounded-[22px] bg-white/80 p-4 shadow-[0_2px_12px_rgba(0,0,0,0.04)] ring-1 ring-black/[0.05] backdrop-blur-2xl">
+          <div className="flex flex-col gap-4 rounded-[24px] bg-white/[0.66] p-4 shadow-[0_2px_8px_rgba(24,24,27,0.03),0_14px_44px_rgba(24,24,27,0.07),inset_0_1px_0_rgba(255,255,255,0.55)] ring-1 ring-white/40 backdrop-blur-2xl">
             {/* API 地址 */}
             <div>
               <FieldLabel>API 地址</FieldLabel>
@@ -533,7 +533,7 @@ export function ApiPage({ onBack }: { onBack: () => void }) {
               {modelPanelOpen && (
                 <div
                   data-model-panel
-                  className="absolute -left-4 -right-4 top-full z-30 mt-1 overflow-hidden rounded-[20px] border border-black/[0.06] bg-white/95 shadow-2xl ring-1 ring-black/[0.05] backdrop-blur-2xl"
+                  className="absolute -left-4 -right-4 top-full z-30 mt-1 overflow-hidden rounded-[20px] border border-white/50 bg-white/[0.85] shadow-[0_8px_32px_rgba(24,24,27,0.12),inset_0_1px_0_rgba(255,255,255,0.6)] ring-1 ring-white/40 backdrop-blur-2xl"
                 >
                     <div className="border-b border-black/[0.05] p-2">
                       <Input
@@ -740,7 +740,7 @@ export function ApiPage({ onBack }: { onBack: () => void }) {
           >
             备用渠道
           </SectionLabel>
-          <div className="flex flex-col gap-4 rounded-[22px] bg-white/80 p-4 shadow-[0_2px_12px_rgba(0,0,0,0.04)] ring-1 ring-black/[0.05] backdrop-blur-2xl">
+          <div className="flex flex-col gap-4 rounded-[24px] bg-white/[0.66] p-4 shadow-[0_2px_8px_rgba(24,24,27,0.03),0_14px_44px_rgba(24,24,27,0.07),inset_0_1px_0_rgba(255,255,255,0.55)] ring-1 ring-white/40 backdrop-blur-2xl">
             <p className="text-[12px] leading-relaxed text-zinc-500">
               主渠道请求失败（连接不上 / 鉴权失败 / 限流等）且本轮还没有内容产出时，自动按顺序改用下面配置的备用渠道重发，消息照常送达；温度与最大 Token 沿用主渠道。
             </p>

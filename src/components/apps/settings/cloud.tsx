@@ -203,7 +203,7 @@ export const CLOUD_BTN_BLUE_CLS =
 
 /** 云端助手 · 表单分组卡（v23 毛玻璃胶囊统一：与 GrayCard 同配方 + 独立行距） */
 export const CLOUD_CARD_CLS =
-  'flex flex-col gap-4 rounded-[24px] bg-white/80 p-4 shadow-[0_2px_12px_rgba(0,0,0,0.04)] ring-1 ring-black/[0.05] backdrop-blur-2xl';
+  'flex flex-col gap-4 rounded-[24px] bg-white/[0.66] p-4 shadow-[0_2px_8px_rgba(24,24,27,0.03),0_14px_44px_rgba(24,24,27,0.07),inset_0_1px_0_rgba(255,255,255,0.55)] ring-1 ring-white/40 backdrop-blur-2xl';
 
 /** 云端助手 · 结果提示框（绿=成功 / 红=失败） */
 export const CLOUD_OK_BOX_CLS =

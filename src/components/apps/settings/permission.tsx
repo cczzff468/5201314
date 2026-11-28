@@ -850,7 +850,7 @@ export function PermissionHubPage({ onBack }: { onBack: () => void }) {
     <DetailShell title="权限给予" onBack={onBack} gray>
       <div className="no-scrollbar flex-1 overflow-y-auto pb-8">
         {/* 说明卡（v1.9.40 精简为一行） */}
-        <div className="mx-1 mt-4 rounded-[22px] bg-white/80 p-4 text-[13px] leading-relaxed ring-1 ring-black/[0.05] backdrop-blur-2xl">
+        <div className="mx-1 mt-4 rounded-[24px] bg-white/[0.66] p-4 text-[13px] leading-relaxed shadow-[0_2px_8px_rgba(24,24,27,0.03),0_14px_44px_rgba(24,24,27,0.07),inset_0_1px_0_rgba(255,255,255,0.55)] ring-1 ring-white/40 backdrop-blur-2xl">
           <p className="text-zinc-500">
             点权限行即可开启（真机自动跳系统授权页，浏览器里记网页授权）；AI 动手能力始终开启——你让 TA 做什么就做什么，TA 也会按人设与记忆主动帮你。
           </p>
@@ -870,7 +870,7 @@ export function PermissionHubPage({ onBack }: { onBack: () => void }) {
         }>
           基础权限
         </SectionLabel>
-        <div className="mx-1 divide-y divide-black/[0.05] overflow-hidden rounded-[22px] bg-white/80 shadow-[0_2px_12px_rgba(0,0,0,0.04)] ring-1 ring-black/[0.05] backdrop-blur-2xl">
+        <div className="mx-1 divide-y divide-black/[0.05] overflow-hidden rounded-[24px] bg-white/[0.66] shadow-[0_2px_8px_rgba(24,24,27,0.03),0_14px_44px_rgba(24,24,27,0.07),inset_0_1px_0_rgba(255,255,255,0.55)] ring-1 ring-white/40 backdrop-blur-2xl">
           {PERM_DEFS.map((d) => (
             <PermissionRow key={d.key} def={d} state={permStates[d.key] ?? 'checking'} onClick={() => setDialogPerm(d)} />
           ))}
@@ -878,7 +878,7 @@ export function PermissionHubPage({ onBack }: { onBack: () => void }) {
 
         {/* ===== 时长数据源（v2.0.0 去 Shizuku：UsageStats 恒走原生系统账本，无模式可选，纯展示） ===== */}
         <SectionLabel icon={Cpu} tone="#FF9500">时长数据源</SectionLabel>
-        <div className="mx-1 divide-y divide-black/[0.05] overflow-hidden rounded-[22px] bg-white/80 shadow-[0_2px_12px_rgba(0,0,0,0.04)] ring-1 ring-black/[0.05] backdrop-blur-2xl">
+        <div className="mx-1 divide-y divide-black/[0.05] overflow-hidden rounded-[24px] bg-white/[0.66] shadow-[0_2px_8px_rgba(24,24,27,0.03),0_14px_44px_rgba(24,24,27,0.07),inset_0_1px_0_rgba(255,255,255,0.55)] ring-1 ring-white/40 backdrop-blur-2xl">
           <div className="flex min-h-[52px] items-center gap-3 px-4 py-2">
             <LineIcon icon={Cpu} />
             <span className="min-w-0 flex-1">
@@ -893,7 +893,7 @@ export function PermissionHubPage({ onBack }: { onBack: () => void }) {
 
         {/* ===== AI 动手范围 ===== */}
         <SectionLabel icon={MousePointerClick} tone="#FF2D55">AI 动手范围</SectionLabel>
-        <div className="mx-1 divide-y divide-black/[0.05] overflow-hidden rounded-[22px] bg-white/80 shadow-[0_2px_12px_rgba(0,0,0,0.04)] ring-1 ring-black/[0.05] backdrop-blur-2xl" role="radiogroup" aria-label="AI 动手范围">
+        <div className="mx-1 divide-y divide-black/[0.05] overflow-hidden rounded-[24px] bg-white/[0.66] shadow-[0_2px_8px_rgba(24,24,27,0.03),0_14px_44px_rgba(24,24,27,0.07),inset_0_1px_0_rgba(255,255,255,0.55)] ring-1 ring-white/40 backdrop-blur-2xl" role="radiogroup" aria-label="AI 动手范围">
           <ModeRadioRow
             icon={AppWindow}
             label="网站里面"

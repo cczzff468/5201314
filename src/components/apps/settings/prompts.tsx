@@ -579,7 +579,7 @@ export function PromptEntriesPage({ onBack }: { onBack: () => void }) {
 
         {/* 多选批量操作条 */}
         {selectMode && selCount > 0 && (
-          <div className="sticky top-0 z-10 mb-2.5 flex items-center gap-2 rounded-full bg-white/95 px-4 py-2 shadow-[0_4px_18px_rgba(17,24,39,0.12)] ring-1 ring-black/[0.05]">
+          <div className="sticky top-0 z-10 mb-2.5 flex items-center gap-2 rounded-full bg-white/[0.82] px-4 py-2 shadow-[0_4px_18px_rgba(17,24,39,0.10),inset_0_1px_0_rgba(255,255,255,0.6)] ring-1 ring-white/40">
             <span className="shrink-0 text-[12px] font-medium">已选 {selCount} 组</span>
             <span className="ml-auto flex items-center gap-1.5">
               <button type="button" onClick={() => batchEnable(true)} className="rounded-full bg-[#34C759] px-3 py-1 text-[11px] font-medium text-white transition-colors active:opacity-80">

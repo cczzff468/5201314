@@ -100,10 +100,13 @@ export default function SettingsApp() {
 
   return (
     <div className="contents" style={SETTINGS_LIGHT_TOKENS}>
-      <IOSScreen className="relative">
-        {/* v2.4.36 液态玻璃改版：RootPage 常驻挂载——子页全部经共享 DetailShell 以底部
-            弹层浮在其上（不再整页替换），主列表的滚动位置与各弹窗开关状态在开关子页
-            期间全程保留（iOS 导航栈感）；RootPage 只读设置与本地状态，常驻挂载无副作用 */}
+      {/* v2.4.37 液态玻璃窗：settings 入 registry glassWindow——窗口层捕掉不透明底，
+          壁纸透过整窗柔光可见（与 App Store/时钟同款）；IOSScreen 自带半透明玻璃底
+          （bg-[#F2F2F7]/[0.60]! 覆盖默认 bg-background；SETTINGS-THEME 恒浅色，不挂
+          dark 变体）。子页全部经共享 DetailShell 以【独立整页】右滑入场景浮在其上
+          （不再底部弹层），主列表的滚动位置与各弹窗开关状态在开关子页期间全程保留
+          （iOS 导航栈感）；RootPage 只读设置与本地状态 */}
+      <IOSScreen className="relative bg-[#F2F2F7]/[0.60]!">
         <RootPage onOpen={setPage} />
         {page === 'account' && <AccountSwitchPage onBack={() => setPage('root')} />}
         {page === 'profile' && <ProfilePage onBack={() => setPage('root')} />}

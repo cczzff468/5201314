@@ -54,7 +54,7 @@ import {
  *  SETTINGS-THEME：恒浅色玻璃白，不随深色主题变黑 */
 export function FontListCard({ children }: { children: ReactNode }) {
   return (
-    <div className="divide-y divide-black/[0.05] overflow-hidden rounded-[22px] bg-white/80 shadow-[0_2px_12px_rgba(0,0,0,0.04)] ring-1 ring-black/[0.05] backdrop-blur-2xl">
+    <div className="divide-y divide-black/[0.05] overflow-hidden rounded-[24px] bg-white/[0.66] shadow-[0_2px_8px_rgba(24,24,27,0.03),0_14px_44px_rgba(24,24,27,0.07),inset_0_1px_0_rgba(255,255,255,0.55)] ring-1 ring-white/40 backdrop-blur-2xl">
       {children}
     </div>
   );
@@ -355,7 +355,7 @@ export function FontPage({ onBack }: { onBack: () => void }) {
                   data-testid="font-upload"
                   onClick={() => fileInputRef.current?.click()}
                   disabled={uploading}
-                  className="flex items-center gap-2 rounded-[14px] bg-white/80 px-4 py-2.5 text-[14px] text-zinc-900 shadow-[0_2px_10px_rgba(17,24,39,0.05)] ring-1 ring-black/[0.05] backdrop-blur-xl transition-all active:scale-[0.97] disabled:opacity-60"
+                  className="flex items-center gap-2 rounded-[14px] bg-white/[0.72] px-4 py-2.5 text-[14px] text-zinc-900 shadow-[0_2px_8px_rgba(24,24,27,0.03),0_14px_44px_rgba(24,24,27,0.07),inset_0_1px_0_rgba(255,255,255,0.55)] ring-1 ring-white/40 backdrop-blur-xl transition-all active:scale-[0.97] disabled:opacity-60"
                 >
                   {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
                   {uploading ? '导入中…' : '导入字体文件（.ttf / .otf / .woff / .woff2）'}
