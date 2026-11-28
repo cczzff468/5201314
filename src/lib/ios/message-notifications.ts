@@ -1,30 +1,27 @@
 'use client';
 
 /**
- * AI 消息系统通知模块（第四十八轮 v2.4.29·合并排版重做）。
+ * AI 消息系统通知模块（v2.4.30·一消息一弹窗重构）。
  *
- * 机主规格（原文逐条落实）：
- * 一、排版
- *  - 绝不把多条消息的文本无缝拼接成一大段；
- *  - 单条通知：正文就是那一条消息（超长省略号，展开见全文）；
- *  - 连发多条（5s 内的突发批次）：合并为一条通知——标题「角色名：发来了 N 条新消息」，
- *    副标题预览最后一条消息（如「再说一个嘛…」）；同批次后续消息到达时原地更新同一条
- *    通知（计数 +1、预览换成最新），不再一条消息弹一条刷屏。
- * 二、头像
- *  - 通知大图标 = 当前聊天角色头像（island-notify 传入的 avatar：路径转绝对 URL 由原生
- *    侧下载，dataURL 直接解码）；小图标 = App 自有单色图标（原生 ic_stat_cove）。
- *  - 大文本展开（BigTextStyle）由原生 localNotify 渲染：下拉通知栏可见完整最新一条消息。
- * 三、通道与点击直达
- *  - Android 原生 IMPORTANCE_HIGH 渠道（弹横幅、响铃、震动）；
- *  - 点击携带 target（{app, contactId}）→ 原生 contentIntent → 回传 local-notify-open
- *    → navigateFromSystemNotify 精确跳到对应聊天界面。
+ * 机主规格（第四十九轮，推翻 v2.4.29 的合并排版）：
+ * 一、AI 每发一条独立的消息，系统就弹一条独立的横幅通知——绝不合并、绝不原地更新：
+ *  - 每条消息的通知 tag = `msg-<消息id>`（id 全局唯一 → Android (tag,id) 对唯一，
+ *    系统层面绝不互相覆盖/合并）；通知 int id 用消息 id 的稳定哈希（同 id 复算同值）；
+ *  - 标题 = 角色名，正文 = 该条消息本身（超长由系统省略号折叠，下拉 BigTextStyle 全文）。
+ * 二、通知图标：
+ *  - 大图标 = 机主在 设置›APP图标 里选择的那一枚图标（appIcon 参数：原生侧下载解码）；
+ *  - 小图标 = 原生 ic_stat_cove（状态栏单色气泡）。
+ * 三、触发口径：只有 APP 在后台才弹系统通知（前台由应用内灵动岛横幅展示，
+ *  点进 APP 聊天页即可看到完整消息，不需要一条条重新显示）。
  *
  * 入口：island-notify.maybeWebNotification 原生分支（信息/微信/QQ 三端 AI 消息投递共用）。
  */
 
-/** 消息通知请求（id 必填：每条消息入队去重；同批突发共用一个通知 tag） */
+import { useSettings } from './store';
+
+/** 消息通知请求（id 必填：每条消息一条独立通知） */
 export interface MessageNotificationReq {
-  /** 消息唯一 ID（去重用：同一消息绝不弹第二条） */
+  /** 消息唯一 ID（通知 tag 与去重键：同一消息绝不弹第二条） */
   id: string;
   /** 通知标题（角色名） */
   title: string;
@@ -32,7 +29,7 @@ export interface MessageNotificationReq {
   body: string;
   /** 点击跳转目标（app + contactId；null = 仅打开 App） */
   target?: { app: string; contactId?: string } | null;
-  /** 角色头像（路径 / dataURL；原生侧作通知大图标） */
+  /** 角色头像（路径 / dataURL；原生侧作通知大图标的回落） */
   avatar?: string | null;
 }
 
@@ -48,7 +45,6 @@ function hashId(s: string): number {
 
 /* ---------------- 串行队列（并发不被吞） ---------------- */
 
-/** 串行链：所有过桥调用按到达顺序逐条执行（前一条 settle 才发下一条） */
 let chain: Promise<void> = Promise.resolve();
 
 /** 已入队/已发送的消息 id 去重（同一消息绝不重复弹两条） */
@@ -57,41 +53,9 @@ const sentIds = new Set<string>();
 /** 队列指标（设置页/调试可读：当前积压 + 累计发送） */
 export const notifyStats = { queued: 0, sent: 0 };
 
-/* ---------------- 突发批次合并（v2.4.29 机主规格） ---------------- */
+/* ---------------- 图标规范化（原生侧下载/解码） ---------------- */
 
-/** 同一会话两条消息间隔 ≤ 该值视为同一突发批次：合并进同一条通知（计数 +1、预览换最新） */
-const BURST_WINDOW_MS = 5_000;
-
-interface BurstState {
-  /** 本批次的通知 tag（msg- 前缀：cancelAllMessageNotifications 按前缀批量撤销） */
-  tag: string;
-  /** 批次内消息条数（含首条） */
-  count: number;
-  /** 最近一条到达时刻 */
-  lastAt: number;
-}
-
-/** 合并键（目标会话）→ 批次状态 */
-const bursts = new Map<string, BurstState>();
-
-/** 请求 → 合并键（同会话同批；无 target 退回标题） */
-function burstKeyOf(req: MessageNotificationReq): string {
-  const t = req.target;
-  if (t) return `${t.app}:${t.contactId ?? ''}`;
-  return `title:${req.title}`;
-}
-
-/** 批次状态过期清理（超过窗口的键顺手淘汰，防 Map 无限增长） */
-function pruneBursts(): void {
-  const now = Date.now();
-  for (const [k, b] of bursts) {
-    if (now - b.lastAt > BURST_WINDOW_MS * 4) bursts.delete(k);
-  }
-}
-
-/* ---------------- 头像规范化（原生侧下载/解码） ---------------- */
-
-/** 头像 → 原生可解析的绝对地址：站内路径补 origin；dataURL 原样；空返回 undefined */
+/** 头像/图标 → 原生可解析的绝对地址：站内路径补 origin；dataURL 原样；空返回 undefined */
 function normalizeAvatar(src: string | null | undefined): string | undefined {
   if (!src || typeof src !== 'string') return undefined;
   const s = src.trim();
@@ -108,30 +72,31 @@ function normalizeAvatar(src: string | null | undefined): string | undefined {
   return undefined;
 }
 
-/** 单条下发（内部）：走原生 localNotify（IMPORTANCE_HIGH 渠道 + BigTextStyle + 头像大图标） */
+/** 机主选择的 APP 图标（设置›APP图标，'1'~'5'）→ 绝对 URL；读取失败返回 undefined */
+function chosenAppIconUrl(): string | undefined {
+  try {
+    const v = useSettings.getState().appIcon;
+    if (v !== '1' && v !== '2' && v !== '3' && v !== '4' && v !== '5') return undefined;
+    return normalizeAvatar(`/icons/app/icon-${v}-192.png`);
+  } catch {
+    return undefined;
+  }
+}
+
+/** 单条下发（内部）：走原生 localNotify（IMPORTANCE_HIGH 多渠道轮询 + BigTextStyle + 机主所选图标大图标） */
 async function postOne(req: MessageNotificationReq): Promise<boolean> {
   try {
     const np = await import('./native-perception');
     if (!np.isNativePerception()) return false;
-    // 突发批次判定：同会话 5s 内的后续消息并入同一条通知（tag 不变 → 原地更新）
-    const key = burstKeyOf(req);
-    const now = Date.now();
-    const prev = bursts.get(key);
-    const inBurst = !!prev && now - prev.lastAt <= BURST_WINDOW_MS;
-    const burst: BurstState = inBurst
-      ? { tag: prev.tag, count: prev.count + 1, lastAt: now }
-      : { tag: `msg-${key}-${now.toString(36)}-${Math.random().toString(36).slice(2, 6)}`, count: 1, lastAt: now };
-    bursts.set(key, burst);
-    pruneBursts();
+    // v2.4.30 一消息一弹窗：tag = msg-<消息id>（唯一 → 系统绝不合并/覆盖）
     const ok = await np.localNotify({
-      // 多条合并格式（机主规格）：「角色名：发来了 N 条新消息」；单条就是角色名
-      title: burst.count > 1 ? `${req.title}：发来了 ${burst.count} 条新消息` : req.title,
-      // 副标题永远只展示【最新一条】消息（绝不拼接多条文本）
+      title: req.title,
       body: req.body,
-      // 同批次共用 tag：后到的消息原地更新同一条通知，不刷屏
-      tag: burst.tag,
+      tag: `msg-${req.id}`,
       url: '/',
       target: req.target ?? undefined,
+      // 大图标：机主选择的 APP 图标优先；角色头像作回落
+      appIcon: chosenAppIconUrl(),
       avatar: normalizeAvatar(req.avatar),
     });
     return ok === true;
@@ -144,7 +109,7 @@ async function postOne(req: MessageNotificationReq): Promise<boolean> {
  * 调度一条 AI 消息系统通知（规范入口）：
  * 1. 同一消息 id 只发一次（去重）；
  * 2. 入串行队列：顺序稳定，并发不被系统吞；
- * 3. 同会话 5s 突发批次合并为一条「发来了 N 条新消息」通知（原地更新）。
+ * 3. 一条消息 = 一条独立通知（唯一 tag，绝不合并成「发来了 N 条」）。
  */
 export function scheduleLocalNotification(req: MessageNotificationReq): void {
   if (typeof window === 'undefined') return;
@@ -171,11 +136,9 @@ export function scheduleLocalNotification(req: MessageNotificationReq): void {
 
 /**
  * 撤销本模块发的全部消息通知（进聊天页清未读时用；与 localNotifyCancelByTagPrefix 同款，
- * 只清 msg- 前缀的本模块通知，常驻守护/其它通知不受影响）。同时清空突发批次状态
- * （旧批次 tag 已被撤销，下一批必须用新 tag）。
+ * 只清 msg- 前缀的本模块通知，常驻守护/其它通知不受影响）。
  */
 export async function cancelAllMessageNotifications(): Promise<void> {
-  bursts.clear();
   try {
     const np = await import('./native-perception');
     if (!np.isNativePerception()) return;
@@ -186,8 +149,8 @@ export async function cancelAllMessageNotifications(): Promise<void> {
 }
 
 /** 调试口：当前队列状态 */
-export function messageNotifySnapshot(): { queued: number; sent: number; ids: number; bursts: number } {
-  return { queued: notifyStats.queued, sent: notifyStats.sent, ids: sentIds.size, bursts: bursts.size };
+export function messageNotifySnapshot(): { queued: number; sent: number; ids: number } {
+  return { queued: notifyStats.queued, sent: notifyStats.sent, ids: sentIds.size };
 }
 
 /** 消息 id → Android 通知 int id（导出给调试/设置页复用） */

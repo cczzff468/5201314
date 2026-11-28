@@ -77,9 +77,9 @@ export function ApiPage({ onBack }: { onBack: () => void }) {
   const setApiFallbacks = useSettings((s) => s.setApiFallbacks);
 
   const [showKey, setShowKey] = useState(false);
-  // v2.2.3：「保存预设」双入口锚点——预设区顶部「添加预设」chip 与连接配置区「保存预设」
-  // 按钮共用同一份名称输入状态，锚点决定输入行渲染在哪个入口下方（同一时间只开一处）
-  const [saveAnchor, setSaveAnchor] = useState<'preset' | 'config' | null>(null);
+  // v2.4.29（机主规格）：「保存预设」唯一入口锚点——连接配置区「保存预设」按钮下方的
+  // 名称输入行。预设区顶部「添加预设」chip 已改为清空 API/Key 重新填写，不再走存名流程
+  const [saveAnchor, setSaveAnchor] = useState<'config' | null>(null);
   const [presetName, setPresetName] = useState('');
 
   const [models, setModels] = useState<string[]>([]);
@@ -194,6 +194,18 @@ export function ApiPage({ onBack }: { onBack: () => void }) {
 
   const deletePreset = (id: string) => {
     setApiPresets(apiPresets.filter((p) => p.id !== id));
+  };
+
+  /** v2.4.29（机主规格）：「添加预设」= 清空下方 API 地址与 API Key（连同模型列表/测试
+   *  结果一起重置），让机主从零填写一套新 API 配置——不是保存当前配置为预设
+   *  （存名入口保留在连接配置区的「保存预设」按钮） */
+  const startFreshApi = () => {
+    updateApiConfig({ baseUrl: '', apiKey: '' });
+    setModels([]);
+    setModelsError('');
+    setModelsHint('');
+    setModelPanelOpen(false);
+    clearTestResult();
   };
 
   const savePreset = () => {
@@ -417,35 +429,14 @@ export function ApiPage({ onBack }: { onBack: () => void }) {
             })}
             <button
               type="button"
-              onClick={() => setSaveAnchor((v) => (v === 'preset' ? null : 'preset'))}
+              onClick={startFreshApi}
+              aria-label="清空 API 地址与 API Key，重新填写"
               className="flex items-center gap-1 rounded-full bg-white/55 px-3.5 py-1.5 text-[13px] text-muted-foreground ring-1 ring-black/[0.06] backdrop-blur-xl transition-all hover:bg-white/80 active:scale-[0.97] dark:bg-white/[0.07] dark:ring-white/[0.1] dark:hover:bg-white/[0.14]"
             >
               <Plus className="h-3.5 w-3.5" />
               添加预设
             </button>
           </div>
-          {saveAnchor === 'preset' && (
-            <div className="mt-3 flex gap-2">
-              <Input
-                value={presetName}
-                onChange={(e) => setPresetName(e.target.value)}
-                placeholder="预设名称，如 我的GPT"
-                autoFocus
-                className="h-10 flex-1 rounded-[14px] border-black/[0.05] bg-white/55 text-[14px] shadow-[inset_0_1px_0_rgba(255,255,255,0.7),0_3px_10px_rgba(17,24,39,0.05)] backdrop-blur-2xl dark:border-white/[0.09] dark:bg-white/[0.07] dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.05),0_3px_10px_rgba(0,0,0,0.2)]"
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') savePreset();
-                }}
-              />
-              <button
-                type="button"
-                onClick={savePreset}
-                disabled={!presetName.trim()}
-                className="h-10 shrink-0 rounded-[14px] bg-white/60 px-5 text-[13px] font-medium text-foreground shadow-[0_4px_14px_rgba(17,24,39,0.07)] ring-1 ring-white/70 backdrop-blur-2xl transition-all active:scale-[0.97] active:bg-white/85 disabled:opacity-40 dark:bg-white/[0.1] dark:ring-white/[0.12] dark:active:bg-white/[0.16]"
-              >
-                保存
-              </button>
-            </div>
-          )}
         </section>
 
         {/* 配置表单 */}

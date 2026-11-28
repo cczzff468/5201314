@@ -81,13 +81,10 @@ export function BatteryIcon({ level, charging, low, mode, light = false }: Batte
      *   （永在无胶囊的最右侧）；
      * - 【内部电量太圆了/整体大小一样】：填充=方角矩形全高贴描边内缘（无裁腰），
      *   边框圆角 5.2 → 3 只作用于描边角，不再吃填充端部高度；
-     * - v2.4.28（第四十七轮·机主规格）：充电时胶囊填充+跟随描边变绿（#30D158），
-     *   数字侧小闪电变绿（白色光环保对比）；低电不变红口径维持。
-     */
+     * - 沿用：充电不变绿/低电不变红（色恒定）、100% 四边贴满、数字反色+投影、
+     *   26% 轨道、充电数字侧小闪电。 */
     // 数字色 = 填充反色：前景浅→胶囊白→黑字，前景深→胶囊黑→白字（常态恒定，无状态色分支）
     const numColor = light ? '#000000' : '#FFFFFF';
-    // v2.4.28：充电时胶囊填充/跟随描边变绿（iOS 充电语义）；非充电维持前景色
-    const pillColor = charging ? '#30D158' : 'currentColor';
     // 柔和投影：保证数字叠在半透明轨道上仍可读（反相光晕）
     const numHalo = light
       ? '0 0 2px rgba(255,255,255,0.55)'
@@ -141,8 +138,7 @@ export function BatteryIcon({ level, charging, low, mode, light = false }: Batte
             strokeWidth={IOS_BAT_STROKE}
           />
           {/* 胶囊色层（clip 到电量宽度）：全高实心填充（第三十八轮：圆角 3.2——机主再要
-              「圆一点点」，柔和中圆；宽度=clipW 精确到电比、左右两端同圆角）+ 同色描边——边框跟随实心胶囊
-              v2.4.28：充电时胶囊色 = 绿（#30D158，iOS 充电语义） */}
+              「圆一点点」，柔和中圆；宽度=clipW 精确到电比、左右两端同圆角）+ 同色描边——边框跟随实心胶囊 */}
           <g clipPath={`url(#${clipId})`}>
             {/* 实心填充：全高贴描边内缘（整体大小一样），中圆角 3.2（柔和不裁腰） */}
             <rect
@@ -151,7 +147,7 @@ export function BatteryIcon({ level, charging, low, mode, light = false }: Batte
               width={Math.max(clipW, 0.01)}
               height={IOS_BAT_INNER_H}
               rx={IOS_BAT_FILL_RADIUS}
-              fill={pillColor}
+              fill="currentColor"
             />
             {/* 胶囊色描边（与填充同色同圆角——覆盖灰描边段的左段） */}
             <rect
@@ -161,7 +157,7 @@ export function BatteryIcon({ level, charging, low, mode, light = false }: Batte
               height={IOS_BAT_INNER_H}
               rx={IOS_BAT_RADIUS}
               fill="none"
-              stroke={pillColor}
+              stroke="currentColor"
               strokeWidth={IOS_BAT_STROKE}
             />
           </g>
@@ -183,18 +179,13 @@ export function BatteryIcon({ level, charging, low, mode, light = false }: Batte
           style={{ width: IOS_BAT_BODY_W, color: numColor, textShadow: numHalo }}
         >
           {digits}
-          {/* 充电小闪电（数字右侧；v2.4.28：充电时变绿 + 白光环——绿色填充/灰轨道上都清晰） */}
+          {/* 充电小闪电（数字右侧、与数字同色同投影） */}
           {charging && (
             <svg
               viewBox="0 0 12 20"
-              className="ml-[2px] h-[9px] w-[5.5px]"
+              className="ml-[2px] h-[9px] w-[5.5px] fill-current"
               aria-hidden="true"
-              fill={charging ? '#30D158' : numColor}
-              style={{
-                filter: charging
-                  ? 'drop-shadow(0 0 1.5px rgba(255,255,255,0.95))'
-                  : 'drop-shadow(0 0 1px rgba(0,0,0,0.3))',
-              }}
+              style={{ filter: 'drop-shadow(0 0 1px rgba(0,0,0,0.3))' }}
             >
               <path d="M7.5 1 2 11.5h3.2L4.5 19 10 8.2H6.6L7.5 1Z" />
             </svg>
@@ -206,10 +197,7 @@ export function BatteryIcon({ level, charging, low, mode, light = false }: Batte
 
   // outside / none：描边电池（第三十三轮：机主要求「外部/不显示变回原来的」——
   // 回退到第三十轮前的经典样式：40% 半透明细描边 + 比例填充 + 40% 半透明凸点）；
-  // outside 在左侧带数字+%，none 只有图标。
-  // v2.4.28（第四十七轮·机主规格）：①填充贴满内腔（1.2px 描边位即可见缝→
-  // 填充四边贴描边内缘，100% 时真正铺满整个图标内部）；②充电闪电变绿（与绿色
-  // 填充同色，白色光环保对比——旧版白闪电在绿填充上不显「充电」语义）。
+  // outside 在左侧带数字+%，none 只有图标
   return (
     <span
       role="img"
@@ -222,20 +210,18 @@ export function BatteryIcon({ level, charging, low, mode, light = false }: Batte
       <span className="relative inline-block h-[12.5px] w-[25px]">
         {/* 外框（不随低电量变红；40% 半透明描边——回退原样式） */}
         <span className="absolute inset-0 rounded-[4.5px] border-[1.2px] border-current opacity-40" />
-        {/* 电量填充：低电量时仅填充变红，百分比与外框保持前景色（用户要求）；
-            v2.4.28 铺满修复：上下左只留 1.2px 描边位（旧 1.8px 悬浮缝 → 看着没填满），
-            宽度同步按 2.4px 留位计算，100% 时四边贴描边内缘真正铺满 */}
+        {/* 电量填充：低电量时仅填充变红，百分比与外框保持前景色（用户要求） */}
         <span
-          className={`absolute bottom-[1.2px] left-[1.2px] top-[1.2px] rounded-[3px] transition-all duration-300 ${
+          className={`absolute bottom-[1.8px] left-[1.8px] top-[1.8px] rounded-[2.5px] transition-all duration-300 ${
             charging ? 'bg-[#30D158]' : low ? 'bg-[#FF453A]' : 'bg-current'
           }`}
-          style={{ width: `calc((100% - 2.4px) * ${fill / 100})` }}
+          style={{ width: `calc((100% - 3.6px) * ${fill / 100})` }}
         />
-        {/* 充电闪电（v2.4.28：变绿与填充同色 + 白光环；非充电不显示） */}
+        {/* 充电闪电 */}
         {charging && (
           <svg
             viewBox="0 0 12 20"
-            className="absolute left-1/2 top-1/2 h-[11px] w-[7px] -translate-x-1/2 -translate-y-1/2 fill-[#30D158] drop-shadow-[0_0_1.5px_rgba(255,255,255,0.95)]"
+            className="absolute left-1/2 top-1/2 h-[11px] w-[7px] -translate-x-1/2 -translate-y-1/2 fill-white drop-shadow-[0_0_1px_rgba(0,0,0,0.4)]"
             aria-hidden="true"
           >
             <path d="M7.5 1 2 11.5h3.2L4.5 19 10 8.2H6.6L7.5 1Z" />

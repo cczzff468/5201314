@@ -11,9 +11,9 @@
  */
 
 /** 当前最新版本（纯网页热更时与 APK versionName 可短暂不同步，下次重打 APK 对齐） */
-export const APP_VERSION = '2.4.29';
+export const APP_VERSION = '2.4.30';
 /** 版本号数字（与 android-shell versionCode 保持一致；覆盖安装要求只增不减；纯网页热更不动） */
-export const APP_VERSION_CODE = 93;
+export const APP_VERSION_CODE = 94;
 
 export interface AppReleaseNote {
   version: string;
@@ -24,6 +24,17 @@ export interface AppReleaseNote {
 
 /** 版本历史（新→旧；设置 › APP 更新 页渲染，最新一条即当前版本） */
 export const APP_RELEASE_NOTES: AppReleaseNote[] = [
+  {
+    version: '2.4.30',
+    date: '2026-11-28',
+    items: [
+      '【需重装 APK · versionCode 94】系统通知一消息一弹窗重构：AI 每发一条独立消息就弹一条独立横幅通知（通知 tag=消息ID 全局唯一，绝不合并成「发来了 N 条新消息」）；三条 IMPORTANCE_HIGH 渠道轮询防 ROM 折叠 + PRIORITY_MAX + 声音/震动/亮屏全开',
+      '【需重装 APK】通知大图标 = 你在 设置›APP图标 选的那一枚图标（原生自动下载缓存，失败回落角色头像）；只有 APP 在后台才弹系统通知——前台只弹应用内灵动岛，点进聊天页即可看到完整消息',
+      '【网页热更·免重装】AI 回复里混入的「response」分隔残留字样彻底清洗（切句边界+流式分段+工具净化三层过滤）',
+      '【网页热更·免重装】生活分享重做：分享发到你们最常聊的那一端（微信/QQ/信息自动识别）；文字先到、图片随后补发（生图重试更稳）；每天分享几次由 TA 按人设心情自己决定，内容不再只是吃饭——好玩的事/倒霉的事/想你了/心里话碎碎念都有',
+      '【网页热更·免重装】文件 App 应用列表改为双列毛玻璃胶囊宫格（图标+名字依次排满、不再显示占用体积）；电池图标恢复原版（充电白闪电+比例电量）；API 设置「添加预设」改为点击清空待填；工具提示气泡去绿色对号；应用锁定界面沉浸式状态栏 +「XX 已被 XX 锁定」新文案；真机锁 QQ 不再连坐锁网页 QQ',
+    ],
+  },
   {
     version: '2.4.29',
     date: '2026-11-28',

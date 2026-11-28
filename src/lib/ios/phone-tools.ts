@@ -2203,6 +2203,8 @@ export { extractJsonToolCalls, stripJsonToolCalls } from './json-tool-calls';
  * 最终回复净化（机主需求三·纯净度铁律）：AI 收尾文本里残留的底层日志一律剥掉——
  * (内心独白：…) / (正在操作：…) / （内部反馈：…） / 【工具调用…】这类括号日志、
  * 独立成行的工具名调用文本。聊天气泡里只允许干净的人话。
+ * v2.4.30（机主反馈）：泄漏的「response」分隔标记一并剥掉——独立成行的整行剥除，
+ * 行内夹在中文句子中间的（「缺了一块呀 response 不对不对」）切成换行交给上游按句切分。
  */
 export function cleanToolLogs(text: string): string {
   let out = text;
@@ -2215,6 +2217,9 @@ export function cleanToolLogs(text: string): string {
     new RegExp(`^[ \t]*(?:${TOOL_NAME_RE_SRC})\s*[(:：][^\n]*$`, 'gim'),
     '',
   );
+  // v2.4.30 泄漏的 response 分隔标记：独立成行的剥掉，行内夹在中文里的切开（由回复切分端按句拆）
+  out = out.replace(/(?:^|\n)\s*response\s*(?=\n|$)/gi, '\n');
+  out = out.replace(/\s*\bresponse\b\s*(?=[\u4e00-\u9fff])/gi, '\n');
   return out.replace(/[ \t]{2,}/g, ' ').trim();
 }
 

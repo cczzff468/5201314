@@ -3838,8 +3838,16 @@ public class NativePerceptionPlugin extends Plugin {
     private static final String LOCAL_NOTIFY_CHANNEL = "local_notify";
     /** v2.4.13 悬浮横幅渠道：渠道重要性创建后不可改（IMPORTANCE_DEFAULT 永远不弹 heads-up），
      * 换新渠道 id 用 IMPORTANCE_HIGH，机主反馈的「系统通知时弹不出悬浮窗」——通知永不横幅
-     * 弹出正是此因。headsUp=true（默认）走此渠道 + PRIORITY_HIGH。 */
-    private static final String LOCAL_NOTIFY_HIGH_CHANNEL = "local_notify_high";
+     * 弹出正是此因。headsUp=true（默认）走此渠道 + PRIORITY_HIGH。
+     * v2.4.30 起单渠道常量被 LOCAL_NOTIFY_HIGH_CHANNELS 三渠道轮询取代（首项同 id 兼容）。 */
+    /** v2.4.30（一消息一弹窗）：三条 IMPORTANCE_HIGH 渠道轮询——部分 ROM（MIUI 等）
+     * 会折叠同渠道连发的高优通知，逐条轮换渠道 id 从渠道层面杜绝合并。 */
+    private static final String[] LOCAL_NOTIFY_HIGH_CHANNELS = {
+            "local_notify_high", "cove_msg_ch_2", "cove_msg_ch_3"
+    };
+    /** 渠道轮询计数器 */
+    private static final java.util.concurrent.atomic.AtomicInteger LOCAL_NOTIFY_CH_ROT =
+            new java.util.concurrent.atomic.AtomicInteger(0);
     /** v2.2.0 拉回 heads-up 兑底通知渠道 */
     private static final String PULLBACK_CHANNEL = "pullback_reminder";
     /** 无 tag 本地通知的自增 id 起点（避开 Agent 常驻通知 id 7788） */
@@ -3881,6 +3889,7 @@ public class NativePerceptionPlugin extends Plugin {
         String url = call.getString("url", null);
         String target = call.getString("target", null);
         String avatar = call.getString("avatar", null);
+        String appIcon = call.getString("appIcon", null);
         boolean headsUp = call.getBoolean("headsUp", true);
         JSObject ret = new JSObject();
         try {
@@ -3917,44 +3926,50 @@ public class NativePerceptionPlugin extends Plugin {
                     // 第三十轮·通知模块重构：IMPORTANCE_HIGH 渠道显式配响铃+震动（机主规格：
                     // 「确保能弹横幅、响铃、震动」——部分 ROM 只看渠道重要性不落默认音/震，
                     // 显式配置三件全齐）；渠道重要性创建后不可改，v2.4.13 起用新渠道 id。
-                    NotificationChannel high = new NotificationChannel(
-                            LOCAL_NOTIFY_HIGH_CHANNEL, "AI 消息（横幅通知）",
-                            NotificationManager.IMPORTANCE_HIGH);
-                    high.setDescription("AI 消息横幅通知：连发多条自动合并为一条（发来了 N 条新消息）；点击直达对应聊天");
-                    high.setLockscreenVisibility(Notification.VISIBILITY_PRIVATE);
-                    high.enableVibration(true);
-                    high.setVibrationPattern(new long[]{0, 180, 90, 180});
-                    high.enableLights(true);
-                    high.setLightColor(0xFF0A84FF);
-                    try {
-                        high.setSound(
-                                android.media.RingtoneManager.getDefaultUri(android.media.RingtoneManager.TYPE_NOTIFICATION),
-                                new android.media.AudioAttributes.Builder()
-                                        .setUsage(android.media.AudioAttributes.USAGE_NOTIFICATION)
-                                        .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                                        .build());
-                    } catch (Throwable ignored) {
-                        // 默认铃音不可用时保持渠道默认音
+                    // v2.4.30：三条高优渠道全部创建 + 逐条轮换使用（防部分 ROM 同渠道
+                    // 折叠连发通知——一消息一弹窗的渠道层保险）。
+                    for (int ci = 0; ci < LOCAL_NOTIFY_HIGH_CHANNELS.length; ci++) {
+                        NotificationChannel high = new NotificationChannel(
+                                LOCAL_NOTIFY_HIGH_CHANNELS[ci],
+                                ci == 0 ? "AI 消息（横幅通知）" : ("AI 消息（横幅通知 " + (ci + 1) + "）"),
+                                NotificationManager.IMPORTANCE_HIGH);
+                        high.setDescription("AI 消息横幅通知：一条消息弹一条独立通知（绝不合并）；点击直达对应聊天");
+                        high.setLockscreenVisibility(Notification.VISIBILITY_PRIVATE);
+                        high.enableVibration(true);
+                        high.setVibrationPattern(new long[]{0, 180, 90, 180});
+                        high.enableLights(true);
+                        high.setLightColor(0xFF0A84FF);
+                        try {
+                            high.setSound(
+                                    android.media.RingtoneManager.getDefaultUri(android.media.RingtoneManager.TYPE_NOTIFICATION),
+                                    new android.media.AudioAttributes.Builder()
+                                            .setUsage(android.media.AudioAttributes.USAGE_NOTIFICATION)
+                                            .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                                            .build());
+                        } catch (Throwable ignored) {
+                            // 默认铃音不可用时保持渠道默认音
+                        }
+                        nm.createNotificationChannel(high);
                     }
-                    nm.createNotificationChannel(high);
-                    useChannel = LOCAL_NOTIFY_HIGH_CHANNEL;
+                    useChannel = LOCAL_NOTIFY_HIGH_CHANNELS[Math.abs(
+                            LOCAL_NOTIFY_CH_ROT.getAndIncrement() % LOCAL_NOTIFY_HIGH_CHANNELS.length)];
                 }
             }
             int id = (tag == null || tag.isEmpty()) ? LOCAL_NOTIFY_SEQ.getAndIncrement() : tag.hashCode();
             if (tag != null && !tag.isEmpty()) {
                 issuedTags.add(tag); // v2.2.0 登记：按前缀批量撤销用
             }
-            // v2.4.29：通知构建+头像解码放后台线程（不堵 Capacitor 桥）；
+            // v2.4.30：通知构建+图标解码放后台线程（不堵 Capacitor 桥）；
             // 桥侧立刻回 ok（验证已过，失败静默——与历史尽力而为口径一致）
             final Context fCtx = ctx;
             final NotificationManager fNm = nm;
             final String fChannel = useChannel;
             final int fId = id;
-            final String fTitle = title, fBody = body, fTag = tag, fUrl = url, fTarget = target, fAvatar = avatar;
+            final String fTitle = title, fBody = body, fTag = tag, fUrl = url, fTarget = target, fAvatar = avatar, fAppIcon = appIcon;
             final boolean fHeadsUp = headsUp;
             NOTIFY_POOL.execute(() -> {
                 try {
-                    postLocalNotify(fCtx, fNm, fChannel, fId, fTitle, fBody, fTag, fUrl, fTarget, fAvatar, fHeadsUp);
+                    postLocalNotify(fCtx, fNm, fChannel, fId, fTitle, fBody, fTag, fUrl, fTarget, fAvatar, fAppIcon, fHeadsUp);
                 } catch (Throwable ignored) {
                     // 后台构建失败静默（历史行为：通知尽力而为）
                 }
@@ -3968,10 +3983,12 @@ public class NativePerceptionPlugin extends Plugin {
         }
     }
 
-    /** v2.4.29：实际构建并下发一条本地通知（NOTIFY_POOL 后台线程）——
-     *  小图标 ic_stat_cove / 大图标角色头像 / BigTextStyle 全文展开 */
+    /** v2.4.30：实际构建并下发一条本地通知（NOTIFY_POOL 后台线程）——
+     *  小图标 ic_stat_cove / 大图标优先机主所选 APP 图标（appIcon）→回落角色头像 /
+     *  BigTextStyle 全文展开 / headsUp 走 PRIORITY_MAX + DEFAULT_ALL（声/震/亮屏） */
     private void postLocalNotify(Context ctx, NotificationManager nm, String channel, int id,
-            String title, String body, String tag, String url, String target, String avatar, boolean headsUp) {
+            String title, String body, String tag, String url, String target, String avatar,
+            String appIcon, boolean headsUp) {
         Intent contentIntent = new Intent(ctx, MainActivity.class);
         contentIntent.setPackage(ctx.getPackageName());
         contentIntent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP);
@@ -3994,8 +4011,10 @@ public class NativePerceptionPlugin extends Plugin {
                         .setAutoCancel(true)
                         .setContentIntent(contentPi);
         if (headsUp) {
-            // heads-up 三件套：高优先级 + 消息类目 + 震动（部分 ROM 需全配才弹横幅）
-            builder.setPriority(NotificationCompat.PRIORITY_HIGH)
+            // heads-up 全家桶（v2.4.30 机主规格）：最高优先级 + 消息类目 + DEFAULT_ALL
+            // （声音/震动/亮屏三件全开——部分 ROM 需全配才弹横幅）
+            builder.setPriority(NotificationCompat.PRIORITY_MAX)
+                    .setDefaults(NotificationCompat.DEFAULT_ALL)
                     .setCategory(NotificationCompat.CATEGORY_MESSAGE);
         }
         if (body != null && !body.isEmpty()) {
@@ -4004,10 +4023,13 @@ public class NativePerceptionPlugin extends Plugin {
             //（折叠预览由系统自行省略号截断，不再是一条短短的省略号）
             builder.setStyle(new NotificationCompat.BigTextStyle().bigText(body));
         }
-        // v2.4.29 大图标：角色头像（dataURL 解码 / http 下载；失败/缺失跳过）
-        if (avatar != null && !avatar.isEmpty()) {
+        // v2.4.30 大图标：机主所选 APP 图标优先（设置›APP图标 透传的绝对 URL/dataURL）；
+        // 失败/缺失回落角色头像（v2.4.29 口径）；再缺失则不带大图标
+        String iconSrc = (appIcon != null && !appIcon.isEmpty()) ? appIcon
+                : (avatar != null && !avatar.isEmpty()) ? avatar : null;
+        if (iconSrc != null) {
             try {
-                android.graphics.Bitmap bmp = NotifyAvatars.decode(avatar);
+                android.graphics.Bitmap bmp = NotifyAvatars.decode(iconSrc);
                 if (bmp != null) builder.setLargeIcon(bmp);
             } catch (Throwable ignored) {
             }

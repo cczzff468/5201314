@@ -970,18 +970,6 @@ export async function toolFreezeRealApp(
   // 落真机锁定记录（解锁清账/锁定界面信息源；到期由原生遮罩锁自动解锁）
   const { setRealFrozen } = await import('./real-app-freeze');
   setRealFrozen({ pkg, unlockAt, charName, reason, contactId: opts?.contactId, app: opts?.app });
-  // 网页有对应体 → 同步冻结网页图标（点击弹锁定界面；强制解锁时一并解真机锁）
-  const { webAppOfPkg, setWebFrozen } = await import('./web-app-lock');
-  const web = webAppOfPkg(pkg);
-  if (web) {
-    // v2.3：无条件同步网页冻结态（同包已冻结时也刷新 unlockAt——重新锁定续时，
-    // 网页图标灰态与真机锁同一时刻到期；setWebFrozen 自带同值去重不白 bump）
-    setWebFrozen(pkg, unlockAt, charName, 'ai', {
-      reason,
-      contactId: opts?.contactId,
-      app: opts?.app,
-    });
-  }
   island('chat', '锁定真机应用', `已锁定${displayName}（${durationMin} 分钟后自动解锁）`);
   return {
     ok: true,

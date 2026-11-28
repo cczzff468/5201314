@@ -26,6 +26,10 @@ import { scopedConvKey } from './ios/accounts';
  *   一句就是一条消息，逐条连发。省略号/逗号这类句中停顿不是边界：切分稳定，不会把
  *   「我……好吧。」撕成两半，也不会按逗号把一句话碎成短句（连发节奏由 AI 生成端按
  *   人设掌握，客户端只按完整句子切）；
+ * - v2.4.30（机主反馈）：部分模型会把内部的「response」分隔标记泄漏进正文（气泡里出现
+ *   字面 response 单词，如「缺了一块呀[发呆] response 不对不对」）——独立成词的 response
+ *   （大小写不敏感）并入边界集合当【分隔符】处理：切分时丢弃、绝不落进气泡文本；
+ *   单条模式（不切分）预剥成空格后再输出。
  * - 动作描写（*...*）独立成条：正文里成对星号包裹的描写拆成单独一段（渲染为居中灰字行、
  *   不与正文挤同一气泡，也不会被语音升级吞掉），与五端 action-desc 渲染同口径；
  * - splitReplySegments：把完整回复按边界切成多条消息文本（单条模式 multi=false 只按标记
@@ -56,18 +60,21 @@ const STORE_KEY = 'chat-reply-counts';
 const MARKER_RE = /&{3,}/;
 
 /**
- * 消息边界（正则源）：「&&&」标记 / 换行 / 句末标点。
+ * 消息边界（正则源）：「&&&」标记 / 换行 / 句末标点 / response 分隔标记。
  * 句末标点取「连续的句终符（。！？!? ～ 〜）+ 紧随的收尾引号/括号」，把「他说“走吧！”」这类
  * 引号收尾整体留在前一条消息末尾；连续标点（！！！/？！/～～）算一个边界，不会切碎。
  * 全角波浪号（～/〜）是口语化句终（「好～」「找到啦～」），与。！？同级算边界；半角「~」
  * 不是（数字范围「3~5」不能被撕开）。
  * 省略号（……）不算边界：它是句中停顿不是句终，「我……好吧。」必须留在同一个气泡里
  * （行尾的省略号由换行边界自然切开，无需单独处理）。
+ * v2.4.30（机主反馈）：独立成词的「response」（前后带空白、大小写不敏感）是模型泄漏的
+ * 内部分隔标记——算边界分隔符（切分时丢弃，不并进气泡），编译处统一加 i 标志。
  */
-const BOUNDARY_SRC = '&{3,}|\\n|[。！？!?～〜]+[”’"』」）)\\]]*';
+const RESPONSE_SEP_SRC = '\\s*\\bresponse\\b\\s*';
+const BOUNDARY_SRC = `&{3,}|\\n|[。！？!?～〜]+[”’"』」）)\\]]*|(?:${RESPONSE_SEP_SRC})`;
 
-/** 非 global 版本：exec 无 lastIndex 副作用，可复用 */
-const BOUNDARY_ONE_RE = new RegExp(BOUNDARY_SRC);
+/** 非 global 版本（加 i 标志：response 分隔标记大小写不敏感）：exec 无 lastIndex 副作用，可复用 */
+const BOUNDARY_ONE_RE = new RegExp(BOUNDARY_SRC, 'i');
 
 /** 末尾 1-2 个「&」：可能被拆进下个增量的半截分隔标记 */
 const HALF_MARKER_RE = /&{1,2}$/;
@@ -212,13 +219,13 @@ export function buildDeviceBurstPrompt(): string {
  * 「&&&」标记与换行本身丢弃；句末标点保留在前一条消息末尾（气泡里要看到「！」）。
  */
 function splitByBoundaryRaw(text: string): string[] {
-  const re = new RegExp(BOUNDARY_SRC, 'g');
+  const re = new RegExp(BOUNDARY_SRC, 'gi');
   const out: string[] = [];
   let last = 0;
   for (let m = re.exec(text); m !== null; m = re.exec(text)) {
     const end = m.index + m[0].length;
-    const isSentence = m[0] !== '\n' && !m[0].startsWith('&');
-    // 句末标点并入前一条消息；标记/换行本身丢弃不进气泡
+    // 句末标点（。！？!?～〜开头）并入前一条消息；标记/换行/response 分隔符本身丢弃不进气泡
+    const isSentence = /^[。！？!?～〜]/.test(m[0]);
     out.push(text.slice(last, isSentence ? end : m.index));
     last = end;
   }
@@ -298,7 +305,9 @@ function splitMultiSegments(content: string): string[] {
  */
 export function splitReplySegments(content: string, multi = false): string[] {
   if (!multi) {
-    const segs = trimSegs(content.split(MARKER_RE));
+    // v2.4.30：单条模式不按换行/句界切——泄漏的 response 分隔标记预剥成空格（不产生额外气泡）
+    const cleaned = content.replace(/\s*\bresponse\b\s*/gi, ' ');
+    const segs = trimSegs(cleaned.split(MARKER_RE));
     return segs.length > 0 ? segs : [''];
   }
   // v55：切分后全员碎片合并（「嗯」「好」「在」这种碎句不再各自成条，并成一条完整消息）
@@ -367,8 +376,8 @@ export function createReplySegmentScanner(onSegment: (segment: string) => void):
         const m = BOUNDARY_ONE_RE.exec(full.slice(scanFrom));
         if (!m) break;
         const end = scanFrom + m.index + m[0].length;
-        const isSentence = m[0] !== '\n' && !m[0].startsWith('&');
-        // 句末标点并入本条（「你好！」完整弹出）；标记/换行本身丢弃不进气泡
+        // 句末标点（。！？!?～〜开头）并入本条（「你好！」完整弹出）；标记/换行/response 分隔符本身丢弃
+        const isSentence = /^[。！？!?～〜]/.test(m[0]);
         const candidate = full.slice(segStart, isSentence ? end : end - m[0].length);
         if (hasOpenBracket(candidate)) {
           // 停在未闭合的标记里：越过标记内边界，等标记闭合后重扫（祝福语带「！」的红包/转账标记）

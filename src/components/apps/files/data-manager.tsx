@@ -1,7 +1,7 @@
 'use client';
 
 /**
- * 文件 App · 存储管理（第四十八轮 v2.4.29 毛玻璃胶囊重做）
+ * 文件 App · 存储管理（第四十九轮 v2.4.30 应用宫格重排）
  *
  * 彻底推翻 Terminal 终端风，改为「极简毛玻璃 + 胶囊」高级设计：
  * - 视觉：页面底色浅色 #F5F5F7 / 深色 #0E0E12；所有卡片为微投影毛玻璃
@@ -10,8 +10,9 @@
  * - 配色写死 iOS 系统色：主操作蓝 #007AFF（备份/选中态）、健康绿 #34C759
  *   （已备份/安全）、危险红 #FF3B30（清理/垃圾警告），文本 zinc 系，全 dark: 变体；
  * - 结构（自上而下）：毛玻璃 hero 总览（总占用大数字 + 已备份/可清理胶囊 + 刷新）→
- *   应用占用横向胶囊列表（短按进 App 专属详情页 / 长按 480ms 进多选，多选时
- *   hero 收起 + 底部滑出毛玻璃悬浮操作栏）→ 快捷操作（一键云端备份 / 健康检查
+ *   应用占用双列宫格胶囊（图标 + 名称 + 已备份绿点，按大小隐形排序但不显示
+ *   占用数值；短按进 App 专属详情页 / 长按 480ms 进多选，多选时 hero 收起 +
+ *   底部滑出毛玻璃悬浮操作栏）→ 快捷操作（一键云端备份 / 健康检查
  *   展开红绿结果行）→ 云端与恢复安静收纳区（恢复 / 记录 / 导入 / 自动备份 / 持久化）；
  * - 操作反馈全部改用 sonner 轻提示（替代旧终端日志），危险操作走毛玻璃
  *   AlertDialog（iOS 上下分区按钮）；
@@ -59,8 +60,6 @@ const GLASS_BASE =
   'bg-white/70 dark:bg-white/[0.06] backdrop-blur-2xl ring-1 ring-black/[0.05] dark:ring-white/[0.08] shadow-[0_2px_12px_rgba(0,0,0,0.035)]';
 /** 标准毛玻璃卡（28px 圆角） */
 const GLASS = `rounded-[28px] ${GLASS_BASE}`;
-/** 灰色小胶囊 chip（占比百分比等） */
-const CHIP = 'rounded-full bg-black/[0.05] dark:bg-white/[0.08] px-3 py-1.5 text-[12px] font-medium text-zinc-500 dark:text-zinc-400';
 /** 收纳区小胶囊 chip（云端恢复 / 记录 / 导入） */
 const CHIPO =
   'rounded-full bg-black/[0.04] dark:bg-white/[0.07] px-3.5 py-2 text-[12.5px] font-medium text-zinc-600 dark:text-zinc-300 transition active:scale-95 disabled:opacity-40';
@@ -167,19 +166,18 @@ function GlassConfirm({
   );
 }
 
-// ---------------- 应用占用胶囊行（短按 / 长按手势） ----------------
+// ---------------- 应用占用宫格胶囊（短按 / 长按手势） ----------------
 
 /**
- * 横向胶囊卡：短按（<500ms 且无移动）进详情页 / 多选下切换勾选；
+ * 紧凑宫格胶囊（双列网格单元）：图标 + 名称 + 已备份绿点，不显示占用大小。
+ * 短按（<500ms 且无移动）进详情页 / 多选下切换勾选；
  * 长按（按住 >=480ms，移动超 10px 取消）进入多选并勾选当前卡。
  * pointer events 自实现（触摸隐式捕获保证抬手事件必达），键盘 Enter/Space 等价短按。
  */
-function AppRow({
-  app, stat, total, safe, selected, multiMode, disabled, onTap, onLongPress,
+function AppCell({
+  app, safe, selected, multiMode, disabled, onTap, onLongPress,
 }: {
   app: AppModuleDef;
-  stat: AppStat;
-  total: number;
   safe: boolean;
   selected: boolean;
   multiMode: boolean;
@@ -246,13 +244,11 @@ function AppRow({
     firedRef.current = false;
   };
 
-  const percent = total > 0 ? `${Math.round((stat.bytes / total) * 100)}%` : '—';
-
   return (
     <div
       role="button"
       tabIndex={0}
-      aria-label={`${app.label}，占用 ${formatBytesAscii(stat.bytes)}，${stat.records} 项数据${safe ? '，已备份' : ''}`}
+      aria-label={`${app.label}，${safe ? '已备份，' : ''}长按多选`}
       onPointerDown={handleDown}
       onPointerMove={handleMove}
       onPointerUp={handleUp}
@@ -265,7 +261,7 @@ function AppRow({
           if (!disabled) onTap();
         }
       }}
-      className={`flex h-[68px] cursor-pointer select-none items-center gap-3 px-3 transition-all duration-200 [-webkit-touch-callout:none] ${
+      className={`flex h-14 w-full cursor-pointer select-none items-center gap-2 px-3 transition-all duration-200 [-webkit-touch-callout:none] ${
         selected && multiMode
           ? 'scale-[1.03] rounded-full bg-[#007AFF]/[0.06] ring-1 ring-[#007AFF]/40 backdrop-blur-2xl shadow-[0_2px_12px_rgba(0,0,0,0.035)] dark:bg-[#007AFF]/[0.10]'
           : `rounded-full ${GLASS_BASE}`
@@ -273,47 +269,38 @@ function AppRow({
     >
       {/* 彩色原样 App 图标 */}
       {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src={app.icon} alt={`${app.label}图标`} className="h-11 w-11 shrink-0 rounded-[14px] object-cover" draggable={false} />
+      <img src={app.icon} alt={`${app.label}图标`} className="h-9 w-9 shrink-0 rounded-[11px] object-cover" draggable={false} />
 
-      {/* 名称（已备份加绿点）+ 大小/条数 */}
+      {/* 名称（已备份加绿点），不显示占用大小 */}
       <div className="min-w-0 flex-1">
-        <p className="flex items-center gap-1.5">
-          <span className="truncate text-[15px] font-semibold leading-tight text-zinc-800 dark:text-zinc-100">{app.label}</span>
+        <p className="flex items-center gap-1">
+          <span className="truncate text-[14px] font-semibold leading-tight text-zinc-800 dark:text-zinc-100">{app.label}</span>
           {safe && <span aria-label="已备份" title="已备份" className="h-[7px] w-[7px] shrink-0 rounded-full bg-[#34C759]" />}
-        </p>
-        <p className="mt-1 truncate text-[12px] leading-none text-zinc-400">
-          {formatBytesAscii(stat.bytes)} · {stat.records} 项
         </p>
       </div>
       <span className="sr-only">长按进入多选，短按查看详情</span>
 
-      {/* 右侧：普通模式占比 chip / 多选模式圆形勾选框 */}
-      {multiMode ? (
+      {/* 多选模式：右侧圆形勾选框 */}
+      {multiMode && (
         <span
           aria-hidden
-          className={`grid h-[26px] w-[26px] shrink-0 place-items-center rounded-full border-2 transition-all duration-200 ${
+          className={`grid h-[22px] w-[22px] shrink-0 place-items-center rounded-full border-2 transition-all duration-200 ${
             selected ? 'border-[#007AFF] bg-[#007AFF] text-white' : 'border-zinc-300 dark:border-zinc-600'
           }`}
         >
-          {selected && <Check className="h-3.5 w-3.5" strokeWidth={3.2} />}
+          {selected && <Check className="h-3 w-3" strokeWidth={3.2} />}
         </span>
-      ) : (
-        <span className={`shrink-0 tabular-nums ${CHIP}`}>{percent}</span>
       )}
     </div>
   );
 }
 
-/** 数据未加载时的骨架胶囊行 */
-function SkeletonRow() {
+/** 数据未加载时的骨架宫格胶囊 */
+function SkeletonCell() {
   return (
-    <div aria-hidden className="flex h-[68px] animate-pulse items-center gap-3 rounded-full bg-black/[0.04] px-3 dark:bg-white/[0.05]">
-      <div className="h-11 w-11 shrink-0 rounded-[14px] bg-black/[0.06] dark:bg-white/[0.08]" />
-      <div className="flex-1 space-y-2">
-        <div className="h-3 w-24 rounded-full bg-black/[0.06] dark:bg-white/[0.08]" />
-        <div className="h-2.5 w-16 rounded-full bg-black/[0.05] dark:bg-white/[0.06]" />
-      </div>
-      <div className="h-7 w-14 rounded-full bg-black/[0.05] dark:bg-white/[0.07]" />
+    <div aria-hidden className="flex h-14 w-full animate-pulse items-center gap-2 rounded-full bg-black/[0.04] px-3 dark:bg-white/[0.05]">
+      <div className="h-9 w-9 shrink-0 rounded-[11px] bg-black/[0.06] dark:bg-white/[0.08]" />
+      <div className="h-3 w-3/4 rounded-full bg-black/[0.06] dark:bg-white/[0.08]" />
     </div>
   );
 }
@@ -408,7 +395,6 @@ export default function DataManager() {
   const totalRecords = (stats ?? []).reduce((s, x) => s + x.records, 0);
   const safeBytes = (stats ?? []).filter((s) => backup && isAppSafe(s, backup)).reduce((s, x) => s + x.bytes, 0);
   const dirtyBytes = Math.max(0, totalBytes - safeBytes);
-  const selBytes = [...sel].reduce((s, id) => s + (statOf(id)?.bytes ?? 0), 0);
   const allSelected = sel.size === APP_MODULES.length;
 
   const lastBackupText = (() => {
@@ -695,7 +681,6 @@ export default function DataManager() {
       {multiMode ? (
         <div className="flex items-center gap-2 px-5 pb-2.5 pt-1">
           <h2 className="text-[14px] font-semibold text-zinc-800 dark:text-zinc-100">已选 {sel.size} 项</h2>
-          <span className="text-[11px] tabular-nums text-zinc-400">{formatBytesAscii(selBytes)}</span>
           <span className="flex-1" />
           <button
             type="button"
@@ -720,18 +705,16 @@ export default function DataManager() {
       )}
 
       <section aria-label="应用占用列表" className="px-4">
-        <div className="space-y-2.5">
+        <div className="grid grid-cols-2 gap-2.5">
           {stats === null
-            ? [0, 1, 2, 3].map((i) => <SkeletonRow key={i} />)
+            ? [0, 1, 2, 3, 4, 5].map((i) => <SkeletonCell key={i} />)
             : sorted.map((stat) => {
                 const app = appOf(stat.id);
                 if (!app) return null;
                 return (
-                  <AppRow
+                  <AppCell
                     key={app.id}
                     app={app}
-                    stat={stat}
-                    total={totalBytes}
                     safe={backup ? isAppSafe(stat, backup) : false}
                     selected={sel.has(app.id)}
                     multiMode={multiMode}
@@ -753,19 +736,11 @@ export default function DataManager() {
           }`}
         >
           <div className="flex items-center gap-2 rounded-full bg-white/85 px-3 py-2.5 ring-1 ring-black/[0.06] shadow-[0_12px_40px_rgba(0,0,0,0.16)] backdrop-blur-2xl dark:bg-zinc-900/85 dark:ring-white/[0.1]">
-            <span className="shrink-0 pl-1 text-[10.5px] leading-tight text-zinc-400">
-              已选
-              <br />
-              <span className="text-[13px] font-semibold tabular-nums text-zinc-700 dark:text-zinc-200">
-                {formatBytesAscii(selBytes)}
-              </span>
-            </span>
-            <span className="flex-1" />
             <button
               type="button"
               onClick={() => void backupApps([...sel])}
               disabled={busy !== ''}
-              className="flex h-10 shrink-0 items-center gap-1.5 rounded-full bg-[#007AFF] px-3.5 text-[12.5px] font-semibold text-white transition active:scale-95 disabled:opacity-50"
+              className="flex h-10 min-w-0 flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-full bg-[#007AFF] px-2 text-[12.5px] font-semibold text-white transition active:scale-95 disabled:opacity-50"
             >
               {busy === 'backup' ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <CloudUpload className="h-4 w-4" aria-hidden />}
               备份选中 ({sel.size})
@@ -774,7 +749,7 @@ export default function DataManager() {
               type="button"
               onClick={() => setConfirmClean([...sel])}
               disabled={busy !== ''}
-              className="flex h-10 shrink-0 items-center gap-1.5 rounded-full bg-[#FF3B30] px-3.5 text-[12.5px] font-semibold text-white transition active:scale-95 disabled:opacity-50"
+              className="flex h-10 min-w-0 flex-1 items-center justify-center gap-1.5 whitespace-nowrap rounded-full bg-[#FF3B30] px-2 text-[12.5px] font-semibold text-white transition active:scale-95 disabled:opacity-50"
             >
               {busy === 'clean' ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Trash2 className="h-4 w-4" aria-hidden />}
               清理选中 ({sel.size})

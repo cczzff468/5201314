@@ -142,9 +142,7 @@ function ToolStatusBubbleInner({ tool, msgId, sessionKey }: Props) {
         ) : tool.status === 'pending' ? (
           <Loader2 className="h-[15px] w-[15px] shrink-0 animate-spin text-black/40 dark:text-white/50" aria-hidden="true" />
         ) : tool.status === 'done' ? (
-          <span aria-hidden className="grid h-[18px] w-[18px] shrink-0 place-items-center rounded-full bg-emerald-500/15">
-            <Check className="h-[11px] w-[11px] text-emerald-400" strokeWidth={3} />
-          </span>
+          null // v2.4.29 机主要求：done 态不显示图标（绿色对号删除），只留文案
         ) : (
           <span aria-hidden className="grid h-[18px] w-[18px] shrink-0 place-items-center rounded-full bg-[#FF453A]/15">
             <X className="h-[11px] w-[11px] text-[#FF6961]" strokeWidth={2.6} />

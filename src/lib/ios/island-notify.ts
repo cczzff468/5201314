@@ -701,12 +701,17 @@ function maybeWebNotification(n: IslandNotification): void {
     // 只查 Android 系统级权限（areNotificationsEnabled），应用内总闸被绕过（网页
     // 分支一直有此闸）——两分支口径对齐，关闭后 Web/原生/推送三通道全部静音。
     if (!isSysNotifyEnabled()) return;
+    // v2.4.30（机主规格「只有APP在后台系统通知才通知」）：前台（机主正看着 APP）
+    // 只弹应用内灵动岛横幅、不弹系统通知栏——点进聊天页就能看到完整消息；
+    // 后台/锁屏/切走 → 才逐条弹真实系统通知（与网页分支 v75 前台闸同口径）。
+    if (!isPageBackground()) return;
     scheduleLocalNotification({
       id: n.id,
       title: n.title,
       body: n.subtitle ? `【${n.subtitle}】${n.body}` : n.body,
       target: n.target,
-      // v2.4.29：头像透传（角色头像 → 通知大图标；路径/dataURL 由 message-notifications 规范化）
+      // v2.4.30：通知大图标 = 机主所选 APP 图标（message-notifications 内部读取设置），
+      // 角色头像作为回落继续透传
       avatar: n.avatar,
     });
     return;

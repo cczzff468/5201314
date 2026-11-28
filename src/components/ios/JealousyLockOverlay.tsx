@@ -306,6 +306,11 @@ export default function JealousyLockOverlay() {
   return (
     <AnimatePresence>
       {showOverlay ? (
+        // v2.4.29 data-bleed：APK 里整层出血铺满物理屏——深色径向渐变压到物理屏顶，
+        // 系统状态栏条带后面就是锁定层的深色（与熄屏遮罩同机制；此前本层从安全区下
+        // 开始，条带露出壁纸/上一 App 底色，机主截图「应用锁定界面系统状态栏后面
+        // 还是没有沉浸式」）。内容层靠下方 pt-[5.5rem] 顶部留白避让状态栏；
+        // 网页端出血规则休眠，与原矩形零变化。
         <motion.div
           key="jealousy-lock-overlay"
           role="alertdialog"
@@ -314,6 +319,7 @@ export default function JealousyLockOverlay() {
           animate={{ opacity: 1, scale: 1 }}
           exit={{ opacity: 0, scale: 0.98 }}
           transition={{ duration: 0.28, ease: [0.32, 0.72, 0, 1] }}
+          data-bleed=""
           className="pointer-events-auto absolute inset-0 z-[86] flex select-none flex-col items-center overflow-hidden px-7"
           style={{
             // v1.9.31 黑白灰简约风：纯灰阶径向渐变，无任何彩色
@@ -337,10 +343,11 @@ export default function JealousyLockOverlay() {
             <ChevronLeft className="h-6 w-6" strokeWidth={2.4} />
           </button>
 
-          <div className="relative flex h-full w-full max-w-sm flex-col items-center justify-between py-14">
-            {/* 头部（v2.3 排版重做）：头像 → 角色名 → 应用名主标题（放大）→ 状态大字「已冻结」→ 理由
-                （彻底删掉「×把」这种断句；层级从上到下：谁 → 冻了什么 → 什么状态 → 为什么） */}
-            <div className="flex flex-col items-center gap-2.5 pt-2">
+          <div className="relative flex h-full w-full max-w-sm flex-col items-center justify-between pb-14 pt-[5.5rem]">
+            {/* 头部（v2.4.29 排版）：头像 → 主标题「××已被××锁定」→ 理由
+                （机主口径：主标题一句话说清「谁锁了什么」，替换原「应用名 + 已冻结」
+                两行；层级从上到下：谁 → 锁了什么/被谁锁 → 为什么） */}
+            <div className="flex flex-col items-center gap-3 pt-2">
               <div className="relative">
                 {/* v2.2 需求二.1：动态读取当前聊天对象头像；无头像资源时回退角色名首字 */}
                 {avatar ? (
@@ -351,15 +358,14 @@ export default function JealousyLockOverlay() {
                   </div>
                 )}
               </div>
-              {/* 角色名（头像正下方，独立一行——不再有「把」字断句） */}
-              <p className="text-[16px] font-medium tracking-wide text-white/60">{charName}</p>
-              {/* 应用中文名（主标题放大：内置映射/原生 PackageManager 解析，绝不裸显英文包名） */}
-              <p className="max-w-[19rem] text-center text-[30px] font-bold leading-tight tracking-wide text-white">
-                {appName}
-              </p>
-              {/* 状态大字（统一「已冻结」） */}
-              <p className="text-[18px] font-semibold tracking-[0.2em] text-white/85">已冻结</p>
-              {/* v2.2 需求二.4：锁定理由去掉圆角边框，直接放在状态字下面 */}
+              {/* 主标题（v2.4.29 机主口径「××（APP 名）已被××（AI 名）锁定」）：应用中文名
+                  走内置映射/原生 PackageManager 解析（绝不裸显英文包名）；应用名与角色名
+                  全亮强调、连接词降一档，一句话讲清锁定关系 */}
+              <h1 className="max-w-[19rem] text-center text-[26px] font-bold leading-snug tracking-wide text-white">
+                「{appName}」<span className="font-semibold text-white/55">已被</span> {charName}{' '}
+                <span className="font-semibold text-white/55">锁定</span>
+              </h1>
+              {/* v2.2 需求二.4：锁定理由去掉圆角边框，直接放在主标题下面 */}
               <p className="max-w-[19rem] text-center text-[15px] font-normal leading-relaxed text-white/60">
                 {reasonText}
               </p>

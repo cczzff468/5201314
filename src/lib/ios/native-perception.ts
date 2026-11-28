@@ -1759,6 +1759,9 @@ export async function nativeSetVolume(volume: number): Promise<{ ok?: boolean; v
  * 非原生壳 → null；旧壳无该方法 → false。
  * v2.4.29（第四十八轮）：新增 avatar（角色头像：路径绝对 URL / dataURL）——原生侧
  * 下载或 base64 解码后作通知大图标（setLargeIcon）；正文自动 BigTextStyle 展开全文。
+ * v2.4.30（第四十九轮）：新增 appIcon（机主在 设置›APP图标 选择的图标，绝对 URL）——
+ * 大图标优先级：appIcon > avatar；headsUp 通知走三条 IMPORTANCE_HIGH 渠道轮询
+ * （防部分 ROM 同渠道折叠）+ DEFAULT_ALL（声音/震动/亮屏）。
  */
 export async function localNotify(opts: {
   title: string;
@@ -1766,15 +1769,17 @@ export async function localNotify(opts: {
   tag?: string;
   url?: string;
   target?: unknown;
-  /** 横幅优先级（默认 true：IMPORTANCE_HIGH 渠道弹横幅+响铃+震动；false 退回静默渠道） */
+  /** 横幅优先级（默认 true：IMPORTANCE_HIGH 多渠道轮询弹横幅+响铃+震动；false 退回静默渠道） */
   headsUp?: boolean;
-  /** 角色头像（绝对 URL / dataURL）：通知大图标；空则用 App 图标 */
+  /** 角色头像（绝对 URL / dataURL）：通知大图标回落 */
   avatar?: string;
+  /** 机主选择的 APP 图标（绝对 URL）：通知大图标优先项 */
+  appIcon?: string;
 }): Promise<boolean | null> {
   const p = await nativePlugin();
   if (!p) return null;
   try {
-    await nativeCall('localNotify', { title: opts.title, body: opts.body, tag: opts.tag, url: opts.url, target: opts.target, headsUp: opts.headsUp ?? true, avatar: opts.avatar }, 8000);
+    await nativeCall('localNotify', { title: opts.title, body: opts.body, tag: opts.tag, url: opts.url, target: opts.target, headsUp: opts.headsUp ?? true, avatar: opts.avatar, appIcon: opts.appIcon }, 8000);
     return true;
   } catch {
     return false;

@@ -14,8 +14,8 @@ android {
         applicationId "com.z.aiphone"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 93          // v2.4.29 通知排版/头像图标重做（BigTextStyle+角色头像+合并「发来了N条」）+ 图标安全区；v92 = 2.4.28 后台通知双根修（边界竞态+自适应快速轮询+pokeBgNotify）
-        versionName "2.4.29"    // v2.4.29：通知合并排版+角色头像大图标+单色小图标+PWA图标安全区
+        versionCode 94          // v2.4.30 一消息一弹窗（唯一tag+三渠道轮询+PRIORITY_MAX+DEFAULT_ALL+机主所选APP图标大图标）；v93 = 2.4.29 通知排版/头像图标重做
+        versionName "2.4.30"    // v2.4.30：一消息一弹窗通知重构+所选APP图标大图标+三渠道轮询
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.

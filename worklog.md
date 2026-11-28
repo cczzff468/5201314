@@ -3996,3 +3996,30 @@ Work Log:
 Stage Summary:
 - 通知三通道统一新口径：单条=角色名+那条消息（省略号），连发=「角色名：发来了 N 条新消息」+最新一条预览，BigTextStyle 下拉全文，头像大图标+单色气泡小图标
 - 文件 App = 极简毛玻璃胶囊存储管理器（hero 总览/胶囊列表/长按多选/专属详情页/一键云备份/健康检查/云端收纳）
+
+---
+Task ID: 5（第四十九轮）
+Agent: 主控 Agent（Z.ai Code）+ 三个并行子代理（2=文件宫格 / 3=五项UI修复 / 4=生活分享+response清洗）
+Task: v2.4.30(94) 一消息一弹窗通知重构 + 机主十项反馈修复
+
+Work Log:
+- 【通知·原生】BgNotifyPoller 彻底重写为「一消息一弹窗」：v2.4.29 的按会话合并（tag=bgm-<sessionKey> 原地更新「发来了 N 条」）全部推翻——每条新消息各建 NotificationJob（tag=bgm-<消息id> 唯一 (tag,id)，通知栏逐条独立堆叠绝不覆盖）；三条 IMPORTANCE_HIGH 渠道（local_notify_high/cove_msg_ch_2/cove_msg_ch_3）AtomicInteger 轮询使用（防 MIUI 等同渠道折叠）；PRIORITY_MAX + setDefaults(DEFAULT_ALL)（声/震/亮屏全开）；POST_SPACING 1.2s→0.9s
+- 【通知·原生】NativePerceptionPlugin.localNotify：新增 appIcon 参数（机主 设置›APP图标 所选图标 URL）作大图标最高优先级（>角色头像回落）；headsUp 同步三渠道轮询 + PRIORITY_MAX + DEFAULT_ALL；postLocalNotify 签名扩参
+- 【通知·大图标】BgNotifyPoller.chosenAppIconUrl：cove_prefs/icon_current('1'~'5') → {服务器base}/icons/app/icon-X-192.png（NotifyAvatars 下载+LRU 缓存，失败回落会话头像）——机主规格「通知前面的图标要显示我们选择的图标」
+- 【通知·桥接】native-perception.ts localNotify 增 appIcon 透传；message-notifications.ts 重写：删除 5s 突发批次合并（BurstState/bursts 整块删除）——一条消息一条独立通知（tag=msg-<消息id>）；chosenAppIconUrl() 从 settings.appIcon 同步读所选图标传原生
+- 【通知·前台闸】island-notify.maybeWebNotification 原生分支补 isPageBackground() 闸——只有 APP 在后台才弹系统通知（前台只弹应用内灵动岛；点进聊天页即见完整消息），与机主规格「只有APP在后台系统通知才通知」对齐
+- 【电池】StatusBar 电池图标完整回退 e45edd9（v2.4.28 充电绿）前原版：inside 模式 pill/描边恢复恒 currentColor、数字侧闪电恢复 fill-current；outside/none 模式恢复 1.8px 边距/2.5px 圆角/3.6px 宽度算式、居中闪电恢复 fill-white（充电绿填充系 e45edd9 之前既有口径保留）
+- 【API设置】「添加预设」chip 语义重做：点击=清空 API 地址+API Key（+模型列表/测试态重置）供从零填写，不再弹名称输入；连接配置区「保存预设」入口保留
+- 【文件App】应用占用列表改双列毛玻璃胶囊宫格：AppRow→AppCell（图标36px+名字+已备份绿点，无体积/占比/右侧不留白，grid-cols-2 依次排满）；多选栏/悬浮操作栏去字节数显示；长按手势/详情页/云备份/健康检查全保留
+- 【response清洗】reply-count.ts：BOUNDARY_SRC 增独立 response 词边界（i/gi），isSentence 判定改 /^[。！？!?～〜]/ 正测（response=丢弃型分隔），splitByBoundaryRaw+流式 scanner 双路同改；单条模式预剥；phone-tools.cleanToolLogs 增独立行+CJK 前缀 response 剥离——AI 回复混入的「response」分隔残留根修（bun 实测：截图原句切分无残留）
+- 【工具气泡】done 态绿色对号图标删除（只留文案；pending 转圈/fail 红叉/复制反馈保留）
+- 【锁定界面】JealousyLockOverlay：根节点挂 data-bleed（APK 出血铺满物理屏顶，状态栏沉浸）+ 内层 pt 5.5rem 避让；主标题重排为「「{应用名}」已被 {角色名} 锁定」（删「已冻结」状态行）；实测冻结信息→灰图标→点开→新文案+倒计时+沉浸渲染全对
+- 【真机锁】toolFreezeRealApp 删除「同步冻结网页图标」整块（setWebFrozen）——真机锁 QQ 只锁真机，不再连坐锁网页 QQ；unfreezeRealApp 残留清理保留
+- 【生活分享】life-share.ts 大改：①pickChannel 按三端最近活跃自动选投放端（wx/qq/sms，role=peer/assistant 分端，未读角标+头像+target 同步）②文字先行、图片并行生成后补投（生图失败不丢文字）+ /api/life-img 失败重试一次 ③每日次数 AI 决定：2/4/6 候选窗每窗一次 callLlmTwoTier 让 TA 按人设决定发不发/发什么（LLM 失败 50% 回落旧场景流）④新增事件型场景 fun/unlucky/missyou/random-thought/complain（纯文字 1~4 条，模板句兜底）
+- 【发版】versionCode 94 / 2.4.30 + gradle assembleDebug BUILD SUCCESSFUL + aapt 实测 94/2.4.30 + APK 部署 public/Cove.apk（8.1MB）
+- 【验证】lint 0 errors（12 warnings 全基线）；tsc 触碰文件 0 errors（tool-status-bubble 2 条为 stash 实证基线）；agent-browser 全链：登录→解锁→文件App 双列宫格（图标+名字+绿点、无体积无留白 VLM 确认）→API 设置清空实测→冻结信息→锁定界面新文案「信息已被谢予安锁定」+沉浸+倒计时→电池原版确认（充电绿填充系 e45edd9^ 既有）；response 切分 bun 实测三态全过；console/dev.log 零 error
+
+Stage Summary:
+- 系统通知「一消息一弹窗」三端（原生轮询/桥接/网页守望）彻底落地：唯一 tag + 三渠道轮询 + PRIORITY_MAX + DEFAULT_ALL + 机主所选 APP 图标大图标 + 仅后台弹（前台灵动岛）
+- 机主十项反馈全数修复：电池原版 / 添加预设=清空 / 文件宫格 / response 清洗 / 绿对号删除 / 锁定界面沉浸+新文案 / 真机锁不连坐 / 生活分享多端+AI次数+多元场景 / 图片补发
+- 关键文件：BgNotifyPoller.java、NativePerceptionPlugin.java、message-notifications.ts、island-notify.ts、native-perception.ts、StatusBar.tsx、settings/api.tsx、files/data-manager.tsx、reply-count.ts、life-share.ts、JealousyLockOverlay.tsx、web-tools.ts、tool-status-bubble.tsx、app-version.ts、build.gradle
