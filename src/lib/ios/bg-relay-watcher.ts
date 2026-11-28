@@ -92,21 +92,26 @@ function pokeNativePoller(): void {
   }
 }
 
-/** APK 退后台期间原生 BgNotifyPoller 已弹过 heads-up 的批次，回前台后绝不再弹（防双弹）。
- * 模块加载即同步执行（先于任何聊天页挂载/投递）：原生侧存的是服务端同构 batchKey
- * （`${sessionKey}#${count}#${hash}`），直接并入 seen 集合；对应会话再拉横幅抑制
- * （聊天页正式投递同一批时三出口全跳，与守望者自己弹过后的口径一致）。 */
+/** APK 退后台期间原生 BgNotifyPoller 已弹过 heads-up 的批次/消息，回前台后绝不再弹（防双弹）。
+ * 模块加载即同步执行（先于任何聊天页挂载/投递）：
+ * - batchKeys（`${sessionKey}#${count}#${hash}`）并入 seen 集合（旧口径兼容）；
+ * - v2.4.32 msgIds（原生真实弹过通知的消息 id）并入消息 id 去重集合——增量入队后
+ *   守望者按消息粒度去重，原生弹过的消息 id 不吸收就会在回前台 peek 时重弹一遍；
+ * 两者都对应会话拉横幅抑制（聊天页正式投递同一批时三出口全跳）。 */
 function absorbNativeNotifiedBatches(): void {
   try {
     const N = (window as unknown as { AIPhoneNative?: AIPhoneNativeBg }).AIPhoneNative;
     if (!N || typeof N.consumeBgNotified !== 'function') return;
     const raw = N.consumeBgNotified();
     if (!raw) return;
-    const parsed = JSON.parse(raw) as { batchKeys?: unknown };
+    const parsed = JSON.parse(raw) as { batchKeys?: unknown; msgIds?: unknown };
     const keys = Array.isArray(parsed.batchKeys)
       ? parsed.batchKeys.filter((k): k is string => typeof k === 'string')
       : [];
-    if (keys.length === 0) return;
+    const ids = Array.isArray(parsed.msgIds)
+      ? parsed.msgIds.filter((k): k is string => typeof k === 'string')
+      : [];
+    if (keys.length === 0 && ids.length === 0) return;
     const seen = loadSeen();
     let changed = false;
     for (const bk of keys) {
@@ -117,6 +122,16 @@ function absorbNativeNotifiedBatches(): void {
       if (key) suppressSessionBanner(key);
     }
     if (changed) saveSeen(seen);
+    if (ids.length > 0) {
+      const msgSeen = loadSeenMsgIds();
+      let idChanged = false;
+      for (const id of ids) {
+        if (msgSeen.has(id)) continue;
+        msgSeen.add(id);
+        idChanged = true;
+      }
+      if (idChanged) saveSeenMsgIds(msgSeen);
+    }
   } catch {
     // 原生桥不存在/返回异常：静默（非 APK 或旧壳）
   }
@@ -169,6 +184,11 @@ const EVENT_DEBOUNCE_MS = 120;
 const SEEN_KEY = 'bg-relay-bannered';
 /** 去重集合上限（超出淘汰最旧；旧条目残留无害——服务端队列被消费后重复键不再出现） */
 const SEEN_MAX = 200;
+/** v2.4.32 已弹【消息】id 去重持久化键（增量入队后同一批消息随生成逐条到达，
+ *  batchKey 随 count 变化——旧批次键去重会把后续新消息重复弹；改按消息 id 粒度） */
+const SEEN_MSG_KEY = 'bg-relay-seen-msgids';
+/** 消息 id 去重集合上限 */
+const SEEN_MSG_MAX = 400;
 
 // ---------------- sessionKey → 通知归属/点击跳转 ----------------
 
@@ -211,6 +231,26 @@ function saveSeen(set: Set<string>): void {
     window.localStorage.setItem(SEEN_KEY, JSON.stringify([...set].slice(-SEEN_MAX)));
   } catch {
     // 持久化失败忽略（内存态去重本次会话仍生效）
+  }
+}
+
+// ---------------- v2.4.32 消息 id 去重集合（localStorage 持久化） ----------------
+
+function loadSeenMsgIds(): Set<string> {
+  try {
+    const raw = window.localStorage.getItem(SEEN_MSG_KEY);
+    const arr: unknown = raw ? JSON.parse(raw) : [];
+    return new Set(Array.isArray(arr) ? arr.filter((x): x is string => typeof x === 'string') : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function saveSeenMsgIds(set: Set<string>): void {
+  try {
+    window.localStorage.setItem(SEEN_MSG_KEY, JSON.stringify([...set].slice(-SEEN_MSG_MAX)));
+  } catch {
+    // 持久化失败忽略
   }
 }
 
@@ -260,7 +300,11 @@ async function peekOnce(): Promise<void> {
     const { isChatStreaming } = await import('../chat-stream-store');
     const { isAiDelivering } = await import('./ai-delivery');
     const seen = loadSeen();
+    // v2.4.32 消息 id 粒度去重：增量入队后同一批消息随生成逐条到达（batchKey/count 持续
+    // 变化），旧批次键去重会把已弹过的旧消息再弹一遍——改按稳定消息 id 只弹没弹过的
+    const msgSeen = loadSeenMsgIds();
     let changed = false;
+    let msgSeenChanged = false;
     for (const [key, p] of Object.entries(data.previews)) {
       if (!p || !(p.count > 0)) continue;
       const parsed = parseSessionTarget(key);
@@ -275,31 +319,34 @@ async function peekOnce(): Promise<void> {
       const snapMsgs = Array.isArray(p.messages)
         ? p.messages.filter((m) => m && typeof m.id === 'string' && typeof m.text === 'string')
         : [];
-      if (snapMsgs.length > 0) {
-        snapRelayMessages(key, snapMsgs);
-      } else {
-        // 服务端旧版本无逐条 messages 字段：用首条预览落一条快照（id 用 batchKey 保幂等）
+      if (snapMsgs.length === 0) {
+        // 服务端旧版本无逐条 messages 字段：批次键去重 + 单条预览弹一次（兼容回退）
         snapRelayMessages(key, [{ id: batchKey, text: preview }]);
+        if (seen.has(batchKey)) continue;
+        seen.add(batchKey);
+        changed = true;
+        clearSessionBannerSuppress(key);
+        pushChatNotification({
+          sessionKey: key,
+          app: parsed.app,
+          title: p.title?.trim() || '新消息',
+          avatar: p.avatar ?? null,
+          body: preview,
+          target: parsed.target,
+        });
+        suppressSessionBanner(key);
+        continue;
       }
-      if (seen.has(batchKey)) continue; // 这批已弹过横幅（未投递但已告知）
-      seen.add(batchKey);
-      changed = true;
-      // v1.9.8.1 关键：这是「新批次」（数量/首条预览变化）——先清掉旧批次的横幅抑制，
-      // 否则旧抑制会把新内容的横幅吃掉（实测：首 peek 弹批次#3 并抑制会话后，
-      // 5min 内到达的批次#4 横幅被吞）。清旧 → 弹新 → 重新武装，抑制永远只覆盖
-      // 「已弹过横幅的当前批」，正式投递同一批时不重复弹
-      clearSessionBannerSuppress(key);
-      // v2.4.28（第四十七轮·逐条弹根修）：服务端带回逐条消息时每条消息各弹一次
-      // （灵动岛横幅逐条排队 + 原生 localNotify 逐条 heads-up，串行间隔 2.4s）——
-      // 旧实现一批只弹一条首条预览横幅，机主看到的正是「把 AI 的消息弄到一起了」。
-      // 服务端旧版本无 messages 字段时回退单条预览（兼容）。
-      const msgs = Array.isArray(p.messages) ? p.messages : [];
-      const bodies = msgs
-        .filter((m) => m && typeof m.id === 'string' && typeof m.text === 'string')
-        .map((m) => truncateBody(m.text))
-        .filter((t) => t.length > 0);
-      if (bodies.length > 0) {
-        for (const body of bodies) {
+      snapRelayMessages(key, snapMsgs);
+      // 逐条弹：只弹本次新到的消息 id（增量到达的第 N 条只弹第 N 条，绝不重弹旧消息）
+      let anyNewMsg = false;
+      for (const m of snapMsgs) {
+        if (msgSeen.has(m.id)) continue;
+        msgSeen.add(m.id);
+        msgSeenChanged = true;
+        anyNewMsg = true;
+        const body = truncateBody(m.text);
+        if (body) {
           pushChatNotification({
             sessionKey: key,
             app: parsed.app,
@@ -309,20 +356,20 @@ async function peekOnce(): Promise<void> {
             target: parsed.target,
           });
         }
-      } else {
-        pushChatNotification({
-          sessionKey: key,
-          app: parsed.app,
-          title: p.title?.trim() || '新消息',
-          avatar: p.avatar ?? null,
-          body: preview,
-          target: parsed.target,
-        });
       }
+      if (!anyNewMsg) continue; // 本批没有新消息（全部弹过/已吸收）：不新增抑制标记
+      seen.add(batchKey);
+      changed = true;
+      // v1.9.8.1 关键：这是「新批次」（数量/首条预览变化）——先清掉旧批次的横幅抑制，
+      // 否则旧抑制会把新内容的横幅吃掉（实测：首 peek 弹批次#3 并抑制会话后，
+      // 5min 内到达的批次#4 横幅被吞）。清旧 → 弹新 → 重新武装，抑制永远只覆盖
+      // 「已弹过横幅的当前批」，正式投递同一批时不重复弹
+      clearSessionBannerSuppress(key);
       // 正式投递同一批消息时不再重复弹（投递忙→闲跃迁或 TTL 后解除）
       suppressSessionBanner(key);
     }
     if (changed) saveSeen(seen);
+    if (msgSeenChanged) saveSeenMsgIds(msgSeen);
     // v2.4.27：周期同步原生轮询配置（地址/总闸/免打扰）——设置变更最多一个 peek 周期内生效
     pushNativePollConfig();
   } catch {

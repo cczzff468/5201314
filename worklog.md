@@ -4049,3 +4049,31 @@ Stage Summary:
 - 悬浮弹窗合并双根修补完：服务端 Web Push 逐条推（v2.4.30 漏改）+ 切句口径对齐（通知条数=聊天页条数）
 - AI 锁应用恢复网页同步冻结（聊天类不连坐）；文件 App 按机主要求精简（去详情页/去健康检查/三按钮备份区）
 - 关键文件：relay-snap.ts（新）、bg-relay-watcher.ts、api/chat/bg/route.ts、server/push-send.ts、web-tools.ts、wx-app/chat-page.tsx、qq-app/chat-page.tsx、chat.tsx、files/data-manager.tsx、files.tsx、app-version.ts
+
+## v2.4.32（第五十一轮）：后台通知即时弹出根修 + 锁定界面三连修 + 文件App云端区改版
+
+Stage: 完成（mock 流式上游端到端验证 + 浏览器实测通过）
+
+改动明细：
+- 【通知即时弹出·核心】api/chat/bg generateAndEnqueue 重写为流式增量入队：不再「等整段回复生成完才一次性入队」（后台通知全堆在回复结束才弹+铃声连响的根因），改为逐块读取 /api/chat 流式响应，凑齐一条完整消息（换行/&&& 硬边界闭合）立刻 enqueue 成独立 PendingItem（single=false）——原生轮询器（4s 快节奏）/Web Push/SSE 广播马上可见，AI 每发一条系统通知+铃声立即弹一次；思考块 [思考]…[/思考] 整块丢弃（跨行安全，兼修旧口径思考文本可能漏进通知）；未闭合 [ / 【 标记扣留拼回（照片/红包标记不被切碎）；中途断流已入队过分段绝不 forceSdk 重试（防重复弹）；单行长文无硬边界时维持旧口径整段入队（single=true）；取消标记 latched 旗标（一次性消费后后续分段绝不入队）
+- 【守望者按消息 id 去重】bg-relay-watcher.ts：增量入队后同一批消息随生成逐条到达（batchKey/count 持续变化），旧批次键去重会重弹旧消息——新增 bg-relay-seen-msgids 持久化集合（上限 400），只弹没弹过的消息 id；快照落库照旧幂等（先落库再弹）；服务端无 messages 字段时回退批次键去重（兼容旧壳）
+- 【原生透传已弹消息 id】BgNotifyPoller.java：pollOnce 收集真实入队的消息 id → appendPendingMsgIds 待认领（上限 120）→ consumeNotifiedBatches 返回 {batchKeys, msgIds}；网页 absorbNativeNotifiedBatches 吸收 msgIds 进消息 id 去重集合 + batchKeys 进 seen + 会话横幅抑制——原生/网页两通道零重复
+- 【锁定界面沉浸式再根修】LockOverlayService.java showOverlay：API 30+ 增加 lp.setFitInsetsTypes(0)+setFitInsetsSides(0)+setFitInsetsIgnoringVisibility(true)——部分 ROM（MIUI/HyperOS、ColorOS）对 TYPE_APPLICATION_OVERLAY 不理会 FLAG_LAYOUT_NO_LIMITS（按 fitInsetsTypes 默认值把窗口内缩到系统栏下方，顶部条带露出桌面底色），fitInsets 新口径让遮罩真正铺满物理屏；API 26~29 维持 NO_LIMITS 主通道
+- 【锁定界面文案】原生主标题「{App名} 已被锁定」→「{App名} 已被 {TA名} 锁定」（机主规格一句话说清锁定关系）
+- 【锁定界面头像/名字根修】device-ops.ts labLockApp 单一收口点兜底：缺名字或缺头像时先按 contactId 解析联系人（名字+对应 App 槽位头像），contactId 缺失/解析不到回退情侣空间绑定恋人（readInviteMeta.partnerContactId+partnerApp）——语音球 Agent/确定性兜底/群聊等无会话上下文路径建锁不再只显「TA」+首字占位
+- 【会话上下文补登记】web-agent.ts runAgentTask 初始化时 setToolSessionContext（AgentCtx 扩展 sessionKey/charName；无会话键时清残留旧上下文）；phone-tools.ts execDetIntent 代执行前同样登记
+- 【文件App云端区改版】files/data-manager.tsx：①一键云端备份从快捷操作移入「云端与恢复」卡片顶部 + 新增「拉取备份」并排按钮（doPullBackup：拉云端最新一份→确认弹窗→恢复；云端无备份/未部署友好提示）②应用占用胶囊美化：绿点删除（机主规格）、名称+占用大小两行文案、底部相对用量细条（中性色 4%~100%）、图标轻投影、勾选框移右上角、骨架屏同步重做③快捷操作收敛为 备份/清除数据/导入备份 三胶囊
+- 【版本】2.4.32（versionCode 不动 94）+ 版本历史五条更新说明（通知即时弹出/沉浸式/头像名字/文件App/防双弹）
+
+验证：
+- lint 0 errors（12 warnings 全基线）+ tsc --noEmit 零错误
+- 增量分段算法 node 独立实测 5 用例全过（逐字符流式切分/思考块跨行剥离/未闭合标记扣留拼回/单行整段/掐断思考保留前文）
+- mock 流式上游（nip.io 公网域名形式绕过 isPrivateHost）端到端实测：POST mode=generate → pollNative 逐轮观察，三条消息随生成逐条入队可见（t+1s/t+3s/t+6s，mock 每条间隔 2.5s）——「AI 发出来信息立马就弹出来」核心目标达成；peekAll preview 视图同口径逐条；consume 清队后 sessions 空
+- agent-browser 实测：解锁→文件 App（应用占用 13 格两行文案+用量条+无绿点渲染正确、快捷操作三胶囊、云端与恢复顶部双按钮「一键云端备份」蓝底+「拉取备份」描边、拉取备份未部署云端的友好 toast）；console/page 零 error
+- 测试数据与 mock 服务全部清理；dev.log 干净
+
+Stage Summary:
+- 后台通知从「回复完才弹」到「发一条弹一条」：服务端接力流式增量入队是根修（通知/铃声/快照落库/Web Push 全部随生成逐条到达），守望者按消息 id 去重 + 原生 msgIds 认领防双弹
+- 锁定界面三连修：沉浸式（fitInsets 新口径）+「xx 已被 xx 锁定」文案 + AI 头像/名字全路径兜底（会话联系人→情侣绑定）
+- 文件 App：一键云端备份+拉取备份入「云端与恢复」区；应用占用胶囊去绿点+大小+用量条美化
+- 关键文件：api/chat/bg/route.ts、bg-relay-watcher.ts、BgNotifyPoller.java、LockOverlayService.java、device-ops.ts、web-agent.ts、phone-tools.ts、files/data-manager.tsx、files.tsx、app-version.ts

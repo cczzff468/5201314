@@ -357,45 +357,158 @@ interface BgPayload {
   config?: unknown;
 }
 
+/**
+ * v2.4.32（机主规格「AI 发出来信息立马就弹通知，不等他回复完」）：
+ * 流式增量入队——服务端接力不再「等整段回复生成完才一次性入队」（那是后台通知
+ * 全部堆在回复结束才弹 + 铃声连响一串的根因），改为边生成边入队：
+ * - /api/chat 的响应本身就是流式 text/plain（上游 SSE → 文本流）：逐块读取，
+ *   凑齐一条完整消息（换行 / &&& 硬边界闭合）立刻 enqueue 成独立 PendingItem
+ *   （single=false，一条 text）——原生轮询器（4s 快节奏）/ Web Push / SSE 广播
+ *   马上就能看到它：AI 每发一条，系统通知 + 铃声立即弹一次；
+ * - 收尾剩余尾段（无换行的最后一句）流结束时入队；整段回复一个硬边界都没有
+ *   （单行长文）时维持旧口径整段入队（single=true，客户端按完整回复解析）；
+ * - 每次入队前检查接力取消标记（用户回页发新消息接管）——标记一次性消费，
+ *   用本地 latched 旗标保证取消后后续分段绝不入队。
+ */
 async function generateAndEnqueue(sessionKey: string, payload: BgPayload, title: string): Promise<void> {
   // 生成开始时刻：cancel 只丢弃「取消前已开始的生成」（用户回页发新消息接管，迟到的旧接力回复作废）；
   // 取消之后新开始的生成（用户接管后又关页）不受影响。deliver 模式永不取消（丢现成消息比多一条更糟）。
   const startedAt = Date.now();
-  const isCancelled = (): boolean => {
+  let cancelledFlag = false;
+  const checkCancel = (): boolean => {
+    if (cancelledFlag) return true;
     const at = cancelled.get(sessionKey);
     if (at === undefined) return false;
     cancelled.delete(sessionKey);
-    return at > startedAt;
+    if (at > startedAt) cancelledFlag = true;
+    return cancelledFlag;
   };
   try {
     const messages = Array.isArray(payload.messages) ? payload.messages : null;
     if (!messages) {
-      if (!isCancelled()) enqueue(sessionKey, ['〔对方暂时没有回复，请稍后再试〕'], true, title);
+      if (!checkCancel()) enqueue(sessionKey, ['〔对方暂时没有回复，请稍后再试〕'], true, title);
       return;
     }
     const port = process.env.PORT || '3000';
-    const call = async (extra: Record<string, unknown>): Promise<string> => {
+    /**
+     * 流式生成 + 增量入队：返回是否成功启动读取（true = 已按流处理，包括「整段无硬边界」
+     * 的收尾整段入队；false = 请求失败，调用方走 forceSdk 兜底/占位文案）。
+     */
+    const streamOnce = async (extra: Record<string, unknown>): Promise<boolean> => {
       const res = await fetch(`http://127.0.0.1:${port}/api/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ messages, ...extra }),
       });
-      return res.ok ? (await res.text()).trim() : '';
+      if (!res.ok || !res.body) return false;
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buf = '';
+      let emittedAny = false;
+      // [思考]…[/思考] 深度思考块跨多行：增量分段必须整块丢弃（客户端流式管线同款语义——
+      // 思考内容绝不进气泡/通知；旧口径 single=true 时靠客户端 buildReplyMsgs 兜底剥，
+      // 但通知侧 splitSingleReply 没剥——思考文本曾有机会漏进系统通知，这里一并根修）
+      let inThink = false;
+      // 未闭合 [ / 【 的段先扣住等闭合（与 splitSingleReply 的 hasOpenBracket 同口径：
+      // 祝福语「！」切碎红包/照片标记的场景；跨段的标记在此拼回原样）
+      let held = '';
+      /** 段处理：思考块丢弃 + 未闭合标记扣留 + 净化后入队 */
+      const emitSegment = (segRaw: string): void => {
+        let piece = held + segRaw;
+        held = '';
+        if (inThink) {
+          const closeIdx = piece.indexOf('[/思考]');
+          if (closeIdx < 0) return; // 还在思考块里：整段丢弃
+          inThink = false;
+          piece = piece.slice(closeIdx + '[/思考]'.length);
+        }
+        const openIdx = piece.indexOf('[思考]');
+        if (openIdx >= 0) {
+          const before = piece.slice(0, openIdx);
+          const rest = piece.slice(openIdx + '[思考]'.length);
+          const closeIdx = rest.indexOf('[/思考]');
+          if (closeIdx >= 0) piece = before + rest.slice(closeIdx + '[/思考]'.length);
+          else {
+            inThink = true;
+            piece = before;
+          }
+        }
+        const t = piece.trim().slice(0, TEXT_MAX);
+        if (!t) return;
+        if (checkCancel()) return;
+        enqueue(sessionKey, [t], false, title);
+        emittedAny = true;
+      };
+      const scanBoundaries = (): void => {
+        // 非全局正则（无 lastIndex 副作用）；从 buf 头部逐个找硬边界，闭合即出段
+        const BOUNDARY = /&{3,}|\n/;
+        for (;;) {
+          const m = BOUNDARY.exec(buf);
+          if (!m) break;
+          const seg = buf.slice(0, m.index);
+          buf = buf.slice(m.index + m[0].length);
+          // 未闭合半角 [ / 全角【（splitSingleReply 同款）：扣住拼下一段（照片/红包标记
+          // 内部的换行/句末标点不是消息边界）；思考块期间不扣（整块本来就丢弃）
+          const hasOpenBracket =
+            !inThink && (seg.lastIndexOf('[') > seg.lastIndexOf(']') || seg.lastIndexOf('\u3010') > seg.lastIndexOf('\u3011'));
+          if (hasOpenBracket) {
+            held += seg;
+            continue;
+          }
+          emitSegment(seg);
+        }
+      };
+      // 读取循环内部容错：中途断流时已入队过分段绝不外抛（外层会 forceSdk 重试 →
+      // 重复弹通知/落库），按「部分完成」收场；一段都没入队过才返回 false 允许重试
+      let readErr = false;
+      try {
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          if (value && value.length > 0) {
+            buf += decoder.decode(value, { stream: true });
+            scanBoundaries();
+          }
+        }
+        buf += decoder.decode();
+      } catch {
+        readErr = true;
+      }
+      if (readErr) return emittedAny;
+      // 尾段：扣住的未闭合标记残余 + 最后一句一起收尾（未闭合标记原样交客户端，
+      // stripUnfinishedPhotoTag 兜底剥除防半截上屏）
+      const tail = held + buf;
+      held = '';
+      if (tail.trim()) emitSegment(tail);
+      // 整段一个硬边界都没有（单行长文）：维持旧口径整段入队（single=true，
+      // 客户端按完整回复解析 + 通知侧 splitSingleReply 切句逐条弹；思考块先剥净）
+      if (!emittedAny && !cancelledFlag) {
+        const full = buf
+          .replace(/\[思考\][\s\S]*?\[\/思考\]/g, '')
+          .replace(/\[思考\][\s\S]*$/g, '')
+          .trim();
+        if (full) enqueue(sessionKey, [full.slice(0, TEXT_MAX)], true, title);
+        else return false; // 空回复：让调用方走兜底
+      }
+      return true;
     };
     // 先按用户配置的原链路生成（上游代理 / 内置模型）；失败（含局域网地址 directOnly 502、
     // 上游断网、空回复）再用内置模型兜底一次 —— 用户关页前的最后一句话必须有人接，
     // 否则重开网页前回复永远不出现（日志实测：上游为内网地址时第一路必然 502）
-    let text = await call(payload.config && typeof payload.config === 'object' ? { config: payload.config } : {});
-    if (!text) {
+    const okStream = await streamOnce(payload.config && typeof payload.config === 'object' ? { config: payload.config } : {}).catch(() => false);
+    if (!okStream) {
       try {
-        text = await call({ forceSdk: true });
+        const okSdk = await streamOnce({ forceSdk: true });
+        if (!okSdk && !checkCancel()) {
+          enqueue(sessionKey, ['〔对方暂时没有回复，请稍后再试〕'], true, title);
+        }
       } catch {
         // 兜底也失败 → 占位文案
+        if (!checkCancel()) enqueue(sessionKey, ['〔对方暂时没有回复，请稍后再试〕'], true, title);
       }
     }
-    if (!isCancelled()) enqueue(sessionKey, [text || '〔对方暂时没有回复，请稍后再试〕'], true, title);
   } catch {
-    if (!isCancelled()) enqueue(sessionKey, ['〔对方暂时没有回复，请稍后再试〕'], true, title);
+    if (!checkCancel()) enqueue(sessionKey, ['〔对方暂时没有回复，请稍后再试〕'], true, title);
   } finally {
     generating.delete(sessionKey);
   }

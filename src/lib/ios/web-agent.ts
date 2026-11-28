@@ -183,6 +183,11 @@ export interface AgentResult {
 export interface AgentCtx {
   /** 最近对话（语音球交接任务时的指代消解：「再试一次/继续」脱离会话没法懂） */
   recentChat?: string;
+  /** v2.4.32 当前会话键（wx:/qq:/sms:…）：工具执行上下文用——锁应用等需要
+   *  联系人身份（charName/contactId）的工具不再拿到空上下文（拦截窗只显「TA」的根因） */
+  sessionKey?: string;
+  /** 当前角色名（与会话键配套） */
+  charName?: string;
 }
 
 /** 任务终态播报钩子（agent-voice-ball 注册：语音来源的任务结束时朗读结果） */
@@ -269,6 +274,15 @@ export async function runAgentTask(
 
   // ---- 初始化 ----
   stopFlag = false;
+  // v2.4.32 工具会话上下文：语音球/AI浏览器等无聊天页路径建锁时 charName/contactId 全空
+  // （拦截窗只显「TA」+无头像的根因）——有会话键就先登记，让 execWebTool 内的
+  // freezeRealApp/lockApp 拿到完整联系人身份；无会话键时至少不再残留上一轮的旧上下文。
+  try {
+    const { setToolSessionContext } = await import('./web-tools');
+    setToolSessionContext(opts?.ctx?.sessionKey ?? '', opts?.ctx?.charName ?? '');
+  } catch {
+    /* 上下文登记失败不影响任务 */
+  }
   const maxRounds = Math.max(3, Math.min(12, opts?.maxRounds ?? 8));
   patchAgentState({
     running: true,

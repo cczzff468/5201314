@@ -587,6 +587,22 @@ public class LockOverlayService extends Service {
                 // 顶部条带与下方遮罩逐像素连续；状态栏图标仍由系统画在最上层（时间/电量
                 // 正常可见，正是锁屏该有的样子）。
                 lp.flags |= WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS;
+                // v2.4.32（机主再报「状态栏后面还是没有沉浸式」根修）：FLAG_LAYOUT_NO_LIMITS
+                // 在部分 ROM（MIUI/HyperOS、ColorOS 等）上对 TYPE_APPLICATION_OVERLAY 不生效——
+                // 这些 ROM 按 fitInsetsTypes 默认值（状态栏+导航栏）把窗口内缩到系统栏下方，
+                // 顶部条带露出桌面底色。API 30+ 的正解是 setFitInsetsTypes(0)（不避让任何
+                // 系统栏）+ setFitInsetsSides(0) + setFitInsetsIgnoringVisibility(true)：窗口
+                // 物理尺寸即全屏，深色遮罩逐像素压到状态栏/导航栏下方（图标仍由系统画在
+                // 最上层，正是锁屏该有的样子）。API 26~29 维持 NO_LIMITS 主通道。
+                if (Build.VERSION.SDK_INT >= 30) {
+                    try {
+                        lp.setFitInsetsTypes(0);
+                        lp.setFitInsetsSides(0);
+                        lp.setFitInsetsIgnoringVisibility(true);
+                    } catch (Throwable ignored) {
+                        // 个别 ROM 不认 fitInsets：静默退化（NO_LIMITS 仍在）
+                    }
+                }
                 // v2.4.2 毛玻璃（机主规格 backdrop-filter: blur(20px)）：API 31+ 开
                 // FLAG_BLUR_BEHIND + setBlurBehindRadius —— 系统级背后实时模糊；
                 // 不支持的 ROM 自动退化为纯深色遮罩（rgba(0,0,0,0.7) 由根视图承担）。
@@ -704,9 +720,10 @@ public class LockOverlayService extends Service {
         name.setPadding(0, dp(12), 0, 0);
         box.addView(name);
 
-        // 主标题：{应用名} 已被锁定（纯白粗体大字——机主规格）
+        // 主标题：{应用名} 已被 {角色名} 锁定（v2.4.32 机主规格「xx（APP名）已被xxx（AI名）锁定」：
+        // 一句话说清锁定关系——谁锁的什么；纯白粗体大字）
         TextView title = new TextView(ctx);
-        title.setText(what + " 已被锁定");
+        title.setText(what + " 已被 " + who + " 锁定");
         title.setTextSize(26);
         title.setTypeface(Typeface.DEFAULT_BOLD, Typeface.BOLD);
         title.setTextColor(Color.WHITE);

@@ -2087,6 +2087,16 @@ async function execDetIntent(
   if (opts?.sessionKey) {
     pushToolStatusBubble(opts.sessionKey, { title: `${charName}正在${actionText}...`, status: 'pending' });
   }
+  // v2.4.32 会话上下文补登记：确定性兜底路径此前不登记（getToolSessionContext 拿到的
+  // 可能是空/残留值——锁应用等需要联系人身份的工具丢 charName/contactId，拦截窗只显「TA」）
+  if (opts?.sessionKey) {
+    try {
+      const { setToolSessionContext } = await import('./web-tools');
+      setToolSessionContext(opts.sessionKey, opts.charName || '');
+    } catch {
+      /* 登记失败不影响代执行 */
+    }
+  }
   let result: string;
   try {
     result = await withTimeout(execWebTool(toolName, toolArgs), TOOL_EXEC_TIMEOUT_MS, '工具执行超时（120s）');

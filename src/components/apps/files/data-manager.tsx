@@ -1,22 +1,20 @@
 'use client';
 
 /**
- * 文件 App · 存储管理（v2.4.31 第五十轮改版）
+ * 文件 App · 存储管理（v2.4.32 第五十一轮改版）
  *
- * 彻底推翻 Terminal 终端风，改为「极简毛玻璃 + 胶囊」高级设计：
- * - 视觉：页面底色浅色 #F5F5F7 / 深色 #0E0E12；所有卡片为微投影毛玻璃
- *   （rounded-[28px] + 极弱 ring + 0.035 投影），一切操作按钮 / 选中标记 /
- *   状态 chip / 悬浮栏一律 rounded-full 胶囊；
- * - 配色写死 iOS 系统色：主操作蓝 #007AFF（备份/选中态）、健康绿 #34C759
- *   （已备份）、危险红 #FF3B30（清理/清除数据），文本 zinc 系，全 dark: 变体；
- * - 结构（自上而下）：毛玻璃 hero 总览（总占用大数字 + 已备份/可清理胶囊 + 刷新）→
- *   应用占用双列宫格胶囊（图标 + 名称 + 已备份绿点；长按 480ms 进多选，
- *   多选时 hero 收起 + 底部滑出毛玻璃悬浮操作栏；v2.4.31 起短按不再进详情页）→
- *   快捷操作（一键云端备份整行 + 备份 / 清除数据 / 导入备份三胶囊；
- *   v2.4.31 起健康检查已删除）→ 云端与恢复安静收纳区（恢复 / 记录 / 导入 /
- *   自动备份 / 持久化）；
- * - 操作反馈全部用 sonner 轻提示，危险操作走毛玻璃 AlertDialog；
- * - 数据层（app-storage / storage-stats / backup / cloud-backup）原样复用，零改动。
+ * 机主规格四项：
+ * - 一键云端备份从「快捷操作」移入「云端与恢复」区（与云端能力同区）；
+ * - 新增「拉取备份」：从云端拉最新一份备份 → 确认后恢复（与云端恢复同款确认弹窗）；
+ * - 应用占用胶囊美化：绿点删除、两行文案（名称 + 占用大小）、底部相对用量细条；
+ * - 快捷操作区收敛为 备份 / 清除数据 / 导入备份 三胶囊。
+ *
+ * 视觉：页面底色浅色 #F5F5F7 / 深色 #0E0E12；所有卡片为微投影毛玻璃
+ * （rounded-[28px] + 极弱 ring + 0.035 投影），操作按钮一律胶囊；
+ * 配色写死 iOS 系统色：主操作蓝 #007AFF（备份/选中态）、危险红 #FF3B30
+ * （清理/清除数据），文本 zinc 系，全 dark: 变体；
+ * 操作反馈全部用 sonner 轻提示，危险操作走毛玻璃 AlertDialog；
+ * 数据层（app-storage / storage-stats / backup / cloud-backup）原样复用，零改动。
  */
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
@@ -174,10 +172,14 @@ function GlassConfirm({
  * pointer events 自实现（触摸隐式捕获保证抬手事件必达），键盘 Enter/Space 等价短按。
  */
 function AppCell({
-  app, safe, selected, multiMode, disabled, onTap, onLongPress,
+  app, safe, size, share, selected, multiMode, disabled, onTap, onLongPress,
 }: {
   app: AppModuleDef;
   safe: boolean;
+  /** 占用字节数（v2.4.32 两行文案的第二行） */
+  size: number;
+  /** 相对总占用比例 0~1（v2.4.32 底部用量细条宽度） */
+  share: number;
   selected: boolean;
   multiMode: boolean;
   disabled: boolean;
@@ -247,7 +249,7 @@ function AppCell({
     <div
       role="button"
       tabIndex={0}
-      aria-label={`${app.label}，${safe ? '已备份，' : ''}长按多选`}
+      aria-label={`${app.label}，占用 ${formatBytesAscii(size)}，长按多选`}
       onPointerDown={handleDown}
       onPointerMove={handleMove}
       onPointerUp={handleUp}
@@ -260,31 +262,47 @@ function AppCell({
           if (!disabled) onTap();
         }
       }}
-      className={`flex h-14 w-full cursor-pointer select-none items-center gap-2 px-3 transition-all duration-200 [-webkit-touch-callout:none] ${
+      className={`relative flex h-[72px] w-full cursor-pointer select-none flex-col justify-center gap-2 overflow-hidden rounded-[22px] px-3 transition-all duration-200 [-webkit-touch-callout:none] ${
         selected && multiMode
-          ? 'scale-[1.03] rounded-full bg-[#007AFF]/[0.06] ring-1 ring-[#007AFF]/40 backdrop-blur-2xl shadow-[0_2px_12px_rgba(0,0,0,0.035)] dark:bg-[#007AFF]/[0.10]'
-          : `rounded-full ${GLASS_BASE}`
+          ? 'scale-[1.02] bg-[#007AFF]/[0.07] ring-1 ring-[#007AFF]/45 backdrop-blur-2xl shadow-[0_2px_14px_rgba(0,0,0,0.05)] dark:bg-[#007AFF]/[0.12]'
+          : GLASS_BASE
       } ${disabled ? 'opacity-60' : 'active:scale-[0.98]'}`}
     >
-      {/* 彩色原样 App 图标 */}
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src={app.icon} alt={`${app.label}图标`} className="h-9 w-9 shrink-0 rounded-[11px] object-cover" draggable={false} />
-
-      {/* 名称（已备份加绿点），不显示占用大小 */}
-      <div className="min-w-0 flex-1">
-        <p className="flex items-center gap-1">
-          <span className="truncate text-[14px] font-semibold leading-tight text-zinc-800 dark:text-zinc-100">{app.label}</span>
-          {safe && <span aria-label="已备份" title="已备份" className="h-[7px] w-[7px] shrink-0 rounded-full bg-[#34C759]" />}
-        </p>
+      {/* 行：彩色 App 图标 + 名称/大小两行（v2.4.32：绿点已删，改大小副行） */}
+      <div className="flex min-w-0 items-center gap-2.5">
+        {/* 彩色原样 App 图标（轻投影提升质感） */}
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={app.icon}
+          alt={`${app.label}图标`}
+          className="h-[38px] w-[38px] shrink-0 rounded-[11px] object-cover shadow-[0_2px_8px_rgba(0,0,0,0.10)]"
+          draggable={false}
+        />
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-[13.5px] font-semibold leading-tight text-zinc-800 dark:text-zinc-100">
+            {app.label}
+          </p>
+          <p className="mt-0.5 truncate text-[11px] font-medium tabular-nums text-zinc-400 dark:text-zinc-500">
+            {safe ? '已备份 · ' : ''}
+            {formatBytesAscii(size)}
+          </p>
+        </div>
+      </div>
+      {/* 底部相对用量细条（v2.4.32 美化：中性色，宽 = 占总量比例，最小 4%） */}
+      <div aria-hidden className="h-[3px] w-full overflow-hidden rounded-full bg-black/[0.05] dark:bg-white/[0.08]">
+        <div
+          className="h-full rounded-full bg-zinc-400/70 dark:bg-zinc-400/60"
+          style={{ width: `${Math.max(4, Math.min(100, Math.round(share * 100)))}%` }}
+        />
       </div>
       <span className="sr-only">长按进入多选</span>
 
-      {/* 多选模式：右侧圆形勾选框 */}
+      {/* 多选模式：右上角圆形勾选框 */}
       {multiMode && (
         <span
           aria-hidden
-          className={`grid h-[22px] w-[22px] shrink-0 place-items-center rounded-full border-2 transition-all duration-200 ${
-            selected ? 'border-[#007AFF] bg-[#007AFF] text-white' : 'border-zinc-300 dark:border-zinc-600'
+          className={`absolute right-2.5 top-2.5 grid h-[20px] w-[20px] place-items-center rounded-full border-2 transition-all duration-200 ${
+            selected ? 'border-[#007AFF] bg-[#007AFF] text-white' : 'border-zinc-300 bg-white/60 dark:border-zinc-600 dark:bg-transparent'
           }`}
         >
           {selected && <Check className="h-3 w-3" strokeWidth={3.2} />}
@@ -297,9 +315,15 @@ function AppCell({
 /** 数据未加载时的骨架宫格胶囊 */
 function SkeletonCell() {
   return (
-    <div aria-hidden className="flex h-14 w-full animate-pulse items-center gap-2 rounded-full bg-black/[0.04] px-3 dark:bg-white/[0.05]">
-      <div className="h-9 w-9 shrink-0 rounded-[11px] bg-black/[0.06] dark:bg-white/[0.08]" />
-      <div className="h-3 w-3/4 rounded-full bg-black/[0.06] dark:bg-white/[0.08]" />
+    <div aria-hidden className="flex h-[72px] w-full animate-pulse flex-col justify-center gap-2 rounded-[22px] bg-black/[0.04] px-3 dark:bg-white/[0.05]">
+      <div className="flex items-center gap-2.5">
+        <div className="h-[38px] w-[38px] shrink-0 rounded-[11px] bg-black/[0.06] dark:bg-white/[0.08]" />
+        <div className="flex-1 space-y-1.5">
+          <div className="h-3 w-3/5 rounded-full bg-black/[0.06] dark:bg-white/[0.08]" />
+          <div className="h-2 w-2/5 rounded-full bg-black/[0.05] dark:bg-white/[0.06]" />
+        </div>
+      </div>
+      <div className="h-[3px] w-full rounded-full bg-black/[0.05] dark:bg-white/[0.07]" />
     </div>
   );
 }
@@ -320,7 +344,7 @@ export default function DataManager() {
   // ---- 交互状态 ----
   const [sel, setSel] = useState<Set<string>>(new Set());
   const [multiMode, setMultiMode] = useState(false);
-  const [busy, setBusy] = useState<'' | 'backup' | 'clean' | 'cloud' | 'restore' | 'import'>('');
+  const [busy, setBusy] = useState<'' | 'backup' | 'clean' | 'cloud' | 'pull' | 'restore' | 'import'>('');
 
   // 危险确认弹窗
   const [confirmClean, setConfirmClean] = useState<string[] | null>(null);
@@ -518,6 +542,36 @@ export default function DataManager() {
     }
   };
 
+  // ---- 拉取备份（v2.4.32 机主新增：从云端拉取最新一份备份 → 确认后恢复） ----
+  const doPullBackup = async () => {
+    if (busy) return;
+    if (!backup?.cloudReady) {
+      toast.error('请先在 设置 › 云端助手 部署 Supabase');
+      return;
+    }
+    setBusy('pull');
+    try {
+      const r = await listBackups();
+      if (!r.ok) {
+        toast.error(r.message ?? '拉取失败，请稍后重试');
+        return;
+      }
+      const rows = r.rows ?? [];
+      setCloudRows(rows);
+      const latest = rows[0] ?? null;
+      if (!latest) {
+        toast.info('云端还没有备份，先点「一键云端备份」存一份吧');
+        return;
+      }
+      // 与「云端恢复」同款确认弹窗（拉到最新一份 → 确认后覆盖恢复）
+      setConfirmRestoreRow(latest);
+    } catch {
+      toast.error('拉取失败，请稍后重试');
+    } finally {
+      setBusy('');
+    }
+  };
+
   const doDeleteCloudRow = async (row: BackupRow) => {
     if (busy) return;
     setBusy('restore');
@@ -633,7 +687,7 @@ export default function DataManager() {
       )}
 
       <section aria-label="应用占用列表" className="px-4">
-        <div className="grid grid-cols-2 gap-2.5">
+        <div className="grid grid-cols-2 gap-3">
           {stats === null
             ? [0, 1, 2, 3, 4, 5].map((i) => <SkeletonCell key={i} />)
             : sorted.map((stat) => {
@@ -644,6 +698,8 @@ export default function DataManager() {
                     key={app.id}
                     app={app}
                     safe={backup ? isAppSafe(stat, backup) : false}
+                    size={stat.bytes}
+                    share={totalBytes > 0 ? stat.bytes / totalBytes : 0}
                     selected={sel.has(app.id)}
                     multiMode={multiMode}
                     disabled={busy !== ''}
@@ -696,25 +752,11 @@ export default function DataManager() {
         </div>
       )}
 
-      {/* ============ 5) 快捷操作（一键云端备份 + 备份/清除数据/导入备份） ============ */}
+      {/* ============ 5) 快捷操作（v2.4.32：备份 / 清除数据 / 导入备份；一键云端备份移至「云端与恢复」） ============ */}
       <h2 className="px-5 pb-2.5 pt-7 text-[13px] font-semibold text-zinc-500 dark:text-zinc-400">快捷操作</h2>
       <section aria-label="快捷操作" className="px-4">
-        <button
-          type="button"
-          onClick={() => void doCloudBackup()}
-          disabled={busy !== ''}
-          className="flex h-[52px] w-full items-center justify-center gap-2 rounded-full bg-[#007AFF] text-[14px] font-semibold text-white shadow-[0_6px_20px_rgba(0,122,255,0.35)] transition active:scale-[0.97] disabled:opacity-50"
-        >
-          {busy === 'cloud' ? (
-            <Loader2 className="h-[18px] w-[18px] animate-spin" aria-hidden />
-          ) : (
-            <CloudUpload className="h-[18px] w-[18px]" aria-hidden />
-          )}
-          {busy === 'cloud' ? '备份中…' : '一键云端备份'}
-        </button>
-
         {/* v2.4.31 三胶囊：备份（本地全量导出）/ 清除数据（危险，过全局确认弹窗）/ 导入备份（文件选择器） */}
-        <div className="mt-3 grid grid-cols-3 gap-3">
+        <div className="grid grid-cols-3 gap-3">
           <button
             type="button"
             onClick={() => void backupApps(APP_MODULES.map((a) => a.id))}
@@ -757,12 +799,43 @@ export default function DataManager() {
         </div>
       </section>
 
-      {/* ============ 7) 云端与恢复（安静收纳区） ============ */}
+      {/* ============ 7) 云端与恢复（v2.4.32：一键云端备份 + 拉取备份移入本区） ============ */}
       <h2 className="px-5 pb-2.5 pt-7 text-[13px] font-semibold text-zinc-500 dark:text-zinc-400">云端与恢复</h2>
       <section aria-label="云端与恢复" className="px-4">
         <div className={`${GLASS} p-4`}>
+          {/* 顶部双按钮（v2.4.32 机主规格）：一键云端备份（主操作蓝） + 拉取备份（毛玻璃描边） */}
+          <div className="grid grid-cols-2 gap-3">
+            <button
+              type="button"
+              onClick={() => void doCloudBackup()}
+              disabled={busy !== ''}
+              className="flex h-[50px] items-center justify-center gap-2 rounded-full bg-[#007AFF] text-[13.5px] font-semibold text-white shadow-[0_6px_20px_rgba(0,122,255,0.32)] transition active:scale-[0.97] disabled:opacity-50"
+            >
+              {busy === 'cloud' ? (
+                <Loader2 className="h-[17px] w-[17px] animate-spin" aria-hidden />
+              ) : (
+                <CloudUpload className="h-[17px] w-[17px]" aria-hidden />
+              )}
+              {busy === 'cloud' ? '备份中…' : '一键云端备份'}
+            </button>
+            <button
+              type="button"
+              onClick={() => void doPullBackup()}
+              disabled={busy !== ''}
+              aria-label="从云端拉取最新备份"
+              className="flex h-[50px] items-center justify-center gap-2 rounded-full bg-white/70 text-[13.5px] font-semibold text-[#007AFF] ring-1 ring-[#007AFF]/25 backdrop-blur-2xl transition active:scale-[0.97] disabled:opacity-50 dark:bg-[#0A84FF]/[0.12] dark:text-[#0A84FF] dark:ring-[#0A84FF]/30"
+            >
+              {busy === 'pull' ? (
+                <Loader2 className="h-[17px] w-[17px] animate-spin" aria-hidden />
+              ) : (
+                <Download className="h-[17px] w-[17px]" aria-hidden />
+              )}
+              {busy === 'pull' ? '拉取中…' : '拉取备份'}
+            </button>
+          </div>
+
           {/* 首行：上次备份 + 云端状态点 */}
-          <div className="flex items-center gap-2">
+          <div className="mt-4 flex items-center gap-2">
             <span
               aria-hidden
               className={`h-2 w-2 shrink-0 rounded-full ${backup?.cloudReady ? 'bg-[#34C759]' : 'bg-zinc-300 dark:bg-zinc-600'}`}

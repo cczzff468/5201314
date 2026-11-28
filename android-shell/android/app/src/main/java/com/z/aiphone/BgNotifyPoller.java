@@ -91,6 +91,9 @@ public final class BgNotifyPoller {
     private static final String KEY_SEEN_IDS = "seen_ids";
     /** 已弹过通知的 batchKey 待认领队列（网页 consumeBgNotified 取走并清空） */
     private static final String KEY_PENDING_BATCH_KEYS = "pending_batch_keys";
+    /** v2.4.32 已弹过通知的【消息 id】待认领队列（增量入队后 batchKey 随 count 变化，
+     *  网页守望者改按消息 id 去重——原生弹过的消息 id 透传给网页防双弹） */
+    private static final String KEY_PENDING_MSG_IDS = "pending_msg_ids";
 
     /** 后台空闲节奏（v2.4.28：10s → 15s——后台通知由快节奏窗口优先覆盖） */
     private static final int POLL_IDLE_MS = 15_000;
@@ -110,6 +113,8 @@ public final class BgNotifyPoller {
     private static final int SEEN_IDS_MAX = 400;
     /** 待认领 batchKey 上限 */
     private static final int PENDING_KEYS_MAX = 40;
+    /** 待认领消息 id 上限（v2.4.32：一消息一弹窗后每批可到多条，放宽到 120） */
+    private static final int PENDING_MSG_IDS_MAX = 120;
     /** 边界判定容差：createdAt ≥ 退后台时刻-800ms 视为「新消息」（deliver beacon 竞态窗口） */
     private static final long BOUNDARY_MARGIN_MS = 800;
 
@@ -254,8 +259,9 @@ public final class BgNotifyPoller {
 
     /**
      * 网页桥 AIPhoneNative.consumeBgNotified() 入口：返回
-     * { batchKeys: [...] }（原生已弹过通知的批次键）并清空待认领队列。
-     * 网页把它们并入 bg-relay-watcher 的 seen 集合 + 会话横幅抑制，防双弹。
+     * { batchKeys: [...], msgIds: [...] }（原生已弹过通知的批次键 + 消息 id）并清空
+     * 待认领队列。网页把它们并入 bg-relay-watcher 的 seen 集合（batchKey）与消息 id
+     * 去重集合（msgIds，v2.4.32 增量入队后按消息粒度防双弹）+ 会话横幅抑制。
      */
     public static String consumeNotifiedBatches(Context ctx) {
         try {
@@ -263,19 +269,27 @@ public final class BgNotifyPoller {
             SharedPreferences sp = appPrefs != null
                     ? appPrefs
                     : ctx.getApplicationContext().getSharedPreferences(PREFS, Context.MODE_PRIVATE);
-            String raw = sp.getString(KEY_PENDING_BATCH_KEYS, "[]");
-            sp.edit().remove(KEY_PENDING_BATCH_KEYS).apply();
+            String rawKeys = sp.getString(KEY_PENDING_BATCH_KEYS, "[]");
+            String rawIds = sp.getString(KEY_PENDING_MSG_IDS, "[]");
+            sp.edit().remove(KEY_PENDING_BATCH_KEYS).remove(KEY_PENDING_MSG_IDS).apply();
             JSONObject out = new JSONObject();
-            JSONArray arr;
+            JSONArray arrKeys;
             try {
-                arr = new JSONArray(raw);
+                arrKeys = new JSONArray(rawKeys);
             } catch (Throwable t) {
-                arr = new JSONArray();
+                arrKeys = new JSONArray();
             }
-            out.put("batchKeys", arr);
+            JSONArray arrIds;
+            try {
+                arrIds = new JSONArray(rawIds);
+            } catch (Throwable t) {
+                arrIds = new JSONArray();
+            }
+            out.put("batchKeys", arrKeys);
+            out.put("msgIds", arrIds);
             return out.toString();
         } catch (Throwable t) {
-            return "{\"batchKeys\":[]}";
+            return "{\"batchKeys\":[],\"msgIds\":[]}";
         }
     }
 
@@ -376,6 +390,8 @@ public final class BgNotifyPoller {
             java.util.Set<String> seen = new java.util.HashSet<>(loadSeenIds(sp));
             jobs = new java.util.ArrayList<>();
             java.util.List<String> newBatchKeys = new java.util.ArrayList<>();
+            // v2.4.32 真实弹出的消息 id（canPost 时才收——网页回前台按 id 防双弹）
+            java.util.List<String> postedMsgIds = new java.util.ArrayList<>();
             boolean anyPosted = false;
 
             java.util.Iterator<String> it = sessions.keys();
@@ -428,6 +444,7 @@ public final class BgNotifyPoller {
                     anyPosted = true;
                     if (canPost && text != null && !text.isEmpty()) {
                         jobs.add(new NotificationJob("bgm-" + id, title, text, avatar, target));
+                        postedMsgIds.add(id); // v2.4.32：真实入队的消息 id 透传网页防双弹
                     }
                 }
                 if (anyNew) {
@@ -441,6 +458,10 @@ public final class BgNotifyPoller {
             }
             if (newBatchKeys.size() > 0) {
                 appendPendingBatchKeys(sp, newBatchKeys);
+            }
+            // v2.4.32 已弹消息 id 待认领（网页守望者按消息粒度防双弹）
+            if (postedMsgIds.size() > 0) {
+                appendPendingMsgIds(sp, postedMsgIds);
             }
             // 弹到新消息 → 延长快节奏窗口（连发批次接着来）
             if (anyPosted) {
@@ -706,6 +727,22 @@ public final class BgNotifyPoller {
             for (String k : keys) arr.put(k);
             while (arr.length() > PENDING_KEYS_MAX) arr.remove(0);
             sp.edit().putString(KEY_PENDING_BATCH_KEYS, arr.toString()).apply();
+        } catch (Throwable ignored) {
+        }
+    }
+
+    /** v2.4.32 待认领消息 id 追加（原生已弹 heads-up 的消息：网页回前台后按 id 防双弹） */
+    private static void appendPendingMsgIds(SharedPreferences sp, java.util.List<String> ids) {
+        try {
+            JSONArray arr;
+            try {
+                arr = new JSONArray(sp.getString(KEY_PENDING_MSG_IDS, "[]"));
+            } catch (Throwable t) {
+                arr = new JSONArray();
+            }
+            for (String k : ids) arr.put(k);
+            while (arr.length() > PENDING_MSG_IDS_MAX) arr.remove(0);
+            sp.edit().putString(KEY_PENDING_MSG_IDS, arr.toString()).apply();
         } catch (Throwable ignored) {
         }
     }

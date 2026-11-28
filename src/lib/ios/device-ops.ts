@@ -881,21 +881,63 @@ export async function labLockApp(
   if (isNeverLockPkg(pkg)) {
     return { ok: false, text: `禁止锁定核心应用（${pkg}）——锁了会导致手机无法操作` };
   }
-  // v2.4.2 拦截窗头像：没显式传头像时按 contactId 从通讯录取对应 App 槽位的头像
-  // （拿不到不影响锁，原生用角色名首字 monogram 兜底）
+  // v2.4.32 拦截窗头像/名字兜底根修（机主实测截图：锁定窗只显示「TA」+ 首字 T 占位——
+  // 语音球 Agent / 确定性兜底 / 群聊等路径建锁时不带会话上下文，charName 空 → 原生
+  // 「TA」兜底、contactId 空 → 头像必然缺失）。所有锁路径都过这里（单一收口点）：
+  // ① 缺名字或缺头像时先按 contactId 解析联系人（名字 + 对应 App 槽位头像）；
+  // ② contactId 缺失/解析不到时回退「情侣空间绑定的恋人」（readInviteMeta.partnerContactId
+  //    + partnerApp）——锁应用的绝大多数场景就是恋人/主聊角色，兜底命中率最高；
+  // ③ 仍然拿不到才维持原样（原生用首字 monogram 兜底，绝不阻塞锁）。
+  let charName = opts.charName?.trim() || '';
+  let contactId = opts.contactId?.trim() || '';
+  let app = opts.app;
   let avatar = opts.avatar;
-  if (!avatar && opts.contactId) {
+  const hasIdentity = charName && charName !== 'TA' && avatar;
+  if (!hasIdentity) {
     try {
       const { listContacts } = await import('./contacts-store');
       const { avatarFor } = await import('@/lib/contacts');
-      const c = (await listContacts()).find((x) => x.id === opts.contactId);
-      const slot = opts.app === 'wx' ? 'wx' : opts.app === 'qq' ? 'qq' : 'sms';
-      avatar = avatarFor(c ?? null, slot) ?? undefined;
+      const all = await listContacts();
+      const resolveOne = (cid: string | undefined, appKind?: string) => {
+        if (!cid) return null;
+        const c = all.find((x) => x.id === cid);
+        if (!c) return null;
+        const slot = appKind === 'wx' ? 'wx' : appKind === 'qq' ? 'qq' : 'sms';
+        return { c, slot };
+      };
+      // ① 会话联系人优先
+      let hit = resolveOne(contactId, app);
+      // ② 情侣绑定恋人兜底（无上下文路径的根修）
+      if (!hit) {
+        const { readInviteMeta } = await import('./couple-invite');
+        const inv = readInviteMeta();
+        if (inv.partnerContactId) {
+          hit = resolveOne(inv.partnerContactId, inv.partnerApp ?? app);
+          if (hit && !contactId) {
+            contactId = inv.partnerContactId;
+            if (!app) app = inv.partnerApp ?? undefined;
+          }
+        }
+      }
+      if (hit) {
+        if (!avatar) avatar = avatarFor(hit.c, hit.slot) ?? undefined;
+        if (!charName || charName === 'TA') {
+          charName =
+            hit.c.name?.trim() || hit.c.nickname?.trim() || hit.c.remark?.trim() || charName;
+        }
+      }
     } catch {
-      /* 头像拿不到不影响锁 */
+      /* 解析失败不影响锁（原生有 monogram 兜底） */
     }
   }
-  const r = await nativeLockApp({ pkg, ...opts, avatar });
+  const r = await nativeLockApp({
+    pkg,
+    ...opts,
+    ...(charName ? { charName } : {}),
+    ...(contactId ? { contactId } : {}),
+    ...(app ? { app } : {}),
+    avatar,
+  });
   if (!r.ok) return { ok: false, text: `锁定失败：${a11yGateText(r.reason)}` };
   const dur = opts.unlockAt ? `，${Math.max(1, Math.round((opts.unlockAt - Date.now()) / 60_000))} 分钟后自动解锁` : '（直到哄好才解锁）';
   return { ok: true, text: `已在真实手机上锁定 ${pkg}${dur}：一点开就会被立即弹回桌面并看到你的拦截窗` };
