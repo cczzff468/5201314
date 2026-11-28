@@ -210,7 +210,7 @@ function buildWebMarkerRules(): string[] {
       '[手机操作:真机打开:包名]（拉起真实手机里安装的 App，如 [手机操作:真机打开:com.tencent.mm]）',
       '[手机操作:看屏幕:]（无障碍静默截屏看真实屏幕内容，用于定位/核对）',
       '[手机操作:截图:] / [手机操作:发截图:附言]（截图=简述当前屏幕；发截图=把屏幕截图作为图片消息直接发进当前聊天，机主要「把截图发给我」时用这个，附言可选）',
-      '[手机操作:锁定:包名(:分钟数)] 或 [手机操作:真机冻结:包名(:分钟数)]（锁定真机应用：全屏遮罩锁定，TA 一打开就被质问文案盖住只能回桌面；分钟数可选=AI 按人设决定的锁定时长，如 [手机操作:锁定:com.android.deskclock:15]，不填=锁到哄好）',
+      '[手机操作:锁定:包名(:分钟数)(:质问文案)] 或 [手机操作:真机冻结:包名(:分钟数)(:质问文案)]（锁定真机应用：全屏遮罩锁定，TA 一打开就被你的质问文案盖住只能回桌面；分钟数可选=AI 按人设决定的锁定时长，如 [手机操作:锁定:com.android.deskclock:15]，不填=默认30分钟；质问文案可选但【强烈建议带上】——按你的【人设+记忆+上下文】写一句你的质问（如"被我没收啦，说了要专心陪我"或"又想刷？先陪我说十分钟"），会显示在全屏拦截窗上，不填只会显示系统默认文案，如 [手机操作:锁定:com.tencent.mobileqq:10:又想刷？先陪我说十分钟]）',
       '[手机操作:解锁:] / [手机操作:真机解冻:包名]（解锁真机应用，撤下遮罩）',
       '[手机操作:搜真机应用:关键词]（搜索真机已安装应用，如 [手机操作:搜真机应用:闹钟] → com.android.deskclock）',
       '[手机操作:前台:] / [手机操作:电量:] / [手机操作:通知:] / [手机操作:短信:] / [手机操作:音量:]（真机只读探测；短信=最近收到的短信）/ [手机操作:音量:百分比]（调真机媒体音量，0-100：0=静音 100=最大，如 [手机操作:音量:80]）',
@@ -288,6 +288,19 @@ const RETIRED_WEB_ONLY = {
 };
 
 /**
+ * v2.4.33 锁定/真机冻结标记的可选质问文案提取：
+ * [锁定:包名:分钟:文案] / [锁定:包名:文案]——分钟是数字时从 p[2] 起拼，否则从 p[1] 起
+ * （文案内的冒号原样拼回）；截 80 字（拦截窗一行展示）。没有文案返回空串（不传 reason）。
+ */
+function markerTailMessage(p: string[], durRaw: number): string {
+  const hasMinutes = Number.isFinite(durRaw) && durRaw > 0;
+  const rest = hasMinutes ? p.slice(2) : p.slice(1);
+  const msg = rest.join(':').trim();
+  if (!msg || /^[\d.]+$/.test(msg)) return ''; // 纯数字尾巴=分钟数不是文案
+  return msg.slice(0, 80);
+}
+
+/**
  * 执行 [手机操作:命令:参数…] 的完整参数段（ACTION_RE 捕获的整段 arg）。
  * v1.9.35：只保留 Web 可执行命令；真机命令一律返回「已退役」如实话术。
  */
@@ -338,9 +351,14 @@ export async function executePhoneOp(argRaw: string): Promise<{ ok: boolean; tex
     case '真机冻结': {
       const { toolFreezeRealApp, getToolSessionContext } = await import('./web-tools');
       // v2.2 需求四：标记兜底也支持 AI 自定义时长——[手机操作:真机冻结:包名(:分钟数)]
+      // v2.4.33（机主反馈「锁定理由总是默认『被我没收啦，说了要专心陪我』」）：
+      // 标记尾段可选带质问文案——[手机操作:锁定:包名:分钟数:质问文案]；文案里可含冒号
+      // （p[2] 起全部拼回）。有文案必传 reason，拦截窗不再落到原生默认文案。
       const durRaw = Number(p[1]);
-      const opts: { durationMin?: number; charName?: string; contactId?: string; app?: string } = {
+      const message = markerTailMessage(p, durRaw);
+      const opts: { durationMin?: number; reason?: string; charName?: string; contactId?: string; app?: string } = {
         durationMin: Number.isFinite(durRaw) && durRaw > 0 ? durRaw : undefined,
+        ...(message ? { reason: message } : {}),
       };
       const ctx = getToolSessionContext();
       if (ctx.charName) opts.charName = ctx.charName;
@@ -356,11 +374,13 @@ export async function executePhoneOp(argRaw: string): Promise<{ ok: boolean; tex
       return { ok: r.ok, text: r.text.replace(/^【[^】]+】/, '') };
     }
     case '锁定': {
-      // [手机操作:锁定:包名(:分钟)]：全屏遮罩锁（与真机冻结同执行器；分钟可选）
+      // [手机操作:锁定:包名(:分钟(:质问文案))]：全屏遮罩锁（与真机冻结同执行器；分钟/文案可选）
       const { toolFreezeRealApp, getToolSessionContext } = await import('./web-tools');
       const durRaw = Number(p[1]);
-      const opts: { durationMin?: number; charName?: string; contactId?: string; app?: string } = {
+      const message = markerTailMessage(p, durRaw);
+      const opts: { durationMin?: number; reason?: string; charName?: string; contactId?: string; app?: string } = {
         durationMin: Number.isFinite(durRaw) && durRaw > 0 ? durRaw : undefined,
+        ...(message ? { reason: message } : {}),
       };
       const ctx = getToolSessionContext();
       if (ctx.charName) opts.charName = ctx.charName;

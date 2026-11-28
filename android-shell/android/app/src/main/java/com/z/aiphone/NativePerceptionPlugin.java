@@ -3873,13 +3873,15 @@ public class NativePerceptionPlugin extends Plugin {
                 return t;
             });
 
-    /** 本地通知 localNotify({title, body, tag?, url?, target?, headsUp?, avatar?})：页面后台时的即时提醒。
+    /** 本地通知 localNotify({title, body, tag?, url?, target?, headsUp?, avatar?, appIcon?})：页面后台时的即时提醒。
      *  v2.4.13：headsUp 默认 true——走 IMPORTANCE_HIGH 渠道弹出悬浮横幅（旧 DEFAULT 渠道
      *  从创建起就永不弹横幅）；传 false 退回旧静默渠道。
-     *  v2.4.29（第四十八轮·机主规格）：
-     *  - avatar（角色头像：dataURL / 绝对 URL）→ 通知大图标（NotifyAvatars 解码下载 + LRU）；
+     *  v2.4.33 图标方向根修（机主规格「左边图标变成我选择的图标，右面显示AI头像」）：
+     *  - appIcon（机主 设置›APP图标 所选那一枚的绝对 URL）→ 通知【小】图标彩色位图
+     *    （Icon.createWithBitmap；缺失/失败回落 ic_stat_cove 单色气泡）；
+     *  - avatar（角色头像：dataURL / 绝对 URL）→ 通知【大】图标（通知卡右侧显示 AI 头像；
+     *    旧版 v2.4.30 方向反了——所选 APP 图标放大图标、头像只作回落）；
      *  - 正文自动 BigTextStyle：长消息下拉展开可见全文；
-     *  - 小图标 = ic_stat_cove（替换 android.R.drawable.ic_dialog_info 系统默认蓝图标）；
      *  - 头像解码/下载在 NOTIFY_POOL 后台线程（不堵桥）；验证仍同步快速失败。 */
     @PluginMethod
     public void localNotify(PluginCall call) {
@@ -3984,8 +3986,12 @@ public class NativePerceptionPlugin extends Plugin {
     }
 
     /** v2.4.30：实际构建并下发一条本地通知（NOTIFY_POOL 后台线程）——
-     *  小图标 ic_stat_cove / 大图标优先机主所选 APP 图标（appIcon）→回落角色头像 /
-     *  BigTextStyle 全文展开 / headsUp 走 PRIORITY_MAX + DEFAULT_ALL（声/震/亮屏） */
+     *  v2.4.33 图标方向根修（机主规格「左边图标变成我选择的图标，右面显示AI头像」）：
+     *  小图标 = 机主所选 APP 图标彩色位图（appIcon 参数→Icon.createWithBitmap；缺失回落
+     *  ic_stat_cove 单色气泡） / 大图标 = 角色 AI 头像（avatar；缺失不带）——旧版 v2.4.30
+     *  把所选 APP 图标放大图标、头像只作回落，方向反了（机主看到右侧是 Cove 图标而非
+     *  TA 的头像）。构建统一走 NotifyAvatars.buildMessageNotification（与 BgNotifyPoller
+     *  两路同构）；headsUp=false 保持静默口径（拉回兑底等安静提醒） */
     private void postLocalNotify(Context ctx, NotificationManager nm, String channel, int id,
             String title, String body, String tag, String url, String target, String avatar,
             String appIcon, boolean headsUp) {
@@ -4003,41 +4009,32 @@ public class NativePerceptionPlugin extends Plugin {
                 hasDest
                         ? (PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT)
                         : PendingIntent.FLAG_IMMUTABLE);
-        NotificationCompat.Builder builder =
-                new NotificationCompat.Builder(ctx, channel)
-                        // 小图标：App 自有单色气泡（v2.4.29 替换系统默认蓝图标）
-                        .setSmallIcon(R.drawable.ic_stat_cove)
-                        .setContentTitle(title == null || title.isEmpty() ? "提醒" : title)
-                        .setAutoCancel(true)
-                        .setContentIntent(contentPi);
-        if (headsUp) {
-            // heads-up 全家桶（v2.4.30 机主规格）：最高优先级 + 消息类目 + DEFAULT_ALL
-            // （声音/震动/亮屏三件全开——部分 ROM 需全配才弹横幅）
-            builder.setPriority(NotificationCompat.PRIORITY_MAX)
-                    .setDefaults(NotificationCompat.DEFAULT_ALL)
-                    .setCategory(NotificationCompat.CATEGORY_MESSAGE);
-        }
-        if (body != null && !body.isEmpty()) {
-            builder.setContentText(body);
-            // v2.4.29 BigTextStyle（机主规格）：下拉通知栏展开可见完整最新一条消息
-            //（折叠预览由系统自行省略号截断，不再是一条短短的省略号）
-            builder.setStyle(new NotificationCompat.BigTextStyle().bigText(body));
-        }
-        // v2.4.30 大图标：机主所选 APP 图标优先（设置›APP图标 透传的绝对 URL/dataURL）；
-        // 失败/缺失回落角色头像（v2.4.29 口径）；再缺失则不带大图标
-        String iconSrc = (appIcon != null && !appIcon.isEmpty()) ? appIcon
-                : (avatar != null && !avatar.isEmpty()) ? avatar : null;
-        if (iconSrc != null) {
+        // v2.4.33 小图标位图：机主所选 APP 图标（JS 侧 chosenAppIconUrl 透传的绝对 URL；
+        // 下载+LRU 缓存+缩到小图标友好尺寸）；解码失败回落 ic_stat_cove 单色资源
+        android.graphics.Bitmap smallBmp = null;
+        if (appIcon != null && !appIcon.isEmpty()) {
             try {
-                android.graphics.Bitmap bmp = NotifyAvatars.decode(iconSrc);
-                if (bmp != null) builder.setLargeIcon(bmp);
+                smallBmp = NotifyAvatars.asSmallIconBitmap(NotifyAvatars.decode(appIcon));
             } catch (Throwable ignored) {
             }
         }
+        // v2.4.33 大图标：角色 AI 头像（机主规格「右面显示AI头像」；缺失不带大图标）
+        android.graphics.Bitmap largeBmp = null;
+        if (avatar != null && !avatar.isEmpty()) {
+            try {
+                largeBmp = NotifyAvatars.decode(avatar);
+            } catch (Throwable ignored) {
+            }
+        }
+        String t = (title == null || title.isEmpty()) ? "提醒" : title;
+        String b = body == null ? "" : body;
+        android.app.Notification n = NotifyAvatars.buildMessageNotification(
+                ctx, channel, R.drawable.ic_stat_cove, smallBmp, largeBmp,
+                t, b, contentPi, headsUp);
         if (tag != null && !tag.isEmpty()) {
-            nm.notify(tag, id, builder.build());
+            nm.notify(tag, id, n);
         } else {
-            nm.notify(id, builder.build());
+            nm.notify(id, n);
         }
     }
 

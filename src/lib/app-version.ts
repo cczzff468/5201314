@@ -11,9 +11,9 @@
  */
 
 /** 当前最新版本（纯网页热更时与 APK versionName 可短暂不同步，下次重打 APK 对齐） */
-export const APP_VERSION = '2.4.32';
+export const APP_VERSION = '2.4.33';
 /** 版本号数字（与 android-shell versionCode 保持一致；覆盖安装要求只增不减；纯网页热更不动） */
-export const APP_VERSION_CODE = 94;
+export const APP_VERSION_CODE = 95;
 
 export interface AppReleaseNote {
   version: string;
@@ -24,6 +24,16 @@ export interface AppReleaseNote {
 
 /** 版本历史（新→旧；设置 › APP 更新 页渲染，最新一条即当前版本） */
 export const APP_RELEASE_NOTES: AppReleaseNote[] = [
+  {
+    version: '2.4.33',
+    date: '2026-11-28',
+    items: [
+      '【需重装 APK · versionCode 95】上一版(v2.4.32)只改了源码忘了重打 APK——锁定界面的新文案/AI头像/沉浸式修复实际没到手机上，本版补齐重打：主标题「××（App名）已被 ××（TA名字）锁定」+ AI 头像名字全路径兜底 + 沉浸式状态栏 fitInsets 新口径',
+      '【需重装 APK】系统通知图标方向根修：通知卡【左边】图标 = 你在 设置›APP图标 选的那一枚（彩色原样显示），【右边】= TA 的真实头像（旧版方向反了：右边显示的是 APP 图标、左边是系统样式）',
+      '【网页热更·免重装】AI 锁应用的质问文案透传：标记兜底路径 [锁定:应用:分钟:质问文案] 支持带 TA 按人设写的文案，全屏拦截窗不再总是默认的「被我没收啦，说了要专心陪我」',
+      '【网页热更·免重装】后台通知不再偶发哑火：服务端接力生成加 5 分钟硬超时——旧版上游网络挂起时接力永久卡死，该会话后台回复一条都不生成一条通知都不弹；通知正文剥除 [手机操作:…] 指令标记（不再裸露指令文本）',
+    ],
+  },
   {
     version: '2.4.32',
     date: '2026-11-28',

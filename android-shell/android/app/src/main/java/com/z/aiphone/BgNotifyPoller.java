@@ -10,7 +10,6 @@ import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.os.Build;
 
-import androidx.core.app.NotificationCompat;
 import androidx.core.content.ContextCompat;
 
 import org.json.JSONArray;
@@ -555,8 +554,12 @@ public final class BgNotifyPoller {
      * - 渠道轮询：三条 IMPORTANCE_HIGH 渠道（ch_1/2/3）逐条轮着用——部分 ROM 会折叠
      *   同渠道连发通知，轮询渠道从根上杜绝「发来了 N 条新消息」式合并；
      * - PRIORITY_HIGH + setDefaults(DEFAULT_ALL)（声音/震动/亮屏三件全开）；
-     * - 大图标 = 机主所选 APP 图标（cove_prefs/icon_current → {base}/icons/app/icon-X-192.png
-     *   下载，NotifyAvatars LRU 缓存）；失败回落会话头像。小图标 = ic_stat_cove。
+     * - v2.4.33 图标方向根修（机主规格「左边图标变成我选择的图标，右面显示AI头像」）：
+     *   小图标（通知卡左上）= 机主所选 APP 图标彩色位图（cove_prefs/icon_current →
+     *   {base}/icons/app/icon-X-192.png 下载，Icon.createWithBitmap；失败回落 ic_stat_cove）；
+     *   大图标（通知卡右侧）= 会话角色 AI 头像（job.avatar；缺失不带大图标）。
+     *   （旧版 v2.4.30 方向反了：所选 APP 图标放大图标、头像只作回落——机主看到右侧
+     *   是 Cove 图标而不是 TA 的头像，左侧则是 ROM 自行渲染的样式。）
      * 点击 → MainActivity（携带 local_notify_url/local_notify_target extras，
      * 走 NativePerceptionPlugin 既有的 handleOnNewIntent → 'local-notify-open'
      * 网页导航链路，直达对应聊天界面；点进 APP 聊天页即可看到完整消息）。
@@ -611,47 +614,36 @@ public final class BgNotifyPoller {
                         ? (PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT)
                         : PendingIntent.FLAG_IMMUTABLE);
 
-        // ---- v2.4.30 一消息一弹窗排版 ----
+        // ---- v2.4.33 一消息一弹窗排版（图标方向根修·NotifyAvatars 共用构建器） ----
         String title = job.title == null || job.title.isEmpty() ? "新消息" : job.title;
         String text = job.text != null ? job.text : "";
-        NotificationCompat.Builder builder = new NotificationCompat.Builder(ctx, channel)
-                // 小图标：App 自有单色气泡（替换系统默认蓝图标）
-                .setSmallIcon(R.drawable.ic_stat_cove)
-                .setContentTitle(title)
-                // 正文：这一条消息本身（超长由系统省略号折叠）
-                .setContentText(ellipsize(text, 60))
-                // 大文本展开：这条消息的完整全文（下拉通知栏多行可见）
-                .setStyle(new NotificationCompat.BigTextStyle()
-                        .setBigContentTitle(title)
-                        .bigText(text))
-                .setAutoCancel(true)
-                .setContentIntent(contentPi)
-                // heads-up 全家桶：最高优先级 + 消息类目 + DEFAULT_ALL（声音/震动/亮屏）
-                .setPriority(NotificationCompat.PRIORITY_MAX)
-                .setDefaults(NotificationCompat.DEFAULT_ALL)
-                .setCategory(NotificationCompat.CATEGORY_MESSAGE);
-        // 大图标：机主所选 APP 图标优先（cove_prefs/icon_current → 服务器图标下载），
-        // 失败/不可用回落会话头像（v2.4.29 口径保留）
-        android.graphics.Bitmap large = null;
+        // 小图标位图：机主所选 APP 图标（下载+LRU 缓存；缩到小图标友好尺寸）
+        android.graphics.Bitmap smallBmp = null;
         try {
             String iconUrl = chosenAppIconUrl(ctx);
-            if (iconUrl != null) large = NotifyAvatars.decode(iconUrl);
+            if (iconUrl != null) {
+                smallBmp = NotifyAvatars.asSmallIconBitmap(NotifyAvatars.decode(iconUrl));
+            }
         } catch (Throwable ignored) {
         }
-        if (large == null && job.avatar != null && !job.avatar.isEmpty()) {
+        // 大图标：会话角色 AI 头像（机主规格「右面显示 AI 头像」；缺失不带）
+        android.graphics.Bitmap large = null;
+        if (job.avatar != null && !job.avatar.isEmpty()) {
             try {
                 large = NotifyAvatars.decode(job.avatar);
             } catch (Throwable ignored) {
             }
         }
-        if (large != null) builder.setLargeIcon(large);
-        nm.notify(job.tag, id, builder.build());
+        Notification n = NotifyAvatars.buildMessageNotification(
+                ctx, channel, R.drawable.ic_stat_cove, smallBmp, large,
+                title, text, contentPi, true);
+        nm.notify(job.tag, id, n);
     }
 
     /**
-     * v2.4.30：机主所选 APP 图标 URL（通知大图标用）。
+     * v2.4.30：机主所选 APP 图标 URL（v2.4.33 起作通知【小】图标位图用）。
      * cove_prefs/icon_current（'1'~'5'，默认 '3'）→ {服务器base}/icons/app/icon-X-192.png。
-     * base 取轮询配置里的服务器地址；无配置/异常返回 null（回落会话头像）。
+     * base 取轮询配置里的服务器地址；无配置/异常返回 null（回落 ic_stat_cove 单色资源）。
      */
     private static String chosenAppIconUrl(Context ctx) {
         try {
@@ -671,7 +663,8 @@ public final class BgNotifyPoller {
         }
     }
 
-    /** 超长截断加省略号（通知折叠预览用） */
+    /** 超长截断加省略号（v2.4.33 起未用：正文省略由系统 BigTextStyle 自行处理；保留工具方法） */
+    @SuppressWarnings("unused")
     private static String ellipsize(String s, int max) {
         if (s == null) return "";
         if (s.length() <= max) return s;

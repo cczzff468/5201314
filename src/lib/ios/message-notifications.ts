@@ -8,9 +8,10 @@
  *  - 每条消息的通知 tag = `msg-<消息id>`（id 全局唯一 → Android (tag,id) 对唯一，
  *    系统层面绝不互相覆盖/合并）；通知 int id 用消息 id 的稳定哈希（同 id 复算同值）；
  *  - 标题 = 角色名，正文 = 该条消息本身（超长由系统省略号折叠，下拉 BigTextStyle 全文）。
- * 二、通知图标：
- *  - 大图标 = 机主在 设置›APP图标 里选择的那一枚图标（appIcon 参数：原生侧下载解码）；
- *  - 小图标 = 原生 ic_stat_cove（状态栏单色气泡）。
+ * 二、通知图标（v2.4.33 方向根修·机主规格「左边图标变成我选择的图标，右面显示AI头像」）：
+ *  - 小图标（通知卡左上）= 机主在 设置›APP图标 里选择的那一枚图标（appIcon 参数：
+ *    原生侧下载解码成彩色位图小图标）；
+ *  - 大图标（通知卡右侧）= 角色真实头像（avatar 参数；缺失不带大图标）。
  * 三、触发口径：只有 APP 在后台才弹系统通知（前台由应用内灵动岛横幅展示，
  *  点进 APP 聊天页即可看到完整消息，不需要一条条重新显示）。
  *
@@ -95,7 +96,8 @@ async function postOne(req: MessageNotificationReq): Promise<boolean> {
       tag: `msg-${req.id}`,
       url: '/',
       target: req.target ?? undefined,
-      // 大图标：机主选择的 APP 图标优先；角色头像作回落
+      // v2.4.33 图标方向：小图标 = 机主所选 APP 图标（通知卡左上彩色显示）；
+      // 大图标 = 角色 AI 头像（通知卡右侧）
       appIcon: chosenAppIconUrl(),
       avatar: normalizeAvatar(req.avatar),
     });

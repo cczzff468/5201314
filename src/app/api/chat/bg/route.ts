@@ -149,6 +149,10 @@ function appDefaultName(sessionKey: string): string {
  */
 function relayPreviewText(raw: string, max = 100): string {
   let t = (raw || '').split('&&&')[0] ?? '';
+  // v2.4.33（机主截图实测：通知正文裸露「[手机操作:锁定:com.tencent.mobileqq:10]」）：
+  // [手机操作:…] 兜底标记整条剥除——标记可能带长包名（>30 字），旧版「≤30 字短标记」
+  // 限长剥不干净；标记是给聊天页执行的指令，绝不进通知正文。任意长度、优先剥。
+  t = t.replace(/\[手机操作:[^\[\]]*\]/g, ' ');
   // 剥方括号动作/媒体标记（[拍照:xxx] [语音] [图片] 等；只剥 ≤30 字的短标记，防误伤长正文）
   t = t.replace(/\[[^\[\]]{1,30}\]/g, ' ');
   t = t.replace(/\s+/g, ' ').trim().slice(0, max);
@@ -395,10 +399,17 @@ async function generateAndEnqueue(sessionKey: string, payload: BgPayload, title:
      * 的收尾整段入队；false = 请求失败，调用方走 forceSdk 兜底/占位文案）。
      */
     const streamOnce = async (extra: Record<string, unknown>): Promise<boolean> => {
+      // v2.4.33（机主反馈「系统通知有时候不通知」根修之一）：fetch 挂死防线——上游/
+      // /api/chat 网络栈偶发挂起（TCP 半开、上游代理无响应）时旧版 fetch 永不 resolve，
+      // generateAndEnqueue 的 finally 永不执行 → generating 集合永久残留该会话 →
+      // 该会话后续所有接力 beacon 全部 scheduled:false 被去重吞掉 → 后台回复一条都不
+      // 生成、一条通知都不弹（直到服务重启）。5 分钟硬超时兜底：超时按失败收场走
+      // forceSdk/占位文案，finally 正常清 generating，会话接力链路绝不死锁。
       const res = await fetch(`http://127.0.0.1:${port}/api/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ messages, ...extra }),
+        signal: AbortSignal.timeout(300_000),
       });
       if (!res.ok || !res.body) return false;
       const reader = res.body.getReader();

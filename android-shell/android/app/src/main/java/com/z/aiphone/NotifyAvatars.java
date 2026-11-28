@@ -1,7 +1,12 @@
 package com.z.aiphone;
 
+import android.app.Notification;
+import android.app.PendingIntent;
+import android.content.Context;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
+import android.graphics.drawable.Icon;
+import android.os.Build;
 import android.util.Base64;
 import android.util.LruCache;
 
@@ -15,14 +20,19 @@ import java.security.MessageDigest;
 /**
  * v2.4.29（第四十八轮）：系统通知大图标（角色头像）解码工具。
  *
- * 机主规格：通知栏左侧图标用当前聊天角色的真实头像（不再用系统默认蓝图标）。
- * - dataURL（canvas.toDataURL 产物 / 服务端 pollNative avatar 字段）→ base64 解码；
- * - http(s) URL（站内头像路径转绝对地址）→ 轻量下载（6s 超时、2MB 上限）；
- * - LRU 缓存（key = src 的 md5 短哈希——dataURL 可能数百 KB，不能直接当 key）；
- * - 统一压到 ≤256px：通知大图标渲染尺寸 ~64dp（xxxhdpi 也就 192px），省内存。
+ * 机主规格（第四十九轮，推翻 v2.4.29 的合并排版）：
+ * 一、AI 每发一条独立的消息，系统就弹一条独立的横幅通知——绝不合并、绝不原地更新
+ * 二、v2.4.33 通知图标方向根修（机主规格「左边图标变成我选择的图标，右面显示AI头像」）：
+ *  - 小图标（通知卡左上，原 ic_stat_cove 单色气泡）→ 换成【机主设置›APP图标 所选那一枚】
+ *    的彩色位图（Icon.createWithBitmap——国产 ROM 通知头部原样渲染彩色位图，不再是被
+ *    ROM 随意渲染的灰样式）；解码失败回落 ic_stat_cove。
+ *  - 大图标（通知卡右侧）→ 改为【会话角色 AI 头像】（旧版 v2.4.30 把所选 APP 图标放大
+ *    图标——方向反了，机主看到右侧是 Cove 图标而不是 TA 的头像）。
+ * v2.4.33 抽出 buildMessageNotification 共用构建器（BgNotifyPoller.postHeadsUp 与
+ * NativePerceptionPlugin.postLocalNotify 两路同构，图标口径一字不差）。
  *
- * 线程约定：decode() 是同步阻塞（网络/解码），调用方必须在后台线程调用
- * （BgNotifyPoller 轮询线程 / NativePerceptionPlugin 通知专用单线程池）。
+ * 线程约定：decode()/buildMessageNotification 是同步阻塞（网络/解码），调用方必须在
+ * 后台线程调用（BgNotifyPoller 轮询线程 / NativePerceptionPlugin 通知专用单线程池）。
  */
 public final class NotifyAvatars {
 
@@ -152,6 +162,70 @@ public final class NotifyAvatars {
             return sb.toString();
         } catch (Throwable t) {
             return String.valueOf(src.hashCode());
+        }
+    }
+
+    // ================= v2.4.33 共用消息通知构建器（图标方向根修） =================
+
+    /**
+     * 构建「AI 消息」通知（BgNotifyPoller 后台轮询 / localNotify 桥接两路共用）：
+     *
+     * - 小图标（通知卡左上）：机主所选 APP 图标彩色位图（smallIconBmp 非空时
+     *   Icon.createWithBitmap——国产 ROM 头部原样彩色渲染）；空时回落 smallIconRes
+     *   （ic_stat_cove 单色气泡）。注意必须用 framework Notification.Builder
+     *   （NotificationCompat 无 setSmallIcon(Icon) 重载）。
+     * - 大图标（通知卡右侧）：会话角色 AI 头像（largeBmp；null 则不带）。
+     * - headsUp=true：PRIORITY_MAX + CATEGORY_MESSAGE + DEFAULT_ALL（声/震/亮屏）；
+     *   false：静默口径（PRIORITY_DEFAULT，不动声色——拉回兑底等安静提醒用）。
+     * - BigTextStyle 全文展开 + 点击直达（contentPi）+ autoCancel。
+     *
+     * @param channel API26+ 通知渠道（低版本忽略，传 null 安全）
+     */
+    public static Notification buildMessageNotification(
+            Context ctx, String channel, int smallIconRes, Bitmap smallIconBmp, Bitmap largeBmp,
+            String title, String text, PendingIntent contentPi, boolean headsUp) {
+        Notification.Builder b = Build.VERSION.SDK_INT >= 26 && channel != null
+                ? new Notification.Builder(ctx, channel)
+                : new Notification.Builder(ctx.getApplicationContext());
+        if (smallIconBmp != null) {
+            try {
+                b.setSmallIcon(Icon.createWithBitmap(smallIconBmp));
+            } catch (Throwable t) {
+                b.setSmallIcon(smallIconRes); // 个别 ROM 不认位图小图标：回落单色资源
+            }
+        } else {
+            b.setSmallIcon(smallIconRes);
+        }
+        if (largeBmp != null) b.setLargeIcon(largeBmp);
+        b.setContentTitle(title == null || title.isEmpty() ? "新消息" : title)
+                .setContentText(text == null ? "" : text)
+                .setStyle(new Notification.BigTextStyle().bigText(text == null ? "" : text))
+                .setAutoCancel(true)
+                .setContentIntent(contentPi);
+        if (headsUp) {
+            b.setPriority(Notification.PRIORITY_MAX)
+                    .setDefaults(Notification.DEFAULT_ALL)
+                    .setCategory(Notification.CATEGORY_MESSAGE);
+        } else {
+            b.setPriority(Notification.PRIORITY_DEFAULT);
+        }
+        return b.build();
+    }
+
+    /** v2.4.33：把任意位图裁成小图标友好尺寸（≈48dp·xxhdpi=144px，中心方形缩放）——
+     *  所选 APP 图标 PNG（192/256px）直接做位图小图标偏大，缩一缩省内存且更清晰 */
+    public static Bitmap asSmallIconBitmap(Bitmap src) {
+        if (src == null) return null;
+        try {
+            final int side = 144;
+            int w = src.getWidth(), h = src.getHeight();
+            if (w <= side && h <= side) return src;
+            float scale = (float) side / Math.max(w, h);
+            Bitmap out = Bitmap.createScaledBitmap(
+                    src, Math.round(w * scale), Math.round(h * scale), true);
+            return out != null ? out : src;
+        } catch (Throwable t) {
+            return src;
         }
     }
 }
